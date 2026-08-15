@@ -3617,8 +3617,8 @@ runInstallEnsureModulesRegression() {
     fi
 }
 
-runAliasInstallSameTargetRegression() {
-    local fixtureDir outputLog cpLog oldScriptDir oldPadmInstallDir oldHome
+runAliasInstallSameTargetRegression() (
+    local fixtureDir outputLog cpLog
     fixtureDir="${TMP_DIR}/alias-install-same-target"
     outputLog="${fixtureDir}/output.log"
     cpLog="${fixtureDir}/cp.log"
@@ -3628,9 +3628,6 @@ runAliasInstallSameTargetRegression() {
 ensureScriptModules() { :; }
 EOF
 
-    oldScriptDir="${SCRIPT_DIR:-}"
-    oldPadmInstallDir="${PADM_INSTALL_DIR:-}"
-    oldHome="${HOME}"
     SCRIPT_DIR="${fixtureDir}"
     PADM_INSTALL_DIR="${fixtureDir}"
     HOME="${fixtureDir}/home"
@@ -3646,16 +3643,9 @@ EOF
     [[ ! -s "${outputLog}" ]]
     [[ ! -e "${cpLog}" ]]
 
-    SCRIPT_DIR="${oldScriptDir}"
-    HOME="${oldHome}"
-    if [[ -n "${oldPadmInstallDir}" ]]; then
-        PADM_INSTALL_DIR="${oldPadmInstallDir}"
-    else
-        unset PADM_INSTALL_DIR
-    fi
-}
+)
 
-runAliasInstallRejectsUnsafeTargetRegression() {
+runAliasInstallRejectsUnsafeTargetRegression() (
     (
         set -euo pipefail
         local root="${TMP_DIR}/alias-install-unsafe-target"
@@ -3668,9 +3658,6 @@ ensureScriptModules() { :; }
 EOF
         printf 'keep\n' >"${targetDir}/shell/sentinel"
 
-        local oldScriptDir="${SCRIPT_DIR:-}"
-        local oldPadmInstallDir="${PADM_INSTALL_DIR:-}"
-        local oldHome="${HOME:-}"
         SCRIPT_DIR="${sourceDir}"
         PADM_INSTALL_DIR="unsafe-target"
         HOME="${root}/home"
@@ -3686,17 +3673,10 @@ EOF
 
         [[ -f "${targetDir}/shell/sentinel" ]]
 
-        SCRIPT_DIR="${oldScriptDir}"
-        HOME="${oldHome}"
-        if [[ -n "${oldPadmInstallDir}" ]]; then
-            PADM_INSTALL_DIR="${oldPadmInstallDir}"
-        else
-            unset PADM_INSTALL_DIR
-        fi
     )
-}
+)
 
-runAliasInstallRejectsUnsafeHomeFallbackRegression() {
+runAliasInstallRejectsUnsafeHomeFallbackRegression() (
     (
         set -euo pipefail
         local root="${TMP_DIR}/alias-install-unsafe-home"
@@ -3708,9 +3688,6 @@ runAliasInstallRejectsUnsafeHomeFallbackRegression() {
 ensureScriptModules() { :; }
 EOF
 
-        local oldScriptDir="${SCRIPT_DIR:-}"
-        local oldPadmInstallDir="${PADM_INSTALL_DIR:-}"
-        local oldHome="${HOME:-}"
         SCRIPT_DIR="${sourceDir}"
         PADM_INSTALL_DIR="${targetDir}"
         HOME="."
@@ -3725,19 +3702,8 @@ EOF
 
         [[ -f "${root}/install.sh" ]]
 
-        SCRIPT_DIR="${oldScriptDir}"
-        if [[ -n "${oldPadmInstallDir}" ]]; then
-            PADM_INSTALL_DIR="${oldPadmInstallDir}"
-        else
-            unset PADM_INSTALL_DIR
-        fi
-        if [[ -n "${oldHome}" ]]; then
-            HOME="${oldHome}"
-        else
-            unset HOME
-        fi
     )
-}
+)
 
 runInstallModulePathsRegression() {
     local outputList moduleTmpRoot fixtureDir oldTmpDir moduleListBefore moduleListAfter
@@ -3936,8 +3902,8 @@ runValidateInstallTempRootStaysInParentShellRegression() {
     grep -q 'validate_tmp_root >/dev/null' "${PROJECT_ROOT}/shell/validate_install.sh"
 }
 
-runAliasInstallMetadataCopyRegression() {
-    local sourceDir targetDir chmodLog shortcutLog shortcutOutput oldScriptDir oldPadmInstallDir oldHome
+runAliasInstallMetadataCopyRegression() (
+    local sourceDir targetDir chmodLog shortcutLog shortcutOutput
     sourceDir="${TMP_DIR}/alias-install-source"
     targetDir="${TMP_DIR}/alias-install-target"
     chmodLog="${TMP_DIR}/alias-install-chmod.log"
@@ -3956,9 +3922,6 @@ EOF
     printf 'local-ref\n' >"${sourceDir}/.padm-ref"
     printf 'expected-ref\n' >"${sourceDir}/.padm-entry-ref"
 
-    oldScriptDir="${SCRIPT_DIR:-}"
-    oldPadmInstallDir="${PADM_INSTALL_DIR:-}"
-    oldHome="${HOME}"
     SCRIPT_DIR="${sourceDir}"
     PADM_INSTALL_DIR="${targetDir}"
     HOME="${TMP_DIR}/alias-install-home"
@@ -4023,14 +3986,7 @@ EOF
     grep -Fqx -- "-s ${targetDir}/install.sh /usr/bin/padm" "${shortcutLog}"
     ! grep -q '快捷方式创建成功' "${shortcutOutput}"
 
-    SCRIPT_DIR="${oldScriptDir}"
-    HOME="${oldHome}"
-    if [[ -n "${oldPadmInstallDir}" ]]; then
-        PADM_INSTALL_DIR="${oldPadmInstallDir}"
-    else
-        unset PADM_INSTALL_DIR
-    fi
-}
+)
 
 runInstallEntrySymlinkPathRegression() {
     local fixtureDir realDir linkDir
