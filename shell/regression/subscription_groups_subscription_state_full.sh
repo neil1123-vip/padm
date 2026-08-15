@@ -165,8 +165,6 @@ runSubscriptionGroupStateStructureFoundationInitTransactionRegression() (
     local initStateFile="${initGroupsDir}/groups.json"
     local initWireGuardDir="${initRoot}/wireguard"
     local initWireGuardStateFile="${initWireGuardDir}/control.json"
-    local oldGroupsDir="${PADM_SUBSCRIPTION_GROUPS_DIR:-}"
-    local oldWireGuardDir="${PADM_WIREGUARD_CONTROL_DIR:-}"
     local initStatus
 
     export PADM_SUBSCRIPTION_GROUPS_DIR="${initGroupsDir}"
@@ -213,8 +211,6 @@ runSubscriptionGroupStateStructureFoundationInitTransactionRegression() (
         return 1
     fi
 
-    if [[ -n "${oldGroupsDir}" ]]; then export PADM_SUBSCRIPTION_GROUPS_DIR="${oldGroupsDir}"; else unset PADM_SUBSCRIPTION_GROUPS_DIR; fi
-    if [[ -n "${oldWireGuardDir}" ]]; then export PADM_WIREGUARD_CONTROL_DIR="${oldWireGuardDir}"; else unset PADM_WIREGUARD_CONTROL_DIR; fi
 )
 
 runSubscriptionGroupStateStructureFoundationSerialRegression() {
@@ -803,11 +799,6 @@ JSON
 }
 
 runSubscriptionSyncTempDirRegression() (
-    local oldTmpDir="${TMPDIR:-}"
-    local oldConfigPath="${configPath:-}"
-    local oldSingBoxConfigPath="${singBoxConfigPath:-}"
-    local oldLocalDir="${PADM_SUBSCRIBE_LOCAL_DIR:-}"
-    local oldPublicDir="${PADM_SUBSCRIBE_DIR:-}"
     local tmpRoot="${TMP_DIR}/subscription-sync-tmp"
     local syncConfigRoot="${TMP_DIR}/subscription-sync-tempdir-config"
     local localDir="${TMP_DIR}/subscription-sync-tempdir-local"
@@ -847,11 +838,6 @@ JSON
     if regressionFindHasMatches "${tmpRoot}" -mindepth 1 -maxdepth 1 -type d; then
         return 1
     fi
-    configPath="${oldConfigPath}"
-    singBoxConfigPath="${oldSingBoxConfigPath}"
-    if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
-    if [[ -n "${oldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
-    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 )
 
 runSubscriptionSyncRestorePairFailureMessageRegression() (
@@ -1127,7 +1113,6 @@ JSON
     subscriptionSyncApplyAccountPlanTransaction '{"create":["sub_new"],"remove":[]}'
     rc=$?
     set -e
-    unset -f cp subscriptionSyncApplyAccountPlan initXrayClients subscriptionSyncGenerateUUID
 
     [[ "${rc}" == "1" ]]
     jq -e '.inbounds[0].settings.clients[0].email == "sub_new-main"' "${targetFile}" >/dev/null
@@ -1164,7 +1149,6 @@ runSubscriptionSyncRollbackRestoreDirFailureRegression() (
     subscriptionSyncRestoreBackupPath "${restoreDirTarget}" "${restoreDirBackup}" local
     restoreStatus=$?
     set -e
-    unset -f cp
     [[ "${restoreStatus}" == "1" ]]
     [[ "$(<"${restoreDirTarget}/default/existing")" == "current default" ]]
     [[ "$(<"${restoreDirTarget}/clashMeta/existing")" == "current clash" ]]
@@ -1803,8 +1787,6 @@ runSubscriptionGroupsRestoreFailureRegression() (
     local currentBackup="${root}/current-backup.json"
     local targetBackup="${root}/target-backup.json"
     local stateFile="${groupsDir}/groups.json"
-    local oldGroupsDir="${PADM_SUBSCRIPTION_GROUPS_DIR:-}"
-    local oldTmpDir="${TMPDIR:-}"
     local beforeSnapshot
     local rc
 
@@ -1828,13 +1810,10 @@ JSON
     restoreSubscriptionGroupsBackup "${targetBackup}" >/dev/null 2>&1
     rc=$?
     set -e
-    unset -f createSubscriptionGroupsBackup
     [[ "${rc}" == "1" ]]
     [[ "$(<"${stateFile}")" == "${beforeSnapshot}" ]]
     [[ ! -e "${currentBackup}" ]]
 
-    if [[ -n "${oldGroupsDir}" ]]; then export PADM_SUBSCRIPTION_GROUPS_DIR="${oldGroupsDir}"; else unset PADM_SUBSCRIPTION_GROUPS_DIR; fi
-    if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 )
 
 runSubscriptionGroupSyncUsesStateLockRegression() (
