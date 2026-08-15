@@ -245,6 +245,7 @@ runFrameworkParallelCompositionContract() (
     local suiteSelector=$1
     local waitingSelector=$2
     local signalingSelector=$3
+    local selectorListFn=${4:-}
     local callLog="${TMP_DIR}/regression-${suiteSelector}-parallel-composition.log"
     local startMarker="${TMP_DIR}/regression-${suiteSelector}-parallel-started"
 
@@ -269,6 +270,13 @@ runFrameworkParallelCompositionContract() (
     PADM_REGRESSION_SUPPRESS_DONE=1 \
         PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionParallelCompositionProbe \
         runRegisteredRegressionMain "${suiteSelector}"
+    if [[ -n "${selectorListFn}" ]]; then
+        while IFS= read -r selector; do
+            [[ -n "${selector}" ]] || continue
+            grep -qx "${selector}-start" "${callLog}"
+            grep -qx "${selector}-finish" "${callLog}"
+        done < <("${selectorListFn}")
+    fi
     awk -v waiting="${waitingSelector}" -v signaling="${signalingSelector}" '
         $0 == waiting "-start" { waitingStart = NR }
         $0 == signaling "-start" { signalingStart = NR }

@@ -161,41 +161,10 @@ runRegressionSubscriptionOutput() {
     runRegressionStep subscription-remote-sources-no-reverse-decode runRemoteSubscribeSourcesAvoidReverseDecodeRegression
 }
 
-runRegressionSubscriptionTxParallelCompositionRegression() (
-    set -euo pipefail
-    local callLog="${TMP_DIR}/regression-subscription-tx-parallel-composition.log"
-
-    : >"${callLog}"
-
-    runRegressionAllSelector() {
-        local selector=$1
-        printf '%s-start\n' "${selector}" >>"${callLog}"
-        if [[ "${selector}" == "sing-box-subscribe-write" ]]; then
-            for _ in 1 2 3 4 5 6 7 8 9 10; do
-                [[ -f "${TMP_DIR}/subscribe-user-output-started" ]] && break
-                sleep 0.05
-            done
-        elif [[ "${selector}" == "subscribe-user-output-transaction" ]]; then
-            : >"${TMP_DIR}/subscribe-user-output-started"
-        fi
-        printf '%s-finish\n' "${selector}" >>"${callLog}"
-    }
-
-    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
-        PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain subscription-tx
-
-    while IFS= read -r selector; do
-        [[ -n "${selector}" ]] || continue
-        grep -qx "${selector}-start" "${callLog}"
-        grep -qx "${selector}-finish" "${callLog}"
-    done < <(listRegressionSubscriptionTxChildSelectors)
-    awk '
-        $0 == "sing-box-subscribe-write-start" { singboxStart = NR }
-        $0 == "subscribe-user-output-transaction-start" { userOutputStart = NR }
-        $0 == "sing-box-subscribe-write-finish" { singboxFinish = NR }
-        END { exit !(singboxStart && userOutputStart && singboxFinish && userOutputStart < singboxFinish) }
-    ' "${callLog}"
-)
+runRegressionSubscriptionTxParallelCompositionRegression() {
+    runFrameworkParallelCompositionContract subscription-tx sing-box-subscribe-write \
+        subscribe-user-output-transaction listRegressionSubscriptionTxChildSelectors
+}
 
 runRegressionSubscriptionLegacyTmpDirIsolationRegression() (
     set -euo pipefail
