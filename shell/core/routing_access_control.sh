@@ -375,15 +375,11 @@ accessControlSafeBackupDir() {
 }
 
 accessControlSafeXrayConfigDir() {
-    [[ -n "${configPath:-}" ]] || return 1
-    padmIsSafeAbsolutePath "${configPath%/}" || return 1
-    printf '%s\n' "${configPath%/}/"
+    coreSafeConfigDir "${configPath:-}"
 }
 
 accessControlSafeSingBoxConfigDir() {
-    [[ -n "${singBoxConfigPath:-}" ]] || return 1
-    padmIsSafeAbsolutePath "${singBoxConfigPath%/}" || return 1
-    printf '%s\n' "${singBoxConfigPath%/}/"
+    coreSafeConfigDir "${singBoxConfigPath:-}"
 }
 
 accessControlManagedXrayFiles() {

@@ -186,15 +186,11 @@ dnsRoutingSafeBackupDir() {
 }
 
 dnsRoutingSafeXrayConfigDir() {
-    [[ -n "${configPath:-}" ]] || return 1
-    padmIsSafeAbsolutePath "${configPath%/}" || return 1
-    printf '%s\n' "${configPath%/}/"
+    coreSafeConfigDir "${configPath:-}"
 }
 
 dnsRoutingSafeSingBoxConfigDir() {
-    [[ -n "${singBoxConfigPath:-}" ]] || return 1
-    padmIsSafeAbsolutePath "${singBoxConfigPath%/}" || return 1
-    printf '%s\n' "${singBoxConfigPath%/}/"
+    coreSafeConfigDir "${singBoxConfigPath:-}"
 }
 
 dnsRoutingManagedSingBoxFiles() {

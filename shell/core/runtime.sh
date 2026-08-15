@@ -42,6 +42,8 @@ padmRequireSafeAbsolutePath() {
     printf '%s\n' "${path}"
 }
 
+coreSafeConfigDir() { local path=${1%/}; padmRequireSafeAbsolutePath "${path}" >/dev/null || return 1; printf '%s/\n' "${path}"; }
+
 padmManagedFilePath() {
     local dirPath=$1
     local fileName=$2
