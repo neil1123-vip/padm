@@ -459,33 +459,33 @@ runCheckPortOpenNginxPathSafetyRegression() {
     )
 }
 
-runWriteSubscribeNginxPathSafetyRegression() {
+runWriteNginxPathSafetyRegression() (
+    set -euo pipefail
+    local writer=$1
+    local config=$2
+    local root="${TMP_DIR}/write-${config%.conf}-nginx-path-safety"
+    local unsafeRoot="${root}/unsafe"
+    local nginxRoot="${root}/nginx conf.d"
+    mkdir -p "${unsafeRoot}" "${nginxRoot}"
+
+    nginx() { return 0; }
+
     (
-        set -euo pipefail
-        local root="${TMP_DIR}/write-subscribe-nginx-path-safety"
-        local unsafeRoot="${root}/unsafe"
-        local nginxRoot="${root}/nginx conf.d"
-        mkdir -p "${unsafeRoot}" "${nginxRoot}"
-
-        nginx() { return 0; }
-
-        (
-            cd "${unsafeRoot}"
-            nginxConfigPath=
-            ! writeSubscribeNginxConfig <<'EOF'
+        cd "${unsafeRoot}"
+        nginxConfigPath=
+        ! "${writer}" <<'EOF'
 server {}
 EOF
-            [[ ! -e subscribe.conf ]]
-            [[ ! -e subscribe.conf.tmp ]]
-        )
-
-        nginxConfigPath="${nginxRoot}/"
-        writeSubscribeNginxConfig <<'EOF'
-server {}
-EOF
-        grep -q 'server {}' "${nginxRoot}/subscribe.conf"
+        [[ ! -e "${config}" ]]
+        [[ ! -e "${config}.tmp" ]]
     )
-}
+
+    nginxConfigPath="${nginxRoot}/"
+    "${writer}" <<'EOF'
+server {}
+EOF
+    grep -q 'server {}' "${nginxRoot}/${config}"
+)
 
 runWriteWireGuardControlNginxPathSafetyRegression() {
     (
@@ -718,34 +718,6 @@ runSubscriptionWireGuardNginxDisableLifecycleRegression() (
     [[ "${nginxRuntimeState}" == "true" ]]
     grep -qx 'nginx:start' <<<"${actions}"
 )
-
-runWriteAloneNginxPathSafetyRegression() {
-    (
-        set -euo pipefail
-        local root="${TMP_DIR}/write-alone-nginx-path-safety"
-        local unsafeRoot="${root}/unsafe"
-        local nginxRoot="${root}/nginx conf.d"
-        mkdir -p "${unsafeRoot}" "${nginxRoot}"
-
-        nginx() { return 0; }
-
-        (
-            cd "${unsafeRoot}"
-            nginxConfigPath=
-            ! writeAloneNginxConfig <<'EOF'
-server {}
-EOF
-            [[ ! -e alone.conf ]]
-            [[ ! -e alone.conf.tmp ]]
-        )
-
-        nginxConfigPath="${nginxRoot}/"
-        writeAloneNginxConfig <<'EOF'
-server {}
-EOF
-        grep -q 'server {}' "${nginxRoot}/alone.conf"
-    )
-}
 
 runCleanLastInstallationSkipsDuplicateNginxCleanupRegression() {
     (
@@ -6461,11 +6433,11 @@ runRegressionFastOnlySafety() {
     runRegressionStep clean-agent-nginx-conf-safety runCleanAgentNginxConfSafetyRegression
     runRegressionStep uninstall-subscribe-nginx-path-safety runUninstallSubscribeNginxPathSafetyRegression
     runRegressionStep check-port-open-nginx-path-safety runCheckPortOpenNginxPathSafetyRegression
-    runRegressionStep write-subscribe-nginx-path-safety runWriteSubscribeNginxPathSafetyRegression
+    runRegressionStep write-subscribe-nginx-path-safety runWriteNginxPathSafetyRegression writeSubscribeNginxConfig subscribe.conf
     runRegressionStep write-wireguard-control-nginx-path-safety runWriteWireGuardControlNginxPathSafetyRegression
     runRegressionStep wireguard-firewall-lifecycle runSubscriptionWireGuardFirewallLifecycleRegression
     runRegressionStep wireguard-nginx-disable-lifecycle runSubscriptionWireGuardNginxDisableLifecycleRegression
-    runRegressionStep write-alone-nginx-path-safety runWriteAloneNginxPathSafetyRegression
+    runRegressionStep write-alone-nginx-path-safety runWriteNginxPathSafetyRegression writeAloneNginxConfig alone.conf
     runRegressionStep clean-last-installation-nginx-safety runCleanLastInstallationSkipsDuplicateNginxCleanupRegression
     runRegressionStep install-nginx-alpine-default-path-safety runInstallNginxAlpineDefaultPathSafetyRegression
     runRegressionStep install-nginx-static-unsafe-path runInstallNginxStaticRejectsUnsafePathRegression
