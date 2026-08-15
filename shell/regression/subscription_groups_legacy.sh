@@ -16086,46 +16086,6 @@ runSubscriptionWireGuardMenuFlowBootstrapRegression() {
     runSubscriptionWireGuardInviteReceiptRegression
 }
 
-runSubscriptionWireGuardMenuFlowPeerAddUpdateRegression() {
-    runSubscriptionWireGuardMenuFlowRegression peer-add-update
-}
-
-runSubscriptionWireGuardMenuFlowPeerRollbackSourceRegression() {
-    runSubscriptionWireGuardMenuFlowRegression peer-rollback-source
-}
-
-runSubscriptionWireGuardMenuFlowPeerRollbackApplyServiceRegression() {
-    runSubscriptionWireGuardMenuFlowRegression peer-rollback-apply-service
-}
-
-runSubscriptionWireGuardMenuFlowPeerRollbackApplyRestoreRegression() {
-    runSubscriptionWireGuardMenuFlowRegression peer-rollback-apply-restore
-}
-
-runSubscriptionWireGuardMenuFlowPeerRollbackCredentialWriteRegression() {
-    runSubscriptionWireGuardMenuFlowRegression peer-rollback-credential-write
-}
-
-runSubscriptionWireGuardMenuFlowPeerRollbackCredentialGroupsRestoreRegression() {
-    runSubscriptionWireGuardMenuFlowRegression peer-rollback-credential-groups-restore
-}
-
-runSubscriptionWireGuardMenuFlowPeerSourceControlToggleRegression() {
-    runSubscriptionWireGuardMenuFlowRegression peer-source-control-toggle
-}
-
-runSubscriptionWireGuardMenuFlowPeerSourceControlClearErrorRegression() {
-    runSubscriptionWireGuardMenuFlowRegression peer-source-control-clear-error
-}
-
-runSubscriptionWireGuardMenuFlowPeerSourceControlStatusRegression() {
-    runSubscriptionWireGuardMenuFlowRegression peer-source-control-status
-}
-
-runSubscriptionWireGuardMenuFlowControlRestoreRegression() {
-    runSubscriptionWireGuardMenuFlowRegression control-restore
-}
-
 runSubscriptionWireGuardRestoreRunnerRegression() (
     local errorLog="${TMP_DIR}/subscription-wireguard-restore-runner-error.log"
     local helperLog="${TMP_DIR}/subscription-wireguard-restore-runner-helper.log"
@@ -17414,50 +17374,6 @@ still-invalid
     else
         unset REALITY_TARGET_PAGE_SIZE
     fi
-}
-
-runMenuSmokeFullCoreRegression() {
-    runMenuSmokeRegression core
-}
-
-runMenuSmokeFullSubscriptionMainEntryRegression() {
-    runMenuSmokeRegression subscription-main-entry
-}
-
-runMenuSmokeFullSubscriptionMainPublishServiceRegression() {
-    runMenuSmokeRegression subscription-main-publish-service
-}
-
-runMenuSmokeFullSubscriptionMainPublishUserEmptyRegression() {
-    runMenuSmokeRegression subscription-main-publish-user-empty
-}
-
-runMenuSmokeFullSubscriptionMainPublishUserCreateRegression() {
-    runMenuSmokeRegression subscription-main-publish-user-create
-}
-
-runMenuSmokeFullSubscriptionMainPublishUserInspectRegression() {
-    runMenuSmokeRegression subscription-main-publish-user-inspect
-}
-
-runMenuSmokeFullSubscriptionMainPublishSyncSkipRegression() {
-    runMenuSmokeRegression subscription-main-publish-sync-skip
-}
-
-runMenuSmokeFullSubscriptionMainPublishSyncEnableRegression() {
-    runMenuSmokeRegression subscription-main-publish-sync-enable
-}
-
-runMenuSmokeFullSubscriptionMainMaintenanceRegression() {
-    runMenuSmokeRegression subscription-main-maintenance
-}
-
-runMenuSmokeFullSubscriptionControlledRegression() {
-    runMenuSmokeRegression subscription-controlled
-}
-
-runMenuSmokeFullCoreMaintenanceRegression() {
-    runMenuSmokeRegression core-maintenance
 }
 
 writeInstallToolsAcmeFixture() {
