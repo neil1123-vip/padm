@@ -33,15 +33,8 @@ vlessEncryptionForConfig() {
 }
 
 emitVlessTcpSubscribeOutput() {
-    local port=$1
-    local email=$2
-    local id=$3
-    local add=$4
-    local path=$5
-    local user=$6
-    local defaultLink
-    local clashMetaBlock
-    local singBoxFilter
+    local port=$1 email=$2 id=$3 user=$6
+    local defaultLink clashMetaBlock singBoxFilter
 
     defaultLink="vless://${id}@$(formatUriAuthorityHost "${currentHost}"):${port}?encryption=none&security=tls&type=tcp&host=${currentHost}&fp=chrome&headerType=none&sni=${currentHost}&flow=xtls-rprx-vision#${email}"
     clashMetaBlock=$(cat <<EOF
@@ -69,15 +62,8 @@ EOF
 }
 
 emitVmessWsSubscribeOutput() {
-    local port=$1
-    local email=$2
-    local id=$3
-    local add=$4
-    local path=$5
-    local user=$6
-    local vmessJson qrCodeBase64Default defaultLink
-    local clashMetaBlock
-    local singBoxFilter
+    local port=$1 email=$2 id=$3 add=$4 path=$5 user=$6
+    local vmessJson qrCodeBase64Default defaultLink clashMetaBlock singBoxFilter
     vmessJson=$(serializeVmessShareJson "${port}" "${email}" "${id}" "${currentHost}" "${path}" ws "${add}") || return 1
     qrCodeBase64Default=$(printf '%s' "${vmessJson}" | base64 -w 0) || return 1
     defaultLink="vmess://${qrCodeBase64Default}"
@@ -112,15 +98,8 @@ EOF
 }
 
 emitVlessWsSubscribeOutput() {
-    local port=$1
-    local email=$2
-    local id=$3
-    local add=$4
-    local path=$5
-    local user=$6
-    local defaultLink
-    local clashMetaBlock
-    local singBoxFilter
+    local port=$1 email=$2 id=$3 add=$4 path=$5 user=$6
+    local defaultLink clashMetaBlock singBoxFilter
 
     defaultLink="vless://${id}@$(formatUriAuthorityHost "${add}"):${port}?encryption=none&security=tls&type=ws&host=${currentHost}&sni=${currentHost}&fp=chrome&path=${path}#${email}"
     clashMetaBlock=$(cat <<EOF
@@ -152,12 +131,7 @@ EOF
 }
 
 emitVlessXHTTPSubscribeOutput() {
-    local port=$1
-    local email=$2
-    local id=$3
-    local add=$4
-    local path=$5
-    local user=$6
+    local port=$1 email=$2 id=$3 add=$4 path=$5 user=$6
     local xrayConfigDir=${configPath:-${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}}
     local xhttpConfigFile=${PADM_VLESS_XHTTP_CONFIG_FILE:-${xrayConfigDir%/}/12_VLESS_XHTTP_inbounds.json}
     local vlessEncryption mihomoEncryption=
@@ -222,15 +196,8 @@ EOF
 }
 
 emitVlessGrpcSubscribeOutput() {
-    local port=$1
-    local email=$2
-    local id=$3
-    local add=$4
-    local path=$5
-    local user=$6
-    local defaultLink
-    local clashMetaBlock
-    local singBoxFilter
+    local port=$1 email=$2 id=$3 add=$4 user=$6
+    local defaultLink clashMetaBlock singBoxFilter
 
     defaultLink="vless://${id}@$(formatUriAuthorityHost "${add}"):${port}?encryption=none&security=tls&type=grpc&host=${currentHost}&path=${currentPath}grpc&serviceName=${currentPath}grpc&fp=chrome&alpn=h2&sni=${currentHost}#${email}"
     clashMetaBlock=$(cat <<EOF
@@ -260,15 +227,8 @@ EOF
 }
 
 emitTrojanSubscribeOutput() {
-    local port=$1
-    local email=$2
-    local id=$3
-    local add=$4
-    local path=$5
-    local user=$6
-    local encodedId yamlPassword defaultLink
-    local clashMetaBlock
-    local singBoxFilter
+    local port=$1 email=$2 id=$3 user=$6
+    local encodedId yamlPassword defaultLink clashMetaBlock singBoxFilter
     encodedId=$(encodeUriUserInfoComponent "${id}") || return 1
     yamlPassword=$(serializeYamlString "${id}") || return 1
     defaultLink="trojan://${encodedId}@$(formatUriAuthorityHost "${currentHost}"):${port}?peer=${currentHost}&fp=chrome&sni=${currentHost}&alpn=http/1.1#${email}_Trojan"
@@ -292,15 +252,8 @@ EOF
 }
 
 emitTrojanGrpcSubscribeOutput() {
-    local port=$1
-    local email=$2
-    local id=$3
-    local add=$4
-    local path=$5
-    local user=$6
-    local encodedId yamlPassword defaultLink
-    local clashMetaBlock
-    local singBoxFilter
+    local port=$1 email=$2 id=$3 add=$4 user=$6
+    local encodedId yamlPassword defaultLink clashMetaBlock singBoxFilter
     encodedId=$(encodeUriUserInfoComponent "${id}") || return 1
     yamlPassword=$(serializeYamlString "${id}") || return 1
     defaultLink="trojan://${encodedId}@$(formatUriAuthorityHost "${add}"):${port}?encryption=none&peer=${currentHost}&security=tls&type=grpc&fp=chrome&sni=${currentHost}&alpn=h2&path=${currentPath}trojangrpc&serviceName=${currentPath}trojangrpc#${email}"
@@ -326,12 +279,7 @@ EOF
 }
 
 emitHysteriaSubscribeOutput() {
-    local port=$1
-    local email=$2
-    local id=$3
-    local add=$4
-    local path=$5
-    local user=$6
+    local port=$1 email=$2 id=$3 user=$6
     subscribeOutputTitle "通用链接：Hysteria2 TLS"
     local clashMetaPortContent="port: ${port}"
     local uriPort=${singBoxHysteria2Port}
@@ -340,9 +288,7 @@ emitHysteriaSubscribeOutput() {
         uriPort=${port}
     fi
 
-    local encodedId yamlPassword defaultLink
-    local clashMetaBlock
-    local singBoxFilter
+    local encodedId yamlPassword defaultLink clashMetaBlock singBoxFilter
     encodedId=$(encodeUriUserInfoComponent "${id}") || return 1
     yamlPassword=$(serializeYamlString "${id}") || return 1
     defaultLink="hysteria2://${encodedId}@$(formatUriAuthorityHost "${currentHost}"):${uriPort}?peer=${currentHost}&insecure=0&sni=${currentHost}&alpn=h3#${email}"
@@ -373,12 +319,7 @@ EOF
 }
 
 emitVlessRealitySubscribeOutput() {
-    local port=$1
-    local email=$2
-    local id=$3
-    local add=$4
-    local path=$5
-    local user=$6
+    local port=$1 email=$2 id=$3 user=$6
     local entryHost
     entryHost=$(realityEntryHost)
 
@@ -431,12 +372,7 @@ ${mihomoEncryption:+    encryption: ${mihomoEncryption}
 }
 
 emitVlessRealityGrpcSubscribeOutput() {
-    local port=$1
-    local email=$2
-    local id=$3
-    local add=$4
-    local path=$5
-    local user=$6
+    local port=$1 email=$2 id=$3 user=$6
     local entryHost
     entryHost=$(realityEntryHost)
     local realitySNI=${xrayVLESSRealitySNI}
@@ -481,20 +417,13 @@ emitVlessRealityGrpcSubscribeOutput() {
 }
 
 emitTuicSubscribeOutput() {
-    local port=$1
-    local email=$2
-    local id=$3
-    local add=$4
-    local path=$5
-    local user=$6
+    local port=$1 email=$2 id=$3 user=$6
     local tuicUUID=
     tuicUUID=${id%%_*}
 
     local tuicPassword=
     tuicPassword=${id#*_}
-    local encodedTuicUUID encodedTuicPassword yamlPassword defaultLink
-    local clashMetaBlock
-    local singBoxFilter
+    local encodedTuicUUID encodedTuicPassword yamlPassword defaultLink clashMetaBlock singBoxFilter
     local singBoxServerPort=${singBoxTuicPort:-${port}}
     encodedTuicUUID=$(encodeUriUserInfoComponent "${tuicUUID}") || return 1
     encodedTuicPassword=$(encodeUriUserInfoComponent "${tuicPassword}") || return 1
@@ -543,18 +472,9 @@ EOF
 }
 
 emitShadowsocksSubscribeOutput() {
-    local port=$1
-    local email=$2
-    local id=$3
-    local add=$4
-    local path=$5
-    local user=$6
+    local port=$1 email=$2 id=$3 user=$6
     local method="2022-blake3-aes-128-gcm"
-    local defaultUserInfo
-    local defaultLink
-    local clashMetaBlock
-    local singBoxFilter
-    local yamlPassword
+    local defaultUserInfo defaultLink clashMetaBlock singBoxFilter yamlPassword
 
     defaultUserInfo=$(printf '%s' "${method}:${id}" | base64 -w 0)
     defaultLink="ss://${defaultUserInfo}@$(formatUriAuthorityHost "${currentHost}"):${port}#${email}"
@@ -580,12 +500,7 @@ EOF
 }
 
 emitNaiveSubscribeOutput() {
-    local port=$1
-    local email=$2
-    local id=$3
-    local add=$4
-    local path=$5
-    local user=$6
+    local port=$1 email=$2 id=$3 user=$6
     subscribeOutputTitle "通用链接：Naive TLS"
     echoContent green "    NaiveProxy 适合需要 TLS 指纹抗性的场景；需要真实域名和可信证书，不是无域名 Reality 替代。\n"
 
@@ -599,15 +514,8 @@ emitNaiveSubscribeOutput() {
 }
 
 emitVmessHTTPUpgradeSubscribeOutput() {
-    local port=$1
-    local email=$2
-    local id=$3
-    local add=$4
-    local path=$5
-    local user=$6
-    local vmessJson qrCodeBase64Default defaultLink
-    local clashMetaBlock
-    local singBoxFilter
+    local port=$1 email=$2 id=$3 add=$4 path=$5 user=$6
+    local vmessJson qrCodeBase64Default defaultLink clashMetaBlock singBoxFilter
     vmessJson=$(serializeVmessShareJson "${port}" "${email}" "${id}" "${currentHost}" "${path}" httpupgrade "${add}") || return 1
     qrCodeBase64Default=$(printf '%s' "${vmessJson}" | base64 -w 0) || return 1
     defaultLink="vmess://${qrCodeBase64Default}"
@@ -643,15 +551,8 @@ EOF
 }
 
 emitAnyTlsSubscribeOutput() {
-    local port=$1
-    local email=$2
-    local id=$3
-    local add=$4
-    local path=$5
-    local user=$6
-    local encodedId yamlPassword defaultLink
-    local clashMetaBlock
-    local singBoxFilter
+    local email=$2 id=$3 user=$6
+    local encodedId yamlPassword defaultLink clashMetaBlock singBoxFilter
     encodedId=$(encodeUriUserInfoComponent "${id}") || return 1
     yamlPassword=$(serializeYamlString "${id}") || return 1
     defaultLink="anytls://${encodedId}@$(formatUriAuthorityHost "${currentHost}"):${singBoxAnyTLSPort}?peer=${currentHost}&insecure=0&sni=${currentHost}#${email}"
