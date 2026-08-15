@@ -22,10 +22,6 @@ regressionScriptModulesReady() {
     [[ "${expectedRef}" == "${localRef}" ]]
 }
 
-regressionScriptModuleFilesPresent() {
-    [[ -f "${SCRIPT_DIR}/shell/core/bootstrap.sh" ]]
-}
-
 regressionScriptRefIsValid() {
     [[ "$1" =~ ^[0-9a-f]{40}$ ]]
 }
