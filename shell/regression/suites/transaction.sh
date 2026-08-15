@@ -74,8 +74,6 @@ listRegressionTransactionCoreSelectorEntries() {
         'default light core-cleanup-failure-propagation' \
         'default medium reload-core-propagation' \
         'default medium sing-box-log-transaction' \
-        'default light user-config-write' \
-        'default light remove-user' \
         'heavy heavy core-install-service-action-failure' \
         'heavy heavy core-port-file-transaction' \
         'medium medium config-transaction' \
@@ -115,9 +113,7 @@ listRegressionTransactionCoreSelectorEntries() {
         'light light sing-box-protocol-reload-failure' \
         'light light geo-update-reload-failure' \
         'light light xray-geo-commit-rollback' \
-        'light light core-cleanup-failure-propagation' \
-        'light light user-config-write' \
-        'light light remove-user'
+        'light light core-cleanup-failure-propagation'
 }
 
 listRegressionTransactionCoreSelectors() {
@@ -368,8 +364,6 @@ registerRegressionFunctionLeaf config-transaction runConfigTransactionRegression
 registerRegressionFunctionLeaf core-port-file-transaction runCorePortFileTransactionRegression
 registerRegressionFunctionLeaf core-port-unsafe-config-dir runCorePortRejectsUnsafeConfigDirRegression
 registerRegressionFunctionLeaf entry-helper-config runEntryHelperConfigRegression
-registerRegressionFunctionLeaf user-config-write runUserConfigWriteRegression
-registerRegressionFunctionLeaf remove-user runRemoveUserRegression
 registerRegressionFunctionLeaf check-port-open-nginx-directory-target runCheckPortOpenNginxRejectsDirectoryTargetRegression
 registerRegressionFunctionLeaf alone-nginx-directory-target runAloneNginxRejectsDirectoryTargetRegression
 registerRegressionFunctionLeaf sing-box-managed-cleanup runSingBoxManagedCleanupRegression

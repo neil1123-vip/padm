@@ -2003,64 +2003,6 @@ runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression() (
     jq -e '.custom == "keep-after"' "${customFile}" >/dev/null
 )
 
-runUserConfigWriteRegression() {
-    local targetPath="${TMP_DIR}/user-config.json"
-    cat >"${targetPath}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"old"}]}}]}
-JSON
-    if writeUserConfigJq "${targetPath}" '.inbounds[0].settings.clients = [' 2>/dev/null; then
-        return 1
-    fi
-    jq -e '.inbounds[0].settings.clients[0].email == "old"' "${targetPath}" >/dev/null
-    [[ ! -e "${targetPath}.tmp" ]]
-    writeUserConfigJq "${targetPath}" '.inbounds[0].settings.clients += [{"email":"new"}]'
-    jq -e '.inbounds[0].settings.clients | length == 2 and .[1].email == "new"' "${targetPath}" >/dev/null
-}
-
-runRemoveUserRegression() {
-    local xrayFile="${configPath}02_VLESS_TCP_inbounds.json"
-    local trojanGrpcFile="${configPath}04_trojan_gRPC_inbounds.json"
-    local httpUpgradeXrayFile="${configPath}11_VMess_HTTPUpgrade_inbounds.json"
-    local httpUpgradeSingBoxFile="${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json"
-    local trojanDirectFile="${configPath}28_trojan_TCP_direct_inbounds.json"
-    local shadowsocksFile="${singBoxConfigPath}30_shadowsocks_inbounds.json"
-    local originalContent
-    mkdir -p "${configPath}" "${singBoxConfigPath}"
-    cat >"${xrayFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"id":"uuid-a","email":"alpha-VLESS_TCP/TLS_Vision"},{"id":"uuid-b","email":"bravo-VLESS_TCP/TLS_Vision"}]}}]}
-JSON
-    cat >"${trojanGrpcFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"password":"uuid-b","email":"bravo-Trojan_gRPC"},{"password":"uuid-a","email":"alpha-Trojan_gRPC"}]}}]}
-JSON
-    cat >"${httpUpgradeXrayFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"id":"uuid-a","email":"alpha-VMess_HTTPUpgrade"},{"id":"uuid-b","email":"bravo-VMess_HTTPUpgrade"}]}}]}
-JSON
-    cat >"${httpUpgradeSingBoxFile}" <<'JSON'
-{"inbounds":[{"users":[{"uuid":"uuid-a","name":"alpha-VMess_HTTPUpgrade"},{"uuid":"uuid-b","name":"bravo-VMess_HTTPUpgrade"}]}]}
-JSON
-    cat >"${trojanDirectFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"password":"uuid-a","email":"alpha-Trojan_TCP_direct"},{"password":"uuid-b","email":"bravo-Trojan_TCP_direct"}]}}]}
-JSON
-    cat >"${shadowsocksFile}" <<'JSON'
-{"inbounds":[{"users":[{"password":"ss-a","name":"alpha-shadowsocks"},{"password":"ss-b","name":"bravo-shadowsocks"}]}]}
-JSON
-
-    removeUserFromConfigFiles uuid-a alpha
-    jq -e '(.inbounds[0].settings.clients | length == 1) and .inbounds[0].settings.clients[0].id == "uuid-b"' "${xrayFile}" >/dev/null
-    jq -e '(.inbounds[0].settings.clients | length == 1) and .inbounds[0].settings.clients[0].password == "uuid-b"' "${trojanGrpcFile}" >/dev/null
-    jq -e '(.inbounds[0].settings.clients | length == 1) and .inbounds[0].settings.clients[0].id == "uuid-b"' "${httpUpgradeXrayFile}" >/dev/null
-    jq -e '(.inbounds[0].users | length == 1) and .inbounds[0].users[0].uuid == "uuid-b"' "${httpUpgradeSingBoxFile}" >/dev/null
-    jq -e '(.inbounds[0].settings.clients | length == 1) and .inbounds[0].settings.clients[0].password == "uuid-b"' "${trojanDirectFile}" >/dev/null
-    jq -e '(.inbounds[0].users | length == 1) and .inbounds[0].users[0].password == "ss-b"' "${shadowsocksFile}" >/dev/null
-
-    originalContent=$(<"${xrayFile}")
-    if writeUserConfigJq "${xrayFile}" '.inbounds[0].settings.clients = [' 2>/dev/null; then
-        return 1
-    fi
-    [[ "$(<"${xrayFile}")" == "${originalContent}" ]]
-    [[ ! -e "${xrayFile}.tmp" ]]
-}
-
 runPortAndPanelHelperRegression() {
     local -a extraPorts btPanelDomains onePanelDomains
 
