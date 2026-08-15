@@ -6,9 +6,7 @@ source "${REGRESSION_RUNTIME_SUITE_DIR}/../framework/runtime.sh"
 PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_RUNTIME_SUITE_DIR}/../subscription_groups_legacy.sh" --reuse
 
 runRegressionRuntimeLegacyLeafWithCompat() (
-    # Re-source legacy runtime fixtures in an isolated subshell so later suite
-    # loads cannot leave source-time TMP_DIR-derived paths stale.
-    PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_RUNTIME_SUITE_DIR}/../subscription_groups_legacy.sh"
+    source "${REGRESSION_RUNTIME_SUITE_DIR}/../legacy_context.sh"
     "$@"
 )
 

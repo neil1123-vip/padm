@@ -40,9 +40,7 @@ listRegressionRoutingChildSelectors() {
 }
 
 runRegressionRoutingLegacyLeafWithCompat() (
-    # Re-source legacy routing fixtures in an isolated subshell so later suite
-    # loads cannot overwrite routing leaf dependencies like readInstallType.
-    PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_ROUTING_SUITE_DIR}/../subscription_groups_legacy.sh"
+    source "${REGRESSION_ROUTING_SUITE_DIR}/../legacy_context.sh"
     "$@"
 )
 

@@ -11,12 +11,8 @@ set -euo pipefail
 REGRESSION_ENTRY_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=/dev/null
 source "${REGRESSION_ENTRY_DIR}/regression/bootstrap.sh"
-
-regressionFindHasMatches() {
-    local firstMatch
-    firstMatch=$(find "$@" -print -quit 2>/dev/null) || return 1
-    [[ -n "${firstMatch}" ]]
-}
+# shellcheck source=/dev/null
+source "${REGRESSION_ENTRY_DIR}/regression/legacy_context.sh"
 
 if ! declare -F regressionProtocolSelectionIncludesCompat >/dev/null 2>&1; then
     regressionProtocolSelectionIncludesCompat() {
@@ -32,33 +28,6 @@ if ! declare -F regressionProtocolSelectionIncludesCompat >/dev/null 2>&1; then
     }
 fi
 
-realityTargetDetector() {
-    printf '%s\n' fake-xray
-}
-
-currentRealityNetworkProfile() {
-    printf '203.0.113.10\tAS64500\tExampleNet\n'
-}
-
-resolveRealityTargetIPv4() {
-    printf '192.0.2.1\n'
-}
-
-lookupRealityTargetAsn() {
-    if [[ -n "${REALITY_ASN_LOOKUP_ARGS_FILE:-}" ]]; then
-        printf '%s\n' "$1" >>"${REALITY_ASN_LOOKUP_ARGS_FILE}"
-    fi
-    case "$1" in
-    198.51.100.*)
-        printf 'AS64501\tRemoteNet\n'
-        ;;
-    *)
-        printf 'AS64500\tExampleNet\n'
-        ;;
-    esac
-}
-
-REALITY_TLS_PING_ARGS_FILE="${TMP_DIR}/tls_ping_args.txt"
 fake-xray() {
     local concurrencyMarker= active=0 attempt=0
     [[ "$1" == "tls" && "$2" == "ping" ]]
@@ -97,13 +66,6 @@ jq() {
     fi
 }
 
-readInstallType() {
-    coreInstallType=${coreInstallType:-1}
-}
-
-SUBSCRIBE_CAPTURE_DIR="${TMP_DIR}/subscribe_local"
-configPath="${TMP_DIR}/xray-conf/"
-singBoxConfigPath="${TMP_DIR}/sing-box-conf/"
 runRoutingRegression() {
     local routingRootRel="${TMP_DIR}/routing-core"
     local routingRoot
@@ -9653,39 +9615,6 @@ JSON
     unset PADM_FAKE_NGINX_VALIDATE_MODE
 }
 
-eval "$(declare -f appendDefaultSubscribeLine | sed '1s/^appendDefaultSubscribeLine/padmRealAppendDefaultSubscribeLine/')"
-eval "$(declare -f appendClashMetaSubscribeBlock | sed '1s/^appendClashMetaSubscribeBlock/padmRealAppendClashMetaSubscribeBlock/')"
-eval "$(declare -f appendClashMetaSubscribeLines | sed '1s/^appendClashMetaSubscribeLines/padmRealAppendClashMetaSubscribeLines/')"
-eval "$(declare -f appendSingBoxSubscribeLocalConfig | sed '1s/^appendSingBoxSubscribeLocalConfig/padmRealAppendSingBoxSubscribeLocalConfig/')"
-
-appendDefaultSubscribeLine() {
-    local user=$1
-    local line=$2
-    mkdir -p "${SUBSCRIBE_CAPTURE_DIR}/default"
-    printf '%s\n' "${line}" >>"${SUBSCRIBE_CAPTURE_DIR}/default/${user}"
-}
-
-appendClashMetaSubscribeBlock() {
-    local user=$1
-    local block=$2
-    mkdir -p "${SUBSCRIBE_CAPTURE_DIR}/clashMeta"
-    printf '%s\n' "${block}" >>"${SUBSCRIBE_CAPTURE_DIR}/clashMeta/${user}"
-}
-
-appendSingBoxSubscribeLocalConfig() {
-    local user=$1
-    local jqFilter=$2
-    local targetPath="${SUBSCRIBE_CAPTURE_DIR}/sing-box/${user}"
-    local tmpPath="${targetPath}.tmp"
-    mkdir -p "${SUBSCRIBE_CAPTURE_DIR}/sing-box"
-    [[ -f "${targetPath}" ]] || printf '[]\n' >"${targetPath}"
-    if ! jq -r "${jqFilter}" "${targetPath}" | jq . >"${tmpPath}"; then
-        rm -f "${tmpPath}"
-        return 1
-    fi
-    mv "${tmpPath}" "${targetPath}"
-}
-
 runSubscribeLocalOutputTransactionRegression() (
     local rootRel="${TMP_DIR}/subscribe-local-output-transaction"
     local root localDir defaultFile clashFile clashLinesFile
@@ -18347,250 +18276,6 @@ runRealityScannerRejectsUnsafeDirRegression() (
     [[ "$(<"${root}/relative-scanner/sentinel")" == "keep" ]]
 )
 
-runUpdatePadmVersionPromptRegression() {
-    local successLog errorLog installDir updateTmpRoot downloadDirLog oldTmpDir
-    local restoreFailureDir restoreFailureErrorLog restoreFailureDownloadLog
-    local replaceFailureDir replaceFailureErrorLog replaceFailureDownloadLog
-    local stageFailureDir stageFailureErrorLog stageFailureDownloadLog
-    successLog="${TMP_DIR}/update-padm-success.log"
-    errorLog="${TMP_DIR}/update-padm-error.log"
-    installDir="${TMP_DIR}/update-padm-install"
-    updateTmpRoot="${TMP_DIR}/update-padm-tmp"
-    downloadDirLog="${TMP_DIR}/update-padm-download-dirs.log"
-    restoreFailureDir="${TMP_DIR}/update-padm-restore-failure"
-    restoreFailureErrorLog="${TMP_DIR}/update-padm-restore-failure-error.log"
-    restoreFailureDownloadLog="${TMP_DIR}/update-padm-restore-failure-download.log"
-    replaceFailureDir="${TMP_DIR}/update-padm-replace-restore-failure"
-    replaceFailureErrorLog="${TMP_DIR}/update-padm-replace-restore-failure-error.log"
-    replaceFailureDownloadLog="${TMP_DIR}/update-padm-replace-restore-failure-download.log"
-    stageFailureDir="${TMP_DIR}/update-padm-stage-failure"
-    stageFailureErrorLog="${TMP_DIR}/update-padm-stage-failure-error.log"
-    stageFailureDownloadLog="${TMP_DIR}/update-padm-stage-failure-download.log"
-    oldTmpDir="${TMPDIR:-}"
-    mkdir -p "${installDir}" "${updateTmpRoot}" "${restoreFailureDir}" "${replaceFailureDir}" "${stageFailureDir}"
-    installDir=$(cd -- "${installDir}" && pwd -P)
-    restoreFailureDir=$(cd -- "${restoreFailureDir}" && pwd -P)
-    replaceFailureDir=$(cd -- "${replaceFailureDir}" && pwd -P)
-    stageFailureDir=$(cd -- "${stageFailureDir}" && pwd -P)
-    : >"${downloadDirLog}"
-    : >"${successLog}"
-    : >"${errorLog}"
-    : >"${restoreFailureErrorLog}"
-    : >"${restoreFailureDownloadLog}"
-    : >"${replaceFailureErrorLog}"
-    : >"${replaceFailureDownloadLog}"
-    : >"${stageFailureErrorLog}"
-    : >"${stageFailureDownloadLog}"
-    TMPDIR="${updateTmpRoot}"
-    printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${installDir}/install.sh"
-    chmod 700 "${installDir}/install.sh"
-
-    (
-        REGRESSION_SUCCESS_CARD_LOG="${successLog}"
-        REGRESSION_ERROR_CARD_LOG="${errorLog}"
-        release=debian
-        PADM_INSTALL_DIR="${installDir}"
-
-        downloadFile() {
-            while [[ $# -gt 0 ]]; do
-                case "$1" in
-                -P)
-                    mkdir -p "$2"
-                    printf '%s\n' "$2" >>"${downloadDirLog}"
-                    cat >"$2/install.sh" <<'EOF'
-#!/usr/bin/env bash
-ensureScriptModules() { :; }
-printf 'new-entry-ok\n'
-exit 0
-EOF
-                    return 0
-                    ;;
-                esac
-                shift
-            done
-            return 1
-        }
-        sudo() { "$@"; }
-
-        updatePadm 1
-    ) >"${TMP_DIR}/update-padm-run-ok.log" 2>&1
-    grep -q '更新入口已下载，正在重新打开新版脚本' "${successLog}"
-    grep -q 'new-entry-ok' "${successLog}" && return 1
-    grep -Eqx "${updateTmpRoot}/padm-update\\.[A-Za-z0-9][A-Za-z0-9]*/?" "${downloadDirLog}"
-    if regressionFindHasMatches "${updateTmpRoot}" -mindepth 1 -maxdepth 1 -type d; then
-        return 1
-    fi
-    [[ ! -e "${installDir}/install.sh.bak" ]]
-    "${installDir}/install.sh" | grep -q 'new-entry-ok'
-
-    printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${installDir}/install.sh"
-    chmod 700 "${installDir}/install.sh"
-    : >"${successLog}"
-    : >"${errorLog}"
-    (
-        REGRESSION_ERROR_CARD_LOG="${errorLog}"
-        release=debian
-        PADM_INSTALL_DIR="${installDir}"
-
-        downloadFile() {
-            while [[ $# -gt 0 ]]; do
-                case "$1" in
-                -P)
-                    mkdir -p "$2"
-                    printf '%s\n' "$2" >>"${downloadDirLog}"
-                    cat >"$2/install.sh" <<'EOF'
-#!/usr/bin/env bash
-ensureScriptModules() { :; }
-exit 23
-EOF
-                    return 0
-                    ;;
-                esac
-                shift
-            done
-            return 1
-        }
-        sudo() { "$@"; }
-
-        updatePadm 1
-    ) >"${TMP_DIR}/update-padm-run-fail.log" 2>&1 && return 1
-    grep -q '新版入口执行失败，已恢复旧入口' "${errorLog}"
-    grep -Eqx "${updateTmpRoot}/padm-update\\.[A-Za-z0-9][A-Za-z0-9]*/?" "${downloadDirLog}"
-    if regressionFindHasMatches "${updateTmpRoot}" -mindepth 1 -maxdepth 1 -type d; then
-        return 1
-    fi
-    "${installDir}/install.sh" | grep -q 'old-entry'
-
-    printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${restoreFailureDir}/install.sh"
-    chmod 700 "${restoreFailureDir}/install.sh"
-    (
-        REGRESSION_ERROR_CARD_LOG="${restoreFailureErrorLog}"
-        release=debian
-        PADM_INSTALL_DIR="${restoreFailureDir}"
-
-        downloadFile() {
-            while [[ $# -gt 0 ]]; do
-                case "$1" in
-                -P)
-                    mkdir -p "$2"
-                    printf '%s\n' "$2" >>"${restoreFailureDownloadLog}"
-                    cat >"$2/install.sh" <<'EOF'
-#!/usr/bin/env bash
-ensureScriptModules() { :; }
-printf 'new-entry\n'
-exit 23
-EOF
-                    return 0
-                    ;;
-                esac
-                shift
-            done
-            return 1
-        }
-        eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
-        commitGeneratedFile() {
-            if [[ "$1" == "${restoreFailureDir}/install.sh.bak" && "$2" == "${restoreFailureDir}/install.sh" ]]; then
-                return 1
-            fi
-            originalCommitGeneratedFile "$@"
-        }
-        sudo() { "$@"; }
-
-        updatePadm 1
-    ) >"${TMP_DIR}/update-padm-restore-failure-run.log" 2>&1 && return 1
-    grep -q "新版入口执行失败，旧入口恢复失败，请手动检查 ${restoreFailureDir}/install.sh 和 ${restoreFailureDir}/install.sh.bak" "${restoreFailureErrorLog}"
-    grep -Eqx "${updateTmpRoot}/padm-update\\.[A-Za-z0-9][A-Za-z0-9]*/?" "${restoreFailureDownloadLog}"
-    if regressionFindHasMatches "${updateTmpRoot}" -mindepth 1 -maxdepth 1 -type d; then
-        return 1
-    fi
-    "${restoreFailureDir}/install.sh" | grep -q 'new-entry'
-    "${restoreFailureDir}/install.sh.bak" | grep -q 'old-entry'
-
-    printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${replaceFailureDir}/install.sh"
-    chmod 700 "${replaceFailureDir}/install.sh"
-    (
-        REGRESSION_ERROR_CARD_LOG="${replaceFailureErrorLog}"
-        release=debian
-        PADM_INSTALL_DIR="${replaceFailureDir}"
-
-        downloadFile() {
-            while [[ $# -gt 0 ]]; do
-                case "$1" in
-                -P)
-                    mkdir -p "$2"
-                    printf '%s\n' "$2" >>"${replaceFailureDownloadLog}"
-                    cat >"$2/install.sh" <<'EOF'
-#!/usr/bin/env bash
-ensureScriptModules() { :; }
-printf 'new-entry\n'
-exit 0
-EOF
-                    return 0
-                    ;;
-                esac
-                shift
-            done
-            return 1
-        }
-        eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
-        commitGeneratedFile() {
-            if [[ "$2" == "${replaceFailureDir}/install.sh" ]]; then
-                return 1
-            fi
-            originalCommitGeneratedFile "$@"
-        }
-
-        updatePadm 1
-    ) >"${TMP_DIR}/update-padm-replace-failure-run.log" 2>&1 && return 1
-    grep -q '更新入口提交失败，已取消更新' "${replaceFailureErrorLog}"
-    [[ ! -e "${replaceFailureDir}/install.sh.bak" ]]
-    "${replaceFailureDir}/install.sh" | grep -q 'old-entry'
-    ! compgen -G "${replaceFailureDir}/.install.sh.install.*" >/dev/null
-
-    printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${stageFailureDir}/install.sh"
-    chmod 700 "${stageFailureDir}/install.sh"
-    (
-        REGRESSION_ERROR_CARD_LOG="${stageFailureErrorLog}"
-        release=debian
-        PADM_INSTALL_DIR="${stageFailureDir}"
-
-        downloadFile() {
-            while [[ $# -gt 0 ]]; do
-                case "$1" in
-                -P)
-                    mkdir -p "$2"
-                    printf '%s\n' "$2" >>"${stageFailureDownloadLog}"
-                    cat >"$2/install.sh" <<'EOF'
-#!/usr/bin/env bash
-ensureScriptModules() { :; }
-printf 'new-entry\n'
-exit 0
-EOF
-                    return 0
-                    ;;
-                esac
-                shift
-            done
-            return 1
-        }
-        cp() {
-            local targetPath="${@: -1}"
-            case "${targetPath}" in
-            "${stageFailureDir}"/.install.sh.install.*)
-                return 1
-                ;;
-            esac
-            command cp "$@"
-        }
-
-        updatePadm 1
-    ) >"${TMP_DIR}/update-padm-stage-failure-run.log" 2>&1 && return 1
-    grep -q '更新入口暂存失败，已取消更新' "${stageFailureErrorLog}"
-    [[ ! -e "${stageFailureDir}/install.sh.bak" ]]
-    "${stageFailureDir}/install.sh" | grep -q 'old-entry'
-    ! compgen -G "${stageFailureDir}/.install.sh.install.*" >/dev/null
-    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
-}
 
 runTlsRenewalFailurePropagationRegression() (
     local root="${TMP_DIR}/tls-renew-failure-propagation"

@@ -41,6 +41,45 @@ prepareSubscriptionStateQuotaUsageFixture() {
 JSON
 }
 
+prepareSubscriptionGroupSyncFixture() {
+    local syncRoot=$1
+    local clientEmail=${2:-sub_old-main}
+
+    mkdir -p "${syncRoot}/xray" "${syncRoot}/subscribe_local/default" \
+        "${syncRoot}/subscribe/default" "${syncRoot}/groups" "${syncRoot}/tmp"
+    configPath="${syncRoot}/xray/"
+    singBoxConfigPath="${syncRoot}/xray/"
+    export PADM_SUBSCRIPTION_GROUPS_DIR="${syncRoot}/groups"
+    export PADM_SUBSCRIBE_LOCAL_DIR="${syncRoot}/subscribe_local"
+    export PADM_SUBSCRIBE_DIR="${syncRoot}/subscribe"
+    TMPDIR="${syncRoot}/tmp"
+    cat >"$(subscriptionGroupsFile)"
+    if [[ -n "${clientEmail}" ]]; then
+        printf '{"inbounds":[{"settings":{"clients":[{"email":"%s"}]}}]}\n' \
+            "${clientEmail}" >"${syncRoot}/xray/02_VLESS_TCP_inbounds.json"
+    else
+        printf '%s\n' '{"inbounds":[{"settings":{"clients":[]}}]}' >"${syncRoot}/xray/02_VLESS_TCP_inbounds.json"
+    fi
+    printf 'old-local\n' >"${syncRoot}/subscribe_local/default/user"
+    printf 'old-public\n' >"${syncRoot}/subscribe/default/user"
+    prepareSubscriptionGroupSyncStubs
+}
+
+prepareSubscriptionGroupSyncStubs() {
+    subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
+    collectSubscriptionTraffic() { return 0; }
+    readInstallType() { return 0; }
+    readInstallProtocolType() { return 0; }
+    readConfigHostPathUUID() { return 0; }
+    subscriptionSyncMarkResult() {
+        printf '%s\n' "$1" >"${resultStatus}"
+        printf '%s\n' "$2" >"${resultFailures}"
+        return 0
+    }
+    successCard() { printf '%s\n' "$*" >"${statusLog}"; }
+    statusCard() { printf '%s\n' "$*" >"${statusLog}"; }
+}
+
 runSubscriptionGroupStateStructureFoundationAddRemoveRegression() {
     mkdir -p "$(subscriptionGroupsDir)"
     writeSubscriptionStateStructureFoundationFixture
@@ -1211,28 +1250,11 @@ runSubscriptionGroupSyncApplyFailureRegression() (
     local originalConfig
     local syncStatus
 
-    mkdir -p "${syncRoot}/xray" "${syncRoot}/subscribe_local/default" "${syncRoot}/subscribe/default" "${syncRoot}/groups" "${syncRoot}/tmp"
-    configPath="${syncRoot}/xray/"
-    singBoxConfigPath="${syncRoot}/xray/"
-    export PADM_SUBSCRIPTION_GROUPS_DIR="${syncRoot}/groups"
-    export PADM_SUBSCRIBE_LOCAL_DIR="${syncRoot}/subscribe_local"
-    export PADM_SUBSCRIBE_DIR="${syncRoot}/subscribe"
-    TMPDIR="${syncRoot}/tmp"
-    cat >"$(subscriptionGroupsFile)" <<'JSON'
+    prepareSubscriptionGroupSyncFixture "${syncRoot}" <<'JSON'
 {"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"edge.example.com","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
-    cat >"${syncConfigFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_old-main"}]}}]}
-JSON
-    printf 'old-local\n' >"${syncLocalFile}"
-    printf 'old-public\n' >"${syncPublicFile}"
     originalConfig=$(<"${syncConfigFile}")
 
-    subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
-    collectSubscriptionTraffic() { return 0; }
-    readInstallType() { return 0; }
-    readInstallProtocolType() { return 0; }
-    readConfigHostPathUUID() { return 0; }
     subscriptionSyncGenerateUUID() {
         printf '99999999-9999-4999-8999-999999999999\n'
     }
@@ -1312,28 +1334,11 @@ runSubscriptionGroupSyncReconcileRollbackRegression() (
     local originalConfig
     local syncStatus
 
-    mkdir -p "${syncRoot}/xray" "${syncRoot}/subscribe_local/default" "${syncRoot}/subscribe/default" "${syncRoot}/groups" "${syncRoot}/tmp"
-    configPath="${syncRoot}/xray/"
-    singBoxConfigPath="${syncRoot}/xray/"
-    export PADM_SUBSCRIPTION_GROUPS_DIR="${syncRoot}/groups"
-    export PADM_SUBSCRIBE_LOCAL_DIR="${syncRoot}/subscribe_local"
-    export PADM_SUBSCRIBE_DIR="${syncRoot}/subscribe"
-    TMPDIR="${syncRoot}/tmp"
-    cat >"$(subscriptionGroupsFile)" <<'JSON'
+    prepareSubscriptionGroupSyncFixture "${syncRoot}" <<'JSON'
 {"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"edge.example.com","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":"","uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
-    cat >"${syncConfigFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_old-main"}]}}]}
-JSON
-    printf 'old-local\n' >"${syncLocalFile}"
-    printf 'old-public\n' >"${syncPublicFile}"
     originalConfig=$(<"${syncConfigFile}")
 
-    subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
-    collectSubscriptionTraffic() { return 0; }
-    readInstallType() { return 0; }
-    readInstallProtocolType() { return 0; }
-    readConfigHostPathUUID() { return 0; }
     subscriptionSyncPlan() {
         printf '{"create":["sub_team_a"],"remove":[]}'
     }
@@ -1401,30 +1406,13 @@ runSubscriptionGroupSyncRemoteFailureRegression() (
     local originalConfig
     local syncStatus
 
-    mkdir -p "${syncRoot}/xray" "${syncRoot}/subscribe_local/default" "${syncRoot}/subscribe/default" "${syncRoot}/groups" "${syncRoot}/tmp"
-    configPath="${syncRoot}/xray/"
-    singBoxConfigPath="${syncRoot}/xray/"
-    export PADM_SUBSCRIPTION_GROUPS_DIR="${syncRoot}/groups"
-    export PADM_SUBSCRIBE_LOCAL_DIR="${syncRoot}/subscribe_local"
-    export PADM_SUBSCRIBE_DIR="${syncRoot}/subscribe"
-    TMPDIR="${syncRoot}/tmp"
-    cat >"$(subscriptionGroupsFile)" <<'JSON'
+    prepareSubscriptionGroupSyncFixture "${syncRoot}" <<'JSON'
 {"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"edge.example.com","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":"","uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
-    cat >"${syncConfigFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_old-main"}]}}]}
-JSON
-    printf 'old-local\n' >"${syncLocalFile}"
-    printf 'old-public\n' >"${syncPublicFile}"
     originalConfig=$(<"${syncConfigFile}")
 
-    subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
     subscriptionCurrentRoleNormalized() { printf 'main\n'; }
     subscriptionRemoteScopeEnabled() { [[ "${remoteFailureMode}" != "control-disabled" ]]; }
-    collectSubscriptionTraffic() { return 0; }
-    readInstallType() { return 0; }
-    readInstallProtocolType() { return 0; }
-    readConfigHostPathUUID() { return 0; }
     subscriptionSyncPlan() {
         printf '{"create":["sub_team_a"],"remove":[]}'
     }
@@ -1488,28 +1476,13 @@ runSubscriptionGroupSyncRemoteBeforePublishRefreshRegression() (
     local statusLog="${syncRoot}/status.log"
     local syncStatus
 
-    mkdir -p "${syncRoot}/xray" "${syncRoot}/subscribe_local/default" "${syncRoot}/subscribe/default" "${syncRoot}/groups" "${syncRoot}/tmp"
-    configPath="${syncRoot}/xray/"
-    singBoxConfigPath="${syncRoot}/xray/"
-    export PADM_SUBSCRIPTION_GROUPS_DIR="${syncRoot}/groups"
-    export PADM_SUBSCRIBE_LOCAL_DIR="${syncRoot}/subscribe_local"
-    export PADM_SUBSCRIBE_DIR="${syncRoot}/subscribe"
-    TMPDIR="${syncRoot}/tmp"
-    : >"${callLog}"
-    cat >"$(subscriptionGroupsFile)" <<'JSON'
+    prepareSubscriptionGroupSyncFixture "${syncRoot}" "" <<'JSON'
 {"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-b","name":"Edge B","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"10.77.0.2","port":39778,"enabled":true,"sync_status":"pending","control_token":"token-b"}],"user_groups":[{"id":"real-sync-6","name":"Real Sync 6","enabled":true,"allowed_sources":["edge-b"],"traffic_limit_gb":0,"token":"","uuid":"3004d897-c06d-45a1-aa64-3d3266ca63d5"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
-    cat >"${syncConfigFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[]}}]}
-JSON
+    : >"${callLog}"
 
-    subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
     subscriptionCurrentRoleNormalized() { printf 'main\n'; }
     subscriptionRemoteScopeEnabled() { return 0; }
-    collectSubscriptionTraffic() { return 0; }
-    readInstallType() { return 0; }
-    readInstallProtocolType() { return 0; }
-    readConfigHostPathUUID() { return 0; }
     reloadCore() {
         printf 'reload\n' >>"${callLog}"
         return 0
@@ -1585,28 +1558,13 @@ runSubscriptionGroupSyncPublishRefreshInlineRegression() (
     local statusLog="${syncRoot}/status.log"
     local syncStatus
 
-    mkdir -p "${syncRoot}/xray" "${syncRoot}/subscribe_local/default" "${syncRoot}/subscribe/default" "${syncRoot}/groups" "${syncRoot}/tmp"
-    configPath="${syncRoot}/xray/"
-    singBoxConfigPath="${syncRoot}/xray/"
-    export PADM_SUBSCRIPTION_GROUPS_DIR="${syncRoot}/groups"
-    export PADM_SUBSCRIBE_LOCAL_DIR="${syncRoot}/subscribe_local"
-    export PADM_SUBSCRIBE_DIR="${syncRoot}/subscribe"
-    TMPDIR="${syncRoot}/tmp"
-    : >"${callLog}"
-    cat >"$(subscriptionGroupsFile)" <<'JSON'
+    prepareSubscriptionGroupSyncFixture "${syncRoot}" "" <<'JSON'
 {"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-disabled","name":"Edge Disabled","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"edge.example.com","port":443,"enabled":false,"sync_status":"pending","control_token":"token-disabled"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":"","uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
-    cat >"${syncConfigFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[]}}]}
-JSON
+    : >"${callLog}"
 
-    subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
     subscriptionCurrentRoleNormalized() { printf 'main\n'; }
     subscriptionRemoteScopeEnabled() { return 0; }
-    collectSubscriptionTraffic() { return 0; }
-    readInstallType() { return 0; }
-    readInstallProtocolType() { return 0; }
-    readConfigHostPathUUID() { return 0; }
     subscriptionSyncPlan() {
         printf '{"create":["sub_team_a"],"remove":[]}'
     }
@@ -1667,18 +1625,8 @@ runSubscriptionGroupSyncSingleConfigBackupRegression() (
     local statusLog="${syncRoot}/status.log"
     local syncStatus
 
-    mkdir -p "${syncRoot}/xray" "${syncRoot}/subscribe_local" "${syncRoot}/subscribe" "${syncRoot}/groups" "${syncRoot}/tmp"
-    configPath="${syncRoot}/xray/"
-    singBoxConfigPath="${syncRoot}/xray/"
-    export PADM_SUBSCRIPTION_GROUPS_DIR="${syncRoot}/groups"
-    export PADM_SUBSCRIBE_LOCAL_DIR="${syncRoot}/subscribe_local"
-    export PADM_SUBSCRIBE_DIR="${syncRoot}/subscribe"
-    TMPDIR="${syncRoot}/tmp"
-    cat >"$(subscriptionGroupsFile)" <<'JSON'
+    prepareSubscriptionGroupSyncFixture "${syncRoot}" "" <<'JSON'
 {"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"token":"","uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-    cat >"${syncConfigFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[]}}]}
 JSON
 
     eval "$(declare -f subscriptionSyncCreateConfigBackups | sed '1s/^subscriptionSyncCreateConfigBackups/originalSubscriptionSyncCreateConfigBackups/')"
@@ -1686,11 +1634,7 @@ JSON
         printf 'backup\n' >>"${backupCountLog}"
         originalSubscriptionSyncCreateConfigBackups "$@"
     }
-    subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
-    collectSubscriptionTraffic() { return 0; }
     readInstallType() { coreInstallType=1; }
-    readInstallProtocolType() { return 0; }
-    readConfigHostPathUUID() { return 0; }
     protocolCapabilityRegistry() {
         printf '1|unused|node|unused|unused|xray|unused|unused|unused|unused|unused|unused|unused|unused|unused|unused|unused|unused|02_VLESS_TCP_inbounds.json\n'
     }

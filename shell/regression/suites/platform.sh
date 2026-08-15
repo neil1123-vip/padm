@@ -14,9 +14,7 @@ runRegressionPlatformFastLeafWithCompat() (
 )
 
 runRegressionPlatformLegacyLeafWithCompat() (
-    # Re-source legacy platform fixtures in an isolated subshell so later suite
-    # loads cannot leave source-time TMP_DIR-derived paths stale.
-    PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_PLATFORM_SUITE_DIR}/../subscription_groups_legacy.sh"
+    source "${REGRESSION_PLATFORM_SUITE_DIR}/../legacy_context.sh"
     "$@"
 )
 
@@ -60,8 +58,8 @@ runRegressionPlatformFastHelperIsolationRegression() (
     legacyBody=$(capturePlatformUpdateRunnerBody)
     fastBody=$(runRegressionPlatformFastLeafWithCompat capturePlatformUpdateRunnerBody)
 
-    grep -Fq 'successLog="${TMP_DIR}/update-padm-success.log"' <<<"${legacyBody}"
-    grep -Fq 'replaceFailureDir="${TMP_DIR}/update-padm-replace-restore-failure"' <<<"${legacyBody}"
+    grep -Fq 'outputLog="${TMP_DIR}/update-padm-output.log"' <<<"${legacyBody}"
+    grep -Fq 'replaceFailureDir="${TMP_DIR}/update-padm-replace-failure"' <<<"${legacyBody}"
     grep -Fq 'outputLog="${TMP_DIR}/update-padm-output.log"' <<<"${fastBody}"
     grep -Fq 'replaceFailureDir="${TMP_DIR}/update-padm-replace-failure"' <<<"${fastBody}"
 )

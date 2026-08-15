@@ -2122,7 +2122,6 @@ EOF
     PADM_OS_RELEASE_FILE="${oldOsReleaseFile}"
     PADM_YUM_REPOS_DIR=
 }
-
 runUpdatePadmVersionPromptRegression() {
     local installDir outputLog errorLog downloadLog oldTmpDir
     local restoreFailureDir restoreFailureErrorLog restoreFailureDownloadLog
@@ -2149,28 +2148,44 @@ runUpdatePadmVersionPromptRegression() {
     restoreFailureDir=$(cd -- "${restoreFailureDir}" && pwd -P)
     replaceFailureDir=$(cd -- "${replaceFailureDir}" && pwd -P)
     stageFailureDir=$(cd -- "${stageFailureDir}" && pwd -P)
+    : >"${downloadLog}"
+    : >"${errorLog}"
+    : >"${restoreFailureErrorLog}"
+    : >"${restoreFailureDownloadLog}"
+    : >"${replaceFailureErrorLog}"
+    : >"${replaceFailureDownloadLog}"
+    : >"${stageFailureErrorLog}"
+    : >"${stageFailureDownloadLog}"
     fetchRemoteRef() { printf '1111111111111111111111111111111111111111\n'; }
+    updatePadmVersionPromptCase() (
+        local mode=$1
+        local targetDir=$2
+        local caseErrorLog=$3
+        local caseDownloadLog=$4
+        local caseOutputLog=$5
+        local exitCode=0
+        case "${mode}" in
+        initial | restore) exitCode=23 ;;
+        replace | stage) ;;
+        *) return 2 ;;
+        esac
 
-    printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${installDir}/install.sh"
-    chmod 700 "${installDir}/install.sh"
-    (
-        REGRESSION_ERROR_CARD_LOG="${errorLog}"
+        printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${targetDir}/install.sh"
+        chmod 700 "${targetDir}/install.sh"
+        REGRESSION_ERROR_CARD_LOG="${caseErrorLog}"
         release=debian
-        PADM_INSTALL_DIR="${installDir}"
+        PADM_INSTALL_DIR="${targetDir}"
         TMPDIR="${updateTmpRoot}"
-
         downloadFile() {
+            local outputDir=
             while [[ $# -gt 0 ]]; do
                 case "$1" in
                 -P)
-                    mkdir -p "$2"
-                    printf '%s\n' "$2" >>"${downloadLog}"
-                    cat >"$2/install.sh" <<'EOF'
-#!/usr/bin/env bash
-ensureScriptModules() { :; }
-printf 'new-entry\n'
-exit 23
-EOF
+                    [[ $# -ge 2 ]] || return 1
+                    outputDir=$2
+                    mkdir -p "${outputDir}"
+                    printf '%s\n' "${outputDir}" >>"${caseDownloadLog}"
+                    printf '#!/usr/bin/env bash\nensureScriptModules() { :; }\nprintf "new-entry\\n"\nexit %s\n' "${exitCode}" >"${outputDir%/}/install.sh"
                     return 0
                     ;;
                 esac
@@ -2178,132 +2193,66 @@ EOF
             done
             return 1
         }
+        case "${mode}" in
+        restore)
+            eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
+            mv() {
+                if [[ "${1:-}" == "-f" && "${2:-}" == "--" &&
+                    "${3:-}" == "${targetDir}/install.sh.bak" &&
+                    "${4:-}" == "${targetDir}/install.sh" ]]; then
+                    return 1
+                fi
+                command mv "$@"
+            }
+            ;;
+        replace)
+            eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
+            commitGeneratedFile() {
+                [[ "${2:-}" == "${targetDir}/install.sh" ]] && return 1
+                originalCommitGeneratedFile "$@"
+            }
+            ;;
+        stage)
+            cp() {
+                local targetPath="${@: -1}"
+                case "${targetPath}" in
+                "${targetDir}"/.install.sh.install.*) return 1 ;;
+                esac
+                command cp "$@"
+            }
+            ;;
+        esac
+        updatePadm 1 >"${caseOutputLog}" 2>&1
+    )
 
-        updatePadm 1
-    ) >"${outputLog}" 2>&1 && return 1
+    local -a updateCasePids=()
+    updatePadmVersionPromptCase initial "${installDir}" "${errorLog}" "${downloadLog}" "${outputLog}" &
+    updateCasePids+=("$!")
+    updatePadmVersionPromptCase restore "${restoreFailureDir}" "${restoreFailureErrorLog}" "${restoreFailureDownloadLog}" "${TMP_DIR}/update-padm-restore-failure-run.log" &
+    updateCasePids+=("$!")
+    updatePadmVersionPromptCase replace "${replaceFailureDir}" "${replaceFailureErrorLog}" "${replaceFailureDownloadLog}" "${TMP_DIR}/update-padm-replace-failure-run.log" &
+    updateCasePids+=("$!")
+    updatePadmVersionPromptCase stage "${stageFailureDir}" "${stageFailureErrorLog}" "${stageFailureDownloadLog}" "${TMP_DIR}/update-padm-stage-failure-run.log" &
+    updateCasePids+=("$!")
+    local updateCaseFailed=0 updateCasePid
+    for updateCasePid in "${updateCasePids[@]}"; do
+        if wait "${updateCasePid}"; then
+            updateCaseFailed=1
+        fi
+    done
+    [[ "${updateCaseFailed}" == "0" ]] || return 1
+
     grep -q '新版入口执行失败，已恢复旧入口' "${errorLog}"
     "${installDir}/install.sh" | grep -q 'old-entry'
 
-    printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${restoreFailureDir}/install.sh"
-    chmod 700 "${restoreFailureDir}/install.sh"
-    (
-        REGRESSION_ERROR_CARD_LOG="${restoreFailureErrorLog}"
-        release=debian
-        PADM_INSTALL_DIR="${restoreFailureDir}"
-        TMPDIR="${updateTmpRoot}"
-
-        downloadFile() {
-            while [[ $# -gt 0 ]]; do
-                case "$1" in
-                -P)
-                    mkdir -p "$2"
-                    printf '%s\n' "$2" >>"${restoreFailureDownloadLog}"
-                    cat >"$2/install.sh" <<'EOF'
-#!/usr/bin/env bash
-ensureScriptModules() { :; }
-printf 'new-entry\n'
-exit 23
-EOF
-                    return 0
-                    ;;
-                esac
-                shift
-            done
-            return 1
-        }
-        mv() {
-            if [[ "$1" == "-f" && "$2" == "--" && "$3" == "${restoreFailureDir}/install.sh.bak" && "$4" == "${restoreFailureDir}/install.sh" ]]; then
-                return 1
-            fi
-            command mv "$@"
-        }
-
-        updatePadm 1
-    ) >"${TMP_DIR}/update-padm-restore-failure-run.log" 2>&1 && return 1
     grep -q '新版入口执行失败，旧入口恢复失败' "${restoreFailureErrorLog}"
     [[ -f "${restoreFailureDir}/install.sh.bak" ]]
 
-    printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${replaceFailureDir}/install.sh"
-    chmod 700 "${replaceFailureDir}/install.sh"
-    (
-        REGRESSION_ERROR_CARD_LOG="${replaceFailureErrorLog}"
-        release=debian
-        PADM_INSTALL_DIR="${replaceFailureDir}"
-        TMPDIR="${updateTmpRoot}"
-
-        downloadFile() {
-            while [[ $# -gt 0 ]]; do
-                case "$1" in
-                -P)
-                    mkdir -p "$2"
-                    printf '%s\n' "$2" >>"${replaceFailureDownloadLog}"
-                    cat >"$2/install.sh" <<'EOF'
-#!/usr/bin/env bash
-ensureScriptModules() { :; }
-printf 'new-entry\n'
-exit 0
-EOF
-                    return 0
-                    ;;
-                esac
-                shift
-            done
-            return 1
-        }
-        eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
-        commitGeneratedFile() {
-            if [[ "$2" == "${replaceFailureDir}/install.sh" ]]; then
-                return 1
-            fi
-            originalCommitGeneratedFile "$@"
-        }
-
-        updatePadm 1
-    ) >"${TMP_DIR}/update-padm-replace-failure-run.log" 2>&1 && return 1
     grep -q '更新入口提交失败，已取消更新' "${replaceFailureErrorLog}"
     [[ ! -e "${replaceFailureDir}/install.sh.bak" ]]
     "${replaceFailureDir}/install.sh" | grep -q 'old-entry'
     ! compgen -G "${replaceFailureDir}/.install.sh.install.*" >/dev/null
 
-    printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${stageFailureDir}/install.sh"
-    chmod 700 "${stageFailureDir}/install.sh"
-    (
-        REGRESSION_ERROR_CARD_LOG="${stageFailureErrorLog}"
-        release=debian
-        PADM_INSTALL_DIR="${stageFailureDir}"
-        TMPDIR="${updateTmpRoot}"
-
-        downloadFile() {
-            while [[ $# -gt 0 ]]; do
-                case "$1" in
-                -P)
-                    mkdir -p "$2"
-                    printf '%s\n' "$2" >>"${stageFailureDownloadLog}"
-                    cat >"$2/install.sh" <<'EOF'
-#!/usr/bin/env bash
-ensureScriptModules() { :; }
-printf 'new-entry\n'
-exit 0
-EOF
-                    return 0
-                    ;;
-                esac
-                shift
-            done
-            return 1
-        }
-        cp() {
-            local targetPath="${@: -1}"
-            case "${targetPath}" in
-            "${stageFailureDir}"/.install.sh.install.*)
-                return 1
-                ;;
-            esac
-            command cp "$@"
-        }
-
-        updatePadm 1
-    ) >"${TMP_DIR}/update-padm-stage-failure-run.log" 2>&1 && return 1
     grep -q '更新入口暂存失败，已取消更新' "${stageFailureErrorLog}"
     [[ ! -e "${stageFailureDir}/install.sh.bak" ]]
     "${stageFailureDir}/install.sh" | grep -q 'old-entry'
@@ -2346,17 +2295,13 @@ EOF
             printf -v "$1" "%s，请手动检查%s" "$2" "$3"
         }
         downloadFile() {
+            local outputDir=
             while [[ $# -gt 0 ]]; do
                 case "$1" in
                 -P)
                     mkdir -p "$2"
                     printf '%s\n' "$2" >>"${dirTargetDownloadLog}"
-                    cat >"$2/install.sh" <<'EOF'
-#!/usr/bin/env bash
-ensureScriptModules() { :; }
-printf 'new-entry-ok\n'
-exit 0
-EOF
+                    printf '#!/usr/bin/env bash\nensureScriptModules() { :; }\nprintf "new-entry-ok\\n"\nexit 0\n' >"$2/install.sh"
                     return 0
                     ;;
                 esac
@@ -2374,7 +2319,6 @@ EOF
     )
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
-
 runUpdatePadmSingleRefRegression() {
     local root installDir updateTmpRoot downloadLog execLog errorLog successLog oldTmpDir
     root="${TMP_DIR}/update-padm-single-ref"
@@ -5450,10 +5394,10 @@ runServiceWaitForStateRegression() {
         mkdir -p "${root}"
         serviceRunning() { [[ -f "${root}/running" ]]; }
         (
-            sleep 1.4
+            sleep 0.14
             : >"${root}/running"
         ) &
-        waitForServiceState serviceRunning running 25 0.1
+        waitForServiceState serviceRunning running 125 0.01
         rm -f "${root}/running"
         waitForServiceState serviceRunning stopped 2 0.1
     )

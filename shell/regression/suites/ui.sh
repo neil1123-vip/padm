@@ -6,9 +6,7 @@ source "${REGRESSION_UI_SUITE_DIR}/../framework/runtime.sh"
 PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_UI_SUITE_DIR}/../subscription_groups_legacy.sh" --reuse
 
 runRegressionUiLegacyLeafWithCompat() (
-    # Re-source legacy UI fixtures in an isolated subshell so parallel menu-smoke
-    # leaves do not share source-time TMP_DIR-derived state directories.
-    PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_UI_SUITE_DIR}/../subscription_groups_legacy.sh"
+    source "${REGRESSION_UI_SUITE_DIR}/../legacy_context.sh"
     "$@"
 )
 

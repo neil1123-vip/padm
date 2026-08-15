@@ -2,33 +2,7 @@
 
 REGRESSION_LEGACY_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_LEGACY_SUITE_DIR}/../subscription_groups_legacy.sh" --reuse
-
-restoreLegacyRealityRegressionStubs() {
-    realityTargetDetector() {
-        printf '%s\n' fake-xray
-    }
-
-    currentRealityNetworkProfile() {
-        printf '203.0.113.10\tAS64500\tExampleNet\n'
-    }
-
-    resolveRealityTargetIPv4() {
-        printf '192.0.2.1\n'
-    }
-
-    lookupRealityTargetAsn() {
-        case "$1" in
-        198.51.100.*)
-            printf 'AS64501\tRemoteNet\n'
-            ;;
-        *)
-            printf 'AS64500\tExampleNet\n'
-            ;;
-        esac
-    }
-}
-
-restoreLegacyRealityRegressionStubs
+restoreLegacyRegressionContext
 
 runRegressionTargetedBatchHelpers() {
     runParallelRegressionRunners "${TMP_DIR}/targeted-batch-helpers-parallel-${BASHPID:-$$}" \
