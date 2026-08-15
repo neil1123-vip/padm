@@ -188,90 +188,97 @@ subscriptionWireGuardValidEndpointValue() {
 
 subscriptionWireGuardValidateStateForConfig() {
     local state=$1
-    local address network listenPort peer peerAddress peerPublicKey peerEndpoint peerHost publicKey
+    local rows kind first second third fourth
+    local address network listenPort peerAddress peerPublicKey peerEndpoint peerHost publicKey
     local -A seenAddresses=()
     local -A seenPublicKeys=()
-    jq -e '
-      type == "object" and
-      (.network | type == "string") and
-      (.address | type == "string") and
-      (.listen_port | type == "number") and
-      (.public_key | type == "string") and
-      (.peers | type == "array") and
-      all(.peers[]?;
-        type == "object" and
-        (.id | type == "string" and length > 0) and
-        (.name | type == "string") and
+    rows=$(jq -er '
+      if type == "object" and
+        (.network | type == "string") and
         (.address | type == "string") and
+        (.listen_port | type == "number") and
         (.public_key | type == "string") and
-        (.endpoint | type == "string") and
-        (.enabled | type == "boolean"))
-    ' <<<"${state}" >/dev/null 2>&1 || return 1
-    address=$(jq -r '.address // empty' <<<"${state}") || return 1
-    network=$(jq -r '.network // empty' <<<"${state}") || return 1
-    listenPort=$(jq -r '.listen_port // empty' <<<"${state}") || return 1
-    subscriptionWireGuardValidIPv4Cidr "${network}" &&
-        subscriptionWireGuardValidIPv4Cidr "${address}" &&
-        subscriptionWireGuardIPv4CidrContains "${network}" "${address}" &&
-        subscriptionWireGuardValidPort "${listenPort}" || return 1
-    peerHost=$(subscriptionWireGuardAddressHost "${address}")
-    seenAddresses["${peerHost}"]=1
-    publicKey=$(jq -r '.public_key // empty' <<<"${state}") || return 1
-    if [[ -n "${publicKey}" ]]; then
-        seenPublicKeys["${publicKey}"]=1
-    fi
-    while IFS= read -r peer; do
-        [[ -n "${peer}" ]] || continue
-        peerAddress=$(jq -r '.address // empty' <<<"${peer}") || return 1
-        peerPublicKey=$(jq -r '.public_key // empty' <<<"${peer}") || return 1
-        peerEndpoint=$(jq -r '.endpoint // empty' <<<"${peer}") || return 1
-        subscriptionWireGuardValidIPv4Cidr "${peerAddress}" &&
-            subscriptionWireGuardIPv4CidrContains "${network}" "${peerAddress}" &&
-            subscriptionWireGuardValidPublicKeyValue "${peerPublicKey}" || return 1
-        peerHost=$(subscriptionWireGuardAddressHost "${peerAddress}")
-        [[ -z "${seenAddresses[${peerHost}]+x}" && -z "${seenPublicKeys[${peerPublicKey}]+x}" ]] || return 1
-        seenAddresses["${peerHost}"]=1
-        seenPublicKeys["${peerPublicKey}"]=1
-        [[ -z "${peerEndpoint}" || "${peerEndpoint}" == "null" ]] ||
-            subscriptionWireGuardValidEndpointValue "${peerEndpoint}" || return 1
-    done < <(jq -c '.peers[]?' <<<"${state}")
+        (.peers | type == "array") and
+        all(.peers[]?;
+          type == "object" and
+          (.id | type == "string" and length > 0) and
+          (.name | type == "string") and
+          (.address | type == "string") and
+          (.public_key | type == "string") and
+          (.endpoint | type == "string") and
+          (.enabled | type == "boolean"))
+      then
+        (["state", .network, .address, .listen_port, .public_key] | join("\u001f")),
+        (.peers[]? | ["peer", .address, .public_key, .endpoint] | join("\u001f"))
+      else error("invalid WireGuard config state") end
+    ' <<<"${state}" 2>/dev/null) || return 1
+    while IFS=$'\x1f' read -r kind first second third fourth; do
+        case "${kind}" in
+        state)
+            network=${first}
+            address=${second}
+            listenPort=${third}
+            publicKey=${fourth}
+            subscriptionWireGuardValidIPv4Cidr "${network}" &&
+                subscriptionWireGuardValidIPv4Cidr "${address}" &&
+                subscriptionWireGuardIPv4CidrContains "${network}" "${address}" &&
+                subscriptionWireGuardValidPort "${listenPort}" || return 1
+            peerHost=$(subscriptionWireGuardAddressHost "${address}")
+            seenAddresses["${peerHost}"]=1
+            [[ -z "${publicKey}" ]] || seenPublicKeys["${publicKey}"]=1
+            ;;
+        peer)
+            peerAddress=${first}
+            peerPublicKey=${second}
+            peerEndpoint=${third}
+            subscriptionWireGuardValidIPv4Cidr "${peerAddress}" &&
+                subscriptionWireGuardIPv4CidrContains "${network}" "${peerAddress}" &&
+                subscriptionWireGuardValidPublicKeyValue "${peerPublicKey}" || return 1
+            peerHost=$(subscriptionWireGuardAddressHost "${peerAddress}")
+            [[ -z "${seenAddresses[${peerHost}]+x}" && -z "${seenPublicKeys[${peerPublicKey}]+x}" ]] || return 1
+            seenAddresses["${peerHost}"]=1
+            seenPublicKeys["${peerPublicKey}"]=1
+            [[ -z "${peerEndpoint}" || "${peerEndpoint}" == "null" ]] ||
+                subscriptionWireGuardValidEndpointValue "${peerEndpoint}" || return 1
+            ;;
+        esac
+    done <<<"${rows}"
 }
 
 subscriptionWireGuardValidateState() {
     local state=$1
-    local role enabled endpointHost publicKey
-    jq -e --arg interface "$(subscriptionWireGuardInterface)" '
-      type == "object" and
-      (.enabled | type == "boolean") and
-      (.role | type == "string" and (. == "uninitialized" or . == "main" or . == "controlled")) and
-      (.interface | type == "string" and . == $interface) and
-      (.network | type == "string") and
-      (.listen_port | type == "number") and
-      (.control_port | type == "number") and
-      (.firewall_owned | type == "boolean") and
-      (.address | type == "string") and
-      (.endpoint_host | type == "string") and
-      (.public_key | type == "string") and
-      (.peers | type == "array")
-    ' <<<"${state}" >/dev/null 2>&1 || return 1
-
-    role=$(jq -r '.role' <<<"${state}") || return 1
-    enabled=$(jq -r '.enabled' <<<"${state}") || return 1
-    endpointHost=$(jq -r '.endpoint_host' <<<"${state}") || return 1
-    publicKey=$(jq -r '.public_key' <<<"${state}") || return 1
-    subscriptionWireGuardValidIPv4Cidr "$(jq -r '.network' <<<"${state}")" &&
-        subscriptionWireGuardValidPort "$(jq -r '.listen_port' <<<"${state}")" &&
-        subscriptionWireGuardValidPort "$(jq -r '.control_port' <<<"${state}")" &&
+    local values role enabled endpointHost publicKey network listenPort controlPort address peerCount firewallOwned
+    values=$(jq -er --arg interface "$(subscriptionWireGuardInterface)" '
+      if type == "object" and
+        (.enabled | type == "boolean") and
+        (.role | type == "string" and (. == "uninitialized" or . == "main" or . == "controlled")) and
+        (.interface | type == "string" and . == $interface) and
+        (.network | type == "string") and
+        (.listen_port | type == "number") and
+        (.control_port | type == "number") and
+        (.firewall_owned | type == "boolean") and
+        (.address | type == "string") and
+        (.endpoint_host | type == "string") and
+        (.public_key | type == "string") and
+        (.peers | type == "array")
+      then [.role, .enabled, .endpoint_host, .public_key, .network, .listen_port,
+        .control_port, .address, (.peers | length), .firewall_owned] | map(tostring) | join("\u001f")
+      else error("invalid WireGuard state") end
+    ' <<<"${state}" 2>/dev/null) || return 1
+    IFS=$'\x1f' read -r role enabled endpointHost publicKey network listenPort controlPort address peerCount firewallOwned <<<"${values}"
+    subscriptionWireGuardValidIPv4Cidr "${network}" &&
+        subscriptionWireGuardValidPort "${listenPort}" &&
+        subscriptionWireGuardValidPort "${controlPort}" &&
         subscriptionWireGuardValidateOptionalStateFields "${state}" || return 1
 
     case "${role}" in
     uninitialized)
         [[ "${enabled}" == "false" &&
-            -z "$(jq -r '.address' <<<"${state}")" &&
+            -z "${address}" &&
             -z "${endpointHost}" &&
             -z "${publicKey}" &&
-            "$(jq -r '.peers | length' <<<"${state}")" == "0" &&
-            "$(jq -r '.firewall_owned' <<<"${state}")" == "false" ]]
+            "${peerCount}" == "0" &&
+            "${firewallOwned}" == "false" ]]
         ;;
     main)
         subscriptionWireGuardValidEndpointHost "${endpointHost}" &&
@@ -288,55 +295,63 @@ subscriptionWireGuardValidateState() {
 
 subscriptionWireGuardValidateOptionalStateFields() {
     local state=$1
-    local role network joinInviteId invite inviteId alias address expiresAt
+    local rows kind first second third fourth fifth
+    local role network hasPendingInvites hasJoinInviteId joinInviteId inviteId alias address expiresAt
     local -A seenInviteIds=()
     local -A seenAliases=()
     local -A seenAddresses=()
 
-    jq -e '
-      ((has("pending_invites") | not) or
-        ((.pending_invites | type) == "array" and
-         all(.pending_invites[]?;
-           type == "object" and
-           keys == ["address", "alias", "expires_at", "invite_id"] and
-           (.invite_id | type) == "string" and
-           (.alias | type) == "string" and
-           (.address | type) == "string" and
-           (.expires_at | type) == "number"))) and
-      ((has("join_invite_id") | not) or (.join_invite_id | type) == "string")
-    ' <<<"${state}" >/dev/null 2>&1 || return 1
-
-    role=$(jq -r '.role' <<<"${state}") || return 1
-    network=$(jq -r '.network' <<<"${state}") || return 1
-    if jq -e 'has("pending_invites")' <<<"${state}" >/dev/null 2>&1; then
-        [[ "${role}" == "main" ]] || return 1
-    fi
-    if jq -e 'has("join_invite_id")' <<<"${state}" >/dev/null 2>&1; then
-        [[ "${role}" == "controlled" ]] || return 1
-        joinInviteId=$(jq -r '.join_invite_id' <<<"${state}") || return 1
-        subscriptionWireGuardValidInviteId "${joinInviteId}" || return 1
-    fi
-
-    while IFS= read -r invite; do
-        [[ -n "${invite}" ]] || continue
-        inviteId=$(jq -r '.invite_id' <<<"${invite}") || return 1
-        alias=$(jq -r '.alias' <<<"${invite}") || return 1
-        address=$(jq -r '.address' <<<"${invite}") || return 1
-        expiresAt=$(jq -r '.expires_at' <<<"${invite}") || return 1
-        subscriptionWireGuardValidInviteId "${inviteId}" &&
-            subscriptionWireGuardValidAlias "${alias}" &&
-            [[ "${alias,,}" != "main" ]] &&
-            subscriptionWireGuardValidIPv4Cidr "${address}" &&
-            [[ "${address#*/}" == "24" ]] &&
-            subscriptionWireGuardIPv4CidrContains "${network}" "${address}" &&
-            subscriptionWireGuardValidExpiry "${expiresAt}" || return 1
-        [[ -z "${seenInviteIds[${inviteId}]+x}" &&
-            -z "${seenAliases[${alias}]+x}" &&
-            -z "${seenAddresses[${address}]+x}" ]] || return 1
-        seenInviteIds["${inviteId}"]=1
-        seenAliases["${alias}"]=1
-        seenAddresses["${address}"]=1
-    done < <(jq -c '.pending_invites[]?' <<<"${state}")
+    rows=$(jq -er '
+      if ((has("pending_invites") | not) or
+          ((.pending_invites | type) == "array" and
+           all(.pending_invites[]?;
+             type == "object" and
+             keys == ["address", "alias", "expires_at", "invite_id"] and
+             (.invite_id | type) == "string" and
+             (.alias | type) == "string" and
+             (.address | type) == "string" and
+             (.expires_at | type) == "number"))) and
+        ((has("join_invite_id") | not) or (.join_invite_id | type) == "string")
+      then
+        (["state", .role, .network, has("pending_invites"), has("join_invite_id"), (.join_invite_id // "")] | map(tostring) | join("\u001f")),
+        (.pending_invites[]? | ["invite", .invite_id, .alias, .address, .expires_at] | map(tostring) | join("\u001f"))
+      else error("invalid optional WireGuard state") end
+    ' <<<"${state}" 2>/dev/null) || return 1
+    while IFS=$'\x1f' read -r kind first second third fourth fifth; do
+        case "${kind}" in
+        state)
+            role=${first}
+            network=${second}
+            hasPendingInvites=${third}
+            hasJoinInviteId=${fourth}
+            joinInviteId=${fifth}
+            [[ "${hasPendingInvites}" != "true" || "${role}" == "main" ]] || return 1
+            if [[ "${hasJoinInviteId}" == "true" ]]; then
+                [[ "${role}" == "controlled" ]] &&
+                    subscriptionWireGuardValidInviteId "${joinInviteId}" || return 1
+            fi
+            ;;
+        invite)
+            inviteId=${first}
+            alias=${second}
+            address=${third}
+            expiresAt=${fourth}
+            subscriptionWireGuardValidInviteId "${inviteId}" &&
+                subscriptionWireGuardValidAlias "${alias}" &&
+                [[ "${alias,,}" != "main" ]] &&
+                subscriptionWireGuardValidIPv4Cidr "${address}" &&
+                [[ "${address#*/}" == "24" ]] &&
+                subscriptionWireGuardIPv4CidrContains "${network}" "${address}" &&
+                subscriptionWireGuardValidExpiry "${expiresAt}" || return 1
+            [[ -z "${seenInviteIds[${inviteId}]+x}" &&
+                -z "${seenAliases[${alias}]+x}" &&
+                -z "${seenAddresses[${address}]+x}" ]] || return 1
+            seenInviteIds["${inviteId}"]=1
+            seenAliases["${alias}"]=1
+            seenAddresses["${address}"]=1
+            ;;
+        esac
+    done <<<"${rows}"
 }
 
 subscriptionWireGuardPeerIdentityAvailable() {
