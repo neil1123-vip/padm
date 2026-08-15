@@ -258,52 +258,7 @@ runRegressionTransactionCoreParallelCompositionRegression() (
         esac
         printf '%s-finish\n' "${selector}" >>"${callLog}"
     }
-    runRegressionRealityLegacyLeafWithCompat() { "$@"; }
-    runRegressionTlsLegacyLeafWithCompat() { "$@"; }
-    runCoreRollbackResultMessageRegression() { runRegressionAllSelector core-rollback-result-message; }
-    runConfigTransactionRegression() { runRegressionAllSelector config-transaction; }
-    runCorePortFileTransactionRegression() { runRegressionAllSelector core-port-file-transaction; }
-    runCorePortRejectsUnsafeConfigDirRegression() { runRegressionAllSelector core-port-unsafe-config-dir; }
-    runEntryHelperConfigRegression() { runRegressionAllSelector entry-helper-config; }
-    runCheckPortOpenNginxRejectsDirectoryTargetRegression() { runRegressionAllSelector check-port-open-nginx-directory-target; }
-    runAloneNginxRejectsDirectoryTargetRegression() { runRegressionAllSelector alone-nginx-directory-target; }
-    runXrayRealityPortFailureRegression() { runRegressionAllSelector xray-reality-port-failure; }
-    runRealityProfileFailureRegression() { runRegressionAllSelector reality-profile-failure; }
-    runSingBoxRealityKeyTransactionRegression() { runRegressionAllSelector sing-box-reality-key-transaction; }
-    runCoreTemplateReturnFailureRegression() { runRegressionAllSelector core-template-return-failure; }
-    runCoreTemplateManagedConfigRemovalRegression() { runRegressionAllSelector core-template-managed-remove; }
-    runCoreBinaryInstallCopyFailureRegression() { runRegressionAllSelector core-binary-install-copy-failure; }
-    runSingBoxCronetRollbackRegression() { runRegressionAllSelector sing-box-cronet-rollback; }
-    runFinalizeSingBoxBinaryInstallRollbackRegression() { runRegressionAllSelector finalize-sing-box-rollback; }
-    runCoreUpgradeRejectsDirectoryTargetRegression() { runRegressionAllSelector core-upgrade-directory-target; }
-    runLegacyCoreUpgradeKeepsExistingBinaryRegression() { runRegressionAllSelector legacy-core-upgrade-keeps-existing; }
-    runCoreFirstInstallLeavesNoLiveArtifactsOnFailureRegression() { runRegressionAllSelector core-first-install-failure-clean; }
-    runCoreFirstInstallCommitFailureRollbackRegression() { runRegressionAllSelector core-first-install-commit-rollback; }
-    runCoreInstallRejectsUnsafeBinaryPathRegression() { runRegressionAllSelector core-install-unsafe-binary-path; }
-    runCoreReleaseArchiveRejectsUnsafePathRegression() { runRegressionAllSelector core-release-archive-unsafe-path; }
-    runCoreReleaseArchiveRejectsSymlinkPayloadRegression() { runRegressionAllSelector core-release-archive-symlink-payload; }
-    runSingBoxDownloadArtifactsCleanupRegression() { runRegressionAllSelector sing-box-download-artifacts-cleanup; }
-    runNetworkCheckReturnFailureRegression() { runRegressionAllSelector network-check-return-failure; }
-    runTlsFailureReturnRegression() { runRegressionAllSelector tls-failure-return; }
-    runTlsReinstallRollbackRegression() { runRegressionAllSelector tls-reinstall-rollback; }
-    runTlsRenewalFailurePropagationRegression() { runRegressionAllSelector tls-renew-failure-propagation; }
-    runServiceQueueApplyPropagationRegression() { runRegressionAllSelector service-queue-apply-propagation; }
-    runCoreInstallServiceActionFailureRegression() { runRegressionAllSelector core-install-service-action-failure; }
-    runSingBoxMergeStartFailureRegression() { runRegressionAllSelector sing-box-merge-start-failure; }
-    runSingBoxMergeConfigTransactionRegression() { runRegressionAllSelector sing-box-merge-config-transaction; }
-    runSingBoxUninstallFailurePropagationRegression() { runRegressionAllSelector sing-box-uninstall-failure-propagation; }
-    runSingBoxUninstallRejectsUnsafeConfigPathRegression() { runRegressionAllSelector sing-box-uninstall-rejects-unsafe-config-path; }
-    runSingBoxManagedCleanupRegression() { runRegressionAllSelector sing-box-managed-cleanup; }
-    runSingBoxProtocolReloadFailureRegression() { runRegressionAllSelector sing-box-protocol-reload-failure; }
-    runGeoUpdateReloadFailureRegression() { runRegressionAllSelector geo-update-reload-failure; }
-    runXrayGeoCommitRollbackRegression() { runRegressionAllSelector xray-geo-commit-rollback; }
-    runCoreCleanupFailurePropagationRegression() { runRegressionAllSelector core-cleanup-failure-propagation; }
-    runReloadCorePropagationRegression() { runRegressionAllSelector reload-core-propagation; }
-    runSingBoxLogTransactionRegression() { runRegressionAllSelector sing-box-log-transaction; }
-    runUserConfigWriteRegression() { runRegressionAllSelector user-config-write; }
-    runRemoveUserRegression() { runRegressionAllSelector remove-user; }
-
-    runRegressionTransactionCoreSuiteRoot
+    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionTransactionCoreSuiteRoot
 
     while IFS= read -r selector; do
         [[ -n "${selector}" ]] || continue
@@ -326,7 +281,7 @@ runRegressionTransactionCoreParallelCompositionRegression() (
         "${TMP_DIR}/transaction-core-wave-boundary-violation"
     : >"${TMP_DIR}/transaction-core-expect-heavy-concurrency"
     : >"${TMP_DIR}/transaction-core-expect-profile-boundary"
-    PADM_REGRESSION_PARALLEL_JOBS=6 PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE=all runRegressionTransactionCoreSuiteRoot
+    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector PADM_REGRESSION_PARALLEL_JOBS=6 PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE=all runRegressionTransactionCoreSuiteRoot
 
     while IFS= read -r selector; do
         [[ -n "${selector}" ]] || continue
@@ -346,7 +301,7 @@ runRegressionTransactionCoreParallelCompositionRegression() (
         "${TMP_DIR}/core-port-file-transaction-started" \
         "${TMP_DIR}/core-install-service-action-failure-finished" \
         "${TMP_DIR}/core-port-file-transaction-finished"
-    PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE=all PADM_REGRESSION_TRANSACTION_CORE_HEAVY_PARALLEL_JOBS=1 PADM_REGRESSION_TRANSACTION_CORE_MEDIUM_PARALLEL_JOBS=1 PADM_REGRESSION_TRANSACTION_CORE_LIGHT_PARALLEL_JOBS=1 runRegressionTransactionCoreSuiteRoot
+    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE=all PADM_REGRESSION_TRANSACTION_CORE_HEAVY_PARALLEL_JOBS=1 PADM_REGRESSION_TRANSACTION_CORE_MEDIUM_PARALLEL_JOBS=1 PADM_REGRESSION_TRANSACTION_CORE_LIGHT_PARALLEL_JOBS=1 runRegressionTransactionCoreSuiteRoot
     awk '
         $0 == "core-install-service-action-failure-finish" { serviceFinish = NR }
         $0 == "core-port-file-transaction-start" { portStart = NR }
@@ -380,25 +335,7 @@ runRegressionTransactionSystemParallelCompositionRegression() (
         fi
         printf '%s-finish\n' "${selector}" >>"${callLog}"
     }
-    runNginxServiceFailureRegression() { runRegressionAllSelector nginx-service-failure; }
-    runNginxServiceRefreshRegression() { runRegressionAllSelector nginx-service-refresh; }
-    runUninstallNginxCleanupRegression() { runRegressionAllSelector uninstall-nginx-cleanup; }
-    runCleanAgentNginxManagedRemovalRegression() { runRegressionAllSelector clean-agent-nginx-managed-remove; }
-    runFail2banManagedCleanupRegression() { runRegressionAllSelector fail2ban-managed-cleanup; }
-    runFail2banApplyTransactionRegression() { runRegressionAllSelector fail2ban-apply-transaction; }
-    runUninstallWireGuardCleanupRegression() { runRegressionAllSelector uninstall-wireguard-cleanup; }
-    runWireGuardKeyTransactionRegression() { runRegressionAllSelector wireguard-key-transaction; }
-    runWireGuardControlSafeDirRegression() { runRegressionAllSelector wireguard-control-safe-dir; }
-    runWarpConfigSafeDirRegression() { runRegressionAllSelector warp-config-safe-dir; }
-    runWarpConfigFileCleanupRegression() { runRegressionAllSelector warp-config-file-cleanup; }
-    runUninstallServiceStopFailureRegression() { runRegressionAllSelector uninstall-service-stop-failure; }
-    runCleanLastInstallationConfigFailureRegression() { runRegressionAllSelector clean-last-installation-failure; }
-    runCleanLastInstallationConfigAcmeHomeFailureRegression() { runRegressionAllSelector clean-last-installation-acme-home; }
-    runCleanLastInstallationConfigResolvesRelativeAcmeHomeRegression() { runRegressionAllSelector clean-last-installation-acme-relative-home; }
-    runAloneNginxConfigWriteTransactionRegression() { runRegressionAllSelector alone-nginx-write-transaction; }
-    runAloneNginxUpdateTransactionRegression() { runRegressionAllSelector alone-nginx-update-transaction; }
-
-    runRegressionTransactionSystemSuiteRoot
+    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionTransactionSystemSuiteRoot
 
     while IFS= read -r selector; do
         [[ -n "${selector}" ]] || continue
@@ -416,7 +353,7 @@ runRegressionTransactionSystemParallelCompositionRegression() (
 
     : >"${callLog}"
     rm -f "${TMP_DIR}/fail2ban-apply-transaction-started"
-    PADM_REGRESSION_TRANSACTION_SYSTEM_PARALLEL_JOBS=1 runRegressionTransactionSystemSuiteRoot
+    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector PADM_REGRESSION_TRANSACTION_SYSTEM_PARALLEL_JOBS=1 runRegressionTransactionSystemSuiteRoot
     awk '
         $0 == "nginx-service-failure-finish" { firstFinish = NR }
         $0 == "uninstall-nginx-cleanup-start" { secondStart = NR }

@@ -123,24 +123,7 @@ runRegressionRoutingParallelCompositionRegression() (
         fi
         printf '%s-finish\n' "${selector}" >>"${callLog}"
     }
-    runSocks5UdpAssociateRegression() { runRegressionAllSelector routing-socks5-udp-associate; }
-    runRoutingRegression() { runRegressionAllSelector routing-core; }
-    runRoutingCoreRejectsUnsafeConfigDirRegression() { runRegressionAllSelector routing-core-unsafe-config-dir; }
-    runAccessControlConfigTransactionRegression() { runRegressionAllSelector routing-access-control-config-transaction; }
-    runAccessControlRejectsUnsafeBackupDirRegression() { runRegressionAllSelector routing-access-control-unsafe-backup-dir; }
-    runAccessControlRejectsUnsafeConfigDirRegression() { runRegressionAllSelector routing-access-control-unsafe-config-dir; }
-    runAccessControlFailureReturnRegression() { runRegressionAllSelector routing-access-control-failure-return; }
-    runBTRoutingFailureReturnRegression() { runRegressionAllSelector routing-bt-failure-return; }
-    runIPv6RoutingFailureReturnRegression() { runRegressionAllSelector routing-ipv6-failure-return; }
-    runWARPRoutingFailureReturnRegression() { runRegressionAllSelector routing-warp-failure-return; }
-    runSocks5RoutingFailureReturnRegression() { runRegressionAllSelector routing-socks5-failure-return; }
-    runDNSRoutingFailureReturnRegression() { runRegressionAllSelector routing-dns-failure-return; }
-    runDNSRoutingRejectsUnsafeBackupDirRegression() { runRegressionAllSelector routing-dns-unsafe-backup-dir; }
-    runDNSRoutingRejectsUnsafeConfigDirRegression() { runRegressionAllSelector routing-dns-unsafe-config-dir; }
-    runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression() { runRegressionAllSelector routing-dns-restore-scope; }
-    runPortAndPanelHelperRegression() { runRegressionAllSelector routing-port-panel; }
-
-    runRegressionRoutingSuiteRoot
+    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionRoutingSuiteRoot
 
     for selector in \
         routing-core \
@@ -171,7 +154,7 @@ runRegressionRoutingParallelCompositionRegression() (
 
     : >"${callLog}"
     rm -f "${TMP_DIR}/routing-core-unsafe-config-dir-started"
-    PADM_REGRESSION_ROUTING_PARALLEL_JOBS=1 runRegressionRoutingSuiteRoot
+    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector PADM_REGRESSION_ROUTING_PARALLEL_JOBS=1 runRegressionRoutingSuiteRoot
     awk '
         $0 == "routing-core-finish" { firstFinish = NR }
         $0 == "routing-access-control-config-transaction-start" { accessConfigStart = NR }
@@ -194,7 +177,7 @@ runRegressionRoutingParallelCompositionRegression() (
     : >"${callLog}"
     rm -f "${TMP_DIR}/routing-core-unsafe-config-dir-started"
     rm -f "${TMP_DIR}/routing-socks5-udp-associate-started"
-    PADM_REGRESSION_ROUTING_RESOURCE_PROFILE=all runRegressionRoutingSuiteRoot
+    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector PADM_REGRESSION_ROUTING_RESOURCE_PROFILE=all runRegressionRoutingSuiteRoot
     for selector in \
         routing-core \
         routing-core-unsafe-config-dir \

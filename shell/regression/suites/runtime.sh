@@ -68,14 +68,7 @@ runRegressionRuntimeParallelCompositionRegression() (
         esac
         printf '%s-finish\n' "${selector}" >>"${callLog}"
     }
-    runRuntimeAndRealityRegression() { runRegressionAllSelector runtime-core; }
-    runAutoReadUnsetAutoInstallRegression() { runRegressionAllSelector runtime-autoread-unset-auto-install; }
-    runAutoInstallRealityRouteRegression() { runRegressionAllSelector runtime-auto-install-reality-route; }
-    runRuntimeTempDirRegression() { runRegressionAllSelector runtime-tempdir; }
-    runRegressionRealityCandidatesSuiteRoot() { runRegressionAllSelector reality-candidates; }
-    runRealityConfigRegression() { runRegressionAllSelector reality-config; }
-
-    PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE=all runRegressionRuntimeSuiteRoot
+    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE=all runRegressionRuntimeSuiteRoot
 
     for selector in \
         runtime-core \
@@ -108,7 +101,7 @@ runRegressionRuntimeParallelCompositionRegression() (
 
     : >"${callLog}"
     rm -f "${TMP_DIR}/runtime-tempdir-started"
-    PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE=all PADM_REGRESSION_RUNTIME_LIGHT_PARALLEL_JOBS=1 PADM_REGRESSION_RUNTIME_HEAVY_PARALLEL_JOBS=1 runRegressionRuntimeSuiteRoot
+    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE=all PADM_REGRESSION_RUNTIME_LIGHT_PARALLEL_JOBS=1 PADM_REGRESSION_RUNTIME_HEAVY_PARALLEL_JOBS=1 runRegressionRuntimeSuiteRoot
     awk '
         $0 == "runtime-core-finish" { coreFinish = NR }
         $0 == "runtime-autoread-unset-auto-install-start" { autoreadStart = NR }
