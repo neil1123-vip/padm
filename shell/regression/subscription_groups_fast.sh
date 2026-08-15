@@ -2154,126 +2154,6 @@ EOF
     PADM_YUM_REPOS_DIR=
 }
 
-runMenuSmokeLightRegression() {
-    local actions=
-    local output=
-    local oldCoreInstallType="${coreInstallType:-}"
-    coreInstallType=
-    recordMenuAction() {
-        actions+="$1"$'\n'
-    }
-    assertMenuAction() {
-        grep -qxF "$1" <<<"${actions}"
-    }
-    resetMenuActions() {
-        actions=
-    }
-    menu() { recordMenuAction menu; }
-    menuLine() { output+="$*"$'\n'; }
-    menuItem() { output+="$2 $3"$'\n'; }
-    menuRecommendedItem() { output+="$2 $3"$'\n'; }
-    menuReturnItem() { output+="$2 $3"$'\n'; }
-    errorCard() { recordMenuAction "errorCard:$1"; }
-    autoRead() {
-        local targetVar=$3
-        local input=
-        if ! IFS= read -r input; then
-            printf -v "${targetVar}" '%s' ""
-            return 1
-        fi
-        printf -v "${targetVar}" '%s' "${input}"
-    }
-    selectCoreInstall() { recordMenuAction selectCoreInstall; }
-    manageFail2ban() { recordMenuAction manageFail2ban; }
-    updatePadm() { recordMenuAction "updatePadm:$*"; }
-    showPadmScriptInstallStatus() { recordMenuAction showPadmScriptInstallStatus; }
-    bbrInstall() { recordMenuAction bbrInstall; }
-    xrayInstalled() { return 0; }
-    singBoxInstalled() { return 0; }
-    upgradeXrayCore() { recordMenuAction "upgradeXrayCore:$*"; }
-    showXrayConfigHealthCheck() { recordMenuAction showXrayConfigHealthCheck; }
-    showXrayCompatibilityAudit() { recordMenuAction showXrayCompatibilityAudit; }
-    checkXrayPrereleaseCompatibility() { recordMenuAction checkXrayPrereleaseCompatibility; }
-    showSingBoxConfigValidation() { recordMenuAction showSingBoxConfigValidation; }
-    showSingBoxCompatibilityAudit() { recordMenuAction showSingBoxCompatibilityAudit; }
-    checkSingBoxPrereleaseCompatibility() { recordMenuAction checkSingBoxPrereleaseCompatibility; }
-    upgradeSingBoxCore() { recordMenuAction "upgradeSingBoxCore:$*"; }
-
-    installMenu <<<"6"
-    assertMenuAction selectCoreInstall
-    grep -q "不知道怎么选时，建议直接选 1" <<<"${output}"
-    grep -q "entry 是客户端连接地址" <<<"${output}"
-
-    resetMenuActions
-    installXray() { recordMenuAction installXray; }
-    installXrayService() { recordMenuAction installXrayService; }
-    initXrayConfig() { recordMenuAction initXrayConfig; }
-    cleanUp() { recordMenuAction cleanUp; }
-    checkGFWStatue() { recordMenuAction checkGFWStatue; }
-    showAccounts() { recordMenuAction showAccounts; }
-    installTools() { recordMenuAction installTools; }
-    readLastInstallationConfig() { recordMenuAction readLastInstallationConfig; }
-    collectEntryProfile() { realityEntryHost=smoke.example.com; recordMenuAction collectEntryProfile; }
-    persistRealityEntryProfile() { recordMenuAction persistRealityEntryProfile; }
-    unInstallSubscribe() { recordMenuAction unInstallSubscribe; }
-    handleNginx() { recordMenuAction "handleNginx:$*"; }
-    serviceQueueRestart() { recordMenuAction "serviceQueueRestart:$*"; }
-    serviceQueueApply() { recordMenuAction serviceQueueApply; }
-    subscriptionWireGuardControlEnabled() { return 0; }
-    refreshSubscriptionWireGuardNginxControl() { recordMenuAction refreshSubscriptionWireGuardNginxControl; }
-    installXrayReality
-    ! grep -q '^handleNginx:' <<<"${actions}"
-    ! assertMenuAction refreshSubscriptionWireGuardNginxControl
-    assertMenuAction serviceQueueApply
-    assertMenuAction persistRealityEntryProfile
-    [[ "${actions}" == *$'serviceQueueApply\npersistRealityEntryProfile\ncheckGFWStatue\ncleanUp\nshowAccounts\n'* ]]
-    resetMenuActions
-    output=
-    systemScriptMenu <<<"3"
-    assertMenuAction manageFail2ban
-    grep -q "Fail2ban 防护" <<<"${output}"
-    resetMenuActions
-    systemScriptMenu <<<"1"
-    assertMenuAction 'updatePadm:1'
-    resetMenuActions
-    systemScriptMenu <<<"2"
-    assertMenuAction showPadmScriptInstallStatus
-    resetMenuActions
-    systemScriptMenu <<<"4"
-    assertMenuAction bbrInstall
-    resetMenuActions
-    output=
-    xrayVersionManageMenu <<<"2"
-    assertMenuAction 'upgradeXrayCore:true'
-    grep -q '升级预发布版' <<<"${output}"
-    ! grep -q '检查预发布兼容性' <<<"${output}"
-    resetMenuActions
-    output=
-    xrayVersionManageMenu <<<"4"
-    assertMenuAction showXrayConfigHealthCheck
-    grep -q '检查当前配置' <<<"${output}"
-    grep -q '扫描升级风险' <<<"${output}"
-    grep -q '试跑预发布版' <<<"${output}"
-    resetMenuActions
-    output=
-    singBoxVersionManageMenu <<<"2"
-    assertMenuAction 'upgradeSingBoxCore:true'
-    grep -q '升级预发布版' <<<"${output}"
-    resetMenuActions
-    output=
-    singBoxVersionManageMenu <<<"4"
-    assertMenuAction showSingBoxConfigValidation
-    grep -q '检查当前配置' <<<"${output}"
-    grep -q '扫描升级风险' <<<"${output}"
-    grep -q '试跑预发布版' <<<"${output}"
-    resetMenuActions
-    singBoxVersionManageMenu <<<"6"
-    assertMenuAction checkSingBoxPrereleaseCompatibility
-    [[ "$(protocolMenuDescription 5)" == "推荐；sing-box / tcp / tls" ]]
-    [[ "$(protocolMenuDescription 4)" == "推荐；sing-box / tcp / tls" ]]
-    coreInstallType="${oldCoreInstallType}"
-}
-
 runUpdatePadmVersionPromptRegression() {
     local installDir outputLog errorLog downloadLog oldTmpDir
     local restoreFailureDir restoreFailureErrorLog restoreFailureDownloadLog
@@ -3543,124 +3423,6 @@ runRemoteControlSystemctlStubDefaultStopDisableRegression() {
     ' "${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh")
     [[ "${explicitStopDisableCount}" == "0" ]]
 }
-
-runRegressionFastParallelCompositionRegression() (
-    set -euo pipefail
-    local callLog="${TMP_DIR}/regression-fast-parallel-composition.log"
-
-    runRegressionPlatform() {
-        printf 'platform-start\n' >>"${callLog}"
-        while [[ ! -f "${TMP_DIR}/fast-only-started" ]]; do
-            sleep 0.05
-        done
-        printf 'platform-finish\n' >>"${callLog}"
-    }
-    runRegressionFastOnly() {
-        printf 'fast-only-start\n' >>"${callLog}"
-        : >"${TMP_DIR}/fast-only-started"
-        printf 'fast-only-finish\n' >>"${callLog}"
-    }
-
-    runRegressionFast
-    grep -qx 'platform-start' "${callLog}"
-    grep -qx 'fast-only-start' "${callLog}"
-    awk '
-        $0 == "platform-start" { platformStart = NR }
-        $0 == "fast-only-start" { fastOnlyStart = NR }
-        $0 == "platform-finish" { platformFinish = NR }
-        END { exit !(platformStart && fastOnlyStart && platformFinish && fastOnlyStart < platformFinish) }
-    ' "${callLog}"
-)
-
-runRegressionFastOnlyParallelCompositionRegression() (
-    set -euo pipefail
-    local callLog="${TMP_DIR}/regression-fast-only-parallel-composition.log"
-
-    runRegressionFastOnlySafety() {
-        printf 'safety-start\n' >>"${callLog}"
-        while [[ ! -f "${TMP_DIR}/fast-only-output-started" ]]; do
-            sleep 0.05
-        done
-        printf 'safety-finish\n' >>"${callLog}"
-    }
-    runRegressionFastOnlyOutput() {
-        printf 'output-start\n' >>"${callLog}"
-        : >"${TMP_DIR}/fast-only-output-started"
-        printf 'output-finish\n' >>"${callLog}"
-    }
-    runRegressionFastOnlyCore() {
-        printf 'core\n' >>"${callLog}"
-    }
-
-    runRegressionFastOnly
-    grep -qx 'safety-start' "${callLog}"
-    grep -qx 'output-start' "${callLog}"
-    awk '
-        $0 == "safety-start" { safetyStart = NR }
-        $0 == "output-start" { outputStart = NR }
-        $0 == "safety-finish" { safetyFinish = NR }
-        END { exit !(safetyStart && outputStart && safetyFinish && outputStart < safetyFinish) }
-    ' "${callLog}"
-)
-
-runRegressionFastOnlyOutputParallelCompositionRegression() (
-    set -euo pipefail
-    local callLog="${TMP_DIR}/regression-fast-only-output-parallel-composition.log"
-
-    runRegressionFastOnlyOutputAutoInstall() {
-        printf 'auto-install-start\n' >>"${callLog}"
-        while [[ ! -f "${TMP_DIR}/fast-only-subscription-started" ]]; do
-            sleep 0.05
-        done
-        printf 'auto-install-finish\n' >>"${callLog}"
-    }
-    runRegressionFastOnlyOutputRest() {
-        printf 'rest-start\n' >>"${callLog}"
-        : >"${TMP_DIR}/fast-only-subscription-started"
-        printf 'rest-finish\n' >>"${callLog}"
-    }
-
-    runRegressionFastOnlyOutput
-    grep -qx 'auto-install-start' "${callLog}"
-    grep -qx 'rest-start' "${callLog}"
-    awk '
-        $0 == "auto-install-start" { autoInstallStart = NR }
-        $0 == "rest-start" { restStart = NR }
-        $0 == "auto-install-finish" { autoInstallFinish = NR }
-        END { exit !(autoInstallStart && restStart && autoInstallFinish && restStart < autoInstallFinish) }
-    ' "${callLog}"
-)
-
-runRegressionPlatformHotParallelCompositionRegression() (
-    set -euo pipefail
-    local callLog="${TMP_DIR}/regression-platform-hot-parallel-composition.log"
-
-    runRegressionPlatformUpdate() {
-        printf 'update-start\n' >>"${callLog}"
-        while [[ ! -f "${TMP_DIR}/platform-refresh-started" ]]; do
-            sleep 0.05
-        done
-        printf 'update-finish\n' >>"${callLog}"
-    }
-    runRegressionPlatformRefresh() {
-        printf 'refresh-start\n' >>"${callLog}"
-        : >"${TMP_DIR}/platform-refresh-started"
-        printf 'refresh-finish\n' >>"${callLog}"
-    }
-    runRegressionPlatformRest() {
-        printf 'rest\n' >>"${callLog}"
-    }
-
-    runRegressionPlatform
-    grep -qx 'update-start' "${callLog}"
-    grep -qx 'refresh-start' "${callLog}"
-    awk '
-        $0 == "update-start" { updateStart = NR }
-        $0 == "refresh-start" { refreshStart = NR }
-        $0 == "update-finish" { updateFinish = NR }
-        END { exit !(updateStart && refreshStart && updateFinish && refreshStart < updateFinish) }
-    ' "${callLog}"
-)
 
 runRemoteControlFunctionStubDefaultStopDisableRegression() {
     local explicitStopDisableCount
@@ -6637,10 +6399,10 @@ runRegressionPlatformRestFoundation() {
     runRegressionStep remove-managed-path-ignore-failure runRemoveManagedPathIgnoreFailureRegression
     runRegressionStep check-log-backup-restore runCheckLogBackupMissingRestoreRegression
     runRegressionStep remote-control-systemctl-stub-default-stop-disable runRemoteControlSystemctlStubDefaultStopDisableRegression
-    runRegressionStep regression-fast-parallel-composition runRegressionFastParallelCompositionRegression
-    runRegressionStep regression-fast-only-parallel-composition runRegressionFastOnlyParallelCompositionRegression
-    runRegressionStep regression-fast-only-output-parallel-composition runRegressionFastOnlyOutputParallelCompositionRegression
-    runRegressionStep regression-platform-hot-parallel-composition runRegressionPlatformHotParallelCompositionRegression
+    runRegressionStep regression-fast-parallel-composition runFrameworkParallelCompositionContract fast platform-hot fast-only
+    runRegressionStep regression-fast-only-parallel-composition runFrameworkParallelCompositionContract fast-only fast-only-safety fast-only-output
+    runRegressionStep regression-fast-only-output-parallel-composition runFrameworkParallelCompositionContract fast-only-output fast-only-output-auto-install fast-only-output-rest
+    runRegressionStep regression-platform-hot-parallel-composition runFrameworkParallelCompositionContract platform-hot platform-update platform-refresh
     runRegressionStep remote-control-function-stub-default-stop-disable runRemoteControlFunctionStubDefaultStopDisableRegression
     runRegressionStep tuic-protocol-single-default-branch runTuicProtocolSingleDefaultBranchRegression
     runRegressionStep tls-dns-api-single-default-branch runTlsDnsApiSingleDefaultBranchRegression
@@ -6682,66 +6444,10 @@ runRegressionPlatformRestSystem() {
 }
 
 runRegressionPlatformRest() {
-    runParallelFastTotals "${TMP_DIR}/platform-rest-parallel-${BASHPID:-$$}" \
+    runParallelRegressionRunners "${TMP_DIR}/platform-rest-parallel-${BASHPID:-$$}" \
         foundation runRegressionPlatformRestFoundation \
         install runRegressionPlatformRestInstall \
         system runRegressionPlatformRestSystem
-}
-
-runRegressionPlatform() {
-    runParallelFastTotals "${TMP_DIR}/platform-hot-parallel-${BASHPID:-$$}" \
-        update runRegressionPlatformUpdate \
-        refresh runRegressionPlatformRefresh \
-        rest runRegressionPlatformRest
-}
-
-runParallelFastTotals() {
-    local orchestrationRoot=$1
-    shift
-    local -a labels=()
-    local -a runners=()
-    local -a logs=()
-    local -a pids=()
-    local -a statuses=()
-    local status=0
-    local i
-
-    if [[ $# -eq 0 || $(( $# % 2 )) -ne 0 ]]; then
-        printf 'runParallelFastTotals expects label/runner pairs\n' >&2
-        return 2
-    fi
-
-    mkdir -p "${orchestrationRoot}"
-    while [[ $# -gt 0 ]]; do
-        labels+=("$1")
-        runners+=("$2")
-        logs+=("${orchestrationRoot}/$1.log")
-        shift 2
-    done
-
-    set +e
-    for i in "${!runners[@]}"; do
-        (
-            trap - EXIT INT TERM
-            set -e
-            runRegressionStep "${labels[$i]}" "${runners[$i]}"
-        ) >"${logs[$i]}" 2>&1 &
-        pids[$i]=$!
-    done
-    for i in "${!pids[@]}"; do
-        wait "${pids[$i]}"
-        statuses[$i]=$?
-    done
-    set -e
-
-    for i in "${!logs[@]}"; do
-        [[ -f "${logs[$i]}" ]] && cat "${logs[$i]}"
-        if [[ "${statuses[$i]}" -ne 0 && "${status}" -eq 0 ]]; then
-            status=${statuses[$i]}
-        fi
-    done
-
-    return "${status}"
 }
 
 runRegressionFastOnlySafety() {
@@ -6811,49 +6517,6 @@ runRegressionFastOnlyOutputRest() {
     runRegressionStep httpupgrade-rejects-unsafe-nginx-path runSingBoxHttpUpgradeRejectsUnsafeNginxPathRegression
     runRegressionStep allow-port-optional-protocol runAllowPortOptionalProtocolRegression
     runRegressionStep core-client-optional-args runCoreClientOptionalArgsRegression
-}
-
-runRegressionFastOnlyOutput() {
-    runParallelFastTotals "${TMP_DIR}/fast-only-output-parallel-${BASHPID:-$$}" \
-        auto-install runRegressionFastOnlyOutputAutoInstall \
-        rest runRegressionFastOnlyOutputRest
-}
-
-runRegressionFastOnlyCore() {
-    runRegressionStep singbox-mainpid-template runSingBoxServiceMainPidTemplateRegression
-    runRegressionStep check-gfw-status-service-wait runCheckGFWStatusServiceWaitRegression
-    runRegressionStep service-wait-state runServiceWaitForStateRegression
-    runRegressionStep core-running-service-state runCoreRunningFallsBackToServiceStateRegression
-    runRegressionStep warp-config-generation-failure runWarpConfigGenerationFailureRegression
-    runRegressionStep fail2ban-profile runFail2banProfileRegression
-    runRegressionStep fail2ban-sshd-systemd-backend runFail2banSshdSystemdBackendRegression
-    runRegressionStep fail2ban-menu runFail2banMenuRegression
-    runRegressionStep xray-strict-validation runXrayStrictValidationRegression
-    runRegressionStep xray-compat-audit runXrayCompatibilityAuditRegression
-    runRegressionStep xray-prerelease-dry-run runXrayPrereleaseDryRunRegression
-    runRegressionStep core-release-tags-pagination runCoreReleaseTagsPaginationRegression
-    runRegressionStep core-rollback-selection runCoreRollbackSelectionRegression
-    runRegressionStep singbox-compat-audit runSingBoxCompatibilityAuditRegression
-    runRegressionStep singbox-prerelease-dry-run runSingBoxPrereleaseDryRunRegression
-    runRegressionStep singbox-log-menu-disable-return runSingBoxLogMenuDisableReturnRegression
-    runRegressionStep reality-stream-split-status-disabled-return runRealityStreamSplitStatusDisabledReturnRegression
-    runRegressionStep services-proc-race runServicesProcRaceRegression
-    runRegressionStep singbox-ignore-client-proc runSingBoxRunningIgnoresClientProcessRegression
-    runRegressionStep nginx-blog-auto-install runNginxBlogAutoInstallRegression
-    runRegressionStep ui-smoke-light runMenuSmokeLightRegression
-}
-
-runRegressionFastOnly() {
-    runParallelFastTotals "${TMP_DIR}/fast-only-parallel-${BASHPID:-$$}" \
-        safety runRegressionFastOnlySafety \
-        output runRegressionFastOnlyOutput \
-        core runRegressionFastOnlyCore
-}
-
-runRegressionFast() {
-    runParallelFastTotals "${TMP_DIR}/fast-parallel-${BASHPID:-$$}" \
-        platform runRegressionPlatform \
-        fast-only runRegressionFastOnly
 }
 
 if [[ "${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" ]]; then
