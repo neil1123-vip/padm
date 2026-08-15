@@ -453,10 +453,12 @@ setUnlockDNS() {
     exit 0
 }
 
-# 移除 DNS 分流
-removeUnlockDNS() {
-    dnsRoutingBackupCreate || { errorCard "DNS 分流配置备份失败，已取消移除"; return 1; }
-    if [[ "${coreInstallType}" == "1" && -f "${configPath}11_dns.json" ]]; then
+# 移除 DNS/hosts 配置
+removeUnlockRoutingConfig() {
+    local title=$1
+    local checkXrayFile=${2:-}
+    dnsRoutingBackupCreate || { errorCard "${title}配置备份失败，已取消移除"; return 1; }
+    if [[ "${coreInstallType}" == 1 && ( -z "${checkXrayFile}" || -f "${configPath}11_dns.json" ) ]]; then
         if ! writeRoutingJsonConfig "${configPath}11_dns.json" <<EOF
 {
 	"dns": {
@@ -467,8 +469,8 @@ removeUnlockDNS() {
 }
 EOF
         then
-            errorCard "DNS 分流配置移除失败，已保留旧配置"
-            dnsRoutingAbortChange "DNS 分流配置移除失败"
+            errorCard "${title}配置移除失败，已保留旧配置"
+            dnsRoutingAbortChange "${title}配置移除失败"
             return 1
         fi
     fi
@@ -489,63 +491,21 @@ EOF
 }
 EOF
         then
-            errorCard "sing-box DNS 分流配置移除失败，已保留旧配置"
-            dnsRoutingAbortChange "DNS 分流配置移除失败"
+            errorCard "sing-box ${title}配置移除失败，已保留旧配置"
+            dnsRoutingAbortChange "${title}配置移除失败"
             return 1
         fi
     fi
 
-    dnsRoutingReloadOrRollback "DNS 分流" || return 1
+    dnsRoutingReloadOrRollback "${title}" || return 1
 
     successCard "卸载成功"
 
     exit 0
 }
+
+# 移除 DNS 分流
+removeUnlockDNS() { removeUnlockRoutingConfig "DNS 分流" 1; }
 
 # 移除 DNS/hosts 覆盖
-removeUnlockSNI() {
-    dnsRoutingBackupCreate || { errorCard "DNS/hosts 覆盖配置备份失败，已取消移除"; return 1; }
-    if [[ "${coreInstallType}" == 1 ]]; then
-        if ! writeRoutingJsonConfig "${configPath}11_dns.json" <<EOF
-{
-    "dns": {
-        "servers": [
-            "localhost"
-        ]
-    }
-}
-EOF
-        then
-            errorCard "DNS/hosts 覆盖配置移除失败，已保留旧配置"
-            dnsRoutingAbortChange "DNS/hosts 覆盖配置移除失败"
-            return 1
-        fi
-    fi
-
-    if [[ -n "${singBoxConfigPath:-}" && -f "${singBoxConfigPath}dns.json" ]]; then
-        local localTag
-        localTag="padm-local"
-        if ! writeRoutingJsonConfig "${singBoxConfigPath}dns.json" <<EOF
-{
-    "dns": {
-        "servers":[
-            {
-                "tag":"${localTag}",
-                "type":"local"
-            }
-        ]
-    }
-}
-EOF
-        then
-            errorCard "sing-box DNS/hosts 覆盖配置移除失败，已保留旧配置"
-            dnsRoutingAbortChange "DNS/hosts 覆盖配置移除失败"
-            return 1
-        fi
-    fi
-
-    dnsRoutingReloadOrRollback "DNS/hosts 覆盖" || return 1
-    successCard "卸载成功"
-
-    exit 0
-}
+removeUnlockSNI() { removeUnlockRoutingConfig "DNS/hosts 覆盖"; }
