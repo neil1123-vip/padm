@@ -6035,7 +6035,7 @@ JSON
         collectXrayCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}" || rc=$?
         [[ "${rc}" == "1" ]]
         [[ "$(wc -l <"${jqLog}")" == "2" ]]
-        summary=$(summarizeXrayCompatibilityAudit "${statusFile}" "${warnFile}")
+        summary=$(summarizeCoreCompatibilityAudit "${statusFile}" "${warnFile}")
         [[ "${summary}" == 'FAIL=1 WARN=3 PASS=0' ]]
         grep -q '^\[WARN\].*settings\.clients/accounts' "${logFile}"
         grep -q '^\[WARN\].*echForceQuery' "${logFile}"

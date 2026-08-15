@@ -244,7 +244,7 @@ check_sing_box_compatibility_audit() {
         warnFile=$(coreTmpFilePath padm-sing-box-compat-audit.warn)
         scanRc=0
         collectSingBoxCompatibilityFindings "${statusFile}" "$(coreTmpFilePath padm-sing-box-compat-audit.log)" "${warnFile}" || scanRc=$?
-        summary=$(summarizeSingBoxCompatibilityAudit "${statusFile}" "${warnFile}")
+        summary=$(summarizeCoreCompatibilityAudit "${statusFile}" "${warnFile}")
         if [[ "${scanRc}" -eq 2 ]]; then
             printf 'WARN:无法检查当前配置\n'
         elif [[ "${scanRc}" -ne 0 ]]; then
@@ -303,7 +303,7 @@ check_xray_compatibility_audit() {
             validateXrayConfigStrictWithBinary /etc/padm/xray/xray "${strictLog}" || strictRc=$?
         fi
         collectXrayCompatibilityFindings "${statusFile}" "$(coreTmpFilePath padm-xray-compat-audit.log)" "${warnFile}" || scanRc=$?
-        summary=$(summarizeXrayCompatibilityAudit "${statusFile}" "${warnFile}")
+        summary=$(summarizeCoreCompatibilityAudit "${statusFile}" "${warnFile}")
         if [[ "${validateRc}" -eq 2 ]]; then
             printf 'WARN:CURRENT_UNAVAILABLE %s\n' "${validateLog}"
         elif [[ "${validateRc}" -ne 0 ]]; then

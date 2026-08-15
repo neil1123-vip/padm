@@ -744,30 +744,18 @@ skipTlsCertificateStatusCard() {
     statusCard "跳过 TLS 证书" "$@"
 }
 
-singBoxCompatibilityAuditLog() {
-    coreTmpFilePath padm-sing-box-compat-audit.log
-}
-
-singBoxCompatibilityAuditStatusFile() {
-    coreTmpFilePath padm-sing-box-compat-audit.status
-}
-
-singBoxCompatibilityAuditWarnFile() {
-    coreTmpFilePath padm-sing-box-compat-audit.warn
-}
-
-singBoxCompatibilityAuditReset() {
+coreCompatibilityAuditReset() {
     : >"${1}"
 }
 
-singBoxCompatibilityAuditStatusAdd() {
+coreCompatibilityAuditStatusAdd() {
     local file=$1
     local level=$2
     local message=$3
     printf '%s:%s\n' "${level}" "${message}" >>"${file}"
 }
 
-singBoxCompatibilityAuditWarn() {
+coreCompatibilityAuditWarn() {
     local warnFile=$1
     local logFile=$2
     local message=$3
@@ -775,19 +763,19 @@ singBoxCompatibilityAuditWarn() {
         printf '[WARN] %s\n' "${message}" >>"${logFile}"
 }
 
-singBoxCompatibilityAuditFail() {
+coreCompatibilityAuditFail() {
     local statusFile=$1
     local logFile=$2
     local message=$3
-    singBoxCompatibilityAuditStatusAdd "${statusFile}" fail "${message}" &&
+    coreCompatibilityAuditStatusAdd "${statusFile}" fail "${message}" &&
         printf '[FAIL] %s\n' "${message}" >>"${logFile}"
 }
 
-singBoxCompatibilityAuditPass() {
+coreCompatibilityAuditPass() {
     local statusFile=$1
     local logFile=$2
     local message=$3
-    singBoxCompatibilityAuditStatusAdd "${statusFile}" pass "${message}" &&
+    coreCompatibilityAuditStatusAdd "${statusFile}" pass "${message}" &&
         printf '[PASS] %s\n' "${message}" >>"${logFile}"
 }
 
@@ -814,18 +802,18 @@ singBoxCompatibilityAuditScanJsonFile() {
             ) then "dns-rule-mix" else empty end
         ] | unique[]
     ' "${file}" 2>>"${logFile}"); then
-        singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "JSON 无法解析：${file}" || return 1
+        coreCompatibilityAuditFail "${statusFile}" "${logFile}" "JSON 无法解析：${file}" || return 1
         return 0
     fi
 
     while IFS= read -r finding; do
         case "${finding}" in
-        wireguard-outbound) singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 WireGuard outbound，请改用 endpoints[type=wireguard]：${file}" || return 1 ;;
-        special-outbound) singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到 legacy special outbound，请改用 route action：${file}" || return 1 ;;
-        domain-strategy) singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 domain_strategy，请迁移到 domain_resolver/default_domain_resolver：${file}" || return 1 ;;
-        dns-rule-outbound) singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 DNS rule outbound，请迁移到 domain_resolver 或 route resolve：${file}" || return 1 ;;
-        dns-server-format) singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 DNS server 格式，请迁移到 typed DNS servers：${file}" || return 1 ;;
-        dns-rule-mix) singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到 1.14 不兼容的 DNS 规则混搭，请检查 ip_version/query_type 与 legacy address filter：${file}" || return 1 ;;
+        wireguard-outbound) coreCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 WireGuard outbound，请改用 endpoints[type=wireguard]：${file}" || return 1 ;;
+        special-outbound) coreCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到 legacy special outbound，请改用 route action：${file}" || return 1 ;;
+        domain-strategy) coreCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 domain_strategy，请迁移到 domain_resolver/default_domain_resolver：${file}" || return 1 ;;
+        dns-rule-outbound) coreCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 DNS rule outbound，请迁移到 domain_resolver 或 route resolve：${file}" || return 1 ;;
+        dns-server-format) coreCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 DNS server 格式，请迁移到 typed DNS servers：${file}" || return 1 ;;
+        dns-rule-mix) coreCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到 1.14 不兼容的 DNS 规则混搭，请检查 ip_version/query_type 与 legacy address filter：${file}" || return 1 ;;
         esac
     done <<<"${findings}"
 }
@@ -836,17 +824,17 @@ collectSingBoxCompatibilityFindings() {
     local warnFile=$3
     local file foundJson=false mergedFile shardDir
 
-    singBoxCompatibilityAuditReset "${statusFile}" || return 1
-    singBoxCompatibilityAuditReset "${warnFile}" || return 1
+    coreCompatibilityAuditReset "${statusFile}" || return 1
+    coreCompatibilityAuditReset "${warnFile}" || return 1
     : >"${logFile}" || return 1
     printf '核心: sing-box\n配置目录: %s\n阶段: 升级风险扫描\n' "$(singBoxConfigShardDir)" >>"${logFile}" || return 1
 
     if ! singBoxConfigInstalled; then
-        singBoxCompatibilityAuditWarn "${warnFile}" "${logFile}" "未检测到 sing-box 配置" || return 1
+        coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "未检测到 sing-box 配置" || return 1
         return 2
     fi
     if ! command -v jq >/dev/null 2>&1; then
-        singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "缺少 jq，无法扫描 sing-box 配置" || return 1
+        coreCompatibilityAuditFail "${statusFile}" "${logFile}" "缺少 jq，无法扫描 sing-box 配置" || return 1
         return 1
     fi
 
@@ -863,30 +851,30 @@ collectSingBoxCompatibilityFindings() {
     done
 
     if [[ "${foundJson}" != "true" ]]; then
-        singBoxCompatibilityAuditWarn "${warnFile}" "${logFile}" "未找到 sing-box JSON 配置文件" || return 1
+        coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "未找到 sing-box JSON 配置文件" || return 1
         return 2
     fi
 
     if [[ ! -s "${statusFile}" ]]; then
-        singBoxCompatibilityAuditPass "${statusFile}" "${logFile}" "未检测到 1.13/1.14 已知兼容风险" || return 1
+        coreCompatibilityAuditPass "${statusFile}" "${logFile}" "未检测到 1.13/1.14 已知兼容风险" || return 1
     fi
-    singBoxCompatibilityAuditHasFailures "${statusFile}" && return 1
+    coreCompatibilityAuditHasFailures "${statusFile}" && return 1
     return 0
 }
 
-singBoxCompatibilityAuditHasFailures() {
+coreCompatibilityAuditHasFailures() {
     local statusFile=$1
     grep -q '^fail:' "${statusFile}" 2>/dev/null
 }
 
-summarizeSingBoxCompatibilityAudit() {
+summarizeCoreCompatibilityAudit() {
     local statusFile=$1
     local warnFile=$2
     local failCount=0 passCount=0 warnCount=0
 
-    [[ -f "${statusFile}" ]] && failCount=$(grep -c '^fail:' "${statusFile}" 2>/dev/null || printf '0')
-    [[ -f "${statusFile}" ]] && passCount=$(grep -c '^pass:' "${statusFile}" 2>/dev/null || printf '0')
-    [[ -f "${warnFile}" ]] && warnCount=$(grep -c '.' "${warnFile}" 2>/dev/null || printf '0')
+    [[ -f "${statusFile}" ]] && failCount=$(grep -c '^fail:' "${statusFile}" 2>/dev/null || true)
+    [[ -f "${statusFile}" ]] && passCount=$(grep -c '^pass:' "${statusFile}" 2>/dev/null || true)
+    [[ -f "${warnFile}" ]] && warnCount=$(grep -c '.' "${warnFile}" 2>/dev/null || true)
     printf 'FAIL=%s WARN=%s PASS=%s' "${failCount}" "${warnCount}" "${passCount}"
 }
 
@@ -910,7 +898,7 @@ showCoreCompatibilityAudit() {
 showSingBoxCompatibilityAudit() {
     showCoreCompatibilityAudit collectSingBoxCompatibilityFindings singBoxCompatibilityAuditCard \
         "未检测到 sing-box 配置" "重点检查 JSON / legacy DNS / WireGuard / special outbounds / domain_strategy" "未发现 1.13/1.14 已知兼容风险" \
-        "${1:-$(singBoxCompatibilityAuditLog)}" "${2:-$(singBoxCompatibilityAuditStatusFile)}" "${3:-$(singBoxCompatibilityAuditWarnFile)}"
+        "${1:-$(coreTmpFilePath padm-sing-box-compat-audit.log)}" "${2:-$(coreTmpFilePath padm-sing-box-compat-audit.status)}" "${3:-$(coreTmpFilePath padm-sing-box-compat-audit.warn)}"
 }
 
 showSingBoxConfigValidation() {
@@ -1040,53 +1028,6 @@ appendXrayCompatibilityHints() {
     fi
 }
 
-xrayCompatibilityAuditLog() {
-    coreTmpFilePath padm-xray-compat-audit.log
-}
-
-xrayCompatibilityAuditStatusFile() {
-    coreTmpFilePath padm-xray-compat-audit.status
-}
-
-xrayCompatibilityAuditWarnFile() {
-    coreTmpFilePath padm-xray-compat-audit.warn
-}
-
-xrayCompatibilityAuditReset() {
-    : >"${1}"
-}
-
-xrayCompatibilityAuditStatusAdd() {
-    local file=$1
-    local level=$2
-    local message=$3
-    printf '%s:%s\n' "${level}" "${message}" >>"${file}"
-}
-
-xrayCompatibilityAuditWarn() {
-    local warnFile=$1
-    local logFile=$2
-    local message=$3
-    printf '%s\n' "${message}" >>"${warnFile}" &&
-        printf '[WARN] %s\n' "${message}" >>"${logFile}"
-}
-
-xrayCompatibilityAuditFail() {
-    local statusFile=$1
-    local logFile=$2
-    local message=$3
-    xrayCompatibilityAuditStatusAdd "${statusFile}" fail "${message}" &&
-        printf '[FAIL] %s\n' "${message}" >>"${logFile}"
-}
-
-xrayCompatibilityAuditPass() {
-    local statusFile=$1
-    local logFile=$2
-    local message=$3
-    xrayCompatibilityAuditStatusAdd "${statusFile}" pass "${message}" &&
-        printf '[PASS] %s\n' "${message}" >>"${logFile}"
-}
-
 xrayCompatibilityAuditScanJsonFile() {
     local file=$1
     local statusFile=$2
@@ -1113,18 +1054,18 @@ xrayCompatibilityAuditScanJsonFile() {
             if any(.outbounds[]?; .protocol? == "dns") then "dns-outbound" else empty end
         ] | unique[]
     ' "${file}" 2>>"${logFile}"); then
-        xrayCompatibilityAuditFail "${statusFile}" "${logFile}" "JSON 无法解析：${file}" || return 1
+        coreCompatibilityAuditFail "${statusFile}" "${logFile}" "JSON 无法解析：${file}" || return 1
         return 0
     fi
 
     while IFS= read -r finding; do
         case "${finding}" in
-        settings-alias) xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到兼容别名 settings.clients/accounts；当前预发布仍兼容，建议后续迁移到 users：${file}" || return 1 ;;
-        ech-force-query) xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到 echForceQuery；Xray 26.5.9 起该字段不再控制 ECH，配置 ECH 时将强制查询：${file}" || return 1 ;;
-        legacy-reverse) xrayCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到 legacy reverse；Xray 26.5.9 起会拒绝该配置，请迁移到 VLESS Reverse Proxy：${file}" || return 1 ;;
-        trusted-xff) xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到 XHTTP/WS/HTTPUpgrade 入站未设置 trustedXForwardedFor；如前置 CDN/反代请专项复核：${file}" || return 1 ;;
-        tunnel-inbound) xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到 tunnel inbound；Xray 26.5.9+ 已调整相关字段，请复核 network/address/port 新 schema：${file}" || return 1 ;;
-        dns-outbound) xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到 DNS outbound；Xray 26.5.9+ 已调整相关字段，请复核 network/address/port 新 schema：${file}" || return 1 ;;
+        settings-alias) coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到兼容别名 settings.clients/accounts；当前预发布仍兼容，建议后续迁移到 users：${file}" || return 1 ;;
+        ech-force-query) coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到 echForceQuery；Xray 26.5.9 起该字段不再控制 ECH，配置 ECH 时将强制查询：${file}" || return 1 ;;
+        legacy-reverse) coreCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到 legacy reverse；Xray 26.5.9 起会拒绝该配置，请迁移到 VLESS Reverse Proxy：${file}" || return 1 ;;
+        trusted-xff) coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到 XHTTP/WS/HTTPUpgrade 入站未设置 trustedXForwardedFor；如前置 CDN/反代请专项复核：${file}" || return 1 ;;
+        tunnel-inbound) coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到 tunnel inbound；Xray 26.5.9+ 已调整相关字段，请复核 network/address/port 新 schema：${file}" || return 1 ;;
+        dns-outbound) coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到 DNS outbound；Xray 26.5.9+ 已调整相关字段，请复核 network/address/port 新 schema：${file}" || return 1 ;;
         esac
     done <<<"${findings}"
 }
@@ -1135,17 +1076,17 @@ collectXrayCompatibilityFindings() {
     local warnFile=$3
     local file foundJson=false configDir
 
-    xrayCompatibilityAuditReset "${statusFile}" || return 1
-    xrayCompatibilityAuditReset "${warnFile}" || return 1
+    coreCompatibilityAuditReset "${statusFile}" || return 1
+    coreCompatibilityAuditReset "${warnFile}" || return 1
     : >"${logFile}" || return 1
     printf '核心: Xray\n配置目录: %s\n阶段: 升级风险扫描\n' "$(coreXrayConfigDir)" >>"${logFile}" || return 1
 
     if ! xrayConfigInstalled; then
-        xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "未检测到 Xray 配置" || return 1
+        coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "未检测到 Xray 配置" || return 1
         return 2
     fi
     if ! command -v jq >/dev/null 2>&1; then
-        xrayCompatibilityAuditFail "${statusFile}" "${logFile}" "缺少 jq，无法扫描 Xray 配置" || return 1
+        coreCompatibilityAuditFail "${statusFile}" "${logFile}" "缺少 jq，无法扫描 Xray 配置" || return 1
         return 1
     fi
 
@@ -1157,37 +1098,21 @@ collectXrayCompatibilityFindings() {
     done
 
     if [[ "${foundJson}" != "true" ]]; then
-        xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "未找到 Xray JSON 配置文件" || return 1
+        coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "未找到 Xray JSON 配置文件" || return 1
         return 2
     fi
 
     if [[ ! -s "${statusFile}" ]] && [[ ! -s "${warnFile}" ]]; then
-        xrayCompatibilityAuditPass "${statusFile}" "${logFile}" "未检测到当前预发布已知兼容风险" || return 1
+        coreCompatibilityAuditPass "${statusFile}" "${logFile}" "未检测到当前预发布已知兼容风险" || return 1
     fi
-    xrayCompatibilityAuditHasFailures "${statusFile}" && return 1
+    coreCompatibilityAuditHasFailures "${statusFile}" && return 1
     return 0
-}
-
-xrayCompatibilityAuditHasFailures() {
-    local statusFile=$1
-    grep -q '^fail:' "${statusFile}" 2>/dev/null
-}
-
-summarizeXrayCompatibilityAudit() {
-    local statusFile=$1
-    local warnFile=$2
-    local failCount=0 passCount=0 warnCount=0
-
-    [[ -f "${statusFile}" ]] && failCount=$(grep -c '^fail:' "${statusFile}" 2>/dev/null || true)
-    [[ -f "${statusFile}" ]] && passCount=$(grep -c '^pass:' "${statusFile}" 2>/dev/null || true)
-    [[ -f "${warnFile}" ]] && warnCount=$(grep -c '.' "${warnFile}" 2>/dev/null || true)
-    printf 'FAIL=%s WARN=%s PASS=%s' "${failCount}" "${warnCount}" "${passCount}"
 }
 
 showXrayCompatibilityAudit() {
     showCoreCompatibilityAudit collectXrayCompatibilityFindings xrayCompatibilityAuditCard \
         "未检测到 Xray 配置" "重点检查 JSON 解析 / legacy reverse" "未检测到当前预发布已知兼容风险" \
-        "${1:-$(xrayCompatibilityAuditLog)}" "${2:-$(xrayCompatibilityAuditStatusFile)}" "${3:-$(xrayCompatibilityAuditWarnFile)}"
+        "${1:-$(coreTmpFilePath padm-xray-compat-audit.log)}" "${2:-$(coreTmpFilePath padm-xray-compat-audit.status)}" "${3:-$(coreTmpFilePath padm-xray-compat-audit.warn)}"
 }
 
 downloadXrayReleaseBinaryToTemp() {
