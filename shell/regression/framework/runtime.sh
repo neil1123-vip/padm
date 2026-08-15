@@ -208,7 +208,7 @@ runFrameworkParallelRegressionSelectors() (
             fi
         done
         if [[ -z "${madeProgress}" ]]; then
-            sleep 0.05
+            wait -n 2>/dev/null || sleep 0.01
         fi
     done
     if (( hadErrexit )); then
