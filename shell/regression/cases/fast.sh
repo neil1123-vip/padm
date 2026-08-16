@@ -180,12 +180,7 @@ runCommitGeneratedFileRejectsDirectoryTargetRegression() (
     padmCreateTempPath tmpFile "${root}/.target.write.XXXXXX"
     printf 'new\n' >"${tmpFile}"
 
-    set +e
-    commitGeneratedFile "${tmpFile}" "${targetPath}" 644
-    status=$?
-    set -e
-
-    [[ "${status}" -ne 0 ]]
+    regressionExpectFailure commitGeneratedFile "${tmpFile}" "${targetPath}" 644
     [[ -f "${tmpFile}" ]]
     [[ -d "${targetPath}" ]]
     [[ ! -e "${targetPath}/$(basename -- "${tmpFile}")" ]]
@@ -633,11 +628,7 @@ runSubscriptionWireGuardFirewallLifecycleRegression() (
         actions+="deny:$1:${2:-tcp}"$'\n'
     }
 
-    set +e
-    initSubscriptionWireGuardMain >/dev/null 2>&1
-    status=$?
-    set -e
-    [[ "${status}" -ne 0 ]]
+    regressionExpectFailure initSubscriptionWireGuardMain >/dev/null 2>&1
     grep -qx 'allow:51820:udp' <<<"${actions}"
     grep -qx 'rollback' <<<"${actions}"
     subscriptionWireGuardReadState | jq -e '.enabled == false and .firewall_owned == false' >/dev/null
@@ -726,11 +717,7 @@ runSubscriptionWireGuardNginxDisableLifecycleRegression() (
 
     resetWireGuardNginxDisableFixture
     queueFail=true
-    set +e
-    disableSubscriptionWireGuardControl >/dev/null 2>&1
-    status=$?
-    set -e
-    [[ "${status}" -ne 0 ]]
+    regressionExpectFailure disableSubscriptionWireGuardControl >/dev/null 2>&1
     subscriptionWireGuardReadState | jq -e '.enabled == true and .role == "controlled"' >/dev/null
     grep -qx 'restored-wireguard' "$(subscriptionWireGuardConfigFile)"
     grep -qx 'old-nginx' "${nginxTarget}"
@@ -987,11 +974,7 @@ runCleanLastInstallationRejectsUnsafeStaticPathRegression() {
             return 0
         }
 
-        set +e
-        cleanLastInstallationConfig >/dev/null
-        rc=$?
-        set -e
-        [[ "${rc}" != "0" ]]
+        regressionExpectFailure cleanLastInstallationConfig >/dev/null
         [[ -f "${staticDir}/check" ]]
         grep -q '静态站点目录' "${errorLog}"
     )
@@ -1159,11 +1142,7 @@ runAutoInstallTlsDomainMissingReturnsRegression() {
         for protocols in 2 26 1,2; do
             : >"${logFile}"
             parseInstallArgs --install-type custom --core xray --protocols "${protocols}" --reality-domain yes --entry-host strict.example.com
-            set +e
-            autoInstallValidateRequiredInputs
-            status=$?
-            set -e
-            [[ "${status}" -ne 0 ]]
+            regressionExpectFailure autoInstallValidateRequiredInputs
             grep -q '仅支持单选 Reality Vision' "${logFile}"
             ! grep -q 'initVar' "${logFile}"
             ! grep -q 'mkdirTools' "${logFile}"
@@ -2873,23 +2852,11 @@ runRemoveInstallPathSafetyRegression() {
         errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
         (
             cd "${root}/cwd"
-            set +e
-            removeInstallPath "." "当前目录"
-            status=$?
-            set -e
-            [[ "${status}" -ne 0 ]]
+            regressionExpectFailure removeInstallPath "." "当前目录"
             [[ -f sentinel ]]
-            set +e
-            removeInstallPath ".." "父目录"
-            status=$?
-            set -e
-            [[ "${status}" -ne 0 ]]
+            regressionExpectFailure removeInstallPath ".." "父目录"
             [[ -f sentinel ]]
-            set +e
-            removeInstallPath "relative" "相对目录"
-            status=$?
-            set -e
-            [[ "${status}" -ne 0 ]]
+            regressionExpectFailure removeInstallPath "relative" "相对目录"
             [[ -f sentinel ]]
         )
         removeInstallPath "${safeTarget}" "安全目标"
@@ -4185,22 +4152,14 @@ runSubscriptionSyncPathSafetyRegression() {
         printf '{"inbounds":[{"settings":{"clients":[{"email":"sub_safe-main"}]}}]}\n' >"${safeConfigRel}/02_VLESS_TCP_inbounds.json"
         printf '{"inbounds":[{"settings":{"clients":[{"email":"sub_relative-main"}]}}]}\n' >"${relativeConfigRel}/02_VLESS_TCP_inbounds.json"
 
-        set +e
-        subscriptionSyncBackupPath "relative-source" "${root}/backup" local
-        status=$?
-        set -e
-        [[ "${status}" -ne 0 ]]
+        regressionExpectFailure subscriptionSyncBackupPath "relative-source" "${root}/backup" local
 
         padmCreateTempPath backupDir -d "${TMP_DIR}/subscription-sync-path-safety-backup.XXXXXX"
         printf 'dir\n' >"${backupDir}/local.exists"
         mkdir -p "${backupDir}/local/default"
         printf 'backup\n' >"${backupDir}/local/default/user"
 
-        set +e
-        subscriptionSyncRestoreBackupPath "relative-target" "${backupDir}" local
-        status=$?
-        set -e
-        [[ "${status}" -ne 0 ]]
+        regressionExpectFailure subscriptionSyncRestoreBackupPath "relative-target" "${backupDir}" local
 
         (
             cd -- "${root}"
@@ -4214,11 +4173,7 @@ runSubscriptionSyncPathSafetyRegression() {
             padmCreateTempPath restoreConfigBackupDir -d "${tmpRootAbs}/subscription-sync-config-restore-backup.XXXXXX"
             printf '{"inbounds":[]}\n' >"${restoreConfigBackupDir}/000000.json"
             printf '%s\t%s\n' "${restoreConfigBackupDir}/000000.json" "relative-config/02_VLESS_TCP_inbounds.json" >"${restoreConfigBackupDir}/manifest"
-            set +e
-            subscriptionSyncRestoreConfigBackups "${restoreConfigBackupDir}"
-            status=$?
-            set -e
-            [[ "${status}" -ne 0 ]]
+            regressionExpectFailure subscriptionSyncRestoreConfigBackups "${restoreConfigBackupDir}"
             [[ "$(<"${root}/relative-config/02_VLESS_TCP_inbounds.json")" == "${originalRelativeConfig}" ]]
             padmRemoveCleanupPath "${restoreConfigBackupDir}"
             padmRemoveCleanupPath "${configBackupDir}"
@@ -4249,12 +4204,7 @@ runSubscriptionSyncConfigRestoreRejectsDirectoryTargetRegression() {
         printf '{"inbounds":[]}\n' >"${backupDir}/000000.json"
         printf '%s\t%s\n' "${backupDir}/000000.json" "${targetFile}" >"${backupDir}/manifest"
 
-        set +e
-        subscriptionSyncRestoreConfigBackups "${backupDir}"
-        status=$?
-        set -e
-
-        [[ "${status}" -ne 0 ]]
+        regressionExpectFailure subscriptionSyncRestoreConfigBackups "${backupDir}"
         [[ -d "${targetFile}" ]]
         [[ ! -e "${targetFile}/000000.json" ]]
         padmRemoveCleanupPath "${backupDir}"
@@ -4282,12 +4232,7 @@ runSubscriptionSyncCreateLocalApplyBackupsRollbackRegression() {
             return 1
         }
 
-        set +e
-        subscriptionSyncCreateLocalApplyBackups configBackupDir outputBackupDir
-        status=$?
-        set -e
-
-        [[ "${status}" -ne 0 ]]
+        regressionExpectFailure subscriptionSyncCreateLocalApplyBackups configBackupDir outputBackupDir
         [[ -z "${configBackupDir}" ]]
         [[ -z "${outputBackupDir}" ]]
         [[ ! -e "${expectedConfigBackup}" ]]
@@ -4498,12 +4443,7 @@ runSubscriptionSyncConfigRestoreRejectsUnmanagedFileRegression() {
         printf '{"inbounds":[]}\n' >"${backupDir}/000000.json"
         printf '%s\t%s\n' "${backupDir}/000000.json" "${targetFile}" >"${backupDir}/manifest"
 
-        set +e
-        subscriptionSyncRestoreConfigBackups "${backupDir}"
-        status=$?
-        set -e
-
-        [[ "${status}" -ne 0 ]]
+        regressionExpectFailure subscriptionSyncRestoreConfigBackups "${backupDir}"
         [[ "$(<"${targetFile}")" == "${originalContent}" ]]
         padmRemoveCleanupPath "${backupDir}"
     )
@@ -4518,12 +4458,7 @@ runRestoreManagedFileFromBackupRejectsDirectoryTargetRegression() (
     mkdir -p "${targetFile}"
     printf '{"restored":true}\n' >"${backupFile}"
 
-    set +e
-    restoreManagedFileFromBackup "${backupFile}" "${targetFile}" 644
-    status=$?
-    set -e
-
-    [[ "${status}" -ne 0 ]]
+    regressionExpectFailure restoreManagedFileFromBackup "${backupFile}" "${targetFile}" 644
     [[ -d "${targetFile}" ]]
     [[ ! -e "${targetFile}/.live.json.restore"* ]]
 )
@@ -5055,11 +4990,7 @@ runSingBoxHttpUpgradeIncrementalStartsNginxRegression() {
 
         singBoxNginxConfig() { printf 'server {}\n' >"${nginxRoot}/sing_box_VMess_HTTPUpgrade.conf"; }
         randomPathFunction() { return 1; }
-        set +e
-        initSingBoxConfig custom 1 true >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" != "0" ]]
+        regressionExpectFailure initSingBoxConfig custom 1 true >/dev/null 2>&1
         [[ ! -e "${singBoxRoot}/11_VMess_HTTPUpgrade_inbounds.json" ]]
     )
 }
@@ -5109,11 +5040,7 @@ runSingBoxHttpUpgradeRejectsUnsafeNginxPathRegression() {
             cat >/dev/null
         }
 
-        set +e
-        initSingBoxConfig custom 1 true >/dev/null
-        rc=$?
-        set -e
-        [[ "${rc}" != "0" ]]
+        regressionExpectFailure initSingBoxConfig custom 1 true >/dev/null
         [[ -f sing_box_VMess_HTTPUpgrade.conf ]]
     )
 }

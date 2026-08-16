@@ -252,3 +252,5 @@ regressionExpectStatus() {
     "$@" || actual=$?
     [[ "${actual}" == "${expected}" ]]
 }
+
+regressionExpectFailure() { ! "$@"; }

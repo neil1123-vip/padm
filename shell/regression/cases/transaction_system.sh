@@ -1500,95 +1500,41 @@ runCleanLastInstallationConfigFailureRegression() (
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 )
 
-runCleanLastInstallationConfigAcmeHomeFailureRegression() (
-    local root="${TMP_DIR}/clean-last-installation-acme-home"
-    local homeDir="${root}/home"
-    local acmeDir="${homeDir}/.acme.sh"
-    local resolvedAcmeDir
-    local cleanupLog="${root}/cleanup.log"
-    local errorLog="${root}/error.log"
-    local rc
-
-    mkdir -p "${root}/nginx" "${root}/static" "${acmeDir}"
-    resolvedAcmeDir=$(cd -- "${homeDir}" && pwd -P)/.acme.sh
-    : >"${cleanupLog}"
-    : >"${errorLog}"
-
-    HOME="${homeDir}"
-    currentDefaultPort=443
-    currentPort=
-    customPort=
-    xrayVLESSRealityPort=
-    xrayVLESSRealityXHTTPort=
-    singBoxVLESSVisionPort=
-    singBoxVLESSRealityVisionPort=
-    singBoxVLESSRealityGRPCPort=
-    singBoxHysteria2Port=
-    singBoxTuicPort=
-    singBoxSocks5Port=
-    hysteriaPort=
-    tuicPort=
-    nginxConfigPath="${root}/nginx/"
-    nginxStaticPath="${root}/static"
-    configPath="${root}/xray-conf/"
-
-    handleXray() { return 0; }
-    handleSingBox() { return 0; }
-    handleNginx() { return 0; }
-    cleanAgentNginxConf() { return 0; }
-    cleanDirectoryContent() { return 0; }
-    readInstallType() { return 0; }
-    mkdirTools() { return 0; }
-    errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
-    showLastInstallationConfig() { return 0; }
-    autoRead() {
-        if [[ "$1" == "clean_acme" ]]; then
-            printf -v "$3" 'y'
-        else
-            printf -v "$3" 'n'
-        fi
-    }
-    lsof() { return 1; }
-    systemctl() { return 0; }
-    rm() {
-        printf 'rm:%s\n' "$*" >>"${cleanupLog}"
-        if [[ "$*" == "-rf -- ${resolvedAcmeDir}" ]]; then
-            return 1
-        fi
-        return 0
-    }
-
-    set +e
-    cleanLastInstallationConfig >/dev/null 2>&1
-    rc=$?
-    set -e
-
-    [[ "${rc}" == "1" ]]
-    grep -qxF "rm:-rf -- ${resolvedAcmeDir}" "${cleanupLog}"
-    ! grep -q "/root/.acme.sh" "${cleanupLog}"
-    grep -q "acme证书和账号配置清理失败" "${errorLog}"
-)
-
-runCleanLastInstallationConfigResolvesRelativeAcmeHomeRegression() (
-    local rootRel="${TMP_DIR}/clean-last-installation-acme-relative-home"
-    local root
-    local rootWorkRel
-    local cleanupLog
-    local errorLog
-    local resolvedAcmeDir
-    local rc
+runCleanLastInstallationConfigAcmeHomeRegression() (
+    local mode=$1
+    local rootRel="${TMP_DIR}/clean-last-installation-acme-${mode}"
+    local root workDir homeDir runDir expectedStatus
 
     mkdir -p "${rootRel}"
     root=$(cd -- "${rootRel}" && pwd -P)
-    rootWorkRel="${rootRel}/work"
-    cleanupLog="${root}/cleanup.log"
-    errorLog="${root}/error.log"
-    mkdir -p "${rootWorkRel}/nginx" "${rootWorkRel}/static" "${rootWorkRel}/relative-home/.acme.sh"
-    resolvedAcmeDir="${root}/work/relative-home/.acme.sh"
+    case "${mode}" in
+    failure)
+        workDir=${root}
+        homeDir="${root}/home"
+        runDir=${PWD}
+        expectedStatus=1
+        ;;
+    relative-home)
+        workDir="${root}/work"
+        homeDir="${workDir}/relative-home"
+        runDir=${workDir}
+        expectedStatus=0
+        ;;
+    *) return 2 ;;
+    esac
+
+    local resolvedAcmeDir="${homeDir}/.acme.sh"
+    local cleanupLog="${root}/cleanup.log"
+    local errorLog="${root}/error.log"
+    mkdir -p "${workDir}/nginx" "${workDir}/static" "${resolvedAcmeDir}"
     : >"${cleanupLog}"
     : >"${errorLog}"
 
-    HOME="relative-home"
+    if [[ "${mode}" == "relative-home" ]]; then
+        HOME=relative-home
+    else
+        HOME=${homeDir}
+    fi
     currentDefaultPort=443
     currentPort=
     customPort=
@@ -1602,9 +1548,9 @@ runCleanLastInstallationConfigResolvesRelativeAcmeHomeRegression() (
     singBoxSocks5Port=
     hysteriaPort=
     tuicPort=
-    nginxConfigPath="${root}/work/nginx/"
-    nginxStaticPath="${root}/work/static"
-    configPath="${root}/work/xray-conf/"
+    nginxConfigPath="${workDir}/nginx/"
+    nginxStaticPath="${workDir}/static"
+    configPath="${workDir}/xray-conf/"
 
     handleXray() { return 0; }
     handleSingBox() { return 0; }
@@ -1626,16 +1572,28 @@ runCleanLastInstallationConfigResolvesRelativeAcmeHomeRegression() (
     systemctl() { return 0; }
     rm() {
         printf 'rm:%s\n' "$*" >>"${cleanupLog}"
+        if [[ "${mode}" == "failure" ]]; then
+            [[ "$*" != "-rf -- ${resolvedAcmeDir}" ]]
+            return
+        fi
         command rm "$@"
     }
 
     (
-        cd "${rootWorkRel}"
-        regressionExpectStatus 0 cleanLastInstallationConfig >/dev/null 2>&1
-        [[ ! -d "${resolvedAcmeDir}" ]]
+        cd "${runDir}"
+        regressionExpectStatus "${expectedStatus}" cleanLastInstallationConfig >/dev/null 2>&1
         grep -qxF "rm:-rf -- ${resolvedAcmeDir}" "${cleanupLog}"
-        ! grep -q 'rm:-rf -- relative-home/.acme.sh' "${cleanupLog}"
-        [[ ! -s "${errorLog}" ]]
+        case "${mode}" in
+        failure)
+            ! grep -q "/root/.acme.sh" "${cleanupLog}"
+            grep -q "acme证书和账号配置清理失败" "${errorLog}"
+            ;;
+        relative-home)
+            [[ ! -d "${resolvedAcmeDir}" ]]
+            ! grep -q 'rm:-rf -- relative-home/.acme.sh' "${cleanupLog}"
+            [[ ! -s "${errorLog}" ]]
+            ;;
+        esac
     )
 )
 

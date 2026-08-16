@@ -1753,12 +1753,7 @@ SH
     PADM_SUBSCRIPTION_GROUPS_DIR="${tokenRoot}/groups"
     tokenFile=$(subscriptionControlTokenFile)
 
-    set +e
-    subscriptionControlEnsureToken >/dev/null 2>&1
-    tokenStatus=$?
-    set -e
-
-    [[ "${tokenStatus}" == "1" ]]
+    regressionExpectStatus 1 subscriptionControlEnsureToken >/dev/null 2>&1
     [[ ! -e "${tokenFile}" ]]
     if regressionFindHasMatches "${tokenRoot}" -maxdepth 2 -type f -name '.control.token.token.*'; then
         return 1

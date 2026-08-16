@@ -863,12 +863,7 @@ JSON
         printf '%s\n' "$*" >>"${statusLog}"
     }
 
-    set +e
-    changeInstalledRealityTarget "new.example.com:8443" "new-sni.example.com"
-    rc=$?
-    set -e
-
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 changeInstalledRealityTarget "new.example.com:8443" "new-sni.example.com"
     [[ "${reloadCalls}" == "2" ]]
     [[ "$(jq -r '.inbounds[1].streamSettings.realitySettings.target' "${xrayVision}")" == "old.example.com:443" ]]
     [[ "$(jq -r '.inbounds[0].streamSettings.realitySettings.target' "${xrayXhttp}")" == "old.example.com:443" ]]
@@ -1023,12 +1018,7 @@ JSON
         printf '%s\n' "$*" >>"${statusLog}"
     }
 
-    set +e
-    changeInstalledRealityTarget "new.example.com:8443" "new-sni.example.com"
-    rc=$?
-    set -e
-
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 changeInstalledRealityTarget "new.example.com:8443" "new-sni.example.com"
     [[ "${reloadCalls}" == "1" ]]
     [[ "${refreshCalls}" == "1" ]]
     [[ "$(jq -r '.inbounds[1].streamSettings.realitySettings.target' "${xrayVision}")" == "new.example.com:8443" ]]

@@ -468,60 +468,6 @@ runCorePortFileTransactionRegression() {
     mkdir -p "${configPath}"
     configRoot=$(cd -- "${configPath}" && pwd -P) || return 1
     configPath="${configRoot%/}/"
-    corePortApplyFileTransaction() {
-        local action=$1
-        local backupDir
-        padmCreateTmpRootPath backupDir padm-core-port.XXXXXX -d || return 1
-        if ! corePortBackupFiles "${backupDir}"; then
-            corePortReportBackupFailure "${backupDir}"
-            return 1
-        fi
-        shift
-        if ! "${action}" "$@" || ! corePortValidateFiles; then
-            if corePortRollbackFiles "${backupDir}"; then
-                padmRemoveCleanupPath "${backupDir}"
-            else
-                corePortReportRollbackFailure "${backupDir}"
-            fi
-            return 1
-        fi
-        padmRemoveCleanupPath "${backupDir}"
-    }
-    corePortApplyReloadTransaction() {
-        local action=$1
-        local backupDir
-        local restoreMessage
-        local rollbackMessage
-        padmCreateTmpRootPath backupDir padm-core-port.XXXXXX -d || return 1
-        if ! corePortBackupFiles "${backupDir}"; then
-            corePortReportBackupFailure "${backupDir}"
-            return 1
-        fi
-        shift
-        if ! "${action}" "$@" || ! corePortValidateFiles; then
-            if corePortRollbackFiles "${backupDir}"; then
-                padmRemoveCleanupPath "${backupDir}"
-            else
-                corePortReportRollbackFailure "${backupDir}"
-            fi
-            return 1
-        fi
-        if reloadCore; then
-            padmRemoveCleanupPath "${backupDir}"
-            return 0
-        fi
-
-        if ! corePortRollbackFiles "${backupDir}"; then
-            padmForgetCleanupPath "${backupDir}"
-            coreSetSingleRestoreResultMessage restoreMessage "入口端口核心重载失败" false "已恢复旧配置" "旧配置" "备份目录: ${backupDir}" || true
-            errorCard "${restoreMessage}"
-            return 1
-        fi
-        coreSetRollbackResultMessage rollbackMessage "入口端口核心重载失败" "已恢复旧配置" reloadCore "恢复后核心重载仍失败，请检查核心服务日志"
-        errorCard "${rollbackMessage}"
-        padmRemoveCleanupPath "${backupDir}"
-        return 1
-    }
     writeCoreDokodemoInbound "${configPath}02_dokodemodoor_inbounds_2053.json" 2053 443 tcp dokodemo-door-newPort-2053
     writeCoreDokodemoInbound "${configPath}02_dokodemodoor_inbounds_2083_default.json" 2083 443 tcp dokodemo-door-newPort-2083
     local original2053 original2083 keptBackup
@@ -854,21 +800,13 @@ runCoreTemplateReturnFailureRegression() (
     }
 
     printf '%s\n' 'old-xray-log' >"${xrayRoot}/00_log.json"
-    set +e
-    initXrayConfig custom 1 true 2>/dev/null
-    xrayRc=$?
-    set -e
-    [[ "${xrayRc}" != "0" ]]
+    regressionExpectFailure initXrayConfig custom 1 true 2>/dev/null
     [[ "$(<"${xrayRoot}/00_log.json")" == 'old-xray-log' ]]
     [[ ! -e "${xrayRoot}/12_policy.json" ]]
     [[ ! -e "${xrayRoot}/11_dns.json" ]]
 
     mode=xray-outbound
-    set +e
-    initXrayConfig custom 1 true 2>/dev/null
-    xrayRc=$?
-    set -e
-    [[ "${xrayRc}" != "0" ]]
+    regressionExpectFailure initXrayConfig custom 1 true 2>/dev/null
     [[ ! -e "${xrayRoot}/09_routing.json" ]]
 
     mode=stop-fail
@@ -878,11 +816,7 @@ runCoreTemplateReturnFailureRegression() (
     SERVICE_QUEUE_ALLOW_FAILURE=previous
     rm -f "${firewallState}"
     : >"${firewallLog}"
-    set +e
-    initSingBoxConfig custom 1 true 2>/dev/null
-    stopRc=$?
-    set -e
-    [[ "${stopRc}" != "0" ]]
+    regressionExpectFailure initSingBoxConfig custom 1 true 2>/dev/null
     grep -qx 'sing-box:stop:true' "${serviceLog}"
     [[ "${writeCalls}" == "0" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
@@ -897,11 +831,7 @@ runCoreTemplateReturnFailureRegression() (
     : >"${serviceLog}"
     rm -f "${firewallState}"
     : >"${firewallLog}"
-    set +e
-    initSingBoxConfig custom 1 true 2>/dev/null
-    singBoxRc=$?
-    set -e
-    [[ "${singBoxRc}" != "0" ]]
+    regressionExpectFailure initSingBoxConfig custom 1 true 2>/dev/null
     [[ "${writeCalls}" != "0" ]]
     [[ "$(<"${singBoxRoot}/02_VLESS_TCP_inbounds.json")" == 'old-sing-box-inbound' ]]
     [[ ! -e "${singBoxRoot}/03_VLESS_WS_inbounds.json" ]]
@@ -915,11 +845,7 @@ runCoreTemplateReturnFailureRegression() (
     writeCalls=0
     padmFirewallStateAdd "port:ufw:tcp:10890"
     : >"${firewallLog}"
-    set +e
-    initSingBoxConfig custom 1 true 2>/dev/null
-    stopRc=$?
-    set -e
-    [[ "${stopRc}" != "0" ]]
+    regressionExpectFailure initSingBoxConfig custom 1 true 2>/dev/null
     ! grep -q ':tcp$' "${firewallLog}"
     grep -qx 'ufw:10890:udp' "${firewallLog}"
     padmFirewallStateHas "port:ufw:tcp:10890"
@@ -988,19 +914,11 @@ runCoreTemplateReturnFailureRegression() (
     currentUUID=
     lastInstallationConfig=
     writeCalls=0
-    set +e
-    initXrayConfigApply custom 1 true 2>/dev/null
-    xrayRc=$?
-    set -e
-    [[ "${xrayRc}" != "0" ]]
+    regressionExpectFailure initXrayConfigApply custom 1 true 2>/dev/null
     [[ "${writeCalls}" == "0" ]]
 
     selectCustomInstallType=",27,"
-    set +e
-    initSingBoxConfigApply custom 1 true 2>/dev/null
-    singBoxRc=$?
-    set -e
-    [[ "${singBoxRc}" != "0" ]]
+    regressionExpectFailure initSingBoxConfigApply custom 1 true 2>/dev/null
     [[ "${writeCalls}" == "0" ]]
 
     manualUuid=not-a-uuid
@@ -1038,30 +956,18 @@ runCoreTemplateReturnFailureRegression() (
     initRealityKey() { return 1; }
     initRealityMldsa65() { return 0; }
     selectCustomInstallType=",1,"
-    set +e
-    initXrayConfig custom 1 true 2>/dev/null
-    xrayRc=$?
-    set -e
-    [[ "${xrayRc}" != "0" ]]
+    regressionExpectFailure initXrayConfig custom 1 true 2>/dev/null
 
     installSniffing() { return 1; }
     selectCustomInstallType=",999,"
-    set +e
-    initXrayConfig custom 1 true 2>/dev/null
-    xrayRc=$?
-    set -e
-    [[ "${xrayRc}" != "0" ]]
+    regressionExpectFailure initXrayConfig custom 1 true 2>/dev/null
 
     installSniffing() { return 0; }
     removeSingBoxConfig() { return 1; }
     setSniffRouting() { return 0; }
     mode=cleanup-fail
     selectCustomInstallType=",999,"
-    set +e
-    padmRunPortAllowTransaction initSingBoxConfigApply custom 1 2>/dev/null
-    singBoxRc=$?
-    set -e
-    [[ "${singBoxRc}" != "0" ]]
+    regressionExpectFailure padmRunPortAllowTransaction initSingBoxConfigApply custom 1 2>/dev/null
 )
 
 runCoreInstallServiceActionFailureRegression() (
@@ -1984,12 +1890,7 @@ runGeoUpdateReloadFailureRegression() (
     mode=reload-fail
     : >"${callLog}"
     printf 'old-version\n' >"${geoVersionFile}"
-    set +e
-    updateGeoSite >/dev/null 2>&1
-    rc=$?
-    set -e
-
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 updateGeoSite >/dev/null 2>&1
     grep -qx 'geo:/etc/padm/xray force' "${callLog}"
     grep -qx 'reload' "${callLog}"
     grep -q '核心重载失败' "${statusLog}"

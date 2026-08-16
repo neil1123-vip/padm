@@ -94,7 +94,7 @@ runSubscriptionGroupStateStructureFoundationAddRemoveRegression() {
 }
 
 runSubscriptionGroupStateStructureFoundationCredentialRegression() {
-    local credential decodedCredential invalidCredential encodedPayload
+    local credential decodedCredential invalidCredential encodedPayload payload
     local publicKey='AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
     local inviteId='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     local receiptToken='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789AB'
@@ -104,18 +104,13 @@ runSubscriptionGroupStateStructureFoundationCredentialRegression() {
     if subscriptionWireGuardCredentialDecode "remote.example.com:39778:token-abc" >/dev/null 2>&1; then
         return 1
     fi
-    invalidCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","control_port":39778}')
-    if subscriptionWireGuardCredentialDecode "${invalidCredential}" >/dev/null 2>&1; then
-        return 1
-    fi
-    invalidCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.999.2/24","public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","control_port":39778,"token":"token-abc"}')
-    if subscriptionWireGuardCredentialDecode "${invalidCredential}" >/dev/null 2>&1; then
-        return 1
-    fi
-    invalidCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","control_port":70000,"token":"token-abc"}')
-    if subscriptionWireGuardCredentialDecode "${invalidCredential}" >/dev/null 2>&1; then
-        return 1
-    fi
+    for payload in \
+        '{"address":"10.77.0.2/24","public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","control_port":39778}' \
+        '{"address":"10.77.999.2/24","public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","control_port":39778,"token":"token-abc"}' \
+        '{"address":"10.77.0.2/24","public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","control_port":70000,"token":"token-abc"}'; do
+        invalidCredential=$(subscriptionWireGuardCredentialEncode controlled "${payload}")
+        regressionExpectFailure subscriptionWireGuardCredentialDecode "${invalidCredential}" >/dev/null 2>&1
+    done
 
     credential=$(subscriptionWireGuardCredentialEncode main "$(jq -cn --arg publicKey "${publicKey}" '{endpoint_host:"main.example.com",listen_port:51820,network:"10.77.0.0/24",address:"10.77.0.1/24",public_key:$publicKey}')")
     subscriptionWireGuardCredentialDecode "${credential}" | jq -e '.kind == "main" and .address == "10.77.0.1/24"' >/dev/null
@@ -132,19 +127,13 @@ runSubscriptionGroupStateStructureFoundationCredentialRegression() {
     if subscriptionWireGuardCredentialDecode "${invalidCredential}" >/dev/null 2>&1; then
         return 1
     fi
-    if subscriptionWireGuardCredentialDecode "padmwg1:abc=" >/dev/null 2>&1 ||
-        subscriptionWireGuardCredentialDecode " padmwg1:abc" >/dev/null 2>&1 ||
-        subscriptionWireGuardCredentialDecode "padmwg1:$(printf 'A%.0s' {1..4090})" >/dev/null 2>&1; then
-        return 1
-    fi
-    encodedPayload=$(printf '%s' '{}{}' | subscriptionWireGuardBase64UrlEncode)
-    if subscriptionWireGuardCredentialDecode "padmwg1:${encodedPayload}" >/dev/null 2>&1; then
-        return 1
-    fi
-    encodedPayload=$(printf '%s' '[]' | subscriptionWireGuardBase64UrlEncode)
-    if subscriptionWireGuardCredentialDecode "padmwg1:${encodedPayload}" >/dev/null 2>&1; then
-        return 1
-    fi
+    for invalidCredential in "padmwg1:abc=" " padmwg1:abc" "padmwg1:$(printf 'A%.0s' {1..4090})"; do
+        regressionExpectFailure subscriptionWireGuardCredentialDecode "${invalidCredential}" >/dev/null 2>&1
+    done
+    for payload in '{}{}' '[]'; do
+        encodedPayload=$(printf '%s' "${payload}" | subscriptionWireGuardBase64UrlEncode)
+        regressionExpectFailure subscriptionWireGuardCredentialDecode "padmwg1:${encodedPayload}" >/dev/null 2>&1
+    done
     invalidCredential=$(subscriptionWireGuardCredentialEncode unknown '{}')
     if subscriptionWireGuardCredentialDecode "${invalidCredential}" >/dev/null 2>&1; then
         return 1
@@ -223,12 +212,7 @@ runSubscriptionGroupStateStructureFoundationInitTransactionRegression() (
         return 1
     }
 
-    set +e
-    ensureSubscriptionGroupsState >/dev/null 2>&1
-    initStatus=$?
-    set -e
-
-    [[ "${initStatus}" == "1" ]]
+    regressionExpectStatus 1 ensureSubscriptionGroupsState >/dev/null 2>&1
     [[ ! -e "${initStateFile}" ]]
     if regressionFindHasMatches "${initGroupsDir}" -maxdepth 1 -type f -name '.groups.json.init.*'; then
         return 1
@@ -246,20 +230,13 @@ runSubscriptionGroupStateStructureValidationRegression() {
     writeDefaultSubscriptionGroupsState "${stateFile}"
     ensureSubscriptionGroupsState
 
-    invalidSnapshot=$(jq '.groups[0].sources[0] |= del(.transport)' "${stateFile}")
-    printf '%s\n' "${invalidSnapshot}" >"${stateFile}"
-    if ensureSubscriptionGroupsState >/dev/null 2>&1; then
-        return 1
-    fi
-    [[ "$(<"${stateFile}")" == "${invalidSnapshot}" ]]
-
-    writeDefaultSubscriptionGroupsState "${stateFile}"
-    invalidSnapshot=$(jq '.version = 1' "${stateFile}")
-    printf '%s\n' "${invalidSnapshot}" >"${stateFile}"
-    if ensureSubscriptionGroupsState >/dev/null 2>&1; then
-        return 1
-    fi
-    [[ "$(<"${stateFile}")" == "${invalidSnapshot}" ]]
+    for invalidFilter in '.groups[0].sources[0] |= del(.transport)' '.version = 1'; do
+        writeDefaultSubscriptionGroupsState "${stateFile}"
+        invalidSnapshot=$(jq "${invalidFilter}" "${stateFile}")
+        printf '%s\n' "${invalidSnapshot}" >"${stateFile}"
+        regressionExpectFailure ensureSubscriptionGroupsState >/dev/null 2>&1
+        [[ "$(<"${stateFile}")" == "${invalidSnapshot}" ]]
+    done
 
     for invalidFilter in \
         '.unexpected = true' \
@@ -810,51 +787,21 @@ JSON
 runSubscriptionSyncRestorePairFailureMessageRegression() (
     local message=
     local detail=
-    local rc
+    local spec configRestored outputRestored expectedStatus expectedMessage
 
-    set +e
-    subscriptionSyncSetRestorePairFailureMessage message \
-        "本机同步失败" \
-        true "配置" "备份目录: /tmp/config" \
-        true "订阅输出" "备份目录: /tmp/output" \
-        "备份目录: /tmp/config 和 /tmp/output"
-    rc=$?
-    set -e
-    [[ "${rc}" == "0" ]]
-    [[ -z "${message}" ]]
-
-    set +e
-    subscriptionSyncSetRestorePairFailureMessage message \
-        "本机同步失败" \
-        false "配置" "备份目录: /tmp/config" \
-        true "订阅输出" "备份目录: /tmp/output" \
-        "备份目录: /tmp/config 和 /tmp/output"
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ "${message}" == "本机同步失败，且配置恢复失败，请手动检查备份目录: /tmp/config" ]]
-
-    set +e
-    subscriptionSyncSetRestorePairFailureMessage message \
-        "本机同步失败" \
-        true "配置" "备份目录: /tmp/config" \
-        false "订阅输出" "备份目录: /tmp/output" \
-        "备份目录: /tmp/config 和 /tmp/output"
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ "${message}" == "本机同步失败，且订阅输出恢复失败，请手动检查备份目录: /tmp/output" ]]
-
-    set +e
-    subscriptionSyncSetRestorePairFailureMessage message \
-        "本机同步失败" \
-        false "配置" "备份目录: /tmp/config" \
-        false "订阅输出" "备份目录: /tmp/output" \
-        "备份目录: /tmp/config 和 /tmp/output"
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ "${message}" == "本机同步失败，且配置与订阅输出恢复失败，请手动检查备份目录: /tmp/config 和 /tmp/output" ]]
+    for spec in \
+        'true|true|0|' \
+        'false|true|1|本机同步失败，且配置恢复失败，请手动检查备份目录: /tmp/config' \
+        'true|false|1|本机同步失败，且订阅输出恢复失败，请手动检查备份目录: /tmp/output' \
+        'false|false|1|本机同步失败，且配置与订阅输出恢复失败，请手动检查备份目录: /tmp/config 和 /tmp/output'; do
+        IFS='|' read -r configRestored outputRestored expectedStatus expectedMessage <<<"${spec}"
+        regressionExpectStatus "${expectedStatus}" subscriptionSyncSetRestorePairFailureMessage message \
+            "本机同步失败" \
+            "${configRestored}" "配置" "备份目录: /tmp/config" \
+            "${outputRestored}" "订阅输出" "备份目录: /tmp/output" \
+            "备份目录: /tmp/config 和 /tmp/output"
+        [[ "${message}" == "${expectedMessage}" ]]
+    done
 
     subscriptionSyncSetManualCheckMessage detail "配置与订阅输出恢复失败" "备份目录: /tmp/config 和 /tmp/output"
     [[ "${detail}" == "配置与订阅输出恢复失败，请手动检查备份目录: /tmp/config 和 /tmp/output" ]]
@@ -880,107 +827,25 @@ runSubscriptionSyncAppendRestoreFailureDetailRegression() (
 runSubscriptionSyncSingleRestoreResultMessageRegression() (
     local message=
     local detail=
-    local rc
+    local spec expectedStatus failure restored successMessage restoreName manualDetail appendDetail expectedMessage
 
-    set +e
-    subscriptionSyncSetSingleRestoreResultMessage message \
-        "限额自动执行失败" \
-        true \
-        "已恢复旧订阅状态" \
-        "订阅状态" \
-        "备份文件: /tmp/groups.json"
-    rc=$?
-    set -e
-    [[ "${rc}" == "0" ]]
-    [[ "${message}" == "限额自动执行失败，已恢复旧订阅状态" ]]
-
-    set +e
-    subscriptionSyncSetSingleRestoreResultMessage message \
-        "限额自动执行失败" \
-        false \
-        "已恢复旧订阅状态" \
-        "订阅状态" \
-        "备份文件: /tmp/groups.json"
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ "${message}" == "限额自动执行失败，且订阅状态恢复失败，请手动检查备份文件: /tmp/groups.json" ]]
+    for spec in \
+        '0|限额自动执行失败|true|已恢复旧订阅状态|订阅状态|备份文件: /tmp/groups.json|true|限额自动执行失败，已恢复旧订阅状态' \
+        '1|限额自动执行失败|false|已恢复旧订阅状态|订阅状态|备份文件: /tmp/groups.json|true|限额自动执行失败，且订阅状态恢复失败，请手动检查备份文件: /tmp/groups.json' \
+        "0|控制面同步期望用户状态写入失败|true||订阅状态|$(subscriptionGroupsFile)|true|控制面同步期望用户状态写入失败" \
+        '1|Xray 流量统计策略配置写入失败|false|已恢复旧配置|旧配置|备份目录: /tmp/stats-backup|true|Xray 流量统计策略配置写入失败，且旧配置恢复失败，请手动检查备份目录: /tmp/stats-backup' \
+        '1|订阅 Nginx 配置校验失败|false|已恢复旧配置|旧配置| /tmp/subscribe.conf 和 /tmp/.subscribe.conf.backup.123456|true|订阅 Nginx 配置校验失败，且旧配置恢复失败，请手动检查 /tmp/subscribe.conf 和 /tmp/.subscribe.conf.backup.123456' \
+        '1|订阅生成失败|false|已恢复旧订阅输出|旧订阅输出|备份目录: /tmp/subscribe-output-backup|true|订阅生成失败，且旧订阅输出恢复失败，请手动检查备份目录: /tmp/subscribe-output-backup' \
+        '0|订阅生成失败|true|已恢复旧订阅输出|旧订阅输出|备份目录: /tmp/subscribe-output-backup|true|订阅生成失败，已恢复旧订阅输出' \
+        '1|WireGuard 主控服务启动失败|false||旧状态||false|WireGuard 主控服务启动失败，且旧状态恢复失败'; do
+        IFS='|' read -r expectedStatus failure restored successMessage restoreName manualDetail appendDetail expectedMessage <<<"${spec}"
+        regressionExpectStatus "${expectedStatus}" subscriptionSyncSetSingleRestoreResultMessage message \
+            "${failure}" "${restored}" "${successMessage}" "${restoreName}" "${manualDetail}" "${appendDetail}"
+        [[ "${message}" == "${expectedMessage}" ]]
+    done
 
     subscriptionSyncSetManualCheckMessage detail "订阅状态恢复失败" "备份文件: /tmp/groups.json"
     [[ "${detail}" == "订阅状态恢复失败，请手动检查备份文件: /tmp/groups.json" ]]
-
-    set +e
-    subscriptionSyncSetSingleRestoreResultMessage message \
-        "控制面同步期望用户状态写入失败" \
-        true \
-        "" \
-        "订阅状态" \
-        "$(subscriptionGroupsFile)"
-    rc=$?
-    set -e
-    [[ "${rc}" == "0" ]]
-    [[ "${message}" == "控制面同步期望用户状态写入失败" ]]
-
-    set +e
-    subscriptionSyncSetSingleRestoreResultMessage message \
-        "Xray 流量统计策略配置写入失败" \
-        false \
-        "已恢复旧配置" \
-        "旧配置" \
-        "备份目录: /tmp/stats-backup"
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ "${message}" == "Xray 流量统计策略配置写入失败，且旧配置恢复失败，请手动检查备份目录: /tmp/stats-backup" ]]
-
-    set +e
-    subscriptionSyncSetSingleRestoreResultMessage message \
-        "订阅 Nginx 配置校验失败" \
-        false \
-        "已恢复旧配置" \
-        "旧配置" \
-        " /tmp/subscribe.conf 和 /tmp/.subscribe.conf.backup.123456"
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ "${message}" == "订阅 Nginx 配置校验失败，且旧配置恢复失败，请手动检查 /tmp/subscribe.conf 和 /tmp/.subscribe.conf.backup.123456" ]]
-
-    set +e
-    subscriptionSyncSetSingleRestoreResultMessage message \
-        "订阅生成失败" \
-        false \
-        "已恢复旧订阅输出" \
-        "旧订阅输出" \
-        "备份目录: /tmp/subscribe-output-backup"
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ "${message}" == "订阅生成失败，且旧订阅输出恢复失败，请手动检查备份目录: /tmp/subscribe-output-backup" ]]
-
-    set +e
-    subscriptionSyncSetSingleRestoreResultMessage message \
-        "订阅生成失败" \
-        true \
-        "已恢复旧订阅输出" \
-        "旧订阅输出" \
-        "备份目录: /tmp/subscribe-output-backup"
-    rc=$?
-    set -e
-    [[ "${rc}" == "0" ]]
-    [[ "${message}" == "订阅生成失败，已恢复旧订阅输出" ]]
-
-    set +e
-    subscriptionSyncSetSingleRestoreResultMessage message \
-        "WireGuard 主控服务启动失败" \
-        false \
-        "" \
-        "旧状态" \
-        "" \
-        false
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ "${message}" == "WireGuard 主控服务启动失败，且旧状态恢复失败" ]]
 )
 
 runSubscriptionSyncRollbackResultMessageRegression() (
@@ -1076,12 +941,7 @@ JSON
         command cp "$@"
     }
 
-    set +e
-    subscriptionSyncApplyAccountPlanTransaction '{"create":["sub_new"],"remove":[]}'
-    rc=$?
-    set -e
-
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 subscriptionSyncApplyAccountPlanTransaction '{"create":["sub_new"],"remove":[]}'
     jq -e '.inbounds[0].settings.clients[0].email == "sub_new-main"' "${targetFile}" >/dev/null
     [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"配置恢复失败"* ]]
     [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"备份目录:"* ]]

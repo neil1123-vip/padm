@@ -250,6 +250,8 @@ runRegressionTargetedBatchHelpers() (
     regressionCaptureFixture() { captureState=changed; return 7; }
     regressionExpectStatus 7 regressionCaptureFixture
     [[ "${captureState}" == "changed" ]]
+    regressionExpectFailure false
+    regressionExpectStatus 1 regressionExpectFailure true
 
     runParallelRegressionRunners "${TMP_DIR}/targeted-batch-helpers-parallel-${BASHPID:-$$}" \
         core-invalid-input-retry-menu runCoreInvalidInputRetryMenuRegression \
