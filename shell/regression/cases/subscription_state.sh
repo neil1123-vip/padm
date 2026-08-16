@@ -420,13 +420,6 @@ runSubscriptionGroupStateStructureSourceRemoveRegression() {
     jq -e '(.groups[0].sources | map(.id) | index("edge") | not) and (.groups[0].traffic.sources | has("edge") | not) and (.groups[0].traffic.user_groups["team-a"].sources | has("edge") | not)' "$(subscriptionGroupsFile)" >/dev/null
 }
 
-runSubscriptionGroupStateStructureSourceSerialRegression() {
-    runRegressionStep subscription-state-structure-source-credential runSubscriptionGroupStateStructureSourceCredentialRegression
-    runRegressionStep subscription-state-structure-source-status runSubscriptionGroupStateStructureSourceStatusRegression
-    runRegressionStep subscription-state-structure-sync-cron runSubscriptionGroupStateStructureSyncCronRegression
-    runRegressionStep subscription-state-structure-source-remove runSubscriptionGroupStateStructureSourceRemoveRegression
-}
-
 runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
     prepareSubscriptionStateQuotaUsageFixture
     (
@@ -468,12 +461,6 @@ runSubscriptionGroupStateQuotaTrafficApplyRegression() {
     prepareSubscriptionStateQuotaUsageFixture
     applySubscriptionQuotaPlan "$(subscriptionQuotaDryRunPlan)"
     jq -e '.groups[0].user_groups[] | select(.id == "team-a" and .enabled == false)' "$(subscriptionGroupsFile)" >/dev/null
-}
-
-runSubscriptionGroupStateQuotaTrafficSerialRegression() {
-    runRegressionStep subscription-state-quota-traffic-summary runSubscriptionGroupStateQuotaTrafficSummaryRegression
-    runRegressionStep subscription-state-quota-traffic-invalid-input runSubscriptionGroupStateQuotaTrafficInvalidInputRegression
-    runRegressionStep subscription-state-quota-traffic-apply runSubscriptionGroupStateQuotaTrafficApplyRegression
 }
 
 runSubscriptionGroupStateQuotaMenuPreviewFailureRegression() {
@@ -543,11 +530,6 @@ JSON
             return 1
         fi
     )
-}
-
-runSubscriptionGroupStateQuotaMenuTransactionSerialRegression() {
-    runRegressionStep subscription-state-quota-menu-preview-fail runSubscriptionGroupStateQuotaMenuPreviewFailureRegression
-    runRegressionStep subscription-state-quota-menu-tx-rollback runSubscriptionGroupStateQuotaTransactionRollbackRegression
 }
 
 runSubscriptionGroupStateQuotaPartialSyncApplyFailureRegression() {
@@ -673,12 +655,6 @@ JSON
         [[ -f "${TMP_DIR}/subscription-group-sync-cron-args.log" ]]
         [[ "$(<"${TMP_DIR}/subscription-group-sync-cron-args.log")" == "" ]]
     )
-}
-
-runSubscriptionGroupStateQuotaPartialSyncSerialRegression() {
-    runRegressionStep subscription-state-quota-partial-sync-apply-failure runSubscriptionGroupStateQuotaPartialSyncApplyFailureRegression
-    runRegressionStep subscription-state-quota-partial-sync-plan runSubscriptionGroupStateQuotaPartialSyncPlanRegression
-    runRegressionStep subscription-state-quota-partial-sync-config runSubscriptionGroupStateQuotaPartialSyncConfigRegression
 }
 
 prepareSubscriptionRemoteRestoreSelfReferenceFixture() {

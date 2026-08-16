@@ -39,7 +39,7 @@ listRegressionSubscriptionStateStructureSourceChildSelectors() {
         subscription-state-structure-source-credential \
         subscription-state-structure-source-status \
         subscription-state-structure-source-remove \
-        subscription-state-structure-source-serial
+        subscription-state-structure-sync-cron
 }
 
 listRegressionSubscriptionStateStructureChildSelectors() {
@@ -72,23 +72,20 @@ listRegressionSubscriptionStateQuotaTrafficChildSelectors() {
     printf '%s\n' \
         subscription-state-quota-traffic-summary \
         subscription-state-quota-traffic-invalid-input \
-        subscription-state-quota-traffic-apply \
-        subscription-state-quota-traffic-serial
+        subscription-state-quota-traffic-apply
 }
 
 listRegressionSubscriptionStateQuotaMenuTransactionChildSelectors() {
     printf '%s\n' \
         subscription-state-quota-menu-preview-fail \
-        subscription-state-quota-menu-tx-rollback \
-        subscription-state-quota-menu-tx-serial
+        subscription-state-quota-menu-tx-rollback
 }
 
 listRegressionSubscriptionStateQuotaPartialSyncChildSelectors() {
     printf '%s\n' \
         subscription-state-quota-partial-sync-apply-failure \
         subscription-state-quota-partial-sync-plan \
-        subscription-state-quota-partial-sync-config \
-        subscription-state-quota-partial-sync-serial
+        subscription-state-quota-partial-sync-config
 }
 
 listRegressionSubscriptionStateSupportChildSelectors() {
@@ -102,19 +99,6 @@ listRegressionSubscriptionStateSupportChildSelectors() {
         subscription-sync-reconcile-early-exit \
         subscription-group-sync-publish-refresh-inline \
         subscription-group-sync-single-config-backup \
-        subscription-groups-restore-failure
-}
-
-listRegressionSubscriptionStateSerialChildSelectors() {
-    printf '%s\n' \
-        subscription-state \
-        subscription-sync-tempdir \
-        subscription-sync-restore-pair-failure-message \
-        subscription-sync-append-restore-failure-detail \
-        subscription-sync-single-restore-result-message \
-        subscription-sync-rollback-result-message \
-        subscription-sync-rollback-failure-serial \
-        subscription-sync-reconcile-early-exit \
         subscription-groups-restore-failure
 }
 
@@ -135,14 +119,6 @@ runRegressionSubscriptionStateRemoteRestore() {
     PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runSubscriptionStateParallelChildRegressionIsolatedSelector \
         runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-remote-restore" \
             listRegressionSubscriptionStateRemoteRestoreChildSelectors
-}
-
-listRegressionSubscriptionStateSyncRollbackFailureSerialChildSelectors() {
-    printf '%s\n' \
-        subscription-sync-rollback-config-restore-failure \
-        subscription-sync-restore-dir-failure \
-        subscription-sync-reload-rollback \
-        subscription-group-sync-rollback-serial
 }
 
 listRegressionSubscriptionStateSyncRollbackFailureChildSelectors() {
@@ -169,43 +145,34 @@ registerRegressionSequentialSelectorList subscription-state-structure-source lis
 registerRegressionFunctionLeaf subscription-state-structure-source-credential runRegressionStep subscription-state-structure-source-credential runSubscriptionGroupStateStructureSourceCredentialRegression
 registerRegressionFunctionLeaf subscription-state-structure-source-status runRegressionStep subscription-state-structure-source-status runSubscriptionGroupStateStructureSourceStatusRegression
 registerRegressionFunctionLeaf subscription-state-structure-source-remove runRegressionStep subscription-state-structure-source-remove runSubscriptionGroupStateStructureSourceRemoveRegression
-registerRegressionFunctionLeaf subscription-state-structure-source-serial runRegressionStep subscription-state-structure-source-serial runSubscriptionGroupStateStructureSourceSerialRegression
+registerRegressionFunctionLeaf subscription-state-structure-sync-cron runRegressionStep subscription-state-structure-sync-cron runSubscriptionGroupStateStructureSyncCronRegression
 registerRegressionFunctionLeaf subscription-state-quota-traffic-summary runRegressionStep subscription-state-quota-traffic-summary runSubscriptionGroupStateQuotaTrafficSummaryRegression
 registerRegressionFunctionLeaf subscription-state-quota-traffic-invalid-input runRegressionStep subscription-state-quota-traffic-invalid-input runSubscriptionGroupStateQuotaTrafficInvalidInputRegression
 registerRegressionFunctionLeaf subscription-state-quota-traffic-apply runRegressionStep subscription-state-quota-traffic-apply runSubscriptionGroupStateQuotaTrafficApplyRegression
-registerRegressionFunctionLeaf subscription-state-quota-traffic-serial runRegressionStep subscription-state-quota-traffic-serial runSubscriptionGroupStateQuotaTrafficSerialRegression
 registerRegressionFunctionLeaf subscription-state-quota-menu-preview-fail runRegressionStep subscription-state-quota-menu-preview-fail runSubscriptionGroupStateQuotaMenuPreviewFailureRegression
 registerRegressionFunctionLeaf subscription-state-quota-menu-tx-rollback runRegressionStep subscription-state-quota-menu-tx-rollback runSubscriptionGroupStateQuotaTransactionRollbackRegression
-registerRegressionFunctionLeaf subscription-state-quota-menu-tx-serial runRegressionStep subscription-state-quota-menu-tx-serial runSubscriptionGroupStateQuotaMenuTransactionSerialRegression
 registerRegressionFunctionLeaf subscription-state-quota-partial-sync-apply-failure runRegressionStep subscription-state-quota-partial-sync-apply-failure runSubscriptionGroupStateQuotaPartialSyncApplyFailureRegression
 registerRegressionFunctionLeaf subscription-state-quota-partial-sync-plan runRegressionStep subscription-state-quota-partial-sync-plan runSubscriptionGroupStateQuotaPartialSyncPlanRegression
 registerRegressionFunctionLeaf subscription-state-quota-partial-sync-config runRegressionStep subscription-state-quota-partial-sync-config runSubscriptionGroupStateQuotaPartialSyncConfigRegression
-registerRegressionFunctionLeaf subscription-state-quota-partial-sync-serial runRegressionStep subscription-state-quota-partial-sync-serial runSubscriptionGroupStateQuotaPartialSyncSerialRegression
 registerRegressionSequentialSelectorList subscription-state-remote-restore-self-reference listRegressionSubscriptionStateRemoteRestoreSelfReferenceChildSelectors
 registerRegressionFunctionLeaf subscription-state-remote-restore-self-reference-plan runRegressionStep subscription-state-remote-restore-self-reference-plan runSubscriptionGroupStateRemoteRestoreSelfReferencePlanRegression
 registerRegressionFunctionLeaf subscription-state-remote-restore-self-reference-sync runRegressionStep subscription-state-remote-restore-self-reference-sync runSubscriptionGroupStateRemoteRestoreSelfReferenceSyncRegression
 registerRegressionFunctionLeaf subscription-state-remote-restore-state-write runRegressionStep subscription-state-remote-restore-state-write runSubscriptionGroupStateRemoteRestoreStateWriteRegression
 registerRegressionFunctionLeaf subscription-state-remote-restore-legacy-menu runRegressionStep subscription-state-remote-restore-legacy-menu runSubscriptionGroupStateRemoteRestoreLegacyMenuRegression
-registerRegressionSequentialSelectorList subscription-state-serial listRegressionSubscriptionStateSerialChildSelectors
 registerRegressionSequentialSelectorList subscription-state-quota-traffic listRegressionSubscriptionStateQuotaTrafficChildSelectors
 registerRegressionSequentialSelectorList subscription-state-quota-menu-tx listRegressionSubscriptionStateQuotaMenuTransactionChildSelectors
 registerRegressionSequentialSelectorList subscription-state-quota-partial-sync listRegressionSubscriptionStateQuotaPartialSyncChildSelectors
-registerRegressionSequentialSelectorList subscription-state-remote-restore-serial listRegressionSubscriptionStateRemoteRestoreChildSelectors
 registerRegressionSequentialSelectorList subscription-state-support listRegressionSubscriptionStateSupportChildSelectors
-registerRegressionSequentialSelectorList subscription-state-sync-rollback-serial listRegressionSubscriptionStateSyncRollbackFailureSerialChildSelectors
-registerRegressionSequentialSelectorList subscription-sync-rollback-failure-serial listRegressionSubscriptionStateSyncRollbackFailureSerialChildSelectors
 registerRegressionFunctionLeaf subscription-sync-tempdir runRegressionStep subscription-sync-tempdir runSubscriptionSyncTempDirRegression
 registerRegressionFunctionLeaf subscription-sync-restore-pair-failure-message runSubscriptionSyncRestorePairFailureMessageRegression
 registerRegressionFunctionLeaf subscription-sync-append-restore-failure-detail runSubscriptionSyncAppendRestoreFailureDetailRegression
 registerRegressionFunctionLeaf subscription-sync-single-restore-result-message runSubscriptionSyncSingleRestoreResultMessageRegression
 registerRegressionFunctionLeaf subscription-sync-rollback-result-message runSubscriptionSyncRollbackResultMessageRegression
 registerRegressionFunctionLeaf subscription-sync-find-user-enabled-projection runSubscriptionSyncFindUserEnabledProjectionRegression
-registerRegressionFunctionLeaf subscription-sync-rollback-failure runRegressionSubscriptionStateSyncRollback
 registerRegressionFunctionLeaf subscription-sync-rollback-config-restore-failure runRegressionStep subscription-sync-rollback-config-restore-failure runSubscriptionSyncRollbackConfigRestoreFailureRegression
 registerRegressionFunctionLeaf subscription-sync-restore-dir-failure runRegressionStep subscription-sync-restore-dir-failure runSubscriptionSyncRollbackRestoreDirFailureRegression
 registerRegressionFunctionLeaf subscription-sync-reload-rollback runRegressionStep subscription-sync-reload-rollback runSubscriptionSyncRollbackReloadRollbackRegression
 registerRegressionFunctionLeaf subscription-group-sync-rollback runRegressionStep subscription-group-sync-rollback runSubscriptionGroupSyncRollbackSerialRegression
-registerRegressionFunctionLeaf subscription-group-sync-rollback-serial runRegressionStep subscription-group-sync-rollback-serial runSubscriptionGroupSyncRollbackSerialRegression
 registerRegressionFunctionLeaf subscription-group-sync-publish-refresh-inline runSubscriptionGroupSyncPublishRefreshInlineRegression
 registerRegressionFunctionLeaf subscription-group-sync-single-config-backup runSubscriptionGroupSyncSingleConfigBackupRegression
 registerRegressionFunctionLeaf subscription-group-sync-apply-failure runRegressionStep subscription-group-sync-apply-failure runSubscriptionGroupSyncApplyFailureRegression
