@@ -13,19 +13,6 @@ removeXrayGeoManagedFiles() {
     removeManagedFilesIfPresent "${geositeFile}" "${geoipFile}" "${geoVersionFile}"
 }
 
-cleanSingBoxDownloadArtifacts() {
-    local installDir=$1
-    local version=$2
-    local assetPath="${installDir%/}/sing-box-${version/v/}${singBoxCoreCPUVendor}.tar.gz"
-    local extractedDir="${installDir%/}/sing-box-${version/v/}${singBoxCoreCPUVendor}"
-
-    padmIsSafeAbsolutePath "${assetPath}" || return 1
-    padmIsSafeAbsolutePath "${extractedDir}" || return 1
-    removeManagedFileIfPresent "${assetPath}" || return 1
-    padmRemoveCleanupPath "${extractedDir}"
-    [[ ! -e "${extractedDir}" ]]
-}
-
 coreArchiveEntryIsSafe() {
     local entryPath=$1
     local normalizedPath segment
@@ -1137,30 +1124,6 @@ downloadXrayReleaseBinaryToTemp() {
     if [[ -n "${tmpDirVar}" ]]; then
         printf -v "${tmpDirVar}" '%s' "${tmpDir}"
     fi
-}
-
-showXrayStrictValidation() {
-    local logFile=${1:-$(coreTmpFilePath padm-core-xray-strict-test.log)}
-
-    if ! xrayInstalled; then
-        : >"${logFile}"
-        printf '无法检查: 未检测到 Xray 二进制\n' >>"${logFile}"
-        xrayStrictValidationCard "无法检查" "未检测到 Xray 二进制"
-        return 2
-    fi
-    if ! xrayConfigInstalled; then
-        : >"${logFile}"
-        printf '无法检查: 未检测到 Xray 配置\n' >>"${logFile}"
-        xrayStrictValidationCard "无法检查" "未检测到 Xray 配置"
-        return 2
-    fi
-    if validateXrayConfigStrictWithBinary "$(coreXrayBinaryPath)" "${logFile}"; then
-        xrayStrictValidationCard "通过"
-        return 0
-    fi
-    appendXrayCompatibilityHints "${logFile}"
-    xrayStrictValidationCard "失败" "排查日志: ${logFile}"
-    return 1
 }
 
 showXrayConfigHealthCheck() {
