@@ -242,6 +242,6 @@ runRegressionStep() {
 
 regressionFindHasMatches() {
     local firstMatch
-    firstMatch=$(find "$@" -print -quit) || return 1
+    firstMatch=$(find "$@" -print -quit 2>/dev/null) || return 1
     [[ -n "${firstMatch}" ]]
 }

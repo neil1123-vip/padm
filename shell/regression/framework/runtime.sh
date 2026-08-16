@@ -243,23 +243,15 @@ runFrameworkParallelRegressionSelectorList() {
 runFrameworkParallelRegressionSelectorListWithJobs() {
     local orchestrationRoot=$1
     local selectorListFn=$2
-    local jobs=
-    local effectiveJobs=
 
     shift 2
+    local jobs=${1:-}
     if [[ $# -gt 0 ]]; then
-        jobs=$1
         shift
     fi
 
-    effectiveJobs="${PADM_REGRESSION_PARALLEL_JOBS:-${jobs}}"
-    if [[ -n "${effectiveJobs}" ]]; then
-        PADM_REGRESSION_PARALLEL_JOBS="${effectiveJobs}" \
-            runFrameworkParallelRegressionSelectorList "${orchestrationRoot}" "${selectorListFn}" "$@"
-        return
-    fi
-
-    runFrameworkParallelRegressionSelectorList "${orchestrationRoot}" "${selectorListFn}" "$@"
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_PARALLEL_JOBS:-${jobs}}" \
+        runFrameworkParallelRegressionSelectorList "${orchestrationRoot}" "${selectorListFn}" "$@"
 }
 
 runFrameworkSequentialRegressionSelectorList() {

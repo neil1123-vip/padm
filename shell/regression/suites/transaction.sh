@@ -8,17 +8,17 @@ listRegressionTransactionChildSelectors() {
 
 listRegressionTransactionCoreSelectorEntries() {
     printf '%s\n' \
+        'heavy core-install-service-action-failure' \
+        'light core-template-return-failure' \
+        'light reality-profile-failure' \
         'medium config-transaction' \
         'heavy core-port-file-transaction' \
         'medium entry-helper-config' \
         'light core-safety-rollback' \
-        'light reality-profile-failure' \
         'light sing-box-reality-key-transaction' \
-        'light core-template-return-failure' \
         'light tls-failure-return' \
         'light tls-reinstall-rollback' \
         'medium tls-renew-failure-propagation' \
-        'heavy core-install-service-action-failure' \
         'medium sing-box-merge-config-transaction' \
         'light sing-box-uninstall-failure-propagation' \
         'light sing-box-protocol-reload-failure' \

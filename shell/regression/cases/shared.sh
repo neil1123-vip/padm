@@ -12,12 +12,6 @@ SUBSCRIBE_CAPTURE_DIR="${TMP_DIR}/subscribe_local"
 configPath="${TMP_DIR}/xray-conf/"
 singBoxConfigPath="${TMP_DIR}/sing-box-conf/"
 
-regressionFindHasMatches() {
-    local firstMatch
-    firstMatch=$(find "$@" -print -quit 2>/dev/null) || return 1
-    [[ -n "${firstMatch}" ]]
-}
-
 readInstallType() {
     coreInstallType=${coreInstallType:-1}
 }
