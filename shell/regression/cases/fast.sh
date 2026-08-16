@@ -1903,14 +1903,14 @@ JSON
 )
 
 runSubscriptionOutputRandomUserRegression() (
-    local subscribeCaptureDir="${TMP_DIR}/subscribe-output-random-user"
-    export PADM_SUBSCRIBE_LOCAL_DIR="${subscribeCaptureDir}"
-    rm -rf "${subscribeCaptureDir}"
+    local SUBSCRIBE_CAPTURE_DIR="${TMP_DIR}/subscribe-output-random-user"
+    export PADM_SUBSCRIBE_LOCAL_DIR="${SUBSCRIBE_CAPTURE_DIR}"
+    rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
     currentHost="tls.example.com"
     defaultBase64Code vlesstcp 443 "padm-abcdef12-VLESS_TCP/TLS_Vision" uuid-tls "" ""
-    [[ -f "${subscribeCaptureDir}/default/padm-abcdef12" ]]
-    [[ ! -e "${subscribeCaptureDir}/default/padm" ]]
-    [[ -f "${subscribeCaptureDir}/sing-box/padm-abcdef12" ]]
+    [[ -f "${SUBSCRIBE_CAPTURE_DIR}/default/padm-abcdef12" ]]
+    [[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/default/padm" ]]
+    [[ -f "${SUBSCRIBE_CAPTURE_DIR}/sing-box/padm-abcdef12" ]]
 )
 
 runManagedFileBackupManifestRegression() (
