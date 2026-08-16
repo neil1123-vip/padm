@@ -34,6 +34,252 @@ assertDisplayedDefaultSubscribeLink() {
     ' "${SUBSCRIBE_CAPTURE_DIR}/screen.log"
 }
 
+runSubscribeLocalRollbackRegression() (
+    local rootRel="${TMP_DIR}/subscribe-local-rollback"
+    local root localDir publicDir errorLog callLog beforeSnapshot beforePublicSnapshot
+    local oldLocalDir="${PADM_SUBSCRIBE_LOCAL_DIR:-}"
+    local oldPublicDir="${PADM_SUBSCRIBE_DIR:-}"
+    local oldTmpDir="${TMPDIR:-}"
+    local oldSubscribeSalt="${subscribeSalt:-}"
+    local renderCalls=0
+    local showAccountsCalls=0
+    local rc
+
+    captureSubscribeLocalSnapshot() {
+        find "${localDir}" -type f -printf '%P\t' -exec cat {} \; | sort
+    }
+    captureSubscribePublicSnapshot() {
+        find "${publicDir}" -type f -printf '%P\t' -exec cat {} \; | sort
+    }
+
+    mkdir -p "${rootRel}"
+    root=$(cd -- "${rootRel}" && pwd -P)
+    localDir="${root}/subscribe_local"
+    publicDir="${root}/subscribe_public"
+    errorLog="${root}/error.log"
+    callLog="${root}/calls.log"
+    beforeSnapshot="${root}/before.txt"
+    beforePublicSnapshot="${root}/before-public.txt"
+    source "${PROJECT_ROOT}/shell/core/manage.sh"
+    export PADM_SUBSCRIBE_LOCAL_DIR="${localDir}"
+    export PADM_SUBSCRIBE_DIR="${publicDir}"
+    TMPDIR="${root}"
+    REGRESSION_ERROR_CARD_LOG="${errorLog}"
+    mkdir -p "${localDir}/default" "${localDir}/clashMeta" "${localDir}/sing-box"
+    mkdir -p "${publicDir}/default" "${publicDir}/clashMeta" "${publicDir}/clashMetaProfiles" "${publicDir}/sing-box" "${publicDir}/sing-box_profiles"
+    printf 'existing-salt\n' >"${localDir}/subscribeSalt"
+    printf 'old default\n' >"${localDir}/default/existing"
+    printf 'old clash\n' >"${localDir}/clashMeta/existing"
+    printf '[{"tag":"old-local"}]\n' >"${localDir}/sing-box/existing"
+    printf 'old public\n' >"${publicDir}/default/existing"
+    subscribeSalt=existing-salt
+    captureSubscribeLocalSnapshot >"${beforeSnapshot}"
+    captureSubscribePublicSnapshot >"${beforePublicSnapshot}"
+
+    readInstallProtocolType() { return 0; }
+    readNginxSubscribe() { return 0; }
+    installSubscribe() { return 0; }
+    renderAllSubscribeUserOutputs() {
+        renderCalls=$((renderCalls + 1))
+        printf 'render\n' >>"${callLog}"
+        return 0
+    }
+
+    : >"${errorLog}"
+    : >"${callLog}"
+    showAccountsCalls=0
+    resolveSubscribeSalt() {
+        writeSubscribeSalt "$1" "new-salt"
+        subscribeSalt="new-salt"
+        return 1
+    }
+    showAccounts() {
+        showAccountsCalls=$((showAccountsCalls + 1))
+        printf 'showAccounts\n' >>"${callLog}"
+        return 0
+    }
+    coreInstallType=1
+    set +e
+    subscribe false true >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${showAccountsCalls}" == "0" ]]
+    [[ "${renderCalls}" == "0" ]]
+    [[ "${subscribeSalt}" == "existing-salt" ]]
+    [[ "$(<"${localDir}/subscribeSalt")" == "existing-salt" ]]
+    diff -u "${beforeSnapshot}" <(captureSubscribeLocalSnapshot)
+    grep -q '订阅 Salt 初始化失败，已恢复旧订阅输出' "${errorLog}"
+    ! regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-subscription-output-backup.*'
+
+    : >"${errorLog}"
+    : >"${callLog}"
+    renderCalls=0
+    showAccountsCalls=0
+    resolveSubscribeSalt() {
+        writeSubscribeSalt "$1" "new-salt"
+        subscribeSalt="new-salt"
+        return 0
+    }
+    showAccounts() {
+        showAccountsCalls=$((showAccountsCalls + 1))
+        printf 'showAccounts\n' >>"${callLog}"
+        printf 'new default\n' >"${localDir}/default/existing"
+        printf 'new clash\n' >"${localDir}/clashMeta/existing"
+        printf '[{"tag":"new-local"}]\n' >"${localDir}/sing-box/existing"
+        return 1
+    }
+    set +e
+    subscribe false true >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${showAccountsCalls}" == "1" ]]
+    [[ "${renderCalls}" == "0" ]]
+    [[ "${subscribeSalt}" == "existing-salt" ]]
+    [[ "$(<"${localDir}/subscribeSalt")" == "existing-salt" ]]
+    diff -u "${beforeSnapshot}" <(captureSubscribeLocalSnapshot)
+    grep -q '订阅生成失败：重建本地订阅失败，已恢复旧订阅输出' "${errorLog}"
+    grep -qx 'showAccounts' "${callLog}"
+    ! regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-subscription-output-backup.*'
+
+    : >"${errorLog}"
+    : >"${callLog}"
+    renderCalls=0
+    showAccountsCalls=0
+    resolveSubscribeSalt() {
+        writeSubscribeSalt "$1" "new-salt"
+        subscribeSalt="new-salt"
+        return 0
+    }
+    showAccounts() {
+        showAccountsCalls=$((showAccountsCalls + 1))
+        printf 'showAccounts\n' >>"${callLog}"
+        printf 'new default\n' >"${localDir}/default/existing"
+        printf 'new clash\n' >"${localDir}/clashMeta/existing"
+        printf '[{"tag":"new-local"}]\n' >"${localDir}/sing-box/existing"
+        return 0
+    }
+    renderAllSubscribeUserOutputs() {
+        renderCalls=$((renderCalls + 1))
+        printf 'render\n' >>"${callLog}"
+        [[ "${PADM_SUBSCRIBE_DIR}" != "${publicDir}" ]] || return 1
+        printf 'new public\n' >"${PADM_SUBSCRIBE_DIR}/default/existing"
+        printf 'first account published\n' >"${PADM_SUBSCRIBE_DIR}/default/first-account"
+        return 1
+    }
+    set +e
+    subscribe false true >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${showAccountsCalls}" == "1" ]]
+    [[ "${renderCalls}" == "1" ]]
+    [[ "${subscribeSalt}" == "existing-salt" ]]
+    [[ "$(<"${localDir}/subscribeSalt")" == "existing-salt" ]]
+    diff -u "${beforeSnapshot}" <(captureSubscribeLocalSnapshot)
+    diff -u "${beforePublicSnapshot}" <(captureSubscribePublicSnapshot)
+    [[ ! -e "${publicDir}/default/first-account" ]]
+    grep -q '订阅生成失败：生成订阅输出失败，已恢复旧订阅输出' "${errorLog}"
+    grep -qx 'showAccounts' "${callLog}"
+    grep -qx 'render' "${callLog}"
+    ! regressionFindHasMatches "${root}" -maxdepth 1 -type d \( -name 'padm-subscription-output-backup.*' -o -name 'padm-subscribe-publish.*' \)
+
+    : >"${errorLog}"
+    : >"${callLog}"
+    renderCalls=0
+    showAccountsCalls=0
+    renderAllSubscribeUserOutputs() {
+        renderCalls=$((renderCalls + 1))
+        printf 'render\n' >>"${callLog}"
+        printf 'new public\n' >"${PADM_SUBSCRIBE_DIR}/default/existing"
+        return 0
+    }
+    syncInstallDirectoryTree() {
+        return 1
+    }
+    set +e
+    subscribe false true >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${showAccountsCalls}" == "1" ]]
+    [[ "${renderCalls}" == "1" ]]
+    [[ "${subscribeSalt}" == "existing-salt" ]]
+    diff -u "${beforeSnapshot}" <(captureSubscribeLocalSnapshot)
+    diff -u "${beforePublicSnapshot}" <(captureSubscribePublicSnapshot)
+    grep -q '订阅生成失败：发布订阅输出失败，已恢复旧订阅输出' "${errorLog}"
+    ! regressionFindHasMatches "${root}" -maxdepth 1 -type d \( -name 'padm-subscription-output-backup.*' -o -name 'padm-subscribe-publish.*' \)
+
+    if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
+    if [[ -n "${oldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
+    if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+    if [[ -n "${oldSubscribeSalt}" ]]; then subscribeSalt="${oldSubscribeSalt}"; else unset subscribeSalt; fi
+)
+
+runSubscriptionGroupsBackupFailureRegression() (
+    local root="${TMP_DIR}/subscription-groups-backup-failure"
+    local groupsDir="${root}/subscribe_groups"
+    local backupsDir="${groupsDir}/backups"
+    local stateFile="${groupsDir}/groups.json"
+    local oldGroupsDir="${PADM_SUBSCRIPTION_GROUPS_DIR:-}"
+    local oldTmpDir="${TMPDIR:-}"
+    local beforeSnapshot
+    local backupModeLog="${root}/backup-mode.log"
+    local chmodLog="${root}/chmod.log"
+    local backupFile
+    local rc
+
+    source "${PROJECT_ROOT}/shell/subscription/groups.sh"
+    export PADM_SUBSCRIPTION_GROUPS_DIR="${groupsDir}"
+    TMPDIR="${root}"
+    mkdir -p "${groupsDir}"
+    cat >"${stateFile}" <<'JSON'
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"默认订阅组","admin":{"id":"admin","name":"我的订阅","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"本机","role":"main","transport":"local","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+JSON
+    beforeSnapshot=$(<"${stateFile}")
+    : >"${backupModeLog}"
+    : >"${chmodLog}"
+    eval "$(declare -f backupManagedFileToPath | sed '1s/^backupManagedFileToPath/originalBackupManagedFileToPath/')"
+    backupManagedFileToPath() {
+        printf '%s|%s|%s\n' "$1" "$2" "${3:-}" >>"${backupModeLog}"
+        originalBackupManagedFileToPath "$@"
+    }
+
+    cp() {
+        return 1
+    }
+
+    set +e
+    backupFile=$(createSubscriptionGroupsBackup)
+    rc=$?
+    set -e
+    unset -f cp
+    [[ "${rc}" == "1" ]]
+    [[ -z "${backupFile}" ]]
+    [[ "$(<"${stateFile}")" == "${beforeSnapshot}" ]]
+    if regressionFindHasMatches "${backupsDir}" -maxdepth 1 -type f -name 'groups-*.json'; then
+        return 1
+    fi
+    chmod() {
+        printf '%s\n' "$*" >>"${chmodLog}"
+        command chmod "$@"
+    }
+    backupFile=$(createSubscriptionGroupsBackup)
+    [[ -f "${backupFile}" ]]
+    grep -Fxq "${stateFile}|${backupFile}|600" "${backupModeLog}"
+    grep -Fxq "700 ${backupsDir}" "${chmodLog}"
+    command chmod 755 "${backupsDir}"
+    command chmod 644 "${backupFile}"
+    : >"${chmodLog}"
+    subscriptionGroupsSecureStateFiles
+    grep -Fxq "700 ${backupsDir}" "${chmodLog}"
+    grep -Fxq "600 ${backupFile}" "${chmodLog}"
+
+    if [[ -n "${oldGroupsDir}" ]]; then export PADM_SUBSCRIPTION_GROUPS_DIR="${oldGroupsDir}"; else unset PADM_SUBSCRIPTION_GROUPS_DIR; fi
+    if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+)
+
 runSubscriptionOutputProfileAndRealityRegression() {
     local SUBSCRIBE_CAPTURE_DIR="${SUBSCRIBE_CAPTURE_DIR}-${BASHPID:-$$}"
     local PADM_SUBSCRIBE_LOCAL_DIR="${SUBSCRIBE_CAPTURE_DIR}"

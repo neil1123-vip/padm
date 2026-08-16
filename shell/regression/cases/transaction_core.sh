@@ -14,6 +14,462 @@ if ! declare -F regressionProtocolSelectionIncludesCompat >/dev/null 2>&1; then
     }
 fi
 
+runCoreReleaseArchiveRejectsRegression() (
+    local mode=$1
+    local root="${TMP_DIR}/core-release-archive-${mode}"
+    local tmpDir="${root}/tmp"
+    local xrayRc singBoxRc
+    local xrayListing singBoxListing singBoxLongListing singBoxExtract
+
+    rm -rf "${root}"
+    mkdir -p "${tmpDir}"
+    xrayCoreCPUVendor=Xray-linux-64
+    singBoxCoreCPUVendor=-linux-amd64
+    if [[ "${mode}" == "symlink-payload" ]]; then
+        xrayListing=xray
+        singBoxListing=$'sing-box-1.2.3-linux-amd64/\nsing-box-1.2.3-linux-amd64/sing-box\nsing-box-1.2.3-linux-amd64/libcronet.so'
+        singBoxLongListing=$'drwxr-xr-x root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/\n-rwxr-xr-x root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/sing-box\nlrwxrwxrwx root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/libcronet.so -> /tmp/libcronet.so'
+        singBoxExtract=$'sing-box\ncronet'
+    else
+        xrayListing=../xray
+        singBoxListing=../sing-box
+        singBoxLongListing='-rw-r--r-- root/root 0 2026-01-01 00:00 ../sing-box'
+        singBoxExtract=sing-box
+    fi
+    downloadGitHubReleaseAsset() {
+        local outputDir= assetName=
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+            -P) outputDir=$2; shift 2 ;;
+            *) assetName=$1; shift ;;
+            esac
+        done
+        mkdir -p "${outputDir}"
+        : >"${outputDir}/${assetName}"
+    }
+    unzip() {
+        if [[ "${1:-}" == "-Z1" ]]; then
+            printf '%s\n' "${xrayListing}"
+            return 0
+        fi
+        if [[ "${mode}" == "symlink-payload" && "${1:-}" == "-Z" && "${2:-}" == "-l" ]]; then
+            printf '%s\n' 'lrwxrwxrwx  3.0 unx 0 b- 0% 2026-01-01 00:00 xray'
+            return 0
+        fi
+        if [[ "${1:-}" == "-p" ]]; then
+            printf 'xray\n'
+            return 0
+        fi
+        local dest=
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+            -d) dest=$2; shift 2 ;;
+            *) shift ;;
+            esac
+        done
+        if [[ "${mode}" == "symlink-payload" ]]; then
+            mkdir -p "${dest}/xray"
+        else
+            printf '#!/usr/bin/env bash\nexit 0\n' >"${dest}/xray"
+            chmod 755 "${dest}/xray"
+        fi
+    }
+    tar() {
+        case "$1" in
+        -tzf) printf '%s\n' "${singBoxListing}"; return 0 ;;
+        -tvzf) printf '%s\n' "${singBoxLongListing}"; return 0 ;;
+        -xOzf) printf '%s\n' "${singBoxExtract}"; return 0 ;;
+        esac
+        local dest=
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+            -C) dest=$2; shift 2 ;;
+            *) shift ;;
+            esac
+        done
+        mkdir -p "${dest}/sing-box-1.2.3-linux-amd64"
+        printf '#!/usr/bin/env bash\nexit 0\n' >"${dest}/sing-box-1.2.3-linux-amd64/sing-box"
+        printf 'cronet\n' >"${dest}/sing-box-1.2.3-linux-amd64/libcronet.so"
+        chmod 755 "${dest}/sing-box-1.2.3-linux-amd64/sing-box"
+    }
+
+    set +e
+    downloadXrayReleaseBinaryToTempDir v1.2.3 "${tmpDir}/xray"
+    xrayRc=$?
+    downloadSingBoxReleaseBinaryToTempDir v1.2.3 "${tmpDir}/sing"
+    singBoxRc=$?
+    set -e
+
+    [[ "${xrayRc}" -ne 0 ]]
+    [[ "${singBoxRc}" -ne 0 ]]
+)
+
+runCoreFirstInstallCommitFailureRollbackRegression() (
+    local rootRel="${TMP_DIR}/core-first-install-commit-failure"
+    local root
+    local xrayDir
+    local singBoxDir
+    local errorLog
+    local copyLog
+    local rmLog
+    local xrayRc singBoxRc
+
+    mkdir -p "${rootRel}/tmp" "${rootRel}/sing-box"
+    root=$(cd -- "${rootRel}" && pwd -P)
+    xrayDir="${root}/xray"
+    singBoxDir="${root}/sing-box"
+    printf 'old-cronet\n' >"${singBoxDir}/libcronet.so"
+    errorLog="${root}/error.log"
+    copyLog="${root}/copy.log"
+    rmLog="${root}/rm.log"
+    : >"${errorLog}"
+    : >"${copyLog}"
+    : >"${rmLog}"
+
+    PADM_XRAY_BINARY="${xrayDir}/xray"
+    PADM_SINGBOX_BINARY="${singBoxDir}/sing-box"
+    xrayCoreCPUVendor=linux-64
+    singBoxCoreCPUVendor=-linux-amd64
+    TMPDIR="${root}/tmp"
+
+    readInstallType() { return 0; }
+    errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+    coreLatestReleaseTag() { printf 'v1.2.3\n'; }
+    checkVersionNotEmpty() { [[ -n "$1" ]]; }
+    padmCreateTempPath() {
+        local resultVar=$1
+        local path
+        shift
+        if [[ "${1:-}" == "-d" ]]; then
+            path=$(mktemp -d "${TMPDIR}/core.XXXXXX") || return 1
+        else
+            path=$(mktemp "${TMPDIR}/core.XXXXXX") || return 1
+        fi
+        printf -v "${resultVar}" '%s' "${path}"
+    }
+    padmCreateTempFileForTarget() {
+        local resultVar=$1
+        local targetFile=$2
+        local targetDir targetName
+        targetDir=$(dirname -- "${targetFile}")
+        targetName=$(basename -- "${targetFile}")
+        mkdir -p "${targetDir}" || return 1
+        path=$(cd -- "${targetDir}" && mktemp ".${targetName}.install.XXXXXX") || return 1
+        printf -v "${resultVar}" '%s' "${targetDir}/${path}"
+    }
+    padmRemoveCleanupPath() { rm -rf "$1"; }
+    padmForgetCleanupPath() { return 0; }
+    removeManagedFileIfPresent() {
+        printf 'rm:%s\n' "$1" >>"${rmLog}"
+        command rm -f -- "$1"
+    }
+    commitGeneratedFile() {
+        local tmpFile=$1
+        local targetFile=$2
+        local mode=$3
+        [[ -n "${mode}" ]] && chmod "${mode}" "${tmpFile}" || return 1
+        if [[ "${targetFile}" == "${PADM_SINGBOX_BINARY}" ]]; then
+            return 1
+        fi
+        mv "${tmpFile}" "${targetFile}"
+    }
+    xrayInstalled() { return 1; }
+    singBoxInstalled() { return 1; }
+    ensureXrayGeoFiles() { return 1; }
+    downloadXrayReleaseBinaryToTempDir() {
+        local version=$1
+        local tmpDir=$2
+        (
+            cd -- "${tmpDir}" || return 1
+            printf '#!/usr/bin/env bash\nexit 0\n' >xray || return 1
+            chmod 755 xray || return 1
+        ) || return 1
+        return 0
+    }
+    downloadSingBoxReleaseBinaryToTempDir() {
+        local version=$1
+        local tmpDir=$2
+        local extractedDir="sing-box-${version/v/}${singBoxCoreCPUVendor}"
+        (
+            cd -- "${tmpDir}" || return 1
+            mkdir -p "${extractedDir}" || return 1
+            printf '#!/usr/bin/env bash\nexit 0\n' >"${extractedDir}/sing-box" || return 1
+            printf 'cronet\n' >"${extractedDir}/libcronet.so" || return 1
+            chmod 755 "${extractedDir}/sing-box" || return 1
+        ) || return 1
+        return 0
+    }
+    cp() {
+        local sourcePath=$1
+        local targetPath=$2
+        printf '%s -> %s\n' "${sourcePath}" "${targetPath}" >>"${copyLog}"
+        command cp "$@"
+    }
+
+    set +e
+    ( installXray 1 false >/dev/null 2>&1 )
+    xrayRc=$?
+    ( installSingBox 1 >/dev/null 2>&1 )
+    singBoxRc=$?
+    set -e
+
+    [[ "${xrayRc}" == "1" ]]
+    [[ "${singBoxRc}" == "1" ]]
+    [[ ! -e "${xrayDir}/xray" ]]
+    [[ ! -e "${singBoxDir}/sing-box" ]]
+    [[ -e "${singBoxDir}/libcronet.so" ]] || return 1
+    [[ "$(<"${singBoxDir}/libcronet.so")" == 'old-cronet' ]] || return 1
+    grep -qxF "rm:${xrayDir}/xray" "${rmLog}"
+    grep -q 'sing-box安装失败' "${errorLog}"
+    ! grep -q 'cronet依赖回滚失败' "${errorLog}"
+
+    rm -f "${singBoxDir}/libcronet.so"
+    set +e
+    ( installSingBox 1 >/dev/null 2>&1 )
+    singBoxRc=$?
+    set -e
+    [[ "${singBoxRc}" == "1" ]]
+    [[ ! -e "${singBoxDir}/sing-box" ]]
+    [[ ! -e "${singBoxDir}/libcronet.so" ]] || return 1
+)
+
+runCoreInstallRejectsUnsafeBinaryPathRegression() (
+    local root="${TMP_DIR}/core-install-unsafe-binary"
+    local errorLog="${root}/error.log"
+    local xrayRc singBoxRc
+
+    mkdir -p "${root}"
+    : >"${errorLog}"
+
+    PADM_XRAY_BINARY="relative/xray"
+    PADM_SINGBOX_BINARY="relative/sing-box"
+    xrayCoreCPUVendor=linux-64
+    singBoxCoreCPUVendor=-linux-amd64
+
+    readInstallType() { return 0; }
+    errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+    coreLatestReleaseTag() { printf 'v1.2.3\n'; }
+    checkVersionNotEmpty() { [[ -n "$1" ]]; }
+    ensureXrayGeoFiles() { return 0; }
+    padmCreateTempPath() {
+        local resultVar=$1
+        local path
+        shift
+        if [[ "${1:-}" == "-d" ]]; then
+            path=$(mktemp -d "${root}/tmp.XXXXXX") || return 1
+        else
+            path=$(mktemp "${root}/tmp.XXXXXX") || return 1
+        fi
+        printf -v "${resultVar}" '%s' "${path}"
+    }
+    padmRemoveCleanupPath() { rm -rf "$1"; }
+    downloadGitHubReleaseAsset() { return 0; }
+    unzip() {
+        if [[ "${1:-}" == "-Z1" ]]; then
+            printf 'xray\n'
+            return 0
+        fi
+        if [[ "${1:-}" == "-Z" && "${2:-}" == "-l" ]]; then
+            printf '%s\n' '-rwxr-xr-x  3.0 unx 0 b- 0% 2026-01-01 00:00 xray'
+            return 0
+        fi
+        if [[ "${1:-}" == "-p" ]]; then
+            printf 'xray\n'
+            return 0
+        fi
+        local dest=
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+            -d)
+                dest=$2
+                shift 2
+                ;;
+            *)
+                shift
+                ;;
+            esac
+        done
+        printf '#!/usr/bin/env bash\nexit 0\n' >"${dest}/xray"
+        chmod 755 "${dest}/xray"
+    }
+    tar() {
+        case "${1:-}" in
+        -tzf)
+            printf 'sing-box-1.2.3-linux-amd64/\nsing-box-1.2.3-linux-amd64/sing-box\nsing-box-1.2.3-linux-amd64/libcronet.so\n'
+            return 0
+            ;;
+        -tvzf)
+            printf '%s\n' 'drwxr-xr-x root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/'
+            printf '%s\n' '-rwxr-xr-x root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/sing-box'
+            printf '%s\n' '-rw-r--r-- root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/libcronet.so'
+            return 0
+            ;;
+        -xOzf)
+            printf 'sing-box\ncronet\n'
+            return 0
+            ;;
+        esac
+        local dest=
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+            -C)
+                dest=$2
+                shift 2
+                ;;
+            *)
+                shift
+                ;;
+            esac
+        done
+        mkdir -p "${dest}/sing-box-1.2.3-linux-amd64"
+        printf '#!/usr/bin/env bash\nexit 0\n' >"${dest}/sing-box-1.2.3-linux-amd64/sing-box"
+        printf 'cronet\n' >"${dest}/sing-box-1.2.3-linux-amd64/libcronet.so"
+        chmod 755 "${dest}/sing-box-1.2.3-linux-amd64/sing-box"
+    }
+
+    set +e
+    ( installXray 1 false >/dev/null 2>&1 )
+    xrayRc=$?
+    ( installSingBox 1 >/dev/null 2>&1 )
+    singBoxRc=$?
+    set -e
+
+    [[ "${xrayRc}" == "1" ]]
+    [[ "${singBoxRc}" == "1" ]]
+    grep -q 'Xray-core安装路径异常' "${errorLog}"
+    grep -q 'sing-box安装路径异常' "${errorLog}"
+)
+
+runCoreCleanupFailurePropagationRegression() (
+    local root="${TMP_DIR}/core-cleanup-failure"
+    local serviceLog="${root}/service.log"
+    local rmLog="${root}/rm.log"
+    local errorLog="${root}/error.log"
+    local reachedFile="${root}/reached"
+    local queueLog="${root}/queue.log"
+    local rc
+
+    mkdir -p "${root}/xray" "${root}/sing-box" "${root}/nginx"
+    configPath="${root}/xray/"
+    singBoxConfigPath="${root}/sing-box/"
+    nginxConfigPath="${root}/nginx/"
+    PADM_REALITY_ENTRY_HOST_FILE="${root}/reality_entry_host"
+    : >"${serviceLog}"
+    : >"${rmLog}"
+    : >"${errorLog}"
+    REGRESSION_ERROR_CARD_LOG="${errorLog}"
+
+    rm() {
+        printf 'rm:%s\n' "$*" >>"${rmLog}"
+        return 0
+    }
+    handleXray() {
+        printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        printf 'cleanup\n' >>"${queueLog}"
+        return 1
+    }
+    handleSingBox() {
+        printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        return 0
+    }
+
+    SERVICE_QUEUE_ALLOW_FAILURE=previous
+    set +e
+    cleanUp xrayDel >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'xray:stop:true' "${serviceLog}"
+    grep -q 'Xray 服务停止失败，已取消清理旧核心' "${errorLog}"
+    [[ ! -s "${rmLog}" ]]
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    : >"${serviceLog}"
+    : >"${rmLog}"
+    : >"${errorLog}"
+    : >"${queueLog}"
+    command rm -f "${reachedFile}"
+    readLastInstallationConfig() { return 0; }
+    collectEntryProfile() { realityEntryHost=cleanup.example.com; return 0; }
+    persistRealityEntryProfile() { printf 'persist\n' >>"${queueLog}"; return 0; }
+    unInstallSubscribe() { return 0; }
+    installTools() { return 0; }
+    installSingBox() { return 0; }
+    installSingBoxService() { return 0; }
+    initSingBoxConfig() { return 0; }
+    serviceQueueRestart() {
+        printf 'restart:%s\n' "$1" >>"${queueLog}"
+        return 0
+    }
+    serviceQueueApply() {
+        printf 'apply\n' >>"${queueLog}"
+        return 0
+    }
+    checkGFWStatue() {
+        printf 'check\n' >>"${queueLog}"
+        printf 'reached\n' >"${reachedFile}"
+        return 0
+    }
+    showAccounts() {
+        printf 'reached\n' >"${reachedFile}"
+        return 0
+    }
+
+    set +e
+    installSingBoxReality >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'xray:stop:true' "${serviceLog}"
+    ! grep -q '/etc/padm/xray' "${rmLog}"
+    [[ "$(<"${queueLog}")" == $'restart:sing-box\napply\npersist\ncheck\ncleanup' ]]
+    [[ -e "${reachedFile}" ]]
+
+    (
+        local switchRoot="${root}/switch-rollback"
+        local oldCoreDir="${switchRoot}/xray"
+        local switchLog="${switchRoot}/switch.log"
+        local xrayServiceRunning=true
+        local switchRc
+
+        mkdir -p "${oldCoreDir}"
+        printf 'old-core\n' >"${oldCoreDir}/state"
+        : >"${switchLog}"
+        PADM_XRAY_BINARY="${oldCoreDir}/xray"
+        rm() { command rm "$@"; }
+        coreTemplateConfigBackupCreate() {
+            printf -v "$1" '%s' "${switchRoot}/config-backup"
+        }
+        checkLogBackupRestore() {
+            printf 'config-restore\n' >>"${switchLog}"
+        }
+        xrayRunning() { [[ "${xrayServiceRunning}" == "true" ]]; }
+        singBoxRunning() { return 1; }
+        handleXray() {
+            if [[ "$1" == "start" && -f "${oldCoreDir}/state" ]]; then
+                printf 'xray:start:restored\n' >>"${switchLog}"
+                xrayServiceRunning=true
+                return 0
+            fi
+            printf 'xray:%s:missing\n' "$1" >>"${switchLog}"
+            return 1
+        }
+        failingSwitch() {
+            xrayServiceRunning=false
+            mv "${oldCoreDir}" "${oldCoreDir}.removed"
+            return 7
+        }
+
+        set +e
+        coreSwitchConfigTransaction sing-box failingSwitch >/dev/null 2>&1
+        switchRc=$?
+        set -e
+        [[ "${switchRc}" == "7" ]]
+        [[ "$(<"${oldCoreDir}/state")" == "old-core" ]]
+        [[ "$(<"${switchLog}")" == $'config-restore\nxray:start:restored' ]]
+    )
+)
+
 runCorePortFileTransactionRegression() {
     local oldTmpDir="${TMPDIR:-}"
     local configRoot

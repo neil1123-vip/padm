@@ -11,6 +11,7 @@ listRegressionTransactionCoreSelectorEntries() {
         'medium config-transaction' \
         'heavy core-port-file-transaction' \
         'medium entry-helper-config' \
+        'light core-safety-rollback' \
         'light reality-profile-failure' \
         'light sing-box-reality-key-transaction' \
         'light core-template-return-failure' \
@@ -121,6 +122,16 @@ runRegressionTransactionSystemSuiteRoot() {
 registerRegressionFunctionLeaf config-transaction runConfigTransactionRegression
 registerRegressionFunctionLeaf core-port-file-transaction runCorePortFileTransactionRegression
 registerRegressionFunctionLeaf entry-helper-config runEntryHelperConfigRegression
+runRegressionCoreSafetyRollback() (
+    set -euo pipefail
+    runCoreReleaseArchiveRejectsRegression unsafe-path
+    runCoreReleaseArchiveRejectsRegression symlink-payload
+    runCoreFirstInstallCommitFailureRollbackRegression
+    runCoreInstallRejectsUnsafeBinaryPathRegression
+    runCoreCleanupFailurePropagationRegression
+)
+
+registerRegressionFunctionLeaf core-safety-rollback runRegressionCoreSafetyRollback
 registerRegressionFunctionLeaf sing-box-reality-key-transaction runSingBoxRealityKeyTransactionRegression
 registerRegressionFunctionLeaf core-template-return-failure runCoreTemplateReturnFailureRegression
 registerRegressionFunctionLeaf core-install-service-action-failure runCoreInstallServiceActionFailureRegression

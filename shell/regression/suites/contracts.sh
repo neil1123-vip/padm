@@ -60,6 +60,40 @@ runRegressionRegistryRunnerArgsContract() (
     cmp -s "${expectedLog}" "${callLog}"
 )
 
+runRegressionParallelSelectorLimitCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-parallel-selector-limit-composition.log"
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        local selector=$1
+
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        [[ "${selector}" == "first" ]] && sleep 0.1
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+
+    PADM_REGRESSION_PARALLEL_JOBS=1 \
+        PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
+        PADM_REGRESSION_PARALLEL_SELECTOR_MODE=selectors \
+        runFrameworkParallelRegressionSelectors "${TMP_DIR}/parallel-selector-limit-composition" \
+        first \
+        second \
+        third
+
+    awk '
+        $0 == "first-finish" { firstFinish = NR }
+        $0 == "second-start" { secondStart = NR }
+        $0 == "second-finish" { secondFinish = NR }
+        $0 == "third-start" { thirdStart = NR }
+        END {
+            exit !(firstFinish && secondStart && secondFinish && thirdStart &&
+                firstFinish < secondStart && secondFinish < thirdStart)
+        }
+    ' "${callLog}"
+)
+
 runFrameworkParallelInterruptCleansChildrenContract() (
     set -euo pipefail
     local childPidFile="${TMP_DIR}/framework-parallel-interrupt-child.pid"
@@ -272,6 +306,7 @@ runRegressionCaseLoaderContract() (
 
 runRegressionDispatcherContracts() {
     runRegressionStep registry-runner-args runRegressionRegistryRunnerArgsContract
+    runRegressionStep parallel-selector-limit runRegressionParallelSelectorLimitCompositionRegression
     runRegressionStep parallel-interrupt-cleans-children runFrameworkParallelInterruptCleansChildrenContract
     runRegressionStep parallel-collects-exited-child runParallelSelectorCollectsExitedChildWithoutRcContract
     runRegressionStep transaction-system-dispatches-children-once runTransactionSystemAggregateDispatchesChildrenExactlyOnceContract

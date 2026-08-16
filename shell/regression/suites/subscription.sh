@@ -14,10 +14,15 @@ listRegressionSubscriptionLightChildSelectors() {
         subscription-state
 }
 
+listRegressionSubscriptionHeavyChildSelectors() {
+    printf '%s\n' subscription-safety
+}
+
 listRegressionSubscriptionChildSelectors() {
     printf '%s\n' \
         subscription-output \
-        subscription-state
+        subscription-state \
+        subscription-safety
 }
 
 runSubscriptionSelectorListRegression() {
@@ -43,6 +48,8 @@ runRegressionSubscriptionSuiteRoot() {
     if [[ "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" == "all" ]]; then
         runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-parallel-light-${BASHPID:-$$}" \
             listRegressionSubscriptionLightChildSelectors
+        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-parallel-heavy-${BASHPID:-$$}" \
+            listRegressionSubscriptionHeavyChildSelectors
         return
     fi
 
@@ -72,5 +79,12 @@ registerRegressionFunctionLeaf subscription-output-profile-and-reality runSubscr
 registerRegressionFunctionLeaf subscription-output-publish-accounts-and-remote-hint runSubscriptionOutputPublishAccountsAndRemoteHintRegression
 registerRegressionFunctionLeaf subscription-output-tls-vless-vmess-trojan runSubscriptionOutputTlsVlessVmessTrojanRegression
 registerRegressionFunctionLeaf subscription-output-tls-any-hysteria-tuic-naive runSubscriptionOutputTlsAnyHysteriaTuicNaiveRegression
+runRegressionSubscriptionSafety() (
+    set -euo pipefail
+    runSubscribeLocalRollbackRegression
+    runSubscriptionGroupsBackupFailureRegression
+)
+
+registerRegressionFunctionLeaf subscription-safety runRegressionSubscriptionSafety
 registerRegressionAggregateRunner parallel subscription runRegressionSubscriptionSuiteRoot \
     $(listRegressionSubscriptionChildSelectors)

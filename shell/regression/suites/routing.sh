@@ -15,7 +15,8 @@ listRegressionRoutingHeavyChildSelectors() {
 listRegressionRoutingLightChildSelectors() {
     printf '%s\n' \
         routing-core-unsafe-config-dir \
-        routing-access-control-failure-return
+        routing-access-control-failure-return \
+        routing-safety
 }
 
 listRegressionRoutingChildSelectors() {
@@ -50,6 +51,15 @@ registerRegressionFunctionLeaf routing-core-unsafe-config-dir runRoutingCoreReje
 registerRegressionFunctionLeaf routing-access-control-config-transaction runAccessControlConfigTransactionRegression
 registerRegressionFunctionLeaf routing-access-control-failure-return runAccessControlFailureReturnRegression
 registerRegressionFunctionLeaf routing-dns-failure-return runDNSRoutingFailureReturnRegression
+runRegressionRoutingSafety() (
+    set -euo pipefail
+    runRoutingRejectsUnsafeDirRegression access-control backup
+    runRoutingRejectsUnsafeDirRegression access-control config
+    runRoutingRejectsUnsafeDirRegression dns-routing backup
+    runRoutingRejectsUnsafeDirRegression dns-routing config
+)
+
+registerRegressionFunctionLeaf routing-safety runRegressionRoutingSafety
 
 registerRegressionAggregateRunner parallel routing runRegressionRoutingSuiteRoot \
     $(listRegressionRoutingChildSelectors)

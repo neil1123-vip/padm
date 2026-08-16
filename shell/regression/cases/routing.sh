@@ -673,6 +673,92 @@ JSON
     grep -q '核心重载失败，且回滚失败' "${statusLog}"
 )
 
+runRoutingRejectsUnsafeDirRegression() (
+    local routing=$1
+    local dirType=$2
+    local backupDirVar backupCreateFn backupCleanupFn backupRestoreFn configFile
+    local root="${TMP_DIR}/${routing}-unsafe-${dirType}"
+    local rmLog="${root}/rm.log"
+    local backupDir="${root}/backup"
+    local rc
+
+    case "${routing}" in
+    access-control)
+        backupDirVar=PADM_ACCESS_CONTROL_BACKUP_DIR
+        backupCreateFn=accessControlBackupCreate
+        backupCleanupFn=accessControlBackupCleanup
+        backupRestoreFn=accessControlBackupRestore
+        configFile=09_routing.json
+        ;;
+    dns-routing)
+        backupDirVar=PADM_DNS_ROUTING_BACKUP_DIR
+        backupCreateFn=dnsRoutingBackupCreate
+        backupCleanupFn=dnsRoutingBackupCleanup
+        backupRestoreFn=dnsRoutingBackupRestore
+        configFile=11_dns.json
+        ;;
+    *) return 1 ;;
+    esac
+
+    mkdir -p "${root}"
+    : >"${rmLog}"
+    singBoxConfigPath=
+    if [[ "${dirType}" == "backup" ]]; then
+        printf -v "${backupDirVar}" '%s' relative-backup
+        configPath="${root}/xray/"
+        mkdir -p "${configPath}"
+    elif [[ "${dirType}" == "config" ]]; then
+        configPath=relative-config/
+        printf -v "${backupDirVar}" '%s' "${backupDir}"
+    else
+        return 1
+    fi
+
+    rm() {
+        printf 'rm:%s\n' "$*" >>"${rmLog}"
+        command rm "$@"
+    }
+
+    set +e
+    "${backupCreateFn}" >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ ! -s "${rmLog}" ]]
+
+    if [[ "${dirType}" == "backup" ]]; then
+        set +e
+        "${backupCleanupFn}" >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        [[ ! -s "${rmLog}" ]]
+
+        mkdir -p "${root}/relative-backup/xray"
+        printf 'old\n' >"${root}/relative-backup/xray/${configFile}"
+        (
+            cd "${root}"
+            set +e
+            "${backupRestoreFn}" >/dev/null 2>&1
+            rc=$?
+            set -e
+            [[ "${rc}" == "1" ]]
+        )
+    else
+        [[ ! -s "${rmLog}" ]]
+        [[ ! -e "${backupDir}" ]]
+
+        mkdir -p "${backupDir}/xray"
+        printf 'old\n' >"${backupDir}/xray/${configFile}"
+        set +e
+        "${backupRestoreFn}" >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+    fi
+    [[ ! -s "${rmLog}" ]]
+)
+
 runSocks5UdpAssociateRegression() (
     local root="${TMP_DIR}/socks5-udp-associate"
     local allowAllMode=true

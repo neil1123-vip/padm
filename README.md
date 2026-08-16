@@ -475,6 +475,9 @@ bash shell/subscription_groups_regression.sh protocol-capabilities
 bash shell/subscription_groups_regression.sh platform-hot
 bash shell/subscription_groups_regression.sh subscription-output
 bash shell/subscription_groups_regression.sh transaction-core
+bash shell/subscription_groups_regression.sh core-safety-rollback
+bash shell/subscription_groups_regression.sh routing-safety
+bash shell/subscription_groups_regression.sh subscription-safety
 bash shell/subscription_groups_regression.sh transaction-system
 bash shell/subscription_groups_regression.sh remote-control-smoke
 bash shell/subscription_groups_regression.sh remote-control-contract
