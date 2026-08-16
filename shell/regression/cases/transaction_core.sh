@@ -374,11 +374,7 @@ runCoreCleanupFailurePropagationRegression() (
     }
 
     SERVICE_QUEUE_ALLOW_FAILURE=previous
-    set +e
-    cleanUp xrayDel >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 cleanUp xrayDel >/dev/null 2>&1
     grep -qx 'xray:stop:true' "${serviceLog}"
     grep -q 'Xray 服务停止失败，已取消清理旧核心' "${errorLog}"
     [[ ! -s "${rmLog}" ]]
@@ -415,11 +411,7 @@ runCoreCleanupFailurePropagationRegression() (
         return 0
     }
 
-    set +e
-    installSingBoxReality >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 installSingBoxReality >/dev/null 2>&1
     grep -qx 'xray:stop:true' "${serviceLog}"
     ! grep -q '/etc/padm/xray' "${rmLog}"
     [[ "$(<"${queueLog}")" == $'restart:sing-box\napply\npersist\ncheck\ncleanup' ]]
@@ -460,11 +452,7 @@ runCoreCleanupFailurePropagationRegression() (
             return 7
         }
 
-        set +e
-        coreSwitchConfigTransaction sing-box failingSwitch >/dev/null 2>&1
-        switchRc=$?
-        set -e
-        [[ "${switchRc}" == "7" ]]
+        regressionExpectStatus 7 coreSwitchConfigTransaction sing-box failingSwitch >/dev/null 2>&1
         [[ "$(<"${oldCoreDir}/state")" == "old-core" ]]
         [[ "$(<"${switchLog}")" == $'config-restore\nxray:start:restored' ]]
     )
@@ -742,11 +730,7 @@ runCorePortFileTransactionRegression() {
         coreInstallType=1
         customPort=
 
-        set +e
-        originalAddCorePort >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 originalAddCorePort >/dev/null 2>&1
         grep -qx 'deny:2555:tcp' "${firewallLog}"
         grep -qx 'deny:2555:udp' "${firewallLog}"
         grep -qx 'deny:2666:tcp' "${firewallLog}"
@@ -770,11 +754,7 @@ runCorePortFileTransactionRegression() {
 
         denyTcpShouldFail=true
         : >"${firewallLog}"
-        set +e
-        originalAddCorePort >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 originalAddCorePort >/dev/null 2>&1
         grep -qx 'deny:2555:tcp' "${firewallLog}"
         grep -qx 'deny:2555:udp' "${firewallLog}"
     )
@@ -971,11 +951,7 @@ runCoreTemplateReturnFailureRegression() (
     rm -f "${firewallState}"
     : >"${firewallLog}"
     : >"${serviceLog}"
-    set +e
-    installSingBoxReality >/dev/null 2>&1
-    stopRc=$?
-    set -e
-    [[ "${stopRc}" == "1" ]]
+    regressionExpectStatus 1 installSingBoxReality >/dev/null 2>&1
     grep -qx 'ufw:10890:tcp' "${firewallLog}"
     grep -qx 'ufw:10890:udp' "${firewallLog}"
     [[ ! -e "${firewallState}" ]]
@@ -990,11 +966,7 @@ runCoreTemplateReturnFailureRegression() (
     padmFirewallStateAdd "port:ufw:tcp:10890"
     : >"${firewallLog}"
     : >"${serviceLog}"
-    set +e
-    installSingBoxReality >/dev/null 2>&1
-    stopRc=$?
-    set -e
-    [[ "${stopRc}" == "1" ]]
+    regressionExpectStatus 1 installSingBoxReality >/dev/null 2>&1
     grep -qx 'ufw:10890:tcp' "${firewallLog}"
     ! grep -q ':udp$' "${firewallLog}"
     [[ ! -e "${firewallState}" ]]
@@ -1240,11 +1212,7 @@ $1:refresh"
     }
 
     resetInstallServiceFixture nginx-stop-fail
-    set +e
-    installXrayReality >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "0" ]]
+    regressionExpectStatus 0 installXrayReality >/dev/null 2>&1
     ! grep -q '^nginx:' "${serviceLog}"
     grep -q '^installXray:' "${callLog}"
     ! grep -q '^wg-refresh$' "${callLog}"
@@ -1258,11 +1226,7 @@ $1:refresh"
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     resetInstallServiceFixture singbox-reality-grpc
-    set +e
-    customSingBoxInstall 26 >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "0" ]]
+    regressionExpectStatus 0 customSingBoxInstall 26 >/dev/null 2>&1
     ! grep -q '^nginx:' "${serviceLog}"
     ! grep -q '^initTLS:' "${callLog}"
     ! grep -q '^installTLS:' "${callLog}"
@@ -1274,40 +1238,24 @@ $1:refresh"
     [[ "$(<"${entryHostFile}")" == "install.example.com" ]]
 
     resetInstallServiceFixture path-fail
-    set +e
-    customXrayInstall 21 >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 customXrayInstall 21 >/dev/null 2>&1
     grep -qx 'path:4' "${callLog}"
     ! grep -q '^nginxBlog:' "${callLog}"
     ! grep -q '^installXray:' "${callLog}"
 
     resetInstallServiceFixture blog-fail
-    set +e
-    customXrayInstall 21 >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 customXrayInstall 21 >/dev/null 2>&1
     grep -qx 'nginxBlog:6' "${callLog}"
     ! grep -q '^installXray:' "${callLog}"
 
     resetInstallServiceFixture cron-fail
-    set +e
-    customXrayInstall 21 >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 customXrayInstall 21 >/dev/null 2>&1
     grep -qx 'cron:10' "${callLog}"
     ! grep -q '^queueApply$' "${callLog}"
     [[ ! -e "${reachedFile}" ]]
 
     resetInstallServiceFixture wg-refresh-fail
-    set +e
-    installXrayReality >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "0" ]]
+    regressionExpectStatus 0 installXrayReality >/dev/null 2>&1
     ! grep -q '^nginx:' "${serviceLog}"
     ! grep -q '^wg-refresh$' "${callLog}"
     grep -q '^installXray:' "${callLog}"
@@ -1316,11 +1264,7 @@ $1:refresh"
 
     resetInstallServiceFixture xray-config-fail
     SERVICE_ACTIONS="existing:start"
-    set +e
-    installXrayReality >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 installXrayReality >/dev/null 2>&1
     ! grep -q '^nginx:' "${serviceLog}"
     ! grep -q '^wg-refresh$' "${callLog}"
     ! grep -q '^queueRefresh:nginx$' "${callLog}"
@@ -1332,11 +1276,7 @@ $1:refresh"
 
     for mode in xray-install-exit xray-service-fail; do
         resetInstallServiceFixture "${mode}"
-        set +e
-        installXrayReality >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 installXrayReality >/dev/null 2>&1
         ! grep -q '^nginx:' "${serviceLog}"
         ! grep -q '^wg-refresh$' "${callLog}"
         ! grep -q '^queueRefresh:nginx$' "${callLog}"
@@ -1351,20 +1291,12 @@ $1:refresh"
     done
 
     resetInstallServiceFixture check-gfw-fail
-    set +e
-    installXrayReality >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 installXrayReality >/dev/null 2>&1
     ! grep -q '^nginx:' "${serviceLog}"
     [[ "${nginxRuntimeState}" == "true" ]] || return 1
 
     resetInstallServiceFixture nginx-start-fail
-    set +e
-    customXrayInstall 21 >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 customXrayInstall 21 >/dev/null 2>&1
     grep -qx 'nginx:start:true' "${serviceLog}"
     grep -qx 'nginx-mode:start restore' "${serviceLog}" || return 1
     [[ "${nginxRuntimeState}" == "true" ]] || return 1
@@ -1374,21 +1306,13 @@ $1:refresh"
 
     resetInstallServiceFixture xray-service-fail
     btDomain=panel.example.com
-    set +e
-    customXrayInstall 21 >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 customXrayInstall 21 >/dev/null 2>&1
     grep -qx 'customPort' "${callLog}"
     grep -qx 'ufw:2443:tcp' "${firewallLog}"
     [[ ! -e "${firewallState}" ]]
 
     resetInstallServiceFixture redirect-fail
-    set +e
-    customXrayInstall 21 >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 customXrayInstall 21 >/dev/null 2>&1
     grep -qx 'redirect' "${callLog}"
     ! grep -q '^nginx:start:' "${serviceLog}"
     ! grep -q '^installXray:' "${callLog}"
@@ -1396,11 +1320,7 @@ $1:refresh"
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     resetInstallServiceFixture no-local-cert
-    set +e
-    customXrayInstall 2 >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "0" ]]
+    regressionExpectStatus 0 customXrayInstall 2 >/dev/null 2>&1
     ! grep -q '^clean-nginx$' "${callLog}"
     ! grep -q '^initTLS:' "${callLog}"
     ! grep -q '^installTLS:' "${callLog}"
@@ -1412,11 +1332,7 @@ $1:refresh"
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     resetInstallServiceFixture xray-start-fail
-    set +e
-    xrayCoreInstall >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 xrayCoreInstall >/dev/null 2>&1
     grep -qx 'xray:stop:true' "${serviceLog}"
     grep -qx 'xray:start:true' "${serviceLog}"
     grep -qx 'nginx:start:true' "${serviceLog}" || return 1
@@ -1427,42 +1343,26 @@ $1:refresh"
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     resetInstallServiceFixture redirect-fail
-    set +e
-    xrayCoreInstall >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 xrayCoreInstall >/dev/null 2>&1
     grep -qx 'redirect' "${callLog}"
     ! grep -q '^xray:stop:' "${serviceLog}"
     [[ ! -e "${reachedFile}" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     resetInstallServiceFixture nginx-stop-fail
-    set +e
-    singBoxInstall >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 singBoxInstall >/dev/null 2>&1
     grep -qx 'nginx:stop:true' "${serviceLog}"
     ! grep -q '^installSingBox:' "${callLog}"
     [[ ! -e "${reachedFile}" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     resetInstallServiceFixture blog-fail
-    set +e
-    xrayCoreInstall >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 xrayCoreInstall >/dev/null 2>&1
     grep -qx 'nginxBlog:10' "${callLog}"
     ! grep -q '^redirect$' "${callLog}"
 
     resetInstallServiceFixture cron-fail
-    set +e
-    singBoxInstall >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 singBoxInstall >/dev/null 2>&1
     grep -qx 'cron:8' "${callLog}"
     grep -qx 'nginx:stop:true' "${serviceLog}"
     grep -qx 'nginx:start:true' "${serviceLog}" || return 1
@@ -1543,20 +1443,12 @@ SH
 
     printf '{"old":true}\n' >"${outputFile}"
     export PADM_FAKE_SINGBOX_MERGE_MODE=fail
-    set +e
-    singBoxMergeConfig >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 singBoxMergeConfig >/dev/null 2>&1
     [[ "$(<"${outputFile}")" == '{"old":true}' ]]
     ! compgen -G "${confDir}/.config.json.merge.*" >/dev/null
 
     export PADM_FAKE_SINGBOX_MERGE_MODE=empty
-    set +e
-    singBoxMergeConfig >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 singBoxMergeConfig >/dev/null 2>&1
     [[ "$(<"${outputFile}")" == '{"old":true}' ]]
     ! compgen -G "${confDir}/.config.json.merge.*" >/dev/null
 
@@ -1598,11 +1490,7 @@ SH
 
     : >"${checkLog}"
     export PADM_FAKE_SINGBOX_CHECK_MODE=fail
-    set +e
-    singBoxMergeConfigForValidation "${binary}" "${logFile}" check >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 singBoxMergeConfigForValidation "${binary}" "${logFile}" check >/dev/null 2>&1
     [[ "$(<"${outputFile}")" == '{"runtime":true}' ]]
     grep -q '^check:' "${checkLog}"
     ! grep -qx "check:${outputFile}" "${checkLog}"
@@ -1928,11 +1816,7 @@ runSingBoxProtocolReloadFailureRegression() (
         : >"${transactionLog}"
         certificateAvailable=false
         confirmValue=n
-        set +e
-        singBoxHysteria2Install >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 singBoxHysteria2Install >/dev/null 2>&1
         [[ ! -s "${certificateLog}" && ! -s "${transactionLog}" && ! -s "${xrayLog}" ]]
         [[ "${currentInstallProtocolType}" == ',1,' ]]
     )
@@ -2000,11 +1884,7 @@ runSingBoxProtocolReloadFailureRegression() (
         return 0
     }
 
-    set +e
-    singBoxTuicInstall >/dev/null 2>&1
-    tuicRc=$?
-    set -e
-    [[ "${tuicRc}" == "1" ]]
+    regressionExpectStatus 1 singBoxTuicInstall >/dev/null 2>&1
     grep -qx 'transaction:sing-box' "${callLog}"
     grep -qx 'config:custom 2 true' "${callLog}"
     grep -qx 'restart:sing-box' "${callLog}"
@@ -2015,11 +1895,7 @@ runSingBoxProtocolReloadFailureRegression() (
 
     : >"${callLog}"
     rm -f "${reachedFile}"
-    set +e
-    singBoxHysteria2Install >/dev/null 2>&1
-    hysteriaRc=$?
-    set -e
-    [[ "${hysteriaRc}" == "1" ]]
+    regressionExpectStatus 1 singBoxHysteria2Install >/dev/null 2>&1
     grep -qx 'transaction:sing-box' "${callLog}"
     grep -qx 'config:custom 2 true' "${callLog}"
     grep -qx 'restart:sing-box' "${callLog}"
@@ -2063,11 +1939,7 @@ runSingBoxProtocolReloadFailureRegression() (
             coreInstallServiceBackupFinalize "${serviceBackup}" sing-box false
             return 7
         }
-        set +e
-        coreInstallConfigTransaction sing-box failingInstall >/dev/null 2>&1
-        transactionRc=$?
-        set -e
-        [[ "${transactionRc}" == "7" ]]
+        regressionExpectStatus 7 coreInstallConfigTransaction sing-box failingInstall >/dev/null 2>&1
         grep -qx 'config-restore' "${transactionLog}"
         grep -qx 'service-restore:sing-box:false' "${transactionLog}"
     )
@@ -2105,11 +1977,7 @@ runGeoUpdateReloadFailureRegression() (
     }
 
     mode=ensure-fail
-    set +e
-    updateGeoSite >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 updateGeoSite >/dev/null 2>&1
     grep -qx 'geo:/etc/padm/xray force' "${callLog}"
     ! grep -q '^reload$' "${callLog}"
 
@@ -2197,11 +2065,7 @@ JSON
     }
 
     originalContent=$(<"${alpnConfig}")
-    set +e
-    applyTraditionalTlsAlpn '["h2","http/1.1"]' >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 applyTraditionalTlsAlpn '["h2","http/1.1"]' >/dev/null 2>&1
     [[ "$(<"${alpnConfig}")" == "${originalContent}" ]]
     [[ "$(wc -l <"${reloadLog}" | tr -d ' ')" == "2" ]]
 
@@ -2214,11 +2078,7 @@ JSON
             fi
             command cp "$@"
         }
-        set +e
-        applyTraditionalTlsAlpn '["h2","http/1.1"]' >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 applyTraditionalTlsAlpn '["h2","http/1.1"]' >/dev/null 2>&1
         jq -e '.inbounds[0].streamSettings.tlsSettings.alpn == ["h2","http/1.1"]' "${alpnConfig}" >/dev/null
         [[ "$(<"${alpnConfig}.alpn.bak")" == "${originalContent}" ]]
     ) || return 1
@@ -2258,11 +2118,7 @@ JSON
     subscribe() { return 0; }
 
     rm -f "${refreshMarker}" "${vlessState}" "${reloadLog}"
-    set +e
-    setVlessRealityEncryption enable >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 setVlessRealityEncryption enable >/dev/null 2>&1
     [[ "$(<"${vlessConfig}")" == "${originalContent}" ]]
     [[ ! -e "${vlessState}" ]]
     [[ ! -e "${refreshMarker}" ]]
@@ -2278,11 +2134,7 @@ JSON
             command cp "$@"
         }
         reloadCore() { return 0; }
-        set +e
-        setVlessRealityEncryption enable >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 setVlessRealityEncryption enable >/dev/null 2>&1
         [[ "$(<"${vlessConfig}")" == "${originalContent}" ]]
         [[ ! -e "${vlessConfig}.vlessenc.bak" ]]
         [[ ! -e "${vlessState}" ]]
@@ -2300,11 +2152,7 @@ JSON
             command mv "$@"
         }
         reloadCore() { return 0; }
-        set +e
-        setVlessRealityEncryption enable >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 setVlessRealityEncryption enable >/dev/null 2>&1
         [[ "$(<"${vlessConfig}")" == "${originalContent}" ]]
         [[ ! -e "${vlessConfig}.vlessenc.bak" ]]
         [[ ! -e "${vlessState}" ]]
@@ -2322,11 +2170,7 @@ JSON
             fi
             command mv "$@"
         }
-        set +e
-        setVlessRealityEncryption enable >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 setVlessRealityEncryption enable >/dev/null 2>&1
         jq -e '.inbounds[0].settings.decryption == "mlkem768x25519plus.native.dec"' "${vlessConfig}" >/dev/null
         [[ "$(<"${vlessConfig}.vlessenc.bak")" == "${originalContent}" ]]
         [[ -e "${vlessState}" ]]
@@ -2349,11 +2193,7 @@ JSON
         nginxConfigPath="${root}/nginx/"
     }
     rm -f "${refreshMarker}" "${subscribeMarker}" "${reloadLog}" "${vlessState}" "${vlessConfig}.vlessenc.bak" "${vlessState}.bak" "${vlessState}.tmp"
-    set +e
-    setVlessRealityEncryption enable >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 setVlessRealityEncryption enable >/dev/null 2>&1
     [[ "$(<"${vlessConfig}")" == "${originalContent}" ]]
     [[ ! -e "${vlessState}" ]]
     [[ ! -e "${vlessConfig}.vlessenc.bak" ]]
@@ -2367,11 +2207,7 @@ JSON
         subscribePort=443
         nginxConfigPath="${root}/nginx/"
     }
-    set +e
-    refreshVlessEncryptionSubscriptions >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 refreshVlessEncryptionSubscriptions >/dev/null 2>&1
 
     subscribePort=
     readNginxSubscribe() {
@@ -2379,11 +2215,7 @@ JSON
         nginxConfigPath="${root}/nginx/"
     }
     showAccounts() { return 1; }
-    set +e
-    refreshVlessEncryptionSubscriptions >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 refreshVlessEncryptionSubscriptions >/dev/null 2>&1
 
     initXrayConfig() { return 0; }
     reloadCore() { return 1; }
@@ -2392,11 +2224,7 @@ JSON
         return 0
     }
     rm -f "${subscribeMarker}"
-    set +e
-    regenerateRealityProfile >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 regenerateRealityProfile >/dev/null 2>&1
     [[ ! -e "${subscribeMarker}" ]]
 
     reloadCore() { return 0; }
@@ -2405,11 +2233,7 @@ JSON
         return 1
     }
     rm -f "${subscribeMarker}"
-    set +e
-    regenerateRealityProfile >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 regenerateRealityProfile >/dev/null 2>&1
     [[ -e "${subscribeMarker}" ]]
 )
 
@@ -2649,11 +2473,7 @@ JSON
             nginxConfigPath="${TMP_DIR}/nginx-refresh/"
         }
         : >"${refreshFailureLog}"
-        set +e
-        refreshVlessEncryptionSubscriptions >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 refreshVlessEncryptionSubscriptions >/dev/null 2>&1
         grep -qx 'cleanDirectoryContent' "${refreshFailureLog}"
         ! grep -q '^showAccounts$' "${refreshFailureLog}"
     ) || return 1
@@ -2824,11 +2644,7 @@ JSON
         errorCard() {
             printf '%s\n' "$*" >>"${errorLog}"
         }
-        set +e
-        checkLog >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 checkLog >/dev/null 2>&1
         [[ "${readCalls}" == "1" ]]
         grep -q 'Reality 日志联动配置写入失败' "${errorLog}"
         jq -e '(.log.access | not) and .log.error == "'"${entryLogBase}"'error.log" and .log.loglevel == "warning"' "${entryConfigPath}00_log.json" >/dev/null
@@ -2860,11 +2676,7 @@ JSON
         errorCard() {
             printf '%s\n' "$*" >>"${errorLog}"
         }
-        set +e
-        checkLog >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 checkLog >/dev/null 2>&1
         [[ "${readCalls}" == "1" ]]
         [[ "${reloadCalls}" == "2" ]]
         grep -q '已回滚日志配置修改' "${errorLog}"
@@ -2894,11 +2706,7 @@ JSON
         errorCard() {
             printf '%s\n' "$*" >>"${errorLog}"
         }
-        set +e
-        initTLSNginxConfig 1 >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 initTLSNginxConfig 1 >/dev/null 2>&1
         grep -qx 'nginx:stop:true' "${serviceLog}"
         grep -q 'TLS 初始化' "${errorLog}"
         [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
@@ -2931,11 +2739,7 @@ JSON
         errorCard() {
             printf '%s\n' "$*" >>"${errorLog}"
         }
-        set +e
-        customPortFunction >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 customPortFunction >/dev/null 2>&1
         grep -qx 'xray:stop:true' "${serviceLog}"
         grep -q '无法复用当前 Reality 端口' "${errorLog}"
         [[ ! -e "${allowMarker}" ]]
@@ -2966,11 +2770,7 @@ JSON
         errorCard() {
             printf '%s\n' "$*" >>"${errorLog}"
         }
-        set +e
-        customPortFunction >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 customPortFunction >/dev/null 2>&1
         grep -q '端口输入错误' "${errorLog}"
         [[ ! -s "${allowLog}" ]]
         [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
@@ -3001,11 +2801,7 @@ JSON
         errorCard() {
             printf '%s\n' "$*" >>"${errorLog}"
         }
-        set +e
-        customPortFunction >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 customPortFunction >/dev/null 2>&1
         [[ ! -e "${checkPortMarker}" ]]
         [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     )
@@ -3060,11 +2856,7 @@ EOF
         originalCommitGeneratedFile "$@"
     }
 
-    set +e
-    initRealityKey >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 initRealityKey >/dev/null 2>&1
     [[ "$(<"${keyFile}")" == "publicKey:old-public" ]]
     [[ "${realityPrivateKey}" == "private-generated" ]]
     [[ "${realityPublicKey}" == "public-generated" ]]
@@ -3104,11 +2896,7 @@ EOF
     chmod +x "${singBoxBinary}"
     realityPrivateKey=
     realityPublicKey=
-    set +e
-    initRealityKey >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 initRealityKey >/dev/null 2>&1
     [[ "$(<"${keyFile}")" == "publicKey:public-generated" ]]
 
     cat >"${singBoxBinary}" <<'EOF'
@@ -3118,11 +2906,7 @@ EOF
     chmod +x "${singBoxBinary}"
     realityPrivateKey=
     realityPublicKey=
-    set +e
-    initRealityKey >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 initRealityKey >/dev/null 2>&1
     [[ "$(<"${keyFile}")" == "publicKey:public-generated" ]]
 
     if [[ -n "${oldSingBoxBinary}" ]]; then

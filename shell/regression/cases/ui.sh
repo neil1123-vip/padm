@@ -890,11 +890,7 @@ runSubscriptionWireGuardRestoreRunnerRegression() (
     }
 
     subscriptionWireGuardRestoreStateAndConfig() { return 1; }
-    set +e
-    subscriptionWireGuardRunRestoreSteps '{}' "" "WireGuard 主控服务启动失败"
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 subscriptionWireGuardRunRestoreSteps '{}' "" "WireGuard 主控服务启动失败"
     grep -q '^WireGuard 主控服务启动失败，且旧状态恢复失败$' "${errorLog}"
     grep -q 'WireGuard 状态文件' "${errorLog}"
     grep -q 'WireGuard 配置文件' "${errorLog}"
@@ -905,11 +901,7 @@ runSubscriptionWireGuardRestoreRunnerRegression() (
     : >"${helperLog}"
     subscriptionWireGuardRestoreStateAndConfig() { return 0; }
     subscriptionWireGuardRestoreGroupsState() { return 1; }
-    set +e
-    subscriptionWireGuardRunRestoreSteps '{}' '{}' "订阅来源凭据写入失败"
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 subscriptionWireGuardRunRestoreSteps '{}' '{}' "订阅来源凭据写入失败"
     grep -q '^订阅来源凭据写入失败，且旧状态恢复失败$' "${errorLog}"
     grep -q '订阅组状态文件' "${errorLog}"
     grep -q 'manual-check:请手动检查订阅组状态文件|/tmp/groups.json' "${helperLog}"

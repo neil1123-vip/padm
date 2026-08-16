@@ -442,11 +442,7 @@ JSON
     frontingType=28_trojan_TCP_direct_inbounds
     currentInstallProtocolType=",28,"
     local readStatus
-    set +e
-    readConfigHostPathUUID 2>"${errorFile}"
-    readStatus=$?
-    set -e
-    [[ "${readStatus}" == "0" ]]
+    regressionExpectStatus 0 readConfigHostPathUUID 2>"${errorFile}"
     if [[ -s "${errorFile}" ]]; then
         cat "${errorFile}" >&2
         return 1

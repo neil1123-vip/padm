@@ -245,7 +245,12 @@ runFrameworkParallelSelectorListWithJobsContract() (
     [[ "$(wc -l <"${callLog}")" -eq 3 ]]
 )
 
-runRegressionTargetedBatchHelpers() {
+runRegressionTargetedBatchHelpers() (
+    local captureState=
+    regressionCaptureFixture() { captureState=changed; return 7; }
+    regressionExpectStatus 7 regressionCaptureFixture
+    [[ "${captureState}" == "changed" ]]
+
     runParallelRegressionRunners "${TMP_DIR}/targeted-batch-helpers-parallel-${BASHPID:-$$}" \
         core-invalid-input-retry-menu runCoreInvalidInputRetryMenuRegression \
         core-selection-retry-action runCoreSelectionRetryActionRegression \
@@ -256,7 +261,7 @@ runRegressionTargetedBatchHelpers() {
         config-transaction runConfigTransactionRegression \
         padm-bbr-managed-cleanup runPadmBbrManagedCleanupRegression \
         alone-nginx-backup-manual-check runNginxBackupManualCheckRegression
-}
+)
 
 runRegressionCaseLoaderContract() (
     set -euo pipefail

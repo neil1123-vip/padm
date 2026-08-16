@@ -64,11 +64,7 @@ runTlsFailureReturnRegression() (
     printf 'old-key\n' >"${existingTlsRoot}/existing.example.com.key"
     installTLSCount=
     sudo() { return 1; }
-    set +e
-    installTLSFromAcme >/dev/null 2>&1
-    shellRc=$?
-    set -e
-    [[ "${shellRc}" == "1" ]]
+    regressionExpectStatus 1 installTLSFromAcme >/dev/null 2>&1
     unset -f sudo
 
     local secureTlsRoot="${root}/secure-install"
@@ -358,11 +354,7 @@ runTlsRenewalFailurePropagationRegression() (
     prepareRenewalFixture
     tlsRegressionStatMode=unsafe-acme
     chmod 777 "${homeDir}/.acme.sh"
-    set +e
-    renewalTLS >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 renewalTLS >/dev/null 2>&1
     [[ ! -s "${commandLog}" ]]
     [[ ! -s "${serviceLog}" ]]
     grep -q 'acme.sh 路径、所有者或权限异常' "${errorLog}"
@@ -554,11 +546,7 @@ EOF
             command chmod "$@"
         }
 
-        set +e
-        renewManagedTLSCertificates >/dev/null 2>&1
-        managedRc=$?
-        set -e
-        [[ "${managedRc}" == "1" ]]
+        regressionExpectStatus 1 renewManagedTLSCertificates >/dev/null 2>&1
         [[ "$(<"${tlsDir}/${certDomain}.crt")" == "old-cert" ]]
         [[ "$(<"${tlsDir}/${certDomain}.key")" == "old-key" ]]
         grep -qx 'xray:start:true' "${serviceLog}"

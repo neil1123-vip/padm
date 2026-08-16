@@ -245,3 +245,10 @@ regressionFindHasMatches() {
     firstMatch=$(find "$@" -print -quit 2>/dev/null) || return 1
     [[ -n "${firstMatch}" ]]
 }
+
+regressionExpectStatus() {
+    local expected=$1 actual=0
+    shift
+    "$@" || actual=$?
+    [[ "${actual}" == "${expected}" ]]
+}

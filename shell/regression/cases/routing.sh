@@ -397,26 +397,14 @@ JSON
     [[ ! -e "${root}/relative-config/11_dns.json" ]]
     ! compgen -G "${root}/relative-config/.11_dns.json.routing.*" >/dev/null
 
-    set +e
-    updateRoutingJsonConfig "${configPath}09_routing.json" '.routing.rules += [{"type":"field"}]' >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 updateRoutingJsonConfig "${configPath}09_routing.json" '.routing.rules += [{"type":"field"}]' >/dev/null 2>&1
     jq -e '.routing.rules == []' "${root}/relative-config/09_routing.json" >/dev/null
     ! compgen -G "${root}/relative-config/.09_routing.json.routing.*" >/dev/null
 
-    set +e
-    removeXrayOutbound "09_routing" >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 removeXrayOutbound "09_routing" >/dev/null 2>&1
     [[ -f "${root}/relative-config/09_routing.json" ]]
 
-    set +e
-    removeSingBoxConfig "socks5_outbound" >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 removeSingBoxConfig "socks5_outbound" >/dev/null 2>&1
     [[ -f "${root}/relative-sing-box/socks5_outbound.json" ]]
     [[ ! -s "${rmLog}" ]]
 )
@@ -625,11 +613,7 @@ JSON
 {"route":{"rules":[{"rule_set":["geosite-cn"],"action":"reject"}]}}
 JSON
 
-    set +e
-    applyAccessControlConfigChange >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 applyAccessControlConfigChange >/dev/null 2>&1
     [[ "${reloadCalls}" == "2" ]]
     jq -e '.routing.rules[0].outboundTag == "old"' "${configPath}09_routing.json" >/dev/null
     [[ ! -e "${configPath}blackhole_out.json" ]]
@@ -719,30 +703,18 @@ runRoutingRejectsUnsafeDirRegression() (
         command rm "$@"
     }
 
-    set +e
-    "${backupCreateFn}" >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 "${backupCreateFn}" >/dev/null 2>&1
     [[ ! -s "${rmLog}" ]]
 
     if [[ "${dirType}" == "backup" ]]; then
-        set +e
-        "${backupCleanupFn}" >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 "${backupCleanupFn}" >/dev/null 2>&1
         [[ ! -s "${rmLog}" ]]
 
         mkdir -p "${root}/relative-backup/xray"
         printf 'old\n' >"${root}/relative-backup/xray/${configFile}"
         (
             cd "${root}"
-            set +e
-            "${backupRestoreFn}" >/dev/null 2>&1
-            rc=$?
-            set -e
-            [[ "${rc}" == "1" ]]
+            regressionExpectStatus 1 "${backupRestoreFn}" >/dev/null 2>&1
         )
     else
         [[ ! -s "${rmLog}" ]]
@@ -750,11 +722,7 @@ runRoutingRejectsUnsafeDirRegression() (
 
         mkdir -p "${backupDir}/xray"
         printf 'old\n' >"${backupDir}/xray/${configFile}"
-        set +e
-        "${backupRestoreFn}" >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 "${backupRestoreFn}" >/dev/null 2>&1
     fi
     [[ ! -s "${rmLog}" ]]
 )
@@ -894,11 +862,7 @@ runDNSRoutingFailureReturnRegression() (
         singBoxConfigPath="${root}/dns-sing-box-helper/"
         printf '{"dns":{"servers":["old"]}}\n' >"${singBoxConfigPath}dns.json"
         splitSingBoxRules() { return 1; }
-        set +e
-        addSingBoxDNSConfig "1.1.1.1" "example.com" >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 addSingBoxDNSConfig "1.1.1.1" "example.com" >/dev/null 2>&1
         jq -e '.dns.servers == ["old"]' "${singBoxConfigPath}dns.json" >/dev/null
     )
 
@@ -919,11 +883,7 @@ runDNSRoutingFailureReturnRegression() (
         unset PADM_DNS_ROUTING_BACKUP_DIR
         DNS_ROUTING_ACTIVE_BACKUP_DIR=
         rm -f "${reloadMarker}" "${errorLog}"
-        set +e
-        setUnlockDNS >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 setUnlockDNS >/dev/null 2>&1
         [[ -e "${reloadMarker}" ]]
         [[ "$(wc -l <"${reloadMarker}")" == "2" ]]
         jq -e '.dns.servers == ["old-xray"]' "${configPath}11_dns.json" >/dev/null
@@ -946,11 +906,7 @@ runDNSRoutingFailureReturnRegression() (
         addSingBoxOutbound() { return 1; }
         rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
         rm -f "${reloadMarker}" "${errorLog}"
-        set +e
-        setUnlockDNS >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 setUnlockDNS >/dev/null 2>&1
         [[ ! -e "${reloadMarker}" ]]
         [[ ! -e "${singBoxConfigPath}dns.json" ]]
         [[ ! -e "${singBoxConfigPath}01_direct_outbound.json" ]]
@@ -972,11 +928,7 @@ runDNSRoutingFailureReturnRegression() (
         }
         rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
         rm -f "${reloadMarker}" "${errorLog}"
-        set +e
-        setUnlockSNI >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 setUnlockSNI >/dev/null 2>&1
         [[ -e "${reloadMarker}" ]]
         [[ "$(wc -l <"${reloadMarker}")" == "2" ]]
         jq -e '.dns.servers == ["old-sni"]' "${configPath}11_dns.json" >/dev/null
@@ -999,11 +951,7 @@ runDNSRoutingFailureReturnRegression() (
         addSingBoxDNSConfig() { return 1; }
         rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
         rm -f "${reloadMarker}" "${errorLog}"
-        set +e
-        setUnlockSNI >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 setUnlockSNI >/dev/null 2>&1
         [[ ! -e "${reloadMarker}" ]]
         jq -e '.dns.servers == ["old-sing-sni"]' "${singBoxConfigPath}dns.json" >/dev/null
         [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
@@ -1019,11 +967,7 @@ runDNSRoutingFailureReturnRegression() (
 JSON
         rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
         rm -f "${reloadMarker}" "${errorLog}"
-        set +e
-        removeUnlockDNS >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 removeUnlockDNS >/dev/null 2>&1
         [[ -e "${reloadMarker}" ]]
         [[ "$(wc -l <"${reloadMarker}")" == "2" ]]
         jq -e '.dns.servers == ["8.8.8.8"]' "${configPath}11_dns.json" >/dev/null
@@ -1044,11 +988,7 @@ JSON
 JSON
         rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
         rm -f "${reloadMarker}" "${errorLog}"
-        set +e
-        removeUnlockDNS >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 removeUnlockDNS >/dev/null 2>&1
         [[ -e "${reloadMarker}" ]]
         [[ "$(wc -l <"${reloadMarker}")" == "2" ]]
         jq -e '.dns.servers == ["8.8.8.8"]' "${configPath}11_dns.json" >/dev/null
@@ -1069,11 +1009,7 @@ JSON
 JSON
         rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
         rm -f "${reloadMarker}" "${errorLog}"
-        set +e
-        removeUnlockSNI >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 removeUnlockSNI >/dev/null 2>&1
         [[ -e "${reloadMarker}" ]]
         [[ "$(wc -l <"${reloadMarker}")" == "2" ]]
         jq -e '.dns.hosts["domain:example.com"] == "203.0.113.10"' "${configPath}11_dns.json" >/dev/null

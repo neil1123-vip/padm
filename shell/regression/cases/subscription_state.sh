@@ -207,27 +207,15 @@ runSubscriptionGroupStateStructureFoundationInitTransactionRegression() (
 
     mkdir -p "${initGroupsDir}"
     printf '{existing-bad-json\n' >"${initStateFile}"
-    set +e
-    ensureSubscriptionGroupsState >/dev/null 2>&1
-    initStatus=$?
-    set -e
-    [[ "${initStatus}" == "1" ]]
+    regressionExpectStatus 1 ensureSubscriptionGroupsState >/dev/null 2>&1
     grep -qxF '{existing-bad-json' "${initStateFile}"
     rm -rf "${initGroupsDir}"
 
     export PADM_WIREGUARD_CONTROL_DIR="${initWireGuardDir}"
     mkdir -p "${initWireGuardDir}"
     printf '{existing-bad-json\n' >"${initWireGuardStateFile}"
-    set +e
-    subscriptionWireGuardReadState >/dev/null 2>&1
-    initStatus=$?
-    set -e
-    [[ "${initStatus}" == "1" ]]
-    set +e
-    subscriptionWireGuardWriteState '.enabled = true' >/dev/null 2>&1
-    initStatus=$?
-    set -e
-    [[ "${initStatus}" == "1" ]]
+    regressionExpectStatus 1 subscriptionWireGuardReadState >/dev/null 2>&1
+    regressionExpectStatus 1 subscriptionWireGuardWriteState '.enabled = true' >/dev/null 2>&1
     grep -qxF '{existing-bad-json' "${initWireGuardStateFile}"
 
     writeDefaultSubscriptionGroupsState() {
@@ -518,11 +506,7 @@ JSON
         subscriptionSyncApplyAccountPlanTransaction() {
             return 1
         }
-        set +e
-        applySubscriptionQuotaPlanTransaction "${quotaTxPlan}"
-        quotaTxStatus=$?
-        set -e
-        [[ "${quotaTxStatus}" == "1" ]]
+        regressionExpectStatus 1 applySubscriptionQuotaPlanTransaction "${quotaTxPlan}"
         [[ -e "${quotaTxLockMarker}" ]]
         jq -e '.groups[0].user_groups[] | select(.id == "team-a" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
         [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"已恢复旧订阅状态"* ]]
@@ -570,11 +554,7 @@ JSON
             printf 'called\n' >"${accountPhaseMarker}"
             return 0
         }
-        set +e
-        applySubscriptionQuotaPlanTransaction "${quotaPartialPlan}"
-        quotaPartialStatus=$?
-        set -e
-        [[ "${quotaPartialStatus}" == "1" ]]
+        regressionExpectStatus 1 applySubscriptionQuotaPlanTransaction "${quotaPartialPlan}"
         jq -e '.groups[0].user_groups[] | select(.id == "team-a" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
         jq -e '.groups[0].user_groups[] | select(.id == "team-b" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
         [[ ! -e "${accountPhaseMarker}" ]]
@@ -1132,11 +1112,7 @@ runSubscriptionSyncRollbackRestoreDirFailureRegression() (
         fi
         command cp "$@"
     }
-    set +e
-    subscriptionSyncRestoreBackupPath "${restoreDirTarget}" "${restoreDirBackup}" local
-    restoreStatus=$?
-    set -e
-    [[ "${restoreStatus}" == "1" ]]
+    regressionExpectStatus 1 subscriptionSyncRestoreBackupPath "${restoreDirTarget}" "${restoreDirBackup}" local
     [[ "$(<"${restoreDirTarget}/default/existing")" == "current default" ]]
     [[ "$(<"${restoreDirTarget}/clashMeta/existing")" == "current clash" ]]
     if regressionFindHasMatches "${restoreDirRoot}" -maxdepth 1 -type d \( -name '.restore-local.*' -o -name '.restore-old-local.*' \); then
@@ -1170,11 +1146,7 @@ JSON
         return 1
     }
 
-    set +e
-    applySubscriptionQuotaPlanAccounts '[{"id":"team-a","action":"disable-and-remove-local-account"}]'
-    reloadStatus=$?
-    set -e
-    [[ "${reloadStatus}" == "1" ]]
+    regressionExpectStatus 1 applySubscriptionQuotaPlanAccounts '[{"id":"team-a","action":"disable-and-remove-local-account"}]'
     [[ "$(<"${reloadTargetFile}")" == "${reloadOriginalContent}" ]]
     [[ "$(wc -l <"${reloadLog}" | tr -d ' ')" == "2" ]]
     [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"核心重载失败"* ]]
@@ -1230,11 +1202,7 @@ JSON
     successCard() { printf '%s\n' "$*" >"${statusLog}"; }
     statusCard() { printf '%s\n' "$*" >"${statusLog}"; }
 
-    set +e
-    runSubscriptionGroupSync
-    syncStatus=$?
-    set -e
-    [[ "${syncStatus}" == "1" ]]
+    regressionExpectStatus 1 runSubscriptionGroupSync
     [[ "$(<"${syncConfigFile}")" == "${originalConfig}" ]]
     [[ "$(<"${syncLocalFile}")" == "old-local" ]]
     [[ "$(<"${syncPublicFile}")" == "old-public" ]]
@@ -1259,11 +1227,7 @@ JSON
     : >"${reconcileLog}"
     subscriptionSyncRestoreSubscribeOutputBackups() { return 1; }
 
-    set +e
-    runSubscriptionGroupSync
-    syncStatus=$?
-    set -e
-    [[ "${syncStatus}" == "1" ]]
+    regressionExpectStatus 1 runSubscriptionGroupSync
     [[ "$(<"${syncConfigFile}")" == "${originalConfig}" ]]
     [[ ! -s "${reconcileLog}" ]]
     grep -q '订阅输出恢复失败' "${resultFailures}"
@@ -1317,11 +1281,7 @@ JSON
     successCard() { printf '%s\n' "$*" >"${statusLog}"; }
     statusCard() { printf '%s\n' "$*" >"${statusLog}"; }
 
-    set +e
-    runSubscriptionGroupSync
-    syncStatus=$?
-    set -e
-    [[ "${syncStatus}" == "1" ]]
+    regressionExpectStatus 1 runSubscriptionGroupSync
     [[ "$(<"${syncConfigFile}")" == "${originalConfig}" ]]
     [[ "$(<"${syncLocalFile}")" == "old-local" ]]
     [[ "$(<"${syncPublicFile}")" == "old-public" ]]
@@ -1390,11 +1350,7 @@ JSON
     successCard() { printf '%s\n' "$*" >"${statusLog}"; }
     statusCard() { printf '%s\n' "$*" >"${statusLog}"; }
 
-    set +e
-    runSubscriptionGroupSync
-    syncStatus=$?
-    set -e
-    [[ "${syncStatus}" == "1" ]]
+    regressionExpectStatus 1 runSubscriptionGroupSync
     [[ "$(<"${syncConfigFile}")" != "${originalConfig}" ]]
     grep -q 'sub_new-main' "${syncConfigFile}"
     [[ "$(<"${syncLocalFile}")" == "old-local" ]]
@@ -1476,11 +1432,7 @@ JSON
     successCard() { printf '%s\n' "$*" >"${statusLog}"; }
     statusCard() { printf '%s\n' "$*" >"${statusLog}"; }
 
-    set +e
-    runSubscriptionGroupSync
-    syncStatus=$?
-    set -e
-    [[ "${syncStatus}" == "0" ]]
+    regressionExpectStatus 0 runSubscriptionGroupSync
     grep -q '^apply-account-plan$' "${callLog}"
     grep -q '^remote-sync$' "${callLog}"
     grep -q '^refresh-publish:{}$' "${callLog}"
@@ -1549,11 +1501,7 @@ JSON
     successCard() { printf '%s\n' "$*" >"${statusLog}"; }
     statusCard() { printf '%s\n' "$*" >"${statusLog}"; }
 
-    set +e
-    runSubscriptionGroupSync
-    syncStatus=$?
-    set -e
-    [[ "${syncStatus}" == "0" ]]
+    regressionExpectStatus 0 runSubscriptionGroupSync
     [[ ! -e "${resultFailures}" || "$(<"${resultFailures}")" == "[]" ]]
     grep -q '同步完成后公网订阅刷新失败' "${resultFailures}" && return 1
     grep -qx 'success' "${resultStatus}"
@@ -1654,11 +1602,7 @@ runSubscriptionSyncReconcileEarlyExitRegression() (
             printf 'subscribe:%s\n' "$*" >>"${callLog}"
             return 0
         }
-        set +e
-        subscriptionSyncReconcileLocalServices
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 subscriptionSyncReconcileLocalServices
         grep -qx 'reload' "${callLog}"
         [[ "$(wc -l <"${callLog}" | tr -d ' ')" == "1" ]]
     )
@@ -1698,11 +1642,7 @@ JSON
         printf '%s\n' "${currentBackup}"
     }
 
-    set +e
-    restoreSubscriptionGroupsBackup "${targetBackup}" >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 restoreSubscriptionGroupsBackup "${targetBackup}" >/dev/null 2>&1
     [[ "$(<"${stateFile}")" == "${beforeSnapshot}" ]]
     [[ ! -e "${currentBackup}" ]]
 

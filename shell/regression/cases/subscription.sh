@@ -99,11 +99,7 @@ runSubscribeLocalRollbackRegression() (
         return 0
     }
     coreInstallType=1
-    set +e
-    subscribe false true >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 subscribe false true >/dev/null 2>&1
     [[ "${showAccountsCalls}" == "0" ]]
     [[ "${renderCalls}" == "0" ]]
     [[ "${subscribeSalt}" == "existing-salt" ]]
@@ -129,11 +125,7 @@ runSubscribeLocalRollbackRegression() (
         printf '[{"tag":"new-local"}]\n' >"${localDir}/sing-box/existing"
         return 1
     }
-    set +e
-    subscribe false true >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 subscribe false true >/dev/null 2>&1
     [[ "${showAccountsCalls}" == "1" ]]
     [[ "${renderCalls}" == "0" ]]
     [[ "${subscribeSalt}" == "existing-salt" ]]
@@ -168,11 +160,7 @@ runSubscribeLocalRollbackRegression() (
         printf 'first account published\n' >"${PADM_SUBSCRIBE_DIR}/default/first-account"
         return 1
     }
-    set +e
-    subscribe false true >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 subscribe false true >/dev/null 2>&1
     [[ "${showAccountsCalls}" == "1" ]]
     [[ "${renderCalls}" == "1" ]]
     [[ "${subscribeSalt}" == "existing-salt" ]]
@@ -198,11 +186,7 @@ runSubscribeLocalRollbackRegression() (
     syncInstallDirectoryTree() {
         return 1
     }
-    set +e
-    subscribe false true >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 subscribe false true >/dev/null 2>&1
     [[ "${showAccountsCalls}" == "1" ]]
     [[ "${renderCalls}" == "1" ]]
     [[ "${subscribeSalt}" == "existing-salt" ]]

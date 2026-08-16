@@ -1732,11 +1732,7 @@ EOF
         inputCount=1
         addPortHopping hysteria2 16295
         removeFailurePort=33001
-        set +e
-        deletePortHoppingRules hysteria2 33000 33002 16295 >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 deletePortHoppingRules hysteria2 33000 33002 16295 >/dev/null 2>&1
         padmFirewallStateHas 'forward:firewalld:udp:33000:33002:16295:owned=33000,33001,33002'
         deletePortHoppingRules hysteria2 33001 33001 16295
         [[ "${#forwardPorts[@]}" == "0" ]]

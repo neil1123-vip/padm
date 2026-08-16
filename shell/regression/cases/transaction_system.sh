@@ -420,11 +420,7 @@ runUninstallWireGuardCleanupRegression() (
 
     for mode in wg-stop-fail control-stop-fail; do
         actions=
-        set +e
-        cleanupSubscriptionWireGuardControlOnUninstall >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 cleanupSubscriptionWireGuardControlOnUninstall >/dev/null 2>&1
         [[ -e "$(subscriptionWireGuardConfigFile)" ]]
         [[ -e "$(subscriptionWireGuardStateFile)" ]]
         [[ -e "$(subscriptionWireGuardPrivateKeyFile)" ]]
@@ -514,19 +510,11 @@ runWarpConfigSafeDirRegression() (
         command rm "$@"
     }
 
-    set +e
-    readConfigWarpReg >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 readConfigWarpReg >/dev/null 2>&1
     [[ ! -s "${rmLog}" ]]
     [[ ! -s "${errorLog}" ]]
 
-    set +e
-    installWarpReg >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 installWarpReg >/dev/null 2>&1
     [[ ! -s "${rmLog}" ]]
     [[ ! -s "${errorLog}" ]]
 
@@ -564,11 +552,7 @@ runWarpConfigSafeDirRegression() (
         autoRead() { printf -v "$3" y; }
         errorCard() { :; }
         downloadGitHubReleaseAsset() { return 1; }
-        set +e
-        installWarpReg >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 installWarpReg >/dev/null 2>&1
         : >"${callerMarker}"
         [[ -f "${callerMarker}" ]]
     )
@@ -584,11 +568,7 @@ runWarpConfigSafeDirRegression() (
         menuClose() { :; }
         autoRead() { printf -v "$3" n; }
         coreCancelledStatusCard() { :; }
-        set +e
-        installWarpReg >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 installWarpReg >/dev/null 2>&1
         : >"${cancelMarker}"
     )
     [[ -f "${cancelMarker}" ]]
@@ -621,11 +601,7 @@ runWarpConfigSafeDirRegression() (
         configPath="${root}/xray/"
         singBoxConfigPath=
         mkdir -p "${configPath}"
-        set +e
-        unInstallWireGuard IPv4 >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 unInstallWireGuard IPv4 >/dev/null 2>&1
     )
     [[ ! -s "${rmLog}" ]]
 )
@@ -644,11 +620,7 @@ runWireGuardControlSafeDirRegression() (
         command rm "$@"
     }
 
-    set +e
-    subscriptionWireGuardWriteState '.enabled = true' >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 subscriptionWireGuardWriteState '.enabled = true' >/dev/null 2>&1
     [[ ! -s "${rmLog}" ]]
     [[ ! -e "${root}/relative-wireguard" ]]
 
@@ -697,11 +669,7 @@ runWireGuardKeyTransactionRegression() (
         originalCommitGeneratedFile "$@"
     }
 
-    set +e
-    subscriptionWireGuardEnsureKeys >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 subscriptionWireGuardEnsureKeys >/dev/null 2>&1
     [[ ! -e "${privateKeyFile}" ]]
     [[ ! -e "${publicKeyFile}" ]]
     if regressionFindHasMatches "${wireGuardDir}" -maxdepth 1 -type f -name '.*.wireguard.*'; then
@@ -712,11 +680,7 @@ runWireGuardKeyTransactionRegression() (
     printf 'existing-private-key\n' >"${privateKeyFile}"
     printf 'existing-public-key\n' >"${publicKeyFile}"
 
-    set +e
-    subscriptionWireGuardEnsureKeys >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 subscriptionWireGuardEnsureKeys >/dev/null 2>&1
     [[ "$(<"${privateKeyFile}")" == "existing-private-key" ]]
     [[ "$(<"${publicKeyFile}")" == "existing-public-key" ]]
     if regressionFindHasMatches "${wireGuardDir}" -maxdepth 1 -type f -name '.*.wireguard.*'; then
@@ -1008,11 +972,7 @@ runFail2banApplyTransactionRegression() (
         originalCommitGeneratedFile "$@"
     }
 
-    set +e
-    fail2banApplyProfile sshd false >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 fail2banApplyProfile sshd false >/dev/null 2>&1
     [[ "$(<"${PADM_FAIL2BAN_JAIL_FILE}")" == "legacy jail" ]]
     [[ "$(<"${PADM_FAIL2BAN_FILTER_FILE}")" == "legacy filter" ]]
     [[ "$(<"${PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE}")" == "legacy scan" ]]
@@ -1024,11 +984,7 @@ runFail2banApplyTransactionRegression() (
     fi
 
     fail2banReloadServiceIfRunning() { return 1; }
-    set +e
-    fail2banApplyProfile disabled false >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 fail2banApplyProfile disabled false >/dev/null 2>&1
     [[ "$(<"${PADM_FAIL2BAN_JAIL_FILE}")" == "legacy jail" ]]
     [[ "$(<"${PADM_FAIL2BAN_FILTER_FILE}")" == "legacy filter" ]]
     [[ "$(<"${PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE}")" == "legacy scan" ]]
@@ -1299,11 +1255,7 @@ runUninstallServiceStopFailureRegression() (
         singBoxConfigPath="${root}/sing-box-conf/"
         nginxStaticPath="${root}/static"
         SERVICE_QUEUE_ALLOW_FAILURE=previous
-        set +e
-        unInstall >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "0" ]]
+        regressionExpectStatus 0 unInstall >/dev/null 2>&1
         [[ "${nginxState}" == "true" ]] || return 1
         grep -qx 'nginx:stop:true' "${serviceLog}"
         grep -qx 'nginx:start:true' "${serviceLog}" || return 1
@@ -1422,11 +1374,7 @@ runCleanLastInstallationConfigFailureRegression() (
         : >"${cleanupLog}"
         : >"${errorLog}"
         SERVICE_QUEUE_ALLOW_FAILURE=previous
-        set +e
-        cleanLastInstallationConfig >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 cleanLastInstallationConfig >/dev/null 2>&1
         [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
         [[ ! -s "${cleanupLog}" ]]
         grep -q '已取消清空上次安装配置' "${errorLog}"
@@ -1451,11 +1399,7 @@ runCleanLastInstallationConfigFailureRegression() (
     : >"${cleanupLog}"
     : >"${errorLog}"
     SERVICE_QUEUE_ALLOW_FAILURE=previous
-    set +e
-    cleanLastInstallationConfig >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 cleanLastInstallationConfig >/dev/null 2>&1
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     grep -qx 'xray:stop:true' "${serviceLog}"
     grep -qx 'sing-box:stop:true' "${serviceLog}"
@@ -1478,11 +1422,7 @@ runCleanLastInstallationConfigFailureRegression() (
         : >"${cleanupLog}"
         : >"${errorLog}"
         SERVICE_QUEUE_ALLOW_FAILURE=previous
-        set +e
-        cleanLastInstallationConfig >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
+        regressionExpectStatus 1 cleanLastInstallationConfig >/dev/null 2>&1
         [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
         grep -qx 'xray:stop:true' "${serviceLog}"
         grep -qx 'sing-box:stop:true' "${serviceLog}"
@@ -1544,11 +1484,7 @@ runCleanLastInstallationConfigFailureRegression() (
     : >"${serviceLog}"
     : >"${cleanupLog}"
     SERVICE_QUEUE_ALLOW_FAILURE=previous
-    set +e
-    readLastInstallationConfig >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 readLastInstallationConfig >/dev/null 2>&1
     grep -qx 'xray:stop:true' "${serviceLog}"
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
@@ -1558,11 +1494,7 @@ runCleanLastInstallationConfigFailureRegression() (
     : >"${installLog}"
     btDomain=
     SERVICE_QUEUE_ALLOW_FAILURE=previous
-    set +e
-    xrayCoreInstall >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 xrayCoreInstall >/dev/null 2>&1
     grep -qx 'xray:stop:true' "${serviceLog}"
     [[ ! -s "${installLog}" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
@@ -1699,11 +1631,7 @@ runCleanLastInstallationConfigResolvesRelativeAcmeHomeRegression() (
 
     (
         cd "${rootWorkRel}"
-        set +e
-        cleanLastInstallationConfig >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "0" ]]
+        regressionExpectStatus 0 cleanLastInstallationConfig >/dev/null 2>&1
         [[ ! -d "${resolvedAcmeDir}" ]]
         grep -qxF "rm:-rf -- ${resolvedAcmeDir}" "${cleanupLog}"
         ! grep -q 'rm:-rf -- relative-home/.acme.sh' "${cleanupLog}"

@@ -394,11 +394,7 @@ runRealityBlockedCandidateTransactionRegression() (
         originalCommitGeneratedFile "$@"
     }
 
-    set +e
-    addRealityTargetBlockedCandidate "new.example.com:443" "manual" >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 addRealityTargetBlockedCandidate "new.example.com:443" "manual" >/dev/null 2>&1
     [[ "$(<"${blockedFile}")" == "old.example.com|手动加入|legacy|old note" ]]
     ! compgen -G "${root}/.reality_target_blocked.tsv.reality.*" >/dev/null
 
@@ -731,11 +727,7 @@ runRealityUnifiedLibraryRollbackRegression() (
         originalCommitGeneratedFile "$@"
     }
 
-    set +e
-    removeRealityTargetsFromUnifiedLibrary "${targetsFile}" >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 removeRealityTargetsFromUnifiedLibrary "${targetsFile}" >/dev/null 2>&1
     grep -qF $'remove.example.com:443\t' "${resultsFile}"
     grep -qF $'keep.example.com:443\t' "${resultsFile}"
     grep -q '^remove.example.com|' "${candidatesFile}"
@@ -908,11 +900,7 @@ JSON
     cat >"${xrayXhttp}" <<'JSON'
 {bad-json
 JSON
-    set +e
-    changeInstalledRealityTarget "new.example.com:8443" "new-sni.example.com"
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
+    regressionExpectStatus 1 changeInstalledRealityTarget "new.example.com:8443" "new-sni.example.com"
     [[ "${reloadCalls}" == "0" ]]
     [[ "$(jq -r '.inbounds[1].streamSettings.realitySettings.target' "${xrayVision}")" == "old.example.com:443" ]]
     [[ "${realityTargetHost}" == "old.example.com" ]]
