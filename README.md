@@ -458,58 +458,42 @@ bash shell/validate_install.sh [domain]
 bash shell/validate_install.sh --online example.com
 ```
 
-本地改动前后可运行统一 dispatcher 下的 selector 回归：
+回归统一通过 selector dispatcher 运行，按三个层级使用：
+
+| 层级 | 命令 | 用途 |
+| --- | --- | --- |
+| 快速反馈 | `bash shell/subscription_groups_regression.sh fast` | 日常小改后的快速检查；不代表完整产品覆盖。 |
+| 主产品回归 | `bash shell/subscription_groups_regression.sh all` | 较大改动的主验证集；按资源预算编排核心产品 suite，但不是所有公开 selector 的并集。 |
+| 按需专项 | `bash shell/subscription_groups_regression.sh <selector>` | 按改动范围补跑协议、深层回滚或 harness 行为检查。 |
+
+`all` 并行运行 `subscription`、`ui`、`transaction-core`、`routing`、`runtime`、`remote-control-smoke` 和远程控制服务安装契约，再串行运行 `transaction-system` 与远程控制响应契约。它默认不包含 `fast`、`protocol-capabilities`、`remote-control-deep` 和 harness 契约；相关改动需按需追加。
+
+常用产品专项：
 
 ```bash
-bash shell/subscription_groups_regression.sh fast
 bash shell/subscription_groups_regression.sh protocol-capabilities
 bash shell/subscription_groups_regression.sh platform-hot
 bash shell/subscription_groups_regression.sh subscription-output
 bash shell/subscription_groups_regression.sh transaction-core
-bash shell/subscription_groups_regression.sh remote-control-contract
+bash shell/subscription_groups_regression.sh transaction-system
 bash shell/subscription_groups_regression.sh remote-control-smoke
+bash shell/subscription_groups_regression.sh remote-control-contract
+bash shell/subscription_groups_regression.sh remote-control-deep
 bash shell/subscription_groups_regression.sh subscription-state
-```
-
-核心与服务重构的聚焦回归：
-
-```bash
 bash shell/subscription_groups_regression.sh ui-full-core
 bash shell/subscription_groups_regression.sh ui-full-core-maintenance
-bash shell/subscription_groups_regression.sh xray-strict-validation
-bash shell/subscription_groups_regression.sh xray-compat-audit
-bash shell/subscription_groups_regression.sh xray-compat-trusted-xff
-bash shell/subscription_groups_regression.sh xray-configured-validation-path
-bash shell/subscription_groups_regression.sh xray-prerelease-dry-run
-bash shell/subscription_groups_regression.sh singbox-compat-audit
-bash shell/subscription_groups_regression.sh singbox-prerelease-dry-run
-bash shell/subscription_groups_regression.sh core-running-service-state
-bash shell/subscription_groups_regression.sh service-queue-apply-propagation
-bash shell/subscription_groups_regression.sh reload-core-propagation
-bash shell/subscription_groups_regression.sh nginx-service-failure
-bash shell/subscription_groups_regression.sh nginx-service-refresh
 ```
 
-推荐的 harness 行为回归集：
+harness 专项：
 
 ```bash
 bash shell/subscription_groups_regression.sh regression-dispatcher-contract
 bash shell/subscription_groups_regression.sh regression-case-loader-contract
-bash shell/subscription_groups_regression.sh regression-all-composition
-bash shell/subscription_groups_regression.sh regression-all-child-parallel-budget-composition
-bash shell/subscription_groups_regression.sh regression-all-resource-layer-composition
+bash shell/subscription_groups_regression.sh framework-parallel-selector-list-with-jobs
+bash shell/subscription_groups_regression.sh targeted-batch-helpers
 ```
 
-需要压并发或保守跑重型 suite 时，优先用 `PADM_REGRESSION_PARALLEL_JOBS`、`PADM_REGRESSION_CHILD_PARALLEL_JOBS`，以及按 suite 开启 `PADM_REGRESSION_*_RESOURCE_PROFILE=all`。
-
-回归分发规则：
-
-| 名称 | 实际命令 | 覆盖范围 |
-| --- | --- | --- |
-| suite / aggregate selector | `bash shell/subscription_groups_regression.sh fast` | 统一分发 `fast`、`all`、`platform-hot`、`platform-io`、`subscription-output`、`transaction-core`、`remote-control` 及其 `smoke` / `contract` / `deep` 分层 selector、`subscription-state*` 等 suite / aggregate selector。 |
-| contract / composition selector | `bash shell/subscription_groups_regression.sh regression-dispatcher-contract` | 验证 registry 参数传递、selector 组合、并发限流与补位、中断清理、异常子进程回收及 aggregate exactly-once。 |
-| 协议能力 selector | `bash shell/subscription_groups_regression.sh protocol-capabilities` | 通过统一 dispatcher 运行协议能力回归；`shell/regression/protocol_capabilities.sh` 仅作为保留原成功标记的兼容转发入口。 |
-| 所有公开 selector | `bash shell/subscription_groups_regression.sh <selector>` | 所有公开回归入口都走同一个 dispatcher。 |
+需要压并发或保守跑重型 suite 时，优先用 `PADM_REGRESSION_PARALLEL_JOBS`、`PADM_REGRESSION_CHILD_PARALLEL_JOBS`，以及按 suite 开启 `PADM_REGRESSION_*_RESOURCE_PROFILE=all`。`shell/regression/protocol_capabilities.sh` 仅作为保留原成功标记的兼容转发入口。
 
 主入口按 `framework/`、`cases/load.sh`、`suites/` 的固定顺序装配回归；case 只加载一次，不再保留历史 source-only 分组层。
 
