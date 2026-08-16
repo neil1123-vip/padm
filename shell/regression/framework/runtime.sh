@@ -23,72 +23,19 @@ cleanupRegressionProcessGroups() {
     done
 }
 
-runParallelRegressionRunners() (
+runRegressionRunnerFunction() { "$1"; }
+
+runParallelRegressionRunners() {
     local orchestrationRoot=$1
     shift
-    local -a labels=()
-    local -a runners=()
-    local -a logs=()
-    local -a pids=()
-    local -a statuses=()
-    local status=0
-    local hadErrexit=0
-    local i
-
     if [[ $# -eq 0 || $(( $# % 2 )) -ne 0 ]]; then
         printf 'runParallelRegressionRunners expects label/runner pairs\n' >&2
         return 2
     fi
-
-    mkdir -p "${orchestrationRoot}"
-    while [[ $# -gt 0 ]]; do
-        labels+=("$1")
-        runners+=("$2")
-        logs+=("${orchestrationRoot}/$1.log")
-        shift 2
-    done
-
-    set -m
-    trap 'exit 130' INT
-    trap 'exit 143' TERM
-    trap 'cleanupRegressionProcessGroups "${pids[@]}"' EXIT
-
-    case $- in
-    *e*) hadErrexit=1 ;;
-    esac
-
-    set +e
-    for i in "${!runners[@]}"; do
-        (
-            trap - EXIT INT TERM
-            set +m
-            set -e
-            runRegressionStep "total:${labels[$i]}" "${runners[$i]}"
-        ) >"${logs[$i]}" 2>&1 &
-        pids[$i]=$!
-    done
-
-    for i in "${!pids[@]}"; do
-        wait "${pids[$i]}"
-        statuses[$i]=$?
-        pids[$i]=
-    done
-    if (( hadErrexit )); then
-        set -e
-    else
-        set +e
-    fi
-
-    for i in "${!logs[@]}"; do
-        [[ -f "${logs[$i]}" ]] && cat "${logs[$i]}"
-        if [[ "${statuses[$i]}" -ne 0 && "${status}" -eq 0 ]]; then
-            status=${statuses[$i]}
-        fi
-    done
-
-    trap - EXIT INT TERM
-    return "${status}"
-)
+    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionRunnerFunction \
+        PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
+        runFrameworkParallelRegressionSelectors "${orchestrationRoot}" "$@"
+}
 
 runFrameworkParallelRegressionSelectors() (
     local orchestrationRoot=$1

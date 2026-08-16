@@ -4996,71 +4996,80 @@ runRegressionPlatformRest() {
         system runRegressionPlatformRestSystem
 }
 
+runWriteSubscribeNginxPathSafetyRegression() { runWriteNginxPathSafetyRegression writeSubscribeNginxConfig subscribe.conf; }
+runWriteAloneNginxPathSafetyRegression() { runWriteNginxPathSafetyRegression writeAloneNginxConfig alone.conf; }
+
 runRegressionFastOnlySafety() {
-    runRegressionStep commit-generated-file-directory-target runCommitGeneratedFileRejectsDirectoryTargetRegression
-    runRegressionStep restore-managed-file-directory-target runRestoreManagedFileFromBackupRejectsDirectoryTargetRegression
-    runRegressionStep github-release-direct-fallback runGitHubReleaseAssetDirectFallbackRegression
-    runRegressionStep download-arg-missing-value runDownloadArgumentMissingValueRegression
-    runRegressionStep fetch-url-wget-hard-limit runFetchUrlWgetHardLimitRegression
-    runRegressionStep github-release-arg-missing-value runGitHubReleaseArgumentMissingValueRegression
-    runRegressionStep remove-install-path-retry runRemoveInstallPathRetryRegression
-    runRegressionStep remove-install-path-file-mode runRemoveInstallPathFileModeRegression
-    runRegressionStep uninstall-padm-root-scope runUninstallPadmRootScopeRegression
-    runRegressionStep remove-install-path-safety runRemoveInstallPathSafetyRegression
-    runRegressionStep remove-nginx-default-conf-safety runRemoveNginxDefaultConfSafetyRegression
-    runRegressionStep clean-agent-nginx-conf-safety runCleanAgentNginxConfSafetyRegression
-    runRegressionStep uninstall-subscribe-nginx-path-safety runUninstallSubscribeNginxPathSafetyRegression
-    runRegressionStep check-port-open-nginx-path-safety runCheckPortOpenNginxPathSafetyRegression
-    runRegressionStep write-subscribe-nginx-path-safety runWriteNginxPathSafetyRegression writeSubscribeNginxConfig subscribe.conf
-    runRegressionStep write-wireguard-control-nginx-path-safety runWriteWireGuardControlNginxPathSafetyRegression
-    runRegressionStep wireguard-firewall-lifecycle runSubscriptionWireGuardFirewallLifecycleRegression
-    runRegressionStep wireguard-nginx-disable-lifecycle runSubscriptionWireGuardNginxDisableLifecycleRegression
-    runRegressionStep write-alone-nginx-path-safety runWriteNginxPathSafetyRegression writeAloneNginxConfig alone.conf
-    runRegressionStep clean-last-installation-nginx-safety runCleanLastInstallationSkipsDuplicateNginxCleanupRegression
-    runRegressionStep install-nginx-alpine-default-path-safety runInstallNginxAlpineDefaultPathSafetyRegression
-    runRegressionStep install-nginx-static-unsafe-path runInstallNginxStaticRejectsUnsafePathRegression
-    runRegressionStep install-nginx-static-unzip-failure runInstallNginxStaticPreservesLiveSiteOnUnzipFailureRegression
-    runRegressionStep clean-last-installation-static-safety runCleanLastInstallationRejectsUnsafeStaticPathRegression
-    runRegressionStep subscription-sync-path-safety runSubscriptionSyncPathSafetyRegression
-    runRegressionStep subscription-sync-config-directory-target runSubscriptionSyncConfigRestoreRejectsDirectoryTargetRegression
-    runRegressionStep subscription-sync-create-local-apply-backups-rollback runSubscriptionSyncCreateLocalApplyBackupsRollbackRegression
-    runRegressionStep state-readers-clear-stale-values runStateReadersClearStaleValuesRegression
-    runRegressionStep read-install-type-keeps-sing-box-shards runReadInstallTypeKeepsSingBoxShardsRegression
-    runRegressionStep check-log-backup-output-variable runCheckLogBackupOutputVariableRegression
-    runRegressionStep suppressed-regression-failure-propagation runSuppressedRegressionFailurePropagationRegression
-    runRegressionStep subscription-sync-config-unmanaged-target runSubscriptionSyncConfigRestoreRejectsUnmanagedFileRegression
-    runRegressionStep subscription-sync-missing-restore-scope runSubscriptionSyncMissingRestoreScopeRegression
-    runRegressionStep no-third-party-qr-service runNoThirdPartyQrServiceRegression
-    runRegressionStep install-refresh-download-bounds runInstallRefreshDownloadBoundsRegression
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_FAST_SAFETY_JOBS:-3}" \
+        runParallelRegressionRunners "${TMP_DIR}/fast-safety-parallel-${BASHPID:-$$}" \
+        commit-generated-file-directory-target runCommitGeneratedFileRejectsDirectoryTargetRegression \
+        restore-managed-file-directory-target runRestoreManagedFileFromBackupRejectsDirectoryTargetRegression \
+        github-release-direct-fallback runGitHubReleaseAssetDirectFallbackRegression \
+        download-arg-missing-value runDownloadArgumentMissingValueRegression \
+        fetch-url-wget-hard-limit runFetchUrlWgetHardLimitRegression \
+        github-release-arg-missing-value runGitHubReleaseArgumentMissingValueRegression \
+        remove-install-path-retry runRemoveInstallPathRetryRegression \
+        remove-install-path-file-mode runRemoveInstallPathFileModeRegression \
+        uninstall-padm-root-scope runUninstallPadmRootScopeRegression \
+        remove-install-path-safety runRemoveInstallPathSafetyRegression \
+        remove-nginx-default-conf-safety runRemoveNginxDefaultConfSafetyRegression \
+        clean-agent-nginx-conf-safety runCleanAgentNginxConfSafetyRegression \
+        uninstall-subscribe-nginx-path-safety runUninstallSubscribeNginxPathSafetyRegression \
+        check-port-open-nginx-path-safety runCheckPortOpenNginxPathSafetyRegression \
+        write-subscribe-nginx-path-safety runWriteSubscribeNginxPathSafetyRegression \
+        write-wireguard-control-nginx-path-safety runWriteWireGuardControlNginxPathSafetyRegression \
+        wireguard-firewall-lifecycle runSubscriptionWireGuardFirewallLifecycleRegression \
+        wireguard-nginx-disable-lifecycle runSubscriptionWireGuardNginxDisableLifecycleRegression \
+        write-alone-nginx-path-safety runWriteAloneNginxPathSafetyRegression \
+        clean-last-installation-nginx-safety runCleanLastInstallationSkipsDuplicateNginxCleanupRegression \
+        install-nginx-alpine-default-path-safety runInstallNginxAlpineDefaultPathSafetyRegression \
+        install-nginx-static-unsafe-path runInstallNginxStaticRejectsUnsafePathRegression \
+        install-nginx-static-unzip-failure runInstallNginxStaticPreservesLiveSiteOnUnzipFailureRegression \
+        clean-last-installation-static-safety runCleanLastInstallationRejectsUnsafeStaticPathRegression \
+        subscription-sync-path-safety runSubscriptionSyncPathSafetyRegression \
+        subscription-sync-config-directory-target runSubscriptionSyncConfigRestoreRejectsDirectoryTargetRegression \
+        subscription-sync-create-local-apply-backups-rollback runSubscriptionSyncCreateLocalApplyBackupsRollbackRegression \
+        state-readers-clear-stale-values runStateReadersClearStaleValuesRegression \
+        read-install-type-keeps-sing-box-shards runReadInstallTypeKeepsSingBoxShardsRegression \
+        check-log-backup-output-variable runCheckLogBackupOutputVariableRegression \
+        suppressed-regression-failure-propagation runSuppressedRegressionFailurePropagationRegression \
+        subscription-sync-config-unmanaged-target runSubscriptionSyncConfigRestoreRejectsUnmanagedFileRegression \
+        subscription-sync-missing-restore-scope runSubscriptionSyncMissingRestoreScopeRegression \
+        no-third-party-qr-service runNoThirdPartyQrServiceRegression \
+        install-refresh-download-bounds runInstallRefreshDownloadBoundsRegression
 }
 
 runRegressionFastOnlyOutputAutoInstall() {
-    runRegressionStep auto-install-generated-identity runAutoInstallGeneratedIdentityRegression
-    runRegressionStep random-uuid-entropy-fallback runRandomUuidEntropyFallbackRegression
-    runRegressionStep auto-install-uuid-validation runAutoInstallUuidValidationRegression
-    runRegressionStep auto-install-user-validation runAutoInstallUserValidationRegression
-    runRegressionStep auto-install-empty-defaults runAutoInstallAllowsEmptyDefaultRegression
-    runRegressionStep auto-install-missing-required-no-stdin runAutoInstallDoesNotReadMissingRequiredValueRegression
-    runRegressionStep auto-install-tls-domain-missing-returns runAutoInstallTlsDomainMissingReturnsRegression
-    runRegressionStep auto-install-two-digit-single-protocol runAutoInstallTwoDigitSingleProtocolRegression
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_FAST_OUTPUT_JOBS:-2}" \
+        runParallelRegressionRunners "${TMP_DIR}/fast-output-auto-install-${BASHPID:-$$}" \
+        auto-install-generated-identity runAutoInstallGeneratedIdentityRegression \
+        random-uuid-entropy-fallback runRandomUuidEntropyFallbackRegression \
+        auto-install-uuid-validation runAutoInstallUuidValidationRegression \
+        auto-install-user-validation runAutoInstallUserValidationRegression \
+        auto-install-empty-defaults runAutoInstallAllowsEmptyDefaultRegression \
+        auto-install-missing-required-no-stdin runAutoInstallDoesNotReadMissingRequiredValueRegression \
+        auto-install-tls-domain-missing-returns runAutoInstallTlsDomainMissingReturnsRegression \
+        auto-install-two-digit-single-protocol runAutoInstallTwoDigitSingleProtocolRegression
 }
 
 runRegressionFastOnlyOutputRest() {
-    runRegressionStep client-name-suffix-preserves-random-prefix runClientNameSuffixPreservesRandomPrefixRegression
-    runRegressionStep subscribe-local-cleanup runInitSubscribeLocalConfigCleansAllFormatsRegression
-    runRegressionStep subscription-output-random-user runSubscriptionOutputRandomUserRegression
-    runRegressionStep show-accounts-optional-step runShowAccountsOptionalStepRegression
-    runRegressionStep subscription-account-port-fallback runSubscriptionAccountPortFallbackRegression
-    runRegressionStep show-accounts-xray-singbox-assist runShowAccountsXrayWithSingBoxAssistRegression
-    runRegressionStep xray-vmess-httpupgrade-subscription-path runXrayVmessHTTPUpgradeSubscriptionPathRegression
-    runRegressionStep show-accounts-singbox-reality-grpc runShowAccountsSingBoxRealityGrpcRegression
-    runRegressionStep trojan-grpc-account-template-filename runTrojanGrpcAccountUsesTemplateFilenameRegression
-    runRegressionStep trojan-fallback-subscribe-entry runTrojanFallbackSubscribeUsesTlsEntryRegression
-    runRegressionStep trojan-fallback-template-frontend runTrojanFallbackTemplateCreatesTlsFrontendRegression
-    runRegressionStep parse-install-args-missing-value runParseInstallArgsMissingValueRegression
-    runRegressionStep locale-unset-printN runLocaleEchoContentUnsetPrintNRegression
-    runRegressionStep httpupgrade-incremental-starts-nginx runSingBoxHttpUpgradeIncrementalStartsNginxRegression
-    runRegressionStep httpupgrade-rejects-unsafe-nginx-path runSingBoxHttpUpgradeRejectsUnsafeNginxPathRegression
-    runRegressionStep allow-port-optional-protocol runAllowPortOptionalProtocolRegression
-    runRegressionStep core-client-optional-args runCoreClientOptionalArgsRegression
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_FAST_OUTPUT_JOBS:-2}" \
+        runParallelRegressionRunners "${TMP_DIR}/fast-output-rest-${BASHPID:-$$}" \
+        client-name-suffix-preserves-random-prefix runClientNameSuffixPreservesRandomPrefixRegression \
+        subscribe-local-cleanup runInitSubscribeLocalConfigCleansAllFormatsRegression \
+        subscription-output-random-user runSubscriptionOutputRandomUserRegression \
+        show-accounts-optional-step runShowAccountsOptionalStepRegression \
+        subscription-account-port-fallback runSubscriptionAccountPortFallbackRegression \
+        show-accounts-xray-singbox-assist runShowAccountsXrayWithSingBoxAssistRegression \
+        xray-vmess-httpupgrade-subscription-path runXrayVmessHTTPUpgradeSubscriptionPathRegression \
+        show-accounts-singbox-reality-grpc runShowAccountsSingBoxRealityGrpcRegression \
+        trojan-grpc-account-template-filename runTrojanGrpcAccountUsesTemplateFilenameRegression \
+        trojan-fallback-subscribe-entry runTrojanFallbackSubscribeUsesTlsEntryRegression \
+        trojan-fallback-template-frontend runTrojanFallbackTemplateCreatesTlsFrontendRegression \
+        parse-install-args-missing-value runParseInstallArgsMissingValueRegression \
+        locale-unset-printN runLocaleEchoContentUnsetPrintNRegression \
+        httpupgrade-incremental-starts-nginx runSingBoxHttpUpgradeIncrementalStartsNginxRegression \
+        httpupgrade-rejects-unsafe-nginx-path runSingBoxHttpUpgradeRejectsUnsafeNginxPathRegression \
+        allow-port-optional-protocol runAllowPortOptionalProtocolRegression \
+        core-client-optional-args runCoreClientOptionalArgsRegression
 }
