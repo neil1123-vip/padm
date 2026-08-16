@@ -275,13 +275,13 @@ runRegressionCaseLoaderContract() (
     local suiteFile caseFile selector runner runnerArgs
     local -a expectedCases=(
         shared fast protocol_capabilities platform routing runtime reality tls ui subscription
-        transaction_core transaction_subscription transaction_system remote_control subscription_state
+        transaction_core transaction_system remote_control subscription_state
     )
     local -a casePaths=()
     local -a runnerArgv=()
 
     [[ "$(grep -Fxc 'source "${SCRIPT_DIR}/regression/cases/load.sh"' "${entry}")" -eq 1 ]] || return 1
-    ! grep -Eq 'source .*regression/cases/(shared|fast|protocol_capabilities|platform|routing|runtime|reality|tls|ui|subscription|transaction_core|transaction_subscription|transaction_system|remote_control|subscription_state)[.]sh' "${entry}" || return 1
+    ! grep -Eq 'source .*regression/cases/(shared|fast|protocol_capabilities|platform|routing|runtime|reality|tls|ui|subscription|transaction_core|transaction_system|remote_control|subscription_state)[.]sh' "${entry}" || return 1
     [[ "$(grep -Ec '^source "\$\{REGRESSION_CASES_DIR\}/[^/]+[.]sh"$' "${load}")" -eq "${#expectedCases[@]}" ]] || return 1
     for caseFile in "${expectedCases[@]}"; do
         [[ "$(grep -Fxc "source \"\${REGRESSION_CASES_DIR}/${caseFile}.sh\"" "${load}")" -eq 1 ]] || return 1

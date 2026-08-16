@@ -1157,7 +1157,7 @@ runAutoInstallTwoDigitSingleProtocolRegression() {
     local outputFile
     outputFile="${TMP_DIR}/auto-install-two-digit-single-protocol.txt"
     (
-        source "${PROJECT_ROOT}/shell/core/bootstrap.sh"
+        source "${PROJECT_ROOT}/shell/core/locale.sh"
         AUTO_INSTALL=true
         installTools() { :; }
         initTLSNginxConfig() { return 1; }
@@ -1169,7 +1169,7 @@ runAutoInstallTwoDigitSingleProtocolRegression() {
         readLastInstallationConfig() { :; }
         unInstallSubscribe() { :; }
         protocolSelectionShowRiskNotes() { :; }
-        customSingBoxInstall 31
+        customSingBoxInstallApply 31
     ) >"${outputFile}" 2>&1 || true
     ! grep -q '多选请使用英文逗号分隔' "${outputFile}"
     grep -q 'TUIC' "${outputFile}"
@@ -3445,7 +3445,7 @@ EOF
 )
 
 runInstallModulePathsRegression() (
-    local outputList moduleTmpRoot fixtureDir moduleListBefore moduleListAfter
+    local outputList moduleTmpRoot fixtureDir
     outputList="${TMP_DIR}/install-module-paths.txt"
     moduleTmpRoot="${TMP_DIR}/install-module-paths-tmp"
     fixtureDir="${TMP_DIR}/install-entry-manifest"
@@ -3471,12 +3471,7 @@ EOF
         SCRIPT_MANIFEST_FILE="${TMP_DIR}/install-module-paths-manifest"
         SCRIPT_EXPECTED_REF_FILE="${TMP_DIR}/install-module-paths-entry-ref"
         SCRIPT_REF_FILE="${TMP_DIR}/install-module-paths-ref"
-        moduleListBefore=$(find "${moduleTmpRoot}" -maxdepth 1 -type f -name 'padm-modules.*' | wc -l | tr -d ' ')
         modulePaths
-        writeModuleManifest "${SCRIPT_MANIFEST_FILE}"
-        scriptModulesReady >/dev/null
-        moduleListAfter=$(find "${moduleTmpRoot}" -maxdepth 1 -type f -name 'padm-modules.*' | wc -l | tr -d ' ')
-        [[ "${moduleListBefore}" == "0" && "${moduleListAfter}" == "0" ]]
     ) | sort >"${outputList}"
     grep -q '^install\.sh$' "${outputList}"
     grep -q '^README\.md$' "${outputList}"
@@ -3504,6 +3499,7 @@ EOF
         printf '# changed\n' >>"${fixtureDir}/install.sh"
         ! scriptModulesReady >/dev/null
     )
+    ! find "${moduleTmpRoot}" -maxdepth 1 -type f -name 'padm-modules.*' -print -quit | grep -q .
 )
 
 runInstallModuleManifestCompleteRegression() {
@@ -4930,54 +4926,62 @@ runCoreClientOptionalArgsRegression() {
 }
 
 runRegressionPlatformUpdate() {
-    runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression
-    runRegressionStep update-padm-single-ref runUpdatePadmSingleRefRegression
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_PLATFORM_UPDATE_JOBS:-2}" \
+        runParallelRegressionRunners "${TMP_DIR}/platform-update-parallel-${BASHPID:-$$}" \
+        update-padm-version-prompt runUpdatePadmVersionPromptRegression \
+        update-padm-single-ref runUpdatePadmSingleRefRegression
 }
 
 runRegressionPlatformRefresh() {
-    runRegressionStep install-refresh-ref-fail-closed runInstallRefreshRefFailClosedRegression
-    runRegressionStep install-refresh-keep-ref-on-lookup-fail runInstallRefreshKeepsRefWhenRemoteLookupFailsRegression
-    runRegressionStep install-refresh-rejects-unsafe-script-dir runInstallRefreshRejectsUnsafeScriptDirRegression
-    runRegressionStep install-refresh-rejects-unsafe-archive runInstallRefreshRejectsUnsafeArchiveRegression
-    runRegressionStep install-refresh-rejects-unsupported-archive-entry runInstallRefreshRejectsUnsupportedArchiveEntriesRegression
-    runRegressionStep install-refresh-restore runInstallRefreshRestoresBackupRegression
-    runRegressionStep install-refresh-signal-restores-and-exits runInstallRefreshSignalRestoresAndExitsRegression
-    runRegressionStep install-module-lock-serializes-load runInstallModuleLockSerializesLoadRegression
-    runRegressionStep install-refresh-rejects-entry-mismatch runInstallRefreshRejectsEntryMismatchRegression
-    runRegressionStep install-refresh-ref-commit-rollback runInstallRefreshRefCommitRollbackRegression
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_PLATFORM_REFRESH_JOBS:-3}" \
+        runParallelRegressionRunners "${TMP_DIR}/platform-refresh-parallel-${BASHPID:-$$}" \
+        install-refresh-ref-fail-closed runInstallRefreshRefFailClosedRegression \
+        install-refresh-keep-ref-on-lookup-fail runInstallRefreshKeepsRefWhenRemoteLookupFailsRegression \
+        install-refresh-rejects-unsafe-script-dir runInstallRefreshRejectsUnsafeScriptDirRegression \
+        install-refresh-rejects-unsafe-archive runInstallRefreshRejectsUnsafeArchiveRegression \
+        install-refresh-rejects-unsupported-archive-entry runInstallRefreshRejectsUnsupportedArchiveEntriesRegression \
+        install-refresh-restore runInstallRefreshRestoresBackupRegression \
+        install-refresh-signal-restores-and-exits runInstallRefreshSignalRestoresAndExitsRegression \
+        install-module-lock-serializes-load runInstallModuleLockSerializesLoadRegression \
+        install-refresh-rejects-entry-mismatch runInstallRefreshRejectsEntryMismatchRegression \
+        install-refresh-ref-commit-rollback runInstallRefreshRefCommitRollbackRegression
 }
 
 runRegressionPlatformRestFoundation() {
-    runRegressionStep release-workflow-version runReleaseWorkflowVersionRegression
-    runRegressionStep version-helpers runVersionHelpersRegression
-    runRegressionStep regression-bootstrap-local-env-fallback runRegressionBootstrapLocalEnvFallbackRegression
-    runRegressionStep cleanup-trap runCleanupTrapRegression
-    runRegressionStep cleanup-trap-relative-path runCleanupTrapRelativePathRegression
-    runRegressionStep clean-directory-safety runCleanDirectoryContentSafetyRegression
-    runRegressionStep managed-file-backup-manifest runManagedFileBackupManifestRegression
-    runRegressionStep managed-file-backup-manifest-validator runManagedFileBackupManifestValidatorRegression
-    runRegressionStep remove-managed-files-ignore-failure runRemoveManagedFilesIgnoreFailureRegression
-    runRegressionStep remove-managed-path-ignore-failure runRemoveManagedPathIgnoreFailureRegression
-    runRegressionStep check-log-backup-restore runCheckLogBackupMissingRestoreRegression
-    runRegressionStep install-entry-refresh runInstallEnsureModulesRegression
-    runRegressionStep install-module-paths runInstallModulePathsRegression
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_PLATFORM_REST_JOBS:-3}" \
+        runParallelRegressionRunners "${TMP_DIR}/platform-rest-foundation-${BASHPID:-$$}" \
+        release-workflow-version runReleaseWorkflowVersionRegression \
+        version-helpers runVersionHelpersRegression \
+        regression-bootstrap-local-env-fallback runRegressionBootstrapLocalEnvFallbackRegression \
+        cleanup-trap runCleanupTrapRegression \
+        cleanup-trap-relative-path runCleanupTrapRelativePathRegression \
+        clean-directory-safety runCleanDirectoryContentSafetyRegression \
+        managed-file-backup-manifest runManagedFileBackupManifestRegression \
+        managed-file-backup-manifest-validator runManagedFileBackupManifestValidatorRegression \
+        remove-managed-files-ignore-failure runRemoveManagedFilesIgnoreFailureRegression \
+        remove-managed-path-ignore-failure runRemoveManagedPathIgnoreFailureRegression \
+        check-log-backup-restore runCheckLogBackupMissingRestoreRegression \
+        install-entry-refresh runInstallEnsureModulesRegression \
+        install-module-paths runInstallModulePathsRegression
 }
 
 runRegressionPlatformRestInstall() {
-    runRegressionStep install-module-manifest-complete runInstallModuleManifestCompleteRegression
-    runRegressionStep install-module-manifest-requires-sha256 runInstallModuleManifestRequiresSha256Regression
-    runRegressionStep subscribe-nginx-location-pattern runSubscribeNginxLocationPatternRegression
-    runRegressionStep install-early-capability-list runInstallEarlyCapabilityListRegression
-    runRegressionStep install-menu-recommended-ids runInstallMenuRecommendedIdsRegression
-    runRegressionStep validate-install-loads-runtime runValidateInstallLoadsRuntimeRegression
-    runRegressionStep validate-install-temp-root-parent-shell runValidateInstallTempRootStaysInParentShellRegression
-    runRegressionStep install-entry-symlink runInstallEntrySymlinkPathRegression
-    runRegressionStep alias-install-metadata runAliasInstallMetadataCopyRegression
-    runRegressionStep alias-install-same-target runAliasInstallSameTargetRegression
-    runRegressionStep alias-install-rejects-unsafe-target runAliasInstallRejectsUnsafeTargetRegression
-    runRegressionStep alias-install-rejects-unsafe-home runAliasInstallRejectsUnsafeHomeFallbackRegression
-    runRegressionStep xray-stats-jq runXrayTrafficStatsJqCompatibilityRegression
-    runRegressionStep local-traffic-accounts runLocalTrafficAccountsBatchRegression
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_PLATFORM_REST_JOBS:-3}" \
+        runParallelRegressionRunners "${TMP_DIR}/platform-rest-install-${BASHPID:-$$}" \
+        install-module-manifest-complete runInstallModuleManifestCompleteRegression \
+        install-module-manifest-requires-sha256 runInstallModuleManifestRequiresSha256Regression \
+        subscribe-nginx-location-pattern runSubscribeNginxLocationPatternRegression \
+        install-early-capability-list runInstallEarlyCapabilityListRegression \
+        install-menu-recommended-ids runInstallMenuRecommendedIdsRegression \
+        validate-install-loads-runtime runValidateInstallLoadsRuntimeRegression \
+        validate-install-temp-root-parent-shell runValidateInstallTempRootStaysInParentShellRegression \
+        install-entry-symlink runInstallEntrySymlinkPathRegression \
+        alias-install-metadata runAliasInstallMetadataCopyRegression \
+        alias-install-same-target runAliasInstallSameTargetRegression \
+        alias-install-rejects-unsafe-target runAliasInstallRejectsUnsafeTargetRegression \
+        alias-install-rejects-unsafe-home runAliasInstallRejectsUnsafeHomeFallbackRegression \
+        xray-stats-jq runXrayTrafficStatsJqCompatibilityRegression \
+        local-traffic-accounts runLocalTrafficAccountsBatchRegression
 }
 
 runRegressionPlatformRestSystem() {

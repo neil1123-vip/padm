@@ -32,6 +32,11 @@ export PADM_ACCESS_CONTROL_BACKUP_DIR="${TMP_DIR}/access_control_backup"
 export PADM_FIREWALL_STATE_FILE="${TMP_DIR}/firewall.state"
 export PADM_SUPPRESS_PROGRESS=1
 
+# shellcheck source=/dev/null
+source "${PROJECT_ROOT}/shell/core/bootstrap.sh"
+padmRegisterCleanupPath "${TMP_DIR}"
+padmInstallCleanupTrap
+
 echoContent() {
     if [[ -n "${REGRESSION_ECHO_LOG:-}" ]]; then
         mkdir -p "$(dirname -- "${REGRESSION_ECHO_LOG}")"
@@ -87,87 +92,6 @@ errorCard() {
 menuClose() {
     return 0
 }
-
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/version.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/platform.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/protocols.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/runtime.sh"
-padmRegisterCleanupPath "${TMP_DIR}"
-padmInstallCleanupTrap
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/reality_targets.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/services.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/protocol_runtime.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/singbox.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/routing_rules.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/routing_ipv6.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/routing_bt.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/routing_warp.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/routing_socks.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/routing.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/routing_access_control.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/routing_dns.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/cores.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/core_templates.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/nginx.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/network.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/fail2ban.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/entry_helpers.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/subscription/groups.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/subscription/subscription.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/subscription/output.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/subscription/output_protocols.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/subscription/accounts.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/subscription/accounts_protocols.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/subscription/control.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/subscription/wireguard_control.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/subscription/sync.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/subscription/traffic.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/subscription/state_maintenance.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/subscription/menu.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/adapters.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/manage.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/state.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/tls.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/menu.sh"
 
 reloadCore() {
     return 0
