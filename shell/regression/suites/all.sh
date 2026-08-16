@@ -8,7 +8,9 @@ listRegressionAllParallelChildSelectors() {
         routing \
         runtime \
         remote-control-smoke \
-        remote-control-contract-service-install
+        remote-control-contract-service-install \
+        remote-control-contract-server-response \
+        transaction-system
 }
 
 runRegressionAllSelectorSuiteRoot() (
@@ -64,8 +66,6 @@ runRegressionAllSuiteRoot() (
     PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelectorSuiteRoot \
         runFrameworkParallelRegressionSelectorList "${TMP_DIR}/all-parallel-${BASHPID:-$$}" \
         listRegressionAllParallelChildSelectors
-    runRegressionStep transaction-system runRegressionAllSelectorSuiteRoot transaction-system
-    runRegressionStep remote-control-contract-server-response runRegressionAllSelectorSuiteRoot remote-control-contract-server-response
 )
 
 listRegressionAllChildSelectors() {

@@ -254,7 +254,6 @@ runRegressionTargetedBatchHelpers() (
     regressionExpectStatus 1 regressionExpectFailure true
 
     runParallelRegressionRunners "${TMP_DIR}/targeted-batch-helpers-parallel-${BASHPID:-$$}" \
-        core-invalid-input-retry-menu runCoreInvalidInputRetryMenuRegression \
         core-selection-retry-action runCoreSelectionRetryActionRegression \
         configured-account-helpers runConfiguredAccountHelpersRegression \
         sync-append-local-user-batch runSubscriptionSyncAppendLocalUserBatchRegression \

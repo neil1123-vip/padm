@@ -466,7 +466,7 @@ bash shell/validate_install.sh --online example.com
 | 主产品回归 | `bash shell/subscription_groups_regression.sh all` | 较大改动的主验证集；按资源预算编排核心产品 suite，但不是所有公开 selector 的并集。 |
 | 按需专项 | `bash shell/subscription_groups_regression.sh <selector>` | 按改动范围补跑协议、深层回滚或 harness 行为检查。 |
 
-`all` 并行运行 `subscription`、`ui`、`transaction-core`、`routing`、`runtime`、`remote-control-smoke` 和远程控制服务安装契约，再串行运行 `transaction-system` 与远程控制响应契约。它默认不包含 `fast`、`protocol-capabilities`、`remote-control-deep` 和 harness 契约；相关改动需按需追加。
+`all` 在同一资源预算内并行运行 `subscription`、`ui`、`transaction-core`、`transaction-system`、`routing`、`runtime`、`remote-control-smoke`、远程控制服务安装契约和远程控制响应契约。它默认不包含 `fast`、`protocol-capabilities`、`remote-control-deep` 和 harness 契约；相关改动需按需追加。
 
 常用产品专项：
 

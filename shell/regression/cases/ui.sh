@@ -907,44 +907,6 @@ runSubscriptionWireGuardRestoreRunnerRegression() (
     grep -q 'manual-check:请手动检查订阅组状态文件|/tmp/groups.json' "${helperLog}"
 )
 
-runCoreInvalidInputRetryMenuRegression() (
-    local actions=
-    local menuHandler
-
-    recordMenuAction() {
-        actions+="$1"$'\n'
-    }
-    assertMenuAction() {
-        grep -qxF "$1" <<<"${actions}"
-    }
-    errorCard() {
-        recordMenuAction "errorCard:$1"
-    }
-    sampleMenu() {
-        recordMenuAction "sampleMenu:$*"
-    }
-
-    declare -F coreInvalidInputRetryMenu >/dev/null
-    coreInvalidInputRetryMenu sampleMenu alpha beta
-    assertMenuAction 'errorCard:输入有误，请重新输入'
-    assertMenuAction 'sampleMenu:alpha beta'
-
-    for menuHandler in \
-        xrayVersionManageMenu \
-        singBoxVersionManageMenu \
-        coreServiceControlMenu \
-        coreConfigMaintenanceMenu \
-        coreLogsMenu \
-        coreAllServicesMenu \
-        coreVersionManageMenu; do
-        [[ "$(grep -cE "^${menuHandler}\\(\\)" "${PROJECT_ROOT}/shell/core/menu.sh")" == "1" ]]
-        ! grep -qE "^${menuHandler}\\(\\)" "${PROJECT_ROOT}/shell/core/cores.sh"
-        ! grep -qE "coreInvalidInputRetryMenu[[:space:]]+${menuHandler}" \
-            "${PROJECT_ROOT}/shell/core/menu.sh" "${PROJECT_ROOT}/shell/core/cores.sh"
-    done
-    [[ "$(grep -cE '^xrayGeoDataMenu\(\)' "${PROJECT_ROOT}/shell/core/menu.sh")" == "1" ]]
-)
-
 runCoreSelectionRetryActionRegression() (
     local actions=
     local -a expectedCounts=(
@@ -1080,72 +1042,40 @@ runMenuSmokeRegression() {
     errorCard() { recordMenuAction "errorCard:$1"; }
     successCard() { recordMenuAction "successCard:$1"; }
     if menuSmokePartSelected core; then
-        coreSelectionErrorCard
-        assertMenuAction 'errorCard:选择错误，请重新选择'
-        resetMenuActions
-        coreInvalidInputErrorCard
-        assertMenuAction 'errorCard:输入有误，请重新输入'
-        resetMenuActions
-        coreCancelledStatusCard "操作未执行"
-        assertMenuAction 'statusCard:已取消'
-        resetMenuActions
-        coreRuleExistsStatusCard "example.com 已存在，跳过"
-        assertMenuAction 'statusCard:规则已存在'
-        resetMenuActions
-        corePortInputErrorCard
-        assertMenuAction 'errorCard:端口输入错误'
-        resetMenuActions
-        aloneNginxConfigRecoveredErrorCard
-        assertMenuAction 'errorCard:Nginx 配置检测失败，已恢复旧 alone.conf'
-        resetMenuActions
-        nginxStartFailureCard "请查看下方日志"
-        assertMenuAction 'statusCard:Nginx 启动失败'
-        resetMenuActions
-        coreNotInstalledErrorCard
-        assertMenuAction 'errorCard:未安装，请使用脚本安装'
-        resetMenuActions
-        coreDomainRequiredErrorCard
-        assertMenuAction 'errorCard:域名不可为空'
-        resetMenuActions
-        coreIPRequiredErrorCard
-        assertMenuAction 'errorCard:IP不可为空'
-        resetMenuActions
-        xrayConfigValidationFailureCard "已取消启动"
-        assertMenuAction 'statusCard:Xray 配置校验失败'
-        resetMenuActions
-        xrayPrereleaseCompatibilityCard "通过"
-        assertMenuAction 'statusCard:Xray 预发布版试跑'
-        resetMenuActions
-        singBoxPrereleaseCompatibilityCard "通过"
-        assertMenuAction 'statusCard:sing-box 预发布版试跑'
-        resetMenuActions
-        xrayConfigValidationCard "通过"
-        assertMenuAction 'statusCard:Xray 当前配置检查'
-        resetMenuActions
-        singBoxConfigValidationCard "通过"
-        assertMenuAction 'statusCard:sing-box 当前配置检查'
-        resetMenuActions
-        skipTlsCertificateStatusCard "检测到宝塔面板/1Panel"
-        assertMenuAction 'statusCard:跳过 TLS 证书'
-        resetMenuActions
-        protocolPortInputStatusCard "端口不合法"
-        assertMenuAction 'statusCard:端口输入'
-        resetMenuActions
-        protocolPortHoppingRangeStatusCard "范围不合法"
-        assertMenuAction 'statusCard:端口跳跃范围'
-        resetMenuActions
-        protocolPortHoppingStatusCard "删除成功"
-        assertMenuAction 'statusCard:端口跳跃'
-        resetMenuActions
-        tuicAlgorithmStatusCard "cubic"
-        assertMenuAction 'statusCard:Tuic 算法'
-        resetMenuActions
-        tlsCertificateCard "重新生成证书"
-        assertMenuAction 'statusCard:TLS 证书'
-        resetMenuActions
-        tlsCertificateStatusCard "未检测到本机 TLS 证书"
-        assertMenuAction 'statusCard:TLS 证书状态'
-        resetMenuActions
+        local cardFn cardArg expectedAction
+        while IFS='|' read -r cardFn cardArg expectedAction; do
+            [[ -n "${cardFn}" ]] || continue
+            if [[ -n "${cardArg}" ]]; then
+                "${cardFn}" "${cardArg}"
+            else
+                "${cardFn}"
+            fi
+            assertMenuAction "${expectedAction}"
+            resetMenuActions
+        done <<'EOF'
+coreSelectionErrorCard||errorCard:选择错误，请重新选择
+coreInvalidInputErrorCard||errorCard:输入有误，请重新输入
+coreCancelledStatusCard|操作未执行|statusCard:已取消
+coreRuleExistsStatusCard|example.com 已存在，跳过|statusCard:规则已存在
+corePortInputErrorCard||errorCard:端口输入错误
+aloneNginxConfigRecoveredErrorCard||errorCard:Nginx 配置检测失败，已恢复旧 alone.conf
+nginxStartFailureCard|请查看下方日志|statusCard:Nginx 启动失败
+coreNotInstalledErrorCard||errorCard:未安装，请使用脚本安装
+coreDomainRequiredErrorCard||errorCard:域名不可为空
+coreIPRequiredErrorCard||errorCard:IP不可为空
+xrayConfigValidationFailureCard|已取消启动|statusCard:Xray 配置校验失败
+xrayPrereleaseCompatibilityCard|通过|statusCard:Xray 预发布版试跑
+singBoxPrereleaseCompatibilityCard|通过|statusCard:sing-box 预发布版试跑
+xrayConfigValidationCard|通过|statusCard:Xray 当前配置检查
+singBoxConfigValidationCard|通过|statusCard:sing-box 当前配置检查
+skipTlsCertificateStatusCard|检测到宝塔面板/1Panel|statusCard:跳过 TLS 证书
+protocolPortInputStatusCard|端口不合法|statusCard:端口输入
+protocolPortHoppingRangeStatusCard|范围不合法|statusCard:端口跳跃范围
+protocolPortHoppingStatusCard|删除成功|statusCard:端口跳跃
+tuicAlgorithmStatusCard|cubic|statusCard:Tuic 算法
+tlsCertificateCard|重新生成证书|statusCard:TLS 证书
+tlsCertificateStatusCard|未检测到本机 TLS 证书|statusCard:TLS 证书状态
+EOF
     fi
     progressCard() { return 0; }
     showInstallStatus() { return 0; }

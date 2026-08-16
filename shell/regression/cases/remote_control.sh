@@ -793,12 +793,6 @@ runRemoteControlServerRefreshRegression() (
     local lightMode=${2:-all}
     local lightModeTag=${lightMode}
     local runLightSections=true
-    local runLightApplySections=false
-    local runLightApplyBasicSections=false
-    local runLightApplyPrepareSections=false
-    local runLightApplyFailureSections=false
-    local runLightRestoreSections=false
-    local runLightReconcileSections=false
     local runDeepSections=true
     local subscribeCalls=0
     local subscribeArgs=
@@ -819,58 +813,32 @@ runRemoteControlServerRefreshRegression() (
     local lightweightOutputIndex=0
     local controlApplyCaptureFile="${TMP_DIR}/remote-control-apply-response-${refreshMode}-${lightModeTag}.json"
 
+    remoteControlLightModeSelected() {
+        local mode
+        [[ "${refreshMode}" == "full" ]] && return 0
+        [[ "${refreshMode}" == "light" ]] || return 1
+        for mode; do
+            [[ "${lightMode}" == "${mode}" ]] && return 0
+        done
+        return 1
+    }
+
     case "${refreshMode}" in
+    full)
+        ;;
+    deep)
+        runLightSections=false
+        ;;
     light)
         runDeepSections=false
         case "${lightMode}" in
-        all)
-            runLightApplySections=true
-            runLightApplyBasicSections=true
-            runLightApplyPrepareSections=true
-            runLightApplyFailureSections=true
-            runLightRestoreSections=true
-            runLightReconcileSections=true
-            ;;
-        apply)
-            runLightApplySections=true
-            runLightApplyBasicSections=true
-            runLightApplyPrepareSections=true
-            runLightApplyFailureSections=true
-            ;;
-        apply-basic)
-            runLightApplySections=true
-            runLightApplyBasicSections=true
-            ;;
-        apply-prepare)
-            runLightApplySections=true
-            runLightApplyPrepareSections=true
-            ;;
-        apply-failure)
-            runLightApplySections=true
-            runLightApplyFailureSections=true
-            ;;
-        restore)
-            runLightRestoreSections=true
-            ;;
-        reconcile)
-            runLightReconcileSections=true
+        all | apply | apply-basic | apply-prepare | apply-failure | restore | reconcile)
             ;;
         *)
             printf 'unknown remote-control server refresh light mode: %s\n' "${lightMode}" >&2
             return 2
             ;;
         esac
-        ;;
-    deep)
-        runLightSections=false
-        ;;
-    full)
-        runLightApplySections=true
-        runLightApplyBasicSections=true
-        runLightApplyPrepareSections=true
-        runLightApplyFailureSections=true
-        runLightRestoreSections=true
-        runLightReconcileSections=true
         ;;
     *)
         printf 'unknown remote-control server refresh mode: %s\n' "${refreshMode}" >&2
@@ -1062,8 +1030,8 @@ JSON
             printf -v "${statusVar}" '%s' "${commandStatus}"
         }
 
-        if [[ "${runLightApplySections}" == "true" ]]; then
-            if [[ "${runLightApplyBasicSections}" == "true" ]]; then
+        if remoteControlLightModeSelected all apply apply-basic apply-prepare apply-failure; then
+            if remoteControlLightModeSelected all apply apply-basic; then
                 local invalidEmptyIdResponse invalidDuplicateResponse invalidUuidMissingResponse invalidUuidEmptyResponse invalidUuidResponse invalidUuidStringResponse
                 local invalidEmptyIdStatus invalidDuplicateStatus invalidUuidMissingStatus invalidUuidEmptyStatus invalidUuidStatus invalidUuidStringStatus
                 runControlApplyCapture invalidEmptyIdResponse invalidEmptyIdStatus local '{"desired_users":[{"id":"","uuid":""}]}'
@@ -1164,7 +1132,7 @@ JSON
                 )
             fi
 
-            if [[ "${runLightApplyPrepareSections}" == "true" ]]; then
+            if remoteControlLightModeSelected all apply apply-prepare; then
                 (
                     local prepareResponse
                     local prepareStatus
@@ -1210,7 +1178,7 @@ JSON
                 )
             fi
 
-            if [[ "${runLightApplyFailureSections}" == "true" ]]; then
+            if remoteControlLightModeSelected all apply apply-failure; then
                 subscribe() {
                     subscribeCalls=$((subscribeCalls + 1))
                     subscribeArgs="$*"
@@ -1232,7 +1200,7 @@ JSON
             fi
         fi
 
-        if [[ "${runLightRestoreSections}" == "true" ]]; then
+        if remoteControlLightModeSelected all restore; then
             (
                 local restoreFailureStateWriteCalls=0
                 local restoreFailureResponse
@@ -1626,7 +1594,7 @@ JSON
         fi
     fi
 
-    if [[ "${runLightReconcileSections}" == "true" ]]; then
+    if remoteControlLightModeSelected all reconcile; then
         subscriptionControlApplyAccountPlan() {
             return 0
         }
@@ -1692,46 +1660,6 @@ JSON
         [[ "${badPlanStatus}" -ne 0 ]]
         jq -e '.ok == false and .error == "plan_failed" and .error_detail.type == "plan_failed" and has("plan") == false' "${responseFile}" >/dev/null
     fi
-)
-
-runRemoteControlServerRefreshLightApplyBasicRegression() (
-    runRemoteControlServerRefreshRegression light apply-basic
-)
-
-runRemoteControlServerRefreshLightApplyPrepareRegression() (
-    runRemoteControlServerRefreshRegression light apply-prepare
-)
-
-runRemoteControlServerRefreshLightApplyFailureRegression() (
-    runRemoteControlServerRefreshRegression light apply-failure
-)
-
-runRemoteControlServerRefreshLightRestoreRegression() (
-    runRemoteControlServerRefreshRegression light restore
-)
-
-runRemoteControlServerRefreshLightReconcileRegression() (
-    runRemoteControlServerRefreshRegression light reconcile
-)
-
-runRemoteControlServerRefreshDeepRegression() (
-    runRemoteControlServerRefreshRegression deep
-)
-
-runSubscriptionControlServiceInstallSuccessRegression() (
-    runSubscriptionControlServiceInstallRegression success
-)
-
-runSubscriptionControlServiceInstallSystemctlFailRegression() (
-    runSubscriptionControlServiceInstallRegression systemctl-fail
-)
-
-runSubscriptionControlServiceInstallHealthFailRegression() (
-    runSubscriptionControlServiceInstallRegression health-fail
-)
-
-runSubscriptionControlServiceInstallHealthRollbackRegression() (
-    runSubscriptionControlServiceInstallRegression health-rollback
 )
 
 runSubscriptionControlTokenTransactionRegression() (

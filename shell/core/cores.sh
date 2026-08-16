@@ -711,10 +711,6 @@ xrayCompatibilityAuditCard() {
     statusCard "Xray 升级风险扫描" "$@"
 }
 
-xrayStrictValidationCard() {
-    statusCard "Xray 严格模式校验" "$@"
-}
-
 xrayPrereleaseCompatibilityCard() {
     statusCard "Xray 预发布版试跑" "$@"
 }

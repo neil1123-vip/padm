@@ -819,36 +819,37 @@ runRealityConfigChangeReloadFailureRegression() (
     local statusLog="${root}/status.log"
     local refreshLog="${root}/refresh.log"
     local applyLog
-    local rc reloadCalls=0 preservedBackupDir
+    local reloadCalls=0 preservedBackupDir
 
     mkdir -p "${root}" "${root}/tmp"
     TMPDIR="${root}/tmp"
-    cat >"${xrayVision}" <<'JSON'
-{"inbounds":[{}, {"streamSettings":{"realitySettings":{"target":"old.example.com:443","serverNames":["old-sni.example.com"]}}}]}
-JSON
-    cat >"${xrayXhttp}" <<'JSON'
-{"inbounds":[{"streamSettings":{"realitySettings":{"target":"old.example.com:443","serverNames":["old-sni.example.com"]},"xhttpSettings":{"host":"old-sni.example.com"}}}]}
-JSON
     cat >"${singBoxVision}" <<'JSON'
 {"inbounds":[{"tls":{"server_name":"old-sni.example.com","reality":{"handshake":{"server":"old.example.com","server_port":443}}}}]}
 JSON
     cat >"${singBoxGrpc}" <<'JSON'
 {"inbounds":[{"tls":{"server_name":"old-sni.example.com","reality":{"handshake":{"server":"old.example.com","server_port":443}}}}]}
 JSON
-    realityTargetHost=old.example.com
-    realityTargetPort=443
-    realitySNI=old-sni.example.com
-    xrayVLESSRealitySNI=old-sni.example.com
-    xrayVLESSRealityXHTTPSNI=old-sni.example.com
-    singBoxVLESSRealityVisionSNI=old-sni.example.com
-    singBoxVLESSRealityGRPCSNI=old-sni.example.com
     PADM_REALITY_XRAY_VISION_CONFIG_FILE="${xrayVision}"
     PADM_REALITY_XRAY_XHTTP_CONFIG_FILE="${xrayXhttp}"
     PADM_REALITY_SINGBOX_VISION_CONFIG_FILE="${singBoxVision}"
     PADM_REALITY_SINGBOX_GRPC_CONFIG_FILE="${singBoxGrpc}"
     applyLog=$(realityTargetTmpPath padm-reality-target-apply.log)
-    : >"${statusLog}"
-    : >"${refreshLog}"
+
+    resetRealityConfigChangeFixture() {
+        local xhttpContent=$1
+        : >"${statusLog}"
+        : >"${refreshLog}"
+        reloadCalls=0
+        realityTargetHost=old.example.com
+        realityTargetPort=443
+        realitySNI=old-sni.example.com
+        xrayVLESSRealitySNI=old-sni.example.com
+        xrayVLESSRealityXHTTPSNI=old-sni.example.com
+        singBoxVLESSRealityVisionSNI=old-sni.example.com
+        singBoxVLESSRealityGRPCSNI=old-sni.example.com
+        printf '%s\n' '{"inbounds":[{}, {"streamSettings":{"realitySettings":{"target":"old.example.com:443","serverNames":["old-sni.example.com"]}}}]}' >"${xrayVision}"
+        printf '%s\n' "${xhttpContent}" >"${xrayXhttp}"
+    }
 
     reloadCore() {
         reloadCalls=$((reloadCalls + 1))
@@ -863,6 +864,7 @@ JSON
         printf '%s\n' "$*" >>"${statusLog}"
     }
 
+    resetRealityConfigChangeFixture '{"inbounds":[{"streamSettings":{"realitySettings":{"target":"old.example.com:443","serverNames":["old-sni.example.com"]},"xhttpSettings":{"host":"old-sni.example.com"}}}]}'
     regressionExpectStatus 1 changeInstalledRealityTarget "new.example.com:8443" "new-sni.example.com"
     [[ "${reloadCalls}" == "2" ]]
     [[ "$(jq -r '.inbounds[1].streamSettings.realitySettings.target' "${xrayVision}")" == "old.example.com:443" ]]
@@ -879,22 +881,7 @@ JSON
     [[ ! -s "${refreshLog}" ]]
     grep -q '核心重载失败，已回滚配置' "${statusLog}"
 
-    : >"${statusLog}"
-    : >"${refreshLog}"
-    reloadCalls=0
-    realityTargetHost=old.example.com
-    realityTargetPort=443
-    realitySNI=old-sni.example.com
-    xrayVLESSRealitySNI=old-sni.example.com
-    xrayVLESSRealityXHTTPSNI=old-sni.example.com
-    singBoxVLESSRealityVisionSNI=old-sni.example.com
-    singBoxVLESSRealityGRPCSNI=old-sni.example.com
-    cat >"${xrayVision}" <<'JSON'
-{"inbounds":[{}, {"streamSettings":{"realitySettings":{"target":"old.example.com:443","serverNames":["old-sni.example.com"]}}}]}
-JSON
-    cat >"${xrayXhttp}" <<'JSON'
-{bad-json
-JSON
+    resetRealityConfigChangeFixture '{bad-json'
     regressionExpectStatus 1 changeInstalledRealityTarget "new.example.com:8443" "new-sni.example.com"
     [[ "${reloadCalls}" == "0" ]]
     [[ "$(jq -r '.inbounds[1].streamSettings.realitySettings.target' "${xrayVision}")" == "old.example.com:443" ]]
@@ -906,34 +893,15 @@ JSON
     grep -q "排查日志: ${applyLog}" "${statusLog}"
     grep -q 'Invalid numeric literal' "${applyLog}"
 
-    : >"${statusLog}"
-    : >"${refreshLog}"
-    reloadCalls=0
-    realityTargetHost=old.example.com
-    realityTargetPort=443
-    realitySNI=old-sni.example.com
-    xrayVLESSRealitySNI=old-sni.example.com
-    xrayVLESSRealityXHTTPSNI=old-sni.example.com
-    singBoxVLESSRealityVisionSNI=old-sni.example.com
-    singBoxVLESSRealityGRPCSNI=old-sni.example.com
-    cat >"${xrayVision}" <<'JSON'
-{"inbounds":[{}, {"streamSettings":{"realitySettings":{"target":"old.example.com:443","serverNames":["old-sni.example.com"]}}}]}
-JSON
-    cat >"${xrayXhttp}" <<'JSON'
-{bad-json
-JSON
+    resetRealityConfigChangeFixture '{bad-json'
     cp() {
         if [[ "$1" == "-p" && "$2" == */xray/07_VLESS_vision_reality_inbounds.json && "$3" == "${root}/.xray-vision.json.restore."* ]]; then
             return 1
         fi
         command cp "$@"
     }
-    set +e
-    changeInstalledRealityTarget "new.example.com:8443" "new-sni.example.com"
-    rc=$?
-    set -e
+    regressionExpectStatus 1 changeInstalledRealityTarget "new.example.com:8443" "new-sni.example.com"
     unset -f cp
-    [[ "${rc}" == "1" ]]
     [[ "${reloadCalls}" == "0" ]]
     [[ "$(jq -r '.inbounds[1].streamSettings.realitySettings.target' "${xrayVision}")" == "new.example.com:8443" ]]
     [[ "${realityTargetHost}" == "old.example.com" ]]
@@ -946,34 +914,15 @@ JSON
     [[ -n "${preservedBackupDir}" && -d "${preservedBackupDir}" ]]
     [[ -f "${preservedBackupDir}/xray/07_VLESS_vision_reality_inbounds.json" ]]
 
-    : >"${statusLog}"
-    : >"${refreshLog}"
-    reloadCalls=0
-    realityTargetHost=old.example.com
-    realityTargetPort=443
-    realitySNI=old-sni.example.com
-    xrayVLESSRealitySNI=old-sni.example.com
-    xrayVLESSRealityXHTTPSNI=old-sni.example.com
-    singBoxVLESSRealityVisionSNI=old-sni.example.com
-    singBoxVLESSRealityGRPCSNI=old-sni.example.com
-    cat >"${xrayVision}" <<'JSON'
-{"inbounds":[{}, {"streamSettings":{"realitySettings":{"target":"old.example.com:443","serverNames":["old-sni.example.com"]}}}]}
-JSON
-    cat >"${xrayXhttp}" <<'JSON'
-{"inbounds":[{"streamSettings":{"realitySettings":{"target":"old.example.com:443","serverNames":["old-sni.example.com"]},"xhttpSettings":{"host":"old-sni.example.com"}}}]}
-JSON
+    resetRealityConfigChangeFixture '{"inbounds":[{"streamSettings":{"realitySettings":{"target":"old.example.com:443","serverNames":["old-sni.example.com"]},"xhttpSettings":{"host":"old-sni.example.com"}}}]}'
     cp() {
         if [[ "$1" == "-p" && "$2" == */xray/07_VLESS_vision_reality_inbounds.json && "$3" == "${root}/.xray-vision.json.restore."* ]]; then
             return 1
         fi
         command cp "$@"
     }
-    set +e
-    changeInstalledRealityTarget "new.example.com:8443" "new-sni.example.com"
-    rc=$?
-    set -e
+    regressionExpectStatus 1 changeInstalledRealityTarget "new.example.com:8443" "new-sni.example.com"
     unset -f cp
-    [[ "${rc}" == "1" ]]
     [[ "${reloadCalls}" == "1" ]]
     [[ "$(jq -r '.inbounds[1].streamSettings.realitySettings.target' "${xrayVision}")" == "new.example.com:8443" ]]
     [[ "${realityTargetHost}" == "new.example.com" ]]

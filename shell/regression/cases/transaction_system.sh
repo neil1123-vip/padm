@@ -1037,7 +1037,7 @@ runUninstallServiceStopFailureRegression() (
     local actionLog="${root}/actions.log"
     local errorLog="${root}/errors.log"
     local rcFile="${root}/uninstall.rc"
-    local mode shellRc rc
+    local mode shellRc
     local nginxState=false
 
     mkdir -p "${root}"
@@ -1110,7 +1110,8 @@ runUninstallServiceStopFailureRegression() (
         return 0
     }
 
-    runUninstallStopFailureCase() {
+    runUninstallCase() {
+        local expectedStatus=$5
         mode=$1
         : >"${serviceLog}"
         : >"${actionLog}"
@@ -1118,8 +1119,9 @@ runUninstallServiceStopFailureRegression() (
         rm -f "${rcFile}"
         release=centos
         coreInstallType=1
-        currentInstallProtocolType=",27,"
-        singBoxConfigPath="${root}/sing-box-conf/"
+        currentInstallProtocolType=$2
+        singBoxConfigPath=$3
+        [[ "$4" == "unchanged" ]] || nginxConfigPath=$4
         nginxStaticPath="${root}/static"
         SERVICE_QUEUE_ALLOW_FAILURE=previous
         set +e
@@ -1131,7 +1133,11 @@ runUninstallServiceStopFailureRegression() (
         shellRc=$?
         set -e
         [[ "${shellRc}" == "0" ]]
-        [[ "$(<"${rcFile}")" == "1" ]]
+        [[ "$(<"${rcFile}")" == "${expectedStatus}" ]]
+    }
+
+    runUninstallStopFailureCase() {
+        runUninstallCase "$1" ",27," "${root}/sing-box-conf/" unchanged 1
         grep -qx 'nginx:stop:true' "${serviceLog}"
         grep -qx 'xray:stop:true' "${serviceLog}"
         grep -qx 'sing-box:stop:true' "${serviceLog}"
@@ -1144,28 +1150,7 @@ runUninstallServiceStopFailureRegression() (
     }
 
     runUninstallStillRunningCase() {
-        mode=$1
-        : >"${serviceLog}"
-        : >"${actionLog}"
-        : >"${errorLog}"
-        rm -f "${rcFile}"
-        release=centos
-        coreInstallType=1
-        currentInstallProtocolType=",1,"
-        singBoxConfigPath="${root}/sing-box-conf/"
-        nginxConfigPath="${root}/nginx/"
-        nginxStaticPath="${root}/static"
-        SERVICE_QUEUE_ALLOW_FAILURE=previous
-        set +e
-        (
-            set +e
-            unInstall >/dev/null 2>&1
-            printf '%s\n' "$?" >"${rcFile}"
-        )
-        shellRc=$?
-        set -e
-        [[ "${shellRc}" == "0" ]]
-        [[ "$(<"${rcFile}")" == "1" ]]
+        runUninstallCase "$1" ",1," "${root}/sing-box-conf/" "${root}/nginx/" 1
         grep -qx 'xray:stop:true' "${serviceLog}"
         grep -qx 'sing-box:stop:true' "${serviceLog}"
         ! grep -qxF 'padm-root-cleanup' "${actionLog}"
@@ -1176,28 +1161,7 @@ runUninstallServiceStopFailureRegression() (
     }
 
     runUninstallNoNginxProtocolCase() {
-        mode=nginx-stop-fail
-        : >"${serviceLog}"
-        : >"${actionLog}"
-        : >"${errorLog}"
-        rm -f "${rcFile}"
-        release=centos
-        coreInstallType=1
-        currentInstallProtocolType=",1,"
-        singBoxConfigPath="${root}/sing-box-conf/"
-        nginxConfigPath="${root}/nginx/"
-        nginxStaticPath="${root}/static"
-        SERVICE_QUEUE_ALLOW_FAILURE=previous
-        set +e
-        (
-            set +e
-            unInstall >/dev/null 2>&1
-            printf '%s\n' "$?" >"${rcFile}"
-        )
-        shellRc=$?
-        set -e
-        [[ "${shellRc}" == "0" ]]
-        [[ "$(<"${rcFile}")" == "0" ]]
+        runUninstallCase nginx-stop-fail ",1," "${root}/sing-box-conf/" "${root}/nginx/" 0
         ! grep -qx 'nginx:stop:true' "${serviceLog}"
         grep -qx 'xray:stop:true' "${serviceLog}"
         grep -qx 'sing-box:stop:true' "${serviceLog}"
@@ -1211,28 +1175,7 @@ runUninstallServiceStopFailureRegression() (
     }
 
     runUninstallWireGuardCleanupFailureCase() {
-        mode=wireguard-cleanup-fail
-        : >"${serviceLog}"
-        : >"${actionLog}"
-        : >"${errorLog}"
-        rm -f "${rcFile}"
-        release=centos
-        coreInstallType=1
-        currentInstallProtocolType=",1,"
-        singBoxConfigPath=
-        nginxConfigPath="${root}/nginx/"
-        nginxStaticPath="${root}/static"
-        SERVICE_QUEUE_ALLOW_FAILURE=previous
-        set +e
-        (
-            set +e
-            unInstall >/dev/null 2>&1
-            printf '%s\n' "$?" >"${rcFile}"
-        )
-        shellRc=$?
-        set -e
-        [[ "${shellRc}" == "0" ]]
-        [[ "$(<"${rcFile}")" == "1" ]]
+        runUninstallCase wireguard-cleanup-fail ",1," "" "${root}/nginx/" 1
         grep -qxF 'wireguard-cleanup' "${actionLog}"
         ! grep -qxF 'nginx-fragments' "${actionLog}"
         ! grep -qxF 'padm-root-cleanup' "${actionLog}"
@@ -1263,11 +1206,12 @@ runUninstallServiceStopFailureRegression() (
         [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     }
 
-    runUninstallStopFailureCase nginx-stop-fail
-    runUninstallStopFailureCase xray-stop-fail
-    runUninstallStopFailureCase sing-box-stop-fail
-    runUninstallStillRunningCase xray-still-running
-    runUninstallStillRunningCase sing-box-still-running
+    for mode in nginx-stop-fail xray-stop-fail sing-box-stop-fail; do
+        runUninstallStopFailureCase "${mode}"
+    done
+    for mode in xray-still-running sing-box-still-running; do
+        runUninstallStillRunningCase "${mode}"
+    done
     runUninstallNoNginxProtocolCase
     runUninstallWireGuardCleanupFailureCase
     runUninstallRestoresNginxCase
