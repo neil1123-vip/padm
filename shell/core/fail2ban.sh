@@ -215,6 +215,27 @@ fail2banSshdJournalMatch() {
     printf '_SYSTEMD_UNIT=ssh.service + _COMM=sshd\n'
 }
 
+fail2banSshdPorts() {
+    local effectiveConfig ports
+    command -v sshd >/dev/null 2>&1 || return 1
+    effectiveConfig=$(sshd -T 2>/dev/null) || return 1
+    ports=$(awk '
+        $1 == "port" && $2 ~ /^[0-9]+$/ {
+            port=$2 + 0
+            if (port >= 1 && port <= 65535 && !seen[port]++) {
+                printf "%s%d", separator, port
+                separator=","
+            }
+        }
+        END {
+            if (separator == "") exit 1
+            printf "\n"
+        }
+    ' <<<"${effectiveConfig}") || return 1
+    [[ -n "${ports}" ]] || return 1
+    printf '%s\n' "${ports}"
+}
+
 fail2banManagedJailHasSection() {
     local jailName=$1
     local jailFile
@@ -354,8 +375,46 @@ fail2banEnsureLogPath() {
 
 fail2banEnsurePadmControlLogPath() { fail2banEnsureLogPath fail2banPadmControlLogFile; }
 
-fail2banEnsureNginxAccessLogPath() {
-    fail2banEnsureLogPath fail2banNginxAccessLogFile
+fail2banResolveNginxScanPorts() {
+    local logFile nginxConfig ports
+    logFile=$(fail2banNginxAccessLogFile) || return 1
+    fail2banIsSafeLogPathValue "${logFile}" || return 1
+    command -v nginx >/dev/null 2>&1 && nginxRunning || return 1
+    [[ -f "${logFile}" && -r "${logFile}" ]] || return 1
+    nginxConfig=$(nginx -T 2>&1) || return 1
+    awk -v target="${logFile}" '
+        $1 == "access_log" {
+            path=$2
+            sub(/;$/, "", path)
+            if (path == target) found=1
+        }
+        END { exit found ? 0 : 1 }
+    ' <<<"${nginxConfig}" || return 1
+    ports=$(awk '
+        $1 == "listen" {
+            endpoint=$2
+            sub(/;$/, "", endpoint)
+            if (endpoint ~ /^unix:/) next
+            if (endpoint ~ /^\[[^]]+\]:[0-9]+$/) {
+                sub(/^.*\]:/, "", endpoint)
+            } else if (endpoint ~ /:[0-9]+$/) {
+                sub(/^.*:/, "", endpoint)
+            } else if (endpoint !~ /^[0-9]+$/) {
+                next
+            }
+            port=endpoint + 0
+            if (port >= 1 && port <= 65535 && !seen[port]++) {
+                printf "%s%d", separator, port
+                separator=","
+            }
+        }
+        END {
+            if (separator == "") exit 1
+            printf "\n"
+        }
+    ' <<<"${nginxConfig}") || return 1
+    [[ -n "${ports}" ]] || return 1
+    printf '%s\n' "${ports}"
 }
 
 fail2banWriteManagedFilter() {
@@ -385,8 +444,9 @@ EOF
 fail2banWriteManagedJail() {
     local profile=$1
     local nginxScanEnabled=${2:-}
+    local nginxScanPorts=${3:-http,https}
     local jailFile tmpFile controlLog controlPort nginxAccessLog
-    local sshdBackend sshdJournalMatch
+    local sshdBackend sshdJournalMatch sshdPorts
     local sshdEnabled=false
     local controlEnabled=false
 
@@ -424,6 +484,7 @@ fail2banWriteManagedJail() {
     nginxAccessLog=$(fail2banNginxAccessLogFile)
     sshdBackend=$(fail2banSshdBackend) || return 1
     sshdJournalMatch=$(fail2banSshdJournalMatch)
+    sshdPorts=$(fail2banSshdPorts) || return 1
     fail2banIsSafeLogPathValue "${controlLog}" || return 1
     fail2banIsValidPortValue "${controlPort}" || return 1
     fail2banIsSafeLogPathValue "${nginxAccessLog}" || return 1
@@ -438,7 +499,7 @@ maxretry = 6
 [sshd]
 enabled = ${sshdEnabled}
 backend = ${sshdBackend}
-port = ssh
+port = ${sshdPorts}
 EOF
     if [[ "${sshdBackend}" == "systemd" ]]; then
         cat >>"${tmpFile}" <<EOF || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
@@ -461,6 +522,7 @@ bantime = 1h
 enabled = ${nginxScanEnabled}
 backend = auto
 filter = padm-nginx-scan-basic
+port = ${nginxScanPorts}
 logpath = ${nginxAccessLog}
 maxretry = 6
 findtime = 10m
@@ -569,6 +631,7 @@ fail2banEnsurePadmControlNginxLogging() {
 fail2banApplyProfile() {
     local profile=$1
     local nginxScanEnabled=${2:-}
+    local nginxScanPorts=http,https
     local managedBackupDir=
     local serviceWasActive=false
     local serviceWasEnabled=false
@@ -659,8 +722,8 @@ fail2banApplyProfile() {
         fi
     fi
     if [[ "${nginxScanEnabled}" == "true" ]]; then
-        if ! fail2banEnsureNginxAccessLogPath; then
-            errorCard "站点扫描扩展日志接入失败" "未能准备 Nginx 访问日志：$(fail2banNginxAccessLogFile)"
+        if ! nginxScanPorts=$(fail2banResolveNginxScanPorts); then
+            errorCard "站点扫描扩展日志未接通" "请确认 Nginx 正在运行、活动配置引用该日志且日志文件可读：$(fail2banNginxAccessLogFile)"
             return 1
         fi
     fi
@@ -688,7 +751,7 @@ fail2banApplyProfile() {
         errorCard "Fail2ban 站点扫描过滤器写入失败"
         return 1
     }
-    fail2banWriteManagedJail "${profile}" "${nginxScanEnabled}" || {
+    fail2banWriteManagedJail "${profile}" "${nginxScanEnabled}" "${nginxScanPorts}" || {
         if fail2banRestoreManagedFiles "${managedBackupDir}" "${serviceWasActive}" "${serviceWasEnabled}"; then
             padmRemoveCleanupPath "${managedBackupDir}"
         else

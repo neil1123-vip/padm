@@ -933,6 +933,8 @@ runFail2banApplyTransactionRegression() (
     local rootRel="${TMP_DIR}/fail2ban-apply-transaction"
     local root
     local errorLog="${TMP_DIR}/fail2ban-apply-transaction-errors.log"
+    local jailBefore
+    local nginxLogConnected=true
     local rc
     local jailCommitFailures=0
 
@@ -945,14 +947,35 @@ runFail2banApplyTransactionRegression() (
     export PADM_FAIL2BAN_FILTER_FILE="${root}/fail2ban/filter.d/padm-control.conf"
     export PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE="${root}/fail2ban/filter.d/padm-nginx-scan-basic.conf"
     export PADM_FAIL2BAN_CONTROL_LOG_FILE="${root}/fail2ban/log/padm-control-access.log"
+    export PADM_FAIL2BAN_NGINX_ACCESS_LOG_FILE="${root}/nginx/access.log"
     export PADM_FAIL2BAN_VALIDATE_LOG="${root}/fail2ban/validate.log"
     : >"${errorLog}"
 
-    mkdir -p "$(dirname "${PADM_FAIL2BAN_CONTROL_LOG_FILE}")"
+    mkdir -p "$(dirname "${PADM_FAIL2BAN_CONTROL_LOG_FILE}")" "$(dirname "${PADM_FAIL2BAN_NGINX_ACCESS_LOG_FILE}")"
     printf 'legacy jail\n' >"${PADM_FAIL2BAN_JAIL_FILE}"
     printf 'legacy filter\n' >"${PADM_FAIL2BAN_FILTER_FILE}"
     printf 'legacy scan\n' >"${PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE}"
     printf 'legacy control log\n' >"${PADM_FAIL2BAN_CONTROL_LOG_FILE}"
+    : >"${PADM_FAIL2BAN_NGINX_ACCESS_LOG_FILE}"
+
+    sshd() {
+        printf 'port 2222\nport 2200\nport 2222\n'
+    }
+    nginxRunning() { return 0; }
+    nginx() {
+        [[ "${1:-}" == "-T" ]] || return 1
+        if [[ "${nginxLogConnected}" == "true" ]]; then
+            printf 'access_log %s;\n' "${PADM_FAIL2BAN_NGINX_ACCESS_LOG_FILE}"
+        else
+            printf 'access_log %s;\n' "${root}/nginx/other.log"
+        fi
+        printf '%s\n' \
+            'listen 80;' \
+            'listen [::]:443 ssl;' \
+            'listen 443 ssl;' \
+            'listen 127.0.0.1:8443;' \
+            'listen unix:/run/nginx.sock;'
+    }
 
     fail2banServiceActive() { return 1; }
     fail2banServiceEnabled() { return 1; }
@@ -996,6 +1019,7 @@ runFail2banApplyTransactionRegression() (
     fail2banApplyProfile sshd false >/dev/null
     grep -q '^\[sshd\]' "${PADM_FAIL2BAN_JAIL_FILE}"
     grep -q '^enabled = true$' "${PADM_FAIL2BAN_JAIL_FILE}"
+    grep -q '^port = 2222,2200$' "${PADM_FAIL2BAN_JAIL_FILE}"
     grep -q '/s/control/' "${PADM_FAIL2BAN_FILTER_FILE}"
     grep -Eq 'wp-login\.php|\.env|phpmyadmin|actuator' "${PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE}"
     ! compgen -G "${root}/fail2ban/jail.d/.padm.local.fail2ban.*" >/dev/null
@@ -1004,6 +1028,18 @@ runFail2banApplyTransactionRegression() (
     if regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-check-log-backup.*'; then
         return 1
     fi
+
+    fail2banApplyProfile sshd true >/dev/null
+    awk '
+        /^\[/ { inScan=($0 == "[nginx-scan-basic]") }
+        inScan && $0 == "port = 80,443,8443" { found=1 }
+        END { exit found ? 0 : 1 }
+    ' "${PADM_FAIL2BAN_JAIL_FILE}"
+    jailBefore=$(<"${PADM_FAIL2BAN_JAIL_FILE}")
+    nginxLogConnected=false
+    regressionExpectStatus 1 fail2banApplyProfile sshd true >/dev/null 2>&1
+    [[ "$(<"${PADM_FAIL2BAN_JAIL_FILE}")" == "${jailBefore}" ]]
+    grep -q '站点扫描扩展日志未接通' "${errorLog}"
 
     (
         fail2banSystemdServiceInstalled() { return 1; }
