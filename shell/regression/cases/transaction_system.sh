@@ -1022,6 +1022,29 @@ runFail2banApplyTransactionRegression() (
     grep -q '^port = 2222,2200$' "${PADM_FAIL2BAN_JAIL_FILE}"
     grep -q '/s/control/' "${PADM_FAIL2BAN_FILTER_FILE}"
     grep -Eq 'wp-login\.php|\.env|phpmyadmin|actuator' "${PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE}"
+    python3 - "${PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE}" <<'PY'
+import re
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as config:
+    failregex = next(line.split("=", 1)[1].strip() for line in config if line.startswith("failregex = "))
+pattern = re.compile(failregex.replace("<HOST>", r"192\.0\.2\.1"))
+
+matches = (
+    '192.0.2.1 - - [probe] "GET /.git/config HTTP/1.1" 404',
+    '192.0.2.1 - - [probe] "GET /.env.local HTTP/1.1" 403',
+    '192.0.2.1 - - [probe] "HEAD /.env?probe=1 HTTP/1.1" 444',
+    '192.0.2.1 - - [probe] "POST /wp-login.php?redirect=x HTTP/1.1" 404',
+)
+misses = (
+    '192.0.2.1 - - [probe] "GET /.github/workflows HTTP/1.1" 404',
+    '192.0.2.1 - - [probe] "GET /wp-administer HTTP/1.1" 403',
+    '192.0.2.1 - - [probe] "GET /actuatorx HTTP/1.1" 404',
+    '192.0.2.1 - - [probe] "GET /.env HTTP/1.1" 200',
+)
+assert all(pattern.search(line) for line in matches)
+assert not any(pattern.search(line) for line in misses)
+PY
     ! compgen -G "${root}/fail2ban/jail.d/.padm.local.fail2ban.*" >/dev/null
     ! compgen -G "${root}/fail2ban/filter.d/.padm-control.conf.fail2ban.*" >/dev/null
     ! compgen -G "${root}/fail2ban/filter.d/.padm-nginx-scan-basic.conf.fail2ban.*" >/dev/null

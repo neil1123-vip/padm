@@ -435,7 +435,7 @@ fail2banWriteNginxScanFilter() {
     padmCreateTempFileForTarget tmpFile "${filterFile}" fail2ban || return 1
     cat >"${tmpFile}" <<'EOF' || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 [Definition]
-failregex = ^<HOST> - .* "(GET|POST|HEAD) /(\.env(?:\.[^ ?"]*)?|\.git(?:/[^"]*|[^"]*)?|wp-login\.php(?:[? ][^"]*)?|wp-admin(?:/[^"]*|[^"]*)?|phpmyadmin(?:/[^"]*|[^"]*)?|cgi-bin(?:/[^"]*|[^"]*)?|manager/html(?:[? ][^"]*)?|actuator(?:/[^"]*|[^"]*)?|boaform(?:/[^"]*|[^"]*)?) HTTP/[^"]*" (40[34]|444)\b
+failregex = ^<HOST> - .* "(GET|POST|HEAD) /(?:\.env(?:\.[^/?"]+)?|\.git|wp-login\.php|wp-admin|phpmyadmin|cgi-bin|manager/html|actuator|boaform)(?:/[^ ?"]*)?(?:\?[^ "]*)? HTTP/[^"]*" (40[34]|444)\b
 ignoreregex =
 EOF
     commitGeneratedFile "${tmpFile}" "${filterFile}" 644 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
