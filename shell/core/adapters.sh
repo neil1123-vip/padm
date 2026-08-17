@@ -801,6 +801,7 @@ installAcmeTool() {
 
 # 安装工具包
 installTools() {
+    padmAssertNativeInstallAllowed || return 1
     progressCard "$1" "安装工具"
     beginPackageInstallTransaction
     local packageTransactionOwner=${PADM_PACKAGE_TRANSACTION_STARTED}

@@ -3281,7 +3281,190 @@ EOF
 
     [[ ! -s "${outputLog}" ]]
     [[ ! -e "${cpLog}" ]]
+    [[ "$(<"${fixtureDir}/mode")" == "native" ]]
 
+)
+
+runDeploymentModeContractRegression() (
+    set -euo pipefail
+    local root="${TMP_DIR}/deployment-mode-contract"
+    local nativeRoot="${root}/native"
+    local dockerRoot="${root}/docker"
+    local dockerFixture=none
+
+    export PADM_NATIVE_INSTALL_DIR="${nativeRoot}"
+    export PADM_DOCKER_INSTALL_DIR="${dockerRoot}"
+
+    docker() {
+        [[ "$1" == "ps" ]] || return 1
+        if [[ "${dockerFixture}" == "project" && "$*" == *"label=io.padm.project=padm-docker"* ]]; then
+            printf 'padm-project-container\n'
+        elif [[ "${dockerFixture}" == "compose" && "$*" == *"label=com.docker.compose.project=padm-docker"* ]]; then
+            printf 'padm-compose-container\n'
+        fi
+    }
+
+    [[ "$(padmDeploymentModeAtRoot "${nativeRoot}")" == "missing" ]]
+    [[ "$(padmNativeDeploymentState)" == "absent" ]]
+
+    mkdir -p "${nativeRoot}"
+    printf '#!/usr/bin/env bash\n' >"${nativeRoot}/install.sh"
+    [[ "$(padmNativeDeploymentState)" == "installed" ]]
+    printf 'native\n' >"${nativeRoot}/mode"
+    [[ "$(padmDeploymentMode native)" == "native" ]]
+    [[ "$(padmNativeDeploymentState)" == "installed" ]]
+    printf 'docker\n' >"${nativeRoot}/mode"
+    [[ "$(padmNativeDeploymentState)" == "ambiguous" ]]
+    printf 'native\nextra\n' >"${nativeRoot}/mode"
+    [[ "$(padmDeploymentMode native)" == "invalid" ]]
+
+    rm -rf "${nativeRoot}"
+    mkdir -p "${nativeRoot}"
+    printf 'legacy-ref\n' >"${nativeRoot}/.padm-ref"
+    [[ "$(padmNativeDeploymentState)" == "installed" ]]
+    padmNativeManagedServiceActive() { return 0; }
+    [[ "$(padmNativeDeploymentState)" == "active" ]]
+
+    [[ "$(padmDockerDeploymentState)" == "absent" ]]
+    mkdir -p "${dockerRoot}"
+    printf 'native\n' >"${dockerRoot}/mode"
+    printf '{}\n' >"${dockerRoot}/deployment.json"
+    [[ "$(padmDockerDeploymentState)" == "ambiguous" ]]
+    printf 'invalid\n' >"${dockerRoot}/mode"
+    [[ "$(padmDockerDeploymentState)" == "ambiguous" ]]
+    printf 'docker\n' >"${dockerRoot}/mode"
+    [[ "$(padmDockerDeploymentState)" == "installed" ]]
+    rm -f "${dockerRoot}/mode"
+    printf '{"schema_version":1,"mode":"docker","compose":{"project":"padm-docker"}}\n' >"${dockerRoot}/deployment.json"
+    [[ "$(padmDockerDeploymentState)" == "installed" ]]
+    (
+        jq() { return 127; }
+        [[ "$(padmDockerDeploymentState)" == "ambiguous" ]]
+    )
+    printf '{}\n' >"${dockerRoot}/deployment.json"
+    [[ "$(padmDockerDeploymentState)" == "ambiguous" ]]
+    : >"${dockerRoot}/deployment.json"
+    [[ "$(padmDockerDeploymentState)" == "ambiguous" ]]
+
+    rm -rf "${dockerRoot}"
+    dockerFixture=project
+    [[ "$(padmDockerDeploymentState)" == "active" ]]
+    dockerFixture=compose
+    [[ "$(padmDockerDeploymentState)" == "active" ]]
+)
+
+runDeploymentSchemaContractRegression() (
+    set -euo pipefail
+    local schema="${PROJECT_ROOT}/docker/contracts/deployment.schema.json"
+
+    jq -e '
+      ."$schema" == "https://json-schema.org/draft/2020-12/schema" and
+      ."$id" == "urn:padm:deployment:1" and
+      .type == "object" and .additionalProperties == false and
+      ((.required | sort) == ([
+        "schema_version", "mode", "padm_version", "bundle_version", "manifest",
+        "compose", "core", "listeners", "images", "formats",
+        "previous_manifest_sha256", "host_integrations"
+      ] | sort)) and
+      .properties.schema_version.const == 1 and
+      .properties.mode.const == "docker" and
+      .properties.compose.properties.project.const == "padm-docker" and
+      ((.properties.images.required | sort) == (["xray", "sing-box", "nginx", "ops", "net"] | sort)) and
+      ((.properties.listeners.items.required | sort) == ([
+        "service", "public_port", "container_port", "transport", "address_families"
+      ] | sort)) and
+      ((.properties.host_integrations.items.required | sort) == ([
+        "type", "profile", "firewall_rules", "devices", "schedules"
+      ] | sort)) and
+      ."$defs".port.minimum == 1 and ."$defs".port.maximum == 65535 and
+      ."$defs".image.properties.index_digest.pattern == "^sha256:[a-f0-9]{64}$"
+    ' "${schema}" >/dev/null
+)
+
+runNativeInstallDockerGuardRegression() (
+    set -euo pipefail
+    local root="${TMP_DIR}/native-install-docker-guard"
+    local sourceDir="${root}/source"
+    local targetDir="${root}/target"
+    local dockerRoot="${root}/docker"
+    local packageMutationLog="${root}/package-mutation.log"
+    local subscriptionMutationLog="${root}/subscription-mutation.log"
+    local commandStatus=0
+
+    mkdir -p "${sourceDir}/shell" "${sourceDir}/documents" "${sourceDir}/assets" "${targetDir}" "${dockerRoot}"
+    cat >"${sourceDir}/install.sh" <<'EOF'
+#!/usr/bin/env bash
+ensureScriptModules() { :; }
+EOF
+    printf 'keep\n' >"${targetDir}/sentinel"
+    printf 'docker\n' >"${dockerRoot}/mode"
+
+    export PADM_DOCKER_INSTALL_DIR="${dockerRoot}"
+    SCRIPT_DIR="${sourceDir}"
+    PADM_INSTALL_DIR="${targetDir}"
+    HOME="${root}/home"
+    mkdir -p "${HOME}"
+    docker() { return 0; }
+
+    beginPackageInstallTransaction() { : >"${packageMutationLog}"; }
+    regressionExpectFailure installTools fixture
+    [[ ! -e "${packageMutationLog}" ]]
+
+    regressionExpectFailure aliasInstall
+    [[ "$(<"${targetDir}/sentinel")" == "keep" ]]
+    [[ ! -e "${targetDir}/mode" ]]
+
+    set +e
+    (
+        eval "$(awk '/^handleScriptCommand\(\)/,/^}/' "${PROJECT_ROOT}/install.sh")"
+        cronName=InstallSubscription
+        mkdirTools() { : >"${subscriptionMutationLog}"; }
+        installSubscribe() { : >"${subscriptionMutationLog}"; }
+        handleScriptCommand
+    ) >/dev/null 2>&1
+    commandStatus=$?
+    set -e
+    [[ "${commandStatus}" -eq 1 ]]
+    [[ ! -e "${subscriptionMutationLog}" ]]
+    [[ "$(<"${dockerRoot}/mode")" == "docker" ]]
+)
+
+runAliasInstallModeMarkerRollbackRegression() (
+    set -euo pipefail
+    local root="${TMP_DIR}/alias-install-mode-rollback"
+    local sourceDir="${root}/source"
+    local targetDir="${root}/target"
+
+    mkdir -p "${sourceDir}/shell" "${sourceDir}/documents" "${sourceDir}/assets" "${targetDir}/shell"
+    cat >"${sourceDir}/install.sh" <<'EOF'
+#!/usr/bin/env bash
+ensureScriptModules() { :; }
+EOF
+    printf 'new\n' >"${sourceDir}/shell/sentinel"
+    printf 'old\n' >"${targetDir}/shell/sentinel"
+    printf 'old-install\n' >"${targetDir}/install.sh"
+
+    SCRIPT_DIR="${sourceDir}"
+    PADM_INSTALL_DIR="${targetDir}"
+    PADM_DOCKER_INSTALL_DIR="${root}/docker"
+    HOME="${root}/home"
+    mkdir -p "${HOME}"
+    docker() { return 0; }
+
+    (
+        eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
+        commitGeneratedFile() {
+            [[ "$2" != "${targetDir}/mode" ]] || return 71
+            originalCommitGeneratedFile "$@"
+        }
+        chmod() { :; }
+        ln() { :; }
+        regressionExpectFailure aliasInstall
+    )
+
+    [[ "$(<"${targetDir}/shell/sentinel")" == "old" ]]
+    [[ "$(<"${targetDir}/install.sh")" == "old-install" ]]
+    [[ ! -e "${targetDir}/mode" ]]
 )
 
 runAliasInstallRejectsUnsafeTargetRegression() (
@@ -3484,9 +3667,10 @@ runValidateInstallTempRootStaysInParentShellRegression() {
 }
 
 runAliasInstallMetadataCopyRegression() (
-    local sourceDir targetDir chmodLog shortcutLog shortcutOutput
+    local sourceDir targetDir dockerRoot chmodLog shortcutLog shortcutOutput
     sourceDir="${TMP_DIR}/alias-install-source"
     targetDir="${TMP_DIR}/alias-install-target"
+    dockerRoot="${TMP_DIR}/alias-install-docker-root"
     chmodLog="${TMP_DIR}/alias-install-chmod.log"
     shortcutLog="${TMP_DIR}/alias-install-shortcut.log"
     shortcutOutput="${TMP_DIR}/alias-install-shortcut.out"
@@ -3505,6 +3689,7 @@ EOF
 
     SCRIPT_DIR="${sourceDir}"
     PADM_INSTALL_DIR="${targetDir}"
+    PADM_DOCKER_INSTALL_DIR="${dockerRoot}"
     HOME="${TMP_DIR}/alias-install-home"
     mkdir -p "${HOME}"
 
@@ -3518,6 +3703,8 @@ EOF
     cmp -s "${sourceDir}/README.md" "${targetDir}/README.md"
     cmp -s "${sourceDir}/.padm-ref" "${targetDir}/.padm-ref"
     cmp -s "${sourceDir}/.padm-entry-ref" "${targetDir}/.padm-entry-ref"
+    [[ "$(<"${targetDir}/mode")" == "native" ]]
+    [[ ! -e "${dockerRoot}" ]]
 
     printf 'old-shell\n' >"${targetDir}/shell/marker"
     printf 'old-docs\n' >"${targetDir}/documents/marker"
@@ -3551,6 +3738,7 @@ EOF
     [[ "$(<"${targetDir}/.padm-ref")" == "old-ref" ]]
     [[ "$(<"${targetDir}/.padm-entry-ref")" == "old-entry-ref" ]]
     [[ "$(<"${targetDir}/install.sh")" == "old-install" ]]
+    [[ "$(<"${targetDir}/mode")" == "native" ]]
     grep -Fqx "700 ${targetDir}/install.sh" "${chmodLog}"
 
     : >"${shortcutLog}"
@@ -4843,8 +5031,11 @@ runRegressionPlatformRestInstall() {
         install-menu-recommended-ids runInstallMenuRecommendedIdsRegression \
         validate-install-loads-runtime runValidateInstallLoadsRuntimeRegression \
         validate-install-temp-root-parent-shell runValidateInstallTempRootStaysInParentShellRegression \
+        deployment-mode-contract runDeploymentModeContractRegression \
+        deployment-schema-contract runDeploymentSchemaContractRegression \
         install-entry-symlink runInstallEntrySymlinkPathRegression \
         alias-install-metadata runAliasInstallMetadataCopyRegression \
+        alias-install-mode-rollback runAliasInstallModeMarkerRollbackRegression \
         alias-install-same-target runAliasInstallSameTargetRegression \
         alias-install-rejects-unsafe-target runAliasInstallRejectsUnsafeTargetRegression \
         alias-install-rejects-unsafe-home runAliasInstallRejectsUnsafeHomeFallbackRegression \
@@ -4880,6 +5071,7 @@ runRegressionFastOnlySafety() {
         download-arg-missing-value runDownloadArgumentMissingValueRegression \
         fetch-url-wget-hard-limit runFetchUrlWgetHardLimitRegression \
         github-release-arg-missing-value runGitHubReleaseArgumentMissingValueRegression \
+        native-install-docker-guard runNativeInstallDockerGuardRegression \
         remove-install-path-retry runRemoveInstallPathRetryRegression \
         remove-install-path-file-mode runRemoveInstallPathFileModeRegression \
         uninstall-padm-root-scope runUninstallPadmRootScopeRegression \

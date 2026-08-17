@@ -785,6 +785,9 @@ handleScriptCommand() {
         exit $?
     elif [[ "${cronName}" == "InstallSubscription" ]]; then
         local installStatus
+        if ! padmAssertNativeInstallAllowed; then
+            exit 1
+        fi
         if ! mkdirTools; then
             errorCard "初始化安装目录失败"
             exit 1

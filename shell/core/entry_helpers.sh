@@ -1318,6 +1318,28 @@ syncInstallDirectoryTree() {
     cleanupInstallSyncPath "${backupRoot}"
 }
 
+ensureNativeModeMarker() {
+    local targetDir=$1
+    local markerFile markerState stagedFile
+    targetDir=$(padmResolveManagedAbsolutePath "${targetDir}") || return 1
+    markerFile="${targetDir%/}/mode"
+    markerState=$(padmDeploymentModeAtRoot "${targetDir}") || return 1
+    case "${markerState}" in
+    native) return 0 ;;
+    missing) ;;
+    *)
+        errorCard "原生部署 mode marker 异常，已拒绝覆盖" "${markerFile}"
+        return 1
+        ;;
+    esac
+    padmCreateTempFileForTarget stagedFile "${markerFile}" mode || return 1
+    printf 'native\n' >"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
+    commitGeneratedFile "${stagedFile}" "${markerFile}" 644 || {
+        padmRemoveCleanupPath "${stagedFile}"
+        return 1
+    }
+}
+
 # 脚本快捷方式
 aliasInstall() {
     local sourceInstall="${SCRIPT_DIR}/install.sh"
@@ -1335,10 +1357,12 @@ aliasInstall() {
     fi
 
     if sameInstallPath "${sourceInstall}" "${targetDir}/install.sh"; then
-        return 0
+        ensureNativeModeMarker "${targetDir}"
+        return $?
     fi
 
     if [[ -f "${sourceInstall}" && -d "${targetDir}" ]] && padmEntryScriptReady "${sourceInstall}"; then
+        padmAssertNativeInstallAllowed || return 1
         local rollbackBackupDir=
         local rollbackStatus=0
         local -a rollbackPaths=(
@@ -1349,6 +1373,7 @@ aliasInstall() {
             "${targetDir}/.padm-module-manifest"
             "${targetDir}/.padm-ref"
             "${targetDir}/.padm-entry-ref"
+            "${targetDir}/mode"
             "${targetDir}/xray/README.md"
             "${targetDir}/install.sh"
         )
@@ -1365,7 +1390,8 @@ aliasInstall() {
             ! syncInstallMetadataFile "${SCRIPT_DIR}/.padm-ref" "${targetDir}/.padm-ref" ||
             ! syncInstallMetadataFile "${SCRIPT_DIR}/.padm-entry-ref" "${targetDir}/.padm-entry-ref" ||
             ! rm -f "${targetDir}/xray/README.md" ||
-            ! syncInstallManagedFile "${sourceInstall}" "${targetDir}/install.sh" 700; then
+            ! syncInstallManagedFile "${sourceInstall}" "${targetDir}/install.sh" 700 ||
+            ! ensureNativeModeMarker "${targetDir}"; then
             adapterRestoreManagedRollbackBackup "${rollbackBackupDir}" || rollbackStatus=1
             if [[ -f "${targetDir}/install.sh" ]] && ! chmod 700 "${targetDir}/install.sh"; then
                 rollbackStatus=1

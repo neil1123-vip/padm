@@ -13,6 +13,8 @@ source "${CORE_DIR}/platform.sh"
 # shellcheck source=/dev/null
 source "${CORE_DIR}/runtime.sh"
 # shellcheck source=/dev/null
+source "${CORE_DIR}/deployment_mode.sh"
+# shellcheck source=/dev/null
 source "${CORE_DIR}/version.sh"
 # shellcheck source=/dev/null
 source "${CORE_DIR}/protocols.sh"

@@ -595,7 +595,7 @@ menu() {
             errorCard "初始化安装目录失败"
             return 1
         fi
-        aliasInstall
+        aliasInstall || return 1
         autoRead main_menu "请选择:" selectMainMenuType || return 0
         case ${selectMainMenuType} in
         1)
