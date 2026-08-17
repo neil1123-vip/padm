@@ -28,6 +28,7 @@ registerRegressionFunctionLeaf fast-only-safety runRegressionFastOnlySafety
 registerRegressionFunctionLeaf fast-only-output-auto-install runRegressionFastOnlyOutputAutoInstall
 registerRegressionFunctionLeaf fast-only-output-rest runRegressionFastOnlyOutputRest
 registerRegressionFunctionLeaf fast-smoke runRegressionFastSmoke
+registerRegressionFunctionLeaf docker-phase1 runDockerPhase1Regression
 
 registerRegressionParallelSelectorList fast-only-output runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/fast-only-output-parallel-${BASHPID:-$$}" listRegressionFastOnlyOutputChildSelectors

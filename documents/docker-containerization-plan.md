@@ -235,6 +235,9 @@ Docker 日志使用受限大小和文件数的轮转配置；应用文件日志�
 
 ### 阶段 1：Docker 控制骨架
 
+状态：已完成（2026-08-17）。实现范围、退出码和验证结果见
+[Docker 容器化阶段 1 基线](docker-phase1-baseline.md)。
+
 实现 `install-docker.sh` 和 Docker 专用模块：
 
 - 检查 Docker Engine、Compose、Bash、下载工具和 JSON 工具。
