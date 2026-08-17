@@ -601,6 +601,11 @@ EOF
     refreshMaxConcurrency=$(sort -nr "${refreshConcurrencyDir}/observed" | head -n 1)
     [[ "${refreshMaxConcurrency}" -ge 2 && "${refreshMaxConcurrency}" -le 4 ]]
     writeRealityTargetResultLine "refresh-scanner.example.com:8443" "sni.refresh-scanner.example.com" "Refresh Scanner" "scanner" "unknown" "198.51.100.20" "AS64501" "RemoteNet" "different_network" "A" "yes" "4096" "yes" "1234567890" "RealiTLScanner: Fixture CA; old result"
+    writeRealityTargetResultLine "refresh-network-fail.example.com:443" "refresh-network-fail.example.com" "Refresh Network Fail" "test" "unknown" "198.51.100.21" "AS64501" "RemoteNet" "different_network" "A" "yes" "4096" "yes" "1234567890" "stale A fixture"
+    resolveRealityTargetIPv4() {
+        [[ "$1" == "refresh-network-fail.example.com" ]] && return 1
+        printf '192.0.2.1\n'
+    }
     rm -f "${REALITY_TLS_PING_ARGS_FILE}" "${asnLookupFile}" "${refreshTimeoutLog}"
     scanLocalAsnRealityTargets
     [[ "$(wc -l <"${REALITY_TLS_PING_ARGS_FILE}" | tr -d ' ')" == "2" ]]
@@ -609,9 +614,11 @@ EOF
     ! grep -qF "fail-auto.example.com" "${REALITY_TLS_PING_ARGS_FILE}"
     [[ "$(wc -l <"${asnLookupFile}" | tr -d ' ')" == "2" ]]
     [[ "$(grep -cFx -- '-k 2 15' "${refreshTimeoutLog}")" == "2" ]]
+    ! grep -qF $'refresh-network-fail.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
     refreshScannerLine=$(grep -F $'refresh-scanner.example.com:8443\tsni.refresh-scanner.example.com\tRefresh Scanner\tscanner\tunknown\t' "${PADM_REALITY_TARGET_SCAN_FILE}")
     [[ "$(realityTargetResultField "${refreshScannerLine}" 9)" == "same_asn" ]]
     [[ "$(realityTargetResultField "${refreshScannerLine}" 15)" == "RealiTLScanner: Fixture CA; TLS 1.3 + X25519MLKEM768 可用，证书链长度满足 Xray 要求" ]]
+    resolveRealityTargetIPv4() { printf '192.0.2.1\n'; }
     unset -f timeout
     unset REALITY_ASN_LOOKUP_ARGS_FILE PADM_FAKE_XRAY_CONCURRENCY_DIR PADM_REALITY_SECONDARY_JOBS
 
@@ -687,14 +694,23 @@ CSV
     batchLinesFile="${TMP_DIR}/reality-batch-lines.tsv"
     failedTargetsFile="${TMP_DIR}/reality-failed-targets.txt"
     writeRealityTargetResultLine "batch-old.example.com:443" "old.example.com" "Old Batch" "test" "unknown" "192.0.2.20" "AS64500" "ExampleNet" "same_asn" "B" "yes" "4096" "yes" "1234567800" "old batch line"
+    writeRealityTargetResultLine "single-drop.example.com:443" "single-drop.example.com" "Single Drop" "test" "unknown" "192.0.2.23" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567800" "old A line"
+    writeRealityTargetResultLine "single-drop.example.com:443" "single-drop.example.com" "Single Drop" "test" "unknown" "192.0.2.23" "AS64500" "ExampleNet" "same_asn" "C" "no" "4096" "yes" "1234567801" "new C line"
+    ! grep -qF $'single-drop.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
+    writeRealityTargetResultLine "batch-drop.example.com:443" "batch-drop.example.com" "Batch Drop" "test" "unknown" "192.0.2.24" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567800" "old A batch line"
     {
         printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "batch-old.example.com:443" "new.example.com" "New Batch" "test" "unknown" "192.0.2.21" "AS64500" "ExampleNet" "same_asn" "A" "yes" "8192" "yes" "1234567899" "new batch line"
         printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "batch-new.example.com:443" "batch-new.example.com" "Batch New" "test" "unknown" "192.0.2.22" "AS64500" "ExampleNet" "same_asn" "B" "yes" "4096" "yes" "1234567898" "second batch line"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "batch-drop.example.com:443" "batch-drop.example.com" "Batch Drop" "test" "unknown" "192.0.2.24" "AS64500" "ExampleNet" "same_asn" "C" "no" "4096" "yes" "1234567899" "new C batch line"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "batch-c.example.com:443" "batch-c.example.com" "Batch C" "test" "unknown" "192.0.2.25" "AS64500" "ExampleNet" "same_asn" "C" "no" "4096" "yes" "1234567899" "new C line"
     } >"${batchLinesFile}"
     writeRealityTargetResultLines "${batchLinesFile}"
     batchLine=$(grep -F $'batch-old.example.com:443\tnew.example.com' "${PADM_REALITY_TARGET_SCAN_FILE}")
     [[ "$(realityTargetResultField "${batchLine}" 10)" == "A" ]]
     grep -qF $'batch-new.example.com:443\tbatch-new.example.com' "${PADM_REALITY_TARGET_SCAN_FILE}"
+    ! grep -qF $'batch-drop.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
+    ! grep -qF $'batch-c.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
+    awk -F'\t' '$10 != "A" && $10 != "B" {exit 1}' "${PADM_REALITY_TARGET_SCAN_FILE}"
     printf '%s\n' "batch-old.example.com:443" >"${failedTargetsFile}"
     printf '%s\n' "batch-old.example.com|batch-old.example.com|Batch Old|global|large_site|unknown|9|yes|batch candidate" >>"${scannerCandidatesFile}"
     removeRealityTargetsFromUnifiedLibrary "${failedTargetsFile}"
@@ -706,7 +722,15 @@ CSV
     unset AUTO_REALITY_SERVER_NAME
     writeRealityTargetResultLine "local.example.com:443" "sni.local.example.com" "Local Example" "test" "no" "192.0.2.1" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "same ASN test target"
     writeRealityTargetResultLine "remote.example.com:443" "sni.remote.example.com" "Remote Example" "test" "no" "198.51.100.1" "AS64501" "RemoteNet" "different_network" "A" "yes" "8192" "yes" "1234567899" "longer cert but different network"
+    writeRealityTargetResultLine "hidden-c.example.com:443" "hidden-c.example.com" "Hidden C" "test" "no" "198.51.100.2" "AS64501" "RemoteNet" "different_network" "C" "no" "4096" "yes" "1234567899" "must not persist"
     [[ "$(realityTargetResultCount)" == "2" ]]
+    [[ "$(realityTargetFilterTitle all)" == "全部可用" ]]
+    ! realityTargetScanResultFilterMatches "C" "same_asn" "all" "test"
+    if ! selectRealityTargetFromScanResults <<<"1"; then
+        return 1
+    fi
+    [[ "${realityTargetHost}" == "local.example.com" ]]
+    [[ "${realitySNI}" == "sni.local.example.com" ]]
     scanLine=$(grep -F $'local.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}")
     [[ "$(realityTargetResultField "${scanLine}" 1)" == "local.example.com:443" ]]
     selectDefaultRealityTarget
