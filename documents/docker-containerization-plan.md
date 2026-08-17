@@ -252,6 +252,10 @@ Docker 日志使用受限大小和文件数的轮转配置；应用文件日志�
 
 ### 阶段 2：镜像与 Compose
 
+状态：实现完成（2026-08-17），本地合同与 Compose/Bake 静态验收已通过；真实
+双架构镜像 build/run smoke 因本机 Docker daemon 未运行，留给阶段 5 CI。实现
+范围和验证结果见 [Docker 容器化阶段 2 基线](docker-phase2-baseline.md)。
+
 制作 5 个镜像，所有基础镜像、上游版本和补丁写入 `versions.lock`。
 
 每个 Dockerfile 必须能在隔离构建上下文中单独重建，并通过同一套 label、架构和 smoke 契约；不得把 `ops` 或 `net` 的工具隐式复制进核心镜像。

@@ -110,8 +110,11 @@ DOCKER_ROOT="${TEST_ROOT}/state"
 NATIVE_ROOT="${TEST_ROOT}/native"
 CLI_DIR="${TEST_ROOT}/usr-local-bin"
 mkdir -p "${NATIVE_ROOT}"
+NO_COMPOSE_SOURCE="${TEST_ROOT}/no-compose-source"
+copyBundleFixture "${NO_COMPOSE_SOURCE}"
+rm -f -- "${NO_COMPOSE_SOURCE}/docker/compose.yaml"
 
-runControl 0 install "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" install --source "${PROJECT_ROOT}"
+runControl 0 install "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" install --source "${NO_COMPOSE_SOURCE}"
 [[ "$(<"${DOCKER_ROOT}/mode")" == "docker" ]] || fail 'mode marker was not initialized'
 for directory in bundle config data secrets logs backups locks; do
     [[ -d "${DOCKER_ROOT}/${directory}" ]] || fail "missing state directory: ${directory}"
@@ -133,7 +136,7 @@ fi
 
 printf 'keep\n' >"${DOCKER_ROOT}/data/sentinel"
 bundleBefore=$(readlink "${DOCKER_ROOT}/bundle")
-runControl 0 repeat-install "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" install --source "${PROJECT_ROOT}"
+runControl 0 repeat-install "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" install --source "${NO_COMPOSE_SOURCE}"
 [[ "$(readlink "${DOCKER_ROOT}/bundle")" == "${bundleBefore}" ]] || fail 'repeat install changed an identical bundle'
 [[ "$(<"${DOCKER_ROOT}/data/sentinel")" == "keep" ]] || fail 'repeat install changed persistent data'
 

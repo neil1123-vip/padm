@@ -1,0 +1,208 @@
+name: padm-docker
+
+x-padm-defaults: &padm-defaults
+  init: true
+  read_only: true
+  restart: unless-stopped
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 256
+  ulimits:
+    nofile:
+      soft: 65536
+      hard: 65536
+
+x-padm-labels: &padm-labels
+  io.padm.project: padm-docker
+
+services:
+  xray:
+    <<: *padm-defaults
+    image: "${PADM_XRAY_IMAGE:?PADM_XRAY_IMAGE is required}"
+    profiles: [core-xray]
+    labels:
+      <<: *padm-labels
+      io.padm.component: xray
+    volumes:
+      - type: bind
+        source: ${PADM_DOCKER_ROOT:-/etc/padm-docker}/config/xray
+        target: /etc/padm/xray
+        read_only: true
+      - type: bind
+        source: ${PADM_DOCKER_ROOT:-/etc/padm-docker}/data/xray
+        target: /var/lib/padm/xray
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+
+  sing-box:
+    <<: *padm-defaults
+    image: "${PADM_SINGBOX_IMAGE:?PADM_SINGBOX_IMAGE is required}"
+    profiles: [core-sing-box]
+    labels:
+      <<: *padm-labels
+      io.padm.component: sing-box
+    volumes:
+      - type: bind
+        source: ${PADM_DOCKER_ROOT:-/etc/padm-docker}/config/sing-box
+        target: /etc/padm/sing-box
+        read_only: true
+      - type: bind
+        source: ${PADM_DOCKER_ROOT:-/etc/padm-docker}/data/sing-box
+        target: /var/lib/padm/sing-box
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+
+  nginx:
+    <<: *padm-defaults
+    image: "${PADM_NGINX_IMAGE:?PADM_NGINX_IMAGE is required}"
+    profiles: [nginx]
+    labels:
+      <<: *padm-labels
+      io.padm.component: nginx
+    volumes:
+      - type: bind
+        source: ${PADM_DOCKER_ROOT:-/etc/padm-docker}/config/nginx
+        target: /etc/nginx/http.d
+        read_only: true
+      - type: bind
+        source: ${PADM_DOCKER_ROOT:-/etc/padm-docker}/data/static
+        target: /srv/padm
+        read_only: true
+      - type: bind
+        source: ${PADM_DOCKER_ROOT:-/etc/padm-docker}/secrets
+        target: /etc/padm/secrets
+        read_only: true
+      - type: bind
+        source: ${PADM_DOCKER_ROOT:-/etc/padm-docker}/logs/nginx
+        target: /var/log/nginx
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m
+
+  subscription:
+    <<: *padm-defaults
+    image: "${PADM_OPS_IMAGE:?PADM_OPS_IMAGE is required}"
+    profiles: [subscription]
+    command: [subscription]
+    labels:
+      <<: *padm-labels
+      io.padm.component: subscription
+    volumes:
+      - type: bind
+        source: ${PADM_DOCKER_ROOT:-/etc/padm-docker}/config/subscription
+        target: /opt/padm/subscription
+        read_only: true
+      - type: bind
+        source: ${PADM_DOCKER_ROOT:-/etc/padm-docker}/data/subscription
+        target: /var/lib/padm/subscription
+      - type: bind
+        source: ${PADM_DOCKER_ROOT:-/etc/padm-docker}/secrets
+        target: /run/padm-secrets
+        read_only: true
+      - type: bind
+        source: ${PADM_DOCKER_ROOT:-/etc/padm-docker}/logs/subscription
+        target: /var/log/padm
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m
+
+  acme:
+    <<: *padm-defaults
+    image: "${PADM_OPS_IMAGE:?PADM_OPS_IMAGE is required}"
+    profiles: [acme]
+    command: [acme, --version]
+    restart: "no"
+    labels:
+      <<: *padm-labels
+      io.padm.component: acme
+    volumes:
+      - type: bind
+        source: ${PADM_DOCKER_ROOT:-/etc/padm-docker}/data/acme
+        target: /var/lib/padm/acme
+      - type: bind
+        source: ${PADM_DOCKER_ROOT:-/etc/padm-docker}/secrets
+        target: /run/padm-secrets
+        read_only: true
+      - type: bind
+        source: ${PADM_DOCKER_ROOT:-/etc/padm-docker}/logs/acme
+        target: /var/log/padm
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m
+
+  net-wireguard:
+    <<: *padm-defaults
+    image: "${PADM_NET_IMAGE:?PADM_NET_IMAGE is required}"
+    profiles: [net-wireguard]
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    labels:
+      <<: *padm-labels
+      io.padm.component: net-wireguard
+    volumes:
+      - type: bind
+        source: ${PADM_DOCKER_ROOT:-/etc/padm-docker}/config/net/wireguard
+        target: /etc/padm/net/wireguard
+        read_only: true
+      - type: bind
+        source: ${PADM_DOCKER_ROOT:-/etc/padm-docker}/data/net/wireguard
+        target: /var/lib/padm/net
+    tmpfs:
+      - /run:rw,nosuid,nodev,size=16m
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+
+  net-fail2ban:
+    <<: *padm-defaults
+    image: "${PADM_NET_IMAGE:?PADM_NET_IMAGE is required}"
+    profiles: [net-fail2ban]
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    labels:
+      <<: *padm-labels
+      io.padm.component: net-fail2ban
+    volumes:
+      - type: bind
+        source: ${PADM_DOCKER_ROOT:-/etc/padm-docker}/config/net/fail2ban
+        target: /etc/fail2ban/jail.d
+        read_only: true
+      - type: bind
+        source: ${PADM_DOCKER_ROOT:-/etc/padm-docker}/logs/nginx
+        target: /var/log/padm/nginx
+        read_only: true
+      - type: bind
+        source: ${PADM_DOCKER_ROOT:-/etc/padm-docker}/data/net/fail2ban
+        target: /var/lib/padm/net
+    tmpfs:
+      - /run:rw,nosuid,nodev,size=16m
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+
+  net-transparent:
+    <<: *padm-defaults
+    image: "${PADM_NET_IMAGE:?PADM_NET_IMAGE is required}"
+    profiles: [net-transparent]
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun:rwm
+    labels:
+      <<: *padm-labels
+      io.padm.component: net-transparent
+    volumes:
+      - type: bind
+        source: ${PADM_DOCKER_ROOT:-/etc/padm-docker}/config/net/transparent
+        target: /etc/padm/net/transparent
+        read_only: true
+      - type: bind
+        source: ${PADM_DOCKER_ROOT:-/etc/padm-docker}/data/net/transparent
+        target: /var/lib/padm/net
+    tmpfs:
+      - /run:rw,nosuid,nodev,size=16m
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+
+networks:
+  default:
+    name: padm-docker
+    labels:
+      io.padm.project: padm-docker

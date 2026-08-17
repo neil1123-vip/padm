@@ -4985,6 +4985,10 @@ runDockerPhase1Regression() {
     bash "${PROJECT_ROOT}/docker/tests/phase1.sh"
 }
 
+runDockerPhase2Regression() {
+    bash "${PROJECT_ROOT}/docker/tests/phase2.sh"
+}
+
 runRegressionPlatformUpdate() {
     PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_PLATFORM_UPDATE_JOBS:-2}" \
         runParallelRegressionRunners "${TMP_DIR}/platform-update-parallel-${BASHPID:-$$}" \
