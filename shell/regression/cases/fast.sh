@@ -321,13 +321,17 @@ runFetchUrlWgetHardLimitRegression() (
     # shellcheck source=/dev/null
     source "${PROJECT_ROOT}/shell/core/runtime.sh"
     local outputFile="${TMP_DIR}/fetch-url-wget-hard-limit.out"
-    curl() { return 63; }
-    wget() { head -c 6291456 /dev/zero; }
+    local curlArgsFile="${TMP_DIR}/fetch-url-curl-timeout.args"
+    local wgetArgsFile="${TMP_DIR}/fetch-url-wget-timeout.args"
+    curl() { printf '%s\n' "$*" >"${curlArgsFile}"; return 63; }
+    wget() { printf '%s\n' "$*" >"${wgetArgsFile}"; head -c 6291456 /dev/zero; }
 
-    if fetchUrlToStdout https://example.invalid/oversized 1 >"${outputFile}"; then
+    if fetchUrlToStdout https://example.invalid/oversized 1 5 >"${outputFile}"; then
         return 1
     fi
     [[ ! -s "${outputFile}" ]]
+    grep -q -- '--max-time 5' "${curlArgsFile}"
+    grep -qx -- '-T 5 -t 2 -qO- https://example.invalid/oversized' "${wgetArgsFile}"
 )
 
 runGitHubReleaseArgumentMissingValueRegression() {

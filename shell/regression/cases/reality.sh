@@ -571,13 +571,37 @@ runRealityConfigScannerRegression() {
     local scannerLine sameAsnLine batchLinesFile failedTargetsFile scannerSummary sameAsnSummary seenDomainsFile
     local asnLookupFile="${TMP_DIR}/reality-scanner-asn-lookups.log"
     local concurrencyDir="${TMP_DIR}/reality-scanner-concurrency"
-    local maxConcurrency
+    local refreshConcurrencyDir="${TMP_DIR}/reality-refresh-concurrency"
+    local refreshTimeoutLog="${TMP_DIR}/reality-refresh-timeout.log"
+    local maxConcurrency refreshMaxConcurrency
     local scannerImported scannerSkipped scannerA scannerB scannerC scannerFail
     cat >"${scannerCandidatesFile}" <<'EOF'
 fail-auto.example.com|fail-auto.example.com|Fail Auto|global|large_site|unknown|1|yes|fixture failing candidate
 www.ibm.com|www.ibm.com|IBM|global|large_site|unknown|2|yes|fixture fallback candidate
 EOF
     export PADM_REALITY_TARGET_CANDIDATES_FILE="${scannerCandidatesFile}"
+
+    rm -f "${PADM_REALITY_TARGET_SCAN_FILE}" "${REALITY_TLS_PING_ARGS_FILE}" "${asnLookupFile}" "${refreshTimeoutLog}"
+    mkdir -p "${refreshConcurrencyDir}"
+    export REALITY_ASN_LOOKUP_ARGS_FILE="${asnLookupFile}"
+    export PADM_FAKE_XRAY_CONCURRENCY_DIR="${refreshConcurrencyDir}"
+    export PADM_REALITY_SECONDARY_JOBS=4
+    timeout() {
+        [[ "$1" == "-k" && "$2" == "2" && "$3" == "15" ]] || return 2
+        printf '%s %s %s\n' "$1" "$2" "$3" >>"${refreshTimeoutLog}"
+        shift 3
+        "$@"
+    }
+    scanLocalAsnRealityTargets
+    unset -f timeout
+    [[ "$(wc -l <"${REALITY_TLS_PING_ARGS_FILE}" | tr -d ' ')" == "2" ]]
+    [[ "$(wc -l <"${asnLookupFile}" | tr -d ' ')" == "1" ]]
+    [[ "$(grep -cFx -- '-k 2 15' "${refreshTimeoutLog}")" == "2" ]]
+    ! grep -qF $'fail-auto.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
+    grep -qF $'www.ibm.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
+    refreshMaxConcurrency=$(sort -nr "${refreshConcurrencyDir}/observed" | head -n 1)
+    [[ "${refreshMaxConcurrency}" -ge 2 && "${refreshMaxConcurrency}" -le 4 ]]
+    unset REALITY_ASN_LOOKUP_ARGS_FILE PADM_FAKE_XRAY_CONCURRENCY_DIR PADM_REALITY_SECONDARY_JOBS
 
     cat >"${TMP_DIR}/realitlscanner.csv" <<'CSV'
 IP,ORIGIN,TLS,ALPN,CURVE,CERT_LENGTH,CERT_SIGNATURE,CERT_PUBLICKEY,CERT_DOMAIN,CERT_ISSUER,GEO_CODE

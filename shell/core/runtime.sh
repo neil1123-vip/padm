@@ -1234,7 +1234,7 @@ downloadUrlToFileBounded() {
 
     : >"${targetFile}" || return 1
     if command -v wget >/dev/null 2>&1; then
-        wget -T 30 -t 2 -qO- "${url}" | head -c "$((maxSize + 1))" >"${targetFile}"
+        wget -T "$((maxTime < 30 ? maxTime : 30))" -t 2 -qO- "${url}" | head -c "$((maxSize + 1))" >"${targetFile}"
         pipelineStatus=("${PIPESTATUS[@]}")
         if [[ "${pipelineStatus[0]:-1}" -eq 0 && "${pipelineStatus[1]:-1}" -eq 0 &&
             "$(wc -c <"${targetFile}")" -le "${maxSize}" ]]; then
@@ -1304,13 +1304,14 @@ downloadFile() {
 fetchUrlToStdout() {
     local url=$1
     local maxAttempts=${2:-3}
+    local maxTime=${3:-30}
     local attempt=1
     local tmpFile
 
     padmCreateTmpRootPath tmpFile padm-fetch-url.XXXXXX || return 1
 
     while [[ ${attempt} -le ${maxAttempts} ]]; do
-        if downloadUrlToFileBounded "${url}" "${tmpFile}" 5242880; then
+        if downloadUrlToFileBounded "${url}" "${tmpFile}" 5242880 "${maxTime}"; then
             cat "${tmpFile}"
             padmRemoveCleanupPath "${tmpFile}"
             return 0

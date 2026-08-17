@@ -676,7 +676,7 @@ normalizeAsnOrg() {
 lookupRealityTargetAsn() {
     local ip=$1
     local response asn org
-    response=$(fetchUrlToStdout "https://api.bgpview.io/ip/${ip}" 3 2>/dev/null || true)
+    response=$(fetchUrlToStdout "https://api.bgpview.io/ip/${ip}" 1 5 2>/dev/null || true)
     if [[ -n "${response}" ]] && command -v jq >/dev/null 2>&1; then
         asn=$(printf '%s\n' "${response}" | jq -r '.data.prefixes[0].asn.asn // empty' 2>/dev/null)
         org=$(printf '%s\n' "${response}" | jq -r '.data.prefixes[0].asn.name // empty' 2>/dev/null)
@@ -685,7 +685,7 @@ lookupRealityTargetAsn() {
             return 0
         fi
     fi
-    response=$(fetchUrlToStdout "https://ipinfo.io/${ip}/org" 3 2>/dev/null || true)
+    response=$(fetchUrlToStdout "https://ipinfo.io/${ip}/org" 1 5 2>/dev/null || true)
     if [[ "${response}" =~ ^AS[0-9]+ ]]; then
         asn=$(printf '%s\n' "${response}" | awk '{print $1}')
         org=$(printf '%s\n' "${response}" | cut -d' ' -f2-)
@@ -697,7 +697,7 @@ lookupRealityTargetAsn() {
 
 currentRealityNetworkProfile() {
     local currentIp profile
-    currentIp=$(fetchUrlToStdout https://api.ipify.org 3 2>/dev/null || true)
+    currentIp=$(fetchUrlToStdout https://api.ipify.org 1 5 2>/dev/null || true)
     [[ "${currentIp}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
     profile=$(lookupRealityTargetAsn "${currentIp}") || return 1
     printf '%s\t%s\n' "${currentIp}" "${profile}"
@@ -2319,81 +2319,153 @@ selectRealityTargetFromScanResults() {
     [[ "$?" == "2" ]]
 }
 
+probeRealityTargetCandidate() {
+    local detector=$1
+    local candidate=$2
+    local currentAsn=$3
+    local currentOrg=$4
+    local host sni name _region category cdnRisk _rank _recommended _candidateNote target ip tlsPingResult result score pqc certLength tls13 note candidateProfile candidateAsn candidateOrg networkMatch checkedAt
+
+    trap - EXIT INT TERM
+    IFS='|' read -r host sni name _region category cdnRisk _rank _recommended _candidateNote <<<"${candidate}"
+    target=$(formatRealityTarget "${host}" 443)
+    if ! ip=$(resolveRealityTargetIPv4 "${host}"); then
+        printf 'NETWORK_FAIL\t%s\n' "${target}"
+        return 0
+    fi
+    if ! tlsPingResult=$(timeout -k 2 15 "${detector}" tls ping -ip "${ip}" "${target}" 2>&1); then
+        printf 'FAIL\t%s\n' "${target}"
+        return 0
+    fi
+    result=$(scoreRealityTargetFromTlsPing "${tlsPingResult}")
+    IFS=$'\t' read -r score pqc certLength tls13 note <<<"${result}"
+    if [[ "${score}" == "FAIL" ]]; then
+        printf 'FAIL\t%s\n' "${target}"
+        return 0
+    fi
+    candidateProfile=$(lookupRealityTargetAsn "${ip}" || true)
+    if [[ -z "${candidateProfile}" ]]; then
+        printf 'NETWORK_FAIL\t%s\n' "${target}"
+        return 0
+    fi
+    candidateAsn=${candidateProfile%%$'\t'*}
+    candidateOrg=${candidateProfile#*$'\t'}
+    networkMatch=different_network
+    if [[ "${candidateAsn}" == "${currentAsn}" ]]; then
+        networkMatch=same_asn
+    elif realityTargetProviderMatches "${currentOrg}" "${candidateOrg}"; then
+        networkMatch=same_provider
+    fi
+    checkedAt=$(date +%s)
+    printf 'OK\t'
+    formatRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "${ip}" "${candidateAsn}" "${candidateOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}"
+}
+
 scanLocalAsnRealityTargets() {
-    local detector networkProfile currentIp currentAsn currentOrg line host sni target name category cdnRisk ip candidateProfile candidateAsn candidateOrg source tlsPingResult result score pqc certLength tls13 note checkedAt scanned=0 resolved=0 failed=0 sameAsn=0 sameProvider=0 differentNetwork=0 scanStart scanSeconds totalCandidates lastProgressAt=0 now
-    local resultLinesFile failedTargetsFile
+    local detector networkProfile currentIp currentAsn currentOrg rest line host target networkMatch scanStart scanSeconds totalCandidates lastProgressAt=0 now
+    local maxJobs=${PADM_REALITY_SECONDARY_JOBS:-4}
+    local resultLinesFile failedTargetsFile probeDir jobFile probeRecord probeStatus probePayload
+    local offset=0 batchEnd index slot pid processed=0 resolved=0 failed=0 sameAsn=0 sameProvider=0 differentNetwork=0
+    local -a candidates=() jobPids=() jobFiles=() jobTargets=()
     if ! detector=$(realityTargetDetector); then
         realityTargetStatusBlock yellow "REALITY 目标站扫描" "未找到 xray，无法扫描目标质量" "安装核心后再执行扫描"
+        return 1
+    fi
+    if ! command -v timeout >/dev/null 2>&1; then
+        realityTargetStatusBlock yellow "REALITY 目标站扫描" "未找到 timeout，无法安全限制 TLS 检测时长"
         return 1
     fi
     if ! networkProfile=$(currentRealityNetworkProfile); then
         realityTargetStatusBlock yellow "REALITY 目标站扫描" "无法识别本机公网 ASN" "已跳过同 ASN 扫描"
         return 1
     fi
+    [[ "${maxJobs}" =~ ^[1-9][0-9]*$ ]] || maxJobs=4
+    (( maxJobs > 16 )) && maxJobs=16
+    while IFS= read -r line; do
+        candidates+=("${line}")
+    done < <(realityTargetCandidates)
     scanStart=$(date +%s)
-    totalCandidates=$(realityTargetCandidateCount)
+    totalCandidates=${#candidates[@]}
     padmCreateTempPath resultLinesFile || return 1
     padmCreateTempPath failedTargetsFile || { padmRemoveCleanupPath "${resultLinesFile}"; return 1; }
+    padmCreateTempPath probeDir -d || { padmRemoveCleanupPath "${resultLinesFile}"; padmRemoveCleanupPath "${failedTargetsFile}"; return 1; }
     currentIp=${networkProfile%%$'\t'*}
-    local rest=${networkProfile#*$'\t'}
+    rest=${networkProfile#*$'\t'}
     currentAsn=${rest%%$'\t'*}
     currentOrg=${rest#*$'\t'}
     realityTargetStatusBlock yellow "REALITY 目标库质量刷新" "本机公网网络: ${currentIp} ${currentAsn} ${currentOrg}" "正在复测统一目标库并写入结果表: ${PADM_REALITY_TARGET_RESULTS_FILE:-/etc/padm/reality_targets_results.tsv}"
-
-    while IFS= read -r line; do
-        IFS='|' read -r host sni name _region category cdnRisk _rank _recommended _note <<<"${line}"
-        target=$(formatRealityTarget "${host}" 443)
-        scanned=$((scanned + 1))
+    if (( totalCandidates > 0 )); then
+        realityTargetProgressLine "REALITY 目标库质量刷新 0/${totalCandidates} 并发：${maxJobs} 已耗时：0s"
+        lastProgressAt=${scanStart}
+    fi
+    while (( offset < totalCandidates )); do
+        batchEnd=$((offset + maxJobs))
+        (( batchEnd > totalCandidates )) && batchEnd=${totalCandidates}
+        jobPids=()
+        jobFiles=()
+        jobTargets=()
+        for ((index = offset; index < batchEnd; index++)); do
+            line=${candidates[${index}]}
+            host=${line%%|*}
+            target=$(formatRealityTarget "${host}" 443)
+            jobFile="${probeDir}/${index}.result"
+            probeRealityTargetCandidate "${detector}" "${line}" "${currentAsn}" "${currentOrg}" >"${jobFile}" &
+            jobPids+=("$!")
+            jobFiles+=("${jobFile}")
+            jobTargets+=("${target}")
+        done
+        for pid in "${jobPids[@]}"; do
+            wait "${pid}" || true
+        done
+        for ((slot = 0; slot < ${#jobFiles[@]}; slot++)); do
+            probeRecord=
+            [[ -f "${jobFiles[${slot}]}" ]] && probeRecord=$(<"${jobFiles[${slot}]}")
+            probeStatus=${probeRecord%%$'\t'*}
+            probePayload=${probeRecord#*$'\t'}
+            case "${probeStatus}" in
+            OK)
+                if [[ -n "${probePayload}" ]]; then
+                    printf '%s\n' "${probePayload}" >>"${resultLinesFile}"
+                    networkMatch=$(realityTargetResultField "${probePayload}" 9)
+                    case "${networkMatch}" in
+                    same_asn) sameAsn=$((sameAsn + 1)) ;;
+                    same_provider) sameProvider=$((sameProvider + 1)) ;;
+                    *) differentNetwork=$((differentNetwork + 1)) ;;
+                    esac
+                    resolved=$((resolved + 1))
+                else
+                    failed=$((failed + 1))
+                fi
+                ;;
+            NETWORK_FAIL)
+                failed=$((failed + 1))
+                ;;
+            FAIL)
+                printf '%s\n' "${probePayload:-${jobTargets[${slot}]}}" >>"${failedTargetsFile}"
+                ;;
+            *)
+                failed=$((failed + 1))
+                ;;
+            esac
+            processed=$((processed + 1))
+        done
         now=$(date +%s)
-        if (( lastProgressAt == 0 || now - lastProgressAt >= 10 || scanned == totalCandidates )); then
-            realityTargetProgressLine "REALITY 目标库质量刷新 ${scanned}/${totalCandidates} 当前：${host} 已耗时：$((now - scanStart))s"
+        if (( lastProgressAt == 0 || now - lastProgressAt >= 10 || processed == totalCandidates )); then
+            line=${candidates[$((batchEnd - 1))]}
+            host=${line%%|*}
+            realityTargetProgressLine "REALITY 目标库质量刷新 ${processed}/${totalCandidates} 当前：${host} 并发：${maxJobs} 已耗时：$((now - scanStart))s"
             lastProgressAt=${now}
         fi
-        if ! ip=$(resolveRealityTargetIPv4 "${host}"); then
-            failed=$((failed + 1))
-            continue
-        fi
-        if ! candidateProfile=$(lookupRealityTargetAsn "${ip}"); then
-            failed=$((failed + 1))
-            continue
-        fi
-        candidateAsn=${candidateProfile%%$'\t'*}
-        candidateOrg=${candidateProfile#*$'\t'}
-        source=different_network
-        if [[ "${candidateAsn}" == "${currentAsn}" ]]; then
-            source=same_asn
-            sameAsn=$((sameAsn + 1))
-        elif realityTargetProviderMatches "${currentOrg}" "${candidateOrg}"; then
-            source=same_provider
-            sameProvider=$((sameProvider + 1))
-        else
-            differentNetwork=$((differentNetwork + 1))
-        fi
-        resolved=$((resolved + 1))
-        if ! tlsPingResult=$("${detector}" tls ping "${target}" 2>&1); then
-            checkedAt=$(date +%s)
-            result=$(scoreRealityTargetFromTlsPing "")
-            IFS=$'\t' read -r score pqc certLength tls13 _note <<<"${result}"
-            note="tls ping 失败，已从统一目标库剔除"
-            printf '%s\n' "${target}" >>"${failedTargetsFile}"
-            continue
-        fi
-        result=$(scoreRealityTargetFromTlsPing "${tlsPingResult}")
-        IFS=$'\t' read -r score pqc certLength tls13 note <<<"${result}"
-        checkedAt=$(date +%s)
-        if [[ "${score}" == "FAIL" ]]; then
-            printf '%s\n' "${target}" >>"${failedTargetsFile}"
-            continue
-        fi
-        formatRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "${ip}" "${candidateAsn}" "${candidateOrg}" "${source}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}" >>"${resultLinesFile}"
-    done < <(realityTargetCandidates)
+        offset=${batchEnd}
+    done
 
     writeRealityTargetResultLines "${resultLinesFile}"
     removeRealityTargetsFromUnifiedLibrary "${failedTargetsFile}"
     padmRemoveCleanupPath "${resultLinesFile}"
     padmRemoveCleanupPath "${failedTargetsFile}"
+    padmRemoveCleanupPath "${probeDir}"
     scanSeconds=$(( $(date +%s) - scanStart ))
-    realityTargetStatusBlock green "REALITY 目标库质量刷新" "复测完成" "候选: ${scanned}" "ASN 已识别: ${resolved}" "same_asn: ${sameAsn}" "same_provider: ${sameProvider}" "different_network: ${differentNetwork}" "解析/ASN 失败: ${failed}" "耗时: ${scanSeconds}s"
+    realityTargetStatusBlock green "REALITY 目标库质量刷新" "复测完成" "候选: ${processed}" "并发: ${maxJobs}" "ASN 已识别: ${resolved}" "same_asn: ${sameAsn}" "same_provider: ${sameProvider}" "different_network: ${differentNetwork}" "解析/ASN 失败: ${failed}" "耗时: ${scanSeconds}s"
     if [[ "$(realityTargetResultCount)" -gt 0 ]]; then
         realityTargetStatusBlock green "REALITY 目标库质量刷新" "自动推荐将优先使用统一结果表中的 A/B 级目标"
     else
