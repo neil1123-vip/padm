@@ -1068,25 +1068,26 @@ auto
 runRealityConfigRefreshSubscriptionRegression() {
     local oldNginxConfigPath="${nginxConfigPath:-}"
     local oldSubscribePort="${subscribePort:-}"
-    local subscribeCalls=0
+    local refreshCalls=0 subscribeCalls=0
     local refreshDir="${TMP_DIR}/reality-refresh-subscribe/"
     mkdir -p "${refreshDir}"
     nginxConfigPath="${refreshDir}"
     subscribePort=
-    subscribe() { subscribeCalls=$((subscribeCalls + 1)); }
+    refreshPublishedSubscriptions() { refreshCalls=$((refreshCalls + 1)); }
+    subscribe() { subscribeCalls=$((subscribeCalls + 1)); return 1; }
     readNginxSubscribe() { :; }
 
     refreshSubscriptionsAfterRealityTargetChange >/dev/null
-    [[ "${subscribeCalls}" == "0" ]]
+    [[ "${refreshCalls}" == "0" && "${subscribeCalls}" == "0" ]]
 
     : >"${nginxConfigPath}subscribe.conf"
     refreshSubscriptionsAfterRealityTargetChange >/dev/null
-    [[ "${subscribeCalls}" == "1" ]]
+    [[ "${refreshCalls}" == "1" && "${subscribeCalls}" == "0" ]]
 
     rm -f "${nginxConfigPath}subscribe.conf"
     readNginxSubscribe() { subscribePort=39778; }
     refreshSubscriptionsAfterRealityTargetChange >/dev/null
-    [[ "${subscribeCalls}" == "2" ]]
+    [[ "${refreshCalls}" == "2" && "${subscribeCalls}" == "0" ]]
 
     nginxConfigPath="${oldNginxConfigPath}"
     subscribePort="${oldSubscribePort}"

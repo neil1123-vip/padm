@@ -2669,13 +2669,13 @@ restoreRealityTargetConfigs() {
 }
 
 refreshSubscriptionsAfterRealityTargetChange() {
-    if ! declare -F subscribe >/dev/null 2>&1 || ! declare -F installSubscribe >/dev/null 2>&1 || ! declare -F showAccounts >/dev/null 2>&1 || ! declare -F readNginxSubscribe >/dev/null 2>&1; then
+    if ! declare -F refreshPublishedSubscriptions >/dev/null 2>&1 || ! declare -F showAccounts >/dev/null 2>&1 || ! declare -F readNginxSubscribe >/dev/null 2>&1; then
         realityTargetStatusBlock yellow "REALITY 目标站" "订阅刷新依赖未完整加载，已跳过订阅刷新" "通过 install.sh 菜单执行时会自动刷新"
         return 0
     fi
     readNginxSubscribe
     if [[ -n "${subscribePort:-}" || -f "${nginxConfigPath:-/etc/nginx/conf.d/}subscribe.conf" ]]; then
-        subscribe false
+        refreshPublishedSubscriptions
     else
         realityTargetStatusBlock yellow "REALITY 目标站" "未启用订阅服务，已跳过订阅刷新"
     fi
