@@ -568,7 +568,7 @@ JSON
 runRealityConfigScannerRegression() {
     local scannerCandidatesFile="${TMP_DIR}/reality-config-scanner-candidates.txt"
     local oldCandidatesFile="${PADM_REALITY_TARGET_CANDIDATES_FILE:-}"
-    local scannerLine sameAsnLine batchLinesFile failedTargetsFile scannerSummary sameAsnSummary seenDomainsFile
+    local scannerLine refreshScannerLine sameAsnLine batchLinesFile failedTargetsFile scannerSummary sameAsnSummary seenDomainsFile
     local asnLookupFile="${TMP_DIR}/reality-scanner-asn-lookups.log"
     local concurrencyDir="${TMP_DIR}/reality-scanner-concurrency"
     local refreshConcurrencyDir="${TMP_DIR}/reality-refresh-concurrency"
@@ -593,7 +593,6 @@ EOF
         "$@"
     }
     scanLocalAsnRealityTargets
-    unset -f timeout
     [[ "$(wc -l <"${REALITY_TLS_PING_ARGS_FILE}" | tr -d ' ')" == "2" ]]
     [[ "$(wc -l <"${asnLookupFile}" | tr -d ' ')" == "1" ]]
     [[ "$(grep -cFx -- '-k 2 15' "${refreshTimeoutLog}")" == "2" ]]
@@ -601,6 +600,19 @@ EOF
     grep -qF $'www.ibm.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
     refreshMaxConcurrency=$(sort -nr "${refreshConcurrencyDir}/observed" | head -n 1)
     [[ "${refreshMaxConcurrency}" -ge 2 && "${refreshMaxConcurrency}" -le 4 ]]
+    writeRealityTargetResultLine "refresh-scanner.example.com:8443" "sni.refresh-scanner.example.com" "Refresh Scanner" "scanner" "unknown" "198.51.100.20" "AS64501" "RemoteNet" "different_network" "A" "yes" "4096" "yes" "1234567890" "RealiTLScanner: Fixture CA; old result"
+    rm -f "${REALITY_TLS_PING_ARGS_FILE}" "${asnLookupFile}" "${refreshTimeoutLog}"
+    scanLocalAsnRealityTargets
+    [[ "$(wc -l <"${REALITY_TLS_PING_ARGS_FILE}" | tr -d ' ')" == "2" ]]
+    grep -qxF "tls ping -ip 192.0.2.1 www.ibm.com:443" "${REALITY_TLS_PING_ARGS_FILE}"
+    grep -qxF "tls ping -ip 192.0.2.1 sni.refresh-scanner.example.com:8443" "${REALITY_TLS_PING_ARGS_FILE}"
+    ! grep -qF "fail-auto.example.com" "${REALITY_TLS_PING_ARGS_FILE}"
+    [[ "$(wc -l <"${asnLookupFile}" | tr -d ' ')" == "2" ]]
+    [[ "$(grep -cFx -- '-k 2 15' "${refreshTimeoutLog}")" == "2" ]]
+    refreshScannerLine=$(grep -F $'refresh-scanner.example.com:8443\tsni.refresh-scanner.example.com\tRefresh Scanner\tscanner\tunknown\t' "${PADM_REALITY_TARGET_SCAN_FILE}")
+    [[ "$(realityTargetResultField "${refreshScannerLine}" 9)" == "same_asn" ]]
+    [[ "$(realityTargetResultField "${refreshScannerLine}" 15)" == "RealiTLScanner: Fixture CA; TLS 1.3 + X25519MLKEM768 可用，证书链长度满足 Xray 要求" ]]
+    unset -f timeout
     unset REALITY_ASN_LOOKUP_ARGS_FILE PADM_FAKE_XRAY_CONCURRENCY_DIR PADM_REALITY_SECONDARY_JOBS
 
     cat >"${TMP_DIR}/realitlscanner.csv" <<'CSV'

@@ -560,6 +560,26 @@ writeRealityTargetResultLines() {
     commitGeneratedFile "${stagedFile}" "${resultsFile}" 644 || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
 }
 
+realityTargetRefreshRecords() {
+    local resultsFile line target parsed host candidateHost sni name _region category cdnRisk _rank _recommended note
+    resultsFile=$(realityTargetManagedResultsFile) || return 1
+    if [[ -s "${resultsFile}" ]]; then
+        while IFS= read -r line; do
+            target=${line%%$'\t'*}
+            [[ -n "${target}" && "${line}" == *$'\t'* ]] || continue
+            parsed=$(parseHostPort "${target}" 443)
+            host=${parsed%:*}
+            realityTargetCandidateBlocked "${host}" && continue
+            printf '%s\n' "${line}"
+        done <"${resultsFile}"
+        return 0
+    fi
+    while IFS='|' read -r candidateHost sni name _region category cdnRisk _rank _recommended note; do
+        target=$(formatRealityTarget "${candidateHost}" 443)
+        formatRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "unknown" "unknown" "unknown" "unknown" "unknown" "unknown" "unknown" "unknown" "0" "内置候选首次检测: ${note}"
+    done < <(realityTargetCandidates)
+}
+
 removeRealityTargetsFromUnifiedLibrary() {
     local targetsFile=$1
     local resultsFile candidatesFile resultsStageFile candidatesStageFile hostsFile target parsed host libraryBackupDir=
@@ -2319,21 +2339,26 @@ selectRealityTargetFromScanResults() {
     [[ "$?" == "2" ]]
 }
 
-probeRealityTargetCandidate() {
+probeRealityTargetRecord() {
     local detector=$1
-    local candidate=$2
+    local record=$2
     local currentAsn=$3
     local currentOrg=$4
-    local host sni name _region category cdnRisk _rank _recommended _candidateNote target ip tlsPingResult result score pqc certLength tls13 note candidateProfile candidateAsn candidateOrg networkMatch checkedAt
+    local target sni name category cdnRisk _oldIp _oldAsn _oldAsOrg _oldNetworkMatch _oldScore _oldPqc _oldCertLength _oldTls13 _oldCheckedAt _oldNote
+    local parsed host port probeTarget ip tlsPingResult result score pqc certLength tls13 note candidateProfile candidateAsn candidateOrg networkMatch checkedAt
 
     trap - EXIT INT TERM
-    IFS='|' read -r host sni name _region category cdnRisk _rank _recommended _candidateNote <<<"${candidate}"
-    target=$(formatRealityTarget "${host}" 443)
+    IFS=$'\t' read -r target sni name category cdnRisk _oldIp _oldAsn _oldAsOrg _oldNetworkMatch _oldScore _oldPqc _oldCertLength _oldTls13 _oldCheckedAt _oldNote <<<"${record}"
+    parsed=$(parseHostPort "${target}" 443)
+    host=${parsed%:*}
+    port=${parsed##*:}
+    target=$(formatRealityTarget "${host}" "${port}")
+    probeTarget=$(formatRealityTarget "${sni:-${host}}" "${port}")
     if ! ip=$(resolveRealityTargetIPv4 "${host}"); then
         printf 'NETWORK_FAIL\t%s\n' "${target}"
         return 0
     fi
-    if ! tlsPingResult=$(timeout -k 2 15 "${detector}" tls ping -ip "${ip}" "${target}" 2>&1); then
+    if ! tlsPingResult=$(timeout -k 2 15 "${detector}" tls ping -ip "${ip}" "${probeTarget}" 2>&1); then
         printf 'FAIL\t%s\n' "${target}"
         return 0
     fi
@@ -2342,6 +2367,9 @@ probeRealityTargetCandidate() {
     if [[ "${score}" == "FAIL" ]]; then
         printf 'FAIL\t%s\n' "${target}"
         return 0
+    fi
+    if [[ "${category}" == "scanner" && "${_oldNote}" == RealiTLScanner:* ]]; then
+        note="${_oldNote%%; *}; ${note}"
     fi
     candidateProfile=$(lookupRealityTargetAsn "${ip}" || true)
     if [[ -z "${candidateProfile}" ]]; then
@@ -2362,9 +2390,9 @@ probeRealityTargetCandidate() {
 }
 
 scanLocalAsnRealityTargets() {
-    local detector networkProfile currentIp currentAsn currentOrg rest line host target networkMatch scanStart scanSeconds totalCandidates lastProgressAt=0 now
+    local detector networkProfile currentIp currentAsn currentOrg rest line parsed host target networkMatch scanStart scanSeconds totalCandidates lastProgressAt=0 now
     local maxJobs=${PADM_REALITY_SECONDARY_JOBS:-4}
-    local resultLinesFile failedTargetsFile probeDir jobFile probeRecord probeStatus probePayload
+    local resultsFile refreshSource resultLinesFile failedTargetsFile probeDir jobFile probeRecord probeStatus probePayload
     local offset=0 batchEnd index slot pid processed=0 resolved=0 failed=0 sameAsn=0 sameProvider=0 differentNetwork=0
     local -a candidates=() jobPids=() jobFiles=() jobTargets=()
     if ! detector=$(realityTargetDetector); then
@@ -2381,9 +2409,15 @@ scanLocalAsnRealityTargets() {
     fi
     [[ "${maxJobs}" =~ ^[1-9][0-9]*$ ]] || maxJobs=4
     (( maxJobs > 16 )) && maxJobs=16
+    resultsFile=$(realityTargetManagedResultsFile) || return 1
+    if [[ -s "${resultsFile}" ]]; then
+        refreshSource="统一结果表"
+    else
+        refreshSource="内置候选初始化"
+    fi
     while IFS= read -r line; do
         candidates+=("${line}")
-    done < <(realityTargetCandidates)
+    done < <(realityTargetRefreshRecords)
     scanStart=$(date +%s)
     totalCandidates=${#candidates[@]}
     padmCreateTempPath resultLinesFile || return 1
@@ -2393,7 +2427,7 @@ scanLocalAsnRealityTargets() {
     rest=${networkProfile#*$'\t'}
     currentAsn=${rest%%$'\t'*}
     currentOrg=${rest#*$'\t'}
-    realityTargetStatusBlock yellow "REALITY 目标库质量刷新" "本机公网网络: ${currentIp} ${currentAsn} ${currentOrg}" "正在复测统一目标库并写入结果表: ${PADM_REALITY_TARGET_RESULTS_FILE:-/etc/padm/reality_targets_results.tsv}"
+    realityTargetStatusBlock yellow "REALITY 目标库质量刷新" "本机公网网络: ${currentIp} ${currentAsn} ${currentOrg}" "检测来源: ${refreshSource}" "写入同一结果表: ${resultsFile}"
     if (( totalCandidates > 0 )); then
         realityTargetProgressLine "REALITY 目标库质量刷新 0/${totalCandidates} 并发：${maxJobs} 已耗时：0s"
         lastProgressAt=${scanStart}
@@ -2406,10 +2440,11 @@ scanLocalAsnRealityTargets() {
         jobTargets=()
         for ((index = offset; index < batchEnd; index++)); do
             line=${candidates[${index}]}
-            host=${line%%|*}
-            target=$(formatRealityTarget "${host}" 443)
+            target=${line%%$'\t'*}
+            parsed=$(parseHostPort "${target}" 443)
+            host=${parsed%:*}
             jobFile="${probeDir}/${index}.result"
-            probeRealityTargetCandidate "${detector}" "${line}" "${currentAsn}" "${currentOrg}" >"${jobFile}" &
+            probeRealityTargetRecord "${detector}" "${line}" "${currentAsn}" "${currentOrg}" >"${jobFile}" &
             jobPids+=("$!")
             jobFiles+=("${jobFile}")
             jobTargets+=("${target}")
@@ -2452,7 +2487,9 @@ scanLocalAsnRealityTargets() {
         now=$(date +%s)
         if (( lastProgressAt == 0 || now - lastProgressAt >= 10 || processed == totalCandidates )); then
             line=${candidates[$((batchEnd - 1))]}
-            host=${line%%|*}
+            target=${line%%$'\t'*}
+            parsed=$(parseHostPort "${target}" 443)
+            host=${parsed%:*}
             realityTargetProgressLine "REALITY 目标库质量刷新 ${processed}/${totalCandidates} 当前：${host} 并发：${maxJobs} 已耗时：$((now - scanStart))s"
             lastProgressAt=${now}
         fi
@@ -2465,7 +2502,7 @@ scanLocalAsnRealityTargets() {
     padmRemoveCleanupPath "${failedTargetsFile}"
     padmRemoveCleanupPath "${probeDir}"
     scanSeconds=$(( $(date +%s) - scanStart ))
-    realityTargetStatusBlock green "REALITY 目标库质量刷新" "复测完成" "候选: ${processed}" "并发: ${maxJobs}" "ASN 已识别: ${resolved}" "same_asn: ${sameAsn}" "same_provider: ${sameProvider}" "different_network: ${differentNetwork}" "解析/ASN 失败: ${failed}" "耗时: ${scanSeconds}s"
+    realityTargetStatusBlock green "REALITY 目标库质量刷新" "复测完成" "目标: ${processed}" "并发: ${maxJobs}" "ASN 已识别: ${resolved}" "same_asn: ${sameAsn}" "same_provider: ${sameProvider}" "different_network: ${differentNetwork}" "解析/ASN 失败: ${failed}" "耗时: ${scanSeconds}s"
     if [[ "$(realityTargetResultCount)" -gt 0 ]]; then
         realityTargetStatusBlock green "REALITY 目标库质量刷新" "自动推荐将优先使用统一结果表中的 A/B 级目标"
     else
