@@ -462,17 +462,19 @@ bash shell/validate_install.sh --online example.com
 
 | 层级 | 命令 | 用途 |
 | --- | --- | --- |
-| 快速反馈 | `bash shell/subscription_groups_regression.sh fast` | 日常小改后的快速检查；不代表完整产品覆盖。 |
+| 快速反馈 | `bash shell/subscription_groups_regression.sh fast` | 日常小改后的代表性检查；完整 fast 集合用 `fast-full`。 |
 | 主产品回归 | `bash shell/subscription_groups_regression.sh all` | 较大改动的主验证集；按资源预算编排核心产品 suite，但不是所有公开 selector 的并集。 |
 | 按需专项 | `bash shell/subscription_groups_regression.sh <selector>` | 按改动范围补跑协议、深层回滚或 harness 行为检查。 |
 
-`all` 在同一资源预算内并行运行 `subscription`、`ui`、`transaction-core`、`transaction-system`、`routing`、`runtime`、`remote-control-smoke`、远程控制服务安装契约和远程控制响应契约。它默认不包含 `fast`、`protocol-capabilities`、`remote-control-deep` 和 harness 契约；相关改动需按需追加。
+`all` 在同一资源预算内并行运行 `subscription`、`ui`、`transaction-core-main`、`transaction-system`、`routing`、`runtime`、`remote-control-smoke`、远程控制服务安装契约和远程控制响应契约。完整 `transaction-core`、`fast-full`、`protocol-capabilities`、`remote-control-deep` 和 harness 契约按改动范围追加。
 
 常用产品专项：
 
 ```bash
 bash shell/subscription_groups_regression.sh protocol-capabilities
 bash shell/subscription_groups_regression.sh platform-hot
+bash shell/subscription_groups_regression.sh platform-smoke
+bash shell/subscription_groups_regression.sh fast-full
 bash shell/subscription_groups_regression.sh subscription-output
 bash shell/subscription_groups_regression.sh transaction-core
 bash shell/subscription_groups_regression.sh core-safety-rollback

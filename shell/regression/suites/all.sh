@@ -4,7 +4,7 @@ listRegressionAllParallelChildSelectors() {
     printf '%s\n' \
         subscription \
         ui \
-        transaction-core \
+        transaction-core-main \
         routing \
         runtime \
         remote-control-smoke \
@@ -21,7 +21,7 @@ runRegressionAllSelectorSuiteRoot() (
         case "$1" in
         subscription) printf '%s\n' "${PADM_REGRESSION_SUBSCRIPTION_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}" ;;
         transaction-system) printf '%s\n' "${PADM_REGRESSION_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}" ;;
-        transaction-core) printf '%s\n' "${PADM_REGRESSION_TRANSACTION_CORE_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}" ;;
+        transaction-core | transaction-core-main) printf '%s\n' "${PADM_REGRESSION_TRANSACTION_CORE_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}" ;;
         ui) printf '%s\n' "${PADM_REGRESSION_UI_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}" ;;
         routing) printf '%s\n' "${PADM_REGRESSION_ROUTING_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_LIGHT_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}}" ;;
         runtime) printf '%s\n' "${PADM_REGRESSION_RUNTIME_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_LIGHT_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}}" ;;

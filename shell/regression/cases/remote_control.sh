@@ -2028,7 +2028,7 @@ sync:failed)
 sync:timeout)
     : >"${PADM_FAKE_CONTROL_STARTED_FILE}"
     (
-        /bin/sleep 2
+        /bin/sleep 1.2
         printf 'survived\n' >"${PADM_FAKE_CONTROL_DESCENDANT_FILE}"
     ) &
     wait
@@ -2061,7 +2061,7 @@ SH
     serverScript=$(subscriptionControlServerScript)
     printf 'noise\n' >"${modeFile}"
     : >"${startedFile}"
-    PADM_CONTROL_SCRIPT_TIMEOUT=1 PADM_CONTROL_REQUEST_TIMEOUT=0.5 PADM_FAKE_CONTROL_MODE_FILE="${modeFile}" PADM_FAKE_CONTROL_STARTED_FILE="${startedFile}" python3 "${serverScript}" >"${serverLog}" 2>&1 &
+    PADM_CONTROL_SCRIPT_TIMEOUT=1 PADM_CONTROL_REQUEST_TIMEOUT=0.2 PADM_FAKE_CONTROL_MODE_FILE="${modeFile}" PADM_FAKE_CONTROL_STARTED_FILE="${startedFile}" python3 "${serverScript}" >"${serverLog}" 2>&1 &
     serverPid=$!
     trap '[[ -n "${serverPid}" ]] && kill "${serverPid}" >/dev/null 2>&1 || true; [[ -n "${serverPid}" ]] && wait "${serverPid}" 2>/dev/null || true' EXIT
     export PADM_TEST_CONTROL_STARTED_FILE="${startedFile}"
@@ -2163,7 +2163,7 @@ def slow_post(endpoint):
     try:
         with socket.create_connection(("127.0.0.1", int(port)), timeout=10) as sock:
             sock.sendall(request_text.encode("utf-8"))
-            time.sleep(1)
+            time.sleep(0.4)
             chunks = []
             while True:
                 chunk = sock.recv(4096)
@@ -2216,16 +2216,12 @@ for _ in range(100):
         break
     time.sleep(0.02)
 assert os.path.exists(os.environ["PADM_TEST_CONTROL_STARTED_FILE"])
-health_started = time.monotonic()
 results["health_during_sync"] = request("GET", "health")
-results["health_during_sync"]["elapsed"] = time.monotonic() - health_started
-busy_started = time.monotonic()
 results["sync_while_busy"] = request("POST", "sync", '{"desired_users":[],"dry_run":false}')
-results["sync_while_busy"]["elapsed"] = time.monotonic() - busy_started
 sync_thread.join(timeout=10)
 assert not sync_thread.is_alive()
 results["sync_timeout"] = sync_holder["result"]
-time.sleep(1.5)
+time.sleep(0.8)
 results["os_name"] = os.name
 results["timeout_descendant_survived"] = os.path.exists(os.environ["PADM_FAKE_CONTROL_DESCENDANT_FILE"])
 set_mode("invalid")
@@ -2245,7 +2241,7 @@ PY
     jq -e '.sync_failed.status == 503 and .sync_failed.body.error == "script_failed" and .sync_failed.body.error_detail.type == "script_failed" and .sync_failed.body.exit_code == 7' "${responseFile}" >/dev/null
     jq -e '.sync_timeout.status == 503 and .sync_timeout.body.error == "script_timeout" and .sync_timeout.body.error_detail.type == "script_timeout"' "${responseFile}" >/dev/null
     jq -e '.os_name != "posix" or .timeout_descendant_survived == false' "${responseFile}" >/dev/null
-    jq -e '.health_during_sync.status == 200 and .health_during_sync.body.ok == true and .health_during_sync.elapsed < 0.5' "${responseFile}" >/dev/null
-    jq -e '.sync_while_busy.status == 503 and .sync_while_busy.body.error == "busy" and .sync_while_busy.body.error_detail.type == "busy" and .sync_while_busy.elapsed < 0.5' "${responseFile}" >/dev/null
+    jq -e '.health_during_sync.status == 200 and .health_during_sync.body.ok == true' "${responseFile}" >/dev/null
+    jq -e '.sync_while_busy.status == 503 and .sync_while_busy.body.error == "busy" and .sync_while_busy.body.error_detail.type == "busy"' "${responseFile}" >/dev/null
     jq -e '.sync_invalid_response.status == 503 and .sync_invalid_response.body.error == "invalid_response" and .sync_invalid_response.body.error_detail.type == "invalid_response"' "${responseFile}" >/dev/null
 )

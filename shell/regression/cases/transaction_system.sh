@@ -1235,18 +1235,7 @@ runCleanLastInstallationConfigFailureRegression() (
     REGRESSION_ERROR_CARD_LOG="${errorLog}"
 
     currentDefaultPort=443
-    currentPort=
-    customPort=
-    xrayVLESSRealityPort=
-    xrayVLESSRealityXHTTPort=
-    singBoxVLESSVisionPort=
-    singBoxVLESSRealityVisionPort=
-    singBoxVLESSRealityGRPCPort=
-    singBoxHysteria2Port=
-    singBoxTuicPort=
-    singBoxSocks5Port=
-    hysteriaPort=
-    tuicPort=
+    regressionResetProtocolPorts
     nginxConfigPath="${root}/nginx/"
     nginxStaticPath="${root}/static"
     configPath="${root}/xray-conf/"
@@ -1480,18 +1469,7 @@ runCleanLastInstallationConfigAcmeHomeRegression() (
         HOME=${homeDir}
     fi
     currentDefaultPort=443
-    currentPort=
-    customPort=
-    xrayVLESSRealityPort=
-    xrayVLESSRealityXHTTPort=
-    singBoxVLESSVisionPort=
-    singBoxVLESSRealityVisionPort=
-    singBoxVLESSRealityGRPCPort=
-    singBoxHysteria2Port=
-    singBoxTuicPort=
-    singBoxSocks5Port=
-    hysteriaPort=
-    tuicPort=
+    regressionResetProtocolPorts
     nginxConfigPath="${workDir}/nginx/"
     nginxStaticPath="${workDir}/static"
     configPath="${workDir}/xray-conf/"

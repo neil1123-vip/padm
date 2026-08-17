@@ -100,3 +100,27 @@ jq() {
         command jq "$@"
     fi
 }
+
+regressionMockCurlAvailable() {
+    command() {
+        if [[ "$1" == -v && "$2" == curl ]]; then
+            return 0
+        fi
+        builtin command "$@"
+    }
+}
+
+regressionResetProtocolPorts() {
+    currentPort=
+    customPort=
+    xrayVLESSRealityPort=
+    xrayVLESSRealityXHTTPort=
+    singBoxVLESSVisionPort=
+    singBoxVLESSRealityVisionPort=
+    singBoxVLESSRealityGRPCPort=
+    singBoxHysteria2Port=
+    singBoxTuicPort=
+    singBoxSocks5Port=
+    hysteriaPort=
+    tuicPort=
+}

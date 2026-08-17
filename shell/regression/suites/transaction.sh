@@ -60,6 +60,17 @@ listRegressionTransactionCoreChildSelectors() {
     listRegressionTransactionCoreSelectors default
 }
 
+listRegressionTransactionCoreMainChildSelectors() {
+    printf '%s\n' \
+        core-safety-rollback \
+        config-transaction \
+        core-port-file-transaction \
+        entry-helper-config \
+        sing-box-reality-key-transaction \
+        sing-box-merge-config-transaction \
+        reload-core-propagation
+}
+
 listRegressionTransactionCoreHeavyChildSelectors() {
     listRegressionTransactionCoreSelectors heavy
 }
@@ -165,5 +176,8 @@ registerRegressionAggregateRunner parallel transaction-system runRegressionTrans
 
 registerRegressionAggregateRunner parallel transaction-core runRegressionTransactionCoreSuiteRoot \
     $(listRegressionTransactionCoreChildSelectors)
+
+registerRegressionParallelSelectorList transaction-core-main runFrameworkParallelRegressionSelectorList \
+    "${TMP_DIR}/transaction-core-main-${BASHPID:-$$}" listRegressionTransactionCoreMainChildSelectors
 
 registerRegressionSequentialSelectorList transaction listRegressionTransactionChildSelectors

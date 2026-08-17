@@ -10,5 +10,6 @@ listRegressionPlatformHotChildSelectors() {
 registerRegressionFunctionLeaf platform-update runRegressionPlatformUpdate
 registerRegressionFunctionLeaf platform-refresh runRegressionPlatformRefresh
 registerRegressionFunctionLeaf platform-rest runRegressionPlatformRest
+registerRegressionFunctionLeaf platform-smoke runRegressionPlatformSmoke
 registerRegressionParallelSelectorList platform-hot runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/platform-hot-parallel-${BASHPID:-$$}" listRegressionPlatformHotChildSelectors

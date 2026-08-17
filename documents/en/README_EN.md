@@ -462,17 +462,19 @@ All regressions use the selector dispatcher and fall into three levels:
 
 | Level | Command | Purpose |
 | --- | --- | --- |
-| Fast feedback | `bash shell/subscription_groups_regression.sh fast` | Quick checks after small changes; not complete product coverage. |
+| Fast feedback | `bash shell/subscription_groups_regression.sh fast` | Representative checks after small changes; use `fast-full` for the complete fast set. |
 | Main product regression | `bash shell/subscription_groups_regression.sh all` | The main validation set for larger changes; schedules core product suites within a resource budget, but is not the union of every public selector. |
 | Focused checks | `bash shell/subscription_groups_regression.sh <selector>` | Adds protocol, deep rollback, or harness checks according to the changed area. |
 
-`all` runs `subscription`, `ui`, `transaction-core`, `routing`, `runtime`, `remote-control-smoke`, and the remote-control service-install contract in parallel, then runs `transaction-system` and the remote-control response contract sequentially. It does not include `fast`, `protocol-capabilities`, `remote-control-deep`, or harness contracts by default; add them when relevant.
+`all` runs `subscription`, `ui`, `transaction-core-main`, `routing`, `runtime`, `remote-control-smoke`, and both remote-control contracts within one resource budget. Add the full `transaction-core`, `fast-full`, `protocol-capabilities`, `remote-control-deep`, and harness contracts when relevant.
 
 Common product-focused selectors:
 
 ```bash
 bash shell/subscription_groups_regression.sh protocol-capabilities
 bash shell/subscription_groups_regression.sh platform-hot
+bash shell/subscription_groups_regression.sh platform-smoke
+bash shell/subscription_groups_regression.sh fast-full
 bash shell/subscription_groups_regression.sh subscription-output
 bash shell/subscription_groups_regression.sh transaction-core
 bash shell/subscription_groups_regression.sh core-safety-rollback

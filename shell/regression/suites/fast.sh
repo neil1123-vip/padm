@@ -14,6 +14,12 @@ listRegressionFastOnlyChildSelectors() {
 
 listRegressionFastChildSelectors() {
     printf '%s\n' \
+        platform-smoke \
+        fast-smoke
+}
+
+listRegressionFastFullChildSelectors() {
+    printf '%s\n' \
         platform-hot \
         fast-only
 }
@@ -21,11 +27,14 @@ listRegressionFastChildSelectors() {
 registerRegressionFunctionLeaf fast-only-safety runRegressionFastOnlySafety
 registerRegressionFunctionLeaf fast-only-output-auto-install runRegressionFastOnlyOutputAutoInstall
 registerRegressionFunctionLeaf fast-only-output-rest runRegressionFastOnlyOutputRest
+registerRegressionFunctionLeaf fast-smoke runRegressionFastSmoke
 
 registerRegressionParallelSelectorList fast-only-output runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/fast-only-output-parallel-${BASHPID:-$$}" listRegressionFastOnlyOutputChildSelectors
 registerRegressionParallelSelectorList fast-only runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/fast-only-parallel-${BASHPID:-$$}" listRegressionFastOnlyChildSelectors
 
+registerRegressionParallelSelectorList fast-full runFrameworkParallelRegressionSelectorList \
+    "${TMP_DIR}/fast-full-parallel-${BASHPID:-$$}" listRegressionFastFullChildSelectors
 registerRegressionParallelSelectorList fast runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/fast-parallel-${BASHPID:-$$}" listRegressionFastChildSelectors

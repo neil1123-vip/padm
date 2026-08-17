@@ -46,6 +46,35 @@ regressionEnsureScriptModules() {
     refreshScriptModules "${remoteRef}" || return 1
 }
 
+regressionLoadInstallFunctions() {
+    eval "$(awk '
+        /^scriptTmpPath\(\)/ { capture = 1 }
+        /^ensureScriptModules\(\)/ { capture = 0 }
+        capture { print }
+    ' "${PROJECT_ROOT}/install.sh")"
+}
+
+regressionConfigureInstallRefreshFixture() {
+    SCRIPT_DIR=$1
+    REPO_ARCHIVE_DIR=padm-main
+    SCRIPT_REF_FILE="${SCRIPT_DIR}/.padm-ref"
+    SCRIPT_EXPECTED_REF_FILE="${SCRIPT_DIR}/.padm-entry-ref"
+    SCRIPT_MANIFEST_FILE="${SCRIPT_DIR}/.padm-module-manifest"
+    REPO_ZIP_URL=fixture.tar.gz
+}
+
+regressionCreateInstallModuleFixture() {
+    local fixtureDir=$1
+    mkdir -p "${fixtureDir}/shell/core" "${fixtureDir}/documents" "${fixtureDir}/assets"
+    printf '#!/usr/bin/env bash\n' >"${fixtureDir}/install.sh"
+    printf 'fixture\n' >"${fixtureDir}/README.md"
+    printf 'document\n' >"${fixtureDir}/documents/template.json"
+    printf 'asset\n' >"${fixtureDir}/assets/template.txt"
+    printf '#!/usr/bin/env bash\nsource "${CORE_DIR}/version.sh"\n' >"${fixtureDir}/shell/core/bootstrap.sh"
+    printf '#!/usr/bin/env bash\n' >"${fixtureDir}/shell/core/version.sh"
+    printf '#!/usr/bin/env bash\n' >"${fixtureDir}/shell/validate_install.sh"
+}
+
 runRegressionBootstrapLocalEnvFallbackRegression() {
     local root="${TMP_DIR}/bootstrap-local-env-fallback"
     local outputFile="${root}/output"
@@ -740,18 +769,7 @@ runCleanLastInstallationSkipsDuplicateNginxCleanupRegression() {
         cd "${unsafeRoot}"
 
         currentDefaultPort=
-        currentPort=
-        customPort=
-        xrayVLESSRealityPort=
-        xrayVLESSRealityXHTTPort=
-        singBoxVLESSVisionPort=
-        singBoxVLESSRealityVisionPort=
-        singBoxVLESSRealityGRPCPort=
-        singBoxHysteria2Port=
-        singBoxTuicPort=
-        singBoxSocks5Port=
-        hysteriaPort=
-        tuicPort=
+        regressionResetProtocolPorts
         nginxConfigPath=
         nginxStaticPath="${root}/static"
 
@@ -940,18 +958,7 @@ runCleanLastInstallationRejectsUnsafeStaticPathRegression() {
         cd "${root}"
 
         currentDefaultPort=
-        currentPort=
-        customPort=
-        xrayVLESSRealityPort=
-        xrayVLESSRealityXHTTPort=
-        singBoxVLESSVisionPort=
-        singBoxVLESSRealityVisionPort=
-        singBoxVLESSRealityGRPCPort=
-        singBoxHysteria2Port=
-        singBoxTuicPort=
-        singBoxSocks5Port=
-        hysteriaPort=
-        tuicPort=
+        regressionResetProtocolPorts
         nginxStaticPath="relative-static"
 
         handleXray() { return 0; }
@@ -2429,17 +2436,8 @@ runInstallRefreshRefFailClosedRegression() (
         (
             set +e
             TMPDIR="${fixtureDir}/tmp"
-            eval "$(awk '
-                /^scriptTmpPath\(\)/ { capture = 1 }
-                /^ensureScriptModules\(\)/ { capture = 0 }
-                capture { print }
-            ' "${PROJECT_ROOT}/install.sh")"
-            SCRIPT_DIR="${fixtureDir}"
-            REPO_ARCHIVE_DIR="padm-main"
-            SCRIPT_REF_FILE="${fixtureDir}/.padm-ref"
-            SCRIPT_EXPECTED_REF_FILE="${fixtureDir}/.padm-entry-ref"
-            SCRIPT_MANIFEST_FILE="${fixtureDir}/.padm-module-manifest"
-            REPO_ZIP_URL="fixture.tar.gz"
+            regressionLoadInstallFunctions
+            regressionConfigureInstallRefreshFixture "${fixtureDir}"
             scriptIsSafeAbsolutePath() { return 0; }
             fetchRemoteRef() { printf '2222222222222222222222222222222222222222\n'; }
             downloadRepoArchive() {
@@ -2500,24 +2498,10 @@ runInstallRefreshKeepsRefWhenRemoteLookupFailsRegression() (
         (
             set +e
             TMPDIR="${fixtureDir}/tmp"
-            eval "$(awk '
-                /^scriptTmpPath\(\)/ { capture = 1 }
-                /^ensureScriptModules\(\)/ { capture = 0 }
-                capture { print }
-            ' "${PROJECT_ROOT}/install.sh")"
-            SCRIPT_DIR="${fixtureDir}"
-            REPO_ARCHIVE_DIR="padm-main"
-            SCRIPT_REF_FILE="${fixtureDir}/.padm-ref"
-            SCRIPT_EXPECTED_REF_FILE="${fixtureDir}/.padm-entry-ref"
-            SCRIPT_MANIFEST_FILE="${fixtureDir}/.padm-module-manifest"
-            REPO_ZIP_URL="fixture.tar.gz"
+            regressionLoadInstallFunctions
+            regressionConfigureInstallRefreshFixture "${fixtureDir}"
             scriptIsSafeAbsolutePath() { return 0; }
-            command() {
-                if [[ "$1" == "-v" && "$2" == "curl" ]]; then
-                    return 0
-                fi
-                builtin command "$@"
-            }
+            regressionMockCurlAvailable
             curl() { tar -czf "${@: -2:1}" -C "${archiveRoot}" padm-main; }
             if refreshScriptModules ""; then
                 exit 0
@@ -2547,23 +2531,14 @@ runInstallRefreshRejectsUnsafeScriptDirRegression() (
         set +e
         cd "${root}"
         TMPDIR="${root}/tmp"
-        eval "$(awk '
-            /^scriptTmpPath\(\)/ { capture = 1 }
-            /^ensureScriptModules\(\)/ { capture = 0 }
-            capture { print }
-        ' "${PROJECT_ROOT}/install.sh")"
+        regressionLoadInstallFunctions
         SCRIPT_DIR="relative-script"
         REPO_ARCHIVE_DIR="padm-main"
         SCRIPT_REF_FILE="${SCRIPT_DIR}/.padm-ref"
         SCRIPT_EXPECTED_REF_FILE="${SCRIPT_DIR}/.padm-entry-ref"
         SCRIPT_MANIFEST_FILE="${SCRIPT_DIR}/.padm-module-manifest"
         REPO_ZIP_URL="fixture.tar.gz"
-        command() {
-            if [[ "$1" == "-v" && "$2" == "curl" ]]; then
-                return 0
-            fi
-            builtin command "$@"
-        }
+        regressionMockCurlAvailable
         curl() { tar -czf "${@: -2:1}" -C "${root}/archive" padm-main; }
         refreshScriptModules 4444444444444444444444444444444444444444
     ) >"${outputLog}" 2>&1 && return 1
@@ -2595,24 +2570,10 @@ runInstallRefreshRejectsUnsafeArchiveRegression() (
         (
             set +e
             TMPDIR="${fixtureDir}/tmp"
-            eval "$(awk '
-                /^scriptTmpPath\(\)/ { capture = 1 }
-                /^ensureScriptModules\(\)/ { capture = 0 }
-                capture { print }
-            ' "${PROJECT_ROOT}/install.sh")"
-            SCRIPT_DIR="${fixtureDir}"
-            REPO_ARCHIVE_DIR="padm-main"
-            SCRIPT_REF_FILE="${fixtureDir}/.padm-ref"
-            SCRIPT_EXPECTED_REF_FILE="${fixtureDir}/.padm-entry-ref"
-            SCRIPT_MANIFEST_FILE="${fixtureDir}/.padm-module-manifest"
-            REPO_ZIP_URL="fixture.tar.gz"
+            regressionLoadInstallFunctions
+            regressionConfigureInstallRefreshFixture "${fixtureDir}"
             scriptIsSafeAbsolutePath() { return 0; }
-            command() {
-                if [[ "$1" == "-v" && "$2" == "curl" ]]; then
-                    return 0
-                fi
-                builtin command "$@"
-            }
+            regressionMockCurlAvailable
             curl() { tar -czf "${@: -2:1}" -C "${archiveRoot}" padm-main --transform='s#^escape.txt$#../escape.txt#' escape.txt; }
             refreshScriptModules 4444444444444444444444444444444444444444
         ) >"${outputLog}" 2>&1 && return 1
@@ -2648,24 +2609,10 @@ runInstallRefreshRejectsUnsupportedArchiveEntriesRegression() {
         runFixtureRefresh() (
             set +e
             TMPDIR="${fixtureDir}/tmp"
-            eval "$(awk '
-                /^scriptTmpPath\(\)/ { capture = 1 }
-                /^ensureScriptModules\(\)/ { capture = 0 }
-                capture { print }
-            ' "${PROJECT_ROOT}/install.sh")"
-            SCRIPT_DIR="${fixtureDir}"
-            REPO_ARCHIVE_DIR="padm-main"
-            SCRIPT_REF_FILE="${fixtureDir}/.padm-ref"
-            SCRIPT_EXPECTED_REF_FILE="${fixtureDir}/.padm-entry-ref"
-            SCRIPT_MANIFEST_FILE="${fixtureDir}/.padm-module-manifest"
-            REPO_ZIP_URL="fixture.tar.gz"
+            regressionLoadInstallFunctions
+            regressionConfigureInstallRefreshFixture "${fixtureDir}"
             scriptIsSafeAbsolutePath() { return 0; }
-            command() {
-                if [[ "$1" == "-v" && "$2" == "curl" ]]; then
-                    return 0
-                fi
-                builtin command "$@"
-            }
+            regressionMockCurlAvailable
             curl() { tar -czf "${@: -2:1}" -C "${archiveRoot}" padm-main; }
             refreshScriptModules 4444444444444444444444444444444444444444
         )
@@ -2891,23 +2838,14 @@ runInstallRefreshRestoresBackupRegression() (
     if (
         set +e
         TMPDIR="${refreshTmpRoot}"
-        eval "$(awk '
-            /^scriptTmpPath\(\)/ { capture = 1 }
-            /^ensureScriptModules\(\)/ { capture = 0 }
-            capture { print }
-        ' "${PROJECT_ROOT}/install.sh")"
+        regressionLoadInstallFunctions
         SCRIPT_DIR="${fixtureDir}"
         REPO_ARCHIVE_DIR="${archiveDirName}"
         SCRIPT_REF_FILE="${fixtureDir}/.padm-ref"
         SCRIPT_MANIFEST_FILE="${fixtureDir}/.padm-module-manifest"
         REPO_ZIP_URL="fixture.tar.gz"
         scriptIsSafeAbsolutePath() { return 0; }
-        command() {
-            if [[ "$1" == "-v" && "$2" == "curl" ]]; then
-                return 0
-            fi
-            builtin command "$@"
-        }
+        regressionMockCurlAvailable
         curl() { tar -czf "${@: -2:1}" -C "${fixtureDir}/archive" "${REPO_ARCHIVE_DIR}"; }
         cp() {
             if [[ "$1" == "-R" && "$2" == */"${REPO_ARCHIVE_DIR}"/documents ]]; then
@@ -2938,23 +2876,14 @@ runInstallRefreshRestoresBackupRegression() (
     if (
         set +e
         TMPDIR="${restoreFailureTmpRoot}"
-        eval "$(awk '
-            /^scriptTmpPath\(\)/ { capture = 1 }
-            /^ensureScriptModules\(\)/ { capture = 0 }
-            capture { print }
-        ' "${PROJECT_ROOT}/install.sh")"
+        regressionLoadInstallFunctions
         SCRIPT_DIR="${restoreFailureDir}"
         REPO_ARCHIVE_DIR="${archiveDirName}"
         SCRIPT_REF_FILE="${restoreFailureDir}/.padm-ref"
         SCRIPT_MANIFEST_FILE="${restoreFailureDir}/.padm-module-manifest"
         REPO_ZIP_URL="fixture.tar.gz"
         scriptIsSafeAbsolutePath() { return 0; }
-        command() {
-            if [[ "$1" == "-v" && "$2" == "curl" ]]; then
-                return 0
-            fi
-            builtin command "$@"
-        }
+        regressionMockCurlAvailable
         curl() { tar -czf "${@: -2:1}" -C "${restoreFailureDir}/archive" "${REPO_ARCHIVE_DIR}"; }
         cp() {
             if [[ "$1" == "-R" && "$2" == */"${REPO_ARCHIVE_DIR}"/documents ]]; then
@@ -2999,16 +2928,8 @@ runInstallRefreshSignalRestoresAndExitsRegression() (
     printf 'new-readme\n' >"${archiveRoot}/README.md"
 
     TMPDIR="${root}/tmp"
-    eval "$(awk '
-        /^scriptTmpPath\(\)/ { capture = 1 }
-        /^ensureScriptModules\(\)/ { capture = 0 }
-        capture { print }
-    ' "${PROJECT_ROOT}/install.sh")"
-    SCRIPT_DIR="${fixtureDir}"
-    REPO_ARCHIVE_DIR=padm-main
-    SCRIPT_REF_FILE="${fixtureDir}/.padm-ref"
-    SCRIPT_EXPECTED_REF_FILE="${fixtureDir}/.padm-entry-ref"
-    SCRIPT_MANIFEST_FILE="${fixtureDir}/.padm-module-manifest"
+    regressionLoadInstallFunctions
+    regressionConfigureInstallRefreshFixture "${fixtureDir}"
     scriptIsSafeAbsolutePath() { return 0; }
     downloadRepoArchive() {
         local _url=$1
@@ -3098,17 +3019,9 @@ runInstallRefreshRejectsEntryMismatchRegression() (
     set +e
     (
         TMPDIR="${root}/tmp"
-        eval "$(awk '
-            /^scriptTmpPath\(\)/ { capture = 1 }
-            /^ensureScriptModules\(\)/ { capture = 0 }
-            capture { print }
-        ' "${PROJECT_ROOT}/install.sh")"
+        regressionLoadInstallFunctions
         SCRIPT_PATH="${fixtureDir}/install.sh"
-        SCRIPT_DIR="${fixtureDir}"
-        REPO_ARCHIVE_DIR=padm-main
-        SCRIPT_REF_FILE="${fixtureDir}/.padm-ref"
-        SCRIPT_EXPECTED_REF_FILE="${fixtureDir}/.padm-entry-ref"
-        SCRIPT_MANIFEST_FILE="${fixtureDir}/.padm-module-manifest"
+        regressionConfigureInstallRefreshFixture "${fixtureDir}"
         scriptIsSafeAbsolutePath() { return 0; }
         downloadRepoArchive() { mkdir -p "$2" && command cp -R "${archiveRoot}" "$2/"; }
         refreshScriptModules 8888888888888888888888888888888888888888
@@ -3146,16 +3059,8 @@ runInstallRefreshRefCommitRollbackRegression() (
     set +e
     (
         TMPDIR="${root}/tmp"
-        eval "$(awk '
-            /^scriptTmpPath\(\)/ { capture = 1 }
-            /^ensureScriptModules\(\)/ { capture = 0 }
-            capture { print }
-        ' "${PROJECT_ROOT}/install.sh")"
-        SCRIPT_DIR="${fixtureDir}"
-        REPO_ARCHIVE_DIR=padm-main
-        SCRIPT_REF_FILE="${fixtureDir}/.padm-ref"
-        SCRIPT_EXPECTED_REF_FILE="${fixtureDir}/.padm-entry-ref"
-        SCRIPT_MANIFEST_FILE="${fixtureDir}/.padm-module-manifest"
+        regressionLoadInstallFunctions
+        regressionConfigureInstallRefreshFixture "${fixtureDir}"
         scriptIsSafeAbsolutePath() { return 0; }
         downloadRepoArchive() { mkdir -p "$2" && command cp -R "${archiveRoot}" "$2/"; }
         writeModuleManifest() { printf 'new-manifest\n' >"$1"; }
@@ -3202,18 +3107,9 @@ runInstallRefreshDownloadBoundsRegression() (
     printf '#!/usr/bin/env bash\n' >"${archiveRoot}/padm-main/shell/validate_install.sh"
 
     TMPDIR="${root}/tmp"
-    eval "$(awk '
-        /^scriptTmpPath\(\)/ { capture = 1 }
-        /^ensureScriptModules\(\)/ { capture = 0 }
-        capture { print }
-    ' "${PROJECT_ROOT}/install.sh")"
+    regressionLoadInstallFunctions
 
-    command() {
-        if [[ "$1" == "-v" && "$2" == "curl" ]]; then
-            return 0
-        fi
-        builtin command "$@"
-    }
+    regressionMockCurlAvailable
     curl() {
         local outputFile=
         printf '%s\n' "$*" >"${curlLog}"
@@ -3449,24 +3345,11 @@ runInstallModulePathsRegression() (
     outputList="${TMP_DIR}/install-module-paths.txt"
     moduleTmpRoot="${TMP_DIR}/install-module-paths-tmp"
     fixtureDir="${TMP_DIR}/install-entry-manifest"
-    mkdir -p "${moduleTmpRoot}" "${fixtureDir}/shell/core" "${fixtureDir}/documents" "${fixtureDir}/assets"
-    printf '#!/usr/bin/env bash\n' >"${fixtureDir}/install.sh"
-    printf 'fixture\n' >"${fixtureDir}/README.md"
-    printf 'document\n' >"${fixtureDir}/documents/template.json"
-    printf 'asset\n' >"${fixtureDir}/assets/template.txt"
-    cat >"${fixtureDir}/shell/core/bootstrap.sh" <<'EOF'
-#!/usr/bin/env bash
-source "${CORE_DIR}/version.sh"
-EOF
-    printf '#!/usr/bin/env bash\n' >"${fixtureDir}/shell/core/version.sh"
-    printf '#!/usr/bin/env bash\n' >"${fixtureDir}/shell/validate_install.sh"
+    mkdir -p "${moduleTmpRoot}"
+    regressionCreateInstallModuleFixture "${fixtureDir}"
     (
         TMPDIR="${moduleTmpRoot}"
-        eval "$(awk '
-            /^scriptTmpPath\(\)/ { capture = 1 }
-            /^ensureScriptModules\(\)/ { capture = 0 }
-            capture { print }
-        ' "${PROJECT_ROOT}/install.sh")"
+        regressionLoadInstallFunctions
         SCRIPT_DIR="${PROJECT_ROOT}"
         SCRIPT_MANIFEST_FILE="${TMP_DIR}/install-module-paths-manifest"
         SCRIPT_EXPECTED_REF_FILE="${TMP_DIR}/install-module-paths-entry-ref"
@@ -3485,15 +3368,8 @@ EOF
     ! grep -q '^REQUIRED_MODULE_PATHS' "${PROJECT_ROOT}/install.sh"
     (
         TMPDIR="${moduleTmpRoot}"
-        eval "$(awk '
-            /^scriptTmpPath\(\)/ { capture = 1 }
-            /^ensureScriptModules\(\)/ { capture = 0 }
-            capture { print }
-        ' "${PROJECT_ROOT}/install.sh")"
-        SCRIPT_DIR="${fixtureDir}"
-        SCRIPT_MANIFEST_FILE="${fixtureDir}/.padm-module-manifest"
-        SCRIPT_EXPECTED_REF_FILE="${fixtureDir}/.padm-entry-ref"
-        SCRIPT_REF_FILE="${fixtureDir}/.padm-ref"
+        regressionLoadInstallFunctions
+        regressionConfigureInstallRefreshFixture "${fixtureDir}"
         writeModuleManifest "${SCRIPT_MANIFEST_FILE}"
         scriptModulesReady >/dev/null
         printf '# changed\n' >>"${fixtureDir}/install.sh"
@@ -3507,28 +3383,12 @@ runInstallModuleManifestCompleteRegression() {
     fixtureDir="${TMP_DIR}/install-module-manifest-complete"
     moduleTmpRoot="${TMP_DIR}/install-module-manifest-complete-tmp"
     oldTmpDir="${TMPDIR:-}"
-    mkdir -p "${moduleTmpRoot}" "${fixtureDir}/shell/core" "${fixtureDir}/documents" "${fixtureDir}/assets"
-    printf '#!/usr/bin/env bash\n' >"${fixtureDir}/install.sh"
-    printf 'fixture\n' >"${fixtureDir}/README.md"
-    printf 'document\n' >"${fixtureDir}/documents/template.json"
-    printf 'asset\n' >"${fixtureDir}/assets/template.txt"
-    cat >"${fixtureDir}/shell/core/bootstrap.sh" <<'EOF'
-#!/usr/bin/env bash
-source "${CORE_DIR}/version.sh"
-EOF
-    printf '#!/usr/bin/env bash\n' >"${fixtureDir}/shell/core/version.sh"
-    printf '#!/usr/bin/env bash\n' >"${fixtureDir}/shell/validate_install.sh"
+    mkdir -p "${moduleTmpRoot}"
+    regressionCreateInstallModuleFixture "${fixtureDir}"
     (
         TMPDIR="${moduleTmpRoot}"
-        eval "$(awk '
-            /^scriptTmpPath\(\)/ { capture = 1 }
-            /^ensureScriptModules\(\)/ { capture = 0 }
-            capture { print }
-        ' "${PROJECT_ROOT}/install.sh")"
-        SCRIPT_DIR="${fixtureDir}"
-        SCRIPT_MANIFEST_FILE="${fixtureDir}/.padm-module-manifest"
-        SCRIPT_EXPECTED_REF_FILE="${fixtureDir}/.padm-entry-ref"
-        SCRIPT_REF_FILE="${fixtureDir}/.padm-ref"
+        regressionLoadInstallFunctions
+        regressionConfigureInstallRefreshFixture "${fixtureDir}"
         writeModuleManifest "${SCRIPT_MANIFEST_FILE}"
         awk '$2 != "shell/core/version.sh"' "${SCRIPT_MANIFEST_FILE}" >"${SCRIPT_MANIFEST_FILE}.tmp"
         mv "${SCRIPT_MANIFEST_FILE}.tmp" "${SCRIPT_MANIFEST_FILE}"
@@ -3543,28 +3403,12 @@ runInstallModuleManifestRequiresSha256Regression() {
     moduleTmpRoot="${TMP_DIR}/install-module-manifest-requires-sha256-tmp"
     oldPath="${PATH}"
     oldTmpDir="${TMPDIR:-}"
-    mkdir -p "${moduleTmpRoot}" "${fixtureDir}/missing-bin" "${fixtureDir}/shell/core" "${fixtureDir}/documents" "${fixtureDir}/assets"
-    printf '#!/usr/bin/env bash\n' >"${fixtureDir}/install.sh"
-    printf 'fixture\n' >"${fixtureDir}/README.md"
-    printf 'document\n' >"${fixtureDir}/documents/template.json"
-    printf 'asset\n' >"${fixtureDir}/assets/template.txt"
-    cat >"${fixtureDir}/shell/core/bootstrap.sh" <<'EOF'
-#!/usr/bin/env bash
-source "${CORE_DIR}/version.sh"
-EOF
-    printf '#!/usr/bin/env bash\n' >"${fixtureDir}/shell/core/version.sh"
-    printf '#!/usr/bin/env bash\n' >"${fixtureDir}/shell/validate_install.sh"
+    mkdir -p "${moduleTmpRoot}" "${fixtureDir}/missing-bin"
+    regressionCreateInstallModuleFixture "${fixtureDir}"
     (
         TMPDIR="${moduleTmpRoot}"
-        eval "$(awk '
-            /^scriptTmpPath\(\)/ { capture = 1 }
-            /^ensureScriptModules\(\)/ { capture = 0 }
-            capture { print }
-        ' "${PROJECT_ROOT}/install.sh")"
-        SCRIPT_DIR="${fixtureDir}"
-        SCRIPT_MANIFEST_FILE="${fixtureDir}/.padm-module-manifest"
-        SCRIPT_EXPECTED_REF_FILE="${fixtureDir}/.padm-entry-ref"
-        SCRIPT_REF_FILE="${fixtureDir}/.padm-ref"
+        regressionLoadInstallFunctions
+        regressionConfigureInstallRefreshFixture "${fixtureDir}"
         PATH="${fixtureDir}/missing-bin"
         hash -r
         ! writeModuleManifest "${SCRIPT_MANIFEST_FILE}"
@@ -4923,6 +4767,26 @@ runCoreClientOptionalArgsRegression() {
         jq -e 'any(.[]; .email == "acct \"one-vless_reality_vision" and .id == "u1")' <<<"${xrayUsers}" >/dev/null
         jq -e 'any(.[]; .name == "acct \"two-VLESS_Reality_Vision" and .uuid == "u2")' <<<"${singboxUsers}" >/dev/null
     )
+}
+
+runRegressionPlatformSmoke() {
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_PLATFORM_SMOKE_JOBS:-4}" \
+        runParallelRegressionRunners "${TMP_DIR}/platform-smoke-${BASHPID:-$$}" \
+        archive-safety runInstallRefreshRejectsUnsupportedArchiveEntriesRegression \
+        refresh-restore runInstallRefreshRestoresBackupRegression \
+        module-lock runInstallModuleLockSerializesLoadRegression \
+        module-manifest runInstallModuleManifestCompleteRegression
+}
+
+runRegressionFastSmoke() {
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_FAST_SMOKE_JOBS:-4}" \
+        runParallelRegressionRunners "${TMP_DIR}/fast-smoke-${BASHPID:-$$}" \
+        commit-generated-file-directory-target runCommitGeneratedFileRejectsDirectoryTargetRegression \
+        wireguard-nginx-path-safety runWriteWireGuardControlNginxPathSafetyRegression \
+        random-uuid-entropy runRandomUuidEntropyFallbackRegression \
+        auto-install-user-validation runAutoInstallUserValidationRegression \
+        remove-install-path-safety runRemoveInstallPathSafetyRegression \
+        subscription-sync-path-safety runSubscriptionSyncPathSafetyRegression
 }
 
 runRegressionPlatformUpdate() {

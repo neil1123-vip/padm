@@ -1054,13 +1054,6 @@ JSON
         printf 'remote\n' >>"${remoteLog}"
         printf '{"failures":[],"snapshots":{}}'
     }
-    subscriptionSyncMarkResult() {
-        printf '%s\n' "$1" >"${resultStatus}"
-        printf '%s\n' "$2" >"${resultFailures}"
-        return 0
-    }
-    successCard() { printf '%s\n' "$*" >"${statusLog}"; }
-    statusCard() { printf '%s\n' "$*" >"${statusLog}"; }
 
     regressionExpectStatus 1 runSubscriptionGroupSync
     [[ "$(<"${syncConfigFile}")" == "${originalConfig}" ]]
@@ -1133,13 +1126,6 @@ JSON
         printf 'remote\n' >>"${remoteLog}"
         printf '{"failures":[],"snapshots":{}}'
     }
-    subscriptionSyncMarkResult() {
-        printf '%s\n' "$1" >"${resultStatus}"
-        printf '%s\n' "$2" >"${resultFailures}"
-        return 0
-    }
-    successCard() { printf '%s\n' "$*" >"${statusLog}"; }
-    statusCard() { printf '%s\n' "$*" >"${statusLog}"; }
 
     regressionExpectStatus 1 runSubscriptionGroupSync
     [[ "$(<"${syncConfigFile}")" == "${originalConfig}" ]]
@@ -1202,13 +1188,6 @@ JSON
         printf 'refresh\n' >>"${refreshLog}"
         return 0
     }
-    subscriptionSyncMarkResult() {
-        printf '%s\n' "$1" >"${resultStatus}"
-        printf '%s\n' "$2" >"${resultFailures}"
-        return 0
-    }
-    successCard() { printf '%s\n' "$*" >"${statusLog}"; }
-    statusCard() { printf '%s\n' "$*" >"${statusLog}"; }
 
     regressionExpectStatus 1 runSubscriptionGroupSync
     [[ "$(<"${syncConfigFile}")" != "${originalConfig}" ]]
@@ -1284,13 +1263,6 @@ JSON
         printf 'refresh-publish:%s\n' "$1" >>"${callLog}"
         return 0
     }
-    subscriptionSyncMarkResult() {
-        printf '%s\n' "$1" >"${resultStatus}"
-        printf '%s\n' "$2" >"${resultFailures}"
-        return 0
-    }
-    successCard() { printf '%s\n' "$*" >"${statusLog}"; }
-    statusCard() { printf '%s\n' "$*" >"${statusLog}"; }
 
     regressionExpectStatus 0 runSubscriptionGroupSync
     grep -q '^apply-account-plan$' "${callLog}"
@@ -1353,13 +1325,6 @@ JSON
         printf 'refresh-publish\n' >>"${callLog}"
         return 0
     }
-    subscriptionSyncMarkResult() {
-        printf '%s\n' "$1" >"${resultStatus}"
-        printf '%s\n' "$2" >"${resultFailures}"
-        return 0
-    }
-    successCard() { printf '%s\n' "$*" >"${statusLog}"; }
-    statusCard() { printf '%s\n' "$*" >"${statusLog}"; }
 
     regressionExpectStatus 0 runSubscriptionGroupSync
     [[ ! -e "${resultFailures}" || "$(<"${resultFailures}")" == "[]" ]]
@@ -1399,13 +1364,6 @@ JSON
     }
     subscriptionSyncReconcileLocalServices() { return 0; }
     readNginxSubscribe() { subscribePort=; }
-    subscriptionSyncMarkResult() {
-        printf '%s\n' "$1" >"${resultStatus}"
-        printf '%s\n' "$2" >"${resultFailures}"
-        return 0
-    }
-    successCard() { printf '%s\n' "$*" >"${statusLog}"; }
-    statusCard() { printf '%s\n' "$*" >"${statusLog}"; }
 
     set +e
     runSubscriptionGroupSync
