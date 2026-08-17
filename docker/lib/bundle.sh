@@ -48,8 +48,11 @@ dockerBundleSourceIsComplete() {
         install-docker.sh \
         docker/lib/bootstrap.sh \
         docker/lib/bundle.sh \
+        docker/lib/services.sh \
         docker/lib/lifecycle.sh \
+        docker/contracts/configure.schema.json \
         docker/contracts/deployment.schema.json \
+        docker/contracts/features.json \
         shell/core/deployment_mode.sh; do
         [[ -f "${sourceRoot}/${required}" && ! -L "${sourceRoot}/${required}" ]] || return 1
     done

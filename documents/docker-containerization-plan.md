@@ -276,6 +276,11 @@ PADM_NET_IMAGE=ghcr.io/example/padm-net@sha256:...
 
 ### 阶段 3：核心、Nginx、TLS 和订阅
 
+状态：实现完成（2026-08-17）。已接入协议 1 的 Xray/sing-box Reality、协议 21
+的 Xray + Nginx WebSocket/TLS、订阅控制、TLS 文件事务和 DNS-01 ACME；专项及
+原生全量回归均通过。实现范围和验证结果见
+[Docker 容器化阶段 3 基线](docker-phase3-baseline.md)。
+
 先接入 Xray 和 sing-box 的协议配置、配置校验、启动和健康检查，再接入 Nginx、TLS、ACME、订阅发布与订阅控制服务。
 
 配置写入必须保持临时文件、校验、备份和回滚顺序。Docker 模式暂未支持的功能必须明确报错或隐藏，不能静默回退到宿主机安装。

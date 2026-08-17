@@ -55,5 +55,5 @@ ENV LD_LIBRARY_PATH=/usr/local/lib
 USER 10001:10001
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["/usr/local/bin/sing-box"]
-CMD ["-D", "/var/lib/padm/sing-box", "-C", "/etc/padm/sing-box", "run"]
-HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 CMD ["/usr/local/bin/sing-box", "version"]
+CMD ["run", "-D", "/var/lib/padm/sing-box", "-c", "/etc/padm/sing-box/config.json"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 CMD ["/usr/local/bin/sing-box", "check", "-D", "/var/lib/padm/sing-box", "-c", "/etc/padm/sing-box/config.json"]

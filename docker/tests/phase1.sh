@@ -140,8 +140,8 @@ runControl 0 repeat-install "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" insta
 [[ "$(readlink "${DOCKER_ROOT}/bundle")" == "${bundleBefore}" ]] || fail 'repeat install changed an identical bundle'
 [[ "$(<"${DOCKER_ROOT}/data/sentinel")" == "keep" ]] || fail 'repeat install changed persistent data'
 
-runControl 14 status-without-compose "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" status
-grep -q '^compose=unavailable$' "${CONTROL_LOG}" || fail 'status did not expose missing Compose state'
+runControl 0 status-without-configuration "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" status
+grep -q '^configured=no$' "${CONTROL_LOG}" || fail 'status did not expose missing configuration state'
 for operation in up down restart logs; do
     runControl 14 "${operation}-without-compose" "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" "${operation}"
 done
@@ -215,6 +215,19 @@ COMPOSE_SOURCE="${TEST_ROOT}/compose-source"
 copyBundleFixture "${COMPOSE_SOURCE}"
 printf 'services: {}\n' >"${COMPOSE_SOURCE}/docker/compose.yaml"
 runControl 0 install-compose-fixture "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" install --source "${COMPOSE_SOURCE}"
+cat >"${DOCKER_ROOT}/deployment.json" <<'EOF'
+{
+  "schema_version": 1,
+  "mode": "docker",
+  "padm_version": "test",
+  "compose": {"project": "padm-docker", "profiles": ["core-xray"]}
+}
+EOF
+cat >"${DOCKER_ROOT}/images.env" <<EOF
+PADM_XRAY_IMAGE=ghcr.io/example/padm-xray:test@sha256:$(printf '1%.0s' {1..64})
+PADM_DOCKER_ROOT=${DOCKER_ROOT}
+EOF
+printf '{"name":"padm-docker","services":{}}\n' >"${DOCKER_ROOT}/compose.json"
 : >"${DOCKER_CALL_LOG}"
 runControl 0 compose-status "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" status
 runControl 0 compose-up "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" up

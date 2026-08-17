@@ -34,6 +34,7 @@ RUN set -eux; \
     rm -rf /tmp/acme.tar.gz "/tmp/acme.sh-${ACME_SH_VERSION}"
 
 COPY --chown=10001:10001 --chmod=0755 entrypoint.sh /usr/local/bin/padm-entrypoint
+COPY --chown=10001:10001 --chmod=0755 control_server.py /opt/padm/subscription/control_server.py
 
 LABEL org.opencontainers.image.source="${SOURCE_URL}" \
       org.opencontainers.image.version="${PADM_VERSION}" \

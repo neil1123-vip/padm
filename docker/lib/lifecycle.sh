@@ -9,6 +9,10 @@ dockerUsage() {
     cat >&2 <<'EOF'
 用法:
   install-docker.sh install [--source <目录>] [--ref <commit|latest>]
+  padm-docker configure --spec <JSON 文件>
+  padm-docker tls install --domain <域名> --cert <文件> --key <文件> [--ops-image <tag@digest>]
+  padm-docker acme <issue|renew> --domain <域名> --email <邮箱> --dns <dns_*> --credentials <文件> [--ops-image <tag@digest>]
+  padm-docker validate
   padm-docker status
   padm-docker up
   padm-docker down
@@ -115,22 +119,36 @@ dockerRequireInstalledBundle() {
 }
 
 dockerComposeFile() {
-    local bundlePath composeFile
-    bundlePath=$(dockerCurrentBundlePath) || return 1
-    composeFile="${bundlePath}/docker/compose.yaml"
+    local root composeFile deploymentFile
+    root=$(dockerInstallRoot) || return 1
+    composeFile="${root}/compose.json"
+    deploymentFile="${root}/deployment.json"
     [[ -f "${composeFile}" && ! -L "${composeFile}" ]] || return 1
+    padmDockerDeploymentIdentityValid "${deploymentFile}" || return 1
     printf '%s\n' "${composeFile}"
 }
 
 dockerComposeRun() {
-    local composeFile composeDir
+    local composeFile composeDir root profile
+    local -a commandArgs=()
     composeFile=$(dockerComposeFile) || {
-        dockerError 'Compose 配置尚未安装；该运行能力将在阶段 2 提供'
+        dockerError 'Docker 服务尚未配置，请先执行 configure'
         return "${PADM_DOCKER_RC_COMPOSE}"
     }
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    [[ -f "${root}/images.env" && ! -L "${root}/images.env" ]] || {
+        dockerError 'images.env 缺失或不安全'
+        return "${PADM_DOCKER_RC_STATE}"
+    }
     composeDir=$(dirname -- "${composeFile}")
-    docker compose --project-name "${PADM_DOCKER_PROJECT}" \
-        --project-directory "${composeDir}" --file "${composeFile}" "$@" || {
+    commandArgs=(docker compose --project-name "${PADM_DOCKER_PROJECT}"
+        --project-directory "${composeDir}" --env-file "${root}/images.env"
+        --file "${composeFile}")
+    while IFS= read -r profile; do
+        [[ -n "${profile}" ]] || continue
+        commandArgs+=(--profile "${profile}")
+    done < <(jq -r '.compose.profiles[]' "${root}/deployment.json")
+    "${commandArgs[@]}" "$@" || {
         dockerError 'Docker Compose 操作失败'
         return "${PADM_DOCKER_RC_COMPOSE}"
     }
@@ -143,7 +161,7 @@ dockerLockInstalledDeployment() {
 }
 
 dockerStatusCommand() {
-    local state bundlePath ref
+    local state bundlePath ref root
     [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
     state=$(dockerDeploymentState) || return "${PADM_DOCKER_RC_STATE}"
@@ -160,12 +178,14 @@ dockerStatusCommand() {
     bundlePath=$(dockerCurrentBundlePath) || return "${PADM_DOCKER_RC_BUNDLE}"
     ref=$(<"${bundlePath}/${PADM_DOCKER_BUNDLE_REF}")
     printf 'state=%s\nbundle_ref=%s\n' "${state}" "${ref}"
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     if ! dockerComposeFile >/dev/null; then
-        printf 'compose=unavailable\n'
-        dockerError 'Compose 配置尚未安装；服务状态不可用'
-        return "${PADM_DOCKER_RC_COMPOSE}"
+        printf 'configured=no\n'
+        return 0
     fi
-    printf 'compose=available\n'
+    printf 'configured=yes\nrelease=%s\nprofiles=%s\n' \
+        "$(jq -r '.padm_version' "${root}/deployment.json")" \
+        "$(jq -r '.compose.profiles | join(",")' "${root}/deployment.json")"
     dockerComposeRun ps
 }
 
@@ -213,6 +233,9 @@ dockerUninstallCommand() {
 
 dockerCommandInterrupted() {
     local status=$1
+    if declare -F dockerConfigurationInterrupted >/dev/null 2>&1; then
+        dockerConfigurationInterrupted || true
+    fi
     dockerReleaseDeploymentLock || true
     dockerEntryCleanup || true
     exit "${status}"
@@ -225,6 +248,17 @@ dockerMain() {
     trap 'dockerCommandInterrupted 143' TERM
     case "${command}" in
     install) dockerInstallCommand "$@" ;;
+    configure) dockerConfigureCommand "$@" ;;
+    tls)
+        if [[ "${1:-}" == "install" ]]; then
+            shift
+            dockerTlsInstallCommand "$@"
+        else
+            status=${PADM_DOCKER_RC_USAGE}
+        fi
+        ;;
+    acme) dockerAcmeCommand "$@" ;;
+    validate) dockerValidateInstalledCommand "$@" ;;
     status) dockerStatusCommand "$@" ;;
     up | down | restart | logs) dockerLifecycleCommand "${command}" "$@" ;;
     uninstall) dockerUninstallCommand "$@" ;;

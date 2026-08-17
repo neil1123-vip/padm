@@ -154,6 +154,8 @@ source "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/bootstrap.sh"
 # shellcheck source=/dev/null
 source "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/bundle.sh"
 # shellcheck source=/dev/null
+source "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/services.sh"
+# shellcheck source=/dev/null
 source "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/lifecycle.sh"
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "protocols": [
+    {
+      "id": 1,
+      "status": "supported",
+      "cores": ["xray", "sing-box"],
+      "profiles": ["core-xray", "core-sing-box"]
+    },
+    {
+      "id": 2,
+      "status": "deferred",
+      "cores": ["xray"],
+      "profiles": []
+    },
+    {
+      "id": 3,
+      "status": "deferred",
+      "cores": ["sing-box"],
+      "profiles": []
+    },
+    {
+      "id": 4,
+      "status": "deferred",
+      "cores": ["sing-box"],
+      "profiles": []
+    },
+    {
+      "id": 5,
+      "status": "deferred",
+      "cores": ["sing-box"],
+      "profiles": []
+    },
+    {
+      "id": 21,
+      "status": "supported",
+      "cores": ["xray"],
+      "profiles": ["core-xray", "nginx"]
+    },
+    {
+      "id": 22,
+      "status": "deferred",
+      "cores": ["xray"],
+      "profiles": []
+    },
+    {
+      "id": 23,
+      "status": "deferred",
+      "cores": ["xray", "sing-box"],
+      "profiles": []
+    },
+    {
+      "id": 24,
+      "status": "deferred",
+      "cores": ["xray"],
+      "profiles": []
+    },
+    {
+      "id": 25,
+      "status": "deferred",
+      "cores": ["xray"],
+      "profiles": []
+    },
+    {
+      "id": 26,
+      "status": "deferred",
+      "cores": ["xray", "sing-box"],
+      "profiles": []
+    },
+    {
+      "id": 27,
+      "status": "deferred",
+      "cores": ["xray"],
+      "profiles": []
+    },
+    {
+      "id": 28,
+      "status": "deferred",
+      "cores": ["xray", "sing-box"],
+      "profiles": []
+    },
+    {
+      "id": 29,
+      "status": "deferred",
+      "cores": ["xray"],
+      "profiles": []
+    },
+    {
+      "id": 30,
+      "status": "deferred",
+      "cores": ["sing-box"],
+      "profiles": []
+    },
+    {
+      "id": 31,
+      "status": "deferred",
+      "cores": ["sing-box"],
+      "profiles": []
+    }
+  ],
+  "features": {
+    "nginx": "supported",
+    "tls-files": "supported",
+    "acme-dns": "supported",
+    "subscription": "supported",
+    "acme-webroot": "deferred",
+    "acme-standalone": "deferred",
+    "fail2ban": "host-integrated",
+    "wireguard": "host-integrated",
+    "tun": "host-integrated",
+    "tproxy": "host-integrated"
+  }
+}

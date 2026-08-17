@@ -15,6 +15,7 @@ x-padm-defaults: &padm-defaults
       hard: 65536
 
 x-padm-labels: &padm-labels
+  io.padm.mode: docker
   io.padm.project: padm-docker
 
 services:
@@ -84,18 +85,15 @@ services:
     <<: *padm-defaults
     image: "${PADM_OPS_IMAGE:?PADM_OPS_IMAGE is required}"
     profiles: [subscription]
-    command: [subscription]
+    command: [subscription, --bind, 0.0.0.0, --port, "8081"]
     labels:
       <<: *padm-labels
       io.padm.component: subscription
     volumes:
       - type: bind
-        source: ${PADM_DOCKER_ROOT:-/etc/padm-docker}/config/subscription
-        target: /opt/padm/subscription
-        read_only: true
-      - type: bind
         source: ${PADM_DOCKER_ROOT:-/etc/padm-docker}/data/subscription
         target: /var/lib/padm/subscription
+        read_only: true
       - type: bind
         source: ${PADM_DOCKER_ROOT:-/etc/padm-docker}/secrets
         target: /run/padm-secrets
@@ -105,6 +103,8 @@ services:
         target: /var/log/padm
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=32m
+    healthcheck:
+      test: [CMD, /usr/local/bin/padm-entrypoint, subscription-health]
 
   acme:
     <<: *padm-defaults

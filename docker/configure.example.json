@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "release": {
+    "version": "3.1.8",
+    "manifest_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "signature_identity": "https://github.com/neil1123-vip/padm/.github/workflows/build-images.yml@refs/heads/main"
+  },
+  "core": {
+    "type": "xray",
+    "protocols": [
+      {
+        "id": 1,
+        "server": "proxy.example.com",
+        "public_port": 443,
+        "address_families": ["ipv4", "ipv6"],
+        "name": "main-reality",
+        "uuid": "11111111-1111-4111-8111-111111111111",
+        "reality": {
+          "server_name": "www.example.com",
+          "target_host": "www.example.com",
+          "target_port": 443,
+          "private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "public_key": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+          "short_id": "6ba85179e30d4fc2"
+        }
+      }
+    ]
+  },
+  "tls": null,
+  "subscription": {
+    "enabled": false,
+    "token": "replace_with_random_token"
+  },
+  "images": {
+    "xray": "ghcr.io/neil1123-vip/padm-xray:3.1.8@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "sing-box": "ghcr.io/neil1123-vip/padm-sing-box:3.1.8@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "nginx": "ghcr.io/neil1123-vip/padm-nginx:3.1.8@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "ops": "ghcr.io/neil1123-vip/padm-ops:3.1.8@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "net": "ghcr.io/neil1123-vip/padm-net:3.1.8@sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  }
+}

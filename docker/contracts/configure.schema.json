@@ -1,0 +1,294 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:padm:docker-configure:1",
+  "title": "padm Docker configuration request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "release", "core", "tls", "subscription", "images"],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "manifest_sha256", "signature_identity"],
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "signature_identity": {
+          "$ref": "#/$defs/non_empty_string"
+        }
+      }
+    },
+    "core": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "protocols"],
+      "properties": {
+        "type": {
+          "enum": ["xray", "sing-box"]
+        },
+        "protocols": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/reality_protocol"
+              },
+              {
+                "$ref": "#/$defs/websocket_protocol"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "tls": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["domain"],
+          "properties": {
+            "domain": {
+              "$ref": "#/$defs/hostname"
+            }
+          }
+        }
+      ]
+    },
+    "subscription": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "token"],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "token": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{16,128}$"
+        }
+      }
+    },
+    "images": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["xray", "sing-box", "nginx", "ops", "net"],
+      "properties": {
+        "xray": {
+          "$ref": "#/$defs/image_reference"
+        },
+        "sing-box": {
+          "$ref": "#/$defs/image_reference"
+        },
+        "nginx": {
+          "$ref": "#/$defs/image_reference"
+        },
+        "ops": {
+          "$ref": "#/$defs/image_reference"
+        },
+        "net": {
+          "$ref": "#/$defs/image_reference"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "non_empty_string": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "hostname": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 253,
+      "pattern": "^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z]{2,63}$"
+    },
+    "uuid": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$"
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "address_families": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2,
+      "uniqueItems": true,
+      "items": {
+        "enum": ["ipv4", "ipv6"]
+      }
+    },
+    "account_name": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._~@+=:-]{1,64}$"
+    },
+    "server_address": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/hostname"
+        },
+        {
+          "type": "string",
+          "format": "ipv4"
+        },
+        {
+          "type": "string",
+          "format": "ipv6"
+        }
+      ]
+    },
+    "image_reference": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._/:@-]*:[A-Za-z0-9._-]+@sha256:[a-f0-9]{64}$"
+    },
+    "protocol_base": {
+      "type": "object",
+      "required": ["id", "server", "public_port", "address_families", "name", "uuid"],
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "server": {
+          "$ref": "#/$defs/server_address"
+        },
+        "public_port": {
+          "$ref": "#/$defs/port"
+        },
+        "address_families": {
+          "$ref": "#/$defs/address_families"
+        },
+        "name": {
+          "$ref": "#/$defs/account_name"
+        },
+        "uuid": {
+          "$ref": "#/$defs/uuid"
+        }
+      }
+    },
+    "reality_protocol": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/protocol_base"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "server", "public_port", "address_families", "name", "uuid", "reality"],
+          "properties": {
+            "id": {
+              "const": 1
+            },
+            "server": {
+              "$ref": "#/$defs/server_address"
+            },
+            "public_port": {
+              "$ref": "#/$defs/port"
+            },
+            "address_families": {
+              "$ref": "#/$defs/address_families"
+            },
+            "name": {
+              "$ref": "#/$defs/account_name"
+            },
+            "uuid": {
+              "$ref": "#/$defs/uuid"
+            },
+            "reality": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["server_name", "target_host", "target_port", "private_key", "public_key", "short_id"],
+              "properties": {
+                "server_name": {
+                  "$ref": "#/$defs/hostname"
+                },
+                "target_host": {
+                  "$ref": "#/$defs/hostname"
+                },
+                "target_port": {
+                  "$ref": "#/$defs/port"
+                },
+                "private_key": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_-]{43}$"
+                },
+                "public_key": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_-]{43}$"
+                },
+                "short_id": {
+                  "type": "string",
+                  "pattern": "^(?:[a-f0-9]{2}){1,8}$"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "websocket_protocol": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/protocol_base"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "server", "public_port", "address_families", "name", "uuid", "websocket"],
+          "properties": {
+            "id": {
+              "const": 21
+            },
+            "server": {
+              "$ref": "#/$defs/server_address"
+            },
+            "public_port": {
+              "$ref": "#/$defs/port"
+            },
+            "address_families": {
+              "$ref": "#/$defs/address_families"
+            },
+            "name": {
+              "$ref": "#/$defs/account_name"
+            },
+            "uuid": {
+              "$ref": "#/$defs/uuid"
+            },
+            "websocket": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["domain", "path"],
+              "properties": {
+                "domain": {
+                  "$ref": "#/$defs/hostname"
+                },
+                "path": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_-]{8,64}$"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

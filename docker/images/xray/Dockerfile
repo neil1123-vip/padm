@@ -59,4 +59,4 @@ USER 10001:10001
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["/usr/local/bin/xray"]
 CMD ["run", "-confdir", "/etc/padm/xray"]
-HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 CMD ["/usr/local/bin/xray", "--version"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 CMD ["/usr/local/bin/xray", "-test", "-confdir", "/etc/padm/xray"]
