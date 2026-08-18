@@ -127,7 +127,7 @@ jobs:
           smoke_ref="${PADM_REGISTRY}/padm-${PADM_IMAGE_NAME}:${IMAGE_TAG}"
           docker buildx bake "${PADM_IMAGE_NAME}" \
             --load \
-            --set "${PADM_IMAGE_NAME}.platforms=${PADM_PLATFORM}" \
+            --set "${PADM_IMAGE_NAME}.platform=${PADM_PLATFORM}" \
             --set "${PADM_IMAGE_NAME}.tags=${smoke_ref}" \
             --set "${PADM_IMAGE_NAME}.args.PADM_VERSION=${PADM_RELEASE_VERSION}"
           bash docker/tests/image-smoke.sh "${smoke_ref}" "${PADM_IMAGE_NAME}"
@@ -191,7 +191,8 @@ jobs:
             --provenance=mode=max \
             --sbom=true \
             --metadata-file "${metadata_file}" \
-            --set "${PADM_IMAGE_NAME}.platforms=linux/amd64,linux/arm64" \
+            --set "${PADM_IMAGE_NAME}.platform=linux/amd64" \
+            --set "${PADM_IMAGE_NAME}.platform=linux/arm64" \
             --set "${PADM_IMAGE_NAME}.tags=${image_ref}" \
             --set "${PADM_IMAGE_NAME}.args.PADM_VERSION=${PADM_RELEASE_VERSION}"
           index_digest=$(jq -r --arg image "${PADM_IMAGE_NAME}" \
