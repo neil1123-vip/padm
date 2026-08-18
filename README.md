@@ -7,6 +7,7 @@
 <p align="center">
   <a href="#快速选择">🚀 快速选择</a> ·
   <a href="#安装">📦 安装</a> ·
+  <a href="#docker-版">🐳 Docker 版</a> ·
   <a href="#协议选择">🧭 协议选择</a> ·
   <a href="#订阅与用户">🔗 订阅与用户</a>
   <br>
@@ -116,6 +117,102 @@ bash install.sh InstallSubscription --domain subscribe.example.com --subscribe-p
 
 订阅发布独立管理自己的 TLS 域名和证书，不会自动使用 Reality entry 或传统 TLS 域名。已有匹配且可用的证书会直接复用；缺少证书时可继续传入上面的 `--tls-ca`、`--dns-api` 和服务商凭据参数完成签发。自定义证书可复用，但需自行续期。
 
+## Docker 版
+
+Docker 版用于把核心、Nginx、订阅和运维任务与宿主系统隔离。它和原生版是两条独立且互斥的入口：原生版使用 `install.sh` / `padm`，Docker 版使用 `install-docker.sh` / `padm-docker`；不会自动混装、迁移或接管另一种部署。
+
+### 安装
+
+Docker 入口只安装并校验 Docker 控制 bundle，不在生产机执行 `docker build`，也不会把 Xray、sing-box、Nginx 或其它依赖安装到宿主机。镜像由本仓库 CI 预构建并发布，首次部署需要再用配置规格生成 Compose 状态：
+
+```bash
+wget -O /root/install-docker.sh "https://raw.githubusercontent.com/neil1123-vip/padm/main/install-docker.sh" && chmod 700 /root/install-docker.sh && /root/install-docker.sh install
+
+# 以 docker/configure.example.json 为字段模板，替换域名、密钥、UUID、token、
+# release manifest 摘要和五个 CI 镜像的 tag@sha256 引用后再执行：
+padm-docker configure --spec /root/padm-docker-config.json
+padm-docker validate
+padm-docker status
+```
+
+需要固定控制脚本版本时，把 `install` 改为 `install --ref <40 位 commit SHA>`；不要把 `latest` 当作生产版本锁。CI Release 同时提供 `release-manifest.json`、`release-manifest.sig`、`release-manifest.sigstore.json` 和 `padm-docker-bundle.tar.gz`，更新时会校验这些资产的签名和摘要。
+
+示例文件中的 digest、密钥和 token 是占位值，不能直接用于生产。生产镜像引用必须使用 CI Release 提供的版本标签和 digest，例如 `ghcr.io/neil1123-vip/padm-xray:3.1.9@sha256:<digest>`；不要使用 `latest`，也不要在主机上手工改成未发布的 tag。
+
+### 五个镜像
+
+五个镜像都由仓库中的 Dockerfile 定义，当前统一以锁定的 Alpine 3.24.1 基础镜像构建；基础 digest、上游版本和架构校验值由 `versions.lock` 锁定，再由 CI 构建 `amd64/arm64` 多架构镜像。一个镜像可以被多个 Compose service 复用，但不同长期职责仍是独立容器。
+
+| 镜像 | 职责 | 宿主集成 |
+| --- | --- | --- |
+| `padm-xray`（`xray`） | Xray-core、Geo 数据和核心配置校验。 | 普通 bridge 容器。 |
+| `padm-sing-box`（`sing-box`） | sing-box、核心配置校验和对应协议运行时。 | 普通 bridge 容器。 |
+| `padm-nginx`（`nginx`） | TLS、WebSocket、反向代理和静态入口。 | 只发布被选中的入口端口。 |
+| `padm-ops`（`ops`） | ACME、订阅控制、Geo/同步等运维任务，按 Compose service 作为长期或一次性进程运行。 | 不持有 Docker Socket。 |
+| `padm-net`（`net`） | WireGuard、Fail2ban、TUN/TProxy 和端口/防火墙集成工具。 | 仅在显式 `net-*` profile 下使用 `NET_ADMIN`、host network 或 `/dev/net/tun`。 |
+
+`net` 的业务工具放在镜像中，但真正的 WireGuard、转发、TUN 和防火墙对象仍属于宿主内核；默认安装不启用这些高权限 profile。普通服务不使用 `privileged`、`SYS_ADMIN` 或 Docker Socket。
+
+### 状态与日常控制
+
+Docker 状态根固定为 `/etc/padm-docker`，原生状态根 `/etc/padm` 不会被 Docker 入口读取或覆盖。常用命令如下：
+
+```bash
+padm-docker status
+padm-docker up
+padm-docker down
+padm-docker restart
+padm-docker logs
+padm-docker validate
+```
+
+证书和 ACME 任务也由同一个宿主控制命令分发到 `ops` 镜像：
+
+```bash
+padm-docker tls install --domain example.com --cert /path/fullchain.pem --key /path/privkey.pem
+padm-docker acme <issue|renew> --domain example.com --email admin@example.com --dns <dns_provider> --credentials /path/credentials
+```
+
+配置变更先生成候选文件、校验端口和 Compose，再备份当前状态并执行健康检查；失败时保留旧配置。Docker 入口安装的控制命令是 `/usr/local/bin/padm-docker`，实际 bundle、配置、数据、密钥、日志和备份分别位于状态根下的 `bundle/`、`config/`、`data/`、`secrets/`、`logs/` 和 `backups/`。
+
+### 更新
+
+更新只接受已签名的 CI Release manifest。默认命令读取最新 Release 的 manifest、Cosign signature、Sigstore bundle 和控制 bundle；也可以显式指定本地或 HTTPS 资产：
+
+```bash
+padm-docker update
+padm-docker update \
+  --manifest <URL|文件> \
+  --signature <URL|文件> \
+  --bundle <URL|文件> \
+  [--control-bundle <URL|文件>]
+```
+
+更新事务依次验签 manifest、预拉取五个固定 digest 镜像、校验当前配置、保存 `backups/update.*` 快照、原子切换镜像引用并运行 Compose health check。拉取、校验、启动或健康检查任一步失败，都会恢复旧配置和旧镜像引用；生产机不会在线编译镜像。需要新版本时，先由 CI 根据新的锁文件构建并发布，再在生产机执行 `padm-docker update`。
+
+### 回滚
+
+```bash
+padm-docker rollback
+```
+
+回滚只使用受管的最近一次 `update.*` 快照，默认退回一个版本；没有有效快照时直接失败，不猜测或拼接任意历史版本。回滚失败会尝试恢复当前版本，并保留备份路径供排障。
+
+### 卸载
+
+```bash
+# 停止并移除 Docker 控制命令；保留配置、数据、备份和镜像
+padm-docker uninstall
+
+# 在保留状态根的前提下，仅删除 deployment 记录中五个精确 digest 镜像
+padm-docker uninstall --remove-images
+
+# 生成最后备份后删除 /etc/padm-docker（不可逆，必须显式确认）
+padm-docker uninstall --purge --confirm PADM-DOCKER-PURGE
+```
+
+普通卸载只清理本项目的 Compose 容器、网络和 CLI 链接，不执行全局 `docker prune`，也不删除其它 Compose project 或用户卷。`--purge` 仅删除带有效 Docker 模式标记的受管状态根；需要保留数据时不要使用它。
+
 ## 系统要求
 
 padm 面向 Linux 服务器运行。代码会识别 Debian、Ubuntu、RHEL/CentOS/AlmaLinux/Rocky/Oracle Linux、Fedora 和 Alpine，并按系统使用 `apt`、`yum` 或 `apk` 安装必要组件。
@@ -127,6 +224,19 @@ padm 面向 Linux 服务器运行。代码会识别 Debian、Ubuntu、RHEL/CentO
 | 基础命令 | 入口下载至少需要 `curl` 或 `wget`；完整包刷新需要 `tar`。 |
 | 常用依赖 | 脚本会按功能安装或使用 `jq`、`nginx`、`acme.sh`、WireGuard tools、Fail2ban 等组件。 |
 | 服务管理 | 核心服务优先使用 systemd；Alpine/OpenRC 路径有专门处理。主控/被控订阅控制服务目前要求 systemd 和 `python3`。 |
+
+### Docker 版要求
+
+| 项目 | 要求 |
+| --- | --- |
+| 操作系统 | Linux；Docker daemon 必须运行 Linux 容器。Windows、macOS 和 Docker Desktop 不在首发支持范围。 |
+| 权限与连接 | root，rootful Docker Engine，本机 rootful Unix socket；不支持 rootless daemon、远程 context 或用户级 socket。 |
+| Compose | Docker Compose v2 插件。 |
+| 架构 | `amd64` 或 `arm64`，主机和 daemon 架构必须一致。 |
+| 主机命令 | `bash` 4+、`docker`、`jq`、`sha256sum`、`tar`，以及 `curl` 或 `wget`；执行签名更新还需要 `cosign`。 |
+| 内核能力 | 普通 profile 不需要额外 capability；WireGuard、Fail2ban、TUN/TProxy 等 `net-*` profile 需要按支持矩阵提供 `NET_ADMIN`、host network 或 `/dev/net/tun`。 |
+
+Docker 版不会自动安装 Docker、修改软件源或安装宿主软件。检测到原生版已安装、正在运行或残留状态时会拒绝安装，请先明确清理原生部署；两种模式不提供隐式迁移。
 
 > [!IMPORTANT]
 > **CentOS / RHEL：** SELinux 处于 Enforcing 时，脚本会提示先手动关闭后再继续。
@@ -148,17 +258,21 @@ padm 主菜单按任务对象分组，一个功能只放在一个主要入口里
 
 ## 运行模型
 
-padm 不是单个超长 Bash 文件，而是“自刷新入口 + 分模块运行时”：
+padm 不是单个超长 Bash 文件，而是“独立入口 + 分模块运行时”：
 
-1. `install.sh` 是唯一入口。它解析参数、处理正式子命令、检查模块完整性，并在需要时下载完整仓库归档。
+1. 原生入口是 `install.sh`，Docker 入口是 `install-docker.sh`；两者分别维护 `/etc/padm` 和 `/etc/padm-docker`，不会互相迁移或混装。
 2. 模块刷新会原子替换 `shell/`、`documents/`、`assets/`、`README.md` 和 `.padm-module-manifest`；失败时尽量恢复旧模块。
 3. `shell/core/bootstrap.sh` 是运行时装配点，按顺序加载平台、运行时、协议、Reality、服务、路由、TLS、订阅、菜单等模块。
 4. 交互菜单和正式子命令共用同一套模块。正式子命令包括 `RenewTLS`、`UpdateGeo`、`SyncSubscriptionGroups`、`SubscriptionControl`、`InstallSubscription`。
-5. 排障时先找实际控制点：入口脚本、模块加载顺序、状态文件、生成配置和校验命令，而不是只看菜单文案。
+5. Docker 控制 bundle 位于 `docker/`，由宿主上的 `padm-docker` 直接调用 Docker CLI 和 Compose；容器不挂载 Docker Socket。
+6. 排障时先找实际控制点：入口脚本、模块加载顺序、状态文件、生成配置和校验命令，而不是只看菜单文案。
 
 | 路径 | 作用 |
 | --- | --- |
 | `install.sh` | 🚪 仓库入口；负责自刷新、参数解析、正式子命令分发和首次模块补齐。 |
+| `install-docker.sh` | 🐳 Docker 独立入口；安装并刷新 Docker 控制 bundle，不构建镜像。 |
+| `padm-docker` | 🎛️ 安装后的 Docker 宿主控制命令；调用固定的 `padm-docker` Compose project。 |
+| `docker/` | 📦 Dockerfile、Compose、manifest、配置合同和生命周期实现。 |
 | `shell/core/` | ⚙️ 平台检测、运行时 helper、协议模板、Reality/TLS/路由/服务/菜单等核心逻辑。 |
 | `shell/subscription/` | 🔗 订阅发布、订阅组状态、用户账号、WireGuard 控制面、远程同步和流量统计。 |
 | `shell/regression/` | 🧪 `framework/` 提供环境、runner 和 registry，`cases/` 单次加载 fixture、stub 与测试函数，`suites/` 只注册 selector、分组和组合。 |
@@ -187,6 +301,16 @@ padm 不是单个超长 Bash 文件，而是“自刷新入口 + 分模块运行
 | `/etc/wireguard/wg-padm.conf` | 🔒 padm 控制面 WireGuard 配置。 |
 | `/etc/padm/reality_entry_host` | 📍 当前 Reality 客户端入口地址。 |
 | `/etc/padm/reality_targets_results.tsv` | 📊 Reality 目标站统一实测结果表。 |
+
+Docker 部署的实际状态源：
+
+| 路径 | 作用 |
+| --- | --- |
+| `/etc/padm-docker/mode` | 🏷️ 固定为 `docker` 的模式标记，用于互斥和卸载保护。 |
+| `/etc/padm-docker/bundle` | 🔗 当前已验证控制 bundle 的原子指针。 |
+| `/etc/padm-docker/deployment.json` | 🧾 当前版本、profiles、端口和五个镜像 digest。 |
+| `/etc/padm-docker/compose.json`、`images.env` | 🐳 当前 Compose 配置和固定镜像引用。 |
+| `/etc/padm-docker/config/`、`data/`、`secrets/`、`backups/` | 💾 配置、运行数据、密钥和更新/卸载备份。 |
 
 公网订阅和服务器间控制面是两套地址体系：
 

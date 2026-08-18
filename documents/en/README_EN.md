@@ -7,6 +7,7 @@
 <p align="center">
   <a href="#quick-choice">🚀 Quick choice</a> ·
   <a href="#installation">📦 Installation</a> ·
+  <a href="#docker-mode">🐳 Docker mode</a> ·
   <a href="#protocol-selection">🧭 Protocols</a> ·
   <a href="#subscriptions-and-users">🔗 Subscriptions</a>
   <br>
@@ -116,6 +117,102 @@ bash install.sh InstallSubscription --domain subscribe.example.com --subscribe-p
 
 Subscription publishing manages its own TLS domain and certificate; it never implicitly uses the Reality entry or the traditional TLS domain. A matching usable certificate is reused. If no certificate exists, pass the same `--tls-ca`, `--dns-api`, and provider credential options shown above to issue one. Custom certificates can be reused but must be renewed externally.
 
+## Docker Mode
+
+Docker mode isolates the cores, Nginx, subscription services, and operations tasks from the host system. It has a separate, mutually exclusive entry path: native mode uses `install.sh` / `padm`, while Docker mode uses `install-docker.sh` / `padm-docker`. Neither mode automatically mixes with, migrates, or takes over the other deployment.
+
+### Installation
+
+The Docker entry installs and verifies the Docker control bundle only. It does not run `docker build` on production hosts or install Xray, sing-box, Nginx, or their dependencies on the host. Images are prebuilt and published by this repository's CI; after the control bundle is installed, generate the Compose state from a configuration spec:
+
+```bash
+wget -O /root/install-docker.sh "https://raw.githubusercontent.com/neil1123-vip/padm/main/install-docker.sh" && chmod 700 /root/install-docker.sh && /root/install-docker.sh install
+
+# Use docker/configure.example.json as the field template. Replace domains,
+# keys, UUIDs, tokens, release metadata, and all five CI tag@sha256 references:
+padm-docker configure --spec /root/padm-docker-config.json
+padm-docker validate
+padm-docker status
+```
+
+To pin the control script version, change `install` to `install --ref <40-character commit SHA>`; do not treat `latest` as a production lock. A CI Release provides `release-manifest.json`, `release-manifest.sig`, `release-manifest.sigstore.json`, and `padm-docker-bundle.tar.gz`; updates verify their signatures and digests.
+
+The example file contains placeholder digests, keys, and tokens and must not be used as-is. Production image references must use the version tag and digest from a CI Release, for example `ghcr.io/neil1123-vip/padm-xray:3.1.9@sha256:<digest>`; do not use `latest` or hand-edit an unpublished tag on the host.
+
+### Five Images
+
+All five images are defined by Dockerfiles in this repository. The current baseline builds them from a locked Alpine 3.24.1 base image; its digest, upstream versions, and architecture checksums are locked in `versions.lock`, then CI builds multi-architecture `amd64/arm64` images. One image may be reused by multiple Compose services, while long-running responsibilities remain separate containers.
+
+| Image | Responsibility | Host integration |
+| --- | --- | --- |
+| `padm-xray` (`xray`) | Xray-core, Geo data, and core configuration validation. | Regular bridge container. |
+| `padm-sing-box` (`sing-box`) | sing-box, configuration validation, and its protocol runtime. | Regular bridge container. |
+| `padm-nginx` (`nginx`) | TLS, WebSocket, reverse proxy, and static entry. | Publishes only the selected entry ports. |
+| `padm-ops` (`ops`) | ACME, subscription control, Geo/sync, and other operations, run as long-lived or one-shot Compose services as appropriate. | No Docker Socket. |
+| `padm-net` (`net`) | WireGuard, Fail2ban, TUN/TProxy, and port/firewall integration tools. | Uses `NET_ADMIN`, host networking, or `/dev/net/tun` only in explicit `net-*` profiles. |
+
+The `net` image contains the feature tools, but WireGuard, forwarding, TUN, and firewall objects still belong to the host kernel. These privileged profiles are disabled by default. Regular services do not use `privileged`, `SYS_ADMIN`, or the Docker Socket.
+
+### State and Daily Control
+
+The Docker state root is fixed at `/etc/padm-docker`; Docker mode never reads or overwrites the native `/etc/padm` state. Common commands are:
+
+```bash
+padm-docker status
+padm-docker up
+padm-docker down
+padm-docker restart
+padm-docker logs
+padm-docker validate
+```
+
+Certificate and ACME tasks are dispatched to the `ops` image by the same host command:
+
+```bash
+padm-docker tls install --domain example.com --cert /path/fullchain.pem --key /path/privkey.pem
+padm-docker acme <issue|renew> --domain example.com --email admin@example.com --dns <dns_provider> --credentials /path/credentials
+```
+
+Configuration changes generate and validate a candidate, check ports and Compose, back up the current state, and then run health checks. A failure leaves the old configuration in place. The installed host command is `/usr/local/bin/padm-docker`; the bundle, configuration, data, secrets, logs, and backups live below the state root in `bundle/`, `config/`, `data/`, `secrets/`, `logs/`, and `backups/`.
+
+### Updates
+
+Updates accept only a signed CI Release manifest. The default command reads the latest Release manifest, Cosign signature, Sigstore bundle, and control bundle; local or HTTPS assets can be supplied explicitly:
+
+```bash
+padm-docker update
+padm-docker update \
+  --manifest <URL|file> \
+  --signature <URL|file> \
+  --bundle <URL|file> \
+  [--control-bundle <URL|file>]
+```
+
+The transaction verifies the manifest, pre-pulls all five digest-pinned images, validates the current configuration, saves a `backups/update.*` snapshot, atomically switches image references, and waits for Compose health checks. A pull, validation, startup, or health-check failure restores the old configuration and image references; production hosts never build images online. To publish a new version, update the lock inputs and let CI publish a Release, then run `padm-docker update` on the production host.
+
+### Rollback
+
+```bash
+padm-docker rollback
+```
+
+Rollback uses only the most recent managed `update.*` snapshot and moves back one version. It fails rather than guessing at an arbitrary historical version when no valid snapshot exists. If rollback itself fails, the command attempts to restore the current version and keeps the backup path for diagnosis.
+
+### Uninstall
+
+```bash
+# Stop and remove the Docker control command; keep state, data, backups, and images
+padm-docker uninstall
+
+# Keep the state root and remove only the five exact digest images recorded by deployment
+padm-docker uninstall --remove-images
+
+# Create a final backup, then delete /etc/padm-docker (irreversible; explicit confirmation required)
+padm-docker uninstall --purge --confirm PADM-DOCKER-PURGE
+```
+
+Normal uninstall removes only this project's Compose containers, network, and CLI link. It does not run a global `docker prune` or delete another Compose project or user volume. `--purge` deletes only the managed state root with a valid Docker mode marker; do not use it when the data must be retained.
+
 ## System Requirements
 
 padm is designed for Linux servers. The code detects Debian, Ubuntu, RHEL/CentOS/AlmaLinux/Rocky/Oracle Linux, Fedora, and Alpine, then uses `apt`, `yum`, or `apk` as appropriate.
@@ -127,6 +224,19 @@ padm is designed for Linux servers. The code detects Debian, Ubuntu, RHEL/CentOS
 | Basic commands | Entry download needs at least `curl` or `wget`; full bundle refresh needs `tar`. |
 | Common dependencies | The script installs or uses `jq`, `nginx`, `acme.sh`, WireGuard tools, Fail2ban, and related tools as features require. |
 | Service management | Core services prefer systemd; Alpine/OpenRC paths are handled separately. The controller/controlled subscription control service currently requires systemd and `python3`. |
+
+### Docker Requirements
+
+| Item | Requirement |
+| --- | --- |
+| Operating system | Linux; the Docker daemon must run Linux containers. Windows, macOS, and Docker Desktop are outside the initial support scope. |
+| Permission and connection | root, a rootful Docker Engine, and the local rootful Unix socket; rootless daemons, remote contexts, and user sockets are unsupported. |
+| Compose | Docker Compose v2 plugin. |
+| Architecture | `amd64` or `arm64`, with matching host and daemon architecture. |
+| Host commands | Bash 4+, `docker`, `jq`, `sha256sum`, `tar`, and either `curl` or `wget`; signed updates also require `cosign`. |
+| Kernel capabilities | The regular profiles need no extra capability. WireGuard, Fail2ban, TUN/TProxy, and other `net-*` profiles require the capability, host networking, or `/dev/net/tun` specified by the support matrix. |
+
+Docker mode does not install Docker, change software sources, or install host packages. If a native installation is active, present, or leaves ambiguous residue, the Docker entry refuses to proceed; there is no implicit migration between modes.
 
 > [!IMPORTANT]
 > **CentOS / RHEL:** If SELinux is Enforcing, the script asks you to disable it manually before continuing.
@@ -148,17 +258,21 @@ padm groups the main menu by task object. Each feature has one primary home:
 
 ## Runtime Model
 
-padm is not one giant Bash file. It is a self-refreshing entry script plus a modular runtime:
+padm is not one giant Bash file. It is a pair of independent entry paths plus a modular runtime:
 
-1. `install.sh` is the only entrypoint. It parses arguments, handles formal subcommands, checks module integrity, and downloads the full repository archive when needed.
+1. The native entry is `install.sh`, and the Docker entry is `install-docker.sh`; they maintain `/etc/padm` and `/etc/padm-docker` separately and never migrate or mix deployments.
 2. Module refresh atomically replaces `shell/`, `documents/`, `assets/`, `README.md`, and `.padm-module-manifest`; on failure it tries to restore the previous module bundle.
 3. `shell/core/bootstrap.sh` assembles the runtime by loading platform, runtime, protocol, Reality, service, routing, TLS, subscription, and menu modules.
 4. The interactive menu and formal subcommands share the same module set. Formal subcommands include `RenewTLS`, `UpdateGeo`, `SyncSubscriptionGroups`, `SubscriptionControl`, and `InstallSubscription`.
-5. For troubleshooting, identify the real control point first: entry script, module load order, state file, generated config, and validation command, not just menu copy.
+5. The Docker control bundle lives under `docker/`; the host-side `padm-docker` calls Docker CLI and Compose directly, and containers never mount the Docker Socket.
+6. For troubleshooting, identify the real control point first: entry script, module load order, state file, generated config, and validation command, not just menu copy.
 
 | Path | Purpose |
 | --- | --- |
 | `install.sh` | 🚪 Repository entry script; handles self-refresh, argument parsing, formal subcommands, and first-run module bootstrap. |
+| `install-docker.sh` | 🐳 Independent Docker entry; installs and refreshes the Docker control bundle without building images. |
+| `padm-docker` | 🎛️ Installed host-side Docker command; controls the fixed `padm-docker` Compose project. |
+| `docker/` | 📦 Dockerfiles, Compose, manifests, configuration contracts, and lifecycle implementation. |
 | `shell/core/` | ⚙️ Platform detection, runtime helpers, protocol templates, Reality/TLS/routing/service/menu logic. |
 | `shell/subscription/` | 🔗 Subscription publishing, subscription-group state, user accounts, WireGuard control plane, remote sync, and traffic accounting. |
 | `shell/regression/` | 🧪 `framework/` provides the environment, runners, and registry; `cases/` loads fixtures, stubs, and test functions once; `suites/` only registers selectors, groups, and compositions. |
@@ -187,6 +301,16 @@ These paths are the actual state sources padm reads, writes, and validates. Star
 | `/etc/wireguard/wg-padm.conf` | 🔒 padm control-plane WireGuard config. |
 | `/etc/padm/reality_entry_host` | 📍 Current Reality client entry address. |
 | `/etc/padm/reality_targets_results.tsv` | 📊 Unified Reality target measurement result table. |
+
+Docker deployment state sources:
+
+| Path | Purpose |
+| --- | --- |
+| `/etc/padm-docker/mode` | 🏷️ `docker` mode marker used for mutual exclusion and uninstall protection. |
+| `/etc/padm-docker/bundle` | 🔗 Atomic pointer to the currently verified control bundle. |
+| `/etc/padm-docker/deployment.json` | 🧾 Current release, profiles, ports, and five image digests. |
+| `/etc/padm-docker/compose.json`, `images.env` | 🐳 Current Compose configuration and pinned image references. |
+| `/etc/padm-docker/config/`, `data/`, `secrets/`, `backups/` | 💾 Configuration, runtime data, secrets, and update/uninstall backups. |
 
 Public subscriptions and server-to-server control use different address families:
 
