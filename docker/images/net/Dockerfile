@@ -24,7 +24,7 @@ RUN set -eux; \
         "iptables=${IPTABLES_VERSION}" \
         "nftables=${NFTABLES_VERSION}" \
         "wireguard-tools=${WIREGUARD_TOOLS_VERSION}"; \
-    mkdir -p /etc/padm/net /var/lib/padm/net
+    mkdir -p /etc/padm/net /etc/wireguard /var/lib/padm/net
 
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/padm-entrypoint
 

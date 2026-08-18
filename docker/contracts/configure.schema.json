@@ -4,7 +4,7 @@
   "title": "padm Docker configuration request",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "release", "core", "tls", "subscription", "images"],
+  "required": ["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"],
   "properties": {
     "schema_version": {
       "const": 1
@@ -102,6 +102,19 @@
           "$ref": "#/$defs/image_reference"
         }
       }
+    },
+    "host_integrations": {
+      "type": "array",
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "oneOf": [
+          {"$ref": "#/$defs/wireguard_integration"},
+          {"$ref": "#/$defs/fail2ban_integration"},
+          {"$ref": "#/$defs/tun_integration"},
+          {"$ref": "#/$defs/tproxy_integration"}
+        ]
+      }
     }
   },
   "$defs": {
@@ -159,6 +172,129 @@
     "image_reference": {
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9._/:@-]*:[A-Za-z0-9._-]+@sha256:[a-f0-9]{64}$"
+    },
+    "integration_base": {
+      "type": "object",
+      "required": ["type", "profile", "firewall_rules", "devices", "schedules", "settings"],
+      "properties": {
+        "type": {"type": "string"},
+        "profile": {"type": "string", "pattern": "^net-[a-z0-9][a-z0-9_-]*$"},
+        "firewall_rules": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/safe_name"}},
+        "devices": {"type": "array", "maxItems": 4, "items": {"$ref": "#/$defs/safe_name"}},
+        "schedules": {"type": "array", "maxItems": 4, "items": {"$ref": "#/$defs/safe_name"}},
+        "settings": {"type": "object"}
+      }
+    },
+    "safe_name": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:/-]{1,128}$"
+    },
+    "wireguard_integration": {
+      "allOf": [
+        {"$ref": "#/$defs/integration_base"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "profile", "firewall_rules", "devices", "schedules", "settings"],
+          "properties": {
+            "type": {"const": "wireguard"},
+            "profile": {"const": "net-wireguard"},
+            "firewall_rules": {"const": []},
+            "devices": {"const": ["wg-padm"]},
+            "schedules": {"const": []},
+            "settings": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["config_file", "interface"],
+              "properties": {
+                "config_file": {"const": "wg-padm.conf"},
+                "interface": {"const": "wg-padm"}
+              }
+            }
+          }
+        }
+      ]
+    },
+    "fail2ban_integration": {
+      "allOf": [
+        {"$ref": "#/$defs/integration_base"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "profile", "firewall_rules", "devices", "schedules", "settings"],
+          "properties": {
+            "type": {"const": "fail2ban"},
+            "profile": {"const": "net-fail2ban"},
+            "firewall_rules": {"const": ["DOCKER-USER"]},
+            "devices": {"const": []},
+            "schedules": {"const": []},
+            "settings": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["log_file", "ports", "max_retry", "find_time", "ban_time"],
+              "properties": {
+                "log_file": {"const": "access.log"},
+                "ports": {"type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": {"$ref": "#/$defs/port"}},
+                "max_retry": {"type": "integer", "minimum": 1, "maximum": 20},
+                "find_time": {"type": "integer", "minimum": 60, "maximum": 86400},
+                "ban_time": {"type": "integer", "minimum": 60, "maximum": 604800}
+              }
+            }
+          }
+        }
+      ]
+    },
+    "tun_integration": {
+      "allOf": [
+        {"$ref": "#/$defs/integration_base"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "profile", "firewall_rules", "devices", "schedules", "settings"],
+          "properties": {
+            "type": {"const": "tun"},
+            "profile": {"const": "net-transparent"},
+            "firewall_rules": {"const": ["sing-box-auto-redirect"]},
+            "devices": {"const": ["/dev/net/tun"]},
+            "schedules": {"const": []},
+            "settings": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["interface", "address"],
+              "properties": {
+                "interface": {"const": "padm-tun"},
+                "address": {"const": "198.18.0.1/30"}
+              }
+            }
+          }
+        }
+      ]
+    },
+    "tproxy_integration": {
+      "allOf": [
+        {"$ref": "#/$defs/integration_base"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "profile", "firewall_rules", "devices", "schedules", "settings"],
+          "properties": {
+            "type": {"const": "tproxy"},
+            "profile": {"const": "net-transparent"},
+            "firewall_rules": {"const": ["padm-tproxy"]},
+            "devices": {"const": []},
+            "schedules": {"const": []},
+            "settings": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["port", "mark"],
+              "properties": {
+                "port": {"$ref": "#/$defs/port"},
+                "mark": {"type": "integer", "minimum": 1, "maximum": 2147483647}
+              }
+            }
+          }
+        }
+      ]
     },
     "protocol_base": {
       "type": "object",

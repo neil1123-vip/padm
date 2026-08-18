@@ -35,7 +35,7 @@ dockerConfigureSpecValidate() {
         return 1
     }
     jq empty "${schemaFile}" "${matrixFile}" "${specFile}" >/dev/null 2>&1 || {
-        dockerError '配置规格或阶段 3 契约不是有效 JSON'
+        dockerError '配置规格或阶段 4 契约不是有效 JSON'
         return 1
     }
     jq -e --slurpfile matrix "${matrixFile}" '
@@ -51,11 +51,13 @@ dockerConfigureSpecValidate() {
       def families: type == "array" and length >= 1 and length <= 2 and
         (unique | length) == length and all(.[]; . == "ipv4" or . == "ipv6");
       def image: type == "string" and test("^[a-z0-9][a-z0-9._/:@-]*:[A-Za-z0-9._-]+@sha256:[a-f0-9]{64}$");
+      def safe_names($max): type == "array" and length <= $max and
+        (unique | length) == length and all(.[]; type == "string" and test("^[A-Za-z0-9._:/-]{1,128}$"));
       def protocol_base: (.server | server) and (.public_port | port) and
         (.address_families | families) and (.name | name) and (.uuid | uuid);
       . as $request |
       ($matrix[0]) as $features |
-      exact(["schema_version", "release", "core", "tls", "subscription", "images"]) and
+      exact(["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"]) and
       .schema_version == 1 and
       (.release | exact(["version", "manifest_sha256", "signature_identity"]) and
         (.version | type == "string" and length > 0) and
@@ -90,25 +92,71 @@ dockerConfigureSpecValidate() {
         (.token | test("^[A-Za-z0-9_-]{16,128}$"))) and
       (.images | exact(["xray", "sing-box", "nginx", "ops", "net"]) and
         all(.[]; image)) and
+      (.host_integrations | type == "array" and length <= 3 and
+        ([.[].type] | unique | length) == length and
+        ([.[] | select(.type == "tun" or .type == "tproxy")] | length) <= 1) and
+      all(.host_integrations[];
+        exact(["type", "profile", "firewall_rules", "devices", "schedules", "settings"]) and
+        (.firewall_rules | safe_names(16)) and (.devices | safe_names(4)) and
+        (.schedules | safe_names(4)) and
+        if .type == "wireguard" then
+          .profile == "net-wireguard" and .firewall_rules == [] and
+          .devices == ["wg-padm"] and .schedules == [] and
+          (.settings | exact(["config_file", "interface"]) and
+            .config_file == "wg-padm.conf" and .interface == "wg-padm")
+        elif .type == "fail2ban" then
+          .profile == "net-fail2ban" and .firewall_rules == ["DOCKER-USER"] and
+          .devices == [] and .schedules == [] and
+          (.settings | exact(["log_file", "ports", "max_retry", "find_time", "ban_time"]) and
+            .log_file == "access.log" and
+            (.ports | type == "array" and length >= 1 and length <= 16 and
+              (unique | length) == length and all(.[]; port)) and
+            (.max_retry | type == "number" and floor == . and . >= 1 and . <= 20) and
+            (.find_time | type == "number" and floor == . and . >= 60 and . <= 86400) and
+            (.ban_time | type == "number" and floor == . and . >= 60 and . <= 604800))
+        elif .type == "tun" then
+          .profile == "net-transparent" and
+          .firewall_rules == ["sing-box-auto-redirect"] and
+          .devices == ["/dev/net/tun"] and .schedules == [] and
+          (.settings | exact(["interface", "address"]) and
+            .interface == "padm-tun" and .address == "198.18.0.1/30")
+        elif .type == "tproxy" then
+          .profile == "net-transparent" and .firewall_rules == ["padm-tproxy"] and
+          .devices == [] and .schedules == [] and
+          (.settings | exact(["port", "mark"]) and (.port | port) and
+            (.mark | type == "number" and floor == . and . >= 1 and . <= 2147483647))
+        else false end) and
       if any(.core.protocols[]; .id == 21) then
         .core.type == "xray" and .tls != null and
         all(.core.protocols[] | select(.id == 21); .websocket.domain == $request.tls.domain)
       else
         .tls == null and .subscription.enabled == false
       end and
-      if .subscription.enabled then any(.core.protocols[]; .id == 21) else true end
+      if .subscription.enabled then any(.core.protocols[]; .id == 21) else true end and
+      if any(.host_integrations[]; .type == "fail2ban") then
+        any(.core.protocols[]; .id == 21) and
+        all(.host_integrations[] | select(.type == "fail2ban") | .settings.ports[];
+          . as $port | any($request.core.protocols[]; .id == 21 and .public_port == $port))
+      else true end and
+      if any(.host_integrations[]; .type == "tun") then .core.type == "sing-box" else true end and
+      if any(.host_integrations[]; .type == "tun" or .type == "tproxy") then
+        all(.core.protocols[]; .id != 21)
+      else true end and
+      all(.host_integrations[] | select(.type == "tproxy");
+        .settings.port as $port | all($request.core.protocols[]; .public_port != $port))
     ' "${specFile}" >/dev/null 2>&1 || {
-        dockerError '配置规格不满足阶段 3 schema、支持矩阵或拓扑约束'
+        dockerError '配置规格不满足阶段 4 schema、支持矩阵或拓扑约束'
         return 1
     }
 }
 
 dockerCurrentOwnsPort() {
-    local root port
+    local root port transport=${2:-tcp}
     root=$(dockerInstallRoot) || return 1
     port=$1
     [[ -f "${root}/deployment.json" && ! -L "${root}/deployment.json" ]] || return 1
-    jq -e --argjson port "${port}" 'any(.listeners[]?; .public_port == $port)' \
+    jq -e --argjson port "${port}" --arg transport "${transport}" \
+        'any(.listeners[]?; .public_port == $port and .transport == $transport)' \
         "${root}/deployment.json" >/dev/null 2>&1
 }
 
@@ -122,20 +170,47 @@ dockerTcpPortIsListening() {
 }
 
 dockerConfigurePortsAvailable() {
-    local specFile=$1 port projects
-    while IFS= read -r port; do
-        dockerCurrentOwnsPort "${port}" && continue
-        if dockerTcpPortIsListening "${port}"; then
-            dockerError "宿主 TCP 端口已被占用: ${port}"
+    local specFile=$1 port transport projects wireguardPort key
+    local -A desiredPorts=()
+    while IFS='|' read -r port transport; do
+        key="${port}|${transport}"
+        if [[ -n "${desiredPorts[${key}]+x}" ]]; then
+            dockerError "配置内重复使用 ${transport^^} 端口: ${port}"
             return 1
         fi
-        projects=$(docker ps --filter "publish=${port}" \
+        desiredPorts[${key}]=1
+        dockerCurrentOwnsPort "${port}" "${transport}" && continue
+        if { [[ "${transport}" == "tcp" ]] && dockerTcpPortIsListening "${port}"; } ||
+            { [[ "${transport}" == "udp" ]] && dockerUdpPortIsListening "${port}"; }; then
+            dockerError "宿主 ${transport^^} 端口已被占用: ${port}"
+            return 1
+        fi
+        projects=$(docker ps --filter "publish=${port}/${transport}" \
             --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null) || return 1
         if [[ -n "${projects//[[:space:]]/}" ]]; then
             dockerError "Docker 已发布宿主端口: ${port}"
             return 1
         fi
-    done < <(jq -r '.core.protocols[].public_port' "${specFile}")
+    done < <(
+        jq -r '
+          ([.core.protocols[] | "\(.public_port)|tcp"] +
+          [.host_integrations[] | select(.type == "tproxy") |
+            "\(.settings.port)|tcp", "\(.settings.port)|udp"]) | unique[]
+        ' "${specFile}"
+        if jq -e 'any(.host_integrations[]; .type == "wireguard")' "${specFile}" >/dev/null; then
+            wireguardPort=$(dockerWireGuardListenPort) || exit 1
+            printf '%s|udp\n' "${wireguardPort}"
+        fi
+    )
+}
+
+dockerUdpPortIsListening() {
+    local port=$1 hexPort
+    hexPort=$(printf '%04X' "${port}") || return 1
+    awk -v port=":${hexPort}" '
+      $2 ~ port "$" && $4 == "07" { found = 1 }
+      END { exit(found ? 0 : 1) }
+    ' /proc/net/udp /proc/net/udp6 2>/dev/null
 }
 
 dockerCreateConfigurationCandidate() {
@@ -144,9 +219,10 @@ dockerCreateConfigurationCandidate() {
     candidate=$(mktemp -d "${root}/.candidate.XXXXXX") || return 1
     dockerManagedPathIsSafe "${root}" "${candidate}" || return 1
     for directory in \
-        config/xray config/sing-box config/nginx \
+        config/xray config/sing-box config/nginx config/net/fail2ban config/net/transparent \
         data/xray data/sing-box data/static data/subscription data/acme \
-        secrets/tls logs/nginx logs/subscription logs/acme; do
+        data/net/wireguard data/net/fail2ban data/net/transparent \
+        secrets/tls secrets/net/wireguard logs/nginx logs/subscription logs/acme; do
         mkdir -p -- "${candidate}/${directory}" || {
             dockerRemoveManagedTree "${root}" "${candidate}" || true
             return 1
@@ -158,13 +234,108 @@ dockerCreateConfigurationCandidate() {
     DOCKER_CONFIG_CANDIDATE=${candidate}
 }
 
+dockerWireGuardConfigFile() {
+    local root
+    root=$(dockerInstallRoot) || return 1
+    printf '%s\n' "${root}/secrets/net/wireguard/wg-padm.conf"
+}
+
+dockerWireGuardListenPort() {
+    local configFile port
+    configFile=$(dockerWireGuardConfigFile) || return 1
+    port=$(awk -F= '
+      /^[[:space:]]*ListenPort[[:space:]]*=/ {
+        value=$2; gsub(/[[:space:]]/, "", value); print value
+      }
+    ' "${configFile}") || return 1
+    [[ "${port}" =~ ^[0-9]+$ && "${port}" -ge 1 && "${port}" -le 65535 ]] || return 1
+    [[ "$(grep -Ec '^[[:space:]]*ListenPort[[:space:]]*=' "${configFile}")" == "1" ]] || return 1
+    printf '%s\n' "${port}"
+}
+
+dockerHostIntegrationInputsValidate() {
+    local specFile=$1 configFile
+    jq -e 'any(.host_integrations[]; .type == "wireguard")' "${specFile}" >/dev/null || return 0
+    configFile=$(dockerWireGuardConfigFile) || return 1
+    [[ -f "${configFile}" && ! -L "${configFile}" && -O "${configFile}" ]] &&
+        dockerPrivateFileIsRestricted "${configFile}" || {
+        dockerError "WireGuard 配置必须是 root 持有且组/其他用户无权限的普通文件: ${configFile}"
+        return 1
+    }
+    if grep -Eiq '^[[:space:]]*(PreUp|PostUp|PreDown|PostDown|SaveConfig|DNS)[[:space:]]*=' "${configFile}" ||
+        [[ "$(grep -Ec '^[[:space:]]*\[Interface\][[:space:]]*$' "${configFile}")" != "1" ]] ||
+        [[ "$(grep -Ec '^[[:space:]]*PrivateKey[[:space:]]*=' "${configFile}")" != "1" ]] ||
+        ! dockerWireGuardListenPort >/dev/null; then
+        dockerError 'WireGuard 配置无效，或包含不允许在容器中执行的 hook/DNS/SaveConfig'
+        return 1
+    fi
+}
+
+dockerStageHostIntegrationFiles() {
+    local specFile=$1 candidate=$2 configFile
+    jq -e 'any(.host_integrations[]; .type == "wireguard")' "${specFile}" >/dev/null || return 0
+    configFile=$(dockerWireGuardConfigFile) || return 1
+    cp -- "${configFile}" "${candidate}/secrets/net/wireguard/wg-padm.conf" &&
+        chmod 0600 "${candidate}/secrets/net/wireguard/wg-padm.conf"
+}
+
+dockerGenerateFail2banConfig() {
+    local specFile=$1 candidate=$2 ports maxRetry findTime banTime
+    jq -e 'any(.host_integrations[]; .type == "fail2ban")' "${specFile}" >/dev/null || return 0
+    ports=$(jq -r '.host_integrations[] | select(.type == "fail2ban") | .settings.ports | join(",")' "${specFile}") || return 1
+    maxRetry=$(jq -r '.host_integrations[] | select(.type == "fail2ban") | .settings.max_retry' "${specFile}") || return 1
+    findTime=$(jq -r '.host_integrations[] | select(.type == "fail2ban") | .settings.find_time' "${specFile}") || return 1
+    banTime=$(jq -r '.host_integrations[] | select(.type == "fail2ban") | .settings.ban_time' "${specFile}") || return 1
+    cat >"${candidate}/config/net/fail2ban/padm-nginx.conf" <<'EOF'
+[Definition]
+failregex = ^<HOST> - .* "(GET|POST|HEAD) /(?:\.env(?:\.[^/?"]+)?|\.git|wp-login\.php|wp-admin|phpmyadmin|cgi-bin|manager/html|actuator|boaform)(?:/[^ ?"]*)?(?:\?[^ "]*)? HTTP/[^"]*" (40[34]|444)\b
+ignoreregex =
+EOF
+    cat >"${candidate}/config/net/fail2ban/padm-docker-user.conf" <<'EOF'
+[INCLUDES]
+before = iptables-common.conf
+
+[Definition]
+actionstart = <iptables> -N padm-f2b
+              <iptables> -I DOCKER-USER 1 -p <protocol> -m conntrack --ctstate NEW --ctorigdstport <port> -j padm-f2b
+actionstop = <iptables> -D DOCKER-USER -p <protocol> -m conntrack --ctstate NEW --ctorigdstport <port> -j padm-f2b
+             <iptables> -F padm-f2b
+             <iptables> -X padm-f2b
+actioncheck = <iptables> -n -L padm-f2b
+actionban = <iptables> -I padm-f2b 1 -s <ip> -j DROP
+actionunban = <iptables> -D padm-f2b -s <ip> -j DROP
+EOF
+    cat >"${candidate}/config/net/fail2ban/padm.local" <<EOF
+[DEFAULT]
+backend = polling
+bantime = ${banTime}
+findtime = ${findTime}
+maxretry = ${maxRetry}
+
+[padm-nginx]
+enabled = true
+filter = padm-nginx
+logpath = /var/log/padm/nginx/access.log
+port = ${ports}
+action = padm-docker-user[port="${ports}", protocol=tcp]
+EOF
+    cat >"${candidate}/config/net/fail2ban/fail2ban.local" <<'EOF'
+[Definition]
+logtarget = STDOUT
+socket = /run/fail2ban/fail2ban.sock
+pidfile = /run/fail2ban/fail2ban.pid
+dbfile = /var/lib/padm/net/fail2ban.sqlite3
+EOF
+    : >"${candidate}/logs/nginx/access.log"
+}
+
 dockerGenerateXrayConfig() {
     local specFile=$1 target=$2
     jq -n --slurpfile request "${specFile}" '
       $request[0] as $r |
       {
         log: {loglevel: "warning"},
-        inbounds: [
+        inbounds: ([
           $r.core.protocols[] |
           if .id == 1 then {
             listen: "0.0.0.0",
@@ -203,7 +374,19 @@ dockerGenerateXrayConfig() {
               wsSettings: {path: "/\(.websocket.path)ws"}
             }
           } else empty end
-        ],
+        ] + [
+          $r.host_integrations[] |
+          select(.type == "tproxy") |
+          {
+            listen: "0.0.0.0",
+            port: .settings.port,
+            protocol: "dokodemo-door",
+            tag: "tproxy-in",
+            settings: {network: "tcp,udp", followRedirect: true},
+            streamSettings: {sockopt: {tproxy: "tproxy"}},
+            sniffing: {enabled: true, destOverride: ["http", "tls", "quic"], routeOnly: true}
+          }
+        ]),
         outbounds: [
           {protocol: "freedom", tag: "direct"},
           {protocol: "blackhole", tag: "blocked"}
@@ -218,7 +401,7 @@ dockerGenerateSingBoxConfig() {
       $request[0] as $r |
       {
         log: {disabled: false, level: "warn", timestamp: true},
-        inbounds: [
+        inbounds: ([
           $r.core.protocols[] |
           {
             type: "vless",
@@ -237,7 +420,24 @@ dockerGenerateSingBoxConfig() {
               }
             }
           }
-        ],
+        ] + [
+          $r.host_integrations[] |
+          if .type == "tun" then {
+            type: "tun",
+            tag: "tun-in",
+            interface_name: .settings.interface,
+            address: [.settings.address],
+            auto_route: true,
+            auto_redirect: true,
+            strict_route: true,
+            stack: "system"
+          } elif .type == "tproxy" then {
+            type: "tproxy",
+            tag: "tproxy-in",
+            listen: "0.0.0.0",
+            listen_port: .settings.port
+          } else empty end
+        ]),
         outbounds: [{type: "direct", tag: "direct"}],
         route: {final: "direct", auto_detect_interface: true}
       }
@@ -261,12 +461,13 @@ dockerStageTlsFiles() {
 }
 
 dockerGenerateNginxConfig() {
-    local specFile=$1 target=$2 domain path token subscriptionEnabled
+    local specFile=$1 target=$2 domain path token subscriptionEnabled fail2banEnabled
     jq -e 'any(.core.protocols[]; .id == 21)' "${specFile}" >/dev/null || return 0
     domain=$(jq -r '.tls.domain' "${specFile}") || return 1
     path=$(jq -r '.core.protocols[] | select(.id == 21) | .websocket.path' "${specFile}") || return 1
     token=$(jq -r '.subscription.token' "${specFile}") || return 1
     subscriptionEnabled=$(jq -r '.subscription.enabled' "${specFile}") || return 1
+    fail2banEnabled=$(jq -r 'any(.host_integrations[]; .type == "fail2ban")' "${specFile}") || return 1
     cat >"${target}" <<EOF
 server {
     listen 8080;
@@ -288,7 +489,11 @@ server {
     ssl_certificate /etc/padm/secrets/tls/${domain}.crt;
     ssl_certificate_key /etc/padm/secrets/tls/${domain}.key;
     ssl_protocols TLSv1.2 TLSv1.3;
-
+EOF
+    if [[ "${fail2banEnabled}" == "true" ]]; then
+        printf '    access_log /var/log/nginx/access.log combined;\n\n' >>"${target}" || return 1
+    fi
+    cat >>"${target}" <<EOF
     location = /${path}ws {
         proxy_pass http://xray:${PADM_DOCKER_WS_BACKEND_PORT};
         proxy_http_version 1.1;
@@ -325,7 +530,7 @@ dockerGenerateSubscription() {
 }
 
 dockerGenerateImagesEnv() {
-    local specFile=$1 target=$2 rootValue=$3 key jsonKey value
+    local specFile=$1 target=$2 rootValue=$3 netRootValue=${4:-$3} key jsonKey value
     while IFS='|' read -r key jsonKey; do
         value=$(jq -r --arg key "${jsonKey}" '.images[$key]' "${specFile}") || return 1
         printf '%s=%s\n' "${key}" "${value}" >>"${target}" || return 1
@@ -337,6 +542,7 @@ PADM_OPS_IMAGE|ops
 PADM_NET_IMAGE|net
 EOF
     printf 'PADM_DOCKER_ROOT=%s\n' "${rootValue}" >>"${target}"
+    printf 'PADM_NET_ROOT=%s\n' "${netRootValue}" >>"${target}"
 }
 
 dockerGenerateCompose() {
@@ -365,6 +571,12 @@ dockerGenerateCompose() {
         target: $target,
         read_only: $readonly
       }];
+      def net_mounts($name; $target; $readonly): [{
+        type: "bind",
+        source: "${PADM_NET_ROOT}/\($name)",
+        target: $target,
+        read_only: $readonly
+      }];
       def ports($protocol; $containerPort): [
         $protocol.address_families[] |
         if . == "ipv4" then "0.0.0.0:\($protocol.public_port):\($containerPort)/tcp"
@@ -372,6 +584,11 @@ dockerGenerateCompose() {
       ];
       ($r.core.protocols | map(select(.id == 1))) as $direct |
       ($r.core.protocols | map(select(.id == 21))) as $websocket |
+      ($r.host_integrations | map(select(.type == "wireguard"))) as $wireguard |
+      ($r.host_integrations | map(select(.type == "fail2ban"))) as $fail2ban |
+      ($r.host_integrations | map(select(.type == "tun"))) as $tun |
+      ($r.host_integrations | map(select(.type == "tproxy"))) as $tproxy |
+      (($tun | length) + ($tproxy | length) == 1) as $transparent |
       ({
         name: "padm-docker",
         services: {},
@@ -411,6 +628,18 @@ dockerGenerateCompose() {
             }
           })
         end
+      | if $transparent then
+          .services[$r.core.type].profiles += ["net-transparent"]
+          | .services[$r.core.type].network_mode = "host"
+          | .services[$r.core.type].user = "0:0"
+          | .services[$r.core.type].cap_add = ["NET_ADMIN"]
+          | del(.services[$r.core.type].ports)
+          | if ($tun | length) == 1 then
+              .services[$r.core.type].devices = [{
+                source: "/dev/net/tun", target: "/dev/net/tun", permissions: "rwm"
+              }]
+            else . end
+        else . end
       | if ($websocket | length) == 1 then
           .services.nginx = (defaults + {
             image: "${PADM_NGINX_IMAGE:?PADM_NGINX_IMAGE is required}",
@@ -450,12 +679,82 @@ dockerGenerateCompose() {
             mounts("secrets"; "/etc/padm/secrets"; true)),
           tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=16m"]
         })
+      | if ($wireguard | length) == 1 then
+          .services["net-wireguard"] = (defaults + {
+            image: "${PADM_NET_IMAGE:?PADM_NET_IMAGE is required}",
+            profiles: ["net-wireguard"],
+            command: ["wireguard", "/etc/wireguard/wg-padm.conf", "wg-padm"],
+            network_mode: "host",
+            cap_add: ["NET_ADMIN"],
+            labels: labels("net-wireguard"),
+            volumes: (net_mounts("secrets/net/wireguard/wg-padm.conf"; "/etc/wireguard/wg-padm.conf"; true) +
+              net_mounts("data/net/wireguard"; "/var/lib/padm/net"; false)),
+            tmpfs: ["/run:rw,nosuid,nodev,size=16m", "/tmp:rw,noexec,nosuid,nodev,size=16m"],
+            healthcheck: {
+              test: ["CMD", "/usr/local/bin/padm-entrypoint", "wireguard-health", "wg-padm"],
+              interval: "30s", timeout: "5s", start_period: "5s", retries: 3
+            }
+          })
+        else . end
+      | if ($fail2ban | length) == 1 then
+          .services["net-fail2ban"] = (defaults + {
+            image: "${PADM_NET_IMAGE:?PADM_NET_IMAGE is required}",
+            profiles: ["net-fail2ban"],
+            command: ["fail2ban", ($fail2ban[0].settings.ports | join(","))],
+            network_mode: "host",
+            cap_add: ["NET_ADMIN"],
+            labels: labels("net-fail2ban"),
+            depends_on: {nginx: {condition: "service_started"}},
+            volumes: (net_mounts("config/net/fail2ban/padm.local"; "/etc/fail2ban/jail.d/padm.local"; true) +
+              net_mounts("config/net/fail2ban/fail2ban.local"; "/etc/fail2ban/fail2ban.local"; true) +
+              net_mounts("config/net/fail2ban/padm-nginx.conf"; "/etc/fail2ban/filter.d/padm-nginx.conf"; true) +
+              net_mounts("config/net/fail2ban/padm-docker-user.conf"; "/etc/fail2ban/action.d/padm-docker-user.conf"; true) +
+              net_mounts("logs/nginx"; "/var/log/padm/nginx"; true) +
+              net_mounts("data/net/fail2ban"; "/var/lib/padm/net"; false)),
+            tmpfs: ["/run:rw,nosuid,nodev,size=16m", "/tmp:rw,noexec,nosuid,nodev,size=16m"],
+            healthcheck: {
+              test: ["CMD", "/usr/local/bin/padm-entrypoint", "fail2ban-health"],
+              interval: "30s", timeout: "5s", start_period: "5s", retries: 3
+            }
+          })
+        else . end
+      | if ($tproxy | length) == 1 then
+          .services["net-transparent"] = (defaults + {
+            image: "${PADM_NET_IMAGE:?PADM_NET_IMAGE is required}",
+            profiles: ["net-transparent"],
+            command: ["tproxy", ($tproxy[0].settings.port | tostring), ($tproxy[0].settings.mark | tostring)],
+            network_mode: "host",
+            cap_add: ["NET_ADMIN"],
+            labels: labels("net-transparent"),
+            depends_on: {($r.core.type): {condition: "service_healthy"}},
+            volumes: net_mounts("data/net/transparent"; "/var/lib/padm/net"; false),
+            tmpfs: ["/run:rw,nosuid,nodev,size=16m", "/tmp:rw,noexec,nosuid,nodev,size=16m"],
+            healthcheck: {
+              test: ["CMD", "/usr/local/bin/padm-entrypoint", "tproxy-health",
+                ($tproxy[0].settings.port | tostring), ($tproxy[0].settings.mark | tostring)],
+              interval: "30s", timeout: "5s", start_period: "5s", retries: 3
+            }
+          })
+        else . end
+      | if ($tun | length) == 1 then
+          .services["net-tun-check"] = (defaults + {
+            image: "${PADM_NET_IMAGE:?PADM_NET_IMAGE is required}",
+            profiles: ["net-check"],
+            command: ["idle"],
+            restart: "no",
+            network_mode: "host",
+            cap_add: ["NET_ADMIN"],
+            devices: [{source: "/dev/net/tun", target: "/dev/net/tun", permissions: "rwm"}],
+            labels: labels("net-tun-check"),
+            tmpfs: ["/run:rw,nosuid,nodev,size=16m", "/tmp:rw,noexec,nosuid,nodev,size=16m"]
+          })
+        else . end
       )
     ' >"${target}"
 }
 
 dockerGenerateDeployment() {
-    local specFile=$1 target=$2 bundlePath bundleVersion previous=
+    local specFile=$1 target=$2 bundlePath bundleVersion previous= wireguardPort=0
     local root
     bundlePath=$(dockerCurrentBundlePath) || return 1
     bundleVersion=$(<"${bundlePath}/${PADM_DOCKER_BUNDLE_REF}") || return 1
@@ -463,13 +762,18 @@ dockerGenerateDeployment() {
     if [[ -f "${root}/deployment.json" && ! -L "${root}/deployment.json" ]]; then
         previous=$(jq -r '.manifest.sha256 // empty' "${root}/deployment.json" 2>/dev/null || true)
     fi
-    jq -n --slurpfile request "${specFile}" --arg bundle "${bundleVersion}" --arg previous "${previous}" '
+    if jq -e 'any(.host_integrations[]; .type == "wireguard")' "${specFile}" >/dev/null; then
+        wireguardPort=$(dockerWireGuardListenPort) || return 1
+    fi
+    jq -n --slurpfile request "${specFile}" --arg bundle "${bundleVersion}" \
+        --arg previous "${previous}" --argjson wireguardPort "${wireguardPort}" '
       $request[0] as $r |
       def digest: capture("@(?<value>sha256:[a-f0-9]{64})$").value;
       def profiles:
         ([if $r.core.type == "xray" then "core-xray" else "core-sing-box" end] +
         [if any($r.core.protocols[]; .id == 21) then "nginx" else empty end] +
-        [if $r.subscription.enabled then "subscription" else empty end]);
+        [if $r.subscription.enabled then "subscription" else empty end] +
+        [$r.host_integrations[].profile]);
       {
         schema_version: 1,
         mode: "docker",
@@ -490,6 +794,18 @@ dockerGenerateDeployment() {
             transport: "tcp",
             address_families: .address_families
           }
+        ] + [
+          $r.host_integrations[] |
+          if .type == "wireguard" then {
+            service: "net-wireguard", public_port: $wireguardPort,
+            container_port: $wireguardPort, transport: "udp",
+            address_families: ["ipv4", "ipv6"]
+          } elif .type == "tproxy" then
+            ({service: $r.core.type, public_port: .settings.port,
+              container_port: .settings.port, transport: "tcp", address_families: ["ipv4"]}),
+            ({service: $r.core.type, public_port: .settings.port,
+              container_port: .settings.port, transport: "udp", address_families: ["ipv4"]})
+          else empty end
         ],
         images: {
           xray: {index_digest: ($r.images.xray | digest)},
@@ -500,13 +816,16 @@ dockerGenerateDeployment() {
         },
         formats: {compose: 1, config: 1, data: 1},
         previous_manifest_sha256: (if $previous == "" then null else $previous end),
-        host_integrations: []
+        host_integrations: [$r.host_integrations[] | {
+          type, profile, firewall_rules, devices, schedules, settings
+        }]
       }
     ' >"${target}"
 }
 
 dockerDeploymentFileValidate() {
     jq -e '
+      def exact($keys): type == "object" and ((keys_unsorted | sort) == ($keys | sort));
       type == "object" and .schema_version == 1 and .mode == "docker" and
       .compose.project == "padm-docker" and
       (.compose.profiles | type == "array" and (unique | length) == length) and
@@ -514,10 +833,25 @@ dockerDeploymentFileValidate() {
       (.core.protocol_ids | type == "array" and length >= 1 and (unique | length) == length) and
       (.listeners | type == "array" and length >= 1 and
         all(.[]; (.public_port >= 1 and .public_port <= 65535) and
-          (.container_port >= 1 and .container_port <= 65535) and .transport == "tcp")) and
+          (.container_port >= 1 and .container_port <= 65535) and
+          (.transport == "tcp" or .transport == "udp"))) and
       (.images | keys | sort) == (["xray", "sing-box", "nginx", "ops", "net"] | sort) and
       all(.images[]; .index_digest | test("^sha256:[a-f0-9]{64}$")) and
-      (.host_integrations | length) == 0
+      (.host_integrations | type == "array" and length <= 3 and
+        ([.[].type] | unique | length) == length) and
+      (. as $deployment | all(.host_integrations[];
+        exact(["type", "profile", "firewall_rules", "devices", "schedules", "settings"]) and
+        (.profile as $profile | ($deployment.compose.profiles | index($profile)) != null) and
+        if .type == "wireguard" then
+          .profile == "net-wireguard" and .firewall_rules == [] and .devices == ["wg-padm"] and
+          (.settings.config_file == "wg-padm.conf" and .settings.interface == "wg-padm")
+        elif .type == "fail2ban" then
+          .profile == "net-fail2ban" and .firewall_rules == ["DOCKER-USER"] and .devices == []
+        elif .type == "tun" then
+          .profile == "net-transparent" and .devices == ["/dev/net/tun"]
+        elif .type == "tproxy" then
+          .profile == "net-transparent" and .firewall_rules == ["padm-tproxy"] and .devices == []
+        else false end))
     ' "$1" >/dev/null 2>&1
 }
 
@@ -529,10 +863,15 @@ dockerPrepareCandidatePermissions() {
     find "${candidate}/secrets" -type f -exec chmod 0640 {} + || return 1
     chmod 0640 "${candidate}/deployment.json" "${candidate}/compose.json" \
         "${candidate}/images.env" "${candidate}/images.runtime.env" || return 1
+    if [[ -f "${candidate}/secrets/net/wireguard/wg-padm.conf" ]]; then
+        chmod 0600 "${candidate}/secrets/net/wireguard/wg-padm.conf" || return 1
+    fi
     if [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" != "1" ]]; then
         chown -R "0:${PADM_DOCKER_CONTAINER_GID}" \
             "${candidate}/config" "${candidate}/data/subscription" \
             "${candidate}/logs" "${candidate}/secrets" || return 1
+        chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" \
+            "${candidate}/logs/nginx" || return 1
         for directory in "${candidate}/data/xray" "${candidate}/data/sing-box" "${candidate}/data/acme"; do
             chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" "${directory}" || return 1
         done
@@ -548,6 +887,8 @@ dockerGenerateCandidate() {
     sing-box) dockerGenerateSingBoxConfig "${specFile}" "${candidate}/config/sing-box/config.json" || return 1 ;;
     *) return 1 ;;
     esac
+    dockerStageHostIntegrationFiles "${specFile}" "${candidate}" || return 1
+    dockerGenerateFail2banConfig "${specFile}" "${candidate}" || return 1
     dockerStageTlsFiles "${specFile}" "${candidate}" || return 1
     dockerGenerateNginxConfig "${specFile}" "${candidate}/config/nginx/default.conf" || return 1
     if jq -e '.subscription.enabled == true' "${specFile}" >/dev/null; then
@@ -571,6 +912,53 @@ dockerCandidateCompose() {
         --file "${candidate}/compose.json" --profile '*' "$@"
 }
 
+dockerCurrentOwnsHostIntegration() {
+    local type=$1 root
+    root=$(dockerInstallRoot) || return 1
+    [[ -f "${root}/deployment.json" && ! -L "${root}/deployment.json" ]] || return 1
+    jq -e --arg type "${type}" 'any(.host_integrations[]?; .type == $type)' \
+        "${root}/deployment.json" >/dev/null 2>&1
+}
+
+dockerValidateHostIntegrations() {
+    local specFile=$1 candidate=$2 ownership port mark ports
+    if jq -e 'any(.host_integrations[]; .type == "wireguard")' "${specFile}" >/dev/null; then
+        ownership=unowned
+        dockerCurrentOwnsHostIntegration wireguard && ownership=owned
+        dockerCandidateCompose "${candidate}" run --rm --no-deps net-wireguard \
+            preflight wireguard /etc/wireguard/wg-padm.conf wg-padm "${ownership}" >/dev/null || {
+            dockerError 'WireGuard 内核、配置或接口前置检查失败'
+            return 1
+        }
+    fi
+    if jq -e 'any(.host_integrations[]; .type == "fail2ban")' "${specFile}" >/dev/null; then
+        ports=$(jq -r '.host_integrations[] | select(.type == "fail2ban") | .settings.ports | join(",")' "${specFile}") || return 1
+        dockerCandidateCompose "${candidate}" run --rm --no-deps net-fail2ban \
+            preflight fail2ban "${ports}" >/dev/null || {
+            dockerError 'Fail2ban 配置、DOCKER-USER 链或日志前置检查失败'
+            return 1
+        }
+    fi
+    if jq -e 'any(.host_integrations[]; .type == "tun")' "${specFile}" >/dev/null; then
+        dockerCandidateCompose "${candidate}" run --rm --no-deps net-tun-check \
+            preflight tun >/dev/null || {
+            dockerError 'TUN 设备或内核前置检查失败'
+            return 1
+        }
+    fi
+    if jq -e 'any(.host_integrations[]; .type == "tproxy")' "${specFile}" >/dev/null; then
+        port=$(jq -r '.host_integrations[] | select(.type == "tproxy") | .settings.port' "${specFile}") || return 1
+        mark=$(jq -r '.host_integrations[] | select(.type == "tproxy") | .settings.mark' "${specFile}") || return 1
+        ownership=unowned
+        dockerCurrentOwnsHostIntegration tproxy && ownership=owned
+        dockerCandidateCompose "${candidate}" run --rm --no-deps net-transparent \
+            preflight tproxy "${port}" "${mark}" "${ownership}" >/dev/null || {
+            dockerError 'TProxy 转发、路由或防火墙前置检查失败'
+            return 1
+        }
+    fi
+}
+
 dockerValidateCandidate() {
     local specFile=$1 candidate=$2 core domain jsonFile
     while IFS= read -r jsonFile; do
@@ -592,6 +980,7 @@ dockerValidateCandidate() {
         dockerError '候选 Compose 配置校验失败'
         return 1
     }
+    dockerValidateHostIntegrations "${specFile}" "${candidate}" || return 1
     core=$(jq -r '.core.type' "${specFile}") || return 1
     case "${core}" in
     xray)
@@ -634,7 +1023,7 @@ dockerValidateCandidate() {
 dockerBackupConfiguration() {
     local root backup relative source
     root=$(dockerInstallRoot) || return 1
-    backup=$(mktemp -d "${root}/backups/phase3.XXXXXX") || return 1
+    backup=$(mktemp -d "${root}/backups/configure.XXXXXX") || return 1
     : >"${backup}/present"
     while IFS= read -r relative; do
         source="${root}/${relative}"
@@ -651,6 +1040,7 @@ compose.json
 config/xray
 config/sing-box
 config/nginx
+config/net
 data/subscription
 EOF
     chmod -R go-rwx "${backup}" || return 1
@@ -678,6 +1068,7 @@ compose.json
 config/xray
 config/sing-box
 config/nginx
+config/net
 data/subscription
 EOF
 }
@@ -691,7 +1082,7 @@ dockerInstallCandidate() {
         cp -- "${backup}/deployment.json" "${root}/deployment.previous.json" || return 1
         chmod 0640 "${root}/deployment.previous.json" || return 1
     fi
-    for relative in config/xray config/sing-box config/nginx data/subscription; do
+    for relative in config/xray config/sing-box config/nginx config/net data/subscription; do
         source="${candidate}/${relative}"
         target="${root}/${relative}"
         mkdir -p -- "$(dirname -- "${target}")" || return 1
@@ -708,6 +1099,7 @@ dockerEnsureRuntimeDataPermissions() {
     root=$(dockerInstallRoot) || return 1
     for directory in \
         data/xray data/sing-box data/static data/acme \
+        data/net/wireguard data/net/fail2ban data/net/transparent \
         logs/nginx logs/subscription logs/acme; do
         if [[ -e "${root}/${directory}" || -L "${root}/${directory}" ]]; then
             [[ -d "${root}/${directory}" && ! -L "${root}/${directory}" ]] || return 1
@@ -720,7 +1112,10 @@ dockerEnsureRuntimeDataPermissions() {
         chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" \
             "${root}/data/xray" "${root}/data/sing-box" "${root}/data/acme" || return 1
         chown -R "0:${PADM_DOCKER_CONTAINER_GID}" "${root}/data/static" \
-            "${root}/logs/nginx" "${root}/logs/subscription" "${root}/logs/acme" || return 1
+            "${root}/logs/subscription" "${root}/logs/acme" || return 1
+        chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" \
+            "${root}/logs/nginx" || return 1
+        chown -R 0:0 "${root}/data/net" || return 1
     fi
 }
 
@@ -769,6 +1164,10 @@ dockerConfigureApply() {
         return "${PADM_DOCKER_RC_STATE}"
     }
     dockerConfigureSpecValidate "${specFile}" || {
+        dockerCleanupConfigurationCandidate || true
+        return "${PADM_DOCKER_RC_STATE}"
+    }
+    dockerHostIntegrationInputsValidate "${specFile}" || {
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_STATE}"
     }
@@ -1132,7 +1531,7 @@ dockerAcmeCommand() {
 }
 
 dockerValidateInstalledCommand() {
-    local root core
+    local root core integration port mark ports
     [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
     dockerLockInstalledDeployment || return $?
@@ -1159,5 +1558,34 @@ dockerValidateInstalledCommand() {
         dockerComposeRun run --rm --no-deps subscription subscription --check >/dev/null ||
             return "${PADM_DOCKER_RC_STATE}"
     fi
+    while IFS= read -r integration; do
+        case "${integration}" in
+        wireguard)
+            dockerComposeRun run --rm --no-deps net-wireguard \
+                preflight wireguard /etc/wireguard/wg-padm.conf wg-padm owned >/dev/null ||
+                return "${PADM_DOCKER_RC_STATE}"
+            ;;
+        fail2ban)
+            ports=$(jq -r '.host_integrations[] | select(.type == "fail2ban") | .settings.ports | join(",")' \
+                "${root}/deployment.json") || return "${PADM_DOCKER_RC_STATE}"
+            dockerComposeRun run --rm --no-deps net-fail2ban preflight fail2ban "${ports}" >/dev/null ||
+                return "${PADM_DOCKER_RC_STATE}"
+            ;;
+        tun)
+            dockerComposeRun run --rm --no-deps net-tun-check preflight tun >/dev/null ||
+                return "${PADM_DOCKER_RC_STATE}"
+            ;;
+        tproxy)
+            port=$(jq -r '.host_integrations[] | select(.type == "tproxy") | .settings.port' \
+                "${root}/deployment.json") || return "${PADM_DOCKER_RC_STATE}"
+            mark=$(jq -r '.host_integrations[] | select(.type == "tproxy") | .settings.mark' \
+                "${root}/deployment.json") || return "${PADM_DOCKER_RC_STATE}"
+            dockerComposeRun run --rm --no-deps net-transparent \
+                preflight tproxy "${port}" "${mark}" owned >/dev/null ||
+                return "${PADM_DOCKER_RC_STATE}"
+            ;;
+        *) return "${PADM_DOCKER_RC_STATE}" ;;
+        esac
+    done < <(jq -r '.host_integrations[].type' "${root}/deployment.json")
     printf 'Docker 部署配置校验通过\n'
 }

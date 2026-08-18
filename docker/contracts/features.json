@@ -109,5 +109,43 @@
     "wireguard": "host-integrated",
     "tun": "host-integrated",
     "tproxy": "host-integrated"
+  },
+  "host_integrations": {
+    "wireguard": {
+      "status": "host-integrated",
+      "profile": "net-wireguard",
+      "services": ["net-wireguard"],
+      "address_families": ["ipv4", "ipv6"],
+      "network_mode": "host",
+      "capabilities": ["NET_ADMIN"],
+      "devices": []
+    },
+    "fail2ban": {
+      "status": "host-integrated",
+      "profile": "net-fail2ban",
+      "services": ["nginx", "net-fail2ban"],
+      "address_families": ["ipv4", "ipv6"],
+      "network_mode": "host",
+      "capabilities": ["NET_ADMIN"],
+      "devices": []
+    },
+    "tun": {
+      "status": "host-integrated",
+      "profile": "net-transparent",
+      "services": ["sing-box"],
+      "address_families": ["ipv4"],
+      "network_mode": "host",
+      "capabilities": ["NET_ADMIN"],
+      "devices": ["/dev/net/tun"]
+    },
+    "tproxy": {
+      "status": "host-integrated",
+      "profile": "net-transparent",
+      "services": ["core", "net-transparent"],
+      "address_families": ["ipv4"],
+      "network_mode": "host",
+      "capabilities": ["NET_ADMIN"],
+      "devices": []
+    }
   }
 }

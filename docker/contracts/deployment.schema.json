@@ -173,10 +173,10 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["type", "profile", "firewall_rules", "devices", "schedules"],
+        "required": ["type", "profile", "firewall_rules", "devices", "schedules", "settings"],
         "properties": {
           "type": {
-            "enum": ["fail2ban", "wireguard", "port-hopping", "tun", "tproxy"]
+            "enum": ["fail2ban", "wireguard", "tun", "tproxy"]
           },
           "profile": {
             "type": "string",
@@ -202,6 +202,9 @@
             "items": {
               "$ref": "#/$defs/non_empty_string"
             }
+          },
+          "settings": {
+            "type": "object"
           }
         }
       }

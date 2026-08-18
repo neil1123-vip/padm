@@ -179,7 +179,8 @@ writeRealitySpec() {
         },
         tls: null,
         subscription: {enabled: false, token: "0123456789abcdef"},
-        images: {xray: $xray, "sing-box": $singbox, nginx: $nginx, ops: $ops, net: $net}
+        images: {xray: $xray, "sing-box": $singbox, nginx: $nginx, ops: $ops, net: $net},
+        host_integrations: []
       }
     ' >"${target}"
 }
@@ -214,7 +215,8 @@ writeWebSocketSpec() {
         },
         tls: {domain: "proxy.example.com"},
         subscription: {enabled: true, token: "0123456789abcdef"},
-        images: {xray: $xray, "sing-box": $singbox, nginx: $nginx, ops: $ops, net: $net}
+        images: {xray: $xray, "sing-box": $singbox, nginx: $nginx, ops: $ops, net: $net},
+        host_integrations: []
       }
     ' >"${target}"
 }
@@ -233,7 +235,7 @@ writeRealitySpec "${ROLLBACK_SPEC}" xray changed-after-failure 24444
 SUBSCRIPTION_UNIT_ROOT="${TEST_ROOT}/subscription-unit"
 mkdir -p "${SUBSCRIPTION_UNIT_ROOT}"
 printf 'vless://unit-test\n' >"${SUBSCRIPTION_UNIT_ROOT}/0123456789abcdef"
-python3 - "${PROJECT_ROOT}/docker/images/ops/control_server.py" "${SUBSCRIPTION_UNIT_ROOT}" <<'PY'
+PYTHONDONTWRITEBYTECODE=1 python3 - "${PROJECT_ROOT}/docker/images/ops/control_server.py" "${SUBSCRIPTION_UNIT_ROOT}" <<'PY'
 import importlib.util
 import sys
 

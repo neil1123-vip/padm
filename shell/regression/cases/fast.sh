@@ -3374,7 +3374,7 @@ runDeploymentSchemaContractRegression() (
         "service", "public_port", "container_port", "transport", "address_families"
       ] | sort)) and
       ((.properties.host_integrations.items.required | sort) == ([
-        "type", "profile", "firewall_rules", "devices", "schedules"
+        "type", "profile", "firewall_rules", "devices", "schedules", "settings"
       ] | sort)) and
       ."$defs".port.minimum == 1 and ."$defs".port.maximum == 65535 and
       ."$defs".image.properties.index_digest.pattern == "^sha256:[a-f0-9]{64}$"
@@ -4991,6 +4991,10 @@ runDockerPhase2Regression() {
 
 runDockerPhase3Regression() {
     bash "${PROJECT_ROOT}/docker/tests/phase3.sh"
+}
+
+runDockerPhase4Regression() {
+    bash "${PROJECT_ROOT}/docker/tests/phase4.sh"
 }
 
 runRegressionPlatformUpdate() {

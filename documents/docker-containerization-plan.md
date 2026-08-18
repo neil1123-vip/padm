@@ -289,6 +289,10 @@ PADM_NET_IMAGE=ghcr.io/example/padm-net@sha256:...
 
 ### 阶段 4：宿主内核集成
 
+状态：实现完成（2026-08-18），实现范围和验证结果见
+[Docker 容器化阶段 4 基线](docker-phase4-baseline.md)。真实 Linux 内核、宿主
+防火墙和双架构容器 smoke 留给阶段 5 CI。
+
 分别接入 WireGuard、Fail2ban、TUN/TProxy 和其他透明代理能力。
 
 每项能力单独启用 profile，并记录所需端口、设备、网络模式和 capability。Fail2ban 必须验证日志路径、宿主防火墙链和真实客户端地址；WireGuard 必须验证密钥、接口和重启恢复。
