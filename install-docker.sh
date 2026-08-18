@@ -44,6 +44,251 @@ dockerEntryDownloadFile() {
     return 1
 }
 
+dockerEntryError() {
+    printf '%s\n' "$*" >&2
+}
+
+dockerEntryDockerAvailable() {
+    command -v docker >/dev/null 2>&1
+}
+
+dockerEntryReadOsRelease() {
+    local osReleaseFile=/etc/os-release
+    local ID= VERSION_CODENAME= UBUNTU_CODENAME=
+    [[ -r "${osReleaseFile}" ]] || {
+        dockerEntryError '无法读取 /etc/os-release，拒绝自动安装 Docker'
+        return 1
+    }
+    # shellcheck disable=SC1091
+    . "${osReleaseFile}"
+    DOCKER_ENTRY_OS_ID=${ID:-}
+    DOCKER_ENTRY_OS_CODENAME=${VERSION_CODENAME:-${UBUNTU_CODENAME:-}}
+}
+
+dockerEntryInstallPlatformReady() {
+    local arch
+    [[ "$(uname -s 2>/dev/null)" == 'Linux' ]] || {
+        dockerEntryError '自动安装 Docker 仅支持 Linux 主机'
+        return 1
+    }
+    [[ "$(id -u 2>/dev/null)" == '0' ]] || {
+        dockerEntryError '自动安装 Docker 必须以 root 运行'
+        return 1
+    }
+    command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]] || {
+        dockerEntryError '自动安装 Docker 需要正在运行的 systemd'
+        return 1
+    }
+    arch=$(uname -m 2>/dev/null) || return 1
+    case "${arch}" in
+    x86_64 | amd64 | aarch64 | arm64) ;;
+    *)
+        dockerEntryError "自动安装 Docker 不支持主机架构: ${arch:-unknown}"
+        return 1
+        ;;
+    esac
+    dockerEntryReadOsRelease
+}
+
+dockerEntryInstallApt() {
+    local repoOs=$1 codename=$2 arch=$3
+    local keySource keyringTemp repoTemp
+    [[ "${repoOs}" == 'debian' || "${repoOs}" == 'ubuntu' ]] || return 1
+    [[ "${codename}" =~ ^[a-z][a-z0-9.-]+$ && "${arch}" =~ ^(amd64|arm64)$ ]] || {
+        dockerEntryError '无法确定 Debian/Ubuntu 的 Docker 仓库版本或架构'
+        return 1
+    }
+    command -v apt-get >/dev/null 2>&1 || {
+        dockerEntryError '缺少 apt-get，无法自动安装 Docker'
+        return 1
+    }
+    DEBIAN_FRONTEND=noninteractive apt-get update || return 1
+    DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        ca-certificates curl gnupg jq tar || return 1
+    install -d -m 0755 /etc/apt/keyrings || return 1
+    keySource=$(mktemp /etc/apt/keyrings/.padm-docker.asc.XXXXXX) || return 1
+    if ! dockerEntryDownloadFile \
+        "https://download.docker.com/linux/${repoOs}/gpg" "${keySource}" 1048576; then
+        rm -f -- "${keySource}"
+        dockerEntryError '无法下载 Docker 官方 APT 签名密钥'
+        return 1
+    fi
+    keyringTemp=$(mktemp /etc/apt/keyrings/.padm-docker.gpg.XXXXXX) || {
+        rm -f -- "${keySource}"
+        return 1
+    }
+    if ! gpg --dearmor --yes --output "${keyringTemp}" "${keySource}"; then
+        rm -f -- "${keySource}" "${keyringTemp}"
+        dockerEntryError '无法处理 Docker 官方 APT 签名密钥'
+        return 1
+    fi
+    install -m 0644 "${keyringTemp}" /etc/apt/keyrings/padm-docker.gpg || {
+        rm -f -- "${keySource}" "${keyringTemp}"
+        return 1
+    }
+    rm -f -- "${keySource}" "${keyringTemp}"
+    repoTemp=$(mktemp /etc/apt/sources.list.d/.padm-docker.list.XXXXXX) || return 1
+    printf 'deb [arch=%s signed-by=/etc/apt/keyrings/padm-docker.gpg] https://download.docker.com/linux/%s %s stable\n' \
+        "${arch}" "${repoOs}" "${codename}" >"${repoTemp}" || {
+        rm -f -- "${repoTemp}"
+        return 1
+    }
+    install -m 0644 "${repoTemp}" /etc/apt/sources.list.d/padm-docker.list || {
+        rm -f -- "${repoTemp}"
+        return 1
+    }
+    rm -f -- "${repoTemp}"
+    DEBIAN_FRONTEND=noninteractive apt-get update || return 1
+    DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || return 1
+}
+
+dockerEntryInstallRpm() {
+    local repoOs=$1 packageManager repoTemp
+    local -a packageCommand=()
+    case "${repoOs}" in
+    centos | fedora | rhel) ;;
+    *) return 1 ;;
+    esac
+    if command -v dnf >/dev/null 2>&1; then
+        packageManager=dnf
+    elif command -v yum >/dev/null 2>&1; then
+        packageManager=yum
+    else
+        dockerEntryError '缺少 dnf 或 yum，无法自动安装 Docker'
+        return 1
+    fi
+    packageCommand=("${packageManager}")
+    "${packageCommand[@]}" -y install ca-certificates curl jq tar || return 1
+    install -d -m 0755 /etc/yum.repos.d || return 1
+    repoTemp=$(mktemp /etc/yum.repos.d/.padm-docker.repo.XXXXXX) || return 1
+    if ! dockerEntryDownloadFile \
+        "https://download.docker.com/linux/${repoOs}/docker-ce.repo" "${repoTemp}" 1048576; then
+        rm -f -- "${repoTemp}"
+        dockerEntryError '无法下载 Docker 官方 RPM 仓库配置'
+        return 1
+    fi
+    install -m 0644 "${repoTemp}" /etc/yum.repos.d/padm-docker.repo || {
+        rm -f -- "${repoTemp}"
+        return 1
+    }
+    rm -f -- "${repoTemp}"
+    "${packageCommand[@]}" -y install \
+        docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || return 1
+}
+
+dockerEntryStartAndVerifyDocker() {
+    local attempt
+    systemctl enable --now docker.service || {
+        dockerEntryError 'Docker 服务启动失败，请检查 systemd 日志'
+        return 1
+    }
+    systemctl enable containerd.service >/dev/null 2>&1 || true
+    for ((attempt = 0; attempt < 30; attempt++)); do
+        if docker info >/dev/null 2>&1 && docker compose version --short >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+    done
+    dockerEntryError 'Docker daemon 或 Compose v2 安装后仍不可用'
+    return 1
+}
+
+dockerEntryInstallDockerEngine() {
+    local arch repoOs
+    dockerEntryInstallPlatformReady || return 1
+    arch=$(uname -m 2>/dev/null) || return 1
+    case "${arch}" in
+    x86_64 | amd64) arch=amd64 ;;
+    aarch64 | arm64) arch=arm64 ;;
+    esac
+    case "${DOCKER_ENTRY_OS_ID}" in
+    debian | ubuntu)
+        [[ -n "${DOCKER_ENTRY_OS_CODENAME}" ]] || {
+            dockerEntryError '无法读取 Debian/Ubuntu 发布代号，拒绝猜测 Docker 仓库'
+            return 1
+        }
+        dockerEntryInstallApt "${DOCKER_ENTRY_OS_ID}" \
+            "${DOCKER_ENTRY_OS_CODENAME}" "${arch}" || return 1
+        ;;
+    centos | fedora | rhel)
+        repoOs=${DOCKER_ENTRY_OS_ID}
+        dockerEntryInstallRpm "${repoOs}" || return 1
+        ;;
+    *)
+        dockerEntryError "当前发行版不在自动安装支持范围: ${DOCKER_ENTRY_OS_ID:-unknown}"
+        dockerEntryError '请先按 Docker 官方文档安装 Docker Engine 和 Compose v2，再重试: https://docs.docker.com/engine/install/'
+        return 1
+        ;;
+    esac
+    dockerEntryStartAndVerifyDocker
+}
+
+dockerEntryNativeInstallAllowed() {
+    local module=${DOCKER_ENTRY_SOURCE_DIR:-}/shell/core/deployment_mode.sh
+    local state root marker entry unit
+    if [[ -f "${module}" && ! -L "${module}" ]]; then
+        # shellcheck disable=SC1090
+        source "${module}" || return 1
+        state=$(padmNativeDeploymentState 2>/dev/null) || state=ambiguous
+        [[ "${state}" == 'absent' ]] && return 0
+        dockerEntryError "检测到原生版状态 (${state})，请先清理原生部署后再安装 Docker"
+        return 1
+    fi
+    root=${PADM_NATIVE_INSTALL_DIR:-${PADM_INSTALL_DIR:-/etc/padm}}
+    [[ "${root}" == /* && "${root}" != '/' && "${root}" != *'/../'* &&
+        "${root}" != */.. && "${root}" != *'/./'* && "${root}" != */. ]] || {
+        dockerEntryError '原生版状态根路径不安全，拒绝自动安装 Docker'
+        return 1
+    }
+    [[ ! -L "${root}" ]] || {
+        dockerEntryError '检测到原生版状态根是符号链接，拒绝自动安装 Docker'
+        return 1
+    }
+    if [[ -e "${root}/mode" || -L "${root}/mode" ]]; then
+        dockerEntryError "检测到原生版模式标记: ${root}/mode"
+        return 1
+    fi
+    for entry in install.sh .padm-ref .padm-module-manifest xray/xray sing-box/sing-box; do
+        if [[ -e "${root}/${entry}" || -L "${root}/${entry}" ]]; then
+            dockerEntryError "检测到原生版残留: ${root}/${entry}"
+            return 1
+        fi
+    done
+    for unit in \
+        /etc/systemd/system/xray.service /etc/systemd/system/sing-box.service \
+        /etc/init.d/xray /etc/init.d/sing-box; do
+        if [[ -f "${unit}" ]] && grep -Fq "${root}/" "${unit}"; then
+            dockerEntryError "检测到原生版服务残留: ${unit}"
+            return 1
+        fi
+    done
+}
+
+dockerEntryEnsureDockerForInstall() {
+    [[ "${DOCKER_ENTRY_ENGINE_READY:-0}" == '1' ]] && return 0
+    dockerEntryDockerAvailable && return 0
+    dockerEntryNativeInstallAllowed || return 10
+    printf '未检测到 Docker。是否使用 Docker 官方软件源安装 Docker Engine 和 Compose v2？[y/N]: ' >&2
+    local answer=
+    IFS= read -r answer || answer=
+    case "${answer}" in
+    y | Y | yes | YES | Yes | 是 | 是的) ;;
+    *)
+        dockerEntryError '未确认安装 Docker，已停止'
+        return 10
+        ;;
+    esac
+    printf '正在安装 Docker Engine 和 Compose v2，请稍候...\n' >&2
+    dockerEntryInstallDockerEngine || return 10
+    DOCKER_ENTRY_ENGINE_READY=1
+}
+
+dockerEntryInstallCommandRequested() {
+    [[ "${BASH_SOURCE[0]}" == "$0" ]] || return 1
+    [[ -z "${1:-}" || "${1}" == 'install' ]]
+}
+
 dockerEntryArchivePathIsSafe() {
     local path=${1%/} segment
     local -a segments=()
@@ -141,6 +386,15 @@ DOCKER_ENTRY_DIR=$(cd -- "$(dirname -- "${DOCKER_ENTRY_PATH}")" && pwd -P)
 DOCKER_ENTRY_SOURCE_DIR=${DOCKER_ENTRY_DIR}
 DOCKER_ENTRY_TEMP_DIR=
 DOCKER_ENTRY_FETCHED_REF=
+DOCKER_ENTRY_ENGINE_READY=0
+
+if dockerEntryInstallCommandRequested "${1:-}"; then
+    dockerEntryEnsureDockerForInstall
+    DOCKER_ENTRY_ENGINE_STATUS=$?
+    if [[ "${DOCKER_ENTRY_ENGINE_STATUS}" -ne 0 ]]; then
+        exit "${DOCKER_ENTRY_ENGINE_STATUS}"
+    fi
+fi
 
 if [[ ! -f "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/bootstrap.sh" ]]; then
     if ! DOCKER_ENTRY_REQUIRE_MATCH=1 dockerEntryFetchBundle latest; then

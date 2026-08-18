@@ -123,7 +123,7 @@ Docker 版用于把核心、Nginx、订阅和运维任务与宿主系统隔离�
 
 ### 安装
 
-Docker 入口只安装并校验 Docker 控制 bundle，不在生产机执行 `docker build`，也不会把 Xray、sing-box、Nginx 或其它依赖安装到宿主机。镜像由本仓库 CI 预构建并发布，首次部署需要再用配置规格生成 Compose 状态：
+Docker 入口会安装并校验 Docker 控制 bundle；缺少 Docker 时，`install` 会在明确确认后引导安装 Docker Engine 和 Compose v2。它不在生产机执行 `docker build`，也不会把 Xray、sing-box、Nginx 或其它业务依赖安装到宿主机。镜像由本仓库 CI 预构建并发布，首次部署需要再用配置规格生成 Compose 状态：
 
 ```bash
 wget -O /root/install-docker.sh "https://raw.githubusercontent.com/neil1123-vip/padm/main/install-docker.sh" && chmod 700 /root/install-docker.sh && /root/install-docker.sh install
@@ -210,7 +210,7 @@ padm-docker uninstall --remove-images
 padm-docker uninstall --purge --confirm PADM-DOCKER-PURGE
 ```
 
-普通卸载只清理本项目的 Compose 容器、网络和 CLI 链接，不执行全局 `docker prune`，也不删除其它 Compose project 或用户卷。`--purge` 仅删除带有效 Docker 模式标记的受管状态根；需要保留数据时不要使用它。
+普通卸载只清理本项目的 Compose 容器、网络和 CLI 链接，不执行全局 `docker prune`，也不删除其它 Compose project 或用户卷；脚本自动安装的 Docker Engine、Compose 插件和软件源不会由 `padm-docker uninstall` 卸载。`--purge` 仅删除带有效 Docker 模式标记的受管状态根；需要保留数据时不要使用它。
 
 ## 系统要求
 
@@ -232,10 +232,10 @@ padm 面向 Linux 服务器运行。代码会识别 Debian、Ubuntu、RHEL/CentO
 | 权限与连接 | root，rootful Docker Engine，本机 rootful Unix socket；不支持 rootless daemon、远程 context 或用户级 socket。 |
 | Compose | Docker Compose v2 插件。 |
 | 架构 | `amd64` 或 `arm64`，主机和 daemon 架构必须一致。 |
-| 主机命令 | `bash` 4+、`docker`、`jq`、`sha256sum`、`tar`，以及 `curl` 或 `wget`；签名更新还需要支持 Sigstore bundle v0.3 的 `cosign`（CI 当前使用 3.x）。 |
+| 主机命令 | `bash` 4+、`jq`、`sha256sum`、`tar`，以及 `curl` 或 `wget`；签名更新还需要支持 Sigstore bundle v0.3 的 `cosign`（CI 当前使用 3.x）。缺少 Docker 时，`install-docker.sh install` 会先询问是否从 Docker 官方软件源安装 Engine、Compose v2 及其宿主前置工具。 |
 | 内核能力 | 普通 profile 不需要额外 capability；WireGuard、Fail2ban、TUN/TProxy 等 `net-*` profile 需要按支持矩阵提供 `NET_ADMIN`、host network 或 `/dev/net/tun`。 |
 
-Docker 版不会自动安装 Docker、修改软件源或安装宿主软件。检测到原生版已安装、正在运行或残留状态时会拒绝安装，请先明确清理原生部署；两种模式不提供隐式迁移。
+首次执行 `install-docker.sh install` 时，如果检测不到 `docker` 命令，脚本会询问是否从 Docker 官方软件源安装 Docker Engine 和 Compose v2；回答否、未确认或安装失败都会停止，且不会初始化 `/etc/padm-docker`。宿主软件包或软件源已经完成的变更不会由脚本擅自删除。仅在命令缺失时触发询问；已有 Docker 但 daemon 或 Compose 不可用时仍直接报错，不会重装。自动安装目前只覆盖 Debian、Ubuntu、CentOS、Fedora、RHEL 的 rootful systemd 主机；其它发行版请先手动安装 Docker。脚本不会安装 Xray、sing-box、Nginx 等业务宿主依赖，也不会执行 `docker build`。检测到原生版已安装、正在运行或残留状态时会拒绝安装，请先明确清理原生部署；两种模式不提供隐式迁移。
 
 > [!IMPORTANT]
 > **CentOS / RHEL：** SELinux 处于 Enforcing 时，脚本会提示先手动关闭后再继续。

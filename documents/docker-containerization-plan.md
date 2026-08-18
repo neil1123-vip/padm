@@ -26,7 +26,7 @@
 
 互斥检查必须区分三种状态：`installed`（部署文件和状态仍存在）、`active`（服务或容器正在运行）和 `port-conflict`（目标监听端口被其他进程占用）。不能用单一目录存在性或一次端口扫描代替这三种判断。
 
-Docker 版首个正式版本只支持 Linux 上的 rootful Docker Engine、Compose v2 和 `amd64/arm64`；不把 rootless、Windows/macOS 主机或没有 Docker daemon 权限的环境列为隐含支持。版本、架构、daemon 可用性和 Compose 能力必须在安装前一次性检查并给出可操作错误。
+Docker 版首个正式版本只支持 Linux 上的 rootful Docker Engine、Compose v2 和 `amd64/arm64`；缺少 Docker 时，`install-docker.sh install` 可在用户明确确认后从 Docker 官方仓库安装 Engine、Compose v2 及必要前置工具。仍不把 rootless、Windows/macOS 主机或没有 Docker daemon 权限的环境列为隐含支持；其它发行版需手动安装。版本、架构、daemon 可用性和 Compose 能力必须在安装前一次性检查并给出可操作错误。
 
 已安装后的最小命令契约为：`status`、`up`、`down`、`restart`、`logs`、`update`、`rollback`、`validate` 和 `uninstall`。每个命令必须可重复执行、返回稳定的非零错误码，并通过部署锁避免并发修改。
 
@@ -241,7 +241,7 @@ Docker 日志使用受限大小和文件数的轮转配置；应用文件日志�
 实现 `install-docker.sh` 和 Docker 专用模块：
 
 - 检查 Docker Engine、Compose、Bash、下载工具和 JSON 工具。
-- 检查 rootful daemon 权限、Compose v2、主机架构和 Linux 内核能力；Docker 版不自动安装 Docker 或修改宿主软件源。
+- 检查 rootful daemon 权限、Compose v2、主机架构和 Linux 内核能力；缺少 Docker 时先交互确认是否修改宿主软件源并安装 Docker Engine/Compose v2，拒绝或失败则不写入 Docker 状态。
 - 创建 `/etc/padm-docker` 及其权限。
 - 初始化部署锁、状态文件、日志目录和数据目录。
 - 为 `install-docker.sh`、`docker/` 和所需共享模块维护独立的 bundle manifest 与原子刷新流程；不能依赖原生入口当前只覆盖 `shell/`、`documents/`、`assets/` 的自刷新。
@@ -393,7 +393,7 @@ Release 阶段增加：
 
 审计证据：原生 `checkSystem` 会按发行版选择包管理器并修改系统；`checkRoot` 只验证 root 和原生配置目录；README 只列出入口下载依赖，没有 Docker daemon、Compose、架构和 rootless 边界。原计划的 Docker 前置检查和命令列表仍不够可执行。
 
-计划修订：Docker 首发支持范围固定为 Linux、rootful Docker Engine、Compose v2、`amd64/arm64`；不自动安装 Docker 或改软件源。固定 `status/up/down/restart/logs/update/rollback/validate/uninstall` 命令、稳定错误码和部署锁，所有命令必须幂等。
+计划修订：Docker 首发支持范围固定为 Linux、rootful Docker Engine、Compose v2、`amd64/arm64`；缺少 Docker 时仅允许用户明确确认后按发行版官方 Docker 仓库引导安装，拒绝或失败必须在写状态前退出。固定 `status/up/down/restart/logs/update/rollback/validate/uninstall` 命令、稳定错误码和部署锁，所有命令必须幂等。
 
 核验标准：分别模拟 daemon 不可用、无权限、Compose 版本不符、架构不符、非 Linux、重复命令和并发执行，脚本必须在写入任何状态前失败并给出明确原因。
 

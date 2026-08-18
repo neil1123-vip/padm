@@ -97,6 +97,69 @@ runControl() {
     fi
 }
 
+runEnginePromptCase() {
+    local name=$1 input=$2 expected=$3 installStatus=$4
+    local marker="${TEST_ROOT}/${name}.installed"
+    local actual=0
+    rm -f -- "${marker}"
+    env \
+        PHASE1_PROJECT_ROOT="${PROJECT_ROOT}" \
+        PHASE1_INPUT="${input}" \
+        PHASE1_EXPECTED="${expected}" \
+        PHASE1_INSTALL_STATUS="${installStatus}" \
+        PHASE1_INSTALL_MARKER="${marker}" \
+        bash -u -c '
+            set -u
+            source "$PHASE1_PROJECT_ROOT/install-docker.sh"
+            dockerEntryDockerAvailable() { return 1; }
+            dockerEntryInstallDockerEngine() {
+                : >"$PHASE1_INSTALL_MARKER"
+                return "$PHASE1_INSTALL_STATUS"
+            }
+            actual=0
+            if [[ "$PHASE1_INPUT" == __EOF__ ]]; then
+                dockerEntryEnsureDockerForInstall </dev/null || actual=$?
+            else
+                dockerEntryEnsureDockerForInstall <<<"$PHASE1_INPUT" || actual=$?
+            fi
+            [[ "$actual" -eq "$PHASE1_EXPECTED" ]]
+        ' || fail "${name}: unexpected Docker prompt result"
+    if [[ "${input}" == 'y' ]]; then
+        [[ -f "${marker}" ]] || fail "${name}: install hook was not called"
+    else
+        [[ ! -e "${marker}" ]] || fail "${name}: install hook was called unexpectedly"
+    fi
+}
+
+runEnginePromptCase prompt-no n 10 0
+runEnginePromptCase prompt-yes y 0 0
+runEnginePromptCase prompt-eof __EOF__ 10 0
+runEnginePromptCase prompt-install-fail y 10 1
+env \
+    PHASE1_PROJECT_ROOT="${PROJECT_ROOT}" \
+    bash -u -c '
+        set -u
+        source "$PHASE1_PROJECT_ROOT/install-docker.sh"
+        dockerEntryDockerAvailable() { return 0; }
+        dockerEntryInstallDockerEngine() { return 99; }
+        dockerEntryEnsureDockerForInstall </dev/null
+    ' || fail 'existing Docker installation prompted or failed unexpectedly'
+NATIVE_PROMPT_ROOT="${TEST_ROOT}/native-prompt"
+mkdir -p "${NATIVE_PROMPT_ROOT}"
+printf 'native\n' >"${NATIVE_PROMPT_ROOT}/mode"
+env \
+    PHASE1_PROJECT_ROOT="${PROJECT_ROOT}" \
+    PADM_NATIVE_INSTALL_DIR="${NATIVE_PROMPT_ROOT}" \
+    bash -u -c '
+        set -u
+        source "$PHASE1_PROJECT_ROOT/install-docker.sh"
+        dockerEntryDockerAvailable() { return 1; }
+        dockerEntryInstallDockerEngine() { return 99; }
+        actual=0
+        dockerEntryEnsureDockerForInstall <<<yes || actual=$?
+        [[ "$actual" -eq 10 ]]
+    ' || fail 'native installation conflict was not rejected before Docker bootstrap'
+
 copyBundleFixture() {
     local target=$1
     mkdir -p "${target}/shell/core" "${target}/documents"
@@ -246,9 +309,17 @@ runControl 0 uninstall "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" uninstall
 [[ "$(<"${DOCKER_ROOT}/mode")" == "docker" ]] || fail 'uninstall removed the mode marker'
 runControl 0 repeat-uninstall "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" uninstall
 
-if grep -ERn 'docker[[:space:]]+build|apt-get|apt[[:space:]]+install|dnf[[:space:]]+install|yum[[:space:]]+install|apk[[:space:]]+add' \
+if grep -ERn 'docker[[:space:]]+build' \
     "${PROJECT_ROOT}/install-docker.sh" "${PROJECT_ROOT}/docker/lib" >/dev/null; then
-    fail 'Docker control path contains a build or package-manager command'
+    fail 'Docker control path contains a build command'
+fi
+grep -Fq 'docker-ce' "${PROJECT_ROOT}/install-docker.sh" || fail 'Docker installer lacks Docker CE packages'
+grep -Fq 'docker-compose-plugin' "${PROJECT_ROOT}/install-docker.sh" ||
+    fail 'Docker installer lacks the Compose v2 plugin'
+grep -Fq '是否使用 Docker 官方软件源安装' "${PROJECT_ROOT}/install-docker.sh" ||
+    fail 'Docker installer lacks the explicit confirmation prompt'
+if grep -Fq 'get.docker.com' "${PROJECT_ROOT}/install-docker.sh"; then
+    fail 'Docker installer uses the convenience script'
 fi
 
 printf 'docker-phase1-regression-ok\n'

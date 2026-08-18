@@ -17,9 +17,9 @@ Docker 版使用独立入口 `install-docker.sh`，安装后的宿主命令为
 安装前一次性检查：
 
 - Linux、root、Bash 4+、`amd64/arm64`。
-- 本机 rootful Docker Engine、Linux daemon、主机与 daemon 架构一致。
+- 本机 rootful Docker Engine、Linux daemon、主机与 daemon 架构一致；缺少 `docker` 命令时，`install` 会先询问是否从 Docker 官方仓库安装 Engine 和 Compose v2。
 - 本机 Unix socket Docker context，拒绝 rootless 和远程 context。
-- Docker Compose v2、jq、SHA-256、tar，以及 curl/wget 之一。
+- Docker Compose v2、jq、SHA-256、tar，以及 curl/wget 之一；自动安装仅覆盖 Debian、Ubuntu、CentOS、Fedora、RHEL 的 systemd 主机。
 
 前置检查和原生部署互斥检查通过后，初始化以下状态：
 
@@ -67,7 +67,7 @@ payload 的聚合 SHA-256。
 | 原生 `all` | 通过，584.710 秒 |
 | `git diff --check` | 通过 |
 
-专项回归使用假 Docker CLI，覆盖 daemon 不可用、rootless、Compose v1、
+专项回归使用假 Docker CLI，并覆盖缺 Docker 时的确认/拒绝/EOF/安装失败分支；同时覆盖 daemon 不可用、rootless、Compose v1、
 不支持架构、原生冲突、无 marker 活跃容器、异常状态根、锁超时、重复安装、
 bundle 失败不切换、缺 Compose 非零、Compose 参数转发和卸载数据保留。
 
@@ -80,6 +80,6 @@ bash shell/subscription_groups_regression.sh docker-phase1
 ## 边界
 
 本阶段不包含 Dockerfile、镜像引用、`compose.yaml`、端口 desired state、
-签名发布 manifest 或 CI 构建，因此不会执行 `docker build`、安装宿主软件或
-修改软件源。Windows/MSYS2 回归验证控制逻辑，不证明真实 Linux rootful
+签名发布 manifest 或 CI 构建，因此不会执行 `docker build` 或安装业务宿主软件。
+缺少 Docker 时的交互式 Engine/Compose 引导属于宿主前置步骤。Windows/MSYS2 回归验证控制逻辑，不证明真实 Linux rootful
 Docker daemon、Compose 网络或容器生命周期；真实 E2E 从阶段 2 开始。

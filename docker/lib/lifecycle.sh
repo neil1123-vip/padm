@@ -8,7 +8,7 @@ PADM_DOCKER_LIFECYCLE_LOADED=1
 dockerUsage() {
     cat >&2 <<'EOF'
 用法:
-  install-docker.sh install [--source <目录>] [--ref <commit|latest>]
+  install-docker.sh install [--source <目录>] [--ref <commit|latest>]  # 缺 Docker 时询问是否安装
   padm-docker configure --spec <JSON 文件>
   padm-docker tls install --domain <域名> --cert <文件> --key <文件> [--ops-image <tag@digest>]
   padm-docker acme <issue|renew> --domain <域名> --email <邮箱> --dns <dns_*> --credentials <文件> [--ops-image <tag@digest>]

@@ -25,7 +25,8 @@
 
 - 证据：原生 `checkSystem` 会按发行版选择包管理器并修改系统；`checkRoot` 只检查 root 和原生目录；README 没有 Docker daemon、Compose、架构和 rootless 约束。
 - 缺口：Docker 安装前置条件和已安装命令没有稳定契约，可能在半初始化状态下写入文件。
-- 修订：首发限定 Linux + rootful Docker Engine + Compose v2 + `amd64/arm64`；不自动安装 Docker；固定九个幂等命令、错误码和部署锁。
+- 修订（当时）：首发限定 Linux + rootful Docker Engine + Compose v2 + `amd64/arm64`；不自动安装 Docker；固定九个幂等命令、错误码和部署锁。
+- 后续决定：缺少 Docker 时，`install-docker.sh install` 可在用户明确确认后从 Docker 官方仓库引导安装 Engine 和 Compose v2；拒绝、EOF 或失败仍在写入 Docker 状态前退出。
 - 核验：daemon、权限、Compose、架构、系统类型、重复执行和并发场景均须在写状态前失败或安全返回。
 
 ## 第 4 轮：镜像职责与运行契约

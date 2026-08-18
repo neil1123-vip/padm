@@ -123,7 +123,7 @@ Docker mode isolates the cores, Nginx, subscription services, and operations tas
 
 ### Installation
 
-The Docker entry installs and verifies the Docker control bundle only. It does not run `docker build` on production hosts or install Xray, sing-box, Nginx, or their dependencies on the host. Images are prebuilt and published by this repository's CI; after the control bundle is installed, generate the Compose state from a configuration spec:
+The Docker entry installs and verifies the Docker control bundle. If Docker is missing, `install` asks for explicit confirmation before bootstrapping Docker Engine and Compose v2. It does not run `docker build` on production hosts or install Xray, sing-box, Nginx, or their application dependencies on the host. Images are prebuilt and published by this repository's CI; after the control bundle is installed, generate the Compose state from a configuration spec:
 
 ```bash
 wget -O /root/install-docker.sh "https://raw.githubusercontent.com/neil1123-vip/padm/main/install-docker.sh" && chmod 700 /root/install-docker.sh && /root/install-docker.sh install
@@ -210,7 +210,7 @@ padm-docker uninstall --remove-images
 padm-docker uninstall --purge --confirm PADM-DOCKER-PURGE
 ```
 
-Normal uninstall removes only this project's Compose containers, network, and CLI link. It does not run a global `docker prune` or delete another Compose project or user volume. `--purge` deletes only the managed state root with a valid Docker mode marker; do not use it when the data must be retained.
+Normal uninstall removes only this project's Compose containers, network, and CLI link. It does not run a global `docker prune` or delete another Compose project or user volume; Docker Engine, the Compose plugin, and repository files installed by the bootstrap are not removed by `padm-docker uninstall`. `--purge` deletes only the managed state root with a valid Docker mode marker; do not use it when the data must be retained.
 
 ## System Requirements
 
@@ -232,10 +232,10 @@ padm is designed for Linux servers. The code detects Debian, Ubuntu, RHEL/CentOS
 | Permission and connection | root, a rootful Docker Engine, and the local rootful Unix socket; rootless daemons, remote contexts, and user sockets are unsupported. |
 | Compose | Docker Compose v2 plugin. |
 | Architecture | `amd64` or `arm64`, with matching host and daemon architecture. |
-| Host commands | Bash 4+, `docker`, `jq`, `sha256sum`, `tar`, and either `curl` or `wget`; signed updates also require Cosign with Sigstore bundle v0.3 support (CI currently uses 3.x). |
+| Host commands | Bash 4+, `jq`, `sha256sum`, `tar`, and either `curl` or `wget`; signed updates also require Cosign with Sigstore bundle v0.3 support (CI currently uses 3.x). If Docker is missing, `install-docker.sh install` asks whether to install Engine, Compose v2, and the host prerequisites from Docker's official repository. |
 | Kernel capabilities | The regular profiles need no extra capability. WireGuard, Fail2ban, TUN/TProxy, and other `net-*` profiles require the capability, host networking, or `/dev/net/tun` specified by the support matrix. |
 
-Docker mode does not install Docker, change software sources, or install host packages. If a native installation is active, present, or leaves ambiguous residue, the Docker entry refuses to proceed; there is no implicit migration between modes.
+On the first `install-docker.sh install`, if the `docker` command is missing, the script asks whether to install Docker Engine and Compose v2 from Docker's official repository. A no/empty answer, EOF, or an installation failure stops before `/etc/padm-docker` is initialized. Host package or repository changes that already completed are not removed implicitly. The prompt is only for a missing command; an existing Docker installation with an unavailable daemon or Compose still fails without reinstalling. Automatic installation currently covers rootful systemd hosts running Debian, Ubuntu, CentOS, Fedora, or RHEL; install Docker manually on other distributions. The script does not install Xray, sing-box, Nginx, or other application dependencies on the host, and it never runs `docker build`. If a native installation is active, present, or leaves ambiguous residue, the Docker entry refuses to proceed; there is no implicit migration between modes.
 
 > [!IMPORTANT]
 > **CentOS / RHEL:** If SELinux is Enforcing, the script asks you to disable it manually before continuing.
