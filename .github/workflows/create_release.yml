@@ -25,7 +25,7 @@ jobs:
       skip: ${{ steps.existing.outputs.result }}
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -79,7 +79,7 @@ jobs:
 
       - name: Check complete release assets
         id: existing
-        uses: actions/github-script@v9
+        uses: actions/github-script@v9.0.0
         env:
           RELEASE_TAG: v${{ steps.resolve.outputs.release_version }}
         with:
@@ -158,19 +158,19 @@ jobs:
       id-token: write
     steps:
       - name: Checkout release commit
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ needs.prepare.outputs.release_sha }}
           fetch-depth: 1
 
       - name: Download release assets
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.1
         with:
           name: ${{ needs.images.outputs.artifact_name }}
           path: release-assets
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v3.8.1
+        uses: sigstore/cosign-installer@v4.1.2
 
       - name: Sign and verify release manifest
         shell: bash
