@@ -33,6 +33,7 @@ registerRegressionFunctionLeaf docker-phase2 runDockerPhase2Regression
 registerRegressionFunctionLeaf docker-phase3 runDockerPhase3Regression
 registerRegressionFunctionLeaf docker-phase4 runDockerPhase4Regression
 registerRegressionFunctionLeaf docker-phase5 runDockerPhase5Regression
+registerRegressionFunctionLeaf docker-phase6 runDockerPhase6Regression
 
 registerRegressionParallelSelectorList fast-only-output runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/fast-only-output-parallel-${BASHPID:-$$}" listRegressionFastOnlyOutputChildSelectors

@@ -79,6 +79,7 @@ jobs:
           bash docker/tests/phase3.sh
           bash docker/tests/phase4.sh
           bash docker/tests/phase5.sh
+          bash docker/tests/phase6.sh
 
   smoke:
     name: Smoke ${{ matrix.image }} (${{ matrix.platform.name }})

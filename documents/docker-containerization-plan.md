@@ -322,6 +322,10 @@ manifest 至少包含：schema 版本、padm 版本、Git commit、5 个镜像 d
 
 ### 阶段 6：更新、回滚和卸载
 
+状态：实现完成（2026-08-18），实现范围和验证结果见
+[Docker 容器化阶段 6 基线](docker-phase6-baseline.md)。真实生产镜像 pull、Compose
+健康检查和 Cosign OIDC 验签留给 Release CI；本地使用 Docker CLI mock 验证事务。
+
 Docker 更新固定为：
 
 ```text
@@ -336,7 +340,9 @@ Docker 更新固定为：
 
 任一步失败，恢复旧 manifest 和旧 `images.env`，再次启动旧版本。更新不使用 `latest`，也不在生产机编译镜像。
 
-普通卸载删除容器、网络和控制脚本，但保留配置、证书和订阅数据；`--purge` 才删除 `/etc/padm-docker`，并要求再次确认。
+普通卸载删除容器、网络和控制脚本，但保留配置、证书、订阅数据、备份和镜像；
+`--remove-images` 只删除 deployment 记录的五个精确 digest；`--purge` 才删除
+`/etc/padm-docker`，并要求 `--confirm PADM-DOCKER-PURGE`。
 
 ## CI 与验证
 

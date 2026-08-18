@@ -48,6 +48,7 @@ dockerBundleSourceIsComplete() {
         install-docker.sh \
         docker/lib/bootstrap.sh \
         docker/lib/bundle.sh \
+        docker/lib/manifest.sh \
         docker/lib/services.sh \
         docker/lib/lifecycle.sh \
         docker/contracts/configure.schema.json \

@@ -117,6 +117,7 @@ dockerEntryFetchBundle() {
         candidate=${candidate%/install-docker.sh}
         [[ -f "${candidate}/docker/lib/bootstrap.sh" &&
             -f "${candidate}/docker/lib/bundle.sh" &&
+            -f "${candidate}/docker/lib/manifest.sh" &&
             -f "${candidate}/docker/lib/lifecycle.sh" &&
             -f "${candidate}/shell/core/deployment_mode.sh" ]] || continue
         DOCKER_ENTRY_SOURCE_DIR=${candidate}
@@ -153,6 +154,8 @@ fi
 source "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/bootstrap.sh"
 # shellcheck source=/dev/null
 source "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/bundle.sh"
+# shellcheck source=/dev/null
+source "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/manifest.sh"
 # shellcheck source=/dev/null
 source "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/services.sh"
 # shellcheck source=/dev/null

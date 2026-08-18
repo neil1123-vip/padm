@@ -1021,14 +1021,16 @@ dockerValidateCandidate() {
 }
 
 dockerBackupConfiguration() {
-    local root backup relative source
+    local root backup relative source prefix=${1:-configure}
     root=$(dockerInstallRoot) || return 1
-    backup=$(mktemp -d "${root}/backups/configure.XXXXXX") || return 1
+    [[ "${prefix}" =~ ^[a-z][a-z0-9_-]*$ ]] || return 1
+    backup=$(mktemp -d "${root}/backups/${prefix}.XXXXXX") || return 1
     : >"${backup}/present"
     while IFS= read -r relative; do
         source="${root}/${relative}"
         [[ -e "${source}" || -L "${source}" ]] || continue
         [[ ! -L "${source}" ]] || return 1
+        [[ -z "$(find "${source}" -type l -print -quit 2>/dev/null)" ]] || return 1
         mkdir -p -- "${backup}/$(dirname -- "${relative}")" || return 1
         cp -a -- "${source}" "${backup}/${relative}" || return 1
         printf '%s\n' "${relative}" >>"${backup}/present" || return 1
@@ -1045,6 +1047,96 @@ data/subscription
 EOF
     chmod -R go-rwx "${backup}" || return 1
     DOCKER_CONFIG_BACKUP=${backup}
+}
+
+dockerUpdateRenderImagesEnv() {
+    local source=$1 target=$2 rootValue=$3
+    local xray singBox nginx ops net
+    [[ -f "${source}" && ! -L "${source}" ]] || return 1
+    xray=$(dockerManifestImageReference xray) || return 1
+    singBox=$(dockerManifestImageReference sing-box) || return 1
+    nginx=$(dockerManifestImageReference nginx) || return 1
+    ops=$(dockerManifestImageReference ops) || return 1
+    net=$(dockerManifestImageReference net) || return 1
+    awk -v xray="${xray}" -v singBox="${singBox}" -v nginx="${nginx}" \
+        -v ops="${ops}" -v net="${net}" -v rootValue="${rootValue}" '
+      BEGIN { FS = "="; OFS = "=" }
+      /^PADM_XRAY_IMAGE=/ { print "PADM_XRAY_IMAGE", xray; seen["xray"] = 1; next }
+      /^PADM_SINGBOX_IMAGE=/ { print "PADM_SINGBOX_IMAGE", singBox; seen["sing-box"] = 1; next }
+      /^PADM_NGINX_IMAGE=/ { print "PADM_NGINX_IMAGE", nginx; seen["nginx"] = 1; next }
+      /^PADM_OPS_IMAGE=/ { print "PADM_OPS_IMAGE", ops; seen["ops"] = 1; next }
+      /^PADM_NET_IMAGE=/ { print "PADM_NET_IMAGE", net; seen["net"] = 1; next }
+      /^PADM_DOCKER_ROOT=/ { print "PADM_DOCKER_ROOT", rootValue; seen["root"] = 1; next }
+      /^PADM_NET_ROOT=/ { print "PADM_NET_ROOT", rootValue; seen["netroot"] = 1; next }
+      { print }
+      END {
+        if (!seen["xray"] || !seen["sing-box"] || !seen["nginx"] || !seen["ops"] ||
+            !seen["net"] || !seen["root"] || !seen["netroot"]) exit 1
+      }
+    ' "${source}" >"${target}"
+}
+
+dockerCreateUpdateCandidate() {
+    local root candidate relative source target version manifestSha previous
+    root=$(dockerInstallRoot) || return 1
+    DOCKER_CONFIG_CANDIDATE=
+    candidate=$(mktemp -d "${root}/.update.XXXXXX") || return 1
+    dockerManagedPathIsSafe "${root}" "${candidate}" || {
+        dockerRemoveManagedTree "${root}" "${candidate}" || true
+        return 1
+    }
+    DOCKER_CONFIG_CANDIDATE=${candidate}
+    for relative in \
+        config/xray config/sing-box config/nginx config/net data/subscription \
+        data/xray data/sing-box data/static data/acme \
+        data/net/wireguard data/net/fail2ban data/net/transparent \
+        secrets/tls secrets/net/wireguard logs/nginx logs/subscription logs/acme; do
+        source="${root}/${relative}"
+        target="${candidate}/${relative}"
+        if [[ -e "${source}" || -L "${source}" ]]; then
+            [[ -d "${source}" && ! -L "${source}" ]] || return 1
+            mkdir -p -- "$(dirname -- "${target}")" && cp -a -- "${source}" "${target}" || return 1
+        else
+            mkdir -p -- "${target}" || return 1
+        fi
+    done
+    [[ -f "${root}/compose.json" && ! -L "${root}/compose.json" &&
+        -f "${root}/images.env" && ! -L "${root}/images.env" &&
+        -f "${root}/deployment.json" && ! -L "${root}/deployment.json" ]] || return 1
+    cp -- "${root}/compose.json" "${candidate}/compose.json" || return 1
+    dockerUpdateRenderImagesEnv "${root}/images.env" "${candidate}/images.env" "${candidate}" || return 1
+    dockerUpdateRenderImagesEnv "${root}/images.env" "${candidate}/images.runtime.env" "${root}" || return 1
+    version=$(dockerManifestReleaseVersion) || return 1
+    manifestSha=${PADM_DOCKER_MANIFEST_SHA256:-}
+    [[ "${manifestSha}" =~ ^[0-9a-f]{64}$ ]] || return 1
+    previous=$(jq -r '.manifest.sha256 // empty' "${root}/deployment.json") || return 1
+    jq -n --slurpfile deployment "${root}/deployment.json" \
+        --arg version "${version}" --arg manifestSha "${manifestSha}" \
+        --arg identity "${PADM_DOCKER_MANIFEST_SIGNATURE_IDENTITY}" \
+        --arg previous "${previous}" \
+        --arg xray "$(dockerManifestImageDigest xray)" \
+        --arg singBox "$(dockerManifestImageDigest sing-box)" \
+        --arg nginx "$(dockerManifestImageDigest nginx)" \
+        --arg ops "$(dockerManifestImageDigest ops)" \
+        --arg net "$(dockerManifestImageDigest net)" '
+      $deployment[0] |
+      .padm_version = $version |
+      .manifest = {sha256: $manifestSha, signature_identity: $identity} |
+      .previous_manifest_sha256 = (if $previous == "" then null else $previous end) |
+      .images.xray.index_digest = $xray |
+      .images["sing-box"].index_digest = $singBox |
+      .images.nginx.index_digest = $nginx |
+      .images.ops.index_digest = $ops |
+      .images.net.index_digest = $net
+    ' >"${candidate}/deployment.json" || return 1
+    dockerPrepareCandidatePermissions "${candidate}" || return 1
+    DOCKER_CONFIG_CANDIDATE=${candidate}
+}
+
+dockerValidateUpdateCandidate() {
+    local candidate=$1
+    dockerDeploymentFileValidate "${candidate}/deployment.json" || return 1
+    dockerCandidateCompose "${candidate}" config --format json >/dev/null 2>&1 || return 1
 }
 
 dockerRemoveConfigurationTargets() {
