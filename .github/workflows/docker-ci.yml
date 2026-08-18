@@ -1,0 +1,26 @@
+name: Docker CI
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/build-images.yml'
+      - '.github/workflows/docker-ci.yml'
+      - '.github/workflows/create_release.yml'
+      - 'docker/**'
+      - 'docker-bake.hcl'
+      - 'install-docker.sh'
+      - 'shell/core/version.sh'
+      - 'versions.lock'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  images:
+    uses: ./.github/workflows/build-images.yml
+    with:
+      version: dev
+      source_ref: ${{ github.sha }}
+      registry: ghcr.io/neil1123-vip
+      push: false

@@ -7,12 +7,22 @@ on:
       - main
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: padm-release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  release:
+  prepare:
+    name: Resolve release
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: write
+    outputs:
+      release_version: ${{ steps.resolve.outputs.release_version }}
+      release_sha: ${{ steps.target.outputs.release_sha }}
+      skip: ${{ steps.existing.outputs.result }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v7
@@ -20,38 +30,35 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Read script version
+      - name: Read script version and lock
         id: version
         shell: bash
         run: |
-          PROJECT_ROOT="$GITHUB_WORKSPACE"
-          source shell/core/version.sh
-          file_version=$(getScriptVersion)
-          if [ -z "$file_version" ]; then
-            echo "Unable to read script version" >&2
-            exit 1
-          fi
-          echo "file_version=$file_version" >> "$GITHUB_OUTPUT"
-          echo "is_release_commit=false" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          current_version=$(sed -n 's/^SCRIPT_VERSION="\([^"]*\)"$/\1/p' shell/core/version.sh | head -n 1)
+          [[ -n "${current_version}" ]] || { echo 'Unable to read script version' >&2; exit 1; }
+          bash docker/release.sh validate-lock "${current_version}"
+          is_release_commit=false
           if git log -1 --format=%s | grep -qE '^chore\(release\): v[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "is_release_commit=true" >> "$GITHUB_OUTPUT"
+            is_release_commit=true
           fi
-          echo "$file_version"
+          echo "current_version=${current_version}" >>"${GITHUB_OUTPUT}"
+          echo "is_release_commit=${is_release_commit}" >>"${GITHUB_OUTPUT}"
 
       - name: Resolve release version
-        id: release_version
+        id: resolve
         shell: bash
+        env:
+          CURRENT_VERSION: ${{ steps.version.outputs.current_version }}
+          IS_RELEASE_COMMIT: ${{ steps.version.outputs.is_release_commit }}
         run: |
-          PROJECT_ROOT="$GITHUB_WORKSPACE"
-          source shell/core/version.sh
-          current_version="${{ steps.version.outputs.file_version }}"
+          set -euo pipefail
           latest_tag=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1)
-          if [ -z "$latest_tag" ]; then
-            latest_tag="$current_version"
+          if [[ -z "${latest_tag}" ]]; then
+            latest_tag="v${CURRENT_VERSION}"
           fi
-
-          if [ "${{ steps.version.outputs.is_release_commit }}" = "true" ]; then
-            release_version="$current_version"
+          if [[ "${IS_RELEASE_COMMIT}" == true ]]; then
+            release_version="${CURRENT_VERSION}"
             needs_bump=false
           else
             if git rev-parse -q --verify "refs/tags/${latest_tag}" >/dev/null; then
@@ -59,53 +66,25 @@ jobs:
             else
               commits=$(git log --format=%B)
             fi
-            next_version="v$(nextScriptVersionFromCommits "$latest_tag" "$commits")"
-            release_version="$next_version"
-            if [ "$release_version" != "$current_version" ]; then
-              needs_bump=true
-            else
-              needs_bump=false
-            fi
+            release_version=$(source shell/core/version.sh; nextScriptVersionFromCommits "${latest_tag}" "${commits}")
+            needs_bump=true
+            [[ "${release_version}" == "${CURRENT_VERSION}" ]] && needs_bump=false
           fi
+          [[ "${release_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "invalid release version: ${release_version}" >&2
+            exit 1
+          }
+          echo "release_version=${release_version}" >>"${GITHUB_OUTPUT}"
+          echo "needs_bump=${needs_bump}" >>"${GITHUB_OUTPUT}"
 
-          echo "latest_tag=$latest_tag" >> "$GITHUB_OUTPUT"
-          echo "release_version=$release_version" >> "$GITHUB_OUTPUT"
-          echo "needs_bump=$needs_bump" >> "$GITHUB_OUTPUT"
-          echo "latest_tag=$latest_tag release_version=$release_version needs_bump=$needs_bump"
-
-      - name: Bump script version
-        id: bump
-        if: ${{ steps.release_version.outputs.needs_bump == 'true' }}
-        shell: bash
-        run: |
-          PROJECT_ROOT="$GITHUB_WORKSPACE"
-          source shell/core/version.sh
-          setScriptVersion "${{ steps.release_version.outputs.release_version }}" shell/core/version.sh
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add shell/core/version.sh
-          git commit -m "chore(release): ${{ steps.release_version.outputs.release_version }}"
-          release_sha=$(git rev-parse HEAD)
-          git push origin HEAD:main
-          echo "release_sha=$release_sha" >> "$GITHUB_OUTPUT"
-
-      - name: Resolve release target
-        id: target
-        shell: bash
-        run: |
-          release_sha="${{ steps.bump.outputs.release_sha }}"
-          if [ -z "$release_sha" ]; then
-            release_sha=$(git rev-parse HEAD)
-          fi
-          echo "release_sha=$release_sha" >> "$GITHUB_OUTPUT"
-          echo "$release_sha"
-
-      - name: Get release
-        id: release
+      - name: Check complete release assets
+        id: existing
         uses: actions/github-script@v9
+        env:
+          RELEASE_TAG: v${{ steps.resolve.outputs.release_version }}
         with:
           script: |
-            const tag = '${{ steps.release_version.outputs.release_version }}';
+            const tag = process.env.RELEASE_TAG;
             const { owner, repo } = context.repo;
             const release = await github.rest.repos.getReleaseByTag({ owner, repo, tag })
               .then(({ data }) => data)
@@ -113,22 +92,117 @@ jobs:
                 if (error.status === 404) return null;
                 throw error;
               });
-            return release ? release.tag_name : '';
+            const required = [
+              'release-manifest.json',
+              'release-manifest.sig',
+              'release-manifest.sigstore.json',
+              'padm-docker-bundle.tar.gz'
+            ];
+            return release && required.every(name => release.assets.some(asset => asset.name === name))
+              ? 'true'
+              : 'false';
           result-encoding: string
 
-      - name: Create release
-        if: ${{ steps.release.outputs.result != steps.release_version.outputs.release_version }}
-        uses: actions/github-script@v9
+      - name: Bump script and lock version
+        id: bump
+        if: ${{ steps.resolve.outputs.needs_bump == 'true' && steps.existing.outputs.result != 'true' }}
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.resolve.outputs.release_version }}
+        run: |
+          set -euo pipefail
+          bash docker/release.sh set-version "${RELEASE_VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add shell/core/version.sh versions.lock
+          git commit -m "chore(release): v${RELEASE_VERSION}"
+          release_sha=$(git rev-parse HEAD)
+          git push origin HEAD:main
+          echo "release_sha=${release_sha}" >>"${GITHUB_OUTPUT}"
+
+      - name: Resolve build commit
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_sha="${{ steps.bump.outputs.release_sha }}"
+          if [[ -z "${release_sha}" ]]; then
+            release_sha=$(git rev-parse HEAD)
+          fi
+          [[ "${release_sha}" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          echo "release_sha=${release_sha}" >>"${GITHUB_OUTPUT}"
+
+  images:
+    name: Build and sign images
+    needs: prepare
+    if: ${{ needs.prepare.outputs.skip != 'true' }}
+    uses: ./.github/workflows/build-images.yml
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    with:
+      version: ${{ needs.prepare.outputs.release_version }}
+      source_ref: ${{ needs.prepare.outputs.release_sha }}
+      registry: ghcr.io/neil1123-vip
+      push: true
+    secrets: inherit
+
+  release:
+    name: Publish Release
+    needs: [prepare, images]
+    if: ${{ needs.prepare.outputs.skip != 'true' && needs.images.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Checkout release commit
+        uses: actions/checkout@v7
         with:
-          script: |
-            const tag = '${{ steps.release_version.outputs.release_version }}';
-            const targetCommitish = '${{ steps.target.outputs.release_sha }}';
-            const { owner, repo } = context.repo;
-            await github.rest.repos.createRelease({
-              owner,
-              repo,
-              tag_name: tag,
-              target_commitish: targetCommitish,
-              name: tag,
-              body: `Automated release ${tag}`
-            });
+          ref: ${{ needs.prepare.outputs.release_sha }}
+          fetch-depth: 1
+
+      - name: Download release assets
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.images.outputs.artifact_name }}
+          path: release-assets
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.8.1
+
+      - name: Sign and verify release manifest
+        shell: bash
+        env:
+          COSIGN_IDENTITY_REGEX: https://github.com/${{ github.repository }}/.github/workflows/.*@refs/heads/main
+          COSIGN_OIDC_ISSUER: https://token.actions.githubusercontent.com
+          RELEASE_VERSION: ${{ needs.prepare.outputs.release_version }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          manifest=release-assets/release-manifest.json
+          signature=release-assets/release-manifest.sig
+          bundle=release-assets/release-manifest.sigstore.json
+          jq -e --arg version "${RELEASE_VERSION}" --arg commit "${RELEASE_SHA}" \
+            '.schema_version == 1 and .release.version == $version and .release.commit == $commit' \
+            "${manifest}" >/dev/null
+          cosign sign-blob --yes --bundle "${bundle}" --output-signature "${signature}" "${manifest}"
+          cosign verify-blob --bundle "${bundle}" --signature "${signature}" \
+            --certificate-identity-regexp "${COSIGN_IDENTITY_REGEX}" \
+            --certificate-oidc-issuer "${COSIGN_OIDC_ISSUER}" "${manifest}" >/dev/null
+
+      - name: Create or update GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.release_version }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          tag="v${RELEASE_VERSION}"
+          if ! gh release view "${tag}" >/dev/null 2>&1; then
+            gh release create "${tag}" --target "${RELEASE_SHA}" --title "${tag}" \
+              --notes "Automated Docker release ${tag}"
+          fi
+          gh release upload "${tag}" release-assets/* --clobber

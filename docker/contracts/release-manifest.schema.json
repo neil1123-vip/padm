@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/neil1123-vip/padm/releases/download/schema/release-manifest.schema.json",
+  "title": "padm Docker release manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "release", "control", "images", "upstream", "formats", "compatibility", "migrations"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "commit", "created_at"],
+      "properties": {
+        "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+        "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "created_at": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"}
+      }
+    },
+    "control": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bundle_url", "sha256", "min_version"],
+      "properties": {
+        "bundle_url": {"type": "string", "pattern": "^https://"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "min_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"}
+      }
+    },
+    "images": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["xray", "sing-box", "nginx", "ops", "net"],
+      "properties": {
+        "xray": {"$ref": "#/$defs/image"},
+        "sing-box": {"$ref": "#/$defs/image"},
+        "nginx": {"$ref": "#/$defs/image"},
+        "ops": {"$ref": "#/$defs/image"},
+        "net": {"$ref": "#/$defs/image"}
+      }
+    },
+    "upstream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alpine", "xray", "sing_box", "nginx", "acme_sh"],
+      "properties": {
+        "alpine": {"type": "string", "minLength": 1},
+        "xray": {"type": "string", "minLength": 1},
+        "sing_box": {"type": "string", "minLength": 1},
+        "nginx": {"type": "string", "minLength": 1},
+        "acme_sh": {"type": "string", "minLength": 1}
+      }
+    },
+    "formats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["compose", "config", "data"],
+      "properties": {
+        "compose": {"const": 1},
+        "config": {"const": 1},
+        "data": {"const": 1}
+      }
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "architectures", "profiles", "features_version"],
+      "properties": {
+        "host": {"const": ["linux", "rootful-docker", "compose-v2"]},
+        "architectures": {"const": ["amd64", "arm64"]},
+        "profiles": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "features_version": {"const": 1}
+      }
+    },
+    "migrations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "direction", "reversible"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$"},
+          "direction": {"enum": ["forward", "none"]},
+          "reversible": {"type": "boolean"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference", "index_digest", "platforms"],
+      "properties": {
+        "reference": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._/-]+:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$"},
+        "index_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "platforms": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["linux/amd64", "linux/arm64"],
+          "properties": {
+            "linux/amd64": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+            "linux/arm64": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+          }
+        }
+      }
+    }
+  }
+}

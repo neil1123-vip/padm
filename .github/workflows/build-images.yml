@@ -1,0 +1,315 @@
+name: Build Docker Images
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Release version without the leading v
+        required: true
+        type: string
+      source_ref:
+        description: Full source commit to build
+        required: true
+        type: string
+      registry:
+        description: OCI registry hostname and namespace
+        required: true
+        type: string
+      push:
+        description: Push and sign release images
+        required: true
+        type: boolean
+    outputs:
+      artifact_name:
+        description: Release assets artifact produced after image publication
+        value: ${{ jobs.assemble.outputs.artifact_name }}
+      manifest_sha256:
+        description: SHA-256 of release-manifest.json
+        value: ${{ jobs.assemble.outputs.manifest_sha256 }}
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version without the leading v
+        required: true
+        default: dev
+        type: string
+      source_ref:
+        description: Source ref or commit
+        required: true
+        default: main
+        type: string
+      registry:
+        description: OCI registry hostname and namespace
+        required: true
+        default: ghcr.io/neil1123-vip
+        type: string
+      push:
+        description: Push and sign release images
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-images-${{ inputs.source_ref || github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  contract:
+    name: Docker contracts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 1
+
+      - name: Validate lock, schemas and contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash docker/release.sh validate-lock
+          bash -n install-docker.sh docker/release.sh docker/tests/image-smoke.sh
+          jq empty docker/contracts/*.json
+          bash docker/tests/phase1.sh
+          bash docker/tests/phase2.sh
+          bash docker/tests/phase3.sh
+          bash docker/tests/phase4.sh
+          bash docker/tests/phase5.sh
+
+  smoke:
+    name: Smoke ${{ matrix.image }} (${{ matrix.platform.name }})
+    needs: contract
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        image: [xray, sing-box, nginx, ops, net]
+        platform:
+          - name: amd64
+            value: linux/amd64
+          - name: arm64
+            value: linux/arm64
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 1
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build one platform
+        shell: bash
+        env:
+          PADM_RELEASE_VERSION: ${{ inputs.version }}
+          PADM_SOURCE_REF: ${{ inputs.source_ref }}
+          PADM_REGISTRY: ${{ inputs.registry }}
+          PADM_IMAGE_NAME: ${{ matrix.image }}
+          PADM_PLATFORM: ${{ matrix.platform.value }}
+          PADM_PLATFORM_NAME: ${{ matrix.platform.name }}
+        run: |
+          set -euo pipefail
+          set -a
+          . ./versions.lock
+          set +a
+          export REGISTRY="${PADM_REGISTRY}"
+          export IMAGE_TAG="ci-${GITHUB_RUN_ID}-${PADM_IMAGE_NAME}-${PADM_PLATFORM_NAME}"
+          export GIT_REVISION="${PADM_SOURCE_REF}"
+          smoke_ref="${PADM_REGISTRY}/padm-${PADM_IMAGE_NAME}:${IMAGE_TAG}"
+          docker buildx bake "${PADM_IMAGE_NAME}" \
+            --load \
+            --set "${PADM_IMAGE_NAME}.platforms=${PADM_PLATFORM}" \
+            --set "${PADM_IMAGE_NAME}.tags=${smoke_ref}" \
+            --set "${PADM_IMAGE_NAME}.args.PADM_VERSION=${PADM_RELEASE_VERSION}"
+          bash docker/tests/image-smoke.sh "${smoke_ref}" "${PADM_IMAGE_NAME}"
+
+  publish:
+    name: Publish ${{ matrix.image }}
+    if: ${{ inputs.push == true }}
+    needs: smoke
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      fail-fast: true
+      matrix:
+        image: [xray, sing-box, nginx, ops, net]
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 1
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.8.1
+
+      - name: Build and publish multi-arch image
+        id: image
+        shell: bash
+        env:
+          PADM_RELEASE_VERSION: ${{ inputs.version }}
+          PADM_SOURCE_REF: ${{ inputs.source_ref }}
+          PADM_REGISTRY: ${{ inputs.registry }}
+          PADM_IMAGE_NAME: ${{ matrix.image }}
+          COSIGN_IDENTITY_REGEX: https://github.com/${{ github.repository }}/.github/workflows/.*@refs/heads/main
+          COSIGN_OIDC_ISSUER: https://token.actions.githubusercontent.com
+        run: |
+          set -euo pipefail
+          set -a
+          . ./versions.lock
+          set +a
+          export REGISTRY="${PADM_REGISTRY}"
+          export IMAGE_TAG="${PADM_RELEASE_VERSION}"
+          export GIT_REVISION="${PADM_SOURCE_REF}"
+          image_ref="${PADM_REGISTRY}/padm-${PADM_IMAGE_NAME}:${PADM_RELEASE_VERSION}"
+          metadata_file="${RUNNER_TEMP}/metadata-${PADM_IMAGE_NAME}.json"
+          raw_file="${RUNNER_TEMP}/imagetools-${PADM_IMAGE_NAME}.json"
+          docker buildx bake "${PADM_IMAGE_NAME}" \
+            --push \
+            --provenance=mode=max \
+            --sbom=true \
+            --metadata-file "${metadata_file}" \
+            --set "${PADM_IMAGE_NAME}.platforms=linux/amd64,linux/arm64" \
+            --set "${PADM_IMAGE_NAME}.tags=${image_ref}" \
+            --set "${PADM_IMAGE_NAME}.args.PADM_VERSION=${PADM_RELEASE_VERSION}"
+          index_digest=$(jq -r --arg image "${PADM_IMAGE_NAME}" \
+            '.[$image]["containerimage.digest"] // empty' "${metadata_file}")
+          if [[ ! "${index_digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            index_digest=$(docker buildx imagetools inspect "${image_ref}" |
+              sed -n 's/^Digest:[[:space:]]*//p' | head -n 1)
+          fi
+          [[ "${index_digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            echo "Unable to resolve index digest" >&2
+            exit 1
+          }
+          docker buildx imagetools inspect "${image_ref}" --raw >"${raw_file}"
+          jq -e '
+            [.manifests[]? | select(.platform.os == "linux" and
+              (.platform.architecture == "amd64" or .platform.architecture == "arm64"))] |
+            length == 2 and (map(.platform.architecture) | sort) == ["amd64", "arm64"] and
+            all(.[]; .digest | test("^sha256:[0-9a-f]{64}$"))
+          ' "${raw_file}" >/dev/null
+          jq -e '
+            [.manifests[]?.annotations? // {} |
+              select(."vnd.docker.reference.type" == "attestation-manifest")] | length >= 1
+          ' "${raw_file}" >/dev/null
+          cosign sign --yes "${image_ref}@${index_digest}"
+          cosign verify "${image_ref}@${index_digest}" \
+            --certificate-identity-regexp "${COSIGN_IDENTITY_REGEX}" \
+            --certificate-oidc-issuer "${COSIGN_OIDC_ISSUER}" \
+            >"${RUNNER_TEMP}/cosign-${PADM_IMAGE_NAME}.json"
+          jq -n \
+            --arg name "${PADM_IMAGE_NAME}" \
+            --arg reference "${image_ref}@${index_digest}" \
+            --arg index_digest "${index_digest}" \
+            --slurpfile raw "${raw_file}" \
+            '{name: $name, reference: $reference, index_digest: $index_digest,
+              platforms: ([$raw[0].manifests[]? |
+                select(.platform.os == "linux" and
+                  (.platform.architecture == "amd64" or .platform.architecture == "arm64")) |
+                {key: ("linux/" + .platform.architecture), value: .digest}] | from_entries)}' \
+            >"${RUNNER_TEMP}/${PADM_IMAGE_NAME}.json"
+
+      - name: Upload image evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: padm-image-${{ matrix.image }}-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/${{ matrix.image }}.json
+            ${{ runner.temp }}/metadata-${{ matrix.image }}.json
+            ${{ runner.temp }}/imagetools-${{ matrix.image }}.json
+            ${{ runner.temp }}/cosign-${{ matrix.image }}.json
+
+  assemble:
+    name: Assemble release assets
+    if: ${{ inputs.push == true }}
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      artifact_name: ${{ steps.output.outputs.artifact_name }}
+      manifest_sha256: ${{ steps.output.outputs.manifest_sha256 }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 1
+
+      - name: Download image evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: padm-image-*-${{ github.run_id }}
+          path: ${{ runner.temp }}/image-results
+          merge-multiple: true
+
+      - name: Build control bundle and release manifest
+        id: manifest
+        shell: bash
+        env:
+          PADM_RELEASE_VERSION: ${{ inputs.version }}
+          PADM_SOURCE_REF: ${{ inputs.source_ref }}
+          PADM_REGISTRY: ${{ inputs.registry }}
+        run: |
+          set -euo pipefail
+          assets="${RUNNER_TEMP}/release-assets"
+          mkdir -p "${assets}"
+          tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -cf - \
+            install-docker.sh docker shell/core/deployment_mode.sh versions.lock docker-bake.hcl \
+            documents/docker*.md | gzip -n >"${assets}/padm-docker-bundle.tar.gz"
+          bundle_sha256=$(sha256sum "${assets}/padm-docker-bundle.tar.gz" | cut -d ' ' -f 1)
+          bundle_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${PADM_RELEASE_VERSION}/padm-docker-bundle.tar.gz"
+          bash docker/release.sh manifest \
+            --version "${PADM_RELEASE_VERSION}" \
+            --commit "${PADM_SOURCE_REF}" \
+            --created-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --registry "${PADM_REGISTRY}" \
+            --bundle-url "${bundle_url}" \
+            --bundle-sha256 "${bundle_sha256}" \
+            --results-dir "${RUNNER_TEMP}/image-results" \
+            --output "${assets}/release-manifest.json"
+          sha256sum "${assets}/release-manifest.json" >"${assets}/release-manifest.sha256"
+          cp "${RUNNER_TEMP}/image-results"/*.json "${assets}/" 2>/dev/null || true
+          printf '%s\n' "${bundle_sha256}" >"${assets}/bundle.sha256"
+
+      - name: Expose release artifact metadata
+        id: output
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_name="padm-release-assets-${GITHUB_RUN_ID}"
+          manifest_sha256=$(cut -d ' ' -f 1 "${RUNNER_TEMP}/release-assets/release-manifest.sha256")
+          echo "artifact_name=${artifact_name}" >>"${GITHUB_OUTPUT}"
+          echo "manifest_sha256=${manifest_sha256}" >>"${GITHUB_OUTPUT}"
+
+      - name: Upload release assets artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: padm-release-assets-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 14
+          path: ${{ runner.temp }}/release-assets

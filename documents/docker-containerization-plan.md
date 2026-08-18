@@ -301,6 +301,10 @@ PADM_NET_IMAGE=ghcr.io/example/padm-net@sha256:...
 
 ### 阶段 5：CI 构建与发布
 
+状态：实现完成（2026-08-18），实现范围和验证结果见
+[Docker 容器化阶段 5 基线](docker-phase5-baseline.md)。真实双架构构建、签名和
+Release API 由 GitHub CI 执行。
+
 新增可复用的 `build-images.yml`，由现有 Release 工作流直接调用，不依赖 `GITHUB_TOKEN` 创建 Release 后再触发另一个工作流。
 
 CI 流程：
