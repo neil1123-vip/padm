@@ -135,7 +135,7 @@ padm-docker validate
 padm-docker status
 ```
 
-需要固定控制脚本版本时，把 `install` 改为 `install --ref <40 位 commit SHA>`；不要把 `latest` 当作生产版本锁。CI Release 同时提供 `release-manifest.json`、`release-manifest.sig`、`release-manifest.sigstore.json` 和 `padm-docker-bundle.tar.gz`，更新时会校验这些资产的签名和摘要。
+需要固定控制脚本版本时，把 `install` 改为 `install --ref <40 位 commit SHA>`；不要把 `latest` 当作生产版本锁。CI Release 同时提供 `release-manifest.json`、Cosign 签发的 Sigstore bundle v0.3（`release-manifest.sigstore.json`，签名内嵌）和 `padm-docker-bundle.tar.gz`，更新时会校验 bundle 签名和摘要。
 
 示例文件中的 digest、密钥和 token 是占位值，不能直接用于生产。生产镜像引用必须使用 CI Release 提供的版本标签和 digest，例如 `ghcr.io/neil1123-vip/padm-xray:3.1.9@sha256:<digest>`；不要使用 `latest`，也不要在主机上手工改成未发布的 tag。
 
@@ -177,13 +177,12 @@ padm-docker acme <issue|renew> --domain example.com --email admin@example.com --
 
 ### 更新
 
-更新只接受已签名的 CI Release manifest。默认命令读取最新 Release 的 manifest、Cosign signature、Sigstore bundle 和控制 bundle；也可以显式指定本地或 HTTPS 资产：
+更新只接受已签名的 CI Release manifest。默认命令读取最新 Release 的 manifest、Cosign 签发的 Sigstore bundle v0.3 和控制 bundle；也可以显式指定本地或 HTTPS 资产：
 
 ```bash
 padm-docker update
 padm-docker update \
   --manifest <URL|文件> \
-  --signature <URL|文件> \
   --bundle <URL|文件> \
   [--control-bundle <URL|文件>]
 ```
@@ -233,7 +232,7 @@ padm 面向 Linux 服务器运行。代码会识别 Debian、Ubuntu、RHEL/CentO
 | 权限与连接 | root，rootful Docker Engine，本机 rootful Unix socket；不支持 rootless daemon、远程 context 或用户级 socket。 |
 | Compose | Docker Compose v2 插件。 |
 | 架构 | `amd64` 或 `arm64`，主机和 daemon 架构必须一致。 |
-| 主机命令 | `bash` 4+、`docker`、`jq`、`sha256sum`、`tar`，以及 `curl` 或 `wget`；执行签名更新还需要 `cosign`。 |
+| 主机命令 | `bash` 4+、`docker`、`jq`、`sha256sum`、`tar`，以及 `curl` 或 `wget`；签名更新还需要支持 Sigstore bundle v0.3 的 `cosign`（CI 当前使用 3.x）。 |
 | 内核能力 | 普通 profile 不需要额外 capability；WireGuard、Fail2ban、TUN/TProxy 等 `net-*` profile 需要按支持矩阵提供 `NET_ADMIN`、host network 或 `/dev/net/tun`。 |
 
 Docker 版不会自动安装 Docker、修改软件源或安装宿主软件。检测到原生版已安装、正在运行或残留状态时会拒绝安装，请先明确清理原生部署；两种模式不提供隐式迁移。

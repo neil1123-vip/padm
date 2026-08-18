@@ -81,6 +81,17 @@ grep -Fq 'id-token: write' "${BUILD_WORKFLOW}" || fail 'OIDC permission is missi
 grep -Fq 'packages: write' "${RELEASE_WORKFLOW}" || fail 'Release caller lacks package write permission'
 grep -Fq 'id-token: write' "${RELEASE_WORKFLOW}" || fail 'Release caller lacks OIDC permission'
 grep -Fq 'release-manifest.json' "${BUILD_WORKFLOW}" || fail 'release manifest is not an artifact'
+grep -Fq -- '--new-bundle-format=true' "${RELEASE_WORKFLOW}" || fail 'Release does not request the new Cosign bundle format'
+grep -Fq 'application/vnd.dev.sigstore.bundle.v0.3+json' "${RELEASE_WORKFLOW}" ||
+    fail 'Release does not validate the Sigstore v0.3 bundle media type'
+grep -Fq 'cosign verify-blob --bundle' "${RELEASE_WORKFLOW}" || fail 'Release does not verify the bundle directly'
+grep -Fq 'cosign verify-blob --bundle' "${PROJECT_ROOT}/docker/lib/manifest.sh" ||
+    fail 'runtime does not verify the manifest bundle directly'
+if grep -Fq -- '--output-signature' "${RELEASE_WORKFLOW}" ||
+    grep -Fq -- '--signature' "${RELEASE_WORKFLOW}" ||
+    grep -Fq -- '--signature' "${PROJECT_ROOT}/docker/lib/manifest.sh" "${PROJECT_ROOT}/docker/lib/lifecycle.sh"; then
+    fail 'Release still depends on a detached manifest signature'
+fi
 grep -Fq 'uses: ./.github/workflows/build-images.yml' "${RELEASE_WORKFLOW}" ||
     fail 'Release workflow does not call reusable image workflow'
 grep -Fq 'needs: [prepare, images]' "${RELEASE_WORKFLOW}" || fail 'Release workflow lacks image gate'

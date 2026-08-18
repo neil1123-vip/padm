@@ -9,14 +9,12 @@ readonly PADM_DOCKER_RELEASE_MANIFEST_URL_DEFAULT=https://github.com/neil1123-vi
 readonly PADM_DOCKER_COSIGN_IDENTITY_REGEX='^https://github\.com/neil1123-vip/padm/\.github/workflows/create_release\.yml@refs/heads/main$'
 readonly PADM_DOCKER_COSIGN_OIDC_ISSUER=https://token.actions.githubusercontent.com
 readonly PADM_DOCKER_MANIFEST_MAX_BYTES=2097152
-readonly PADM_DOCKER_SIGNATURE_MAX_BYTES=1048576
 readonly PADM_DOCKER_BUNDLE_MAX_BYTES=10485760
 readonly PADM_DOCKER_CONTROL_BUNDLE_MAX_BYTES=52428800
 readonly PADM_DOCKER_MANIFEST_IMAGE_NAMES=(xray sing-box nginx ops net)
 
 PADM_DOCKER_MANIFEST_TEMP_DIR=
 PADM_DOCKER_MANIFEST_FILE=
-PADM_DOCKER_MANIFEST_SIGNATURE=
 PADM_DOCKER_MANIFEST_BUNDLE=
 PADM_DOCKER_CONTROL_BUNDLE=
 PADM_DOCKER_MANIFEST_SHA256=
@@ -29,7 +27,6 @@ dockerManifestCleanup() {
     rm -rf -- "${tempDir}"
     PADM_DOCKER_MANIFEST_TEMP_DIR=
     PADM_DOCKER_MANIFEST_FILE=
-    PADM_DOCKER_MANIFEST_SIGNATURE=
     PADM_DOCKER_MANIFEST_BUNDLE=
     PADM_DOCKER_CONTROL_BUNDLE=
     PADM_DOCKER_MANIFEST_SHA256=
@@ -93,12 +90,12 @@ dockerManifestValidate() {
 }
 
 dockerManifestVerifySignature() {
-    local manifest=$1 signature=$2 bundle=$3
+    local manifest=$1 bundle=$2
     dockerRequireCommand cosign || {
         dockerError '缺少 cosign，拒绝验证 Docker release manifest'
         return 1
     }
-    cosign verify-blob --bundle "${bundle}" --signature "${signature}" \
+    cosign verify-blob --bundle "${bundle}" \
         --certificate-identity-regexp "${PADM_DOCKER_COSIGN_IDENTITY_REGEX}" \
         --certificate-oidc-issuer "${PADM_DOCKER_COSIGN_OIDC_ISSUER}" \
         "${manifest}" >/dev/null 2>&1 || {
@@ -109,7 +106,7 @@ dockerManifestVerifySignature() {
 
 dockerManifestPrepare() {
     local source=${1:-${PADM_DOCKER_RELEASE_MANIFEST_URL_DEFAULT}}
-    local signature=${2:-} bundle=${3:-} controlSource=${4:-}
+    local bundle=${2:-} controlSource=${3:-}
     local root tempDir arch controlUrl controlSha expectedSha
     dockerManifestCleanup || return 1
     root=$(dockerInstallRoot) || return 1
@@ -120,25 +117,17 @@ dockerManifestPrepare() {
     }
     PADM_DOCKER_MANIFEST_TEMP_DIR=${tempDir}
     PADM_DOCKER_MANIFEST_FILE=${tempDir}/release-manifest.json
-    PADM_DOCKER_MANIFEST_SIGNATURE=${tempDir}/release-manifest.sig
     PADM_DOCKER_MANIFEST_BUNDLE=${tempDir}/release-manifest.sigstore.json
     PADM_DOCKER_CONTROL_BUNDLE=${tempDir}/padm-docker-bundle.tar.gz
     dockerManifestInputCopy "${source}" "${PADM_DOCKER_MANIFEST_FILE}" "${PADM_DOCKER_MANIFEST_MAX_BYTES}" || {
         dockerError '无法获取 release manifest'
         return 1
     }
-    if [[ -z "${signature}" && "${source}" =~ /release-manifest[.]json$ ]]; then
-        signature=${source%release-manifest.json}release-manifest.sig
-    fi
     if [[ -z "${bundle}" && "${source}" =~ /release-manifest[.]json$ ]]; then
         bundle=${source%release-manifest.json}release-manifest.sigstore.json
     fi
-    [[ -n "${signature}" && -n "${bundle}" ]] || {
-        dockerError '本地 manifest 必须同时提供 signature 和 Sigstore bundle'
-        return 1
-    }
-    dockerManifestInputCopy "${signature}" "${PADM_DOCKER_MANIFEST_SIGNATURE}" "${PADM_DOCKER_SIGNATURE_MAX_BYTES}" || {
-        dockerError '无法获取 release manifest signature'
+    [[ -n "${bundle}" ]] || {
+        dockerError '本地 manifest 必须提供 Sigstore bundle'
         return 1
     }
     dockerManifestInputCopy "${bundle}" "${PADM_DOCKER_MANIFEST_BUNDLE}" "${PADM_DOCKER_BUNDLE_MAX_BYTES}" || {
@@ -150,7 +139,7 @@ dockerManifestPrepare() {
         return 1
     }
     dockerManifestVerifySignature "${PADM_DOCKER_MANIFEST_FILE}" \
-        "${PADM_DOCKER_MANIFEST_SIGNATURE}" "${PADM_DOCKER_MANIFEST_BUNDLE}" || return 1
+        "${PADM_DOCKER_MANIFEST_BUNDLE}" || return 1
     controlUrl=${controlSource}
     [[ -n "${controlUrl}" ]] || controlUrl=$(jq -er '.control.bundle_url' "${PADM_DOCKER_MANIFEST_FILE}") || return 1
     dockerManifestInputCopy "${controlUrl}" "${PADM_DOCKER_CONTROL_BUNDLE}" "${PADM_DOCKER_CONTROL_BUNDLE_MAX_BYTES}" || {

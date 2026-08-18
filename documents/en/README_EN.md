@@ -135,7 +135,7 @@ padm-docker validate
 padm-docker status
 ```
 
-To pin the control script version, change `install` to `install --ref <40-character commit SHA>`; do not treat `latest` as a production lock. A CI Release provides `release-manifest.json`, `release-manifest.sig`, `release-manifest.sigstore.json`, and `padm-docker-bundle.tar.gz`; updates verify their signatures and digests.
+To pin the control script version, change `install` to `install --ref <40-character commit SHA>`; do not treat `latest` as a production lock. A CI Release provides `release-manifest.json`, a Cosign-signed Sigstore bundle v0.3 (`release-manifest.sigstore.json`, with the signature embedded), and `padm-docker-bundle.tar.gz`; updates verify the bundle signature and digests.
 
 The example file contains placeholder digests, keys, and tokens and must not be used as-is. Production image references must use the version tag and digest from a CI Release, for example `ghcr.io/neil1123-vip/padm-xray:3.1.9@sha256:<digest>`; do not use `latest` or hand-edit an unpublished tag on the host.
 
@@ -177,13 +177,12 @@ Configuration changes generate and validate a candidate, check ports and Compose
 
 ### Updates
 
-Updates accept only a signed CI Release manifest. The default command reads the latest Release manifest, Cosign signature, Sigstore bundle, and control bundle; local or HTTPS assets can be supplied explicitly:
+Updates accept only a signed CI Release manifest. The default command reads the latest Release manifest, a Cosign-signed Sigstore bundle v0.3, and the control bundle; local or HTTPS assets can be supplied explicitly:
 
 ```bash
 padm-docker update
 padm-docker update \
   --manifest <URL|file> \
-  --signature <URL|file> \
   --bundle <URL|file> \
   [--control-bundle <URL|file>]
 ```
@@ -233,7 +232,7 @@ padm is designed for Linux servers. The code detects Debian, Ubuntu, RHEL/CentOS
 | Permission and connection | root, a rootful Docker Engine, and the local rootful Unix socket; rootless daemons, remote contexts, and user sockets are unsupported. |
 | Compose | Docker Compose v2 plugin. |
 | Architecture | `amd64` or `arm64`, with matching host and daemon architecture. |
-| Host commands | Bash 4+, `docker`, `jq`, `sha256sum`, `tar`, and either `curl` or `wget`; signed updates also require `cosign`. |
+| Host commands | Bash 4+, `docker`, `jq`, `sha256sum`, `tar`, and either `curl` or `wget`; signed updates also require Cosign with Sigstore bundle v0.3 support (CI currently uses 3.x). |
 | Kernel capabilities | The regular profiles need no extra capability. WireGuard, Fail2ban, TUN/TProxy, and other `net-*` profiles require the capability, host networking, or `/dev/net/tun` specified by the support matrix. |
 
 Docker mode does not install Docker, change software sources, or install host packages. If a native installation is active, present, or leaves ambiguous residue, the Docker entry refuses to proceed; there is no implicit migration between modes.

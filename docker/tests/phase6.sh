@@ -89,7 +89,7 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
         jq ".images.xray.reference = \"ghcr.io/example/padm-xray:3.2.0@sha256:$digest\"" "$source" >"$source.bad"
         ! dockerManifestValidate "$source.bad"
         dockerManifestVerifySignature() { return 1; }
-        ! dockerManifestVerifySignature "$source" a b
+        ! dockerManifestVerifySignature "$source" b
 
         dockerHostPreflight() { :; }
         dockerLockInstalledDeployment() { :; }

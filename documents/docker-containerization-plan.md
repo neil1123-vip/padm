@@ -175,7 +175,7 @@ Fail2ban、WireGuard、端口跳跃和 TUN/TProxy 的业务工具放在 `net` �
 
 ### 发布信任与 manifest
 
-固定 digest 只保证内容未变化，不证明发布者身份。`install-docker.sh` 内置受信任的 Cosign 验证镜像 digest、Fulcio issuer 和本仓库 Release workflow identity；下载 `release-manifest.json` 与 Sigstore bundle 后先验证签名身份，再读取任何 URL、bundle hash 或镜像 digest。离线安装可传入本地 manifest、签名 bundle 和镜像归档，但不提供跳过生产验签的隐式开关。
+固定 digest 只保证内容未变化，不证明发布者身份。`install-docker.sh` 内置受信任的 Cosign 验证镜像 digest、Fulcio issuer 和本仓库 Release workflow identity；下载 `release-manifest.json` 与 Sigstore bundle v0.3（签名内嵌）后先验证签名身份，再读取任何 URL、bundle hash 或镜像 digest。离线安装可传入本地 manifest、签名 bundle 和镜像归档，但不提供跳过生产验签的隐式开关。
 
 `release-manifest.json` 至少包含以下版本化字段，未知 schema 或缺少必填字段时拒绝安装：
 

@@ -18,7 +18,7 @@ dockerUsage() {
   padm-docker down
   padm-docker restart
   padm-docker logs [Compose logs 参数]
-  padm-docker update [--manifest <URL|文件> --signature <URL|文件> --bundle <URL|文件> [--control-bundle <URL|文件>]]
+  padm-docker update [--manifest <URL|文件> --bundle <URL|文件> [--control-bundle <URL|文件>]]
   padm-docker rollback
   padm-docker uninstall [--remove-images] [--purge --confirm PADM-DOCKER-PURGE]
 EOF
@@ -225,17 +225,12 @@ dockerPullManifestImages() {
 }
 
 dockerUpdateCommand() {
-    local manifest= signature= bundle= controlBundle= candidate backup
+    local manifest= bundle= controlBundle= candidate backup
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
         --manifest)
             [[ "$#" -ge 2 && -n "$2" ]] || return "${PADM_DOCKER_RC_USAGE}"
             manifest=$2
-            shift 2
-            ;;
-        --signature)
-            [[ "$#" -ge 2 && -n "$2" ]] || return "${PADM_DOCKER_RC_USAGE}"
-            signature=$2
             shift 2
             ;;
         --bundle)
@@ -260,7 +255,7 @@ dockerUpdateCommand() {
         dockerError 'Docker 服务尚未配置，请先执行 configure'
         return "${PADM_DOCKER_RC_COMPOSE}"
     }
-    dockerManifestPrepare "${manifest}" "${signature}" "${bundle}" "${controlBundle}" ||
+    dockerManifestPrepare "${manifest}" "${bundle}" "${controlBundle}" ||
         return "${PADM_DOCKER_RC_MANIFEST}"
     dockerPullManifestImages || return "${PADM_DOCKER_RC_COMPOSE}"
     dockerCreateUpdateCandidate || {

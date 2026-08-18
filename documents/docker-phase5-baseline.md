@@ -18,8 +18,8 @@
 - `.github/workflows/docker-ci.yml` 为 Pull Request 复用同一 workflow，禁止推送。
 - `.github/workflows/create_release.yml` 使用 concurrency 和 release-commit guard，
   只有镜像 workflow 成功、manifest 签名验证成功后才创建或补齐 Release 资产。
-- Release artifact 包含 `release-manifest.json`、Cosign signature/bundle、控制
-  bundle 和镜像构建证据，不把 manifest 回提交到 `main`。
+- Release artifact 包含 `release-manifest.json`、Cosign 签发的 Sigstore bundle v0.3、
+  控制 bundle 和镜像构建证据，不把 manifest 回提交到 `main`；签名直接内嵌在 bundle 中。
 
 ## 本地验证
 

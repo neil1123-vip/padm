@@ -94,7 +94,6 @@ jobs:
               });
             const required = [
               'release-manifest.json',
-              'release-manifest.sig',
               'release-manifest.sigstore.json',
               'padm-docker-bundle.tar.gz'
             ];
@@ -182,14 +181,14 @@ jobs:
         run: |
           set -euo pipefail
           manifest=release-assets/release-manifest.json
-          signature=release-assets/release-manifest.sig
           bundle=release-assets/release-manifest.sigstore.json
           jq -e --arg version "${RELEASE_VERSION}" --arg commit "${RELEASE_SHA}" \
             '.schema_version == 1 and .release.version == $version and .release.commit == $commit' \
             "${manifest}" >/dev/null
-          cosign sign-blob --yes --use-signing-config=false --new-bundle-format=false \
-            --bundle "${bundle}" --output-signature "${signature}" "${manifest}"
-          cosign verify-blob --bundle "${bundle}" --signature "${signature}" \
+          cosign sign-blob --yes --new-bundle-format=true --bundle "${bundle}" "${manifest}"
+          jq -e '.mediaType == "application/vnd.dev.sigstore.bundle.v0.3+json"' \
+            "${bundle}" >/dev/null
+          cosign verify-blob --bundle "${bundle}" \
             --certificate-identity-regexp "${PADM_COSIGN_IDENTITY_REGEX}" \
             --certificate-oidc-issuer "${PADM_COSIGN_OIDC_ISSUER}" "${manifest}" >/dev/null
 
