@@ -187,7 +187,8 @@ jobs:
           jq -e --arg version "${RELEASE_VERSION}" --arg commit "${RELEASE_SHA}" \
             '.schema_version == 1 and .release.version == $version and .release.commit == $commit' \
             "${manifest}" >/dev/null
-          cosign sign-blob --yes --bundle "${bundle}" --output-signature "${signature}" "${manifest}"
+          cosign sign-blob --yes --use-signing-config=false --new-bundle-format=false \
+            --bundle "${bundle}" --output-signature "${signature}" "${manifest}"
           cosign verify-blob --bundle "${bundle}" --signature "${signature}" \
             --certificate-identity-regexp "${PADM_COSIGN_IDENTITY_REGEX}" \
             --certificate-oidc-issuer "${PADM_COSIGN_OIDC_ISSUER}" "${manifest}" >/dev/null
