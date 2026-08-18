@@ -785,7 +785,8 @@ dockerGenerateDeployment() {
         },
         compose: {project: "padm-docker", profiles: profiles},
         core: {type: $r.core.type, protocol_ids: [$r.core.protocols[].id]},
-        listeners: [
+        listeners: (
+          [
           $r.core.protocols[] |
           {
             service: (if .id == 21 then "nginx" else $r.core.type end),
@@ -794,7 +795,7 @@ dockerGenerateDeployment() {
             transport: "tcp",
             address_families: .address_families
           }
-        ] + [
+          ] + [
           $r.host_integrations[] |
           if .type == "wireguard" then {
             service: "net-wireguard", public_port: $wireguardPort,
@@ -806,7 +807,8 @@ dockerGenerateDeployment() {
             ({service: $r.core.type, public_port: .settings.port,
               container_port: .settings.port, transport: "udp", address_families: ["ipv4"]})
           else empty end
-        ],
+          ]
+        ),
         images: {
           xray: {index_digest: ($r.images.xray | digest)},
           "sing-box": {index_digest: ($r.images["sing-box"] | digest)},
