@@ -2877,7 +2877,7 @@ manageRealityTarget() {
     menuItem 2 "刷新目标库质量" "复测统一目标库，按 TLS/PQC 与 ASN 关系写入结果"
     menuItem 3 "扫描本机附近网段" "运行 RealiTLScanner，发现目标并导入统一目标库"
     menuItem 4 "随机抽样同 ASN" "拉取本机 ASN 公告前缀，发现目标并导入统一目标库"
-    menuItem 5 "查看/切换可用目标" "分页查看统一 A/B 目标并直接切换"
+    menuItem 5 "查看/切换 A 级目标" "分页查看统一 A 级目标并直接切换"
     menuItem 6 "手动设置目标站" "输入 host[:port] 和可选 SNI"
     menuItem 7 "查看目标站黑名单" "显示 CDN/Apple 等不会参与扫描的目标"
     menuItem 8 "查看 PQC/ML-DSA-65 状态" "展示当前 pqv 与目标站评分"

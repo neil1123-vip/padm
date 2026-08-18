@@ -401,7 +401,7 @@ realityTargetResultCount() {
         printf '0\n'
         return 0
     }
-    awk -F'\t' '$10 == "A" || $10 == "B" {count++} END{print count + 0}' "${resultsFile}"
+    awk -F'\t' '$10 == "A" {count++} END{print count + 0}' "${resultsFile}"
 }
 
 realityTargetResultField() {
@@ -435,7 +435,7 @@ realityTargetResultLine() {
     local resultsFile
     resultsFile=$(realityTargetManagedResultsFile) || return 1
     [[ -n "${target}" && -f "${resultsFile}" ]] || return 1
-    awk -F'\t' -v target="${target}" '$1 == target {line = $0} END {if (line != "") print line; else exit 1}' "${resultsFile}"
+    awk -F'\t' -v target="${target}" '$1 == target && $10 == "A" {line = $0} END {if (line != "") print line; else exit 1}' "${resultsFile}"
 }
 
 realityTargetCachedAsnSummary() {
@@ -517,11 +517,11 @@ writeRealityTargetResultLine() {
     padmEnsureSafeDirectory "$(dirname -- "${resultsFile}")" || return 1
     padmCreateTempFileForTarget stagedFile "${resultsFile}" reality || return 1
     if [[ -f "${resultsFile}" ]]; then
-        awk -F'\t' -v target="${target}" '$1 != target && ($10 == "A" || $10 == "B")' "${resultsFile}" >"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
+        awk -F'\t' -v target="${target}" '$1 != target && $10 == "A"' "${resultsFile}" >"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
     else
         : >"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
     fi
-    if [[ "${score}" == "A" || "${score}" == "B" ]]; then
+    if [[ "${score}" == "A" ]]; then
         formatRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}" >>"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
     fi
     commitGeneratedFile "${stagedFile}" "${resultsFile}" 644 || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
@@ -530,30 +530,33 @@ writeRealityTargetResultLine() {
 writeRealityTargetResultLines() {
     local linesFile=$1
     local resultsFile stagedFile
-    [[ -s "${linesFile}" ]] || return 0
+    [[ -f "${linesFile}" ]] || return 0
     resultsFile=$(realityTargetManagedResultsFile) || return 1
     padmEnsureSafeDirectory "$(dirname -- "${resultsFile}")" || return 1
     padmCreateTempFileForTarget stagedFile "${resultsFile}" reality || return 1
-    if [[ -f "${resultsFile}" ]]; then
+    if [[ -f "${resultsFile}" && -s "${linesFile}" ]]; then
         awk -F'\t' '
           NR == FNR {
             if (!($1 in seen)) order[++count] = $1
             seen[$1] = 1
-            keep[$1] = ($10 == "A" || $10 == "B")
+            keep[$1] = ($10 == "A")
             if (keep[$1]) line[$1] = $0
             next
           }
-          !($1 in seen) && ($10 == "A" || $10 == "B") { print }
+          !($1 in seen) && $10 == "A" { print }
           END {
             for (i = 1; i <= count; i++) if (keep[order[i]]) print line[order[i]]
           }
         ' "${linesFile}" "${resultsFile}" >"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
+    elif [[ -f "${resultsFile}" ]]; then
+        awk -F'\t' '$10 == "A"' "${resultsFile}" >"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
     else
+        [[ -s "${linesFile}" ]] || { padmRemoveCleanupPath "${stagedFile}"; return 0; }
         awk -F'\t' '
           {
             if (!($1 in seen)) order[++count] = $1
             seen[$1] = 1
-            keep[$1] = ($10 == "A" || $10 == "B")
+            keep[$1] = ($10 == "A")
             if (keep[$1]) line[$1] = $0
           }
           END {
@@ -565,12 +568,12 @@ writeRealityTargetResultLines() {
 }
 
 realityTargetRefreshRecords() {
-    local resultsFile line target parsed host candidateHost sni name _region category cdnRisk _rank _recommended note
+    local resultsFile line target parsed host sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note
     resultsFile=$(realityTargetManagedResultsFile) || return 1
     if [[ -s "${resultsFile}" ]]; then
         while IFS= read -r line; do
-            target=${line%%$'\t'*}
-            [[ -n "${target}" && "${line}" == *$'\t'* ]] || continue
+            IFS=$'\t' read -r target sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note <<<"${line}"
+            [[ -n "${target}" && "${score}" == "A" ]] || continue
             parsed=$(parseHostPort "${target}" 443)
             host=${parsed%:*}
             realityTargetCandidateBlocked "${host}" && continue
@@ -593,7 +596,7 @@ removeRealityTargetsFromUnifiedLibrary() {
     checkLogBackupCreate libraryBackupDir "${resultsFile}" "${candidatesFile}" || return 1
     if [[ -f "${resultsFile}" ]]; then
         padmCreateTempFileForTarget resultsStageFile "${resultsFile}" reality || { padmRemoveCleanupPath "${libraryBackupDir}"; return 1; }
-        awk -F'\t' 'NR == FNR {targets[$1] = 1; next} !($1 in targets) && ($10 == "A" || $10 == "B")' "${targetsFile}" "${resultsFile}" >"${resultsStageFile}" || {
+        awk -F'\t' 'NR == FNR {targets[$1] = 1; next} !($1 in targets) && $10 == "A"' "${targetsFile}" "${resultsFile}" >"${resultsStageFile}" || {
             padmRemoveCleanupPath "${resultsStageFile}"
             padmRemoveCleanupPath "${libraryBackupDir}"
             return 1
@@ -650,8 +653,8 @@ sortedRealityTargetResults() {
     resultsFile="${PADM_REALITY_TARGET_RESULTS_FILE:-/etc/padm/reality_targets_results.tsv}"
     [[ -f "${resultsFile}" ]] || return 1
     awk -F'\t' '
-      {
-        scoreRank = ($10 == "A" ? 4 : ($10 == "B" ? 3 : ($10 == "C" ? 2 : ($10 == "FAIL" ? 0 : 1))))
+      $10 == "A" {
+        scoreRank = 4
         networkRank = ($9 == "same_asn" ? 4 : ($9 == "same_provider" ? 3 : ($9 == "different_network" ? 2 : 1)))
         cdnRank = ($5 == "no" ? 3 : ($5 == "unknown" ? 2 : 1))
         certRank = ($12 ~ /^[0-9]+$/ ? $12 : 0)
@@ -662,7 +665,7 @@ sortedRealityTargetResults() {
 }
 
 bestScannedRealityTargetLine() {
-    sortedRealityTargetResults | awk -F'\t' '$10 == "A" || $10 == "B" {print; found=1; exit} END{if (!found) exit 1}'
+    sortedRealityTargetResults | awk -F'\t' '$10 == "A" {print; found=1; exit} END{if (!found) exit 1}'
 }
 
 selectScannedRealityTarget() {
@@ -1617,7 +1620,7 @@ importRealityScannerResults() {
                     score=$(realityTargetResultField "${probePayload}" 10)
                     case "${score}" in
                     A) countA=$((countA + 1)); imported=$((imported + 1)) ;;
-                    B) countB=$((countB + 1)); imported=$((imported + 1)) ;;
+                    B) countB=$((countB + 1)); skipped=$((skipped + 1)) ;;
                     C) countC=$((countC + 1)); skipped=$((skipped + 1)) ;;
                     *) countFail=$((countFail + 1)); skipped=$((skipped + 1)) ;;
                     esac
@@ -1657,7 +1660,7 @@ importRealityScannerResults() {
     if [[ -n "${summaryVar}" ]]; then
         printf -v "${summaryVar}" '%s\t%s\t%s\t%s\t%s\t%s' "${imported}" "${skipped}" "${countA}" "${countB}" "${countC}" "${countFail}"
     fi
-    realityTargetStatusBlock green "RealiTLScanner 导入" "二次检测: ${totalRecords}" "并发: ${maxJobs}" "重复域名: ${duplicateCount}" "写入 A/B: ${imported}" "剔除/跳过: ${skipped}" "A: ${countA}" "B: ${countB}" "C剔除: ${countC}" "FAIL剔除: ${countFail}" "耗时: $(($(date +%s) - importStart))s"
+    realityTargetStatusBlock green "RealiTLScanner 导入" "二次检测: ${totalRecords}" "并发: ${maxJobs}" "重复域名: ${duplicateCount}" "写入 A: ${imported}" "剔除/跳过: ${skipped}" "A: ${countA}" "B剔除: ${countB}" "C剔除: ${countC}" "FAIL剔除: ${countFail}" "耗时: $(($(date +%s) - importStart))s"
 }
 
 
@@ -2111,7 +2114,7 @@ showRealityTargetQualityActions() {
     local target=$1
     local action confirm
     echoContent title "\n┌─ REALITY 目标站后续操作 ─────────────────────────────"
-    menuItem 1 "去查看/切换可用目标" "打开统一 A/B 目标列表并直接切换"
+    menuItem 1 "去查看/切换 A 级目标" "打开统一 A 级目标列表并直接切换"
     menuItem 2 "加入目标站黑名单" "后续不参与统一目标库刷新和扫描导入"
     menuReturnItem 3 "返回" "回到 REALITY 目标站管理"
     menuClose
@@ -2148,13 +2151,12 @@ showRealityTargetCachedQuality() {
 realityTargetFilterTitle() {
     case "$1" in
     A|a) printf 'A 级\n' ;;
-    B|b) printf 'B 级\n' ;;
     same_asn|同ASN) printf '同 ASN\n' ;;
     same_provider|同提供商|相近网络) printf '同提供商\n' ;;
     local_network|同网络|本机网络) printf '同网络\n' ;;
     scanner|扫描)
         printf 'RealiTLScanner\n' ;;
-    all|全部|*) printf '全部可用\n' ;;
+    all|全部|*) printf '全部 A 级\n' ;;
     esac
 }
 
@@ -2163,13 +2165,10 @@ realityTargetScanResultFilterMatches() {
     local networkMatch=$2
     local filter=${3:-all}
     local category=${4:-}
-    [[ "${score}" == "A" || "${score}" == "B" ]] || return 1
+    [[ "${score}" == "A" ]] || return 1
     case "${filter}" in
     A|a)
         [[ "${score}" == "A" ]]
-        ;;
-    B|b)
-        [[ "${score}" == "B" ]]
         ;;
     same_asn|同ASN)
         [[ "${networkMatch}" == "same_asn" ]]
@@ -2193,26 +2192,24 @@ selectRealityTargetScanResultFilter() {
     local selected
     {
         echoContent title "\n┌─ REALITY 检测结果范围 ─────────────────────────────"
-        menuItem 1 "全部可用" "显示统一结果表中的 A/B 目标"
+        menuItem 1 "全部 A 级" "显示统一结果表中的 A 级目标"
         menuItem 2 "A 级" "TLS1.3 + X25519MLKEM768 + 证书链长度达标"
-        menuItem 3 "B 级" "TLS1.3 + X25519MLKEM768，证书链长度未达 A 级"
-        menuItem 4 "同 ASN" "只看 network=same_asn"
-        menuItem 5 "同提供商" "只看 network=same_provider"
-        menuItem 6 "同网络" "显示 same_asn 和 same_provider"
-        menuItem 7 "RealiTLScanner" "只看 category=scanner 的网段扫描结果"
-        menuReturnItem 8 "返回" "回到 REALITY 目标站管理"
+        menuItem 3 "同 ASN" "只看 network=same_asn"
+        menuItem 4 "同提供商" "只看 network=same_provider"
+        menuItem 5 "同网络" "显示 same_asn 和 same_provider"
+        menuItem 6 "RealiTLScanner" "只看 category=scanner 的网段扫描结果"
+        menuReturnItem 7 "返回" "回到 REALITY 目标站管理"
         menuClose
     } >&2
-    autoRead reality_target_result_filter "请选择查看范围[默认1=全部可用]:" selected
+    autoRead reality_target_result_filter "请选择查看范围[默认1=全部 A 级]:" selected
     case "${selected:-1}" in
     1) printf 'all\n' ;;
     2) printf 'A\n' ;;
-    3) printf 'B\n' ;;
-    4) printf 'same_asn\n' ;;
-    5) printf 'same_provider\n' ;;
-    6) printf 'local_network\n' ;;
-    7) printf 'scanner\n' ;;
-    8|r|R) printf 'return\n' ;;
+    3) printf 'same_asn\n' ;;
+    4) printf 'same_provider\n' ;;
+    5) printf 'local_network\n' ;;
+    6) printf 'scanner\n' ;;
+    7|r|R) printf 'return\n' ;;
     *) return 1 ;;
     esac
 }
@@ -2223,7 +2220,7 @@ showRealityTargetScanResults() {
     local page=${3:-1} pageSize=${REALITY_TARGET_RESULT_PAGE_SIZE:-10} total maxPage choice
     local line itemIndex=0 pageIndex=1 start end target sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note checkedTime titleFilter selectedLine selectedTarget selectedSni parsed absoluteIndex
     if [[ "$(realityTargetResultCount)" -eq 0 ]]; then
-        realityTargetStatusBlock yellow "REALITY 可用目标" "暂无 A/B 级目标"
+        realityTargetStatusBlock yellow "REALITY A 级目标" "暂无 A 级目标"
         return 1
     fi
     if [[ "${filter}" == "return" ]]; then
@@ -2242,7 +2239,7 @@ showRealityTargetScanResults() {
         start=$(( (page - 1) * pageSize + 1 ))
         end=$(( page * pageSize ))
         titleFilter=$(realityTargetFilterTitle "${filter}")
-        echoContent title "\n┌─ REALITY 可用目标：${titleFilter} ───────────────────────────────"
+        echoContent title "\n┌─ REALITY A 级目标：${titleFilter} ───────────────────────────────"
         menuLine "筛选条件：${filter}；第 ${page}/${maxPage} 页；总数：${total}；n 下一页；p 上一页；f 重新筛选；r 返回"
         itemIndex=0
         pageIndex=1
@@ -2445,7 +2442,7 @@ scanLocalAsnRealityTargets() {
                 if [[ -n "${probePayload}" ]]; then
                     printf '%s\n' "${probePayload}" >>"${resultLinesFile}"
                     score=$(realityTargetResultField "${probePayload}" 10)
-                    if [[ "${score}" == "A" || "${score}" == "B" ]]; then
+                    if [[ "${score}" == "A" ]]; then
                         networkMatch=$(realityTargetResultField "${probePayload}" 9)
                         case "${networkMatch}" in
                         same_asn) sameAsn=$((sameAsn + 1)) ;;
@@ -2490,11 +2487,11 @@ scanLocalAsnRealityTargets() {
     padmRemoveCleanupPath "${failedTargetsFile}"
     padmRemoveCleanupPath "${probeDir}"
     scanSeconds=$(( $(date +%s) - scanStart ))
-    realityTargetStatusBlock green "REALITY 目标库质量刷新" "复测完成" "目标: ${processed}" "并发: ${maxJobs}" "保留 A/B: ${resolved}" "same_asn: ${sameAsn}" "same_provider: ${sameProvider}" "different_network: ${differentNetwork}" "剔除: ${failed}" "耗时: ${scanSeconds}s"
+    realityTargetStatusBlock green "REALITY 目标库质量刷新" "复测完成" "目标: ${processed}" "并发: ${maxJobs}" "保留 A: ${resolved}" "same_asn: ${sameAsn}" "same_provider: ${sameProvider}" "different_network: ${differentNetwork}" "剔除: ${failed}" "耗时: ${scanSeconds}s"
     if [[ "$(realityTargetResultCount)" -gt 0 ]]; then
-        realityTargetStatusBlock green "REALITY 目标库质量刷新" "自动推荐将优先使用统一结果表中的 A/B 级目标"
+        realityTargetStatusBlock green "REALITY 目标库质量刷新" "自动推荐将优先使用统一结果表中的 A 级目标"
     else
-        realityTargetStatusBlock yellow "REALITY 目标库质量刷新" "未得到 A/B 级结果" "自动推荐仍回退到 www.ibm.com:443"
+        realityTargetStatusBlock yellow "REALITY 目标库质量刷新" "未得到 A 级结果" "自动推荐仍回退到 www.ibm.com:443"
     fi
 }
 

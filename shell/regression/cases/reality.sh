@@ -252,11 +252,9 @@ EOF
     [[ "$(realityTargetCachedNetworkSummary "www.ibm.com:443")" == "同 ASN" ]]
     [[ "$(realityTargetCachedAsnSummary "missing.example.com:443")" == "暂无缓存" ]]
     writeRealityTargetCacheLine "www.ibm.com:443" "B" "yes" "2048" "yes" "1234567891" "updated"
-    cachedLine=$(realityTargetResultLine "www.ibm.com:443")
-    [[ "$(realityTargetResultField "${cachedLine}" 6)" == "192.0.2.44" ]]
-    [[ "$(realityTargetResultField "${cachedLine}" 7)" == "AS64500" ]]
-    [[ "$(realityTargetResultField "${cachedLine}" 9)" == "same_asn" ]]
-    [[ "$(realityTargetResultField "${cachedLine}" 10)" == "B" ]]
+    cachedLine=$(realityTargetResultLine "www.ibm.com:443" 2>/dev/null || true)
+    [[ -z "${cachedLine}" ]]
+    [[ "$(realityTargetResultCount)" == "0" ]]
     ! realityTargetCandidates | grep -q '^www.cloudflare.com|'
     ! realityTargetCandidates | grep -q '^www.apple.com|'
 
@@ -568,7 +566,7 @@ JSON
 runRealityConfigScannerRegression() {
     local scannerCandidatesFile="${TMP_DIR}/reality-config-scanner-candidates.txt"
     local oldCandidatesFile="${PADM_REALITY_TARGET_CANDIDATES_FILE:-}"
-    local scannerLine refreshScannerLine sameAsnLine batchLinesFile failedTargetsFile scannerSummary sameAsnSummary seenDomainsFile
+    local scannerLine refreshScannerLine sameAsnLine batchLinesFile failedTargetsFile emptyLinesFile scannerSummary sameAsnSummary seenDomainsFile
     local asnLookupFile="${TMP_DIR}/reality-scanner-asn-lookups.log"
     local concurrencyDir="${TMP_DIR}/reality-scanner-concurrency"
     local refreshConcurrencyDir="${TMP_DIR}/reality-refresh-concurrency"
@@ -693,6 +691,7 @@ CSV
     unset REALITY_ASN_LOOKUP_ARGS_FILE PADM_REALITY_SECONDARY_JOBS
     batchLinesFile="${TMP_DIR}/reality-batch-lines.tsv"
     failedTargetsFile="${TMP_DIR}/reality-failed-targets.txt"
+    emptyLinesFile="${TMP_DIR}/reality-empty-lines.tsv"
     writeRealityTargetResultLine "batch-old.example.com:443" "old.example.com" "Old Batch" "test" "unknown" "192.0.2.20" "AS64500" "ExampleNet" "same_asn" "B" "yes" "4096" "yes" "1234567800" "old batch line"
     writeRealityTargetResultLine "single-drop.example.com:443" "single-drop.example.com" "Single Drop" "test" "unknown" "192.0.2.23" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567800" "old A line"
     writeRealityTargetResultLine "single-drop.example.com:443" "single-drop.example.com" "Single Drop" "test" "unknown" "192.0.2.23" "AS64500" "ExampleNet" "same_asn" "C" "no" "4096" "yes" "1234567801" "new C line"
@@ -707,10 +706,14 @@ CSV
     writeRealityTargetResultLines "${batchLinesFile}"
     batchLine=$(grep -F $'batch-old.example.com:443\tnew.example.com' "${PADM_REALITY_TARGET_SCAN_FILE}")
     [[ "$(realityTargetResultField "${batchLine}" 10)" == "A" ]]
-    grep -qF $'batch-new.example.com:443\tbatch-new.example.com' "${PADM_REALITY_TARGET_SCAN_FILE}"
+    ! grep -qF $'batch-new.example.com:443\tbatch-new.example.com' "${PADM_REALITY_TARGET_SCAN_FILE}"
     ! grep -qF $'batch-drop.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
     ! grep -qF $'batch-c.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
-    awk -F'\t' '$10 != "A" && $10 != "B" {exit 1}' "${PADM_REALITY_TARGET_SCAN_FILE}"
+    awk -F'\t' '$10 != "A" {exit 1}' "${PADM_REALITY_TARGET_SCAN_FILE}"
+    formatRealityTargetResultLine "legacy-b.example.com:443" "legacy-b.example.com" "Legacy B" "test" "unknown" "198.51.100.30" "AS64501" "RemoteNet" "different_network" "B" "yes" "4096" "yes" "1234567899" "legacy B" >>"${PADM_REALITY_TARGET_SCAN_FILE}"
+    : >"${emptyLinesFile}"
+    writeRealityTargetResultLines "${emptyLinesFile}"
+    ! grep -qF $'legacy-b.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
     printf '%s\n' "batch-old.example.com:443" >"${failedTargetsFile}"
     printf '%s\n' "batch-old.example.com|batch-old.example.com|Batch Old|global|large_site|unknown|9|yes|batch candidate" >>"${scannerCandidatesFile}"
     removeRealityTargetsFromUnifiedLibrary "${failedTargetsFile}"
@@ -724,7 +727,7 @@ CSV
     writeRealityTargetResultLine "remote.example.com:443" "sni.remote.example.com" "Remote Example" "test" "no" "198.51.100.1" "AS64501" "RemoteNet" "different_network" "A" "yes" "8192" "yes" "1234567899" "longer cert but different network"
     writeRealityTargetResultLine "hidden-c.example.com:443" "hidden-c.example.com" "Hidden C" "test" "no" "198.51.100.2" "AS64501" "RemoteNet" "different_network" "C" "no" "4096" "yes" "1234567899" "must not persist"
     [[ "$(realityTargetResultCount)" == "2" ]]
-    [[ "$(realityTargetFilterTitle all)" == "全部可用" ]]
+    [[ "$(realityTargetFilterTitle all)" == "全部 A 级" ]]
     ! realityTargetScanResultFilterMatches "C" "same_asn" "all" "test"
     if ! selectRealityTargetFromScanResults <<<"1"; then
         return 1
@@ -803,7 +806,7 @@ runRealityUnifiedLibraryRollbackRegression() (
     }
     removeRealityTargetsFromUnifiedLibrary "${targetsFile}"
     ! grep -qF $'remove.example.com:443\t' "${resultsFile}"
-    grep -qF $'keep.example.com:443\t' "${resultsFile}"
+    ! grep -qF $'keep.example.com:443\t' "${resultsFile}"
     ! grep -q '^remove.example.com|' "${candidatesFile}"
     grep -q '^keep.example.com|' "${candidatesFile}"
     ! compgen -G "${root}/.reality_targets_results.tsv.reality.*" >/dev/null
