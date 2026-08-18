@@ -175,8 +175,8 @@ jobs:
       - name: Sign and verify release manifest
         shell: bash
         env:
-          COSIGN_IDENTITY_REGEX: https://github.com/${{ github.repository }}/.github/workflows/.*@refs/heads/main
-          COSIGN_OIDC_ISSUER: https://token.actions.githubusercontent.com
+          PADM_COSIGN_IDENTITY_REGEX: https://github.com/${{ github.repository }}/.github/workflows/.*@refs/heads/main
+          PADM_COSIGN_OIDC_ISSUER: https://token.actions.githubusercontent.com
           RELEASE_VERSION: ${{ needs.prepare.outputs.release_version }}
           RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
         run: |
@@ -189,8 +189,8 @@ jobs:
             "${manifest}" >/dev/null
           cosign sign-blob --yes --bundle "${bundle}" --output-signature "${signature}" "${manifest}"
           cosign verify-blob --bundle "${bundle}" --signature "${signature}" \
-            --certificate-identity-regexp "${COSIGN_IDENTITY_REGEX}" \
-            --certificate-oidc-issuer "${COSIGN_OIDC_ISSUER}" "${manifest}" >/dev/null
+            --certificate-identity-regexp "${PADM_COSIGN_IDENTITY_REGEX}" \
+            --certificate-oidc-issuer "${PADM_COSIGN_OIDC_ISSUER}" "${manifest}" >/dev/null
 
       - name: Create or update GitHub Release
         shell: bash

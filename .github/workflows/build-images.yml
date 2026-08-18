@@ -173,8 +173,8 @@ jobs:
           PADM_SOURCE_REF: ${{ inputs.source_ref }}
           PADM_REGISTRY: ${{ inputs.registry }}
           PADM_IMAGE_NAME: ${{ matrix.image }}
-          COSIGN_IDENTITY_REGEX: https://github.com/${{ github.repository }}/.github/workflows/.*@refs/heads/main
-          COSIGN_OIDC_ISSUER: https://token.actions.githubusercontent.com
+          PADM_COSIGN_IDENTITY_REGEX: https://github.com/${{ github.repository }}/.github/workflows/.*@refs/heads/main
+          PADM_COSIGN_OIDC_ISSUER: https://token.actions.githubusercontent.com
         run: |
           set -euo pipefail
           set -a
@@ -218,8 +218,8 @@ jobs:
           ' "${raw_file}" >/dev/null
           cosign sign --yes "${image_ref}@${index_digest}"
           cosign verify "${image_ref}@${index_digest}" \
-            --certificate-identity-regexp "${COSIGN_IDENTITY_REGEX}" \
-            --certificate-oidc-issuer "${COSIGN_OIDC_ISSUER}" \
+            --certificate-identity-regexp "${PADM_COSIGN_IDENTITY_REGEX}" \
+            --certificate-oidc-issuer "${PADM_COSIGN_OIDC_ISSUER}" \
             >"${RUNNER_TEMP}/cosign-${PADM_IMAGE_NAME}.json"
           jq -n \
             --arg name "${PADM_IMAGE_NAME}" \
