@@ -198,17 +198,25 @@ manageSubscriptionLocalHome() {
     subscriptionRequireLocalPublisherRole || return 1
     while true; do
         echoContent title "\n┌─ 本机订阅首页 ─────────────────────────────────────"
-        menuItem 1 "发布订阅" "安装订阅服务、查看自用链接，并创建或维护分享订阅"
-        menuItem 2 "本机运行与维护" "订阅同步、用量与限额和状态备份"
-        menuItem 3 "启用多服务器协同" "将本机初始化为主控，保留现有订阅状态和服务"
-        menuReturnItem 4 "返回上级" "回到订阅模式选择"
+        menuItem 1 "安装/更新订阅服务" "安装或刷新 Nginx 订阅发布配置"
+        menuItem 2 "刷新并查看我的订阅链接" "重新生成并显示当前自用订阅"
+        menuItem 3 "新建并发布订阅" "填写 ID、节点范围和额度，然后同步并拿到可发送的链接"
+        menuItem 4 "查看并处理已有订阅" "刷新链接、改范围、改额度、启停或删除"
+        menuItem 5 "订阅同步" "立即同步、自动同步、用量限额和状态排障"
+        menuItem 6 "状态备份与恢复" "创建、查看、恢复或重建 groups.json"
+        menuItem 7 "启用多服务器协同" "将本机初始化为主控，保留现有订阅状态和服务"
+        menuReturnItem 8 "返回上级" "回到订阅模式选择"
         menuClose
         autoRead subscription_local_home_menu "请选择:" localHomeStatus
         case "${localHomeStatus}" in
-        1) manageSubscriptionPublishSubscriptions ;;
-        2) manageSubscriptionLocalMaintenance ;;
-        3) runSubscriptionMainControllerWizard && return 0 ;;
-        4) return ;;
+        1) installSubscribe && showSubscriptionServiceStatus ;;
+        2) subscribe ;;
+        3) createAndSyncUserSubscriptionWizard ;;
+        4) manageUserSubscriptionItem ;;
+        5) manageSubscriptionSyncSettings ;;
+        6) manageSubscriptionStateBackups ;;
+        7) runSubscriptionMainControllerWizard && return 0 ;;
+        8) return ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -237,19 +245,37 @@ manageSubscriptionMainHome() {
     while true; do
         echoContent title "\n┌─ 主控首页 ─────────────────────────────────────────"
         showSubscriptionServerRoleSummary
-        menuLine "这里集中处理主控侧的发布、协同和维护。"
-        menuLine "建议先按 发布订阅 或 多服务器协同 完成主线，再到维护页处理低频排障。"
-        menuItem 1 "发布订阅" "安装订阅服务、查看自用链接，并创建或维护分享订阅"
-        menuItem 2 "多服务器协同" "主控建链、添加被控、更新凭据并查看协同状态"
-        menuItem 3 "主控维护与排障" "处理同步、用量治理、状态备份和控制面细节"
-        menuReturnItem 4 "返回主菜单" "回到 padm 管理面板"
+        menuItem 1 "安装/更新订阅服务" "安装或刷新 Nginx 订阅发布配置"
+        menuItem 2 "刷新并查看我的订阅链接" "重新生成并显示当前自用订阅"
+        menuItem 3 "新建并发布订阅" "填写 ID、节点范围和额度，然后同步并拿到可发送的链接"
+        menuItem 4 "查看并处理已有订阅" "刷新链接、改范围、改额度、启停或删除"
+        menuItem 5 "查看我的可用服务器" "查看本机和已添加被控服务器源"
+        menuItem 6 "查看我的流量" "查看自用账号流量统计"
+        menuItem 7 "订阅同步" "立即同步、自动同步、用量限额和状态排障"
+        menuItem 8 "状态备份与恢复" "创建、查看、恢复或重建 groups.json"
+        menuItem 9 "主控建链向导" "初始化主控、复制主控凭据并检查健康"
+        menuItem 10 "添加/移除被控服务器" "创建邀请、完成接入、管理来源或移除 Peer"
+        menuItem 11 "更新被控服务器凭据" "更新内网地址、公钥、控制端口和 Token"
+        menuItem 12 "查看协同状态" "查看来源、健康检查和最近同步结果"
+        menuItem 13 "控制面与连接细节" "查看凭据、Peer、地址，并处理重启或关闭"
+        menuReturnItem 14 "返回主菜单" "回到 padm 管理面板"
         menuClose
         autoRead subscription_main_home_menu "请选择:" mainHomeStatus
         case "${mainHomeStatus}" in
-        1) manageSubscriptionPublishSubscriptions ;;
-        2) manageSubscriptionMultiServer ;;
-        3) manageSubscriptionMainMaintenance ;;
-        4) menu; return ;;
+        1) installSubscribe && showSubscriptionServiceStatus ;;
+        2) subscribe ;;
+        3) createAndSyncUserSubscriptionWizard ;;
+        4) manageUserSubscriptionItem ;;
+        5) showSubscriptionSources ;;
+        6) showAdminSubscriptionTraffic ;;
+        7) manageSubscriptionSyncSettings ;;
+        8) manageSubscriptionStateBackups ;;
+        9) runSubscriptionMainControllerWizard ;;
+        10) addSubscribeMenu ;;
+        11) setSubscriptionSourceControlTokenMenu ;;
+        12) showSubscriptionSources; showSubscriptionRemoteHealthPlan; showSubscriptionSourceSyncResults ;;
+        13) manageSubscriptionMainControlDetails ;;
+        14) menu; return ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -260,12 +286,14 @@ manageSubscriptionControlledHome() {
     while true; do
         echoContent title "\n┌─ 被控首页 ─────────────────────────────────────────"
         showSubscriptionServerRoleSummary
-        menuLine "这里集中处理被控侧的接入、状态查看和必要维护。"
-        menuLine "建议先完成接入主控，再查看本机状态；只有需要修复时再进入维护页。"
         menuItem 1 "接入主控" "粘贴主控邀请，完成接入并生成对应回执"
         menuItem 2 "查看本机状态" "查看角色、地址、Peer、WireGuard 和最近同步结果"
-        menuItem 3 "被控维护与排障" "更新主控凭据、查看控制面细节，或重启/关闭被控控制面"
-        menuReturnItem 4 "返回主菜单" "回到 padm 管理面板"
+        menuItem 3 "导入/更新主控接入凭据" "仅更新已有连接的主控端点或身份"
+        menuItem 4 "显示接入回执/旧版被控凭据" "显式显示包含长期控制 Token 的接入秘密"
+        menuItem 5 "查看控制面与 Peer 细节" "显示 WireGuard 状态以及与主控的 Peer 连接细节"
+        menuItem 6 "重写配置并重启被控控制面" "重写配置并重启 WireGuard 和控制服务"
+        menuDangerItem 7 "关闭被控控制面" "停止本机 WireGuard 控制面"
+        menuReturnItem 8 "返回主菜单" "回到 padm 管理面板"
         menuClose
         autoRead subscription_controlled_home_menu "请选择:" controlledHomeStatus
         case "${controlledHomeStatus}" in
@@ -276,8 +304,16 @@ manageSubscriptionControlledHome() {
             showSubscriptionWireGuardStatus
             showSubscriptionSourceSyncResults
             ;;
-        3) manageSubscriptionControlledMaintenance ;;
-        4) menu; return ;;
+        3) importSubscriptionWireGuardMainCredential ;;
+        4) showSubscriptionWireGuardControlledAccessCredential ;;
+        5)
+            echoContent title "\n┌─ 控制面与 Peer 细节 ───────────────────────────────"
+            showSubscriptionWireGuardStatus
+            showSubscriptionWireGuardPeers
+            ;;
+        6) restartSubscriptionWireGuardControl ;;
+        7) disableSubscriptionWireGuardControl ;;
+        8) menu; return ;;
         *) coreSelectionErrorCard ;;
         esac
     done

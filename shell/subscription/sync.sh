@@ -72,10 +72,7 @@ subscriptionSyncEnsureEnabledUserUUIDs() {
         generated=$(jq -c --arg id "${id}" --arg uuid "${uuid}" '. + [{id:$id, uuid:$uuid}]' <<<"${generated}") || return 1
     done <<<"${missingIds}"
     if jq -e 'length > 0' <<<"${generated}" >/dev/null 2>&1; then
-        subscriptionActiveGroupWrite --argjson generated "${generated}" '
-          reduce $generated[] as $user (.;
-            .user_groups |= map(if .id == $user.id then .uuid = $user.uuid else . end))
-        ' || return 1
+        subscriptionApplyUserGroupState "${generated}" '[]' || return 1
     fi
 }
 
@@ -432,7 +429,7 @@ subscriptionSyncAppendLocalUser() {
     if [[ -z "${uuid}" ]]; then
         uuid=$(subscriptionSyncGenerateUUID) || return 1
         subscriptionSyncUUIDIsValid "${uuid}" || return 1
-        subscriptionActiveGroupWrite --arg id "${id}" --arg uuid "${uuid}" '.user_groups |= map(if .id == $id then .uuid = $uuid else . end)' || return 1
+        subscriptionApplyUserGroupState "$(jq -cn --arg id "${id}" --arg uuid "${uuid}" '[{id:$id,uuid:$uuid}]')" '[]' || return 1
     fi
     subscriptionSyncUUIDIsValid "${uuid}" || return 1
 

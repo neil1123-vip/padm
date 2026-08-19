@@ -242,7 +242,7 @@ JSON
     [[ "${rc}" == "1" ]]
     [[ -z "${backupFile}" ]]
     [[ "$(<"${stateFile}")" == "${beforeSnapshot}" ]]
-    if regressionFindHasMatches "${backupsDir}" -maxdepth 1 -type f -name 'groups-*.json'; then
+    if regressionFindHasMatches "${backupsDir}" -maxdepth 1 -type f -name 'groups-[0-9]*.json'; then
         return 1
     fi
     chmod() {

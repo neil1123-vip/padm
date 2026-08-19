@@ -79,18 +79,22 @@ prepareSubscriptionGroupSyncStubs() {
 runSubscriptionGroupStateStructureFoundationAddRemoveRegression() {
     mkdir -p "$(subscriptionGroupsDir)"
     writeSubscriptionStateStructureFoundationFixture
-    jq -e '.version == 2 and .active_group == "default" and (.groups | length == 1)' "$(subscriptionGroupsFile)" >/dev/null
+    ensureSubscriptionGroupsState
+    jq -e '.version == 3 and .active_group == "default" and (.groups | length == 1) and (.groups[0] | has("admin") | not)' "$(subscriptionGroupsFile)" >/dev/null
+    if ! regressionFindHasMatches "$(subscriptionGroupsBackupDir)" -maxdepth 1 -type f -name 'groups-pre-v3-migration-*.json'; then
+        return 1
+    fi
 
     addSubscriptionSourceState ip-edge "IP Edge" 203.0.113.10 39778
     jq -e '.groups[0].sources[] | select(.id == "ip-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "203.0.113.10" and .port == 39778)' "$(subscriptionGroupsFile)" >/dev/null
     removeSubscriptionSourceState ip-edge
 
     addUserSubscriptionState team-a "Team A" '["main"]' 7
-    jq -e '.groups[0].user_groups == [{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":7,"token":""}]' "$(subscriptionGroupsFile)" >/dev/null
+    jq -e '.groups[0].user_groups == [{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":7}]' "$(subscriptionGroupsFile)" >/dev/null
     if addUserSubscriptionState team-a Replacement '["*"]' 99 >/dev/null 2>&1; then
         return 1
     fi
-    jq -e '.groups[0].user_groups == [{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":7,"token":""}]' "$(subscriptionGroupsFile)" >/dev/null
+    jq -e '.groups[0].user_groups == [{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":7}]' "$(subscriptionGroupsFile)" >/dev/null
 }
 
 runSubscriptionGroupStateStructureFoundationCredentialRegression() {
@@ -240,7 +244,7 @@ runSubscriptionGroupStateStructureValidationRegression() {
 
     for invalidFilter in \
         '.unexpected = true' \
-        'del(.groups[0].admin)' \
+        '.groups[0].user_groups += [{"id":"bad","name":"Bad","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"token":""}]' \
         'del(.groups[0].sources[0].transport)' \
         '.groups[0].sync.remote_enabled = true'; do
         writeDefaultSubscriptionGroupsState "${stateFile}"
@@ -522,7 +526,7 @@ JSON
         [[ -e "${quotaTxLockMarker}" ]]
         jq -e '.groups[0].user_groups[] | select(.id == "team-a" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
         [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"已恢复旧订阅状态"* ]]
-        if regressionFindHasMatches "${quotaTxRoot}/groups/backups" -maxdepth 1 -type f -name 'groups-*.json'; then
+        if regressionFindHasMatches "${quotaTxRoot}/groups/backups" -maxdepth 1 -type f -name 'groups-[0-9]*.json'; then
             return 1
         fi
     )
@@ -571,7 +575,7 @@ JSON
         jq -e '.groups[0].user_groups[] | select(.id == "team-b" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
         [[ ! -e "${accountPhaseMarker}" ]]
         [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"停用超额分享订阅失败"* ]]
-        if regressionFindHasMatches "${quotaPartialRoot}/groups/backups" -maxdepth 1 -type f -name 'groups-*.json'; then
+        if regressionFindHasMatches "${quotaPartialRoot}/groups/backups" -maxdepth 1 -type f -name 'groups-[0-9]*.json'; then
             return 1
         fi
     )
@@ -738,6 +742,7 @@ runSubscriptionGroupStateRemoteRestoreStateWriteRegression() {
 runSubscriptionGroupStateRemoteRestoreLegacyMenuRegression() {
     mkdir -p "$(subscriptionGroupsDir)"
     writeSubscriptionStateDefaultFixture
+    ensureSubscriptionGroupsState
 
     local beforeSnapshot legacyBackup menuBackup
     legacyBackup="${TMP_DIR}/legacy-groups-backup.json"
@@ -774,7 +779,7 @@ JSON
         menuOutput=$(printf '1\nyes\n' | restoreSubscriptionGroupsBackupMenu)
         [[ "${menuOutput}" == *"menu:"* ]]
     )
-    jq -e '.version == 2 and .active_group == "legacy" and .groups[0].id == "legacy"' "$(subscriptionGroupsFile)" >/dev/null
+    jq -e '.version == 3 and .active_group == "legacy" and .groups[0].id == "legacy"' "$(subscriptionGroupsFile)" >/dev/null
 }
 
 runSubscriptionSyncTempDirRegression() (

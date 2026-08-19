@@ -612,261 +612,35 @@ subscriptionControlSystemdQuotedArgument() {
 
 writeSubscriptionControlServer() {
     local serverScript
+    local sourceScript
     local scriptPath
-    local scriptPathLiteral
-    local scriptVersion
-    local scriptVersionLiteral
     local tokenFile
+    local scriptVersion
+    local port
+    local scriptPathLiteral
     local tokenFileLiteral
+    local scriptVersionLiteral
     local tmpFile
-    serverScript=$(subscriptionControlServerScript)
-    scriptPath=$(subscriptionGroupSyncInstallScript)
-    scriptVersion=$(getScriptVersion)
-    tokenFile=$(subscriptionControlTokenFile)
-    if command -v cygpath >/dev/null 2>&1; then
-        scriptPath=$(cygpath -m "${scriptPath}")
-        tokenFile=$(cygpath -m "${tokenFile}")
-    fi
+    serverScript=$(subscriptionControlServerScript) || return 1
+    sourceScript="${PROJECT_ROOT}/shell/subscription/control_server.py"
+    [[ -f "${sourceScript}" ]] || return 1
+    scriptPath=$(subscriptionGroupSyncInstallScript) || return 1
+    tokenFile=$(subscriptionControlTokenFile) || return 1
+    scriptVersion=$(getScriptVersion) || return 1
+    port=$(subscriptionControlPort) || return 1
+    [[ "${port}" =~ ^[0-9]+$ ]] || return 1
     scriptPathLiteral=$(subscriptionControlPythonStringLiteral "${scriptPath}") || return 1
     tokenFileLiteral=$(subscriptionControlPythonStringLiteral "${tokenFile}") || return 1
     scriptVersionLiteral=$(subscriptionControlPythonStringLiteral "${scriptVersion}") || return 1
     padmCreateTempFileForTarget tmpFile "${serverScript}" control-server || return 1
-    cat >"${tmpFile}" <<EOF || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
-#!/usr/bin/env python3
-import json
-import os
-import signal
-import shutil
-import socket
-import subprocess
-import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from threading import Lock
-
-SCRIPT_PATH = ${scriptPathLiteral}
-TOKEN_FILE = ${tokenFileLiteral}
-VERSION = ${scriptVersionLiteral}
-CAPABILITIES = ["health", "sync", "traffic"]
-PORT = $(subscriptionControlPort)
-MAX_BODY_SIZE = 256 * 1024
-CONTROL_REQUEST_LOCK = Lock()
-try:
-    SCRIPT_TIMEOUT = max(0.1, float(os.environ.get("PADM_CONTROL_SCRIPT_TIMEOUT", "20") or "20"))
-except ValueError:
-    SCRIPT_TIMEOUT = 20
-try:
-    REQUEST_READ_TIMEOUT = max(0.1, float(os.environ.get("PADM_CONTROL_REQUEST_TIMEOUT", "10") or "10"))
-except ValueError:
-    REQUEST_READ_TIMEOUT = 10
-
-class Handler(BaseHTTPRequestHandler):
-    def setup(self):
-        super().setup()
-        self.connection.settimeout(REQUEST_READ_TIMEOUT)
-
-    def log_message(self, *_):
-        return
-
-    def respond(self, code, payload):
-        data = json.dumps(payload, ensure_ascii=False).encode()
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        try:
-            self.wfile.write(data)
-        except OSError:
-            pass
-
-    def token(self):
-        auth = self.headers.get("Authorization", "")
-        if auth.startswith("Bearer "):
-            return auth[7:]
-        return ""
-
-    def expected_token(self):
-        try:
-            with open(TOKEN_FILE, encoding="utf-8") as handle:
-                return handle.read().strip()
-        except OSError:
-            return ""
-
-    def authorized(self):
-        expected = self.expected_token()
-        return bool(expected) and self.token() == expected
-
-    def endpoint(self):
-        prefix = "/s/control/"
-        if not self.path.startswith(prefix):
-            return ""
-        return self.path[len(prefix):].split("?", 1)[0]
-
-    def parse_script_response(self, stdout, returncode):
-        output = (stdout or "").strip()
-        parsed = []
-        decoder = json.JSONDecoder()
-        if output:
-            for index, char in enumerate(output):
-                if char != "{":
-                    continue
-                try:
-                    value, _ = decoder.raw_decode(output[index:])
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(value, dict):
-                    parsed.append(value)
-        body = None
-        for candidate in reversed(parsed):
-            if "ok" in candidate:
-                body = candidate
-                break
-        if body is None and parsed:
-            body = parsed[-1]
-        if isinstance(body, dict):
-            if returncode != 0:
-                body = dict(body)
-                body.setdefault("exit_code", returncode)
-                if body.get("ok") is not False:
-                    body["ok"] = False
-                    body.setdefault("error", "script_failed")
-                body.setdefault("error_detail", {"type": "script_failed", "message": f"脚本退出码 {returncode}"})
-            return body
-        if returncode != 0:
-            return {"ok": False, "error": "script_failed", "exit_code": returncode, "error_detail": {"type": "script_failed", "message": f"脚本退出码 {returncode}"}}
-        return {"ok": False, "error": "invalid_response", "error_detail": {"type": "invalid_response", "message": "脚本输出不是合法 JSON"}}
-
-    def response_status(self, endpoint, body):
-        if not isinstance(body, dict):
-            return 500
-        if body.get("ok") is True:
-            return 200
-        error = body.get("error", "")
-        if error == "unauthorized":
-            return 401
-        if endpoint in ("sync", "traffic") and error in ("invalid_payload", "empty_payload"):
-            return 400
-        if endpoint == "health":
-            return 503
-        if error in ("script_timeout", "script_failed", "script_exec_failed", "invalid_response"):
-            return 503
-        if endpoint in ("sync", "traffic"):
-            return 503
-        return 500
-
-    def call_script(self, endpoint, payload=""):
-        bash_bin = shutil.which("bash.exe") or shutil.which("bash") or "/bin/bash"
-        cmd = [bash_bin, SCRIPT_PATH, "SubscriptionControl", endpoint]
-        env = dict(os.environ)
-        env["PADM_CONTROL_SERVER"] = "1"
-        env["PADM_CONTROL_TOKEN"] = self.token()
-        env["PADM_SKIP_REMOTE_REF_CHECK"] = "1"
-        popen_options = {"start_new_session": True} if os.name == "posix" else {
-            "creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-        }
-        try:
-            process = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                env=env,
-                encoding="utf-8",
-                errors="replace",
-                **popen_options,
-            )
-            stdout, _ = process.communicate(payload, timeout=SCRIPT_TIMEOUT)
-        except subprocess.TimeoutExpired:
-            if os.name == "posix":
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-            else:
-                taskkill = shutil.which("taskkill.exe") or shutil.which("taskkill")
-                if taskkill:
-                    subprocess.run(
-                        [taskkill, "/PID", str(process.pid), "/T", "/F"],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        check=False,
-                    )
-                if process.poll() is None:
-                    process.kill()
-            try:
-                process.communicate(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.communicate()
-            return {"ok": False, "error": "script_timeout", "error_detail": {"type": "script_timeout", "message": "脚本执行超时"}}
-        except OSError:
-            return {"ok": False, "error": "script_exec_failed", "error_detail": {"type": "script_exec_failed", "message": "脚本无法执行"}}
-        return self.parse_script_response(stdout, process.returncode)
-
-    def read_body(self, length):
-        deadline = time.monotonic() + REQUEST_READ_TIMEOUT
-        chunks = []
-        remaining = length
-        while remaining > 0:
-            timeout = deadline - time.monotonic()
-            if timeout <= 0:
-                raise TimeoutError
-            self.connection.settimeout(timeout)
-            chunk = self.rfile.read(min(65536, remaining))
-            if not chunk:
-                raise ValueError
-            chunks.append(chunk)
-            remaining -= len(chunk)
-        return b"".join(chunks)
-
-    def do_GET(self):
-        endpoint = self.endpoint()
-        if endpoint != "health":
-            self.respond(404, {"ok": False, "error": "not_found"})
-            return
-        if not self.authorized():
-            self.respond(401, {"ok": False, "error": "unauthorized", "error_detail": {"type": "unauthorized", "message": "控制 token 验证失败"}})
-            return
-        self.respond(200, {"ok": True, "version": VERSION, "capabilities": CAPABILITIES})
-
-    def do_POST(self):
-        endpoint = self.endpoint()
-        if endpoint not in ("sync", "traffic"):
-            self.respond(404, {"ok": False, "error": "not_found"})
-            return
-        if not self.authorized():
-            self.respond(401, {"ok": False, "error": "unauthorized", "error_detail": {"type": "unauthorized", "message": "控制 token 验证失败"}})
-            return
-        try:
-            length = int(self.headers.get("Content-Length", "0") or "0")
-        except ValueError:
-            self.respond(400, {"ok": False, "error": "invalid_payload", "error_detail": {"type": "invalid_payload", "message": "Content-Length 无效"}})
-            return
-        if length < 0:
-            self.respond(400, {"ok": False, "error": "invalid_payload", "error_detail": {"type": "invalid_payload", "message": "Content-Length 无效"}})
-            return
-        if length > MAX_BODY_SIZE:
-            self.respond(413, {"ok": False, "error": "payload_too_large"})
-            return
-        try:
-            payload = self.read_body(length).decode("utf-8", errors="replace") if length > 0 else ""
-        except (socket.timeout, TimeoutError):
-            self.respond(408, {"ok": False, "error": "request_timeout", "error_detail": {"type": "request_timeout", "message": "请求体读取超时"}})
-            return
-        except ValueError:
-            self.respond(400, {"ok": False, "error": "invalid_payload", "error_detail": {"type": "invalid_payload", "message": "请求体不完整"}})
-            return
-        if not CONTROL_REQUEST_LOCK.acquire(blocking=False):
-            self.respond(503, {"ok": False, "error": "busy", "error_detail": {"type": "busy", "message": "控制服务正在处理其他变更请求"}})
-            return
-        try:
-            body = self.call_script(endpoint, payload)
-        finally:
-            CONTROL_REQUEST_LOCK.release()
-        self.respond(self.response_status(endpoint, body), body)
-
-ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
-EOF
+    {
+        printf 'import os\n'
+        printf 'os.environ.setdefault("PADM_CONTROL_SCRIPT_PATH", %s)\n' "${scriptPathLiteral}"
+        printf 'os.environ.setdefault("PADM_CONTROL_TOKEN_FILE", %s)\n' "${tokenFileLiteral}"
+        printf 'os.environ.setdefault("PADM_CONTROL_VERSION", %s)\n' "${scriptVersionLiteral}"
+        printf 'os.environ.setdefault("PADM_CONTROL_PORT", "%s")\n' "${port}"
+        cat "${sourceScript}"
+    } >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
     commitGeneratedFile "${tmpFile}" "${serverScript}" 755 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
 
@@ -966,6 +740,11 @@ installSubscriptionControlService() {
     local serviceFile
     local serverScript
     local serverScriptArg
+    local scriptPath
+    local scriptPathArg
+    local tokenFile
+    local tokenFileArg
+    local scriptVersionArg
     local tmpFile
     local token
     local i
@@ -989,6 +768,11 @@ installSubscriptionControlService() {
     subscriptionGroupsSecureStateFiles || return 1
     serverScript=$(subscriptionControlServerScript)
     serverScriptArg=$(subscriptionControlSystemdQuotedArgument "${serverScript}") || return 1
+    scriptPath=$(subscriptionGroupSyncInstallScript) || return 1
+    scriptPathArg=$(subscriptionControlSystemdQuotedArgument "${scriptPath}") || return 1
+    tokenFile=$(subscriptionControlTokenFile) || return 1
+    tokenFileArg=$(subscriptionControlSystemdQuotedArgument "${tokenFile}") || return 1
+    scriptVersionArg=$(subscriptionControlSystemdQuotedArgument "$(getScriptVersion)") || return 1
     serviceFile=$(subscriptionControlServiceFile)
     if systemctl is-active --quiet padm-subscription-control.service; then
         serviceWasActive=true
@@ -1012,6 +796,10 @@ After=network.target
 
 [Service]
 Type=simple
+Environment=PADM_CONTROL_SCRIPT_PATH=${scriptPathArg}
+Environment=PADM_CONTROL_TOKEN_FILE=${tokenFileArg}
+Environment=PADM_CONTROL_VERSION=${scriptVersionArg}
+Environment=PADM_CONTROL_PORT=$(subscriptionControlPort)
 ExecStart=/usr/bin/env python3 ${serverScriptArg}
 Restart=always
 RestartSec=3
@@ -1172,16 +960,7 @@ subscriptionControlApplyAccountPlan() {
         removeIds=$(jq -c --arg id "${accountId}" '. + [$id] | unique' <<<"${removeIds}") || return 1
     done <<<"${removeAccounts}"
     if jq -e 'length > 0' <<<"${createUsers}" >/dev/null 2>&1 || jq -e 'length > 0' <<<"${removeIds}" >/dev/null 2>&1; then
-        if ! subscriptionActiveGroupWrite --argjson users "${createUsers}" --argjson removeIds "${removeIds}" '
-          .user_groups = [.user_groups[]? | select(.id as $id | ($removeIds | index($id) | not))] |
-          .traffic.user_groups = (reduce $removeIds[] as $id ((.traffic.user_groups // {}); del(.[$id]))) |
-          reduce $users[] as $user (.;
-            if any(.user_groups[]?; .id == $user.id) then
-              .user_groups |= map(if .id == $user.id then .uuid = $user.uuid else . end)
-            else
-              .user_groups += [{id:$user.id, name:$user.id, enabled:true, allowed_sources:["main"], traffic_limit_gb:0, token:"", uuid:$user.uuid}]
-            end)
-        '; then
+        if ! subscriptionApplyUserGroupState "${createUsers}" "${removeIds}"; then
             applyError="控制面同步期望用户状态写入失败"
             if ! subscriptionGroupsStateWrite --argjson previousGroupsState "${previousGroupsState}" '$previousGroupsState' >/dev/null 2>&1; then
                 subscriptionSyncSetSingleRestoreResultMessage \

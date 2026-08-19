@@ -14,24 +14,7 @@ subscribeAccountTitle() {
 
 # 订阅账号展示
 subscriptionAccountDisplayFunction() {
-    case "$1" in
-    1) printf 'showVlessRealityAccounts' ;;
-    2) printf 'showVlessRealityXHTTPAccounts' ;;
-    3) printf 'showHysteriaAccounts' ;;
-    4) printf 'showAnyTlsAccounts' ;;
-    5) printf 'showNaiveAccounts' ;;
-    21) printf 'showVlessWsAccounts' ;;
-    22) printf 'showVmessWsAccounts' ;;
-    23) printf 'showVmessHTTPUpgradeAccounts' ;;
-    24) printf 'showVlessGrpcAccounts' ;;
-    25) printf 'showTrojanGrpcAccounts' ;;
-    26) printf 'showVlessRealityGrpcAccounts' ;;
-    27) printf 'showVlessTcpAccounts' ;;
-    28 | 29) printf 'showTrojanAccounts' ;;
-    30) printf 'showShadowsocksAccounts' ;;
-    31) printf 'showTuicAccounts' ;;
-    *) return 1 ;;
-    esac
+    protocolCapabilityMeta "$1" account_display
 }
 
 showAccounts() {

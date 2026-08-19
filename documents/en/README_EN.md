@@ -435,15 +435,15 @@ Reality Vision, Reality gRPC, and Reality XHTTP do not depend on a local static 
 
 ## Subscriptions and Users
 
-The subscription system is role-based instead of one flat menu.
+The subscription system is role-based; controller and controlled home screens expose common actions directly, while low-frequency maintenance functions remain as compatibility entry points.
 
 | State | Menu shape | What it is for |
 | --- | --- | --- |
 | 🟡 Uninitialized | `Use this server locally` / `This server is the controller` / `This server is controlled` | A single server can manage local subscriptions directly; choose controller or controlled mode only for multi-server use. |
-| 🟢 Controller | `Publish subscriptions` / `Multi-server coordination` / `Controller maintenance & troubleshooting` | Create user subscriptions, publish links, add controlled servers, run sync, and handle quotas. |
-| 🔵 Controlled | `Join controller` / `View local status` / `Controlled maintenance & troubleshooting` | Paste a controller invite, provide this server's nodes to the controller, and view WireGuard/sync state. |
+| 🟢 Controller | The controller home directly exposes publishing, sync, coordination, and control-plane actions | Create user subscriptions, publish links, add controlled servers, run sync, and handle quotas. |
+| 🔵 Controlled | The controlled home directly exposes join, status, credential, and control-plane actions | Paste a controller invite, provide this server's nodes to the controller, and view WireGuard/sync state. |
 
-Controller and local-only modes now share one `Subscription sync` menu under maintenance: run a full sync, enable/disable automatic sync, set the interval, open status/troubleshooting, or manage usage and quotas. The automatic-sync switch controls both immediate sync after configuration changes and cron; manual full sync remains available when it is off.
+Controller and local-only home screens share one `Subscription sync` menu: run a full sync, enable/disable automatic sync, set the interval, open status/troubleshooting, or manage usage and quotas. The automatic-sync switch controls both immediate sync after configuration changes and cron; manual full sync remains available when it is off.
 
 - A controller syncs every enabled controlled-server source. There is no separate global remote-sync switch; pause one server through `Add/remove controlled server` -> `Enable/disable controlled server`.
 - Public subscriptions are published only after the local host and every enabled source return complete snapshots. If any required source fails, the previous complete public subscription stays in place instead of being overwritten by a partial node set.
@@ -452,23 +452,23 @@ Controller and local-only modes now share one `Subscription sync` menu under mai
 
 Recommended flow for local-only or controller-side shared subscriptions:
 
-1. Open `Publish subscriptions` -> `Install/update subscription service`.
-2. Open `Publish subscriptions` -> `Create and publish subscription`, using an ID such as `team-a`.
+1. From the local or controller home, open `Install/update subscription service`.
+2. From the same home screen, open `Create and publish subscription`, using an ID such as `team-a`.
 3. Follow the wizard to select server sources and traffic limit.
 4. With automatic sync enabled, saving triggers one full sync. If it is disabled, run a manual full sync later from `Subscription sync`. The managed account `sub_<ID>` is written to the core config.
 5. Copy the user subscription link after the full sync completes.
 
 Recommended multi-server flow:
 
-1. On the controller, open `Multi-server coordination` -> `Controller setup wizard`, then use `Add/remove controlled server` -> `Create controlled-server invite` and enter the controlled-server alias once. The controller reserves its WireGuard address automatically.
+1. On the controller, open `Controller setup wizard` from the controller home, then use `Add/remove controlled server` -> `Create controlled-server invite` and enter the controlled-server alias once. The controller reserves its WireGuard address automatically.
 2. On the controlled server, open `Join controller` and paste the invite. Initialization and controller-peer import complete without an address prompt; copy the resulting join receipt once.
-3. Back on the controller, use `Add/remove controlled server` -> `Complete controlled-server join` and paste the receipt. The reserved alias drives the peer, source, and control-token transaction, followed by a health check for that source only.
+3. Back on the controller, open `Add/remove controlled server` from the controller home, then use `Complete controlled-server join` and paste the receipt. The reserved alias drives the peer, source, and control-token transaction, followed by a health check for that source only.
 4. To temporarily exclude one controlled server, use `Enable/disable controlled server`. Disabling preserves its peer, token, and history; the next full sync removes that source's nodes from the public subscription.
 5. Pending invites can be viewed or cancelled by alias. Invites and receipts are bearer secrets, so normal status, health output, and pending lists never show their complete values. Cancel and recreate a lost invite.
 6. Legacy `main` / `controlled` credentials remain only in explicitly named maintenance actions for existing links; first-time joins accept invites and receipts only. Receipts and legacy controlled credentials contain long-lived control tokens and must travel through a trusted channel.
 7. WireGuard uses UDP and the control API uses HTTP only inside the tunnel, so this join flow needs no TLS certificate. Public client subscriptions continue to use HTTPS separately.
 
-State backup and restore only affect `/etc/padm/subscribe_groups/groups.json`. Before restoring a backup or rebuilding state, the script creates a current-state backup and requires typing `yes`; state loading and restore accept only the current exact `version: 2` structure. Legacy structures and states with extra, missing, or invalid fields are rejected rather than rewritten.
+State backup and restore only affect `/etc/padm/subscribe_groups/groups.json`. Before restoring a backup or rebuilding state, the script creates a current-state backup and requires typing `yes`; the current exact structure is `version: 3`. On first read, an older `version: 2` state is backed up as `groups-pre-v3-migration-*`, then atomically migrated by removing unused group-level `admin` metadata and user `token` fields. Other legacy structures and states with extra, missing, or invalid fields are rejected.
 
 ## Routing and Access Control
 

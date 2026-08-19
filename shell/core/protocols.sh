@@ -2,22 +2,22 @@
 
 protocolCapabilityRegistry() {
     cat <<'EOF'
-1|VLESS Reality Vision|node|recommended|both|xray,sing-box|vless|tcp|reality|none|yes|core|no|no|no|conditional|||07_VLESS_vision_reality_inbounds.json|uri,clash-meta,sing-box|wide|||默认直连推荐
-2|VLESS Reality XHTTP|node|recommended|xray|xray|vless|xhttp|reality|none|yes|core|no|no|no|conditional|||12_VLESS_XHTTP_inbounds.json|uri,clash-meta|modern|||Xray-only；sing-box 不生成
-3|Hysteria2|node|recommended|both|sing-box|hysteria2|quic|tls|none|yes|core|yes|yes|yes|no||1.11.0|06_hysteria2_inbounds.json|uri,clash-meta,sing-box|modern|||UDP/移动/弱网默认推荐
-4|AnyTLS|node|recommended|sing-box|sing-box|anytls|tcp|tls|none|yes|core|yes|yes|no|no||1.12.0|13_anytls_inbounds.json|uri,clash-meta,sing-box|modern|||sing-box AnyTLS
-5|NaiveProxy|node|recommended|sing-box|sing-box|naive|tcp|tls|none|yes|core|yes|yes|no|no|||10_naive_inbounds.json|uri|modern|||HTTPS/Cronet 指纹场景
-21|VLESS WS TLS|node|advanced|xray|xray|vless|ws|tls|http_front|yes|nginx|yes|yes|no|yes|||03_VLESS_WS_inbounds.json|uri,clash-meta,sing-box|wide|WebSocket 属高级方案，新装优先 XHTTP|VLESS Reality XHTTP|高级兼容协议
-22|VMess WS TLS|node|advanced|xray|xray|vmess|ws|tls|http_front|yes|nginx|yes|yes|no|yes|||05_VMess_WS_inbounds.json|uri,clash-meta,sing-box|wide|VMess 与 WebSocket 均为高级方案|VLESS Reality Vision|高级兼容协议
-23|VMess HTTPUpgrade TLS|node|advanced|both|xray,sing-box|vmess|httpupgrade|tls|http_front|yes|nginx|yes|yes|no|yes|||11_VMess_HTTPUpgrade_inbounds.json|uri,clash-meta,sing-box|modern|HTTPUpgrade 属高级方案，新装优先 XHTTP|VLESS Reality XHTTP|高级兼容协议
-24|VLESS gRPC TLS|node|advanced|xray|xray|vless|grpc|tls|grpc_front|yes|nginx|yes|yes|no|yes|||06_VLESS_GRPc_inbounds.json|uri,clash-meta,sing-box|wide|gRPC 有主动探测与 fallback 限制|VLESS Reality XHTTP|高级兼容协议
-25|Trojan gRPC TLS|node|advanced|xray|xray|trojan|grpc|tls|grpc_front|yes|nginx|yes|yes|no|yes|||04_trojan_GRPc_inbounds.json|uri,clash-meta,sing-box|wide|gRPC 有主动探测与 fallback 限制|AnyTLS|高级兼容协议
-26|VLESS Reality gRPC|node|advanced|both|xray,sing-box|vless|grpc|reality|none|yes|core|no|no|no|conditional|||08_VLESS_vision_gRPC_inbounds.json|uri,clash-meta,sing-box|modern|Reality gRPC 是高级方案|VLESS Reality Vision|高级 Reality 组合
-27|VLESS TCP TLS Vision|node|advanced|xray|xray|vless|tcp|tls|fallback_backend|yes|xray|yes|yes|no|no|||02_VLESS_TCP_inbounds.json|uri,clash-meta,sing-box|wide|传统 TLS/fallback 高级路径|VLESS Reality Vision|fallback 入口
-28|Trojan TCP TLS direct|node|advanced|both|xray,sing-box|trojan|tcp|tls|none|yes|core|yes|yes|no|no|||28_trojan_TCP_direct_inbounds.json|uri,clash-meta,sing-box|wide|传统 TLS 协议，仅显式选择时使用|AnyTLS|直连 TLS
-29|Trojan TCP TLS fallback|node|advanced|xray|xray|trojan|tcp|tls|fallback_backend|yes|xray|yes|yes|no|no|||04_trojan_TCP_inbounds.json|uri,clash-meta,sing-box|wide|fallback 仅限 TCP+TLS|AnyTLS|fallback 入口
-30|Shadowsocks|node|advanced|sing-box|sing-box|shadowsocks|tcp|none|none|yes|core|no|no|yes|no|||30_shadowsocks_inbounds.json|uri,clash-meta,sing-box|wide|不作为默认公网节点推荐|VLESS Reality Vision|高级兼容协议
-31|TUIC|node|advanced|sing-box|sing-box|tuic|quic|tls|none|yes|core|yes|yes|yes|no|||09_tuic_inbounds.json|uri,clash-meta,sing-box|modern|UDP/弱网新装引导使用 Hysteria2|Hysteria2|高级 UDP 协议
+1|VLESS Reality Vision|node|recommended|both|xray,sing-box|vless|tcp|reality|none|yes|core|no|no|no|conditional|||07_VLESS_vision_reality_inbounds.json|uri,clash-meta,sing-box|wide|||默认直连推荐|showVlessRealityAccounts
+2|VLESS Reality XHTTP|node|recommended|xray|xray|vless|xhttp|reality|none|yes|core|no|no|no|conditional|||12_VLESS_XHTTP_inbounds.json|uri,clash-meta|modern|||Xray-only；sing-box 不生成|showVlessRealityXHTTPAccounts
+3|Hysteria2|node|recommended|both|sing-box|hysteria2|quic|tls|none|yes|core|yes|yes|yes|no||1.11.0|06_hysteria2_inbounds.json|uri,clash-meta,sing-box|modern|||UDP/移动/弱网默认推荐|showHysteriaAccounts
+4|AnyTLS|node|recommended|sing-box|sing-box|anytls|tcp|tls|none|yes|core|yes|yes|no|no||1.12.0|13_anytls_inbounds.json|uri,clash-meta,sing-box|modern|||sing-box AnyTLS|showAnyTlsAccounts
+5|NaiveProxy|node|recommended|sing-box|sing-box|naive|tcp|tls|none|yes|core|yes|yes|no|no|||10_naive_inbounds.json|uri|modern|||HTTPS/Cronet 指纹场景|showNaiveAccounts
+21|VLESS WS TLS|node|advanced|xray|xray|vless|ws|tls|http_front|yes|nginx|yes|yes|no|yes|||03_VLESS_WS_inbounds.json|uri,clash-meta,sing-box|wide|WebSocket 属高级方案，新装优先 XHTTP|VLESS Reality XHTTP|高级兼容协议|showVlessWsAccounts
+22|VMess WS TLS|node|advanced|xray|xray|vmess|ws|tls|http_front|yes|nginx|yes|yes|no|yes|||05_VMess_WS_inbounds.json|uri,clash-meta,sing-box|wide|VMess 与 WebSocket 均为高级方案|VLESS Reality Vision|高级兼容协议|showVmessWsAccounts
+23|VMess HTTPUpgrade TLS|node|advanced|both|xray,sing-box|vmess|httpupgrade|tls|http_front|yes|nginx|yes|yes|no|yes|||11_VMess_HTTPUpgrade_inbounds.json|uri,clash-meta,sing-box|modern|HTTPUpgrade 属高级方案，新装优先 XHTTP|VLESS Reality XHTTP|高级兼容协议|showVmessHTTPUpgradeAccounts
+24|VLESS gRPC TLS|node|advanced|xray|xray|vless|grpc|tls|grpc_front|yes|nginx|yes|yes|no|yes|||06_VLESS_GRPc_inbounds.json|uri,clash-meta,sing-box|wide|gRPC 有主动探测与 fallback 限制|VLESS Reality XHTTP|高级兼容协议|showVlessGrpcAccounts
+25|Trojan gRPC TLS|node|advanced|xray|xray|trojan|grpc|tls|grpc_front|yes|nginx|yes|yes|no|yes|||04_trojan_GRPc_inbounds.json|uri,clash-meta,sing-box|wide|gRPC 有主动探测与 fallback 限制|AnyTLS|高级兼容协议|showTrojanGrpcAccounts
+26|VLESS Reality gRPC|node|advanced|both|xray,sing-box|vless|grpc|reality|none|yes|core|no|no|no|conditional|||08_VLESS_vision_gRPC_inbounds.json|uri,clash-meta,sing-box|modern|Reality gRPC 是高级方案|VLESS Reality Vision|高级 Reality 组合|showVlessRealityGrpcAccounts
+27|VLESS TCP TLS Vision|node|advanced|xray|xray|vless|tcp|tls|fallback_backend|yes|xray|yes|yes|no|no|||02_VLESS_TCP_inbounds.json|uri,clash-meta,sing-box|wide|传统 TLS/fallback 高级路径|VLESS Reality Vision|fallback 入口|showVlessTcpAccounts
+28|Trojan TCP TLS direct|node|advanced|both|xray,sing-box|trojan|tcp|tls|none|yes|core|yes|yes|no|no|||28_trojan_TCP_direct_inbounds.json|uri,clash-meta,sing-box|wide|传统 TLS 协议，仅显式选择时使用|AnyTLS|直连 TLS|showTrojanAccounts
+29|Trojan TCP TLS fallback|node|advanced|xray|xray|trojan|tcp|tls|fallback_backend|yes|xray|yes|yes|no|no|||04_trojan_TCP_inbounds.json|uri,clash-meta,sing-box|wide|fallback 仅限 TCP+TLS|AnyTLS|fallback 入口|showTrojanAccounts
+30|Shadowsocks|node|advanced|sing-box|sing-box|shadowsocks|tcp|none|none|yes|core|no|no|yes|no|||30_shadowsocks_inbounds.json|uri,clash-meta,sing-box|wide|不作为默认公网节点推荐|VLESS Reality Vision|高级兼容协议|showShadowsocksAccounts
+31|TUIC|node|advanced|sing-box|sing-box|tuic|quic|tls|none|yes|core|yes|yes|yes|no|||09_tuic_inbounds.json|uri,clash-meta,sing-box|modern|UDP/弱网新装引导使用 Hysteria2|Hysteria2|高级 UDP 协议|showTuicAccounts
 201|Socks 中继|internal|advanced|both|xray,sing-box|socks|tcp|none|none|no|core|no|no|yes|no|||20_socks5_inbounds.json||wide|||中继与路由菜单能力
 202|HTTP 中继|internal|advanced|both|xray,sing-box|http|tcp|none|none|no|core|no|no|no|no|||||wide|||中继菜单能力
 203|WireGuard|internal|advanced|both|xray,sing-box|wireguard|udp|none|none|no|core|no|no|yes|no|||||wide|||路由能力
@@ -63,6 +63,7 @@ protocolCapabilityFieldIndex() {
     risk_note) printf '22' ;;
     replacement) printf '23' ;;
     notes) printf '24' ;;
+    account_display) printf '25' ;;
     *) return 1 ;;
     esac
 }

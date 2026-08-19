@@ -1414,12 +1414,13 @@ invite-credential"
         setMenuSmokeRole main
         resetMenuActions
         output=
-        manageSubscription <<<"4"
-        grep -q "发布订阅" <<<"${output}"
-        grep -q "多服务器协同" <<<"${output}"
-        grep -q "主控维护与排障" <<<"${output}"
-        if grep -q "我自己用" <<<"${output}" || grep -q "给别人用" <<<"${output}" || grep -q "运行与维护" <<<"${output}" || grep -q "高级诊断" <<<"${output}" || grep -q "被控维护与排障" <<<"${output}"; then
-            printf 'menu-smoke failed: main top-level still shows removed or controlled entries\n' >&2
+        manageSubscription <<<"14"
+        grep -q "安装/更新订阅服务" <<<"${output}"
+        grep -q "订阅同步" <<<"${output}"
+        grep -q "主控建链向导" <<<"${output}"
+        grep -q "控制面与连接细节" <<<"${output}"
+        if grep -q '^发布订阅 ' <<<"${output}" || grep -q '^多服务器协同 ' <<<"${output}" || grep -q '^主控维护与排障 ' <<<"${output}" || grep -q '^被控维护与排障 ' <<<"${output}"; then
+            printf 'menu-smoke failed: main top-level still exposes grouped submenus\n' >&2
             return 1
         fi
         assertMenuAction menu
@@ -1703,10 +1704,11 @@ n
         setMenuSmokeRole controlled
         resetMenuActions
         output=
-        manageSubscription <<<"4"
+        manageSubscription <<<"8"
         grep -q "接入主控" <<<"${output}"
         grep -q "查看本机状态" <<<"${output}"
-        grep -q "被控维护与排障" <<<"${output}"
+        grep -q "导入/更新主控接入凭据" <<<"${output}"
+        grep -q "查看控制面与 Peer 细节" <<<"${output}"
         if grep -q "发布订阅" <<<"${output}" || grep -q "多服务器协同" <<<"${output}" || grep -q "主控维护与排障" <<<"${output}"; then
             printf 'menu-smoke failed: controlled top-level still shows main entries\n' >&2
             return 1
@@ -1716,14 +1718,14 @@ n
         manageSubscriptionControlledHome <<<"1
 invite-credential
 y
-4"
+8"
         assertMenuAction subscriptionWireGuardJoinInvite
         assertMenuAction showSubscriptionWireGuardJoinReceipt
         assertMenuAction showSubscriptionWireGuardStatus
         resetMenuActions
         output=
         manageSubscriptionControlledHome <<<"2
-4"
+8"
         grep -q "当前服务器角色：" <<<"${output}"
         if assertMenuAction showSubscriptionWireGuardControlledCredential || assertMenuAction showSubscriptionWireGuardJoinReceipt; then
             return 1

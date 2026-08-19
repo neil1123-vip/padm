@@ -109,7 +109,7 @@ subscriptionGroupsWithLock() {
 }
 
 subscriptionGroupsSchemaVersion() {
-    echo 2
+    echo 3
 }
 
 writeDefaultSubscriptionGroupsState() {
@@ -121,14 +121,6 @@ writeDefaultSubscriptionGroupsState() {
     {
       "id": "default",
       "name": "默认订阅组",
-      "admin": {
-        "id": "admin",
-        "name": "我的订阅",
-        "enabled": true,
-        "allowed_sources": ["*"],
-        "traffic_limit_gb": 0,
-        "token": ""
-      },
       "sources": [
         {
           "id": "main",
@@ -177,10 +169,10 @@ validateSubscriptionGroupsState() {
       def allowed_sources:
         type == "array" and length > 0 and all(.[]; nonempty_string);
       def principal($optional):
-        exact(["id", "name", "enabled", "allowed_sources", "traffic_limit_gb", "token"]; $optional) and
+        exact(["id", "name", "enabled", "allowed_sources", "traffic_limit_gb"]; $optional) and
         (.id | nonempty_string) and (.name | nonempty_string) and
         (.enabled | type == "boolean") and (.allowed_sources | allowed_sources) and
-        (.traffic_limit_gb | count) and (.token | type == "string") and
+        (.traffic_limit_gb | count) and
         ((has("uuid") | not) or (.uuid | type == "string" and test("^[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$")));
       def sync_plan:
         exact(["create", "remove"]; []) and
@@ -226,9 +218,8 @@ validateSubscriptionGroupsState() {
       (.groups | type == "array" and length > 0) and
       (.active_group | type == "string" and length > 0) and (.active_group as $active | any(.groups[]?; .id == $active)) and
       all(.groups[];
-        exact(["id", "name", "admin", "sources", "user_groups", "sync", "traffic"]; []) and
+        exact(["id", "name", "sources", "user_groups", "sync", "traffic"]; []) and
         (.id | nonempty_string) and (.name | nonempty_string) and
-        (.admin | principal([])) and
         (.sources | type == "array" and length > 0 and all(.[]; source) and ([.[] | select(.role == "main")] | length == 1)) and
         (.user_groups | type == "array" and all(.[]; principal(["uuid"]))) and
         (.sync |
@@ -247,6 +238,44 @@ validateSubscriptionGroupsState() {
     ' "${stateFile}" >/dev/null 2>&1
 }
 
+backupSubscriptionGroupsStateForV3Migration() {
+    local stateFile=$1
+    local backupDir
+    local backupFile
+    backupDir=$(subscriptionGroupsBackupDir) || return 1
+    padmEnsureSafeDirectory "${backupDir}" || return 1
+    chmod 700 "${backupDir}" 2>/dev/null || return 1
+    backupFile="${backupDir}/groups-pre-v3-migration-$(date '+%Y%m%d%H%M%S')-${BASHPID:-$$}-${RANDOM}.json"
+    while [[ -e "${backupFile}" ]]; do
+        backupFile="${backupDir}/groups-pre-v3-migration-$(date '+%Y%m%d%H%M%S')-${BASHPID:-$$}-${RANDOM}.json"
+    done
+    backupManagedFileToPath "${stateFile}" "${backupFile}" 600 || return 1
+    printf '%s\n' "${backupFile}"
+}
+
+migrateSubscriptionGroupsV2State() {
+    local stateFile=$1
+    local stageFile
+    padmCreateTempFileForTarget stageFile "${stateFile}" v3-migration || return 1
+    if ! jq '
+      if .version == 2 then
+        .version = 3 |
+        .groups |= map(del(.admin) | .user_groups |= map(del(.token)))
+      else . end
+    ' "${stateFile}" >"${stageFile}" || ! validateSubscriptionGroupsState "${stageFile}"; then
+        padmRemoveCleanupPath "${stageFile}"
+        return 1
+    fi
+    if ! backupSubscriptionGroupsStateForV3Migration "${stateFile}" >/dev/null; then
+        padmRemoveCleanupPath "${stageFile}"
+        return 1
+    fi
+    if ! commitGeneratedFile "${stageFile}" "${stateFile}" 600; then
+        padmRemoveCleanupPath "${stageFile}"
+        return 1
+    fi
+}
+
 ensureSubscriptionGroupsStateUnlocked() {
     local stateDir
     local stateFile
@@ -262,8 +291,10 @@ ensureSubscriptionGroupsStateUnlocked() {
             return 1
         fi
         padmRemoveCleanupPath "${stageFile}"
-    elif [[ ! -f "${stateFile}" ]] || ! validateSubscriptionGroupsState "${stateFile}"; then
+    elif [[ ! -f "${stateFile}" ]]; then
         return 1
+    elif ! validateSubscriptionGroupsState "${stateFile}"; then
+        migrateSubscriptionGroupsV2State "${stateFile}" || return 1
     fi
     if declare -F subscriptionGroupsSecureStateFiles >/dev/null 2>&1; then
         subscriptionGroupsSecureStateFiles 2>/dev/null || return 1
@@ -438,8 +469,30 @@ addUserSubscriptionState() {
     local limit=${4:-0}
     subscriptionActiveGroupWrite --arg id "${id}" --arg name "${name}" --argjson sources "${sources}" --argjson limit "${limit}" '
         if any(.user_groups[]?; .id == $id) then error("user subscription already exists") else
-          .user_groups += [{"id": $id, "name": $name, "enabled": true, "allowed_sources": $sources, "traffic_limit_gb": $limit, "token": ""}]
+          .user_groups += [{"id": $id, "name": $name, "enabled": true, "allowed_sources": $sources, "traffic_limit_gb": $limit}]
         end
+    '
+}
+
+subscriptionApplyUserGroupState() {
+    local desiredUsers=${1:-'[]'}
+    local removeIds=${2:-'[]'}
+    jq -e -n --argjson users "${desiredUsers}" --argjson removeIds "${removeIds}" '
+      ($users | type == "array" and all(.[]?; type == "object" and
+        (.id | type == "string" and length > 0) and
+        (.uuid | type == "string" and test("^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$")))) and
+      ($removeIds | type == "array" and all(.[]?; type == "string" and length > 0)) and
+      ([$users[]?.id] | length) == ([$users[]?.id] | unique | length)
+    ' >/dev/null 2>&1 || return 1
+    subscriptionActiveGroupWrite --argjson users "${desiredUsers}" --argjson removeIds "${removeIds}" '
+      .user_groups = [.user_groups[]? | select(.id as $id | ($removeIds | index($id) | not))] |
+      .traffic.user_groups = (reduce $removeIds[] as $id ((.traffic.user_groups // {}); del(.[$id]))) |
+      reduce $users[] as $user (.;
+        if any(.user_groups[]?; .id == $user.id) then
+          .user_groups |= map(if .id == $user.id then .uuid = $user.uuid else . end)
+        else
+          .user_groups += [{id:$user.id, name:$user.id, enabled:true, allowed_sources:["main"], traffic_limit_gb:0, uuid:$user.uuid}]
+        end)
     '
 }
 

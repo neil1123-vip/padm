@@ -343,6 +343,17 @@ runSubscriptionCapabilityDispatchRegression() {
     assertEquals showVmessHTTPUpgradeAccounts "$(subscriptionAccountDisplayFunction 23)" "account-display-fn:23"
     assertEquals showShadowsocksAccounts "$(subscriptionAccountDisplayFunction 30)" "account-display-fn:30"
     assertEquals showTuicAccounts "$(subscriptionAccountDisplayFunction 31)" "account-display-fn:31"
+    assertEquals 25 "$(protocolCapabilityFieldIndex account_display)" "account-display-field-index"
+    if protocolCapabilityRegistry | awk -F'|' '$3 == "node" && $25 == "" { exit 1 }'; then
+        :
+    else
+        printf 'assert-fail:public node capabilities must define account display functions\n' >&2
+        return 1
+    fi
+    if grep -Eq '^[[:space:]]*case "\$1"' "${accountsFile}"; then
+        printf 'assert-fail:account display mapping must live in capability registry\n' >&2
+        return 1
+    fi
 
     if grep -Eq '^[[:space:]]*show(Vless|Trojan|Vmess|Hysteria|Tuic|Naive|AnyTls)' "${accountsFile}"; then
         printf 'assert-fail:showAccounts should dispatch account display functions through capability ids\n' >&2
