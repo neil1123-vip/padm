@@ -563,8 +563,8 @@ runWriteWireGuardControlNginxPathSafetyRegression() {
         ensureSubscriptionWireGuardNginxConfig
         grep -q 'listen 10.77.0.1:39778;' "${nginxRoot}/padm-control-wg.conf"
         grep -q 'proxy_connect_timeout 5s;' "${nginxRoot}/padm-control-wg.conf"
-        grep -q 'proxy_send_timeout 180s;' "${nginxRoot}/padm-control-wg.conf"
-        grep -q 'proxy_read_timeout 195s;' "${nginxRoot}/padm-control-wg.conf"
+        grep -q 'proxy_send_timeout 20s;' "${nginxRoot}/padm-control-wg.conf"
+        grep -q 'proxy_read_timeout 30s;' "${nginxRoot}/padm-control-wg.conf"
         grep -q "alias ${subscribeRoot}/\\\$1/\\\$2;" "${nginxRoot}/padm-control-wg.conf"
 
         subscriptionWireGuardReadState() { printf '%s\n' '{"address":"10.77.0.1/24","control_port":"39778;\nserver{}"}'; }

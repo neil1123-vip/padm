@@ -126,6 +126,8 @@ subscriptionRemoteControlRequest() {
     local token
     local url
     local maxTime
+    local deadline
+    local remainingTime
     local -a curlArgs=()
     local response
     local statusCode
@@ -134,10 +136,11 @@ subscriptionRemoteControlRequest() {
     [[ -n "${token}" ]] || return 2
     url=$(subscriptionRemoteControlUrl "${source}" "${endpoint}") || return 1
     if [[ "${endpoint}" == "sync" ]]; then
-        maxTime=210
+        maxTime=40
     else
         maxTime=15
     fi
+    deadline=$((SECONDS + maxTime))
     curlArgs=(
         -sS
         --connect-timeout 5
@@ -155,6 +158,9 @@ subscriptionRemoteControlRequest() {
     fi
     if ! response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" <<<"${payload}" 2>/dev/null); then
         subscriptionRemoteWireGuardWaitForPeerEndpointFromSource "${source}" "" "" "${baselineEndpoint}" "${baselineHandshake}" >/dev/null 2>&1 || true
+        remainingTime=$((deadline - SECONDS))
+        ((remainingTime > 0)) || return 1
+        curlArgs[4]="${remainingTime}"
         response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" <<<"${payload}" 2>/dev/null) || return 1
     fi
     statusCode=${response##*$'\n'}
@@ -645,9 +651,9 @@ PORT = $(subscriptionControlPort)
 MAX_BODY_SIZE = 256 * 1024
 CONTROL_REQUEST_LOCK = Lock()
 try:
-    SCRIPT_TIMEOUT = max(0.1, float(os.environ.get("PADM_CONTROL_SCRIPT_TIMEOUT", "180") or "180"))
+    SCRIPT_TIMEOUT = max(0.1, float(os.environ.get("PADM_CONTROL_SCRIPT_TIMEOUT", "20") or "20"))
 except ValueError:
-    SCRIPT_TIMEOUT = 180
+    SCRIPT_TIMEOUT = 20
 try:
     REQUEST_READ_TIMEOUT = max(0.1, float(os.environ.get("PADM_CONTROL_REQUEST_TIMEOUT", "10") or "10"))
 except ValueError:

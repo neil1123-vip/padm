@@ -243,11 +243,14 @@ runRemoteControlInlineRequestHelpersRegression() (
     local curlHeaderFilesLog="${TMP_DIR}/remote-control-inline-request-curl-header-files.log"
     local curlChmodLog="${TMP_DIR}/remote-control-inline-request-curl-chmod.log"
     local curlPayloadLog="${TMP_DIR}/remote-control-inline-request-curl-payload.log"
+    local retryLog="${TMP_DIR}/remote-control-inline-request-retry.log"
+    local requestMode=success
 
     : >"${curlArgsLog}"
     : >"${curlHeaderFilesLog}"
     : >"${curlChmodLog}"
     : >"${curlPayloadLog}"
+    : >"${retryLog}"
 
     [[ "$(subscriptionRemoteControlUrl "${source}" sync)" == "http://10.77.0.2:39778/s/control/sync" ]]
     ! subscriptionRemoteControlUrl "${legacySource}" sync >/dev/null 2>&1
@@ -263,6 +266,10 @@ runRemoteControlInlineRequestHelpersRegression() (
     }
     subscriptionWireGuardControlUrl() {
         printf 'https://control.example/%s\n' "$2"
+    }
+    subscriptionRemoteWireGuardWaitForPeerEndpointFromSource() {
+        printf 'wait\n' >>"${retryLog}"
+        SECONDS=$((SECONDS + 40))
     }
     chmod() {
         printf '%s\n' "$*" >>"${curlChmodLog}"
@@ -289,6 +296,7 @@ runRemoteControlInlineRequestHelpersRegression() (
             fi
             [[ "${arg}" == "-H" ]] && expectHeader=true
         done
+        [[ "${requestMode}" == "success" ]] || return 1
         case "$*" in
         *'https://control.example/sync'*)
             printf '{"ok":true,"dry_run":false,"changed":false,"plan":{"create":[],"remove":[]}}\n200'
@@ -321,10 +329,16 @@ runRemoteControlInlineRequestHelpersRegression() (
     ! grep -qF 'Authorization: Bearer token' "${curlArgsLog}"
     [[ "$(wc -l <"${curlHeaderFilesLog}" | tr -d ' ')" == "2" ]] || return 1
     [[ "$(grep -c '^600 .*/padm-control-auth\.' "${curlChmodLog}")" == "2" ]] || return 1
-    grep -q -- '--max-time 210' "${curlArgsLog}" || return 1
+    grep -q -- '--max-time 40' "${curlArgsLog}" || return 1
     grep -qF -- '--data-binary @-' "${curlArgsLog}" || return 1
     ! grep -qF 'desired_users' "${curlArgsLog}"
     grep -qxF '{"desired_users":[],"dry_run":false}' "${curlPayloadLog}" || return 1
+
+    requestMode=budget-exhausted
+    : >"${curlArgsLog}"
+    ! subscriptionRemoteControlRequest "${source}" sync '{"desired_users":[],"dry_run":false}' >/dev/null 2>&1
+    [[ "$(wc -l <"${curlArgsLog}" | tr -d ' ')" == "1" ]] || return 1
+    [[ "$(wc -l <"${retryLog}" | tr -d ' ')" == "1" ]] || return 1
     while IFS= read -r headerFile; do
         [[ -n "${headerFile}" ]] || continue
         [[ ! -e "${headerFile}" ]] || return 1
