@@ -240,7 +240,7 @@ subscriptionRemoteControlHealth() {
     }
     statusCode=${response##*$'\n'}
     body=${response%$'\n'*}
-    if [[ "${statusCode}" == "200" ]] && jq -e '.ok == true' <<<"${body}" >/dev/null 2>&1; then
+    if [[ "${statusCode}" == "200" ]] && jq -e '.ok == true and (.capabilities | type == "array" and index("health") != null and index("sync") != null and index("traffic") != null)' <<<"${body}" >/dev/null 2>&1; then
         jq -c --arg id "$(jq -r '.id' <<<"${source}")" --arg name "$(jq -r '.name' <<<"${source}")" '. + {id:$id, name:$name, ok:true}' <<<"${body}"
         return 0
     fi
@@ -263,6 +263,62 @@ subscriptionRemoteHealthInternalErrorResult() {
         --arg id "$(jq -r '.id // "unknown"' <<<"${source}" 2>/dev/null || echo unknown)" \
         --arg name "$(jq -r '.name // .id // "unknown"' <<<"${source}" 2>/dev/null || echo unknown)" \
         '{id:$id, name:$name, ok:false, status:"internal_error", error_detail:{type:"internal_error", message:"健康检查结果生成失败"}}'
+}
+
+subscriptionRemoteTrafficForSource() {
+    local source=$1
+    local sourceId
+    local response
+    sourceId=$(jq -r '.id // empty' <<<"${source}") || return 1
+    [[ -n "${sourceId}" ]] || return 1
+    if subscriptionRemoteSourceSelfReference "${source}"; then
+        jq -n --arg sourceId "${sourceId}" \
+            '{source_id:$sourceId, status:"self_reference", error_detail:{type:"self_reference", message:"服务器源指向当前订阅服务，已跳过以避免递归采集"}}'
+    elif [[ -z "$(jq -r '.control_token // empty' <<<"${source}")" ]]; then
+        jq -n --arg sourceId "${sourceId}" \
+            '{source_id:$sourceId, status:"missing_token", error_detail:{type:"missing_token", message:"未配置控制 token"}}'
+    elif response=$(subscriptionRemoteControlRequest "${source}" traffic '{}'); then
+        if jq -e '.ok == true' <<<"${response}" >/dev/null 2>&1 && jq -e '
+          keys == ["items", "ok"] and
+          (.items | type == "array") and
+          ([.items[].account] | length) == ([.items[].account] | unique | length) and
+          all(.items[]?;
+            type == "object" and
+            keys == ["account", "download", "upload"] and
+            (.account | type == "string" and length > 0 and test("^[A-Za-z0-9_-]+$")) and
+            (.upload | type == "number" and . >= 0 and . == floor) and
+            (.download | type == "number" and . >= 0 and . == floor))
+        ' <<<"${response}" >/dev/null 2>&1; then
+            jq -n --arg sourceId "${sourceId}" --argjson response "${response}" \
+                '{source_id:$sourceId, status:"success", response:$response}'
+        elif jq -e '.ok == true' <<<"${response}" >/dev/null 2>&1; then
+            jq -n --arg sourceId "${sourceId}" --argjson response "${response}" \
+                '{source_id:$sourceId, status:"remote_error", error_detail:{type:"invalid_response", message:"远端流量响应格式无效"}, response:$response}'
+        else
+            jq -n --arg sourceId "${sourceId}" --arg message "$(subscriptionRemoteResponseErrorMessage "${response}")" --argjson response "${response}" \
+                '{source_id:$sourceId, status:"remote_error", error_detail:{type:"remote_error", message:$message}, response:$response}'
+        fi
+    else
+        jq -n --arg sourceId "${sourceId}" \
+            '{source_id:$sourceId, status:"unreachable", error_detail:{type:"unreachable", message:"不可达或流量请求失败"}}'
+    fi
+}
+
+subscriptionRemoteTrafficInternalErrorResult() {
+    local source=$1
+    jq -n \
+        --arg sourceId "$(jq -r '.id // "unknown"' <<<"${source}" 2>/dev/null || echo unknown)" \
+        '{source_id:$sourceId, status:"internal_error", error_detail:{type:"internal_error", message:"远端流量结果生成失败"}}'
+}
+
+subscriptionRemoteTrafficAll() {
+    local sources
+    sources=$(subscriptionRemoteControlSources) || return 1
+    subscriptionRemoteCollectParallelResults \
+        "${sources}" \
+        padm-remote-traffic.XXXXXX \
+        subscriptionRemoteTrafficForSource \
+        subscriptionRemoteTrafficInternalErrorResult
 }
 
 subscriptionRemoteSyncPlanInternalErrorResult() {
@@ -584,7 +640,7 @@ from threading import Lock
 SCRIPT_PATH = ${scriptPathLiteral}
 TOKEN_FILE = ${tokenFileLiteral}
 VERSION = ${scriptVersionLiteral}
-CAPABILITIES = ["health", "sync"]
+CAPABILITIES = ["health", "sync", "traffic"]
 PORT = $(subscriptionControlPort)
 MAX_BODY_SIZE = 256 * 1024
 CONTROL_REQUEST_LOCK = Lock()
@@ -681,13 +737,13 @@ class Handler(BaseHTTPRequestHandler):
         error = body.get("error", "")
         if error == "unauthorized":
             return 401
-        if endpoint == "sync" and error in ("invalid_payload", "empty_payload"):
+        if endpoint in ("sync", "traffic") and error in ("invalid_payload", "empty_payload"):
             return 400
         if endpoint == "health":
             return 503
         if error in ("script_timeout", "script_failed", "script_exec_failed", "invalid_response"):
             return 503
-        if endpoint == "sync":
+        if endpoint in ("sync", "traffic"):
             return 503
         return 500
 
@@ -769,7 +825,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         endpoint = self.endpoint()
-        if endpoint != "sync":
+        if endpoint not in ("sync", "traffic"):
             self.respond(404, {"ok": False, "error": "not_found"})
             return
         if not self.authorized():
@@ -1218,6 +1274,41 @@ subscriptionControlSyncResponse() {
     fi
 }
 
+subscriptionControlTrafficResponse() {
+    local payload=$1
+    local snapshot
+    if ! jq -e 'type == "object" and keys == []' <<<"${payload}" >/dev/null 2>&1; then
+        jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"流量请求体格式不正确"}}'
+        return 1
+    fi
+    readInstallType
+    readInstallProtocolType
+    if ! ensureSubscriptionGroupsState || ! ensureXrayTrafficStatsConfig; then
+        jq -n '{ok:false, error:"traffic_failed", error_detail:{type:"traffic_failed", message:"流量统计配置不可用"}}'
+        return 1
+    fi
+    snapshot=$(collectLocalTrafficSnapshot)
+    if ! jq -e '
+      .ok == true and
+      (.items | type == "array") and
+      ([.items[].account] | length) == ([.items[].account] | unique | length) and
+      all(.items[]?;
+        type == "object" and
+        keys == ["account", "download", "upload"] and
+        (.account | type == "string" and length > 0 and test("^[A-Za-z0-9_-]+$")) and
+        (.upload | type == "number" and . >= 0 and . == floor) and
+        (.download | type == "number" and . >= 0 and . == floor))
+    ' <<<"${snapshot}" >/dev/null 2>&1; then
+        jq -n '{ok:false, error:"traffic_failed", error_detail:{type:"traffic_failed", message:"本机流量统计采集失败"}}'
+        return 1
+    fi
+    writeSubscriptionTrafficSnapshot "${snapshot}" >/dev/null 2>&1 || {
+        jq -n '{ok:false, error:"traffic_failed", error_detail:{type:"traffic_failed", message:"本机流量统计写入失败"}}'
+        return 1
+    }
+    jq -c '{ok:true, items:.items}' <<<"${snapshot}"
+}
+
 subscriptionControlApplySyncUnlocked() {
     local payload=$1
     local dryRun
@@ -1345,7 +1436,16 @@ handleSubscriptionControl() {
         return 1
     fi
     if [[ "${endpoint}" == "health" ]]; then
-        jq -n --arg version "$(getScriptVersion)" '{ok:true, version:$version, capabilities:["health","sync"]}'
+        jq -n --arg version "$(getScriptVersion)" '{ok:true, version:$version, capabilities:["health","sync","traffic"]}'
+    elif [[ "${endpoint}" == "traffic" ]]; then
+        if [[ -z "${payload}" ]]; then
+            payload=$(cat)
+        fi
+        if [[ -z "${payload}" ]]; then
+            jq -n '{ok:false, error:"empty_payload", error_detail:{type:"empty_payload", message:"流量请求体为空"}}'
+            return 1
+        fi
+        subscriptionControlTrafficResponse "${payload}"
     elif [[ "${endpoint}" == "sync" ]]; then
         if [[ -z "${payload}" ]]; then
             payload=$(cat)

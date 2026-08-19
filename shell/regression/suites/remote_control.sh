@@ -30,6 +30,7 @@ listRegressionRemoteControlSmokeCoreChildSelectors() {
         remote-control-inline-request-helpers \
         remote-control-inline-wireguard-peer-helpers \
         remote-control-inline-token-consumers \
+        remote-control-traffic-contract \
         remote-control-inline-sync-runner \
         remote-control-inline-sync-parallel-runner \
         remote-control-handle-inline-helpers
@@ -58,6 +59,7 @@ registerRegressionFunctionLeaf remote-control-health runRemoteControlHealthRegre
 registerRegressionFunctionLeaf remote-control-inline-request-helpers runRemoteControlInlineRequestHelpersRegression
 registerRegressionFunctionLeaf remote-control-inline-wireguard-peer-helpers runRemoteControlInlineWireGuardPeerHelpersRegression
 registerRegressionFunctionLeaf remote-control-inline-token-consumers runRemoteControlInlineTokenConsumersRegression
+registerRegressionFunctionLeaf remote-control-traffic-contract runRemoteControlTrafficContractRegression
 registerRegressionFunctionLeaf remote-control-inline-sync-runner runRemoteControlInlineSyncRunnerRegression
 registerRegressionFunctionLeaf remote-control-inline-sync-parallel-runner runRemoteControlInlineSyncParallelRunnerRegression
 registerRegressionFunctionLeaf remote-control-handle-inline-helpers runRemoteControlHandleInlineHelpersRegression

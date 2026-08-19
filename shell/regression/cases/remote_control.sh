@@ -201,7 +201,7 @@ runRemoteControlHealthRegression() (
             printf '{"ok":false,"error":"service_unavailable","error_detail":{"type":"service_unavailable","message":"服务暂时不可用"}}\n503'
             ;;
         success)
-            printf '{"ok":true,"version":"test","capabilities":["health","sync"]}\n200'
+            printf '{"ok":true,"version":"test","capabilities":["health","sync","traffic"]}\n200'
             ;;
         *)
             printf '{"ok":false,"error":"unexpected"}\n500'
@@ -229,7 +229,7 @@ runRemoteControlHealthRegression() (
     response=$(PADM_FAKE_REMOTE_HEALTH_MODE=success subscriptionRemoteControlHealth "${sourceRemote}" | jq -c .)
     [[ "${response}" == *'"ok":true'* ]]
     [[ "${response}" == *'"version":"test"'* ]]
-    [[ "${response}" == *'"capabilities":["health","sync"]'* ]]
+    [[ "${response}" == *'"capabilities":["health","sync","traffic"]'* ]]
     [[ "${response}" == *'"id":"edge-remote"'* ]]
     [[ "${response}" == *'"name":"Edge Remote"'* ]]
 )
@@ -294,7 +294,7 @@ runRemoteControlInlineRequestHelpersRegression() (
             printf '{"ok":true,"dry_run":false,"changed":false,"plan":{"create":[],"remove":[]}}\n200'
             ;;
         *'https://control.example/health'*)
-            printf '{"ok":true,"version":"test","capabilities":["health","sync"]}\n200'
+            printf '{"ok":true,"version":"test","capabilities":["health","sync","traffic"]}\n200'
             ;;
         *)
             return 1
@@ -314,7 +314,7 @@ runRemoteControlInlineRequestHelpersRegression() (
     healthResponse=$(jq -c . <<<"${healthResponse}") || return 1
     [[ "${healthResponse}" == *'"ok":true'* ]] || return 1
     [[ "${healthResponse}" == *'"version":"test"'* ]] || return 1
-    [[ "${healthResponse}" == *'"capabilities":["health","sync"]'* ]] || return 1
+    [[ "${healthResponse}" == *'"capabilities":["health","sync","traffic"]'* ]] || return 1
     [[ "${healthResponse}" == *'"id":"edge-remote"'* ]] || return 1
     [[ "${healthResponse}" == *'"name":"Edge Remote"'* ]] || return 1
     [[ "$(grep -c -- '--max-filesize 1048576' "${curlArgsLog}")" == "2" ]] || return 1
@@ -398,7 +398,7 @@ runRemoteControlInlineWireGuardPeerHelpersRegression() (
             printf '{"ok":true,"dry_run":false,"changed":false,"plan":{"create":[],"remove":[]}}\n200'
             ;;
         *'https://control.example/health'*)
-            printf '{"ok":true,"version":"test","capabilities":["health","sync"]}\n200'
+            printf '{"ok":true,"version":"test","capabilities":["health","sync","traffic"]}\n200'
             ;;
         *)
             return 1
@@ -425,7 +425,7 @@ runRemoteControlInlineWireGuardPeerHelpersRegression() (
     healthResponse=$(jq -c . <<<"${healthResponse}") || return 1
     [[ "${healthResponse}" == *'"ok":true'* ]] || return 1
     [[ "${healthResponse}" == *'"version":"test"'* ]] || return 1
-    [[ "${healthResponse}" == *'"capabilities":["health","sync"]'* ]] || return 1
+    [[ "${healthResponse}" == *'"capabilities":["health","sync","traffic"]'* ]] || return 1
     [[ "${healthResponse}" == *'"id":"edge-remote"'* ]] || return 1
     [[ "${healthResponse}" == *'"name":"Edge Remote"'* ]] || return 1
     [[ "$(wc -l <"${endpointLog}")" == "2" ]] || return 1
@@ -515,6 +515,31 @@ runRemoteControlInlineTokenConsumersRegression() (
     grep -Fqx $'failure\tedge-remote\tinvalid_response\t未返回完整订阅快照' "${statusLog}" || return 1
     [[ ! -e "${healthLog}" ]] || return 1
     ! grep -q '^status	' "${statusLog}" || return 1
+)
+
+runRemoteControlTrafficContractRegression() (
+    local source='{"id":"edge-remote","name":"Edge Remote","control_token":"token","scheme":"wireguard","transport":"wireguard","host":"10.77.0.2","port":39778}'
+    local responseMode=valid
+    local result
+
+    subscriptionRemoteSourceSelfReference() { return 1; }
+    subscriptionRemoteControlRequest() {
+        [[ "$2" == "traffic" && "$3" == '{}' ]] || return 1
+        case "${responseMode}" in
+        valid) printf '%s\n' '{"ok":true,"items":[{"account":"admin","upload":1,"download":2},{"account":"sub_team_a","upload":3,"download":4}]}' ;;
+        duplicate) printf '%s\n' '{"ok":true,"items":[{"account":"admin","upload":1,"download":2},{"account":"admin","upload":3,"download":4}]}' ;;
+        legacy) printf '%s\n' '{"ok":false,"error":"unknown_endpoint","error_detail":{"type":"unknown_endpoint","message":"未知控制端点"}}' ;;
+        esac
+    }
+
+    result=$(subscriptionRemoteTrafficForSource "${source}")
+    jq -e '.source_id == "edge-remote" and .status == "success" and .response.items[1].account == "sub_team_a"' <<<"${result}" >/dev/null
+    responseMode=duplicate
+    result=$(subscriptionRemoteTrafficForSource "${source}")
+    jq -e '.status == "remote_error" and .error_detail.type == "invalid_response"' <<<"${result}" >/dev/null
+    responseMode=legacy
+    result=$(subscriptionRemoteTrafficForSource "${source}")
+    jq -e '.status == "remote_error" and .error_detail.type == "remote_error" and .error_detail.message == "未知控制端点"' <<<"${result}" >/dev/null
 )
 
 runRemoteControlInlineSyncRunnerRegression() (
@@ -692,7 +717,7 @@ runRemoteControlHandleInlineHelpersRegression() (
         printf '{"create":[],"remove":[]}'
     }
     healthResponse=$(handleSubscriptionControl health test-token | jq -c .)
-    [[ "${healthResponse}" == *'"ok":true'*'"version":"test"'*'"capabilities":["health","sync"]'* ]]
+    [[ "${healthResponse}" == *'"ok":true'*'"version":"test"'*'"capabilities":["health","sync","traffic"]'* ]]
 
     jq '.version = 1' "$(subscriptionGroupsFile)" >"$(subscriptionGroupsFile).tmp"
     mv "$(subscriptionGroupsFile).tmp" "$(subscriptionGroupsFile)"
@@ -2008,6 +2033,12 @@ if [[ "${endpoint}" == "sync" ]]; then
         printf '{"ok":false,"error":"invalid_payload","error_detail":{"type":"invalid_payload","message":"同步请求体格式不正确"}}\n'
         exit 1
     fi
+elif [[ "${endpoint}" == "traffic" ]]; then
+    payload=$(cat)
+    if [[ "${payload}" != "{}" ]]; then
+        printf '{"ok":false,"error":"invalid_payload","error_detail":{"type":"invalid_payload","message":"流量请求体格式不正确"}}\n'
+        exit 1
+    fi
 fi
 case "${endpoint}:${mode}" in
 health:*)
@@ -2019,6 +2050,10 @@ sync:noise)
     printf '{"ok":false,"error":"first_json"}\n'
     printf 'ui noise between json\n'
     printf '{"ok":true,"dry_run":false,"changed":true,"plan":{"create":[],"remove":[]}}\n'
+    ;;
+traffic:noise)
+    printf 'ui noise before traffic\n'
+    printf '{"ok":true,"items":[{"account":"admin","upload":7,"download":9}]}\n'
     ;;
 sync:failed)
     printf 'ui noise before failed sync\n'
@@ -2192,6 +2227,7 @@ for _ in range(80):
 
 set_mode("noise")
 results["sync_success"] = request("POST", "sync", '{"desired_users":[],"dry_run":false}')
+results["traffic_success"] = request("POST", "traffic", "{}")
 results["subscribe_removed"] = request("POST", "subscribe", '{"account":"team_a"}')
 results["health_unauthorized"] = request("GET", "health", token_override="wrong-token")
 results["sync_empty_payload"] = request("POST", "sync", "")
@@ -2230,8 +2266,9 @@ results["sync_invalid_response"] = request("POST", "sync", '{"desired_users":[],
 print(json.dumps(results, ensure_ascii=False))
 PY
 
-    jq -e '.health_ready.status == 200 and .health_ready.body.ok == true and .health_ready.body.version == "test" and .health_ready.body.capabilities == ["health","sync"]' "${responseFile}" >/dev/null
+    jq -e '.health_ready.status == 200 and .health_ready.body.ok == true and .health_ready.body.version == "test" and .health_ready.body.capabilities == ["health","sync","traffic"]' "${responseFile}" >/dev/null
     jq -e '.sync_success.status == 200 and .sync_success.body.ok == true and .sync_success.body.changed == true and (.sync_success.body.plan.create | length) == 0' "${responseFile}" >/dev/null
+    jq -e '.traffic_success.status == 200 and .traffic_success.body.ok == true and .traffic_success.body.items == [{account:"admin",upload:7,download:9}]' "${responseFile}" >/dev/null
     jq -e '.subscribe_removed.status == 404 and .subscribe_removed.body.error == "not_found"' "${responseFile}" >/dev/null
     jq -e '.health_unauthorized.status == 401' "${responseFile}" >/dev/null
     jq -e '.sync_empty_payload.status == 400' "${responseFile}" >/dev/null

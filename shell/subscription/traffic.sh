@@ -240,14 +240,15 @@ collectLocalTrafficSnapshot() {
 
 writeSubscriptionTrafficSnapshot() {
     local snapshot=$1
+    local remoteResults=${2:-[]}
     local accountIdMap
-    if ! jq -e '.ok == true' <<<"${snapshot}" >/dev/null 2>&1; then
+    if ! jq -e '.ok == true and (.items | type == "array")' <<<"${snapshot}" >/dev/null 2>&1 ||
+        ! jq -e 'type == "array" and all(.[]; .status == "success" and (.response.items | type == "array"))' <<<"${remoteResults}" >/dev/null 2>&1; then
         statusCard "流量统计" "采集失败，已保留上次统计"
         return 1
     fi
     accountIdMap=$(subscriptionActiveGroupRead -r '.user_groups[]?.id' | subscriptionSyncAccountIdMapJsonFromIds) || return 1
-    subscriptionActiveGroupWrite --argjson snapshot "${snapshot}" --argjson accountIdMap "${accountIdMap}" '
-      def addTraffic($items): reduce $items[] as $item ({upload:0, download:0}; .upload += ($item.upload // 0) | .download += ($item.download // 0));
+    subscriptionActiveGroupWrite --argjson snapshot "${snapshot}" --argjson remoteResults "${remoteResults}" --argjson accountIdMap "${accountIdMap}" '
       def sourceTotal($prev; $current):
         ($prev // {upload:0, download:0, counters:{}}) as $old |
         ($old.counters // {}) as $oldCounters |
@@ -255,29 +256,44 @@ writeSubscriptionTrafficSnapshot() {
           ($oldCounters[$item.account] // {upload:0, download:0}) as $counter |
           (($item.upload // 0) - ($counter.upload // 0)) as $uploadDelta |
           (($item.download // 0) - ($counter.download // 0)) as $downloadDelta |
-          .upload += (if ($oldCounters | has($item.account)) and $uploadDelta > 0 then $uploadDelta else 0 end) |
-          .download += (if ($oldCounters | has($item.account)) and $downloadDelta > 0 then $downloadDelta else 0 end) |
+          .upload += (if ($oldCounters | has($item.account)) then (if $uploadDelta >= 0 then $uploadDelta else ($item.upload // 0) end) else ($item.upload // 0) end) |
+          .download += (if ($oldCounters | has($item.account)) then (if $downloadDelta >= 0 then $downloadDelta else ($item.download // 0) end) else ($item.download // 0) end) |
           .counters[$item.account] = {upload: ($item.upload // 0), download: ($item.download // 0)})) as $delta |
         {upload: (($old.upload // 0) + $delta.upload), download: (($old.download // 0) + $delta.download), counters: $delta.counters, updated_at: (now | strftime("%F %T"))};
+      def mapped($items): $items | map(. + {id: ($accountIdMap[.account] // .account)});
       . as $group |
-      ($snapshot.items | map(. + {id: ($accountIdMap[.account] // .account)})) as $items |
+      (mapped($snapshot.items)) as $items |
       ($items | map(select(.account | startswith("sub_")))) as $userItems |
       ($items | map(select((.account | startswith("sub_")) | not))) as $adminItems |
       (sourceTotal($group.traffic.sources.main; $items)) as $mainTraffic |
-      (sourceTotal($group.traffic.admin.sources.main; $adminItems)) as $adminTraffic |
-      (($group.traffic.sources // {}) | to_entries | map(select(.key != "main") | .value) | addTraffic(.)) as $remoteTraffic |
-      .traffic.global = {upload: (($mainTraffic.upload // 0) + ($remoteTraffic.upload // 0)), download: (($mainTraffic.download // 0) + ($remoteTraffic.download // 0))} |
-      .traffic.admin = (($group.traffic.admin // {}) + {upload: ($adminTraffic.upload // 0), download: ($adminTraffic.download // 0), sources: ((($group.traffic.admin.sources // {}) + {main: $adminTraffic}))}) |
-      .traffic.user_groups = (reduce $group.user_groups[]? as $userGroup ({};
-        ($userItems | map(select(.id == $userGroup.id))) as $groupItems |
-        sourceTotal(($group.traffic.user_groups[$userGroup.id].sources.main // {}); $groupItems) as $groupTraffic |
-        .[$userGroup.id] = (($group.traffic.user_groups[$userGroup.id] // {}) + {upload: ($groupTraffic.upload // 0), download: ($groupTraffic.download // 0), sources: ((($group.traffic.user_groups[$userGroup.id].sources // {}) + {main: $groupTraffic}))}))) |
-      .traffic.sources = (($group.traffic.sources // {}) + {main: $mainTraffic})
+      (sourceTotal($group.traffic.admin.sources.main; $adminItems)) as $mainAdminTraffic |
+      ($remoteResults | map(select(.status == "success") | {source_id, items:mapped(.response.items)})) as $remote |
+      ($remote | map(. as $result | {key:$result.source_id, value:sourceTotal($group.traffic.sources[$result.source_id]; $result.items)}) | from_entries) as $remoteSourceTraffic |
+      (($group.traffic.sources // {}) + {main:$mainTraffic} + $remoteSourceTraffic) as $sourceTraffic |
+      ($remote | map(. as $result | {key:$result.source_id, value:sourceTotal($group.traffic.admin.sources[$result.source_id]; ($result.items | map(select(.account | startswith("sub_") | not))))}) | from_entries) as $remoteAdminSourceTraffic |
+      (($group.traffic.admin.sources // {}) + {main:$mainAdminTraffic} + $remoteAdminSourceTraffic) as $adminSourceTraffic |
+      ($group.user_groups | map(
+        . as $user |
+        (sourceTotal(($group.traffic.user_groups[$user.id].sources.main // {}); ($userItems | map(select(.id == $user.id))))) as $mainUserTraffic |
+        ($remote | map(. as $result | {key:$result.source_id, value:sourceTotal($group.traffic.user_groups[$user.id].sources[$result.source_id]; ($result.items | map(select(.id == $user.id))))}) | from_entries) as $remoteUserSourceTraffic |
+        (($group.traffic.user_groups[$user.id].sources // {}) + {main:$mainUserTraffic} + $remoteUserSourceTraffic) as $userSourceTraffic |
+        {key:$user.id, value:(($group.traffic.user_groups[$user.id] // {}) + {upload:([$userSourceTraffic[] | .upload] | add // 0), download:([$userSourceTraffic[] | .download] | add // 0), sources:$userSourceTraffic})}
+      ) | from_entries) as $userTraffic |
+      ([$sourceTraffic[] | .upload] | add // 0) as $globalUpload |
+      ([$sourceTraffic[] | .download] | add // 0) as $globalDownload |
+      ([$adminSourceTraffic[] | .upload] | add // 0) as $adminUpload |
+      ([$adminSourceTraffic[] | .download] | add // 0) as $adminDownload |
+      .traffic.global = {upload:$globalUpload, download:$globalDownload} |
+      .traffic.admin = (($group.traffic.admin // {}) + {upload:$adminUpload, download:$adminDownload, sources:$adminSourceTraffic}) |
+      .traffic.user_groups = $userTraffic |
+      .traffic.sources = $sourceTraffic
     '
 }
 
 collectSubscriptionTraffic() {
     local snapshot
+    local remoteResults='[]'
+    local role
     ensureSubscriptionGroupsState
     readInstallType
     readInstallProtocolType
@@ -285,7 +301,11 @@ collectSubscriptionTraffic() {
         return 1
     fi
     snapshot=$(collectLocalTrafficSnapshot)
-    if writeSubscriptionTrafficSnapshot "${snapshot}"; then
+    role=$(subscriptionCurrentRoleNormalized) || return 1
+    if [[ "${role}" == "main" ]] && subscriptionHasEnabledRemoteSources; then
+        remoteResults=$(subscriptionRemoteTrafficAll) || return 1
+    fi
+    if writeSubscriptionTrafficSnapshot "${snapshot}" "${remoteResults}"; then
         successCard "流量统计已更新"
     else
         return 1

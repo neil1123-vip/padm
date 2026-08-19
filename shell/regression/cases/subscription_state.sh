@@ -403,6 +403,41 @@ runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
     subscriptionQuotaDryRunPlan | jq -e 'length == 1 and .[0].id == "team-a" and .[0].limit_gb == 1 and .[0].percent >= 100 and .[0].action == "disable-and-remove-local-account"' >/dev/null
 }
 
+runSubscriptionGroupStateQuotaTrafficRemoteRegression() {
+    local localSnapshot
+    local remoteResults
+    prepareSubscriptionStateQuotaUsageFixture
+    subscriptionActiveGroupWrite '
+      .sources += [{id:"edge-2",name:"edge-2",role:"secondary",scheme:"wireguard",transport:"wireguard",host:"10.77.0.4",port:48780,enabled:true,sync_status:"pending",control_token:"token-ghi"}] |
+      .traffic = {global:{upload:0,download:0},admin:{upload:0,download:0,sources:{}},user_groups:{},sources:{}}
+    '
+    localSnapshot='{"ok":true,"items":[{"account":"admin","upload":10,"download":20},{"account":"sub_team_a","upload":30,"download":40}]}'
+    remoteResults='[{"source_id":"remote-edge","status":"success","response":{"items":[{"account":"admin","upload":5,"download":6},{"account":"sub_team_a","upload":7,"download":8}]}},{"source_id":"edge-2","status":"success","response":{"items":[{"account":"admin","upload":2,"download":3},{"account":"sub_team_a","upload":4,"download":5}]}}]'
+    writeSubscriptionTrafficSnapshot "${localSnapshot}" "${remoteResults}"
+    jq -e '
+      .groups[0].traffic.global == {upload:58,download:82} and
+      (.groups[0].traffic.sources | length) == 3 and
+      .groups[0].traffic.admin.upload == 17 and
+      .groups[0].traffic.admin.download == 29 and
+      .groups[0].traffic.admin.sources["remote-edge"].upload == 5 and
+      .groups[0].traffic.user_groups["team-a"].upload == 41 and
+      .groups[0].traffic.user_groups["team-a"].download == 53 and
+      .groups[0].traffic.sources["edge-2"].upload == 6 and
+      .groups[0].traffic.sources["edge-2"].counters.sub_team_a.upload == 4
+    ' "$(subscriptionGroupsFile)" >/dev/null
+
+    localSnapshot='{"ok":true,"items":[{"account":"admin","upload":3,"download":4},{"account":"sub_team_a","upload":1,"download":2}]}'
+    remoteResults='[{"source_id":"remote-edge","status":"success","response":{"items":[{"account":"admin","upload":1,"download":1},{"account":"sub_team_a","upload":2,"download":1}]}},{"source_id":"edge-2","status":"success","response":{"items":[{"account":"admin","upload":3,"download":1},{"account":"sub_team_a","upload":1,"download":2}]}}]'
+    writeSubscriptionTrafficSnapshot "${localSnapshot}" "${remoteResults}"
+    jq -e '
+      .groups[0].traffic.global == {upload:67,download:93} and
+      .groups[0].traffic.admin.upload == 22 and
+      .groups[0].traffic.admin.download == 35 and
+      .groups[0].traffic.user_groups["team-a"].upload == 45 and
+      .groups[0].traffic.user_groups["team-a"].download == 58
+    ' "$(subscriptionGroupsFile)" >/dev/null
+}
+
 runSubscriptionGroupStateQuotaTrafficInvalidInputRegression() {
     prepareSubscriptionStateQuotaUsageFixture
     if applySubscriptionQuotaPlan '{bad-json' 2>/dev/null; then

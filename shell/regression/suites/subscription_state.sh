@@ -71,6 +71,7 @@ runRegressionSubscriptionStateQuota() {
 listRegressionSubscriptionStateQuotaTrafficChildSelectors() {
     printf '%s\n' \
         subscription-state-quota-traffic-summary \
+        subscription-state-quota-traffic-remote \
         subscription-state-quota-traffic-invalid-input \
         subscription-state-quota-traffic-apply
 }
@@ -147,6 +148,7 @@ registerRegressionFunctionLeaf subscription-state-structure-source-status runReg
 registerRegressionFunctionLeaf subscription-state-structure-source-remove runRegressionStep subscription-state-structure-source-remove runSubscriptionGroupStateStructureSourceRemoveRegression
 registerRegressionFunctionLeaf subscription-state-structure-sync-cron runRegressionStep subscription-state-structure-sync-cron runSubscriptionGroupStateStructureSyncCronRegression
 registerRegressionFunctionLeaf subscription-state-quota-traffic-summary runRegressionStep subscription-state-quota-traffic-summary runSubscriptionGroupStateQuotaTrafficSummaryRegression
+registerRegressionFunctionLeaf subscription-state-quota-traffic-remote runRegressionStep subscription-state-quota-traffic-remote runSubscriptionGroupStateQuotaTrafficRemoteRegression
 registerRegressionFunctionLeaf subscription-state-quota-traffic-invalid-input runRegressionStep subscription-state-quota-traffic-invalid-input runSubscriptionGroupStateQuotaTrafficInvalidInputRegression
 registerRegressionFunctionLeaf subscription-state-quota-traffic-apply runRegressionStep subscription-state-quota-traffic-apply runSubscriptionGroupStateQuotaTrafficApplyRegression
 registerRegressionFunctionLeaf subscription-state-quota-menu-preview-fail runRegressionStep subscription-state-quota-menu-preview-fail runSubscriptionGroupStateQuotaMenuPreviewFailureRegression
