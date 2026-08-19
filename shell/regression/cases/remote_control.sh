@@ -816,6 +816,12 @@ JSON
 runRemoteControlServerRefreshRegression() (
     local refreshMode=${1:-full}
     local lightMode=${2:-all}
+    local refreshTmpDir="${TMP_DIR}/remote-control-server-refresh-${refreshMode}-${lightMode}-${BASHPID:-$$}"
+    local TMP_DIR="${refreshTmpDir}"
+    local TMPDIR="${TMP_DIR}"
+    local PADM_SUBSCRIPTION_GROUPS_DIR="${TMP_DIR}/subscribe_groups"
+    local PADM_SUBSCRIBE_LOCAL_DIR="${TMP_DIR}/subscribe_local"
+    local PADM_SUBSCRIBE_DIR="${TMP_DIR}/subscribe"
     local lightModeTag=${lightMode}
     local runLightSections=true
     local runDeepSections=true
@@ -837,6 +843,9 @@ runRemoteControlServerRefreshRegression() (
     local lightweightConfigIndex=0
     local lightweightOutputIndex=0
     local controlApplyCaptureFile="${TMP_DIR}/remote-control-apply-response-${refreshMode}-${lightModeTag}.json"
+
+    mkdir -p "${TMP_DIR}" "${PADM_SUBSCRIPTION_GROUPS_DIR}" "${PADM_SUBSCRIBE_LOCAL_DIR}" "${PADM_SUBSCRIBE_DIR}"
+    export TMPDIR PADM_SUBSCRIPTION_GROUPS_DIR PADM_SUBSCRIBE_LOCAL_DIR PADM_SUBSCRIBE_DIR
 
     remoteControlLightModeSelected() {
         local mode
