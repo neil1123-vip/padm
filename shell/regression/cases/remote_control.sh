@@ -755,7 +755,7 @@ runRemoteControlHandleInlineHelpersRegression() (
     }
 
     syncResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}' | jq -c .)
-    [[ "${syncResponse}" == *'"ok":true'*'"dry_run":false'*'"changed":false'* ]]
+    [[ "${syncResponse}" == *'"ok":true'*'"dry_run":false'*'"changed":true'* ]]
     [[ "${syncResponse}" == *'"create":[]'*'"remove":[]'* ]]
     jq -e '.ok == true and (.subscriptions | has("sub_team_a"))' <<<"${syncResponse}" >/dev/null
     [[ -e "${syncLockMarker}" ]]
@@ -764,7 +764,7 @@ runRemoteControlHandleInlineHelpersRegression() (
     expectedDefaultB=$(printf 'trojan://snapshot-b\n' | base64 | tr -d '\n')
     syncSnapshotResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"},{"id":"team-b","uuid":"22222222-2222-2222-2222-222222222222"}],"dry_run":false}' | jq -c .)
     jq -e --arg expectedDefault "${expectedDefault}" --arg expectedDefaultB "${expectedDefaultB}" '
-      .ok == true and .dry_run == false and .changed == false and
+      .ok == true and .dry_run == false and .changed == true and
       .subscriptions.sub_team_a.default == $expectedDefault and
       .subscriptions.sub_team_a.clash_meta == "name: sub_team_a" and
       .subscriptions.sub_team_a.sing_box == [{"tag":"sub_team_a"}] and
@@ -807,7 +807,7 @@ runRemoteControlHandleInlineHelpersRegression() (
     syncSnapshotFailureStatus=$?
     set -e
     [[ "${syncSnapshotFailureStatus}" -ne 0 ]]
-    jq -e '.ok == false and .changed == false and .error == "generation_failed" and .error_detail.type == "generation_failed" and has("subscriptions") == false' <<<"${syncSnapshotResponse}" >/dev/null
+    jq -e '.ok == false and .changed == true and .error == "generation_failed" and .error_detail.type == "generation_failed" and has("subscriptions") == false' <<<"${syncSnapshotResponse}" >/dev/null
     [[ "${syncSnapshotResponse}" != *secret-credential* && "${syncSnapshotResponse}" != *'private diagnostic'* ]]
 
     mkdir -p "${configDir}"
@@ -1153,10 +1153,9 @@ JSON
                     subscriptionSyncApplyAccountPlanTransaction() { return 0; }
                     originalSubscriptionControlApplyAccountPlan '{"create":[],"remove":["sub_team_a"]}' '[]'
                     jq -e '
-                      all(.groups[0].user_groups[]?; .id != "team-a") and
-                      any(.groups[0].user_groups[]?; .id == "local-only") and
+                      (.groups[0].user_groups | length) == 0 and
                       (.groups[0].traffic.user_groups | has("team-a") | not) and
-                      (.groups[0].traffic.user_groups | has("local-only"))
+                      (.groups[0].traffic.user_groups | has("local-only") | not)
                     ' <<<"${virtualGroupsState}" >/dev/null
                 )
 
@@ -1165,6 +1164,25 @@ JSON
                     subscriptionSyncApplyAccountPlanTransaction() { return 0; }
                     originalSubscriptionControlApplyAccountPlan \
                         '{"create":["sub_team_a"],"remove":["sub_team_a"]}' \
+                        '[{"id":"team-a","uuid":"33333333-3333-3333-3333-333333333333"}]'
+                    jq -e '
+                      .groups[0].user_groups == [{
+                        "id":"team-a",
+                        "name":"Preserved Name",
+                        "enabled":true,
+                        "allowed_sources":["main"],
+                        "traffic_limit_gb":5,
+                        "token":"",
+                        "uuid":"33333333-3333-3333-3333-333333333333"
+                      }]
+                    ' <<<"${virtualGroupsState}" >/dev/null
+                )
+
+                (
+                    setVirtualSubscriptionGroupsState '{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Preserved Name","enabled":false,"allowed_sources":["main"],"traffic_limit_gb":5,"token":"","uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}'
+                    subscriptionSyncApplyAccountPlanTransaction() { return 0; }
+                    originalSubscriptionControlApplyAccountPlan \
+                        '{"create":[],"remove":[]}' \
                         '[{"id":"team-a","uuid":"33333333-3333-3333-3333-333333333333"}]'
                     jq -e '
                       .groups[0].user_groups == [{
@@ -1274,7 +1292,7 @@ JSON
                 [[ "${restoreFailureStatus}" -ne 0 ]]
                 responseHasErrorType "${restoreFailureResponse}" apply_plan_failed
                 [[ "${restoreFailureResponse}" == *'订阅状态恢复失败'* ]]
-                jq -e '.groups[0].user_groups[0].enabled == false and .groups[0].user_groups[0].allowed_sources == ["*"] and .groups[0].user_groups[0].uuid == "11111111-1111-1111-1111-111111111111"' <<<"${virtualGroupsState}" >/dev/null
+                jq -e '.groups[0].user_groups[0].enabled == true and .groups[0].user_groups[0].uuid == "11111111-1111-1111-1111-111111111111"' <<<"${virtualGroupsState}" >/dev/null
             )
 
             (

@@ -95,6 +95,13 @@ runSubscriptionGroupStateStructureFoundationAddRemoveRegression() {
         return 1
     fi
     jq -e '.groups[0].user_groups == [{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":7}]' "$(subscriptionGroupsFile)" >/dev/null
+    if toggleUserSubscriptionState missing >/dev/null 2>&1 ||
+        setUserSubscriptionSources missing '["main"]' >/dev/null 2>&1 ||
+        setUserSubscriptionTrafficLimit missing 1 >/dev/null 2>&1 ||
+        setUserSubscriptionEnabled missing false >/dev/null 2>&1 ||
+        removeUserSubscriptionState missing >/dev/null 2>&1; then
+        return 1
+    fi
 }
 
 runSubscriptionGroupStateStructureFoundationCredentialRegression() {
@@ -245,6 +252,9 @@ runSubscriptionGroupStateStructureValidationRegression() {
     for invalidFilter in \
         '.unexpected = true' \
         '.groups[0].user_groups += [{"id":"bad","name":"Bad","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"token":""}]' \
+        '.groups[0].user_groups += [{"id":"bad","name":"Bad","enabled":true,"allowed_sources":["missing-source"],"traffic_limit_gb":0,"token":""}]' \
+        '.groups[0].user_groups += [{"id":"dup","name":"Dup","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"},{"id":"dup","name":"Dup 2","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"uuid":"22222222-2222-2222-2222-222222222222"}]' \
+        '.groups[0].sources += [{"id":"main","name":"Duplicate Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}]' \
         'del(.groups[0].sources[0].transport)' \
         '.groups[0].sync.remote_enabled = true'; do
         writeDefaultSubscriptionGroupsState "${stateFile}"
@@ -271,6 +281,9 @@ runSubscriptionGroupStateStructureSourceCredentialRegression() {
     jq -e '.groups[0].sources[] | select(.id == "remote-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.2" and .port == 39778 and .control_token == "token-abc")' "$(subscriptionGroupsFile)" >/dev/null
     setSubscriptionSourceCredential remote-edge "10.77.0.3" 48779 "token-def"
     jq -e '.groups[0].sources[] | select(.id == "remote-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.3" and .port == 48779 and .control_token == "token-def")' "$(subscriptionGroupsFile)" >/dev/null
+    if setSubscriptionSourceCredential missing "10.77.0.4" 48779 token >/dev/null 2>&1; then
+        return 1
+    fi
 }
 
 runSubscriptionGroupStateStructureSourceStatusRegression() {
@@ -290,6 +303,11 @@ runSubscriptionGroupStateStructureSourceStatusRegression() {
     subscriptionHasEnabledRemoteSources
     clearSubscriptionSourceSyncError edge
     jq -e '(.groups[0].sources[] | select(.id == "edge") | has("last_sync_error")) | not' "$(subscriptionGroupsFile)" >/dev/null
+    if setSubscriptionSourceSyncStatus missing success >/dev/null 2>&1 ||
+        setSubscriptionSourceSyncFailure missing unreachable error >/dev/null 2>&1 ||
+        clearSubscriptionSourceSyncError missing >/dev/null 2>&1; then
+        return 1
+    fi
 }
 
 runSubscriptionGroupStateStructureSyncCronRegression() {
@@ -385,6 +403,11 @@ runSubscriptionGroupStateStructureSyncCronRegression() {
 runSubscriptionGroupStateStructureSourceRemoveRegression() {
     mkdir -p "$(subscriptionGroupsDir)"
     writeSubscriptionStateSourceRemoveFixture
+    if removeSubscriptionSourceState edge >/dev/null 2>&1; then
+        return 1
+    fi
+    jq -e '.groups[0].sources | map(.id) | index("edge")' "$(subscriptionGroupsFile)" >/dev/null
+    setUserSubscriptionSources team-a '["main"]'
     removeSubscriptionSourceState edge
     jq -e '(.groups[0].sources | map(.id) | index("edge") | not) and (.groups[0].traffic.sources | has("edge") | not) and (.groups[0].traffic.user_groups["team-a"].sources | has("edge") | not)' "$(subscriptionGroupsFile)" >/dev/null
 }
@@ -1502,7 +1525,7 @@ JSON
 
     regressionExpectStatus 1 restoreSubscriptionGroupsBackup "${targetBackup}" >/dev/null 2>&1
     [[ "$(<"${stateFile}")" == "${beforeSnapshot}" ]]
-    [[ ! -e "${currentBackup}" ]]
+    [[ -f "${currentBackup}" ]]
 
 )
 

@@ -167,7 +167,8 @@ validateSubscriptionGroupsState() {
       def nonempty_string: type == "string" and length > 0;
       def count: type == "number" and . == floor and . >= 0;
       def allowed_sources:
-        type == "array" and length > 0 and all(.[]; nonempty_string);
+        type == "array" and length > 0 and all(.[]; nonempty_string) and
+        (length == (unique | length));
       def principal($optional):
         exact(["id", "name", "enabled", "allowed_sources", "traffic_limit_gb"]; $optional) and
         (.id | nonempty_string) and (.name | nonempty_string) and
@@ -216,12 +217,16 @@ validateSubscriptionGroupsState() {
 
       exact(["version", "active_group", "groups"]; []) and .version == $schemaVersion and
       (.groups | type == "array" and length > 0) and
+      ([.groups[]?.id] | length) == ([.groups[]?.id] | unique | length) and
       (.active_group | type == "string" and length > 0) and (.active_group as $active | any(.groups[]?; .id == $active)) and
       all(.groups[];
         exact(["id", "name", "sources", "user_groups", "sync", "traffic"]; []) and
         (.id | nonempty_string) and (.name | nonempty_string) and
+        ([.sources[]?.id] | length) == ([.sources[]?.id] | unique | length) and
         (.sources | type == "array" and length > 0 and all(.[]; source) and ([.[] | select(.role == "main")] | length == 1)) and
         (.user_groups | type == "array" and all(.[]; principal(["uuid"]))) and
+        ([.user_groups[]?.id] | length) == ([.user_groups[]?.id] | unique | length) and
+        ([.sources[]?.id] as $sourceIds | all(.user_groups[]?.allowed_sources[]?; . as $sourceId | $sourceId == "*" or ($sourceIds | index($sourceId)) != null)) and
         (.sync |
           exact(["enabled", "interval_minutes", "last_run", "last_status", "failures", "quota_auto_apply"]; []) and
           (.enabled | type == "boolean") and
@@ -384,14 +389,8 @@ listSubscriptionGroupsBackups() {
 restoreSubscriptionGroupsBackupUnlocked() {
     local backupFile=$1
     local stateFile
-    local restoreBackupFile
     stateFile=$(subscriptionGroupsFile)
-    restoreBackupFile=$(createSubscriptionGroupsBackup) || return 1
-    if ! subscriptionGroupsStateReplace "${backupFile}" "${stateFile}"; then
-        padmRemoveCleanupPath "${restoreBackupFile}"
-        return 1
-    fi
-    padmRemoveCleanupPath "${restoreBackupFile}"
+    subscriptionGroupsStateReplace "${backupFile}" "${stateFile}"
 }
 
 restoreSubscriptionGroupsBackup() {
@@ -489,7 +488,7 @@ subscriptionApplyUserGroupState() {
       .traffic.user_groups = (reduce $removeIds[] as $id ((.traffic.user_groups // {}); del(.[$id]))) |
       reduce $users[] as $user (.;
         if any(.user_groups[]?; .id == $user.id) then
-          .user_groups |= map(if .id == $user.id then .uuid = $user.uuid else . end)
+          .user_groups |= map(if .id == $user.id then .enabled = true | .uuid = $user.uuid else . end)
         else
           .user_groups += [{id:$user.id, name:$user.id, enabled:true, allowed_sources:["main"], traffic_limit_gb:0, uuid:$user.uuid}]
         end)
@@ -499,32 +498,60 @@ subscriptionApplyUserGroupState() {
 removeUserSubscriptionState() {
     local id=$1
     subscriptionActiveGroupWrite --arg id "${id}" '
-        .user_groups = ([.user_groups[]? | select(.id != $id)]) |
-        .traffic.user_groups |= (del(.[$id]) // {})
+        if any(.user_groups[]?; .id == $id) then
+          .user_groups = ([.user_groups[]? | select(.id != $id)]) |
+          .traffic.user_groups |= (del(.[$id]) // {})
+        else
+          error("user subscription not found")
+        end
     '
 }
 
 toggleUserSubscriptionState() {
     local id=$1
-    subscriptionActiveGroupWrite --arg id "${id}" '.user_groups |= map(if .id == $id then .enabled = (.enabled | not) else . end)'
+    subscriptionActiveGroupWrite --arg id "${id}" '
+        if any(.user_groups[]?; .id == $id) then
+          .user_groups |= map(if .id == $id then .enabled = (.enabled | not) else . end)
+        else
+          error("user subscription not found")
+        end
+    '
 }
 
 setUserSubscriptionSources() {
     local id=$1
     local sources=$2
-    subscriptionActiveGroupWrite --arg id "${id}" --argjson sources "${sources}" '.user_groups |= map(if .id == $id then .allowed_sources = $sources else . end)'
+    subscriptionActiveGroupWrite --arg id "${id}" --argjson sources "${sources}" '
+        if any(.user_groups[]?; .id == $id) then
+          .user_groups |= map(if .id == $id then .allowed_sources = $sources else . end)
+        else
+          error("user subscription not found")
+        end
+    '
 }
 
 setUserSubscriptionTrafficLimit() {
     local id=$1
     local limit=$2
-    subscriptionActiveGroupWrite --arg id "${id}" --argjson limit "${limit}" '.user_groups |= map(if .id == $id then .traffic_limit_gb = $limit else . end)'
+    subscriptionActiveGroupWrite --arg id "${id}" --argjson limit "${limit}" '
+        if any(.user_groups[]?; .id == $id) then
+          .user_groups |= map(if .id == $id then .traffic_limit_gb = $limit else . end)
+        else
+          error("user subscription not found")
+        end
+    '
 }
 
 setUserSubscriptionEnabled() {
     local id=$1
     local enabled=$2
-    subscriptionActiveGroupWrite --arg id "${id}" --argjson enabled "${enabled}" '.user_groups |= map(if .id == $id then .enabled = $enabled else . end)'
+    subscriptionActiveGroupWrite --arg id "${id}" --argjson enabled "${enabled}" '
+        if any(.user_groups[]?; .id == $id) then
+          .user_groups |= map(if .id == $id then .enabled = $enabled else . end)
+        else
+          error("user subscription not found")
+        end
+    '
 }
 
 userSubscriptionExists() {
@@ -574,7 +601,13 @@ addSubscriptionSourceState() {
 removeSubscriptionSourceState() {
     local id=$1
     subscriptionActiveGroupWrite --arg id "${id}" '
-        if any(.sources[]?; .id == $id and .role == "main") then . else
+        if any(.sources[]?; .id == $id and .role == "main") then
+          error("main subscription source cannot be removed")
+        elif (any(.sources[]?; .id == $id) | not) then
+          error("subscription source not found")
+        elif any(.user_groups[]?.allowed_sources[]?; . == $id) then
+          error("subscription source is still referenced by a user")
+        else
           .sources = ([.sources[]? | select(.id != $id)]) |
           .traffic.sources |= (del(.[$id]) // {}) |
           .traffic.admin.sources |= (del(.[$id]) // {}) |
@@ -588,7 +621,13 @@ setSubscriptionSourceCredential() {
     local host=$2
     local port=$3
     local token=$4
-    subscriptionActiveGroupWrite --arg id "${id}" --arg host "${host}" --argjson port "${port}" --arg token "${token}" '.sources |= map(if .id == $id and .role != "main" then .transport = "wireguard" | .scheme = "wireguard" | .host = $host | .port = $port | .control_token = $token else . end)'
+    subscriptionActiveGroupWrite --arg id "${id}" --arg host "${host}" --argjson port "${port}" --arg token "${token}" '
+        if any(.sources[]?; .id == $id and .role != "main") then
+          .sources |= map(if .id == $id and .role != "main" then .transport = "wireguard" | .scheme = "wireguard" | .host = $host | .port = $port | .control_token = $token else . end)
+        else
+          error("remote subscription source not found")
+        end
+    '
 }
 
 setSubscriptionSourceEnabled() {
@@ -610,11 +649,23 @@ setSubscriptionSourceSyncStatus() {
     local changed=${3:-}
     local plan=${4:-}
     if [[ -n "${plan}" ]]; then
-        subscriptionActiveGroupWrite --arg id "${id}" --arg status "${status}" --argjson changed "${changed}" --argjson plan "${plan}" '.sources |= map(if .id == $id then .sync_status = $status | .last_sync_changed = $changed | .last_sync_plan = $plan | del(.last_sync_error) else . end)'
+        subscriptionActiveGroupWrite --arg id "${id}" --arg status "${status}" --argjson changed "${changed}" --argjson plan "${plan}" '
+          if any(.sources[]?; .id == $id) then
+            .sources |= map(if .id == $id then .sync_status = $status | .last_sync_changed = $changed | .last_sync_plan = $plan | del(.last_sync_error) else . end)
+          else error("subscription source not found") end
+        '
     elif [[ -n "${changed}" ]]; then
-        subscriptionActiveGroupWrite --arg id "${id}" --arg status "${status}" --argjson changed "${changed}" '.sources |= map(if .id == $id then .sync_status = $status | .last_sync_changed = $changed | del(.last_sync_error) else . end)'
+        subscriptionActiveGroupWrite --arg id "${id}" --arg status "${status}" --argjson changed "${changed}" '
+          if any(.sources[]?; .id == $id) then
+            .sources |= map(if .id == $id then .sync_status = $status | .last_sync_changed = $changed | del(.last_sync_error) else . end)
+          else error("subscription source not found") end
+        '
     else
-        subscriptionActiveGroupWrite --arg id "${id}" --arg status "${status}" '.sources |= map(if .id == $id then .sync_status = $status else . end)'
+        subscriptionActiveGroupWrite --arg id "${id}" --arg status "${status}" '
+          if any(.sources[]?; .id == $id) then
+            .sources |= map(if .id == $id then .sync_status = $status else . end)
+          else error("subscription source not found") end
+        '
     fi
 }
 
@@ -622,7 +673,11 @@ setSubscriptionSourceSyncFailure() {
     local id=$1
     local errorType=$2
     local errorMessage=$3
-    subscriptionActiveGroupWrite --arg id "${id}" --arg errorType "${errorType}" --arg errorMessage "${errorMessage}" '.sources |= map(if .id == $id then .sync_status = "failed" | .last_sync_changed = false | .last_sync_error = {type:$errorType, message:$errorMessage} | del(.last_sync_plan) else . end)'
+    subscriptionActiveGroupWrite --arg id "${id}" --arg errorType "${errorType}" --arg errorMessage "${errorMessage}" '
+      if any(.sources[]?; .id == $id) then
+        .sources |= map(if .id == $id then .sync_status = "failed" | .last_sync_changed = false | .last_sync_error = {type:$errorType, message:$errorMessage} | del(.last_sync_plan) else . end)
+      else error("subscription source not found") end
+    '
 }
 
 subscriptionSourceExists() {
@@ -641,5 +696,9 @@ subscriptionHasEnabledRemoteSources() {
 
 clearSubscriptionSourceSyncError() {
     local id=$1
-    subscriptionActiveGroupWrite --arg id "${id}" '.sources |= map(if .id == $id then del(.last_sync_error) else . end)'
+    subscriptionActiveGroupWrite --arg id "${id}" '
+      if any(.sources[]?; .id == $id) then
+        .sources |= map(if .id == $id then del(.last_sync_error) else . end)
+      else error("subscription source not found") end
+    '
 }

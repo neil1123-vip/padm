@@ -920,67 +920,49 @@ subscriptionControlToken() {
     tr -d '[:space:]' <"${tokenFile}"
 }
 
-subscriptionControlCreateUsersFromPlan() {
-    local desiredUsers=$1
-    local createAccounts=$2
-    jq -c -n \
-      --argjson desiredUsers "${desiredUsers}" \
-      --argjson createAccounts "${createAccounts}" '
-      [ $desiredUsers[]?
-        | select((.id // "") != "")
-        | . as $user
-        | ($user.id | '"${SUBSCRIPTION_SYNC_ACCOUNT_NAME_FROM_ID_JQ}"') as $account
-        | select(any($createAccounts[]?; . == $account))
-        | ($user.uuid // "") as $uuid
-        | select($uuid != "")
-        | {id: $user.id, uuid: $uuid}
-      ]'
-}
-
 subscriptionControlApplyAccountPlan() {
     local plan=$1
     local desiredUsers=$2
     local accountName
     local accountId
-    local createAccounts
-    local createUsers
     local removeAccounts
     local removeIds='[]'
+    local desiredUserIds
     local previousGroupsState
     local applyError=
     SUBSCRIPTION_SYNC_TRANSACTION_ERROR=
     subscriptionSyncValidateAccountPlan "${plan}" || return 1
     previousGroupsState=$(subscriptionGroupsStateRead -c '.') || return 1
-    createAccounts=$(jq -c '.create' <<<"${plan}") || return 1
-    createUsers=$(subscriptionControlCreateUsersFromPlan "${desiredUsers}" "${createAccounts}") || return 1
+    desiredUserIds=$(jq -c '[.[].id]' <<<"${desiredUsers}") || return 1
+    removeIds=$(subscriptionActiveGroupRead -c --argjson desiredIds "${desiredUserIds}" '
+      [.user_groups[]?.id | . as $id | select(($desiredIds | index($id)) == null) | $id]
+    ') || return 1
     removeAccounts=$(jq -r '(.remove - .create)[]' <<<"${plan}") || return 1
     while IFS= read -r accountName; do
         [[ -n "${accountName}" ]] || continue
         accountId=$(subscriptionSyncAccountIdFromName "${accountName}") || return 1
         removeIds=$(jq -c --arg id "${accountId}" '. + [$id] | unique' <<<"${removeIds}") || return 1
     done <<<"${removeAccounts}"
-    if jq -e 'length > 0' <<<"${createUsers}" >/dev/null 2>&1 || jq -e 'length > 0' <<<"${removeIds}" >/dev/null 2>&1; then
-        if ! subscriptionApplyUserGroupState "${createUsers}" "${removeIds}"; then
-            applyError="控制面同步期望用户状态写入失败"
-            if ! subscriptionGroupsStateWrite --argjson previousGroupsState "${previousGroupsState}" '$previousGroupsState' >/dev/null 2>&1; then
-                subscriptionSyncSetSingleRestoreResultMessage \
-                    SUBSCRIPTION_SYNC_TRANSACTION_ERROR \
-                    "${applyError}" \
-                    false \
-                    "" \
-                    "订阅状态" \
-                    "$(subscriptionGroupsFile)"
-                return 1
-            fi
+    if ! subscriptionApplyUserGroupState "${desiredUsers}" "${removeIds}"; then
+        applyError="控制面同步期望用户状态写入失败"
+        if ! subscriptionGroupsStateWrite --argjson previousGroupsState "${previousGroupsState}" '$previousGroupsState' >/dev/null 2>&1; then
             subscriptionSyncSetSingleRestoreResultMessage \
                 SUBSCRIPTION_SYNC_TRANSACTION_ERROR \
                 "${applyError}" \
-                true \
+                false \
                 "" \
                 "订阅状态" \
                 "$(subscriptionGroupsFile)"
             return 1
         fi
+        subscriptionSyncSetSingleRestoreResultMessage \
+            SUBSCRIPTION_SYNC_TRANSACTION_ERROR \
+            "${applyError}" \
+            true \
+            "" \
+            "订阅状态" \
+            "$(subscriptionGroupsFile)"
+        return 1
     fi
     if ! subscriptionSyncApplyAccountPlanTransaction "${plan}"; then
         applyError="${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-控制面同步计划应用失败}"
@@ -1003,6 +985,15 @@ subscriptionControlApplyAccountPlan() {
             "$(subscriptionGroupsFile)"
         return 1
     fi
+}
+
+subscriptionControlUserRegistryNeedsSync() {
+    local desiredUsers=$1
+    subscriptionActiveGroupRead -r --argjson desiredUsers "${desiredUsers}" '
+      ([.user_groups[]? | {id, enabled, uuid:(.uuid // "")}] | sort_by(.id)) as $current |
+      ([$desiredUsers[]? | {id, enabled:true, uuid}] | sort_by(.id)) as $desired |
+      $current != $desired
+    '
 }
 
 subscriptionControlRestoreAppliedPlan() {
@@ -1103,6 +1094,7 @@ subscriptionControlApplySyncUnlocked() {
     local configBackupDir=
     local outputBackupDir=
     local prepareFailureMessage=
+    local registryNeedsSync
     if ! jq -e '
       def valid_id: type == "string" and length > 0 and test("^[A-Za-z0-9_-]+$");
       def valid_uuid: type == "string" and test("^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$");
@@ -1136,7 +1128,11 @@ subscriptionControlApplySyncUnlocked() {
         fi
         return 1
     fi
-    if jq -e '(.create | length == 0) and (.remove | length == 0)' <<<"${plan}" >/dev/null 2>&1; then
+    registryNeedsSync=$(subscriptionControlUserRegistryNeedsSync "${desiredUsers}") || {
+        jq -n '{ok:false, error:"plan_failed", error_detail:{type:"plan_failed", message:"本地用户状态读取失败"}}'
+        return 1
+    }
+    if [[ "${registryNeedsSync}" != "true" ]] && jq -e '(.create | length == 0) and (.remove | length == 0)' <<<"${plan}" >/dev/null 2>&1; then
         subscriptionControlSyncResponse "${plan}" "${dryRun}" false "${desiredUsers}"
         return
     fi

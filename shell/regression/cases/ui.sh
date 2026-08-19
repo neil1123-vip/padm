@@ -224,11 +224,9 @@ main.example.com
         wireGuardMenuCreateReceiptJson edge-a "${controlledPublicKey}" "${controlledToken}" receiptJson
         receiptCredential=$(subscriptionWireGuardCredentialEncode receipt "$(jq -c 'del(.version,.kind)' <<<"${receiptJson}")")
         resetMenuActions
-        manageSubscriptionMultiServer <<<"2
-2
+        addSubscribeMenu <<<"2
 ${receiptCredential}
-6
-5"
+6"
         assertMenuAction 'runSubscriptionGroupSync:'
         subscriptionWireGuardReadState | jq -e --arg publicKey "${controlledPublicKey}" '.peers[] | select(.id == "edge-a" and .address == "10.77.0.2/24" and .public_key == $publicKey and .endpoint == "")' >/dev/null
         subscriptionGroupsStateRead -e --arg token "${controlledToken}" '.groups[0].sources[] | select(.id == "edge-a" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.2" and .port == 39778 and .control_token == $token)' >/dev/null
@@ -289,10 +287,8 @@ SH
         wireGuardMenuAddEdgePeer
 
         resetMenuActions
-        manageSubscriptionMultiServer <<<"3
-${updatedCredential}
-edge-a
-5"
+        setSubscriptionSourceControlTokenMenu <<<"${updatedCredential}
+edge-a"
         assertMenuAction 'runSubscriptionGroupSync:'
         subscriptionWireGuardReadState | jq -e --arg publicKey "${updatedPublicKey}" '.peers[] | select(.id == "edge-a" and .address == "10.77.0.3/24" and .public_key == $publicKey and .endpoint == "")' >/dev/null
         subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .host == "10.77.0.3" and .port == 48779 and .control_token == "token-b")' >/dev/null
@@ -431,8 +427,7 @@ y"
         if wireGuardMenuPartSelected peer-source-control || wireGuardMenuPartSelected peer-source-control-status; then
             resetMenuActions
             local multiServerStatusOutput
-            multiServerStatusOutput=$(manageSubscriptionMultiServer <<<"4
-5")
+            multiServerStatusOutput=$(showSubscriptionSources; showSubscriptionRemoteHealthPlan; showSubscriptionSourceSyncResults)
             grep -q '^ID:edge-a$' <<<"${multiServerStatusOutput}"
             if grep -Eq 'padmwg1:|token-a' <<<"${multiServerStatusOutput}"; then
                 return 1
@@ -1433,7 +1428,7 @@ invite-credential"
         setMenuSmokeRole main
         resetMenuActions
         output=
-        manageSubscriptionPublishSubscriptions <<<"7"
+        manageSubscriptionMainHome <<<"14"
         grep -q "安装/更新订阅服务" <<<"${output}"
         grep -q "刷新并查看我的订阅链接" <<<"${output}"
         grep -q "新建并发布订阅" <<<"${output}"
@@ -1445,13 +1440,13 @@ invite-credential"
             return 1
         fi
         resetMenuActions
-        manageSubscriptionPublishSubscriptions <<<"1
-7"
+        manageSubscriptionMainHome <<<"1
+14"
         assertMenuAction installSubscribe
         assertMenuAction showSubscriptionServiceStatus
         resetMenuActions
-        manageSubscriptionPublishSubscriptions <<<"2
-7"
+        manageSubscriptionMainHome <<<"2
+14"
         assertMenuAction subscribe
         resetMenuActions
     fi
@@ -1462,8 +1457,8 @@ invite-credential"
         ensureSubscriptionGroupsState
         setMenuSmokeRole main
         resetMenuActions
-        manageSubscriptionPublishSubscriptions <<<"4
-7" || true
+        manageSubscriptionMainHome <<<"4
+14" || true
         subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | ((.user_groups // []) | length) == 0' >/dev/null
     fi
 
@@ -1473,11 +1468,11 @@ invite-credential"
         ensureSubscriptionGroupsState
         setMenuSmokeRole main
         resetMenuActions
-        manageSubscriptionPublishSubscriptions <<<"3
+        manageSubscriptionMainHome <<<"3
 demo-user
 main
 0
-7"
+14"
         subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | any(.user_groups[]?; .id == "demo-user" and .name == "demo-user")' >/dev/null
     fi
 
@@ -1487,19 +1482,19 @@ main
         ensureSubscriptionGroupsState
         setMenuSmokeRole main
         if [[ "${menuSmokePart}" == "subscription-main-publish-user-inspect" ]]; then
-            manageSubscriptionPublishSubscriptions <<<"3
+            manageSubscriptionMainHome <<<"3
 demo-user
 main
 0
-7"
+14"
         fi
         resetMenuActions
         output=
-        manageSubscriptionPublishSubscriptions <<<"4
+        manageSubscriptionMainHome <<<"4
 demo-user
 3
 9
-7"
+14"
         grep -q "查看并处理已有订阅" <<<"${output}"
         grep -q "查看当前用量" <<<"${output}"
         resetMenuActions
@@ -1512,12 +1507,12 @@ demo-user
         setMenuSmokeRole main
         resetMenuActions
         subscriptionGroupsStateWrite --arg groupId "default" '.groups |= map(if .id == $groupId then .sync.enabled = false else . end)'
-        manageSubscriptionPublishSubscriptions <<<"3
+        manageSubscriptionMainHome <<<"3
 team-a
 *
 0
 n
-7"
+14"
         subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | any(.user_groups[]?; .id == "team-a" and .name == "team-a")' >/dev/null
         subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | .sync.enabled == false' >/dev/null
         if assertMenuAction 'runSubscriptionGroupSync:'; then
@@ -1536,12 +1531,12 @@ n
         rm -rf "${PADM_SUBSCRIPTION_GROUPS_DIR}"
         ensureSubscriptionGroupsState
         subscriptionGroupsStateWrite --arg groupId "default" '.groups |= map(if .id == $groupId then .sync.enabled = false else . end)'
-        manageSubscriptionPublishSubscriptions <<<"3
+        manageSubscriptionMainHome <<<"3
 team-b
 main
 0
 
-7"
+14"
         assertMenuAction refreshSubscriptionGroupSyncCron
         assertMenuAction 'runSubscriptionGroupSync:'
         subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | .sync.enabled == true' >/dev/null
@@ -1552,52 +1547,6 @@ main
         coreInstallType=1
         ensureSubscriptionGroupsState
         setMenuSmokeRole main
-        resetMenuActions
-        output=
-        manageSubscriptionMultiServer <<<"5"
-        grep -q "主控建链向导" <<<"${output}"
-        grep -q "添加/移除被控服务器" <<<"${output}"
-        grep -q "更新被控服务器凭据" <<<"${output}"
-        grep -q "查看协同状态" <<<"${output}"
-        if grep -q "多服务器细项" <<<"${output}"; then
-            printf 'menu-smoke failed: main multi-server still shows advanced submenu\n' >&2
-            return 1
-        fi
-        resetMenuActions
-        manageSubscriptionMultiServer <<<"1
-n
-5"
-        assertMenuAction initSubscriptionWireGuardMain
-        resetMenuActions
-        manageSubscriptionMultiServer <<<"3
-5"
-        assertMenuAction setSubscriptionSourceControlTokenMenu
-        resetMenuActions
-        manageSubscriptionMultiServer <<<"4
-5"
-        if assertMenuAction showSubscriptionWireGuardMainCredential; then
-            return 1
-        fi
-        assertMenuAction showSubscriptionSources
-        assertMenuAction showSubscriptionRemoteHealthPlan
-        assertMenuAction subscriptionRemoteControlHealthAll
-        assertMenuAction showSubscriptionSourceSyncResults
-        resetMenuActions
-        output=
-        manageSubscriptionMainMaintenance <<<"4"
-        grep -q "订阅同步" <<<"${output}"
-        grep -q "状态备份与恢复" <<<"${output}"
-        grep -q "控制面与连接细节" <<<"${output}"
-        if grep -q "立即完整同步" <<<"${output}" || grep -q "用量与限额" <<<"${output}" || grep -q "清除同步错误" <<<"${output}"; then
-            printf 'menu-smoke failed: main maintenance still duplicates sync actions\n' >&2
-            return 1
-        fi
-        resetMenuActions
-        manageSubscriptionMainMaintenance <<<"1
-1
-6
-4"
-        assertMenuAction 'runSubscriptionGroupSync:'
         resetMenuActions
         output=
         manageSubscriptionSyncSettings <<<"6"
@@ -1733,39 +1682,6 @@ y
         assertMenuAction showSubscriptionWireGuardStatus
         assertMenuAction showSubscriptionSourceSyncResults
         resetMenuActions
-        output=
-        manageSubscriptionControlledMaintenance <<<"6"
-        grep -q "导入/更新主控接入凭据" <<<"${output}"
-        grep -q "显示接入回执/旧版被控凭据" <<<"${output}"
-        grep -q "查看控制面与 Peer 细节" <<<"${output}"
-        grep -q "重写配置并重启被控控制面" <<<"${output}"
-        grep -q "关闭被控控制面" <<<"${output}"
-        if grep -q "查看本机主控接入凭据" <<<"${output}" || grep -q "初始化本机为主控" <<<"${output}"; then
-            printf 'menu-smoke failed: controlled maintenance still shows main-only actions\n' >&2
-            return 1
-        fi
-        resetMenuActions
-        manageSubscriptionControlledMaintenance <<<"1
-6"
-        assertMenuAction importSubscriptionWireGuardMainCredential
-        resetMenuActions
-        manageSubscriptionControlledMaintenance <<<"2
-6"
-        assertMenuAction showSubscriptionWireGuardControlledAccessCredential
-        resetMenuActions
-        manageSubscriptionControlledMaintenance <<<"3
-6"
-        assertMenuAction showSubscriptionWireGuardStatus
-        assertMenuAction showSubscriptionWireGuardPeers
-        resetMenuActions
-        manageSubscriptionControlledMaintenance <<<"4
-6"
-        assertMenuAction restartSubscriptionWireGuardControl
-        resetMenuActions
-        manageSubscriptionControlledMaintenance <<<"5
-6"
-        assertMenuAction disableSubscriptionWireGuardControl
-        resetMenuActions
         addSubscribeMenu <<<"3" || true
         assertMenuAction 'errorCard:当前机器已初始化为被控'
         resetMenuActions
@@ -1786,11 +1702,11 @@ y
         assertMenuAction 'errorCard:当前机器已初始化为主控'
         resetMenuActions
         output=
-        manageSubscriptionPublishSubscriptions <<<"7"
+        manageSubscriptionMainHome <<<"14"
         grep -q "安装/更新订阅服务" <<<"${output}"
         resetMenuActions
         output=
-        manageSubscriptionPublishSubscriptions <<<"7"
+        manageSubscriptionMainHome <<<"14"
         grep -q "查看并处理已有订阅" <<<"${output}"
         resetMenuActions
         output=
