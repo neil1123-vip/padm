@@ -920,6 +920,22 @@ subscriptionControlToken() {
     tr -d '[:space:]' <"${tokenFile}"
 }
 
+subscriptionControlSetAccountPlanFailure() {
+    local previousGroupsState=$1
+    local applyError=$2
+    local restored=false
+    if subscriptionGroupsStateWrite --argjson previousGroupsState "${previousGroupsState}" '$previousGroupsState' >/dev/null 2>&1; then
+        restored=true
+    fi
+    subscriptionSyncSetSingleRestoreResultMessage \
+        SUBSCRIPTION_SYNC_TRANSACTION_ERROR \
+        "${applyError}" \
+        "${restored}" \
+        "" \
+        "订阅状态" \
+        "$(subscriptionGroupsFile)"
+}
+
 subscriptionControlApplyAccountPlan() {
     local plan=$1
     local desiredUsers=$2
@@ -945,44 +961,12 @@ subscriptionControlApplyAccountPlan() {
     done <<<"${removeAccounts}"
     if ! subscriptionApplyUserGroupState "${desiredUsers}" "${removeIds}"; then
         applyError="控制面同步期望用户状态写入失败"
-        if ! subscriptionGroupsStateWrite --argjson previousGroupsState "${previousGroupsState}" '$previousGroupsState' >/dev/null 2>&1; then
-            subscriptionSyncSetSingleRestoreResultMessage \
-                SUBSCRIPTION_SYNC_TRANSACTION_ERROR \
-                "${applyError}" \
-                false \
-                "" \
-                "订阅状态" \
-                "$(subscriptionGroupsFile)"
-            return 1
-        fi
-        subscriptionSyncSetSingleRestoreResultMessage \
-            SUBSCRIPTION_SYNC_TRANSACTION_ERROR \
-            "${applyError}" \
-            true \
-            "" \
-            "订阅状态" \
-            "$(subscriptionGroupsFile)"
+        subscriptionControlSetAccountPlanFailure "${previousGroupsState}" "${applyError}" || return 1
         return 1
     fi
     if ! subscriptionSyncApplyAccountPlanTransaction "${plan}"; then
         applyError="${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-控制面同步计划应用失败}"
-        if ! subscriptionGroupsStateWrite --argjson previousGroupsState "${previousGroupsState}" '$previousGroupsState' >/dev/null 2>&1; then
-            subscriptionSyncSetSingleRestoreResultMessage \
-                SUBSCRIPTION_SYNC_TRANSACTION_ERROR \
-                "${applyError}" \
-                false \
-                "" \
-                "订阅状态" \
-                "$(subscriptionGroupsFile)"
-            return 1
-        fi
-        subscriptionSyncSetSingleRestoreResultMessage \
-            SUBSCRIPTION_SYNC_TRANSACTION_ERROR \
-            "${applyError}" \
-            true \
-            "" \
-            "订阅状态" \
-            "$(subscriptionGroupsFile)"
+        subscriptionControlSetAccountPlanFailure "${previousGroupsState}" "${applyError}" || return 1
         return 1
     fi
 }
