@@ -246,16 +246,6 @@ subscriptionSyncAccountPlanFromIds() {
     esac
 }
 
-subscriptionSyncAccountIdMapJsonFromIds() {
-    jq -R -s '
-      split("\n")
-      | map(select(length > 0))
-      | unique
-      | map({key: (. | '"${SUBSCRIPTION_SYNC_ACCOUNT_NAME_FROM_ID_JQ}"'), value: .})
-      | from_entries
-    '
-}
-
 subscriptionSyncPlanFromAccounts() {
     local desiredAccountsJson=$1
     local currentAccounts
@@ -289,9 +279,11 @@ subscriptionSyncCredentialMismatchAccounts() {
 
 subscriptionSyncPlanFromDesiredUsers() {
     local desiredUsers=$1
+    local desiredIds
     local plan
     local credentialUpdates
-    plan=$(subscriptionSyncAccountPlanFromIds sync < <(jq -r '.[].id' <<<"${desiredUsers}")) || return 1
+    desiredIds=$(jq -r '.[].id' <<<"${desiredUsers}") || return 1
+    plan=$(subscriptionSyncAccountPlanFromIds sync <<<"${desiredIds}") || return 1
     subscriptionSyncValidateAccountPlan "${plan}" || return 1
     credentialUpdates=$(subscriptionSyncCredentialMismatchAccounts "${desiredUsers}") || return 1
     jq -c -n --argjson plan "${plan}" --argjson updates "${credentialUpdates}" '
@@ -936,7 +928,7 @@ subscriptionSyncMarkResult() {
 }
 
 subscriptionQuotaDryRunPlan() {
-    ensureSubscriptionGroupsState
+    ensureSubscriptionGroupsState || return 1
     subscriptionActiveGroupRead -r '
       . as $group |
       [($group.user_groups[]? |
@@ -991,8 +983,10 @@ applySubscriptionQuotaPlan() {
 applySubscriptionQuotaPlanAccounts() {
     local quotaPlan=$1
     local accountPlan
+    local planIds
     local rc=0
-    accountPlan=$(subscriptionSyncAccountPlanFromIds remove < <(subscriptionQuotaPlanIds "${quotaPlan}")) || return 1
+    planIds=$(subscriptionQuotaPlanIds "${quotaPlan}") || return 1
+    accountPlan=$(subscriptionSyncAccountPlanFromIds remove <<<"${planIds}") || return 1
     if jq -e '.remove | length > 0' <<<"${accountPlan}" >/dev/null 2>&1; then
         if ! subscriptionSyncApplyAccountPlanTransaction "${accountPlan}" reloadCore; then
             rc=1

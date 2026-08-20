@@ -339,6 +339,14 @@ runRemoteControlInlineRequestHelpersRegression() (
     ! subscriptionRemoteControlRequest "${source}" sync '{"desired_users":[],"dry_run":false}' >/dev/null 2>&1
     [[ "$(wc -l <"${curlArgsLog}" | tr -d ' ')" == "1" ]] || return 1
     [[ "$(wc -l <"${retryLog}" | tr -d ' ')" == "1" ]] || return 1
+
+    : >"${curlArgsLog}"
+    : >"${retryLog}"
+    healthResponse=$(subscriptionRemoteControlHealth "${source}" 2>/dev/null) || return 1
+    jq -e '.ok == false and .status == "unreachable"' <<<"${healthResponse}" >/dev/null || return 1
+    [[ "$(wc -l <"${curlArgsLog}" | tr -d ' ')" == "1" ]] || return 1
+    [[ "$(wc -l <"${retryLog}" | tr -d ' ')" == "1" ]] || return 1
+
     while IFS= read -r headerFile; do
         [[ -n "${headerFile}" ]] || continue
         [[ ! -e "${headerFile}" ]] || return 1
@@ -494,10 +502,6 @@ runRemoteControlInlineTokenConsumersRegression() (
     setSubscriptionSourceSyncFailure() {
         printf 'failure\t%s\t%s\t%s\n' "$1" "$2" "$3" >>"${statusLog}"
     }
-    activeSubscriptionGroupId() {
-        printf 'default\n'
-    }
-
     planResponse=$(subscriptionRemoteSyncPlanForSource "${remoteSourceJson}" "${desiredUsersBySourceJson}" 2>/dev/null || true)
     [[ -n "${planResponse}" ]] || return 1
     planResponse=$(jq -c . <<<"${planResponse}") || return 1
@@ -1449,6 +1453,7 @@ JSON
         cat >"$(subscriptionGroupsFile)" <<'JSON'
 {"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
+        ensureSubscriptionGroupsState
         coreInstallType=1
         subscriptionSyncPlanFromAccounts() {
             printf '{"create":["sub_rollback"],"remove":[]}'
@@ -1518,12 +1523,13 @@ JSON
         cat >"$(subscriptionGroupsFile)" <<'JSON'
 {"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
+        ensureSubscriptionGroupsState
         coreInstallType=1
         subscriptionSyncPlanFromAccounts() {
             printf '{"create":["sub_publish"],"remove":[]}'
         }
         subscriptionControlApplyAccountPlan() {
-            subscriptionGroupsStateWrite '.groups |= map(.user_groups += [{"id":"publish","name":"Publish","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":"","uuid":"77777777-7777-7777-7777-777777777777"}])'
+            subscriptionGroupsStateWrite '.groups |= map(.user_groups += [{"id":"publish","name":"Publish","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"77777777-7777-7777-7777-777777777777"}])'
             cat >"${configPath}02_VLESS_TCP_inbounds.json" <<'JSON'
 {"inbounds":[{"settings":{"clients":[{"email":"sub_publish-vless","id":"77777777-7777-7777-7777-777777777777"}]}}]}
 JSON
@@ -1598,12 +1604,13 @@ JSON
         cat >"$(subscriptionGroupsFile)" <<'JSON'
 {"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
+        ensureSubscriptionGroupsState
         coreInstallType=1
         subscriptionSyncPlanFromAccounts() {
             printf '{"create":["sub_restore_fail"],"remove":[]}'
         }
         subscriptionControlApplyAccountPlan() {
-            subscriptionGroupsStateWrite '.groups |= map(.user_groups += [{"id":"restore-fail","name":"Restore Fail","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":"","uuid":"88888888-8888-8888-8888-888888888888"}])'
+            subscriptionGroupsStateWrite '.groups |= map(.user_groups += [{"id":"restore-fail","name":"Restore Fail","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"88888888-8888-8888-8888-888888888888"}])'
             cat >"${configPath}02_VLESS_TCP_inbounds.json" <<'JSON'
 {"inbounds":[{"settings":{"clients":[{"email":"sub_restore_fail-vless","id":"88888888-8888-8888-8888-888888888888"}]}}]}
 JSON

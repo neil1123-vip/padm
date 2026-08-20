@@ -3,7 +3,7 @@
 subscriptionGroupsStateSummaryJson() {
     local localOnly=false
     [[ "$(subscriptionCurrentRoleNormalized)" == "uninitialized" ]] && localOnly=true
-    ensureSubscriptionGroupsState
+    ensureSubscriptionGroupsState || return 1
     subscriptionActiveGroupRead --argjson localOnly "${localOnly}" '
       {
         group_id: .id,
@@ -128,7 +128,7 @@ resetSubscriptionGroupsStateMenu() {
     local stageFile
     local currentBackup
     local confirm=
-    ensureSubscriptionGroupsState
+    ensureSubscriptionGroupsState || return 1
     showSubscriptionGroupsStateSummary
     currentBackup=$(createSubscriptionGroupsBackup) || {
         errorCard "重建前备份当前状态失败，已取消重建"

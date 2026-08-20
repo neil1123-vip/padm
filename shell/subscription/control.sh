@@ -65,11 +65,15 @@ subscriptionRemoteWireGuardWaitForPeerEndpointFromSource() {
     local delay=${3:-${PADM_REMOTE_WG_ENDPOINT_DELAY:-0.25}}
     local baselineEndpoint=${4:-}
     local baselineHandshake=${5:-0}
+    local deadline=${6:-}
     local peerState
     local publicKey=
     local endpoint=
     local handshake=0
     local tryIndex
+    if [[ -n "${deadline}" ]] && ((SECONDS >= deadline)); then
+        return 1
+    fi
     peerState=$(subscriptionRemoteWireGuardPeerStateFromSource "${source}" 2>/dev/null || true)
     [[ -n "${peerState}" ]] || return 0
     [[ "${baselineHandshake}" =~ ^[0-9]+$ ]] || baselineHandshake=0
@@ -83,6 +87,9 @@ subscriptionRemoteWireGuardWaitForPeerEndpointFromSource() {
         fi
     fi
     for ((tryIndex = 0; tryIndex < attempts; tryIndex++)); do
+        if [[ -n "${deadline}" ]] && ((SECONDS >= deadline)); then
+            return 1
+        fi
         peerState=$(subscriptionRemoteWireGuardPeerStateFromSource "${source}" 2>/dev/null || true)
         if [[ -n "${peerState}" ]]; then
             IFS=$'\t' read -r publicKey endpoint handshake <<<"${peerState}"
@@ -94,6 +101,9 @@ subscriptionRemoteWireGuardWaitForPeerEndpointFromSource() {
                     return 0
                 fi
             fi
+        fi
+        if [[ -n "${deadline}" ]]; then
+            ((deadline > SECONDS)) || return 1
         fi
         sleep "${delay}"
     done
@@ -157,7 +167,7 @@ subscriptionRemoteControlRequest() {
         IFS=$'\t' read -r peerPublicKey baselineEndpoint baselineHandshake <<<"${peerState}"
     fi
     if ! response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" <<<"${payload}" 2>/dev/null); then
-        subscriptionRemoteWireGuardWaitForPeerEndpointFromSource "${source}" "" "" "${baselineEndpoint}" "${baselineHandshake}" >/dev/null 2>&1 || true
+        subscriptionRemoteWireGuardWaitForPeerEndpointFromSource "${source}" "" "" "${baselineEndpoint}" "${baselineHandshake}" "${deadline}" >/dev/null 2>&1 || true
         remainingTime=$((deadline - SECONDS))
         ((remainingTime > 0)) || return 1
         curlArgs[4]="${remainingTime}"
@@ -219,6 +229,8 @@ subscriptionRemoteControlHealth() {
     local statusCode
     local body
     local errorMessage
+    local deadline
+    local remainingTime
     token=$(jq -r '.control_token // empty' <<<"${source}") || return 1
     if [[ -z "${token}" ]]; then
         jq -n --arg id "$(jq -r '.id' <<<"${source}")" --arg name "$(jq -r '.name' <<<"${source}")" '{id:$id, name:$name, ok:false, status:"missing_token", error_detail:{type:"missing_token", message:"未配置控制 token"}}'
@@ -229,6 +241,7 @@ subscriptionRemoteControlHealth() {
         IFS=$'\t' read -r peerPublicKey baselineEndpoint baselineHandshake <<<"${peerState}"
     fi
     url=$(subscriptionRemoteControlUrl "${source}" health) || return 1
+    deadline=$((SECONDS + 15))
     curlArgs=(
         -sS
         --connect-timeout 5
@@ -238,7 +251,13 @@ subscriptionRemoteControlHealth() {
         "${url}"
     )
     response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" 2>/dev/null) || {
-        subscriptionRemoteWireGuardWaitForPeerEndpointFromSource "${source}" "" "" "${baselineEndpoint}" "${baselineHandshake}" >/dev/null 2>&1 || true
+        subscriptionRemoteWireGuardWaitForPeerEndpointFromSource "${source}" "" "" "${baselineEndpoint}" "${baselineHandshake}" "${deadline}" >/dev/null 2>&1 || true
+        remainingTime=$((deadline - SECONDS))
+        if ((remainingTime <= 0)); then
+            jq -n --arg id "$(jq -r '.id' <<<"${source}")" --arg name "$(jq -r '.name' <<<"${source}")" '{id:$id, name:$name, ok:false, status:"unreachable", error_detail:{type:"unreachable", message:"不可达或健康检查失败"}}'
+            return 0
+        fi
+        curlArgs[4]="${remainingTime}"
         response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" 2>/dev/null) || {
             jq -n --arg id "$(jq -r '.id' <<<"${source}")" --arg name "$(jq -r '.name' <<<"${source}")" '{id:$id, name:$name, ok:false, status:"unreachable", error_detail:{type:"unreachable", message:"不可达或健康检查失败"}}'
             return 0

@@ -803,7 +803,7 @@ runSubscriptionSyncAppendLocalUserBatchRegression() (
     singBoxConfigPath="${root}/sing-box/"
     export PADM_SUBSCRIPTION_GROUPS_DIR="${root}/groups"
     ensureSubscriptionGroupsState
-    subscriptionGroupsStateWrite '.groups[0].user_groups += [{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":"","uuid":"11111111-1111-1111-1111-111111111111"}]'
+    subscriptionGroupsStateWrite '.groups[0].user_groups += [{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}]'
 
     subscriptionSyncAppendProtocolBatch() {
         printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >>"${callLog}"
@@ -845,7 +845,6 @@ runConfiguredAccountHelpersRegression() (
 
 runTrafficAccountIdMapHelperRegression() (
     local trafficRoot="${TMP_DIR}/traffic-account-id-map-helper"
-    local helperLog="${trafficRoot}/helper.log"
     local trafficSnapshot='{"ok":true,"items":[{"account":"sub_team_a","upload":1,"download":2},{"account":"sub_team_b","upload":3,"download":4}]}'
 
     mkdir -p "${trafficRoot}/groups"
@@ -854,11 +853,6 @@ runTrafficAccountIdMapHelperRegression() (
 {"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":"","uuid":"11111111-1111-1111-1111-111111111111"},{"id":"team-b","name":"Team B","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":"","uuid":"22222222-2222-2222-2222-222222222222"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
 
-    subscriptionSyncAccountIdMapJsonFromIds() {
-        cat >"${helperLog}"
-        printf '{"sub_team_a":"team-a","sub_team_b":"team-b"}\n'
-    }
-
     writeSubscriptionTrafficSnapshot "${trafficSnapshot}"
     jq -e '
       .groups[0].traffic.user_groups["team-a"].sources.main.counters.sub_team_a.upload == 1 and
@@ -866,9 +860,4 @@ JSON
       .groups[0].traffic.user_groups["team-b"].sources.main.counters.sub_team_b.upload == 3 and
       .groups[0].traffic.user_groups["team-b"].sources.main.counters.sub_team_b.download == 4
     ' "$(subscriptionGroupsFile)" >/dev/null
-    [[ -f "${helperLog}" ]] || return 1
-    grep -qx 'team-a' "${helperLog}" || return 1
-    grep -qx 'team-b' "${helperLog}" || return 1
-
-    unset -f subscriptionSyncAccountIdMapJsonFromIds
 )

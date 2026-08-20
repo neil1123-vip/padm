@@ -479,12 +479,14 @@ showUserSubscriptions() {
     local jqProgram
     local quotaStatusJq
     quotaStatusJq=$(subscriptionUserQuotaStatusJq) || return 1
-    ensureSubscriptionGroupsState
     jqProgram=$(printf '%s\n%s\n' "${quotaStatusJq}" '
       . as $group |
       .user_groups[]? |
       "\(.id)\u001f\(.name)\u001f\(.enabled)\u001f\(.allowed_sources | join(","))\u001f\(.traffic_limit_gb)\u001f\(subscriptionUserQuotaStatus(.; $group.traffic.user_groups[.id] // {upload:0, download:0}; true))"')
-    output=$(subscriptionActiveGroupRead -r "${jqProgram}")
+    output=$(subscriptionActiveGroupRead -r "${jqProgram}") || {
+        errorCard "用户订阅读取失败"
+        return 1
+    }
     if [[ -z "${output}" ]]; then
         statusCard "用户订阅" "暂无用户订阅"
         return
@@ -532,6 +534,7 @@ createAndSyncUserSubscriptionWizard() {
     local canShowLinks=true
     local syncWillRun=false
     local subscriptionServiceStatus=0
+    local sourceOutput
     autoRead user_subscription_id "请输入分享订阅ID[只用于管理，例 team-a]:" id
     if [[ -z "${id}" ]] || ! echo "${id}" | grep -qE '^[a-zA-Z0-9_-]+$'; then
         errorCard "输入有误，ID 只能包含英文、数字、下划线或短横线"
@@ -551,7 +554,8 @@ createAndSyncUserSubscriptionWizard() {
     userResultCard "这个订阅可使用的服务器"
     menuLine "这里设置这个订阅的服务器范围。"
     menuLine "建议先确保远端服务器已接入，再输入 main、远端服务器 ID 或 *；多个服务器用英文逗号分隔，例如 main,remote-a。"
-    subscriptionActiveGroupRead -r '.sources[] | "\(.id):\(.name):\(.role):\(.scheme):\(.host):\(.port):\(.enabled):\(.sync_status)"'
+    sourceOutput=$(subscriptionActiveGroupRead -r '.sources[] | "\(.id):\(.name):\(.role):\(.scheme):\(.host):\(.port):\(.enabled):\(.sync_status)"') || return 1
+    printf '%s\n' "${sourceOutput}"
     menuClose
     autoRead user_subscription_sources "请输入服务器范围[回车默认 main]:" sourceIds
     sourceIds=${sourceIds:-main}
@@ -608,12 +612,16 @@ createAndSyncUserSubscriptionWizard() {
 selectUserSubscriptionId() {
     local id=
     selectedUserSubscriptionId=
-    ensureSubscriptionGroupsState
-    if ! subscriptionActiveGroupRead -e 'any(.user_groups[]?; true)' >/dev/null 2>&1; then
+    local hasUsers
+    hasUsers=$(subscriptionActiveGroupRead -r 'any(.user_groups[]?; true)') || {
+        errorCard "用户订阅读取失败"
+        return 1
+    }
+    if [[ "${hasUsers}" != "true" ]]; then
         statusCard "用户订阅" "暂无用户订阅" "先到主控首页 -> 新建并发布订阅创建一个"
         return 1
     fi
-    showUserSubscriptions
+    showUserSubscriptions || return 1
     autoRead select_user_subscription_id "请输入用户订阅ID:" id
     if [[ -z "${id}" ]] || ! userSubscriptionExists "${id}"; then
         errorCard "用户订阅 ID 无效，请按上面的列表重新输入"
@@ -770,13 +778,15 @@ setUserSubscriptionSourcesMenu() {
     local sourceIds=
     local sourceJson=
     local line=
+    local sourceOutput
 
     userResultCard "这个订阅可使用的服务器"
     menuLine "这里设置这个订阅的服务器范围。"
     menuLine "建议先确保远端服务器已添加凭据，再输入 main、远端服务器 ID 或 *；多个服务器用英文逗号分隔，例如 main,remote-a。"
+    sourceOutput=$(subscriptionActiveGroupRead -r '.sources[] | "\(.id):\(.name):\(.role):\(.scheme):\(.host):\(.port):\(.enabled):\(.sync_status)"') || return 1
     while IFS= read -r line; do
         menuLine "${line}"
-    done < <(subscriptionActiveGroupRead -r '.sources[] | "\(.id):\(.name):\(.role):\(.scheme):\(.host):\(.port):\(.enabled):\(.sync_status)"')
+    done <<<"${sourceOutput}"
     menuClose
     autoRead user_subscription_sources "请输入服务器范围，多个用逗号分隔:" sourceIds
     if ! sourceJson=$(parseUserSubscriptionSources "${sourceIds}"); then
@@ -867,12 +877,14 @@ manageSubscriptionPendingInvites() {
 
 removeSubscriptionControlledServerMenu() {
     local sourceId=
+    local sourceOutput
     echoContent title "\n┌─ 移除被控服务器 ───────────────────────────────────"
     menuLine "这里列出当前可移除的被控服务器。"
-    subscriptionActiveGroupRead -r '
+    sourceOutput=$(subscriptionActiveGroupRead -r '
       [.sources[]? | select(.role != "main")] |
       to_entries[] |
-      "│ \(.key + 1). \(.value.id):\(.value.name):\(.value.role):\(.value.scheme):\(.value.host):\(.value.port):\(.value.enabled):\(.value.sync_status)"'
+      "│ \(.key + 1). \(.value.id):\(.value.name):\(.value.role):\(.value.scheme):\(.value.host):\(.value.port):\(.value.enabled):\(.value.sync_status)"') || return 1
+    printf '%s\n' "${sourceOutput}"
     menuClose
     autoRead delete_subscription_source "请输入要删除的被控服务器源ID:" sourceId
     if [[ -z "${sourceId}" ]] || ! subscriptionSourceExists "${sourceId}" || subscriptionSourceIsMain "${sourceId}"; then
@@ -892,11 +904,13 @@ changeSubscriptionSourceEnabledMenu() {
     local targetEnabled=
     local actionText=
     local confirm=
+    local sourceOutput
 
     userResultCard "被控服务器启用状态"
-    subscriptionActiveGroupRead -r '
+    sourceOutput=$(subscriptionActiveGroupRead -r '
       .sources[]? | select(.role != "main") |
-      "ID:\(.id)  名称:\(.name)  当前状态:" + (if .enabled == true then "启用" else "停用" end)'
+      "ID:\(.id)  名称:\(.name)  当前状态:" + (if .enabled == true then "启用" else "停用" end)') || return 1
+    printf '%s\n' "${sourceOutput}"
     menuClose
     autoRead subscription_source_enabled_id "请输入要启用或停用的被控服务器 ID:" sourceId
     if [[ -z "${sourceId}" ]] || ! subscriptionSourceExists "${sourceId}" || subscriptionSourceIsMain "${sourceId}"; then
@@ -999,34 +1013,45 @@ EOF
 
 showSubscriptionSources() {
     local syncSummary
+    local role
+    local output
     local sourceFilter='.'
-    [[ "$(subscriptionCurrentRoleNormalized)" == "uninitialized" ]] && sourceFilter='select(.role == "main")'
+    role=$(subscriptionCurrentRoleNormalized) || return 1
+    [[ "${role}" == "uninitialized" ]] && sourceFilter='select(.role == "main")'
     syncSummary=$(subscriptionSourceSyncSummaryJq) || return 1
-    subscriptionActiveGroupRead -r "
+    output=$(subscriptionActiveGroupRead -r "
       .sources[]? |
       ${sourceFilter} |
       \"ID:\\(.id)\\n名称:\\(.name)\\n角色:\\(.role)\\n地址:\\(.scheme)://\\(.host):\\(.port)\\n启用:\\(.enabled)\\n同步状态:\\(.sync_status)\" +
       ${syncSummary} +
-      \"\\n---\""
+      \"\\n---\"") || return 1
+    printf '%s\n' "${output}"
 }
 
 showSubscriptionSourceControlUrls() {
-    subscriptionActiveGroupRead -r '
+    local output
+    output=$(subscriptionActiveGroupRead -r '
       .sources[]? | select(.role != "main") |
       "ID:\(.id)\n名称:\(.name)\n控制面:WireGuard\n内网地址:\(.host):\(.port)\nHealth:http://\(.host):\(.port)/s/control/health\nSync:http://\(.host):\(.port)/s/control/sync\n---"'
+    ) || return 1
+    printf '%s\n' "${output}"
 }
 
 showSubscriptionSourceSyncResults() {
     local syncSummary
+    local role
+    local output
     local sourceFilter='.'
-    [[ "$(subscriptionCurrentRoleNormalized)" == "uninitialized" ]] && sourceFilter='select(.role == "main")'
+    role=$(subscriptionCurrentRoleNormalized) || return 1
+    [[ "${role}" == "uninitialized" ]] && sourceFilter='select(.role == "main")'
     syncSummary=$(subscriptionSourceSyncSummaryJq) || return 1
-    subscriptionActiveGroupRead -r "
+    output=$(subscriptionActiveGroupRead -r "
       .sources[]? |
       ${sourceFilter} |
       \"ID:\\(.id)\\n名称:\\(.name)\\n同步状态:\\(.sync_status)\" +
       ${syncSummary} +
-      \"\\n---\""
+      \"\\n---\"") || return 1
+    printf '%s\n' "${output}"
 }
 
 setSubscriptionSourceControlTokenMenu() {
@@ -1063,14 +1088,14 @@ setSubscriptionSourceControlTokenMenu() {
     matches=$(subscriptionActiveGroupRead -r --arg host "${host}" --argjson port "${port}" '
       .sources[]?
       | select(.role != "main" and .host == $host and .port == $port)
-      | .id')
+      | .id') || return 1
     if [[ -n "${matches}" ]] && [[ "$(printf '%s\n' "${matches}" | wc -l | tr -d ' ')" == "1" ]]; then
         sourceId=${matches}
     else
         subscriptionActiveGroupRead -r '
           .sources[]?
           | select(.role != "main")
-          | "\(.id):\(.name):\(.scheme):\(.host):\(.port):\(.sync_status)"'
+          | "\(.id):\(.name):\(.scheme):\(.host):\(.port):\(.sync_status)"' || return 1
         autoRead subscription_source_id "请输入要更新的被控服务器别名:" sourceId
     fi
     if [[ -z "${sourceId}" ]] || ! subscriptionSourceExists "${sourceId}" || subscriptionSourceIsMain "${sourceId}"; then
@@ -1088,13 +1113,16 @@ setSubscriptionSourceControlTokenMenu() {
 clearSubscriptionSourceSyncErrorMenu() {
     subscriptionRequireMainRole || return 1
     local sourceId=
-    showSubscriptionSourceSyncResults
+    showSubscriptionSourceSyncResults || return 1
     autoRead subscription_clear_error_source "请输入要清除错误的被控服务器源ID:" sourceId
     if [[ -z "${sourceId}" ]] || ! subscriptionSourceExists "${sourceId}"; then
         errorCard "服务器源 ID 无效"
         return 1
     fi
-    clearSubscriptionSourceSyncError "${sourceId}"
+    if ! clearSubscriptionSourceSyncError "${sourceId}"; then
+        errorCard "同步错误清除失败"
+        return 1
+    fi
     successCard "同步错误已清除"
 }
 

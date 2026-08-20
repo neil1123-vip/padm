@@ -241,14 +241,12 @@ collectLocalTrafficSnapshot() {
 writeSubscriptionTrafficSnapshot() {
     local snapshot=$1
     local remoteResults=${2:-[]}
-    local accountIdMap
     if ! jq -e '.ok == true and (.items | type == "array")' <<<"${snapshot}" >/dev/null 2>&1 ||
-        ! jq -e 'type == "array" and all(.[]; .status == "success" and (.response.items | type == "array"))' <<<"${remoteResults}" >/dev/null 2>&1; then
+        ! jq -e 'type == "array" and all(.[]; .status == "success" and (.source_id | type == "string" and length > 0) and (.response.items | type == "array"))' <<<"${remoteResults}" >/dev/null 2>&1; then
         statusCard "流量统计" "采集失败，已保留上次统计"
         return 1
     fi
-    accountIdMap=$(subscriptionActiveGroupRead -r '.user_groups[]?.id' | subscriptionSyncAccountIdMapJsonFromIds) || return 1
-    subscriptionActiveGroupWrite --argjson snapshot "${snapshot}" --argjson remoteResults "${remoteResults}" --argjson accountIdMap "${accountIdMap}" '
+    subscriptionActiveGroupWrite --argjson snapshot "${snapshot}" --argjson remoteResults "${remoteResults}" '
       def sourceTotal($prev; $current):
         ($prev // {upload:0, download:0, counters:{}}) as $old |
         ($old.counters // {}) as $oldCounters |
@@ -260,23 +258,27 @@ writeSubscriptionTrafficSnapshot() {
           .download += (if ($oldCounters | has($item.account)) then (if $downloadDelta >= 0 then $downloadDelta else ($item.download // 0) end) else ($item.download // 0) end) |
           .counters[$item.account] = {upload: ($item.upload // 0), download: ($item.download // 0)})) as $delta |
         {upload: (($old.upload // 0) + $delta.upload), download: (($old.download // 0) + $delta.download), counters: $delta.counters, updated_at: (now | strftime("%F %T"))};
-      def mapped($items): $items | map(. + {id: ($accountIdMap[.account] // .account)});
+      def mapped($items; $accountIdMap): $items | map(. + {id: ($accountIdMap[.account] // .account)});
+      def keepSources($map; $ids):
+        ($map // {}) | with_entries(. as $entry | select(($ids | index($entry.key)) != null));
       . as $group |
-      (mapped($snapshot.items)) as $items |
+      ($group.sources | map(.id)) as $sourceIds |
+      ($group.user_groups | map({key:(.id | '"${SUBSCRIPTION_SYNC_ACCOUNT_NAME_FROM_ID_JQ}"'), value:.id}) | from_entries) as $accountIdMap |
+      (mapped($snapshot.items; $accountIdMap)) as $items |
       ($items | map(select(.account | startswith("sub_")))) as $userItems |
       ($items | map(select((.account | startswith("sub_")) | not))) as $adminItems |
       (sourceTotal($group.traffic.sources.main; $items)) as $mainTraffic |
       (sourceTotal($group.traffic.admin.sources.main; $adminItems)) as $mainAdminTraffic |
-      ($remoteResults | map(select(.status == "success") | {source_id, items:mapped(.response.items)})) as $remote |
+      ($remoteResults | map(select(.status == "success") | . as $result | select(($sourceIds | index($result.source_id)) != null) | {source_id:$result.source_id, items:mapped($result.response.items; $accountIdMap)})) as $remote |
       ($remote | map(. as $result | {key:$result.source_id, value:sourceTotal($group.traffic.sources[$result.source_id]; $result.items)}) | from_entries) as $remoteSourceTraffic |
-      (($group.traffic.sources // {}) + {main:$mainTraffic} + $remoteSourceTraffic) as $sourceTraffic |
+      (keepSources($group.traffic.sources; $sourceIds) + {main:$mainTraffic} + $remoteSourceTraffic) as $sourceTraffic |
       ($remote | map(. as $result | {key:$result.source_id, value:sourceTotal($group.traffic.admin.sources[$result.source_id]; ($result.items | map(select(.account | startswith("sub_") | not))))}) | from_entries) as $remoteAdminSourceTraffic |
-      (($group.traffic.admin.sources // {}) + {main:$mainAdminTraffic} + $remoteAdminSourceTraffic) as $adminSourceTraffic |
+      (keepSources($group.traffic.admin.sources; $sourceIds) + {main:$mainAdminTraffic} + $remoteAdminSourceTraffic) as $adminSourceTraffic |
       ($group.user_groups | map(
         . as $user |
         (sourceTotal(($group.traffic.user_groups[$user.id].sources.main // {}); ($userItems | map(select(.id == $user.id))))) as $mainUserTraffic |
         ($remote | map(. as $result | {key:$result.source_id, value:sourceTotal($group.traffic.user_groups[$user.id].sources[$result.source_id]; ($result.items | map(select(.id == $user.id))))}) | from_entries) as $remoteUserSourceTraffic |
-        (($group.traffic.user_groups[$user.id].sources // {}) + {main:$mainUserTraffic} + $remoteUserSourceTraffic) as $userSourceTraffic |
+        (keepSources($group.traffic.user_groups[$user.id].sources; $sourceIds) + {main:$mainUserTraffic} + $remoteUserSourceTraffic) as $userSourceTraffic |
         {key:$user.id, value:(($group.traffic.user_groups[$user.id] // {}) + {upload:([$userSourceTraffic[] | .upload] | add // 0), download:([$userSourceTraffic[] | .download] | add // 0), sources:$userSourceTraffic})}
       ) | from_entries) as $userTraffic |
       ([$sourceTraffic[] | .upload] | add // 0) as $globalUpload |
@@ -294,7 +296,7 @@ collectSubscriptionTraffic() {
     local snapshot
     local remoteResults='[]'
     local role
-    ensureSubscriptionGroupsState
+    ensureSubscriptionGroupsState || return 1
     readInstallType
     readInstallProtocolType
     if ! ensureXrayTrafficStatsConfig; then
@@ -331,7 +333,7 @@ EOF
 showAdminSubscriptionTraffic() {
     local traffic
     local summary
-    traffic=$(subscriptionActiveGroupRead -r '.traffic.admin')
+    traffic=$(subscriptionActiveGroupRead -r '.traffic.admin') || return 1
     summary=$(jq -r '
       def mb($v): (((($v // 0) / 1024 / 1024) | floor) | tostring) + " MB";
       "总上传：" + mb(.upload) + "\n" +
@@ -348,7 +350,7 @@ showUserSubscriptionTraffic() {
     local quotaStatus
     local jqProgram
     local quotaStatusJq
-    ensureSubscriptionGroupsState
+    ensureSubscriptionGroupsState || return 1
     quotaStatusJq=$(subscriptionUserQuotaStatusJq) || return 1
     jqProgram=$(printf '%s\n%s\n' "${quotaStatusJq}" '
       (.user_groups[]? | select(.id == $id)) as $userGroup |
@@ -368,7 +370,7 @@ showSubscriptionTrafficOverview() {
     local jqProgram
     local quotaStatusJq
     quotaStatusJq=$(subscriptionUserQuotaStatusJq) || return 1
-    ensureSubscriptionGroupsState
+    ensureSubscriptionGroupsState || return 1
     jqProgram=$(printf '%s\n%s\n' "${quotaStatusJq}" '
       def mb($v): (((($v // 0) / 1024 / 1024) | floor) | tostring) + " MB";
       . as $group |
@@ -382,7 +384,7 @@ showSubscriptionTrafficOverview() {
       "服务器源：共 " + (($group.sources | length) | tostring) + " 个，启用远端 " + (([$group.sources[]? | select(.role != "main" and .enabled == true)] | length) | tostring) + " 个\n" +
       "最近同步：状态 " + (($group.sync.last_status // "pending") | tostring) + "，时间 " + (($group.sync.last_run // "未运行") | tostring) + "\n" +
       "流量更新时间：" + (($group.traffic.sources.main.updated_at // $group.traffic.admin.sources.main.updated_at // "未知") | tostring)')
-    output=$(subscriptionActiveGroupRead -r "${jqProgram}")
+    output=$(subscriptionActiveGroupRead -r "${jqProgram}") || return 1
     userResultCard "用量与限额总览"
     while IFS= read -r line; do
         menuLine "${line}"
@@ -432,7 +434,7 @@ manageTrafficAndQuota() {
 
 selectUserSubscriptionTrafficMenu() {
     local userSubscriptionId=
-    showUserSubscriptions
+    showUserSubscriptions || return 1
     autoRead user_subscription_traffic_id "请输入用户订阅 ID:" userSubscriptionId
     if [[ -z "${userSubscriptionId}" ]] || ! userSubscriptionExists "${userSubscriptionId}"; then
         errorCard "用户订阅 ID 无效"
@@ -444,7 +446,7 @@ selectUserSubscriptionTrafficMenu() {
 showSubscriptionSourcesTraffic() {
     local traffic
     local summary
-    traffic=$(subscriptionActiveGroupRead -r '.traffic.sources')
+    traffic=$(subscriptionActiveGroupRead -r '.traffic.sources') || return 1
     summary=$(jq -r '
       def mb($v): (((($v // 0) / 1024 / 1024) | floor) | tostring) + " MB";
       def total($items): reduce $items[] as $item ({upload:0, download:0}; .upload += ($item.upload // 0) | .download += ($item.download // 0));

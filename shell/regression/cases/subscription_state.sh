@@ -80,7 +80,7 @@ runSubscriptionGroupStateStructureFoundationAddRemoveRegression() {
     mkdir -p "$(subscriptionGroupsDir)"
     writeSubscriptionStateStructureFoundationFixture
     ensureSubscriptionGroupsState
-    jq -e '.version == 3 and .active_group == "default" and (.groups | length == 1) and (.groups[0] | has("admin") | not)' "$(subscriptionGroupsFile)" >/dev/null
+    jq -e '.version == 4 and .active_group == "default" and (.groups | length == 1) and (.groups[0] | has("admin") | not)' "$(subscriptionGroupsFile)" >/dev/null
     if ! regressionFindHasMatches "$(subscriptionGroupsBackupDir)" -maxdepth 1 -type f -name 'groups-pre-v3-migration-*.json'; then
         return 1
     fi
@@ -235,6 +235,7 @@ runSubscriptionGroupStateStructureValidationRegression() {
     local beforeSnapshot
     local invalidFilter
     local invalidSnapshot
+    local migrationSnapshot
     local stateFile
     mkdir -p "$(subscriptionGroupsDir)"
     stateFile=$(subscriptionGroupsFile)
@@ -269,15 +270,42 @@ runSubscriptionGroupStateStructureValidationRegression() {
         return 1
     fi
     [[ "$(<"${stateFile}")" == "${beforeSnapshot}" ]]
+
+    jq '
+      .version = 3 |
+      .groups[0].user_groups = [{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*","main","ghost"],"traffic_limit_gb":0}] |
+      .groups[0].traffic = {
+        global:{upload:999,download:999},
+        admin:{upload:999,download:999,sources:{main:{upload:3,download:4},ghost:{upload:90,download:91}}},
+        user_groups:{"team-a":{upload:999,download:999,sources:{main:{upload:5,download:6},ghost:{upload:70,download:71}}},ghost:{upload:1,download:1,sources:{}}},
+        sources:{main:{upload:8,download:10},ghost:{upload:80,download:81}}
+      }
+    ' "${stateFile}" >"${stateFile}.v3"
+    mv "${stateFile}.v3" "${stateFile}"
+    ensureSubscriptionGroupsState
+    jq -e '
+      .version == 4 and
+      .groups[0].user_groups[0].allowed_sources == ["*"] and
+      .groups[0].traffic.global == {upload:8,download:10} and
+      .groups[0].traffic.admin.upload == 3 and .groups[0].traffic.admin.download == 4 and
+      .groups[0].traffic.user_groups["team-a"].upload == 5 and
+      (.groups[0].traffic.sources | has("ghost") | not) and
+      (.groups[0].traffic.user_groups | has("ghost") | not)
+    ' "${stateFile}" >/dev/null
+    regressionFindHasMatches "$(subscriptionGroupsBackupDir)" -maxdepth 1 -type f -name 'groups-pre-v4-migration-*.json'
+
+    jq '.version = 3 | .groups[0].user_groups[0].id = "unsafe/id"' "${stateFile}" >"${stateFile}.invalid"
+    mv "${stateFile}.invalid" "${stateFile}"
+    migrationSnapshot=$(<"${stateFile}")
+    regressionExpectFailure ensureSubscriptionGroupsState >/dev/null 2>&1
+    [[ "$(<"${stateFile}")" == "${migrationSnapshot}" ]]
 }
 
 runSubscriptionGroupStateStructureSourceCredentialRegression() {
     mkdir -p "$(subscriptionGroupsDir)"
     writeSubscriptionStateSourceCredentialFixture
-    subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id remote-edge --arg token "token-abc" '
-      .groups |= map(if .id == $groupId then
-        .sources |= map(if .id == $id and .role != "main" then .control_token = $token else . end)
-      else . end)'
+    subscriptionActiveGroupWrite --arg id remote-edge --arg token "token-abc" '
+      .sources |= map(if .id == $id and .role != "main" then .control_token = $token else . end)'
     jq -e '.groups[0].sources[] | select(.id == "remote-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.2" and .port == 39778 and .control_token == "token-abc")' "$(subscriptionGroupsFile)" >/dev/null
     setSubscriptionSourceCredential remote-edge "10.77.0.3" 48779 "token-def"
     jq -e '.groups[0].sources[] | select(.id == "remote-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.3" and .port == 48779 and .control_token == "token-def")' "$(subscriptionGroupsFile)" >/dev/null
@@ -409,7 +437,13 @@ runSubscriptionGroupStateStructureSourceRemoveRegression() {
     jq -e '.groups[0].sources | map(.id) | index("edge")' "$(subscriptionGroupsFile)" >/dev/null
     setUserSubscriptionSources team-a '["main"]'
     removeSubscriptionSourceState edge
-    jq -e '(.groups[0].sources | map(.id) | index("edge") | not) and (.groups[0].traffic.sources | has("edge") | not) and (.groups[0].traffic.user_groups["team-a"].sources | has("edge") | not)' "$(subscriptionGroupsFile)" >/dev/null
+    jq -e '
+      (.groups[0].sources | map(.id) | index("edge") | not) and
+      (.groups[0].traffic.sources | has("edge") | not) and
+      (.groups[0].traffic.user_groups["team-a"].sources | has("edge") | not) and
+      .groups[0].traffic.global == {upload:0,download:0} and
+      .groups[0].traffic.user_groups["team-a"] == {upload:0,download:0,sources:{}}
+    ' "$(subscriptionGroupsFile)" >/dev/null
 }
 
 runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
@@ -462,6 +496,15 @@ runSubscriptionGroupStateQuotaTrafficRemoteRegression() {
       .groups[0].traffic.admin.download == 35 and
       .groups[0].traffic.user_groups["team-a"].upload == 45 and
       .groups[0].traffic.user_groups["team-a"].download == 58
+    ' "$(subscriptionGroupsFile)" >/dev/null
+
+    removeSubscriptionSourceState edge-2
+    remoteResults='[{"source_id":"edge-2","status":"success","response":{"items":[{"account":"admin","upload":99,"download":99}]}}]'
+    writeSubscriptionTrafficSnapshot '{"ok":true,"items":[{"account":"admin","upload":3,"download":4},{"account":"sub_team_a","upload":1,"download":2}]}' "${remoteResults}"
+    jq -e '
+      (.groups[0].traffic.sources | has("edge-2") | not) and
+      (.groups[0].traffic.admin.sources | has("edge-2") | not) and
+      (.groups[0].traffic.user_groups["team-a"].sources | has("edge-2") | not)
     ' "$(subscriptionGroupsFile)" >/dev/null
 }
 
@@ -739,14 +782,18 @@ runSubscriptionGroupStateRemoteRestoreStateWriteRegression() {
         (
             trap - EXIT INT TERM
             PADM_CLEANUP_PATHS=()
-            subscriptionGroupsStateWrite '.groups[0].traffic.global.upload += 1'
+            subscriptionGroupsStateWrite '
+              .groups[0].traffic.sources.main = ((.groups[0].traffic.sources.main // {upload:0,download:0}) | .upload += 1) |
+              .groups[0].traffic.global.upload += 1'
         ) &
         pids+=("$!")
     done
     for pid in "${pids[@]}"; do
         wait "${pid}"
     done
-    subscriptionGroupsStateRead -e --argjson workerCount "${workerCount}" '.groups[0].traffic.global.upload == $workerCount' >/dev/null
+    subscriptionGroupsStateRead -e --argjson workerCount "${workerCount}" '
+      .groups[0].traffic.global.upload == $workerCount and
+      .groups[0].traffic.sources.main.upload == $workerCount' >/dev/null
 
     date() {
         if [[ "${1:-}" == "+%Y%m%d%H%M%S" ]]; then
@@ -802,7 +849,7 @@ JSON
         menuOutput=$(printf '1\nyes\n' | restoreSubscriptionGroupsBackupMenu)
         [[ "${menuOutput}" == *"menu:"* ]]
     )
-    jq -e '.version == 3 and .active_group == "legacy" and .groups[0].id == "legacy"' "$(subscriptionGroupsFile)" >/dev/null
+    jq -e '.version == 4 and .active_group == "legacy" and .groups[0].id == "legacy"' "$(subscriptionGroupsFile)" >/dev/null
 }
 
 runSubscriptionSyncTempDirRegression() (
@@ -846,6 +893,27 @@ JSON
         return 1
     fi
 )
+
+runSubscriptionSyncProcessSubstitutionFailureRegression() {
+    local accountPlanCalled=false
+    subscriptionSyncAccountPlanFromIds() {
+        accountPlanCalled=true
+        cat >/dev/null
+        printf '{"create":[],"remove":[]}'
+    }
+    subscriptionSyncCredentialMismatchAccounts() { printf '[]\n'; }
+    if subscriptionSyncPlanFromDesiredUsers '{bad-json' >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ "${accountPlanCalled}" == "false" ]]
+
+    accountPlanCalled=false
+    subscriptionQuotaPlanIds() { return 7; }
+    if applySubscriptionQuotaPlanAccounts '[{"id":"team-a","action":"disable-and-remove-local-account"}]' >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ "${accountPlanCalled}" == "false" ]]
+}
 
 runSubscriptionSyncRestorePairFailureMessageRegression() (
     local message=
