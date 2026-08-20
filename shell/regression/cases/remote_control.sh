@@ -544,7 +544,7 @@ runRemoteControlTrafficContractRegression() (
     subscriptionRemoteControlRequest() {
         [[ "$2" == "traffic" && "$3" == '{}' ]] || return 1
         case "${responseMode}" in
-        valid) printf '%s\n' '{"ok":true,"items":[{"account":"admin","upload":1,"download":2},{"account":"sub_team_a","upload":3,"download":4}]}' ;;
+        valid) printf '%s\n' '{"ok":true,"items":[{"account":"user@example.com","upload":1,"download":2},{"account":"sub_team_a","upload":3,"download":4}]}' ;;
         duplicate) printf '%s\n' '{"ok":true,"items":[{"account":"admin","upload":1,"download":2},{"account":"admin","upload":3,"download":4}]}' ;;
         legacy) printf '%s\n' '{"ok":false,"error":"unknown_endpoint","error_detail":{"type":"unknown_endpoint","message":"未知控制端点"}}' ;;
         esac
@@ -714,6 +714,7 @@ runRemoteControlHandleInlineHelpersRegression() (
     local snapshotLog="${controlRoot}/snapshot.log"
     local expectedDefault
     local expectedDefaultB
+    local longId
 
     mkdir -p "${controlRoot}/state"
     export PADM_SUBSCRIPTION_GROUPS_DIR="${controlRoot}/state"
@@ -782,10 +783,13 @@ runRemoteControlHandleInlineHelpersRegression() (
     jq -e '.ok == true and .subscriptions == {}' <<<"${emptySnapshotResponse}" >/dev/null
     [[ "$(wc -l <"${snapshotLog}" | tr -d ' ')" == "2" ]]
 
+    longId=$(printf 'a%.0s' {1..65})
     for invalidPayload in \
         '{"desired_users":[]}' \
         '{"desired_users":[],"dry_run":false,"include_subscriptions":true}' \
-        '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111","name":"Team A"}],"dry_run":false}'; do
+        '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111","name":"Team A"}],"dry_run":false}' \
+        '{"desired_users":[{"id":"team-a","uuid":"AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA"},{"id":"team-b","uuid":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}],"dry_run":false}' \
+        "$(jq -cn --arg id "${longId}" '{desired_users:[{id:$id,uuid:"11111111-1111-1111-1111-111111111111"}],dry_run:false}')"; do
         set +e
         invalidPayloadResponse=$(handleSubscriptionControl sync test-token "${invalidPayload}")
         invalidPayloadStatus=$?
@@ -821,7 +825,7 @@ runRemoteControlHandleInlineHelpersRegression() (
 {"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge","name":"Edge","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"10.77.0.2","port":39778,"enabled":true,"sync_status":"pending"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["edge"],"traffic_limit_gb":0,"token":"","uuid":"22222222-2222-2222-2222-222222222222"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
     desiredBySource=$(subscriptionRemoteDesiredUsersBySource '[{"id":"edge"}]')
-    jq -e '.["edge"][0].uuid == "22222222-2222-2222-2222-222222222222"' <<<"${desiredBySource}" >/dev/null
+    jq -e '.["edge"][0].uuid == "22222222-2222-2222-2222-222222222222" and (.["edge"][0] | keys) == ["account","id","uuid"]' <<<"${desiredBySource}" >/dev/null
     subscriptionActiveGroupRead -e '.user_groups[0].uuid == "22222222-2222-2222-2222-222222222222"' >/dev/null
 
     cat >"${configDir}/01_inbounds.json" <<'JSON'

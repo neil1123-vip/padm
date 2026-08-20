@@ -17,7 +17,7 @@ subscriptionRemoteDesiredUsersBySource() {
         .[$sourceId] = [
           $users[]?
           | select((.allowed_sources | index($sourceId)) or (.allowed_sources | index("*")))
-          | {id, name, uuid, traffic_limit_gb, account}
+          | {id, uuid, account}
         ])
     ' || return 1
 }
@@ -310,7 +310,7 @@ subscriptionRemoteTrafficForSource() {
           all(.items[]?;
             type == "object" and
             keys == ["account", "download", "upload"] and
-            (.account | type == "string" and length > 0 and test("^[A-Za-z0-9_-]+$")) and
+            (.account | type == "string" and length > 0 and . != "." and . != ".." and test("^[A-Za-z0-9._~@+=:-]+$")) and
             (.upload | type == "number" and . >= 0 and . == floor) and
             (.download | type == "number" and . >= 0 and . == floor))
         ' <<<"${response}" >/dev/null 2>&1; then
@@ -1074,7 +1074,7 @@ subscriptionControlTrafficResponse() {
       all(.items[]?;
         type == "object" and
         keys == ["account", "download", "upload"] and
-        (.account | type == "string" and length > 0 and test("^[A-Za-z0-9_-]+$")) and
+        (.account | type == "string" and length > 0 and . != "." and . != ".." and test("^[A-Za-z0-9._~@+=:-]+$")) and
         (.upload | type == "number" and . >= 0 and . == floor) and
         (.download | type == "number" and . >= 0 and . == floor))
     ' <<<"${snapshot}" >/dev/null 2>&1; then
@@ -1099,7 +1099,7 @@ subscriptionControlApplySyncUnlocked() {
     local prepareFailureMessage=
     local registryNeedsSync
     if ! jq -e '
-      def valid_id: type == "string" and length > 0 and test("^[A-Za-z0-9_-]+$");
+      def valid_id: type == "string" and length <= 64 and test("^[A-Za-z0-9_-]+$");
       def valid_uuid: type == "string" and test("^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$");
       type == "object" and
       (keys == ["desired_users", "dry_run"]) and
@@ -1109,7 +1109,8 @@ subscriptionControlApplySyncUnlocked() {
         (keys == ["id", "uuid"]) and
         (.id | valid_id) and
         (.uuid | valid_uuid)) and
-      ([.desired_users[]?.id] | length) == ([.desired_users[]?.id] | unique | length)
+      ([.desired_users[]?.id] | length) == ([.desired_users[]?.id] | unique | length) and
+      ([.desired_users[]?.uuid | ascii_downcase] | length) == ([.desired_users[]?.uuid | ascii_downcase] | unique | length)
     ' <<<"${payload}" >/dev/null 2>&1; then
         jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"同步请求体格式不正确"}}'
         return 1

@@ -100,42 +100,98 @@ selectSubscriptionGroupsBackupFile() {
     selectedSubscriptionGroupsBackupFile=${backupFile}
 }
 
+applySubscriptionGroupsStateMaintenanceUnlocked() {
+    local targetStateFile=$1
+    local actionName=$2
+    local currentBackup=
+    local configBackupDir=
+    local outputBackupDir=
+    local previousCrontab=
+    local failure=
+    local rollbackStatus=0
+
+    SUBSCRIPTION_STATE_MAINTENANCE_BACKUP=
+    SUBSCRIPTION_STATE_MAINTENANCE_ERROR=
+    previousCrontab=$(readUserCrontabContent) || {
+        SUBSCRIPTION_STATE_MAINTENANCE_ERROR="${actionName}前读取定时任务失败，未执行${actionName}"
+        return 1
+    }
+    currentBackup=$(createSubscriptionGroupsBackup) || {
+        SUBSCRIPTION_STATE_MAINTENANCE_ERROR="${actionName}前备份当前状态失败，未执行${actionName}"
+        return 1
+    }
+    SUBSCRIPTION_STATE_MAINTENANCE_BACKUP=${currentBackup}
+    if ! subscriptionSyncCreateLocalApplyBackups configBackupDir outputBackupDir; then
+        SUBSCRIPTION_STATE_MAINTENANCE_ERROR="${actionName}前备份本机配置或订阅输出失败，未执行${actionName}"
+        return 1
+    fi
+    if ! subscriptionGroupsStateReplace "${targetStateFile}" "$(subscriptionGroupsFile)"; then
+        subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
+        SUBSCRIPTION_STATE_MAINTENANCE_ERROR="订阅状态${actionName}失败，当前状态未变"
+        return 1
+    fi
+    if ! runSubscriptionGroupSync; then
+        failure="订阅状态${actionName}后的完整同步失败"
+    elif ! refreshSubscriptionGroupSyncCron; then
+        failure="订阅状态${actionName}后的定时任务刷新失败"
+    fi
+    if [[ -z "${failure}" ]]; then
+        subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
+        return 0
+    fi
+
+    if subscriptionSyncRollbackLocalApply "${configBackupDir}" "${outputBackupDir}" "${failure}" "${currentBackup}"; then
+        SUBSCRIPTION_STATE_MAINTENANCE_ERROR="${failure}，已恢复旧状态、配置和订阅输出"
+    else
+        SUBSCRIPTION_STATE_MAINTENANCE_ERROR=${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-"${failure}，且本地数据恢复失败"}
+        rollbackStatus=1
+    fi
+    if [[ "${SUBSCRIPTION_SYNC_CONFIG_RESTORED:-false}" == "true" ]] && ! subscriptionSyncReconcileLocalServices; then
+        SUBSCRIPTION_STATE_MAINTENANCE_ERROR="${SUBSCRIPTION_STATE_MAINTENANCE_ERROR}；恢复旧配置后服务重建失败，请检查核心服务日志"
+        rollbackStatus=1
+    fi
+    if ! cmp -s -- "${currentBackup}" "$(subscriptionGroupsFile)"; then
+        SUBSCRIPTION_STATE_MAINTENANCE_ERROR="${SUBSCRIPTION_STATE_MAINTENANCE_ERROR}；旧状态恢复结果未通过校验"
+        rollbackStatus=1
+    fi
+    if ! installUserCrontabContent "${previousCrontab}"; then
+        SUBSCRIPTION_STATE_MAINTENANCE_ERROR="${SUBSCRIPTION_STATE_MAINTENANCE_ERROR}；旧定时任务恢复失败"
+        rollbackStatus=1
+    fi
+    if ((rollbackStatus == 0)); then
+        subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
+    else
+        subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}" "${outputBackupDir}"
+    fi
+    return 1
+}
+
 restoreSubscriptionGroupsBackupMenu() {
     local backupFile
-    local currentBackup
     local confirm=
     selectSubscriptionGroupsBackupFile || return 1
     backupFile=${selectedSubscriptionGroupsBackupFile}
-    currentBackup=$(createSubscriptionGroupsBackup) || {
-        errorCard "恢复前备份当前状态失败，已取消恢复"
-        return 1
-    }
-    statusCard "即将恢复订阅状态" "目标备份：${backupFile}" "当前状态已先备份到：${currentBackup}"
-    autoRead subscription_restore_confirm "恢复会覆盖当前 groups.json。确认请输入 yes:" confirm
+    statusCard "即将恢复订阅状态" "目标备份：${backupFile}" "确认后会先备份当前状态、配置和订阅输出，再执行完整同步"
+    autoRead subscription_restore_confirm "恢复会覆盖当前状态并重新同步。确认请输入 yes:" confirm
     if [[ "${confirm}" != "yes" ]]; then
         coreCancelledStatusCard "状态恢复未执行"
         return 1
     fi
-    restoreSubscriptionGroupsBackup "${backupFile}" || {
-        errorCard "状态恢复失败" "当前状态备份：${currentBackup}"
+    if ! subscriptionGroupsWithLock applySubscriptionGroupsStateMaintenanceUnlocked "${backupFile}" "恢复"; then
+        errorCard "${SUBSCRIPTION_STATE_MAINTENANCE_ERROR:-状态恢复失败}" "恢复前状态备份：${SUBSCRIPTION_STATE_MAINTENANCE_BACKUP:-未创建}"
         return 1
-    }
-    successCard "状态恢复完成" "恢复来源：${backupFile}" "恢复前备份：${currentBackup}"
+    fi
+    successCard "状态恢复完成" "恢复来源：${backupFile}" "恢复前状态备份：${SUBSCRIPTION_STATE_MAINTENANCE_BACKUP}"
 }
 
 resetSubscriptionGroupsStateMenu() {
     local stateFile
     local stageFile
-    local currentBackup
     local confirm=
     ensureSubscriptionGroupsState || return 1
-    showSubscriptionGroupsStateSummary
-    currentBackup=$(createSubscriptionGroupsBackup) || {
-        errorCard "重建前备份当前状态失败，已取消重建"
-        return 1
-    }
-    statusCard "即将重建订阅状态" "这会把 groups.json 重置为默认空状态" "当前状态已先备份到：${currentBackup}" "升级或打开菜单不会自动执行此操作"
-    autoRead subscription_reset_confirm "确认重建请输入 yes:" confirm
+    showSubscriptionGroupsStateSummary || return 1
+    statusCard "即将重建订阅状态" "这会把 groups.json 重置为默认空状态" "确认后会先备份当前状态、配置和订阅输出，再执行完整同步"
+    autoRead subscription_reset_confirm "确认重建并重新同步请输入 yes:" confirm
     if [[ "${confirm}" != "yes" ]]; then
         coreCancelledStatusCard "订阅状态未重建"
         return 1
@@ -150,16 +206,13 @@ resetSubscriptionGroupsStateMenu() {
         errorCard "默认状态生成失败"
         return 1
     }
-    if ! subscriptionGroupsStateReplace "${stageFile}" "${stateFile}"; then
+    if ! subscriptionGroupsWithLock applySubscriptionGroupsStateMaintenanceUnlocked "${stageFile}" "重建"; then
         padmRemoveCleanupPath "${stageFile}"
-        errorCard "订阅状态重建失败" "当前状态备份：${currentBackup}"
+        errorCard "${SUBSCRIPTION_STATE_MAINTENANCE_ERROR:-订阅状态重建失败}" "重建前状态备份：${SUBSCRIPTION_STATE_MAINTENANCE_BACKUP:-未创建}"
         return 1
     fi
     padmRemoveCleanupPath "${stageFile}"
-    if declare -F subscriptionGroupsSecureStateFiles >/dev/null 2>&1; then
-        subscriptionGroupsSecureStateFiles 2>/dev/null || return 1
-    fi
-    successCard "订阅状态已重建" "重建前备份：${currentBackup}"
+    successCard "订阅状态已重建" "重建前状态备份：${SUBSCRIPTION_STATE_MAINTENANCE_BACKUP}"
 }
 
 manageSubscriptionStateBackups() {

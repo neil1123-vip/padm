@@ -16,7 +16,7 @@ subscriptionSyncAccountUnescapeId() {
     printf '%s\n' "${id}"
 }
 
-SUBSCRIPTION_SYNC_MANAGED_ACCOUNT_JQ='((.email // .name // .username // "") | sub("-(VLESS_TCP/TLS_Vision|VLESS_WS|VLESS_Reality_XHTTP|Trojan_gRPC|VMess_WS|trojan_tcp|Trojan_TCP|vless_grpc|singbox_hysteria2|vless_reality_vision|vless_reality_grpc|VLESS_Reality_Vision|VLESS_Reality_gPRC|singbox_tuic|singbox_naive|VMess_HTTPUpgrade|anytls)$"; ""))'
+SUBSCRIPTION_SYNC_MANAGED_ACCOUNT_JQ='((.email // .name // .username // "") | sub("-('"$(clientNameSuffixRegex)"')$"; ""))'
 SUBSCRIPTION_SYNC_ACCOUNT_NAME_FROM_ID_JQ='"sub_" + (((. | tostring) | gsub("_"; "\u0001") | gsub("-"; "_") | gsub("\u0001"; "-")))'
 
 subscriptionSyncAccountName() {
@@ -76,20 +76,28 @@ subscriptionSyncEnsureEnabledUserUUIDs() {
     fi
 }
 
-subscriptionSyncValidConfigFiles() {
+subscriptionSyncLoadValidConfigFiles() {
+    local resultVar=$1
+    shift
+    local -n resultRef=${resultVar}
     local file
+    local discoveredFiles
+    resultRef=()
     if (($# > 0)); then
-        for file; do [[ -f "${file}" ]] && printf '%s\n' "${file}"; done
+        for file; do [[ -f "${file}" ]] && resultRef+=("${file}"); done
     else
+        discoveredFiles=$(subscriptionSyncConfigFiles) || return 1
+        [[ -n "${discoveredFiles}" ]] || return 0
         while IFS= read -r file; do
-            [[ -f "${file}" ]] && printf '%s\n' "${file}"
-        done < <(subscriptionSyncConfigFiles)
+            [[ -f "${file}" ]] && resultRef+=("${file}")
+        done <<<"${discoveredFiles}"
     fi
+    return 0
 }
 
 subscriptionSyncConfiguredAccountNamesJson() {
     local -a validFiles=()
-    mapfile -t validFiles < <(subscriptionSyncValidConfigFiles "$@")
+    subscriptionSyncLoadValidConfigFiles validFiles "$@" || return 1
     [[ "${#validFiles[@]}" -gt 0 ]] || {
         printf '[]\n'
         return 0
@@ -109,7 +117,7 @@ subscriptionSyncConfiguredManagedUsers() {
 
 subscriptionSyncConfiguredManagedCredentials() {
     local -a validFiles=()
-    mapfile -t validFiles < <(subscriptionSyncValidConfigFiles "$@")
+    subscriptionSyncLoadValidConfigFiles validFiles "$@" || return 1
     [[ "${#validFiles[@]}" -gt 0 ]] || {
         printf '[]\n'
         return 0
@@ -214,6 +222,7 @@ subscriptionSyncConfigFiles() {
             [[ -f "${file}" ]] && echo "${file}"
         done
     fi
+    return 0
 }
 
 subscriptionSyncAccountNamesJsonFromIds() {
@@ -327,12 +336,14 @@ subscriptionSyncRemoveAccount() {
     local accountName=$1
     local file
     local rc=0
+    local -a configFiles=()
     subscriptionSyncRequireSafeConfigDirs || return 1
-    while IFS= read -r file; do
+    subscriptionSyncLoadValidConfigFiles configFiles || return 1
+    for file in "${configFiles[@]}"; do
         if ! subscriptionSyncRemoveAccountFromFile "${file}" "${accountName}"; then
             rc=1
         fi
-    done < <(subscriptionSyncConfigFiles)
+    done
     return "${rc}"
 }
 
@@ -490,14 +501,15 @@ subscriptionSyncCreateConfigBackups() {
     local file
     local backupIndex=0
     local -a backupArgs=()
+    local -a configFiles=()
 
     subscriptionSyncRequireSafeConfigDirs || return 1
+    subscriptionSyncLoadValidConfigFiles configFiles || return 1
     padmCreateTmpRootPath createdBackupDir padm-subscription-sync-backup.XXXXXX -d || return 1
-    while IFS= read -r file; do
-        [[ -f "${file}" ]] || continue
+    for file in "${configFiles[@]}"; do
         backupArgs+=("$(printf '%06d.json' "${backupIndex}")" "${file}")
         backupIndex=$((backupIndex + 1))
-    done < <(subscriptionSyncConfigFiles)
+    done
     if ! padmWriteManagedFileBackupManifest "${createdBackupDir}" "${backupArgs[@]}"; then
         padmRemoveCleanupPath "${createdBackupDir}"
         return 1
@@ -951,7 +963,10 @@ subscriptionQuotaValidatePlan() {
     local quotaPlan=$1
     jq -e '
       type == "array" and
-      all(.[]?; type == "object" and (.id | type == "string" and length > 0) and .action == "disable-and-remove-local-account")
+      all(.[]?; type == "object" and
+        (.id | type == "string" and length <= 64 and test("^[A-Za-z0-9_-]+$")) and
+        .action == "disable-and-remove-local-account") and
+      ([.[].id] | length) == ([.[].id] | unique | length)
     ' <<<"${quotaPlan}" >/dev/null 2>&1
 }
 
@@ -997,18 +1012,39 @@ applySubscriptionQuotaPlanAccounts() {
 
 applySubscriptionQuotaPlanTransactionUnlocked() {
     local quotaPlan=$1
+    local requestedIds
+    local currentPlan
+    local effectivePlan
     local backupFile
     local quotaError=
 
     SUBSCRIPTION_SYNC_TRANSACTION_ERROR=
+    subscriptionQuotaValidatePlan "${quotaPlan}" || return 1
+    requestedIds=$(jq -c '[.[].id]' <<<"${quotaPlan}") || return 1
+    currentPlan=$(subscriptionQuotaDryRunPlan) || {
+        SUBSCRIPTION_SYNC_TRANSACTION_ERROR="限额自动执行时重新检查超额状态失败"
+        return 1
+    }
+    subscriptionQuotaValidatePlan "${currentPlan}" || {
+        SUBSCRIPTION_SYNC_TRANSACTION_ERROR="限额自动执行时重新检查计划格式失败"
+        return 1
+    }
+    effectivePlan=$(jq -c --argjson requestedIds "${requestedIds}" '
+      [.[]? | .id as $id | select(($requestedIds | index($id)) != null)]
+    ' <<<"${currentPlan}") || {
+        SUBSCRIPTION_SYNC_TRANSACTION_ERROR="限额自动执行时重新检查计划格式失败"
+        return 1
+    }
+    [[ "$(jq 'length' <<<"${effectivePlan}")" != "0" ]] || return 0
+
     backupFile=$(createSubscriptionGroupsBackup) || {
         SUBSCRIPTION_SYNC_TRANSACTION_ERROR="限额自动执行前订阅状态备份失败"
         return 1
     }
-    if ! applySubscriptionQuotaPlan "${quotaPlan}"; then
+    if ! applySubscriptionQuotaPlan "${effectivePlan}"; then
         quotaError="限额自动执行时，停用超额分享订阅失败"
     else
-        if ! applySubscriptionQuotaPlanAccounts "${quotaPlan}"; then
+        if ! applySubscriptionQuotaPlanAccounts "${effectivePlan}"; then
             quotaError="${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-限额自动执行时，移除本机托管账号失败}"
         fi
     fi

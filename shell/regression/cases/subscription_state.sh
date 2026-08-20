@@ -77,6 +77,7 @@ prepareSubscriptionGroupSyncStubs() {
 }
 
 runSubscriptionGroupStateStructureFoundationAddRemoveRegression() {
+    local longId
     mkdir -p "$(subscriptionGroupsDir)"
     writeSubscriptionStateStructureFoundationFixture
     ensureSubscriptionGroupsState
@@ -102,6 +103,11 @@ runSubscriptionGroupStateStructureFoundationAddRemoveRegression() {
         removeUserSubscriptionState missing >/dev/null 2>&1; then
         return 1
     fi
+    longId=$(printf 'a%.0s' {1..65})
+    subscriptionStateIdValid "${longId%a}"
+    regressionExpectStatus 1 subscriptionStateIdValid "${longId}" >/dev/null 2>&1
+    regressionExpectStatus 1 subscriptionApplyUserGroupState \
+        '[{"id":"team-a","uuid":"AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA"},{"id":"team-b","uuid":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}]' '[]' >/dev/null 2>&1
 }
 
 runSubscriptionGroupStateStructureFoundationCredentialRegression() {
@@ -255,6 +261,7 @@ runSubscriptionGroupStateStructureValidationRegression() {
         '.groups[0].user_groups += [{"id":"bad","name":"Bad","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"token":""}]' \
         '.groups[0].user_groups += [{"id":"bad","name":"Bad","enabled":true,"allowed_sources":["missing-source"],"traffic_limit_gb":0,"token":""}]' \
         '.groups[0].user_groups += [{"id":"dup","name":"Dup","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"},{"id":"dup","name":"Dup 2","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"uuid":"22222222-2222-2222-2222-222222222222"}]' \
+        '.groups[0].user_groups += [{"id":"uuid-a","name":"UUID A","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"uuid":"AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA"},{"id":"uuid-b","name":"UUID B","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"uuid":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}]' \
         '.groups[0].sources += [{"id":"main","name":"Duplicate Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}]' \
         'del(.groups[0].sources[0].transport)' \
         '.groups[0].sync.remote_enabled = true'; do
@@ -498,6 +505,23 @@ runSubscriptionGroupStateQuotaTrafficRemoteRegression() {
       .groups[0].traffic.user_groups["team-a"].download == 58
     ' "$(subscriptionGroupsFile)" >/dev/null
 
+    local remoteEdgeBefore edge2Before mainBefore
+    remoteEdgeBefore=$(jq -c '.groups[0].traffic.sources["remote-edge"]' "$(subscriptionGroupsFile)")
+    edge2Before=$(jq -r '.groups[0].traffic.sources["edge-2"].upload' "$(subscriptionGroupsFile)")
+    mainBefore=$(jq -r '.groups[0].traffic.sources.main.upload' "$(subscriptionGroupsFile)")
+    remoteResults='[{"source_id":"remote-edge","status":"unreachable"},{"source_id":"edge-2","status":"success","response":{"items":[{"account":"admin","upload":4,"download":2},{"account":"sub_team_a","upload":2,"download":3}]}}]'
+    writeSubscriptionTrafficSnapshot '{"ok":true,"items":[{"account":"admin","upload":4,"download":5},{"account":"sub_team_a","upload":2,"download":3}]}' "${remoteResults}"
+    jq -e --argjson remoteEdgeBefore "${remoteEdgeBefore}" --argjson edge2Before "${edge2Before}" --argjson mainBefore "${mainBefore}" '
+      .groups[0].traffic.sources["remote-edge"] == $remoteEdgeBefore and
+      .groups[0].traffic.sources["edge-2"].upload == ($edge2Before + 2) and
+      .groups[0].traffic.sources.main.upload == ($mainBefore + 2)
+    ' "$(subscriptionGroupsFile)" >/dev/null
+
+    mainBefore=$(jq -r '.groups[0].traffic.sources.main.upload' "$(subscriptionGroupsFile)")
+    writeSubscriptionTrafficSnapshot '{"ok":true,"items":[]}' '[]'
+    writeSubscriptionTrafficSnapshot '{"ok":true,"items":[{"account":"admin","upload":5,"download":5},{"account":"sub_team_a","upload":3,"download":3}]}' '[]'
+    jq -e --argjson mainBefore "${mainBefore}" '.groups[0].traffic.sources.main.upload == ($mainBefore + 2)' "$(subscriptionGroupsFile)" >/dev/null
+
     removeSubscriptionSourceState edge-2
     remoteResults='[{"source_id":"edge-2","status":"success","response":{"items":[{"account":"admin","upload":99,"download":99}]}}]'
     writeSubscriptionTrafficSnapshot '{"ok":true,"items":[{"account":"admin","upload":3,"download":4},{"account":"sub_team_a","upload":1,"download":2}]}' "${remoteResults}"
@@ -598,6 +622,26 @@ JSON
     )
 }
 
+runSubscriptionGroupStateQuotaTransactionRecheckRegression() (
+    local confirmedPlan='[{"id":"team-a","action":"disable-and-remove-local-account"}]'
+    local mutationMarker="${TMP_DIR}/subscription-quota-recheck-mutated"
+
+    subscriptionQuotaDryRunPlan() {
+        printf '%s\n' '[{"id":"team-b","action":"disable-and-remove-local-account"}]'
+    }
+    createSubscriptionGroupsBackup() {
+        : >"${mutationMarker}"
+        return 1
+    }
+    setUserSubscriptionEnabled() {
+        : >"${mutationMarker}"
+        return 1
+    }
+
+    regressionExpectStatus 0 applySubscriptionQuotaPlanTransaction "${confirmedPlan}"
+    [[ ! -e "${mutationMarker}" ]]
+)
+
 runSubscriptionGroupStateQuotaPartialSyncApplyFailureRegression() {
     (
         local quotaPartialRoot="${TMP_DIR}/subscription-quota-partial-state-failure"
@@ -635,6 +679,9 @@ JSON
         subscriptionSyncApplyAccountPlanTransaction() {
             printf 'called\n' >"${accountPhaseMarker}"
             return 0
+        }
+        subscriptionQuotaDryRunPlan() {
+            printf '%s\n' "${quotaPartialPlan}"
         }
         regressionExpectStatus 1 applySubscriptionQuotaPlanTransaction "${quotaPartialPlan}"
         jq -e '.groups[0].user_groups[] | select(.id == "team-a" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
@@ -676,10 +723,10 @@ runSubscriptionGroupStateQuotaPartialSyncConfigRegression() {
     singBoxConfigPath="${syncConfigRoot}/sing-box/"
     mkdir -p "${configPath}" "${singBoxConfigPath}"
     cat >"${configPath}02_VLESS_TCP_inbounds.json" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_team_a-main"},{"email":"sub_team_b-main"}]}}]}
+{"inbounds":[{"settings":{"clients":[{"email":"sub_team_a-main"},{"email":"sub_team_b-main"},{"email":"sub_team_c-Trojan_TCP_direct"}]}}]}
 JSON
     cat >"${singBoxConfigPath}06_hysteria2_inbounds.json" <<'JSON'
-{"inbounds":[{"users":[{"name":"sub_team_a-main"},{"username":"sub_team_b-main"}]}]}
+{"inbounds":[{"users":[{"name":"sub_team_a-main"},{"username":"sub_team_b-main"},{"name":"sub_team_c-shadowsocks"}]}]}
 JSON
     (
         local capturedConfiguredAccountArgc="${TMP_DIR}/subscription-sync-configured-account-argc.txt"
@@ -693,8 +740,8 @@ JSON
     subscriptionSyncCurrentManagedUsers \
         "${configPath}02_VLESS_TCP_inbounds.json" \
         "${singBoxConfigPath}06_hysteria2_inbounds.json" |
-        jq -e '. == ["sub_team_a-main", "sub_team_b-main"]' >/dev/null
-    subscriptionSyncPlanFromAccounts '["sub_team_a-main"]' | jq -e '.create == [] and .remove == ["sub_team_b-main"]' >/dev/null
+        jq -e '. == ["sub_team_a-main", "sub_team_b-main", "sub_team_c"]' >/dev/null
+    subscriptionSyncPlanFromAccounts '["sub_team_a-main"]' | jq -e '.create == [] and .remove == ["sub_team_b-main", "sub_team_c"]' >/dev/null
     printf '{bad-json' >"${configPath}99_broken_inbounds.json"
     set +e
     subscriptionSyncPlanFromAccounts '["sub_team_a"]' >/dev/null 2>&1
@@ -838,6 +885,16 @@ JSON
             cp "$(subscriptionGroupsFile)" "${TMP_DIR}/legacy-menu-current-backup.json" || return 1
             printf '%s\n' "${TMP_DIR}/legacy-menu-current-backup.json"
         }
+        readUserCrontabContent() { printf 'old-cron\n'; }
+        installUserCrontabContent() { printf '%s\n' "$1" >"${TMP_DIR}/legacy-menu-cron.txt"; }
+        subscriptionSyncCreateLocalApplyBackups() {
+            printf -v "$1" '%s' "${TMP_DIR}/legacy-menu-config-backup"
+            printf -v "$2" '%s' "${TMP_DIR}/legacy-menu-output-backup"
+            mkdir -p "${!1}" "${!2}"
+        }
+        subscriptionSyncReleaseLocalApplyBackups() { :; }
+        runSubscriptionGroupSync() { return 0; }
+        refreshSubscriptionGroupSyncCron() { return 0; }
         autoRead() {
             local targetVar=$3
             local input=
@@ -913,7 +970,76 @@ runSubscriptionSyncProcessSubstitutionFailureRegression() {
         return 1
     fi
     [[ "${accountPlanCalled}" == "false" ]]
+
+    subscriptionSyncConfigFiles() { return 7; }
+    regressionExpectStatus 1 subscriptionSyncConfiguredAccountNamesJson >/dev/null 2>&1
+    regressionExpectStatus 1 subscriptionSyncConfiguredManagedCredentials >/dev/null 2>&1
+
+    subscriptionSyncConfiguredAccountNamesJson "${TMP_DIR}/missing-inbounds.json" | jq -e '. == []' >/dev/null
 }
+
+runSubscriptionUserRemovalTransactionLockRegression() (
+    local logFile="${TMP_DIR}/subscription-user-removal-lock.log"
+    : >"${logFile}"
+    autoRead() { printf -v "$3" '%s' yes; }
+    subscriptionGroupsWithLock() {
+        printf '%s\n' lock-start >>"${logFile}"
+        "$@"
+        local status=$?
+        printf '%s\n' lock-end >>"${logFile}"
+        return "${status}"
+    }
+    subscriptionGroupsStateRead() { printf '%s\n' '{}'; }
+    subscriptionSyncCreateConfigBackups() { printf -v "$1" '%s' "${TMP_DIR}/user-removal-config"; mkdir -p "${!1}"; }
+    subscriptionSyncAccountName() { printf 'sub_%s\n' "$1"; }
+    removeUserSubscriptionState() { printf '%s\n' remove-state >>"${logFile}"; }
+    subscriptionSyncRemoveAccount() { printf '%s\n' remove-account >>"${logFile}"; }
+    reloadCore() { printf '%s\n' reload >>"${logFile}"; }
+    subscriptionSyncReleaseLocalApplyBackups() { :; }
+    padmRemoveCleanupPath() { :; }
+    successCard() { :; }
+    runSubscriptionSyncAfterMutation() { printf '%s\n' post-sync >>"${logFile}"; }
+
+    removeUserSubscriptionMenu team-a
+    [[ "$(<"${logFile}")" == $'lock-start\nremove-state\nremove-account\nreload\nlock-end\npost-sync' ]]
+)
+
+runSubscriptionStateMaintenanceRollbackRegression() (
+    local root="${TMP_DIR}/subscription-state-maintenance-rollback"
+    local stateFile="${root}/groups.json"
+    local targetFile="${root}/target.json"
+    local maintCurrentBackup="${root}/current-backup.json"
+    local logFile="${root}/calls.log"
+    mkdir -p "${root}"
+    printf 'old-state\n' >"${stateFile}"
+    printf 'new-state\n' >"${targetFile}"
+    : >"${logFile}"
+
+    subscriptionGroupsFile() { printf '%s\n' "${stateFile}"; }
+    readUserCrontabContent() { printf 'old-cron\n'; }
+    createSubscriptionGroupsBackup() { cp "${stateFile}" "${maintCurrentBackup}"; printf '%s\n' "${maintCurrentBackup}"; }
+    subscriptionSyncCreateLocalApplyBackups() {
+        printf -v "$1" '%s' "${root}/config-backup"
+        printf -v "$2" '%s' "${root}/output-backup"
+        mkdir -p "${!1}" "${!2}"
+    }
+    subscriptionGroupsStateReplace() { cp "$1" "$2"; printf '%s\n' replace >>"${logFile}"; }
+    runSubscriptionGroupSync() { printf '%s\n' sync >>"${logFile}"; return 1; }
+    subscriptionSyncRollbackLocalApply() {
+        cp "${maintCurrentBackup}" "${stateFile}"
+        SUBSCRIPTION_SYNC_CONFIG_RESTORED=true
+        printf '%s\n' rollback >>"${logFile}"
+        return 0
+    }
+    subscriptionSyncReconcileLocalServices() { printf '%s\n' reconcile >>"${logFile}"; }
+    installUserCrontabContent() { printf '%s\n' cron >>"${logFile}"; }
+    subscriptionSyncReleaseLocalApplyBackups() { printf '%s:%s\n' release "$1" >>"${logFile}"; }
+
+    regressionExpectStatus 1 applySubscriptionGroupsStateMaintenanceUnlocked "${targetFile}" "恢复"
+    [[ "$(<"${stateFile}")" == 'old-state' ]]
+    head -n 5 "${logFile}" | cmp -s - <(printf '%s\n' replace sync rollback reconcile cron)
+    tail -n 1 "${logFile}" | grep -qx 'release:remove'
+)
 
 runSubscriptionSyncRestorePairFailureMessageRegression() (
     local message=

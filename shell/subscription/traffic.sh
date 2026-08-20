@@ -242,22 +242,32 @@ writeSubscriptionTrafficSnapshot() {
     local snapshot=$1
     local remoteResults=${2:-[]}
     if ! jq -e '.ok == true and (.items | type == "array")' <<<"${snapshot}" >/dev/null 2>&1 ||
-        ! jq -e 'type == "array" and all(.[]; .status == "success" and (.source_id | type == "string" and length > 0) and (.response.items | type == "array"))' <<<"${remoteResults}" >/dev/null 2>&1; then
+        ! jq -e '
+          type == "array" and
+          ([.[].source_id] | length) == ([.[].source_id] | unique | length) and
+          all(.[];
+            (.source_id | type == "string" and length > 0) and
+            (.status | type == "string" and length > 0) and
+            (if .status == "success" then (.response.items | type == "array") else true end))
+        ' <<<"${remoteResults}" >/dev/null 2>&1; then
         statusCard "流量统计" "采集失败，已保留上次统计"
         return 1
     fi
     subscriptionActiveGroupWrite --argjson snapshot "${snapshot}" --argjson remoteResults "${remoteResults}" '
       def sourceTotal($prev; $current):
         ($prev // {upload:0, download:0, counters:{}}) as $old |
-        ($old.counters // {}) as $oldCounters |
-        (reduce $current[] as $item ({upload:0, download:0, counters:{}};
-          ($oldCounters[$item.account] // {upload:0, download:0}) as $counter |
-          (($item.upload // 0) - ($counter.upload // 0)) as $uploadDelta |
-          (($item.download // 0) - ($counter.download // 0)) as $downloadDelta |
-          .upload += (if ($oldCounters | has($item.account)) then (if $uploadDelta >= 0 then $uploadDelta else ($item.upload // 0) end) else ($item.upload // 0) end) |
-          .download += (if ($oldCounters | has($item.account)) then (if $downloadDelta >= 0 then $downloadDelta else ($item.download // 0) end) else ($item.download // 0) end) |
-          .counters[$item.account] = {upload: ($item.upload // 0), download: ($item.download // 0)})) as $delta |
-        {upload: (($old.upload // 0) + $delta.upload), download: (($old.download // 0) + $delta.download), counters: $delta.counters, updated_at: (now | strftime("%F %T"))};
+        if ($current | length) == 0 then $old
+        else
+          ($old.counters // {}) as $oldCounters |
+          (reduce $current[] as $item ({upload:0, download:0, counters:{}};
+            ($oldCounters[$item.account] // {upload:0, download:0}) as $counter |
+            (($item.upload // 0) - ($counter.upload // 0)) as $uploadDelta |
+            (($item.download // 0) - ($counter.download // 0)) as $downloadDelta |
+            .upload += (if ($oldCounters | has($item.account)) then (if $uploadDelta >= 0 then $uploadDelta else ($item.upload // 0) end) else ($item.upload // 0) end) |
+            .download += (if ($oldCounters | has($item.account)) then (if $downloadDelta >= 0 then $downloadDelta else ($item.download // 0) end) else ($item.download // 0) end) |
+            .counters[$item.account] = {upload: ($item.upload // 0), download: ($item.download // 0)})) as $delta |
+          {upload: (($old.upload // 0) + $delta.upload), download: (($old.download // 0) + $delta.download), counters: $delta.counters, updated_at: (now | strftime("%F %T"))}
+        end;
       def mapped($items; $accountIdMap): $items | map(. + {id: ($accountIdMap[.account] // .account)});
       def keepSources($map; $ids):
         ($map // {}) | with_entries(. as $entry | select(($ids | index($entry.key)) != null));

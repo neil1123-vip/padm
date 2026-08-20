@@ -79,7 +79,8 @@ listRegressionSubscriptionStateQuotaTrafficChildSelectors() {
 listRegressionSubscriptionStateQuotaMenuTransactionChildSelectors() {
     printf '%s\n' \
         subscription-state-quota-menu-preview-fail \
-        subscription-state-quota-menu-tx-rollback
+        subscription-state-quota-menu-tx-rollback \
+        subscription-state-quota-menu-tx-recheck
 }
 
 listRegressionSubscriptionStateQuotaPartialSyncChildSelectors() {
@@ -98,6 +99,8 @@ listRegressionSubscriptionStateSupportChildSelectors() {
         subscription-sync-single-restore-result-message \
         subscription-sync-rollback-result-message \
         subscription-sync-find-user-enabled-projection \
+        subscription-user-removal-transaction-lock \
+        subscription-state-maintenance-rollback \
         subscription-sync-reconcile-early-exit \
         subscription-group-sync-publish-refresh-inline \
         subscription-group-sync-single-config-backup \
@@ -154,6 +157,7 @@ registerRegressionFunctionLeaf subscription-state-quota-traffic-invalid-input ru
 registerRegressionFunctionLeaf subscription-state-quota-traffic-apply runRegressionStep subscription-state-quota-traffic-apply runSubscriptionGroupStateQuotaTrafficApplyRegression
 registerRegressionFunctionLeaf subscription-state-quota-menu-preview-fail runRegressionStep subscription-state-quota-menu-preview-fail runSubscriptionGroupStateQuotaMenuPreviewFailureRegression
 registerRegressionFunctionLeaf subscription-state-quota-menu-tx-rollback runRegressionStep subscription-state-quota-menu-tx-rollback runSubscriptionGroupStateQuotaTransactionRollbackRegression
+registerRegressionFunctionLeaf subscription-state-quota-menu-tx-recheck runRegressionStep subscription-state-quota-menu-tx-recheck runSubscriptionGroupStateQuotaTransactionRecheckRegression
 registerRegressionFunctionLeaf subscription-state-quota-partial-sync-apply-failure runRegressionStep subscription-state-quota-partial-sync-apply-failure runSubscriptionGroupStateQuotaPartialSyncApplyFailureRegression
 registerRegressionFunctionLeaf subscription-state-quota-partial-sync-plan runRegressionStep subscription-state-quota-partial-sync-plan runSubscriptionGroupStateQuotaPartialSyncPlanRegression
 registerRegressionFunctionLeaf subscription-state-quota-partial-sync-config runRegressionStep subscription-state-quota-partial-sync-config runSubscriptionGroupStateQuotaPartialSyncConfigRegression
@@ -173,6 +177,8 @@ registerRegressionFunctionLeaf subscription-sync-append-restore-failure-detail r
 registerRegressionFunctionLeaf subscription-sync-single-restore-result-message runSubscriptionSyncSingleRestoreResultMessageRegression
 registerRegressionFunctionLeaf subscription-sync-rollback-result-message runSubscriptionSyncRollbackResultMessageRegression
 registerRegressionFunctionLeaf subscription-sync-find-user-enabled-projection runSubscriptionSyncFindUserEnabledProjectionRegression
+registerRegressionFunctionLeaf subscription-user-removal-transaction-lock runRegressionStep subscription-user-removal-transaction-lock runSubscriptionUserRemovalTransactionLockRegression
+registerRegressionFunctionLeaf subscription-state-maintenance-rollback runRegressionStep subscription-state-maintenance-rollback runSubscriptionStateMaintenanceRollbackRegression
 registerRegressionFunctionLeaf subscription-sync-rollback-config-restore-failure runRegressionStep subscription-sync-rollback-config-restore-failure runSubscriptionSyncRollbackConfigRestoreFailureRegression
 registerRegressionFunctionLeaf subscription-sync-restore-dir-failure runRegressionStep subscription-sync-restore-dir-failure runSubscriptionSyncRollbackRestoreDirFailureRegression
 registerRegressionFunctionLeaf subscription-sync-reload-rollback runRegressionStep subscription-sync-reload-rollback runSubscriptionSyncRollbackReloadRollbackRegression

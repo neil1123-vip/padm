@@ -1924,29 +1924,38 @@ EOF
 
 
 # 读取 Xray 用户数据并初始化
+CORE_CLIENT_NAME_SUFFIXES=(
+    'VLESS_TCP/TLS_Vision'
+    'VLESS_WS'
+    'VLESS_Reality_XHTTP'
+    'Trojan_gRPC'
+    'VMess_WS'
+    'trojan_tcp'
+    'Trojan_TCP'
+    'vless_grpc'
+    'singbox_hysteria2'
+    'vless_reality_vision'
+    'vless_reality_grpc'
+    'VLESS_Reality_Vision'
+    'VLESS_Reality_gPRC'
+    'singbox_tuic'
+    'singbox_naive'
+    'VMess_HTTPUpgrade'
+    'Trojan_TCP_direct'
+    'shadowsocks'
+    'anytls'
+)
+
+clientNameSuffixRegex() {
+    local IFS='|'
+    printf '%s\n' "${CORE_CLIENT_NAME_SUFFIXES[*]}"
+}
+
 stripClientNameSuffix() {
     local label=$1
     local suffix
-    for suffix in \
-        '-VLESS_TCP/TLS_Vision' \
-        '-VLESS_WS' \
-        '-VLESS_Reality_XHTTP' \
-        '-Trojan_gRPC' \
-        '-VMess_WS' \
-        '-trojan_tcp' \
-        '-Trojan_TCP' \
-        '-vless_grpc' \
-        '-singbox_hysteria2' \
-        '-vless_reality_vision' \
-        '-vless_reality_grpc' \
-        '-VLESS_Reality_Vision' \
-        '-VLESS_Reality_gPRC' \
-        '-singbox_tuic' \
-        '-singbox_naive' \
-        '-VMess_HTTPUpgrade' \
-        '-Trojan_TCP_direct' \
-        '-shadowsocks' \
-        '-anytls'; do
+    for suffix in "${CORE_CLIENT_NAME_SUFFIXES[@]}"; do
+        suffix="-${suffix}"
         if [[ "${label}" == *"${suffix}" ]]; then
             printf '%s' "${label%"${suffix}"}"
             return 0

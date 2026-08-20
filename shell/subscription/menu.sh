@@ -536,8 +536,8 @@ createAndSyncUserSubscriptionWizard() {
     local subscriptionServiceStatus=0
     local sourceOutput
     autoRead user_subscription_id "请输入分享订阅ID[只用于管理，例 team-a]:" id
-    if [[ -z "${id}" ]] || ! echo "${id}" | grep -qE '^[a-zA-Z0-9_-]+$'; then
-        errorCard "输入有误，ID 只能包含英文、数字、下划线或短横线"
+    if ! subscriptionStateIdValid "${id}"; then
+        errorCard "输入有误，ID 最多 64 个字符，且只能包含英文、数字、下划线或短横线"
         return 1
     fi
 
@@ -676,18 +676,12 @@ removeUserSubscriptionRollback() {
     fi
 }
 
-removeUserSubscriptionMenu() {
+removeUserSubscriptionTransactionUnlocked() {
     local userSubscriptionId=$1
-    local confirm=
     local previousGroupsState
     local configBackupDir
     local accountName
     local manualCheckMessage
-    autoRead remove_user_subscription_confirm "删除订阅 ${userSubscriptionId} 会移除状态；同步后会删除对应托管账号。确认请输入 yes：" confirm
-    if [[ "${confirm}" != "yes" ]]; then
-        coreCancelledStatusCard "操作未执行"
-        return 1
-    fi
     previousGroupsState=$(subscriptionGroupsStateRead -c '.') || {
         subscriptionSyncSetManualCheckMessage manualCheckMessage "读取当前订阅状态失败" " $(subscriptionGroupsFile)"
         errorCard "${manualCheckMessage}"
@@ -723,6 +717,17 @@ removeUserSubscriptionMenu() {
         return 1
     fi
     padmRemoveCleanupPath "${configBackupDir}"
+}
+
+removeUserSubscriptionMenu() {
+    local userSubscriptionId=$1
+    local confirm=
+    autoRead remove_user_subscription_confirm "删除订阅 ${userSubscriptionId} 会移除状态；同步后会删除对应托管账号。确认请输入 yes：" confirm
+    if [[ "${confirm}" != "yes" ]]; then
+        coreCancelledStatusCard "操作未执行"
+        return 1
+    fi
+    subscriptionGroupsWithLock removeUserSubscriptionTransactionUnlocked "${userSubscriptionId}" || return 1
     successCard "用户订阅已删除"
     runSubscriptionSyncAfterMutation "用户订阅删除" || true
     return 0

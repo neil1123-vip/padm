@@ -113,7 +113,8 @@ subscriptionGroupsSchemaVersion() {
 }
 
 subscriptionStateIdValid() {
-    [[ "${1:-}" =~ ^[A-Za-z0-9_-]+$ ]]
+    local id=${1:-}
+    [[ "${id}" =~ ^[A-Za-z0-9_-]+$ ]] && ((${#id} <= 64))
 }
 
 writeDefaultSubscriptionGroupsState() {
@@ -169,7 +170,7 @@ validateSubscriptionGroupsState() {
         ((keys - ($required + $optional)) | length == 0) and
         (. as $object | all($required[]; . as $key | $object | has($key)));
       def nonempty_string: type == "string" and length > 0;
-      def state_id: type == "string" and test("^[A-Za-z0-9_-]+$");
+      def state_id: type == "string" and length <= 64 and test("^[A-Za-z0-9_-]+$");
       def count: type == "number" and . == floor and . >= 0;
       def allowed_sources:
         type == "array" and length > 0 and all(.[]; . == "*" or state_id) and
@@ -246,6 +247,8 @@ validateSubscriptionGroupsState() {
         (.sources | type == "array" and length > 0 and all(.[]; source) and ([.[] | select(.role == "main")] | length == 1)) and
         (.user_groups | type == "array" and all(.[]; principal(["uuid"]))) and
         ([.user_groups[]?.id] | length) == ([.user_groups[]?.id] | unique | length) and
+        ([.user_groups[]? | select(has("uuid")) | .uuid | ascii_downcase] | length) ==
+          ([.user_groups[]? | select(has("uuid")) | .uuid | ascii_downcase] | unique | length) and
         (all(.user_groups[]?.id; state_id)) and
         ([.sources[]?.id] as $sourceIds | all(.user_groups[]?.allowed_sources[]?; . as $sourceId | $sourceId == "*" or ($sourceIds | index($sourceId)) != null)) and
         (.sync |
@@ -298,7 +301,7 @@ migrateSubscriptionGroupsState() {
     [[ "${fromVersion}" == "2" ]] && backupVersion=3
     padmCreateTempFileForTarget stageFile "${stateFile}" v4-migration || return 1
     if ! jq -e '
-      def valid_id: type == "string" and test("^[A-Za-z0-9_-]+$");
+      def valid_id: type == "string" and length <= 64 and test("^[A-Za-z0-9_-]+$");
       def valid_count: type == "number" and . == floor and . >= 0;
       def fail($message): error($message);
       def normalized_counters($value):
@@ -624,10 +627,11 @@ subscriptionApplyUserGroupState() {
     local removeIds=${2:-'[]'}
     jq -e -n --argjson users "${desiredUsers}" --argjson removeIds "${removeIds}" '
       ($users | type == "array" and all(.[]?; type == "object" and
-        (.id | type == "string" and test("^[A-Za-z0-9_-]+$")) and
+        (.id | type == "string" and length <= 64 and test("^[A-Za-z0-9_-]+$")) and
         (.uuid | type == "string" and test("^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$")))) and
-      ($removeIds | type == "array" and all(.[]?; type == "string" and test("^[A-Za-z0-9_-]+$"))) and
-      ([$users[]?.id] | length) == ([$users[]?.id] | unique | length)
+      ($removeIds | type == "array" and all(.[]?; type == "string" and length <= 64 and test("^[A-Za-z0-9_-]+$"))) and
+      ([$users[]?.id] | length) == ([$users[]?.id] | unique | length) and
+      ([$users[]?.uuid | ascii_downcase] | length) == ([$users[]?.uuid | ascii_downcase] | unique | length)
     ' >/dev/null 2>&1 || return 1
     subscriptionActiveGroupWrite --argjson users "${desiredUsers}" --argjson removeIds "${removeIds}" '
       .user_groups = [.user_groups[]? | select(.id as $id | ($removeIds | index($id) | not))] |
