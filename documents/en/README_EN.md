@@ -468,7 +468,7 @@ Recommended multi-server flow:
 6. Legacy `main` / `controlled` credentials remain only in explicitly named maintenance actions for existing links; first-time joins accept invites and receipts only. Receipts and legacy controlled credentials contain long-lived control tokens and must travel through a trusted channel.
 7. WireGuard uses UDP and the control API uses HTTP only inside the tunnel, so this join flow needs no TLS certificate. Public client subscriptions continue to use HTTPS separately.
 
-State backup and restore only affect `/etc/padm/subscribe_groups/groups.json`. Before restoring a backup or rebuilding state, the script creates a current-state backup and requires typing `yes`; the current exact structure is `version: 3`. On first read, an older `version: 2` state is backed up as `groups-pre-v3-migration-*`, then atomically migrated by removing unused group-level `admin` metadata and user `token` fields. Other legacy structures and states with extra, missing, or invalid fields are rejected.
+State backup and restore only affect `/etc/padm/subscribe_groups/groups.json`. Restoring a backup or rebuilding state first requires typing `yes`; only after confirmation does the script create a current-state backup. The current exact structure is a single-root `version: 5` object, with no persisted `groups[]`, `active_group`, or traffic summary fields. On first read, an older `version: 2`, `3`, or `4` state is migrated only when it contains one active group, after the old file is backed up as the corresponding `groups-pre-v3-migration-*`, `groups-pre-v4-migration-*`, or `groups-pre-v5-migration-*`; multi-group, other legacy, and states with extra, missing, or invalid fields are rejected.
 
 ## Routing and Access Control
 

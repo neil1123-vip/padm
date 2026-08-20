@@ -109,7 +109,7 @@ subscriptionGroupsWithLock() {
 }
 
 subscriptionGroupsSchemaVersion() {
-    echo 4
+    echo 5
 }
 
 subscriptionStateIdValid() {
@@ -117,45 +117,47 @@ subscriptionStateIdValid() {
     [[ "${id}" =~ ^[A-Za-z0-9_-]+$ ]] && ((${#id} <= 64))
 }
 
+subscriptionTrafficTotalsJq() {
+    cat <<'EOF'
+def subscriptionTrafficTotal($sources):
+  ($sources // {}) as $map |
+  {upload: ([$map[]?.upload] | add // 0), download: ([$map[]?.download] | add // 0)};
+EOF
+}
+
 writeDefaultSubscriptionGroupsState() {
     cat <<EOF >"$1"
 {
   "version": $(subscriptionGroupsSchemaVersion),
-  "active_group": "default",
-  "groups": [
+  "id": "default",
+  "name": "默认订阅组",
+  "sources": [
     {
-      "id": "default",
-      "name": "默认订阅组",
-      "sources": [
-        {
-          "id": "main",
-          "name": "本机",
-          "role": "main",
-          "scheme": "local",
-          "transport": "local",
-          "host": "127.0.0.1",
-          "port": 0,
-          "enabled": true,
-          "sync_status": "local"
-        }
-      ],
-      "user_groups": [],
-      "sync": {
-        "enabled": true,
-        "interval_minutes": 10,
-        "last_run": "",
-        "last_status": "pending",
-        "failures": [],
-        "quota_auto_apply": false
-      },
-      "traffic": {
-        "global": {"upload": 0, "download": 0},
-        "admin": {"upload": 0, "download": 0, "sources": {}},
-        "user_groups": {},
-        "sources": {}
-      }
+      "id": "main",
+      "name": "本机",
+      "role": "main",
+      "scheme": "local",
+      "transport": "local",
+      "host": "127.0.0.1",
+      "port": 0,
+      "enabled": true,
+      "sync_status": "local"
     }
-  ]
+  ],
+  "user_groups": [],
+  "sync": {
+    "enabled": true,
+    "interval_minutes": 10,
+    "last_run": "",
+    "last_status": "pending",
+    "failures": [],
+    "quota_auto_apply": false
+  },
+  "traffic": {
+    "admin": {"sources": {}},
+    "user_groups": {},
+    "sources": {}
+  }
 }
 EOF
 }
@@ -207,70 +209,49 @@ validateSubscriptionGroupsState() {
           ((has("last_sync_plan") | not) or (.last_sync_plan | sync_plan)) and
           ((has("last_sync_error") | not) or (.last_sync_error | sync_error))
         end;
-      def traffic_total:
-        exact(["upload", "download"]; []) and (.upload | count) and (.download | count);
       def source_traffic:
         exact(["upload", "download"]; ["counters", "updated_at"]) and
         (.upload | count) and (.download | count) and
         ((has("counters") | not) or
-          (.counters | type == "object" and all(to_entries[]?; (.key | nonempty_string) and (.value | traffic_total)))) and
+          (.counters | type == "object" and all(to_entries[]?;
+            (.key | nonempty_string) and
+            (.value | exact(["upload", "download"]; []) and (.upload | count) and (.download | count))))) and
         ((has("updated_at") | not) or (.updated_at | type == "string"));
       def source_traffic_map:
         type == "object" and all(to_entries[]?; (.key | nonempty_string) and (.value | source_traffic));
       def scoped_traffic:
-        exact(["upload", "download", "sources"]; []) and
-        (.upload | count) and (.download | count) and (.sources | source_traffic_map);
-      def scoped_consistent:
-        .upload == ([.sources[]?.upload] | add // 0) and
-        .download == ([.sources[]?.download] | add // 0);
+        exact(["sources"]; []) and (.sources | source_traffic_map);
       def ids_subset($map; $ids):
         ($map | keys | all(.[]; . as $id | ($ids | index($id)) != null));
-      def user_sources_subset($ids):
-        all(.traffic.user_groups[]?;
-          (.sources | keys | all(.[]; . as $id | ($ids | index($id)) != null)));
-      def traffic_summaries_consistent:
-        (.traffic.global.upload == ([.traffic.sources[]?.upload] | add // 0)) and
-        (.traffic.global.download == ([.traffic.sources[]?.download] | add // 0)) and
-        (.traffic.admin.upload == ([.traffic.admin.sources[]?.upload] | add // 0)) and
-        (.traffic.admin.download == ([.traffic.admin.sources[]?.download] | add // 0)) and
-        all(.traffic.user_groups[]?; scoped_consistent);
-
-      exact(["version", "active_group", "groups"]; []) and .version == $schemaVersion and
-      (.groups | type == "array" and length > 0) and
-      ([.groups[]?.id] | length) == ([.groups[]?.id] | unique | length) and
-      (all(.groups[]?.id; state_id)) and
-      (.active_group | state_id) and (.active_group as $active | any(.groups[]?; .id == $active)) and
-      all(.groups[];
-        exact(["id", "name", "sources", "user_groups", "sync", "traffic"]; []) and
-        (.id | state_id) and (.name | nonempty_string) and
-        ([.sources[]?.id] | length) == ([.sources[]?.id] | unique | length) and
-        (.sources | type == "array" and length > 0 and all(.[]; source) and ([.[] | select(.role == "main")] | length == 1)) and
-        (.user_groups | type == "array" and all(.[]; principal(["uuid"]))) and
-        ([.user_groups[]?.id] | length) == ([.user_groups[]?.id] | unique | length) and
-        ([.user_groups[]? | select(has("uuid")) | .uuid | ascii_downcase] | length) ==
-          ([.user_groups[]? | select(has("uuid")) | .uuid | ascii_downcase] | unique | length) and
-        (all(.user_groups[]?.id; state_id)) and
-        ([.sources[]?.id] as $sourceIds | all(.user_groups[]?.allowed_sources[]?; . as $sourceId | $sourceId == "*" or ($sourceIds | index($sourceId)) != null)) and
-        (.sync |
-          exact(["enabled", "interval_minutes", "last_run", "last_status", "failures", "quota_auto_apply"]; []) and
-          (.enabled | type == "boolean") and
-          (.interval_minutes | type == "number" and . == floor and . >= 1 and . <= 59) and
-          (.last_run | type == "string") and
-          (.last_status == "pending" or .last_status == "success" or .last_status == "partial") and
-          (.failures | type == "array" and all(.[]; type == "string")) and
-          (.quota_auto_apply | type == "boolean")) and
-        (.traffic |
-          exact(["global", "admin", "user_groups", "sources"]; []) and
-          (.global | traffic_total) and (.admin | scoped_traffic) and
-          (.user_groups | type == "object" and all(to_entries[]?; (.key | nonempty_string) and (.value | scoped_traffic))) and
-          (.sources | source_traffic_map)) and
-        ([.sources[]?.id] as $sourceIds |
-          [.user_groups[]?.id] as $userIds |
-          ids_subset(.traffic.sources; $sourceIds) and
-          ids_subset(.traffic.admin.sources; $sourceIds) and
-          ids_subset(.traffic.user_groups; $userIds) and
-          user_sources_subset($sourceIds) and
-          traffic_summaries_consistent))
+      exact(["version", "id", "name", "sources", "user_groups", "sync", "traffic"]; []) and .version == $schemaVersion and
+      (.id | state_id) and (.name | nonempty_string) and
+      ([.sources[]?.id] | length) == ([.sources[]?.id] | unique | length) and
+      (.sources | type == "array" and length > 0 and all(.[]; source) and ([.[] | select(.role == "main")] | length == 1)) and
+      (.user_groups | type == "array" and all(.[]; principal(["uuid"]))) and
+      ([.user_groups[]?.id] | length) == ([.user_groups[]?.id] | unique | length) and
+      ([.user_groups[]? | select(has("uuid")) | .uuid | ascii_downcase] | length) ==
+        ([.user_groups[]? | select(has("uuid")) | .uuid | ascii_downcase] | unique | length) and
+      (all(.user_groups[]?.id; state_id)) and
+      ([.sources[]?.id] as $sourceIds | all(.user_groups[]?.allowed_sources[]?; . as $sourceId | $sourceId == "*" or ($sourceIds | index($sourceId)) != null)) and
+      (.sync |
+        exact(["enabled", "interval_minutes", "last_run", "last_status", "failures", "quota_auto_apply"]; []) and
+        (.enabled | type == "boolean") and
+        (.interval_minutes | type == "number" and . == floor and . >= 1 and . <= 59) and
+        (.last_run | type == "string") and
+        (.last_status == "pending" or .last_status == "success" or .last_status == "partial") and
+        (.failures | type == "array" and all(.[]; type == "string")) and
+        (.quota_auto_apply | type == "boolean")) and
+      (.traffic |
+        exact(["admin", "user_groups", "sources"]; []) and
+        (.admin | scoped_traffic) and
+        (.user_groups | type == "object" and all(to_entries[]?; (.key | state_id) and (.value | scoped_traffic))) and
+        (.sources | source_traffic_map)) and
+      ([.sources[]?.id] as $sourceIds |
+        [.user_groups[]?.id] as $userIds |
+        ids_subset(.traffic.sources; $sourceIds) and
+        ids_subset(.traffic.admin.sources; $sourceIds) and
+        ids_subset(.traffic.user_groups; $userIds) and
+        (all(.traffic.user_groups[]?; (.sources | keys | all(.[]; . as $id | ($sourceIds | index($id)) != null)))))
     ' "${stateFile}" >/dev/null 2>&1
 }
 
@@ -292,114 +273,115 @@ backupSubscriptionGroupsStateForMigration() {
 
 migrateSubscriptionGroupsState() {
     local stateFile=$1
+    local outputFile=${2:-}
     local fromVersion
     local backupVersion
     local stageFile
+    local ownsStage=true
     fromVersion=$(jq -r '.version // empty' "${stateFile}" 2>/dev/null) || return 1
-    [[ "${fromVersion}" == "2" || "${fromVersion}" == "3" ]] || return 1
-    backupVersion=4
+    [[ "${fromVersion}" == "2" || "${fromVersion}" == "3" || "${fromVersion}" == "4" ]] || return 1
+    backupVersion=5
     [[ "${fromVersion}" == "2" ]] && backupVersion=3
-    padmCreateTempFileForTarget stageFile "${stateFile}" v4-migration || return 1
+    [[ "${fromVersion}" == "3" ]] && backupVersion=4
+    if [[ -n "${outputFile}" ]]; then
+        stageFile=${outputFile}
+        ownsStage=false
+    else
+        padmCreateTempFileForTarget stageFile "${stateFile}" v5-migration || return 1
+    fi
     if ! jq -e '
       def valid_id: type == "string" and length <= 64 and test("^[A-Za-z0-9_-]+$");
       def valid_count: type == "number" and . == floor and . >= 0;
-      def fail($message): error($message);
-      def normalized_counters($value):
-        if ($value | has("counters") | not) then {}
-        elif ($value.counters | type) != "object" then fail("invalid traffic counters")
-        else
-          {counters: (reduce (($value.counters | to_entries[]?)) as $entry ({};
-            if (($entry.value | type) != "object" or
-                (($entry.value.upload // 0) | valid_count | not) or
-                (($entry.value.download // 0) | valid_count | not)) then
-              fail("invalid traffic counter")
-            else
-              .[$entry.key] = {
-                upload: ($entry.value.upload // 0),
-                download: ($entry.value.download // 0)
-              }
-            end))}
+      def count_or_zero($object; $key; $message):
+        if ($object | has($key) | not) then 0
+        elif ($object[$key] | valid_count) then $object[$key]
+        else error($message)
         end;
-      def normalized_traffic($value):
-        if (($value // {}) | type) != "object" then fail("invalid traffic value")
-        elif ((($value.upload // 0) | valid_count | not) or (($value.download // 0) | valid_count | not)) then
-          fail("invalid traffic total")
+      def object_field($object; $key; $message):
+        if ($object | has($key) | not) then {}
+        elif (($object[$key] | type) != "object") then error($message)
+        else $object[$key]
+        end;
+      def normalize_traffic($value):
+        if (($value | type) != "object") then error("invalid traffic value")
         else
-          {upload: ($value.upload // 0), download: ($value.download // 0)} +
-          normalized_counters(($value // {})) +
-          (if (($value // {}) | has("updated_at")) then
-             if (($value.updated_at | type) == "string") then {updated_at:$value.updated_at} else fail("invalid traffic timestamp") end
+          {upload:count_or_zero($value; "upload"; "invalid traffic total"),
+           download:count_or_zero($value; "download"; "invalid traffic total")} +
+          (if ($value | has("counters")) then
+             if ($value.counters | type) != "object" then error("invalid traffic counters")
+              else {counters:(reduce ($value.counters | to_entries[]?) as $entry ({};
+               if (($entry.value | type) != "object" ) then
+                 error("invalid traffic counter")
+               else .[$entry.key] = {
+                 upload:count_or_zero($entry.value; "upload"; "invalid traffic counter"),
+                 download:count_or_zero($entry.value; "download"; "invalid traffic counter")
+               }
+               end))}
+             end
+           else {} end) +
+          (if ($value | has("updated_at")) then
+             if ($value.updated_at | type) == "string" then {updated_at:$value.updated_at}
+             else error("invalid traffic timestamp") end
            else {} end)
         end;
-      def normalized_source_map($value; $source_ids):
-        if (($value // {}) | type) != "object" then fail("invalid traffic source map")
-        else
-          reduce (($value // {}) | to_entries[]? | . as $entry |
-            select(($source_ids | index($entry.key)) != null)) as $entry ({};
-              .[$entry.key] = normalized_traffic($entry.value))
+      def source_map($value; $source_ids):
+        if (($value | type) != "object") then error("invalid traffic source map")
+        else reduce ($value | to_entries[]? | . as $entry |
+          select(($source_ids | index($entry.key)) != null)) as $entry ({};
+            .[$entry.key] = normalize_traffic($entry.value))
         end;
-      def normalized_scoped($value; $source_ids):
-        if (($value // {}) | type) != "object" then fail("invalid scoped traffic")
-        else
-          {upload:0, download:0, sources:normalized_source_map(($value.sources // {}); $source_ids)}
-        end;
-      def total($items; $field): [$items[]? | .[$field]] | add // 0;
+      def scoped_map($value; $source_ids):
+        if (($value | type) != "object") then error("invalid scoped traffic")
+        else {sources: source_map(object_field($value; "sources"; "invalid traffic source map"); $source_ids)} end;
       def normalize_group:
-        if ((.id | valid_id) | not) then fail("unsafe subscription group id") else . end |
+        if ((.id | valid_id) | not) then error("unsafe subscription group id") else . end |
         if ((.sources | type) != "array") or (all(.sources[]?.id; valid_id) | not) then
-          fail("unsafe subscription source id")
+          error("unsafe subscription source id")
         else . end |
         if ((.user_groups | type) != "array") or (all(.user_groups[]?.id; valid_id) | not) then
-          fail("unsafe user subscription id")
+          error("unsafe user subscription id")
         else . end |
         (.sources | map(.id)) as $source_ids |
         (.user_groups | map(.id)) as $user_ids |
         .user_groups |= map(
-          if ((.allowed_sources | type) != "array") then fail("invalid allowed sources")
+          del(.token) |
+          if ((.allowed_sources | type) != "array") then error("invalid allowed sources")
           elif (.allowed_sources | index("*")) != null then .allowed_sources = ["*"]
-          else
-            .allowed_sources = (
-              [.allowed_sources[]? | . as $source_id | select(($source_ids | index($source_id)) != null)]
-              | unique
-              | if length == 0 then ["main"] else . end)
+        else .allowed_sources = ([.allowed_sources[]? | . as $source_id |
+            select(($source_ids | index($source_id)) != null)] | unique | if length == 0 then ["main"] else . end)
           end) |
-        (.traffic // {}) as $traffic |
+        (if has("traffic") then .traffic else {} end) as $traffic |
+        if (($traffic | type) != "object") then error("invalid traffic root") else . end |
         .traffic = {
-          global: {upload:0, download:0},
-          admin: normalized_scoped(($traffic.admin // {}); $source_ids),
-          user_groups: (if (($traffic.user_groups // {}) | type) != "object" then fail("invalid user traffic map")
-            else reduce (($traffic.user_groups // {}) | to_entries[]? | . as $entry |
+          admin: scoped_map(object_field($traffic; "admin"; "invalid admin traffic"); $source_ids),
+          user_groups: (object_field($traffic; "user_groups"; "invalid user traffic map") as $user_traffic |
+            reduce ($user_traffic | to_entries[]? | . as $entry |
               select(($user_ids | index($entry.key)) != null)) as $entry ({};
-                .[$entry.key] = normalized_scoped($entry.value; $source_ids)) end),
-          sources: normalized_source_map(($traffic.sources // {}); $source_ids)
+                .[$entry.key] = scoped_map($entry.value; $source_ids))
+            ),
+          sources: source_map(object_field($traffic; "sources"; "invalid traffic source map"); $source_ids)
         } |
-        .traffic.global = {
-          upload: total(.traffic.sources; "upload"),
-          download: total(.traffic.sources; "download")
-        } |
-        .traffic.admin = .traffic.admin + {
-          upload: total(.traffic.admin.sources; "upload"),
-          download: total(.traffic.admin.sources; "download")
-        } |
-        .traffic.user_groups |= with_entries(
-          .value = .value + {
-            upload: total(.value.sources; "upload"),
-            download: total(.value.sources; "download")
-          });
-
-      if .version == 2 then
-        .version = 3 |
-        .groups |= map(del(.admin) | .user_groups |= map(del(.token)))
-      elif .version == 3 then .
-      else fail("unsupported subscription groups schema")
-      end |
-      if ((.groups | type) != "array") then fail("invalid subscription groups") else . end |
-      .groups |= map(normalize_group) |
-      .version = 4
+        {version:5, id:.id, name:.name, sources:.sources, user_groups:.user_groups,
+         sync: {
+           enabled: .sync.enabled,
+           interval_minutes: .sync.interval_minutes,
+           last_run: .sync.last_run,
+           last_status: .sync.last_status,
+           failures: .sync.failures,
+           quota_auto_apply: .sync.quota_auto_apply
+         },
+         traffic:.traffic};
+      if ((.version == 2 or .version == 3 or .version == 4) and
+          (.groups | type == "array") and (.groups | length == 1) and
+          (.active_group == .groups[0].id)) then
+        .groups[0] | normalize_group
+      else error("single subscription group required")
+      end
     ' "${stateFile}" >"${stageFile}" || ! validateSubscriptionGroupsState "${stageFile}"; then
-        padmRemoveCleanupPath "${stageFile}"
+        [[ "${ownsStage}" == true ]] && padmRemoveCleanupPath "${stageFile}"
         return 1
     fi
+    [[ "${ownsStage}" == true ]] || return 0
     if ! backupSubscriptionGroupsStateForMigration "${stateFile}" "${backupVersion}" >/dev/null; then
         padmRemoveCleanupPath "${stageFile}"
         return 1
@@ -448,16 +430,39 @@ subscriptionGroupsStateRead() {
 subscriptionGroupsStateReplaceUnlocked() {
     local sourceFile=$1
     local targetFile=$2
+    local normalizedFile=
+    local sourceVersion
     local tmpFile
     [[ -f "${sourceFile}" ]] || return 1
-    validateSubscriptionGroupsState "${sourceFile}" || return 1
+    if ! validateSubscriptionGroupsState "${sourceFile}"; then
+        sourceVersion=$(jq -r '.version // empty' "${sourceFile}" 2>/dev/null) || return 1
+        [[ "${sourceVersion}" == "2" || "${sourceVersion}" == "3" || "${sourceVersion}" == "4" ]] || return 1
+        padmCreateTempFileForTarget normalizedFile "${targetFile}" restore-migration || return 1
+        if ! migrateSubscriptionGroupsState "${sourceFile}" "${normalizedFile}"; then
+            padmRemoveCleanupPath "${normalizedFile}"
+            return 1
+        fi
+        sourceFile=${normalizedFile}
+    fi
     padmCreateTempFileForTarget tmpFile "${targetFile}" state || return 1
-    cp "${sourceFile}" "${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
-    if ! validateSubscriptionGroupsState "${tmpFile}"; then
+    if ! cp "${sourceFile}" "${tmpFile}"; then
         padmRemoveCleanupPath "${tmpFile}"
+        [[ -n "${normalizedFile}" ]] && padmRemoveCleanupPath "${normalizedFile}"
         return 1
     fi
-    commitGeneratedJsonFile "${tmpFile}" "${targetFile}" 600 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+    if ! validateSubscriptionGroupsState "${tmpFile}"; then
+        padmRemoveCleanupPath "${tmpFile}"
+        [[ -n "${normalizedFile}" ]] && padmRemoveCleanupPath "${normalizedFile}"
+        return 1
+    fi
+    if ! commitGeneratedJsonFile "${tmpFile}" "${targetFile}" 600; then
+        padmRemoveCleanupPath "${tmpFile}"
+        [[ -n "${normalizedFile}" ]] && padmRemoveCleanupPath "${normalizedFile}"
+        return 1
+    fi
+    if [[ -n "${normalizedFile}" ]]; then
+        padmRemoveCleanupPath "${normalizedFile}"
+    fi
 }
 
 subscriptionGroupsStateReplace() {
@@ -535,7 +540,7 @@ subscriptionActiveGroupRead() {
         argCount=$(($# - 1))
         jqArgs=("${@:1:${argCount}}")
     fi
-    subscriptionGroupsStateRead "${jqArgs[@]}" ".active_group as \$active | .groups | map(select(.id == \$active)) | if length == 1 then .[0] | ${query} else error(\"active subscription group not found\") end"
+    subscriptionGroupsStateRead "${jqArgs[@]}" "${query}"
 }
 
 subscriptionActiveGroupWrite() {
@@ -547,14 +552,7 @@ subscriptionActiveGroupWrite() {
         argCount=$(($# - 1))
         jqArgs=("${@:1:${argCount}}")
     fi
-    subscriptionGroupsStateWrite "${jqArgs[@]}" "
-      .active_group as \$active |
-      if ([.groups[]? | select(.id == \$active)] | length) == 1 then
-        .groups |= map(if .id == \$active then ${update} else . end)
-      else
-        error(\"active subscription group not found\")
-      end
-    "
+    subscriptionGroupsStateWrite "${jqArgs[@]}" "${update}"
 }
 
 subscriptionActiveGroupSetById() {
@@ -737,10 +735,6 @@ removeSubscriptionSourceState() {
     local id=$1
     subscriptionStateIdValid "${id}" || return 1
     subscriptionActiveGroupWrite --arg id "${id}" '
-        def totals($sources): {
-          upload: ([$sources[]?.upload] | add // 0),
-          download: ([$sources[]?.download] | add // 0)
-        };
         if any(.sources[]?; .id == $id and .role == "main") then
           error("main subscription source cannot be removed")
         elif (any(.sources[]?; .id == $id) | not) then
@@ -751,11 +745,7 @@ removeSubscriptionSourceState() {
           .sources = ([.sources[]? | select(.id != $id)]) |
           .traffic.sources |= (del(.[$id]) // {}) |
           .traffic.admin.sources |= (del(.[$id]) // {}) |
-          .traffic.user_groups |= with_entries(
-            .value.sources |= (del(.[$id]) // {}) |
-            .value += totals(.value.sources)) |
-          .traffic.global = totals(.traffic.sources) |
-          .traffic.admin += totals(.traffic.admin.sources)
+          .traffic.user_groups |= with_entries(.value.sources |= (del(.[$id]) // {}))
         end
     '
 }

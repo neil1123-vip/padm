@@ -229,7 +229,7 @@ ${receiptCredential}
 6"
         assertMenuAction 'runSubscriptionGroupSync:'
         subscriptionWireGuardReadState | jq -e --arg publicKey "${controlledPublicKey}" '.peers[] | select(.id == "edge-a" and .address == "10.77.0.2/24" and .public_key == $publicKey and .endpoint == "")' >/dev/null
-        subscriptionGroupsStateRead -e --arg token "${controlledToken}" '.groups[0].sources[] | select(.id == "edge-a" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.2" and .port == 39778 and .control_token == $token)' >/dev/null
+        subscriptionGroupsStateRead -e --arg token "${controlledToken}" '.sources[] | select(.id == "edge-a" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.2" and .port == 39778 and .control_token == $token)' >/dev/null
     }
 
     if wireGuardMenuPartSelected bootstrap; then
@@ -291,7 +291,7 @@ SH
 edge-a"
         assertMenuAction 'runSubscriptionGroupSync:'
         subscriptionWireGuardReadState | jq -e --arg publicKey "${updatedPublicKey}" '.peers[] | select(.id == "edge-a" and .address == "10.77.0.3/24" and .public_key == $publicKey and .endpoint == "")' >/dev/null
-        subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .host == "10.77.0.3" and .port == 48779 and .control_token == "token-b")' >/dev/null
+        subscriptionGroupsStateRead -e '.sources[] | select(.id == "edge-a" and .host == "10.77.0.3" and .port == 48779 and .control_token == "token-b")' >/dev/null
     fi
 
     if wireGuardMenuPartSelected peer-rollback-apply || wireGuardMenuPartSelected peer-rollback-apply-service; then
@@ -308,7 +308,7 @@ edge-a"
             return 1
         fi
         wireGuardApplyShouldFail=
-        if subscriptionGroupsStateRead -e 'any(.groups[0].sources[]?; .id == "edge-fail")' >/dev/null 2>&1; then
+        if subscriptionGroupsStateRead -e 'any(.sources[]?; .id == "edge-fail")' >/dev/null 2>&1; then
             return 1
         fi
         if subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "edge-fail")' >/dev/null 2>&1; then
@@ -346,7 +346,7 @@ edge-a"
             return 1
         fi
         addSourceShouldFail=
-        if subscriptionGroupsStateRead -e 'any(.groups[0].sources[]?; .id == "edge-addfail")' >/dev/null 2>&1; then
+        if subscriptionGroupsStateRead -e 'any(.sources[]?; .id == "edge-addfail")' >/dev/null 2>&1; then
             return 1
         fi
     fi
@@ -362,7 +362,7 @@ edge-a"
             return 1
         fi
         setCredentialShouldFail=
-        if subscriptionGroupsStateRead -e 'any(.groups[0].sources[]?; .id == "edge-setfail")' >/dev/null 2>&1; then
+        if subscriptionGroupsStateRead -e 'any(.sources[]?; .id == "edge-setfail")' >/dev/null 2>&1; then
             return 1
         fi
         if subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "edge-setfail")' >/dev/null 2>&1; then
@@ -386,7 +386,7 @@ edge-a"
         setCredentialShouldFail=
         restoreGroupsWriteShouldFail=
         assertMenuAction 'errorCard:订阅来源凭据写入失败，且旧状态恢复失败'
-        subscriptionGroupsStateRead -e 'any(.groups[0].sources[]?; .id == "edge-groups-restore-fail")' >/dev/null
+        subscriptionGroupsStateRead -e 'any(.sources[]?; .id == "edge-groups-restore-fail")' >/dev/null
         if subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "edge-groups-restore-fail")' >/dev/null 2>&1; then
             return 1
         fi
@@ -401,12 +401,12 @@ edge-a"
             resetMenuActions
             changeSubscriptionSourceEnabledMenu <<<"edge-a
 y"
-            subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .enabled == false)' >/dev/null
+            subscriptionGroupsStateRead -e '.sources[] | select(.id == "edge-a" and .enabled == false)' >/dev/null
             assertMenuAction 'runSubscriptionGroupSync:'
             resetMenuActions
             changeSubscriptionSourceEnabledMenu <<<"edge-a
 y"
-            subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .enabled == true)' >/dev/null
+            subscriptionGroupsStateRead -e '.sources[] | select(.id == "edge-a" and .enabled == true)' >/dev/null
             assertMenuAction 'runSubscriptionGroupSync:'
         fi
 
@@ -421,7 +421,7 @@ y"
                 clearSubscriptionSourceSyncError "${sourceId}"
             }
             clearSubscriptionSourceSyncErrorMenu <<<"edge-a"
-            subscriptionGroupsStateRead -e '(.groups[0].sources[] | select(.id == "edge-a") | has("last_sync_error")) | not' >/dev/null
+            subscriptionGroupsStateRead -e '(.sources[] | select(.id == "edge-a") | has("last_sync_error")) | not' >/dev/null
         fi
 
         if wireGuardMenuPartSelected peer-source-control || wireGuardMenuPartSelected peer-source-control-status; then
@@ -619,10 +619,22 @@ runSubscriptionWireGuardInviteReceiptRegression() (
         testWireGuardState=${candidate}
         printf '%s\n' "${testWireGuardState}" >"${stateMarker}"
     }
-    subscriptionGroupsStateRead() { jq "$@" <<<"${testGroupsState}"; }
+    normalizeTestGroupsState() {
+        jq -c '
+          if (.groups | type) == "array" and (.groups | length) == 1 then
+            .groups[0] as $group |
+            {version:5, id:$group.id, name:$group.name, sources:$group.sources,
+             user_groups:$group.user_groups, sync:$group.sync,
+             traffic:{admin:{sources:(($group.traffic.admin.sources // {}))},
+                      user_groups:(($group.traffic.user_groups // {}) | with_entries(.value={sources:(.value.sources // {})})),
+                      sources:($group.traffic.sources // {})}}
+          else . end
+        ' <<<"${testGroupsState}"
+    }
+    subscriptionGroupsStateRead() { normalizeTestGroupsState | jq "$@"; }
     subscriptionGroupsStateWrite() {
         local candidate
-        candidate=$(jq -c "$@" <<<"${testGroupsState}") || return 1
+        candidate=$(normalizeTestGroupsState | jq -c "$@") || return 1
         testGroupsState=${candidate}
     }
     subscriptionGroupsWithLock() {
@@ -687,7 +699,7 @@ runSubscriptionWireGuardInviteReceiptRegression() (
     subscriptionWireGuardCompleteInvite "${receiptJson}" completedAlias
     [[ "${completedAlias}" == "hk-2" ]]
     subscriptionWireGuardReadState | jq -e --arg publicKey "${controlledPublicKeyB}" 'any(.peers[]?; .id == "hk-2" and .address == "10.77.0.3/24" and .public_key == $publicKey and .endpoint == "") and (.pending_invites | length) == 1 and .pending_invites[0].alias == "hk-3"' >/dev/null
-    subscriptionGroupsStateRead -e --arg token "${receiptToken}" '.groups[0].sources[] | select(.id == "hk-2" and .host == "10.77.0.3" and .control_token == $token)' >/dev/null
+    subscriptionGroupsStateRead -e --arg token "${receiptToken}" '.sources[] | select(.id == "hk-2" and .host == "10.77.0.3" and .control_token == $token)' >/dev/null
     stateBefore=$(subscriptionWireGuardReadState)
     groupsBefore=$(subscriptionGroupsStateRead -c '.')
     if subscriptionWireGuardCompleteInvite "${receiptJson}" completedAlias >/dev/null 2>&1; then
@@ -709,7 +721,7 @@ runSubscriptionWireGuardInviteReceiptRegression() (
     subscriptionWireGuardWriteState --arg id hk-3 --arg address "$(jq -r '.address' <<<"${inviteJsonC}")" --arg publicKey "${controlledPublicKeyC}" '.peers += [{id:$id,name:$id,address:$address,public_key:$publicKey,endpoint:"",enabled:true}]'
     subscriptionWireGuardCompleteInvite "${receiptJson}" completedAlias
     [[ "${completedAlias}" == "hk-3" ]]
-    subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "hk-3" and .control_token != "")' >/dev/null
+    subscriptionGroupsStateRead -e '.sources[] | select(.id == "hk-3" and .control_token != "")' >/dev/null
 
     stateBefore=$(subscriptionWireGuardReadState)
     staleInviteId=$(printf '%064x' 100)
@@ -1459,7 +1471,7 @@ invite-credential"
         resetMenuActions
         manageSubscriptionMainHome <<<"4
 14" || true
-        subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | ((.user_groups // []) | length) == 0' >/dev/null
+        subscriptionGroupsStateRead -e '((.user_groups // []) | length) == 0' >/dev/null
     fi
 
     if menuSmokePartSelected subscription-main-publish-user || menuSmokePartSelected subscription-main-publish-user-create; then
@@ -1473,7 +1485,7 @@ demo-user
 main
 0
 14"
-        subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | any(.user_groups[]?; .id == "demo-user" and .name == "demo-user")' >/dev/null
+        subscriptionGroupsStateRead -e 'any(.user_groups[]?; .id == "demo-user" and .name == "demo-user")' >/dev/null
     fi
 
     if menuSmokePartSelected subscription-main-publish-user || menuSmokePartSelected subscription-main-publish-user-inspect; then
@@ -1506,15 +1518,15 @@ demo-user
         ensureSubscriptionGroupsState
         setMenuSmokeRole main
         resetMenuActions
-        subscriptionGroupsStateWrite --arg groupId "default" '.groups |= map(if .id == $groupId then .sync.enabled = false else . end)'
+        subscriptionGroupsStateWrite '.sync.enabled = false'
         manageSubscriptionMainHome <<<"3
 team-a
 *
 0
 n
 14"
-        subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | any(.user_groups[]?; .id == "team-a" and .name == "team-a")' >/dev/null
-        subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | .sync.enabled == false' >/dev/null
+        subscriptionGroupsStateRead -e 'any(.user_groups[]?; .id == "team-a" and .name == "team-a")' >/dev/null
+        subscriptionGroupsStateRead -e '.sync.enabled == false' >/dev/null
         if assertMenuAction 'runSubscriptionGroupSync:'; then
             printf 'menu-smoke failed: disabled auto sync still ran a full sync\n' >&2
             return 1
@@ -1530,7 +1542,7 @@ n
         resetMenuActions
         rm -rf "${PADM_SUBSCRIPTION_GROUPS_DIR}"
         ensureSubscriptionGroupsState
-        subscriptionGroupsStateWrite --arg groupId "default" '.groups |= map(if .id == $groupId then .sync.enabled = false else . end)'
+        subscriptionGroupsStateWrite '.sync.enabled = false'
         manageSubscriptionMainHome <<<"3
 team-b
 main
@@ -1539,7 +1551,7 @@ main
 14"
         assertMenuAction refreshSubscriptionGroupSyncCron
         assertMenuAction 'runSubscriptionGroupSync:'
-        subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | .sync.enabled == true' >/dev/null
+        subscriptionGroupsStateRead -e '.sync.enabled == true' >/dev/null
     fi
 
     if menuSmokePartSelected subscription-main-maintenance; then
@@ -1607,7 +1619,7 @@ main
         manageTrafficAndQuota <<<"8
 9"
         assertMenuAction 'successCard:限额自动执行状态已切换'
-        subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | .sync.quota_auto_apply == true' >/dev/null
+        subscriptionGroupsStateRead -e '.sync.quota_auto_apply == true' >/dev/null
         resetMenuActions
         manageSubscriptionMainControlDetails <<<"1
 7"

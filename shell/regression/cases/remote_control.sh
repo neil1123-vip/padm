@@ -960,7 +960,19 @@ JSON
     }
 
     setVirtualSubscriptionGroupsState() {
-        virtualGroupsState=$1
+        virtualGroupsState=$(jq -c '
+          if (.groups | type) == "array" and (.groups | length) == 1 then
+            .groups[0] as $group |
+            $group |
+            .user_groups |= map(del(.token)) |
+            .traffic = {
+              admin: {sources: ((.traffic.admin.sources // {}) )},
+              user_groups: ((.traffic.user_groups // {}) | with_entries(.value = {sources:(.value.sources // {})})),
+              sources: (.traffic.sources // {})
+            } |
+            {version:5, id, name, sources, user_groups, sync, traffic}
+          else . end
+        ' <<<"$1")
     }
 
     virtualSubscriptionGroupsStateRead() {
@@ -1161,9 +1173,9 @@ JSON
                     subscriptionSyncApplyAccountPlanTransaction() { return 0; }
                     originalSubscriptionControlApplyAccountPlan '{"create":[],"remove":["sub_team_a"]}' '[]'
                     jq -e '
-                      (.groups[0].user_groups | length) == 0 and
-                      (.groups[0].traffic.user_groups | has("team-a") | not) and
-                      (.groups[0].traffic.user_groups | has("local-only") | not)
+                      (.user_groups | length) == 0 and
+                      (.traffic.user_groups | has("team-a") | not) and
+                      (.traffic.user_groups | has("local-only") | not)
                     ' <<<"${virtualGroupsState}" >/dev/null
                 )
 
@@ -1174,13 +1186,12 @@ JSON
                         '{"create":["sub_team_a"],"remove":["sub_team_a"]}' \
                         '[{"id":"team-a","uuid":"33333333-3333-3333-3333-333333333333"}]'
                     jq -e '
-                      .groups[0].user_groups == [{
+                      .user_groups == [{
                         "id":"team-a",
                         "name":"Preserved Name",
                         "enabled":true,
                         "allowed_sources":["main"],
                         "traffic_limit_gb":5,
-                        "token":"",
                         "uuid":"33333333-3333-3333-3333-333333333333"
                       }]
                     ' <<<"${virtualGroupsState}" >/dev/null
@@ -1193,13 +1204,12 @@ JSON
                         '{"create":[],"remove":[]}' \
                         '[{"id":"team-a","uuid":"33333333-3333-3333-3333-333333333333"}]'
                     jq -e '
-                      .groups[0].user_groups == [{
+                      .user_groups == [{
                         "id":"team-a",
                         "name":"Preserved Name",
                         "enabled":true,
                         "allowed_sources":["main"],
                         "traffic_limit_gb":5,
-                        "token":"",
                         "uuid":"33333333-3333-3333-3333-333333333333"
                       }]
                     ' <<<"${virtualGroupsState}" >/dev/null
@@ -1300,7 +1310,7 @@ JSON
                 [[ "${restoreFailureStatus}" -ne 0 ]]
                 responseHasErrorType "${restoreFailureResponse}" apply_plan_failed
                 [[ "${restoreFailureResponse}" == *'订阅状态恢复失败'* ]]
-                jq -e '.groups[0].user_groups[0].enabled == true and .groups[0].user_groups[0].uuid == "11111111-1111-1111-1111-111111111111"' <<<"${virtualGroupsState}" >/dev/null
+                jq -e '.user_groups[0].enabled == true and .user_groups[0].uuid == "11111111-1111-1111-1111-111111111111"' <<<"${virtualGroupsState}" >/dev/null
             )
 
             (
@@ -1533,7 +1543,7 @@ JSON
             printf '{"create":["sub_publish"],"remove":[]}'
         }
         subscriptionControlApplyAccountPlan() {
-            subscriptionGroupsStateWrite '.groups |= map(.user_groups += [{"id":"publish","name":"Publish","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"77777777-7777-7777-7777-777777777777"}])'
+            subscriptionGroupsStateWrite '.user_groups += [{"id":"publish","name":"Publish","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"77777777-7777-7777-7777-777777777777"}]'
             cat >"${configPath}02_VLESS_TCP_inbounds.json" <<'JSON'
 {"inbounds":[{"settings":{"clients":[{"email":"sub_publish-vless","id":"77777777-7777-7777-7777-777777777777"}]}}]}
 JSON
@@ -1546,7 +1556,7 @@ JSON
                 printf 'vless://%s\n' "${account}" >"${PADM_SUBSCRIBE_LOCAL_DIR}/default/${account}"
                 printf 'name: %s\n' "${account}" >"${PADM_SUBSCRIBE_LOCAL_DIR}/clashMeta/${account}"
                 printf '[{"tag":"%s"}]\n' "${account}" >"${PADM_SUBSCRIBE_LOCAL_DIR}/sing-box/${account}"
-            done < <(subscriptionGroupsStateRead -r '.groups[].user_groups[]? | select(.enabled == true) | .id')
+            done < <(subscriptionGroupsStateRead -r '.user_groups[]? | select(.enabled == true) | .id')
         }
         refreshRollbackStateBefore=$(jq -c . "$(subscriptionGroupsFile)")
         refreshRollbackFirstBefore=$(<"${configPath}02_VLESS_TCP_inbounds.json")
@@ -1568,7 +1578,7 @@ JSON
         set -e
         [[ "${refreshRollbackStatus}" -eq 0 ]]
         jq -e '.ok == true and .changed == true and (.subscriptions | has("sub_publish"))' "${responseFile}.refresh-rollback" >/dev/null
-        jq -e 'any(.groups[0].user_groups[]; .id == "publish")' "$(subscriptionGroupsFile)" >/dev/null
+        jq -e 'any(.user_groups[]; .id == "publish")' "$(subscriptionGroupsFile)" >/dev/null
         [[ "$(<"${configPath}02_VLESS_TCP_inbounds.json")" != "${refreshRollbackFirstBefore}" ]]
         diff -u "${refreshRollbackLocalExpected}" <(find "${refreshRollbackLocalDir}" -type f -printf '%P\t' -exec cat {} \; | sort)
         diff -u "${refreshRollbackPublicExpected}" <(find "${refreshRollbackPublicDir}" -type f -printf '%P\t' -exec cat {} \; | sort)
@@ -1614,7 +1624,7 @@ JSON
             printf '{"create":["sub_restore_fail"],"remove":[]}'
         }
         subscriptionControlApplyAccountPlan() {
-            subscriptionGroupsStateWrite '.groups |= map(.user_groups += [{"id":"restore-fail","name":"Restore Fail","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"88888888-8888-8888-8888-888888888888"}])'
+            subscriptionGroupsStateWrite '.user_groups += [{"id":"restore-fail","name":"Restore Fail","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"88888888-8888-8888-8888-888888888888"}]'
             cat >"${configPath}02_VLESS_TCP_inbounds.json" <<'JSON'
 {"inbounds":[{"settings":{"clients":[{"email":"sub_restore_fail-vless","id":"88888888-8888-8888-8888-888888888888"}]}}]}
 JSON

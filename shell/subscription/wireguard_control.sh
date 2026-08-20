@@ -1104,7 +1104,7 @@ subscriptionWireGuardCredentialDecode() {
 
 subscriptionWireGuardActiveSourcesFromGroupsState() {
     local groupsState=$1
-    jq -c '.active_group as $active | [.groups[]? | select(.id == $active) | .sources[]?]' <<<"${groupsState}"
+    jq -c '[.sources[]?]' <<<"${groupsState}"
 }
 
 subscriptionWireGuardCleanPendingInvitesJson() {

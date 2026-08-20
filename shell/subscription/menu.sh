@@ -479,10 +479,10 @@ showUserSubscriptions() {
     local jqProgram
     local quotaStatusJq
     quotaStatusJq=$(subscriptionUserQuotaStatusJq) || return 1
-    jqProgram=$(printf '%s\n%s\n' "${quotaStatusJq}" '
+    jqProgram=$(printf '%s\n%s\n%s\n' "$(subscriptionTrafficTotalsJq)" "${quotaStatusJq}" '
       . as $group |
       .user_groups[]? |
-      "\(.id)\u001f\(.name)\u001f\(.enabled)\u001f\(.allowed_sources | join(","))\u001f\(.traffic_limit_gb)\u001f\(subscriptionUserQuotaStatus(.; $group.traffic.user_groups[.id] // {upload:0, download:0}; true))"')
+      "\(.id)\u001f\(.name)\u001f\(.enabled)\u001f\(.allowed_sources | join(","))\u001f\(.traffic_limit_gb)\u001f\(subscriptionUserQuotaStatus(.; subscriptionTrafficTotal(($group.traffic.user_groups[.id] // {}).sources); true))"')
     output=$(subscriptionActiveGroupRead -r "${jqProgram}") || {
         errorCard "用户订阅读取失败"
         return 1

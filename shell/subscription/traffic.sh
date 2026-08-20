@@ -289,14 +289,9 @@ writeSubscriptionTrafficSnapshot() {
         (sourceTotal(($group.traffic.user_groups[$user.id].sources.main // {}); ($userItems | map(select(.id == $user.id))))) as $mainUserTraffic |
         ($remote | map(. as $result | {key:$result.source_id, value:sourceTotal($group.traffic.user_groups[$user.id].sources[$result.source_id]; ($result.items | map(select(.id == $user.id))))}) | from_entries) as $remoteUserSourceTraffic |
         (keepSources($group.traffic.user_groups[$user.id].sources; $sourceIds) + {main:$mainUserTraffic} + $remoteUserSourceTraffic) as $userSourceTraffic |
-        {key:$user.id, value:(($group.traffic.user_groups[$user.id] // {}) + {upload:([$userSourceTraffic[] | .upload] | add // 0), download:([$userSourceTraffic[] | .download] | add // 0), sources:$userSourceTraffic})}
+        {key:$user.id, value:{sources:$userSourceTraffic}}
       ) | from_entries) as $userTraffic |
-      ([$sourceTraffic[] | .upload] | add // 0) as $globalUpload |
-      ([$sourceTraffic[] | .download] | add // 0) as $globalDownload |
-      ([$adminSourceTraffic[] | .upload] | add // 0) as $adminUpload |
-      ([$adminSourceTraffic[] | .download] | add // 0) as $adminDownload |
-      .traffic.global = {upload:$globalUpload, download:$globalDownload} |
-      .traffic.admin = (($group.traffic.admin // {}) + {upload:$adminUpload, download:$adminDownload, sources:$adminSourceTraffic}) |
+      .traffic.admin = {sources:$adminSourceTraffic} |
       .traffic.user_groups = $userTraffic |
       .traffic.sources = $sourceTraffic
     '
@@ -346,8 +341,9 @@ showAdminSubscriptionTraffic() {
     traffic=$(subscriptionActiveGroupRead -r '.traffic.admin') || return 1
     summary=$(jq -r '
       def mb($v): (((($v // 0) / 1024 / 1024) | floor) | tostring) + " MB";
-      "总上传：" + mb(.upload) + "\n" +
-      "总下载：" + mb(.download) + "\n" +
+      (.sources // {}) as $sources |
+      "总上传：" + mb([$sources[]?.upload] | add // 0) + "\n" +
+      "总下载：" + mb([$sources[]?.download] | add // 0) + "\n" +
       "来源数：" + (((.sources // {}) | length) | tostring) + "\n" +
       "最近更新：" + (((.sources // {}) | to_entries | map(.value.updated_at // empty) | max) // (.updated_at // "未知") | tostring)
     ' <<<"${traffic}") || return 1
@@ -362,15 +358,15 @@ showUserSubscriptionTraffic() {
     local quotaStatusJq
     ensureSubscriptionGroupsState || return 1
     quotaStatusJq=$(subscriptionUserQuotaStatusJq) || return 1
-    jqProgram=$(printf '%s\n%s\n' "${quotaStatusJq}" '
+    jqProgram=$(printf '%s\n%s\n%s\n' "$(subscriptionTrafficTotalsJq)" "${quotaStatusJq}" '
       (.user_groups[]? | select(.id == $id)) as $userGroup |
-      (.traffic.user_groups[$id] // {upload:0, download:0}) as $traffic |
+      (subscriptionTrafficTotal((.traffic.user_groups[$id] // {}).sources)) as $traffic |
       subscriptionUserQuotaStatus($userGroup; $traffic; true)')
     quotaStatus=$(subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" "${jqProgram}") || return 1
     userResultCard "用户订阅流量"
     menuLine "用户订阅：${userSubscriptionId}"
     menuLine "限额状态：${quotaStatus}"
-    traffic=$(subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" '.traffic.user_groups[$id] // {upload:0, download:0, sources:{}}')
+    traffic=$(subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" '.traffic.user_groups[$id] // {sources:{}}')
     printf '%s\n' "${traffic}" | jq .
     menuClose
 }
@@ -381,14 +377,15 @@ showSubscriptionTrafficOverview() {
     local quotaStatusJq
     quotaStatusJq=$(subscriptionUserQuotaStatusJq) || return 1
     ensureSubscriptionGroupsState || return 1
-    jqProgram=$(printf '%s\n%s\n' "${quotaStatusJq}" '
+    jqProgram=$(printf '%s\n%s\n%s\n' "$(subscriptionTrafficTotalsJq)" "${quotaStatusJq}" '
       def mb($v): (((($v // 0) / 1024 / 1024) | floor) | tostring) + " MB";
       . as $group |
+      (subscriptionTrafficTotal($group.traffic.sources)) as $globalTraffic |
       ($group.user_groups // []) as $users |
       [($users[]? | select(.enabled == true))] as $enabledUsers |
-      [($users[]? | select(subscriptionUserQuotaStatus(.; $group.traffic.user_groups[.id] // {}; false) == "已超限"))] as $overLimit |
-      [($users[]? | select(subscriptionUserQuotaStatus(.; $group.traffic.user_groups[.id] // {}; false) == "接近上限"))] as $nearLimit |
-      "全局累计：上传 " + mb($group.traffic.global.upload) + " / 下载 " + mb($group.traffic.global.download) + "\n" +
+      [($users[]? | select(subscriptionUserQuotaStatus(.; subscriptionTrafficTotal(($group.traffic.user_groups[.id] // {}).sources); false) == "已超限"))] as $overLimit |
+      [($users[]? | select(subscriptionUserQuotaStatus(.; subscriptionTrafficTotal(($group.traffic.user_groups[.id] // {}).sources); false) == "接近上限"))] as $nearLimit |
+      "全局累计：上传 " + mb($globalTraffic.upload) + " / 下载 " + mb($globalTraffic.download) + "\n" +
       "分享订阅：共 " + (($users | length) | tostring) + " 个，启用 " + (($enabledUsers | length) | tostring) + " 个\n" +
       "限额状态：超限 " + (($overLimit | length) | tostring) + " 个，接近上限 " + (($nearLimit | length) | tostring) + " 个\n" +
       "服务器源：共 " + (($group.sources | length) | tostring) + " 个，启用远端 " + (([$group.sources[]? | select(.role != "main" and .enabled == true)] | length) | tostring) + " 个\n" +

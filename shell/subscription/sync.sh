@@ -940,12 +940,13 @@ subscriptionSyncMarkResult() {
 }
 
 subscriptionQuotaDryRunPlan() {
+    local jqProgram
     ensureSubscriptionGroupsState || return 1
-    subscriptionActiveGroupRead -r '
+    jqProgram=$(printf '%s\n%s\n' "$(subscriptionTrafficTotalsJq)" '
       . as $group |
       [($group.user_groups[]? |
         (.traffic_limit_gb // 0 | tonumber? // 0) as $limitGb |
-        ($group.traffic.user_groups[.id] // {upload:0, download:0}) as $traffic |
+        (subscriptionTrafficTotal(($group.traffic.user_groups[.id] // {}).sources)) as $traffic |
         (($traffic.upload // 0) + ($traffic.download // 0)) as $usedBytes |
         (($limitGb * 1024 * 1024 * 1024) | floor) as $limitBytes |
         select((if has("enabled") then .enabled else true end) == true and $limitGb > 0 and $usedBytes >= $limitBytes) |
@@ -956,7 +957,8 @@ subscriptionQuotaDryRunPlan() {
           limit_gb: $limitGb,
           percent: (($usedBytes * 100 / $limitBytes) | floor),
           action: "disable-and-remove-local-account"
-        })]'
+         })]')
+    subscriptionActiveGroupRead -r "${jqProgram}"
 }
 
 subscriptionQuotaValidatePlan() {
@@ -1019,6 +1021,7 @@ applySubscriptionQuotaPlanTransactionUnlocked() {
     local quotaError=
 
     SUBSCRIPTION_SYNC_TRANSACTION_ERROR=
+    ensureSubscriptionGroupsState || return 1
     subscriptionQuotaValidatePlan "${quotaPlan}" || return 1
     requestedIds=$(jq -c '[.[].id]' <<<"${quotaPlan}") || return 1
     currentPlan=$(subscriptionQuotaDryRunPlan) || {

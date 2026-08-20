@@ -433,7 +433,7 @@ runSubscriptionOutputPublishAccountsAndRemoteHintRegression() {
     printf '0\n' >"${mainCheckFile}"
 
     subscriptionGroupsStateRead() {
-        if [[ "$*" == "-r .active_group" ]]; then
+        if [[ "$*" == "-r .id" ]]; then
             printf 'default\n'
             return 0
         fi
@@ -803,7 +803,7 @@ runSubscriptionSyncAppendLocalUserBatchRegression() (
     singBoxConfigPath="${root}/sing-box/"
     export PADM_SUBSCRIPTION_GROUPS_DIR="${root}/groups"
     ensureSubscriptionGroupsState
-    subscriptionGroupsStateWrite '.groups[0].user_groups += [{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}]'
+    subscriptionGroupsStateWrite '.user_groups += [{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}]'
 
     subscriptionSyncAppendProtocolBatch() {
         printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >>"${callLog}"
@@ -855,9 +855,9 @@ JSON
 
     writeSubscriptionTrafficSnapshot "${trafficSnapshot}"
     jq -e '
-      .groups[0].traffic.user_groups["team-a"].sources.main.counters.sub_team_a.upload == 1 and
-      .groups[0].traffic.user_groups["team-a"].sources.main.counters.sub_team_a.download == 2 and
-      .groups[0].traffic.user_groups["team-b"].sources.main.counters.sub_team_b.upload == 3 and
-      .groups[0].traffic.user_groups["team-b"].sources.main.counters.sub_team_b.download == 4
+      .traffic.user_groups["team-a"].sources.main.counters.sub_team_a.upload == 1 and
+      .traffic.user_groups["team-a"].sources.main.counters.sub_team_a.download == 2 and
+      .traffic.user_groups["team-b"].sources.main.counters.sub_team_b.upload == 3 and
+      .traffic.user_groups["team-b"].sources.main.counters.sub_team_b.download == 4
     ' "$(subscriptionGroupsFile)" >/dev/null
 )
