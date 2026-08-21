@@ -851,6 +851,35 @@ JSON
     jq -e '(.inbounds[0].settings.clients | length) == 2' "${targetFile}" >/dev/null
 )
 
+runSubscriptionSyncRemoveAccountFromFileRegression() (
+    local root="${TMP_DIR}/subscription-sync-remove-account-file"
+    local noMatchFile="${root}/no-match.json"
+    local noMatchSnapshot="${root}/no-match.snapshot"
+    local matchFile="${root}/match.json"
+    local invalidFile="${root}/invalid.json"
+    local invalidSnapshot="${root}/invalid.snapshot"
+
+    mkdir -p "${root}"
+    printf '%s\n' '{"inbounds":[{"settings":{"clients":[{"id":"keep-client","email":"sub_team_b-VLESS_WS"}]},"users":[{"name":"sub_team_c"}]}]}' >"${noMatchFile}"
+    cp "${noMatchFile}" "${noMatchSnapshot}"
+    subscriptionSyncRemoveAccountFromFile "${noMatchFile}" sub_team_a
+    cmp -s "${noMatchFile}" "${noMatchSnapshot}"
+
+    printf '%s\n' '{"inbounds":[{"settings":{"clients":[{"id":"remove-client","email":"sub_team_a-VLESS_WS"},{"id":"keep-client","email":"sub_team_b-VLESS_WS"}]},"users":[{"name":"sub_team_a"},{"name":"sub_team_c"}]}]}' >"${matchFile}"
+    subscriptionSyncRemoveAccountFromFile "${matchFile}" sub_team_a
+    jq -e '
+      (.inbounds[0].settings.clients | map(.email) | . == ["sub_team_b-VLESS_WS"]) and
+      (.inbounds[0].users | map(.name) | . == ["sub_team_c"])
+    ' "${matchFile}" >/dev/null
+
+    printf '%s\n' '{bad-json' >"${invalidFile}"
+    cp "${invalidFile}" "${invalidSnapshot}"
+    if subscriptionSyncRemoveAccountFromFile "${invalidFile}" sub_team_a; then
+        return 1
+    fi
+    cmp -s "${invalidFile}" "${invalidSnapshot}"
+)
+
 runConfiguredAccountHelpersRegression() (
     local helperLog="${TMP_DIR}/configured-account-helpers.log"
     local currentManaged accounts

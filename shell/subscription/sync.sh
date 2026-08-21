@@ -315,12 +315,18 @@ subscriptionSyncRemoveAccountFromFile() {
     local file=$1
     local accountName=$2
     local tmpFile
+    local jqStatus
     [[ -f "${file}" ]] || return 0
-    jq empty "${file}" >/dev/null 2>&1 || return 1
-    if ! jq -e --arg accountName "${accountName}" '
-      [(.inbounds[]?.settings.clients[]?), (.inbounds[]?.users[]?)][]
-      | select(('"${SUBSCRIPTION_SYNC_MANAGED_ACCOUNT_JQ}"') == $accountName)' "${file}" >/dev/null 2>&1; then
-        return 0
+    if jq -e --arg accountName "${accountName}" '
+      any(
+        [(.inbounds[]?.settings.clients[]?), (.inbounds[]?.users[]?)][]?;
+        ('"${SUBSCRIPTION_SYNC_MANAGED_ACCOUNT_JQ}"') == $accountName
+      )' "${file}" >/dev/null 2>&1; then
+        :
+    else
+        jqStatus=$?
+        [[ "${jqStatus}" -eq 1 ]] && return 0
+        return 1
     fi
     padmCreateTempFileForTarget tmpFile "${file}" sync || return 1
     if ! jq --arg accountName "${accountName}" '
