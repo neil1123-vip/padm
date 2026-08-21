@@ -2043,7 +2043,8 @@ runSubscriptionControlServerResponseRegression() (
     local controlRoot="${TMP_DIR}/remote-control-server-response"
     local fakeInstall="${controlRoot}/install.sh"
     local modeFile="${controlRoot}/mode"
-    local startedFile="${controlRoot}/sync.started"
+    local startedFile="${controlRoot}/script.started"
+    local syncCompletedFile="${controlRoot}/sync.completed"
     local descendantSurvivedFile="${controlRoot}/descendant.survived"
     local responseFile="${controlRoot}/response.txt"
     local serverLog="${controlRoot}/server.log"
@@ -2122,14 +2123,20 @@ sync:failed)
     printf '{"ok":true,"changed":true}\n'
     exit 7
     ;;
-sync:timeout)
+sync:slow)
+    : >"${PADM_FAKE_CONTROL_STARTED_FILE}"
+    /bin/sleep 1.2
+    printf 'completed\n' >"${PADM_FAKE_CONTROL_SYNC_COMPLETED_FILE}"
+    printf '{"ok":true,"dry_run":false,"changed":false,"plan":{"create":[],"remove":[]}}\n'
+    ;;
+traffic:timeout)
     : >"${PADM_FAKE_CONTROL_STARTED_FILE}"
     (
         /bin/sleep 1.2
         printf 'survived\n' >"${PADM_FAKE_CONTROL_DESCENDANT_FILE}"
     ) &
     wait
-    printf '{"ok":true}\n'
+    printf '{"ok":true,"items":[]}\n'
     ;;
     sync:invalid)
         printf 'ui noise only\n'
@@ -2153,6 +2160,7 @@ SH
     mkdir -p "$(dirname "$(subscriptionControlTokenFile)")"
     printf '%s\n' "${serverToken}" >"$(subscriptionControlTokenFile)"
     export PADM_FAKE_SERVER_TOKEN="${serverToken}"
+    export PADM_FAKE_CONTROL_SYNC_COMPLETED_FILE="${syncCompletedFile}"
     export PADM_FAKE_CONTROL_DESCENDANT_FILE="${descendantSurvivedFile}"
     writeSubscriptionControlServer
     serverScript=$(subscriptionControlServerScript)
@@ -2162,6 +2170,8 @@ SH
     serverPid=$!
     trap '[[ -n "${serverPid}" ]] && kill "${serverPid}" >/dev/null 2>&1 || true; [[ -n "${serverPid}" ]] && wait "${serverPid}" 2>/dev/null || true' EXIT
     export PADM_TEST_CONTROL_STARTED_FILE="${startedFile}"
+    export PADM_TEST_CONTROL_SYNC_COMPLETED_FILE="${syncCompletedFile}"
+    export PADM_TEST_CONTROL_DESCENDANT_FILE="${descendantSurvivedFile}"
 
     PADM_TEST_CONTROL_PORT="${testPort}" \
     PADM_TEST_CONTROL_MODE_FILE="${modeFile}" \
@@ -2299,9 +2309,13 @@ results["sync_slow_body"] = slow_post("sync")
 
 set_mode("failed")
 results["sync_failed"] = request("POST", "sync", '{"desired_users":[],"dry_run":false}')
-set_mode("timeout")
+set_mode("slow")
 try:
     os.remove(os.environ["PADM_TEST_CONTROL_STARTED_FILE"])
+except FileNotFoundError:
+    pass
+try:
+    os.remove(os.environ["PADM_TEST_CONTROL_SYNC_COMPLETED_FILE"])
 except FileNotFoundError:
     pass
 sync_holder = {}
@@ -2318,7 +2332,16 @@ results["health_during_sync"] = request("GET", "health")
 results["sync_while_busy"] = request("POST", "sync", '{"desired_users":[],"dry_run":false}')
 sync_thread.join(timeout=10)
 assert not sync_thread.is_alive()
-results["sync_timeout"] = sync_holder["result"]
+results["sync_slow"] = sync_holder["result"]
+results["sync_completed"] = os.path.exists(os.environ["PADM_TEST_CONTROL_SYNC_COMPLETED_FILE"])
+
+set_mode("timeout")
+for path in (os.environ["PADM_TEST_CONTROL_STARTED_FILE"], os.environ["PADM_TEST_CONTROL_DESCENDANT_FILE"]):
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+results["traffic_timeout"] = request("POST", "traffic", "{}")
 time.sleep(0.8)
 results["os_name"] = os.name
 results["timeout_descendant_survived"] = os.path.exists(os.environ["PADM_FAKE_CONTROL_DESCENDANT_FILE"])
@@ -2338,7 +2361,8 @@ PY
     jq -e '.sync_bad_content_length.status == 400 and .sync_bad_content_length.body.error == "invalid_payload"' "${responseFile}" >/dev/null
     jq -e '.sync_slow_body.status == 408 and .sync_slow_body.body.error == "request_timeout"' "${responseFile}" >/dev/null
     jq -e '.sync_failed.status == 503 and .sync_failed.body.error == "script_failed" and .sync_failed.body.error_detail.type == "script_failed" and .sync_failed.body.exit_code == 7' "${responseFile}" >/dev/null
-    jq -e '.sync_timeout.status == 503 and .sync_timeout.body.error == "script_timeout" and .sync_timeout.body.error_detail.type == "script_timeout"' "${responseFile}" >/dev/null
+    jq -e '.sync_slow.status == 200 and .sync_slow.body.ok == true and .sync_slow.body.changed == false and .sync_completed == true' "${responseFile}" >/dev/null
+    jq -e '.traffic_timeout.status == 503 and .traffic_timeout.body.error == "script_timeout" and .traffic_timeout.body.error_detail.type == "script_timeout"' "${responseFile}" >/dev/null
     jq -e '.os_name != "posix" or .timeout_descendant_survived == false' "${responseFile}" >/dev/null
     jq -e '.health_during_sync.status == 200 and .health_during_sync.body.ok == true' "${responseFile}" >/dev/null
     jq -e '.sync_while_busy.status == 503 and .sync_while_busy.body.error == "busy" and .sync_while_busy.body.error_detail.type == "busy"' "${responseFile}" >/dev/null

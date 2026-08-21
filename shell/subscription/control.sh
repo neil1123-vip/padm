@@ -461,6 +461,85 @@ subscriptionRemoteSyncPlanForSource() {
     fi
 }
 
+subscriptionRemoteApplyDesiredUsersForSource() {
+    local source=$1
+    local desiredUsersBySource=$2
+    local sourceId
+    local result
+    local status
+    local message
+    SUBSCRIPTION_REMOTE_SOURCE_ERROR=
+    sourceId=$(jq -r '.id // empty' <<<"${source}") || return 1
+    [[ -n "${sourceId}" ]] || return 1
+    jq -e --arg sourceId "${sourceId}" '
+      type == "object" and
+      has($sourceId) and
+      (.[$sourceId] | type == "array")
+    ' <<<"${desiredUsersBySource}" >/dev/null 2>&1 || return 1
+    result=$(subscriptionRemoteSyncPlanForSource "${source}" "${desiredUsersBySource}" false) || {
+        SUBSCRIPTION_REMOTE_SOURCE_ERROR="远程服务器源 ${sourceId} 用户同步请求失败"
+        return 1
+    }
+    status=$(jq -r '.status // empty' <<<"${result}") || return 1
+    if [[ "${status}" == "success" ]]; then
+        return 0
+    fi
+    message=$(jq -r '.error_detail.message // .error // "未知错误"' <<<"${result}") || return 1
+    SUBSCRIPTION_REMOTE_SOURCE_ERROR="远程服务器源 ${sourceId} 用户同步失败：${message}"
+    return 1
+}
+
+subscriptionRemoteDrainSource() {
+    local source=$1
+    local outputVar=$2
+    local sourceId
+    local desiredUsers
+    local emptyUsers
+    sourceId=$(jq -r '.id // empty' <<<"${source}") || return 1
+    [[ -n "${sourceId}" ]] || return 1
+    desiredUsers=$(subscriptionRemoteDesiredUsersBySource "$(jq -cn --argjson source "${source}" '[$source]')") || return 1
+    emptyUsers=$(jq -cn --arg sourceId "${sourceId}" '{($sourceId):[]}') || return 1
+    subscriptionRemoteApplyDesiredUsersForSource "${source}" "${emptyUsers}" || return 1
+    printf -v "${outputVar}" '%s' "${desiredUsers}"
+}
+
+subscriptionRemoteRestoreSourceUsersIfEnabled() {
+    local source=$1
+    local desiredUsersBySource=$2
+    jq -e '.enabled == true' <<<"${source}" >/dev/null 2>&1 || return 0
+    subscriptionRemoteApplyDesiredUsersForSource "${source}" "${desiredUsersBySource}"
+}
+
+setSubscriptionRemoteSourceEnabledUnlocked() {
+    local id=$1
+    local enabled=$2
+    local source
+    local originalUsers=
+    local restoreError
+    SUBSCRIPTION_REMOTE_SOURCE_MUTATION_ERROR=
+    source=$(subscriptionActiveGroupRead -ce --arg id "${id}" 'first(.sources[]? | select(.id == $id and .role != "main"))') || return 1
+    if [[ "${enabled}" == "false" ]] && jq -e '.enabled == true' <<<"${source}" >/dev/null 2>&1; then
+        if ! subscriptionRemoteDrainSource "${source}" originalUsers; then
+            SUBSCRIPTION_REMOTE_SOURCE_MUTATION_ERROR="${SUBSCRIPTION_REMOTE_SOURCE_ERROR:-远端用户清理失败}"
+            return 1
+        fi
+    fi
+    if setSubscriptionSourceEnabled "${id}" "${enabled}"; then
+        return 0
+    fi
+    if [[ -n "${originalUsers}" ]] && ! subscriptionRemoteRestoreSourceUsersIfEnabled "${source}" "${originalUsers}"; then
+        restoreError="${SUBSCRIPTION_REMOTE_SOURCE_ERROR:-远端用户恢复失败}"
+        SUBSCRIPTION_REMOTE_SOURCE_MUTATION_ERROR="被控服务器状态更新失败，且${restoreError}"
+    else
+        SUBSCRIPTION_REMOTE_SOURCE_MUTATION_ERROR="被控服务器状态更新失败"
+    fi
+    return 1
+}
+
+setSubscriptionRemoteSourceEnabled() {
+    subscriptionGroupsWithLock setSubscriptionRemoteSourceEnabledUnlocked "$@"
+}
+
 subscriptionRemoteSyncPlan() {
     local sources
     local desiredUsersBySource='{}'

@@ -19,6 +19,7 @@ runSubscriptionWireGuardMenuFlowRegression() (
     local wireGuardApplyShouldFail= installControlShouldFail= refreshControlShouldFail= serviceQueueShouldFail=
     local addSourceShouldFail= setCredentialShouldFail= restoreStateWriteShouldFail= restoreGroupsWriteShouldFail=
     local disableStateWriteShouldFail=
+    local sourceStateWriteShouldFail='' remoteApplyShouldFail=''
     local stopShouldFail=
     local stopAllowMissingBackend=
     local actions=
@@ -29,6 +30,8 @@ runSubscriptionWireGuardMenuFlowRegression() (
     source "${PROJECT_ROOT}/shell/core/state.sh"
     # shellcheck source=/dev/null
     source "${PROJECT_ROOT}/shell/subscription/groups.sh"
+    # shellcheck source=/dev/null
+    source "${PROJECT_ROOT}/shell/subscription/control.sh"
     # shellcheck source=/dev/null
     source "${PROJECT_ROOT}/shell/subscription/wireguard_control.sh"
     # shellcheck source=/dev/null
@@ -148,6 +151,7 @@ runSubscriptionWireGuardMenuFlowRegression() (
     }
     eval "$(declare -f addSubscriptionSourceState | sed '1s/^addSubscriptionSourceState/originalAddSubscriptionSourceState/')"
     eval "$(declare -f setSubscriptionSourceCredential | sed '1s/^setSubscriptionSourceCredential/originalSetSubscriptionSourceCredential/')"
+    eval "$(declare -f setSubscriptionSourceEnabled | sed '1s/^setSubscriptionSourceEnabled/originalSetSubscriptionSourceEnabled/')"
     addSubscriptionSourceState() {
         [[ "${addSourceShouldFail}" == "true" ]] && return 1
         originalAddSubscriptionSourceState "$@"
@@ -155,6 +159,19 @@ runSubscriptionWireGuardMenuFlowRegression() (
     setSubscriptionSourceCredential() {
         [[ "${setCredentialShouldFail}" == "true" ]] && return 1
         originalSetSubscriptionSourceCredential "$@"
+    }
+    setSubscriptionSourceEnabled() {
+        [[ "${sourceStateWriteShouldFail}" == "true" ]] && return 1
+        originalSetSubscriptionSourceEnabled "$@"
+    }
+    subscriptionRemoteApplyDesiredUsersForSource() {
+        local sourceId
+        sourceId=$(jq -r '.id' <<<"$1") || return 1
+        recordMenuAction "subscriptionRemoteApplyDesiredUsersForSource:${sourceId}:$(jq -c . <<<"$2")"
+        if [[ "${remoteApplyShouldFail}" == "true" ]]; then
+            SUBSCRIPTION_REMOTE_SOURCE_ERROR="模拟远端用户同步失败"
+            return 1
+        fi
     }
     subscriptionRemoteControlHealthAll() { printf '[{"id":"edge-a","ok":true}]\n'; }
     subscriptionRemoteControlHealth() { printf '{"ok":true}\n'; }
@@ -177,6 +194,8 @@ runSubscriptionWireGuardMenuFlowRegression() (
         restoreStateWriteShouldFail=
         restoreGroupsWriteShouldFail=
         disableStateWriteShouldFail=
+        sourceStateWriteShouldFail=
+        remoteApplyShouldFail=
         stopShouldFail=
         stopAllowMissingBackend=
         actions=
@@ -402,12 +421,38 @@ edge-a"
             changeSubscriptionSourceEnabledMenu <<<"edge-a
 y"
             subscriptionGroupsStateRead -e '.sources[] | select(.id == "edge-a" and .enabled == false)' >/dev/null
+            assertMenuAction 'subscriptionRemoteApplyDesiredUsersForSource:edge-a:{"edge-a":[]}'
             assertMenuAction 'runSubscriptionGroupSync:'
             resetMenuActions
             changeSubscriptionSourceEnabledMenu <<<"edge-a
 y"
             subscriptionGroupsStateRead -e '.sources[] | select(.id == "edge-a" and .enabled == true)' >/dev/null
+            if assertMenuAction 'subscriptionRemoteApplyDesiredUsersForSource:edge-a:{"edge-a":[]}'; then
+                return 1
+            fi
             assertMenuAction 'runSubscriptionGroupSync:'
+
+            sourceStateWriteShouldFail=true
+            resetMenuActions
+            if changeSubscriptionSourceEnabledMenu <<<"edge-a
+y"; then
+                sourceStateWriteShouldFail=
+                return 1
+            fi
+            sourceStateWriteShouldFail=
+            subscriptionGroupsStateRead -e '.sources[] | select(.id == "edge-a" and .enabled == true)' >/dev/null
+            [[ "$(grep -c '^subscriptionRemoteApplyDesiredUsersForSource:edge-a:' <<<"${actions}")" == "2" ]]
+
+            remoteApplyShouldFail=true
+            resetMenuActions
+            if changeSubscriptionSourceEnabledMenu <<<"edge-a
+y"; then
+                remoteApplyShouldFail=
+                return 1
+            fi
+            remoteApplyShouldFail=
+            subscriptionGroupsStateRead -e '.sources[] | select(.id == "edge-a" and .enabled == true)' >/dev/null
+            assertMenuAction 'errorCard:模拟远端用户同步失败'
         fi
 
         if wireGuardMenuPartSelected peer-source-control || wireGuardMenuPartSelected peer-source-control-status; then
@@ -558,10 +603,11 @@ runSubscriptionWireGuardInviteReceiptRegression() (
     local applyFailNext=false
     local mainPublicKey controlledPublicKeyA controlledPublicKeyB controlledPublicKeyC
     local receiptToken='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789AB'
-    local inviteCredentialA inviteCredentialB inviteCredentialC joinCredential
-    local inviteJsonA inviteJsonB inviteJsonC joinJson receiptJson receiptCredential controlledCredentialJson completedAlias
+    local inviteCredentialA inviteCredentialB inviteCredentialC cancelInviteCredential joinCredential
+    local inviteJsonA inviteJsonB inviteJsonC cancelInviteJson joinJson receiptJson receiptCredential controlledCredentialJson completedAlias
     local stateBefore groupsBefore pendingJson readSecretValue= secretOutput staleInviteId
     local testWireGuardState testGroupsState
+    local remoteApplyLog="${root}/remote-apply.log"
 
     # Restore production functions because other legacy UI tests install global stubs.
     # shellcheck source=/dev/null
@@ -586,6 +632,9 @@ runSubscriptionWireGuardInviteReceiptRegression() (
     statusCard() { return 0; }
     successCard() { return 0; }
     warnCard() { return 0; }
+    subscriptionRemoteApplyDesiredUsersForSource() {
+        printf '%s\t%s\n' "$(jq -r '.id' <<<"$1")" "$(jq -c . <<<"$2")" >>"${remoteApplyLog}"
+    }
     subscriptionWireGuardConfigFile() { printf '%s\n' "${wireGuardConfig}"; }
     subscriptionWireGuardStateFile() { printf '%s\n' "${stateMarker}"; }
     subscriptionWireGuardReadState() {
@@ -708,6 +757,31 @@ runSubscriptionWireGuardInviteReceiptRegression() (
     subscriptionWireGuardCompleteInvite "${receiptJson}" completedAlias
     [[ "${completedAlias}" == "hk-3" ]]
     subscriptionGroupsStateRead -e '.sources[] | select(.id == "hk-3" and .control_token != "")' >/dev/null
+
+    subscriptionWireGuardCreateInvite cancel-edge cancelInviteCredential
+    cancelInviteJson=$(subscriptionWireGuardCredentialDecode "${cancelInviteCredential}")
+    addSubscriptionSourceState cancel-edge cancel-edge "$(subscriptionWireGuardAddressHost "$(jq -r '.address' <<<"${cancelInviteJson}")")" 39778
+    : >"${remoteApplyLog}"
+    subscriptionWireGuardCancelInvite cancel-edge
+    subscriptionGroupsStateRead -e 'any(.sources[]?; .id == "cancel-edge") | not' >/dev/null
+    subscriptionWireGuardReadState | jq -e 'any(.pending_invites[]?; .alias == "cancel-edge") | not' >/dev/null
+    [[ "$(wc -l <"${remoteApplyLog}" | tr -d ' ')" == "1" ]]
+
+    stateBefore=$(subscriptionWireGuardReadState)
+    groupsBefore=$(subscriptionGroupsStateRead -c '.')
+    : >"${remoteApplyLog}"
+    applyFailNext=true
+    if subscriptionWireGuardRemovePeerAndSource hk-2 >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ "$(subscriptionWireGuardReadState)" == "${stateBefore}" ]]
+    [[ "$(subscriptionGroupsStateRead -c '.')" == "${groupsBefore}" ]]
+    [[ "$(wc -l <"${remoteApplyLog}" | tr -d ' ')" == "2" ]]
+    : >"${remoteApplyLog}"
+    subscriptionWireGuardRemovePeerAndSource hk-2
+    subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "hk-2") | not' >/dev/null
+    subscriptionGroupsStateRead -e 'any(.sources[]?; .id == "hk-2") | not' >/dev/null
+    [[ "$(wc -l <"${remoteApplyLog}" | tr -d ' ')" == "1" ]]
 
     stateBefore=$(subscriptionWireGuardReadState)
     staleInviteId=$(printf '%064x' 100)
@@ -898,6 +972,12 @@ runSubscriptionWireGuardRestoreRunnerRegression() (
     grep -q '^订阅来源凭据写入失败，且旧状态恢复失败$' "${errorLog}"
     grep -q '订阅组状态文件' "${errorLog}"
     grep -q 'manual-check:请手动检查订阅组状态文件|/tmp/groups.json' "${helperLog}"
+
+    : >"${helperLog}"
+    subscriptionWireGuardRestoreStateAndGroupsOrReport() { printf 'local\n' >>"${helperLog}"; return 1; }
+    subscriptionRemoteRestoreSourceUsersIfEnabled() { printf 'remote\n' >>"${helperLog}"; return 0; }
+    regressionExpectStatus 1 subscriptionWireGuardRestoreSourceMutationOrReport '{}' '{}' '{"enabled":true}' '{"edge":[]}' "来源删除失败"
+    [[ "$(<"${helperLog}")" == $'local\nremote' ]]
 )
 
 runCoreSelectionRetryActionRegression() (
@@ -1475,6 +1555,16 @@ main
 0
 9"
         subscriptionGroupsStateRead -e 'any(.user_groups[]?; .id == "demo-user" and .name == "demo-user")' >/dev/null
+        local duplicateSideEffectMarker="${TMP_DIR}/duplicate-user-side-effect"
+        rm -f "${duplicateSideEffectMarker}"
+        (
+            readNginxSubscribe() { : >"${duplicateSideEffectMarker}"; subscribePort=; }
+            installSubscribe() { : >"${duplicateSideEffectMarker}"; }
+            if createAndSyncUserSubscriptionWizard <<<"demo-user"; then
+                return 1
+            fi
+        )
+        [[ ! -e "${duplicateSideEffectMarker}" ]]
     fi
 
     if menuSmokePartSelected subscription-main-publish-user || menuSmokePartSelected subscription-main-publish-user-inspect; then

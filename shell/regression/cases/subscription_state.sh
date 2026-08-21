@@ -463,6 +463,11 @@ runSubscriptionGroupStateStructureSourceRemoveRegression() {
         return 1
     fi
     jq -e '.sources | map(.id) | index("edge")' "$(subscriptionGroupsFile)" >/dev/null
+    setUserSubscriptionSources team-a '["*"]'
+    if removeSubscriptionSourceState edge >/dev/null 2>&1; then
+        return 1
+    fi
+    jq -e '.sources | map(.id) | index("edge")' "$(subscriptionGroupsFile)" >/dev/null
     setUserSubscriptionSources team-a '["main"]'
     removeSubscriptionSourceState edge
     jq -e '
@@ -498,6 +503,8 @@ runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
 runSubscriptionGroupStateQuotaTrafficRemoteRegression() {
     local localSnapshot
     local remoteResults
+    local stateBefore
+    local mainBefore
     prepareSubscriptionStateQuotaUsageFixture
     subscriptionActiveGroupWrite '
       .sources += [{id:"edge-2",name:"edge-2",role:"secondary",scheme:"wireguard",transport:"wireguard",host:"10.77.0.4",port:48780,enabled:true,sync_status:"pending",control_token:"token-ghi"}] |
@@ -529,31 +536,40 @@ runSubscriptionGroupStateQuotaTrafficRemoteRegression() {
       (.traffic.user_groups["team-a"] | has("upload") | not)
     ' "$(subscriptionGroupsFile)" >/dev/null
 
-    local remoteEdgeBefore edge2Before mainBefore
-    remoteEdgeBefore=$(jq -c '.traffic.sources["remote-edge"]' "$(subscriptionGroupsFile)")
-    edge2Before=$(jq -r '.traffic.sources["edge-2"].upload' "$(subscriptionGroupsFile)")
-    mainBefore=$(jq -r '.traffic.sources.main.upload' "$(subscriptionGroupsFile)")
+    stateBefore=$(jq -c '.traffic' "$(subscriptionGroupsFile)")
     remoteResults='[{"source_id":"remote-edge","status":"unreachable"},{"source_id":"edge-2","status":"success","response":{"items":[{"account":"admin","upload":4,"download":2},{"account":"sub_team_a","upload":2,"download":3}]}}]'
-    writeSubscriptionTrafficSnapshot '{"ok":true,"items":[{"account":"admin","upload":4,"download":5},{"account":"sub_team_a","upload":2,"download":3}]}' "${remoteResults}"
-    jq -e --argjson remoteEdgeBefore "${remoteEdgeBefore}" --argjson edge2Before "${edge2Before}" --argjson mainBefore "${mainBefore}" '
-      .traffic.sources["remote-edge"] == $remoteEdgeBefore and
-      .traffic.sources["edge-2"].upload == ($edge2Before + 2) and
-      .traffic.sources.main.upload == ($mainBefore + 2)
-    ' "$(subscriptionGroupsFile)" >/dev/null
+    if writeSubscriptionTrafficSnapshot '{"ok":true,"items":[{"account":"admin","upload":4,"download":5},{"account":"sub_team_a","upload":2,"download":3}]}' "${remoteResults}" >/dev/null 2>&1; then
+        return 1
+    fi
+    jq -e --argjson stateBefore "${stateBefore}" '.traffic == $stateBefore' "$(subscriptionGroupsFile)" >/dev/null
 
+    stateBefore=$(jq -c '.traffic' "$(subscriptionGroupsFile)")
+    remoteResults='[{"source_id":"remote-edge","status":"success","response":{"items":[]}}]'
+    if writeSubscriptionTrafficSnapshot '{"ok":true,"items":[]}' "${remoteResults}" >/dev/null 2>&1; then
+        return 1
+    fi
+    jq -e --argjson stateBefore "${stateBefore}" '.traffic == $stateBefore' "$(subscriptionGroupsFile)" >/dev/null
+
+    setSubscriptionSourceEnabled remote-edge false
+    setSubscriptionSourceEnabled edge-2 false
     mainBefore=$(jq -r '.traffic.sources.main.upload' "$(subscriptionGroupsFile)")
     writeSubscriptionTrafficSnapshot '{"ok":true,"items":[]}' '[]'
     writeSubscriptionTrafficSnapshot '{"ok":true,"items":[{"account":"admin","upload":5,"download":5},{"account":"sub_team_a","upload":3,"download":3}]}' '[]'
-    jq -e --argjson mainBefore "${mainBefore}" '.traffic.sources.main.upload == ($mainBefore + 2)' "$(subscriptionGroupsFile)" >/dev/null
+    jq -e --argjson mainBefore "${mainBefore}" '.traffic.sources.main.upload == ($mainBefore + 4)' "$(subscriptionGroupsFile)" >/dev/null
 
+    setUserSubscriptionSources team-a '["main"]'
     removeSubscriptionSourceState edge-2
+    stateBefore=$(jq -c '.traffic' "$(subscriptionGroupsFile)")
     remoteResults='[{"source_id":"edge-2","status":"success","response":{"items":[{"account":"admin","upload":99,"download":99}]}}]'
-    writeSubscriptionTrafficSnapshot '{"ok":true,"items":[{"account":"admin","upload":3,"download":4},{"account":"sub_team_a","upload":1,"download":2}]}' "${remoteResults}"
+    if writeSubscriptionTrafficSnapshot '{"ok":true,"items":[{"account":"admin","upload":3,"download":4},{"account":"sub_team_a","upload":1,"download":2}]}' "${remoteResults}" >/dev/null 2>&1; then
+        return 1
+    fi
     jq -e '
       (.traffic.sources | has("edge-2") | not) and
       (.traffic.admin.sources | has("edge-2") | not) and
       (.traffic.user_groups["team-a"].sources | has("edge-2") | not)
     ' "$(subscriptionGroupsFile)" >/dev/null
+    jq -e --argjson stateBefore "${stateBefore}" '.traffic == $stateBefore' "$(subscriptionGroupsFile)" >/dev/null
 }
 
 runSubscriptionGroupStateQuotaTrafficInvalidInputRegression() {
@@ -997,6 +1013,10 @@ runSubscriptionSyncProcessSubstitutionFailureRegression() {
     subscriptionSyncConfigFiles() { return 7; }
     regressionExpectStatus 1 subscriptionSyncConfiguredAccountNamesJson >/dev/null 2>&1
     regressionExpectStatus 1 subscriptionSyncConfiguredManagedCredentials >/dev/null 2>&1
+
+    protocolCapabilityRegistry() { return 7; }
+    regressionExpectStatus 1 subscriptionSyncAppendProtocolBatch test-uuid test-account "${TMP_DIR}/" xray >/dev/null 2>&1
+    regressionExpectStatus 1 subscriptionSyncAppendProtocolBatch test-uuid test-account "${TMP_DIR}/" unsupported >/dev/null 2>&1
 
     subscriptionSyncConfiguredAccountNamesJson "${TMP_DIR}/missing-inbounds.json" | jq -e '. == []' >/dev/null
 
@@ -1640,6 +1660,9 @@ runSubscriptionGroupSyncSingleConfigBackupRegression() (
     local resultStatus="${syncRoot}/mark-status.log"
     local resultFailures="${syncRoot}/mark-failures.log"
     local statusLog="${syncRoot}/status.log"
+    local quotaPlanMarker="${syncRoot}/quota-plan-called"
+    local successMarker="${syncRoot}/unexpected-success"
+    local errorMarker="${syncRoot}/mark-result-error"
     local syncStatus
 
     prepareSubscriptionGroupSyncFixture "${syncRoot}" "" <<'JSON'
@@ -1658,6 +1681,9 @@ JSON
     initXrayClients() {
         jq -n --arg email "$3-main" '[{email:$email}]'
     }
+    subscriptionGroupQuotaAutoApplyEnabled() { return 0; }
+    collectSubscriptionTraffic() { return 1; }
+    subscriptionQuotaDryRunPlan() { : >"${quotaPlanMarker}"; printf '[]\n'; }
     subscriptionSyncReconcileLocalServices() { return 0; }
     readNginxSubscribe() { subscribePort=; }
 
@@ -1665,13 +1691,21 @@ JSON
     runSubscriptionGroupSync
     syncStatus=$?
     set -e
-    unset -f subscriptionSyncCreateConfigBackups originalSubscriptionSyncCreateConfigBackups protocolCapabilityRegistry initXrayClients
 
     [[ "${syncStatus}" == "0" ]]
+    [[ ! -e "${quotaPlanMarker}" ]]
     [[ "$(grep -c '^backup$' "${backupCountLog}")" == "1" ]]
     jq -e '.inbounds[0].settings.clients[0].email == "sub_team_a-main"' "${syncConfigFile}" >/dev/null
     [[ "$(<"${resultFailures}")" == "[]" ]]
     grep -qx 'success' "${resultStatus}"
+    grep -q '自动同步完成' "${statusLog}"
+
+    subscriptionSyncMarkResult() { return 1; }
+    successCard() { : >"${successMarker}"; }
+    errorCard() { : >"${errorMarker}"; }
+    regressionExpectStatus 1 runSubscriptionGroupSync >/dev/null 2>&1
+    [[ ! -e "${successMarker}" && -e "${errorMarker}" ]]
+    unset -f subscriptionSyncCreateConfigBackups originalSubscriptionSyncCreateConfigBackups protocolCapabilityRegistry initXrayClients
 )
 
 runSubscriptionGroupSyncRollbackSerialRegression() {

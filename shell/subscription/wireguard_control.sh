@@ -674,6 +674,22 @@ subscriptionWireGuardRestoreStateAndGroupsOrReport() {
     subscriptionWireGuardRunRestoreSteps "${previousState}" "${previousGroupsState}" "${failureTitle}"
 }
 
+subscriptionWireGuardRestoreSourceMutationOrReport() {
+    local previousState=$1
+    local previousGroupsState=$2
+    local source=$3
+    local originalUsers=$4
+    local failureTitle=$5
+    local restoreFailed=false
+
+    subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "${failureTitle}" || restoreFailed=true
+    if [[ -n "${source}" ]] && ! subscriptionRemoteRestoreSourceUsersIfEnabled "${source}" "${originalUsers}"; then
+        errorCard "${failureTitle}，且${SUBSCRIPTION_REMOTE_SOURCE_ERROR:-远端用户恢复失败}"
+        restoreFailed=true
+    fi
+    [[ "${restoreFailed}" == "false" ]]
+}
+
 subscriptionWireGuardReadPreviousState() {
     local outputVar=$1
     local errorMessage=${2:-}
@@ -979,7 +995,7 @@ server {
         client_max_body_size 256k;
         proxy_connect_timeout 5s;
         proxy_send_timeout 20s;
-        proxy_read_timeout 30s;
+        proxy_read_timeout 45s;
         proxy_pass http://127.0.0.1:$(subscriptionControlPort);
         proxy_set_header Authorization \$http_authorization;
         proxy_set_header Content-Type \$content_type;
@@ -1301,6 +1317,8 @@ subscriptionWireGuardListPendingInvites() {
 subscriptionWireGuardCancelInviteUnlocked() {
     local alias=$1
     local previousState previousGroupsState now currentPending cleanPending invite peerExists=false sourceExists=false workingPending
+    local source=
+    local originalUsers=
     subscriptionWireGuardValidAlias "${alias}" || return 1
     subscriptionWireGuardReadPreviousStateAndGroups previousState previousGroupsState "WireGuard 状态读取失败" "订阅组状态读取失败" || return 1
     [[ "$(jq -r '.role' <<<"${previousState}")" == "main" ]] || return 1
@@ -1320,17 +1338,29 @@ subscriptionWireGuardCancelInviteUnlocked() {
         subscriptionWireGuardWriteState --argjson pendingInvites "${workingPending}" '.pending_invites = $pendingInvites' || return 1
         return 0
     fi
-    subscriptionWireGuardWriteState --arg alias "${alias}" --argjson pendingInvites "${cleanPending}" '.pending_invites = $pendingInvites | .peers = [.peers[]? | select(.id != $alias)]' || return 1
+    if [[ "${sourceExists}" == "true" ]]; then
+        source=$(jq -ce --arg alias "${alias}" 'first(.sources[]? | select(.id == $alias and .role != "main"))' <<<"${previousGroupsState}") || return 1
+        if ! subscriptionRemoteDrainSource "${source}" originalUsers; then
+            errorCard "${SUBSCRIPTION_REMOTE_SOURCE_ERROR:-被控服务器远端用户清理失败}" "邀请、服务器源和 WireGuard Peer 均未修改"
+            return 1
+        fi
+    fi
+    if ! subscriptionWireGuardWriteState --arg alias "${alias}" --argjson pendingInvites "${cleanPending}" '.pending_invites = $pendingInvites | .peers = [.peers[]? | select(.id != $alias)]'; then
+        if [[ -n "${source}" ]] && ! subscriptionRemoteRestoreSourceUsersIfEnabled "${source}" "${originalUsers}"; then
+            errorCard "待完成邀请取消失败，且${SUBSCRIPTION_REMOTE_SOURCE_ERROR:-远端用户恢复失败}"
+        fi
+        return 1
+    fi
     if [[ "${peerExists}" == "true" ]] && ! applySubscriptionWireGuardService; then
-        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "待完成邀请取消失败" || return 1
+        subscriptionWireGuardRestoreSourceMutationOrReport "${previousState}" "${previousGroupsState}" "${source}" "${originalUsers}" "待完成邀请取消失败" || true
         return 1
     fi
     if [[ "${sourceExists}" == "true" ]] && ! removeSubscriptionSourceState "${alias}"; then
-        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "待完成邀请取消失败" || return 1
+        subscriptionWireGuardRestoreSourceMutationOrReport "${previousState}" "${previousGroupsState}" "${source}" "${originalUsers}" "待完成邀请取消失败" || true
         return 1
     fi
     if ! subscriptionWireGuardWriteState --argjson pendingInvites "${workingPending}" '.pending_invites = $pendingInvites'; then
-        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "待完成邀请取消失败" || return 1
+        subscriptionWireGuardRestoreSourceMutationOrReport "${previousState}" "${previousGroupsState}" "${source}" "${originalUsers}" "待完成邀请取消失败" || true
         return 1
     fi
 }
@@ -1777,6 +1807,8 @@ subscriptionWireGuardRemovePeerAndSourceUnlocked() {
     local id=$1
     local previousState
     local previousGroupsState
+    local source
+    local originalUsers=
     [[ -n "${id}" ]] || return 1
     if [[ "$(subscriptionWireGuardRole)" != "main" ]]; then
         errorCard "只有主控可以移除被控服务器" "第一版只支持一台主控管理多台被控"
@@ -1787,19 +1819,29 @@ subscriptionWireGuardRemovePeerAndSourceUnlocked() {
         errorCard "被控服务器源已变化" "请重新选择后重试"
         return 1
     fi
+    source=$(subscriptionActiveGroupRead -ce --arg id "${id}" 'first(.sources[]? | select(.id == $id and .role != "main"))') || return 1
+    if ! subscriptionRemoteDrainSource "${source}" originalUsers; then
+        errorCard "${SUBSCRIPTION_REMOTE_SOURCE_ERROR:-被控服务器远端用户清理失败}" "服务器源和 WireGuard Peer 均未修改"
+        return 1
+    fi
     subscriptionWireGuardWriteState \
       --arg id "${id}" \
-      '.peers = ([.peers[]? | select(.id != $id)])' || return 1
+      '.peers = ([.peers[]? | select(.id != $id)])' || {
+        if ! subscriptionRemoteRestoreSourceUsersIfEnabled "${source}" "${originalUsers}"; then
+            errorCard "被控服务器状态移除失败，且${SUBSCRIPTION_REMOTE_SOURCE_ERROR:-远端用户恢复失败}"
+        fi
+        return 1
+      }
     if ! applySubscriptionWireGuardService; then
-        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "WireGuard 被控服务器移除失败" || return 1
+        subscriptionWireGuardRestoreSourceMutationOrReport "${previousState}" "${previousGroupsState}" "${source}" "${originalUsers}" "WireGuard 被控服务器移除失败" || true
         return 1
     fi
     if ! removeSubscriptionSourceState "${id}"; then
-        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "被控服务器状态移除失败" || return 1
+        subscriptionWireGuardRestoreSourceMutationOrReport "${previousState}" "${previousGroupsState}" "${source}" "${originalUsers}" "被控服务器状态移除失败" || true
         return 1
     fi
     if ! subscriptionWireGuardWriteState --arg id "${id}" 'if has("pending_invites") then .pending_invites = [.pending_invites[]? | select(.alias != $id)] else . end'; then
-        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "被控服务器状态移除失败" || return 1
+        subscriptionWireGuardRestoreSourceMutationOrReport "${previousState}" "${previousGroupsState}" "${source}" "${originalUsers}" "被控服务器状态移除失败" || true
         return 1
     fi
 }

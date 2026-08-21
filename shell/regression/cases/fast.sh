@@ -564,7 +564,7 @@ runWriteWireGuardControlNginxPathSafetyRegression() {
         grep -q 'listen 10.77.0.1:39778;' "${nginxRoot}/padm-control-wg.conf"
         grep -q 'proxy_connect_timeout 5s;' "${nginxRoot}/padm-control-wg.conf"
         grep -q 'proxy_send_timeout 20s;' "${nginxRoot}/padm-control-wg.conf"
-        grep -q 'proxy_read_timeout 30s;' "${nginxRoot}/padm-control-wg.conf"
+        grep -q 'proxy_read_timeout 45s;' "${nginxRoot}/padm-control-wg.conf"
         grep -q "alias ${subscribeRoot}/\\\$1/\\\$2;" "${nginxRoot}/padm-control-wg.conf"
 
         subscriptionWireGuardReadState() { printf '%s\n' '{"address":"10.77.0.1/24","control_port":"39778;\nserver{}"}'; }
@@ -1852,6 +1852,13 @@ JSON
 JSON
     accounts=$(collectLocalTrafficAccounts)
     jq -e '. == ["admin","ops","sub_team_a","sub_team_b"]' <<<"${accounts}" >/dev/null
+
+    snapshot=$(collectLocalTrafficSnapshot)
+    jq -e '.ok == false and (.items | length) == 0' <<<"${snapshot}" >/dev/null
+    coreInstallType=2
+    snapshot=$(collectLocalTrafficSnapshot)
+    jq -e '.ok == false and (.items | length) == 0' <<<"${snapshot}" >/dev/null
+    coreInstallType=1
 
     printf '{bad-json\n' >"${singBoxConfig}03_inbounds.json"
     if collectLocalTrafficAccounts >/dev/null 2>&1; then

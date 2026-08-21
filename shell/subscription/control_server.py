@@ -124,24 +124,31 @@ class Handler(BaseHTTPRequestHandler):
                 [bash_bin, SCRIPT_PATH, "SubscriptionControl", endpoint], stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
                 encoding="utf-8", errors="replace", **popen_options)
-            stdout, _ = process.communicate(payload, timeout=SCRIPT_TIMEOUT)
+            stdout, _ = process.communicate(payload, timeout=None if endpoint == "sync" else SCRIPT_TIMEOUT)
         except subprocess.TimeoutExpired:
             if os.name == "posix":
                 try:
-                    os.killpg(process.pid, signal.SIGKILL)
+                    os.killpg(process.pid, signal.SIGTERM)
                 except ProcessLookupError:
                     pass
             else:
-                taskkill = shutil.which("taskkill.exe") or shutil.which("taskkill")
-                if taskkill:
-                    subprocess.run([taskkill, "/PID", str(process.pid), "/T", "/F"],
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
                 if process.poll() is None:
-                    process.kill()
+                    process.terminate()
             try:
                 process.communicate(timeout=5)
             except subprocess.TimeoutExpired:
-                process.kill()
+                if os.name == "posix":
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                else:
+                    taskkill = shutil.which("taskkill.exe") or shutil.which("taskkill")
+                    if taskkill:
+                        subprocess.run([taskkill, "/PID", str(process.pid), "/T", "/F"],
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+                    if process.poll() is None:
+                        process.kill()
                 process.communicate()
             return {"ok": False, "error": "script_timeout",
                     "error_detail": {"type": "script_timeout", "message": "脚本执行超时"}}

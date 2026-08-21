@@ -223,6 +223,10 @@ collectXrayTrafficStatsSnapshot() {
 collectLocalTrafficSnapshot() {
     local accounts
     local items
+    if [[ "${coreInstallType:-}" != "1" || -n "${singBoxConfigPath:-}" ]]; then
+        jq -n '{ok:false, items: []}'
+        return
+    fi
     if ! accounts=$(collectLocalTrafficAccounts); then
         jq -n '{ok:false, items: []}'
         return
@@ -248,7 +252,8 @@ writeSubscriptionTrafficSnapshot() {
           all(.[];
             (.source_id | type == "string" and length > 0) and
             (.status | type == "string" and length > 0) and
-            (if .status == "success" then (.response.items | type == "array") else true end))
+            .status == "success" and
+            (.response.items | type == "array"))
         ' <<<"${remoteResults}" >/dev/null 2>&1; then
         statusCard "流量统计" "采集失败，已保留上次统计"
         return 1
@@ -272,6 +277,10 @@ writeSubscriptionTrafficSnapshot() {
       def keepSources($map; $ids):
         ($map // {}) | with_entries(. as $entry | select(($ids | index($entry.key)) != null));
       . as $group |
+      ($group.sources | map(select(.role != "main" and .enabled == true) | .id) | sort) as $expectedRemoteSourceIds |
+      if (($remoteResults | map(.source_id) | sort) != $expectedRemoteSourceIds) then
+        error("remote traffic result set does not match enabled sources")
+      else
       ($group.sources | map(.id)) as $sourceIds |
       ($group.user_groups | map({key:(.id | '"${SUBSCRIPTION_SYNC_ACCOUNT_NAME_FROM_ID_JQ}"'), value:.id}) | from_entries) as $accountIdMap |
       (mapped($snapshot.items; $accountIdMap)) as $items |
@@ -294,6 +303,7 @@ writeSubscriptionTrafficSnapshot() {
       .traffic.admin = {sources:$adminSourceTraffic} |
       .traffic.user_groups = $userTraffic |
       .traffic.sources = $sourceTraffic
+      end
     '
 }
 

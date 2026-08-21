@@ -740,7 +740,7 @@ removeSubscriptionSourceState() {
           error("main subscription source cannot be removed")
         elif (any(.sources[]?; .id == $id) | not) then
           error("subscription source not found")
-        elif any(.user_groups[]?.allowed_sources[]?; . == $id) then
+        elif any(.user_groups[]?.allowed_sources[]?; . == "*" or . == $id) then
           error("subscription source is still referenced by a user")
         else
           .sources = ([.sources[]? | select(.id != $id)]) |

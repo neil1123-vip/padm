@@ -399,24 +399,26 @@ subscriptionSyncAppendProtocolBatch() {
     local mode=$4
     local protocolId
     local fileName
+    local registry
     local rc=0
 
+    case "${mode}" in
+    xray)
+        registry=$(protocolCapabilityRegistry) || return 1
+        registry=$(awk -F'|' '$3 == "node" && ("," $6 ",") ~ ",xray," && $19 != "" { print $1 "\t" $19 }' <<<"${registry}") || return 1
+        ;;
+    singbox)
+        registry=$(protocolCapabilityRegistry) || return 1
+        registry=$(awk -F'|' '$3 == "node" && ("," $6 ",") ~ ",sing-box," && $19 != "" { print $1 "\t" $19 }' <<<"${registry}") || return 1
+        ;;
+    *)
+        return 1
+        ;;
+    esac
     while IFS=$'\t' read -r protocolId fileName; do
         [[ -n "${protocolId}" && -n "${fileName}" ]] || continue
         subscriptionSyncAppendProtocolUser "${protocolId}" "${configDir}${fileName}" '' "${uuid}" "${accountName}" || rc=1
-    done < <(
-        case "${mode}" in
-        xray)
-            protocolCapabilityRegistry | awk -F'|' '$3 == "node" && ("," $6 ",") ~ ",xray," && $19 != "" { print $1 "\t" $19 }'
-            ;;
-        singbox)
-            protocolCapabilityRegistry | awk -F'|' '$3 == "node" && ("," $6 ",") ~ ",sing-box," && $19 != "" { print $1 "\t" $19 }'
-            ;;
-        *)
-            return 1
-            ;;
-        esac
-    )
+    done <<<"${registry}"
     return "${rc}"
 }
 
@@ -1152,8 +1154,7 @@ runSubscriptionGroupSyncUnlocked() {
                 fi
             fi
         else
-            failures=$(jq '. + ["限额自动执行前流量统计刷新失败"]' <<<"${failures}")
-            rc=1
+            statusCard "限额自动执行" "流量快照不完整，已跳过额度判断并保留旧统计"
         fi
     fi
 
@@ -1292,15 +1293,16 @@ runSubscriptionGroupSyncUnlocked() {
     fi
 
     if ! collectSubscriptionTraffic; then
-        failures=$(jq '. + ["同步完成后流量统计刷新失败"]' <<<"${failures}")
-        rc=1
+        statusCard "流量统计" "同步已完成，但流量快照不完整，已保留旧统计"
     fi
 
     if [[ "${failures}" == "[]" ]]; then
-        if ! subscriptionSyncMarkResult success "${failures}"; then
-            rc=1
+        if subscriptionSyncMarkResult success "${failures}"; then
+            successCard "自动同步完成"
+        else
+            errorCard "自动同步已执行，但同步结果写入失败"
+            return 1
         fi
-        successCard "自动同步完成"
     else
         if ! subscriptionSyncMarkResult partial "${failures}"; then
             rc=1

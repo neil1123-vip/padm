@@ -501,15 +501,9 @@ createAndSyncUserSubscriptionWizard() {
         errorCard "输入有误，ID 最多 64 个字符，且只能包含英文、数字、下划线或短横线"
         return 1
     fi
-
-    if ensureSubscriptionServiceForSharedLinks; then
-        :
-    else
-        subscriptionServiceStatus=$?
-        if [[ "${subscriptionServiceStatus}" == "2" ]]; then
-            return 1
-        fi
-        canShowLinks=false
+    if userSubscriptionExists "${id}"; then
+        errorCard "分享订阅 ID 已存在"
+        return 1
     fi
 
     userResultCard "这个订阅可使用的服务器"
@@ -534,6 +528,16 @@ createAndSyncUserSubscriptionWizard() {
     if ! echo "${limit}" | grep -qE '^[0-9]+$'; then
         errorCard "订阅额度必须是数字"
         return 1
+    fi
+
+    if ensureSubscriptionServiceForSharedLinks; then
+        :
+    else
+        subscriptionServiceStatus=$?
+        if [[ "${subscriptionServiceStatus}" == "2" ]]; then
+            return 1
+        fi
+        canShowLinks=false
     fi
 
     if ! addUserSubscriptionState "${id}" "${id}" "${sourceJson}" "${limit}"; then
@@ -887,8 +891,8 @@ changeSubscriptionSourceEnabledMenu() {
     warnCard "${actionText}被控服务器" "目标：${sourceId}（$(jq -r '.name' <<<"${source}")）" "停用只影响后续同步和公网发布，不删除 Peer、Token 或历史状态"
     autoConfirm subscription_source_enabled_confirm "确认${actionText} ${sourceId}？" n confirm
     [[ "${confirm}" == "y" ]] || { coreCancelledStatusCard "服务器源状态未修改"; return 0; }
-    if ! setSubscriptionSourceEnabled "${sourceId}" "${targetEnabled}"; then
-        errorCard "被控服务器状态更新失败"
+    if ! setSubscriptionRemoteSourceEnabled "${sourceId}" "${targetEnabled}"; then
+        errorCard "${SUBSCRIPTION_REMOTE_SOURCE_MUTATION_ERROR:-被控服务器状态更新失败}"
         return 1
     fi
     successCard "被控服务器已${actionText}" "来源：${sourceId}"
