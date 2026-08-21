@@ -69,7 +69,7 @@ runSubscriptionMainControllerWizard() {
     if [[ "${createInvite}" == "y" ]]; then
         createSubscriptionWireGuardInviteMenu
     else
-        statusCard "已跳过创建邀请" "稍后可从 主控首页 -> 添加/移除被控服务器 创建"
+        statusCard "已跳过创建邀请" "稍后可从 主控首页 -> 服务器与协同 创建"
     fi
 }
 
@@ -157,7 +157,7 @@ subscriptionRequireRole() {
         return 1
         ;;
     *)
-        errorCard "当前机器还没完成角色初始化" "请先进入 订阅与用户 选择 这台作为主控 或 这台作为被控"
+        errorCard "当前机器还没完成角色初始化" "请从本机订阅首页启用主控协同或接入主控"
         return 1
         ;;
     esac
@@ -170,42 +170,23 @@ subscriptionRequireMainRole() {
 
 subscriptionRequireControlledRole() {
     subscriptionRequireRole controlled main \
-        "当前机器已初始化为主控" "请进入 主控首页 -> 发布订阅、订阅同步或控制面与连接细节"
-}
-
-manageSubscriptionRoleSelection() {
-    while true; do
-        echoContent title "\n┌─ 订阅与用户 ───────────────────────────────────────"
-        showSubscriptionServerRoleSummary
-        menuLine "可直接管理本机订阅，也可按需启用主控/被控拓扑。"
-        menuItem 1 "本机单独使用" "管理本机订阅、用户、流量和维护，不启用 WireGuard"
-        menuItem 2 "这台作为主控" "初始化主控、输出本机接入凭据，并开始添加被控服务器"
-        menuItem 3 "这台作为被控" "初始化被控、导入主控凭据，并输出本机接入凭据"
-        menuReturnItem 4 "返回主菜单" "回到 padm 管理面板"
-        menuClose
-        autoRead subscription_role_selection_menu "请选择:" roleSelectionStatus
-        case "${roleSelectionStatus}" in
-        1) manageSubscriptionLocalHome ;;
-        2) runSubscriptionMainControllerWizard && return 0 ;;
-        3) runSubscriptionControlledWizard && return 0 ;;
-        4) menu; return 1 ;;
-        *) coreSelectionErrorCard ;;
-        esac
-    done
+        "当前机器已初始化为主控" "请进入主控首页管理订阅、同步或控制面"
 }
 
 manageSubscriptionLocalHome() {
     subscriptionRequireLocalPublisherRole || return 1
     while true; do
         echoContent title "\n┌─ 本机订阅首页 ─────────────────────────────────────"
+        showSubscriptionServerRoleSummary
         menuItem 1 "安装/更新订阅服务" "安装或刷新 Nginx 订阅发布配置"
         menuItem 2 "刷新并查看我的订阅链接" "重新生成并显示当前自用订阅"
         menuItem 3 "新建并发布订阅" "填写 ID、节点范围和额度，然后同步并拿到可发送的链接"
         menuItem 4 "查看并处理已有订阅" "刷新链接、改范围、改额度、启停或删除"
         menuItem 5 "订阅同步" "立即同步、自动同步、用量限额和状态排障"
-        menuItem 6 "状态备份与恢复" "创建、查看、恢复或重建 groups.json"
-        menuItem 7 "启用多服务器协同" "将本机初始化为主控，保留现有订阅状态和服务"
-        menuReturnItem 8 "返回上级" "回到订阅模式选择"
+        menuItem 6 "状态备份与恢复" "创建、恢复或重建 groups.json"
+        menuItem 7 "启用主控协同" "将本机初始化为主控，保留现有订阅状态和服务"
+        menuItem 8 "接入主控" "粘贴主控邀请，将本机初始化为被控"
+        menuReturnItem 9 "返回主菜单" "回到 padm 管理面板"
         menuClose
         autoRead subscription_local_home_menu "请选择:" localHomeStatus
         case "${localHomeStatus}" in
@@ -215,8 +196,9 @@ manageSubscriptionLocalHome() {
         4) manageUserSubscriptionItem ;;
         5) manageSubscriptionSyncSettings ;;
         6) manageSubscriptionStateBackups ;;
-        7) runSubscriptionMainControllerWizard && return 0 ;;
-        8) return ;;
+        7) runSubscriptionMainControllerWizard; return ;;
+        8) runSubscriptionControlledWizard; return ;;
+        9) menu; return ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -231,16 +213,11 @@ manageSubscriptionMainHome() {
         menuItem 2 "刷新并查看我的订阅链接" "重新生成并显示当前自用订阅"
         menuItem 3 "新建并发布订阅" "填写 ID、节点范围和额度，然后同步并拿到可发送的链接"
         menuItem 4 "查看并处理已有订阅" "刷新链接、改范围、改额度、启停或删除"
-        menuItem 5 "查看我的可用服务器" "查看本机和已添加被控服务器源"
-        menuItem 6 "查看我的流量" "查看自用账号流量统计"
-        menuItem 7 "订阅同步" "立即同步、自动同步、用量限额和状态排障"
-        menuItem 8 "状态备份与恢复" "创建、查看、恢复或重建 groups.json"
-        menuItem 9 "主控建链向导" "初始化主控、复制主控凭据并检查健康"
-        menuItem 10 "添加/移除被控服务器" "创建邀请、完成接入、管理来源或移除 Peer"
-        menuItem 11 "更新被控服务器凭据" "更新内网地址、公钥、控制端口和 Token"
-        menuItem 12 "查看协同状态" "查看来源、健康检查和最近同步结果"
-        menuItem 13 "控制面与连接细节" "查看凭据、Peer、地址，并处理重启或关闭"
-        menuReturnItem 14 "返回主菜单" "回到 padm 管理面板"
+        menuItem 5 "订阅同步" "立即同步、自动同步、用量限额和状态排障"
+        menuItem 6 "状态备份与恢复" "创建、恢复或重建 groups.json"
+        menuItem 7 "服务器与协同" "查看来源，管理邀请、凭据、健康和服务器状态"
+        menuItem 8 "控制面与连接" "查看凭据、Peer、地址，并处理重启或关闭"
+        menuReturnItem 9 "返回主菜单" "回到 padm 管理面板"
         menuClose
         autoRead subscription_main_home_menu "请选择:" mainHomeStatus
         case "${mainHomeStatus}" in
@@ -248,16 +225,11 @@ manageSubscriptionMainHome() {
         2) subscribe ;;
         3) createAndSyncUserSubscriptionWizard ;;
         4) manageUserSubscriptionItem ;;
-        5) showSubscriptionSources ;;
-        6) showAdminSubscriptionTraffic ;;
-        7) manageSubscriptionSyncSettings ;;
-        8) manageSubscriptionStateBackups ;;
-        9) runSubscriptionMainControllerWizard ;;
-        10) addSubscribeMenu ;;
-        11) setSubscriptionSourceControlTokenMenu ;;
-        12) showSubscriptionSources; showSubscriptionRemoteHealthPlan; showSubscriptionSourceSyncResults ;;
-        13) manageSubscriptionMainControlDetails ;;
-        14) menu; return ;;
+        5) manageSubscriptionSyncSettings ;;
+        6) manageSubscriptionStateBackups ;;
+        7) manageSubscriptionServers ;;
+        8) manageSubscriptionMainControlDetails ;;
+        9) menu; return ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -309,21 +281,19 @@ manageSubscriptionMainControlDetails() {
         showSubscriptionWireGuardStatus
         menuItem 1 "显示主控维护凭据" "仅用于维护已有连接，不用于首次接入"
         menuItem 2 "查看 Peer 和连接状态" "查看 WireGuard peer 和被控列表"
-        menuItem 3 "测试被控连接" "请求所有被控健康检查"
-        menuItem 4 "查看控制面地址" "显示 WireGuard 内网 health/sync 地址"
-        menuItem 5 "重写配置并重启主控控制面" "重写配置并重启控制服务"
-        menuDangerItem 6 "关闭主控控制面" "停止本机 WireGuard 控制面"
-        menuReturnItem 7 "返回主控首页" "回到上级菜单"
+        menuItem 3 "查看控制面地址" "显示 WireGuard 内网 health/sync 地址"
+        menuItem 4 "重写配置并重启主控控制面" "重写配置并重启控制服务"
+        menuDangerItem 5 "关闭主控控制面" "停止本机 WireGuard 控制面"
+        menuReturnItem 6 "返回主控首页" "回到上级菜单"
         menuClose
         autoRead subscription_main_control_details_menu "请选择:" mainControlDetailsStatus
         case "${mainControlDetailsStatus}" in
         1) showSubscriptionWireGuardMainCredential ;;
         2) showSubscriptionWireGuardPeers ;;
-        3) showSubscriptionRemoteHealthPlan ;;
-        4) showSubscriptionSourceControlUrls ;;
-        5) restartSubscriptionWireGuardControl ;;
-        6) disableSubscriptionWireGuardControl ;;
-        7) return ;;
+        3) showSubscriptionSourceControlUrls ;;
+        4) restartSubscriptionWireGuardControl ;;
+        5) disableSubscriptionWireGuardControl ;;
+        6) return ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -356,7 +326,8 @@ manageSubscription() {
         }
         case "${role}" in
         uninitialized)
-            manageSubscriptionRoleSelection || return
+            manageSubscriptionLocalHome
+            return
             ;;
         main)
             manageSubscriptionMainHome
@@ -456,15 +427,6 @@ showSubscriptionQuotaPlanJson() {
       "动作：停用超额订阅并移除本机托管账号"
     ' <<<"${plan}") || return 1
     showSubscriptionJsonWithSummary "超限处理计划" "${plan}" "${summary}"
-}
-
-showSubscriptionQuotaPlan() {
-    local plan
-    plan=$(subscriptionQuotaDryRunPlan) || {
-        errorCard "超限处理计划生成失败"
-        return 1
-    }
-    showSubscriptionQuotaPlanJson "${plan}"
 }
 
 showUserSubscriptions() {
@@ -740,28 +702,22 @@ manageUserSubscriptionItem() {
         echoContent title "\n┌─ 处理已有订阅 ─────────────────────────────────────"
         menuLine "当前订阅：${userSubscriptionId}"
         menuLine "这里处理一个已有订阅的日常维护。"
-        menuLine "建议先刷新并查看链接，再调整范围和额度；批量同步与超限处理在订阅同步中处理。"
-        menuItem 1 "同步并刷新链接" "先应用订阅变更，再重新生成当前链接"
-        menuItem 2 "刷新并查看当前链接" "重新生成订阅输出并显示该订阅当前链接"
-        menuItem 3 "查看当前用量" "只读查看累计用量和额度状态"
-        menuItem 4 "设置节点范围" "选择 main、被控服务器 ID 或 *"
-        menuItem 5 "设置订阅额度" "0 表示不限；这里只设置额度，不执行超限处理"
-        menuItem 6 "启用/停用当前订阅" "停用后同步会移除对应托管账号"
-        menuItem 7 "预览同步变更" "查看将创建/删除哪些托管账号"
-        menuDangerItem 8 "删除订阅" "删除记录；同步后移除对应托管账号"
-        menuReturnItem 9 "返回发布订阅" "回到上级菜单"
+        menuLine "批量同步与超限处理在订阅同步中处理。"
+        menuItem 1 "刷新并查看当前链接" "重新生成订阅输出并显示该订阅当前链接"
+        menuItem 2 "查看当前用量" "只读查看累计用量和额度状态"
+        menuItem 3 "设置节点范围" "选择 main、被控服务器 ID 或 *"
+        menuItem 4 "设置订阅额度" "0 表示不限；这里只设置额度，不执行超限处理"
+        menuItem 5 "启用/停用当前订阅" "停用后同步会移除对应托管账号"
+        menuDangerItem 6 "删除订阅" "删除记录；同步后移除对应托管账号"
+        menuReturnItem 7 "返回上级" "回到订阅首页"
         menuClose
         autoRead user_subscription_item_menu "请选择:" userSubscriptionItemStatus
         case "${userSubscriptionItemStatus}" in
-        1)
-            runSubscriptionGroupSync || return 1
-            showUserSubscriptionLinks "${userSubscriptionId}"
-            ;;
-        2) showUserSubscriptionLinks "${userSubscriptionId}" ;;
-        3) showUserSubscriptionTraffic "${userSubscriptionId}" ;;
-        4) setUserSubscriptionSourcesMenu "${userSubscriptionId}" ;;
-        5) setUserSubscriptionTrafficLimitMenu "${userSubscriptionId}" ;;
-        6)
+        1) showUserSubscriptionLinks "${userSubscriptionId}" ;;
+        2) showUserSubscriptionTraffic "${userSubscriptionId}" ;;
+        3) setUserSubscriptionSourcesMenu "${userSubscriptionId}" ;;
+        4) setUserSubscriptionTrafficLimitMenu "${userSubscriptionId}" ;;
+        5)
             if toggleUserSubscriptionState "${userSubscriptionId}"; then
                 successCard "用户订阅状态已切换"
                 runSubscriptionSyncAfterMutation "用户订阅状态切换" || return 1
@@ -769,9 +725,8 @@ manageUserSubscriptionItem() {
                 errorCard "用户订阅状态切换失败"
             fi
             ;;
-        7) showSubscriptionLocalSyncPlan ;;
-        8) removeUserSubscriptionMenu "${userSubscriptionId}" && return ;;
-        9) return ;;
+        6) removeUserSubscriptionMenu "${userSubscriptionId}" && return ;;
+        7) return ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -940,28 +895,33 @@ changeSubscriptionSourceEnabledMenu() {
     runSubscriptionSyncAfterMutation "被控服务器${actionText}" || true
 }
 
-addSubscribeMenu() {
+manageSubscriptionServers() {
     subscriptionRequireMainRole || return 1
-    local addSubscribeStatus=
+    local serverStatus=
     while true; do
-        echoContent title "\n┌─ 服务器源管理 ─────────────────────────────────────"
-        menuLine "这里管理主控上的被控服务器源。"
+        echoContent title "\n┌─ 服务器与协同 ─────────────────────────────────────"
         menuLine "推荐按 创建邀请 -> 被控导入 -> 完成接入 的顺序操作。"
-        menuItem 1 "创建被控邀请" "输入一次别名，自动预留 WireGuard 地址"
-        menuItem 2 "完成被控接入" "粘贴接入回执，自动使用预留别名和地址"
-        menuItem 3 "查看/取消待完成邀请" "按别名查看状态或释放预留地址"
-        menuItem 4 "启用/停用被控服务器" "保留凭据，只调整该来源是否参加同步和发布"
-        menuItem 5 "移除被控服务器" "删除已有被控来源和 WireGuard Peer"
-        menuReturnItem 6 "返回多服务器协同" "回到上级菜单"
+        menuItem 1 "查看来源与同步状态" "查看本机和被控来源的地址、启用状态及最近同步结果"
+        menuItem 2 "创建被控邀请" "输入一次别名，自动预留 WireGuard 地址"
+        menuItem 3 "完成被控接入" "粘贴接入回执，自动使用预留别名和地址"
+        menuItem 4 "查看/取消待完成邀请" "按别名查看状态或释放预留地址"
+        menuItem 5 "更新被控服务器凭据" "更新内网地址、公钥、控制端口和 Token"
+        menuItem 6 "启用/停用被控服务器" "保留凭据，只调整该来源是否参加同步和发布"
+        menuItem 7 "检查被控服务器健康" "请求所有启用的被控服务器健康检查"
+        menuDangerItem 8 "移除被控服务器" "删除已有被控来源和 WireGuard Peer"
+        menuReturnItem 9 "返回主控首页" "回到上级菜单"
         menuClose
-        autoRead server_source_menu "请选择:" addSubscribeStatus
-        case "${addSubscribeStatus}" in
-        1) createSubscriptionWireGuardInviteMenu ;;
-        2) addOtherSubscribe ;;
-        3) manageSubscriptionPendingInvites ;;
-        4) changeSubscriptionSourceEnabledMenu ;;
-        5) removeSubscriptionControlledServerMenu ;;
-        6) return ;;
+        autoRead server_source_menu "请选择:" serverStatus
+        case "${serverStatus}" in
+        1) showSubscriptionSources ;;
+        2) createSubscriptionWireGuardInviteMenu ;;
+        3) addOtherSubscribe ;;
+        4) manageSubscriptionPendingInvites ;;
+        5) setSubscriptionSourceControlTokenMenu ;;
+        6) changeSubscriptionSourceEnabledMenu ;;
+        7) showSubscriptionRemoteHealthPlan ;;
+        8) removeSubscriptionControlledServerMenu ;;
+        9) return ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -996,7 +956,7 @@ addOtherSubscribe() {
     if [[ -n "${health}" ]] && jq -e '.ok == true' <<<"${health}" >/dev/null 2>&1; then
         successCard "被控接入已完成" "别名：${completedAlias}" "WireGuard 与控制服务健康检查通过"
     else
-        warnCard "接入已保存，但暂不可达" "别名：${completedAlias}" "Peer、服务器源和 Token 已保留；可稍后从 查看协同状态 重试健康检查"
+        warnCard "接入已保存，但暂不可达" "别名：${completedAlias}" "Peer、服务器源和 Token 已保留；可稍后从 服务器与协同 重试健康检查"
     fi
     runSubscriptionSyncAfterMutation "被控服务器接入" || true
 }
@@ -1037,23 +997,6 @@ showSubscriptionSourceControlUrls() {
       .sources[]? | select(.role != "main") |
       "ID:\(.id)\n名称:\(.name)\n控制面:WireGuard\n内网地址:\(.host):\(.port)\nHealth:http://\(.host):\(.port)/s/control/health\nSync:http://\(.host):\(.port)/s/control/sync\n---"'
     ) || return 1
-    printf '%s\n' "${output}"
-}
-
-showSubscriptionSourceSyncResults() {
-    local syncSummary
-    local role
-    local output
-    local sourceFilter='.'
-    role=$(subscriptionCurrentRoleNormalized) || return 1
-    [[ "${role}" == "uninitialized" ]] && sourceFilter='select(.role == "main")'
-    syncSummary=$(subscriptionSourceSyncSummaryJq) || return 1
-    output=$(subscriptionActiveGroupRead -r "
-      .sources[]? |
-      ${sourceFilter} |
-      \"ID:\\(.id)\\n名称:\\(.name)\\n同步状态:\\(.sync_status)\" +
-      ${syncSummary} +
-      \"\\n---\"") || return 1
     printf '%s\n' "${output}"
 }
 
@@ -1167,11 +1110,10 @@ manageSubscriptionSyncDiagnostics() {
         menuItem 1 "查看最近同步结果与失败列表" "显示组状态和各来源最近同步结果"
         menuItem 2 "检查本机服务与发布状态" "显示服务器角色和公网订阅服务状态"
         if [[ "${role}" == "main" ]]; then
-            menuItem 3 "检查被控服务器健康" "请求所有启用的被控服务器健康检查"
-            menuItem 4 "查看本机同步计划" "预览本机 create/remove"
-            menuItem 5 "查看远端同步计划" "对启用来源执行 dry-run"
-            menuItem 6 "查看自动同步定时任务" "显示当前 SyncSubscriptionGroups cron"
-            menuReturnItem 7 "返回订阅同步" "回到上级菜单"
+            menuItem 3 "查看本机同步计划" "预览本机 create/remove"
+            menuItem 4 "查看远端同步计划" "对启用来源执行 dry-run"
+            menuItem 5 "查看自动同步定时任务" "显示当前 SyncSubscriptionGroups cron"
+            menuReturnItem 6 "返回订阅同步" "回到上级菜单"
         else
             menuItem 3 "查看本机同步计划" "预览本机 create/remove"
             menuItem 4 "查看自动同步定时任务" "显示当前 SyncSubscriptionGroups cron"
@@ -1181,18 +1123,17 @@ manageSubscriptionSyncDiagnostics() {
         autoRead subscription_sync_diagnostics_menu "请选择:" diagnosticStatus
         if [[ "${role}" == "main" ]]; then
             case "${diagnosticStatus}" in
-            1) showSubscriptionGroupsStateSummary; showSubscriptionSourceSyncResults ;;
+            1) showSubscriptionGroupsStateSummary; showSubscriptionSources ;;
             2) showSubscriptionServerRoleSummary; showSubscriptionServiceStatus ;;
-            3) showSubscriptionRemoteHealthPlan ;;
-            4) showSubscriptionLocalSyncPlan ;;
-            5) showSubscriptionRemoteSyncPlan ;;
-            6) crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true ;;
-            7) return ;;
+            3) showSubscriptionLocalSyncPlan ;;
+            4) showSubscriptionRemoteSyncPlan ;;
+            5) crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true ;;
+            6) return ;;
             *) coreSelectionErrorCard ;;
             esac
         else
             case "${diagnosticStatus}" in
-            1) showSubscriptionGroupsStateSummary; showSubscriptionSourceSyncResults ;;
+            1) showSubscriptionGroupsStateSummary; showSubscriptionSources ;;
             2) showSubscriptionServerRoleSummary; showSubscriptionServiceStatus ;;
             3) showSubscriptionLocalSyncPlan ;;
             4) crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true ;;

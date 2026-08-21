@@ -1012,9 +1012,8 @@ runSubscriptionSyncProcessSubstitutionFailureRegression() {
         regressionExpectStatus 1 listSubscriptionGroupsBackups >/dev/null 2>&1
 
         listSubscriptionGroupsBackups() { return 7; }
-        regressionExpectStatus 1 showSubscriptionGroupsBackups >/dev/null 2>&1
         regressionExpectStatus 1 selectSubscriptionGroupsBackupFile >/dev/null 2>&1
-        [[ "$(grep -c '^状态备份列表读取失败$' <<<"${errors}")" == "2" ]]
+        [[ "$(grep -c '^状态备份列表读取失败$' <<<"${errors}")" == "1" ]]
     )
 }
 
