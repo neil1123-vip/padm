@@ -584,8 +584,14 @@ subscriptionActiveGroupSetById() {
         "${query}"
 }
 
-subscriptionActiveEnabledUsersJson() {
-    subscriptionActiveGroupRead -c '
+subscriptionEnabledUsersJsonFromState() {
+    local state=$1
+    jq -c '
+      if has("groups") then
+        .active_group as $active | first(.groups[]? | select(.id == $active))
+      else
+        .
+      end |
       . as $group |
       [.user_groups[]?
        | select(.enabled == true)
@@ -605,7 +611,14 @@ subscriptionActiveEnabledUsersJson() {
              else
                any($group.sources[]?; .role != "main" and .enabled == true and (.id as $sid | $allowed | index($sid)))
              end)
-         }]'
+         }]
+    ' <<<"${state}"
+}
+
+subscriptionActiveEnabledUsersJson() {
+    local groupState
+    groupState=$(subscriptionActiveGroupRead -c '.') || return 1
+    subscriptionEnabledUsersJsonFromState "${groupState}"
 }
 
 addUserSubscriptionState() {
@@ -732,9 +745,19 @@ addSubscriptionSourceState() {
     '
 }
 
+subscriptionSourceRemovalAllowed() {
+    local id=$1
+    subscriptionStateIdValid "${id}" || return 1
+    subscriptionActiveGroupRead -e --arg id "${id}" '
+        any(.sources[]?; .id == $id and .role != "main") and
+        all(.user_groups[]?.allowed_sources[]?; . != "*" and . != $id)
+    ' >/dev/null 2>&1
+}
+
 removeSubscriptionSourceState() {
     local id=$1
     subscriptionStateIdValid "${id}" || return 1
+    subscriptionSourceRemovalAllowed "${id}" || return 1
     subscriptionActiveGroupWrite --arg id "${id}" '
         if any(.sources[]?; .id == $id and .role == "main") then
           error("main subscription source cannot be removed")

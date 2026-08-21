@@ -7,10 +7,15 @@ subscriptionRemoteControlSources() {
 
 subscriptionRemoteDesiredUsersBySource() {
     local sources=$1
+    local state=${2:-}
     local sourceIds
     local enabledUsers
     sourceIds=$(jq -c '[.[].id]' <<<"${sources}") || return 1
-    enabledUsers=$(subscriptionActiveEnabledUsersJson) || return 1
+    if [[ -n "${state}" ]]; then
+        enabledUsers=$(subscriptionEnabledUsersJsonFromState "${state}") || return 1
+    else
+        enabledUsers=$(subscriptionActiveEnabledUsersJson) || return 1
+    fi
     jq -e 'all(.[]?; (.uuid // "") | test("^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"))' <<<"${enabledUsers}" >/dev/null 2>&1 || return 1
     jq -c -n --argjson sourceIds "${sourceIds}" --argjson users "${enabledUsers}" '
       reduce $sourceIds[]? as $sourceId ({};
@@ -492,12 +497,13 @@ subscriptionRemoteApplyDesiredUsersForSource() {
 subscriptionRemoteDrainSource() {
     local source=$1
     local outputVar=$2
+    local state=${3:-}
     local sourceId
     local desiredUsers
     local emptyUsers
     sourceId=$(jq -r '.id // empty' <<<"${source}") || return 1
     [[ -n "${sourceId}" ]] || return 1
-    desiredUsers=$(subscriptionRemoteDesiredUsersBySource "$(jq -cn --argjson source "${source}" '[$source]')") || return 1
+    desiredUsers=$(subscriptionRemoteDesiredUsersBySource "$(jq -cn --argjson source "${source}" '[$source]')" "${state}") || return 1
     emptyUsers=$(jq -cn --arg sourceId "${sourceId}" '{($sourceId):[]}') || return 1
     subscriptionRemoteApplyDesiredUsersForSource "${source}" "${emptyUsers}" || return 1
     printf -v "${outputVar}" '%s' "${desiredUsers}"

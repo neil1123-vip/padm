@@ -91,8 +91,11 @@ applySubscriptionGroupsStateMaintenanceUnlocked() {
     local configBackupDir=
     local outputBackupDir=
     local previousCrontab=
+    local previousGroupsState=
+    local targetGroupsState=
     local failure=
     local rollbackStatus=0
+    local wireGuardTransitionActive=false
 
     SUBSCRIPTION_STATE_MAINTENANCE_BACKUP=
     SUBSCRIPTION_STATE_MAINTENANCE_ERROR=
@@ -105,6 +108,10 @@ applySubscriptionGroupsStateMaintenanceUnlocked() {
         return 1
     }
     SUBSCRIPTION_STATE_MAINTENANCE_BACKUP=${currentBackup}
+    previousGroupsState=$(<"${currentBackup}") || {
+        SUBSCRIPTION_STATE_MAINTENANCE_ERROR="${actionName}前读取当前状态备份失败，未执行${actionName}"
+        return 1
+    }
     if ! subscriptionSyncCreateLocalApplyBackups configBackupDir outputBackupDir; then
         SUBSCRIPTION_STATE_MAINTENANCE_ERROR="${actionName}前备份本机配置或订阅输出失败，未执行${actionName}"
         return 1
@@ -114,12 +121,24 @@ applySubscriptionGroupsStateMaintenanceUnlocked() {
         SUBSCRIPTION_STATE_MAINTENANCE_ERROR="订阅状态${actionName}失败，当前状态未变"
         return 1
     fi
-    if ! runSubscriptionGroupSync; then
+    if declare -F subscriptionWireGuardCleanupRemovedSources >/dev/null 2>&1; then
+        if ! targetGroupsState=$(jq -c '.' "$(subscriptionGroupsFile)" 2>/dev/null); then
+            failure="订阅状态${actionName}后的目标状态读取失败"
+        elif ! subscriptionWireGuardCleanupRemovedSources "${previousGroupsState}" "${targetGroupsState}"; then
+            failure="订阅状态${actionName}后的旧来源清理失败"
+        elif [[ "${SUBSCRIPTION_WIREGUARD_GROUPS_TRANSITION_ACTIVE:-false}" == "true" ]]; then
+            wireGuardTransitionActive=true
+        fi
+    fi
+    if [[ -z "${failure}" ]] && ! runSubscriptionGroupSync; then
         failure="订阅状态${actionName}后的完整同步失败"
-    elif ! refreshSubscriptionGroupSyncCron; then
+    elif [[ -z "${failure}" ]] && ! refreshSubscriptionGroupSyncCron; then
         failure="订阅状态${actionName}后的定时任务刷新失败"
     fi
     if [[ -z "${failure}" ]]; then
+        if declare -F subscriptionWireGuardResetGroupsTransition >/dev/null 2>&1; then
+            subscriptionWireGuardResetGroupsTransition
+        fi
         subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
         return 0
     fi
@@ -129,6 +148,13 @@ applySubscriptionGroupsStateMaintenanceUnlocked() {
     else
         SUBSCRIPTION_STATE_MAINTENANCE_ERROR=${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-"${failure}，且本地数据恢复失败"}
         rollbackStatus=1
+    fi
+    if [[ "${wireGuardTransitionActive}" == "true" ]] ||
+        [[ "${SUBSCRIPTION_WIREGUARD_GROUPS_TRANSITION_ACTIVE:-false}" == "true" ]]; then
+        if ! subscriptionWireGuardRollbackGroupsTransition; then
+            SUBSCRIPTION_STATE_MAINTENANCE_ERROR="${SUBSCRIPTION_STATE_MAINTENANCE_ERROR}；${SUBSCRIPTION_WIREGUARD_GROUPS_TRANSITION_ERROR:-旧来源恢复失败}"
+            rollbackStatus=1
+        fi
     fi
     if [[ "${SUBSCRIPTION_SYNC_CONFIG_RESTORED:-false}" == "true" ]] && ! subscriptionSyncReconcileLocalServices; then
         SUBSCRIPTION_STATE_MAINTENANCE_ERROR="${SUBSCRIPTION_STATE_MAINTENANCE_ERROR}；恢复旧配置后服务重建失败，请检查核心服务日志"

@@ -128,16 +128,167 @@ ensureSubscriptionServiceForSharedLinks() {
 
 runSubscriptionSyncAfterMutation() {
     local reason=${1:-subscription-change}
+    local previousState=${2:-}
+    local configBackupDir=${3:-}
+    local outputBackupDir=${4:-}
+    local restoreState=true
+    local rollbackStateRestored=true
+    local configRestored=true
+    local outputRestored=true
+    local servicesRestored=true
+    local restoreMessage=
+    local restoreDetail=
     if ! subscriptionGroupSyncEnabled; then
+        if [[ -n "${configBackupDir}" || -n "${outputBackupDir}" ]]; then
+            subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
+        fi
         statusCard "订阅变更已保存" "自动同步已关闭，等待手动完整同步（${reason}）"
         return 0
     fi
+    if [[ -n "${previousState}" ]]; then
+        if [[ -z "${configBackupDir}" && -z "${outputBackupDir}" ]]; then
+            subscriptionSyncCreateLocalApplyBackups configBackupDir outputBackupDir || {
+                if subscriptionGroupsStateWrite --argjson previousState "${previousState}" '$previousState' >/dev/null 2>&1; then
+                    warnCard "变更未完成" "无法创建回滚用的本机配置和订阅输出备份，已恢复变更前状态（${reason}）"
+                else
+                    warnCard "变更未完成" "无法创建回滚用的本机配置和订阅输出备份，且变更前状态恢复失败（${reason}）"
+                fi
+                return 1
+            }
+        elif [[ -z "${outputBackupDir}" ]]; then
+            subscriptionSyncCreateSubscribeOutputBackups outputBackupDir || {
+                if subscriptionSyncRestoreConfigBackups "${configBackupDir}" >/dev/null 2>&1; then
+                    if ! subscriptionGroupsStateWrite --argjson previousState "${previousState}" '$previousState' >/dev/null 2>&1; then
+                        restoreState=false
+                    fi
+                    if ! subscriptionSyncReconcileLocalServices >/dev/null 2>&1; then
+                        servicesRestored=false
+                    fi
+                    if [[ "${restoreState}" == "true" && "${servicesRestored}" == "true" ]]; then
+                        subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}"
+                    else
+                        subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}"
+                    fi
+                else
+                    subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}"
+                    restoreState=false
+                fi
+                if [[ "${restoreState}" == "true" && "${servicesRestored}" == "true" ]]; then
+                    warnCard "变更未完成" "后置同步前备份失败，已恢复变更前状态（${reason}）"
+                else
+                    warnCard "变更未完成" "后置同步前备份失败，且变更前状态或本机服务恢复失败，请检查备份目录（${reason}）"
+                fi
+                return 1
+            }
+        elif [[ -z "${configBackupDir}" ]]; then
+            subscriptionSyncCreateConfigBackups configBackupDir || {
+                warnCard "变更未完成" "后置同步前配置备份失败，请检查变更状态（${reason}）"
+                return 1
+            }
+        fi
+    fi
     statusCard "订阅变更已保存" "正在执行完整同步（${reason}）"
     if runSubscriptionGroupSync; then
+        subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
         return 0
     fi
+    if [[ -n "${previousState}" ]]; then
+        if ! subscriptionGroupsStateWrite --argjson previousState "${previousState}" '$previousState' >/dev/null 2>&1; then
+            restoreState=false
+        fi
+        if [[ "${restoreState}" == "true" ]]; then
+            if runSubscriptionGroupSync; then
+                subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
+                warnCard "变更未完成" "后置完整同步失败，已恢复变更前状态并完成回滚同步（${reason}）"
+            else
+                if ! subscriptionGroupsStateWrite --argjson previousState "${previousState}" '$previousState' >/dev/null 2>&1; then
+                    rollbackStateRestored=false
+                fi
+                if ! subscriptionSyncRestoreConfigBackups "${configBackupDir}" >/dev/null 2>&1; then
+                    configRestored=false
+                fi
+                if ! subscriptionSyncRestoreSubscribeOutputBackups "${outputBackupDir}" >/dev/null 2>&1; then
+                    outputRestored=false
+                fi
+                if [[ "${configRestored}" == "true" ]]; then
+                    subscriptionSyncReconcileLocalServices >/dev/null 2>&1 || servicesRestored=false
+                fi
+                if [[ "${rollbackStateRestored}" == "true" && "${configRestored}" == "true" && "${outputRestored}" == "true" && "${servicesRestored}" == "true" ]]; then
+                    subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
+                    warnCard "变更未完成" "后置完整同步失败，已恢复变更前状态、本机配置和订阅输出，但回滚同步仍失败（${reason}）"
+                else
+                    subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}" "${outputBackupDir}"
+                    restoreMessage="${reason}后回滚同步失败"
+                    if [[ "${rollbackStateRestored}" != "true" ]]; then
+                        subscriptionSyncSetManualCheckMessage restoreDetail "订阅状态恢复失败" "$(subscriptionGroupsFile)"
+                        restoreMessage+="，且${restoreDetail}"
+                    fi
+                    if [[ "${configRestored}" != "true" ]]; then
+                        subscriptionSyncSetManualCheckMessage restoreDetail "本机配置恢复失败" "备份目录: ${configBackupDir}"
+                        restoreMessage+="；${restoreDetail}"
+                    fi
+                    if [[ "${outputRestored}" != "true" ]]; then
+                        subscriptionSyncSetManualCheckMessage restoreDetail "订阅输出恢复失败" "备份目录: ${outputBackupDir}"
+                        restoreMessage+="；${restoreDetail}"
+                    fi
+                    if [[ "${servicesRestored}" != "true" ]]; then
+                        restoreMessage+="；恢复旧配置后核心重载失败，请检查核心服务日志"
+                    fi
+                    warnCard "变更未完成" "${restoreMessage:-后置完整同步失败，变更前状态已恢复，但本机配置或订阅输出恢复失败，请检查备份目录}"
+                fi
+            fi
+        else
+            if ! subscriptionSyncRestoreConfigBackups "${configBackupDir}" >/dev/null 2>&1; then
+                configRestored=false
+            fi
+            if ! subscriptionSyncRestoreSubscribeOutputBackups "${outputBackupDir}" >/dev/null 2>&1; then
+                outputRestored=false
+            fi
+            if [[ "${configRestored}" == "true" ]]; then
+                subscriptionSyncReconcileLocalServices >/dev/null 2>&1 || servicesRestored=false
+            fi
+            subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}" "${outputBackupDir}"
+            restoreMessage="${reason}后变更前状态恢复失败"
+            if [[ "${configRestored}" != "true" ]]; then
+                subscriptionSyncSetManualCheckMessage restoreDetail "本机配置恢复失败" "备份目录: ${configBackupDir}"
+                restoreMessage+="；${restoreDetail}"
+            fi
+            if [[ "${outputRestored}" != "true" ]]; then
+                subscriptionSyncSetManualCheckMessage restoreDetail "订阅输出恢复失败" "备份目录: ${outputBackupDir}"
+                restoreMessage+="；${restoreDetail}"
+            fi
+            if [[ "${servicesRestored}" != "true" ]]; then
+                restoreMessage+="；恢复旧配置后核心重载失败，请检查核心服务日志"
+            fi
+            warnCard "变更未完成" "${restoreMessage}；备份已保留，请检查状态文件和备份目录（${reason}）"
+        fi
+        return 1
+    fi
+    subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
     warnCard "变更已保存，但后置完整同步失败" "请到 订阅同步 -> 状态与排障 查看失败原因，修复后手动重试"
     return 1
+}
+
+SUBSCRIPTION_USER_MUTATION_CONFIG_BACKUP_DIR=
+
+runUserSubscriptionMutationAndSyncUnlocked() {
+    local reason=$1
+    local mutationError=${2:-}
+    shift 2
+    local previousState
+    SUBSCRIPTION_USER_MUTATION_CONFIG_BACKUP_DIR=
+    previousState=$(subscriptionGroupsStateRead -c '.') || {
+        errorCard "用户订阅状态读取失败"
+        return 1
+    }
+    if ! "$@"; then
+        [[ -n "${mutationError}" ]] && errorCard "${mutationError}"
+        return 1
+    fi
+    runSubscriptionSyncAfterMutation \
+        "${reason}" \
+        "${previousState}" \
+        "${SUBSCRIPTION_USER_MUTATION_CONFIG_BACKUP_DIR}"
 }
 
 subscriptionRequireRole() {
@@ -644,27 +795,28 @@ removeUserSubscriptionRollback() {
 removeUserSubscriptionTransactionUnlocked() {
     local userSubscriptionId=$1
     local previousGroupsState
-    local configBackupDir
+    local createdConfigBackupDir
     local accountName
     local manualCheckMessage
+    SUBSCRIPTION_USER_MUTATION_CONFIG_BACKUP_DIR=
     previousGroupsState=$(subscriptionGroupsStateRead -c '.') || {
         subscriptionSyncSetManualCheckMessage manualCheckMessage "读取当前订阅状态失败" " $(subscriptionGroupsFile)"
         errorCard "${manualCheckMessage}"
         return 1
     }
-    subscriptionSyncCreateConfigBackups configBackupDir || {
+    subscriptionSyncCreateConfigBackups createdConfigBackupDir || {
         subscriptionSyncSetManualCheckMessage manualCheckMessage "删除订阅前托管账号配置备份失败" "本机配置"
         errorCard "${manualCheckMessage}"
         return 1
     }
     accountName=$(subscriptionSyncAccountName "${userSubscriptionId}")
     if ! removeUserSubscriptionState "${userSubscriptionId}"; then
-        padmRemoveCleanupPath "${configBackupDir}"
+        padmRemoveCleanupPath "${createdConfigBackupDir}"
         errorCard "用户订阅状态删除失败"
         return 1
     fi
     if ! subscriptionSyncRemoveAccount "${accountName}"; then
-        if ! removeUserSubscriptionRollback "${previousGroupsState}" "${configBackupDir}" "托管账号配置移除失败"; then
+        if ! removeUserSubscriptionRollback "${previousGroupsState}" "${createdConfigBackupDir}" "托管账号配置移除失败"; then
             return 1
         fi
         local rollbackMessage
@@ -673,7 +825,7 @@ removeUserSubscriptionTransactionUnlocked() {
         return 1
     fi
     if ! reloadCore; then
-        if ! removeUserSubscriptionRollback "${previousGroupsState}" "${configBackupDir}" "核心重载失败"; then
+        if ! removeUserSubscriptionRollback "${previousGroupsState}" "${createdConfigBackupDir}" "核心重载失败"; then
             return 1
         fi
         local rollbackMessage
@@ -681,7 +833,7 @@ removeUserSubscriptionTransactionUnlocked() {
         errorCard "${rollbackMessage}"
         return 1
     fi
-    padmRemoveCleanupPath "${configBackupDir}"
+    SUBSCRIPTION_USER_MUTATION_CONFIG_BACKUP_DIR=${createdConfigBackupDir}
 }
 
 removeUserSubscriptionMenu() {
@@ -692,10 +844,13 @@ removeUserSubscriptionMenu() {
         coreCancelledStatusCard "操作未执行"
         return 1
     fi
-    subscriptionGroupsWithLock removeUserSubscriptionTransactionUnlocked "${userSubscriptionId}" || return 1
-    successCard "用户订阅已删除"
-    runSubscriptionSyncAfterMutation "用户订阅删除" || true
-    return 0
+    if subscriptionGroupsWithLock runUserSubscriptionMutationAndSyncUnlocked \
+        "用户订阅删除" "" \
+        removeUserSubscriptionTransactionUnlocked "${userSubscriptionId}"; then
+        successCard "用户订阅已删除"
+        return 0
+    fi
+    return 1
 }
 
 manageUserSubscriptionItem() {
@@ -722,11 +877,12 @@ manageUserSubscriptionItem() {
         3) setUserSubscriptionSourcesMenu "${userSubscriptionId}" ;;
         4) setUserSubscriptionTrafficLimitMenu "${userSubscriptionId}" ;;
         5)
-            if toggleUserSubscriptionState "${userSubscriptionId}"; then
+            if subscriptionGroupsWithLock runUserSubscriptionMutationAndSyncUnlocked \
+                "用户订阅状态切换" "用户订阅状态切换失败" \
+                toggleUserSubscriptionState "${userSubscriptionId}"; then
                 successCard "用户订阅状态已切换"
-                runSubscriptionSyncAfterMutation "用户订阅状态切换" || return 1
             else
-                errorCard "用户订阅状态切换失败"
+                return 1
             fi
             ;;
         6) removeUserSubscriptionMenu "${userSubscriptionId}" && return ;;
@@ -760,12 +916,13 @@ setUserSubscriptionSourcesMenu() {
         errorCard "服务器范围包含不存在的服务器源"
         return 1
     fi
-    if ! setUserSubscriptionSources "${userSubscriptionId}" "${sourceJson}"; then
-        errorCard "节点范围更新失败"
-        return 1
+    if subscriptionGroupsWithLock runUserSubscriptionMutationAndSyncUnlocked \
+        "用户订阅节点范围更新" "节点范围更新失败" \
+        setUserSubscriptionSources "${userSubscriptionId}" "${sourceJson}"; then
+        successCard "节点范围已更新"
+        return 0
     fi
-    successCard "节点范围已更新"
-    runSubscriptionSyncAfterMutation "用户订阅节点范围更新"
+    return 1
 }
 
 setUserSubscriptionTrafficLimitMenu() {
@@ -840,6 +997,7 @@ manageSubscriptionPendingInvites() {
 removeSubscriptionControlledServerMenu() {
     local sourceId=
     local sourceOutput
+    local localOnlyConfirm=
     echoContent title "\n┌─ 移除被控服务器 ───────────────────────────────────"
     menuLine "这里列出当前可移除的被控服务器。"
     sourceOutput=$(subscriptionActiveGroupRead -r '
@@ -853,9 +1011,30 @@ removeSubscriptionControlledServerMenu() {
         errorCard "被控服务器源 ID 无效"
         return 1
     fi
-    subscriptionWireGuardRemovePeerAndSource "${sourceId}" || { errorCard "被控服务器删除失败"; return 1; }
-    successCard "被控服务器删除成功" "服务器源和 WireGuard Peer 已移除"
-    runSubscriptionSyncAfterMutation "被控服务器删除"
+    if ! subscriptionWireGuardRemovePeerAndSource "${sourceId}"; then
+        if [[ "${SUBSCRIPTION_WIREGUARD_SOURCE_REMOVE_ERROR:-}" == "remote" ]]; then
+            warnCard "远端服务器不可达或清理失败" "仅本地移除会删除本机来源和 WireGuard Peer，但不会删除远端账号；请在远端手工清理后再确认"
+            autoConfirm subscription_source_local_remove_confirm "确认仅本地移除 ${sourceId}？" n localOnlyConfirm
+            if [[ "${localOnlyConfirm}" == "y" ]]; then
+                if subscriptionWireGuardRemovePeerAndSourceLocalOnly "${sourceId}"; then
+                    if runSubscriptionSyncAfterMutation "被控服务器仅本地移除"; then
+                        successCard "被控服务器已仅本地移除" "本机来源和 WireGuard Peer 已移除" "远端账号未清理，请手工处理"
+                        return 0
+                    fi
+                    return 1
+                fi
+                errorCard "被控服务器仅本地移除失败"
+                return 1
+            fi
+        fi
+        errorCard "被控服务器删除失败"
+        return 1
+    fi
+    if runSubscriptionSyncAfterMutation "被控服务器删除"; then
+        successCard "被控服务器删除成功" "服务器源和 WireGuard Peer 已移除"
+        return 0
+    fi
+    return 1
 }
 
 changeSubscriptionSourceEnabledMenu() {

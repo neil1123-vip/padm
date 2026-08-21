@@ -1060,7 +1060,7 @@ runSubscriptionUserRemovalTransactionLockRegression() (
     runSubscriptionSyncAfterMutation() { printf '%s\n' post-sync >>"${logFile}"; }
 
     removeUserSubscriptionMenu team-a
-    [[ "$(<"${logFile}")" == $'lock-start\nremove-state\nremove-account\nreload\nlock-end\npost-sync' ]]
+    [[ "$(<"${logFile}")" == $'lock-start\nremove-state\nremove-account\nreload\npost-sync\nlock-end' ]]
 )
 
 runSubscriptionStateMaintenanceRollbackRegression() (
@@ -1071,7 +1071,7 @@ runSubscriptionStateMaintenanceRollbackRegression() (
     local logFile="${root}/calls.log"
     mkdir -p "${root}"
     printf 'old-state\n' >"${stateFile}"
-    printf 'new-state\n' >"${targetFile}"
+    printf '{"sources":[]}' >"${targetFile}"
     : >"${logFile}"
 
     subscriptionGroupsFile() { printf '%s\n' "${stateFile}"; }
@@ -1083,6 +1083,7 @@ runSubscriptionStateMaintenanceRollbackRegression() (
         mkdir -p "${!1}" "${!2}"
     }
     subscriptionGroupsStateReplace() { cp "$1" "$2"; printf '%s\n' replace >>"${logFile}"; }
+    subscriptionWireGuardCleanupRemovedSources() { return 0; }
     runSubscriptionGroupSync() { printf '%s\n' sync >>"${logFile}"; return 1; }
     subscriptionSyncRollbackLocalApply() {
         cp "${maintCurrentBackup}" "${stateFile}"
@@ -1098,6 +1099,193 @@ runSubscriptionStateMaintenanceRollbackRegression() (
     [[ "$(<"${stateFile}")" == 'old-state' ]]
     head -n 5 "${logFile}" | cmp -s - <(printf '%s\n' replace sync rollback reconcile cron)
     tail -n 1 "${logFile}" | grep -qx 'release:remove'
+)
+
+runSubscriptionStateMaintenanceRemovedSourceCleanupRegression() (
+    local logFile="${TMP_DIR}/subscription-state-maintenance-removed-source.log"
+    local previousGroupsState='{"sources":[{"id":"main","role":"main"},{"id":"edge-old","role":"secondary","enabled":true}],"user_groups":[]}'
+    local targetGroupsState='{"sources":[{"id":"main","role":"main"}],"user_groups":[]}'
+    TEST_WIREGUARD_TRANSITION_STATE='{"enabled":true,"role":"main","address":"10.77.0.1/24","peers":[{"id":"edge-old","address":"10.77.0.2/24","public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","endpoint":"","enabled":true}]}'
+    : >"${logFile}"
+
+    subscriptionWireGuardReadState() { printf '%s\n' "${TEST_WIREGUARD_TRANSITION_STATE}"; }
+    subscriptionRemoteDrainSource() {
+        printf 'drain:%s:%s\n' "$(jq -r '.id' <<<"$1")" "$3" >>"${logFile}"
+        printf -v "$2" '%s' '{"edge-old":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111","account":"sub_team_a"}]}'
+    }
+    subscriptionWireGuardWriteState() {
+        local state= filter=
+        while (($# > 1)); do
+            if [[ "$1" == "--argjson" && "$2" == "state" ]]; then
+                state=$3
+                shift 3
+            else
+                shift
+            fi
+        done
+        filter=${1:-}
+        [[ -n "${state}" && -n "${filter}" ]] || return 1
+        TEST_WIREGUARD_TRANSITION_STATE=${state}
+    }
+    applySubscriptionWireGuardService() { printf 'apply\n' >>"${logFile}"; }
+    subscriptionWireGuardRestoreStateAndConfig() {
+        TEST_WIREGUARD_TRANSITION_STATE=$1
+        printf 'restore-state\n' >>"${logFile}"
+    }
+    subscriptionRemoteApplyDesiredUsersForSource() {
+        printf 'restore-remote:%s\n' "$(jq -r '.id' <<<"$1")" >>"${logFile}"
+    }
+
+    subscriptionWireGuardCleanupRemovedSourcesUnlocked "${previousGroupsState}" "${targetGroupsState}"
+    [[ "${SUBSCRIPTION_WIREGUARD_GROUPS_TRANSITION_ACTIVE}" == "true" ]]
+    jq -e '.peers | length == 0' <<<"${TEST_WIREGUARD_TRANSITION_STATE}" >/dev/null
+    grep -q '^drain:edge-old:' "${logFile}"
+
+    subscriptionWireGuardRollbackGroupsTransition
+    jq -e '.peers[0].id == "edge-old"' <<<"${TEST_WIREGUARD_TRANSITION_STATE}" >/dev/null
+    grep -qx 'restore-state' "${logFile}"
+    grep -qx 'restore-remote:edge-old' "${logFile}"
+)
+
+runSubscriptionSourceRemovalPreflightRegression() (
+    local logFile="${TMP_DIR}/subscription-source-removal-preflight.log"
+    TEST_SOURCE_GROUPS='{"sources":[{"id":"main","role":"main"},{"id":"edge","role":"secondary"}],"user_groups":[{"id":"team-a","allowed_sources":["*"]}]}'
+    TEST_SOURCE_WIREGUARD='{"role":"main","peers":[]}'
+    : >"${logFile}"
+
+    subscriptionWireGuardRole() { printf 'main\n'; }
+    subscriptionWireGuardReadPreviousStateAndGroups() {
+        printf -v "$1" '%s' "${TEST_SOURCE_WIREGUARD}"
+        printf -v "$2" '%s' "${TEST_SOURCE_GROUPS}"
+    }
+    subscriptionActiveGroupRead() { jq "$@" <<<"${TEST_SOURCE_GROUPS}"; }
+    subscriptionSourceExists() { [[ "$1" == "edge" ]]; }
+    subscriptionSourceIsMain() { [[ "$1" == "main" ]]; }
+    subscriptionRemoteDrainSource() { printf 'remote\n' >>"${logFile}"; return 1; }
+    subscriptionWireGuardWriteState() { printf 'wireguard\n' >>"${logFile}"; return 1; }
+
+    if subscriptionWireGuardRemovePeerAndSourceUnlocked edge >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ ! -s "${logFile}" ]]
+)
+
+runSubscriptionMutationSyncRollbackRegression() (
+    TEST_SYNC_CALLS=0
+    TEST_SYNC_STATE_RESTORED=false
+    subscriptionGroupSyncEnabled() { return 0; }
+    runSubscriptionGroupSync() {
+        TEST_SYNC_CALLS=$((TEST_SYNC_CALLS + 1))
+        [[ "${TEST_SYNC_CALLS}" -gt 1 ]]
+    }
+    subscriptionGroupsStateWrite() { TEST_SYNC_STATE_RESTORED=true; }
+    statusCard() { :; }
+    warnCard() { :; }
+
+    if runSubscriptionSyncAfterMutation "测试用户收权" '{"old":true}'; then
+        return 1
+    fi
+    [[ "${TEST_SYNC_CALLS}" == "2" ]]
+    [[ "${TEST_SYNC_STATE_RESTORED}" == "true" ]]
+)
+
+runSubscriptionMutationSyncRollbackLocalRestoreRegression() (
+    local configFile="${TMP_DIR}/mutation-config.json"
+    local outputFile="${TMP_DIR}/mutation-output.txt"
+    local testConfigBackupDir="${TMP_DIR}/mutation-config-backup"
+    local testOutputBackupDir="${TMP_DIR}/mutation-output-backup"
+    local releaseMode=
+    printf 'old-config\n' >"${configFile}"
+    printf 'old-output\n' >"${outputFile}"
+    TEST_SYNC_CALLS=0
+    TEST_SYNC_STATE_RESTORED=false
+    TEST_CONFIG_RESTORED=false
+    TEST_OUTPUT_RESTORED=false
+    TEST_SERVICES_RECONCILED=false
+    subscriptionGroupSyncEnabled() { return 0; }
+    runSubscriptionGroupSync() {
+        TEST_SYNC_CALLS=$((TEST_SYNC_CALLS + 1))
+        printf 'new-config\n' >"${configFile}"
+        printf 'new-output\n' >"${outputFile}"
+        return 1
+    }
+    subscriptionSyncCreateLocalApplyBackups() {
+        mkdir -p "${testConfigBackupDir}" "${testOutputBackupDir}"
+        cp "${configFile}" "${testConfigBackupDir}/config"
+        cp "${outputFile}" "${testOutputBackupDir}/output"
+        printf -v "$1" '%s' "${testConfigBackupDir}"
+        printf -v "$2" '%s' "${testOutputBackupDir}"
+    }
+    subscriptionGroupsStateWrite() { TEST_SYNC_STATE_RESTORED=true; }
+    subscriptionSyncRestoreConfigBackups() { cp "${testConfigBackupDir}/config" "${configFile}"; TEST_CONFIG_RESTORED=true; }
+    subscriptionSyncRestoreSubscribeOutputBackups() { cp "${testOutputBackupDir}/output" "${outputFile}"; TEST_OUTPUT_RESTORED=true; }
+    subscriptionSyncReconcileLocalServices() { TEST_SERVICES_RECONCILED=true; }
+    subscriptionSyncReleaseLocalApplyBackups() { releaseMode=$1; }
+    statusCard() { :; }
+    warnCard() { :; }
+
+    if runSubscriptionSyncAfterMutation "测试用户收权" '{"old":true}'; then
+        return 1
+    fi
+    [[ "${TEST_SYNC_CALLS}" == "2" ]]
+    [[ "${TEST_SYNC_STATE_RESTORED}" == "true" ]]
+    [[ "${TEST_CONFIG_RESTORED}" == "true" ]]
+    [[ "${TEST_OUTPUT_RESTORED}" == "true" ]]
+    [[ "${TEST_SERVICES_RECONCILED}" == "true" ]]
+    [[ "${releaseMode}" == "remove" ]]
+    [[ "$(<"${configFile}")" == "old-config" ]]
+    [[ "$(<"${outputFile}")" == "old-output" ]]
+)
+
+runSubscriptionMutationSyncStateRestoreFailureRegression() (
+    local configFile="${TMP_DIR}/mutation-state-failure-config.json"
+    local outputFile="${TMP_DIR}/mutation-state-failure-output.txt"
+    local testConfigBackupDir="${TMP_DIR}/mutation-state-failure-config-backup"
+    local testOutputBackupDir="${TMP_DIR}/mutation-state-failure-output-backup"
+    local releaseMode=
+    printf 'old-config\n' >"${configFile}"
+    printf 'old-output\n' >"${outputFile}"
+    TEST_SYNC_CALLS=0
+    TEST_STATE_WRITE_CALLS=0
+    TEST_CONFIG_RESTORED=false
+    TEST_OUTPUT_RESTORED=false
+    TEST_SERVICES_RECONCILED=false
+    subscriptionGroupSyncEnabled() { return 0; }
+    runSubscriptionGroupSync() {
+        TEST_SYNC_CALLS=$((TEST_SYNC_CALLS + 1))
+        printf 'new-config\n' >"${configFile}"
+        printf 'new-output\n' >"${outputFile}"
+        return 1
+    }
+    subscriptionSyncCreateLocalApplyBackups() {
+        mkdir -p "${testConfigBackupDir}" "${testOutputBackupDir}"
+        cp "${configFile}" "${testConfigBackupDir}/config"
+        cp "${outputFile}" "${testOutputBackupDir}/output"
+        printf -v "$1" '%s' "${testConfigBackupDir}"
+        printf -v "$2" '%s' "${testOutputBackupDir}"
+    }
+    subscriptionGroupsStateWrite() {
+        TEST_STATE_WRITE_CALLS=$((TEST_STATE_WRITE_CALLS + 1))
+        return 1
+    }
+    subscriptionSyncRestoreConfigBackups() { cp "${testConfigBackupDir}/config" "${configFile}"; TEST_CONFIG_RESTORED=true; }
+    subscriptionSyncRestoreSubscribeOutputBackups() { cp "${testOutputBackupDir}/output" "${outputFile}"; TEST_OUTPUT_RESTORED=true; }
+    subscriptionSyncReconcileLocalServices() { TEST_SERVICES_RECONCILED=true; }
+    subscriptionSyncReleaseLocalApplyBackups() { releaseMode=$1; }
+    statusCard() { :; }
+    warnCard() { :; }
+
+    if runSubscriptionSyncAfterMutation "测试状态恢复失败" '{"old":true}'; then
+        return 1
+    fi
+    [[ "${TEST_SYNC_CALLS}" == "1" ]]
+    [[ "${TEST_STATE_WRITE_CALLS}" == "1" ]]
+    [[ "${TEST_CONFIG_RESTORED}" == "true" ]]
+    [[ "${TEST_OUTPUT_RESTORED}" == "true" ]]
+    [[ "${TEST_SERVICES_RECONCILED}" == "true" ]]
+    [[ "${releaseMode}" == "forget" ]]
+    [[ "$(<"${configFile}")" == "old-config" ]]
+    [[ "$(<"${outputFile}")" == "old-output" ]]
 )
 
 runSubscriptionSyncRestorePairFailureMessageRegression() (

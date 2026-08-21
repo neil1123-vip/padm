@@ -101,6 +101,11 @@ listRegressionSubscriptionStateSupportChildSelectors() {
         subscription-sync-find-user-enabled-projection \
         subscription-user-removal-transaction-lock \
         subscription-state-maintenance-rollback \
+        subscription-state-maintenance-removed-source-cleanup \
+        subscription-source-removal-preflight \
+        subscription-mutation-sync-rollback \
+        subscription-mutation-sync-rollback-local-restore \
+        subscription-mutation-sync-state-restore-failure \
         subscription-sync-reconcile-early-exit \
         subscription-group-sync-publish-refresh-inline \
         subscription-group-sync-single-config-backup \
@@ -179,6 +184,11 @@ registerRegressionFunctionLeaf subscription-sync-rollback-result-message runSubs
 registerRegressionFunctionLeaf subscription-sync-find-user-enabled-projection runSubscriptionSyncFindUserEnabledProjectionRegression
 registerRegressionFunctionLeaf subscription-user-removal-transaction-lock runRegressionStep subscription-user-removal-transaction-lock runSubscriptionUserRemovalTransactionLockRegression
 registerRegressionFunctionLeaf subscription-state-maintenance-rollback runRegressionStep subscription-state-maintenance-rollback runSubscriptionStateMaintenanceRollbackRegression
+registerRegressionFunctionLeaf subscription-state-maintenance-removed-source-cleanup runRegressionStep subscription-state-maintenance-removed-source-cleanup runSubscriptionStateMaintenanceRemovedSourceCleanupRegression
+registerRegressionFunctionLeaf subscription-source-removal-preflight runRegressionStep subscription-source-removal-preflight runSubscriptionSourceRemovalPreflightRegression
+registerRegressionFunctionLeaf subscription-mutation-sync-rollback runRegressionStep subscription-mutation-sync-rollback runSubscriptionMutationSyncRollbackRegression
+registerRegressionFunctionLeaf subscription-mutation-sync-rollback-local-restore runRegressionStep subscription-mutation-sync-rollback-local-restore runSubscriptionMutationSyncRollbackLocalRestoreRegression
+registerRegressionFunctionLeaf subscription-mutation-sync-state-restore-failure runRegressionStep subscription-mutation-sync-state-restore-failure runSubscriptionMutationSyncStateRestoreFailureRegression
 registerRegressionFunctionLeaf subscription-sync-rollback-config-restore-failure runRegressionStep subscription-sync-rollback-config-restore-failure runSubscriptionSyncRollbackConfigRestoreFailureRegression
 registerRegressionFunctionLeaf subscription-sync-restore-dir-failure runRegressionStep subscription-sync-restore-dir-failure runSubscriptionSyncRollbackRestoreDirFailureRegression
 registerRegressionFunctionLeaf subscription-sync-reload-rollback runRegressionStep subscription-sync-reload-rollback runSubscriptionSyncRollbackReloadRollbackRegression
