@@ -269,7 +269,7 @@ manageSubscriptionControlledHome() {
         echoContent title "\n┌─ 被控首页 ─────────────────────────────────────────"
         showSubscriptionServerRoleSummary
         menuItem 1 "接入主控" "粘贴主控邀请，完成接入并生成对应回执"
-        menuItem 2 "查看本机状态" "查看角色、地址、Peer、WireGuard 和最近同步结果"
+        menuItem 2 "查看本机状态" "查看角色、地址、Peer 和 WireGuard 状态"
         menuItem 3 "导入/更新主控接入凭据" "仅更新已有连接的主控端点或身份"
         menuItem 4 "显示接入回执/旧版被控凭据" "显式显示包含长期控制 Token 的接入秘密"
         menuItem 5 "查看控制面与 Peer 细节" "显示 WireGuard 状态以及与主控的 Peer 连接细节"
@@ -284,7 +284,6 @@ manageSubscriptionControlledHome() {
             echoContent title "\n┌─ 本机状态 ─────────────────────────────────────────"
             showSubscriptionServerRoleSummary
             showSubscriptionWireGuardStatus
-            showSubscriptionSourceSyncResults
             ;;
         3) importSubscriptionWireGuardMainCredential ;;
         4) showSubscriptionWireGuardControlledAccessCredential ;;
@@ -379,7 +378,7 @@ showSubscriptionServiceStatus() {
     if [[ -n "${subscribePort}" ]]; then
         statusCard "订阅服务" "状态：已配置" "协议：${subscribeType:-https}" "域名：${subscribeDomain}" "端口：${subscribePort}"
     else
-        statusCard "订阅服务" "状态：未检测到可用订阅发布配置" "如需本机向客户端发布订阅，请进入主控首页 -> 安装/更新订阅服务" "仅作为被控加入主控时，不需要安装公网订阅服务"
+        statusCard "订阅服务" "状态：未检测到可用订阅发布配置" "如需本机向客户端发布订阅，请进入 订阅与用户首页 -> 安装/更新订阅服务" "仅作为被控加入主控时，不需要安装公网订阅服务"
     fi
 }
 
@@ -604,7 +603,7 @@ createAndSyncUserSubscriptionWizard() {
         if [[ "${canShowLinks}" == "true" ]]; then
             showUserSubscriptionLinks "${id}"
         else
-            statusCard "同步完成，但暂时还不能查看链接" "订阅对象和托管账号已生成" "等安装好订阅服务后，到主控首页 -> 查看并处理已有订阅中再刷新并查看链接"
+            statusCard "同步完成，但暂时还不能查看链接" "订阅对象和托管账号已生成" "等安装好订阅服务后，到 订阅与用户首页 -> 查看并处理已有订阅中再刷新并查看链接"
         fi
     fi
 }
@@ -618,7 +617,7 @@ selectUserSubscriptionId() {
         return 1
     }
     if [[ "${hasUsers}" != "true" ]]; then
-        statusCard "用户订阅" "暂无用户订阅" "先到主控首页 -> 新建并发布订阅创建一个"
+        statusCard "用户订阅" "暂无用户订阅" "先到 订阅与用户首页 -> 新建并发布订阅创建一个"
         return 1
     fi
     showUserSubscriptions || return 1
@@ -823,7 +822,6 @@ setUserSubscriptionTrafficLimitMenu() {
         return 1
     fi
     successCard "订阅额度已更新" "超限停用和批量处理请到 订阅同步 -> 用量与限额 执行"
-    runSubscriptionSyncAfterMutation "用户订阅额度更新"
 }
 # 添加服务器源
 createSubscriptionWireGuardInviteMenu() {
@@ -1115,22 +1113,6 @@ setSubscriptionSourceControlTokenMenu() {
     runSubscriptionSyncAfterMutation "被控服务器凭据更新"
 }
 
-clearSubscriptionSourceSyncErrorMenu() {
-    subscriptionRequireMainRole || return 1
-    local sourceId=
-    showSubscriptionSourceSyncResults || return 1
-    autoRead subscription_clear_error_source "请输入要清除错误的被控服务器源ID:" sourceId
-    if [[ -z "${sourceId}" ]] || ! subscriptionSourceExists "${sourceId}"; then
-        errorCard "服务器源 ID 无效"
-        return 1
-    fi
-    if ! clearSubscriptionSourceSyncError "${sourceId}"; then
-        errorCard "同步错误清除失败"
-        return 1
-    fi
-    successCard "同步错误已清除"
-}
-
 refreshSubscriptionGroupSyncCron() {
     ensureSubscriptionGroupsState || return 1
     if subscriptionGroupSyncEnabled; then
@@ -1189,8 +1171,7 @@ manageSubscriptionSyncDiagnostics() {
             menuItem 4 "查看本机同步计划" "预览本机 create/remove"
             menuItem 5 "查看远端同步计划" "对启用来源执行 dry-run"
             menuItem 6 "查看自动同步定时任务" "显示当前 SyncSubscriptionGroups cron"
-            menuItem 7 "清除指定服务器源同步错误" "清理指定来源最近同步错误"
-            menuReturnItem 8 "返回订阅同步" "回到上级菜单"
+            menuReturnItem 7 "返回订阅同步" "回到上级菜单"
         else
             menuItem 3 "查看本机同步计划" "预览本机 create/remove"
             menuItem 4 "查看自动同步定时任务" "显示当前 SyncSubscriptionGroups cron"
@@ -1206,8 +1187,7 @@ manageSubscriptionSyncDiagnostics() {
             4) showSubscriptionLocalSyncPlan ;;
             5) showSubscriptionRemoteSyncPlan ;;
             6) crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true ;;
-            7) clearSubscriptionSourceSyncErrorMenu ;;
-            8) return ;;
+            7) return ;;
             *) coreSelectionErrorCard ;;
             esac
         else

@@ -392,7 +392,7 @@ edge-a"
         fi
     fi
 
-    if wireGuardMenuPartSelected peer-source-control || wireGuardMenuPartSelected peer-source-control-toggle || wireGuardMenuPartSelected peer-source-control-clear-error || wireGuardMenuPartSelected peer-source-control-status; then
+    if wireGuardMenuPartSelected peer-source-control || wireGuardMenuPartSelected peer-source-control-toggle || wireGuardMenuPartSelected peer-source-control-status; then
         wireGuardMenuInitializeMain
         wireGuardMenuAddEdgePeer
 
@@ -408,20 +408,6 @@ y"
 y"
             subscriptionGroupsStateRead -e '.sources[] | select(.id == "edge-a" and .enabled == true)' >/dev/null
             assertMenuAction 'runSubscriptionGroupSync:'
-        fi
-
-        if wireGuardMenuPartSelected peer-source-control || wireGuardMenuPartSelected peer-source-control-clear-error; then
-            setSubscriptionSourceSyncFailure edge-a remote_error old-error
-            resetMenuActions
-            clearSubscriptionSourceSyncErrorMenu() {
-                subscriptionRequireMainRole || return 1
-                recordMenuAction clearSubscriptionSourceSyncErrorMenu
-                local sourceId=
-                autoRead subscription_clear_error_source "请输入要清除错误的被控服务器源ID:" sourceId
-                clearSubscriptionSourceSyncError "${sourceId}"
-            }
-            clearSubscriptionSourceSyncErrorMenu <<<"edge-a"
-            subscriptionGroupsStateRead -e '(.sources[] | select(.id == "edge-a") | has("last_sync_error")) | not' >/dev/null
         fi
 
         if wireGuardMenuPartSelected peer-source-control || wireGuardMenuPartSelected peer-source-control-status; then
@@ -1201,10 +1187,6 @@ EOF
         subscriptionRequireMainRole || return 1
         recordMenuAction setSubscriptionSourceControlTokenMenu
     }
-    clearSubscriptionSourceSyncErrorMenu() {
-        subscriptionRequireMainRole || return 1
-        recordMenuAction clearSubscriptionSourceSyncErrorMenu
-    }
     showAdminSubscriptionTraffic() { recordMenuAction showAdminSubscriptionTraffic; }
     collectSubscriptionTraffic() { recordMenuAction collectSubscriptionTraffic; return 0; }
     showSubscriptionTrafficOverview() { recordMenuAction showSubscriptionTrafficOverview; }
@@ -1505,10 +1487,17 @@ main
         manageSubscriptionMainHome <<<"4
 demo-user
 3
+5
+2
 9
 14"
         grep -q "查看并处理已有订阅" <<<"${output}"
         grep -q "查看当前用量" <<<"${output}"
+        subscriptionGroupsStateRead -e 'any(.user_groups[]?; .id == "demo-user" and .traffic_limit_gb == 2)' >/dev/null
+        if assertMenuAction 'runSubscriptionGroupSync:'; then
+            printf 'menu-smoke failed: quota setter ran a full sync\n' >&2
+            return 1
+        fi
         resetMenuActions
     fi
 
@@ -1574,33 +1563,29 @@ main
         resetMenuActions
         manageSubscriptionSyncSettings <<<"4
 1
-8
+7
 6"
         assertMenuAction showSubscriptionGroupsStateSummary
         assertMenuAction showSubscriptionSourceSyncResults
         resetMenuActions
         manageSubscriptionSyncDiagnostics <<<"2
-8"
+7"
         assertMenuAction showSubscriptionServiceStatus
         resetMenuActions
         manageSubscriptionSyncDiagnostics <<<"3
-8"
+7"
         assertMenuAction showSubscriptionRemoteHealthPlan
         assertMenuAction subscriptionRemoteControlHealthAll
         resetMenuActions
         manageSubscriptionSyncDiagnostics <<<"4
-8"
+7"
         assertMenuAction showSubscriptionLocalSyncPlan
         assertMenuAction subscriptionSyncPlan
         resetMenuActions
         manageSubscriptionSyncDiagnostics <<<"5
-8"
+7"
         assertMenuAction showSubscriptionRemoteSyncPlan
         assertMenuAction subscriptionRemoteSyncPlan
-        resetMenuActions
-        manageSubscriptionSyncDiagnostics <<<"7
-8"
-        assertMenuAction clearSubscriptionSourceSyncErrorMenu
         resetMenuActions
         manageTrafficAndQuota <<<"1
 9"
@@ -1692,7 +1677,10 @@ y
             return 1
         fi
         assertMenuAction showSubscriptionWireGuardStatus
-        assertMenuAction showSubscriptionSourceSyncResults
+        if assertMenuAction showSubscriptionSourceSyncResults; then
+            printf 'menu-smoke failed: controlled status shows local source sync result\n' >&2
+            return 1
+        fi
         resetMenuActions
         addSubscribeMenu <<<"3" || true
         assertMenuAction 'errorCard:当前机器已初始化为被控'
@@ -1701,9 +1689,6 @@ y
         assertMenuAction 'errorCard:当前机器已初始化为被控'
         resetMenuActions
         changeSubscriptionSourceEnabledMenu <<<"" || true
-        assertMenuAction 'errorCard:当前机器已初始化为被控'
-        resetMenuActions
-        clearSubscriptionSourceSyncErrorMenu <<<"" || true
         assertMenuAction 'errorCard:当前机器已初始化为被控'
         resetMenuActions
         manageSubscriptionMainHome <<<"4" || true

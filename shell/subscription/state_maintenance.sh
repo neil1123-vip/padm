@@ -20,7 +20,7 @@ subscriptionGroupsStateSummaryJson() {
           last_status: (.sync.last_status // "pending"),
           failures: (.sync.failures // [])
         },
-        traffic_updated_at: ((.traffic.sources.main.updated_at // .traffic.admin.sources.main.updated_at // "") | if . == "" then "unknown" else . end)
+        traffic_updated_at: (((.traffic.sources // {}) | to_entries | map(.value.updated_at // empty) | max) // "unknown")
       }'
 }
 
@@ -50,23 +50,23 @@ createSubscriptionGroupsBackupMenu() {
     successCard "状态备份已创建" "备份文件：${backupFile}"
 }
 
-printSubscriptionGroupsBackups() {
-    local index=1
-    local backupFile
-    local found=
-    while IFS= read -r backupFile; do
-        [[ -n "${backupFile}" ]] || continue
-        found=true
-        menuLine "${index}. ${backupFile}"
-        index=$((index + 1))
-    done < <(listSubscriptionGroupsBackups | sort)
-    [[ -n "${found}" ]]
-}
-
 showSubscriptionGroupsBackups() {
+    local backupFile
+    local backupsOutput
+    local index=1
+    backupsOutput=$(listSubscriptionGroupsBackups) || {
+        errorCard "状态备份列表读取失败"
+        return 1
+    }
     userResultCard "订阅状态备份"
-    if ! printSubscriptionGroupsBackups; then
+    if [[ -z "${backupsOutput}" ]]; then
         menuLine "暂无备份"
+    else
+        while IFS= read -r backupFile; do
+            [[ -n "${backupFile}" ]] || continue
+            menuLine "${index}. ${backupFile}"
+            index=$((index + 1))
+        done <<<"${backupsOutput}"
     fi
     menuClose
 }
@@ -74,10 +74,15 @@ showSubscriptionGroupsBackups() {
 selectSubscriptionGroupsBackupFile() {
     local backupChoice=
     local backupFile=
+    local backupsOutput
     local backups=()
     local index
     selectedSubscriptionGroupsBackupFile=
-    mapfile -t backups < <(listSubscriptionGroupsBackups | sort)
+    backupsOutput=$(listSubscriptionGroupsBackups) || {
+        errorCard "状态备份列表读取失败"
+        return 1
+    }
+    [[ -z "${backupsOutput}" ]] || mapfile -t backups <<<"${backupsOutput}"
     if [[ "${#backups[@]}" -eq 0 ]]; then
         errorCard "暂无可恢复的状态备份"
         return 1

@@ -360,11 +360,8 @@ runSubscriptionGroupStateStructureSourceStatusRegression() {
     jq -e '.sources[] | select(.id == "main" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
     setSubscriptionSourceEnabled edge true
     subscriptionHasEnabledRemoteSources
-    clearSubscriptionSourceSyncError edge
-    jq -e '(.sources[] | select(.id == "edge") | has("last_sync_error")) | not' "$(subscriptionGroupsFile)" >/dev/null
     if setSubscriptionSourceSyncStatus missing success >/dev/null 2>&1 ||
-        setSubscriptionSourceSyncFailure missing unreachable error >/dev/null 2>&1 ||
-        clearSubscriptionSourceSyncError missing >/dev/null 2>&1; then
+        setSubscriptionSourceSyncFailure missing unreachable error >/dev/null 2>&1; then
         return 1
     fi
 }
@@ -491,6 +488,9 @@ runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
         [[ "${trafficOutput}" == *"总上传：3 MB"* ]]
         [[ "${trafficOutput}" == *"总下载：1 MB"* ]]
         [[ "${trafficOutput}" == *"最近更新：2026-06-10 10:01:00"* ]]
+        trafficOutput=$(showSubscriptionTrafficOverview)
+        [[ "${trafficOutput}" == *"流量更新时间：2026-06-10 10:01:00"* ]]
+        subscriptionGroupsStateSummaryJson | jq -e '.traffic_updated_at == "2026-06-10 10:01:00"' >/dev/null
     )
     subscriptionQuotaDryRunPlan | jq -e 'length == 1 and .[0].id == "team-a" and .[0].limit_gb == 1 and .[0].percent >= 100 and .[0].action == "disable-and-remove-local-account"' >/dev/null
 }
@@ -999,6 +999,23 @@ runSubscriptionSyncProcessSubstitutionFailureRegression() {
     regressionExpectStatus 1 subscriptionSyncConfiguredManagedCredentials >/dev/null 2>&1
 
     subscriptionSyncConfiguredAccountNamesJson "${TMP_DIR}/missing-inbounds.json" | jq -e '. == []' >/dev/null
+
+    (
+        local errors=
+        errorCard() { errors+="$1"$'\n'; }
+        userResultCard() { :; }
+        menuLine() { :; }
+        menuClose() { :; }
+        autoRead() { return 99; }
+
+        subscriptionGroupsBackupDir() { return 7; }
+        regressionExpectStatus 1 listSubscriptionGroupsBackups >/dev/null 2>&1
+
+        listSubscriptionGroupsBackups() { return 7; }
+        regressionExpectStatus 1 showSubscriptionGroupsBackups >/dev/null 2>&1
+        regressionExpectStatus 1 selectSubscriptionGroupsBackupFile >/dev/null 2>&1
+        [[ "$(grep -c '^状态备份列表读取失败$' <<<"${errors}")" == "2" ]]
+    )
 }
 
 runSubscriptionUserRemovalTransactionLockRegression() (

@@ -179,7 +179,6 @@ listRegressionWireGuardMenuFlowPeerRollbackCredentialChildSelectors() {
 listRegressionWireGuardMenuFlowPeerSourceControlChildSelectors() {
     printf '%s\n' \
         wireguard-menu-flow-peer-source-control-toggle \
-        wireguard-menu-flow-peer-source-control-clear-error \
         wireguard-menu-flow-peer-source-control-status
 }
 
@@ -197,7 +196,6 @@ listRegressionUiChildSelectors() {
         ui-full-subscription-main-publish-user-create \
         ui-full-subscription-main-publish-service \
         wireguard-menu-flow-peer-add-update \
-        wireguard-menu-flow-peer-source-control-clear-error \
         wireguard-menu-flow-peer-source-control-status \
         ui-full-subscription-main-publish-user-empty \
         ui-full-subscription-main-maintenance \
@@ -263,7 +261,6 @@ registerRegressionFunctionLeaf wireguard-menu-flow-peer-rollback-source runSubsc
 registerRegressionFunctionLeaf wireguard-menu-flow-peer-rollback-credential-write runSubscriptionWireGuardMenuFlowRegression peer-rollback-credential-write
 registerRegressionFunctionLeaf wireguard-menu-flow-peer-rollback-credential-groups-restore runSubscriptionWireGuardMenuFlowRegression peer-rollback-credential-groups-restore
 registerRegressionFunctionLeaf wireguard-menu-flow-peer-source-control-toggle runSubscriptionWireGuardMenuFlowRegression peer-source-control-toggle
-registerRegressionFunctionLeaf wireguard-menu-flow-peer-source-control-clear-error runSubscriptionWireGuardMenuFlowRegression peer-source-control-clear-error
 registerRegressionFunctionLeaf wireguard-menu-flow-peer-source-control-status runSubscriptionWireGuardMenuFlowRegression peer-source-control-status
 registerRegressionFunctionLeaf wireguard-menu-flow-control-restore runSubscriptionWireGuardMenuFlowRegression control-restore
 registerRegressionFunctionLeaf wireguard-restore-runner runSubscriptionWireGuardRestoreRunnerRegression

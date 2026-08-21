@@ -390,7 +390,7 @@ showSubscriptionTrafficOverview() {
       "限额状态：超限 " + (($overLimit | length) | tostring) + " 个，接近上限 " + (($nearLimit | length) | tostring) + " 个\n" +
       "服务器源：共 " + (($group.sources | length) | tostring) + " 个，启用远端 " + (([$group.sources[]? | select(.role != "main" and .enabled == true)] | length) | tostring) + " 个\n" +
       "最近同步：状态 " + (($group.sync.last_status // "pending") | tostring) + "，时间 " + (($group.sync.last_run // "未运行") | tostring) + "\n" +
-      "流量更新时间：" + (($group.traffic.sources.main.updated_at // $group.traffic.admin.sources.main.updated_at // "未知") | tostring)')
+      "流量更新时间：" + (((($group.traffic.sources // {}) | to_entries | map(.value.updated_at // empty) | max) // "未知") | tostring)')
     output=$(subscriptionActiveGroupRead -r "${jqProgram}") || return 1
     userResultCard "用量与限额总览"
     while IFS= read -r line; do

@@ -513,7 +513,8 @@ createSubscriptionGroupsBackup() {
 
 listSubscriptionGroupsBackups() {
     local backupDir
-    backupDir=$(subscriptionGroupsBackupDir)
+    local backupFile
+    backupDir=$(subscriptionGroupsBackupDir) || return 1
     [[ -d "${backupDir}" ]] || return 0
     for backupFile in "${backupDir}"/groups-*.json; do
         [[ -f "${backupFile}" ]] && echo "${backupFile}"
@@ -815,10 +816,4 @@ subscriptionSourceIsMain() {
 
 subscriptionHasEnabledRemoteSources() {
     subscriptionActiveGroupRead -e 'any(.sources[]?; .role != "main" and .enabled == true)' >/dev/null 2>&1
-}
-
-clearSubscriptionSourceSyncError() {
-    local id=$1
-    subscriptionStateIdValid "${id}" || return 1
-    subscriptionActiveGroupSetById sources "${id}" "subscription source not found" 'del(.last_sync_error)'
 }
