@@ -369,6 +369,7 @@ subscriptionSyncAppendProtocolUser() {
     local accountName=$5
     local clients=
     local userPath=
+    # init*Clients reads this dynamically scoped value to preserve existing clients.
     local currentClients='[]'
     [[ -f "${file}" ]] || return 0
     if [[ -n "${preferredPath}" ]]; then
@@ -380,10 +381,10 @@ subscriptionSyncAppendProtocolUser() {
     else
         userPath='.inbounds[0].users'
     fi
-    if jq -e --arg accountName "${accountName}" "${userPath}[]? | select((${SUBSCRIPTION_SYNC_MANAGED_ACCOUNT_JQ}) == \$accountName)" "${file}" >/dev/null 2>&1; then
-        return
+    currentClients=$(jq -c --arg accountName "${accountName}" "${userPath} // [] | if any(.[]?; (${SUBSCRIPTION_SYNC_MANAGED_ACCOUNT_JQ}) == \$accountName) then null else . end" "${file}") || return 1
+    if [[ "${currentClients}" == "null" ]]; then
+        return 0
     fi
-    currentClients=$(jq -c "${userPath} // []" "${file}") || return 1
     if [[ "${coreInstallType}" == "2" ]]; then
         clients=$(initSingBoxClients "${protocolId}" "${uuid}" "${accountName}") || return 1
     else

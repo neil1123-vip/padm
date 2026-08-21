@@ -821,6 +821,36 @@ runSubscriptionSyncAppendLocalUserBatchRegression() (
     singBoxConfigPath="${oldSingBoxConfigPath}"
 )
 
+runSubscriptionSyncAppendProtocolUserPreservesClientsRegression() (
+    local root="${TMP_DIR}/subscription-sync-append-preserves-clients"
+    local targetFile="${root}/01_inbounds.json"
+
+    mkdir -p "${root}/tmp"
+    TMPDIR="${root}/tmp"
+    cat >"${targetFile}" <<'JSON'
+{"inbounds":[{"settings":{"clients":[{"id":"old-uuid","email":"sub_existing-VLESS_WS"}]}}]}
+JSON
+
+    coreInstallType=1
+    initXrayClients() {
+        jq -n \
+            --argjson clients "${currentClients}" \
+            --arg uuid "$2" \
+            --arg account "$3" \
+            '$clients + [{id:$uuid,email:($account + "-VLESS_WS")}]'
+    }
+
+    subscriptionSyncAppendProtocolUser 1 "${targetFile}" '.inbounds[0].settings.clients' new-uuid sub_new
+    jq -e '
+      (.inbounds[0].settings.clients | length) == 2 and
+      .inbounds[0].settings.clients[0].email == "sub_existing-VLESS_WS" and
+      .inbounds[0].settings.clients[1].email == "sub_new-VLESS_WS"
+    ' "${targetFile}" >/dev/null
+
+    subscriptionSyncAppendProtocolUser 1 "${targetFile}" '.inbounds[0].settings.clients' another-uuid sub_new
+    jq -e '(.inbounds[0].settings.clients | length) == 2' "${targetFile}" >/dev/null
+)
+
 runConfiguredAccountHelpersRegression() (
     local helperLog="${TMP_DIR}/configured-account-helpers.log"
     local currentManaged accounts
