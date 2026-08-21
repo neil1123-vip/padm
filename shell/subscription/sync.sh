@@ -57,7 +57,7 @@ subscriptionSyncUUIDIsValid() {
 subscriptionSyncEnsureEnabledUserUUIDs() {
     local id
     local uuid
-    local generated='[]'
+    local -a generatedArgs=()
     local missingIds
     missingIds=$(subscriptionActiveGroupRead -r '
       .user_groups[]?
@@ -69,9 +69,14 @@ subscriptionSyncEnsureEnabledUserUUIDs() {
         [[ -n "${id}" ]] || continue
         uuid=$(subscriptionSyncGenerateUUID) || return 1
         subscriptionSyncUUIDIsValid "${uuid}" || return 1
-        generated=$(jq -c --arg id "${id}" --arg uuid "${uuid}" '. + [{id:$id, uuid:$uuid}]' <<<"${generated}") || return 1
+        generatedArgs+=("${id}" "${uuid}")
     done <<<"${missingIds}"
-    if jq -e 'length > 0' <<<"${generated}" >/dev/null 2>&1; then
+    if ((${#generatedArgs[@]} > 0)); then
+        local generated
+        generated=$(jq -cn --args '
+          [range(0; ($ARGS.positional | length) / 2) as $i
+           | {id:$ARGS.positional[$i * 2], uuid:$ARGS.positional[$i * 2 + 1]}]
+        ' -- "${generatedArgs[@]}") || return 1
         subscriptionApplyUserGroupState "${generated}" '[]' || return 1
     fi
 }

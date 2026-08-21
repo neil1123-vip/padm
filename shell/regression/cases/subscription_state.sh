@@ -1458,6 +1458,42 @@ JSON
     fi
 )
 
+runSubscriptionSyncEnsureEnabledUserUUIDsBatchRegression() (
+    local syncRoot="${TMP_DIR}/subscription-sync-ensure-user-uuids-batch"
+    local capturedUsers="${syncRoot}/generated-users.json"
+    local uuidLog="${syncRoot}/generated-uuids.log"
+
+    prepareSubscriptionGroupSyncFixture "${syncRoot}" "" <<'JSON'
+{"version":5,"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0},{"id":"team-b","name":"Team B","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0},{"id":"team-disabled","name":"Disabled","enabled":false,"allowed_sources":["main"],"traffic_limit_gb":0},{"id":"team-existing","name":"Existing","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"uuid":"33333333-3333-4333-8333-333333333333"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"admin":{"sources":{}},"user_groups":{},"sources":{}}}
+JSON
+    : >"${uuidLog}"
+
+    subscriptionSyncGenerateUUID() {
+        local count uuid
+        count=$(wc -l <"${uuidLog}")
+        case "${count}" in
+        0) uuid='11111111-1111-4111-8111-111111111111' ;;
+        1) uuid='22222222-2222-4222-8222-222222222222' ;;
+        *) return 1 ;;
+        esac
+        printf '%s\n' "${uuid}" >>"${uuidLog}"
+        printf '%s\n' "${uuid}"
+    }
+    subscriptionApplyUserGroupState() {
+        printf '%s\n' "$1" >"${capturedUsers}"
+        [[ "${2:-}" == '[]' ]]
+    }
+
+    subscriptionSyncEnsureEnabledUserUUIDs
+    jq -e '
+      . == [
+        {id:"team-a",uuid:"11111111-1111-4111-8111-111111111111"},
+        {id:"team-b",uuid:"22222222-2222-4222-8222-222222222222"}
+      ]
+    ' "${capturedUsers}" >/dev/null
+    [[ "$(wc -l <"${uuidLog}" | tr -d ' ')" == "2" ]]
+)
+
 runSubscriptionSyncRollbackRestoreDirFailureRegression() (
     local restoreDirRoot="${TMP_DIR}/subscription-sync-restore-dir-failure"
     local restoreDirTarget="${restoreDirRoot}/subscribe_local"

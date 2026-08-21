@@ -99,6 +99,7 @@ listRegressionSubscriptionStateSupportChildSelectors() {
         subscription-sync-single-restore-result-message \
         subscription-sync-rollback-result-message \
         subscription-sync-find-user-enabled-projection \
+        subscription-sync-ensure-user-uuids-batch \
         subscription-sync-append-preserves-clients \
         subscription-sync-remove-account-file \
         subscription-user-removal-transaction-lock \
@@ -184,6 +185,7 @@ registerRegressionFunctionLeaf subscription-sync-append-restore-failure-detail r
 registerRegressionFunctionLeaf subscription-sync-single-restore-result-message runSubscriptionSyncSingleRestoreResultMessageRegression
 registerRegressionFunctionLeaf subscription-sync-rollback-result-message runSubscriptionSyncRollbackResultMessageRegression
 registerRegressionFunctionLeaf subscription-sync-find-user-enabled-projection runSubscriptionSyncFindUserEnabledProjectionRegression
+registerRegressionFunctionLeaf subscription-sync-ensure-user-uuids-batch runRegressionStep subscription-sync-ensure-user-uuids-batch runSubscriptionSyncEnsureEnabledUserUUIDsBatchRegression
 registerRegressionFunctionLeaf subscription-sync-append-preserves-clients runRegressionStep subscription-sync-append-preserves-clients runSubscriptionSyncAppendProtocolUserPreservesClientsRegression
 registerRegressionFunctionLeaf subscription-sync-remove-account-file runRegressionStep subscription-sync-remove-account-file runSubscriptionSyncRemoveAccountFromFileRegression
 registerRegressionFunctionLeaf subscription-user-removal-transaction-lock runRegressionStep subscription-user-removal-transaction-lock runSubscriptionUserRemovalTransactionLockRegression
