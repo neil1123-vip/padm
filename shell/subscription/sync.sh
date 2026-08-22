@@ -1264,7 +1264,7 @@ runSubscriptionGroupSyncUnlocked() {
     fi
 
     if [[ "${localSyncReady}" == "true" && "${remoteSyncRequired}" == "true" ]]; then
-        statusCard "订阅同步" "正在同步被控服务器，请稍候"
+        statusCard "订阅同步" "正在等待被控服务器同步响应" "单台请求最长 40 秒（含重试），多个服务器并行执行"
         if ! remoteSyncResult=$(runSubscriptionRemoteSync) ||
             ! jq -e '.failures | type == "array"' <<<"${remoteSyncResult}" >/dev/null 2>&1 ||
             ! jq -e '.snapshots | type == "object"' <<<"${remoteSyncResult}" >/dev/null 2>&1; then

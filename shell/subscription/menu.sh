@@ -544,6 +544,7 @@ showSubscriptionLocalSyncPlan() {
 showSubscriptionRemoteHealthPlan() {
     local health
     local summary
+    statusCard "被控服务器健康检查" "正在等待启用的被控服务器响应" "单台请求最长 15 秒（含重试），多个服务器并行检查"
     health=$(subscriptionRemoteControlHealthAll) || {
         errorCard "被控服务器健康检查失败"
         return 1
@@ -559,6 +560,7 @@ showSubscriptionRemoteHealthPlan() {
 showSubscriptionRemoteSyncPlan() {
     local plan
     local summary
+    statusCard "远程同步计划" "正在等待被控服务器响应" "单台请求最长 40 秒（含重试），多个服务器并行请求"
     plan=$(subscriptionRemoteSyncPlan) || {
         errorCard "远程同步计划生成失败"
         return 1

@@ -320,6 +320,7 @@ collectSubscriptionTraffic() {
     snapshot=$(collectLocalTrafficSnapshot)
     role=$(subscriptionCurrentRoleNormalized) || return 1
     if [[ "${role}" == "main" ]] && subscriptionHasEnabledRemoteSources; then
+        statusCard "流量统计" "正在等待被控服务器流量响应" "单台请求最长 15 秒（含重试），多个服务器并行请求"
         remoteResults=$(subscriptionRemoteTrafficAll) || return 1
     fi
     if writeSubscriptionTrafficSnapshot "${snapshot}" "${remoteResults}"; then
