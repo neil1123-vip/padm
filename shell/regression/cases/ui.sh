@@ -243,9 +243,9 @@ main.example.com
         wireGuardMenuCreateReceiptJson edge-a "${controlledPublicKey}" "${controlledToken}" receiptJson
         receiptCredential=$(subscriptionWireGuardCredentialEncode receipt "$(jq -c 'del(.version,.kind)' <<<"${receiptJson}")")
         resetMenuActions
-        manageSubscriptionServers <<<"3
+        manageSubscriptionServers <<<"2
 ${receiptCredential}
-9"
+8"
         assertMenuAction 'runSubscriptionGroupSync:'
         subscriptionWireGuardReadState | jq -e --arg publicKey "${controlledPublicKey}" '.peers[] | select(.id == "edge-a" and .address == "10.77.0.2/24" and .public_key == $publicKey and .endpoint == "")' >/dev/null
         subscriptionGroupsStateRead -e --arg token "${controlledToken}" '.sources[] | select(.id == "edge-a" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.2" and .port == 39778 and .control_token == $token)' >/dev/null
@@ -1793,7 +1793,7 @@ main
         output=
         manageSubscriptionMainHome <<<"3
 1
-9
+8
 3
 4"
         grep -q "管理被控服务器" <<<"${output}"
@@ -1807,18 +1807,17 @@ main
 4"
         assertMenuAction showSubscriptionWireGuardStatus
         for wgAction in \
-            "1:showSubscriptionSources" \
-            "2:createSubscriptionWireGuardInviteMenu" \
-            "3:addOtherSubscribe" \
-            "4:manageSubscriptionPendingInvites" \
-            "5:setSubscriptionSourceControlTokenMenu" \
-            "6:changeSubscriptionSourceEnabledMenu" \
-            "8:removeSubscriptionControlledServerMenu" \
-            "7:showSubscriptionRemoteHealthPlan"; do
+            "1:createSubscriptionWireGuardInviteMenu" \
+            "2:addOtherSubscribe" \
+            "3:manageSubscriptionPendingInvites" \
+            "4:setSubscriptionSourceControlTokenMenu" \
+            "5:changeSubscriptionSourceEnabledMenu" \
+            "7:removeSubscriptionControlledServerMenu" \
+            "6:showSubscriptionRemoteHealthPlan"; do
             wgChoice=${wgAction%%:*}
             resetMenuActions
             manageSubscriptionServers <<<"${wgChoice}
-9"
+8"
             assertMenuAction "${wgAction#*:}"
         done
         assertMenuAction subscriptionRemoteControlHealthAll

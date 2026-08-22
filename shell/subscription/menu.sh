@@ -453,8 +453,8 @@ manageSubscriptionCoordination() {
     local coordinationStatus=
     while true; do
         echoContent title "\n┌─ 协同与控制 ───────────────────────────────────────"
-        menuLine "状态在对应管理页显示；这里集中处理接入和控制面动作。"
-        menuItem 1 "管理被控服务器" "查看来源状态，创建/完成接入，管理凭据、启停、健康和移除"
+        menuLine "来源状态在 订阅同步 -> 状态与排障 查看；这里集中处理接入和控制面动作。"
+        menuItem 1 "管理被控服务器" "创建/完成接入，管理邀请、凭据、启停、健康和移除"
         menuItem 2 "维护本机控制面" "查看 WireGuard 状态、凭据、地址和 Peer，或重启/关闭"
         menuReturnItem 3 "返回主控首页" "回到上级菜单"
         menuClose
@@ -1165,28 +1165,26 @@ manageSubscriptionServers() {
     local serverStatus=
     while true; do
         echoContent title "\n┌─ 被控服务器 ───────────────────────────────────────"
-        menuLine "推荐按 创建邀请 -> 被控导入 -> 完成接入 的顺序操作。"
-        menuItem 1 "查看来源与同步状态" "查看本机和被控来源的地址、启用状态及最近同步结果"
-        menuItem 2 "创建被控邀请" "输入一次别名，自动预留 WireGuard 地址"
-        menuItem 3 "完成被控接入" "粘贴接入回执，自动使用预留别名和地址"
-        menuItem 4 "查看/取消待完成邀请" "按别名查看状态或释放预留地址"
-        menuItem 5 "更新被控服务器凭据" "更新内网地址、公钥、控制端口和 Token"
-        menuItem 6 "启用/停用被控服务器" "保留凭据，只调整该来源是否参加同步和发布"
-        menuItem 7 "检查被控服务器健康" "请求所有启用的被控服务器健康检查"
-        menuDangerItem 8 "移除被控服务器" "删除已有被控来源和 WireGuard Peer"
-        menuReturnItem 9 "返回主控首页" "回到上级菜单"
+        menuLine "来源状态请到 订阅同步 -> 状态与排障 查看；推荐按 创建邀请 -> 被控导入 -> 完成接入 操作。"
+        menuItem 1 "创建被控邀请" "输入一次别名，自动预留 WireGuard 地址"
+        menuItem 2 "完成被控接入" "粘贴接入回执，自动使用预留别名和地址"
+        menuItem 3 "查看/取消待完成邀请" "按别名查看状态或释放预留地址"
+        menuItem 4 "更新被控服务器凭据" "更新内网地址、公钥、控制端口和 Token"
+        menuItem 5 "启用/停用被控服务器" "保留凭据，只调整该来源是否参加同步和发布"
+        menuItem 6 "检查被控服务器健康" "请求所有启用的被控服务器健康检查"
+        menuDangerItem 7 "移除被控服务器" "删除已有被控来源和 WireGuard Peer"
+        menuReturnItem 8 "返回主控首页" "回到上级菜单"
         menuClose
         autoRead server_source_menu "请选择:" serverStatus
         case "${serverStatus}" in
-        1) showSubscriptionSources ;;
-        2) createSubscriptionWireGuardInviteMenu ;;
-        3) addOtherSubscribe ;;
-        4) manageSubscriptionPendingInvites ;;
-        5) setSubscriptionSourceControlTokenMenu ;;
-        6) changeSubscriptionSourceEnabledMenu ;;
-        7) showSubscriptionRemoteHealthPlan ;;
-        8) removeSubscriptionControlledServerMenu ;;
-        9) return ;;
+        1) createSubscriptionWireGuardInviteMenu ;;
+        2) addOtherSubscribe ;;
+        3) manageSubscriptionPendingInvites ;;
+        4) setSubscriptionSourceControlTokenMenu ;;
+        5) changeSubscriptionSourceEnabledMenu ;;
+        6) showSubscriptionRemoteHealthPlan ;;
+        7) removeSubscriptionControlledServerMenu ;;
+        8) return ;;
         *) coreSelectionErrorCard ;;
         esac
     done
