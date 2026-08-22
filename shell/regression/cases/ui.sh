@@ -245,7 +245,7 @@ main.example.com
         resetMenuActions
         manageSubscriptionServers <<<"2
 ${receiptCredential}
-8"
+7"
         assertMenuAction 'runSubscriptionGroupSync:'
         subscriptionWireGuardReadState | jq -e --arg publicKey "${controlledPublicKey}" '.peers[] | select(.id == "edge-a" and .address == "10.77.0.2/24" and .public_key == $publicKey and .endpoint == "")' >/dev/null
         subscriptionGroupsStateRead -e --arg token "${controlledToken}" '.sources[] | select(.id == "edge-a" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.2" and .port == 39778 and .control_token == $token)' >/dev/null
@@ -1733,24 +1733,29 @@ main
         resetMenuActions
         manageSubscriptionSyncSettings <<<"4
 1
-6
+7
 6"
         assertMenuAction showSubscriptionGroupsStateSummary
         assertMenuAction showSubscriptionSources
         resetMenuActions
         manageSubscriptionSyncDiagnostics <<<"2
-6"
+7"
         assertMenuAction showSubscriptionServiceStatus
         resetMenuActions
         manageSubscriptionSyncDiagnostics <<<"3
-6"
+7"
         assertMenuAction showSubscriptionLocalSyncPlan
         assertMenuAction subscriptionSyncPlan
         resetMenuActions
         manageSubscriptionSyncDiagnostics <<<"4
-6"
+7"
         assertMenuAction showSubscriptionRemoteSyncPlan
         assertMenuAction subscriptionRemoteSyncPlan
+        resetMenuActions
+        manageSubscriptionSyncDiagnostics <<<"5
+7"
+        assertMenuAction showSubscriptionRemoteHealthPlan
+        assertMenuAction subscriptionRemoteControlHealthAll
         resetMenuActions
         output=
         manageTrafficAndQuota <<<"1
@@ -1793,7 +1798,7 @@ main
         output=
         manageSubscriptionMainHome <<<"3
 1
-8
+7
 3
 4"
         grep -q "管理被控服务器" <<<"${output}"
@@ -1812,15 +1817,13 @@ main
             "3:manageSubscriptionPendingInvites" \
             "4:setSubscriptionSourceControlTokenMenu" \
             "5:changeSubscriptionSourceEnabledMenu" \
-            "7:removeSubscriptionControlledServerMenu" \
-            "6:showSubscriptionRemoteHealthPlan"; do
+            "6:removeSubscriptionControlledServerMenu"; do
             wgChoice=${wgAction%%:*}
             resetMenuActions
             manageSubscriptionServers <<<"${wgChoice}
-8"
+7"
             assertMenuAction "${wgAction#*:}"
         done
-        assertMenuAction subscriptionRemoteControlHealthAll
         resetMenuActions
         manageSubscriptionStateBackups <<<"1
 5"

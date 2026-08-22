@@ -454,7 +454,7 @@ manageSubscriptionCoordination() {
     while true; do
         echoContent title "\n┌─ 协同与控制 ───────────────────────────────────────"
         menuLine "来源状态在 订阅同步 -> 状态与排障 查看；这里集中处理接入和控制面动作。"
-        menuItem 1 "管理被控服务器" "创建/完成接入，管理邀请、凭据、启停、健康和移除"
+        menuItem 1 "管理被控服务器" "创建/完成接入，管理邀请、凭据、启停和移除"
         menuItem 2 "维护本机控制面" "查看 WireGuard 状态、凭据、地址和 Peer，或重启/关闭"
         menuReturnItem 3 "返回主控首页" "回到上级菜单"
         menuClose
@@ -1165,15 +1165,14 @@ manageSubscriptionServers() {
     local serverStatus=
     while true; do
         echoContent title "\n┌─ 被控服务器 ───────────────────────────────────────"
-        menuLine "来源状态请到 订阅同步 -> 状态与排障 查看；推荐按 创建邀请 -> 被控导入 -> 完成接入 操作。"
+        menuLine "来源状态和健康检查请到 订阅同步 -> 状态与排障 查看；推荐按 创建邀请 -> 被控导入 -> 完成接入 操作。"
         menuItem 1 "创建被控邀请" "输入一次别名，自动预留 WireGuard 地址"
         menuItem 2 "完成被控接入" "粘贴接入回执，自动使用预留别名和地址"
         menuItem 3 "查看/取消待完成邀请" "按别名查看状态或释放预留地址"
         menuItem 4 "更新被控服务器凭据" "更新内网地址、公钥、控制端口和 Token"
         menuItem 5 "启用/停用被控服务器" "保留凭据，只调整该来源是否参加同步和发布"
-        menuItem 6 "检查被控服务器健康" "请求所有启用的被控服务器健康检查"
-        menuDangerItem 7 "移除被控服务器" "删除已有被控来源和 WireGuard Peer"
-        menuReturnItem 8 "返回主控首页" "回到上级菜单"
+        menuDangerItem 6 "移除被控服务器" "删除已有被控来源和 WireGuard Peer"
+        menuReturnItem 7 "返回主控首页" "回到上级菜单"
         menuClose
         autoRead server_source_menu "请选择:" serverStatus
         case "${serverStatus}" in
@@ -1182,9 +1181,8 @@ manageSubscriptionServers() {
         3) manageSubscriptionPendingInvites ;;
         4) setSubscriptionSourceControlTokenMenu ;;
         5) changeSubscriptionSourceEnabledMenu ;;
-        6) showSubscriptionRemoteHealthPlan ;;
-        7) removeSubscriptionControlledServerMenu ;;
-        8) return ;;
+        6) removeSubscriptionControlledServerMenu ;;
+        7) return ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -1219,7 +1217,7 @@ addOtherSubscribe() {
     if [[ -n "${health}" ]] && jq -e '.ok == true' <<<"${health}" >/dev/null 2>&1; then
         successCard "被控接入已完成" "别名：${completedAlias}" "WireGuard 与控制服务健康检查通过"
     else
-        warnCard "接入已保存，但暂不可达" "别名：${completedAlias}" "Peer、服务器源和 Token 已保留；可稍后从 协同与控制 -> 管理被控服务器 重试健康检查"
+        warnCard "接入已保存，但暂不可达" "别名：${completedAlias}" "Peer、服务器源和 Token 已保留；可稍后从 订阅同步 -> 状态与排障 重试健康检查"
     fi
     runSubscriptionSyncAfterMutation "被控服务器接入" || true
 }
@@ -1371,7 +1369,7 @@ manageSubscriptionSyncDiagnostics() {
     role=$(subscriptionCurrentRoleNormalized) || return 1
     [[ "${role}" == "main" || "${role}" == "uninitialized" ]] || return 1
     if [[ "${role}" == "main" ]]; then
-        returnChoice=6
+        returnChoice=7
         roleAction=remote
     fi
     while true; do
@@ -1381,7 +1379,8 @@ manageSubscriptionSyncDiagnostics() {
         menuItem 3 "查看本机同步计划" "预览本机 create/remove"
         if [[ "${roleAction}" == "remote" ]]; then
             menuItem 4 "查看远端同步计划" "对启用来源执行 dry-run"
-            menuItem 5 "查看自动同步定时任务" "显示当前 SyncSubscriptionGroups cron"
+            menuItem 5 "检查被控服务器健康" "请求所有启用的被控服务器健康检查"
+            menuItem 6 "查看自动同步定时任务" "显示当前 SyncSubscriptionGroups cron"
         else
             menuItem 4 "查看自动同步定时任务" "显示当前 SyncSubscriptionGroups cron"
         fi
@@ -1400,7 +1399,14 @@ manageSubscriptionSyncDiagnostics() {
             fi
             ;;
         "${returnChoice}") return ;;
-        5) crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true ;;
+        5)
+            if [[ "${roleAction}" == "remote" ]]; then
+                showSubscriptionRemoteHealthPlan
+            else
+                crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true
+            fi
+            ;;
+        6) crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true ;;
         *) coreSelectionErrorCard ;;
         esac
     done
