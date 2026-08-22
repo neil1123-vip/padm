@@ -122,7 +122,7 @@ ensureSubscriptionServiceForSharedLinks() {
         return 0
     fi
 
-    statusCard "已跳过订阅服务安装" "本次仍可保存订阅对象和执行同步" "等之后安装好订阅服务，再来刷新并查看链接"
+    statusCard "已跳过订阅服务安装" "本次仍可保存订阅对象和执行同步" "等之后安装好订阅服务，再到订阅管理刷新并查看链接"
     return 1
 }
 
@@ -330,26 +330,24 @@ manageSubscriptionLocalHome() {
         echoContent title "\n┌─ 本机订阅首页 ─────────────────────────────────────"
         showSubscriptionServerRoleSummary
         menuItem 1 "安装/更新订阅服务" "安装或刷新 Nginx 订阅发布配置"
-        menuItem 2 "刷新并查看我的订阅链接" "重新生成并显示当前自用订阅"
+        menuItem 2 "订阅管理" "统一查看本机自用和分享订阅，刷新链接或处理订阅状态"
         menuItem 3 "新建并发布订阅" "填写 ID、节点范围和额度，然后同步并拿到可发送的链接"
-        menuItem 4 "查看并处理已有订阅" "刷新链接、改范围、改额度、启停或删除"
-        menuItem 5 "订阅同步" "立即同步、自动同步、用量限额和状态排障"
-        menuItem 6 "状态备份与恢复" "创建、恢复或重建 groups.json"
-        menuItem 7 "启用主控协同" "将本机初始化为主控，保留现有订阅状态和服务"
-        menuItem 8 "接入主控" "粘贴主控邀请，将本机初始化为被控"
-        menuReturnItem 9 "返回主菜单" "回到 padm 管理面板"
+        menuItem 4 "订阅同步" "立即同步、自动同步、用量限额和状态排障"
+        menuItem 5 "状态备份与恢复" "创建、恢复或重建 groups.json"
+        menuItem 6 "启用主控协同" "将本机初始化为主控，保留现有订阅状态和服务"
+        menuItem 7 "接入主控" "粘贴主控邀请，将本机初始化为被控"
+        menuReturnItem 8 "返回主菜单" "回到 padm 管理面板"
         menuClose
         autoRead subscription_local_home_menu "请选择:" localHomeStatus
         case "${localHomeStatus}" in
         1) installSubscribe && showSubscriptionServiceStatus ;;
-        2) subscribe ;;
+        2) manageSubscriptionCatalog ;;
         3) createAndSyncUserSubscriptionWizard ;;
-        4) manageUserSubscriptionItem ;;
-        5) manageSubscriptionSyncSettings ;;
-        6) manageSubscriptionStateBackups ;;
-        7) runSubscriptionMainControllerWizard; return ;;
-        8) runSubscriptionControlledWizard; return ;;
-        9) return 0 ;;
+        4) manageSubscriptionSyncSettings ;;
+        5) manageSubscriptionStateBackups ;;
+        6) runSubscriptionMainControllerWizard; return ;;
+        7) runSubscriptionControlledWizard; return ;;
+        8) return 0 ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -361,26 +359,24 @@ manageSubscriptionMainHome() {
         echoContent title "\n┌─ 主控首页 ─────────────────────────────────────────"
         showSubscriptionServerRoleSummary
         menuItem 1 "安装/更新订阅服务" "安装或刷新 Nginx 订阅发布配置"
-        menuItem 2 "刷新并查看我的订阅链接" "重新生成并显示当前自用订阅"
+        menuItem 2 "订阅管理" "统一查看本机自用和分享订阅，刷新链接或处理订阅状态"
         menuItem 3 "新建并发布订阅" "填写 ID、节点范围和额度，然后同步并拿到可发送的链接"
-        menuItem 4 "查看并处理已有订阅" "刷新链接、改范围、改额度、启停或删除"
-        menuItem 5 "订阅同步" "立即同步、自动同步、用量限额和状态排障"
-        menuItem 6 "状态备份与恢复" "创建、恢复或重建 groups.json"
-        menuItem 7 "服务器与协同" "查看来源，管理邀请、凭据、健康和服务器状态"
-        menuItem 8 "控制面与连接" "查看凭据、Peer、地址，并处理重启或关闭"
-        menuReturnItem 9 "返回主菜单" "回到 padm 管理面板"
+        menuItem 4 "订阅同步" "立即同步、自动同步、用量限额和状态排障"
+        menuItem 5 "状态备份与恢复" "创建、恢复或重建 groups.json"
+        menuItem 6 "服务器与协同" "查看来源，管理邀请、凭据、健康和服务器状态"
+        menuItem 7 "控制面与连接" "查看凭据、Peer、地址，并处理重启或关闭"
+        menuReturnItem 8 "返回主菜单" "回到 padm 管理面板"
         menuClose
         autoRead subscription_main_home_menu "请选择:" mainHomeStatus
         case "${mainHomeStatus}" in
         1) installSubscribe && showSubscriptionServiceStatus ;;
-        2) subscribe ;;
+        2) manageSubscriptionCatalog ;;
         3) createAndSyncUserSubscriptionWizard ;;
-        4) manageUserSubscriptionItem ;;
-        5) manageSubscriptionSyncSettings ;;
-        6) manageSubscriptionStateBackups ;;
-        7) manageSubscriptionServers ;;
-        8) manageSubscriptionMainControlDetails ;;
-        9) return 0 ;;
+        4) manageSubscriptionSyncSettings ;;
+        5) manageSubscriptionStateBackups ;;
+        6) manageSubscriptionServers ;;
+        7) manageSubscriptionMainControlDetails ;;
+        8) return 0 ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -569,6 +565,31 @@ showSubscriptionQuotaPlanJson() {
     showSubscriptionJsonWithSummary "超限处理计划" "${plan}" "${summary}"
 }
 
+manageSubscriptionCatalog() {
+    subscriptionRequireLocalPublisherRole || return 1
+    local subscriptionCatalogStatus=
+    while true; do
+        echoContent title "\n┌─ 订阅管理 ─────────────────────────────────────────"
+        menuLine "管理员自用订阅来自本机协议配置，不进入分享订阅额度或远端同步。"
+        menuLine "分享订阅由 groups.json 管理，统一在这里进入链接、状态和用量处理。"
+        menuItem 1 "刷新并查看全部订阅链接" "一次刷新本机自用和已启用分享订阅，并显示可用链接"
+        menuItem 2 "查看并处理分享订阅" "刷新单个分享链接、改范围、改额度、启停或删除"
+        menuItem 3 "查看我的流量" "查看管理员自用账号在各服务器源的累计流量"
+        menuItem 4 "用量与限额" "查看全局、管理员和分享订阅用量并处理超限"
+        menuReturnItem 5 "返回订阅首页" "回到上级菜单"
+        menuClose
+        autoRead subscription_catalog_menu "请选择:" subscriptionCatalogStatus
+        case "${subscriptionCatalogStatus}" in
+        1) refreshSubscriptionLinks ;;
+        2) manageUserSubscriptionItem ;;
+        3) showAdminSubscriptionTraffic ;;
+        4) manageTrafficAndQuota ;;
+        5) return ;;
+        *) coreSelectionErrorCard ;;
+        esac
+    done
+}
+
 showUserSubscriptions() {
     local output
     local id
@@ -709,7 +730,7 @@ createAndSyncUserSubscriptionWizard() {
         if [[ "${canShowLinks}" == "true" ]]; then
             showUserSubscriptionLinks "${id}"
         else
-            statusCard "同步完成，但暂时还不能查看链接" "订阅对象和托管账号已生成" "等安装好订阅服务后，到 订阅与用户首页 -> 查看并处理已有订阅中再刷新并查看链接"
+            statusCard "同步完成，但暂时还不能查看链接" "订阅对象和托管账号已生成" "等安装好订阅服务后，到 订阅管理 -> 查看并处理分享订阅中再刷新并查看链接"
         fi
     fi
 }
@@ -742,11 +763,19 @@ showUserSubscriptionLinks() {
     if ! ensureSubscriptionServiceForSharedLinks; then
         return 1
     fi
-    if ! subscribe false "" "${accountName}" true; then
-        errorCard "订阅输出刷新失败，请检查订阅配置"
+    if ! refreshSubscriptionLinks "${accountName}" true; then
         return 1
     fi
     statusCard "用户订阅链接" "已刷新 ${accountName} 的订阅输出，请把上方该账号的链接发给对方" "如果上方没有该账号，先执行同步生成托管账号"
+}
+
+refreshSubscriptionLinks() {
+    local accountName=${1:-}
+    local skipCleanup=${2:-}
+    if ! subscribe false "" "${accountName}" "${skipCleanup}"; then
+        errorCard "订阅输出刷新失败，请检查订阅配置"
+        return 1
+    fi
 }
 
 removeUserSubscriptionRollback() {
@@ -847,7 +876,7 @@ manageUserSubscriptionItem() {
     selectUserSubscriptionId || return
     userSubscriptionId=${selectedUserSubscriptionId}
     while true; do
-        echoContent title "\n┌─ 处理已有订阅 ─────────────────────────────────────"
+        echoContent title "\n┌─ 处理分享订阅 ─────────────────────────────────────"
         menuLine "当前订阅：${userSubscriptionId}"
         menuLine "这里处理一个已有订阅的日常维护。"
         menuLine "批量同步与超限处理在订阅同步中处理。"
@@ -989,6 +1018,7 @@ removeSubscriptionControlledServerMenu() {
     local localOnlyConfirm=
     echoContent title "\n┌─ 移除被控服务器 ───────────────────────────────────"
     menuLine "这里列出当前可移除的被控服务器。"
+    menuLine "删除前会自动清理用户订阅中的该来源；使用 * 的订阅范围会保留。"
     sourceOutput=$(subscriptionActiveGroupRead -r '
       [.sources[]? | select(.role != "main")] |
       to_entries[] |

@@ -756,16 +756,30 @@ subscriptionSourceRemovalAllowed() {
 
 removeSubscriptionSourceState() {
     local id=$1
+    local autoDetach=${2:-false}
+    local autoDetachJson=false
     subscriptionStateIdValid "${id}" || return 1
-    subscriptionSourceRemovalAllowed "${id}" || return 1
-    subscriptionActiveGroupWrite --arg id "${id}" '
+    if [[ "${autoDetach}" == "true" ]]; then
+        autoDetachJson=true
+    else
+        subscriptionSourceRemovalAllowed "${id}" || return 1
+    fi
+    subscriptionActiveGroupWrite --arg id "${id}" --argjson autoDetach "${autoDetachJson}" '
         if any(.sources[]?; .id == $id and .role == "main") then
           error("main subscription source cannot be removed")
         elif (any(.sources[]?; .id == $id) | not) then
           error("subscription source not found")
-        elif any(.user_groups[]?.allowed_sources[]?; . == "*" or . == $id) then
+        elif ($autoDetach | not) and any(.user_groups[]?.allowed_sources[]?; . == "*" or . == $id) then
           error("subscription source is still referenced by a user")
         else
+          (if $autoDetach then
+             .user_groups |= map(
+               .allowed_sources |= (
+                 if index($id) == null then .
+                 else ([.[] | select(. != $id)] | if length == 0 then ["main"] else . end)
+                 end)
+             )
+           else . end) |
           .sources = ([.sources[]? | select(.id != $id)]) |
           .traffic.sources |= (del(.[$id]) // {}) |
           .traffic.admin.sources |= (del(.[$id]) // {}) |

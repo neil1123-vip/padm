@@ -445,6 +445,8 @@ The subscription system is role-based; controller and controlled home screens ex
 
 Controller and local-only home screens share one `Subscription sync` menu: run a full sync, enable/disable automatic sync, set the interval, open status/troubleshooting, or manage usage and quotas. The automatic-sync switch controls both immediate sync after configuration changes and cron; manual full sync remains available when it is off.
 
+The `Subscription management` entry is the single place for link refresh, shared-subscription maintenance, and usage access. Admin self-use subscriptions remain derived from the local protocol configuration; they are not stored in `user_groups`, do not use shared quotas, and are never pushed to controlled servers.
+
 - A controller syncs every enabled controlled-server source. There is no separate global remote-sync switch; pause one server through `Add/remove controlled server` -> `Enable/disable controlled server`.
 - Public subscriptions are published only after the local host and every enabled source return complete snapshots. If any required source fails, the previous complete public subscription stays in place instead of being overwritten by a partial node set.
 - After changing a controlled server's Reality target or other node configuration, enabled automatic sync regenerates local nodes, fetches every enabled source, and publishes the complete group. The outer HTTPS subscription URL stays unchanged and nodes from the other servers remain present.

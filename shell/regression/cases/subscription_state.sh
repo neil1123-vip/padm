@@ -468,15 +468,19 @@ runSubscriptionGroupStateStructureSourceRemoveRegression() {
         return 1
     fi
     jq -e '.sources | map(.id) | index("edge")' "$(subscriptionGroupsFile)" >/dev/null
-    setUserSubscriptionSources team-a '["main"]'
-    removeSubscriptionSourceState edge
+    removeSubscriptionSourceState edge true
     jq -e '
       (.sources | map(.id) | index("edge") | not) and
+      .user_groups[0].allowed_sources == ["*"] and
       (.traffic.sources | has("edge") | not) and
       (.traffic.user_groups["team-a"].sources | has("edge") | not) and
       (.traffic | has("global") | not) and
       .traffic.user_groups["team-a"] == {sources:{}}
     ' "$(subscriptionGroupsFile)" >/dev/null
+
+    writeSubscriptionStateSourceRemoveFixture
+    removeSubscriptionSourceState edge true
+    jq -e '(.sources | map(.id) | index("edge") | not) and (.user_groups[0].allowed_sources == ["main"])' "$(subscriptionGroupsFile)" >/dev/null
 }
 
 runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
@@ -1149,7 +1153,7 @@ runSubscriptionStateMaintenanceRemovedSourceCleanupRegression() (
 
 runSubscriptionSourceRemovalPreflightRegression() (
     local logFile="${TMP_DIR}/subscription-source-removal-preflight.log"
-    TEST_SOURCE_GROUPS='{"sources":[{"id":"main","role":"main"},{"id":"edge","role":"secondary"}],"user_groups":[{"id":"team-a","allowed_sources":["*"]}]}'
+    TEST_SOURCE_GROUPS='{"sources":[{"id":"main","role":"main"},{"id":"edge","role":"secondary"}],"user_groups":[{"id":"team-a","allowed_sources":["edge"]}]}'
     TEST_SOURCE_WIREGUARD='{"role":"main","peers":[]}'
     : >"${logFile}"
 
@@ -1167,7 +1171,8 @@ runSubscriptionSourceRemovalPreflightRegression() (
     if subscriptionWireGuardRemovePeerAndSourceUnlocked edge >/dev/null 2>&1; then
         return 1
     fi
-    [[ ! -s "${logFile}" ]]
+    grep -qx 'remote' "${logFile}"
+    ! grep -q '^wireguard$' "${logFile}"
 )
 
 runSubscriptionMutationSyncRollbackRegression() (

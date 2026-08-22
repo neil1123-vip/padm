@@ -1940,12 +1940,7 @@ subscriptionWireGuardRemovePeerAndSourceUnlocked() {
         return 1
     fi
     source=$(subscriptionActiveGroupRead -ce --arg id "${id}" 'first(.sources[]? | select(.id == $id and .role != "main"))') || return 1
-    if ! subscriptionSourceRemovalAllowed "${id}"; then
-        SUBSCRIPTION_WIREGUARD_SOURCE_REMOVE_ERROR=referenced
-        errorCard "被控服务器仍被用户订阅引用，无法移除" "请先移除该来源的用户范围引用"
-        return 1
-    fi
-    if [[ "${localOnly}" != "true" ]] && ! subscriptionRemoteDrainSource "${source}" originalUsers; then
+    if [[ "${localOnly}" != "true" ]] && ! subscriptionRemoteDrainSource "${source}" originalUsers "${previousGroupsState}"; then
         # shellcheck disable=SC2034
         SUBSCRIPTION_WIREGUARD_SOURCE_REMOVE_ERROR=remote
         errorCard "${SUBSCRIPTION_REMOTE_SOURCE_ERROR:-被控服务器远端用户清理失败}" "服务器源和 WireGuard Peer 均未修改"
@@ -1954,16 +1949,14 @@ subscriptionWireGuardRemovePeerAndSourceUnlocked() {
     subscriptionWireGuardWriteState \
       --arg id "${id}" \
       '.peers = ([.peers[]? | select(.id != $id)])' || {
-        if [[ -n "${originalUsers}" ]] && ! subscriptionRemoteRestoreSourceUsersIfEnabled "${source}" "${originalUsers}"; then
-            errorCard "被控服务器状态移除失败，且${SUBSCRIPTION_REMOTE_SOURCE_ERROR:-远端用户恢复失败}"
-        fi
+        subscriptionWireGuardRestoreSourceMutationOrReport "${previousState}" "${previousGroupsState}" "${source}" "${originalUsers}" "WireGuard 被控服务器移除失败" || true
         return 1
-      }
+    }
     if ! applySubscriptionWireGuardService; then
         subscriptionWireGuardRestoreSourceMutationOrReport "${previousState}" "${previousGroupsState}" "${source}" "${originalUsers}" "WireGuard 被控服务器移除失败" || true
         return 1
     fi
-    if ! removeSubscriptionSourceState "${id}"; then
+    if ! removeSubscriptionSourceState "${id}" true; then
         subscriptionWireGuardRestoreSourceMutationOrReport "${previousState}" "${previousGroupsState}" "${source}" "${originalUsers}" "被控服务器状态移除失败" || true
         return 1
     fi
