@@ -1785,13 +1785,22 @@ main
             assertMenuAction "${wgAction#*:}"
         done
         resetMenuActions
+        output=
         manageSubscriptionMainHome <<<"3
 1
-4
+9
+3
+4"
+        grep -q "管理被控服务器" <<<"${output}"
+        grep -q "维护本机控制面" <<<"${output}"
+        ! grep -q "查看协同状态" <<<"${output}"
+        resetMenuActions
+        manageSubscriptionMainHome <<<"3
+2
+6
+3
 4"
         assertMenuAction showSubscriptionWireGuardStatus
-        assertMenuAction showSubscriptionSources
-        assertMenuAction showSubscriptionWireGuardPeers
         for wgAction in \
             "1:showSubscriptionSources" \
             "2:createSubscriptionWireGuardInviteMenu" \

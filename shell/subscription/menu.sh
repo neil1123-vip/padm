@@ -345,7 +345,7 @@ subscriptionPublisherHome() {
         menuItem 1 "订阅与用户" "发布与链接、分享订阅、用量与限额"
         menuItem 2 "订阅同步" "立即同步、自动同步、状态排障和状态备份"
         if [[ "${publisherRole}" == "main" ]]; then
-            menuItem 3 "协同与控制" "查看协同状态，管理被控服务器和本机控制面"
+            menuItem 3 "协同与控制" "管理被控服务器和本机控制面；状态在对应页面查看"
         else
             menuItem 3 "启用主控协同" "将本机初始化为主控，保留现有订阅状态和服务"
             menuItem 4 "接入主控" "粘贴主控邀请，将本机初始化为被控"
@@ -450,31 +450,21 @@ manageSubscriptionMainControlDetails() {
     done
 }
 
-showSubscriptionCoordinationStatus() {
-    echoContent title "\n┌─ 协同状态 ─────────────────────────────────────────"
-    showSubscriptionWireGuardStatus
-    showSubscriptionSources
-    showSubscriptionWireGuardPeers
-    menuClose
-}
-
 manageSubscriptionCoordination() {
     subscriptionRequireMainRole || return 1
     local coordinationStatus=
     while true; do
         echoContent title "\n┌─ 协同与控制 ───────────────────────────────────────"
-        menuLine "这里统一管理被控服务器接入、来源和本机控制面。"
-        menuItem 1 "查看协同状态" "查看来源、同步状态、WireGuard 和 Peer"
-        menuItem 2 "管理被控服务器" "创建/完成接入，管理邀请、凭据、启停、健康和移除"
-        menuItem 3 "维护本机控制面" "查看维护凭据、控制地址、Peer，或重启/关闭"
-        menuReturnItem 4 "返回主控首页" "回到上级菜单"
+        menuLine "状态在对应管理页显示；这里集中处理接入和控制面动作。"
+        menuItem 1 "管理被控服务器" "查看来源状态，创建/完成接入，管理凭据、启停、健康和移除"
+        menuItem 2 "维护本机控制面" "查看 WireGuard 状态、凭据、地址和 Peer，或重启/关闭"
+        menuReturnItem 3 "返回主控首页" "回到上级菜单"
         menuClose
         autoRead subscription_coordination_menu "请选择:" coordinationStatus
         case "${coordinationStatus}" in
-        1) showSubscriptionCoordinationStatus ;;
-        2) manageSubscriptionServers ;;
-        3) manageSubscriptionMainControlDetails ;;
-        4) return ;;
+        1) manageSubscriptionServers ;;
+        2) manageSubscriptionMainControlDetails ;;
+        3) return ;;
         *) coreSelectionErrorCard ;;
         esac
     done
