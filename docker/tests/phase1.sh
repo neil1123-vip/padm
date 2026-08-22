@@ -298,8 +298,8 @@ runControl 0 compose-down "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" down
 runControl 0 compose-restart "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" restart
 runControl 0 compose-logs "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" logs --tail 5
 grep -q ' ps$' "${DOCKER_CALL_LOG}" || fail 'status did not call Compose ps'
-grep -q ' up -d$' "${DOCKER_CALL_LOG}" || fail 'up did not call Compose up -d'
-grep -q ' down$' "${DOCKER_CALL_LOG}" || fail 'down did not call Compose down'
+grep -q ' up -d --remove-orphans$' "${DOCKER_CALL_LOG}" || fail 'up did not remove Compose orphans'
+grep -q ' down --remove-orphans$' "${DOCKER_CALL_LOG}" || fail 'down did not remove Compose orphans'
 grep -q ' restart$' "${DOCKER_CALL_LOG}" || fail 'restart did not call Compose restart'
 grep -q ' logs --tail 5$' "${DOCKER_CALL_LOG}" || fail 'logs arguments were not forwarded'
 

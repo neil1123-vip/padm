@@ -132,7 +132,7 @@ dockerComposeFile() {
 
 dockerComposeRun() {
     local composeFile composeDir root profile
-    local -a commandArgs=()
+    local -a commandArgs=() extraArgs=()
     composeFile=$(dockerComposeFile) || {
         dockerError 'Docker 服务尚未配置，请先执行 configure'
         return "${PADM_DOCKER_RC_COMPOSE}"
@@ -150,7 +150,10 @@ dockerComposeRun() {
         [[ -n "${profile}" ]] || continue
         commandArgs+=(--profile "${profile}")
     done < <(jq -r '.compose.profiles[]' "${root}/deployment.json")
-    "${commandArgs[@]}" "$@" || {
+    case "${1:-}" in
+    up|down) extraArgs+=(--remove-orphans) ;;
+    esac
+    "${commandArgs[@]}" "$@" "${extraArgs[@]}" || {
         dockerError 'Docker Compose 操作失败'
         return "${PADM_DOCKER_RC_COMPOSE}"
     }
