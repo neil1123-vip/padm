@@ -431,20 +431,18 @@ manageSubscriptionMainControlDetails() {
         menuLine "建议先查看凭据、Peer 和连接状态，再决定是否重启或关闭控制面。"
         showSubscriptionWireGuardStatus
         menuItem 1 "显示主控维护凭据" "仅用于维护已有连接，不用于首次接入"
-        menuItem 2 "查看 Peer 和连接状态" "查看 WireGuard peer 和被控列表"
-        menuItem 3 "查看控制面地址" "显示 WireGuard 内网 health/sync 地址"
-        menuItem 4 "重写配置并重启主控控制面" "重写配置并重启控制服务"
-        menuDangerItem 5 "关闭主控控制面" "停止本机 WireGuard 控制面"
-        menuReturnItem 6 "返回主控首页" "回到上级菜单"
+        menuItem 2 "查看连接详情" "一次查看 WireGuard Peer、Health 和 Sync 地址"
+        menuItem 3 "重写配置并重启主控控制面" "重写配置并重启控制服务"
+        menuDangerItem 4 "关闭主控控制面" "停止本机 WireGuard 控制面"
+        menuReturnItem 5 "返回主控首页" "回到上级菜单"
         menuClose
         autoRead subscription_main_control_details_menu "请选择:" mainControlDetailsStatus
         case "${mainControlDetailsStatus}" in
         1) showSubscriptionWireGuardMainCredential ;;
-        2) showSubscriptionWireGuardPeers ;;
-        3) showSubscriptionSourceControlUrls ;;
-        4) restartSubscriptionWireGuardControl ;;
-        5) disableSubscriptionWireGuardControl ;;
-        6) return ;;
+        2) showSubscriptionWireGuardPeers; showSubscriptionSourceControlUrls ;;
+        3) restartSubscriptionWireGuardControl ;;
+        4) disableSubscriptionWireGuardControl ;;
+        5) return ;;
         *) coreSelectionErrorCard ;;
         esac
     done

@@ -508,9 +508,9 @@ y"; then
         grep -qxF 'old-nginx-control' "${nginxTarget}"
 
         resetMenuActions
-        manageSubscriptionMainControlDetails <<<"4
-5
-6"
+        manageSubscriptionMainControlDetails <<<"3
+4
+5"
         assertMenuAction installSubscriptionControlService
         assertMenuAction refreshSubscriptionWireGuardNginxControl
         subscriptionWireGuardReadState | jq -e '.enabled == false' >/dev/null
@@ -1775,13 +1775,18 @@ main
         subscriptionGroupsStateRead -e '.sync.quota_auto_apply == true' >/dev/null
         resetMenuActions
         manageSubscriptionMainControlDetails <<<"1
-6"
+5"
         assertMenuAction showSubscriptionWireGuardMainCredential
-        for wgAction in "2:showSubscriptionWireGuardPeers" "3:showSubscriptionSourceControlUrls" "4:restartSubscriptionWireGuardControl" "5:disableSubscriptionWireGuardControl"; do
+        resetMenuActions
+        manageSubscriptionMainControlDetails <<<"2
+5"
+        assertMenuAction showSubscriptionWireGuardPeers
+        assertMenuAction showSubscriptionSourceControlUrls
+        for wgAction in "3:restartSubscriptionWireGuardControl" "4:disableSubscriptionWireGuardControl"; do
             wgChoice=${wgAction%%:*}
             resetMenuActions
             manageSubscriptionMainControlDetails <<<"${wgChoice}
-6"
+5"
             assertMenuAction "${wgAction#*:}"
         done
         resetMenuActions
@@ -1797,7 +1802,7 @@ main
         resetMenuActions
         manageSubscriptionMainHome <<<"3
 2
-6
+5
 3
 4"
         assertMenuAction showSubscriptionWireGuardStatus
