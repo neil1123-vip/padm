@@ -5,7 +5,7 @@ installMenu() {
     if [[ -n "${coreInstallType}" ]]; then
         menuLine "检测到已有安装；以下入口会重建核心与协议配置，请先确认已备份"
     else
-        menuLine "首次安装或不知道怎么选时，建议直接选 1；安装后去 订阅与用户 -> 订阅管理 查看链接"
+        menuLine "首次安装或不知道怎么选时，建议直接选 1；安装后去 订阅与用户 -> 刷新并查看订阅链接"
     fi
     menuLine "怎么选：直连/有域名选 1；需要 CDN/反代选 2；没有域名选 3；需要 TLS 指纹抗性可选 4"
     menuLine "高级：想手选核心和协议选 5；旧客户端、迁移或已有 TLS/fallback 架构选 6"
@@ -578,7 +578,7 @@ menu() {
         checkWgetShowProgress
         menuSection "├─ 任务入口 ───────────────────────────────────────"
         menuItem 1 "安装与重装" "含新手选择指引；推荐直连/CDN/无域名 Reality、NaiveProxy、自定义和传统 TLS"
-        menuItem 2 "订阅与用户" "快速开始、我的订阅、分享订阅、用量限额、同步备份、多服务器和诊断"
+        menuItem 2 "订阅与用户" "发布链接、创建和维护分享订阅、用量限额与多服务器同步"
         menuItem 3 "协议与入口" "REALITY、XHTTP、Hysteria2、Tuic、入口端口和 CDN 入口"
         menuItem 4 "站点与证书" "传统 TLS fallback 站点、302、ALPN 和 TLS 证书"
         menuItem 5 "路由与访问控制" "分流、BT、域名/IP 阻断、直连例外和区域阻断"

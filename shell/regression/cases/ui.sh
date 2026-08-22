@@ -207,7 +207,7 @@ runSubscriptionWireGuardMenuFlowRegression() (
     wireGuardMenuInitializeMain() {
         wireGuardMenuResetFixture
         resetMenuActions
-        manageSubscriptionLocalHome <<<"6
+        manageSubscriptionLocalHome <<<"3
 main.example.com
 3"
         assertMenuAction initSubscriptionWireGuardMain
@@ -1458,7 +1458,7 @@ EOF
         setMenuSmokeRole uninitialized
         resetMenuActions
         output=
-        manageSubscription <<<"8" || true
+        manageSubscription <<<"5" || true
         ! assertMenuAction menu
         grep -q "多服务器角色：.*未启用；可直接使用本机订阅" <<<"${output}"
         grep -q "启用主控协同" <<<"${output}"
@@ -1469,7 +1469,7 @@ EOF
         fi
         resetMenuActions
         output=
-        manageSubscriptionLocalHome <<<"6
+        manageSubscriptionLocalHome <<<"3
 n"
         assertMenuAction initSubscriptionWireGuardMain
         assertMenuAction 'statusCard:主控建链已完成'
@@ -1477,9 +1477,16 @@ n"
             return 1
         fi
         resetMenuActions
+        setMenuSmokeRole uninitialized
+        output=
+        manageSubscriptionLocalHome <<<"1
+6
+5"
+        grep -q "返回本机订阅首页" <<<"${output}"
+        resetMenuActions
         output=
         setMenuSmokeRole uninitialized
-        manageSubscriptionLocalHome <<<"7
+        manageSubscriptionLocalHome <<<"4
 invite-credential"
         assertMenuAction subscriptionWireGuardJoinInvite
         assertMenuAction showSubscriptionWireGuardJoinReceipt
@@ -1487,8 +1494,8 @@ invite-credential"
         setMenuSmokeRole main
         resetMenuActions
         output=
-        manageSubscription <<<"8"
-        grep -q "安装/更新订阅服务" <<<"${output}"
+        manageSubscription <<<"5"
+        grep -q "订阅与用户" <<<"${output}"
         grep -q "订阅同步" <<<"${output}"
         grep -q "服务器与协同" <<<"${output}"
         grep -q "控制面与连接" <<<"${output}"
@@ -1506,10 +1513,9 @@ invite-credential"
         setMenuSmokeRole main
         resetMenuActions
         output=
-        manageSubscriptionMainHome <<<"8"
-        grep -q "安装/更新订阅服务" <<<"${output}"
-        grep -q "订阅管理" <<<"${output}"
-        grep -q "新建并发布订阅" <<<"${output}"
+        manageSubscriptionMainHome <<<"5"
+        grep -q "订阅与用户" <<<"${output}"
+        ! grep -q "新建并发布订阅" <<<"${output}"
         ! grep -q "刷新并查看我的订阅链接" <<<"${output}"
         ! grep -q "查看并处理已有订阅" <<<"${output}"
         grep -q "服务器与协同" <<<"${output}"
@@ -1520,24 +1526,28 @@ invite-credential"
         fi
         resetMenuActions
         manageSubscriptionMainHome <<<"1
-8"
+1
+6
+5"
         assertMenuAction installSubscribe
         assertMenuAction showSubscriptionServiceStatus
         resetMenuActions
-        manageSubscriptionMainHome <<<"2
-1
-5
-8"
+        manageSubscriptionMainHome <<<"1
+2
+6
+5"
         assertMenuAction subscribe
         resetMenuActions
         output=
-        manageSubscriptionMainHome <<<"2
-5
-8"
-        grep -q "管理员自用订阅来自本机协议配置" <<<"${output}"
-        grep -q "刷新并查看全部订阅链接" <<<"${output}"
-        grep -q "查看并处理分享订阅" <<<"${output}"
+        manageSubscriptionMainHome <<<"1
+6
+5"
+        grep -q "本机自用订阅来自协议配置" <<<"${output}"
+        grep -q "刷新并查看订阅链接" <<<"${output}"
+        grep -q "新建分享订阅" <<<"${output}"
+        grep -q "管理分享订阅" <<<"${output}"
         grep -q "用量与限额" <<<"${output}"
+        grep -q "返回主控首页" <<<"${output}"
         resetMenuActions
     fi
 
@@ -1547,10 +1557,10 @@ invite-credential"
         ensureSubscriptionGroupsState
         setMenuSmokeRole main
         resetMenuActions
-        manageSubscriptionMainHome <<<"2
-2
-5
-8" || true
+        manageSubscriptionMainHome <<<"1
+4
+6
+5" || true
         subscriptionGroupsStateRead -e '((.user_groups // []) | length) == 0' >/dev/null
     fi
 
@@ -1560,11 +1570,13 @@ invite-credential"
         ensureSubscriptionGroupsState
         setMenuSmokeRole main
         resetMenuActions
-        manageSubscriptionMainHome <<<"3
+        manageSubscriptionMainHome <<<"1
+3
 demo-user
 main
 0
-8"
+6
+5"
         subscriptionGroupsStateRead -e 'any(.user_groups[]?; .id == "demo-user" and .name == "demo-user")' >/dev/null
         local duplicateSideEffectMarker="${TMP_DIR}/duplicate-user-side-effect"
         rm -f "${duplicateSideEffectMarker}"
@@ -1584,24 +1596,26 @@ main
         ensureSubscriptionGroupsState
         setMenuSmokeRole main
         if [[ "${menuSmokePart}" == "subscription-main-publish-user-inspect" ]]; then
-            manageSubscriptionMainHome <<<"3
+            manageSubscriptionMainHome <<<"1
+3
 demo-user
 main
 0
-8"
+6
+5"
         fi
         resetMenuActions
         output=
-        manageSubscriptionMainHome <<<"2
-2
+        manageSubscriptionMainHome <<<"1
+4
 demo-user
 2
 4
 2
 7
-5
-8"
-        grep -q "处理分享订阅" <<<"${output}"
+6
+5"
+        grep -q "管理分享订阅" <<<"${output}"
         grep -q "查看当前用量" <<<"${output}"
         subscriptionGroupsStateRead -e 'any(.user_groups[]?; .id == "demo-user" and .traffic_limit_gb == 2)' >/dev/null
         if assertMenuAction 'runSubscriptionGroupSync:'; then
@@ -1618,12 +1632,14 @@ demo-user
         setMenuSmokeRole main
         resetMenuActions
         subscriptionGroupsStateWrite '.sync.enabled = false'
-        manageSubscriptionMainHome <<<"3
+        manageSubscriptionMainHome <<<"1
+3
 team-a
 *
 0
 n
-8"
+6
+5"
         subscriptionGroupsStateRead -e 'any(.user_groups[]?; .id == "team-a" and .name == "team-a")' >/dev/null
         subscriptionGroupsStateRead -e '.sync.enabled == false' >/dev/null
         if assertMenuAction 'runSubscriptionGroupSync:'; then
@@ -1642,12 +1658,14 @@ n
         rm -rf "${PADM_SUBSCRIPTION_GROUPS_DIR}"
         ensureSubscriptionGroupsState
         subscriptionGroupsStateWrite '.sync.enabled = false'
-        manageSubscriptionMainHome <<<"3
+        manageSubscriptionMainHome <<<"1
+3
 team-b
 main
 0
 
-8"
+6
+5"
         assertMenuAction refreshSubscriptionGroupSyncCron
         assertMenuAction 'runSubscriptionGroupSync:'
         subscriptionGroupsStateRead -e '.sync.enabled == true' >/dev/null
@@ -1665,11 +1683,18 @@ main
         grep -q "开启/关闭自动同步" <<<"${output}"
         grep -q "设置同步间隔" <<<"${output}"
         grep -q "状态与排障" <<<"${output}"
-        grep -q "用量与限额" <<<"${output}"
+        grep -q "状态备份与恢复" <<<"${output}"
+        ! grep -q "用量与限额" <<<"${output}"
         if grep -q "事件同步" <<<"${output}" || grep -q "开启/关闭远程同步" <<<"${output}"; then
             printf 'menu-smoke failed: unified sync menu still exposes legacy toggles\n' >&2
             return 1
         fi
+        resetMenuActions
+        output=
+        manageSubscriptionSyncSettings <<<"5
+5
+6"
+        grep -q "返回订阅同步" <<<"${output}"
         resetMenuActions
         manageSubscriptionSyncSettings <<<"4
 1
@@ -1692,10 +1717,12 @@ main
         assertMenuAction showSubscriptionRemoteSyncPlan
         assertMenuAction subscriptionRemoteSyncPlan
         resetMenuActions
+        output=
         manageTrafficAndQuota <<<"1
 9"
         assertMenuAction collectSubscriptionTraffic
         assertMenuAction showSubscriptionTrafficOverview
+        grep -q "返回订阅与用户" <<<"${output}"
         resetMenuActions
         manageTrafficAndQuota <<<"3
 9"
@@ -1798,7 +1825,7 @@ y
         changeSubscriptionSourceEnabledMenu <<<"" || true
         assertMenuAction 'errorCard:当前机器已初始化为被控'
         resetMenuActions
-        manageSubscriptionMainHome <<<"4" || true
+        manageSubscriptionMainHome <<<"3" || true
         assertMenuAction 'errorCard:当前机器已初始化为被控'
         resetMenuActions
         setMenuSmokeRole main
@@ -1806,12 +1833,8 @@ y
         assertMenuAction 'errorCard:当前机器已初始化为主控'
         resetMenuActions
         output=
-        manageSubscriptionMainHome <<<"8"
-        grep -q "安装/更新订阅服务" <<<"${output}"
-        resetMenuActions
-        output=
-        manageSubscriptionMainHome <<<"8"
-        grep -q "订阅管理" <<<"${output}"
+        manageSubscriptionMainHome <<<"5"
+        grep -q "订阅与用户" <<<"${output}"
         resetMenuActions
         output=
         manageTrafficAndQuota <<<"9"
@@ -1838,7 +1861,8 @@ y
         manageSubscriptionSyncSettings <<<"6"
         grep -q "立即完整同步" <<<"${output}"
         grep -q "状态与排障" <<<"${output}"
-        grep -q "用量与限额" <<<"${output}"
+        grep -q "状态备份与恢复" <<<"${output}"
+        ! grep -q "用量与限额" <<<"${output}"
         if grep -q "远端同步计划" <<<"${output}" || grep -q "事件同步" <<<"${output}"; then
             printf 'menu-smoke failed: local sync menu exposes main-only or legacy actions\n' >&2
             return 1

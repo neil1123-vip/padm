@@ -227,10 +227,13 @@ resetSubscriptionGroupsStateMenu() {
 
 manageSubscriptionStateBackups() {
     subscriptionRequireLocalPublisherRole || return 1
-    local role
-    local returnText
+    local role returnText returnMenu=${1:-home}
     role=$(subscriptionCurrentRoleNormalized) || return 1
-    [[ "${role}" == "main" ]] && returnText="返回主控首页" || returnText="返回本机订阅首页"
+    if [[ "${returnMenu}" == "sync" ]]; then
+        returnText="返回订阅同步"
+    else
+        [[ "${role}" == "main" ]] && returnText="返回主控首页" || returnText="返回本机订阅首页"
+    fi
     while true; do
         echoContent title "\n┌─ 状态备份与恢复 ───────────────────────────────────"
         menuLine "这里只管理 groups.json 状态；恢复和重建都会先自动备份当前状态"

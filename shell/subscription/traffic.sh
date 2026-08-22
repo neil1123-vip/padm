@@ -412,11 +412,7 @@ showSubscriptionTrafficOverview() {
 
 manageTrafficAndQuota() {
     subscriptionRequireLocalPublisherRole || return 1
-    local role
-    local returnText
     local quotaAutoApplyText
-    role=$(subscriptionCurrentRoleNormalized) || return 1
-    [[ "${role}" == "main" ]] && returnText="返回主控订阅同步" || returnText="返回本机订阅同步"
     while true; do
         subscriptionGroupQuotaAutoApplyEnabled && quotaAutoApplyText="开启" || quotaAutoApplyText="关闭"
         echoContent title "\n┌─ 流量与限额 ───────────────────────────────────────"
@@ -431,7 +427,7 @@ manageTrafficAndQuota() {
         menuItem 6 "查看服务器流量" "显示各服务器源累计流量"
         menuDangerItem 7 "执行超限处理" "停用超额订阅并移除本机托管账号"
         menuItem 8 "开启/关闭自动执行超限处理" "切换同步前的自动限额事务"
-        menuReturnItem 9 "${returnText}" "回到上级菜单"
+        menuReturnItem 9 "返回订阅与用户" "回到上级菜单"
         menuClose
         autoRead traffic_quota_menu "请选择:" trafficQuotaStatus
         case "${trafficQuotaStatus}" in
