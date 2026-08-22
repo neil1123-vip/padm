@@ -286,6 +286,10 @@ jq -e '(.compose.profiles | sort) == ["core-xray", "nginx", "subscription"]' \
     "${DOCKER_ROOT}/deployment.json" >/dev/null || fail 'Nginx profiles are wrong'
 grep -q 'proxy_pass http://xray:31297;' "${DOCKER_ROOT}/config/nginx/default.conf" ||
     fail 'Nginx did not proxy the WebSocket backend'
+grep -q 'proxy_read_timeout 5d;' "${DOCKER_ROOT}/config/nginx/default.conf" ||
+    fail 'Nginx WebSocket read timeout is missing'
+! grep -q 'proxy_send_timeout' "${DOCKER_ROOT}/config/nginx/default.conf" ||
+    fail 'Nginx WebSocket send timeout should use the default'
 grep -q 'vless://22222222-2222-4222-8222-222222222222@proxy.example.com:24444' \
     "${DOCKER_ROOT}/data/subscription/0123456789abcdef" || fail 'subscription output is wrong'
 jq -e '(.services | keys | sort) == ["acme", "nginx", "subscription", "xray"]' \
