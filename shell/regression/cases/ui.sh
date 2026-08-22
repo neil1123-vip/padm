@@ -983,7 +983,7 @@ runSubscriptionWireGuardRestoreRunnerRegression() (
 runCoreSelectionRetryActionRegression() (
     local actions=
     local -a expectedCounts=(
-        'shell/core/menu.sh|7'
+        'shell/core/menu.sh|6'
         'shell/core/cores.sh|1'
         'shell/core/routing_access_control.sh|3'
         'shell/core/manage.sh|18'
@@ -993,7 +993,6 @@ runCoreSelectionRetryActionRegression() (
         'shell/core/routing_ipv6.sh|1'
     )
     local -a expectedPatterns=(
-        'shell/core/menu.sh|coreSelectionRetryAction menu'
         'shell/core/cores.sh|coreSelectionRetryAction selectCoreInstall'
         'shell/core/routing_access_control.sh|coreSelectionRetryAction removeAccessControlMenu'
         'shell/core/manage.sh|coreSelectionRetryAction manageTraditionalTlsFallback "$@"'
@@ -1006,8 +1005,6 @@ runCoreSelectionRetryActionRegression() (
         'shell/core/routing_ipv6.sh|coreSelectionRetryAction ipv6Routing'
     )
     local -a removedPatterns=(
-        'shell/core/menu.sh|coreSelectionErrorCard
-        menu'
         'shell/core/cores.sh|coreSelectionErrorCard
         selectCoreInstall'
         'shell/core/routing_access_control.sh|coreSelectionErrorCard; removeAccessControlMenu; return'
@@ -1420,7 +1417,7 @@ EOF
         resetMenuRender
         customSingBoxInstall() { recordMenuAction "customSingBoxInstall:$*"; }
         installMenu <<<"7"
-        assertMenuAction menu
+        ! assertMenuAction menu
         resetMenuActions
         installMenu <<<"4"
         assertMenuAction "customSingBoxInstall:5"
@@ -1429,7 +1426,7 @@ EOF
         assertMenuAction selectCoreInstall
         resetMenuActions
         protocolEntryMenu <<<"7"
-        assertMenuAction menu
+        ! assertMenuAction menu
         resetMenuActions
         output=
         local realityMenuNetworkMarker="${TMP_DIR}/menu-smoke-reality-network"
@@ -1447,7 +1444,7 @@ EOF
         grep -q "网络关系（缓存）" <<<"${output}"
         [[ "$(grep -cF '重新生成 Reality 参数' <<<"${output}")" == "2" ]]
         [[ ! -e "${realityMenuNetworkMarker}" ]]
-        assertMenuAction menu
+        ! assertMenuAction menu
         if assertMenuAction 'errorCard:选择错误'; then
             printf 'menu-smoke failed: protocol entry reality target flow returned unexpected selection error\n' >&2
             return 1
@@ -1462,7 +1459,7 @@ EOF
         resetMenuActions
         output=
         manageSubscription <<<"9" || true
-        assertMenuAction menu
+        ! assertMenuAction menu
         grep -q "多服务器角色：.*未启用；可直接使用本机订阅" <<<"${output}"
         grep -q "启用主控协同" <<<"${output}"
         grep -q "接入主控" <<<"${output}"
@@ -1499,7 +1496,7 @@ invite-credential"
             printf 'menu-smoke failed: main top-level still exposes grouped submenus\n' >&2
             return 1
         fi
-        assertMenuAction menu
+        ! assertMenuAction menu
     fi
 
     if menuSmokePartSelected subscription-main-publish-service; then
@@ -1757,7 +1754,7 @@ main
             printf 'menu-smoke failed: controlled top-level still shows main entries\n' >&2
             return 1
         fi
-        assertMenuAction menu
+        ! assertMenuAction menu
         resetMenuActions
         manageSubscriptionControlledHome <<<"1
 invite-credential
@@ -1904,7 +1901,7 @@ still-invalid
 
         resetMenuActions
         resetMenuRender
-        coreConfigMaintenanceMenu <<<"6"
+        coreVersionManageMenu <<<"6"
         [[ "${menuItems}" == $'Xray-core 生命周期\nsing-box 生命周期\n服务运行态\n日志与诊断\nXray Geo 数据\n返回主菜单\n' ]]
         ! assertMenuAction showXrayCompatibilityAudit
         ! assertMenuAction checkXrayPrereleaseCompatibility

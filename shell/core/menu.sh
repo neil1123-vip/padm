@@ -48,7 +48,7 @@ installMenu() {
         selectCoreInstall
         ;;
     7)
-        menu
+        return 0
         ;;
     *)
         coreSelectionRetryAction installMenu
@@ -89,7 +89,7 @@ protocolEntryMenu() {
         manageCDN 1
         ;;
     7)
-        menu
+        return 0
         ;;
     *)
         coreSelectionRetryAction protocolEntryMenu
@@ -115,7 +115,7 @@ siteCertificateMenu() {
         manageTLSCertificates
         ;;
     3)
-        menu
+        return 0
         ;;
     *)
         coreSelectionRetryAction siteCertificateMenu
@@ -144,7 +144,7 @@ routingAccessMenu() {
         accessControlMenu 1
         ;;
     4)
-        menu
+        return 0
         ;;
     *)
         coreSelectionRetryAction routingAccessMenu
@@ -177,7 +177,7 @@ systemScriptMenu() {
         bbrInstall
         ;;
     5)
-        menu
+        return 0
         ;;
     *)
         coreSelectionRetryAction systemScriptMenu
@@ -201,7 +201,7 @@ advancedDangerMenu() {
         manageVlessEncryptionExperiment
         ;;
     3)
-        menu
+        return 0
         ;;
     *)
         coreSelectionRetryAction advancedDangerMenu
@@ -539,10 +539,6 @@ xrayGeoDataMenu() {
     done
 }
 
-coreConfigMaintenanceMenu() {
-    coreVersionManageMenu "$@"
-}
-
 coreVersionManageMenu() {
     local selectCore=
     while true; do
@@ -600,6 +596,7 @@ menu() {
         case ${selectMainMenuType} in
         1)
             installMenu || return $?
+            [[ "${AUTO_INSTALL:-}" == "true" ]] && return 0
             ;;
         2)
             manageSubscription 1
@@ -624,9 +621,9 @@ menu() {
             advancedDangerMenu
             ;;
         *)
-            coreSelectionRetryAction menu
+            coreInvalidInputErrorCard
             ;;
         esac
-        return $?
+        continue
     done
 }

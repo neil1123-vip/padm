@@ -349,7 +349,7 @@ manageSubscriptionLocalHome() {
         6) manageSubscriptionStateBackups ;;
         7) runSubscriptionMainControllerWizard; return ;;
         8) runSubscriptionControlledWizard; return ;;
-        9) menu; return ;;
+        9) return 0 ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -380,7 +380,7 @@ manageSubscriptionMainHome() {
         6) manageSubscriptionStateBackups ;;
         7) manageSubscriptionServers ;;
         8) manageSubscriptionMainControlDetails ;;
-        9) menu; return ;;
+        9) return 0 ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -417,7 +417,7 @@ manageSubscriptionControlledHome() {
             ;;
         6) restartSubscriptionWireGuardControl ;;
         7) disableSubscriptionWireGuardControl ;;
-        8) menu; return ;;
+        8) return 0 ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -470,26 +470,15 @@ manageSubscription() {
         exit 0
     fi
 
-    while true; do
-        role=$(subscriptionCurrentRoleNormalized) || {
-            errorCard "WireGuard 控制面状态损坏或不可读" "请先修复 $(subscriptionWireGuardStateFile)，本机模式不会绕过损坏状态"
-            return 1
-        }
-        case "${role}" in
-        uninitialized)
-            manageSubscriptionLocalHome
-            return
-            ;;
-        main)
-            manageSubscriptionMainHome
-            return
-            ;;
-        controlled)
-            manageSubscriptionControlledHome
-            return
-            ;;
-        esac
-    done
+    role=$(subscriptionCurrentRoleNormalized) || {
+        errorCard "WireGuard 控制面状态损坏或不可读" "请先修复 $(subscriptionWireGuardStateFile)，本机模式不会绕过损坏状态"
+        return 1
+    }
+    case "${role}" in
+    uninitialized) manageSubscriptionLocalHome ;;
+    main) manageSubscriptionMainHome ;;
+    controlled) manageSubscriptionControlledHome ;;
+    esac
 }
 
 showSubscriptionServiceStatus() {
@@ -1286,44 +1275,43 @@ setSubscriptionGroupSyncIntervalWithCron() {
 manageSubscriptionSyncDiagnostics() {
     local role
     local diagnosticStatus=
+    local returnChoice=5
+    local roleAction=cron
     role=$(subscriptionCurrentRoleNormalized) || return 1
     [[ "${role}" == "main" || "${role}" == "uninitialized" ]] || return 1
+    if [[ "${role}" == "main" ]]; then
+        returnChoice=6
+        roleAction=remote
+    fi
     while true; do
         echoContent title "\n┌─ 同步状态与排障 ───────────────────────────────────"
         menuItem 1 "查看最近同步结果与失败列表" "显示组状态和各来源最近同步结果"
         menuItem 2 "检查本机服务与发布状态" "显示服务器角色和公网订阅服务状态"
-        if [[ "${role}" == "main" ]]; then
-            menuItem 3 "查看本机同步计划" "预览本机 create/remove"
+        menuItem 3 "查看本机同步计划" "预览本机 create/remove"
+        if [[ "${roleAction}" == "remote" ]]; then
             menuItem 4 "查看远端同步计划" "对启用来源执行 dry-run"
             menuItem 5 "查看自动同步定时任务" "显示当前 SyncSubscriptionGroups cron"
-            menuReturnItem 6 "返回订阅同步" "回到上级菜单"
         else
-            menuItem 3 "查看本机同步计划" "预览本机 create/remove"
             menuItem 4 "查看自动同步定时任务" "显示当前 SyncSubscriptionGroups cron"
-            menuReturnItem 5 "返回订阅同步" "回到上级菜单"
         fi
+        menuReturnItem "${returnChoice}" "返回订阅同步" "回到上级菜单"
         menuClose
         autoRead subscription_sync_diagnostics_menu "请选择:" diagnosticStatus
-        if [[ "${role}" == "main" ]]; then
-            case "${diagnosticStatus}" in
-            1) showSubscriptionGroupsStateSummary; showSubscriptionSources ;;
-            2) showSubscriptionServerRoleSummary; showSubscriptionServiceStatus ;;
-            3) showSubscriptionLocalSyncPlan ;;
-            4) showSubscriptionRemoteSyncPlan ;;
-            5) crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true ;;
-            6) return ;;
-            *) coreSelectionErrorCard ;;
-            esac
-        else
-            case "${diagnosticStatus}" in
-            1) showSubscriptionGroupsStateSummary; showSubscriptionSources ;;
-            2) showSubscriptionServerRoleSummary; showSubscriptionServiceStatus ;;
-            3) showSubscriptionLocalSyncPlan ;;
-            4) crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true ;;
-            5) return ;;
-            *) coreSelectionErrorCard ;;
-            esac
-        fi
+        case "${diagnosticStatus}" in
+        1) showSubscriptionGroupsStateSummary; showSubscriptionSources ;;
+        2) showSubscriptionServerRoleSummary; showSubscriptionServiceStatus ;;
+        3) showSubscriptionLocalSyncPlan ;;
+        4)
+            if [[ "${roleAction}" == "remote" ]]; then
+                showSubscriptionRemoteSyncPlan
+            else
+                crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true
+            fi
+            ;;
+        "${returnChoice}") return ;;
+        5) crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true ;;
+        *) coreSelectionErrorCard ;;
+        esac
     done
 }
 

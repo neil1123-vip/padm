@@ -446,7 +446,7 @@ manageVlessEncryptionExperiment() {
         setVlessRealityEncryption disable && successCard "VLESS Encryption 实验开关已关闭"
         ;;
     3)
-        menu
+        return 0
         ;;
     *)
         coreSelectionRetryAction manageVlessEncryptionExperiment

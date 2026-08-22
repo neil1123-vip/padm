@@ -1002,7 +1002,7 @@ bbrInstall() {
         runThirdPartyTcpAccelerationScript
         ;;
     5)
-        menu
+        return 0
         ;;
     *)
         coreSelectionRetryAction bbrInstall
