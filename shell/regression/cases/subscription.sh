@@ -900,6 +900,16 @@ runConfiguredAccountHelpersRegression() (
     accounts=$(collectLocalTrafficAccounts)
     jq -e '. == ["admin","ops","sub_team_a","sub_team_b"]' <<<"${accounts}" >/dev/null
     grep -qx '0' "${helperLog}" || return 1
+
+    subscriptionSyncCurrentManagedUsers() {
+        return 97
+    }
+    subscriptionSyncConfiguredManagedCredentials() {
+        printf '[{"account":"sub_team_a","uuids":["old-uuid"]}]\n'
+    }
+    local mismatches
+    mismatches=$(subscriptionSyncCredentialMismatchAccounts '[{"id":"team-a","uuid":"new-uuid"}]')
+    jq -e '. == ["sub_team_a"]' <<<"${mismatches}" >/dev/null
 )
 
 runTrafficAccountIdMapHelperRegression() (

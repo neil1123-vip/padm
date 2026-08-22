@@ -273,18 +273,15 @@ subscriptionSyncPlanFromAccounts() {
 
 subscriptionSyncCredentialMismatchAccounts() {
     local desiredUsers=$1
-    local currentAccounts
     local currentCredentials
-    currentAccounts=$(subscriptionSyncCurrentManagedUsers) || return 1
     currentCredentials=$(subscriptionSyncConfiguredManagedCredentials) || return 1
     jq -c -n \
       --argjson desiredUsers "${desiredUsers}" \
-      --argjson currentAccounts "${currentAccounts}" \
       --argjson currentCredentials "${currentCredentials}" '
       [$desiredUsers[]?
        | . as $user
        | ($user.id | '"${SUBSCRIPTION_SYNC_ACCOUNT_NAME_FROM_ID_JQ}"') as $account
-       | select($currentAccounts | index($account))
+       | select(any($currentCredentials[]?; .account == $account))
        | ([$currentCredentials[]? | select(.account == $account) | .uuids[]?] | unique) as $currentUuids
        | select($currentUuids != [$user.uuid])
        | $account]
