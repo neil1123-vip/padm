@@ -1480,7 +1480,7 @@ n"
         setMenuSmokeRole uninitialized
         output=
         manageSubscriptionLocalHome <<<"1
-6
+4
 5"
         grep -q "返回本机订阅首页" <<<"${output}"
         resetMenuActions
@@ -1527,27 +1527,48 @@ invite-credential"
         resetMenuActions
         manageSubscriptionMainHome <<<"1
 1
-6
+1
+3
+4
 5"
         assertMenuAction installSubscribe
         assertMenuAction showSubscriptionServiceStatus
         resetMenuActions
         manageSubscriptionMainHome <<<"1
+1
 2
-6
+3
+4
 5"
         assertMenuAction subscribe
         resetMenuActions
         output=
         manageSubscriptionMainHome <<<"1
-6
+4
 5"
         grep -q "本机自用订阅来自协议配置" <<<"${output}"
-        grep -q "刷新并查看订阅链接" <<<"${output}"
-        grep -q "新建分享订阅" <<<"${output}"
-        grep -q "管理分享订阅" <<<"${output}"
+        grep -q "发布与链接" <<<"${output}"
+        grep -q "分享订阅" <<<"${output}"
         grep -q "用量与限额" <<<"${output}"
         grep -q "返回主控首页" <<<"${output}"
+        resetMenuActions
+        output=
+        manageSubscriptionMainHome <<<"1
+1
+3
+4
+5"
+        grep -q "安装/更新发布服务" <<<"${output}"
+        grep -q "刷新并查看订阅链接" <<<"${output}"
+        resetMenuActions
+        output=
+        manageSubscriptionMainHome <<<"1
+2
+3
+4
+5"
+        grep -q "新建分享订阅" <<<"${output}"
+        grep -q "管理分享订阅" <<<"${output}"
         resetMenuActions
     fi
 
@@ -1558,8 +1579,10 @@ invite-credential"
         setMenuSmokeRole main
         resetMenuActions
         manageSubscriptionMainHome <<<"1
+2
+2
+3
 4
-6
 5" || true
         subscriptionGroupsStateRead -e '((.user_groups // []) | length) == 0' >/dev/null
     fi
@@ -1571,11 +1594,13 @@ invite-credential"
         setMenuSmokeRole main
         resetMenuActions
         manageSubscriptionMainHome <<<"1
-3
+2
+1
 demo-user
 main
 0
-6
+3
+4
 5"
         subscriptionGroupsStateRead -e 'any(.user_groups[]?; .id == "demo-user" and .name == "demo-user")' >/dev/null
         local duplicateSideEffectMarker="${TMP_DIR}/duplicate-user-side-effect"
@@ -1597,23 +1622,27 @@ main
         setMenuSmokeRole main
         if [[ "${menuSmokePart}" == "subscription-main-publish-user-inspect" ]]; then
             manageSubscriptionMainHome <<<"1
-3
+2
+1
 demo-user
 main
 0
-6
+3
+4
 5"
         fi
         resetMenuActions
         output=
         manageSubscriptionMainHome <<<"1
-4
+2
+2
 demo-user
 2
 4
 2
 7
-6
+3
+4
 5"
         grep -q "管理分享订阅" <<<"${output}"
         grep -q "查看当前用量" <<<"${output}"
@@ -1633,12 +1662,14 @@ demo-user
         resetMenuActions
         subscriptionGroupsStateWrite '.sync.enabled = false'
         manageSubscriptionMainHome <<<"1
-3
+2
+1
 team-a
 *
 0
 n
-6
+3
+4
 5"
         subscriptionGroupsStateRead -e 'any(.user_groups[]?; .id == "team-a" and .name == "team-a")' >/dev/null
         subscriptionGroupsStateRead -e '.sync.enabled == false' >/dev/null
@@ -1659,12 +1690,14 @@ n
         ensureSubscriptionGroupsState
         subscriptionGroupsStateWrite '.sync.enabled = false'
         manageSubscriptionMainHome <<<"1
-3
+2
+1
 team-b
 main
 0
 
-6
+3
+4
 5"
         assertMenuAction refreshSubscriptionGroupSyncCron
         assertMenuAction 'runSubscriptionGroupSync:'
@@ -1719,21 +1752,23 @@ main
         resetMenuActions
         output=
         manageTrafficAndQuota <<<"1
-9"
+5"
         assertMenuAction collectSubscriptionTraffic
         assertMenuAction showSubscriptionTrafficOverview
         grep -q "返回订阅与用户" <<<"${output}"
         resetMenuActions
-        manageTrafficAndQuota <<<"3
-9"
+        manageTrafficAndQuota <<<"2
+1
+5
+5"
         assertMenuAction showAdminSubscriptionTraffic
         resetMenuActions
-        manageTrafficAndQuota <<<"7
-9"
+        manageTrafficAndQuota <<<"3
+5"
         assertMenuAction executeSubscriptionQuotaPlanMenu
         resetMenuActions
-        manageTrafficAndQuota <<<"8
-9"
+        manageTrafficAndQuota <<<"4
+5"
         assertMenuAction 'successCard:限额自动执行状态已切换'
         subscriptionGroupsStateRead -e '.sync.quota_auto_apply == true' >/dev/null
         resetMenuActions
@@ -1837,11 +1872,11 @@ y
         grep -q "订阅与用户" <<<"${output}"
         resetMenuActions
         output=
-        manageTrafficAndQuota <<<"9"
-        grep -q "查看用量总览" <<<"${output}"
+        manageTrafficAndQuota <<<"5"
+        grep -q "刷新并显示总览" <<<"${output}"
         resetMenuActions
         setMenuSmokeRole controlled
-        manageTrafficAndQuota <<<"9" || true
+        manageTrafficAndQuota <<<"5" || true
         assertMenuAction 'errorCard:当前机器已初始化为被控'
         resetMenuActions
         manageSubscriptionStateBackups <<<"5" || true
@@ -1851,7 +1886,7 @@ y
         assertMenuAction 'errorCard:当前机器已初始化为被控'
         resetMenuActions
         setMenuSmokeRole uninitialized
-        manageTrafficAndQuota <<<"9"
+        manageTrafficAndQuota <<<"5"
         [[ -z "${actions}" ]]
         resetMenuActions
         manageSubscriptionStateBackups <<<"5"

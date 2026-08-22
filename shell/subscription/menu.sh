@@ -122,7 +122,7 @@ ensureSubscriptionServiceForSharedLinks() {
         return 0
     fi
 
-    statusCard "已跳过订阅服务安装" "本次仍可保存订阅对象和执行同步" "等之后安装好订阅服务，再到 订阅与用户 -> 刷新并查看订阅链接"
+    statusCard "已跳过订阅服务安装" "本次仍可保存订阅对象和执行同步" "等之后安装好订阅服务，再到 订阅与用户 -> 发布与链接 -> 刷新并查看订阅链接"
     return 1
 }
 
@@ -339,7 +339,7 @@ subscriptionPublisherHome() {
     while true; do
         echoContent title "\n┌─ ${homeTitle} ─────────────────────────────────────"
         showSubscriptionServerRoleSummary
-        menuItem 1 "订阅与用户" "发布服务、查看链接、新建或维护分享订阅，并处理用量限额"
+        menuItem 1 "订阅与用户" "发布与链接、分享订阅、用量与限额"
         menuItem 2 "订阅同步" "立即同步、自动同步、状态排障和状态备份"
         if [[ "${publisherRole}" == "main" ]]; then
             menuItem 3 "服务器与协同" "查看来源，管理邀请、凭据、健康和服务器状态"
@@ -489,7 +489,7 @@ showSubscriptionServiceStatus() {
     if [[ -n "${subscribePort}" ]]; then
         statusCard "订阅服务" "状态：已配置" "协议：${subscribeType:-https}" "域名：${subscribeDomain}" "端口：${subscribePort}"
     else
-        statusCard "订阅服务" "状态：未检测到可用订阅发布配置" "如需本机向客户端发布订阅，请进入 订阅与用户 -> 发布服务" "仅作为被控加入主控时，不需要安装公网订阅服务"
+        statusCard "订阅服务" "状态：未检测到可用订阅发布配置" "如需本机向客户端发布订阅，请进入 订阅与用户 -> 发布与链接" "仅作为被控加入主控时，不需要安装公网订阅服务"
     fi
 }
 
@@ -569,6 +569,46 @@ showSubscriptionQuotaPlanJson() {
     showSubscriptionJsonWithSummary "超限处理计划" "${plan}" "${summary}"
 }
 
+manageSubscriptionPublishMenu() {
+    subscriptionRequireLocalPublisherRole || return 1
+    local publishStatus=
+    while true; do
+        echoContent title "\n┌─ 发布与链接 ───────────────────────────────────────"
+        menuLine "安装/更新公网订阅服务，或刷新本机和分享订阅链接。"
+        menuItem 1 "安装/更新发布服务" "只处理订阅服务和公网发布状态"
+        menuItem 2 "刷新并查看订阅链接" "重新生成本机自用和已启用分享订阅，并显示链接"
+        menuReturnItem 3 "返回订阅与用户" "回到上级菜单"
+        menuClose
+        autoRead subscription_publish_menu "请选择:" publishStatus
+        case "${publishStatus}" in
+        1) installSubscribe && showSubscriptionServiceStatus ;;
+        2) refreshSubscriptionLinks ;;
+        3) return ;;
+        *) coreSelectionErrorCard ;;
+        esac
+    done
+}
+
+manageSharedSubscriptions() {
+    subscriptionRequireLocalPublisherRole || return 1
+    local sharedStatus=
+    while true; do
+        echoContent title "\n┌─ 分享订阅 ─────────────────────────────────────────"
+        menuLine "创建新订阅，或选择已有订阅进行日常维护。"
+        menuItem 1 "新建分享订阅" "填写 ID、节点范围和额度，然后同步并拿到可发送的链接"
+        menuItem 2 "管理分享订阅" "刷新单个链接、改范围、改额度、启停或删除"
+        menuReturnItem 3 "返回订阅与用户" "回到上级菜单"
+        menuClose
+        autoRead shared_subscription_menu "请选择:" sharedStatus
+        case "${sharedStatus}" in
+        1) createAndSyncUserSubscriptionWizard ;;
+        2) manageUserSubscriptionItem ;;
+        3) return ;;
+        *) coreSelectionErrorCard ;;
+        esac
+    done
+}
+
 manageSubscriptionCatalog() {
     subscriptionRequireLocalPublisherRole || return 1
     local subscriptionCatalogStatus=
@@ -578,22 +618,18 @@ manageSubscriptionCatalog() {
     [[ "${role}" == "main" ]] && returnText="返回主控首页" || returnText="返回本机订阅首页"
     while true; do
         echoContent title "\n┌─ 订阅与用户 ───────────────────────────────────────"
-        menuLine "本机自用订阅来自协议配置；分享订阅在这里创建、发布和维护。"
-        menuItem 1 "发布服务" "安装/更新订阅服务并查看公网发布状态"
-        menuItem 2 "刷新并查看订阅链接" "刷新本机自用和已启用分享订阅，并显示可用链接"
-        menuItem 3 "新建分享订阅" "填写 ID、节点范围和额度，然后同步并拿到可发送的链接"
-        menuItem 4 "管理分享订阅" "刷新单个链接、改范围、改额度、启停或删除"
-        menuItem 5 "用量与限额" "查看自用、分享订阅和服务器流量，并处理超限"
-        menuReturnItem 6 "${returnText}" "回到上级菜单"
+        menuLine "本机自用订阅来自协议配置；这里统一处理发布、分享订阅和用量。"
+        menuItem 1 "发布与链接" "安装/更新发布服务，或刷新并查看订阅链接"
+        menuItem 2 "分享订阅" "新建或维护已有分享订阅"
+        menuItem 3 "用量与限额" "查看用量明细，并处理超限和自动限额"
+        menuReturnItem 4 "${returnText}" "回到上级菜单"
         menuClose
         autoRead subscription_catalog_menu "请选择:" subscriptionCatalogStatus
         case "${subscriptionCatalogStatus}" in
-        1) installSubscribe && showSubscriptionServiceStatus ;;
-        2) refreshSubscriptionLinks ;;
-        3) createAndSyncUserSubscriptionWizard ;;
-        4) manageUserSubscriptionItem ;;
-        5) manageTrafficAndQuota ;;
-        6) return ;;
+        1) manageSubscriptionPublishMenu ;;
+        2) manageSharedSubscriptions ;;
+        3) manageTrafficAndQuota ;;
+        4) return ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -739,7 +775,7 @@ createAndSyncUserSubscriptionWizard() {
         if [[ "${canShowLinks}" == "true" ]]; then
             showUserSubscriptionLinks "${id}"
         else
-            statusCard "同步完成，但暂时还不能查看链接" "订阅对象和托管账号已生成" "等安装好订阅服务后，到 订阅与用户 -> 管理分享订阅中再刷新并查看链接"
+            statusCard "同步完成，但暂时还不能查看链接" "订阅对象和托管账号已生成" "等安装好订阅服务后，到 订阅与用户 -> 发布与链接中再刷新并查看链接"
         fi
     fi
 }
@@ -753,7 +789,7 @@ selectUserSubscriptionId() {
         return 1
     }
     if [[ "${hasUsers}" != "true" ]]; then
-        statusCard "用户订阅" "暂无用户订阅" "先到 订阅与用户 -> 新建分享订阅创建一个"
+        statusCard "用户订阅" "暂无用户订阅" "先到 订阅与用户 -> 分享订阅 -> 新建分享订阅创建一个"
         return 1
     fi
     showUserSubscriptions || return 1

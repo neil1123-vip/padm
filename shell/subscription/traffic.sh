@@ -410,36 +410,51 @@ showSubscriptionTrafficOverview() {
 }
 
 
+manageTrafficDetails() {
+    subscriptionRequireLocalPublisherRole || return 1
+    local trafficDetailsStatus=
+    while true; do
+        echoContent title "\n┌─ 用量明细 ─────────────────────────────────────────"
+        menuLine "按账号、分享订阅或服务器源查看累计流量。"
+        menuItem 1 "查看我的流量" "查看自用账号在各服务器源的累计流量"
+        menuItem 2 "查看分享订阅限额概览" "列出全部分享订阅、额度和状态"
+        menuItem 3 "查看单个分享订阅用量" "选择订阅后显示用量和额度状态"
+        menuItem 4 "查看服务器流量" "显示各服务器源累计流量"
+        menuReturnItem 5 "返回流量与限额" "回到上级菜单"
+        menuClose
+        autoRead traffic_details_menu "请选择:" trafficDetailsStatus
+        case "${trafficDetailsStatus}" in
+        1) showAdminSubscriptionTraffic ;;
+        2) showUserSubscriptions ;;
+        3) selectUserSubscriptionTrafficMenu ;;
+        4) showSubscriptionSourcesTraffic ;;
+        5) return ;;
+        *) coreSelectionErrorCard ;;
+        esac
+    done
+}
+
 manageTrafficAndQuota() {
     subscriptionRequireLocalPublisherRole || return 1
     local quotaAutoApplyText
     while true; do
         subscriptionGroupQuotaAutoApplyEnabled && quotaAutoApplyText="开启" || quotaAutoApplyText="关闭"
         echoContent title "\n┌─ 流量与限额 ───────────────────────────────────────"
-        menuLine "这里是用量治理台：先刷新统计，再查看用量或执行超限处理"
-        menuLine "订阅额度在新建或已有订阅中设置；这里不编辑订阅对象，只处理运行状态"
+        menuLine "先刷新总览；明细、超限和自动处理按需进入。"
         menuLine "自动执行超限处理：${quotaAutoApplyText}"
         menuItem 1 "刷新并显示总览" "采集本机账号流量，写入 groups.json 后显示治理摘要"
-        menuItem 2 "查看用量总览" "显示全局、分享订阅、服务器源和最近同步摘要"
-        menuItem 3 "查看我的流量" "查看自用账号在各服务器源的累计流量"
-        menuItem 4 "查看分享订阅限额概览" "列出全部分享订阅、额度和状态"
-        menuItem 5 "查看单个分享订阅用量" "选择订阅后显示用量和额度状态"
-        menuItem 6 "查看服务器流量" "显示各服务器源累计流量"
-        menuDangerItem 7 "执行超限处理" "停用超额订阅并移除本机托管账号"
-        menuItem 8 "开启/关闭自动执行超限处理" "切换同步前的自动限额事务"
-        menuReturnItem 9 "返回订阅与用户" "回到上级菜单"
+        menuItem 2 "用量明细" "按账号、分享订阅或服务器源查看累计流量"
+        menuDangerItem 3 "执行超限处理" "停用超额订阅并移除本机托管账号"
+        menuItem 4 "开启/关闭自动执行超限处理" "切换同步前的自动限额事务"
+        menuReturnItem 5 "返回订阅与用户" "回到上级菜单"
         menuClose
         autoRead traffic_quota_menu "请选择:" trafficQuotaStatus
         case "${trafficQuotaStatus}" in
         1) collectSubscriptionTraffic && showSubscriptionTrafficOverview ;;
-        2) showSubscriptionTrafficOverview ;;
-        3) showAdminSubscriptionTraffic ;;
-        4) showUserSubscriptions ;;
-        5) selectUserSubscriptionTrafficMenu ;;
-        6) showSubscriptionSourcesTraffic ;;
-        7) executeSubscriptionQuotaPlanMenu ;;
-        8) toggleSubscriptionGroupQuotaAutoApplyEnabled && successCard "限额自动执行状态已切换" || errorCard "限额自动执行状态切换失败" ;;
-        9) return ;;
+        2) manageTrafficDetails ;;
+        3) executeSubscriptionQuotaPlanMenu ;;
+        4) toggleSubscriptionGroupQuotaAutoApplyEnabled && successCard "限额自动执行状态已切换" || errorCard "限额自动执行状态切换失败" ;;
+        5) return ;;
         *) coreSelectionErrorCard ;;
         esac
     done

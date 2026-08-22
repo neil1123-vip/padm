@@ -5,7 +5,7 @@ installMenu() {
     if [[ -n "${coreInstallType}" ]]; then
         menuLine "检测到已有安装；以下入口会重建核心与协议配置，请先确认已备份"
     else
-        menuLine "首次安装或不知道怎么选时，建议直接选 1；安装后去 订阅与用户 -> 刷新并查看订阅链接"
+        menuLine "首次安装或不知道怎么选时，建议直接选 1；安装后去 订阅与用户 -> 发布与链接 -> 刷新并查看订阅链接"
     fi
     menuLine "怎么选：直连/有域名选 1；需要 CDN/反代选 2；没有域名选 3；需要 TLS 指纹抗性可选 4"
     menuLine "高级：想手选核心和协议选 5；旧客户端、迁移或已有 TLS/fallback 架构选 6"
