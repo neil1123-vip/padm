@@ -1494,11 +1494,12 @@ invite-credential"
         setMenuSmokeRole main
         resetMenuActions
         output=
-        manageSubscription <<<"5"
+        manageSubscription <<<"4"
         grep -q "订阅与用户" <<<"${output}"
         grep -q "订阅同步" <<<"${output}"
-        grep -q "服务器与协同" <<<"${output}"
-        grep -q "控制面与连接" <<<"${output}"
+        grep -q "协同与控制" <<<"${output}"
+        ! grep -q "服务器与协同" <<<"${output}"
+        ! grep -q "控制面与连接" <<<"${output}"
         if grep -q '^发布订阅 ' <<<"${output}" || grep -q '^多服务器协同 ' <<<"${output}" || grep -q '^主控维护与排障 ' <<<"${output}" || grep -q '^被控维护与排障 ' <<<"${output}"; then
             printf 'menu-smoke failed: main top-level still exposes grouped submenus\n' >&2
             return 1
@@ -1513,13 +1514,14 @@ invite-credential"
         setMenuSmokeRole main
         resetMenuActions
         output=
-        manageSubscriptionMainHome <<<"5"
+        manageSubscriptionMainHome <<<"4"
         grep -q "订阅与用户" <<<"${output}"
         ! grep -q "新建并发布订阅" <<<"${output}"
         ! grep -q "刷新并查看我的订阅链接" <<<"${output}"
         ! grep -q "查看并处理已有订阅" <<<"${output}"
-        grep -q "服务器与协同" <<<"${output}"
-        grep -q "控制面与连接" <<<"${output}"
+        grep -q "协同与控制" <<<"${output}"
+        ! grep -q "服务器与协同" <<<"${output}"
+        ! grep -q "控制面与连接" <<<"${output}"
         if grep -q "同步订阅变更" <<<"${output}" || grep -q "预览同步变更" <<<"${output}" || grep -q "查看我的可用服务器" <<<"${output}"; then
             printf 'menu-smoke failed: main menu still shows duplicate leaf entries\n' >&2
             return 1
@@ -1530,7 +1532,7 @@ invite-credential"
 1
 3
 4
-5"
+4"
         assertMenuAction installSubscribe
         assertMenuAction showSubscriptionServiceStatus
         resetMenuActions
@@ -1539,13 +1541,13 @@ invite-credential"
 2
 3
 4
-5"
+4"
         assertMenuAction subscribe
         resetMenuActions
         output=
         manageSubscriptionMainHome <<<"1
 4
-5"
+4"
         grep -q "本机自用订阅来自协议配置" <<<"${output}"
         grep -q "发布与链接" <<<"${output}"
         grep -q "分享订阅" <<<"${output}"
@@ -1557,7 +1559,7 @@ invite-credential"
 1
 3
 4
-5"
+4"
         grep -q "安装/更新发布服务" <<<"${output}"
         grep -q "刷新并查看订阅链接" <<<"${output}"
         resetMenuActions
@@ -1566,7 +1568,7 @@ invite-credential"
 2
 3
 4
-5"
+4"
         grep -q "新建分享订阅" <<<"${output}"
         grep -q "管理分享订阅" <<<"${output}"
         resetMenuActions
@@ -1583,7 +1585,7 @@ invite-credential"
 2
 3
 4
-5" || true
+4" || true
         subscriptionGroupsStateRead -e '((.user_groups // []) | length) == 0' >/dev/null
     fi
 
@@ -1601,7 +1603,7 @@ main
 0
 3
 4
-5"
+4"
         subscriptionGroupsStateRead -e 'any(.user_groups[]?; .id == "demo-user" and .name == "demo-user")' >/dev/null
         local duplicateSideEffectMarker="${TMP_DIR}/duplicate-user-side-effect"
         rm -f "${duplicateSideEffectMarker}"
@@ -1629,7 +1631,7 @@ main
 0
 3
 4
-5"
+4"
         fi
         resetMenuActions
         output=
@@ -1643,7 +1645,7 @@ demo-user
 7
 3
 4
-5"
+4"
         grep -q "管理分享订阅" <<<"${output}"
         grep -q "查看当前用量" <<<"${output}"
         subscriptionGroupsStateRead -e 'any(.user_groups[]?; .id == "demo-user" and .traffic_limit_gb == 2)' >/dev/null
@@ -1670,7 +1672,7 @@ team-a
 n
 3
 4
-5"
+4"
         subscriptionGroupsStateRead -e 'any(.user_groups[]?; .id == "team-a" and .name == "team-a")' >/dev/null
         subscriptionGroupsStateRead -e '.sync.enabled == false' >/dev/null
         if assertMenuAction 'runSubscriptionGroupSync:'; then
@@ -1698,7 +1700,7 @@ main
 
 3
 4
-5"
+4"
         assertMenuAction refreshSubscriptionGroupSyncCron
         assertMenuAction 'runSubscriptionGroupSync:'
         subscriptionGroupsStateRead -e '.sync.enabled == true' >/dev/null
@@ -1782,6 +1784,14 @@ main
 6"
             assertMenuAction "${wgAction#*:}"
         done
+        resetMenuActions
+        manageSubscriptionMainHome <<<"3
+1
+4
+4"
+        assertMenuAction showSubscriptionWireGuardStatus
+        assertMenuAction showSubscriptionSources
+        assertMenuAction showSubscriptionWireGuardPeers
         for wgAction in \
             "1:showSubscriptionSources" \
             "2:createSubscriptionWireGuardInviteMenu" \
@@ -1868,7 +1878,7 @@ y
         assertMenuAction 'errorCard:当前机器已初始化为主控'
         resetMenuActions
         output=
-        manageSubscriptionMainHome <<<"5"
+        manageSubscriptionMainHome <<<"4"
         grep -q "订阅与用户" <<<"${output}"
         resetMenuActions
         output=

@@ -440,14 +440,14 @@ The subscription system is role-based; local and controller home screens keep `S
 | State | Menu shape | What it is for |
 | --- | --- | --- |
 | 🟡 Uninitialized | `Use this server locally` / `This server is the controller` / `This server is controlled` | A single server can manage local subscriptions directly; choose controller or controlled mode only for multi-server use. |
-| 🟢 Controller | The controller home exposes subscriptions and users, sync, server coordination, and control-plane actions | Create user subscriptions, publish links, add controlled servers, run sync, and handle quotas. |
+| 🟢 Controller | The controller home exposes subscriptions and users, sync, and `Coordination & control` | Create user subscriptions, publish links, add controlled servers, run sync, and handle quotas. |
 | 🔵 Controlled | The controlled home directly exposes join, status, credential, and control-plane actions | Paste a controller invite, provide this server's nodes to the controller, and view WireGuard/sync state. |
 
 Controller and local-only home screens share one `Subscription sync` menu: run a full sync, enable/disable automatic sync, set the interval, open status/troubleshooting, or manage state backups. Usage and quotas live in `Subscriptions & users`, so each task has one primary entry. The automatic-sync switch controls both immediate sync after configuration changes and cron; manual full sync remains available when it is off.
 
 The `Subscriptions & users` entry is the single place for link refresh, shared-subscription creation/maintenance, and usage/quota access. Admin self-use subscriptions remain derived from the local protocol configuration; they are not stored in `user_groups`, do not use shared quotas, and are never pushed to controlled servers.
 
-- A controller syncs every enabled controlled-server source. There is no separate global remote-sync switch; pause one server through `Server coordination` -> `Enable/disable controlled server`.
+- A controller syncs every enabled controlled-server source. There is no separate global remote-sync switch; pause one server through `Coordination & control` -> `Controlled servers` -> `Enable/disable controlled server`.
 - Public subscriptions are published only after the local host and every enabled source return complete snapshots. If any required source fails, the previous complete public subscription stays in place instead of being overwritten by a partial node set.
 - After changing a controlled server's Reality target or other node configuration, enabled automatic sync regenerates local nodes, fetches every enabled source, and publishes the complete group. The outer HTTPS subscription URL stays unchanged and nodes from the other servers remain present.
 - Controlled servers do not expose an active-sync menu; they only answer authenticated sync requests from the controller.
@@ -462,9 +462,9 @@ Recommended flow for local-only or controller-side shared subscriptions:
 
 Recommended multi-server flow:
 
-1. On the local server, open `Enable controller coordination`, then use `Server coordination` -> `Create controlled-server invite` and enter the controlled-server alias once. The controller reserves its WireGuard address automatically.
+1. On the local server, open `Enable controller coordination`, then use `Coordination & control` -> `Controlled servers` -> `Create controlled-server invite` and enter the controlled-server alias once. The controller reserves its WireGuard address automatically.
 2. On the controlled server, open `Join controller` and paste the invite. Initialization and controller-peer import complete without an address prompt; copy the resulting join receipt once.
-3. Back on the controller, open `Server coordination` from the controller home, then use `Complete controlled-server join` and paste the receipt. The reserved alias drives the peer, source, and control-token transaction, followed by a health check for that source only.
+3. Back on the controller, open `Coordination & control` from the controller home, then use `Controlled servers` -> `Complete controlled-server join` and paste the receipt. The reserved alias drives the peer, source, and control-token transaction, followed by a health check for that source only.
 4. To temporarily exclude one controlled server, use `Enable/disable controlled server`. Disabling preserves its peer, token, and history; the next full sync removes that source's nodes from the public subscription.
 5. Pending invites can be viewed or cancelled by alias. Invites and receipts are bearer secrets, so normal status, health output, and pending lists never show their complete values. Cancel and recreate a lost invite.
 6. Legacy `main` / `controlled` credentials remain only in explicitly named maintenance actions for existing links; first-time joins accept invites and receipts only. Receipts and legacy controlled credentials contain long-lived control tokens and must travel through a trusted channel.

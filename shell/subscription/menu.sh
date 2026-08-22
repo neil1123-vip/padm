@@ -69,7 +69,7 @@ runSubscriptionMainControllerWizard() {
     if [[ "${createInvite}" == "y" ]]; then
         createSubscriptionWireGuardInviteMenu
     else
-        statusCard "已跳过创建邀请" "稍后可从 主控首页 -> 服务器与协同 创建"
+        statusCard "已跳过创建邀请" "稍后可从 主控首页 -> 协同与控制 -> 管理被控服务器 -> 创建被控邀请"
     fi
 }
 
@@ -329,12 +329,15 @@ subscriptionPublisherHome() {
     local homeTitle
     local menuKey
     local homeStatus
+    local returnChoice
     if [[ "${publisherRole}" == "main" ]]; then
         homeTitle="主控首页"
         menuKey=subscription_main_home_menu
+        returnChoice=4
     else
         homeTitle="本机订阅首页"
         menuKey=subscription_local_home_menu
+        returnChoice=5
     fi
     while true; do
         echoContent title "\n┌─ ${homeTitle} ─────────────────────────────────────"
@@ -342,35 +345,32 @@ subscriptionPublisherHome() {
         menuItem 1 "订阅与用户" "发布与链接、分享订阅、用量与限额"
         menuItem 2 "订阅同步" "立即同步、自动同步、状态排障和状态备份"
         if [[ "${publisherRole}" == "main" ]]; then
-            menuItem 3 "服务器与协同" "查看来源，管理邀请、凭据、健康和服务器状态"
-            menuItem 4 "控制面与连接" "查看凭据、Peer、地址，并处理重启或关闭"
+            menuItem 3 "协同与控制" "查看协同状态，管理被控服务器和本机控制面"
         else
             menuItem 3 "启用主控协同" "将本机初始化为主控，保留现有订阅状态和服务"
             menuItem 4 "接入主控" "粘贴主控邀请，将本机初始化为被控"
         fi
-        menuReturnItem 5 "返回主菜单" "回到 padm 管理面板"
+        menuReturnItem "${returnChoice}" "返回主菜单" "回到 padm 管理面板"
         menuClose
         autoRead "${menuKey}" "请选择:" homeStatus
+        if [[ "${homeStatus}" == "${returnChoice}" ]]; then
+            return 0
+        fi
         case "${homeStatus}" in
         1) manageSubscriptionCatalog ;;
         2) manageSubscriptionSyncSettings ;;
         3)
             if [[ "${publisherRole}" == "main" ]]; then
-                manageSubscriptionServers
+                manageSubscriptionCoordination
             else
                 runSubscriptionMainControllerWizard
                 return
             fi
             ;;
         4)
-            if [[ "${publisherRole}" == "main" ]]; then
-                manageSubscriptionMainControlDetails
-            else
-                runSubscriptionControlledWizard
-                return
-            fi
+            runSubscriptionControlledWizard
+            return
             ;;
-        5) return 0 ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -426,7 +426,7 @@ manageSubscriptionControlledHome() {
 manageSubscriptionMainControlDetails() {
     subscriptionRequireMainRole || return 1
     while true; do
-        echoContent title "\n┌─ 控制面与连接细节 ─────────────────────────────────"
+        echoContent title "\n┌─ 本机控制面 ───────────────────────────────────────"
         menuLine "这里处理主控控制面的状态、连接和恢复动作。"
         menuLine "建议先查看凭据、Peer 和连接状态，再决定是否重启或关闭控制面。"
         showSubscriptionWireGuardStatus
@@ -445,6 +445,36 @@ manageSubscriptionMainControlDetails() {
         4) restartSubscriptionWireGuardControl ;;
         5) disableSubscriptionWireGuardControl ;;
         6) return ;;
+        *) coreSelectionErrorCard ;;
+        esac
+    done
+}
+
+showSubscriptionCoordinationStatus() {
+    echoContent title "\n┌─ 协同状态 ─────────────────────────────────────────"
+    showSubscriptionWireGuardStatus
+    showSubscriptionSources
+    showSubscriptionWireGuardPeers
+    menuClose
+}
+
+manageSubscriptionCoordination() {
+    subscriptionRequireMainRole || return 1
+    local coordinationStatus=
+    while true; do
+        echoContent title "\n┌─ 协同与控制 ───────────────────────────────────────"
+        menuLine "这里统一管理被控服务器接入、来源和本机控制面。"
+        menuItem 1 "查看协同状态" "查看来源、同步状态、WireGuard 和 Peer"
+        menuItem 2 "管理被控服务器" "创建/完成接入，管理邀请、凭据、启停、健康和移除"
+        menuItem 3 "维护本机控制面" "查看维护凭据、控制地址、Peer，或重启/关闭"
+        menuReturnItem 4 "返回主控首页" "回到上级菜单"
+        menuClose
+        autoRead subscription_coordination_menu "请选择:" coordinationStatus
+        case "${coordinationStatus}" in
+        1) showSubscriptionCoordinationStatus ;;
+        2) manageSubscriptionServers ;;
+        3) manageSubscriptionMainControlDetails ;;
+        4) return ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -1146,7 +1176,7 @@ manageSubscriptionServers() {
     subscriptionRequireMainRole || return 1
     local serverStatus=
     while true; do
-        echoContent title "\n┌─ 服务器与协同 ─────────────────────────────────────"
+        echoContent title "\n┌─ 被控服务器 ───────────────────────────────────────"
         menuLine "推荐按 创建邀请 -> 被控导入 -> 完成接入 的顺序操作。"
         menuItem 1 "查看来源与同步状态" "查看本机和被控来源的地址、启用状态及最近同步结果"
         menuItem 2 "创建被控邀请" "输入一次别名，自动预留 WireGuard 地址"
@@ -1203,7 +1233,7 @@ addOtherSubscribe() {
     if [[ -n "${health}" ]] && jq -e '.ok == true' <<<"${health}" >/dev/null 2>&1; then
         successCard "被控接入已完成" "别名：${completedAlias}" "WireGuard 与控制服务健康检查通过"
     else
-        warnCard "接入已保存，但暂不可达" "别名：${completedAlias}" "Peer、服务器源和 Token 已保留；可稍后从 服务器与协同 重试健康检查"
+        warnCard "接入已保存，但暂不可达" "别名：${completedAlias}" "Peer、服务器源和 Token 已保留；可稍后从 协同与控制 -> 管理被控服务器 重试健康检查"
     fi
     runSubscriptionSyncAfterMutation "被控服务器接入" || true
 }
