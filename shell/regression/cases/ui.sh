@@ -22,7 +22,7 @@ runSubscriptionWireGuardMenuFlowRegression() (
     local sourceStateWriteShouldFail='' remoteApplyShouldFail=''
     local stopShouldFail=
     local stopAllowMissingBackend=
-    local actions=
+    local actions= healthCallCount=0
 
     # Restore the real subscription functions because earlier UI smoke tests
     # define menu stubs with global Bash function scope.
@@ -174,7 +174,7 @@ runSubscriptionWireGuardMenuFlowRegression() (
         fi
     }
     subscriptionRemoteControlHealthAll() { printf '[{"id":"edge-a","ok":true}]\n'; }
-    subscriptionRemoteControlHealth() { printf '{"ok":true}\n'; }
+    subscriptionRemoteControlHealth() { healthCallCount=$((healthCallCount + 1)); printf '{"ok":true}\n'; }
     userJsonCard() { recordMenuAction "userJsonCard:$1"; }
     subscribe() { recordMenuAction subscribe; }
 
@@ -198,6 +198,7 @@ runSubscriptionWireGuardMenuFlowRegression() (
         remoteApplyShouldFail=
         stopShouldFail=
         stopAllowMissingBackend=
+        healthCallCount=0
         actions=
         rm -rf "${PADM_WIREGUARD_CONTROL_DIR}" "${PADM_SUBSCRIPTION_GROUPS_DIR}"
         mkdir -p "${nginxConfigPath}"
@@ -246,6 +247,7 @@ main.example.com
         manageSubscriptionServers <<<"2
 ${receiptCredential}
 7"
+        [[ "${healthCallCount}" == "0" ]]
         assertMenuAction 'runSubscriptionGroupSync:'
         subscriptionWireGuardReadState | jq -e --arg publicKey "${controlledPublicKey}" '.peers[] | select(.id == "edge-a" and .address == "10.77.0.2/24" and .public_key == $publicKey and .endpoint == "")' >/dev/null
         subscriptionGroupsStateRead -e --arg token "${controlledToken}" '.sources[] | select(.id == "edge-a" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.2" and .port == 39778 and .control_token == $token)' >/dev/null

@@ -1192,7 +1192,7 @@ manageSubscriptionServers() {
 addOtherSubscribe() {
     local credential=
     local credentialJson=
-    local completedAlias= source= health=
+    local completedAlias=
     echoContent title "\n┌─ 完成被控接入 ─────────────────────────────────────"
     menuLine "粘贴接入回执，自动使用创建邀请时预留的别名和地址。"
     menuClose
@@ -1210,15 +1210,7 @@ addOtherSubscribe() {
         return 1
     fi
     subscriptionWireGuardCompleteInvite "${credentialJson}" completedAlias || return 1
-    source=$(subscriptionActiveGroupRead -c --arg id "${completedAlias}" 'first(.sources[]? | select(.id == $id)) // empty') || true
-    if [[ -n "${source}" ]]; then
-        health=$(subscriptionRemoteControlHealth "${source}" 2>/dev/null || true)
-    fi
-    if [[ -n "${health}" ]] && jq -e '.ok == true' <<<"${health}" >/dev/null 2>&1; then
-        successCard "被控接入已完成" "别名：${completedAlias}" "WireGuard 与控制服务健康检查通过"
-    else
-        warnCard "接入已保存，但暂不可达" "别名：${completedAlias}" "Peer、服务器源和 Token 已保留；可稍后从 订阅同步 -> 状态与排障 重试健康检查"
-    fi
+    successCard "被控接入已完成" "别名：${completedAlias}" "Peer、服务器源和 Token 已保存；可到 订阅同步 -> 状态与排障 执行健康检查"
     runSubscriptionSyncAfterMutation "被控服务器接入" || true
 }
 
