@@ -1147,7 +1147,7 @@ subscriptionControlTrafficResponse() {
     fi
     readInstallType
     readInstallProtocolType
-    if ! ensureSubscriptionGroupsState || ! ensureXrayTrafficStatsConfig; then
+    if ! ensureSubscriptionGroupsState || ! ensureTrafficStatsConfig; then
         jq -n '{ok:false, error:"traffic_failed", error_detail:{type:"traffic_failed", message:"流量统计配置不可用"}}'
         return 1
     fi

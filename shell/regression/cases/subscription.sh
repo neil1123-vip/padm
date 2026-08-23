@@ -896,10 +896,18 @@ runConfiguredAccountHelpersRegression() (
         printf '%s\n' "$#" >"${helperLog}"
         printf '["admin","ops","sub_team_a","sub_team_b"]\n'
     }
+    trafficStatsAccountConfigFiles() {
+        local -n resultRef=$1
+        resultRef=("$3$2.json")
+    }
 
+    coreInstallType=1
+    configPath="${TMP_DIR}/configured-account-xray/"
+    singBoxConfigPath="${TMP_DIR}/configured-account-sing-box/"
+    mkdir -p "${configPath}" "${singBoxConfigPath}"
     accounts=$(collectLocalTrafficAccounts)
     jq -e '. == ["admin","ops","sub_team_a","sub_team_b"]' <<<"${accounts}" >/dev/null
-    grep -qx '0' "${helperLog}" || return 1
+    grep -qx '2' "${helperLog}" || return 1
 
     subscriptionSyncCurrentManagedUsers() {
         return 97

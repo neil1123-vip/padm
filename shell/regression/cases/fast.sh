@@ -1823,51 +1823,196 @@ runXrayTrafficStatsJqCompatibilityRegression() (
     mkdir -p "${fakeBin}"
     cat >"${fakeBin}/xray" <<'SH'
 #!/usr/bin/env bash
+if [[ "${PADM_TEST_XRAY_TEXT:-}" == "1" ]]; then
+    cat <<'TEXT'
+stat: <
+  name: "user>>>team-VLESS_WS>>>traffic>>>uplink"
+  value: 3
+>
+stat: <
+  name: "user>>>team-downlink-VLESS_WS>>>traffic>>>uplink"
+  value: 2
+>
+stat: <
+  name: "user>>>team-downlink-VLESS_WS>>>traffic>>>downlink"
+  value: 3
+>
+TEXT
+    exit 0
+fi
 cat <<'JSON'
-{"stat":[{"name":"user>>>team-VLESS_WS>>>traffic>>>uplink","value":3},{"name":"user>>>team-VLESS_WS>>>traffic>>>uplink","value":4},{"name":"user>>>team-VLESS_WS>>>traffic>>>downlink","value":5},{"name":"user>>>team-VLESS_WS>>>traffic>>>downlink","value":"6"},{"name":"user>>>ignored-VLESS_WS>>>traffic>>>uplink","value":7},{"name":"inbound>>>api>>>traffic>>>uplink","value":99}]}
+{"stat":[{"name":"user>>>team-VLESS_WS>>>traffic>>>uplink","value":3},{"name":"user>>>team-VLESS_WS>>>traffic>>>uplink","value":4},{"name":"user>>>team-VLESS_WS>>>traffic>>>downlink","value":5},{"name":"user>>>team-VLESS_WS>>>traffic>>>downlink","value":"6"},{"name":"user>>>team-downlink-VLESS_WS>>>traffic>>>uplink","value":2},{"name":"user>>>team-downlink-VLESS_WS>>>traffic>>>downlink","value":3},{"name":"user>>>ignored-VLESS_WS>>>traffic>>>uplink","value":7},{"name":"inbound>>>api>>>traffic>>>uplink","value":99}]}
 JSON
 SH
     chmod +x "${fakeBin}/xray"
     XRAY_STATS_BINARY="${fakeBin}/xray"
-    collectXrayTrafficStatsSnapshot '["team","missing"]' | jq -e '. == [{"account":"team","upload":7,"download":11},{"account":"missing","upload":0,"download":0}]' >/dev/null
+    collectXrayTrafficStatsSnapshot '["team","team-downlink","missing"]' | jq -e '. == [{"account":"team","upload":7,"download":11},{"account":"team-downlink","upload":2,"download":3},{"account":"missing","upload":0,"download":0}]' >/dev/null
+    export PADM_TEST_XRAY_TEXT=1
+    collectXrayTrafficStatsSnapshot '["team","team-downlink","missing"]' | jq -e '. == [{"account":"team","upload":3,"download":0},{"account":"team-downlink","upload":2,"download":3},{"account":"missing","upload":0,"download":0}]' >/dev/null
+    unset PADM_TEST_XRAY_TEXT
 )
 
 runLocalTrafficAccountsBatchRegression() (
     local xrayConfig="${TMP_DIR}/traffic-xray-conf/"
     local singBoxConfig="${TMP_DIR}/traffic-sing-box-conf/"
+    local fakeBin="${TMP_DIR}/traffic-fake-bin"
+    local grpcResponse="${TMP_DIR}/traffic-sing-box-response.bin"
+    local invalidGrpcResponse="${TMP_DIR}/traffic-sing-box-invalid-response.bin"
     local accounts
+    local grpcStats
     local snapshot
-    local reloadMarker="${TMP_DIR}/traffic-reload"
+    local xrayReloadMarker="${TMP_DIR}/traffic-xray-reload"
+    local singBoxMergeMarker="${TMP_DIR}/traffic-sing-box-merge"
+    local singBoxReloadMarker="${TMP_DIR}/traffic-sing-box-reload"
+    local singBoxStatsConfig="${singBoxConfig}14_stats_api.json"
+    local singBoxMergedConfig="${TMP_DIR}/traffic-sing-box-merged.json"
     local originalStats
     local originalPolicy
-    mkdir -p "${xrayConfig}" "${singBoxConfig}"
+    local originalSingBoxStats
+    local originalSingBoxMerged
+    mkdir -p "${xrayConfig}" "${singBoxConfig}" "${fakeBin}"
     configPath="${xrayConfig}"
     singBoxConfigPath="${singBoxConfig}"
     coreInstallType=1
-    cat >"${xrayConfig}01_inbounds.json" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_team_a-VLESS_WS"},{"email":"admin-VLESS_TCP/TLS_Vision"}]}},{"users":[{"name":"sub_team_b-singbox_hysteria2"}]}]}
+    cat >"${xrayConfig}03_VLESS_WS_inbounds.json" <<'JSON'
+{"inbounds":[{"protocol":"vless","settings":{"clients":[{"email":"sub_team_a-VLESS_WS"},{"email":"sub_team_b-VLESS_WS"},{"email":"admin-VLESS_TCP/TLS_Vision"}]}}]}
 JSON
-    cat >"${singBoxConfig}02_inbounds.json" <<'JSON'
-{"inbounds":[{"users":[{"username":"sub_team_a-singbox_tuic"},{"username":"ops"}]}]}
+    cat >"${singBoxConfig}09_tuic_inbounds.json" <<'JSON'
+{"inbounds":[{"type":"tuic","users":[{"username":"sub_team_a-singbox_tuic"},{"username":"ops"}]}]}
 JSON
+    cat >"${singBoxConfig}20_socks5_inbounds.json" <<'JSON'
+{"inbounds":[{"type":"socks","users":[{"username":"00000000-0000-0000-0000-000000000001","password":"00000000-0000-0000-0000-000000000001"}]}]}
+JSON
+    cat >"${fakeBin}/xray" <<'SH'
+#!/usr/bin/env bash
+[[ "$*" == *10085* ]] || exit 1
+[[ "${PADM_TEST_TRAFFIC_FAIL_SERVER:-}" != "10085" ]] || exit 1
+cat <<'JSON'
+{"stat":[{"name":"user>>>sub_team_a-VLESS_WS>>>traffic>>>uplink","value":7},{"name":"user>>>sub_team_a-VLESS_WS>>>traffic>>>downlink","value":11},{"name":"user>>>admin-VLESS_TCP/TLS_Vision>>>traffic>>>uplink","value":3},{"name":"user>>>admin-VLESS_TCP/TLS_Vision>>>traffic>>>downlink","value":5}]}
+JSON
+SH
+    chmod +x "${fakeBin}/xray"
+    printf '%b' '\x00\x00\x00\x00\x93\x0a\x35\x0a\x31\x75\x73\x65\x72\x3e\x3e\x3e\x73\x75\x62\x5f\x74\x65\x61\x6d\x5f\x61\x2d\x73\x69\x6e\x67\x62\x6f\x78\x5f\x74\x75\x69\x63\x3e\x3e\x3e\x74\x72\x61\x66\x66\x69\x63\x3e\x3e\x3e\x75\x70\x6c\x69\x6e\x6b\x10\x0d\x0a\x37\x0a\x33\x75\x73\x65\x72\x3e\x3e\x3e\x73\x75\x62\x5f\x74\x65\x61\x6d\x5f\x61\x2d\x73\x69\x6e\x67\x62\x6f\x78\x5f\x74\x75\x69\x63\x3e\x3e\x3e\x74\x72\x61\x66\x66\x69\x63\x3e\x3e\x3e\x64\x6f\x77\x6e\x6c\x69\x6e\x6b\x10\x11\x0a\x21\x0a\x1d\x75\x73\x65\x72\x3e\x3e\x3e\x6f\x70\x73\x3e\x3e\x3e\x74\x72\x61\x66\x66\x69\x63\x3e\x3e\x3e\x75\x70\x6c\x69\x6e\x6b\x10\x13' >"${grpcResponse}"
+    printf '\000' >"${invalidGrpcResponse}"
+
+    curl() {
+        local args=" $* "
+        local headers=
+        local output=
+        local request=
+        local url=
+        if [[ "${1:-}" == "--version" ]]; then
+            printf 'Features: HTTP2\n'
+            return 0
+        fi
+        [[ "${args}" == *" --http2-prior-knowledge "* && "${args}" == *" Content-Type: application/grpc "* && "${args}" == *" TE: trailers "* ]] || return 1
+        while (($#)); do
+            case "$1" in
+            -D) headers=$2; shift 2 ;;
+            --data-binary) request=${2#@}; shift 2 ;;
+            --output) output=$2; shift 2 ;;
+            http://*) url=$1; shift ;;
+            *) shift ;;
+            esac
+        done
+        [[ "${url}" == "http://127.0.0.1:10087/v2ray.core.app.stats.command.StatsService/QueryStats" ]] || return 1
+        [[ "$(od -An -v -tx1 "${request}" | tr -d '[:space:]')" == "00000000061a0475736572" ]] || return 1
+        cp "${grpcResponse}" "${output}" || return 1
+        printf 'HTTP/2 200\r\ngrpc-status: %s\r\n\r\n' "${PADM_TEST_GRPC_STATUS:-0}" >"${headers}"
+    }
+    grpcStats=$(querySingBoxTrafficStatsGrpc)
+    jq -e '.stat | map(.value) == [13,17,19]' <<<"${grpcStats}" >/dev/null
+    PADM_TEST_GRPC_STATUS=13
+    if querySingBoxTrafficStatsGrpc >/dev/null 2>&1; then
+        return 1
+    fi
+    unset PADM_TEST_GRPC_STATUS
+    unset -f curl
+
     accounts=$(collectLocalTrafficAccounts)
     jq -e '. == ["admin","ops","sub_team_a","sub_team_b"]' <<<"${accounts}" >/dev/null
 
+    singBoxConfigPath=
+    XRAY_STATS_BINARY="${fakeBin}/xray"
     snapshot=$(collectLocalTrafficSnapshot)
-    jq -e '.ok == false and (.items | length) == 0' <<<"${snapshot}" >/dev/null
-    coreInstallType=2
-    snapshot=$(collectLocalTrafficSnapshot)
-    jq -e '.ok == false and (.items | length) == 0' <<<"${snapshot}" >/dev/null
-    coreInstallType=1
+    jq -e '. == {ok:true,items:[{account:"admin",upload:3,download:5},{account:"sub_team_a",upload:7,download:11},{account:"sub_team_b",upload:0,download:0}]}' <<<"${snapshot}" >/dev/null
 
-    printf '{bad-json\n' >"${singBoxConfig}03_inbounds.json"
+    configPath="${singBoxConfig}"
+    singBoxConfigPath="${singBoxConfig}"
+    coreInstallType=2
+    XRAY_STATS_BINARY="${TMP_DIR}/traffic-missing-xray"
+    querySingBoxTrafficStatsGrpc() {
+        [[ "${PADM_TEST_TRAFFIC_FAIL_SERVER:-}" != "10087" ]] || return 1
+        singBoxGrpcResponseToStatsJson "${grpcResponse}"
+    }
+    snapshot=$(collectLocalTrafficSnapshot)
+    jq -e '. == {ok:true,items:[{account:"ops",upload:19,download:0},{account:"sub_team_a",upload:13,download:17}]}' <<<"${snapshot}" >/dev/null
+    if singBoxGrpcResponseToStatsJson "${invalidGrpcResponse}" >/dev/null 2>&1; then
+        return 1
+    fi
+
+    configPath="${xrayConfig}"
+    singBoxConfigPath="${singBoxConfig}"
+    coreInstallType=1
+    XRAY_STATS_BINARY="${fakeBin}/xray"
+    snapshot=$(collectLocalTrafficSnapshot)
+    jq -e '. == {ok:true,items:[{account:"admin",upload:3,download:5},{account:"ops",upload:19,download:0},{account:"sub_team_a",upload:20,download:28},{account:"sub_team_b",upload:0,download:0}]}' <<<"${snapshot}" >/dev/null
+    export PADM_TEST_TRAFFIC_FAIL_SERVER=10087
+    snapshot=$(collectLocalTrafficSnapshot)
+    jq -e '.ok == false and (.items | length) == 0' <<<"${snapshot}" >/dev/null
+    export PADM_TEST_TRAFFIC_FAIL_SERVER=10085
+    snapshot=$(collectLocalTrafficSnapshot)
+    jq -e '.ok == false and (.items | length) == 0' <<<"${snapshot}" >/dev/null
+    unset PADM_TEST_TRAFFIC_FAIL_SERVER
+
+    printf '{bad-json\n' >"${singBoxConfig}13_anytls_inbounds.json"
     if collectLocalTrafficAccounts >/dev/null 2>&1; then
         return 1
     fi
     snapshot=$(collectLocalTrafficSnapshot)
     jq -e '.ok == false and (.items | length) == 0' <<<"${snapshot}" >/dev/null
 
-    rm -f "${singBoxConfig}03_inbounds.json" "${reloadMarker}" "${xrayConfig}13_stats_api.json" "${xrayConfig}12_policy.json"
+    rm -f "${singBoxConfig}13_anytls_inbounds.json"
+    configPath="${singBoxConfig}"
+    singBoxConfigPath="${singBoxConfig}"
+    coreInstallType=2
+    printf '{"old":true}\n' >"${singBoxMergedConfig}"
+    singBoxMergedConfigFile() { printf '%s\n' "${singBoxMergedConfig}"; }
+    singBoxMergeConfig() {
+        cp "${singBoxStatsConfig}" "${singBoxMergedConfig}"
+        printf 'merge\n' >>"${singBoxMergeMarker}"
+    }
+    reloadCore() { printf 'reload\n' >>"${singBoxReloadMarker}"; }
+    ensureSingBoxTrafficStatsConfig
+    jq -e '.experimental.v2ray_api.listen == "127.0.0.1:10087" and .experimental.v2ray_api.stats.enabled == true and .experimental.v2ray_api.stats.users == ["ops","sub_team_a-singbox_tuic"]' "${singBoxStatsConfig}" >/dev/null
+    [[ "$(wc -l <"${singBoxMergeMarker}")" -eq 1 ]]
+    [[ "$(wc -l <"${singBoxReloadMarker}")" -eq 1 ]]
+    ensureSingBoxTrafficStatsConfig
+    [[ "$(wc -l <"${singBoxMergeMarker}")" -eq 1 ]]
+    [[ "$(wc -l <"${singBoxReloadMarker}")" -eq 1 ]]
+    printf '{"missing_stats":true}\n' >"${singBoxMergedConfig}"
+    ensureSingBoxTrafficStatsConfig
+    [[ "$(wc -l <"${singBoxMergeMarker}")" -eq 2 ]]
+    [[ "$(wc -l <"${singBoxReloadMarker}")" -eq 2 ]]
+
+    originalSingBoxStats=$(<"${singBoxStatsConfig}")
+    originalSingBoxMerged=$(<"${singBoxMergedConfig}")
+    jq '.inbounds[0].users += [{"name":"sub_team_b-singbox_hysteria2"}]' "${singBoxConfig}09_tuic_inbounds.json" >"${singBoxConfig}09_tuic_inbounds.json.tmp"
+    mv "${singBoxConfig}09_tuic_inbounds.json.tmp" "${singBoxConfig}09_tuic_inbounds.json"
+    reloadCore() {
+        printf 'reload-failed\n' >>"${singBoxReloadMarker}"
+        return 1
+    }
+    if ensureSingBoxTrafficStatsConfig >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ "$(<"${singBoxStatsConfig}")" == "${originalSingBoxStats}" ]]
+    [[ "$(<"${singBoxMergedConfig}")" == "${originalSingBoxMerged}" ]]
+
+    configPath="${xrayConfig}"
+    singBoxConfigPath=
+    coreInstallType=1
+    rm -f "${xrayReloadMarker}" "${xrayConfig}13_stats_api.json" "${xrayConfig}12_policy.json"
     printf '{bad-json\n' >"${xrayConfig}12_policy.json"
     if ensureXrayTrafficStatsConfig >/dev/null 2>&1; then
         return 1
@@ -1884,13 +2029,13 @@ JSON
     originalStats=$(<"${xrayConfig}13_stats_api.json")
     originalPolicy=$(<"${xrayConfig}12_policy.json")
     reloadCore() {
-        printf 'reload\n' >"${reloadMarker}"
+        printf 'reload\n' >"${xrayReloadMarker}"
         return 1
     }
     if ensureXrayTrafficStatsConfig >/dev/null 2>&1; then
         return 1
     fi
-    [[ -e "${reloadMarker}" ]]
+    [[ -e "${xrayReloadMarker}" ]]
     [[ "$(<"${xrayConfig}13_stats_api.json")" == "${originalStats}" ]]
     [[ "$(<"${xrayConfig}12_policy.json")" == "${originalPolicy}" ]]
 )
