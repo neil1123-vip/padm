@@ -1853,10 +1853,10 @@ SH
         "$@"
     }
     XRAY_STATS_BINARY="${fakeBin}/xray"
-    collectXrayTrafficStatsSnapshot '["team","team-downlink","missing"]' | jq -e '. == [{"account":"team","upload":7,"download":11},{"account":"team-downlink","upload":2,"download":3},{"account":"missing","upload":0,"download":0}]' >/dev/null
+    collectXrayTrafficStatsSnapshot '["team","team-VLESS_WS","team-downlink","missing"]' | jq -e '. == [{"account":"team","upload":7,"download":11},{"account":"team-VLESS_WS","upload":0,"download":0},{"account":"team-downlink","upload":2,"download":3},{"account":"missing","upload":0,"download":0}]' >/dev/null
     [[ -e "${timeoutMarker}" ]]
     export PADM_TEST_XRAY_TEXT=1
-    collectXrayTrafficStatsSnapshot '["team","team-downlink","missing"]' | jq -e '. == [{"account":"team","upload":4294967296,"download":0},{"account":"team-downlink","upload":2,"download":3},{"account":"missing","upload":0,"download":0}]' >/dev/null
+    collectXrayTrafficStatsSnapshot '["team","team-VLESS_WS","team-downlink","missing"]' | jq -e '. == [{"account":"team","upload":4294967296,"download":0},{"account":"team-VLESS_WS","upload":0,"download":0},{"account":"team-downlink","upload":2,"download":3},{"account":"missing","upload":0,"download":0}]' >/dev/null
     unset PADM_TEST_XRAY_TEXT
 )
 
@@ -2067,6 +2067,23 @@ JSON
     ' "${xrayConfig}12_policy.json" >/dev/null
     checkLogBackupCreate() { return 1; }
     ensureXrayTrafficStatsConfig
+
+    local singleReloadLog="${TMP_DIR}/traffic-single-reload.log"
+    local statsReloadMode=external
+    ensureSingBoxTrafficStatsConfig() {
+        printf 'stats\n' >>"${singleReloadLog}"
+        if [[ "${statsReloadMode}" == "internal" ]]; then
+            printf 'internal-reload\n' >>"${singleReloadLog}"
+            SUBSCRIPTION_TRAFFIC_STATS_RELOADED=true
+        fi
+    }
+    reloadCore() { printf 'core-reload\n' >>"${singleReloadLog}"; }
+    reloadCoreWithTrafficStatsConfig
+    [[ "$(<"${singleReloadLog}")" == $'stats\ncore-reload' ]]
+    : >"${singleReloadLog}"
+    statsReloadMode=internal
+    reloadCoreWithTrafficStatsConfig
+    [[ "$(<"${singleReloadLog}")" == $'stats\ninternal-reload' ]]
 )
 
 runSubscriptionOutputRandomUserRegression() (

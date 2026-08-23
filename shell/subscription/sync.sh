@@ -939,7 +939,7 @@ subscriptionSyncApplyAccountPlanTransaction() {
 }
 
 subscriptionSyncReconcileLocalServices() {
-    reloadCore || return 1
+    reloadCoreWithTrafficStatsConfig || return 1
 }
 
 subscriptionSyncMarkResult() {
@@ -1016,7 +1016,7 @@ applySubscriptionQuotaPlanAccounts() {
     planIds=$(subscriptionQuotaPlanIds "${quotaPlan}") || return 1
     accountPlan=$(subscriptionSyncAccountPlanFromIds remove <<<"${planIds}") || return 1
     if jq -e '.remove | length > 0' <<<"${accountPlan}" >/dev/null 2>&1; then
-        if ! subscriptionSyncApplyAccountPlanTransaction "${accountPlan}" reloadCore; then
+        if ! subscriptionSyncApplyAccountPlanTransaction "${accountPlan}" reloadCoreWithTrafficStatsConfig; then
             rc=1
         fi
     fi
@@ -1096,6 +1096,10 @@ executeSubscriptionQuotaPlanMenu() {
     local quotaPlan
     local confirm=
     local rc=0
+    if ! collectSubscriptionTraffic >/dev/null 2>&1; then
+        errorCard "流量快照不完整，已取消超限处理"
+        return 1
+    fi
     quotaPlan=$(subscriptionQuotaDryRunPlan) || {
         errorCard "超限处理计划生成失败"
         return 1
@@ -1139,6 +1143,8 @@ runSubscriptionGroupSyncUnlocked() {
     local sourceId
     local controlStateWriteFailed=false
     local trafficCollected=false
+    local localTrafficBaseline=false
+    local localTrafficReady=false
     local postSyncTrafficRequired=false
     local localSyncChanged=false
     local rc=0
@@ -1151,8 +1157,16 @@ runSubscriptionGroupSyncUnlocked() {
         return 1
     }
 
+    if subscriptionLocalTrafficBaselineExists; then
+        localTrafficBaseline=true
+    fi
+    SUBSCRIPTION_TRAFFIC_LOCAL_COMMITTED=false
     if collectSubscriptionTraffic; then
         trafficCollected=true
+        localTrafficReady=true
+    elif [[ "${SUBSCRIPTION_TRAFFIC_LOCAL_COMMITTED:-false}" == "true" ]]; then
+        localTrafficReady=true
+        statusCard "流量统计" "同步前部分来源采集失败，成功来源已更新，失败来源保留旧统计"
     else
         statusCard "流量统计" "同步前流量快照不完整，已保留旧统计"
     fi
@@ -1195,10 +1209,13 @@ runSubscriptionGroupSyncUnlocked() {
         elif ! subscriptionSyncValidateAccountPlan "${syncPlan}"; then
             localSyncFailure="本机同步计划格式无效"
         elif jq -e '(.create | length > 0) or (.remove | length > 0)' <<<"${syncPlan}" >/dev/null 2>&1; then
-            localSyncChanged=true
-            postSyncTrafficRequired=true
-            if ! subscriptionSyncApplyAccountPlan "${syncPlan}"; then
+            if [[ "${localTrafficBaseline}" == "true" && "${localTrafficReady}" != "true" ]]; then
+                localSyncFailure="同步前本机流量采集失败，为避免丢失累计流量已取消核心变更"
+            elif ! subscriptionSyncApplyAccountPlan "${syncPlan}"; then
                 localSyncFailure="本机同步计划应用失败"
+            else
+                localSyncChanged=true
+                postSyncTrafficRequired=true
             fi
         fi
         if [[ -n "${localSyncFailure}" ]]; then
@@ -1319,7 +1336,11 @@ runSubscriptionGroupSyncUnlocked() {
     fi
 
     if [[ "${postSyncTrafficRequired}" == "true" ]] && ! collectSubscriptionTraffic; then
-        statusCard "流量统计" "同步已完成，但重载后的流量基线更新失败，已保留旧统计"
+        if [[ "${SUBSCRIPTION_TRAFFIC_LOCAL_COMMITTED:-false}" == "true" ]]; then
+            statusCard "流量统计" "同步已完成，本机和成功来源基线已更新，失败来源保留旧统计"
+        else
+            statusCard "流量统计" "同步已完成，但重载后的流量基线更新失败，已保留旧统计"
+        fi
     fi
 
     if [[ "${failures}" == "[]" ]]; then

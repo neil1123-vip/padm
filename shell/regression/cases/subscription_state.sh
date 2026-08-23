@@ -44,7 +44,7 @@ prepareSubscriptionGroupSyncFixture() {
     mkdir -p "${syncRoot}/xray" "${syncRoot}/subscribe_local/default" \
         "${syncRoot}/subscribe/default" "${syncRoot}/groups" "${syncRoot}/tmp"
     configPath="${syncRoot}/xray/"
-    singBoxConfigPath="${syncRoot}/xray/"
+    singBoxConfigPath=
     export PADM_SUBSCRIPTION_GROUPS_DIR="${syncRoot}/groups"
     export PADM_SUBSCRIBE_LOCAL_DIR="${syncRoot}/subscribe_local"
     export PADM_SUBSCRIBE_DIR="${syncRoot}/subscribe"
@@ -585,7 +585,15 @@ runSubscriptionGroupStateQuotaTrafficRemoteRegression() {
     if writeSubscriptionTrafficSnapshot '{"ok":true,"items":[{"account":"admin","upload":4,"download":5},{"account":"sub_team_a","upload":2,"download":3}]}' "${remoteResults}" >/dev/null 2>&1; then
         return 1
     fi
-    jq -e --argjson stateBefore "${stateBefore}" '.traffic == $stateBefore' "$(subscriptionGroupsFile)" >/dev/null
+    [[ "${SUBSCRIPTION_TRAFFIC_LOCAL_COMMITTED}" == "true" ]]
+    [[ "${SUBSCRIPTION_TRAFFIC_COMPLETE}" == "false" ]]
+    jq -e --argjson stateBefore "${stateBefore}" '
+      .traffic.sources.main.upload == ($stateBefore.sources.main.upload + 2) and
+      .traffic.sources["edge-2"].upload == ($stateBefore.sources["edge-2"].upload + 2) and
+      .traffic.sources["remote-edge"] == $stateBefore.sources["remote-edge"] and
+      .traffic.admin.sources["remote-edge"] == $stateBefore.admin.sources["remote-edge"] and
+      .traffic.user_groups["team-a"].sources["remote-edge"] == $stateBefore.user_groups["team-a"].sources["remote-edge"]
+    ' "$(subscriptionGroupsFile)" >/dev/null
 
     stateBefore=$(jq -c '.traffic' "$(subscriptionGroupsFile)")
     remoteResults='[{"source_id":"remote-edge","status":"success","response":{"items":[]}}]'
@@ -599,7 +607,7 @@ runSubscriptionGroupStateQuotaTrafficRemoteRegression() {
     mainBefore=$(jq -r '.traffic.sources.main.upload' "$(subscriptionGroupsFile)")
     writeSubscriptionTrafficSnapshot '{"ok":true,"items":[]}' '[]'
     writeSubscriptionTrafficSnapshot '{"ok":true,"items":[{"account":"admin","upload":5,"download":5},{"account":"sub_team_a","upload":3,"download":3}]}' '[]'
-    jq -e --argjson mainBefore "${mainBefore}" '.traffic.sources.main.upload == ($mainBefore + 4)' "$(subscriptionGroupsFile)" >/dev/null
+    jq -e --argjson mainBefore "${mainBefore}" '.traffic.sources.main.upload == ($mainBefore + 2)' "$(subscriptionGroupsFile)" >/dev/null
 
     setUserSubscriptionSources team-a '["main"]'
     removeSubscriptionSourceState edge-2
@@ -644,9 +652,17 @@ runSubscriptionGroupStateQuotaTrafficApplyRegression() {
 runSubscriptionGroupStateQuotaMenuPreviewFailureRegression() {
     prepareSubscriptionStateQuotaUsageFixture
     (
+        local planMarker="${TMP_DIR}/subscription-quota-stale-plan"
+        collectSubscriptionTraffic() { return 1; }
+        subscriptionQuotaDryRunPlan() { : >"${planMarker}"; printf '[]\n'; }
+        regressionExpectStatus 1 executeSubscriptionQuotaPlanMenu >/dev/null 2>&1
+        [[ ! -e "${planMarker}" ]]
+    )
+    (
         local quotaMenuOutput
         local quotaMenuStatus
         menuLine() { printf 'menu:%s\n' "$*"; }
+        collectSubscriptionTraffic() { return 0; }
         subscriptionSyncApplyAccountPlanTransaction() {
             return 42
         }
@@ -1094,17 +1110,19 @@ runSubscriptionUserRemovalTransactionLockRegression() (
     }
     subscriptionGroupsStateRead() { printf '%s\n' '{}'; }
     subscriptionSyncCreateConfigBackups() { printf -v "$1" '%s' "${TMP_DIR}/user-removal-config"; mkdir -p "${!1}"; }
+    subscriptionLocalTrafficBaselineExists() { return 1; }
+    collectSubscriptionTraffic() { printf '%s\n' pre-traffic >>"${logFile}"; }
     subscriptionSyncAccountName() { printf 'sub_%s\n' "$1"; }
     removeUserSubscriptionState() { printf '%s\n' remove-state >>"${logFile}"; }
     subscriptionSyncRemoveAccount() { printf '%s\n' remove-account >>"${logFile}"; }
-    reloadCore() { printf '%s\n' reload >>"${logFile}"; }
+    reloadCoreWithTrafficStatsConfig() { printf '%s\n' reload >>"${logFile}"; }
     subscriptionSyncReleaseLocalApplyBackups() { :; }
     padmRemoveCleanupPath() { :; }
     successCard() { :; }
     runSubscriptionSyncAfterMutation() { printf '%s\n' post-sync >>"${logFile}"; }
 
     removeUserSubscriptionMenu team-a
-    [[ "$(<"${logFile}")" == $'lock-start\nremove-state\nremove-account\nreload\npost-sync\nlock-end' ]]
+    [[ "$(<"${logFile}")" == $'lock-start\npre-traffic\nremove-state\nremove-account\nreload\npost-sync\nlock-end' ]]
 )
 
 runSubscriptionStateMaintenanceRollbackRegression() (
@@ -1574,7 +1592,7 @@ runSubscriptionSyncRollbackReloadRollbackRegression() (
 
     mkdir -p "${reloadRoot}/xray" "${reloadRoot}/tmp"
     configPath="${reloadRoot}/xray/"
-    singBoxConfigPath="${reloadRoot}/xray/"
+    singBoxConfigPath=
     TMPDIR="${reloadRoot}/tmp"
     coreInstallType=1
     cat >"${reloadTargetFile}" <<'JSON'
@@ -2073,6 +2091,8 @@ runSubscriptionGroupSyncTrafficReloadOrderRegression() (
     local resultFailures="${syncRoot}/mark-failures.log"
     local statusLog="${syncRoot}/status.log"
     local planMode=changed
+    local trafficMode=success
+    local baselineMode=true
 
     prepareSubscriptionGroupSyncFixture "${syncRoot}" <<'JSON'
 {"version":6,"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"admin":{"sources":{}},"user_groups":{},"sources":{}}}
@@ -2084,19 +2104,56 @@ JSON
             printf '{"create":[],"remove":[]}'
         fi
     }
-    collectSubscriptionTraffic() { printf 'traffic\n' >>"${callLog}"; }
+    subscriptionLocalTrafficBaselineExists() { [[ "${baselineMode}" == "true" ]]; }
+    collectSubscriptionTraffic() {
+        printf 'traffic\n' >>"${callLog}"
+        [[ "${trafficMode}" == "success" ]]
+    }
     subscriptionSyncApplyAccountPlan() { printf 'apply\n' >>"${callLog}"; }
-    subscriptionSyncReconcileLocalServices() { printf 'reload\n' >>"${callLog}"; }
+    ensureSingBoxTrafficStatsConfig() { printf 'stats\n' >>"${callLog}"; }
+    reloadCore() { printf 'reload\n' >>"${callLog}"; }
     subscriptionCurrentRoleNormalized() { printf 'main\n'; }
     readNginxSubscribe() { subscribePort=; }
 
     runSubscriptionGroupSyncUnlocked
-    [[ "$(<"${callLog}")" == $'traffic\napply\nreload\ntraffic' ]]
+    [[ "$(<"${callLog}")" == $'traffic\napply\nstats\nreload\ntraffic' ]]
+
+    : >"${callLog}"
+    trafficMode=failure
+    if runSubscriptionGroupSyncUnlocked; then
+        return 1
+    fi
+    [[ "$(<"${callLog}")" == "traffic" ]]
+    jq -e 'any(.[]; contains("同步前本机流量采集失败"))' "${resultFailures}" >/dev/null
+
+    : >"${callLog}"
+    baselineMode=false
+    runSubscriptionGroupSyncUnlocked
+    [[ "$(<"${callLog}")" == $'traffic\napply\nstats\nreload\ntraffic' ]]
 
     : >"${callLog}"
     planMode=empty
+    trafficMode=success
+    baselineMode=true
     runSubscriptionGroupSyncUnlocked
     [[ "$(<"${callLog}")" == "traffic" ]]
+)
+
+runSubscriptionGroupsLockTimeoutRegression() (
+    local lockRoot="${TMP_DIR}/subscription-groups-lock-timeout"
+    local flockLog="${lockRoot}/flock.log"
+    mkdir -p "${lockRoot}/groups"
+    export PADM_SUBSCRIPTION_GROUPS_DIR="${lockRoot}/groups"
+    flock() {
+        printf '%s\n' "$*" >>"${flockLog}"
+        return 1
+    }
+
+    PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=invalid regressionExpectStatus 1 subscriptionGroupsWithLock true
+    grep -Eq '^-w 120 [0-9]+$' "${flockLog}"
+    : >"${flockLog}"
+    PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=9 regressionExpectStatus 1 subscriptionGroupsWithLock true
+    grep -Eq '^-w 9 [0-9]+$' "${flockLog}"
 )
 
 runSubscriptionGroupSyncUsesStateLockRegression() (

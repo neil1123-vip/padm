@@ -240,12 +240,21 @@ ensureSingBoxTrafficStatsConfig() {
         failTrafficStatsConfigChange "${trafficBackupDir}" "sing-box 流量统计配置更新后核心重载失败" true
         return 1
     fi
+    SUBSCRIPTION_TRAFFIC_STATS_RELOADED=true
     padmRemoveCleanupPath "${trafficBackupDir}"
 }
 
 ensureTrafficStatsConfig() {
     ensureXrayTrafficStatsConfig || return 1
     ensureSingBoxTrafficStatsConfig
+}
+
+reloadCoreWithTrafficStatsConfig() {
+    local SUBSCRIPTION_TRAFFIC_STATS_RELOADED=false
+    ensureSingBoxTrafficStatsConfig || return 1
+    if [[ "${SUBSCRIPTION_TRAFFIC_STATS_RELOADED}" != "true" ]]; then
+        reloadCore
+    fi
 }
 
 collectLocalTrafficAccounts() {
@@ -271,14 +280,13 @@ collectLocalTrafficAccounts() {
 
 mapTrafficStatsJsonToAccounts() {
     local accounts=$1
-    jq --argjson accounts "${accounts}" '
+    local suffixRegex
+    suffixRegex=$(clientNameSuffixRegex) || return 1
+    jq --argjson accounts "${accounts}" --arg suffixRegex "${suffixRegex}" '
       def accountName($name):
         (($name | split(">>>"))[1] // "") as $raw |
-        ([$accounts[] as $account
-          | select($raw == $account or ($raw | startswith($account + "-")))
-          | $account]
-         | sort_by(length)
-         | last) // ($raw | sub("-(uplink|downlink)$"; ""));
+        ($raw | sub("-(" + $suffixRegex + ")$"; "") | sub("-(uplink|downlink)$"; "")) as $account |
+        if ($accounts | index($account)) != null then $account else "" end;
       def direction($name): if ($name | endswith("downlink")) then "download" else "upload" end;
       def emptyTotals: reduce $accounts[] as $account ({}; .[$account] = {account:$account, upload:0, download:0});
       (reduce .stat[]? as $stat (emptyTotals;
@@ -295,7 +303,9 @@ mapTrafficStatsJsonToAccounts() {
 collectXrayTrafficStatsSnapshot() {
     local accounts=$1
     local stats=
+    local suffixRegex
     local xrayBinary=${XRAY_STATS_BINARY:-/etc/padm/xray/xray}
+    suffixRegex=$(clientNameSuffixRegex) || return 1
     command -v timeout >/dev/null 2>&1 || return 1
     if [[ ! -x "${xrayBinary}" ]]; then
         return 1
@@ -309,7 +319,7 @@ collectXrayTrafficStatsSnapshot() {
     if jq empty <<<"${stats}" >/dev/null 2>&1; then
         mapTrafficStatsJsonToAccounts "${accounts}" <<<"${stats}"
     else
-        awk -v accounts="$(jq -r 'join(" ")' <<<"${accounts}")" '
+        awk -v accounts="$(jq -r 'join(" ")' <<<"${accounts}")" -v suffixRegex="${suffixRegex}" '
           BEGIN {
             split(accounts, allowed, " ")
             for (i in allowed) wanted[allowed[i]] = 1
@@ -320,11 +330,9 @@ collectXrayTrafficStatsSnapshot() {
             sub(/".*$/, "", name)
             direction = (name ~ /(>>>traffic>>>|-)?downlink$/) ? "download" : "upload"
             sub(/>>>traffic>>>(uplink|downlink)$/, "", name)
+            sub("-(" suffixRegex ")$", "", name)
             sub(/-(uplink|downlink)$/, "", name)
-            account = ""
-            for (candidate in wanted) {
-              if ((name == candidate || index(name, candidate "-") == 1) && length(candidate) > length(account)) account = candidate
-            }
+            account = wanted[name] ? name : ""
           }
           /value: / {
             if (wanted[account]) totals[account SUBSEP direction] += $2
@@ -526,18 +534,23 @@ subscriptionTrafficItemsValid() {
 writeSubscriptionTrafficSnapshot() {
     local snapshot=$1
     local remoteResults=${2:-[]}
+    local expectedRemoteSourceIds
     local items
     local remoteItems
+    SUBSCRIPTION_TRAFFIC_LOCAL_COMMITTED=false
+    SUBSCRIPTION_TRAFFIC_COMPLETE=false
+    expectedRemoteSourceIds=$(subscriptionActiveGroupRead -c '[.sources[]? | select(.role != "main" and .enabled == true) | .id]') || return 1
     if ! items=$(jq -ce 'select(.ok == true and (.items | type == "array")) | .items' <<<"${snapshot}" 2>/dev/null) ||
         ! subscriptionTrafficItemsValid "${items}" ||
-        ! jq -e '
+        ! jq -e --argjson expectedRemoteSourceIds "${expectedRemoteSourceIds}" '
           type == "array" and
           ([.[].source_id] | length) == ([.[].source_id] | unique | length) and
           all(.[];
+            . as $result |
             (.source_id | type == "string" and length > 0) and
+            (($expectedRemoteSourceIds | index($result.source_id)) != null) and
             (.status | type == "string" and length > 0) and
-            .status == "success" and
-            (.response.items | type == "array"))
+            (if .status == "success" then (.response.items | type == "array") else true end))
         ' <<<"${remoteResults}" >/dev/null 2>&1; then
         statusCard "流量统计" "采集失败，已保留上次统计"
         return 1
@@ -547,8 +560,8 @@ writeSubscriptionTrafficSnapshot() {
             statusCard "流量统计" "采集失败，已保留上次统计"
             return 1
         fi
-    done < <(jq -c '.[].response.items' <<<"${remoteResults}")
-    subscriptionActiveGroupWrite --argjson snapshot "${snapshot}" --argjson remoteResults "${remoteResults}" '
+    done < <(jq -c '.[] | select(.status == "success") | .response.items' <<<"${remoteResults}")
+    if ! subscriptionActiveGroupWrite --argjson snapshot "${snapshot}" --argjson remoteResults "${remoteResults}" '
       def counterTotal($counters):
         {upload:([$counters[]?.upload] | add // 0), download:([$counters[]?.download] | add // 0)};
       def resetDelta($old; $current; $known):
@@ -585,43 +598,65 @@ writeSubscriptionTrafficSnapshot() {
           {upload: (($old.upload // 0) + $delta.upload), download: (($old.download // 0) + $delta.download), counters: $delta.counters, updated_at: (now | strftime("%F %T"))}
         end;
       def mapped($items; $accountIdMap): $items | map(. + {id: ($accountIdMap[.account] // .account)});
+      def indexedById($items):
+        reduce $items[] as $item ({}; .[$item.id] = ((.[$item.id] // []) + [$item]));
       def keepSources($map; $ids):
         ($map // {}) | with_entries(. as $entry | select(($ids | index($entry.key)) != null));
       . as $group |
-      ($group.sources | map(select(.role != "main" and .enabled == true) | .id) | sort) as $expectedRemoteSourceIds |
-      if (($remoteResults | map(.source_id) | sort) != $expectedRemoteSourceIds) then
-        error("remote traffic result set does not match enabled sources")
-      else
       ($group.sources | map(.id)) as $sourceIds |
       ($group.user_groups | map({key:(.id | '"${SUBSCRIPTION_SYNC_ACCOUNT_NAME_FROM_ID_JQ}"'), value:.id}) | from_entries) as $accountIdMap |
       (mapped($snapshot.items; $accountIdMap)) as $items |
       ($items | map(select(.account | startswith("sub_")))) as $userItems |
+      (indexedById($userItems)) as $userItemsById |
       ($items | map(select((.account | startswith("sub_")) | not))) as $adminItems |
       (sourceTotal($group.traffic.sources.main; $items)) as $mainTraffic |
       (sourceTotal($group.traffic.admin.sources.main; $adminItems)) as $mainAdminTraffic |
-      ($remoteResults | map(select(.status == "success") | . as $result | select(($sourceIds | index($result.source_id)) != null) | {source_id:$result.source_id, items:mapped($result.response.items; $accountIdMap)})) as $remote |
+      ($remoteResults | map(select(.status == "success") | . as $result |
+        (mapped($result.response.items; $accountIdMap)) as $mappedItems |
+        {source_id:$result.source_id, items:$mappedItems, user_items_by_id:indexedById($mappedItems | map(select(.account | startswith("sub_"))))})) as $remote |
       ($remote | map(. as $result | {key:$result.source_id, value:sourceTotal($group.traffic.sources[$result.source_id]; $result.items)}) | from_entries) as $remoteSourceTraffic |
       (keepSources($group.traffic.sources; $sourceIds) + {main:$mainTraffic} + $remoteSourceTraffic) as $sourceTraffic |
       ($remote | map(. as $result | {key:$result.source_id, value:sourceTotal($group.traffic.admin.sources[$result.source_id]; ($result.items | map(select(.account | startswith("sub_") | not))))}) | from_entries) as $remoteAdminSourceTraffic |
       (keepSources($group.traffic.admin.sources; $sourceIds) + {main:$mainAdminTraffic} + $remoteAdminSourceTraffic) as $adminSourceTraffic |
       ($group.user_groups | map(
         . as $user |
-        (sourceTotal(($group.traffic.user_groups[$user.id].sources.main // {}); ($userItems | map(select(.id == $user.id))))) as $mainUserTraffic |
-        ($remote | map(. as $result | {key:$result.source_id, value:sourceTotal($group.traffic.user_groups[$user.id].sources[$result.source_id]; ($result.items | map(select(.id == $user.id))))}) | from_entries) as $remoteUserSourceTraffic |
+        (sourceTotal(($group.traffic.user_groups[$user.id].sources.main // {}); ($userItemsById[$user.id] // []))) as $mainUserTraffic |
+        ($remote | map(. as $result | {key:$result.source_id, value:sourceTotal($group.traffic.user_groups[$user.id].sources[$result.source_id]; ($result.user_items_by_id[$user.id] // []))}) | from_entries) as $remoteUserSourceTraffic |
         (keepSources($group.traffic.user_groups[$user.id].sources; $sourceIds) + {main:$mainUserTraffic} + $remoteUserSourceTraffic) as $userSourceTraffic |
         {key:$user.id, value:{sources:$userSourceTraffic}}
       ) | from_entries) as $userTraffic |
       .traffic.admin = {sources:$adminSourceTraffic} |
       .traffic.user_groups = $userTraffic |
       .traffic.sources = $sourceTraffic
-      end
-    '
+    '; then
+        statusCard "流量统计" "统计写入失败，已保留上次统计"
+        return 1
+    fi
+    SUBSCRIPTION_TRAFFIC_LOCAL_COMMITTED=true
+    if jq -e --argjson expectedRemoteSourceIds "${expectedRemoteSourceIds}" '
+      (map(.source_id) | sort) == ($expectedRemoteSourceIds | sort) and
+      all(.[]; .status == "success")
+    ' <<<"${remoteResults}" >/dev/null 2>&1; then
+        SUBSCRIPTION_TRAFFIC_COMPLETE=true
+        return 0
+    fi
+    statusCard "流量统计" "部分来源采集失败，本机和成功来源已更新，失败来源保留旧统计"
+    return 1
+}
+
+subscriptionLocalTrafficBaselineExists() {
+    subscriptionActiveGroupRead -e '
+      [.traffic.sources.main?, .traffic.admin.sources.main?, .traffic.user_groups[]?.sources.main?] |
+      any(.[]; (.counters? | type == "object" and length > 0))
+    ' >/dev/null 2>&1
 }
 
 collectSubscriptionTrafficUnlocked() {
     local snapshot
     local remoteResults='[]'
     local role
+    SUBSCRIPTION_TRAFFIC_LOCAL_COMMITTED=false
+    SUBSCRIPTION_TRAFFIC_COMPLETE=false
     ensureSubscriptionGroupsState || return 1
     readInstallType
     readInstallProtocolType
@@ -632,7 +667,7 @@ collectSubscriptionTrafficUnlocked() {
     role=$(subscriptionCurrentRoleNormalized) || return 1
     if [[ "${role}" == "main" ]] && subscriptionHasEnabledRemoteSources; then
         statusCard "流量统计" "正在等待被控服务器流量响应" "单台请求最长 15 秒（含重试），多个服务器并行请求"
-        remoteResults=$(subscriptionRemoteTrafficAll) || return 1
+        remoteResults=$(subscriptionRemoteTrafficAll) || remoteResults='[]'
     fi
     if writeSubscriptionTrafficSnapshot "${snapshot}" "${remoteResults}"; then
         successCard "流量统计已更新"

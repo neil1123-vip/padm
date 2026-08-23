@@ -1173,6 +1173,8 @@ subscriptionControlApplySyncUnlocked() {
     local prepareFailureMessage=
     local registryNeedsSync
     local planHasCoreChanges=false
+    local localTrafficBaseline=false
+    local localTrafficReady=false
     if ! jq -e '
       def valid_id: type == "string" and length <= 64 and test("^[A-Za-z0-9_-]+$");
       def valid_uuid: type == "string" and test("^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$");
@@ -1223,16 +1225,27 @@ subscriptionControlApplySyncUnlocked() {
         return 0
     fi
     if [[ "${planHasCoreChanges}" == "true" ]]; then
-        collectSubscriptionTraffic >/dev/null 2>&1 || true
+        if subscriptionLocalTrafficBaselineExists; then
+            localTrafficBaseline=true
+        fi
+        SUBSCRIPTION_TRAFFIC_LOCAL_COMMITTED=false
+        if collectSubscriptionTraffic >/dev/null 2>&1 || [[ "${SUBSCRIPTION_TRAFFIC_LOCAL_COMMITTED:-false}" == "true" ]]; then
+            localTrafficReady=true
+        fi
+        if [[ "${localTrafficBaseline}" == "true" && "${localTrafficReady}" != "true" ]]; then
+            prepareFailureMessage="同步前本机流量采集失败，为避免丢失累计流量已取消核心变更"
+        fi
     fi
-    if ! previousGroupsState=$(subscriptionGroupsStateRead -c '.'); then
-        prepareFailureMessage="同步前订阅状态读取失败"
-    elif ! subscriptionSyncCreateLocalApplyBackups configBackupDir outputBackupDir; then
-        prepareFailureMessage="同步前配置备份失败"
-        if [[ "${SUBSCRIPTION_SYNC_LOCAL_APPLY_BACKUP_STAGE:-}" == "config" ]]; then
-            prepareFailureMessage="同步前订阅输出备份失败"
-            configBackupDir=
-            outputBackupDir=
+    if [[ -z "${prepareFailureMessage}" ]]; then
+        if ! previousGroupsState=$(subscriptionGroupsStateRead -c '.'); then
+            prepareFailureMessage="同步前订阅状态读取失败"
+        elif ! subscriptionSyncCreateLocalApplyBackups configBackupDir outputBackupDir; then
+            prepareFailureMessage="同步前配置备份失败"
+            if [[ "${SUBSCRIPTION_SYNC_LOCAL_APPLY_BACKUP_STAGE:-}" == "config" ]]; then
+                prepareFailureMessage="同步前订阅输出备份失败"
+                configBackupDir=
+                outputBackupDir=
+            fi
         fi
     fi
     if [[ -n "${prepareFailureMessage}" ]]; then
@@ -1265,16 +1278,16 @@ subscriptionControlApplySyncUnlocked() {
                 return 1
             fi
         else
-            if ! reloadCore; then
+            if ! reloadCoreWithTrafficStatsConfig; then
                 if subscriptionControlRestoreAppliedPlan "${previousGroupsState}" "${configBackupDir}" "${outputBackupDir}"; then
                     subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
-                    subscriptionSyncSetRollbackRetryMessage SUBSCRIPTION_CONTROL_RESTORE_ERROR "核心重载失败" reloadCore "恢复旧配置后核心重载仍失败，请检查核心服务日志" true
+                    subscriptionSyncSetRollbackRetryMessage SUBSCRIPTION_CONTROL_RESTORE_ERROR "核心重载失败" reloadCoreWithTrafficStatsConfig "恢复旧配置后核心重载仍失败，请检查核心服务日志" true
                 else
                     subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}" "${outputBackupDir}"
                     subscriptionSyncRetryPartiallyRestoredConfig \
                         SUBSCRIPTION_CONTROL_RESTORE_ERROR \
                         "${SUBSCRIPTION_CONTROL_CONFIG_RESTORED:-false}" \
-                        reloadCore \
+                        reloadCoreWithTrafficStatsConfig \
                         "恢复旧配置后核心重载仍失败，请检查核心服务日志" || true
                 fi
                 collectSubscriptionTraffic >/dev/null 2>&1 || true

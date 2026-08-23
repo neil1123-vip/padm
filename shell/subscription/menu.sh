@@ -876,7 +876,20 @@ removeUserSubscriptionTransactionUnlocked() {
     local createdConfigBackupDir
     local accountName
     local manualCheckMessage
+    local localTrafficBaseline=false
+    local localTrafficReady=false
     SUBSCRIPTION_USER_MUTATION_CONFIG_BACKUP_DIR=
+    if subscriptionLocalTrafficBaselineExists; then
+        localTrafficBaseline=true
+    fi
+    SUBSCRIPTION_TRAFFIC_LOCAL_COMMITTED=false
+    if collectSubscriptionTraffic >/dev/null 2>&1 || [[ "${SUBSCRIPTION_TRAFFIC_LOCAL_COMMITTED:-false}" == "true" ]]; then
+        localTrafficReady=true
+    fi
+    if [[ "${localTrafficBaseline}" == "true" && "${localTrafficReady}" != "true" ]]; then
+        errorCard "删除前本机流量采集失败，为避免丢失累计流量已取消删除"
+        return 1
+    fi
     previousGroupsState=$(subscriptionGroupsStateRead -c '.') || {
         subscriptionSyncSetManualCheckMessage manualCheckMessage "读取当前订阅状态失败" " $(subscriptionGroupsFile)"
         errorCard "${manualCheckMessage}"
@@ -902,12 +915,12 @@ removeUserSubscriptionTransactionUnlocked() {
         errorCard "${rollbackMessage}"
         return 1
     fi
-    if ! reloadCore; then
+    if ! reloadCoreWithTrafficStatsConfig; then
         if ! removeUserSubscriptionRollback "${previousGroupsState}" "${createdConfigBackupDir}" "核心重载失败"; then
             return 1
         fi
         local rollbackMessage
-        subscriptionSyncSetRollbackRetryMessage rollbackMessage "核心重载失败" reloadCore "恢复旧配置后核心重载仍失败，请检查核心服务日志"
+        subscriptionSyncSetRollbackRetryMessage rollbackMessage "核心重载失败" reloadCoreWithTrafficStatsConfig "恢复旧配置后核心重载仍失败，请检查核心服务日志"
         errorCard "${rollbackMessage}"
         return 1
     fi

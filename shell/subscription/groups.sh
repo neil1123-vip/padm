@@ -78,10 +78,10 @@ subscriptionGroupsWithLock() {
 
     local groupsDir
     local lockFile
-    local lockTimeout=${PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT:-30}
+    local lockTimeout=${PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT:-120}
     local lockFd
     local status
-    [[ "${lockTimeout}" =~ ^[0-9]+$ ]] || lockTimeout=30
+    [[ "${lockTimeout}" =~ ^[0-9]+$ ]] || lockTimeout=120
     groupsDir=$(subscriptionGroupsSafeDir) || return 1
     padmEnsureSafeDirectory "${groupsDir}" || return 1
     lockFile=$(subscriptionGroupsLockFile) || return 1
