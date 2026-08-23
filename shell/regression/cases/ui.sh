@@ -1563,7 +1563,7 @@ invite-credential"
         grep -q "本机自用订阅来自协议配置" <<<"${output}"
         grep -q "发布与链接" <<<"${output}"
         grep -q "分享订阅" <<<"${output}"
-        grep -q "用量与限额" <<<"${output}"
+        grep -q "流量与限额" <<<"${output}"
         grep -q "返回主控首页" <<<"${output}"
         resetMenuActions
         output=
@@ -1659,7 +1659,7 @@ demo-user
 4
 4"
         grep -q "管理分享订阅" <<<"${output}"
-        grep -q "查看当前用量" <<<"${output}"
+        grep -q "查看当前流量" <<<"${output}"
         subscriptionGroupsStateRead -e 'any(.user_groups[]?; .id == "demo-user" and .traffic_limit_gb == 2)' >/dev/null
         if assertMenuAction 'runSubscriptionGroupSync:'; then
             printf 'menu-smoke failed: quota setter ran a full sync\n' >&2
@@ -1731,7 +1731,7 @@ main
         grep -q "设置同步间隔" <<<"${output}"
         grep -q "状态与排障" <<<"${output}"
         grep -q "状态备份与恢复" <<<"${output}"
-        ! grep -q "用量与限额" <<<"${output}"
+        ! grep -q "流量与限额" <<<"${output}"
         if grep -q "事件同步" <<<"${output}" || grep -q "开启/关闭远程同步" <<<"${output}"; then
             printf 'menu-smoke failed: unified sync menu still exposes legacy toggles\n' >&2
             return 1
@@ -1935,7 +1935,7 @@ y
         grep -q "立即完整同步" <<<"${output}"
         grep -q "状态与排障" <<<"${output}"
         grep -q "状态备份与恢复" <<<"${output}"
-        ! grep -q "用量与限额" <<<"${output}"
+        ! grep -q "流量与限额" <<<"${output}"
         if grep -q "远端同步计划" <<<"${output}" || grep -q "事件同步" <<<"${output}"; then
             printf 'menu-smoke failed: local sync menu exposes main-only or legacy actions\n' >&2
             return 1

@@ -342,7 +342,7 @@ subscriptionPublisherHome() {
     while true; do
         echoContent title "\n┌─ ${homeTitle} ─────────────────────────────────────"
         showSubscriptionServerRoleSummary
-        menuItem 1 "订阅与用户" "发布与链接、分享订阅、用量与限额"
+        menuItem 1 "订阅与用户" "发布与链接、分享订阅、流量与限额"
         menuItem 2 "订阅同步" "立即同步、自动同步、状态排障和状态备份"
         if [[ "${publisherRole}" == "main" ]]; then
             menuItem 3 "协同与控制" "管理被控服务器和本机控制面；状态在对应页面查看"
@@ -633,10 +633,10 @@ manageSubscriptionCatalog() {
     [[ "${role}" == "main" ]] && returnText="返回主控首页" || returnText="返回本机订阅首页"
     while true; do
         echoContent title "\n┌─ 订阅与用户 ───────────────────────────────────────"
-        menuLine "本机自用订阅来自协议配置；这里统一处理发布、分享订阅和用量。"
+        menuLine "本机自用订阅来自协议配置；这里统一处理发布、分享订阅和流量。"
         menuItem 1 "发布与链接" "安装/更新发布服务，或刷新并查看订阅链接"
         menuItem 2 "分享订阅" "新建或维护已有分享订阅"
-        menuItem 3 "用量与限额" "查看用量明细，并处理超限和自动限额"
+        menuItem 3 "流量与限额" "查看流量明细，并处理超限和自动限额"
         menuReturnItem 4 "${returnText}" "回到上级菜单"
         menuClose
         autoRead subscription_catalog_menu "请选择:" subscriptionCatalogStatus
@@ -744,7 +744,7 @@ createAndSyncUserSubscriptionWizard() {
         return 1
     fi
 
-    autoRead user_subscription_traffic_limit "请输入订阅额度GB[回车/0为不限；这里只设置额度，超限处理在 订阅与用户 -> 用量与限额 中执行]:" limit
+    autoRead user_subscription_traffic_limit "请输入订阅额度GB[回车/0为不限；这里只设置额度，超限处理在 订阅与用户 -> 流量与限额 中执行]:" limit
     limit=${limit:-0}
     if ! echo "${limit}" | grep -qE '^[0-9]+$'; then
         errorCard "订阅额度必须是数字"
@@ -765,7 +765,7 @@ createAndSyncUserSubscriptionWizard() {
         errorCard "分享订阅创建失败，订阅 ID 可能已存在或状态写入失败"
         return 1
     fi
-    statusCard "分享订阅已创建" "订阅ID：${id}" "实际托管账号：$(subscriptionSyncAccountName "${id}")" "服务器范围：${sourceIds}" "订阅额度GB：${limit}" "超限停用和批量处理请到 订阅与用户 -> 用量与限额 执行"
+    statusCard "分享订阅已创建" "订阅ID：${id}" "实际托管账号：$(subscriptionSyncAccountName "${id}")" "服务器范围：${sourceIds}" "订阅额度GB：${limit}" "超限停用和批量处理请到 订阅与用户 -> 流量与限额 执行"
 
     if ! subscriptionGroupSyncEnabled; then
         autoRead user_subscription_enable_auto_sync "是否开启后续自动同步？[yes/no，默认 yes]：" enableSync
@@ -939,9 +939,9 @@ manageUserSubscriptionItem() {
         echoContent title "\n┌─ 管理分享订阅 ─────────────────────────────────────"
         menuLine "当前订阅：${userSubscriptionId}"
         menuLine "这里处理一个已有订阅的日常维护。"
-        menuLine "订阅变更随同步生效；用量与限额在订阅与用户中处理。"
+        menuLine "订阅变更随同步生效；流量与限额在订阅与用户中处理。"
         menuItem 1 "刷新并查看当前链接" "重新生成订阅输出并显示该订阅当前链接"
-        menuItem 2 "查看当前用量" "只读查看累计用量和额度状态"
+        menuItem 2 "查看当前流量" "只读查看累计流量和额度状态"
         menuItem 3 "设置节点范围" "选择 main、被控服务器 ID 或 *"
         menuItem 4 "设置订阅额度" "0 表示不限；这里只设置额度，不执行超限处理"
         menuItem 5 "启用/停用当前订阅" "停用后同步会移除对应托管账号"
@@ -1015,7 +1015,7 @@ setUserSubscriptionTrafficLimitMenu() {
         errorCard "订阅额度更新失败"
         return 1
     fi
-    successCard "订阅额度已更新" "超限停用和批量处理请到 订阅与用户 -> 用量与限额 执行"
+    successCard "订阅额度已更新" "超限停用和批量处理请到 订阅与用户 -> 流量与限额 执行"
 }
 # 添加服务器源
 createSubscriptionWireGuardInviteMenu() {

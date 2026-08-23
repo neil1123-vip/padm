@@ -403,7 +403,7 @@ showSubscriptionTrafficOverview() {
       "最近同步：状态 " + (($group.sync.last_status // "pending") | tostring) + "，时间 " + (($group.sync.last_run // "未运行") | tostring) + "\n" +
       "流量更新时间：" + (((($group.traffic.sources // {}) | to_entries | map(.value.updated_at // empty) | max) // "未知") | tostring)')
     output=$(subscriptionActiveGroupRead -r "${jqProgram}") || return 1
-    userResultCard "用量与限额总览"
+    userResultCard "流量与限额总览"
     while IFS= read -r line; do
         menuLine "${line}"
     done <<<"${output}"
@@ -415,11 +415,11 @@ manageTrafficDetails() {
     subscriptionRequireLocalPublisherRole || return 1
     local trafficDetailsStatus=
     while true; do
-        echoContent title "\n┌─ 用量明细 ─────────────────────────────────────────"
+        echoContent title "\n┌─ 流量明细 ─────────────────────────────────────────"
         menuLine "按账号、分享订阅或服务器源查看累计流量。"
         menuItem 1 "查看我的流量" "查看自用账号在各服务器源的累计流量"
         menuItem 2 "查看分享订阅限额概览" "列出全部分享订阅、额度和状态"
-        menuItem 3 "查看单个分享订阅用量" "选择订阅后显示用量和额度状态"
+        menuItem 3 "查看单个分享订阅流量" "选择订阅后显示流量和额度状态"
         menuItem 4 "查看服务器流量" "显示各服务器源累计流量"
         menuReturnItem 5 "返回流量与限额" "回到上级菜单"
         menuClose
@@ -444,7 +444,7 @@ manageTrafficAndQuota() {
         menuLine "先刷新总览；明细、超限和自动处理按需进入。"
         menuLine "自动执行超限处理：${quotaAutoApplyText}"
         menuItem 1 "刷新并显示总览" "采集本机账号流量，写入 groups.json 后显示治理摘要"
-        menuItem 2 "用量明细" "按账号、分享订阅或服务器源查看累计流量"
+        menuItem 2 "流量明细" "按账号、分享订阅或服务器源查看累计流量"
         menuDangerItem 3 "执行超限处理" "停用超额订阅并移除本机托管账号"
         menuItem 4 "开启/关闭自动执行超限处理" "切换同步前的自动限额事务"
         menuReturnItem 5 "返回订阅与用户" "回到上级菜单"

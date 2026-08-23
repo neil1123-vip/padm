@@ -578,7 +578,7 @@ menu() {
         checkWgetShowProgress
         menuSection "├─ 任务入口 ───────────────────────────────────────"
         menuItem 1 "安装与重装" "含新手选择指引；推荐直连/CDN/无域名 Reality、NaiveProxy、自定义和传统 TLS"
-        menuItem 2 "订阅与用户" "发布链接、创建和维护分享订阅、用量限额与多服务器同步"
+        menuItem 2 "订阅与用户" "发布链接、创建和维护分享订阅、流量限额与多服务器同步"
         menuItem 3 "协议与入口" "REALITY、XHTTP、Hysteria2、Tuic、入口端口和 CDN 入口"
         menuItem 4 "站点与证书" "传统 TLS fallback 站点、302、ALPN 和 TLS 证书"
         menuItem 5 "路由与访问控制" "分流、BT、域名/IP 阻断、直连例外和区域阻断"
