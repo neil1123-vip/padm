@@ -4054,6 +4054,11 @@ runShowAccountsOptionalStepRegression() {
         while IFS='|' read -r protocolId _; do
             subscriptionAccountDisplayFunction "${protocolId}" >/dev/null
         done < <(protocolCapabilityRegistry | awk -F'|' '$3 == "node" { print }')
+    )
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
 
         readInstallType() { return 0; }
         readInstallProtocolType() { return 0; }
@@ -4519,7 +4524,7 @@ runRestoreManagedFileFromBackupRejectsDirectoryTargetRegression() (
 
     regressionExpectFailure restoreManagedFileFromBackup "${backupFile}" "${targetFile}" 644
     [[ -d "${targetFile}" ]]
-    [[ ! -e "${targetFile}/.live.json.restore"* ]]
+    ! compgen -G "${targetFile}/.live.json.restore*" >/dev/null
 )
 
 runSubscriptionSyncMissingRestoreScopeRegression() {
