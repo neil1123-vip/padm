@@ -1824,7 +1824,7 @@ runXrayTrafficStatsJqCompatibilityRegression() (
     cat >"${fakeBin}/xray" <<'SH'
 #!/usr/bin/env bash
 cat <<'JSON'
-{"stat":[{"name":"user>>>team-uplink","value":3},{"name":"user>>>team-uplink","value":4},{"name":"user>>>team-downlink","value":5},{"name":"user>>>team-downlink","value":"6"},{"name":"user>>>ignored-uplink","value":7},{"name":"inbound>>>api>>>traffic>>>uplink","value":99}]}
+{"stat":[{"name":"user>>>team-VLESS_WS>>>traffic>>>uplink","value":3},{"name":"user>>>team-VLESS_WS>>>traffic>>>uplink","value":4},{"name":"user>>>team-VLESS_WS>>>traffic>>>downlink","value":5},{"name":"user>>>team-VLESS_WS>>>traffic>>>downlink","value":"6"},{"name":"user>>>ignored-VLESS_WS>>>traffic>>>uplink","value":7},{"name":"inbound>>>api>>>traffic>>>uplink","value":99}]}
 JSON
 SH
     chmod +x "${fakeBin}/xray"

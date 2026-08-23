@@ -177,7 +177,13 @@ collectXrayTrafficStatsSnapshot() {
     fi
     if jq empty <<<"${stats}" >/dev/null 2>&1; then
         jq --argjson accounts "${accounts}" '
-          def accountName($name): (($name | split(">>>"))[1] // "" | sub("-(uplink|downlink)$"; ""));
+          def accountName($name):
+            (($name | split(">>>"))[1] // "") as $raw |
+            ([$accounts[] as $account
+              | select($raw == $account or ($raw | startswith($account + "-")))
+              | $account]
+             | sort_by(length)
+             | last) // ($raw | sub("-(uplink|downlink)$"; ""));
           def direction($name): if ($name | contains("downlink")) then "download" else "upload" end;
           def emptyTotals: reduce $accounts[] as $account ({}; .[$account] = {account:$account, upload:0, download:0});
           (reduce .stat[]? as $stat (emptyTotals;
