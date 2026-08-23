@@ -36,14 +36,11 @@ ensureXrayTrafficStatsConfig() {
     local tmpFile
     local policyTmp
     local trafficBackupDir
-    local changed=
+    local statsChanged=false
+    local policyChanged=false
     [[ "${coreInstallType}" == "1" && -d "${xrayConfigPath}" ]] || return 0
-    checkLogBackupCreate trafficBackupDir "${statsConfig}" "${policyConfig}" || {
-        errorCard "Xray 流量统计配置备份失败，已取消更新"
-        return 1
-    }
     padmCreateTempFileForTarget tmpFile "${statsConfig}" stats || {
-        failTrafficStatsConfigChange "${trafficBackupDir}" "Xray 流量统计 stats 临时文件创建失败"
+        errorCard "Xray 流量统计 stats 临时文件创建失败"
         return 1
     }
     if ! cat <<EOF >"${tmpFile}"
@@ -81,75 +78,76 @@ ensureXrayTrafficStatsConfig() {
 EOF
     then
         padmRemoveCleanupPath "${tmpFile}"
-        failTrafficStatsConfigChange "${trafficBackupDir}" "Xray 流量统计 stats 配置生成失败"
+        errorCard "Xray 流量统计 stats 配置生成失败"
         return 1
     fi
-    if [[ -f "${statsConfig}" ]] && cmp -s "${tmpFile}" "${statsConfig}"; then
+    padmCreateTempFileForTarget policyTmp "${policyConfig}" policy || {
         padmRemoveCleanupPath "${tmpFile}"
+        errorCard "Xray 流量统计策略配置临时文件创建失败"
+        return 1
+    }
+    if [[ -f "${policyConfig}" ]]; then
+        if ! jq '
+          .policy.levels["0"].statsUserUplink = true |
+          .policy.levels["0"].statsUserDownlink = true
+        ' "${policyConfig}" >"${policyTmp}"; then
+            padmRemoveCleanupPath "${tmpFile}"
+            padmRemoveCleanupPath "${policyTmp}"
+            errorCard "Xray 流量统计策略配置生成失败"
+            return 1
+        fi
     else
+        if ! jq -n '
+          {policy:{levels:{"0":{}}, system:{}}} |
+          .policy.levels["0"].statsUserUplink = true |
+          .policy.levels["0"].statsUserDownlink = true
+        ' >"${policyTmp}"; then
+            padmRemoveCleanupPath "${tmpFile}"
+            padmRemoveCleanupPath "${policyTmp}"
+            errorCard "Xray 流量统计策略配置生成失败"
+            return 1
+        fi
+    fi
+
+    if [[ ! -f "${statsConfig}" ]] || ! cmp -s "${tmpFile}" "${statsConfig}"; then
+        statsChanged=true
+    fi
+    if [[ ! -f "${policyConfig}" ]] || ! cmp -s "${policyTmp}" "${policyConfig}"; then
+        policyChanged=true
+    fi
+    if [[ "${statsChanged}" != "true" && "${policyChanged}" != "true" ]]; then
+        padmRemoveCleanupPath "${tmpFile}"
+        padmRemoveCleanupPath "${policyTmp}"
+        return 0
+    fi
+
+    checkLogBackupCreate trafficBackupDir "${statsConfig}" "${policyConfig}" || {
+        padmRemoveCleanupPath "${tmpFile}"
+        padmRemoveCleanupPath "${policyTmp}"
+        errorCard "Xray 流量统计配置备份失败，已取消更新"
+        return 1
+    }
+    if [[ "${statsChanged}" == "true" ]]; then
         commitGeneratedJsonFile "${tmpFile}" "${statsConfig}" || {
             padmRemoveCleanupPath "${tmpFile}"
+            padmRemoveCleanupPath "${policyTmp}"
             failTrafficStatsConfigChange "${trafficBackupDir}" "Xray 流量统计 stats 配置写入失败"
             return 1
         }
-        changed=true
-    fi
-
-    if [[ ! -f "${policyConfig}" ]]; then
-        padmCreateTempFileForTarget policyTmp "${policyConfig}" policy || {
-            failTrafficStatsConfigChange "${trafficBackupDir}" "Xray 流量统计策略默认配置临时文件创建失败"
-            return 1
-        }
-        if ! cat <<EOF >"${policyTmp}"
-{
-  "policy": {
-    "levels": {
-      "0": {}
-    },
-    "system": {}
-  }
-}
-EOF
-        then
-            padmRemoveCleanupPath "${policyTmp}"
-            failTrafficStatsConfigChange "${trafficBackupDir}" "Xray 流量统计策略默认配置生成失败"
-            return 1
-        fi
-        commitGeneratedJsonFile "${policyTmp}" "${policyConfig}" || {
-            padmRemoveCleanupPath "${policyTmp}"
-            failTrafficStatsConfigChange "${trafficBackupDir}" "Xray 流量统计策略默认配置写入失败"
-            return 1
-        }
-        changed=true
-    fi
-    padmCreateTempFileForTarget policyTmp "${policyConfig}" policy || {
-        failTrafficStatsConfigChange "${trafficBackupDir}" "Xray 流量统计策略配置临时文件创建失败"
-        return 1
-    }
-    if ! jq '
-      .policy.levels["0"].statsUserUplink = true |
-      .policy.levels["0"].statsUserDownlink = true |
-      .policy.system.statsInboundUplink = true |
-      .policy.system.statsInboundDownlink = true |
-      .policy.system.statsOutboundUplink = true |
-      .policy.system.statsOutboundDownlink = true
-    ' "${policyConfig}" >"${policyTmp}"; then
-        padmRemoveCleanupPath "${policyTmp}"
-        failTrafficStatsConfigChange "${trafficBackupDir}" "Xray 流量统计策略配置生成失败"
-        return 1
-    fi
-    if cmp -s "${policyTmp}" "${policyConfig}"; then
-        padmRemoveCleanupPath "${policyTmp}"
     else
+        padmRemoveCleanupPath "${tmpFile}"
+    fi
+    if [[ "${policyChanged}" == "true" ]]; then
         commitGeneratedJsonFile "${policyTmp}" "${policyConfig}" || {
             padmRemoveCleanupPath "${policyTmp}"
             failTrafficStatsConfigChange "${trafficBackupDir}" "Xray 流量统计策略配置写入失败"
             return 1
         }
-        changed=true
+    else
+        padmRemoveCleanupPath "${policyTmp}"
     fi
 
-    if [[ -n "${changed}" && -n "${configPath}" ]]; then
+    if [[ -n "${configPath:-}" ]]; then
         if ! reloadCore; then
             failTrafficStatsConfigChange "${trafficBackupDir}" "Xray 流量统计配置更新后核心重载失败" true
             return 1
@@ -298,10 +296,11 @@ collectXrayTrafficStatsSnapshot() {
     local accounts=$1
     local stats=
     local xrayBinary=${XRAY_STATS_BINARY:-/etc/padm/xray/xray}
+    command -v timeout >/dev/null 2>&1 || return 1
     if [[ ! -x "${xrayBinary}" ]]; then
         return 1
     fi
-    if ! stats=$("${xrayBinary}" api statsquery --server=127.0.0.1:10085 -pattern user 2>/dev/null); then
+    if ! stats=$(timeout 5 "${xrayBinary}" api statsquery --server=127.0.0.1:10085 -pattern user 2>/dev/null); then
         return 1
     fi
     if [[ -z "${stats}" ]]; then
@@ -338,7 +337,7 @@ collectXrayTrafficStatsSnapshot() {
               if (account == "") continue
               if (!first) printf ","
               first = 0
-              printf "{\"account\":\"%s\",\"upload\":%d,\"download\":%d}", account, totals[account SUBSEP "upload"] + 0, totals[account SUBSEP "download"] + 0
+              printf "{\"account\":\"%s\",\"upload\":%.0f,\"download\":%.0f}", account, totals[account SUBSEP "upload"] + 0, totals[account SUBSEP "download"] + 0
             }
             printf "]"
           }' <<<"${stats}"
@@ -421,7 +420,6 @@ querySingBoxTrafficStatsGrpc() {
     local tmpDir
     local stats
     command -v curl >/dev/null 2>&1 || return 1
-    curl --version 2>/dev/null | grep -q 'Features:.*HTTP2' || return 1
     padmCreateTmpRootPath tmpDir padm-sing-box-stats.XXXXXX -d || return 1
     printf '\000\000\000\000\006\032\004user' >"${tmpDir}/request.bin" || {
         padmRemoveCleanupPath "${tmpDir}"
@@ -479,11 +477,19 @@ collectLocalTrafficSnapshot() {
         return
     fi
     if ! items=$(jq -cn --argjson accounts "${accounts}" --argjson xray "${xrayItems}" --argjson singBox "${singBoxItems}" '
-      $accounts | map(. as $account | {
-        account:$account,
-        upload:([($xray + $singBox)[] | select(.account == $account) | (.upload // 0)] | add // 0),
-        download:([($xray + $singBox)[] | select(.account == $account) | (.download // 0)] | add // 0)
-      })
+      def indexed: map({key:.account, value:{upload:(.upload // 0), download:(.download // 0)}}) | from_entries;
+      ($xray | indexed) as $xrayByAccount |
+      ($singBox | indexed) as $singBoxByAccount |
+      $accounts | map(. as $account |
+        ({} +
+          (if ($xray | length) > 0 then {xray:($xrayByAccount[$account] // {upload:0, download:0})} else {} end) +
+          (if ($singBox | length) > 0 then {"sing-box":($singBoxByAccount[$account] // {upload:0, download:0})} else {} end)) as $cores |
+        {
+          account:$account,
+          upload:([$cores[]?.upload] | add // 0),
+          download:([$cores[]?.download] | add // 0),
+          cores:$cores
+        })
     '); then
         jq -n '{ok:false, items: []}'
         return
@@ -491,10 +497,39 @@ collectLocalTrafficSnapshot() {
     jq -n --argjson items "${items}" '{ok:true, items:$items}'
 }
 
+subscriptionTrafficItemsValid() {
+    local items=$1
+    jq -e '
+      def count: type == "number" and . >= 0 and . == floor;
+      def counter:
+        type == "object" and keys == ["download", "upload"] and
+        (.upload | count) and (.download | count);
+      def cores:
+        type == "object" and length > 0 and
+        ((keys - ["sing-box", "xray"]) | length == 0) and
+        all(to_entries[]?; .value | counter);
+      type == "array" and
+      ([.[].account] | length) == ([.[].account] | unique | length) and
+      all(.[]?;
+        type == "object" and
+        ((keys == ["account", "download", "upload"]) or
+         (keys == ["account", "cores", "download", "upload"])) and
+        (.account | type == "string" and length > 0 and . != "." and . != ".." and test("^[A-Za-z0-9._~@+=:-]+$")) and
+        (.upload | count) and (.download | count) and
+        ((has("cores") | not) or
+          ((.cores | cores) and
+           .upload == ([.cores[]?.upload] | add // 0) and
+           .download == ([.cores[]?.download] | add // 0))))
+    ' <<<"${items}" >/dev/null 2>&1
+}
+
 writeSubscriptionTrafficSnapshot() {
     local snapshot=$1
     local remoteResults=${2:-[]}
-    if ! jq -e '.ok == true and (.items | type == "array")' <<<"${snapshot}" >/dev/null 2>&1 ||
+    local items
+    local remoteItems
+    if ! items=$(jq -ce 'select(.ok == true and (.items | type == "array")) | .items' <<<"${snapshot}" 2>/dev/null) ||
+        ! subscriptionTrafficItemsValid "${items}" ||
         ! jq -e '
           type == "array" and
           ([.[].source_id] | length) == ([.[].source_id] | unique | length) and
@@ -507,19 +542,46 @@ writeSubscriptionTrafficSnapshot() {
         statusCard "流量统计" "采集失败，已保留上次统计"
         return 1
     fi
+    while IFS= read -r remoteItems; do
+        if ! subscriptionTrafficItemsValid "${remoteItems}"; then
+            statusCard "流量统计" "采集失败，已保留上次统计"
+            return 1
+        fi
+    done < <(jq -c '.[].response.items' <<<"${remoteResults}")
     subscriptionActiveGroupWrite --argjson snapshot "${snapshot}" --argjson remoteResults "${remoteResults}" '
+      def counterTotal($counters):
+        {upload:([$counters[]?.upload] | add // 0), download:([$counters[]?.download] | add // 0)};
+      def resetDelta($old; $current; $known):
+        (($current.upload // 0) - ($old.upload // 0)) as $upload |
+        (($current.download // 0) - ($old.download // 0)) as $download |
+        {
+          upload:(if $known then (if $upload >= 0 then $upload else ($current.upload // 0) end) else ($current.upload // 0) end),
+          download:(if $known then (if $download >= 0 then $download else ($current.download // 0) end) else ($current.download // 0) end)
+        };
+      def coreDelta($old; $current):
+        reduce ($current | to_entries[]) as $entry ({upload:0, download:0};
+          (resetDelta(($old[$entry.key] // {upload:0, download:0}); $entry.value; ($old | has($entry.key)))) as $delta |
+          .upload += $delta.upload |
+          .download += $delta.download);
+      def itemCounters($item):
+        if ($item | has("cores")) then $item.cores
+        else {legacy:{upload:($item.upload // 0), download:($item.download // 0)}}
+        end;
       def sourceTotal($prev; $current):
         ($prev // {upload:0, download:0, counters:{}}) as $old |
         if ($current | length) == 0 then $old
         else
           ($old.counters // {}) as $oldCounters |
           (reduce $current[] as $item ({upload:0, download:0, counters:{}};
-            ($oldCounters[$item.account] // {upload:0, download:0}) as $counter |
-            (($item.upload // 0) - ($counter.upload // 0)) as $uploadDelta |
-            (($item.download // 0) - ($counter.download // 0)) as $downloadDelta |
-            .upload += (if ($oldCounters | has($item.account)) then (if $uploadDelta >= 0 then $uploadDelta else ($item.upload // 0) end) else ($item.upload // 0) end) |
-            .download += (if ($oldCounters | has($item.account)) then (if $downloadDelta >= 0 then $downloadDelta else ($item.download // 0) end) else ($item.download // 0) end) |
-            .counters[$item.account] = {upload: ($item.upload // 0), download: ($item.download // 0)})) as $delta |
+            itemCounters($item) as $currentCounters |
+            ($oldCounters[$item.account] // {}) as $accountCounters |
+            (if (($accountCounters | has("legacy")) or ($currentCounters | has("legacy"))) then
+               resetDelta(counterTotal($accountCounters); counterTotal($currentCounters); ($oldCounters | has($item.account)))
+             else coreDelta($accountCounters; $currentCounters)
+             end) as $counterDelta |
+            .upload += $counterDelta.upload |
+            .download += $counterDelta.download |
+            .counters[$item.account] = $currentCounters)) as $delta |
           {upload: (($old.upload // 0) + $delta.upload), download: (($old.download // 0) + $delta.download), counters: $delta.counters, updated_at: (now | strftime("%F %T"))}
         end;
       def mapped($items; $accountIdMap): $items | map(. + {id: ($accountIdMap[.account] // .account)});
@@ -556,7 +618,7 @@ writeSubscriptionTrafficSnapshot() {
     '
 }
 
-collectSubscriptionTraffic() {
+collectSubscriptionTrafficUnlocked() {
     local snapshot
     local remoteResults='[]'
     local role
@@ -577,6 +639,10 @@ collectSubscriptionTraffic() {
     else
         return 1
     fi
+}
+
+collectSubscriptionTraffic() {
+    subscriptionGroupsWithLock collectSubscriptionTrafficUnlocked
 }
 
 subscriptionUserQuotaStatusJq() {

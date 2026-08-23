@@ -932,9 +932,9 @@ JSON
 
     writeSubscriptionTrafficSnapshot "${trafficSnapshot}"
     jq -e '
-      .traffic.user_groups["team-a"].sources.main.counters.sub_team_a.upload == 1 and
-      .traffic.user_groups["team-a"].sources.main.counters.sub_team_a.download == 2 and
-      .traffic.user_groups["team-b"].sources.main.counters.sub_team_b.upload == 3 and
-      .traffic.user_groups["team-b"].sources.main.counters.sub_team_b.download == 4
+      .traffic.user_groups["team-a"].sources.main.counters.sub_team_a.legacy.upload == 1 and
+      .traffic.user_groups["team-a"].sources.main.counters.sub_team_a.legacy.download == 2 and
+      .traffic.user_groups["team-b"].sources.main.counters.sub_team_b.legacy.upload == 3 and
+      .traffic.user_groups["team-b"].sources.main.counters.sub_team_b.legacy.download == 4
     ' "$(subscriptionGroupsFile)" >/dev/null
 )

@@ -470,7 +470,7 @@ Reality Vision、Reality gRPC 和 Reality XHTTP 不依赖本机静态站点。Re
 6. 旧版 `main` / `controlled` 凭据仅保留在明确命名的维护入口，用于更新已有连接；首次接入只接受邀请/回执。包含长期控制 Token 的回执或旧版被控凭据只通过可信通道传递。
 7. WireGuard 使用 UDP，控制 API 只在隧道内使用 HTTP，不需要 TLS 证书；客户端订阅继续单独使用公网 HTTPS。
 
-`订阅同步` -> `状态备份与恢复` 只作用于 `/etc/padm/subscribe_groups/groups.json`。恢复备份或重建状态前会先要求输入 `yes`，确认后才创建当前状态备份；当前结构为精确的 `version: 5` 单组根对象，不再持久化 `groups[]`、`active_group` 或流量汇总字段。首次读取旧 `version: 2`、`3`、`4` 状态时，仅在确认只有一个活动组后备份旧文件到对应的 `groups-pre-v3-migration-*`、`groups-pre-v4-migration-*` 或 `groups-pre-v5-migration-*`，再原子迁移；多组、其他旧版结构以及含额外、缺失或无效字段的状态会被拒绝。
+`订阅同步` -> `状态备份与恢复` 只作用于 `/etc/padm/subscribe_groups/groups.json`。恢复备份或重建状态前会先要求输入 `yes`，确认后才创建当前状态备份；当前结构为精确的 `version: 6` 单组根对象，不再持久化 `groups[]`、`active_group` 或流量汇总字段，并按 Xray / sing-box 核心分别保存流量基线。首次读取旧 `version: 2`、`3`、`4`、`5` 状态时会原子迁移；其中 v5 聚合基线先保存为兼容基线，并在首次新格式采集后替换为按核心基线。旧文件会备份到对应的 `groups-pre-v3-migration-*`、`groups-pre-v4-migration-*`、`groups-pre-v5-migration-*` 或 `groups-pre-v6-migration-*`；多组、其他旧版结构以及含额外、缺失或无效字段的状态会被拒绝。
 
 ## 路由与访问控制
 

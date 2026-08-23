@@ -1138,6 +1138,9 @@ runSubscriptionGroupSyncUnlocked() {
     local remoteSyncRequired=false
     local sourceId
     local controlStateWriteFailed=false
+    local trafficCollected=false
+    local postSyncTrafficRequired=false
+    local localSyncChanged=false
     local rc=0
     ensureSubscriptionGroupsState || return 1
     readInstallType
@@ -1148,8 +1151,14 @@ runSubscriptionGroupSyncUnlocked() {
         return 1
     }
 
+    if collectSubscriptionTraffic; then
+        trafficCollected=true
+    else
+        statusCard "流量统计" "同步前流量快照不完整，已保留旧统计"
+    fi
+
     if subscriptionGroupQuotaAutoApplyEnabled; then
-        if collectSubscriptionTraffic; then
+        if [[ "${trafficCollected}" == "true" ]]; then
             if ! quotaPlan=$(subscriptionQuotaDryRunPlan); then
                 failures=$(jq '. + ["限额自动执行计划生成失败"]' <<<"${failures}")
                 rc=1
@@ -1157,6 +1166,7 @@ runSubscriptionGroupSyncUnlocked() {
                 failures=$(jq '. + ["限额自动执行计划格式无效"]' <<<"${failures}")
                 rc=1
             elif [[ "$(jq 'length' <<<"${quotaPlan}")" != "0" ]]; then
+                postSyncTrafficRequired=true
                 if ! applySubscriptionQuotaPlanTransaction "${quotaPlan}"; then
                     failures=$(jq --arg message "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-限额自动执行失败}" '. + [$message]' <<<"${failures}")
                     rc=1
@@ -1182,8 +1192,14 @@ runSubscriptionGroupSyncUnlocked() {
             localSyncFailure="本机同步 UUID 初始化失败"
         elif ! syncPlan=$(subscriptionSyncPlan); then
             localSyncFailure="本机同步计划计算失败"
-        elif ! subscriptionSyncApplyAccountPlan "${syncPlan}"; then
-            localSyncFailure="本机同步计划应用失败"
+        elif ! subscriptionSyncValidateAccountPlan "${syncPlan}"; then
+            localSyncFailure="本机同步计划格式无效"
+        elif jq -e '(.create | length > 0) or (.remove | length > 0)' <<<"${syncPlan}" >/dev/null 2>&1; then
+            localSyncChanged=true
+            postSyncTrafficRequired=true
+            if ! subscriptionSyncApplyAccountPlan "${syncPlan}"; then
+                localSyncFailure="本机同步计划应用失败"
+            fi
         fi
         if [[ -n "${localSyncFailure}" ]]; then
             if subscriptionSyncRollbackLocalApply "${configBackupDir}" "${outputBackupDir}" "${localSyncFailure}" "${groupsBackupFile}"; then
@@ -1197,7 +1213,7 @@ runSubscriptionGroupSyncUnlocked() {
             outputBackupDir=
             groupsBackupFile=
             rc=1
-        elif ! subscriptionSyncReconcileLocalServices; then
+        elif [[ "${localSyncChanged}" == "true" ]] && ! subscriptionSyncReconcileLocalServices; then
             localSyncFailure="本机同步后服务重建失败"
             if subscriptionSyncRollbackLocalApply "${configBackupDir}" "${outputBackupDir}" "${localSyncFailure}" "${groupsBackupFile}"; then
                 subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}" "${groupsBackupFile}"
@@ -1264,6 +1280,7 @@ runSubscriptionGroupSyncUnlocked() {
     fi
 
     if [[ "${localSyncReady}" == "true" && "${remoteSyncRequired}" == "true" ]]; then
+        postSyncTrafficRequired=true
         statusCard "订阅同步" "正在等待被控服务器同步响应" "单台请求最长 40 秒（含重试），多个服务器并行执行"
         if ! remoteSyncResult=$(runSubscriptionRemoteSync) ||
             ! jq -e '.failures | type == "array"' <<<"${remoteSyncResult}" >/dev/null 2>&1 ||
@@ -1301,8 +1318,8 @@ runSubscriptionGroupSyncUnlocked() {
         padmRemoveCleanupPath "${outputBackupDir}"
     fi
 
-    if ! collectSubscriptionTraffic; then
-        statusCard "流量统计" "同步已完成，但流量快照不完整，已保留旧统计"
+    if [[ "${postSyncTrafficRequired}" == "true" ]] && ! collectSubscriptionTraffic; then
+        statusCard "流量统计" "同步已完成，但重载后的流量基线更新失败，已保留旧统计"
     fi
 
     if [[ "${failures}" == "[]" ]]; then

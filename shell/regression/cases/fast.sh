@@ -1820,6 +1820,7 @@ runPortHoppingMenuUsesCommandLookupRegression() (
 
 runXrayTrafficStatsJqCompatibilityRegression() (
     local fakeBin="${TMP_DIR}/fake-xray-stats-bin"
+    local timeoutMarker="${TMP_DIR}/fake-xray-stats-timeout"
     mkdir -p "${fakeBin}"
     cat >"${fakeBin}/xray" <<'SH'
 #!/usr/bin/env bash
@@ -1827,7 +1828,7 @@ if [[ "${PADM_TEST_XRAY_TEXT:-}" == "1" ]]; then
     cat <<'TEXT'
 stat: <
   name: "user>>>team-VLESS_WS>>>traffic>>>uplink"
-  value: 3
+  value: 4294967296
 >
 stat: <
   name: "user>>>team-downlink-VLESS_WS>>>traffic>>>uplink"
@@ -1845,10 +1846,17 @@ cat <<'JSON'
 JSON
 SH
     chmod +x "${fakeBin}/xray"
+    timeout() {
+        [[ "$1" == "5" ]] || return 1
+        : >"${timeoutMarker}"
+        shift
+        "$@"
+    }
     XRAY_STATS_BINARY="${fakeBin}/xray"
     collectXrayTrafficStatsSnapshot '["team","team-downlink","missing"]' | jq -e '. == [{"account":"team","upload":7,"download":11},{"account":"team-downlink","upload":2,"download":3},{"account":"missing","upload":0,"download":0}]' >/dev/null
+    [[ -e "${timeoutMarker}" ]]
     export PADM_TEST_XRAY_TEXT=1
-    collectXrayTrafficStatsSnapshot '["team","team-downlink","missing"]' | jq -e '. == [{"account":"team","upload":3,"download":0},{"account":"team-downlink","upload":2,"download":3},{"account":"missing","upload":0,"download":0}]' >/dev/null
+    collectXrayTrafficStatsSnapshot '["team","team-downlink","missing"]' | jq -e '. == [{"account":"team","upload":4294967296,"download":0},{"account":"team-downlink","upload":2,"download":3},{"account":"missing","upload":0,"download":0}]' >/dev/null
     unset PADM_TEST_XRAY_TEXT
 )
 
@@ -1866,6 +1874,7 @@ runLocalTrafficAccountsBatchRegression() (
     local singBoxReloadMarker="${TMP_DIR}/traffic-sing-box-reload"
     local singBoxStatsConfig="${singBoxConfig}14_stats_api.json"
     local singBoxMergedConfig="${TMP_DIR}/traffic-sing-box-merged.json"
+    local curlVersionMarker="${TMP_DIR}/traffic-curl-version"
     local originalStats
     local originalPolicy
     local originalSingBoxStats
@@ -1902,6 +1911,7 @@ SH
         local request=
         local url=
         if [[ "${1:-}" == "--version" ]]; then
+            : >"${curlVersionMarker}"
             printf 'Features: HTTP2\n'
             return 0
         fi
@@ -1927,6 +1937,7 @@ SH
         return 1
     fi
     unset PADM_TEST_GRPC_STATUS
+    [[ ! -e "${curlVersionMarker}" ]]
     unset -f curl
 
     accounts=$(collectLocalTrafficAccounts)
@@ -1935,7 +1946,7 @@ SH
     singBoxConfigPath=
     XRAY_STATS_BINARY="${fakeBin}/xray"
     snapshot=$(collectLocalTrafficSnapshot)
-    jq -e '. == {ok:true,items:[{account:"admin",upload:3,download:5},{account:"sub_team_a",upload:7,download:11},{account:"sub_team_b",upload:0,download:0}]}' <<<"${snapshot}" >/dev/null
+    jq -e '. == {ok:true,items:[{account:"admin",upload:3,download:5,cores:{xray:{upload:3,download:5}}},{account:"sub_team_a",upload:7,download:11,cores:{xray:{upload:7,download:11}}},{account:"sub_team_b",upload:0,download:0,cores:{xray:{upload:0,download:0}}}]}' <<<"${snapshot}" >/dev/null
 
     configPath="${singBoxConfig}"
     singBoxConfigPath="${singBoxConfig}"
@@ -1946,7 +1957,7 @@ SH
         singBoxGrpcResponseToStatsJson "${grpcResponse}"
     }
     snapshot=$(collectLocalTrafficSnapshot)
-    jq -e '. == {ok:true,items:[{account:"ops",upload:19,download:0},{account:"sub_team_a",upload:13,download:17}]}' <<<"${snapshot}" >/dev/null
+    jq -e '. == {ok:true,items:[{account:"ops",upload:19,download:0,cores:{"sing-box":{upload:19,download:0}}},{account:"sub_team_a",upload:13,download:17,cores:{"sing-box":{upload:13,download:17}}}]}' <<<"${snapshot}" >/dev/null
     if singBoxGrpcResponseToStatsJson "${invalidGrpcResponse}" >/dev/null 2>&1; then
         return 1
     fi
@@ -1956,7 +1967,7 @@ SH
     coreInstallType=1
     XRAY_STATS_BINARY="${fakeBin}/xray"
     snapshot=$(collectLocalTrafficSnapshot)
-    jq -e '. == {ok:true,items:[{account:"admin",upload:3,download:5},{account:"ops",upload:19,download:0},{account:"sub_team_a",upload:20,download:28},{account:"sub_team_b",upload:0,download:0}]}' <<<"${snapshot}" >/dev/null
+    jq -e '. == {ok:true,items:[{account:"admin",upload:3,download:5,cores:{xray:{upload:3,download:5},"sing-box":{upload:0,download:0}}},{account:"ops",upload:19,download:0,cores:{xray:{upload:0,download:0},"sing-box":{upload:19,download:0}}},{account:"sub_team_a",upload:20,download:28,cores:{xray:{upload:7,download:11},"sing-box":{upload:13,download:17}}},{account:"sub_team_b",upload:0,download:0,cores:{xray:{upload:0,download:0},"sing-box":{upload:0,download:0}}}]}' <<<"${snapshot}" >/dev/null
     export PADM_TEST_TRAFFIC_FAIL_SERVER=10087
     snapshot=$(collectLocalTrafficSnapshot)
     jq -e '.ok == false and (.items | length) == 0' <<<"${snapshot}" >/dev/null
@@ -2038,6 +2049,24 @@ JSON
     [[ -e "${xrayReloadMarker}" ]]
     [[ "$(<"${xrayConfig}13_stats_api.json")" == "${originalStats}" ]]
     [[ "$(<"${xrayConfig}12_policy.json")" == "${originalPolicy}" ]]
+
+    reloadCore() {
+        printf 'reload-success\n' >"${xrayReloadMarker}"
+        return 0
+    }
+    ensureXrayTrafficStatsConfig
+    jq -e '
+      .policy.levels["0"].statsUserUplink == true and
+      .policy.levels["0"].statsUserDownlink == true and
+      .policy.system == {
+        statsInboundUplink:false,
+        statsInboundDownlink:false,
+        statsOutboundUplink:false,
+        statsOutboundDownlink:false
+      }
+    ' "${xrayConfig}12_policy.json" >/dev/null
+    checkLogBackupCreate() { return 1; }
+    ensureXrayTrafficStatsConfig
 )
 
 runSubscriptionOutputRandomUserRegression() (

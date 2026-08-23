@@ -109,7 +109,7 @@ subscriptionGroupsWithLock() {
 }
 
 subscriptionGroupsSchemaVersion() {
-    echo 5
+    echo 6
 }
 
 subscriptionStateIdValid() {
@@ -215,7 +215,13 @@ validateSubscriptionGroupsState() {
         ((has("counters") | not) or
           (.counters | type == "object" and all(to_entries[]?;
             (.key | nonempty_string) and
-            (.value | exact(["upload", "download"]; []) and (.upload | count) and (.download | count))))) and
+            (.value |
+              type == "object" and length > 0 and
+              ((keys - ["legacy", "sing-box", "xray"]) | length == 0) and
+              ((has("legacy") | not) or keys == ["legacy"]) and
+              all(to_entries[]?;
+                .value | exact(["upload", "download"]; []) and
+                (.upload | count) and (.download | count)))))) and
         ((has("updated_at") | not) or (.updated_at | type == "string"));
       def source_traffic_map:
         type == "object" and all(to_entries[]?; (.key | nonempty_string) and (.value | source_traffic));
@@ -257,15 +263,15 @@ validateSubscriptionGroupsState() {
 
 backupSubscriptionGroupsStateForMigration() {
     local stateFile=$1
-    local fromVersion=${2:-3}
+    local targetVersion=${2:-6}
     local backupDir
     local backupFile
     backupDir=$(subscriptionGroupsBackupDir) || return 1
     padmEnsureSafeDirectory "${backupDir}" || return 1
     chmod 700 "${backupDir}" 2>/dev/null || return 1
-    backupFile="${backupDir}/groups-pre-v${fromVersion}-migration-$(date '+%Y%m%d%H%M%S')-${BASHPID:-$$}-${RANDOM}.json"
+    backupFile="${backupDir}/groups-pre-v${targetVersion}-migration-$(date '+%Y%m%d%H%M%S')-${BASHPID:-$$}-${RANDOM}.json"
     while [[ -e "${backupFile}" ]]; do
-        backupFile="${backupDir}/groups-pre-v${fromVersion}-migration-$(date '+%Y%m%d%H%M%S')-${BASHPID:-$$}-${RANDOM}.json"
+        backupFile="${backupDir}/groups-pre-v${targetVersion}-migration-$(date '+%Y%m%d%H%M%S')-${BASHPID:-$$}-${RANDOM}.json"
     done
     backupManagedFileToPath "${stateFile}" "${backupFile}" 600 || return 1
     printf '%s\n' "${backupFile}"
@@ -279,15 +285,16 @@ migrateSubscriptionGroupsState() {
     local stageFile
     local ownsStage=true
     fromVersion=$(jq -r '.version // empty' "${stateFile}" 2>/dev/null) || return 1
-    [[ "${fromVersion}" == "2" || "${fromVersion}" == "3" || "${fromVersion}" == "4" ]] || return 1
-    backupVersion=5
+    [[ "${fromVersion}" == "2" || "${fromVersion}" == "3" || "${fromVersion}" == "4" || "${fromVersion}" == "5" ]] || return 1
+    backupVersion=6
     [[ "${fromVersion}" == "2" ]] && backupVersion=3
     [[ "${fromVersion}" == "3" ]] && backupVersion=4
+    [[ "${fromVersion}" == "4" ]] && backupVersion=5
     if [[ -n "${outputFile}" ]]; then
         stageFile=${outputFile}
         ownsStage=false
     else
-        padmCreateTempFileForTarget stageFile "${stateFile}" v5-migration || return 1
+        padmCreateTempFileForTarget stageFile "${stateFile}" v6-migration || return 1
     fi
     if ! jq -e '
       def valid_id: type == "string" and length <= 64 and test("^[A-Za-z0-9_-]+$");
@@ -312,10 +319,10 @@ migrateSubscriptionGroupsState() {
               else {counters:(reduce ($value.counters | to_entries[]?) as $entry ({};
                if (($entry.value | type) != "object" ) then
                  error("invalid traffic counter")
-               else .[$entry.key] = {
+               else .[$entry.key] = {legacy:{
                  upload:count_or_zero($entry.value; "upload"; "invalid traffic counter"),
                  download:count_or_zero($entry.value; "download"; "invalid traffic counter")
-               }
+               }}
                end))}
              end
            else {} end) +
@@ -361,7 +368,7 @@ migrateSubscriptionGroupsState() {
             ),
           sources: source_map(object_field($traffic; "sources"; "invalid traffic source map"); $source_ids)
         } |
-        {version:5, id:.id, name:.name, sources:.sources, user_groups:.user_groups,
+        {version:6, id:.id, name:.name, sources:.sources, user_groups:.user_groups,
          sync: {
            enabled: .sync.enabled,
            interval_minutes: .sync.interval_minutes,
@@ -371,7 +378,9 @@ migrateSubscriptionGroupsState() {
            quota_auto_apply: .sync.quota_auto_apply
          },
          traffic:.traffic};
-      if ((.version == 2 or .version == 3 or .version == 4) and
+      if .version == 5 then
+        normalize_group
+      elif ((.version == 2 or .version == 3 or .version == 4) and
           (.groups | type == "array") and (.groups | length == 1) and
           (.active_group == .groups[0].id)) then
         .groups[0] | normalize_group
@@ -436,7 +445,7 @@ subscriptionGroupsStateReplaceUnlocked() {
     [[ -f "${sourceFile}" ]] || return 1
     if ! validateSubscriptionGroupsState "${sourceFile}"; then
         sourceVersion=$(jq -r '.version // empty' "${sourceFile}" 2>/dev/null) || return 1
-        [[ "${sourceVersion}" == "2" || "${sourceVersion}" == "3" || "${sourceVersion}" == "4" ]] || return 1
+        [[ "${sourceVersion}" == "2" || "${sourceVersion}" == "3" || "${sourceVersion}" == "4" || "${sourceVersion}" == "5" ]] || return 1
         padmCreateTempFileForTarget normalizedFile "${targetFile}" restore-migration || return 1
         if ! migrateSubscriptionGroupsState "${sourceFile}" "${normalizedFile}"; then
             padmRemoveCleanupPath "${normalizedFile}"

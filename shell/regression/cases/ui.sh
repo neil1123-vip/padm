@@ -661,7 +661,7 @@ runSubscriptionWireGuardInviteReceiptRegression() (
         jq -c '
           if (.groups | type) == "array" and (.groups | length) == 1 then
             .groups[0] as $group |
-            {version:5, id:$group.id, name:$group.name, sources:$group.sources,
+            {version:6, id:$group.id, name:$group.name, sources:$group.sources,
              user_groups:$group.user_groups, sync:$group.sync,
              traffic:{admin:{sources:(($group.traffic.admin.sources // {}))},
                       user_groups:(($group.traffic.user_groups // {}) | with_entries(.value={sources:(.value.sources // {})})),

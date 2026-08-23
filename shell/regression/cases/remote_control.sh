@@ -544,20 +544,43 @@ runRemoteControlTrafficContractRegression() (
     subscriptionRemoteControlRequest() {
         [[ "$2" == "traffic" && "$3" == '{}' ]] || return 1
         case "${responseMode}" in
-        valid) printf '%s\n' '{"ok":true,"items":[{"account":"user@example.com","upload":1,"download":2},{"account":"sub_team_a","upload":3,"download":4}]}' ;;
+        valid) printf '%s\n' '{"ok":true,"items":[{"account":"user@example.com","upload":1,"download":2,"cores":{"xray":{"upload":1,"download":2}}},{"account":"sub_team_a","upload":3,"download":4,"cores":{"xray":{"upload":1,"download":1},"sing-box":{"upload":2,"download":3}}}]}' ;;
+        old-format) printf '%s\n' '{"ok":true,"items":[{"account":"sub_team_a","upload":3,"download":4}]}' ;;
         duplicate) printf '%s\n' '{"ok":true,"items":[{"account":"admin","upload":1,"download":2},{"account":"admin","upload":3,"download":4}]}' ;;
+        invalid-cores) printf '%s\n' '{"ok":true,"items":[{"account":"admin","upload":9,"download":2,"cores":{"xray":{"upload":1,"download":2}}}]}' ;;
         legacy) printf '%s\n' '{"ok":false,"error":"unknown_endpoint","error_detail":{"type":"unknown_endpoint","message":"未知控制端点"}}' ;;
         esac
     }
 
     result=$(subscriptionRemoteTrafficForSource "${source}")
-    jq -e '.source_id == "edge-remote" and .status == "success" and .response.items[1].account == "sub_team_a"' <<<"${result}" >/dev/null
+    jq -e '.source_id == "edge-remote" and .status == "success" and .response.items[1].cores["sing-box"].download == 3' <<<"${result}" >/dev/null
+    responseMode=old-format
+    result=$(subscriptionRemoteTrafficForSource "${source}")
+    jq -e '.status == "success" and (.response.items[0] | has("cores") | not)' <<<"${result}" >/dev/null
     responseMode=duplicate
+    result=$(subscriptionRemoteTrafficForSource "${source}")
+    jq -e '.status == "remote_error" and .error_detail.type == "invalid_response"' <<<"${result}" >/dev/null
+    responseMode=invalid-cores
     result=$(subscriptionRemoteTrafficForSource "${source}")
     jq -e '.status == "remote_error" and .error_detail.type == "invalid_response"' <<<"${result}" >/dev/null
     responseMode=legacy
     result=$(subscriptionRemoteTrafficForSource "${source}")
     jq -e '.status == "remote_error" and .error_detail.type == "remote_error" and .error_detail.message == "未知控制端点"' <<<"${result}" >/dev/null
+
+    local lockLog="${TMP_DIR}/remote-control-traffic-lock.log"
+    subscriptionGroupsWithLock() {
+        local functionName=$1
+        printf 'lock:%s\n' "${functionName}" >>"${lockLog}"
+        shift
+        "${functionName}" "$@"
+    }
+    subscriptionControlTrafficResponseUnlocked() {
+        printf 'traffic:%s\n' "$1" >>"${lockLog}"
+        return 17
+    }
+    regressionExpectStatus 17 subscriptionControlTrafficResponse '{}'
+    grep -qx 'lock:subscriptionControlTrafficResponseUnlocked' "${lockLog}"
+    grep -qx 'traffic:{}' "${lockLog}"
 )
 
 runRemoteControlInlineSyncRunnerRegression() (
@@ -711,6 +734,7 @@ runRemoteControlHandleInlineHelpersRegression() (
     local subscribeResponse
     local subscribeStatus
     local syncLockMarker="${controlRoot}/sync-lock-observed"
+    local coreReloadMarker="${controlRoot}/core-reloaded"
     local snapshotLog="${controlRoot}/snapshot.log"
     local expectedDefault
     local expectedDefaultB
@@ -735,6 +759,8 @@ runRemoteControlHandleInlineHelpersRegression() (
         [[ "${SUBSCRIPTION_GROUPS_LOCK_HELD:-}" == "1" ]] && : >"${syncLockMarker}"
         printf '{"create":[],"remove":[]}'
     }
+    reloadCore() { : >"${coreReloadMarker}"; }
+    subscriptionSyncReconcileLocalServices() { : >"${coreReloadMarker}"; }
     healthResponse=$(handleSubscriptionControl health test-token | jq -c .)
     [[ "${healthResponse}" == *'"ok":true'*'"version":"test"'*'"capabilities":["health","sync","traffic"]'* ]]
 
@@ -764,6 +790,7 @@ runRemoteControlHandleInlineHelpersRegression() (
     [[ "${syncResponse}" == *'"create":[]'*'"remove":[]'* ]]
     jq -e '.ok == true and (.subscriptions | has("sub_team_a"))' <<<"${syncResponse}" >/dev/null
     [[ -e "${syncLockMarker}" ]]
+    [[ ! -e "${coreReloadMarker}" ]]
 
     expectedDefault=$(printf 'vless://snapshot\n' | base64 | tr -d '\n')
     expectedDefaultB=$(printf 'trojan://snapshot-b\n' | base64 | tr -d '\n')
@@ -970,7 +997,7 @@ JSON
               user_groups: ((.traffic.user_groups // {}) | with_entries(.value = {sources:(.value.sources // {})})),
               sources: (.traffic.sources // {})
             } |
-            {version:5, id, name, sources, user_groups, sync, traffic}
+            {version:6, id, name, sources, user_groups, sync, traffic}
           else . end
         ' <<<"$1")
     }
@@ -1298,6 +1325,9 @@ JSON
                 }
                 subscriptionSyncApplyAccountPlanTransaction() {
                     return 1
+                }
+                collectSubscriptionTraffic() {
+                    return 0
                 }
                 subscriptionGroupsStateWrite() {
                     restoreFailureStateWriteCalls=$((restoreFailureStateWriteCalls + 1))
@@ -1689,8 +1719,12 @@ JSON
         resetVirtualSubscriptionGroupsState
         (
             local reconcileLog="${TMP_DIR}/remote-control-local-reconcile-retry.log"
+            local trafficCalls=0
             reconcileCalls=0
             : >"${reconcileLog}"
+            collectSubscriptionTraffic() {
+                trafficCalls=$((trafficCalls + 1))
+            }
             subscriptionSyncReconcileLocalServices() {
                 reconcileCalls=$((reconcileCalls + 1))
                 printf '%s\n' "${1:-<empty>}" >>"${reconcileLog}"
@@ -1702,6 +1736,7 @@ JSON
             set -e
             [[ "${reconcileStatus}" -ne 0 ]]
             [[ "${reconcileCalls}" == "2" ]]
+            [[ "${trafficCalls}" == "2" ]]
             grep -qxm1 '^<empty>$' "${reconcileLog}"
             grep -qxm1 '^true$' "${reconcileLog}"
             jq -e '.ok == false and .error == "reconcile_failed" and .error_detail.type == "reconcile_failed" and (.error_detail.message | contains("已恢复旧配置")) and ((.error_detail.message | contains("恢复旧配置后服务重建仍失败")) | not)' "${responseFile}" >/dev/null
@@ -1709,8 +1744,12 @@ JSON
 
         (
             local reconcileLog="${TMP_DIR}/remote-control-local-reconcile-retry-fail.log"
+            local trafficCalls=0
             reconcileCalls=0
             : >"${reconcileLog}"
+            collectSubscriptionTraffic() {
+                trafficCalls=$((trafficCalls + 1))
+            }
             subscriptionSyncReconcileLocalServices() {
                 reconcileCalls=$((reconcileCalls + 1))
                 printf '%s\n' "${1:-<empty>}" >>"${reconcileLog}"
@@ -1722,9 +1761,29 @@ JSON
             set -e
             [[ "${reconcileStatus}" -ne 0 ]]
             [[ "${reconcileCalls}" == "2" ]]
+            [[ "${trafficCalls}" == "2" ]]
             grep -qxm1 '^<empty>$' "${reconcileLog}"
             grep -qxm1 '^true$' "${reconcileLog}"
             jq -e '.ok == false and .error == "reconcile_failed" and .error_detail.type == "reconcile_failed" and (.error_detail.message | contains("恢复旧配置后服务重建仍失败"))' "${responseFile}.reconcile-retry-fail" >/dev/null
+        )
+
+        (
+            local controlledReloadCalls=0
+            local controlledReloadResponse
+            local controlledReloadStatus
+            local trafficCalls=0
+            collectSubscriptionTraffic() {
+                trafficCalls=$((trafficCalls + 1))
+            }
+            reloadCore() {
+                controlledReloadCalls=$((controlledReloadCalls + 1))
+                [[ "${controlledReloadCalls}" -gt 1 ]]
+            }
+            runControlApplyCapture controlledReloadResponse controlledReloadStatus server '{"desired_users":[{"id":"team-c","uuid":"33333333-3333-3333-3333-333333333333"}],"dry_run":false}'
+            [[ "${controlledReloadStatus}" -ne 0 ]]
+            [[ "${controlledReloadCalls}" == "2" ]]
+            [[ "${trafficCalls}" == "2" ]]
+            jq -e '.ok == false and .error == "reload_failed" and .error_detail.type == "reload_failed" and (.error_detail.message | contains("已恢复旧配置"))' <<<"${controlledReloadResponse}" >/dev/null
         )
 
         subscriptionSyncPlanFromAccounts() {

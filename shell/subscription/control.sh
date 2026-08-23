@@ -299,6 +299,7 @@ subscriptionRemoteTrafficForSource() {
     local source=$1
     local sourceId
     local response
+    local items
     sourceId=$(jq -r '.id // empty' <<<"${source}") || return 1
     [[ -n "${sourceId}" ]] || return 1
     if subscriptionRemoteSourceSelfReference "${source}"; then
@@ -308,17 +309,8 @@ subscriptionRemoteTrafficForSource() {
         jq -n --arg sourceId "${sourceId}" \
             '{source_id:$sourceId, status:"missing_token", error_detail:{type:"missing_token", message:"未配置控制 token"}}'
     elif response=$(subscriptionRemoteControlRequest "${source}" traffic '{}'); then
-        if jq -e '.ok == true' <<<"${response}" >/dev/null 2>&1 && jq -e '
-          keys == ["items", "ok"] and
-          (.items | type == "array") and
-          ([.items[].account] | length) == ([.items[].account] | unique | length) and
-          all(.items[]?;
-            type == "object" and
-            keys == ["account", "download", "upload"] and
-            (.account | type == "string" and length > 0 and . != "." and . != ".." and test("^[A-Za-z0-9._~@+=:-]+$")) and
-            (.upload | type == "number" and . >= 0 and . == floor) and
-            (.download | type == "number" and . >= 0 and . == floor))
-        ' <<<"${response}" >/dev/null 2>&1; then
+        if items=$(jq -ce 'select(keys == ["items", "ok"] and .ok == true and (.items | type == "array")) | .items' <<<"${response}" 2>/dev/null) &&
+            subscriptionTrafficItemsValid "${items}"; then
             jq -n --arg sourceId "${sourceId}" --argjson response "${response}" \
                 '{source_id:$sourceId, status:"success", response:$response}'
         elif jq -e '.ok == true' <<<"${response}" >/dev/null 2>&1; then
@@ -1068,7 +1060,8 @@ subscriptionControlApplyAccountPlan() {
         subscriptionControlSetAccountPlanFailure "${previousGroupsState}" "${applyError}" || return 1
         return 1
     fi
-    if ! subscriptionSyncApplyAccountPlanTransaction "${plan}"; then
+    if jq -e '(.create | length > 0) or (.remove | length > 0)' <<<"${plan}" >/dev/null 2>&1 &&
+        ! subscriptionSyncApplyAccountPlanTransaction "${plan}"; then
         applyError="${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-控制面同步计划应用失败}"
         subscriptionControlSetAccountPlanFailure "${previousGroupsState}" "${applyError}" || return 1
         return 1
@@ -1138,9 +1131,10 @@ subscriptionControlSyncResponse() {
     fi
 }
 
-subscriptionControlTrafficResponse() {
+subscriptionControlTrafficResponseUnlocked() {
     local payload=$1
     local snapshot
+    local items
     if ! jq -e 'type == "object" and keys == []' <<<"${payload}" >/dev/null 2>&1; then
         jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"流量请求体格式不正确"}}'
         return 1
@@ -1152,17 +1146,8 @@ subscriptionControlTrafficResponse() {
         return 1
     fi
     snapshot=$(collectLocalTrafficSnapshot)
-    if ! jq -e '
-      .ok == true and
-      (.items | type == "array") and
-      ([.items[].account] | length) == ([.items[].account] | unique | length) and
-      all(.items[]?;
-        type == "object" and
-        keys == ["account", "download", "upload"] and
-        (.account | type == "string" and length > 0 and . != "." and . != ".." and test("^[A-Za-z0-9._~@+=:-]+$")) and
-        (.upload | type == "number" and . >= 0 and . == floor) and
-        (.download | type == "number" and . >= 0 and . == floor))
-    ' <<<"${snapshot}" >/dev/null 2>&1; then
+    if ! items=$(jq -ce 'select(.ok == true and (.items | type == "array")) | .items' <<<"${snapshot}" 2>/dev/null) ||
+        ! subscriptionTrafficItemsValid "${items}"; then
         jq -n '{ok:false, error:"traffic_failed", error_detail:{type:"traffic_failed", message:"本机流量统计采集失败"}}'
         return 1
     fi
@@ -1171,6 +1156,10 @@ subscriptionControlTrafficResponse() {
         return 1
     }
     jq -c '{ok:true, items:.items}' <<<"${snapshot}"
+}
+
+subscriptionControlTrafficResponse() {
+    subscriptionGroupsWithLock subscriptionControlTrafficResponseUnlocked "$@"
 }
 
 subscriptionControlApplySyncUnlocked() {
@@ -1183,6 +1172,7 @@ subscriptionControlApplySyncUnlocked() {
     local outputBackupDir=
     local prepareFailureMessage=
     local registryNeedsSync
+    local planHasCoreChanges=false
     if ! jq -e '
       def valid_id: type == "string" and length <= 64 and test("^[A-Za-z0-9_-]+$");
       def valid_uuid: type == "string" and test("^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$");
@@ -1217,6 +1207,9 @@ subscriptionControlApplySyncUnlocked() {
         fi
         return 1
     fi
+    if jq -e '(.create | length > 0) or (.remove | length > 0)' <<<"${plan}" >/dev/null 2>&1; then
+        planHasCoreChanges=true
+    fi
     registryNeedsSync=$(subscriptionControlUserRegistryNeedsSync "${desiredUsers}") || {
         jq -n '{ok:false, error:"plan_failed", error_detail:{type:"plan_failed", message:"本地用户状态读取失败"}}'
         return 1
@@ -1228,6 +1221,9 @@ subscriptionControlApplySyncUnlocked() {
     if [[ "${dryRun}" == "true" ]]; then
         jq -n --argjson plan "${plan}" '{ok:true, dry_run:true, changed:true, plan:$plan}'
         return 0
+    fi
+    if [[ "${planHasCoreChanges}" == "true" ]]; then
+        collectSubscriptionTraffic >/dev/null 2>&1 || true
     fi
     if ! previousGroupsState=$(subscriptionGroupsStateRead -c '.'); then
         prepareFailureMessage="同步前订阅状态读取失败"
@@ -1249,41 +1245,48 @@ subscriptionControlApplySyncUnlocked() {
         jq -n --argjson plan "${plan}" --arg message "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-同步计划应用失败}" '{ok:false, changed:true, dry_run:false, error:"apply_plan_failed", error_detail:{type:"apply_plan_failed", message:$message}, plan:$plan}'
         return 1
     fi
-    if [[ "${PADM_CONTROL_SERVER:-}" != "1" ]]; then
-        if ! subscriptionSyncReconcileLocalServices; then
-            if subscriptionControlRestoreAppliedPlan "${previousGroupsState}" "${configBackupDir}" "${outputBackupDir}"; then
-                subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
-                subscriptionSyncSetRollbackRetryMessage SUBSCRIPTION_CONTROL_RESTORE_ERROR "本机服务重建失败" subscriptionSyncReconcileLocalServices "恢复旧配置后服务重建仍失败，请检查核心服务日志" true
-            else
-                subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}" "${outputBackupDir}"
-                subscriptionSyncRetryPartiallyRestoredConfig \
-                    SUBSCRIPTION_CONTROL_RESTORE_ERROR \
-                    "${SUBSCRIPTION_CONTROL_CONFIG_RESTORED:-false}" \
-                    subscriptionSyncReconcileLocalServices \
-                    "恢复旧配置后服务重建仍失败，请检查核心服务日志" \
-                    true || true
+    if [[ "${planHasCoreChanges}" == "true" ]]; then
+        if [[ "${PADM_CONTROL_SERVER:-}" != "1" ]]; then
+            if ! subscriptionSyncReconcileLocalServices; then
+                if subscriptionControlRestoreAppliedPlan "${previousGroupsState}" "${configBackupDir}" "${outputBackupDir}"; then
+                    subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
+                    subscriptionSyncSetRollbackRetryMessage SUBSCRIPTION_CONTROL_RESTORE_ERROR "本机服务重建失败" subscriptionSyncReconcileLocalServices "恢复旧配置后服务重建仍失败，请检查核心服务日志" true
+                else
+                    subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}" "${outputBackupDir}"
+                    subscriptionSyncRetryPartiallyRestoredConfig \
+                        SUBSCRIPTION_CONTROL_RESTORE_ERROR \
+                        "${SUBSCRIPTION_CONTROL_CONFIG_RESTORED:-false}" \
+                        subscriptionSyncReconcileLocalServices \
+                        "恢复旧配置后服务重建仍失败，请检查核心服务日志" \
+                        true || true
+                fi
+                collectSubscriptionTraffic >/dev/null 2>&1 || true
+                jq -n --argjson plan "${plan}" --arg message "${SUBSCRIPTION_CONTROL_RESTORE_ERROR:-本机服务重建失败}" '{ok:false, changed:true, dry_run:false, error:"reconcile_failed", error_detail:{type:"reconcile_failed", message:$message}, plan:$plan}'
+                return 1
             fi
-            jq -n --argjson plan "${plan}" --arg message "${SUBSCRIPTION_CONTROL_RESTORE_ERROR:-本机服务重建失败}" '{ok:false, changed:true, dry_run:false, error:"reconcile_failed", error_detail:{type:"reconcile_failed", message:$message}, plan:$plan}'
-            return 1
-        fi
-    else
-        if ! reloadCore; then
-            if subscriptionControlRestoreAppliedPlan "${previousGroupsState}" "${configBackupDir}" "${outputBackupDir}"; then
-                subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
-                subscriptionSyncSetRollbackRetryMessage SUBSCRIPTION_CONTROL_RESTORE_ERROR "核心重载失败" reloadCore "恢复旧配置后核心重载仍失败，请检查核心服务日志" true
-            else
-                subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}" "${outputBackupDir}"
-                subscriptionSyncRetryPartiallyRestoredConfig \
-                    SUBSCRIPTION_CONTROL_RESTORE_ERROR \
-                    "${SUBSCRIPTION_CONTROL_CONFIG_RESTORED:-false}" \
-                    reloadCore \
-                    "恢复旧配置后核心重载仍失败，请检查核心服务日志" || true
+        else
+            if ! reloadCore; then
+                if subscriptionControlRestoreAppliedPlan "${previousGroupsState}" "${configBackupDir}" "${outputBackupDir}"; then
+                    subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
+                    subscriptionSyncSetRollbackRetryMessage SUBSCRIPTION_CONTROL_RESTORE_ERROR "核心重载失败" reloadCore "恢复旧配置后核心重载仍失败，请检查核心服务日志" true
+                else
+                    subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}" "${outputBackupDir}"
+                    subscriptionSyncRetryPartiallyRestoredConfig \
+                        SUBSCRIPTION_CONTROL_RESTORE_ERROR \
+                        "${SUBSCRIPTION_CONTROL_CONFIG_RESTORED:-false}" \
+                        reloadCore \
+                        "恢复旧配置后核心重载仍失败，请检查核心服务日志" || true
+                fi
+                collectSubscriptionTraffic >/dev/null 2>&1 || true
+                jq -n --argjson plan "${plan}" --arg message "${SUBSCRIPTION_CONTROL_RESTORE_ERROR:-核心重载失败}" '{ok:false, changed:true, dry_run:false, error:"reload_failed", error_detail:{type:"reload_failed", message:$message}, plan:$plan}'
+                return 1
             fi
-            jq -n --argjson plan "${plan}" --arg message "${SUBSCRIPTION_CONTROL_RESTORE_ERROR:-核心重载失败}" '{ok:false, changed:true, dry_run:false, error:"reload_failed", error_detail:{type:"reload_failed", message:$message}, plan:$plan}'
-            return 1
         fi
     fi
     subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
+    if [[ "${planHasCoreChanges}" == "true" ]]; then
+        collectSubscriptionTraffic >/dev/null 2>&1 || true
+    fi
     subscriptionControlSyncResponse "${plan}" false true "${desiredUsers}"
 }
 

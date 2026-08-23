@@ -112,6 +112,7 @@ listRegressionSubscriptionStateSupportChildSelectors() {
         subscription-sync-reconcile-early-exit \
         subscription-group-sync-publish-refresh-inline \
         subscription-group-sync-single-config-backup \
+        subscription-group-sync-traffic-reload-order \
         subscription-groups-restore-failure
 }
 
@@ -201,6 +202,7 @@ registerRegressionFunctionLeaf subscription-sync-reload-rollback runRegressionSt
 registerRegressionFunctionLeaf subscription-group-sync-rollback runRegressionStep subscription-group-sync-rollback runSubscriptionGroupSyncRollbackSerialRegression
 registerRegressionFunctionLeaf subscription-group-sync-publish-refresh-inline runSubscriptionGroupSyncPublishRefreshInlineRegression
 registerRegressionFunctionLeaf subscription-group-sync-single-config-backup runSubscriptionGroupSyncSingleConfigBackupRegression
+registerRegressionFunctionLeaf subscription-group-sync-traffic-reload-order runRegressionStep subscription-group-sync-traffic-reload-order runSubscriptionGroupSyncTrafficReloadOrderRegression
 registerRegressionFunctionLeaf subscription-group-sync-apply-failure runRegressionStep subscription-group-sync-apply-failure runSubscriptionGroupSyncApplyFailureRegression
 registerRegressionFunctionLeaf subscription-group-sync-reconcile-rollback runRegressionStep subscription-group-sync-reconcile-rollback runSubscriptionGroupSyncReconcileRollbackRegression
 registerRegressionFunctionLeaf subscription-group-sync-remote-failure runRegressionStep subscription-group-sync-remote-failure runSubscriptionGroupSyncRemoteFailureRegression

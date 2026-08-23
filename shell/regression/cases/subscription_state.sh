@@ -81,7 +81,7 @@ runSubscriptionGroupStateStructureFoundationAddRemoveRegression() {
     mkdir -p "$(subscriptionGroupsDir)"
     writeSubscriptionStateStructureFoundationFixture
     ensureSubscriptionGroupsState
-    jq -e '.version == 5 and (.groups | not) and (.active_group | not) and (has("admin") | not)' "$(subscriptionGroupsFile)" >/dev/null
+    jq -e '.version == 6 and (.groups | not) and (.active_group | not) and (has("admin") | not)' "$(subscriptionGroupsFile)" >/dev/null
     if ! regressionFindHasMatches "$(subscriptionGroupsBackupDir)" -maxdepth 1 -type f -name 'groups-pre-v3-migration-*.json'; then
         return 1
     fi
@@ -264,6 +264,8 @@ runSubscriptionGroupStateStructureValidationRegression() {
         '.user_groups += [{"id":"uuid-a","name":"UUID A","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"uuid":"AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA"},{"id":"uuid-b","name":"UUID B","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"uuid":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}]' \
         '.sources += [{"id":"main","name":"Duplicate Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}]' \
         'del(.sources[0].transport)' \
+        '.traffic.sources.main = {upload:1,download:2,counters:{admin:{legacy:{upload:1,download:2},xray:{upload:1,download:2}}}}' \
+        '.traffic.sources.main = {upload:1,download:2,counters:{admin:{unknown:{upload:1,download:2}}}}' \
         '.sync.remote_enabled = true'; do
         writeDefaultSubscriptionGroupsState "${stateFile}"
         beforeSnapshot=$(<"${stateFile}")
@@ -300,7 +302,7 @@ runSubscriptionGroupStateStructureValidationRegression() {
     mv "${stateFile}.v3" "${stateFile}"
     ensureSubscriptionGroupsState
     jq -e '
-      .version == 5 and
+      .version == 6 and
       .user_groups[0].allowed_sources == ["*"] and
       (.traffic | has("global") | not) and
       (.traffic.admin | has("upload") | not) and
@@ -312,6 +314,44 @@ runSubscriptionGroupStateStructureValidationRegression() {
       (.traffic.user_groups | has("ghost") | not)
     ' "${stateFile}" >/dev/null
     regressionFindHasMatches "$(subscriptionGroupsBackupDir)" -maxdepth 1 -type f -name 'groups-pre-v4-migration-*.json'
+
+    jq '
+      .version = 5 |
+      .traffic = {
+        admin:{sources:{}},
+        user_groups:{"team-a":{sources:{main:{upload:30,download:40,counters:{sub_team_a:{upload:30,download:40}}}}}},
+        sources:{main:{upload:30,download:40,counters:{sub_team_a:{upload:30,download:40}}}}
+      }
+    ' "${stateFile}" >"${stateFile}.v5"
+    mv "${stateFile}.v5" "${stateFile}"
+    ensureSubscriptionGroupsState
+    jq -e '
+      .version == 6 and
+      .traffic.sources.main.counters.sub_team_a == {legacy:{upload:30,download:40}} and
+      .traffic.user_groups["team-a"].sources.main.counters.sub_team_a == {legacy:{upload:30,download:40}}
+    ' "${stateFile}" >/dev/null
+    regressionFindHasMatches "$(subscriptionGroupsBackupDir)" -maxdepth 1 -type f -name 'groups-pre-v6-migration-*.json'
+
+    writeSubscriptionTrafficSnapshot '{"ok":true,"items":[{"account":"admin","upload":0,"download":0,"cores":{"xray":{"upload":0,"download":0},"sing-box":{"upload":0,"download":0}}},{"account":"sub_team_a","upload":30,"download":40,"cores":{"xray":{"upload":10,"download":15},"sing-box":{"upload":20,"download":25}}}]}' '[]'
+    jq -e '
+      .traffic.sources.main.upload == 30 and .traffic.sources.main.download == 40 and
+      .traffic.user_groups["team-a"].sources.main.upload == 30 and
+      .traffic.sources.main.counters.sub_team_a == {xray:{upload:10,download:15},"sing-box":{upload:20,download:25}}
+    ' "${stateFile}" >/dev/null
+
+    writeSubscriptionTrafficSnapshot '{"ok":true,"items":[{"account":"admin","upload":0,"download":0,"cores":{"xray":{"upload":0,"download":0},"sing-box":{"upload":0,"download":0}}},{"account":"sub_team_a","upload":27,"download":33,"cores":{"xray":{"upload":2,"download":3},"sing-box":{"upload":25,"download":30}}}]}' '[]'
+    jq -e '
+      .traffic.sources.main.upload == 37 and .traffic.sources.main.download == 48 and
+      .traffic.user_groups["team-a"].sources.main.upload == 37 and
+      .traffic.sources.main.counters.sub_team_a == {xray:{upload:2,download:3},"sing-box":{upload:25,download:30}}
+    ' "${stateFile}" >/dev/null
+
+    writeSubscriptionTrafficSnapshot '{"ok":true,"items":[{"account":"admin","upload":0,"download":0,"cores":{"xray":{"upload":0,"download":0},"sing-box":{"upload":0,"download":0}}},{"account":"sub_team_a","upload":11,"download":14,"cores":{"xray":{"upload":7,"download":8},"sing-box":{"upload":4,"download":6}}}]}' '[]'
+    jq -e '
+      .traffic.sources.main.upload == 46 and .traffic.sources.main.download == 59 and
+      .traffic.user_groups["team-a"].sources.main.download == 59 and
+      .traffic.sources.main.counters.sub_team_a == {xray:{upload:7,download:8},"sing-box":{upload:4,download:6}}
+    ' "${stateFile}" >/dev/null
 
     jq '
       . as $state |
@@ -522,7 +562,7 @@ runSubscriptionGroupStateQuotaTrafficRemoteRegression() {
       .traffic.admin.sources["remote-edge"].upload == 5 and
       .traffic.user_groups["team-a"].sources["remote-edge"].upload == 7 and
       .traffic.sources["edge-2"].upload == 6 and
-      .traffic.sources["edge-2"].counters.sub_team_a.upload == 4 and
+      .traffic.sources["edge-2"].counters.sub_team_a.legacy.upload == 4 and
       (.traffic | has("global") | not) and
       (.traffic.admin | has("upload") | not) and
       (.traffic.user_groups["team-a"] | has("upload") | not)
@@ -949,7 +989,7 @@ JSON
         menuOutput=$(printf '1\nyes\n' | restoreSubscriptionGroupsBackupMenu)
         [[ "${menuOutput}" == *"menu:"* ]]
     )
-    jq -e '.version == 5 and (.groups | not) and (.active_group | not) and .id == "legacy"' "$(subscriptionGroupsFile)" >/dev/null
+    jq -e '.version == 6 and (.groups | not) and (.active_group | not) and .id == "legacy"' "$(subscriptionGroupsFile)" >/dev/null
 }
 
 runSubscriptionSyncTempDirRegression() (
@@ -1469,7 +1509,7 @@ runSubscriptionSyncEnsureEnabledUserUUIDsBatchRegression() (
     local uuidLog="${syncRoot}/generated-uuids.log"
 
     prepareSubscriptionGroupSyncFixture "${syncRoot}" "" <<'JSON'
-{"version":5,"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0},{"id":"team-b","name":"Team B","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0},{"id":"team-disabled","name":"Disabled","enabled":false,"allowed_sources":["main"],"traffic_limit_gb":0},{"id":"team-existing","name":"Existing","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"uuid":"33333333-3333-4333-8333-333333333333"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"admin":{"sources":{}},"user_groups":{},"sources":{}}}
+{"version":6,"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0},{"id":"team-b","name":"Team B","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0},{"id":"team-disabled","name":"Disabled","enabled":false,"allowed_sources":["main"],"traffic_limit_gb":0},{"id":"team-existing","name":"Existing","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"uuid":"33333333-3333-4333-8333-333333333333"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"admin":{"sources":{}},"user_groups":{},"sources":{}}}
 JSON
     : >"${uuidLog}"
 
@@ -2025,6 +2065,40 @@ JSON
 
 )
 
+runSubscriptionGroupSyncTrafficReloadOrderRegression() (
+    set -euo pipefail
+    local syncRoot="${TMP_DIR}/subscription-group-sync-traffic-order"
+    local callLog="${syncRoot}/calls.log"
+    local resultStatus="${syncRoot}/mark-status.log"
+    local resultFailures="${syncRoot}/mark-failures.log"
+    local statusLog="${syncRoot}/status.log"
+    local planMode=changed
+
+    prepareSubscriptionGroupSyncFixture "${syncRoot}" <<'JSON'
+{"version":6,"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"admin":{"sources":{}},"user_groups":{},"sources":{}}}
+JSON
+    subscriptionSyncPlan() {
+        if [[ "${planMode}" == "changed" ]]; then
+            printf '{"create":["sub_team_a"],"remove":[]}'
+        else
+            printf '{"create":[],"remove":[]}'
+        fi
+    }
+    collectSubscriptionTraffic() { printf 'traffic\n' >>"${callLog}"; }
+    subscriptionSyncApplyAccountPlan() { printf 'apply\n' >>"${callLog}"; }
+    subscriptionSyncReconcileLocalServices() { printf 'reload\n' >>"${callLog}"; }
+    subscriptionCurrentRoleNormalized() { printf 'main\n'; }
+    readNginxSubscribe() { subscribePort=; }
+
+    runSubscriptionGroupSyncUnlocked
+    [[ "$(<"${callLog}")" == $'traffic\napply\nreload\ntraffic' ]]
+
+    : >"${callLog}"
+    planMode=empty
+    runSubscriptionGroupSyncUnlocked
+    [[ "$(<"${callLog}")" == "traffic" ]]
+)
+
 runSubscriptionGroupSyncUsesStateLockRegression() (
     set -euo pipefail
     local callLog="${TMP_DIR}/subscription-group-sync-state-lock.log"
@@ -2046,4 +2120,17 @@ runSubscriptionGroupSyncUsesStateLockRegression() (
     [[ "${status}" == "17" ]]
     grep -qx 'lock:runSubscriptionGroupSyncUnlocked' "${callLog}"
     grep -qx 'sync:' "${callLog}"
+
+    : >"${callLog}"
+    collectSubscriptionTrafficUnlocked() {
+        printf 'traffic:%s\n' "$*" >>"${callLog}"
+        return 18
+    }
+    set +e
+    collectSubscriptionTraffic
+    status=$?
+    set -e
+    [[ "${status}" == "18" ]]
+    grep -qx 'lock:collectSubscriptionTrafficUnlocked' "${callLog}"
+    grep -qx 'traffic:' "${callLog}"
 )
