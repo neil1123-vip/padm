@@ -394,7 +394,7 @@ manageSubscriptionControlledHome() {
         menuItem 1 "接入主控" "粘贴主控邀请，完成接入并生成对应回执"
         menuItem 2 "查看本机状态" "查看角色、地址、Peer 和 WireGuard 状态"
         menuItem 3 "导入/更新主控接入凭据" "仅更新已有连接的主控端点或身份"
-        menuItem 4 "显示接入回执/旧版被控凭据" "显式显示包含长期控制 Token 的接入秘密"
+        menuItem 4 "显示被控更新凭据" "生成给主控更新地址、公钥、控制端口和 Token 的凭据"
         menuItem 5 "查看控制面与 Peer 细节" "显示 WireGuard 状态以及与主控的 Peer 连接细节"
         menuItem 6 "重写配置并重启被控控制面" "重写配置并重启 WireGuard 和控制服务"
         menuDangerItem 7 "关闭被控控制面" "停止本机 WireGuard 控制面"
@@ -470,14 +470,9 @@ manageSubscriptionCoordination() {
 
 
 showSubscriptionWireGuardControlledAccessCredential() {
-    local state
-    state=$(subscriptionWireGuardReadState) || { errorCard "WireGuard 状态读取失败"; return 1; }
-    warnCard "即将显示接入秘密" "接入回执和旧版被控凭据都包含长期控制 Token，请只通过可信通道传递"
-    if [[ -n "$(jq -r '.join_invite_id // empty' <<<"${state}")" ]]; then
-        showSubscriptionWireGuardJoinReceipt
-    else
-        showSubscriptionWireGuardControlledCredential
-    fi
+    subscriptionWireGuardReadState >/dev/null || { errorCard "WireGuard 状态读取失败"; return 1; }
+    warnCard "即将显示被控更新凭据" "该凭据包含长期控制 Token，请只通过可信通道传递；首次接入回执会在接入主控后自动显示"
+    showSubscriptionWireGuardControlledCredential
 }
 
 # 订阅与用户入口

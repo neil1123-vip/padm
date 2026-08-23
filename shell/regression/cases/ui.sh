@@ -608,6 +608,7 @@ runSubscriptionWireGuardInviteReceiptRegression() (
     local inviteCredentialA inviteCredentialB inviteCredentialC cancelInviteCredential joinCredential
     local inviteJsonA inviteJsonB inviteJsonC cancelInviteJson joinJson receiptJson receiptCredential controlledCredentialJson completedAlias
     local stateBefore groupsBefore pendingJson readSecretValue= secretOutput staleInviteId
+    local credentialStatusLog="${root}/credential-status.log"
     local testWireGuardState testGroupsState
     local remoteApplyLog="${root}/remote-apply.log"
 
@@ -631,7 +632,7 @@ runSubscriptionWireGuardInviteReceiptRegression() (
     controlledPublicKeyC=$(printf '01234567890123456789012345678901' | base64 -w 0)
 
     errorCard() { return 0; }
-    statusCard() { return 0; }
+    statusCard() { printf '%s\n' "$@" >>"${credentialStatusLog}"; }
     successCard() { return 0; }
     warnCard() { return 0; }
     subscriptionRemoteApplyDesiredUsersForSource() {
@@ -818,6 +819,15 @@ runSubscriptionWireGuardInviteReceiptRegression() (
     subscriptionWireGuardReadState | jq -e --arg inviteId "$(jq -r '.invite_id' <<<"${joinJson}")" '.role == "controlled" and .address == $address and .join_invite_id == $inviteId and (.peers | length) == 1 and .peers[0].id == "main"' --arg address "$(jq -r '.address' <<<"${joinJson}")" >/dev/null
     subscriptionWireGuardJoinReceiptCredential receiptCredential
     subscriptionWireGuardCredentialDecode "${receiptCredential}" | jq -e --arg inviteId "$(jq -r '.invite_id' <<<"${joinJson}")" --arg token "${receiptToken}" '.kind == "receipt" and .invite_id == $inviteId and .token == $token' >/dev/null
+    : >"${credentialStatusLog}"
+    showSubscriptionWireGuardControlledAccessCredential
+    grep -qx '本机被控接入凭据' "${credentialStatusLog}"
+    ! grep -qx '被控接入回执' "${credentialStatusLog}"
+    controlledCredential=$(sed -n '2s/^被控接入凭据：//p' "${credentialStatusLog}")
+    controlledCredentialJson=$(subscriptionWireGuardCredentialDecode "${controlledCredential}")
+    jq -e --arg address "$(jq -r '.address' <<<"${testWireGuardState}")" --arg publicKey "$(jq -r '.public_key' <<<"${testWireGuardState}")" --arg token "${receiptToken}" \
+        '.kind == "controlled" and .address == $address and .public_key == $publicKey and .control_port == 39778 and .token == $token' \
+        <<<"${controlledCredentialJson}" >/dev/null
     stateBefore=$(subscriptionWireGuardReadState)
     subscriptionWireGuardWriteState --arg publicKey "${controlledPublicKeyB}" '.peers += [{id:"main",name:"重复主控",address:"10.77.0.9/24",public_key:$publicKey,endpoint:"backup.example.com:51820",enabled:true}]'
     if subscriptionWireGuardJoinReceiptCredential receiptCredential >/dev/null 2>&1; then
