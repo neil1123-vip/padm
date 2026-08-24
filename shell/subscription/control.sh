@@ -334,8 +334,10 @@ subscriptionRemoteTrafficInternalErrorResult() {
 }
 
 subscriptionRemoteTrafficAll() {
-    local sources
-    sources=$(subscriptionRemoteControlSources) || return 1
+    local sources=${1:-}
+    if [[ -z "${sources}" ]]; then
+        sources=$(subscriptionRemoteControlSources) || return 1
+    fi
     subscriptionRemoteCollectParallelResults \
         "${sources}" \
         padm-remote-traffic.XXXXXX \

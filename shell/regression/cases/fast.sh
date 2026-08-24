@@ -2098,12 +2098,23 @@ JSON
     ensureTrafficStatsConfig() { return 0; }
     collectLocalTrafficSnapshot() { jq -n '{ok:false, items: []}'; return 1; }
     subscriptionCurrentRoleNormalized() { printf 'main\n'; }
-    subscriptionHasEnabledRemoteSources() { return 0; }
     subscriptionRemoteTrafficAll() { : >"${remoteTrafficMarker}"; printf '[]\n'; }
     if collectSubscriptionTrafficUnlocked >/dev/null 2>&1; then
         return 1
     fi
     [[ ! -e "${remoteTrafficMarker}" ]]
+
+    local remoteSourceArgumentMarker="${TMP_DIR}/traffic-remote-source-argument"
+    collectLocalTrafficSnapshot() { jq -n '{ok:true, items: []}'; }
+    subscriptionRemoteControlSources() { printf '[{"id":"edge"}]\n'; }
+    subscriptionRemoteTrafficAll() {
+        printf '%s\n' "${1:-}" >"${remoteSourceArgumentMarker}"
+        printf '[]\n'
+    }
+    writeSubscriptionTrafficSnapshot() { return 0; }
+    successCard() { :; }
+    collectSubscriptionTrafficUnlocked >/dev/null 2>&1
+    [[ "$(<"${remoteSourceArgumentMarker}")" == '[{"id":"edge"}]' ]]
 )
 
 runSubscriptionOutputRandomUserRegression() (

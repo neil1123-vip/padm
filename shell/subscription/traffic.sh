@@ -659,6 +659,7 @@ subscriptionLocalTrafficBaselineExists() {
 collectSubscriptionTrafficUnlocked() {
     local snapshot
     local remoteResults='[]'
+    local remoteSources
     local role
     SUBSCRIPTION_TRAFFIC_LOCAL_COMMITTED=false
     SUBSCRIPTION_TRAFFIC_COMPLETE=false
@@ -673,9 +674,11 @@ collectSubscriptionTrafficUnlocked() {
         return 1
     fi
     role=$(subscriptionCurrentRoleNormalized) || return 1
-    if [[ "${role}" == "main" ]] && subscriptionHasEnabledRemoteSources; then
+    if [[ "${role}" == "main" ]] &&
+        remoteSources=$(subscriptionRemoteControlSources) &&
+        jq -e 'type == "array" and length > 0' <<<"${remoteSources}" >/dev/null 2>&1; then
         statusCard "流量统计" "正在等待被控服务器流量响应" "单台请求最长 15 秒（含重试），多个服务器并行请求"
-        remoteResults=$(subscriptionRemoteTrafficAll) || remoteResults='[]'
+        remoteResults=$(subscriptionRemoteTrafficAll "${remoteSources}") || remoteResults='[]'
     fi
     if writeSubscriptionTrafficSnapshot "${snapshot}" "${remoteResults}"; then
         successCard "流量统计已更新"
