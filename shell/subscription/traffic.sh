@@ -284,9 +284,11 @@ mapTrafficStatsJsonToAccounts() {
     suffixRegex=$(clientNameSuffixRegex) || return 1
     jq --argjson accounts "${accounts}" --arg suffixRegex "${suffixRegex}" '
       def accountName($name):
-        (($name | split(">>>"))[1] // "") as $raw |
-        ($raw | sub("-(" + $suffixRegex + ")$"; "") | sub("-(uplink|downlink)$"; "")) as $account |
-        if ($accounts | index($account)) != null then $account else "" end;
+        ((($name | split(">>>"))[1] // "") | sub("-(" + $suffixRegex + ")$"; "")) as $account |
+        if has($account) then $account
+        else ($account | sub("-(uplink|downlink)$"; "")) as $legacyAccount |
+          if has($legacyAccount) then $legacyAccount else "" end
+        end;
       def direction($name): if ($name | endswith("downlink")) then "download" else "upload" end;
       def emptyTotals: reduce $accounts[] as $account ({}; .[$account] = {account:$account, upload:0, download:0});
       (reduce .stat[]? as $stat (emptyTotals;
@@ -331,8 +333,11 @@ collectXrayTrafficStatsSnapshot() {
             direction = (name ~ /(>>>traffic>>>|-)?downlink$/) ? "download" : "upload"
             sub(/>>>traffic>>>(uplink|downlink)$/, "", name)
             sub("-(" suffixRegex ")$", "", name)
-            sub(/-(uplink|downlink)$/, "", name)
-            account = wanted[name] ? name : ""
+            if (wanted[name]) account = name
+            else {
+              sub(/-(uplink|downlink)$/, "", name)
+              account = wanted[name] ? name : ""
+            }
           }
           /value: / {
             if (wanted[account]) totals[account SUBSEP direction] += $2
@@ -466,11 +471,11 @@ collectLocalTrafficSnapshot() {
     local singBoxItems='[]'
     if [[ "${coreInstallType:-}" != "1" && -z "${singBoxConfigPath:-}" ]]; then
         jq -n '{ok:false, items: []}'
-        return
+        return 1
     fi
     if ! accounts=$(collectLocalTrafficAccounts); then
         jq -n '{ok:false, items: []}'
-        return
+        return 1
     fi
     if [[ "$(jq 'length' <<<"${accounts}")" == "0" ]]; then
         jq -n '{ok:true, items: []}'
@@ -478,11 +483,11 @@ collectLocalTrafficSnapshot() {
     fi
     if [[ "${coreInstallType:-}" == "1" ]] && ! xrayItems=$(collectXrayTrafficStatsSnapshot "${accounts}"); then
         jq -n '{ok:false, items: []}'
-        return
+        return 1
     fi
     if [[ -n "${singBoxConfigPath:-}" ]] && ! singBoxItems=$(collectSingBoxTrafficStatsSnapshot "${accounts}"); then
         jq -n '{ok:false, items: []}'
-        return
+        return 1
     fi
     if ! items=$(jq -cn --argjson accounts "${accounts}" --argjson xray "${xrayItems}" --argjson singBox "${singBoxItems}" '
       def indexed: map({key:.account, value:{upload:(.upload // 0), download:(.download // 0)}}) | from_entries;
@@ -500,7 +505,7 @@ collectLocalTrafficSnapshot() {
         })
     '); then
         jq -n '{ok:false, items: []}'
-        return
+        return 1
     fi
     jq -n --argjson items "${items}" '{ok:true, items:$items}'
 }
@@ -663,7 +668,10 @@ collectSubscriptionTrafficUnlocked() {
     if ! ensureTrafficStatsConfig; then
         return 1
     fi
-    snapshot=$(collectLocalTrafficSnapshot)
+    if ! snapshot=$(collectLocalTrafficSnapshot); then
+        statusCard "流量统计" "本机采集失败，已跳过远端请求并保留上次统计"
+        return 1
+    fi
     role=$(subscriptionCurrentRoleNormalized) || return 1
     if [[ "${role}" == "main" ]] && subscriptionHasEnabledRemoteSources; then
         statusCard "流量统计" "正在等待被控服务器流量响应" "单台请求最长 15 秒（含重试），多个服务器并行请求"

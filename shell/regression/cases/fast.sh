@@ -1969,10 +1969,14 @@ SH
     snapshot=$(collectLocalTrafficSnapshot)
     jq -e '. == {ok:true,items:[{account:"admin",upload:3,download:5,cores:{xray:{upload:3,download:5},"sing-box":{upload:0,download:0}}},{account:"ops",upload:19,download:0,cores:{xray:{upload:0,download:0},"sing-box":{upload:19,download:0}}},{account:"sub_team_a",upload:20,download:28,cores:{xray:{upload:7,download:11},"sing-box":{upload:13,download:17}}},{account:"sub_team_b",upload:0,download:0,cores:{xray:{upload:0,download:0},"sing-box":{upload:0,download:0}}}]}' <<<"${snapshot}" >/dev/null
     export PADM_TEST_TRAFFIC_FAIL_SERVER=10087
-    snapshot=$(collectLocalTrafficSnapshot)
+    if snapshot=$(collectLocalTrafficSnapshot); then
+        return 1
+    fi
     jq -e '.ok == false and (.items | length) == 0' <<<"${snapshot}" >/dev/null
     export PADM_TEST_TRAFFIC_FAIL_SERVER=10085
-    snapshot=$(collectLocalTrafficSnapshot)
+    if snapshot=$(collectLocalTrafficSnapshot); then
+        return 1
+    fi
     jq -e '.ok == false and (.items | length) == 0' <<<"${snapshot}" >/dev/null
     unset PADM_TEST_TRAFFIC_FAIL_SERVER
 
@@ -1980,7 +1984,9 @@ SH
     if collectLocalTrafficAccounts >/dev/null 2>&1; then
         return 1
     fi
-    snapshot=$(collectLocalTrafficSnapshot)
+    if snapshot=$(collectLocalTrafficSnapshot); then
+        return 1
+    fi
     jq -e '.ok == false and (.items | length) == 0' <<<"${snapshot}" >/dev/null
 
     rm -f "${singBoxConfig}13_anytls_inbounds.json"
@@ -2084,6 +2090,20 @@ JSON
     statsReloadMode=internal
     reloadCoreWithTrafficStatsConfig
     [[ "$(<"${singleReloadLog}")" == $'stats\ninternal-reload' ]]
+
+    local remoteTrafficMarker="${TMP_DIR}/traffic-remote-requested"
+    ensureSubscriptionGroupsState() { return 0; }
+    readInstallType() { return 0; }
+    readInstallProtocolType() { return 0; }
+    ensureTrafficStatsConfig() { return 0; }
+    collectLocalTrafficSnapshot() { jq -n '{ok:false, items: []}'; return 1; }
+    subscriptionCurrentRoleNormalized() { printf 'main\n'; }
+    subscriptionHasEnabledRemoteSources() { return 0; }
+    subscriptionRemoteTrafficAll() { : >"${remoteTrafficMarker}"; printf '[]\n'; }
+    if collectSubscriptionTrafficUnlocked >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ ! -e "${remoteTrafficMarker}" ]]
 )
 
 runSubscriptionOutputRandomUserRegression() (

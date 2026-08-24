@@ -1145,7 +1145,10 @@ subscriptionControlTrafficResponseUnlocked() {
         jq -n '{ok:false, error:"traffic_failed", error_detail:{type:"traffic_failed", message:"流量统计配置不可用"}}'
         return 1
     fi
-    snapshot=$(collectLocalTrafficSnapshot)
+    if ! snapshot=$(collectLocalTrafficSnapshot); then
+        jq -n '{ok:false, error:"traffic_failed", error_detail:{type:"traffic_failed", message:"本机流量统计采集失败"}}'
+        return 1
+    fi
     if ! items=$(jq -ce 'select(.ok == true and (.items | type == "array")) | .items' <<<"${snapshot}" 2>/dev/null) ||
         ! subscriptionTrafficItemsValid "${items}"; then
         jq -n '{ok:false, error:"traffic_failed", error_detail:{type:"traffic_failed", message:"本机流量统计采集失败"}}'
