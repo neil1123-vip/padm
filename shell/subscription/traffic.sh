@@ -605,10 +605,10 @@ writeSubscriptionTrafficSnapshot() {
       def mapped($items; $accountIdMap): $items | map(. + {id: ($accountIdMap[.account] // .account)});
       def indexedById($items):
         reduce $items[] as $item ({}; .[$item.id] = ((.[$item.id] // []) + [$item]));
-      def keepSources($map; $ids):
-        ($map // {}) | with_entries(. as $entry | select(($ids | index($entry.key)) != null));
+      def keepSources($map; $idSet):
+        ($map // {}) | with_entries(. as $entry | select($idSet[$entry.key] == true));
       . as $group |
-      ($group.sources | map(.id)) as $sourceIds |
+      ($group.sources | map({key:.id, value:true}) | from_entries) as $sourceIdSet |
       ($group.user_groups | map({key:(.id | '"${SUBSCRIPTION_SYNC_ACCOUNT_NAME_FROM_ID_JQ}"'), value:.id}) | from_entries) as $accountIdMap |
       (mapped($snapshot.items; $accountIdMap)) as $items |
       ($items | map(select(.account | startswith("sub_")))) as $userItems |
@@ -620,14 +620,14 @@ writeSubscriptionTrafficSnapshot() {
         (mapped($result.response.items; $accountIdMap)) as $mappedItems |
         {source_id:$result.source_id, items:$mappedItems, user_items_by_id:indexedById($mappedItems | map(select(.account | startswith("sub_"))))})) as $remote |
       ($remote | map(. as $result | {key:$result.source_id, value:sourceTotal($group.traffic.sources[$result.source_id]; $result.items)}) | from_entries) as $remoteSourceTraffic |
-      (keepSources($group.traffic.sources; $sourceIds) + {main:$mainTraffic} + $remoteSourceTraffic) as $sourceTraffic |
+      (keepSources($group.traffic.sources; $sourceIdSet) + {main:$mainTraffic} + $remoteSourceTraffic) as $sourceTraffic |
       ($remote | map(. as $result | {key:$result.source_id, value:sourceTotal($group.traffic.admin.sources[$result.source_id]; ($result.items | map(select(.account | startswith("sub_") | not))))}) | from_entries) as $remoteAdminSourceTraffic |
-      (keepSources($group.traffic.admin.sources; $sourceIds) + {main:$mainAdminTraffic} + $remoteAdminSourceTraffic) as $adminSourceTraffic |
+      (keepSources($group.traffic.admin.sources; $sourceIdSet) + {main:$mainAdminTraffic} + $remoteAdminSourceTraffic) as $adminSourceTraffic |
       ($group.user_groups | map(
         . as $user |
         (sourceTotal(($group.traffic.user_groups[$user.id].sources.main // {}); ($userItemsById[$user.id] // []))) as $mainUserTraffic |
         ($remote | map(. as $result | {key:$result.source_id, value:sourceTotal($group.traffic.user_groups[$user.id].sources[$result.source_id]; ($result.user_items_by_id[$user.id] // []))}) | from_entries) as $remoteUserSourceTraffic |
-        (keepSources($group.traffic.user_groups[$user.id].sources; $sourceIds) + {main:$mainUserTraffic} + $remoteUserSourceTraffic) as $userSourceTraffic |
+        (keepSources($group.traffic.user_groups[$user.id].sources; $sourceIdSet) + {main:$mainUserTraffic} + $remoteUserSourceTraffic) as $userSourceTraffic |
         {key:$user.id, value:{sources:$userSourceTraffic}}
       ) | from_entries) as $userTraffic |
       .traffic.admin = {sources:$adminSourceTraffic} |
@@ -759,12 +759,15 @@ showSubscriptionTrafficOverview() {
       . as $group |
       (subscriptionTrafficTotal($group.traffic.sources)) as $globalTraffic |
       ($group.user_groups // []) as $users |
-      [($users[]? | select(.enabled == true))] as $enabledUsers |
-      [($users[]? | select(subscriptionUserQuotaStatus(.; subscriptionTrafficTotal(($group.traffic.user_groups[.id] // {}).sources); false) == "已超限"))] as $overLimit |
-      [($users[]? | select(subscriptionUserQuotaStatus(.; subscriptionTrafficTotal(($group.traffic.user_groups[.id] // {}).sources); false) == "接近上限"))] as $nearLimit |
+      (reduce ($users[]?) as $user ({total:0, enabled:0, over_limit:0, near_limit:0};
+        (subscriptionUserQuotaStatus($user; subscriptionTrafficTotal(($group.traffic.user_groups[$user.id] // {}).sources); false)) as $status |
+        .total += 1 |
+        .enabled += (if $user.enabled == true then 1 else 0 end) |
+        .over_limit += (if $status == "已超限" then 1 else 0 end) |
+        .near_limit += (if $status == "接近上限" then 1 else 0 end))) as $userSummary |
       "全局累计：上传 " + mb($globalTraffic.upload) + " / 下载 " + mb($globalTraffic.download) + "\n" +
-      "分享订阅：共 " + (($users | length) | tostring) + " 个，启用 " + (($enabledUsers | length) | tostring) + " 个\n" +
-      "限额状态：超限 " + (($overLimit | length) | tostring) + " 个，接近上限 " + (($nearLimit | length) | tostring) + " 个\n" +
+      "分享订阅：共 " + ($userSummary.total | tostring) + " 个，启用 " + ($userSummary.enabled | tostring) + " 个\n" +
+      "限额状态：超限 " + ($userSummary.over_limit | tostring) + " 个，接近上限 " + ($userSummary.near_limit | tostring) + " 个\n" +
       "服务器源：共 " + (($group.sources | length) | tostring) + " 个，启用远端 " + (([$group.sources[]? | select(.role != "main" and .enabled == true)] | length) | tostring) + " 个\n" +
       "最近同步：状态 " + (($group.sync.last_status // "pending") | tostring) + "，时间 " + (($group.sync.last_run // "未运行") | tostring) + "\n" +
       "流量更新时间：" + (((($group.traffic.sources // {}) | to_entries | map(.value.updated_at // empty) | max) // "未知") | tostring)')

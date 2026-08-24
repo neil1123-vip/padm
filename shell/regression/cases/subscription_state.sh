@@ -538,6 +538,8 @@ runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
         [[ "${trafficOutput}" == *"总下载：1 MB"* ]]
         [[ "${trafficOutput}" == *"最近更新：2026-06-10 10:01:00"* ]]
         trafficOutput=$(showSubscriptionTrafficOverview)
+        [[ "${trafficOutput}" == *"分享订阅：共 1 个，启用 1 个"* ]]
+        [[ "${trafficOutput}" == *"限额状态：超限 1 个，接近上限 0 个"* ]]
         [[ "${trafficOutput}" == *"流量更新时间：2026-06-10 10:01:00"* ]]
         subscriptionGroupsStateSummaryJson | jq -e '.traffic_updated_at == "2026-06-10 10:01:00"' >/dev/null
     )

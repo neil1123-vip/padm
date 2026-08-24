@@ -120,8 +120,10 @@ subscriptionStateIdValid() {
 subscriptionTrafficTotalsJq() {
     cat <<'EOF'
 def subscriptionTrafficTotal($sources):
-  ($sources // {}) as $map |
-  {upload: ([$map[]?.upload] | add // 0), download: ([$map[]?.download] | add // 0)};
+  reduce (($sources // {})[]?) as $source
+    ({upload:0, download:0};
+      .upload += ($source.upload // 0) |
+      .download += ($source.download // 0));
 EOF
 }
 
