@@ -952,7 +952,6 @@ subscriptionSyncMarkResult() {
 
 subscriptionQuotaDryRunPlan() {
     local jqProgram
-    ensureSubscriptionGroupsState || return 1
     jqProgram=$(printf '%s\n%s\n' "$(subscriptionTrafficTotalsJq)" '
       . as $group |
       [($group.user_groups[]? |

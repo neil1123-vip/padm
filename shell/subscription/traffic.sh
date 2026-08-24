@@ -724,21 +724,27 @@ showAdminSubscriptionTraffic() {
 
 showUserSubscriptionTraffic() {
     local userSubscriptionId=$1
+    local result
     local traffic
     local quotaStatus
     local jqProgram
     local quotaStatusJq
-    ensureSubscriptionGroupsState || return 1
     quotaStatusJq=$(subscriptionUserQuotaStatusJq) || return 1
     jqProgram=$(printf '%s\n%s\n%s\n' "$(subscriptionTrafficTotalsJq)" "${quotaStatusJq}" '
-      (.user_groups[]? | select(.id == $id)) as $userGroup |
-      (subscriptionTrafficTotal((.traffic.user_groups[$id] // {}).sources)) as $traffic |
-      subscriptionUserQuotaStatus($userGroup; $traffic; true)')
-    quotaStatus=$(subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" "${jqProgram}") || return 1
+      . as $group |
+      (first($group.user_groups[]? | select(.id == $id))) as $userGroup |
+      ($group.traffic.user_groups[$id] // {sources:{}}) as $traffic |
+      (subscriptionTrafficTotal($traffic.sources)) as $trafficTotal |
+      {
+        quota_status:(if ($userGroup | type) == "object" then subscriptionUserQuotaStatus($userGroup; $trafficTotal; true) else "" end),
+        traffic:$traffic
+      }')
+    result=$(subscriptionActiveGroupRead -c --arg id "${userSubscriptionId}" "${jqProgram}") || return 1
+    quotaStatus=$(jq -r '.quota_status' <<<"${result}") || return 1
+    traffic=$(jq -c '.traffic' <<<"${result}") || return 1
     userResultCard "用户订阅流量"
     menuLine "用户订阅：${userSubscriptionId}"
     menuLine "限额状态：${quotaStatus}"
-    traffic=$(subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" '.traffic.user_groups[$id] // {sources:{}}')
     printf '%s\n' "${traffic}" | jq .
     menuClose
 }
@@ -748,7 +754,6 @@ showSubscriptionTrafficOverview() {
     local jqProgram
     local quotaStatusJq
     quotaStatusJq=$(subscriptionUserQuotaStatusJq) || return 1
-    ensureSubscriptionGroupsState || return 1
     jqProgram=$(printf '%s\n%s\n%s\n' "$(subscriptionTrafficTotalsJq)" "${quotaStatusJq}" '
       def mb($v): (((($v // 0) / 1024 / 1024) | floor) | tostring) + " MB";
       . as $group |

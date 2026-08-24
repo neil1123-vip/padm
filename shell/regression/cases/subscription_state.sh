@@ -541,6 +541,29 @@ runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
         [[ "${trafficOutput}" == *"流量更新时间：2026-06-10 10:01:00"* ]]
         subscriptionGroupsStateSummaryJson | jq -e '.traffic_updated_at == "2026-06-10 10:01:00"' >/dev/null
     )
+    (
+        local trafficReadResult='{"user_groups":[{"id":"team-a","traffic_limit_gb":1}],"traffic":{"user_groups":{"team-a":{"sources":{"main":{"upload":1,"download":2}}}}}}'
+        local trafficReadLog="${TMP_DIR}/subscription-state-quota-traffic-read.log"
+        local trafficOutput
+        : >"${trafficReadLog}"
+        subscriptionActiveGroupRead() {
+            local query=${!#}
+            local argCount=$(($# - 1))
+            local -a jqArgs=()
+            printf 'read\n' >>"${trafficReadLog}"
+            if ((argCount > 0)); then
+                jqArgs=("${@:1:${argCount}}")
+            fi
+            jq "${jqArgs[@]}" "${query}" <<<"${trafficReadResult}"
+        }
+        userResultCard() { :; }
+        menuLine() { printf '%s\n' "$*"; }
+        menuClose() { :; }
+        trafficOutput=$(showUserSubscriptionTraffic team-a)
+        [[ "$(wc -l <"${trafficReadLog}")" == "1" ]]
+        [[ "${trafficOutput}" == *"限额状态：正常(0%)"* ]]
+        [[ "${trafficOutput}" == *'"upload": 1'* ]]
+    )
     subscriptionQuotaDryRunPlan | jq -e 'length == 1 and .[0].id == "team-a" and .[0].limit_gb == 1 and .[0].percent >= 100 and .[0].action == "disable-and-remove-local-account"' >/dev/null
 }
 
