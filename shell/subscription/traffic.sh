@@ -466,7 +466,7 @@ collectSingBoxTrafficStatsSnapshot() {
 
 collectLocalTrafficSnapshot() {
     local accounts
-    local items
+    local snapshot
     local xrayItems='[]'
     local singBoxItems='[]'
     if [[ "${coreInstallType:-}" != "1" && -z "${singBoxConfigPath:-}" ]]; then
@@ -477,7 +477,7 @@ collectLocalTrafficSnapshot() {
         jq -n '{ok:false, items: []}'
         return 1
     fi
-    if [[ "$(jq 'length' <<<"${accounts}")" == "0" ]]; then
+    if [[ "${accounts}" == '[]' ]]; then
         jq -n '{ok:true, items: []}'
         return
     fi
@@ -489,7 +489,7 @@ collectLocalTrafficSnapshot() {
         jq -n '{ok:false, items: []}'
         return 1
     fi
-    if ! items=$(jq -cn --argjson accounts "${accounts}" --argjson xray "${xrayItems}" --argjson singBox "${singBoxItems}" '
+    if ! snapshot=$(jq -cn --argjson accounts "${accounts}" --argjson xray "${xrayItems}" --argjson singBox "${singBoxItems}" '
       def indexed: map({key:.account, value:{upload:(.upload // 0), download:(.download // 0)}}) | from_entries;
       ($xray | indexed) as $xrayByAccount |
       ($singBox | indexed) as $singBoxByAccount |
@@ -502,12 +502,13 @@ collectLocalTrafficSnapshot() {
           upload:([$cores[]?.upload] | add // 0),
           download:([$cores[]?.download] | add // 0),
           cores:$cores
-        })
+        }) |
+      {ok:true, items:.}
     '); then
         jq -n '{ok:false, items: []}'
         return 1
     fi
-    jq -n --argjson items "${items}" '{ok:true, items:$items}'
+    printf '%s\n' "${snapshot}"
 }
 
 subscriptionTrafficItemsValid() {
