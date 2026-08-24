@@ -302,14 +302,12 @@ subscriptionRemoteTrafficForSource() {
     local sourceId
     local response
     local items
+    local requestStatus
     sourceId=$(jq -r '.id // empty' <<<"${source}") || return 1
     [[ -n "${sourceId}" ]] || return 1
     if subscriptionRemoteSourceSelfReference "$@"; then
         jq -n --arg sourceId "${sourceId}" \
             '{source_id:$sourceId, status:"self_reference", error_detail:{type:"self_reference", message:"服务器源指向当前订阅服务，已跳过以避免递归采集"}}'
-    elif [[ -z "$(jq -r '.control_token // empty' <<<"${source}")" ]]; then
-        jq -n --arg sourceId "${sourceId}" \
-            '{source_id:$sourceId, status:"missing_token", error_detail:{type:"missing_token", message:"未配置控制 token"}}'
     elif response=$(subscriptionRemoteControlRequest "${source}" traffic '{}'); then
         if items=$(jq -ce 'select(keys == ["items", "ok"] and .ok == true and (.items | type == "array")) | .items' <<<"${response}" 2>/dev/null) &&
             subscriptionTrafficItemsValid "${items}"; then
@@ -323,8 +321,14 @@ subscriptionRemoteTrafficForSource() {
                 '{source_id:$sourceId, status:"remote_error", error_detail:{type:"remote_error", message:$message}, response:$response}'
         fi
     else
-        jq -n --arg sourceId "${sourceId}" \
-            '{source_id:$sourceId, status:"unreachable", error_detail:{type:"unreachable", message:"不可达或流量请求失败"}}'
+        requestStatus=$?
+        if ((requestStatus == 2)); then
+            jq -n --arg sourceId "${sourceId}" \
+                '{source_id:$sourceId, status:"missing_token", error_detail:{type:"missing_token", message:"未配置控制 token"}}'
+        else
+            jq -n --arg sourceId "${sourceId}" \
+                '{source_id:$sourceId, status:"unreachable", error_detail:{type:"unreachable", message:"不可达或流量请求失败"}}'
+        fi
     fi
 }
 

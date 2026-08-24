@@ -537,6 +537,7 @@ runRemoteControlInlineTokenConsumersRegression() (
 
 runRemoteControlTrafficContractRegression() (
     local source='{"id":"edge-remote","name":"Edge Remote","control_token":"token","scheme":"wireguard","transport":"wireguard","host":"10.77.0.2","port":39778}'
+    local missingTokenSource='{"id":"edge-missing-token","name":"Edge Missing Token","scheme":"wireguard","transport":"wireguard","host":"10.77.0.2","port":39778}'
     local selfSource='{"id":"edge-self","name":"Edge Self","control_token":"token","scheme":"wireguard","transport":"wireguard","host":"10.77.0.1","port":39778}'
     local secondSource='{"id":"edge-second","name":"Edge Second","control_token":"token","scheme":"wireguard","transport":"wireguard","host":"10.77.0.3","port":39778}'
     local responseMode=valid
@@ -548,6 +549,9 @@ runRemoteControlTrafficContractRegression() (
         printf 'read\n' >>"${selfStateReadLog}"
         printf '%s\n' '{"address":"10.77.0.1"}'
     }
+    result=$(subscriptionRemoteTrafficForSource "${missingTokenSource}")
+    jq -e '.source_id == "edge-missing-token" and .status == "missing_token" and .error_detail.type == "missing_token"' <<<"${result}" >/dev/null
+
     subscriptionRemoteControlRequest() {
         [[ "$2" == "traffic" && "$3" == '{}' ]] || return 1
         case "${responseMode}" in
