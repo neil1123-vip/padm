@@ -30,9 +30,11 @@ subscriptionRemoteDesiredUsersBySource() {
 subscriptionRemoteSourceSelfReference() {
     local source=$1
     local sourceHost
-    local selfHost
+    local selfHost=${2-}
     sourceHost=$(jq -r '(.host // "") | ascii_downcase' <<<"${source}")
-    selfHost=$(subscriptionWireGuardReadState | jq -r '.address // empty' | head -n 1)
+    if [[ $# -lt 2 ]]; then
+        selfHost=$(subscriptionWireGuardReadState | jq -r '.address // empty' | head -n 1) || return 1
+    fi
     selfHost=$(subscriptionWireGuardAddressHost "${selfHost}")
     selfHost=$(tr 'A-Z' 'a-z' <<<"${selfHost}")
     [[ -n "${selfHost}" && "${sourceHost}" == "${selfHost}" ]]
@@ -302,7 +304,7 @@ subscriptionRemoteTrafficForSource() {
     local items
     sourceId=$(jq -r '.id // empty' <<<"${source}") || return 1
     [[ -n "${sourceId}" ]] || return 1
-    if subscriptionRemoteSourceSelfReference "${source}"; then
+    if subscriptionRemoteSourceSelfReference "$@"; then
         jq -n --arg sourceId "${sourceId}" \
             '{source_id:$sourceId, status:"self_reference", error_detail:{type:"self_reference", message:"服务器源指向当前订阅服务，已跳过以避免递归采集"}}'
     elif [[ -z "$(jq -r '.control_token // empty' <<<"${source}")" ]]; then
@@ -335,14 +337,21 @@ subscriptionRemoteTrafficInternalErrorResult() {
 
 subscriptionRemoteTrafficAll() {
     local sources=${1:-}
+    local selfAddress
+    local -a workerArgs=()
     if [[ -z "${sources}" ]]; then
         sources=$(subscriptionRemoteControlSources) || return 1
+    fi
+    if [[ -n "${sources}" ]] &&
+        selfAddress=$(subscriptionWireGuardReadState | jq -r '.address // empty' | head -n 1); then
+        workerArgs=("${selfAddress}")
     fi
     subscriptionRemoteCollectParallelResults \
         "${sources}" \
         padm-remote-traffic.XXXXXX \
         subscriptionRemoteTrafficForSource \
-        subscriptionRemoteTrafficInternalErrorResult
+        subscriptionRemoteTrafficInternalErrorResult \
+        "${workerArgs[@]}"
 }
 
 subscriptionRemoteSyncPlanInternalErrorResult() {

@@ -537,10 +537,17 @@ runRemoteControlInlineTokenConsumersRegression() (
 
 runRemoteControlTrafficContractRegression() (
     local source='{"id":"edge-remote","name":"Edge Remote","control_token":"token","scheme":"wireguard","transport":"wireguard","host":"10.77.0.2","port":39778}'
+    local selfSource='{"id":"edge-self","name":"Edge Self","control_token":"token","scheme":"wireguard","transport":"wireguard","host":"10.77.0.1","port":39778}'
+    local secondSource='{"id":"edge-second","name":"Edge Second","control_token":"token","scheme":"wireguard","transport":"wireguard","host":"10.77.0.3","port":39778}'
     local responseMode=valid
     local result
+    local selfStateReadLog="${TMP_DIR}/remote-control-traffic-self-state.log"
 
-    subscriptionRemoteSourceSelfReference() { return 1; }
+    : >"${selfStateReadLog}"
+    subscriptionWireGuardReadState() {
+        printf 'read\n' >>"${selfStateReadLog}"
+        printf '%s\n' '{"address":"10.77.0.1"}'
+    }
     subscriptionRemoteControlRequest() {
         [[ "$2" == "traffic" && "$3" == '{}' ]] || return 1
         case "${responseMode}" in
@@ -566,6 +573,16 @@ runRemoteControlTrafficContractRegression() (
     responseMode=legacy
     result=$(subscriptionRemoteTrafficForSource "${source}")
     jq -e '.status == "remote_error" and .error_detail.type == "remote_error" and .error_detail.message == "未知控制端点"' <<<"${result}" >/dev/null
+
+    responseMode=valid
+    : >"${selfStateReadLog}"
+    result=$(subscriptionRemoteTrafficAll "[${source},${secondSource},${selfSource}]")
+    jq -e '
+      length == 3 and
+      ([.[] | select(.status == "success")] | length) == 2 and
+      any(.[]; .source_id == "edge-self" and .status == "self_reference")
+    ' <<<"${result}" >/dev/null
+    [[ "$(wc -l <"${selfStateReadLog}")" -eq 1 ]]
 
     local lockLog="${TMP_DIR}/remote-control-traffic-lock.log"
     subscriptionGroupsWithLock() {
