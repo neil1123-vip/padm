@@ -305,9 +305,9 @@ mapTrafficStatsJsonToAccounts() {
 collectXrayTrafficStatsSnapshot() {
     local accounts=$1
     local stats=
+    local jsonItems=
     local suffixRegex
     local xrayBinary=${XRAY_STATS_BINARY:-/etc/padm/xray/xray}
-    suffixRegex=$(clientNameSuffixRegex) || return 1
     command -v timeout >/dev/null 2>&1 || return 1
     if [[ ! -x "${xrayBinary}" ]]; then
         return 1
@@ -318,10 +318,12 @@ collectXrayTrafficStatsSnapshot() {
     if [[ -z "${stats}" ]]; then
         return 1
     fi
-    if jq empty <<<"${stats}" >/dev/null 2>&1; then
-        mapTrafficStatsJsonToAccounts "${accounts}" <<<"${stats}"
-    else
-        awk -v accounts="$(jq -r 'join(" ")' <<<"${accounts}")" -v suffixRegex="${suffixRegex}" '
+    if jsonItems=$(mapTrafficStatsJsonToAccounts "${accounts}" <<<"${stats}" 2>/dev/null); then
+        printf '%s\n' "${jsonItems}"
+        return 0
+    fi
+    suffixRegex=$(clientNameSuffixRegex) || return 1
+    awk -v accounts="$(jq -r 'join(" ")' <<<"${accounts}")" -v suffixRegex="${suffixRegex}" '
           BEGIN {
             split(accounts, allowed, " ")
             for (i in allowed) wanted[allowed[i]] = 1
@@ -354,7 +356,6 @@ collectXrayTrafficStatsSnapshot() {
             }
             printf "]"
           }' <<<"${stats}"
-    fi
 }
 
 singBoxGrpcResponseToStatsJson() {
