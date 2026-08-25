@@ -574,6 +574,20 @@ runRemoteControlTrafficContractRegression() (
 
     result=$(subscriptionRemoteTrafficForSource "${source}")
     jq -e '.source_id == "edge-remote" and .status == "success" and .response.items[1].cores["sing-box"].download == 3' <<<"${result}" >/dev/null
+    (
+        local trafficParseCountFile="${TMP_DIR}/remote-control-traffic-parse-count"
+        : >"${trafficParseCountFile}"
+        jq() {
+            if [[ "$#" -ge 2 && "$1" == "-ce" && "$2" == *'keys == ["items", "ok"]'* ]] ||
+                [[ "$#" -ge 2 && "$1" == "-e" && "$2" == *'def count:'* ]]; then
+                printf 'x' >>"${trafficParseCountFile}"
+            fi
+            command jq "$@"
+        }
+        result=$(subscriptionRemoteTrafficForSource "${source}")
+        command jq -e '.status == "success"' <<<"${result}" >/dev/null
+        [[ "$(wc -c <"${trafficParseCountFile}")" == "1" ]]
+    )
     responseMode=old-format
     result=$(subscriptionRemoteTrafficForSource "${source}")
     jq -e '.status == "success" and (.response.items[0] | has("cores") | not)' <<<"${result}" >/dev/null

@@ -512,10 +512,7 @@ collectLocalTrafficSnapshot() {
     printf '%s\n' "${snapshot}"
 }
 
-subscriptionTrafficItemsValid() {
-    local items=$1
-    local remoteResults=${2:-[]}
-    jq -e --argjson remoteResults "${remoteResults}" '
+SUBSCRIPTION_TRAFFIC_ITEMS_VALIDATION_JQ='
       def count: type == "number" and . >= 0 and . == floor;
       def counter:
         type == "object" and keys == ["download", "upload"] and
@@ -537,9 +534,15 @@ subscriptionTrafficItemsValid() {
             ((.cores | cores) and
              .upload == ([.cores[]?.upload] | add // 0) and
              .download == ([.cores[]?.download] | add // 0))));
+'
+
+subscriptionTrafficItemsValid() {
+    local items=$1
+    local remoteResults=${2:-[]}
+    jq -e --argjson remoteResults "${remoteResults}" "${SUBSCRIPTION_TRAFFIC_ITEMS_VALIDATION_JQ}
       validItems and
-      all($remoteResults[]? | select(.status == "success"); .response.items | validItems)
-    ' <<<"${items}" >/dev/null 2>&1
+      all(\$remoteResults[]? | select(.status == \"success\"); .response.items | validItems)
+    " <<<"${items}" >/dev/null 2>&1
 }
 
 writeSubscriptionTrafficSnapshot() {

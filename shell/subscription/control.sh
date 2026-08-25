@@ -309,8 +309,10 @@ subscriptionRemoteTrafficForSource() {
         jq -n --arg sourceId "${sourceId}" \
             '{source_id:$sourceId, status:"self_reference", error_detail:{type:"self_reference", message:"服务器源指向当前订阅服务，已跳过以避免递归采集"}}'
     elif response=$(subscriptionRemoteControlRequest "${source}" traffic '{}'); then
-        if items=$(jq -ce 'select(keys == ["items", "ok"] and .ok == true and (.items | type == "array")) | .items' <<<"${response}" 2>/dev/null) &&
-            subscriptionTrafficItemsValid "${items}"; then
+        if items=$(jq -ce "${SUBSCRIPTION_TRAFFIC_ITEMS_VALIDATION_JQ}
+            select(keys == [\"items\", \"ok\"] and .ok == true and (.items | type == \"array\")) |
+            .items | select(validItems)
+        " <<<"${response}" 2>/dev/null); then
             jq -n --arg sourceId "${sourceId}" --argjson response "${response}" \
                 '{source_id:$sourceId, status:"success", response:$response}'
         elif jq -e '.ok == true' <<<"${response}" >/dev/null 2>&1; then
