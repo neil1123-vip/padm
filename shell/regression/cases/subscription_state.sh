@@ -606,6 +606,13 @@ runSubscriptionGroupStateQuotaTrafficRemoteRegression() {
     ' "$(subscriptionGroupsFile)" >/dev/null
 
     stateBefore=$(jq -c '.traffic' "$(subscriptionGroupsFile)")
+    remoteResults='[{"source_id":"remote-edge","status":"success","response":{"items":[{"account":"admin","upload":-1,"download":0}]}},{"source_id":"edge-2","status":"success","response":{"items":[]}}]'
+    if writeSubscriptionTrafficSnapshot "${localSnapshot}" "${remoteResults}" >/dev/null 2>&1; then
+        return 1
+    fi
+    jq -e --argjson stateBefore "${stateBefore}" '.traffic == $stateBefore' "$(subscriptionGroupsFile)" >/dev/null
+
+    stateBefore=$(jq -c '.traffic' "$(subscriptionGroupsFile)")
     remoteResults='[{"source_id":"remote-edge","status":"unreachable"},{"source_id":"edge-2","status":"success","response":{"items":[{"account":"admin","upload":4,"download":2},{"account":"sub_team_a","upload":2,"download":3}]}}]'
     if writeSubscriptionTrafficSnapshot '{"ok":true,"items":[{"account":"admin","upload":4,"download":5},{"account":"sub_team_a","upload":2,"download":3}]}' "${remoteResults}" >/dev/null 2>&1; then
         return 1

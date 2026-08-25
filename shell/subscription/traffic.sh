@@ -513,7 +513,8 @@ collectLocalTrafficSnapshot() {
 
 subscriptionTrafficItemsValid() {
     local items=$1
-    jq -e '
+    local remoteResults=${2:-[]}
+    jq -e --argjson remoteResults "${remoteResults}" '
       def count: type == "number" and . >= 0 and . == floor;
       def counter:
         type == "object" and keys == ["download", "upload"] and
@@ -522,18 +523,21 @@ subscriptionTrafficItemsValid() {
         type == "object" and length > 0 and
         ((keys - ["sing-box", "xray"]) | length == 0) and
         all(to_entries[]?; .value | counter);
-      type == "array" and
-      ([.[].account] | length) == ([.[].account] | unique | length) and
-      all(.[]?;
-        type == "object" and
-        ((keys == ["account", "download", "upload"]) or
-         (keys == ["account", "cores", "download", "upload"])) and
-        (.account | type == "string" and length > 0 and . != "." and . != ".." and test("^[A-Za-z0-9._~@+=:-]+$")) and
-        (.upload | count) and (.download | count) and
-        ((has("cores") | not) or
-          ((.cores | cores) and
-           .upload == ([.cores[]?.upload] | add // 0) and
-           .download == ([.cores[]?.download] | add // 0))))
+      def validItems:
+        type == "array" and
+        ([.[].account] | length) == ([.[].account] | unique | length) and
+        all(.[]?;
+          type == "object" and
+          ((keys == ["account", "download", "upload"]) or
+           (keys == ["account", "cores", "download", "upload"])) and
+          (.account | type == "string" and length > 0 and . != "." and . != ".." and test("^[A-Za-z0-9._~@+=:-]+$")) and
+          (.upload | count) and (.download | count) and
+          ((has("cores") | not) or
+            ((.cores | cores) and
+             .upload == ([.cores[]?.upload] | add // 0) and
+             .download == ([.cores[]?.download] | add // 0))));
+      validItems and
+      all($remoteResults[]? | select(.status == "success"); .response.items | validItems)
     ' <<<"${items}" >/dev/null 2>&1
 }
 
@@ -542,31 +546,28 @@ writeSubscriptionTrafficSnapshot() {
     local remoteResults=${2:-[]}
     local expectedRemoteSourceIds
     local items
-    local remoteItems
+    local remoteComplete
     SUBSCRIPTION_TRAFFIC_LOCAL_COMMITTED=false
     SUBSCRIPTION_TRAFFIC_COMPLETE=false
     expectedRemoteSourceIds=$(subscriptionActiveGroupRead -c '[.sources[]? | select(.role != "main" and .enabled == true) | .id]') || return 1
     if ! items=$(jq -ce 'select(.ok == true and (.items | type == "array")) | .items' <<<"${snapshot}" 2>/dev/null) ||
-        ! subscriptionTrafficItemsValid "${items}" ||
-        ! jq -e --argjson expectedRemoteSourceIds "${expectedRemoteSourceIds}" '
-          type == "array" and
-          ([.[].source_id] | length) == ([.[].source_id] | unique | length) and
-          all(.[];
-            . as $result |
-            (.source_id | type == "string" and length > 0) and
-            (($expectedRemoteSourceIds | index($result.source_id)) != null) and
-            (.status | type == "string" and length > 0) and
-            (if .status == "success" then (.response.items | type == "array") else true end))
-        ' <<<"${remoteResults}" >/dev/null 2>&1; then
+        ! remoteComplete=$(jq -er --argjson expectedRemoteSourceIds "${expectedRemoteSourceIds}" '
+          select(
+            type == "array" and
+            ([.[].source_id] | length) == ([.[].source_id] | unique | length) and
+            all(.[];
+              . as $result |
+              (.source_id | type == "string" and length > 0) and
+              (($expectedRemoteSourceIds | index($result.source_id)) != null) and
+              (.status | type == "string" and length > 0) and
+              (if .status == "success" then (.response.items | type == "array") else true end))) |
+          (((map(.source_id) | sort) == ($expectedRemoteSourceIds | sort) and
+            all(.[]; .status == "success")) | tostring)
+        ' <<<"${remoteResults}" 2>/dev/null) ||
+        ! subscriptionTrafficItemsValid "${items}" "${remoteResults}"; then
         statusCard "流量统计" "采集失败，已保留上次统计"
         return 1
     fi
-    while IFS= read -r remoteItems; do
-        if ! subscriptionTrafficItemsValid "${remoteItems}"; then
-            statusCard "流量统计" "采集失败，已保留上次统计"
-            return 1
-        fi
-    done < <(jq -c '.[] | select(.status == "success") | .response.items' <<<"${remoteResults}")
     if ! subscriptionActiveGroupWrite --argjson snapshot "${snapshot}" --argjson remoteResults "${remoteResults}" '
       def counterTotal($counters):
         {upload:([$counters[]?.upload] | add // 0), download:([$counters[]?.download] | add // 0)};
@@ -639,10 +640,7 @@ writeSubscriptionTrafficSnapshot() {
         return 1
     fi
     SUBSCRIPTION_TRAFFIC_LOCAL_COMMITTED=true
-    if jq -e --argjson expectedRemoteSourceIds "${expectedRemoteSourceIds}" '
-      (map(.source_id) | sort) == ($expectedRemoteSourceIds | sort) and
-      all(.[]; .status == "success")
-    ' <<<"${remoteResults}" >/dev/null 2>&1; then
+    if [[ "${remoteComplete}" == "true" ]]; then
         SUBSCRIPTION_TRAFFIC_COMPLETE=true
         return 0
     fi
@@ -677,7 +675,7 @@ collectSubscriptionTrafficUnlocked() {
     role=$(subscriptionCurrentRoleNormalized) || return 1
     if [[ "${role}" == "main" ]] &&
         remoteSources=$(subscriptionRemoteControlSources) &&
-        jq -e 'type == "array" and length > 0' <<<"${remoteSources}" >/dev/null 2>&1; then
+        [[ "${remoteSources}" != '[]' ]]; then
         statusCard "流量统计" "正在等待被控服务器流量响应" "单台请求最长 15 秒（含重试），多个服务器并行请求"
         remoteResults=$(subscriptionRemoteTrafficAll "${remoteSources}") || remoteResults='[]'
     fi
