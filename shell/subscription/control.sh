@@ -1173,7 +1173,7 @@ subscriptionControlTrafficResponseUnlocked() {
         jq -n '{ok:false, error:"traffic_failed", error_detail:{type:"traffic_failed", message:"本机流量统计写入失败"}}'
         return 1
     }
-    jq -c '{ok:true, items:.items}' <<<"${snapshot}"
+    printf '{"ok":true,"items":%s}\n' "${items}"
 }
 
 subscriptionControlTrafficResponse() {
