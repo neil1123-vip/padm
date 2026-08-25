@@ -391,7 +391,7 @@ subscriptionRemoteCollectParallelResults() {
         (
             local writeResult
             writeResult=$("${workerFn}" "${source}" "${workerArgs[@]}" 2>/dev/null) || writeResult=
-            if [[ -n "${writeResult}" ]] && jq -e . <<<"${writeResult}" >/dev/null 2>&1; then
+            if [[ -n "${writeResult}" ]]; then
                 printf '%s\n' "${writeResult}" >"${outputFile}"
             else
                 "${fallbackFn}" "${source}" >"${outputFile}" 2>/dev/null || true
@@ -406,13 +406,13 @@ subscriptionRemoteCollectParallelResults() {
     if [[ "${#sourceList[@]}" == "0" ]]; then
         aggregatedResults=$(jq -n '[]') || { padmRemoveCleanupPath "${tmpDir}"; return 1; }
     elif aggregatedResults=$(jq -es --argjson expectedCount "${#sourceList[@]}" \
-        'select(length == $expectedCount)' "${outputFiles[@]}" 2>/dev/null); then
+        'select(length == $expectedCount and all(.[]; type == "object"))' "${outputFiles[@]}" 2>/dev/null); then
         :
     else
         for index in "${!sourceList[@]}"; do
             source=${sourceList[$index]}
             printf -v outputFile '%s/%06d.json' "${tmpDir}" "${index}"
-            if [[ -f "${outputFile}" ]] && result=$(jq -c . "${outputFile}" 2>/dev/null); then
+            if [[ -f "${outputFile}" ]] && result=$(jq -ce 'select(type == "object")' "${outputFile}" 2>/dev/null); then
                 resultList+=("${result}")
             else
                 result=$("${fallbackFn}" "${source}") || {

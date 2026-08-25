@@ -449,7 +449,7 @@ querySingBoxTrafficStatsGrpc() {
         padmRemoveCleanupPath "${tmpDir}"
         return 1
     fi
-    if ! tr -d '\r' <"${tmpDir}/headers" | grep -Eq '^grpc-status:[[:space:]]*0[[:space:]]*$' ||
+    if ! grep -Eq '^grpc-status:[[:space:]]*0[[:space:]]*$' "${tmpDir}/headers" ||
         ! stats=$(singBoxGrpcResponseToStatsJson "${tmpDir}/response.bin"); then
         padmRemoveCleanupPath "${tmpDir}"
         return 1

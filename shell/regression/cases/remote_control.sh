@@ -156,14 +156,21 @@ JSON
 
 runRemoteControlSourcesParsedOnceRegression() (
     local parseCountFile="${TMP_DIR}/remote-control-sources-parse-count"
+    local resultValidationCountFile="${TMP_DIR}/remote-control-result-validation-count"
     local parseCount
+    local resultValidationCount
     local result
     local sources='[{"id":"edge-a","name":"Edge A"},{"id":"edge-b","name":"Edge B"}]'
 
     : >"${parseCountFile}"
+    : >"${resultValidationCountFile}"
     jq() {
         if [[ "$#" -ge 2 && "$1" == "-c" && "$2" == ".[]" ]]; then
             printf 'x' >>"${parseCountFile}"
+        fi
+        if [[ "$#" -ge 2 && "$1" == "-e" && "$2" == "." ]] ||
+            [[ "$#" -ge 2 && "$1" == "-c" && "$2" == "." ]]; then
+            printf 'x' >>"${resultValidationCountFile}"
         fi
         command jq "$@"
     }
@@ -183,7 +190,9 @@ runRemoteControlSourcesParsedOnceRegression() (
     result=$(subscriptionRemoteCollectParallelResults "${sources}" padm-remote-parse-once.XXXXXX remoteControlParseOnceWorker remoteControlParseOnceFallback)
     jq -e 'length == 2 and .[0].source_id == "edge-a" and .[1].source_id == "edge-b"' <<<"${result}" >/dev/null
     parseCount=$(wc -c <"${parseCountFile}")
+    resultValidationCount=$(wc -c <"${resultValidationCountFile}")
     ((parseCount == 1))
+    ((resultValidationCount == 0))
 )
 
 runRemoteControlHealthRegression() (
