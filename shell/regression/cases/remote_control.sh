@@ -610,6 +610,21 @@ runRemoteControlTrafficContractRegression() (
       any(.[]; .source_id == "edge-self" and .status == "self_reference")
     ' <<<"${result}" >/dev/null
     [[ "$(wc -l <"${selfStateReadLog}")" -eq 1 ]]
+    (
+        local filterProcessLog="${TMP_DIR}/remote-control-traffic-filter-processes.log"
+        : >"${filterProcessLog}"
+        head() {
+            printf 'head\n' >>"${filterProcessLog}"
+            command head "$@"
+        }
+        tr() {
+            printf 'tr\n' >>"${filterProcessLog}"
+            command tr "$@"
+        }
+        result=$(subscriptionRemoteTrafficAll "[${source},${secondSource},${selfSource}]")
+        jq -e 'length == 3 and ([.[] | select(.status == "success")] | length) == 2' <<<"${result}" >/dev/null
+        [[ ! -s "${filterProcessLog}" ]]
+    )
 
     local lockLog="${TMP_DIR}/remote-control-traffic-lock.log"
     subscriptionGroupsWithLock() {

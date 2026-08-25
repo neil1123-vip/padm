@@ -33,10 +33,10 @@ subscriptionRemoteSourceSelfReference() {
     local selfHost=${2-}
     sourceHost=$(jq -r '(.host // "") | ascii_downcase' <<<"${source}")
     if [[ $# -lt 2 ]]; then
-        selfHost=$(subscriptionWireGuardReadState | jq -r '.address // empty' | head -n 1) || return 1
+        selfHost=$(subscriptionWireGuardReadState | jq -r '.address // empty') || return 1
     fi
     selfHost=$(subscriptionWireGuardAddressHost "${selfHost}")
-    selfHost=$(tr 'A-Z' 'a-z' <<<"${selfHost}")
+    selfHost=${selfHost,,}
     [[ -n "${selfHost}" && "${sourceHost}" == "${selfHost}" ]]
 }
 
@@ -349,7 +349,7 @@ subscriptionRemoteTrafficAll() {
         sources=$(subscriptionRemoteControlSources) || return 1
     fi
     if [[ -n "${sources}" ]] &&
-        selfAddress=$(subscriptionWireGuardReadState | jq -r '.address // empty' | head -n 1); then
+        selfAddress=$(subscriptionWireGuardReadState | jq -r '.address // empty'); then
         workerArgs=("${selfAddress}")
     fi
     subscriptionRemoteCollectParallelResults \
@@ -1156,7 +1156,7 @@ subscriptionControlSyncResponse() {
 subscriptionControlTrafficResponseUnlocked() {
     local payload=$1
     local snapshot
-    local items
+    local trafficItems
     if ! jq -e 'type == "object" and keys == []' <<<"${payload}" >/dev/null 2>&1; then
         jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"流量请求体格式不正确"}}'
         return 1
@@ -1171,16 +1171,16 @@ subscriptionControlTrafficResponseUnlocked() {
         jq -n '{ok:false, error:"traffic_failed", error_detail:{type:"traffic_failed", message:"本机流量统计采集失败"}}'
         return 1
     fi
-    if ! items=$(jq -ce 'select(.ok == true and (.items | type == "array")) | .items' <<<"${snapshot}" 2>/dev/null) ||
-        ! subscriptionTrafficItemsValid "${items}"; then
+    if writeSubscriptionTrafficSnapshot "${snapshot}" '[]' trafficItems >/dev/null 2>&1; then
+        :
+    elif [[ "${SUBSCRIPTION_TRAFFIC_VALIDATION_FAILED:-false}" == "true" ]]; then
         jq -n '{ok:false, error:"traffic_failed", error_detail:{type:"traffic_failed", message:"本机流量统计采集失败"}}'
         return 1
-    fi
-    writeSubscriptionTrafficSnapshot "${snapshot}" >/dev/null 2>&1 || {
+    else
         jq -n '{ok:false, error:"traffic_failed", error_detail:{type:"traffic_failed", message:"本机流量统计写入失败"}}'
         return 1
-    }
-    printf '{"ok":true,"items":%s}\n' "${items}"
+    fi
+    printf '{"ok":true,"items":%s}\n' "${trafficItems}"
 }
 
 subscriptionControlTrafficResponse() {

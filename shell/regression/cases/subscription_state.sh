@@ -572,6 +572,7 @@ runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
 runSubscriptionGroupStateQuotaTrafficRemoteRegression() {
     local localSnapshot
     local remoteResults
+    local collectedItems
     local stateBefore
     local mainBefore
     prepareSubscriptionStateQuotaUsageFixture
@@ -581,7 +582,8 @@ runSubscriptionGroupStateQuotaTrafficRemoteRegression() {
     '
     localSnapshot='{"ok":true,"items":[{"account":"admin","upload":10,"download":20},{"account":"sub_team_a","upload":30,"download":40}]}'
     remoteResults='[{"source_id":"remote-edge","status":"success","response":{"items":[{"account":"admin","upload":5,"download":6},{"account":"sub_team_a","upload":7,"download":8}]}},{"source_id":"edge-2","status":"success","response":{"items":[{"account":"admin","upload":2,"download":3},{"account":"sub_team_a","upload":4,"download":5}]}}]'
-    writeSubscriptionTrafficSnapshot "${localSnapshot}" "${remoteResults}"
+    writeSubscriptionTrafficSnapshot "${localSnapshot}" "${remoteResults}" collectedItems
+    [[ "${collectedItems}" == "$(jq -c '.items' <<<"${localSnapshot}")" ]]
     jq -e '
       (.traffic.sources | length) == 3 and
       .traffic.admin.sources["remote-edge"].upload == 5 and
@@ -640,6 +642,14 @@ runSubscriptionGroupStateQuotaTrafficRemoteRegression() {
     writeSubscriptionTrafficSnapshot '{"ok":true,"items":[]}' '[]'
     writeSubscriptionTrafficSnapshot '{"ok":true,"items":[{"account":"admin","upload":5,"download":5},{"account":"sub_team_a","upload":3,"download":3}]}' '[]'
     jq -e --argjson mainBefore "${mainBefore}" '.traffic.sources.main.upload == ($mainBefore + 2)' "$(subscriptionGroupsFile)" >/dev/null
+
+    readInstallType() { :; }
+    readInstallProtocolType() { :; }
+    ensureTrafficStatsConfig() { :; }
+    collectLocalTrafficSnapshot() { printf '%s\n' "${localSnapshot}"; }
+    local controlResponse
+    controlResponse=$(subscriptionControlTrafficResponseUnlocked '{}')
+    jq -e '.ok == true and .items == [{account:"admin",upload:3,download:4},{account:"sub_team_a",upload:1,download:2}]' <<<"${controlResponse}" >/dev/null
 
     setUserSubscriptionSources team-a '["main"]'
     removeSubscriptionSourceState edge-2

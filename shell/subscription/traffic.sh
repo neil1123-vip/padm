@@ -548,12 +548,18 @@ subscriptionTrafficItemsValid() {
 writeSubscriptionTrafficSnapshot() {
     local snapshot=$1
     local remoteResults=${2:-[]}
+    local outputVar=${3:-}
     local items
     local remoteComplete
     SUBSCRIPTION_TRAFFIC_LOCAL_COMMITTED=false
     SUBSCRIPTION_TRAFFIC_COMPLETE=false
-    if ! items=$(jq -ce 'select(.ok == true and (.items | type == "array")) | .items' <<<"${snapshot}" 2>/dev/null) ||
-        ! remoteComplete=$(subscriptionActiveGroupRead -er --argjson remoteResults "${remoteResults}" '
+    SUBSCRIPTION_TRAFFIC_VALIDATION_FAILED=false
+    if ! items=$(jq -ce 'select(.ok == true and (.items | type == "array")) | .items' <<<"${snapshot}" 2>/dev/null); then
+        SUBSCRIPTION_TRAFFIC_VALIDATION_FAILED=true
+        statusCard "流量统计" "采集失败，已保留上次统计"
+        return 1
+    fi
+    if ! remoteComplete=$(subscriptionActiveGroupRead -er --argjson remoteResults "${remoteResults}" '
           ([.sources[]? | select(.role != "main" and .enabled == true) | .id]) as $expectedRemoteSourceIds |
           $remoteResults |
           select(
@@ -567,8 +573,12 @@ writeSubscriptionTrafficSnapshot() {
               (if .status == "success" then (.response.items | type == "array") else true end))) |
           (((map(.source_id) | sort) == ($expectedRemoteSourceIds | sort) and
             all(.[]; .status == "success")) | tostring)
-        ' 2>/dev/null) ||
-        ! subscriptionTrafficItemsValid "${items}" "${remoteResults}"; then
+        ' 2>/dev/null); then
+        statusCard "流量统计" "采集失败，已保留上次统计"
+        return 1
+    fi
+    if ! subscriptionTrafficItemsValid "${items}" "${remoteResults}"; then
+        SUBSCRIPTION_TRAFFIC_VALIDATION_FAILED=true
         statusCard "流量统计" "采集失败，已保留上次统计"
         return 1
     fi
@@ -642,6 +652,9 @@ writeSubscriptionTrafficSnapshot() {
     '; then
         statusCard "流量统计" "统计写入失败，已保留上次统计"
         return 1
+    fi
+    if [[ -n "${outputVar}" ]]; then
+        printf -v "${outputVar}" '%s' "${items}"
     fi
     SUBSCRIPTION_TRAFFIC_LOCAL_COMMITTED=true
     if [[ "${remoteComplete}" == "true" ]]; then
