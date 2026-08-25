@@ -544,14 +544,14 @@ subscriptionTrafficItemsValid() {
 writeSubscriptionTrafficSnapshot() {
     local snapshot=$1
     local remoteResults=${2:-[]}
-    local expectedRemoteSourceIds
     local items
     local remoteComplete
     SUBSCRIPTION_TRAFFIC_LOCAL_COMMITTED=false
     SUBSCRIPTION_TRAFFIC_COMPLETE=false
-    expectedRemoteSourceIds=$(subscriptionActiveGroupRead -c '[.sources[]? | select(.role != "main" and .enabled == true) | .id]') || return 1
     if ! items=$(jq -ce 'select(.ok == true and (.items | type == "array")) | .items' <<<"${snapshot}" 2>/dev/null) ||
-        ! remoteComplete=$(jq -er --argjson expectedRemoteSourceIds "${expectedRemoteSourceIds}" '
+        ! remoteComplete=$(subscriptionActiveGroupRead -er --argjson remoteResults "${remoteResults}" '
+          ([.sources[]? | select(.role != "main" and .enabled == true) | .id]) as $expectedRemoteSourceIds |
+          $remoteResults |
           select(
             type == "array" and
             ([.[].source_id] | length) == ([.[].source_id] | unique | length) and
@@ -563,7 +563,7 @@ writeSubscriptionTrafficSnapshot() {
               (if .status == "success" then (.response.items | type == "array") else true end))) |
           (((map(.source_id) | sort) == ($expectedRemoteSourceIds | sort) and
             all(.[]; .status == "success")) | tostring)
-        ' <<<"${remoteResults}" 2>/dev/null) ||
+        ' 2>/dev/null) ||
         ! subscriptionTrafficItemsValid "${items}" "${remoteResults}"; then
         statusCard "流量统计" "采集失败，已保留上次统计"
         return 1
