@@ -378,6 +378,7 @@ subscriptionRemoteCollectParallelResults() {
     local aggregatedResults
     local index=0
     local -a sourceList=()
+    local -a outputFiles=()
     local -a resultList=()
     local -a workerArgs=("$@")
     local pids=()
@@ -386,6 +387,7 @@ subscriptionRemoteCollectParallelResults() {
     mapfile -t sourceList < <(jq -c '.[]' <<<"${sources}")
     for source in "${sourceList[@]}"; do
         printf -v outputFile '%s/%06d.json' "${tmpDir}" "${index}"
+        outputFiles+=("${outputFile}")
         (
             local writeResult
             writeResult=$("${workerFn}" "${source}" "${workerArgs[@]}" 2>/dev/null) || writeResult=
@@ -403,6 +405,9 @@ subscriptionRemoteCollectParallelResults() {
     done
     if [[ "${#sourceList[@]}" == "0" ]]; then
         aggregatedResults=$(jq -n '[]') || { padmRemoveCleanupPath "${tmpDir}"; return 1; }
+    elif aggregatedResults=$(jq -es --argjson expectedCount "${#sourceList[@]}" \
+        'select(length == $expectedCount)' "${outputFiles[@]}" 2>/dev/null); then
+        :
     else
         for index in "${!sourceList[@]}"; do
             source=${sourceList[$index]}
