@@ -723,6 +723,7 @@ runRemoteControlInlineSyncParallelRunnerRegression() (
     local statusLog="${TMP_DIR}/remote-control-inline-sync-parallel-runner.status"
     local callLog="${TMP_DIR}/remote-control-inline-sync-parallel-runner.calls"
     local brokenStarted="${TMP_DIR}/remote-control-inline-sync-parallel-runner.broken-started"
+    local selfStateReadLog="${TMP_DIR}/remote-control-inline-sync-parallel-runner.self-state"
     local syncResult
 
     : >"${callLog}"
@@ -732,6 +733,10 @@ runRemoteControlInlineSyncParallelRunnerRegression() (
     }
     subscriptionRemoteDesiredUsersBySource() {
         printf '%s\n' "${desiredUsersBySourceJson}"
+    }
+    subscriptionWireGuardReadState() {
+        printf '1\n' >>"${selfStateReadLog}"
+        printf '{"address":"10.77.0.1/24"}\n'
     }
     subscriptionRemoteSyncPlanForSource() {
         local sourceJson=$1
@@ -770,6 +775,7 @@ runRemoteControlInlineSyncParallelRunnerRegression() (
     jq -e '.snapshots == {"edge-slow":{},"edge-broken":null}' <<<"${syncResult}" >/dev/null || return 1
     grep -qx 'edge-slow-start' "${callLog}" || return 1
     grep -qx 'edge-broken-start' "${callLog}" || return 1
+    [[ "$(wc -l <"${selfStateReadLog}")" == "1" ]] || return 1
     ! grep -qx 'edge-broken-not-parallel' "${callLog}" || return 1
     grep -Fqx $'status\tedge-slow\tsuccess\tfalse\t{"create":[],"remove":[]}' "${statusLog}" || return 1
     grep -q $'^failure\tedge-broken\tinternal_error\t' "${statusLog}" || return 1

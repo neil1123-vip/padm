@@ -456,16 +456,19 @@ subscriptionRemoteSyncPlanForSource() {
     local source=$1
     local desiredUsersBySource=${2:-}
     local dryRun=${3:-true}
+    local selfAddress=${4-}
     local sourceId
     local payload
     local response
     local responsePlan
     local errorMessage
     local requestStatus
+    local -a selfReferenceArgs=()
 
     sourceId=$(jq -r '.id' <<<"${source}")
     payload=$(subscriptionRemoteControlPayload "${source}" "${dryRun}" "${desiredUsersBySource}" "${sourceId}") || return 1
-    if subscriptionRemoteSourceSelfReference "${source}"; then
+    [[ $# -ge 4 ]] && selfReferenceArgs=("${selfAddress}")
+    if subscriptionRemoteSourceSelfReference "${source}" "${selfReferenceArgs[@]}"; then
         jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"self_reference", error_detail:{type:"self_reference", message:"服务器源指向当前订阅服务，已跳过以避免递归同步"}, dry_run:$dryRun, request:$payload}'
     else
         if response=$(subscriptionRemoteControlRequest "${source}" sync "${payload}" 2>/dev/null); then
@@ -577,16 +580,23 @@ setSubscriptionRemoteSourceEnabled() {
 subscriptionRemoteSyncPlan() {
     local sources
     local desiredUsersBySource='{}'
+    local selfAddress
+    local -a workerArgs=()
     sources=$(subscriptionRemoteControlSources) || return 1
     if [[ "${sources}" != '[]' ]]; then
         desiredUsersBySource=$(subscriptionRemoteDesiredUsersBySource "${sources}") || return 1
+        if selfAddress=$(subscriptionWireGuardReadState | jq -r '.address // empty'); then
+            workerArgs=("${selfAddress}")
+        fi
     fi
     subscriptionRemoteCollectParallelResults \
         "${sources}" \
         padm-remote-plan.XXXXXX \
         subscriptionRemoteSyncPlanForSource \
         subscriptionRemoteSyncPlanInternalErrorResult \
-        "${desiredUsersBySource}"
+        "${desiredUsersBySource}" \
+        true \
+        "${workerArgs[@]}"
 }
 
 runSubscriptionRemoteSync() {
@@ -608,6 +618,8 @@ runSubscriptionRemoteSync() {
     local expectedAccounts
     local snapshotInvalid
     local snapshotError
+    local selfAddress
+    local -a workerArgs=()
     local -A sourceIdSet=()
     local -A expectedAccountsBySource=()
     sources=$(subscriptionRemoteControlSources) || return 1
@@ -616,6 +628,9 @@ runSubscriptionRemoteSync() {
         return 0
     fi
     desiredUsersBySource=$(subscriptionRemoteDesiredUsersBySource "${sources}") || return 1
+    if selfAddress=$(subscriptionWireGuardReadState | jq -r '.address // empty'); then
+        workerArgs=("${selfAddress}")
+    fi
     sourceIdRows=$(jq -r '.[].id' <<<"${sources}") || return 1
     while IFS= read -r sourceId; do
         [[ -n "${sourceId}" ]] || continue
@@ -632,7 +647,8 @@ runSubscriptionRemoteSync() {
         subscriptionRemoteSyncPlanForSource \
         subscriptionRemoteSyncPlanInternalErrorResult \
         "${desiredUsersBySource}" \
-        false) || return 1
+        false \
+        "${workerArgs[@]}") || return 1
     while IFS= read -r sourceResult; do
         sourceId=$(jq -r '.source_id // empty' <<<"${sourceResult}") || return 1
         [[ -n "${sourceId}" ]] || return 1
