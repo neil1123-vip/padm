@@ -1133,6 +1133,7 @@ executeSubscriptionQuotaPlanMenu() {
 
 runSubscriptionGroupSyncUnlocked() {
     local failures='[]'
+    local -a failureMessages=()
     local remoteFailures='[]'
     local remoteSyncResult='{"failures":[],"snapshots":{}}'
     local remoteResultFields
@@ -1160,7 +1161,8 @@ runSubscriptionGroupSyncUnlocked() {
     readInstallType
     readInstallProtocolType
     readConfigHostPathUUID || {
-        failures=$(jq '. + ["本机配置读取失败"]' <<<"${failures}")
+        failureMessages+=("本机配置读取失败")
+        failures=$(jq -cn --args '$ARGS.positional' -- "${failureMessages[@]}") || return 1
         subscriptionSyncMarkResult partial "${failures}" || true
         return 1
     }
@@ -1182,15 +1184,15 @@ runSubscriptionGroupSyncUnlocked() {
     if subscriptionGroupQuotaAutoApplyEnabled; then
         if [[ "${trafficCollected}" == "true" ]]; then
             if ! quotaPlan=$(subscriptionQuotaDryRunPlan); then
-                failures=$(jq '. + ["限额自动执行计划生成失败"]' <<<"${failures}")
+                failureMessages+=("限额自动执行计划生成失败")
                 rc=1
             elif ! subscriptionQuotaValidatePlan "${quotaPlan}"; then
-                failures=$(jq '. + ["限额自动执行计划格式无效"]' <<<"${failures}")
+                failureMessages+=("限额自动执行计划格式无效")
                 rc=1
             elif [[ "${quotaPlan}" != '[]' ]]; then
                 postSyncTrafficRequired=true
                 if ! applySubscriptionQuotaPlanTransaction "${quotaPlan}"; then
-                    failures=$(jq --arg message "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-限额自动执行失败}" '. + [$message]' <<<"${failures}")
+                    failureMessages+=("${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-限额自动执行失败}")
                     rc=1
                 fi
             fi
@@ -1200,9 +1202,9 @@ runSubscriptionGroupSyncUnlocked() {
     fi
 
     subscriptionSyncCreateLocalApplyBackups configBackupDir outputBackupDir groupsBackupFile || {
-        failures=$(jq '. + ["本机同步前配置备份失败"]' <<<"${failures}")
+        failureMessages+=("本机同步前配置备份失败")
         if [[ "${SUBSCRIPTION_SYNC_LOCAL_APPLY_BACKUP_STAGE:-}" == "config" ]]; then
-            failures=$(jq '. + ["本机同步前订阅输出备份失败"]' <<<"${failures}")
+            failureMessages+=("本机同步前订阅输出备份失败")
             configBackupDir=
             outputBackupDir=
             groupsBackupFile=
@@ -1233,7 +1235,7 @@ runSubscriptionGroupSyncUnlocked() {
                 subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}" "${outputBackupDir}" "${groupsBackupFile}"
                 localSyncFailure="${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-${localSyncFailure}}"
             fi
-            failures=$(jq --arg message "${localSyncFailure}" '. + [$message]' <<<"${failures}")
+            failureMessages+=("${localSyncFailure}")
             configBackupDir=
             outputBackupDir=
             groupsBackupFile=
@@ -1259,7 +1261,7 @@ runSubscriptionGroupSyncUnlocked() {
                     "恢复旧配置后服务重建仍失败，请检查核心服务日志" \
                     true || true
             fi
-            failures=$(jq --arg message "${localSyncFailure}" '. + [$message]' <<<"${failures}")
+            failureMessages+=("${localSyncFailure}")
             configBackupDir=
             outputBackupDir=
             groupsBackupFile=
@@ -1276,7 +1278,8 @@ runSubscriptionGroupSyncUnlocked() {
     fi
 
     role=$(subscriptionCurrentRoleNormalized) || {
-        failures=$(jq '. + ["订阅服务器角色读取失败"]' <<<"${failures}")
+        failureMessages+=("订阅服务器角色读取失败")
+        failures=$(jq -cn --args '$ARGS.positional' -- "${failureMessages[@]}") || return 1
         subscriptionSyncMarkResult partial "${failures}" || true
         return 1
     }
@@ -1288,13 +1291,12 @@ runSubscriptionGroupSyncUnlocked() {
             remoteSyncRequired=true
         else
             remoteFailures='["主控控制面已关闭，启用的被控服务器无法同步"]'
-            failures=$(jq -n --argjson failures "${failures}" --argjson remoteFailures "${remoteFailures}" '$failures + $remoteFailures')
             while IFS= read -r sourceId; do
                 [[ -n "${sourceId}" ]] || continue
                 setSubscriptionSourceSyncFailure "${sourceId}" control_disabled "主控控制面已关闭" || controlStateWriteFailed=true
             done < <(jq -r '.[].id' <<<"${remoteSources}")
             if [[ "${controlStateWriteFailed}" == "true" ]]; then
-                failures=$(jq '. + ["主控控制面关闭状态写入失败"]' <<<"${failures}")
+                failureMessages+=("主控控制面关闭状态写入失败")
                 remoteFailures=$(jq '. + ["主控控制面关闭状态写入失败"]' <<<"${remoteFailures}")
             fi
             rc=1
@@ -1302,7 +1304,7 @@ runSubscriptionGroupSyncUnlocked() {
     fi
 
     if [[ "${localSyncReady}" != "true" && "${remoteSyncRequired}" == "true" ]]; then
-        failures=$(jq '. + ["本机同步未完成，已跳过被控服务器同步"]' <<<"${failures}")
+        failureMessages+=("本机同步未完成，已跳过被控服务器同步")
         rc=1
     fi
 
@@ -1312,14 +1314,13 @@ runSubscriptionGroupSyncUnlocked() {
         if ! remoteSyncResult=$(runSubscriptionRemoteSync "${remoteSources}") ||
             ! remoteResultFields=$(jq -er '
               select(type == "object" and (.failures | type == "array") and (.snapshots | type == "object")) |
-              [.failures | tojson, .snapshots | tojson] | @tsv
+              [(.failures | tojson), (.snapshots | tojson)] | @tsv
             ' <<<"${remoteSyncResult}" 2>/dev/null); then
             remoteFailures='["被控服务器同步结果生成失败"]'
             remoteSnapshots=null
         else
             IFS=$'\t' read -r remoteFailures remoteSnapshots <<<"${remoteResultFields}"
         fi
-        failures=$(jq -n --argjson failures "${failures}" --argjson remoteFailures "${remoteFailures}" '$failures + $remoteFailures')
         if [[ "${remoteFailures}" != "[]" ]]; then
             rc=1
         fi
@@ -1330,12 +1331,12 @@ runSubscriptionGroupSyncUnlocked() {
         subscribeType=
         subscribeDomain=
         if ! readNginxSubscribe; then
-            failures=$(jq '. + ["订阅 Nginx 配置损坏，已跳过公网订阅刷新"]' <<<"${failures}")
+            failureMessages+=("订阅 Nginx 配置损坏，已跳过公网订阅刷新")
             rc=1
         elif [[ -n "${subscribePort:-}" ]]; then
             statusCard "订阅同步" "正在刷新并原子发布订阅节点，请稍候"
             if ! refreshPublishedSubscriptions "${remoteSnapshots}" >/dev/null 2>&1; then
-                failures=$(jq '. + ["同步完成后公网订阅刷新失败"]' <<<"${failures}")
+                failureMessages+=("同步完成后公网订阅刷新失败")
                 rc=1
             fi
         fi
@@ -1356,6 +1357,10 @@ runSubscriptionGroupSyncUnlocked() {
         fi
     fi
 
+    failures=$(jq -cn --args '$ARGS.positional' -- "${failureMessages[@]}") || return 1
+    if [[ "${remoteFailures}" != "[]" ]]; then
+        failures=$(jq -n --argjson failures "${failures}" --argjson remoteFailures "${remoteFailures}" '$failures + $remoteFailures') || return 1
+    fi
     if [[ "${failures}" == "[]" ]]; then
         if subscriptionSyncMarkResult success "${failures}"; then
             successCard "自动同步完成"
