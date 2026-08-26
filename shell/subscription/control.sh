@@ -633,6 +633,8 @@ runSubscriptionRemoteSync() {
     local expectedAccounts
     local snapshotInvalid
     local snapshotError
+    local resultFields
+    local hasSubscriptions
     local -a failureMessages=()
     local selfAddress
     local -a workerArgs=()
@@ -668,10 +670,18 @@ runSubscriptionRemoteSync() {
         false \
         "${workerArgs[@]}") || return 1
     while IFS= read -r sourceResult; do
-        sourceId=$(jq -r '.source_id // empty' <<<"${sourceResult}") || return 1
+        resultFields=$(jq -r '
+          [
+            (.source_id // ""),
+            (.status // ""),
+            (.response.changed | tostring),
+            (.response.plan | tojson),
+            (if ((.response | type) == "object") then ((.response | has("subscriptions")) | tostring) else "false" end)
+          ] | @tsv
+        ' <<<"${sourceResult}") || return 1
+        IFS=$'\t' read -r sourceId status changed plan hasSubscriptions <<<"${resultFields}"
         [[ -n "${sourceId}" ]] || return 1
         [[ -n "${sourceIdSet["${sourceId}"]+x}" ]] || return 1
-        status=$(jq -r '.status // empty' <<<"${sourceResult}") || return 1
         stateWriteFailed=false
         snapshotInvalid=false
         snapshotError=
@@ -686,9 +696,7 @@ runSubscriptionRemoteSync() {
             failureMessages+=("远程服务器源 ${sourceId} 未配置控制 token")
             ;;
         success)
-            changed=$(jq -r '.response.changed' <<<"${sourceResult}") || return 1
-            plan=$(jq -c '.response.plan' <<<"${sourceResult}") || return 1
-            if jq -e '.response | has("subscriptions")' <<<"${sourceResult}" >/dev/null 2>&1; then
+            if [[ "${hasSubscriptions}" == "true" ]]; then
                 expectedAccounts=${expectedAccountsBySource["${sourceId}"]-[]}
                 if sourceSnapshots=$(jq -ce --argjson expectedAccounts "${expectedAccounts}" '
                   .response.subscriptions as $subscriptions
