@@ -488,6 +488,10 @@ subscriptionRemoteSyncPlanForSource() {
     local sourceId
     local payload
     local response
+    local responseFields
+    local responseOk
+    local responseDryRun
+    local responseChanged
     local responsePlan
     local errorMessage
     local requestStatus
@@ -500,14 +504,25 @@ subscriptionRemoteSyncPlanForSource() {
         jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"self_reference", error_detail:{type:"self_reference", message:"服务器源指向当前订阅服务，已跳过以避免递归同步"}, dry_run:$dryRun, request:$payload}'
     else
         if response=$(subscriptionRemoteControlRequest "${source}" sync "${payload}" 2>/dev/null); then
-            if responsePlan=$(jq -ce --argjson dryRun "${dryRun}" '
-              select(.ok == true and
-                (.dry_run == $dryRun) and
-                (.changed | type == "boolean") and
-                (.plan | type == "object")) | .plan
-            ' <<<"${response}" 2>/dev/null) && subscriptionSyncValidateAccountPlan "${responsePlan}"; then
+            if responseFields=$(jq -r --argjson dryRun "${dryRun}" '
+              [
+                ((.ok == true) | tostring),
+                ((.dry_run == $dryRun) | tostring),
+                ((.changed | type == "boolean") | tostring),
+                (if (.plan | type) == "object" then (.plan | tojson) else "" end)
+              ] | @tsv
+            ' <<<"${response}" 2>/dev/null); then
+                IFS=$'\t' read -r responseOk responseDryRun responseChanged responsePlan <<<"${responseFields}"
+            else
+                responseOk=false
+                responseDryRun=false
+                responseChanged=false
+                responsePlan=
+            fi
+            if [[ "${responseOk}" == "true" && "${responseDryRun}" == "true" && "${responseChanged}" == "true" ]] &&
+                subscriptionSyncValidateAccountPlan "${responsePlan}"; then
                 jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" --argjson response "${response}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"success", dry_run:$dryRun, request:$payload, response:$response}'
-            elif jq -e '.ok == true' <<<"${response}" >/dev/null 2>&1; then
+            elif [[ "${responseOk}" == "true" ]]; then
                 errorMessage="远端同步响应格式无效"
                 jq -n --arg sourceId "${sourceId}" --arg errorMessage "${errorMessage}" --argjson payload "${payload}" --argjson response "${response}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"remote_error", error:$errorMessage, error_detail:{type:"invalid_response", message:$errorMessage}, dry_run:$dryRun, request:$payload, response:$response}'
             else
