@@ -471,23 +471,23 @@ collectLocalTrafficSnapshot() {
     local xrayItems='[]'
     local singBoxItems='[]'
     if [[ "${coreInstallType:-}" != "1" && -z "${singBoxConfigPath:-}" ]]; then
-        jq -n '{ok:false, items: []}'
+        printf '%s\n' '{"ok":false,"items":[]}'
         return 1
     fi
     if ! accounts=$(collectLocalTrafficAccounts); then
-        jq -n '{ok:false, items: []}'
+        printf '%s\n' '{"ok":false,"items":[]}'
         return 1
     fi
     if [[ "${accounts}" == '[]' ]]; then
-        jq -n '{ok:true, items: []}'
+        printf '%s\n' '{"ok":true,"items":[]}'
         return
     fi
     if [[ "${coreInstallType:-}" == "1" ]] && ! xrayItems=$(collectXrayTrafficStatsSnapshot "${accounts}"); then
-        jq -n '{ok:false, items: []}'
+        printf '%s\n' '{"ok":false,"items":[]}'
         return 1
     fi
     if [[ -n "${singBoxConfigPath:-}" ]] && ! singBoxItems=$(collectSingBoxTrafficStatsSnapshot "${accounts}"); then
-        jq -n '{ok:false, items: []}'
+        printf '%s\n' '{"ok":false,"items":[]}'
         return 1
     fi
     if ! snapshot=$(jq -cn --argjson accounts "${accounts}" --argjson xray "${xrayItems}" --argjson singBox "${singBoxItems}" '
@@ -506,7 +506,7 @@ collectLocalTrafficSnapshot() {
         }) |
       {ok:true, items:.}
     '); then
-        jq -n '{ok:false, items: []}'
+        printf '%s\n' '{"ok":false,"items":[]}'
         return 1
     fi
     printf '%s\n' "${snapshot}"

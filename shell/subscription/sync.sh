@@ -1048,7 +1048,7 @@ applySubscriptionQuotaPlanTransactionUnlocked() {
         SUBSCRIPTION_SYNC_TRANSACTION_ERROR="限额自动执行时重新检查计划格式失败"
         return 1
     }
-    [[ "$(jq 'length' <<<"${effectivePlan}")" != "0" ]] || return 0
+    [[ "${effectivePlan}" != '[]' ]] || return 0
 
     backupFile=$(createSubscriptionGroupsBackup) || {
         SUBSCRIPTION_SYNC_TRANSACTION_ERROR="限额自动执行前订阅状态备份失败"
@@ -1104,7 +1104,7 @@ executeSubscriptionQuotaPlanMenu() {
         return 1
     }
     showSubscriptionQuotaPlanJson "${quotaPlan}" || return 1
-    if [[ "$(jq 'length' <<<"${quotaPlan}")" == "0" ]]; then
+    if [[ "${quotaPlan}" == '[]' ]]; then
         statusCard "无需处理" "当前没有已超额且仍启用的分享订阅"
         return 0
     fi
@@ -1178,7 +1178,7 @@ runSubscriptionGroupSyncUnlocked() {
             elif ! subscriptionQuotaValidatePlan "${quotaPlan}"; then
                 failures=$(jq '. + ["限额自动执行计划格式无效"]' <<<"${failures}")
                 rc=1
-            elif [[ "$(jq 'length' <<<"${quotaPlan}")" != "0" ]]; then
+            elif [[ "${quotaPlan}" != '[]' ]]; then
                 postSyncTrafficRequired=true
                 if ! applySubscriptionQuotaPlanTransaction "${quotaPlan}"; then
                     failures=$(jq --arg message "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-限额自动执行失败}" '. + [$message]' <<<"${failures}")
