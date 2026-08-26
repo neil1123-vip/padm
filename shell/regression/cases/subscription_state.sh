@@ -1868,6 +1868,7 @@ runSubscriptionGroupSyncRemoteBeforePublishRefreshRegression() (
     local syncRoot="${TMP_DIR}/subscription-group-sync-remote-before-publish-refresh"
     local syncConfigFile="${syncRoot}/xray/02_VLESS_TCP_inbounds.json"
     local callLog="${syncRoot}/calls.log"
+    local snapshotFile="${syncRoot}/snapshot.json"
     local resultStatus="${syncRoot}/mark-status.log"
     local resultFailures="${syncRoot}/mark-failures.log"
     local statusLog="${syncRoot}/status.log"
@@ -1911,21 +1912,31 @@ JSON
     }
     runSubscriptionRemoteSync() {
         printf 'remote-sync\n' >>"${callLog}"
-        printf '{"failures":[],"snapshots":{}}'
+        cat <<'JSON'
+{"failures":[],"snapshots":{"edge-b":{"sub_real_sync_6":{"default":"dmxlc3M6Ly9yZW1vdGUtc25hcHNob3Q=","clash_meta":"proxies:\n- name: sub_real_sync_6-node","sing_box":[{"tag":"sub_real_sync_6-node"}]}}}}
+JSON
     }
     refreshPublishedSubscriptions() {
-        printf 'refresh-publish:%s\n' "$1" >>"${callLog}"
+        printf 'refresh-publish\n' >>"${callLog}"
+        printf '%s\n' "$1" >"${snapshotFile}"
         return 0
     }
 
     regressionExpectStatus 0 runSubscriptionGroupSync
     grep -q '^apply-account-plan$' "${callLog}"
     grep -q '^remote-sync$' "${callLog}"
-    grep -q '^refresh-publish:{}$' "${callLog}"
+    grep -q '^refresh-publish$' "${callLog}"
+    jq -e '
+      .["edge-b"].sub_real_sync_6 == {
+        default:"dmxlc3M6Ly9yZW1vdGUtc25hcHNob3Q=",
+        clash_meta:"proxies:\n- name: sub_real_sync_6-node",
+        sing_box:[{tag:"sub_real_sync_6-node"}]
+      }
+    ' "${snapshotFile}" >/dev/null
     python - <<'PY' "${callLog}"
 import sys
 lines = [line.strip() for line in open(sys.argv[1], encoding='utf-8') if line.strip()]
-assert lines.index('remote-sync') < lines.index('refresh-publish:{}')
+assert lines.index('remote-sync') < lines.index('refresh-publish')
 PY
     [[ "$(<"${resultFailures}")" == "[]" ]]
     grep -qx 'success' "${resultStatus}"

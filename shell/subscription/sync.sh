@@ -1136,7 +1136,7 @@ runSubscriptionGroupSyncUnlocked() {
     local -a failureMessages=()
     local remoteFailures='[]'
     local remoteSyncResult='{"failures":[],"snapshots":{}}'
-    local remoteResultFields
+    local -a remoteResultFields=()
     local remoteSnapshots='{}'
     local syncPlan
     local quotaPlan='[]'
@@ -1311,15 +1311,21 @@ runSubscriptionGroupSyncUnlocked() {
     if [[ "${localSyncReady}" == "true" && "${remoteSyncRequired}" == "true" ]]; then
         postSyncTrafficRequired=true
         statusCard "订阅同步" "正在等待被控服务器同步响应" "单台请求最长 40 秒（含重试），多个服务器并行执行"
+        remoteResultFields=()
         if ! remoteSyncResult=$(runSubscriptionRemoteSync "${remoteSources}") ||
-            ! remoteResultFields=$(jq -er '
-              select(type == "object" and (.failures | type == "array") and (.snapshots | type == "object")) |
-              [(.failures | tojson), (.snapshots | tojson)] | @tsv
-            ' <<<"${remoteSyncResult}" 2>/dev/null); then
+            ! mapfile -d '' -t remoteResultFields < <(
+                jq -j -e '
+                  select(type == "object" and (.failures | type == "array") and (.snapshots | type == "object")) |
+                  [(.failures | tojson), (.snapshots | tojson)] |
+                  map(. , "\u0000") | .[]
+                ' <<<"${remoteSyncResult}" 2>/dev/null
+            ) ||
+            [[ "${#remoteResultFields[@]}" -ne 2 ]]; then
             remoteFailures='["被控服务器同步结果生成失败"]'
             remoteSnapshots=null
         else
-            IFS=$'\t' read -r remoteFailures remoteSnapshots <<<"${remoteResultFields}"
+            remoteFailures=${remoteResultFields[0]}
+            remoteSnapshots=${remoteResultFields[1]}
         fi
         if [[ "${remoteFailures}" != "[]" ]]; then
             rc=1
