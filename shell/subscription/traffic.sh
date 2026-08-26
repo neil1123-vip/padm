@@ -740,11 +740,11 @@ showAdminSubscriptionTraffic() {
 
 showUserSubscriptionTraffic() {
     local userSubscriptionId=$1
-    local result
     local traffic
     local quotaStatus
     local jqProgram
     local quotaStatusJq
+    local -a resultFields=()
     quotaStatusJq=$(subscriptionUserQuotaStatusJq) || return 1
     jqProgram=$(printf '%s\n%s\n%s\n' "$(subscriptionTrafficTotalsJq)" "${quotaStatusJq}" '
       . as $group |
@@ -755,9 +755,13 @@ showUserSubscriptionTraffic() {
         quota_status:(if ($userGroup | type) == "object" then subscriptionUserQuotaStatus($userGroup; $trafficTotal; true) else "" end),
         traffic:$traffic
       }')
-    result=$(subscriptionActiveGroupRead -c --arg id "${userSubscriptionId}" "${jqProgram}") || return 1
-    quotaStatus=$(jq -r '.quota_status' <<<"${result}") || return 1
-    traffic=$(jq -c '.traffic' <<<"${result}") || return 1
+    mapfile -d '' -t resultFields < <(
+        subscriptionActiveGroupRead -j --arg id "${userSubscriptionId}" "${jqProgram} |
+          [.quota_status, (.traffic | tojson)] | map(. , \"\u0000\") | .[]"
+    )
+    [[ "${#resultFields[@]}" -eq 2 ]] || return 1
+    quotaStatus=${resultFields[0]}
+    traffic=${resultFields[1]}
     userResultCard "用户订阅流量"
     menuLine "用户订阅：${userSubscriptionId}"
     menuLine "限额状态：${quotaStatus}"
