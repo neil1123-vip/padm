@@ -677,6 +677,10 @@ runSubscriptionGroupStateQuotaTrafficInvalidInputRegression() {
     if applySubscriptionQuotaPlan '[{"id":"missing","action":"disable-and-remove-local-account"}]' 2>/dev/null; then
         return 1
     fi
+    if applySubscriptionQuotaPlan '[{"id":"team-a","action":"disable-and-remove-local-account"},{"id":"missing","action":"disable-and-remove-local-account"}]' 2>/dev/null; then
+        return 1
+    fi
+    jq -e '.user_groups[] | select(.id == "team-a" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
     if subscriptionSyncApplyAccountPlan '{bad-json' 2>/dev/null; then
         return 1
     fi
@@ -810,13 +814,9 @@ JSON
             [[ -f "${backupFile}" ]] || return 1
             cp "${backupFile}" "${quotaPartialStateFile}" || return 1
         }
-        setUserSubscriptionEnabled() {
-            local id=$1
-            local enabled=$2
-            if [[ "${id}" == "team-b" ]]; then
-                return 1
-            fi
-            subscriptionGroupsStateWrite --arg id "${id}" --argjson enabled "${enabled}" '.user_groups |= map(if .id == $id then .enabled = $enabled else . end)'
+        subscriptionActiveGroupWrite() {
+            subscriptionGroupsStateWrite --arg id team-a '.user_groups |= map(if .id == $id then .enabled = false else . end)' || return 1
+            return 1
         }
         subscriptionSyncApplyAccountPlanTransaction() {
             printf 'called\n' >"${accountPhaseMarker}"

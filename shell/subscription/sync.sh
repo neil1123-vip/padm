@@ -990,21 +990,18 @@ subscriptionQuotaPlanIds() {
 
 applySubscriptionQuotaPlan() {
     local quotaPlan=$1
-    local id
     local planIds
-    local rc=0
     planIds=$(subscriptionQuotaPlanIds "${quotaPlan}") || return 1
-    while IFS= read -r id; do
-        [[ -n "${id}" ]] || continue
-        if ! userSubscriptionExists "${id}"; then
-            rc=1
-            continue
-        fi
-        if ! setUserSubscriptionEnabled "${id}" false; then
-            rc=1
-        fi
-    done <<<"${planIds}"
-    return "${rc}"
+    [[ -n "${planIds}" ]] || return 0
+    subscriptionActiveGroupWrite --argjson plan "${quotaPlan}" '
+      ($plan | map(.id)) as $ids |
+      if (($ids - [.user_groups[]?.id]) | length) > 0 then
+        error("user subscription not found")
+      else
+        .user_groups |= map(.id as $id |
+          if ($ids | index($id)) != null then .enabled = false else . end)
+      end
+    '
 }
 
 applySubscriptionQuotaPlanAccounts() {
