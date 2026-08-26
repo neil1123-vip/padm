@@ -592,8 +592,9 @@ subscriptionRemoteSyncPlan() {
 runSubscriptionRemoteSync() {
     local sources
     local desiredUsersBySource='{}'
+    local sourceIdRows
+    local expectedAccountRows
     local sourceId
-    local source
     local sourceResult
     local syncResults
     local status
@@ -607,12 +608,24 @@ runSubscriptionRemoteSync() {
     local expectedAccounts
     local snapshotInvalid
     local snapshotError
+    local -A sourceIdSet=()
+    local -A expectedAccountsBySource=()
     sources=$(subscriptionRemoteControlSources) || return 1
     if [[ "${sources}" == '[]' ]]; then
         printf '%s\n' '{"failures":[],"snapshots":{}}'
         return 0
     fi
     desiredUsersBySource=$(subscriptionRemoteDesiredUsersBySource "${sources}") || return 1
+    sourceIdRows=$(jq -r '.[].id' <<<"${sources}") || return 1
+    while IFS= read -r sourceId; do
+        [[ -n "${sourceId}" ]] || continue
+        sourceIdSet["${sourceId}"]=1
+    done <<<"${sourceIdRows}"
+    expectedAccountRows=$(jq -r 'to_entries[] | [.key, ([.value[]?.account] | sort | tojson)] | @tsv' <<<"${desiredUsersBySource}") || return 1
+    while IFS=$'\t' read -r sourceId expectedAccounts; do
+        [[ -n "${sourceId}" ]] || continue
+        expectedAccountsBySource["${sourceId}"]=${expectedAccounts}
+    done <<<"${expectedAccountRows}"
     syncResults=$(subscriptionRemoteCollectParallelResults \
         "${sources}" \
         padm-remote-sync.XXXXXX \
@@ -623,7 +636,7 @@ runSubscriptionRemoteSync() {
     while IFS= read -r sourceResult; do
         sourceId=$(jq -r '.source_id // empty' <<<"${sourceResult}") || return 1
         [[ -n "${sourceId}" ]] || return 1
-        source=$(jq -ce --arg sourceId "${sourceId}" '.[] | select(.id == $sourceId)' <<<"${sources}") || return 1
+        [[ -n "${sourceIdSet["${sourceId}"]+x}" ]] || return 1
         status=$(jq -r '.status // empty' <<<"${sourceResult}") || return 1
         stateWriteFailed=false
         snapshotInvalid=false
@@ -642,7 +655,7 @@ runSubscriptionRemoteSync() {
             changed=$(jq -r '.response.changed' <<<"${sourceResult}") || return 1
             plan=$(jq -c '.response.plan' <<<"${sourceResult}") || return 1
             if jq -e '.response | has("subscriptions")' <<<"${sourceResult}" >/dev/null 2>&1; then
-                expectedAccounts=$(jq -c --arg sourceId "${sourceId}" '[.[$sourceId][]?.account] | sort' <<<"${desiredUsersBySource}") || return 1
+                expectedAccounts=${expectedAccountsBySource["${sourceId}"]-[]}
                 if sourceSnapshots=$(jq -ce --argjson expectedAccounts "${expectedAccounts}" '
                   .response.subscriptions as $subscriptions
                   | select(
