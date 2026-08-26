@@ -391,12 +391,13 @@ subscriptionSyncAppendProtocolUser() {
     [[ -f "${file}" ]] || return 0
     if [[ -n "${preferredPath}" ]]; then
         userPath="${preferredPath}"
-    elif jq -e '.inbounds[1].settings.clients' "${file}" >/dev/null 2>&1; then
-        userPath='.inbounds[1].settings.clients'
-    elif jq -e '.inbounds[0].settings.clients' "${file}" >/dev/null 2>&1; then
-        userPath='.inbounds[0].settings.clients'
     else
-        userPath='.inbounds[0].users'
+        userPath=$(jq -r '
+          if .inbounds[1].settings.clients then ".inbounds[1].settings.clients"
+          elif .inbounds[0].settings.clients then ".inbounds[0].settings.clients"
+          else ".inbounds[0].users"
+          end
+        ' "${file}") || return 1
     fi
     currentClients=$(jq -c --arg accountName "${accountName}" "${userPath} // [] | if any(.[]?; (${SUBSCRIPTION_SYNC_MANAGED_ACCOUNT_JQ}) == \$accountName) then null else . end" "${file}") || return 1
     if [[ "${currentClients}" == "null" ]]; then

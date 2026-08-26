@@ -849,6 +849,13 @@ JSON
 
     subscriptionSyncAppendProtocolUser 1 "${targetFile}" '.inbounds[0].settings.clients' another-uuid sub_new
     jq -e '(.inbounds[0].settings.clients | length) == 2' "${targetFile}" >/dev/null
+
+    printf '%s\n' '{"inbounds":[{"settings":{"clients":[{"id":"old-uuid","email":"sub_existing-VLESS_WS"}]}}]}' >"${root}/auto-path.json"
+    subscriptionSyncAppendProtocolUser 1 "${root}/auto-path.json" '' new-uuid sub_new
+    jq -e '
+      (.inbounds[0].settings.clients | length) == 2 and
+      .inbounds[0].settings.clients[1].email == "sub_new-VLESS_WS"
+    ' "${root}/auto-path.json" >/dev/null
 )
 
 runSubscriptionSyncRemoveAccountFromFileRegression() (
