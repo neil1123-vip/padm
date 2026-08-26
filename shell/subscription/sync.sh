@@ -1152,6 +1152,7 @@ runSubscriptionGroupSyncUnlocked() {
     local localTrafficReady=false
     local postSyncTrafficRequired=false
     local localSyncChanged=false
+    local remoteSources='[]'
     local rc=0
     ensureSubscriptionGroupsState || return 1
     readInstallType
@@ -1277,7 +1278,9 @@ runSubscriptionGroupSyncUnlocked() {
         subscriptionSyncMarkResult partial "${failures}" || true
         return 1
     }
-    if [[ "${role}" == "main" ]] && subscriptionHasEnabledRemoteSources; then
+    if [[ "${role}" == "main" ]] &&
+        remoteSources=$(subscriptionRemoteControlSources) &&
+        [[ -n "${remoteSources}" && "${remoteSources}" != '[]' ]]; then
         enabledRemoteSources=true
         if subscriptionRemoteScopeEnabled; then
             remoteSyncRequired=true
@@ -1287,7 +1290,7 @@ runSubscriptionGroupSyncUnlocked() {
             while IFS= read -r sourceId; do
                 [[ -n "${sourceId}" ]] || continue
                 setSubscriptionSourceSyncFailure "${sourceId}" control_disabled "主控控制面已关闭" || controlStateWriteFailed=true
-            done < <(subscriptionActiveGroupRead -r '.sources[]? | select(.role != "main" and .enabled == true) | .id')
+            done < <(jq -r '.[].id' <<<"${remoteSources}")
             if [[ "${controlStateWriteFailed}" == "true" ]]; then
                 failures=$(jq '. + ["主控控制面关闭状态写入失败"]' <<<"${failures}")
                 remoteFailures=$(jq '. + ["主控控制面关闭状态写入失败"]' <<<"${remoteFailures}")
@@ -1304,7 +1307,7 @@ runSubscriptionGroupSyncUnlocked() {
     if [[ "${localSyncReady}" == "true" && "${remoteSyncRequired}" == "true" ]]; then
         postSyncTrafficRequired=true
         statusCard "订阅同步" "正在等待被控服务器同步响应" "单台请求最长 40 秒（含重试），多个服务器并行执行"
-        if ! remoteSyncResult=$(runSubscriptionRemoteSync) ||
+        if ! remoteSyncResult=$(runSubscriptionRemoteSync "${remoteSources}") ||
             ! jq -e '.failures | type == "array"' <<<"${remoteSyncResult}" >/dev/null 2>&1 ||
             ! jq -e '.snapshots | type == "object"' <<<"${remoteSyncResult}" >/dev/null 2>&1; then
             remoteSyncResult='{"failures":["被控服务器同步结果生成失败"],"snapshots":null}'

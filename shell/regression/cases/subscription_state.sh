@@ -1797,6 +1797,8 @@ runSubscriptionGroupSyncRemoteFailureRegression() (
     local syncLocalFile="${syncRoot}/subscribe_local/default/user"
     local syncPublicFile="${syncRoot}/subscribe/default/user"
     local remoteLog="${syncRoot}/remote.log"
+    local remoteArgFile="${syncRoot}/remote-arg.json"
+    local remoteSourceReadLog="${syncRoot}/remote-source-reads.log"
     local reconcileLog="${syncRoot}/reconcile.log"
     local statusLog="${syncRoot}/status.log"
     local resultStatus="${syncRoot}/mark-status.log"
@@ -1812,6 +1814,10 @@ JSON
 
     subscriptionCurrentRoleNormalized() { printf 'main\n'; }
     subscriptionRemoteScopeEnabled() { [[ "${remoteFailureMode}" != "control-disabled" ]]; }
+    subscriptionRemoteControlSources() {
+        printf 'read\n' >>"${remoteSourceReadLog}"
+        subscriptionActiveGroupRead '[.sources[]? | select(.role != "main" and .enabled == true)]'
+    }
     subscriptionSyncPlan() {
         printf '{"create":["sub_team_a"],"remove":[]}'
     }
@@ -1827,6 +1833,7 @@ JSON
     }
     runSubscriptionRemoteSync() {
         printf 'remote\n' >>"${remoteLog}"
+        printf '%s\n' "${1-}" >"${remoteArgFile}"
         printf '{"failures":["被控服务器同步失败"],"snapshots":{"edge-a":null}}'
     }
     refreshPublishedSubscriptions() {
@@ -1846,6 +1853,8 @@ JSON
         jq -e '.sources[] | select(.id == "edge-a" and .last_sync_error.type == "control_disabled")' "$(subscriptionGroupsFile)" >/dev/null
     else
         grep -qx 'remote' "${remoteLog}"
+        [[ "$(wc -l <"${remoteSourceReadLog}")" == "1" ]] || return 1
+        jq -e '. == [{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"edge.example.com","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"}]' "${remoteArgFile}" >/dev/null
         grep -q '被控服务器同步失败' "${resultFailures}"
     fi
     grep -q '本机自动同步完成，但被控服务器同步失败，请查看失败列表' "${statusLog}"

@@ -600,7 +600,7 @@ subscriptionRemoteSyncPlan() {
 }
 
 runSubscriptionRemoteSync() {
-    local sources
+    local sources=${1-}
     local desiredUsersBySource='{}'
     local sourceIdRows
     local expectedAccountRows
@@ -622,7 +622,9 @@ runSubscriptionRemoteSync() {
     local -a workerArgs=()
     local -A sourceIdSet=()
     local -A expectedAccountsBySource=()
-    sources=$(subscriptionRemoteControlSources) || return 1
+    if [[ -z "${sources}" ]]; then
+        sources=$(subscriptionRemoteControlSources) || return 1
+    fi
     if [[ "${sources}" == '[]' ]]; then
         printf '%s\n' '{"failures":[],"snapshots":{}}'
         return 0
