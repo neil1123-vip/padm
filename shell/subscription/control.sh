@@ -50,15 +50,28 @@ subscriptionRemoteControlUrl() {
 
 subscriptionRemoteWireGuardPeerStateFromSource() {
     local source=$1
+    local wireGuardState
     local sourceId
     local publicKey
     local interface
     local endpoint=
     local handshake=0
-    sourceId=$(jq -r '.id // empty' <<<"${source}") || return 1
-    [[ -n "${sourceId}" ]] || return 1
-    publicKey=$(subscriptionWireGuardReadState | jq -r --arg id "${sourceId}" '.peers[]? | select(.id == $id) | .public_key // empty' | head -n 1)
-    [[ -n "${publicKey}" ]] || return 1
+    local -a peerFields=()
+    wireGuardState=$(subscriptionWireGuardReadState) || return 1
+    mapfile -d '' -t peerFields < <(
+        jq -j -s '
+          .[0] as $source |
+          .[1] as $state |
+          [
+            ($source.id // "" | tostring),
+            (first(($state.peers[]? | select(.id == $source.id) | .public_key) // "") | tostring)
+          ] | map(. , "\u0000") | .[]
+        ' < <(printf '%s\n%s\n' "${source}" "${wireGuardState}")
+    )
+    [[ "${#peerFields[@]}" -eq 2 ]] || return 1
+    sourceId=${peerFields[0]}
+    publicKey=${peerFields[1]}
+    [[ -n "${sourceId}" && -n "${publicKey}" ]] || return 1
     command -v wg >/dev/null 2>&1 || return 1
     interface=$(subscriptionWireGuardInterface 2>/dev/null) || return 1
     [[ -n "${interface}" ]] || return 1
