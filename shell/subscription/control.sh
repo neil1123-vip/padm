@@ -1390,7 +1390,8 @@ handleSubscriptionControl() {
 subscriptionControlRenderSubscribeAccounts() (
     local desiredUsers=$1
     local subscribeRoot=
-    local localBase account id defaultContent clashContent singBoxContent subscriptions='{}' snapshot
+    local localBase account id defaultContent clashContent singBoxContent entry subscriptions
+    local -a entries=()
 
     desiredUsers=$(jq -ce 'select(type == "array" and all(.[]?; (.id | type == "string" and length > 0)))' <<<"${desiredUsers}") || return 1
     if [[ "${desiredUsers}" == '[]' ]]; then
@@ -1423,16 +1424,15 @@ subscriptionControlRenderSubscribeAccounts() (
         if [[ -f "${localBase}/sing-box/${account}" ]]; then
             singBoxContent=$(jq -c . "${localBase}/sing-box/${account}") || { padmRemoveCleanupPath "${subscribeRoot}"; return 1; }
         fi
-        snapshot=$(jq -n \
+        entry=$(jq -cn \
+            --arg account "${account}" \
             --arg default "${defaultContent}" \
             --arg clashMeta "${clashContent}" \
             --argjson singBox "${singBoxContent}" \
-            '{default:$default, clash_meta:$clashMeta, sing_box:$singBox}') || { padmRemoveCleanupPath "${subscribeRoot}"; return 1; }
-        subscriptions=$(jq -c --arg account "${account}" --argjson snapshot "${snapshot}" '. + {($account):$snapshot}' <<<"${subscriptions}") || {
-            padmRemoveCleanupPath "${subscribeRoot}"
-            return 1
-        }
+            '{key:$account, value:{default:$default, clash_meta:$clashMeta, sing_box:$singBox}}') || { padmRemoveCleanupPath "${subscribeRoot}"; return 1; }
+        entries+=("${entry}")
     done < <(jq -r '.[].id' <<<"${desiredUsers}")
+    subscriptions=$(printf '%s\n' "${entries[@]}" | jq -cs 'from_entries') || { padmRemoveCleanupPath "${subscribeRoot}"; return 1; }
     (( $(printf '%s' "${subscriptions}" | wc -c) <= 900000 )) || { padmRemoveCleanupPath "${subscribeRoot}"; return 1; }
     padmRemoveCleanupPath "${subscribeRoot}"
     printf '%s\n' "${subscriptions}"
