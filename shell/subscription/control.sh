@@ -648,6 +648,7 @@ runSubscriptionRemoteSync() {
     local resultFields
     local hasSubscriptions
     local -a failureMessages=()
+    local -a snapshotEntries=()
     local selfAddress
     local -a workerArgs=()
     local -A sourceIdSet=()
@@ -729,15 +730,15 @@ runSubscriptionRemoteSync() {
                     )
                   | $subscriptions
                 ' <<<"${sourceResult}"); then
-                    snapshots=$(jq -c --arg sourceId "${sourceId}" --argjson sourceSnapshots "${sourceSnapshots}" '. + {($sourceId):$sourceSnapshots}' <<<"${snapshots}") || return 1
+                    snapshotEntries+=("${sourceId}"$'\t'"${sourceSnapshots}")
                 else
-                    snapshots=$(jq -c --arg sourceId "${sourceId}" '. + {($sourceId):null}' <<<"${snapshots}") || return 1
+                    snapshotEntries+=("${sourceId}"$'\t'null)
                     snapshotError="返回的订阅快照格式无效"
                     failureMessages+=("远程服务器源 ${sourceId} ${snapshotError}")
                     snapshotInvalid=true
                 fi
             else
-                snapshots=$(jq -c --arg sourceId "${sourceId}" '. + {($sourceId):null}' <<<"${snapshots}") || return 1
+                snapshotEntries+=("${sourceId}"$'\t'null)
                 snapshotError="未返回完整订阅快照"
                 failureMessages+=("远程服务器源 ${sourceId} ${snapshotError}")
                 snapshotInvalid=true
@@ -768,12 +769,19 @@ runSubscriptionRemoteSync() {
             ;;
         esac
         if [[ "${status}" != "success" ]]; then
-            snapshots=$(jq -c --arg sourceId "${sourceId}" '. + {($sourceId):null}' <<<"${snapshots}") || return 1
+            snapshotEntries+=("${sourceId}"$'\t'null)
         fi
         if [[ "${stateWriteFailed}" == "true" ]]; then
             failureMessages+=("远程服务器源 ${sourceId} 同步状态写入失败")
         fi
     done < <(jq -c '.[]' <<<"${syncResults}")
+    if ((${#snapshotEntries[@]} > 0)); then
+        snapshots=$(printf '%s\n' "${snapshotEntries[@]}" | jq -Rsc '
+          split("\n") |
+          map(select(length > 0) | split("\t") | {key:.[0], value:(.[1] | fromjson)}) |
+          from_entries
+        ') || return 1
+    fi
     if ((${#failureMessages[@]} > 0)); then
         failures=$(jq -cn --args '$ARGS.positional' -- "${failureMessages[@]}") || return 1
     fi
