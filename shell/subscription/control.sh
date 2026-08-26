@@ -617,8 +617,7 @@ subscriptionRemoteSyncPlan() {
 runSubscriptionRemoteSync() {
     local sources=${1-}
     local desiredUsersBySource='{}'
-    local sourceIdRows
-    local expectedAccountRows
+    local sourceMetadataRows
     local sourceId
     local sourceResult
     local syncResults
@@ -651,16 +650,19 @@ runSubscriptionRemoteSync() {
     if selfAddress=$(subscriptionWireGuardReadState | jq -r '.address // empty'); then
         workerArgs=("${selfAddress}")
     fi
-    sourceIdRows=$(jq -r '.[].id' <<<"${sources}") || return 1
-    while IFS= read -r sourceId; do
-        [[ -n "${sourceId}" ]] || continue
-        sourceIdSet["${sourceId}"]=1
-    done <<<"${sourceIdRows}"
-    expectedAccountRows=$(jq -r 'to_entries[] | [.key, ([.value[]?.account] | sort | tojson)] | @tsv' <<<"${desiredUsersBySource}") || return 1
+    sourceMetadataRows=$(jq -r -s '
+      .[0] as $sources |
+      .[1] as $desiredUsersBySource |
+      $sources[] | [
+        .id,
+        (($desiredUsersBySource[.id] // []) | [.[].account] | sort | tojson)
+      ] | @tsv
+    ' < <(printf '%s\n%s\n' "${sources}" "${desiredUsersBySource}")) || return 1
     while IFS=$'\t' read -r sourceId expectedAccounts; do
         [[ -n "${sourceId}" ]] || continue
+        sourceIdSet["${sourceId}"]=1
         expectedAccountsBySource["${sourceId}"]=${expectedAccounts}
-    done <<<"${expectedAccountRows}"
+    done <<<"${sourceMetadataRows}"
     syncResults=$(subscriptionRemoteCollectParallelResults \
         "${sources}" \
         padm-remote-sync.XXXXXX \
