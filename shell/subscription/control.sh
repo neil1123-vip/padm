@@ -239,11 +239,22 @@ subscriptionRemoteControlHealth() {
     local response
     local statusCode
     local body
+    local validatedBody
     local errorMessage
     local deadline
     local remainingTime
-    sourceMeta=$(jq -c '{id: ((.id // "null") | tostring), name: ((.name // "null") | tostring)}' <<<"${source}") || return 1
-    token=$(jq -r '.control_token // empty' <<<"${source}") || return 1
+    local -a sourceFields=()
+    mapfile -d '' -t sourceFields < <(
+        jq -j '
+          [
+            ({id: ((.id // "null") | tostring), name: ((.name // "null") | tostring)} | tojson),
+            (.control_token // "")
+          ] | map(. , "\u0000") | .[]
+        ' <<<"${source}"
+    )
+    [[ "${#sourceFields[@]}" -eq 2 ]] || return 1
+    sourceMeta=${sourceFields[0]}
+    token=${sourceFields[1]}
     if [[ -z "${token}" ]]; then
         jq -n --argjson sourceMeta "${sourceMeta}" '{id:$sourceMeta.id, name:$sourceMeta.name, ok:false, status:"missing_token", error_detail:{type:"missing_token", message:"未配置控制 token"}}'
         return 0
@@ -277,8 +288,12 @@ subscriptionRemoteControlHealth() {
     }
     statusCode=${response##*$'\n'}
     body=${response%$'\n'*}
-    if [[ "${statusCode}" == "200" ]] && jq -e '.ok == true and (.capabilities | type == "array" and index("health") != null and index("sync") != null and index("traffic") != null)' <<<"${body}" >/dev/null 2>&1; then
-        jq -c --argjson sourceMeta "${sourceMeta}" '. + {id:$sourceMeta.id, name:$sourceMeta.name, ok:true}' <<<"${body}"
+    if [[ "${statusCode}" == "200" ]] &&
+        validatedBody=$(jq -ce --argjson sourceMeta "${sourceMeta}" '
+          select(.ok == true and (.capabilities | type == "array" and index("health") != null and index("sync") != null and index("traffic") != null)) |
+          . + {id:$sourceMeta.id, name:$sourceMeta.name, ok:true}
+        ' <<<"${body}" 2>/dev/null); then
+        printf '%s\n' "${validatedBody}"
         return 0
     fi
     if [[ "${statusCode}" == "401" ]]; then

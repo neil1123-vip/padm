@@ -199,7 +199,16 @@ runRemoteControlHealthRegression() (
     local sourceMissing='{"id":"edge-missing","name":"Edge Missing","scheme":"wireguard","transport":"wireguard","host":"remote.example","port":443}'
     local sourceRemote='{"id":"edge-remote","name":"Edge Remote","control_token":"token","scheme":"wireguard","transport":"wireguard","host":"remote.example","port":443}'
     local sourceUnauthorized='{"id":"edge-auth","name":"Edge Auth","control_token":"token","scheme":"wireguard","transport":"wireguard","host":"remote.example","port":443}'
+    local sourceParseCountFile="${TMP_DIR}/remote-control-health-source-parse-count"
     local response
+
+    : >"${sourceParseCountFile}"
+    jq() {
+        if [[ "$*" == *'control_token'* && "$*" == *'tojson'* ]]; then
+            printf 'x' >>"${sourceParseCountFile}"
+        fi
+        command jq "$@"
+    }
 
     curl() {
         case "${PADM_FAKE_REMOTE_HEALTH_MODE:-}" in
@@ -222,6 +231,7 @@ runRemoteControlHealthRegression() (
     [[ "${response}" == *'"status":"missing_token"'* ]]
     [[ "${response}" == *'"type":"missing_token"'* ]]
     [[ "${response}" == *'未配置控制 token'* ]]
+    [[ "$(wc -c <"${sourceParseCountFile}")" == "1" ]]
 
     response=$(PADM_FAKE_REMOTE_HEALTH_MODE=unauthorized subscriptionRemoteControlHealth "${sourceUnauthorized}" | jq -c .)
     [[ "${response}" == *'"status":"unauthorized"'* ]]
