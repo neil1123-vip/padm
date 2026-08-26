@@ -244,12 +244,13 @@ subscriptionSyncAccountNamesJsonFromIds() {
 
 subscriptionSyncAccountPlanFromIds() {
     local mode=$1
+    local currentAccounts=${2-}
     local desiredAccountsJson
 
     desiredAccountsJson=$(subscriptionSyncAccountNamesJsonFromIds) || return 1
     case "${mode}" in
     sync)
-        subscriptionSyncPlanFromAccounts "${desiredAccountsJson}"
+        subscriptionSyncPlanFromAccounts "${desiredAccountsJson}" "${currentAccounts}"
         ;;
     remove)
         jq -n --argjson remove "${desiredAccountsJson}" '{create:[], remove:$remove}'
@@ -262,9 +263,11 @@ subscriptionSyncAccountPlanFromIds() {
 
 subscriptionSyncPlanFromAccounts() {
     local desiredAccountsJson=$1
-    local currentAccounts
+    local currentAccounts=${2-}
     subscriptionSyncRequireSafeConfigDirs || return 1
-    currentAccounts=$(subscriptionSyncCurrentManagedUsers) || return 1
+    if [[ -z "${currentAccounts}" ]]; then
+        currentAccounts=$(subscriptionSyncCurrentManagedUsers) || return 1
+    fi
     jq -n \
       --argjson desired "${desiredAccountsJson}" \
       --argjson current "${currentAccounts}" \
@@ -273,8 +276,10 @@ subscriptionSyncPlanFromAccounts() {
 
 subscriptionSyncCredentialMismatchAccounts() {
     local desiredUsers=$1
-    local currentCredentials
-    currentCredentials=$(subscriptionSyncConfiguredManagedCredentials) || return 1
+    local currentCredentials=${2-}
+    if [[ -z "${currentCredentials}" ]]; then
+        currentCredentials=$(subscriptionSyncConfiguredManagedCredentials) || return 1
+    fi
     jq -c -n \
       --argjson desiredUsers "${desiredUsers}" \
       --argjson currentCredentials "${currentCredentials}" '
@@ -291,12 +296,16 @@ subscriptionSyncCredentialMismatchAccounts() {
 subscriptionSyncPlanFromDesiredUsers() {
     local desiredUsers=$1
     local desiredIds
+    local currentCredentials
+    local currentAccounts
     local plan
     local credentialUpdates
     desiredIds=$(jq -r '.[].id' <<<"${desiredUsers}") || return 1
-    plan=$(subscriptionSyncAccountPlanFromIds sync <<<"${desiredIds}") || return 1
+    currentCredentials=$(subscriptionSyncConfiguredManagedCredentials) || return 1
+    currentAccounts=$(jq -c '[.[].account] | unique' <<<"${currentCredentials}") || return 1
+    plan=$(subscriptionSyncAccountPlanFromIds sync "${currentAccounts}" <<<"${desiredIds}") || return 1
     subscriptionSyncValidateAccountPlan "${plan}" || return 1
-    credentialUpdates=$(subscriptionSyncCredentialMismatchAccounts "${desiredUsers}") || return 1
+    credentialUpdates=$(subscriptionSyncCredentialMismatchAccounts "${desiredUsers}" "${currentCredentials}") || return 1
     jq -c -n --argjson plan "${plan}" --argjson updates "${credentialUpdates}" '
       $plan
       | .create = ((.create + $updates) | unique)
