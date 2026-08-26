@@ -633,6 +633,7 @@ runSubscriptionRemoteSync() {
     local expectedAccounts
     local snapshotInvalid
     local snapshotError
+    local -a failureMessages=()
     local selfAddress
     local -a workerArgs=()
     local -A sourceIdSet=()
@@ -677,12 +678,12 @@ runSubscriptionRemoteSync() {
         case "${status}" in
         self_reference)
             setSubscriptionSourceSyncFailure "${sourceId}" self_reference "服务器源指向当前订阅服务，已跳过以避免递归同步" || stateWriteFailed=true
-            failures=$(jq --arg sourceId "${sourceId}" '. + ["远程服务器源 " + $sourceId + " 指向当前订阅服务，已跳过"]' <<<"${failures}")
+            failureMessages+=("远程服务器源 ${sourceId} 指向当前订阅服务，已跳过")
             ;;
         missing_token)
             errorMessage=$(jq -r '.error_detail.message // "未配置控制 token"' <<<"${sourceResult}") || return 1
             setSubscriptionSourceSyncFailure "${sourceId}" missing_token "${errorMessage}" || stateWriteFailed=true
-            failures=$(jq --arg sourceId "${sourceId}" '. + ["远程服务器源 " + $sourceId + " 未配置控制 token"]' <<<"${failures}")
+            failureMessages+=("远程服务器源 ${sourceId} 未配置控制 token")
             ;;
         success)
             changed=$(jq -r '.response.changed' <<<"${sourceResult}") || return 1
@@ -709,13 +710,13 @@ runSubscriptionRemoteSync() {
                 else
                     snapshots=$(jq -c --arg sourceId "${sourceId}" '. + {($sourceId):null}' <<<"${snapshots}") || return 1
                     snapshotError="返回的订阅快照格式无效"
-                    failures=$(jq --arg sourceId "${sourceId}" --arg errorMessage "${snapshotError}" '. + ["远程服务器源 " + $sourceId + " " + $errorMessage]' <<<"${failures}") || return 1
+                    failureMessages+=("远程服务器源 ${sourceId} ${snapshotError}")
                     snapshotInvalid=true
                 fi
             else
                 snapshots=$(jq -c --arg sourceId "${sourceId}" '. + {($sourceId):null}' <<<"${snapshots}") || return 1
                 snapshotError="未返回完整订阅快照"
-                failures=$(jq --arg sourceId "${sourceId}" --arg errorMessage "${snapshotError}" '. + ["远程服务器源 " + $sourceId + " " + $errorMessage]' <<<"${failures}") || return 1
+                failureMessages+=("远程服务器源 ${sourceId} ${snapshotError}")
                 snapshotInvalid=true
             fi
             if [[ "${snapshotInvalid}" == "true" ]]; then
@@ -727,17 +728,17 @@ runSubscriptionRemoteSync() {
         remote_error)
             errorMessage=$(jq -r 'if ((.error_detail.message // "") | length) > 0 then .error_detail.message else (.error // "unknown_error") end' <<<"${sourceResult}") || return 1
             setSubscriptionSourceSyncFailure "${sourceId}" remote_error "${errorMessage}" || stateWriteFailed=true
-            failures=$(jq --arg sourceId "${sourceId}" --arg errorMessage "${errorMessage}" '. + ["远程服务器源 " + $sourceId + " 拒绝同步: " + $errorMessage]' <<<"${failures}")
+            failureMessages+=("远程服务器源 ${sourceId} 拒绝同步: ${errorMessage}")
             ;;
         unreachable)
             errorMessage=$(jq -r '.error_detail.message // "不可达或同步请求失败"' <<<"${sourceResult}") || return 1
             setSubscriptionSourceSyncFailure "${sourceId}" unreachable "${errorMessage}" || stateWriteFailed=true
-            failures=$(jq --arg sourceId "${sourceId}" '. + ["远程服务器源 " + $sourceId + " 不可达或同步请求失败"]' <<<"${failures}")
+            failureMessages+=("远程服务器源 ${sourceId} 不可达或同步请求失败")
             ;;
         internal_error)
             errorMessage=$(jq -r '.error_detail.message // "远程同步结果生成失败"' <<<"${sourceResult}") || return 1
             setSubscriptionSourceSyncFailure "${sourceId}" internal_error "${errorMessage}" || stateWriteFailed=true
-            failures=$(jq --arg sourceId "${sourceId}" --arg errorMessage "${errorMessage}" '. + ["远程服务器源 " + $sourceId + " 同步结果生成失败: " + $errorMessage]' <<<"${failures}")
+            failureMessages+=("远程服务器源 ${sourceId} 同步结果生成失败: ${errorMessage}")
             ;;
         *)
             return 1
@@ -747,9 +748,12 @@ runSubscriptionRemoteSync() {
             snapshots=$(jq -c --arg sourceId "${sourceId}" '. + {($sourceId):null}' <<<"${snapshots}") || return 1
         fi
         if [[ "${stateWriteFailed}" == "true" ]]; then
-            failures=$(jq --arg sourceId "${sourceId}" '. + ["远程服务器源 " + $sourceId + " 同步状态写入失败"]' <<<"${failures}") || return 1
+            failureMessages+=("远程服务器源 ${sourceId} 同步状态写入失败")
         fi
     done < <(jq -c '.[]' <<<"${syncResults}")
+    if ((${#failureMessages[@]} > 0)); then
+        failures=$(jq -cn --args '$ARGS.positional' -- "${failureMessages[@]}") || return 1
+    fi
     jq -n --argjson failures "${failures}" --argjson snapshots "${snapshots}" '{failures:$failures, snapshots:$snapshots}'
 }
 
