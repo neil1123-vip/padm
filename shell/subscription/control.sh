@@ -396,6 +396,7 @@ subscriptionRemoteCollectParallelResults() {
     local -a workerArgs=("$@")
     local pids=()
 
+    [[ "${sources}" == '[]' ]] && { printf '[]\n'; return 0; }
     padmCreateTmpRootPath tmpDir "${tmpPattern}" -d || return 1
     mapfile -t sourceList < <(jq -c '.[]' <<<"${sources}")
     for source in "${sourceList[@]}"; do
@@ -607,9 +608,11 @@ runSubscriptionRemoteSync() {
     local snapshotInvalid
     local snapshotError
     sources=$(subscriptionRemoteControlSources) || return 1
-    if [[ "${sources}" != '[]' ]]; then
-        desiredUsersBySource=$(subscriptionRemoteDesiredUsersBySource "${sources}") || return 1
+    if [[ "${sources}" == '[]' ]]; then
+        printf '%s\n' '{"failures":[],"snapshots":{}}'
+        return 0
     fi
+    desiredUsersBySource=$(subscriptionRemoteDesiredUsersBySource "${sources}") || return 1
     syncResults=$(subscriptionRemoteCollectParallelResults \
         "${sources}" \
         padm-remote-sync.XXXXXX \
