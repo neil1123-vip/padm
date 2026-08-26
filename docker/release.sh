@@ -20,6 +20,12 @@ is_digest() {
     [[ "$1" =~ ^sha256:[0-9a-f]{64}$ ]]
 }
 
+is_newer_semver() {
+    local current=$1 candidate=$2
+    [[ "${current}" != "${candidate}" &&
+        "$(printf '%s\n%s\n' "${current}" "${candidate}" | sort -V | tail -n 1)" == "${candidate}" ]]
+}
+
 load_lock() {
     [[ -f "${LOCK_FILE}" && ! -L "${LOCK_FILE}" ]] || die 'versions.lock is missing or unsafe'
     set -a
@@ -33,7 +39,7 @@ script_version() {
 }
 
 validate_lock() {
-    local expected=${1:-} variable scriptVersion
+    local expected=${1:-} variable scriptVersion singBoxVersion
     [[ -f "${VERSION_FILE}" && ! -L "${VERSION_FILE}" ]] || die 'version file is missing or unsafe'
     grep -Env '^(#.*|[[:space:]]*|PADM_LOCK_[A-Z0-9_]+=[A-Za-z0-9._:/@,+-]+)$' \
         "${LOCK_FILE}" >/dev/null && die 'versions.lock contains unsafe syntax' || true
@@ -64,6 +70,18 @@ validate_lock() {
     fi
     [[ "${PADM_LOCK_ALPINE_BASE}" =~ ^alpine:[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]] ||
         die 'Alpine base is not pinned by digest'
+    [[ "${PADM_LOCK_XRAY_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die 'invalid Xray version'
+    [[ "${PADM_LOCK_XRAY_AMD64_ASSET}" == Xray-linux-64.zip &&
+        "${PADM_LOCK_XRAY_ARM64_ASSET}" == Xray-linux-arm64-v8a.zip ]] || die 'invalid Xray assets'
+    [[ "${PADM_LOCK_SING_BOX_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die 'invalid sing-box version'
+    singBoxVersion=${PADM_LOCK_SING_BOX_VERSION#v}
+    [[ "${PADM_LOCK_SING_BOX_AMD64_ASSET}" == "sing-box-${singBoxVersion}-linux-amd64.tar.gz" &&
+        "${PADM_LOCK_SING_BOX_ARM64_ASSET}" == "sing-box-${singBoxVersion}-linux-arm64.tar.gz" ]] ||
+        die 'invalid sing-box assets'
+    [[ "${PADM_LOCK_ACME_SH_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die 'invalid acme.sh version'
+    [[ "${PADM_LOCK_ACME_SH_URL}" == "https://codeload.github.com/acmesh-official/acme.sh/tar.gz/refs/tags/${PADM_LOCK_ACME_SH_VERSION}" ||
+        "${PADM_LOCK_ACME_SH_URL}" == "https://codeload.github.com/acmesh-official/acme.sh/tar.gz/refs/tags/v${PADM_LOCK_ACME_SH_VERSION}" ]] ||
+        die 'invalid acme.sh URL'
     for variable in \
         PADM_LOCK_XRAY_AMD64_SHA256 PADM_LOCK_XRAY_ARM64_SHA256 \
         PADM_LOCK_SING_BOX_AMD64_SHA256 PADM_LOCK_SING_BOX_ARM64_SHA256 \
@@ -71,6 +89,167 @@ validate_lock() {
         [[ "${!variable}" =~ ^[0-9a-f]{64}$ ]] || die "invalid checksum: ${variable}"
     done
     [[ "${PADM_LOCK_PATCHES}" == none ]] || die 'unreviewed build patches are not allowed'
+}
+
+latest_release_tag() {
+    local repository=$1 release tag
+    release=$(gh api "repos/${repository}/releases/latest") || die "failed to query ${repository} release"
+    tag=$(jq -er 'select(.draft == false and .prerelease == false) | .tag_name | select(type == "string")' \
+        <<<"${release}") || die "${repository} has no stable release"
+    printf '%s\n' "${tag}"
+}
+
+download_sha256() {
+    local url=$1 output=$2
+    curl --fail --location --silent --show-error --retry 3 --connect-timeout 15 --max-time 300 \
+        --max-filesize 134217728 --output "${output}" "${url}" || return 1
+    [[ -s "${output}" ]] || return 1
+    sha256sum "${output}" | awk '{print $1}'
+}
+
+refresh_upstreams() {
+    local tool xrayTag singBoxTag singBoxVersion acmeTag acmeVersion tmpRoot changed=false
+    local xrayVersion xrayAmd64Asset xrayAmd64Sha256 xrayArm64Asset xrayArm64Sha256
+    local singBoxAmd64Asset singBoxAmd64Sha256 singBoxArm64Asset singBoxArm64Sha256 acmeUrl acmeSha256
+    local updateXray=false updateSingBox=false updateAcme=false
+    for tool in gh jq curl sha256sum sort tail awk; do
+        command -v "${tool}" >/dev/null 2>&1 || die "missing upstream refresh tool: ${tool}"
+    done
+    validate_lock
+
+    xrayTag=$(latest_release_tag XTLS/Xray-core)
+    singBoxTag=$(latest_release_tag SagerNet/sing-box)
+    acmeTag=$(latest_release_tag acmesh-official/acme.sh)
+    [[ "${xrayTag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "invalid Xray release tag: ${xrayTag}"
+    [[ "${singBoxTag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "invalid sing-box release tag: ${singBoxTag}"
+    [[ "${acmeTag}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "invalid acme.sh release tag: ${acmeTag}"
+    singBoxVersion=${singBoxTag#v}
+    acmeVersion=${acmeTag#v}
+
+    if [[ "${xrayTag#v}" == "${PADM_LOCK_XRAY_VERSION#v}" ]]; then
+        :
+    elif is_newer_semver "${PADM_LOCK_XRAY_VERSION#v}" "${xrayTag#v}"; then
+        updateXray=true
+    else
+        die "Xray latest release ${xrayTag} is older than lock ${PADM_LOCK_XRAY_VERSION}"
+    fi
+    if [[ "${singBoxVersion}" == "${PADM_LOCK_SING_BOX_VERSION#v}" ]]; then
+        :
+    elif is_newer_semver "${PADM_LOCK_SING_BOX_VERSION#v}" "${singBoxVersion}"; then
+        updateSingBox=true
+    else
+        die "sing-box latest release ${singBoxTag} is older than lock ${PADM_LOCK_SING_BOX_VERSION}"
+    fi
+    if [[ "${acmeVersion}" == "${PADM_LOCK_ACME_SH_VERSION}" ]]; then
+        :
+    elif is_newer_semver "${PADM_LOCK_ACME_SH_VERSION}" "${acmeVersion}"; then
+        updateAcme=true
+    else
+        die "acme.sh latest release ${acmeTag} is older than lock ${PADM_LOCK_ACME_SH_VERSION}"
+    fi
+    if [[ "${updateXray}" == false && "${updateSingBox}" == false && "${updateAcme}" == false ]]; then
+        printf 'upstream-lock-current\n'
+        return
+    fi
+
+    tmpRoot=$(mktemp -d "${TMPDIR:-/tmp}/padm-upstream-refresh.XXXXXX")
+    trap 'rm -rf -- "${tmpRoot}"' RETURN
+    xrayVersion=${PADM_LOCK_XRAY_VERSION}
+    xrayAmd64Asset=${PADM_LOCK_XRAY_AMD64_ASSET}
+    xrayAmd64Sha256=${PADM_LOCK_XRAY_AMD64_SHA256}
+    xrayArm64Asset=${PADM_LOCK_XRAY_ARM64_ASSET}
+    xrayArm64Sha256=${PADM_LOCK_XRAY_ARM64_SHA256}
+    singBoxAmd64Asset=${PADM_LOCK_SING_BOX_AMD64_ASSET}
+    singBoxAmd64Sha256=${PADM_LOCK_SING_BOX_AMD64_SHA256}
+    singBoxArm64Asset=${PADM_LOCK_SING_BOX_ARM64_ASSET}
+    singBoxArm64Sha256=${PADM_LOCK_SING_BOX_ARM64_SHA256}
+    acmeUrl=${PADM_LOCK_ACME_SH_URL}
+    acmeSha256=${PADM_LOCK_ACME_SH_SHA256}
+
+    if [[ "${updateXray}" == true ]]; then
+        xrayVersion=${xrayTag}
+        xrayAmd64Asset=Xray-linux-64.zip
+        xrayArm64Asset=Xray-linux-arm64-v8a.zip
+        xrayAmd64Sha256=$(download_sha256 \
+            "https://github.com/XTLS/Xray-core/releases/download/${xrayTag}/${xrayAmd64Asset}" \
+            "${tmpRoot}/${xrayAmd64Asset}") || die 'failed to download Xray amd64 asset'
+        xrayArm64Sha256=$(download_sha256 \
+            "https://github.com/XTLS/Xray-core/releases/download/${xrayTag}/${xrayArm64Asset}" \
+            "${tmpRoot}/${xrayArm64Asset}") || die 'failed to download Xray arm64 asset'
+        changed=true
+        printf 'Xray: %s -> %s\n' "${PADM_LOCK_XRAY_VERSION}" "${xrayTag}"
+    fi
+    if [[ "${updateSingBox}" == true ]]; then
+        singBoxAmd64Asset="sing-box-${singBoxVersion}-linux-amd64.tar.gz"
+        singBoxArm64Asset="sing-box-${singBoxVersion}-linux-arm64.tar.gz"
+        singBoxAmd64Sha256=$(download_sha256 \
+            "https://github.com/SagerNet/sing-box/releases/download/${singBoxTag}/${singBoxAmd64Asset}" \
+            "${tmpRoot}/${singBoxAmd64Asset}") || die 'failed to download sing-box amd64 asset'
+        singBoxArm64Sha256=$(download_sha256 \
+            "https://github.com/SagerNet/sing-box/releases/download/${singBoxTag}/${singBoxArm64Asset}" \
+            "${tmpRoot}/${singBoxArm64Asset}") || die 'failed to download sing-box arm64 asset'
+        changed=true
+        printf 'sing-box: %s -> %s\n' "${PADM_LOCK_SING_BOX_VERSION}" "${singBoxTag}"
+    else
+        singBoxTag=${PADM_LOCK_SING_BOX_VERSION}
+    fi
+    if [[ "${updateAcme}" == true ]]; then
+        acmeUrl="https://codeload.github.com/acmesh-official/acme.sh/tar.gz/refs/tags/${acmeTag}"
+        acmeSha256=$(download_sha256 "${acmeUrl}" "${tmpRoot}/acme.sh.tar.gz") ||
+            die 'failed to download acme.sh archive'
+        changed=true
+        printf 'acme.sh: %s -> %s\n' "${PADM_LOCK_ACME_SH_VERSION}" "${acmeVersion}"
+    else
+        acmeVersion=${PADM_LOCK_ACME_SH_VERSION}
+    fi
+
+    [[ "${changed}" == true ]] || die 'upstream refresh did not produce an update'
+    awk \
+        -v xrayVersion="${xrayVersion}" \
+        -v xrayAmd64Asset="${xrayAmd64Asset}" -v xrayAmd64Sha256="${xrayAmd64Sha256}" \
+        -v xrayArm64Asset="${xrayArm64Asset}" -v xrayArm64Sha256="${xrayArm64Sha256}" \
+        -v singBoxVersion="${singBoxTag}" \
+        -v singBoxAmd64Asset="${singBoxAmd64Asset}" -v singBoxAmd64Sha256="${singBoxAmd64Sha256}" \
+        -v singBoxArm64Asset="${singBoxArm64Asset}" -v singBoxArm64Sha256="${singBoxArm64Sha256}" \
+        -v acmeVersion="${acmeVersion}" -v acmeUrl="${acmeUrl}" -v acmeSha256="${acmeSha256}" '
+        BEGIN {
+            value["PADM_LOCK_XRAY_VERSION"] = xrayVersion
+            value["PADM_LOCK_XRAY_AMD64_ASSET"] = xrayAmd64Asset
+            value["PADM_LOCK_XRAY_AMD64_SHA256"] = xrayAmd64Sha256
+            value["PADM_LOCK_XRAY_ARM64_ASSET"] = xrayArm64Asset
+            value["PADM_LOCK_XRAY_ARM64_SHA256"] = xrayArm64Sha256
+            value["PADM_LOCK_SING_BOX_VERSION"] = singBoxVersion
+            value["PADM_LOCK_SING_BOX_AMD64_ASSET"] = singBoxAmd64Asset
+            value["PADM_LOCK_SING_BOX_AMD64_SHA256"] = singBoxAmd64Sha256
+            value["PADM_LOCK_SING_BOX_ARM64_ASSET"] = singBoxArm64Asset
+            value["PADM_LOCK_SING_BOX_ARM64_SHA256"] = singBoxArm64Sha256
+            value["PADM_LOCK_ACME_SH_VERSION"] = acmeVersion
+            value["PADM_LOCK_ACME_SH_URL"] = acmeUrl
+            value["PADM_LOCK_ACME_SH_SHA256"] = acmeSha256
+        }
+        {
+            key = $0
+            sub(/=.*/, "", key)
+            if (key in value) {
+                print key "=" value[key]
+                seen[key]++
+                next
+            }
+            print
+        }
+        END {
+            for (key in value) if (seen[key] != 1) exit 1
+        }
+    ' "${LOCK_FILE}" >"${tmpRoot}/versions.lock" || die 'failed to update upstream lock values'
+    cp -- "${LOCK_FILE}" "${tmpRoot}/versions.lock.original"
+    mv -- "${tmpRoot}/versions.lock" "${LOCK_FILE}"
+    if ! (validate_lock); then
+        mv -- "${tmpRoot}/versions.lock.original" "${LOCK_FILE}"
+        die 'refreshed upstream lock is invalid'
+    fi
+    trap - RETURN
+    rm -rf -- "${tmpRoot}"
+    printf 'upstream-lock-updated\n'
 }
 
 set_version() {
@@ -245,6 +424,7 @@ usage() {
 usage:
   docker/release.sh validate-lock [VERSION]
   docker/release.sh set-version VERSION
+  docker/release.sh refresh-upstreams
   docker/release.sh validate-manifest FILE
   docker/release.sh manifest --version VERSION --commit SHA --created-at UTC \
     --registry REGISTRY --bundle-url URL --bundle-sha256 SHA256 \
@@ -262,6 +442,10 @@ validate-lock)
 set-version)
     [[ "$#" -eq 2 ]] || { usage; exit 2; }
     set_version "$2"
+    ;;
+refresh-upstreams)
+    [[ "$#" -eq 1 ]] || { usage; exit 2; }
+    refresh_upstreams
     ;;
 validate-manifest)
     [[ "$#" -eq 2 ]] || { usage; exit 2; }

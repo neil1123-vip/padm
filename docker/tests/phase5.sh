@@ -17,7 +17,7 @@ fail() {
     exit 1
 }
 
-for tool in bash jq grep sha256sum; do
+for tool in bash cmp jq grep sha256sum; do
     command -v "${tool}" >/dev/null 2>&1 || fail "missing tool: ${tool}"
 done
 
@@ -26,9 +26,11 @@ SCHEMA_FILE=${PROJECT_ROOT}/docker/contracts/release-manifest.schema.json
 BUILD_WORKFLOW=${PROJECT_ROOT}/.github/workflows/build-images.yml
 PR_WORKFLOW=${PROJECT_ROOT}/.github/workflows/docker-ci.yml
 RELEASE_WORKFLOW=${PROJECT_ROOT}/.github/workflows/create_release.yml
+UPSTREAM_WORKFLOW=${PROJECT_ROOT}/.github/workflows/refresh-upstreams.yml
 FAST_CASES=${PROJECT_ROOT}/shell/regression/cases/fast.sh
 FAST_SUITE=${PROJECT_ROOT}/shell/regression/suites/fast.sh
 for file in "${RELEASE_SCRIPT}" "${SCHEMA_FILE}" "${BUILD_WORKFLOW}" "${PR_WORKFLOW}" "${RELEASE_WORKFLOW}" \
+    "${UPSTREAM_WORKFLOW}" \
     "${PROJECT_ROOT}/docker/tests/image-smoke.sh"; do
     [[ -f "${file}" && ! -L "${file}" ]] || fail "required phase 5 file is missing: ${file}"
 done
@@ -36,6 +38,66 @@ done
 bash -n "${RELEASE_SCRIPT}" "${PROJECT_ROOT}/docker/tests/image-smoke.sh" || fail 'phase 5 shell syntax is invalid'
 jq empty "${SCHEMA_FILE}" || fail 'release manifest schema is invalid JSON'
 bash "${RELEASE_SCRIPT}" validate-lock | grep -qx 'release-lock-ok' || fail 'release lock validation failed'
+
+UPDATER_ROOT=${TEST_ROOT}/updater
+MOCK_BIN=${TEST_ROOT}/mock-bin
+mkdir -p "${UPDATER_ROOT}/docker" "${UPDATER_ROOT}/shell/core" "${MOCK_BIN}"
+cp "${RELEASE_SCRIPT}" "${UPDATER_ROOT}/docker/release.sh"
+cp "${PROJECT_ROOT}/versions.lock" "${UPDATER_ROOT}/versions.lock"
+cp "${PROJECT_ROOT}/shell/core/version.sh" "${UPDATER_ROOT}/shell/core/version.sh"
+cat >"${MOCK_BIN}/gh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+case "$*" in
+*repos/XTLS/Xray-core/releases/latest*) printf '%s\n' '{"tag_name":"v99.1.2","draft":false,"prerelease":false}' ;;
+*repos/SagerNet/sing-box/releases/latest*) printf '%s\n' '{"tag_name":"v9.8.7","draft":false,"prerelease":false}' ;;
+*repos/acmesh-official/acme.sh/releases/latest*) printf '%s\n' '{"tag_name":"v8.7.6","draft":false,"prerelease":false}' ;;
+*) exit 1 ;;
+esac
+EOF
+cat >"${MOCK_BIN}/curl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+output=
+url=
+while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+    --output | -o) output=${2:-}; shift 2 ;;
+    *) url=$1; shift ;;
+    esac
+done
+[[ -n "${output}" && -n "${url}" ]] || exit 1
+case "${url}" in
+*Xray-linux-64.zip) printf '%s' xray-amd64 >"${output}" ;;
+*Xray-linux-arm64-v8a.zip) printf '%s' xray-arm64 >"${output}" ;;
+*sing-box-9.8.7-linux-amd64.tar.gz) printf '%s' sing-box-amd64 >"${output}" ;;
+*sing-box-9.8.7-linux-arm64.tar.gz) printf '%s' sing-box-arm64 >"${output}" ;;
+*acmesh-official/acme.sh/tar.gz/refs/tags/v8.7.6) printf '%s' acme-sh >"${output}" ;;
+*) exit 1 ;;
+esac
+EOF
+chmod +x "${MOCK_BIN}/gh" "${MOCK_BIN}/curl"
+PATH="${MOCK_BIN}:${PATH}" bash "${UPDATER_ROOT}/docker/release.sh" refresh-upstreams >/dev/null ||
+    fail 'upstream lock refresh failed'
+(
+    set -a
+    # shellcheck disable=SC1091
+    . "${UPDATER_ROOT}/versions.lock"
+    set +a
+    [[ "${PADM_LOCK_XRAY_VERSION}" == v99.1.2 ]]
+    [[ "${PADM_LOCK_XRAY_AMD64_SHA256}" == "$(printf '%s' xray-amd64 | sha256sum | awk '{print $1}')" ]]
+    [[ "${PADM_LOCK_XRAY_ARM64_SHA256}" == "$(printf '%s' xray-arm64 | sha256sum | awk '{print $1}')" ]]
+    [[ "${PADM_LOCK_SING_BOX_VERSION}" == v9.8.7 ]]
+    [[ "${PADM_LOCK_SING_BOX_AMD64_ASSET}" == sing-box-9.8.7-linux-amd64.tar.gz ]]
+    [[ "${PADM_LOCK_SING_BOX_ARM64_ASSET}" == sing-box-9.8.7-linux-arm64.tar.gz ]]
+    [[ "${PADM_LOCK_ACME_SH_VERSION}" == 8.7.6 ]]
+    [[ "${PADM_LOCK_ACME_SH_URL}" == */refs/tags/v8.7.6 ]]
+) || fail 'upstream lock refresh produced wrong values'
+cp "${UPDATER_ROOT}/versions.lock" "${UPDATER_ROOT}/versions.lock.once"
+PATH="${MOCK_BIN}:${PATH}" bash "${UPDATER_ROOT}/docker/release.sh" refresh-upstreams >/dev/null ||
+    fail 'idempotent upstream lock refresh failed'
+cmp -s "${UPDATER_ROOT}/versions.lock.once" "${UPDATER_ROOT}/versions.lock" ||
+    fail 'current upstream lock was rewritten'
 
 for name in xray sing-box nginx ops net; do
     jq -n --arg name "${name}" --arg digest "sha256:${IMAGE_DIGEST}" \
@@ -98,11 +160,21 @@ grep -Fq 'needs: [prepare, images]' "${RELEASE_WORKFLOW}" || fail 'Release workf
 grep -Fq 'concurrency:' "${RELEASE_WORKFLOW}" || fail 'Release workflow lacks concurrency'
 grep -Fq 'is_release_commit' "${RELEASE_WORKFLOW}" || fail 'Release workflow lacks release commit guard'
 grep -Fq 'docker/release.sh set-version' "${RELEASE_WORKFLOW}" || fail 'lock/version bump is not unified'
+grep -Fq "cron: '17 3 * * 1'" "${UPSTREAM_WORKFLOW}" || fail 'upstream refresh is not scheduled weekly'
+grep -Fq 'docker/release.sh refresh-upstreams' "${UPSTREAM_WORKFLOW}" ||
+    fail 'upstream workflow does not refresh the lock'
+grep -Fq 'pull-requests: write' "${UPSTREAM_WORKFLOW}" || fail 'upstream workflow cannot create PRs'
+grep -Fq 'actions: write' "${UPSTREAM_WORKFLOW}" || fail 'upstream workflow cannot dispatch Docker CI'
+grep -Fq 'checks: read' "${UPSTREAM_WORKFLOW}" || fail 'upstream workflow cannot read Docker CI status'
+grep -Fq 'gh workflow run docker-ci.yml' "${UPSTREAM_WORKFLOW}" ||
+    fail 'upstream workflow does not dispatch Docker CI'
+grep -Fq 'gh run watch' "${UPSTREAM_WORKFLOW}" || fail 'upstream workflow does not wait for Docker CI'
 grep -Fq 'uses: ./.github/workflows/build-images.yml' "${PR_WORKFLOW}" ||
     fail 'PR workflow does not reuse image workflow'
 grep -Fq 'runDockerPhase5Regression' "${FAST_CASES}" || fail 'phase 5 is not in fast regression cases'
 grep -Fq 'docker-phase5' "${FAST_SUITE}" || fail 'phase 5 is not registered in fast suite'
-if grep -ERn ':[[:space:]]*latest([[:space:]]|$)' "${BUILD_WORKFLOW}" "${PR_WORKFLOW}" "${RELEASE_WORKFLOW}" >/dev/null; then
+if grep -ERn ':[[:space:]]*latest([[:space:]]|$)' \
+    "${BUILD_WORKFLOW}" "${PR_WORKFLOW}" "${RELEASE_WORKFLOW}" "${UPSTREAM_WORKFLOW}" >/dev/null; then
     fail 'phase 5 workflow contains latest image tags'
 fi
 

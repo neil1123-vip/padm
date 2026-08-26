@@ -1,0 +1,115 @@
+name: Refresh Upstream Versions
+
+on:
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  checks: read
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: refresh-upstream-versions
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Check for a pending update
+        id: pending
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          count=$(gh pr list --repo "${GITHUB_REPOSITORY}" --base main --state open --limit 100 \
+            --json headRefName \
+            --jq '[.[] | select(.headRefName | startswith("codex/upstream-versions-"))] | length')
+          if [[ "${count}" -gt 0 ]]; then
+            echo 'skip=true' >>"${GITHUB_OUTPUT}"
+            echo 'A pending upstream update PR already exists.' >>"${GITHUB_STEP_SUMMARY}"
+          else
+            echo 'skip=false' >>"${GITHUB_OUTPUT}"
+          fi
+
+      - name: Refresh stable upstream releases
+        if: steps.pending.outputs.skip != 'true'
+        id: update
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          bash docker/release.sh refresh-upstreams
+          if git diff --quiet -- versions.lock; then
+            echo 'changed=false' >>"${GITHUB_OUTPUT}"
+            echo 'Upstream versions are current.' >>"${GITHUB_STEP_SUMMARY}"
+          else
+            echo 'changed=true' >>"${GITHUB_OUTPUT}"
+            git diff -- versions.lock
+          fi
+
+      - name: Validate the refreshed lock
+        if: steps.update.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n docker/release.sh
+          git diff --check
+          bash docker/release.sh validate-lock
+          bash docker/tests/phase5.sh
+
+      - name: Open update PR and dispatch Docker CI
+        if: steps.update.outputs.changed == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          set -a
+          . ./versions.lock
+          set +a
+          branch="codex/upstream-versions-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          title='chore(deps): refresh upstream versions'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "${branch}"
+          git add versions.lock
+          git commit -m "${title}"
+          git push --set-upstream origin "${branch}"
+          body=$(printf '%s\n\n%s\n%s\n%s\n\n%s\n' \
+            'Refresh the pinned stable upstream releases and their downloaded SHA-256 values.' \
+            "- Xray: ${PADM_LOCK_XRAY_VERSION}" \
+            "- sing-box: ${PADM_LOCK_SING_BOX_VERSION}" \
+            "- acme.sh: ${PADM_LOCK_ACME_SH_VERSION}" \
+            'Docker CI is dispatched explicitly for the generated commit.')
+          pr_url=$(gh pr create --repo "${GITHUB_REPOSITORY}" --base main --head "${branch}" \
+            --title "${title}" --body "${body}")
+          ci_url=$(gh workflow run docker-ci.yml --repo "${GITHUB_REPOSITORY}" --ref "${branch}")
+          ci_run_id=${ci_url##*/}
+          if [[ ! "${ci_run_id}" =~ ^[0-9]+$ ]]; then
+            commit_sha=$(git rev-parse HEAD)
+            for _ in {1..30}; do
+              ci_run_id=$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow docker-ci.yml \
+                --branch "${branch}" --commit "${commit_sha}" --event workflow_dispatch --limit 1 \
+                --json databaseId --jq '.[0].databaseId // empty')
+              [[ "${ci_run_id}" =~ ^[0-9]+$ ]] && break
+              sleep 2
+            done
+          fi
+          [[ "${ci_run_id}" =~ ^[0-9]+$ ]] || {
+            echo "Docker CI dispatch did not expose a run id: ${ci_url}" >&2
+            exit 1
+          }
+          gh run watch "${ci_run_id}" --repo "${GITHUB_REPOSITORY}" --exit-status
+          printf 'Created %s and Docker CI run %s passed.\n' "${pr_url}" "${ci_run_id}" >>"${GITHUB_STEP_SUMMARY}"
