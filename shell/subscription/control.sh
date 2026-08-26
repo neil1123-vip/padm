@@ -1085,20 +1085,22 @@ subscriptionControlSetAccountPlanFailure() {
 subscriptionControlApplyAccountPlan() {
     local plan=$1
     local desiredUsers=$2
+    local previousGroupsState=${3-}
     local accountName
     local accountId
     local removeAccounts
     local removeIds='[]'
     local desiredUserIds
-    local previousGroupsState
     local applyError=
     SUBSCRIPTION_SYNC_TRANSACTION_ERROR=
     subscriptionSyncValidateAccountPlan "${plan}" || return 1
-    previousGroupsState=$(subscriptionGroupsStateRead -c '.') || return 1
+    if [[ -z "${previousGroupsState}" ]]; then
+        previousGroupsState=$(subscriptionGroupsStateRead -c '.') || return 1
+    fi
     desiredUserIds=$(jq -c '[.[].id]' <<<"${desiredUsers}") || return 1
-    removeIds=$(subscriptionActiveGroupRead -c --argjson desiredIds "${desiredUserIds}" '
+    removeIds=$(jq -c --argjson desiredIds "${desiredUserIds}" '
       [.user_groups[]?.id | . as $id | select(($desiredIds | index($id)) == null) | $id]
-    ') || return 1
+    ' <<<"${previousGroupsState}") || return 1
     removeAccounts=$(jq -r '(.remove - .create)[]' <<<"${plan}") || return 1
     while IFS= read -r accountName; do
         [[ -n "${accountName}" ]] || continue
@@ -1306,7 +1308,7 @@ subscriptionControlApplySyncUnlocked() {
         return 1
     fi
     SUBSCRIPTION_CONTROL_RESTORE_ERROR=
-    if ! subscriptionControlApplyAccountPlan "${plan}" "${desiredUsers}"; then
+    if ! subscriptionControlApplyAccountPlan "${plan}" "${desiredUsers}" "${previousGroupsState}"; then
         subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
         jq -n --argjson plan "${plan}" --arg message "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-同步计划应用失败}" '{ok:false, changed:true, dry_run:false, error:"apply_plan_failed", error_detail:{type:"apply_plan_failed", message:$message}, plan:$plan}'
         return 1
