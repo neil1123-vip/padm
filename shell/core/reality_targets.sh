@@ -761,6 +761,15 @@ lookupRealityTargetAsn() {
         printf '%s\t%s\n' "${asn}" "$(normalizeAsnOrg "${org}")"
         return 0
     fi
+    response=$(fetchUrlToStdout "https://stat.ripe.net/data/prefix-overview/data.json?resource=${ip}" 1 5 2>/dev/null || true)
+    if [[ -n "${response}" ]] && command -v jq >/dev/null 2>&1; then
+        asn=$(printf '%s\n' "${response}" | jq -r '.data.asns[0].asn // empty' 2>/dev/null)
+        org=$(printf '%s\n' "${response}" | jq -r '.data.asns[0].holder // empty' 2>/dev/null)
+        if [[ "${asn}" =~ ^[0-9]+$ ]]; then
+            printf 'AS%s\t%s\n' "${asn}" "$(normalizeAsnOrg "${org}")"
+            return 0
+        fi
+    fi
     return 1
 }
 
@@ -868,10 +877,26 @@ lookupRealityTargetAsnCached() {
     lookupRealityTargetAsnAndCache "${ip}" "${cacheFile}" "${origin}"
 }
 
+realityTargetPublicIPv4() {
+    local currentIp endpoint
+    currentIp=$(fetchPublicIP 4 2>/dev/null || true)
+    if [[ "${currentIp}" =~ ^[0-9]+(\.[0-9]+){3}$ ]] && padmIsValidHostName "${currentIp}"; then
+        printf '%s\n' "${currentIp}"
+        return 0
+    fi
+    for endpoint in https://api.ipify.org https://ipinfo.io/ip; do
+        currentIp=$(fetchUrlToStdout "${endpoint}" 1 5 2>/dev/null || true)
+        if [[ "${currentIp}" =~ ^[0-9]+(\.[0-9]+){3}$ ]] && padmIsValidHostName "${currentIp}"; then
+            printf '%s\n' "${currentIp}"
+            return 0
+        fi
+    done
+    return 1
+}
+
 currentRealityNetworkProfile() {
     local currentIp profile
-    currentIp=$(fetchUrlToStdout https://api.ipify.org 1 5 2>/dev/null || true)
-    [[ "${currentIp}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+    currentIp=$(realityTargetPublicIPv4) || return 1
     profile=$(lookupRealityTargetAsn "${currentIp}") || return 1
     printf '%s\t%s\n' "${currentIp}" "${profile}"
 }
@@ -2371,7 +2396,7 @@ runRealityScannerPrefixFile() {
 
 runRealityScannerAdvanced() {
     local currentIp scanRange confirm selectedRealityScannerRange
-    currentIp=$(fetchUrlToStdout https://api.ipify.org 3 2>/dev/null || true)
+    currentIp=$(realityTargetPublicIPv4 2>/dev/null || true)
     realityTargetStatusBlock yellow "RealiTLScanner 风险提示" "会扫描目标网段 TLS 证书" "作者建议本地运行；云端扫描可能导致 VPS 被标记"
     autoRead reality_scanner_confirm "确认在本机运行高级扫描？[y/n]:" confirm
     [[ "${confirm}" == "y" ]] || return 1

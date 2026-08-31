@@ -361,6 +361,23 @@ runRealityAsnScanPlanRegression() {
     local sampleCount=0
     local _sampleIp prefixFirst prefixLast prefixUsable
     AUTO_INSTALL=
+    (
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/reality_targets.sh"
+        fetchPublicIP() { printf '999.0.0.1\n'; }
+        fetchUrlToStdout() {
+            case "$1" in
+            https://api.ipify.org) printf '999.0.0.2\n' ;;
+            https://ipinfo.io/ip) printf '203.0.113.10\n' ;;
+            https://api.bgpview.io/ip/203.0.113.10 | https://ipinfo.io/203.0.113.10/org) return 1 ;;
+            'https://stat.ripe.net/data/prefix-overview/data.json?resource=203.0.113.10')
+                printf '%s\n' '{"data":{"asns":[{"asn":64500,"holder":"ExampleNet"}]}}'
+                ;;
+            *) return 1 ;;
+            esac
+        }
+        [[ "$(currentRealityNetworkProfile)" == $'203.0.113.10\tAS64500\tExampleNet' ]]
+    )
     cat >"${asnPrefixFile}" <<'EOF'
 192.0.2.0/24
 198.51.100.0/25
