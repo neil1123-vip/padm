@@ -598,6 +598,7 @@ installSubscribeApply() {
     subscribePublicBase="${subscribePublicBase%/}"
     padmEnsureSafeDirectory "${subscribePublicBase}" || return 1
     padmEnsureSafeDirectory "${nginxStaticPath}" || return 1
+    allowPort "${desiredPort}" || return 1
 
     if [[ "${oldSubscribeConfigState}" == "valid" &&
         "${oldSubscribePort}" == "${desiredPort}" &&
@@ -606,7 +607,9 @@ installSubscribeApply() {
             errorCard "订阅 Nginx 配置校验失败"
             return 1
         }
-        nginxRunning || runSubscribeNginxAction start || return 1
+        if ! nginxRunning || ! subscriptionTcpPortHasListener "${desiredPort}"; then
+            runSubscribeNginxAction refresh || return 1
+        fi
         probeSubscribeTLS "${subscribeServerName}" "${desiredPort}" || {
             errorCard "订阅 HTTPS 本机 SNI/TLS 探测失败"
             return 1
@@ -614,7 +617,6 @@ installSubscribeApply() {
         return 0
     fi
 
-    allowPort "${desiredPort}" || return 1
     checkLogBackupCreate installBackupDir "${targetPath}" || {
         errorCard "订阅 Nginx 配置备份失败"
         return 1

@@ -1,5 +1,45 @@
 #!/usr/bin/env bash
 
+runSubscriptionServiceRuntimeRecoveryRegression() (
+    set -euo pipefail
+    local root="${TMP_DIR}/subscription-service-runtime-recovery"
+    local actionLog="${root}/actions.log"
+    local listenerReady=false
+
+    mkdir -p "${root}/nginx" "${root}/static" "${root}/tls"
+    : >"${actionLog}"
+    nginxConfigPath="${root}/nginx/"
+    nginxStaticPath="${root}/static"
+
+    readNginxSubscribe() {
+        subscribeConfigState=valid
+        subscribeDomain=subscribe.example.com
+        subscribePort=39778
+    }
+    nginxConfigFilePath() { printf '%s\n' "${nginxConfigPath}$1"; }
+    resolveSubscribeServerName() { printf -v "$1" '%s' subscribe.example.com; }
+    resolveSubscribePort() { printf -v "$1" '%s' 39778; }
+    validateSubscribeTargetPort() { return 0; }
+    prepareSubscribeTLSCertificate() { return 0; }
+    tlsManagedDir() { printf '%s\n' "${root}/tls"; }
+    tlsCertificatePairUsable() { return 0; }
+    subscribePublicBaseDir() { printf '%s\n' "${root}/public"; }
+    nginx() { [[ "$1" == "-v" || "$1" == "-t" ]]; }
+    allowPort() { printf 'allow:%s\n' "$1" >>"${actionLog}"; }
+    nginxRunning() { return 0; }
+    subscriptionTcpPortHasListener() { [[ "${listenerReady}" == "true" ]]; }
+    runSubscribeNginxAction() {
+        [[ "$1" == "refresh" ]] || return 1
+        listenerReady=true
+        printf 'refresh\n' >>"${actionLog}"
+    }
+    probeSubscribeTLS() { [[ "${listenerReady}" == "true" ]]; }
+
+    installSubscribeApply
+    grep -qx 'allow:39778' "${actionLog}"
+    grep -qx 'refresh' "${actionLog}"
+)
+
 assertCapturedSubscribeOutputs() {
     local user=$1
     local expectedDefault=$2

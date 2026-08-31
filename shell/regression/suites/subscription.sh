@@ -81,6 +81,7 @@ registerRegressionFunctionLeaf subscription-output-tls-vless-vmess-trojan runSub
 registerRegressionFunctionLeaf subscription-output-tls-any-hysteria-tuic-naive runSubscriptionOutputTlsAnyHysteriaTuicNaiveRegression
 runRegressionSubscriptionSafety() (
     set -euo pipefail
+    runSubscriptionServiceRuntimeRecoveryRegression
     runSubscribeLocalRollbackRegression
     runSubscriptionGroupsBackupFailureRegression
 )
