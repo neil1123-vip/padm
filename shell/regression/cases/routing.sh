@@ -14,7 +14,13 @@ runRoutingRegression() {
 - name: "openai"
 YAML
     rulesJson=$(initSingBoxRules "openai,example.com,full:api.example.com" "regression")
-    jq -e '.ruleSet[0].tag == "geosite_openai_regression" and .suffixRules == ["example.com"] and .domainRules == ["api.example.com"]' <<<"${rulesJson}" >/dev/null
+    jq -e '
+      .ruleSet[0].tag == "geosite_openai_regression" and
+      .ruleSet[0].http_client.detour == "01_direct_outbound" and
+      (.ruleSet[0] | has("download_detour") | not) and
+      .suffixRules == ["example.com"] and
+      .domainRules == ["api.example.com"]
+    ' <<<"${rulesJson}" >/dev/null
     local splitDomainRules splitSuffixRules splitRuleSet splitRuleSetTag
     if splitSingBoxRules '{bad-json' splitDomainRules splitSuffixRules splitRuleSet splitRuleSetTag 2>/dev/null; then
         return 1
@@ -25,7 +31,9 @@ YAML
       .route.rules[0].domain_suffix == ["example.com"] and
       .route.rules[0].domain == ["api.example.com"] and
       (.route.rules[0].domain_regex | not) and
-      .route.rule_set[0].url == "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-openai.srs"
+      .route.rule_set[0].url == "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-openai.srs" and
+      .route.rule_set[0].http_client.detour == "01_direct_outbound" and
+      (.route.rule_set[0] | has("download_detour") | not)
     ' "${singBoxConfigPath}test_route.json" >/dev/null
     [[ "$(getDLCMatchedRuleValue example.com "${singBoxConfigPath}")" == "domain:example.com" ]]
     [[ "$(getDLCMatchedRuleValue full:api.example.com "${singBoxConfigPath}")" == "full:api.example.com" ]]
@@ -137,7 +145,9 @@ JSON
     jq -e '
       .route.rules[0].rule_set == ["geoip_cn_cn_block_ip_route"] and
       .route.rules[0].action == "reject" and
-      .route.rule_set[0].format == "binary"
+      .route.rule_set[0].format == "binary" and
+      .route.rule_set[0].http_client.detour == "01_direct_outbound" and
+      (.route.rule_set[0] | has("download_detour") | not)
     ' "${singBoxConfigPath}cn_block_ip_route.json" >/dev/null
     addSingBoxOutbound "01_direct_outbound"
     jq -e '.outbounds[0].tag == "01_direct_outbound"' "${singBoxConfigPath}01_direct_outbound.json" >/dev/null
@@ -256,7 +266,9 @@ JSON
       .route.default_domain_resolver == "padm-local" and
       (.route.rules[]? | select(.action == "resolve" and .server == "padm-dnsRouting")) and
       (.dns.rules[0].domain_regex | not) and
-      .route.rule_set[0].format == "binary"
+      .route.rule_set[0].format == "binary" and
+      .route.rule_set[0].http_client.detour == "01_direct_outbound" and
+      (.route.rule_set[0] | has("download_detour") | not)
     ' "${singBoxConfigPath}dns.json" >/dev/null
     jq -e '.inbounds[0].tls.reality.handshake.domain_resolver? | not' "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json" >/dev/null
     jq -e '.outbounds[0].domain_resolver? | not' "${singBoxConfigPath}socks5_outbound.json" >/dev/null

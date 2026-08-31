@@ -228,7 +228,7 @@ jq -e '
   .services["sing-box"].devices[0].source == "/dev/net/tun" and
   (.services | has("net-transparent") | not) and .services["net-tun-check"].restart == "no"
 ' "${DOCKER_ROOT}/compose.json" >/dev/null || fail 'TUN service boundary is wrong'
-jq -e 'any(.inbounds[]; .type == "tun" and .interface_name == "padm-tun" and .auto_redirect == true)' \
+jq -e 'any(.inbounds[]; .type == "tun" and .interface_name == "padm-tun" and .dns_mode == "disabled" and .auto_redirect == true)' \
     "${DOCKER_ROOT}/config/sing-box/config.json" >/dev/null || fail 'sing-box TUN inbound is wrong'
 grep -q 'net-tun-check preflight tun' "${DOCKER_LOG}" || fail 'TUN preflight was not called'
 

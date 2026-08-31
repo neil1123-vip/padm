@@ -577,6 +577,7 @@ dockerGenerateSingBoxConfig() {
             tag: "tun-in",
             interface_name: .settings.interface,
             address: [.settings.address],
+            dns_mode: "disabled",
             auto_route: true,
             auto_redirect: true,
             strict_route: true,

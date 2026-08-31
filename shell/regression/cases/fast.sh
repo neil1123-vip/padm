@@ -5222,6 +5222,91 @@ runCoreClientOptionalArgsRegression() {
     )
 }
 
+runSingBox114CompatibilityAuditRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/cores.sh"
+        local root="${TMP_DIR}/sing-box-114-compatibility"
+        local configFile="${root}/deprecated.json"
+        local explicitFile="${root}/explicit.json"
+        local statusFile="${root}/status"
+        local warnFile="${root}/warn"
+        local logFile="${root}/audit.log"
+
+        mkdir -p "${root}"
+        cat >"${configFile}" <<'JSON'
+{
+  "dns": {
+    "independent_cache": true,
+    "rules": [
+      {"rule_set": "query-types"},
+      {"ip_is_private": true}
+    ]
+  },
+  "route": {
+    "rule_set": [
+      {"tag": "query-types", "type": "inline", "rules": [{"query_type": ["A"]}]},
+      {"tag": "legacy", "type": "remote", "url": "https://example.com/legacy.srs", "download_detour": "direct"},
+      {"tag": "implicit", "type": "remote", "url": "https://example.com/implicit.srs"}
+    ]
+  }
+}
+JSON
+        : >"${statusFile}"
+        : >"${warnFile}"
+        : >"${logFile}"
+        singBoxCompatibilityAuditScanJsonFile "${configFile}" "${statusFile}" "${logFile}" "${warnFile}"
+        [[ "$(grep -c '^fail:' "${statusFile}")" -eq 1 ]]
+        grep -q 'DNS 规则混搭' "${statusFile}"
+        [[ "$(grep -c '.' "${warnFile}")" -eq 3 ]]
+        grep -q 'independent_cache' "${warnFile}"
+        grep -q 'download_detour' "${warnFile}"
+        grep -q '默认 HTTP client' "${warnFile}"
+
+        cat >"${explicitFile}" <<'JSON'
+{
+  "http_clients": [{"tag": "rules", "detour": "direct"}],
+  "dns": {
+    "rules": [
+      {"query_type": ["A"]},
+      {"match_response": true, "ip_is_private": true}
+    ]
+  },
+  "route": {
+    "default_http_client": "rules",
+    "rule_set": [
+      {"tag": "explicit", "type": "remote", "url": "https://example.com/explicit.srs"}
+    ]
+  }
+}
+JSON
+        : >"${statusFile}"
+        : >"${warnFile}"
+        : >"${logFile}"
+        singBoxCompatibilityAuditScanJsonFile "${explicitFile}" "${statusFile}" "${logFile}" "${warnFile}"
+        [[ ! -s "${statusFile}" ]]
+        [[ ! -s "${warnFile}" ]]
+
+        local singBoxConfigPath="${root}/merged-default/config/"
+        mkdir -p "${singBoxConfigPath}"
+        cp -- "${explicitFile}" "${root}/merged-default/config.json"
+        printf '%s\n' '{"route":{"rule_set":[{"tag":"implicit","type":"remote","url":"https://example.com/implicit.srs"}]}}' >"${singBoxConfigPath}rules.json"
+        collectSingBoxCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
+        [[ ! -s "${warnFile}" ]]
+
+        jq -e '
+          (.dns | has("independent_cache") | not) and
+          any(.http_clients[]; .tag == "rule-set-proxy" and .detour == "proxy") and
+          .route.default_http_client == "rule-set-proxy" and
+          .route.default_domain_resolver == "dns-local" and
+          all(.route.rule_set[]; has("download_detour") | not)
+        ' "${PROJECT_ROOT}/documents/sing-box.json" >/dev/null
+    )
+}
+
 runRegressionPlatformSmoke() {
     PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_PLATFORM_SMOKE_JOBS:-4}" \
         runParallelRegressionRunners "${TMP_DIR}/platform-smoke-${BASHPID:-$$}" \
@@ -5238,6 +5323,7 @@ runRegressionFastSmoke() {
         wireguard-nginx-path-safety runWriteWireGuardControlNginxPathSafetyRegression \
         random-uuid-entropy runRandomUuidEntropyFallbackRegression \
         auto-install-user-validation runAutoInstallUserValidationRegression \
+        sing-box-1.14-compatibility runSingBox114CompatibilityAuditRegression \
         remove-install-path-safety runRemoveInstallPathSafetyRegression \
         subscription-sync-path-safety runSubscriptionSyncPathSafetyRegression
 }
