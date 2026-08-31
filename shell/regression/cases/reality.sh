@@ -233,6 +233,8 @@ nodejs.org|nodejs.org|Node.js|global|developer|unknown|4|yes|fixture developer
 www.asus.com|www.asus.com|ASUS|asia|large_site|unknown|5|no|fixture asia manual
 www.cloudflare.com|www.cloudflare.com|Cloudflare|global|cdn|yes|6|no|fixture blocked
 www.apple.com|www.apple.com|Apple|global|large_site|unknown|7|no|fixture blocked
+www.java.com|www.java.com|Java|global|large_site|unknown|8|no|fixture blocked relay
+lol.secure.dyn.riotcdn.net|lol.secure.dyn.riotcdn.net|Riot CDN|global|cdn|unknown|9|no|fixture blocked relay
 EOF
     export PADM_REALITY_TARGET_CANDIDATES_FILE="${fixtureFile}"
     REALITY_TARGET_PAGE_SIZE=2
@@ -254,11 +256,14 @@ EOF
     [[ "$(realityTargetCachedAsnSummary "missing.example.com:443")" == "暂无缓存" ]]
     writeRealityTargetCacheLine "www.ibm.com:443" "B" "yes" "2048" "yes" "1234567891" "updated"
     cachedLine=$(realityTargetResultLine "www.ibm.com:443" 2>/dev/null || true)
-    [[ -z "${cachedLine}" ]]
+    [[ "$(realityTargetResultField "${cachedLine}" 10)" == "B" ]]
     [[ "$(realityTargetResultCount)" == "0" ]]
     formatRealityTargetResultLine "legacy.example.com:443" "legacy.example.com" "Legacy" "test" "yes" "192.0.2.45" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567892" "legacy risk" >"${cacheFile}"
+    formatRealityTargetResultLine "www.java.com:443" "www.java.com" "Java" "test" "no" "192.0.2.46" "AS64500" "ExampleNet" "same_asn" "A" "yes" "8192" "yes" "1234567893" "legacy blocked target" >>"${cacheFile}"
     [[ "$(realityTargetResultCount)" == "0" ]]
-    ! realityTargetResultLine "legacy.example.com:443"
+    [[ "$(realityTargetResultField "$(realityTargetResultLine "legacy.example.com:443")" 5)" == "yes" ]]
+    ! grep -qF $'www.java.com:443\t' <<<"$(sortedRealityTargetResults)"
+    grep -qF $'www.ibm.com:443\t' <<<"$(realityTargetRefreshRecords)"
     openssl() {
         printf '%s\n' "$*" >"${ipv6OpenSslArgsFile}"
         printf 'Protocol version: TLSv1.3\n'
@@ -290,6 +295,12 @@ EOF
     unset -f dig
     ! realityTargetCandidates | grep -q '^www.cloudflare.com|'
     ! realityTargetCandidates | grep -q '^www.apple.com|'
+    ! realityTargetCandidates | grep -q '^www.java.com|'
+    ! realityTargetCandidates | grep -q 'riotcdn.net|'
+    realityTargetCandidateBlocked "www.java.com"
+    realityTargetCandidateBlocked "lol.secure.dyn.riotcdn.net"
+    realityTargetCandidateBlocked "WWW.JAVA.COM"
+    realityTargetCandidateBlocked "LOL.SECURE.DYN.RIOTCDN.NET"
 
     selectRealityTargetCandidateInteractive recommended <<<"n
 3
@@ -599,7 +610,7 @@ JSON
 runRealityConfigScannerRegression() {
     local scannerCandidatesFile="${TMP_DIR}/reality-config-scanner-candidates.txt"
     local oldCandidatesFile="${PADM_REALITY_TARGET_CANDIDATES_FILE:-}"
-    local scannerLine refreshScannerLine sameAsnLine batchLinesFile failedTargetsFile emptyLinesFile scannerSummary sameAsnSummary seenDomainsFile
+    local scannerLine refreshScannerLine sameAsnLine batchLinesFile failedTargetsFile emptyLinesFile scannerSummary sameAsnSummary seenDomainsFile endpointResult unsafeLine
     local asnLookupFile="${TMP_DIR}/reality-scanner-asn-lookups.log"
     local concurrencyDir="${TMP_DIR}/reality-scanner-concurrency"
     local refreshConcurrencyDir="${TMP_DIR}/reality-refresh-concurrency"
@@ -625,6 +636,15 @@ EOF
     ! validateRealityTargetSelection manual "relay-sni.example.com:443" "relay-sni.example.com"
     ! validateRealityTargetSelection manual "unknown-risk.example.com:443" "unknown-risk.example.com"
     ! validateRealityTargetSelection manual "multi-risk.example.com:443" "multi-risk.example.com"
+    endpointResult=$(probeRealityTargetEndpoint fake-xray "multi-score.example.com:443" "multi-score.example.com")
+    [[ "$(printf '%s\n' "${endpointResult}" | awk -F'\t' '{print $1 "\t" $2 "\t" $5 "\t" $7}')" == $'no\t198.51.100.53\tC\t2048' ]]
+    [[ "$(printf '%s\n' "${endpointResult}" | awk -F'\t' '{print $9}')" == *"全部 3 个地址按最差评分聚合"* ]]
+    endpointResult=$(probeRealityTargetEndpoint fake-xray "multi-risk.example.com:443" "multi-risk.example.com")
+    [[ "$(printf '%s\n' "${endpointResult}" | awk -F'\t' '{print $1 "\t" $5}')" == $'cloudflare_relay\tC' ]]
+    [[ "$(printf '%s\n' "${endpointResult}" | awk -F'\t' '{print $9}')" == *"全部 3 个地址按最差评分聚合"* ]]
+    [[ "$(realityTargetResultField "$(realityTargetResultLine "manual-b.example.com:443")" 10)" == "B" ]]
+    [[ "$(realityTargetResultField "$(realityTargetResultLine "relay-asn.example.com:443")" 5)" == "cloudflare_relay" ]]
+    [[ "$(realityTargetResultField "$(realityTargetResultLine "unknown-risk.example.com:443")" 5)" == "unknown" ]]
     rm -f "${REALITY_TLS_PING_ARGS_FILE}" "${asnLookupFile}" "${refreshTimeoutLog}"
     export PADM_FAKE_XRAY_CONCURRENCY_DIR="${refreshConcurrencyDir}"
     timeout() {
@@ -637,7 +657,9 @@ EOF
     [[ "$(wc -l <"${REALITY_TLS_PING_ARGS_FILE}" | tr -d ' ')" == "3" ]]
     [[ "$(wc -l <"${asnLookupFile}" | tr -d ' ')" == "2" ]]
     [[ "$(grep -cFx -- '-k 2 15' "${refreshTimeoutLog}")" == "3" ]]
-    ! grep -qF $'fail-auto.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
+    unsafeLine=$(grep -F $'fail-auto.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}")
+    [[ "$(realityTargetResultField "${unsafeLine}" 5)" == "unknown" ]]
+    [[ "$(realityTargetResultField "${unsafeLine}" 10)" == "FAIL" ]]
     grep -qF $'www.ibm.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
     refreshMaxConcurrency=$(sort -nr "${refreshConcurrencyDir}/observed" | head -n 1)
     [[ "${refreshMaxConcurrency}" -ge 2 && "${refreshMaxConcurrency}" -le 4 ]]
@@ -738,7 +760,7 @@ CSV
     writeRealityTargetResultLine "batch-old.example.com:443" "old.example.com" "Old Batch" "test" "unknown" "192.0.2.20" "AS64500" "ExampleNet" "same_asn" "B" "yes" "4096" "yes" "1234567800" "old batch line"
     writeRealityTargetResultLine "single-drop.example.com:443" "single-drop.example.com" "Single Drop" "test" "no" "192.0.2.23" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567800" "old A line"
     writeRealityTargetResultLine "single-drop.example.com:443" "single-drop.example.com" "Single Drop" "test" "unknown" "192.0.2.23" "AS64500" "ExampleNet" "same_asn" "C" "no" "4096" "yes" "1234567801" "new C line"
-    ! grep -qF $'single-drop.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
+    [[ "$(realityTargetResultField "$(realityTargetResultLine "single-drop.example.com:443")" 10)" == "C" ]]
     writeRealityTargetResultLine "batch-drop.example.com:443" "batch-drop.example.com" "Batch Drop" "test" "no" "192.0.2.24" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567800" "old A batch line"
     {
         printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "batch-old.example.com:443" "new.example.com" "New Batch" "test" "no" "192.0.2.21" "AS64500" "ExampleNet" "same_asn" "A" "yes" "8192" "yes" "1234567899" "new batch line"
@@ -749,14 +771,13 @@ CSV
     writeRealityTargetResultLines "${batchLinesFile}"
     batchLine=$(grep -F $'batch-old.example.com:443\tnew.example.com' "${PADM_REALITY_TARGET_SCAN_FILE}")
     [[ "$(realityTargetResultField "${batchLine}" 10)" == "A" ]]
-    ! grep -qF $'batch-new.example.com:443\tbatch-new.example.com' "${PADM_REALITY_TARGET_SCAN_FILE}"
-    ! grep -qF $'batch-drop.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
-    ! grep -qF $'batch-c.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
-    awk -F'\t' '$10 != "A" {exit 1}' "${PADM_REALITY_TARGET_SCAN_FILE}"
+    grep -qF $'batch-new.example.com:443\tbatch-new.example.com' "${PADM_REALITY_TARGET_SCAN_FILE}"
+    [[ "$(realityTargetResultField "$(realityTargetResultLine "batch-drop.example.com:443")" 10)" == "C" ]]
+    grep -qF $'batch-c.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
     formatRealityTargetResultLine "legacy-b.example.com:443" "legacy-b.example.com" "Legacy B" "test" "unknown" "198.51.100.30" "AS64501" "RemoteNet" "different_network" "B" "yes" "4096" "yes" "1234567899" "legacy B" >>"${PADM_REALITY_TARGET_SCAN_FILE}"
     : >"${emptyLinesFile}"
     writeRealityTargetResultLines "${emptyLinesFile}"
-    ! grep -qF $'legacy-b.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
+    grep -qF $'legacy-b.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
     printf '%s\n' "batch-old.example.com:443" >"${failedTargetsFile}"
     printf '%s\n' "batch-old.example.com|batch-old.example.com|Batch Old|global|large_site|unknown|9|yes|batch candidate" >>"${scannerCandidatesFile}"
     removeRealityTargetsFromUnifiedLibrary "${failedTargetsFile}"
@@ -768,8 +789,9 @@ CSV
     unset AUTO_REALITY_SERVER_NAME
     writeRealityTargetResultLine "local.example.com:443" "sni.local.example.com" "Local Example" "test" "no" "192.0.2.1" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "same ASN test target"
     writeRealityTargetResultLine "remote.example.com:443" "sni.remote.example.com" "Remote Example" "test" "no" "198.51.100.1" "AS64501" "RemoteNet" "different_network" "A" "yes" "8192" "yes" "1234567899" "longer cert but different network"
-    writeRealityTargetResultLine "hidden-c.example.com:443" "hidden-c.example.com" "Hidden C" "test" "no" "198.51.100.2" "AS64501" "RemoteNet" "different_network" "C" "no" "4096" "yes" "1234567899" "must not persist"
+    writeRealityTargetResultLine "hidden-c.example.com:443" "hidden-c.example.com" "Hidden C" "test" "no" "198.51.100.2" "AS64501" "RemoteNet" "different_network" "C" "no" "4096" "yes" "1234567899" "must persist but remain unselectable"
     [[ "$(realityTargetResultCount)" == "2" ]]
+    grep -qF $'hidden-c.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
     [[ "$(realityTargetFilterTitle all)" == "全部 A 级" ]]
     ! realityTargetScanResultFilterMatches "C" "same_asn" "all" "test"
     if ! selectRealityTargetFromScanResults <<<"1"; then
@@ -790,6 +812,25 @@ CSV
     [[ "${realityTargetPort}" == "443" ]]
     [[ "${realitySNI}" == "www.ibm.com" ]]
     grep -q "tls ping -ip 192.0.2.1 www.ibm.com:443" "${REALITY_TLS_PING_ARGS_FILE}"
+    (
+        export PADM_REALITY_TARGET_RESULTS_FILE="${TMP_DIR}/reality-singbox-openssl-results.tsv"
+        export PADM_REALITY_TARGET_SCAN_FILE="${PADM_REALITY_TARGET_RESULTS_FILE}"
+        export PADM_REALITY_TARGET_CANDIDATES_FILE="${TMP_DIR}/reality-singbox-openssl-candidates.tsv"
+        printf '%s\n' 'openssl-c.example.com|openssl-c.example.com|OpenSSL C|global|large_site|unknown|1|yes|sing-box fallback fixture' >"${PADM_REALITY_TARGET_CANDIDATES_FILE}"
+        rm -f "${PADM_REALITY_TARGET_RESULTS_FILE}"
+        coreInstallType=2
+        selectCoreType=
+        PADM_REALITY_AUTO_PROBE_LIMIT=1
+        realityTargetDetector() { return 1; }
+        openssl() { return 0; }
+        probeRealityTargetEndpoint() {
+            printf 'no\t192.0.2.70\tAS64500\tExampleNet\tC\tno\tunknown\tyes\tOpenSSL TLS 1.3 fixture\n'
+        }
+        selectAutoRecommendedRealityTarget
+        [[ "${realityTargetHost}" == "openssl-c.example.com" ]]
+        validateRealityTargetSelection auto "openssl-c.example.com:443" "openssl-c.example.com"
+        [[ "$(realityTargetResultField "$(realityTargetResultLine "openssl-c.example.com:443")" 10)" == "C" ]]
+    )
     if [[ -n "${oldCandidatesFile}" ]]; then
         export PADM_REALITY_TARGET_CANDIDATES_FILE="${oldCandidatesFile}"
     else

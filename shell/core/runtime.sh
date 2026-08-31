@@ -874,7 +874,7 @@ showInstallArgsHelp() {
 ├─ 关键概念
 │ TLS 域名/端口: 普通 TLS 协议入口；当前不作为新人首选，传统 TLS 类协议存在更高识别风险
 │ Reality entry: 客户端实际连接地址，通常是自有域名、CDN 入口或服务器 IP
-│ Reality target: REALITY 伪装目标站；自动仅接受 cdn_risk=no 且评分 A，示例域名仅为占位符
+│ Reality target: REALITY 伪装目标站；自动优先 no+A，sing-box 无 Xray 时可回退到 OpenSSL 验证的 no+C
 │ 手工目标: 实测全部 A/AAAA；B/C 警告，Cloudflare 中继风险或探测未知均拒绝
 │ Reality SNI: REALITY 握手 SNI，默认等于 target host
 │ Reality 不申请本机 TLS 证书，也不因安装操作 Nginx；严格域名仅支持单选 Vision 1
@@ -902,7 +902,7 @@ showInstallArgsHelp() {
 │ --reuse-last <yes|no|y|n>               是否复用上次安装配置
 │ --clean-acme <yes|no|y|n>               清空上次配置时是否清理 acme
 │ --reality-domain <yes|no|y|n>           严格域名模式，仅支持单选 Reality Vision 1
-│ --reality-target <host[:port]>          REALITY 伪装目标站；未传自动选择，无安全 A 级结果则失败
+│ --reality-target <host[:port]>          REALITY 伪装目标站；未传自动选择，无可接受的安全结果则失败
 │ --reality-server-name <sni>             REALITY SNI，默认等于 target host
 │ --entry-host <host>                     Reality entry；优先于 --domain、历史 entry、currentHost 和公网 IP
 │ --subscribe-port <port>                 订阅服务端口

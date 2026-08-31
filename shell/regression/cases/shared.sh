@@ -35,7 +35,8 @@ resolveRealityTargetAddresses() {
     case "$1" in
     relay-asn.example.com) printf '203.0.113.35\n' ;;
     relay-sni.example.com) printf '203.0.113.36\n' ;;
-    multi-risk.example.com) printf '192.0.2.1\n203.0.113.35\n' ;;
+    multi-risk.example.com) printf '192.0.2.1\n203.0.113.35\n198.51.100.52\n' ;;
+    multi-score.example.com) printf '192.0.2.1\n198.51.100.52\n198.51.100.53\n' ;;
     unknown-risk.example.com) printf '198.51.100.254\n' ;;
     *) printf '192.0.2.1\n' ;;
     esac
@@ -105,6 +106,14 @@ fake-xray() {
         else
             printf 'Pinging with SNI\nHandshake failure: certificate does not match SNI\n'
         fi
+        return 0
+    fi
+    if [[ ( "$*" == *"multi-score.example.com"* || "$*" == *"multi-risk.example.com"* ) && "$*" == *"-ip 198.51.100.52"* ]]; then
+        printf 'Pinging with SNI\nHandshake succeeded\nTLS version: TLS 1.3\nCertificate chain total length: 4096\n'
+        return 0
+    fi
+    if [[ "$*" == *"multi-score.example.com"* && "$*" == *"-ip 198.51.100.53"* ]]; then
+        printf 'Pinging with SNI\nHandshake succeeded\nTLS version: TLS 1.3\nCertificate chain total length: 2048\n'
         return 0
     fi
     if [[ "$*" == *"manual-b.example.com"* ]]; then
