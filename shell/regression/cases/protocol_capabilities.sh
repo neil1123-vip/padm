@@ -237,7 +237,7 @@ runProtocolCapabilityTemplateRegression() {
 
     currentClients='[{"uuid":"11111111-1111-4111-8111-111111111111","name":"main-VLESS_Reality_Vision"}]'
     ssUsers=$(initSingBoxClients 30)
-    if ! jq -e '.[0].name == "main-shadowsocks" and .[0].password != "11111111-1111-4111-8111-111111111111"' >/dev/null <<<"${ssUsers}"; then
+    if ! jq -e '.[0].name == "main-shadowsocks" and .[0].password != "11111111-1111-4111-8111-111111111111"' <<<"${ssUsers}" >/dev/null; then
         printf 'assert-fail:sing-box Shadowsocks 2022 users should not use UUID as raw key\n' >&2
         return 1
     fi

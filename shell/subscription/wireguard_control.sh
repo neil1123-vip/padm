@@ -165,7 +165,7 @@ subscriptionWireGuardValidInviteId() {
 }
 
 subscriptionWireGuardValidExpiry() {
-    [[ "$1" =~ ^[0-9]+$ ]] && ((10#$1 > 0))
+    [[ "$1" =~ ^[0-9]+$ ]] && ((10#${1} > 0))
 }
 
 subscriptionWireGuardValidPublicKeyValue() {
