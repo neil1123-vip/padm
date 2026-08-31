@@ -990,7 +990,8 @@ CSV
     writeRealityTargetResultLine "hidden-c.example.com:443" "hidden-c.example.com" "Hidden C" "test" "no" "198.51.100.2" "AS64501" "RemoteNet" "different_network" "C" "no" "4096" "yes" "1234567899" "must persist but remain unselectable"
     [[ "$(realityTargetResultCount)" == "2" ]]
     grep -qF $'hidden-c.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
-    [[ "$(realityTargetFilterTitle all)" == "全部 A 级" ]]
+    [[ "$(realityTargetFilterTitle all)" == "全部" ]]
+    [[ "$(selectRealityTargetScanResultFilter <<<"2" 2>/dev/null)" == "same_asn" ]]
     ! realityTargetScanResultFilterMatches "C" "same_asn" "all" "test"
     if ! selectRealityTargetFromScanResults <<<"1"; then
         return 1

@@ -324,9 +324,9 @@ addRealityTargetBlockedCandidate() {
     if [[ -f "${blockedFile}" ]]; then
         cp -p "${blockedFile}" "${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
     fi
-    printf '%s|%s|%s|%s\n' "${host}" "手动加入" "${reason}" "用户手动加入；后续不参与统一目标库刷新和扫描导入" >>"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
+    printf '%s|%s|%s|%s\n' "${host}" "手动加入" "${reason}" "用户手动加入；后续不参与目标库刷新和扫描导入" >>"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
     commitGeneratedFile "${stagedFile}" "${blockedFile}" 644 || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
-    realityTargetStatusBlock green "REALITY 目标站黑名单" "已加入: ${host}" "后续不参与统一目标库刷新和 RealiTLScanner 导入" "当前已安装目标不会自动切换"
+    realityTargetStatusBlock green "REALITY 目标站黑名单" "已加入: ${host}" "后续不参与目标库刷新和 RealiTLScanner 导入" "当前已安装目标不会自动切换"
 }
 
 realityTargetBlockedHostMatches() {
@@ -2570,8 +2570,8 @@ showRealityTargetQualityActions() {
     local target=$1
     local action confirm
     echoContent title "\n┌─ REALITY 目标站后续操作 ─────────────────────────────"
-    menuItem 1 "去查看/切换 A 级目标" "打开统一 A 级目标列表并直接切换"
-    menuItem 2 "加入目标站黑名单" "后续不参与统一目标库刷新和扫描导入"
+    menuItem 1 "查看/切换 A 级目标" "打开目标库中的 A 级目标并切换"
+    menuItem 2 "加入目标站黑名单" "后续不参与目标库刷新和扫描导入"
     menuReturnItem 3 "返回" "回到 REALITY 目标站管理"
     menuClose
     autoRead reality_target_quality_action "请选择后续操作[默认3=返回]:" action
@@ -2606,13 +2606,12 @@ showRealityTargetCachedQuality() {
 
 realityTargetFilterTitle() {
     case "$1" in
-    A|a) printf 'A 级\n' ;;
     same_asn|同ASN) printf '同 ASN\n' ;;
     same_provider|同提供商|相近网络) printf '同提供商\n' ;;
     local_network|同网络|本机网络) printf '同网络\n' ;;
     scanner|扫描)
         printf 'RealiTLScanner\n' ;;
-    all|全部|*) printf '全部 A 级\n' ;;
+    all|全部|*) printf '全部\n' ;;
     esac
 }
 
@@ -2623,9 +2622,6 @@ realityTargetScanResultFilterMatches() {
     local category=${4:-}
     [[ "${score}" == "A" ]] || return 1
     case "${filter}" in
-    A|a)
-        [[ "${score}" == "A" ]]
-        ;;
     same_asn|同ASN)
         [[ "${networkMatch}" == "same_asn" ]]
         ;;
@@ -2647,25 +2643,23 @@ realityTargetScanResultFilterMatches() {
 selectRealityTargetScanResultFilter() {
     local selected
     {
-        echoContent title "\n┌─ REALITY 检测结果范围 ─────────────────────────────"
-        menuItem 1 "全部 A 级" "显示统一结果表中的 A 级目标"
-        menuItem 2 "A 级" "TLS1.3 + X25519MLKEM768 + 证书链长度达标"
-        menuItem 3 "同 ASN" "只看 network=same_asn"
-        menuItem 4 "同提供商" "只看 network=same_provider"
-        menuItem 5 "同网络" "显示 same_asn 和 same_provider"
-        menuItem 6 "RealiTLScanner" "只看 category=scanner 的网段扫描结果"
-        menuReturnItem 7 "返回" "回到 REALITY 目标站管理"
+        echoContent title "\n┌─ REALITY A 级目标筛选 ─────────────────────────────"
+        menuItem 1 "全部" "显示目标库内所有 A 级目标"
+        menuItem 2 "同 ASN" "只看与本机 ASN 相同的 A 级目标"
+        menuItem 3 "同提供商" "只看同一提供商的 A 级目标"
+        menuItem 4 "同网络" "显示同 ASN 和同提供商的 A 级目标"
+        menuItem 5 "RealiTLScanner" "只看网段扫描发现的 A 级目标"
+        menuReturnItem 6 "返回" "回到 REALITY 目标站管理"
         menuClose
     } >&2
-    autoRead reality_target_result_filter "请选择查看范围[默认1=全部 A 级]:" selected
+    autoRead reality_target_result_filter "请选择筛选条件[默认1=全部]：" selected
     case "${selected:-1}" in
     1) printf 'all\n' ;;
-    2) printf 'A\n' ;;
-    3) printf 'same_asn\n' ;;
-    4) printf 'same_provider\n' ;;
-    5) printf 'local_network\n' ;;
-    6) printf 'scanner\n' ;;
-    7|r|R) printf 'return\n' ;;
+    2) printf 'same_asn\n' ;;
+    3) printf 'same_provider\n' ;;
+    4) printf 'local_network\n' ;;
+    5) printf 'scanner\n' ;;
+    6|r|R) printf 'return\n' ;;
     *) return 1 ;;
     esac
 }
@@ -2711,7 +2705,7 @@ showRealityTargetScanResults() {
             [[ -n "${note}" ]] && menuLine "    ${note}"
             pageIndex=$((pageIndex + 1))
         done < <(sortedRealityTargetResults)
-        [[ "${total}" == "0" ]] && menuLine "当前范围没有检测结果"
+        [[ "${total}" == "0" ]] && menuLine "当前筛选没有 A 级目标"
         menuClose
         if [[ "${mode}" == "once" ]]; then
             return 0
@@ -2836,7 +2830,7 @@ scanLocalAsnRealityTargets() {
     if [[ "${refreshScope}" == "all" ]]; then
         refreshSource="全部内置候选"
     elif [[ -s "${resultsFile}" ]]; then
-        refreshSource="统一结果表"
+        refreshSource="目标库"
     else
         refreshSource="推荐候选初始化"
     fi
@@ -2854,9 +2848,9 @@ scanLocalAsnRealityTargets() {
     rest=${networkProfile#*$'\t'}
     currentAsn=${rest%%$'\t'*}
     currentOrg=${rest#*$'\t'}
-    realityTargetStatusBlock yellow "REALITY 目标库质量刷新" "本机公网网络: ${currentIp} ${currentAsn} ${currentOrg}" "检测来源: ${refreshSource}" "写入同一结果表: ${resultsFile}"
+    realityTargetStatusBlock yellow "REALITY 目标库刷新" "本机公网网络: ${currentIp} ${currentAsn} ${currentOrg}" "检测来源: ${refreshSource}" "目标库文件: ${resultsFile}"
     if (( totalCandidates > 0 )); then
-        realityTargetProgressLine "REALITY 目标库质量刷新 0/${totalCandidates} 并发：${maxJobs} 已耗时：0s"
+        realityTargetProgressLine "REALITY 目标库刷新 0/${totalCandidates} 并发：${maxJobs} 已耗时：0s"
         lastProgressAt=${scanStart}
     fi
     while (( index < totalCandidates || running > 0 )); do
@@ -2903,7 +2897,7 @@ scanLocalAsnRealityTargets() {
             if (( lastProgressAt == 0 || now - lastProgressAt >= 10 || processed == totalCandidates )); then
                 parsed=$(parseHostPort "${target}" 443)
                 host=${parsed%:*}
-                realityTargetProgressLine "REALITY 目标库质量刷新 ${processed}/${totalCandidates} 当前：${host} 并发：${maxJobs} 已耗时：$((now - scanStart))s"
+                realityTargetProgressLine "REALITY 目标库刷新 ${processed}/${totalCandidates} 当前：${host} 并发：${maxJobs} 已耗时：$((now - scanStart))s"
                 lastProgressAt=${now}
             fi
         fi
@@ -2953,11 +2947,11 @@ scanLocalAsnRealityTargets() {
     padmRemoveCleanupPath "${failedTargetsFile}"
     padmRemoveCleanupPath "${probeDir}"
     scanSeconds=$(( $(date +%s) - scanStart ))
-    realityTargetStatusBlock green "REALITY 目标库质量刷新" "复测完成" "目标: ${processed}" "并发: ${maxJobs}" "可选 A: ${resolved}" "same_asn: ${sameAsn}" "same_provider: ${sameProvider}" "different_network: ${differentNetwork}" "非候选/失败: ${failed}" "耗时: ${scanSeconds}s"
+    realityTargetStatusBlock green "REALITY 目标库刷新" "复测完成" "目标: ${processed}" "并发: ${maxJobs}" "A 级目标: ${resolved}" "same_asn: ${sameAsn}" "same_provider: ${sameProvider}" "different_network: ${differentNetwork}" "非候选/失败: ${failed}" "耗时: ${scanSeconds}s"
     if [[ "$(realityTargetResultCount)" -gt 0 ]]; then
-        realityTargetStatusBlock green "REALITY 目标库质量刷新" "自动推荐将只使用 cdn_risk=no 的 A 级目标"
+        realityTargetStatusBlock green "REALITY 目标库刷新" "自动推荐将只使用 cdn_risk=no 的 A 级目标"
     else
-        realityTargetStatusBlock yellow "REALITY 目标库质量刷新" "未得到 cdn_risk=no 的 A 级结果" "不会写入未经检测的兜底目标"
+        realityTargetStatusBlock yellow "REALITY 目标库刷新" "未得到 cdn_risk=no 的 A 级目标" "不会写入未经检测的兜底目标"
     fi
 }
 

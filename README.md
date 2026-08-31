@@ -301,7 +301,7 @@ padm 不是单个超长 Bash 文件，而是“独立入口 + 分模块运行时
 | `/etc/padm/wireguard/` | 🔒 主控/被控 WireGuard 控制面状态、密钥和 peer 信息。 |
 | `/etc/wireguard/wg-padm.conf` | 🔒 padm 控制面 WireGuard 配置。 |
 | `/etc/padm/reality_entry_host` | 📍 当前 Reality 客户端入口地址。 |
-| `/etc/padm/reality_targets_results.tsv` | 📊 Reality 目标站统一实测结果表。 |
+| `/etc/padm/reality_targets_results.tsv` | 📊 Reality 目标库，按目标保留最新实测结果。 |
 
 Docker 部署的实际状态源：
 
@@ -403,7 +403,7 @@ Reality entry 按 `--entry-host`、`--domain`、`/etc/padm/reality_entry_host`�
 
 Reality 目标站检测结果继续使用 15 列 TSV 写入 `/etc/padm/reality_targets_results.tsv`，按目标保留最后一次完整结果，包括 B/C、`cloudflare_relay`、`unknown` 与 FAIL；第 5 列为 `no | cloudflare_relay | unknown`，旧值 `yes` 按危险处理。持久化不等于可选择，常规候选仍只从 `no + A` 中筛选。评分包含 TLS 1.3、`X25519MLKEM768` 和证书链长度；可选目标按 `same_asn > same_provider > different_network > unknown`、证书链长度、检测时间排序。
 
-`协议与入口` -> `REALITY 管理` 可查看当前目标、运行 `xray tls ping`、刷新目标库、运行 RealiTLScanner、切换实测结果、查看 PQC/ML-DSA-65 状态和配置 443 共存分流。目标库为空时，普通刷新默认只检测 `recommended=yes` 候选；需要覆盖全部内置/托管候选时可使用“完整扫描全部候选”。
+`协议与入口` -> `REALITY 管理` 可检测当前目标、刷新目标库、运行 RealiTLScanner、切换 A 级目标、查看 PQC/ML-DSA-65 状态和配置 443 共存分流。目标库为空时，普通刷新默认只检测 `recommended=yes` 候选；需要覆盖全部内置/托管候选时可使用“复测全部候选”。
 
 > [!WARNING]
 > **扫描风险：** RealiTLScanner 是高级功能，云端扫描可能导致 VPS 被标记；脚本会在执行前提示确认。

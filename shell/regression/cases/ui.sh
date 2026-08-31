@@ -1451,7 +1451,7 @@ EOF
 10
 6
 7"
-        grep -q "实时查看目标质量" <<<"${output}"
+        grep -q "检测当前目标" <<<"${output}"
         grep -q "目标 ASN（缓存）" <<<"${output}"
         grep -q "网络关系（缓存）" <<<"${output}"
         [[ "$(grep -cF '重新生成 Reality 参数' <<<"${output}")" == "2" ]]

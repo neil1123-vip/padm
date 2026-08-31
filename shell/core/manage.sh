@@ -2869,22 +2869,22 @@ manageRealityTarget() {
     fi
 
     echoContent title "\n┌─ REALITY 目标站管理 ───────────────────────────────"
-    menuLine "当前目标: ${currentTarget}"
-    menuLine "当前 SNI: ${realitySNI:-未知}"
-    menuLine "目标 ASN（缓存）: ${targetAsnSummary}"
-    menuLine "网络关系（缓存）: ${networkMatchSummary}"
-    menuItem 1 "实时查看目标质量" "重新检测 TLS/PQC、ASN 与网络关系，并展示证书链"
-    menuItem 2 "刷新目标库质量" "复测统一目标库，按 TLS/PQC 与 ASN 关系写入结果"
-    menuItem 3 "扫描本机附近网段" "运行 RealiTLScanner，发现目标并导入统一目标库"
-    menuItem 4 "随机抽样同 ASN" "拉取本机 ASN 公告前缀，发现目标并导入统一目标库"
-    menuItem 5 "查看/切换 A 级目标" "分页查看统一 A 级目标并直接切换"
+    menuLine "当前目标：${currentTarget}"
+    menuLine "当前 SNI：${realitySNI:-未知}"
+    menuLine "目标 ASN（缓存）：${targetAsnSummary}"
+    menuLine "网络关系（缓存）：${networkMatchSummary}"
+    menuItem 1 "检测当前目标" "复测 TLS/PQC、ASN 与网络关系，并查看证书链"
+    menuItem 2 "刷新目标库" "复测目标库中的目标并更新质量结果"
+    menuItem 3 "扫描指定网段" "运行 RealiTLScanner，发现目标并加入目标库"
+    menuItem 4 "同 ASN 抽样扫描" "从本机 ASN 公告前缀随机抽样，发现目标并加入目标库"
+    menuItem 5 "查看/切换 A 级目标" "分页查看目标库中的 A 级目标并切换"
     menuItem 6 "手动设置目标站" "输入 host[:port] 和可选 SNI"
-    menuItem 7 "查看目标站黑名单" "显示 CDN/Apple 等不会参与扫描的目标"
-    menuItem 8 "查看 PQC/ML-DSA-65 状态" "展示当前 pqv 与目标站评分"
-    menuItem 9 "完整扫描全部候选" "忽略已有结果范围，复测全部内置/托管候选，耗时较长"
+    menuItem 7 "查看目标站黑名单" "显示不会参与目标库刷新或扫描导入的目标"
+    menuItem 8 "查看 PQC/ML-DSA-65 状态" "显示 ML-DSA-65 验证值与目标站评分"
+    menuItem 9 "复测全部候选" "复测全部内置/托管候选并更新目标库，耗时较长"
     menuReturnItem 10 "返回" "回到 REALITY 管理"
     menuClose
-    autoRead reality_target_manage_menu "请选择:" selectTargetMenu
+    autoRead reality_target_manage_menu "请选择：" selectTargetMenu
     case "${selectTargetMenu}" in
     1)
         if [[ "${currentTarget}" != "未读取到" ]]; then
@@ -2909,9 +2909,9 @@ manageRealityTarget() {
         fi
         ;;
     6)
-        autoRead reality_target "请输入REALITY伪装目标 host[:port]:" targetInput
+        autoRead reality_target "请输入 REALITY 伪装目标 host[:port]：" targetInput
         [[ -n "${targetInput}" ]] || return 1
-        autoRead reality_server_name "请输入SNI[回车默认等于目标 host]:" sniInput
+        autoRead reality_server_name "请输入 SNI[回车默认等于目标 host]：" sniInput
         changeInstalledRealityTarget "${targetInput}" "${sniInput}"
         ;;
     7)
