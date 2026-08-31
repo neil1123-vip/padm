@@ -3053,6 +3053,7 @@ runRemoveInstallPathSafetyRegression() {
 
 runInstallRefreshRestoresBackupRegression() (
     local fixtureDir archiveRoot outputLog archiveDirName refreshTmpRoot restoreFailureDir restoreFailureArchiveRoot restoreFailureOutputLog restoreFailureTmpRoot
+    local realityLibraryLine=$'custom.example.com:443\tcustom.example.com\tCustom Target\tscanner\tno\t192.0.2.80\tAS64500\tExampleNet\tsame_asn\tA\tyes\t4096\tyes\t1234567890\tpreserve across update'
     fixtureDir="${TMP_DIR}/install-refresh-restore"
     archiveDirName="padm-main"
     mkdir -p "${fixtureDir}"
@@ -3069,6 +3070,7 @@ runInstallRefreshRestoresBackupRegression() (
     printf 'old-shell\n' >"${fixtureDir}/shell/marker"
     printf 'old-doc\n' >"${fixtureDir}/documents/marker"
     printf 'old-readme\n' >"${fixtureDir}/README.md"
+    printf '%s\n' "${realityLibraryLine}" >"${fixtureDir}/reality_targets_results.tsv"
     command cp "${fixtureDir}/install.sh" "${archiveRoot}/install.sh"
     printf 'new-shell\n' >"${archiveRoot}/shell/marker"
     printf 'new-doc\n' >"${archiveRoot}/documents/marker"
@@ -3101,6 +3103,21 @@ runInstallRefreshRestoresBackupRegression() (
     [[ "$(<"${fixtureDir}/shell/marker")" == "old-shell" ]]
     [[ "$(<"${fixtureDir}/documents/marker")" == "old-doc" ]]
     [[ "$(<"${fixtureDir}/README.md")" == "old-readme" ]]
+    [[ "$(<"${fixtureDir}/reality_targets_results.tsv")" == "${realityLibraryLine}" ]]
+
+    (
+        set -e
+        TMPDIR="${refreshTmpRoot}"
+        regressionLoadInstallFunctions
+        regressionConfigureInstallRefreshFixture "${fixtureDir}"
+        scriptIsSafeAbsolutePath() { return 0; }
+        regressionMockCurlAvailable
+        curl() { tar -czf "${@: -2:1}" -C "${fixtureDir}/archive" "${REPO_ARCHIVE_DIR}"; }
+        writeModuleManifest() { : >"$1"; }
+        refreshScriptModules 6666666666666666666666666666666666666666
+    ) >"${outputLog}" 2>&1
+    [[ "$(<"${fixtureDir}/shell/marker")" == "new-shell" ]]
+    [[ "$(<"${fixtureDir}/reality_targets_results.tsv")" == "${realityLibraryLine}" ]]
 
     mkdir -p "${restoreFailureDir}/shell" "${restoreFailureDir}/documents" "${restoreFailureDir}/assets" "${restoreFailureArchiveRoot}/shell" "${restoreFailureArchiveRoot}/documents" "${restoreFailureArchiveRoot}/assets" "${restoreFailureTmpRoot}"
     printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${restoreFailureDir}/install.sh"
@@ -3903,6 +3920,7 @@ runValidateInstallTempRootStaysInParentShellRegression() {
 
 runAliasInstallMetadataCopyRegression() (
     local sourceDir targetDir dockerRoot chmodLog shortcutLog shortcutOutput
+    local realityLibraryLine=$'custom.example.com:443\tcustom.example.com\tCustom Target\tscanner\tno\t192.0.2.80\tAS64500\tExampleNet\tsame_asn\tA\tyes\t4096\tyes\t1234567890\tpreserve across update'
     sourceDir="${TMP_DIR}/alias-install-source"
     targetDir="${TMP_DIR}/alias-install-target"
     dockerRoot="${TMP_DIR}/alias-install-docker-root"
@@ -3921,6 +3939,7 @@ EOF
     printf 'manifest\n' >"${sourceDir}/.padm-module-manifest"
     printf 'local-ref\n' >"${sourceDir}/.padm-ref"
     printf 'expected-ref\n' >"${sourceDir}/.padm-entry-ref"
+    printf '%s\n' "${realityLibraryLine}" >"${targetDir}/reality_targets_results.tsv"
 
     SCRIPT_DIR="${sourceDir}"
     PADM_INSTALL_DIR="${targetDir}"
@@ -3940,6 +3959,7 @@ EOF
     cmp -s "${sourceDir}/.padm-entry-ref" "${targetDir}/.padm-entry-ref"
     [[ "$(<"${targetDir}/mode")" == "native" ]]
     [[ ! -e "${dockerRoot}" ]]
+    [[ "$(<"${targetDir}/reality_targets_results.tsv")" == "${realityLibraryLine}" ]]
 
     printf 'old-shell\n' >"${targetDir}/shell/marker"
     printf 'old-docs\n' >"${targetDir}/documents/marker"
@@ -3974,6 +3994,7 @@ EOF
     [[ "$(<"${targetDir}/.padm-entry-ref")" == "old-entry-ref" ]]
     [[ "$(<"${targetDir}/install.sh")" == "old-install" ]]
     [[ "$(<"${targetDir}/mode")" == "native" ]]
+    [[ "$(<"${targetDir}/reality_targets_results.tsv")" == "${realityLibraryLine}" ]]
     grep -Fqx "700 ${targetDir}/install.sh" "${chmodLog}"
 
     : >"${shortcutLog}"

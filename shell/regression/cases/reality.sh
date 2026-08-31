@@ -620,7 +620,7 @@ JSON
 runRealityConfigScannerRegression() {
     local scannerCandidatesFile="${TMP_DIR}/reality-config-scanner-candidates.txt"
     local oldCandidatesFile="${PADM_REALITY_TARGET_CANDIDATES_FILE:-}"
-    local scannerLine refreshScannerLine sameAsnLine batchLinesFile failedTargetsFile emptyLinesFile scannerSummary sameAsnSummary seenDomainsFile endpointResult unsafeLine
+    local scannerLine unknownAsnScannerLine refreshScannerLine sameAsnLine batchLinesFile failedTargetsFile emptyLinesFile scannerSummary sameAsnSummary seenDomainsFile endpointResult unsafeLine asnCacheFile asnCacheProfile asnLookupCount
     local asnLookupFile="${TMP_DIR}/reality-scanner-asn-lookups.log"
     local concurrencyDir="${TMP_DIR}/reality-scanner-concurrency"
     local refreshConcurrencyDir="${TMP_DIR}/reality-refresh-concurrency"
@@ -679,7 +679,8 @@ EOF
     }
     scanLocalAsnRealityTargets
     [[ "$(wc -l <"${REALITY_TLS_PING_ARGS_FILE}" | tr -d ' ')" == "3" ]]
-    [[ "$(wc -l <"${asnLookupFile}" | tr -d ' ')" == "2" ]]
+    asnLookupCount=$(wc -l <"${asnLookupFile}" | tr -d ' ')
+    [[ "${asnLookupCount}" -ge 1 && "${asnLookupCount}" -le 2 ]]
     [[ "$(grep -cFx -- '-k 2 15' "${refreshTimeoutLog}")" == "3" ]]
     unsafeLine=$(grep -F $'fail-auto.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}")
     [[ "$(realityTargetResultField "${unsafeLine}" 5)" == "unknown" ]]
@@ -699,7 +700,8 @@ EOF
     grep -qxF "tls ping -ip 192.0.2.1 www.ibm.com:443" "${REALITY_TLS_PING_ARGS_FILE}"
     grep -qxF "tls ping -ip 192.0.2.1 sni.refresh-scanner.example.com:8443" "${REALITY_TLS_PING_ARGS_FILE}"
     ! grep -qF "fail-auto.example.com" "${REALITY_TLS_PING_ARGS_FILE}"
-    [[ "$(wc -l <"${asnLookupFile}" | tr -d ' ')" == "2" ]]
+    asnLookupCount=$(wc -l <"${asnLookupFile}" | tr -d ' ')
+    [[ "${asnLookupCount}" -ge 1 && "${asnLookupCount}" -le 2 ]]
     [[ "$(grep -cFx -- '-k 2 15' "${refreshTimeoutLog}")" == "4" ]]
     ! grep -qF $'refresh-network-fail.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
     refreshScannerLine=$(grep -F $'refresh-scanner.example.com:8443\tsni.refresh-scanner.example.com\tRefresh Scanner\tscanner\tno\t' "${PADM_REALITY_TARGET_SCAN_FILE}")
@@ -708,6 +710,112 @@ EOF
     resolveRealityTargetAddresses() { printf '192.0.2.1\n'; }
     unset -f timeout
     unset REALITY_ASN_LOOKUP_ARGS_FILE PADM_FAKE_XRAY_CONCURRENCY_DIR PADM_REALITY_SECONDARY_JOBS
+
+    (
+        local rollingDir="${TMP_DIR}/reality-refresh-rolling"
+        local rollingProgressLog="${rollingDir}/progress.log"
+        mkdir -p "${rollingDir}"
+        rm -f "${rollingDir}/slow-active" "${rollingDir}/ninth-started" "${rollingDir}/rolling-observed" \
+            "${rollingProgressLog}" "${rollingDir}/results.tsv"
+        export PADM_REALITY_TARGET_RESULTS_FILE="${rollingDir}/results.tsv"
+        export PADM_REALITY_TARGET_SCAN_FILE="${PADM_REALITY_TARGET_RESULTS_FILE}"
+        unset PADM_REALITY_SECONDARY_JOBS
+        realityTargetRefreshRecords() {
+            local fixtureIndex
+            for ((fixtureIndex = 0; fixtureIndex < 9; fixtureIndex++)); do
+                formatRealityTargetResultLine "rolling-${fixtureIndex}.example.com:443" "rolling-${fixtureIndex}.example.com" \
+                    "Rolling ${fixtureIndex}" "test" "no" "192.0.2.${fixtureIndex}" "AS64500" "ExampleNet" \
+                    "same_asn" "A" "yes" "4096" "yes" "1234567890" "rolling fixture"
+            done
+        }
+        realityTargetProgressLine() { printf '%s\n' "$*" >>"${rollingProgressLog}"; }
+        probeRealityTargetRecord() {
+            local record=$2 target sni name category _rest attempt
+            IFS=$'\t' read -r target sni name category _rest <<<"${record}"
+            case "${target}" in
+            rolling-0.example.com:443)
+                : >"${rollingDir}/slow-active"
+                for ((attempt = 0; attempt < 200; attempt++)); do
+                    if [[ -f "${rollingDir}/ninth-started" ]]; then
+                        : >"${rollingDir}/rolling-observed"
+                        break
+                    fi
+                    command sleep 0.01
+                done
+                command rm -f "${rollingDir}/slow-active"
+                ;;
+            rolling-8.example.com:443)
+                : >"${rollingDir}/ninth-started"
+                [[ -f "${rollingDir}/slow-active" ]] && : >"${rollingDir}/rolling-observed"
+                ;;
+            *)
+                for ((attempt = 0; attempt < 200; attempt++)); do
+                    [[ -f "${rollingDir}/slow-active" ]] && break
+                    command sleep 0.01
+                done
+                ;;
+            esac
+            printf 'OK\t'
+            formatRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" "no" "192.0.2.1" \
+                "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "rolling fixture"
+        }
+        scanLocalAsnRealityTargets >/dev/null
+        grep -qF '并发：8' "${rollingProgressLog}"
+        [[ -f "${rollingDir}/rolling-observed" ]]
+        [[ "$(wc -l <"${PADM_REALITY_TARGET_RESULTS_FILE}" | tr -d ' ')" == "9" ]]
+    )
+
+    (
+        local rollingDir="${TMP_DIR}/reality-scanner-rolling"
+        local rollingCsv="${rollingDir}/scanner.csv"
+        local rollingProgressLog="${rollingDir}/progress.log"
+        local fixtureIndex
+        mkdir -p "${rollingDir}"
+        rm -f "${rollingDir}/slow-active" "${rollingDir}/ninth-started" "${rollingDir}/rolling-observed" \
+            "${rollingProgressLog}" "${rollingDir}/results.tsv" "${rollingCsv}"
+        export PADM_REALITY_TARGET_RESULTS_FILE="${rollingDir}/results.tsv"
+        export PADM_REALITY_TARGET_SCAN_FILE="${PADM_REALITY_TARGET_RESULTS_FILE}"
+        unset PADM_REALITY_SECONDARY_JOBS
+        printf 'IP,ORIGIN,CERT_DOMAIN,CERT_ISSUER,GEO_CODE\n' >"${rollingCsv}"
+        for ((fixtureIndex = 0; fixtureIndex < 9; fixtureIndex++)); do
+            printf '192.0.2.%s,192.0.2.0/24,rolling-scanner-%s.example.com,Test CA,N/A\n' \
+                "$((fixtureIndex + 1))" "${fixtureIndex}" >>"${rollingCsv}"
+        done
+        realityTargetProgressLine() { printf '%s\n' "$*" >>"${rollingProgressLog}"; }
+        probeRealityScannerCandidate() {
+            local ip=$2 domain=$3 attempt
+            case "${domain}" in
+            rolling-scanner-0.example.com)
+                : >"${rollingDir}/slow-active"
+                for ((attempt = 0; attempt < 200; attempt++)); do
+                    if [[ -f "${rollingDir}/ninth-started" ]]; then
+                        : >"${rollingDir}/rolling-observed"
+                        break
+                    fi
+                    command sleep 0.01
+                done
+                command rm -f "${rollingDir}/slow-active"
+                ;;
+            rolling-scanner-8.example.com)
+                : >"${rollingDir}/ninth-started"
+                [[ -f "${rollingDir}/slow-active" ]] && : >"${rollingDir}/rolling-observed"
+                ;;
+            *)
+                for ((attempt = 0; attempt < 200; attempt++)); do
+                    [[ -f "${rollingDir}/slow-active" ]] && break
+                    command sleep 0.01
+                done
+                ;;
+            esac
+            printf 'OK\t'
+            formatRealityTargetResultLine "${domain}:443" "${domain}" "${domain}" "scanner" "no" "${ip}" \
+                "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "rolling scanner fixture"
+        }
+        importRealityScannerResults "${rollingCsv}" "AS64500" "ExampleNet" >/dev/null
+        grep -qF 'TLS/CDN 二次检测 0/9 并发：8' "${rollingProgressLog}"
+        [[ -f "${rollingDir}/rolling-observed" ]]
+        [[ "$(wc -l <"${PADM_REALITY_TARGET_RESULTS_FILE}" | tr -d ' ')" == "9" ]]
+    )
 
     cat >"${TMP_DIR}/realitlscanner.csv" <<'CSV'
 IP,ORIGIN,TLS,ALPN,CURVE,CERT_LENGTH,CERT_SIGNATURE,CERT_PUBLICKEY,CERT_DOMAIN,CERT_ISSUER,GEO_CODE
@@ -718,6 +826,7 @@ IP,ORIGIN,TLS,ALPN,CURVE,CERT_LENGTH,CERT_SIGNATURE,CERT_PUBLICKEY,CERT_DOMAIN,C
 198.51.100.14,198.51.100.0/24,TLS 1.3,h2,X25519,4096,ECDSA,ECDSA,scanner-three.example.com,"Let's Encrypt",N/A
 198.51.100.15,198.51.100.0/24,TLS 1.3,h2,X25519,4096,ECDSA,ECDSA,scanner-four.example.com,"Let's Encrypt",N/A
 198.51.100.16,198.51.100.0/24,TLS 1.3,h2,X25519,4096,ECDSA,ECDSA,scanner-five.example.com,"Let's Encrypt",N/A
+198.51.100.254,198.51.100.128/25,TLS 1.3,h2,X25519,4096,ECDSA,ECDSA,scanner-unknown-asn.example.com,"Let's Encrypt",N/A
 198.51.100.17,198.51.100.0/24,TLS 1.3,h2,X25519,4096,ECDSA,ECDSA,fail.example.com,"Let's Encrypt",N/A
 192.0.2.12,192.0.2.0/24,TLS 1.3,h2,X25519,4096,ECDSA,ECDSA,images.apple.com,"Apple Inc.",N/A
 192.0.2.13,192.0.2.0/24,TLS 1.3,h2,X25519,4096,ECDSA,ECDSA,Common Name,"Test",N/A
@@ -731,19 +840,34 @@ CSV
     rm -f "${REALITY_TLS_PING_ARGS_FILE}" "${asnLookupFile}"
     mkdir -p "${concurrencyDir}"
     export REALITY_ASN_LOOKUP_ARGS_FILE="${asnLookupFile}"
+    asnCacheFile="${TMP_DIR}/reality-scanner-asn-cache.tsv"
+    : >"${asnCacheFile}"
+    asnCacheProfile=$(scannerRealityNetworkProfile "198.51.100.11" "AS64500" "ExampleNet" "198.51.100.0/24" "${asnCacheFile}")
+    [[ "${asnCacheProfile}" == $'AS64501\tRemoteNet\tdifferent_network' ]]
+    asnCacheProfile=$(scannerRealityNetworkProfile "198.51.100.12" "AS64500" "ExampleNet" "198.51.100.0/24" "${asnCacheFile}")
+    [[ "${asnCacheProfile}" == $'AS64501\tRemoteNet\tdifferent_network' ]]
+    asnCacheProfile=$(lookupRealityTargetAsnCached "198.51.100.11" "${asnCacheFile}")
+    [[ "${asnCacheProfile}" == $'AS64501\tRemoteNet' ]]
+    [[ "$(wc -l <"${asnLookupFile}" | tr -d ' ')" == "1" ]]
+    grep -qxF '198.51.100.11' "${asnLookupFile}"
+    rm -f "${asnLookupFile}"
     export PADM_FAKE_XRAY_CONCURRENCY_DIR="${concurrencyDir}"
     export PADM_REALITY_SECONDARY_JOBS=4
     importRealityScannerResults "${TMP_DIR}/realitlscanner.csv" "AS64500" "ExampleNet" scannerSummary
     IFS=$'\t' read -r scannerImported scannerSkipped scannerA scannerB scannerC scannerFail <<<"${scannerSummary}"
     [[ "${scannerImported}" == "5" ]]
-    [[ "${scannerSkipped}" == "9" ]]
+    [[ "${scannerSkipped}" == "10" ]]
     [[ "${scannerA}" == "5" ]]
     [[ "${scannerB}" == "0" ]]
     [[ "${scannerC}" == "0" ]]
-    [[ "${scannerFail}" == "1" ]]
-    [[ "$(wc -l <"${REALITY_TLS_PING_ARGS_FILE}" | tr -d ' ')" == "11" ]]
+    [[ "${scannerFail}" == "2" ]]
+    [[ "$(wc -l <"${REALITY_TLS_PING_ARGS_FILE}" | tr -d ' ')" == "13" ]]
     [[ "$(grep -c 'scanner.example.com:443' "${REALITY_TLS_PING_ARGS_FILE}")" == "1" ]]
-    [[ "$(wc -l <"${asnLookupFile}" | tr -d ' ')" == "5" ]]
+    [[ "$(grep -c 'cloudflare.com:443' "${REALITY_TLS_PING_ARGS_FILE}")" == "6" ]]
+    grep -qxF 'tls ping -ip 198.51.100.254 cloudflare.com:443' "${REALITY_TLS_PING_ARGS_FILE}"
+    asnLookupCount=$(wc -l <"${asnLookupFile}" | tr -d ' ')
+    [[ "${asnLookupCount}" -ge 2 && "${asnLookupCount}" -le 5 ]]
+    ! grep -qxF '198.51.100.16' "${asnLookupFile}"
     ! grep -qx '198.51.100.17' "${asnLookupFile}"
     maxConcurrency=$(sort -nr "${concurrencyDir}/observed" | head -n 1)
     [[ "${maxConcurrency}" -ge 2 && "${maxConcurrency}" -le 4 ]]
@@ -752,6 +876,9 @@ CSV
     [[ "$(realityTargetResultField "${scannerLine}" 8)" == "RemoteNet" ]]
     [[ "$(realityTargetResultField "${scannerLine}" 9)" == "different_network" ]]
     [[ "$(realityTargetResultField "${scannerLine}" 15)" == *"RealiTLScanner: Let's Encrypt, Inc.;"* ]]
+    unknownAsnScannerLine=$(grep -F $'scanner-unknown-asn.example.com:443\tscanner-unknown-asn.example.com\tscanner-unknown-asn.example.com\tscanner' "${PADM_REALITY_TARGET_SCAN_FILE}")
+    [[ "$(realityTargetResultField "${unknownAsnScannerLine}" 5)" == "unknown" ]]
+    [[ "$(realityTargetResultField "${unknownAsnScannerLine}" 7)" == "unknown" ]]
     grep -qF $'scanner-five.example.com:443\tscanner-five.example.com' "${PADM_REALITY_TARGET_SCAN_FILE}"
 
     unset PADM_FAKE_XRAY_CONCURRENCY_DIR
