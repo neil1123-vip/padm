@@ -399,7 +399,7 @@ Reality Vision、Reality XHTTP 和 Reality gRPC 均不申请本机 TLS 证书；
 
 Reality entry 按 `--entry-host`、`--domain`、`/etc/padm/reality_entry_host`、`currentHost`、公网 IP 的顺序选择。普通单选 Reality 端口按显式 `--port`、历史端口、`443` 的顺序选择；多协议继续使用各自端口，不把顶层 `--port` 注入 Reality 子端口。启用 443 共存后，客户端仍连接记录的公网端口，核心继续复用已记录的内部端口。
 
-未传 `--reality-target` 时，脚本会进入目标站选择器。自动选择优先使用 `cdn_risk=no` 且评分为 A 的实测结果；全新 sing-box 安装没有 Xray 检测器时，才允许回退到由 OpenSSL 验证 TLS 1.3 的 `no + C` 结果。没有可接受结果时安装终止，不写入未经检测的兜底目标。手工目标会枚举全部 A/AAAA，每个地址独立评分并取最差结果：任一地址属于 AS13335 或可响应 `cloudflare.com` SNI 即标记 `cloudflare_relay` 并拒绝，DNS、ASN 或 TLS 探测不完整则标记 `unknown` 并拒绝。手工仅接受 `no + A/B/C`，其中 B/C 会明确警告；检测当前已安装目标只告警，不会静默切换配置。`java.com` 与 `riotcdn.net` 及其子域名已静态排除，不参与候选刷新、扫描导入或自动选择。
+未传 `--reality-target` 时，脚本会进入目标站选择器。自动选择优先使用 `cdn_risk=no` 且评分为 A 的实测结果；全新 sing-box 安装没有 Xray 检测器时，才允许回退到由 OpenSSL 验证 TLS 1.3 的 `no + C` 结果。没有可接受结果时安装终止，不写入未经检测的兜底目标。手工目标会枚举全部 A/AAAA，每个地址独立评分并取最差结果：任一地址属于 AS13335 或可响应 `cloudflare.com` SNI 即标记 `cloudflare_relay` 并拒绝，DNS、ASN 或 TLS 探测不完整则标记 `unknown` 并拒绝。手工仅接受 `no + A/B/C`，其中 B/C 会明确警告；检测当前已安装目标只告警，不会静默切换配置。`java.com` 与 `riotcdn.net` 及其子域名属于不可覆盖的静态硬风险，候选刷新、扫描导入、自动/手工选择和 Docker 部署都会拒绝。
 
 Reality 目标站检测结果继续使用 15 列 TSV 写入 `/etc/padm/reality_targets_results.tsv`，按目标保留最后一次完整结果，包括 B/C、`cloudflare_relay`、`unknown` 与 FAIL；第 5 列为 `no | cloudflare_relay | unknown`，旧值 `yes` 按危险处理。持久化不等于可选择，常规候选仍只从 `no + A` 中筛选。评分包含 TLS 1.3、`X25519MLKEM768` 和证书链长度；可选目标按 `same_asn > same_provider > different_network > unknown`、证书链长度、检测时间排序。
 

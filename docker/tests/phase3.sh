@@ -247,11 +247,13 @@ writeWebSocketSpec() {
 
 REALITY_XRAY_SPEC="${TEST_ROOT}/xray.json"
 REALITY_SINGBOX_SPEC="${TEST_ROOT}/sing-box.json"
+REALITY_RELAY_SPEC="${TEST_ROOT}/reality-relay.json"
 WS_SPEC="${TEST_ROOT}/ws.json"
 UNSUPPORTED_SPEC="${TEST_ROOT}/unsupported.json"
 ROLLBACK_SPEC="${TEST_ROOT}/rollback.json"
 writeRealitySpec "${REALITY_XRAY_SPEC}" xray main-xray
 writeRealitySpec "${REALITY_SINGBOX_SPEC}" sing-box main-sing-box
+jq '.core.protocols[0].reality.target_host = "WWW.JAVA.COM"' "${REALITY_XRAY_SPEC}" >"${REALITY_RELAY_SPEC}"
 writeWebSocketSpec "${WS_SPEC}"
 jq '.core.protocols[0].id = 3' "${REALITY_XRAY_SPEC}" >"${UNSUPPORTED_SPEC}"
 writeRealitySpec "${ROLLBACK_SPEC}" xray changed-after-failure 24444
@@ -289,6 +291,8 @@ jq -e '(.services | keys | sort) == ["acme", "xray"]' \
 grep -q ' run --rm --no-deps xray -test -confdir /etc/padm/xray' "${DOCKER_LOG}" ||
     fail 'Xray candidate was not validated in its image'
 
+runControl 15 reject-reality-static-relay configure --spec "${REALITY_RELAY_SPEC}"
+grep -qF '命中已知 CDN 中继风险域名' "${CONTROL_LOG}" || fail 'known relay Reality target was not rejected'
 FAKE_DOCKER_MODE=reality-asn-risk runControl 15 reject-reality-as13335 configure --spec "${REALITY_XRAY_SPEC}"
 grep -qF '命中 Cloudflare AS13335' "${CONTROL_LOG}" || fail 'AS13335 Reality target was not rejected'
 FAKE_DOCKER_MODE=reality-sni-risk runControl 15 reject-reality-cloudflare-sni configure --spec "${REALITY_XRAY_SPEC}"

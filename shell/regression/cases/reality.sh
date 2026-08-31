@@ -235,6 +235,8 @@ www.cloudflare.com|www.cloudflare.com|Cloudflare|global|cdn|yes|6|no|fixture blo
 www.apple.com|www.apple.com|Apple|global|large_site|unknown|7|no|fixture blocked
 www.java.com|www.java.com|Java|global|large_site|unknown|8|no|fixture blocked relay
 lol.secure.dyn.riotcdn.net|lol.secure.dyn.riotcdn.net|Riot CDN|global|cdn|unknown|9|no|fixture blocked relay
+WWW.JAVA.COM|WWW.JAVA.COM|Java Upper|global|large_site|unknown|10|no|fixture blocked relay uppercase
+LOL.SECURE.DYN.RIOTCDN.NET|LOL.SECURE.DYN.RIOTCDN.NET|Riot CDN Upper|global|cdn|unknown|11|no|fixture blocked relay uppercase
 EOF
     export PADM_REALITY_TARGET_CANDIDATES_FILE="${fixtureFile}"
     REALITY_TARGET_PAGE_SIZE=2
@@ -264,6 +266,14 @@ EOF
     [[ "$(realityTargetResultField "$(realityTargetResultLine "legacy.example.com:443")" 5)" == "yes" ]]
     ! grep -qF $'www.java.com:443\t' <<<"$(sortedRealityTargetResults)"
     grep -qF $'www.ibm.com:443\t' <<<"$(realityTargetRefreshRecords)"
+    (
+        local relativeResultsRoot="${TMP_DIR}/reality-relative-results"
+        mkdir -p "${relativeResultsRoot}/child"
+        formatRealityTargetResultLine "safe.example.com:443" "safe.example.com" "Safe" "test" "no" "192.0.2.47" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567894" "managed path fixture" >"${relativeResultsRoot}/results.tsv"
+        cd "${relativeResultsRoot}/child"
+        export PADM_REALITY_TARGET_RESULTS_FILE=../results.tsv
+        ! sortedRealityTargetResults
+    )
     openssl() {
         printf '%s\n' "$*" >"${ipv6OpenSslArgsFile}"
         printf 'Protocol version: TLSv1.3\n'
@@ -295,8 +305,8 @@ EOF
     unset -f dig
     ! realityTargetCandidates | grep -q '^www.cloudflare.com|'
     ! realityTargetCandidates | grep -q '^www.apple.com|'
-    ! realityTargetCandidates | grep -q '^www.java.com|'
-    ! realityTargetCandidates | grep -q 'riotcdn.net|'
+    ! realityTargetCandidates | grep -qi '^www.java.com|'
+    ! realityTargetCandidates | grep -qi 'riotcdn.net|'
     realityTargetCandidateBlocked "www.java.com"
     realityTargetCandidateBlocked "lol.secure.dyn.riotcdn.net"
     realityTargetCandidateBlocked "WWW.JAVA.COM"
@@ -627,6 +637,20 @@ EOF
     mkdir -p "${refreshConcurrencyDir}"
     export REALITY_ASN_LOOKUP_ARGS_FILE="${asnLookupFile}"
     export PADM_REALITY_SECONDARY_JOBS=4
+    (
+        export PADM_REALITY_TARGET_RESULTS_FILE="${TMP_DIR}/reality-static-block-results.tsv"
+        realityTargetDetector() { printf 'fake-xray\n'; }
+        probeRealityTargetEndpoint() {
+            printf 'no\t192.0.2.80\tAS64500\tExampleNet\tA\tyes\t4096\tyes\tstatic block fixture\n'
+        }
+        validateRealityTargetSelection manual "WWW.APPLE.COM:443" "WWW.APPLE.COM"
+        ! validateRealityTargetSelection manual "WWW.JAVA.COM:443" "WWW.JAVA.COM"
+        ! validateRealityTargetSelection manual "LOL.SECURE.DYN.RIOTCDN.NET:443" "LOL.SECURE.DYN.RIOTCDN.NET"
+        probeRealityTargetEndpoint() {
+            printf 'no\t192.0.2.81\tAS64500\tExampleNet\tINVALID\tno\tunknown\tyes\tinvalid score fixture\n'
+        }
+        ! validateRealityTargetSelection manual "invalid-score.example.com:443" "invalid-score.example.com"
+    )
     validateRealityTargetSelection manual "manual-b.example.com:443" "manual-b.example.com"
     ! validateRealityTargetSelection auto "manual-b.example.com:443" "manual-b.example.com"
     validateRealityTargetSelection manual "manual-c.example.com:443" "manual-c.example.com"

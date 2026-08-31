@@ -255,6 +255,12 @@ dockerRealityTargetsValidate() {
     opsImage=$(jq -r '.images.ops' "${specFile}") || return 1
     while IFS=$'\t' read -r host port sni; do
         incomplete=false
+        case "${host,,}" in
+        java.com | *.java.com | riotcdn.net | *.riotcdn.net)
+            dockerError "REALITY 目标命中已知 CDN 中继风险域名: ${host}"
+            return 1
+            ;;
+        esac
         records=$(dockerRealityTargetNetworkRecords "${opsImage}" "${host}" 2>/dev/null) || {
             dockerError "REALITY 目标地址解析失败: ${host}"
             return 1

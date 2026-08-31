@@ -58,8 +58,10 @@ realityTargetScoreStyle() {
 }
 
 realityTargetCandidatePool() {
-    if [[ -n "${PADM_REALITY_TARGET_CANDIDATES_FILE:-}" && -f "${PADM_REALITY_TARGET_CANDIDATES_FILE}" ]]; then
-        cat "${PADM_REALITY_TARGET_CANDIDATES_FILE}"
+    local candidatesFile
+    candidatesFile=$(realityTargetManagedCandidatesFile 2>/dev/null || true)
+    if [[ -n "${candidatesFile}" && -f "${candidatesFile}" ]]; then
+        cat "${candidatesFile}"
         return 0
     fi
     cat <<'EOF'
@@ -300,7 +302,7 @@ java.com|Java|cloudflare_relay|已知 Cloudflare 回源中继风险，禁止作�
 riotcdn.net|Riot CDN|cloudflare_relay|已知 CDN 回源中继风险，禁止作为 Reality 目标
 EOF
     local customBlockedFile
-    customBlockedFile="${PADM_REALITY_TARGET_BLOCKED_FILE:-/etc/padm/reality_target_blocked.tsv}"
+    customBlockedFile=$(realityTargetManagedBlockedCandidatesFile 2>/dev/null || true)
     [[ -f "${customBlockedFile}" ]] && cat "${customBlockedFile}"
     return 0
 }
@@ -327,22 +329,27 @@ addRealityTargetBlockedCandidate() {
     realityTargetStatusBlock green "REALITY 目标站黑名单" "已加入: ${host}" "后续不参与统一目标库刷新和 RealiTLScanner 导入" "当前已安装目标不会自动切换"
 }
 
+realityTargetBlockedHostMatches() {
+    local host=${1,,}
+    local blocked=${2,,}
+    local normalizedBlocked=${blocked#www.}
+    [[ -n "${blocked}" && ("${host}" == "${blocked}" || "${host}" == "${normalizedBlocked}" || "${host}" == *."${normalizedBlocked}" || "${host}" == *."${blocked}") ]]
+}
+
 realityTargetCandidateBlocked() {
-    local host=$1
-    local line blocked normalizedBlocked
-    host=${host,,}
-    while IFS='|' read -r blocked _; do
-        blocked=${blocked,,}
-        normalizedBlocked=${blocked#www.}
-        if [[ "${host}" == "${blocked}" || "${host}" == "${normalizedBlocked}" || "${host}" == *."${normalizedBlocked}" || "${host}" == *."${blocked}" ]]; then
-            return 0
-        fi
+    local host=$1 requiredType=${2:-}
+    local blocked _name blockType _description
+    requiredType=${requiredType,,}
+    while IFS='|' read -r blocked _name blockType _description; do
+        blockType=${blockType,,}
+        [[ -z "${requiredType}" || "${blockType}" == "${requiredType}" ]] || continue
+        realityTargetBlockedHostMatches "${host}" "${blocked}" && return 0
     done < <(realityTargetBlockedCandidates)
     return 1
 }
 
 realityTargetCandidates() {
-    local line host _rest blockedLine blocked normalizedBlocked skip
+    local line host _rest blocked skip
     local blockedHosts=()
     while IFS='|' read -r blocked _rest; do
         blockedHosts+=("${blocked}")
@@ -351,8 +358,7 @@ realityTargetCandidates() {
         IFS='|' read -r host _rest <<<"${line}"
         skip=false
         for blocked in "${blockedHosts[@]}"; do
-            normalizedBlocked=${blocked#www.}
-            if [[ "${host}" == "${blocked}" || "${host}" == "${normalizedBlocked}" || "${host}" == *."${normalizedBlocked}" || "${host}" == *."${blocked}" ]]; then
+            if realityTargetBlockedHostMatches "${host}" "${blocked}"; then
                 skip=true
                 break
             fi
@@ -657,7 +663,7 @@ removeRealityTargetsFromUnifiedLibrary() {
 sortedRealityTargetResults() {
     local score=${1:-A}
     local resultsFile line target parsed host
-    resultsFile="${PADM_REALITY_TARGET_RESULTS_FILE:-/etc/padm/reality_targets_results.tsv}"
+    resultsFile=$(realityTargetManagedResultsFile) || return 1
     [[ -f "${resultsFile}" ]] || return 1
     while IFS= read -r line; do
         target=${line%%$'\t'*}
@@ -1236,6 +1242,10 @@ validateRealityTargetSelection() {
         realityTargetStatusBlock red "REALITY 目标站" "目标或 SNI 不合法: ${target} / ${sni}"
         return 1
     fi
+    if realityTargetCandidateBlocked "${host}" cloudflare_relay; then
+        realityTargetStatusBlock red "REALITY 目标站" "命中已知 CDN 中继风险域名: ${target}" "静态黑名单已拒绝写入配置"
+        return 1
+    fi
     detector=$(realityTargetDetector 2>/dev/null || true)
     if [[ -z "${detector}" ]] && ! command -v openssl >/dev/null 2>&1; then
         realityTargetStatusBlock red "REALITY 目标站" "缺少 Xray/OpenSSL，无法完成安全检测" "已拒绝写入配置"
@@ -1282,10 +1292,17 @@ validateRealityTargetSelection() {
         return 1
         ;;
     esac
-    if [[ "${score}" == "FAIL" ]]; then
+    case "${score}" in
+    A | B | C) ;;
+    FAIL)
         realityTargetStatusBlock red "REALITY 目标站" "TLS 质量检测失败: ${target}" "${note}"
         return 1
-    fi
+        ;;
+    *)
+        realityTargetStatusBlock red "REALITY 目标站" "TLS 质量检测返回无效评分: ${score:-empty}" "已拒绝写入配置"
+        return 1
+        ;;
+    esac
     if [[ "${policy}" == "auto" && "${score}" != "A" ]]; then
         if [[ "${score}" != "C" ]] || ! realityTargetOpenSslAutoFallbackAllowed "${detector}"; then
             realityTargetStatusBlock red "REALITY 自动推荐" "自动模式不接受当前目标: ${target}" "本次评分: ${score}"
