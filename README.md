@@ -71,22 +71,24 @@ padm
 bash install.sh --help
 ```
 
+以下命令中的 `target.example.com` 仅为占位符，必须替换为通过实时检测的 Reality 目标站。
+
 推荐直连 Reality Vision：
 
 ```bash
-bash install.sh --install-type custom --core xray --protocols 1 --entry-host node.example.com --reality-target www.ibm.com:443 --reality-server-name www.ibm.com --reuse-last no
+bash install.sh --install-type custom --core xray --protocols 1 --entry-host node.example.com --reality-target target.example.com:443 --reality-server-name target.example.com --reuse-last no
 ```
 
 推荐 CDN Reality XHTTP：
 
 ```bash
-bash install.sh --install-type custom --core xray --protocols 2 --entry-host cdn.example.com --reality-target www.ibm.com:443 --reality-server-name www.ibm.com --reuse-last no
+bash install.sh --install-type custom --core xray --protocols 2 --entry-host cdn.example.com --reality-target target.example.com:443 --reality-server-name target.example.com --reuse-last no
 ```
 
 无域名 Reality：
 
 ```bash
-bash install.sh --install-type reality --core xray --reality-target www.ibm.com:443 --reuse-last no --clean-acme no
+bash install.sh --install-type reality --core xray --reality-target target.example.com:443 --reuse-last no --clean-acme no
 ```
 
 NaiveProxy：
@@ -391,13 +393,15 @@ Reality 里有三个容易混淆的概念：
 | 🎭 Reality target | Reality 伪装访问的外部真实 HTTPS 站点 | Xray `realitySettings.target`；sing-box `tls.reality.handshake` |
 | 🧾 Reality SNI | Reality 握手使用的 SNI | Xray `serverNames`；sing-box `tls.server_name`；订阅 `sni/servername` |
 
-常见配置是：客户端连接 `node.example.com`，Reality target 使用 `www.ibm.com:443`，Reality SNI 使用 `www.ibm.com`。
+常见配置是：客户端连接 `node.example.com`，Reality target 使用已实测的 `target.example.com:443`，Reality SNI 使用 `target.example.com`。
 
 Reality Vision、Reality XHTTP 和 Reality gRPC 均不申请本机 TLS 证书；纯 Reality 安装不创建或清理站点，不操作 ACME/Cron，也不停止、启动或重载 Nginx。`--reality-domain yes` 是严格域名模式，只允许单选 Reality Vision `1`，并校验 entry 域名及 DNS；协议 `2`、`26` 或任何多选组合会在安装依赖和写配置前拒绝。
 
 Reality entry 按 `--entry-host`、`--domain`、`/etc/padm/reality_entry_host`、`currentHost`、公网 IP 的顺序选择。普通单选 Reality 端口按显式 `--port`、历史端口、`443` 的顺序选择；多协议继续使用各自端口，不把顶层 `--port` 注入 Reality 子端口。启用 443 共存后，客户端仍连接记录的公网端口，核心继续复用已记录的内部端口。
 
-未传 `--reality-target` 时，脚本会进入目标站选择器。自动选择优先使用已有 A/B 实测结果；没有结果时实测内置候选并选择可用目标；仍无可用结果时回退 `www.ibm.com:443`。Reality 目标站检测结果写入 `/etc/padm/reality_targets_results.tsv`，评分包括 TLS 1.3、`X25519MLKEM768`、证书链长度、网络匹配、CDN 风险和检测时间。
+未传 `--reality-target` 时，脚本会进入目标站选择器。自动选择只接受 `cdn_risk=no` 且评分为 A 的实测结果；没有结果时实测内置候选，仍无安全 A 级结果则终止，不再写入未经检测的兜底目标。手工目标会枚举全部 A/AAAA：任一地址属于 AS13335 或可响应 `cloudflare.com` SNI 即标记 `cloudflare_relay` 并拒绝，DNS、ASN 或 TLS 探测不完整则标记 `unknown` 并拒绝。手工仅接受 `no + A/B/C`，其中 B/C 会明确警告；检测当前已安装目标只告警，不会静默切换配置。
+
+Reality 目标站检测结果继续使用 15 列 TSV 写入 `/etc/padm/reality_targets_results.tsv`，第 5 列为 `no | cloudflare_relay | unknown`，旧值 `yes` 按危险处理。评分包含 TLS 1.3、`X25519MLKEM768` 和证书链长度；可选目标按 `same_asn > same_provider > different_network > unknown`、证书链长度、检测时间排序。
 
 `协议与入口` -> `REALITY 管理` 可查看当前目标、运行 `xray tls ping`、刷新目标库、运行 RealiTLScanner、切换实测结果、查看 PQC/ML-DSA-65 状态和配置 443 共存分流。
 
@@ -548,7 +552,7 @@ net.ipv4.tcp_congestion_control = bbr
 | `--show-risky-protocols` | 无 | 输出后退出 | 列出带风险提示的高级公网节点能力。 |
 | `--domain` | 域名 | TLS 安装时必须提供或交互输入 | TLS 证书域名；也是 Reality entry 的第二优先级，但 Reality 不为其申请证书。 |
 | `--entry-host` | 域名或 IP | 优先于 `--domain`、历史 entry、`currentHost` 和公网 IP | Reality 客户端实际连接地址。 |
-| `--reality-target` | `host[:port]` | 未传时进入目标站选择器；兜底 `www.ibm.com:443` | Reality 伪装目标站。 |
+| `--reality-target` | `host[:port]` | 未传时进入目标站选择器；无安全 A 级结果则失败 | Reality 伪装目标站；显式目标也必须通过实时风险校验。 |
 | `--reality-server-name` | SNI 域名 | 默认等于 target host | Reality SNI。 |
 | `--port` | 端口号 | TLS 默认 `443`；单选 Reality 为显式端口 > 历史端口 > `443` | TLS 入口端口或单选 Reality 客户端连接端口；多协议不注入 Reality 子端口。 |
 | `--tls-ca` | `letsencrypt`、`zerossl`、`buypass` | `letsencrypt` | 证书 CA。 |

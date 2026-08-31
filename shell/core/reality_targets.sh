@@ -63,7 +63,7 @@ realityTargetCandidatePool() {
         return 0
     fi
     cat <<'EOF'
-www.ibm.com|www.ibm.com|IBM|global|large_site|unknown|1|yes|远端实测 TLS1.3/PQC 可用且证书链较长，适合作为默认目标
+www.ibm.com|www.ibm.com|IBM|global|large_site|unknown|1|yes|候选目标；使用前仍需实时通过 TLS 与 Cloudflare 中继风险检测
 www.microsoft.com|www.microsoft.com|Microsoft|global|large_site|unknown|2|yes|全球稳定大型 HTTPS 站点，适合作为稳定备选
 www.reuters.com|www.reuters.com|Reuters|global|media|unknown|3|yes|远端实测 TLS1.3/PQC 可用且证书链很长，适合作为高质量备选
 www.qualcomm.com|www.qualcomm.com|Qualcomm|global|large_site|unknown|94|yes|远端实测 TLS1.3/PQC 可用且证书链很长，适合作为高质量备选
@@ -401,7 +401,7 @@ realityTargetResultCount() {
         printf '0\n'
         return 0
     }
-    awk -F'\t' '$10 == "A" {count++} END{print count + 0}' "${resultsFile}"
+    awk -F'\t' '$5 == "no" && $10 == "A" {count++} END{print count + 0}' "${resultsFile}"
 }
 
 realityTargetResultField() {
@@ -435,7 +435,7 @@ realityTargetResultLine() {
     local resultsFile
     resultsFile=$(realityTargetManagedResultsFile) || return 1
     [[ -n "${target}" && -f "${resultsFile}" ]] || return 1
-    awk -F'\t' -v target="${target}" '$1 == target && $10 == "A" {line = $0} END {if (line != "") print line; else exit 1}' "${resultsFile}"
+    awk -F'\t' -v target="${target}" '$1 == target && $5 == "no" && $10 == "A" {line = $0} END {if (line != "") print line; else exit 1}' "${resultsFile}"
 }
 
 realityTargetCachedAsnSummary() {
@@ -517,11 +517,11 @@ writeRealityTargetResultLine() {
     padmEnsureSafeDirectory "$(dirname -- "${resultsFile}")" || return 1
     padmCreateTempFileForTarget stagedFile "${resultsFile}" reality || return 1
     if [[ -f "${resultsFile}" ]]; then
-        awk -F'\t' -v target="${target}" '$1 != target && $10 == "A"' "${resultsFile}" >"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
+        awk -F'\t' -v target="${target}" '$1 != target && $5 == "no" && $10 == "A"' "${resultsFile}" >"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
     else
         : >"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
     fi
-    if [[ "${score}" == "A" ]]; then
+    if [[ "${cdnRisk}" == "no" && "${score}" == "A" ]]; then
         formatRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}" >>"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
     fi
     commitGeneratedFile "${stagedFile}" "${resultsFile}" 644 || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
@@ -539,24 +539,24 @@ writeRealityTargetResultLines() {
           NR == FNR {
             if (!($1 in seen)) order[++count] = $1
             seen[$1] = 1
-            keep[$1] = ($10 == "A")
+            keep[$1] = ($5 == "no" && $10 == "A")
             if (keep[$1]) line[$1] = $0
             next
           }
-          !($1 in seen) && $10 == "A" { print }
+          !($1 in seen) && $5 == "no" && $10 == "A" { print }
           END {
             for (i = 1; i <= count; i++) if (keep[order[i]]) print line[order[i]]
           }
         ' "${linesFile}" "${resultsFile}" >"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
     elif [[ -f "${resultsFile}" ]]; then
-        awk -F'\t' '$10 == "A"' "${resultsFile}" >"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
+        awk -F'\t' '$5 == "no" && $10 == "A"' "${resultsFile}" >"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
     else
         [[ -s "${linesFile}" ]] || { padmRemoveCleanupPath "${stagedFile}"; return 0; }
         awk -F'\t' '
           {
             if (!($1 in seen)) order[++count] = $1
             seen[$1] = 1
-            keep[$1] = ($10 == "A")
+            keep[$1] = ($5 == "no" && $10 == "A")
             if (keep[$1]) line[$1] = $0
           }
           END {
@@ -573,7 +573,7 @@ realityTargetRefreshRecords() {
     if [[ -s "${resultsFile}" ]]; then
         while IFS= read -r line; do
             IFS=$'\t' read -r target sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note <<<"${line}"
-            [[ -n "${target}" && "${score}" == "A" ]] || continue
+            [[ -n "${target}" && "${cdnRisk}" == "no" && "${score}" == "A" ]] || continue
             parsed=$(parseHostPort "${target}" 443)
             host=${parsed%:*}
             realityTargetCandidateBlocked "${host}" && continue
@@ -596,7 +596,7 @@ removeRealityTargetsFromUnifiedLibrary() {
     checkLogBackupCreate libraryBackupDir "${resultsFile}" "${candidatesFile}" || return 1
     if [[ -f "${resultsFile}" ]]; then
         padmCreateTempFileForTarget resultsStageFile "${resultsFile}" reality || { padmRemoveCleanupPath "${libraryBackupDir}"; return 1; }
-        awk -F'\t' 'NR == FNR {targets[$1] = 1; next} !($1 in targets) && $10 == "A"' "${targetsFile}" "${resultsFile}" >"${resultsStageFile}" || {
+        awk -F'\t' 'NR == FNR {targets[$1] = 1; next} !($1 in targets) && $5 == "no" && $10 == "A"' "${targetsFile}" "${resultsFile}" >"${resultsStageFile}" || {
             padmRemoveCleanupPath "${resultsStageFile}"
             padmRemoveCleanupPath "${libraryBackupDir}"
             return 1
@@ -653,19 +653,17 @@ sortedRealityTargetResults() {
     resultsFile="${PADM_REALITY_TARGET_RESULTS_FILE:-/etc/padm/reality_targets_results.tsv}"
     [[ -f "${resultsFile}" ]] || return 1
     awk -F'\t' '
-      $10 == "A" {
-        scoreRank = 4
+      $5 == "no" && $10 == "A" {
         networkRank = ($9 == "same_asn" ? 4 : ($9 == "same_provider" ? 3 : ($9 == "different_network" ? 2 : 1)))
-        cdnRank = ($5 == "no" ? 3 : ($5 == "unknown" ? 2 : 1))
         certRank = ($12 ~ /^[0-9]+$/ ? $12 : 0)
         checked = ($14 ~ /^[0-9]+$/ ? $14 : 0)
-        printf "%d\t%d\t%d\t%d\t%d\t%s\n", scoreRank, networkRank, cdnRank, certRank, checked, $0
+        printf "%d\t%d\t%d\t%s\n", networkRank, certRank, checked, $0
       }
-    ' "${resultsFile}" | sort -t $'\t' -k1,1nr -k2,2nr -k3,3nr -k4,4nr -k5,5nr | cut -f6-
+    ' "${resultsFile}" | sort -t $'\t' -k1,1nr -k2,2nr -k3,3nr | cut -f4-
 }
 
 bestScannedRealityTargetLine() {
-    sortedRealityTargetResults | awk -F'\t' '$10 == "A" {print; found=1; exit} END{if (!found) exit 1}'
+    sortedRealityTargetResults | awk -F'\t' '$5 == "no" && $10 == "A" {print; found=1; exit} END{if (!found) exit 1}'
 }
 
 selectScannedRealityTarget() {
@@ -679,20 +677,35 @@ selectScannedRealityTarget() {
     realitySNI=${AUTO_REALITY_SERVER_NAME:-${sni:-${realityTargetHost}}}
 }
 
-resolveRealityTargetIPv4() {
+resolveRealityTargetAddresses() {
     local host=$1
-    local resolved=
+    local resolved='' aResponse='' aaaaResponse='' resolverOutput=''
+    if [[ "${host}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ || ( "${host}" == *:* && "${host}" =~ ^[0-9A-Fa-f:]+$ ) ]]; then
+        printf '%s\n' "${host}"
+        return 0
+    fi
     if command -v dig >/dev/null 2>&1; then
-        resolved=$(dig +short A "${host}" | awk '/^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ {print; exit}')
+        aResponse=$(dig +time=3 +tries=1 +noall +comments +answer A "${host}" 2>/dev/null) || return 1
+        aaaaResponse=$(dig +time=3 +tries=1 +noall +comments +answer AAAA "${host}" 2>/dev/null) || return 1
+        resolverOutput="${aResponse}"$'\n'"${aaaaResponse}"
+        [[ "$(printf '%s\n' "${resolverOutput}" | grep -c 'status: NOERROR')" == "2" ]] || return 1
+        resolved=$(printf '%s\n' "${resolverOutput}" |
+            awk '$4 == "A" || $4 == "AAAA" {if (!seen[$5]++) print $5}')
     fi
     if [[ -z "${resolved}" ]] && command -v getent >/dev/null 2>&1; then
-        resolved=$(getent ahostsv4 "${host}" | awk '/STREAM/ {print $1; exit}')
+        resolverOutput=$(getent ahosts "${host}" 2>/dev/null || true)
+        resolved=$(printf '%s\n' "${resolverOutput}" |
+            awk '$1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ || $1 ~ /^[0-9A-Fa-f:]+$/ {if (!seen[$1]++) print $1}')
     fi
     if [[ -z "${resolved}" ]] && command -v host >/dev/null 2>&1; then
-        resolved=$(host "${host}" | awk '/has address/ {print $4; exit}')
+        resolved=$(host "${host}" | awk '/has address/ || /has IPv6 address/ {if (!seen[$NF]++) print $NF}')
     fi
     [[ -n "${resolved}" ]] || return 1
     printf '%s\n' "${resolved}"
+}
+
+resolveRealityTargetIPv4() {
+    resolveRealityTargetAddresses "$1" | awk '/^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ {print; exit}'
 }
 
 normalizeAsnOrg() {
@@ -1026,6 +1039,220 @@ realityTargetDetector() {
     fi
 }
 
+realityTargetTlsPingState() {
+    local output=$1
+    printf '%s\n' "${output}" | awk '
+      /Pinging with SNI/ {inSni = 1; next}
+      inSni && /Handshake succeeded/ {success = 1}
+      inSni && /Handshake failure/ {rejected = 1}
+      END {
+        if (success) print "success"
+        else if (rejected) print "rejected"
+        else print "unknown"
+      }
+    '
+}
+
+probeRealityTargetTls() {
+    local detector=$1
+    local ip=$2
+    local sni=$3
+    local port=$4
+    local timeoutSeconds=${PADM_REALITY_TLS_TIMEOUT:-15}
+    local target connect raw
+    [[ "${timeoutSeconds}" =~ ^[0-9]+$ && "${timeoutSeconds}" -gt 0 ]] || timeoutSeconds=15
+    target=$(formatRealityTarget "${sni}" "${port}")
+    if ! command -v timeout >/dev/null 2>&1; then
+        printf 'Pinging with SNI\nProbe unavailable: timeout command is missing\n'
+        return 0
+    fi
+    if [[ -n "${detector}" ]]; then
+        if declare -F "${detector}" >/dev/null 2>&1 && ! declare -F timeout >/dev/null 2>&1; then
+            raw=$("${detector}" tls ping -ip "${ip}" "${target}" 2>&1 || true)
+        else
+            raw=$(timeout -k 2 "${timeoutSeconds}" "${detector}" tls ping -ip "${ip}" "${target}" 2>&1 || true)
+        fi
+        printf '%s\n' "${raw}"
+        return 0
+    fi
+    if ! command -v openssl >/dev/null 2>&1; then
+        printf 'Pinging with SNI\nProbe unavailable: neither xray nor openssl is installed\n'
+        return 0
+    fi
+    if [[ "${ip}" == *:* ]]; then
+        connect="[${ip}]:${port}"
+    else
+        connect="${ip}:${port}"
+    fi
+    if raw=$(timeout -k 2 "${timeoutSeconds}" openssl s_client -connect "${connect}" -servername "${sni}" \
+        -verify_hostname "${sni}" -verify_return_error -tls1_3 -brief </dev/null 2>&1); then
+        printf 'Pinging with SNI\nHandshake succeeded\nTLS version: TLSv1.3\n%s\n' "${raw}"
+    elif printf '%s\n' "${raw}" | grep -Eqi 'hostname mismatch|certificate verify failed|verify error:num=62'; then
+        printf 'Pinging with SNI\nHandshake failure: certificate does not match SNI\n%s\n' "${raw}"
+    else
+        printf 'Pinging with SNI\nProbe unavailable: TLS connection failed\n%s\n' "${raw}"
+    fi
+}
+
+realityTargetAddressCdnRisk() {
+    local detector=$1
+    local ip=$2
+    local port=$3
+    local asn=$4
+    local targetState=$5
+    local normalizedAsn cfResult cfState
+    normalizedAsn=$(normalizeRealityAsn "${asn}" 2>/dev/null || true)
+    if [[ "${normalizedAsn}" == "AS13335" ]]; then
+        printf 'cloudflare_relay\n'
+        return 0
+    fi
+    if [[ -z "${normalizedAsn}" || "${targetState}" != "success" ]]; then
+        printf 'unknown\n'
+        return 0
+    fi
+    cfResult=$(probeRealityTargetTls "${detector}" "${ip}" cloudflare.com "${port}")
+    cfState=$(realityTargetTlsPingState "${cfResult}")
+    case "${cfState}" in
+    success) printf 'cloudflare_relay\n' ;;
+    rejected) printf 'no\n' ;;
+    *) printf 'unknown\n' ;;
+    esac
+}
+
+probeRealityTargetEndpoint() {
+    local detector=$1
+    local target=$2
+    local sni=$3
+    local preferredIp=${4:-}
+    local addressScope=${5:-all}
+    local parsed host port resolved='' addresses ip profile asn asOrg targetResult targetState addressRisk
+    local primaryIp=unknown primaryAsn=unknown primaryOrg=unknown scoreResult='' risk=no
+    local score=FAIL pqc=no certLength=unknown tls13=unknown note="未完成 TLS 质量检测"
+    local first=true
+    parsed=$(parseHostPort "${target}" 443)
+    host=${parsed%:*}
+    port=${parsed##*:}
+    if [[ "${addressScope}" == "preferred_only" ]]; then
+        addresses=${preferredIp}
+    else
+        resolved=$(resolveRealityTargetAddresses "${host}" 2>/dev/null || true)
+        addresses=$(printf '%s\n%s\n' "${preferredIp}" "${resolved}" | awk 'NF && !seen[$0]++')
+        [[ -n "${resolved}" ]] || risk=unknown
+    fi
+    [[ -n "${addresses}" ]] || return 1
+
+    while IFS= read -r ip; do
+        [[ -n "${ip}" ]] || continue
+        profile=$(lookupRealityTargetAsn "${ip}" 2>/dev/null || true)
+        if [[ -n "${profile}" ]]; then
+            asn=${profile%%$'\t'*}
+            asOrg=${profile#*$'\t'}
+        else
+            asn=unknown
+            asOrg=unknown
+        fi
+        targetResult=$(probeRealityTargetTls "${detector}" "${ip}" "${sni}" "${port}")
+        targetState=$(realityTargetTlsPingState "${targetResult}")
+        if [[ "${first}" == "true" ]]; then
+            primaryIp=${ip}
+            primaryAsn=${asn}
+            primaryOrg=${asOrg}
+            scoreResult=$(scoreRealityTargetFromTlsPing "${targetResult}")
+            IFS=$'\t' read -r score pqc certLength tls13 note <<<"${scoreResult}"
+            first=false
+        fi
+        addressRisk=$(realityTargetAddressCdnRisk "${detector}" "${ip}" "${port}" "${asn}" "${targetState}")
+        if [[ "${addressRisk}" == "cloudflare_relay" ]]; then
+            risk=cloudflare_relay
+            break
+        fi
+        [[ "${addressRisk}" == "no" ]] || risk=unknown
+    done <<<"${addresses}"
+
+    case "${risk}" in
+    cloudflare_relay) note="${note}; 检测到 Cloudflare 中继风险" ;;
+    unknown) note="${note}; DNS/ASN/TLS 风险探测不完整" ;;
+    esac
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "${risk}" "${primaryIp}" "${primaryAsn}" "${primaryOrg}" \
+        "${score}" "${pqc}" "${certLength}" "${tls13}" "${note}"
+}
+
+validateRealityTargetSelection() {
+    local policy=$1
+    local target=$2
+    local sni=$3
+    local parsed host port detector='' probeResult cdnRisk ip asn asOrg score pqc certLength tls13 note
+    local networkProfile rest currentAsn='' currentOrg='' networkMatch=unknown checkedAt cachedLine='' name category
+    parsed=$(parseHostPort "${target}" 443)
+    host=${parsed%:*}
+    port=${parsed##*:}
+    target=$(formatRealityTarget "${host}" "${port}")
+    if ! validateRealityTarget "${host}" "${port}" || ! padmIsValidHostName "${sni}"; then
+        realityTargetStatusBlock red "REALITY 目标站" "目标或 SNI 不合法: ${target} / ${sni}"
+        return 1
+    fi
+    detector=$(realityTargetDetector 2>/dev/null || true)
+    if [[ -z "${detector}" ]] && ! command -v openssl >/dev/null 2>&1; then
+        realityTargetStatusBlock red "REALITY 目标站" "缺少 Xray/OpenSSL，无法完成安全检测" "已拒绝写入配置"
+        return 1
+    fi
+    realityTargetStatusBlock yellow "REALITY 目标站校验" "正在检测全部 A/AAAA: ${target}" "SNI: ${sni}"
+    probeResult=$(probeRealityTargetEndpoint "${detector}" "${target}" "${sni}") || {
+        realityTargetStatusBlock red "REALITY 目标站" "目标地址解析失败: ${target}" "已拒绝写入配置"
+        return 1
+    }
+    IFS=$'\t' read -r cdnRisk ip asn asOrg score pqc certLength tls13 note <<<"${probeResult}"
+    if networkProfile=$(currentRealityNetworkProfile 2>/dev/null); then
+        rest=${networkProfile#*$'\t'}
+        currentAsn=${rest%%$'\t'*}
+        currentOrg=${rest#*$'\t'}
+        if [[ "${asn}" == "${currentAsn}" ]]; then
+            networkMatch=same_asn
+        elif [[ "${asn}" != "unknown" ]] && realityTargetProviderMatches "${currentOrg}" "${asOrg}"; then
+            networkMatch=same_provider
+        elif [[ "${asn}" != "unknown" ]]; then
+            networkMatch=different_network
+        fi
+    fi
+    cachedLine=$(realityTargetResultLine "${target}" 2>/dev/null || true)
+    name=${host}
+    category=manual
+    if [[ -n "${cachedLine}" ]]; then
+        name=$(realityTargetResultField "${cachedLine}" 3)
+        category=$(realityTargetResultField "${cachedLine}" 4)
+    fi
+    checkedAt=$(date +%s)
+    writeRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" \
+        "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" \
+        "${certLength}" "${tls13}" "${checkedAt}" "最终校验: ${note}" || return 1
+
+    case "${cdnRisk}" in
+    cloudflare_relay | yes)
+        realityTargetStatusBlock red "REALITY 目标站" "检测到 Cloudflare 中继风险: ${target}" "ASN=${asn}，已拒绝写入配置"
+        return 1
+        ;;
+    no) ;;
+    *)
+        realityTargetStatusBlock red "REALITY 目标站" "风险检测结果为 unknown: ${target}" "DNS、ASN 或 TLS 探测不完整，已拒绝写入配置"
+        return 1
+        ;;
+    esac
+    if [[ "${score}" == "FAIL" ]]; then
+        realityTargetStatusBlock red "REALITY 目标站" "TLS 质量检测失败: ${target}" "${note}"
+        return 1
+    fi
+    if [[ "${policy}" == "auto" && "${score}" != "A" ]]; then
+        realityTargetStatusBlock red "REALITY 自动推荐" "自动模式仅允许 A 级目标: ${target}" "本次评分: ${score}"
+        return 1
+    fi
+    if [[ "${score}" == "B" || "${score}" == "C" ]]; then
+        realityTargetStatusBlock yellow "REALITY 目标站" "手工目标已通过 CDN 风险校验，但质量为 ${score} 级" "${note}"
+    else
+        realityTargetStatusBlock green "REALITY 目标站" "已通过安全校验: ${target}" "cdn_risk=no，评分=${score}"
+    fi
+}
+
 formatRealityTarget() {
     local host=$1
     local port=${2:-443}
@@ -1234,61 +1461,49 @@ selectRealityTargetCandidateInteractive() {
 }
 
 selectAutoRecommendedRealityTarget() {
-    local detector line host sni name category cdn target tlsPingResult result score pqc certLength tls13 note checkedAt
-    local probeLimit probed=0 bestRank=0 bestCert=0 bestHost= bestPort=443 bestSni= bestTarget= bestScore= bestPqc= bestCertLength=
-    local scoreRank certRank
+    local detector='' line host sni name category target record probeRecord probeStatus probePayload
+    local currentProfile rest currentAsn='' currentOrg='' probeLimit probed=0 selectedLine selectedTarget selectedScore
+    local resultTarget resultSni resultName resultCategory cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note
 
-    if ! detector=$(realityTargetDetector); then
-        realityTargetStatusBlock yellow "REALITY 自动推荐" "未找到 xray，无法实测目标质量" "已回退默认目标 www.ibm.com:443"
+    detector=$(realityTargetDetector 2>/dev/null || true)
+    if [[ -z "${detector}" ]] && ! command -v openssl >/dev/null 2>&1; then
+        realityTargetStatusBlock red "REALITY 自动推荐" "缺少 Xray/OpenSSL，无法实测目标质量"
         return 1
+    fi
+    if currentProfile=$(currentRealityNetworkProfile 2>/dev/null); then
+        rest=${currentProfile#*$'\t'}
+        currentAsn=${rest%%$'\t'*}
+        currentOrg=${rest#*$'\t'}
     fi
 
     probeLimit=${PADM_REALITY_AUTO_PROBE_LIMIT:-10}
     [[ "${probeLimit}" =~ ^[0-9]+$ && "${probeLimit}" -gt 0 ]] || probeLimit=10
 
     while IFS= read -r line; do
-        IFS='|' read -r host sni name _region category cdn _rank _recommended _note <<<"${line}"
+        IFS='|' read -r host sni name _region category _cdn _rank _recommended _note <<<"${line}"
         target=$(formatRealityTarget "${host}" 443)
         probed=$((probed + 1))
-        realityTargetStatusBlock yellow "REALITY 自动推荐" "正在实测: ${target}" "SNI: ${sni}" "进度: ${probed}/${probeLimit}"
-        checkedAt=$(date +%s)
-        if tlsPingResult=$("${detector}" tls ping "${target}" 2>&1); then
-            result=$(scoreRealityTargetFromTlsPing "${tlsPingResult}")
-        else
-            result=$(scoreRealityTargetFromTlsPing "")
-        fi
-        IFS=$'\t' read -r score pqc certLength tls13 note <<<"${result}"
-        writeRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" "${cdn}" "unknown" "unknown" "unknown" "auto_probe" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "自动推荐实测: ${note}"
-
-        case "${score}" in
-        A) scoreRank=4 ;;
-        B) scoreRank=3 ;;
-        *) scoreRank=0 ;;
-        esac
-        certRank=0
-        [[ "${certLength}" =~ ^[0-9]+$ ]] && certRank=${certLength}
-        if (( scoreRank > bestRank || (scoreRank == bestRank && certRank > bestCert) )); then
-            bestRank=${scoreRank}
-            bestCert=${certRank}
-            bestHost=${host}
-            bestSni=${sni}
-            bestTarget=${target}
-            bestScore=${score}
-            bestPqc=${pqc}
-            bestCertLength=${certLength}
+        realityTargetStatusBlock yellow "REALITY 自动推荐" "正在检测全部 A/AAAA: ${target}" "SNI: ${sni}" "进度: ${probed}/${probeLimit}"
+        record=$(formatRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" unknown unknown unknown unknown unknown unknown unknown unknown unknown 0 "自动推荐")
+        probeRecord=$(probeRealityTargetRecord "${detector}" "${record}" "${currentAsn}" "${currentOrg}")
+        IFS=$'\t' read -r probeStatus probePayload <<<"${probeRecord}"
+        if [[ "${probeStatus}" == "OK" && -n "${probePayload}" ]]; then
+            IFS=$'\t' read -r resultTarget resultSni resultName resultCategory cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note <<<"${probePayload}"
+            writeRealityTargetResultLine "${resultTarget}" "${resultSni}" "${resultName}" "${resultCategory}" "${cdnRisk}" \
+                "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}" || return 1
         fi
         (( probed >= probeLimit )) && break
     done < <(realityTargetFilteredCandidates recommended)
 
-    if (( bestRank >= 3 )); then
-        realityTargetHost=${bestHost}
-        realityTargetPort=${bestPort}
-        realitySNI=${AUTO_REALITY_SERVER_NAME:-${bestSni}}
-        realityTargetStatusBlock green "REALITY 自动推荐" "已选择: ${bestTarget}" "评分: ${bestScore}" "X25519MLKEM768: ${bestPqc}" "证书链长度: ${bestCertLength}" "实测候选: ${probed}"
+    if selectScannedRealityTarget; then
+        selectedTarget=$(formatRealityTarget "${realityTargetHost}" "${realityTargetPort}")
+        selectedLine=$(realityTargetResultLine "${selectedTarget}") || return 1
+        selectedScore=$(realityTargetResultField "${selectedLine}" 10)
+        realityTargetStatusBlock green "REALITY 自动推荐" "已选择: ${selectedTarget}" "cdn_risk=no，评分=${selectedScore}" "实测候选: ${probed}"
         return 0
     fi
 
-    realityTargetStatusBlock yellow "REALITY 自动推荐" "推荐候选未得到 A/B 级实测结果" "已回退默认目标 www.ibm.com:443"
+    realityTargetStatusBlock red "REALITY 自动推荐" "推荐候选未得到 cdn_risk=no 且评分 A 的结果" "未写入未经检测的兜底目标"
     return 1
 }
 
@@ -1299,21 +1514,8 @@ selectDefaultRealityTarget() {
     if selectAutoRecommendedRealityTarget; then
         return 0
     fi
-    realityTargetHost=www.ibm.com
-    realityTargetPort=443
-    realitySNI=${AUTO_REALITY_SERVER_NAME:-www.ibm.com}
-}
-
-selectRandomRealityTargetCandidate() {
-    local count randomNum line host sni
-    count=$(realityTargetCandidateCount)
-    randomNum=$(randomNum 1 "${count}")
-    line=$(realityTargetCandidateLineByIndex "${randomNum}") || line=$(realityTargetCandidateLineByIndex 1)
-    host=$(realityTargetCandidateField "${line}" 1)
-    sni=$(realityTargetCandidateField "${line}" 2)
-    realityTargetHost=${host}
-    realityTargetPort=443
-    realitySNI=${AUTO_REALITY_SERVER_NAME:-${sni}}
+    realityTargetStatusBlock red "REALITY 目标站" "没有通过安全门槛的 A 级目标" "请刷新目标库或手工输入后重试"
+    return 1
 }
 
 parseRealityTargetInput() {
@@ -1347,6 +1549,7 @@ writeRealityTargetCacheLine() {
     local refreshedAsn=${9:-}
     local refreshedAsOrg=${10:-}
     local refreshedNetworkMatch=${11:-}
+    local refreshedCdnRisk=${12:-}
     local parsed host line sni name category cdnRisk ip asn asOrg networkMatch
     parsed=$(parseHostPort "${target}" 443)
     host=${parsed%:*}
@@ -1375,23 +1578,26 @@ writeRealityTargetCacheLine() {
         asOrg=${refreshedAsOrg:-unknown}
         networkMatch=${refreshedNetworkMatch:-unknown}
     fi
+    [[ -z "${refreshedCdnRisk}" ]] || cdnRisk=${refreshedCdnRisk}
     writeRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}"
 }
 
 scoreRealityTargetFromTlsPing() {
     local tlsPingResult=$1
+    local sniResult
     local score="FAIL"
     local pqc="no"
     local certLength="unknown"
     local tls13="unknown"
     local note="未检测到可用 TLS 1.3 握手"
 
-    if echo "${tlsPingResult}" | grep -qi "TLS Post-Quantum key exchange:.*X25519MLKEM768"; then
+    sniResult=$(printf '%s\n' "${tlsPingResult}" | awk '/Pinging with SNI/{inSni=1; next} inSni')
+    if printf '%s\n' "${sniResult}" | grep -qi "TLS Post-Quantum key exchange:.*X25519MLKEM768"; then
         pqc="yes"
     fi
-    certLength=$(echo "${tlsPingResult}" | awk '/Pinging with SNI/{inSni=1; next} inSni && /Certificate chain/{print $5; exit}')
+    certLength=$(printf '%s\n' "${sniResult}" | awk '/Certificate chain/{print $5; exit}')
     [[ "${certLength}" =~ ^[0-9]+$ ]] || certLength="unknown"
-    if echo "${tlsPingResult}" | grep -qi "TLS.*1\.3\|TLSv1\.3"; then
+    if printf '%s\n' "${sniResult}" | grep -qi "TLS.*1\.3\|TLSv1\.3"; then
         tls13="yes"
     fi
 
@@ -1494,14 +1700,12 @@ probeRealityScannerCandidate() {
     local currentAsn=${5:-}
     local currentOrg=${6:-}
     local networkMode=${7:-lookup}
-    local target tlsPingResult result score pqc certLength tls13 note checkedAt profile candidateAsn candidateOrg networkMatch
+    local target tlsPingResult tlsState result score pqc certLength tls13 note checkedAt profile candidateAsn candidateOrg networkMatch cdnRisk
 
     trap - EXIT INT TERM
     target=$(formatRealityTarget "${domain}" 443)
-    if ! tlsPingResult=$("${detector}" tls ping -ip "${ip}" "${target}" 2>&1); then
-        printf 'FAIL\t%s\n' "${target}"
-        return 0
-    fi
+    tlsPingResult=$(probeRealityTargetTls "${detector}" "${ip}" "${domain}" 443)
+    tlsState=$(realityTargetTlsPingState "${tlsPingResult}")
     result=$(scoreRealityTargetFromTlsPing "${tlsPingResult}")
     IFS=$'\t' read -r score pqc certLength tls13 note <<<"${result}"
     if [[ "${score}" == "FAIL" ]]; then
@@ -1516,9 +1720,10 @@ probeRealityScannerCandidate() {
         profile=$(scannerRealityNetworkProfile "${ip}" "${currentAsn}" "${currentOrg}")
         IFS=$'\t' read -r candidateAsn candidateOrg networkMatch <<<"${profile}"
     fi
+    cdnRisk=$(realityTargetAddressCdnRisk "${detector}" "${ip}" 443 "${candidateAsn}" "${tlsState}")
     checkedAt=$(date +%s)
     printf 'OK\t'
-    formatRealityTargetResultLine "${target}" "${domain}" "${domain}" "scanner" "unknown" "${ip}" "${candidateAsn}" "${candidateOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "RealiTLScanner: ${issuer}; ${note}"
+    formatRealityTargetResultLine "${target}" "${domain}" "${domain}" "scanner" "${cdnRisk}" "${ip}" "${candidateAsn}" "${candidateOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "RealiTLScanner: ${issuer}; ${note}"
 }
 
 importRealityScannerResults() {
@@ -1529,7 +1734,7 @@ importRealityScannerResults() {
     local networkMode=${5:-lookup}
     local seenDomainsFile=${6:-}
     local maxJobs=${PADM_REALITY_SECONDARY_JOBS:-4}
-    local detector ip origin domain issuer geo domainKey record target score _ip _origin _issuer _geo
+    local detector ip origin domain issuer geo domainKey record target score cdnRisk _ip _origin _issuer _geo
     local normalizedFile resultLinesFile failedTargetsFile probeDir jobFile probeRecord probeStatus probePayload currentDomain
     local offset=0 batchEnd index slot pid imported=0 skipped=0 duplicateCount=0 processed=0 totalRecords importStart lastProgressAt=0 now countA=0 countB=0 countC=0 countFail=0
     local -a candidates=() jobPids=() jobFiles=() jobTargets=()
@@ -1618,8 +1823,17 @@ importRealityScannerResults() {
                 if [[ -n "${probePayload}" ]]; then
                     printf '%s\n' "${probePayload}" >>"${resultLinesFile}"
                     score=$(realityTargetResultField "${probePayload}" 10)
+                    cdnRisk=$(realityTargetResultField "${probePayload}" 5)
                     case "${score}" in
-                    A) countA=$((countA + 1)); imported=$((imported + 1)) ;;
+                    A)
+                        if [[ "${cdnRisk}" == "no" ]]; then
+                            countA=$((countA + 1))
+                            imported=$((imported + 1))
+                        else
+                            countFail=$((countFail + 1))
+                            skipped=$((skipped + 1))
+                        fi
+                        ;;
                     B) countB=$((countB + 1)); skipped=$((skipped + 1)) ;;
                     C) countC=$((countC + 1)); skipped=$((skipped + 1)) ;;
                     *) countFail=$((countFail + 1)); skipped=$((skipped + 1)) ;;
@@ -2059,55 +2273,54 @@ showRealityTargetCertificateChain() {
 
 showRealityTargetQuality() {
     local target=$1
-    local detector tlsPingResult result score pqc certLength tls13 note checkedAt detectStart detectSeconds
-    local parsed host ip= networkProfile rest currentAsn= currentOrg= candidateProfile candidateAsn= candidateOrg= networkMatch= networkStatus
-    if ! detector=$(realityTargetDetector); then
-        realityTargetStatusBlock yellow "REALITY 目标站检测" "未找到 xray，无法在线检测" "安装核心后可在 REALITY 管理中检测"
+    local detector='' probeResult cdnRisk score pqc certLength tls13 note checkedAt detectStart detectSeconds
+    local parsed host port sni ip asn asOrg networkProfile rest currentAsn='' currentOrg='' networkMatch=unknown color=green cachedLine='' name category
+    detector=$(realityTargetDetector 2>/dev/null || true)
+    if [[ -z "${detector}" ]] && ! command -v openssl >/dev/null 2>&1; then
+        realityTargetStatusBlock yellow "REALITY 目标站检测" "缺少 Xray/OpenSSL，无法在线检测"
         return 1
     fi
-    realityTargetStatusBlock yellow "REALITY 目标站检测" "正在检测: ${target}"
-    detectStart=$(date +%s)
-    if ! tlsPingResult=$("${detector}" tls ping "${target}" 2>&1); then
-        checkedAt=$(date +%s)
-        detectSeconds=$((checkedAt - detectStart))
-        removeRealityTargetFromUnifiedLibrary "${target}"
-        realityTargetStatusBlock red "REALITY 目标站检测" "目标站检测失败: ${target}" "耗时: ${detectSeconds}s" "已从统一目标库记录中剔除"
-        return 1
-    fi
-    result=$(scoreRealityTargetFromTlsPing "${tlsPingResult}")
-    score=$(printf '%s\n' "${result}" | awk -F'\t' '{print $1}')
-    pqc=$(printf '%s\n' "${result}" | awk -F'\t' '{print $2}')
-    certLength=$(printf '%s\n' "${result}" | awk -F'\t' '{print $3}')
-    tls13=$(printf '%s\n' "${result}" | awk -F'\t' '{print $4}')
-    note=$(printf '%s\n' "${result}" | awk -F'\t' '{print $5}')
     parsed=$(parseHostPort "${target}" 443)
     host=${parsed%:*}
-    networkStatus="目标 IP 解析失败，保留原缓存"
-    if ip=$(resolveRealityTargetIPv4 "${host}"); then
-        if networkProfile=$(currentRealityNetworkProfile 2>/dev/null); then
-            rest=${networkProfile#*$'\t'}
-            currentAsn=${rest%%$'\t'*}
-            currentOrg=${rest#*$'\t'}
-        fi
-        candidateProfile=$(scannerRealityNetworkProfile "${ip}" "${currentAsn}" "${currentOrg}")
-        IFS=$'\t' read -r candidateAsn candidateOrg networkMatch <<<"${candidateProfile}"
-        if [[ "${candidateAsn}" == "unknown" ]]; then
-            ip=
-            candidateAsn=
-            candidateOrg=
-            networkMatch=
-            networkStatus="目标 ASN 查询失败，保留原缓存"
-        elif [[ -z "${currentAsn}" ]]; then
-            networkMatch=unknown
-            networkStatus="已刷新目标 ASN；本机 ASN 查询失败，网络关系未知"
-        else
-            networkStatus="已刷新目标 ASN 与网络关系"
+    port=${parsed##*:}
+    target=$(formatRealityTarget "${host}" "${port}")
+    cachedLine=$(realityTargetResultLine "${target}" 2>/dev/null || true)
+    sni=${host}
+    name=${host}
+    category=manual
+    if [[ -n "${cachedLine}" ]]; then
+        sni=$(realityTargetResultField "${cachedLine}" 2)
+        name=$(realityTargetResultField "${cachedLine}" 3)
+        category=$(realityTargetResultField "${cachedLine}" 4)
+    elif [[ "${host}" == "${realityTargetHost:-}" ]]; then
+        sni=${realitySNI:-${host}}
+    fi
+    realityTargetStatusBlock yellow "REALITY 目标站检测" "正在检测全部 A/AAAA: ${target}" "SNI: ${sni}"
+    detectStart=$(date +%s)
+    if ! probeResult=$(probeRealityTargetEndpoint "${detector}" "${target}" "${sni}"); then
+        realityTargetStatusBlock red "REALITY 目标站检测" "目标地址解析失败: ${target}"
+        return 1
+    fi
+    IFS=$'\t' read -r cdnRisk ip asn asOrg score pqc certLength tls13 note <<<"${probeResult}"
+    if networkProfile=$(currentRealityNetworkProfile 2>/dev/null); then
+        rest=${networkProfile#*$'\t'}
+        currentAsn=${rest%%$'\t'*}
+        currentOrg=${rest#*$'\t'}
+        if [[ "${asn}" == "${currentAsn}" ]]; then
+            networkMatch=same_asn
+        elif [[ "${asn}" != "unknown" ]] && realityTargetProviderMatches "${currentOrg}" "${asOrg}"; then
+            networkMatch=same_provider
+        elif [[ "${asn}" != "unknown" ]]; then
+            networkMatch=different_network
         fi
     fi
     checkedAt=$(date +%s)
     detectSeconds=$((checkedAt - detectStart))
-    writeRealityTargetCacheLine "${target}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}" "${ip}" "${candidateAsn}" "${candidateOrg}" "${networkMatch}"
-    realityTargetStatusBlock green "REALITY 目标站检测" "评分: $(realityTargetScoreStyle "${score}")" "X25519MLKEM768: ${pqc}" "TLS1.3: ${tls13}" "证书链长度: ${certLength}" "目标 ASN（缓存）: $(realityTargetCachedAsnSummary "${target}")" "网络关系（缓存）: $(realityTargetCachedNetworkSummary "${target}")" "网络缓存: ${networkStatus}" "耗时: ${detectSeconds}s" "结论: ${note}"
+    writeRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}" || return 1
+    [[ "${cdnRisk}" == "no" && "${score}" != "FAIL" ]] || color=red
+    [[ "${cdnRisk}" == "no" && ( "${score}" == "B" || "${score}" == "C" ) ]] && color=yellow
+    realityTargetStatusBlock "${color}" "REALITY 目标站检测" "cdn_risk: ${cdnRisk}" "评分: $(realityTargetScoreStyle "${score}")" "X25519MLKEM768: ${pqc}" "TLS1.3: ${tls13}" "证书链长度: ${certLength}" "目标地址: ${ip} ${asn} ${asOrg}" "网络关系: ${networkMatch}" "耗时: ${detectSeconds}s" "结论: ${note}" "仅检测告警，未自动切换配置"
+    [[ "${cdnRisk}" == "no" && "${score}" != "FAIL" ]]
 }
 
 showRealityTargetQualityActions() {
@@ -2325,44 +2538,25 @@ probeRealityTargetRecord() {
     local currentAsn=$3
     local currentOrg=$4
     local target sni name category cdnRisk _oldIp _oldAsn _oldAsOrg _oldNetworkMatch _oldScore _oldPqc _oldCertLength _oldTls13 _oldCheckedAt _oldNote
-    local parsed host port probeTarget ip tlsPingResult result score pqc certLength tls13 note candidateProfile candidateAsn candidateOrg networkMatch checkedAt
+    local endpointResult ip candidateAsn candidateOrg score pqc certLength tls13 note networkMatch checkedAt
 
     trap - EXIT INT TERM
     IFS=$'\t' read -r target sni name category cdnRisk _oldIp _oldAsn _oldAsOrg _oldNetworkMatch _oldScore _oldPqc _oldCertLength _oldTls13 _oldCheckedAt _oldNote <<<"${record}"
-    parsed=$(parseHostPort "${target}" 443)
-    host=${parsed%:*}
-    port=${parsed##*:}
-    target=$(formatRealityTarget "${host}" "${port}")
-    probeTarget=$(formatRealityTarget "${sni:-${host}}" "${port}")
-    if ! ip=$(resolveRealityTargetIPv4 "${host}"); then
+    if ! endpointResult=$(probeRealityTargetEndpoint "${detector}" "${target}" "${sni}"); then
         printf 'NETWORK_FAIL\t%s\n' "${target}"
         return 0
     fi
-    if ! tlsPingResult=$(timeout -k 2 15 "${detector}" tls ping -ip "${ip}" "${probeTarget}" 2>&1); then
-        printf 'FAIL\t%s\n' "${target}"
-        return 0
-    fi
-    result=$(scoreRealityTargetFromTlsPing "${tlsPingResult}")
-    IFS=$'\t' read -r score pqc certLength tls13 note <<<"${result}"
-    if [[ "${score}" == "FAIL" ]]; then
-        printf 'FAIL\t%s\n' "${target}"
-        return 0
-    fi
+    IFS=$'\t' read -r cdnRisk ip candidateAsn candidateOrg score pqc certLength tls13 note <<<"${endpointResult}"
     if [[ "${category}" == "scanner" && "${_oldNote}" == RealiTLScanner:* ]]; then
         note="${_oldNote%%; *}; ${note}"
     fi
-    candidateProfile=$(lookupRealityTargetAsn "${ip}" || true)
-    if [[ -z "${candidateProfile}" ]]; then
-        printf 'NETWORK_FAIL\t%s\n' "${target}"
-        return 0
-    fi
-    candidateAsn=${candidateProfile%%$'\t'*}
-    candidateOrg=${candidateProfile#*$'\t'}
-    networkMatch=different_network
-    if [[ "${candidateAsn}" == "${currentAsn}" ]]; then
+    networkMatch=unknown
+    if [[ "${candidateAsn}" != "unknown" && "${candidateAsn}" == "${currentAsn}" ]]; then
         networkMatch=same_asn
-    elif realityTargetProviderMatches "${currentOrg}" "${candidateOrg}"; then
+    elif [[ "${candidateAsn}" != "unknown" && -n "${currentAsn}" ]] && realityTargetProviderMatches "${currentOrg}" "${candidateOrg}"; then
         networkMatch=same_provider
+    elif [[ "${candidateAsn}" != "unknown" && -n "${currentAsn}" ]]; then
+        networkMatch=different_network
     fi
     checkedAt=$(date +%s)
     printf 'OK\t'
@@ -2370,7 +2564,7 @@ probeRealityTargetRecord() {
 }
 
 scanLocalAsnRealityTargets() {
-    local detector networkProfile currentIp currentAsn currentOrg rest line parsed host target networkMatch score scanStart scanSeconds totalCandidates lastProgressAt=0 now
+    local detector networkProfile currentIp currentAsn currentOrg rest line parsed host target networkMatch score cdnRisk scanStart scanSeconds totalCandidates lastProgressAt=0 now
     local maxJobs=${PADM_REALITY_SECONDARY_JOBS:-4}
     local resultsFile refreshSource resultLinesFile failedTargetsFile probeDir jobFile probeRecord probeStatus probePayload
     local offset=0 batchEnd index slot pid processed=0 resolved=0 failed=0 sameAsn=0 sameProvider=0 differentNetwork=0
@@ -2442,7 +2636,8 @@ scanLocalAsnRealityTargets() {
                 if [[ -n "${probePayload}" ]]; then
                     printf '%s\n' "${probePayload}" >>"${resultLinesFile}"
                     score=$(realityTargetResultField "${probePayload}" 10)
-                    if [[ "${score}" == "A" ]]; then
+                    cdnRisk=$(realityTargetResultField "${probePayload}" 5)
+                    if [[ "${cdnRisk}" == "no" && "${score}" == "A" ]]; then
                         networkMatch=$(realityTargetResultField "${probePayload}" 9)
                         case "${networkMatch}" in
                         same_asn) sameAsn=$((sameAsn + 1)) ;;
@@ -2489,9 +2684,9 @@ scanLocalAsnRealityTargets() {
     scanSeconds=$(( $(date +%s) - scanStart ))
     realityTargetStatusBlock green "REALITY 目标库质量刷新" "复测完成" "目标: ${processed}" "并发: ${maxJobs}" "保留 A: ${resolved}" "same_asn: ${sameAsn}" "same_provider: ${sameProvider}" "different_network: ${differentNetwork}" "剔除: ${failed}" "耗时: ${scanSeconds}s"
     if [[ "$(realityTargetResultCount)" -gt 0 ]]; then
-        realityTargetStatusBlock green "REALITY 目标库质量刷新" "自动推荐将优先使用统一结果表中的 A 级目标"
+        realityTargetStatusBlock green "REALITY 目标库质量刷新" "自动推荐将只使用 cdn_risk=no 的 A 级目标"
     else
-        realityTargetStatusBlock yellow "REALITY 目标库质量刷新" "未得到 A 级结果" "自动推荐仍回退到 www.ibm.com:443"
+        realityTargetStatusBlock yellow "REALITY 目标库质量刷新" "未得到 cdn_risk=no 的 A 级结果" "不会写入未经检测的兜底目标"
     fi
 }
 
@@ -2715,6 +2910,7 @@ changeInstalledRealityTarget() {
     local previousXrayVLESSRealityXHTTPSNI="${xrayVLESSRealityXHTTPSNI:-}"
     local previousSingBoxVLESSRealityVisionSNI="${singBoxVLESSRealityVisionSNI:-}"
     local previousSingBoxVLESSRealityGRPCSNI="${singBoxVLESSRealityGRPCSNI:-}"
+    validateRealityTargetSelection manual "${target}" "${sni}" || return 1
     padmCreateTempPath backupDir -d "$(realityTargetTmpPath 'padm-reality-target.XXXXXX')" || return 1
     if ! backupRealityTargetConfigs "${backupDir}"; then
         padmRemoveCleanupPath "${backupDir}"

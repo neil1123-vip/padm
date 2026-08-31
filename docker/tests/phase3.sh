@@ -85,6 +85,30 @@ compose)
 ps)
     ;;
 run)
+    if [[ " ${*} " == *' --entrypoint python3 '* ]]; then
+        if [[ "${mode}" == "reality-dns-failure" ]]; then
+            exit 2
+        elif [[ "${mode}" == "reality-asn-risk" ]]; then
+            printf '203.0.113.35\tAS13335\tCloudflare\n'
+        elif [[ "${mode}" == "reality-unknown-risk" ]]; then
+            printf '192.0.2.1\tunknown\tunknown\n'
+        else
+            printf '192.0.2.1\tAS64500\tExampleNet\n'
+        fi
+        exit 0
+    fi
+    if [[ " ${*} " == *' tls ping '* ]]; then
+        if [[ " ${*} " == *' cloudflare.com:443 '* ]]; then
+            if [[ "${mode}" == "reality-sni-risk" ]]; then
+                printf 'Pinging with SNI\nHandshake succeeded\nTLS Version:\tTLS 1.3\n'
+            else
+                printf 'Pinging with SNI\nHandshake failure: certificate does not match SNI\n'
+            fi
+        else
+            printf 'Pinging with SNI\nHandshake succeeded\nTLS Version:\tTLS 1.3\n'
+        fi
+        exit 0
+    fi
     output=
     fullchain=
     keyfile=
@@ -264,6 +288,17 @@ jq -e '(.services | keys | sort) == ["acme", "xray"]' \
     "${DOCKER_ROOT}/compose.json" >/dev/null || fail 'Xray Compose services are wrong'
 grep -q ' run --rm --no-deps xray -test -confdir /etc/padm/xray' "${DOCKER_LOG}" ||
     fail 'Xray candidate was not validated in its image'
+
+FAKE_DOCKER_MODE=reality-asn-risk runControl 15 reject-reality-as13335 configure --spec "${REALITY_XRAY_SPEC}"
+grep -qF '命中 Cloudflare AS13335' "${CONTROL_LOG}" || fail 'AS13335 Reality target was not rejected'
+FAKE_DOCKER_MODE=reality-sni-risk runControl 15 reject-reality-cloudflare-sni configure --spec "${REALITY_XRAY_SPEC}"
+grep -qF '可响应 cloudflare.com SNI' "${CONTROL_LOG}" || fail 'Cloudflare SNI relay was not rejected'
+FAKE_DOCKER_MODE=reality-unknown-risk runControl 15 reject-reality-unknown configure --spec "${REALITY_XRAY_SPEC}"
+grep -qF '风险检测不完整' "${CONTROL_LOG}" || fail 'unknown Reality target risk was not rejected'
+FAKE_DOCKER_MODE=reality-dns-failure runControl 15 reject-reality-dns-failure configure --spec "${REALITY_XRAY_SPEC}"
+grep -qF '目标地址解析失败' "${CONTROL_LOG}" || fail 'partial DNS failure was not rejected'
+jq -e '.core.type == "xray" and .core.protocol_ids == [1]' "${DOCKER_ROOT}/deployment.json" >/dev/null ||
+    fail 'rejected Reality target changed the live deployment'
 
 runControl 0 configure-sing-box configure --spec "${REALITY_SINGBOX_SPEC}"
 jq -e '.core.type == "sing-box" and .core.protocol_ids == [1]' \

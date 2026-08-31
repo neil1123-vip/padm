@@ -59,7 +59,18 @@ compose)
         exit 1
     fi
     ;;
-ps | run) ;;
+ps) ;;
+run)
+    if [[ " ${*} " == *' --entrypoint python3 '* ]]; then
+        printf '192.0.2.1\tAS64500\tExampleNet\n'
+    elif [[ " ${*} " == *' tls ping '* ]]; then
+        if [[ " ${*} " == *' cloudflare.com:443 '* ]]; then
+            printf 'Pinging with SNI\nHandshake failure: certificate does not match SNI\n'
+        else
+            printf 'Pinging with SNI\nHandshake succeeded\nTLS Version:\tTLS 1.3\n'
+        fi
+    fi
+    ;;
 *) exit 1 ;;
 esac
 EOF

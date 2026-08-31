@@ -6,6 +6,9 @@ if ! declare -F padmRealAppendDefaultSubscribeLine >/dev/null 2>&1; then
     eval "$(declare -f appendClashMetaSubscribeLines | sed '1s/^appendClashMetaSubscribeLines/padmRealAppendClashMetaSubscribeLines/')"
     eval "$(declare -f appendSingBoxSubscribeLocalConfig | sed '1s/^appendSingBoxSubscribeLocalConfig/padmRealAppendSingBoxSubscribeLocalConfig/')"
 fi
+if ! declare -F padmRealResolveRealityTargetAddresses >/dev/null 2>&1; then
+    eval "$(declare -f resolveRealityTargetAddresses | sed '1s/^resolveRealityTargetAddresses/padmRealResolveRealityTargetAddresses/')"
+fi
 
 REALITY_TLS_PING_ARGS_FILE="${TMP_DIR}/tls_ping_args.txt"
 SUBSCRIBE_CAPTURE_DIR="${TMP_DIR}/subscribe_local"
@@ -28,11 +31,24 @@ resolveRealityTargetIPv4() {
     printf '192.0.2.1\n'
 }
 
+resolveRealityTargetAddresses() {
+    case "$1" in
+    relay-asn.example.com) printf '203.0.113.35\n' ;;
+    relay-sni.example.com) printf '203.0.113.36\n' ;;
+    multi-risk.example.com) printf '192.0.2.1\n203.0.113.35\n' ;;
+    unknown-risk.example.com) printf '198.51.100.254\n' ;;
+    *) printf '192.0.2.1\n' ;;
+    esac
+}
+
 lookupRealityTargetAsn() {
     if [[ -n "${REALITY_ASN_LOOKUP_ARGS_FILE:-}" ]]; then
         printf '%s\n' "$1" >>"${REALITY_ASN_LOOKUP_ARGS_FILE}"
     fi
     case "$1" in
+    203.0.113.35) printf 'AS13335\tCloudflare\n' ;;
+    203.0.113.36) printf 'AS64500\tExampleNet\n' ;;
+    198.51.100.254) return 1 ;;
     198.51.100.*) printf 'AS64501\tRemoteNet\n' ;;
     *) printf 'AS64500\tExampleNet\n' ;;
     esac
@@ -64,7 +80,7 @@ appendSingBoxSubscribeLocalConfig() {
 }
 
 fake-xray() {
-    local concurrencyMarker= active=0 attempt=0
+    local concurrencyMarker='' active=0 attempt=0
     [[ "$1" == "tls" && "$2" == "ping" ]]
     printf '%s\n' "$*" >>"${REALITY_TLS_PING_ARGS_FILE}"
     if [[ -n "${PADM_FAKE_XRAY_CONCURRENCY_DIR:-}" ]]; then
@@ -83,14 +99,30 @@ fake-xray() {
     if [[ "$*" == *"fail.example.com"* || "$*" == *"fail-auto.example.com"* ]]; then
         return 1
     fi
+    if [[ "$*" == *"cloudflare.com"* ]]; then
+        if [[ "$*" == *"-ip 203.0.113.36"* ]]; then
+            printf 'Pinging with SNI\nHandshake succeeded\nTLS version: TLS 1.3\nCertificate chain total length: 4096\n'
+        else
+            printf 'Pinging with SNI\nHandshake failure: certificate does not match SNI\n'
+        fi
+        return 0
+    fi
+    if [[ "$*" == *"manual-b.example.com"* ]]; then
+        printf 'Pinging with SNI\nHandshake succeeded\nTLS Post-Quantum key exchange: X25519MLKEM768\nTLS version: TLS 1.3\nCertificate chain total length: 2048\n'
+        return 0
+    fi
+    if [[ "$*" == *"manual-c.example.com"* ]]; then
+        printf 'Pinging with SNI\nHandshake succeeded\nTLS version: TLS 1.3\nCertificate chain total length: 4096\n'
+        return 0
+    fi
     if [[ "${PADM_FAKE_XRAY_ONLY_IBM:-}" == "true" && "$*" != *"www.ibm.com"* ]]; then
         return 1
     fi
     if [[ "$*" == *"www.microsoft.com"* ]]; then
-        printf 'Pinging with SNI\nTLS Post-Quantum key exchange: X25519MLKEM768\nTLS version: TLS 1.3\nCertificate chain total length: 8192\n'
+        printf 'Pinging with SNI\nHandshake succeeded\nTLS Post-Quantum key exchange: X25519MLKEM768\nTLS version: TLS 1.3\nCertificate chain total length: 8192\n'
         return 0
     fi
-    printf 'Pinging with SNI\nTLS Post-Quantum key exchange: X25519MLKEM768\nTLS version: TLS 1.3\nCertificate chain total length: 4096\n'
+    printf 'Pinging with SNI\nHandshake succeeded\nTLS Post-Quantum key exchange: X25519MLKEM768\nTLS version: TLS 1.3\nCertificate chain total length: 4096\n'
 }
 
 jq() {

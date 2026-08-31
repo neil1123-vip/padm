@@ -150,6 +150,150 @@ dockerConfigureSpecValidate() {
     }
 }
 
+dockerRealityTlsPingState() {
+    local output=$1
+    printf '%s\n' "${output}" | awk '
+      /Pinging with SNI/ {inSni = 1; next}
+      inSni && /Handshake succeeded/ {success = 1}
+      inSni && /Handshake failure/ {rejected = 1}
+      END {
+        if (success) print "success"
+        else if (rejected) print "rejected"
+        else print "unknown"
+      }
+    '
+}
+
+dockerRealityTlsPingHasTls13() {
+    local output=$1
+    printf '%s\n' "${output}" | awk '
+      /Pinging with SNI/ {inSni = 1; next}
+      inSni && /TLS Version:[[:space:]]*TLS 1\.3/ {found = 1}
+      END {exit found ? 0 : 1}
+    '
+}
+
+dockerRealityTargetNetworkRecords() {
+    local opsImage=$1 host=$2
+    docker run --rm --entrypoint python3 "${opsImage}" -c '
+import json
+import socket
+import sys
+import urllib.parse
+import urllib.request
+
+host = sys.argv[1]
+addresses = []
+missing_codes = {socket.EAI_NONAME}
+if hasattr(socket, "EAI_NODATA"):
+    missing_codes.add(socket.EAI_NODATA)
+for family in (socket.AF_INET, socket.AF_INET6):
+    try:
+        records = socket.getaddrinfo(host, None, family, socket.SOCK_STREAM)
+    except socket.gaierror as error:
+        if error.errno not in missing_codes:
+            raise
+        continue
+    for record in records:
+        ip = record[4][0]
+        if ip not in addresses:
+            addresses.append(ip)
+if not addresses:
+    raise SystemExit(2)
+
+for ip in addresses:
+    asn = org = ""
+    encoded = urllib.parse.quote(ip, safe="")
+    request = urllib.request.Request(
+        "https://api.bgpview.io/ip/" + encoded,
+        headers={"User-Agent": "padm-reality-check/1"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            prefixes = json.load(response).get("data", {}).get("prefixes") or []
+        if prefixes:
+            data = prefixes[0].get("asn") or {}
+            if data.get("asn"):
+                asn = "AS" + str(data["asn"])
+                org = str(data.get("name") or "")
+    except Exception:
+        pass
+    if not asn:
+        request = urllib.request.Request(
+            "https://ipinfo.io/" + encoded + "/org",
+            headers={"User-Agent": "padm-reality-check/1"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                value = response.read(4096).decode("utf-8", "replace").strip()
+            fields = value.split(maxsplit=1)
+            if fields and fields[0].startswith("AS") and fields[0][2:].isdigit():
+                asn = fields[0]
+                org = fields[1] if len(fields) > 1 else ""
+        except Exception:
+            pass
+    print(ip, asn or "unknown", org or "unknown", sep="\t")
+' "${host}"
+}
+
+dockerRealityTargetTlsPing() {
+    local xrayImage=$1 ip=$2 sni=$3 port=$4
+    local timeoutSeconds=${PADM_DOCKER_REALITY_TLS_TIMEOUT:-20}
+    [[ "${timeoutSeconds}" =~ ^[0-9]+$ && "${timeoutSeconds}" -gt 0 ]] || timeoutSeconds=20
+    timeout -k 2 "${timeoutSeconds}" docker run --rm "${xrayImage}" tls ping -ip "${ip}" "${sni}:${port}" 2>&1 || true
+}
+
+dockerRealityTargetsValidate() {
+    local specFile=$1 xrayImage opsImage host port sni records ip asn _org
+    local targetResult targetState cfResult cfState incomplete=false
+    jq -e 'any(.core.protocols[]; .id == 1)' "${specFile}" >/dev/null || return 0
+    command -v timeout >/dev/null 2>&1 || {
+        dockerError '缺少 timeout，无法限制 REALITY 目标站探测时长'
+        return 1
+    }
+    xrayImage=$(jq -r '.images.xray' "${specFile}") || return 1
+    opsImage=$(jq -r '.images.ops' "${specFile}") || return 1
+    while IFS=$'\t' read -r host port sni; do
+        incomplete=false
+        records=$(dockerRealityTargetNetworkRecords "${opsImage}" "${host}" 2>/dev/null) || {
+            dockerError "REALITY 目标地址解析失败: ${host}"
+            return 1
+        }
+        [[ -n "${records}" ]] || {
+            dockerError "REALITY 目标没有 A/AAAA 记录: ${host}"
+            return 1
+        }
+        while IFS=$'\t' read -r ip asn _org; do
+            [[ -n "${ip}" ]] || continue
+            if [[ "${asn}" == "AS13335" ]]; then
+                dockerError "REALITY 目标命中 Cloudflare AS13335: ${host} -> ${ip}"
+                return 1
+            fi
+            [[ "${asn}" != "unknown" ]] || incomplete=true
+            targetResult=$(dockerRealityTargetTlsPing "${xrayImage}" "${ip}" "${sni}" "${port}")
+            targetState=$(dockerRealityTlsPingState "${targetResult}")
+            if [[ "${targetState}" != "success" ]] || ! dockerRealityTlsPingHasTls13 "${targetResult}"; then
+                incomplete=true
+                continue
+            fi
+            cfResult=$(dockerRealityTargetTlsPing "${xrayImage}" "${ip}" cloudflare.com "${port}")
+            cfState=$(dockerRealityTlsPingState "${cfResult}")
+            case "${cfState}" in
+            success)
+                dockerError "REALITY 目标可响应 cloudflare.com SNI，存在中继风险: ${host} -> ${ip}"
+                return 1
+                ;;
+            rejected) ;;
+            *) incomplete=true ;;
+            esac
+        done <<<"${records}"
+        if [[ "${incomplete}" == "true" ]]; then
+            dockerError "REALITY 目标风险检测不完整，已拒绝部署: ${host}:${port}"
+            return 1
+        fi
+    done < <(jq -r '.core.protocols[] | select(.id == 1) | [.reality.target_host, (.reality.target_port | tostring), .reality.server_name] | @tsv' "${specFile}")
+}
+
 dockerCurrentOwnsPort() {
     local root port transport=${2:-tcp}
     root=$(dockerInstallRoot) || return 1
@@ -1262,6 +1406,10 @@ dockerConfigureApply() {
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_STATE}"
     }
+    dockerRealityTargetsValidate "${specFile}" || {
+        dockerCleanupConfigurationCandidate || true
+        return "${PADM_DOCKER_RC_STATE}"
+    }
     dockerHostIntegrationInputsValidate "${specFile}" || {
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_STATE}"
@@ -1325,7 +1473,8 @@ dockerDomainIsValid() {
 }
 
 dockerEmailIsValid() {
-    [[ "$1" =~ ^[A-Za-z0-9.!#$%\&\'*+/=?^_\`{|}~-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,63}$ ]]
+    local regex=$'^[A-Za-z0-9.!#$%&\'*+/=?^_\x60{|}~-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,63}$'
+    [[ "$1" =~ ${regex} ]]
 }
 
 dockerImageReferenceIsValid() {

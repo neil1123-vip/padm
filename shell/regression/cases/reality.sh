@@ -222,7 +222,8 @@ runRealityCandidateFastRegression() {
     local oldResultsFile="${PADM_REALITY_TARGET_RESULTS_FILE:-}"
     local oldRealityPageSize="${REALITY_TARGET_PAGE_SIZE:-}"
     local oldAutoInstall="${AUTO_INSTALL:-}"
-    local firstRecommendedRealityCandidate firstDeveloperRealityCandidate microsoftCandidate cachedLine
+    local ipv6OpenSslArgsFile="${TMP_DIR}/reality-ipv6-openssl-args.txt"
+    local firstRecommendedRealityCandidate firstDeveloperRealityCandidate microsoftCandidate cachedLine resolvedAddresses
 
     cat >"${fixtureFile}" <<'EOF'
 www.ibm.com|www.ibm.com|IBM|global|large_site|unknown|1|yes|fixture default
@@ -255,6 +256,38 @@ EOF
     cachedLine=$(realityTargetResultLine "www.ibm.com:443" 2>/dev/null || true)
     [[ -z "${cachedLine}" ]]
     [[ "$(realityTargetResultCount)" == "0" ]]
+    formatRealityTargetResultLine "legacy.example.com:443" "legacy.example.com" "Legacy" "test" "yes" "192.0.2.45" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567892" "legacy risk" >"${cacheFile}"
+    [[ "$(realityTargetResultCount)" == "0" ]]
+    ! realityTargetResultLine "legacy.example.com:443"
+    openssl() {
+        printf '%s\n' "$*" >"${ipv6OpenSslArgsFile}"
+        printf 'Protocol version: TLSv1.3\n'
+    }
+    timeout() {
+        shift 3
+        "$@"
+    }
+    probeRealityTargetTls "" "2001:db8::1" "ipv6.example.com" 443 >/dev/null
+    grep -qF -- '-connect [2001:db8::1]:443' "${ipv6OpenSslArgsFile}"
+    unset -f openssl timeout
+    dig() {
+        local type=A status=NOERROR address=192.0.2.60
+        if [[ " $* " == *' AAAA '* ]]; then
+            type=AAAA
+            status=${PADM_FAKE_AAAA_DNS_STATUS:-NOERROR}
+            address=2001:db8::60
+        fi
+        printf ';; ->>HEADER<<- opcode: QUERY, status: %s, id: 1\n' "${status}"
+        [[ "${status}" == "NOERROR" ]] && printf 'fixture.example.com. 60 IN %s %s\n' "${type}" "${address}"
+    }
+    PADM_FAKE_AAAA_DNS_STATUS=SERVFAIL
+    ! padmRealResolveRealityTargetAddresses fixture.example.com
+    PADM_FAKE_AAAA_DNS_STATUS=NOERROR
+    resolvedAddresses=$(padmRealResolveRealityTargetAddresses fixture.example.com)
+    grep -qxF '192.0.2.60' <<<"${resolvedAddresses}"
+    grep -qxF '2001:db8::60' <<<"${resolvedAddresses}"
+    unset PADM_FAKE_AAAA_DNS_STATUS
+    unset -f dig
     ! realityTargetCandidates | grep -q '^www.cloudflare.com|'
     ! realityTargetCandidates | grep -q '^www.apple.com|'
 
@@ -582,8 +615,18 @@ EOF
     rm -f "${PADM_REALITY_TARGET_SCAN_FILE}" "${REALITY_TLS_PING_ARGS_FILE}" "${asnLookupFile}" "${refreshTimeoutLog}"
     mkdir -p "${refreshConcurrencyDir}"
     export REALITY_ASN_LOOKUP_ARGS_FILE="${asnLookupFile}"
-    export PADM_FAKE_XRAY_CONCURRENCY_DIR="${refreshConcurrencyDir}"
     export PADM_REALITY_SECONDARY_JOBS=4
+    validateRealityTargetSelection manual "manual-b.example.com:443" "manual-b.example.com"
+    ! validateRealityTargetSelection auto "manual-b.example.com:443" "manual-b.example.com"
+    validateRealityTargetSelection manual "manual-c.example.com:443" "manual-c.example.com"
+    ! validateRealityTargetSelection auto "manual-c.example.com:443" "manual-c.example.com"
+    ! validateRealityTargetSelection manual "fail.example.com:443" "fail.example.com"
+    ! validateRealityTargetSelection manual "relay-asn.example.com:443" "relay-asn.example.com"
+    ! validateRealityTargetSelection manual "relay-sni.example.com:443" "relay-sni.example.com"
+    ! validateRealityTargetSelection manual "unknown-risk.example.com:443" "unknown-risk.example.com"
+    ! validateRealityTargetSelection manual "multi-risk.example.com:443" "multi-risk.example.com"
+    rm -f "${REALITY_TLS_PING_ARGS_FILE}" "${asnLookupFile}" "${refreshTimeoutLog}"
+    export PADM_FAKE_XRAY_CONCURRENCY_DIR="${refreshConcurrencyDir}"
     timeout() {
         [[ "$1" == "-k" && "$2" == "2" && "$3" == "15" ]] || return 2
         printf '%s %s %s\n' "$1" "$2" "$3" >>"${refreshTimeoutLog}"
@@ -591,32 +634,32 @@ EOF
         "$@"
     }
     scanLocalAsnRealityTargets
-    [[ "$(wc -l <"${REALITY_TLS_PING_ARGS_FILE}" | tr -d ' ')" == "2" ]]
-    [[ "$(wc -l <"${asnLookupFile}" | tr -d ' ')" == "1" ]]
-    [[ "$(grep -cFx -- '-k 2 15' "${refreshTimeoutLog}")" == "2" ]]
+    [[ "$(wc -l <"${REALITY_TLS_PING_ARGS_FILE}" | tr -d ' ')" == "3" ]]
+    [[ "$(wc -l <"${asnLookupFile}" | tr -d ' ')" == "2" ]]
+    [[ "$(grep -cFx -- '-k 2 15' "${refreshTimeoutLog}")" == "3" ]]
     ! grep -qF $'fail-auto.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
     grep -qF $'www.ibm.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
     refreshMaxConcurrency=$(sort -nr "${refreshConcurrencyDir}/observed" | head -n 1)
     [[ "${refreshMaxConcurrency}" -ge 2 && "${refreshMaxConcurrency}" -le 4 ]]
-    writeRealityTargetResultLine "refresh-scanner.example.com:8443" "sni.refresh-scanner.example.com" "Refresh Scanner" "scanner" "unknown" "198.51.100.20" "AS64501" "RemoteNet" "different_network" "A" "yes" "4096" "yes" "1234567890" "RealiTLScanner: Fixture CA; old result"
-    writeRealityTargetResultLine "refresh-network-fail.example.com:443" "refresh-network-fail.example.com" "Refresh Network Fail" "test" "unknown" "198.51.100.21" "AS64501" "RemoteNet" "different_network" "A" "yes" "4096" "yes" "1234567890" "stale A fixture"
-    resolveRealityTargetIPv4() {
+    writeRealityTargetResultLine "refresh-scanner.example.com:8443" "sni.refresh-scanner.example.com" "Refresh Scanner" "scanner" "no" "198.51.100.20" "AS64501" "RemoteNet" "different_network" "A" "yes" "4096" "yes" "1234567890" "RealiTLScanner: Fixture CA; old result"
+    writeRealityTargetResultLine "refresh-network-fail.example.com:443" "refresh-network-fail.example.com" "Refresh Network Fail" "test" "no" "198.51.100.21" "AS64501" "RemoteNet" "different_network" "A" "yes" "4096" "yes" "1234567890" "stale A fixture"
+    resolveRealityTargetAddresses() {
         [[ "$1" == "refresh-network-fail.example.com" ]] && return 1
         printf '192.0.2.1\n'
     }
     rm -f "${REALITY_TLS_PING_ARGS_FILE}" "${asnLookupFile}" "${refreshTimeoutLog}"
     scanLocalAsnRealityTargets
-    [[ "$(wc -l <"${REALITY_TLS_PING_ARGS_FILE}" | tr -d ' ')" == "2" ]]
+    [[ "$(wc -l <"${REALITY_TLS_PING_ARGS_FILE}" | tr -d ' ')" == "4" ]]
     grep -qxF "tls ping -ip 192.0.2.1 www.ibm.com:443" "${REALITY_TLS_PING_ARGS_FILE}"
     grep -qxF "tls ping -ip 192.0.2.1 sni.refresh-scanner.example.com:8443" "${REALITY_TLS_PING_ARGS_FILE}"
     ! grep -qF "fail-auto.example.com" "${REALITY_TLS_PING_ARGS_FILE}"
     [[ "$(wc -l <"${asnLookupFile}" | tr -d ' ')" == "2" ]]
-    [[ "$(grep -cFx -- '-k 2 15' "${refreshTimeoutLog}")" == "2" ]]
+    [[ "$(grep -cFx -- '-k 2 15' "${refreshTimeoutLog}")" == "4" ]]
     ! grep -qF $'refresh-network-fail.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
-    refreshScannerLine=$(grep -F $'refresh-scanner.example.com:8443\tsni.refresh-scanner.example.com\tRefresh Scanner\tscanner\tunknown\t' "${PADM_REALITY_TARGET_SCAN_FILE}")
+    refreshScannerLine=$(grep -F $'refresh-scanner.example.com:8443\tsni.refresh-scanner.example.com\tRefresh Scanner\tscanner\tno\t' "${PADM_REALITY_TARGET_SCAN_FILE}")
     [[ "$(realityTargetResultField "${refreshScannerLine}" 9)" == "same_asn" ]]
     [[ "$(realityTargetResultField "${refreshScannerLine}" 15)" == "RealiTLScanner: Fixture CA; TLS 1.3 + X25519MLKEM768 可用，证书链长度满足 Xray 要求" ]]
-    resolveRealityTargetIPv4() { printf '192.0.2.1\n'; }
+    resolveRealityTargetAddresses() { printf '192.0.2.1\n'; }
     unset -f timeout
     unset REALITY_ASN_LOOKUP_ARGS_FILE PADM_FAKE_XRAY_CONCURRENCY_DIR PADM_REALITY_SECONDARY_JOBS
 
@@ -652,7 +695,7 @@ CSV
     [[ "${scannerB}" == "0" ]]
     [[ "${scannerC}" == "0" ]]
     [[ "${scannerFail}" == "1" ]]
-    [[ "$(wc -l <"${REALITY_TLS_PING_ARGS_FILE}" | tr -d ' ')" == "6" ]]
+    [[ "$(wc -l <"${REALITY_TLS_PING_ARGS_FILE}" | tr -d ' ')" == "11" ]]
     [[ "$(grep -c 'scanner.example.com:443' "${REALITY_TLS_PING_ARGS_FILE}")" == "1" ]]
     [[ "$(wc -l <"${asnLookupFile}" | tr -d ' ')" == "5" ]]
     ! grep -qx '198.51.100.17' "${asnLookupFile}"
@@ -693,12 +736,12 @@ CSV
     failedTargetsFile="${TMP_DIR}/reality-failed-targets.txt"
     emptyLinesFile="${TMP_DIR}/reality-empty-lines.tsv"
     writeRealityTargetResultLine "batch-old.example.com:443" "old.example.com" "Old Batch" "test" "unknown" "192.0.2.20" "AS64500" "ExampleNet" "same_asn" "B" "yes" "4096" "yes" "1234567800" "old batch line"
-    writeRealityTargetResultLine "single-drop.example.com:443" "single-drop.example.com" "Single Drop" "test" "unknown" "192.0.2.23" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567800" "old A line"
+    writeRealityTargetResultLine "single-drop.example.com:443" "single-drop.example.com" "Single Drop" "test" "no" "192.0.2.23" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567800" "old A line"
     writeRealityTargetResultLine "single-drop.example.com:443" "single-drop.example.com" "Single Drop" "test" "unknown" "192.0.2.23" "AS64500" "ExampleNet" "same_asn" "C" "no" "4096" "yes" "1234567801" "new C line"
     ! grep -qF $'single-drop.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
-    writeRealityTargetResultLine "batch-drop.example.com:443" "batch-drop.example.com" "Batch Drop" "test" "unknown" "192.0.2.24" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567800" "old A batch line"
+    writeRealityTargetResultLine "batch-drop.example.com:443" "batch-drop.example.com" "Batch Drop" "test" "no" "192.0.2.24" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567800" "old A batch line"
     {
-        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "batch-old.example.com:443" "new.example.com" "New Batch" "test" "unknown" "192.0.2.21" "AS64500" "ExampleNet" "same_asn" "A" "yes" "8192" "yes" "1234567899" "new batch line"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "batch-old.example.com:443" "new.example.com" "New Batch" "test" "no" "192.0.2.21" "AS64500" "ExampleNet" "same_asn" "A" "yes" "8192" "yes" "1234567899" "new batch line"
         printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "batch-new.example.com:443" "batch-new.example.com" "Batch New" "test" "unknown" "192.0.2.22" "AS64500" "ExampleNet" "same_asn" "B" "yes" "4096" "yes" "1234567898" "second batch line"
         printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "batch-drop.example.com:443" "batch-drop.example.com" "Batch Drop" "test" "unknown" "192.0.2.24" "AS64500" "ExampleNet" "same_asn" "C" "no" "4096" "yes" "1234567899" "new C batch line"
         printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "batch-c.example.com:443" "batch-c.example.com" "Batch C" "test" "unknown" "192.0.2.25" "AS64500" "ExampleNet" "same_asn" "C" "no" "4096" "yes" "1234567899" "new C line"
@@ -746,7 +789,7 @@ CSV
     [[ "${realityTargetHost}" == "www.ibm.com" ]]
     [[ "${realityTargetPort}" == "443" ]]
     [[ "${realitySNI}" == "www.ibm.com" ]]
-    grep -q "tls ping www.ibm.com:443" "${REALITY_TLS_PING_ARGS_FILE}"
+    grep -q "tls ping -ip 192.0.2.1 www.ibm.com:443" "${REALITY_TLS_PING_ARGS_FILE}"
     if [[ -n "${oldCandidatesFile}" ]]; then
         export PADM_REALITY_TARGET_CANDIDATES_FILE="${oldCandidatesFile}"
     else
@@ -1139,7 +1182,7 @@ IP,ORIGIN,CERT_DOMAIN,CERT_ISSUER,GEO_CODE
 CSV
     cp "${TMP_DIR}/realitlscanner-fail.csv" "${TMP_DIR}/realitlscanner-fail-1.csv"
     cp "${TMP_DIR}/realitlscanner-fail.csv" "${TMP_DIR}/realitlscanner-fail-2.csv"
-    writeRealityTargetResultLine "fail.example.com:443" "fail.example.com" "Fail Example" "scanner" "unknown" "192.0.2.14" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "stale target"
+    writeRealityTargetResultLine "fail.example.com:443" "fail.example.com" "Fail Example" "scanner" "no" "192.0.2.14" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "stale target"
     rm -f "${REALITY_TLS_PING_ARGS_FILE}"
     importRealityScannerResults "${TMP_DIR}/realitlscanner-fail-1.csv" || true
     grep -qxF "tls ping -ip 192.0.2.14 fail.example.com:443" "${REALITY_TLS_PING_ARGS_FILE}"

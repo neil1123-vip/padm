@@ -227,12 +227,16 @@ runRuntimeAndRealityRegression() {
     [[ "$(realityTargetResultField "${cachedLine}" 8)" == "ExampleNet" ]]
     [[ "$(realityTargetResultField "${cachedLine}" 9)" == "same_asn" ]]
     [[ "$(printf '%s\n' "${cachedLine}" | awk -F'\t' '{print $10}')" == "A" ]]
-    grep -q "tls ping www.microsoft.com:443" "${REALITY_TLS_PING_ARGS_FILE}"
+    grep -qxF "tls ping -ip 192.0.2.1 www.microsoft.com:443" "${REALITY_TLS_PING_ARGS_FILE}"
     scoreLine=$(scoreRealityTargetFromTlsPing $'Pinging with SNI\nTLS Post-Quantum key exchange: X25519MLKEM768\nTLS version: TLS 1.3\nCertificate chain total length: 2048')
     [[ "$(printf '%s\n' "${scoreLine}" | awk -F'\t' '{print $1}')" == "B" ]]
     scoreLine=$(scoreRealityTargetFromTlsPing $'Pinging with SNI\nTLS version: TLS 1.3\nCertificate chain total length: 4096')
     [[ "$(printf '%s\n' "${scoreLine}" | awk -F'\t' '{print $1}')" == "C" ]]
     scoreLine=$(scoreRealityTargetFromTlsPing $'Pinging with SNI\nTLS version: TLS 1.2\nCertificate chain total length: 4096')
+    [[ "$(printf '%s\n' "${scoreLine}" | awk -F'\t' '{print $1}')" == "FAIL" ]]
+    scoreLine=$(scoreRealityTargetFromTlsPing $'Pinging without SNI\nTLS Post-Quantum key exchange: X25519MLKEM768\nTLS version: TLS 1.3\nCertificate chain total length: 4096\nPinging with SNI\nTLS version: TLS 1.3\nCertificate chain total length: 4096')
+    [[ "$(printf '%s\n' "${scoreLine}" | awk -F'\t' '{print $1}')" == "C" ]]
+    scoreLine=$(scoreRealityTargetFromTlsPing $'Pinging without SNI\nTLS Post-Quantum key exchange: X25519MLKEM768\nTLS version: TLS 1.3\nCertificate chain total length: 4096\nPinging with SNI\nTLS version: TLS 1.2\nCertificate chain total length: 4096')
     [[ "$(printf '%s\n' "${scoreLine}" | awk -F'\t' '{print $1}')" == "FAIL" ]]
 }
 

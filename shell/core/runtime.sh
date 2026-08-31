@@ -857,8 +857,8 @@ showInstallArgsHelp() {
 ┌─ padm 非交互安装参数 ──────────────────────────────
 │ 用法: bash install.sh [RenewTLS|UpdateGeo|SyncSubscriptionGroups|SubscriptionControl|InstallSubscription] [options]
 ├─ 新人三步走
-│ 1. 推荐直连: bash install.sh --install-type custom --core xray --protocols 1 --entry-host node.example.com --reality-target www.ibm.com:443
-│ 2. 推荐 XHTTP: bash install.sh --install-type custom --core xray --protocols 2 --entry-host cdn.example.com --reality-target www.ibm.com:443
+│ 1. 推荐直连: bash install.sh --install-type custom --core xray --protocols 1 --entry-host node.example.com --reality-target target.example.com:443
+│ 2. 推荐 XHTTP: bash install.sh --install-type custom --core xray --protocols 2 --entry-host cdn.example.com --reality-target target.example.com:443
 │ 3. 安装后: 运行 padm -> 订阅与用户；可选本机单独使用、主控或被控
 ├─ 交互菜单路径
 │ 安装与重装: 含新手选择指引，推荐直连/CDN/无域名 Reality、NaiveProxy、自定义安装、传统 TLS 兼容安装
@@ -874,13 +874,14 @@ showInstallArgsHelp() {
 ├─ 关键概念
 │ TLS 域名/端口: 普通 TLS 协议入口；当前不作为新人首选，传统 TLS 类协议存在更高识别风险
 │ Reality entry: 客户端实际连接地址，通常是自有域名、CDN 入口或服务器 IP
-│ Reality target: REALITY 伪装目标站，建议使用真实大型 HTTPS 站点，端口默认 443
+│ Reality target: REALITY 伪装目标站；自动仅接受 cdn_risk=no 且评分 A，示例域名仅为占位符
+│ 手工目标: 实测全部 A/AAAA；B/C 警告，Cloudflare 中继风险或探测未知均拒绝
 │ Reality SNI: REALITY 握手 SNI，默认等于 target host
 │ Reality 不申请本机 TLS 证书，也不因安装操作 Nginx；严格域名仅支持单选 Vision 1
 ├─ 常用示例
-│ bash install.sh --install-type custom --core xray --protocols 1 --entry-host node.example.com --reality-target www.ibm.com:443 --reality-server-name www.ibm.com
-│ bash install.sh --install-type custom --core xray --protocols 2 --entry-host cdn.example.com --reality-target www.ibm.com:443 --reality-server-name www.ibm.com
-│ bash install.sh --install-type reality --core xray --reality-target www.ibm.com:443 --reuse-last no
+│ bash install.sh --install-type custom --core xray --protocols 1 --entry-host node.example.com --reality-target target.example.com:443 --reality-server-name target.example.com
+│ bash install.sh --install-type custom --core xray --protocols 2 --entry-host cdn.example.com --reality-target target.example.com:443 --reality-server-name target.example.com
+│ bash install.sh --install-type reality --core xray --reality-target target.example.com:443 --reuse-last no
 ├─ 参数
 │ --install-type <install|custom|reality>  安装类型；无自动参数时进入交互菜单；有其它自动参数时默认 custom
 │ --core <xray|sing-box|1|2>              安装核心
@@ -901,7 +902,7 @@ showInstallArgsHelp() {
 │ --reuse-last <yes|no|y|n>               是否复用上次安装配置
 │ --clean-acme <yes|no|y|n>               清空上次配置时是否清理 acme
 │ --reality-domain <yes|no|y|n>           严格域名模式，仅支持单选 Reality Vision 1
-│ --reality-target <host[:port]>          REALITY 伪装目标站，默认推荐 www.ibm.com:443
+│ --reality-target <host[:port]>          REALITY 伪装目标站；未传自动选择，无安全 A 级结果则失败
 │ --reality-server-name <sni>             REALITY SNI，默认等于 target host
 │ --entry-host <host>                     Reality entry；优先于 --domain、历史 entry、currentHost 和公网 IP
 │ --subscribe-port <port>                 订阅服务端口

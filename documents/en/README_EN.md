@@ -71,22 +71,24 @@ Show the currently supported flags and examples:
 bash install.sh --help
 ```
 
+`target.example.com` in the commands below is only a placeholder. Replace it with a Reality target that passes the live checks.
+
 Recommended direct Reality Vision:
 
 ```bash
-bash install.sh --install-type custom --core xray --protocols 1 --entry-host node.example.com --reality-target www.ibm.com:443 --reality-server-name www.ibm.com --reuse-last no
+bash install.sh --install-type custom --core xray --protocols 1 --entry-host node.example.com --reality-target target.example.com:443 --reality-server-name target.example.com --reuse-last no
 ```
 
 Recommended CDN Reality XHTTP:
 
 ```bash
-bash install.sh --install-type custom --core xray --protocols 2 --entry-host cdn.example.com --reality-target www.ibm.com:443 --reality-server-name www.ibm.com --reuse-last no
+bash install.sh --install-type custom --core xray --protocols 2 --entry-host cdn.example.com --reality-target target.example.com:443 --reality-server-name target.example.com --reuse-last no
 ```
 
 No-domain Reality:
 
 ```bash
-bash install.sh --install-type reality --core xray --reality-target www.ibm.com:443 --reuse-last no --clean-acme no
+bash install.sh --install-type reality --core xray --reality-target target.example.com:443 --reuse-last no --clean-acme no
 ```
 
 NaiveProxy:
@@ -391,13 +393,15 @@ Reality has three concepts that are easy to mix up:
 | 🎭 Reality target | External real HTTPS site used as the camouflage target | Xray `realitySettings.target`; sing-box `tls.reality.handshake` |
 | 🧾 Reality SNI | SNI used during the Reality handshake | Xray `serverNames`; sing-box `tls.server_name`; subscription `sni/servername` |
 
-A common setup is: client entry `node.example.com`, Reality target `www.ibm.com:443`, and Reality SNI `www.ibm.com`.
+A common setup is: client entry `node.example.com`, a measured Reality target such as `target.example.com:443`, and Reality SNI `target.example.com`.
 
 Reality Vision, Reality XHTTP, and Reality gRPC never request a local TLS certificate. A Reality-only install does not create or remove sites, touch ACME/cron, or stop, start, or reload Nginx. `--reality-domain yes` enables strict-domain mode only for a single Reality Vision `1` selection and validates the entry hostname and DNS; protocol `2`, `26`, or any multi-selection is rejected before dependencies or configuration writes.
 
 Reality entry selection is `--entry-host`, then `--domain`, `/etc/padm/reality_entry_host`, `currentHost`, and finally the public IP. A normal single Reality port is selected as explicit `--port`, previous port, then `443`. Multi-protocol installs keep independent protocol ports and do not inject top-level `--port` into a Reality sub-port. With 443 coexistence enabled, clients keep using the recorded public port while the core reuses the recorded internal port.
 
-When `--reality-target` is omitted, the script opens the target selector. Automatic selection prefers existing A/B measured results; if none exist, it probes built-in candidates; if no usable result is found, it falls back to `www.ibm.com:443`. Reality target measurements are written to `/etc/padm/reality_targets_results.tsv`, including TLS 1.3, `X25519MLKEM768`, certificate-chain length, network match, CDN risk, and check time.
+When `--reality-target` is omitted, the script opens the target selector. Automatic selection accepts only measured results with `cdn_risk=no` and score A. If none exist, it probes built-in candidates; if no safe A result is found, installation stops instead of writing an untested fallback. Manual targets resolve every A/AAAA address: any address in AS13335 or able to answer a `cloudflare.com` SNI probe is marked `cloudflare_relay` and rejected. Incomplete DNS, ASN, or TLS probing is marked `unknown` and rejected. Manual selection accepts only `no + A/B/C`, with an explicit warning for B/C. Checking the currently installed target only warns and never switches the configuration silently.
+
+Reality target measurements remain a 15-column TSV at `/etc/padm/reality_targets_results.tsv`; column 5 is `no | cloudflare_relay | unknown`, and legacy `yes` values are treated as risky. Scoring covers TLS 1.3, `X25519MLKEM768`, and certificate-chain length. Eligible targets are ordered by `same_asn > same_provider > different_network > unknown`, then certificate-chain length and check time.
 
 `Protocols & entry` -> `REALITY management` can show the current target, run `xray tls ping`, refresh the target library, run RealiTLScanner, switch from measured results, view PQC/ML-DSA-65 status, and configure 443 coexistence splitting.
 
@@ -548,7 +552,7 @@ Disabling it only removes padm's own sysctl file and attempts to restore the pre
 | `--show-risky-protocols` | None | Print and exit | List advanced public node capabilities with risk notices. |
 | `--domain` | domain | Required or prompted for TLS installs | TLS certificate domain; also the second Reality entry priority, but Reality does not request a certificate for it. |
 | `--entry-host` | domain or IP | Before `--domain`, saved entry, `currentHost`, and public IP | Address Reality clients actually connect to. |
-| `--reality-target` | `host[:port]` | Opens selector when omitted; fallback `www.ibm.com:443` | Reality camouflage target. |
+| `--reality-target` | `host[:port]` | Opens selector when omitted; fails without a safe A result | Reality camouflage target; explicit values also require live risk validation. |
 | `--reality-server-name` | SNI hostname | Defaults to target host | Reality SNI. |
 | `--port` | port number | TLS defaults to `443`; single Reality uses explicit port, previous port, then `443` | TLS entry port or single-Reality client port; not injected into Reality sub-ports in multi-selection installs. |
 | `--tls-ca` | `letsencrypt`, `zerossl`, `buypass` | `letsencrypt` | Certificate authority. |

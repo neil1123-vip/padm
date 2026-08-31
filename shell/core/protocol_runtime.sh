@@ -776,57 +776,50 @@ printRealityTargetProfile() {
 collectRealityProfile() {
     local targetInput=
     local selectRealityTargetMode=
+    local selectionPolicy=manual
+    local selectedTarget
 
     [[ -n "${realityEntryHost:-}" ]] || collectEntryProfile || return 1
 
     if [[ -n "${AUTO_REALITY_TARGET:-}" ]]; then
         parseRealityTargetInput "${AUTO_REALITY_TARGET}" || return 1
-        printRealityTargetProfile
-        return 0
     elif [[ -n "${realityTargetHost:-}" ]]; then
         parseRealityTargetInput "${realityTargetHost}:${realityTargetPort:-443}" || return 1
-        printRealityTargetProfile
-        return 0
+    else
+        echoContent title "\n┌─ Reality 伪装目标 ─────────────────────────────────"
+        menuLine "entry：客户端连接到你的服务器地址，已在订阅中作为 server/@host 使用"
+        menuLine "target：REALITY 伪装访问的外部真实 HTTPS 站点，写入服务端握手配置"
+        menuLine "SNI：REALITY 握手域名，默认等于 target host；除非明确知道原因，不要单独改"
+        menuLine "自动推荐仅使用 cdn_risk=no 且评分 A 的实时检测结果"
+        menuLine "PQC/ML-DSA-65 场景需要目标站支持 X25519MLKEM768 且证书链足够长"
+        menuClose
+        echoContent title "┌─ REALITY 目标站选择 ───────────────────────────────"
+        menuRecommendedItem 1 "自动推荐" "只选择通过 Cloudflare 风险校验的 A 级目标"
+        menuItem 2 "候选列表" "选择后实时检测全部 A/AAAA"
+        menuItem 3 "手动输入" "输入 host 或 host:port，端口默认 443"
+        menuClose
+        autoRead reality_target_mode "请选择[默认1]:" selectRealityTargetMode
+        selectRealityTargetMode=${selectRealityTargetMode:-1}
+
+        case "${selectRealityTargetMode}" in
+        2)
+            selectRealityTargetCandidateInteractive recommended || return 1
+            ;;
+        3)
+            autoRead reality_target "请输入REALITY伪装目标域名，默认端口443:" targetInput
+            if [[ -z "${targetInput}" ]]; then
+                selectionPolicy=auto
+                selectDefaultRealityTarget || return 1
+            else
+                parseRealityTargetInput "${targetInput}" || return 1
+            fi
+            ;;
+        *)
+            selectionPolicy=auto
+            selectDefaultRealityTarget || return 1
+            ;;
+        esac
     fi
-
-    echoContent title "\n┌─ Reality 伪装目标 ─────────────────────────────────"
-    menuLine "entry：客户端连接到你的服务器地址，已在订阅中作为 server/@host 使用"
-    menuLine "target：REALITY 伪装访问的外部真实 HTTPS 站点，写入服务端握手配置"
-    menuLine "SNI：REALITY 握手域名，默认等于 target host；除非明确知道原因，不要单独改"
-    menuLine "自动推荐会优先使用实测结果，无结果时回退 www.ibm.com:443"
-    menuLine "PQC/ML-DSA-65 场景需要目标站支持 X25519MLKEM768 且证书链足够长"
-    menuClose
-    echoContent title "┌─ REALITY 目标站选择 ───────────────────────────────"
-    menuRecommendedItem 1 "自动推荐" "优先使用实测结果；无结果则 www.ibm.com:443"
-    menuItem 2 "候选列表" "从内置结构化候选池选择"
-    menuItem 3 "手动输入" "输入 host 或 host:port，端口默认 443"
-    menuItem 4 "随机候选" "从内置候选池随机选择一个目标"
-    menuClose
-    autoRead reality_target_mode "请选择[默认1]:" selectRealityTargetMode
-    selectRealityTargetMode=${selectRealityTargetMode:-1}
-
-    case "${selectRealityTargetMode}" in
-    2)
-        if ! selectRealityTargetCandidateInteractive recommended; then
-            statusCard "Reality 目标站" "候选编号无效，改用默认目标 www.ibm.com:443"
-            selectDefaultRealityTarget
-        fi
-        ;;
-    3)
-        autoRead reality_target "请输入REALITY伪装目标域名，默认端口443:" targetInput
-        if [[ -z "${targetInput}" ]]; then
-            selectDefaultRealityTarget
-        else
-            parseRealityTargetInput "${targetInput}" || return 1
-        fi
-        ;;
-    4)
-        selectRandomRealityTargetCandidate
-        ;;
-    *)
-        selectDefaultRealityTarget
-        ;;
-    esac
 
     if ! validateRealityTarget "${realityTargetHost}" "${realityTargetPort:-443}"; then
         realityTargetStatusBlock red "REALITY 目标站" "伪装目标不合法: ${realityTargetHost}:${realityTargetPort:-443}"
@@ -839,6 +832,8 @@ collectRealityProfile() {
     if [[ "${realityTargetHost}" =~ ^[0-9.]+$ && -z "${AUTO_REALITY_SERVER_NAME:-}" ]]; then
         statusCard "Reality SNI 提醒" "目标站是 IP" "建议在高级场景手动指定 --reality-server-name" "或确认客户端 SNI 行为"
     fi
+    selectedTarget=$(formatRealityTarget "${realityTargetHost}" "${realityTargetPort:-443}")
+    validateRealityTargetSelection "${selectionPolicy}" "${selectedTarget}" "${realitySNI:-${realityTargetHost}}" || return 1
     printRealityTargetProfile
 }
 
