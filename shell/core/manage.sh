@@ -2881,7 +2881,8 @@ manageRealityTarget() {
     menuItem 6 "手动设置目标站" "输入 host[:port] 和可选 SNI"
     menuItem 7 "查看目标站黑名单" "显示 CDN/Apple 等不会参与扫描的目标"
     menuItem 8 "查看 PQC/ML-DSA-65 状态" "展示当前 pqv 与目标站评分"
-    menuReturnItem 9 "返回" "回到 REALITY 管理"
+    menuItem 9 "完整扫描全部候选" "忽略已有结果范围，复测全部内置/托管候选，耗时较长"
+    menuReturnItem 10 "返回" "回到 REALITY 管理"
     menuClose
     autoRead reality_target_manage_menu "请选择:" selectTargetMenu
     case "${selectTargetMenu}" in
@@ -2920,6 +2921,9 @@ manageRealityTarget() {
         showRealityTargetPqcStatus
         ;;
     9)
+        scanLocalAsnRealityTargets all || true
+        ;;
+    10)
         return 0
         ;;
     *)

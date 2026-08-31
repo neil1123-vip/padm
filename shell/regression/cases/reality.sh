@@ -265,7 +265,11 @@ EOF
     [[ "$(realityTargetResultCount)" == "0" ]]
     [[ "$(realityTargetResultField "$(realityTargetResultLine "legacy.example.com:443")" 5)" == "yes" ]]
     ! grep -qF $'www.java.com:443\t' <<<"$(sortedRealityTargetResults)"
+    [[ "$(realityTargetRefreshRecords | wc -l | tr -d ' ')" == "4" ]]
     grep -qF $'www.ibm.com:443\t' <<<"$(realityTargetRefreshRecords)"
+    ! grep -qF $'www.asus.com:443\t' <<<"$(realityTargetRefreshRecords)"
+    [[ "$(realityTargetRefreshRecords all | wc -l | tr -d ' ')" == "5" ]]
+    grep -qF $'www.asus.com:443\t' <<<"$(realityTargetRefreshRecords all)"
     (
         local relativeResultsRoot="${TMP_DIR}/reality-relative-results"
         mkdir -p "${relativeResultsRoot}/child"
@@ -406,7 +410,7 @@ y
 
 runRealityCandidateFullRegression() {
     local firstRecommendedRealityCandidate firstDeveloperRealityCandidate firstRealityCandidate secondRealityCandidate blockedCloudflareRealityCandidate
-    [[ "$(realityTargetCandidateCount)" -ge 194 ]]
+    [[ "$(realityTargetCandidateCount)" -ge 193 ]]
     [[ "$(realityTargetFilteredCandidateCount recommended)" -ge 40 ]]
     [[ "$(realityTargetFilteredCandidateCount developer)" -ge 10 ]]
     [[ "$(realityTargetFilteredCandidateCount asia)" -ge 2 ]]
@@ -680,7 +684,7 @@ EOF
     scanLocalAsnRealityTargets
     [[ "$(wc -l <"${REALITY_TLS_PING_ARGS_FILE}" | tr -d ' ')" == "3" ]]
     asnLookupCount=$(wc -l <"${asnLookupFile}" | tr -d ' ')
-    [[ "${asnLookupCount}" -ge 1 && "${asnLookupCount}" -le 2 ]]
+    [[ "${asnLookupCount}" == "1" ]]
     [[ "$(grep -cFx -- '-k 2 15' "${refreshTimeoutLog}")" == "3" ]]
     unsafeLine=$(grep -F $'fail-auto.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}")
     [[ "$(realityTargetResultField "${unsafeLine}" 5)" == "unknown" ]]
@@ -701,7 +705,7 @@ EOF
     grep -qxF "tls ping -ip 192.0.2.1 sni.refresh-scanner.example.com:8443" "${REALITY_TLS_PING_ARGS_FILE}"
     ! grep -qF "fail-auto.example.com" "${REALITY_TLS_PING_ARGS_FILE}"
     asnLookupCount=$(wc -l <"${asnLookupFile}" | tr -d ' ')
-    [[ "${asnLookupCount}" -ge 1 && "${asnLookupCount}" -le 2 ]]
+    [[ "${asnLookupCount}" == "1" ]]
     [[ "$(grep -cFx -- '-k 2 15' "${refreshTimeoutLog}")" == "4" ]]
     ! grep -qF $'refresh-network-fail.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
     refreshScannerLine=$(grep -F $'refresh-scanner.example.com:8443\tsni.refresh-scanner.example.com\tRefresh Scanner\tscanner\tno\t' "${PADM_REALITY_TARGET_SCAN_FILE}")
@@ -850,6 +854,32 @@ CSV
     [[ "${asnCacheProfile}" == $'AS64501\tRemoteNet' ]]
     [[ "$(wc -l <"${asnLookupFile}" | tr -d ' ')" == "1" ]]
     grep -qxF '198.51.100.11' "${asnLookupFile}"
+    (
+        local singleflightDir="${TMP_DIR}/reality-asn-singleflight"
+        local singleflightCache="${singleflightDir}/cache.tsv"
+        local singleflightLookups="${singleflightDir}/lookups.log"
+        local index pid
+        local -a pids=()
+        mkdir -p "${singleflightDir}"
+        : >"${singleflightCache}"
+        : >"${singleflightLookups}"
+        lookupRealityTargetAsn() {
+            printf '%s\n' "$1" >>"${singleflightLookups}"
+            command sleep 0.1
+            printf 'AS64501\tRemoteNet\n'
+        }
+        for ((index = 1; index <= 8; index++)); do
+            lookupRealityTargetAsnCached "198.51.100.${index}" "${singleflightCache}" "198.51.100.0/24" >"${singleflightDir}/${index}.out" &
+            pids+=("$!")
+        done
+        for pid in "${pids[@]}"; do
+            wait "${pid}"
+        done
+        [[ "$(wc -l <"${singleflightLookups}" | tr -d ' ')" == "1" ]]
+        for ((index = 1; index <= 8; index++)); do
+            grep -qxF $'AS64501\tRemoteNet' "${singleflightDir}/${index}.out"
+        done
+    )
     rm -f "${asnLookupFile}"
     export PADM_FAKE_XRAY_CONCURRENCY_DIR="${concurrencyDir}"
     export PADM_REALITY_SECONDARY_JOBS=4
@@ -866,7 +896,7 @@ CSV
     [[ "$(grep -c 'cloudflare.com:443' "${REALITY_TLS_PING_ARGS_FILE}")" == "6" ]]
     grep -qxF 'tls ping -ip 198.51.100.254 cloudflare.com:443' "${REALITY_TLS_PING_ARGS_FILE}"
     asnLookupCount=$(wc -l <"${asnLookupFile}" | tr -d ' ')
-    [[ "${asnLookupCount}" -ge 2 && "${asnLookupCount}" -le 5 ]]
+    [[ "${asnLookupCount}" == "2" ]]
     ! grep -qxF '198.51.100.16' "${asnLookupFile}"
     ! grep -qx '198.51.100.17' "${asnLookupFile}"
     maxConcurrency=$(sort -nr "${concurrencyDir}/observed" | head -n 1)

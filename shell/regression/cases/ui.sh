@@ -1448,7 +1448,7 @@ EOF
         currentRealityNetworkProfile() { : >"${realityMenuNetworkMarker}"; return 1; }
         protocolEntryMenu <<<"1
 2
-9
+10
 6
 7"
         grep -q "实时查看目标质量" <<<"${output}"

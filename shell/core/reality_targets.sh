@@ -578,10 +578,15 @@ writeRealityTargetResultLines() {
 }
 
 realityTargetRefreshRecords() {
+    local scope=${1:-recommended}
     local resultsFile line target parsed host sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note
     local found=false
+    case "${scope}" in
+    recommended | all) ;;
+    *) return 1 ;;
+    esac
     resultsFile=$(realityTargetManagedResultsFile) || return 1
-    if [[ -s "${resultsFile}" ]]; then
+    if [[ "${scope}" != "all" && -s "${resultsFile}" ]]; then
         while IFS= read -r line; do
             IFS=$'\t' read -r target sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note <<<"${line}"
             [[ -n "${target}" && "${cdnRisk}" == "no" && "${score}" == "A" ]] || continue
@@ -594,6 +599,7 @@ realityTargetRefreshRecords() {
         [[ "${found}" == "true" ]] && return 0
     fi
     while IFS='|' read -r candidateHost sni name _region category cdnRisk _rank _recommended note; do
+        [[ "${scope}" == "all" || "${_recommended}" == "yes" ]] || continue
         target=$(formatRealityTarget "${candidateHost}" 443)
         formatRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "unknown" "unknown" "unknown" "unknown" "unknown" "unknown" "unknown" "unknown" "0" "内置候选首次检测: ${note}"
     done < <(realityTargetCandidates)
@@ -758,28 +764,51 @@ lookupRealityTargetAsn() {
     return 1
 }
 
-lookupRealityTargetAsnCached() {
+realityTargetAsnCacheLookup() {
+    local ip=$1
+    local cacheFile=$2
+    local origin=${3:-}
+    local cacheKey cacheAsn cacheOrg cachedOrigin='' cachedIpUnknown=false
+    [[ -f "${cacheFile}" ]] || return 1
+    while IFS=$'\t' read -r cacheKey cacheAsn cacheOrg; do
+        if [[ "${cacheKey}" == "ip:${ip}" ]]; then
+            if [[ "${cacheAsn}" == "unknown" ]]; then
+                cachedIpUnknown=true
+                continue
+            fi
+            [[ "${cacheAsn}" =~ ^AS[0-9]+$ ]] || continue
+            printf '%s\t%s\n' "${cacheAsn}" "${cacheOrg}"
+            return 0
+        fi
+        if [[ -n "${origin}" && "${cacheKey}" == "origin:${origin}" ]]; then
+            if [[ "${cacheAsn}" == "unknown" || "${cacheAsn}" =~ ^AS[0-9]+$ ]]; then
+                cachedOrigin="${cacheAsn}"$'\t'"${cacheOrg}"
+            fi
+        fi
+    done <"${cacheFile}"
+    if [[ -n "${cachedOrigin}" && "${cachedOrigin}" != unknown$'\t'* ]]; then
+        printf '%s\n' "${cachedOrigin}"
+        return 0
+    fi
+    [[ "${cachedIpUnknown}" == "true" || -n "${cachedOrigin}" ]] && return 2
+    return 1
+}
+
+lookupRealityTargetAsnAndCache() {
     local ip=$1
     local cacheFile=${2:-}
     local origin=${3:-}
-    local cacheKey cacheAsn cacheOrg cachedOrigin='' profile asn org
-    if [[ -n "${cacheFile}" && -f "${cacheFile}" ]]; then
-        while IFS=$'\t' read -r cacheKey cacheAsn cacheOrg; do
-            [[ "${cacheAsn}" =~ ^AS[0-9]+$ ]] || continue
-            if [[ "${cacheKey}" == "ip:${ip}" ]]; then
-                printf '%s\t%s\n' "${cacheAsn}" "${cacheOrg}"
-                return 0
+    local profile asn org
+    if ! profile=$(lookupRealityTargetAsn "${ip}"); then
+        if [[ -n "${cacheFile}" ]]; then
+            if [[ "${origin}" == */* ]]; then
+                printf 'ip:%s\tunknown\tunknown\norigin:%s\tunknown\tunknown\n' "${ip}" "${origin}" >>"${cacheFile}" 2>/dev/null || true
+            else
+                printf 'ip:%s\tunknown\tunknown\n' "${ip}" >>"${cacheFile}" 2>/dev/null || true
             fi
-            if [[ -n "${origin}" && "${cacheKey}" == "origin:${origin}" ]]; then
-                cachedOrigin="${cacheAsn}"$'\t'"${cacheOrg}"
-            fi
-        done <"${cacheFile}"
-        if [[ -n "${cachedOrigin}" ]]; then
-            printf '%s\n' "${cachedOrigin}"
-            return 0
         fi
+        return 1
     fi
-    profile=$(lookupRealityTargetAsn "${ip}") || return 1
     if [[ -n "${cacheFile}" ]]; then
         asn=${profile%%$'\t'*}
         org=${profile#*$'\t'}
@@ -793,6 +822,50 @@ lookupRealityTargetAsnCached() {
         fi
     fi
     printf '%s\n' "${profile}"
+}
+
+lookupRealityTargetAsnCached() {
+    local ip=$1
+    local cacheFile=${2:-}
+    local origin=${3:-}
+    local profile cacheStatus lockToken lockFile status
+    if profile=$(realityTargetAsnCacheLookup "${ip}" "${cacheFile}" "${origin}"); then
+        printf '%s\n' "${profile}"
+        return 0
+    else
+        cacheStatus=$?
+        [[ "${cacheStatus}" == "2" ]] && return 1
+    fi
+    if [[ -n "${cacheFile}" ]] && command -v flock >/dev/null 2>&1; then
+        lockToken=${origin:-ip:${ip}}
+        lockToken=${lockToken//[^[:alnum:]._-]/_}
+        lockFile="${cacheFile}.${lockToken}.lock"
+        if (
+            if ! { exec 9>>"${lockFile}"; } 2>/dev/null; then
+                exit 74
+            fi
+            flock -w 15 9 || exit 75
+            if profile=$(realityTargetAsnCacheLookup "${ip}" "${cacheFile}" "${origin}"); then
+                printf '%s\n' "${profile}"
+                exit 0
+            else
+                cacheStatus=$?
+                case "${cacheStatus}" in
+                2) exit 1 ;;
+                esac
+            fi
+            lookupRealityTargetAsnAndCache "${ip}" "${cacheFile}" "${origin}"
+        ); then
+            return 0
+        else
+            status=$?
+            case "${status}" in
+            74 | 75) ;;
+            *) return "${status}" ;;
+            esac
+        fi
+    fi
+    lookupRealityTargetAsnAndCache "${ip}" "${cacheFile}" "${origin}"
 }
 
 currentRealityNetworkProfile() {
@@ -1218,7 +1291,14 @@ probeRealityTargetEndpoint() {
 
     while IFS= read -r ip; do
         [[ -n "${ip}" ]] || continue
-        profile=$(lookupRealityTargetAsnCached "${ip}" "${asnCacheFile}" 2>/dev/null || true)
+        targetResult=$(probeRealityTargetTls "${detector}" "${ip}" "${sni}" "${port}")
+        targetState=$(realityTargetTlsPingState "${targetResult}")
+        scoreResult=$(scoreRealityTargetFromTlsPing "${targetResult}")
+        IFS=$'\t' read -r addressScore addressPqc addressCertLength addressTls13 addressNote <<<"${scoreResult}"
+        profile=
+        if [[ "${addressScore}" != "FAIL" ]]; then
+            profile=$(lookupRealityTargetAsnCached "${ip}" "${asnCacheFile}" 2>/dev/null || true)
+        fi
         if [[ -n "${profile}" ]]; then
             asn=${profile%%$'\t'*}
             asOrg=${profile#*$'\t'}
@@ -1226,10 +1306,6 @@ probeRealityTargetEndpoint() {
             asn=unknown
             asOrg=unknown
         fi
-        targetResult=$(probeRealityTargetTls "${detector}" "${ip}" "${sni}" "${port}")
-        targetState=$(realityTargetTlsPingState "${targetResult}")
-        scoreResult=$(scoreRealityTargetFromTlsPing "${targetResult}")
-        IFS=$'\t' read -r addressScore addressPqc addressCertLength addressTls13 addressNote <<<"${scoreResult}"
         case "${addressScore}" in
         A) addressRank=4 ;;
         B) addressRank=3 ;;
@@ -2707,11 +2783,16 @@ probeRealityTargetRecord() {
 }
 
 scanLocalAsnRealityTargets() {
+    local refreshScope=${1:-recommended}
     local detector networkProfile currentIp currentAsn currentOrg rest line parsed host target networkMatch score cdnRisk scanStart scanSeconds totalCandidates lastProgressAt=0 now
     local maxJobs=${PADM_REALITY_SECONDARY_JOBS:-8}
     local resultsFile refreshSource resultLinesFile failedTargetsFile probeDir asnCacheFile jobFile doneFile probeRecord probeStatus probePayload
     local index=0 activeIndex slot pid running=0 madeProgress processed=0 resolved=0 failed=0 sameAsn=0 sameProvider=0 differentNetwork=0
     local -a candidates=() activeSlots=() jobPids=() jobFiles=() jobDoneFiles=() jobTargets=()
+    case "${refreshScope}" in
+    recommended | all) ;;
+    *) return 1 ;;
+    esac
     if ! detector=$(realityTargetDetector); then
         realityTargetStatusBlock yellow "REALITY 目标站扫描" "未找到 xray，无法扫描目标质量" "安装核心后再执行扫描"
         return 1
@@ -2727,14 +2808,16 @@ scanLocalAsnRealityTargets() {
     [[ "${maxJobs}" =~ ^[1-9][0-9]*$ ]] || maxJobs=8
     (( maxJobs > 16 )) && maxJobs=16
     resultsFile=$(realityTargetManagedResultsFile) || return 1
-    if [[ -s "${resultsFile}" ]]; then
+    if [[ "${refreshScope}" == "all" ]]; then
+        refreshSource="全部内置候选"
+    elif [[ -s "${resultsFile}" ]]; then
         refreshSource="统一结果表"
     else
-        refreshSource="内置候选初始化"
+        refreshSource="推荐候选初始化"
     fi
     while IFS= read -r line; do
         candidates+=("${line}")
-    done < <(realityTargetRefreshRecords)
+    done < <(realityTargetRefreshRecords "${refreshScope}")
     scanStart=$(date +%s)
     totalCandidates=${#candidates[@]}
     padmCreateTempPath resultLinesFile || return 1
