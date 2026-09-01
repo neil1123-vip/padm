@@ -228,12 +228,12 @@ addPortHopping() {
     fi
     if [[ -n "${currentPortHoppingStart}" || -n "${currentPortHoppingEnd}" ]]; then
         protocolPortHoppingStatusCard "已添加不可重复添加，可删除后重新添加"
-        exit 0
+        return 0
     fi
     if [[ "${rhelLike:-}" == "true" ]]; then
         if ! systemctl is-active --quiet firewalld 2>/dev/null; then
             protocolPortHoppingStatusCard "未启动 firewalld 防火墙，无法设置端口跳跃"
-            exit 0
+            return 1
         fi
     fi
 
@@ -246,27 +246,30 @@ addPortHopping() {
 
     echoContent yellow "请输入端口跳跃的范围，例如[30000-31000]"
 
-    autoRead port_hopping_range "范围:" portHoppingRange
-    if [[ -z "${portHoppingRange}" ]]; then
-        protocolPortHoppingRangeStatusCard "范围不可为空"
-        addPortHopping "${type}" "${targetPort}"
-    elif [[ "${portHoppingRange}" == *-* ]]; then
-
-        local portStart=
-        local portEnd=
+    local portHoppingRange= portStart= portEnd=
+    while true; do
+        autoRead port_hopping_range "范围:" portHoppingRange || return 0
+        if [[ -z "${portHoppingRange}" ]]; then
+            protocolPortHoppingRangeStatusCard "范围不可为空"
+            continue
+        fi
+        if [[ "${portHoppingRange}" != *-* ]]; then
+            protocolPortHoppingRangeStatusCard "范围不合法"
+            continue
+        fi
         portStart=${portHoppingRange%%-*}
         portEnd=${portHoppingRange#*-}
 
-        if [[ -z "${portStart}" || -z "${portEnd}" ]]; then
-            protocolPortHoppingRangeStatusCard "范围不合法"
-            addPortHopping "${type}" "${targetPort}"
-        elif ! validPortNumber "${portStart}" || ! validPortNumber "${portEnd}" ||
+        if [[ -z "${portStart}" || -z "${portEnd}" ]] ||
+            ! validPortNumber "${portStart}" || ! validPortNumber "${portEnd}" ||
             ((10#${portStart} < 30000 || 10#${portStart} > 40000 || 10#${portEnd} < 30000 || 10#${portEnd} > 40000 || 10#${portEnd} < 10#${portStart})); then
             protocolPortHoppingRangeStatusCard "范围不合法"
-            addPortHopping "${type}" "${targetPort}"
-        else
-            protocolPortHoppingRangeStatusCard "${portHoppingRange}"
-            if [[ "${rhelLike:-}" == "true" ]] && systemctl is-active --quiet firewalld; then
+            continue
+        fi
+        break
+    done
+    protocolPortHoppingRangeStatusCard "${portHoppingRange}"
+    if [[ "${rhelLike:-}" == "true" ]] && systemctl is-active --quiet firewalld; then
                 local addedMasquerade=
                 local addedForwardPorts=
                 local forwardStateKey
@@ -280,7 +283,7 @@ addPortHopping() {
                     fi
                     sudo firewall-cmd --reload >/dev/null 2>&1 || true
                     protocolPortHoppingStatusCard "端口跳跃添加失败，已尝试回滚本次 firewalld 规则"
-                    exit 1
+                    return 1
                 fi
                 if ! ( allowPort "${portStart}:${portEnd}" udp ); then
                     [[ -z "${addedForwardPorts}" ]] || removeFirewalldForwardPortRange "${portStart}" "${portEnd}" "${targetPort}" "owned=${addedForwardPorts}" >/dev/null 2>&1 || true
@@ -289,7 +292,7 @@ addPortHopping() {
                     fi
                     sudo firewall-cmd --reload >/dev/null 2>&1 || true
                     protocolPortHoppingStatusCard "端口跳跃开放端口失败，已尝试回滚本次 firewalld 规则"
-                    exit 1
+                    return 1
                 fi
                 forwardStateKey=$(padmFirewalldForwardStateKey "${portStart}" "${portEnd}" "${targetPort}" "${addedForwardPorts}")
                 if ! padmFirewallStateAdd "${forwardStateKey}"; then
@@ -300,7 +303,7 @@ addPortHopping() {
                     fi
                     sudo firewall-cmd --reload >/dev/null 2>&1 || true
                     protocolPortHoppingStatusCard "端口跳跃状态记录失败，已尝试回滚本次 firewalld 规则"
-                    exit 1
+                    return 1
                 fi
                 if [[ "${addedMasquerade}" == "true" ]] && ! padmFirewallStateAdd masquerade:firewalld; then
                     [[ -z "${addedForwardPorts}" ]] || removeFirewalldForwardPortRange "${portStart}" "${portEnd}" "${targetPort}" "owned=${addedForwardPorts}" >/dev/null 2>&1 || true
@@ -309,7 +312,7 @@ addPortHopping() {
                     sudo firewall-cmd --zone=public --permanent --remove-masquerade >/dev/null 2>&1 || true
                     sudo firewall-cmd --reload >/dev/null 2>&1 || true
                     protocolPortHoppingStatusCard "端口跳跃状态记录失败，已尝试回滚本次 firewalld 规则"
-                    exit 1
+                    return 1
                 fi
             else
                 if ! iptables -t nat -A PREROUTING -p udp --dport "${portStart}:${portEnd}" -m comment --comment "neil1123-vip_${type}_portHopping" -j DNAT --to-destination ":${targetPort}"; then
@@ -351,12 +354,7 @@ addPortHopping() {
                     portHoppingWarnIptablesNotPersistent
                 fi
             fi
-            protocolPortHoppingStatusCard "端口跳跃添加成功"
-        fi
-    else
-        protocolPortHoppingRangeStatusCard "范围不合法"
-        addPortHopping "${type}" "${targetPort}"
-    fi
+    protocolPortHoppingStatusCard "端口跳跃添加成功"
 }
 
 
@@ -483,7 +481,7 @@ portHoppingMenu() {
     if { [[ "${rhelLike:-}" != "true" ]] || ! systemctl is-active --quiet firewalld 2>/dev/null; } &&
         ! command -v iptables >/dev/null 2>&1; then
         protocolPortHoppingStatusCard "无法识别 iptables 工具，无法使用端口跳跃，退出安装"
-        exit 0
+        return 1
     fi
 
     local targetPort=
