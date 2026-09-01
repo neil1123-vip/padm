@@ -1111,6 +1111,7 @@ runMenuSmokeRegression() {
         menuItems=
     }
     eval "$(declare -f menu | sed '1s/^menu /originalCoreMainMenu /')"
+    eval "$(declare -f manageSubscriptionPendingInvites | sed '1s/^manageSubscriptionPendingInvites /originalManageSubscriptionPendingInvites /')"
     menu() { recordMenuAction menu; }
     uiStyle() { printf '%s' "$2"; }
     menuLine() { output+="$*"$'\n'; }
@@ -1817,6 +1818,22 @@ main
             : >"${syncStatusJqLog}"
             manageSubscriptionSyncSettings <<<"6"
             [[ "$(wc -l <"${syncStatusJqLog}")" == "1" ]]
+        )
+        (
+            local pendingInviteJqLog="${TMP_DIR}/pending-invite-jq.log"
+            subscriptionWireGuardListPendingInvites() {
+                printf '%s\n' '[{"alias":"edge-a","address":"10.77.0.2/24","expires_at":1770000000,"remaining_seconds":3600,"status":"pending"}]'
+            }
+            autoRead() { printf -v "$3" '%s' ''; }
+            jq() {
+                printf 'jq\n' >>"${pendingInviteJqLog}"
+                command jq "$@"
+            }
+            : >"${pendingInviteJqLog}"
+            output=
+            originalManageSubscriptionPendingInvites
+            grep -q '别名：edge-a' <<<"${output}"
+            [[ "$(wc -l <"${pendingInviteJqLog}")" == "1" ]]
         )
         resetMenuActions
         output=

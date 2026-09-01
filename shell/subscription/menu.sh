@@ -1054,21 +1054,29 @@ subscriptionWireGuardInviteRemainingText() {
 }
 
 manageSubscriptionPendingInvites() {
-    local pendingJson invite alias= confirmCancel= statusText remainingSeconds
+    local pendingJson inviteRows alias address expiresAt remainingSeconds statusText confirmCancel=
     pendingJson=$(subscriptionWireGuardListPendingInvites) || return 1
     echoContent title "\n┌─ 待完成邀请 ───────────────────────────────────────"
-    if [[ "$(jq -r 'length' <<<"${pendingJson}")" == "0" ]]; then
+    inviteRows=$(jq -r '
+      .[] |
+      [
+        .alias,
+        .address,
+        (.expires_at | tostring),
+        (.remaining_seconds | tonumber),
+        (if (.remaining_seconds | tonumber) <= 0 then "接入未完成且已过期"
+         elif .status == "incomplete" then "接入未完成"
+         else "待接入" end)
+      ] | @tsv
+    ' <<<"${pendingJson}") || return 1
+    if [[ -z "${inviteRows}" ]]; then
         menuLine "当前没有待完成邀请。"
         menuClose
         return 0
     fi
-    while IFS= read -r invite; do
-        statusText="待接入"
-        [[ "$(jq -r '.status' <<<"${invite}")" == "incomplete" ]] && statusText="接入未完成"
-        remainingSeconds=$(jq -r '.remaining_seconds' <<<"${invite}") || return 1
-        ((remainingSeconds <= 0)) && statusText="接入未完成且已过期"
-        menuLine "别名：$(jq -r '.alias' <<<"${invite}")；地址：$(jq -r '.address' <<<"${invite}")；过期：$(subscriptionWireGuardInviteLocalTime "$(jq -r '.expires_at' <<<"${invite}")")；剩余：$(subscriptionWireGuardInviteRemainingText "${remainingSeconds}")；状态：${statusText}"
-    done < <(jq -c '.[]' <<<"${pendingJson}")
+    while IFS=$'\t' read -r alias address expiresAt remainingSeconds statusText; do
+        menuLine "别名：${alias}；地址：${address}；过期：$(subscriptionWireGuardInviteLocalTime "${expiresAt}")；剩余：$(subscriptionWireGuardInviteRemainingText "${remainingSeconds}")；状态：${statusText}"
+    done <<<"${inviteRows}"
     menuClose
     autoRead subscription_cancel_invite_alias "输入要取消的唯一别名[直接回车返回]:" alias
     [[ -n "${alias}" ]] || return 0
