@@ -399,13 +399,13 @@ Reality Vision、Reality XHTTP 和 Reality gRPC 均不申请本机 TLS 证书；
 
 Reality entry 按 `--entry-host`、`--domain`、`/etc/padm/reality_entry_host`、`currentHost`、公网 IP 的顺序选择。普通单选 Reality 端口按显式 `--port`、历史端口、`443` 的顺序选择；多协议继续使用各自端口，不把顶层 `--port` 注入 Reality 子端口。启用 443 共存后，客户端仍连接记录的公网端口，核心继续复用已记录的内部端口。
 
-未传 `--reality-target` 时，脚本会进入目标站选择器。自动选择优先使用 `cdn_risk=no` 且评分为 A 的实测结果；全新 sing-box 安装没有 Xray 检测器时，才允许回退到由 OpenSSL 验证 TLS 1.3 的 `no + C` 结果。没有可接受结果时安装终止，不写入未经检测的兜底目标。手工目标会枚举全部 A/AAAA，每个地址独立评分并取最差结果：任一地址属于 AS13335 或可响应 `cloudflare.com` SNI 即标记 `cloudflare_relay` 并拒绝，DNS、ASN 或 TLS 探测不完整则标记 `unknown` 并拒绝。手工仅接受 `no + A/B/C`，其中 B/C 会明确警告；检测当前已安装目标只告警，不会静默切换配置。`java.com`、`nodejs.org` 与 `riotcdn.net` 及其子域名属于不可覆盖的静态硬风险，候选刷新、扫描导入、自动/手工选择和 Docker 部署都会拒绝。
+未传 `--reality-target` 时，脚本会进入目标站选择器。自动选择优先使用 `cdn_risk=no` 且评分为 A 的实测结果；全新 sing-box 安装没有 Xray 检测器时，才允许回退到由 OpenSSL 验证 TLS 1.3 的 `no + C` 结果。没有可接受结果时安装终止，不写入未经检测的兜底目标。手工目标会枚举全部 A/AAAA，每个地址独立评分并取最差结果：任一地址属于 AS13335 或可响应 `cloudflare.com` SNI 即标记 `cloudflare_relay`；DNS CNAME 指向已知 CDN 边缘域名，或 ASN/组织属于已知专属 CDN 时标记 `cdn_edge`，两者都会拒绝。DNS、ASN 或 TLS 探测不完整则标记 `unknown` 并拒绝。手工仅接受 `no + A/B/C`，其中 B/C 会明确警告；检测当前已安装目标只告警，不会静默切换配置。`java.com`、`nodejs.org` 与 `riotcdn.net` 及其子域名属于不可覆盖的静态硬风险，候选刷新、扫描导入、自动/手工选择和 Docker 部署都会拒绝。
 
 内置候选库共 194 项。本轮全量复测确认其中 154 项存在 CDN/边缘代理证据，已统一从候选刷新、RealiTLScanner 扫描导入、自动选择和 A 级结果中排除。其余候选的未知或 TLS 失败状态仍需实时检测，不会被自动选用；目前有明确直连证据并作为默认推荐的是 `www.gnu.org`、`www.debian.org`、`www.ubuntu.com` 和 `mariadb.org`。候选筛选统一按关键词处理，`dev`、`developer`、`开发者` 是同一筛选别名。
 
-Reality 目标站检测结果继续使用 15 列 TSV 写入 `/etc/padm/reality_targets_results.tsv`，按目标保留最后一次完整结果，包括 B/C、`cloudflare_relay`、`unknown` 与 FAIL；第 5 列为 `no | cloudflare_relay | unknown`，旧值 `yes` 按危险处理。持久化不等于可选择，常规候选仍只从 `no + A` 中筛选。评分包含 TLS 1.3、`X25519MLKEM768` 和证书链长度；可选目标按 `same_asn > same_provider > different_network > unknown`、证书链长度、检测时间排序。
+Reality 目标站检测结果继续使用 15 列 TSV 写入 `/etc/padm/reality_targets_results.tsv`，按目标保留最后一次完整结果，包括 B/C、`cloudflare_relay`、`cdn_edge`、`unknown` 与 FAIL；第 5 列为 `no | cloudflare_relay | cdn_edge | unknown`，旧值 `yes` 按危险处理。持久化不等于可选择，常规候选仍只从 `no + A` 中筛选。评分包含 TLS 1.3、`X25519MLKEM768` 和证书链长度；可选目标按 `same_asn > same_provider > different_network > unknown`、证书链长度、检测时间排序。
 
-`协议与入口` -> `REALITY 管理` 可检测当前目标、刷新目标库、运行 RealiTLScanner、切换 A 级目标、查看 PQC/ML-DSA-65 状态和配置 443 共存分流。目标库为空时，普通刷新默认只检测 `recommended=yes` 候选；需要覆盖全部内置/托管候选时可使用“复测全部候选”。
+`协议与入口` -> `REALITY 管理` 可检测当前目标、刷新目标库、运行 RealiTLScanner、切换 A 级目标、查看 PQC/ML-DSA-65 状态和配置 443 共存分流。普通刷新会保留已有合格结果，并自动补测候选池中尚未出现在结果文件的 `recommended=yes` 目标，新增目标不会因已有结果而跳过；需要覆盖全部内置/托管候选时可使用“复测全部候选”。
 
 > [!WARNING]
 > **扫描风险：** RealiTLScanner 是高级功能，云端扫描可能导致 VPS 被标记；脚本会在执行前提示确认。

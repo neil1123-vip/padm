@@ -740,8 +740,8 @@ writeRealityTargetResultLines() {
 
 realityTargetRefreshRecords() {
     local scope=${1:-recommended}
-    local resultsFile line target parsed host sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note
-    local found=false
+    local resultsFile line target parsed host port candidateKey sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note
+    local -A seenTargets=()
     case "${scope}" in
     recommended | all) ;;
     *) return 1 ;;
@@ -750,18 +750,22 @@ realityTargetRefreshRecords() {
     if [[ "${scope}" != "all" && -s "${resultsFile}" ]]; then
         while IFS= read -r line; do
             IFS=$'\t' read -r target sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note <<<"${line}"
-            [[ -n "${target}" && "${cdnRisk}" == "no" && "${score}" == "A" ]] || continue
+            [[ -n "${target}" ]] || continue
             parsed=$(parseHostPort "${target}" 443)
             host=${parsed%:*}
+            host=${host,,}
+            port=${parsed##*:}
+            seenTargets["$(formatRealityTarget "${host}" "${port}")"]=1
+            [[ "${cdnRisk}" == "no" && "${score}" == "A" ]] || continue
             realityTargetCandidateBlocked "${host}" && continue
             printf '%s\n' "${line}"
-            found=true
         done <"${resultsFile}"
-        [[ "${found}" == "true" ]] && return 0
     fi
     while IFS='|' read -r candidateHost sni name _region category cdnRisk _rank _recommended note; do
         [[ "${scope}" == "all" || "${_recommended}" == "yes" ]] || continue
         target=$(formatRealityTarget "${candidateHost}" 443)
+        candidateKey=$(formatRealityTarget "${candidateHost,,}" 443)
+        [[ -v "seenTargets[${candidateKey}]" ]] && continue
         formatRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "unknown" "unknown" "unknown" "unknown" "unknown" "unknown" "unknown" "unknown" "0" "内置候选首次检测: ${note}"
     done < <(realityTargetCandidates)
 }
@@ -1348,6 +1352,65 @@ realityTargetProviderMatches() {
     [[ "${candidateNorm}" == *"${currentNorm}"* || "${currentNorm}" == *"${candidateNorm}"* ]]
 }
 
+realityTargetCdnProviderFromCname() {
+    local cname=${1,,}
+    cname=${cname%.}
+    case "${cname}" in
+    cloudfront.net | *.cloudfront.net | *.cloudfront.com) printf 'cloudfront\n' ;;
+    fastly.net | *.fastly.net | *.fastlylb.net) printf 'fastly\n' ;;
+    akamai.net | *.akamai.net | *.akamaiedge.net | *.akamaihd.net | *.akamaized.net | *.edgesuite.net | *.edgekey.net | *.akamaistream.net) printf 'akamai\n' ;;
+    azureedge.net | *.azureedge.net | *.trafficmanager.net | *.azurefd.net) printf 'azure\n' ;;
+    cdn.cloudflare.net | *.cdn.cloudflare.net | *.cloudflare.net) printf 'cloudflare\n' ;;
+    bunnycdn.com | *.bunnycdn.com | *.b-cdn.net) printf 'bunny\n' ;;
+    cdn77.org | *.cdn77.org | *.cdn77.net | *.stackpathcdn.com | *.stackpathdns.com) printf 'edge\n' ;;
+    *.incapdns.net | *.impervadns.net | *.sucuri.net | *.edgecastcdn.net | *.llnwd.net | *.limelight.com) printf 'edge\n' ;;
+    *.cachefly.net | *.keycdn.com | *.kxcdn.com | *.gcorelabs.net | *.gcore.com) printf 'edge\n' ;;
+    *) return 1 ;;
+    esac
+}
+
+realityTargetCdnProviderFromAsn() {
+    local asn=${1:-}
+    local asOrg=${2:-}
+    local normalizedAsn normalizedOrg
+    normalizedAsn=$(normalizeRealityAsn "${asn}" 2>/dev/null || true)
+    case "${normalizedAsn}" in
+    AS13335) printf 'cloudflare\n'; return 0 ;;
+    AS16625 | AS20940) printf 'akamai\n'; return 0 ;;
+    AS54113) printf 'fastly\n'; return 0 ;;
+    AS60068) printf 'bunny\n'; return 0 ;;
+    AS12989 | AS15133 | AS22822) printf 'edge\n'; return 0 ;;
+    esac
+    normalizedOrg=$(printf '%s' "${asOrg}" | tr '[:upper:]' '[:lower:]')
+    case "${normalizedOrg}" in
+    *akamai* | *fastly* | *bunny* | *stackpath* | *edgecast* | *limelight* | *imperva* | *cdn77* | *gcore*)
+        printf 'edge\n'
+        return 0
+        ;;
+    *) return 1 ;;
+    esac
+}
+
+realityTargetDnsCdnProvider() {
+    local host=$1
+    local cname provider
+    [[ -n "${host}" && "${host}" != *:* && ! "${host}" =~ ^[0-9]+(\.[0-9]+){3}$ ]] || return 1
+    if command -v dig >/dev/null 2>&1; then
+        while IFS= read -r cname; do
+            [[ -n "${cname}" ]] || continue
+            provider=$(realityTargetCdnProviderFromCname "${cname}" 2>/dev/null || true)
+            [[ -n "${provider}" ]] && { printf '%s\n' "${provider}"; return 0; }
+        done < <(dig +time=2 +tries=1 +short CNAME "${host}" 2>/dev/null || true)
+    elif command -v host >/dev/null 2>&1; then
+        while IFS= read -r cname; do
+            [[ -n "${cname}" ]] || continue
+            provider=$(realityTargetCdnProviderFromCname "${cname}" 2>/dev/null || true)
+            [[ -n "${provider}" ]] && { printf '%s\n' "${provider}"; return 0; }
+        done < <(host -t CNAME "${host}" 2>/dev/null | awk '/alias for/ {print $NF}')
+    fi
+    return 1
+}
+
 realityTargetDetector() {
     if [[ -x "/etc/padm/xray/xray" ]]; then
         printf '%s\n' "/etc/padm/xray/xray"
@@ -1426,7 +1489,24 @@ realityTargetAddressCdnRisk() {
     local port=$3
     local asn=$4
     local targetState=$5
-    local normalizedAsn cfResult cfState
+    local asOrg=${6:-}
+    local dnsProvider=${7:-}
+    local normalizedAsn provider cfResult cfState
+    if [[ "${dnsProvider}" == "cloudflare" ]]; then
+        printf 'cloudflare_relay\n'
+        return 0
+    elif [[ -n "${dnsProvider}" ]]; then
+        printf 'cdn_edge\n'
+        return 0
+    fi
+    provider=$(realityTargetCdnProviderFromAsn "${asn}" "${asOrg}" 2>/dev/null || true)
+    if [[ "${provider}" == "cloudflare" ]]; then
+        printf 'cloudflare_relay\n'
+        return 0
+    elif [[ -n "${provider}" ]]; then
+        printf 'cdn_edge\n'
+        return 0
+    fi
     normalizedAsn=$(normalizeRealityAsn "${asn}" 2>/dev/null || true)
     if [[ "${normalizedAsn}" == "AS13335" ]]; then
         printf 'cloudflare_relay\n'
@@ -1458,7 +1538,7 @@ probeRealityTargetEndpoint() {
     local preferredIp=${4:-}
     local addressScope=${5:-all}
     local asnCacheFile=${6:-}
-    local parsed host port resolved='' addresses ip profile asn asOrg targetResult targetState addressRisk
+    local parsed host port resolved='' addresses ip profile asn asOrg targetResult targetState addressRisk hostCdnProvider
     local primaryIp=unknown primaryAsn=unknown primaryOrg=unknown scoreResult='' risk=no
     local addressScore addressPqc addressCertLength addressTls13 addressNote addressRank certRank
     local score=FAIL pqc=no certLength=unknown tls13=unknown note="未完成 TLS 质量检测"
@@ -1466,6 +1546,7 @@ probeRealityTargetEndpoint() {
     parsed=$(parseHostPort "${target}" 443)
     host=${parsed%:*}
     port=${parsed##*:}
+    hostCdnProvider=$(realityTargetDnsCdnProvider "${host}" 2>/dev/null || true)
     if [[ "${addressScope}" == "preferred_only" ]]; then
         addresses=${preferredIp}
     else
@@ -1514,9 +1595,10 @@ probeRealityTargetEndpoint() {
             worstRank=${addressRank}
             worstCertRank=${certRank}
         fi
-        addressRisk=$(realityTargetAddressCdnRisk "${detector}" "${ip}" "${port}" "${asn}" "${targetState}")
+        addressRisk=$(realityTargetAddressCdnRisk "${detector}" "${ip}" "${port}" "${asn}" "${targetState}" "${asOrg}" "${hostCdnProvider}")
         case "${addressRisk}" in
         cloudflare_relay) risk=cloudflare_relay ;;
+        cdn_edge) [[ "${risk}" == "cloudflare_relay" ]] || risk=cdn_edge ;;
         no) ;;
         *) [[ "${risk}" == "cloudflare_relay" ]] || risk=unknown ;;
         esac
@@ -1527,6 +1609,7 @@ probeRealityTargetEndpoint() {
     fi
     case "${risk}" in
     cloudflare_relay) note="${note}; 检测到 Cloudflare 中继风险" ;;
+    cdn_edge) note="${note}; 检测到 CDN/边缘代理风险" ;;
     unknown) note="${note}; DNS/ASN/TLS 风险探测不完整" ;;
     esac
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
@@ -1548,8 +1631,10 @@ validateRealityTargetSelection() {
         realityTargetStatusBlock red "REALITY 目标站" "目标或 SNI 不合法: ${target} / ${sni}"
         return 1
     fi
-    if realityTargetCandidateBlocked "${host}" cloudflare_relay; then
-        realityTargetStatusBlock red "REALITY 目标站" "命中已知 CDN 中继风险域名: ${target}" "静态黑名单已拒绝写入配置"
+    if realityTargetCandidateBlocked "${host}" cdn_edge ||
+        realityTargetCandidateBlocked "${host}" cloudflare_relay ||
+        realityTargetCandidateBlocked "${host}" cdn; then
+        realityTargetStatusBlock red "REALITY 目标站" "命中已知 CDN/边缘代理风险域名: ${target}" "静态黑名单已拒绝写入配置"
         return 1
     fi
     detector=$(realityTargetDetector 2>/dev/null || true)
@@ -1588,8 +1673,12 @@ validateRealityTargetSelection() {
         "${certLength}" "${tls13}" "${checkedAt}" "最终校验: ${note}" || return 1
 
     case "${cdnRisk}" in
-    cloudflare_relay | yes)
+    cloudflare_relay)
         realityTargetStatusBlock red "REALITY 目标站" "检测到 Cloudflare 中继风险: ${target}" "ASN=${asn}，已拒绝写入配置"
+        return 1
+        ;;
+    cdn_edge | yes)
+        realityTargetStatusBlock red "REALITY 目标站" "检测到 CDN/边缘代理风险: ${target}" "ASN=${asn} ${asOrg}，已拒绝写入配置"
         return 1
         ;;
     no) ;;
@@ -2071,7 +2160,7 @@ probeRealityScannerCandidate() {
     local networkMode=${7:-lookup}
     local origin=${8:-}
     local asnCacheFile=${9:-}
-    local target tlsPingResult tlsState result score pqc certLength tls13 note checkedAt profile candidateAsn candidateOrg networkMatch cdnRisk
+    local target tlsPingResult tlsState result score pqc certLength tls13 note checkedAt profile candidateAsn candidateOrg networkMatch cdnRisk dnsProvider
 
     trap - EXIT INT TERM
     target=$(formatRealityTarget "${domain}" 443)
@@ -2091,7 +2180,8 @@ probeRealityScannerCandidate() {
         profile=$(scannerRealityNetworkProfile "${ip}" "${currentAsn}" "${currentOrg}" "${origin}" "${asnCacheFile}")
         IFS=$'\t' read -r candidateAsn candidateOrg networkMatch <<<"${profile}"
     fi
-    cdnRisk=$(realityTargetAddressCdnRisk "${detector}" "${ip}" 443 "${candidateAsn}" "${tlsState}")
+    dnsProvider=$(realityTargetDnsCdnProvider "${domain}" 2>/dev/null || true)
+    cdnRisk=$(realityTargetAddressCdnRisk "${detector}" "${ip}" 443 "${candidateAsn}" "${tlsState}" "${candidateOrg}" "${dnsProvider}")
     checkedAt=$(date +%s)
     printf 'OK\t'
     formatRealityTargetResultLine "${target}" "${domain}" "${domain}" "scanner" "${cdnRisk}" "${ip}" "${candidateAsn}" "${candidateOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "RealiTLScanner: ${issuer}; ${note}"

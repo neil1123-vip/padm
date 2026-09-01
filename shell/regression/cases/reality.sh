@@ -20,7 +20,7 @@ runRealityProfileFailureRegression() (
     currentHost=
     lastInstallationConfig=true
     AUTO_ENTRY_HOST=node.example.com
-    AUTO_REALITY_TARGET=www.microsoft.com:443
+    AUTO_REALITY_TARGET=www.gnu.org:443
     PADM_REALITY_ENTRY_HOST_FILE="${entryHostFile}"
     : >"${errorLog}"
     realityPort=10888
@@ -162,7 +162,7 @@ runRealityProfileFailureRegression() (
     AUTO_REALITY_DOMAIN=
     realityOnlyWithDomain=
     AUTO_ENTRY_HOST=node.example.com
-    AUTO_REALITY_TARGET=www.microsoft.com:443
+    AUTO_REALITY_TARGET=www.gnu.org:443
     realityEntryHost=
     realityTargetHost=
     realityTargetPort=
@@ -223,7 +223,7 @@ runRealityCandidateFastRegression() {
     local oldRealityPageSize="${REALITY_TARGET_PAGE_SIZE:-}"
     local oldAutoInstall="${AUTO_INSTALL:-}"
     local ipv6OpenSslArgsFile="${TMP_DIR}/reality-ipv6-openssl-args.txt"
-    local firstRecommendedRealityCandidate secondaryCandidate cachedLine resolvedAddresses
+    local firstRecommendedRealityCandidate secondaryCandidate cachedLine resolvedAddresses refreshRecordsWithNewCandidate
 
     cat >"${fixtureFile}" <<'EOF'
 fixture-primary.example.com|fixture-primary.example.com|Fixture Primary|global|large_site|unknown|1|yes|fixture default
@@ -251,9 +251,15 @@ EOF
     [[ "$(realityTargetCandidateField "${firstRecommendedRealityCandidate}" 1)" == "fixture-primary.example.com" ]]
     export PADM_REALITY_TARGET_RESULTS_FILE="${cacheFile}"
     formatRealityTargetResultLine "fixture-primary.example.com:443" "fixture-primary.example.com" "Fixture Primary" "large_site" "no" "192.0.2.44" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "cached" >"${cacheFile}"
+    formatRealityTargetResultLine "fixture-secondary.example.com:8443" "fixture-secondary.example.com" "Fixture Secondary Alternate Port" "large_site" "unknown" "192.0.2.45" "AS64500" "ExampleNet" "same_asn" "B" "yes" "2048" "yes" "1234567890" "alternate port cache" >>"${cacheFile}"
     [[ "$(realityTargetCachedAsnSummary "fixture-primary.example.com:443")" == "192.0.2.44 AS64500 ExampleNet" ]]
     [[ "$(realityTargetCachedNetworkSummary "fixture-primary.example.com:443")" == "同 ASN" ]]
     [[ "$(realityTargetCachedAsnSummary "missing.example.com:443")" == "暂无缓存" ]]
+    refreshRecordsWithNewCandidate=$(realityTargetRefreshRecords)
+    [[ "$(printf '%s\n' "${refreshRecordsWithNewCandidate}" | wc -l | tr -d ' ')" == "4" ]]
+    grep -qF $'fixture-primary.example.com:443\t' <<<"${refreshRecordsWithNewCandidate}"
+    grep -qF $'fixture-secondary.example.com:443\t' <<<"${refreshRecordsWithNewCandidate}"
+    ! grep -qF $'fixture-secondary.example.com:8443\t' <<<"${refreshRecordsWithNewCandidate}"
     writeRealityTargetCacheLine "fixture-primary.example.com:443" "B" "yes" "2048" "yes" "1234567891" "updated"
     cachedLine=$(realityTargetResultLine "fixture-primary.example.com:443" 2>/dev/null || true)
     [[ "$(realityTargetResultField "${cachedLine}" 10)" == "B" ]]
@@ -453,6 +459,18 @@ runRealityCandidateFullRegression() {
     [[ "$(realityTargetCandidatePool | awk -F'|' 'tolower($6) == "yes" {count++} END {print count + 0}')" == "0" ]]
     realityTargetCandidateBlocked "www.ibm.com" cdn_edge
     ! realityTargetCandidateBlocked "www.gnu.org"
+    [[ "$(realityTargetCdnProviderFromCname d123.cloudfront.net.)" == "cloudfront" ]]
+    [[ "$(realityTargetCdnProviderFromCname edge.fastly.net.)" == "fastly" ]]
+    [[ "$(realityTargetCdnProviderFromCname a123.edgekey.net.)" == "akamai" ]]
+    [[ "$(realityTargetCdnProviderFromAsn AS20940 "Akamai International")" == "akamai" ]]
+    [[ "$(realityTargetCdnProviderFromAsn AS54113 "Fastly")" == "fastly" ]]
+    ! realityTargetCdnProviderFromAsn AS16509 "Amazon.com"
+    (
+        dig() {
+            [[ " $* " == *" CNAME "* ]] && printf 'd123.cloudfront.net.\n'
+        }
+        [[ "$(realityTargetDnsCdnProvider fresh.example.com)" == "cloudfront" ]]
+    )
     ! realityTargetCandidates | grep -q '^www.cloudflare.com|'
     ! realityTargetCandidates | grep -q '^www.apple.com|'
     ! realityTargetCandidates | grep -q '^nodejs.org|'
@@ -678,6 +696,7 @@ EOF
             printf 'no\t192.0.2.80\tAS64500\tExampleNet\tA\tyes\t4096\tyes\tstatic block fixture\n'
         }
         validateRealityTargetSelection manual "WWW.APPLE.COM:443" "WWW.APPLE.COM"
+        ! validateRealityTargetSelection manual "WWW.IBM.COM:443" "WWW.IBM.COM"
         ! validateRealityTargetSelection manual "WWW.JAVA.COM:443" "WWW.JAVA.COM"
         ! validateRealityTargetSelection manual "WWW.NODEJS.ORG:443" "WWW.NODEJS.ORG"
         ! validateRealityTargetSelection manual "LOL.SECURE.DYN.RIOTCDN.NET:443" "LOL.SECURE.DYN.RIOTCDN.NET"
@@ -704,6 +723,16 @@ EOF
     [[ "$(realityTargetResultField "$(realityTargetResultLine "manual-b.example.com:443")" 10)" == "B" ]]
     [[ "$(realityTargetResultField "$(realityTargetResultLine "relay-asn.example.com:443")" 5)" == "cloudflare_relay" ]]
     [[ "$(realityTargetResultField "$(realityTargetResultLine "unknown-risk.example.com:443")" 5)" == "unknown" ]]
+    (
+        realityTargetDnsCdnProvider() { printf 'cloudfront\n'; }
+        resolveRealityTargetAddresses() { printf '192.0.2.88\n'; }
+        lookupRealityTargetAsnCached() { printf 'AS16509\tAmazon.com\n'; }
+        endpointResult=$(probeRealityTargetEndpoint fake-xray "fresh-edge.example.com:443" "fresh-edge.example.com")
+        [[ "$(printf '%s\n' "${endpointResult}" | awk -F'\t' '{print $1 "\t" $5}')" == $'cdn_edge\tA' ]]
+        realityTargetDnsCdnProvider() { printf 'fastly\n'; }
+        scannerRecord=$(probeRealityScannerCandidate fake-xray 192.0.2.89 fresh-fastly.example.com Fastly AS64500 ExampleNet)
+        [[ "$(printf '%s\n' "${scannerRecord}" | awk -F'\t' '{print $1 "\t" $6}')" == $'OK\tcdn_edge' ]]
+    )
     rm -f "${REALITY_TLS_PING_ARGS_FILE}" "${asnLookupFile}" "${refreshTimeoutLog}"
     export PADM_FAKE_XRAY_CONCURRENCY_DIR="${refreshConcurrencyDir}"
     timeout() {
