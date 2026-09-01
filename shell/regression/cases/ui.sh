@@ -1001,7 +1001,7 @@ runCoreSelectionRetryActionRegression() (
         'shell/core/manage.sh|18'
         'shell/core/fail2ban.sh|1'
         'shell/core/entry_helpers.sh|1'
-        'shell/core/routing_socks.sh|4'
+        'shell/core/routing_socks.sh|0'
         'shell/core/routing_ipv6.sh|1'
     )
     local -a expectedPatterns=(
@@ -1013,7 +1013,6 @@ runCoreSelectionRetryActionRegression() (
         'shell/core/manage.sh|coreSelectionRetryAction manageTuic'
         'shell/core/fail2ban.sh|coreSelectionRetryAction manageFail2ban'
         'shell/core/entry_helpers.sh|coreSelectionRetryAction bbrInstall'
-        'shell/core/routing_socks.sh|coreSelectionRetryAction socks5Routing'
         'shell/core/routing_ipv6.sh|coreSelectionRetryAction ipv6Routing'
     )
     local -a removedPatterns=(
@@ -1476,6 +1475,55 @@ EOF
             assertMenuAction 'errorCard:选择错误'
             ! assertMenuAction routingToolsMenu
             [[ "$(wc -l <"${routingMenuRenderLog}")" == "2" ]]
+        )
+
+        (
+            local socksMenuRenderLog="${TMP_DIR}/socks-menu-render.log"
+            local oldCoreInstallType="${coreInstallType:-}"
+            coreInstallType=1
+            : >"${socksMenuRenderLog}"
+            echoContent() { printf '%s\n' "$*" >>"${socksMenuRenderLog}"; }
+
+            (
+                routingToolsMenu() { recordMenuAction routingToolsMenu; }
+                socks5OutboundRoutingMenu() { recordMenuAction socks5OutboundRoutingMenu; }
+                socks5InboundRoutingMenu() { recordMenuAction socks5InboundRoutingMenu; }
+                removeSocks5Routing() { recordMenuAction removeSocks5Routing; }
+                resetMenuActions
+                socks5Routing <<< $'bad\n4'
+                assertMenuAction 'errorCard:选择错误'
+                ! assertMenuAction routingToolsMenu
+                [[ "$(wc -l <"${socksMenuRenderLog}")" == "2" ]]
+            )
+
+            (
+                readInstallType() { :; }
+                socks5Routing() { recordMenuAction socks5Routing; }
+                resetMenuActions
+                socks5InboundRoutingMenu <<< $'bad\n5'
+                assertMenuAction 'errorCard:选择错误'
+                ! assertMenuAction socks5Routing
+                [[ "$(wc -l <"${socksMenuRenderLog}")" == "4" ]]
+            )
+
+            (
+                socks5Routing() { recordMenuAction socks5Routing; }
+                resetMenuActions
+                socks5OutboundRoutingMenu <<< $'bad\n5'
+                assertMenuAction 'errorCard:选择错误'
+                ! assertMenuAction socks5Routing
+                [[ "$(wc -l <"${socksMenuRenderLog}")" == "6" ]]
+            )
+
+            (
+                socks5Routing() { recordMenuAction socks5Routing; }
+                resetMenuActions
+                removeSocks5Routing <<< $'bad\n4'
+                assertMenuAction 'errorCard:选择错误'
+                ! assertMenuAction socks5Routing
+                [[ "$(wc -l <"${socksMenuRenderLog}")" == "8" ]]
+            )
+            coreInstallType="${oldCoreInstallType}"
         )
 
         xrayInstalledState=false

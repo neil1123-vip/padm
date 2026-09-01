@@ -6,183 +6,173 @@ socks5Routing() {
         errorCard "未安装任意协议，请先进入主菜单 -> 安装与重装"
         return 1
     fi
-    echoContent title "\n┌─ Socks5 分流 ──────────────────────────────────────"
-    menuLine "用于两台机器之间中继出站，不建议把入站暴露给不可信网络"
-    menuLine "出站适合本机把部分域名转发到落地机；入站适合落地机只允许指定源 IP 访问"
-    menuItem 1 "Socks5 出站" "转发机/代理机配置"
-    menuItem 2 "Socks5 入站" "解锁机/落地机配置"
-    menuItem 3 "卸载" "移除 Socks5 分流配置"
-    menuReturnItem 4 "返回分流工具" "回到上一级分流菜单"
-    menuClose
-    autoRead socks5_menu "请选择:" selectType
+    local selectType=
+    while true; do
+        echoContent title "\n┌─ Socks5 分流 ──────────────────────────────────────"
+        menuLine "用于两台机器之间中继出站，不建议把入站暴露给不可信网络"
+        menuLine "出站适合本机把部分域名转发到落地机；入站适合落地机只允许指定源 IP 访问"
+        menuItem 1 "Socks5 出站" "转发机/代理机配置"
+        menuItem 2 "Socks5 入站" "解锁机/落地机配置"
+        menuItem 3 "卸载" "移除 Socks5 分流配置"
+        menuReturnItem 4 "返回分流工具" "回到上一级分流菜单"
+        menuClose
+        selectType=
+        autoRead socks5_menu "请选择:" selectType || return 0
 
-    case ${selectType} in
-    1)
-        socks5OutboundRoutingMenu
-        ;;
-    2)
-        socks5InboundRoutingMenu
-        ;;
-    3)
-        removeSocks5Routing
-        ;;
-    4)
-        routingToolsMenu
-        ;;
-    *)
-        coreSelectionRetryAction socks5Routing
-        ;;
-    esac
+        case "${selectType}" in
+        1) socks5OutboundRoutingMenu; return $? ;;
+        2) socks5InboundRoutingMenu; return $? ;;
+        3) removeSocks5Routing; return $? ;;
+        4) return 0 ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
 }
 # Socks5 入站菜单
 socks5InboundRoutingMenu() {
-    local backupDir=
-    readInstallType
-    echoContent title "\n┌─ Socks5 入站 ──────────────────────────────────────"
-    menuItem 1 "安装 Socks5 入站" "配置解锁机/落地机入站"
-    menuItem 2 "查看分流规则" "显示当前入站分流规则"
-    menuItem 3 "添加分流规则" "更新入站分流域名"
-    menuItem 4 "查看入站配置" "显示端口、用户与密码"
-    menuReturnItem 5 "返回 Socks5 分流" "回到上级菜单"
-    menuClose
-    autoRead socks5_inbound_menu "请选择:" selectType
-    case ${selectType} in
-    1)
-        totalProgress=1
-        installSingBox 1 || return 1
-        singBoxConfigPath="${singBoxConfigPath:-/etc/padm/sing-box/conf/config/}"
-        socks5RoutingBackupCreate backupDir || { errorCard "Socks5 入站配置备份失败"; return 1; }
-        local PADM_PORT_ALLOW_TRANSACTION_ACTIVE=true
-        local PADM_PORT_ALLOW_TRANSACTION_KEYS=
-        if ! setSocks5Inbound; then
-            socks5RoutingRollback "${backupDir}" "Socks5 入站配置失败" false || true
-            padmRollbackPortAllowTransaction || errorCard "Socks5 入站配置失败，且新增端口防火墙规则回滚失败"
-            return 1
-        fi
-        if ! setSocks5InboundRouting; then
-            socks5RoutingRollback "${backupDir}" "Socks5 入站配置失败" false || true
-            padmRollbackPortAllowTransaction || errorCard "Socks5 入站配置失败，且新增端口防火墙规则回滚失败"
-            return 1
-        fi
-        if ! installSingBoxService 1; then
-            socks5RoutingRollback "${backupDir}" "sing-box 服务安装失败" false || true
-            padmRollbackPortAllowTransaction || errorCard "sing-box 服务安装失败，且 Socks5 入站端口防火墙规则回滚失败"
-            return 1
-        fi
-        if ! reloadCore; then
-            socks5RoutingRollback "${backupDir}" "Socks5 入站核心重载失败" true || true
-            padmRollbackPortAllowTransaction || errorCard "Socks5 入站核心重载失败，且新增端口防火墙规则回滚失败"
-            return 1
-        fi
-        PADM_PORT_ALLOW_TRANSACTION_KEYS=
-        padmRemoveCleanupPath "${backupDir}"
-        socks5InboundRoutingMenu
-        ;;
-    2)
-        showSingBoxRoutingRules socks5_02_inbound_route
-        socks5InboundRoutingMenu
-        ;;
-    3)
-        socks5RoutingBackupCreate backupDir || { errorCard "Socks5 入站规则备份失败"; return 1; }
-        if ! setSocks5InboundRouting addRules; then
-            socks5RoutingRollback "${backupDir}" "Socks5 入站规则更新失败" false
-            return 1
-        fi
-        if ! reloadCore; then
-            socks5RoutingRollback "${backupDir}" "Socks5 入站核心重载失败" true
-            return 1
-        fi
-        padmRemoveCleanupPath "${backupDir}"
-        socks5InboundRoutingMenu
-        ;;
-    4)
-        if [[ -f "${singBoxConfigPath}20_socks5_inbounds.json" ]]; then
-            echoContent title "\n┌─ Socks5 出站信息 ──────────────────────────────────"
-            menuLine "下列内容需要配置到其他机器的出站，请不要在本机进行代理行为"
-            menuLine "端口：$(jq .inbounds[0].listen_port ${singBoxConfigPath}20_socks5_inbounds.json)"
-            menuLine "用户名称：$(jq -r .inbounds[0].users[0].username ${singBoxConfigPath}20_socks5_inbounds.json)"
-            menuLine "用户密码：$(jq -r .inbounds[0].users[0].password ${singBoxConfigPath}20_socks5_inbounds.json)"
-            menuClose
-        else
-            errorCard "未安装相应功能"
-            socks5InboundRoutingMenu
-        fi
-        ;;
-    5)
-        socks5Routing
-        ;;
-    *)
-        coreSelectionRetryAction socks5InboundRoutingMenu
-        ;;
-    esac
-
+    local backupDir= selectType=
+    local PADM_PORT_ALLOW_TRANSACTION_ACTIVE=false
+    local PADM_PORT_ALLOW_TRANSACTION_KEYS=
+    while true; do
+        readInstallType
+        echoContent title "\n┌─ Socks5 入站 ──────────────────────────────────────"
+        menuItem 1 "安装 Socks5 入站" "配置解锁机/落地机入站"
+        menuItem 2 "查看分流规则" "显示当前入站分流规则"
+        menuItem 3 "添加分流规则" "更新入站分流域名"
+        menuItem 4 "查看入站配置" "显示端口、用户与密码"
+        menuReturnItem 5 "返回 Socks5 分流" "回到上级菜单"
+        menuClose
+        selectType=
+        autoRead socks5_inbound_menu "请选择:" selectType || return 0
+        case "${selectType}" in
+        1)
+            totalProgress=1
+            installSingBox 1 || return 1
+            singBoxConfigPath="${singBoxConfigPath:-/etc/padm/sing-box/conf/config/}"
+            backupDir=
+            socks5RoutingBackupCreate backupDir || { errorCard "Socks5 入站配置备份失败"; return 1; }
+            PADM_PORT_ALLOW_TRANSACTION_ACTIVE=true
+            PADM_PORT_ALLOW_TRANSACTION_KEYS=
+            if ! setSocks5Inbound; then
+                socks5RoutingRollback "${backupDir}" "Socks5 入站配置失败" false || true
+                padmRollbackPortAllowTransaction || errorCard "Socks5 入站配置失败，且新增端口防火墙规则回滚失败"
+                return 1
+            fi
+            if ! setSocks5InboundRouting; then
+                socks5RoutingRollback "${backupDir}" "Socks5 入站配置失败" false || true
+                padmRollbackPortAllowTransaction || errorCard "Socks5 入站配置失败，且新增端口防火墙规则回滚失败"
+                return 1
+            fi
+            if ! installSingBoxService 1; then
+                socks5RoutingRollback "${backupDir}" "sing-box 服务安装失败" false || true
+                padmRollbackPortAllowTransaction || errorCard "sing-box 服务安装失败，且 Socks5 入站端口防火墙规则回滚失败"
+                return 1
+            fi
+            if ! reloadCore; then
+                socks5RoutingRollback "${backupDir}" "Socks5 入站核心重载失败" true || true
+                padmRollbackPortAllowTransaction || errorCard "Socks5 入站核心重载失败，且新增端口防火墙规则回滚失败"
+                return 1
+            fi
+            PADM_PORT_ALLOW_TRANSACTION_ACTIVE=false
+            PADM_PORT_ALLOW_TRANSACTION_KEYS=
+            padmRemoveCleanupPath "${backupDir}"
+            ;;
+        2)
+            showSingBoxRoutingRules socks5_02_inbound_route
+            ;;
+        3)
+            backupDir=
+            socks5RoutingBackupCreate backupDir || { errorCard "Socks5 入站规则备份失败"; return 1; }
+            if ! setSocks5InboundRouting addRules; then
+                socks5RoutingRollback "${backupDir}" "Socks5 入站规则更新失败" false
+                return 1
+            fi
+            if ! reloadCore; then
+                socks5RoutingRollback "${backupDir}" "Socks5 入站核心重载失败" true
+                return 1
+            fi
+            padmRemoveCleanupPath "${backupDir}"
+            ;;
+        4)
+            if [[ -f "${singBoxConfigPath}20_socks5_inbounds.json" ]]; then
+                echoContent title "\n┌─ Socks5 入站信息 ──────────────────────────────────"
+                menuLine "下列内容需要配置到其他机器的出站，请不要在本机进行代理行为"
+                menuLine "端口：$(jq .inbounds[0].listen_port "${singBoxConfigPath}20_socks5_inbounds.json")"
+                menuLine "用户名称：$(jq -r .inbounds[0].users[0].username "${singBoxConfigPath}20_socks5_inbounds.json")"
+                menuLine "用户密码：$(jq -r .inbounds[0].users[0].password "${singBoxConfigPath}20_socks5_inbounds.json")"
+                menuClose
+            else
+                errorCard "未安装相应功能"
+            fi
+            ;;
+        5) return 0 ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
 }
 
 # Socks5 出站菜单
 socks5OutboundRoutingMenu() {
-    local backupDir=
-    echoContent title "\n┌─ Socks5 出站 ──────────────────────────────────────"
-    menuItem 1 "安装 Socks5 出站" "配置转发机/代理机出站"
-    menuDangerItem 2 "设置 Socks5 全局转发" "删除其他出站并全局走 Socks5"
-    menuItem 3 "查看分流规则" "显示当前出站分流规则"
-    menuItem 4 "添加分流规则" "更新出站分流域名"
-    menuReturnItem 5 "返回 Socks5 分流" "回到上级菜单"
-    menuClose
-    autoRead socks5_outbound_menu "请选择:" selectType
-    case ${selectType} in
-    1)
-        socks5RoutingBackupCreate backupDir || { errorCard "Socks5 出站配置备份失败"; return 1; }
-        if ! setSocks5Outbound || ! setSocks5OutboundRouting; then
-            socks5RoutingRollback "${backupDir}" "Socks5 出站配置失败" false
-            return 1
-        fi
-        if ! reloadCore; then
-            socks5RoutingRollback "${backupDir}" "Socks5 出站核心重载失败" true
-            return 1
-        fi
-        padmRemoveCleanupPath "${backupDir}"
-        socks5OutboundRoutingMenu
-        ;;
-    2)
-        socks5RoutingBackupCreate backupDir || { errorCard "Socks5 全局出站配置备份失败"; return 1; }
-        if ! setSocks5Outbound || ! setSocks5OutboundRoutingAll; then
-            socks5RoutingRollback "${backupDir}" "Socks5 全局出站配置失败" false
-            return 1
-        fi
-        if ! reloadCore; then
-            socks5RoutingRollback "${backupDir}" "Socks5 全局出站核心重载失败" true
-            return 1
-        fi
-        padmRemoveCleanupPath "${backupDir}"
-        successCard "Socks5全局出站设置完毕"
-        socks5OutboundRoutingMenu
-        ;;
-    3)
-        showSingBoxRoutingRules socks5_01_outbound_route
-        showXrayRoutingRules socks5_outbound
-        socks5OutboundRoutingMenu
-        ;;
-    4)
-        socks5RoutingBackupCreate backupDir || { errorCard "Socks5 出站规则备份失败"; return 1; }
-        if ! setSocks5OutboundRouting addRules; then
-            socks5RoutingRollback "${backupDir}" "Socks5 出站规则更新失败" false
-            return 1
-        fi
-        if ! reloadCore; then
-            socks5RoutingRollback "${backupDir}" "Socks5 出站核心重载失败" true
-            return 1
-        fi
-        padmRemoveCleanupPath "${backupDir}"
-        socks5OutboundRoutingMenu
-        ;;
-    5)
-        socks5Routing
-        ;;
-    *)
-        coreSelectionRetryAction socks5OutboundRoutingMenu
-        ;;
-    esac
-
+    local backupDir= selectType=
+    while true; do
+        echoContent title "\n┌─ Socks5 出站 ──────────────────────────────────────"
+        menuItem 1 "安装 Socks5 出站" "配置转发机/代理机出站"
+        menuDangerItem 2 "设置 Socks5 全局转发" "删除其他出站并全局走 Socks5"
+        menuItem 3 "查看分流规则" "显示当前出站分流规则"
+        menuItem 4 "添加分流规则" "更新出站分流域名"
+        menuReturnItem 5 "返回 Socks5 分流" "回到上级菜单"
+        menuClose
+        selectType=
+        autoRead socks5_outbound_menu "请选择:" selectType || return 0
+        case "${selectType}" in
+        1)
+            backupDir=
+            socks5RoutingBackupCreate backupDir || { errorCard "Socks5 出站配置备份失败"; return 1; }
+            if ! setSocks5Outbound || ! setSocks5OutboundRouting; then
+                socks5RoutingRollback "${backupDir}" "Socks5 出站配置失败" false
+                return 1
+            fi
+            if ! reloadCore; then
+                socks5RoutingRollback "${backupDir}" "Socks5 出站核心重载失败" true
+                return 1
+            fi
+            padmRemoveCleanupPath "${backupDir}"
+            ;;
+        2)
+            backupDir=
+            socks5RoutingBackupCreate backupDir || { errorCard "Socks5 全局出站配置备份失败"; return 1; }
+            if ! setSocks5Outbound || ! setSocks5OutboundRoutingAll; then
+                socks5RoutingRollback "${backupDir}" "Socks5 全局出站配置失败" false
+                return 1
+            fi
+            if ! reloadCore; then
+                socks5RoutingRollback "${backupDir}" "Socks5 全局出站核心重载失败" true
+                return 1
+            fi
+            padmRemoveCleanupPath "${backupDir}"
+            successCard "Socks5全局出站设置完毕"
+            ;;
+        3)
+            showSingBoxRoutingRules socks5_01_outbound_route
+            showXrayRoutingRules socks5_outbound
+            ;;
+        4)
+            backupDir=
+            socks5RoutingBackupCreate backupDir || { errorCard "Socks5 出站规则备份失败"; return 1; }
+            if ! setSocks5OutboundRouting addRules; then
+                socks5RoutingRollback "${backupDir}" "Socks5 出站规则更新失败" false
+                return 1
+            fi
+            if ! reloadCore; then
+                socks5RoutingRollback "${backupDir}" "Socks5 出站核心重载失败" true
+                return 1
+            fi
+            padmRemoveCleanupPath "${backupDir}"
+            ;;
+        5) return 0 ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
 }
 
 # Socks5 全局分流
@@ -330,101 +320,109 @@ removeSocks5Routing() {
     local backupDir=
     local socks5InboundPort=
     local socks5InboundConfig=
-    echoContent title "\n┌─ 卸载 Socks5 分流 ─────────────────────────────────"
-    menuItem 1 "卸载 Socks5 出站" "移除出站转发配置"
-    menuItem 2 "卸载 Socks5 入站" "移除入站监听配置"
-    menuDangerItem 3 "卸载全部" "同时移除 Socks5 出站和入站配置"
-    menuReturnItem 4 "返回 Socks5 分流" "回到上级菜单"
-    menuClose
-    autoRead socks5_uninstall_menu "请选择:" unInstallSocks5RoutingStatus
-    case "${unInstallSocks5RoutingStatus}" in
-    1 | 2 | 3)
-        socks5RoutingBackupCreate backupDir || { errorCard "Socks5 卸载配置备份失败"; return 1; }
-        ;;
-    esac
-    if [[ "${unInstallSocks5RoutingStatus}" == "2" || "${unInstallSocks5RoutingStatus}" == "3" ]] && [[ -n "${singBoxConfigPath}" ]]; then
-        socks5InboundConfig=$(padmManagedFilePath "${singBoxConfigPath}" 20_socks5_inbounds.json) || {
-            socks5RoutingRollback "${backupDir}" "Socks5 入站端口读取失败" false
-            return 1
-        }
-        if [[ -f "${socks5InboundConfig}" ]]; then
-            socks5InboundPort=$(jq -r '.inbounds[0].listen_port // empty' "${socks5InboundConfig}") || {
+    local unInstallSocks5RoutingStatus=
+    while true; do
+        backupDir=
+        socks5InboundPort=
+        socks5InboundConfig=
+        echoContent title "\n┌─ 卸载 Socks5 分流 ─────────────────────────────────"
+        menuItem 1 "卸载 Socks5 出站" "移除出站转发配置"
+        menuItem 2 "卸载 Socks5 入站" "移除入站监听配置"
+        menuDangerItem 3 "卸载全部" "同时移除 Socks5 出站和入站配置"
+        menuReturnItem 4 "返回 Socks5 分流" "回到上级菜单"
+        menuClose
+        unInstallSocks5RoutingStatus=
+        autoRead socks5_uninstall_menu "请选择:" unInstallSocks5RoutingStatus || return 0
+        case "${unInstallSocks5RoutingStatus}" in
+        1 | 2 | 3)
+            socks5RoutingBackupCreate backupDir || { errorCard "Socks5 卸载配置备份失败"; return 1; }
+            ;;
+        4)
+            return 0
+            ;;
+        *)
+            coreSelectionErrorCard "选择错误"
+            continue
+            ;;
+        esac
+        if [[ "${unInstallSocks5RoutingStatus}" == "2" || "${unInstallSocks5RoutingStatus}" == "3" ]] && [[ -n "${singBoxConfigPath}" ]]; then
+            socks5InboundConfig=$(padmManagedFilePath "${singBoxConfigPath}" 20_socks5_inbounds.json) || {
                 socks5RoutingRollback "${backupDir}" "Socks5 入站端口读取失败" false
                 return 1
             }
-            if ! validPortNumber "${socks5InboundPort}"; then
-                socks5RoutingRollback "${backupDir}" "Socks5 入站端口无效" false
+            if [[ -f "${socks5InboundConfig}" ]]; then
+                socks5InboundPort=$(jq -r '.inbounds[0].listen_port // empty' "${socks5InboundConfig}") || {
+                    socks5RoutingRollback "${backupDir}" "Socks5 入站端口读取失败" false
+                    return 1
+                }
+                if ! validPortNumber "${socks5InboundPort}"; then
+                    socks5RoutingRollback "${backupDir}" "Socks5 入站端口无效" false
+                    return 1
+                fi
+            fi
+        fi
+        if [[ "${unInstallSocks5RoutingStatus}" == "1" ]]; then
+            if [[ "${coreInstallType}" == "1" ]]; then
+                unInstallRouting socks5_outbound outboundTag || { socks5RoutingRollback "${backupDir}" "Socks5 出站卸载失败" false; return 1; }
+                removeXrayOutbound socks5_outbound || { socks5RoutingRollback "${backupDir}" "Socks5 出站卸载失败" false; return 1; }
+
+                addXrayOutbound z_direct_outbound || { socks5RoutingRollback "${backupDir}" "Socks5 出站卸载失败" false; return 1; }
+            fi
+
+            if [[ -n "${singBoxConfigPath}" ]]; then
+                removeSingBoxConfig socks5_outbound || { socks5RoutingRollback "${backupDir}" "Socks5 出站卸载失败" false; return 1; }
+                removeSingBoxConfig socks5_01_outbound_route || { socks5RoutingRollback "${backupDir}" "Socks5 出站卸载失败" false; return 1; }
+                addSingBoxOutbound 01_direct_outbound || { socks5RoutingRollback "${backupDir}" "Socks5 出站卸载失败" false; return 1; }
+            fi
+
+        elif [[ "${unInstallSocks5RoutingStatus}" == "2" ]]; then
+
+            if [[ -n "${singBoxConfigPath}" ]]; then
+                removeSingBoxConfig 20_socks5_inbounds || { socks5RoutingRollback "${backupDir}" "Socks5 入站卸载失败" false; return 1; }
+                removeSingBoxConfig socks5_02_inbound_route || { socks5RoutingRollback "${backupDir}" "Socks5 入站卸载失败" false; return 1; }
+                removeSingBoxConfig sniff_socks5_inbound || { socks5RoutingRollback "${backupDir}" "Socks5 入站卸载失败" false; return 1; }
+                removeSingBoxConfig "strategy_ipv4_only_socks5_inbound" || { socks5RoutingRollback "${backupDir}" "Socks5 入站卸载失败" false; return 1; }
+                removeSingBoxConfig "strategy_ipv6_only_socks5_inbound" || { socks5RoutingRollback "${backupDir}" "Socks5 入站卸载失败" false; return 1; }
+            fi
+
+            stopSocks5SingBox || { socks5RoutingRollback "${backupDir}" "Socks5 入站服务停止失败" true; return 1; }
+        elif [[ "${unInstallSocks5RoutingStatus}" == "3" ]]; then
+            if [[ "${coreInstallType}" == "1" ]]; then
+                unInstallRouting socks5_outbound outboundTag || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
+                removeXrayOutbound socks5_outbound || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
+                addXrayOutbound z_direct_outbound || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
+            fi
+
+            if [[ -n "${singBoxConfigPath}" ]]; then
+                removeSingBoxConfig socks5_outbound || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
+                removeSingBoxConfig socks5_01_outbound_route || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
+                removeSingBoxConfig 20_socks5_inbounds || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
+                removeSingBoxConfig socks5_02_inbound_route || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
+                removeSingBoxConfig sniff_socks5_inbound || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
+                removeSingBoxConfig "strategy_ipv4_only_socks5_inbound" || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
+                removeSingBoxConfig "strategy_ipv6_only_socks5_inbound" || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
+
+                addSingBoxOutbound 01_direct_outbound || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
+            fi
+
+            stopSocks5SingBox || { socks5RoutingRollback "${backupDir}" "Socks5 服务停止失败" true; return 1; }
+        fi
+        if ! reloadCore; then
+            socks5RoutingRollback "${backupDir}" "Socks5 卸载核心重载失败" true
+            return 1
+        fi
+        padmRemoveCleanupPath "${backupDir}"
+        if [[ -n "${socks5InboundPort}" ]]; then
+            local firewallStatus=0
+            denyPort "${socks5InboundPort}" || firewallStatus=1
+            denyPort "${socks5InboundPort}" udp || firewallStatus=1
+            if [[ "${firewallStatus}" != "0" ]]; then
+                errorCard "Socks5 入站已卸载，但防火墙规则回收失败，请检查防火墙状态"
                 return 1
             fi
         fi
-    fi
-    if [[ "${unInstallSocks5RoutingStatus}" == "1" ]]; then
-        if [[ "${coreInstallType}" == "1" ]]; then
-            unInstallRouting socks5_outbound outboundTag || { socks5RoutingRollback "${backupDir}" "Socks5 出站卸载失败" false; return 1; }
-            removeXrayOutbound socks5_outbound || { socks5RoutingRollback "${backupDir}" "Socks5 出站卸载失败" false; return 1; }
-
-            addXrayOutbound z_direct_outbound || { socks5RoutingRollback "${backupDir}" "Socks5 出站卸载失败" false; return 1; }
-        fi
-
-        if [[ -n "${singBoxConfigPath}" ]]; then
-            removeSingBoxConfig socks5_outbound || { socks5RoutingRollback "${backupDir}" "Socks5 出站卸载失败" false; return 1; }
-            removeSingBoxConfig socks5_01_outbound_route || { socks5RoutingRollback "${backupDir}" "Socks5 出站卸载失败" false; return 1; }
-            addSingBoxOutbound 01_direct_outbound || { socks5RoutingRollback "${backupDir}" "Socks5 出站卸载失败" false; return 1; }
-        fi
-
-    elif [[ "${unInstallSocks5RoutingStatus}" == "2" ]]; then
-
-        if [[ -n "${singBoxConfigPath}" ]]; then
-            removeSingBoxConfig 20_socks5_inbounds || { socks5RoutingRollback "${backupDir}" "Socks5 入站卸载失败" false; return 1; }
-            removeSingBoxConfig socks5_02_inbound_route || { socks5RoutingRollback "${backupDir}" "Socks5 入站卸载失败" false; return 1; }
-            removeSingBoxConfig sniff_socks5_inbound || { socks5RoutingRollback "${backupDir}" "Socks5 入站卸载失败" false; return 1; }
-            removeSingBoxConfig "strategy_ipv4_only_socks5_inbound" || { socks5RoutingRollback "${backupDir}" "Socks5 入站卸载失败" false; return 1; }
-            removeSingBoxConfig "strategy_ipv6_only_socks5_inbound" || { socks5RoutingRollback "${backupDir}" "Socks5 入站卸载失败" false; return 1; }
-        fi
-
-        stopSocks5SingBox || { socks5RoutingRollback "${backupDir}" "Socks5 入站服务停止失败" true; return 1; }
-    elif [[ "${unInstallSocks5RoutingStatus}" == "3" ]]; then
-        if [[ "${coreInstallType}" == "1" ]]; then
-            unInstallRouting socks5_outbound outboundTag || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
-            removeXrayOutbound socks5_outbound || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
-            addXrayOutbound z_direct_outbound || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
-        fi
-
-        if [[ -n "${singBoxConfigPath}" ]]; then
-            removeSingBoxConfig socks5_outbound || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
-            removeSingBoxConfig socks5_01_outbound_route || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
-            removeSingBoxConfig 20_socks5_inbounds || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
-            removeSingBoxConfig socks5_02_inbound_route || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
-            removeSingBoxConfig sniff_socks5_inbound || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
-            removeSingBoxConfig "strategy_ipv4_only_socks5_inbound" || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
-            removeSingBoxConfig "strategy_ipv6_only_socks5_inbound" || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
-
-            addSingBoxOutbound 01_direct_outbound || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
-        fi
-
-        stopSocks5SingBox || { socks5RoutingRollback "${backupDir}" "Socks5 服务停止失败" true; return 1; }
-    elif [[ "${unInstallSocks5RoutingStatus}" == "4" ]]; then
-        socks5Routing
-        return
-    else
-        coreSelectionRetryAction removeSocks5Routing
-        return
-    fi
-    if ! reloadCore; then
-        socks5RoutingRollback "${backupDir}" "Socks5 卸载核心重载失败" true
-        return 1
-    fi
-    padmRemoveCleanupPath "${backupDir}"
-    if [[ -n "${socks5InboundPort}" ]]; then
-        local firewallStatus=0
-        denyPort "${socks5InboundPort}" || firewallStatus=1
-        denyPort "${socks5InboundPort}" udp || firewallStatus=1
-        if [[ "${firewallStatus}" != "0" ]]; then
-            errorCard "Socks5 入站已卸载，但防火墙规则回收失败，请检查防火墙状态"
-            return 1
-        fi
-    fi
-    successCard "卸载完毕"
+        successCard "卸载完毕"
+    done
 }
 # 写入 Socks5 入站配置
 writeSocks5InboundConfig() {
