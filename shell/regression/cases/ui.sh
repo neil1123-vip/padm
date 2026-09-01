@@ -995,7 +995,7 @@ runSubscriptionWireGuardRestoreRunnerRegression() (
 runCoreSelectionRetryActionRegression() (
     local actions=
     local -a expectedCounts=(
-        'shell/core/menu.sh|6'
+        'shell/core/menu.sh|5'
         'shell/core/cores.sh|1'
         'shell/core/routing_access_control.sh|0'
         'shell/core/manage.sh|18'
@@ -1034,6 +1034,7 @@ runCoreSelectionRetryActionRegression() (
         socks5Routing'
         'shell/core/routing_ipv6.sh|coreSelectionErrorCard
         ipv6Routing'
+        'shell/core/menu.sh|coreSelectionRetryAction routingAccessMenu'
     )
     local entry file pattern expectedCount actualCount
 
@@ -1445,6 +1446,22 @@ EOF
             assertMenuAction 'errorCard:选择错误'
             [[ "$(wc -l <"${routingToolsRenderLog}")" == "2" ]]
             ! assertMenuAction routingAccessMenu
+        )
+
+        (
+            local routingAccessRenderLog="${TMP_DIR}/routing-access-render.log"
+            echoContent() { printf '%s\n' "$*" >>"${routingAccessRenderLog}"; }
+            routingToolsMenu() { recordMenuAction routingToolsMenu; }
+            btTools() { recordMenuAction btTools; }
+            accessControlMenu() { recordMenuAction accessControlMenu; }
+            : >"${routingAccessRenderLog}"
+            resetMenuActions
+            routingAccessMenu <<< $'bad\n4'
+            assertMenuAction 'errorCard:选择错误'
+            ! assertMenuAction routingToolsMenu
+            ! assertMenuAction btTools
+            ! assertMenuAction accessControlMenu
+            [[ "$(wc -l <"${routingAccessRenderLog}")" == "2" ]]
         )
 
         (

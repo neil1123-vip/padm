@@ -124,32 +124,26 @@ siteCertificateMenu() {
 }
 
 routingAccessMenu() {
-    echoContent title "\n┌─ 路由与访问控制 ───────────────────────────────────"
-    menuLine "这里管理服务端出站、分流、BT 阻断和访问限制，不是客户端配置教程"
-    menuLine "阻断/区域策略可能影响系统更新、证书申请和应用连接，执行前先看说明"
-    menuItem 1 "分流工具" "WARP、IPv6、Socks5、DNS/hosts 覆盖"
-    menuItem 2 "BT 下载管理" "P2P/BT 下载访问控制"
-    menuItem 3 "访问控制" "域名/IP 阻断、直连例外、区域阻断"
-    menuReturnItem 4 "返回主菜单" "回到 padm 管理面板"
-    menuClose
-    autoRead routing_access_menu "请选择:" selectRoutingAccessMenuType
-    case ${selectRoutingAccessMenuType} in
-    1)
-        routingToolsMenu 1
-        ;;
-    2)
-        btTools 1
-        ;;
-    3)
-        accessControlMenu 1
-        ;;
-    4)
-        return 0
-        ;;
-    *)
-        coreSelectionRetryAction routingAccessMenu
-        ;;
-    esac
+    local selectRoutingAccessMenuType=
+    while true; do
+        echoContent title "\n┌─ 路由与访问控制 ───────────────────────────────────"
+        menuLine "这里管理服务端出站、分流、BT 阻断和访问限制，不是客户端配置教程"
+        menuLine "阻断/区域策略可能影响系统更新、证书申请和应用连接，执行前先看说明"
+        menuItem 1 "分流工具" "WARP、IPv6、Socks5、DNS/hosts 覆盖"
+        menuItem 2 "BT 下载管理" "P2P/BT 下载访问控制"
+        menuItem 3 "访问控制" "域名/IP 阻断、直连例外、区域阻断"
+        menuReturnItem 4 "返回主菜单" "回到 padm 管理面板"
+        menuClose
+        selectRoutingAccessMenuType=
+        autoRead routing_access_menu "请选择:" selectRoutingAccessMenuType || return 0
+        case "${selectRoutingAccessMenuType}" in
+        1) routingToolsMenu 1; return $? ;;
+        2) btTools 1; return $? ;;
+        3) accessControlMenu 1; return $? ;;
+        4) return 0 ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
 }
 
 systemScriptMenu() {
