@@ -1,59 +1,64 @@
 #!/usr/bin/env bash
 
 installMenu() {
-    echoContent title "\n┌─ 安装与重装 ───────────────────────────────────────"
-    if [[ -n "${coreInstallType}" ]]; then
-        menuLine "检测到已有安装；以下入口会重建核心与协议配置，请先确认已备份"
-    else
-        menuLine "首次安装或不知道怎么选时，建议直接选 1；安装后去 订阅与用户 -> 发布与链接 -> 刷新并查看订阅链接"
-    fi
-    menuLine "怎么选：直连/有域名选 1；需要 CDN/反代选 2；没有域名选 3；需要 TLS 指纹抗性可选 4"
-    menuLine "高级：想手选核心和协议选 5；旧客户端、迁移或已有 TLS/fallback 架构选 6"
-    menuLine "概念：entry 是客户端连接地址；target/SNI 是 Reality 伪装目标，不是同一个概念"
-    menuRecommendedItem 1 "推荐直连 Reality Vision" "新手首选；稳定、配置少，有域名或直连入口都适合"
-    menuRecommendedItem 2 "推荐 CDN Reality XHTTP" "需要 CDN/反代时选择；客户端兼容要求更高"
-    menuItem 3 "无域名 Reality" "没有域名时选择；用服务器 IP 或自定义 entry-host"
-    menuRecommendedItem 4 "TLS 指纹抗性 NaiveProxy" "需要真实域名和证书；不是无域名 Reality 替代"
-    menuItem 5 "自定义安装" "手动选择核心和协议组合，适合熟悉参数的人"
-    menuItem 6 "传统 TLS 兼容安装" "仅用于旧客户端、迁移或已有 TLS/fallback 架构"
-    menuReturnItem 7 "返回主菜单" "回到 padm 管理面板"
-    menuClose
-    autoRead install_type "请选择:" selectInstallType
-    case ${selectInstallType} in
-    1)
-        selectInstallType=2
-        selectCoreType=1
-        customXrayInstall 1 domain
-        ;;
-    2)
-        selectInstallType=2
-        selectCoreType=1
-        customXrayInstall 2
-        ;;
-    3)
-        selectInstallType=3
-        selectCoreInstall
-        ;;
-    4)
-        selectInstallType=2
-        selectCoreType=2
-        customSingBoxInstall 5
-        ;;
-    5)
-        selectInstallType=2
-        selectCoreInstall
-        ;;
-    6)
-        selectInstallType=1
-        selectCoreInstall
-        ;;
-    7)
-        return 0
-        ;;
-    *)
-        coreSelectionRetryAction installMenu
-        ;;
-    esac
+    while true; do
+        echoContent title "\n┌─ 安装与重装 ───────────────────────────────────────"
+        if [[ -n "${coreInstallType}" ]]; then
+            menuLine "检测到已有安装；以下入口会重建核心与协议配置，请先确认已备份"
+        else
+            menuLine "首次安装或不知道怎么选时，建议直接选 1；安装后去 订阅与用户 -> 发布与链接 -> 刷新并查看订阅链接"
+        fi
+        menuLine "怎么选：直连/有域名选 1；需要 CDN/反代选 2；没有域名选 3；需要 TLS 指纹抗性可选 4"
+        menuLine "高级：想手选核心和协议选 5；旧客户端、迁移或已有 TLS/fallback 架构选 6"
+        menuLine "概念：entry 是客户端连接地址；target/SNI 是 Reality 伪装目标，不是同一个概念"
+        menuRecommendedItem 1 "推荐直连 Reality Vision" "新手首选；稳定、配置少，有域名或直连入口都适合"
+        menuRecommendedItem 2 "推荐 CDN Reality XHTTP" "需要 CDN/反代时选择；客户端兼容要求更高"
+        menuItem 3 "无域名 Reality" "没有域名时选择；用服务器 IP 或自定义 entry-host"
+        menuRecommendedItem 4 "TLS 指纹抗性 NaiveProxy" "需要真实域名和证书；不是无域名 Reality 替代"
+        menuItem 5 "自定义安装" "手动选择核心和协议组合，适合熟悉参数的人"
+        menuItem 6 "传统 TLS 兼容安装" "仅用于旧客户端、迁移或已有 TLS/fallback 架构"
+        menuReturnItem 7 "返回主菜单" "回到 padm 管理面板"
+        menuClose
+        selectInstallType=
+        autoRead install_type "请选择:" selectInstallType || return 0
+        case "${selectInstallType}" in
+        1)
+            selectInstallType=2
+            selectCoreType=1
+            customXrayInstall 1 domain
+            return $?
+            ;;
+        2)
+            selectInstallType=2
+            selectCoreType=1
+            customXrayInstall 2
+            return $?
+            ;;
+        3)
+            selectInstallType=3
+            selectCoreInstall
+            return $?
+            ;;
+        4)
+            selectInstallType=2
+            selectCoreType=2
+            customSingBoxInstall 5
+            return $?
+            ;;
+        5)
+            selectInstallType=2
+            selectCoreInstall
+            return $?
+            ;;
+        6)
+            selectInstallType=1
+            selectCoreInstall
+            return $?
+            ;;
+        7) return 0 ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
 }
 
 protocolEntryMenu() {

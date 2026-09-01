@@ -995,7 +995,7 @@ runSubscriptionWireGuardRestoreRunnerRegression() (
 runCoreSelectionRetryActionRegression() (
     local actions=
     local -a expectedCounts=(
-        'shell/core/menu.sh|1'
+        'shell/core/menu.sh|0'
         'shell/core/cores.sh|1'
         'shell/core/routing_access_control.sh|0'
         'shell/core/manage.sh|18'
@@ -1039,6 +1039,7 @@ runCoreSelectionRetryActionRegression() (
         'shell/core/menu.sh|coreSelectionRetryAction siteCertificateMenu'
         'shell/core/menu.sh|coreSelectionRetryAction systemScriptMenu'
         'shell/core/menu.sh|coreSelectionRetryAction advancedDangerMenu'
+        'shell/core/menu.sh|coreSelectionRetryAction installMenu'
     )
     local entry file pattern expectedCount actualCount
 

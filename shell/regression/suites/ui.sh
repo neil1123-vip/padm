@@ -45,6 +45,22 @@ runRegressionUiSmokeSuiteRoot() {
     grep -q "entry 是客户端连接地址" <<<"${output}"
 
     (
+        local menuRenderLog="${TMP_DIR}/install-menu-render.log"
+        echoContent() { printf '%s\n' "$*" >>"${menuRenderLog}"; }
+        customXrayInstall() { recordMenuAction customXrayInstall; }
+        customSingBoxInstall() { recordMenuAction customSingBoxInstall; }
+        selectCoreInstall() { recordMenuAction selectCoreInstall; }
+        : >"${menuRenderLog}"
+        resetMenuActions
+        installMenu <<< $'bad\n7'
+        assertMenuAction 'errorCard:选择错误'
+        ! assertMenuAction customXrayInstall
+        ! assertMenuAction customSingBoxInstall
+        ! assertMenuAction selectCoreInstall
+        [[ "$(wc -l <"${menuRenderLog}")" == "2" ]]
+    )
+
+    (
         local menuRenderLog="${TMP_DIR}/top-level-menu-render.log"
         echoContent() { printf '%s\n' "$*" >>"${menuRenderLog}"; }
         updatePadm() { recordMenuAction updatePadm; }
