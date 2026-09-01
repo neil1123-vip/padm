@@ -219,15 +219,15 @@ runRuntimeAndRealityRegression() {
     [[ "${realitySNI}" == "example.org" ]]
     scoreLine=$(scoreRealityTargetFromTlsPing $'Pinging with SNI\nTLS Post-Quantum key exchange: X25519MLKEM768\nTLS version: TLS 1.3\nCertificate chain total length: 4096')
     [[ "$(printf '%s\n' "${scoreLine}" | awk -F'\t' '{print $1}')" == "A" ]]
-    showRealityTargetQuality "www.microsoft.com:443"
+    showRealityTargetQuality "runtime.example.com:443"
     [[ "$(realityTargetResultCount)" -ge "1" ]]
-    cachedLine=$(awk -F'\t' '$1 == "www.microsoft.com:443" {print; found=1; exit} END {exit found ? 0 : 1}' "${PADM_REALITY_TARGET_RESULTS_FILE}")
+    cachedLine=$(awk -F'\t' '$1 == "runtime.example.com:443" {print; found=1; exit} END {exit found ? 0 : 1}' "${PADM_REALITY_TARGET_RESULTS_FILE}")
     [[ "$(realityTargetResultField "${cachedLine}" 6)" == "192.0.2.1" ]]
     [[ "$(realityTargetResultField "${cachedLine}" 7)" == "AS64500" ]]
     [[ "$(realityTargetResultField "${cachedLine}" 8)" == "ExampleNet" ]]
     [[ "$(realityTargetResultField "${cachedLine}" 9)" == "same_asn" ]]
     [[ "$(printf '%s\n' "${cachedLine}" | awk -F'\t' '{print $10}')" == "A" ]]
-    grep -qxF "tls ping -ip 192.0.2.1 www.microsoft.com:443" "${REALITY_TLS_PING_ARGS_FILE}"
+    grep -qxF "tls ping -ip 192.0.2.1 runtime.example.com:443" "${REALITY_TLS_PING_ARGS_FILE}"
     scoreLine=$(scoreRealityTargetFromTlsPing $'Pinging with SNI\nTLS Post-Quantum key exchange: X25519MLKEM768\nTLS version: TLS 1.3\nCertificate chain total length: 2048')
     [[ "$(printf '%s\n' "${scoreLine}" | awk -F'\t' '{print $1}')" == "B" ]]
     scoreLine=$(scoreRealityTargetFromTlsPing $'Pinging with SNI\nTLS version: TLS 1.3\nCertificate chain total length: 4096')
