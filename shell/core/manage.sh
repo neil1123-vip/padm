@@ -2989,53 +2989,40 @@ regenerateRealityProfile() {
 }
 
 manageReality() {
+    local selectRealityManageType=
     while true; do
-    readInstallProtocolType
-    readConfigHostPathUUID || return 1
-    readCustomPort
-    readSingBoxConfig
+        readInstallProtocolType
+        readConfigHostPathUUID || return 1
+        readCustomPort
+        readSingBoxConfig
 
-    if ! currentProtocolHasAny 1 2 26 || [[ -z "${coreInstallType}" ]]; then
-        errorCard "请先安装 Reality 协议。新人路径：主菜单 -> 安装与重装 -> 无域名 Reality，或 安装与重装 -> 自定义安装 中选择 Reality 编号"
-        exit 0
-    fi
+        if ! currentProtocolHasAny 1 2 26 || [[ -z "${coreInstallType:-}" ]]; then
+            errorCard "请先安装 Reality 协议。新人路径：主菜单 -> 安装与重装 -> 无域名 Reality，或 安装与重装 -> 自定义安装 中选择 Reality 编号"
+            return 1
+        fi
 
-    echoContent title "\n┌─ REALITY 管理 ─────────────────────────────────────"
-    menuItem 1 "重新生成 Reality 参数" "更新 key、shortId 等 Reality 参数"
-    menuItem 2 "目标站管理" "查看、检测或切换 Reality 伪装目标"
-    menuItem 3 "配置 443 共存分流" "同机真实网站与 Reality 共用公网 443"
-    menuItem 4 "查看当前分流状态" "检查 state、Nginx stream 与后端监听"
-    menuItem 5 "关闭 443 共存分流" "恢复 Reality 原入口端口并清理分流配置"
-    menuReturnItem 6 "返回协议与入口" "回到上级菜单"
-    menuLine "Reality 不需要本机伪装站点；443 共存分流仅用于同机真实网站"
-    menuLine "分流时只填写真实网站域名，其他 SNI 默认转给 Reality"
-    menuClose
-    autoRead reality_manage_menu "请选择:" selectRealityManageType
+        echoContent title "\n┌─ REALITY 管理 ─────────────────────────────────────"
+        menuItem 1 "重新生成 Reality 参数" "更新 key、shortId 等 Reality 参数"
+        menuItem 2 "目标站管理" "查看、检测或切换 Reality 伪装目标"
+        menuItem 3 "配置 443 共存分流" "同机真实网站与 Reality 共用公网 443"
+        menuItem 4 "查看当前分流状态" "检查 state、Nginx stream 与后端监听"
+        menuItem 5 "关闭 443 共存分流" "恢复 Reality 原入口端口并清理分流配置"
+        menuReturnItem 6 "返回协议与入口" "回到上级菜单"
+        menuLine "Reality 不需要本机伪装站点；443 共存分流仅用于同机真实网站"
+        menuLine "分流时只填写真实网站域名，其他 SNI 默认转给 Reality"
+        menuClose
+        selectRealityManageType=
+        autoRead reality_manage_menu "请选择:" selectRealityManageType || return 0
 
-    case "${selectRealityManageType}" in
-    1)
-        regenerateRealityProfile
-        ;;
-    2)
-        manageRealityTarget
-        ;;
-    3)
-        configureRealityStreamSplit
-        ;;
-    4)
-        showRealityStreamSplitStatus
-        ;;
-    5)
-        disableRealityStreamSplit
-        ;;
-    6)
-        protocolEntryMenu
-        return 0
-        ;;
-    *)
-        coreSelectionErrorCard "选择错误"
-        ;;
-    esac
+        case "${selectRealityManageType}" in
+        1) regenerateRealityProfile || true ;;
+        2) manageRealityTarget || true ;;
+        3) configureRealityStreamSplit || true ;;
+        4) showRealityStreamSplitStatus || true ;;
+        5) disableRealityStreamSplit || true ;;
+        6) return 0 ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
     done
 }
 
