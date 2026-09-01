@@ -224,6 +224,7 @@ runRealityCandidateFastRegression() {
     local oldRealityPageSize="${REALITY_TARGET_PAGE_SIZE:-}"
     local oldAutoInstall="${AUTO_INSTALL:-}"
     local ipv6OpenSslArgsFile="${TMP_DIR}/reality-ipv6-openssl-args.txt"
+    local staleResultsFile="${TMP_DIR}/reality-target-stale.tsv"
     local firstRecommendedRealityCandidate secondaryCandidate resolvedAddresses refreshRecordsWithNewCandidate
 
     cat >"${fixtureFile}" <<'EOF'
@@ -256,6 +257,12 @@ EOF
     [[ "$(realityTargetCachedAsnSummary "fixture-primary.example.com:443")" == "192.0.2.44 AS64500 ExampleNet" ]]
     [[ "$(realityTargetCachedNetworkSummary "fixture-primary.example.com:443")" == "同 ASN" ]]
     [[ "$(realityTargetCachedAsnSummary "missing.example.com:443")" == "暂无缓存" ]]
+    formatRealityTargetResultLine "stale.example.com:443" "stale.example.com" "Stale" "test" "no" "192.0.2.40" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "old A" >"${staleResultsFile}"
+    formatRealityTargetResultLine "stale.example.com:443" "stale.example.com" "Stale" "test" "no" "192.0.2.40" "AS64500" "ExampleNet" "same_asn" "B" "yes" "4096" "yes" "1234567891" "latest B" >>"${staleResultsFile}"
+    (
+        export PADM_REALITY_TARGET_RESULTS_FILE="${staleResultsFile}"
+        ! realityTargetResultLine "stale.example.com:443" >/dev/null
+    )
     refreshRecordsWithNewCandidate=$(realityTargetRefreshRecords)
     [[ "$(printf '%s\n' "${refreshRecordsWithNewCandidate}" | wc -l | tr -d ' ')" == "4" ]]
     grep -qF $'fixture-primary.example.com:443\t' <<<"${refreshRecordsWithNewCandidate}"
@@ -438,8 +445,9 @@ y
 }
 
 runRealityCandidateFullRegression() {
-    local firstRecommendedRealityCandidate firstRealityCandidate secondRealityCandidate blockedCloudflareRealityCandidate blockedNodejsRealityCandidate
+    local firstRecommendedRealityCandidate firstRealityCandidate secondRealityCandidate blockedCloudflareRealityCandidate blockedNodejsRealityCandidate candidateHost
     [[ "$(realityTargetCandidateCount)" == "37" ]]
+    [[ "$(realityTargetCandidatePool | wc -l | tr -d ' ')" == "37" ]]
     [[ "$(realityTargetFilteredCandidateCount all)" == "$(realityTargetCandidateCount)" ]]
     [[ "$(realityTargetBuiltInCdnBlockedCandidates | sort -u | wc -l | tr -d ' ')" == "154" ]]
     [[ "$(realityTargetFilteredCandidateCount recommended)" == "4" ]]
@@ -459,6 +467,11 @@ runRealityCandidateFullRegression() {
     realityTargetBlockedCandidates >/dev/null
     ! realityTargetCandidatePool | grep -q '^nodejs.org|'
     [[ "$(realityTargetCandidatePool | awk -F'|' 'tolower($6) == "yes" {count++} END {print count + 0}')" == "0" ]]
+    while IFS='|' read -r candidateHost _; do
+        if realityTargetCandidateBlocked "${candidateHost}"; then
+            return 1
+        fi
+    done < <(realityTargetCandidatePool)
     realityTargetCandidateBlocked "www.ibm.com" cdn_edge
     ! realityTargetCandidateBlocked "www.gnu.org"
     [[ "$(realityTargetCdnProviderFromCname d123.cloudfront.net.)" == "cloudfront" ]]

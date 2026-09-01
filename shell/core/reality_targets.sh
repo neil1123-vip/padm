@@ -65,200 +65,43 @@ realityTargetCandidatePool() {
         return 0
     fi
     cat <<'EOF'
-www.ibm.com|www.ibm.com|IBM|global|large_site|unknown|1|yes|候选目标；使用前仍需实时通过 TLS 与 Cloudflare 中继风险检测
-www.microsoft.com|www.microsoft.com|Microsoft|global|large_site|unknown|2|yes|全球稳定大型 HTTPS 站点，适合作为稳定备选
-www.reuters.com|www.reuters.com|Reuters|global|media|unknown|3|yes|远端实测 TLS1.3/PQC 可用且证书链很长，适合作为高质量备选
-www.qualcomm.com|www.qualcomm.com|Qualcomm|global|large_site|unknown|94|yes|远端实测 TLS1.3/PQC 可用且证书链很长，适合作为高质量备选
-www.vmware.com|www.vmware.com|VMware|global|large_site|unknown|90|yes|远端实测 TLS1.3/PQC 可用且证书链较长，适合作为企业站点备选
-www.atlassian.com|www.atlassian.com|Atlassian|global|developer|unknown|89|yes|远端实测 TLS1.3/PQC 可用且证书链较长，开发者工具站点备选
-www.jetbrains.com|www.jetbrains.com|JetBrains|global|developer|unknown|88|yes|远端实测 TLS1.3/PQC 可用且证书链达标，开发者工具站点备选
-www.mongodb.com|www.mongodb.com|MongoDB|global|developer|unknown|87|yes|远端实测 TLS1.3/PQC 可用且证书链达标，数据库站点备选
-www.asus.com|www.asus.com|ASUS|asia|large_site|unknown|86|yes|远端实测 TLS1.3/PQC 可用且证书链达标，亚洲硬件站点备选
-www.bbc.com|www.bbc.com|BBC|global|media|unknown|85|yes|远端实测 TLS1.3/PQC 可用且证书链较长，媒体站点备选
-www.nationalgeographic.com|www.nationalgeographic.com|National Geographic|global|media|unknown|84|yes|远端实测 TLS1.3/PQC 可用且证书链较长，媒体站点备选
-tensorflow.org|tensorflow.org|TensorFlow|global|developer|unknown|83|yes|远端实测 TLS1.3/PQC 可用且证书链达标，AI/开发者站点备选
-www.oracle.com|www.oracle.com|Oracle|global|large_site|unknown|82|yes|远端实测 TLS1.3 可用且证书链较长，大型企业站点备选
-go.dev|go.dev|Go|global|developer|unknown|81|yes|远端实测 TLS1.3 可用且证书链较长，开发者站点备选
-www.samsung.com|www.samsung.com|Samsung|asia|large_site|unknown|80|yes|亚洲网络常见大型站点，适合作为区域备选
-www.nvidia.com|www.nvidia.com|NVIDIA|global|large_site|unknown|79|yes|大型科技站点，适合作为备选目标
-www.amd.com|www.amd.com|AMD|global|large_site|unknown|78|yes|大型科技站点，适合作为备选目标
-www.python.org|www.python.org|Python|global|developer|unknown|77|yes|开发者常见 HTTPS 站点，适合作为备选目标
-react.dev|react.dev|React|global|developer|unknown|76|yes|开发者常见 HTTPS 站点，适合作为备选目标
-vuejs.org|vuejs.org|Vue|global|developer|unknown|75|yes|开发者常见 HTTPS 站点，适合作为备选目标
-www.cisco.com|www.cisco.com|Cisco|global|large_site|unknown|74|yes|大型企业站点，适合作为备选目标
-www.mozilla.org|www.mozilla.org|Mozilla|global|large_site|unknown|73|yes|远端实测 TLS1.3/PQC 可用，大型 HTTPS 站点备选
-developer.mozilla.org|developer.mozilla.org|MDN|global|developer|unknown|72|yes|远端实测 TLS1.3/PQC 可用，开发者文档站点备选
-www.kernel.org|www.kernel.org|Linux Kernel|global|developer|unknown|71|yes|远端实测 TLS1.3/PQC 可用，开源基础设施站点备选
-git-scm.com|git-scm.com|Git|global|developer|unknown|70|yes|远端实测 TLS1.3/PQC 可用，开发者工具站点备选
-www.vultr.com|www.vultr.com|Vultr|global|cloud|unknown|69|yes|远端实测 TLS1.3/PQC 可用，云服务站点备选
-www.linode.com|www.linode.com|Linode|global|cloud|unknown|68|yes|远端实测 TLS1.3/PQC 可用，云服务站点备选
-www.spotify.com|www.spotify.com|Spotify|global|media|unknown|67|yes|远端实测 TLS1.3/PQC 可用，媒体站点备选
-www.twitch.tv|www.twitch.tv|Twitch|global|media|unknown|66|yes|远端实测 TLS1.3/PQC 可用，媒体站点备选
-www.wikipedia.org|www.wikipedia.org|Wikipedia|global|media|unknown|65|yes|远端实测 TLS1.3/PQC 可用，公共知识站点备选
-www.wikimedia.org|www.wikimedia.org|Wikimedia|global|media|unknown|64|yes|远端实测 TLS1.3/PQC 可用，公共知识站点备选
-addons.mozilla.org|addons.mozilla.org|Mozilla Add-ons|global|large_site|unknown|63|yes|大型 HTTPS 站点，适合作为备选目标
-dl.google.com|dl.google.com|Google Download|global|large_site|unknown|62|yes|大型下载站点，部分地区可达性需自测
-rust-lang.org|rust-lang.org|Rust|global|developer|unknown|61|yes|远端实测 TLS1.3/PQC 可用，开发者站点备选
-www.ruby-lang.org|www.ruby-lang.org|Ruby|global|developer|unknown|60|yes|远端实测 TLS1.3/PQC 可用，开发者站点备选
-www.perl.org|www.perl.org|Perl|global|developer|unknown|59|yes|远端实测 TLS1.3/PQC 可用，开发者站点备选
-www.springer.com|www.springer.com|Springer|global|education|unknown|58|yes|远端实测 TLS1.3/PQC 可用，学术出版站点备选
-www.nytimes.com|www.nytimes.com|New York Times|global|media|unknown|57|yes|远端实测 TLS1.3/PQC 可用，媒体站点备选
-www.theguardian.com|www.theguardian.com|The Guardian|global|media|unknown|56|yes|远端实测 TLS1.3/PQC 可用，媒体站点备选
-www.sony.com|www.sony.com|Sony|global|large_site|unknown|55|no|远端实测 TLS1.3 可用且证书链较长，但未检测到 PQC，手动备选
-www.hp.com|www.hp.com|HP|global|large_site|unknown|54|no|远端实测 TLS1.3 可用，证书链接近 ML-DSA-65 建议，手动备选
-www.redhat.com|www.redhat.com|Red Hat|global|developer|unknown|53|no|远端实测 TLS1.3 可用，手动备选
 www.gnu.org|www.gnu.org|GNU|global|developer|unknown|52|yes|远端复测确认直连，作为普通 Reality 默认候选
 www.debian.org|www.debian.org|Debian|global|developer|unknown|51|yes|远端复测确认直连，作为普通 Reality 默认候选
 www.ubuntu.com|www.ubuntu.com|Ubuntu|global|developer|unknown|50|yes|远端复测确认直连，作为普通 Reality 默认候选
-www.dell.com|www.dell.com|Dell|global|large_site|unknown|49|no|远端实测 TLS1.3 可用，手动备选
-www.intel.com|www.intel.com|Intel|global|large_site|unknown|48|no|远端实测 TLS1.3 可用，手动备选
-www.lenovo.com|www.lenovo.com|Lenovo|global|large_site|unknown|47|no|远端实测 TLS1.3 可用，手动备选
-www.apple.com|www.apple.com|Apple|global|large_site|unknown|45|no|Xray 会提示 Apple/iCloud 类目标可能带来封锁风险，仅高级用户自选
-www.google-analytics.com|www.google-analytics.com|Google Analytics|global|large_site|unknown|44|no|部分地区可达性和策略差异较大，默认降权
-www.amazon.com|www.amazon.com|Amazon|global|large_site|unknown|43|no|大型站点，区域解析差异较大
-m.media-amazon.com|m.media-amazon.com|Amazon Media|global|large_site|unknown|42|no|大型媒体站点，区域解析差异较大
-www.swift.com|www.swift.com|Swift|global|large_site|unknown|41|no|大型站点，适合作为手动备选
-www.sap.com|www.sap.com|SAP|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.salesforce.com|www.salesforce.com|Salesforce|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.adobe.com|www.adobe.com|Adobe|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.autodesk.com|www.autodesk.com|Autodesk|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.servicenow.com|www.servicenow.com|ServiceNow|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.workday.com|www.workday.com|Workday|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 www.dropbox.com|www.dropbox.com|Dropbox|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.box.com|www.box.com|Box|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.okta.com|www.okta.com|Okta|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.zoom.com|www.zoom.com|Zoom|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 www.slack.com|www.slack.com|Slack|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.docusign.com|www.docusign.com|DocuSign|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.paypal.com|www.paypal.com|PayPal|global|finance|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.visa.com|www.visa.com|Visa|global|finance|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.mastercard.com|www.mastercard.com|Mastercard|global|finance|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.americanexpress.com|www.americanexpress.com|American Express|global|finance|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.hsbc.com|www.hsbc.com|HSBC|global|finance|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.citi.com|www.citi.com|Citi|global|finance|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.jpmorgan.com|www.jpmorgan.com|JPMorgan|global|finance|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.goldmansachs.com|www.goldmansachs.com|Goldman Sachs|global|finance|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.nasdaq.com|www.nasdaq.com|Nasdaq|global|finance|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.londonstockexchange.com|www.londonstockexchange.com|London Stock Exchange|global|finance|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.bloomberg.com|www.bloomberg.com|Bloomberg|global|media|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.ft.com|www.ft.com|Financial Times|global|media|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.wsj.com|www.wsj.com|Wall Street Journal|global|media|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.economist.com|www.economist.com|The Economist|global|media|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.apnews.com|www.apnews.com|Associated Press|global|media|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.npr.org|www.npr.org|NPR|global|media|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.pbs.org|www.pbs.org|PBS|global|media|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.cnn.com|www.cnn.com|CNN|global|media|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.cnbc.com|www.cnbc.com|CNBC|global|media|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.forbes.com|www.forbes.com|Forbes|global|media|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.wired.com|www.wired.com|Wired|global|media|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.theverge.com|www.theverge.com|The Verge|global|media|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.engadget.com|www.engadget.com|Engadget|global|media|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.arstechnica.com|www.arstechnica.com|Ars Technica|global|media|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.stackoverflow.com|www.stackoverflow.com|Stack Overflow|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-stackexchange.com|stackexchange.com|Stack Exchange|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-superuser.com|superuser.com|Super User|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-serverfault.com|serverfault.com|Server Fault|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-github.com|github.com|GitHub|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-docs.github.com|docs.github.com|GitHub Docs|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-about.gitlab.com|about.gitlab.com|GitLab|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-bitbucket.org|bitbucket.org|Bitbucket|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-code.visualstudio.com|code.visualstudio.com|Visual Studio Code|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-marketplace.visualstudio.com|marketplace.visualstudio.com|Visual Studio Marketplace|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.docker.com|www.docker.com|Docker|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-hub.docker.com|hub.docker.com|Docker Hub|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-kubernetes.io|kubernetes.io|Kubernetes|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-helm.sh|helm.sh|Helm|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-prometheus.io|prometheus.io|Prometheus|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 grafana.com|grafana.com|Grafana|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 elastic.co|elastic.co|Elastic|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 www.postgresql.org|www.postgresql.org|PostgreSQL|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.mysql.com|www.mysql.com|MySQL|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 mariadb.org|mariadb.org|MariaDB|global|developer|unknown|39|yes|远端复测确认直连，作为普通 Reality 默认候选
-redis.io|redis.io|Redis|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 www.nginx.com|www.nginx.com|NGINX|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 nginx.org|nginx.org|NGINX Open Source|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 httpd.apache.org|httpd.apache.org|Apache HTTP Server|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 www.apache.org|www.apache.org|Apache|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 maven.apache.org|maven.apache.org|Apache Maven|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-gradle.org|gradle.org|Gradle|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 cmake.org|cmake.org|CMake|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 llvm.org|llvm.org|LLVM|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 clang.llvm.org|clang.llvm.org|Clang|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 gcc.gnu.org|gcc.gnu.org|GCC|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 www.eclipse.org|www.eclipse.org|Eclipse|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.qt.io|www.qt.io|Qt|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.djangoproject.com|www.djangoproject.com|Django|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-flask.palletsprojects.com|flask.palletsprojects.com|Flask|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-fastapi.tiangolo.com|fastapi.tiangolo.com|FastAPI|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-laravel.com|laravel.com|Laravel|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-symfony.com|symfony.com|Symfony|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-rubyonrails.org|rubyonrails.org|Ruby on Rails|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-dotnet.microsoft.com|dotnet.microsoft.com|.NET|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-learn.microsoft.com|learn.microsoft.com|Microsoft Learn|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 developer.android.com|developer.android.com|Android Developers|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 android.com|android.com|Android|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 www.chromium.org|www.chromium.org|Chromium|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 www.openjdk.org|www.openjdk.org|OpenJDK|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-jdk.java.net|jdk.java.net|JDK Builds|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-crates.io|crates.io|Crates.io|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 docs.rs|docs.rs|Docs.rs|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 pypi.org|pypi.org|PyPI|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-npmjs.com|npmjs.com|npm|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-yarnpkg.com|yarnpkg.com|Yarn|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-pnpm.io|pnpm.io|pnpm|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 deno.com|deno.com|Deno|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-bun.sh|bun.sh|Bun|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-typescriptlang.org|typescriptlang.org|TypeScript|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-webpack.js.org|webpack.js.org|Webpack|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-vitejs.dev|vitejs.dev|Vite|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-svelte.dev|svelte.dev|Svelte|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 angular.dev|angular.dev|Angular|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-nuxt.com|nuxt.com|Nuxt|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-nextjs.org|nextjs.org|Next.js|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-vercel.com|vercel.com|Vercel|global|cloud|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-netlify.com|netlify.com|Netlify|global|cloud|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.heroku.com|www.heroku.com|Heroku|global|cloud|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-render.com|render.com|Render|global|cloud|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 fly.io|fly.io|Fly.io|global|cloud|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-railway.app|railway.app|Railway|global|cloud|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.digitalocean.com|www.digitalocean.com|DigitalOcean|global|cloud|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 www.ovhcloud.com|www.ovhcloud.com|OVHcloud|global|cloud|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 www.hetzner.com|www.hetzner.com|Hetzner|global|cloud|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.scaleway.com|www.scaleway.com|Scaleway|global|cloud|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.oraclecloud.com|www.oraclecloud.com|Oracle Cloud|global|cloud|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 cloud.google.com|cloud.google.com|Google Cloud|global|cloud|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-aws.amazon.com|aws.amazon.com|AWS|global|cloud|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-azure.microsoft.com|azure.microsoft.com|Microsoft Azure|global|cloud|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.tencentcloud.com|www.tencentcloud.com|Tencent Cloud|asia|cloud|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 www.alibabacloud.com|www.alibabacloud.com|Alibaba Cloud|asia|cloud|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 www.cloudflarestatus.com|www.cloudflarestatus.com|Cloudflare Status|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-status.aws.amazon.com|status.aws.amazon.com|AWS Status|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 status.cloud.google.com|status.cloud.google.com|Google Cloud Status|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 azure.status.microsoft|azure.status.microsoft|Azure Status|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.uptime.com|www.uptime.com|Uptime.com|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.pingdom.com|www.pingdom.com|Pingdom|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.cloudflareblog.com|www.cloudflareblog.com|Cloudflare Blog|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.shopify.com|www.shopify.com|Shopify|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 www.stripe.com|www.stripe.com|Stripe|global|finance|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-squareup.com|squareup.com|Square|global|finance|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.ebay.com|www.ebay.com|eBay|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.etsy.com|www.etsy.com|Etsy|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.airbnb.com|www.airbnb.com|Airbnb|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.booking.com|www.booking.com|Booking.com|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.expedia.com|www.expedia.com|Expedia|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.tripadvisor.com|www.tripadvisor.com|Tripadvisor|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.uber.com|www.uber.com|Uber|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.lyft.com|www.lyft.com|Lyft|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-soundcloud.com|soundcloud.com|SoundCloud|global|media|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-vimeo.com|vimeo.com|Vimeo|global|media|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 www.netflix.com|www.netflix.com|Netflix|global|media|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.hulu.com|www.hulu.com|Hulu|global|media|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.disneyplus.com|www.disneyplus.com|Disney+|global|media|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.imdb.com|www.imdb.com|IMDb|global|media|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.rottentomatoes.com|www.rottentomatoes.com|Rotten Tomatoes|global|media|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.metmuseum.org|www.metmuseum.org|The Met|global|education|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.britannica.com|www.britannica.com|Britannica|global|education|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.coursera.org|www.coursera.org|Coursera|global|education|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 EOF
 }
 
@@ -603,7 +446,7 @@ realityTargetResultLine() {
     local resultsFile
     resultsFile=$(realityTargetManagedResultsFile) || return 1
     [[ -n "${target}" && -f "${resultsFile}" ]] || return 1
-    awk -F'\t' -v target="${target}" '$1 == target {line = $0} END {if (line != "") print line; else exit 1}' "${resultsFile}"
+    awk -F'\t' -v target="${target}" '$1 == target {line = $0; keep = ($5 == "no" && $10 == "A")} END {if (keep) print line; else exit 1}' "${resultsFile}"
 }
 
 realityTargetCachedAsnSummary() {
