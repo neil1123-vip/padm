@@ -1417,6 +1417,7 @@ manageSubscriptionSyncSettings() {
     local syncSettingsStatus=
     local targetSyncEnabled
     local interval=
+    local lastStatus lastRun failureCount summary
     role=$(subscriptionCurrentRoleNormalized) || {
         subscriptionRequireLocalPublisherRole
         return 1
@@ -1428,12 +1429,13 @@ manageSubscriptionSyncSettings() {
     [[ "${role}" == "main" ]] && returnText="返回主控首页" || returnText="返回本机订阅首页"
     while true; do
         syncStatus=$(subscriptionActiveGroupRead -c '{enabled:(.sync.enabled == true), interval_minutes:(.sync.interval_minutes // 10), last_run:(.sync.last_run // ""), last_status:(.sync.last_status // "pending"), failure_count:((.sync.failures // []) | length)}') || return 1
-        [[ "$(jq -r '.enabled' <<<"${syncStatus}")" == "true" ]] && enabledText="开启" || enabledText="关闭"
+        summary=$(jq -r '[if .enabled then "开启" else "关闭" end, (.interval_minutes | tostring), .last_status, (if .last_run == "" then "未运行" else .last_run end), (.failure_count | tostring)] | @tsv' <<<"${syncStatus}") || return 1
+        IFS=$'\t' read -r enabledText interval lastStatus lastRun failureCount <<<"${summary}"
         echoContent title "\n┌─ 订阅同步 ─────────────────────────────────────────"
         menuLine "自动同步：${enabledText}"
-        menuLine "同步间隔：$(jq -r '.interval_minutes' <<<"${syncStatus}") 分钟"
-        menuLine "最近结果：$(jq -r '.last_status' <<<"${syncStatus}") / $(jq -r 'if .last_run == "" then "未运行" else .last_run end' <<<"${syncStatus}")"
-        menuLine "失败数量：$(jq -r '.failure_count' <<<"${syncStatus}")"
+        menuLine "同步间隔：${interval} 分钟"
+        menuLine "最近结果：${lastStatus} / ${lastRun}"
+        menuLine "失败数量：${failureCount}"
         menuItem 1 "立即完整同步" "同步本机和所有启用来源，成功后发布完整订阅"
         menuItem 2 "开启/关闭自动同步" "同时控制菜单变更后的即时同步和 cron"
         menuItem 3 "设置同步间隔" "设置 1-59 分钟间隔，不隐式开启自动同步"

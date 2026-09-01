@@ -1787,6 +1787,20 @@ main
             printf 'menu-smoke failed: unified sync menu still exposes legacy toggles\n' >&2
             return 1
         fi
+        (
+            local syncStatusJqLog="${TMP_DIR}/sync-status-jq.log"
+            subscriptionCurrentRoleNormalized() { printf 'main\n'; }
+            subscriptionActiveGroupRead() {
+                printf '%s\n' '{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failure_count":0}'
+            }
+            jq() {
+                printf 'jq\n' >>"${syncStatusJqLog}"
+                command jq "$@"
+            }
+            : >"${syncStatusJqLog}"
+            manageSubscriptionSyncSettings <<<"6"
+            [[ "$(wc -l <"${syncStatusJqLog}")" == "1" ]]
+        )
         resetMenuActions
         output=
         manageSubscriptionSyncSettings <<<"5
