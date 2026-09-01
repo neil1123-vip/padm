@@ -57,44 +57,32 @@ installMenu() {
 }
 
 protocolEntryMenu() {
-    echoContent title "\n┌─ 协议与入口 ───────────────────────────────────────"
-    menuLine "这里集中管理客户端入口、入站协议和订阅中的连接地址"
-    menuLine "证书/静态站点去 站点与证书；分流/阻断去 路由与访问控制"
-    menuItem 1 "REALITY 管理" "目标站、密钥、443 共存分流和 Reality 参数"
-    menuItem 2 "XHTTP 管理" "普通/高级/实验分层调整 Reality XHTTP"
-    menuItem 3 "Hysteria2 管理" "安装、卸载或管理 UDP 端口跳跃"
-    menuItem 4 "Tuic 管理" "安装、卸载和高级参数"
-    menuItem 5 "入口端口管理" "为已安装 Xray 追加或移除入口端口"
-    menuItem 6 "CDN 入口管理" "订阅入口地址覆盖、CDN/H3 使用说明"
-    menuReturnItem 7 "返回主菜单" "回到 padm 管理面板"
-    menuClose
-    autoRead protocol_entry_menu "请选择:" selectProtocolMenuType
-    case ${selectProtocolMenuType} in
-    1)
-        manageReality 1
-        ;;
-    2)
-        manageXHTTP
-        ;;
-    3)
-        manageHysteria
-        ;;
-    4)
-        manageTuic
-        ;;
-    5)
-        addCorePort 1
-        ;;
-    6)
-        manageCDN 1
-        ;;
-    7)
-        return 0
-        ;;
-    *)
-        coreSelectionRetryAction protocolEntryMenu
-        ;;
-    esac
+    local selectProtocolMenuType=
+    while true; do
+        echoContent title "\n┌─ 协议与入口 ───────────────────────────────────────"
+        menuLine "这里集中管理客户端入口、入站协议和订阅中的连接地址"
+        menuLine "证书/静态站点去 站点与证书；分流/阻断去 路由与访问控制"
+        menuItem 1 "REALITY 管理" "目标站、密钥、443 共存分流和 Reality 参数"
+        menuItem 2 "XHTTP 管理" "普通/高级/实验分层调整 Reality XHTTP"
+        menuItem 3 "Hysteria2 管理" "安装、卸载或管理 UDP 端口跳跃"
+        menuItem 4 "Tuic 管理" "安装、卸载和高级参数"
+        menuItem 5 "入口端口管理" "为已安装 Xray 追加或移除入口端口"
+        menuItem 6 "CDN 入口管理" "订阅入口地址覆盖、CDN/H3 使用说明"
+        menuReturnItem 7 "返回主菜单" "回到 padm 管理面板"
+        menuClose
+        selectProtocolMenuType=
+        autoRead protocol_entry_menu "请选择:" selectProtocolMenuType || return 0
+        case "${selectProtocolMenuType}" in
+        1) manageReality 1; return $? ;;
+        2) manageXHTTP; return $? ;;
+        3) manageHysteria; return $? ;;
+        4) manageTuic; return $? ;;
+        5) addCorePort 1; return $? ;;
+        6) manageCDN 1; return $? ;;
+        7) return 0 ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
 }
 
 siteCertificateMenu() {

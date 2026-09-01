@@ -995,7 +995,7 @@ runSubscriptionWireGuardRestoreRunnerRegression() (
 runCoreSelectionRetryActionRegression() (
     local actions=
     local -a expectedCounts=(
-        'shell/core/menu.sh|5'
+        'shell/core/menu.sh|4'
         'shell/core/cores.sh|1'
         'shell/core/routing_access_control.sh|0'
         'shell/core/manage.sh|18'
@@ -1035,6 +1035,7 @@ runCoreSelectionRetryActionRegression() (
         'shell/core/routing_ipv6.sh|coreSelectionErrorCard
         ipv6Routing'
         'shell/core/menu.sh|coreSelectionRetryAction routingAccessMenu'
+        'shell/core/menu.sh|coreSelectionRetryAction protocolEntryMenu'
     )
     local entry file pattern expectedCount actualCount
 
@@ -1650,6 +1651,27 @@ EOF
         resetMenuActions
         protocolEntryMenu <<<"7"
         ! assertMenuAction menu
+        (
+            local protocolMenuRenderLog="${TMP_DIR}/protocol-menu-render.log"
+            echoContent() { printf '%s\n' "$*" >>"${protocolMenuRenderLog}"; }
+            manageReality() { recordMenuAction manageReality; }
+            manageXHTTP() { recordMenuAction manageXHTTP; }
+            manageHysteria() { recordMenuAction manageHysteria; }
+            manageTuic() { recordMenuAction manageTuic; }
+            addCorePort() { recordMenuAction addCorePort; }
+            manageCDN() { recordMenuAction manageCDN; }
+            : >"${protocolMenuRenderLog}"
+            resetMenuActions
+            protocolEntryMenu <<< $'bad\n7'
+            assertMenuAction 'errorCard:选择错误'
+            ! assertMenuAction manageReality
+            ! assertMenuAction manageXHTTP
+            ! assertMenuAction manageHysteria
+            ! assertMenuAction manageTuic
+            ! assertMenuAction addCorePort
+            ! assertMenuAction manageCDN
+            [[ "$(wc -l <"${protocolMenuRenderLog}")" == "2" ]]
+        )
         resetMenuActions
         output=
         local realityMenuNetworkMarker="${TMP_DIR}/menu-smoke-reality-network"
