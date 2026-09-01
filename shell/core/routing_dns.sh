@@ -4,70 +4,58 @@ DNS_ROUTING_ACTIVE_BACKUP_DIR=
 
 # DNS/hosts 路由与覆盖
 dnsRouting() {
-
     if [[ -z "${configPath}" ]]; then
         coreNotInstalledErrorCard
         menu
         exit 0
     fi
-    echoContent title "\n┌─ DNS 分流 ─────────────────────────────────────────"
-    menuLine "只改变核心内指定域名的 DNS 解析，不会修改系统 DNS"
-    menuLine "适合少量域名定向解析；如果目标是固定后端 IP，优先用 DNS/hosts 覆盖"
-    menuItem 1 "添加" "添加 DNS 分流配置"
-    menuDangerItem 2 "卸载" "移除 DNS 分流配置"
-    menuReturnItem 3 "返回分流工具" "回到上一级分流菜单"
-    menuClose
-    autoRead dns_routing_menu "请选择:" selectType
+    local selectType=
+    while true; do
+        echoContent title "\n┌─ DNS 分流 ─────────────────────────────────────────"
+        menuLine "只改变核心内指定域名的 DNS 解析，不会修改系统 DNS"
+        menuLine "适合少量域名定向解析；如果目标是固定后端 IP，优先用 DNS/hosts 覆盖"
+        menuItem 1 "添加" "添加 DNS 分流配置"
+        menuDangerItem 2 "卸载" "移除 DNS 分流配置"
+        menuReturnItem 3 "返回分流工具" "回到上一级分流菜单"
+        menuClose
+        selectType=
+        autoRead dns_routing_menu "请选择:" selectType || return 0
 
-    case ${selectType} in
-    1)
-        setUnlockDNS
-        ;;
-    2)
-        removeUnlockDNS
-        ;;
-    3)
-        routingToolsMenu
-        ;;
-    *)
-        coreSelectionErrorCard "选择错误"
-        dnsRouting "$1"
-        ;;
-    esac
+        case "${selectType}" in
+        1) setUnlockDNS; return $? ;;
+        2) removeUnlockDNS; return $? ;;
+        3) return 0 ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
 }
 
 # DNS/hosts 覆盖
 sniRouting() {
-
     if [[ -z "${configPath}" ]]; then
         coreNotInstalledErrorCard
         menu
         exit 0
     fi
-    echoContent title "\n┌─ DNS/hosts 覆盖 ───────────────────────────────────"
-    menuLine "把指定域名在核心内解析到指定 IP；这不是 Nginx/TCP 反向代理"
-    menuLine "Xray 支持 geosite/domain 规则；sing-box 使用 remote rule_set 与 domain_suffix"
-    menuItem 1 "添加" "添加 DNS/hosts 覆盖规则"
-    menuDangerItem 2 "卸载" "移除 DNS/hosts 覆盖配置"
-    menuReturnItem 3 "返回分流工具" "回到上一级分流菜单"
-    menuClose
-    autoRead sni_routing_menu "请选择:" selectType
+    local selectType=
+    while true; do
+        echoContent title "\n┌─ DNS/hosts 覆盖 ───────────────────────────────────"
+        menuLine "把指定域名在核心内解析到指定 IP；这不是 Nginx/TCP 反向代理"
+        menuLine "Xray 支持 geosite/domain 规则；sing-box 使用 remote rule_set 与 domain_suffix"
+        menuItem 1 "添加" "添加 DNS/hosts 覆盖规则"
+        menuDangerItem 2 "卸载" "移除 DNS/hosts 覆盖配置"
+        menuReturnItem 3 "返回分流工具" "回到上一级分流菜单"
+        menuClose
+        selectType=
+        autoRead sni_routing_menu "请选择:" selectType || return 0
 
-    case ${selectType} in
-    1)
-        setUnlockSNI
-        ;;
-    2)
-        removeUnlockSNI
-        ;;
-    3)
-        routingToolsMenu
-        ;;
-    *)
-        coreSelectionErrorCard "选择错误"
-        sniRouting "$1"
-        ;;
-    esac
+        case "${selectType}" in
+        1) setUnlockSNI; return $? ;;
+        2) removeUnlockSNI; return $? ;;
+        3) return 0 ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
 }
 
 dnsRoutingBackupCreate() {

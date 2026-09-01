@@ -289,47 +289,39 @@ warpRoutingReg() {
             successMessage="WARP全局出站设置完毕"
         else
             coreCancelledStatusCard "未设置 WARP 全局出站"
-            warpRoutingReg "$1" "${type}"
             return 0
         fi
     elif [[ "${warpStatus}" == "4" ]]; then
         routingConfigApplyTransaction "卸载 WARP ${type} 分流失败" false true removeWireGuardRoutingConfig "${type}" || return 1
         successMessage="卸载WARP ${type}分流完毕"
     elif [[ "${warpStatus}" == "5" ]]; then
-        warpRoutingMenu
         return 0
     else
         coreSelectionErrorCard "选择错误"
-        warpRoutingReg "$1" "${type}"
-        return 0
+        return 1
     fi
     [[ -n "${successMessage}" ]] && successCard "${successMessage}"
 }
 
 
 warpRoutingMenu() {
-    echoContent title "\n┌─ WARP 出站 ────────────────────────────────────────"
-    menuLine "通过 Cloudflare WARP WireGuard 出站，常用于 IPv4/IPv6 出口切换"
-    menuLine "依赖第三方 warp-reg 获取账号参数；Cloudflare 服务状态或策略变化会影响可用性"
-    menuItem 1 "WARP IPv4" "使用 IPv4 WARP 地址作为出站"
-    menuItem 2 "WARP IPv6" "使用 IPv6 WARP 地址作为出站"
-    menuReturnItem 3 "返回分流工具" "回到上一级分流菜单"
-    menuClose
-    autoRead warp_routing_type_menu "请选择:" warpRoutingType
+    local warpRoutingType=
+    while true; do
+        echoContent title "\n┌─ WARP 出站 ────────────────────────────────────────"
+        menuLine "通过 Cloudflare WARP WireGuard 出站，常用于 IPv4/IPv6 出口切换"
+        menuLine "依赖第三方 warp-reg 获取账号参数；Cloudflare 服务状态或策略变化会影响可用性"
+        menuItem 1 "WARP IPv4" "使用 IPv4 WARP 地址作为出站"
+        menuItem 2 "WARP IPv6" "使用 IPv6 WARP 地址作为出站"
+        menuReturnItem 3 "返回分流工具" "回到上一级分流菜单"
+        menuClose
+        warpRoutingType=
+        autoRead warp_routing_type_menu "请选择:" warpRoutingType || return 0
 
-    case ${warpRoutingType} in
-    1)
-        warpRoutingReg 1 IPv4
-        ;;
-    2)
-        warpRoutingReg 1 IPv6
-        ;;
-    3)
-        routingToolsMenu
-        ;;
-    *)
-        coreSelectionErrorCard "选择错误"
-        warpRoutingMenu
-        ;;
-    esac
+        case "${warpRoutingType}" in
+        1) warpRoutingReg 1 IPv4 || true; continue ;;
+        2) warpRoutingReg 1 IPv6 || true; continue ;;
+        3) return 0 ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
 }

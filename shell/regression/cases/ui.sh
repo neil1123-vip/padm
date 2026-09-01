@@ -1448,6 +1448,36 @@ EOF
             ! assertMenuAction routingAccessMenu
         )
 
+        (
+            local routingMenuRenderLog="${TMP_DIR}/routing-child-render.log"
+            configPath="${TMP_DIR}/menu-smoke-routing-config/"
+            setUnlockDNS() { recordMenuAction setUnlockDNS; }
+            removeUnlockDNS() { recordMenuAction removeUnlockDNS; }
+            setUnlockSNI() { recordMenuAction setUnlockSNI; }
+            removeUnlockSNI() { recordMenuAction removeUnlockSNI; }
+            routingToolsMenu() { recordMenuAction routingToolsMenu; }
+            echoContent() { printf '%s\n' "$*" >>"${routingMenuRenderLog}"; }
+            : >"${routingMenuRenderLog}"
+            resetMenuActions
+            dnsRouting <<< $'bad\n3'
+            assertMenuAction 'errorCard:选择错误'
+            ! assertMenuAction routingToolsMenu
+            [[ "$(wc -l <"${routingMenuRenderLog}")" == "2" ]]
+            : >"${routingMenuRenderLog}"
+            resetMenuActions
+            sniRouting <<< $'bad\n3'
+            assertMenuAction 'errorCard:选择错误'
+            ! assertMenuAction routingToolsMenu
+            [[ "$(wc -l <"${routingMenuRenderLog}")" == "2" ]]
+            : >"${routingMenuRenderLog}"
+            resetMenuActions
+            warpRoutingReg() { recordMenuAction "warpRoutingReg:$*"; }
+            warpRoutingMenu <<< $'bad\n3'
+            assertMenuAction 'errorCard:选择错误'
+            ! assertMenuAction routingToolsMenu
+            [[ "$(wc -l <"${routingMenuRenderLog}")" == "2" ]]
+        )
+
         xrayInstalledState=false
         singBoxInstalledState=false
         serviceInstalledState=false
