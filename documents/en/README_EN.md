@@ -452,8 +452,8 @@ Controller and local-only home screens share one `Subscription sync` menu: run a
 The `Subscriptions & users` entry is the single place for link refresh, shared-subscription creation/maintenance, and usage/quota access. Admin self-use subscriptions remain derived from the local protocol configuration; they are not stored in `user_groups`, do not use shared quotas, and are never pushed to controlled servers.
 
 - A controller syncs every enabled controlled-server source. There is no separate global remote-sync switch; pause one server through `Coordination & control` -> `Controlled servers` -> `Enable/disable controlled server`.
-- Public subscriptions are published only after the local host and every enabled source return complete snapshots. If any required source fails, the previous complete public subscription stays in place instead of being overwritten by a partial node set.
-- After changing a controlled server's Reality target or other node configuration, enabled automatic sync regenerates local nodes, fetches every enabled source, and publishes the complete group. The outer HTTPS subscription URL stays unchanged and nodes from the other servers remain present.
+- Sync completes the local configuration first, then handles controlled-server snapshots per source. When the local host succeeds and the remote sync result is valid, the public subscription is published from the successful sources and failed sources are omitted; the overall run is marked partial. If a remote-only user has no available source, that user's previous output is retained. A local failure or an invalid remote result keeps the whole public subscription unchanged.
+- After changing a controlled server's Reality target or other node configuration, enabled automatic sync regenerates local nodes, fetches enabled sources, and publishes the available sources. The outer HTTPS subscription URL stays unchanged and nodes from other successful servers remain present.
 - Controlled servers do not expose an active-sync menu; they only answer authenticated sync requests from the controller.
 
 Recommended flow for local-only or controller-side shared subscriptions:

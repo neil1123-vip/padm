@@ -2601,6 +2601,9 @@ renderSubscribeUserOutputs() {
     local showStatus=$5
     local remoteSnapshots=${6:-}
     local localBase publicBase stageDir defaultPath clashPath clashProfilePath singBoxProfilePath singBoxPath clashProxyUrl localSingBoxTemplate base64Result singBoxTmpPath clashSourcePath clashContentPath
+    local localDefaultAvailable=false
+    local remoteStageStatus=0
+    local previousBase
 
     SUBSCRIBE_USER_OUTPUT_ERROR=
     localBase=$(subscribeLocalBaseDir)
@@ -2618,6 +2621,7 @@ renderSubscribeUserOutputs() {
     singBoxPath="${stageDir}/sing-box/${emailMd5}"
 
     if [[ -f "${localBase}/default/${email}" ]]; then
+        localDefaultAvailable=true
         if ! cp "${localBase}/default/${email}" "${defaultPath}"; then
             padmRemoveCleanupPath "${stageDir}"
             return 1
@@ -2635,9 +2639,35 @@ renderSubscribeUserOutputs() {
         cp "${localBase}/sing-box/${email}" "${singBoxProfilePath}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
     fi
     if [[ "${updateRemoteStatus}" == "y" ]] && subscriptionRemoteScopeEnabled; then
-        if ! PADM_SUBSCRIBE_DIR="${stageDir}" stageRemoteSubscribe "${emailMd5}" "${email}" "${remoteSnapshots}"; then
+        remoteStageStatus=0
+        PADM_SUBSCRIBE_DIR="${stageDir}" stageRemoteSubscribe "${emailMd5}" "${email}" "${remoteSnapshots}" || remoteStageStatus=$?
+        if [[ "${remoteStageStatus}" -ne 0 && "${remoteStageStatus}" -ne 2 ]]; then
             padmRemoveCleanupPath "${stageDir}"
             return 1
+        fi
+        if [[ "${remoteStageStatus}" -eq 2 && "${localDefaultAvailable}" != "true" ]]; then
+            previousBase=${PADM_SUBSCRIBE_PREVIOUS_DIR:-}
+            if [[ -z "${previousBase}" ]] || ! previousBase=$(padmResolveManagedAbsolutePath "${previousBase}") ||
+                [[ ! -s "${previousBase}/default/${emailMd5}" ]]; then
+                padmRemoveCleanupPath "${stageDir}"
+                return 1
+            fi
+            if ! cp "${previousBase}/default/${emailMd5}" "${defaultPath}" ||
+                ! { if [[ -f "${previousBase}/clashMeta/${emailMd5}" ]]; then cp "${previousBase}/clashMeta/${emailMd5}" "${clashPath}"; else rm -f "${clashPath}"; fi; } ||
+                ! { if [[ -f "${previousBase}/clashMetaProfiles/${emailMd5}" ]]; then cp "${previousBase}/clashMetaProfiles/${emailMd5}" "${clashProfilePath}"; else rm -f "${clashProfilePath}"; fi; } ||
+                ! { if [[ -f "${previousBase}/sing-box_profiles/${emailMd5}" ]]; then cp "${previousBase}/sing-box_profiles/${emailMd5}" "${singBoxProfilePath}"; else rm -f "${singBoxProfilePath}"; fi; } ||
+                ! { if [[ -f "${previousBase}/sing-box/${emailMd5}" ]]; then cp "${previousBase}/sing-box/${emailMd5}" "${singBoxPath}"; else rm -f "${singBoxPath}"; fi; }; then
+                padmRemoveCleanupPath "${stageDir}"
+                return 1
+            fi
+            commitSubscribeUserOutputFile "${defaultPath}" "${publicBase}/default/${emailMd5}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
+            commitSubscribeUserOutputFile "${clashPath}" "${publicBase}/clashMeta/${emailMd5}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
+            commitSubscribeUserOutputFile "${clashProfilePath}" "${publicBase}/clashMetaProfiles/${emailMd5}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
+            commitSubscribeUserOutputFile "${singBoxProfilePath}" "${publicBase}/sing-box_profiles/${emailMd5}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
+            commitSubscribeUserOutputFile "${singBoxPath}" "${publicBase}/sing-box/${emailMd5}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
+            [[ -n "${showStatus}" ]] || statusCard "订阅输出" "${email} 没有可用来源，已保留上一版输出"
+            padmRemoveCleanupPath "${stageDir}"
+            return 0
         fi
         if [[ -f "${localBase}/sing-box/${email}" ]]; then
             cp "${localBase}/sing-box/${email}" "${singBoxProfilePath}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
@@ -2768,7 +2798,8 @@ generateSubscribeOutputsUnlocked() {
             restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "订阅生成失败：重建本地订阅失败" "${previousSubscribeSalt}" true
             return 1
         fi
-        if ! PADM_SUBSCRIBE_DIR="${publishStage}" renderAllSubscribeUserOutputs "${localBase}" "${renewSalt}" "${showStatus}" "${publishAccountsOverride}" "${skipCleanup}" "${remoteSnapshots}"; then
+        if ! PADM_SUBSCRIBE_DIR="${publishStage}" PADM_SUBSCRIBE_PREVIOUS_DIR="${publicBase}" \
+            renderAllSubscribeUserOutputs "${localBase}" "${renewSalt}" "${showStatus}" "${publishAccountsOverride}" "${skipCleanup}" "${remoteSnapshots}"; then
             padmRemoveCleanupPath "${publishStage}"
             restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "订阅生成失败：生成订阅输出失败" "${previousSubscribeSalt}" true
             return 1

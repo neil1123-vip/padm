@@ -645,6 +645,100 @@ runSubscriptionOutputPublishAccountsAndRemoteHintRegression() {
 )
 }
 
+runSubscriptionOutputPartialRemoteSourcesRegression() (
+    set -euo pipefail
+    local root="${TMP_DIR}/subscription-output-partial-remote-sources"
+    local localBase="${root}/local"
+    local publicBase="${root}/public"
+    local email=sub_team_a
+    local emailMd5
+    local goodDefault
+    local goodClashMeta
+    local goodSingBox
+    local syncSnapshots
+
+    mkdir -p "${root}/tmp" "${localBase}" "${publicBase}"
+    TMPDIR="${root}/tmp"
+    export PADM_SUBSCRIBE_LOCAL_DIR="${localBase}"
+    export PADM_SUBSCRIBE_DIR="${publicBase}"
+    subscribeSalt=test-salt
+    emailMd5=$(printf '%s\n' "${email}${subscribeSalt}" | md5sum | awk '{print $1}')
+    goodDefault=$(printf 'vless://good\n' | base64 -w 0)
+    goodClashMeta=$'  - name: sub_team_a\n    server: good.example.com'
+    goodSingBox='[{"tag":"sub_team_a","type":"vless","server":"good.example.com"}]'
+    syncSnapshots=$(jq -cn \
+        --arg default "${goodDefault}" \
+        --arg clashMeta "${goodClashMeta}" \
+        --argjson singBox "${goodSingBox}" \
+        '{"edge-good":{"sub_team_a":{"default":$default,"clash_meta":$clashMeta,"sing_box":$singBox}},"edge-bad":{"sub_team_a":{"default":"","clash_meta":"bad","sing_box":[]}}}')
+
+    subscriptionRemoteScopeEnabled() { return 0; }
+    subscriptionRemoteSubscribeSourcesForAccount() {
+        printf -v "$2" '%s' $'edge-good\nedge-bad'
+    }
+    subscriptionActiveGroupRead() {
+        case "$*" in
+        *'--arg id edge-good'*) printf '%s\n' '{"id":"edge-good","host":"good.example.com","port":443}' ;;
+        *'--arg id edge-bad'*) printf '%s\n' '{"id":"edge-bad","host":"bad.example.com","port":443}' ;;
+        *) return 1 ;;
+        esac
+    }
+
+    stageRemoteSubscribe "${emailMd5}" "${email}" "${syncSnapshots}"
+    grep -qx 'vless://good' "${publicBase}/default/${emailMd5}"
+    grep -q 'sub_team_a_edge-good' "${publicBase}/clashMeta/${emailMd5}"
+    ! grep -q 'edge-bad' "${publicBase}/default/${emailMd5}" "${publicBase}/clashMeta/${emailMd5}" "${localBase}/sing-box/${email}"
+    jq -e 'length == 1 and .[0].tag == "sub_team_a_edge-good"' "${localBase}/sing-box/${email}" >/dev/null
+)
+
+runSubscriptionOutputRemoteOnlyAllFailedRestoreRegression() (
+    set -euo pipefail
+    local root="${TMP_DIR}/subscription-output-remote-only-all-failed"
+    local localBase="${root}/local"
+    local publicBase="${root}/public"
+    local email=sub_team_a
+    local emailMd5
+
+    mkdir -p \
+        "${root}/tmp" \
+        "${localBase}" \
+        "${publicBase}/default" \
+        "${publicBase}/clashMeta" \
+        "${publicBase}/clashMetaProfiles" \
+        "${publicBase}/sing-box_profiles" \
+        "${publicBase}/sing-box"
+    TMPDIR="${root}/tmp"
+    export PADM_SUBSCRIBE_LOCAL_DIR="${localBase}"
+    export PADM_SUBSCRIBE_DIR="${publicBase}"
+    export PADM_SUBSCRIBE_PREVIOUS_DIR="${publicBase}"
+    subscribeSalt=test-salt
+    emailMd5=$(printf '%s\n' "${email}${subscribeSalt}" | md5sum | awk '{print $1}')
+    printf 'old-default\n' >"${publicBase}/default/${emailMd5}"
+    printf 'old-clash\n' >"${publicBase}/clashMeta/${emailMd5}"
+    printf 'old-clash-profile\n' >"${publicBase}/clashMetaProfiles/${emailMd5}"
+    printf '[{"tag":"old-profile"}]\n' >"${publicBase}/sing-box_profiles/${emailMd5}"
+    printf '{"outbounds":[{"tag":"old-sing-box"}]}\n' >"${publicBase}/sing-box/${emailMd5}"
+
+    subscriptionRemoteScopeEnabled() { return 0; }
+    subscriptionRemoteSubscribeSourcesForAccount() {
+        printf -v "$2" '%s' $'edge-a\nedge-b'
+    }
+    subscriptionActiveGroupRead() {
+        case "$*" in
+        *'--arg id edge-a'*) printf '%s\n' '{"id":"edge-a","host":"a.example.com","port":443}' ;;
+        *'--arg id edge-b'*) printf '%s\n' '{"id":"edge-b","host":"b.example.com","port":443}' ;;
+        *) return 1 ;;
+        esac
+    }
+
+    renderSubscribeUserOutputs "${email}" "${emailMd5}" example.com y true '{"edge-a":null,"edge-b":null}'
+    [[ "$(<"${publicBase}/default/${emailMd5}")" == 'old-default' ]]
+    [[ "$(<"${publicBase}/clashMeta/${emailMd5}")" == 'old-clash' ]]
+    [[ "$(<"${publicBase}/clashMetaProfiles/${emailMd5}")" == 'old-clash-profile' ]]
+    [[ "$(<"${publicBase}/sing-box_profiles/${emailMd5}")" == '[{"tag":"old-profile"}]' ]]
+    [[ "$(<"${publicBase}/sing-box/${emailMd5}")" == '{"outbounds":[{"tag":"old-sing-box"}]}' ]]
+)
+
 runSubscriptionOutputTlsVlessVmessTrojanRegression() {
     local SUBSCRIBE_CAPTURE_DIR="${SUBSCRIBE_CAPTURE_DIR}-${BASHPID:-$$}"
     local PADM_SUBSCRIBE_LOCAL_DIR="${SUBSCRIBE_CAPTURE_DIR}"

@@ -1804,6 +1804,7 @@ runSubscriptionGroupSyncRemoteFailureRegression() (
     local resultStatus="${syncRoot}/mark-status.log"
     local resultFailures="${syncRoot}/mark-failures.log"
     local refreshLog="${syncRoot}/refresh.log"
+    local snapshotFile="${syncRoot}/snapshot.json"
     local originalConfig
     local syncStatus
 
@@ -1838,6 +1839,7 @@ JSON
     }
     refreshPublishedSubscriptions() {
         printf 'refresh\n' >>"${refreshLog}"
+        printf '%s\n' "$1" >"${snapshotFile}"
         return 0
     }
 
@@ -1846,8 +1848,8 @@ JSON
     grep -q 'sub_new-main' "${syncConfigFile}"
     [[ "$(<"${syncLocalFile}")" == "old-local" ]]
     [[ "$(<"${syncPublicFile}")" == "old-public" ]]
-    [[ ! -e "${refreshLog}" ]]
     if [[ "${remoteFailureMode}" == "control-disabled" ]]; then
+        [[ ! -e "${refreshLog}" ]]
         [[ ! -e "${remoteLog}" ]]
         grep -q '主控控制面已关闭，启用的被控服务器无法同步' "${resultFailures}"
         jq -e '.sources[] | select(.id == "edge-a" and .last_sync_error.type == "control_disabled")' "$(subscriptionGroupsFile)" >/dev/null
@@ -1856,8 +1858,13 @@ JSON
         [[ "$(wc -l <"${remoteSourceReadLog}")" == "1" ]] || return 1
         jq -e '. == [{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"edge.example.com","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"}]' "${remoteArgFile}" >/dev/null
         grep -q '被控服务器同步失败' "${resultFailures}"
+        [[ -f "${refreshLog}" ]]
+        jq -e '."edge-a" == null' "${snapshotFile}" >/dev/null
+        grep -q '已按可用来源发布订阅' "${statusLog}"
     fi
-    grep -q '本机自动同步完成，但被控服务器同步失败，请查看失败列表' "${statusLog}"
+    if [[ "${remoteFailureMode}" == "control-disabled" ]]; then
+        grep -q '本机自动同步完成，但被控服务器同步失败，请查看失败列表' "${statusLog}"
+    fi
     grep -qx 'partial' "${resultStatus}"
     if regressionFindHasMatches "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \); then
         return 1

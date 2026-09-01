@@ -1156,6 +1156,8 @@ runSubscriptionGroupSyncUnlocked() {
     local postSyncTrafficRequired=false
     local localSyncChanged=false
     local remoteSources='[]'
+    local remotePublishReady=false
+    local publishedWithRemoteFailures=false
     local rc=0
     ensureSubscriptionGroupsState || return 1
     readInstallType
@@ -1332,7 +1334,15 @@ runSubscriptionGroupSyncUnlocked() {
         fi
     fi
 
-    if [[ "${localSyncReady}" == "true" && "${remoteFailures}" == "[]" ]]; then
+    if [[ "${remoteSyncRequired}" == "true" ]]; then
+        if [[ "${remoteSnapshots}" != "null" ]] && jq -e 'type == "object"' <<<"${remoteSnapshots}" >/dev/null 2>&1; then
+            remotePublishReady=true
+        fi
+    elif [[ "${enabledRemoteSources}" != "true" ]]; then
+        remotePublishReady=true
+    fi
+
+    if [[ "${localSyncReady}" == "true" && "${remotePublishReady}" == "true" ]]; then
         subscribePort=
         subscribeType=
         subscribeDomain=
@@ -1344,6 +1354,8 @@ runSubscriptionGroupSyncUnlocked() {
             if ! refreshPublishedSubscriptions "${remoteSnapshots}" >/dev/null 2>&1; then
                 failureMessages+=("同步完成后公网订阅刷新失败")
                 rc=1
+            elif [[ "${remoteFailures}" != "[]" ]]; then
+                publishedWithRemoteFailures=true
             fi
         fi
     fi
@@ -1380,7 +1392,11 @@ runSubscriptionGroupSyncUnlocked() {
         fi
         if [[ "${localSyncReady}" == "true" ]]; then
             if [[ "${enabledRemoteSources}" == "true" && "${remoteFailures}" != "[]" ]]; then
-                statusCard "订阅同步" "本机自动同步完成，但被控服务器同步失败，请查看失败列表"
+                if [[ "${publishedWithRemoteFailures}" == "true" ]]; then
+                    statusCard "订阅同步" "本机自动同步完成，已按可用来源发布订阅；部分被控服务器同步失败，请查看失败列表"
+                else
+                    statusCard "订阅同步" "本机自动同步完成，但被控服务器同步失败，请查看失败列表"
+                fi
             else
                 statusCard "订阅同步" "本机自动同步完成，但部分步骤失败，请查看失败列表"
             fi

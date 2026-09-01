@@ -776,6 +776,7 @@ stageRemoteSubscribe() {
     local sourceLines=
     local escapedEmail=
     local stageDir publicBase localBase defaultTarget clashTarget singBoxTarget
+    local validSourceCount=0
 
     subscriptionRemoteScopeEnabled || return 0
 
@@ -832,14 +833,16 @@ stageRemoteSubscribe() {
             return 1
         }
         remoteUrl=$(jq -r '.host + ":" + (.port | tostring)' <<<"${source}") || { padmRemoveCleanupPath "${stageDir}"; return 1; }
-        controlledResponse=$(jq -ce --arg sourceId "${serverAlias}" --arg account "${email}" '
+        if ! controlledResponse=$(jq -ce --arg sourceId "${serverAlias}" --arg account "${email}" '
           select(type == "object")
           | .[$sourceId]
           | select(type == "object")
           | .[$account]
           | select(type == "object")
           | . + {ok:true, account:$account}
-        ' <<<"${syncSnapshots}") || { padmRemoveCleanupPath "${stageDir}"; return 1; }
+        ' <<<"${syncSnapshots}" 2>/dev/null); then
+            continue
+        fi
         jq -r '.clash_meta // ""' <<<"${controlledResponse}" >"${clashFile}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
         jq -r '.default // ""' <<<"${controlledResponse}" >"${defaultFile}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
         jq -c '.sing_box // []' <<<"${controlledResponse}" >"${singBoxFile}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
@@ -847,13 +850,7 @@ stageRemoteSubscribe() {
         clashMetaProxies=$(sed '/proxies:/d' "${clashFile}" | sed -E \
             -e "s/^([[:space:]-]*name:[[:space:]]*\")${escapedEmail}([^\"]*)(\".*)$/\1${email}_${serverAlias}\2\3/" \
             -e "s/^([[:space:]-]*name:[[:space:]]*)${escapedEmail}([^[:space:]]*)([[:space:]]*)$/\1${email}_${serverAlias}\2\3/")
-        if [[ -n "${clashMetaProxies}" && "${clashMetaProxies}" != *nginx* ]]; then
-            if ! appendUniqueLines "${clashMetaProxies}" "${clashTarget}"; then
-                padmRemoveCleanupPath "${stageDir}"
-                return 1
-            fi
-            successCard "clashMeta订阅 ${remoteUrl}:${email} 更新成功"
-        else
+        if [[ -z "${clashMetaProxies}" || "${clashMetaProxies}" == *nginx* ]]; then
             errorCard "clashMeta订阅 ${remoteUrl}:${email} 快照无效或不存在"
             sourceInvalid=true
         fi
@@ -865,13 +862,7 @@ stageRemoteSubscribe() {
             else
                 default=
             fi
-            if [[ -n "${default}" ]]; then
-                if ! appendUniqueLines "${default}" "${defaultTarget}"; then
-                    padmRemoveCleanupPath "${stageDir}"
-                    return 1
-                fi
-                successCard "通用订阅 ${remoteUrl}:${email} 更新成功"
-            else
+            if [[ -z "${default}" ]]; then
                 errorCard "通用订阅 ${remoteUrl}:${email} 解码失败"
                 sourceInvalid=true
             fi
@@ -886,21 +877,31 @@ stageRemoteSubscribe() {
                 padmRemoveCleanupPath "${stageDir}"
                 return 1
             fi
-            if ! mergeSingBoxSubscribeOutbounds "${singBoxTarget}" "${singBoxSubscribe}"; then
-                padmRemoveCleanupPath "${stageDir}"
-                return 1
-            fi
-            successCard "sing-box订阅 ${remoteUrl}:${email} 更新成功"
         else
             errorCard "sing-box订阅 ${remoteUrl}:${email} 快照无效或不存在"
             sourceInvalid=true
         fi
         if [[ "${sourceInvalid}" == "true" ]]; then
+            rm -f "${clashFile}" "${defaultFile}" "${singBoxFile}"
+            continue
+        fi
+        if ! appendUniqueLines "${clashMetaProxies}" "${clashTarget}" ||
+            ! appendUniqueLines "${default}" "${defaultTarget}" ||
+            ! mergeSingBoxSubscribeOutbounds "${singBoxTarget}" "${singBoxSubscribe}"; then
             padmRemoveCleanupPath "${stageDir}"
             return 1
         fi
+        successCard "clashMeta订阅 ${remoteUrl}:${email} 更新成功"
+        successCard "通用订阅 ${remoteUrl}:${email} 更新成功"
+        successCard "sing-box订阅 ${remoteUrl}:${email} 更新成功"
+        validSourceCount=$((validSourceCount + 1))
         rm -f "${clashFile}" "${defaultFile}" "${singBoxFile}"
     done <<<"${sourceLines}"
+
+    if ((validSourceCount == 0)); then
+        padmRemoveCleanupPath "${stageDir}"
+        return 2
+    fi
 
     padmEnsureSafeDirectory "${publicBase}/default" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
     padmEnsureSafeDirectory "${publicBase}/clashMeta" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
