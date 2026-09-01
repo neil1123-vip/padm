@@ -14,6 +14,7 @@ runRegressionUiSmokeSuiteRoot() {
     resetMenuActions() {
         actions=
     }
+    eval "$(declare -f selectCoreInstall | sed '1s/^selectCoreInstall /originalSelectCoreInstall /')"
     menu() { recordMenuAction menu; }
     menuLine() { output+="$*"$'\n'; }
     menuItem() { output+="$2 $3"$'\n'; }
@@ -43,6 +44,20 @@ runRegressionUiSmokeSuiteRoot() {
     assertMenuAction selectCoreInstall
     grep -q "不知道怎么选时，建议直接选 1" <<<"${output}"
     grep -q "entry 是客户端连接地址" <<<"${output}"
+
+    (
+        local menuRenderLog="${TMP_DIR}/core-select-menu-render.log"
+        echoContent() { printf '%s\n' "$*" >>"${menuRenderLog}"; }
+        xrayCoreInstall() { recordMenuAction xrayCoreInstall; }
+        singBoxInstall() { recordMenuAction singBoxInstall; }
+        selectInstallType=1
+        : >"${menuRenderLog}"
+        resetMenuActions
+        originalSelectCoreInstall <<< $'bad\n1'
+        assertMenuAction 'errorCard:选择错误'
+        assertMenuAction xrayCoreInstall
+        [[ "$(wc -l <"${menuRenderLog}")" == "2" ]]
+    )
 
     (
         local menuRenderLog="${TMP_DIR}/install-menu-render.log"

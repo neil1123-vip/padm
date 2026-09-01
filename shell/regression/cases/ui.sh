@@ -996,7 +996,7 @@ runCoreSelectionRetryActionRegression() (
     local actions=
     local -a expectedCounts=(
         'shell/core/menu.sh|0'
-        'shell/core/cores.sh|1'
+        'shell/core/cores.sh|0'
         'shell/core/routing_access_control.sh|0'
         'shell/core/manage.sh|18'
         'shell/core/fail2ban.sh|1'
@@ -1007,7 +1007,6 @@ runCoreSelectionRetryActionRegression() (
         'shell/core/routing_ipv6.sh|0'
     )
     local -a expectedPatterns=(
-        'shell/core/cores.sh|coreSelectionRetryAction selectCoreInstall'
         'shell/core/manage.sh|coreSelectionRetryAction manageTraditionalTlsFallback "$@"'
         'shell/core/manage.sh|coreSelectionRetryAction checkBTPanel'
         'shell/core/manage.sh|coreSelectionRetryAction manageXHTTPPresets'

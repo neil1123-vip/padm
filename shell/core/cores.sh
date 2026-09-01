@@ -2412,34 +2412,39 @@ customSingBoxInstall() {
 # 选择核心安装 sing-box 或 Xray-core
 selectCoreInstall() {
     progressCard "1" "选择核心安装"
-    echoContent title "\n┌─ 选择核心 ─────────────────────────────────────────"
-    menuRecommendedItem 1 "Xray-core" "推荐新人优先选择，Reality Vision 与 Reality XHTTP 场景验证最多"
-    menuItem 2 "sing-box" "适合 Hysteria2、Tuic、Naive、AnyTLS 或统一 sing-box 配置"
-    menuClose
-    autoRead core "请选择:" selectCoreType
-    case ${selectCoreType} in
-    1)
-        if [[ "${selectInstallType}" == "1" ]]; then
-            xrayCoreInstall
-        elif [[ "${selectInstallType}" == "2" ]]; then
-            customXrayInstall || return $?
-        elif [[ "${selectInstallType}" == "3" ]]; then
-            installXrayReality
-        fi
-        ;;
-    2)
-        if [[ "${selectInstallType}" == "1" ]]; then
-            singBoxInstall
-        elif [[ "${selectInstallType}" == "2" ]]; then
-            customSingBoxInstall || return $?
-        elif [[ "${selectInstallType}" == "3" ]]; then
-            installSingBoxReality
-        fi
-        ;;
-    *)
-        coreSelectionRetryAction selectCoreInstall
-        ;;
-    esac
+    while true; do
+        echoContent title "\n┌─ 选择核心 ─────────────────────────────────────────"
+        menuRecommendedItem 1 "Xray-core" "推荐新人优先选择，Reality Vision 与 Reality XHTTP 场景验证最多"
+        menuItem 2 "sing-box" "适合 Hysteria2、Tuic、Naive、AnyTLS 或统一 sing-box 配置"
+        menuClose
+        selectCoreType=
+        autoRead core "请选择:" selectCoreType || return 0
+        case "${selectCoreType}" in
+        1)
+            if [[ "${selectInstallType}" == "1" ]]; then
+                xrayCoreInstall
+            elif [[ "${selectInstallType}" == "2" ]]; then
+                customXrayInstall || return $?
+            elif [[ "${selectInstallType}" == "3" ]]; then
+                installXrayReality
+            fi
+            return $?
+            ;;
+        2)
+            if [[ "${selectInstallType}" == "1" ]]; then
+                singBoxInstall
+            elif [[ "${selectInstallType}" == "2" ]]; then
+                customSingBoxInstall || return $?
+            elif [[ "${selectInstallType}" == "3" ]]; then
+                installSingBoxReality
+            fi
+            return $?
+            ;;
+        *)
+            coreSelectionErrorCard "选择错误"
+            ;;
+        esac
+    done
 }
 
 
