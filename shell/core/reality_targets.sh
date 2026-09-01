@@ -664,25 +664,40 @@ removeRealityTargetsFromUnifiedLibrary() {
 
 sortedRealityTargetResults() {
     local score=${1:-A}
-    local resultsFile line target parsed host
+    local resultsFile
     resultsFile=$(realityTargetManagedResultsFile) || return 1
     [[ -f "${resultsFile}" ]] || return 1
-    while IFS= read -r line; do
-        target=${line%%$'\t'*}
-        parsed=$(parseHostPort "${target}" 443)
-        host=${parsed%:*}
-        realityTargetCandidateBlocked "${host}" && continue
-        printf '%s\n' "${line}"
-    done < <(
-        awk -F'\t' -v score="${score}" '
-          $5 == "no" && $10 == score {
-            networkRank = ($9 == "same_asn" ? 4 : ($9 == "same_provider" ? 3 : ($9 == "different_network" ? 2 : 1)))
-            certRank = ($12 ~ /^[0-9]+$/ ? $12 : 0)
-            checked = ($14 ~ /^[0-9]+$/ ? $14 : 0)
-            printf "%d\t%d\t%d\t%s\n", networkRank, certRank, checked, $0
-          }
-        ' "${resultsFile}" | sort -t $'\t' -k1,1nr -k2,2nr -k3,3nr | cut -f4-
-    )
+    awk -F'\t' -v score="${score}" '
+      function blockedHost(host, i, blocked, normalized, suffix) {
+        host = tolower(host)
+        for (i = 1; i <= blockedCount; i++) {
+          blocked = blockedHosts[i]
+          normalized = blocked
+          sub(/^www\./, "", normalized)
+          if (host == blocked || host == normalized) return 1
+          suffix = "." normalized
+          if (length(host) > length(suffix) && substr(host, length(host) - length(suffix) + 1) == suffix) return 1
+          suffix = "." blocked
+          if (length(host) > length(suffix) && substr(host, length(host) - length(suffix) + 1) == suffix) return 1
+        }
+        return 0
+      }
+      FILENAME == ARGV[1] {
+        split($0, parts, "[|]")
+        if (parts[1] != "") blockedHosts[++blockedCount] = tolower(parts[1])
+        next
+      }
+      {
+        target = $1
+        sub(/:[^:]*$/, "", target)
+        if ($5 == "no" && $10 == score && !blockedHost(target)) {
+          networkRank = ($9 == "same_asn" ? 4 : ($9 == "same_provider" ? 3 : ($9 == "different_network" ? 2 : 1)))
+          certRank = ($12 ~ /^[0-9]+$/ ? $12 : 0)
+          checked = ($14 ~ /^[0-9]+$/ ? $14 : 0)
+          printf "%d\t%d\t%d\t%s\n", networkRank, certRank, checked, $0
+        }
+      }
+    ' <(realityTargetBlockedCandidates) "${resultsFile}" | sort -t $'\t' -k1,1nr -k2,2nr -k3,3nr | cut -f4-
 }
 
 bestScannedRealityTargetLine() {
@@ -2757,7 +2772,10 @@ showRealityTargetScanResults() {
     local mode=${2:-interactive}
     local page=${3:-1} pageSize=${REALITY_TARGET_RESULT_PAGE_SIZE:-10} total maxPage choice
     local line itemIndex=0 pageIndex=1 start end target sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note checkedTime titleFilter selectedLine selectedTarget selectedSni parsed absoluteIndex
-    if [[ "$(realityTargetResultCount)" -eq 0 ]]; then
+    local -a sortedResults=()
+    # Keep one sorted snapshot while paging; results change only after leaving this menu.
+    mapfile -t sortedResults < <(sortedRealityTargetResults)
+    if [[ "${#sortedResults[@]}" -eq 0 ]]; then
         realityTargetStatusBlock yellow "REALITY A 级目标" "暂无 A 级目标"
         return 1
     fi
@@ -2766,10 +2784,10 @@ showRealityTargetScanResults() {
     fi
     while true; do
         total=0
-        while IFS= read -r line; do
+        for line in "${sortedResults[@]}"; do
             IFS=$'\t' read -r _target _sni _name category _cdnRisk _ip _asn _asOrg networkMatch score _pqc _certLength _tls13 _checkedAt _note <<<"${line}"
             realityTargetScanResultFilterMatches "${score}" "${networkMatch}" "${filter}" "${category}" && total=$((total + 1))
-        done < <(sortedRealityTargetResults)
+        done
         maxPage=$(( (total + pageSize - 1) / pageSize ))
         (( maxPage < 1 )) && maxPage=1
         (( page > maxPage )) && page=${maxPage}
@@ -2781,7 +2799,7 @@ showRealityTargetScanResults() {
         menuLine "筛选条件：${filter}；第 ${page}/${maxPage} 页；总数：${total}；n 下一页；p 上一页；f 重新筛选；r 返回"
         itemIndex=0
         pageIndex=1
-        while IFS= read -r line; do
+        for line in "${sortedResults[@]}"; do
             IFS=$'\t' read -r target sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note <<<"${line}"
             realityTargetScanResultFilterMatches "${score}" "${networkMatch}" "${filter}" "${category}" || continue
             itemIndex=$((itemIndex + 1))
@@ -2792,7 +2810,7 @@ showRealityTargetScanResults() {
             menuLine "    name=${name} category=${category}"
             [[ -n "${note}" ]] && menuLine "    ${note}"
             pageIndex=$((pageIndex + 1))
-        done < <(sortedRealityTargetResults)
+        done
         [[ "${total}" == "0" ]] && menuLine "当前筛选没有 A 级目标"
         menuClose
         if [[ "${mode}" == "once" ]]; then
@@ -2817,10 +2835,21 @@ showRealityTargetScanResults() {
         *)
             if [[ "${choice}" =~ ^[0-9]+$ ]]; then
                 absoluteIndex=$(( (page - 1) * pageSize + choice ))
-                selectedLine=$(realityTargetResultLineByFilteredIndex "${filter}" "${absoluteIndex}") || {
+                selectedLine=
+                itemIndex=0
+                for line in "${sortedResults[@]}"; do
+                    IFS=$'\t' read -r _target _sni _name category _cdnRisk _ip _asn _asOrg networkMatch score _pqc _certLength _tls13 _checkedAt _note <<<"${line}"
+                    realityTargetScanResultFilterMatches "${score}" "${networkMatch}" "${filter}" "${category}" || continue
+                    itemIndex=$((itemIndex + 1))
+                    if [[ "${itemIndex}" == "${absoluteIndex}" ]]; then
+                        selectedLine=${line}
+                        break
+                    fi
+                done
+                if [[ -z "${selectedLine}" ]]; then
                     errorCard "本页编号无效，请重新选择"
                     continue
-                }
+                fi
                 selectedTarget=$(realityTargetResultField "${selectedLine}" 1)
                 selectedSni=$(realityTargetResultField "${selectedLine}" 2)
                 parsed=$(parseHostPort "${selectedTarget}" 443)

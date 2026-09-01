@@ -286,6 +286,30 @@ EOF
     [[ "$(realityTargetRefreshRecords all | wc -l | tr -d ' ')" == "5" ]]
     grep -qF $'fixture-asia.example.com:443\t' <<<"$(realityTargetRefreshRecords all)"
     (
+        local option5ResultsFile="${TMP_DIR}/reality-option5-results.tsv"
+        local option5SortCallsFile="${TMP_DIR}/reality-option5-sort-calls.log"
+        local option5BlockedCallsFile="${TMP_DIR}/reality-option5-blocked-calls.log"
+        export PADM_REALITY_TARGET_RESULTS_FILE="${option5ResultsFile}"
+        export PADM_REALITY_TARGET_SCAN_FILE="${option5ResultsFile}"
+        : >"${option5SortCallsFile}"
+        : >"${option5BlockedCallsFile}"
+        formatRealityTargetResultLine "option5-a.example.com:443" "option5-a.example.com" "Option 5 A" "test" "no" "192.0.2.44" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "cached" >"${option5ResultsFile}"
+        formatRealityTargetResultLine "option5-b.example.com:443" "option5-b.example.com" "Option 5 B" "test" "no" "192.0.2.45" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "cached" >>"${option5ResultsFile}"
+        eval "$(declare -f sortedRealityTargetResults | sed "1s/^sortedRealityTargetResults/originalSortedRealityTargetResults/")"
+        eval "$(declare -f realityTargetBlockedCandidates | sed "1s/^realityTargetBlockedCandidates/originalRealityTargetBlockedCandidates/")"
+        sortedRealityTargetResults() {
+            printf 'sorted\n' >>"${option5SortCallsFile}"
+            originalSortedRealityTargetResults
+        }
+        realityTargetBlockedCandidates() {
+            printf 'blocked\n' >>"${option5BlockedCallsFile}"
+            originalRealityTargetBlockedCandidates
+        }
+        showRealityTargetScanResults all interactive <<<"r" >/dev/null
+        [[ "$(wc -l <"${option5SortCallsFile}" | tr -d ' ')" == "1" ]]
+        [[ "$(wc -l <"${option5BlockedCallsFile}" | tr -d ' ')" == "1" ]]
+    )
+    (
         local relativeResultsRoot="${TMP_DIR}/reality-relative-results"
         mkdir -p "${relativeResultsRoot}/child"
         formatRealityTargetResultLine "safe.example.com:443" "safe.example.com" "Safe" "test" "no" "192.0.2.47" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567894" "managed path fixture" >"${relativeResultsRoot}/results.tsv"
