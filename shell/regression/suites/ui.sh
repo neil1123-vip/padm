@@ -18,6 +18,18 @@ runRegressionUiSmokeSuiteRoot() {
     eval "$(declare -f manageCDN | sed '1s/^manageCDN /originalManageCDN /')"
     eval "$(declare -f manageHysteria | sed '1s/^manageHysteria /originalManageHysteria /')"
     eval "$(declare -f manageTuic | sed '1s/^manageTuic /originalManageTuic /')"
+    eval "$(declare -f manageXHTTP | sed '1s/^manageXHTTP /originalManageXHTTP /')"
+    eval "$(declare -f manageXHTTPNormal | sed '1s/^manageXHTTPNormal /originalManageXHTTPNormal /')"
+    eval "$(declare -f manageXHTTPAdvanced | sed '1s/^manageXHTTPAdvanced /originalManageXHTTPAdvanced /')"
+    eval "$(declare -f manageXHTTPExperiment | sed '1s/^manageXHTTPExperiment /originalManageXHTTPExperiment /')"
+    eval "$(declare -f manageXHTTPPresets | sed '1s/^manageXHTTPPresets /originalManageXHTTPPresets /')"
+    eval "$(declare -f manageXHTTPMode | sed '1s/^manageXHTTPMode /originalManageXHTTPMode /')"
+    eval "$(declare -f manageXHTTPXmux | sed '1s/^manageXHTTPXmux /originalManageXHTTPXmux /')"
+    eval "$(declare -f manageVlessEncryptionExperiment | sed '1s/^manageVlessEncryptionExperiment /originalManageVlessEncryptionExperiment /')"
+    eval "$(declare -f manageTraditionalTlsFallback | sed '1s/^manageTraditionalTlsFallback /originalManageTraditionalTlsFallback /')"
+    eval "$(declare -f manageTraditionalTlsStaticSite | sed '1s/^manageTraditionalTlsStaticSite /originalManageTraditionalTlsStaticSite /')"
+    eval "$(declare -f manageTraditionalTlsRedirect | sed '1s/^manageTraditionalTlsRedirect /originalManageTraditionalTlsRedirect /')"
+    eval "$(declare -f setTraditionalTlsAlpnManual | sed '1s/^setTraditionalTlsAlpnManual /originalSetTraditionalTlsAlpnManual /')"
     menu() { recordMenuAction menu; }
     menuLine() { output+="$*"$'\n'; }
     menuItem() { output+="$2 $3"$'\n'; }
@@ -123,6 +135,78 @@ runRegressionUiSmokeSuiteRoot() {
         assertMenuAction 'errorCard:选择错误'
         [[ "$(wc -l <"${menuRenderLog}")" == "2" ]]
         singBoxConfigPath="${oldSingBoxConfigPath}"
+    )
+
+    (
+        local menuRenderLog="${TMP_DIR}/xhttp-menu-render.log"
+        local oldCoreInstallType="${coreInstallType:-}"
+        echoContent() { printf '%s\n' "$*" >>"${menuRenderLog}"; }
+        readInstallType() { :; }
+        readInstallProtocolType() { :; }
+        currentProtocolHas() { return 0; }
+        xhttpSettingsSummary() { :; }
+        setXHTTPPreset() { recordMenuAction "setXHTTPPreset:$*"; }
+        setXHTTPMode() { recordMenuAction "setXHTTPMode:$*"; }
+        setXHTTPCustomXmux() { recordMenuAction setXHTTPCustomXmux; }
+        setXHTTPPathHost() { recordMenuAction setXHTTPPathHost; }
+        setXHTTPAdvancedParams() { recordMenuAction setXHTTPAdvancedParams; }
+        setXHTTPRecommendedDefaults() { recordMenuAction setXHTTPRecommendedDefaults; }
+        setXHTTPDownloadSettings() { recordMenuAction setXHTTPDownloadSettings; }
+        disableXHTTPDownloadSettings() { recordMenuAction disableXHTTPDownloadSettings; }
+        protocolEntryMenu() { recordMenuAction protocolEntryMenu; }
+        coreInstallType=1
+
+        runMenuLoopSmoke() {
+            local handler=$1
+            local input=$2
+            : >"${menuRenderLog}"
+            resetMenuActions
+            "${handler}" <<<"${input}"
+            assertMenuAction 'errorCard:选择错误'
+            [[ "$(wc -l <"${menuRenderLog}")" == "2" ]]
+        }
+        runMenuLoopSmoke originalManageXHTTP $'bad\n5'
+        ! assertMenuAction protocolEntryMenu
+        runMenuLoopSmoke originalManageXHTTPNormal $'bad\n5'
+        runMenuLoopSmoke originalManageXHTTPAdvanced $'bad\n5'
+        runMenuLoopSmoke originalManageXHTTPExperiment $'bad\n3'
+        runMenuLoopSmoke originalManageXHTTPPresets $'bad\n5'
+        runMenuLoopSmoke originalManageXHTTPMode $'bad\n4'
+        runMenuLoopSmoke originalManageXHTTPXmux $'bad\n4'
+        coreInstallType="${oldCoreInstallType}"
+    )
+
+    (
+        local menuRenderLog="${TMP_DIR}/legacy-menu-render.log"
+        local oldCoreInstallType="${coreInstallType:-}"
+        local oldNginxStaticPath="${nginxStaticPath:-}"
+        echoContent() {
+            [[ "$*" == *"┌─"* ]] && printf '%s\n' "$*" >>"${menuRenderLog}"
+            return 0
+        }
+        readInstallType() { :; }
+        readInstallProtocolType() { :; }
+        currentProtocolHas() { return 0; }
+        vlessEncryptionStateSummary() { :; }
+        coreInstallType=1
+        nginxStaticPath=/tmp
+
+        runMenuLoopSmoke() {
+            local handler=$1
+            local input=$2
+            : >"${menuRenderLog}"
+            resetMenuActions
+            "${handler}" 1 <<<"${input}"
+            assertMenuAction 'errorCard:选择错误'
+            [[ "$(wc -l <"${menuRenderLog}")" == "2" ]]
+        }
+        runMenuLoopSmoke originalManageVlessEncryptionExperiment $'bad\n3'
+        runMenuLoopSmoke originalManageTraditionalTlsFallback $'bad\n7'
+        runMenuLoopSmoke originalManageTraditionalTlsStaticSite $'bad\n21'
+        runMenuLoopSmoke originalManageTraditionalTlsRedirect $'bad\n3'
+        runMenuLoopSmoke originalSetTraditionalTlsAlpnManual $'bad\n4'
+        coreInstallType="${oldCoreInstallType}"
+        nginxStaticPath="${oldNginxStaticPath}"
     )
 
     (

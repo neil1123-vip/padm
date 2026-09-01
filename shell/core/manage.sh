@@ -416,42 +416,47 @@ setVlessRealityEncryption() {
 }
 
 manageVlessEncryptionExperiment() {
-    readInstallType
-    readInstallProtocolType
-    echoContent title "\n┌─ VLESS Encryption 实验功能 ─────────────────────────"
-    menuLine "最佳性能组合：Reality Vision 使用 VLESS Encryption + XTLS Vision"
-    menuLine "CDN 场景：Reality XHTTP 使用 VLESS Encryption + XTLS Vision + XHTTP XMUX"
-    menuLine "启用后可能只有部分客户端可用；需 Mihomo v1.19.13+，sing-box 暂不支持"
-    menuLine "默认推荐仍是 Reality Vision，不建议新手启用"
-    vlessEncryptionStateSummary
-    menuDangerItem 1 "启用实验开关" "优先应用到 Reality XHTTP，否则应用到 Reality Vision"
-    menuItem 2 "关闭实验开关" "恢复 decryption=none 并删除实验订阅参数"
-    menuReturnItem 3 "返回主菜单" "回到 padm 管理面板"
-    echoContent title "└──────────────────────────────────────────────────"
-    autoRead vless_encryption_menu "请选择:" selectVlessEncryptionMenu
-    case ${selectVlessEncryptionMenu} in
-    1)
-        warnCard \
-            "这是实验功能，可能只有部分客户端可用" \
-            "启用后 default VLESS 链接和 Mihomo 订阅会携带 encryption 参数" \
-            "需 Mihomo v1.19.13+；sing-box 订阅因上游不支持仍省略"
-        autoConfirm vless_encryption_confirm "确认承担兼容性风险并启用 VLESS Encryption？" n confirmVlessEncryption
-        if [[ "${confirmVlessEncryption}" == "y" ]]; then
-            setVlessRealityEncryption enable && successCard "VLESS Encryption 实验开关已启用"
-        else
-            coreCancelledStatusCard "操作未执行"
-        fi
-        ;;
-    2)
-        setVlessRealityEncryption disable && successCard "VLESS Encryption 实验开关已关闭"
-        ;;
-    3)
-        return 0
-        ;;
-    *)
-        coreSelectionRetryAction manageVlessEncryptionExperiment
-        ;;
-    esac
+    local selectVlessEncryptionMenu confirmVlessEncryption
+    while true; do
+        readInstallType
+        readInstallProtocolType
+        echoContent title "\n┌─ VLESS Encryption 实验功能 ─────────────────────────"
+        menuLine "最佳性能组合：Reality Vision 使用 VLESS Encryption + XTLS Vision"
+        menuLine "CDN 场景：Reality XHTTP 使用 VLESS Encryption + XTLS Vision + XHTTP XMUX"
+        menuLine "启用后可能只有部分客户端可用；需 Mihomo v1.19.13+，sing-box 暂不支持"
+        menuLine "默认推荐仍是 Reality Vision，不建议新手启用"
+        vlessEncryptionStateSummary
+        menuDangerItem 1 "启用实验开关" "优先应用到 Reality XHTTP，否则应用到 Reality Vision"
+        menuItem 2 "关闭实验开关" "恢复 decryption=none 并删除实验订阅参数"
+        menuReturnItem 3 "返回主菜单" "回到 padm 管理面板"
+        echoContent title "└──────────────────────────────────────────────────"
+        selectVlessEncryptionMenu=
+        autoRead vless_encryption_menu "请选择:" selectVlessEncryptionMenu || return 0
+        case "${selectVlessEncryptionMenu}" in
+        1)
+            warnCard \
+                "这是实验功能，可能只有部分客户端可用" \
+                "启用后 default VLESS 链接和 Mihomo 订阅会携带 encryption 参数" \
+                "需 Mihomo v1.19.13+；sing-box 订阅因上游不支持仍省略"
+            confirmVlessEncryption=
+            autoConfirm vless_encryption_confirm "确认承担兼容性风险并启用 VLESS Encryption？" n confirmVlessEncryption
+            if [[ "${confirmVlessEncryption}" == "y" ]]; then
+                setVlessRealityEncryption enable && successCard "VLESS Encryption 实验开关已启用" || true
+            else
+                coreCancelledStatusCard "操作未执行"
+            fi
+            ;;
+        2)
+            setVlessRealityEncryption disable && successCard "VLESS Encryption 实验开关已关闭" || true
+            ;;
+        3)
+            return 0
+            ;;
+        *)
+            coreSelectionErrorCard "选择错误"
+            ;;
+        esac
+    done
 }
 
 panelCertDomainList() {
@@ -738,55 +743,43 @@ cleanUp() {
 manageTraditionalTlsFallback() {
     if [[ "${coreInstallType}" == "2" ]]; then
         errorCard "此功能仅支持 Xray-core 内核"
-        exit 0
+        return 1
     fi
 
     progressCard "$1" "传统 TLS fallback 维护"
 
     if ! currentProtocolHas 27 || [[ -z "${coreInstallType}" ]]; then
         errorCard "请先安装 Xray-core 的 27.VLESS TCP TLS Vision"
-        exit 0
+        return 1
     fi
 
-    echoContent title "\n┌─ 传统 TLS fallback 维护 ───────────────────────────"
-    menuLine "仅用于传统 TLS fallback / WS / gRPC / Trojan 兼容维护"
-    menuLine "Reality Vision / Reality XHTTP 不依赖此处 ALPN 或静态站点"
-    menuRecommendedItem 1 "重建 fallback 配置" "alone.conf 缺失或不完整时重建 Nginx 承接层"
-    menuItem 2 "更换静态站点" "更换本机 Nginx fallback 页面"
-    menuItem 3 "302 重定向管理" "添加或移除 fallback 根路由重定向"
-    menuItem 4 "ALPN 诊断" "检查 h2 fallback、ALPN 与 Nginx 承接层是否匹配"
-    menuRecommendedItem 5 "修复为推荐 ALPN" "存在 h2 fallback 时设置 h2,http/1.1"
-    menuItem 6 "手动设置 ALPN" "兼容排障时手动调整 ALPN 顺序"
-    menuReturnItem 7 "返回站点与证书" "回到上级菜单"
-    menuClose
-    autoRead traditional_tls_menu "请选择:" selectTraditionalTlsMenu
+    local selectTraditionalTlsMenu=
+    while true; do
+        echoContent title "\n┌─ 传统 TLS fallback 维护 ───────────────────────────"
+        menuLine "仅用于传统 TLS fallback / WS / gRPC / Trojan 兼容维护"
+        menuLine "Reality Vision / Reality XHTTP 不依赖此处 ALPN 或静态站点"
+        menuRecommendedItem 1 "重建 fallback 配置" "alone.conf 缺失或不完整时重建 Nginx 承接层"
+        menuItem 2 "更换静态站点" "更换本机 Nginx fallback 页面"
+        menuItem 3 "302 重定向管理" "添加或移除 fallback 根路由重定向"
+        menuItem 4 "ALPN 诊断" "检查 h2 fallback、ALPN 与 Nginx 承接层是否匹配"
+        menuRecommendedItem 5 "修复为推荐 ALPN" "存在 h2 fallback 时设置 h2,http/1.1"
+        menuItem 6 "手动设置 ALPN" "兼容排障时手动调整 ALPN 顺序"
+        menuReturnItem 7 "返回站点与证书" "回到上级菜单"
+        menuClose
+        selectTraditionalTlsMenu=
+        autoRead traditional_tls_menu "请选择:" selectTraditionalTlsMenu || return 0
 
-    case "${selectTraditionalTlsMenu}" in
-    1)
-        ensureTraditionalTlsFallbackNginxConfig
-        ;;
-    2)
-        manageTraditionalTlsStaticSite
-        ;;
-    3)
-        manageTraditionalTlsRedirect
-        ;;
-    4)
-        diagnoseTraditionalTlsAlpn
-        ;;
-    5)
-        repairTraditionalTlsAlpn
-        ;;
-    6)
-        setTraditionalTlsAlpnManual
-        ;;
-    7)
-        siteCertificateMenu
-        ;;
-    *)
-        coreSelectionRetryAction manageTraditionalTlsFallback "$@"
-        ;;
-    esac
+        case "${selectTraditionalTlsMenu}" in
+        1) ensureTraditionalTlsFallbackNginxConfig || true ;;
+        2) manageTraditionalTlsStaticSite || true ;;
+        3) manageTraditionalTlsRedirect || true ;;
+        4) diagnoseTraditionalTlsAlpn || true ;;
+        5) repairTraditionalTlsAlpn || true ;;
+        6) setTraditionalTlsAlpnManual || true ;;
+        7) return 0 ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
 }
 
 traditionalTlsFallbackConfigFile() {
@@ -826,100 +819,106 @@ traditionalTlsCurrentAlpn() {
 }
 
 manageTraditionalTlsStaticSite() {
-    echoContent title "\n┌─ 传统 TLS fallback 静态站点 ───────────────────────"
-    menuLine "未命中代理协议时展示本机静态页面"
-    menuLine "如需自定义，请手动复制模板文件到 ${nginxStaticPath}"
-    menuItem 1 "现代引导页" "站点模板 1"
-    menuItem 2 "游戏工作室" "站点模板 2"
-    menuItem 3 "个人笔记" "站点模板 3"
-    menuItem 4 "商务服务" "站点模板 4"
-    menuItem 5 "媒体工具" "站点模板 5"
-    menuItem 6 "互动节奏页" "站点模板 6"
-    menuItem 7 "制造企业" "站点模板 7"
-    menuItem 8 "作品集展示" "站点模板 8"
-    menuItem 9 "本地404页面" "站点模板 9"
-    menuItem 10 "服务状态页" "站点模板 10"
-    menuItem 11 "文档索引" "站点模板 11"
-    menuItem 12 "产品简介" "站点模板 12"
-    menuItem 13 "研究实验室" "站点模板 13"
-    menuItem 14 "社区主页" "站点模板 14"
-    menuItem 15 "旅行札记" "站点模板 15"
-    menuItem 16 "食谱收藏" "站点模板 16"
-    menuItem 17 "图片日志" "站点模板 17"
-    menuItem 18 "学习中心" "站点模板 18"
-    menuItem 19 "活动页面" "站点模板 19"
-    menuItem 20 "团队介绍" "站点模板 20"
-    menuReturnItem 21 "返回" "回到传统 TLS fallback 维护"
-    menuClose
-    autoRead nginx_blog_menu "请选择:" selectInstallNginxBlogType
+    local selectInstallNginxBlogType=
+    while true; do
+        echoContent title "\n┌─ 传统 TLS fallback 静态站点 ───────────────────────"
+        menuLine "未命中代理协议时展示本机静态页面"
+        menuLine "如需自定义，请手动复制模板文件到 ${nginxStaticPath}"
+        menuItem 1 "现代引导页" "站点模板 1"
+        menuItem 2 "游戏工作室" "站点模板 2"
+        menuItem 3 "个人笔记" "站点模板 3"
+        menuItem 4 "商务服务" "站点模板 4"
+        menuItem 5 "媒体工具" "站点模板 5"
+        menuItem 6 "互动节奏页" "站点模板 6"
+        menuItem 7 "制造企业" "站点模板 7"
+        menuItem 8 "作品集展示" "站点模板 8"
+        menuItem 9 "本地404页面" "站点模板 9"
+        menuItem 10 "服务状态页" "站点模板 10"
+        menuItem 11 "文档索引" "站点模板 11"
+        menuItem 12 "产品简介" "站点模板 12"
+        menuItem 13 "研究实验室" "站点模板 13"
+        menuItem 14 "社区主页" "站点模板 14"
+        menuItem 15 "旅行札记" "站点模板 15"
+        menuItem 16 "食谱收藏" "站点模板 16"
+        menuItem 17 "图片日志" "站点模板 17"
+        menuItem 18 "学习中心" "站点模板 18"
+        menuItem 19 "活动页面" "站点模板 19"
+        menuItem 20 "团队介绍" "站点模板 20"
+        menuReturnItem 21 "返回" "回到传统 TLS fallback 维护"
+        menuClose
+        selectInstallNginxBlogType=
+        autoRead nginx_blog_menu "请选择:" selectInstallNginxBlogType || return 0
 
-    if [[ "${selectInstallNginxBlogType}" =~ ^([1-9]|1[0-9]|20)$ ]]; then
-        installNginxStaticTemplate "${selectInstallNginxBlogType}"
-        successCard "更换传统 TLS fallback 静态站点成功"
-    elif [[ "${selectInstallNginxBlogType}" == "21" ]]; then
-        manageTraditionalTlsFallback
-    else
-        coreSelectionRetryAction manageTraditionalTlsStaticSite
-    fi
+        if [[ "${selectInstallNginxBlogType}" =~ ^([1-9]|1[0-9]|20)$ ]]; then
+            installNginxStaticTemplate "${selectInstallNginxBlogType}" || true
+            successCard "更换传统 TLS fallback 静态站点成功"
+        elif [[ "${selectInstallNginxBlogType}" == "21" ]]; then
+            return 0
+        else
+            coreSelectionErrorCard "选择错误"
+        fi
+    done
 }
 
 manageTraditionalTlsRedirect() {
-    echoContent title "\n┌─ 302 重定向管理 ───────────────────────────────────"
-    menuLine "重定向优先级更高；配置后根路由静态站点将不起作用"
-    menuLine "如想恢复静态站点展示，需要先删除 302 重定向配置"
-    menuItem 1 "添加" "写入 302 重定向目标"
-    menuItem 2 "删除" "移除当前 302 重定向"
-    menuReturnItem 3 "返回" "回到传统 TLS fallback 维护"
-    menuClose
-    autoRead nginx_redirect_menu "请选择:" redirectStatus
+    local redirectStatus=
+    while true; do
+        echoContent title "\n┌─ 302 重定向管理 ───────────────────────────────────"
+        menuLine "重定向优先级更高；配置后根路由静态站点将不起作用"
+        menuLine "如想恢复静态站点展示，需要先删除 302 重定向配置"
+        menuItem 1 "添加" "写入 302 重定向目标"
+        menuItem 2 "删除" "移除当前 302 重定向"
+        menuReturnItem 3 "返回" "回到传统 TLS fallback 维护"
+        menuClose
+        redirectStatus=
+        autoRead nginx_redirect_menu "请选择:" redirectStatus || return 0
 
-    if [[ "${redirectStatus}" == "1" ]]; then
-        if ! ensureTraditionalTlsFallbackNginxConfig; then
-            return 1
-        fi
-        backupNginxConfig backup || return 1
-        autoRead redirect_domain "请输入要重定向的域名,例如 https://www.baidu.com:" redirectDomain
-        if ! removeNginx302 || ! addNginx302 "${redirectDomain}"; then
-            backupNginxConfig restoreBackup
-            return 1
-        fi
-        serviceQueueRefresh nginx
-        if ! serviceQueueApply; then
-            backupNginxConfig restoreBackup || return 1
+        if [[ "${redirectStatus}" == "1" ]]; then
+            if ! ensureTraditionalTlsFallbackNginxConfig; then
+                return 1
+            fi
+            backupNginxConfig backup || return 1
+            autoRead redirect_domain "请输入要重定向的域名,例如 https://www.baidu.com:" redirectDomain
+            if ! removeNginx302 || ! addNginx302 "${redirectDomain}"; then
+                backupNginxConfig restoreBackup
+                return 1
+            fi
             serviceQueueRefresh nginx
-            serviceQueueApply || return 1
-            return 1
-        fi
-        if [[ -z $(pgrep -f "nginx") ]]; then
-            backupNginxConfig restoreBackup
+            if ! serviceQueueApply; then
+                backupNginxConfig restoreBackup || return 1
+                serviceQueueRefresh nginx
+                serviceQueueApply || return 1
+                return 1
+            fi
+            if [[ -z $(pgrep -f "nginx") ]]; then
+                backupNginxConfig restoreBackup
+                serviceQueueRefresh nginx
+                serviceQueueApply || return 1
+                return 1
+            fi
+            if ! checkNginx302; then
+                return 1
+            fi
+        elif [[ "${redirectStatus}" == "2" ]]; then
+            if ! ensureTraditionalTlsFallbackNginxConfig; then
+                return 1
+            fi
+            backupNginxConfig backup || return 1
+            removeNginx302 || return 1
             serviceQueueRefresh nginx
-            serviceQueueApply || return 1
-            return 1
+            if ! serviceQueueApply; then
+                backupNginxConfig restoreBackup || return 1
+                serviceQueueRefresh nginx
+                serviceQueueApply || return 1
+                return 1
+            fi
+            successCard "移除302重定向成功"
+        elif [[ "${redirectStatus}" == "3" ]]; then
+            return 0
+        else
+            coreSelectionErrorCard "选择错误"
         fi
-        if ! checkNginx302; then
-            return 1
-        fi
-        exit 0
-    elif [[ "${redirectStatus}" == "2" ]]; then
-        if ! ensureTraditionalTlsFallbackNginxConfig; then
-            return 1
-        fi
-        backupNginxConfig backup || return 1
-        removeNginx302 || return 1
-        serviceQueueRefresh nginx
-        if ! serviceQueueApply; then
-            backupNginxConfig restoreBackup || return 1
-            serviceQueueRefresh nginx
-            serviceQueueApply || return 1
-            return 1
-        fi
-        successCard "移除302重定向成功"
-        exit 0
-    elif [[ "${redirectStatus}" == "3" ]]; then
-        manageTraditionalTlsFallback
-    else
-        coreSelectionRetryAction manageTraditionalTlsRedirect
-    fi
+    done
 }
 
 diagnoseTraditionalTlsAlpn() {
@@ -1028,31 +1027,25 @@ repairTraditionalTlsAlpn() {
 }
 
 setTraditionalTlsAlpnManual() {
-    echoContent title "\n┌─ 手动设置 ALPN ────────────────────────────────────"
-    menuLine "仅用于传统 TLS fallback 兼容排障"
-    menuRecommendedItem 1 "h2,http/1.1" "推荐用于存在 h2 fallback/gRPC 的场景"
-    menuItem 2 "http/1.1,h2" "旧客户端兼容排障"
-    menuItem 3 "http/1.1" "仅 HTTP/1.1"
-    menuReturnItem 4 "返回" "回到传统 TLS fallback 维护"
-    menuClose
-    autoRead traditional_tls_alpn_manual "请选择:" selectAlpnManual
-    case "${selectAlpnManual}" in
-    1)
-        applyTraditionalTlsAlpn '["h2","http/1.1"]'
-        ;;
-    2)
-        applyTraditionalTlsAlpn '["http/1.1","h2"]'
-        ;;
-    3)
-        applyTraditionalTlsAlpn '["http/1.1"]'
-        ;;
-    4)
-        manageTraditionalTlsFallback
-        ;;
-    *)
-        coreSelectionRetryAction setTraditionalTlsAlpnManual
-        ;;
-    esac
+    local selectAlpnManual=
+    while true; do
+        echoContent title "\n┌─ 手动设置 ALPN ────────────────────────────────────"
+        menuLine "仅用于传统 TLS fallback 兼容排障"
+        menuRecommendedItem 1 "h2,http/1.1" "推荐用于存在 h2 fallback/gRPC 的场景"
+        menuItem 2 "http/1.1,h2" "旧客户端兼容排障"
+        menuItem 3 "http/1.1" "仅 HTTP/1.1"
+        menuReturnItem 4 "返回" "回到传统 TLS fallback 维护"
+        menuClose
+        selectAlpnManual=
+        autoRead traditional_tls_alpn_manual "请选择:" selectAlpnManual || return 0
+        case "${selectAlpnManual}" in
+        1) applyTraditionalTlsAlpn '["h2","http/1.1"]' || true ;;
+        2) applyTraditionalTlsAlpn '["http/1.1","h2"]' || true ;;
+        3) applyTraditionalTlsAlpn '["http/1.1"]' || true ;;
+        4) return 0 ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
 }
 
 
@@ -3386,144 +3379,136 @@ disableXHTTPDownloadSettings() {
 }
 
 manageXHTTPPresets() {
-    echoContent title "\n┌─ XHTTP 场景预设 ───────────────────────────────────"
-    menuRecommendedItem 1 "日常/CDN 推荐" "auto + XMUX 16-32"
-    menuItem 2 "兼容优先" "packet-up，适合未知 CDN/反代"
-    menuItem 3 "性能优先" "stream-up，适合 H2/gRPC 兼容链路"
-    menuItem 4 "测速/单并发" "auto + maxConcurrency=1"
-    menuReturnItem 5 "返回" "回到 XHTTP 管理"
-    menuClose
-    autoRead xhttp_preset_menu "请选择:" selectXHTTPPreset
-    case "${selectXHTTPPreset}" in
-    1) setXHTTPPreset daily ;;
-    2) setXHTTPPreset compatible ;;
-    3) setXHTTPPreset stream ;;
-    4) setXHTTPPreset single ;;
-    5) manageXHTTP ;;
-    *) coreSelectionRetryAction manageXHTTPPresets ;;
-    esac
+    local selectXHTTPPreset=
+    while true; do
+        echoContent title "\n┌─ XHTTP 场景预设 ───────────────────────────────────"
+        menuRecommendedItem 1 "日常/CDN 推荐" "auto + XMUX 16-32"
+        menuItem 2 "兼容优先" "packet-up，适合未知 CDN/反代"
+        menuItem 3 "性能优先" "stream-up，适合 H2/gRPC 兼容链路"
+        menuItem 4 "测速/单并发" "auto + maxConcurrency=1"
+        menuReturnItem 5 "返回" "回到 XHTTP 管理"
+        menuClose
+        selectXHTTPPreset=
+        autoRead xhttp_preset_menu "请选择:" selectXHTTPPreset || return 0
+        case "${selectXHTTPPreset}" in
+        1) setXHTTPPreset daily || true ;;
+        2) setXHTTPPreset compatible || true ;;
+        3) setXHTTPPreset stream || true ;;
+        4) setXHTTPPreset single || true ;;
+        5) return 0 ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
 }
 
 manageXHTTPMode() {
-    echoContent title "\n┌─ XHTTP mode 设置 ──────────────────────────────────"
-    menuRecommendedItem 1 "auto" "推荐默认，由 Xray 自动选择"
-    menuItem 2 "packet-up" "兼容性最强"
-    menuItem 3 "stream-up" "流式上行，效率更高"
-    menuReturnItem 4 "返回" "回到 XHTTP 管理"
-    menuClose
-    autoRead xhttp_mode_menu "请选择:" selectXHTTPMode
-    case "${selectXHTTPMode}" in
-    1) setXHTTPMode auto ;;
-    2) setXHTTPMode packet-up ;;
-    3) setXHTTPMode stream-up ;;
-    4) manageXHTTP ;;
-    *) coreSelectionRetryAction manageXHTTPMode ;;
-    esac
+    local selectXHTTPMode=
+    while true; do
+        echoContent title "\n┌─ XHTTP mode 设置 ──────────────────────────────────"
+        menuRecommendedItem 1 "auto" "推荐默认，由 Xray 自动选择"
+        menuItem 2 "packet-up" "兼容性最强"
+        menuItem 3 "stream-up" "流式上行，效率更高"
+        menuReturnItem 4 "返回" "回到 XHTTP 管理"
+        menuClose
+        selectXHTTPMode=
+        autoRead xhttp_mode_menu "请选择:" selectXHTTPMode || return 0
+        case "${selectXHTTPMode}" in
+        1) setXHTTPMode auto || true ;;
+        2) setXHTTPMode packet-up || true ;;
+        3) setXHTTPMode stream-up || true ;;
+        4) return 0 ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
 }
 
 manageXHTTPXmux() {
-    echoContent title "\n┌─ XHTTP XMUX 设置 ──────────────────────────────────"
-    menuItem 1 "日常随机复用" "maxConcurrency 16-32"
-    menuItem 2 "单并发" "maxConcurrency 1，测速/排障"
-    menuItem 3 "自定义范围" "自定义 maxConcurrency/request/time"
-    menuReturnItem 4 "返回" "回到 XHTTP 管理"
-    menuClose
-    autoRead xhttp_xmux_menu "请选择:" selectXHTTPXmux
-    case "${selectXHTTPXmux}" in
-    1) setXHTTPPreset daily ;;
-    2) setXHTTPPreset single ;;
-    3) setXHTTPCustomXmux ;;
-    4) manageXHTTP ;;
-    *) coreSelectionRetryAction manageXHTTPXmux ;;
-    esac
+    local selectXHTTPXmux=
+    while true; do
+        echoContent title "\n┌─ XHTTP XMUX 设置 ──────────────────────────────────"
+        menuItem 1 "日常随机复用" "maxConcurrency 16-32"
+        menuItem 2 "单并发" "maxConcurrency 1，测速/排障"
+        menuItem 3 "自定义范围" "自定义 maxConcurrency/request/time"
+        menuReturnItem 4 "返回" "回到 XHTTP 管理"
+        menuClose
+        selectXHTTPXmux=
+        autoRead xhttp_xmux_menu "请选择:" selectXHTTPXmux || return 0
+        case "${selectXHTTPXmux}" in
+        1) setXHTTPPreset daily || true ;;
+        2) setXHTTPPreset single || true ;;
+        3) setXHTTPCustomXmux || true ;;
+        4) return 0 ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
 }
 
 manageXHTTPNormal() {
-    echoContent title "\n┌─ XHTTP 普通设置 ───────────────────────────────────"
-    menuLine "普通设置面向日常/CDN 使用，优先选择场景预设"
-    menuItem 1 "查看当前配置" "显示 mode、path、host、XMUX 与高级状态"
-    menuItem 2 "场景预设" "日常、兼容、性能、测速"
-    menuItem 3 "mode 设置" "auto / packet-up / stream-up"
-    menuItem 4 "CDN / H3 使用说明" "查看 Cloudflare、H3 和兼容性提示"
-    menuReturnItem 5 "返回 XHTTP 管理" "回到上级菜单"
-    menuClose
-    autoRead xhttp_normal_menu "请选择:" selectXHTTPNormal
-    case "${selectXHTTPNormal}" in
-    1)
-        xhttpSettingsSummary
-        ;;
-    2)
-        manageXHTTPPresets
-        ;;
-    3)
-        manageXHTTPMode
-        ;;
-    4)
-        showXHTTPUsageNotes
-        ;;
-    5)
-        manageXHTTP
-        ;;
-    *)
-        coreSelectionRetryAction manageXHTTPNormal
-        ;;
-    esac
+    local selectXHTTPNormal=
+    while true; do
+        echoContent title "\n┌─ XHTTP 普通设置 ───────────────────────────────────"
+        menuLine "普通设置面向日常/CDN 使用，优先选择场景预设"
+        menuItem 1 "查看当前配置" "显示 mode、path、host、XMUX 与高级状态"
+        menuItem 2 "场景预设" "日常、兼容、性能、测速"
+        menuItem 3 "mode 设置" "auto / packet-up / stream-up"
+        menuItem 4 "CDN / H3 使用说明" "查看 Cloudflare、H3 和兼容性提示"
+        menuReturnItem 5 "返回 XHTTP 管理" "回到上级菜单"
+        menuClose
+        selectXHTTPNormal=
+        autoRead xhttp_normal_menu "请选择:" selectXHTTPNormal || return 0
+        case "${selectXHTTPNormal}" in
+        1) xhttpSettingsSummary || true ;;
+        2) manageXHTTPPresets || true ;;
+        3) manageXHTTPMode || true ;;
+        4) showXHTTPUsageNotes ;;
+        5) return 0 ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
 }
 
 manageXHTTPAdvanced() {
-    echoContent title "\n┌─ XHTTP 高级设置 ───────────────────────────────────"
-    menuLine "高级设置会改变复用、path/host 或 packet/stream 细节"
-    menuItem 1 "XMUX 设置" "日常、单并发或自定义范围"
-    menuItem 2 "path / host 设置" "CDN 域前置或特殊反代场景"
-    menuItem 3 "header / packet / stream 参数" "xPadding、sc*、gRPC/SSE header"
-    menuRecommendedItem 4 "恢复推荐默认值" "恢复 mode、XMUX 与高级推荐值"
-    menuReturnItem 5 "返回 XHTTP 管理" "回到上级菜单"
-    menuClose
-    autoRead xhttp_advanced_menu "请选择:" selectXHTTPAdvanced
-    case "${selectXHTTPAdvanced}" in
-    1)
-        manageXHTTPXmux
-        ;;
-    2)
-        setXHTTPPathHost
-        ;;
-    3)
-        setXHTTPAdvancedParams
-        ;;
-    4)
-        setXHTTPRecommendedDefaults
-        ;;
-    5)
-        manageXHTTP
-        ;;
-    *)
-        coreSelectionRetryAction manageXHTTPAdvanced
-        ;;
-    esac
+    local selectXHTTPAdvanced=
+    while true; do
+        echoContent title "\n┌─ XHTTP 高级设置 ───────────────────────────────────"
+        menuLine "高级设置会改变复用、path/host 或 packet/stream 细节"
+        menuItem 1 "XMUX 设置" "日常、单并发或自定义范围"
+        menuItem 2 "path / host 设置" "CDN 域前置或特殊反代场景"
+        menuItem 3 "header / packet / stream 参数" "xPadding、sc*、gRPC/SSE header"
+        menuRecommendedItem 4 "恢复推荐默认值" "恢复 mode、XMUX 与高级推荐值"
+        menuReturnItem 5 "返回 XHTTP 管理" "回到上级菜单"
+        menuClose
+        selectXHTTPAdvanced=
+        autoRead xhttp_advanced_menu "请选择:" selectXHTTPAdvanced || return 0
+        case "${selectXHTTPAdvanced}" in
+        1) manageXHTTPXmux || true ;;
+        2) setXHTTPPathHost || true ;;
+        3) setXHTTPAdvancedParams || true ;;
+        4) setXHTTPRecommendedDefaults || true ;;
+        5) return 0 ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
 }
 
 manageXHTTPExperiment() {
-    echoContent title "\n┌─ XHTTP 实验功能 ───────────────────────────────────"
-    menuLine "实验功能依赖客户端、CDN 和反代行为；填错会导致连接失败"
-    menuDangerItem 1 "启用上下行分离" "配置独立下行 downloadSettings"
-    menuItem 2 "关闭上下行分离" "删除 downloadSettings"
-    menuReturnItem 3 "返回 XHTTP 管理" "回到上级菜单"
-    menuClose
-    autoRead xhttp_experiment_menu "请选择:" selectXHTTPExperiment
-    case "${selectXHTTPExperiment}" in
-    1)
-        setXHTTPDownloadSettings
-        ;;
-    2)
-        disableXHTTPDownloadSettings
-        ;;
-    3)
-        manageXHTTP
-        ;;
-    *)
-        coreSelectionRetryAction manageXHTTPExperiment
-        ;;
-    esac
+    local selectXHTTPExperiment=
+    while true; do
+        echoContent title "\n┌─ XHTTP 实验功能 ───────────────────────────────────"
+        menuLine "实验功能依赖客户端、CDN 和反代行为；填错会导致连接失败"
+        menuDangerItem 1 "启用上下行分离" "配置独立下行 downloadSettings"
+        menuItem 2 "关闭上下行分离" "删除 downloadSettings"
+        menuReturnItem 3 "返回 XHTTP 管理" "回到上级菜单"
+        menuClose
+        selectXHTTPExperiment=
+        autoRead xhttp_experiment_menu "请选择:" selectXHTTPExperiment || return 0
+        case "${selectXHTTPExperiment}" in
+        1) setXHTTPDownloadSettings || true ;;
+        2) disableXHTTPDownloadSettings || true ;;
+        3) return 0 ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
 }
 
 showXHTTPUsageNotes() {
@@ -3537,45 +3522,37 @@ showXHTTPUsageNotes() {
 }
 
 manageXHTTP() {
-    readInstallType
-    readInstallProtocolType
-    if [[ "${coreInstallType}" != "1" ]] || ! currentProtocolHas 2; then
-        errorCard "请先安装 Xray 的 2.VLESS Reality XHTTP"
-        return 1
-    fi
+    local selectXHTTPManageType=
+    while true; do
+        readInstallType
+        readInstallProtocolType
+        if [[ "${coreInstallType}" != "1" ]] || ! currentProtocolHas 2; then
+            errorCard "请先安装 Xray 的 2.VLESS Reality XHTTP"
+            return 1
+        fi
 
-    echoContent title "\n┌─ XHTTP 管理 ───────────────────────────────────────"
-    menuLine "这里只调整 XHTTP 协议参数；CDN 连接地址在 协议与入口 -> CDN 入口管理"
-    menuLine "普通设置优先；高级和实验功能适合明确知道客户端与线路能力时使用"
-    xhttpSettingsSummary
-    menuItem 1 "普通设置" "状态、场景预设、mode 与使用说明"
-    menuItem 2 "高级设置" "XMUX、path/host、header/packet/stream 参数"
-    menuDangerItem 3 "实验功能" "上下行分离等高风险能力"
-    menuRecommendedItem 4 "恢复推荐默认值" "恢复 mode、XMUX 与高级推荐值"
-    menuReturnItem 5 "返回协议与入口" "回到上级菜单"
-    menuClose
-    autoRead xhttp_manage_menu "请选择:" selectXHTTPManageType
+        echoContent title "\n┌─ XHTTP 管理 ───────────────────────────────────────"
+        menuLine "这里只调整 XHTTP 协议参数；CDN 连接地址在 协议与入口 -> CDN 入口管理"
+        menuLine "普通设置优先；高级和实验功能适合明确知道客户端与线路能力时使用"
+        xhttpSettingsSummary
+        menuItem 1 "普通设置" "状态、场景预设、mode 与使用说明"
+        menuItem 2 "高级设置" "XMUX、path/host、header/packet/stream 参数"
+        menuDangerItem 3 "实验功能" "上下行分离等高风险能力"
+        menuRecommendedItem 4 "恢复推荐默认值" "恢复 mode、XMUX 与高级推荐值"
+        menuReturnItem 5 "返回协议与入口" "回到上级菜单"
+        menuClose
+        selectXHTTPManageType=
+        autoRead xhttp_manage_menu "请选择:" selectXHTTPManageType || return 0
 
-    case "${selectXHTTPManageType}" in
-    1)
-        manageXHTTPNormal
-        ;;
-    2)
-        manageXHTTPAdvanced
-        ;;
-    3)
-        manageXHTTPExperiment
-        ;;
-    4)
-        setXHTTPRecommendedDefaults
-        ;;
-    5)
-        protocolEntryMenu
-        ;;
-    *)
-        coreSelectionRetryAction manageXHTTP
-        ;;
-    esac
+        case "${selectXHTTPManageType}" in
+        1) manageXHTTPNormal || true ;;
+        2) manageXHTTPAdvanced || true ;;
+        3) manageXHTTPExperiment || true ;;
+        4) setXHTTPRecommendedDefaults || true ;;
+        5) return 0 ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
 }
 
 

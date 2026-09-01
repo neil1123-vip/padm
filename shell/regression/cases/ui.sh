@@ -998,7 +998,7 @@ runCoreSelectionRetryActionRegression() (
         'shell/core/menu.sh|0'
         'shell/core/cores.sh|0'
         'shell/core/routing_access_control.sh|0'
-        'shell/core/manage.sh|14'
+        'shell/core/manage.sh|2'
         'shell/core/fail2ban.sh|1'
         'shell/core/entry_helpers.sh|1'
         'shell/core/routing_bt.sh|0'
@@ -1007,9 +1007,7 @@ runCoreSelectionRetryActionRegression() (
         'shell/core/routing_ipv6.sh|0'
     )
     local -a expectedPatterns=(
-        'shell/core/manage.sh|coreSelectionRetryAction manageTraditionalTlsFallback "$@"'
         'shell/core/manage.sh|coreSelectionRetryAction checkBTPanel'
-        'shell/core/manage.sh|coreSelectionRetryAction manageXHTTPPresets'
         'shell/core/fail2ban.sh|coreSelectionRetryAction manageFail2ban'
         'shell/core/entry_helpers.sh|coreSelectionRetryAction bbrInstall'
     )
@@ -1018,7 +1016,7 @@ runCoreSelectionRetryActionRegression() (
         selectCoreInstall'
         'shell/core/routing_access_control.sh|coreSelectionErrorCard; removeAccessControlMenu; return'
         'shell/core/manage.sh|coreSelectionErrorCard
-        manageTraditionalTlsFallback "$@"'
+        manageVlessEncryptionExperiment'
         'shell/core/manage.sh|coreSelectionErrorCard
         checkBTPanel'
         'shell/core/manage.sh|coreSelectionErrorCard; manageXHTTPPresets'
