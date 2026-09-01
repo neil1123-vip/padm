@@ -1483,6 +1483,19 @@ EOF
         configPath="${TMP_DIR}/menu-smoke-xray/"
         coreInstallType=1
         ensureSubscriptionGroupsState
+        (
+            local roleSummaryJqLog="${TMP_DIR}/role-summary-jq.log"
+            jq() {
+                printf 'jq\n' >>"${roleSummaryJqLog}"
+                command jq "$@"
+            }
+            subscriptionWireGuardReadState() {
+                printf '%s\n' '{"enabled":true,"role":"main","address":"10.77.0.1/24","peers":[{"id":"edge-a"}]}'
+            }
+            : >"${roleSummaryJqLog}"
+            showSubscriptionServerRoleSummary
+            [[ "$(wc -l <"${roleSummaryJqLog}")" == "1" ]]
+        )
         setMenuSmokeRole uninitialized
         resetMenuActions
         output=

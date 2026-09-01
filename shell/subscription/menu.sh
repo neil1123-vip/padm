@@ -2,6 +2,7 @@
 
 showSubscriptionServerRoleSummary() {
     local state
+    local summary
     local role
     local roleText
     local enabledText
@@ -11,7 +12,8 @@ showSubscriptionServerRoleSummary() {
         errorCard "WireGuard 控制面状态损坏或不可读" "请先修复 $(subscriptionWireGuardStateFile)"
         return 1
     }
-    role=$(jq -r '.role' <<<"${state}")
+    summary=$(jq -r '[.role, (if .enabled == true then "已启用" else "未启用" end), (if (.address // "") == "" then "未配置" else .address end), (.peers | length | tostring)] | @tsv' <<<"${state}") || return 1
+    IFS=$'\t' read -r role enabledText address peerCount <<<"${summary}"
     case "${role}" in
     main) roleText="主控" ;;
     controlled) roleText="被控" ;;
@@ -21,13 +23,6 @@ showSubscriptionServerRoleSummary() {
         ;;
     *) return 1 ;;
     esac
-    if [[ "$(jq -r '.enabled' <<<"${state}")" == "true" ]]; then
-        enabledText="已启用"
-    else
-        enabledText="未启用"
-    fi
-    address=$(jq -r 'if (.address // "") == "" then "未配置" else .address end' <<<"${state}")
-    peerCount=$(jq -r '.peers | length' <<<"${state}")
     menuLine "当前服务器角色：$(uiStyle value "${roleText}")；WireGuard 控制面：$(uiStyle value "${enabledText}")；内网地址：$(uiStyle value "${address}")；Peer：$(uiStyle value "${peerCount}")"
 }
 
