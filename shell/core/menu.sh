@@ -126,9 +126,9 @@ routingAccessMenu() {
         selectRoutingAccessMenuType=
         autoRead routing_access_menu "请选择:" selectRoutingAccessMenuType || return 0
         case "${selectRoutingAccessMenuType}" in
-        1) routingToolsMenu 1; return $? ;;
-        2) btTools 1; return $? ;;
-        3) accessControlMenu 1; return $? ;;
+        1) routingToolsMenu 1 || true; continue ;;
+        2) btTools 1 || true; continue ;;
+        3) accessControlMenu 1 || true; continue ;;
         4) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac

@@ -1445,6 +1445,25 @@ EOF
             assertMenuAction 'errorCard:选择错误'
             [[ "$(wc -l <"${routingToolsRenderLog}")" == "2" ]]
             ! assertMenuAction routingAccessMenu
+
+            warpRoutingMenu() {
+                recordMenuAction warpRoutingMenu
+                IFS= read -r _
+            }
+            : >"${routingToolsRenderLog}"
+            resetMenuActions
+            routingToolsMenu <<< $'1\n6'
+            assertMenuAction warpRoutingMenu
+            [[ "$(wc -l <"${routingToolsRenderLog}")" == "2" ]]
+
+            singBoxConfigPath=/tmp/menu-smoke-sing-box/
+            sniRouting() { recordMenuAction sniRouting; }
+            : >"${routingToolsRenderLog}"
+            resetMenuActions
+            routingToolsMenu <<< $'5\n6'
+            assertMenuAction 'errorCard:此功能不支持Hysteria2、Tuic'
+            ! assertMenuAction sniRouting
+            [[ "$(wc -l <"${routingToolsRenderLog}")" == "2" ]]
         )
 
         (
@@ -1460,6 +1479,16 @@ EOF
             ! assertMenuAction routingToolsMenu
             ! assertMenuAction btTools
             ! assertMenuAction accessControlMenu
+            [[ "$(wc -l <"${routingAccessRenderLog}")" == "2" ]]
+
+            routingToolsMenu() {
+                recordMenuAction routingToolsMenu
+                IFS= read -r _
+            }
+            : >"${routingAccessRenderLog}"
+            resetMenuActions
+            routingAccessMenu <<< $'1\n6\n4'
+            assertMenuAction routingToolsMenu
             [[ "$(wc -l <"${routingAccessRenderLog}")" == "2" ]]
         )
 
