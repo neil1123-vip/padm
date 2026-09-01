@@ -490,7 +490,13 @@ selectPanelCertDomain() {
     if [[ -z "${currentHost}" ]]; then
         echoContent title "\n读取${title}配置\n"
         echo "${certList}"
-        autoRead bt_domain_select "请输入编号选择:" selectBTDomain
+        while true; do
+            selectBTDomain=
+            autoRead bt_domain_select "请输入编号选择:" selectBTDomain || return 2
+            btDomain=$(awk -F ':' -v selected="${selectBTDomain}" '$1 == selected {print $2; exit}' <<<"${certList}")
+            [[ -n "${btDomain}" ]] && return 0
+            coreSelectionErrorCard "选择错误"
+        done
     else
         selectBTDomain=$(awk -F ':' -v host="${currentHost}" '$2 == host {print $1; exit}' <<<"${certList}")
     fi
@@ -502,7 +508,13 @@ selectPanelCertDomain() {
 # 检查是否安装宝塔
 checkBTPanel() {
     if [[ -n $(pgrep -f "BT-Panel") ]]; then
-        if [[ -d '/www/server/panel/vhost/cert/' ]] && selectPanelCertDomain "宝塔" '/www/server/panel/vhost/cert/*/fullchain.pem' 1; then
+        if [[ ! -d '/www/server/panel/vhost/cert/' ]]; then
+            return 0
+        fi
+        local panelCertStatus=0
+        selectPanelCertDomain "宝塔" '/www/server/panel/vhost/cert/*/fullchain.pem' 1 || panelCertStatus=$?
+        case "${panelCertStatus}" in
+        0)
             domain=${btDomain}
             if [[ ! -f "/etc/padm/tls/${btDomain}.crt" && ! -f "/etc/padm/tls/${btDomain}.key" ]]; then
                 ln -s "/www/server/panel/vhost/cert/${btDomain}/fullchain.pem" "/etc/padm/tls/${btDomain}.crt"
@@ -515,15 +527,22 @@ checkBTPanel() {
                 chattr -i "/www/wwwroot/${btDomain}/.user.ini"
             fi
             nginxConfigPath="/www/server/panel/vhost/nginx/"
-        elif [[ -d '/www/server/panel/vhost/cert/' ]]; then
-            coreSelectionRetryAction checkBTPanel
-        fi
+            ;;
+        2) return 0 ;;
+        *) return 1 ;;
+        esac
     fi
 }
 
 check1Panel() {
     if [[ -n $(pgrep -f "1panel") ]]; then
-        if [[ -d '/opt/1panel/apps/openresty/openresty/www/sites/' ]] && selectPanelCertDomain "1Panel" '/opt/1panel/apps/openresty/openresty/www/sites/*/ssl/fullchain.pem' 2; then
+        if [[ ! -d '/opt/1panel/apps/openresty/openresty/www/sites/' ]]; then
+            return 0
+        fi
+        local panelCertStatus=0
+        selectPanelCertDomain "1Panel" '/opt/1panel/apps/openresty/openresty/www/sites/*/ssl/fullchain.pem' 2 || panelCertStatus=$?
+        case "${panelCertStatus}" in
+        0)
             domain=${btDomain}
             if [[ ! -f "/etc/padm/tls/${btDomain}.crt" && ! -f "/etc/padm/tls/${btDomain}.key" ]]; then
                 ln -s "/opt/1panel/apps/openresty/openresty/www/sites/${btDomain}/ssl/fullchain.pem" "/etc/padm/tls/${btDomain}.crt"
@@ -531,9 +550,10 @@ check1Panel() {
             fi
 
             nginxStaticPath="/opt/1panel/apps/openresty/openresty/www/sites/${btDomain}/index/"
-        elif [[ -d '/opt/1panel/apps/openresty/openresty/www/sites/' ]]; then
-            coreSelectionRetryAction check1Panel
-        fi
+            ;;
+        2) return 0 ;;
+        *) return 1 ;;
+        esac
     fi
 }
 

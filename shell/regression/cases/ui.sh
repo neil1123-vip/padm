@@ -998,7 +998,7 @@ runCoreSelectionRetryActionRegression() (
         'shell/core/menu.sh|0'
         'shell/core/cores.sh|0'
         'shell/core/routing_access_control.sh|0'
-        'shell/core/manage.sh|2'
+        'shell/core/manage.sh|0'
         'shell/core/fail2ban.sh|0'
         'shell/core/entry_helpers.sh|0'
         'shell/core/routing_bt.sh|0'
@@ -1006,28 +1006,18 @@ runCoreSelectionRetryActionRegression() (
         'shell/core/protocol_runtime.sh|0'
         'shell/core/routing_ipv6.sh|0'
     )
-    local -a expectedPatterns=(
-        'shell/core/manage.sh|coreSelectionRetryAction checkBTPanel'
-    )
+    local -a expectedPatterns=()
     local -a removedPatterns=(
-        'shell/core/cores.sh|coreSelectionErrorCard
-        selectCoreInstall'
+        'shell/core/cores.sh|coreSelectionRetryAction selectCoreInstall'
         'shell/core/routing_access_control.sh|coreSelectionErrorCard; removeAccessControlMenu; return'
-        'shell/core/manage.sh|coreSelectionErrorCard
-        manageVlessEncryptionExperiment'
-        'shell/core/manage.sh|coreSelectionErrorCard
-        checkBTPanel'
+        'shell/core/manage.sh|coreSelectionRetryAction manageVlessEncryptionExperiment'
+        'shell/core/manage.sh|coreSelectionRetryAction checkBTPanel'
         'shell/core/manage.sh|coreSelectionErrorCard; manageXHTTPPresets'
-        'shell/core/manage.sh|coreSelectionErrorCard
-        manageTuic'
-        'shell/core/fail2ban.sh|coreSelectionErrorCard
-        manageFail2ban'
-        'shell/core/entry_helpers.sh|coreSelectionErrorCard
-        bbrInstall'
-        'shell/core/routing_socks.sh|coreSelectionErrorCard
-        socks5Routing'
-        'shell/core/routing_ipv6.sh|coreSelectionErrorCard
-        ipv6Routing'
+        'shell/core/manage.sh|coreSelectionRetryAction manageTuic'
+        'shell/core/fail2ban.sh|coreSelectionRetryAction manageFail2ban'
+        'shell/core/entry_helpers.sh|coreSelectionRetryAction bbrInstall'
+        'shell/core/routing_socks.sh|coreSelectionRetryAction socks5Routing'
+        'shell/core/routing_ipv6.sh|coreSelectionRetryAction ipv6Routing'
         'shell/core/menu.sh|coreSelectionRetryAction routingAccessMenu'
         'shell/core/menu.sh|coreSelectionRetryAction protocolEntryMenu'
         'shell/core/menu.sh|coreSelectionRetryAction siteCertificateMenu'
@@ -1061,12 +1051,14 @@ runCoreSelectionRetryActionRegression() (
         [[ "${actualCount}" == "${expectedCount}" ]]
     done
     for entry in "${expectedPatterns[@]}"; do
-        IFS='|' read -r file pattern <<<"${entry}"
+        file=${entry%%|*}
+        pattern=${entry#*|}
         grep -qF "${pattern}" "${PROJECT_ROOT}/${file}"
     done
     for entry in "${removedPatterns[@]}"; do
-        IFS='|' read -r file pattern <<<"${entry}"
-        ! grep -qF "${pattern}" "${PROJECT_ROOT}/${file}"
+        file=${entry%%|*}
+        pattern=${entry#*|}
+        ! grep -qF -- "${pattern}" "${PROJECT_ROOT}/${file}"
     done
 )
 
