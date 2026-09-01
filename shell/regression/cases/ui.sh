@@ -1112,6 +1112,9 @@ runMenuSmokeRegression() {
     }
     eval "$(declare -f menu | sed '1s/^menu /originalCoreMainMenu /')"
     eval "$(declare -f manageSubscriptionPendingInvites | sed '1s/^manageSubscriptionPendingInvites /originalManageSubscriptionPendingInvites /')"
+    eval "$(declare -f setUserSubscriptionSourcesMenu | sed '1s/^setUserSubscriptionSourcesMenu /originalSetUserSubscriptionSourcesMenu /')"
+    eval "$(declare -f changeSubscriptionSourceEnabledMenu | sed '1s/^changeSubscriptionSourceEnabledMenu /originalChangeSubscriptionSourceEnabledMenu /')"
+    eval "$(declare -f removeSubscriptionControlledServerMenu | sed '1s/^removeSubscriptionControlledServerMenu /originalRemoveSubscriptionControlledServerMenu /')"
     menu() { recordMenuAction menu; }
     uiStyle() { printf '%s' "$2"; }
     menuLine() { output+="$*"$'\n'; }
@@ -1535,6 +1538,58 @@ EOF
             : >"${roleSummaryJqLog}"
             showSubscriptionServerRoleSummary
             [[ "$(wc -l <"${roleSummaryJqLog}")" == "1" ]]
+        )
+        (
+            local sourceReadLog="${TMP_DIR}/user-source-menu-read.log"
+            local prompt= mutationSources=
+            subscriptionActiveGroupRead() {
+                printf 'read\n' >>"${sourceReadLog}"
+                printf '%s\n' '[{"id":"main","name":"本机","role":"main","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}]'
+            }
+            subscriptionGroupsWithLock() {
+                mutationSources=${!#}
+                return 0
+            }
+            autoRead() {
+                prompt=$2
+                printf -v "$3" '%s' ''
+            }
+            : >"${sourceReadLog}"
+            originalSetUserSubscriptionSourcesMenu demo-user
+            [[ "$(wc -l <"${sourceReadLog}")" == "1" ]]
+            [[ "${mutationSources}" == '["main"]' ]]
+            [[ "${prompt}" == *'回车默认 main'* ]]
+        )
+        (
+            local sourceReadLog="${TMP_DIR}/source-toggle-menu-read.log"
+            local warning=
+            subscriptionRequireMainRole() { return 0; }
+            subscriptionActiveGroupRead() {
+                printf 'read\n' >>"${sourceReadLog}"
+                printf '%s\n' '[{"id":"edge-a","name":"边缘 A","role":"secondary","scheme":"wireguard","host":"10.77.0.2","port":39778,"enabled":false,"sync_status":"pending"}]'
+            }
+            autoRead() { printf -v "$3" '%s' edge-a; }
+            autoConfirm() { printf -v "$4" '%s' n; }
+            warnCard() { warning=$*; }
+            setSubscriptionRemoteSourceEnabled() { return 0; }
+            runSubscriptionSyncAfterMutation() { return 0; }
+            : >"${sourceReadLog}"
+            originalChangeSubscriptionSourceEnabledMenu
+            [[ "$(wc -l <"${sourceReadLog}")" == "1" ]]
+            [[ "${warning}" == *'启用后，后续同步和公网发布会包含该来源'* ]]
+        )
+        (
+            local sourceReadLog="${TMP_DIR}/source-remove-menu-read.log"
+            subscriptionActiveGroupRead() {
+                printf 'read\n' >>"${sourceReadLog}"
+                printf '%s\n' '[{"id":"edge-a","name":"边缘 A","role":"secondary","scheme":"wireguard","host":"10.77.0.2","port":39778,"enabled":true,"sync_status":"pending"}]'
+            }
+            autoRead() { printf -v "$3" '%s' edge-a; }
+            subscriptionWireGuardRemovePeerAndSource() { return 0; }
+            runSubscriptionSyncAfterMutation() { return 0; }
+            : >"${sourceReadLog}"
+            originalRemoveSubscriptionControlledServerMenu
+            [[ "$(wc -l <"${sourceReadLog}")" == "1" ]]
         )
         setMenuSmokeRole uninitialized
         resetMenuActions
