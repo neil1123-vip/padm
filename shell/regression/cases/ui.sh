@@ -997,16 +997,16 @@ runCoreSelectionRetryActionRegression() (
     local -a expectedCounts=(
         'shell/core/menu.sh|6'
         'shell/core/cores.sh|1'
-        'shell/core/routing_access_control.sh|3'
+        'shell/core/routing_access_control.sh|0'
         'shell/core/manage.sh|18'
         'shell/core/fail2ban.sh|1'
         'shell/core/entry_helpers.sh|1'
         'shell/core/routing_socks.sh|0'
+        'shell/core/protocol_runtime.sh|0'
         'shell/core/routing_ipv6.sh|1'
     )
     local -a expectedPatterns=(
         'shell/core/cores.sh|coreSelectionRetryAction selectCoreInstall'
-        'shell/core/routing_access_control.sh|coreSelectionRetryAction removeAccessControlMenu'
         'shell/core/manage.sh|coreSelectionRetryAction manageTraditionalTlsFallback "$@"'
         'shell/core/manage.sh|coreSelectionRetryAction checkBTPanel'
         'shell/core/manage.sh|coreSelectionRetryAction manageXHTTPPresets'
@@ -1524,6 +1524,42 @@ EOF
                 [[ "$(wc -l <"${socksMenuRenderLog}")" == "8" ]]
             )
             coreInstallType="${oldCoreInstallType}"
+        )
+
+        (
+            local accessMenuRenderLog="${TMP_DIR}/access-menu-render.log"
+            local oldConfigPath="${configPath:-}"
+            configPath="${TMP_DIR}/menu-smoke-access-config/"
+            : >"${accessMenuRenderLog}"
+            echoContent() { printf '%s\n' "$*" >>"${accessMenuRenderLog}"; }
+            routingAccessMenu() { recordMenuAction routingAccessMenu; }
+            eval "$(declare -f accessControlMenu | sed '1s/^accessControlMenu /originalAccessControlMenu /')"
+            accessControlMenu() { recordMenuAction accessControlMenu; }
+
+            (
+                resetMenuActions
+                originalAccessControlMenu <<< $'bad\n7'
+                assertMenuAction 'errorCard:选择错误'
+                ! assertMenuAction routingAccessMenu
+                [[ "$(wc -l <"${accessMenuRenderLog}")" == "2" ]]
+            )
+
+            (
+                resetMenuActions
+                manageRegionalBlockPolicy <<< $'bad\n4'
+                assertMenuAction 'errorCard:选择错误'
+                ! assertMenuAction accessControlMenu
+                [[ "$(wc -l <"${accessMenuRenderLog}")" == "4" ]]
+            )
+
+            (
+                resetMenuActions
+                removeAccessControlMenu <<< $'bad\n6'
+                assertMenuAction 'errorCard:选择错误'
+                ! assertMenuAction accessControlMenu
+                [[ "$(wc -l <"${accessMenuRenderLog}")" == "6" ]]
+            )
+            configPath="${oldConfigPath}"
         )
 
         xrayInstalledState=false

@@ -1774,6 +1774,9 @@ runPortHoppingMenuUsesCommandLookupRegression() (
     statusCard() {
         printf '%s|%s\n' "$1" "$2" >>"${actionLog}"
     }
+    coreSelectionErrorCard() {
+        protocolPortHoppingStatusCard "${1:-选择错误，请重新选择}"
+    }
     menuItem() { :; }
     menuClose() { :; }
     echoContent() { :; }

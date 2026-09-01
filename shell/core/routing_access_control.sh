@@ -7,48 +7,34 @@ accessControlMenu() {
         coreNotInstalledErrorCard
         return 1
     fi
+    local accessControlStatus=
+    while true; do
+        echoContent title "\n┌─ 访问控制 ─────────────────────────────────────────"
+        menuLine "管理域名/IP 阻断、直连例外和区域阻断规则"
+        menuLine "这是服务端出站与访问限制，不会修改客户端订阅入口"
+        menuLine "Xray 使用 routing + blackhole/direct；sing-box 使用 rule_set/domain_suffix/ip_cidr"
+        menuItem 1 "查看当前访问控制" "显示 Xray / sing-box 当前阻断与例外"
+        menuItem 2 "添加域名阻断" "添加 geosite 或自定义域名阻断"
+        menuItem 3 "添加 IP/CIDR 阻断" "添加自定义 IP、CIDR 或 geoip 规则"
+        menuItem 4 "添加直连例外" "添加优先直连域名规则"
+        menuDangerItem 5 "区域阻断策略" "屏蔽 geosite:cn / geoip:cn 等高风险策略"
+        menuItem 6 "移除访问控制" "按类型移除阻断或例外规则"
+        menuReturnItem 7 "返回路由与访问控制" "回到上级菜单"
+        menuClose
 
-    echoContent title "\n┌─ 访问控制 ─────────────────────────────────────────"
-    menuLine "管理域名/IP 阻断、直连例外和区域阻断规则"
-    menuLine "这是服务端出站与访问限制，不会修改客户端订阅入口"
-    menuLine "Xray 使用 routing + blackhole/direct；sing-box 使用 rule_set/domain_suffix/ip_cidr"
-    menuItem 1 "查看当前访问控制" "显示 Xray / sing-box 当前阻断与例外"
-    menuItem 2 "添加域名阻断" "添加 geosite 或自定义域名阻断"
-    menuItem 3 "添加 IP/CIDR 阻断" "添加自定义 IP、CIDR 或 geoip 规则"
-    menuItem 4 "添加直连例外" "添加优先直连域名规则"
-    menuDangerItem 5 "区域阻断策略" "屏蔽 geosite:cn / geoip:cn 等高风险策略"
-    menuItem 6 "移除访问控制" "按类型移除阻断或例外规则"
-    menuReturnItem 7 "返回路由与访问控制" "回到上级菜单"
-    menuClose
-
-    autoRead access_control_menu "请选择:" accessControlStatus
-    case "${accessControlStatus}" in
-    1)
-        showAccessControlStatus
-        ;;
-    2)
-        addBlockedDomains
-        ;;
-    3)
-        addBlockedIPs
-        ;;
-    4)
-        addDirectAllowDomains
-        ;;
-    5)
-        manageRegionalBlockPolicy
-        ;;
-    6)
-        removeAccessControlMenu
-        ;;
-    7)
-        routingAccessMenu
-        ;;
-    *)
-        coreSelectionRetryAction accessControlMenu
-        return
-        ;;
-    esac
+        accessControlStatus=
+        autoRead access_control_menu "请选择:" accessControlStatus || return 0
+        case "${accessControlStatus}" in
+        1) showAccessControlStatus; return $? ;;
+        2) addBlockedDomains; return $? ;;
+        3) addBlockedIPs; return $? ;;
+        4) addDirectAllowDomains; return $? ;;
+        5) manageRegionalBlockPolicy; return $? ;;
+        6) removeAccessControlMenu; return $? ;;
+        7) return 0 ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
 }
 
 showAccessControlStatus() {
@@ -186,78 +172,88 @@ addDirectAllowDomains() {
 
 manageRegionalBlockPolicy() {
     local policyStatus allowDomainList extraAllowDomainList
-    allowDomainList="dl.google.com,apple.com,bing.com,microsoft.com,gstatic,xn--ngstr-lra8j.com,googleapis.com,googleapis.cn"
-    echoContent title "\n┌─ 区域阻断策略 ─────────────────────────────────────"
-    menuLine "危险操作：可能影响系统更新、证书签发、应用连接和客户端服务"
-    menuLine "默认直连例外：${allowDomainList}"
-    menuDangerItem 1 "屏蔽 geosite:cn + geoip:cn" "同时阻断大陆域名和大陆 IP"
-    menuDangerItem 2 "仅屏蔽 geosite:cn" "只按域名规则阻断"
-    menuDangerItem 3 "仅屏蔽 geoip:cn" "只按 IP 规则阻断"
-    menuReturnItem 4 "返回" "回到访问控制"
-    menuClose
-    autoRead access_region_policy "请选择:" policyStatus
-    [[ "${policyStatus}" == "4" ]] && { accessControlMenu; return; }
-    if [[ ! "${policyStatus}" =~ ^[1-3]$ ]]; then
-        coreSelectionRetryAction manageRegionalBlockPolicy
-        return
-    fi
-    autoRead access_region_extra_allow "追加直连例外域名[可留空，多个用英文逗号]:" extraAllowDomainList
-    if [[ -n "${extraAllowDomainList}" ]]; then
-        allowDomainList="${allowDomainList},${extraAllowDomainList}"
-    fi
+    while true; do
+        allowDomainList="dl.google.com,apple.com,bing.com,microsoft.com,gstatic,xn--ngstr-lra8j.com,googleapis.com,googleapis.cn"
+        extraAllowDomainList=
+        echoContent title "\n┌─ 区域阻断策略 ─────────────────────────────────────"
+        menuLine "危险操作：可能影响系统更新、证书签发、应用连接和客户端服务"
+        menuLine "默认直连例外：${allowDomainList}"
+        menuDangerItem 1 "屏蔽 geosite:cn + geoip:cn" "同时阻断大陆域名和大陆 IP"
+        menuDangerItem 2 "仅屏蔽 geosite:cn" "只按域名规则阻断"
+        menuDangerItem 3 "仅屏蔽 geoip:cn" "只按 IP 规则阻断"
+        menuReturnItem 4 "返回" "回到访问控制"
+        menuClose
+        policyStatus=
+        autoRead access_region_policy "请选择:" policyStatus || return 0
+        case "${policyStatus}" in
+        4) return 0 ;;
+        1 | 2 | 3) ;;
+        *) coreSelectionErrorCard "选择错误"; continue ;;
+        esac
+        autoRead access_region_extra_allow "追加直连例外域名[可留空，多个用英文逗号]:" extraAllowDomainList || return 0
+        if [[ -n "${extraAllowDomainList}" ]]; then
+            allowDomainList="${allowDomainList},${extraAllowDomainList}"
+        fi
 
-    accessControlBackupCreate || return 1
-    if [[ "${coreInstallType}" == "1" ]]; then
-        if [[ "${policyStatus}" == "1" || "${policyStatus}" == "2" ]]; then
-            addXrayRouting blackhole_out outboundTag "cn" || { accessControlAbortChange; return 1; }
-            addXrayOutbound blackhole_out || { accessControlAbortChange; return 1; }
+        accessControlBackupCreate || return 1
+        if [[ "${coreInstallType}" == "1" ]]; then
+            if [[ "${policyStatus}" == "1" || "${policyStatus}" == "2" ]]; then
+                addXrayRouting blackhole_out outboundTag "cn" || { accessControlAbortChange; return 1; }
+                addXrayOutbound blackhole_out || { accessControlAbortChange; return 1; }
+            fi
+            if [[ "${policyStatus}" == "1" || "${policyStatus}" == "3" ]]; then
+                addXrayIPRouting blackhole_ip_out outboundTag "cn" || { accessControlAbortChange; return 1; }
+                addXrayOutbound blackhole_ip_out || { accessControlAbortChange; return 1; }
+            fi
+            addXrayRouting allow_domain_direct_outbound outboundTag "${allowDomainList}" "top" || { accessControlAbortChange; return 1; }
+            addXrayOutbound allow_domain_direct_outbound || { accessControlAbortChange; return 1; }
         fi
-        if [[ "${policyStatus}" == "1" || "${policyStatus}" == "3" ]]; then
-            addXrayIPRouting blackhole_ip_out outboundTag "cn" || { accessControlAbortChange; return 1; }
-            addXrayOutbound blackhole_ip_out || { accessControlAbortChange; return 1; }
+        if [[ -n "${singBoxConfigPath}" ]]; then
+            if [[ "${policyStatus}" == "1" || "${policyStatus}" == "2" ]]; then
+                addSingBoxRouteRule "cn_block_outbound" "cn" "cn_block_route" || { accessControlAbortChange; return 1; }
+            fi
+            if [[ "${policyStatus}" == "1" || "${policyStatus}" == "3" ]]; then
+                addSingBoxGeoIPRouteRule "block_ip_outbound" "cn" "cn_block_ip_route" || { accessControlAbortChange; return 1; }
+            fi
+            addSingBoxRouteRule "01_direct_outbound" "${allowDomainList}" "00_allow_domain_route" || { accessControlAbortChange; return 1; }
+            addSingBoxOutbound "01_direct_outbound" || { accessControlAbortChange; return 1; }
         fi
-        addXrayRouting allow_domain_direct_outbound outboundTag "${allowDomainList}" "top" || { accessControlAbortChange; return 1; }
-        addXrayOutbound allow_domain_direct_outbound || { accessControlAbortChange; return 1; }
-    fi
-    if [[ -n "${singBoxConfigPath}" ]]; then
-        if [[ "${policyStatus}" == "1" || "${policyStatus}" == "2" ]]; then
-            addSingBoxRouteRule "cn_block_outbound" "cn" "cn_block_route" || { accessControlAbortChange; return 1; }
-        fi
-        if [[ "${policyStatus}" == "1" || "${policyStatus}" == "3" ]]; then
-            addSingBoxGeoIPRouteRule "block_ip_outbound" "cn" "cn_block_ip_route" || { accessControlAbortChange; return 1; }
-        fi
-        addSingBoxRouteRule "01_direct_outbound" "${allowDomainList}" "00_allow_domain_route" || { accessControlAbortChange; return 1; }
-        addSingBoxOutbound "01_direct_outbound" || { accessControlAbortChange; return 1; }
-    fi
-    applyAccessControlConfigChange || return 1
-    successCard "区域阻断策略已应用"
+        applyAccessControlConfigChange || return 1
+        successCard "区域阻断策略已应用"
+        return $?
+    done
 }
 
 removeAccessControlMenu() {
-    echoContent title "\n┌─ 移除访问控制 ─────────────────────────────────────"
-    menuItem 1 "只移除域名阻断" "保留 IP 阻断和直连例外"
-    menuItem 2 "只移除 IP/CIDR 阻断" "保留域名阻断和直连例外"
-    menuItem 3 "只移除直连例外" "保留阻断规则"
-    menuItem 4 "只移除区域阻断" "移除 cn 域名/IP 区域策略"
-    menuDangerItem 5 "移除全部访问控制" "移除域名/IP 阻断、区域阻断和直连例外"
-    menuReturnItem 6 "返回" "回到访问控制"
-    menuClose
-    autoRead access_remove_menu "请选择:" removeStatus
-    case "${removeStatus}" in
-    1|2|3|4|5) ;;
-    6) accessControlMenu; return ;;
-    *) coreSelectionRetryAction removeAccessControlMenu; return ;;
-    esac
-    accessControlBackupCreate || return 1
-    case "${removeStatus}" in
-    1) removeAccessControlByKind domain || { accessControlAbortChange; return 1; } ;;
-    2) removeAccessControlByKind ip || { accessControlAbortChange; return 1; } ;;
-    3) removeAccessControlByKind allow || { accessControlAbortChange; return 1; } ;;
-    4) removeAccessControlByKind region || { accessControlAbortChange; return 1; } ;;
-    5) removeAccessControlByKind all || { accessControlAbortChange; return 1; } ;;
-    esac
-    applyAccessControlConfigChange || return 1
-    successCard "访问控制规则已移除"
+    local removeStatus=
+    while true; do
+        echoContent title "\n┌─ 移除访问控制 ─────────────────────────────────────"
+        menuItem 1 "只移除域名阻断" "保留 IP 阻断和直连例外"
+        menuItem 2 "只移除 IP/CIDR 阻断" "保留域名阻断和直连例外"
+        menuItem 3 "只移除直连例外" "保留阻断规则"
+        menuItem 4 "只移除区域阻断" "移除 cn 域名/IP 区域策略"
+        menuDangerItem 5 "移除全部访问控制" "移除域名/IP 阻断、区域阻断和直连例外"
+        menuReturnItem 6 "返回" "回到访问控制"
+        menuClose
+        removeStatus=
+        autoRead access_remove_menu "请选择:" removeStatus || return 0
+        case "${removeStatus}" in
+        1|2|3|4|5) ;;
+        6) return 0 ;;
+        *) coreSelectionErrorCard "选择错误"; continue ;;
+        esac
+        accessControlBackupCreate || return 1
+        case "${removeStatus}" in
+        1) removeAccessControlByKind domain || { accessControlAbortChange; return 1; } ;;
+        2) removeAccessControlByKind ip || { accessControlAbortChange; return 1; } ;;
+        3) removeAccessControlByKind allow || { accessControlAbortChange; return 1; } ;;
+        4) removeAccessControlByKind region || { accessControlAbortChange; return 1; } ;;
+        5) removeAccessControlByKind all || { accessControlAbortChange; return 1; } ;;
+        esac
+        applyAccessControlConfigChange || return 1
+        successCard "访问控制规则已移除"
+        return $?
+    done
 }
 
 removeAccessControlByKind() {

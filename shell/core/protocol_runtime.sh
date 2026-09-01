@@ -502,30 +502,39 @@ portHoppingMenu() {
         portHoppingEnd=${tuicPortHoppingEnd}
     fi
 
-    echoContent title "\n┌─ 端口跳跃 ─────────────────────────────────────────"
-    menuItem 1 "添加端口跳跃" "配置 UDP 端口范围转发到当前服务端口"
-    menuItem 2 "删除端口跳跃" "移除当前端口跳跃规则"
-    menuItem 3 "查看端口跳跃" "显示当前端口跳跃范围"
-    menuClose
-    autoRead port_hopping_menu "请选择:" selectPortHoppingStatus
-    if [[ "${selectPortHoppingStatus}" == "1" ]]; then
-        addPortHopping "${type}" "${targetPort}" || return 1
-    elif [[ "${selectPortHoppingStatus}" == "2" ]]; then
-        if deletePortHoppingRules "${type}" "${portHoppingStart}" "${portHoppingEnd}" "${targetPort}"; then
-            protocolPortHoppingStatusCard "删除成功"
-        else
+    local selectPortHoppingStatus=
+    while true; do
+        echoContent title "\n┌─ 端口跳跃 ─────────────────────────────────────────"
+        menuItem 1 "添加端口跳跃" "配置 UDP 端口范围转发到当前服务端口"
+        menuItem 2 "删除端口跳跃" "移除当前端口跳跃规则"
+        menuItem 3 "查看端口跳跃" "显示当前端口跳跃范围"
+        menuClose
+        selectPortHoppingStatus=
+        autoRead port_hopping_menu "请选择:" selectPortHoppingStatus || return 0
+        case "${selectPortHoppingStatus}" in
+        1)
+            addPortHopping "${type}" "${targetPort}" || return 1
+            return 0
+            ;;
+        2)
+            if deletePortHoppingRules "${type}" "${portHoppingStart}" "${portHoppingEnd}" "${targetPort}"; then
+                protocolPortHoppingStatusCard "删除成功"
+                return 0
+            fi
             protocolPortHoppingStatusCard "删除失败，请检查防火墙规则"
             return 1
-        fi
-    elif [[ "${selectPortHoppingStatus}" == "3" ]]; then
-        if [[ -n "${portHoppingStart}" && -n "${portHoppingEnd}" ]]; then
-            protocolPortHoppingStatusCard "当前端口跳跃范围为: ${portHoppingStart}-${portHoppingEnd}"
-        else
-            protocolPortHoppingStatusCard "未设置端口跳跃"
-        fi
-    else
-        portHoppingMenu "${type}"
-    fi
+            ;;
+        3)
+            if [[ -n "${portHoppingStart}" && -n "${portHoppingEnd}" ]]; then
+                protocolPortHoppingStatusCard "当前端口跳跃范围为: ${portHoppingStart}-${portHoppingEnd}"
+            else
+                protocolPortHoppingStatusCard "未设置端口跳跃"
+            fi
+            return 0
+            ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
 }
 
 
