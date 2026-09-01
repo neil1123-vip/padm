@@ -1074,11 +1074,11 @@ checkLogRollbackOrReport() {
 checkLog() {
     if [[ "${coreInstallType}" == "2" ]]; then
         errorCard "此功能仅支持 Xray-core 内核"
-        exit 0
+        return 1
     fi
     if [[ -z "${configPath}" && -z "${realityStatus}" ]]; then
         errorCard "没有检测到安装目录，请执行脚本安装内容"
-        exit 0
+        return 1
     fi
     local realityLogShow=
     local logStatus=false
@@ -1102,7 +1102,7 @@ checkLog() {
     menuItem 6 "清空日志" "清理当前日志文件"
     menuClose
 
-    autoRead log_menu "请选择:" selectAccessLogType
+    autoRead log_menu "请选择:" selectAccessLogType || return 0
     local configPathLog=${configPath//conf\//}
 
     case ${selectAccessLogType} in
@@ -1156,7 +1156,7 @@ checkLog() {
             return 1
         fi
         padmRemoveCleanupPath "${logBackupDir}"
-        checkLog 1
+        return 0
         ;;
     2)
         tail -f "${configPathLog}access.log"
