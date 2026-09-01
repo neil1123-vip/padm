@@ -1001,9 +1001,10 @@ runCoreSelectionRetryActionRegression() (
         'shell/core/manage.sh|18'
         'shell/core/fail2ban.sh|1'
         'shell/core/entry_helpers.sh|1'
+        'shell/core/routing_bt.sh|0'
         'shell/core/routing_socks.sh|0'
         'shell/core/protocol_runtime.sh|0'
-        'shell/core/routing_ipv6.sh|1'
+        'shell/core/routing_ipv6.sh|0'
     )
     local -a expectedPatterns=(
         'shell/core/cores.sh|coreSelectionRetryAction selectCoreInstall'
@@ -1013,7 +1014,6 @@ runCoreSelectionRetryActionRegression() (
         'shell/core/manage.sh|coreSelectionRetryAction manageTuic'
         'shell/core/fail2ban.sh|coreSelectionRetryAction manageFail2ban'
         'shell/core/entry_helpers.sh|coreSelectionRetryAction bbrInstall'
-        'shell/core/routing_ipv6.sh|coreSelectionRetryAction ipv6Routing'
     )
     local -a removedPatterns=(
         'shell/core/cores.sh|coreSelectionErrorCard
@@ -1475,6 +1475,27 @@ EOF
             assertMenuAction 'errorCard:选择错误'
             ! assertMenuAction routingToolsMenu
             [[ "$(wc -l <"${routingMenuRenderLog}")" == "2" ]]
+
+            (
+                coreInstallType=1
+                singBoxConfigPath=
+                readInstallType() { :; }
+                hasIPv6Connectivity() { return 0; }
+                routingAccessMenu() { recordMenuAction routingAccessMenu; }
+                : >"${routingMenuRenderLog}"
+                resetMenuActions
+                btTools <<< $'bad\n4'
+                assertMenuAction 'errorCard:选择错误'
+                ! assertMenuAction routingAccessMenu
+                [[ "$(wc -l <"${routingMenuRenderLog}")" == "2" ]]
+
+                : >"${routingMenuRenderLog}"
+                resetMenuActions
+                ipv6Routing <<< $'bad\n5'
+                assertMenuAction 'errorCard:选择错误'
+                ! assertMenuAction routingAccessMenu
+                [[ "$(wc -l <"${routingMenuRenderLog}")" == "2" ]]
+            )
         )
 
         (

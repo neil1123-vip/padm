@@ -10,15 +10,12 @@ btTools() {
 
         coreNotInstalledErrorCard
 
-        menu
-
-        exit 0
+        return 1
 
     fi
-
-
-
-    echoContent title "\n┌─ BT 下载管理 ──────────────────────────────────────"
+    local btStatus=
+    while true; do
+        echoContent title "\n┌─ BT 下载管理 ──────────────────────────────────────"
 
     menuLine "通过核心协议嗅探识别 bittorrent 后阻断"
 
@@ -40,44 +37,39 @@ btTools() {
 
     menuClose
 
-    autoRead bt_menu "请选择:" btStatus
+    btStatus=
+    autoRead bt_menu "请选择:" btStatus || return 0
 
     if [[ "${btStatus}" == "1" ]]; then
 
         routingConfigApplyTransaction "启用 BT 阻断失败" true false installBTBlock || return 1
 
         successCard "已启用 BT 阻断"
+        return $?
 
     elif [[ "${btStatus}" == "2" ]]; then
 
         routingConfigApplyTransaction "关闭 BT 阻断失败" true false uninstallBTBlock || return 1
 
         successCard "已关闭 BT 阻断"
+        return $?
 
     elif [[ "${btStatus}" == "3" ]]; then
 
         showBTBlockStatus
 
-        return
+        return $?
 
     elif [[ "${btStatus}" == "4" ]]; then
 
-        routingAccessMenu
-
-        return
+        return 0
 
     else
 
-        coreSelectionErrorCard
-
-        btTools
-
-        return
+        coreSelectionErrorCard "选择错误"
 
     fi
-
-
-
+    done
 }
 
 

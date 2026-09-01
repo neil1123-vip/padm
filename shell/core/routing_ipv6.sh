@@ -8,9 +8,7 @@ ipv6Routing() {
 
         coreNotInstalledErrorCard
 
-        menu
-
-        exit 0
+        return 1
 
     fi
 
@@ -22,10 +20,12 @@ ipv6Routing() {
     fi
 
     local successMessage=
+    local ipv6Status=
 
     progressCard "1" "IPv6 分流"
 
-    echoContent title "\n┌─ IPv6 分流 ────────────────────────────────────────"
+    while true; do
+        echoContent title "\n┌─ IPv6 分流 ────────────────────────────────────────"
 
     menuItem 1 "查看已分流域名" "显示当前 IPv6 分流规则"
 
@@ -39,13 +39,14 @@ ipv6Routing() {
 
     menuClose
 
-    autoRead ipv6_menu "请选择:" ipv6Status
+    ipv6Status=
+    autoRead ipv6_menu "请选择:" ipv6Status || return 0
 
     if [[ "${ipv6Status}" == "1" ]]; then
 
         showIPv6Routing
 
-        exit 0
+        return 0
 
     elif [[ "${ipv6Status}" == "2" ]]; then
 
@@ -93,9 +94,7 @@ ipv6Routing() {
 
             coreCancelledStatusCard "未设置 IPv6 全局出站"
 
-            ipv6Routing
-
-            return
+            return 0
 
         fi
 
@@ -107,18 +106,17 @@ ipv6Routing() {
 
     elif [[ "${ipv6Status}" == "5" ]]; then
 
-        routingAccessMenu
-
-        return
+        return 0
 
     else
-        coreSelectionRetryAction ipv6Routing
-
-        return
+        coreSelectionErrorCard "选择错误"
 
     fi
-    [[ -n "${successMessage}" ]] && successCard "${successMessage}"
-
+    if [[ -n "${successMessage}" ]]; then
+        successCard "${successMessage}"
+        return $?
+    fi
+    done
 }
 
 addIPv6RoutingConfig() {
