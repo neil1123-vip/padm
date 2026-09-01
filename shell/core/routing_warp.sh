@@ -256,11 +256,11 @@ warpRoutingReg() {
     menuDangerItem 4 "卸载 WARP 分流" "移除 WARP ${type} 分流配置"
     menuReturnItem 5 "返回 WARP 出站" "回到 WARP 出站菜单"
     menuClose
-    autoRead warp_ipv4_menu "请选择:" warpStatus
+    autoRead warp_ipv4_menu "请选择:" warpStatus || return 0
 
     if [[ "${warpStatus}" == "1" ]]; then
         showWireGuardDomain "${type}"
-        exit 0
+        return 0
     elif [[ "${warpStatus}" == "2" ]]; then
         echoContent title "\n┌─ WARP 分流规则说明 ────────────────────────────────"
         menuLine "支持 sing-box、Xray-core"

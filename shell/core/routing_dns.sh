@@ -6,8 +6,7 @@ DNS_ROUTING_ACTIVE_BACKUP_DIR=
 dnsRouting() {
     if [[ -z "${configPath}" ]]; then
         coreNotInstalledErrorCard
-        menu
-        exit 0
+        return 1
     fi
     local selectType=
     while true; do
@@ -22,8 +21,8 @@ dnsRouting() {
         autoRead dns_routing_menu "请选择:" selectType || return 0
 
         case "${selectType}" in
-        1) setUnlockDNS; return $? ;;
-        2) removeUnlockDNS; return $? ;;
+        1) setUnlockDNS || true; continue ;;
+        2) removeUnlockDNS || true; continue ;;
         3) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
@@ -34,8 +33,7 @@ dnsRouting() {
 sniRouting() {
     if [[ -z "${configPath}" ]]; then
         coreNotInstalledErrorCard
-        menu
-        exit 0
+        return 1
     fi
     local selectType=
     while true; do
@@ -50,8 +48,8 @@ sniRouting() {
         autoRead sni_routing_menu "请选择:" selectType || return 0
 
         case "${selectType}" in
-        1) setUnlockSNI; return $? ;;
-        2) removeUnlockSNI; return $? ;;
+        1) setUnlockSNI || true; continue ;;
+        2) removeUnlockSNI || true; continue ;;
         3) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
@@ -186,7 +184,7 @@ dnsRoutingManagedSingBoxFiles() {
 
 # DNS/hosts 配置写入
 setUnlockSNI() {
-    autoRead sni_routing_ip "请输入要覆盖到的 IP:" setSNIP
+    autoRead sni_routing_ip "请输入要覆盖到的 IP:" setSNIP || return 0
     if [[ -n ${setSNIP} ]]; then
         echoContent title "\n┌─ DNS/hosts 覆盖规则 ───────────────────────────────"
         menuLine "Xray 录入示例：netflix,disney,hulu"
@@ -195,7 +193,7 @@ setUnlockSNI() {
 
         dnsRoutingBackupCreate || { errorCard "DNS/hosts 覆盖配置备份失败，已取消修改"; return 1; }
         if [[ "${coreInstallType}" == 1 ]]; then
-            autoRead sni_xray_domains "请按照上面示例录入域名:" xrayDomainList
+            autoRead sni_xray_domains "请按照上面示例录入域名:" xrayDomainList || return 0
             local hosts={}
             while read -r domain; do
                 local matchedRuleValue
@@ -221,7 +219,7 @@ EOF
         fi
         if [[ -n "${singBoxConfigPath}" ]]; then
             echoContent yellow "录入示例:www.netflix.com,www.google.com"
-            autoRead sni_singbox_domains "请按照上面示例录入域名:" singboxDomainList
+            autoRead sni_singbox_domains "请按照上面示例录入域名:" singboxDomainList || return 0
             addSingBoxDNSConfig "${setSNIP}" "${singboxDomainList}" "predefined" || { dnsRoutingAbortChange "DNS/hosts 覆盖配置写入失败"; return 1; }
         fi
         dnsRoutingReloadOrRollback "DNS/hosts 覆盖" || return 1
@@ -229,7 +227,7 @@ EOF
     else
         coreIPRequiredErrorCard
     fi
-    exit 0
+    return 0
 }
 
 # 添加 Xray DNS 配置
@@ -402,12 +400,12 @@ EOF
 }
 # 设置 DNS 分流
 setUnlockDNS() {
-    autoRead dns_routing_server "请输入分流的DNS:" setDNS
+    autoRead dns_routing_server "请输入分流的DNS:" setDNS || return 0
     if [[ -n ${setDNS} ]]; then
         echoContent title "\n┌─ DNS 分流规则 ─────────────────────────────────────"
         menuLine "录入示例：netflix,disney,hulu"
         menuClose
-        autoRead routing_domain_rules "请按照上面示例录入域名:" domainList
+        autoRead routing_domain_rules "请按照上面示例录入域名:" domainList || return 0
 
         dnsRoutingBackupCreate || { errorCard "DNS 分流配置备份失败，已取消修改"; return 1; }
         if ! addXrayDNSConfig "${setDNS}" "${domainList}"; then
@@ -433,7 +431,7 @@ setUnlockDNS() {
     else
         errorCard "dns不可为空"
     fi
-    exit 0
+    return 0
 }
 
 # 移除 DNS/hosts 配置
@@ -484,7 +482,7 @@ EOF
 
     successCard "卸载成功"
 
-    exit 0
+    return 0
 }
 
 # 移除 DNS 分流
