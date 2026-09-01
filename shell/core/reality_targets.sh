@@ -665,76 +665,49 @@ formatRealityTargetResultLine() {
 }
 
 writeRealityTargetResultLine() {
-    local target=$1
-    local sni=$2
-    local name=$3
-    local category=$4
-    local cdnRisk=$5
-    local ip=$6
-    local asn=$7
-    local asOrg=$8
-    local networkMatch=$9
-    local score=${10}
-    local pqc=${11}
-    local certLength=${12}
-    local tls13=${13}
-    local checkedAt=${14}
-    local note=${15}
-    local resultsFile stagedFile
-    resultsFile=$(realityTargetManagedResultsFile) || return 1
-    padmEnsureSafeDirectory "$(dirname -- "${resultsFile}")" || return 1
-    padmCreateTempFileForTarget stagedFile "${resultsFile}" reality || return 1
-    if [[ -f "${resultsFile}" ]]; then
-        awk -F'\t' -v target="${target}" '$1 != target' "${resultsFile}" >"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
-    else
-        : >"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
-    fi
-    formatRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}" >>"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
-    commitGeneratedFile "${stagedFile}" "${resultsFile}" 644 || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
+    local linesFile status
+    padmCreateTempPath linesFile "$(realityTargetTmpPath 'padm-reality-target-result.XXXXXX')" || return 1
+    formatRealityTargetResultLine "$@" >"${linesFile}" || { padmRemoveCleanupPath "${linesFile}"; return 1; }
+    writeRealityTargetResultLines "${linesFile}"
+    status=$?
+    padmRemoveCleanupPath "${linesFile}"
+    return "${status}"
 }
 
 writeRealityTargetResultLines() {
     local linesFile=$1
-    local resultsFile stagedFile
+    local resultsFile mergedFile stagedFile line target parsed host
+    local -a sourceFiles=()
     [[ -f "${linesFile}" ]] || return 0
     resultsFile=$(realityTargetManagedResultsFile) || return 1
+    [[ -f "${resultsFile}" ]] && sourceFiles+=("${resultsFile}")
+    [[ -s "${linesFile}" ]] && sourceFiles+=("${linesFile}")
+    ((${#sourceFiles[@]} > 0)) || return 0
     padmEnsureSafeDirectory "$(dirname -- "${resultsFile}")" || return 1
-    padmCreateTempFileForTarget stagedFile "${resultsFile}" reality || return 1
-    if [[ -f "${resultsFile}" && -s "${linesFile}" ]]; then
-        awk -F'\t' '
-          {
-            if (!($1 in seen)) order[++count] = $1
-            seen[$1] = 1
-            line[$1] = $0
-          }
-          END {
-            for (i = 1; i <= count; i++) print line[order[i]]
-          }
-        ' "${resultsFile}" "${linesFile}" >"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
-    elif [[ -f "${resultsFile}" ]]; then
-        awk -F'\t' '
-          {
-            if (!($1 in seen)) order[++count] = $1
-            seen[$1] = 1
-            line[$1] = $0
-          }
-          END {
-            for (i = 1; i <= count; i++) print line[order[i]]
-          }
-        ' "${resultsFile}" >"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
-    else
-        [[ -s "${linesFile}" ]] || { padmRemoveCleanupPath "${stagedFile}"; return 0; }
-        awk -F'\t' '
-          {
-            if (!($1 in seen)) order[++count] = $1
-            seen[$1] = 1
-            line[$1] = $0
-          }
-          END {
-            for (i = 1; i <= count; i++) print line[order[i]]
-          }
-        ' "${linesFile}" >"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
-    fi
+    padmCreateTempFileForTarget mergedFile "${resultsFile}" reality-merge || return 1
+    padmCreateTempFileForTarget stagedFile "${resultsFile}" reality || { padmRemoveCleanupPath "${mergedFile}"; return 1; }
+    awk -F'\t' '
+      {
+        if (!($1 in seen)) order[++count] = $1
+        seen[$1] = 1
+        line[$1] = $0
+        keep[$1] = ($5 == "no" && $10 == "A")
+      }
+      END {
+        for (i = 1; i <= count; i++) {
+          target = order[i]
+          if (keep[target]) print line[target]
+        }
+      }
+    ' "${sourceFiles[@]}" >"${mergedFile}" || { padmRemoveCleanupPath "${mergedFile}"; padmRemoveCleanupPath "${stagedFile}"; return 1; }
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+        target=${line%%$'\t'*}
+        parsed=$(parseHostPort "${target}" 443)
+        host=${parsed%:*}
+        realityTargetCandidateBlocked "${host}" && continue
+        printf '%s\n' "${line}" >>"${stagedFile}" || { padmRemoveCleanupPath "${mergedFile}"; padmRemoveCleanupPath "${stagedFile}"; return 1; }
+    done <"${mergedFile}"
+    padmRemoveCleanupPath "${mergedFile}"
     commitGeneratedFile "${stagedFile}" "${resultsFile}" 644 || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
 }
 
@@ -772,21 +745,36 @@ realityTargetRefreshRecords() {
 
 removeRealityTargetsFromUnifiedLibrary() {
     local targetsFile=$1
-    local resultsFile candidatesFile resultsStageFile candidatesStageFile hostsFile target parsed host libraryBackupDir=
+    local resultsFile candidatesFile resultsStageFile candidatesStageFile hostsFile normalizationFile target parsed host libraryBackupDir=
     [[ -s "${targetsFile}" ]] || return 0
     resultsFile=$(realityTargetManagedResultsFile) || return 1
     candidatesFile=$(realityTargetManagedCandidatesFile 2>/dev/null || true)
     checkLogBackupCreate libraryBackupDir "${resultsFile}" "${candidatesFile}" || return 1
     if [[ -f "${resultsFile}" ]]; then
-        padmCreateTempFileForTarget resultsStageFile "${resultsFile}" reality || { padmRemoveCleanupPath "${libraryBackupDir}"; return 1; }
+        if ! padmCreateTempPath normalizationFile; then
+            realityTargetRestoreManagedBackup "${libraryBackupDir}" || true
+            return 1
+        fi
+        if ! writeRealityTargetResultLines "${normalizationFile}"; then
+            padmRemoveCleanupPath "${normalizationFile}"
+            realityTargetRestoreManagedBackup "${libraryBackupDir}" || return 1
+            return 1
+        fi
+        padmRemoveCleanupPath "${normalizationFile}"
+    fi
+    if [[ -f "${resultsFile}" ]]; then
+        padmCreateTempFileForTarget resultsStageFile "${resultsFile}" reality || {
+            realityTargetRestoreManagedBackup "${libraryBackupDir}" || true
+            return 1
+        }
         awk -F'\t' 'NR == FNR {targets[$1] = 1; next} !($1 in targets)' "${targetsFile}" "${resultsFile}" >"${resultsStageFile}" || {
             padmRemoveCleanupPath "${resultsStageFile}"
-            padmRemoveCleanupPath "${libraryBackupDir}"
+            realityTargetRestoreManagedBackup "${libraryBackupDir}" || true
             return 1
         }
         commitGeneratedFile "${resultsStageFile}" "${resultsFile}" 644 || {
             padmRemoveCleanupPath "${resultsStageFile}"
-            padmRemoveCleanupPath "${libraryBackupDir}"
+            realityTargetRestoreManagedBackup "${libraryBackupDir}" || true
             return 1
         }
     fi
@@ -1913,7 +1901,7 @@ selectRealityTargetCandidateInteractive() {
 
 selectAutoRecommendedRealityTarget() {
     local detector='' line host sni name category target record probeRecord probeStatus probePayload
-    local currentProfile rest currentAsn='' currentOrg='' probeLimit probed=0 selectedLine selectedTarget selectedScore
+    local currentProfile rest currentAsn='' currentOrg='' probeLimit probed=0 selectedLine selectedTarget selectedScore fallbackLine='' parsed
     local resultTarget resultSni resultName resultCategory cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note
 
     detector=$(realityTargetDetector 2>/dev/null || true)
@@ -1940,20 +1928,30 @@ selectAutoRecommendedRealityTarget() {
         IFS=$'\t' read -r probeStatus probePayload <<<"${probeRecord}"
         if [[ "${probeStatus}" == "OK" && -n "${probePayload}" ]]; then
             IFS=$'\t' read -r resultTarget resultSni resultName resultCategory cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note <<<"${probePayload}"
+            if [[ -z "${fallbackLine}" && "${cdnRisk}" == "no" && "${score}" == "C" ]]; then
+                fallbackLine=${probePayload}
+            fi
             writeRealityTargetResultLine "${resultTarget}" "${resultSni}" "${resultName}" "${resultCategory}" "${cdnRisk}" \
                 "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}" || return 1
         fi
         (( probed >= probeLimit )) && break
     done < <(realityTargetFilteredCandidates recommended)
 
-    if ! selectScannedRealityTarget; then
-        if ! realityTargetOpenSslAutoFallbackAllowed "${detector}" || ! selectScannedRealityTarget C; then
-            realityTargetStatusBlock red "REALITY 自动推荐" "推荐候选未得到可接受的 cdn_risk=no 结果" "未写入未经检测的兜底目标"
-            return 1
-        fi
+    if selectScannedRealityTarget; then
+        selectedTarget=$(formatRealityTarget "${realityTargetHost}" "${realityTargetPort}")
+        selectedLine=$(realityTargetResultLine "${selectedTarget}") || return 1
+    elif realityTargetOpenSslAutoFallbackAllowed "${detector}" && [[ -n "${fallbackLine}" ]]; then
+        selectedLine=${fallbackLine}
+        selectedTarget=$(realityTargetResultField "${selectedLine}" 1)
+        resultSni=$(realityTargetResultField "${selectedLine}" 2)
+        parsed=$(parseHostPort "${selectedTarget}" 443)
+        realityTargetHost=${parsed%:*}
+        realityTargetPort=${parsed##*:}
+        realitySNI=${AUTO_REALITY_SERVER_NAME:-${resultSni:-${realityTargetHost}}}
+    else
+        realityTargetStatusBlock red "REALITY 自动推荐" "推荐候选未得到可接受的 cdn_risk=no 结果" "未写入未经检测的兜底目标"
+        return 1
     fi
-    selectedTarget=$(formatRealityTarget "${realityTargetHost}" "${realityTargetPort}")
-    selectedLine=$(realityTargetResultLine "${selectedTarget}") || return 1
     selectedScore=$(realityTargetResultField "${selectedLine}" 10)
     if [[ "${selectedScore}" == "C" ]]; then
         realityTargetStatusBlock yellow "REALITY 自动推荐" "已选择 OpenSSL 验证的 sing-box 回退目标: ${selectedTarget}" "cdn_risk=no，评分=C" "实测候选: ${probed}"
