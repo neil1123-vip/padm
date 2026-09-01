@@ -379,6 +379,8 @@ runRealityAsnScanPlanRegression() {
     local oldAutoInstall="${AUTO_INSTALL:-}"
     local sampleCount=0
     local _sampleIp prefixFirst prefixLast prefixUsable
+    local largePrefixFile="${TMP_DIR}/asn-large-prefix.txt"
+    local largeSampleFile="${TMP_DIR}/asn-large-sample-ips.txt"
     AUTO_INSTALL=
     (
         # shellcheck source=/dev/null
@@ -415,6 +417,10 @@ EOF
     done <"${sampleFile}"
     [[ "${sampleCount}" == "12" ]]
     awk '!seen[$0]++ {next} {exit 1}' "${sampleFile}"
+    printf '10.0.0.0/8\n' >"${largePrefixFile}"
+    generateRealityAsnSampleIps "${largePrefixFile}" 10000 "${largeSampleFile}"
+    [[ "$(wc -l <"${largeSampleFile}" | tr -d ' ')" == "10000" ]]
+    awk '!seen[$0]++ {next} {exit 1}' "${largeSampleFile}"
     selectRealityAsnScanPlan AS64500 "${asnPrefixFile}" <<<"5
 12
 y

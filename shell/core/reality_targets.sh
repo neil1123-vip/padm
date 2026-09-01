@@ -1004,21 +1004,19 @@ generateRealityAsnSampleIps() {
     local prefixFile=$1
     local targetCount=$2
     local outputFile=$3
-    local rangesFile prefix range first last count generated=0 prefixIndex offset ip maxAttempts attempts nextIp
+    local rangesFile prefix range first _ count generated=0 prefixIndex remaining randomIndex lastIndex
+    local pickKey lastKey ipOffset lastOffset randomValue ip
     declare -a rangeFirsts=()
-    declare -a rangeLasts=()
-    declare -a rangeCounts=()
-    declare -a rangeNexts=()
+    declare -a rangeRemaining=()
+    declare -A rangeShuffle=()
     padmCreateTempPath rangesFile || return 1
     while IFS= read -r prefix; do
         range=$(realityAsnPrefixUsableRange "${prefix}" || true)
         [[ -n "${range}" ]] && printf '%s\n' "${range}" >>"${rangesFile}"
     done <"${prefixFile}"
-    while IFS=$'\t' read -r first last count; do
+    while IFS=$'\t' read -r first _ count; do
         rangeFirsts+=("${first}")
-        rangeLasts+=("${last}")
-        rangeCounts+=("${count}")
-        rangeNexts+=("${first}")
+        rangeRemaining+=("${count}")
     done <"${rangesFile}"
     padmRemoveCleanupPath "${rangesFile}"
     : >"${outputFile}"
@@ -1027,34 +1025,41 @@ generateRealityAsnSampleIps() {
         for prefixIndex in "${!rangeFirsts[@]}"; do
             (( generated >= targetCount )) && break
             first=${rangeFirsts[${prefixIndex}]}
-            last=${rangeLasts[${prefixIndex}]}
-            count=${rangeCounts[${prefixIndex}]}
-            nextIp=${rangeNexts[${prefixIndex}]}
-            if (( nextIp > last )); then
+            remaining=${rangeRemaining[${prefixIndex}]}
+            if (( remaining <= 0 )); then
                 continue
             fi
-            offset=$((RANDOM % count))
-            ip=$((first + offset))
-            maxAttempts=${count}
-            attempts=0
-            while (( attempts < maxAttempts )); do
-                if (( ip < first || ip > last )); then
-                    ip=${first}
-                fi
-                if (( ip >= nextIp )); then
-                    printf '%s\n' "$(realityIntToIpv4 "${ip}")" >>"${outputFile}"
-                    rangeNexts[${prefixIndex}]=$((ip + 1))
-                    generated=$((generated + 1))
-                    break
-                fi
-                ip=$((ip + 1))
-                attempts=$((attempts + 1))
-            done
+            # Sparse Fisher-Yates: sample a unique offset without walking a huge prefix.
+            randomValue=$(( (RANDOM << 30) ^ (RANDOM << 15) ^ RANDOM ))
+            randomIndex=$((randomValue % remaining))
+            lastIndex=$((remaining - 1))
+            pickKey="${prefixIndex}:${randomIndex}"
+            lastKey="${prefixIndex}:${lastIndex}"
+            if [[ -v "rangeShuffle[${pickKey}]" ]]; then
+                ipOffset=${rangeShuffle[${pickKey}]}
+            else
+                ipOffset=${randomIndex}
+            fi
+            if [[ -v "rangeShuffle[${lastKey}]" ]]; then
+                lastOffset=${rangeShuffle[${lastKey}]}
+            else
+                lastOffset=${lastIndex}
+            fi
+            if (( randomIndex == lastIndex )); then
+                unset "rangeShuffle[${lastKey}]"
+            else
+                rangeShuffle[${pickKey}]=${lastOffset}
+                unset "rangeShuffle[${lastKey}]"
+            fi
+            rangeRemaining[prefixIndex]=${lastIndex}
+            ip=$((first + ipOffset))
+            printf '%d.%d.%d.%d\n' "$(( (ip >> 24) & 255 ))" "$(( (ip >> 16) & 255 ))" "$(( (ip >> 8) & 255 ))" "$(( ip & 255 ))" >>"${outputFile}"
+            generated=$((generated + 1))
         done
         if (( generated < targetCount )); then
             local hasRemaining=false
             for prefixIndex in "${!rangeFirsts[@]}"; do
-                if (( rangeNexts[${prefixIndex}] <= rangeLasts[${prefixIndex}] )); then
+                if (( rangeRemaining[prefixIndex] > 0 )); then
                     hasRemaining=true
                     break
                 fi
