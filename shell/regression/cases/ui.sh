@@ -1405,6 +1405,28 @@ EOF
         [[ "${output}" == *"Xray Geo:"*"版本 v20260513"* ]]
         ! assertMenuAction unexpected-network-version-fetch
 
+        (
+            local serviceProbeLog="${TMP_DIR}/core-status-service-probes.log"
+            serviceInstalled() {
+                printf 'installed:%s\n' "$1" >>"${serviceProbeLog}"
+                [[ "${serviceInstalledState}" == "true" ]]
+            }
+            serviceRunning() {
+                printf 'running:%s\n' "$1" >>"${serviceProbeLog}"
+                case "$1" in
+                xray) [[ "${xrayRunningState}" == "true" ]] ;;
+                sing-box) [[ "${singBoxRunningState}" == "true" ]] ;;
+                nginx) [[ "${nginxRunningState}" == "true" ]] ;;
+                *) return 1 ;;
+                esac
+            }
+            nginxReasonsMock=
+            : >"${serviceProbeLog}"
+            showCoreStatusOverview
+            [[ "$(grep -c '^installed:nginx$' "${serviceProbeLog}")" == "1" ]]
+            [[ "$(grep -c '^running:nginx$' "${serviceProbeLog}")" == "1" ]]
+        )
+
         xrayInstalledState=false
         singBoxInstalledState=false
         serviceInstalledState=false

@@ -230,6 +230,7 @@ coreMenuServiceState() {
 
 showCoreStatusOverview() {
     local xrayConfigDir xrayDir xrayBinary reason
+    local xrayServiceStatus singBoxServiceStatus nginxServiceStatus
     local xrayVersion="未安装" singBoxVersion="未安装"
     local geoStatus="未安装" geoVersion= geoCron="未设置"
     local xrayConfigStatus="未配置" singBoxConfigStatus="未配置"
@@ -256,10 +257,13 @@ showCoreStatusOverview() {
         [[ -n "${reason}" ]] || continue
         nginxReasonText+="${nginxReasonText:+、}${reason}"
     done <<<"${nginxReasons}"
+    xrayServiceStatus=$(coreMenuServiceState xray)
+    singBoxServiceStatus=$(coreMenuServiceState sing-box)
+    nginxServiceStatus=$(coreMenuServiceState nginx)
 
     echoContent title "\n┌─ 核心状态总览 ─────────────────────────────────────"
     menuLine "Xray-core: $(coreDisplayState "${xrayVersion}")"
-    menuLine "Xray 服务: $(coreDisplayState "$(coreMenuServiceState xray)")"
+    menuLine "Xray 服务: $(coreDisplayState "${xrayServiceStatus}")"
     menuLine "Xray 配置: $(coreDisplayState "${xrayConfigStatus}")"
     if [[ -n "${geoVersion}" ]]; then
         menuLine "Xray Geo: $(coreDisplayState "${geoStatus}") / $(coreDisplayState "${geoVersion}") / 自动更新 $(coreDisplayState "${geoCron}")"
@@ -267,12 +271,12 @@ showCoreStatusOverview() {
         menuLine "Xray Geo: $(coreDisplayState "${geoStatus}") / 自动更新 $(coreDisplayState "${geoCron}")"
     fi
     menuLine "sing-box: $(coreDisplayState "${singBoxVersion}")"
-    menuLine "sing-box 服务: $(coreDisplayState "$(coreMenuServiceState sing-box)")"
+    menuLine "sing-box 服务: $(coreDisplayState "${singBoxServiceStatus}")"
     menuLine "sing-box 配置: $(coreDisplayState "${singBoxConfigStatus}")"
     if [[ -n "${nginxReasonText}" ]]; then
-        menuLine "Nginx 服务: $(coreDisplayState "$(coreMenuServiceState nginx)") / padm 依赖: ${nginxReasonText}"
-    elif serviceInstalled nginx; then
-        menuLine "Nginx 服务: $(coreDisplayState "$(coreMenuServiceState nginx)") / $(coreDisplayState "只读")（非 padm 当前依赖）"
+        menuLine "Nginx 服务: $(coreDisplayState "${nginxServiceStatus}") / padm 依赖: ${nginxReasonText}"
+    elif [[ "${nginxServiceStatus}" != "未安装" ]]; then
+        menuLine "Nginx 服务: $(coreDisplayState "${nginxServiceStatus}") / $(coreDisplayState "只读")（非 padm 当前依赖）"
     else
         menuLine "Nginx 服务: $(coreDisplayState "未安装")"
     fi
