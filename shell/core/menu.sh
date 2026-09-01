@@ -393,7 +393,7 @@ coreServiceControlAction() {
 }
 
 coreServiceControlMenu() {
-    local serviceName=$1 title=$1 selectServiceAction= confirm=
+    local serviceName=$1 title=$1 selectServiceAction= confirm= serviceStatus=
     [[ "${serviceName}" == "xray" ]] && title="Xray-core"
     [[ "${serviceName}" == "nginx" ]] && title="Nginx"
     if [[ "${serviceName}" == "nginx" ]] && ! nginxRuntimeRequired; then
@@ -401,13 +401,14 @@ coreServiceControlMenu() {
         return 0
     fi
     while true; do
+        serviceStatus=$(coreMenuServiceState "${serviceName}")
         echoContent title "\n┌─ ${title} 服务控制 ─────────────────────────────────"
-        menuLine "当前状态: $(coreDisplayState "$(coreMenuServiceState "${serviceName}")")"
+        menuLine "当前状态: $(coreDisplayState "${serviceStatus}")"
         menuItem 1 "启动" "服务已运行时不重复启动"
         menuItem 2 "停止" "会中断当前连接，执行前再次确认"
         menuItem 3 "重启" "完整停止后重新启动"
         if [[ "${serviceName}" == "nginx" ]]; then
-            if serviceRunning nginx; then
+            if [[ "${serviceStatus}" == "运行中" ]]; then
                 menuItem 4 "reload" "先执行 nginx -t，再平滑重载"
             else
                 menuItem 4 "reload（不可用）" "Nginx 未运行，无法平滑重载"
@@ -433,7 +434,7 @@ coreServiceControlMenu() {
         3) coreServiceControlAction "${serviceName}" restart || true ;;
         4)
             if [[ "${serviceName}" == "nginx" ]]; then
-                if serviceRunning nginx; then
+                if [[ "${serviceStatus}" == "运行中" ]]; then
                     coreServiceControlAction nginx reload || true
                 else
                     statusCard "Nginx reload" "不可用" "Nginx 未运行，未执行服务动作"

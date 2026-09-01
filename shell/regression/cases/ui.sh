@@ -2153,6 +2153,22 @@ still-invalid
 5'
         assertMenuAction 'runServiceAction:nginx:reload'
 
+        (
+            local controlServiceProbeLog="${TMP_DIR}/core-service-control-probes.log"
+            serviceInstalled() {
+                printf 'installed:%s\n' "$1" >>"${controlServiceProbeLog}"
+                return 0
+            }
+            serviceRunning() {
+                printf 'running:%s\n' "$1" >>"${controlServiceProbeLog}"
+                return 0
+            }
+            nginxReasonsMock="订阅发布"
+            : >"${controlServiceProbeLog}"
+            coreServiceControlMenu nginx <<<"5"
+            [[ "$(grep -c '^running:nginx$' "${controlServiceProbeLog}")" == "1" ]]
+        )
+
         resetMenuActions
         resetMenuRender
         coreLogsMenu <<<'4
