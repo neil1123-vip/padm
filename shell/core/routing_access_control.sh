@@ -25,12 +25,12 @@ accessControlMenu() {
         accessControlStatus=
         autoRead access_control_menu "请选择:" accessControlStatus || return 0
         case "${accessControlStatus}" in
-        1) showAccessControlStatus; return $? ;;
-        2) addBlockedDomains; return $? ;;
-        3) addBlockedIPs; return $? ;;
-        4) addDirectAllowDomains; return $? ;;
-        5) manageRegionalBlockPolicy; return $? ;;
-        6) removeAccessControlMenu; return $? ;;
+        1) showAccessControlStatus || true; continue ;;
+        2) addBlockedDomains || true; continue ;;
+        3) addBlockedIPs || true; continue ;;
+        4) addDirectAllowDomains || true; continue ;;
+        5) manageRegionalBlockPolicy || true; continue ;;
+        6) removeAccessControlMenu || true; continue ;;
         7) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac

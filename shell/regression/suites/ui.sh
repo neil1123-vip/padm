@@ -44,7 +44,10 @@ runRegressionUiSmokeSuiteRoot() {
     autoRead() {
         local targetVar=$3
         local input=
-        IFS= read -r input || input=
+        IFS= read -r input || {
+            printf -v "${targetVar}" '%s' ""
+            return 1
+        }
         printf -v "${targetVar}" '%s' "${input}"
     }
     selectCoreInstall() { recordMenuAction selectCoreInstall; }

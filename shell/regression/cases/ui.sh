@@ -55,7 +55,10 @@ runSubscriptionWireGuardMenuFlowRegression() (
     autoRead() {
         local targetVar=$3
         local readValue=
-        IFS= read -r readValue || readValue=
+        IFS= read -r readValue || {
+            printf -v "${targetVar}" '%s' ""
+            return 1
+        }
         printf -v "${targetVar}" '%s' "${readValue}"
     }
     echoContent() { return 0; }

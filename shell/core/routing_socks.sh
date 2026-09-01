@@ -20,9 +20,9 @@ socks5Routing() {
         autoRead socks5_menu "请选择:" selectType || return 0
 
         case "${selectType}" in
-        1) socks5OutboundRoutingMenu; return $? ;;
-        2) socks5InboundRoutingMenu; return $? ;;
-        3) removeSocks5Routing; return $? ;;
+        1) socks5OutboundRoutingMenu || true; continue ;;
+        2) socks5InboundRoutingMenu || true; continue ;;
+        3) removeSocks5Routing || true; continue ;;
         4) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac

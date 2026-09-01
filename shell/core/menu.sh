@@ -78,12 +78,12 @@ protocolEntryMenu() {
         selectProtocolMenuType=
         autoRead protocol_entry_menu "请选择:" selectProtocolMenuType || return 0
         case "${selectProtocolMenuType}" in
-        1) manageReality 1; return $? ;;
-        2) manageXHTTP; return $? ;;
-        3) manageHysteria; return $? ;;
-        4) manageTuic; return $? ;;
-        5) addCorePort 1; return $? ;;
-        6) manageCDN 1; return $? ;;
+        1) manageReality 1 || true; continue ;;
+        2) manageXHTTP || true; continue ;;
+        3) manageHysteria || true; continue ;;
+        4) manageTuic || true; continue ;;
+        5) addCorePort 1 || true; continue ;;
+        6) manageCDN 1 || true; continue ;;
         7) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
@@ -104,8 +104,8 @@ siteCertificateMenu() {
         selectSiteCertificateMenuType=
         autoRead site_certificate_menu "请选择:" selectSiteCertificateMenuType || return 0
         case "${selectSiteCertificateMenuType}" in
-        1) manageTraditionalTlsFallback 1; return $? ;;
-        2) manageTLSCertificates; return $? ;;
+        1) manageTraditionalTlsFallback 1 || true; continue ;;
+        2) manageTLSCertificates || true; continue ;;
         3) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
@@ -150,10 +150,10 @@ systemScriptMenu() {
         selectSystemMenuType=
         autoRead system_script_menu "请选择:" selectSystemMenuType || return 0
         case "${selectSystemMenuType}" in
-        1) updatePadm 1; return $? ;;
-        2) showPadmScriptInstallStatus; return $? ;;
-        3) manageFail2ban; return $? ;;
-        4) bbrInstall; return $? ;;
+        1) updatePadm 1 || true; continue ;;
+        2) showPadmScriptInstallStatus || true; continue ;;
+        3) manageFail2ban || true; continue ;;
+        4) bbrInstall || true; continue ;;
         5) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
@@ -173,7 +173,7 @@ advancedDangerMenu() {
         autoRead danger_menu "请选择:" selectDangerMenuType || return 0
         case "${selectDangerMenuType}" in
         1) unInstall 1; return $? ;;
-        2) manageVlessEncryptionExperiment; return $? ;;
+        2) manageVlessEncryptionExperiment || true; continue ;;
         3) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
