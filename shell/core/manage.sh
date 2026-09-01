@@ -1904,50 +1904,53 @@ clearCDNEntryAddress() {
 }
 
 manageCDN() {
+    local selectCDNType=
     progressCard "$1" "CDN 入口管理" "1"
-    readInstallType
-    readInstallProtocolType
+    while true; do
+        readInstallType
+        readInstallProtocolType
 
-    echoContent title "\n┌─ CDN 入口管理 ─────────────────────────────────────"
-    menuLine "这里只覆盖订阅里的客户端连接地址，不修改 Reality target/SNI 或 XHTTP 参数"
-    menuLine "多个 CDN CNAME、优选 IP 或入口域名可用英文逗号分隔，订阅会生成多条节点"
-    menuLine "当前入口地址：$(cdnCurrentAddress)"
-    if currentProtocolHas 2; then
-        menuLine "当前已安装 Reality XHTTP，可直接调整入口地址"
-    elif currentProtocolHasAny 21 23 24 25; then
-        menuLine "当前是传统 TLS/CDN 协议，仅建议用于旧客户端兼容"
-    else
-        menuLine "未检测到 XHTTP 能力；新建 XHTTP 节点建议安装协议 2：$(xrayProtocolName 2)"
-    fi
-    menuItem 1 "设置入口地址" "写入 CDN CNAME、优选 IP 或自有域名"
-    menuItem 2 "清空入口地址" "恢复订阅使用安装入口地址"
-    menuItem 3 "CDN / H3 使用说明" "查看协议选择和排障提示"
-    menuReturnItem 4 "返回协议与入口" "回到上级菜单"
-    menuClose
-    autoRead cdn_menu "请选择:" selectCDNType
-
-    case ${selectCDNType} in
-    1)
-        if currentProtocolHas 2 || currentProtocolHasAny 21 23 24 25; then
-            setCDNEntryAddress
+        echoContent title "\n┌─ CDN 入口管理 ─────────────────────────────────────"
+        menuLine "这里只覆盖订阅里的客户端连接地址，不修改 Reality target/SNI 或 XHTTP 参数"
+        menuLine "多个 CDN CNAME、优选 IP 或入口域名可用英文逗号分隔，订阅会生成多条节点"
+        menuLine "当前入口地址：$(cdnCurrentAddress)"
+        if currentProtocolHas 2; then
+            menuLine "当前已安装 Reality XHTTP，可直接调整入口地址"
+        elif currentProtocolHasAny 21 23 24 25; then
+            menuLine "当前是传统 TLS/CDN 协议，仅建议用于旧客户端兼容"
         else
-            statusCard "不可用" "请先安装 Reality XHTTP 或传统 TLS/CDN 协议"
+            menuLine "未检测到 XHTTP 能力；新建 XHTTP 节点建议安装协议 2：$(xrayProtocolName 2)"
         fi
-        ;;
-    2)
-        clearCDNEntryAddress
-        ;;
-    3)
-        showCDNUsageNotes
-        ;;
-    4)
-        protocolEntryMenu
-        ;;
-    *)
-        coreSelectionErrorCard "选择错误"
-        manageCDN 1
-        ;;
-    esac
+        menuItem 1 "设置入口地址" "写入 CDN CNAME、优选 IP 或自有域名"
+        menuItem 2 "清空入口地址" "恢复订阅使用安装入口地址"
+        menuItem 3 "CDN / H3 使用说明" "查看协议选择和排障提示"
+        menuReturnItem 4 "返回协议与入口" "回到上级菜单"
+        menuClose
+        selectCDNType=
+        autoRead cdn_menu "请选择:" selectCDNType || return 0
+
+        case "${selectCDNType}" in
+        1)
+            if currentProtocolHas 2 || currentProtocolHasAny 21 23 24 25; then
+                setCDNEntryAddress || true
+            else
+                statusCard "不可用" "请先安装 Reality XHTTP 或传统 TLS/CDN 协议"
+            fi
+            ;;
+        2)
+            clearCDNEntryAddress || true
+            ;;
+        3)
+            showCDNUsageNotes
+            ;;
+        4)
+            return 0
+            ;;
+        *)
+            coreSelectionErrorCard "选择错误"
+            ;;
+        esac
+    done
 }
 
 # Clash Meta 配置文件
@@ -3578,34 +3581,37 @@ manageXHTTP() {
 
 # hysteria管理
 manageHysteria() {
-    echoContent title "\n┌─ Hysteria2 管理 ───────────────────────────────────"
-    local hysteria2Status=
-    if [[ -n "${singBoxConfigPath}" ]] && [[ -f "/etc/padm/sing-box/conf/config/06_hysteria2_inbounds.json" ]]; then
+    local hysteria2Status installHysteria2Status
+    while true; do
+        hysteria2Status=
+        echoContent title "\n┌─ Hysteria2 管理 ───────────────────────────────────"
         menuLine "依赖 sing-box 内核；适合 UDP、移动网络场景"
-        menuItem 1 "重新安装" "重建 Hysteria2 入站配置"
-        menuItem 2 "卸载" "移除 Hysteria2 入站配置"
-        menuItem 3 "端口跳跃管理" "配置 UDP 端口跳跃转发"
-        menuReturnItem 4 "返回协议与入口" "回到上级菜单"
-        hysteria2Status=true
-    else
-        menuLine "依赖 sing-box 内核；适合 UDP、移动网络场景"
-        menuItem 1 "安装" "新增 Hysteria2 入站配置"
-        menuReturnItem 2 "返回协议与入口" "回到上级菜单"
-    fi
+        if [[ -n "${singBoxConfigPath}" ]] && [[ -f "/etc/padm/sing-box/conf/config/06_hysteria2_inbounds.json" ]]; then
+            menuItem 1 "重新安装" "重建 Hysteria2 入站配置"
+            menuItem 2 "卸载" "移除 Hysteria2 入站配置"
+            menuItem 3 "端口跳跃管理" "配置 UDP 端口跳跃转发"
+            menuReturnItem 4 "返回协议与入口" "回到上级菜单"
+            hysteria2Status=true
+        else
+            menuItem 1 "安装" "新增 Hysteria2 入站配置"
+            menuReturnItem 2 "返回协议与入口" "回到上级菜单"
+        fi
 
-    menuClose
-    autoRead hysteria_menu "请选择:" installHysteria2Status
-    if [[ "${installHysteria2Status}" == "1" ]]; then
-        singBoxHysteria2Install
-    elif [[ "${installHysteria2Status}" == "2" && "${hysteria2Status}" == "true" ]]; then
-        unInstallSingBox hysteria2
-    elif [[ "${installHysteria2Status}" == "3" && "${hysteria2Status}" == "true" ]]; then
-        portHoppingMenu hysteria2
-    elif [[ ( "${installHysteria2Status}" == "4" && "${hysteria2Status}" == "true" ) || ( "${installHysteria2Status}" == "2" && "${hysteria2Status}" != "true" ) ]]; then
-        protocolEntryMenu
-    else
-        coreSelectionRetryAction manageHysteria
-    fi
+        menuClose
+        installHysteria2Status=
+        autoRead hysteria_menu "请选择:" installHysteria2Status || return 0
+        if [[ "${installHysteria2Status}" == "1" ]]; then
+            singBoxHysteria2Install || true
+        elif [[ "${installHysteria2Status}" == "2" && "${hysteria2Status}" == "true" ]]; then
+            unInstallSingBox hysteria2 || true
+        elif [[ "${installHysteria2Status}" == "3" && "${hysteria2Status}" == "true" ]]; then
+            portHoppingMenu hysteria2 || true
+        elif [[ ( "${installHysteria2Status}" == "4" && "${hysteria2Status}" == "true" ) || ( "${installHysteria2Status}" == "2" && "${hysteria2Status}" != "true" ) ]]; then
+            return 0
+        else
+            coreSelectionErrorCard "选择错误"
+        fi
+    done
 }
 
 
@@ -3717,82 +3723,92 @@ setTuicRecommendedDefaults() {
 }
 
 manageTuicCongestionControl() {
-    echoContent title "\n┌─ Tuic 拥塞控制 ────────────────────────────────────"
-    menuLine "sing-box 默认 cubic；bbr 可在高带宽或长距离链路手动尝试"
-    menuRecommendedItem 1 "cubic" "默认推荐"
-    menuItem 2 "bbr" "高带宽/长距离链路可试"
-    menuItem 3 "new_reno" "兼容保守"
-    menuReturnItem 4 "返回" "回到 Tuic 管理"
-    menuClose
-    autoRead tuic_congestion_menu "请选择:" selectTuicCongestion
-    case "${selectTuicCongestion}" in
-    1) setTuicCongestionControl cubic ;;
-    2) setTuicCongestionControl bbr ;;
-    3) setTuicCongestionControl new_reno ;;
-    4) manageTuic ;;
-    *) coreSelectionRetryAction manageTuicCongestionControl ;;
-    esac
+    local selectTuicCongestion=
+    while true; do
+        echoContent title "\n┌─ Tuic 拥塞控制 ────────────────────────────────────"
+        menuLine "sing-box 默认 cubic；bbr 可在高带宽或长距离链路手动尝试"
+        menuRecommendedItem 1 "cubic" "默认推荐"
+        menuItem 2 "bbr" "高带宽/长距离链路可试"
+        menuItem 3 "new_reno" "兼容保守"
+        menuReturnItem 4 "返回" "回到 Tuic 管理"
+        menuClose
+        selectTuicCongestion=
+        autoRead tuic_congestion_menu "请选择:" selectTuicCongestion || return 0
+        case "${selectTuicCongestion}" in
+        1) setTuicCongestionControl cubic || true ;;
+        2) setTuicCongestionControl bbr || true ;;
+        3) setTuicCongestionControl new_reno || true ;;
+        4) return 0 ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
 }
 
 manageTuicAdvanced() {
-    echoContent title "\n┌─ Tuic 高级设置 ────────────────────────────────────"
-    menuLine "高级参数直接写入 sing-box Tuic inbound，写入后会 merge 校验并 reload"
-    menuItem 1 "连接参数" "设置 auth_timeout 与 heartbeat"
-    menuDangerItem 2 "启用 0-RTT" "减少握手但增加重放风险"
-    menuRecommendedItem 3 "关闭 0-RTT" "恢复上游推荐的安全默认值"
-    menuRecommendedItem 4 "恢复推荐默认值" "cubic、3s、10s、0-RTT 关闭"
-    menuReturnItem 5 "返回 Tuic 管理" "回到上级菜单"
-    menuClose
-    autoRead tuic_advanced_menu "请选择:" selectTuicAdvanced
-    case "${selectTuicAdvanced}" in
-    1) setTuicConnectionParams ;;
-    2) setTuicZeroRtt true ;;
-    3) setTuicZeroRtt false ;;
-    4) setTuicRecommendedDefaults ;;
-    5) manageTuic ;;
-    *) coreSelectionRetryAction manageTuicAdvanced ;;
-    esac
+    local selectTuicAdvanced=
+    while true; do
+        echoContent title "\n┌─ Tuic 高级设置 ────────────────────────────────────"
+        menuLine "高级参数直接写入 sing-box Tuic inbound，写入后会 merge 校验并 reload"
+        menuItem 1 "连接参数" "设置 auth_timeout 与 heartbeat"
+        menuDangerItem 2 "启用 0-RTT" "减少握手但增加重放风险"
+        menuRecommendedItem 3 "关闭 0-RTT" "恢复上游推荐的安全默认值"
+        menuRecommendedItem 4 "恢复推荐默认值" "cubic、3s、10s、0-RTT 关闭"
+        menuReturnItem 5 "返回 Tuic 管理" "回到上级菜单"
+        menuClose
+        selectTuicAdvanced=
+        autoRead tuic_advanced_menu "请选择:" selectTuicAdvanced || return 0
+        case "${selectTuicAdvanced}" in
+        1) setTuicConnectionParams || true ;;
+        2) setTuicZeroRtt true || true ;;
+        3) setTuicZeroRtt false || true ;;
+        4) setTuicRecommendedDefaults || true ;;
+        5) return 0 ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
 }
 
 manageTuic() {
-    echoContent title "\n┌─ Tuic 管理 ────────────────────────────────────────"
-    local tuicStatus=
-    if [[ -n "${singBoxConfigPath}" ]] && [[ -f "/etc/padm/sing-box/conf/config/09_tuic_inbounds.json" ]]; then
+    local tuicStatus installTuicStatus
+    while true; do
+        tuicStatus=
+        echoContent title "\n┌─ Tuic 管理 ────────────────────────────────────────"
         menuLine "依赖 sing-box 内核；适合 UDP、移动网络或 QUIC/HTTP3 客户端场景"
         menuLine "不作为新人默认推荐"
-        tuicSettingsSummary
-        menuItem 1 "重新安装" "重建 Tuic 入站配置"
-        menuItem 2 "卸载" "移除 Tuic 入站配置"
-        menuItem 3 "端口跳跃管理" "配置 UDP 端口跳跃转发"
-        menuItem 4 "拥塞控制" "cubic / bbr / new_reno"
-        menuItem 5 "高级设置" "auth_timeout、heartbeat、0-RTT"
-        menuRecommendedItem 6 "恢复推荐默认值" "cubic、3s、10s、0-RTT 关闭"
-        menuReturnItem 7 "返回协议与入口" "回到上级菜单"
-        tuicStatus=true
-    else
-        menuLine "依赖 sing-box 内核；适合 UDP、移动网络或 QUIC/HTTP3 客户端场景"
-        menuLine "不作为新人默认推荐"
-        menuItem 1 "安装" "新增 Tuic 入站配置"
-        menuReturnItem 2 "返回协议与入口" "回到上级菜单"
-    fi
+        if [[ -n "${singBoxConfigPath}" ]] && [[ -f "/etc/padm/sing-box/conf/config/09_tuic_inbounds.json" ]]; then
+            tuicSettingsSummary
+            menuItem 1 "重新安装" "重建 Tuic 入站配置"
+            menuItem 2 "卸载" "移除 Tuic 入站配置"
+            menuItem 3 "端口跳跃管理" "配置 UDP 端口跳跃转发"
+            menuItem 4 "拥塞控制" "cubic / bbr / new_reno"
+            menuItem 5 "高级设置" "auth_timeout、heartbeat、0-RTT"
+            menuRecommendedItem 6 "恢复推荐默认值" "cubic、3s、10s、0-RTT 关闭"
+            menuReturnItem 7 "返回协议与入口" "回到上级菜单"
+            tuicStatus=true
+        else
+            menuItem 1 "安装" "新增 Tuic 入站配置"
+            menuReturnItem 2 "返回协议与入口" "回到上级菜单"
+        fi
 
-    menuClose
-    autoRead tuic_menu "请选择:" installTuicStatus
-    if [[ "${installTuicStatus}" == "1" ]]; then
-        singBoxTuicInstall
-    elif [[ "${installTuicStatus}" == "2" && "${tuicStatus}" == "true" ]]; then
-        unInstallSingBox tuic
-    elif [[ "${installTuicStatus}" == "3" && "${tuicStatus}" == "true" ]]; then
-        portHoppingMenu tuic
-    elif [[ "${installTuicStatus}" == "4" && "${tuicStatus}" == "true" ]]; then
-        manageTuicCongestionControl
-    elif [[ "${installTuicStatus}" == "5" && "${tuicStatus}" == "true" ]]; then
-        manageTuicAdvanced
-    elif [[ "${installTuicStatus}" == "6" && "${tuicStatus}" == "true" ]]; then
-        setTuicRecommendedDefaults
-    elif [[ ( "${installTuicStatus}" == "7" && "${tuicStatus}" == "true" ) || ( "${installTuicStatus}" == "2" && "${tuicStatus}" != "true" ) ]]; then
-        protocolEntryMenu
-    else
-        coreSelectionRetryAction manageTuic
-    fi
+        menuClose
+        installTuicStatus=
+        autoRead tuic_menu "请选择:" installTuicStatus || return 0
+        if [[ "${installTuicStatus}" == "1" ]]; then
+            singBoxTuicInstall || true
+        elif [[ "${installTuicStatus}" == "2" && "${tuicStatus}" == "true" ]]; then
+            unInstallSingBox tuic || true
+        elif [[ "${installTuicStatus}" == "3" && "${tuicStatus}" == "true" ]]; then
+            portHoppingMenu tuic || true
+        elif [[ "${installTuicStatus}" == "4" && "${tuicStatus}" == "true" ]]; then
+            manageTuicCongestionControl || true
+        elif [[ "${installTuicStatus}" == "5" && "${tuicStatus}" == "true" ]]; then
+            manageTuicAdvanced || true
+        elif [[ "${installTuicStatus}" == "6" && "${tuicStatus}" == "true" ]]; then
+            setTuicRecommendedDefaults || true
+        elif [[ ( "${installTuicStatus}" == "7" && "${tuicStatus}" == "true" ) || ( "${installTuicStatus}" == "2" && "${tuicStatus}" != "true" ) ]]; then
+            return 0
+        else
+            coreSelectionErrorCard "选择错误"
+        fi
+    done
 }

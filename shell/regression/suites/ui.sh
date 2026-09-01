@@ -15,6 +15,9 @@ runRegressionUiSmokeSuiteRoot() {
         actions=
     }
     eval "$(declare -f selectCoreInstall | sed '1s/^selectCoreInstall /originalSelectCoreInstall /')"
+    eval "$(declare -f manageCDN | sed '1s/^manageCDN /originalManageCDN /')"
+    eval "$(declare -f manageHysteria | sed '1s/^manageHysteria /originalManageHysteria /')"
+    eval "$(declare -f manageTuic | sed '1s/^manageTuic /originalManageTuic /')"
     menu() { recordMenuAction menu; }
     menuLine() { output+="$*"$'\n'; }
     menuItem() { output+="$2 $3"$'\n'; }
@@ -73,6 +76,53 @@ runRegressionUiSmokeSuiteRoot() {
         ! assertMenuAction customSingBoxInstall
         ! assertMenuAction selectCoreInstall
         [[ "$(wc -l <"${menuRenderLog}")" == "2" ]]
+    )
+
+    (
+        local menuRenderLog="${TMP_DIR}/protocol-child-menu-render.log"
+        local oldSingBoxConfigPath="${singBoxConfigPath:-}"
+        echoContent() { printf '%s\n' "$*" >>"${menuRenderLog}"; }
+        readInstallType() { :; }
+        readInstallProtocolType() { :; }
+        currentProtocolHas() { return 1; }
+        currentProtocolHasAny() { return 1; }
+        xrayProtocolName() { printf '2.VLESS Reality XHTTP'; }
+        cdnCurrentAddress() { printf '未设置'; }
+        singBoxConfigPath=
+
+        : >"${menuRenderLog}"
+        resetMenuActions
+        originalManageCDN 1 <<< $'bad\n4'
+        assertMenuAction 'errorCard:选择错误'
+        ! assertMenuAction protocolEntryMenu
+        [[ "$(wc -l <"${menuRenderLog}")" == "2" ]]
+
+        : >"${menuRenderLog}"
+        resetMenuActions
+        originalManageHysteria <<< $'bad\n2'
+        assertMenuAction 'errorCard:选择错误'
+        ! assertMenuAction protocolEntryMenu
+        [[ "$(wc -l <"${menuRenderLog}")" == "2" ]]
+
+        : >"${menuRenderLog}"
+        resetMenuActions
+        originalManageTuic <<< $'bad\n2'
+        assertMenuAction 'errorCard:选择错误'
+        ! assertMenuAction protocolEntryMenu
+        [[ "$(wc -l <"${menuRenderLog}")" == "2" ]]
+
+        : >"${menuRenderLog}"
+        resetMenuActions
+        manageTuicCongestionControl <<< $'bad\n4'
+        assertMenuAction 'errorCard:选择错误'
+        [[ "$(wc -l <"${menuRenderLog}")" == "2" ]]
+
+        : >"${menuRenderLog}"
+        resetMenuActions
+        manageTuicAdvanced <<< $'bad\n5'
+        assertMenuAction 'errorCard:选择错误'
+        [[ "$(wc -l <"${menuRenderLog}")" == "2" ]]
+        singBoxConfigPath="${oldSingBoxConfigPath}"
     )
 
     (
