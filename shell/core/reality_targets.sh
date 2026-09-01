@@ -69,7 +69,6 @@ www.ibm.com|www.ibm.com|IBM|global|large_site|unknown|1|yes|候选目标；使�
 www.microsoft.com|www.microsoft.com|Microsoft|global|large_site|unknown|2|yes|全球稳定大型 HTTPS 站点，适合作为稳定备选
 www.reuters.com|www.reuters.com|Reuters|global|media|unknown|3|yes|远端实测 TLS1.3/PQC 可用且证书链很长，适合作为高质量备选
 www.qualcomm.com|www.qualcomm.com|Qualcomm|global|large_site|unknown|94|yes|远端实测 TLS1.3/PQC 可用且证书链很长，适合作为高质量备选
-nodejs.org|nodejs.org|Node.js|global|developer|unknown|92|yes|远端实测 TLS1.3/PQC 可用且证书链很长，开发者站点备选
 www.vmware.com|www.vmware.com|VMware|global|large_site|unknown|90|yes|远端实测 TLS1.3/PQC 可用且证书链较长，适合作为企业站点备选
 www.atlassian.com|www.atlassian.com|Atlassian|global|developer|unknown|89|yes|远端实测 TLS1.3/PQC 可用且证书链较长，开发者工具站点备选
 www.jetbrains.com|www.jetbrains.com|JetBrains|global|developer|unknown|88|yes|远端实测 TLS1.3/PQC 可用且证书链达标，开发者工具站点备选
@@ -299,6 +298,7 @@ www.fastly.com|Fastly|cdn|CDN 目标可能带来转发滥用风险
 www.akamai.com|Akamai|cdn|CDN 目标可能带来转发滥用风险
 cloudflare.com|Cloudflare Root|cdn|CDN 目标可能带来转发滥用风险
 java.com|Java|cloudflare_relay|已知 Cloudflare 回源中继风险，禁止作为 Reality 目标
+nodejs.org|Node.js|cloudflare_relay|已确认由 Cloudflare CDN 承载，禁止作为 Reality 目标
 riotcdn.net|Riot CDN|cloudflare_relay|已知 CDN 回源中继风险，禁止作为 Reality 目标
 EOF
     local customBlockedFile

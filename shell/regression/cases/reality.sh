@@ -223,7 +223,7 @@ runRealityCandidateFastRegression() {
     local oldRealityPageSize="${REALITY_TARGET_PAGE_SIZE:-}"
     local oldAutoInstall="${AUTO_INSTALL:-}"
     local ipv6OpenSslArgsFile="${TMP_DIR}/reality-ipv6-openssl-args.txt"
-    local firstRecommendedRealityCandidate firstDeveloperRealityCandidate microsoftCandidate cachedLine resolvedAddresses
+    local firstRecommendedRealityCandidate microsoftCandidate cachedLine resolvedAddresses
 
     cat >"${fixtureFile}" <<'EOF'
 www.ibm.com|www.ibm.com|IBM|global|large_site|unknown|1|yes|fixture default
@@ -242,15 +242,13 @@ EOF
     REALITY_TARGET_PAGE_SIZE=2
     AUTO_INSTALL=
 
-    [[ "$(realityTargetCandidateCount)" == "5" ]]
-    [[ "$(realityTargetFilteredCandidateCount recommended)" == "4" ]]
-    [[ "$(realityTargetFilteredCandidateCount developer)" == "1" ]]
+    [[ "$(realityTargetCandidateCount)" == "4" ]]
+    [[ "$(realityTargetFilteredCandidateCount recommended)" == "3" ]]
+    [[ "$(realityTargetFilteredCandidateCount developer)" == "0" ]]
     [[ "$(realityTargetFilteredCandidateCount asia)" == "1" ]]
     [[ "$(realityTargetFilteredCandidateCount microsoft)" == "1" ]]
     firstRecommendedRealityCandidate=$(realityTargetFilteredCandidateLineByIndex recommended 1)
     [[ "$(realityTargetCandidateField "${firstRecommendedRealityCandidate}" 1)" == "www.ibm.com" ]]
-    firstDeveloperRealityCandidate=$(realityTargetFilteredCandidateLineByIndex developer 1)
-    [[ "$(realityTargetCandidateField "${firstDeveloperRealityCandidate}" 5)" == "developer" ]]
     export PADM_REALITY_TARGET_RESULTS_FILE="${cacheFile}"
     formatRealityTargetResultLine "www.ibm.com:443" "www.ibm.com" "IBM" "large_site" "no" "192.0.2.44" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "cached" >"${cacheFile}"
     [[ "$(realityTargetCachedAsnSummary "www.ibm.com:443")" == "192.0.2.44 AS64500 ExampleNet" ]]
@@ -262,13 +260,15 @@ EOF
     [[ "$(realityTargetResultCount)" == "0" ]]
     formatRealityTargetResultLine "legacy.example.com:443" "legacy.example.com" "Legacy" "test" "yes" "192.0.2.45" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567892" "legacy risk" >"${cacheFile}"
     formatRealityTargetResultLine "www.java.com:443" "www.java.com" "Java" "test" "no" "192.0.2.46" "AS64500" "ExampleNet" "same_asn" "A" "yes" "8192" "yes" "1234567893" "legacy blocked target" >>"${cacheFile}"
+    formatRealityTargetResultLine "nodejs.org:443" "nodejs.org" "Node.js" "test" "no" "192.0.2.47" "AS64500" "ExampleNet" "same_asn" "A" "yes" "8192" "yes" "1234567894" "legacy blocked target" >>"${cacheFile}"
     [[ "$(realityTargetResultCount)" == "0" ]]
     [[ "$(realityTargetResultField "$(realityTargetResultLine "legacy.example.com:443")" 5)" == "yes" ]]
     ! grep -qF $'www.java.com:443\t' <<<"$(sortedRealityTargetResults)"
-    [[ "$(realityTargetRefreshRecords | wc -l | tr -d ' ')" == "4" ]]
+    ! grep -qF $'nodejs.org:443\t' <<<"$(sortedRealityTargetResults)"
+    [[ "$(realityTargetRefreshRecords | wc -l | tr -d ' ')" == "3" ]]
     grep -qF $'www.ibm.com:443\t' <<<"$(realityTargetRefreshRecords)"
     ! grep -qF $'www.asus.com:443\t' <<<"$(realityTargetRefreshRecords)"
-    [[ "$(realityTargetRefreshRecords all | wc -l | tr -d ' ')" == "5" ]]
+    [[ "$(realityTargetRefreshRecords all | wc -l | tr -d ' ')" == "4" ]]
     grep -qF $'www.asus.com:443\t' <<<"$(realityTargetRefreshRecords all)"
     (
         local relativeResultsRoot="${TMP_DIR}/reality-relative-results"
@@ -310,8 +310,11 @@ EOF
     ! realityTargetCandidates | grep -q '^www.cloudflare.com|'
     ! realityTargetCandidates | grep -q '^www.apple.com|'
     ! realityTargetCandidates | grep -qi '^www.java.com|'
+    ! realityTargetCandidates | grep -qi '^nodejs.org|'
     ! realityTargetCandidates | grep -qi 'riotcdn.net|'
     realityTargetCandidateBlocked "www.java.com"
+    realityTargetCandidateBlocked "nodejs.org" cloudflare_relay
+    realityTargetCandidateBlocked "www.nodejs.org" cloudflare_relay
     realityTargetCandidateBlocked "lol.secure.dyn.riotcdn.net"
     realityTargetCandidateBlocked "WWW.JAVA.COM"
     realityTargetCandidateBlocked "LOL.SECURE.DYN.RIOTCDN.NET"
@@ -426,9 +429,9 @@ y
 }
 
 runRealityCandidateFullRegression() {
-    local firstRecommendedRealityCandidate firstDeveloperRealityCandidate firstRealityCandidate secondRealityCandidate blockedCloudflareRealityCandidate
-    [[ "$(realityTargetCandidateCount)" -ge 193 ]]
-    [[ "$(realityTargetFilteredCandidateCount recommended)" -ge 40 ]]
+    local firstRecommendedRealityCandidate firstDeveloperRealityCandidate firstRealityCandidate secondRealityCandidate blockedCloudflareRealityCandidate blockedNodejsRealityCandidate
+    [[ "$(realityTargetCandidateCount)" -ge 192 ]]
+    [[ "$(realityTargetFilteredCandidateCount recommended)" -ge 39 ]]
     [[ "$(realityTargetFilteredCandidateCount developer)" -ge 10 ]]
     [[ "$(realityTargetFilteredCandidateCount asia)" -ge 2 ]]
     [[ "$(realityTargetFilteredCandidateCount microsoft)" -ge 1 ]]
@@ -442,9 +445,15 @@ runRealityCandidateFullRegression() {
     [[ "$(realityTargetCandidateField "${secondRealityCandidate}" 1)" == "www.microsoft.com" ]]
     blockedCloudflareRealityCandidate=$(realityTargetBlockedCandidates | grep '^www.cloudflare.com|')
     [[ -n "${blockedCloudflareRealityCandidate}" ]]
+    blockedNodejsRealityCandidate=$(realityTargetBlockedCandidates | grep '^nodejs.org|')
+    [[ -n "${blockedNodejsRealityCandidate}" ]]
     realityTargetBlockedCandidates >/dev/null
+    ! realityTargetCandidatePool | grep -q '^nodejs.org|'
     ! realityTargetCandidates | grep -q '^www.cloudflare.com|'
     ! realityTargetCandidates | grep -q '^www.apple.com|'
+    ! realityTargetCandidates | grep -q '^nodejs.org|'
+    realityTargetCandidateBlocked "nodejs.org" cloudflare_relay
+    realityTargetCandidateBlocked "www.nodejs.org" cloudflare_relay
 }
 
 runRealityBlockedCandidateTransactionRegression() (
@@ -666,6 +675,7 @@ EOF
         }
         validateRealityTargetSelection manual "WWW.APPLE.COM:443" "WWW.APPLE.COM"
         ! validateRealityTargetSelection manual "WWW.JAVA.COM:443" "WWW.JAVA.COM"
+        ! validateRealityTargetSelection manual "WWW.NODEJS.ORG:443" "WWW.NODEJS.ORG"
         ! validateRealityTargetSelection manual "LOL.SECURE.DYN.RIOTCDN.NET:443" "LOL.SECURE.DYN.RIOTCDN.NET"
         probeRealityTargetEndpoint() {
             printf 'no\t192.0.2.81\tAS64500\tExampleNet\tINVALID\tno\tunknown\tyes\tinvalid score fixture\n'
