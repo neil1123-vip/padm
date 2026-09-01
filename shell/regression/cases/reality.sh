@@ -232,6 +232,7 @@ www.reuters.com|www.reuters.com|Reuters|global|media|unknown|3|yes|fixture media
 nodejs.org|nodejs.org|Node.js|global|developer|unknown|4|yes|fixture developer
 www.asus.com|www.asus.com|ASUS|asia|large_site|unknown|5|no|fixture asia manual
 www.cloudflare.com|www.cloudflare.com|Cloudflare|global|cdn|yes|6|no|fixture blocked
+cdn-risk.example.com|cdn-risk.example.com|CDN Risk|global|large_site|yes|6|no|fixture CDN risk
 www.apple.com|www.apple.com|Apple|global|large_site|unknown|7|no|fixture blocked
 www.java.com|www.java.com|Java|global|large_site|unknown|8|no|fixture blocked relay
 lol.secure.dyn.riotcdn.net|lol.secure.dyn.riotcdn.net|Riot CDN|global|cdn|unknown|9|no|fixture blocked relay
@@ -244,7 +245,6 @@ EOF
 
     [[ "$(realityTargetCandidateCount)" == "4" ]]
     [[ "$(realityTargetFilteredCandidateCount recommended)" == "3" ]]
-    [[ "$(realityTargetFilteredCandidateCount developer)" == "0" ]]
     [[ "$(realityTargetFilteredCandidateCount asia)" == "1" ]]
     [[ "$(realityTargetFilteredCandidateCount microsoft)" == "1" ]]
     firstRecommendedRealityCandidate=$(realityTargetFilteredCandidateLineByIndex recommended 1)
@@ -308,6 +308,7 @@ EOF
     unset PADM_FAKE_AAAA_DNS_STATUS
     unset -f dig
     ! realityTargetCandidates | grep -q '^www.cloudflare.com|'
+    ! realityTargetCandidates | grep -q '^cdn-risk.example.com|'
     ! realityTargetCandidates | grep -q '^www.apple.com|'
     ! realityTargetCandidates | grep -qi '^www.java.com|'
     ! realityTargetCandidates | grep -qi '^nodejs.org|'
@@ -319,18 +320,18 @@ EOF
     realityTargetCandidateBlocked "WWW.JAVA.COM"
     realityTargetCandidateBlocked "LOL.SECURE.DYN.RIOTCDN.NET"
 
-    selectRealityTargetCandidateInteractive recommended <<<"n
+    selectRealityTargetCandidateInteractive <<<"n
 3
 "
     [[ "${realityTargetHost}" == "www.reuters.com" ]]
     microsoftCandidate=$(realityTargetFilteredCandidateLineByIndex microsoft 1)
     [[ "$(realityTargetCandidateField "${microsoftCandidate}" 1)" == "www.microsoft.com" ]]
-    selectRealityTargetCandidateInteractive recommended <<<"m
+    selectRealityTargetCandidateInteractive <<<"m
 manual.example.com:8443
 "
     [[ "${realityTargetHost}" == "manual.example.com" ]]
     [[ "${realityTargetPort}" == "8443" ]]
-    if selectRealityTargetCandidateInteractive recommended <<<"r
+    if selectRealityTargetCandidateInteractive <<<"r
 "; then
         return 1
     fi
@@ -429,16 +430,14 @@ y
 }
 
 runRealityCandidateFullRegression() {
-    local firstRecommendedRealityCandidate firstDeveloperRealityCandidate firstRealityCandidate secondRealityCandidate blockedCloudflareRealityCandidate blockedNodejsRealityCandidate
+    local firstRecommendedRealityCandidate firstRealityCandidate secondRealityCandidate blockedCloudflareRealityCandidate blockedNodejsRealityCandidate
     [[ "$(realityTargetCandidateCount)" -ge 192 ]]
+    [[ "$(realityTargetFilteredCandidateCount all)" == "$(realityTargetCandidateCount)" ]]
     [[ "$(realityTargetFilteredCandidateCount recommended)" -ge 39 ]]
-    [[ "$(realityTargetFilteredCandidateCount developer)" -ge 10 ]]
     [[ "$(realityTargetFilteredCandidateCount asia)" -ge 2 ]]
     [[ "$(realityTargetFilteredCandidateCount microsoft)" -ge 1 ]]
     firstRecommendedRealityCandidate=$(realityTargetFilteredCandidateLineByIndex recommended 1)
     [[ "$(realityTargetCandidateField "${firstRecommendedRealityCandidate}" 1)" == "www.ibm.com" ]]
-    firstDeveloperRealityCandidate=$(realityTargetFilteredCandidateLineByIndex developer 1)
-    [[ "$(realityTargetCandidateField "${firstDeveloperRealityCandidate}" 5)" == "developer" ]]
     firstRealityCandidate=$(realityTargetCandidateLineByIndex 1)
     [[ "$(realityTargetCandidateField "${firstRealityCandidate}" 1)" == "www.ibm.com" ]]
     secondRealityCandidate=$(realityTargetCandidateLineByIndex 2)
@@ -449,6 +448,7 @@ runRealityCandidateFullRegression() {
     [[ -n "${blockedNodejsRealityCandidate}" ]]
     realityTargetBlockedCandidates >/dev/null
     ! realityTargetCandidatePool | grep -q '^nodejs.org|'
+    [[ "$(realityTargetCandidatePool | awk -F'|' 'tolower($6) == "yes" {count++} END {print count + 0}')" == "0" ]]
     ! realityTargetCandidates | grep -q '^www.cloudflare.com|'
     ! realityTargetCandidates | grep -q '^www.apple.com|'
     ! realityTargetCandidates | grep -q '^nodejs.org|'

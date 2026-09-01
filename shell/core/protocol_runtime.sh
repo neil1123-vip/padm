@@ -803,7 +803,7 @@ collectRealityProfile() {
 
         case "${selectRealityTargetMode}" in
         2)
-            selectRealityTargetCandidateInteractive recommended || return 1
+            selectRealityTargetCandidateInteractive || return 1
             ;;
         3)
             autoRead reality_target "请输入REALITY伪装目标域名，默认端口443:" targetInput

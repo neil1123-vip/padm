@@ -259,10 +259,6 @@ www.rottentomatoes.com|www.rottentomatoes.com|Rotten Tomatoes|global|media|unkno
 www.metmuseum.org|www.metmuseum.org|The Met|global|education|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 www.britannica.com|www.britannica.com|Britannica|global|education|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 www.coursera.org|www.coursera.org|Coursera|global|education|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.cloudflare.com|www.cloudflare.com|Cloudflare|global|cdn|yes|35|no|远端实测 TLS1.3/PQC 可用但属于 CDN 目标，可能带来转发滥用风险
-www.fastly.com|www.fastly.com|Fastly|global|cdn|yes|34|no|远端实测 TLS1.3/PQC 可用但属于 CDN 目标，仅高级用户自选
-www.akamai.com|www.akamai.com|Akamai|global|cdn|yes|33|no|远端实测 TLS1.3/PQC 可用但属于 CDN 目标，仅高级用户自选
-cloudflare.com|cloudflare.com|Cloudflare Root|global|cdn|yes|32|no|CDN 目标可能带来转发滥用风险，仅高级用户自选
 EOF
 }
 
@@ -349,13 +345,14 @@ realityTargetCandidateBlocked() {
 }
 
 realityTargetCandidates() {
-    local line host _rest blocked skip
+    local line host _sni _name _region _category cdn _rest blocked skip
     local blockedHosts=()
     while IFS='|' read -r blocked _rest; do
         blockedHosts+=("${blocked}")
     done < <(realityTargetBlockedCandidates)
     while IFS= read -r line; do
-        IFS='|' read -r host _rest <<<"${line}"
+        IFS='|' read -r host _sni _name _region _category cdn _rest <<<"${line}"
+        [[ "${cdn,,}" == "yes" ]] && continue
         skip=false
         for blocked in "${blockedHosts[@]}"; do
             if realityTargetBlockedHostMatches "${host}" "${blocked}"; then
@@ -1518,23 +1515,16 @@ realityTargetCandidateMatchesFilter() {
     IFS='|' read -r host sni name region category cdn rank recommended note <<<"${line}"
 
     case "${filter}" in
+    dev | 开发者) filter=developer ;;
+    媒体) filter=media ;;
+    亚洲) filter=asia ;;
+    esac
+    case "${filter}" in
     "" | all | 全部)
         return 0
         ;;
     recommended | 推荐)
         [[ "${recommended}" == "yes" ]]
-        return
-        ;;
-    developer | dev | 开发者)
-        [[ "${category}" == "developer" ]]
-        return
-        ;;
-    media | 媒体)
-        [[ "${category}" == "media" ]]
-        return
-        ;;
-    asia | 亚洲)
-        [[ "${region}" == "asia" ]]
         return
         ;;
     manual | 手动备选)
@@ -1579,10 +1569,10 @@ realityTargetFilteredCandidateLineByIndex() {
 }
 
 showRealityTargetCandidatePage() {
-    local filter=${1:-recommended}
+    local filter=${1:-all}
     local page=${2:-1}
     local pageSize=${3:-12}
-    local total start end line index=1 host sni name region category cdn rank recommended note marker
+    local total start end line index=1 host sni name region category _cdn rank recommended note
     total=$(realityTargetFilteredCandidateCount "${filter}")
     start=$(( (page - 1) * pageSize + 1 ))
     end=$(( page * pageSize ))
@@ -1597,10 +1587,8 @@ showRealityTargetCandidatePage() {
     fi
     while IFS= read -r line; do
         if (( index >= start && index <= end )); then
-            IFS='|' read -r host sni name region category cdn rank recommended note <<<"${line}"
-            marker=""
-            [[ "${cdn}" == "yes" ]] && marker="谨慎"
-            menuItem "${index}" "${host}:443" "${name} ${marker} ${region}/${category} SNI=${sni}"
+            IFS='|' read -r host sni name region category _cdn rank recommended note <<<"${line}"
+            menuItem "${index}" "${host}:443" "${name} ${region}/${category} SNI=${sni}"
             [[ -n "${note}" ]] && menuLine "    ${note}"
         fi
         index=$((index + 1))
@@ -1609,7 +1597,7 @@ showRealityTargetCandidatePage() {
 }
 
 selectRealityTargetCandidateInteractive() {
-    local filter=${1:-recommended}
+    local filter=${1:-all}
     local page=1
     local pageSize=${REALITY_TARGET_PAGE_SIZE:-12}
     local total maxPage choice selectedLine targetInput
@@ -1635,10 +1623,10 @@ selectRealityTargetCandidateInteractive() {
             ;;
         f | F)
             echoContent title "\n┌─ REALITY 候选筛选 ─────────────────────────────────"
-            menuLine "可输入：recommended/developer/media/asia/manual/all，或任意关键词"
+            menuLine "可输入：recommended/manual/all，或域名、名称、区域、分类关键词"
             menuClose
-            autoRead reality_target_filter "请输入筛选条件[回车推荐]：" filter
-            filter=${filter:-recommended}
+            autoRead reality_target_filter "请输入筛选条件[回车全部]：" filter
+            filter=${filter:-all}
             page=1
             ;;
         m | M)
