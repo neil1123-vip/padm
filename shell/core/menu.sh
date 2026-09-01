@@ -131,60 +131,48 @@ routingAccessMenu() {
 }
 
 systemScriptMenu() {
-    echoContent title "\n┌─ 系统与脚本 ───────────────────────────────────────"
-    menuLine "这里维护 padm 脚本自身和宿主机网络辅助项"
-    menuLine "核心版本、服务、日志和配置校验请去 核心与服务"
-    menuItem 1 "更新 padm 脚本" "更新脚本文件"
-    menuItem 2 "查看脚本安装状态" "显示入口校验、版本、ref 和 manifest"
-    menuItem 3 "Fail2ban 防护" "SSH 和 /s/control/ 的最小防护入口"
-    menuItem 4 "网络优化" "查看或启用官方 BBR + fq"
-    menuReturnItem 5 "返回主菜单" "回到 padm 管理面板"
-    menuClose
-    autoRead system_script_menu "请选择:" selectSystemMenuType
-    case ${selectSystemMenuType} in
-    1)
-        updatePadm 1
-        ;;
-    2)
-        showPadmScriptInstallStatus
-        ;;
-    3)
-        manageFail2ban
-        ;;
-    4)
-        bbrInstall
-        ;;
-    5)
-        return 0
-        ;;
-    *)
-        coreSelectionRetryAction systemScriptMenu
-        ;;
-    esac
+    local selectSystemMenuType=
+    while true; do
+        echoContent title "\n┌─ 系统与脚本 ───────────────────────────────────────"
+        menuLine "这里维护 padm 脚本自身和宿主机网络辅助项"
+        menuLine "核心版本、服务、日志和配置校验请去 核心与服务"
+        menuItem 1 "更新 padm 脚本" "更新脚本文件"
+        menuItem 2 "查看脚本安装状态" "显示入口校验、版本、ref 和 manifest"
+        menuItem 3 "Fail2ban 防护" "SSH 和 /s/control/ 的最小防护入口"
+        menuItem 4 "网络优化" "查看或启用官方 BBR + fq"
+        menuReturnItem 5 "返回主菜单" "回到 padm 管理面板"
+        menuClose
+        selectSystemMenuType=
+        autoRead system_script_menu "请选择:" selectSystemMenuType || return 0
+        case "${selectSystemMenuType}" in
+        1) updatePadm 1; return $? ;;
+        2) showPadmScriptInstallStatus; return $? ;;
+        3) manageFail2ban; return $? ;;
+        4) bbrInstall; return $? ;;
+        5) return 0 ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
 }
 
 advancedDangerMenu() {
-    echoContent title "\n┌─ 高级/危险操作 ────────────────────────────────────"
-    menuLine "这里只放不可逆、实验性或容易影响现有连接的操作"
-    menuDangerItem 1 "卸载脚本" "移除脚本和相关配置，执行前请确认备份"
-    menuDangerItem 2 "VLESS Encryption 实验" "Xray-only，高级兼容性实验开关"
-    menuReturnItem 3 "返回主菜单" "回到 padm 管理面板"
-    menuClose
-    autoRead danger_menu "请选择:" selectDangerMenuType
-    case ${selectDangerMenuType} in
-    1)
-        unInstall 1
-        ;;
-    2)
-        manageVlessEncryptionExperiment
-        ;;
-    3)
-        return 0
-        ;;
-    *)
-        coreSelectionRetryAction advancedDangerMenu
-        ;;
-    esac
+    local selectDangerMenuType=
+    while true; do
+        echoContent title "\n┌─ 高级/危险操作 ────────────────────────────────────"
+        menuLine "这里只放不可逆、实验性或容易影响现有连接的操作"
+        menuDangerItem 1 "卸载脚本" "移除脚本和相关配置，执行前请确认备份"
+        menuDangerItem 2 "VLESS Encryption 实验" "Xray-only，高级兼容性实验开关"
+        menuReturnItem 3 "返回主菜单" "回到 padm 管理面板"
+        menuClose
+        selectDangerMenuType=
+        autoRead danger_menu "请选择:" selectDangerMenuType || return 0
+        case "${selectDangerMenuType}" in
+        1) unInstall 1; return $? ;;
+        2) manageVlessEncryptionExperiment; return $? ;;
+        3) return 0 ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
 }
 
 coreDisplayState() {
