@@ -478,10 +478,11 @@ updateSELinuxHTTPPortT() {
 
 # 检查 wget 进度显示支持
 checkWgetShowProgress() {
-    if [[ "${release}" != "alpine" ]]; then
-        if find /usr/bin /usr/sbin | grep -q "/wget" && wget --help | grep -q show-progress; then
-            wgetShowProgressStatus="--show-progress"
-        fi
+    wgetShowProgressStatus=
+    [[ "${release}" != "alpine" ]] || return 0
+    command -v wget >/dev/null 2>&1 || return 0
+    if wget --help 2>/dev/null | grep -q -- "show-progress"; then
+        wgetShowProgressStatus="--show-progress"
     fi
 }
 

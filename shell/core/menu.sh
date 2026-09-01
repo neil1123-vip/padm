@@ -568,14 +568,23 @@ coreVersionManageMenu() {
 
 menu() {
     cd "$HOME" || return 1
+    if ! mkdirTools; then
+        errorCard "初始化安装目录失败"
+        return 1
+    fi
+    checkWgetShowProgress
+    aliasInstall || return 1
     while true; do
         echoContent title "\n┌─ padm 管理面板 ───────────────────────────────────"
         menuLine "Xray-core / sing-box 节点安装与运维脚本"
         menuLine "版本：$(getScriptVersion)"
         menuLine "原则：安装、订阅、入口、站点、路由、核心、系统各归一处"
         menuSection "├─ 当前状态 ───────────────────────────────────────"
-        showInstallStatus
-        checkWgetShowProgress
+        if [[ "${PADM_INSTALL_STATUS_READY:-}" == "1" ]]; then
+            showInstallStatus cached
+        else
+            showInstallStatus
+        fi
         menuSection "├─ 任务入口 ───────────────────────────────────────"
         menuItem 1 "安装与重装" "含新手选择指引；推荐直连/CDN/无域名 Reality、NaiveProxy、自定义和传统 TLS"
         menuItem 2 "订阅与用户" "发布链接、创建和维护分享订阅、流量限额与多服务器同步"
@@ -587,12 +596,8 @@ menu() {
         menuDangerItem 8 "高级/危险操作" "卸载和实验性高风险开关"
         menuLine "新人建议：1 安装与重装里先看怎么选；安装后 2 查看订阅"
         menuClose
-        if ! mkdirTools; then
-            errorCard "初始化安装目录失败"
-            return 1
-        fi
-        aliasInstall || return 1
         autoRead main_menu "请选择:" selectMainMenuType || return 0
+        PADM_INSTALL_STATUS_READY=0
         case ${selectMainMenuType} in
         1)
             installMenu || return $?

@@ -1074,6 +1074,8 @@ runCoreSelectionRetryActionRegression() (
 runMenuSmokeRegression() {
     local actions=
     local output= menuItems=
+    local mainMenuShowStatusCount=0 mainMenuWgetCount=0
+    local mainMenuMkdirCount=0 mainMenuAliasCount=0 mainMenuStatusArgs=
     local menuSmokePart="${1:-all}"
     local parentTmpDir="${TMP_DIR}"
     local TMP_DIR="${parentTmpDir}/menu-smoke-${BASHPID:-$$}"
@@ -1160,10 +1162,13 @@ tlsCertificateStatusCard|未检测到本机 TLS 证书|statusCard:TLS 证书状�
 EOF
     fi
     progressCard() { return 0; }
-    showInstallStatus() { return 0; }
-    checkWgetShowProgress() { return 0; }
-    mkdirTools() { return 0; }
-    aliasInstall() { return 0; }
+    showInstallStatus() {
+        mainMenuShowStatusCount=$((mainMenuShowStatusCount + 1))
+        mainMenuStatusArgs+="${1:-none}"$'\n'
+    }
+    checkWgetShowProgress() { mainMenuWgetCount=$((mainMenuWgetCount + 1)); return 0; }
+    mkdirTools() { mainMenuMkdirCount=$((mainMenuMkdirCount + 1)); return 0; }
+    aliasInstall() { mainMenuAliasCount=$((mainMenuAliasCount + 1)); return 0; }
     getScriptVersion() { printf 'test\n'; }
     autoRead() {
         local targetVar=$3
@@ -1419,11 +1424,22 @@ EOF
 
         resetMenuActions
         resetMenuRender
+        mainMenuShowStatusCount=0
+        mainMenuWgetCount=0
+        mainMenuMkdirCount=0
+        mainMenuAliasCount=0
+        mainMenuStatusArgs=
+        PADM_INSTALL_STATUS_READY=1
         local menuSmokePwd=$PWD
         originalCoreMainMenu <<<'6
 6'
         cd "${menuSmokePwd}" || return 1
         [[ "$(grep -c '^安装与重装$' <<<"${menuItems}")" == "2" ]]
+        [[ "${mainMenuShowStatusCount}" == "2" ]]
+        [[ "${mainMenuWgetCount}" == "1" ]]
+        [[ "${mainMenuMkdirCount}" == "1" ]]
+        [[ "${mainMenuAliasCount}" == "1" ]]
+        [[ "${mainMenuStatusArgs}" == $'cached\nnone\n' ]]
         ! assertMenuAction unexpected-network-version-fetch
 
         resetMenuRender

@@ -144,6 +144,7 @@ readNginxSubscribe() {
 
 # 检测安装方式
 readInstallType() {
+    PADM_INSTALL_STATUS_READY=0
     coreInstallType=
     configPath=
     singBoxConfigPath=
@@ -190,6 +191,7 @@ readInstallType() {
 
 # 读取协议类型
 readInstallProtocolType() {
+    PADM_INSTALL_STATUS_READY=0
     currentInstallProtocolType=
     frontingType=
 
@@ -470,6 +472,7 @@ readInstallProtocolType() {
     if [[ "${currentInstallProtocolType:0:1}" != "," ]]; then
         currentInstallProtocolType=",${currentInstallProtocolType}"
     fi
+    PADM_INSTALL_STATUS_READY=1
 }
 
 
@@ -1003,8 +1006,8 @@ showInstallStatus() {
                 echoContent yellow "\n核心: sing-box[未运行]"
             fi
         fi
-        # 读取协议类型
-        readInstallProtocolType
+        # 直接调用默认刷新；菜单首帧可传 cached 复用启动阶段的状态快照。
+        [[ "${1:-refresh}" == "cached" ]] || readInstallProtocolType
 
         if [[ -n ${currentInstallProtocolType} ]]; then
             echoContent yellow "已安装协议: \c"
