@@ -1318,38 +1318,44 @@ corePortRollbackFirewallRules() {
 }
 
 addCorePort() {
-
-    if [[ "${coreInstallType}" == "2" ]]; then
+    if [[ "${coreInstallType:-}" == "2" ]]; then
         errorCard "此功能仅支持Xray-core内核"
-        exit 0
+        return 1
     fi
 
-    echoContent title "\n┌─ 入口端口管理 ─────────────────────────────────────"
-    menuLine "支持批量添加；不影响默认端口使用"
-    menuLine "查看账号时只展示默认端口账号；端口列表用英文逗号分隔"
-    menuLine "如已安装 Hysteria2，会同时安装 Hysteria2 新端口"
-    menuLine "示例：2053,2083,2087"
-    menuItem 1 "查看已添加端口" "列出当前额外端口"
-    menuItem 2 "添加端口" "批量添加新入口端口"
-    menuItem 3 "删除端口" "移除已添加端口"
-    menuClose
-    autoRead core_port_menu "请选择:" selectNewPortType
-    if [[ "${selectNewPortType}" == "1" ]]; then
-        corePortListExtra
-        exit 0
-    elif [[ "${selectNewPortType}" == "2" ]]; then
-        autoRead extra_core_ports "请输入端口号:" newPort
-        autoRead extra_core_default_port "请输入默认的端口号，同时会更改订阅端口以及节点端口，[回车]默认443:" defaultPort
+    local selectNewPortType newPort defaultPort portIndex port parsedPorts settingsPort firewallStatus
+    local -a openedFirewallRules=()
+    while true; do
+        echoContent title "\n┌─ 入口端口管理 ─────────────────────────────────────"
+        menuLine "支持批量添加；不影响默认端口使用"
+        menuLine "查看账号时只展示默认端口账号；端口列表用英文逗号分隔"
+        menuLine "如已安装 Hysteria2，会同时安装 Hysteria2 新端口"
+        menuLine "示例：2053,2083,2087"
+        menuItem 1 "查看已添加端口" "列出当前额外端口"
+        menuItem 2 "添加端口" "批量添加新入口端口"
+        menuItem 3 "删除端口" "移除已添加端口"
+        menuReturnItem 4 "返回协议与入口" "回到上级菜单"
+        menuClose
+        selectNewPortType=
+        autoRead core_port_menu "请选择:" selectNewPortType || return 0
+        case "${selectNewPortType}" in
+        1)
+            corePortListExtra || true
+            ;;
+        2)
+            newPort=
+            defaultPort=
+            autoRead extra_core_ports "请输入端口号[回车取消]:" newPort || return 0
+            [[ -n "${newPort}" ]] || return 0
+            autoRead extra_core_default_port "请输入默认的端口号，同时会更改订阅端口以及节点端口，[回车]默认443:" defaultPort || return 0
 
-        if [[ -n "${newPort}" ]]; then
-            local parsedPorts=
-            local settingsPort=443
-            local -a openedFirewallRules=()
+            settingsPort=443
+            openedFirewallRules=()
             parsedPorts=$(corePortParseList "${newPort}") || {
                 errorCard "端口格式错误"
                 return 1
             }
-            if [[ -n "${customPort}" ]]; then
+            if [[ -n "${customPort:-}" ]]; then
                 settingsPort=${customPort}
             fi
             while read -r port; do
@@ -1369,34 +1375,37 @@ addCorePort() {
                 errorCard "入口端口配置写入或重载失败，已尝试恢复旧配置；如上方提示回滚失败，请检查备份目录"
                 return 1
             fi
-
             successCard "添加完毕"
-            addCorePort
-        fi
-    elif [[ "${selectNewPortType}" == "3" ]]; then
-        corePortListExtra
-        autoRead extra_core_delete_port "请输入要删除的端口编号:" portIndex
-        local port
-        port=$(corePortResolveByIndex "${portIndex}")
-        if [[ -n "${port}" ]]; then
-            if ! corePortApplyReloadTransaction corePortRemove "${port}"; then
-                errorCard "入口端口删除或重载失败，已尝试恢复旧配置；如上方提示回滚失败，请检查备份目录"
-                return 1
+            ;;
+        3)
+            corePortListExtra || true
+            portIndex=
+            autoRead extra_core_delete_port "请输入要删除的端口编号:" portIndex || return 0
+            port=$(corePortResolveByIndex "${portIndex}") || true
+            if [[ -n "${port}" ]]; then
+                if ! corePortApplyReloadTransaction corePortRemove "${port}"; then
+                    errorCard "入口端口删除或重载失败，已尝试恢复旧配置；如上方提示回滚失败，请检查备份目录"
+                    return 1
+                fi
+                firewallStatus=0
+                denyPort "${port}" || firewallStatus=1
+                denyPort "${port}" udp || firewallStatus=1
+                if [[ "${firewallStatus}" != "0" ]]; then
+                    errorCard "入口端口配置已删除，但防火墙规则回收失败，请检查防火墙状态"
+                    return 1
+                fi
+            else
+                statusCard "输入错误" "编号输入错误，请重新选择"
             fi
-            local firewallStatus=0
-            denyPort "${port}" || firewallStatus=1
-            denyPort "${port}" udp || firewallStatus=1
-            if [[ "${firewallStatus}" != "0" ]]; then
-                errorCard "入口端口配置已删除，但防火墙规则回收失败，请检查防火墙状态"
-                return 1
-            fi
-
-            addCorePort
-        else
-            statusCard "输入错误" "编号输入错误，请重新选择"
-            addCorePort
-        fi
-    fi
+            ;;
+        4)
+            return 0
+            ;;
+        *)
+            coreSelectionErrorCard "选择错误"
+            ;;
+        esac
+    done
 }
 
 

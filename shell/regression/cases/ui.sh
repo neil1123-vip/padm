@@ -999,8 +999,8 @@ runCoreSelectionRetryActionRegression() (
         'shell/core/cores.sh|0'
         'shell/core/routing_access_control.sh|0'
         'shell/core/manage.sh|2'
-        'shell/core/fail2ban.sh|1'
-        'shell/core/entry_helpers.sh|1'
+        'shell/core/fail2ban.sh|0'
+        'shell/core/entry_helpers.sh|0'
         'shell/core/routing_bt.sh|0'
         'shell/core/routing_socks.sh|0'
         'shell/core/protocol_runtime.sh|0'
@@ -1008,8 +1008,6 @@ runCoreSelectionRetryActionRegression() (
     )
     local -a expectedPatterns=(
         'shell/core/manage.sh|coreSelectionRetryAction checkBTPanel'
-        'shell/core/fail2ban.sh|coreSelectionRetryAction manageFail2ban'
-        'shell/core/entry_helpers.sh|coreSelectionRetryAction bbrInstall'
     )
     local -a removedPatterns=(
         'shell/core/cores.sh|coreSelectionErrorCard

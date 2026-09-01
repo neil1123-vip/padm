@@ -18,6 +18,7 @@ runRegressionUiSmokeSuiteRoot() {
     eval "$(declare -f manageCDN | sed '1s/^manageCDN /originalManageCDN /')"
     eval "$(declare -f manageHysteria | sed '1s/^manageHysteria /originalManageHysteria /')"
     eval "$(declare -f manageTuic | sed '1s/^manageTuic /originalManageTuic /')"
+    eval "$(declare -f addCorePort | sed '1s/^addCorePort /originalAddCorePort /')"
     eval "$(declare -f manageXHTTP | sed '1s/^manageXHTTP /originalManageXHTTP /')"
     eval "$(declare -f manageXHTTPNormal | sed '1s/^manageXHTTPNormal /originalManageXHTTPNormal /')"
     eval "$(declare -f manageXHTTPAdvanced | sed '1s/^manageXHTTPAdvanced /originalManageXHTTPAdvanced /')"
@@ -30,6 +31,8 @@ runRegressionUiSmokeSuiteRoot() {
     eval "$(declare -f manageTraditionalTlsStaticSite | sed '1s/^manageTraditionalTlsStaticSite /originalManageTraditionalTlsStaticSite /')"
     eval "$(declare -f manageTraditionalTlsRedirect | sed '1s/^manageTraditionalTlsRedirect /originalManageTraditionalTlsRedirect /')"
     eval "$(declare -f setTraditionalTlsAlpnManual | sed '1s/^setTraditionalTlsAlpnManual /originalSetTraditionalTlsAlpnManual /')"
+    eval "$(declare -f bbrInstall | sed '1s/^bbrInstall /originalBbrInstall /')"
+    eval "$(declare -f manageFail2ban | sed '1s/^manageFail2ban /originalManageFail2ban /')"
     menu() { recordMenuAction menu; }
     menuLine() { output+="$*"$'\n'; }
     menuItem() { output+="$2 $3"$'\n'; }
@@ -107,6 +110,13 @@ runRegressionUiSmokeSuiteRoot() {
         originalManageCDN 1 <<< $'bad\n4'
         assertMenuAction 'errorCard:选择错误'
         ! assertMenuAction protocolEntryMenu
+        [[ "$(wc -l <"${menuRenderLog}")" == "2" ]]
+
+        : >"${menuRenderLog}"
+        resetMenuActions
+        coreInstallType=1
+        originalAddCorePort 1 <<< $'bad\n4'
+        assertMenuAction 'errorCard:选择错误'
         [[ "$(wc -l <"${menuRenderLog}")" == "2" ]]
 
         : >"${menuRenderLog}"
@@ -207,6 +217,31 @@ runRegressionUiSmokeSuiteRoot() {
         runMenuLoopSmoke originalSetTraditionalTlsAlpnManual $'bad\n4'
         coreInstallType="${oldCoreInstallType}"
         nginxStaticPath="${oldNginxStaticPath}"
+    )
+
+    (
+        local menuRenderLog="${TMP_DIR}/bbr-menu-render.log"
+        echoContent() { printf '%s\n' "$*" >>"${menuRenderLog}"; }
+        : >"${menuRenderLog}"
+        resetMenuActions
+        originalBbrInstall <<< $'bad\n5'
+        assertMenuAction 'errorCard:选择错误'
+        [[ "$(wc -l <"${menuRenderLog}")" == "2" ]]
+    )
+
+    (
+        local menuRenderLog="${TMP_DIR}/fail2ban-menu-render.log"
+        echoContent() { printf '%s\n' "$*" >>"${menuRenderLog}"; }
+        fail2banRoleText() { printf '未知'; }
+        fail2banControlSurfaceText() { printf '未启用'; }
+        fail2banCurrentProfileLabel() { printf '未配置'; }
+        fail2banNginxScanStatusText() { printf '关闭'; }
+        fail2banRecommendedProfileName() { printf 'sshd'; }
+        : >"${menuRenderLog}"
+        resetMenuActions
+        originalManageFail2ban <<< $'bad\n9'
+        assertMenuAction 'errorCard:选择错误'
+        [[ "$(wc -l <"${menuRenderLog}")" == "2" ]]
     )
 
     (

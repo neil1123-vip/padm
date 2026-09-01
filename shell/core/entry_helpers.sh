@@ -754,7 +754,6 @@ printNetworkOptimizationStatus() {
 
 showNetworkOptimizationStatus() {
     printNetworkOptimizationStatus
-    bbrInstall
 }
 
 commitPadmBbrFile() {
@@ -791,7 +790,6 @@ enableOfficialBbrFq() {
 
     if ! padmBbrAvailable; then
         statusCard "BBR 不可用" "当前内核不支持 BBR" "padm 不会自动安装或切换内核" "如需第三方内核，请使用高级脚本并自行确认风险"
-        bbrInstall
         return
     fi
 
@@ -810,7 +808,6 @@ enableOfficialBbrFq() {
             bbrEnableFailureCard "现有配置已应用但当前状态未完全匹配，未改动首次启用前状态" "日志：${existingLogFile}"
         fi
         printNetworkOptimizationStatus
-        bbrInstall
         return
     fi
 
@@ -821,8 +818,8 @@ enableOfficialBbrFq() {
     previousCongestion=${previousCongestion:-cubic}
     previousQdisc=${previousQdisc:-fq_codel}
 
-    padmEnsureSafeDirectory "$(dirname "${PADM_BBR_STATE_FILE}")" || { bbrEnableFailureCard "状态目录创建失败"; bbrInstall; return; }
-    padmCreateTempPath stateTmp "$(bbrStateTempTemplate)" || { bbrEnableFailureCard "无法创建状态临时文件"; bbrInstall; return; }
+    padmEnsureSafeDirectory "$(dirname "${PADM_BBR_STATE_FILE}")" || { bbrEnableFailureCard "状态目录创建失败"; return; }
+    padmCreateTempPath stateTmp "$(bbrStateTempTemplate)" || { bbrEnableFailureCard "无法创建状态临时文件"; return; }
     cat >"${stateTmp}" <<EOF
 previous_congestion=${previousCongestion}
 previous_qdisc=${previousQdisc}
@@ -830,7 +827,6 @@ EOF
     if ! commitPadmBbrFile "${stateTmp}" "${PADM_BBR_STATE_FILE}"; then
         padmRemoveCleanupPath "${stateTmp}"
         bbrEnableFailureCard "状态文件提交失败，未改动 sysctl 配置"
-        bbrInstall
         return
     fi
 
@@ -842,7 +838,6 @@ EOF
         else
             bbrEnableFailureCard "无法创建 sysctl 临时文件，已删除本次状态记录"
         fi
-        bbrInstall
         return
     fi
     cat >"${sysctlTmp}" <<EOF
@@ -858,7 +853,6 @@ EOF
         else
             bbrEnableFailureCard "sysctl 配置提交失败，已删除本次状态记录"
         fi
-        bbrInstall
         return
     fi
 
@@ -868,12 +862,10 @@ EOF
             local applyCleanupFailureMessage
             coreSetPairedFileManualCheckMessage applyCleanupFailureMessage "sysctl 应用失败，且本次写入清理失败" "${PADM_BBR_SYSCTL_CONF}" "${PADM_BBR_STATE_FILE}"
             bbrEnableFailureCard "${applyCleanupFailureMessage}" "日志：${logFile}"
-            bbrInstall
             return
         fi
         restorePadmBbrRuntime "${previousCongestion}" "${previousQdisc}"
         bbrEnableFailureCard "sysctl 应用失败，已删除本次写入并尝试恢复原运行值" "日志：${logFile}"
-        bbrInstall
         return
     fi
 
@@ -886,21 +878,18 @@ EOF
             coreSetPairedFileManualCheckMessage stateMismatchCleanupFailureMessage "配置已应用但当前状态未完全匹配，且本次写入清理失败" "${PADM_BBR_SYSCTL_CONF}" "${PADM_BBR_STATE_FILE}"
             bbrEnableFailureCard "${stateMismatchCleanupFailureMessage}" "请查看下方状态和 ${logFile}"
             printNetworkOptimizationStatus
-            bbrInstall
             return
         fi
         restorePadmBbrRuntime "${previousCongestion}" "${previousQdisc}"
         bbrEnableFailureCard "配置已应用但当前状态未完全匹配，已删除本次写入并尝试恢复原运行值" "请查看下方状态和 ${logFile}"
     fi
     printNetworkOptimizationStatus
-    bbrInstall
 }
 
 disablePadmBbr() {
     if [[ ! -f "${PADM_BBR_SYSCTL_CONF}" ]]; then
         statusCard "无需关闭" "padm 未写入 BBR 配置" "不会改动其它 sysctl 文件"
         printNetworkOptimizationStatus
-        bbrInstall
         return
     fi
 
@@ -916,7 +905,6 @@ disablePadmBbr() {
         coreSetPairedFileManualCheckMessage disableCleanupFailureMessage "配置文件清理失败" "${PADM_BBR_SYSCTL_CONF}" "${PADM_BBR_STATE_FILE}"
         statusCard "padm BBR 关闭失败" "${disableCleanupFailureMessage}"
         printNetworkOptimizationStatus
-        bbrInstall
         return
     fi
     local logFile
@@ -926,7 +914,6 @@ disablePadmBbr() {
     sysctl -w "net.core.default_qdisc=${previousQdisc}" >>"${logFile}" 2>&1 || true
     statusCard "padm BBR 已关闭" "已删除 ${PADM_BBR_SYSCTL_CONF}" "已尝试恢复启用前的拥塞控制和 qdisc" "未改动用户其它 sysctl 配置"
     printNetworkOptimizationStatus
-    bbrInstall
 }
 
 runThirdPartyTcpAccelerationScript() {
@@ -938,7 +925,6 @@ runThirdPartyTcpAccelerationScript() {
     autoConfirm third_party_tcp_confirm "确认下载并运行第三方 TCP 加速脚本？" n confirmThirdPartyTcp
     if [[ "${confirmThirdPartyTcp}" != "y" ]]; then
         coreCancelledStatusCard "未运行第三方 TCP 加速脚本"
-        bbrInstall
         return
     fi
 
@@ -948,14 +934,12 @@ runThirdPartyTcpAccelerationScript() {
     local scriptUrl
     if ! padmCreateTmpRootPath tmpDir padm-tcpx.XXXXXX -d; then
         statusCard "下载失败" "第三方脚本临时目录创建失败" "未执行任何第三方脚本"
-        bbrInstall
         return
     fi
     scriptPath="${tmpDir}/tcpx.sh"
     if ! scriptRef=$(resolveGitHubCommitRef "${PADM_THIRD_PARTY_TCP_REPO}" "${PADM_THIRD_PARTY_TCP_REF}"); then
         padmRemoveCleanupPath "${tmpDir}"
         statusCard "下载失败" "第三方脚本最新提交解析失败" "未执行任何第三方脚本"
-        bbrInstall
         return
     fi
     scriptUrl="https://raw.githubusercontent.com/${PADM_THIRD_PARTY_TCP_REPO}/${scriptRef}/${PADM_THIRD_PARTY_TCP_SCRIPT_PATH}"
@@ -963,14 +947,12 @@ runThirdPartyTcpAccelerationScript() {
         [[ ! -s "${scriptPath}" ]] || ! grep -q "^#!" "${scriptPath}"; then
         padmRemoveCleanupPath "${tmpDir}"
         statusCard "下载失败" "第三方脚本为空或格式异常" "未执行任何第三方脚本"
-        bbrInstall
         return
     fi
 
     if ! chmod +x "${scriptPath}"; then
         padmRemoveCleanupPath "${tmpDir}"
         statusCard "下载失败" "第三方脚本权限设置失败" "未执行任何第三方脚本"
-        bbrInstall
         return
     fi
     local scriptStatus=0
@@ -980,35 +962,27 @@ runThirdPartyTcpAccelerationScript() {
 }
 
 bbrInstall() {
-    echoContent title "\n┌─ 网络优化 ─────────────────────────────────────────"
-    menuLine "默认推荐官方内核自带 BBR + fq；不自动换内核"
-    menuItem 1 "查看网络优化状态" "内核、拥塞控制、qdisc、BBR 可用性"
-    menuItem 2 "启用官方 BBR + fq" "写入 ${PADM_BBR_SYSCTL_CONF}"
-    menuItem 3 "关闭 padm BBR 设置" "只删除 padm 写入的 sysctl 配置"
-    menuDangerItem 4 "高级：第三方 TCP 加速脚本" "可能换内核、改引导、需要重启"
-    menuReturnItem 5 "返回主菜单" "回到 padm 管理面板"
-    menuClose
-    autoRead bbr_menu "请选择:" installBBRStatus
-    case "${installBBRStatus}" in
-    1)
-        showNetworkOptimizationStatus
-        ;;
-    2)
-        enableOfficialBbrFq
-        ;;
-    3)
-        disablePadmBbr
-        ;;
-    4)
-        runThirdPartyTcpAccelerationScript
-        ;;
-    5)
-        return 0
-        ;;
-    *)
-        coreSelectionRetryAction bbrInstall
-        ;;
-    esac
+    local installBBRStatus=
+    while true; do
+        echoContent title "\n┌─ 网络优化 ─────────────────────────────────────────"
+        menuLine "默认推荐官方内核自带 BBR + fq；不自动换内核"
+        menuItem 1 "查看网络优化状态" "内核、拥塞控制、qdisc、BBR 可用性"
+        menuItem 2 "启用官方 BBR + fq" "写入 ${PADM_BBR_SYSCTL_CONF}"
+        menuItem 3 "关闭 padm BBR 设置" "只删除 padm 写入的 sysctl 配置"
+        menuDangerItem 4 "高级：第三方 TCP 加速脚本" "可能换内核、改引导、需要重启"
+        menuReturnItem 5 "返回主菜单" "回到 padm 管理面板"
+        menuClose
+        installBBRStatus=
+        autoRead bbr_menu "请选择:" installBBRStatus || return 0
+        case "${installBBRStatus}" in
+        1) showNetworkOptimizationStatus || true ;;
+        2) enableOfficialBbrFq || true ;;
+        3) disablePadmBbr || true ;;
+        4) runThirdPartyTcpAccelerationScript || true ;;
+        5) return 0 ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
 }
 
 writeXrayLogConfig() {

@@ -888,51 +888,35 @@ showFail2banBans() {
 }
 
 manageFail2ban() {
-    echoContent title "\n┌─ Fail2ban 防护 ────────────────────────────────────"
-    menuLine "这里只管理 padm 当前用到的 SSH、/s/control/ 与站点扫描扩展防护，不扩展成通用安全平台。"
-    menuLine "推荐策略会按本机角色和控制面启用状态自动判断。站点扫描扩展默认关闭，只在站点探测较多时建议开启。"
-    menuLine "当前角色：$(uiStyle value "$(fail2banRoleText)")；控制面：$(uiStyle value "$(fail2banControlSurfaceText)")；当前策略：$(uiStyle value "$(fail2banCurrentProfileLabel)")；站点扫描扩展：$(uiStyle value "$(fail2banNginxScanStatusText)")"
-    menuItem 1 "查看当前防护状态" "查看角色、推荐策略、当前 jail 和服务状态"
-    menuItem 2 "启用推荐防护" "自动选择 仅 SSH 或 SSH + 控制面 防护"
-    menuItem 3 "只启用 SSH 防护" "适合未启用主控/被控控制面，或先做最小接入"
-    menuItem 4 "启用 SSH + 控制面防护" "同时保护 SSH 和 WireGuard 内网 /s/control/ 端点"
-    menuItem 5 "启用站点扫描扩展防护" "默认关闭；仅在公开站点遭遇明显探测时再开启"
-    menuItem 6 "关闭站点扫描扩展防护" "恢复为纯基线防护，不影响 SSH / 控制面基线策略"
-    menuItem 7 "查看当前封禁" "查看 fail2ban 当前 jail 与被封禁 IP"
-    menuDangerItem 8 "停用 padm 管理的防护" "保留 fail2ban 软件包，只关闭 padm 管理的 jail"
-    menuReturnItem 9 "返回系统与脚本" "回到上级菜单"
-    menuClose
-    autoRead fail2ban_menu "请选择:" selectFail2banMenuType
-    case "${selectFail2banMenuType}" in
-    1)
-        showFail2banRuntimeStatus
-        ;;
-    2)
-        fail2banApplyProfile "$(fail2banRecommendedProfileName)"
-        ;;
-    3)
-        fail2banApplyProfile sshd
-        ;;
-    4)
-        fail2banApplyProfile sshd+control
-        ;;
-    5)
-        fail2banApplyNginxScanExtension enable
-        ;;
-    6)
-        fail2banApplyNginxScanExtension disable
-        ;;
-    7)
-        showFail2banBans
-        ;;
-    8)
-        fail2banApplyProfile disabled
-        ;;
-    9)
-        systemScriptMenu
-        ;;
-    *)
-        coreSelectionRetryAction manageFail2ban
-        ;;
-    esac
+    local selectFail2banMenuType=
+    while true; do
+        echoContent title "\n┌─ Fail2ban 防护 ────────────────────────────────────"
+        menuLine "这里只管理 padm 当前用到的 SSH、/s/control/ 与站点扫描扩展防护，不扩展成通用安全平台。"
+        menuLine "推荐策略会按本机角色和控制面启用状态自动判断。站点扫描扩展默认关闭，只在站点探测较多时建议开启。"
+        menuLine "当前角色：$(uiStyle value "$(fail2banRoleText)")；控制面：$(uiStyle value "$(fail2banControlSurfaceText)")；当前策略：$(uiStyle value "$(fail2banCurrentProfileLabel)")；站点扫描扩展：$(uiStyle value "$(fail2banNginxScanStatusText)")"
+        menuItem 1 "查看当前防护状态" "查看角色、推荐策略、当前 jail 和服务状态"
+        menuItem 2 "启用推荐防护" "自动选择 仅 SSH 或 SSH + 控制面 防护"
+        menuItem 3 "只启用 SSH 防护" "适合未启用主控/被控控制面，或先做最小接入"
+        menuItem 4 "启用 SSH + 控制面防护" "同时保护 SSH 和 WireGuard 内网 /s/control/ 端点"
+        menuItem 5 "启用站点扫描扩展防护" "默认关闭；仅在公开站点遭遇明显探测时再开启"
+        menuItem 6 "关闭站点扫描扩展防护" "恢复为纯基线防护，不影响 SSH / 控制面基线策略"
+        menuItem 7 "查看当前封禁" "查看 fail2ban 当前 jail 与被封禁 IP"
+        menuDangerItem 8 "停用 padm 管理的防护" "保留 fail2ban 软件包，只关闭 padm 管理的 jail"
+        menuReturnItem 9 "返回系统与脚本" "回到上级菜单"
+        menuClose
+        selectFail2banMenuType=
+        autoRead fail2ban_menu "请选择:" selectFail2banMenuType || return 0
+        case "${selectFail2banMenuType}" in
+        1) showFail2banRuntimeStatus || true ;;
+        2) fail2banApplyProfile "$(fail2banRecommendedProfileName)" || true ;;
+        3) fail2banApplyProfile sshd || true ;;
+        4) fail2banApplyProfile sshd+control || true ;;
+        5) fail2banApplyNginxScanExtension enable || true ;;
+        6) fail2banApplyNginxScanExtension disable || true ;;
+        7) showFail2banBans || true ;;
+        8) fail2banApplyProfile disabled || true ;;
+        9) return 0 ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
 }
