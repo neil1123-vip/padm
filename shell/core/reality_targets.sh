@@ -107,9 +107,9 @@ www.theguardian.com|www.theguardian.com|The Guardian|global|media|unknown|56|yes
 www.sony.com|www.sony.com|Sony|global|large_site|unknown|55|no|远端实测 TLS1.3 可用且证书链较长，但未检测到 PQC，手动备选
 www.hp.com|www.hp.com|HP|global|large_site|unknown|54|no|远端实测 TLS1.3 可用，证书链接近 ML-DSA-65 建议，手动备选
 www.redhat.com|www.redhat.com|Red Hat|global|developer|unknown|53|no|远端实测 TLS1.3 可用，手动备选
-www.gnu.org|www.gnu.org|GNU|global|developer|unknown|52|no|远端实测 TLS1.3 可用，手动备选
-www.debian.org|www.debian.org|Debian|global|developer|unknown|51|no|远端实测 TLS1.3 可用，手动备选
-www.ubuntu.com|www.ubuntu.com|Ubuntu|global|developer|unknown|50|no|远端实测 TLS1.3 可用，手动备选
+www.gnu.org|www.gnu.org|GNU|global|developer|unknown|52|yes|远端复测确认直连，作为普通 Reality 默认候选
+www.debian.org|www.debian.org|Debian|global|developer|unknown|51|yes|远端复测确认直连，作为普通 Reality 默认候选
+www.ubuntu.com|www.ubuntu.com|Ubuntu|global|developer|unknown|50|yes|远端复测确认直连，作为普通 Reality 默认候选
 www.dell.com|www.dell.com|Dell|global|large_site|unknown|49|no|远端实测 TLS1.3 可用，手动备选
 www.intel.com|www.intel.com|Intel|global|large_site|unknown|48|no|远端实测 TLS1.3 可用，手动备选
 www.lenovo.com|www.lenovo.com|Lenovo|global|large_site|unknown|47|no|远端实测 TLS1.3 可用，手动备选
@@ -173,7 +173,7 @@ grafana.com|grafana.com|Grafana|global|developer|unknown|39|no|未远端实测�
 elastic.co|elastic.co|Elastic|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 www.postgresql.org|www.postgresql.org|PostgreSQL|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 www.mysql.com|www.mysql.com|MySQL|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-mariadb.org|mariadb.org|MariaDB|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
+mariadb.org|mariadb.org|MariaDB|global|developer|unknown|39|yes|远端复测确认直连，作为普通 Reality 默认候选
 redis.io|redis.io|Redis|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 www.nginx.com|www.nginx.com|NGINX|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
 nginx.org|nginx.org|NGINX Open Source|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
@@ -276,6 +276,166 @@ realityTargetManagedCandidatesFile() {
     padmResolveManagedAbsolutePath "${candidatesFile}"
 }
 
+realityTargetBuiltInCdnBlockedCandidates() {
+    # Full built-in candidate audit: DNS CNAME/ASN and HTTPS edge evidence.
+    cat <<'EOF'
+www.ibm.com
+www.microsoft.com
+www.reuters.com
+www.qualcomm.com
+www.vmware.com
+www.atlassian.com
+www.jetbrains.com
+www.mongodb.com
+www.asus.com
+www.bbc.com
+www.nationalgeographic.com
+tensorflow.org
+www.oracle.com
+go.dev
+www.samsung.com
+www.nvidia.com
+www.amd.com
+www.python.org
+react.dev
+vuejs.org
+www.cisco.com
+www.mozilla.org
+developer.mozilla.org
+www.kernel.org
+git-scm.com
+www.vultr.com
+www.linode.com
+www.spotify.com
+www.twitch.tv
+www.wikipedia.org
+www.wikimedia.org
+addons.mozilla.org
+dl.google.com
+rust-lang.org
+www.ruby-lang.org
+www.perl.org
+www.springer.com
+www.nytimes.com
+www.theguardian.com
+www.sony.com
+www.hp.com
+www.redhat.com
+www.dell.com
+www.intel.com
+www.lenovo.com
+www.amazon.com
+m.media-amazon.com
+www.swift.com
+www.sap.com
+www.salesforce.com
+www.adobe.com
+www.autodesk.com
+www.servicenow.com
+www.workday.com
+www.box.com
+www.okta.com
+www.zoom.com
+www.docusign.com
+www.paypal.com
+www.visa.com
+www.mastercard.com
+www.americanexpress.com
+www.hsbc.com
+www.citi.com
+www.jpmorgan.com
+www.goldmansachs.com
+www.nasdaq.com
+www.londonstockexchange.com
+www.bloomberg.com
+www.ft.com
+www.wsj.com
+www.economist.com
+www.apnews.com
+www.npr.org
+www.pbs.org
+www.cnn.com
+www.cnbc.com
+www.forbes.com
+www.wired.com
+www.theverge.com
+www.engadget.com
+www.arstechnica.com
+www.stackoverflow.com
+stackexchange.com
+superuser.com
+serverfault.com
+github.com
+docs.github.com
+about.gitlab.com
+bitbucket.org
+code.visualstudio.com
+marketplace.visualstudio.com
+www.docker.com
+hub.docker.com
+kubernetes.io
+helm.sh
+prometheus.io
+www.mysql.com
+redis.io
+gradle.org
+www.qt.io
+www.djangoproject.com
+flask.palletsprojects.com
+fastapi.tiangolo.com
+laravel.com
+symfony.com
+rubyonrails.org
+dotnet.microsoft.com
+learn.microsoft.com
+jdk.java.net
+crates.io
+npmjs.com
+yarnpkg.com
+pnpm.io
+bun.sh
+typescriptlang.org
+webpack.js.org
+vitejs.dev
+svelte.dev
+nuxt.com
+nextjs.org
+vercel.com
+netlify.com
+www.heroku.com
+render.com
+railway.app
+www.digitalocean.com
+www.scaleway.com
+www.oraclecloud.com
+aws.amazon.com
+azure.microsoft.com
+www.tencentcloud.com
+www.uptime.com
+www.pingdom.com
+www.cloudflareblog.com
+www.shopify.com
+squareup.com
+www.ebay.com
+www.etsy.com
+www.airbnb.com
+www.booking.com
+www.expedia.com
+www.tripadvisor.com
+www.uber.com
+www.lyft.com
+soundcloud.com
+vimeo.com
+www.hulu.com
+www.disneyplus.com
+www.imdb.com
+www.rottentomatoes.com
+www.metmuseum.org
+www.britannica.com
+www.coursera.org
+EOF
+}
+
 realityTargetRestoreManagedBackup() {
     local backupDir=$1
     if ! checkLogBackupRestore "${backupDir}"; then
@@ -297,6 +457,10 @@ java.com|Java|cloudflare_relay|已知 Cloudflare 回源中继风险，禁止作�
 nodejs.org|Node.js|cloudflare_relay|已确认由 Cloudflare CDN 承载，禁止作为 Reality 目标
 riotcdn.net|Riot CDN|cloudflare_relay|已知 CDN 回源中继风险，禁止作为 Reality 目标
 EOF
+    while IFS= read -r blocked; do
+        [[ -n "${blocked}" ]] || continue
+        printf '%s|内置 CDN/边缘代理|cdn_edge|全量候选复测确认存在 CDN 或边缘平台代理证据\n' "${blocked}"
+    done < <(realityTargetBuiltInCdnBlockedCandidates)
     local customBlockedFile
     customBlockedFile=$(realityTargetManagedBlockedCandidatesFile 2>/dev/null || true)
     [[ -f "${customBlockedFile}" ]] && cat "${customBlockedFile}"

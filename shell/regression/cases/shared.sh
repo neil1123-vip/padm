@@ -124,7 +124,7 @@ fake-xray() {
         printf 'Pinging with SNI\nHandshake succeeded\nTLS version: TLS 1.3\nCertificate chain total length: 4096\n'
         return 0
     fi
-    if [[ "${PADM_FAKE_XRAY_ONLY_IBM:-}" == "true" && "$*" != *"www.ibm.com"* ]]; then
+    if [[ -n "${PADM_FAKE_XRAY_ONLY_HOST:-}" && "$*" != *"${PADM_FAKE_XRAY_ONLY_HOST}"* ]]; then
         return 1
     fi
     if [[ "$*" == *"www.microsoft.com"* ]]; then

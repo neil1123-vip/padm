@@ -223,14 +223,14 @@ runRealityCandidateFastRegression() {
     local oldRealityPageSize="${REALITY_TARGET_PAGE_SIZE:-}"
     local oldAutoInstall="${AUTO_INSTALL:-}"
     local ipv6OpenSslArgsFile="${TMP_DIR}/reality-ipv6-openssl-args.txt"
-    local firstRecommendedRealityCandidate microsoftCandidate cachedLine resolvedAddresses
+    local firstRecommendedRealityCandidate secondaryCandidate cachedLine resolvedAddresses
 
     cat >"${fixtureFile}" <<'EOF'
-www.ibm.com|www.ibm.com|IBM|global|large_site|unknown|1|yes|fixture default
-www.microsoft.com|www.microsoft.com|Microsoft|global|large_site|unknown|2|yes|fixture microsoft
-www.reuters.com|www.reuters.com|Reuters|global|media|unknown|3|yes|fixture media
-nodejs.org|nodejs.org|Node.js|global|developer|unknown|4|yes|fixture developer
-www.asus.com|www.asus.com|ASUS|asia|large_site|unknown|5|no|fixture asia manual
+fixture-primary.example.com|fixture-primary.example.com|Fixture Primary|global|large_site|unknown|1|yes|fixture default
+fixture-secondary.example.com|fixture-secondary.example.com|Fixture Secondary|global|large_site|unknown|2|yes|fixture secondary
+fixture-media.example.com|fixture-media.example.com|Fixture Media|global|media|unknown|3|yes|fixture media
+fixture-developer.example.com|fixture-developer.example.com|Fixture Developer|global|developer|unknown|4|yes|fixture developer
+fixture-asia.example.com|fixture-asia.example.com|Fixture Asia|asia|large_site|unknown|5|no|fixture asia manual
 www.cloudflare.com|www.cloudflare.com|Cloudflare|global|cdn|yes|6|no|fixture blocked
 cdn-risk.example.com|cdn-risk.example.com|CDN Risk|global|large_site|yes|6|no|fixture CDN risk
 www.apple.com|www.apple.com|Apple|global|large_site|unknown|7|no|fixture blocked
@@ -243,19 +243,19 @@ EOF
     REALITY_TARGET_PAGE_SIZE=2
     AUTO_INSTALL=
 
-    [[ "$(realityTargetCandidateCount)" == "4" ]]
-    [[ "$(realityTargetFilteredCandidateCount recommended)" == "3" ]]
+    [[ "$(realityTargetCandidateCount)" == "5" ]]
+    [[ "$(realityTargetFilteredCandidateCount recommended)" == "4" ]]
     [[ "$(realityTargetFilteredCandidateCount asia)" == "1" ]]
-    [[ "$(realityTargetFilteredCandidateCount microsoft)" == "1" ]]
+    [[ "$(realityTargetFilteredCandidateCount secondary)" == "1" ]]
     firstRecommendedRealityCandidate=$(realityTargetFilteredCandidateLineByIndex recommended 1)
-    [[ "$(realityTargetCandidateField "${firstRecommendedRealityCandidate}" 1)" == "www.ibm.com" ]]
+    [[ "$(realityTargetCandidateField "${firstRecommendedRealityCandidate}" 1)" == "fixture-primary.example.com" ]]
     export PADM_REALITY_TARGET_RESULTS_FILE="${cacheFile}"
-    formatRealityTargetResultLine "www.ibm.com:443" "www.ibm.com" "IBM" "large_site" "no" "192.0.2.44" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "cached" >"${cacheFile}"
-    [[ "$(realityTargetCachedAsnSummary "www.ibm.com:443")" == "192.0.2.44 AS64500 ExampleNet" ]]
-    [[ "$(realityTargetCachedNetworkSummary "www.ibm.com:443")" == "同 ASN" ]]
+    formatRealityTargetResultLine "fixture-primary.example.com:443" "fixture-primary.example.com" "Fixture Primary" "large_site" "no" "192.0.2.44" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "cached" >"${cacheFile}"
+    [[ "$(realityTargetCachedAsnSummary "fixture-primary.example.com:443")" == "192.0.2.44 AS64500 ExampleNet" ]]
+    [[ "$(realityTargetCachedNetworkSummary "fixture-primary.example.com:443")" == "同 ASN" ]]
     [[ "$(realityTargetCachedAsnSummary "missing.example.com:443")" == "暂无缓存" ]]
-    writeRealityTargetCacheLine "www.ibm.com:443" "B" "yes" "2048" "yes" "1234567891" "updated"
-    cachedLine=$(realityTargetResultLine "www.ibm.com:443" 2>/dev/null || true)
+    writeRealityTargetCacheLine "fixture-primary.example.com:443" "B" "yes" "2048" "yes" "1234567891" "updated"
+    cachedLine=$(realityTargetResultLine "fixture-primary.example.com:443" 2>/dev/null || true)
     [[ "$(realityTargetResultField "${cachedLine}" 10)" == "B" ]]
     [[ "$(realityTargetResultCount)" == "0" ]]
     formatRealityTargetResultLine "legacy.example.com:443" "legacy.example.com" "Legacy" "test" "yes" "192.0.2.45" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567892" "legacy risk" >"${cacheFile}"
@@ -265,11 +265,11 @@ EOF
     [[ "$(realityTargetResultField "$(realityTargetResultLine "legacy.example.com:443")" 5)" == "yes" ]]
     ! grep -qF $'www.java.com:443\t' <<<"$(sortedRealityTargetResults)"
     ! grep -qF $'nodejs.org:443\t' <<<"$(sortedRealityTargetResults)"
-    [[ "$(realityTargetRefreshRecords | wc -l | tr -d ' ')" == "3" ]]
-    grep -qF $'www.ibm.com:443\t' <<<"$(realityTargetRefreshRecords)"
-    ! grep -qF $'www.asus.com:443\t' <<<"$(realityTargetRefreshRecords)"
-    [[ "$(realityTargetRefreshRecords all | wc -l | tr -d ' ')" == "4" ]]
-    grep -qF $'www.asus.com:443\t' <<<"$(realityTargetRefreshRecords all)"
+    [[ "$(realityTargetRefreshRecords | wc -l | tr -d ' ')" == "4" ]]
+    grep -qF $'fixture-primary.example.com:443\t' <<<"$(realityTargetRefreshRecords)"
+    ! grep -qF $'fixture-asia.example.com:443\t' <<<"$(realityTargetRefreshRecords)"
+    [[ "$(realityTargetRefreshRecords all | wc -l | tr -d ' ')" == "5" ]]
+    grep -qF $'fixture-asia.example.com:443\t' <<<"$(realityTargetRefreshRecords all)"
     (
         local relativeResultsRoot="${TMP_DIR}/reality-relative-results"
         mkdir -p "${relativeResultsRoot}/child"
@@ -323,9 +323,9 @@ EOF
     selectRealityTargetCandidateInteractive <<<"n
 3
 "
-    [[ "${realityTargetHost}" == "www.reuters.com" ]]
-    microsoftCandidate=$(realityTargetFilteredCandidateLineByIndex microsoft 1)
-    [[ "$(realityTargetCandidateField "${microsoftCandidate}" 1)" == "www.microsoft.com" ]]
+    [[ "${realityTargetHost}" == "fixture-media.example.com" ]]
+    secondaryCandidate=$(realityTargetFilteredCandidateLineByIndex secondary 1)
+    [[ "$(realityTargetCandidateField "${secondaryCandidate}" 1)" == "fixture-secondary.example.com" ]]
     selectRealityTargetCandidateInteractive <<<"m
 manual.example.com:8443
 "
@@ -431,17 +431,19 @@ y
 
 runRealityCandidateFullRegression() {
     local firstRecommendedRealityCandidate firstRealityCandidate secondRealityCandidate blockedCloudflareRealityCandidate blockedNodejsRealityCandidate
-    [[ "$(realityTargetCandidateCount)" -ge 192 ]]
+    [[ "$(realityTargetCandidateCount)" == "37" ]]
     [[ "$(realityTargetFilteredCandidateCount all)" == "$(realityTargetCandidateCount)" ]]
-    [[ "$(realityTargetFilteredCandidateCount recommended)" -ge 39 ]]
-    [[ "$(realityTargetFilteredCandidateCount asia)" -ge 2 ]]
-    [[ "$(realityTargetFilteredCandidateCount microsoft)" -ge 1 ]]
+    [[ "$(realityTargetBuiltInCdnBlockedCandidates | sort -u | wc -l | tr -d ' ')" == "154" ]]
+    [[ "$(realityTargetFilteredCandidateCount recommended)" == "4" ]]
+    [[ "$(realityTargetFilteredCandidateCount asia)" == "1" ]]
+    ! realityTargetCandidates | grep -qF 'www.microsoft.com|'
+    [[ "$(realityTargetFilteredCandidateCount dev)" == "$(realityTargetFilteredCandidateCount developer)" ]]
     firstRecommendedRealityCandidate=$(realityTargetFilteredCandidateLineByIndex recommended 1)
-    [[ "$(realityTargetCandidateField "${firstRecommendedRealityCandidate}" 1)" == "www.ibm.com" ]]
+    [[ "$(realityTargetCandidateField "${firstRecommendedRealityCandidate}" 1)" == "www.gnu.org" ]]
     firstRealityCandidate=$(realityTargetCandidateLineByIndex 1)
-    [[ "$(realityTargetCandidateField "${firstRealityCandidate}" 1)" == "www.ibm.com" ]]
+    [[ "$(realityTargetCandidateField "${firstRealityCandidate}" 1)" == "www.gnu.org" ]]
     secondRealityCandidate=$(realityTargetCandidateLineByIndex 2)
-    [[ "$(realityTargetCandidateField "${secondRealityCandidate}" 1)" == "www.microsoft.com" ]]
+    [[ "$(realityTargetCandidateField "${secondRealityCandidate}" 1)" == "www.debian.org" ]]
     blockedCloudflareRealityCandidate=$(realityTargetBlockedCandidates | grep '^www.cloudflare.com|')
     [[ -n "${blockedCloudflareRealityCandidate}" ]]
     blockedNodejsRealityCandidate=$(realityTargetBlockedCandidates | grep '^nodejs.org|')
@@ -449,6 +451,8 @@ runRealityCandidateFullRegression() {
     realityTargetBlockedCandidates >/dev/null
     ! realityTargetCandidatePool | grep -q '^nodejs.org|'
     [[ "$(realityTargetCandidatePool | awk -F'|' 'tolower($6) == "yes" {count++} END {print count + 0}')" == "0" ]]
+    realityTargetCandidateBlocked "www.ibm.com" cdn_edge
+    ! realityTargetCandidateBlocked "www.gnu.org"
     ! realityTargetCandidates | grep -q '^www.cloudflare.com|'
     ! realityTargetCandidates | grep -q '^www.apple.com|'
     ! realityTargetCandidates | grep -q '^nodejs.org|'
@@ -659,7 +663,7 @@ runRealityConfigScannerRegression() {
     local scannerImported scannerSkipped scannerA scannerB scannerC scannerFail
     cat >"${scannerCandidatesFile}" <<'EOF'
 fail-auto.example.com|fail-auto.example.com|Fail Auto|global|large_site|unknown|1|yes|fixture failing candidate
-www.ibm.com|www.ibm.com|IBM|global|large_site|unknown|2|yes|fixture fallback candidate
+fixture-fallback.example.com|fixture-fallback.example.com|Fixture Fallback|global|large_site|unknown|2|yes|fixture fallback candidate
 EOF
     export PADM_REALITY_TARGET_CANDIDATES_FILE="${scannerCandidatesFile}"
 
@@ -716,7 +720,7 @@ EOF
     unsafeLine=$(grep -F $'fail-auto.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}")
     [[ "$(realityTargetResultField "${unsafeLine}" 5)" == "unknown" ]]
     [[ "$(realityTargetResultField "${unsafeLine}" 10)" == "FAIL" ]]
-    grep -qF $'www.ibm.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
+    grep -qF $'fixture-fallback.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
     refreshMaxConcurrency=$(sort -nr "${refreshConcurrencyDir}/observed" | head -n 1)
     [[ "${refreshMaxConcurrency}" -ge 2 && "${refreshMaxConcurrency}" -le 4 ]]
     writeRealityTargetResultLine "refresh-scanner.example.com:8443" "sni.refresh-scanner.example.com" "Refresh Scanner" "scanner" "no" "198.51.100.20" "AS64501" "RemoteNet" "different_network" "A" "yes" "4096" "yes" "1234567890" "RealiTLScanner: Fixture CA; old result"
@@ -728,7 +732,7 @@ EOF
     rm -f "${REALITY_TLS_PING_ARGS_FILE}" "${asnLookupFile}" "${refreshTimeoutLog}"
     scanLocalAsnRealityTargets
     [[ "$(wc -l <"${REALITY_TLS_PING_ARGS_FILE}" | tr -d ' ')" == "4" ]]
-    grep -qxF "tls ping -ip 192.0.2.1 www.ibm.com:443" "${REALITY_TLS_PING_ARGS_FILE}"
+    grep -qxF "tls ping -ip 192.0.2.1 fixture-fallback.example.com:443" "${REALITY_TLS_PING_ARGS_FILE}"
     grep -qxF "tls ping -ip 192.0.2.1 sni.refresh-scanner.example.com:8443" "${REALITY_TLS_PING_ARGS_FILE}"
     ! grep -qF "fail-auto.example.com" "${REALITY_TLS_PING_ARGS_FILE}"
     asnLookupCount=$(wc -l <"${asnLookupFile}" | tr -d ' ')
@@ -1016,11 +1020,12 @@ CSV
     [[ "${realitySNI}" == "sni.local.example.com" ]]
     rm -f "${PADM_REALITY_TARGET_SCAN_FILE}" "${REALITY_TLS_PING_ARGS_FILE}"
     unset AUTO_REALITY_SERVER_NAME
-    PADM_FAKE_XRAY_ONLY_IBM=true selectDefaultRealityTarget
-    [[ "${realityTargetHost}" == "www.ibm.com" ]]
+    unset PADM_REALITY_TARGET_CANDIDATES_FILE
+    PADM_FAKE_XRAY_ONLY_HOST=www.gnu.org selectDefaultRealityTarget
+    [[ "${realityTargetHost}" == "www.gnu.org" ]]
     [[ "${realityTargetPort}" == "443" ]]
-    [[ "${realitySNI}" == "www.ibm.com" ]]
-    grep -q "tls ping -ip 192.0.2.1 www.ibm.com:443" "${REALITY_TLS_PING_ARGS_FILE}"
+    [[ "${realitySNI}" == "www.gnu.org" ]]
+    grep -q "tls ping -ip 192.0.2.1 www.gnu.org:443" "${REALITY_TLS_PING_ARGS_FILE}"
     (
         export PADM_REALITY_TARGET_RESULTS_FILE="${TMP_DIR}/reality-singbox-openssl-results.tsv"
         export PADM_REALITY_TARGET_SCAN_FILE="${PADM_REALITY_TARGET_RESULTS_FILE}"
@@ -1045,7 +1050,7 @@ CSV
     else
         unset PADM_REALITY_TARGET_CANDIDATES_FILE
     fi
-    unset PADM_FAKE_XRAY_ONLY_IBM
+    unset PADM_FAKE_XRAY_ONLY_HOST
 }
 
 runRealityUnifiedLibraryRollbackRegression() (
