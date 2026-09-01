@@ -995,7 +995,7 @@ runSubscriptionWireGuardRestoreRunnerRegression() (
 runCoreSelectionRetryActionRegression() (
     local actions=
     local -a expectedCounts=(
-        'shell/core/menu.sh|4'
+        'shell/core/menu.sh|3'
         'shell/core/cores.sh|1'
         'shell/core/routing_access_control.sh|0'
         'shell/core/manage.sh|18'
@@ -1036,6 +1036,7 @@ runCoreSelectionRetryActionRegression() (
         ipv6Routing'
         'shell/core/menu.sh|coreSelectionRetryAction routingAccessMenu'
         'shell/core/menu.sh|coreSelectionRetryAction protocolEntryMenu'
+        'shell/core/menu.sh|coreSelectionRetryAction siteCertificateMenu'
     )
     local entry file pattern expectedCount actualCount
 
@@ -1671,6 +1672,19 @@ EOF
             ! assertMenuAction addCorePort
             ! assertMenuAction manageCDN
             [[ "$(wc -l <"${protocolMenuRenderLog}")" == "2" ]]
+        )
+        (
+            local siteMenuRenderLog="${TMP_DIR}/site-menu-render.log"
+            echoContent() { printf '%s\n' "$*" >>"${siteMenuRenderLog}"; }
+            manageTraditionalTlsFallback() { recordMenuAction manageTraditionalTlsFallback; }
+            manageTLSCertificates() { recordMenuAction manageTLSCertificates; }
+            : >"${siteMenuRenderLog}"
+            resetMenuActions
+            siteCertificateMenu <<< $'bad\n3'
+            assertMenuAction 'errorCard:选择错误'
+            ! assertMenuAction manageTraditionalTlsFallback
+            ! assertMenuAction manageTLSCertificates
+            [[ "$(wc -l <"${siteMenuRenderLog}")" == "2" ]]
         )
         resetMenuActions
         output=

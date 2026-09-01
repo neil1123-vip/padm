@@ -86,29 +86,25 @@ protocolEntryMenu() {
 }
 
 siteCertificateMenu() {
-    echoContent title "\n┌─ 站点与证书 ───────────────────────────────────────"
-    menuLine "这里只维护传统 TLS fallback 站点、302、ALPN 和本机 TLS 证书"
-    menuLine "Reality 不使用本机 TLS 证书；这里的证书只服务传统 TLS、站点或订阅"
-    menuLine "Reality target/SNI 伪装目标仍由 Reality 目标站管理，二者不要混淆"
-    menuItem 1 "传统 TLS fallback 维护" "静态站点、302 重定向、ALPN 诊断/修复"
-    menuItem 2 "本机 TLS 证书管理" "续签或查看 /etc/padm/tls 证书"
-    menuReturnItem 3 "返回主菜单" "回到 padm 管理面板"
-    menuClose
-    autoRead site_certificate_menu "请选择:" selectSiteCertificateMenuType
-    case ${selectSiteCertificateMenuType} in
-    1)
-        manageTraditionalTlsFallback 1
-        ;;
-    2)
-        manageTLSCertificates
-        ;;
-    3)
-        return 0
-        ;;
-    *)
-        coreSelectionRetryAction siteCertificateMenu
-        ;;
-    esac
+    local selectSiteCertificateMenuType=
+    while true; do
+        echoContent title "\n┌─ 站点与证书 ───────────────────────────────────────"
+        menuLine "这里只维护传统 TLS fallback 站点、302、ALPN 和本机 TLS 证书"
+        menuLine "Reality 不使用本机 TLS 证书；这里的证书只服务传统 TLS、站点或订阅"
+        menuLine "Reality target/SNI 伪装目标仍由 Reality 目标站管理，二者不要混淆"
+        menuItem 1 "传统 TLS fallback 维护" "静态站点、302 重定向、ALPN 诊断/修复"
+        menuItem 2 "本机 TLS 证书管理" "续签或查看 /etc/padm/tls 证书"
+        menuReturnItem 3 "返回主菜单" "回到 padm 管理面板"
+        menuClose
+        selectSiteCertificateMenuType=
+        autoRead site_certificate_menu "请选择:" selectSiteCertificateMenuType || return 0
+        case "${selectSiteCertificateMenuType}" in
+        1) manageTraditionalTlsFallback 1; return $? ;;
+        2) manageTLSCertificates; return $? ;;
+        3) return 0 ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+    done
 }
 
 routingAccessMenu() {
