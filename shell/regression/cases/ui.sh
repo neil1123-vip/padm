@@ -1427,6 +1427,23 @@ EOF
             [[ "$(grep -c '^running:nginx$' "${serviceProbeLog}")" == "1" ]]
         )
 
+        (
+            local routingToolsRenderLog="${TMP_DIR}/routing-tools-render.log"
+            echoContent() { printf '%s\n' "$*" >>"${routingToolsRenderLog}"; }
+            routingAccessMenu() { recordMenuAction routingAccessMenu; }
+            : >"${routingToolsRenderLog}"
+            resetMenuActions
+            routingToolsMenu <<<"6"
+            ! assertMenuAction routingAccessMenu
+            [[ "$(wc -l <"${routingToolsRenderLog}")" == "1" ]]
+            : >"${routingToolsRenderLog}"
+            resetMenuActions
+            routingToolsMenu <<< $'bad\n6'
+            assertMenuAction 'errorCard:选择错误'
+            [[ "$(wc -l <"${routingToolsRenderLog}")" == "2" ]]
+            ! assertMenuAction routingAccessMenu
+        )
+
         xrayInstalledState=false
         singBoxInstalledState=false
         serviceInstalledState=false
