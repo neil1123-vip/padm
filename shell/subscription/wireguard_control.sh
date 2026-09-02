@@ -1127,62 +1127,30 @@ subscriptionWireGuardCleanPendingInvitesJson() {
     local state=$1
     local groupsState=$2
     local now=$3
-    local sources pending result invite inviteId alias address host expiresAt
-    local peerById peerByAddress sourceById sourceByAddress
-    local peerSame sourceSame conflict complete
-    sources=$(subscriptionWireGuardActiveSourcesFromGroupsState "${groupsState}") || return 1
-    pending=$(jq -c '.pending_invites // []' <<<"${state}") || return 1
-    result='[]'
-    while IFS= read -r invite; do
-        [[ -n "${invite}" ]] || continue
-        inviteId=$(jq -r '.invite_id' <<<"${invite}") || return 1
-        alias=$(jq -r '.alias' <<<"${invite}") || return 1
-        address=$(jq -r '.address' <<<"${invite}") || return 1
-        host=$(subscriptionWireGuardAddressHost "${address}")
-        expiresAt=$(jq -r '.expires_at' <<<"${invite}") || return 1
-        peerById=$(jq -c --arg alias "${alias}" 'first(.peers[]? | select(.id == $alias)) // empty' <<<"${state}") || return 1
-        peerByAddress=$(jq -c --arg host "${host}" 'first(.peers[]? | select((.address | split("/")[0]) == $host)) // empty' <<<"${state}") || return 1
-        sourceById=$(jq -c --arg alias "${alias}" 'first(.[]? | select(.id == $alias)) // empty' <<<"${sources}") || return 1
-        sourceByAddress=$(jq -c --arg host "${host}" 'first(.[]? | select(.host == $host)) // empty' <<<"${sources}") || return 1
-        peerSame=false
-        sourceSame=false
-        conflict=false
-        complete=false
-
-        if [[ -n "${peerById}" ]]; then
-            if [[ "$(subscriptionWireGuardAddressHost "$(jq -r '.address' <<<"${peerById}")")" == "${host}" ]]; then
-                peerSame=true
-            else
-                conflict=true
-            fi
-        fi
-        if [[ -n "${peerByAddress}" && "$(jq -r '.id' <<<"${peerByAddress}")" != "${alias}" ]]; then
-            conflict=true
-        fi
-        if [[ -n "${sourceById}" ]]; then
-            if jq -e --arg host "${host}" '.role != "main" and .host == $host' <<<"${sourceById}" >/dev/null 2>&1; then
-                sourceSame=true
-            else
-                conflict=true
-            fi
-        fi
-        if [[ -n "${sourceByAddress}" && "$(jq -r '.id' <<<"${sourceByAddress}")" != "${alias}" ]]; then
-            conflict=true
-        fi
-        if [[ "${peerSame}" == "true" && "${sourceSame}" == "true" ]] &&
-            jq -e '((.transport // .scheme // "") == "wireguard") and ((.control_token // "") | length > 0)' <<<"${sourceById}" >/dev/null 2>&1; then
-            complete=true
-        fi
-
-        if [[ "${conflict}" == "true" || "${complete}" == "true" ]]; then
-            continue
-        fi
-        if ((10#${expiresAt} <= 10#${now})) && [[ "${peerSame}" != "true" && "${sourceSame}" != "true" ]]; then
-            continue
-        fi
-        result=$(jq -c --argjson invite "${invite}" '. + [$invite]' <<<"${result}") || return 1
-    done < <(jq -c '.[]?' <<<"${pending}")
-    printf '%s\n' "${result}"
+    jq -c --argjson now "${now}" --argjson groupsState "${groupsState}" '
+      . as $state |
+      ($state.peers // []) as $peers |
+      ($groupsState.sources // []) as $sources |
+      [($state.pending_invites // [])[] as $invite |
+        ($invite.address | split("/")[0]) as $host |
+        (first($peers[]? | select(.id == $invite.alias)) // null) as $peerById |
+        (first($peers[]? | select((.address | split("/")[0]) == $host)) // null) as $peerByAddress |
+        (first($sources[]? | select(.id == $invite.alias)) // null) as $sourceById |
+        (first($sources[]? | select(.host == $host)) // null) as $sourceByAddress |
+        ($peerById != null and (($peerById.address | split("/")[0]) == $host)) as $peerSame |
+        ($sourceById != null and $sourceById.role != "main" and $sourceById.host == $host) as $sourceSame |
+        ($peerById != null and ($peerSame | not)) as $peerIdConflict |
+        ($peerByAddress != null and $peerByAddress.id != $invite.alias) as $peerAddressConflict |
+        ($sourceById != null and ($sourceSame | not)) as $sourceIdConflict |
+        ($sourceByAddress != null and $sourceByAddress.id != $invite.alias) as $sourceAddressConflict |
+        ($peerSame and $sourceSame and
+          (($sourceById.transport // $sourceById.scheme // "") == "wireguard") and
+          (($sourceById.control_token // "") | length > 0)) as $complete |
+        select(($peerIdConflict or $peerAddressConflict or $sourceIdConflict or $sourceAddressConflict or $complete) | not) |
+        select(($invite.expires_at > $now) or $peerSame or $sourceSame) |
+        $invite
+      ]
+    ' <<<"${state}"
 }
 
 subscriptionWireGuardPersistCleanPendingInvites() {

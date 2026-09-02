@@ -368,6 +368,7 @@ listRegressionUiFullSubscriptionMainPublishSyncChildSelectors() {
 listRegressionWireGuardMenuFlowChildSelectors() {
     printf '%s\n' \
         wireguard-menu-flow-bootstrap \
+        wireguard-menu-flow-invite-receipt \
         wireguard-menu-flow-peer-add-update \
         wireguard-menu-flow-peer-rollback-apply \
         wireguard-menu-flow-peer-rollback-source \
@@ -427,6 +428,7 @@ listRegressionUiChildSelectors() {
         ui-full-subscription-main-maintenance \
         wireguard-menu-flow-control-restore \
         wireguard-menu-flow-bootstrap \
+        wireguard-menu-flow-invite-receipt \
         ui-full-subscription-main-entry \
         ui-full-subscription-controlled \
         ui-full-core \
@@ -441,6 +443,7 @@ listRegressionUiAllProfileChildSelectors() {
         wireguard-menu-flow-peer-rollback-apply \
         wireguard-menu-flow-peer-rollback-source \
         wireguard-menu-flow-bootstrap \
+        wireguard-menu-flow-invite-receipt \
         wireguard-menu-flow-peer-add-update \
         wireguard-menu-flow-peer-source-control \
         wireguard-menu-flow-control-restore \
@@ -480,6 +483,7 @@ registerRegressionFunctionLeaf ui-full-subscription-main-maintenance runMenuSmok
 registerRegressionFunctionLeaf ui-full-subscription-controlled runMenuSmokeRegression subscription-controlled
 registerRegressionFunctionLeaf ui-full-core-maintenance runMenuSmokeRegression core-maintenance
 registerRegressionFunctionLeaf wireguard-menu-flow-bootstrap runSubscriptionWireGuardMenuFlowBootstrapRegression
+registerRegressionFunctionLeaf wireguard-menu-flow-invite-receipt runSubscriptionWireGuardInviteReceiptRegression
 registerRegressionFunctionLeaf wireguard-menu-flow-peer-add-update runSubscriptionWireGuardMenuFlowRegression peer-add-update
 registerRegressionFunctionLeaf wireguard-menu-flow-peer-rollback-apply-service runSubscriptionWireGuardMenuFlowRegression peer-rollback-apply-service
 registerRegressionFunctionLeaf wireguard-menu-flow-peer-rollback-apply-restore runSubscriptionWireGuardMenuFlowRegression peer-rollback-apply-restore

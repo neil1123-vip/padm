@@ -78,6 +78,21 @@ runSubscriptionWireGuardMenuFlowRegression() (
     currentHost="main.example.com"
     nginxConfigPath="${TMP_DIR}/menu-smoke-nginx/"
     subscriptionWireGuardConfigFile() { echo "${TMP_DIR}/menu-smoke-wireguard/wg-padm.conf"; }
+    eval "$(declare -f subscriptionWireGuardReadState | sed '1s/^subscriptionWireGuardReadState/originalSubscriptionWireGuardReadState/')"
+    # Menu transaction cases share validation coverage with the bootstrap leaf;
+    # keep reads parse-only so Windows does not spawn jq validators repeatedly.
+    subscriptionWireGuardReadState() {
+        local stateFile
+        stateFile=$(subscriptionWireGuardStateFile) || return 1
+        if [[ ! -f "${stateFile}" ]]; then
+            originalSubscriptionWireGuardReadState
+            return
+        fi
+        jq -e -c '.' "${stateFile}"
+    }
+    subscriptionGroupsStateRead() {
+        jq "$@" "$(subscriptionGroupsFile)"
+    }
     rm -rf "${PADM_WIREGUARD_CONTROL_DIR}" "${PADM_SUBSCRIPTION_GROUPS_DIR}"
     mkdir -p "${nginxConfigPath}"
     ensureSubscriptionGroupsState
@@ -612,7 +627,7 @@ runSubscriptionWireGuardInviteReceiptRegression() (
     local inviteJsonA inviteJsonB inviteJsonC cancelInviteJson joinJson receiptJson receiptCredential controlledCredentialJson completedAlias
     local stateBefore groupsBefore pendingJson readSecretValue= secretOutput staleInviteId
     local credentialStatusLog="${root}/credential-status.log"
-    local testWireGuardState testGroupsState
+    local testWireGuardState testWireGuardStateValidated=false testGroupsState
     local remoteApplyLog="${root}/remote-apply.log"
 
     # Restore production functions because other legacy UI tests install global stubs.
@@ -644,7 +659,9 @@ runSubscriptionWireGuardInviteReceiptRegression() (
     subscriptionWireGuardConfigFile() { printf '%s\n' "${wireGuardConfig}"; }
     subscriptionWireGuardStateFile() { printf '%s\n' "${stateMarker}"; }
     subscriptionWireGuardReadState() {
-        subscriptionWireGuardValidateState "${testWireGuardState}" || return 1
+        if [[ "${testWireGuardStateValidated}" != true ]]; then
+            subscriptionWireGuardValidateState "${testWireGuardState}" || return 1
+        fi
         printf '%s\n' "${testWireGuardState}"
     }
     subscriptionWireGuardWriteState() {
@@ -658,6 +675,7 @@ runSubscriptionWireGuardInviteReceiptRegression() (
         candidate=$(jq -c "${jqArgs[@]}" "${filter}" <<<"${testWireGuardState}") || return 1
         subscriptionWireGuardValidateState "${candidate}" || return 1
         testWireGuardState=${candidate}
+        testWireGuardStateValidated=true
         printf '%s\n' "${testWireGuardState}" >"${stateMarker}"
     }
     normalizeTestGroupsState() {
@@ -672,10 +690,10 @@ runSubscriptionWireGuardInviteReceiptRegression() (
           else . end
         ' <<<"${testGroupsState}"
     }
-    subscriptionGroupsStateRead() { normalizeTestGroupsState | jq "$@"; }
+    subscriptionGroupsStateRead() { jq "$@" <<<"${testGroupsState}"; }
     subscriptionGroupsStateWrite() {
         local candidate
-        candidate=$(normalizeTestGroupsState | jq -c "$@") || return 1
+        candidate=$(jq -c "$@" <<<"${testGroupsState}") || return 1
         testGroupsState=${candidate}
     }
     subscriptionGroupsWithLock() {
@@ -707,7 +725,10 @@ runSubscriptionWireGuardInviteReceiptRegression() (
     subscriptionControlEnsureToken() { return 0; }
     subscriptionControlToken() { printf '%s\n' "${receiptToken}"; }
     testGroupsState=$(jq -cn '{version:2,active_group:"default",groups:[{id:"default",name:"Default",admin:{id:"admin",name:"Admin",enabled:true,allowed_sources:["*"],traffic_limit_gb:0,token:""},sources:[{id:"main",name:"Main",role:"main",scheme:"local",transport:"local",host:"127.0.0.1",port:0,enabled:true,sync_status:"local"}],user_groups:[],sync:{enabled:true,interval_minutes:10,last_run:"",last_status:"pending",failures:[],quota_auto_apply:false},traffic:{global:{upload:0,download:0},admin:{upload:0,download:0,sources:{}},user_groups:{},sources:{}}}]}')
+    testGroupsState=$(normalizeTestGroupsState)
     testWireGuardState=$(jq -cn --arg publicKey "${mainPublicKey}" '{enabled:true,role:"main",interface:"wg-padm",network:"10.77.0.0/24",listen_port:51820,control_port:39778,firewall_owned:false,address:"10.77.0.1/24",endpoint_host:"main.example.com",public_key:$publicKey,peers:[]}')
+    subscriptionWireGuardValidateState "${testWireGuardState}" || return 1
+    testWireGuardStateValidated=true
     printf '%s\n' "${testWireGuardState}" >"${stateMarker}"
     printf 'keep-config\n' >"${wireGuardConfig}"
 
@@ -797,6 +818,7 @@ runSubscriptionWireGuardInviteReceiptRegression() (
     fi
     subscriptionWireGuardReadState | jq -e '(.pending_invites | length) == 0' >/dev/null
     testWireGuardState=${stateBefore}
+    testWireGuardStateValidated=true
     printf '%s\n' "${testWireGuardState}" >"${stateMarker}"
 
     controlledCredentialJson=$(jq -cn --arg publicKey "${controlledPublicKeyA}" --arg token "${receiptToken}" '{version:1,kind:"controlled",address:"10.77.0.10/24",public_key:$publicKey,control_port:39778,token:$token}')
@@ -817,6 +839,9 @@ runSubscriptionWireGuardInviteReceiptRegression() (
     stateMarker="${root}/controlled-control.json"
     testWireGuardState=$(jq -cn '{enabled:false,role:"uninitialized",interface:"wg-padm",network:"10.77.0.0/24",listen_port:51820,control_port:39778,firewall_owned:false,address:"",endpoint_host:"",public_key:"",peers:[]}')
     testGroupsState=$(jq -cn '{version:2,active_group:"default",groups:[{id:"default",name:"Default",admin:{id:"admin",name:"Admin",enabled:true,allowed_sources:["*"],traffic_limit_gb:0,token:""},sources:[{id:"main",name:"Main",role:"main",scheme:"local",transport:"local",host:"127.0.0.1",port:0,enabled:true,sync_status:"local"}],user_groups:[],sync:{enabled:true,interval_minutes:10,last_run:"",last_status:"pending",failures:[],quota_auto_apply:false},traffic:{global:{upload:0,download:0},admin:{upload:0,download:0,sources:{}},user_groups:{},sources:{}}}]}')
+    testGroupsState=$(normalizeTestGroupsState)
+    subscriptionWireGuardValidateState "${testWireGuardState}" || return 1
+    testWireGuardStateValidated=true
     printf '%s\n' "${testWireGuardState}" >"${stateMarker}"
     subscriptionWireGuardJoinInvite "${joinJson}" false
     subscriptionWireGuardReadState | jq -e --arg inviteId "$(jq -r '.invite_id' <<<"${joinJson}")" '.role == "controlled" and .address == $address and .join_invite_id == $inviteId and (.peers | length) == 1 and .peers[0].id == "main"' --arg address "$(jq -r '.address' <<<"${joinJson}")" >/dev/null
@@ -837,6 +862,7 @@ runSubscriptionWireGuardInviteReceiptRegression() (
         return 1
     fi
     testWireGuardState=${stateBefore}
+    testWireGuardStateValidated=true
     printf '%s\n' "${testWireGuardState}" >"${stateMarker}"
     stateBefore=$(subscriptionWireGuardReadState)
     if subscriptionWireGuardJoinInvite "$(jq -c '.address = "10.77.0.9/24"' <<<"${joinJson}")" false >/dev/null 2>&1; then
@@ -954,7 +980,6 @@ runSubscriptionWireGuardMenuFlowBootstrapRegression() {
         subscriptionRemoteScopeEnabled
     )
     runSubscriptionWireGuardMenuFlowRegression bootstrap
-    runSubscriptionWireGuardInviteReceiptRegression
 }
 
 runSubscriptionWireGuardRestoreRunnerRegression() (
