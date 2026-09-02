@@ -653,6 +653,10 @@ showUserSubscriptions() {
     local sources
     local limit
     local quota
+    local enabledText
+    local limitText
+    local sourceText
+    local quotaText
     local jqProgram
     local quotaStatusJq
     quotaStatusJq=$(subscriptionUserQuotaStatusJq) || return 1
@@ -670,21 +674,31 @@ showUserSubscriptions() {
     fi
     userResultCard "用户订阅列表"
     while IFS=$'\037' read -r id name enabled sources limit quota; do
-        menuLine "ID：$(uiStyle value "${id}")"
-        menuLine "名称：$(uiStyle value "${name}")"
-        if [[ "${enabled}" == "true" ]]; then
-            menuLine "状态：$(uiStyle ok "${enabled}")"
+        if [[ "${name}" == "${id}" ]]; then
+            menuLine "订阅：$(uiStyle value "${id}")"
         else
-            menuLine "状态：$(uiStyle warn "${enabled}")"
+            menuLine "订阅：$(uiStyle value "${name}")（${id}）"
         fi
-        menuLine "可用服务器：$(uiStyle value "${sources}")"
-        menuLine "订阅额度GB：$(uiStyle value "${limit}")"
+        if [[ "${enabled}" == "true" ]]; then
+            enabledText=$(uiStyle ok "已启用")
+        else
+            enabledText=$(uiStyle warn "已停用")
+        fi
+        if [[ "${limit}" == "0" ]]; then
+            limitText="不限额"
+        else
+            limitText="${limit} GB"
+        fi
         case "${quota}" in
-        已超限*) menuLine "限额状态：$(uiStyle danger "${quota}")" ;;
-        接近上限*) menuLine "限额状态：$(uiStyle warn "${quota}")" ;;
-        正常*) menuLine "限额状态：$(uiStyle ok "${quota}")" ;;
-        *) menuLine "限额状态：$(uiStyle muted "${quota}")" ;;
+        已超限*) quotaText=$(uiStyle danger "${quota}") ;;
+        接近上限*) quotaText=$(uiStyle warn "${quota}") ;;
+        正常*) quotaText=$(uiStyle ok "${quota}") ;;
+        *) quotaText=$(uiStyle muted "${quota}") ;;
         esac
+        sourceText=${sources//,/、}
+        [[ "${sourceText}" == "*" ]] && sourceText="全部"
+        menuLine "状态：${enabledText} / 额度：$(uiStyle value "${limitText}") / 限额：${quotaText}"
+        menuLine "服务器：$(uiStyle value "${sourceText}")"
     done <<<"${output}"
     menuClose
 }

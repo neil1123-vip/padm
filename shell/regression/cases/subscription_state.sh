@@ -532,11 +532,20 @@ runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
         [[ "${trafficOutput}" == *"总上传：2 MB"* ]]
         [[ "${trafficOutput}" == *"总下载：1 MB"* ]]
         [[ "${trafficOutput}" == *"来源数：1"* ]]
+        [[ "${trafficOutput}" == *"Main（main）：上传 2 MB / 下载 1 MB"* ]]
+        [[ "${trafficOutput}" != *'"sources"'* ]]
         trafficOutput=$(showSubscriptionSourcesTraffic)
         [[ "${trafficOutput}" == *"服务器数：2"* ]]
         [[ "${trafficOutput}" == *"总上传：3 MB"* ]]
         [[ "${trafficOutput}" == *"总下载：1 MB"* ]]
         [[ "${trafficOutput}" == *"最近更新：2026-06-10 10:01:00"* ]]
+        [[ "${trafficOutput}" == *"remote-edge：上传 1 MB / 下载 0 B"* ]]
+        [[ "${trafficOutput}" != *'"upload"'* ]]
+        trafficOutput=$(showUserSubscriptions)
+        [[ "${trafficOutput}" == *"订阅：Team A（team-a）"* ]]
+        [[ "${trafficOutput}" == *"状态：已启用 / 额度：1 GB / 限额：已超限(100%)"* ]]
+        [[ "${trafficOutput}" == *"服务器：全部"* ]]
+        [[ "${trafficOutput}" != *"状态：true"* ]]
         trafficOutput=$(showSubscriptionTrafficOverview)
         [[ "${trafficOutput}" == *"分享订阅：共 1 个，启用 1 个"* ]]
         [[ "${trafficOutput}" == *"限额状态：超限 1 个，接近上限 0 个"* ]]
@@ -564,7 +573,10 @@ runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
         trafficOutput=$(showUserSubscriptionTraffic team-a)
         [[ "$(wc -l <"${trafficReadLog}")" == "1" ]]
         [[ "${trafficOutput}" == *"限额状态：正常(0%)"* ]]
-        [[ "${trafficOutput}" == *'"upload": 1'* ]]
+        [[ "${trafficOutput}" == *"总上传：1 B"* ]]
+        [[ "${trafficOutput}" == *"总下载：2 B"* ]]
+        [[ "${trafficOutput}" == *"来源明细："* ]]
+        [[ "${trafficOutput}" != *'"upload"'* ]]
     )
     subscriptionQuotaDryRunPlan | jq -e 'length == 1 and .[0].id == "team-a" and .[0].limit_gb == 1 and .[0].percent >= 100 and .[0].action == "disable-and-remove-local-account"' >/dev/null
 }

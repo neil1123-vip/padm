@@ -723,50 +723,87 @@ def subscriptionUserQuotaStatus($user; $traffic; $showPercent):
 EOF
 }
 
+subscriptionTrafficDisplayJq() {
+    cat <<'EOF'
+def subscriptionTrafficDecimal($value):
+  (((($value * 10) | round) / 10) | tostring);
+def subscriptionTrafficSize($value):
+  (($value // 0) | tonumber? // 0) as $bytes |
+  if $bytes >= 1099511627776 then subscriptionTrafficDecimal($bytes / 1099511627776) + " TB"
+  elif $bytes >= 1073741824 then subscriptionTrafficDecimal($bytes / 1073741824) + " GB"
+  elif $bytes >= 1048576 then subscriptionTrafficDecimal($bytes / 1048576) + " MB"
+  elif $bytes >= 1024 then subscriptionTrafficDecimal($bytes / 1024) + " KB"
+  else (($bytes | floor | tostring) + " B")
+  end;
+def subscriptionTrafficSourceLabel($sourceNames; $id):
+  ($sourceNames[$id] // $id) as $name |
+  if $name == $id then $name else $name + "（" + $id + "）" end;
+def subscriptionTrafficLatest($sources):
+  (([($sources // {})[]? | .updated_at? | select(type == "string" and length > 0)] | max) // "未知") | tostring;
+def subscriptionTrafficLines($sources; $sourceNames; $kind):
+  ($sources // {}) as $items |
+  (subscriptionTrafficTotal($items)) as $total |
+  (if $kind == "server" then
+    ["服务器数：" + (($items | length) | tostring)]
+   else [] end) +
+  [
+    "总上传：" + subscriptionTrafficSize($total.upload),
+    "总下载：" + subscriptionTrafficSize($total.download),
+    (if $kind == "admin" or $kind == "user" then "来源数：" + (($items | length) | tostring) else empty end),
+    "最近更新：" + subscriptionTrafficLatest($items),
+    "来源明细："
+  ] +
+  (($items | to_entries | sort_by(if .key == "main" then [0, .key] else [1, .key] end)) |
+    if length == 0 then ["  暂无来源流量"]
+    else map(
+      .key as $id |
+      "  " + subscriptionTrafficSourceLabel($sourceNames; $id) +
+      "：上传 " + subscriptionTrafficSize(.value.upload) +
+      " / 下载 " + subscriptionTrafficSize(.value.download)
+    )
+    end);
+EOF
+}
+
+showSubscriptionTrafficCard() {
+    local title=$1
+    local output=$2
+    userResultCard "${title}"
+    while IFS= read -r line; do
+        [[ -n "${line}" ]] && menuLine "${line}"
+    done <<<"${output}"
+    menuClose
+}
+
 showAdminSubscriptionTraffic() {
-    local traffic
-    local summary
-    traffic=$(subscriptionActiveGroupRead -r '.traffic.admin') || return 1
-    summary=$(jq -r '
-      def mb($v): (((($v // 0) / 1024 / 1024) | floor) | tostring) + " MB";
-      (.sources // {}) as $sources |
-      "总上传：" + mb([$sources[]?.upload] | add // 0) + "\n" +
-      "总下载：" + mb([$sources[]?.download] | add // 0) + "\n" +
-      "来源数：" + (((.sources // {}) | length) | tostring) + "\n" +
-      "最近更新：" + (((.sources // {}) | to_entries | map(.value.updated_at // empty) | max) // (.updated_at // "未知") | tostring)
-    ' <<<"${traffic}") || return 1
-    showSubscriptionJsonWithSummary "我的流量" "${traffic}" "${summary}"
+    local output
+    local jqProgram
+    jqProgram=$(printf '%s\n%s\n%s\n' "$(subscriptionTrafficTotalsJq)" "$(subscriptionTrafficDisplayJq)" '
+      (.sources // [] | map({key:.id, value:(.name // .id)}) | from_entries) as $sourceNames |
+      subscriptionTrafficLines(.traffic.admin.sources; $sourceNames; "admin") | .[]')
+    output=$(subscriptionActiveGroupRead -r "${jqProgram}") || return 1
+    showSubscriptionTrafficCard "我的流量" "${output}"
 }
 
 showUserSubscriptionTraffic() {
     local userSubscriptionId=$1
-    local traffic
-    local quotaStatus
+    local output
     local jqProgram
     local quotaStatusJq
-    local -a resultFields=()
     quotaStatusJq=$(subscriptionUserQuotaStatusJq) || return 1
-    jqProgram=$(printf '%s\n%s\n%s\n' "$(subscriptionTrafficTotalsJq)" "${quotaStatusJq}" '
+    jqProgram=$(printf '%s\n%s\n%s\n%s\n' "$(subscriptionTrafficTotalsJq)" "$(subscriptionTrafficDisplayJq)" "${quotaStatusJq}" '
       . as $group |
       (first($group.user_groups[]? | select(.id == $id))) as $userGroup |
-      ($group.traffic.user_groups[$id] // {sources:{}}) as $traffic |
-      (subscriptionTrafficTotal($traffic.sources)) as $trafficTotal |
-      {
-        quota_status:(if ($userGroup | type) == "object" then subscriptionUserQuotaStatus($userGroup; $trafficTotal; true) else "" end),
-        traffic:$traffic
-      }')
-    mapfile -d '' -t resultFields < <(
-        subscriptionActiveGroupRead -j --arg id "${userSubscriptionId}" "${jqProgram} |
-          [.quota_status, (.traffic | tojson)] | map(. , \"\u0000\") | .[]"
-    )
-    [[ "${#resultFields[@]}" -eq 2 ]] || return 1
-    quotaStatus=${resultFields[0]}
-    traffic=${resultFields[1]}
-    userResultCard "用户订阅流量"
-    menuLine "用户订阅：${userSubscriptionId}"
-    menuLine "限额状态：${quotaStatus}"
-    printf '%s\n' "${traffic}" | jq .
-    menuClose
+      ($group.traffic.user_groups[$id].sources // {}) as $traffic |
+      ($group.sources // [] | map({key:.id, value:(.name // .id)}) | from_entries) as $sourceNames |
+      ($userGroup.name // $id) as $name |
+      (if ($userGroup | type) == "object" then subscriptionUserQuotaStatus($userGroup; subscriptionTrafficTotal($traffic); true) else "未知" end) as $quotaStatus |
+      ([
+        ("订阅：" + $name + (if $name == $id then "" else "（" + $id + "）" end)),
+        ("限额状态：" + $quotaStatus)
+      ] + subscriptionTrafficLines($traffic; $sourceNames; "user")) | .[]')
+    output=$(subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" "${jqProgram}") || return 1
+    showSubscriptionTrafficCard "用户订阅流量" "${output}"
 }
 
 showSubscriptionTrafficOverview() {
@@ -806,10 +843,10 @@ manageTrafficDetails() {
     while true; do
         echoContent title "\n┌─ 流量明细 ─────────────────────────────────────────"
         menuLine "按账号、分享订阅或服务器源查看累计流量。"
-        menuItem 1 "查看我的流量" "查看自用账号在各服务器源的累计流量"
-        menuItem 2 "查看分享订阅限额概览" "列出全部分享订阅、额度和状态"
-        menuItem 3 "查看单个分享订阅流量" "选择订阅后显示流量和额度状态"
-        menuItem 4 "查看服务器流量" "显示各服务器源累计流量"
+        menuItem 1 "我的流量" "自用账号按服务器统计"
+        menuItem 2 "分享订阅概览" "额度、状态和服务器范围"
+        menuItem 3 "单个分享订阅" "选择订阅查看累计流量"
+        menuItem 4 "服务器流量" "全部账号按服务器统计"
         menuReturnItem 5 "返回流量与限额" "回到上级菜单"
         menuClose
         autoRead traffic_details_menu "请选择:" trafficDetailsStatus
@@ -862,18 +899,11 @@ selectUserSubscriptionTrafficMenu() {
 }
 
 showSubscriptionSourcesTraffic() {
-    local traffic
-    local summary
-    traffic=$(subscriptionActiveGroupRead -r '.traffic.sources') || return 1
-    summary=$(jq -r '
-      def mb($v): (((($v // 0) / 1024 / 1024) | floor) | tostring) + " MB";
-      def total($items): reduce $items[] as $item ({upload:0, download:0}; .upload += ($item.upload // 0) | .download += ($item.download // 0));
-      (. // {}) as $sources |
-      (total($sources | to_entries | map(.value))) as $total |
-      "服务器数：" + (($sources | length) | tostring) + "\n" +
-      "总上传：" + mb($total.upload) + "\n" +
-      "总下载：" + mb($total.download) + "\n" +
-      "最近更新：" + (($sources | to_entries | map(.value.updated_at // empty) | max) // "未知" | tostring)
-    ' <<<"${traffic}") || return 1
-    showSubscriptionJsonWithSummary "服务器流量" "${traffic}" "${summary}"
+    local output
+    local jqProgram
+    jqProgram=$(printf '%s\n%s\n%s\n' "$(subscriptionTrafficTotalsJq)" "$(subscriptionTrafficDisplayJq)" '
+      (.sources // [] | map({key:.id, value:(.name // .id)}) | from_entries) as $sourceNames |
+      subscriptionTrafficLines(.traffic.sources; $sourceNames; "server") | .[]')
+    output=$(subscriptionActiveGroupRead -r "${jqProgram}") || return 1
+    showSubscriptionTrafficCard "服务器流量" "${output}"
 }
