@@ -598,6 +598,33 @@ runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
         [[ "$(<"${lockTimeoutLog}")" == "0" ]]
         [[ "${trafficOutput}" == *"自动执行超限处理：暂不可读"* ]]
     )
+    (
+        local lockTimeoutLog="${TMP_DIR}/subscription-state-quota-display-lock-timeout.log"
+        local trafficOutput
+        : >"${lockTimeoutLog}"
+        subscriptionActiveGroupRead() {
+            printf '%s\n' "${PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT:-unset}" >>"${lockTimeoutLog}"
+            return 1
+        }
+        userResultCard() { :; }
+        menuLine() { :; }
+        menuClose() { :; }
+        errorCard() { :; }
+        autoRead() { printf -v "$3" '%s' team-a; }
+        trafficOutput=$(showAdminSubscriptionTraffic || true)
+        trafficOutput=$(showUserSubscriptionTraffic team-a || true)
+        trafficOutput=$(showSubscriptionTrafficOverview || true)
+        trafficOutput=$(showSubscriptionSourcesTraffic || true)
+        trafficOutput=$(showUserSubscriptions || true)
+        showUserSubscriptions() { :; }
+        trafficOutput=$(selectUserSubscriptionTrafficMenu || true)
+        subscriptionCurrentRoleNormalized() { printf '%s\n' main; }
+        trafficOutput=$(subscriptionGroupsStateSummaryJson || true)
+        trafficOutput=$(showSubscriptionSources || true)
+        trafficOutput=$(showSubscriptionSourceControlUrls || true)
+        [[ "$(wc -l <"${lockTimeoutLog}")" == "9" ]]
+        ! grep -vq '^0$' "${lockTimeoutLog}"
+    )
     subscriptionQuotaDryRunPlan | jq -e 'length == 1 and .[0].id == "team-a" and .[0].limit_gb == 1 and .[0].percent >= 100 and .[0].action == "disable-and-remove-local-account"' >/dev/null
 }
 

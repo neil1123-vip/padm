@@ -781,7 +781,8 @@ showAdminSubscriptionTraffic() {
     jqProgram=$(printf '%s\n%s\n%s\n' "$(subscriptionTrafficTotalsJq)" "$(subscriptionTrafficDisplayJq)" '
       (.sources // [] | map({key:.id, value:(.name // .id)}) | from_entries) as $sourceNames |
       subscriptionTrafficLines(.traffic.admin.sources; $sourceNames; "admin") | .[]')
-    output=$(subscriptionActiveGroupRead -r "${jqProgram}") || return 1
+    output=$(PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 \
+        subscriptionActiveGroupRead -r "${jqProgram}") || return 1
     showSubscriptionTrafficCard "我的流量" "${output}"
 }
 
@@ -802,7 +803,8 @@ showUserSubscriptionTraffic() {
         ("订阅：" + $name + (if $name == $id then "" else "（" + $id + "）" end)),
         ("限额状态：" + $quotaStatus)
       ] + subscriptionTrafficLines($traffic; $sourceNames; "user")) | .[]')
-    output=$(subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" "${jqProgram}") || return 1
+    output=$(PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 \
+        subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" "${jqProgram}") || return 1
     showSubscriptionTrafficCard "用户订阅流量" "${output}"
 }
 
@@ -828,7 +830,8 @@ showSubscriptionTrafficOverview() {
       "服务器源：共 " + (($group.sources | length) | tostring) + " 个，启用远端 " + (([$group.sources[]? | select(.role != "main" and .enabled == true)] | length) | tostring) + " 个\n" +
       "最近同步：状态 " + (($group.sync.last_status // "pending") | tostring) + "，时间 " + (($group.sync.last_run // "未运行") | tostring) + "\n" +
       "流量更新时间：" + (((($group.traffic.sources // {}) | to_entries | map(.value.updated_at // empty) | max) // "未知") | tostring)')
-    output=$(subscriptionActiveGroupRead -r "${jqProgram}") || return 1
+    output=$(PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 \
+        subscriptionActiveGroupRead -r "${jqProgram}") || return 1
     userResultCard "流量与限额总览"
     while IFS= read -r line; do
         menuLine "${line}"
@@ -893,7 +896,8 @@ selectUserSubscriptionTrafficMenu() {
     local userSubscriptionId=
     showUserSubscriptions || return 1
     autoRead user_subscription_traffic_id "请输入用户订阅 ID:" userSubscriptionId
-    if [[ -z "${userSubscriptionId}" ]] || ! userSubscriptionExists "${userSubscriptionId}"; then
+    if [[ -z "${userSubscriptionId}" ]] ||
+        ! PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 userSubscriptionExists "${userSubscriptionId}"; then
         errorCard "用户订阅 ID 无效"
         return 1
     fi
@@ -906,6 +910,7 @@ showSubscriptionSourcesTraffic() {
     jqProgram=$(printf '%s\n%s\n%s\n' "$(subscriptionTrafficTotalsJq)" "$(subscriptionTrafficDisplayJq)" '
       (.sources // [] | map({key:.id, value:(.name // .id)}) | from_entries) as $sourceNames |
       subscriptionTrafficLines(.traffic.sources; $sourceNames; "server") | .[]')
-    output=$(subscriptionActiveGroupRead -r "${jqProgram}") || return 1
+    output=$(PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 \
+        subscriptionActiveGroupRead -r "${jqProgram}") || return 1
     showSubscriptionTrafficCard "服务器流量" "${output}"
 }

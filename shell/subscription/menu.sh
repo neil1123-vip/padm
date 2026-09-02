@@ -664,7 +664,8 @@ showUserSubscriptions() {
       . as $group |
       .user_groups[]? |
       "\(.id)\u001f\(.name)\u001f\(.enabled)\u001f\(.allowed_sources | join(","))\u001f\(.traffic_limit_gb)\u001f\(subscriptionUserQuotaStatus(.; subscriptionTrafficTotal(($group.traffic.user_groups[.id] // {}).sources); true))"')
-    output=$(subscriptionActiveGroupRead -r "${jqProgram}") || {
+    output=$(PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 \
+        subscriptionActiveGroupRead -r "${jqProgram}") || {
         errorCard "用户订阅读取失败"
         return 1
     }
@@ -1281,7 +1282,8 @@ showSubscriptionSources() {
     role=$(subscriptionCurrentRoleNormalized) || return 1
     [[ "${role}" == "uninitialized" ]] && sourceFilter='select(.role == "main")'
     syncSummary=$(subscriptionSourceSyncSummaryJq) || return 1
-    output=$(subscriptionActiveGroupRead -r "
+    output=$(PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 \
+        subscriptionActiveGroupRead -r "
       .sources[]? |
       ${sourceFilter} |
       \"ID:\\(.id)\\n名称:\\(.name)\\n角色:\\(.role)\\n地址:\\(.scheme)://\\(.host):\\(.port)\\n启用:\\(.enabled)\\n同步状态:\\(.sync_status)\" +
@@ -1292,7 +1294,8 @@ showSubscriptionSources() {
 
 showSubscriptionSourceControlUrls() {
     local output
-    output=$(subscriptionActiveGroupRead -r '
+    output=$(PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 \
+        subscriptionActiveGroupRead -r '
       .sources[]? | select(.role != "main") |
       "ID:\(.id)\n名称:\(.name)\n控制面:WireGuard\n内网地址:\(.host):\(.port)\nHealth:http://\(.host):\(.port)/s/control/health\nSync:http://\(.host):\(.port)/s/control/sync\n---"'
     ) || return 1

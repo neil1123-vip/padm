@@ -3,8 +3,7 @@
 subscriptionGroupsStateSummaryJson() {
     local localOnly=false
     [[ "$(subscriptionCurrentRoleNormalized)" == "uninitialized" ]] && localOnly=true
-    ensureSubscriptionGroupsState || return 1
-    subscriptionActiveGroupRead --argjson localOnly "${localOnly}" '
+    PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 subscriptionActiveGroupRead --argjson localOnly "${localOnly}" '
       {
         group_id: .id,
         group_name: .name,
