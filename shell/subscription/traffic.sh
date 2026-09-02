@@ -865,7 +865,9 @@ manageTrafficAndQuota() {
     subscriptionRequireLocalPublisherRole || return 1
     local quotaAutoApplyText
     while true; do
-        subscriptionGroupQuotaAutoApplyEnabled && quotaAutoApplyText="开启" || quotaAutoApplyText="关闭"
+        quotaAutoApplyText=$(PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 \
+            subscriptionActiveGroupRead -r 'if (.sync.quota_auto_apply // false) == true then "开启" else "关闭" end' 2>/dev/null) || \
+            quotaAutoApplyText="暂不可读"
         echoContent title "\n┌─ 流量与限额 ───────────────────────────────────────"
         menuLine "先刷新总览；明细、超限和自动处理按需进入。"
         menuLine "自动执行超限处理：${quotaAutoApplyText}"

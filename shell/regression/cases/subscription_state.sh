@@ -578,6 +578,26 @@ runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
         [[ "${trafficOutput}" == *"来源明细："* ]]
         [[ "${trafficOutput}" != *'"upload"'* ]]
     )
+    (
+        local lockTimeoutLog="${TMP_DIR}/subscription-state-quota-menu-lock-timeout.log"
+        local trafficOutput
+        : >"${lockTimeoutLog}"
+        subscriptionRequireLocalPublisherRole() { return 0; }
+        subscriptionActiveGroupRead() {
+            printf '%s\n' "${PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT:-unset}" >>"${lockTimeoutLog}"
+            return 1
+        }
+        autoRead() { printf -v "$3" '%s' 5; }
+        echoContent() { :; }
+        menuLine() { printf '%s\n' "$*"; }
+        menuItem() { :; }
+        menuDangerItem() { :; }
+        menuReturnItem() { :; }
+        menuClose() { :; }
+        trafficOutput=$(manageTrafficAndQuota)
+        [[ "$(<"${lockTimeoutLog}")" == "0" ]]
+        [[ "${trafficOutput}" == *"自动执行超限处理：暂不可读"* ]]
+    )
     subscriptionQuotaDryRunPlan | jq -e 'length == 1 and .[0].id == "team-a" and .[0].limit_gb == 1 and .[0].percent >= 100 and .[0].action == "disable-and-remove-local-account"' >/dev/null
 }
 
