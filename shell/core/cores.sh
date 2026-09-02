@@ -774,6 +774,8 @@ singBoxCompatibilityAuditScanJsonFile() {
         . as $config |
         def dns_configs: .. | objects | .dns? | select(type == "object");
         def dns_rules: .rules[]? | recurse(.rules[]?);
+        def tls_configs: .. | objects | .tls? | select(type == "object");
+        def cache_files: .. | objects | .cache_file? | select(type == "object");
         def referenced_rule_set_tags:
             [dns_rules | .rule_set? | if type == "array" then .[] else . end | select(type == "string")];
         def uses_query_filter:
@@ -790,6 +792,13 @@ singBoxCompatibilityAuditScanJsonFile() {
             has("rule_set_ip_cidr_accept_empty") or
             ((has("ip_cidr") or has("ip_is_private")) and ((.match_response? // false) != true))
         );
+        def uses_legacy_dns_strategy: any(dns_rules; has("strategy"));
+        def uses_legacy_dns_rule_set_ip_cidr_accept_empty:
+            any(dns_rules; has("rule_set_ip_cidr_accept_empty"));
+        def uses_legacy_dns_address_filter: any(
+            dns_rules;
+            (has("ip_cidr") or has("ip_is_private")) and ((.match_response? // false) != true)
+        );
         [
             if any(.outbounds[]?; .type? == "wireguard") then "wireguard-outbound" else empty end,
             if any(.outbounds[]?; .type? == "block" or .type? == "dns") then "special-outbound" else empty end,
@@ -800,8 +809,13 @@ singBoxCompatibilityAuditScanJsonFile() {
                 type == "string" or (type == "object" and (has("address") or has("detour") or has("strategy")) and (has("type") | not))
             ) then "dns-server-format" else empty end,
             if any(dns_configs; uses_query_filter and uses_legacy_dns_filter) then "dns-rule-mix" else empty end,
+            if any(dns_configs; uses_legacy_dns_strategy) then "dns-rule-strategy" else empty end,
+            if any(dns_configs; uses_legacy_dns_rule_set_ip_cidr_accept_empty) then "dns-rule-set-ip-cidr-empty" else empty end,
+            if any(dns_configs; uses_legacy_dns_address_filter) then "dns-address-filter" else empty end,
             if any(dns_configs; has("independent_cache")) then "independent-cache" else empty end,
             if any(.route.rule_set[]?; .type? == "remote" and has("download_detour")) then "download-detour" else empty end,
+            if any(tls_configs; has("acme")) then "tls-acme" else empty end,
+            if any(cache_files; has("store_rdrc")) then "store-rdrc" else empty end,
             if (($defaultHttpClientConfigured or ((.route.default_http_client? // "") != "")) | not) and
                 any(.route.rule_set[]?; .type? == "remote" and (has("http_client") | not))
             then "implicit-http-client" else empty end
@@ -819,8 +833,13 @@ singBoxCompatibilityAuditScanJsonFile() {
         dns-rule-outbound) coreCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 DNS rule outbound，请迁移到 domain_resolver 或 route resolve：${file}" || return 1 ;;
         dns-server-format) coreCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 DNS server 格式，请迁移到 typed DNS servers：${file}" || return 1 ;;
         dns-rule-mix) coreCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到 1.14 不兼容的 DNS 规则混搭，请检查 ip_version/query_type 与 legacy address filter：${file}" || return 1 ;;
+        dns-rule-strategy) coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到已弃用的 DNS 规则 strategy，请迁移到 domain_resolver 中的 strategy（1.16 将移除）：${file}" || return 1 ;;
+        dns-rule-set-ip-cidr-empty) coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到已弃用的 DNS 规则 rule_set_ip_cidr_accept_empty，请迁移到 response matching（1.16 将移除）：${file}" || return 1 ;;
+        dns-address-filter) coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到未带 match_response 的 DNS 地址过滤字段 ip_cidr/ip_is_private，请迁移到 evaluate + match_response（1.16 将移除）：${file}" || return 1 ;;
         independent-cache) coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到 1.14 已弃用的 independent_cache，可直接删除（1.16 将移除）：${file}" || return 1 ;;
         download-detour) coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到 1.14 已弃用的 download_detour，请迁移到 http_client（1.16 将移除）：${file}" || return 1 ;;
+        tls-acme) coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到已弃用的内嵌 tls.acme，请迁移到 certificate_provider（1.16 将移除）：${file}" || return 1 ;;
+        store-rdrc) coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到已弃用的 store_rdrc，请改用 store_dns（1.16 将移除）：${file}" || return 1 ;;
         implicit-http-client) coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到远程 rule-set 使用隐式默认 HTTP client，请配置 http_client 或 route.default_http_client（1.16 将移除旧行为）：${file}" || return 1 ;;
         esac
     done <<<"${findings}"
@@ -1293,13 +1312,15 @@ checkXrayPrereleaseCompatibility() {
 appendSingBoxCompatibilityHints() {
     local logFile=$1
     [[ -f "${logFile}" ]] || return 0
-    if grep -Eqi 'legacy DNS servers|legacy special outbounds|legacy domain strategy|domain_resolver|default_domain_resolver|wireguard.*outbound|domain_strategy|independent_cache|download_detour|default_http_client|隐式默认 HTTP client|默认 HTTP client' "${logFile}"; then
+    if grep -Eqi 'legacy DNS servers|legacy special outbounds|legacy domain strategy|domain_resolver|default_domain_resolver|wireguard.*outbound|domain_strategy|independent_cache|download_detour|default_http_client|隐式默认 HTTP client|默认 HTTP client|tls\.acme|store_rdrc|certificate_provider|store_dns|rule_set_ip_cidr_accept_empty|match_response|DNS 规则 strategy' "${logFile}"; then
         {
             printf '\n[padm 兼容性提示]\n'
             printf -- '- sing-box 1.13+ 已移除 legacy special outbounds；阻断规则应使用 route action: reject，不再使用 type=block 出站。\n'
             printf -- '- sing-box 1.13+ 已移除旧 WireGuard outbound；请迁移到 endpoints[type=wireguard]。\n'
             printf -- '- sing-box 1.14 已移除旧 DNS server 格式与旧 domain_strategy；请使用 typed DNS servers 与 domain_resolver/default_domain_resolver。\n'
             printf -- '- sing-box 1.14 已弃用 independent_cache、download_detour 与隐式默认 HTTP client；请在 1.16 前迁移。\n'
+            printf -- '- sing-box 1.14 已弃用内嵌 tls.acme 与 store_rdrc；请迁移到 certificate_provider 与 store_dns。\n'
+            printf -- '- sing-box 1.14 已弃用 DNS 规则 strategy、rule_set_ip_cidr_accept_empty 及未带 match_response 的 ip_cidr/ip_is_private；请迁移到 domain_resolver 或 evaluate + match_response。\n'
         } >>"${logFile}"
     fi
 }

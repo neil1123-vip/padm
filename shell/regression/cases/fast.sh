@@ -5234,6 +5234,7 @@ runSingBox114CompatibilityAuditRegression() {
         source "${PROJECT_ROOT}/shell/core/cores.sh"
         local root="${TMP_DIR}/sing-box-114-compatibility"
         local configFile="${root}/deprecated.json"
+        local legacyOnlyFile="${root}/legacy-only.json"
         local explicitFile="${root}/explicit.json"
         local statusFile="${root}/status"
         local warnFile="${root}/warn"
@@ -5249,12 +5250,18 @@ runSingBox114CompatibilityAuditRegression() {
       {"ip_is_private": true}
     ]
   },
+  "inbounds": [
+    {"type": "mixed", "tls": {"acme": {"domain": ["example.com"]}}}
+  ],
   "route": {
     "rule_set": [
       {"tag": "query-types", "type": "inline", "rules": [{"query_type": ["A"]}]},
       {"tag": "legacy", "type": "remote", "url": "https://example.com/legacy.srs", "download_detour": "direct"},
       {"tag": "implicit", "type": "remote", "url": "https://example.com/implicit.srs"}
     ]
+  },
+  "experimental": {
+    "cache_file": {"enabled": true, "store_rdrc": true}
   }
 }
 JSON
@@ -5264,14 +5271,42 @@ JSON
         singBoxCompatibilityAuditScanJsonFile "${configFile}" "${statusFile}" "${logFile}" "${warnFile}"
         [[ "$(grep -c '^fail:' "${statusFile}")" -eq 1 ]]
         grep -q 'DNS 规则混搭' "${statusFile}"
-        [[ "$(grep -c '.' "${warnFile}")" -eq 3 ]]
+        [[ "$(grep -c '.' "${warnFile}")" -eq 6 ]]
         grep -q 'independent_cache' "${warnFile}"
         grep -q 'download_detour' "${warnFile}"
+        grep -q 'tls.acme' "${warnFile}"
+        grep -q 'store_rdrc' "${warnFile}"
         grep -q '默认 HTTP client' "${warnFile}"
+        grep -q 'match_response' "${warnFile}"
+
+        cat >"${legacyOnlyFile}" <<'JSON'
+{
+  "dns": {
+    "rules": [
+      {"strategy": "prefer_ipv4"},
+      {"rule_set_ip_cidr_accept_empty": true},
+      {"ip_cidr": ["203.0.113.0/24"]},
+      {"ip_is_private": true}
+    ]
+  }
+}
+JSON
+        : >"${statusFile}"
+        : >"${warnFile}"
+        : >"${logFile}"
+        singBoxCompatibilityAuditScanJsonFile "${legacyOnlyFile}" "${statusFile}" "${logFile}" "${warnFile}"
+        [[ ! -s "${statusFile}" ]]
+        [[ "$(grep -c '.' "${warnFile}")" -eq 3 ]]
+        grep -q 'DNS 规则 strategy' "${warnFile}"
+        grep -q 'rule_set_ip_cidr_accept_empty' "${warnFile}"
+        grep -q 'match_response' "${warnFile}"
 
         cat >"${explicitFile}" <<'JSON'
 {
   "http_clients": [{"tag": "rules", "detour": "direct"}],
+  "inbounds": [
+    {"type": "mixed", "tls": {"certificate_provider": "acme"}}
+  ],
   "dns": {
     "rules": [
       {"query_type": ["A"]},
@@ -5283,6 +5318,9 @@ JSON
     "rule_set": [
       {"tag": "explicit", "type": "remote", "url": "https://example.com/explicit.srs"}
     ]
+  },
+  "experimental": {
+    "cache_file": {"enabled": true, "store_dns": true}
   }
 }
 JSON
@@ -5299,6 +5337,11 @@ JSON
         printf '%s\n' '{"route":{"rule_set":[{"tag":"implicit","type":"remote","url":"https://example.com/implicit.srs"}]}}' >"${singBoxConfigPath}rules.json"
         collectSingBoxCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
         [[ ! -s "${warnFile}" ]]
+
+        printf '%s\n' 'store_rdrc tls.acme' >"${logFile}"
+        appendSingBoxCompatibilityHints "${logFile}"
+        grep -q 'certificate_provider' "${logFile}"
+        grep -q 'store_dns' "${logFile}"
 
         jq -e '
           (.dns | has("independent_cache") | not) and
