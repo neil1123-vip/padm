@@ -778,6 +778,13 @@ singBoxCompatibilityAuditScanJsonFile() {
         def cache_files: .. | objects | .cache_file? | select(type == "object");
         def referenced_rule_set_tags:
             [dns_rules | .rule_set? | if type == "array" then .[] else . end | select(type == "string")];
+        def pure_ip_rule_set_tags:
+            [$config.route.rule_set[]?
+             | select((.type? // "inline") == "inline" and (.tag? | type) == "string" and (.rules? | type) == "array")
+             | [.rules[] | recurse(.rules[]?) | select(type == "object" and ((.rules? | type) != "array"))] as $leaves
+             | select(($leaves | length) > 0 and all($leaves[]; has("ip_cidr") or has("ip_is_private")))
+             | .tag];
+        def response_enabled: .match_response? == true;
         def uses_query_filter:
             any(dns_rules; has("ip_version") or has("query_type")) or
             (referenced_rule_set_tags as $tags |
@@ -790,14 +797,18 @@ singBoxCompatibilityAuditScanJsonFile() {
             dns_rules;
             has("strategy") or
             has("rule_set_ip_cidr_accept_empty") or
-            ((has("ip_cidr") or has("ip_is_private")) and ((.match_response? // false) != true))
+            ((has("ip_cidr") or has("ip_is_private")) and (response_enabled | not)) or
+            (([.rule_set? | if type == "array" then .[] else . end | select(type == "string")] | any(.[]; . as $tag | (pure_ip_rule_set_tags | index($tag)) != null)) and
+                (response_enabled | not))
         );
         def uses_legacy_dns_strategy: any(dns_rules; has("strategy"));
         def uses_legacy_dns_rule_set_ip_cidr_accept_empty:
             any(dns_rules; has("rule_set_ip_cidr_accept_empty"));
         def uses_legacy_dns_address_filter: any(
             dns_rules;
-            (has("ip_cidr") or has("ip_is_private")) and ((.match_response? // false) != true)
+            ((has("ip_cidr") or has("ip_is_private")) and (response_enabled | not)) or
+            (([.rule_set? | if type == "array" then .[] else . end | select(type == "string")] | any(.[]; . as $tag | (pure_ip_rule_set_tags | index($tag)) != null)) and
+                (response_enabled | not))
         );
         [
             if any(.outbounds[]?; .type? == "wireguard") then "wireguard-outbound" else empty end,
@@ -817,7 +828,8 @@ singBoxCompatibilityAuditScanJsonFile() {
             if any(tls_configs; has("acme")) then "tls-acme" else empty end,
             if any(cache_files; has("store_rdrc")) then "store-rdrc" else empty end,
             if (($defaultHttpClientConfigured or ((.route.default_http_client? // "") != "")) | not) and
-                any(.route.rule_set[]?; .type? == "remote" and (has("http_client") | not))
+                any(.route.rule_set[]?; .type? == "remote" and
+                    (((has("http_client") | not) or (.http_client? == "")) and ((.download_detour? // "") == "")))
             then "implicit-http-client" else empty end
         ] | unique[]
     ' "${file}" 2>>"${logFile}"); then
@@ -833,7 +845,7 @@ singBoxCompatibilityAuditScanJsonFile() {
         dns-rule-outbound) coreCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 DNS rule outbound，请迁移到 domain_resolver 或 route resolve：${file}" || return 1 ;;
         dns-server-format) coreCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 DNS server 格式，请迁移到 typed DNS servers：${file}" || return 1 ;;
         dns-rule-mix) coreCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到 1.14 不兼容的 DNS 规则混搭，请检查 ip_version/query_type 与 legacy address filter：${file}" || return 1 ;;
-        dns-rule-strategy) coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到已弃用的 DNS 规则 strategy，请迁移到 domain_resolver 中的 strategy（1.16 将移除）：${file}" || return 1 ;;
+        dns-rule-strategy) coreCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到无法自动迁移的 DNS 规则 strategy，请改用 rule items 后重试（1.16 将移除）：${file}" || return 1 ;;
         dns-rule-set-ip-cidr-empty) coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到已弃用的 DNS 规则 rule_set_ip_cidr_accept_empty，请迁移到 response matching（1.16 将移除）：${file}" || return 1 ;;
         dns-address-filter) coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到未带 match_response 的 DNS 地址过滤字段 ip_cidr/ip_is_private，请迁移到 evaluate + match_response（1.16 将移除）：${file}" || return 1 ;;
         independent-cache) coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到 1.14 已弃用的 independent_cache，可直接删除（1.16 将移除）：${file}" || return 1 ;;
@@ -843,6 +855,289 @@ singBoxCompatibilityAuditScanJsonFile() {
         implicit-http-client) coreCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到远程 rule-set 使用隐式默认 HTTP client，请配置 http_client 或 route.default_http_client（1.16 将移除旧行为）：${file}" || return 1 ;;
         esac
     done <<<"${findings}"
+}
+
+singBoxUpgradeMigrationRollback() {
+    local backupDir=$1
+
+    [[ -n "${backupDir}" ]] || return 0
+    if checkLogBackupRestore "${backupDir}"; then
+        padmRemoveCleanupPath "${backupDir}"
+        return 0
+    fi
+    padmForgetCleanupPath "${backupDir}"
+    errorCard "sing-box 升级失败，迁移后的配置恢复失败，请手动检查备份目录: ${backupDir}"
+    return 1
+}
+
+migrateSingBox116DeprecatedConfig() {
+    local resultVar=$1
+    local logFile=${2:-$(coreTmpFilePath padm-sing-box-116-migration.log)}
+    local mergedFile shardDir file facts backupDir tmpFile needsMigration
+    local hasShard=false
+    local carrierFile= defaultOutbound generatedHttpTag
+    local routeDefaults dnsFinals dnsServers
+    local -a targets=() backupTargets=()
+    local -A seenTargets=()
+
+    printf -v "${resultVar}" '%s' ''
+    : >"${logFile}" || return 1
+    if ! command -v jq >/dev/null 2>&1; then
+        printf '失败: 缺少 jq，无法迁移 sing-box 1.16 弃用配置\n' >>"${logFile}"
+        return 1
+    fi
+
+    mergedFile=$(singBoxMergedConfigFile)
+    shardDir=$(singBoxConfigShardDir)
+    for file in "${shardDir}"*.json; do
+        [[ -f "${file}" ]] || continue
+        if [[ -z "${seenTargets[${file}]+x}" ]]; then
+            targets+=("${file}")
+            seenTargets["${file}"]=1
+            hasShard=true
+        fi
+    done
+    if [[ "${hasShard}" != "true" && -f "${mergedFile}" ]]; then
+        targets+=("${mergedFile}")
+        seenTargets["${mergedFile}"]=1
+    fi
+    if [[ "${#targets[@]}" -eq 0 ]]; then
+        printf '无法检查: 未找到 sing-box JSON 配置文件\n' >>"${logFile}"
+        return 2
+    fi
+    backupTargets=("${targets[@]}")
+    if [[ "${hasShard}" == "true" && -f "${mergedFile}" ]]; then
+        backupTargets+=("${mergedFile}")
+    fi
+
+    if ! facts=$(jq -s '
+        def nonempty: type == "string" and length > 0;
+        def dns_rules: .[] | .dns.rules[]? | recurse(.rules[]?);
+        def dns_configs: .[] | .. | objects | .dns? | select(type == "object");
+        def tls_configs: .[] | .. | objects | .tls? | select(type == "object");
+        def cache_files: .[] | .. | objects | .cache_file? | select(type == "object");
+        def rule_sets: .[] | .route.rule_set[]? | select(type == "object");
+        def rule_set_tags:
+            .rule_set? | if type == "array" then .[] else . end | select(type == "string");
+        def response_enabled: .match_response? == true;
+        def pure_ip_rule_set:
+            select((.type? // "inline") == "inline" and (.tag? | type) == "string" and (.rules? | type) == "array")
+            | . as $set
+            | [$set.rules[] | recurse(.rules[]?) | select(type == "object" and ((.rules? | type) != "array"))] as $leaves
+            | select(($leaves | length) > 0 and all($leaves[]; has("ip_cidr") or has("ip_is_private")))
+            | .tag;
+        ([rule_sets | pure_ip_rule_set] | unique) as $pureTags |
+        ([.[].route.default_http_client? | select(nonempty)] | unique) as $routeDefaults |
+        ([.[].dns.final? | select(nonempty)] | unique) as $dnsFinals |
+        ([.[].dns.servers[]? | select(type == "object") | .tag? | select(nonempty)] | unique) as $dnsServers |
+        ([.[].http_clients[]? | select(type == "object") | .tag? | select(nonempty)] | unique) as $httpTags |
+        ([.[].route.final? | select(nonempty)] | .[0] // "") as $routeFinal |
+        ([.[].outbounds[]? | select(type == "object") | .tag? | select(nonempty)] | .[0] // "") as $firstOutbound |
+        (any(rule_sets; .type? == "remote" and
+            (((has("http_client") | not) or (.http_client? == "")) and ((.download_detour? // "") == "")))) as $needsHttpDefault |
+        (any(dns_rules; has("strategy"))) as $hasStrategy |
+        (any(dns_rules;
+            has("rule_set_ip_cidr_accept_empty") or
+            ((has("ip_cidr") or has("ip_is_private")) and (response_enabled | not)) or
+            (([rule_set_tags] | any(.[]; . as $tag | ($pureTags | index($tag)) != null)) and (response_enabled | not)))) as $hasDNSResponseMigration |
+        {
+            route_defaults: $routeDefaults,
+            dns_finals: $dnsFinals,
+            dns_servers: $dnsServers,
+            pure_rule_set_tags: $pureTags,
+            http_tags: $httpTags,
+            route_final: $routeFinal,
+            first_outbound: $firstOutbound,
+            needs_http_default: ($needsHttpDefault and ($routeDefaults | length) == 0),
+            has_strategy: $hasStrategy,
+            has_dns_response_migration: $hasDNSResponseMigration,
+            has_download_detour: any(rule_sets; .type? == "remote" and has("download_detour")),
+            has_tls_acme: any(tls_configs; has("acme")),
+            has_independent_cache: any(dns_configs; has("independent_cache")),
+            has_store_rdrc: any(cache_files; has("store_rdrc"))
+        }
+        | . + {needs_migration: (.has_strategy or .has_dns_response_migration or .has_download_detour or .has_tls_acme or .has_independent_cache or .has_store_rdrc or .needs_http_default)}
+    ' "${targets[@]}"); then
+        printf '失败: JSON 无法解析，迁移已取消\n' >>"${logFile}"
+        return 1
+    fi
+
+    if [[ "$(jq -r '.has_strategy' <<<"${facts}")" == "true" ]]; then
+        printf '失败: 检测到 DNS 规则 strategy，官方尚未提供可验证的 1.16 等价迁移，请人工改用 rule items 后重试\n' >>"${logFile}"
+        return 1
+    fi
+    needsMigration=$(jq -r '.needs_migration' <<<"${facts}")
+    [[ "${needsMigration}" == "true" ]] || return 0
+
+    if [[ "$(jq -r '.needs_http_default' <<<"${facts}")" == "true" &&
+        "$(jq -r '.route_defaults | length' <<<"${facts}")" -eq 0 ]]; then
+        defaultOutbound=$(jq -r 'if .route_final != "" then .route_final else .first_outbound end' <<<"${facts}")
+        if [[ -z "${defaultOutbound}" ]]; then
+            printf '失败: 无法推导远程 rule-set 的默认 HTTP client，请配置 route.final 或 outbounds 后重试\n' >>"${logFile}"
+            return 1
+        fi
+        generatedHttpTag=padm-migrated-http-client
+        if jq -e --arg tag "${generatedHttpTag}" '.http_tags | index($tag) != null' <<<"${facts}" >/dev/null; then
+            printf '失败: 迁移所需 HTTP client tag 已存在：%s\n' "${generatedHttpTag}" >>"${logFile}"
+            return 1
+        fi
+        facts=$(jq --arg tag "${generatedHttpTag}" --arg detour "${defaultOutbound}" '. + {generated_http_tag: $tag, default_outbound: $detour}' <<<"${facts}") || return 1
+    fi
+
+    carrierFile=${targets[0]}
+    for file in "${targets[@]}"; do
+        if jq -e '(.route? | type) == "object"' "${file}" >/dev/null 2>&1; then
+            carrierFile=${file}
+            break
+        fi
+    done
+
+    checkLogBackupCreate backupDir "${backupTargets[@]}" || {
+        printf '失败: 迁移前配置备份失败\n' >>"${logFile}"
+        return 1
+    }
+
+    for file in "${targets[@]}"; do
+        padmCreateTempFileForTarget tmpFile "${file}" migrate || {
+            printf '失败: 无法创建迁移临时文件：%s\n' "${file}" >>"${logFile}"
+            singBoxUpgradeMigrationRollback "${backupDir}" || true
+            return 1
+        }
+        if ! jq --argjson facts "${facts}" --arg carrierFile "${carrierFile}" --arg currentFile "${file}" '
+            def nonempty: type == "string" and length > 0;
+            def response_enabled: .match_response? == true;
+            def rule_set_tags:
+                .rule_set? | if type == "array" then .[] else . end | select(type == "string");
+            def references_pure_ip_rule_set:
+                [rule_set_tags] as $tags |
+                any($tags[]?; . as $tag | ($facts.pure_rule_set_tags | index($tag)) != null);
+            def first_server:
+                [.. | objects | .server? | select(type == "string" and length > 0)] | .[0] // "";
+            def transform_rule:
+                if type != "object" then
+                    [., false, ""]
+                elif has("strategy") then
+                    error("DNS 规则 strategy 无法自动迁移")
+                elif (.type? == "logical" and (.rules? | type) == "array") then
+                    [ .rules[] | transform_rule ] as $children |
+                    ([ $children[] | .[0] ]) as $newRules |
+                    (any($children[]; .[1])) as $childNeeds |
+                    [ $children[] | .[2] | select(type == "string" and length > 0) ] as $childServers |
+                    ($childServers | unique) as $uniqueChildServers |
+                    if $childNeeds and (($uniqueChildServers | length) > 1) then
+                        error("logical DNS 规则包含多个 server，无法自动迁移")
+                    else
+                        ([ $uniqueChildServers[], (. | first_server) ] | map(select(type == "string" and length > 0)) | .[0] // "") as $server |
+                        [(. | del(.rule_set_ip_cidr_accept_empty)), $childNeeds, $server]
+                        | .[0].rules = $newRules
+                    end
+                else
+                    . as $before |
+                    (has("rule_set_ip_cidr_accept_empty") and (.rule_set_ip_cidr_accept_empty == true)) as $acceptEmpty |
+                    ((has("ip_cidr") or has("ip_is_private")) and (response_enabled | not)) as $legacyAddress |
+                    (references_pure_ip_rule_set and (response_enabled | not)) as $pureAddress |
+                    ((del(.rule_set_ip_cidr_accept_empty) |
+                        if ($acceptEmpty or $legacyAddress or $pureAddress) then .match_response = true else . end)) as $newRule |
+                    [$newRule, ($acceptEmpty or $legacyAddress or $pureAddress), ($before | first_server)]
+                end;
+            def default_eval_server:
+                if ($facts.dns_finals | length) == 1 then $facts.dns_finals[0]
+                elif ($facts.dns_servers | length) == 1 then $facts.dns_servers[0]
+                else "" end;
+            def migrate_dns_rules:
+                [ .dns.rules[] | transform_rule ] as $items |
+                (reduce $items[] as $item
+                    ({rules: []};
+                     ($item[0]) as $rule |
+                     ($item[1]) as $needs |
+                     (($item[2] | select(type == "string" and length > 0)) // default_eval_server) as $server |
+                     if $needs then
+                         if ($server | length) == 0 then error("DNS response matching 缺少可推导的 DNS server")
+                         elif (.rules | length) > 0 and
+                             (.rules[-1].action? == "evaluate") and
+                             ((.rules[-1].tag? // "") == "") and
+                             (.rules[-1].server == $server) then
+                             .rules += [$rule]
+                         else
+                             .rules += [{action: "evaluate", server: $server}, $rule]
+                         end
+                     else .rules += [$rule]
+                     end) | .rules);
+            walk(
+                if type == "object" and (.tls? | type) == "object" and (.tls | has("acme")) then
+                    if (.tls | has("certificate_provider")) then error("tls.acme 与 tls.certificate_provider 冲突")
+                    elif (.tls.acme | type) != "object" then error("tls.acme 不是对象，无法迁移")
+                    else .tls.certificate_provider = ({type: "acme"} + .tls.acme) | del(.tls.acme)
+                    end
+                elif type == "object" and (.dns? | type) == "object" and (.dns | has("independent_cache")) then
+                    .dns |= del(.independent_cache)
+                elif type == "object" and (.cache_file? | type) == "object" and (.cache_file | has("store_rdrc")) then
+                    if (.cache_file | has("store_dns")) and (.cache_file.store_dns != .cache_file.store_rdrc) then
+                        error("store_rdrc 与 store_dns 冲突")
+                    else .cache_file.store_dns = .cache_file.store_rdrc | del(.cache_file.store_rdrc)
+                    end
+                elif type == "object" and .type? == "remote" and has("download_detour") then
+                    if has("http_client") then error("download_detour 与 http_client 冲突")
+                    elif (.download_detour | type) != "string" then error("download_detour 不是字符串")
+                    elif .download_detour == "" then del(.download_detour)
+                    else .http_client = {detour: .download_detour} | del(.download_detour)
+                    end
+                else .
+                end
+            )
+            | if (.dns? | type) == "object" and (.dns.rules? | type) == "array" then
+                .dns.rules = migrate_dns_rules
+              else . end
+            | if $currentFile == $carrierFile and $facts.needs_http_default then
+                .route = (.route // {})
+                | .http_clients = ((.http_clients // []) + [{tag: $facts.generated_http_tag, detour: $facts.default_outbound}])
+                | .route.default_http_client = $facts.generated_http_tag
+              else . end
+        ' "${file}" >"${tmpFile}" 2>>"${logFile}"; then
+            padmRemoveCleanupPath "${tmpFile}"
+            printf '失败: 迁移配置失败：%s\n' "${file}" >>"${logFile}"
+            singBoxUpgradeMigrationRollback "${backupDir}" || true
+            return 1
+        fi
+        if ! commitGeneratedJsonFile "${tmpFile}" "${file}" 644; then
+            padmRemoveCleanupPath "${tmpFile}"
+            printf '失败: 写入迁移配置失败：%s\n' "${file}" >>"${logFile}"
+            singBoxUpgradeMigrationRollback "${backupDir}" || true
+            return 1
+        fi
+        printf '已迁移: %s\n' "${file}" >>"${logFile}"
+    done
+
+    if ! jq -s -e '
+        def nonempty: type == "string" and length > 0;
+        def dns_rules: .[] | .dns.rules[]? | recurse(.rules[]?);
+        def rule_sets: .[] | .route.rule_set[]? | select(type == "object");
+        def rule_set_tags:
+            .rule_set? | if type == "array" then .[] else . end | select(type == "string");
+        def needs_http_default:
+            .type? == "remote" and
+            (((has("http_client") | not) or (.http_client? == "")) and ((.download_detour? // "") == ""));
+        ([rule_sets
+          | select((.type? // "inline") == "inline" and (.tag? | type) == "string" and (.rules? | type) == "array")
+          | [.rules[] | recurse(.rules[]?) | select(type == "object" and ((.rules? | type) != "array"))] as $leaves
+          | select(($leaves | length) > 0 and all($leaves[]; has("ip_cidr") or has("ip_is_private")))
+          | .tag] | unique) as $pureTags |
+        ([.[].route.default_http_client? | select(nonempty)] | length > 0) as $has_http_default |
+        ((any(dns_rules; has("strategy") or has("rule_set_ip_cidr_accept_empty") or
+            ((has("ip_cidr") or has("ip_is_private")) and ((.match_response? // false) != true)) or
+            (([rule_set_tags] | any(.[]; . as $tag | ($pureTags | index($tag)) != null)) and ((.match_response? // false) != true)))) | not) and
+        ((any(rule_sets; .type? == "remote" and has("download_detour"))) | not) and
+        ($has_http_default or ((any(rule_sets; needs_http_default)) | not)) and
+        ((any(.[] | .. | objects; ((.tls? | type) == "object" and (.tls | has("acme"))))) | not) and
+        ((any(.[] | .. | objects; ((.dns? | type) == "object" and (.dns | has("independent_cache"))))) | not) and
+        ((any(.[] | .. | objects; ((.cache_file? | type) == "object" and (.cache_file | has("store_rdrc"))))) | not)
+    ' "${targets[@]}" >/dev/null 2>>"${logFile}"; then
+        printf '失败: 迁移后检查仍发现 1.16 弃用字段，正在恢复旧配置\n' >>"${logFile}"
+        singBoxUpgradeMigrationRollback "${backupDir}" || true
+        return 1
+    fi
+    printf -v "${resultVar}" '%s' "${backupDir}"
+    return 0
 }
 
 collectSingBoxCompatibilityFindings() {
@@ -1534,7 +1829,7 @@ installDownloadedXrayBinary() {
 installDownloadedSingBoxBinary() {
     local version=$1
     local tmpDir=${2:-}
-    local oldBinary backupBinary extractedDir newBinary logFile cronetPath cronetBackup actualVersion
+    local oldBinary backupBinary extractedDir newBinary logFile cronetPath cronetBackup actualVersion migrationBackupDir=
     local reusedPreparedDir=false
     local rc
     logFile=$(coreTmpFilePath padm-core-sing-box-upgrade-test.log)
@@ -1569,31 +1864,49 @@ installDownloadedSingBoxBinary() {
             return 1
         fi
     fi
+    if singBoxConfigInstalled && singBoxVersionAtLeast "${version}" 1.14.0 &&
+        ! migrateSingBox116DeprecatedConfig migrationBackupDir "${logFile}.migration"; then
+        padmRemoveCleanupPath "${tmpDir}"
+        statusCard "sing-box 配置迁移失败" "已取消升级" "排查日志: ${logFile}.migration"
+        return 1
+    fi
     if singBoxConfigInstalled && ! validateSingBoxConfigWithBinary "${newBinary}" "${logFile}"; then
         padmRemoveCleanupPath "${tmpDir}"
+        singBoxUpgradeMigrationRollback "${migrationBackupDir}" || true
         statusCard "sing-box 配置校验失败" "已取消升级" "排查日志: ${logFile}"
         return 1
     fi
 
     oldBinary=$(coreSingBoxBinaryPath)
-    validateCoreInstallTargetPath "${oldBinary}" "sing-box" || { padmRemoveCleanupPath "${tmpDir}"; return 1; }
+    validateCoreInstallTargetPath "${oldBinary}" "sing-box" || {
+        padmRemoveCleanupPath "${tmpDir}"
+        singBoxUpgradeMigrationRollback "${migrationBackupDir}" || true
+        return 1
+    }
     backupBinary="${oldBinary}.bak.$(date +%s)"
     cronetPath=$(coreSingBoxCronetPath)
-    validateCoreInstallTargetPath "${cronetPath}" "sing-box cronet依赖" || { padmRemoveCleanupPath "${tmpDir}"; return 1; }
+    validateCoreInstallTargetPath "${cronetPath}" "sing-box cronet依赖" || {
+        padmRemoveCleanupPath "${tmpDir}"
+        singBoxUpgradeMigrationRollback "${migrationBackupDir}" || true
+        return 1
+    }
     cronetBackup="${cronetPath}.bak.$(date +%s)"
     if ! padmEnsureSafeDirectory "$(dirname "${oldBinary}")"; then
         padmRemoveCleanupPath "${tmpDir}"
+        singBoxUpgradeMigrationRollback "${migrationBackupDir}" || true
         errorCard "sing-box 安装目录创建失败"
         return 1
     fi
     if [[ -f "${oldBinary}" ]] && ! backupManagedFileToPath "${oldBinary}" "${backupBinary}" 655; then
         padmRemoveCleanupPath "${tmpDir}"
+        singBoxUpgradeMigrationRollback "${migrationBackupDir}" || true
         errorCard "sing-box 旧二进制备份失败"
         return 1
     fi
     if [[ -f "${cronetPath}" ]] && ! backupManagedFileToPath "${cronetPath}" "${cronetBackup}" 644; then
         padmRemoveCleanupPath "${tmpDir}"
         [[ -f "${backupBinary}" ]] && removeManagedFilesIfPresentIgnoreFailure "${backupBinary}"
+        singBoxUpgradeMigrationRollback "${migrationBackupDir}" || true
         errorCard "sing-box 旧 cronet 依赖备份失败"
         return 1
     fi
@@ -1601,16 +1914,19 @@ installDownloadedSingBoxBinary() {
         padmRemoveCleanupPath "${tmpDir}"
         [[ -f "${backupBinary}" ]] && removeManagedFilesIfPresentIgnoreFailure "${backupBinary}"
         [[ -f "${cronetBackup}" ]] && removeManagedFilesIfPresentIgnoreFailure "${cronetBackup}"
+        singBoxUpgradeMigrationRollback "${migrationBackupDir}" || true
         statusCard "sing-box 更新失败" "sing-box 服务停止失败，已取消替换" "排查日志: ${logFile}"
         return 1
     fi
     if ! commitStagedCoreInstallFile "${newBinary}" "${oldBinary}" 655; then
         padmRemoveCleanupPath "${tmpDir}"
+        singBoxUpgradeMigrationRollback "${migrationBackupDir}" || true
         finalizeFailedSingBoxBinaryInstall "${backupBinary}" "${oldBinary}" "${cronetBackup}" "${cronetPath}" "${logFile}"
         return 1
     fi
     if ! commitStagedCoreInstallFile "${extractedDir}/libcronet.so" "${cronetPath}" 644; then
         padmRemoveCleanupPath "${tmpDir}"
+        singBoxUpgradeMigrationRollback "${migrationBackupDir}" || true
         finalizeFailedSingBoxBinaryInstall "${backupBinary}" "${oldBinary}" "${cronetBackup}" "${cronetPath}" "${logFile}"
         return 1
     fi
@@ -1620,9 +1936,11 @@ installDownloadedSingBoxBinary() {
         padmRemoveCleanupPath "${tmpDir}"
         [[ -f "${backupBinary}" ]] && removeManagedFilesIfPresentIgnoreFailure "${backupBinary}"
         [[ -f "${cronetBackup}" ]] && removeManagedFilesIfPresentIgnoreFailure "${cronetBackup}"
+        [[ -n "${migrationBackupDir}" ]] && padmRemoveCleanupPath "${migrationBackupDir}"
         return 0
     fi
     padmRemoveCleanupPath "${tmpDir}"
+    singBoxUpgradeMigrationRollback "${migrationBackupDir}" || true
     finalizeFailedSingBoxBinaryInstall "${backupBinary}" "${oldBinary}" "${cronetBackup}" "${cronetPath}" "${logFile}"
 }
 

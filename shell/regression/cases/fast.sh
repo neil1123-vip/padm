@@ -5295,10 +5295,25 @@ JSON
         : >"${warnFile}"
         : >"${logFile}"
         singBoxCompatibilityAuditScanJsonFile "${legacyOnlyFile}" "${statusFile}" "${logFile}" "${warnFile}"
-        [[ ! -s "${statusFile}" ]]
-        [[ "$(grep -c '.' "${warnFile}")" -eq 3 ]]
-        grep -q 'DNS 规则 strategy' "${warnFile}"
+        [[ "$(grep -c '^fail:' "${statusFile}")" -eq 1 ]]
+        [[ "$(grep -c '.' "${warnFile}")" -eq 2 ]]
+        grep -q 'DNS 规则 strategy' "${statusFile}"
         grep -q 'rule_set_ip_cidr_accept_empty' "${warnFile}"
+        grep -q 'match_response' "${warnFile}"
+
+        local pureRuleSetFile="${root}/pure-rule-set.json"
+        cat >"${pureRuleSetFile}" <<'JSON'
+{
+  "dns": {"rules": [{"rule_set": "geoip-inline", "action": "route", "server": "dns-local"}]},
+  "route": {"rule_set": [{"tag": "geoip-inline", "type": "inline", "rules": [{"ip_cidr": ["203.0.113.0/24"]}]}]}
+}
+JSON
+        : >"${statusFile}"
+        : >"${warnFile}"
+        : >"${logFile}"
+        singBoxCompatibilityAuditScanJsonFile "${pureRuleSetFile}" "${statusFile}" "${logFile}" "${warnFile}"
+        [[ ! -s "${statusFile}" ]]
+        [[ "$(grep -c '.' "${warnFile}")" -eq 1 ]]
         grep -q 'match_response' "${warnFile}"
 
         cat >"${explicitFile}" <<'JSON'
@@ -5342,6 +5357,316 @@ JSON
         appendSingBoxCompatibilityHints "${logFile}"
         grep -q 'certificate_provider' "${logFile}"
         grep -q 'store_dns' "${logFile}"
+
+        local migrationRoot="${root}/migration"
+        local migrationConfigDir="${migrationRoot}/conf/config/"
+        local migrationShard="${migrationConfigDir}01_rules.json"
+        local migrationMerged="${migrationRoot}/conf/config.json"
+        local migrationLog="${migrationRoot}/migration.log"
+        local migrationBackup
+        local migrationShardBefore migrationMergedBefore
+
+        mkdir -p "${migrationConfigDir}"
+        cat >"${migrationShard}" <<'JSON'
+{
+  "dns": {
+    "servers": [{"tag": "dns-local", "type": "local"}],
+    "final": "dns-local",
+    "independent_cache": true,
+    "rules": [
+      {"rule_set_ip_cidr_accept_empty": true, "server": "dns-local", "action": "route"},
+      {"ip_is_private": true, "server": "dns-local", "action": "route"},
+      {"rule_set": "geoip-inline", "server": "dns-local", "action": "route"}
+    ]
+  },
+  "inbounds": [{"type": "mixed", "tls": {"acme": {"domain": ["example.com"]}}}],
+  "outbounds": [{"type": "direct", "tag": "direct"}],
+  "route": {
+    "rule_set": [
+      {"tag": "geoip-inline", "type": "inline", "rules": [{"ip_cidr": ["203.0.113.0/24"]}]},
+      {"tag": "legacy", "type": "remote", "url": "https://example.com/legacy.srs", "download_detour": "direct"},
+      {"tag": "implicit", "type": "remote", "url": "https://example.com/implicit.srs"}
+    ]
+  },
+  "experimental": {"cache_file": {"enabled": true, "store_rdrc": true}}
+}
+JSON
+        printf '%s\n' '{"stale":true}' >"${migrationMerged}"
+        singBoxConfigPath="${migrationConfigDir}"
+        migrationShardBefore=$(<"${migrationShard}")
+        migrationMergedBefore=$(<"${migrationMerged}")
+        migrateSingBox116DeprecatedConfig migrationBackup "${migrationLog}"
+        [[ -n "${migrationBackup}" ]]
+        [[ "$(<"${migrationMerged}")" == "${migrationMergedBefore}" ]]
+        jq -e '
+          (.dns | has("independent_cache") | not) and
+          .dns.rules[0].action == "evaluate" and .dns.rules[0].server == "dns-local" and
+          .dns.rules[1].match_response == true and
+          .dns.rules[2].action == "evaluate" and .dns.rules[3].match_response == true and
+          .dns.rules[4].action == "evaluate" and .dns.rules[5].match_response == true and
+          .inbounds[0].tls.certificate_provider.type == "acme" and
+          .inbounds[0].tls.certificate_provider.domain == ["example.com"] and
+          (.inbounds[0].tls | has("acme") | not) and
+          .experimental.cache_file.store_dns == true and
+          (.experimental.cache_file | has("store_rdrc") | not) and
+          .route.rule_set[1].http_client.detour == "direct" and
+          all(.route.rule_set[]; has("download_detour") | not) and
+          .route.default_http_client == "padm-migrated-http-client" and
+          .http_clients[0].tag == "padm-migrated-http-client" and
+          .http_clients[0].detour == "direct"
+        ' "${migrationShard}" >/dev/null
+        singBoxUpgradeMigrationRollback "${migrationBackup}"
+        [[ "$(<"${migrationShard}")" == "${migrationShardBefore}" ]]
+        [[ "$(<"${migrationMerged}")" == "${migrationMergedBefore}" ]]
+
+        local explicitMigrationRoot="${root}/migration-explicit"
+        local explicitMigrationDir="${explicitMigrationRoot}/conf/config/"
+        local explicitMigrationFile="${explicitMigrationDir}01_rules.json"
+        local explicitMigrationLog="${explicitMigrationRoot}/migration.log"
+        local explicitMigrationBackup
+        mkdir -p "${explicitMigrationDir}"
+        cat >"${explicitMigrationFile}" <<'JSON'
+{
+  "http_clients": [{"tag": "existing", "detour": "proxy"}],
+  "route": {
+    "default_http_client": "existing",
+    "rule_set": [{"tag": "legacy", "type": "remote", "url": "https://example.com/legacy.srs", "download_detour": "direct"}]
+  }
+}
+JSON
+        singBoxConfigPath="${explicitMigrationDir}"
+        migrateSingBox116DeprecatedConfig explicitMigrationBackup "${explicitMigrationLog}"
+        jq -e '
+          .http_clients == [{"tag":"existing","detour":"proxy"}] and
+          .route.default_http_client == "existing" and
+          .route.rule_set[0].http_client.detour == "direct" and
+          (.route.rule_set[0] | has("download_detour") | not) and
+          ([.http_clients[] | select(.tag == "padm-migrated-http-client")] | length) == 0
+        ' "${explicitMigrationFile}" >/dev/null
+        singBoxUpgradeMigrationRollback "${explicitMigrationBackup}"
+
+        local implicitHttpRoot="${root}/migration-implicit-http"
+        local implicitHttpDir="${implicitHttpRoot}/conf/config/"
+        local implicitHttpFile="${implicitHttpDir}01_rules.json"
+        local implicitHttpLog="${implicitHttpRoot}/migration.log"
+        local implicitHttpBackup
+        mkdir -p "${implicitHttpDir}"
+        cat >"${implicitHttpFile}" <<'JSON'
+{
+  "http_clients": [{"tag": "existing", "detour": "proxy"}],
+  "outbounds": [{"type": "direct", "tag": "direct"}],
+  "route": {
+    "rule_set": [{"tag": "legacy", "type": "remote", "url": "https://example.com/legacy.srs"}]
+  }
+}
+JSON
+        singBoxConfigPath="${implicitHttpDir}"
+        migrateSingBox116DeprecatedConfig implicitHttpBackup "${implicitHttpLog}"
+        jq -e '
+          .http_clients == [
+            {"tag":"existing","detour":"proxy"},
+            {"tag":"padm-migrated-http-client","detour":"direct"}
+          ] and
+          .route.default_http_client == "padm-migrated-http-client"
+        ' "${implicitHttpFile}" >/dev/null
+        singBoxUpgradeMigrationRollback "${implicitHttpBackup}"
+
+        local nonBooleanRoot="${root}/migration-nonboolean"
+        local nonBooleanDir="${nonBooleanRoot}/conf/config/"
+        local nonBooleanFile="${nonBooleanDir}01_dns.json"
+        local nonBooleanLog="${nonBooleanRoot}/migration.log"
+        local nonBooleanBackup
+        mkdir -p "${nonBooleanDir}"
+        printf '%s\n' '{"dns":{"servers":[{"tag":"dns-local","type":"local"}],"final":"dns-local","rules":[{"ip_cidr":["203.0.113.0/24"],"match_response":"true"}]}}' >"${nonBooleanFile}"
+        singBoxConfigPath="${nonBooleanDir}"
+        migrateSingBox116DeprecatedConfig nonBooleanBackup "${nonBooleanLog}"
+        jq -e '.dns.rules[0].action == "evaluate" and .dns.rules[1].match_response == true' "${nonBooleanFile}" >/dev/null
+        singBoxUpgradeMigrationRollback "${nonBooleanBackup}"
+
+        local strategyRoot="${root}/migration-strategy"
+        local strategyDir="${strategyRoot}/conf/config/"
+        local strategyFile="${strategyDir}01_dns.json"
+        local strategyLog="${strategyRoot}/migration.log"
+        local strategyBefore strategyBackup=
+        mkdir -p "${strategyDir}"
+        printf '%s\n' '{"dns":{"rules":[{"strategy":"prefer_ipv4"}]}}' >"${strategyFile}"
+        strategyBefore=$(<"${strategyFile}")
+        singBoxConfigPath="${strategyDir}"
+        if migrateSingBox116DeprecatedConfig strategyBackup "${strategyLog}"; then
+            return 1
+        fi
+        [[ -z "${strategyBackup}" ]]
+        [[ "$(<"${strategyFile}")" == "${strategyBefore}" ]]
+        grep -q 'strategy' "${strategyLog}"
+
+        local logicalRoot="${root}/migration-logical"
+        local logicalDir="${logicalRoot}/conf/config/"
+        local logicalFile="${logicalDir}01_dns.json"
+        local logicalLog="${logicalRoot}/migration.log"
+        local logicalBefore logicalBackup
+        mkdir -p "${logicalDir}"
+        cat >"${logicalFile}" <<'JSON'
+{"dns":{"rules":[{"type":"logical","mode":"or","rules":[{"ip_is_private":true,"server":"dns-a"},{"ip_cidr":["203.0.113.0/24"],"server":"dns-b"}]}]}}
+JSON
+        logicalBefore=$(<"${logicalFile}")
+        singBoxConfigPath="${logicalDir}"
+        if migrateSingBox116DeprecatedConfig logicalBackup "${logicalLog}"; then
+            return 1
+        fi
+        [[ -z "${logicalBackup}" ]]
+        [[ "$(<"${logicalFile}")" == "${logicalBefore}" ]]
+        grep -q 'logical DNS 规则包含多个 server' "${logicalLog}"
+
+        local conflictRoot="${root}/migration-conflicts"
+        local conflictDir conflictFile conflictLog conflictBefore conflictBackup
+        assertMigrationFailure() {
+            local name=$1
+            local needle=$2
+            conflictDir="${conflictRoot}/${name}/conf/config"
+            conflictFile="${conflictDir}/01.json"
+            conflictLog="${conflictRoot}/${name}.log"
+            mkdir -p "${conflictDir}"
+            conflictBefore=$(<"${conflictFile}")
+            conflictBackup=
+            singBoxConfigPath="${conflictDir}/"
+            if migrateSingBox116DeprecatedConfig conflictBackup "${conflictLog}"; then
+                return 1
+            fi
+            [[ -z "${conflictBackup}" ]]
+            [[ "$(<"${conflictFile}")" == "${conflictBefore}" ]]
+            grep -q "${needle}" "${conflictLog}"
+        }
+
+        conflictDir="${conflictRoot}/tls/conf/config"
+        mkdir -p "${conflictDir}"
+        printf '%s\n' '{"inbounds":[{"tls":{"acme":{"domain":["example.com"]},"certificate_provider":{"type":"acme"}}}]}' >"${conflictDir}/01.json"
+        assertMigrationFailure tls 'tls.acme 与 tls.certificate_provider 冲突'
+
+        conflictDir="${conflictRoot}/cache/conf/config"
+        mkdir -p "${conflictDir}"
+        printf '%s\n' '{"experimental":{"cache_file":{"store_rdrc":true,"store_dns":false}}}' >"${conflictDir}/01.json"
+        assertMigrationFailure cache 'store_rdrc 与 store_dns 冲突'
+
+        conflictDir="${conflictRoot}/http/conf/config"
+        mkdir -p "${conflictDir}"
+        printf '%s\n' '{"route":{"rule_set":[{"type":"remote","download_detour":"direct","http_client":{"detour":"proxy"}}]}}' >"${conflictDir}/01.json"
+        assertMigrationFailure http 'download_detour 与 http_client 冲突'
+
+        local rollbackRoot="${root}/migration-rollback"
+        local rollbackDir="${rollbackRoot}/conf/config/"
+        local rollbackFirst="${rollbackDir}01_first.json"
+        local rollbackSecond="${rollbackDir}02_failure.json"
+        local rollbackMerged="${rollbackRoot}/conf/config.json"
+        local rollbackLog="${rollbackRoot}/migration.log"
+        local rollbackFirstBefore rollbackSecondBefore rollbackMergedBefore rollbackBackup=
+        mkdir -p "${rollbackDir}"
+        printf '%s\n' '{"route":{"rule_set":[{"type":"remote","download_detour":"direct"}]}}' >"${rollbackFirst}"
+        printf '%s\n' '{"inbounds":[{"tls":{"acme":"invalid"}}]}' >"${rollbackSecond}"
+        printf '%s\n' '{"stale":true}' >"${rollbackMerged}"
+        rollbackFirstBefore=$(<"${rollbackFirst}")
+        rollbackSecondBefore=$(<"${rollbackSecond}")
+        rollbackMergedBefore=$(<"${rollbackMerged}")
+        singBoxConfigPath="${rollbackDir}"
+        if migrateSingBox116DeprecatedConfig rollbackBackup "${rollbackLog}"; then
+            return 1
+        fi
+        [[ -z "${rollbackBackup}" ]]
+        [[ "$(<"${rollbackFirst}")" == "${rollbackFirstBefore}" ]]
+        [[ "$(<"${rollbackSecond}")" == "${rollbackSecondBefore}" ]]
+        [[ "$(<"${rollbackMerged}")" == "${rollbackMergedBefore}" ]]
+        grep -q '迁移配置失败' "${rollbackLog}"
+
+        (
+            local installRoot="${root}/install-version-gate"
+            local currentBinary="${installRoot}/sing-box"
+            local currentCronet="${installRoot}/libcronet.so"
+            local preparedDir preparedVersion
+            local migrationCalls=0
+            local serviceRunning=false
+
+            mkdir -p "${installRoot}/conf/config"
+            printf 'old-binary\n' >"${currentBinary}"
+            printf 'old-cronet\n' >"${currentCronet}"
+            chmod 755 "${currentBinary}"
+            printf '%s\n' '{"legacy":true}' >"${installRoot}/conf/config/01.json"
+            PADM_SINGBOX_BINARY="${currentBinary}"
+            singBoxConfigPath="${installRoot}/conf/config/"
+            singBoxCoreCPUVendor=-linux-amd64
+
+            singBoxConfigInstalled() { return 0; }
+            singBoxBinaryVersion() { printf '%s\n' "${preparedVersion}"; }
+            validateSingBoxConfigWithBinary() { return 0; }
+            migrateSingBox116DeprecatedConfig() {
+                migrationCalls=$((migrationCalls + 1))
+                return 0
+            }
+            backupManagedFileToPath() {
+                command cp -- "$1" "$2"
+            }
+            commitStagedCoreInstallFile() {
+                command cp -- "$1" "$2" && chmod "$3" "$2"
+            }
+            runCoreServiceActionAllowFailure() {
+                if [[ "${2:-}" == "stop" ]]; then
+                    serviceRunning=false
+                else
+                    serviceRunning=true
+                fi
+                return 0
+            }
+            singBoxInstalled() { [[ -x "${currentBinary}" ]]; }
+            singBoxRunning() { [[ "${serviceRunning}" == "true" ]]; }
+            statusCard() { :; }
+            successCard() { :; }
+            errorCard() { :; }
+
+            makePreparedDir() {
+                local version=$1
+                local dir="${installRoot}/prepared-${version}"
+                local extracted="${dir}/sing-box-${version/v/}${singBoxCoreCPUVendor}"
+                mkdir -p "${extracted}"
+                printf '#!/usr/bin/env bash\nexit 0\n' >"${extracted}/sing-box"
+                printf 'cronet\n' >"${extracted}/libcronet.so"
+                chmod 755 "${extracted}/sing-box"
+                printf '%s\n' "${dir}"
+            }
+
+            preparedVersion=v1.16.0
+            preparedDir=$(makePreparedDir "${preparedVersion}")
+            installDownloadedSingBoxBinary "${preparedVersion}" "${preparedDir}"
+            [[ "${migrationCalls}" == "1" ]]
+
+            preparedVersion=v1.14.0
+            preparedDir=$(makePreparedDir "${preparedVersion}")
+            installDownloadedSingBoxBinary "${preparedVersion}" "${preparedDir}"
+            [[ "${migrationCalls}" == "2" ]]
+
+            preparedVersion=v1.13.0
+            preparedDir=$(makePreparedDir "${preparedVersion}")
+            installDownloadedSingBoxBinary "${preparedVersion}" "${preparedDir}"
+            [[ "${migrationCalls}" == "2" ]]
+
+            (
+                local failureOrder= installBackupDir="${installRoot}/migration-backup"
+                preparedVersion=v1.16.0
+                preparedDir=$(makePreparedDir "${preparedVersion}")
+                migrateSingBox116DeprecatedConfig() {
+                    printf -v "$1" '%s' "${installBackupDir}"
+                    return 0
+                }
+                singBoxUpgradeMigrationRollback() {
+                    failureOrder+=$'rollback\n'
+                    return 0
+                }
+                finalizeFailedSingBoxBinaryInstall() {
+                    failureOrder+=$'finalize\n'
+                    return 1
+                }
+                commitStagedCoreInstallFile() { return 1; }
+                installDownloadedSingBoxBinary "${preparedVersion}" "${preparedDir}" || true
+                [[ "${failureOrder}" == $'rollback\nfinalize\n' ]]
+            )
+        )
 
         jq -e '
           (.dns | has("independent_cache") | not) and
