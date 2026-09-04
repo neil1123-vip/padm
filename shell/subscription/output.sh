@@ -141,9 +141,10 @@ serializeVlessRealityXHTTPLink() {
     local encryption=${8:-none}
     local host=${9:-${sni}}
     local mode=${10:-}
+    local pqv=${11:-}
     local modeParam=
     [[ -n "${mode}" ]] && modeParam="&mode=${mode}"
-    printf 'vless://%s@%s:%s?encryption=%s&security=reality&type=xhttp&sni=%s&host=%s&fp=chrome&path=%s%s&pbk=%s&sid=6ba85179e30d4fc2#%s' "${id}" "$(formatUriAuthorityHost "${add}")" "${port}" "${encryption}" "${sni}" "${host}" "${path}" "${modeParam}" "${publicKey}" "${email}"
+    printf 'vless://%s@%s:%s?encryption=%s&security=reality%s&type=xhttp&sni=%s&host=%s&fp=chrome&path=%s%s&pbk=%s&sid=6ba85179e30d4fc2#%s' "${id}" "$(formatUriAuthorityHost "${add}")" "${port}" "${encryption}" "${pqv:+&pqv=${pqv}}" "${sni}" "${host}" "${path}" "${modeParam}" "${publicKey}" "${email}"
 }
 
 appendSingBoxSubscribeLocalConfig() {

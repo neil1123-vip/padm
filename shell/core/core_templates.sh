@@ -501,6 +501,8 @@ EOF
             ],
             "privateKey": "${realityPrivateKey}",
             "publicKey": "${realityPublicKey}",
+            "mldsa65Seed": "${realityMldsa65Seed}",
+            "mldsa65Verify": "${realityMldsa65Verify}",
             "maxTimeDiff": 70000,
             "shortIds": [
                 "",

@@ -272,6 +272,8 @@ readInstallProtocolType() {
             currentRealityXHTTPPublicKey=$(jq -r .inbounds[0].streamSettings.realitySettings.publicKey "${row}.json")
             currentRealityPublicKey=${currentRealityXHTTPPublicKey}
             currentRealityPrivateKey=$(jq -r '.inbounds[0].streamSettings.realitySettings.privateKey // empty' "${row}.json")
+            currentRealityMldsa65Seed=$(jq -r '.inbounds[0].streamSettings.realitySettings.mldsa65Seed // empty' "${row}.json")
+            currentRealityMldsa65Verify=$(jq -r '.inbounds[0].streamSettings.realitySettings.mldsa65Verify // empty' "${row}.json")
         fi
 
         if [[ "${row}" == *VMess_WS_inbounds* ]]; then

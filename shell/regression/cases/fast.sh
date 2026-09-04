@@ -5235,6 +5235,7 @@ runSingBox114CompatibilityAuditRegression() {
         local root="${TMP_DIR}/sing-box-114-compatibility"
         local configFile="${root}/deprecated.json"
         local legacyOnlyFile="${root}/legacy-only.json"
+        local domainStrategyFile="${root}/domain-strategy.json"
         local explicitFile="${root}/explicit.json"
         local statusFile="${root}/status"
         local warnFile="${root}/warn"
@@ -5278,6 +5279,14 @@ JSON
         grep -q 'store_rdrc' "${warnFile}"
         grep -q '默认 HTTP client' "${warnFile}"
         grep -q 'match_response' "${warnFile}"
+
+        printf '%s\n' '{"outbounds":[{"type":"direct","tag":"IPv4_out","domain_strategy":"ipv4_only"}]}' >"${domainStrategyFile}"
+        : >"${statusFile}"
+        : >"${warnFile}"
+        : >"${logFile}"
+        singBoxCompatibilityAuditScanJsonFile "${domainStrategyFile}" "${statusFile}" "${logFile}" "${warnFile}"
+        [[ "$(grep -c '^fail:' "${statusFile}")" -eq 1 ]]
+        grep -q 'domain_strategy' "${statusFile}"
 
         cat >"${legacyOnlyFile}" <<'JSON'
 {
@@ -5380,7 +5389,11 @@ JSON
     ]
   },
   "inbounds": [{"type": "mixed", "tls": {"acme": {"domain": ["example.com"]}}}],
-  "outbounds": [{"type": "direct", "tag": "direct"}],
+  "outbounds": [
+    {"type": "direct", "tag": "direct"},
+    {"type": "direct", "tag": "IPv4_out", "domain_strategy": "ipv4_only"},
+    {"type": "direct", "tag": "IPv6_out", "detour": "direct", "domain_strategy": "ipv6_only"}
+  ],
   "route": {
     "rule_set": [
       {"tag": "geoip-inline", "type": "inline", "rules": [{"ip_cidr": ["203.0.113.0/24"]}]},
@@ -5404,6 +5417,13 @@ JSON
           .dns.rules[1].match_response == true and
           .dns.rules[2].action == "evaluate" and .dns.rules[3].match_response == true and
           .dns.rules[4].action == "evaluate" and .dns.rules[5].match_response == true and
+          any(.dns.servers[]; .tag == "padm-local" and .type == "local") and
+          .outbounds[1].domain_resolver.server == "padm-local" and
+          .outbounds[1].domain_resolver.strategy == "ipv4_only" and
+          (.outbounds[1] | has("domain_strategy") | not) and
+          .outbounds[2].domain_resolver.server == "padm-local" and
+          .outbounds[2].domain_resolver.strategy == "ipv6_only" and
+          (.outbounds[2] | has("domain_strategy") | not) and
           .inbounds[0].tls.certificate_provider.type == "acme" and
           .inbounds[0].tls.certificate_provider.domain == ["example.com"] and
           (.inbounds[0].tls | has("acme") | not) and
@@ -5470,6 +5490,23 @@ JSON
           .route.default_http_client == "padm-migrated-http-client"
         ' "${implicitHttpFile}" >/dev/null
         singBoxUpgradeMigrationRollback "${implicitHttpBackup}"
+
+        local unrelatedResolverRoot="${root}/migration-unrelated-resolver"
+        local unrelatedResolverDir="${unrelatedResolverRoot}/conf/config/"
+        local unrelatedResolverFile="${unrelatedResolverDir}01_rules.json"
+        local unrelatedResolverLog="${unrelatedResolverRoot}/migration.log"
+        local unrelatedResolverBackup
+        mkdir -p "${unrelatedResolverDir}"
+        cat >"${unrelatedResolverFile}" <<'JSON'
+{
+  "dns": {"servers": [{"tag": "padm-local", "type": "udp", "server": "1.1.1.1"}]},
+  "route": {"rule_set": [{"tag": "legacy", "type": "remote", "url": "https://example.com/legacy.srs", "download_detour": "direct"}]}
+}
+JSON
+        singBoxConfigPath="${unrelatedResolverDir}"
+        migrateSingBox116DeprecatedConfig unrelatedResolverBackup "${unrelatedResolverLog}"
+        jq -e '.route.rule_set[0].http_client.detour == "direct" and (.route.rule_set[0] | has("download_detour") | not)' "${unrelatedResolverFile}" >/dev/null
+        singBoxUpgradeMigrationRollback "${unrelatedResolverBackup}"
 
         local nonBooleanRoot="${root}/migration-nonboolean"
         local nonBooleanDir="${nonBooleanRoot}/conf/config/"
@@ -5551,6 +5588,11 @@ JSON
         mkdir -p "${conflictDir}"
         printf '%s\n' '{"route":{"rule_set":[{"type":"remote","download_detour":"direct","http_client":{"detour":"proxy"}}]}}' >"${conflictDir}/01.json"
         assertMigrationFailure http 'download_detour 与 http_client 冲突'
+
+        conflictDir="${conflictRoot}/domain-resolver/conf/config"
+        mkdir -p "${conflictDir}"
+        printf '%s\n' '{"outbounds":[{"type":"direct","tag":"IPv4_out","domain_strategy":"ipv4_only","domain_resolver":{"server":"padm-local","strategy":"ipv4_only"}}]}' >"${conflictDir}/01.json"
+        assertMigrationFailure domain-resolver 'domain_strategy 与 domain_resolver 冲突'
 
         local rollbackRoot="${root}/migration-rollback"
         local rollbackDir="${rollbackRoot}/conf/config/"

@@ -135,7 +135,7 @@ emitVlessXHTTPSubscribeOutput() {
     local xrayConfigDir=${configPath:-${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}}
     local xhttpConfigFile=${PADM_VLESS_XHTTP_CONFIG_FILE:-${xrayConfigDir%/}/12_VLESS_XHTTP_inbounds.json}
     local vlessEncryption mihomoEncryption=
-    local defaultLink xhttpHost xhttpMode
+    local defaultLink xhttpHost xhttpMode realityMldsa65Verify=${currentRealityMldsa65Verify:-}
     if ! vlessEncryption=$(vlessEncryptionForConfig "${xhttpConfigFile}" 0); then
         errorCard "订阅输出生成失败" "VLESS Encryption 配置与状态不一致，请重新启用或关闭实验功能后重试"
         return 1
@@ -161,13 +161,13 @@ emitVlessXHTTPSubscribeOutput() {
         return 1
         ;;
     esac
-    defaultLink=$(serializeVlessRealityXHTTPLink "${id}" "${add}" "${port}" "${xrayVLESSRealityXHTTPSNI}" "${path}" "${currentRealityXHTTPPublicKey}" "${email}" "${vlessEncryption}" "${xhttpHost}" "${xhttpMode}")
+    defaultLink=$(serializeVlessRealityXHTTPLink "${id}" "${add}" "${port}" "${xrayVLESSRealityXHTTPSNI}" "${path}" "${currentRealityXHTTPPublicKey}" "${email}" "${vlessEncryption}" "${xhttpHost}" "${xhttpMode}" "${realityMldsa65Verify}")
 
     subscribeOutputTitle "通用格式：VLESS Reality XHTTP Vision XMUX"
     echoContent green "    ${defaultLink}\n"
 
     subscribeOutputTitle "格式化明文：VLESS Reality XHTTP Vision XMUX"
-    echoContent green "协议类型:VLESS reality，入口地址:${add}，publicKey:${currentRealityXHTTPPublicKey}，shortId: 6ba85179e30d4fc2,serverNames：${xrayVLESSRealityXHTTPSNI}，端口:${port}，XHTTP host:${xhttpHost}，路径：${path}，mode:${xhttpMode}，Reality SNI:${xrayVLESSRealityXHTTPSNI}，用户ID:${id}，传输方式:xhttp，账户名:${email}\n"
+    echoContent green "协议类型:VLESS reality，入口地址:${add}，publicKey:${currentRealityXHTTPPublicKey}，shortId: 6ba85179e30d4fc2${realityMldsa65Verify:+，pqv=${realityMldsa65Verify}}，serverNames：${xrayVLESSRealityXHTTPSNI}，端口:${port}，XHTTP host:${xhttpHost}，路径：${path}，mode:${xhttpMode}，Reality SNI:${xrayVLESSRealityXHTTPSNI}，用户ID:${id}，传输方式:xhttp，账户名:${email}\n"
     appendDefaultSubscribeLine "${user}" "${defaultLink}" || return 1
 
     appendClashMetaSubscribeLines "${user}" <<EOF || return 1

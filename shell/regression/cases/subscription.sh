@@ -399,23 +399,27 @@ jq -e '.[0].transport.service_name == "grpc" and .[0].tls.reality.short_id == "6
 grep -q 'pqv=pqv' "${SUBSCRIBE_CAPTURE_DIR}/screen.log"
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
+currentRealityMldsa65Verify=""
 local oldConfigPath="${configPath:-}"
 configPath="${TMP_DIR}/xhttp-subscription-conf/"
 mkdir -p "${configPath}"
 xrayVLESSRealityXHTTPSNI="www.microsoft.com"
 currentRealityXHTTPPublicKey="pubkey"
 cat >"${configPath}12_VLESS_XHTTP_inbounds.json" <<'EOF'
-{"inbounds":[{"settings":{"decryption":"active-decryption"},"streamSettings":{"xhttpSettings":{"host":"front.example.com","path":"/custom-xhttp","mode":"packet-up"}}}]}
+{"inbounds":[{"settings":{"decryption":"active-decryption"},"streamSettings":{"realitySettings":{"serverNames":["www.microsoft.com"],"publicKey":"pubkey","privateKey":"priv","target":"www.microsoft.com:443","mldsa65Seed":"seed-xhttp","mldsa65Verify":"pqv-xhttp"},"xhttpSettings":{"host":"front.example.com","path":"/custom-xhttp","mode":"packet-up"}}}]}
 EOF
 ! defaultBase64Code vlessXHTTP 443 user-a-xhttp-missing-state uuid-a "cdn.example.com" "/ignored"
 [[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-missing-state" ]]
 [[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp-missing-state" ]]
 
 printf '%s\n' '{"enabled":true,"encryption":"active-encryption","decryption":"active-decryption"}' >"${PADM_VLESS_ENCRYPTION_STATE_FILE}"
+readInstallProtocolType
+[[ "${currentRealityMldsa65Seed}" == "seed-xhttp" && "${currentRealityMldsa65Verify}" == "pqv-xhttp" ]]
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 defaultBase64Code vlessXHTTP 443 user-a-xhttp-active uuid-a "cdn.example.com" "/ignored"
-expectedXHTTPLink=$(serializeVlessRealityXHTTPLink "uuid-a" "cdn.example.com" "443" "www.microsoft.com" "/custom-xhttp" "pubkey" "user-a-xhttp-active" active-encryption "front.example.com" "packet-up")
+expectedXHTTPLink=$(serializeVlessRealityXHTTPLink "uuid-a" "cdn.example.com" "443" "www.microsoft.com" "/custom-xhttp" "pubkey" "user-a-xhttp-active" active-encryption "front.example.com" "packet-up" "pqv-xhttp")
 grep -qxF "${expectedXHTTPLink}" "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-active"
+grep -q 'pqv=pqv-xhttp' "${SUBSCRIBE_CAPTURE_DIR}/screen.log"
 grep -qx '    encryption: "active-encryption"' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp-active"
 [[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/sing-box/user-a-xhttp-active" ]]
 rm -f "${PADM_VLESS_ENCRYPTION_STATE_FILE}"
@@ -424,6 +428,7 @@ rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 cat >"${configPath}12_VLESS_XHTTP_inbounds.json" <<'EOF'
 {"inbounds":[{"streamSettings":{"xhttpSettings":{"host":"front.example.com","path":"/custom-xhttp","mode":"packet-up"}}}]}
 EOF
+currentRealityMldsa65Verify=""
 defaultBase64Code vlessXHTTP 443 user-a-xhttp uuid-a "cdn.example.com" "/ignored"
 expectedXHTTPLink=$(serializeVlessRealityXHTTPLink "uuid-a" "cdn.example.com" "443" "www.microsoft.com" "/custom-xhttp" "pubkey" "user-a-xhttp" none "front.example.com" "packet-up")
 grep -qxF "${expectedXHTTPLink}" "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp"

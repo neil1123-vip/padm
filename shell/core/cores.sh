@@ -916,6 +916,9 @@ migrateSingBox116DeprecatedConfig() {
         def dns_configs: .[] | .. | objects | .dns? | select(type == "object");
         def tls_configs: .[] | .. | objects | .tls? | select(type == "object");
         def cache_files: .[] | .. | objects | .cache_file? | select(type == "object");
+        def typed_dns_servers:
+            .[] | .. | objects | .dns? | select(type == "object") |
+            .servers? | select(type == "array") | .[]? | select(type == "object");
         def rule_sets: .[] | .route.rule_set[]? | select(type == "object");
         def rule_set_tags:
             .rule_set? | if type == "array" then .[] else . end | select(type == "string");
@@ -933,6 +936,9 @@ migrateSingBox116DeprecatedConfig() {
         ([.[].http_clients[]? | select(type == "object") | .tag? | select(nonempty)] | unique) as $httpTags |
         ([.[].route.final? | select(nonempty)] | .[0] // "") as $routeFinal |
         ([.[].outbounds[]? | select(type == "object") | .tag? | select(nonempty)] | .[0] // "") as $firstOutbound |
+        (any(.[] | .. | objects; has("domain_strategy"))) as $hasDomainStrategy |
+        (any(typed_dns_servers; .tag? == "padm-local" and .type? == "local")) as $hasLocalResolver |
+        (any(typed_dns_servers; .tag? == "padm-local" and .type? != "local")) as $hasLocalResolverConflict |
         (any(rule_sets; .type? == "remote" and
             (((has("http_client") | not) or (.http_client? == "")) and ((.download_detour? // "") == "")))) as $needsHttpDefault |
         (any(dns_rules; has("strategy"))) as $hasStrategy |
@@ -948,6 +954,10 @@ migrateSingBox116DeprecatedConfig() {
             http_tags: $httpTags,
             route_final: $routeFinal,
             first_outbound: $firstOutbound,
+            has_domain_strategy: $hasDomainStrategy,
+            has_local_resolver: $hasLocalResolver,
+            has_local_resolver_conflict: $hasLocalResolverConflict,
+            needs_domain_strategy: ($hasDomainStrategy and ($hasLocalResolver | not)),
             needs_http_default: ($needsHttpDefault and ($routeDefaults | length) == 0),
             has_strategy: $hasStrategy,
             has_dns_response_migration: $hasDNSResponseMigration,
@@ -956,7 +966,7 @@ migrateSingBox116DeprecatedConfig() {
             has_independent_cache: any(dns_configs; has("independent_cache")),
             has_store_rdrc: any(cache_files; has("store_rdrc"))
         }
-        | . + {needs_migration: (.has_strategy or .has_dns_response_migration or .has_download_detour or .has_tls_acme or .has_independent_cache or .has_store_rdrc or .needs_http_default)}
+        | . + {needs_migration: (.has_domain_strategy or .has_strategy or .has_dns_response_migration or .has_download_detour or .has_tls_acme or .has_independent_cache or .has_store_rdrc or .needs_http_default)}
     ' "${targets[@]}"); then
         printf '失败: JSON 无法解析，迁移已取消\n' >>"${logFile}"
         return 1
@@ -964,6 +974,10 @@ migrateSingBox116DeprecatedConfig() {
 
     if [[ "$(jq -r '.has_strategy' <<<"${facts}")" == "true" ]]; then
         printf '失败: 检测到 DNS 规则 strategy，官方尚未提供可验证的 1.16 等价迁移，请人工改用 rule items 后重试\n' >>"${logFile}"
+        return 1
+    fi
+    if [[ "$(jq -r '.has_domain_strategy and .has_local_resolver_conflict' <<<"${facts}")" == "true" ]]; then
+        printf '失败: padm-local DNS resolver 已存在但不是 local 类型，无法迁移 domain_strategy\n' >>"${logFile}"
         return 1
     fi
     needsMigration=$(jq -r '.needs_migration' <<<"${facts}")
@@ -991,6 +1005,14 @@ migrateSingBox116DeprecatedConfig() {
             break
         fi
     done
+    if [[ "${carrierFile}" == "${targets[0]}" ]]; then
+        for file in "${targets[@]}"; do
+            if jq -e '(.dns? | type) == "object"' "${file}" >/dev/null 2>&1; then
+                carrierFile=${file}
+                break
+            fi
+        done
+    fi
 
     checkLogBackupCreate backupDir "${backupTargets[@]}" || {
         printf '失败: 迁移前配置备份失败\n' >>"${logFile}"
@@ -1064,7 +1086,13 @@ migrateSingBox116DeprecatedConfig() {
                      else .rules += [$rule]
                      end) | .rules);
             walk(
-                if type == "object" and (.tls? | type) == "object" and (.tls | has("acme")) then
+                if type == "object" and has("domain_strategy") then
+                    if has("domain_resolver") then error("domain_strategy 与 domain_resolver 冲突")
+                    elif (.domain_strategy | type) != "string" then error("domain_strategy 不是字符串")
+                    elif .domain_strategy == "" then error("domain_strategy 为空")
+                    else .domain_resolver = {server: "padm-local", strategy: .domain_strategy} | del(.domain_strategy)
+                    end
+                elif type == "object" and (.tls? | type) == "object" and (.tls | has("acme")) then
                     if (.tls | has("certificate_provider")) then error("tls.acme 与 tls.certificate_provider 冲突")
                     elif (.tls.acme | type) != "object" then error("tls.acme 不是对象，无法迁移")
                     else .tls.certificate_provider = ({type: "acme"} + .tls.acme) | del(.tls.acme)
@@ -1087,6 +1115,21 @@ migrateSingBox116DeprecatedConfig() {
             )
             | if (.dns? | type) == "object" and (.dns.rules? | type) == "array" then
                 .dns.rules = migrate_dns_rules
+              else . end
+            | if $currentFile == $carrierFile and $facts.needs_domain_strategy and (($facts.has_local_resolver | not)) then
+                if ((.dns? | type) == "null") then
+                    .dns = {servers: [{tag: "padm-local", type: "local"}]}
+                elif ((.dns? | type) != "object") then
+                    error("DNS 配置不是对象，无法初始化 padm-local resolver")
+                elif ((.dns.servers? | type) == "null") then
+                    .dns.servers = [{tag: "padm-local", type: "local"}]
+                elif ((.dns.servers | type) != "array") then
+                    error("DNS servers 不是数组，无法初始化 padm-local resolver")
+                elif any(.dns.servers[]?; type == "object" and .tag? == "padm-local") then
+                    .
+                else
+                    .dns.servers += [{tag: "padm-local", type: "local"}]
+                end
               else . end
             | if $currentFile == $carrierFile and $facts.needs_http_default then
                 .route = (.route // {})
@@ -1127,6 +1170,7 @@ migrateSingBox116DeprecatedConfig() {
             ((has("ip_cidr") or has("ip_is_private")) and ((.match_response? // false) != true)) or
             (([rule_set_tags] | any(.[]; . as $tag | ($pureTags | index($tag)) != null)) and ((.match_response? // false) != true)))) | not) and
         ((any(rule_sets; .type? == "remote" and has("download_detour"))) | not) and
+        ((any(.[] | .. | objects; has("domain_strategy"))) | not) and
         ($has_http_default or ((any(rule_sets; needs_http_default)) | not)) and
         ((any(.[] | .. | objects; ((.tls? | type) == "object" and (.tls | has("acme"))))) | not) and
         ((any(.[] | .. | objects; ((.dns? | type) == "object" and (.dns | has("independent_cache"))))) | not) and
