@@ -1351,6 +1351,11 @@ SH
     export PADM_FAKE_SINGBOX_MERGE_MODE=fail
     regressionExpectStatus 1 singBoxMergeConfig >/dev/null 2>&1
     [[ "$(<"${outputFile}")" == '{"old":true}' ]]
+    printf '%s\n' '{"outbounds":[{"type":"direct","domain_resolver":{"server":"padm-local"}}]}' >"${shardDir}/01_missing_resolver.json"
+    regressionExpectStatus 1 singBoxMergeConfig >/dev/null 2>&1
+    [[ "$(<"${outputFile}")" == '{"old":true}' ]]
+    [[ ! -e "${shardDir}/dns.json" ]]
+    rm -f "${shardDir}/01_missing_resolver.json"
     ! compgen -G "${confDir}/.config.json.merge.*" >/dev/null
 
     export PADM_FAKE_SINGBOX_MERGE_MODE=empty

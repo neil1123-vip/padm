@@ -343,7 +343,7 @@ routingConfigBackupCreate() {
         blackhole_out.json wireguard_out_IPv4.json wireguard_out_IPv6.json socks5_outbound.json
     )
     local -a singBoxFiles=(
-        01_direct_outbound.json IPv4_out.json IPv6_out.json IPv6_route.json bt_block_route.json
+        01_direct_outbound.json IPv4_out.json IPv6_out.json IPv6_route.json bt_block_route.json dns.json
         socks5_02_inbound_route.json wireguard_endpoints_IPv4_route.json
         wireguard_endpoints_IPv6_route.json wireguard_endpoints_IPv4.json
         wireguard_endpoints_IPv6.json wireguard_outbound.json
@@ -528,6 +528,7 @@ splitSingBoxRules() {
 # 设置 sniff routing 规则
 setSniffRouting() {
     local targetPath="${singBoxConfigPath:-/etc/padm/sing-box/conf/config/}sniff.json"
+    initSingBoxLocalDNSConfig || return 1
     writeRoutingJsonConfig "${targetPath}" <<EOF || return 1
 {
     "route":{

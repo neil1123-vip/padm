@@ -62,11 +62,111 @@ removeSingBoxRouteRule() {
 
 
 # 添加 sing-box 出站
+initSingBoxLocalDNSConfig() {
+    local mode=${1:-ensure}
+    local configDir targetPath file resolverState
+    local -a configFiles=()
+
+    case "${mode}" in
+    ensure|check) ;;
+    *) return 2 ;;
+    esac
+    configDir=$(coreSafeConfigDir "${singBoxConfigPath:-/etc/padm/sing-box/conf/config/}") || return 1
+    targetPath="${configDir}dns.json"
+    for file in "${configDir}"*.json; do
+        [[ -f "${file}" ]] && configFiles+=("${file}")
+    done
+    if [[ "${#configFiles[@]}" -gt 0 ]]; then
+        if ! resolverState=$(jq -sr '
+            def padm_resolvers:
+                .[] | .. | objects | .dns? | select(type == "object") |
+                .servers? | select(type == "array") | .[]? |
+                select(type == "object" and .tag? == "padm-local");
+            [padm_resolvers] as $resolvers |
+            if any($resolvers[]; .type? != "local") then "conflict"
+            elif ($resolvers | length) > 1 then "duplicate"
+            elif ($resolvers | length) == 1 then "present"
+            else "missing"
+            end
+        ' "${configFiles[@]}"); then
+            errorCard "sing-box DNS 配置解析失败，已保留旧配置"
+            return 1
+        fi
+        case "${resolverState}" in
+        present) return 0 ;;
+        conflict)
+            errorCard "padm-local DNS resolver 已存在但不是 local 类型"
+            return 1
+            ;;
+        duplicate)
+            errorCard "检测到重复的 padm-local DNS resolver"
+            return 1
+            ;;
+        missing)
+            if [[ "${mode}" == "check" ]]; then
+                if jq -s -e '
+                    any(.[] | .. | objects;
+                        ((.domain_resolver? | type) == "object" and .domain_resolver.server? == "padm-local") or
+                        ((.route? | type) == "object" and
+                            (.route.default_domain_resolver? == "padm-local" or
+                             any(.route.rules[]? | recurse(.rules[]?); .server? == "padm-local"))) or
+                        ((.dns? | type) == "object" and
+                            (.dns.final? == "padm-local" or
+                             any(.dns.rules[]? | recurse(.rules[]?); .server? == "padm-local")))
+                    )
+                ' "${configFiles[@]}" >/dev/null; then
+                    errorCard "配置引用了不存在的 padm-local DNS resolver"
+                    return 1
+                fi
+                return 0
+            fi
+            ;;
+        esac
+    elif [[ "${mode}" == "check" ]]; then
+        return 0
+    fi
+
+    if [[ ! -f "${targetPath}" ]]; then
+        writeRoutingJsonConfig "${targetPath}" <<'EOF' || return 1
+{
+    "dns": {
+        "servers": [
+            {
+                "tag": "padm-local",
+                "type": "local"
+            }
+        ]
+    }
+}
+EOF
+        return 0
+    fi
+
+    updateRoutingJsonConfig "${targetPath}" '
+        if type != "object" then
+            error("sing-box DNS 配置不是对象")
+        elif (.dns? | type) == "null" then
+            .dns = {servers: [{tag: "padm-local", type: "local"}]}
+        elif (.dns | type) != "object" then
+            error("sing-box DNS 配置不是对象")
+        elif (.dns.servers? | type) == "null" then
+            .dns.servers = [{tag: "padm-local", type: "local"}]
+        elif (.dns.servers | type) != "array" then
+            error("sing-box DNS servers 不是数组")
+        else
+            .dns.servers += [{tag: "padm-local", type: "local"}]
+        end
+    '
+}
+
 addSingBoxOutbound() {
     local tag=$1
     local type="ipv4"
     local detour=${2:-}
     local resolverTag="padm-local"
+    if [[ -n "${detour}" || ( "${tag}" != *direct* && "${tag}" != *block* ) ]]; then
+        initSingBoxLocalDNSConfig || return 1
+    fi
     if [[ "${tag}" == *IPv6* ]]; then
         type=ipv6
     fi
@@ -481,6 +581,7 @@ singBoxMergeConfigToTemp() {
     confDir=$(singBoxConfigConfDir)
     outputFile=$(singBoxMergedConfigFile)
 
+    initSingBoxLocalDNSConfig check || return 1
     padmCreateTempFileForTarget mergedTmpFile "${outputFile}" merge || return 1
     tmpName=$(basename -- "${mergedTmpFile}")
     rm -f "${mergedTmpFile}" >/dev/null 2>&1 || { padmRemoveCleanupPath "${mergedTmpFile}"; return 1; }

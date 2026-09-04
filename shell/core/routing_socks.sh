@@ -273,7 +273,7 @@ socks5RoutingBackupCreate() {
         socks5_outbound.json socks5_01_outbound_route.json 20_socks5_inbounds.json
         socks5_02_inbound_route.json sniff_socks5_inbound.json
         strategy_ipv4_only_socks5_inbound.json strategy_ipv6_only_socks5_inbound.json
-        01_direct_outbound.json IPv4_out.json IPv6_out.json
+        01_direct_outbound.json IPv4_out.json IPv6_out.json dns.json
         wireguard_endpoints_IPv4_route.json wireguard_endpoints_IPv6_route.json
         wireguard_endpoints_IPv4.json wireguard_endpoints_IPv6.json
     )

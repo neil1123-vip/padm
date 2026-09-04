@@ -153,6 +153,7 @@ JSON
     jq -e '.outbounds[0].tag == "01_direct_outbound"' "${singBoxConfigPath}01_direct_outbound.json" >/dev/null
     addSingBoxOutbound "IPv6_out"
     jq -e '.outbounds[0].domain_resolver.server == "padm-local" and .outbounds[0].domain_resolver.strategy == "ipv6_only" and (.outbounds[0].domain_strategy | not)' "${singBoxConfigPath}IPv6_out.json" >/dev/null
+    jq -e '[.dns.servers[] | select(.tag == "padm-local" and .type == "local")] | length == 1' "${singBoxConfigPath}dns.json" >/dev/null
     addSingBoxOutbound "block_domain_outbound"
     [[ ! -e "${singBoxConfigPath}block_domain_outbound.json" ]]
     addXrayOutbound "IPv4_outbound"
@@ -232,8 +233,49 @@ JSON
     [[ ! -e "${singBoxConfigPath}wireguard_endpoints_IPv4.json.tmp" ]]
     unset -f readConfigWarpReg initHysteriaPort initHysteria2Network initXrayClients
     hysteriaPort=23456
+    rm -f "${singBoxConfigPath}dns.json"
     setSniffRouting
     jq -e '.route.rules[0].action == "sniff"' "${singBoxConfigPath}sniff.json" >/dev/null
+    jq -e '
+      [.dns.servers[] | select(.tag == "padm-local" and .type == "local")] | length == 1
+    ' "${singBoxConfigPath}dns.json" >/dev/null
+    initSingBoxLocalDNSConfig
+    jq -e '
+      [.dns.servers[] | select(.tag == "padm-local" and .type == "local")] | length == 1
+    ' "${singBoxConfigPath}dns.json" >/dev/null
+    printf '%s\n' '{"dns":{"servers":[{"tag":"custom","type":"udp","server":"1.1.1.1"}]},"route":{"final":"direct"}}' >"${singBoxConfigPath}dns.json"
+    initSingBoxLocalDNSConfig
+    jq -e '
+      any(.dns.servers[]; .tag == "custom") and
+      any(.dns.servers[]; .tag == "padm-local" and .type == "local") and
+      .route.final == "direct"
+    ' "${singBoxConfigPath}dns.json" >/dev/null
+    rm -f "${singBoxConfigPath}dns.json"
+    printf '%s\n' '{"dns":{"servers":[{"tag":"padm-local","type":"udp","server":"1.1.1.1"}]}}' >"${singBoxConfigPath}resolver.json"
+    originalContent=$(<"${singBoxConfigPath}resolver.json")
+    if initSingBoxLocalDNSConfig 2>/dev/null; then
+        return 1
+    fi
+    [[ "$(<"${singBoxConfigPath}resolver.json")" == "${originalContent}" ]]
+    [[ ! -e "${singBoxConfigPath}dns.json" ]]
+    printf '%s\n' '{"dns":{"servers":[{"tag":"padm-local","type":"local"}]}}' >"${singBoxConfigPath}resolver.json"
+    initSingBoxLocalDNSConfig
+    [[ ! -e "${singBoxConfigPath}dns.json" ]]
+    addSingBoxDNSConfig "1.1.1.1" "cross-shard.example.com"
+    jq -e '
+      ([.dns.servers[]? | select(.tag == "padm-local")] | length) == 0 and
+      .route.default_domain_resolver == "padm-local"
+    ' "${singBoxConfigPath}dns.json" >/dev/null
+    jq -s -e '
+      [.[].dns.servers[]? | select(.tag == "padm-local" and .type == "local")] | length == 1
+    ' "${singBoxConfigPath}"*.json >/dev/null
+    printf '%s\n' '{"dns":{"servers":[{"tag":"padm-local","type":"local"}]}}' >"${singBoxConfigPath}resolver-duplicate.json"
+    if initSingBoxLocalDNSConfig 2>/dev/null; then
+        return 1
+    fi
+    rm -f "${singBoxConfigPath}resolver-duplicate.json"
+    rm -f "${singBoxConfigPath}resolver.json"
+    initSingBoxLocalDNSConfig
     setStrategyRouting socks5_inbound ipv6_only
     jq -e '
       .route.rules[0].inbound == "socks5_inbound" and

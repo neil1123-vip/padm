@@ -285,10 +285,19 @@ addSingBoxDNSConfig() {
     local domainRules suffixRules ruleSet ruleSetTag
     splitSingBoxRules "${rules}" domainRules suffixRules ruleSet ruleSetTag || { errorCard "sing-box DNS 规则拆分失败，已保留旧配置"; return 1; }
     if [[ -n "${singBoxConfigPath}" ]]; then
-        local localTag hostsTag routingTag
+        local localTag hostsTag routingTag localServerEntry
         localTag="padm-local"
         hostsTag="padm-hosts"
         routingTag="padm-dnsRouting"
+        initSingBoxLocalDNSConfig || return 1
+        localServerEntry='      {"tag":"padm-local","type":"local"},'
+        if jq -e --arg localTag "${localTag}" '
+            any(.dns.servers[]?; type == "object" and .tag? == $localTag and .type? == "local")
+        ' "${singBoxConfigPath}dns.json" >/dev/null 2>&1; then
+            :
+        else
+            localServerEntry=
+        fi
         if [[ "${actionType}" == "predefined" ]]; then
             local predefined={}
             while read -r line; do
@@ -299,10 +308,7 @@ addSingBoxDNSConfig() {
 {
   "dns": {
     "servers": [
-      {
-        "tag": "${localTag}",
-        "type": "local"
-      },
+${localServerEntry}
       {
         "tag": "${hostsTag}",
         "type": "hosts",
@@ -349,10 +355,7 @@ EOF
 {
   "dns": {
     "servers": [
-      {
-        "tag": "${localTag}",
-        "type": "local"
-      },
+${localServerEntry}
       {
         "tag": "${routingTag}",
         "type": "udp",
