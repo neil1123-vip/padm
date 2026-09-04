@@ -5668,6 +5668,51 @@ JSON
             )
         )
 
+        (
+            local preflightRoot="${root}/prerelease-migration"
+            local preflightConfigDir="${preflightRoot}/conf/config/"
+            local preflightFile="${preflightConfigDir}01_rules.json"
+            local preflightLog="${preflightRoot}/prerelease.log"
+            local preflightBefore validationCallsFile="${preflightRoot}/validation-calls" validationConfigDirFile="${preflightRoot}/validation-config-dir"
+            mkdir -p "${preflightConfigDir}"
+            printf '%s\n' '{"route":{"rule_set":[{"type":"remote","tag":"legacy","url":"https://example.com/legacy.srs","download_detour":"direct"}]}}' >"${preflightFile}"
+            printf '0\n' >"${validationCallsFile}"
+            preflightBefore=$(<"${preflightFile}")
+            singBoxConfigPath="${preflightConfigDir}"
+            downloadSingBoxReleaseBinaryToTemp() {
+                local version=$1
+                local binaryVar=$2
+                local dirVar=$3
+                local dir="${preflightRoot}/download"
+                local extracted="${dir}/sing-box-${version/v/}-linux-amd64"
+                mkdir -p "${extracted}"
+                printf '#!/usr/bin/env bash\nexit 0\n' >"${extracted}/sing-box"
+                chmod 755 "${extracted}/sing-box"
+                printf -v "${binaryVar}" '%s' "${extracted}/sing-box"
+                printf -v "${dirVar}" '%s' "${dir}"
+            }
+            singBoxBinaryVersion() { printf '%s\n' v1.16.0; }
+            validateSingBoxConfigWithBinary() {
+                local validationCalls validationConfigDir
+                validationCalls=$(<"${validationCallsFile}")
+                printf '%s\n' "$((validationCalls + 1))" >"${validationCallsFile}"
+                validationConfigDir=$(singBoxConfigShardDir)
+                printf '%s\n' "${validationConfigDir}" >"${validationConfigDirFile}"
+                if compgen -G "${validationConfigDir}*.json" >/dev/null &&
+                    grep -q 'download_detour' "${validationConfigDir}"*.json; then
+                    return 1
+                fi
+                return 0
+            }
+            singBoxPrereleaseCompatibilityCard() { :; }
+
+            checkSingBoxPrereleaseCompatibility v1.16.0 "${preflightLog}"
+            [[ "$(<"${validationCallsFile}")" == "1" ]]
+            [[ "$(<"${validationConfigDirFile}")" != "${preflightConfigDir}" ]]
+            [[ "$(<"${preflightFile}")" == "${preflightBefore}" ]]
+            grep -q '已迁移' "${preflightLog}"
+        )
+
         jq -e '
           (.dns | has("independent_cache") | not) and
           any(.http_clients[]; .tag == "rule-set-proxy" and .detour == "proxy") and

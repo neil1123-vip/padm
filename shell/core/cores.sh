@@ -1268,6 +1268,47 @@ downloadSingBoxReleaseBinaryToTemp() {
     fi
 }
 
+validateSingBoxPrereleaseConfigWithMigration() {
+    local binary=$1
+    local version=$2
+    local logFile=$3
+    local originalConfDir stagingRoot stagingConfDir migrationLog
+    local migrationBackup= validationRc=0
+
+    if ! singBoxVersionAtLeast "${version}" 1.14.0; then
+        validateSingBoxConfigWithBinary "${binary}" "${logFile}"
+        return $?
+    fi
+    originalConfDir=$(singBoxConfigConfDir) || return 1
+    padmCreateTmpRootPath stagingRoot padm-sing-box-prerelease-config.XXXXXX -d || return 1
+    stagingConfDir="${stagingRoot}/conf"
+    if ! padmEnsureSafeDirectory "${stagingConfDir}" || ! cp -a "${originalConfDir}/." "${stagingConfDir}/"; then
+        padmRemoveCleanupPath "${stagingRoot}"
+        return 1
+    fi
+    migrationLog="${logFile}.migration"
+    (
+        migrationBackup=
+        validationRc=0
+        singBoxConfigPath="${stagingConfDir}/config/"
+        if ! migrateSingBox116DeprecatedConfig migrationBackup "${migrationLog}"; then
+            [[ -n "${migrationBackup}" ]] && padmRemoveCleanupPath "${migrationBackup}"
+            exit 1
+        fi
+        validateSingBoxConfigWithBinary "${binary}" "${logFile}" || validationRc=$?
+        [[ -n "${migrationBackup}" ]] && padmRemoveCleanupPath "${migrationBackup}"
+        exit "${validationRc}"
+    )
+    validationRc=$?
+    {
+        printf '\n[目标版本配置迁移]\n'
+        cat "${migrationLog}" 2>/dev/null || true
+    } >>"${logFile}" || validationRc=1
+    removeManagedFilesIfPresentIgnoreFailure "${migrationLog}"
+    padmRemoveCleanupPath "${stagingRoot}" || true
+    return "${validationRc}"
+}
+
 checkSingBoxPrereleaseCompatibility() {
     local version=${1:-}
     local logFile=${2:-$(coreTmpFilePath padm-core-sing-box-prerelease-audit.log)}
@@ -1319,7 +1360,7 @@ checkSingBoxPrereleaseCompatibility() {
         singBoxPrereleaseCompatibilityCard "失败" "下载二进制版本不匹配" "目标版本: ${resolvedVersion}" "实际版本: ${actualVersion:-无法解析}" "排查日志: ${logFile}"
         return 1
     fi
-    validateSingBoxConfigWithBinary "${downloadedBinary}" "${validateLog}" || validateRc=$?
+    validateSingBoxPrereleaseConfigWithMigration "${downloadedBinary}" "${resolvedVersion}" "${validateLog}" || validateRc=$?
     {
         printf '\n[目标二进制配置校验]\n'
         cat "${validateLog}" 2>/dev/null || true
