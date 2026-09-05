@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 runRoutingRegression() {
+    runDNSRoutingCustomConfigRegression
     local routingRootRel="${TMP_DIR}/routing-core"
     local routingRoot
     mkdir -p "${routingRootRel}/xray-conf" "${routingRootRel}/sing-box-conf" "${routingRootRel}/tmp"
@@ -279,12 +280,12 @@ JSON
         }
         removeUnlockDNS
         [[ "${reloadCount}" == 1 ]]
-        jq -e '. == {}' "${singBoxConfigPath}dns.json" >/dev/null
+        jq -e 'all(.dns.servers[]?; .tag != "padm-local" and .tag != "padm-dnsRouting")' "${singBoxConfigPath}dns.json" >/dev/null
         [[ "$(<"${singBoxConfigPath}resolver.json")" == "${resolverBefore}" ]]
         addSingBoxDNSConfig "203.0.113.10" "cross-shard.example.com" predefined
         removeUnlockSNI
         [[ "${reloadCount}" == 2 ]]
-        jq -e '. == {}' "${singBoxConfigPath}dns.json" >/dev/null
+        jq -e 'all(.dns.servers[]?; .tag != "padm-local" and .tag != "padm-hosts")' "${singBoxConfigPath}dns.json" >/dev/null
         [[ "$(<"${singBoxConfigPath}resolver.json")" == "${resolverBefore}" ]]
 
         addSingBoxDNSConfig "1.1.1.1" "cross-shard.example.com"
@@ -378,7 +379,7 @@ JSON
     coreInstallType=2
     printf '{"dns":{"servers":["custom"]}}\n' >"${singBoxConfigPath}dns.json"
     ( removeUnlockSNI ) || return 1
-    jq -e '.dns.servers[0].type == "local"' "${singBoxConfigPath}dns.json" >/dev/null
+    jq -e '.dns.servers[0] == "custom" and any(.dns.servers[] | objects; .tag == "padm-local" and .type == "local")' "${singBoxConfigPath}dns.json" >/dev/null
     coreInstallType=1
     printf '{"inbounds":[{"sniffing":{"destOverride":["http"]},"settings":{}}]}
 ' >"${configPath}02_sniffing_inbounds.json"
@@ -448,6 +449,106 @@ JSON
     [[ "$(validateAccessIPList '1.1.1.1, 1.1.1.1,2001:db8::/32,cn')" == "1.1.1.1,2001:db8::/32,cn" ]]
     ! validateAccessIPList 'bad-ip' >/dev/null
 }
+
+runDNSRoutingCustomConfigRegression() (
+    local coreInstallType=2 configPath=''
+    local singBoxConfigPath="${TMP_DIR}/dns-custom-config/"
+    local resolverPlacement before afterAdd externalBefore
+    mkdir -p "${singBoxConfigPath}"
+    for resolverPlacement in local external; do
+        cat >"${singBoxConfigPath}dns.json" <<'JSON'
+{
+  "log":{"level":"warn"},
+  "dns":{
+    "servers":[{"tag":"custom-dns","type":"udp","server":"9.9.9.9"}],
+    "rules":[{"domain_suffix":["internal.example"],"server":"custom-dns"},{"type":"logical","mode":"or","rules":[{"rule_set":"custom-rules"}],"server":"custom-dns"}],
+    "final":"custom-dns","strategy":"ipv4_only","disable_cache":true
+  },
+  "route":{
+    "final":"custom-direct","default_domain_resolver":{"server":"custom-dns","strategy":"prefer_ipv4"},
+    "rules":[{"domain_suffix":["internal.example"],"outbound":"custom-direct"}],
+    "rule_set":[{"tag":"custom-rules","type":"inline","rules":[{"domain_suffix":["example.net"]}]},{"tag":"geosite_shared_dns","type":"inline","rules":[{"domain_suffix":["shared.example"]}]}]
+  }
+}
+JSON
+        cat >"${singBoxConfigPath}custom.json" <<'JSON'
+{"route":{"rules":[{"type":"logical","mode":"or","rules":[{"rule_set":"geosite_shared_dns"}],"outbound":"custom-direct"}]},"outbounds":[{"tag":"custom-direct","type":"direct"}]}
+JSON
+        if [[ "${resolverPlacement}" == local ]]; then
+            initSingBoxLocalDNSConfig
+        else
+            updateRoutingJsonConfig "${singBoxConfigPath}custom.json" '.dns.servers = [{tag:"padm-local",type:"local"}] | .route.default_domain_resolver = "custom-dns"'
+            updateRoutingJsonConfig "${singBoxConfigPath}dns.json" 'del(.route.default_domain_resolver)'
+        fi
+        before=$(jq -Sc . "${singBoxConfigPath}dns.json")
+        externalBefore=$(<"${singBoxConfigPath}custom.json")
+
+        addSingBoxDNSConfig "1.1.1.1" "geosite:shared,geosite:exclusive,example.com"
+        jq -e --argjson before "${before}" '
+            .log == $before.log and
+            .dns.final == $before.dns.final and .dns.strategy == $before.dns.strategy and .dns.disable_cache and
+            .dns.servers[:($before.dns.servers | length)] == $before.dns.servers and
+            .dns.rules[:($before.dns.rules | length)] == $before.dns.rules and
+            .route.rules[:($before.route.rules | length)] == $before.route.rules and
+            .route.final == $before.route.final and .route.default_domain_resolver == $before.route.default_domain_resolver and
+            ([.route.rule_set[] | select(.tag == "geosite_shared_dns")]) == [$before.route.rule_set[1]] and
+            any(.route.rule_set[]; .tag == "geosite_exclusive_dns")
+        ' "${singBoxConfigPath}dns.json" >/dev/null
+        afterAdd=$(jq -Sc . "${singBoxConfigPath}dns.json")
+        addSingBoxDNSConfig "1.1.1.1" "geosite:shared,geosite:exclusive,example.com"
+        [[ "$(jq -Sc . "${singBoxConfigPath}dns.json")" == "${afterAdd}" ]]
+        removeUnlockDNS
+        [[ "$(jq -Sc . "${singBoxConfigPath}dns.json")" == "${before}" ]]
+
+        addSingBoxDNSConfig "1.1.1.1" "geosite:exclusive,example.com"
+        addSingBoxDNSConfig "203.0.113.10" "full:api.example.com,example.org" predefined
+        jq -e '
+            any(.dns.servers[]; .tag == "padm-hosts" and .predefined["api.example.com"] == "203.0.113.10") and
+            all(.dns.servers[]; .tag != "padm-dnsRouting") and
+            all(.route.rule_set[]; .tag != "geosite_exclusive_dns")
+        ' "${singBoxConfigPath}dns.json" >/dev/null
+        afterAdd=$(<"${singBoxConfigPath}dns.json")
+        (
+            reloadCore() { return 1; }
+            regressionExpectStatus 1 removeUnlockSNI
+            [[ "$(<"${singBoxConfigPath}dns.json")" == "${afterAdd}" ]]
+        )
+        removeUnlockSNI
+        [[ "$(jq -Sc . "${singBoxConfigPath}dns.json")" == "${before}" ]]
+        [[ "$(<"${singBoxConfigPath}custom.json")" == "${externalBefore}" ]]
+        initSingBoxLocalDNSConfig check
+
+        addSingBoxDNSConfig "1.1.1.1" "geosite:shared,geosite:exclusive,example.com"
+        updateRoutingJsonConfig "${singBoxConfigPath}dns.json" '
+            (.route.rule_set[] | select(.tag == "geosite_exclusive_dns")).update_interval = "12h" |
+            .dns.final = "padm-dnsRouting"
+        '
+        removeUnlockDNS
+        jq -e '
+            .dns.final == "padm-dnsRouting" and
+            any(.dns.servers[]; .tag == "padm-dnsRouting") and
+            any(.route.rule_set[]; .tag == "geosite_exclusive_dns" and .update_interval == "12h")
+        ' "${singBoxConfigPath}dns.json" >/dev/null
+
+        updateRoutingJsonConfig "${singBoxConfigPath}dns.json" '.dns.final = "custom-dns"'
+        updateRoutingJsonConfig "${singBoxConfigPath}custom.json" '.outbounds[0].domain_resolver = {server:"padm-dnsRouting",strategy:"prefer_ipv4"}'
+        removeUnlockDNS
+        jq -e 'any(.dns.servers[]; .tag == "padm-dnsRouting")' "${singBoxConfigPath}dns.json" >/dev/null
+        updateRoutingJsonConfig "${singBoxConfigPath}custom.json" 'del(.outbounds[0].domain_resolver) | .dns.servers += [{tag:"padm-hosts",type:"hosts",predefined:{"external.example":"203.0.113.20"}}]'
+        before=$(<"${singBoxConfigPath}dns.json")
+        externalBefore=$(<"${singBoxConfigPath}custom.json")
+        regressionExpectStatus 1 addSingBoxDNSConfig "203.0.113.10" "example.com" predefined >/dev/null 2>&1
+        [[ "$(<"${singBoxConfigPath}dns.json")" == "${before}" ]]
+        [[ "$(<"${singBoxConfigPath}custom.json")" == "${externalBefore}" ]]
+
+        updateRoutingJsonConfig "${singBoxConfigPath}dns.json" '.dns.rules = {}'
+        before=$(<"${singBoxConfigPath}dns.json")
+        regressionExpectStatus 1 addSingBoxDNSConfig "1.1.1.1" "example.com" >/dev/null 2>&1
+        [[ "$(<"${singBoxConfigPath}dns.json")" == "${before}" ]]
+        regressionExpectStatus 1 removeUnlockDNS >/dev/null 2>&1
+        [[ "$(<"${singBoxConfigPath}dns.json")" == "${before}" ]]
+    done
+)
 
 runRoutingCoreRejectsUnsafeConfigDirRegression() (
     local root="${TMP_DIR}/routing-core-unsafe-config"

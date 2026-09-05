@@ -273,6 +273,82 @@ EOF
     fi
 }
 
+# 仅替换受管 DNS 内容，保留自定义配置与跨分片引用。
+updateSingBoxDNSRoutingConfig() {
+    local patch=${1:-'{}'}
+    local configDir targetPath file currentFile=/dev/null merged
+    local -a otherFiles=()
+    configDir=$(dnsRoutingSafeSingBoxConfigDir) || return 1
+    targetPath="${configDir}dns.json"
+    if [[ -f "${targetPath}" ]]; then
+        currentFile="${targetPath}"
+    fi
+    for file in "${configDir}"*.json; do
+        [[ -f "${file}" && "${file}" != "${targetPath}" ]] && otherFiles+=("${file}")
+    done
+    merged=$(jq -s --slurpfile current "${currentFile}" --argjson patch "${patch}" '
+        def managed_tag: . == "padm-hosts" or . == "padm-dnsRouting";
+        def managed_rule: type == "object" and (.server? | managed_tag);
+        def rule_refs:
+            .. | objects | .rule_set? |
+            if type == "string" then . elif type == "array" then .[] | strings else empty end;
+        def server_refs:
+            .. | objects |
+            (.server?, .final?, .default_domain_resolver?,
+             (.domain_resolver? | if type == "object" then .server? else . end)) |
+            select(managed_tag);
+        . as $shards |
+        if ($current | length) > 1 then error("sing-box DNS config must contain one object")
+        elif $current == [] then {} else $current[0] end |
+        if type != "object" then error("sing-box DNS config must be an object") else . end |
+        if any(.dns, .route; . != null and type != "object") then
+            error("sing-box dns/route must be objects")
+        else . end |
+        if any(.dns.servers, .dns.rules, .route.rules, .route.rule_set; . != null and type != "array") then
+            error("sing-box DNS servers/rules/rule_set must be arrays")
+        else . end |
+        [.dns.rules[]?, .route.rules[]? | select(managed_rule) | rule_refs] as $oldRuleTags |
+        if .dns.rules != null then .dns.rules |= map(select(managed_rule | not)) else . end |
+        if .route.rules != null then .route.rules |= map(select(managed_rule | not)) else . end |
+        ($shards + [., $patch]) as $retained |
+        [$retained[] | rule_refs] as $usedRuleTags |
+        [$retained[] | server_refs] as $usedServerTags |
+        [$patch.dns.servers[]?.tag] as $newServerTags |
+        if any($shards[].dns.servers[]? | objects; .tag as $tag | $newServerTags | index($tag)) then
+            error("managed DNS server tag already exists in another shard")
+        else . end |
+        if .dns.servers != null then
+            .dns.servers |= map(select(
+                if type == "object" and (.tag | managed_tag) then
+                    .tag as $tag | ($newServerTags | index($tag) | not) and ($usedServerTags | index($tag))
+                else true end
+            ))
+        else . end |
+        if .route.rule_set != null then
+            .route.rule_set |= map(select(.tag as $tag |
+                (($oldRuleTags | index($tag)) and ($usedRuleTags | index($tag) | not) and
+                 ($tag | startswith("geosite_") and endswith("_dns")) and
+                 . == {tag:$tag, type:"remote", format:"binary", http_client:{detour:"01_direct_outbound"},
+                       url:("https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-" +
+                            ($tag | ltrimstr("geosite_") | rtrimstr("_dns")) + ".srs")}) | not
+            )) |
+            if .route.rule_set == [] then del(.route.rule_set) else . end
+        else . end |
+        [($shards + [.])[] | .route.rule_set[]?.tag] as $definedRuleTags |
+        if ($patch.dns.servers // [] | length) > 0 then
+            .dns.servers = ((.dns.servers // []) + $patch.dns.servers) |
+            .dns.rules = ((.dns.rules // []) + $patch.dns.rules) |
+            .route.rules = ((.route.rules // []) + $patch.route.rules) |
+            ([$patch.route.rule_set[] | select(.tag as $tag | $definedRuleTags | index($tag) | not)]) as $newRuleSets |
+            if $newRuleSets != [] then .route.rule_set = ((.route.rule_set // []) + $newRuleSets) else . end |
+            if all(($shards + [.])[]; .route.default_domain_resolver == null) then
+                .route.default_domain_resolver = "padm-local"
+            else . end
+        else . end
+    ' "${otherFiles[@]}" </dev/null) || return 1
+    writeRoutingJsonConfig "${targetPath}" <<<"${merged}"
+}
+
 # 添加 sing-box DNS 配置
 addSingBoxDNSConfig() {
     local ip=$1
@@ -285,119 +361,27 @@ addSingBoxDNSConfig() {
     local domainRules suffixRules ruleSet ruleSetTag
     splitSingBoxRules "${rules}" domainRules suffixRules ruleSet ruleSetTag || { errorCard "sing-box DNS 规则拆分失败，已保留旧配置"; return 1; }
     if [[ -n "${singBoxConfigPath}" ]]; then
-        local localTag hostsTag routingTag localServerEntry
-        localTag="padm-local"
-        hostsTag="padm-hosts"
-        routingTag="padm-dnsRouting"
+        local patch
+        patch=$(jq -n --arg ip "${ip}" --arg action "${actionType}" \
+            --argjson domains "${domainRules}" --argjson suffixes "${suffixRules}" \
+            --argjson ruleSets "${ruleSet}" --argjson ruleTags "${ruleSetTag}" '
+            (if $action == "predefined" then "padm-hosts" else "padm-dnsRouting" end) as $tag |
+            ({domain:$domains, domain_suffix:$suffixes, rule_set:$ruleTags} |
+                with_entries(select(.value | length > 0))) as $match |
+            {
+                dns: {
+                    servers: [(if $action == "predefined" then
+                        {tag:$tag, type:"hosts", predefined:(($domains + $suffixes) | unique | map({key:., value:$ip}) | from_entries)}
+                    else {tag:$tag, type:"udp", server:$ip} end)],
+                    rules: [($match + {server:$tag} | if $action == "predefined" then del(.rule_set) else . end)]
+                },
+                route: {rules: [($match + {action:"resolve", server:$tag})], rule_set:$ruleSets}
+            }
+        ') || return 1
         initSingBoxLocalDNSConfig || return 1
-        localServerEntry='      {"tag":"padm-local","type":"local"},'
-        if jq -e --arg localTag "${localTag}" '
-            any(.dns.servers[]?; type == "object" and .tag? == $localTag and .type? == "local")
-        ' "${singBoxConfigPath}dns.json" >/dev/null 2>&1; then
-            :
-        else
-            localServerEntry=
-        fi
-        if [[ "${actionType}" == "predefined" ]]; then
-            local predefined={}
-            while read -r line; do
-                predefined=$(jq --arg key "${line}" --arg value "${ip}" '. + {($key): $value}' <<<"${predefined}") || return 1
-            done < <({ jq -r '.[]' <<<"${domainRules}"; jq -r '.[]' <<<"${suffixRules}"; } | grep -v '^$' | sort -u)
-
-            if ! writeRoutingJsonConfig "${singBoxConfigPath}dns.json" <<EOF
-{
-  "dns": {
-    "servers": [
-${localServerEntry}
-      {
-        "tag": "${hostsTag}",
-        "type": "hosts",
-        "predefined": ${predefined}
-      }
-    ],
-    "rules": [
-      {
-        "domain":${domainRules},
-        "domain_suffix":${suffixRules},
-        "server":"${hostsTag}"
-      }
-    ]
-  },
-  "route": {
-    "rule_set": ${ruleSet},
-    "rules": [
-      {
-        "rule_set": ${ruleSetTag},
-        "domain": ${domainRules},
-        "domain_suffix": ${suffixRules},
-        "action": "resolve",
-        "server": "${hostsTag}"
-      }
-    ],
-    "default_domain_resolver": "${localTag}"
-  }
-}
-EOF
-            then
-                errorCard "sing-box DNS/hosts 覆盖配置写入失败，已保留旧配置"
-                return 1
-            fi
-            if ! updateRoutingJsonConfig "${singBoxConfigPath}dns.json" '
-                if .route.rule_set == [] then del(.route.rule_set) else . end |
-                (.dns.rules[] |= with_entries(select((.value | if type == "array" then length > 0 else true end)))) |
-                (.route.rules[] |= with_entries(select((.value | if type == "array" then length > 0 else true end))))
-            '; then
-                errorCard "sing-box DNS/hosts 覆盖配置整理失败，已保留旧配置"
-                return 1
-            fi
-        else
-            if ! writeRoutingJsonConfig "${singBoxConfigPath}dns.json" <<EOF
-{
-  "dns": {
-    "servers": [
-${localServerEntry}
-      {
-        "tag": "${routingTag}",
-        "type": "udp",
-        "server": "${ip}"
-      }
-    ],
-    "rules": [
-      {
-        "rule_set": ${ruleSetTag},
-        "domain": ${domainRules},
-        "domain_suffix": ${suffixRules},
-        "server":"${routingTag}"
-      }
-    ]
-  },
-  "route":{
-    "rule_set":${ruleSet},
-    "rules": [
-      {
-        "rule_set": ${ruleSetTag},
-        "domain": ${domainRules},
-        "domain_suffix": ${suffixRules},
-        "action": "resolve",
-        "server": "${routingTag}"
-      }
-    ],
-    "default_domain_resolver": "${localTag}"
-  }
-}
-EOF
-            then
-                errorCard "sing-box DNS 分流配置写入失败，已保留旧配置"
-                return 1
-            fi
-            if ! updateRoutingJsonConfig "${singBoxConfigPath}dns.json" '
-                if .route.rule_set == [] then del(.route.rule_set) else . end |
-                (.dns.rules[] |= with_entries(select((.value | if type == "array" then length > 0 else true end)))) |
-                (.route.rules[] |= with_entries(select((.value | if type == "array" then length > 0 else true end))))
-            '; then
-                errorCard "sing-box DNS 分流配置整理失败，已保留旧配置"
-                return 1
-            fi
+        if ! updateSingBoxDNSRoutingConfig "${patch}"; then
+            errorCard "sing-box DNS/hosts 配置写入失败，已保留旧配置"
+            return 1
         fi
     fi
 }
@@ -460,7 +444,7 @@ EOF
     fi
 
     if [[ -n "${singBoxConfigPath:-}" && -f "${singBoxConfigPath}dns.json" ]]; then
-        if ! writeRoutingJsonConfig "${singBoxConfigPath}dns.json" <<<'{}' ||
+        if ! updateSingBoxDNSRoutingConfig ||
             ! initSingBoxLocalDNSConfig; then
             errorCard "sing-box ${title}配置移除失败，已保留旧配置"
             dnsRoutingAbortChange "${title}配置移除失败"
