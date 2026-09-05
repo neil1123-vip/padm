@@ -384,6 +384,7 @@ subscriptionSyncAppendProtocolUser() {
     local preferredPath=$3
     local uuid=$4
     local accountName=$5
+    local mode=${6:-}
     local clients=
     local userPath=
     # init*Clients reads this dynamically scoped value to preserve existing clients.
@@ -403,7 +404,7 @@ subscriptionSyncAppendProtocolUser() {
     if [[ "${currentClients}" == "null" ]]; then
         return 0
     fi
-    if [[ "${coreInstallType}" == "2" ]]; then
+    if [[ "${mode}" == "singbox" || ( -z "${mode}" && "${coreInstallType}" == "2" ) ]]; then
         clients=$(initSingBoxClients "${protocolId}" "${uuid}" "${accountName}") || return 1
     else
         clients=$(initXrayClients "${protocolId}" "${uuid}" "${accountName}") || return 1
@@ -436,7 +437,7 @@ subscriptionSyncAppendProtocolBatch() {
     esac
     while IFS=$'\t' read -r protocolId fileName; do
         [[ -n "${protocolId}" && -n "${fileName}" ]] || continue
-        subscriptionSyncAppendProtocolUser "${protocolId}" "${configDir}${fileName}" '' "${uuid}" "${accountName}" || rc=1
+        subscriptionSyncAppendProtocolUser "${protocolId}" "${configDir}${fileName}" '' "${uuid}" "${accountName}" "${mode}" || rc=1
     done <<<"${registry}"
     return "${rc}"
 }

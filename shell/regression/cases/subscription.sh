@@ -1060,6 +1060,7 @@ runSubscriptionSyncAppendLocalUserBatchRegression() (
 runSubscriptionSyncAppendProtocolUserPreservesClientsRegression() (
     local root="${TMP_DIR}/subscription-sync-append-preserves-clients"
     local targetFile="${root}/01_inbounds.json"
+    local singBoxTargetFile="${root}/06_hysteria2_inbounds.json"
 
     mkdir -p "${root}/tmp"
     TMPDIR="${root}/tmp"
@@ -1092,6 +1093,24 @@ JSON
       (.inbounds[0].settings.clients | length) == 2 and
       .inbounds[0].settings.clients[1].email == "sub_new-VLESS_WS"
     ' "${root}/auto-path.json" >/dev/null
+
+    cat >"${singBoxTargetFile}" <<'JSON'
+{"inbounds":[{"users":[{"password":"old-password","name":"sub_existing-singbox_hysteria2"}]}]}
+JSON
+    initSingBoxClients() {
+        jq -n \
+            --argjson clients "${currentClients}" \
+            --arg password "$2" \
+            --arg account "$3" \
+            '$clients + [{password:$password,name:($account + "-singbox_hysteria2")}]'
+    }
+
+    subscriptionSyncAppendProtocolUser 3 "${singBoxTargetFile}" '' new-password sub_new singbox
+    jq -e '
+      (.inbounds[0].users | length) == 2 and
+      .inbounds[0].users[0].name == "sub_existing-singbox_hysteria2" and
+      .inbounds[0].users[1].name == "sub_new-singbox_hysteria2"
+    ' "${singBoxTargetFile}" >/dev/null
 )
 
 runSubscriptionSyncRemoveAccountFromFileRegression() (
