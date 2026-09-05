@@ -351,6 +351,9 @@ singBoxRunning() {
     local mergedConfig
     local systemdServiceFile
     local openRcServiceFile
+    local binary
+    binary=$(coreSingBoxBinaryPath 2>/dev/null || true)
+    [[ -n "${binary}" ]] || return 1
     mergedConfig=$(singBoxMergedConfigFile 2>/dev/null || true)
     systemdServiceFile=${PADM_SINGBOX_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/sing-box.service}
     openRcServiceFile=${PADM_SINGBOX_OPENRC_SERVICE_FILE:-/etc/init.d/sing-box}
@@ -358,13 +361,13 @@ singBoxRunning() {
         [[ -n "${pid}" ]] || continue
         exe=$(padmReadProcExe "/proc/${pid}/exe")
         cmdline=$(padmReadProcCmdline "/proc/${pid}/cmdline")
-        [[ "${cmdline}" == *"/etc/padm/sing-box/sing-box run -c "* ]] || continue
+        [[ "${cmdline}" == *"${binary} run -c "* ]] || continue
         if [[ -z "${mergedConfig}" || "${cmdline}" != *" -c ${mergedConfig}"* ]]; then
             continue
         fi
-        [[ "${exe}" == "/etc/padm/sing-box/sing-box" || "${exe}" == "/etc/padm/sing-box/sing-box (deleted)" ]] || continue
+        [[ "${exe}" == "${binary}" || "${exe}" == "${binary} (deleted)" ]] || continue
         if [[ -n "${systemdServiceFile}" && -f "${systemdServiceFile}" ]] || [[ -n "${openRcServiceFile}" && -f "${openRcServiceFile}" ]]; then
-            [[ "${cmdline}" == *"/etc/padm/sing-box/sing-box run -c ${mergedConfig}"* ]] || continue
+            [[ "${cmdline}" == *"${binary} run -c ${mergedConfig}"* ]] || continue
         fi
         return 0
     done < <(pgrep -x sing-box 2>/dev/null)
@@ -378,9 +381,13 @@ singBoxRunning() {
 }
 
 handleSingBoxMergeFailure() {
+    local binary configDir confDir
+    binary=$(coreSingBoxBinaryPath)
+    configDir=$(singBoxConfigShardDir)
+    confDir=$(singBoxConfigConfDir)
     errorCard "sing-box配置合并失败"
     menuLine "$(uiStyle warn "请手动执行以下命令查看 merge 错误日志：")"
-    menuLine "$(uiStyle value "/etc/padm/sing-box/sing-box merge config.json -C /etc/padm/sing-box/conf/config/ -D /etc/padm/sing-box/conf/")"
+    menuLine "$(uiStyle value "${binary} merge config.json -C ${configDir} -D ${confDir}/")"
     return 1
 }
 
@@ -413,10 +420,10 @@ handleSingBox() {
         else
             errorCard "sing-box启动失败"
             menuLine "$(uiStyle warn "请手动执行以下命令查看 merge 错误日志：")"
-            menuLine "$(uiStyle value "/etc/padm/sing-box/sing-box merge config.json -C /etc/padm/sing-box/conf/config/ -D /etc/padm/sing-box/conf/")"
+            menuLine "$(uiStyle value "$(coreSingBoxBinaryPath) merge config.json -C $(singBoxConfigShardDir) -D $(singBoxConfigConfDir)/")"
             echo
             menuLine "$(uiStyle warn "如 merge 命令没有错误，请手动执行以下命令查看运行日志：")"
-            menuLine "$(uiStyle value "/etc/padm/sing-box/sing-box run -c /etc/padm/sing-box/conf/config.json")"
+            menuLine "$(uiStyle value "$(coreSingBoxBinaryPath) run -c $(singBoxMergedConfigFile)")"
             return 1
         fi
     elif [[ "$1" == "stop" ]]; then

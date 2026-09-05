@@ -3584,12 +3584,13 @@ manageXHTTP() {
 
 # hysteria管理
 manageHysteria() {
-    local hysteria2Status installHysteria2Status
+    local hysteria2Status installHysteria2Status configFile
     while true; do
         hysteria2Status=
         echoContent title "\n┌─ Hysteria2 管理 ───────────────────────────────────"
         menuLine "依赖 sing-box；已有 Xray 时可作为辅助核心增量安装，适合 UDP、移动网络场景"
-        if [[ -n "${singBoxConfigPath}" ]] && [[ -f "/etc/padm/sing-box/conf/config/06_hysteria2_inbounds.json" ]]; then
+        configFile=$(padmManagedFilePath "$(singBoxConfigShardDir)" 06_hysteria2_inbounds.json 2>/dev/null || true)
+        if [[ -n "${singBoxConfigPath}" && -f "${configFile}" ]]; then
             menuItem 1 "重新安装" "重建 Hysteria2 入站配置"
             menuItem 2 "卸载" "移除 Hysteria2 入站配置"
             menuItem 3 "端口跳跃管理" "配置 UDP 端口跳跃转发"
@@ -3620,7 +3621,7 @@ manageHysteria() {
 
 # TUIC 管理
 tuicConfigFile() {
-    echo "/etc/padm/sing-box/conf/config/09_tuic_inbounds.json"
+    padmManagedFilePath "$(singBoxConfigShardDir)" 09_tuic_inbounds.json
 }
 
 tuicSettingsSummary() {
@@ -3648,8 +3649,10 @@ refreshTuicSubscriptions() {
 }
 
 validateTuicConfigUpdate() {
-    [[ -x /etc/padm/sing-box/sing-box ]] || return 0
-    singBoxMergeConfigForValidation /etc/padm/sing-box/sing-box "$(tuicConfigTestLog)"
+    local binary
+    binary=$(coreSingBoxBinaryPath) || return 1
+    [[ -x "${binary}" ]] || return 0
+    singBoxMergeConfigForValidation "${binary}" "$(tuicConfigTestLog)"
 }
 
 tuicConfigTestLog() {
@@ -3772,13 +3775,14 @@ manageTuicAdvanced() {
 }
 
 manageTuic() {
-    local tuicStatus installTuicStatus
+    local tuicStatus installTuicStatus configFile
     while true; do
         tuicStatus=
         echoContent title "\n┌─ Tuic 管理 ────────────────────────────────────────"
         menuLine "依赖 sing-box；已有 Xray 时可作为辅助核心增量安装，适合 UDP、移动网络或 QUIC/HTTP3 客户端场景"
         menuLine "不作为新人默认推荐"
-        if [[ -n "${singBoxConfigPath}" ]] && [[ -f "/etc/padm/sing-box/conf/config/09_tuic_inbounds.json" ]]; then
+        configFile=$(tuicConfigFile 2>/dev/null || true)
+        if [[ -n "${singBoxConfigPath}" && -f "${configFile}" ]]; then
             tuicSettingsSummary
             menuItem 1 "重新安装" "重建 Tuic 入站配置"
             menuItem 2 "卸载" "移除 Tuic 入站配置"

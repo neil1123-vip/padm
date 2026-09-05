@@ -2141,12 +2141,15 @@ installAlpineStartup() {
     padmCreateTempPath tmpFile "$(coreTmpFilePath "padm-${serviceName}.init.XXXXXX")" || return 1
 
     if [[ "${serviceName}" == "sing-box" ]]; then
+        local singBoxBinary singBoxConfig
+        singBoxBinary=$(coreSingBoxBinaryPath)
+        singBoxConfig=$(singBoxMergedConfigFile)
         cat <<EOF >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 #!/sbin/openrc-run
 
 description="sing-box service"
-command="/etc/padm/sing-box/sing-box"
-command_args="run -c /etc/padm/sing-box/conf/config.json"
+command="${singBoxBinary}"
+command_args="run -c ${singBoxConfig}"
 command_background=true
 pidfile="/var/run/sing-box.pid"
 EOF
@@ -2253,7 +2256,7 @@ coreInstallServiceBackupFinalize() {
 # sing-box开机自启
 installSingBoxService() {
     progressCard "$1" "配置 sing-box 开机自启"
-    local execStart='/etc/padm/sing-box/sing-box run -c /etc/padm/sing-box/conf/config.json'
+    local execStart="$(coreSingBoxBinaryPath) run -c $(singBoxMergedConfigFile)"
     local serviceFile=
     local serviceBackupDir=
     local serviceWasEnabled=false
