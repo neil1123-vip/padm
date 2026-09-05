@@ -1273,7 +1273,16 @@ subscriptionSourceSyncSummaryJq() {
     cat <<'EOF'
 (if has("last_sync_changed") then "\n上次同步变更:" + (if .last_sync_changed then "是" else "否" end) else "" end) +
 (if .last_sync_plan? then "\n上次同步计划: 创建\((.last_sync_plan.create // []) | length)，删除\((.last_sync_plan.remove // []) | length)" else "" end) +
-(if .last_sync_error? then "\n上次同步错误:\(.last_sync_error.type) \(.last_sync_error.message)" else "" end)
+(if .last_sync_error? then "\n上次同步错误:\(.last_sync_error.type) \(.last_sync_error.message)" else "" end) +
+(if ((.sync_failure_count // 0) | tonumber? // 0) > 0 then
+    "\n连续失败次数:\(((.sync_failure_count // 0) | tonumber? // 0))"
+  else "" end) +
+(((.sync_circuit_open_until // 0) | tonumber? // 0) as $cooldownUntil |
+  if $cooldownUntil > (now | floor) then
+    "\n冷却状态:冷却中（剩余 \($cooldownUntil - (now | floor)) 秒）"
+  elif $cooldownUntil > 0 then
+    "\n冷却状态:可重试"
+  else "" end)
 EOF
 }
 
