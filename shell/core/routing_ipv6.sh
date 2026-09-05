@@ -184,7 +184,7 @@ showIPv6Routing() {
 
             echoContent yellow "Xray-core："
 
-            jq -r -c '.routing.rules[]|select (.outboundTag=="IPv6_out")|.domain' ${configPath}09_routing.json | jq -r
+            jq '.routing.rules[] | select(.outboundTag == "IPv6_out") | .domain' ${configPath}09_routing.json
 
         elif [[ ! -f "${configPath}09_routing.json" && -f "${configPath}IPv6_out.json" ]]; then
 
@@ -208,7 +208,7 @@ showIPv6Routing() {
 
             echoContent yellow "sing-box"
 
-            jq -r -c '.route.rules[]|select (.outbound=="IPv6_out")' "${singBoxConfigPath}IPv6_route.json" | jq -r
+            jq '.route.rules[] | select(.outbound == "IPv6_out")' "${singBoxConfigPath}IPv6_route.json"
 
         elif [[ ! -f "${singBoxConfigPath}IPv6_route.json" && -f "${singBoxConfigPath}IPv6_out.json" ]]; then
 

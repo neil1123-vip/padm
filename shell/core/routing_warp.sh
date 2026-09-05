@@ -97,7 +97,7 @@ showWireGuardDomain() {
     if [[ "${coreInstallType}" == "1" ]]; then
         if [[ -f "${configPath}09_routing.json" ]]; then
             echoContent yellow "Xray-core"
-            jq -r -c '.routing.rules[]|select (.outboundTag=="wireguard_out_'"${type}"'")|.domain' ${configPath}09_routing.json | jq -r
+            jq '.routing.rules[] | select(.outboundTag == "wireguard_out_'"${type}"'") | .domain' ${configPath}09_routing.json
         elif [[ ! -f "${configPath}09_routing.json" && -f "${configPath}wireguard_out_${type}.json" ]]; then
             echoContent yellow "Xray-core"
             successCard "已设置warp ${type}全局分流"
@@ -109,7 +109,7 @@ showWireGuardDomain() {
     if [[ -n "${singBoxConfigPath}" ]]; then
         if [[ -f "${singBoxConfigPath}wireguard_endpoints_${type}_route.json" ]]; then
             echoContent yellow "sing-box"
-            jq -r -c '.route.rules[]' "${singBoxConfigPath}wireguard_endpoints_${type}_route.json" | jq -r
+            jq '.route.rules[]' "${singBoxConfigPath}wireguard_endpoints_${type}_route.json"
         elif [[ ! -f "${singBoxConfigPath}wireguard_endpoints_${type}_route.json" && -f "${singBoxConfigPath}wireguard_endpoints_${type}.json" ]]; then
             echoContent yellow "sing-box"
             successCard "已设置warp ${type}全局分流"

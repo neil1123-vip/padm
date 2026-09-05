@@ -260,7 +260,7 @@ addSingBoxIPRouteRule() {
     fi
 
     local ipCIDR=[]
-    ipCIDR=$(echo "${ipList}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^cn$/geoip:cn/' | grep -v '^$' | sort -n | uniq | jq -R . | jq -s .) || return 1
+    ipCIDR=$(echo "${ipList}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^cn$/geoip:cn/' | grep -v '^$' | sort -n | uniq | jq -R -s 'split("\n") | map(select(length > 0))') || return 1
 
     local routeAction='"outbound": "'"${outboundTag}"'"'
     if [[ "${outboundTag}" == *block* ]]; then

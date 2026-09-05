@@ -17,7 +17,7 @@ showVlessTcpAccounts() {
     if currentProtocolHas 27; then
 
         subscribeSectionTitle "VLESS TCP TLS Vision" "传统 TLS 兼容方案"
-        jq .inbounds[0].settings.clients//.inbounds[0].users ${configPath}02_VLESS_TCP_inbounds.json | jq -c '.[]' | while read -r user; do
+        jq -c '(.inbounds[0].settings.clients // .inbounds[0].users)[]' ${configPath}02_VLESS_TCP_inbounds.json | while read -r user; do
             local email accountId
             IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
 
@@ -34,7 +34,7 @@ showVlessWsAccounts() {
     if currentProtocolHas 21; then
         subscribeSectionTitle "VLESS WS TLS" "兼容旧客户端，不作为新手推荐"
 
-        jq .inbounds[0].settings.clients//.inbounds[0].users ${configPath}03_VLESS_WS_inbounds.json | jq -c '.[]' | while read -r user; do
+        jq -c '(.inbounds[0].settings.clients // .inbounds[0].users)[]' ${configPath}03_VLESS_WS_inbounds.json | while read -r user; do
             local email accountId
             IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
 
@@ -68,7 +68,7 @@ showTrojanGrpcAccounts() {
     # trojan grpc
     if currentProtocolHas 25; then
         subscribeSectionTitle "Trojan gRPC TLS" "兼容旧客户端，不作为新手推荐"
-        jq .inbounds[0].settings.clients ${configPath}04_trojan_GRPc_inbounds.json | jq -c '.[]' | while read -r user; do
+        jq -c '.inbounds[0].settings.clients[]' ${configPath}04_trojan_GRPc_inbounds.json | while read -r user; do
             local email password
             IFS=$'\037' read -r email _ password _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
             local count=
@@ -95,7 +95,7 @@ showVmessWsAccounts() {
         elif [[ "${coreInstallType}" == "2" ]]; then
             path="${singBoxVMessWSPath}"
         fi
-        jq .inbounds[0].settings.clients//.inbounds[0].users ${configPath}05_VMess_WS_inbounds.json | jq -c '.[]' | while read -r user; do
+        jq -c '(.inbounds[0].settings.clients // .inbounds[0].users)[]' ${configPath}05_VMess_WS_inbounds.json | while read -r user; do
             local email accountId
             IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
 
@@ -128,7 +128,7 @@ showTrojanAccounts() {
     fi
     if [[ -n "${trojanConfigFile}" ]]; then
         subscribeSectionTitle "Trojan TLS" "不推荐"
-        jq .inbounds[0].settings.clients//.inbounds[0].users "${trojanConfigFile}" | jq -c '.[]' | while read -r user; do
+        jq -c '(.inbounds[0].settings.clients // .inbounds[0].users)[]' "${trojanConfigFile}" | while read -r user; do
             local email password
             IFS=$'\037' read -r email _ password _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
             subscribeAccountTitle "${email}"
@@ -142,7 +142,7 @@ showVlessGrpcAccounts() {
     # VLESS grpc
     if currentProtocolHas 24; then
         subscribeSectionTitle "VLESS gRPC TLS" "兼容旧客户端，不作为新手推荐"
-        jq .inbounds[0].settings.clients ${configPath}06_VLESS_GRPc_inbounds.json | jq -c '.[]' | while read -r user; do
+        jq -c '.inbounds[0].settings.clients[]' ${configPath}06_VLESS_GRPc_inbounds.json | while read -r user; do
             local email accountId
             IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
 
@@ -192,7 +192,7 @@ showVlessRealityAccounts() {
     # VLESS Reality Vision
     if currentProtocolHas 1; then
         subscribeSectionTitle "VLESS reality_vision" "推荐"
-        jq .inbounds[1].settings.clients//.inbounds[0].users ${configPath}07_VLESS_vision_reality_inbounds.json | jq -c '.[]' | while read -r user; do
+        jq -c '(.inbounds[1].settings.clients // .inbounds[0].users)[]' ${configPath}07_VLESS_vision_reality_inbounds.json | while read -r user; do
             local email accountId
             IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
 
@@ -231,7 +231,7 @@ showVlessRealityGrpcAccountsFromConfig() {
     local realityGRPCPublicKey=$4
     local realityGRPCMldsa65Verify=$5
     [[ -f "${configFile}" ]] || return 0
-    jq '.inbounds[0].settings.clients // .inbounds[0].users' "${configFile}" | jq -c '.[]' | while read -r user; do
+    jq -c '(.inbounds[0].settings.clients // .inbounds[0].users)[]' "${configFile}" | while read -r user; do
             local email accountId
             IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
 
@@ -330,7 +330,7 @@ showVmessHTTPUpgradeAccounts() {
         if [[ "${coreInstallType}" == "1" && -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json" ]]; then
             configRoot="${singBoxConfigPath}"
         fi
-        jq .inbounds[0].settings.clients//.inbounds[0].users "${configRoot}11_VMess_HTTPUpgrade_inbounds.json" | jq -c '.[]' | while read -r user; do
+        jq -c '(.inbounds[0].settings.clients // .inbounds[0].users)[]' "${configRoot}11_VMess_HTTPUpgrade_inbounds.json" | while read -r user; do
             local email accountId
             IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
 
@@ -357,7 +357,7 @@ showVlessRealityXHTTPAccounts() {
     if currentProtocolHas 2; then
         subscribeSectionTitle "VLESS Reality XHTTP" "CDN推荐"
 
-        jq .inbounds[0].settings.clients//.inbounds[0].users ${configPath}12_VLESS_XHTTP_inbounds.json | jq -c '.[]' | while read -r user; do
+        jq -c '(.inbounds[0].settings.clients // .inbounds[0].users)[]' ${configPath}12_VLESS_XHTTP_inbounds.json | while read -r user; do
             local email accountId
             IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
             echo
