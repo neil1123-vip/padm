@@ -374,8 +374,10 @@ JSON
     [[ ! -e "${singBoxConfigPath}dns.json.tmp" ]]
     coreInstallType=1
     printf '{"dns":{"servers":["custom"]}}\n' >"${configPath}11_dns.json"
+    rm -f "${configPath}dns_routing.state"
     ( removeUnlockDNS ) || return 1
-    jq -e '.dns.servers == ["localhost"]' "${configPath}11_dns.json" >/dev/null
+    jq -e '.dns.servers == ["custom"]' "${configPath}11_dns.json" >/dev/null
+    [[ ! -e "${configPath}dns_routing.state" ]]
     coreInstallType=2
     printf '{"dns":{"servers":["custom"]}}\n' >"${singBoxConfigPath}dns.json"
     ( removeUnlockSNI ) || return 1

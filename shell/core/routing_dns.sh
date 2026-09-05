@@ -76,6 +76,9 @@ dnsRoutingBackupCreate() {
         xrayManagedFile=$(padmManagedFilePath "${xrayConfigDir}" "11_dns.json") || return 1
         backupArgs+=("xray/11_dns.json" "${xrayManagedFile}")
         backupTargets+=("${xrayManagedFile}")
+        xrayManagedFile=$(padmManagedFilePath "${xrayConfigDir}" "dns_routing.state") || return 1
+        backupArgs+=("xray/dns_routing.state" "${xrayManagedFile}")
+        backupTargets+=("${xrayManagedFile}")
     fi
     if [[ -n "${singBoxConfigDir}" ]]; then
         while IFS= read -r singBoxFile; do
@@ -178,8 +181,91 @@ dnsRoutingSafeSingBoxConfigDir() {
     coreSafeConfigDir "${singBoxConfigPath:-}"
 }
 
+dnsRoutingXrayStateFile() {
+    local configDir
+    configDir=$(dnsRoutingSafeXrayConfigDir) || return 1
+    if [[ -n "${PADM_XRAY_DNS_STATE_FILE:-}" ]]; then
+        padmRequireSafeAbsolutePath "${PADM_XRAY_DNS_STATE_FILE}"
+    else
+        printf '%s\n' "${configDir}dns_routing.state"
+    fi
+}
+
 dnsRoutingManagedSingBoxFiles() {
     printf '%s\n' "dns.json" "01_direct_outbound.json"
+}
+
+# 合并 Xray DNS 配置并记录 PADM 所有权。
+updateXrayDNSRoutingConfig() {
+    local operation=${1:-}
+    local patch=${2:-'{}'}
+    local configDir targetPath currentFile=/dev/null statePath stateFile=/dev/null result merged state changed
+    configDir=$(dnsRoutingSafeXrayConfigDir) || return 1
+    targetPath="${configDir}11_dns.json"
+    [[ -f "${targetPath}" ]] && currentFile="${targetPath}"
+    statePath=$(dnsRoutingXrayStateFile) || return 1
+    [[ -f "${statePath}" ]] && stateFile="${statePath}"
+    result=$(jq -s --slurpfile state "${stateFile}" --arg operation "${operation}" --argjson patch "${patch}" '
+        def valid_state:
+            type == "object" and .version == 1 and
+            (.dns | type == "object") and (.sni | type == "object") and
+            (.dns.servers | type == "array") and (.dns.hosts | type == "object") and
+            (.sni.servers | type == "array") and (.sni.hosts | type == "object");
+        def remove_servers($items; $remove):
+            [$items[] as $item | select(any($remove[]?; . == $item) | not) | $item];
+        def remove_hosts($items; $remove):
+            reduce ($remove | keys[]) as $key ($items;
+                if has($key) and .[$key] == $remove[$key] then del(.[$key]) else . end);
+        if ($operation | IN("add-dns", "add-sni", "remove-dns", "remove-sni")) | not then
+            error("invalid Xray DNS operation")
+        else
+            (if length == 1 then .[0] else {} end) as $config |
+            if ($config | type) != "object" then error("Xray DNS config must be an object")
+            elif ($config.dns? // {} | type) != "object" then error("Xray DNS section must be an object")
+            elif (($config.dns.servers? // []) | type) != "array" then error("Xray DNS servers must be an array")
+            elif (($config.dns.hosts? // {}) | type) != "object" then error("Xray DNS hosts must be an object")
+            else
+                ($state | if (length == 1 and (.[0] | valid_state)) then .[0] else null end) as $saved |
+                if ($operation | startswith("remove-")) and $saved == null then
+                    {config:$config, state:null, changed:false}
+                else
+                    ($saved // {version:1, dns:{servers:[],hosts:{}}, sni:{servers:[],hosts:{}}}) as $manifest |
+                    (if $operation | endswith("dns") then "dns" else "sni" end) as $feature |
+                    ($manifest[$feature]) as $old |
+                    ($config.dns // {}) as $dns |
+                    (remove_servers(($dns.servers // []); ($old.servers // []))) as $keptServers |
+                    (remove_hosts(($dns.hosts // {}); ($old.hosts // {}))) as $keptHosts |
+                    if $operation | startswith("remove-") then
+                        ($manifest | .[$feature] = {servers:[],hosts:{}}) as $newManifest |
+                        {config:($config | .dns.servers=$keptServers | .dns.hosts=$keptHosts), state:$newManifest, changed:true}
+                    else
+                        (reduce (($patch.servers // [])[]) as $item
+                            ({servers:$keptServers, added:[]};
+                                if any(.servers[]; . == $item) then .
+                                else .servers += [$item] | .added += [$item] end)) as $serverResult |
+                        (reduce (($patch.hosts // {}) | keys[]) as $key
+                            ({hosts:$keptHosts, added:{}};
+                                ($patch.hosts[$key]) as $value |
+                                if (.hosts | has($key)) then
+                                    if .hosts[$key] == $value then . else error("Xray DNS host conflicts with custom value") end
+                                else .hosts[$key]=$value | .added[$key]=$value end)) as $hostResult |
+                        ($manifest | .[$feature] = {servers:$serverResult.added, hosts:$hostResult.added}) as $newManifest |
+                        {config:($config | .dns.servers=$serverResult.servers | .dns.hosts=$hostResult.hosts), state:$newManifest, changed:true}
+                    end
+                end
+            end
+        end
+    ' "${currentFile}" </dev/null) || return 1
+    changed=$(jq -r '.changed' <<<"${result}") || return 1
+    [[ "${changed}" == true ]] || return 0
+    merged=$(jq -c '.config' <<<"${result}") || return 1
+    state=$(jq -c '.state | if (.dns.servers + (.dns.hosts | to_entries) + .sni.servers + (.sni.hosts | to_entries)) == [] then null else . end' <<<"${result}") || return 1
+    writeRoutingJsonConfig "${targetPath}" <<<"${merged}" || return 1
+    if [[ "${state}" == null ]]; then
+        removeManagedFileIfPresent "${statePath}"
+    else
+        writeRoutingJsonConfig "${statePath}" <<<"${state}" || return 1
+    fi
 }
 
 # DNS/hosts 配置写入
@@ -200,18 +286,9 @@ setUnlockSNI() {
                 matchedRuleValue=$(getDLCMatchedRuleValue "${domain}" "/etc/padm/xray")
                 hosts=$(echo "${hosts}" | jq -r --arg key "${matchedRuleValue}" --arg value "${setSNIP}" '. + {($key):$value}')
             done < <(echo "${xrayDomainList}" | tr ',' '\n')
-            if ! writeRoutingJsonConfig "${configPath}11_dns.json" <<EOF
-{
-    "dns": {
-        "hosts":${hosts},
-        "servers": [
-            "8.8.8.8",
-            "1.1.1.1"
-        ]
-    }
-}
-EOF
-            then
+            local xrayPatch
+            xrayPatch=$(jq -n --argjson hosts "${hosts}" '{servers:["8.8.8.8","1.1.1.1"],hosts:$hosts}') || return 1
+            if ! updateXrayDNSRoutingConfig add-sni "${xrayPatch}"; then
                 errorCard "DNS/hosts 覆盖配置写入失败，已保留旧配置"
                 dnsRoutingAbortChange "DNS/hosts 覆盖配置写入失败"
                 return 1
@@ -251,22 +328,9 @@ addXrayDNSConfig() {
     done < <(echo "${domainList}" | tr ',' '\n')
 
     if [[ "${coreInstallType}" == "1" ]]; then
-
-        if ! writeRoutingJsonConfig "${configPath}11_dns.json" <<EOF
-{
-    "dns": {
-        "servers": [
-            {
-                "address": "${ip}",
-                "port": 53,
-                "domains": ${domains}
-            },
-        "localhost"
-        ]
-    }
-}
-EOF
-        then
+        local xrayPatch
+        xrayPatch=$(jq -n --arg ip "${ip}" --argjson domains "${domains}" '{servers:[{address:$ip,port:53,domains:$domains}],hosts:{}}') || return 1
+        if ! updateXrayDNSRoutingConfig add-dns "${xrayPatch}"; then
             errorCard "DNS 分流配置写入失败，已保留旧配置"
             return 1
         fi
@@ -427,16 +491,9 @@ removeUnlockRoutingConfig() {
     local checkXrayFile=${2:-}
     dnsRoutingBackupCreate || { errorCard "${title}配置备份失败，已取消移除"; return 1; }
     if [[ "${coreInstallType}" == 1 && ( -z "${checkXrayFile}" || -f "${configPath}11_dns.json" ) ]]; then
-        if ! writeRoutingJsonConfig "${configPath}11_dns.json" <<EOF
-{
-	"dns": {
-		"servers": [
-			"localhost"
-		]
-	}
-}
-EOF
-        then
+        local xrayOperation=remove-sni
+        [[ -n "${checkXrayFile}" ]] && xrayOperation=remove-dns
+        if ! updateXrayDNSRoutingConfig "${xrayOperation}"; then
             errorCard "${title}配置移除失败，已保留旧配置"
             dnsRoutingAbortChange "${title}配置移除失败"
             return 1
