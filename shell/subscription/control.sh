@@ -174,6 +174,11 @@ subscriptionRemoteControlRequest() {
     url=$(subscriptionRemoteControlUrl "${source}" "${endpoint}") || return 1
     if [[ "${endpoint}" == "sync" ]]; then
         maxTime=40
+    elif [[ "${endpoint}" == "traffic" ]]; then
+        maxTime=${PADM_REMOTE_TRAFFIC_MAX_TIME:-15}
+        retryDelay=${PADM_REMOTE_TRAFFIC_RETRY_DELAY:-2}
+        [[ "${maxTime}" =~ ^[0-9]+$ ]] || maxTime=15
+        [[ "${retryDelay}" =~ ^[0-9]+$ ]] || retryDelay=2
     elif [[ "${endpoint}" == "refresh" ]]; then
         maxTime=45
     else
