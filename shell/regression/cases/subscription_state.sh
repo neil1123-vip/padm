@@ -2282,6 +2282,11 @@ runSubscriptionGroupsLockTimeoutRegression() (
     : >"${flockLog}"
     PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=9 regressionExpectStatus 1 subscriptionGroupsWithLock true
     grep -Eq '^-w 9 [0-9]+$' "${flockLog}"
+    : >"${flockLog}"
+    PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 \
+        PADM_SUBSCRIPTION_GROUPS_LOCK_SKIP_BUSY=true \
+        regressionExpectStatus 0 subscriptionGroupsWithLock true
+    grep -Eq '^-w 0 [0-9]+$' "${flockLog}"
 )
 
 runSubscriptionGroupSyncUsesStateLockRegression() (

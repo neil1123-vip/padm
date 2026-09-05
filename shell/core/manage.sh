@@ -2670,6 +2670,16 @@ renderSubscribeUserOutputs() {
             padmRemoveCleanupPath "${stageDir}"
             return 1
         fi
+        if [[ "${remoteStageStatus}" -eq 2 && "${localDefaultAvailable}" == "true" ]]; then
+            previousBase=${PADM_SUBSCRIBE_PREVIOUS_DIR:-}
+            if [[ -n "${previousBase}" ]] &&
+                previousBase=$(padmResolveManagedAbsolutePath "${previousBase}") &&
+                [[ -s "${previousBase}/default/${emailMd5}" ]]; then
+                [[ -z "${showStatus}" ]] || statusCard "订阅输出" "${email} 暂无可用被控来源，已保留上一版公网输出"
+                padmRemoveCleanupPath "${stageDir}"
+                return 0
+            fi
+        fi
         if [[ "${remoteStageStatus}" -eq 2 && "${localDefaultAvailable}" != "true" ]]; then
             previousBase=${PADM_SUBSCRIBE_PREVIOUS_DIR:-}
             if [[ -z "${previousBase}" ]] || ! previousBase=$(padmResolveManagedAbsolutePath "${previousBase}") ||

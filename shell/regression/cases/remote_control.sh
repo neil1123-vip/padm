@@ -315,6 +315,10 @@ runRemoteControlInlineRequestHelpersRegression() (
             fi
             [[ "${arg}" == "-H" ]] && expectHeader=true
         done
+        case "${requestMode}" in
+        connection-refused) return 7 ;;
+        timeout) return 28 ;;
+        esac
         [[ "${requestMode}" == "success" ]] || return 1
         case "$*" in
         *'https://control.example/sync'*)
@@ -358,6 +362,13 @@ runRemoteControlInlineRequestHelpersRegression() (
     ! subscriptionRemoteControlRequest "${source}" sync '{"desired_users":[],"dry_run":false}' >/dev/null 2>&1
     [[ "$(wc -l <"${curlArgsLog}" | tr -d ' ')" == "1" ]] || return 1
     [[ "$(wc -l <"${retryLog}" | tr -d ' ')" == "1" ]] || return 1
+
+    requestMode=connection-refused
+    requestResponse=$(subscriptionRemoteSyncPlanForSource "${source}" '{}' true 10.77.0.1 2>/dev/null || true)
+    jq -e '.status == "unreachable" and .error_detail.type == "connection_refused"' <<<"${requestResponse}" >/dev/null || return 1
+    requestMode=timeout
+    requestResponse=$(subscriptionRemoteSyncPlanForSource "${source}" '{}' true 10.77.0.1 2>/dev/null || true)
+    jq -e '.status == "unreachable" and .error_detail.type == "timeout"' <<<"${requestResponse}" >/dev/null || return 1
 
     : >"${curlArgsLog}"
     : >"${retryLog}"

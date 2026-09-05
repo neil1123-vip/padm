@@ -164,6 +164,7 @@ subscriptionRemoteControlRequest() {
     local response
     local statusCode
     local body
+    local requestStatus=1
     token=$(jq -r '.control_token // empty' <<<"${source}") || return 1
     [[ -n "${token}" ]] || return 2
     url=$(subscriptionRemoteControlUrl "${source}" "${endpoint}") || return 1
@@ -190,12 +191,18 @@ subscriptionRemoteControlRequest() {
     if [[ -n "${peerState}" ]]; then
         IFS=$'\t' read -r peerPublicKey baselineEndpoint baselineHandshake <<<"${peerState}"
     fi
-    if ! response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" <<<"${payload}" 2>/dev/null); then
+    if response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" <<<"${payload}" 2>/dev/null); then
+        :
+    else
+        requestStatus=$?
         subscriptionRemoteWireGuardWaitForPeerEndpointFromSource "${source}" "" "" "${baselineEndpoint}" "${baselineHandshake}" "${deadline}" >/dev/null 2>&1 || true
         remainingTime=$((deadline - SECONDS))
-        ((remainingTime > 0)) || return 1
+        ((remainingTime > 0)) || return "${requestStatus}"
         curlArgs[4]="${remainingTime}"
-        response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" <<<"${payload}" 2>/dev/null) || return 1
+        response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" <<<"${payload}" 2>/dev/null) || {
+            requestStatus=$?
+            return "${requestStatus}"
+        }
     fi
     statusCode=${response##*$'\n'}
     body=${response%$'\n'*}
@@ -577,6 +584,10 @@ subscriptionRemoteSyncPlanForSource() {
             requestStatus=$?
             if ((requestStatus == 2)); then
                 jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"missing_token", error_detail:{type:"missing_token", message:"未配置控制 token"}, dry_run:$dryRun, request:$payload}'
+            elif ((requestStatus == 7)); then
+                jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"unreachable", error_detail:{type:"connection_refused", message:"连接被拒绝（目标端口未监听或被防火墙拒绝）"}, dry_run:$dryRun, request:$payload}'
+            elif ((requestStatus == 28)); then
+                jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"unreachable", error_detail:{type:"timeout", message:"连接超时（服务器无响应）"}, dry_run:$dryRun, request:$payload}'
             else
                 jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"unreachable", error_detail:{type:"unreachable", message:"不可达或同步请求失败"}, dry_run:$dryRun, request:$payload}'
             fi
@@ -695,6 +706,7 @@ runSubscriptionRemoteSync() {
     local syncResults
     local status
     local errorMessage
+    local errorType
     local changed
     local plan
     local stateWriteFailed
@@ -814,8 +826,9 @@ runSubscriptionRemoteSync() {
             failureMessages+=("远程服务器源 ${sourceId} 拒绝同步: ${errorMessage}")
             ;;
         unreachable)
+            errorType=$(jq -r '.error_detail.type // "unreachable"' <<<"${sourceResult}") || return 1
             errorMessage=$(jq -r '.error_detail.message // "不可达或同步请求失败"' <<<"${sourceResult}") || return 1
-            setSubscriptionSourceSyncFailure "${sourceId}" unreachable "${errorMessage}" || stateWriteFailed=true
+            setSubscriptionSourceSyncFailure "${sourceId}" "${errorType}" "${errorMessage}" || stateWriteFailed=true
             failureMessages+=("远程服务器源 ${sourceId} 不可达或同步请求失败")
             ;;
         internal_error)

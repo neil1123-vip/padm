@@ -1419,7 +1419,9 @@ runSubscriptionGroupSyncCron() {
     subscriptionRequireLocalPublisherRole || return 1
     enabled=$(subscriptionActiveGroupRead -r '.sync.enabled == true') || return 1
     [[ "${enabled}" == "true" ]] || return 0
-    runSubscriptionGroupSync
+    PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 \
+        PADM_SUBSCRIPTION_GROUPS_LOCK_SKIP_BUSY=true \
+        runSubscriptionGroupSync
 }
 
 subscriptionGroupSyncCronFile() {

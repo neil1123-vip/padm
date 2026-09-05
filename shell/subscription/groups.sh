@@ -54,7 +54,10 @@ subscriptionGroupsWithDirectoryLock() {
                 continue
             fi
         fi
-        ((SECONDS < deadline)) || return 1
+        if ((SECONDS >= deadline)); then
+            [[ "${PADM_SUBSCRIPTION_GROUPS_LOCK_SKIP_BUSY:-false}" == "true" ]] && return 0
+            return 1
+        fi
         sleep 0.1
     done
     printf '%s\n' "${BASHPID:-$$}" >"${lockDir}/pid" || { rmdir -- "${lockDir}" 2>/dev/null || true; return 1; }
@@ -94,6 +97,7 @@ subscriptionGroupsWithLock() {
     chmod 600 "${lockFile}" 2>/dev/null || { exec {lockFd}>&-; return 1; }
     if ! flock -w "${lockTimeout}" "${lockFd}"; then
         exec {lockFd}>&-
+        [[ "${PADM_SUBSCRIPTION_GROUPS_LOCK_SKIP_BUSY:-false}" == "true" ]] && return 0
         return 1
     fi
 

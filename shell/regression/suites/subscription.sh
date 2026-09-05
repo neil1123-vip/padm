@@ -6,6 +6,7 @@ listRegressionSubscriptionOutputChildSelectors() {
         subscription-output-publish-accounts-and-remote-hint \
         subscription-output-partial-remote-sources \
         subscription-output-remote-only-all-failed-restore \
+        subscription-output-mixed-local-remote-all-failed-preserves-previous \
         subscription-output-tls-vless-vmess-trojan \
         subscription-output-tls-any-hysteria-tuic-naive
 }
@@ -81,6 +82,7 @@ registerRegressionFunctionLeaf subscription-output-profile-and-reality runSubscr
 registerRegressionFunctionLeaf subscription-output-publish-accounts-and-remote-hint runSubscriptionOutputPublishAccountsAndRemoteHintRegression
 registerRegressionFunctionLeaf subscription-output-partial-remote-sources runSubscriptionOutputPartialRemoteSourcesRegression
 registerRegressionFunctionLeaf subscription-output-remote-only-all-failed-restore runSubscriptionOutputRemoteOnlyAllFailedRestoreRegression
+registerRegressionFunctionLeaf subscription-output-mixed-local-remote-all-failed-preserves-previous runSubscriptionOutputMixedLocalRemoteAllFailedPreservesPreviousRegression
 registerRegressionFunctionLeaf subscription-output-tls-vless-vmess-trojan runSubscriptionOutputTlsVlessVmessTrojanRegression
 registerRegressionFunctionLeaf subscription-output-tls-any-hysteria-tuic-naive runSubscriptionOutputTlsAnyHysteriaTuicNaiveRegression
 runRegressionSubscriptionSafety() (
