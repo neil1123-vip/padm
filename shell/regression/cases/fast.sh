@@ -4178,10 +4178,10 @@ runSubscriptionAccountPortFallbackRegression() {
         jq() {
             case "$*" in
             *02_VLESS_TCP_inbounds.json*)
-                printf '[{"email":"vless-user","id":"vless-id"}]\n'
+                printf '{"email":"vless-user","id":"vless-id"}\n'
                 ;;
             *28_trojan_TCP_direct_inbounds.json*)
-                printf '[{"email":"trojan-user","password":"trojan-pass"}]\n'
+                printf '{"email":"trojan-user","password":"trojan-pass"}\n'
                 ;;
             *)
                 command jq "$@"
@@ -4207,6 +4207,40 @@ runSubscriptionAccountPortFallbackRegression() {
         grep -qx 'trojan|10990' "${captureLog}"
     )
 }
+
+runDualCoreSharedProtocolDispatchRegression() (
+    set -euo pipefail
+    source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+    source "${PROJECT_ROOT}/shell/subscription/accounts_protocols.sh"
+    local root="${TMP_DIR}/dual-core-shared-protocols" log="${TMP_DIR}/dual-core-shared-protocols.log"
+    mkdir -p "${root}/xray" "${root}/sing-box"
+    : >"${log}"
+    for file in 07_VLESS_vision_reality_inbounds.json 28_trojan_TCP_direct_inbounds.json; do
+        printf '{"inbounds":[]}\n' >"${root}/xray/${file}"
+        printf '{"inbounds":[]}\n' >"${root}/sing-box/${file}"
+    done
+    configPath="${root}/xray/"; singBoxConfigPath="${root}/sing-box/"
+    coreInstallType=1; currentDefaultPort=443; singBoxTrojanPort=24443
+    xrayVLESSRealityVisionPort=443; singBoxVLESSRealityVisionPort=14443
+    currentCDNAddress=example.com; currentPath=padm
+    currentProtocolHas() { [[ "$1" == 1 || "$1" == 28 ]]; }
+    subscribeSectionTitle() { :; }; subscribeAccountTitle() { :; }
+    subscriptionAccountProfile() { printf 'user\037id\037password\037user\037user\037id\n'; }
+    defaultBase64Code() { printf '%s|%s\n' "$1" "$2" >>"${log}"; }
+    realityStreamPublicPortForProtocol() { :; }
+    jq() {
+        case "$*" in
+        *07_VLESS_vision_reality_inbounds.json*) printf '{"email":"user","id":"id"}\n' ;;
+        *28_trojan_TCP_direct_inbounds.json*) printf '{"email":"user","password":"password"}\n' ;;
+        *) command jq "$@" ;;
+        esac
+    }
+    showVlessRealityAccounts; showTrojanAccounts
+    [[ "$(grep -c '^vlessReality|' "${log}")" == 2 ]]
+    [[ "$(grep -c '^trojan|' "${log}")" == 2 ]]
+    grep -qx 'vlessReality|443' "${log}"; grep -qx 'vlessReality|14443' "${log}"
+    grep -qx 'trojan|443' "${log}"; grep -qx 'trojan|24443' "${log}"
+)
 
 runInitSubscribeLocalConfigCleansAllFormatsRegression() {
     (
@@ -5958,6 +5992,7 @@ runRegressionFastOnlyOutputRest() {
         subscription-output-random-user runSubscriptionOutputRandomUserRegression \
         show-accounts-optional-step runShowAccountsOptionalStepRegression \
         subscription-account-port-fallback runSubscriptionAccountPortFallbackRegression \
+        dual-core-shared-protocol-dispatch runDualCoreSharedProtocolDispatchRegression \
         show-accounts-xray-singbox-assist runShowAccountsXrayWithSingBoxAssistRegression \
         xray-vmess-httpupgrade-subscription-path runXrayVmessHTTPUpgradeSubscriptionPathRegression \
         show-accounts-singbox-reality-grpc runShowAccountsSingBoxRealityGrpcRegression \
