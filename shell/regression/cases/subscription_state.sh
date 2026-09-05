@@ -572,6 +572,7 @@ runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
         [[ "${trafficOutput}" == *"限额状态：超限 1 个，接近上限 0 个"* ]]
         [[ "${trafficOutput}" == *"流量更新时间：2026-06-10 10:01:00"* ]]
         subscriptionGroupsStateSummaryJson | jq -e '.traffic_updated_at == "2026-06-10 10:01:00"' >/dev/null
+        subscriptionGroupsStateSummaryJson | jq -e '.traffic_snapshot_age_seconds | type == "number"' >/dev/null
     )
     (
         local trafficReadResult='{"user_groups":[{"id":"team-a","traffic_limit_gb":1}],"traffic":{"user_groups":{"team-a":{"sources":{"main":{"upload":1,"download":2}}}}}}'

@@ -22,7 +22,12 @@ subscriptionGroupsStateSummaryJson() {
           failures: (.sync.failures // []),
           failure_details: (.sync.failure_details // [])
         },
-        traffic_updated_at: (((.traffic.sources // {}) | to_entries | map(.value.updated_at // empty) | max) // "unknown")
+        traffic_updated_at: (((.traffic.sources // {}) | to_entries | map(.value.updated_at // empty) | max) // "unknown"),
+        traffic_snapshot_age_seconds: (((.traffic.sources // {}) | to_entries | map(.value.updated_at // empty) | max) as $stamp |
+          if ($stamp | type) == "string" and ($stamp | length) > 0 then
+            (try ((now | floor) - ($stamp | fromdateiso8601))
+             catch (try ((now | floor) - ($stamp | strptime("%Y-%m-%d %H:%M:%S") | mktime)) catch null))
+          else null end)
       }'
 }
 
@@ -38,7 +43,10 @@ showSubscriptionGroupsStateSummary() {
       "分享订阅：" + ((.subscription_users // 0) | tostring) + " 个，启用 " + ((.enabled_users // 0) | tostring) + " 个\n" +
       "服务器源：" + ((.sources // 0) | tostring) + " 个，启用远端 " + ((.enabled_remote_sources // 0) | tostring) + " 个\n" +
       "同步状态：" + ((.sync.last_status // "pending") | tostring) + "，最近运行 " + ((.sync.last_run // "未运行") | tostring) + "\n" +
-      "流量更新时间：" + ((.traffic_updated_at // "unknown") | tostring)
+      "流量更新时间：" + ((.traffic_updated_at // "unknown") | tostring) +
+      (if (.traffic_snapshot_age_seconds | type) == "number" and .traffic_snapshot_age_seconds >= 0 then
+         "（约 " + ((.traffic_snapshot_age_seconds / 60) | floor | tostring) + " 分钟前）"
+       else "（年龄未知）" end)
     ' <<<"${summaryJson}") || return 1
     showSubscriptionJsonWithSummary "订阅状态摘要" "${summaryJson}" "${summary}"
 }
