@@ -4489,6 +4489,12 @@ runReadInstallTypeKeepsSingBoxShardsRegression() {
         export PADM_SINGBOX_CONFIG_DIR="${singBoxConfigDir}"
 
         readInstallType
+        [[ -z "${coreInstallType}" ]]
+
+        rm -f "${xrayBinary}" "${singBoxBinary}"
+        cp /usr/bin/true "${xrayBinary}"
+        cp /usr/bin/true "${singBoxBinary}"
+        readInstallType
         [[ "${coreInstallType}" == "2" ]]
         [[ "${singBoxConfigPath}" == "${singBoxConfigDir}/" ]]
 
