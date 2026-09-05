@@ -4166,6 +4166,8 @@ runSubscriptionAccountPortFallbackRegression() {
         local root="${TMP_DIR}/subscription-account-port-fallback"
         local captureLog="${root}/capture.log"
         mkdir -p "${root}"
+        mkdir -p "${root}/config"
+        : >"${root}/config/28_trojan_TCP_direct_inbounds.json"
         : >"${captureLog}"
         configPath="${root}/config/"
         currentHost=example.com

@@ -136,6 +136,7 @@ showTrojanAccounts() {
 
 showTrojanAccountsFromConfig() {
     local trojanConfigFile=$1 port=$2
+    [[ -f "${trojanConfigFile}" ]] || return 0
     jq -c '(.inbounds[0].settings.clients // .inbounds[0].users)[]' "${trojanConfigFile}" | while read -r user; do
             local email password
             IFS=$'\037' read -r email _ password _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
