@@ -4166,10 +4166,11 @@ runSubscriptionAccountPortFallbackRegression() {
         local root="${TMP_DIR}/subscription-account-port-fallback"
         local captureLog="${root}/capture.log"
         mkdir -p "${root}"
-        mkdir -p "${root}/config"
+        mkdir -p "${root}/config" "${root}/missing"
         : >"${root}/config/28_trojan_TCP_direct_inbounds.json"
         : >"${captureLog}"
         configPath="${root}/config/"
+        singBoxConfigPath="${root}/missing/"
         currentHost=example.com
         currentProtocolHas() { [[ "$1" == "27" || "$1" == "28" ]]; }
         subscribeSectionTitle() { return 0; }
@@ -4199,6 +4200,7 @@ runSubscriptionAccountPortFallbackRegression() {
         showTrojanAccounts
         grep -qx 'vlesstcp|443' "${captureLog}"
         grep -qx 'trojan|443' "${captureLog}"
+        [[ "$(grep -c '^trojan|' "${captureLog}")" == "1" ]]
 
         : >"${captureLog}"
         coreInstallType=2
