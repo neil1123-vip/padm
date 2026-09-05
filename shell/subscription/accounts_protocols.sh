@@ -204,10 +204,10 @@ showVlessRealityAccounts() {
     fi
 }
 
-showVlessRealityAccountsFromConfig() {
+showVlessRealityAccountsFromConfig() (
+    set -e
     local core=$1 configFile=$2 port=$3
     [[ -f "${configFile}" ]] || return 0
-    local oldCore=${coreInstallType} oldConfig=${configPath}
     coreInstallType=${core}
     configPath="$(dirname -- "${configFile}")/"
     local usersFilter='(.inbounds[1].settings.clients // .inbounds[0].users)[]'
@@ -226,9 +226,7 @@ showVlessRealityAccountsFromConfig() {
             fi
             defaultBase64Code vlessReality "${realityVisionPort}" "${email}" "${accountId}" || return 1
         done
-    coreInstallType=${oldCore}
-    configPath=${oldConfig}
-}
+)
 
 showVlessRealityGrpcAccounts() {
     # VLESS Reality gRPC
