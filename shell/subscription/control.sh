@@ -206,10 +206,12 @@ subscriptionRemoteControlRequest() {
         [[ "${SUBSCRIPTION_SYNC_ROLLBACK:-false}" != "true" ]] || return "${requestStatus}"
         subscriptionRemoteWireGuardWaitForPeerEndpointFromSource "${source}" "" "" "${baselineEndpoint}" "${baselineHandshake}" "${deadline}" >/dev/null 2>&1 || true
         remainingTime=$((deadline - SECONDS))
+        retryJitter=$((RANDOM % 2))
+        ((remainingTime > retryDelay + retryJitter)) || return "${requestStatus}"
+        sleep "$((retryDelay + retryJitter))" || return 1
+        remainingTime=$((deadline - SECONDS))
         ((remainingTime > 0)) || return "${requestStatus}"
         curlArgs[4]="${remainingTime}"
-        retryJitter=$((RANDOM % 2))
-        ((remainingTime > retryDelay + retryJitter)) && sleep "$((retryDelay + retryJitter))"
         response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" <<<"${payload}" 2>/dev/null) || {
             requestStatus=$?
             return "${requestStatus}"
@@ -218,22 +220,23 @@ subscriptionRemoteControlRequest() {
     statusCode=${response##*$'\n'}
     body=${response%$'\n'*}
     if [[ "${SUBSCRIPTION_SYNC_ROLLBACK:-false}" != "true" && ( "${statusCode}" == "429" || "${statusCode}" == "503" ) ]]; then
-        retryAfter=$(jq -r '(.retry_after // .error_detail.retry_after // 0) | tonumber? // 0' <<<"${body}" 2>/dev/null || printf '0')
+        retryAfter=$(jq -r --argjson maxTime "${maxTime}" '[(.retry_after // .error_detail.retry_after // 0 | tonumber? // 0), $maxTime] | min | ceil' <<<"${body}" 2>/dev/null || printf '0')
         [[ "${retryAfter}" =~ ^[0-9]+$ ]] || retryAfter=0
         ((retryAfter > retryDelay)) && retryDelay=${retryAfter}
         remainingTime=$((deadline - SECONDS))
-        if ((remainingTime > retryDelay)); then
-            retryJitter=$((RANDOM % 2))
-            ((remainingTime > retryDelay + retryJitter)) && sleep "$((retryDelay + retryJitter))"
+        retryJitter=$((RANDOM % 2))
+        if ((remainingTime > retryDelay + retryJitter)); then
+            sleep "$((retryDelay + retryJitter))" || return 1
             remainingTime=$((deadline - SECONDS))
-            ((remainingTime > 0)) || return 0
-            curlArgs[4]="${remainingTime}"
-            response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" <<<"${payload}" 2>/dev/null) || {
-                requestStatus=$?
-                return "${requestStatus}"
-            }
-            statusCode=${response##*$'\n'}
-            body=${response%$'\n'*}
+            if ((remainingTime > 0)); then
+                curlArgs[4]="${remainingTime}"
+                response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" <<<"${payload}" 2>/dev/null) || {
+                    requestStatus=$?
+                    return "${requestStatus}"
+                }
+                statusCode=${response##*$'\n'}
+                body=${response%$'\n'*}
+            fi
         fi
     fi
     if ! body=$(jq -c . <<<"${body}" 2>/dev/null); then
@@ -644,7 +647,7 @@ subscriptionRemoteSyncPlanForSource() {
     sourceId=$(jq -r '.id' <<<"${source}")
     payload=$(subscriptionRemoteControlPayload "${source}" "${dryRun}" "${desiredUsersBySource}" "${sourceId}") || return 1
     circuitOpenUntil=$(jq -r '(.sync_circuit_open_until // 0) | tonumber? // 0' <<<"${source}") || return 1
-    if [[ "${circuitOpenUntil}" =~ ^[0-9]+$ ]] && ((circuitOpenUntil > $(date +%s))); then
+    if [[ "${SUBSCRIPTION_SYNC_ROLLBACK:-false}" != "true" && "${circuitOpenUntil}" =~ ^[0-9]+$ ]] && ((circuitOpenUntil > $(date +%s))); then
         jq -n --arg sourceId "${sourceId}" --argjson circuitUntil "${circuitOpenUntil}" --argjson dryRun "${dryRun}" --argjson payload "${payload}" \
             '{source_id:$sourceId, status:"circuit_open", error_detail:{type:"circuit_open", message:("来源冷却中，预计 " + ($circuitUntil | tostring) + " 后重试")}, dry_run:$dryRun, request:$payload}'
         return 0
@@ -707,6 +710,8 @@ subscriptionRemoteApplyDesiredUsersForSource() {
       has($sourceId) and
       (.[$sourceId] | type == "array")
     ' <<<"${desiredUsersBySource}" >/dev/null 2>&1 || return 1
+    # Explicit drain/restore operations must not be blocked by scheduled-sync backoff.
+    source=$(jq -c 'del(.sync_circuit_open_until)' <<<"${source}") || return 1
     result=$(subscriptionRemoteSyncPlanForSource "${source}" "${desiredUsersBySource}" false) || {
         SUBSCRIPTION_REMOTE_SOURCE_ERROR="远程服务器源 ${sourceId} 用户同步请求失败"
         return 1

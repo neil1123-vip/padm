@@ -404,6 +404,16 @@ runSubscriptionGroupStateStructureSourceStatusRegression() {
         setSubscriptionSourceSyncFailure missing unreachable error >/dev/null 2>&1; then
         return 1
     fi
+    setSubscriptionSourceSyncFailure edge unreachable first-error
+    jq -e '
+      (.sources[] | select(.id == "edge") | .sync_failure_count) == 1 and
+      (.sources[] | select(.id == "edge") | .sync_circuit_open_until) > 0 and
+      (.sources[] | select(.id == "main") | has("sync_failure_count") | not)
+    ' "$(subscriptionGroupsFile)" >/dev/null || return 1
+    setSubscriptionSourceSyncFailure edge unreachable second-error
+    jq -e '(.sources[] | select(.id == "edge") | .sync_failure_count) == 2' "$(subscriptionGroupsFile)" >/dev/null || return 1
+    setSubscriptionSourceSyncStatus edge success true '{"create":[],"remove":[]}'
+    jq -e 'any(.sources[]; .id == "edge" and .sync_failure_count == 0 and (has("sync_circuit_open_until") | not) and .sync_status == "success")' "$(subscriptionGroupsFile)" >/dev/null || return 1
 }
 
 runSubscriptionGroupStateStructureSyncCronRegression() {

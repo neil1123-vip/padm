@@ -377,6 +377,62 @@ runRemoteControlInlineRequestHelpersRegression() (
     [[ "$(wc -l <"${curlArgsLog}" | tr -d ' ')" == "1" ]] || return 1
     [[ "$(wc -l <"${retryLog}" | tr -d ' ')" == "1" ]] || return 1
 
+    (
+        local retryCountFile="${TMP_DIR}/remote-control-retry-count"
+        local retrySleepFile="${TMP_DIR}/remote-control-retry-sleep"
+        local retryMode=retry
+        local retryResponse
+        : >"${retryCountFile}"
+        : >"${retrySleepFile}"
+        subscriptionRemoteWireGuardPeerStateFromSource() { return 1; }
+        subscriptionRemoteControlCurl() {
+            local count=0
+            [[ -s "${retryCountFile}" ]] && count=$(<"${retryCountFile}")
+            count=$((count + 1))
+            printf '%s' "${count}" >"${retryCountFile}"
+            case "${retryMode}:${count}" in
+            retry:1) printf '{"ok":false,"error":"busy","retry_after":3}\n429' ;;
+            retry:2) printf '{"ok":true,"dry_run":false,"changed":false,"plan":{"create":[],"remove":[]}}\n200' ;;
+            insufficient:1) printf '{"ok":false,"error":"busy","retry_after":40}\n503' ;;
+            oversized:1) printf '{"ok":false,"error":"busy","retry_after":999999}\n503' ;;
+            rollback:1) printf '{"ok":false,"error":"busy","retry_after":3}\n503' ;;
+            *) return 1 ;;
+            esac
+        }
+        sleep() {
+            printf '%s\n' "$1" >>"${retrySleepFile}"
+            SECONDS=$((SECONDS + $1))
+        }
+        SECONDS=0
+        retryResponse=$(subscriptionRemoteControlRequest "${source}" sync '{}' 2>/dev/null) || return 1
+        [[ "${retryResponse}" == *'"ok":true'* ]] || return 1
+        [[ "$(<"${retryCountFile}")" == "2" ]] || return 1
+        [[ "$(wc -l <"${retrySleepFile}" | tr -d ' ')" == "1" ]] || return 1
+
+        : >"${retryCountFile}"
+        : >"${retrySleepFile}"
+        retryMode=insufficient
+        SECONDS=0
+        retryResponse=$(subscriptionRemoteControlRequest "${source}" sync '{}' 2>/dev/null) || return 1
+        [[ "${retryResponse}" == *'"http_status":503'* ]] || return 1
+        [[ "$(<"${retryCountFile}")" == "1" ]] || return 1
+        [[ ! -s "${retrySleepFile}" ]] || return 1
+
+        : >"${retryCountFile}"
+        retryMode=oversized
+        SECONDS=0
+        retryResponse=$(subscriptionRemoteControlRequest "${source}" sync '{}' 2>/dev/null) || return 1
+        [[ "${retryResponse}" == *'"http_status":503'* ]] || return 1
+        [[ "$(<"${retryCountFile}")" == "1" ]] || return 1
+
+        : >"${retryCountFile}"
+        retryMode=rollback
+        SECONDS=0
+        retryResponse=$(SUBSCRIPTION_SYNC_ROLLBACK=true subscriptionRemoteControlRequest "${source}" sync '{}' 2>/dev/null) || return 1
+        [[ "${retryResponse}" == *'"http_status":503'* ]] || return 1
+        [[ "$(<"${retryCountFile}")" == "1" ]] || return 1
+    ) || return 1
+
     while IFS= read -r headerFile; do
         [[ -n "${headerFile}" ]] || continue
         [[ ! -e "${headerFile}" ]] || return 1
