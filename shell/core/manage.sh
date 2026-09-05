@@ -2449,6 +2449,7 @@ renderAllSubscribeUserOutputs() {
     local publishAccounts=
     local existingMd5s='[]'
     local remoteScopeEnabled=false
+    local currentDomain=
 
     subscriptionRemoteScopeEnabled && remoteScopeEnabled=true
 
@@ -2486,24 +2487,23 @@ renderAllSubscribeUserOutputs() {
         return 0
     fi
 
+    currentDomain=$(resolveSubscribePublicDomain)
+    if [[ -z "${currentDomain}" ]]; then
+        errorCard "订阅地址生成失败" "未读取到订阅服务域名，请进入 我的订阅 检查 HTTPS 发布入口配置"
+        return 1
+    fi
+    if [[ -n "${currentDefaultPort}" && "${currentDefaultPort}" != "443" && -z "${subscribePortLocal}" ]]; then
+        currentDomain="${currentDomain}:${currentDefaultPort}"
+    fi
+    if [[ -n "${subscribePortLocal}" ]]; then
+        currentDomain="${currentDomain}:${subscribePortLocal}"
+    fi
+
     while IFS= read -r email; do
         [[ -n "${email}" ]] || continue
         emailMd5=$(printf '%s\n' "${email}${subscribeSalt}" | md5sum | awk '{print $1}')
         existingMd5s=$(jq --arg md5 "${emailMd5}" '. + [$md5]' <<<"${existingMd5s}") || return 1
         echoContent title "\n┌─ 订阅输出 ─────────────────────────────────────────"
-        currentDomain=$(resolveSubscribePublicDomain)
-        if [[ -z "${currentDomain}" ]]; then
-            errorCard "订阅地址生成失败" "未读取到订阅服务域名，请进入 我的订阅 检查 HTTPS 发布入口配置"
-            return 1
-        fi
-
-        if [[ -n "${currentDefaultPort}" && "${currentDefaultPort}" != "443" && -z "${subscribePortLocal}" ]]; then
-            currentDomain="${currentDomain}:${currentDefaultPort}"
-        fi
-        if [[ -n "${subscribePortLocal}" ]]; then
-            currentDomain="${currentDomain}:${subscribePort}"
-        fi
-
         if ! renderSubscribeUserOutputs "${email}" "${emailMd5}" "${currentDomain}" "${updateOtherSubscribeStatus:-}" "${showStatus}" "${remoteSnapshots}"; then
             errorCard "${SUBSCRIBE_USER_OUTPUT_ERROR:-订阅生成失败，已保留旧订阅输出}"
             return 1

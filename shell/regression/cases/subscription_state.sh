@@ -1351,6 +1351,8 @@ runSubscriptionMutationSyncRollbackRegression() (
     subscriptionGroupSyncEnabled() { return 0; }
     runSubscriptionGroupSync() {
         TEST_SYNC_CALLS=$((TEST_SYNC_CALLS + 1))
+        [[ "${TEST_SYNC_CALLS}" == "1" ]] || [[ "${SUBSCRIPTION_SYNC_ROLLBACK:-false}" == "true" ]] || return 1
+        [[ "${TEST_SYNC_CALLS}" != "1" ]] || return 1
         [[ "${TEST_SYNC_CALLS}" -gt 1 ]]
     }
     subscriptionGroupsStateWrite() { TEST_SYNC_STATE_RESTORED=true; }
@@ -1377,6 +1379,7 @@ runSubscriptionMutationSyncRollbackLocalRestoreRegression() (
     TEST_CONFIG_RESTORED=false
     TEST_OUTPUT_RESTORED=false
     TEST_SERVICES_RECONCILED=false
+    TEST_ROLLBACK_MARKED=false
     subscriptionGroupSyncEnabled() { return 0; }
     runSubscriptionGroupSync() {
         TEST_SYNC_CALLS=$((TEST_SYNC_CALLS + 1))
@@ -1396,6 +1399,7 @@ runSubscriptionMutationSyncRollbackLocalRestoreRegression() (
     subscriptionSyncRestoreSubscribeOutputBackups() { cp "${testOutputBackupDir}/output" "${outputFile}"; TEST_OUTPUT_RESTORED=true; }
     subscriptionSyncReconcileLocalServices() { TEST_SERVICES_RECONCILED=true; }
     subscriptionSyncReleaseLocalApplyBackups() { releaseMode=$1; }
+    subscriptionSyncMarkResult() { TEST_ROLLBACK_MARKED=true; }
     statusCard() { :; }
     warnCard() { :; }
 
@@ -1408,6 +1412,7 @@ runSubscriptionMutationSyncRollbackLocalRestoreRegression() (
     [[ "${TEST_OUTPUT_RESTORED}" == "true" ]]
     [[ "${TEST_SERVICES_RECONCILED}" == "true" ]]
     [[ "${releaseMode}" == "remove" ]]
+    [[ "${TEST_ROLLBACK_MARKED}" == "true" ]]
     [[ "$(<"${configFile}")" == "old-config" ]]
     [[ "$(<"${outputFile}")" == "old-output" ]]
 )

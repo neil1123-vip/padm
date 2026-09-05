@@ -192,7 +192,7 @@ runSubscriptionSyncAfterMutation() {
             restoreState=false
         fi
         if [[ "${restoreState}" == "true" ]]; then
-            if runSubscriptionGroupSync; then
+            if SUBSCRIPTION_SYNC_ROLLBACK=true runSubscriptionGroupSync; then
                 subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
                 warnCard "变更未完成" "后置完整同步失败，已恢复变更前状态并完成回滚同步（${reason}）"
             else
@@ -210,9 +210,11 @@ runSubscriptionSyncAfterMutation() {
                 fi
                 if [[ "${rollbackStateRestored}" == "true" && "${configRestored}" == "true" && "${outputRestored}" == "true" && "${servicesRestored}" == "true" ]]; then
                     subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
+                    subscriptionSyncMarkResult partial '["回滚同步失败，远程服务器可能仍未恢复"]' >/dev/null 2>&1 || true
                     warnCard "变更未完成" "后置完整同步失败，已恢复变更前状态、本机配置和订阅输出，但回滚同步仍失败（${reason}）"
                 else
                     subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}" "${outputBackupDir}"
+                    subscriptionSyncMarkResult partial '["回滚同步失败，变更前状态或本机恢复未完全确认"]' >/dev/null 2>&1 || true
                     restoreMessage="${reason}后回滚同步失败"
                     if [[ "${rollbackStateRestored}" != "true" ]]; then
                         subscriptionSyncSetManualCheckMessage restoreDetail "订阅状态恢复失败" "$(subscriptionGroupsFile)"

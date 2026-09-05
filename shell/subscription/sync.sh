@@ -1186,7 +1186,9 @@ runSubscriptionGroupSyncUnlocked() {
             localSyncWorkRequired=true
         fi
     fi
-    subscriptionGroupQuotaAutoApplyEnabled && quotaAutoApply=true
+    if [[ "${SUBSCRIPTION_SYNC_ROLLBACK:-false}" != "true" ]] && subscriptionGroupQuotaAutoApplyEnabled; then
+        quotaAutoApply=true
+    fi
 
     if [[ "${localSyncWorkRequired}" == "true" || "${quotaAutoApply}" == "true" ]] && subscriptionLocalTrafficBaselineExists; then
         localTrafficBaseline=true
@@ -1337,7 +1339,11 @@ runSubscriptionGroupSyncUnlocked() {
 
     if [[ "${localSyncReady}" == "true" && "${remoteSyncRequired}" == "true" ]]; then
         postSyncTrafficRequired=true
-        statusCard "订阅同步" "正在等待被控服务器同步响应" "单台请求最长 40 秒（含重试），多个服务器并行执行"
+        if [[ "${SUBSCRIPTION_SYNC_ROLLBACK:-false}" == "true" ]]; then
+            statusCard "订阅同步" "正在执行回滚同步" "单台请求最长 15 秒，不重复等待 WireGuard 握手，多个服务器并行执行"
+        else
+            statusCard "订阅同步" "正在等待被控服务器同步响应" "单台请求最长 40 秒（含重试），多个服务器并行执行"
+        fi
         remoteResultFields=()
         if ! remoteSyncResult=$(runSubscriptionRemoteSync "${remoteSources}") ||
             ! mapfile -d '' -t remoteResultFields < <(

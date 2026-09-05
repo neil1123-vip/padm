@@ -158,6 +158,7 @@ subscriptionRemoteControlRequest() {
     local token
     local url
     local maxTime
+    local connectTimeout=5
     local deadline
     local remainingTime
     local -a curlArgs=()
@@ -175,10 +176,14 @@ subscriptionRemoteControlRequest() {
     else
         maxTime=15
     fi
+    if [[ "${SUBSCRIPTION_SYNC_ROLLBACK:-false}" == "true" ]]; then
+        connectTimeout=2
+        maxTime=15
+    fi
     deadline=$((SECONDS + maxTime))
     curlArgs=(
         -sS
-        --connect-timeout 5
+        --connect-timeout "${connectTimeout}"
         --max-time "${maxTime}"
         --max-filesize 1048576
         -H "Content-Type: application/json"
@@ -195,6 +200,7 @@ subscriptionRemoteControlRequest() {
         :
     else
         requestStatus=$?
+        [[ "${SUBSCRIPTION_SYNC_ROLLBACK:-false}" != "true" ]] || return "${requestStatus}"
         subscriptionRemoteWireGuardWaitForPeerEndpointFromSource "${source}" "" "" "${baselineEndpoint}" "${baselineHandshake}" "${deadline}" >/dev/null 2>&1 || true
         remainingTime=$((deadline - SECONDS))
         ((remainingTime > 0)) || return "${requestStatus}"
@@ -290,6 +296,41 @@ subscriptionRemoteResponseErrorMessage() {
     printf '%s\n' "${errorMessage}"
 }
 
+subscriptionRemoteResponseErrorType() {
+    jq -r --arg statusCode "${2:-}" '
+      (($statusCode | tonumber?) // (.http_status? | tonumber?) // 0) as $status |
+      if $status >= 400 and $status < 500 then "http_4xx"
+      elif $status >= 500 and $status < 600 then "http_5xx"
+      else (.error_detail.type? | select(type == "string" and length > 0)) // "remote_error"
+      end
+    ' <<<"$1"
+}
+
+subscriptionRemoteTransportErrorDetail() {
+    local source=$1
+    local requestStatus=$2
+    local errorType=unreachable
+    local message="不可达或请求失败"
+    local peerState handshake now
+    case "${requestStatus}" in
+    7) errorType=connection_refused; message="连接被拒绝（目标端口未监听或被防火墙拒绝）" ;;
+    28) errorType=timeout; message="连接超时（服务器无响应）" ;;
+    esac
+    if [[ "${requestStatus}" == "7" || "${requestStatus}" == "28" ]]; then
+        peerState=$(subscriptionRemoteWireGuardPeerStateFromSource "${source}" 2>/dev/null || true)
+        handshake=${peerState##*$'\t'}
+        # A curl failure alone does not establish a WireGuard handshake failure.
+        if [[ -n "${peerState}" && "${handshake}" =~ ^[0-9]+$ ]]; then
+            now=$(date +%s) || return 1
+            if ((handshake == 0 || now - handshake > 180)); then
+                errorType=wireguard_handshake_timeout
+                message="WireGuard 握手未建立或已过期，请检查隧道连通性"
+            fi
+        fi
+    fi
+    jq -cn --arg type "${errorType}" --arg message "${message}" '{type:$type, message:$message}'
+}
+
 subscriptionRemoteControlHealth() {
     local source=$1
     local token
@@ -305,6 +346,8 @@ subscriptionRemoteControlHealth() {
     local body
     local validatedBody
     local errorMessage
+    local errorType errorDetail requestStatus
+    local connectTimeout=5
     local deadline
     local remainingTime
     local -a sourceFields=()
@@ -328,25 +371,33 @@ subscriptionRemoteControlHealth() {
         IFS=$'\t' read -r peerPublicKey baselineEndpoint baselineHandshake <<<"${peerState}"
     fi
     url=$(subscriptionRemoteControlUrl "${source}" health) || return 1
+    [[ "${SUBSCRIPTION_SYNC_ROLLBACK:-false}" != "true" ]] || connectTimeout=2
     deadline=$((SECONDS + 15))
     curlArgs=(
         -sS
-        --connect-timeout 5
+        --connect-timeout "${connectTimeout}"
         --max-time 15
         --max-filesize 1048576
         -w '\n%{http_code}'
         "${url}"
     )
     response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" 2>/dev/null) || {
-        subscriptionRemoteWireGuardWaitForPeerEndpointFromSource "${source}" "" "" "${baselineEndpoint}" "${baselineHandshake}" "${deadline}" >/dev/null 2>&1 || true
-        remainingTime=$((deadline - SECONDS))
+        requestStatus=$?
+        remainingTime=0
+        if [[ "${SUBSCRIPTION_SYNC_ROLLBACK:-false}" != "true" ]]; then
+            subscriptionRemoteWireGuardWaitForPeerEndpointFromSource "${source}" "" "" "${baselineEndpoint}" "${baselineHandshake}" "${deadline}" >/dev/null 2>&1 || true
+            remainingTime=$((deadline - SECONDS))
+        fi
         if ((remainingTime <= 0)); then
-            jq -n --argjson sourceMeta "${sourceMeta}" '{id:$sourceMeta.id, name:$sourceMeta.name, ok:false, status:"unreachable", error_detail:{type:"unreachable", message:"不可达或健康检查失败"}}'
+            errorDetail=$(subscriptionRemoteTransportErrorDetail "${source}" "${requestStatus}") || return 1
+            jq -n --argjson sourceMeta "${sourceMeta}" --argjson detail "${errorDetail}" '{id:$sourceMeta.id, name:$sourceMeta.name, ok:false, status:"unreachable", error_detail:$detail}'
             return 0
         fi
         curlArgs[4]="${remainingTime}"
         response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" 2>/dev/null) || {
-            jq -n --argjson sourceMeta "${sourceMeta}" '{id:$sourceMeta.id, name:$sourceMeta.name, ok:false, status:"unreachable", error_detail:{type:"unreachable", message:"不可达或健康检查失败"}}'
+            requestStatus=$?
+            errorDetail=$(subscriptionRemoteTransportErrorDetail "${source}" "${requestStatus}") || return 1
+            jq -n --argjson sourceMeta "${sourceMeta}" --argjson detail "${errorDetail}" '{id:$sourceMeta.id, name:$sourceMeta.name, ok:false, status:"unreachable", error_detail:$detail}'
             return 0
         }
     }
@@ -366,11 +417,13 @@ subscriptionRemoteControlHealth() {
     fi
     if jq -c . <<<"${body}" >/dev/null 2>&1; then
         errorMessage=$(subscriptionRemoteResponseErrorMessage "${body}")
+        errorType=$(subscriptionRemoteResponseErrorType "${body}" "${statusCode}") || return 1
         [[ -n "${statusCode}" && "${statusCode}" != "null" ]] && errorMessage="${errorMessage} (HTTP ${statusCode})"
-        jq -n --argjson sourceMeta "${sourceMeta}" --arg statusCode "${statusCode}" --arg errorMessage "${errorMessage}" '{id:$sourceMeta.id, name:$sourceMeta.name, ok:false, status:"remote_error", status_code:$statusCode, error:$errorMessage, error_detail:{type:"remote_error", message:$errorMessage}}'
+        jq -n --argjson sourceMeta "${sourceMeta}" --arg statusCode "${statusCode}" --arg errorMessage "${errorMessage}" --arg errorType "${errorType}" '{id:$sourceMeta.id, name:$sourceMeta.name, ok:false, status:"remote_error", status_code:$statusCode, error:$errorMessage, error_detail:{type:$errorType, message:$errorMessage}}'
         return 0
     fi
-    jq -n --argjson sourceMeta "${sourceMeta}" --arg statusCode "${statusCode}" '{id:$sourceMeta.id, name:$sourceMeta.name, ok:false, status:"remote_error", status_code:$statusCode}'
+    errorType=$(subscriptionRemoteResponseErrorType '{"error_detail":{"type":"invalid_response"}}' "${statusCode}") || return 1
+    jq -n --argjson sourceMeta "${sourceMeta}" --arg statusCode "${statusCode}" --arg errorType "${errorType}" '{id:$sourceMeta.id, name:$sourceMeta.name, ok:false, status:"remote_error", status_code:$statusCode, error_detail:{type:$errorType, message:("远端响应不是合法 JSON (HTTP " + $statusCode + ")")}}'
 }
 
 subscriptionRemoteHealthInternalErrorResult() {
@@ -387,6 +440,7 @@ subscriptionRemoteTrafficForSource() {
     local response
     local responseStatus
     local requestStatus
+    local errorType errorDetail
     sourceId=$(jq -r '.id // empty' <<<"${source}") || return 1
     [[ -n "${sourceId}" ]] || return 1
     if subscriptionRemoteSourceSelfReference "$@"; then
@@ -409,8 +463,9 @@ subscriptionRemoteTrafficForSource() {
             jq -n --arg sourceId "${sourceId}" --argjson response "${response}" \
                 '{source_id:$sourceId, status:"remote_error", error_detail:{type:"invalid_response", message:"远端流量响应格式无效"}, response:$response}'
         else
-            jq -n --arg sourceId "${sourceId}" --arg message "$(subscriptionRemoteResponseErrorMessage "${response}")" --argjson response "${response}" \
-                '{source_id:$sourceId, status:"remote_error", error_detail:{type:"remote_error", message:$message}, response:$response}'
+            errorType=$(subscriptionRemoteResponseErrorType "${response}") || return 1
+            jq -n --arg sourceId "${sourceId}" --arg message "$(subscriptionRemoteResponseErrorMessage "${response}")" --argjson response "${response}" --arg errorType "${errorType}" \
+                '{source_id:$sourceId, status:"remote_error", error_detail:{type:$errorType, message:$message}, response:$response}'
         fi
     else
         requestStatus=$?
@@ -418,8 +473,9 @@ subscriptionRemoteTrafficForSource() {
             jq -n --arg sourceId "${sourceId}" \
                 '{source_id:$sourceId, status:"missing_token", error_detail:{type:"missing_token", message:"未配置控制 token"}}'
         else
-            jq -n --arg sourceId "${sourceId}" \
-                '{source_id:$sourceId, status:"unreachable", error_detail:{type:"unreachable", message:"不可达或流量请求失败"}}'
+            errorDetail=$(subscriptionRemoteTransportErrorDetail "${source}" "${requestStatus}") || return 1
+            jq -n --arg sourceId "${sourceId}" --argjson detail "${errorDetail}" \
+                '{source_id:$sourceId, status:"unreachable", error_detail:$detail}'
         fi
     fi
 }
@@ -545,6 +601,7 @@ subscriptionRemoteSyncPlanForSource() {
     local responseChanged
     local responsePlan
     local errorMessage
+    local errorType errorDetail
     local requestStatus
     local -a selfReferenceArgs=()
 
@@ -578,18 +635,16 @@ subscriptionRemoteSyncPlanForSource() {
                 jq -n --arg sourceId "${sourceId}" --arg errorMessage "${errorMessage}" --argjson payload "${payload}" --argjson response "${response}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"remote_error", error:$errorMessage, error_detail:{type:"invalid_response", message:$errorMessage}, dry_run:$dryRun, request:$payload, response:$response}'
             else
                 errorMessage=$(subscriptionRemoteResponseErrorMessage "${response}")
-                jq -n --arg sourceId "${sourceId}" --arg errorMessage "${errorMessage}" --argjson payload "${payload}" --argjson response "${response}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"remote_error", error:$errorMessage, error_detail:{type:"remote_error", message:$errorMessage}, dry_run:$dryRun, request:$payload, response:$response}'
+                errorType=$(subscriptionRemoteResponseErrorType "${response}") || return 1
+                jq -n --arg sourceId "${sourceId}" --arg errorMessage "${errorMessage}" --argjson payload "${payload}" --argjson response "${response}" --argjson dryRun "${dryRun}" --arg errorType "${errorType}" '{source_id:$sourceId, status:"remote_error", error:$errorMessage, error_detail:{type:$errorType, message:$errorMessage}, dry_run:$dryRun, request:$payload, response:$response}'
             fi
         else
             requestStatus=$?
             if ((requestStatus == 2)); then
                 jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"missing_token", error_detail:{type:"missing_token", message:"未配置控制 token"}, dry_run:$dryRun, request:$payload}'
-            elif ((requestStatus == 7)); then
-                jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"unreachable", error_detail:{type:"connection_refused", message:"连接被拒绝（目标端口未监听或被防火墙拒绝）"}, dry_run:$dryRun, request:$payload}'
-            elif ((requestStatus == 28)); then
-                jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"unreachable", error_detail:{type:"timeout", message:"连接超时（服务器无响应）"}, dry_run:$dryRun, request:$payload}'
             else
-                jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"unreachable", error_detail:{type:"unreachable", message:"不可达或同步请求失败"}, dry_run:$dryRun, request:$payload}'
+                errorDetail=$(subscriptionRemoteTransportErrorDetail "${source}" "${requestStatus}") || return 1
+                jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" --argjson dryRun "${dryRun}" --argjson detail "${errorDetail}" '{source_id:$sourceId, status:"unreachable", error_detail:$detail, dry_run:$dryRun, request:$payload}'
             fi
         fi
     fi
@@ -821,15 +876,16 @@ runSubscriptionRemoteSync() {
             fi
             ;;
         remote_error)
+            errorType=$(jq -r '.error_detail.type // "remote_error"' <<<"${sourceResult}") || return 1
             errorMessage=$(jq -r 'if ((.error_detail.message // "") | length) > 0 then .error_detail.message else (.error // "unknown_error") end' <<<"${sourceResult}") || return 1
-            setSubscriptionSourceSyncFailure "${sourceId}" remote_error "${errorMessage}" || stateWriteFailed=true
+            setSubscriptionSourceSyncFailure "${sourceId}" "${errorType}" "${errorMessage}" || stateWriteFailed=true
             failureMessages+=("远程服务器源 ${sourceId} 拒绝同步: ${errorMessage}")
             ;;
         unreachable)
             errorType=$(jq -r '.error_detail.type // "unreachable"' <<<"${sourceResult}") || return 1
             errorMessage=$(jq -r '.error_detail.message // "不可达或同步请求失败"' <<<"${sourceResult}") || return 1
             setSubscriptionSourceSyncFailure "${sourceId}" "${errorType}" "${errorMessage}" || stateWriteFailed=true
-            failureMessages+=("远程服务器源 ${sourceId} 不可达或同步请求失败")
+            failureMessages+=("远程服务器源 ${sourceId} 不可达或同步请求失败: ${errorMessage}")
             ;;
         internal_error)
             errorMessage=$(jq -r '.error_detail.message // "远程同步结果生成失败"' <<<"${sourceResult}") || return 1
