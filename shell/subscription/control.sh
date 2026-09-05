@@ -647,7 +647,7 @@ subscriptionRemoteSyncPlanForSource() {
     sourceId=$(jq -r '.id' <<<"${source}")
     payload=$(subscriptionRemoteControlPayload "${source}" "${dryRun}" "${desiredUsersBySource}" "${sourceId}") || return 1
     circuitOpenUntil=$(jq -r '(.sync_circuit_open_until // 0) | tonumber? // 0' <<<"${source}") || return 1
-    if [[ "${SUBSCRIPTION_SYNC_ROLLBACK:-false}" != "true" && "${circuitOpenUntil}" =~ ^[0-9]+$ ]] && ((circuitOpenUntil > $(date +%s))); then
+    if [[ "${SUBSCRIPTION_SYNC_ROLLBACK:-false}" != "true" && "${SUBSCRIPTION_SYNC_FORCE_RETRY:-false}" != "true" && "${circuitOpenUntil}" =~ ^[0-9]+$ ]] && ((circuitOpenUntil > $(date +%s))); then
         jq -n --arg sourceId "${sourceId}" --argjson circuitUntil "${circuitOpenUntil}" --argjson dryRun "${dryRun}" --argjson payload "${payload}" \
             '{source_id:$sourceId, status:"circuit_open", error_detail:{type:"circuit_open", message:("来源冷却中，预计 " + ($circuitUntil | tostring) + " 后重试")}, dry_run:$dryRun, request:$payload}'
         return 0

@@ -1440,6 +1440,7 @@ manageSubscriptionSyncDiagnostics() {
             menuItem 4 "查看远端同步计划" "对启用来源执行 dry-run"
             menuItem 5 "检查被控服务器健康" "请求所有启用的被控服务器健康检查"
             menuItem 6 "查看自动同步定时任务" "显示当前 SyncSubscriptionGroups cron"
+            menuItem 7 "强制立即重试" "临时跳过来源冷却并完整同步，不修改失败计数"
         else
             menuItem 4 "查看自动同步定时任务" "显示当前 SyncSubscriptionGroups cron"
         fi
@@ -1466,6 +1467,7 @@ manageSubscriptionSyncDiagnostics() {
             fi
             ;;
         6) crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true ;;
+        7) runSubscriptionGroupSyncForceRetry || true ;;
         *) coreSelectionErrorCard ;;
         esac
     done

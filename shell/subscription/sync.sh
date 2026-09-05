@@ -1467,6 +1467,10 @@ runSubscriptionGroupSync() {
     subscriptionGroupsWithLock runSubscriptionGroupSyncUnlocked
 }
 
+runSubscriptionGroupSyncForceRetry() {
+    SUBSCRIPTION_SYNC_FORCE_RETRY=true runSubscriptionGroupSync
+}
+
 runSubscriptionGroupSyncCron() {
     local enabled
     local status
