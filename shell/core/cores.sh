@@ -2134,6 +2134,15 @@ checkGFWStatue() {
 }
 
 
+coreServicePathArgument() {
+    local path=$1
+    if ! padmIsSafeAbsolutePath "${path}" || [[ ! "${path}" =~ ^/[a-zA-Z0-9_./\ -]+$ ]]; then
+        errorCard "服务路径无效" "路径必须为绝对路径，且仅包含字母、数字、空格或 _ . / -"
+        return 1
+    fi
+    printf '"%s"' "${path}"
+}
+
 # 安装alpine开机启动
 installAlpineStartup() {
     local serviceName=$1
@@ -2142,14 +2151,14 @@ installAlpineStartup() {
 
     if [[ "${serviceName}" == "sing-box" ]]; then
         local singBoxBinary singBoxConfig
-        singBoxBinary=$(coreSingBoxBinaryPath)
-        singBoxConfig=$(singBoxMergedConfigFile)
+        singBoxBinary=$(coreServicePathArgument "$(coreSingBoxBinaryPath)") || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+        singBoxConfig=$(coreServicePathArgument "$(singBoxMergedConfigFile)") || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
         cat <<EOF >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 #!/sbin/openrc-run
 
 description="sing-box service"
-command="${singBoxBinary}"
-command_args="run -c ${singBoxConfig}"
+command=${singBoxBinary}
+command_args='run -c ${singBoxConfig}'
 command_background=true
 pidfile="/var/run/sing-box.pid"
 EOF
@@ -2256,7 +2265,10 @@ coreInstallServiceBackupFinalize() {
 # sing-box开机自启
 installSingBoxService() {
     progressCard "$1" "配置 sing-box 开机自启"
-    local execStart="$(coreSingBoxBinaryPath) run -c $(singBoxMergedConfigFile)"
+    local binaryArg configArg execStart
+    binaryArg=$(coreServicePathArgument "$(coreSingBoxBinaryPath)") || return 1
+    configArg=$(coreServicePathArgument "$(singBoxMergedConfigFile)") || return 1
+    execStart="${binaryArg} run -c ${configArg}"
     local serviceFile=
     local serviceBackupDir=
     local serviceWasEnabled=false
@@ -2286,7 +2298,7 @@ LimitNOFILE=infinity
 [Install]
 WantedBy=multi-user.target
 EOF
-        if ! grep -q '^\[Service\]$' "${tmpFile}" || ! grep -q "^ExecStart=${execStart}$" "${tmpFile}"; then
+        if ! grep -q '^\[Service\]$' "${tmpFile}" || ! grep -Fxq "ExecStart=${execStart}" "${tmpFile}"; then
             padmRemoveCleanupPath "${tmpFile}"
             errorCard "sing-box systemd 模板生成失败"
             return 1

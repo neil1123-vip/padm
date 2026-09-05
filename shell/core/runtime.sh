@@ -611,6 +611,10 @@ writeGeneratedJsonFile() {
     local tmpPrefix=$2
     local tmpFile
 
+    if [[ "${targetFile}" == /etc/padm/sing-box/conf/config/* ]] && declare -F singBoxTemplateConfigDir >/dev/null 2>&1; then
+        targetFile="$(singBoxTemplateConfigDir)/${targetFile##*/}"
+    fi
+
     padmEnsureSafeDirectory "$(dirname -- "${targetFile}")" || return 1
     padmCreateTempPath tmpFile "$(padmTmpFilePath "${tmpPrefix}.XXXXXX")" || return 1
     cat >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }

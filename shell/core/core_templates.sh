@@ -26,7 +26,7 @@ removeXrayTemplateConfigFiles() {
 }
 
 singBoxTemplateConfigDir() {
-    printf '%s\n' "/etc/padm/sing-box/conf/config"
+    printf '%s\n' "${PADM_SINGBOX_CONFIG_DIR:-/etc/padm/sing-box/conf/config}"
 }
 
 singBoxTemplateConfigFile() {

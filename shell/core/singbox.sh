@@ -554,7 +554,7 @@ singBoxHysteria2Install() {
 
 
 singBoxConfigShardDir() {
-    local configDir="${singBoxConfigPath:-/etc/padm/sing-box/conf/config/}"
+    local configDir="${singBoxConfigPath:-${PADM_SINGBOX_CONFIG_DIR:-/etc/padm/sing-box/conf/config/}}"
 
     configDir="${configDir%/}/"
     printf '%s\n' "${configDir}"

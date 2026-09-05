@@ -14,6 +14,48 @@ if ! declare -F regressionProtocolSelectionIncludesCompat >/dev/null 2>&1; then
     }
 fi
 
+runSingBoxCustomPathsRegression() (
+    set -euo pipefail
+    source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+    local root="${TMP_DIR}/sing-box custom paths" singBoxConfigPath=
+    export PADM_SINGBOX_BINARY="${root}/bin/sing-box"
+    export PADM_SINGBOX_CONFIG_DIR="${root}/conf/config"
+    export PADM_SINGBOX_SYSTEMD_SERVICE_FILE="${root}/sing-box.service"
+    export PADM_SINGBOX_OPENRC_SERVICE_FILE="${root}/sing-box.init"
+    export PADM_TMP_DIR="${root}/tmp"
+    mkdir -p "${root}/tmp" "${PADM_SINGBOX_CONFIG_DIR}"
+    [[ "$(singBoxConfigShardDir)" == "${PADM_SINGBOX_CONFIG_DIR}/" ]]
+    [[ "$(tuicConfigFile)" == "${PADM_SINGBOX_CONFIG_DIR}/09_tuic_inbounds.json" ]]
+    singBoxConfigPath="${root}/staged/"
+    [[ "$(singBoxConfigShardDir)" == "${singBoxConfigPath}" ]]
+    singBoxConfigPath=
+
+    find() { printf '/usr/bin/systemctl\n'; }
+    bootStartup() { return 0; }
+    coreStartupServiceEnabled() { return 1; }
+    checkLogBackupCreate() { printf -v "$1" '%s' ''; }
+    coreInstallServiceBackupFinalize() { return 0; }
+    local release=debian
+    installSingBoxService test >/dev/null
+    grep -Fxq "ExecStart=\"${PADM_SINGBOX_BINARY}\" run -c \"${root}/conf/config.json\"" "${PADM_SINGBOX_SYSTEMD_SERVICE_FILE}"
+    installAlpineStartup sing-box
+    bash -n "${PADM_SINGBOX_OPENRC_SERVICE_FILE}"
+    source "${PADM_SINGBOX_OPENRC_SERVICE_FILE}"
+    [[ "${command}" == "${PADM_SINGBOX_BINARY}" ]]
+    [[ "${command_args}" == "run -c \"${root}/conf/config.json\"" ]]
+
+    local runningConfig="${root}/conf/config.json"
+    pgrep() { printf '123\n'; }
+    padmReadProcExe() { printf '%s\n' "${PADM_SINGBOX_BINARY}"; }
+    padmReadProcCmdline() { printf '%s run -c %s\n' "${PADM_SINGBOX_BINARY}" "${runningConfig}"; }
+    padmCommandExists() { return 1; }
+    singBoxRunning
+    runningConfig="${root}/other.json"
+    regressionExpectStatus 1 singBoxRunning
+    PADM_SINGBOX_BINARY="${root}/unsafe%path"
+    regressionExpectStatus 1 installSingBoxService test >/dev/null
+)
+
 runCoreReleaseArchiveRejectsRegression() (
     local mode=$1
     local root="${TMP_DIR}/core-release-archive-${mode}"
