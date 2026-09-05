@@ -114,22 +114,22 @@ initHysteriaPort() {
 initHysteria2Network() {
 
     while true; do
-        echoContent yellow "请输入本地带宽峰值的下行速度（默认：100，单位：Mbps）"
+        echoContent yellow "请输入服务端下行带宽峰值（客户端→服务端，默认：100，单位：Mbps）"
         autoRead hysteria_download_speed "下行速度:" hysteria2ClientDownloadSpeed
         hysteria2ClientDownloadSpeed=${hysteria2ClientDownloadSpeed:-100}
         if [[ "${hysteria2ClientDownloadSpeed}" =~ ^[0-9]{1,6}$ ]] && ((10#${hysteria2ClientDownloadSpeed} > 0)); then
-            statusCard "Hysteria2 下行速度" "${hysteria2ClientDownloadSpeed} Mbps"
+            statusCard "Hysteria2 服务端下行（客户端→服务端）" "${hysteria2ClientDownloadSpeed} Mbps"
             break
         fi
         statusCard "Hysteria2 带宽" "带宽不合法"
     done
 
     while true; do
-        echoContent yellow "请输入本地带宽峰值的上行速度（默认：50，单位：Mbps）"
+        echoContent yellow "请输入服务端上行带宽峰值（服务端→客户端，默认：50，单位：Mbps）"
         autoRead hysteria_upload_speed "上行速度:" hysteria2ClientUploadSpeed
         hysteria2ClientUploadSpeed=${hysteria2ClientUploadSpeed:-50}
         if [[ "${hysteria2ClientUploadSpeed}" =~ ^[0-9]{1,6}$ ]] && ((10#${hysteria2ClientUploadSpeed} > 0)); then
-            statusCard "Hysteria2 上行速度" "${hysteria2ClientUploadSpeed} Mbps"
+            statusCard "Hysteria2 服务端上行（服务端→客户端）" "${hysteria2ClientUploadSpeed} Mbps"
             break
         fi
         statusCard "Hysteria2 带宽" "带宽不合法"
