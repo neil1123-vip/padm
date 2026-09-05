@@ -525,5 +525,9 @@ reloadCore() {
     if currentProtocolHas 20 || [[ "${coreInstallType}" == "2" || -n "${singBoxConfigPath}" ]]; then
         serviceQueueRestart sing-box
     fi
-    serviceQueueApply
+    serviceQueueApply || return 1
+    if [[ "${PADM_SKIP_CONTROLLER_REFRESH:-}" != "1" && "${PADM_CONTROL_SERVER:-}" != "1" ]] &&
+        declare -F subscriptionNotifyControllerRefresh >/dev/null 2>&1; then
+        subscriptionNotifyControllerRefresh || true
+    fi
 }

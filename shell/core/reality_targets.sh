@@ -3270,32 +3270,7 @@ restoreRealityTargetConfigs() {
 refreshSubscriptionsAfterRealityTargetChange() {
     if declare -F subscriptionCurrentRoleNormalized >/dev/null 2>&1 &&
         [[ "$(subscriptionCurrentRoleNormalized 2>/dev/null || true)" == "controlled" ]]; then
-        if ! declare -F subscriptionWireGuardReadState >/dev/null 2>&1 ||
-            ! declare -F subscriptionControlToken >/dev/null 2>&1 ||
-            ! declare -F subscriptionRemoteControlRequest >/dev/null 2>&1; then
-            realityTargetStatusBlock yellow "REALITY 目标站" "被控端刷新依赖未完整加载，已跳过主控通知"
-            return 0
-        fi
-        local controlledState mainAddress mainHost mainToken mainSource refreshResponse
-        controlledState=$(subscriptionWireGuardReadState) || return 1
-        mainAddress=$(jq -r 'first(.peers[]? | select(.id == "main" and .enabled == true) | .address) // empty' <<<"${controlledState}") || return 1
-        mainHost=${mainAddress%%/*}
-        mainToken=$(subscriptionControlToken) || return 1
-        [[ -n "${mainHost}" && -n "${mainToken}" ]] || return 1
-        mainSource=$(jq -cn --arg host "${mainHost}" --arg token "${mainToken}" \
-            '{id:"main",transport:"wireguard",host:$host,port:39778,control_token:$token}') || return 1
-        refreshResponse=$(subscriptionRemoteControlRequest "${mainSource}" refresh '{}') || return 1
-        if jq -e '.ok == true and (.refreshed == true or .skipped == "automatic_sync_disabled")' <<<"${refreshResponse}" >/dev/null 2>&1; then
-            if jq -e '.skipped == "automatic_sync_disabled"' <<<"${refreshResponse}" >/dev/null 2>&1; then
-                realityTargetStatusBlock yellow "REALITY 目标站" "已通知主控，但主控自动同步已关闭" "请在主控执行立即完整同步"
-                return 0
-            fi
-            realityTargetStatusBlock green "REALITY 目标站" "已通知主控刷新订阅"
-            return 0
-        fi
-        realityTargetStatusBlock yellow "REALITY 目标站" "目标站已更新，但主控订阅刷新失败" \
-            "请在主控执行订阅同步并检查被控来源状态"
-        return 1
+        return 0
     fi
     if ! declare -F refreshPublishedSubscriptions >/dev/null 2>&1 || ! declare -F showAccounts >/dev/null 2>&1 || ! declare -F readNginxSubscribe >/dev/null 2>&1; then
         realityTargetStatusBlock yellow "REALITY 目标站" "订阅刷新依赖未完整加载，已跳过订阅刷新" "通过 install.sh 菜单执行时会自动刷新"
@@ -3357,7 +3332,7 @@ changeInstalledRealityTarget() {
         realityTargetStatusBlock red "REALITY 目标站" "配置校验失败，已回滚" "Xray 日志: $(realityTargetTmpPath padm-reality-target-xray-test.log)" "sing-box 日志: $(realityTargetTmpPath padm-reality-target-sing-box-test.log)"
         return 1
     fi
-    if ! reloadCore; then
+    if ! PADM_SKIP_CONTROLLER_REFRESH=1 reloadCore; then
         if ! restoreRealityTargetConfigs "${backupDir}"; then
             realityTargetStatusBlock red "REALITY 目标站" "核心重载失败，且回滚配置失败" "备份目录: ${backupDir}"
             padmForgetCleanupPath "${backupDir}"

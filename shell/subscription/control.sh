@@ -223,6 +223,40 @@ subscriptionControlRefreshAuthorized() {
         'any(.sources[]?; .role != "main" and .enabled == true and (.control_token // "") == $token)'
 }
 
+subscriptionNotifyControllerRefresh() {
+    declare -F subscriptionCurrentRoleNormalized >/dev/null 2>&1 || return 0
+    [[ "$(subscriptionCurrentRoleNormalized 2>/dev/null || true)" == "controlled" ]] || return 0
+    if ! declare -F subscriptionWireGuardReadState >/dev/null 2>&1 ||
+        ! declare -F subscriptionControlToken >/dev/null 2>&1 ||
+        ! declare -F subscriptionRemoteControlRequest >/dev/null 2>&1; then
+        declare -F realityTargetStatusBlock >/dev/null 2>&1 &&
+            realityTargetStatusBlock yellow "订阅同步" "被控端刷新依赖未完整加载，已跳过主控通知"
+        return 0
+    fi
+    local controlledState mainAddress mainHost mainToken mainSource refreshResponse
+    controlledState=$(subscriptionWireGuardReadState) || return 1
+    mainAddress=$(jq -r 'first(.peers[]? | select(.id == "main" and .enabled == true) | .address) // empty' <<<"${controlledState}") || return 1
+    mainHost=${mainAddress%%/*}
+    mainToken=$(subscriptionControlToken) || return 1
+    [[ -n "${mainHost}" && -n "${mainToken}" ]] || return 1
+    mainSource=$(jq -cn --arg host "${mainHost}" --arg token "${mainToken}" \
+        '{id:"main",transport:"wireguard",host:$host,port:39778,control_token:$token}') || return 1
+    refreshResponse=$(subscriptionRemoteControlRequest "${mainSource}" refresh '{}') || return 1
+    if jq -e '.ok == true and (.refreshed == true or .skipped == "automatic_sync_disabled")' <<<"${refreshResponse}" >/dev/null 2>&1; then
+        if jq -e '.skipped == "automatic_sync_disabled"' <<<"${refreshResponse}" >/dev/null 2>&1; then
+            declare -F realityTargetStatusBlock >/dev/null 2>&1 &&
+                realityTargetStatusBlock yellow "订阅同步" "已通知主控，但主控自动同步已关闭" "请在主控执行立即完整同步"
+        else
+            declare -F realityTargetStatusBlock >/dev/null 2>&1 &&
+                realityTargetStatusBlock green "订阅同步" "已通知主控刷新订阅"
+        fi
+        return 0
+    fi
+    declare -F realityTargetStatusBlock >/dev/null 2>&1 &&
+        realityTargetStatusBlock yellow "订阅同步" "主控订阅刷新失败" "请在主控执行立即完整同步并检查被控来源状态"
+    return 1
+}
+
 subscriptionRemoteControlPayload() {
     local source=$1
     local dryRun=$2

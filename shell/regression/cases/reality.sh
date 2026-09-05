@@ -1517,7 +1517,7 @@ runRealityConfigControlledRefreshRegression() (
     }
     realityTargetStatusBlock() { printf '%s\n' "$*" >>"${statusLog}"; }
 
-    refreshSubscriptionsAfterRealityTargetChange
+    subscriptionNotifyControllerRefresh
     jq -e '.id == "main" and .host == "10.77.0.1" and .port == 39778 and .control_token == "controlled-token"' <<<"${refreshSource}" >/dev/null
     grep -q '已通知主控刷新订阅' "${statusLog}"
 )
