@@ -40,13 +40,20 @@ class Handler(BaseHTTPRequestHandler):
         return
 
     def respond(self, code, payload):
+        retry_after = None
         if code in (409, 429, 503) and isinstance(payload, dict):
             payload = dict(payload)
             payload.setdefault("retry_after", 5)
+            try:
+                retry_after = max(0, int(float(payload.get("retry_after", 5))))
+            except (TypeError, ValueError):
+                retry_after = 5
         data = json.dumps(payload, ensure_ascii=False).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
+        if retry_after is not None:
+            self.send_header("Retry-After", str(retry_after))
         self.end_headers()
         try:
             self.wfile.write(data)
