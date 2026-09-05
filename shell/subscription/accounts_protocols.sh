@@ -216,7 +216,7 @@ showVlessRealityGrpcAccounts() {
         if [[ "${coreInstallType}" == "2" ]]; then
             showVlessRealityGrpcAccountsFromConfig "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json" "${singBoxVLESSRealityGRPCPort:-}" "${singBoxVLESSRealityGRPCSNI:-}" "${singBoxVLESSRealityPublicKey:-}" ""
         else
-            showVlessRealityGrpcAccountsFromConfig "${configPath}08_VLESS_vision_gRPC_inbounds.json" "${xrayVLESSRealityGRPCPort:-}" "${xrayVLESSRealityGRPCSNI:-}" "${xrayVLESSRealityGRPCPublicKey:-${currentRealityPublicKey:-}}" "${xrayVLESSRealityGRPCMldsa65Verify:-${currentRealityMldsa65Verify:-}}"
+            showVlessRealityGrpcAccountsFromConfig "${configPath}08_VLESS_vision_gRPC_inbounds.json" "${xrayVLESSRealityGRPCPort:-}" "${xrayVLESSRealityGRPCSNI:-}" "${xrayVLESSRealityGRPCPublicKey:-${currentRealityPublicKey:-}}" "${xrayVLESSRealityGRPCMldsa65Verify:-}"
         fi
         if [[ "${coreInstallType}" == "1" && -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json" ]]; then
             showVlessRealityGrpcAccountsFromConfig "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json" "${singBoxVLESSRealityGRPCPort:-}" "${singBoxVLESSRealityGRPCSNI:-}" "${singBoxVLESSRealityPublicKey:-}" ""

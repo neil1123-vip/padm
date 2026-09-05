@@ -1286,6 +1286,7 @@ runSingBoxMergeConfigTransactionRegression() (
     local checkLog="${root}/check.log"
     local commitMarker="${root}/commit.log"
     local logFile="${root}/merge.log"
+    local mergeCalls="${root}/merge-calls.log"
     local rc
 
     mkdir -p "${shardDir}"
@@ -1310,6 +1311,7 @@ if [[ "$1" == "check" ]]; then
     exit
 fi
 [[ "$1" == "merge" ]] || exit 2
+printf 'merge\n' >>"${PADM_FAKE_SINGBOX_MERGE_LOG}"
 output=$2
 shift 2
 dest=
@@ -1346,13 +1348,17 @@ SH
     PADM_SINGBOX_BINARY="${binary}"
     singBoxConfigPath="${shardDir}/"
     export PADM_FAKE_SINGBOX_CHECK_LOG="${checkLog}"
+    export PADM_FAKE_SINGBOX_MERGE_LOG="${mergeCalls}"
 
     printf '{"old":true}\n' >"${outputFile}"
     export PADM_FAKE_SINGBOX_MERGE_MODE=fail
     regressionExpectStatus 1 singBoxMergeConfig >/dev/null 2>&1
     [[ "$(<"${outputFile}")" == '{"old":true}' ]]
+    export PADM_FAKE_SINGBOX_MERGE_MODE=success
+    : >"${mergeCalls}"
     printf '%s\n' '{"outbounds":[{"type":"direct","domain_resolver":{"server":"padm-local"}}]}' >"${shardDir}/01_missing_resolver.json"
     regressionExpectStatus 1 singBoxMergeConfig >/dev/null 2>&1
+    [[ ! -s "${mergeCalls}" ]]
     [[ "$(<"${outputFile}")" == '{"old":true}' ]]
     [[ ! -e "${shardDir}/dns.json" ]]
     rm -f "${shardDir}/01_missing_resolver.json"

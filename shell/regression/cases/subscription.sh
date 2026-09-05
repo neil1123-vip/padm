@@ -377,6 +377,11 @@ EOF
     configPath="${singBoxVisionConfigDir}/"
     readInstallProtocolType
     [[ -z "${currentRealityMldsa65Seed}" && -z "${currentRealityMldsa65Verify}" ]]
+    currentRealityMldsa65Verify=stale-pqv
+    singBoxVLESSRealityPublicKey=sing-box-public
+    defaultBase64Code vlessReality 443 sing-box-vision-no-pqv uuid-vision "" ""
+    regressionExpectStatus 1 grep -q 'pqv=' "${SUBSCRIBE_CAPTURE_DIR}/default/sing-box-vision-no-pqv"
+    grep -qF '&pbk=sing-box-public&' "${SUBSCRIBE_CAPTURE_DIR}/default/sing-box-vision-no-pqv"
 )
 rm -f "${PADM_VLESS_ENCRYPTION_STATE_FILE}"
 configPath="${visionOutputPreviousConfigPath}"
@@ -422,6 +427,49 @@ grep -qxF "${expectedXHTTPLink}" "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-
 grep -q 'pqv=pqv-xhttp' "${SUBSCRIBE_CAPTURE_DIR}/screen.log"
 grep -qx '    encryption: "active-encryption"' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp-active"
 [[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/sing-box/user-a-xhttp-active" ]]
+(
+    local configPath="${TMP_DIR}/reality-pqv-isolation/"
+    local singBoxConfigPath=
+    mkdir -p "${configPath}"
+    cat >"${configPath}07_VLESS_vision_reality_inbounds.json" <<'EOF'
+{"inbounds":[{"port":443},{"settings":{"clients":[]},"streamSettings":{"realitySettings":{"serverNames":["vision.example.com"],"publicKey":"vision-public","privateKey":"vision-private","target":"vision.example.com:443","mldsa65Seed":"vision-seed","mldsa65Verify":"vision-pqv"}}}]}
+EOF
+    cat >"${configPath}08_VLESS_vision_gRPC_inbounds.json" <<'EOF'
+{"inbounds":[{"port":8443,"settings":{"clients":[{"email":"grpc-no-pqv","id":"uuid-grpc"}]},"streamSettings":{"realitySettings":{"serverNames":["grpc.example.com"],"publicKey":"grpc-public","privateKey":"grpc-private","target":"grpc.example.com:443","mldsa65Verify":""}}}]}
+EOF
+    cat >"${configPath}12_VLESS_XHTTP_inbounds.json" <<'EOF'
+{"inbounds":[{"port":9443,"settings":{"clients":[]},"streamSettings":{"realitySettings":{"serverNames":["xhttp.example.com"],"publicKey":"xhttp-public","privateKey":"xhttp-private","target":"xhttp.example.com:443","mldsa65Seed":"xhttp-seed","mldsa65Verify":"xhttp-pqv"},"xhttpSettings":{"host":"xhttp.example.com","path":"/xhttp","mode":"auto"}}}]}
+EOF
+    readInstallProtocolType
+    realityEntryHost="node.example.com"
+    defaultBase64Code vlessReality 443 vision-own-pqv uuid-vision "" ""
+    grep -qF '&pqv=vision-pqv&' "${SUBSCRIBE_CAPTURE_DIR}/default/vision-own-pqv"
+    grep -qF '&pbk=vision-public&' "${SUBSCRIBE_CAPTURE_DIR}/default/vision-own-pqv"
+
+    currentRealityMldsa65Verify="stale-pqv"
+    defaultBase64Code vlessXHTTP 9443 xhttp-own-pqv uuid-xhttp "node.example.com" "/ignored"
+    grep -qF '&pqv=xhttp-pqv&' "${SUBSCRIBE_CAPTURE_DIR}/default/xhttp-own-pqv"
+    showVlessRealityGrpcAccounts
+    regressionExpectStatus 1 grep -q 'pqv=' "${SUBSCRIBE_CAPTURE_DIR}/default/grpc-no-pqv"
+    grep -qF '&pbk=grpc-public&' "${SUBSCRIBE_CAPTURE_DIR}/default/grpc-no-pqv"
+
+    updateRoutingJsonConfig "${configPath}08_VLESS_vision_gRPC_inbounds.json" '.inbounds[0].streamSettings.realitySettings.mldsa65Verify = "grpc-pqv" | .inbounds[0].settings.clients[0].email = "grpc-own-pqv"'
+    readInstallProtocolType
+    showVlessRealityGrpcAccounts
+    grep -qF '&pqv=grpc-pqv&' "${SUBSCRIBE_CAPTURE_DIR}/default/grpc-own-pqv"
+
+    updateRoutingJsonConfig "${configPath}07_VLESS_vision_reality_inbounds.json" 'del(.inbounds[1].streamSettings.realitySettings.mldsa65Verify)'
+    updateRoutingJsonConfig "${configPath}12_VLESS_XHTTP_inbounds.json" '.inbounds[0].streamSettings.realitySettings.mldsa65Verify = null'
+    defaultBase64Code vlessReality 443 vision-no-pqv uuid-vision "" ""
+    defaultBase64Code vlessXHTTP 9443 xhttp-no-pqv uuid-xhttp "node.example.com" "/ignored"
+    regressionExpectStatus 1 grep -q 'pqv=' "${SUBSCRIBE_CAPTURE_DIR}/default/vision-no-pqv" "${SUBSCRIBE_CAPTURE_DIR}/default/xhttp-no-pqv"
+
+    printf '{invalid-json\n' >"${configPath}07_VLESS_vision_reality_inbounds.json"
+    printf '{invalid-json\n' >"${configPath}12_VLESS_XHTTP_inbounds.json"
+    regressionExpectStatus 1 defaultBase64Code vlessReality 443 vision-invalid-config uuid-vision "" ""
+    regressionExpectStatus 1 defaultBase64Code vlessXHTTP 9443 xhttp-invalid-config uuid-xhttp "node.example.com" "/ignored"
+    [[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/default/vision-invalid-config" && ! -e "${SUBSCRIBE_CAPTURE_DIR}/default/xhttp-invalid-config" ]]
+)
 rm -f "${PADM_VLESS_ENCRYPTION_STATE_FILE}"
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 

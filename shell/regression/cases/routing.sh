@@ -269,6 +269,32 @@ JSON
     jq -s -e '
       [.[].dns.servers[]? | select(.tag == "padm-local" and .type == "local")] | length == 1
     ' "${singBoxConfigPath}"*.json >/dev/null
+    (
+        local coreInstallType=2 configPath='' reloadCount=0
+        local resolverBefore dnsBefore
+        resolverBefore=$(<"${singBoxConfigPath}resolver.json")
+        reloadCore() {
+            reloadCount=$((reloadCount + 1))
+            initSingBoxLocalDNSConfig check
+        }
+        removeUnlockDNS
+        [[ "${reloadCount}" == 1 ]]
+        jq -e '. == {}' "${singBoxConfigPath}dns.json" >/dev/null
+        [[ "$(<"${singBoxConfigPath}resolver.json")" == "${resolverBefore}" ]]
+        addSingBoxDNSConfig "203.0.113.10" "cross-shard.example.com" predefined
+        removeUnlockSNI
+        [[ "${reloadCount}" == 2 ]]
+        jq -e '. == {}' "${singBoxConfigPath}dns.json" >/dev/null
+        [[ "$(<"${singBoxConfigPath}resolver.json")" == "${resolverBefore}" ]]
+
+        addSingBoxDNSConfig "1.1.1.1" "cross-shard.example.com"
+        dnsBefore=$(<"${singBoxConfigPath}dns.json")
+        initSingBoxLocalDNSConfig() { return 1; }
+        regressionExpectStatus 1 removeUnlockDNS
+        [[ "${reloadCount}" == 2 ]]
+        [[ "$(<"${singBoxConfigPath}dns.json")" == "${dnsBefore}" ]]
+        [[ "$(<"${singBoxConfigPath}resolver.json")" == "${resolverBefore}" ]]
+    )
     printf '%s\n' '{"dns":{"servers":[{"tag":"padm-local","type":"local"}]}}' >"${singBoxConfigPath}resolver-duplicate.json"
     if initSingBoxLocalDNSConfig 2>/dev/null; then
         return 1

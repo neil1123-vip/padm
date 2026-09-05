@@ -460,21 +460,8 @@ EOF
     fi
 
     if [[ -n "${singBoxConfigPath:-}" && -f "${singBoxConfigPath}dns.json" ]]; then
-        local localTag
-        localTag="padm-local"
-        if ! writeRoutingJsonConfig "${singBoxConfigPath}dns.json" <<EOF
-{
-    "dns": {
-        "servers":[
-            {
-                "tag":"${localTag}",
-                "type":"local"
-            }
-        ]
-    }
-}
-EOF
-        then
+        if ! writeRoutingJsonConfig "${singBoxConfigPath}dns.json" <<<'{}' ||
+            ! initSingBoxLocalDNSConfig; then
             errorCard "sing-box ${title}配置移除失败，已保留旧配置"
             dnsRoutingAbortChange "${title}配置移除失败"
             return 1

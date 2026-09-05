@@ -135,13 +135,16 @@ emitVlessXHTTPSubscribeOutput() {
     local xrayConfigDir=${configPath:-${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}}
     local xhttpConfigFile=${PADM_VLESS_XHTTP_CONFIG_FILE:-${xrayConfigDir%/}/12_VLESS_XHTTP_inbounds.json}
     local vlessEncryption mihomoEncryption=
-    local defaultLink xhttpHost xhttpMode realityMldsa65Verify=${currentRealityMldsa65Verify:-}
+    local defaultLink xhttpHost xhttpMode realityMldsa65Verify=
     if ! vlessEncryption=$(vlessEncryptionForConfig "${xhttpConfigFile}" 0); then
         errorCard "订阅输出生成失败" "VLESS Encryption 配置与状态不一致，请重新启用或关闭实验功能后重试"
         return 1
     fi
     if [[ "${vlessEncryption}" != "none" ]]; then
         mihomoEncryption=$(serializeYamlString "${vlessEncryption}") || return 1
+    fi
+    if [[ -f "${xhttpConfigFile}" ]]; then
+        realityMldsa65Verify=$(jq -r '.inbounds[0].streamSettings.realitySettings.mldsa65Verify // empty' "${xhttpConfigFile}") || return 1
     fi
     path=$(xrayRealityXHTTPSetting path "${path}")
     xhttpHost=$(xrayRealityXHTTPSetting host "${xrayVLESSRealityXHTTPSNI}")
@@ -325,7 +328,7 @@ emitVlessRealitySubscribeOutput() {
 
     local realitySNI=${xrayVLESSRealitySNI}
     local publicKey=${currentRealityPublicKey:-}
-    local realityMldsa65Verify=${currentRealityMldsa65Verify:-}
+    local realityMldsa65Verify=
     local xrayConfigDir=${configPath:-${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}}
     local realityConfigFile=${PADM_VLESS_REALITY_CONFIG_FILE:-${xrayConfigDir%/}/07_VLESS_vision_reality_inbounds.json}
     local vlessEncryption mihomoEncryption=
@@ -340,6 +343,9 @@ emitVlessRealitySubscribeOutput() {
     if [[ "${coreInstallType}" == "2" ]]; then
         realitySNI=${singBoxVLESSRealityVisionSNI}
         publicKey=${singBoxVLESSRealityPublicKey}
+    elif [[ -f "${realityConfigFile}" ]]; then
+        publicKey=$(jq -r '.inbounds[1].streamSettings.realitySettings.publicKey // empty' "${realityConfigFile}") || return 1
+        realityMldsa65Verify=$(jq -r '.inbounds[1].streamSettings.realitySettings.mldsa65Verify // empty' "${realityConfigFile}") || return 1
     fi
     local defaultLink
     defaultLink=$(serializeVlessRealityVisionLink "${id}" "${entryHost}" "${port}" "${realitySNI}" "${publicKey}" "${realityMldsa65Verify}" "${email}" "${vlessEncryption}")
