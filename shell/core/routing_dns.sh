@@ -437,7 +437,7 @@ addSingBoxDNSConfig() {
                     servers: [(if $action == "predefined" then
                         {tag:$tag, type:"hosts", predefined:(($domains + $suffixes) | unique | map({key:., value:$ip}) | from_entries)}
                     else {tag:$tag, type:"udp", server:$ip} end)],
-                    rules: [($match + {server:$tag} | if $action == "predefined" then del(.rule_set) else . end)]
+                    rules: [($match + {action:"route", server:$tag} | if $action == "predefined" then del(.rule_set) else . end)]
                 },
                 route: {rules: [($match + {action:"resolve", server:$tag})], rule_set:$ruleSets}
             }

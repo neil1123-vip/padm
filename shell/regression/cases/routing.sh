@@ -331,6 +331,7 @@ JSON
     jq -e '
       .dns.rules[0].rule_set == ["geosite_openai_dns"] and
       .dns.rules[0].domain_suffix == ["example.com"] and
+      .dns.rules[0].action == "route" and
       (.dns.servers[] | select(.tag == "padm-local" and .type == "local")) and
       (.dns.servers[] | select(.tag == "padm-dnsRouting" and .type == "udp" and .server == "1.1.1.1")) and
       .route.default_domain_resolver == "padm-local" and

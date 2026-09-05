@@ -1476,6 +1476,10 @@ handleSubscriptionControl() {
             jq -n '{ok:false, error:"unauthorized", error_detail:{type:"unauthorized", message:"控制 token 验证失败"}}'
             return 1
         fi
+        if [[ "$(subscriptionActiveGroupRead -r '.sync.enabled == true')" != "true" ]]; then
+            jq -n '{ok:true, refreshed:false, skipped:"automatic_sync_disabled"}'
+            return 0
+        fi
         if runSubscriptionGroupSync >/dev/null 2>&1; then
             jq -n '{ok:true, refreshed:true}'
         else

@@ -3285,7 +3285,11 @@ refreshSubscriptionsAfterRealityTargetChange() {
         mainSource=$(jq -cn --arg host "${mainHost}" --arg token "${mainToken}" \
             '{id:"main",transport:"wireguard",host:$host,port:39778,control_token:$token}') || return 1
         refreshResponse=$(subscriptionRemoteControlRequest "${mainSource}" refresh '{}') || return 1
-        if jq -e '.ok == true and .refreshed == true' <<<"${refreshResponse}" >/dev/null 2>&1; then
+        if jq -e '.ok == true and (.refreshed == true or .skipped == "automatic_sync_disabled")' <<<"${refreshResponse}" >/dev/null 2>&1; then
+            if jq -e '.skipped == "automatic_sync_disabled"' <<<"${refreshResponse}" >/dev/null 2>&1; then
+                realityTargetStatusBlock yellow "REALITY 目标站" "已通知主控，但主控自动同步已关闭" "请在主控执行立即完整同步"
+                return 0
+            fi
             realityTargetStatusBlock green "REALITY 目标站" "已通知主控刷新订阅"
             return 0
         fi
