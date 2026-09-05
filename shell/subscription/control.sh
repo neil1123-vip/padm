@@ -167,6 +167,8 @@ subscriptionRemoteControlRequest() {
     local body
     local requestStatus=1
     local retryDelay=1
+    local retryJitter=0
+    local retryAfter=0
     token=$(jq -r '.control_token // empty' <<<"${source}") || return 1
     [[ -n "${token}" ]] || return 2
     url=$(subscriptionRemoteControlUrl "${source}" "${endpoint}") || return 1
@@ -206,7 +208,8 @@ subscriptionRemoteControlRequest() {
         remainingTime=$((deadline - SECONDS))
         ((remainingTime > 0)) || return "${requestStatus}"
         curlArgs[4]="${remainingTime}"
-        ((remainingTime > retryDelay)) && sleep "${retryDelay}"
+        retryJitter=$((RANDOM % 2))
+        ((remainingTime > retryDelay + retryJitter)) && sleep "$((retryDelay + retryJitter))"
         response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" <<<"${payload}" 2>/dev/null) || {
             requestStatus=$?
             return "${requestStatus}"
@@ -215,9 +218,13 @@ subscriptionRemoteControlRequest() {
     statusCode=${response##*$'\n'}
     body=${response%$'\n'*}
     if [[ "${SUBSCRIPTION_SYNC_ROLLBACK:-false}" != "true" && ( "${statusCode}" == "429" || "${statusCode}" == "503" ) ]]; then
+        retryAfter=$(jq -r '(.retry_after // .error_detail.retry_after // 0) | tonumber? // 0' <<<"${body}" 2>/dev/null || printf '0')
+        [[ "${retryAfter}" =~ ^[0-9]+$ ]] || retryAfter=0
+        ((retryAfter > retryDelay)) && retryDelay=${retryAfter}
         remainingTime=$((deadline - SECONDS))
         if ((remainingTime > retryDelay)); then
-            sleep "${retryDelay}"
+            retryJitter=$((RANDOM % 2))
+            ((remainingTime > retryDelay + retryJitter)) && sleep "$((retryDelay + retryJitter))"
             remainingTime=$((deadline - SECONDS))
             ((remainingTime > 0)) || return 0
             curlArgs[4]="${remainingTime}"
@@ -631,10 +638,17 @@ subscriptionRemoteSyncPlanForSource() {
     local errorMessage
     local errorType errorDetail
     local requestStatus
+    local circuitOpenUntil
     local -a selfReferenceArgs=()
 
     sourceId=$(jq -r '.id' <<<"${source}")
     payload=$(subscriptionRemoteControlPayload "${source}" "${dryRun}" "${desiredUsersBySource}" "${sourceId}") || return 1
+    circuitOpenUntil=$(jq -r '(.sync_circuit_open_until // 0) | tonumber? // 0' <<<"${source}") || return 1
+    if [[ "${circuitOpenUntil}" =~ ^[0-9]+$ ]] && ((circuitOpenUntil > $(date +%s))); then
+        jq -n --arg sourceId "${sourceId}" --argjson circuitUntil "${circuitOpenUntil}" --argjson dryRun "${dryRun}" --argjson payload "${payload}" \
+            '{source_id:$sourceId, status:"circuit_open", error_detail:{type:"circuit_open", message:("来源冷却中，预计 " + ($circuitUntil | tostring) + " 后重试")}, dry_run:$dryRun, request:$payload}'
+        return 0
+    fi
     [[ $# -ge 4 ]] && selfReferenceArgs=("${selfAddress}")
     if subscriptionRemoteSourceSelfReference "${source}" "${selfReferenceArgs[@]}"; then
         jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"self_reference", error_detail:{type:"self_reference", message:"服务器源指向当前订阅服务，已跳过以避免递归同步"}, dry_run:$dryRun, request:$payload}'
@@ -908,6 +922,10 @@ runSubscriptionRemoteSync() {
             errorMessage=$(jq -r 'if ((.error_detail.message // "") | length) > 0 then .error_detail.message else (.error // "unknown_error") end' <<<"${sourceResult}") || return 1
             setSubscriptionSourceSyncFailure "${sourceId}" "${errorType}" "${errorMessage}" || stateWriteFailed=true
             failureMessages+=("远程服务器源 ${sourceId} 拒绝同步: ${errorMessage}")
+            ;;
+        circuit_open)
+            errorMessage=$(jq -r '.error_detail.message // "来源冷却中，已跳过本次同步"' <<<"${sourceResult}") || return 1
+            failureMessages+=("远程服务器源 ${sourceId} ${errorMessage}")
             ;;
         unreachable)
             errorType=$(jq -r '.error_detail.type // "unreachable"' <<<"${sourceResult}") || return 1

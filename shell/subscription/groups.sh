@@ -214,7 +214,7 @@ validateSubscriptionGroupsState() {
           .port == 0 and .enabled == true and .sync_status == "local"
         else
           exact(["id", "name", "role", "scheme", "transport", "host", "port", "enabled", "sync_status"];
-            ["control_token", "last_sync_changed", "last_sync_plan", "last_sync_error"]) and
+            ["control_token", "last_sync_changed", "last_sync_plan", "last_sync_error", "sync_failure_count", "sync_circuit_open_until"]) and
           .role == "secondary" and .scheme == "wireguard" and .transport == "wireguard" and
           (.id | state_id) and (.name | nonempty_string) and (.host | nonempty_string) and
           (.port | type == "number" and . == floor and . >= 1 and . <= 65535) and
@@ -223,7 +223,9 @@ validateSubscriptionGroupsState() {
           ((has("control_token") | not) or (.control_token | nonempty_string)) and
           ((has("last_sync_changed") | not) or (.last_sync_changed | type == "boolean")) and
           ((has("last_sync_plan") | not) or (.last_sync_plan | sync_plan)) and
-          ((has("last_sync_error") | not) or (.last_sync_error | sync_error))
+          ((has("last_sync_error") | not) or (.last_sync_error | sync_error)) and
+          ((has("sync_failure_count") | not) or (.sync_failure_count | count)) and
+          ((has("sync_circuit_open_until") | not) or (.sync_circuit_open_until | count))
         end;
       def source_traffic:
         exact(["upload", "download"]; ["counters", "updated_at"]) and
@@ -843,11 +845,11 @@ setSubscriptionSourceSyncStatus() {
     if [[ -n "${plan}" ]]; then
         subscriptionActiveGroupSetById sources "${id}" "subscription source not found" \
             --arg status "${status}" --argjson changed "${changed}" --argjson plan "${plan}" \
-            '.sync_status = $status | .last_sync_changed = $changed | .last_sync_plan = $plan | del(.last_sync_error)'
+            '.sync_status = $status | .last_sync_changed = $changed | .last_sync_plan = $plan | .sync_failure_count = 0 | del(.last_sync_error, .sync_circuit_open_until)'
     elif [[ -n "${changed}" ]]; then
         subscriptionActiveGroupSetById sources "${id}" "subscription source not found" \
             --arg status "${status}" --argjson changed "${changed}" \
-            '.sync_status = $status | .last_sync_changed = $changed | del(.last_sync_error)'
+            '.sync_status = $status | .last_sync_changed = $changed | .sync_failure_count = 0 | del(.last_sync_error, .sync_circuit_open_until)'
     else
         subscriptionActiveGroupSetById sources "${id}" "subscription source not found" \
             --arg status "${status}" '.sync_status = $status'
@@ -858,10 +860,20 @@ setSubscriptionSourceSyncFailure() {
     local id=$1
     local errorType=$2
     local errorMessage=$3
+    local now
+    local failureCount
+    local backoff
+    local circuitUntil
     subscriptionStateIdValid "${id}" || return 1
+    now=$(date +%s) || return 1
+    failureCount=$(subscriptionActiveGroupRead -r --arg id "${id}" 'first(.sources[]? | select(.id == $id) | (.sync_failure_count // 0)) // 0') || return 1
+    [[ "${failureCount}" =~ ^[0-9]+$ ]] || failureCount=0
+    failureCount=$((failureCount + 1))
+    backoff=$((60 << (failureCount > 6 ? 5 : failureCount - 1)))
+    circuitUntil=$((now + backoff))
     subscriptionActiveGroupSetById sources "${id}" "subscription source not found" \
-        --arg errorType "${errorType}" --arg errorMessage "${errorMessage}" \
-        '.sync_status = "failed" | .last_sync_changed = false | .last_sync_error = {type:$errorType, message:$errorMessage} | del(.last_sync_plan)'
+        --arg errorType "${errorType}" --arg errorMessage "${errorMessage}" --argjson failureCount "${failureCount}" --argjson circuitUntil "${circuitUntil}" \
+        '.sync_status = "failed" | .last_sync_changed = false | .last_sync_error = {type:$errorType, message:$errorMessage} | .sync_failure_count = $failureCount | .sync_circuit_open_until = $circuitUntil | del(.last_sync_plan)'
 }
 
 subscriptionSourceExists() {

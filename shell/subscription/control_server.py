@@ -40,6 +40,9 @@ class Handler(BaseHTTPRequestHandler):
         return
 
     def respond(self, code, payload):
+        if code in (409, 429, 503) and isinstance(payload, dict):
+            payload = dict(payload)
+            payload.setdefault("retry_after", 5)
         data = json.dumps(payload, ensure_ascii=False).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
