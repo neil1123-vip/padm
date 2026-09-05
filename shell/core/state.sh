@@ -155,7 +155,7 @@ readInstallType() {
     local singBoxConfigDir="${PADM_SINGBOX_CONFIG_DIR:-/etc/padm/sing-box/conf/config}"
     local singBoxMergedFile="$(dirname -- "${singBoxConfigDir%/}")/config.json"
 
-    if [[ -x "${xrayBinary}" && -d "${xrayConfigDir}" ]]; then
+    if [[ -f "${xrayBinary}" && -x "${xrayBinary}" && -d "${xrayConfigDir}" ]]; then
         # 检测 Xray-core
         for configFile in $(protocolCapabilityIdsByProjectCore xray | tr ',' ' '); do
             configFile=$(protocolCapabilityMeta "${configFile}" config_file 2>/dev/null || true)
@@ -173,13 +173,13 @@ readInstallType() {
             if [[ -f "${configPath}12_VLESS_XHTTP_inbounds.json" ]]; then
                 realityStatus=12
             fi
-            if [[ -x "${singBoxBinary}" ]] && compgen -G "${singBoxConfigDir%/}/*inbounds.json" >/dev/null; then
+            if [[ -f "${singBoxBinary}" && -x "${singBoxBinary}" ]] && compgen -G "${singBoxConfigDir%/}/*inbounds.json" >/dev/null; then
                 singBoxConfigPath=${singBoxConfigDir%/}/
             fi
         fi
     fi
     if [[ "${coreInstallType}" != "1" ]] &&
-        [[ -x "${singBoxBinary}" ]] &&
+        [[ -f "${singBoxBinary}" && -x "${singBoxBinary}" ]] &&
         { [[ -f "${singBoxMergedFile}" ]] || compgen -G "${singBoxConfigDir%/}/*.json" >/dev/null; }; then
         # 检测 sing-box；分片配置仍然有效，即使合并文件暂时不存在。
         ctlPath=${singBoxBinary}

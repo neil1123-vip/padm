@@ -4480,8 +4480,7 @@ runReadInstallTypeKeepsSingBoxShardsRegression() {
         local singBoxConfigDir="${root}/sing-box/conf/config"
 
         mkdir -p "${xrayConfigDir}" "${singBoxConfigDir}"
-        : >"${xrayBinary}"
-        : >"${singBoxBinary}"
+        mkdir -p "${xrayBinary}" "${singBoxBinary}"
         printf '{"inbounds":[]}\n' >"${singBoxConfigDir}/02_other_inbounds.json"
         export PADM_XRAY_BINARY="${xrayBinary}"
         export PADM_XRAY_CONF_DIR="${xrayConfigDir}"
@@ -4491,7 +4490,7 @@ runReadInstallTypeKeepsSingBoxShardsRegression() {
         readInstallType
         [[ -z "${coreInstallType}" ]]
 
-        rm -f "${xrayBinary}" "${singBoxBinary}"
+        rm -rf "${xrayBinary}" "${singBoxBinary}"
         cp /usr/bin/true "${xrayBinary}"
         cp /usr/bin/true "${singBoxBinary}"
         readInstallType
