@@ -525,6 +525,9 @@ singBoxTuicInstallApply() {
     serviceQueueRestart sing-box
     serviceQueueApply || return 1
     showAccounts 4
+    if declare -F subscriptionNotifyControllerRefresh >/dev/null 2>&1; then
+        subscriptionNotifyControllerRefresh || true
+    fi
 }
 
 singBoxTuicInstall() {
@@ -546,6 +549,9 @@ singBoxHysteria2InstallApply() {
     serviceQueueRestart sing-box
     serviceQueueApply || return 1
     showAccounts 4
+    if declare -F subscriptionNotifyControllerRefresh >/dev/null 2>&1; then
+        subscriptionNotifyControllerRefresh || true
+    fi
 }
 
 singBoxHysteria2Install() {

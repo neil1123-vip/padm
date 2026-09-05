@@ -1863,6 +1863,20 @@ runSingBoxProtocolReloadFailureRegression() (
     ! grep -qx 'restart:xray' "${callLog}"
     [[ ! -e "${reachedFile}" ]]
 
+    : >"${callLog}"
+    rm -f "${reachedFile}"
+    serviceQueueApply() {
+        printf 'apply\n' >>"${callLog}"
+        return 0
+    }
+    subscriptionNotifyControllerRefresh() {
+        printf 'notify\n' >>"${callLog}"
+        return 0
+    }
+    singBoxTuicInstallApply >/dev/null 2>&1
+    singBoxHysteria2InstallApply >/dev/null 2>&1
+    [[ "$(grep -c '^notify$' "${callLog}")" == "2" ]]
+
     (
         local transactionRoot="${root}/transaction"
         local configBackup="${transactionRoot}/config-backup"
