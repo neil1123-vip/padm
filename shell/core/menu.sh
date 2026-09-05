@@ -8,6 +8,7 @@ installMenu() {
         else
             menuLine "首次安装或不知道怎么选时，建议直接选 1；安装后去 订阅与用户 -> 发布与链接 -> 刷新并查看订阅链接"
         fi
+        menuLine "已有 Xray 想保留并补装 sing-box 协议时，请从 协议与入口 -> Hysteria2/Tuic 增量安装"
         menuLine "怎么选：直连/有域名选 1；需要 CDN/反代选 2；没有域名选 3；需要 TLS 指纹抗性可选 4"
         menuLine "高级：想手选核心和协议选 5；旧客户端、迁移或已有 TLS/fallback 架构选 6"
         menuLine "概念：entry 是客户端连接地址；target/SNI 是 Reality 伪装目标，不是同一个概念"
@@ -67,6 +68,7 @@ protocolEntryMenu() {
         echoContent title "\n┌─ 协议与入口 ───────────────────────────────────────"
         menuLine "这里集中管理客户端入口、入站协议和订阅中的连接地址"
         menuLine "证书/静态站点去 站点与证书；分流/阻断去 路由与访问控制"
+        menuLine "已有 Xray 时，Hysteria2/Tuic 可增量启用 sing-box 辅助核心，不会删除 Xray"
         menuItem 1 "REALITY 管理" "目标站、密钥、443 共存分流和 Reality 参数"
         menuItem 2 "XHTTP 管理" "普通/高级/实验分层调整 Reality XHTTP"
         menuItem 3 "Hysteria2 管理" "安装、卸载或管理 UDP 端口跳跃"

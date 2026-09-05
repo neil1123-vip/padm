@@ -497,6 +497,16 @@ Xray access control uses routing + blackhole/direct; sing-box uses remote rule s
 
 The `Cores & services` home view reads only local version, configuration, service, and Xray Geo state. It does not validate configurations or access the network while rendering. The page remains available when neither core is installed, including read-only scans that do not require a local binary. Remote version data is fetched only for an explicit upgrade, rollback, or prerelease trial.
 
+### Xray primary core with sing-box auxiliary core
+
+The project supports keeping Xray as the primary core while enabling sing-box incrementally as an auxiliary core:
+
+1. Install Xray from `Install & reinstall` first.
+2. Open `Protocol & entry`, enter `Hysteria2` or `Tuic`, and choose `Install`.
+3. sing-box is installed separately with its own config fragments and service. Xray's configuration and service remain in place, while subscription and status pages read both cores.
+
+This is not a `--core both` mode; `--core` still accepts only `xray` or `sing-box`. Running a full sing-box installation from `Install & reinstall` switches the primary core and removes Xray. The currently exposed auxiliary-core incremental entries are Hysteria2 and Tuic.
+
 The home view always has six entries:
 
 1. Xray-core lifecycle
