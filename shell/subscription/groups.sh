@@ -876,6 +876,40 @@ setSubscriptionSourceSyncFailure() {
         '.sync_status = "failed" | .last_sync_changed = false | .last_sync_error = {type:$errorType, message:$errorMessage} | .sync_failure_count = $failureCount | .sync_circuit_open_until = $circuitUntil | del(.last_sync_plan)'
 }
 
+setSubscriptionSourcesSyncResults() {
+    local updates=$1
+    local now=${2:-}
+    [[ -n "${now}" ]] || now=$(date +%s) || return 1
+    jq -e -n --argjson updates "${updates}" '
+      $updates | type == "array" and all(.[]?;
+        type == "object" and (.id | type == "string") and
+        ((.kind == "success" and (.changed | type == "boolean") and (.plan | type == "object")) or
+         (.kind == "failure" and (.error_type | type == "string") and (.error_message | type == "string"))))
+    ' >/dev/null 2>&1 || return 1
+    subscriptionActiveGroupWrite --argjson updates "${updates}" --argjson now "${now}" '
+      reduce $updates[] as $update (.;
+        .sources |= map(
+          if .id != $update.id then .
+          elif $update.kind == "success" then
+            .sync_status = "success" |
+            .last_sync_changed = $update.changed |
+            .last_sync_plan = $update.plan |
+            .sync_failure_count = 0 |
+            del(.last_sync_error, .sync_circuit_open_until)
+          else
+            ((.sync_failure_count // 0) + 1) as $failureCount |
+            ([60, 120, 240, 480, 960, 1920][([$failureCount - 1, 5] | min)]) as $backoff |
+            .sync_status = "failed" |
+            .last_sync_changed = false |
+            .last_sync_error = {type:$update.error_type, message:$update.error_message} |
+            .sync_failure_count = $failureCount |
+            .sync_circuit_open_until = ($now + $backoff) |
+            del(.last_sync_plan)
+          end)
+      )
+    '
+}
+
 subscriptionSourceExists() {
     local id=$1
     subscriptionStateIdValid "${id}" || return 1

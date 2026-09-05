@@ -823,7 +823,6 @@ runSubscriptionRemoteSync() {
     local errorType
     local changed
     local plan
-    local stateWriteFailed
     local failures='[]'
     local snapshots='{}'
     local sourceSnapshots
@@ -834,6 +833,7 @@ runSubscriptionRemoteSync() {
     local hasSubscriptions
     local syncMaxTime
     local syncDeadlineEpoch
+    local sourceStateUpdates='[]'
     local -a failureMessages=()
     local -a snapshotEntries=()
     local selfAddress
@@ -888,17 +888,16 @@ runSubscriptionRemoteSync() {
         IFS=$'\t' read -r sourceId status changed plan hasSubscriptions <<<"${resultFields}"
         [[ -n "${sourceId}" ]] || return 1
         [[ -n "${sourceIdSet["${sourceId}"]+x}" ]] || return 1
-        stateWriteFailed=false
         snapshotInvalid=false
         snapshotError=
         case "${status}" in
         self_reference)
-            setSubscriptionSourceSyncFailure "${sourceId}" self_reference "服务器源指向当前订阅服务，已跳过以避免递归同步" || stateWriteFailed=true
+            sourceStateUpdates=$(jq -c --arg id "${sourceId}" --arg errorType self_reference --arg errorMessage "服务器源指向当前订阅服务，已跳过以避免递归同步" '. + [{id:$id,kind:"failure",error_type:$errorType,error_message:$errorMessage}]' <<<"${sourceStateUpdates}") || return 1
             failureMessages+=("远程服务器源 ${sourceId} 指向当前订阅服务，已跳过")
             ;;
         missing_token)
             errorMessage=$(jq -r '.error_detail.message // "未配置控制 token"' <<<"${sourceResult}") || return 1
-            setSubscriptionSourceSyncFailure "${sourceId}" missing_token "${errorMessage}" || stateWriteFailed=true
+            sourceStateUpdates=$(jq -c --arg id "${sourceId}" --arg errorType missing_token --arg errorMessage "${errorMessage}" '. + [{id:$id,kind:"failure",error_type:$errorType,error_message:$errorMessage}]' <<<"${sourceStateUpdates}") || return 1
             failureMessages+=("远程服务器源 ${sourceId} 未配置控制 token")
             ;;
         success)
@@ -934,15 +933,15 @@ runSubscriptionRemoteSync() {
                 snapshotInvalid=true
             fi
             if [[ "${snapshotInvalid}" == "true" ]]; then
-                setSubscriptionSourceSyncFailure "${sourceId}" invalid_response "${snapshotError}" || stateWriteFailed=true
+                sourceStateUpdates=$(jq -c --arg id "${sourceId}" --arg errorType invalid_response --arg errorMessage "${snapshotError}" '. + [{id:$id,kind:"failure",error_type:$errorType,error_message:$errorMessage}]' <<<"${sourceStateUpdates}") || return 1
             else
-                setSubscriptionSourceSyncStatus "${sourceId}" success "${changed}" "${plan}" || stateWriteFailed=true
+                sourceStateUpdates=$(jq -c --arg id "${sourceId}" --argjson changed "${changed}" --argjson plan "${plan}" '. + [{id:$id,kind:"success",changed:$changed,plan:$plan}]' <<<"${sourceStateUpdates}") || return 1
             fi
             ;;
         remote_error)
             errorType=$(jq -r '.error_detail.type // "remote_error"' <<<"${sourceResult}") || return 1
             errorMessage=$(jq -r 'if ((.error_detail.message // "") | length) > 0 then .error_detail.message else (.error // "unknown_error") end' <<<"${sourceResult}") || return 1
-            setSubscriptionSourceSyncFailure "${sourceId}" "${errorType}" "${errorMessage}" || stateWriteFailed=true
+            sourceStateUpdates=$(jq -c --arg id "${sourceId}" --arg errorType "${errorType}" --arg errorMessage "${errorMessage}" '. + [{id:$id,kind:"failure",error_type:$errorType,error_message:$errorMessage}]' <<<"${sourceStateUpdates}") || return 1
             failureMessages+=("远程服务器源 ${sourceId} 拒绝同步: ${errorMessage}")
             ;;
         circuit_open)
@@ -952,12 +951,12 @@ runSubscriptionRemoteSync() {
         unreachable)
             errorType=$(jq -r '.error_detail.type // "unreachable"' <<<"${sourceResult}") || return 1
             errorMessage=$(jq -r '.error_detail.message // "不可达或同步请求失败"' <<<"${sourceResult}") || return 1
-            setSubscriptionSourceSyncFailure "${sourceId}" "${errorType}" "${errorMessage}" || stateWriteFailed=true
+            sourceStateUpdates=$(jq -c --arg id "${sourceId}" --arg errorType "${errorType}" --arg errorMessage "${errorMessage}" '. + [{id:$id,kind:"failure",error_type:$errorType,error_message:$errorMessage}]' <<<"${sourceStateUpdates}") || return 1
             failureMessages+=("远程服务器源 ${sourceId} 不可达或同步请求失败: ${errorMessage}")
             ;;
         internal_error)
             errorMessage=$(jq -r '.error_detail.message // "远程同步结果生成失败"' <<<"${sourceResult}") || return 1
-            setSubscriptionSourceSyncFailure "${sourceId}" internal_error "${errorMessage}" || stateWriteFailed=true
+            sourceStateUpdates=$(jq -c --arg id "${sourceId}" --arg errorType internal_error --arg errorMessage "${errorMessage}" '. + [{id:$id,kind:"failure",error_type:$errorType,error_message:$errorMessage}]' <<<"${sourceStateUpdates}") || return 1
             failureMessages+=("远程服务器源 ${sourceId} 同步结果生成失败: ${errorMessage}")
             ;;
         *)
@@ -967,10 +966,10 @@ runSubscriptionRemoteSync() {
         if [[ "${status}" != "success" ]]; then
             snapshotEntries+=("${sourceId}"$'\t'null)
         fi
-        if [[ "${stateWriteFailed}" == "true" ]]; then
-            failureMessages+=("远程服务器源 ${sourceId} 同步状态写入失败")
-        fi
     done < <(jq -c '.[]' <<<"${syncResults}")
+    if [[ "${sourceStateUpdates}" != '[]' ]] && ! setSubscriptionSourcesSyncResults "${sourceStateUpdates}"; then
+        failureMessages+=("远程服务器源同步状态批量写入失败")
+    fi
     if ((${#snapshotEntries[@]} > 0)); then
         snapshots=$(printf '%s\n' "${snapshotEntries[@]}" | jq -Rsc '
           split("\n") |

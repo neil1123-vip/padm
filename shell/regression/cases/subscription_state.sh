@@ -14,7 +14,7 @@ JSON
 
 writeSubscriptionStateSourceStatusFixture() {
     cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"我的订阅","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"本机","role":"main","transport":"local","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge","name":"Edge","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"example.com","port":443,"enabled":true,"sync_status":"failed","last_sync_error":{"type":"unreachable","message":"old"}}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"我的订阅","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"本机","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge","name":"Edge","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"example.com","port":443,"enabled":true,"sync_status":"failed","last_sync_error":{"type":"unreachable","message":"old"}},{"id":"edge-2","name":"Edge 2","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"example.net","port":444,"enabled":true,"sync_status":"pending"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
 }
 
@@ -390,7 +390,9 @@ runSubscriptionGroupStateStructureSourceStatusRegression() {
     writeSubscriptionStateSourceStatusFixture
     subscriptionHasEnabledRemoteSources
     setSubscriptionSourceEnabled edge false
+    setSubscriptionSourceEnabled edge-2 false
     jq -e '.sources[] | select(.id == "edge" and .enabled == false)' "$(subscriptionGroupsFile)" >/dev/null
+    jq -e '.sources[] | select(.id == "edge-2" and .enabled == false)' "$(subscriptionGroupsFile)" >/dev/null
     if subscriptionHasEnabledRemoteSources; then
         return 1
     fi
@@ -399,6 +401,7 @@ runSubscriptionGroupStateStructureSourceStatusRegression() {
     fi
     jq -e '.sources[] | select(.id == "main" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
     setSubscriptionSourceEnabled edge true
+    setSubscriptionSourceEnabled edge-2 true
     subscriptionHasEnabledRemoteSources
     if setSubscriptionSourceSyncStatus missing success >/dev/null 2>&1 ||
         setSubscriptionSourceSyncFailure missing unreachable error >/dev/null 2>&1; then
@@ -414,6 +417,11 @@ runSubscriptionGroupStateStructureSourceStatusRegression() {
     jq -e '(.sources[] | select(.id == "edge") | .sync_failure_count) == 2' "$(subscriptionGroupsFile)" >/dev/null || return 1
     setSubscriptionSourceSyncStatus edge success true '{"create":[],"remove":[]}'
     jq -e 'any(.sources[]; .id == "edge" and .sync_failure_count == 0 and (has("sync_circuit_open_until") | not) and .sync_status == "success")' "$(subscriptionGroupsFile)" >/dev/null || return 1
+    setSubscriptionSourcesSyncResults '[{"id":"edge","kind":"failure","error_type":"timeout","error_message":"同步超时"},{"id":"edge-2","kind":"success","changed":false,"plan":{"create":[],"remove":[]}}]' 1700000000
+    jq -e '
+      any(.sources[]; .id == "edge" and .sync_failure_count == 1 and .sync_circuit_open_until == 1700000060) and
+      any(.sources[]; .id == "edge-2" and .sync_status == "success" and .last_sync_changed == false)
+    ' "$(subscriptionGroupsFile)" >/dev/null || return 1
 }
 
 runSubscriptionGroupStateStructureSyncCronRegression() {

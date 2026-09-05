@@ -588,11 +588,15 @@ runRemoteControlInlineTokenConsumersRegression() (
         *) jq -cn --argjson dryRun "$(jq -r '.dry_run' <<<"${payload}")" '{ok:true,dry_run:$dryRun,changed:false,plan:{create:[],remove:[]}}' ;;
         esac
     }
-    setSubscriptionSourceSyncStatus() {
-        printf 'status\t%s\t%s\n' "$1" "$2" >>"${statusLog}"
-    }
-    setSubscriptionSourceSyncFailure() {
-        printf 'failure\t%s\t%s\t%s\n' "$1" "$2" "$3" >>"${statusLog}"
+    setSubscriptionSourcesSyncResults() {
+        local update
+        while IFS= read -r update; do
+            if [[ "$(jq -r '.kind' <<<"${update}")" == "success" ]]; then
+                printf 'status\t%s\t%s\n' "$(jq -r '.id' <<<"${update}")" success >>"${statusLog}"
+            else
+                printf 'failure\t%s\t%s\t%s\n' "$(jq -r '.id' <<<"${update}")" "$(jq -r '.error_type' <<<"${update}")" "$(jq -r '.error_message' <<<"${update}")" >>"${statusLog}"
+            fi
+        done < <(jq -c '.[]' <<<"$1")
     }
     planResponse=$(subscriptionRemoteSyncPlanForSource "${remoteSourceJson}" "${desiredUsersBySourceJson}" 2>/dev/null || true)
     [[ -n "${planResponse}" ]] || return 1
@@ -767,11 +771,15 @@ runRemoteControlInlineSyncRunnerRegression() (
                 '{source_id:"edge-remote", status:"success", dry_run:false, request:$request, response:$response}'
         fi
     }
-    setSubscriptionSourceSyncStatus() {
-        printf 'status\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >>"${statusLog}"
-    }
-    setSubscriptionSourceSyncFailure() {
-        printf 'failure\t%s\t%s\t%s\n' "$1" "$2" "$3" >>"${statusLog}"
+    setSubscriptionSourcesSyncResults() {
+        local update
+        while IFS= read -r update; do
+            if [[ "$(jq -r '.kind' <<<"${update}")" == "success" ]]; then
+                printf 'status\t%s\t%s\t%s\t%s\n' "$(jq -r '.id' <<<"${update}")" success "$(jq -r '.changed' <<<"${update}")" "$(jq -c '.plan' <<<"${update}")" >>"${statusLog}"
+            else
+                printf 'failure\t%s\t%s\t%s\n' "$(jq -r '.id' <<<"${update}")" "$(jq -r '.error_type' <<<"${update}")" "$(jq -r '.error_message' <<<"${update}")" >>"${statusLog}"
+            fi
+        done < <(jq -c '.[]' <<<"$1")
     }
 
     syncResult=$(runSubscriptionRemoteSync 2>/dev/null || true)
@@ -792,12 +800,10 @@ runRemoteControlInlineSyncRunnerRegression() (
     ! grep -q '^status	' "${statusLog}" || return 1
     snapshotMode=valid
 
-    setSubscriptionSourceSyncStatus() {
-        return 71
-    }
+    setSubscriptionSourcesSyncResults() { return 71; }
     syncResult=$(runSubscriptionRemoteSync 2>/dev/null) || return 1
     syncResult=$(jq -c . <<<"${syncResult}") || return 1
-    jq -e '.failures == ["远程服务器源 edge-remote 同步状态写入失败"] and .snapshots["edge-remote"].sub_team_a.default == "dmxlc3M6Ly9zbmFwc2hvdA=="' <<<"${syncResult}" >/dev/null
+    jq -e '.failures == ["远程服务器源同步状态批量写入失败"] and .snapshots["edge-remote"].sub_team_a.default == "dmxlc3M6Ly9zbmFwc2hvdA=="' <<<"${syncResult}" >/dev/null
 )
 
 runRemoteControlInlineSyncParallelRunnerRegression() (
@@ -844,11 +850,15 @@ runRemoteControlInlineSyncParallelRunnerRegression() (
             ;;
         esac
     }
-    setSubscriptionSourceSyncStatus() {
-        printf 'status\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >>"${statusLog}"
-    }
-    setSubscriptionSourceSyncFailure() {
-        printf 'failure\t%s\t%s\t%s\n' "$1" "$2" "$3" >>"${statusLog}"
+    setSubscriptionSourcesSyncResults() {
+        local update
+        while IFS= read -r update; do
+            if [[ "$(jq -r '.kind' <<<"${update}")" == "success" ]]; then
+                printf 'status\t%s\t%s\t%s\t%s\n' "$(jq -r '.id' <<<"${update}")" success "$(jq -r '.changed' <<<"${update}")" "$(jq -c '.plan' <<<"${update}")" >>"${statusLog}"
+            else
+                printf 'failure\t%s\t%s\t%s\n' "$(jq -r '.id' <<<"${update}")" "$(jq -r '.error_type' <<<"${update}")" "$(jq -r '.error_message' <<<"${update}")" >>"${statusLog}"
+            fi
+        done < <(jq -c '.[]' <<<"$1")
     }
 
     syncResult=$(runSubscriptionRemoteSync 2>/dev/null || true)
