@@ -468,7 +468,55 @@ JSON
     currentInstallProtocolType="${oldCurrentInstallProtocolType}"
 }
 
+runProtocolConfigOwnershipRegression() (
+    set -euo pipefail
+    source "${PROJECT_ROOT}/shell/core/state.sh"
+    local root="${TMP_DIR}/protocol-config-ownership"
+    local configPath="${root}/xray" singBoxConfigPath="${root}/sing-box" coreInstallType=1
+    local id file expected
+    mkdir -p "${configPath}" "${singBoxConfigPath}"
+    for id in 1 2 3 4 5 23 26 28 29 30 31; do
+        file=$(protocolCapabilityMeta "${id}" config_file)
+        printf '{"inbounds":[]}\n' >"${configPath}/${file}"
+        printf '{"inbounds":[]}\n' >"${singBoxConfigPath}/${file}"
+        expected=${configPath}
+        [[ "$(protocolCapabilityMeta "${id}" project_core)" != "sing-box" ]] || expected=${singBoxConfigPath}
+        assertEquals "${expected}/${file}" "$(protocolConfigFile "${id}")" "config-owner:${id}"
+        rm "${expected}/${file}"
+        if [[ "$(protocolCapabilityMeta "${id}" project_core)" != "xray,sing-box" ]]; then
+            regressionExpectStatus 1 protocolConfigFile "${id}"
+        else
+            assertEquals "${singBoxConfigPath}/${file}" "$(protocolConfigFile "${id}")" "config-aux-only:${id}"
+        fi
+    done
+    coreInstallType=2
+    configPath=${singBoxConfigPath}
+    singBoxConfigPath=
+    assertEquals "${configPath}/07_VLESS_vision_reality_inbounds.json" "$(protocolConfigFile 1)" single-singbox-config
+    regressionExpectStatus 1 protocolConfigFile 2
+    regressionExpectStatus 1 protocolConfigFile 999
+
+    coreInstallType=1
+    configPath="${root}/primary/"
+    singBoxConfigPath="${root}/auxiliary/"
+    mkdir -p "${configPath}" "${singBoxConfigPath}"
+    printf '{"inbounds":[{"listen_port":14443,"tls":{"server_name":"aux.example"}}]}\n' >"${singBoxConfigPath}07_VLESS_vision_reality_inbounds.json"
+    printf '{"inbounds":[{"listen_port":24443}]}\n' >"${singBoxConfigPath}28_trojan_TCP_direct_inbounds.json"
+    printf '{"inbounds":[{"listen_port":34443}]}\n' >"${singBoxConfigPath}30_shadowsocks_inbounds.json"
+    printf 'publicKey:aux-key\n' >"${singBoxConfigPath}reality_key"
+    readInstallProtocolType
+    for id in 1 28 30; do currentProtocolHas "${id}"; done
+    assertEquals 14443 "${singBoxVLESSRealityVisionPort}" auxiliary-vision-port
+    assertEquals aux.example "${singBoxVLESSRealityVisionSNI}" auxiliary-vision-sni
+    assertEquals aux-key "${singBoxVLESSRealityPublicKey}" auxiliary-vision-key
+    assertEquals 24443 "${singBoxTrojanPort}" auxiliary-trojan-port
+    assertEquals 34443 "${singBoxShadowsocksPort}" auxiliary-shadowsocks-port
+    readConfigHostPathUUID 2>"${root}/host-errors"
+    [[ ! -s "${root}/host-errors" ]]
+)
+
 runProtocolCapabilitiesRegression() {
+    runRegressionStep protocol-config-ownership runProtocolConfigOwnershipRegression
     runRegressionStep protocol-capability-registry runProtocolCapabilityRegistryRegression
     runRegressionStep protocol-capability-menu-core runProtocolCapabilityMenuAndCoreRegression
     runRegressionStep protocol-capability-nginx-topology runProtocolCapabilityNginxTopologyRegression

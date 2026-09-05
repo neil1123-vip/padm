@@ -165,10 +165,8 @@ showHysteriaAccounts() {
     if currentProtocolHas 3 || [[ -n "${hysteriaPort:-}" ]]; then
         readPortHopping "hysteria2" "${singBoxHysteria2Port}"
         subscribeSectionTitle "Hysteria2 TLS" "UDP/移动网络可选"
-        local path="${configPath}"
-        if [[ "${coreInstallType}" == "1" ]]; then
-            path="${singBoxConfigPath}"
-        fi
+        local configFile
+        configFile=$(protocolConfigFile 3) || return 1
         local hysteria2DefaultPort=
         if [[ -n "${hysteria2PortHoppingStart}" && -n "${hysteria2PortHoppingEnd}" ]]; then
             hysteria2DefaultPort="${hysteria2PortHopping}"
@@ -176,7 +174,7 @@ showHysteriaAccounts() {
             hysteria2DefaultPort=${singBoxHysteria2Port}
         fi
 
-        jq -r -c '.inbounds[]|.users[]' "${path}06_hysteria2_inbounds.json" | while read -r user; do
+        jq -r -c '.inbounds[]|.users[]' "${configFile}" | while read -r user; do
             local name password
             IFS=$'\037' read -r _ _ password _ name _ <<<"$(subscriptionAccountProfile "${user}")"
             subscribeAccountTitle "${name}"
@@ -251,15 +249,13 @@ showTuicAccounts() {
     if currentProtocolHas 31 || [[ -n "${tuicPort:-}" ]]; then
         readPortHopping "tuic" "${singBoxTuicPort}"
         subscribeSectionTitle "Tuic TLS" "UDP/移动网络可选"
-        local path="${configPath}"
-        if [[ "${coreInstallType}" == "1" ]]; then
-            path="${singBoxConfigPath}"
-        fi
+        local configFile
+        configFile=$(protocolConfigFile 31) || return 1
         local tuicDefaultPort=${singBoxTuicPort}
         if [[ -n "${tuicPortHoppingStart:-}" && -n "${tuicPortHoppingEnd:-}" ]]; then
             tuicDefaultPort="${tuicPortHopping}"
         fi
-        jq -r -c '.inbounds[].users[]' "${path}09_tuic_inbounds.json" | while read -r user; do
+        jq -r -c '.inbounds[].users[]' "${configFile}" | while read -r user; do
             local name uuid password
             IFS=$'\037' read -r _ _ password _ name uuid <<<"$(subscriptionAccountProfile "${user}")"
             subscribeAccountTitle "${name}"

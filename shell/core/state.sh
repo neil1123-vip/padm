@@ -191,6 +191,7 @@ readInstallType() {
 
 # 读取协议类型
 readInstallProtocolType() {
+    local configFile
     PADM_INSTALL_STATUS_READY=0
     currentInstallProtocolType=
     frontingType=
@@ -415,12 +416,24 @@ readInstallProtocolType() {
     )
 
     if [[ "${coreInstallType}" == "1" && -n "${singBoxConfigPath}" ]]; then
+        local protocolId
+        while IFS= read -r protocolId; do
+            [[ -n "${protocolId}" ]] || continue
+            configFile=$(protocolCapabilityMeta "${protocolId}" config_file 2>/dev/null || true)
+            [[ -n "${configFile}" && -f "${singBoxConfigPath}${configFile}" ]] || continue
+            protocolStateAdd "${protocolId}"
+        done < <(protocolCapabilityIdsByProjectCore sing-box | tr ',' '\n')
         if [[ -f "${singBoxConfigPath}06_hysteria2_inbounds.json" ]]; then
-            protocolStateAdd 3
             singBoxHysteria2Port=$(jq .inbounds[0].listen_port "${singBoxConfigPath}06_hysteria2_inbounds.json")
         fi
+        if [[ -f "${singBoxConfigPath}07_VLESS_vision_reality_inbounds.json" ]]; then
+            singBoxVLESSRealityVisionPort=$(jq -r '.inbounds[0].listen_port' "${singBoxConfigPath}07_VLESS_vision_reality_inbounds.json")
+            singBoxVLESSRealityVisionSNI=$(jq -r '.inbounds[0].tls.server_name // empty' "${singBoxConfigPath}07_VLESS_vision_reality_inbounds.json")
+            if [[ -f "${singBoxConfigPath}reality_key" ]]; then
+                singBoxVLESSRealityPublicKey=$(awk -F ':' '/publicKey/ {print $2; exit}' "${singBoxConfigPath}reality_key")
+            fi
+        fi
         if [[ -f "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json" ]]; then
-            protocolStateAdd 26
             singBoxVLESSRealityGRPCPort=$(jq -r '.inbounds[0].listen_port' "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json")
             singBoxVLESSRealityGRPCSNI=$(jq -r '.inbounds[0].tls.server_name // empty' "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json")
             currentRealityPrivateKey=$(jq -r '.inbounds[0].tls.reality.private_key // empty' "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json")
@@ -441,15 +454,12 @@ readInstallProtocolType() {
             fi
         fi
         if [[ -f "${singBoxConfigPath}09_tuic_inbounds.json" ]]; then
-            protocolStateAdd 31
             singBoxTuicPort=$(jq .inbounds[0].listen_port "${singBoxConfigPath}09_tuic_inbounds.json")
         fi
         if [[ -f "${singBoxConfigPath}10_naive_inbounds.json" ]]; then
-            protocolStateAdd 5
             singBoxNaivePort=$(jq -r '.inbounds[0].listen_port' "${singBoxConfigPath}10_naive_inbounds.json")
         fi
         if [[ -f "${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json" ]]; then
-            protocolStateAdd 23
             singBoxVMessHTTPUpgradePort=$(awk '
               /listen/ {
                 for (i = 1; i <= NF; i++) {
@@ -467,8 +477,13 @@ readInstallProtocolType() {
             fi
         fi
         if [[ -f "${singBoxConfigPath}13_anytls_inbounds.json" ]]; then
-            protocolStateAdd 4
             singBoxAnyTLSPort=$(jq -r '.inbounds[0].listen_port' "${singBoxConfigPath}13_anytls_inbounds.json")
+        fi
+        if [[ -f "${singBoxConfigPath}28_trojan_TCP_direct_inbounds.json" ]]; then
+            singBoxTrojanPort=$(jq -r '.inbounds[0].listen_port' "${singBoxConfigPath}28_trojan_TCP_direct_inbounds.json")
+        fi
+        if [[ -f "${singBoxConfigPath}30_shadowsocks_inbounds.json" ]]; then
+            singBoxShadowsocksPort=$(jq -r '.inbounds[0].listen_port' "${singBoxConfigPath}30_shadowsocks_inbounds.json")
         fi
     fi
     if [[ "${currentInstallProtocolType:0:1}" != "," ]]; then
@@ -862,7 +877,7 @@ readConfigHostPathUUID() {
         fi
 
         # reality
-        if currentProtocolHas 1; then
+        if currentProtocolHas 1 && [[ -f "${configPath}07_VLESS_vision_reality_inbounds.json" ]]; then
 
             currentClients=$(jq -r .inbounds[1].settings.clients ${configPath}07_VLESS_vision_reality_inbounds.json)
             currentUUID=$(jq -r .inbounds[1].settings.clients[0].id ${configPath}07_VLESS_vision_reality_inbounds.json)

@@ -76,6 +76,28 @@ protocolCapabilityMeta() {
     protocolCapabilityRegistry | awk -F'|' -v id="${protocolId}" -v idx="${fieldIndex}" '$1 == id { print $idx; found = 1; exit } END { exit found ? 0 : 1 }'
 }
 
+protocolConfigFile() {
+    local protocolId=$1
+    local configFile protocolCore configDir candidate
+    configFile=$(protocolCapabilityMeta "${protocolId}" config_file) || return 1
+    [[ -n "${configFile}" ]] || return 1
+    protocolCore=$(protocolCapabilityMeta "${protocolId}" project_core) || return 1
+    if [[ "${coreInstallType:-}" != "2" && ",${protocolCore}," == *",xray,"* && -n "${configPath:-}" ]]; then
+        candidate=$(padmManagedFilePath "${configPath}" "${configFile}") || return 1
+        if [[ -f "${candidate}" ]]; then
+            printf '%s\n' "${candidate}"
+            return 0
+        fi
+    fi
+    [[ ",${protocolCore}," == *",sing-box,"* ]] || return 1
+    configDir=${singBoxConfigPath:-}
+    [[ "${coreInstallType:-}" != "2" ]] || configDir=${configDir:-${configPath:-}}
+    [[ -n "${configDir}" ]] || return 1
+    candidate=$(padmManagedFilePath "${configDir}" "${configFile}") || return 1
+    [[ -f "${candidate}" ]] || return 1
+    printf '%s\n' "${candidate}"
+}
+
 protocolCapabilityIdsByCategory() {
     local category=$1
     protocolCapabilityRegistry | awk -F'|' -v category="${category}" '$3 == category { print $1 }' | paste -sd ','
