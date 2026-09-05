@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 runRoutingRegression() {
+    runXrayDNSCustomConfigRegression
     runDNSRoutingCustomConfigRegression
     local routingRootRel="${TMP_DIR}/routing-core"
     local routingRoot
@@ -451,6 +452,46 @@ JSON
     [[ "$(validateAccessIPList '1.1.1.1, 1.1.1.1,2001:db8::/32,cn')" == "1.1.1.1,2001:db8::/32,cn" ]]
     ! validateAccessIPList 'bad-ip' >/dev/null
 }
+
+runXrayDNSCustomConfigRegression() (
+    local root="${TMP_DIR}/xray-dns-custom-config"
+    local configPath="${root}/xray/"
+    local singBoxConfigPath= coreInstallType=1
+    local PADM_DNS_ROUTING_BACKUP_DIR="${root}/backup"
+    local initial
+    mkdir -p "${configPath}"
+    reloadCore() { return 0; }
+    getDLCMatchedRuleValue() { printf 'domain:%s\n' "$1"; }
+    cat >"${configPath}11_dns.json" <<'JSON'
+{
+  "dns": {
+    "servers": ["custom-dns"],
+    "hosts": {"domain:custom.example": "192.0.2.1"}
+  }
+}
+JSON
+    initial=$(jq -Sc . "${configPath}11_dns.json")
+    addXrayDNSConfig "203.0.113.53" "example.com"
+    updateXrayDNSRoutingConfig add-sni '{"servers":["8.8.8.8"],"hosts":{"domain:padm.example":"192.0.2.2"}}'
+    jq -e '
+        (.dns.servers | index("custom-dns")) and
+        .dns.hosts["domain:custom.example"] == "192.0.2.1" and
+        any(.dns.servers[] | objects; .address == "203.0.113.53") and
+        (.dns.servers | index("8.8.8.8")) and
+        .dns.hosts["domain:padm.example"] == "192.0.2.2"
+    ' "${configPath}11_dns.json" >/dev/null
+    jq -e '.dns.servers and .sni.servers and .sni.hosts' "${configPath}dns_routing.state" >/dev/null
+    removeUnlockDNS
+    jq -e '
+        (.dns.servers | index("custom-dns")) and
+        .dns.hosts["domain:custom.example"] == "192.0.2.1" and
+        (any(.dns.servers[] | objects; .address == "203.0.113.53") | not)
+    ' "${configPath}11_dns.json" >/dev/null
+    jq -e '(.dns.servers | index("8.8.8.8")) and .dns.hosts["domain:padm.example"] == "192.0.2.2"' "${configPath}11_dns.json" >/dev/null
+    removeUnlockSNI
+    [[ "$(jq -Sc . "${configPath}11_dns.json")" == "${initial}" ]]
+    [[ ! -e "${configPath}dns_routing.state" ]]
+)
 
 runDNSRoutingCustomConfigRegression() (
     local coreInstallType=2 configPath=''
