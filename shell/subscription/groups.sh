@@ -116,6 +116,10 @@ subscriptionGroupsSchemaVersion() {
     echo 6
 }
 
+subscriptionGroupSyncDefaultInterval() {
+    printf '10\n'
+}
+
 subscriptionStateIdValid() {
     local id=${1:-}
     [[ "${id}" =~ ^[A-Za-z0-9_-]+$ ]] && ((${#id} <= 64))
@@ -153,7 +157,7 @@ writeDefaultSubscriptionGroupsState() {
   "user_groups": [],
   "sync": {
     "enabled": true,
-    "interval_minutes": 10,
+    "interval_minutes": $(subscriptionGroupSyncDefaultInterval),
     "last_run": "",
     "last_status": "pending",
     "failures": [],

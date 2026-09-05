@@ -408,6 +408,17 @@ runSubscriptionGroupStateStructureSourceStatusRegression() {
 
 runSubscriptionGroupStateStructureSyncCronRegression() {
     mkdir -p "$(subscriptionGroupsDir)"
+    [[ "$(subscriptionGroupSyncDefaultInterval)" == "10" ]]
+    writeDefaultSubscriptionGroupsState "${TMP_DIR}/sync-defaults.json"
+    jq -e '.sync.interval_minutes == 10' "${TMP_DIR}/sync-defaults.json" >/dev/null
+    (
+        local syncState='{"sync":{}}'
+        subscriptionActiveGroupRead() { jq "$@" <<<"${syncState}"; }
+        [[ "$(subscriptionGroupSyncCronCommand)" == *'padm_minute / 10 * 10'* ]]
+        subscriptionGroupsStateSummaryJson | jq -e '.sync.interval_minutes == 10' >/dev/null
+        syncState='{"sync":{"interval_minutes":60}}'
+        [[ "$(subscriptionGroupSyncCronCommand)" == *'padm_minute / 10 * 10'* ]]
+    )
     writeSubscriptionStateSourceStatusFixture
     setSubscriptionGroupSyncInterval 17
     (
@@ -2263,8 +2274,46 @@ JSON
     planMode=empty
     trafficMode=success
     baselineMode=true
-    runSubscriptionGroupSyncUnlocked
-    [[ "$(<"${callLog}")" == "traffic" ]]
+    (
+        subscriptionSyncCreateLocalApplyBackups() { printf 'backup\n' >>"${callLog}"; return 1; }
+        runSubscriptionGroupSync
+        [[ ! -s "${callLog}" ]]
+        [[ "$(<"${resultStatus}")" == "success" && "$(<"${resultFailures}")" == '[]' ]]
+
+        subscriptionRemoteControlSources() { printf '[{"id":"edge"}]\n'; }
+        subscriptionRemoteScopeEnabled() { return 0; }
+        runSubscriptionRemoteSync() {
+            printf 'remote\n' >>"${callLog}"
+            printf '{"failures":[],"snapshots":{"edge":{}}}\n'
+        }
+        readNginxSubscribe() { subscribePort=443; }
+        refreshPublishedSubscriptions() {
+            printf 'publish\n' >>"${callLog}"
+            [[ "$1" == '{"edge":{}}' ]]
+        }
+        runSubscriptionGroupSync
+        [[ "$(<"${callLog}")" == $'remote\npublish\ntraffic' ]]
+        [[ "$(<"${resultStatus}")" == "success" ]]
+
+        : >"${callLog}"
+        subscriptionSyncPlan() { return 1; }
+        regressionExpectStatus 1 runSubscriptionGroupSync
+        [[ ! -s "${callLog}" ]]
+        [[ "$(<"${resultStatus}")" == "partial" ]]
+    )
+
+    : >"${callLog}"
+    subscriptionActiveGroupWrite 'del(.user_groups[0].uuid)'
+    subscriptionSyncGenerateUUID() { printf '22222222-2222-4222-8222-222222222222\n'; }
+    runSubscriptionGroupSync
+    [[ "$(<"${callLog}")" == 'traffic' ]]
+    subscriptionActiveGroupRead -e '.user_groups[0].uuid == "22222222-2222-4222-8222-222222222222"' >/dev/null
+
+    : >"${callLog}"
+    subscriptionGroupQuotaAutoApplyEnabled() { return 0; }
+    subscriptionQuotaDryRunPlan() { printf 'quota\n' >>"${callLog}"; printf '[]\n'; }
+    runSubscriptionGroupSync
+    [[ "$(<"${callLog}")" == $'traffic\nquota' ]]
 )
 
 runSubscriptionGroupsLockTimeoutRegression() (

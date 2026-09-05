@@ -1468,6 +1468,7 @@ manageSubscriptionSyncSettings() {
     local syncSettingsStatus=
     local targetSyncEnabled
     local interval=
+    local defaultInterval
     local lastStatus lastRun failureCount summary
     role=$(subscriptionCurrentRoleNormalized) || {
         subscriptionRequireLocalPublisherRole
@@ -1479,7 +1480,8 @@ manageSubscriptionSyncSettings() {
     }
     [[ "${role}" == "main" ]] && returnText="返回主控首页" || returnText="返回本机订阅首页"
     while true; do
-        syncStatus=$(subscriptionActiveGroupRead -c '{enabled:(.sync.enabled == true), interval_minutes:(.sync.interval_minutes // 10), last_run:(.sync.last_run // ""), last_status:(.sync.last_status // "pending"), failure_count:((.sync.failures // []) | length)}') || return 1
+        defaultInterval=$(subscriptionGroupSyncDefaultInterval) || return 1
+        syncStatus=$(subscriptionActiveGroupRead --argjson defaultInterval "${defaultInterval}" -c '{enabled:(.sync.enabled == true), interval_minutes:(.sync.interval_minutes // $defaultInterval), last_run:(.sync.last_run // ""), last_status:(.sync.last_status // "pending"), failure_count:((.sync.failures // []) | length)}') || return 1
         summary=$(jq -r '[if .enabled then "开启" else "关闭" end, (.interval_minutes | tostring), .last_status, (if .last_run == "" then "未运行" else .last_run end), (.failure_count | tostring)] | @tsv' <<<"${syncStatus}") || return 1
         IFS=$'\t' read -r enabledText interval lastStatus lastRun failureCount <<<"${summary}"
         echoContent title "\n┌─ 订阅同步 ─────────────────────────────────────────"

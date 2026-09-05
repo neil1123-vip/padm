@@ -1158,6 +1158,10 @@ runSubscriptionGroupSyncUnlocked() {
     local remoteSources='[]'
     local remotePublishReady=false
     local publishedWithRemoteFailures=false
+    local localSyncPlanReady=false
+    local localSyncWorkRequired=false
+    local missingUserUUIDs
+    local quotaAutoApply=false
     local rc=0
     ensureSubscriptionGroupsState || return 1
     readInstallType
@@ -1169,21 +1173,38 @@ runSubscriptionGroupSyncUnlocked() {
         return 1
     }
 
-    if subscriptionLocalTrafficBaselineExists; then
+    # Keep this preflight read-only so UUID initialization remains rollback-safe.
+    if ! syncPlan=$(subscriptionSyncPlan) ||
+        ! subscriptionSyncValidateAccountPlan "${syncPlan}" ||
+        ! missingUserUUIDs=$(subscriptionActiveGroupRead -r 'any(.user_groups[]?; .enabled == true and (.uuid // "") == "")'); then
+        failureMessages+=("本机同步计划计算失败")
+        rc=1
+    else
+        localSyncPlanReady=true
+        if [[ "${missingUserUUIDs}" == "true" ]] ||
+            jq -e '(.create | length > 0) or (.remove | length > 0)' <<<"${syncPlan}" >/dev/null 2>&1; then
+            localSyncWorkRequired=true
+        fi
+    fi
+    subscriptionGroupQuotaAutoApplyEnabled && quotaAutoApply=true
+
+    if [[ "${localSyncWorkRequired}" == "true" || "${quotaAutoApply}" == "true" ]] && subscriptionLocalTrafficBaselineExists; then
         localTrafficBaseline=true
     fi
     SUBSCRIPTION_TRAFFIC_LOCAL_COMMITTED=false
-    if collectSubscriptionTraffic; then
-        trafficCollected=true
-        localTrafficReady=true
-    elif [[ "${SUBSCRIPTION_TRAFFIC_LOCAL_COMMITTED:-false}" == "true" ]]; then
-        localTrafficReady=true
-        statusCard "流量统计" "同步前部分来源采集失败，成功来源已更新，失败来源保留旧统计"
-    else
-        statusCard "流量统计" "同步前流量快照不完整，已保留旧统计"
+    if [[ "${localSyncWorkRequired}" == "true" || "${quotaAutoApply}" == "true" ]]; then
+        if collectSubscriptionTraffic; then
+            trafficCollected=true
+            localTrafficReady=true
+        elif [[ "${SUBSCRIPTION_TRAFFIC_LOCAL_COMMITTED:-false}" == "true" ]]; then
+            localTrafficReady=true
+            statusCard "流量统计" "同步前部分来源采集失败，成功来源已更新，失败来源保留旧统计"
+        else
+            statusCard "流量统计" "同步前流量快照不完整，已保留旧统计"
+        fi
     fi
 
-    if subscriptionGroupQuotaAutoApplyEnabled; then
+    if [[ "${quotaAutoApply}" == "true" ]]; then
         if [[ "${trafficCollected}" == "true" ]]; then
             if ! quotaPlan=$(subscriptionQuotaDryRunPlan); then
                 failureMessages+=("限额自动执行计划生成失败")
@@ -1203,7 +1224,11 @@ runSubscriptionGroupSyncUnlocked() {
         fi
     fi
 
-    subscriptionSyncCreateLocalApplyBackups configBackupDir outputBackupDir groupsBackupFile || {
+    if [[ "${localSyncPlanReady}" != "true" ]]; then
+        :
+    elif [[ "${localSyncWorkRequired}" != "true" && "${quotaAutoApply}" != "true" ]]; then
+        localSyncReady=true
+    elif ! subscriptionSyncCreateLocalApplyBackups configBackupDir outputBackupDir groupsBackupFile; then
         failureMessages+=("本机同步前配置备份失败")
         if [[ "${SUBSCRIPTION_SYNC_LOCAL_APPLY_BACKUP_STAGE:-}" == "config" ]]; then
             failureMessages+=("本机同步前订阅输出备份失败")
@@ -1212,7 +1237,7 @@ runSubscriptionGroupSyncUnlocked() {
             groupsBackupFile=
         fi
         rc=1
-    }
+    fi
     if [[ -n "${configBackupDir}" && -n "${outputBackupDir}" && -n "${groupsBackupFile}" ]]; then
         if ! subscriptionSyncEnsureEnabledUserUUIDs; then
             localSyncFailure="本机同步 UUID 初始化失败"
@@ -1275,7 +1300,7 @@ runSubscriptionGroupSyncUnlocked() {
             groupsBackupFile=
             localSyncReady=true
         fi
-    else
+    elif [[ "${localSyncReady}" != "true" ]]; then
         rc=1
     fi
 
@@ -1430,8 +1455,10 @@ subscriptionGroupSyncCronFile() {
 
 subscriptionGroupSyncCronCommand() {
     local interval
-    interval=$(subscriptionActiveGroupRead -r '(.sync.interval_minutes // 10) | tonumber? // 10') || return 1
-    subscriptionGroupSyncIntervalValid "${interval}" || interval=10
+    local defaultInterval
+    defaultInterval=$(subscriptionGroupSyncDefaultInterval) || return 1
+    interval=$(subscriptionActiveGroupRead --argjson defaultInterval "${defaultInterval}" -r '(.sync.interval_minutes // $defaultInterval) | tonumber? // $defaultInterval') || return 1
+    subscriptionGroupSyncIntervalValid "${interval}" || interval=${defaultInterval}
     printf '* * * * * padm_minute=$(( $(date +\\%%s) / 60 )); [ $((padm_minute / %s * %s)) -eq "$padm_minute" ] && /bin/bash /etc/padm/install.sh SyncSubscriptionGroups >> %s 2>&1\n' \
         "${interval}" \
         "${interval}" \

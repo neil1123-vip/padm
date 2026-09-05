@@ -2,8 +2,10 @@
 
 subscriptionGroupsStateSummaryJson() {
     local localOnly=false
+    local defaultInterval
     [[ "$(subscriptionCurrentRoleNormalized)" == "uninitialized" ]] && localOnly=true
-    PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 subscriptionActiveGroupRead --argjson localOnly "${localOnly}" '
+    defaultInterval=$(subscriptionGroupSyncDefaultInterval) || return 1
+    PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 subscriptionActiveGroupRead --argjson localOnly "${localOnly}" --argjson defaultInterval "${defaultInterval}" '
       {
         group_id: .id,
         group_name: .name,
@@ -13,7 +15,7 @@ subscriptionGroupsStateSummaryJson() {
         enabled_remote_sources: (if $localOnly then 0 else ([.sources[]? | select(.role != "main" and .enabled == true)] | length) end),
         sync: {
           enabled: (.sync.enabled == true),
-          interval_minutes: (.sync.interval_minutes // 10),
+          interval_minutes: (.sync.interval_minutes // $defaultInterval),
           quota_auto_apply: (.sync.quota_auto_apply // false),
           last_run: (.sync.last_run // ""),
           last_status: (.sync.last_status // "pending"),
