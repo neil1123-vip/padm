@@ -166,6 +166,7 @@ subscriptionRemoteControlRequest() {
     local statusCode
     local body
     local requestStatus=1
+    local retryDelay=1
     token=$(jq -r '.control_token // empty' <<<"${source}") || return 1
     [[ -n "${token}" ]] || return 2
     url=$(subscriptionRemoteControlUrl "${source}" "${endpoint}") || return 1
@@ -205,6 +206,7 @@ subscriptionRemoteControlRequest() {
         remainingTime=$((deadline - SECONDS))
         ((remainingTime > 0)) || return "${requestStatus}"
         curlArgs[4]="${remainingTime}"
+        ((remainingTime > retryDelay)) && sleep "${retryDelay}"
         response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" <<<"${payload}" 2>/dev/null) || {
             requestStatus=$?
             return "${requestStatus}"
@@ -212,6 +214,21 @@ subscriptionRemoteControlRequest() {
     fi
     statusCode=${response##*$'\n'}
     body=${response%$'\n'*}
+    if [[ "${SUBSCRIPTION_SYNC_ROLLBACK:-false}" != "true" && ( "${statusCode}" == "429" || "${statusCode}" == "503" ) ]]; then
+        remainingTime=$((deadline - SECONDS))
+        if ((remainingTime > retryDelay)); then
+            sleep "${retryDelay}"
+            remainingTime=$((deadline - SECONDS))
+            ((remainingTime > 0)) || return 0
+            curlArgs[4]="${remainingTime}"
+            response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" <<<"${payload}" 2>/dev/null) || {
+                requestStatus=$?
+                return "${requestStatus}"
+            }
+            statusCode=${response##*$'\n'}
+            body=${response%$'\n'*}
+        fi
+    fi
     if ! body=$(jq -c . <<<"${body}" 2>/dev/null); then
         jq -n --arg statusCode "${statusCode}" '{ok:false, error:"invalid_response", error_detail:{type:"invalid_response", message:"远端响应不是合法 JSON"}, http_status: ($statusCode | tonumber? // 0)}'
         return 0
@@ -530,6 +547,9 @@ subscriptionRemoteCollectParallelResults() {
     local -a resultList=()
     local -a workerArgs=("$@")
     local pids=()
+    local maxConcurrency=${PADM_REMOTE_SYNC_MAX_CONCURRENCY:-8}
+
+    [[ "${maxConcurrency}" =~ ^[1-9][0-9]*$ ]] || maxConcurrency=8
 
     [[ "${sources}" == '[]' ]] && { printf '[]\n'; return 0; }
     padmCreateTmpRootPath tmpDir "${tmpPattern}" -d || return 1
@@ -548,6 +568,10 @@ subscriptionRemoteCollectParallelResults() {
         ) &
         pids+=("$!")
         index=$((index + 1))
+        if ((${#pids[@]} >= maxConcurrency)); then
+            wait "${pids[0]}" 2>/dev/null || true
+            pids=("${pids[@]:1}")
+        fi
     done
     for pid in "${pids[@]}"; do
         wait "${pid}" 2>/dev/null || true

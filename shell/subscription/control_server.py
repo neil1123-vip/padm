@@ -25,6 +25,10 @@ try:
     REQUEST_READ_TIMEOUT = max(0.1, float(os.environ.get("PADM_CONTROL_REQUEST_TIMEOUT", "10") or "10"))
 except ValueError:
     REQUEST_READ_TIMEOUT = 10
+try:
+    LONG_SCRIPT_TIMEOUT = max(0.1, float(os.environ.get("PADM_CONTROL_LONG_SCRIPT_TIMEOUT", "50") or "50"))
+except ValueError:
+    LONG_SCRIPT_TIMEOUT = 50
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -124,7 +128,8 @@ class Handler(BaseHTTPRequestHandler):
                 [bash_bin, SCRIPT_PATH, "SubscriptionControl", endpoint], stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
                 encoding="utf-8", errors="replace", **popen_options)
-            stdout, _ = process.communicate(payload, timeout=None if endpoint in ("sync", "refresh") else SCRIPT_TIMEOUT)
+            timeout = LONG_SCRIPT_TIMEOUT if endpoint in ("sync", "refresh") else SCRIPT_TIMEOUT
+            stdout, _ = process.communicate(payload, timeout=timeout)
         except subprocess.TimeoutExpired:
             if os.name == "posix":
                 try:

@@ -19,7 +19,8 @@ subscriptionGroupsStateSummaryJson() {
           quota_auto_apply: (.sync.quota_auto_apply // false),
           last_run: (.sync.last_run // ""),
           last_status: (.sync.last_status // "pending"),
-          failures: (.sync.failures // [])
+          failures: (.sync.failures // []),
+          failure_details: (.sync.failure_details // [])
         },
         traffic_updated_at: (((.traffic.sources // {}) | to_entries | map(.value.updated_at // empty) | max) // "unknown")
       }'

@@ -955,9 +955,10 @@ subscriptionSyncReconcileLocalServices() {
 subscriptionSyncMarkResult() {
     local status=$1
     local failures=$2
+    local failureDetails=${3:-[]}
     local now
     now=$(date '+%Y-%m-%d %H:%M:%S')
-    subscriptionActiveGroupWrite --arg now "${now}" --arg status "${status}" --argjson failures "${failures}" '.sync.last_run = $now | .sync.last_status = $status | .sync.failures = $failures'
+    subscriptionActiveGroupWrite --arg now "${now}" --arg status "${status}" --argjson failures "${failures}" --argjson failureDetails "${failureDetails}" '.sync.last_run = $now | .sync.last_status = $status | .sync.failures = $failures | .sync.failure_details = $failureDetails'
 }
 
 subscriptionQuotaDryRunPlan() {
@@ -1162,6 +1163,7 @@ runSubscriptionGroupSyncUnlocked() {
     local localSyncWorkRequired=false
     local missingUserUUIDs
     local quotaAutoApply=false
+    local failureDetails='[]'
     local rc=0
     ensureSubscriptionGroupsState || return 1
     readInstallType
@@ -1410,15 +1412,25 @@ runSubscriptionGroupSyncUnlocked() {
     if [[ "${remoteFailures}" != "[]" ]]; then
         failures=$(jq -n --argjson failures "${failures}" --argjson remoteFailures "${remoteFailures}" '$failures + $remoteFailures') || return 1
     fi
+    if [[ "${failures}" != "[]" ]]; then
+        if failureDetails=$(subscriptionActiveGroupRead -c '[.sources[]? | select(.last_sync_error? and (.last_sync_error.type // "") != "") | {source_id:.id, type:.last_sync_error.type, message:(.last_sync_error.message // "")}]' 2>/dev/null); then
+            :
+        else
+            failureDetails='[]'
+        fi
+        failureDetails=$(jq -n --argjson details "${failureDetails}" --argjson failures "${failures}" '$details + [$failures[] | select(test("^远程服务器源 ") | not) | {type:"sync_failure", message:.}]') || return 1
+    else
+        failureDetails='[]'
+    fi
     if [[ "${failures}" == "[]" ]]; then
-        if subscriptionSyncMarkResult success "${failures}"; then
+        if subscriptionSyncMarkResult success "${failures}" "${failureDetails}"; then
             successCard "自动同步完成"
         else
             errorCard "自动同步已执行，但同步结果写入失败"
             return 1
         fi
     else
-        if ! subscriptionSyncMarkResult partial "${failures}"; then
+        if ! subscriptionSyncMarkResult partial "${failures}" "${failureDetails}"; then
             rc=1
         fi
         if [[ "${localSyncReady}" == "true" ]]; then
