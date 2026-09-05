@@ -161,6 +161,7 @@ subscriptionRemoteControlRequest() {
     local connectTimeout=5
     local deadline
     local remainingTime
+    local globalDeadlineEpoch
     local -a curlArgs=()
     local response
     local statusCode
@@ -174,6 +175,12 @@ subscriptionRemoteControlRequest() {
     url=$(subscriptionRemoteControlUrl "${source}" "${endpoint}") || return 1
     if [[ "${endpoint}" == "sync" ]]; then
         maxTime=40
+        globalDeadlineEpoch=${PADM_REMOTE_SYNC_DEADLINE_EPOCH:-}
+        if [[ "${globalDeadlineEpoch}" =~ ^[0-9]+$ ]]; then
+            remainingTime=$((globalDeadlineEpoch - $(date +%s)))
+            ((remainingTime > 0)) || return 28
+            ((remainingTime < maxTime)) && maxTime=${remainingTime}
+        fi
     elif [[ "${endpoint}" == "traffic" ]]; then
         maxTime=${PADM_REMOTE_TRAFFIC_MAX_TIME:-15}
         retryDelay=${PADM_REMOTE_TRAFFIC_RETRY_DELAY:-2}
@@ -825,6 +832,8 @@ runSubscriptionRemoteSync() {
     local snapshotError
     local resultFields
     local hasSubscriptions
+    local syncMaxTime
+    local syncDeadlineEpoch
     local -a failureMessages=()
     local -a snapshotEntries=()
     local selfAddress
@@ -842,6 +851,9 @@ runSubscriptionRemoteSync() {
     if selfAddress=$(subscriptionWireGuardReadState | jq -r '.address // empty'); then
         workerArgs=("${selfAddress}")
     fi
+    syncMaxTime=${PADM_REMOTE_SYNC_MAX_TIME:-45}
+    [[ "${syncMaxTime}" =~ ^[1-9][0-9]*$ ]] || syncMaxTime=45
+    syncDeadlineEpoch=$(( $(date +%s) + syncMaxTime ))
     sourceMetadataRows=$(jq -r -s '
       .[0] as $sources |
       .[1] as $desiredUsersBySource |
@@ -855,7 +867,7 @@ runSubscriptionRemoteSync() {
         sourceIdSet["${sourceId}"]=1
         expectedAccountsBySource["${sourceId}"]=${expectedAccounts}
     done <<<"${sourceMetadataRows}"
-    syncResults=$(subscriptionRemoteCollectParallelResults \
+    syncResults=$(PADM_REMOTE_SYNC_DEADLINE_EPOCH="${syncDeadlineEpoch}" subscriptionRemoteCollectParallelResults \
         "${sources}" \
         padm-remote-sync.XXXXXX \
         subscriptionRemoteSyncPlanForSource \

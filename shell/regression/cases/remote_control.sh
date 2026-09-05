@@ -357,6 +357,12 @@ runRemoteControlInlineRequestHelpersRegression() (
     ! grep -qF 'desired_users' "${curlArgsLog}"
     grep -qxF '{"desired_users":[],"dry_run":false}' "${curlPayloadLog}" || return 1
 
+    requestMode=success
+    : >"${curlArgsLog}"
+    PADM_REMOTE_SYNC_DEADLINE_EPOCH=$(($(date +%s) + 3)) \
+        subscriptionRemoteControlRequest "${source}" sync '{}' >/dev/null 2>&1 || return 1
+    grep -q -- '--max-time 3' "${curlArgsLog}" || return 1
+
     requestMode=budget-exhausted
     : >"${curlArgsLog}"
     ! subscriptionRemoteControlRequest "${source}" sync '{"desired_users":[],"dry_run":false}' >/dev/null 2>&1
