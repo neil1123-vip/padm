@@ -309,7 +309,7 @@ collectXrayTrafficStatsSnapshot() {
     local suffixRegex
     local xrayBinary=${XRAY_STATS_BINARY:-/etc/padm/xray/xray}
     command -v timeout >/dev/null 2>&1 || return 1
-    if [[ ! -x "${xrayBinary}" ]]; then
+    if [[ ! -f "${xrayBinary}" || ! -x "${xrayBinary}" ]]; then
         return 1
     fi
     if ! stats=$(timeout 5 "${xrayBinary}" api statsquery --server=127.0.0.1:10085 -pattern user 2>/dev/null); then

@@ -212,7 +212,7 @@ showCoreStatusOverview() {
     xrayConfigDir=$(coreXrayConfigDir)
     xrayDir=$(dirname "${xrayConfigDir}")
     xrayBinary=$(coreXrayBinaryPath)
-    if [[ -x "${xrayBinary}" ]]; then
+    if coreExecutableFile "${xrayBinary}"; then
         xrayVersion=$(xrayBinaryVersion "${xrayBinary}")
     fi
     singBoxVersion=$(getSingBoxCurrentVersion)
@@ -221,7 +221,7 @@ showCoreStatusOverview() {
     if [[ -s "${xrayDir}/geosite.dat" && -s "${xrayDir}/geoip.dat" ]]; then
         geoStatus="已安装"
         geoVersion=$(xrayGeoDisplayVersion "${xrayDir}")
-    elif [[ -x "${xrayBinary}" ]]; then
+    elif coreExecutableFile "${xrayBinary}"; then
         geoStatus="缺失或为空"
     fi
     crontab -l 2>/dev/null | grep -q "UpdateGeo" && geoCron="已设置"

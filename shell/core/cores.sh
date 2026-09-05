@@ -527,11 +527,11 @@ coreLatestReleaseTag() {
 }
 
 xrayInstalled() {
-    [[ -x "$(coreXrayBinaryPath)" ]]
+    coreExecutableFile "$(coreXrayBinaryPath)"
 }
 
 singBoxInstalled() {
-    [[ -x "$(coreSingBoxBinaryPath)" ]]
+    coreExecutableFile "$(coreSingBoxBinaryPath)"
 }
 
 coreXrayBinaryPath() {

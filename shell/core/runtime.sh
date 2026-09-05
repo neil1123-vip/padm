@@ -12,6 +12,10 @@ coreSingBoxBinaryPath() {
     printf '%s\n' "${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}"
 }
 
+coreExecutableFile() {
+    [[ -f "$1" && -x "$1" ]]
+}
+
 PADM_CLEANUP_PATHS=()
 PADM_CLEANUP_TRAP_INSTALLED=
 

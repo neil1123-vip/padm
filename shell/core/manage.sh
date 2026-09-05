@@ -56,8 +56,8 @@ vlessEncryptionStateSummary() {
     local xrayVersion="未安装"
     local encryptionPrefix="none"
     stateFile="${PADM_VLESS_ENCRYPTION_STATE_FILE:-/etc/padm/xray/vless_encryption.json}"
-    if [[ -x /etc/padm/xray/xray ]]; then
-        xrayVersion=$(/etc/padm/xray/xray --version | awk 'NR==1 {print $2}')
+    if coreExecutableFile "$(coreXrayBinaryPath)"; then
+        xrayVersion=$("$(coreXrayBinaryPath)" --version | awk 'NR==1 {print $2}')
     fi
     if [[ -f "${stateFile}" ]]; then
         encryptionPrefix=$(jq -r '.encryption // "none" | split(".")[:3] | join(".")' "${stateFile}" 2>/dev/null)
@@ -709,9 +709,9 @@ unInstallSingBox() {
         return 1
     }
     if [[ -n "${singBoxConfigPath}" ]]; then
-        if [[ -x "${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}" ]]; then
+        if coreExecutableFile "$(coreSingBoxBinaryPath)"; then
             validationLog=$(padmTmpFilePath padm-sing-box-uninstall.log)
-            if ! singBoxMergeConfigForValidation "${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}" "${validationLog}" check; then
+            if ! singBoxMergeConfigForValidation "$(coreSingBoxBinaryPath)" "${validationLog}" check; then
                 singBoxProtocolUninstallRollback "${uninstallBackupDir}" "${serviceWasRunning}" "${serviceWasEnabled}" false "sing-box 配置校验失败"
                 return 1
             fi
@@ -1015,7 +1015,7 @@ applyTraditionalTlsAlpn() {
     local xrayConfigDir
     xrayBinary=$(manageXrayBinaryPath)
     xrayConfigDir=$(manageXrayConfigDir)
-    if [[ -x "${xrayBinary}" ]] && ! "${xrayBinary}" -test -confdir "${xrayConfigDir}" >"$(traditionalTlsAlpnTestLog)" 2>&1; then
+    if coreExecutableFile "${xrayBinary}" && ! "${xrayBinary}" -test -confdir "${xrayConfigDir}" >"$(traditionalTlsAlpnTestLog)" 2>&1; then
         if ! restoreTraditionalTlsAlpnBackup "${backupFile}" "${configFile}" "$(xrayConfigValidationFailureTitle)"; then
             return 1
         fi
@@ -3173,7 +3173,7 @@ validateXHTTPConfigUpdate() {
     local xrayConfigDir
     xrayBinary=$(manageXrayBinaryPath)
     xrayConfigDir=$(manageXrayConfigDir)
-    [[ -x "${xrayBinary}" ]] || return 0
+    coreExecutableFile "${xrayBinary}" || return 0
     "${xrayBinary}" -test -confdir "${xrayConfigDir}" >"$(xhttpConfigTestLog)" 2>&1
 }
 
@@ -3651,7 +3651,7 @@ refreshTuicSubscriptions() {
 validateTuicConfigUpdate() {
     local binary
     binary=$(coreSingBoxBinaryPath) || return 1
-    [[ -x "${binary}" ]] || return 0
+    coreExecutableFile "${binary}" || return 0
     singBoxMergeConfigForValidation "${binary}" "$(tuicConfigTestLog)"
 }
 

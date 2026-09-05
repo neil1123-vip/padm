@@ -101,7 +101,7 @@ serviceInstalled() {
     local serviceName=$1
     case "${serviceName}" in
     xray)
-        [[ -x "$(xrayServiceBinaryPath)" ||
+        [[ -f "$(xrayServiceBinaryPath)" && -x "$(xrayServiceBinaryPath)" ||
             -f "${PADM_XRAY_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/xray.service}" ||
             -f "${PADM_XRAY_OPENRC_SERVICE_FILE:-/etc/init.d/xray}" ]]
         ;;
@@ -110,7 +110,7 @@ serviceInstalled() {
         if declare -F coreSingBoxBinaryPath >/dev/null 2>&1; then
             binary=$(coreSingBoxBinaryPath)
         fi
-        [[ -x "${binary}" ||
+        [[ -f "${binary}" && -x "${binary}" ||
             -f "${PADM_SINGBOX_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/sing-box.service}" ||
             -f "${PADM_SINGBOX_OPENRC_SERVICE_FILE:-/etc/init.d/sing-box}" ]]
         ;;
@@ -477,7 +477,7 @@ handleXray() {
     if [[ -n $(find /bin /usr/bin -name "systemctl") ]] && [[ -n $(find /etc/systemd/system/ -name "xray.service") ]]; then
         if ! xrayRunning && [[ "$1" == "start" ]]; then
             logFile=$(xrayStartTestLog)
-            if [[ -x "${xrayBinary}" && -d "${xrayConfigDir}" ]] && ! "${xrayBinary}" -test -confdir "${xrayConfigDir}" >"${logFile}" 2>&1; then
+            if [[ -f "${xrayBinary}" && -x "${xrayBinary}" && -d "${xrayConfigDir}" ]] && ! "${xrayBinary}" -test -confdir "${xrayConfigDir}" >"${logFile}" 2>&1; then
                 xrayConfigValidationFailureCard "已取消启动" "排查日志: ${logFile}"
                 return 1
             fi
@@ -488,7 +488,7 @@ handleXray() {
     elif [[ -f "/etc/init.d/xray" ]]; then
         if ! xrayRunning && [[ "$1" == "start" ]]; then
             logFile=$(xrayStartTestLog)
-            if [[ -x "${xrayBinary}" && -d "${xrayConfigDir}" ]] && ! "${xrayBinary}" -test -confdir "${xrayConfigDir}" >"${logFile}" 2>&1; then
+            if [[ -f "${xrayBinary}" && -x "${xrayBinary}" && -d "${xrayConfigDir}" ]] && ! "${xrayBinary}" -test -confdir "${xrayConfigDir}" >"${logFile}" 2>&1; then
                 xrayConfigValidationFailureCard "已取消启动" "排查日志: ${logFile}"
                 return 1
             fi
