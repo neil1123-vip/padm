@@ -535,6 +535,7 @@ singBoxTuicInstall() {
 
 # sing-box Hysteria2 安装
 singBoxHysteria2InstallApply() {
+    local singBoxHysteria2CredentialMode=true
     singBoxEnsureTLSDependency Hysteria2 || return 1
 
     totalProgress=5
