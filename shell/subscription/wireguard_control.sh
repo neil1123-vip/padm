@@ -431,9 +431,10 @@ subscriptionWireGuardValidateControlledCredentialJson() {
 
 subscriptionWireGuardValidateInviteCredentialJson() {
     local credentialJson=$1
-    local inviteId alias address network mainAddress endpointHost listenPort mainPublicKey expiresAt
-    jq -e '
-      type == "object" and
+    local values inviteId alias address network mainAddress endpointHost listenPort mainPublicKey expiresAt
+    values=$(jq -ers '
+      select(length == 1) | .[0] |
+      select(type == "object" and
       keys == ["address", "alias", "endpoint_host", "expires_at", "invite_id", "kind", "listen_port", "main_address", "main_public_key", "network", "version"] and
       .version == 1 and .kind == "invite" and
       (.invite_id | type) == "string" and
@@ -444,17 +445,11 @@ subscriptionWireGuardValidateInviteCredentialJson() {
       (.endpoint_host | type) == "string" and
       (.listen_port | type) == "number" and
       (.main_public_key | type) == "string" and
-      (.expires_at | type) == "number"
-    ' <<<"${credentialJson}" >/dev/null 2>&1 || return 1
-    inviteId=$(jq -r '.invite_id' <<<"${credentialJson}") || return 1
-    alias=$(jq -r '.alias' <<<"${credentialJson}") || return 1
-    address=$(jq -r '.address' <<<"${credentialJson}") || return 1
-    network=$(jq -r '.network' <<<"${credentialJson}") || return 1
-    mainAddress=$(jq -r '.main_address' <<<"${credentialJson}") || return 1
-    endpointHost=$(jq -r '.endpoint_host' <<<"${credentialJson}") || return 1
-    listenPort=$(jq -r '.listen_port' <<<"${credentialJson}") || return 1
-    mainPublicKey=$(jq -r '.main_public_key' <<<"${credentialJson}") || return 1
-    expiresAt=$(jq -r '.expires_at' <<<"${credentialJson}") || return 1
+      (.expires_at | type) == "number") |
+      [.invite_id, .alias, .address, .network, .main_address, .endpoint_host,
+       .listen_port, .main_public_key, .expires_at] | @tsv
+    ' <<<"${credentialJson}" 2>/dev/null) || return 1
+    IFS=$'\t' read -r inviteId alias address network mainAddress endpointHost listenPort mainPublicKey expiresAt <<<"${values}"
     subscriptionWireGuardValidInviteId "${inviteId}" &&
         subscriptionWireGuardValidAlias "${alias}" &&
         subscriptionWireGuardValidIPv4Cidr "${network}" && [[ "${network#*/}" == "24" ]] &&
@@ -462,7 +457,7 @@ subscriptionWireGuardValidateInviteCredentialJson() {
         subscriptionWireGuardValidIPv4Cidr "${mainAddress}" && [[ "${mainAddress#*/}" == "24" ]] &&
         subscriptionWireGuardIPv4CidrContains "${network}" "${address}" &&
         subscriptionWireGuardIPv4CidrContains "${network}" "${mainAddress}" &&
-        [[ "$(subscriptionWireGuardAddressHost "${address}")" != "$(subscriptionWireGuardAddressHost "${mainAddress}")" ]] &&
+        [[ "${address%%/*}" != "${mainAddress%%/*}" ]] &&
         subscriptionWireGuardValidEndpointHost "${endpointHost}" &&
         subscriptionWireGuardValidPort "${listenPort}" &&
         subscriptionWireGuardValidPublicKeyValue "${mainPublicKey}" &&
@@ -1173,24 +1168,26 @@ subscriptionWireGuardAllocateInviteAddress() {
     local state=$1
     local groupsState=$2
     local pendingInvites=$3
-    local network networkHost networkValue prefix sources address host suffix
+    local rows network networkHost networkValue prefix host suffix
+    local -a addresses=()
     local -A occupied=()
-    network=$(jq -r '.network' <<<"${state}") || return 1
+    rows=$(jq -er --argjson groupsState "${groupsState}" --argjson pendingInvites "${pendingInvites}" '
+      .network,
+      ((.address, .peers[]?.address, $pendingInvites[]?.address) | split("/")[0]),
+      ($groupsState.sources[]? | select(.role != "main") | .host)
+    ' <<<"${state}") || return 1
+    mapfile -t addresses <<<"${rows}"
+    network=${addresses[0]}
     [[ "${network#*/}" == "24" ]] || return 1
     networkHost=${network%/*}
     networkValue=$(subscriptionWireGuardIPv4HostValue "${networkHost}") || return 1
     ((networkValue % 256 == 0)) || return 1
     prefix=${networkHost%.*}
-    sources=$(subscriptionWireGuardActiveSourcesFromGroupsState "${groupsState}") || return 1
-    host=$(subscriptionWireGuardAddressHost "$(jq -r '.address' <<<"${state}")")
-    [[ -n "${host}" ]] && occupied["${host}"]=1
-    while IFS= read -r address; do
-        [[ -n "${address}" ]] || continue
-        occupied["$(subscriptionWireGuardAddressHost "${address}")"]=1
-    done < <(jq -r '.peers[]?.address, .pending_invites[]?.address' <<<"$(jq -c --argjson pendingInvites "${pendingInvites}" '.pending_invites = $pendingInvites' <<<"${state}")")
-    while IFS= read -r host; do
-        subscriptionWireGuardValidIPv4Host "${host}" && occupied["${host}"]=1
-    done < <(jq -r '.[]? | select(.role != "main") | .host' <<<"${sources}")
+    for host in "${addresses[@]:1}"; do
+        if subscriptionWireGuardValidIPv4Host "${host}"; then
+            occupied["${host}"]=1
+        fi
+    done
     for ((suffix = 2; suffix <= 254; suffix++)); do
         host="${prefix}.${suffix}"
         if [[ -z "${occupied[${host}]+x}" ]]; then
@@ -1214,8 +1211,10 @@ subscriptionWireGuardCreateInviteUnlocked() {
     currentPending=$(jq -c '.pending_invites // []' <<<"${state}") || return 1
     cleanPending=$(subscriptionWireGuardCleanPendingInvitesJson "${state}" "${groupsState}" "${now}") || return 1
     state=$(jq -c --argjson pendingInvites "${cleanPending}" '.pending_invites = $pendingInvites' <<<"${state}") || return 1
-    if jq -e --arg alias "${alias}" 'any(.peers[]?; .id == $alias) or any(.pending_invites[]?; .alias == $alias)' <<<"${state}" >/dev/null 2>&1 ||
-        subscriptionWireGuardActiveSourcesFromGroupsState "${groupsState}" | jq -e --arg alias "${alias}" 'any(.[]?; .id == $alias)' >/dev/null 2>&1; then
+    if jq -e --arg alias "${alias}" --argjson groupsState "${groupsState}" '
+      any(.peers[]?; .id == $alias) or any(.pending_invites[]?; .alias == $alias) or
+      any($groupsState.sources[]?; .id == $alias)
+    ' <<<"${state}" >/dev/null 2>&1; then
         [[ "${cleanPending}" == "${currentPending}" ]] || subscriptionWireGuardWriteState --argjson pendingInvites "${cleanPending}" '.pending_invites = $pendingInvites' || return 1
         errorCard "被控别名已被 Peer、服务器源或待完成邀请占用"
         return 1
@@ -1235,18 +1234,13 @@ subscriptionWireGuardCreateInviteUnlocked() {
     done
     subscriptionWireGuardValidInviteId "${inviteId}" || return 1
     expiresAt=$((10#${now} + 86400))
-    payload=$(jq -cn \
+    payload=$(jq -c \
       --arg inviteId "${inviteId}" \
       --arg alias "${alias}" \
       --arg address "${address}" \
-      --arg network "$(jq -r '.network' <<<"${state}")" \
-      --arg mainAddress "$(jq -r '.address' <<<"${state}")" \
-      --arg endpointHost "$(jq -r '.endpoint_host' <<<"${state}")" \
-      --argjson listenPort "$(jq -r '.listen_port' <<<"${state}")" \
-      --arg mainPublicKey "$(jq -r '.public_key' <<<"${state}")" \
       --argjson expiresAt "${expiresAt}" \
-      '{invite_id:$inviteId, alias:$alias, address:$address, network:$network, main_address:$mainAddress, endpoint_host:$endpointHost, listen_port:$listenPort, main_public_key:$mainPublicKey, expires_at:$expiresAt}') || return 1
-    subscriptionWireGuardValidateInviteCredentialJson "$(jq -c '. + {version:1, kind:"invite"}' <<<"${payload}")" || return 1
+      '{version:1, kind:"invite", invite_id:$inviteId, alias:$alias, address:$address, network:.network, main_address:.address, endpoint_host:.endpoint_host, listen_port:.listen_port, main_public_key:.public_key, expires_at:$expiresAt}' <<<"${state}") || return 1
+    subscriptionWireGuardValidateInviteCredentialJson "${payload}" || return 1
     __padmInviteCredential=$(subscriptionWireGuardCredentialEncode invite "${payload}") || return 1
     cleanPending=$(jq -c --arg inviteId "${inviteId}" --arg alias "${alias}" --arg address "${address}" --argjson expiresAt "${expiresAt}" '. + [{invite_id:$inviteId, alias:$alias, address:$address, expires_at:$expiresAt}]' <<<"${cleanPending}") || return 1
     subscriptionWireGuardWriteState --argjson pendingInvites "${cleanPending}" '.pending_invites = $pendingInvites' || { errorCard "待完成邀请写入失败"; return 1; }

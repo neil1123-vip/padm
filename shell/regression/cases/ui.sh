@@ -610,7 +610,65 @@ y"; then
     nginxConfigPath="${oldNginxConfigPath}"
 )
 
+runSubscriptionWireGuardInviteCreateRegression() (
+    local root="${TMP_DIR}/wireguard-invite-create" mainPublicKey
+    local processLog="${root}/invite-processes.log" credential decoded invalid field
+    local allocationState allocationGroups allocationPending
+    local -a processes=()
+    # shellcheck source=/dev/null
+    source "${PROJECT_ROOT}/shell/subscription/control.sh"
+    # shellcheck source=/dev/null
+    source "${PROJECT_ROOT}/shell/subscription/groups.sh"
+    # shellcheck source=/dev/null
+    source "${PROJECT_ROOT}/shell/subscription/wireguard_control.sh"
+    PADM_SUBSCRIPTION_GROUPS_DIR="${root}/file-groups"
+    PADM_WIREGUARD_CONTROL_DIR="${root}/file-wireguard"
+    mkdir -p "${PADM_SUBSCRIPTION_GROUPS_DIR}" "${PADM_WIREGUARD_CONTROL_DIR}"
+    mainPublicKey=$(printf '0123456789abcdefghijklmnopqrstuv' | base64 -w 0)
+    writeDefaultSubscriptionGroupsState "$(subscriptionGroupsFile)"
+    command jq -cn --arg publicKey "${mainPublicKey}" \
+        '{enabled:true,role:"main",interface:"wg-padm",network:"10.77.0.0/24",listen_port:51820,control_port:39778,firewall_owned:false,address:"10.77.0.1/24",endpoint_host:"main.example.com",public_key:$publicKey,peers:[]}' \
+        >"$(subscriptionWireGuardStateFile)"
+    jq() { printf '%s\n' "${FUNCNAME[1]}" >>"${processLog}"; command jq "$@"; }
+    : >"${processLog}"
+    subscriptionWireGuardCreateInvite b credential
+    mapfile -t processes <"${processLog}"
+    ((${#processes[@]} <= 30)) || { printf 'invite-create: expected <=30 jq calls, got %s\n' "${#processes[@]}" >&2; return 1; }
+    decoded=$(subscriptionWireGuardCredentialDecode "${credential}")
+    jq -e '.alias == "b" and .address == "10.77.0.2/24"' <<<"${decoded}" >/dev/null
+    subscriptionWireGuardReadState | jq -e '.pending_invites | length == 1' >/dev/null
+
+    : >"${processLog}"
+    subscriptionWireGuardValidateInviteCredentialJson "${decoded}"
+    mapfile -t processes <"${processLog}"
+    ((${#processes[@]} == 1))
+    for field in invite_id alias address network main_address endpoint_host main_public_key; do
+        invalid=$(jq -c --arg field "${field}" '.[$field] += "\nignored"' <<<"${decoded}")
+        regressionExpectStatus 1 subscriptionWireGuardValidateInviteCredentialJson "${invalid}"
+        invalid=$(jq -c --arg field "${field}" '.[$field] = ""' <<<"${decoded}")
+        regressionExpectStatus 1 subscriptionWireGuardValidateInviteCredentialJson "${invalid}"
+    done
+    for invalid in \
+        "$(jq -c '.listen_port = 1.5' <<<"${decoded}")" \
+        "$(jq -c '.expires_at = "tomorrow"' <<<"${decoded}")" \
+        "$(jq -c '.address = .main_address' <<<"${decoded}")" \
+        "{} ${decoded}" "${decoded} {}"; do
+        regressionExpectStatus 1 subscriptionWireGuardValidateInviteCredentialJson "${invalid}"
+    done
+
+    allocationState='{"network":"10.77.0.0/24","address":"10.77.0.1/24","peers":[{"address":"10.77.0.2/32"}],"pending_invites":[{"address":"10.77.0.5/24"}]}'
+    allocationGroups='{"sources":[{"role":"secondary","host":"10.77.0.3"},{"role":"secondary","host":"edge.example.com"}]}'
+    allocationPending='[{"address":"10.77.0.4/24"}]'
+    : >"${processLog}"
+    [[ "$(subscriptionWireGuardAllocateInviteAddress "${allocationState}" "${allocationGroups}" "${allocationPending}")" == "10.77.0.5/24" ]]
+    mapfile -t processes <"${processLog}"
+    ((${#processes[@]} == 1))
+    allocationPending=$(jq -cn '[range(2;255) | {address:("10.77.0.\(.)/24")}]')
+    regressionExpectStatus 1 subscriptionWireGuardAllocateInviteAddress "${allocationState}" "${allocationGroups}" "${allocationPending}"
+)
+
 runSubscriptionWireGuardInviteReceiptRegression() (
+    runSubscriptionWireGuardInviteCreateRegression
     local root="${TMP_DIR}/wireguard-invite-receipt"
     local mainWireGuardDir="${root}/main-wireguard"
     local controlledWireGuardDir="${root}/controlled-wireguard"

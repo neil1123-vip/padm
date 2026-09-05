@@ -1058,6 +1058,7 @@ createSubscriptionWireGuardInviteMenu() {
     menuLine "主控将自动预留别名和 WireGuard 地址；邀请只在本次结果中显示。"
     menuClose
     autoRead subscription_invite_alias "请输入被控服务器别名[英文/数字/短横线，例 hk-1]:" alias
+    statusCard "正在创建被控邀请" "正在检查别名并预留地址；若有同步任务运行，将等待它完成"
     subscriptionWireGuardCreateInvite "${alias}" inviteCredential || return 1
     statusCard "被控邀请已创建" "被控别名：${alias}" "被控邀请：${inviteCredential}" "邀请有效期 24 小时，请通过可信通道传递；丢失时取消并重建" "WireGuard 使用 UDP，控制 API 只在隧道内使用 HTTP；此步骤不需要 TLS 证书"
 }
