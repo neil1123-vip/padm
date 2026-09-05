@@ -169,6 +169,8 @@ subscriptionRemoteControlRequest() {
     url=$(subscriptionRemoteControlUrl "${source}" "${endpoint}") || return 1
     if [[ "${endpoint}" == "sync" ]]; then
         maxTime=40
+    elif [[ "${endpoint}" == "refresh" ]]; then
+        maxTime=45
     else
         maxTime=15
     fi
@@ -211,6 +213,14 @@ subscriptionRemoteControlRequest() {
         ' <<<"${body}") || return 1
     fi
     printf '%s\n' "${body}"
+}
+
+subscriptionControlRefreshAuthorized() {
+    local token=$1
+    [[ -n "${token}" ]] || return 1
+    [[ "$(subscriptionCurrentRoleNormalized 2>/dev/null || true)" == "main" ]] || return 1
+    subscriptionActiveGroupRead -r --arg token "${token}" \
+        'any(.sources[]?; .role != "main" and .enabled == true and (.control_token // "") == $token)'
 }
 
 subscriptionRemoteControlPayload() {
@@ -1450,14 +1460,29 @@ handleSubscriptionControl() {
     local token=${2:-${PADM_CONTROL_TOKEN:-}}
     local payload=${3:-}
     local currentToken=
-    currentToken=$(subscriptionControlToken 2>/dev/null || true)
-    if [[ -z "${currentToken}" || "${token}" != "${currentToken}" ]]; then
-        jq -n '{ok:false, error:"unauthorized", error_detail:{type:"unauthorized", message:"控制 token 验证失败"}}'
-        return 1
+    if [[ "${endpoint}" != "refresh" ]]; then
+        currentToken=$(subscriptionControlToken 2>/dev/null || true)
+        if [[ -z "${currentToken}" || "${token}" != "${currentToken}" ]]; then
+            jq -n '{ok:false, error:"unauthorized", error_detail:{type:"unauthorized", message:"控制 token 验证失败"}}'
+            return 1
+        fi
     fi
     if ! ensureSubscriptionGroupsState; then
         jq -n '{ok:false, error:"invalid_state", error_detail:{type:"invalid_state", message:"订阅组状态版本或结构无效"}}'
         return 1
+    fi
+    if [[ "${endpoint}" == "refresh" ]]; then
+        if ! subscriptionControlRefreshAuthorized "${token}"; then
+            jq -n '{ok:false, error:"unauthorized", error_detail:{type:"unauthorized", message:"控制 token 验证失败"}}'
+            return 1
+        fi
+        if runSubscriptionGroupSync >/dev/null 2>&1; then
+            jq -n '{ok:true, refreshed:true}'
+        else
+            jq -n '{ok:false, error:"refresh_failed", error_detail:{type:"refresh_failed", message:"主控订阅刷新失败"}}'
+            return 1
+        fi
+        return 0
     fi
     if [[ "${endpoint}" == "health" ]]; then
         jq -n --arg version "$(getScriptVersion)" '{ok:true, version:$version, capabilities:["health","sync","traffic"]}'

@@ -1501,6 +1501,27 @@ runRealityConfigRefreshSubscriptionRegression() {
     subscribePort="${oldSubscribePort}"
 }
 
+runRealityConfigControlledRefreshRegression() (
+    local refreshSource=
+    local statusLog="${TMP_DIR}/reality-controlled-refresh-status.log"
+    : >"${statusLog}"
+    subscriptionCurrentRoleNormalized() { printf 'controlled\n'; }
+    subscriptionWireGuardReadState() {
+        printf '%s\n' '{"peers":[{"id":"main","address":"10.77.0.1/24","enabled":true}]}'
+    }
+    subscriptionControlToken() { printf 'controlled-token\n'; }
+    subscriptionRemoteControlRequest() {
+        refreshSource=$1
+        [[ "$2" == "refresh" && "$3" == "{}" ]] || return 1
+        printf '%s\n' '{"ok":true,"refreshed":true}'
+    }
+    realityTargetStatusBlock() { printf '%s\n' "$*" >>"${statusLog}"; }
+
+    refreshSubscriptionsAfterRealityTargetChange
+    jq -e '.id == "main" and .host == "10.77.0.1" and .port == 39778 and .control_token == "controlled-token"' <<<"${refreshSource}" >/dev/null
+    grep -q '已通知主控刷新订阅' "${statusLog}"
+)
+
 runRealityConfigImportSkipRegression() {
     cat >"${TMP_DIR}/realitlscanner-fail.csv" <<'CSV'
 IP,ORIGIN,CERT_DOMAIN,CERT_ISSUER,GEO_CODE
@@ -1530,5 +1551,6 @@ runRealityConfigRegression() {
     runRegressionStep reality-config-change-subscription-refresh-failure runRealityConfigChangeSubscriptionRefreshFailureRegression
     runRegressionStep reality-config-xhttp-download-settings runXHTTPDownloadSettingsRegression
     runRegressionStep reality-config-refresh-subscription runRealityConfigRefreshSubscriptionRegression
+    runRegressionStep reality-config-controlled-refresh runRealityConfigControlledRefreshRegression
     runRegressionStep reality-config-import-skip runRealityConfigImportSkipRegression
 }

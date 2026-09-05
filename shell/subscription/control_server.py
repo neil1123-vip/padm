@@ -107,7 +107,7 @@ class Handler(BaseHTTPRequestHandler):
             return 503
         if error in ("script_timeout", "script_failed", "script_exec_failed", "invalid_response"):
             return 503
-        return 503 if endpoint in ("sync", "traffic") else 500
+        return 503 if endpoint in ("sync", "traffic", "refresh") else 500
 
     def call_script(self, endpoint, payload=""):
         bash_bin = shutil.which("bash.exe") or shutil.which("bash") or "/bin/bash"
@@ -124,7 +124,7 @@ class Handler(BaseHTTPRequestHandler):
                 [bash_bin, SCRIPT_PATH, "SubscriptionControl", endpoint], stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
                 encoding="utf-8", errors="replace", **popen_options)
-            stdout, _ = process.communicate(payload, timeout=None if endpoint == "sync" else SCRIPT_TIMEOUT)
+            stdout, _ = process.communicate(payload, timeout=None if endpoint in ("sync", "refresh") else SCRIPT_TIMEOUT)
         except subprocess.TimeoutExpired:
             if os.name == "posix":
                 try:
@@ -185,10 +185,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         endpoint = self.endpoint()
-        if endpoint not in ("sync", "traffic"):
+        if endpoint not in ("sync", "traffic", "refresh"):
             self.respond(404, {"ok": False, "error": "not_found"})
             return
-        if not self.authorized():
+        if endpoint != "refresh" and not self.authorized():
             self.respond(401, {"ok": False, "error": "unauthorized",
                                "error_detail": {"type": "unauthorized", "message": "控制 token 验证失败"}})
             return

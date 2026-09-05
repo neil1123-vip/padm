@@ -455,8 +455,8 @@ The `Subscriptions & users` entry is the single place for link refresh, shared-s
 
 - A controller syncs every enabled controlled-server source. There is no separate global remote-sync switch; pause one server through `Coordination & control` -> `Controlled servers` -> `Enable/disable controlled server`.
 - Sync completes the local configuration first, then handles controlled-server snapshots per source. When the local host succeeds and the remote sync result is valid, the public subscription is published from the successful sources and failed sources are omitted; the overall run is marked partial. If a remote-only user has no available source, that user's previous output is retained. A local failure or an invalid remote result keeps the whole public subscription unchanged.
-- After changing a controlled server's Reality target or other node configuration, enabled automatic sync regenerates local nodes, fetches enabled sources, and publishes the available sources. The outer HTTPS subscription URL stays unchanged and nodes from other successful servers remain present.
-- Controlled servers do not expose an active-sync menu; they only answer authenticated sync requests from the controller.
+- After changing a controlled server's Reality target or other node configuration, the controlled server notifies the controller over WireGuard; with automatic sync enabled, the controller regenerates local nodes, fetches enabled sources, and publishes the available sources. The outer HTTPS subscription URL stays unchanged and nodes from other successful servers remain present.
+- Controlled servers do not expose an active-sync menu; if the change notification fails, run “Full sync now” on the controller.
 
 Recommended flow for local-only or controller-side shared subscriptions:
 
