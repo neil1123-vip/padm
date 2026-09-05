@@ -1263,8 +1263,8 @@ realityTargetDnsCdnProvider() {
 }
 
 realityTargetDetector() {
-    if [[ -x "/etc/padm/xray/xray" ]]; then
-        printf '%s\n' "/etc/padm/xray/xray"
+    if [[ -f "$(coreXrayBinaryPath)" && -x "$(coreXrayBinaryPath)" ]]; then
+        coreXrayBinaryPath
     elif command -v xray >/dev/null 2>&1; then
         command -v xray
     else
@@ -3097,11 +3097,11 @@ realityXrayXhttpConfigPath() {
 }
 
 realitySingBoxVisionConfigPath() {
-    printf '%s\n' "${PADM_REALITY_SINGBOX_VISION_CONFIG_FILE:-/etc/padm/sing-box/conf/config/07_VLESS_vision_reality_inbounds.json}"
+    printf '%s\n' "${PADM_REALITY_SINGBOX_VISION_CONFIG_FILE:-${singBoxConfigPath:-${PADM_SINGBOX_CONFIG_DIR:-/etc/padm/sing-box/conf/config/}}07_VLESS_vision_reality_inbounds.json}"
 }
 
 realitySingBoxGrpcConfigPath() {
-    printf '%s\n' "${PADM_REALITY_SINGBOX_GRPC_CONFIG_FILE:-/etc/padm/sing-box/conf/config/08_VLESS_vision_gRPC_inbounds.json}"
+    printf '%s\n' "${PADM_REALITY_SINGBOX_GRPC_CONFIG_FILE:-${singBoxConfigPath:-${PADM_SINGBOX_CONFIG_DIR:-/etc/padm/sing-box/conf/config/}}08_VLESS_vision_gRPC_inbounds.json}"
 }
 
 applyRealityTargetToInstalledConfigs() {
@@ -3212,15 +3212,15 @@ restoreRealityTargetRuntimeState() {
 validateRealityTargetConfigAfterChange() {
     local logFile
     if [[ -f "$(realityXrayVisionConfigPath)" || -f "$(realityXrayXhttpConfigPath)" ]]; then
-        if [[ -x "/etc/padm/xray/xray" ]]; then
+        if [[ -f "$(coreXrayBinaryPath)" && -x "$(coreXrayBinaryPath)" ]]; then
             logFile=$(realityTargetTmpPath padm-reality-target-xray-test.log)
-            /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >"${logFile}" 2>&1 || return 1
+            "$(coreXrayBinaryPath)" -test -confdir "$(coreXrayConfigDir)" >"${logFile}" 2>&1 || return 1
         fi
     fi
     if [[ -f "$(realitySingBoxVisionConfigPath)" || -f "$(realitySingBoxGrpcConfigPath)" ]]; then
-        if [[ -x "/etc/padm/sing-box/sing-box" ]]; then
+        if [[ -f "$(coreSingBoxBinaryPath)" && -x "$(coreSingBoxBinaryPath)" ]]; then
             logFile=$(realityTargetTmpPath padm-reality-target-sing-box-test.log)
-            singBoxMergeConfigForValidation /etc/padm/sing-box/sing-box "${logFile}" || return 1
+            singBoxMergeConfigForValidation "$(coreSingBoxBinaryPath)" "${logFile}" || return 1
         fi
     fi
 }

@@ -669,11 +669,13 @@ cleanLastInstallationConfigApply() {
         errorCard "Xray 配置目录清理失败，已取消清空上次安装配置"
         return 1
     fi
-    if ! removeManagedFileIfPresent /etc/padm/sing-box/conf/config.json; then
+    local singBoxConfigDir="${PADM_SINGBOX_CONFIG_DIR:-/etc/padm/sing-box/conf/config}"
+    local singBoxConfDir="$(dirname -- "${singBoxConfigDir%/}")"
+    if ! removeManagedFileIfPresent "${singBoxConfDir}/config.json"; then
         errorCard "sing-box 主配置清理失败，已取消清空上次安装配置"
         return 1
     fi
-    if ! cleanDirectoryContent /etc/padm/sing-box/conf/config; then
+    if ! cleanDirectoryContent "${singBoxConfigDir}"; then
         errorCard "sing-box 分片配置目录清理失败，已取消清空上次安装配置"
         return 1
     fi

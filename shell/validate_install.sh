@@ -197,11 +197,11 @@ check_fail2ban_jail_has_section() {
 }
 
 check_xray() {
-    if [[ -x /etc/padm/xray/xray ]]; then
+    if [[ -f "$(coreXrayBinaryPath)" && -x "$(coreXrayBinaryPath)" ]]; then
         pass "xray 二进制可执行"
-        /etc/padm/xray/xray --version | head -n 1
-        check_optional_file /etc/padm/xray/geoip.dat
-        check_optional_file /etc/padm/xray/geosite.dat
+        "$(coreXrayBinaryPath)" --version | head -n 1
+        check_optional_file "$(dirname -- "$(coreXrayBinaryPath)")/geoip.dat"
+        check_optional_file "$(dirname -- "$(coreXrayBinaryPath)")/geosite.dat"
         check_service_active xray.service
         check_service_enabled xray.service
     else
@@ -210,9 +210,9 @@ check_xray() {
 }
 
 check_sing_box() {
-    if [[ -x /etc/padm/sing-box/sing-box ]]; then
+    if [[ -f "$(coreSingBoxBinaryPath)" && -x "$(coreSingBoxBinaryPath)" ]]; then
         pass "sing-box 二进制可执行"
-        /etc/padm/sing-box/sing-box version | head -n 1
+        "$(coreSingBoxBinaryPath)" version | head -n 1
         check_service_active_optional sing-box.service
         check_service_enabled sing-box.service
     else
@@ -223,7 +223,7 @@ check_sing_box() {
 check_sing_box_compatibility_audit() {
     local statusFile warnFile summary compatLog scanRc
 
-    if [[ ! -x /etc/padm/sing-box/sing-box ]]; then
+    if [[ ! -f "$(coreSingBoxBinaryPath)" || ! -x "$(coreSingBoxBinaryPath)" ]]; then
         warn "未安装 sing-box，跳过兼容体检摘要"
         return
     fi
@@ -274,7 +274,7 @@ check_xray_compatibility_audit() {
     local statusFile warnFile summary validateLog strictLog compatLog
     local validateRc strictRc scanRc
 
-    if [[ ! -x /etc/padm/xray/xray ]]; then
+    if [[ ! -f "$(coreXrayBinaryPath)" || ! -x "$(coreXrayBinaryPath)" ]]; then
         warn "未安装 Xray，跳过兼容体检摘要"
         return
     fi
@@ -298,9 +298,9 @@ check_xray_compatibility_audit() {
         validateRc=0
         strictRc=0
         scanRc=0
-        validateXrayConfigWithBinary /etc/padm/xray/xray "${validateLog}" || validateRc=$?
+        validateXrayConfigWithBinary "$(coreXrayBinaryPath)" "${validateLog}" || validateRc=$?
         if [[ "${validateRc}" -eq 0 ]]; then
-            validateXrayConfigStrictWithBinary /etc/padm/xray/xray "${strictLog}" || strictRc=$?
+            validateXrayConfigStrictWithBinary "$(coreXrayBinaryPath)" "${strictLog}" || strictRc=$?
         fi
         collectXrayCompatibilityFindings "${statusFile}" "$(coreTmpFilePath padm-xray-compat-audit.log)" "${warnFile}" || scanRc=$?
         summary=$(summarizeCoreCompatibilityAudit "${statusFile}" "${warnFile}")
@@ -537,12 +537,12 @@ check_fail2ban() {
 }
 
 check_maintenance_summary() {
-    if [[ ! -x /etc/padm/xray/xray ]]; then
+    if [[ ! -f "$(coreXrayBinaryPath)" || ! -x "$(coreXrayBinaryPath)" ]]; then
         warn "未安装 Xray，跳过 Xray Geo 文件检查"
-    elif [[ -s /etc/padm/xray/geosite.dat && -s /etc/padm/xray/geoip.dat ]]; then
+    elif [[ -s "$(dirname -- "$(coreXrayBinaryPath)")/geosite.dat" && -s "$(dirname -- "$(coreXrayBinaryPath)")/geoip.dat" ]]; then
         pass "Xray Geo 文件齐全"
-        if [[ -s /etc/padm/xray/geo.version ]]; then
-            pass "Xray Geo 版本：$(tr -d '\r\n' </etc/padm/xray/geo.version)"
+        if [[ -s "$(dirname -- "$(coreXrayBinaryPath)")/geo.version" ]]; then
+            pass "Xray Geo 版本：$(tr -d '\r\n' <"$(dirname -- "$(coreXrayBinaryPath)")/geo.version")"
         else
             warn "Xray Geo 版本文件缺失：/etc/padm/xray/geo.version"
         fi
@@ -672,10 +672,10 @@ main() {
 
     local has_xray=false
     local has_sing_box=false
-    if [[ -x /etc/padm/xray/xray ]]; then
+    if [[ -f "$(coreXrayBinaryPath)" && -x "$(coreXrayBinaryPath)" ]]; then
         has_xray=true
     fi
-    if [[ -x /etc/padm/sing-box/sing-box ]]; then
+    if [[ -f "$(coreSingBoxBinaryPath)" && -x "$(coreSingBoxBinaryPath)" ]]; then
         has_sing_box=true
     fi
     if [[ "${has_xray}" == "false" && "${has_sing_box}" == "false" ]]; then

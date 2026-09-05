@@ -1,5 +1,17 @@
 #!/usr/bin/env bash
 
+coreXrayBinaryPath() {
+    printf '%s\n' "${PADM_XRAY_BINARY:-/etc/padm/xray/xray}"
+}
+
+coreXrayConfigDir() {
+    printf '%s\n' "${PADM_XRAY_CONF_DIR:-${PADM_XRAY_DIR:-/etc/padm/xray}/conf}"
+}
+
+coreSingBoxBinaryPath() {
+    printf '%s\n' "${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}"
+}
+
 PADM_CLEANUP_PATHS=()
 PADM_CLEANUP_TRAP_INSTALLED=
 

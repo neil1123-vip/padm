@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 realityKeyFile() {
-    printf '%s\n' "${PADM_SINGBOX_REALITY_KEY_FILE:-/etc/padm/sing-box/conf/config/reality_key}"
+    printf '%s\n' "${PADM_SINGBOX_REALITY_KEY_FILE:-${singBoxConfigPath:-${PADM_SINGBOX_CONFIG_DIR:-/etc/padm/sing-box/conf/config/}}reality_key}"
 }
 
 protocolPortInputStatusCard() {
@@ -623,7 +623,7 @@ initRealityKey() {
     fi
     if [[ -z "${realityPrivateKey}" ]]; then
         if [[ "${selectCoreType}" == "2" || "${coreInstallType}" == "2" ]]; then
-            local singBoxBinary="${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}"
+            local singBoxBinary="$(coreSingBoxBinaryPath)"
             if ! realityX25519Key=$("${singBoxBinary}" generate reality-keypair); then
                 errorCard "Reality Key 生成失败"
                 return 1
@@ -637,9 +637,9 @@ initRealityKey() {
         else
             autoRead reality_private_key "请输入Private Key[回车自动生成]:" historyPrivateKey
             if [[ -n "${historyPrivateKey}" ]]; then
-                realityX25519Key=$(/etc/padm/xray/xray x25519 -i "${historyPrivateKey}") || return 1
+                realityX25519Key=$("$(coreXrayBinaryPath)" x25519 -i "${historyPrivateKey}") || return 1
             else
-                realityX25519Key=$(/etc/padm/xray/xray x25519) || return 1
+                realityX25519Key=$("$(coreXrayBinaryPath)" x25519) || return 1
             fi
             realityPrivateKey=$(echo "${realityX25519Key}" | grep "PrivateKey" | awk '{print $2}')
             realityPublicKey=$(echo "${realityX25519Key}" | grep "Password" | awk '{print $3}')
@@ -668,7 +668,7 @@ initRealityMldsa65() {
     local tlsPingResult=
     local length=
     local target="${realityTargetHost}:${realityTargetPort}"
-    tlsPingResult=$(/etc/padm/xray/xray tls ping "${target}" 2>/dev/null)
+    tlsPingResult=$("$(coreXrayBinaryPath)" tls ping "${target}" 2>/dev/null)
     if echo "${tlsPingResult}" | awk '/Pinging with SNI/{inSni=1; next} inSni && /TLS Post-Quantum key exchange:.*X25519MLKEM768/{found=1} END{exit found ? 0 : 1}'; then
         length=$(echo "${tlsPingResult}" | awk '/Pinging with SNI/{inSni=1; next} inSni && /Certificate chain/{print $5; exit}')
 
@@ -684,7 +684,7 @@ initRealityMldsa65() {
                 realityMldsa65Verify=${currentRealityMldsa65Verify}
             fi
             if [[ -z "${realityMldsa65Seed}" ]]; then
-                realityMldsa65=$(/etc/padm/xray/xray mldsa65)
+                realityMldsa65=$("$(coreXrayBinaryPath)" mldsa65)
                 realityMldsa65Seed=$(echo "${realityMldsa65}" | head -1 | awk '{print $2}')
                 realityMldsa65Verify=$(echo "${realityMldsa65}" | tail -n 1 | awk '{print $2}')
             fi

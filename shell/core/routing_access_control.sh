@@ -483,17 +483,17 @@ validateAccessControlConfig() {
     local logFile
     ACCESS_CONTROL_FAILURE_TITLE=
     ACCESS_CONTROL_FAILURE_LOG=
-    if [[ "${coreInstallType}" == "1" && -x /etc/padm/xray/xray ]]; then
+    if [[ "${coreInstallType}" == "1" && -f "$(coreXrayBinaryPath)" && -x "$(coreXrayBinaryPath)" ]]; then
         logFile=$(accessControlXrayTestLog)
-        if ! /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >"${logFile}" 2>&1; then
+        if ! "$(coreXrayBinaryPath)" -test -confdir "$(coreXrayConfigDir)" >"${logFile}" 2>&1; then
             ACCESS_CONTROL_FAILURE_TITLE="$(xrayConfigValidationFailureTitle)"
             ACCESS_CONTROL_FAILURE_LOG="${logFile}"
             return 1
         fi
     fi
-    if [[ -n "${singBoxConfigPath}" && -x /etc/padm/sing-box/sing-box ]]; then
+    if [[ -n "${singBoxConfigPath}" && -f "$(coreSingBoxBinaryPath)" && -x "$(coreSingBoxBinaryPath)" ]]; then
         logFile=$(accessControlSingBoxTestLog)
-        if ! singBoxMergeConfigForValidation /etc/padm/sing-box/sing-box "${logFile}"; then
+        if ! singBoxMergeConfigForValidation "$(coreSingBoxBinaryPath)" "${logFile}"; then
             ACCESS_CONTROL_FAILURE_TITLE="sing-box 配置校验失败"
             ACCESS_CONTROL_FAILURE_LOG="${logFile}"
             return 1

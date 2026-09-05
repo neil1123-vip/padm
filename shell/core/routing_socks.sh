@@ -48,7 +48,7 @@ socks5InboundRoutingMenu() {
         1)
             totalProgress=1
             installSingBox 1 || return 1
-            singBoxConfigPath="${singBoxConfigPath:-/etc/padm/sing-box/conf/config/}"
+            singBoxConfigPath="${singBoxConfigPath:-${PADM_SINGBOX_CONFIG_DIR:-/etc/padm/sing-box/conf/config/}}"
             backupDir=
             socks5RoutingBackupCreate backupDir || { errorCard "Socks5 入站配置备份失败"; return 1; }
             PADM_PORT_ALLOW_TRANSACTION_ACTIVE=true
@@ -452,9 +452,9 @@ setSocks5Inbound() {
     autoRead socks5_inbound_uuid "UUID:" socks5RoutingUUID
     if [[ -z "${socks5RoutingUUID}" ]]; then
         if [[ "${coreInstallType}" == "1" ]]; then
-            socks5RoutingUUID=$(/etc/padm/xray/xray uuid)
+            socks5RoutingUUID=$("$(coreXrayBinaryPath)" uuid)
         elif [[ -n "${singBoxConfigPath}" ]]; then
-            socks5RoutingUUID=$(/etc/padm/sing-box/sing-box generate uuid)
+            socks5RoutingUUID=$("$(coreSingBoxBinaryPath)" generate uuid)
         fi
     fi
     if [[ -z "${socks5RoutingUUID}" ]]; then
@@ -481,7 +481,7 @@ setSocks5Inbound() {
         errorCard "选择类型错误"
         return 1
     fi
-    local socks5InboundPath="${singBoxConfigPath:-/etc/padm/sing-box/conf/config/}20_socks5_inbounds.json"
+    local socks5InboundPath="${singBoxConfigPath:-${PADM_SINGBOX_CONFIG_DIR:-/etc/padm/sing-box/conf/config/}}20_socks5_inbounds.json"
     writeSocks5InboundConfig "${socks5InboundPath}" "${result[-1]}" "${socks5RoutingUUID}" || return 1
     setStrategyRouting socks5_inbound "${domainStrategy}" || return 1
 }
@@ -490,7 +490,7 @@ setSocks5Inbound() {
 # Socks5 inbound routing 规则
 setSocks5InboundRouting() {
 
-    singBoxConfigPath="${singBoxConfigPath:-/etc/padm/sing-box/conf/config/}"
+    singBoxConfigPath="${singBoxConfigPath:-${PADM_SINGBOX_CONFIG_DIR:-/etc/padm/sing-box/conf/config/}}"
     local action="${1:-}"
 
     if [[ "${action}" == "addRules" && ! -f "${singBoxConfigPath}socks5_02_inbound_route.json" && ! -f "${configPath}09_routing.json" ]]; then
