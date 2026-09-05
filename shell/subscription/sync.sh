@@ -1390,6 +1390,16 @@ runSubscriptionGroupSyncUnlocked() {
             elif [[ "${remoteFailures}" != "[]" ]]; then
                 publishedWithRemoteFailures=true
             fi
+            local publishedAccountCount
+            local remoteSourceCount
+            local remoteFailureCount
+            local remoteSuccessCount
+            publishedAccountCount=$(printf '%s\n' "${SUBSCRIPTION_PUBLISH_ACCOUNTS:-}" | sed '/^$/d' | wc -l | tr -d ' ') || publishedAccountCount=0
+            remoteSourceCount=$(jq 'length' <<<"${remoteSources}" 2>/dev/null || printf '0')
+            remoteFailureCount=$(jq 'length' <<<"${remoteFailures}" 2>/dev/null || printf '0')
+            remoteSuccessCount=$((remoteSourceCount - remoteFailureCount))
+            ((remoteSuccessCount >= 0)) || remoteSuccessCount=0
+            statusCard "订阅摘要" "成功来源 ${remoteSuccessCount} 个，失败来源 ${remoteFailureCount} 个，实际发布账号 ${publishedAccountCount} 个，失败来源沿用旧快照：$(if [[ "${remoteFailures}" != "[]" ]]; then printf '是'; else printf '否'; fi)"
         fi
     fi
 
@@ -1459,12 +1469,23 @@ runSubscriptionGroupSync() {
 
 runSubscriptionGroupSyncCron() {
     local enabled
+    local status
+    local previousLockTimeout=${PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT-}
+    local previousSkipBusy=${PADM_SUBSCRIPTION_GROUPS_LOCK_SKIP_BUSY-}
+    SUBSCRIPTION_GROUPS_LOCK_SKIPPED=false
     subscriptionRequireLocalPublisherRole || return 1
     enabled=$(subscriptionActiveGroupRead -r '.sync.enabled == true') || return 1
     [[ "${enabled}" == "true" ]] || return 0
-    PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 \
-        PADM_SUBSCRIPTION_GROUPS_LOCK_SKIP_BUSY=true \
-        runSubscriptionGroupSync
+    PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0
+    PADM_SUBSCRIPTION_GROUPS_LOCK_SKIP_BUSY=true
+    if runSubscriptionGroupSync; then status=0; else status=$?; fi
+    if [[ -n "${previousLockTimeout}" ]]; then PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=${previousLockTimeout}; else unset PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT; fi
+    if [[ -n "${previousSkipBusy}" ]]; then PADM_SUBSCRIPTION_GROUPS_LOCK_SKIP_BUSY=${previousSkipBusy}; else unset PADM_SUBSCRIPTION_GROUPS_LOCK_SKIP_BUSY; fi
+    if [[ "${SUBSCRIPTION_GROUPS_LOCK_SKIPPED:-false}" == "true" ]]; then
+        printf '[%s] SyncSubscriptionGroups skipped: previous run still holds the lock\n' "$(date '+%Y-%m-%d %H:%M:%S')" >>"$(subscriptionGroupSyncCronFile)" 2>/dev/null || true
+        return 0
+    fi
+    return "${status}"
 }
 
 subscriptionGroupSyncCronFile() {
@@ -1474,9 +1495,17 @@ subscriptionGroupSyncCronFile() {
 subscriptionGroupSyncCronCommand() {
     local interval
     local defaultInterval
+    local failureCount
+    local backoff
     defaultInterval=$(subscriptionGroupSyncDefaultInterval) || return 1
     interval=$(subscriptionActiveGroupRead --argjson defaultInterval "${defaultInterval}" -r '(.sync.interval_minutes // $defaultInterval) | tonumber? // $defaultInterval') || return 1
     subscriptionGroupSyncIntervalValid "${interval}" || interval=${defaultInterval}
+    failureCount=$(subscriptionActiveGroupRead -r '(.sync.failures // []) | length' 2>/dev/null || printf '0')
+    [[ "${failureCount}" =~ ^[0-9]+$ ]] || failureCount=0
+    backoff=0
+    for ((backoff = 0; backoff < failureCount && backoff < 6; backoff++)); do :; done
+    interval=$((interval * (1 << backoff)))
+    ((interval <= 59)) || interval=59
     printf '* * * * * padm_minute=$(( $(date +\\%%s) / 60 )); [ $((padm_minute / %s * %s)) -eq "$padm_minute" ] && /bin/bash /etc/padm/install.sh SyncSubscriptionGroups >> %s 2>&1\n' \
         "${interval}" \
         "${interval}" \

@@ -105,8 +105,14 @@ class Handler(BaseHTTPRequestHandler):
         error = body.get("error", "")
         if error == "unauthorized":
             return 401
-        if endpoint in ("sync", "traffic") and error in ("invalid_payload", "empty_payload"):
+        if error in ("invalid_payload", "empty_payload"):
             return 400
+        if error == "request_timeout":
+            return 408
+        if error == "busy":
+            return 409
+        if error == "payload_too_large":
+            return 413
         if endpoint == "health":
             return 503
         if error in ("script_timeout", "script_failed", "script_exec_failed", "invalid_response"):

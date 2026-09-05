@@ -316,7 +316,11 @@ subscriptionRemoteResponseErrorMessage() {
 subscriptionRemoteResponseErrorType() {
     jq -r --arg statusCode "${2:-}" '
       (($statusCode | tonumber?) // (.http_status? | tonumber?) // 0) as $status |
-      if $status >= 400 and $status < 500 then "http_4xx"
+      if $status == 400 then "http_400"
+      elif $status == 401 then "http_401"
+      elif $status == 409 then "http_409"
+      elif $status == 429 then "http_429"
+      elif $status >= 400 and $status < 500 then "http_4xx"
       elif $status >= 500 and $status < 600 then "http_5xx"
       else (.error_detail.type? | select(type == "string" and length > 0)) // "remote_error"
       end
