@@ -690,6 +690,7 @@ runCorePortFileTransactionRegression() {
         local denyShouldFail=false
         local denyTcpShouldFail=false
         local mode=add-fail
+        local deleteMenuReads=0
         local rc
         : >"${firewallLog}"
         : >"${firewallErrorLog}"
@@ -697,7 +698,14 @@ runCorePortFileTransactionRegression() {
         addCorePort() { return 0; }
         autoRead() {
             case "$1" in
-            core_port_menu) [[ "${mode}" == "delete" ]] && printf -v "$3" 3 || printf -v "$3" 2 ;;
+            core_port_menu)
+                if [[ "${mode}" == "delete" ]]; then
+                    deleteMenuReads=$((deleteMenuReads + 1))
+                    [[ "${deleteMenuReads}" == "1" ]] && printf -v "$3" 3 || printf -v "$3" 4
+                else
+                    printf -v "$3" 2
+                fi
+                ;;
             extra_core_ports) printf -v "$3" '2555,2666' ;;
             extra_core_default_port) printf -v "$3" 443 ;;
             extra_core_delete_port) printf -v "$3" 1 ;;
@@ -741,6 +749,7 @@ runCorePortFileTransactionRegression() {
         grep -qx 'deny:2555:udp' "${firewallLog}"
 
         denyTcpShouldFail=true
+        deleteMenuReads=0
         : >"${firewallLog}"
         regressionExpectStatus 1 originalAddCorePort >/dev/null 2>&1
         grep -qx 'deny:2555:tcp' "${firewallLog}"
