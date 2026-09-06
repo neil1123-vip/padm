@@ -173,8 +173,13 @@ showHysteriaAccounts() {
     if currentProtocolHas 3 || [[ -n "${hysteriaPort:-}" ]]; then
         readPortHopping "hysteria2" "${singBoxHysteria2Port}"
         subscribeSectionTitle "Hysteria2 TLS" "UDP/移动网络可选"
-        local configFile
+        local configFile currentHost
         configFile=$(protocolConfigFile 3) || return 1
+        if ! currentHost=$(jq -er '.inbounds[0].tls.server_name | select(type == "string" and length > 0)' "${configFile}") ||
+            ! padmIsValidConnectAddress "${currentHost}"; then
+            errorCard "Hysteria2 订阅生成失败" "协议配置缺少有效的 TLS 域名"
+            return 1
+        fi
         local hysteria2DefaultPort=
         if [[ -n "${hysteria2PortHoppingStart}" && -n "${hysteria2PortHoppingEnd}" ]]; then
             hysteria2DefaultPort="${hysteria2PortHopping}"
@@ -271,8 +276,13 @@ showTuicAccounts() {
     if currentProtocolHas 31 || [[ -n "${tuicPort:-}" ]]; then
         readPortHopping "tuic" "${singBoxTuicPort}"
         subscribeSectionTitle "Tuic TLS" "UDP/移动网络可选"
-        local configFile
+        local configFile currentHost
         configFile=$(protocolConfigFile 31) || return 1
+        if ! currentHost=$(jq -er '.inbounds[0].tls.server_name | select(type == "string" and length > 0)' "${configFile}") ||
+            ! padmIsValidConnectAddress "${currentHost}"; then
+            errorCard "TUIC 订阅生成失败" "协议配置缺少有效的 TLS 域名"
+            return 1
+        fi
         local tuicDefaultPort=${singBoxTuicPort}
         if [[ -n "${tuicPortHoppingStart:-}" && -n "${tuicPortHoppingEnd:-}" ]]; then
             tuicDefaultPort="${tuicPortHopping}"

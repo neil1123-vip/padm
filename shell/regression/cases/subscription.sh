@@ -917,7 +917,59 @@ jq -e '.[0].security == "auto" and .[0].transport.path == "/upgrade" and .[0].pa
 unset REGRESSION_ECHO_LOG
 }
 
+runSubscriptionOutputAuxiliaryUdpRegression() (
+    local root="${TMP_DIR}/subscription-output-auxiliary-udp"
+    local uuid=11111111-1111-1111-1111-111111111111
+    local desired='[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}]'
+    local mode subscriptions links
+    local hysteria2PortHoppingStart= hysteria2PortHoppingEnd= hysteria2PortHopping=
+    local tuicPortHoppingStart= tuicPortHoppingEnd= tuicPortHopping=
+    local configPath="${root}/xray/" singBoxConfigPath="${root}/sing-box/"
+    local PADM_REALITY_ENTRY_HOST_FILE="${root}/entry-host"
+    local PADM_SUBSCRIPTION_GROUPS_DIR="${root}/groups"
+    source "${PROJECT_ROOT}/shell/subscription/output.sh"
+    readInstallType() { :; }
+    readPortHopping() { :; }
+    mkdir -p "${configPath}" "${singBoxConfigPath}"
+    printf '192.0.2.10\n' >"${PADM_REALITY_ENTRY_HOST_FILE}"
+    cat >"${configPath}07_VLESS_vision_reality_inbounds.json" <<'JSON'
+{"inbounds":[{"port":443},{"settings":{"clients":[],"decryption":"none"},"streamSettings":{"realitySettings":{"serverNames":["www.example.com"],"target":"www.example.com:443","publicKey":"public-key","privateKey":"private-key"}}}]}
+JSON
+    ensureSubscriptionGroupsState
+    subscriptionApplyUserGroupState "${desired}" '[]'
+    for mode in reality tls singbox; do
+        coreInstallType=1
+        if [[ "${mode}" == tls ]]; then
+            printf '%s\n' '{"inbounds":[{"port":443,"settings":{"clients":[]},"streamSettings":{"tlsSettings":{"certificates":[{"certificateFile":"/etc/padm/tls/main.example.com.crt"}]}}}]}' >"${configPath}28_trojan_TCP_direct_inbounds.json"
+        elif [[ "${mode}" == singbox ]]; then
+            coreInstallType=2
+            configPath="${singBoxConfigPath}"
+        fi
+        printf '%s\n' '{"inbounds":[{"type":"hysteria2","listen_port":8443,"users":[],"up_mbps":100,"down_mbps":200,"tls":{"enabled":true,"server_name":"hy.example.com"}}]}' >"${singBoxConfigPath}06_hysteria2_inbounds.json"
+        printf '%s\n' '{"inbounds":[{"type":"tuic","listen_port":9443,"users":[],"congestion_control":"bbr","tls":{"enabled":true,"server_name":"tuic.example.com"}}]}' >"${singBoxConfigPath}09_tuic_inbounds.json"
+        subscriptionSyncAppendLocalUser team-a
+        subscriptions=$(subscriptionControlRenderSubscribeAccounts "${desired}") || {
+            printf 'assert-fail:auxiliary-udp-render:%s\n' "${mode}" >&2
+            return 1
+        }
+        links=$(jq -r '.sub_team_a.default' <<<"${subscriptions}" | base64 -d)
+        grep -qF "hysteria2://${uuid}@hy.example.com:8443?peer=hy.example.com&insecure=0&sni=hy.example.com&alpn=h3#" <<<"${links}"
+        grep -qF "tuic://${uuid}:${uuid}@tuic.example.com:9443?congestion_control=bbr&alpn=h3&sni=tuic.example.com&udp_relay_mode=native&allow_insecure=0#" <<<"${links}"
+        jq -e --arg uuid "${uuid}" '
+          .sub_team_a as $account |
+          ($account.clash_meta | contains("server: hy.example.com") and contains("sni: hy.example.com") and
+            contains("server: tuic.example.com") and contains("sni: tuic.example.com")) and
+          ([$account.sing_box[] | select(.type == "hysteria2" or .type == "tuic")] |
+            length == 2 and all(.[]; .password == $uuid) and
+            any(.[]; .type == "hysteria2" and .server == "hy.example.com" and .server_port == 8443 and .tls.server_name == "hy.example.com") and
+            any(.[]; .type == "tuic" and .server == "tuic.example.com" and .server_port == 9443 and .tls.server_name == "tuic.example.com" and .uuid == $uuid))
+        ' <<<"${subscriptions}" >/dev/null
+        printf 'regression-ok:auxiliary-udp-output:%s\n' "${mode}"
+    done
+)
+
 runSubscriptionOutputTlsAnyHysteriaTuicNaiveRegression() {
+    runRegressionStep subscription-output-auxiliary-udp runSubscriptionOutputAuxiliaryUdpRegression
     local SUBSCRIBE_CAPTURE_DIR="${SUBSCRIBE_CAPTURE_DIR}-${BASHPID:-$$}"
     local PADM_SUBSCRIBE_LOCAL_DIR="${SUBSCRIBE_CAPTURE_DIR}"
 subscribeOutputPortIsValid hysteria "20000-20002"
