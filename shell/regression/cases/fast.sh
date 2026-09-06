@@ -1888,6 +1888,7 @@ runLocalTrafficAccountsBatchRegression() (
     local originalPolicy
     local originalSingBoxStats
     local originalSingBoxMerged
+    local singBoxCapabilityBinary="${fakeBin}/sing-box"
     mkdir -p "${xrayConfig}" "${singBoxConfig}" "${fakeBin}"
     configPath="${xrayConfig}"
     singBoxConfigPath="${singBoxConfig}"
@@ -2034,6 +2035,32 @@ SH
     fi
     [[ "$(<"${singBoxStatsConfig}")" == "${originalSingBoxStats}" ]]
     [[ "$(<"${singBoxMergedConfig}")" == "${originalSingBoxMerged}" ]]
+
+    singBoxMergeConfig() {
+        printf '{"inbounds":[]}\n' >"${singBoxMergedConfig}"
+        printf 'merge-unsupported\n' >>"${singBoxMergeMarker}"
+    }
+    reloadCore() { printf 'reload-unsupported\n' >>"${singBoxReloadMarker}"; }
+    cat >"${singBoxCapabilityBinary}" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' 'build -tags=with_clash_api,with_quic'
+SH
+    chmod +x "${singBoxCapabilityBinary}"
+    PADM_SINGBOX_BINARY="${singBoxCapabilityBinary}"
+    printf '%s\n' '{"experimental":{"v2ray_api":{}}}' >"${singBoxStatsConfig}"
+    ensureSingBoxTrafficStatsConfig
+    [[ ! -e "${singBoxStatsConfig}" ]]
+    grep -q '^merge-unsupported$' "${singBoxMergeMarker}"
+    grep -q '^reload-unsupported$' "${singBoxReloadMarker}"
+
+    if singBoxV2rayApiSupported; then
+        return 1
+    fi
+    printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\\n" "build -tags=with_v2ray_api,with_quic"' >"${singBoxCapabilityBinary}"
+    if ! singBoxV2rayApiSupported; then
+        return 1
+    fi
+    unset PADM_SINGBOX_BINARY
 
     configPath="${xrayConfig}"
     singBoxConfigPath=

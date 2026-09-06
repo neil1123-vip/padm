@@ -200,6 +200,25 @@ ensureSingBoxTrafficStatsConfig() {
     [[ -d "${configDir}" ]] || return 0
     statsConfig=${configDir}14_stats_api.json
     mergedConfig=$(singBoxMergedConfigFile) || return 1
+    if declare -F singBoxV2rayApiSupported >/dev/null 2>&1 &&
+        ! singBoxV2rayApiSupported; then
+        [[ -f "${statsConfig}" ]] || return 0
+        checkLogBackupCreate trafficBackupDir "${statsConfig}" "${mergedConfig}" || {
+            errorCard "sing-box 不支持 v2ray_api，旧统计配置备份失败，已取消更新"
+            return 1
+        }
+        if ! removeManagedFileIfPresent "${statsConfig}"; then
+            failTrafficStatsConfigChange "${trafficBackupDir}" "sing-box 不支持 v2ray_api，旧统计配置清理失败"
+            return 1
+        fi
+        if ! reloadCore; then
+            failTrafficStatsConfigChange "${trafficBackupDir}" "sing-box 不支持 v2ray_api，配置清理后核心重载失败" true
+            return 1
+        fi
+        SUBSCRIPTION_TRAFFIC_STATS_RELOADED=true
+        padmRemoveCleanupPath "${trafficBackupDir}"
+        return 0
+    fi
     users=$(collectSingBoxTrafficUsers "${configDir}") || {
         errorCard "sing-box 流量统计用户读取失败"
         return 1
@@ -461,6 +480,10 @@ querySingBoxTrafficStatsGrpc() {
 collectSingBoxTrafficStatsSnapshot() {
     local accounts=$1
     local stats
+    if declare -F singBoxV2rayApiSupported >/dev/null 2>&1 &&
+        ! singBoxV2rayApiSupported; then
+        return 1
+    fi
     stats=$(querySingBoxTrafficStatsGrpc) || return 1
     mapTrafficStatsJsonToAccounts "${accounts}" <<<"${stats}"
 }

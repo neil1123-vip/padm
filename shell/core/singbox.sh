@@ -619,9 +619,16 @@ singBoxMergeConfigForValidation() {
 # 合并 sing-box 配置
 singBoxMergeConfig() {
     local binary="${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}"
-    local outputFile tmpFile
+    local outputFile tmpFile statsConfig
 
     outputFile=$(singBoxMergedConfigFile)
+    if declare -F singBoxV2rayApiSupported >/dev/null 2>&1 &&
+        ! singBoxV2rayApiSupported "${binary}"; then
+        statsConfig="$(singBoxConfigShardDir)14_stats_api.json"
+        if [[ -e "${statsConfig}" ]]; then
+            removeManagedFileIfPresent "${statsConfig}" || return 1
+        fi
+    fi
     singBoxMergeConfigToTemp tmpFile "${binary}" /dev/null || return 1
     commitGeneratedFile "${tmpFile}" "${outputFile}" 644 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }

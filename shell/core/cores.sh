@@ -631,6 +631,14 @@ singBoxBinaryVersion() {
     "${1}" version 2>/dev/null | awk 'NR == 1 && $1 == "sing-box" && $2 == "version" { print "v"$3; exit }'
 }
 
+singBoxV2rayApiSupported() {
+    local binary=${1:-$(coreSingBoxBinaryPath 2>/dev/null || true)}
+    local versionOutput
+    [[ -x "${binary}" ]] || return 0
+    versionOutput=$("${binary}" version 2>/dev/null) || return 0
+    grep -Eq '(^|[^[:alnum:]_])with_v2ray_api([^[:alnum:]_]|$)' <<<"${versionOutput}"
+}
+
 runXrayConfigValidation() {
     local binary=$1
     local mode=$2
