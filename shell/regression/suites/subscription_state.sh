@@ -118,6 +118,12 @@ listRegressionSubscriptionStateSupportChildSelectors() {
         subscription-groups-restore-failure
 }
 
+runRegressionSubscriptionStateSupport() {
+    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runSubscriptionStateParallelChildRegressionIsolatedSelector \
+        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-support" \
+            listRegressionSubscriptionStateSupportChildSelectors
+}
+
 listRegressionSubscriptionStateRemoteRestoreSelfReferenceChildSelectors() {
     printf '%s\n' \
         subscription-state-remote-restore-self-reference-plan \
@@ -180,7 +186,8 @@ registerRegressionFunctionLeaf subscription-state-remote-restore-legacy-menu run
 registerRegressionSequentialSelectorList subscription-state-quota-traffic listRegressionSubscriptionStateQuotaTrafficChildSelectors
 registerRegressionSequentialSelectorList subscription-state-quota-menu-tx listRegressionSubscriptionStateQuotaMenuTransactionChildSelectors
 registerRegressionSequentialSelectorList subscription-state-quota-partial-sync listRegressionSubscriptionStateQuotaPartialSyncChildSelectors
-registerRegressionSequentialSelectorList subscription-state-support listRegressionSubscriptionStateSupportChildSelectors
+registerRegressionAggregateRunner parallel subscription-state-support runRegressionSubscriptionStateSupport \
+    $(listRegressionSubscriptionStateSupportChildSelectors)
 registerRegressionFunctionLeaf subscription-sync-tempdir runRegressionStep subscription-sync-tempdir runSubscriptionSyncTempDirRegression
 registerRegressionFunctionLeaf subscription-sync-process-substitution-failure runRegressionStep subscription-sync-process-substitution-failure runSubscriptionSyncProcessSubstitutionFailureRegression
 registerRegressionFunctionLeaf subscription-sync-missing-protocol-plan runRegressionStep subscription-sync-missing-protocol-plan runSubscriptionSyncMissingProtocolPlanRegression

@@ -301,7 +301,6 @@ subscriptionSyncMissingProtocolAccounts() {
     local mode
     local configDir
     local registry
-    local protocolId
     local fileName
     local file
     local configuredAccounts
@@ -325,8 +324,8 @@ subscriptionSyncMissingProtocolAccounts() {
         else
             registry=$(protocolCapabilityRegistry | awk -F'|' '$3 == "node" && ("," $6 ",") ~ ",sing-box," && $19 != "" { print $1 "\t" $19 }') || return 1
         fi
-        while IFS=$'\t' read -r protocolId fileName; do
-            [[ -n "${protocolId}" && -n "${fileName}" ]] || continue
+        while IFS=$'\t' read -r _ fileName; do
+            [[ -n "${fileName}" ]] || continue
             file="${configDir}${fileName}"
             [[ -f "${file}" ]] || continue
             [[ -n "${seenFiles[${file}]:-}" ]] && continue
