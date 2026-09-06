@@ -843,7 +843,7 @@ EOF
             case "${target}" in
             rolling-0.example.com:443)
                 : >"${rollingDir}/slow-active"
-                for ((attempt = 0; attempt < 200; attempt++)); do
+                for ((attempt = 0; attempt < 10; attempt++)); do
                     if [[ -f "${rollingDir}/ninth-started" ]]; then
                         : >"${rollingDir}/rolling-observed"
                         break
@@ -857,7 +857,7 @@ EOF
                 [[ -f "${rollingDir}/slow-active" ]] && : >"${rollingDir}/rolling-observed"
                 ;;
             *)
-                for ((attempt = 0; attempt < 200; attempt++)); do
+                for ((attempt = 0; attempt < 10; attempt++)); do
                     [[ -f "${rollingDir}/slow-active" ]] && break
                     command sleep 0.01
                 done
@@ -895,7 +895,7 @@ EOF
             case "${domain}" in
             rolling-scanner-0.example.com)
                 : >"${rollingDir}/slow-active"
-                for ((attempt = 0; attempt < 200; attempt++)); do
+                for ((attempt = 0; attempt < 10; attempt++)); do
                     if [[ -f "${rollingDir}/ninth-started" ]]; then
                         : >"${rollingDir}/rolling-observed"
                         break
@@ -909,7 +909,7 @@ EOF
                 [[ -f "${rollingDir}/slow-active" ]] && : >"${rollingDir}/rolling-observed"
                 ;;
             *)
-                for ((attempt = 0; attempt < 200; attempt++)); do
+                for ((attempt = 0; attempt < 10; attempt++)); do
                     [[ -f "${rollingDir}/slow-active" ]] && break
                     command sleep 0.01
                 done

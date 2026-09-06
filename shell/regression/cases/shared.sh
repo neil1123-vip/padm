@@ -81,15 +81,18 @@ appendSingBoxSubscribeLocalConfig() {
 }
 
 fake-xray() {
-    local concurrencyMarker='' active=0 attempt=0
+    local concurrencyMarker='' active=0 attempt=0 marker
     [[ "$1" == "tls" && "$2" == "ping" ]]
     printf '%s\n' "$*" >>"${REALITY_TLS_PING_ARGS_FILE}"
     if [[ -n "${PADM_FAKE_XRAY_CONCURRENCY_DIR:-}" ]]; then
         command mkdir -p "${PADM_FAKE_XRAY_CONCURRENCY_DIR}/active"
         concurrencyMarker="${PADM_FAKE_XRAY_CONCURRENCY_DIR}/active/${BASHPID:-$$}"
         : >"${concurrencyMarker}"
-        for ((attempt = 0; attempt < 200; attempt++)); do
-            active=$(find "${PADM_FAKE_XRAY_CONCURRENCY_DIR}/active" -type f | wc -l | tr -d ' ')
+        for ((attempt = 0; attempt < 10; attempt++)); do
+            active=0
+            for marker in "${PADM_FAKE_XRAY_CONCURRENCY_DIR}/active/"*; do
+                [[ -f "${marker}" ]] && active=$((active + 1))
+            done
             (( active >= 2 )) && break
             command sleep 0.01
         done
