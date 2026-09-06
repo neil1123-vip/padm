@@ -443,8 +443,9 @@ subscriptionSyncAppendProtocolUser() {
     local accountName=$5
     local mode=${6:-}
     local clients=
+    local existingClients=
     local userPath=
-    # init*Clients reads this dynamically scoped value to preserve existing clients.
+    # Generate only the new client; keep existing credentials and fields unchanged.
     local currentClients='[]'
     [[ -f "${file}" ]] || return 0
     if [[ -n "${preferredPath}" ]]; then
@@ -457,8 +458,8 @@ subscriptionSyncAppendProtocolUser() {
           end
         ' "${file}") || return 1
     fi
-    currentClients=$(jq -c --arg accountName "${accountName}" "${userPath} // [] | if any(.[]?; (${SUBSCRIPTION_SYNC_MANAGED_ACCOUNT_JQ}) == \$accountName) then null else . end" "${file}") || return 1
-    if [[ "${currentClients}" == "null" ]]; then
+    existingClients=$(jq -c --arg accountName "${accountName}" "${userPath} // [] | if any(.[]?; (${SUBSCRIPTION_SYNC_MANAGED_ACCOUNT_JQ}) == \$accountName) then null else . end" "${file}") || return 1
+    if [[ "${existingClients}" == "null" ]]; then
         return 0
     fi
     if [[ "${mode}" == "singbox" || ( -z "${mode}" && "${coreInstallType}" == "2" ) ]]; then
@@ -466,6 +467,7 @@ subscriptionSyncAppendProtocolUser() {
     else
         clients=$(initXrayClients "${protocolId}" "${uuid}" "${accountName}") || return 1
     fi
+    clients=$(jq -c --argjson clients "${clients}" '. + $clients' <<<"${existingClients}") || return 1
     subscriptionSyncSetUsersInFile "${file}" "${userPath}" "${clients}"
 }
 

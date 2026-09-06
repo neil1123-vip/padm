@@ -1125,30 +1125,22 @@ runSubscriptionSyncAppendProtocolUserPreservesClientsRegression() (
     mkdir -p "${root}/tmp"
     TMPDIR="${root}/tmp"
     cat >"${targetFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"id":"old-uuid","email":"sub_existing-VLESS_WS"}]}}]}
+{"inbounds":[{"settings":{"clients":[{"id":"old-uuid","email":"sub_existing-VLESS_WS","level":7}]}}]}
 JSON
 
     coreInstallType=1
-    initXrayClients() {
-        jq -n \
-            --argjson clients "${currentClients}" \
-            --arg uuid "$2" \
-            --arg account "$3" \
-            '$clients + [{id:$uuid,email:($account + "-VLESS_WS")}]'
-    }
-
-    subscriptionSyncAppendProtocolUser 1 "${targetFile}" '.inbounds[0].settings.clients' new-uuid sub_new
+    subscriptionSyncAppendProtocolUser 21 "${targetFile}" '.inbounds[0].settings.clients' new-uuid sub_new
     jq -e '
       (.inbounds[0].settings.clients | length) == 2 and
-      .inbounds[0].settings.clients[0].email == "sub_existing-VLESS_WS" and
+      .inbounds[0].settings.clients[0] == {id:"old-uuid",email:"sub_existing-VLESS_WS",level:7} and
       .inbounds[0].settings.clients[1].email == "sub_new-VLESS_WS"
     ' "${targetFile}" >/dev/null
 
-    subscriptionSyncAppendProtocolUser 1 "${targetFile}" '.inbounds[0].settings.clients' another-uuid sub_new
+    subscriptionSyncAppendProtocolUser 21 "${targetFile}" '.inbounds[0].settings.clients' another-uuid sub_new
     jq -e '(.inbounds[0].settings.clients | length) == 2' "${targetFile}" >/dev/null
 
     printf '%s\n' '{"inbounds":[{"settings":{"clients":[{"id":"old-uuid","email":"sub_existing-VLESS_WS"}]}}]}' >"${root}/auto-path.json"
-    subscriptionSyncAppendProtocolUser 1 "${root}/auto-path.json" '' new-uuid sub_new
+    subscriptionSyncAppendProtocolUser 21 "${root}/auto-path.json" '' new-uuid sub_new
     jq -e '
       (.inbounds[0].settings.clients | length) == 2 and
       .inbounds[0].settings.clients[1].email == "sub_new-VLESS_WS"
@@ -1157,20 +1149,25 @@ JSON
     cat >"${singBoxTargetFile}" <<'JSON'
 {"inbounds":[{"users":[{"password":"old-password","name":"sub_existing-singbox_hysteria2"}]}]}
 JSON
-    initSingBoxClients() {
-        jq -n \
-            --argjson clients "${currentClients}" \
-            --arg password "$2" \
-            --arg account "$3" \
-            '$clients + [{password:$password,name:($account + "-singbox_hysteria2")}]'
-    }
-
     subscriptionSyncAppendProtocolUser 3 "${singBoxTargetFile}" '' new-password sub_new singbox
     jq -e '
       (.inbounds[0].users | length) == 2 and
       .inbounds[0].users[0].name == "sub_existing-singbox_hysteria2" and
       .inbounds[0].users[1].name == "sub_new-singbox_hysteria2"
     ' "${singBoxTargetFile}" >/dev/null
+
+    local tuicFile="${root}/09_tuic_inbounds.json" beforeRepeat
+    printf '%s\n' '{"inbounds":[{"users":[{"uuid":"old-uuid","password":"custom-password","name":"admin-singbox_tuic"}]}]}' >"${tuicFile}"
+    subscriptionSyncAppendProtocolUser 31 "${tuicFile}" '' new-uuid sub_new singbox
+    jq -e '
+      .inbounds[0].users == [
+        {uuid:"old-uuid",password:"custom-password",name:"admin-singbox_tuic"},
+        {uuid:"new-uuid",password:"new-uuid",name:"sub_new-singbox_tuic"}
+      ]
+    ' "${tuicFile}" >/dev/null
+    beforeRepeat=$(<"${tuicFile}")
+    subscriptionSyncAppendProtocolUser 31 "${tuicFile}" '' new-uuid sub_new singbox
+    [[ "$(<"${tuicFile}")" == "${beforeRepeat}" ]]
 )
 
 runSubscriptionSyncRemoveAccountFromFileRegression() (
