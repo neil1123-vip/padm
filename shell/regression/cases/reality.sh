@@ -1502,7 +1502,7 @@ runRealityConfigRefreshSubscriptionRegression() {
 }
 
 runRealityConfigControlledRefreshRegression() (
-    local refreshSource=
+    local refreshSourceFile="${TMP_DIR}/reality-controlled-refresh-source.json"
     local statusLog="${TMP_DIR}/reality-controlled-refresh-status.log"
     : >"${statusLog}"
     subscriptionCurrentRoleNormalized() { printf 'controlled\n'; }
@@ -1511,14 +1511,14 @@ runRealityConfigControlledRefreshRegression() (
     }
     subscriptionControlToken() { printf 'controlled-token\n'; }
     subscriptionRemoteControlRequest() {
-        refreshSource=$1
+        printf '%s\n' "$1" >"${refreshSourceFile}"
         [[ "$2" == "refresh" && "$3" == "{}" ]] || return 1
         printf '%s\n' '{"ok":true,"refreshed":true}'
     }
     realityTargetStatusBlock() { printf '%s\n' "$*" >>"${statusLog}"; }
 
     subscriptionNotifyControllerRefresh
-    jq -e '.id == "main" and .host == "10.77.0.1" and .port == 39778 and .control_token == "controlled-token"' <<<"${refreshSource}" >/dev/null
+    jq -e '.id == "main" and .host == "10.77.0.1" and .port == 39778 and .control_token == "controlled-token"' "${refreshSourceFile}" >/dev/null
     grep -q '已通知主控刷新订阅' "${statusLog}"
 )
 

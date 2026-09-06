@@ -9,6 +9,8 @@ runSubscriptionStateParallelChildRegressionIsolated() (
     unset PADM_REGRESSION_PARALLEL_SELECTOR_MODE
     TMP_DIR="${isolatedRoot}"
     TMPDIR="${isolatedRoot}/tmp"
+    PADM_CLEANUP_PATHS=()
+    padmRegisterCleanupPath "${TMP_DIR}"
     export PADM_SUBSCRIPTION_GROUPS_DIR="${isolatedRoot}/groups"
     mkdir -p "${TMP_DIR}" "${TMPDIR}" "${PADM_SUBSCRIPTION_GROUPS_DIR}"
     "$@"
