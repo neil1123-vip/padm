@@ -242,7 +242,7 @@ runRemoteControlHealthRegression() (
     response=$(PADM_FAKE_REMOTE_HEALTH_MODE=remote_error subscriptionRemoteControlHealth "${sourceRemote}" | jq -c .)
     [[ "${response}" == *'"status":"remote_error"'* ]]
     [[ "${response}" == *'"status_code":"503"'* ]]
-    [[ "${response}" == *'"type":"remote_error"'* ]]
+    [[ "${response}" == *'"type":"http_5xx"'* ]]
     [[ "${response}" == *'服务暂时不可用'* ]]
 
     response=$(PADM_FAKE_REMOTE_HEALTH_MODE=success subscriptionRemoteControlHealth "${sourceRemote}" | jq -c .)
@@ -686,7 +686,7 @@ runRemoteControlTrafficContractRegression() (
     jq -e '.status == "remote_error" and .error_detail.type == "invalid_response"' <<<"${result}" >/dev/null
     responseMode=legacy
     result=$(subscriptionRemoteTrafficForSource "${source}")
-    jq -e '.status == "remote_error" and .error_detail.type == "remote_error" and .error_detail.message == "未知控制端点"' <<<"${result}" >/dev/null
+    jq -e '.status == "remote_error" and .error_detail.type == "unknown_endpoint" and .error_detail.message == "未知控制端点"' <<<"${result}" >/dev/null
 
     responseMode=valid
     : >"${selfStateReadLog}"
