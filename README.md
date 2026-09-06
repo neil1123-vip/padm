@@ -616,6 +616,8 @@ bash shell/subscription_groups_regression.sh protocol-capabilities
 bash shell/subscription_groups_regression.sh platform-hot
 bash shell/subscription_groups_regression.sh platform-smoke
 bash shell/subscription_groups_regression.sh fast-full
+# sing-box 1.14 兼容性迁移专项（fast-full 已包含）
+bash shell/subscription_groups_regression.sh fast-only-compatibility
 bash shell/subscription_groups_regression.sh subscription-output
 bash shell/subscription_groups_regression.sh transaction-core
 bash shell/subscription_groups_regression.sh core-safety-rollback

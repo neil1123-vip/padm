@@ -9,7 +9,8 @@ listRegressionFastOnlyOutputChildSelectors() {
 listRegressionFastOnlyChildSelectors() {
     printf '%s\n' \
         fast-only-safety \
-        fast-only-output
+        fast-only-output \
+        fast-only-compatibility
 }
 
 listRegressionFastChildSelectors() {
@@ -27,6 +28,7 @@ listRegressionFastFullChildSelectors() {
 registerRegressionFunctionLeaf fast-only-safety runRegressionFastOnlySafety
 registerRegressionFunctionLeaf fast-only-output-auto-install runRegressionFastOnlyOutputAutoInstall
 registerRegressionFunctionLeaf fast-only-output-rest runRegressionFastOnlyOutputRest
+registerRegressionFunctionLeaf fast-only-compatibility runSingBox114CompatibilityAuditRegression
 registerRegressionFunctionLeaf fast-smoke runRegressionFastSmoke
 registerRegressionFunctionLeaf docker-phase1 runDockerPhase1Regression
 registerRegressionFunctionLeaf docker-phase2 runDockerPhase2Regression

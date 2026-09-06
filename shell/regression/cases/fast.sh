@@ -5824,7 +5824,6 @@ runRegressionFastSmoke() {
         wireguard-nginx-path-safety runWriteWireGuardControlNginxPathSafetyRegression \
         random-uuid-entropy runRandomUuidEntropyFallbackRegression \
         auto-install-user-validation runAutoInstallUserValidationRegression \
-        sing-box-1.14-compatibility runSingBox114CompatibilityAuditRegression \
         remove-install-path-safety runRemoveInstallPathSafetyRegression \
         subscription-sync-path-safety runSubscriptionSyncPathSafetyRegression
 }
