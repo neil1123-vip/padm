@@ -94,6 +94,7 @@ listRegressionSubscriptionStateSupportChildSelectors() {
     printf '%s\n' \
         subscription-sync-tempdir \
         subscription-sync-process-substitution-failure \
+        subscription-sync-missing-protocol-plan \
         subscription-sync-restore-pair-failure-message \
         subscription-sync-append-restore-failure-detail \
         subscription-sync-single-restore-result-message \
@@ -182,6 +183,7 @@ registerRegressionSequentialSelectorList subscription-state-quota-partial-sync l
 registerRegressionSequentialSelectorList subscription-state-support listRegressionSubscriptionStateSupportChildSelectors
 registerRegressionFunctionLeaf subscription-sync-tempdir runRegressionStep subscription-sync-tempdir runSubscriptionSyncTempDirRegression
 registerRegressionFunctionLeaf subscription-sync-process-substitution-failure runRegressionStep subscription-sync-process-substitution-failure runSubscriptionSyncProcessSubstitutionFailureRegression
+registerRegressionFunctionLeaf subscription-sync-missing-protocol-plan runRegressionStep subscription-sync-missing-protocol-plan runSubscriptionSyncMissingProtocolPlanRegression
 registerRegressionFunctionLeaf subscription-sync-restore-pair-failure-message runSubscriptionSyncRestorePairFailureMessageRegression
 registerRegressionFunctionLeaf subscription-sync-append-restore-failure-detail runSubscriptionSyncAppendRestoreFailureDetailRegression
 registerRegressionFunctionLeaf subscription-sync-single-restore-result-message runSubscriptionSyncSingleRestoreResultMessageRegression

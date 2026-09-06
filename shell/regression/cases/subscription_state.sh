@@ -1228,6 +1228,34 @@ runSubscriptionSyncProcessSubstitutionFailureRegression() {
     )
 }
 
+runSubscriptionSyncMissingProtocolPlanRegression() (
+    local root="${TMP_DIR}/subscription-sync-missing-protocol-plan"
+    local oldConfigPath="${configPath:-}"
+    local oldSingBoxConfigPath="${singBoxConfigPath:-}"
+    local plan
+
+    mkdir -p "${root}/xray" "${root}/sing-box"
+    configPath="${root}/xray/"
+    singBoxConfigPath="${root}/sing-box/"
+    printf '%s\n' '{"inbounds":[{"settings":{"clients":[{"id":"11111111-1111-1111-1111-111111111111","email":"sub_team_a-VLESS_TCP"}]}}]}' >"${configPath}02_VLESS_TCP_inbounds.json"
+    printf '%s\n' '{"inbounds":[{"users":[]}]}' >"${singBoxConfigPath}06_hysteria2_inbounds.json"
+
+    protocolCapabilityRegistry() {
+        printf '%s\n' \
+            '1|VLESS|node|x|both|xray|x|x|x|x|x|x|x|x|x|x|x|x|02_VLESS_TCP_inbounds.json' \
+            '3|Hysteria2|node|x|both|sing-box|x|x|x|x|x|x|x|x|x|x|x|x|06_hysteria2_inbounds.json'
+    }
+    subscriptionSyncAccountPlanFromIds() {
+        printf '{"create":[],"remove":[]}\n'
+    }
+
+    plan=$(subscriptionSyncPlanFromDesiredUsers '[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}]')
+    jq -e '.create == ["sub_team_a"] and .remove == ["sub_team_a"]' <<<"${plan}" >/dev/null
+
+    configPath="${oldConfigPath}"
+    singBoxConfigPath="${oldSingBoxConfigPath}"
+)
+
 runSubscriptionUserRemovalTransactionLockRegression() (
     local logFile="${TMP_DIR}/subscription-user-removal-lock.log"
     : >"${logFile}"

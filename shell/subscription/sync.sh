@@ -293,6 +293,62 @@ subscriptionSyncCredentialMismatchAccounts() {
       | unique'
 }
 
+subscriptionSyncMissingProtocolAccounts() {
+    local desiredUsers=$1
+    local desiredAccounts
+    local xrayConfigDir
+    local singBoxConfigDir=
+    local mode
+    local configDir
+    local registry
+    local protocolId
+    local fileName
+    local file
+    local configuredAccounts
+    local account
+    local missingCount
+    local -a missingAccounts=()
+    local -A seenFiles=()
+
+    desiredAccounts=$(jq -r '.[].id | '"${SUBSCRIPTION_SYNC_ACCOUNT_NAME_FROM_ID_JQ}"'' <<<"${desiredUsers}") || return 1
+    xrayConfigDir=$(subscriptionSyncSafeConfigDir) || return 1
+    if [[ -n "${singBoxConfigPath:-}" ]]; then
+        singBoxConfigDir=$(subscriptionSyncSafeSingBoxConfigDir) || return 1
+    fi
+
+    for mode in xray singbox; do
+        configDir=${xrayConfigDir}
+        [[ "${mode}" == "singbox" ]] && configDir=${singBoxConfigDir}
+        [[ -n "${configDir}" ]] || continue
+        if [[ "${mode}" == "xray" ]]; then
+            registry=$(protocolCapabilityRegistry | awk -F'|' '$3 == "node" && ("," $6 ",") ~ ",xray," && $19 != "" { print $1 "\t" $19 }') || return 1
+        else
+            registry=$(protocolCapabilityRegistry | awk -F'|' '$3 == "node" && ("," $6 ",") ~ ",sing-box," && $19 != "" { print $1 "\t" $19 }') || return 1
+        fi
+        while IFS=$'\t' read -r protocolId fileName; do
+            [[ -n "${protocolId}" && -n "${fileName}" ]] || continue
+            file="${configDir}${fileName}"
+            [[ -f "${file}" ]] || continue
+            [[ -n "${seenFiles[${file}]:-}" ]] && continue
+            seenFiles["${file}"]=1
+            configuredAccounts=$(subscriptionSyncConfiguredAccountNamesJson "${file}") || return 1
+            while IFS= read -r account; do
+                [[ -n "${account}" ]] || continue
+                if ! jq -e --arg account "${account}" 'index($account) != null' <<<"${configuredAccounts}" >/dev/null; then
+                    missingAccounts+=("${account}")
+                fi
+            done <<<"${desiredAccounts}"
+        done <<<"${registry}"
+    done
+
+    missingCount=${#missingAccounts[@]}
+    if ((missingCount == 0)); then
+        printf '[]\n'
+    else
+        jq -cn --args '$ARGS.positional | unique' -- "${missingAccounts[@]}"
+    fi
+}
+
 subscriptionSyncPlanFromDesiredUsers() {
     local desiredUsers=$1
     local desiredIds
@@ -300,16 +356,18 @@ subscriptionSyncPlanFromDesiredUsers() {
     local currentAccounts
     local plan
     local credentialUpdates
+    local protocolUpdates
     desiredIds=$(jq -r '.[].id' <<<"${desiredUsers}") || return 1
     currentCredentials=$(subscriptionSyncConfiguredManagedCredentials) || return 1
     currentAccounts=$(jq -c '[.[].account] | unique' <<<"${currentCredentials}") || return 1
     plan=$(subscriptionSyncAccountPlanFromIds sync "${currentAccounts}" <<<"${desiredIds}") || return 1
     subscriptionSyncValidateAccountPlan "${plan}" || return 1
     credentialUpdates=$(subscriptionSyncCredentialMismatchAccounts "${desiredUsers}" "${currentCredentials}") || return 1
-    jq -c -n --argjson plan "${plan}" --argjson updates "${credentialUpdates}" '
+    protocolUpdates=$(subscriptionSyncMissingProtocolAccounts "${desiredUsers}") || return 1
+    jq -c -n --argjson plan "${plan}" --argjson updates "${credentialUpdates}" --argjson protocolUpdates "${protocolUpdates}" '
       $plan
-      | .create = ((.create + $updates) | unique)
-      | .remove = ((.remove + $updates) | unique)'
+      | .create = ((.create + $updates + $protocolUpdates) | unique)
+      | .remove = ((.remove + $updates + $protocolUpdates) | unique)'
 }
 
 subscriptionSyncPlan() {
