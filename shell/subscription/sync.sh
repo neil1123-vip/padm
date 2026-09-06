@@ -520,7 +520,11 @@ subscriptionSyncAppendLocalUser() {
         singBoxConfigDir=$(subscriptionSyncSafeSingBoxConfigDir) || return 1
     fi
 
-    subscriptionSyncAppendProtocolBatch "${xrayConfigDir}" "${uuid}" "${accountName}" xray || rc=1
+    if [[ "${coreInstallType}" == "2" ]]; then
+        subscriptionSyncAppendProtocolBatch "${xrayConfigDir}" "${uuid}" "${accountName}" singbox || rc=1
+    else
+        subscriptionSyncAppendProtocolBatch "${xrayConfigDir}" "${uuid}" "${accountName}" xray || rc=1
+    fi
     if [[ -n "${singBoxConfigDir}" && "${singBoxConfigDir}" != "${xrayConfigDir}" ]]; then
         subscriptionSyncAppendProtocolBatch "${singBoxConfigDir}" "${uuid}" "${accountName}" singbox || rc=1
     fi

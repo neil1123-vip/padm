@@ -1035,6 +1035,7 @@ runSubscriptionSyncAppendLocalUserBatchRegression() (
     local oldSingBoxConfigPath="${singBoxConfigPath:-}"
 
     mkdir -p "${root}" "${root}/xray" "${root}/sing-box" "${root}/groups"
+    coreInstallType=1
     configPath="${root}/xray/"
     singBoxConfigPath="${root}/sing-box/"
     export PADM_SUBSCRIPTION_GROUPS_DIR="${root}/groups"
@@ -1051,6 +1052,13 @@ runSubscriptionSyncAppendLocalUserBatchRegression() (
     [[ -f "${callLog}" ]] || return 1
     [[ "$(wc -l <"${callLog}" | tr -d ' ')" == "2" ]] || return 1
     grep -qx "${root}/xray/	11111111-1111-1111-1111-111111111111	sub_team_a	xray" "${callLog}" || return 1
+    grep -qx "${root}/sing-box/	11111111-1111-1111-1111-111111111111	sub_team_a	singbox" "${callLog}" || return 1
+
+    : >"${callLog}"
+    coreInstallType=2
+    configPath="${singBoxConfigPath}"
+    subscriptionSyncAppendLocalUser team-a
+    [[ "$(wc -l <"${callLog}" | tr -d ' ')" == "1" ]] || return 1
     grep -qx "${root}/sing-box/	11111111-1111-1111-1111-111111111111	sub_team_a	singbox" "${callLog}" || return 1
 
     configPath="${oldConfigPath}"
