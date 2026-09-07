@@ -409,7 +409,18 @@ for scenario in new draft untagged stale-untagged duplicate published conflictin
 done
 
 grep -Fq 'workflow_call:' "${BUILD_WORKFLOW}" || fail 'build workflow is not reusable'
-grep -Fq 'docker/setup-qemu-action' "${BUILD_WORKFLOW}" || fail 'build workflow lacks multi-arch emulation'
+smokeRunner=$(awk '
+    /^  smoke:$/ { inSmoke = 1; next }
+    inSmoke && /^    steps:$/ { exit }
+    inSmoke && /^    runs-on:/ { print }
+' "${BUILD_WORKFLOW}")
+[[ "${smokeRunner}" == "    runs-on: \${{ matrix.platform.runner }}" ]] ||
+    fail 'build workflow does not select one runner per platform'
+grep -Fq 'runner: ubuntu-latest' "${BUILD_WORKFLOW}" || fail 'amd64 smoke runner is missing'
+grep -Fq 'runner: ubuntu-24.04-arm' "${BUILD_WORKFLOW}" || fail 'arm64 smoke runner is not native'
+if grep -Fq 'docker/setup-qemu-action' "${BUILD_WORKFLOW}"; then
+    fail 'build workflow still relies on QEMU for platform smoke'
+fi
 grep -Fq 'linux/amd64' "${BUILD_WORKFLOW}" || fail 'build workflow lacks amd64'
 grep -Fq 'linux/arm64' "${BUILD_WORKFLOW}" || fail 'build workflow lacks arm64'
 grep -Eq '^[[:space:]]+provenance:.*mode=max' "${BUILD_WORKFLOW}" || fail 'provenance attestation is not enabled'

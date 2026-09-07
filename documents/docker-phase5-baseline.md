@@ -37,6 +37,7 @@
 ## CI 边界
 
 本机 Docker daemon 未运行，未在 Windows 上伪造镜像 build/run 结果。真实的
-Buildx 双架构构建、QEMU smoke、GHCR push、Cosign keyless 身份、SBOM/provenance
-attestation 和 GitHub Release API 必须在 CI runner 上完成；任一门禁失败都不会进入
+Buildx 双架构构建、原生双架构 smoke、GHCR push、Cosign keyless 身份、SBOM/provenance
+attestation 和 GitHub Release API 必须在 CI runner 上完成；镜像 smoke 在匹配架构的原生
+runner 上执行，避免 QEMU 运行时差异；任一门禁失败都不会进入
 正式 Release。阶段 6 再接入生产端 manifest 验签、更新、回滚和卸载事务。
