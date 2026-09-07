@@ -36,6 +36,7 @@ requiredLockVariables=(
     PADM_LOCK_XRAY_AMD64_SHA256 PADM_LOCK_XRAY_ARM64_ASSET PADM_LOCK_XRAY_ARM64_SHA256
     PADM_LOCK_UNZIP_VERSION PADM_LOCK_SING_BOX_VERSION PADM_LOCK_SING_BOX_AMD64_ASSET
     PADM_LOCK_SING_BOX_AMD64_SHA256 PADM_LOCK_SING_BOX_ARM64_ASSET PADM_LOCK_SING_BOX_ARM64_SHA256
+    PADM_LOCK_SING_BOX_AMD64_UPSTREAM_SHA256 PADM_LOCK_SING_BOX_ARM64_UPSTREAM_SHA256
     PADM_LOCK_NGINX_VERSION PADM_LOCK_NGINX_PACKAGE_VERSION PADM_LOCK_ACME_SH_VERSION
     PADM_LOCK_ACME_SH_URL PADM_LOCK_ACME_SH_SHA256 PADM_LOCK_PYTHON3_VERSION
     PADM_LOCK_OPENSSL_VERSION PADM_LOCK_SOCAT_VERSION PADM_LOCK_BASH_VERSION
@@ -56,6 +57,7 @@ scriptVersion=$(sed -n 's/^SCRIPT_VERSION="\([^"]*\)"/\1/p' "${PROJECT_ROOT}/she
 for variableName in \
     PADM_LOCK_XRAY_AMD64_SHA256 PADM_LOCK_XRAY_ARM64_SHA256 \
     PADM_LOCK_SING_BOX_AMD64_SHA256 PADM_LOCK_SING_BOX_ARM64_SHA256 \
+    PADM_LOCK_SING_BOX_AMD64_UPSTREAM_SHA256 PADM_LOCK_SING_BOX_ARM64_UPSTREAM_SHA256 \
     PADM_LOCK_ACME_SH_SHA256; do
     [[ "${!variableName}" =~ ^[0-9a-f]{64}$ ]] || fail "invalid checksum: ${variableName}"
 done
@@ -109,8 +111,13 @@ jq -e '
     (.group.default.targets | sort) == ["net", "nginx", "ops", "sing-box", "xray"] and
     all(.target[]; (.platforms | sort) == ["linux/amd64", "linux/arm64"]) and
     all(.target[]; .args.ALPINE_BASE == $base) and
+    .target["sing-box"].args.SING_BOX_AMD64_SHA256 == $singBoxAmd64 and
+    .target["sing-box"].args.SING_BOX_ARM64_SHA256 == $singBoxArm64 and
     all(.target[]; (.tags | length) == 1 and (all(.tags[]; (contains(":latest") | not))))
-' --arg base "${PADM_LOCK_ALPINE_BASE}" "${bakeJson}" >/dev/null || fail 'Bake output drifted from the lock contract'
+' --arg base "${PADM_LOCK_ALPINE_BASE}" \
+    --arg singBoxAmd64 "${PADM_LOCK_SING_BOX_AMD64_SHA256}" \
+    --arg singBoxArm64 "${PADM_LOCK_SING_BOX_ARM64_SHA256}" \
+    "${bakeJson}" >/dev/null || fail 'Bake output drifted from the lock contract'
 
 digest=$(printf '1%.0s' {1..64})
 imagesEnv="${TEST_ROOT}/images.env"

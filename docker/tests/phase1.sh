@@ -6,7 +6,7 @@ TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/padm-docker-phase1.XXXXXX")
 MOCK_BIN="${TEST_ROOT}/bin"
 CONTROL_LOG="${TEST_ROOT}/control.log"
 DOCKER_CALL_LOG="${TEST_ROOT}/docker.log"
-mkdir -p "${MOCK_BIN}"
+mkdir -p "${MOCK_BIN}" "${TEST_ROOT}/systemd"
 trap 'rm -rf -- "${TEST_ROOT}"' EXIT
 
 fail() {
@@ -69,6 +69,8 @@ ps)
 esac
 EOF
 chmod 0755 "${MOCK_BIN}/uname" "${MOCK_BIN}/id" "${MOCK_BIN}/docker"
+printf '#!/usr/bin/env bash\nexit 0\n' >"${MOCK_BIN}/systemctl"
+chmod 0755 "${MOCK_BIN}/systemctl"
 
 export FAKE_DOCKER_LOG="${DOCKER_CALL_LOG}"
 
@@ -84,6 +86,7 @@ runControl() {
         PADM_DOCKER_INSTALL_DIR="${dockerRoot}" \
         PADM_NATIVE_INSTALL_DIR="${nativeRoot}" \
         PADM_DOCKER_BIN_DIR="${binDir}" \
+        PADM_DOCKER_SYSTEMD_DIR="${TEST_ROOT}/systemd" \
         PADM_DOCKER_LOCK_TIMEOUT="${PADM_DOCKER_LOCK_TIMEOUT:-2}" \
         FAKE_DOCKER_LOG="${DOCKER_CALL_LOG}" \
         FAKE_DOCKER_MODE="${FAKE_DOCKER_MODE:-ok}" \
@@ -166,6 +169,7 @@ copyBundleFixture() {
     cp "${PROJECT_ROOT}/install-docker.sh" "${target}/install-docker.sh"
     cp -R "${PROJECT_ROOT}/docker" "${target}/docker"
     cp "${PROJECT_ROOT}/shell/core/deployment_mode.sh" "${target}/shell/core/deployment_mode.sh"
+    cp "${PROJECT_ROOT}/shell/core/stats_grpc.sh" "${target}/shell/core/stats_grpc.sh"
     find "${PROJECT_ROOT}/documents" -maxdepth 1 -type f -name 'docker*.md' -exec cp {} "${target}/documents/" \;
 }
 
@@ -183,6 +187,7 @@ for directory in bundle config data secrets logs backups locks; do
     [[ -d "${DOCKER_ROOT}/${directory}" ]] || fail "missing state directory: ${directory}"
 done
 [[ -L "${DOCKER_ROOT}/bundle" ]] || fail 'bundle pointer is not a symbolic link'
+[[ -f "${DOCKER_ROOT}/bundle/shell/core/stats_grpc.sh" ]] || fail 'bundle lacks the shared stats decoder'
 [[ -L "${CLI_DIR}/padm-docker" ]] || fail 'padm-docker command link is missing'
 [[ "$(readlink "${CLI_DIR}/padm-docker")" == "${DOCKER_ROOT}/bundle/install-docker.sh" ]] ||
     fail 'padm-docker command link has an unexpected target'
@@ -283,6 +288,7 @@ cat >"${DOCKER_ROOT}/deployment.json" <<'EOF'
   "schema_version": 1,
   "mode": "docker",
   "padm_version": "test",
+  "core": {"type": "xray"},
   "compose": {"project": "padm-docker", "profiles": ["core-xray"]}
 }
 EOF

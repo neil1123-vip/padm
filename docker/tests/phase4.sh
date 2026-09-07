@@ -11,7 +11,7 @@ NATIVE_ROOT="${TEST_ROOT}/native"
 CLI_DIR="${TEST_ROOT}/bin-installed"
 IMAGE_DIGEST=$(printf '1%.0s' {1..64})
 OPS_IMAGE="ghcr.io/example/padm-ops:test@sha256:${IMAGE_DIGEST}"
-mkdir -p "${MOCK_BIN}" "${NATIVE_ROOT}"
+mkdir -p "${MOCK_BIN}" "${NATIVE_ROOT}" "${TEST_ROOT}/systemd"
 cleanup() {
     if [[ "${PADM_TEST_KEEP:-0}" == "1" ]]; then
         printf 'docker-phase4-test-root: %s\n' "${TEST_ROOT}" >&2
@@ -75,6 +75,9 @@ run)
 esac
 EOF
 chmod 0755 "${MOCK_BIN}/uname" "${MOCK_BIN}/id" "${MOCK_BIN}/stat" "${MOCK_BIN}/docker"
+printf '#!/usr/bin/env bash\nexit 0\n' >"${MOCK_BIN}/systemctl"
+chmod 0755 "${MOCK_BIN}/systemctl"
+cp "${MOCK_BIN}/systemctl" "${MOCK_BIN}/nsenter"
 
 runControl() {
     local expected=$1 name=$2 actual=0
@@ -83,6 +86,7 @@ runControl() {
     env MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" DOCKER_HOST= \
         PADM_DOCKER_INSTALL_DIR="${DOCKER_ROOT}" PADM_NATIVE_INSTALL_DIR="${NATIVE_ROOT}" \
         PADM_DOCKER_BIN_DIR="${CLI_DIR}" PADM_DOCKER_LOCK_TIMEOUT=2 \
+        PADM_DOCKER_SYSTEMD_DIR="${TEST_ROOT}/systemd" \
         PADM_DOCKER_HEALTH_TIMEOUT=1 PADM_DOCKER_SKIP_CHOWN=1 \
         FAKE_DOCKER_LOG="${DOCKER_LOG}" FAKE_DOCKER_MODE="${FAKE_DOCKER_MODE:-ok}" \
         FAKE_DOCKER_FAIL_ONCE="${TEST_ROOT}/fail-once" \

@@ -32,6 +32,7 @@ dockerBundlePayloadPaths() {
         printf '%s\n' "${path}"
     done < <(find "${sourceRoot}/docker" -type f -print | LC_ALL=C sort)
     printf 'shell/core/deployment_mode.sh\n'
+    printf 'shell/core/stats_grpc.sh\n'
     if [[ -d "${sourceRoot}/documents" && ! -L "${sourceRoot}/documents" ]]; then
         while IFS= read -r path; do
             path=${path#"${sourceRoot}/"}
@@ -50,11 +51,13 @@ dockerBundleSourceIsComplete() {
         docker/lib/bundle.sh \
         docker/lib/manifest.sh \
         docker/lib/services.sh \
+        docker/lib/traffic.sh \
         docker/lib/lifecycle.sh \
         docker/contracts/configure.schema.json \
         docker/contracts/deployment.schema.json \
         docker/contracts/features.json \
-        shell/core/deployment_mode.sh; do
+        shell/core/deployment_mode.sh \
+        shell/core/stats_grpc.sh; do
         [[ -f "${sourceRoot}/${required}" && ! -L "${sourceRoot}/${required}" ]] || return 1
     done
     dockerBundlePayloadPaths "${sourceRoot}" >/dev/null

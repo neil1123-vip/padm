@@ -83,7 +83,7 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
             printf "%s=%s\n" "$key" "ghcr.io/example/padm-test:3.1.9@sha256:$digest"
         done >"$root/images.env"
         printf "PADM_DOCKER_ROOT=%s\nPADM_NET_ROOT=%s\n" "$root" "$root" >>"$root/images.env"
-        printf "old\n" >"$root/config/xray/config.json"
+        printf "%s\n" "{\"inbounds\":[{\"protocol\":\"vless\",\"tag\":\"test\",\"settings\":{\"clients\":[{\"id\":\"11111111-1111-4111-8111-111111111111\",\"email\":\"test\"}]}}]}" >"$root/config/xray/config.json"
         source="$PHASE6_MANIFEST"
         dockerManifestValidate "$source"
         jq ".images.xray.reference = \"ghcr.io/example/padm-xray:3.2.0@sha256:$digest\"" "$source" >"$source.bad"
@@ -93,6 +93,10 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
 
         dockerHostPreflight() { :; }
         dockerLockInstalledDeployment() { :; }
+        dockerTrafficScheduleCheck() { :; }
+        dockerTrafficScheduleInstall() { :; }
+        dockerTrafficScheduleRemove() { :; }
+        dockerTrafficBeforeChange() { :; }
         dockerManifestPrepare() {
             PADM_DOCKER_MANIFEST_FILE=$source
             PADM_DOCKER_MANIFEST_SHA256=$(printf "a%.0s" {1..64})
@@ -119,6 +123,12 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
         latest=$(find "$root/backups" -maxdepth 1 -type d -name "update.*" -printf "%T@ %p\n" | sort -nr | head -n 1 | cut -d" " -f2-)
         rm -rf -- "$latest"
         unset FAKE_DOCKER_FAIL_UP
+        scheduleAttempts=0
+        dockerTrafficScheduleInstall() { scheduleAttempts=$((scheduleAttempts + 1)); [[ "$scheduleAttempts" -gt 1 ]]; }
+        ! dockerRollbackCommand
+        grep -q "3.2.0@sha256:$(printf 2%.0s {1..64})" "$root/images.env"
+        [[ "$scheduleAttempts" == 2 ]]
+        dockerTrafficScheduleInstall() { :; }
         dockerRollbackCommand
         grep -q "3.1.9@sha256:$(printf 1%.0s {1..64})" "$root/images.env"
         test -d "$root"
@@ -129,5 +139,73 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
         dockerUninstallCommand --purge --confirm PADM-DOCKER-PURGE
         test ! -e "$root"
     ' || fail 'phase 6 transaction contract failed'
+
+(
+    source "${PROJECT_ROOT}/docker/lib/lifecycle.sh"
+    scheduleRoot="${TEST_ROOT}/schedule"
+    export PADM_DOCKER_SYSTEMD_DIR="${scheduleRoot}/units"
+    export PADM_DOCKER_BIN_DIR="${scheduleRoot}/bin"
+    mkdir -p "${scheduleRoot}/locks" "${PADM_DOCKER_SYSTEMD_DIR}" "${PADM_DOCKER_BIN_DIR}"
+    dockerInstallRoot() { printf '%s\n' "${scheduleRoot}"; }
+    dockerError() { printf '%s\n' "$*" >&2; }
+    scheduler=systemd
+    systemctl() {
+        [[ "${scheduler}" == systemd ]] || return 1
+        printf '%s\n' "$*" >>"${scheduleRoot}/systemctl.log"
+    }
+    pgrep() { [[ "${scheduler}" == cron ]]; }
+    crontab() {
+        if [[ "$1" == -l ]]; then
+            if [[ -f "${scheduleRoot}/crontab" ]]; then cat "${scheduleRoot}/crontab";
+            else printf 'no crontab for root\n' >&2; return 1; fi
+        else
+            cat >"${scheduleRoot}/crontab"
+        fi
+    }
+    dockerTrafficScheduleInstall
+    dockerTrafficScheduleInstall
+    grep -qF "Environment=PADM_DOCKER_INSTALL_DIR=${scheduleRoot}" "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-traffic.service"
+    grep -qF 'traffic collect' "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-traffic.service"
+    grep -qxF 'AccuracySec=1s' "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-traffic.timer"
+    dockerTrafficScheduleRemove
+    [[ ! -e "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-traffic.timer" ]]
+    scheduler=cron
+    printf '0 0 * * * true # existing-job\n' >"${scheduleRoot}/crontab"
+    dockerTrafficScheduleInstall
+    dockerTrafficScheduleInstall
+    [[ "$(grep -c '# padm-docker-traffic$' "${scheduleRoot}/crontab")" == 1 ]]
+    dockerTrafficScheduleRemove
+    [[ "$(<"${scheduleRoot}/crontab")" == '0 0 * * * true # existing-job' ]]
+    scheduler=none
+    ! dockerTrafficScheduleCheck
+)
+
+(
+    source "${PROJECT_ROOT}/docker/lib/bootstrap.sh"
+    source "${PROJECT_ROOT}/docker/lib/lifecycle.sh"
+    rollbackRoot="${TEST_ROOT}/rollback-capability"
+    rollbackFixture="${rollbackRoot}/backups/update.test"
+    export PADM_DOCKER_INSTALL_DIR="${rollbackRoot}"
+    mkdir -p "${rollbackFixture}" "${rollbackRoot}/config/sing-box"
+    printf '%s\n' '{"core":{"type":"sing-box"}}' >"${rollbackFixture}/deployment.json"
+    printf '{}\n' >"${rollbackRoot}/config/sing-box/users.base"
+    dockerHostPreflight() { :; }
+    dockerLockInstalledDeployment() { :; }
+    dockerComposeFile() { :; }
+    dockerLatestUpdateBackup() { printf '%s\n' "${rollbackFixture}"; }
+    dockerTrafficBeforeChange() { touch "${rollbackRoot}/changed"; }
+    dockerCandidateCompose() { touch "${rollbackRoot}/checked"; printf 'sing-box version 1.14.0\nTags: with_quic\n'; }
+    ! dockerRollbackCommand
+    [[ -f "${rollbackRoot}/checked" && ! -e "${rollbackRoot}/changed" ]]
+    dockerCandidateCompose() { printf 'sing-box version 1.14.0\nTags: with_quic,with_v2ray_api\n'; }
+    dockerTrafficRollbackCheck "${rollbackFixture}"
+    dockerTrafficRuntimeCheck() { :; }
+    dockerTrafficBeforeChange() { :; }
+    dockerTrafficScheduleInstall() { return 1; }
+    dockerComposeRun() { touch "${rollbackRoot}/changed"; }
+    ! dockerLifecycleCommand up
+    ! dockerLifecycleCommand restart
+    [[ ! -e "${rollbackRoot}/changed" ]]
+)
 
 printf 'docker-phase6-regression-ok\n'

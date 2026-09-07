@@ -14,6 +14,9 @@ dockerUsage() {
   padm-docker acme <issue|renew> --domain <域名> --email <邮箱> --dns <dns_*> --credentials <文件> [--ops-image <tag@digest>]
   padm-docker validate
   padm-docker status
+  padm-docker traffic <show|collect>
+  padm-docker traffic limit <账号 ID> <额度 GiB，0 不限额>
+  padm-docker traffic reset <账号 ID>
   padm-docker up
   padm-docker down
   padm-docker restart
@@ -22,6 +25,161 @@ dockerUsage() {
   padm-docker rollback
   padm-docker uninstall [--remove-images] [--purge --confirm PADM-DOCKER-PURGE]
 EOF
+}
+
+dockerTrafficScheduleCheck() {
+    if command -v systemctl >/dev/null 2>&1 && systemctl show-environment >/dev/null 2>&1; then
+        return 0
+    fi
+    if command -v crontab >/dev/null 2>&1 && command -v pgrep >/dev/null 2>&1 &&
+        { pgrep -x cron >/dev/null || pgrep -x crond >/dev/null; }; then
+        return 0
+    fi
+    dockerError '自动流量采集需要正在运行的 systemd 或 cron，请先启用其中一项'
+    return 1
+}
+
+dockerTrafficReadCrontab() {
+    local content
+    content=$(LC_ALL=C crontab -l 2>&1) || {
+        case "${content}" in
+        *'no crontab for'*|*"can't open 'root': No such file or directory"*) return 0 ;;
+        *) dockerError "${content}"; return 1 ;;
+        esac
+    }
+    printf '%s\n' "${content}"
+}
+
+dockerTrafficCronRemove() {
+    local content
+    command -v crontab >/dev/null 2>&1 || return 0
+    content=$(dockerTrafficReadCrontab) || return 1
+    if [[ "${content}" == *'# padm-docker-traffic'* ]]; then
+        printf '%s\n' "${content}" | sed '/# padm-docker-traffic$/d' | crontab - || return 1
+    fi
+}
+
+dockerTrafficRuntimeCheck() {
+    local core=${1:-} root
+    if [[ -z "${core}" ]]; then
+        root=$(dockerInstallRoot) || return 1
+        core=$(jq -er '.core.type' "${root}/deployment.json") || return 1
+    fi
+    if [[ "${core}" == sing-box ]]; then
+        dockerRequireCommand nsenter && dockerRequireCommand curl || return 1
+        curl --version | grep -q 'HTTP2' || {
+            dockerError 'sing-box 自动流量采集需要支持 HTTP/2 的宿主 curl'
+            return 1
+        }
+    fi
+    dockerTrafficScheduleCheck
+}
+
+dockerTrafficScheduleInstall() {
+    local root cli bashPath unitDir temp cronText
+    dockerTrafficScheduleCheck || return 1
+    root=$(dockerInstallRoot) || return 1
+    cli="${PADM_DOCKER_BIN_DIR:-/usr/local/bin}/padm-docker"
+    bashPath=$(command -v bash) || return 1
+    # 定时任务配置不能接受换行、shell 表达式或 systemd 占位符。
+    [[ "${root}" =~ ^/[A-Za-z0-9._/-]+$ && "${cli}" =~ ^/[A-Za-z0-9._/-]+$ &&
+        "${bashPath}" =~ ^/[A-Za-z0-9._/-]+$ ]] || return 1
+    if command -v systemctl >/dev/null 2>&1 && systemctl show-environment >/dev/null 2>&1; then
+        unitDir=${PADM_DOCKER_SYSTEMD_DIR:-/etc/systemd/system}
+        [[ -d "${unitDir}" && ! -L "${unitDir}" && -O "${unitDir}" ]] || return 1
+        for temp in "${unitDir}/padm-docker-traffic.service" "${unitDir}/padm-docker-traffic.timer"; do
+            [[ ! -L "${temp}" ]] || return 1
+            if [[ -e "${temp}" ]]; then
+                [[ -f "${temp}" && -O "${temp}" ]] &&
+                    grep -qxF '# padm-docker 流量采集' "${temp}" || return 1
+            fi
+        done
+        temp=$(mktemp "${root}/locks/traffic-unit.XXXXXX") || return 1
+        cat >"${temp}" <<EOF
+# padm-docker 流量采集
+[Unit]
+Description=padm Docker traffic accounting
+After=docker.service
+[Service]
+Type=oneshot
+Environment=PADM_DOCKER_INSTALL_DIR=${root}
+ExecStart=${bashPath} ${cli} traffic collect
+TimeoutStartSec=90
+EOF
+        install -m 0644 "${temp}" "${unitDir}/padm-docker-traffic.service" || { rm -f -- "${temp}"; return 1; }
+        cat >"${temp}" <<'EOF'
+# padm-docker 流量采集
+[Unit]
+Description=Collect padm Docker traffic every minute
+[Timer]
+OnCalendar=*-*-* *:*:00
+AccuracySec=1s
+Persistent=true
+[Install]
+WantedBy=timers.target
+EOF
+        install -m 0644 "${temp}" "${unitDir}/padm-docker-traffic.timer" || { rm -f -- "${temp}"; return 1; }
+        rm -f -- "${temp}"
+        systemctl daemon-reload && systemctl enable --now padm-docker-traffic.timer && dockerTrafficCronRemove
+    else
+        cronText=$(dockerTrafficReadCrontab) || return 1
+        {
+            printf '%s\n' "${cronText}" | sed '/# padm-docker-traffic$/d'
+            printf '* * * * * PADM_DOCKER_INSTALL_DIR=%s %s %s traffic collect # padm-docker-traffic\n' "${root}" "${bashPath}" "${cli}"
+        } | crontab -
+    fi
+}
+
+dockerTrafficScheduleRemove() {
+    local unitDir file changed=0
+    unitDir=${PADM_DOCKER_SYSTEMD_DIR:-/etc/systemd/system}
+    for file in "${unitDir}/padm-docker-traffic.timer" "${unitDir}/padm-docker-traffic.service"; do
+        [[ -e "${file}" || -L "${file}" ]] || continue
+        [[ -d "${unitDir}" && ! -L "${unitDir}" && -O "${unitDir}" &&
+            -f "${file}" && ! -L "${file}" && -O "${file}" ]] || return 1
+        grep -qxF '# padm-docker 流量采集' "${file}" || return 1
+        if [[ "${file}" == *.timer ]]; then systemctl disable --now "${file##*/}" || return 1;
+        else systemctl stop "${file##*/}" || return 1; fi
+        rm -f -- "${file}" || return 1
+        changed=1
+    done
+    [[ "${changed}" == 0 ]] || systemctl daemon-reload || return 1
+    dockerTrafficCronRemove
+}
+
+dockerTrafficBeforeChange() {
+    local root core
+    root=$(dockerInstallRoot) || return 0
+    [[ -f "${root}/deployment.json" ]] || return 0
+    core=$(jq -r '.core.type' "${root}/deployment.json") || return 0
+    if [[ -f "${root}/config/${core}/users.base" ]]; then
+        dockerTrafficSnapshot || dockerError '变更前采集失败，已保留历史流量；本次未采集的增量无法恢复'
+    fi
+    return 0
+}
+
+dockerTrafficCommand() {
+    local action=${1:-show} bytes
+    [[ "$#" -eq 0 ]] || shift
+    dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+    dockerLockInstalledDeployment || return $?
+    case "${action}" in
+    show|collect)
+        [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
+        if [[ "${action}" == show ]]; then dockerTrafficShow; else dockerTrafficCollect; fi
+        ;;
+    limit)
+        [[ "$#" -eq 2 && "$2" =~ ^[0-9]+([.][0-9]{1,6})?$ ]] || return "${PADM_DOCKER_RC_USAGE}"
+        bytes=$(jq -en --arg value "$2" '($value | tonumber) * 1073741824 | floor | select(. <= 9007199254740991)') ||
+            return "${PADM_DOCKER_RC_USAGE}"
+        dockerTrafficSetLimit "$1" "${bytes}"
+        ;;
+    reset)
+        [[ "$#" -eq 1 ]] || return "${PADM_DOCKER_RC_USAGE}"
+        dockerTrafficReset "$1"
+        ;;
+    *) dockerUsage; return "${PADM_DOCKER_RC_USAGE}" ;;
+    esac
 }
 
 dockerPrepareInstallSource() {
@@ -199,18 +357,26 @@ dockerLifecycleCommand() {
     shift
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
     dockerLockInstalledDeployment || return $?
+    dockerComposeFile >/dev/null || {
+        dockerError 'Docker 服务尚未配置，请先执行 configure'
+        return "${PADM_DOCKER_RC_COMPOSE}"
+    }
     case "${operation}" in
     up)
         [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
-        dockerComposeRun up -d
+        dockerTrafficRuntimeCheck || return "${PADM_DOCKER_RC_HOST}"
+        dockerTrafficScheduleInstall && dockerComposeRun up -d
         ;;
     down)
         [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
-        dockerComposeRun down
+        dockerTrafficBeforeChange
+        dockerComposeRun down && dockerTrafficScheduleRemove
         ;;
     restart)
         [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
-        dockerComposeRun restart
+        dockerTrafficRuntimeCheck || return "${PADM_DOCKER_RC_HOST}"
+        dockerTrafficBeforeChange
+        dockerTrafficScheduleInstall && dockerComposeRun restart
         ;;
     logs) dockerComposeRun logs "$@" ;;
     esac
@@ -261,6 +427,8 @@ dockerUpdateCommand() {
     dockerManifestPrepare "${manifest}" "${bundle}" "${controlBundle}" ||
         return "${PADM_DOCKER_RC_MANIFEST}"
     dockerPullManifestImages || return "${PADM_DOCKER_RC_COMPOSE}"
+    dockerTrafficRuntimeCheck || return "${PADM_DOCKER_RC_HOST}"
+    dockerTrafficBeforeChange
     dockerCreateUpdateCandidate || {
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_STATE}"
@@ -277,7 +445,8 @@ dockerUpdateCommand() {
     backup=${DOCKER_CONFIG_BACKUP}
     if ! dockerInstallCandidate "${candidate}" "${backup}" ||
         ! dockerEnsureRuntimeDataPermissions ||
-        ! dockerComposeRun up -d --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}"; then
+        ! dockerComposeRun up -d --force-recreate --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" ||
+        ! dockerTrafficScheduleInstall; then
         dockerError '更新启动或健康检查失败，正在恢复旧配置'
         if ! dockerRestoreConfiguration; then
             dockerError "旧版本恢复失败，请检查备份: ${backup}"
@@ -339,6 +508,20 @@ dockerLatestUpdateBackup() {
     printf '%s\n' "${backup}"
 }
 
+dockerTrafficRollbackCheck() {
+    local backup=$1 root version
+    [[ "$(jq -r '.core.type' "${backup}/deployment.json")" == sing-box ]] || return 0
+    root=$(dockerInstallRoot) || return 1
+    if [[ -f "${root}/data/traffic/state.json" || -f "${root}/config/sing-box/users.base" ||
+        -f "${backup}/config/sing-box/users.base" ]]; then
+        version=$(dockerCandidateCompose "${backup}" run --rm --no-deps sing-box version) || return 1
+        grep -Eq '(^|[^[:alnum:]_])with_v2ray_api([^[:alnum:]_]|$)' <<<"${version}" || {
+            dockerError '回滚目标 sing-box 不支持用户统计，无法保留当前采集与额度管理；现有部署未停止'
+            return 1
+        }
+    fi
+}
+
 dockerRollbackCommand() {
     local backup currentBackup
     [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
@@ -352,11 +535,14 @@ dockerRollbackCommand() {
         dockerError '没有可用的更新回滚快照'
         return "${PADM_DOCKER_RC_STATE}"
     }
+    dockerTrafficRollbackCheck "${backup}" || return "${PADM_DOCKER_RC_STATE}"
+    dockerTrafficRuntimeCheck "$(jq -r '.core.type' "${backup}/deployment.json")" || return "${PADM_DOCKER_RC_HOST}"
+    dockerTrafficBeforeChange
     dockerBackupConfiguration rollback || return "${PADM_DOCKER_RC_STATE}"
     currentBackup=${DOCKER_CONFIG_BACKUP}
     DOCKER_CONFIG_BACKUP=${backup}
     DOCKER_CONFIG_SWITCHED=1
-    if dockerRestoreConfiguration; then
+    if dockerRestoreConfiguration && dockerTrafficScheduleInstall; then
         DOCKER_CONFIG_BACKUP=${currentBackup}
         printf 'Docker 已回滚到: %s\n' "${backup}"
         return 0
@@ -364,7 +550,8 @@ dockerRollbackCommand() {
     dockerError '回滚失败，正在尝试恢复当前版本'
     DOCKER_CONFIG_BACKUP=${currentBackup}
     DOCKER_CONFIG_SWITCHED=1
-    dockerRestoreConfiguration || dockerError "当前版本恢复失败，请检查备份: ${currentBackup}"
+    dockerRestoreConfiguration && dockerTrafficScheduleInstall ||
+        dockerError "当前版本或采集调度恢复失败，请检查备份: ${currentBackup}"
     return "${PADM_DOCKER_RC_COMPOSE}"
 }
 
@@ -431,6 +618,7 @@ dockerUninstallCommand() {
         return 0
     fi
     dockerLockInstalledDeployment || return $?
+    dockerTrafficBeforeChange
     if ((purge)); then
         dockerBackupConfiguration uninstall || return "${PADM_DOCKER_RC_STATE}"
         backup=${DOCKER_CONFIG_BACKUP}
@@ -443,6 +631,7 @@ dockerUninstallCommand() {
         }
         dockerComposeRun down || return $?
     fi
+    dockerTrafficScheduleRemove || return "${PADM_DOCKER_RC_STATE}"
     dockerRemoveCli || return "${PADM_DOCKER_RC_STATE}"
     if ((removeImages)); then
         dockerRemoveRecordedImages || return "${PADM_DOCKER_RC_COMPOSE}"
@@ -488,6 +677,7 @@ dockerMain() {
     acme) dockerAcmeCommand "$@" ;;
     validate) dockerValidateInstalledCommand "$@" ;;
     status) dockerStatusCommand "$@" ;;
+    traffic) dockerTrafficCommand "$@" ;;
     up | down | restart | logs) dockerLifecycleCommand "${command}" "$@" ;;
     update) dockerUpdateCommand "$@" ;;
     rollback) dockerRollbackCommand "$@" ;;

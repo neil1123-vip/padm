@@ -16,12 +16,14 @@ RUN set -eux; \
         arm64) asset="${SING_BOX_ARM64_ASSET}"; sha256="${SING_BOX_ARM64_SHA256}" ;; \
         *) echo "unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
-    wget -q -O "/tmp/${asset}" "https://github.com/SagerNet/sing-box/releases/download/${SING_BOX_VERSION}/${asset}"; \
+    wget -q -O "/tmp/${asset}" "https://github.com/neil1123-vip/padm/releases/download/sing-box-${SING_BOX_VERSION}/${asset}"; \
     echo "${sha256}  /tmp/${asset}" | sha256sum -c -; \
     mkdir /out; \
     tar -xzf "/tmp/${asset}" --strip-components=1 -C /out; \
     test -x /out/sing-box; \
-    test -s /out/libcronet.so
+    test -s /out/libcronet.so; \
+    test -s /out/LICENSE; \
+    test -s /out/BUILD_INFO.json
 
 FROM ${ALPINE_BASE}
 
@@ -44,6 +46,7 @@ RUN set -eux; \
 
 COPY --from=fetch --chown=10001:10001 --chmod=0755 /out/sing-box /usr/local/bin/sing-box
 COPY --from=fetch --chown=10001:10001 --chmod=0644 /out/libcronet.so /usr/local/lib/libcronet.so
+COPY --from=fetch --chmod=0644 /out/LICENSE /out/BUILD_INFO.json /usr/share/doc/sing-box/
 
 LABEL org.opencontainers.image.source="${SOURCE_URL}" \
       org.opencontainers.image.version="${PADM_VERSION}" \

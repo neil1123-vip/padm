@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# shellcheck source=/dev/null
+source "$(dirname -- "${BASH_SOURCE[0]}")/traffic.sh" || return 1
+
 if [[ "${PADM_DOCKER_SERVICES_LOADED:-}" == "1" ]]; then
     return 0 2>/dev/null || exit 0
 fi
@@ -1055,6 +1058,7 @@ dockerGenerateCandidate() {
     dockerGenerateImagesEnv "${specFile}" "${candidate}/images.runtime.env" "${root}" || return 1
     dockerGenerateCompose "${specFile}" "${candidate}/compose.json" || return 1
     dockerGenerateDeployment "${specFile}" "${candidate}/deployment.json" || return 1
+    dockerTrafficPrepareCandidate "${candidate}" || return 1
     dockerPrepareCandidatePermissions "${candidate}"
 }
 
@@ -1283,6 +1287,7 @@ dockerCreateUpdateCandidate() {
       .images.ops.index_digest = $ops |
       .images.net.index_digest = $net
     ' >"${candidate}/deployment.json" || return 1
+    dockerTrafficPrepareCandidate "${candidate}" || return 1
     dockerPrepareCandidatePermissions "${candidate}" || return 1
     DOCKER_CONFIG_CANDIDATE=${candidate}
 }
@@ -1354,11 +1359,18 @@ dockerEnsureRuntimeDataPermissions() {
         fi
         chmod 0750 "${root}/${directory}" || return 1
     done
+    for directory in config data/subscription; do
+        [[ -d "${root}/${directory}" && ! -L "${root}/${directory}" ]] || return 1
+        [[ -z "$(find "${root}/${directory}" -type l -print -quit)" ]] || return 1
+        find "${root}/${directory}" -type d -exec chmod 0750 {} + || return 1
+        find "${root}/${directory}" -type f -exec chmod 0640 {} + || return 1
+    done
     if [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" != "1" ]]; then
         chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" \
             "${root}/data/xray" "${root}/data/sing-box" "${root}/data/acme" || return 1
         chown -R "0:${PADM_DOCKER_CONTAINER_GID}" "${root}/data/static" \
-            "${root}/logs/subscription" "${root}/logs/acme" || return 1
+            "${root}/logs/subscription" "${root}/logs/acme" \
+            "${root}/config" "${root}/data/subscription" || return 1
         chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" \
             "${root}/logs/nginx" || return 1
         chown -R 0:0 "${root}/data/net" || return 1
@@ -1366,7 +1378,7 @@ dockerEnsureRuntimeDataPermissions() {
 }
 
 dockerRestoreConfiguration() {
-    local root backup=${DOCKER_CONFIG_BACKUP:-} relative
+    local root backup=${DOCKER_CONFIG_BACKUP:-} relative core
     [[ "${DOCKER_CONFIG_SWITCHED:-0}" == "1" && -n "${backup}" ]] || return 0
     root=$(dockerInstallRoot) || return 1
     dockerComposeRun down >/dev/null 2>&1 || true
@@ -1378,7 +1390,14 @@ dockerRestoreConfiguration() {
     done <"${backup}/present"
     DOCKER_CONFIG_SWITCHED=0
     if [[ -f "${root}/deployment.json" && -f "${root}/compose.json" && -f "${root}/images.env" ]]; then
-        dockerComposeRun up -d --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" >/dev/null 2>&1 || return 1
+        core=$(jq -r '.core.type' "${root}/deployment.json") || return 1
+        if [[ -f "${root}/config/${core}/users.base" || -f "${root}/data/traffic/state.json" ]]; then
+            dockerTrafficPrepareCandidate "${root}" || return 1
+        fi
+        dockerEnsureRuntimeDataPermissions || return 1
+        dockerComposeRun up -d --force-recreate --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" >/dev/null 2>&1 || return 1
+    else
+        dockerTrafficScheduleRemove || return 1
     fi
 }
 
@@ -1402,6 +1421,8 @@ dockerConfigurationInterrupted() {
 dockerConfigureApply() {
     local sourceSpec=$1 specFile candidate backup
     dockerConfigureSpecValidate "${sourceSpec}" || return "${PADM_DOCKER_RC_STATE}"
+    dockerTrafficRuntimeCheck "$(jq -r '.core.type' "${sourceSpec}")" || return "${PADM_DOCKER_RC_HOST}"
+    dockerTrafficBeforeChange
     dockerCreateConfigurationCandidate || return "${PADM_DOCKER_RC_STATE}"
     candidate=${DOCKER_CONFIG_CANDIDATE}
     specFile="${candidate}/request.json"
@@ -1437,7 +1458,8 @@ dockerConfigureApply() {
     backup=${DOCKER_CONFIG_BACKUP}
     if ! dockerInstallCandidate "${candidate}" "${backup}" ||
         ! dockerEnsureRuntimeDataPermissions ||
-        ! dockerComposeRun up -d --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}"; then
+        ! dockerComposeRun up -d --force-recreate --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" ||
+        ! dockerTrafficScheduleInstall; then
         dockerError '候选部署启动或健康检查失败，正在恢复旧配置'
         if ! dockerRestoreConfiguration; then
             dockerError "旧配置恢复失败，请检查备份: ${backup}"

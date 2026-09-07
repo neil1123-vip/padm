@@ -177,6 +177,24 @@ padm-docker acme <issue|renew> --domain example.com --email admin@example.com --
 
 Configuration changes generate and validate a candidate, check ports and Compose, back up the current state, and then run health checks. A failure leaves the old configuration in place. The installed host command is `/usr/local/bin/padm-docker`; the bundle, configuration, data, secrets, logs, and backups live below the state root in `bundle/`, `config/`, `data/`, `secrets/`, `logs/`, and `backups/`.
 
+### User Traffic and Quotas
+
+`configure` and `update` configure user statistics for the active core and install a host collection task that runs every minute. The task prefers `padm-docker-traffic.timer`, with a running cron daemon as the fallback. Both Xray and sing-box accumulate upload and download bytes by stable account ID. The same UUID across protocol inbounds shares one total, while display names are preserved separately.
+
+```bash
+padm-docker traffic collect
+padm-docker traffic show
+padm-docker traffic limit <account-id> 100
+padm-docker traffic limit <account-id> 0
+padm-docker traffic reset <account-id>
+```
+
+`collect` samples traffic and applies quotas immediately; `show` displays saved counters and the account IDs used by the other commands. `limit` uses GiB, with `0` meaning unlimited, and applies to upload plus download. `reset` clears the accumulated usage, keeps the limit, and restores users whose quota is available again. Disabling or restoring users validates the new configuration and restarts only the affected core, briefly interrupting its existing connections.
+
+The complete user configuration is kept in `config/<core>/users.base`; users over quota are removed only from the runtime configuration. Totals, limits, and sampling baselines are stored in `/etc/padm-docker/data/traffic/state.json` and survive core restarts, configuration regeneration, and version rollback. Collection failures preserve existing totals. Quotas are checked every minute, so usage may exceed the limit by one sampling interval plus scheduling delays. Traffic not yet sampled before an unexpected exit cannot be recovered.
+
+sing-box collection requires host `nsenter` and an HTTP/2-capable `curl`, which access `127.0.0.1:10087` inside the container network namespace. Xray uses its in-container stats command at `127.0.0.1:10085`. Stats ports are not published publicly, and containers do not mount the Docker Socket. `down` and `uninstall` remove the collection schedule; `up` and `restart` restore it.
+
 ### Updates
 
 Updates accept only a signed CI Release manifest. The default command reads the latest Release manifest, a Cosign-signed Sigstore bundle v0.3, and the control bundle; local or HTTPS assets can be supplied explicitly:
@@ -197,7 +215,7 @@ The transaction verifies the manifest, pre-pulls all five digest-pinned images, 
 padm-docker rollback
 ```
 
-Rollback uses only the most recent managed `update.*` snapshot and moves back one version. It fails rather than guessing at an arbitrary historical version when no valid snapshot exists. If rollback itself fails, the command attempts to restore the current version and keeps the backup path for diagnosis.
+Rollback uses only the most recent managed `update.*` snapshot and moves back one version. It fails rather than guessing at an arbitrary historical version when no valid snapshot exists. Once user statistics are enabled, a sing-box rollback target must include `with_v2ray_api`; incompatible targets are rejected before stopping the current deployment to preserve quota enforcement. If rollback itself fails, the command attempts to restore the current version and keeps the backup path for diagnosis.
 
 ### Uninstall
 
@@ -235,6 +253,7 @@ padm is designed for Linux servers. The code detects Debian, Ubuntu, RHEL/CentOS
 | Compose | Docker Compose v2 plugin. |
 | Architecture | `amd64` or `arm64`, with matching host and daemon architecture. |
 | Host commands | Bash 4+, `jq`, `sha256sum`, `tar`, and either `curl` or `wget`; signed updates also require Cosign with Sigstore bundle v0.3 support (CI currently uses 3.x). If Docker is missing, `install-docker.sh install` asks whether to install Engine, Compose v2, and the host prerequisites from Docker's official repository. |
+| User statistics | A running systemd or cron daemon. sing-box also needs host `nsenter` (usually from `util-linux`) and an HTTP/2-capable `curl`. Configuration and updates stop if these requirements are missing. |
 | Kernel capabilities | The regular profiles need no extra capability. WireGuard, Fail2ban, TUN/TProxy, and other `net-*` profiles require the capability, host networking, or `/dev/net/tun` specified by the support matrix. |
 
 On the first `install-docker.sh install`, if the `docker` command is missing, the script asks whether to install Docker Engine and Compose v2 from Docker's official repository. A no/empty answer, EOF, or an installation failure stops before `/etc/padm-docker` is initialized. Host package or repository changes that already completed are not removed implicitly. The prompt is only for a missing command; an existing Docker installation with an unavailable daemon or Compose still fails without reinstalling. Automatic installation currently covers rootful systemd hosts running Debian, Ubuntu, CentOS, Fedora, or RHEL; install Docker manually on other distributions. The script does not install Xray, sing-box, Nginx, or other application dependencies on the host, and it never runs `docker build`. If a native installation is active, present, or leaves ambiguous residue, the Docker entry refuses to proceed; there is no implicit migration between modes.
@@ -526,7 +545,11 @@ Nginx can be started, stopped, restarted, or smoothly reloaded only when the cur
 
 ### sing-box Stats Build and Traffic Recovery
 
-Native sing-box installations, as either the primary or auxiliary core, use this repository's CI build from upstream source. It keeps the upstream default build tags and adds `with_purego,with_v2ray_api` for per-user traffic statistics, including Hysteria2 and TUIC. Servers download Linux amd64 / arm64 packages without compiling locally. Docker images still use the upstream build pinned in `versions.lock`; this native core conversion does not apply to them.
+Native sing-box installations, as either the primary or auxiliary core, and the Docker `padm-sing-box` image use this repository's CI build from upstream source. It keeps the upstream default build tags and adds `with_purego,with_v2ray_api` for per-user traffic statistics, including Hysteria2 and TUIC. Servers download Linux amd64 / arm64 packages or images without compiling locally.
+
+`with_grpc` selects the full gRPC transport implementation. Without it, the default gRPC lite implementation still supports this project's Reality gRPC configuration. User statistics are enabled independently by `with_v2ray_api`; Hysteria2 and TUIC do not depend on `with_grpc` either.
+
+Docker pins the stats archive version and both architecture SHA256 values in `versions.lock`. Official archive digests are kept separately to verify the Cronet source during stats builds. Docker includes the user collection and quota management described above. Existing deployments should download `/root/install-docker.sh` again using the Docker installation command, run `bash /root/install-docker.sh install --ref <40-character commit SHA of this release>` to refresh the host control bundle, and then run `padm-docker update` to update images and initialize statistics. This first upgrade must use the freshly downloaded entry: the old `padm-docker install` omits the new shared module, and `update` itself does not replace the host control script. Existing protocol configuration is preserved, and available protocol entries still follow the Docker support matrix. The following menu steps apply to native deployments.
 
 If an older core reports `v2ray api is not included in this build`, or connectivity was restored by removing the stats configuration, perform these steps on the server running sing-box:
 
@@ -539,6 +562,8 @@ After a successful upgrade, the script restores `14_stats_api.json` from the exi
 Stable upgrades, prerelease trials, and rollbacks select only published `sing-box-v<upstream-version>` releases from this repository. Installation verifies the asset digest, actual version, and `with_v2ray_api` tag. An unavailable package or failed check stops before replacing the current core.
 
 Maintainers can run the `Build sing-box Traffic Stats` Actions workflow, leaving `version` empty to use `versions.lock` or specifying an upstream tag such as `v1.14.0`. Changes to the version lock or build files pushed to `main` also trigger a build. Both architectures must pass startup, Naive/Cronet loading, actual Hysteria2/TUIC transfers, and per-user stats checks before binary archives, corresponding source, and `SHA256SUMS` are published. Binary archives include `LICENSE` and build information. Stats releases do not take over padm's latest release marker. Wait for a successful workflow publication before the first installation.
+
+For a new upstream version, first run that stats workflow with an explicit `version` and wait for publication, then run or wait for `Refresh Upstream Versions` to update the Docker lock. Automatic refresh selects only published stable stats releases from this repository, excluding drafts and prereleases. Docker CI checks the stats tag, API startup, and Cronet loading on both architectures before allowing image publication.
 
 ## System and Script
 

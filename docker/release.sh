@@ -51,6 +51,7 @@ validate_lock() {
         PADM_LOCK_XRAY_AMD64_SHA256 PADM_LOCK_XRAY_ARM64_ASSET PADM_LOCK_XRAY_ARM64_SHA256 \
         PADM_LOCK_UNZIP_VERSION PADM_LOCK_SING_BOX_VERSION PADM_LOCK_SING_BOX_AMD64_ASSET \
         PADM_LOCK_SING_BOX_AMD64_SHA256 PADM_LOCK_SING_BOX_ARM64_ASSET PADM_LOCK_SING_BOX_ARM64_SHA256 \
+        PADM_LOCK_SING_BOX_AMD64_UPSTREAM_SHA256 PADM_LOCK_SING_BOX_ARM64_UPSTREAM_SHA256 \
         PADM_LOCK_NGINX_VERSION PADM_LOCK_NGINX_PACKAGE_VERSION PADM_LOCK_ACME_SH_VERSION \
         PADM_LOCK_ACME_SH_URL PADM_LOCK_ACME_SH_SHA256 PADM_LOCK_PYTHON3_VERSION \
         PADM_LOCK_OPENSSL_VERSION PADM_LOCK_SOCAT_VERSION PADM_LOCK_BASH_VERSION \
@@ -85,6 +86,7 @@ validate_lock() {
     for variable in \
         PADM_LOCK_XRAY_AMD64_SHA256 PADM_LOCK_XRAY_ARM64_SHA256 \
         PADM_LOCK_SING_BOX_AMD64_SHA256 PADM_LOCK_SING_BOX_ARM64_SHA256 \
+        PADM_LOCK_SING_BOX_AMD64_UPSTREAM_SHA256 PADM_LOCK_SING_BOX_ARM64_UPSTREAM_SHA256 \
         PADM_LOCK_ACME_SH_SHA256; do
         [[ "${!variable}" =~ ^[0-9a-f]{64}$ ]] || die "invalid checksum: ${variable}"
     done
@@ -99,6 +101,22 @@ latest_release_tag() {
     printf '%s\n' "${tag}"
 }
 
+latest_sing_box_stats_tag() {
+    local releases tag
+    releases=$(gh api 'repos/neil1123-vip/padm/releases?per_page=100' --paginate --slurp) ||
+        die 'failed to query sing-box stats releases'
+    tag=$(jq -er '.[][] | select(.draft == false and .prerelease == false) | .tag_name |
+        select(test("^sing-box-v[0-9]+\\.[0-9]+\\.[0-9]+$")) | ltrimstr("sing-box-")' \
+        <<<"${releases}" | sort -V | tail -n 1) || die 'no published stable sing-box stats release'
+    printf '%s\n' "${tag}"
+}
+
+release_asset_sha256() {
+    jq -er --arg name "$1" '[.assets[] | select(.name == $name)] |
+        if length == 1 and .[0].size > 0 then .[0].digest else empty end |
+        select(test("^sha256:[0-9a-f]{64}$")) | ltrimstr("sha256:")'
+}
+
 download_sha256() {
     local url=$1 output=$2
     curl --fail --location --silent --show-error --retry 3 --connect-timeout 15 --max-time 300 \
@@ -111,6 +129,8 @@ refresh_upstreams() {
     local tool xrayTag singBoxTag singBoxVersion acmeTag acmeVersion tmpRoot changed=false
     local xrayVersion xrayAmd64Asset xrayAmd64Sha256 xrayArm64Asset xrayArm64Sha256
     local singBoxAmd64Asset singBoxAmd64Sha256 singBoxArm64Asset singBoxArm64Sha256 acmeUrl acmeSha256
+    local singBoxAmd64UpstreamSha256 singBoxArm64UpstreamSha256 statsRelease upstreamRelease
+    local arch asset expectedDigest actualDigest
     local updateXray=false updateSingBox=false updateAcme=false
     for tool in gh jq curl sha256sum sort tail awk; do
         command -v "${tool}" >/dev/null 2>&1 || die "missing upstream refresh tool: ${tool}"
@@ -118,7 +138,7 @@ refresh_upstreams() {
     validate_lock
 
     xrayTag=$(latest_release_tag XTLS/Xray-core)
-    singBoxTag=$(latest_release_tag SagerNet/sing-box)
+    singBoxTag=$(latest_sing_box_stats_tag)
     acmeTag=$(latest_release_tag acmesh-official/acme.sh)
     [[ "${xrayTag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "invalid Xray release tag: ${xrayTag}"
     [[ "${singBoxTag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "invalid sing-box release tag: ${singBoxTag}"
@@ -163,6 +183,8 @@ refresh_upstreams() {
     singBoxAmd64Sha256=${PADM_LOCK_SING_BOX_AMD64_SHA256}
     singBoxArm64Asset=${PADM_LOCK_SING_BOX_ARM64_ASSET}
     singBoxArm64Sha256=${PADM_LOCK_SING_BOX_ARM64_SHA256}
+    singBoxAmd64UpstreamSha256=${PADM_LOCK_SING_BOX_AMD64_UPSTREAM_SHA256}
+    singBoxArm64UpstreamSha256=${PADM_LOCK_SING_BOX_ARM64_UPSTREAM_SHA256}
     acmeUrl=${PADM_LOCK_ACME_SH_URL}
     acmeSha256=${PADM_LOCK_ACME_SH_SHA256}
 
@@ -182,14 +204,40 @@ refresh_upstreams() {
     if [[ "${updateSingBox}" == true ]]; then
         singBoxAmd64Asset="sing-box-${singBoxVersion}-linux-amd64.tar.gz"
         singBoxArm64Asset="sing-box-${singBoxVersion}-linux-arm64.tar.gz"
-        singBoxAmd64Sha256=$(download_sha256 \
-            "https://github.com/SagerNet/sing-box/releases/download/${singBoxTag}/${singBoxAmd64Asset}" \
-            "${tmpRoot}/${singBoxAmd64Asset}") || die 'failed to download sing-box amd64 asset'
-        singBoxArm64Sha256=$(download_sha256 \
-            "https://github.com/SagerNet/sing-box/releases/download/${singBoxTag}/${singBoxArm64Asset}" \
-            "${tmpRoot}/${singBoxArm64Asset}") || die 'failed to download sing-box arm64 asset'
+        statsRelease=$(gh api "repos/neil1123-vip/padm/releases/tags/sing-box-${singBoxTag}") ||
+            die 'failed to query sing-box stats assets'
+        upstreamRelease=$(gh api "repos/SagerNet/sing-box/releases/tags/${singBoxTag}") ||
+            die 'failed to query sing-box upstream assets'
+        jq -e --arg tag "sing-box-${singBoxTag}" \
+            '.tag_name == $tag and .draft == false and .prerelease == false' <<<"${statsRelease}" >/dev/null ||
+            die 'sing-box stats release is not stable'
+        jq -e --arg tag "${singBoxTag}" \
+            '.tag_name == $tag and .draft == false and .prerelease == false' <<<"${upstreamRelease}" >/dev/null ||
+            die 'sing-box upstream release is not stable'
+        for asset in "sing-box-${singBoxVersion}-source.tar.gz" SHA256SUMS; do
+            release_asset_sha256 "${asset}" <<<"${statsRelease}" >/dev/null ||
+                die "missing verified sing-box stats asset: ${asset}"
+        done
+        for arch in amd64 arm64; do
+            asset="sing-box-${singBoxVersion}-linux-${arch}.tar.gz"
+            expectedDigest=$(release_asset_sha256 "${asset}" <<<"${statsRelease}") ||
+                die "missing verified sing-box stats asset: ${asset}"
+            actualDigest=$(download_sha256 \
+                "https://github.com/neil1123-vip/padm/releases/download/sing-box-${singBoxTag}/${asset}" \
+                "${tmpRoot}/${asset}") || die "failed to download sing-box stats ${arch} asset"
+            [[ "${actualDigest}" == "${expectedDigest}" ]] || die "sing-box stats ${arch} digest mismatch"
+            expectedDigest=$(release_asset_sha256 "${asset}" <<<"${upstreamRelease}") ||
+                die "missing verified sing-box upstream asset: ${asset}"
+            if [[ "${arch}" == amd64 ]]; then
+                singBoxAmd64Sha256=${actualDigest}
+                singBoxAmd64UpstreamSha256=${expectedDigest}
+            else
+                singBoxArm64Sha256=${actualDigest}
+                singBoxArm64UpstreamSha256=${expectedDigest}
+            fi
+        done
         changed=true
-        printf 'sing-box: %s -> %s\n' "${PADM_LOCK_SING_BOX_VERSION}" "${singBoxTag}"
+        printf 'sing-box stats: %s -> %s\n' "${PADM_LOCK_SING_BOX_VERSION}" "${singBoxTag}"
     else
         singBoxTag=${PADM_LOCK_SING_BOX_VERSION}
     fi
@@ -211,6 +259,8 @@ refresh_upstreams() {
         -v singBoxVersion="${singBoxTag}" \
         -v singBoxAmd64Asset="${singBoxAmd64Asset}" -v singBoxAmd64Sha256="${singBoxAmd64Sha256}" \
         -v singBoxArm64Asset="${singBoxArm64Asset}" -v singBoxArm64Sha256="${singBoxArm64Sha256}" \
+        -v singBoxAmd64UpstreamSha256="${singBoxAmd64UpstreamSha256}" \
+        -v singBoxArm64UpstreamSha256="${singBoxArm64UpstreamSha256}" \
         -v acmeVersion="${acmeVersion}" -v acmeUrl="${acmeUrl}" -v acmeSha256="${acmeSha256}" '
         BEGIN {
             value["PADM_LOCK_XRAY_VERSION"] = xrayVersion
@@ -223,6 +273,8 @@ refresh_upstreams() {
             value["PADM_LOCK_SING_BOX_AMD64_SHA256"] = singBoxAmd64Sha256
             value["PADM_LOCK_SING_BOX_ARM64_ASSET"] = singBoxArm64Asset
             value["PADM_LOCK_SING_BOX_ARM64_SHA256"] = singBoxArm64Sha256
+            value["PADM_LOCK_SING_BOX_AMD64_UPSTREAM_SHA256"] = singBoxAmd64UpstreamSha256
+            value["PADM_LOCK_SING_BOX_ARM64_UPSTREAM_SHA256"] = singBoxArm64UpstreamSha256
             value["PADM_LOCK_ACME_SH_VERSION"] = acmeVersion
             value["PADM_LOCK_ACME_SH_URL"] = acmeUrl
             value["PADM_LOCK_ACME_SH_SHA256"] = acmeSha256

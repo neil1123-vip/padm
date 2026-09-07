@@ -44,13 +44,43 @@ MOCK_BIN=${TEST_ROOT}/mock-bin
 mkdir -p "${UPDATER_ROOT}/docker" "${UPDATER_ROOT}/shell/core" "${MOCK_BIN}"
 cp "${RELEASE_SCRIPT}" "${UPDATER_ROOT}/docker/release.sh"
 cp "${PROJECT_ROOT}/versions.lock" "${UPDATER_ROOT}/versions.lock"
+cp "${UPDATER_ROOT}/versions.lock" "${UPDATER_ROOT}/versions.lock.original"
 cp "${PROJECT_ROOT}/shell/core/version.sh" "${UPDATER_ROOT}/shell/core/version.sh"
 cat >"${MOCK_BIN}/gh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 case "$*" in
 *repos/XTLS/Xray-core/releases/latest*) printf '%s\n' '{"tag_name":"v99.1.2","draft":false,"prerelease":false}' ;;
-*repos/SagerNet/sing-box/releases/latest*) printf '%s\n' '{"tag_name":"v9.8.7","draft":false,"prerelease":false}' ;;
+*'repos/neil1123-vip/padm/releases?per_page=100 --paginate --slurp'*)
+    if [[ "${PADM_TEST_STATS_FAILURE:-}" == no-stable ]]; then
+        printf '%s\n' '[[{"tag_name":"sing-box-v9.8.7","draft":true,"prerelease":false}]]'
+    else
+        printf '%s\n' '[[{"tag_name":"v99.0.0","draft":false,"prerelease":false},
+          {"tag_name":"sing-box-v9.7.0","draft":false,"prerelease":false},
+          {"tag_name":"sing-box-v99.0.0","draft":true,"prerelease":false},
+          {"tag_name":"sing-box-v98.0.0","draft":false,"prerelease":true},
+          {"tag_name":"sing-box-v97.0.0-alpha.1","draft":false,"prerelease":false}],
+          [{"tag_name":"sing-box-v9.8.7","draft":false,"prerelease":false}]]'
+    fi ;;
+*repos/neil1123-vip/padm/releases/tags/sing-box-v9.8.7*|*repos/SagerNet/sing-box/releases/tags/v9.8.7*)
+    prefix=sing-box
+    tag=sing-box-v9.8.7
+    if [[ "$*" == *repos/SagerNet/* ]]; then
+        prefix=upstream
+        tag=v9.8.7
+    fi
+    jq -n --arg tag "${tag}" --arg failure "${PADM_TEST_STATS_FAILURE:-}" \
+        --arg amd64 "$(printf '%s' "${prefix}-amd64" | sha256sum | awk '{print $1}')" \
+        --arg arm64 "$(printf '%s' "${prefix}-arm64" | sha256sum | awk '{print $1}')" '
+      {tag_name: $tag, draft: false, prerelease: false, assets: [
+        {name: "sing-box-9.8.7-linux-amd64.tar.gz", size: 100, digest: ("sha256:" + $amd64)},
+        {name: "sing-box-9.8.7-linux-arm64.tar.gz", size: 100, digest: ("sha256:" + $arm64)},
+        {name: "sing-box-9.8.7-source.tar.gz", size: 100, digest: ("sha256:" + $amd64)},
+        {name: "SHA256SUMS", size: 100, digest: ("sha256:" + $amd64)}]} |
+      if $failure == "missing-asset" then .assets |= map(select(.name != "SHA256SUMS"))
+      elif $failure == "missing-digest" then .assets[1].digest = null
+      elif $failure == "duplicate-asset" then .assets += [.assets[0]]
+      else . end' ;;
 *repos/acmesh-official/acme.sh/releases/latest*) printf '%s\n' '{"tag_name":"v8.7.6","draft":false,"prerelease":false}' ;;
 *) exit 1 ;;
 esac
@@ -70,8 +100,12 @@ done
 case "${url}" in
 *Xray-linux-64.zip) printf '%s' xray-amd64 >"${output}" ;;
 *Xray-linux-arm64-v8a.zip) printf '%s' xray-arm64 >"${output}" ;;
-*sing-box-9.8.7-linux-amd64.tar.gz) printf '%s' sing-box-amd64 >"${output}" ;;
-*sing-box-9.8.7-linux-arm64.tar.gz) printf '%s' sing-box-arm64 >"${output}" ;;
+https://github.com/neil1123-vip/padm/releases/download/sing-box-v9.8.7/sing-box-9.8.7-linux-amd64.tar.gz)
+    printf '%s' sing-box-amd64 >"${output}" ;;
+https://github.com/neil1123-vip/padm/releases/download/sing-box-v9.8.7/sing-box-9.8.7-linux-arm64.tar.gz)
+    [[ "${PADM_TEST_STATS_FAILURE:-}" != download ]] || exit 22
+    printf '%s' sing-box-arm64 >"${output}"
+    [[ "${PADM_TEST_STATS_FAILURE:-}" != checksum ]] || printf '%s' corrupt >>"${output}" ;;
 *acmesh-official/acme.sh/tar.gz/refs/tags/v8.7.6) printf '%s' acme-sh >"${output}" ;;
 *) exit 1 ;;
 esac
@@ -90,6 +124,10 @@ PATH="${MOCK_BIN}:${PATH}" bash "${UPDATER_ROOT}/docker/release.sh" refresh-upst
     [[ "${PADM_LOCK_SING_BOX_VERSION}" == v9.8.7 ]]
     [[ "${PADM_LOCK_SING_BOX_AMD64_ASSET}" == sing-box-9.8.7-linux-amd64.tar.gz ]]
     [[ "${PADM_LOCK_SING_BOX_ARM64_ASSET}" == sing-box-9.8.7-linux-arm64.tar.gz ]]
+    [[ "${PADM_LOCK_SING_BOX_AMD64_SHA256}" == "$(printf '%s' sing-box-amd64 | sha256sum | awk '{print $1}')" ]]
+    [[ "${PADM_LOCK_SING_BOX_ARM64_SHA256}" == "$(printf '%s' sing-box-arm64 | sha256sum | awk '{print $1}')" ]]
+    [[ "${PADM_LOCK_SING_BOX_AMD64_UPSTREAM_SHA256}" == "$(printf '%s' upstream-amd64 | sha256sum | awk '{print $1}')" ]]
+    [[ "${PADM_LOCK_SING_BOX_ARM64_UPSTREAM_SHA256}" == "$(printf '%s' upstream-arm64 | sha256sum | awk '{print $1}')" ]]
     [[ "${PADM_LOCK_ACME_SH_VERSION}" == 8.7.6 ]]
     [[ "${PADM_LOCK_ACME_SH_URL}" == */refs/tags/v8.7.6 ]]
 ) || fail 'upstream lock refresh produced wrong values'
@@ -98,6 +136,17 @@ PATH="${MOCK_BIN}:${PATH}" bash "${UPDATER_ROOT}/docker/release.sh" refresh-upst
     fail 'idempotent upstream lock refresh failed'
 cmp -s "${UPDATER_ROOT}/versions.lock.once" "${UPDATER_ROOT}/versions.lock" ||
     fail 'current upstream lock was rewritten'
+
+# 发布不完整或下载失败时，任何核心的锁值都必须保持原样。
+for failure in no-stable missing-asset missing-digest duplicate-asset download checksum; do
+    cp "${UPDATER_ROOT}/versions.lock.original" "${UPDATER_ROOT}/versions.lock"
+    if PATH="${MOCK_BIN}:${PATH}" PADM_TEST_STATS_FAILURE="${failure}" \
+        bash "${UPDATER_ROOT}/docker/release.sh" refresh-upstreams >"${TEST_ROOT}/refresh-failure.log" 2>&1; then
+        fail "upstream refresh accepted ${failure}"
+    fi
+    cmp -s "${UPDATER_ROOT}/versions.lock.original" "${UPDATER_ROOT}/versions.lock" ||
+        fail "upstream refresh changed the lock after ${failure}"
+done
 
 for name in xray sing-box nginx ops net; do
     jq -n --arg name "${name}" --arg digest "sha256:${IMAGE_DIGEST}" \

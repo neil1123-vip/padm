@@ -80,6 +80,7 @@ jobs:
           bash docker/tests/phase4.sh
           bash docker/tests/phase5.sh
           bash docker/tests/phase6.sh
+          bash docker/tests/traffic.sh
 
   smoke:
     name: Smoke ${{ matrix.image }} (${{ matrix.platform.name }})
@@ -281,7 +282,7 @@ jobs:
           assets="${RUNNER_TEMP}/release-assets"
           mkdir -p "${assets}"
           tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -cf - \
-            install-docker.sh docker shell/core/deployment_mode.sh versions.lock docker-bake.hcl \
+            install-docker.sh docker shell/core/deployment_mode.sh shell/core/stats_grpc.sh versions.lock docker-bake.hcl \
             documents/docker*.md | gzip -n >"${assets}/padm-docker-bundle.tar.gz"
           bundle_sha256=$(sha256sum "${assets}/padm-docker-bundle.tar.gz" | cut -d ' ' -f 1)
           bundle_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${PADM_RELEASE_VERSION}/padm-docker-bundle.tar.gz"

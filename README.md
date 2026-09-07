@@ -177,6 +177,24 @@ padm-docker acme <issue|renew> --domain example.com --email admin@example.com --
 
 配置变更先生成候选文件、校验端口和 Compose，再备份当前状态并执行健康检查；失败时保留旧配置。Docker 入口安装的控制命令是 `/usr/local/bin/padm-docker`，实际 bundle、配置、数据、密钥、日志和备份分别位于状态根下的 `bundle/`、`config/`、`data/`、`secrets/`、`logs/` 和 `backups/`。
 
+### 用户流量与额度
+
+`configure` 和 `update` 会为当前核心配置用户统计，并安装每分钟执行的宿主采集任务：优先使用 `padm-docker-traffic.timer`，无 systemd 时使用已运行的 cron。Xray 和 sing-box 均按稳定账号 ID 累计上传、下载流量；同一 UUID 在多个协议入口中合并计量，显示名称独立保留。
+
+```bash
+padm-docker traffic collect
+padm-docker traffic show
+padm-docker traffic limit <账号ID> 100
+padm-docker traffic limit <账号ID> 0
+padm-docker traffic reset <账号ID>
+```
+
+`collect` 立即采集并执行额度检查，`show` 显示已保存的计数；账号 ID 从 `show` 输出中读取。`limit` 的单位为 GiB，`0` 表示不限额，额度按上传与下载之和计算。`reset` 清零累计量并保留额度，重新启用因此恢复额度的用户。超额或恢复用户时会先校验配置，再仅重启对应核心，该核心的现有连接会短暂中断。
+
+完整用户配置保存在 `config/<核心>/users.base`，超额用户仅从运行配置中停用。累计量、额度与采样基线保存在 `/etc/padm-docker/data/traffic/state.json`，不随核心重启、配置重建或版本回滚清零。采集失败会保留已有累计量；额度检查按分钟执行，可能有一个采样周期及任务延迟的超额，意外退出前尚未采集的流量无法补算。
+
+sing-box 采集要求宿主提供 `nsenter` 和支持 HTTP/2 的 `curl`，通过容器网络命名空间访问 `127.0.0.1:10087`；Xray 使用容器内的统计命令访问 `127.0.0.1:10085`。统计端口不发布到公网，容器不挂载 Docker Socket。`down` 和 `uninstall` 会移除采集调度，`up` 和 `restart` 会恢复调度。
+
 ### 更新
 
 更新只接受已签名的 CI Release manifest。默认命令读取最新 Release 的 manifest、Cosign 签发的 Sigstore bundle v0.3 和控制 bundle；也可以显式指定本地或 HTTPS 资产：
@@ -197,7 +215,7 @@ padm-docker update \
 padm-docker rollback
 ```
 
-回滚只使用受管的最近一次 `update.*` 快照，默认退回一个版本；没有有效快照时直接失败，不猜测或拼接任意历史版本。回滚失败会尝试恢复当前版本，并保留备份路径供排障。
+回滚只使用受管的最近一次 `update.*` 快照，默认退回一个版本；没有有效快照时直接失败，不猜测或拼接任意历史版本。已启用用户统计时，回滚目标 sing-box 必须具备 `with_v2ray_api`，否则会在停止现有部署前拒绝，避免丢失额度约束。回滚失败会尝试恢复当前版本，并保留备份路径供排障。
 
 ### 卸载
 
@@ -235,6 +253,7 @@ padm 面向 Linux 服务器运行。代码会识别 Debian、Ubuntu、RHEL/CentO
 | Compose | Docker Compose v2 插件。 |
 | 架构 | `amd64` 或 `arm64`，主机和 daemon 架构必须一致。 |
 | 主机命令 | `bash` 4+、`jq`、`sha256sum`、`tar`，以及 `curl` 或 `wget`；签名更新还需要支持 Sigstore bundle v0.3 的 `cosign`（CI 当前使用 3.x）。缺少 Docker 时，`install-docker.sh install` 会先询问是否从 Docker 官方软件源安装 Engine、Compose v2 及其宿主前置工具。 |
+| 用户统计 | 正在运行的 systemd 或 cron；sing-box 还需宿主 `nsenter`（通常来自 `util-linux`）及支持 HTTP/2 的 `curl`。配置或更新时检查，缺少则停止。 |
 | 内核能力 | 普通 profile 不需要额外 capability；WireGuard、Fail2ban、TUN/TProxy 等 `net-*` profile 需要按支持矩阵提供 `NET_ADMIN`、host network 或 `/dev/net/tun`。 |
 
 首次执行 `install-docker.sh install` 时，如果检测不到 `docker` 命令，脚本会询问是否从 Docker 官方软件源安装 Docker Engine 和 Compose v2；回答否、未确认或安装失败都会停止，且不会初始化 `/etc/padm-docker`。宿主软件包或软件源已经完成的变更不会由脚本擅自删除。仅在命令缺失时触发询问；已有 Docker 但 daemon 或 Compose 不可用时仍直接报错，不会重装。自动安装目前只覆盖 Debian、Ubuntu、CentOS、Fedora、RHEL 的 rootful systemd 主机；其它发行版请先手动安装 Docker。脚本不会安装 Xray、sing-box、Nginx 等业务宿主依赖，也不会执行 `docker build`。检测到原生版已安装、正在运行或残留状态时会拒绝安装，请先明确清理原生部署；两种模式不提供隐式迁移。
@@ -526,7 +545,11 @@ Nginx 只在当前协议、站点或订阅配置确实依赖它时可启动、�
 
 ### sing-box 统计版与流量恢复
 
-原生部署的 sing-box 主核心和副核心统一使用本仓库 CI 从上游源码构建的统计版，保留上游默认构建标签并追加 `with_purego,with_v2ray_api`，支持 Hysteria2、TUIC 等协议的按用户流量统计。服务器直接下载 Linux amd64 / arm64 安装包，无需现场编译。Docker 镜像仍按 `versions.lock` 使用上游构建，不适用此原生核心切换流程。
+原生部署的 sing-box 主核心、副核心及 Docker 的 `padm-sing-box` 镜像统一使用本仓库 CI 从上游源码构建的统计版，保留上游默认构建标签并追加 `with_purego,with_v2ray_api`，具备 Hysteria2、TUIC 等协议的按用户流量统计能力。服务器直接下载 Linux amd64 / arm64 安装包或镜像，无需现场编译。
+
+`with_grpc` 控制完整的 gRPC 传输实现；未启用时仍有默认 gRPC lite，本项目的 Reality gRPC 配置可以使用。按用户统计由 `with_v2ray_api` 独立启用，Hysteria2 和 TUIC 也不依赖 `with_grpc`。
+
+Docker 镜像按 `versions.lock` 固定统计包版本和双架构 SHA256；官方包摘要单独保留，用于统计版构建时校验 Cronet 来源。Docker 已接入上述用户采集和额度管理。已有部署先按 Docker 安装命令重新下载 `/root/install-docker.sh`，再执行 `bash /root/install-docker.sh install --ref <本次发布的40位commit SHA>` 刷新宿主控制 bundle，最后执行 `padm-docker update` 更新镜像并初始化统计。首次升级必须使用新下载的入口，旧 `padm-docker install` 会遗漏新增的共享模块；`update` 本身也不替换宿主控制脚本。现有协议配置会保留，协议入口仍以 Docker 支持矩阵为准。以下菜单步骤适用于原生部署。
 
 若旧核心出现 `v2ray api is not included in this build`，或曾清理统计配置后恢复连接，请在运行 sing-box 的服务器上执行：
 
@@ -539,6 +562,8 @@ Nginx 只在当前协议、站点或订阅配置确实依赖它时可启动、�
 稳定版、预发布版试跑和版本回退均只选择本仓库已发布的 `sing-box-v<上游版本>`，安装时校验资产摘要、实际版本和 `with_v2ray_api` 标签；缺少安装包或校验失败会停止，不会替换当前核心。
 
 维护者可运行 Actions 的 `Build sing-box Traffic Stats` 工作流，`version` 留空时读取 `versions.lock`，也可指定上游标签（如 `v1.14.0`）。修改版本锁或构建文件并推送至 `main` 也会触发构建。两个架构均须通过启动、Naive/Cronet 加载、Hysteria2/TUIC 实际传输和用户统计检查，才会发布二进制包、对应源码包和 `SHA256SUMS`；二进制包包含 `LICENSE` 和构建信息。统计版 release 不占用 padm 自身的 latest 标记。首次使用前需等待该工作流成功发布。
+
+升级到新的上游版本时，先指定 `version` 运行该统计版工作流并完成发布，再运行或等待 `Refresh Upstream Versions` 更新 Docker 版本锁。自动刷新只选择本仓库已发布的正式统计版，忽略草稿和预发布版；Docker CI 在两种架构上检查统计标签、API 启动及 Cronet 加载后才允许发布镜像。
 
 ## 系统与脚本
 

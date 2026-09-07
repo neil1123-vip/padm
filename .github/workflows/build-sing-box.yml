@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   prepare:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.resolve.outputs.version }}
       commit: ${{ steps.resolve.outputs.commit }}
@@ -38,7 +38,7 @@ jobs:
           set -euo pipefail
           . ./versions.lock
           printf 'version=%s\namd64=%s\narm64=%s\n' "${PADM_LOCK_SING_BOX_VERSION}" \
-            "${PADM_LOCK_SING_BOX_AMD64_SHA256}" "${PADM_LOCK_SING_BOX_ARM64_SHA256}" >>"${GITHUB_OUTPUT}"
+            "${PADM_LOCK_SING_BOX_AMD64_UPSTREAM_SHA256}" "${PADM_LOCK_SING_BOX_ARM64_UPSTREAM_SHA256}" >>"${GITHUB_OUTPUT}"
       - name: Resolve immutable source and release assets
         id: resolve
         uses: actions/github-script@v9
@@ -73,7 +73,7 @@ jobs:
               if (version === process.env.LOCK_VERSION && sha256 !== process.env[`LOCK_${arch.toUpperCase()}`]) {
                 throw new Error(`Upstream ${arch} digest differs from versions.lock`);
               }
-              return { arch, runner: arch === 'amd64' ? 'ubuntu-24.04' : 'ubuntu-24.04-arm', sha256 };
+              return { arch, runner: arch === 'amd64' ? 'ubuntu-latest' : 'ubuntu-24.04-arm', sha256 };
             }) };
             const tag = `sing-box-${version}`;
             const existing = await github.rest.repos.getReleaseByTag({ ...context.repo, tag })
@@ -130,7 +130,7 @@ jobs:
   publish:
     needs: [prepare, build]
     if: needs.prepare.outputs.skip != 'true' && needs.build.result == 'success'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
