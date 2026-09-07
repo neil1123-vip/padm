@@ -29,7 +29,6 @@ jobs:
       commit: ${{ steps.resolve.outputs.commit }}
       matrix: ${{ steps.resolve.outputs.matrix }}
       skip: ${{ steps.resolve.outputs.skip }}
-      release_id: ${{ steps.resolve.outputs.release_id }}
     steps:
       - uses: actions/checkout@v7
       - name: Read version lock
@@ -90,7 +89,6 @@ jobs:
             core.setOutput('commit', object.sha);
             core.setOutput('matrix', JSON.stringify(matrix));
             core.setOutput('skip', complete ? 'true' : 'false');
-            core.setOutput('release_id', existing?.id || '');
 
   build:
     needs: prepare
@@ -148,7 +146,6 @@ jobs:
           GH_REPO: ${{ github.repository }}
           VERSION: ${{ needs.prepare.outputs.version }}
           SOURCE_COMMIT: ${{ needs.prepare.outputs.commit }}
-          RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
         run: |
           set -euo pipefail
           cd .tmp-sing-box-release
@@ -166,17 +163,29 @@ jobs:
             "Source: https://github.com/SagerNet/sing-box/tree/${SOURCE_COMMIT}" \
             'Build: upstream default tags plus with_purego and with_v2ray_api; CGO_ENABLED=0.' \
             "Corresponding source: ${base}-source.tar.gz. Binary archives include LICENSE and BUILD_INFO.json." >notes.txt
-          if [[ -z "${RELEASE_ID}" ]]; then
-            gh release create "${tag}" --target "${GITHUB_SHA}" --title "sing-box ${VERSION} (padm traffic stats)" \
-              --draft --latest=false --prerelease="${prerelease}" --notes-file notes.txt
-          else
-            [[ "$(gh api "repos/${GH_REPO}/releases/${RELEASE_ID}" --jq .draft)" == true ]]
+          gh api "repos/${GH_REPO}/releases?per_page=100" --paginate --slurp >releases.json
+          release_id=$(jq -r --arg tag "${tag}" '
+            [.[][] | select(.tag_name == $tag)] |
+            if length > 1 then error("Duplicate release tags") else .[0].id // "" end
+          ' releases.json)
+          if [[ -z "${release_id}" ]]; then
+            release_id=$(gh api --method POST "repos/${GH_REPO}/releases" \
+              -f tag_name="${tag}" -f target_commitish="${GITHUB_SHA}" \
+              -f name="sing-box ${VERSION} (padm traffic stats)" -F draft=true \
+              -F prerelease="${prerelease}" -f make_latest=false -F body=@notes.txt --jq .id)
           fi
+          [[ "${release_id}" =~ ^[0-9]+$ ]]
+          gh api "repos/${GH_REPO}/releases/${release_id}" >release.json
+          jq -e --arg tag "${tag}" --argjson id "${release_id}" \
+            '.id == $id and .tag_name == $tag and .draft == true' release.json >/dev/null
           gh release upload "${tag}" "${assets[@]}" --clobber
-          gh api "repos/${GH_REPO}/releases/tags/${tag}" >release.json
+          gh api "repos/${GH_REPO}/releases/${release_id}" >release.json
+          jq -e --arg tag "${tag}" --argjson id "${release_id}" \
+            '.id == $id and .tag_name == $tag and .draft == true' release.json >/dev/null
           for asset in "${assets[@]}"; do
             digest="sha256:$(sha256sum "${asset}" | cut -d ' ' -f 1)"
             jq -e --arg name "${asset}" --arg digest "${digest}" \
               '[.assets[] | select(.name == $name and .digest == $digest and .size > 0)] | length == 1' release.json >/dev/null
           done
-          gh release edit "${tag}" --draft=false --latest=false --prerelease="${prerelease}" --notes-file notes.txt
+          gh api --method PATCH "repos/${GH_REPO}/releases/${release_id}" \
+            -F draft=false -f make_latest=false -F prerelease="${prerelease}" -F body=@notes.txt --silent
