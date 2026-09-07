@@ -31,11 +31,13 @@ ARG TARGETARCH
 ARG SING_BOX_VERSION
 ARG CA_CERTIFICATES_VERSION
 ARG GCOMPAT_VERSION
+ARG LIBGCC_VERSION
 
 RUN set -eux; \
     apk add --no-cache \
         "ca-certificates=${CA_CERTIFICATES_VERSION}" \
-        "gcompat=${GCOMPAT_VERSION}"; \
+        "gcompat=${GCOMPAT_VERSION}" \
+        "libgcc=${LIBGCC_VERSION}"; \
     addgroup -S -g 10001 padm; \
     adduser -S -D -H -u 10001 -G padm padm; \
     mkdir -p /etc/padm/sing-box /var/lib/padm/sing-box; \

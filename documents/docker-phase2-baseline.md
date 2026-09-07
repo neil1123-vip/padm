@@ -23,7 +23,7 @@ CI 发布的 digest，不执行 `docker build`，也不直接部署 Xray、sing-
 - Xray、sing-box 的版本、两种架构资产名和 SHA-256。
 - acme.sh 的版本、归档 URL 和 SHA-256。
 - Nginx、Python、OpenSSL、socat、WireGuard、Fail2ban、iptables、nftables、
-  iproute2、bash、CA 和 unzip 的 APK 版本。
+  iproute2、bash、CA、unzip、gcompat 和 libgcc 的 APK 版本。
 - 当前补丁集合；本阶段为 `none`。
 
 锁文件是 shell 兼容的只读键值文件。CI/Bake 的加载方式固定为：
@@ -40,7 +40,7 @@ GIT_REVISION="$(git rev-parse HEAD)" IMAGE_TAG=v3.1.8 docker buildx bake --push
 | 镜像 | 内容 | 运行用户 | 可写路径 |
 |---|---|---|---|
 | `padm-xray` | Xray、geoip/geosite、CA | `10001:10001` | `/tmp`、`/var/lib/padm/xray` |
-| `padm-sing-box` | sing-box、libcronet、CA | `10001:10001` | `/tmp`、`/var/lib/padm/sing-box` |
+| `padm-sing-box` | sing-box、libcronet、gcompat、libgcc、CA | `10001:10001` | `/tmp`、`/var/lib/padm/sing-box` |
 | `padm-nginx` | Alpine Nginx、PADM 非 root 配置 | `10001:10001` | `/tmp` |
 | `padm-ops` | Python、OpenSSL、socat、acme.sh | `10001:10001` | `/tmp`、`/var/lib/padm` |
 | `padm-net` | WireGuard、Fail2ban、iproute2、iptables/nftables | `0:0` | `/run`、`/tmp`、`/var/lib/padm/net` |

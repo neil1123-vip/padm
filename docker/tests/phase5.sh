@@ -81,6 +81,7 @@ assert_image_impact "${inputBase}" "${inputHead}" none
 
 # 按实际 Bake 参数覆盖每个镜像的独立依赖，避免把上游升级放大为全量构建。
 for dependency in xray:PADM_LOCK_UNZIP_VERSION sing-box:PADM_LOCK_GCOMPAT_VERSION \
+    sing-box:PADM_LOCK_LIBGCC_VERSION \
     nginx:PADM_LOCK_NGINX_PACKAGE_VERSION ops:PADM_LOCK_ACME_SH_SHA256 net:PADM_LOCK_FAIL2BAN_VERSION; do
     inputBase=${inputHead}
     inputKey=${dependency#*:}
