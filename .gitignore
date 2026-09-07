@@ -3,6 +3,7 @@
 .DS_Store
 
 # Local agent context and project notes
+/AGENTS.md
 AgentState.md
 AgentState.archive.md
 ProjectLog.md
