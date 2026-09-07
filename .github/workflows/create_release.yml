@@ -313,7 +313,11 @@ jobs:
           for asset in "${assets[@]}"; do [[ -s "${asset}" ]]; done
           gh api "repos/${GH_REPO}/releases?per_page=100" --paginate --slurp >"${RUNNER_TEMP}/releases.json"
           release_id=$(jq -r --arg tag "${tag}" '
-            [.[][] | select(.tag_name == $tag)] |
+            [.[][] | select(.tag_name == $tag or
+              (.draft == true and .prerelease == false and .name == $tag and
+               .body == ("Automated Docker release " + $tag) and
+               .author.login == "github-actions[bot]" and
+               (.tag_name | test("^untagged-[0-9a-f]+$"))))] |
             if length > 1 then error("Duplicate release tags") else .[0].id // "" end
           ' "${RUNNER_TEMP}/releases.json")
           if [[ -z "${release_id}" ]]; then
@@ -324,7 +328,12 @@ jobs:
           fi
           [[ "${release_id}" =~ ^[0-9]+$ ]]
           gh api "repos/${GH_REPO}/releases/${release_id}" >"${RUNNER_TEMP}/release.json"
-          jq -e --arg tag "${tag}" '.tag_name == $tag and .draft == true' \
+          jq -e --arg tag "${tag}" --argjson id "${release_id}" '
+            .id == $id and .draft == true and (.tag_name == $tag or
+              (.prerelease == false and .name == $tag and
+               .body == ("Automated Docker release " + $tag) and
+               .author.login == "github-actions[bot]" and
+               (.tag_name | test("^untagged-[0-9a-f]+$"))))' \
             "${RUNNER_TEMP}/release.json" >/dev/null
           # 失败草稿可随新源码重试，但不移动已存在且指向其它提交的标签。
           gh api "repos/${GH_REPO}/git/matching-refs/tags/${tag}" >"${RUNNER_TEMP}/tag-refs.json"
@@ -332,10 +341,20 @@ jobs:
             [.[] | select(.ref == $ref)] |
             length == 0 or (length == 1 and .[0].object.type == "commit" and .[0].object.sha == $commit)
           ' "${RUNNER_TEMP}/tag-refs.json" >/dev/null
-          gh api --method PATCH "repos/${GH_REPO}/releases/${release_id}" \
-            -f target_commitish="${RELEASE_SHA}" -F draft=true -f make_latest=false --silent
-          gh release upload "${tag}" "${assets[@]}" --clobber
+          # 草稿可能尚无正式标签，附件按 ID 上传；只替换本次发布的同名附件。
+          for asset in "${assets[@]}"; do
+            asset_ids=$(jq -r --arg name "${asset}" '.assets[] | select(.name == $name) | .id' \
+              "${RUNNER_TEMP}/release.json")
+            for asset_id in ${asset_ids}; do
+              [[ "${asset_id}" =~ ^[0-9]+$ ]]
+              gh api --method DELETE "repos/${GH_REPO}/releases/assets/${asset_id}" --silent
+            done
+            gh api --method POST "https://uploads.github.com/repos/${GH_REPO}/releases/${release_id}/assets?name=${asset}" \
+              --header 'Content-Type: application/octet-stream' --input "${asset}" --silent
+          done
           gh api "repos/${GH_REPO}/releases/${release_id}" >"${RUNNER_TEMP}/release.json"
+          jq -e --argjson id "${release_id}" '.id == $id and .draft == true' \
+            "${RUNNER_TEMP}/release.json" >/dev/null
           for asset in "${assets[@]}"; do
             digest="sha256:$(sha256sum "${asset}" | cut -d ' ' -f 1)"
             jq -e --arg name "${asset}" --arg digest "${digest}" \
@@ -343,4 +362,8 @@ jobs:
               "${RUNNER_TEMP}/release.json" >/dev/null
           done
           gh api --method PATCH "repos/${GH_REPO}/releases/${release_id}" \
-            -F draft=false -F prerelease=false -f make_latest=true --silent
+            -f tag_name="${tag}" -f target_commitish="${RELEASE_SHA}" \
+            -F draft=false -F prerelease=false -f make_latest=true >"${RUNNER_TEMP}/release.json"
+          jq -e --arg tag "${tag}" --argjson id "${release_id}" \
+            '.id == $id and .tag_name == $tag and .draft == false and .prerelease == false' \
+            "${RUNNER_TEMP}/release.json" >/dev/null

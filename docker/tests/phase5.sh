@@ -288,6 +288,126 @@ if bash "${RELEASE_SCRIPT}" validate-manifest "${MANIFEST}.bad" >/dev/null 2>&1;
     fail 'manifest validator accepted an unknown field'
 fi
 
+# 执行工作流中的实际 Bash 块，模拟无标签草稿及部分上传失败后的重试。
+PUBLISH_SCRIPT=${TEST_ROOT}/publish.sh
+awk '
+    /^      - name: Create or update GitHub Release$/ {step = 1; next}
+    step && /^        run: \|$/ {code = 1; next}
+    code {
+        if ($0 !~ /^          / && $0 !~ /^[[:space:]]*$/) exit
+        sub(/^          /, ""); print
+    }
+' "${RELEASE_WORKFLOW}" >"${PUBLISH_SCRIPT}"
+[[ -s "${PUBLISH_SCRIPT}" ]] || fail 'release publication script is missing'
+bash -n "${PUBLISH_SCRIPT}" || fail 'release publication script is invalid'
+cat >"${MOCK_BIN}/gh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"${RUNNER_TEMP}/calls"
+remote=${RUNNER_TEMP}/remote.json
+case "$*" in
+'api repos/'*'/releases?per_page=100 --paginate --slurp')
+    if [[ "${SCENARIO}" == new && ! -f "${RUNNER_TEMP}/created" ]]; then
+        printf '[[]]\n'
+    elif [[ "${SCENARIO}" == duplicate ]]; then
+        jq '[[., (. | .id = 43)]]' "${remote}"
+    else
+        jq '[[.]]' "${remote}"
+    fi ;;
+'api --method POST repos/'*'/releases '*)
+    touch "${RUNNER_TEMP}/created"
+    printf '42\n' ;;
+'api repos/'*'/releases/42') cat "${remote}" ;;
+'api repos/'*'/git/matching-refs/tags/'*)
+    if [[ "${SCENARIO}" == conflicting-tag ]]; then
+        jq -n --arg ref "refs/tags/v${RELEASE_VERSION}" '[{ref: $ref, object: {type: "commit", sha: "other"}}]'
+    else
+        printf '[]\n'
+    fi ;;
+'api --method DELETE repos/'*'/releases/assets/'*)
+    [[ "${SCENARIO}" != delete-failed ]] || exit 22
+    jq --argjson id "${4##*/}" '.assets |= map(select(.id != $id))' "${remote}" >"${remote}.next"
+    mv "${remote}.next" "${remote}" ;;
+'api --method POST https://uploads.github.com/repos/'*'/releases/42/assets?name='*)
+    asset=${4##*name=}
+    [[ "$5" == --header && "$6" == 'Content-Type: application/octet-stream' &&
+        "$7" == --input && "$8" == "${asset}" && -s "$8" ]]
+    jq -e --arg name "${asset}" '[.assets[] | select(.name == $name)] | length == 0' "${remote}" >/dev/null
+    if [[ "${SCENARIO}" == upload-failed && "${asset}" == release-manifest.sigstore.json &&
+        ! -f "${RUNNER_TEMP}/failed-once" ]]; then
+        jq --arg name "${asset}" '.assets += [{id: 8, name: $name, size: 0, state: "starter"}]' \
+            "${remote}" >"${remote}.next"
+        mv "${remote}.next" "${remote}"
+        touch "${RUNNER_TEMP}/failed-once"
+        exit 22
+    fi
+    [[ "${SCENARIO}" != missing-asset || "${asset}" != padm-docker-bundle.tar.gz ]] || exit 0
+    digest="sha256:$(sha256sum "${asset}" | cut -d ' ' -f 1)"
+    [[ "${SCENARIO}" != wrong-digest ]] || digest=sha256:wrong
+    jq --arg name "${asset}" --arg digest "${digest}" --argjson size "$(wc -c <"${asset}")" '
+        .assets += [{id: (([.assets[].id, 100] | max) + 1), name: $name,
+                     size: $size, digest: $digest, state: "uploaded"}]
+    ' "${remote}" >"${remote}.next"
+    mv "${remote}.next" "${remote}" ;;
+'api --method PATCH repos/'*'/releases/42 '*)
+    [[ "$*" == *" -f tag_name=v${RELEASE_VERSION} "* &&
+        "$*" == *" -f target_commitish=${RELEASE_SHA} "* &&
+        "$*" == *' -F draft=false -F prerelease=false -f make_latest=true'* ]]
+    jq --arg tag "v${RELEASE_VERSION}" --arg commit "${RELEASE_SHA}" '
+        .tag_name = $tag | .target_commitish = $commit | .draft = false | .prerelease = false
+    ' "${remote}" >"${remote}.next"
+    mv "${remote}.next" "${remote}"
+    cat "${remote}" ;;
+*) printf 'unexpected gh command: %s\n' "$*" >&2; exit 99 ;;
+esac
+EOF
+chmod +x "${MOCK_BIN}/gh"
+for scenario in new draft untagged stale-untagged duplicate published conflicting-tag \
+    upload-failed delete-failed wrong-digest missing-asset; do
+    publishRoot=${TEST_ROOT}/publish-${scenario}
+    mkdir -p "${publishRoot}/release-assets"
+    for asset in release-manifest.json release-manifest.sigstore.json padm-docker-bundle.tar.gz; do
+        printf '%s\n' "${asset}" >"${publishRoot}/release-assets/${asset}"
+    done
+    jq -n --arg commit "${COMMIT}" --arg scenario "${scenario}" '
+        {id: 42, tag_name: "v3.8.0", name: "v3.8.0", draft: true, prerelease: false,
+         body: "Automated Docker release v3.8.0", author: {login: "github-actions[bot]"},
+         target_commitish: $commit, assets: [{id: 7, name: "release-manifest.json"},
+                                           {id: 99, name: "unrelated.txt"}]} |
+        if $scenario == "new" then .assets = []
+        elif $scenario == "published" then .draft = false
+        elif $scenario == "untagged" then .tag_name = "untagged-abc123"
+        elif $scenario == "stale-untagged" then .tag_name = "untagged-abc123" | .target_commitish = "old"
+        else . end
+    ' >"${publishRoot}/remote.json"
+    expected=failure
+    case "${scenario}" in new | draft | untagged | stale-untagged) expected=success ;; esac
+    actual=success
+    (cd "${publishRoot}" && PATH="${MOCK_BIN}:${PATH}" RUNNER_TEMP="${publishRoot}" SCENARIO="${scenario}" \
+        RELEASE_VERSION=3.8.0 RELEASE_SHA="${COMMIT}" GH_REPO=example/padm bash "${PUBLISH_SCRIPT}") \
+        >"${publishRoot}/output" 2>&1 || actual=failure
+    [[ "${actual}" == "${expected}" ]] || { cat "${publishRoot}/output"; fail "publish ${scenario}: ${actual}"; }
+    if [[ "${expected}" == failure ]]; then
+        jq -e '.draft == true' "${publishRoot}/remote.json" >/dev/null || [[ "${scenario}" == published ]] ||
+            fail "publish ${scenario} exposed an incomplete release"
+    fi
+    if [[ "${scenario}" == upload-failed ]]; then
+        (cd "${publishRoot}" && PATH="${MOCK_BIN}:${PATH}" RUNNER_TEMP="${publishRoot}" SCENARIO="${scenario}" \
+            RELEASE_VERSION=3.8.0 RELEASE_SHA="${COMMIT}" GH_REPO=example/padm bash "${PUBLISH_SCRIPT}") \
+            >"${publishRoot}/retry-output" 2>&1 || { cat "${publishRoot}/retry-output"; fail 'publish retry failed'; }
+        grep -Fq '/releases/assets/8 --silent' "${publishRoot}/calls" || fail 'retry kept an incomplete upload'
+        expected=success
+    fi
+    if [[ "${expected}" == success ]]; then
+        jq -e --arg commit "${COMMIT}" '.draft == false and .tag_name == "v3.8.0" and
+            .target_commitish == $commit and ([.assets[] | select(.size > 0)] | length == 3)' \
+            "${publishRoot}/remote.json" >/dev/null || fail "publish ${scenario} is incomplete"
+        [[ "${scenario}" == new ]] || jq -e '.assets | any(.id == 99)' "${publishRoot}/remote.json" >/dev/null ||
+            fail 'publication removed an unrelated asset'
+    fi
+    [[ "${scenario}" == new || ! -f "${publishRoot}/created" ]] || fail "publish ${scenario} created a duplicate release"
+done
+
 grep -Fq 'workflow_call:' "${BUILD_WORKFLOW}" || fail 'build workflow is not reusable'
 grep -Fq 'docker/setup-qemu-action' "${BUILD_WORKFLOW}" || fail 'build workflow lacks multi-arch emulation'
 grep -Fq 'linux/amd64' "${BUILD_WORKFLOW}" || fail 'build workflow lacks amd64'
