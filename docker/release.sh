@@ -26,6 +26,33 @@ is_newer_semver() {
         "$(printf '%s\n%s\n' "${current}" "${candidate}" | sort -V | tail -n 1)" == "${candidate}" ]]
 }
 
+apply_lock_updates() {
+    local input=$1 output=$2 updates=$3
+    awk -v updates="${updates}" '
+        BEGIN {
+            count = split(updates, rows, /\n/)
+            for (i = 1; i <= count; i++) {
+                key = rows[i]
+                sub(/=.*/, "", key)
+                value[key] = substr(rows[i], length(key) + 2)
+            }
+        }
+        {
+            key = $0
+            sub(/=.*/, "", key)
+            if (key in value) {
+                print key "=" value[key]
+                seen[key]++
+                next
+            }
+            print
+        }
+        END {
+            for (key in value) if (seen[key] != 1) exit 1
+        }
+    ' "${input}" >"${output}" || die 'failed to update lock values'
+}
+
 load_lock() {
     [[ -f "${LOCK_FILE}" && ! -L "${LOCK_FILE}" ]] || die 'versions.lock is missing or unsafe'
     set -a
@@ -69,7 +96,9 @@ validate_lock() {
         is_semver "${expected}" || die 'requested version is not semver'
         [[ "${expected}" == "${scriptVersion}" ]] || die 'requested version differs from source'
     fi
-    [[ "${PADM_LOCK_ALPINE_BASE}" =~ ^alpine:[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]] ||
+    [[ "${PADM_LOCK_ALPINE_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die 'invalid Alpine version'
+    [[ "${PADM_LOCK_ALPINE_BASE}" == "alpine:${PADM_LOCK_ALPINE_VERSION}@${PADM_LOCK_ALPINE_BASE#*@}" &&
+        "${PADM_LOCK_ALPINE_BASE}" =~ ^alpine:[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]] ||
         die 'Alpine base is not pinned by digest'
     [[ "${PADM_LOCK_XRAY_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die 'invalid Xray version'
     [[ "${PADM_LOCK_XRAY_AMD64_ASSET}" == Xray-linux-64.zip &&
@@ -79,10 +108,22 @@ validate_lock() {
     [[ "${PADM_LOCK_SING_BOX_AMD64_ASSET}" == "sing-box-${singBoxVersion}-linux-amd64.tar.gz" &&
         "${PADM_LOCK_SING_BOX_ARM64_ASSET}" == "sing-box-${singBoxVersion}-linux-arm64.tar.gz" ]] ||
         die 'invalid sing-box assets'
+    [[ "${PADM_LOCK_NGINX_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die 'invalid nginx version'
     [[ "${PADM_LOCK_ACME_SH_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die 'invalid acme.sh version'
     [[ "${PADM_LOCK_ACME_SH_URL}" == "https://codeload.github.com/acmesh-official/acme.sh/tar.gz/refs/tags/${PADM_LOCK_ACME_SH_VERSION}" ||
         "${PADM_LOCK_ACME_SH_URL}" == "https://codeload.github.com/acmesh-official/acme.sh/tar.gz/refs/tags/v${PADM_LOCK_ACME_SH_VERSION}" ]] ||
         die 'invalid acme.sh URL'
+    for variable in \
+        PADM_LOCK_CA_CERTIFICATES_VERSION PADM_LOCK_GCOMPAT_VERSION PADM_LOCK_LIBGCC_VERSION \
+        PADM_LOCK_UNZIP_VERSION PADM_LOCK_NGINX_PACKAGE_VERSION PADM_LOCK_PYTHON3_VERSION \
+        PADM_LOCK_OPENSSL_VERSION PADM_LOCK_SOCAT_VERSION PADM_LOCK_BASH_VERSION \
+        PADM_LOCK_IPROUTE2_VERSION PADM_LOCK_IPTABLES_VERSION PADM_LOCK_NFTABLES_VERSION \
+        PADM_LOCK_WIREGUARD_TOOLS_VERSION PADM_LOCK_FAIL2BAN_VERSION; do
+        [[ "${!variable}" =~ ^[A-Za-z0-9][A-Za-z0-9.+:~_-]*$ ]] || die "invalid APK version: ${variable}"
+    done
+    [[ "${PADM_LOCK_NGINX_PACKAGE_VERSION}" == "${PADM_LOCK_NGINX_VERSION}" ||
+        "${PADM_LOCK_NGINX_PACKAGE_VERSION}" == "${PADM_LOCK_NGINX_VERSION}-r"* ]] ||
+        die 'nginx package version differs from nginx version'
     for variable in \
         PADM_LOCK_XRAY_AMD64_SHA256 PADM_LOCK_XRAY_ARM64_SHA256 \
         PADM_LOCK_SING_BOX_AMD64_SHA256 PADM_LOCK_SING_BOX_ARM64_SHA256 \
@@ -106,6 +147,8 @@ image_lock_inputs() {
         case "${key}" in
         PADM_LOCK_VERSION|PADM_LOCK_SING_BOX_AMD64_UPSTREAM_SHA256|PADM_LOCK_SING_BOX_ARM64_UPSTREAM_SHA256)
             continue ;;
+        PADM_LOCK_ALPINE_VERSION|PADM_LOCK_ALPINE_BASE)
+            owner=all ;;
         PADM_LOCK_XRAY_VERSION|PADM_LOCK_XRAY_AMD64_ASSET|PADM_LOCK_XRAY_AMD64_SHA256|\
         PADM_LOCK_XRAY_ARM64_ASSET|PADM_LOCK_XRAY_ARM64_SHA256|PADM_LOCK_UNZIP_VERSION)
             owner=xray ;;
@@ -121,9 +164,9 @@ image_lock_inputs() {
         PADM_LOCK_NFTABLES_VERSION|PADM_LOCK_WIREGUARD_TOOLS_VERSION|PADM_LOCK_FAIL2BAN_VERSION)
             owner=net ;;
         # 共同输入及尚未归类的新键按影响所有镜像处理。
-        *) owner=${image} ;;
+        *) owner=all ;;
         esac
-        [[ "${owner}" != "${image}" ]] || printf '%s\n' "${line}"
+        [[ "${owner}" == all || "${owner}" == "${image}" ]] && printf '%s\n' "${line}"
     done
     [[ "${values[PADM_LOCK_SCHEMA]:-}" == 1 ]]
 }
@@ -176,14 +219,102 @@ download_sha256() {
     sha256sum "${output}" | awk '{print $1}'
 }
 
+alpine_tag_metadata() {
+    local minor=$1 response tag
+    response=$(curl --fail --location --silent --show-error --retry 3 --connect-timeout 15 --max-time 60 \
+        "https://hub.docker.com/v2/repositories/library/alpine/tags?page_size=100&name=${minor}&ordering=last_updated") ||
+        die 'failed to query Alpine Docker tags'
+    tag=$(jq -er --arg prefix "${minor}." '
+        .results[] | .name | select(test("^" + $prefix + "[0-9]+$"))
+    ' <<<"${response}" | sort -V | tail -n 1) || die "no stable Alpine patch release for ${minor}"
+    jq -e --arg tag "${tag}" '
+        .results[] | select(.name == $tag) |
+        (.digest | select(test("^sha256:[0-9a-f]{64}$"))) and
+        ([.images[] | select(.os == "linux" and .architecture == "amd64")] | length > 0) and
+        ([.images[] | select(.os == "linux" and .architecture == "arm64")] | length > 0)
+    ' <<<"${response}" >/dev/null || die "Alpine tag ${tag} has no verified amd64/arm64 image"
+    printf '%s\t%s\n' "${tag}" "$(jq -er --arg tag "${tag}" '.results[] | select(.name == $tag) | .digest' <<<"${response}")"
+}
+
+apk_index_package_versions() {
+    local index=$1 package=$2
+    tar -xOzf "${index}" APKINDEX | awk -v package="${package}" '
+        /^P:/ { name = substr($0, 3); sub(/^[[:space:]]+/, "", name) }
+        /^V:/ { version = substr($0, 3); sub(/^[[:space:]]+/, "", version) }
+        /^$/ {
+            if (name == package) print version
+            name = ""
+            version = ""
+        }
+        END { if (name == package) print version }
+    '
+}
+
+refresh_alpine_packages() {
+    local minor=$1 tmpRoot=$2 package arch repo index candidate best candidates
+    shift 2
+    local -a packages=("$@")
+    local -A latest=()
+    for arch in x86_64 aarch64; do
+        for repo in main community; do
+            index="${tmpRoot}/apkindex-${repo}-${arch}.tar.gz"
+            curl --fail --location --silent --show-error --retry 3 --connect-timeout 15 --max-time 120 \
+                --max-filesize 16777216 --output "${index}" \
+                "https://dl-cdn.alpinelinux.org/alpine/v${minor}/${repo}/${arch}/APKINDEX.tar.gz" ||
+                die "failed to download Alpine ${minor} ${repo}/${arch} APK index"
+            [[ -s "${index}" ]] || die "empty Alpine ${minor} ${repo}/${arch} APK index"
+        done
+        for package in "${packages[@]}"; do
+            best=
+            for repo in main community; do
+                index="${tmpRoot}/apkindex-${repo}-${arch}.tar.gz"
+                candidates=$(apk_index_package_versions "${index}" "${package}") ||
+                    die "failed to parse Alpine ${minor} ${repo}/${arch} APK index"
+                while IFS= read -r candidate; do
+                    [[ -n "${candidate}" ]] || continue
+                    if [[ -z "${best}" ]] || is_newer_semver "${best}" "${candidate}"; then
+                        best=${candidate}
+                    fi
+                done <<<"${candidates}"
+            done
+            [[ -n "${best}" ]] || die "Alpine ${minor} has no ${package} package for ${arch}"
+            latest["${arch}:${package}"]=${best}
+        done
+    done
+    for package in "${packages[@]}"; do
+        [[ "${latest[x86_64:${package}]}" == "${latest[aarch64:${package}]}" ]] ||
+            die "Alpine ${package} differs by architecture: x86_64=${latest[x86_64:${package}]} aarch64=${latest[aarch64:${package}]}"
+        printf '%s\t%s\n' "${package}" "${latest[x86_64:${package}]}"
+    done
+}
+
 refresh_upstreams() {
     local tool xrayTag singBoxTag singBoxVersion acmeTag acmeVersion tmpRoot changed=false
+    local alpineMinor alpineMetadata alpineTag alpineDigest alpineVersion alpineBase apkUpdates package packageVersion
     local xrayVersion xrayAmd64Asset xrayAmd64Sha256 xrayArm64Asset xrayArm64Sha256
     local singBoxAmd64Asset singBoxAmd64Sha256 singBoxArm64Asset singBoxArm64Sha256 acmeUrl acmeSha256
     local singBoxAmd64UpstreamSha256 singBoxArm64UpstreamSha256 statsRelease upstreamRelease
-    local arch asset expectedDigest actualDigest
-    local updateXray=false updateSingBox=false updateAcme=false
-    for tool in gh jq curl sha256sum sort tail awk; do
+    local nginxVersion nginxPackageVersion lockUpdates
+    local arch asset expectedDigest actualDigest current apkLockKey
+    local updateXray=false updateSingBox=false updateAcme=false updateAlpine=false updateApk=false
+    local -a apkPackages=(ca-certificates gcompat libgcc unzip nginx python3 openssl socat bash iproute2 iptables nftables wireguard-tools fail2ban)
+    local -A apkVersions=() apkLockKeys=(
+        [ca-certificates]=PADM_LOCK_CA_CERTIFICATES_VERSION
+        [gcompat]=PADM_LOCK_GCOMPAT_VERSION
+        [libgcc]=PADM_LOCK_LIBGCC_VERSION
+        [unzip]=PADM_LOCK_UNZIP_VERSION
+        [nginx]=PADM_LOCK_NGINX_PACKAGE_VERSION
+        [python3]=PADM_LOCK_PYTHON3_VERSION
+        [openssl]=PADM_LOCK_OPENSSL_VERSION
+        [socat]=PADM_LOCK_SOCAT_VERSION
+        [bash]=PADM_LOCK_BASH_VERSION
+        [iproute2]=PADM_LOCK_IPROUTE2_VERSION
+        [iptables]=PADM_LOCK_IPTABLES_VERSION
+        [nftables]=PADM_LOCK_NFTABLES_VERSION
+        [wireguard-tools]=PADM_LOCK_WIREGUARD_TOOLS_VERSION
+        [fail2ban]=PADM_LOCK_FAIL2BAN_VERSION
+    )
+    for tool in gh jq curl sha256sum sort tail awk tar; do
         command -v "${tool}" >/dev/null 2>&1 || die "missing upstream refresh tool: ${tool}"
     done
     validate_lock
@@ -191,11 +322,22 @@ refresh_upstreams() {
     xrayTag=$(latest_release_tag XTLS/Xray-core)
     singBoxTag=$(latest_sing_box_stats_tag)
     acmeTag=$(latest_release_tag acmesh-official/acme.sh)
+    alpineMinor=${PADM_LOCK_ALPINE_VERSION%.*}
+    alpineMetadata=$(alpine_tag_metadata "${alpineMinor}")
+    alpineTag=${alpineMetadata%%$'\t'*}
+    alpineDigest=${alpineMetadata#*$'\t'}
     [[ "${xrayTag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "invalid Xray release tag: ${xrayTag}"
     [[ "${singBoxTag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "invalid sing-box release tag: ${singBoxTag}"
     [[ "${acmeTag}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "invalid acme.sh release tag: ${acmeTag}"
     singBoxVersion=${singBoxTag#v}
     acmeVersion=${acmeTag#v}
+    if [[ "${alpineTag}" == "${PADM_LOCK_ALPINE_VERSION}" ]]; then
+        [[ "${alpineDigest}" == "${PADM_LOCK_ALPINE_BASE#*@}" ]] || updateAlpine=true
+    elif is_newer_semver "${PADM_LOCK_ALPINE_VERSION}" "${alpineTag}"; then
+        updateAlpine=true
+    else
+        die "Alpine latest patch ${alpineTag} is older than lock ${PADM_LOCK_ALPINE_VERSION}"
+    fi
 
     if [[ "${xrayTag#v}" == "${PADM_LOCK_XRAY_VERSION#v}" ]]; then
         :
@@ -218,13 +360,45 @@ refresh_upstreams() {
     else
         die "acme.sh latest release ${acmeTag} is older than lock ${PADM_LOCK_ACME_SH_VERSION}"
     fi
-    if [[ "${updateXray}" == false && "${updateSingBox}" == false && "${updateAcme}" == false ]]; then
+    tmpRoot=$(mktemp -d "${TMPDIR:-/tmp}/padm-upstream-refresh.XXXXXX")
+    trap 'rm -rf -- "${tmpRoot}"' RETURN
+    apkUpdates=$(refresh_alpine_packages "${alpineMinor}" "${tmpRoot}" "${apkPackages[@]}")
+    while IFS=$'\t' read -r package packageVersion; do
+        apkLockKey=${apkLockKeys[${package}]:-}
+        [[ -n "${apkLockKey}" ]] || die "unexpected Alpine package: ${package}"
+        current=${!apkLockKey}
+        apkVersions["${package}"]=${packageVersion}
+        if [[ "${packageVersion}" == "${current}" ]]; then
+            :
+        elif is_newer_semver "${current}" "${packageVersion}"; then
+            updateApk=true
+        else
+            die "Alpine ${package} latest version ${packageVersion} is older than lock ${current}"
+        fi
+    done <<<"${apkUpdates}"
+    nginxPackageVersion=${apkVersions[nginx]}
+    nginxVersion=${nginxPackageVersion%%-r*}
+    is_semver "${nginxVersion}" || die "invalid Alpine nginx version: ${nginxPackageVersion}"
+    if [[ "${updateAlpine}" == true ]]; then
+        changed=true
+        alpineVersion=${alpineTag}
+        alpineBase="alpine:${alpineTag}@${alpineDigest}"
+        printf 'Alpine: %s -> %s\n' "${PADM_LOCK_ALPINE_VERSION}" "${alpineVersion}"
+    else
+        alpineVersion=${PADM_LOCK_ALPINE_VERSION}
+        alpineBase=${PADM_LOCK_ALPINE_BASE}
+    fi
+    if [[ "${updateApk}" == true ]]; then
+        changed=true
+        printf 'Alpine APK: refreshed locked package versions\n'
+    fi
+    if [[ "${updateXray}" == false && "${updateSingBox}" == false && "${updateAcme}" == false &&
+        "${updateAlpine}" == false && "${updateApk}" == false ]]; then
+        rm -rf -- "${tmpRoot}"
+        trap - RETURN
         printf 'upstream-lock-current\n'
         return
     fi
-
-    tmpRoot=$(mktemp -d "${TMPDIR:-/tmp}/padm-upstream-refresh.XXXXXX")
-    trap 'rm -rf -- "${tmpRoot}"' RETURN
     xrayVersion=${PADM_LOCK_XRAY_VERSION}
     xrayAmd64Asset=${PADM_LOCK_XRAY_AMD64_ASSET}
     xrayAmd64Sha256=${PADM_LOCK_XRAY_AMD64_SHA256}
@@ -303,47 +477,30 @@ refresh_upstreams() {
     fi
 
     [[ "${changed}" == true ]] || die 'upstream refresh did not produce an update'
-    awk \
-        -v xrayVersion="${xrayVersion}" \
-        -v xrayAmd64Asset="${xrayAmd64Asset}" -v xrayAmd64Sha256="${xrayAmd64Sha256}" \
-        -v xrayArm64Asset="${xrayArm64Asset}" -v xrayArm64Sha256="${xrayArm64Sha256}" \
-        -v singBoxVersion="${singBoxTag}" \
-        -v singBoxAmd64Asset="${singBoxAmd64Asset}" -v singBoxAmd64Sha256="${singBoxAmd64Sha256}" \
-        -v singBoxArm64Asset="${singBoxArm64Asset}" -v singBoxArm64Sha256="${singBoxArm64Sha256}" \
-        -v singBoxAmd64UpstreamSha256="${singBoxAmd64UpstreamSha256}" \
-        -v singBoxArm64UpstreamSha256="${singBoxArm64UpstreamSha256}" \
-        -v acmeVersion="${acmeVersion}" -v acmeUrl="${acmeUrl}" -v acmeSha256="${acmeSha256}" '
-        BEGIN {
-            value["PADM_LOCK_XRAY_VERSION"] = xrayVersion
-            value["PADM_LOCK_XRAY_AMD64_ASSET"] = xrayAmd64Asset
-            value["PADM_LOCK_XRAY_AMD64_SHA256"] = xrayAmd64Sha256
-            value["PADM_LOCK_XRAY_ARM64_ASSET"] = xrayArm64Asset
-            value["PADM_LOCK_XRAY_ARM64_SHA256"] = xrayArm64Sha256
-            value["PADM_LOCK_SING_BOX_VERSION"] = singBoxVersion
-            value["PADM_LOCK_SING_BOX_AMD64_ASSET"] = singBoxAmd64Asset
-            value["PADM_LOCK_SING_BOX_AMD64_SHA256"] = singBoxAmd64Sha256
-            value["PADM_LOCK_SING_BOX_ARM64_ASSET"] = singBoxArm64Asset
-            value["PADM_LOCK_SING_BOX_ARM64_SHA256"] = singBoxArm64Sha256
-            value["PADM_LOCK_SING_BOX_AMD64_UPSTREAM_SHA256"] = singBoxAmd64UpstreamSha256
-            value["PADM_LOCK_SING_BOX_ARM64_UPSTREAM_SHA256"] = singBoxArm64UpstreamSha256
-            value["PADM_LOCK_ACME_SH_VERSION"] = acmeVersion
-            value["PADM_LOCK_ACME_SH_URL"] = acmeUrl
-            value["PADM_LOCK_ACME_SH_SHA256"] = acmeSha256
-        }
-        {
-            key = $0
-            sub(/=.*/, "", key)
-            if (key in value) {
-                print key "=" value[key]
-                seen[key]++
-                next
-            }
-            print
-        }
-        END {
-            for (key in value) if (seen[key] != 1) exit 1
-        }
-    ' "${LOCK_FILE}" >"${tmpRoot}/versions.lock" || die 'failed to update upstream lock values'
+    lockUpdates=$(printf '%s\n' \
+        "PADM_LOCK_ALPINE_VERSION=${alpineVersion}" \
+        "PADM_LOCK_ALPINE_BASE=${alpineBase}" \
+        "PADM_LOCK_XRAY_VERSION=${xrayVersion}" \
+        "PADM_LOCK_XRAY_AMD64_ASSET=${xrayAmd64Asset}" \
+        "PADM_LOCK_XRAY_AMD64_SHA256=${xrayAmd64Sha256}" \
+        "PADM_LOCK_XRAY_ARM64_ASSET=${xrayArm64Asset}" \
+        "PADM_LOCK_XRAY_ARM64_SHA256=${xrayArm64Sha256}" \
+        "PADM_LOCK_SING_BOX_VERSION=${singBoxTag}" \
+        "PADM_LOCK_SING_BOX_AMD64_ASSET=${singBoxAmd64Asset}" \
+        "PADM_LOCK_SING_BOX_AMD64_SHA256=${singBoxAmd64Sha256}" \
+        "PADM_LOCK_SING_BOX_ARM64_ASSET=${singBoxArm64Asset}" \
+        "PADM_LOCK_SING_BOX_ARM64_SHA256=${singBoxArm64Sha256}" \
+        "PADM_LOCK_SING_BOX_AMD64_UPSTREAM_SHA256=${singBoxAmd64UpstreamSha256}" \
+        "PADM_LOCK_SING_BOX_ARM64_UPSTREAM_SHA256=${singBoxArm64UpstreamSha256}" \
+        "PADM_LOCK_NGINX_VERSION=${nginxVersion}" \
+        "PADM_LOCK_NGINX_PACKAGE_VERSION=${nginxPackageVersion}" \
+        "PADM_LOCK_ACME_SH_VERSION=${acmeVersion}" \
+        "PADM_LOCK_ACME_SH_URL=${acmeUrl}" \
+        "PADM_LOCK_ACME_SH_SHA256=${acmeSha256}")
+    for package in "${apkPackages[@]}"; do
+        lockUpdates+=$'\n'"${apkLockKeys[${package}]}=${apkVersions[${package}]}"
+    done
+    apply_lock_updates "${LOCK_FILE}" "${tmpRoot}/versions.lock" "${lockUpdates}"
     cp -- "${LOCK_FILE}" "${tmpRoot}/versions.lock.original"
     mv -- "${tmpRoot}/versions.lock" "${LOCK_FILE}"
     if ! (validate_lock); then

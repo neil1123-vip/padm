@@ -17,7 +17,7 @@ fail() {
     exit 1
 }
 
-for tool in bash cmp git jq grep sha256sum; do
+for tool in bash cmp git jq grep sha256sum tar; do
     command -v "${tool}" >/dev/null 2>&1 || fail "missing tool: ${tool}"
 done
 
@@ -119,11 +119,130 @@ fi
 
 UPDATER_ROOT=${TEST_ROOT}/updater
 MOCK_BIN=${TEST_ROOT}/mock-bin
-mkdir -p "${UPDATER_ROOT}/docker" "${UPDATER_ROOT}/shell/core" "${MOCK_BIN}"
+APK_FIXTURE_ROOT=${TEST_ROOT}/apk-fixtures
+mkdir -p "${UPDATER_ROOT}/docker" "${UPDATER_ROOT}/shell/core" "${MOCK_BIN}" "${APK_FIXTURE_ROOT}"
 cp "${RELEASE_SCRIPT}" "${UPDATER_ROOT}/docker/release.sh"
 cp "${PROJECT_ROOT}/versions.lock" "${UPDATER_ROOT}/versions.lock"
 cp "${UPDATER_ROOT}/versions.lock" "${UPDATER_ROOT}/versions.lock.original"
 cp "${PROJECT_ROOT}/shell/core/version.sh" "${UPDATER_ROOT}/shell/core/version.sh"
+ALPINE_DIGEST=$(printf 'd%.0s' {1..64})
+ALPINE_NEXT_DIGEST=$(printf 'e%.0s' {1..64})
+cat >"${TEST_ROOT}/alpine-tags.json" <<EOF
+{"results":[{"name":"3.24.2","digest":"sha256:${ALPINE_DIGEST}","images":[{"os":"linux","architecture":"amd64"},{"os":"linux","architecture":"arm64"}]}]}
+EOF
+cat >"${TEST_ROOT}/alpine-tags-next.json" <<EOF
+{"results":[{"name":"3.24.3","digest":"sha256:${ALPINE_NEXT_DIGEST}","images":[{"os":"linux","architecture":"amd64"},{"os":"linux","architecture":"arm64"}]}]}
+EOF
+create_apk_fixture() {
+    local mode=$1 repo=$2 arch=$3 root
+    root=${TEST_ROOT}/apk-build/${mode}-${repo}-${arch}
+    mkdir -p "${root}"
+    if [[ "${mode}" == invalid ]]; then
+        printf 'not an APK index\n' >"${root}/APKINDEX"
+    else
+        case "${mode}:${arch}" in
+        normal:*) cat >"${root}/APKINDEX" <<'EOF'
+P: ca-certificates
+V: 20260612-r0
+
+P: gcompat
+V: 1.1.0-r5
+
+P: libgcc
+V: 15.2.0-r6
+
+P: unzip
+V: 6.0-r17
+
+P: nginx
+V: 1.30.5-r0
+
+P: python3
+V: 3.14.7-r2
+
+P: openssl
+V: 3.5.9-r0
+
+P: socat
+V: 1.8.1.4-r0
+
+P: bash
+V: 5.3.10-r0
+
+P: iproute2
+V: 7.0.1-r0
+
+P: iptables
+V: 1.8.14-r0
+
+P: nftables
+V: 1.1.7-r0
+
+P: wireguard-tools
+V: 1.0.20260224-r0
+
+P: fail2ban
+V: 1.1.0-r4
+EOF
+            ;;
+        mismatch:aarch64) sed 's/20260612-r0/20260613-r0/' \
+                "${TEST_ROOT}/apk-build/normal-main-x86_64/APKINDEX" >"${root}/APKINDEX" ;;
+        mismatch:*) cp "${TEST_ROOT}/apk-build/normal-main-x86_64/APKINDEX" "${root}/APKINDEX" ;;
+        next:*) cat >"${root}/APKINDEX" <<'EOF'
+P: ca-certificates
+V: 20260613-r0
+
+P: gcompat
+V: 1.1.0-r6
+
+P: libgcc
+V: 15.2.0-r7
+
+P: unzip
+V: 6.0-r18
+
+P: nginx
+V: 1.30.6-r0
+
+P: python3
+V: 3.14.7-r3
+
+P: openssl
+V: 3.5.9-r1
+
+P: socat
+V: 1.8.1.5-r0
+
+P: bash
+V: 5.3.11-r0
+
+P: iproute2
+V: 7.0.2-r0
+
+P: iptables
+V: 1.8.15-r0
+
+P: nftables
+V: 1.1.8-r0
+
+P: wireguard-tools
+V: 1.0.20260225-r0
+
+P: fail2ban
+V: 1.1.0-r5
+EOF
+            ;;
+        esac
+    fi
+    tar -czf "${APK_FIXTURE_ROOT}/${mode}-${repo}-${arch}.tar.gz" -C "${root}" APKINDEX
+}
+for mode in normal mismatch next invalid; do
+    for repo in main community; do
+        for arch in x86_64 aarch64; do
+            create_apk_fixture "${mode}" "${repo}" "${arch}"
+        done
+    done
+done
 cat >"${MOCK_BIN}/gh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -174,8 +293,22 @@ while [[ "$#" -gt 0 ]]; do
     *) url=$1; shift ;;
     esac
 done
-[[ -n "${output}" && -n "${url}" ]] || exit 1
+[[ -n "${url}" ]] || exit 1
 case "${url}" in
+https://hub.docker.com/v2/repositories/library/alpine/tags*)
+    [[ "${PADM_TEST_STATS_FAILURE:-}" != alpine-api ]] || exit 22
+    cat "${PADM_TEST_ALPINE_TAGS}"
+    ;;
+*dl-cdn.alpinelinux.org/alpine/*/APKINDEX.tar.gz)
+    [[ "${PADM_TEST_STATS_FAILURE:-}" != apk-download ]] || exit 22
+    [[ -n "${output}" ]] || exit 1
+    mode=${PADM_TEST_APK_MODE:-normal}
+    [[ "${PADM_TEST_STATS_FAILURE:-}" != apk-parse ]] || mode=invalid
+    [[ "${PADM_TEST_STATS_FAILURE:-}" != arch-mismatch ]] || mode=mismatch
+    repo=$(case "${url}" in */main/*) printf main ;; *) printf community ;; esac)
+    arch=$(case "${url}" in */x86_64/*) printf x86_64 ;; *) printf aarch64 ;; esac)
+    cp "${PADM_TEST_APK_FIXTURES}/${mode}-${repo}-${arch}.tar.gz" "${output}"
+    ;;
 *Xray-linux-64.zip) printf '%s' xray-amd64 >"${output}" ;;
 *Xray-linux-arm64-v8a.zip) printf '%s' xray-arm64 >"${output}" ;;
 https://github.com/neil1123-vip/padm/releases/download/sing-box-v9.8.7/sing-box-9.8.7-linux-amd64.tar.gz)
@@ -189,7 +322,9 @@ https://github.com/neil1123-vip/padm/releases/download/sing-box-v9.8.7/sing-box-
 esac
 EOF
 chmod +x "${MOCK_BIN}/gh" "${MOCK_BIN}/curl"
-PATH="${MOCK_BIN}:${PATH}" bash "${UPDATER_ROOT}/docker/release.sh" refresh-upstreams >/dev/null ||
+PATH="${MOCK_BIN}:${PATH}" PADM_TEST_ALPINE_TAGS="${TEST_ROOT}/alpine-tags.json" \
+    PADM_TEST_APK_FIXTURES="${APK_FIXTURE_ROOT}" PADM_TEST_APK_MODE=normal \
+    bash "${UPDATER_ROOT}/docker/release.sh" refresh-upstreams >/dev/null ||
     fail 'upstream lock refresh failed'
 (
     set -a
@@ -208,17 +343,81 @@ PATH="${MOCK_BIN}:${PATH}" bash "${UPDATER_ROOT}/docker/release.sh" refresh-upst
     [[ "${PADM_LOCK_SING_BOX_ARM64_UPSTREAM_SHA256}" == "$(printf '%s' upstream-arm64 | sha256sum | awk '{print $1}')" ]]
     [[ "${PADM_LOCK_ACME_SH_VERSION}" == 8.7.6 ]]
     [[ "${PADM_LOCK_ACME_SH_URL}" == */refs/tags/v8.7.6 ]]
+    [[ "${PADM_LOCK_ALPINE_VERSION}" == 3.24.2 ]]
+    [[ "${PADM_LOCK_ALPINE_BASE}" == "alpine:3.24.2@sha256:${ALPINE_DIGEST}" ]]
+    [[ "${PADM_LOCK_NGINX_VERSION}" == 1.30.5 ]]
+    [[ "${PADM_LOCK_NGINX_PACKAGE_VERSION}" == 1.30.5-r0 ]]
+    for expected in \
+        PADM_LOCK_CA_CERTIFICATES_VERSION=20260612-r0 \
+        PADM_LOCK_GCOMPAT_VERSION=1.1.0-r5 \
+        PADM_LOCK_LIBGCC_VERSION=15.2.0-r6 \
+        PADM_LOCK_UNZIP_VERSION=6.0-r17 \
+        PADM_LOCK_PYTHON3_VERSION=3.14.7-r2 \
+        PADM_LOCK_OPENSSL_VERSION=3.5.9-r0 \
+        PADM_LOCK_SOCAT_VERSION=1.8.1.4-r0 \
+        PADM_LOCK_BASH_VERSION=5.3.10-r0 \
+        PADM_LOCK_IPROUTE2_VERSION=7.0.1-r0 \
+        PADM_LOCK_IPTABLES_VERSION=1.8.14-r0 \
+        PADM_LOCK_NFTABLES_VERSION=1.1.7-r0 \
+        PADM_LOCK_WIREGUARD_TOOLS_VERSION=1.0.20260224-r0 \
+        PADM_LOCK_FAIL2BAN_VERSION=1.1.0-r4; do
+        key=${expected%%=*}
+        [[ "${!key}" == "${expected#*=}" ]]
+    done
 ) || fail 'upstream lock refresh produced wrong values'
 cp "${UPDATER_ROOT}/versions.lock" "${UPDATER_ROOT}/versions.lock.once"
-PATH="${MOCK_BIN}:${PATH}" bash "${UPDATER_ROOT}/docker/release.sh" refresh-upstreams >/dev/null ||
+PATH="${MOCK_BIN}:${PATH}" PADM_TEST_ALPINE_TAGS="${TEST_ROOT}/alpine-tags.json" \
+    PADM_TEST_APK_FIXTURES="${APK_FIXTURE_ROOT}" PADM_TEST_APK_MODE=normal \
+    bash "${UPDATER_ROOT}/docker/release.sh" refresh-upstreams >/dev/null ||
     fail 'idempotent upstream lock refresh failed'
 cmp -s "${UPDATER_ROOT}/versions.lock.once" "${UPDATER_ROOT}/versions.lock" ||
     fail 'current upstream lock was rewritten'
 
+grep -E '^PADM_LOCK_(XRAY|SING_BOX|ACME_SH)_' "${UPDATER_ROOT}/versions.lock" \
+    >"${TEST_ROOT}/core-lock.before"
+PATH="${MOCK_BIN}:${PATH}" PADM_TEST_ALPINE_TAGS="${TEST_ROOT}/alpine-tags-next.json" \
+    PADM_TEST_APK_FIXTURES="${APK_FIXTURE_ROOT}" PADM_TEST_APK_MODE=next \
+    bash "${UPDATER_ROOT}/docker/release.sh" refresh-upstreams >/dev/null ||
+    fail 'Alpine/APK-only upstream refresh failed'
+grep -E '^PADM_LOCK_(XRAY|SING_BOX|ACME_SH)_' "${UPDATER_ROOT}/versions.lock" \
+    >"${TEST_ROOT}/core-lock.after"
+cmp -s "${TEST_ROOT}/core-lock.before" "${TEST_ROOT}/core-lock.after" ||
+    fail 'Alpine/APK-only refresh changed core locks'
+(
+    set -a
+    # shellcheck disable=SC1091
+    . "${UPDATER_ROOT}/versions.lock"
+    set +a
+    [[ "${PADM_LOCK_ALPINE_VERSION}" == 3.24.3 ]]
+    [[ "${PADM_LOCK_ALPINE_BASE}" == "alpine:3.24.3@sha256:${ALPINE_NEXT_DIGEST}" ]]
+    [[ "${PADM_LOCK_NGINX_VERSION}" == 1.30.6 ]]
+    [[ "${PADM_LOCK_NGINX_PACKAGE_VERSION}" == 1.30.6-r0 ]]
+    for expected in \
+        PADM_LOCK_CA_CERTIFICATES_VERSION=20260613-r0 \
+        PADM_LOCK_GCOMPAT_VERSION=1.1.0-r6 \
+        PADM_LOCK_LIBGCC_VERSION=15.2.0-r7 \
+        PADM_LOCK_UNZIP_VERSION=6.0-r18 \
+        PADM_LOCK_PYTHON3_VERSION=3.14.7-r3 \
+        PADM_LOCK_OPENSSL_VERSION=3.5.9-r1 \
+        PADM_LOCK_SOCAT_VERSION=1.8.1.5-r0 \
+        PADM_LOCK_BASH_VERSION=5.3.11-r0 \
+        PADM_LOCK_IPROUTE2_VERSION=7.0.2-r0 \
+        PADM_LOCK_IPTABLES_VERSION=1.8.15-r0 \
+        PADM_LOCK_NFTABLES_VERSION=1.1.8-r0 \
+        PADM_LOCK_WIREGUARD_TOOLS_VERSION=1.0.20260225-r0 \
+        PADM_LOCK_FAIL2BAN_VERSION=1.1.0-r5; do
+        key=${expected%%=*}
+        [[ "${!key}" == "${expected#*=}" ]]
+    done
+) || fail 'Alpine/APK-only refresh produced wrong values'
+
 # 发布不完整或下载失败时，任何核心的锁值都必须保持原样。
-for failure in no-stable missing-asset missing-digest duplicate-asset download checksum; do
+for failure in no-stable missing-asset missing-digest duplicate-asset download checksum \
+    alpine-api apk-download apk-parse arch-mismatch; do
     cp "${UPDATER_ROOT}/versions.lock.original" "${UPDATER_ROOT}/versions.lock"
-    if PATH="${MOCK_BIN}:${PATH}" PADM_TEST_STATS_FAILURE="${failure}" \
+    if PATH="${MOCK_BIN}:${PATH}" PADM_TEST_ALPINE_TAGS="${TEST_ROOT}/alpine-tags.json" \
+        PADM_TEST_APK_FIXTURES="${APK_FIXTURE_ROOT}" PADM_TEST_APK_MODE=normal \
+        PADM_TEST_STATS_FAILURE="${failure}" \
         bash "${UPDATER_ROOT}/docker/release.sh" refresh-upstreams >"${TEST_ROOT}/refresh-failure.log" 2>&1; then
         fail "upstream refresh accepted ${failure}"
     fi
