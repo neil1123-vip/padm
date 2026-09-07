@@ -89,7 +89,7 @@ jq -n --arg cert "${tmp_dir}/cert.pem" --arg key "${tmp_dir}/key.pem" '{
         {inbound: ["socks-hy2"], action: "route", outbound: "hy2-client"},
         {inbound: ["socks-tuic"], action: "route", outbound: "tuic-client"}
     ]},
-    inbounds: ([
+    inbounds: (([
         {type: "hysteria2", tag: "hy2", listen: "127.0.0.1", listen_port: 35401,
          users: [{name: "padm-hy2", password: "padm-build-smoke"}]},
         {type: "tuic", tag: "tuic", listen: "127.0.0.1", listen_port: 35402,
@@ -97,7 +97,7 @@ jq -n --arg cert "${tmp_dir}/cert.pem" --arg key "${tmp_dir}/key.pem" '{
     ] | map(. + {tls: {enabled: true, server_name: "localhost", alpn: ["h3"], certificate_path: $cert, key_path: $key}})) + [
         {type: "socks", tag: "socks-hy2", listen: "127.0.0.1", listen_port: 35403},
         {type: "socks", tag: "socks-tuic", listen: "127.0.0.1", listen_port: 35404}
-    ],
+    ]),
     outbounds: [
         {type: "direct", tag: "direct"},
         {type: "naive", tag: "cronet-smoke", server: "127.0.0.1", server_port: 9,
