@@ -19,6 +19,10 @@ on:
         description: Push and sign release images
         required: true
         type: boolean
+      contracts_only:
+        description: Validate contracts without building or publishing images
+        default: false
+        type: boolean
     outputs:
       artifact_name:
         description: Release assets artifact produced after image publication
@@ -59,10 +63,12 @@ jobs:
           bash docker/tests/traffic.sh
 
       - name: Install Cosign
+        if: ${{ !inputs.contracts_only }}
         uses: sigstore/cosign-installer@v4.1.2
 
       - name: Resolve changed image inputs
         id: plan
+        if: ${{ !inputs.contracts_only }}
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -105,6 +111,7 @@ jobs:
   smoke:
     name: Smoke ${{ matrix.image.name }} (${{ matrix.platform.name }})
     needs: contract
+    if: ${{ !inputs.contracts_only }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
@@ -211,7 +218,7 @@ jobs:
 
   publish:
     name: Publish ${{ matrix.image.name }}
-    if: ${{ inputs.push == true }}
+    if: ${{ inputs.push && !inputs.contracts_only }}
     needs: [contract, smoke]
     runs-on: ubuntu-latest
     strategy:
@@ -329,7 +336,7 @@ jobs:
 
   assemble:
     name: Assemble release assets
-    if: ${{ inputs.push == true }}
+    if: ${{ inputs.push && !inputs.contracts_only }}
     needs: publish
     runs-on: ubuntu-latest
     permissions:

@@ -312,6 +312,19 @@ grep -Fq 'uses: ./.github/workflows/build-images.yml' "${RELEASE_WORKFLOW}" ||
     fail 'Release workflow does not call reusable image workflow'
 grep -Fq 'needs: [prepare, images]' "${RELEASE_WORKFLOW}" || fail 'Release workflow lacks image gate'
 grep -Fq 'concurrency:' "${RELEASE_WORKFLOW}" || fail 'Release workflow lacks concurrency'
+# 测试和发布流程修复必须进入检查，是否发布由相对已发布版本的运行差异决定。
+grep -Fq "      - '.github/workflows/**'" "${RELEASE_WORKFLOW}" ||
+    fail 'main workflow does not receive workflow changes'
+grep -Fq "      - 'docker/**'" "${RELEASE_WORKFLOW}" ||
+    fail 'main workflow does not receive Docker changes'
+if grep -Eq "^      - '!(docker/tests/\*\*|docker/release[.]sh)'$" "${RELEASE_WORKFLOW}"; then
+    fail 'main workflow filters out Docker tests or release fixes'
+fi
+grep -Fq 'contracts_only:' "${RELEASE_WORKFLOW}" || fail 'main workflow lacks contracts-only validation'
+grep -Fq "if: \${{ !inputs.contracts_only }}" "${BUILD_WORKFLOW}" ||
+    fail 'contracts-only validation does not gate image work'
+grep -Fq -- "-F force_release=\"\${FORCE_RELEASE}\"" "${RELEASE_WORKFLOW}" ||
+    fail 'automatic workflow handoff loses release intent'
 grep -Fq 'is_release_commit' "${RELEASE_WORKFLOW}" || fail 'Release workflow lacks release commit guard'
 grep -Fq 'docker/release.sh set-version' "${RELEASE_WORKFLOW}" || fail 'lock/version bump is not unified'
 grep -Fq "cron: '17 3 * * 1'" "${UPSTREAM_WORKFLOW}" || fail 'upstream refresh is not scheduled weekly'

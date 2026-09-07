@@ -2,10 +2,16 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      force_release:
+        description: Publish even without pending runtime changes
+        type: boolean
+        default: true
   push:
     branches:
       - main
     paths:
+      - '.github/workflows/**'
       - 'install.sh'
       - 'install-docker.sh'
       - 'shell/**'
@@ -14,8 +20,6 @@ on:
       - '!shell/validate_install.sh'
       - '!shell/build-sing-box.sh'
       - 'docker/**'
-      - '!docker/tests/**'
-      - '!docker/release.sh'
       - 'docker-bake.hcl'
       - 'versions.lock'
       - 'assets/**'
@@ -38,6 +42,7 @@ jobs:
     outputs:
       release_version: ${{ steps.resolve.outputs.release_version }}
       release_sha: ${{ steps.target.outputs.release_sha }}
+      deferred: ${{ steps.revision.outputs.deferred }}
       skip: ${{ steps.revision.outputs.deferred == 'true' || steps.scope.outputs.changed != 'true' || steps.existing.outputs.result == 'true' }}
     steps:
       - name: Checkout repo
@@ -53,13 +58,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WORKFLOW_SHA: ${{ github.workflow_sha }}
+          FORCE_RELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.force_release }}
         run: |
           set -euo pipefail
           if git diff --quiet "${WORKFLOW_SHA}" HEAD -- \
             .github/workflows/create_release.yml .github/workflows/build-images.yml; then
             echo 'deferred=false' >>"${GITHUB_OUTPUT}"
           else
-            gh workflow run create_release.yml --repo "${GITHUB_REPOSITORY}" --ref main
+            gh workflow run create_release.yml --repo "${GITHUB_REPOSITORY}" --ref main \
+              -F force_release="${FORCE_RELEASE}"
             echo 'deferred=true' >>"${GITHUB_OUTPUT}"
             echo 'Release handed to the latest workflow revision.' >>"${GITHUB_STEP_SUMMARY}"
           fi
@@ -103,7 +110,7 @@ jobs:
         if: steps.revision.outputs.deferred != 'true'
         shell: bash
         env:
-          RELEASE_EVENT: ${{ github.event_name }}
+          FORCE_RELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.force_release }}
           LATEST_TAG: ${{ steps.latest.outputs.result }}
         run: |
           set -euo pipefail
@@ -112,7 +119,7 @@ jobs:
           if [[ -n "${latest_tag}" ]]; then
             git merge-base --is-ancestor "${latest_tag}" HEAD
           fi
-          if [[ "${RELEASE_EVENT}" != workflow_dispatch && -n "${latest_tag}" ]] &&
+          if [[ "${FORCE_RELEASE}" != true && -n "${latest_tag}" ]] &&
             git diff --quiet "${latest_tag}" HEAD -- install.sh install-docker.sh shell docker \
               docker-bake.hcl versions.lock assets \
               ':(exclude)shell/regression/**' ':(exclude)shell/subscription_groups_regression.sh' \
@@ -195,6 +202,7 @@ jobs:
         env:
           RELEASE_VERSION: ${{ steps.resolve.outputs.release_version }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE_RELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.force_release }}
         run: |
           set -euo pipefail
           base_sha=$(git rev-parse HEAD)
@@ -208,7 +216,8 @@ jobs:
             git fetch origin main
             if [[ "$(git rev-parse origin/main)" != "${base_sha}" ]]; then
               # 文档等被过滤的推送也可能造成竞争，重新调度后必须重新解析版本。
-              gh workflow run create_release.yml --repo "${GITHUB_REPOSITORY}" --ref main
+              gh workflow run create_release.yml --repo "${GITHUB_REPOSITORY}" --ref main \
+                -F force_release="${FORCE_RELEASE}"
               echo '::notice::Main advanced; a new release run will resolve the latest source.'
             fi
             exit 1
@@ -228,19 +237,20 @@ jobs:
           echo "release_sha=${release_sha}" >>"${GITHUB_OUTPUT}"
 
   images:
-    name: Build and sign images
+    name: Validate or publish images
     needs: prepare
-    if: ${{ needs.prepare.outputs.skip != 'true' }}
+    if: ${{ needs.prepare.outputs.deferred == 'false' }}
     uses: ./.github/workflows/build-images.yml
     permissions:
       contents: read
       packages: write
       id-token: write
     with:
-      version: ${{ needs.prepare.outputs.release_version }}
+      version: ${{ needs.prepare.outputs.release_version || 'dev' }}
       source_ref: ${{ needs.prepare.outputs.release_sha }}
       registry: ghcr.io/neil1123-vip
-      push: true
+      push: ${{ needs.prepare.outputs.skip != 'true' }}
+      contracts_only: ${{ needs.prepare.outputs.skip == 'true' }}
     secrets: inherit
 
   release:

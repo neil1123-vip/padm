@@ -171,7 +171,7 @@ Fail2ban、WireGuard、端口跳跃和 TUN/TProxy 的业务工具放在 `net` �
 
 `versions.lock` 固定每个镜像的 base index digest、上游版本、源码/归档 SHA-256、系统包快照和补丁摘要；Dockerfile 不执行无锁的 `latest`、在线脚本安装或构建时下载运行时配置。Buildx 为 `amd64/arm64` 生成同一 tag 的多架构 index，输出 digest、SBOM 和 provenance；“可复现”定义为输入锁定、构建步骤固定、产物 digest 可验证，不虚假承诺不同时间必然得到相同 digest。
 
-Release 工作流仅对运行内容变化自动执行，串行处理最新 `main`，先解析并提交版本 bump，再校验镜像和生成已签名 manifest。变化镜像按架构各构建一次，精确摘要通过 smoke 后才合并签名；未变化镜像复用可信旧 manifest 的引用。三个客户端附件上传并核对摘要后才公开 Release 草稿，不完整发布不会成为 latest。`GITHUB_TOKEN` 提交不会额外触发普通 push 工作流，失败可手动重跑 Release。
+Release 工作流对运行内容、Docker 测试、发布脚本和 CI 变化自动执行，串行处理最新 `main`；没有待发布运行变化时只跑 Docker 契约测试，否则先解析并提交版本 bump，再校验镜像和生成已签名 manifest。变化镜像按架构各构建一次，精确摘要通过 smoke 后才合并签名；未变化镜像复用可信旧 manifest 的引用。三个客户端附件上传并核对摘要后才公开 Release 草稿，不完整发布不会成为 latest。`GITHUB_TOKEN` 提交不会额外触发普通 push 工作流，失败后可推送测试或 CI 修复以续发，也可手动运行 Release。
 
 ### 发布信任与 manifest
 
