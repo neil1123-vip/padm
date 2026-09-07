@@ -29,9 +29,6 @@ RUN set -eux; \
 FROM ${ALPINE_BASE}
 
 ARG TARGETARCH
-ARG PADM_VERSION
-ARG SOURCE_URL
-ARG VCS_REF
 ARG XRAY_VERSION
 ARG CA_CERTIFICATES_VERSION
 
@@ -45,6 +42,9 @@ RUN set -eux; \
 COPY --from=fetch --chown=10001:10001 --chmod=0755 /out/xray /usr/local/bin/xray
 COPY --from=fetch --chown=10001:10001 --chmod=0644 /out/geoip.dat /out/geosite.dat /usr/local/share/xray/
 
+ARG PADM_VERSION
+ARG SOURCE_URL
+ARG VCS_REF
 LABEL org.opencontainers.image.source="${SOURCE_URL}" \
       org.opencontainers.image.version="${PADM_VERSION}" \
       org.opencontainers.image.revision="${VCS_REF}" \

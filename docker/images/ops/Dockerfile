@@ -4,9 +4,6 @@ ARG ALPINE_BASE
 FROM ${ALPINE_BASE}
 
 ARG TARGETARCH
-ARG PADM_VERSION
-ARG SOURCE_URL
-ARG VCS_REF
 ARG ACME_SH_VERSION
 ARG ACME_SH_URL
 ARG ACME_SH_SHA256
@@ -36,6 +33,9 @@ RUN set -eux; \
 COPY --chown=10001:10001 --chmod=0755 entrypoint.sh /usr/local/bin/padm-entrypoint
 COPY --chown=10001:10001 --chmod=0755 control_server.py /opt/padm/subscription/control_server.py
 
+ARG PADM_VERSION
+ARG SOURCE_URL
+ARG VCS_REF
 LABEL org.opencontainers.image.source="${SOURCE_URL}" \
       org.opencontainers.image.version="${PADM_VERSION}" \
       org.opencontainers.image.revision="${VCS_REF}" \

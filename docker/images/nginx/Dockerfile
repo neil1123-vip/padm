@@ -4,9 +4,6 @@ ARG ALPINE_BASE
 FROM ${ALPINE_BASE}
 
 ARG TARGETARCH
-ARG PADM_VERSION
-ARG SOURCE_URL
-ARG VCS_REF
 ARG NGINX_VERSION
 ARG NGINX_PACKAGE_VERSION
 ARG CA_CERTIFICATES_VERSION
@@ -23,6 +20,9 @@ RUN set -eux; \
 COPY --chown=10001:10001 --chmod=0644 nginx.conf /etc/nginx/nginx.conf
 COPY --chown=10001:10001 --chmod=0644 default.conf /etc/nginx/http.d/default.conf
 
+ARG PADM_VERSION
+ARG SOURCE_URL
+ARG VCS_REF
 LABEL org.opencontainers.image.source="${SOURCE_URL}" \
       org.opencontainers.image.version="${PADM_VERSION}" \
       org.opencontainers.image.revision="${VCS_REF}" \

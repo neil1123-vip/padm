@@ -4,9 +4,6 @@ ARG ALPINE_BASE
 FROM ${ALPINE_BASE}
 
 ARG TARGETARCH
-ARG PADM_VERSION
-ARG SOURCE_URL
-ARG VCS_REF
 ARG BASH_VERSION
 ARG CA_CERTIFICATES_VERSION
 ARG FAIL2BAN_VERSION
@@ -28,6 +25,9 @@ RUN set -eux; \
 
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/padm-entrypoint
 
+ARG PADM_VERSION
+ARG SOURCE_URL
+ARG VCS_REF
 LABEL org.opencontainers.image.source="${SOURCE_URL}" \
       org.opencontainers.image.version="${PADM_VERSION}" \
       org.opencontainers.image.revision="${VCS_REF}" \

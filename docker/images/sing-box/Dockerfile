@@ -28,9 +28,6 @@ RUN set -eux; \
 FROM ${ALPINE_BASE}
 
 ARG TARGETARCH
-ARG PADM_VERSION
-ARG SOURCE_URL
-ARG VCS_REF
 ARG SING_BOX_VERSION
 ARG CA_CERTIFICATES_VERSION
 ARG GCOMPAT_VERSION
@@ -48,6 +45,9 @@ COPY --from=fetch --chown=10001:10001 --chmod=0755 /out/sing-box /usr/local/bin/
 COPY --from=fetch --chown=10001:10001 --chmod=0644 /out/libcronet.so /usr/local/lib/libcronet.so
 COPY --from=fetch --chmod=0644 /out/LICENSE /out/BUILD_INFO.json /usr/share/doc/sing-box/
 
+ARG PADM_VERSION
+ARG SOURCE_URL
+ARG VCS_REF
 LABEL org.opencontainers.image.source="${SOURCE_URL}" \
       org.opencontainers.image.version="${PADM_VERSION}" \
       org.opencontainers.image.revision="${VCS_REF}" \
