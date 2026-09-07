@@ -5,6 +5,20 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'install.sh'
+      - 'install-docker.sh'
+      - 'shell/**'
+      - '!shell/regression/**'
+      - '!shell/subscription_groups_regression.sh'
+      - '!shell/validate_install.sh'
+      - '!shell/build-sing-box.sh'
+      - 'docker/**'
+      - '!docker/tests/**'
+      - '!docker/release.sh'
+      - 'docker-bake.hcl'
+      - 'versions.lock'
+      - 'assets/**'
 
 permissions:
   contents: read
@@ -16,22 +30,43 @@ concurrency:
 jobs:
   prepare:
     name: Resolve release
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
     outputs:
       release_version: ${{ steps.resolve.outputs.release_version }}
       release_sha: ${{ steps.target.outputs.release_sha }}
-      skip: ${{ steps.existing.outputs.result }}
+      skip: ${{ steps.revision.outputs.deferred == 'true' || steps.scope.outputs.changed != 'true' || steps.existing.outputs.result == 'true' }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v7
         with:
+          ref: main
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Use latest workflow revision
+        id: revision
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet "${WORKFLOW_SHA}" HEAD -- \
+            .github/workflows/create_release.yml .github/workflows/build-images.yml; then
+            echo 'deferred=false' >>"${GITHUB_OUTPUT}"
+          else
+            gh workflow run create_release.yml --repo "${GITHUB_REPOSITORY}" --ref main
+            echo 'deferred=true' >>"${GITHUB_OUTPUT}"
+            echo 'Release handed to the latest workflow revision.' >>"${GITHUB_STEP_SUMMARY}"
+          fi
+
       - name: Read script version and lock
         id: version
+        if: steps.revision.outputs.deferred != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -45,15 +80,61 @@ jobs:
           echo "current_version=${current_version}" >>"${GITHUB_OUTPUT}"
           echo "is_release_commit=${is_release_commit}" >>"${GITHUB_OUTPUT}"
 
+      - name: Read latest published version
+        id: latest
+        if: steps.revision.outputs.deferred != 'true'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const release = await github.rest.repos.getLatestRelease(context.repo)
+              .then(({ data }) => data).catch(error => {
+                if (error.status === 404) return null;
+                throw error;
+              });
+            if (!release) return '';
+            if (release.draft || release.prerelease || !/^v\d+\.\d+\.\d+$/.test(release.tag_name)) {
+              throw new Error('Latest release is not a stable padm version');
+            }
+            return release.tag_name;
+          result-encoding: string
+
+      - name: Check unreleased runtime changes
+        id: scope
+        if: steps.revision.outputs.deferred != 'true'
+        shell: bash
+        env:
+          RELEASE_EVENT: ${{ github.event_name }}
+          LATEST_TAG: ${{ steps.latest.outputs.result }}
+        run: |
+          set -euo pipefail
+          latest_tag=${LATEST_TAG}
+          changed=true
+          if [[ -n "${latest_tag}" ]]; then
+            git merge-base --is-ancestor "${latest_tag}" HEAD
+          fi
+          if [[ "${RELEASE_EVENT}" != workflow_dispatch && -n "${latest_tag}" ]] &&
+            git diff --quiet "${latest_tag}" HEAD -- install.sh install-docker.sh shell docker \
+              docker-bake.hcl versions.lock assets \
+              ':(exclude)shell/regression/**' ':(exclude)shell/subscription_groups_regression.sh' \
+              ':(exclude)shell/validate_install.sh' ':(exclude)shell/build-sing-box.sh' \
+              ':(exclude)docker/tests/**' ':(exclude)docker/release.sh'; then
+            changed=false
+          fi
+          echo "latest_tag=${latest_tag}" >>"${GITHUB_OUTPUT}"
+          echo "changed=${changed}" >>"${GITHUB_OUTPUT}"
+          [[ "${changed}" == true ]] || echo 'No unreleased runtime changes.' >>"${GITHUB_STEP_SUMMARY}"
+
       - name: Resolve release version
         id: resolve
+        if: steps.scope.outputs.changed == 'true'
         shell: bash
         env:
           CURRENT_VERSION: ${{ steps.version.outputs.current_version }}
           IS_RELEASE_COMMIT: ${{ steps.version.outputs.is_release_commit }}
+          LATEST_TAG: ${{ steps.scope.outputs.latest_tag }}
         run: |
           set -euo pipefail
-          latest_tag=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1)
+          latest_tag=${LATEST_TAG}
           if [[ -z "${latest_tag}" ]]; then
             latest_tag="v${CURRENT_VERSION}"
           fi
@@ -66,6 +147,8 @@ jobs:
             else
               commits=$(git log --format=%B)
             fi
+            # 运行内容变化至少递增补丁版本，避免非约定格式的提交被遗漏。
+            commits+=$'\nfix: release runtime changes'
             release_version=$(source shell/core/version.sh; nextScriptVersionFromCommits "${latest_tag}" "${commits}")
             needs_bump=true
             [[ "${release_version}" == "${CURRENT_VERSION}" ]] && needs_bump=false
@@ -79,6 +162,7 @@ jobs:
 
       - name: Check complete release assets
         id: existing
+        if: steps.scope.outputs.changed == 'true'
         uses: actions/github-script@v9
         env:
           RELEASE_TAG: v${{ steps.resolve.outputs.release_version }}
@@ -97,7 +181,9 @@ jobs:
               'release-manifest.sigstore.json',
               'padm-docker-bundle.tar.gz'
             ];
-            return release && required.every(name => release.assets.some(asset => asset.name === name))
+            return release && !release.draft && !release.prerelease && required.every(name =>
+              release.assets.filter(asset => asset.name === name && asset.size > 0 &&
+                /^sha256:[0-9a-f]{64}$/.test(asset.digest || '')).length === 1)
               ? 'true'
               : 'false';
           result-encoding: string
@@ -108,15 +194,25 @@ jobs:
         shell: bash
         env:
           RELEASE_VERSION: ${{ steps.resolve.outputs.release_version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          base_sha=$(git rev-parse HEAD)
           bash docker/release.sh set-version "${RELEASE_VERSION}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add shell/core/version.sh versions.lock
           git commit -m "chore(release): v${RELEASE_VERSION}"
           release_sha=$(git rev-parse HEAD)
-          git push origin HEAD:main
+          if ! git push origin HEAD:main; then
+            git fetch origin main
+            if [[ "$(git rev-parse origin/main)" != "${base_sha}" ]]; then
+              # 文档等被过滤的推送也可能造成竞争，重新调度后必须重新解析版本。
+              gh workflow run create_release.yml --repo "${GITHUB_REPOSITORY}" --ref main
+              echo '::notice::Main advanced; a new release run will resolve the latest source.'
+            fi
+            exit 1
+          fi
           echo "release_sha=${release_sha}" >>"${GITHUB_OUTPUT}"
 
       - name: Resolve build commit
@@ -196,13 +292,45 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           RELEASE_VERSION: ${{ needs.prepare.outputs.release_version }}
           RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
         run: |
           set -euo pipefail
           tag="v${RELEASE_VERSION}"
-          if ! gh release view "${tag}" >/dev/null 2>&1; then
-            gh release create "${tag}" --target "${RELEASE_SHA}" --title "${tag}" \
-              --notes "Automated Docker release ${tag}"
+          assets=(release-manifest.json release-manifest.sigstore.json padm-docker-bundle.tar.gz)
+          cd release-assets
+          for asset in "${assets[@]}"; do [[ -s "${asset}" ]]; done
+          gh api "repos/${GH_REPO}/releases?per_page=100" --paginate --slurp >"${RUNNER_TEMP}/releases.json"
+          release_id=$(jq -r --arg tag "${tag}" '
+            [.[][] | select(.tag_name == $tag)] |
+            if length > 1 then error("Duplicate release tags") else .[0].id // "" end
+          ' "${RUNNER_TEMP}/releases.json")
+          if [[ -z "${release_id}" ]]; then
+            release_id=$(gh api --method POST "repos/${GH_REPO}/releases" \
+              -f tag_name="${tag}" -f target_commitish="${RELEASE_SHA}" -f name="${tag}" \
+              -F draft=true -F prerelease=false -f make_latest=false \
+              -f body="Automated Docker release ${tag}" --jq .id)
           fi
-          gh release upload "${tag}" release-assets/* --clobber
+          [[ "${release_id}" =~ ^[0-9]+$ ]]
+          gh api "repos/${GH_REPO}/releases/${release_id}" >"${RUNNER_TEMP}/release.json"
+          jq -e --arg tag "${tag}" '.tag_name == $tag and .draft == true' \
+            "${RUNNER_TEMP}/release.json" >/dev/null
+          # 失败草稿可随新源码重试，但不移动已存在且指向其它提交的标签。
+          gh api "repos/${GH_REPO}/git/matching-refs/tags/${tag}" >"${RUNNER_TEMP}/tag-refs.json"
+          jq -e --arg ref "refs/tags/${tag}" --arg commit "${RELEASE_SHA}" '
+            [.[] | select(.ref == $ref)] |
+            length == 0 or (length == 1 and .[0].object.type == "commit" and .[0].object.sha == $commit)
+          ' "${RUNNER_TEMP}/tag-refs.json" >/dev/null
+          gh api --method PATCH "repos/${GH_REPO}/releases/${release_id}" \
+            -f target_commitish="${RELEASE_SHA}" -F draft=true -f make_latest=false --silent
+          gh release upload "${tag}" "${assets[@]}" --clobber
+          gh api "repos/${GH_REPO}/releases/${release_id}" >"${RUNNER_TEMP}/release.json"
+          for asset in "${assets[@]}"; do
+            digest="sha256:$(sha256sum "${asset}" | cut -d ' ' -f 1)"
+            jq -e --arg name "${asset}" --arg digest "${digest}" \
+              '[.assets[] | select(.name == $name and .digest == $digest and .size > 0)] | length == 1' \
+              "${RUNNER_TEMP}/release.json" >/dev/null
+          done
+          gh api --method PATCH "repos/${GH_REPO}/releases/${release_id}" \
+            -F draft=false -F prerelease=false -f make_latest=true --silent

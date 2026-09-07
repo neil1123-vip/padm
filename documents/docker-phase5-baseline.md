@@ -12,14 +12,16 @@
 - `docker/contracts/release-manifest.schema.json` 固定 schema v1，包含源码提交、
   控制 bundle、五个镜像的多架构 index/platform digest、格式版本、主机兼容性
   和迁移列表；未知字段或缺失字段拒绝。
-- `.github/workflows/build-images.yml` 是可复用 workflow：先对五个镜像的
-  `amd64/arm64` 做 `--load` smoke，再在发布模式构建多架构 index，启用 BuildKit
-  SBOM/provenance，Cosign 签名并验证镜像，最后上传 digest/attestation 证据。
+- `.github/workflows/build-images.yml` 仅作为可复用 workflow，按镜像输入变化决定构建或复用。
+  发布时每架构只构建一次，携带 SBOM/provenance 按 digest 推送；精确摘要通过 smoke 后
+  才合并双架构 index 并签名。普通验证使用 `--load`，复用镜像仍做双架构 smoke 和验签。
+  分镜像/架构使用 Actions 构建缓存，复用基线须来自已验签且可追溯的旧 manifest。
 - `.github/workflows/docker-ci.yml` 为 Pull Request 复用同一 workflow，禁止推送。
-- `.github/workflows/create_release.yml` 使用 concurrency 和 release-commit guard，
-  只有镜像 workflow 成功、manifest 签名验证成功后才创建或补齐 Release 资产。
-- Release artifact 包含 `release-manifest.json`、Cosign 签发的 Sigstore bundle v0.3、
-  控制 bundle 和镜像构建证据，不把 manifest 回提交到 `main`；签名直接内嵌在 bundle 中。
+- `.github/workflows/create_release.yml` 只对运行内容变化自动发布，串行处理最新 `main`，
+  跳过已发布的内容；只有镜像 workflow 成功、manifest 验签和资产摘要检查通过后才公开草稿。
+- Release 只附带 `release-manifest.json`、Cosign 签发的 Sigstore bundle v0.3 和控制 bundle，
+  不把 manifest 回提交到 `main`。镜像证明保存在 OCI 仓库，诊断 JSON 在 Actions 保留 7 天。
+- PR 和手动验证共用去重并发组，过时验证取消；上游刷新优先等待已有的同提交 CI，缺失才补发。
 
 ## 本地验证
 

@@ -17,7 +17,7 @@ fail() {
     exit 1
 }
 
-for tool in bash cmp jq grep sha256sum; do
+for tool in bash cmp git jq grep sha256sum; do
     command -v "${tool}" >/dev/null 2>&1 || fail "missing tool: ${tool}"
 done
 
@@ -38,6 +38,83 @@ done
 bash -n "${RELEASE_SCRIPT}" "${PROJECT_ROOT}/docker/tests/image-smoke.sh" || fail 'phase 5 shell syntax is invalid'
 jq empty "${SCHEMA_FILE}" || fail 'release manifest schema is invalid JSON'
 bash "${RELEASE_SCRIPT}" validate-lock | grep -qx 'release-lock-ok' || fail 'release lock validation failed'
+
+INPUT_ROOT=${TEST_ROOT}/image-inputs
+mkdir -p "${INPUT_ROOT}/docker/tests" "${INPUT_ROOT}/.github/workflows" "${INPUT_ROOT}/shell"
+cp "${RELEASE_SCRIPT}" "${INPUT_ROOT}/docker/release.sh"
+cp "${PROJECT_ROOT}/versions.lock" "${PROJECT_ROOT}/docker-bake.hcl" "${INPUT_ROOT}/"
+cp -R "${PROJECT_ROOT}/docker/images" "${INPUT_ROOT}/docker/images"
+cp "${BUILD_WORKFLOW}" "${INPUT_ROOT}/.github/workflows/build-images.yml"
+cp "${PROJECT_ROOT}/docker/tests/image-smoke.sh" "${INPUT_ROOT}/docker/tests/image-smoke.sh"
+git -C "${INPUT_ROOT}" init -q
+git -C "${INPUT_ROOT}" config core.autocrlf false
+git -C "${INPUT_ROOT}" config user.name 'padm phase5'
+git -C "${INPUT_ROOT}" config user.email 'padm-phase5@example.invalid'
+input_commit() {
+    git -C "${INPUT_ROOT}" add --all
+    git -C "${INPUT_ROOT}" -c commit.gpgsign=false -c core.hooksPath=/dev/null commit -qm fixture
+    git -C "${INPUT_ROOT}" rev-parse HEAD
+}
+assert_image_impact() {
+    local base=$1 head=$2 affected=$3 image actual expected
+    for image in xray sing-box nginx ops net; do
+        expected=unchanged
+        [[ "${affected}" != all && "${affected}" != "${image}" ]] || expected=changed
+        if bash "${INPUT_ROOT}/docker/release.sh" image-inputs-unchanged "${base}" "${head}" "${image}"; then
+            actual=unchanged
+        else
+            actual=changed
+        fi
+        [[ "${actual}" == "${expected}" ]] || fail "${affected} input reported ${image} as ${actual}"
+    done
+}
+inputBase=$(input_commit)
+sed 's/^PADM_LOCK_VERSION=.*/PADM_LOCK_VERSION=99.0.0/' "${INPUT_ROOT}/versions.lock" >"${INPUT_ROOT}/lock.next"
+mv "${INPUT_ROOT}/lock.next" "${INPUT_ROOT}/versions.lock"
+printf ':\n' >"${INPUT_ROOT}/shell/control.sh"
+inputHead=$(input_commit)
+assert_image_impact "${inputBase}" "${inputHead}" none
+inputBase=${inputHead}
+printf '\n# 补充运行验证\n' >>"${INPUT_ROOT}/docker/tests/image-smoke.sh"
+inputHead=$(input_commit)
+assert_image_impact "${inputBase}" "${inputHead}" none
+
+# 按实际 Bake 参数覆盖每个镜像的独立依赖，避免把上游升级放大为全量构建。
+for dependency in xray:PADM_LOCK_UNZIP_VERSION sing-box:PADM_LOCK_GCOMPAT_VERSION \
+    nginx:PADM_LOCK_NGINX_PACKAGE_VERSION ops:PADM_LOCK_ACME_SH_SHA256 net:PADM_LOCK_FAIL2BAN_VERSION; do
+    inputBase=${inputHead}
+    inputKey=${dependency#*:}
+    awk -v key="${inputKey}" 'index($0, key "=") == 1 {$0 = key "=changed"} {print}' \
+        "${INPUT_ROOT}/versions.lock" >"${INPUT_ROOT}/lock.next"
+    mv "${INPUT_ROOT}/lock.next" "${INPUT_ROOT}/versions.lock"
+    inputHead=$(input_commit)
+    assert_image_impact "${inputBase}" "${inputHead}" "${dependency%%:*}"
+done
+inputBase=${inputHead}
+printf '\n# 订阅容器变更\n' >>"${INPUT_ROOT}/docker/images/ops/control_server.py"
+inputHead=$(input_commit)
+assert_image_impact "${inputBase}" "${inputHead}" ops
+
+inputBase=${inputHead}
+sed 's/^PADM_LOCK_CA_CERTIFICATES_VERSION=.*/PADM_LOCK_CA_CERTIFICATES_VERSION=changed/' \
+    "${INPUT_ROOT}/versions.lock" >"${INPUT_ROOT}/lock.next"
+mv "${INPUT_ROOT}/lock.next" "${INPUT_ROOT}/versions.lock"
+inputHead=$(input_commit)
+assert_image_impact "${inputBase}" "${inputHead}" all
+inputBase=${inputHead}
+printf '\nPADM_LOCK_FUTURE_DEPENDENCY=1\n' >>"${INPUT_ROOT}/versions.lock"
+inputHead=$(input_commit)
+assert_image_impact "${inputBase}" "${inputHead}" all
+inputBase=${inputHead}
+printf '\n# 构建输入变更\n' >>"${INPUT_ROOT}/.github/workflows/build-images.yml"
+inputHead=$(input_commit)
+assert_image_impact "${inputBase}" "${inputHead}" all
+
+# 无法证明祖先关系时，不能根据相同文件内容认定已有镜像可复用。
+if bash "${INPUT_ROOT}/docker/release.sh" image-inputs-unchanged missing-ref "${inputHead}" xray ||
+    bash "${INPUT_ROOT}/docker/release.sh" image-inputs-unchanged "${inputHead}" "${inputBase}" xray; then
+    fail 'image reuse accepted an unknown or non-ancestor baseline'
+fi
 
 UPDATER_ROOT=${TEST_ROOT}/updater
 MOCK_BIN=${TEST_ROOT}/mock-bin
@@ -157,15 +234,18 @@ for name in xray sing-box nginx ops net; do
         >"${RESULTS_DIR}/${name}.json"
 done
 
-bash "${RELEASE_SCRIPT}" manifest \
-    --version "${CURRENT_VERSION}" \
-    --commit "${COMMIT}" \
-    --created-at 2026-08-18T00:00:00Z \
-    --registry ghcr.io/neil1123-vip \
-    --bundle-url "https://github.com/neil1123-vip/padm/releases/download/v${CURRENT_VERSION}/padm-docker-bundle.tar.gz" \
-    --bundle-sha256 "${IMAGE_DIGEST}" \
-    --results-dir "${RESULTS_DIR}" \
-    --output "${MANIFEST}" || fail 'manifest generation failed'
+generate_manifest() {
+    bash "${RELEASE_SCRIPT}" manifest \
+        --version "${CURRENT_VERSION}" \
+        --commit "${COMMIT}" \
+        --created-at 2026-08-18T00:00:00Z \
+        --registry ghcr.io/neil1123-vip \
+        --bundle-url "https://github.com/neil1123-vip/padm/releases/download/v${CURRENT_VERSION}/padm-docker-bundle.tar.gz" \
+        --bundle-sha256 "${IMAGE_DIGEST}" \
+        --results-dir "${RESULTS_DIR}" \
+        --output "${MANIFEST}"
+}
+generate_manifest || fail 'manifest generation failed'
 bash "${RELEASE_SCRIPT}" validate-manifest "${MANIFEST}" | grep -qx 'release-manifest-ok' ||
     fail 'generated manifest does not validate'
 jq -e --arg version "${CURRENT_VERSION}" '
@@ -174,6 +254,33 @@ jq -e --arg version "${CURRENT_VERSION}" '
   .compatibility.architectures == ["amd64", "arm64"] and
   .migrations == []
 ' "${MANIFEST}" >/dev/null || fail 'generated manifest fields are wrong'
+
+cp "${RESULTS_DIR}/xray.json" "${TEST_ROOT}/xray.original.json"
+reusedReference="ghcr.io/neil1123-vip/padm-xray:0.0.1@sha256:${IMAGE_DIGEST}"
+jq --arg reference "${reusedReference}" '.reference = $reference' \
+    "${TEST_ROOT}/xray.original.json" >"${RESULTS_DIR}/xray.json"
+generate_manifest || fail 'manifest rejected a reused image version'
+jq -e --arg version "${CURRENT_VERSION}" --arg reference "${reusedReference}" \
+    '.release.version == $version and .images.xray.reference == $reference' "${MANIFEST}" >/dev/null ||
+    fail 'manifest changed the reused image reference'
+
+for invalidReference in \
+    "ghcr.io/other/padm-xray:0.0.1@sha256:${IMAGE_DIGEST}" \
+    "ghcr.io/neil1123-vip/padm-sing-box:0.0.1@sha256:${IMAGE_DIGEST}" \
+    "ghcr.io/neil1123-vip/padm-xray:latest@sha256:${IMAGE_DIGEST}" \
+    "ghcr.io/neil1123-vip/padm-xray:0.0.1@sha256:${PLATFORM_DIGEST}"; do
+    jq --arg reference "${invalidReference}" '.reference = $reference' \
+        "${TEST_ROOT}/xray.original.json" >"${RESULTS_DIR}/xray.json"
+    if generate_manifest >"${TEST_ROOT}/manifest-error.log" 2>&1; then
+        fail "manifest accepted an invalid image reference: ${invalidReference}"
+    fi
+done
+cp "${TEST_ROOT}/xray.original.json" "${RESULTS_DIR}/xray.json"
+jq --arg digest "sha256:${PLATFORM_DIGEST}" '.images.xray.index_digest = $digest' \
+    "${MANIFEST}" >"${MANIFEST}.bad"
+if bash "${RELEASE_SCRIPT}" validate-manifest "${MANIFEST}.bad" >/dev/null 2>&1; then
+    fail 'manifest validator accepted an inconsistent image digest'
+fi
 
 jq '.unexpected = true' "${MANIFEST}" >"${MANIFEST}.bad"
 if bash "${RELEASE_SCRIPT}" validate-manifest "${MANIFEST}.bad" >/dev/null 2>&1; then
@@ -184,11 +291,9 @@ grep -Fq 'workflow_call:' "${BUILD_WORKFLOW}" || fail 'build workflow is not reu
 grep -Fq 'docker/setup-qemu-action' "${BUILD_WORKFLOW}" || fail 'build workflow lacks multi-arch emulation'
 grep -Fq 'linux/amd64' "${BUILD_WORKFLOW}" || fail 'build workflow lacks amd64'
 grep -Fq 'linux/arm64' "${BUILD_WORKFLOW}" || fail 'build workflow lacks arm64'
-grep -Fq -- '--provenance=mode=max' "${BUILD_WORKFLOW}" || fail 'provenance attestation is not enabled'
-grep -Fq -- '--sbom=true' "${BUILD_WORKFLOW}" || fail 'SBOM attestation is not enabled'
+grep -Eq '^[[:space:]]+provenance:.*mode=max' "${BUILD_WORKFLOW}" || fail 'provenance attestation is not enabled'
+grep -Eq '^[[:space:]]+sbom:.*inputs[.]push' "${BUILD_WORKFLOW}" || fail 'SBOM attestation is not enabled'
 grep -Fq 'cosign sign' "${BUILD_WORKFLOW}" || fail 'image signing is not enabled'
-grep -Fq 'packages: write' "${BUILD_WORKFLOW}" || fail 'package write permission is missing'
-grep -Fq 'id-token: write' "${BUILD_WORKFLOW}" || fail 'OIDC permission is missing'
 grep -Fq 'packages: write' "${RELEASE_WORKFLOW}" || fail 'Release caller lacks package write permission'
 grep -Fq 'id-token: write' "${RELEASE_WORKFLOW}" || fail 'Release caller lacks OIDC permission'
 grep -Fq 'release-manifest.json' "${BUILD_WORKFLOW}" || fail 'release manifest is not an artifact'

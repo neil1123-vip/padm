@@ -171,7 +171,7 @@ Fail2ban、WireGuard、端口跳跃和 TUN/TProxy 的业务工具放在 `net` �
 
 `versions.lock` 固定每个镜像的 base index digest、上游版本、源码/归档 SHA-256、系统包快照和补丁摘要；Dockerfile 不执行无锁的 `latest`、在线脚本安装或构建时下载运行时配置。Buildx 为 `amd64/arm64` 生成同一 tag 的多架构 index，输出 digest、SBOM 和 provenance；“可复现”定义为输入锁定、构建步骤固定、产物 digest 可验证，不虚假承诺不同时间必然得到相同 digest。
 
-现有 Release 工作流先解析版本，再在本次运行内完成镜像构建、smoke 和签名；所有检查通过后才推送版本 bump commit、镜像和 Release manifest。工作流使用 concurrency 和 release-commit guard，重复运行同一版本只补齐缺失资产，不重复创建 Release；不依赖创建 Release 后触发另一个 `push` 工作流。
+Release 工作流仅对运行内容变化自动执行，串行处理最新 `main`，先解析并提交版本 bump，再校验镜像和生成已签名 manifest。变化镜像按架构各构建一次，精确摘要通过 smoke 后才合并签名；未变化镜像复用可信旧 manifest 的引用。三个客户端附件上传并核对摘要后才公开 Release 草稿，不完整发布不会成为 latest。`GITHUB_TOKEN` 提交不会额外触发普通 push 工作流，失败可手动重跑 Release。
 
 ### 发布信任与 manifest
 
@@ -513,7 +513,7 @@ Release 阶段增加：
 
 审计证据：当前 README 和英文 README 都把 `install.sh` 描述为唯一入口，并详细说明原生依赖、systemd/OpenRC 和 `/etc/padm`；这与 Docker 版独立入口、Linux/Compose v2 限制和双模式互斥不一致。
 
-计划修订：保留原生 `install.sh` 文档，同时新增 `install-docker.sh`、`padm-docker` 命令、Docker 系统要求、5 镜像/host-integrated profile、数据目录、更新/回滚/卸载和支持矩阵。中文/英文入口页保持同一契约，Release 附件列出 bundle manifest、签名、SBOM 和 provenance。
+计划修订：保留原生 `install.sh` 文档，同时新增 `install-docker.sh`、`padm-docker` 命令、Docker 系统要求、5 镜像/host-integrated profile、数据目录、更新/回滚/卸载和支持矩阵。中文/英文入口页保持同一契约，Release 附件仅包含控制 bundle、manifest 和签名；SBOM/provenance 保存在 OCI 仓库，诊断 JSON 在 Actions 保留 7 天。
 
 核验标准：从 README 的两条安装路径分别能落到正确入口；文档不再宣称全仓库只有一个入口；示例端口、版本、架构和权限要求与脚本 contract 自动检查一致。
 

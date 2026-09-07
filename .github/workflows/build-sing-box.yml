@@ -28,10 +28,32 @@ jobs:
       version: ${{ steps.resolve.outputs.version }}
       commit: ${{ steps.resolve.outputs.commit }}
       matrix: ${{ steps.resolve.outputs.matrix }}
-      skip: ${{ steps.resolve.outputs.skip }}
+      skip: ${{ steps.resolve.outputs.skip || 'true' }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Detect sing-box build input changes
+        id: inputs
+        shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          changed=true
+          if [[ "${GITHUB_EVENT_NAME}" == push && "${BEFORE_SHA}" =~ ^[0-9a-f]{40}$ &&
+            "${BEFORE_SHA}" != 0000000000000000000000000000000000000000 ]] &&
+            git cat-file -e "${BEFORE_SHA}:versions.lock"; then
+            if git diff --quiet "${BEFORE_SHA}" HEAD -- .github/workflows/build-sing-box.yml shell/build-sing-box.sh; then
+              build_keys='^PADM_LOCK_SING_BOX_(VERSION|AMD64_UPSTREAM_SHA256|ARM64_UPSTREAM_SHA256)='
+              previous=$(git show "${BEFORE_SHA}:versions.lock" | grep -E "${build_keys}")
+              current=$(grep -E "${build_keys}" versions.lock)
+              [[ "${previous}" != "${current}" ]] || changed=false
+            fi
+          fi
+          printf 'changed=%s\n' "${changed}" >>"${GITHUB_OUTPUT}"
       - name: Read version lock
+        if: steps.inputs.outputs.changed == 'true'
         id: lock
         shell: bash
         run: |
@@ -40,6 +62,7 @@ jobs:
           printf 'version=%s\namd64=%s\narm64=%s\n' "${PADM_LOCK_SING_BOX_VERSION}" \
             "${PADM_LOCK_SING_BOX_AMD64_UPSTREAM_SHA256}" "${PADM_LOCK_SING_BOX_ARM64_UPSTREAM_SHA256}" >>"${GITHUB_OUTPUT}"
       - name: Resolve immutable source and release assets
+        if: steps.inputs.outputs.changed == 'true'
         id: resolve
         uses: actions/github-script@v9
         env:
@@ -53,6 +76,20 @@ jobs:
             if (!/^v\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?$/.test(version)) {
               throw new Error(`Unsupported upstream version: ${version}`);
             }
+            const base = `sing-box-${version.slice(1)}`;
+            const tag = `sing-box-${version}`;
+            const existing = await github.rest.repos.getReleaseByTag({ ...context.repo, tag })
+              .then(({ data }) => data).catch(error => {
+                if (error.status === 404) return null;
+                throw error;
+              });
+            const required = [`${base}-linux-amd64.tar.gz`, `${base}-linux-arm64.tar.gz`, `${base}-source.tar.gz`, 'SHA256SUMS'];
+            const complete = existing && !existing.draft && required.every(name => existing.assets.filter(asset =>
+              asset.name === name && asset.size > 0 && /^sha256:[0-9a-f]{64}$/.test(asset.digest || '')).length === 1);
+            if (existing && !existing.draft && !complete) throw new Error('Published release is incomplete; repair it explicitly');
+            core.setOutput('version', version);
+            core.setOutput('skip', complete ? 'true' : 'false');
+            if (complete) return;
             const upstream = { owner: 'SagerNet', repo: 'sing-box' };
             let { data: { object } } = await github.rest.git.getRef({ ...upstream, ref: `tags/${version}` });
             for (let depth = 0; object.type === 'tag' && depth < 5; depth++) {
@@ -63,7 +100,6 @@ jobs:
             }
             const { data: release } = await github.rest.repos.getReleaseByTag({ ...upstream, tag: version });
             if (release.draft || release.tag_name !== version) throw new Error('Upstream release is unavailable');
-            const base = `sing-box-${version.slice(1)}`;
             const matrix = { include: ['amd64', 'arm64'].map(arch => {
               const assets = release.assets.filter(asset => asset.name === `${base}-linux-${arch}.tar.gz`);
               if (assets.length !== 1 || !/^sha256:[0-9a-f]{64}$/.test(assets[0].digest || '') || assets[0].size <= 0) {
@@ -75,20 +111,8 @@ jobs:
               }
               return { arch, runner: arch === 'amd64' ? 'ubuntu-latest' : 'ubuntu-24.04-arm', sha256 };
             }) };
-            const tag = `sing-box-${version}`;
-            const existing = await github.rest.repos.getReleaseByTag({ ...context.repo, tag })
-              .then(({ data }) => data).catch(error => {
-                if (error.status === 404) return null;
-                throw error;
-              });
-            const required = [`${base}-linux-amd64.tar.gz`, `${base}-linux-arm64.tar.gz`, `${base}-source.tar.gz`, 'SHA256SUMS'];
-            const complete = existing && !existing.draft && required.every(name => existing.assets.some(asset =>
-              asset.name === name && asset.size > 0 && /^sha256:[0-9a-f]{64}$/.test(asset.digest || '')));
-            if (existing && !existing.draft && !complete) throw new Error('Published release is incomplete; repair it explicitly');
-            core.setOutput('version', version);
             core.setOutput('commit', object.sha);
             core.setOutput('matrix', JSON.stringify(matrix));
-            core.setOutput('skip', complete ? 'true' : 'false');
 
   build:
     needs: prepare
@@ -126,6 +150,7 @@ jobs:
           path: .tmp-sing-box-artifacts/*.tar.gz
           include-hidden-files: true
           if-no-files-found: error
+          retention-days: 7
 
   publish:
     needs: [prepare, build]

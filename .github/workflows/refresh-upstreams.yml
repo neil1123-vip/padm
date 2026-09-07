@@ -69,7 +69,7 @@ jobs:
           bash docker/release.sh validate-lock
           bash docker/tests/phase5.sh
 
-      - name: Open update PR and dispatch Docker CI
+      - name: Open update PR and ensure Docker CI
         if: steps.update.outputs.changed == 'true'
         shell: bash
         env:
@@ -87,29 +87,52 @@ jobs:
           git add versions.lock
           git commit -m "${title}"
           git push --set-upstream origin "${branch}"
-          body=$(printf '%s\n\n%s\n%s\n%s\n\n%s\n' \
+          commit_sha=$(git rev-parse HEAD)
+          body_file="${RUNNER_TEMP}/upstream-pr-body.md"
+          printf '%s\n\n%s\n%s\n%s\n\n%s\n' \
             'Refresh the pinned stable upstream releases and their downloaded SHA-256 values.' \
             "- Xray: ${PADM_LOCK_XRAY_VERSION}" \
             "- sing-box: ${PADM_LOCK_SING_BOX_VERSION}" \
             "- acme.sh: ${PADM_LOCK_ACME_SH_VERSION}" \
-            'Docker CI is dispatched explicitly for the generated commit.')
+            'Docker CI validates this commit; the refresh task reuses its PR run or dispatches a fallback.' >"${body_file}"
           pr_url=$(gh pr create --repo "${GITHUB_REPOSITORY}" --base main --head "${branch}" \
-            --title "${title}" --body "${body}")
-          ci_url=$(gh workflow run docker-ci.yml --repo "${GITHUB_REPOSITORY}" --ref "${branch}")
-          ci_run_id=${ci_url##*/}
-          if [[ ! "${ci_run_id}" =~ ^[0-9]+$ ]]; then
-            commit_sha=$(git rev-parse HEAD)
-            for _ in {1..30}; do
-              ci_run_id=$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow docker-ci.yml \
-                --branch "${branch}" --commit "${commit_sha}" --event workflow_dispatch --limit 1 \
-                --json databaseId --jq '.[0].databaseId // empty')
-              [[ "${ci_run_id}" =~ ^[0-9]+$ ]] && break
-              sleep 2
-            done
+            --title "${title}" --body-file "${body_file}")
+          find_ci_run() {
+            gh run list --repo "${GITHUB_REPOSITORY}" --workflow docker-ci.yml \
+              --branch "${branch}" --commit "${commit_sha}" --limit 100 \
+              --json databaseId,event --jq '[.[] | select(.event == "pull_request" or .event == "workflow_dispatch")] | .[0].databaseId // empty'
+          }
+          ci_run_id=$(find_ci_run)
+          for _ in {1..3}; do
+            [[ -n "${ci_run_id}" ]] && break
+            sleep 2
+            ci_run_id=$(find_ci_run)
+          done
+          if [[ -z "${ci_run_id}" ]]; then
+            # GITHUB_TOKEN 创建的 PR 不一定触发事件，缺少运行时才显式派发。
+            gh workflow run docker-ci.yml --repo "${GITHUB_REPOSITORY}" --ref "${branch}"
           fi
+          for _ in {1..30}; do
+            [[ "${ci_run_id}" =~ ^[0-9]+$ ]] && break
+            sleep 2
+            ci_run_id=$(find_ci_run)
+          done
           [[ "${ci_run_id}" =~ ^[0-9]+$ ]] || {
-            echo "Docker CI dispatch did not expose a run id: ${ci_url}" >&2
+            echo "Docker CI did not expose a run for ${commit_sha}" >&2
             exit 1
           }
-          gh run watch "${ci_run_id}" --repo "${GITHUB_REPOSITORY}" --exit-status
+          passed=false
+          for _ in {1..3}; do
+            if gh run watch "${ci_run_id}" --repo "${GITHUB_REPOSITORY}" --exit-status; then
+              passed=true
+              break
+            fi
+            conclusion=$(gh run view "${ci_run_id}" --repo "${GITHUB_REPOSITORY}" --json conclusion --jq .conclusion)
+            [[ "${conclusion}" == cancelled ]] || exit 1
+            # 两种事件同时到达时，等待同一提交取代被取消运行的验证。
+            replacement=$(find_ci_run)
+            [[ "${replacement}" =~ ^[0-9]+$ && "${replacement}" -gt "${ci_run_id}" ]] || exit 1
+            ci_run_id=${replacement}
+          done
+          [[ "${passed}" == true ]] || { echo 'Docker CI did not complete successfully' >&2; exit 1; }
           printf 'Created %s and Docker CI run %s passed.\n' "${pr_url}" "${ci_run_id}" >>"${GITHUB_STEP_SUMMARY}"

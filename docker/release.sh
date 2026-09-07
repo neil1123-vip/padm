@@ -93,6 +93,57 @@ validate_lock() {
     [[ "${PADM_LOCK_PATCHES}" == none ]] || die 'unreviewed build patches are not allowed'
 }
 
+image_lock_inputs() {
+    local image=$1 line key owner
+    local -A values=()
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+        line=${line%$'\r'}
+        [[ "${line}" == \#* || "${line}" =~ ^[[:space:]]*$ ]] && continue
+        [[ "${line}" =~ ^(PADM_LOCK_[A-Z0-9_]+)=([A-Za-z0-9._:/@,+-]+)$ ]] || return 1
+        key=${BASH_REMATCH[1]}
+        [[ -z "${values[${key}]+present}" ]] || return 1
+        values[${key}]=${BASH_REMATCH[2]}
+        case "${key}" in
+        PADM_LOCK_VERSION|PADM_LOCK_SING_BOX_AMD64_UPSTREAM_SHA256|PADM_LOCK_SING_BOX_ARM64_UPSTREAM_SHA256)
+            continue ;;
+        PADM_LOCK_XRAY_VERSION|PADM_LOCK_XRAY_AMD64_ASSET|PADM_LOCK_XRAY_AMD64_SHA256|\
+        PADM_LOCK_XRAY_ARM64_ASSET|PADM_LOCK_XRAY_ARM64_SHA256|PADM_LOCK_UNZIP_VERSION)
+            owner=xray ;;
+        PADM_LOCK_SING_BOX_VERSION|PADM_LOCK_SING_BOX_AMD64_ASSET|PADM_LOCK_SING_BOX_AMD64_SHA256|\
+        PADM_LOCK_SING_BOX_ARM64_ASSET|PADM_LOCK_SING_BOX_ARM64_SHA256|PADM_LOCK_GCOMPAT_VERSION)
+            owner=sing-box ;;
+        PADM_LOCK_NGINX_VERSION|PADM_LOCK_NGINX_PACKAGE_VERSION)
+            owner=nginx ;;
+        PADM_LOCK_ACME_SH_VERSION|PADM_LOCK_ACME_SH_URL|PADM_LOCK_ACME_SH_SHA256|\
+        PADM_LOCK_PYTHON3_VERSION|PADM_LOCK_OPENSSL_VERSION|PADM_LOCK_SOCAT_VERSION)
+            owner=ops ;;
+        PADM_LOCK_BASH_VERSION|PADM_LOCK_IPROUTE2_VERSION|PADM_LOCK_IPTABLES_VERSION|\
+        PADM_LOCK_NFTABLES_VERSION|PADM_LOCK_WIREGUARD_TOOLS_VERSION|PADM_LOCK_FAIL2BAN_VERSION)
+            owner=net ;;
+        # 共同输入及尚未归类的新键按影响所有镜像处理。
+        *) owner=${image} ;;
+        esac
+        [[ "${owner}" != "${image}" ]] || printf '%s\n' "${line}"
+    done
+    [[ "${values[PADM_LOCK_SCHEMA]:-}" == 1 ]]
+}
+
+image_inputs_unchanged() {
+    local base=$1 head=$2 image=$3 baseLock headLock baseInputs headInputs
+    case "${image}" in xray|sing-box|nginx|ops|net) ;; *) return 1 ;; esac
+    base=$(git -C "${PROJECT_ROOT}" rev-parse --verify --end-of-options "${base}^{commit}" 2>/dev/null) || return 1
+    head=$(git -C "${PROJECT_ROOT}" rev-parse --verify --end-of-options "${head}^{commit}" 2>/dev/null) || return 1
+    git -C "${PROJECT_ROOT}" merge-base --is-ancestor "${base}" "${head}" || return 1
+    git -C "${PROJECT_ROOT}" diff --quiet "${base}" "${head}" -- \
+        "docker/images/${image}" docker-bake.hcl docker/release.sh \
+        .github/workflows/build-images.yml || return 1
+    baseLock=$(git -C "${PROJECT_ROOT}" show "${base}:versions.lock") || return 1
+    headLock=$(git -C "${PROJECT_ROOT}" show "${head}:versions.lock") || return 1
+    baseInputs=$(image_lock_inputs "${image}" <<<"${baseLock}" | LC_ALL=C sort) || return 1
+    headInputs=$(image_lock_inputs "${image}" <<<"${headLock}" | LC_ALL=C sort) || return 1
+    [[ "${baseInputs}" == "${headInputs}" ]]
+}
+
 latest_release_tag() {
     local repository=$1 release tag
     release=$(gh api "repos/${repository}/releases/latest") || die "failed to query ${repository} release"
@@ -346,8 +397,10 @@ manifest_validate() {
       def digest: type == "string" and test("^sha256:[0-9a-f]{64}$");
       def ref: type == "string" and test("^[a-z0-9][a-z0-9._/-]+:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$");
       def image:
+        . as $image |
         type == "object" and exact(["reference", "index_digest", "platforms"]) and
         (.reference | ref) and (.index_digest | digest) and
+        ($image.reference | endswith("@" + $image.index_digest)) and
         (.platforms as $p |
           ($p | type == "object" and exact(["linux/amd64", "linux/arm64"])) and
           ($p["linux/amd64"] | digest) and ($p["linux/arm64"] | digest));
@@ -412,13 +465,15 @@ manifest_generate() {
     for name in "${IMAGE_NAMES[@]}"; do
         resultFile=${resultsDir}/${name}.json
         [[ -f "${resultFile}" && ! -L "${resultFile}" ]] || die "missing image result: ${name}"
-        jq -e --arg name "${name}" --arg registry "${registry}" --arg version "${version}" '
-          type == "object" and
+        jq -e --arg name "${name}" --arg registry "${registry}" '
+          . as $image | type == "object" and
           (keys_unsorted | sort) == ["index_digest", "name", "platforms", "reference"] and
           .name == $name and (.reference | type == "string" and
-            startswith($registry + "/padm-" + $name + ":" + $version + "@sha256:") and
-            test("^[a-z0-9][a-z0-9._/-]+:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$")) and
+            startswith($registry + "/padm-" + $name + ":") and
+            (ltrimstr($registry + "/padm-" + $name + ":") |
+              test("^[0-9]+[.][0-9]+[.][0-9]+@sha256:[0-9a-f]{64}$"))) and
           (.index_digest | test("^sha256:[0-9a-f]{64}$")) and
+          ($image.reference | endswith("@" + $image.index_digest)) and
           (.platforms | type == "object" and (keys_unsorted | sort) == ["linux/amd64", "linux/arm64"] and
             all(.[]; test("^sha256:[0-9a-f]{64}$")))
         ' "${resultFile}" >/dev/null || die "invalid image result: ${name}"
@@ -477,6 +532,7 @@ usage:
   docker/release.sh validate-lock [VERSION]
   docker/release.sh set-version VERSION
   docker/release.sh refresh-upstreams
+  docker/release.sh image-inputs-unchanged BASE HEAD IMAGE
   docker/release.sh validate-manifest FILE
   docker/release.sh manifest --version VERSION --commit SHA --created-at UTC \
     --registry REGISTRY --bundle-url URL --bundle-sha256 SHA256 \
@@ -498,6 +554,10 @@ set-version)
 refresh-upstreams)
     [[ "$#" -eq 1 ]] || { usage; exit 2; }
     refresh_upstreams
+    ;;
+image-inputs-unchanged)
+    [[ "$#" -eq 4 ]] || { usage; exit 2; }
+    image_inputs_unchanged "$2" "$3" "$4"
     ;;
 validate-manifest)
     [[ "$#" -eq 2 ]] || { usage; exit 2; }

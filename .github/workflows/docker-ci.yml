@@ -9,6 +9,8 @@ on:
       - 'docker/**'
       - 'docker-bake.hcl'
       - 'install-docker.sh'
+      - 'shell/core/deployment_mode.sh'
+      - 'shell/core/stats_grpc.sh'
       - 'shell/core/version.sh'
       - 'versions.lock'
   workflow_dispatch:
@@ -16,13 +18,16 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: docker-ci-branch-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   images:
     uses: ./.github/workflows/build-images.yml
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
+    concurrency:
+      group: docker-ci-head-${{ github.event.pull_request.head.sha || github.sha }}
+      cancel-in-progress: true
     with:
       version: dev
       source_ref: ${{ github.sha }}

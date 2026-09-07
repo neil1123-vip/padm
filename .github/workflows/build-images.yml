@@ -26,46 +26,22 @@ on:
       manifest_sha256:
         description: SHA-256 of release-manifest.json
         value: ${{ jobs.assemble.outputs.manifest_sha256 }}
-  workflow_dispatch:
-    inputs:
-      version:
-        description: Version without the leading v
-        required: true
-        default: dev
-        type: string
-      source_ref:
-        description: Source ref or commit
-        required: true
-        default: main
-        type: string
-      registry:
-        description: OCI registry hostname and namespace
-        required: true
-        default: ghcr.io/neil1123-vip
-        type: string
-      push:
-        description: Push and sign release images
-        required: true
-        default: false
-        type: boolean
-
-permissions:
-  contents: read
-
-concurrency:
-  group: docker-images-${{ inputs.source_ref || github.sha }}
-  cancel-in-progress: false
 
 jobs:
   contract:
     name: Docker contracts
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      images: ${{ steps.plan.outputs.images }}
+      registry_host: ${{ steps.plan.outputs.registry_host }}
     steps:
       - name: Checkout source
         uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_ref }}
-          fetch-depth: 1
+          fetch-depth: 0
 
       - name: Validate lock, schemas and contracts
         shell: bash
@@ -82,14 +58,58 @@ jobs:
           bash docker/tests/phase6.sh
           bash docker/tests/traffic.sh
 
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v4.1.2
+
+      - name: Resolve changed image inputs
+        id: plan
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PADM_REGISTRY: ${{ inputs.registry }}
+          PADM_COSIGN_IDENTITY_REGEX: https://github.com/${{ github.repository }}/.github/workflows/.*@refs/heads/main
+        run: |
+          set -euo pipefail
+          previous="${RUNNER_TEMP}/previous-release"
+          mkdir -p "${previous}"
+          baseline=
+          # 只有验签且可追溯到当前提交的发布记录才能作为复用基线。
+          if gh release download --repo "${GITHUB_REPOSITORY}" --dir "${previous}" \
+              --pattern release-manifest.json --pattern release-manifest.sigstore.json &&
+            cosign verify-blob --bundle "${previous}/release-manifest.sigstore.json" \
+              --certificate-identity-regexp "${PADM_COSIGN_IDENTITY_REGEX}" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              "${previous}/release-manifest.json" &&
+            bash docker/release.sh validate-manifest "${previous}/release-manifest.json"; then
+            baseline=$(jq -r '.release.commit' "${previous}/release-manifest.json")
+          else
+            echo '::notice::No verified release baseline; all images will be rebuilt.'
+          fi
+          images='[]'
+          for name in xray sing-box nginx ops net; do
+            reference=
+            if [[ -n "${baseline}" ]] &&
+              bash docker/release.sh image-inputs-unchanged "${baseline}" HEAD "${name}"; then
+              reference=$(jq -r --arg name "${name}" '.images[$name].reference' "${previous}/release-manifest.json")
+              if [[ "${reference}" != "${PADM_REGISTRY}/padm-${name}:"* ]]; then
+                reference=
+              fi
+            fi
+            images=$(jq -c --arg name "${name}" --arg reference "${reference}" \
+              '. + [{name: $name, reference: $reference}]' <<<"${images}")
+            printf '%s: %s\n' "${name}" "${reference:-rebuild}" >>"${GITHUB_STEP_SUMMARY}"
+          done
+          echo "images=${images}" >>"${GITHUB_OUTPUT}"
+          echo "registry_host=${PADM_REGISTRY%%/*}" >>"${GITHUB_OUTPUT}"
+
   smoke:
-    name: Smoke ${{ matrix.image }} (${{ matrix.platform.name }})
+    name: Smoke ${{ matrix.image.name }} (${{ matrix.platform.name }})
     needs: contract
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
       matrix:
-        image: [xray, sing-box, nginx, ops, net]
+        image: ${{ fromJSON(needs.contract.outputs.images) }}
         platform:
           - name: amd64
             value: linux/amd64
@@ -108,44 +128,96 @@ jobs:
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v4
 
+      - name: Log in to registry
+        if: ${{ inputs.push }}
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ needs.contract.outputs.registry_host }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Export locked build inputs
+        if: ${{ matrix.image.reference == '' }}
+        shell: bash
+        run: grep '^PADM_LOCK_[A-Z0-9_]*=' versions.lock >>"${GITHUB_ENV}"
+
       - name: Build one platform
+        id: build
+        if: ${{ matrix.image.reference == '' }}
+        uses: docker/bake-action@v7
+        env:
+          REGISTRY: ${{ inputs.registry }}
+          IMAGE_TAG: ${{ inputs.version }}
+          GIT_REVISION: ${{ inputs.source_ref }}
+          DOCKER_BUILD_RECORD_UPLOAD: 'false'
+        with:
+          source: .
+          targets: ${{ matrix.image.name }}
+          provenance: ${{ inputs.push && 'mode=max' || 'false' }}
+          sbom: ${{ inputs.push }}
+          set: |
+            ${{ matrix.image.name }}.platform=${{ matrix.platform.value }}
+            ${{ matrix.image.name }}.tags=${{ inputs.push && format('{0}/padm-{1}', inputs.registry, matrix.image.name) || format('{0}/padm-{1}:{2}', inputs.registry, matrix.image.name, inputs.version) }}
+            ${{ matrix.image.name }}.args.PADM_VERSION=${{ inputs.version }}
+            ${{ matrix.image.name }}.output=${{ inputs.push && 'type=image,push-by-digest=true,name-canonical=true,push=true' || 'type=docker' }}
+            ${{ matrix.image.name }}.cache-from=type=gha,scope=padm-${{ matrix.image.name }}-${{ matrix.platform.name }}
+            ${{ matrix.image.name }}.cache-to=type=gha,mode=max,scope=padm-${{ matrix.image.name }}-${{ matrix.platform.name }}
+
+      - name: Test the exact image
         shell: bash
         env:
           PADM_RELEASE_VERSION: ${{ inputs.version }}
-          PADM_SOURCE_REF: ${{ inputs.source_ref }}
           PADM_REGISTRY: ${{ inputs.registry }}
-          PADM_IMAGE_NAME: ${{ matrix.image }}
+          PADM_IMAGE_NAME: ${{ matrix.image.name }}
           PADM_PLATFORM: ${{ matrix.platform.value }}
           PADM_PLATFORM_NAME: ${{ matrix.platform.name }}
+          PADM_PREVIOUS_REFERENCE: ${{ matrix.image.reference }}
+          PADM_PUSH: ${{ inputs.push }}
+          BUILD_METADATA: ${{ steps.build.outputs.metadata }}
+          DOCKER_DEFAULT_PLATFORM: ${{ matrix.platform.value }}
         run: |
           set -euo pipefail
-          set -a
-          . ./versions.lock
-          set +a
-          export REGISTRY="${PADM_REGISTRY}"
-          export IMAGE_TAG="ci-${GITHUB_RUN_ID}-${PADM_IMAGE_NAME}-${PADM_PLATFORM_NAME}"
-          export GIT_REVISION="${PADM_SOURCE_REF}"
-          smoke_ref="${PADM_REGISTRY}/padm-${PADM_IMAGE_NAME}:${IMAGE_TAG}"
-          docker buildx bake "${PADM_IMAGE_NAME}" \
-            --load \
-            --set "${PADM_IMAGE_NAME}.platform=${PADM_PLATFORM}" \
-            --set "${PADM_IMAGE_NAME}.tags=${smoke_ref}" \
-            --set "${PADM_IMAGE_NAME}.args.PADM_VERSION=${PADM_RELEASE_VERSION}"
+          repository="${PADM_REGISTRY}/padm-${PADM_IMAGE_NAME}"
+          smoke_ref="${repository}:${PADM_RELEASE_VERSION}"
+          if [[ -n "${PADM_PREVIOUS_REFERENCE}" ]]; then
+            smoke_ref=${PADM_PREVIOUS_REFERENCE}
+          elif [[ "${PADM_PUSH}" == true ]]; then
+            digest=$(jq -er --arg name "${PADM_IMAGE_NAME}" \
+              '.[$name]["containerimage.digest"] | select(test("^sha256:[0-9a-f]{64}$"))' <<<"${BUILD_METADATA}")
+            smoke_ref="${repository}@${digest}"
+          fi
+          if [[ -n "${PADM_PREVIOUS_REFERENCE}" || "${PADM_PUSH}" == true ]]; then
+            docker pull --platform "${PADM_PLATFORM}" "${smoke_ref}"
+          fi
           bash docker/tests/image-smoke.sh "${smoke_ref}" "${PADM_IMAGE_NAME}"
+          if [[ "${PADM_PUSH}" == true && -z "${PADM_PREVIOUS_REFERENCE}" ]]; then
+            platform_digest=$(docker buildx imagetools inspect "${smoke_ref}" --raw |
+              jq -er --arg arch "${PADM_PLATFORM_NAME}" \
+                '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch)] |
+                 if length == 1 then .[0].digest else error("Invalid platform index") end')
+            jq -n --arg digest "${digest}" --arg platform_digest "${platform_digest}" \
+              '{digest: $digest, platform_digest: $platform_digest}' \
+              >"${RUNNER_TEMP}/${PADM_IMAGE_NAME}-${PADM_PLATFORM_NAME}.json"
+          fi
+
+      - name: Upload tested platform digest
+        if: ${{ inputs.push && matrix.image.reference == '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: padm-platform-${{ matrix.image.name }}-${{ matrix.platform.name }}-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 7
+          path: ${{ runner.temp }}/${{ matrix.image.name }}-${{ matrix.platform.name }}.json
 
   publish:
-    name: Publish ${{ matrix.image }}
+    name: Publish ${{ matrix.image.name }}
     if: ${{ inputs.push == true }}
-    needs: smoke
+    needs: [contract, smoke]
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
     strategy:
       fail-fast: true
       matrix:
-        image: [xray, sing-box, nginx, ops, net]
+        image: ${{ fromJSON(needs.contract.outputs.images) }}
     steps:
       - name: Checkout source
         uses: actions/checkout@v7
@@ -159,46 +231,46 @@ jobs:
       - name: Log in to registry
         uses: docker/login-action@v4
         with:
-          registry: ${{ inputs.registry }}
+          registry: ${{ needs.contract.outputs.registry_host }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@v4.1.2
 
-      - name: Build and publish multi-arch image
+      - name: Download tested platform digests
+        if: ${{ matrix.image.reference == '' }}
+        uses: actions/download-artifact@v8
+        with:
+          pattern: padm-platform-${{ matrix.image.name }}-*-${{ github.run_id }}
+          path: ${{ runner.temp }}/platforms
+          merge-multiple: true
+
+      - name: Merge tested images or reuse signed index
         id: image
         shell: bash
         env:
           PADM_RELEASE_VERSION: ${{ inputs.version }}
-          PADM_SOURCE_REF: ${{ inputs.source_ref }}
           PADM_REGISTRY: ${{ inputs.registry }}
-          PADM_IMAGE_NAME: ${{ matrix.image }}
+          PADM_IMAGE_NAME: ${{ matrix.image.name }}
+          PADM_PREVIOUS_REFERENCE: ${{ matrix.image.reference }}
           PADM_COSIGN_IDENTITY_REGEX: https://github.com/${{ github.repository }}/.github/workflows/.*@refs/heads/main
           PADM_COSIGN_OIDC_ISSUER: https://token.actions.githubusercontent.com
         run: |
           set -euo pipefail
-          set -a
-          . ./versions.lock
-          set +a
-          export REGISTRY="${PADM_REGISTRY}"
-          export IMAGE_TAG="${PADM_RELEASE_VERSION}"
-          export GIT_REVISION="${PADM_SOURCE_REF}"
           image_ref="${PADM_REGISTRY}/padm-${PADM_IMAGE_NAME}:${PADM_RELEASE_VERSION}"
-          metadata_file="${RUNNER_TEMP}/metadata-${PADM_IMAGE_NAME}.json"
           raw_file="${RUNNER_TEMP}/imagetools-${PADM_IMAGE_NAME}.json"
-          docker buildx bake "${PADM_IMAGE_NAME}" \
-            --push \
-            --provenance=mode=max \
-            --sbom=true \
-            --metadata-file "${metadata_file}" \
-            --set "${PADM_IMAGE_NAME}.platform=linux/amd64" \
-            --set "${PADM_IMAGE_NAME}.platform=linux/arm64" \
-            --set "${PADM_IMAGE_NAME}.tags=${image_ref}" \
-            --set "${PADM_IMAGE_NAME}.args.PADM_VERSION=${PADM_RELEASE_VERSION}"
-          index_digest=$(jq -r --arg image "${PADM_IMAGE_NAME}" \
-            '.[$image]["containerimage.digest"] // empty' "${metadata_file}")
-          if [[ ! "${index_digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+          if [[ -n "${PADM_PREVIOUS_REFERENCE}" ]]; then
+            image_ref=${PADM_PREVIOUS_REFERENCE%@*}
+            index_digest=${PADM_PREVIOUS_REFERENCE##*@}
+          else
+            refs=()
+            for arch in amd64 arm64; do
+              result="${RUNNER_TEMP}/platforms/${PADM_IMAGE_NAME}-${arch}.json"
+              digest=$(jq -er '.digest | select(test("^sha256:[0-9a-f]{64}$"))' "${result}")
+              refs+=("${PADM_REGISTRY}/padm-${PADM_IMAGE_NAME}@${digest}")
+            done
+            docker buildx imagetools create --tag "${image_ref}" "${refs[@]}"
             index_digest=$(docker buildx imagetools inspect "${image_ref}" |
               sed -n 's/^Digest:[[:space:]]*//p' | head -n 1)
           fi
@@ -206,7 +278,7 @@ jobs:
             echo "Unable to resolve index digest" >&2
             exit 1
           }
-          docker buildx imagetools inspect "${image_ref}" --raw >"${raw_file}"
+          docker buildx imagetools inspect "${image_ref}@${index_digest}" --raw >"${raw_file}"
           jq -e '
             [.manifests[]? | select(.platform.os == "linux" and
               (.platform.architecture == "amd64" or .platform.architecture == "arm64"))] |
@@ -214,10 +286,20 @@ jobs:
             all(.[]; .digest | test("^sha256:[0-9a-f]{64}$"))
           ' "${raw_file}" >/dev/null
           jq -e '
-            [.manifests[]?.annotations? // {} |
-              select(."vnd.docker.reference.type" == "attestation-manifest")] | length >= 1
+            . as $index |
+            all(.manifests[] | select(.platform.os == "linux");
+              .digest as $digest | any($index.manifests[];
+                .annotations["vnd.docker.reference.type"] == "attestation-manifest" and
+                .annotations["vnd.docker.reference.digest"] == $digest))
           ' "${raw_file}" >/dev/null
-          cosign sign --yes "${image_ref}@${index_digest}"
+          if [[ -z "${PADM_PREVIOUS_REFERENCE}" ]]; then
+            jq -e --slurpfile amd64 "${RUNNER_TEMP}/platforms/${PADM_IMAGE_NAME}-amd64.json" \
+              --slurpfile arm64 "${RUNNER_TEMP}/platforms/${PADM_IMAGE_NAME}-arm64.json" '
+              [.manifests[] | select(.platform.os == "linux") | {key: .platform.architecture, value: .digest}] |
+              from_entries == {amd64: $amd64[0].platform_digest, arm64: $arm64[0].platform_digest}
+            ' "${raw_file}" >/dev/null
+            cosign sign --yes "${image_ref}@${index_digest}"
+          fi
           cosign verify "${image_ref}@${index_digest}" \
             --certificate-identity-regexp "${PADM_COSIGN_IDENTITY_REGEX}" \
             --certificate-oidc-issuer "${PADM_COSIGN_OIDC_ISSUER}" \
@@ -237,14 +319,13 @@ jobs:
       - name: Upload image evidence
         uses: actions/upload-artifact@v7
         with:
-          name: padm-image-${{ matrix.image }}-${{ github.run_id }}
+          name: padm-image-${{ matrix.image.name }}-${{ github.run_id }}
           if-no-files-found: error
           retention-days: 7
           path: |
-            ${{ runner.temp }}/${{ matrix.image }}.json
-            ${{ runner.temp }}/metadata-${{ matrix.image }}.json
-            ${{ runner.temp }}/imagetools-${{ matrix.image }}.json
-            ${{ runner.temp }}/cosign-${{ matrix.image }}.json
+            ${{ runner.temp }}/${{ matrix.image.name }}.json
+            ${{ runner.temp }}/imagetools-${{ matrix.image.name }}.json
+            ${{ runner.temp }}/cosign-${{ matrix.image.name }}.json
 
   assemble:
     name: Assemble release assets
@@ -295,9 +376,6 @@ jobs:
             --bundle-sha256 "${bundle_sha256}" \
             --results-dir "${RUNNER_TEMP}/image-results" \
             --output "${assets}/release-manifest.json"
-          sha256sum "${assets}/release-manifest.json" >"${assets}/release-manifest.sha256"
-          cp "${RUNNER_TEMP}/image-results"/*.json "${assets}/" 2>/dev/null || true
-          printf '%s\n' "${bundle_sha256}" >"${assets}/bundle.sha256"
 
       - name: Expose release artifact metadata
         id: output
@@ -305,7 +383,7 @@ jobs:
         run: |
           set -euo pipefail
           artifact_name="padm-release-assets-${GITHUB_RUN_ID}"
-          manifest_sha256=$(cut -d ' ' -f 1 "${RUNNER_TEMP}/release-assets/release-manifest.sha256")
+          manifest_sha256=$(sha256sum "${RUNNER_TEMP}/release-assets/release-manifest.json" | cut -d ' ' -f 1)
           echo "artifact_name=${artifact_name}" >>"${GITHUB_OUTPUT}"
           echo "manifest_sha256=${manifest_sha256}" >>"${GITHUB_OUTPUT}"
 
@@ -314,5 +392,5 @@ jobs:
         with:
           name: padm-release-assets-${{ github.run_id }}
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 7
           path: ${{ runner.temp }}/release-assets

@@ -139,6 +139,10 @@ padm-docker status
 
 需要固定控制脚本版本时，把 `install` 改为 `install --ref <40 位 commit SHA>`；不要把 `latest` 当作生产版本锁。CI Release 同时提供 `release-manifest.json`、Cosign 签发的 Sigstore bundle v0.3（`release-manifest.sigstore.json`，签名内嵌）和 `padm-docker-bundle.tar.gz`，更新时会校验 bundle 签名和摘要。
 
+`main` 的安装入口、运行脚本、Docker 配置、镜像输入或版本锁变化才自动发布；仅文档、测试和 CI 文件变化不递增版本。发布任务串行处理最新 `main`，三个附件全部上传并核对摘要后才公开 Release。需要重试或主动发布时运行 `Release` 工作流；普通验证可运行 `Docker CI`。
+
+CI 按每个镜像的目录、共享构建定义及实际锁定依赖判断是否重建；未变化的镜像沿用上一份已验签 manifest 的 `tag@sha256`，其标签可能早于当前脚本版本。每个变化镜像的两个架构各构建一次，按精确摘要测试后合并并签名；所有复用镜像仍执行双架构 smoke 和签名验证。无法确认可信基线时完整重建。SBOM、provenance 和镜像签名保存在 OCI 仓库，诊断 JSON 仅作为保留 7 天的 Actions artifact，不再作为 Release 附件重复上传。
+
 示例文件中的 digest、密钥和 token 是占位值，不能直接用于生产。生产镜像引用必须使用 CI Release 提供的版本标签和 digest，例如 `ghcr.io/neil1123-vip/padm-xray:3.1.9@sha256:<digest>`；不要使用 `latest`，也不要在主机上手工改成未发布的 tag。
 
 ### 五个镜像
@@ -561,7 +565,7 @@ Docker 镜像按 `versions.lock` 固定统计包版本和双架构 SHA256；官�
 
 稳定版、预发布版试跑和版本回退均只选择本仓库已发布的 `sing-box-v<上游版本>`，安装时校验资产摘要、实际版本和 `with_v2ray_api` 标签；缺少安装包或校验失败会停止，不会替换当前核心。
 
-维护者可运行 Actions 的 `Build sing-box Traffic Stats` 工作流，`version` 留空时读取 `versions.lock`，也可指定上游标签（如 `v1.14.0`）。修改版本锁或构建文件并推送至 `main` 也会触发构建。两个架构均须通过启动、Naive/Cronet 加载、Hysteria2/TUIC 实际传输和用户统计检查，才会发布二进制包、对应源码包和 `SHA256SUMS`；二进制包包含 `LICENSE` 和构建信息。统计版 release 不占用 padm 自身的 latest 标记。首次使用前需等待该工作流成功发布。
+维护者可运行 Actions 的 `Build sing-box Traffic Stats` 工作流，`version` 留空时读取 `versions.lock`，也可指定上游标签（如 `v1.14.0`）。推送至 `main` 时，仅统计版构建文件或相关版本锁输入变化才进入准备流程；已完整发布的统计包不会重复构建，无关锁变化直接跳过。两个架构均须通过启动、Naive/Cronet 加载、Hysteria2/TUIC 实际传输和用户统计检查，才会发布二进制包、对应源码包和 `SHA256SUMS`；二进制包包含 `LICENSE` 和构建信息。统计版 release 不占用 padm 自身的 latest 标记。首次使用前需等待该工作流成功发布。
 
 升级到新的上游版本时，先指定 `version` 运行该统计版工作流并完成发布，再运行或等待 `Refresh Upstream Versions` 更新 Docker 版本锁。自动刷新只选择本仓库已发布的正式统计版，忽略草稿和预发布版；Docker CI 在两种架构上检查统计标签、API 启动及 Cronet 加载后才允许发布镜像。
 
