@@ -327,8 +327,20 @@ grep -Fq 'uses: ./.github/workflows/build-images.yml' "${PR_WORKFLOW}" ||
     fail 'PR workflow does not reuse image workflow'
 grep -Fq 'runDockerPhase5Regression' "${FAST_CASES}" || fail 'phase 5 is not in fast regression cases'
 grep -Fq 'docker-phase5' "${FAST_SUITE}" || fail 'phase 5 is not registered in fast suite'
-if grep -ERn ':[[:space:]]*latest([[:space:]]|$)' \
-    "${BUILD_WORKFLOW}" "${PR_WORKFLOW}" "${RELEASE_WORKFLOW}" "${UPSTREAM_WORKFLOW}" >/dev/null; then
+LATEST_IMAGE_PATTERN=':latest([^A-Za-z0-9_.-]|$)'
+# 镜像标签的冒号后不能有空格，不能把 YAML 步骤标识 id: latest 判为镜像。
+for safeLine in 'id: latest' 'runs-on: ubuntu-latest' 'image: alpine:latest-dev'; do
+    if grep -Eq "${LATEST_IMAGE_PATTERN}" <<<"${safeLine}"; then
+        fail "latest image check rejected a non-latest reference: ${safeLine}"
+    fi
+done
+for unsafeLine in 'image: alpine:latest' 'image: "alpine:latest"' "image: 'alpine:latest'" \
+    'docker run alpine:latest sh' "image: alpine:latest@sha256:${IMAGE_DIGEST}"; do
+    grep -Eq "${LATEST_IMAGE_PATTERN}" <<<"${unsafeLine}" ||
+        fail "latest image check missed an unpinned tag: ${unsafeLine}"
+done
+if grep -En "${LATEST_IMAGE_PATTERN}" \
+    "${BUILD_WORKFLOW}" "${PR_WORKFLOW}" "${RELEASE_WORKFLOW}" "${UPSTREAM_WORKFLOW}"; then
     fail 'phase 5 workflow contains latest image tags'
 fi
 
