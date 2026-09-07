@@ -9,6 +9,7 @@ listRegressionTransactionChildSelectors() {
 listRegressionTransactionCoreSelectorEntries() {
     printf '%s\n' \
         'light sing-box-custom-paths' \
+        'light sing-box-stats-build' \
         'heavy core-install-service-action-failure' \
         'light core-template-return-failure' \
         'light reality-profile-failure' \
@@ -132,6 +133,7 @@ runRegressionTransactionSystemSuiteRoot() {
 }
 
 registerRegressionFunctionLeaf sing-box-custom-paths runSingBoxCustomPathsRegression
+registerRegressionFunctionLeaf sing-box-stats-build runSingBoxStatsBuildRegression
 registerRegressionFunctionLeaf config-transaction runConfigTransactionRegression
 registerRegressionFunctionLeaf core-port-file-transaction runCorePortFileTransactionRegression
 registerRegressionFunctionLeaf entry-helper-config runEntryHelperConfigRegression

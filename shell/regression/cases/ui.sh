@@ -1484,7 +1484,23 @@ EOF
         resetMenuRender
         PADM_XRAY_DIR="${geoOverviewDir}" PADM_XRAY_BINARY="${geoOverviewDir}/xray" PADM_SINGBOX_BINARY="${geoOverviewDir}/missing-sing-box" showCoreStatusOverview
         [[ "${output}" == *"Xray Geo:"*"版本 v20260513"* ]]
+        [[ "${output}" == *"sing-box 用户统计能力: 无法检查"* ]]
         ! assertMenuAction unexpected-network-version-fetch
+
+        (
+            local apiCapability
+            singBoxV2rayApiCapability() { printf '%s\n' "${apiCapability}"; }
+            for apiCapability in supported unsupported unknown; do
+                resetMenuRender
+                showCoreStatusOverview
+                case "${apiCapability}" in
+                supported) [[ "${output}" == *"sing-box 用户统计能力: 支持"* ]] ;;
+                unsupported) [[ "${output}" == *"sing-box 用户统计能力: 不支持，需升级统计版"* ]] ;;
+                unknown) [[ "${output}" == *"sing-box 用户统计能力: 无法检查"* ]] ;;
+                esac
+            done
+            ! assertMenuAction unexpected-network-version-fetch
+        )
 
         (
             local serviceProbeLog="${TMP_DIR}/core-status-service-probes.log"

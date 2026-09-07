@@ -204,7 +204,7 @@ coreMenuServiceState() {
 showCoreStatusOverview() {
     local xrayConfigDir xrayDir xrayBinary reason
     local xrayServiceStatus singBoxServiceStatus nginxServiceStatus
-    local xrayVersion="未安装" singBoxVersion="未安装"
+    local xrayVersion="未安装" singBoxVersion="未安装" singBoxApiStatus="无法检查"
     local geoStatus="未安装" geoVersion= geoCron="未设置"
     local xrayConfigStatus="未配置" singBoxConfigStatus="未配置"
     local nginxReasons= nginxReasonText=
@@ -216,6 +216,10 @@ showCoreStatusOverview() {
         xrayVersion=$(xrayBinaryVersion "${xrayBinary}")
     fi
     singBoxVersion=$(getSingBoxCurrentVersion)
+    case "$(singBoxV2rayApiCapability)" in
+    supported) singBoxApiStatus="支持" ;;
+    unsupported) singBoxApiStatus="不支持，需升级统计版" ;;
+    esac
     xrayConfigInstalled && xrayConfigStatus="已配置"
     singBoxConfigInstalled && singBoxConfigStatus="已配置"
     if [[ -s "${xrayDir}/geosite.dat" && -s "${xrayDir}/geoip.dat" ]]; then
@@ -244,6 +248,7 @@ showCoreStatusOverview() {
         menuLine "Xray Geo: $(coreDisplayState "${geoStatus}") / 自动更新 $(coreDisplayState "${geoCron}")"
     fi
     menuLine "sing-box: $(coreDisplayState "${singBoxVersion}")"
+    menuLine "sing-box 用户统计能力: $(coreDisplayState "${singBoxApiStatus}")"
     menuLine "sing-box 服务: $(coreDisplayState "${singBoxServiceStatus}")"
     menuLine "sing-box 配置: $(coreDisplayState "${singBoxConfigStatus}")"
     if [[ -n "${nginxReasonText}" ]]; then
@@ -305,9 +310,9 @@ singBoxVersionManageMenu() {
     local selectSingBoxType version rollbackStatus
     while true; do
         echoContent title "\n┌─ sing-box 生命周期 ─────────────────────────────────"
-        menuItem 1 "升级稳定版" "下载并校验最新稳定版后替换"
-        menuItem 2 "升级预发布版" "下载、试跑并确认后替换"
-        menuItem 3 "回退稳定版" "选择最近的稳定版本回退"
+        menuItem 1 "升级稳定版" "下载并校验最新统计版后替换"
+        menuItem 2 "升级预发布版" "下载统计版、试跑并确认后替换"
+        menuItem 3 "回退稳定版" "选择已发布的统计版本回退"
         menuItem 4 "检查当前配置" "执行 merge + check"
         menuItem 5 "扫描升级风险" "只读扫描 1.13/1.14 迁移风险"
         menuItem 6 "试跑预发布版" "不替换二进制，不操作服务"

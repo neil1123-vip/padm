@@ -2040,7 +2040,10 @@ SH
         printf '{"inbounds":[]}\n' >"${singBoxMergedConfig}"
         printf 'merge-unsupported\n' >>"${singBoxMergeMarker}"
     }
-    reloadCore() { printf 'reload-unsupported\n' >>"${singBoxReloadMarker}"; }
+    reloadCore() {
+        singBoxMergeConfig || return 1
+        printf 'reload-unsupported\n' >>"${singBoxReloadMarker}"
+    }
     cat >"${singBoxCapabilityBinary}" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' 'build -tags=with_clash_api,with_quic'
@@ -2060,6 +2063,13 @@ SH
     if ! singBoxV2rayApiSupported; then
         return 1
     fi
+    singBoxMergeConfig() {
+        cp "${singBoxStatsConfig}" "${singBoxMergedConfig}"
+    }
+    ensureSingBoxTrafficStatsConfig
+    jq -e '.experimental.v2ray_api.stats.users == ["ops","sub_team_a-singbox_tuic","sub_team_b-singbox_hysteria2"]' "${singBoxMergedConfig}" >/dev/null
+    snapshot=$(collectLocalTrafficSnapshot)
+    jq -e '.ok and any(.items[]; .account == "sub_team_a" and .cores["sing-box"].upload == 13 and .cores["sing-box"].download == 17)' <<<"${snapshot}" >/dev/null
     unset PADM_SINGBOX_BINARY
 
     configPath="${xrayConfig}"
@@ -5707,6 +5717,7 @@ JSON
 
             singBoxConfigInstalled() { return 0; }
             singBoxBinaryVersion() { printf '%s\n' "${preparedVersion}"; }
+            ensureSingBoxTrafficStatsConfig() { return 0; }
             validateSingBoxConfigWithBinary() { return 0; }
             migrateSingBox116DeprecatedConfig() {
                 migrationCalls=$((migrationCalls + 1))
@@ -5737,7 +5748,7 @@ JSON
                 local dir="${installRoot}/prepared-${version}"
                 local extracted="${dir}/sing-box-${version/v/}${singBoxCoreCPUVendor}"
                 mkdir -p "${extracted}"
-                printf '#!/usr/bin/env bash\nexit 0\n' >"${extracted}/sing-box"
+                printf '#!/usr/bin/env bash\nprintf "Tags: with_v2ray_api\\n"\n' >"${extracted}/sing-box"
                 printf 'cronet\n' >"${extracted}/libcronet.so"
                 chmod 755 "${extracted}/sing-box"
                 printf '%s\n' "${dir}"

@@ -134,7 +134,8 @@ downloadSingBoxReleaseBinaryToTempDir() {
     local extractedDir="${tmpDir}/sing-box-${version/v/}${singBoxCoreCPUVendor}"
     local binary="${extractedDir}/sing-box"
 
-    if ! downloadGitHubReleaseAsset -P "${tmpDir}/" SagerNet/sing-box "${version}" "${asset}"; then
+    if ! downloadGitHubReleaseAsset -P "${tmpDir}/" neil1123-vip/padm "sing-box-${version}" "${asset}"; then
+        errorCard "sing-box 统计版安装包不可用: ${version}，请检查该版本的构建发布状态"
         return 1
     fi
     if ! validateCoreTarArchive "${tmpDir}/${asset}"; then
@@ -145,6 +146,11 @@ downloadSingBoxReleaseBinaryToTempDir() {
     fi
     coreExtractedFileIsRegular "${extractedDir}/libcronet.so" || return 3
     coreExtractedFileIsRegular "${binary}" && [[ -x "${binary}" ]] || return 4
+    if [[ "$(singBoxBinaryVersion "${binary}")" != "${version}" ||
+        "$(singBoxV2rayApiCapability "${binary}")" != supported ]]; then
+        errorCard "sing-box 统计版版本或 with_v2ray_api 能力校验失败"
+        return 4
+    fi
 }
 
 downloadXrayGeoFilesToStage() {
@@ -343,10 +349,14 @@ installSingBoxApply() {
     local targetBinary=
     local targetCronet=
     local cronetBackup=
+    local needsStatsBuild=false
     readInstallType
     progressCard "$1" "安装 sing-box"
 
-    if ! singBoxInstalled; then
+    if singBoxInstalled && [[ "$(singBoxV2rayApiCapability)" != supported ]]; then
+        needsStatsBuild=true
+    fi
+    if ! singBoxInstalled || { [[ "${needsStatsBuild}" == true ]] && ! singBoxConfigInstalled; }; then
 
         version=$(coreLatestReleaseTag SagerNet/sing-box "${prereleaseStatus}")
         checkVersionNotEmpty "${version}"
@@ -400,8 +410,13 @@ installSingBoxApply() {
     else
         successCard "当前版本:$(getSingBoxCurrentVersion)"
 
-        if [[ -z "${lastInstallationConfig:-}" ]]; then
-            autoRead singbox_reinstall "是否更新、升级？[y/n]:" reInstallSingBoxStatus
+        if [[ "${needsStatsBuild}" == true || -z "${lastInstallationConfig:-}" ]]; then
+            if [[ "${needsStatsBuild}" == true ]]; then
+                statusCard "sing-box 用户统计" "当前核心缺少统计能力，将升级到已发布的统计版"
+                reInstallSingBoxStatus=y
+            else
+                autoRead singbox_reinstall "是否更新、升级？[y/n]:" reInstallSingBoxStatus
+            fi
             if [[ "${reInstallSingBoxStatus}" == "y" ]]; then
                 version=$(coreLatestReleaseTag SagerNet/sing-box "${prereleaseStatus}") || exit 1
                 checkVersionNotEmpty "${version}"
@@ -492,17 +507,29 @@ coreReleaseTags() {
     local prerelease=${2:-false}
     local limit=${3:-20}
     local metadata page=1 pageSize=5 pageCount tagCount=0 tag
+    local releaseRepo=${repo} tagPrefix= collectedTags=
     [[ "${repo}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || return 1
     [[ "${prerelease}" == "true" || "${prerelease}" == "false" ]] || return 1
     [[ "${limit}" =~ ^[0-9]+$ && "${limit}" -gt 0 && "${limit}" -le 100 ]] || return 1
+    if [[ "${repo}" == "SagerNet/sing-box" ]]; then
+        releaseRepo=neil1123-vip/padm
+        tagPrefix=sing-box-
+        pageSize=50
+    fi
     while ((tagCount < limit && page <= 20)); do
-        metadata=$(fetchUrlToStdout "https://api.github.com/repos/${repo}/releases?per_page=${pageSize}&page=${page}" 3) || return 1
+        metadata=$(fetchUrlToStdout "https://api.github.com/repos/${releaseRepo}/releases?per_page=${pageSize}&page=${page}" 3) || return 1
         pageCount=$(jq -er 'if type == "array" then length else error("release metadata is not an array") end' <<<"${metadata}") || return 1
-        tag=$(jq -r --argjson prerelease "${prerelease}" '
-          .[] | select(.prerelease == $prerelease) | .tag_name | select(type == "string" and length > 0)
+        tag=$(jq -r --argjson prerelease "${prerelease}" --arg prefix "${tagPrefix}" '
+          .[] | select(.draft != true and .prerelease == $prerelease) | .tag_name |
+          select(type == "string" and length > 0 and startswith($prefix)) | ltrimstr($prefix) |
+          select($prefix == "" or test("^v[0-9]+\\.[0-9]+\\.[0-9]+(-[A-Za-z0-9.-]+)?$"))
         ' <<<"${metadata}") || return 1
         while IFS= read -r tag; do
             [[ -n "${tag}" ]] || continue
+            if [[ -n "${tagPrefix}" ]]; then
+                collectedTags+="${tag}"$'\n'
+                continue
+            fi
             printf '%s\n' "${tag}"
             tagCount=$((tagCount + 1))
             ((tagCount >= limit)) && break
@@ -510,6 +537,11 @@ coreReleaseTags() {
         ((pageCount < pageSize)) && break
         page=$((page + 1))
     done
+    if [[ -n "${tagPrefix}" ]]; then
+        [[ -n "${collectedTags}" ]] || return 1
+        printf '%s' "${collectedTags}" | sort -Vr -u | sed -n "1,${limit}p"
+        return
+    fi
     ((tagCount > 0))
 }
 
@@ -517,7 +549,7 @@ coreLatestReleaseTag() {
     local repo=$1
     local prerelease=${2:-false}
     local metadata
-    if [[ "${prerelease}" == "false" ]]; then
+    if [[ "${prerelease}" == "false" && "${repo}" != "SagerNet/sing-box" ]]; then
         metadata=$(fetchUrlToStdout "https://api.github.com/repos/${repo}/releases/latest" 3) || metadata=
         if [[ -n "${metadata}" ]]; then
             jq -er '.tag_name | select(type == "string" and length > 0)' <<<"${metadata}" && return 0
@@ -631,12 +663,20 @@ singBoxBinaryVersion() {
     "${1}" version 2>/dev/null | awk 'NR == 1 && $1 == "sing-box" && $2 == "version" { print "v"$3; exit }'
 }
 
-singBoxV2rayApiSupported() {
+singBoxV2rayApiCapability() {
     local binary=${1:-$(coreSingBoxBinaryPath 2>/dev/null || true)}
     local versionOutput
-    [[ -x "${binary}" ]] || return 0
-    versionOutput=$("${binary}" version 2>/dev/null) || return 0
-    grep -Eq '(^|[^[:alnum:]_])with_v2ray_api([^[:alnum:]_]|$)' <<<"${versionOutput}"
+    [[ -x "${binary}" ]] || { printf 'unknown\n'; return 0; }
+    versionOutput=$("${binary}" version 2>/dev/null) || { printf 'unknown\n'; return 0; }
+    if grep -Eq '(^|[^[:alnum:]_])with_v2ray_api([^[:alnum:]_]|$)' <<<"${versionOutput}"; then
+        printf 'supported\n'
+    else
+        printf 'unsupported\n'
+    fi
+}
+
+singBoxV2rayApiSupported() {
+    [[ "$(singBoxV2rayApiCapability "${1:-}")" != 'unsupported' ]]
 }
 
 runXrayConfigValidation() {
@@ -1922,6 +1962,7 @@ installDownloadedXrayBinary() {
 installDownloadedSingBoxBinary() {
     local version=$1
     local tmpDir=${2:-}
+    local singBoxConfigPath=${singBoxConfigPath:-$(singBoxConfigShardDir)}
     local oldBinary backupBinary extractedDir newBinary logFile cronetPath cronetBackup actualVersion migrationBackupDir=
     local reusedPreparedDir=false
     local rc
@@ -1956,6 +1997,12 @@ installDownloadedSingBoxBinary() {
             statusCard "sing-box 更新失败" "已校验二进制版本发生变化" "目标版本: ${version}" "实际版本: ${actualVersion:-无法解析}"
             return 1
         fi
+    fi
+    if [[ "$(singBoxV2rayApiCapability "${newBinary}")" != supported ]]; then
+        padmRemoveCleanupPath "${tmpDir}"
+        statusCard "sing-box 更新失败" "目标二进制未通过 with_v2ray_api 能力检查，已保留当前核心" \
+            "请使用本项目发布的 sing-box 统计版"
+        return 1
     fi
     if singBoxConfigInstalled && singBoxVersionAtLeast "${version}" 1.14.0 &&
         ! migrateSingBox116DeprecatedConfig migrationBackupDir "${logFile}.migration"; then
@@ -2025,12 +2072,25 @@ installDownloadedSingBoxBinary() {
     fi
     runCoreServiceActionAllowFailure handleSingBox start || true
     if singBoxInstalled && singBoxRunning; then
-        successCard "sing-box更新成功"
-        padmRemoveCleanupPath "${tmpDir}"
-        [[ -f "${backupBinary}" ]] && removeManagedFilesIfPresentIgnoreFailure "${backupBinary}"
-        [[ -f "${cronetBackup}" ]] && removeManagedFilesIfPresentIgnoreFailure "${cronetBackup}"
-        [[ -n "${migrationBackupDir}" ]] && padmRemoveCleanupPath "${migrationBackupDir}"
-        return 0
+        if (
+            # Statistics recovery must not restart the Xray primary core.
+            reloadCore() { runServiceAction sing-box restart; }
+            ensureSingBoxTrafficStatsConfig
+        ); then
+            successCard "sing-box更新成功"
+            padmRemoveCleanupPath "${tmpDir}"
+            [[ -f "${backupBinary}" ]] && removeManagedFilesIfPresentIgnoreFailure "${backupBinary}"
+            [[ -f "${cronetBackup}" ]] && removeManagedFilesIfPresentIgnoreFailure "${cronetBackup}"
+            [[ -n "${migrationBackupDir}" ]] && padmRemoveCleanupPath "${migrationBackupDir}"
+            return 0
+        fi
+        if ! runCoreServiceActionAllowFailure handleSingBox stop; then
+            [[ -n "${migrationBackupDir}" ]] && padmForgetCleanupPath "${migrationBackupDir}"
+            padmRemoveCleanupPath "${tmpDir}"
+            statusCard "sing-box 更新失败" "统计配置恢复失败，且新服务无法停止，已保留备份供手动恢复" \
+                "二进制: ${backupBinary}" "Cronet: ${cronetBackup}" "配置: ${migrationBackupDir:-未迁移}"
+            return 1
+        fi
     fi
     padmRemoveCleanupPath "${tmpDir}"
     singBoxUpgradeMigrationRollback "${migrationBackupDir}" || true

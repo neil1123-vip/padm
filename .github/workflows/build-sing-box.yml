@@ -1,0 +1,182 @@
+name: Build sing-box Traffic Stats
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'versions.lock'
+      - '.github/workflows/build-sing-box.yml'
+      - 'shell/build-sing-box.sh'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Upstream sing-box tag (empty uses versions.lock)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: padm-sing-box-build
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      commit: ${{ steps.resolve.outputs.commit }}
+      matrix: ${{ steps.resolve.outputs.matrix }}
+      skip: ${{ steps.resolve.outputs.skip }}
+      release_id: ${{ steps.resolve.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Read version lock
+        id: lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          . ./versions.lock
+          printf 'version=%s\namd64=%s\narm64=%s\n' "${PADM_LOCK_SING_BOX_VERSION}" \
+            "${PADM_LOCK_SING_BOX_AMD64_SHA256}" "${PADM_LOCK_SING_BOX_ARM64_SHA256}" >>"${GITHUB_OUTPUT}"
+      - name: Resolve immutable source and release assets
+        id: resolve
+        uses: actions/github-script@v9
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+          LOCK_VERSION: ${{ steps.lock.outputs.version }}
+          LOCK_AMD64: ${{ steps.lock.outputs.amd64 }}
+          LOCK_ARM64: ${{ steps.lock.outputs.arm64 }}
+        with:
+          script: |
+            const version = process.env.REQUESTED_VERSION || process.env.LOCK_VERSION;
+            if (!/^v\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?$/.test(version)) {
+              throw new Error(`Unsupported upstream version: ${version}`);
+            }
+            const upstream = { owner: 'SagerNet', repo: 'sing-box' };
+            let { data: { object } } = await github.rest.git.getRef({ ...upstream, ref: `tags/${version}` });
+            for (let depth = 0; object.type === 'tag' && depth < 5; depth++) {
+              ({ data: { object } } = await github.rest.git.getTag({ ...upstream, tag_sha: object.sha }));
+            }
+            if (object.type !== 'commit' || !/^[0-9a-f]{40}$/.test(object.sha)) {
+              throw new Error('Upstream tag did not resolve to a commit');
+            }
+            const { data: release } = await github.rest.repos.getReleaseByTag({ ...upstream, tag: version });
+            if (release.draft || release.tag_name !== version) throw new Error('Upstream release is unavailable');
+            const base = `sing-box-${version.slice(1)}`;
+            const matrix = { include: ['amd64', 'arm64'].map(arch => {
+              const assets = release.assets.filter(asset => asset.name === `${base}-linux-${arch}.tar.gz`);
+              if (assets.length !== 1 || !/^sha256:[0-9a-f]{64}$/.test(assets[0].digest || '') || assets[0].size <= 0) {
+                throw new Error(`Missing verified upstream asset for ${arch}`);
+              }
+              const sha256 = assets[0].digest.slice(7);
+              if (version === process.env.LOCK_VERSION && sha256 !== process.env[`LOCK_${arch.toUpperCase()}`]) {
+                throw new Error(`Upstream ${arch} digest differs from versions.lock`);
+              }
+              return { arch, runner: arch === 'amd64' ? 'ubuntu-24.04' : 'ubuntu-24.04-arm', sha256 };
+            }) };
+            const tag = `sing-box-${version}`;
+            const existing = await github.rest.repos.getReleaseByTag({ ...context.repo, tag })
+              .then(({ data }) => data).catch(error => {
+                if (error.status === 404) return null;
+                throw error;
+              });
+            const required = [`${base}-linux-amd64.tar.gz`, `${base}-linux-arm64.tar.gz`, `${base}-source.tar.gz`, 'SHA256SUMS'];
+            const complete = existing && !existing.draft && required.every(name => existing.assets.some(asset =>
+              asset.name === name && asset.size > 0 && /^sha256:[0-9a-f]{64}$/.test(asset.digest || '')));
+            if (existing && !existing.draft && !complete) throw new Error('Published release is incomplete; repair it explicitly');
+            core.setOutput('version', version);
+            core.setOutput('commit', object.sha);
+            core.setOutput('matrix', JSON.stringify(matrix));
+            core.setOutput('skip', complete ? 'true' : 'false');
+            core.setOutput('release_id', existing?.id || '');
+
+  build:
+    needs: prepare
+    if: needs.prepare.outputs.skip != 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Checkout pinned upstream source
+        uses: actions/checkout@v7
+        with:
+          repository: SagerNet/sing-box
+          ref: ${{ needs.prepare.outputs.commit }}
+          path: .tmp-sing-box-source
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: .tmp-sing-box-source/go.mod
+          cache-dependency-path: .tmp-sing-box-source/go.sum
+      - name: Build and verify native binary
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+          ARCH: ${{ matrix.arch }}
+          UPSTREAM_SHA256: ${{ matrix.sha256 }}
+        run: |
+          bash shell/build-sing-box.sh "${VERSION}" "${COMMIT}" "${ARCH}" \
+            .tmp-sing-box-source .tmp-sing-box-artifacts "${UPSTREAM_SHA256}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sing-box-${{ needs.prepare.outputs.version }}-${{ matrix.arch }}
+          path: .tmp-sing-box-artifacts/*.tar.gz
+          include-hidden-files: true
+          if-no-files-found: error
+
+  publish:
+    needs: [prepare, build]
+    if: needs.prepare.outputs.skip != 'true' && needs.build.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: sing-box-${{ needs.prepare.outputs.version }}-*
+          path: .tmp-sing-box-release
+          merge-multiple: true
+      - name: Publish complete release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          SOURCE_COMMIT: ${{ needs.prepare.outputs.commit }}
+          RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          cd .tmp-sing-box-release
+          base="sing-box-${VERSION#v}"
+          assets=("${base}-linux-amd64.tar.gz" "${base}-linux-arm64.tar.gz" "${base}-source.tar.gz")
+          for asset in "${assets[@]}"; do [[ -s "${asset}" ]]; done
+          sha256sum "${assets[@]}" >SHA256SUMS
+          sha256sum --check --strict SHA256SUMS
+          assets+=(SHA256SUMS)
+          tag="sing-box-${VERSION}"
+          prerelease=false
+          [[ "${VERSION}" != *-* ]] || prerelease=true
+          printf '%s\n\n%s\n%s\n%s\n' \
+            "sing-box ${VERSION} with per-user traffic statistics for padm." \
+            "Source: https://github.com/SagerNet/sing-box/tree/${SOURCE_COMMIT}" \
+            'Build: upstream default tags plus with_purego and with_v2ray_api; CGO_ENABLED=0.' \
+            "Corresponding source: ${base}-source.tar.gz. Binary archives include LICENSE and BUILD_INFO.json." >notes.txt
+          if [[ -z "${RELEASE_ID}" ]]; then
+            gh release create "${tag}" --target "${GITHUB_SHA}" --title "sing-box ${VERSION} (padm traffic stats)" \
+              --draft --latest=false --prerelease="${prerelease}" --notes-file notes.txt
+          else
+            [[ "$(gh api "repos/${GH_REPO}/releases/${RELEASE_ID}" --jq .draft)" == true ]]
+          fi
+          gh release upload "${tag}" "${assets[@]}" --clobber
+          gh api "repos/${GH_REPO}/releases/tags/${tag}" >release.json
+          for asset in "${assets[@]}"; do
+            digest="sha256:$(sha256sum "${asset}" | cut -d ' ' -f 1)"
+            jq -e --arg name "${asset}" --arg digest "${digest}" \
+              '[.assets[] | select(.name == $name and .digest == $digest and .size > 0)] | length == 1' release.json >/dev/null
+          done
+          gh release edit "${tag}" --draft=false --latest=false --prerelease="${prerelease}" --notes-file notes.txt

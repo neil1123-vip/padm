@@ -524,6 +524,22 @@ When upgrading or rolling back a core, the script downloads the target version i
 
 Nginx can be started, stopped, restarted, or smoothly reloaded only when the current protocol, site, or subscription configuration depends on it. An installed Nginx instance with no current padm dependency is read-only. Protocol, site, and subscription menus continue to own Nginx configuration; the service view owns only state and actions. Xray `geosite.dat` / `geoip.dat` updates, status, and scheduling live under `Xray Geo data`.
 
+### sing-box Stats Build and Traffic Recovery
+
+Native sing-box installations, as either the primary or auxiliary core, use this repository's CI build from upstream source. It keeps the upstream default build tags and adds `with_purego,with_v2ray_api` for per-user traffic statistics, including Hysteria2 and TUIC. Servers download Linux amd64 / arm64 packages without compiling locally. Docker images still use the upstream build pinned in `versions.lock`; this native core conversion does not apply to them.
+
+If an older core reports `v2ray api is not included in this build`, or connectivity was restored by removing the stats configuration, perform these steps on the server running sing-box:
+
+1. Update padm from `System & script`.
+2. Open `Cores & services` -> `sing-box lifecycle` -> `Upgrade stable` to install a published stats build.
+3. Confirm that `sing-box user statistics capability` is supported and the service is running, then run `Check current configuration`.
+
+After a successful upgrade, the script restores `14_stats_api.json` from the existing protocol users and reloads the core. The stats API listens only on `127.0.0.1:10087`; existing ports, certificates, and user credentials are retained. Failed stats restoration triggers an attempt to roll back the core and configuration. Reusing a previous installation configuration also converts an older core that lacks stats support. Traffic from periods without collection cannot be recovered; new traffic is attributed to the existing accounts.
+
+Stable upgrades, prerelease trials, and rollbacks select only published `sing-box-v<upstream-version>` releases from this repository. Installation verifies the asset digest, actual version, and `with_v2ray_api` tag. An unavailable package or failed check stops before replacing the current core.
+
+Maintainers can run the `Build sing-box Traffic Stats` Actions workflow, leaving `version` empty to use `versions.lock` or specifying an upstream tag such as `v1.14.0`. Changes to the version lock or build files pushed to `main` also trigger a build. Both architectures must pass startup, Naive/Cronet loading, actual Hysteria2/TUIC transfers, and per-user stats checks before binary archives, corresponding source, and `SHA256SUMS` are published. Binary archives include `LICENSE` and build information. Stats releases do not take over padm's latest release marker. Wait for a successful workflow publication before the first installation.
+
 ## System and Script
 
 `System & script` handles padm itself and host-level helper features:

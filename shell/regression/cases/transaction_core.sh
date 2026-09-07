@@ -14,6 +14,157 @@ if ! declare -F regressionProtocolSelectionIncludesCompat >/dev/null 2>&1; then
     }
 fi
 
+runSingBoxStatsBuildRegression() (
+    set -euo pipefail
+    local root="${TMP_DIR}/sing-box-stats-build"
+    local version=v1.14.0 candidateVersion=v1.14.0 tags=with_quic,with_v2ray_api
+    local singBoxCoreCPUVendor=-linux-amd64
+    local packageDir="sing-box-${version#v}${singBoxCoreCPUVendor}"
+    local serviceRunning=true serviceStops=0 statsResult=0 migrationCalls=0
+    local PADM_SINGBOX_BINARY="${root}/installed/sing-box" PADM_TMP_DIR="${root}/tmp"
+    local singBoxConfigPath="${root}/installed/conf/config/"
+    mkdir -p "${root}/payload/${packageDir}" "${singBoxConfigPath}" "${PADM_TMP_DIR}"
+    : >"${root}/stats-calls"
+
+    fetchUrlToStdout() {
+        case "$1" in
+        'https://api.github.com/repos/neil1123-vip/padm/releases?per_page=50&page=1')
+            jq -cn '[{tag_name:"sing-box-v1.13.0",prerelease:false},
+              {tag_name:"sing-box-v1.16.0-alpha.1",prerelease:true},
+              {tag_name:"sing-box-v9.0.0",prerelease:false,draft:true},
+              {tag_name:"sing-box-invalid",prerelease:false}] +
+              [range(46) | {tag_name:"v3.7.6",prerelease:false}]' ;;
+        'https://api.github.com/repos/neil1123-vip/padm/releases?per_page=50&page=2')
+            printf '%s\n' '[{"tag_name":"sing-box-v1.14.0","prerelease":false}]' ;;
+        'https://api.github.com/repos/XTLS/Xray-core/releases/latest')
+            printf '%s\n' '{"tag_name":"v26.3.27"}' ;;
+        *) return 1 ;;
+        esac
+    }
+    [[ "$(coreLatestReleaseTag SagerNet/sing-box)" == v1.14.0 ]]
+    [[ "$(coreReleaseTags SagerNet/sing-box false 20)" == $'v1.14.0\nv1.13.0' ]]
+    [[ "$(coreLatestReleaseTag SagerNet/sing-box true)" == v1.16.0-alpha.1 ]]
+    [[ "$(coreLatestReleaseTag XTLS/Xray-core)" == v26.3.27 ]]
+    fetchUrlToStdout() { printf '[]\n'; }
+    regressionExpectStatus 1 coreLatestReleaseTag SagerNet/sing-box
+
+    makeStatsPackage() {
+        printf '#!/usr/bin/env bash\nprintf "sing-box version %s\\nTags: %s\\n"\n' "${candidateVersion#v}" "${tags}" >"${root}/payload/${packageDir}/sing-box"
+        chmod 755 "${root}/payload/${packageDir}/sing-box"
+        printf 'new-cronet\n' >"${root}/payload/${packageDir}/libcronet.so"
+        tar -czf "${root}/${packageDir}.tar.gz" -C "${root}/payload" "${packageDir}"
+    }
+    downloadGitHubReleaseAsset() {
+        [[ "$1" == -P && "$3" == neil1123-vip/padm && "$4" == "sing-box-${version}" && "$5" == "${packageDir}.tar.gz" ]] || return 1
+        mkdir -p "$2"
+        cp "${root}/${packageDir}.tar.gz" "$2/$5"
+    }
+    makeStatsPackage
+    downloadSingBoxReleaseBinaryToTempDir "${version}" "${root}/good"
+    [[ "$(singBoxV2rayApiCapability "${root}/good/${packageDir}/sing-box")" == supported ]]
+    [[ "$(singBoxV2rayApiCapability "${root}/missing")" == unknown ]]
+    tags=with_v2ray_apix
+    makeStatsPackage
+    regressionExpectStatus 4 downloadSingBoxReleaseBinaryToTempDir "${version}" "${root}/unsupported"
+    tags=with_v2ray_api
+    candidateVersion=v1.13.0
+    makeStatsPackage
+    regressionExpectStatus 4 downloadSingBoxReleaseBinaryToTempDir "${version}" "${root}/wrong-version"
+
+    printf '#!/usr/bin/env bash\nprintf "sing-box version 1.14.0\\nTags: with_quic\\n"\n' >"${PADM_SINGBOX_BINARY}"
+    chmod 755 "${PADM_SINGBOX_BINARY}"
+    printf 'old-cronet\n' >"${root}/installed/libcronet.so"
+    local originalBinary
+    originalBinary=$(<"${PADM_SINGBOX_BINARY}")
+    (
+        local lastInstallationConfig=reused installCalls=0
+        readInstallType() { return 0; }
+        singBoxConfigInstalled() { return 0; }
+        coreLatestReleaseTag() { printf 'v1.14.0\n'; }
+        autoRead() { return 99; }
+        installDownloadedSingBoxBinary() {
+            [[ "$1" == "${version}" ]] || return 1
+            installCalls=$((installCalls + 1))
+        }
+        installSingBoxApply 1
+        [[ "${installCalls}" == 1 ]]
+    )
+    singBoxConfigInstalled() { return 0; }
+    validateSingBoxConfigWithBinary() { return 0; }
+    migrateSingBox116DeprecatedConfig() { migrationCalls=$((migrationCalls + 1)); }
+    runCoreServiceActionAllowFailure() {
+        [[ "$1" == handleSingBox ]] || return 1
+        case "$2" in
+        stop) serviceRunning=false; serviceStops=$((serviceStops + 1)) ;;
+        start) serviceRunning=true ;;
+        *) return 1 ;;
+        esac
+    }
+    singBoxRunning() { [[ "${serviceRunning}" == true ]]; }
+    ensureSingBoxTrafficStatsConfig() {
+        [[ "$(singBoxV2rayApiCapability)" == supported ]] || return 1
+        printf 'stats\n' >>"${root}/stats-calls"
+        return "${statsResult}"
+    }
+    regressionExpectStatus 1 installDownloadedSingBoxBinary "${version}" "${root}/unsupported"
+    [[ "${serviceStops}" == 0 && "${migrationCalls}" == 0 && ! -s "${root}/stats-calls" ]]
+    [[ "$(<"${PADM_SINGBOX_BINARY}")" == "${originalBinary}" ]]
+
+    statsResult=1
+    regressionExpectStatus 1 installDownloadedSingBoxBinary "${version}" "${root}/good"
+    [[ "$(wc -l <"${root}/stats-calls")" == 1 && "${serviceStops}" == 2 && "${serviceRunning}" == true ]]
+    [[ "$(<"${PADM_SINGBOX_BINARY}")" == "${originalBinary}" ]]
+    [[ "$(<"${root}/installed/libcronet.so")" == old-cronet ]]
+
+    statsResult=0
+    candidateVersion=${version}
+    makeStatsPackage
+    downloadSingBoxReleaseBinaryToTempDir "${version}" "${root}/good"
+    installDownloadedSingBoxBinary "${version}" "${root}/good"
+    [[ "$(wc -l <"${root}/stats-calls")" == 2 && "${serviceRunning}" == true ]]
+    [[ "$(singBoxV2rayApiCapability)" == supported ]]
+    [[ "$(<"${root}/installed/libcronet.so")" == new-cronet ]]
+    (
+        local lastInstallationConfig=reused
+        printf '%s\n' "${originalBinary}" >"${PADM_SINGBOX_BINARY}"
+        readInstallType() { return 0; }
+        singBoxConfigInstalled() { return 1; }
+        coreLatestReleaseTag() { printf 'v1.14.0\n'; }
+        installDownloadedSingBoxBinary() { return 99; }
+        padmCreateTempPath() {
+            local installTemp
+            if [[ "${2:-}" == -d ]]; then
+                installTemp=$(mktemp -d "${PADM_TMP_DIR}/install.XXXXXX") || return 1
+            else
+                installTemp=$(mktemp "${PADM_TMP_DIR}/install.XXXXXX") || return 1
+            fi
+            printf -v "$1" '%s' "${installTemp}"
+        }
+        installSingBoxApply 1
+        [[ "$(singBoxV2rayApiCapability)" == supported ]]
+        [[ "$(<"${root}/installed/libcronet.so")" == new-cronet ]]
+    )
+    (
+        source "${PROJECT_ROOT}/shell/subscription/traffic.sh"
+        local PADM_SINGBOX_CONFIG_DIR="${singBoxConfigPath%/}"
+        local expectedStats="${PADM_SINGBOX_CONFIG_DIR}/14_stats_api.json"
+        singBoxConfigPath=
+        printf '%s\n' '{"inbounds":[{"type":"hysteria2","users":[{"name":"sub_team_hy2","password":"test"}]}]}' >"${PADM_SINGBOX_CONFIG_DIR}/06_hysteria2_inbounds.json"
+        singBoxMergeConfig() {
+            cp "${expectedStats}" "$(singBoxMergedConfigFile)"
+        }
+        runServiceAction() {
+            [[ "$*" == 'sing-box restart' ]] || return 99
+            printf '%s\n' "$*" >>"${root}/stats-service"
+        }
+        reloadCore() { return 99; }
+        downloadSingBoxReleaseBinaryToTempDir "${version}" "${root}/real-stats"
+        installDownloadedSingBoxBinary "${version}" "${root}/real-stats"
+        jq -e '.experimental.v2ray_api.stats.users == ["sub_team_hy2"]' "${expectedStats}" >/dev/null
+        [[ "$(<"${root}/stats-service")" == 'sing-box restart' && -z "${singBoxConfigPath}" ]]
+    )
+)
+
 runSingBoxCustomPathsRegression() (
     set -euo pipefail
     source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
@@ -364,7 +515,7 @@ runCoreInstallRejectsUnsafeBinaryPathRegression() (
             esac
         done
         mkdir -p "${dest}/sing-box-1.2.3-linux-amd64"
-        printf '#!/usr/bin/env bash\nexit 0\n' >"${dest}/sing-box-1.2.3-linux-amd64/sing-box"
+        printf '#!/usr/bin/env bash\nprintf "sing-box version 1.2.3\\nTags: with_v2ray_api\\n"\n' >"${dest}/sing-box-1.2.3-linux-amd64/sing-box"
         printf 'cronet\n' >"${dest}/sing-box-1.2.3-linux-amd64/libcronet.so"
         chmod 755 "${dest}/sing-box-1.2.3-linux-amd64/sing-box"
     }
