@@ -1207,7 +1207,29 @@ EOF
         statusCard "Hysteria2端口" "${result[-1]}"
         initHysteria2Network || return 1
         local hysteria2MasqueradeConfig
+        local hysteria2ObfsConfig
+        local hysteria2BandwidthConfig
+        local hysteria2ObfsJson
         hysteria2MasqueradeConfig=$(hysteria2MasqueradeJson "${hysteria2Masquerade:-}") || return 1
+        case "${hysteria2BandwidthMode:-brutal}" in
+        bbr)
+            hysteria2RequireSingBoxField ignore_client_bandwidth 1.11.0 || return 1
+            hysteria2BandwidthConfig='            "ignore_client_bandwidth": true,'
+            ;;
+        brutal)
+            hysteria2BandwidthConfig=$(printf '            "up_mbps": %s,\n            "down_mbps": %s,' "${hysteria2ClientDownloadSpeed}" "${hysteria2ClientUploadSpeed}")
+            ;;
+        *)
+            errorCard "Hysteria2 拥塞模式不受支持"
+            return 1
+            ;;
+        esac
+        hysteria2ObfsConfig=
+        if [[ -n "${hysteria2ObfsType:-}" ]]; then
+            hysteria2RequireSingBoxField obfs 1.14.0 || return 1
+            hysteria2ObfsJson=$(hysteria2ObfsConfigJson "${hysteria2ObfsType}" "${hysteria2ObfsPassword:-}") || return 1
+            hysteria2ObfsConfig=$(printf '            "obfs": %s,\n' "${hysteria2ObfsJson}") || return 1
+        fi
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/06_hysteria2_inbounds.json padm-sing-box-hysteria2 <<EOF || { errorCard "sing-box Hysteria2 入站模板提交失败"; return 1; }
 {
     "inbounds": [
@@ -1216,8 +1238,8 @@ EOF
             "listen": "::",
             "listen_port": ${result[-1]},
             "users": $(initSingBoxClients 3),
-            "up_mbps":${hysteria2ClientUploadSpeed},
-            "down_mbps":${hysteria2ClientDownloadSpeed},
+${hysteria2BandwidthConfig}
+${hysteria2ObfsConfig}
             "tls": {
                 "enabled": true,
                 "server_name":"${sslDomain}",

@@ -530,6 +530,8 @@ Xray 访问控制使用 routing + blackhole/direct；sing-box 使用 remote rule
 
 这不是 `--core both` 模式；`--core` 仍然只能填写 `xray` 或 `sing-box`。从 `安装与重装` 重新执行完整的 sing-box 安装会切换主核心并清理 Xray。当前公开的辅助核心增量入口是 Hysteria2 和 Tuic。
 
+Hysteria2 安装会统一生成服务端、Clash Meta 和 sing-box 订阅参数：默认使用 Brutal 固定带宽，带宽按客户端视角填写（下行是服务端到客户端，上行是客户端到服务端）；选择 BBR 时不写入固定带宽，由客户端使用自适应 BBR。端口跳跃会在 sing-box 订阅中生成 `server_ports` 范围。混淆为可选项，支持 `salamander` 和 `gecko`，开启后会同步到 Clash Meta、sing-box 和 Hysteria2 URI；回车重装会保留已有模式和混淆配置，输入 `off` 可关闭混淆。
+
 首页固定为 6 个入口：
 
 1. Xray-core 生命周期

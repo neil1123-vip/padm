@@ -530,6 +530,8 @@ The project supports keeping Xray as the primary core while enabling sing-box in
 
 This is not a `--core both` mode; `--core` still accepts only `xray` or `sing-box`. Running a full sing-box installation from `Install & reinstall` switches the primary core and removes Xray. The currently exposed auxiliary-core incremental entries are Hysteria2 and Tuic.
 
+Hysteria2 installation keeps the server, Clash Meta, and sing-box subscription parameters aligned. Brutal fixed bandwidth is the default, entered from the client's perspective: download is server to client and upload is client to server. BBR omits fixed bandwidth so clients use adaptive BBR. Port hopping is emitted as a `server_ports` range in sing-box subscriptions. Obfuscation is optional and supports `salamander` and `gecko`; it is emitted to Clash Meta, sing-box, and Hysteria2 URIs with the matching password. Pressing Enter during reinstall keeps the existing mode and obfuscation, while `off` disables obfuscation.
+
 The home view always has six entries:
 
 1. Xray-core lifecycle

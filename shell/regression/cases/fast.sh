@@ -1372,6 +1372,7 @@ runPortHoppingWithoutPersistentRegression() (
     local iptablesSaveShouldFail=false
     local rc
     local uploadCount=0
+    local hysteriaNetworkMode=1
     local warnLog="${TMP_DIR}/port-hopping-warn.log"
     : >"${warnLog}"
     : >"${natStateFile}"
@@ -1422,6 +1423,9 @@ runPortHoppingWithoutPersistentRegression() (
             else
                 printf -v "$3" '%s' '60'
             fi
+            ;;
+        hysteria_bandwidth_mode)
+            printf -v "$3" '%s' "${hysteriaNetworkMode}"
             ;;
         *)
             printf -v "$3" '%s' ''
@@ -1512,6 +1516,19 @@ EOF
     grep -q '带宽不合法' "${warnLog}"
     [[ "${hysteria2ClientDownloadSpeed}" == "120" ]]
     [[ "${hysteria2ClientUploadSpeed}" == "60" ]]
+
+    hysteriaNetworkMode=brutal
+    hysteria2BandwidthMode=brutal
+    initHysteria2Network
+    [[ "${hysteria2BandwidthMode}" == brutal ]]
+
+    hysteriaNetworkMode=2
+    hysteria2ObfsType=salamander
+    hysteria2ObfsPassword=existing-secret
+    initHysteria2Network
+    [[ "${hysteria2BandwidthMode}" == bbr ]]
+    [[ -z "${hysteria2ClientDownloadSpeed}" && -z "${hysteria2ClientUploadSpeed}" ]]
+    [[ "${hysteria2ObfsType}" == salamander && "${hysteria2ObfsPassword}" == existing-secret ]]
 
     inputCount=0
     initHysteriaPort

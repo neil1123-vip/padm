@@ -283,18 +283,55 @@ EOF
 
 emitHysteriaSubscribeOutput() {
     local port=$1 email=$2 id=$3 user=$6
-    subscribeOutputTitle "通用链接：Hysteria2 TLS"
     local clashMetaPortContent="port: ${port}"
     local uriPort=${singBoxHysteria2Port}
+    local singBoxPortExpression='{server_port:($port|tonumber)}'
     if [[ "${port}" == *-* ]]; then
         clashMetaPortContent="ports: ${port}"
         uriPort=${port}
+        singBoxPortExpression='{server_ports:[$ports]}'
+    fi
+
+    local bandwidthMode=${hysteria2BandwidthMode:-brutal}
+    local bandwidthUriParams='' bandwidthClashBlock='' bandwidthSingBoxExpression='{}'
+    if [[ "${bandwidthMode}" == "brutal" ]]; then
+        if ! [[ "${hysteria2ClientUploadSpeed:-}" =~ ^[0-9]+$ && "${hysteria2ClientDownloadSpeed:-}" =~ ^[0-9]+$ ]] ||
+            ((10#${hysteria2ClientUploadSpeed} <= 0 || 10#${hysteria2ClientDownloadSpeed} <= 0)); then
+            errorCard "订阅输出生成失败" "Hysteria2 Brutal 带宽配置不合法"
+            return 1
+        fi
+        bandwidthUriParams="&upmbps=${hysteria2ClientUploadSpeed}&downmbps=${hysteria2ClientDownloadSpeed}"
+        bandwidthClashBlock=$(printf '    up: "%s Mbps"\n    down: "%s Mbps"\n' "${hysteria2ClientUploadSpeed}" "${hysteria2ClientDownloadSpeed}")
+        bandwidthSingBoxExpression='{up_mbps:($up|tonumber),down_mbps:($down|tonumber)}'
+    elif [[ "${bandwidthMode}" != "bbr" ]]; then
+        errorCard "订阅输出生成失败" "Hysteria2 拥塞模式不受支持"
+        return 1
+    fi
+
+    local obfsUriParams='' obfsClashBlock='' obfsSingBoxExpression='{}'
+    if [[ -n "${hysteria2ObfsType:-}" ]]; then
+        local encodedObfsPassword obfsYamlType obfsYamlPassword
+        [[ "${hysteria2ObfsType}" == "salamander" || "${hysteria2ObfsType}" == "gecko" ]] || {
+            errorCard "订阅输出生成失败" "Hysteria2 混淆类型不受支持"
+            return 1
+        }
+        [[ -n "${hysteria2ObfsPassword:-}" ]] || {
+            errorCard "订阅输出生成失败" "Hysteria2 混淆密码为空"
+            return 1
+        }
+        encodedObfsPassword=$(encodeUriUserInfoComponent "${hysteria2ObfsPassword:-}") || return 1
+        obfsYamlType=$(serializeYamlString "${hysteria2ObfsType}") || return 1
+        obfsYamlPassword=$(serializeYamlString "${hysteria2ObfsPassword:-}") || return 1
+        obfsUriParams="&obfs=${hysteria2ObfsType}&obfs-password=${encodedObfsPassword}"
+        obfsClashBlock=$(printf '    obfs: %s\n    obfs-password: %s\n' "${obfsYamlType}" "${obfsYamlPassword}")
+        obfsSingBoxExpression='{obfs:{type:$obfs_type,password:$obfs_password}}'
     fi
 
     local encodedId yamlPassword defaultLink clashMetaBlock singBoxFilter
     encodedId=$(encodeUriUserInfoComponent "${id}") || return 1
     yamlPassword=$(serializeYamlString "${id}") || return 1
-    defaultLink="hysteria2://${encodedId}@$(formatUriAuthorityHost "${currentHost}"):${uriPort}?peer=${currentHost}&insecure=0&sni=${currentHost}&alpn=h3#${email}"
+    defaultLink="hysteria2://${encodedId}@$(formatUriAuthorityHost "${currentHost}"):${uriPort}?peer=${currentHost}&insecure=0&sni=${currentHost}&alpn=h3${bandwidthUriParams}${obfsUriParams}#${email}"
+    subscribeOutputTitle "通用链接：Hysteria2 TLS"
     clashMetaBlock=$(cat <<EOF
   - name: "${email}"
     type: hysteria2
@@ -304,11 +341,15 @@ emitHysteriaSubscribeOutput() {
     alpn:
         - h3
     sni: ${currentHost}
-    up: "${hysteria2ClientUploadSpeed} Mbps"
-    down: "${hysteria2ClientDownloadSpeed} Mbps"
+${bandwidthClashBlock}
+${obfsClashBlock}
 EOF
 )
-    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"hysteria2",server:$server,server_port:$port,up_mbps:$up,down_mbps:$down,password:$password,tls:{enabled:true,server_name:$sni,alpn:["h3"]}}' --arg tag "${email}" --arg server "${currentHost}" --argjson port "${singBoxHysteria2Port}" --argjson up "${hysteria2ClientUploadSpeed}" --argjson down "${hysteria2ClientDownloadSpeed}" --arg password "${id}" --arg sni "${currentHost}") || return 1
+    singBoxFilter=$(singBoxSubscribeAppendFilter \
+        "{tag:\$tag,type:\"hysteria2\",server:\$server} + (${singBoxPortExpression}) + (${bandwidthSingBoxExpression}) + {password:\$password,tls:{enabled:true,server_name:\$sni,alpn:[\"h3\"]}} + (${obfsSingBoxExpression})" \
+        --arg tag "${email}" --arg server "${currentHost}" --arg port "${singBoxHysteria2Port}" --arg ports "${port/-/:}" \
+        --arg up "${hysteria2ClientUploadSpeed:-}" --arg down "${hysteria2ClientDownloadSpeed:-}" \
+        --arg password "${id}" --arg sni "${currentHost}" --arg obfs_type "${hysteria2ObfsType:-}" --arg obfs_password "${hysteria2ObfsPassword:-}") || return 1
 
     echoContent green "    ${defaultLink}\n"
     appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"

@@ -497,6 +497,12 @@ readInstallProtocolType() {
 readSingBoxConfig() {
     tuicPort=
     hysteriaPort=
+    hysteria2BandwidthMode=
+    hysteria2ClientDownloadSpeed=
+    hysteria2ClientUploadSpeed=
+    hysteria2ObfsType=
+    hysteria2ObfsPassword=
+    hysteria2Masquerade=
     if [[ -n "${singBoxConfigPath}" ]]; then
 
         if [[ -f "${singBoxConfigPath}09_tuic_inbounds.json" ]]; then
@@ -508,8 +514,14 @@ readSingBoxConfig() {
         fi
         if [[ -f "${singBoxConfigPath}06_hysteria2_inbounds.json" ]]; then
             hysteriaPort=$(jq -r '.inbounds[0].listen_port' "${singBoxConfigPath}06_hysteria2_inbounds.json")
-            hysteria2ClientUploadSpeed=$(jq -r '.inbounds[0].up_mbps' "${singBoxConfigPath}06_hysteria2_inbounds.json")
-            hysteria2ClientDownloadSpeed=$(jq -r '.inbounds[0].down_mbps' "${singBoxConfigPath}06_hysteria2_inbounds.json")
+            hysteria2BandwidthMode=brutal
+            hysteria2ClientDownloadSpeed=$(jq -r '.inbounds[0].up_mbps // empty' "${singBoxConfigPath}06_hysteria2_inbounds.json")
+            hysteria2ClientUploadSpeed=$(jq -r '.inbounds[0].down_mbps // empty' "${singBoxConfigPath}06_hysteria2_inbounds.json")
+            if jq -e '.inbounds[0].ignore_client_bandwidth == true and (.inbounds[0].up_mbps // 0) == 0 and (.inbounds[0].down_mbps // 0) == 0' "${singBoxConfigPath}06_hysteria2_inbounds.json" >/dev/null 2>&1; then
+                hysteria2BandwidthMode=bbr
+            fi
+            hysteria2ObfsType=$(jq -r '.inbounds[0].obfs.type // empty' "${singBoxConfigPath}06_hysteria2_inbounds.json")
+            hysteria2ObfsPassword=$(jq -r '.inbounds[0].obfs.password // empty' "${singBoxConfigPath}06_hysteria2_inbounds.json")
             hysteria2Masquerade=$(jq -r '.inbounds[0].masquerade // empty | if type == "string" then . else empty end' "${singBoxConfigPath}06_hysteria2_inbounds.json")
         fi
     fi

@@ -953,7 +953,7 @@ JSON
             return 1
         }
         links=$(jq -r '.sub_team_a.default' <<<"${subscriptions}" | base64 -d)
-        grep -qF "hysteria2://${uuid}@hy.example.com:8443?peer=hy.example.com&insecure=0&sni=hy.example.com&alpn=h3#" <<<"${links}"
+        grep -qF "hysteria2://${uuid}@hy.example.com:8443?peer=hy.example.com&insecure=0&sni=hy.example.com&alpn=h3&upmbps=200&downmbps=100#" <<<"${links}"
         grep -qF "tuic://${uuid}:${uuid}@tuic.example.com:9443?congestion_control=bbr&alpn=h3&sni=tuic.example.com&udp_relay_mode=native&allow_insecure=0#" <<<"${links}"
         jq -e --arg uuid "${uuid}" '
           .sub_team_a as $account |
@@ -961,7 +961,7 @@ JSON
             contains("server: tuic.example.com") and contains("sni: tuic.example.com")) and
           ([$account.sing_box[] | select(.type == "hysteria2" or .type == "tuic")] |
             length == 2 and all(.[]; .password == $uuid) and
-            any(.[]; .type == "hysteria2" and .server == "hy.example.com" and .server_port == 8443 and .tls.server_name == "hy.example.com") and
+            any(.[]; .type == "hysteria2" and .server == "hy.example.com" and .server_port == 8443 and .up_mbps == 200 and .down_mbps == 100 and .tls.server_name == "hy.example.com") and
             any(.[]; .type == "tuic" and .server == "tuic.example.com" and .server_port == 9443 and .tls.server_name == "tuic.example.com" and .uuid == $uuid))
         ' <<<"${subscriptions}" >/dev/null
         printf 'regression-ok:auxiliary-udp-output:%s\n' "${mode}"
@@ -1000,7 +1000,7 @@ singBoxHysteria2Port=9443
 hysteria2ClientUploadSpeed=100
 hysteria2ClientDownloadSpeed=200
 hysteriaV2rayN=$(jq() { command jq "$@"; }; defaultBase64Code hysteria 8443 tls-hysteria-user "pass@:/?#[]" "" "")
-assertCapturedSubscribeOutputs "tls-hysteria-user" "hysteria2://pass%40%3A%2F%3F%23%5B%5D@[2001:db8::10]:9443?peer=2001:db8::10&insecure=0&sni=2001:db8::10&alpn=h3#tls-hysteria-user" "2001:db8::10" "2001:db8::10" "tcp" "hysteria2"
+assertCapturedSubscribeOutputs "tls-hysteria-user" "hysteria2://pass%40%3A%2F%3F%23%5B%5D@[2001:db8::10]:9443?peer=2001:db8::10&insecure=0&sni=2001:db8::10&alpn=h3&upmbps=100&downmbps=200#tls-hysteria-user" "2001:db8::10" "2001:db8::10" "tcp" "hysteria2"
 assertDisplayedDefaultSubscribeLink "tls-hysteria-user" "通用链接：Hysteria2 TLS"
 grep -qxF '    password: "pass@:/?#[]"' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-hysteria-user"
 jq -e '.server == "[2001:db8::10]:8443" and .auth == "pass@:/?#[]" and .tls.sni == "2001:db8::10" and .socks5.timeout == 300' <<<"${hysteriaV2rayN}" >/dev/null
@@ -1009,11 +1009,42 @@ jq -e '.[0].password == "pass@:/?#[]" and .[0].up_mbps == 100 and .[0].down_mbps
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="tls.example.com"
 singBoxHysteria2Port=9443
+hysteria2BandwidthMode=bbr
+hysteria2ClientUploadSpeed=
+hysteria2ClientDownloadSpeed=
+hysteria2ObfsType=salamander
+hysteria2ObfsPassword='obfs@:/?#[]'
+defaultBase64Code hysteria 9443 tls-hysteria-bbr-user pass-hysteria-bbr "" ""
+grep -qxF "hysteria2://pass-hysteria-bbr@tls.example.com:9443?peer=tls.example.com&insecure=0&sni=tls.example.com&alpn=h3&obfs=salamander&obfs-password=obfs%40%3A%2F%3F%23%5B%5D#tls-hysteria-bbr-user" "${SUBSCRIBE_CAPTURE_DIR}/default/tls-hysteria-bbr-user"
+! grep -qE '^    (up|down):' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-hysteria-bbr-user"
+jq -e '.[0].type == "hysteria2" and (.[0].up_mbps | not) and (.[0].down_mbps | not) and .[0].obfs.type == "salamander" and .[0].obfs.password == "obfs@:/?#[]"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-hysteria-bbr-user" >/dev/null
+
+rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
+currentHost="tls.example.com"
+singBoxHysteria2Port=9443
+hysteria2BandwidthMode=brutal
+hysteria2ObfsType=gecko
+hysteria2ObfsPassword='obfs@:/?#[]'
+hysteria2ClientUploadSpeed=100
+hysteria2ClientDownloadSpeed=200
+defaultBase64Code hysteria 9443 tls-hysteria-brutal-obfs-user pass-hysteria-brutal-obfs "" "" >/dev/null
+grep -qxF '    up: "100 Mbps"' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-hysteria-brutal-obfs-user"
+grep -qxF '    down: "200 Mbps"' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-hysteria-brutal-obfs-user"
+grep -qxF '    obfs: "gecko"' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-hysteria-brutal-obfs-user"
+grep -qxF '    obfs-password: "obfs@:/?#[]"' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-hysteria-brutal-obfs-user"
+
+rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
+currentHost="tls.example.com"
+singBoxHysteria2Port=9443
+hysteria2BandwidthMode=brutal
+hysteria2ObfsType=
+hysteria2ObfsPassword=
 hysteria2ClientUploadSpeed=100
 hysteria2ClientDownloadSpeed=200
 defaultBase64Code hysteria "20000-20002" tls-hysteria-hop-user pass-hysteria-hop "" "" >/dev/null
-grep -qxF "hysteria2://pass-hysteria-hop@tls.example.com:20000-20002?peer=tls.example.com&insecure=0&sni=tls.example.com&alpn=h3#tls-hysteria-hop-user" "${SUBSCRIBE_CAPTURE_DIR}/default/tls-hysteria-hop-user"
+grep -qxF "hysteria2://pass-hysteria-hop@tls.example.com:20000-20002?peer=tls.example.com&insecure=0&sni=tls.example.com&alpn=h3&upmbps=100&downmbps=200#tls-hysteria-hop-user" "${SUBSCRIBE_CAPTURE_DIR}/default/tls-hysteria-hop-user"
 grep -qx "    ports: 20000-20002" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-hysteria-hop-user"
+jq -e '.[0].server_ports == ["20000:20002"] and (.[0].server_port | not)' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-hysteria-hop-user" >/dev/null
 [[ -f "${SUBSCRIBE_CAPTURE_DIR}/screen.log" ]] || return 1
 if grep -q 'mport' "${SUBSCRIBE_CAPTURE_DIR}/default/tls-hysteria-hop-user" "${SUBSCRIBE_CAPTURE_DIR}/screen.log"; then
     return 1

@@ -189,6 +189,10 @@ initVar() {
     hysteriaPort=
     hysteria2ClientDownloadSpeed=
     hysteria2ClientUploadSpeed=
+    hysteria2BandwidthMode=
+    hysteria2ObfsType=
+    hysteria2ObfsPassword=
+    hysteria2Masquerade=
     realityPrivateKey=
     realitySNI=
     realityTargetHost=

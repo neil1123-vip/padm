@@ -258,17 +258,17 @@ runHysteria2CapabilityRegression() {
     local configDir="${TMP_DIR}/hysteria2-conf/"
     local oldUpload="${hysteria2ClientUploadSpeed:-}"
     local oldDownload="${hysteria2ClientDownloadSpeed:-}"
+    local oldBandwidthMode="${hysteria2BandwidthMode:-}"
+    local oldObfsType="${hysteria2ObfsType:-}"
+    local oldObfsPassword="${hysteria2ObfsPassword:-}"
     local oldDomain="${domain:-}"
     local oldCurrentHost="${currentHost:-}"
     local oldPadmTlsDir="${PADM_TLS_DIR:-}"
     local tlsFallbackDir="${TMP_DIR}/hysteria2-tls-fallback/"
 
-    if ! grep -Fq '"up_mbps":${hysteria2ClientUploadSpeed}' "${coreTemplate}"; then
-        printf 'assert-fail:hysteria2 template up_mbps should use upload speed\n' >&2
-        return 1
-    fi
-    if ! grep -Fq '"down_mbps":${hysteria2ClientDownloadSpeed}' "${coreTemplate}"; then
-        printf 'assert-fail:hysteria2 template down_mbps should use download speed\n' >&2
+    if ! grep -Fq '"up_mbps": %s,\n            "down_mbps": %s,' "${coreTemplate}" ||
+        ! grep -Fq '"${hysteria2ClientDownloadSpeed}" "${hysteria2ClientUploadSpeed}"' "${coreTemplate}"; then
+        printf 'assert-fail:hysteria2 template should map client download/upload to server up/down\n' >&2
         return 1
     fi
     if ! grep -Fq '"masquerade":' "${coreTemplate}"; then
@@ -282,8 +282,16 @@ runHysteria2CapabilityRegression() {
 EOF
     singBoxConfigPath="${configDir}"
     readSingBoxConfig
-    assertEquals 75 "${hysteria2ClientUploadSpeed}" "hysteria2-read-upload"
-    assertEquals 150 "${hysteria2ClientDownloadSpeed}" "hysteria2-read-download"
+    assertEquals 150 "${hysteria2ClientUploadSpeed}" "hysteria2-read-upload"
+    assertEquals 75 "${hysteria2ClientDownloadSpeed}" "hysteria2-read-download"
+
+    cat >"${configDir}06_hysteria2_inbounds.json" <<'EOF'
+{"inbounds":[{"type":"hysteria2","listen_port":2443,"ignore_client_bandwidth":true,"obfs":{"type":"salamander","password":"obfs-password"},"users":[],"tls":{"enabled":true}}]}
+EOF
+    readSingBoxConfig
+    assertEquals bbr "${hysteria2BandwidthMode}" "hysteria2-read-bbr"
+    assertEquals salamander "${hysteria2ObfsType}" "hysteria2-read-obfs-type"
+    assertEquals obfs-password "${hysteria2ObfsPassword}" "hysteria2-read-obfs-password"
 
     mkdir -p "${tlsFallbackDir}"
     printf 'cert\n' >"${tlsFallbackDir}/fallback.example.com.crt"
@@ -313,6 +321,11 @@ EOF
     fi
     hysteria2SingBoxFieldSupported masquerade v1.11.0 || { printf 'assert-fail:hysteria2 masquerade should be available on sing-box 1.11\n' >&2; return 1; }
     hysteria2SingBoxFieldSupported obfs_gecko v1.14.0-alpha.32 || { printf 'assert-fail:hysteria2 gecko obfs should be available on sing-box 1.14 prerelease\n' >&2; return 1; }
+    assertEquals '{"type":"salamander","password":"secret"}' "$(hysteria2ObfsConfigJson salamander secret | jq -c .)" "hysteria2-obfs-json"
+    if hysteria2ObfsConfigJson gecko "" >/dev/null 2>&1; then
+        printf 'assert-fail:hysteria2 obfs password must not be empty\n' >&2
+        return 1
+    fi
     if hysteria2SingBoxFieldSupported bbr_profile v1.13.13; then
         printf 'assert-fail:hysteria2 bbr_profile should require sing-box 1.14\n' >&2
         return 1
@@ -321,6 +334,9 @@ EOF
     singBoxConfigPath="${oldSingBoxConfigPath}"
     hysteria2ClientUploadSpeed="${oldUpload}"
     hysteria2ClientDownloadSpeed="${oldDownload}"
+    hysteria2BandwidthMode="${oldBandwidthMode}"
+    hysteria2ObfsType="${oldObfsType}"
+    hysteria2ObfsPassword="${oldObfsPassword}"
     domain="${oldDomain}"
     currentHost="${oldCurrentHost}"
     if [[ -n "${oldPadmTlsDir}" ]]; then

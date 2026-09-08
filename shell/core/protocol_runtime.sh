@@ -57,6 +57,18 @@ hysteria2SingBoxFieldSupported() {
     singBoxVersionAtLeast "${version}" "${required}"
 }
 
+hysteria2ObfsConfigJson() {
+    local type=${1:-} password=${2:-}
+    if [[ -z "${type}" ]]; then
+        printf '{}'
+        return 0
+    fi
+    [[ "${type}" == "salamander" || "${type}" == "gecko" ]] || return 1
+    [[ -n "${password}" ]] || return 1
+    jq -nc --arg type "${type}" --arg password "${password}" \
+        '{type:$type,password:$password}'
+}
+
 hysteria2RequireSingBoxField() {
     local field=$1
     local required=$2
@@ -113,27 +125,79 @@ initHysteriaPort() {
 # 初始化 Hysteria2 网络信息
 initHysteria2Network() {
 
+    local bandwidthMode existingBandwidthMode=${hysteria2BandwidthMode:-brutal}
     while true; do
-        echoContent yellow "请输入服务端下行带宽峰值（客户端→服务端，默认：100，单位：Mbps）"
-        autoRead hysteria_download_speed "下行速度:" hysteria2ClientDownloadSpeed
-        hysteria2ClientDownloadSpeed=${hysteria2ClientDownloadSpeed:-100}
-        if [[ "${hysteria2ClientDownloadSpeed}" =~ ^[0-9]{1,6}$ ]] && ((10#${hysteria2ClientDownloadSpeed} > 0)); then
-            statusCard "Hysteria2 服务端下行（客户端→服务端）" "${hysteria2ClientDownloadSpeed} Mbps"
+        echoContent yellow "请选择 Hysteria2 拥塞模式：1 Brutal（固定带宽），2 BBR（自适应），回车保持 ${existingBandwidthMode}"
+        autoRead hysteria_bandwidth_mode "模式[1 Brutal/2 BBR，回车保持]:" bandwidthMode
+        bandwidthMode=${bandwidthMode:-${existingBandwidthMode}}
+        case "${bandwidthMode}" in
+        1|brutal)
+            hysteria2BandwidthMode=brutal
             break
-        fi
-        statusCard "Hysteria2 带宽" "带宽不合法"
+            ;;
+        2|bbr)
+            hysteria2BandwidthMode=bbr
+            hysteria2ClientDownloadSpeed=
+            hysteria2ClientUploadSpeed=
+            statusCard "Hysteria2 拥塞模式" "BBR 自适应"
+            break
+            ;;
+        *)
+            statusCard "Hysteria2 拥塞模式" "模式不合法"
+            ;;
+        esac
     done
 
-    while true; do
-        echoContent yellow "请输入服务端上行带宽峰值（服务端→客户端，默认：50，单位：Mbps）"
-        autoRead hysteria_upload_speed "上行速度:" hysteria2ClientUploadSpeed
-        hysteria2ClientUploadSpeed=${hysteria2ClientUploadSpeed:-50}
-        if [[ "${hysteria2ClientUploadSpeed}" =~ ^[0-9]{1,6}$ ]] && ((10#${hysteria2ClientUploadSpeed} > 0)); then
-            statusCard "Hysteria2 服务端上行（服务端→客户端）" "${hysteria2ClientUploadSpeed} Mbps"
-            break
+    if [[ "${hysteria2BandwidthMode}" == "brutal" ]]; then
+        while true; do
+            echoContent yellow "请输入客户端下行带宽峰值（服务端→客户端，默认：100，单位：Mbps）"
+            autoRead hysteria_download_speed "下行速度:" hysteria2ClientDownloadSpeed
+            hysteria2ClientDownloadSpeed=${hysteria2ClientDownloadSpeed:-100}
+            if [[ "${hysteria2ClientDownloadSpeed}" =~ ^[0-9]{1,6}$ ]] && ((10#${hysteria2ClientDownloadSpeed} > 0)); then
+                statusCard "Hysteria2 客户端下行（服务端→客户端）" "${hysteria2ClientDownloadSpeed} Mbps"
+                break
+            fi
+            statusCard "Hysteria2 带宽" "带宽不合法"
+        done
+
+        while true; do
+            echoContent yellow "请输入客户端上行带宽峰值（客户端→服务端，默认：50，单位：Mbps）"
+            autoRead hysteria_upload_speed "上行速度:" hysteria2ClientUploadSpeed
+            hysteria2ClientUploadSpeed=${hysteria2ClientUploadSpeed:-50}
+            if [[ "${hysteria2ClientUploadSpeed}" =~ ^[0-9]{1,6}$ ]] && ((10#${hysteria2ClientUploadSpeed} > 0)); then
+                statusCard "Hysteria2 客户端上行（客户端→服务端）" "${hysteria2ClientUploadSpeed} Mbps"
+                break
+            fi
+            statusCard "Hysteria2 带宽" "带宽不合法"
+        done
+    fi
+
+    local existingObfsType=${hysteria2ObfsType:-}
+    local existingObfsPassword=${hysteria2ObfsPassword:-}
+    hysteria2ObfsType=
+    hysteria2ObfsPassword=
+    echoContent yellow "请输入 Hysteria2 混淆类型[回车保持 ${existingObfsType:-关闭}，off 关闭，salamander/gecko]"
+    autoRead hysteria_obfs_type "混淆类型:" hysteria2ObfsType
+    hysteria2ObfsType=${hysteria2ObfsType,,}
+    [[ -n "${hysteria2ObfsType}" ]] || hysteria2ObfsType=${existingObfsType}
+    if [[ "${hysteria2ObfsType}" == "off" || "${hysteria2ObfsType}" == "none" ]]; then
+        hysteria2ObfsType=
+    fi
+    if [[ -n "${hysteria2ObfsType}" && "${hysteria2ObfsType}" != salamander && "${hysteria2ObfsType}" != gecko ]]; then
+        errorCard "Hysteria2 混淆类型仅支持 salamander 或 gecko"
+        return 1
+    fi
+    if [[ -n "${hysteria2ObfsType}" ]]; then
+        autoRead hysteria_obfs_password "混淆密码:" hysteria2ObfsPassword
+        hysteria2ObfsPassword=${hysteria2ObfsPassword:-${existingObfsPassword}}
+        if [[ -z "${hysteria2ObfsPassword}" ]]; then
+            hysteria2ObfsPassword=$(generateRandomUuidValue) || {
+                errorCard "Hysteria2 混淆密码生成失败"
+                return 1
+            }
         fi
-        statusCard "Hysteria2 带宽" "带宽不合法"
-    done
+        statusCard "Hysteria2 混淆" "${hysteria2ObfsType}"
+    fi
 
     hysteria2RequireSingBoxField masquerade 1.11.0 || return 1
     echoContent yellow "请输入 Hysteria2 认证失败伪装 URL[http/https/file，回车使用固定404响应]"

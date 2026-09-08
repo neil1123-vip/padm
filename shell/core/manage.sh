@@ -3582,6 +3582,23 @@ manageXHTTP() {
 }
 
 
+hysteria2SettingsSummary() {
+    local configFile=$1 port bandwidth obfs userCount
+    [[ -f "${configFile}" ]] || return 0
+    port=$(jq -r '.inbounds[0].listen_port // ""' "${configFile}" 2>/dev/null)
+    if jq -e '.inbounds[0].ignore_client_bandwidth == true' "${configFile}" >/dev/null 2>&1; then
+        bandwidth="BBR（自适应）"
+    else
+        bandwidth="Brutal（下行 $(jq -r '.inbounds[0].up_mbps // ""' "${configFile}" 2>/dev/null) Mbps，上行 $(jq -r '.inbounds[0].down_mbps // ""' "${configFile}" 2>/dev/null) Mbps）"
+    fi
+    obfs=$(jq -r '.inbounds[0].obfs.type // "关闭"' "${configFile}" 2>/dev/null)
+    userCount=$(jq -r '.inbounds[0].users | length' "${configFile}" 2>/dev/null)
+    menuLine "监听端口：${port}"
+    menuLine "拥塞控制：${bandwidth}"
+    menuLine "混淆：${obfs}"
+    menuLine "用户数量：${userCount}"
+}
+
 # hysteria管理
 manageHysteria() {
     local hysteria2Status installHysteria2Status configFile
@@ -3591,6 +3608,7 @@ manageHysteria() {
         menuLine "依赖 sing-box；已有 Xray 时可作为辅助核心增量安装，适合 UDP、移动网络场景"
         configFile=$(padmManagedFilePath "$(singBoxConfigShardDir)" 06_hysteria2_inbounds.json 2>/dev/null || true)
         if [[ -n "${singBoxConfigPath}" && -f "${configFile}" ]]; then
+            hysteria2SettingsSummary "${configFile}"
             menuItem 1 "重新安装" "重建 Hysteria2 入站配置"
             menuItem 2 "卸载" "移除 Hysteria2 入站配置"
             menuItem 3 "端口跳跃管理" "配置 UDP 端口跳跃转发"
