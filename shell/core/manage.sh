@@ -3604,7 +3604,10 @@ hysteria2ConfigFile() {
 }
 
 refreshHysteria2Subscriptions() {
-    refreshProtocolSubscriptions Hysteria2 "已刷新公网订阅" "已刷新本地订阅"
+    refreshProtocolSubscriptions Hysteria2 "已刷新公网订阅" "已刷新本地订阅" || return 1
+    if declare -F subscriptionNotifyControllerRefresh >/dev/null 2>&1; then
+        subscriptionNotifyControllerRefresh || true
+    fi
 }
 
 hysteria2ConfigTestLog() {
