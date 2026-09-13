@@ -127,6 +127,9 @@ initHysteria2Network() {
 
     local bandwidthMode existingBandwidthMode=${hysteria2BandwidthMode:-brutal}
     while true; do
+        menuLine "Brutal：适合客户端与服务端之间带宽较稳定的线路；需手填上下行，可从实测速率的 70%-80% 起步"
+        menuLine "BBR：适合带宽波动、移动网络或多人共享出口；无需手填带宽，不确定时建议选 2"
+        menuLine "此处 BBR 是 Hysteria2/QUIC 自适应拥塞控制，与系统 TCP BBR 设置无关"
         echoContent yellow "请选择 Hysteria2 拥塞模式：1 Brutal（固定带宽），2 BBR（自适应），回车保持 ${existingBandwidthMode}"
         autoRead hysteria_bandwidth_mode "模式[1 Brutal/2 BBR，回车保持]:" bandwidthMode
         bandwidthMode=${bandwidthMode:-${existingBandwidthMode}}

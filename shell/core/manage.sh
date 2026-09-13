@@ -3599,6 +3599,108 @@ hysteria2SettingsSummary() {
     menuLine "用户数量：${userCount}"
 }
 
+hysteria2ConfigFile() {
+    padmManagedFilePath "$(singBoxConfigShardDir)" 06_hysteria2_inbounds.json
+}
+
+refreshHysteria2Subscriptions() {
+    refreshProtocolSubscriptions Hysteria2 "已刷新公网订阅" "已刷新本地订阅"
+}
+
+hysteria2ConfigTestLog() {
+    padmTmpFilePath padm-hysteria2-test.log
+}
+
+validateHysteria2ConfigUpdate() {
+    local binary
+    binary=$(coreSingBoxBinaryPath) || return 1
+    coreExecutableFile "${binary}" || return 0
+    singBoxMergeConfigForValidation "${binary}" "$(hysteria2ConfigTestLog)"
+}
+
+reloadHysteria2Core() {
+    runServiceAction sing-box restart
+}
+
+commitHysteria2ConfigUpdate() {
+    local stagedFile=$1
+    local successMessage=$2
+    local configFile backupFile
+    configFile=$(hysteria2ConfigFile)
+    configFile=$(padmResolveManagedAbsolutePath "${configFile}") || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
+    [[ -f "${configFile}" ]] || {
+        errorCard "未检测到 Hysteria2 配置，请先安装 Hysteria2"
+        padmRemoveCleanupPath "${stagedFile}"
+        return 1
+    }
+    backupFile="${configFile}.hysteria2.bak"
+    configTransactionCommit "${configFile}" "${stagedFile}" "${backupFile}" validateHysteria2ConfigUpdate "Hysteria2 配置校验失败" "已回滚本次 Hysteria2 修改；排查日志：$(hysteria2ConfigTestLog)" "${successMessage}" refreshHysteria2Subscriptions reloadHysteria2Core
+}
+
+applyHysteria2ConfigUpdate() {
+    local configFile
+    configFile=$(hysteria2ConfigFile) || return 1
+    applyManagedJsonConfigUpdate "${configFile}" hysteria2 "写入 Hysteria2 配置失败，已取消" commitHysteria2ConfigUpdate "$@"
+}
+
+readHysteria2Bandwidth() {
+    local prompt=$1 defaultValue=$2 resultVar=$3 input
+    while true; do
+        autoRead hysteria_bandwidth_value "${prompt}[回车默认 ${defaultValue} Mbps]:" input
+        input=${input:-${defaultValue}}
+        if [[ "${input}" =~ ^[0-9]{1,6}$ ]] && ((10#${input} > 0)); then
+            printf -v "${resultVar}" '%s' "${input}"
+            return 0
+        fi
+        errorCard "带宽必须是大于 0 的整数 Mbps"
+    done
+}
+
+setHysteria2BandwidthMode() {
+    local mode=$1 download upload
+    case "${mode}" in
+    bbr)
+        applyHysteria2ConfigUpdate 'del(.inbounds[0].up_mbps, .inbounds[0].down_mbps) | .inbounds[0].ignore_client_bandwidth = true' "Hysteria2 已切换为 BBR 自适应"
+        ;;
+    brutal)
+        download=$(jq -r '.inbounds[0].up_mbps // 100' "$(hysteria2ConfigFile)")
+        upload=$(jq -r '.inbounds[0].down_mbps // 50' "$(hysteria2ConfigFile)")
+        readHysteria2Bandwidth "客户端下行带宽（服务端→客户端）" "${download}" download || return 1
+        readHysteria2Bandwidth "客户端上行带宽（客户端→服务端）" "${upload}" upload || return 1
+        applyHysteria2ConfigUpdate ".inbounds[0] |= (del(.ignore_client_bandwidth) | .up_mbps = ${download} | .down_mbps = ${upload})" "Hysteria2 已切换为 Brutal（下行 ${download} Mbps，上行 ${upload} Mbps）"
+        ;;
+    *)
+        return 1
+        ;;
+    esac
+}
+
+manageHysteria2Bandwidth() {
+    local configFile selectMode currentMode
+    configFile=$(hysteria2ConfigFile)
+    currentMode=brutal
+    jq -e '.inbounds[0].ignore_client_bandwidth == true' "${configFile}" >/dev/null 2>&1 && currentMode=bbr
+    while true; do
+        echoContent title "\n┌─ Hysteria2 拥塞模式 ───────────────────────────────"
+        menuLine "当前模式：${currentMode}"
+        menuLine "Brutal 适合带宽稳定且可测速的线路；BBR 适合波动、移动网络或不确定线路"
+        menuItem 1 "Brutal" "固定带宽；切换时可调整上下行 Mbps"
+        menuRecommendedItem 2 "BBR" "自适应带宽；无需填写速率"
+        menuReturnItem 3 "返回" "回到 Hysteria2 管理"
+        menuClose
+        selectMode=
+        autoRead hysteria_bandwidth_manage_menu "请选择:" selectMode || return 0
+        case "${selectMode}" in
+        1) setHysteria2BandwidthMode brutal || true ;;
+        2) setHysteria2BandwidthMode bbr || true ;;
+        3) return 0 ;;
+        *) coreSelectionErrorCard "选择错误" ;;
+        esac
+        currentMode=brutal
+        jq -e '.inbounds[0].ignore_client_bandwidth == true' "${configFile}" >/dev/null 2>&1 && currentMode=bbr
+    done
+}
+
 # hysteria管理
 manageHysteria() {
     local hysteria2Status installHysteria2Status configFile
@@ -3606,13 +3708,14 @@ manageHysteria() {
         hysteria2Status=
         echoContent title "\n┌─ Hysteria2 管理 ───────────────────────────────────"
         menuLine "依赖 sing-box；已有 Xray 时可作为辅助核心增量安装，适合 UDP、移动网络场景"
-        configFile=$(padmManagedFilePath "$(singBoxConfigShardDir)" 06_hysteria2_inbounds.json 2>/dev/null || true)
+        configFile=$(hysteria2ConfigFile 2>/dev/null || true)
         if [[ -n "${singBoxConfigPath}" && -f "${configFile}" ]]; then
             hysteria2SettingsSummary "${configFile}"
             menuItem 1 "重新安装" "重建 Hysteria2 入站配置"
             menuItem 2 "卸载" "移除 Hysteria2 入站配置"
             menuItem 3 "端口跳跃管理" "配置 UDP 端口跳跃转发"
-            menuReturnItem 4 "返回协议与入口" "回到上级菜单"
+            menuItem 4 "拥塞模式" "切换 Brutal 固定带宽或 BBR 自适应"
+            menuReturnItem 5 "返回协议与入口" "回到上级菜单"
             hysteria2Status=true
         else
             menuItem 1 "安装" "新增 Hysteria2 入站配置"
@@ -3628,7 +3731,9 @@ manageHysteria() {
             unInstallSingBox hysteria2 || true
         elif [[ "${installHysteria2Status}" == "3" && "${hysteria2Status}" == "true" ]]; then
             portHoppingMenu hysteria2 || true
-        elif [[ ( "${installHysteria2Status}" == "4" && "${hysteria2Status}" == "true" ) || ( "${installHysteria2Status}" == "2" && "${hysteria2Status}" != "true" ) ]]; then
+        elif [[ "${installHysteria2Status}" == "4" && "${hysteria2Status}" == "true" ]]; then
+            manageHysteria2Bandwidth || true
+        elif [[ ( "${installHysteria2Status}" == "5" && "${hysteria2Status}" == "true" ) || ( "${installHysteria2Status}" == "2" && "${hysteria2Status}" != "true" ) ]]; then
             return 0
         else
             coreSelectionErrorCard "选择错误"
