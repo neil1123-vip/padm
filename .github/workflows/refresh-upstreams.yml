@@ -2,7 +2,7 @@ name: Refresh Upstream Versions
 
 on:
   schedule:
-    - cron: '17 3 * * 1'
+    - cron: '17 3 * * *'
   workflow_dispatch:
 
 permissions:
@@ -16,7 +16,35 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  latest:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Detect latest stable sing-box release
+        id: resolve
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          release=$(gh api repos/SagerNet/sing-box/releases/latest)
+          version=$(jq -er 'select(.draft == false and .prerelease == false) | .tag_name |
+            select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))' <<<"${release}")
+          printf 'version=%s\n' "${version}" >>"${GITHUB_OUTPUT}"
+
+  sing_box:
+    needs: latest
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build-sing-box.yml
+    with:
+      version: ${{ needs.latest.outputs.version }}
+
   refresh:
+    needs: sing_box
     runs-on: ubuntu-latest
     steps:
       - name: Checkout main

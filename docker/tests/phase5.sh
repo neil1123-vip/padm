@@ -27,10 +27,11 @@ BUILD_WORKFLOW=${PROJECT_ROOT}/.github/workflows/build-images.yml
 PR_WORKFLOW=${PROJECT_ROOT}/.github/workflows/docker-ci.yml
 RELEASE_WORKFLOW=${PROJECT_ROOT}/.github/workflows/create_release.yml
 UPSTREAM_WORKFLOW=${PROJECT_ROOT}/.github/workflows/refresh-upstreams.yml
+SING_BOX_WORKFLOW=${PROJECT_ROOT}/.github/workflows/build-sing-box.yml
 FAST_CASES=${PROJECT_ROOT}/shell/regression/cases/fast.sh
 FAST_SUITE=${PROJECT_ROOT}/shell/regression/suites/fast.sh
 for file in "${RELEASE_SCRIPT}" "${SCHEMA_FILE}" "${BUILD_WORKFLOW}" "${PR_WORKFLOW}" "${RELEASE_WORKFLOW}" \
-    "${UPSTREAM_WORKFLOW}" \
+    "${UPSTREAM_WORKFLOW}" "${SING_BOX_WORKFLOW}" \
     "${PROJECT_ROOT}/docker/tests/image-smoke.sh"; do
     [[ -f "${file}" && ! -L "${file}" ]] || fail "required phase 5 file is missing: ${file}"
 done
@@ -247,6 +248,9 @@ cat >"${MOCK_BIN}/gh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 case "$*" in
+'api repos/SagerNet/sing-box/releases/latest')
+    [[ "${PADM_TEST_LATEST_FAILURE:-}" != api ]] || exit 22
+    cat "${PADM_TEST_LATEST_RELEASE}" ;;
 *repos/XTLS/Xray-core/releases/latest*) printf '%s\n' '{"tag_name":"v99.1.2","draft":false,"prerelease":false}' ;;
 *'repos/neil1123-vip/padm/releases?per_page=100 --paginate --slurp'*)
     if [[ "${PADM_TEST_STATS_FAILURE:-}" == no-stable ]]; then
@@ -322,6 +326,41 @@ https://github.com/neil1123-vip/padm/releases/download/sing-box-v9.8.7/sing-box-
 esac
 EOF
 chmod +x "${MOCK_BIN}/gh" "${MOCK_BIN}/curl"
+# 执行工作流实际检测脚本，异常响应不得向后续构建传递版本。
+LATEST_SCRIPT=${TEST_ROOT}/latest-sing-box.sh
+awk '
+    /^        id: resolve$/ {step = 1; next}
+    step && /^        run: \|$/ {code = 1; next}
+    code {
+        if ($0 !~ /^          / && $0 !~ /^[[:space:]]*$/) exit
+        sub(/^          /, ""); print
+    }
+' "${UPSTREAM_WORKFLOW}" >"${LATEST_SCRIPT}"
+[[ -s "${LATEST_SCRIPT}" ]] || fail 'upstream sing-box detection script is missing'
+for scenario in stable draft prerelease alpha invalid empty api; do
+    jq -n --arg scenario "${scenario}" '
+        {tag_name: "v1.14.1", draft: false, prerelease: false} |
+        if $scenario == "draft" then .draft = true
+        elif $scenario == "prerelease" then .prerelease = true
+        elif $scenario == "alpha" then .tag_name = "v1.15.0-alpha.1"
+        elif $scenario == "invalid" then .tag_name = "v1.14.1/invalid"
+        elif $scenario == "empty" then .tag_name = ""
+        else . end
+    ' >"${TEST_ROOT}/latest-sing-box.json"
+    : >"${TEST_ROOT}/latest-output"
+    actual=success
+    PATH="${MOCK_BIN}:${PATH}" PADM_TEST_LATEST_RELEASE="${TEST_ROOT}/latest-sing-box.json" \
+        PADM_TEST_LATEST_FAILURE="${scenario}" GITHUB_OUTPUT="${TEST_ROOT}/latest-output" \
+        bash "${LATEST_SCRIPT}" >"${TEST_ROOT}/latest.log" 2>&1 || actual=failure
+    if [[ "${scenario}" == stable ]]; then
+        [[ "${actual}" == success && "$(cat "${TEST_ROOT}/latest-output")" == version=v1.14.1 ]] ||
+            { cat "${TEST_ROOT}/latest.log"; fail 'stable upstream sing-box was not selected'; }
+    else
+        [[ "${actual}" == failure && ! -s "${TEST_ROOT}/latest-output" ]] ||
+            fail "upstream sing-box detection accepted ${scenario}"
+    fi
+done
+
 PATH="${MOCK_BIN}:${PATH}" PADM_TEST_ALPINE_TAGS="${TEST_ROOT}/alpine-tags.json" \
     PADM_TEST_APK_FIXTURES="${APK_FIXTURE_ROOT}" PADM_TEST_APK_MODE=normal \
     bash "${UPDATER_ROOT}/docker/release.sh" refresh-upstreams >/dev/null ||
@@ -658,7 +697,28 @@ grep -Fq -- "-F force_release=\"\${FORCE_RELEASE}\"" "${RELEASE_WORKFLOW}" ||
     fail 'automatic workflow handoff loses release intent'
 grep -Fq 'is_release_commit' "${RELEASE_WORKFLOW}" || fail 'Release workflow lacks release commit guard'
 grep -Fq 'docker/release.sh set-version' "${RELEASE_WORKFLOW}" || fail 'lock/version bump is not unified'
-grep -Fq "cron: '17 3 * * 1'" "${UPSTREAM_WORKFLOW}" || fail 'upstream refresh is not scheduled weekly'
+grep -Fq "cron: '17 3 * * *'" "${UPSTREAM_WORKFLOW}" || fail 'upstream refresh is not scheduled daily'
+singBoxCall=$(awk '
+    /^  workflow_call:$/ {event = 1; next}
+    event && /^[^ ]|^  [^ ]/ {exit}
+    event {print}
+' "${SING_BOX_WORKFLOW}")
+for requirement in '      version:' '        required: true' '        type: string'; do
+    grep -Fxq "${requirement}" <<<"${singBoxCall}" || fail "reusable sing-box workflow lacks: ${requirement}"
+done
+grep -Fq "version: \${{ steps.resolve.outputs.version }}" "${UPSTREAM_WORKFLOW}" ||
+    fail 'upstream workflow does not expose the resolved version'
+singBoxJob=$(awk '
+    /^  sing_box:$/ {job = 1; next}
+    job && /^  [^ ]/ {exit}
+    job {print}
+' "${UPSTREAM_WORKFLOW}")
+for requirement in '    needs: latest' '    uses: ./.github/workflows/build-sing-box.yml' \
+    "      version: \${{ needs.latest.outputs.version }}" '      contents: write'; do
+    grep -Fxq "${requirement}" <<<"${singBoxJob}" || fail "upstream sing-box job lacks: ${requirement}"
+done
+refreshNeeds=$(awk '/^  refresh:$/ {job = 1; next} job && /^    needs:/ {print; exit}' "${UPSTREAM_WORKFLOW}")
+[[ "${refreshNeeds}" == '    needs: sing_box' ]] || fail 'upstream lock refresh does not wait for sing-box publication'
 grep -Fq 'docker/release.sh refresh-upstreams' "${UPSTREAM_WORKFLOW}" ||
     fail 'upstream workflow does not refresh the lock'
 grep -Fq 'pull-requests: write' "${UPSTREAM_WORKFLOW}" || fail 'upstream workflow cannot create PRs'

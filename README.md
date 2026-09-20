@@ -569,7 +569,7 @@ Docker 镜像按 `versions.lock` 固定统计包版本和双架构 SHA256；官�
 
 维护者可运行 Actions 的 `Build sing-box Traffic Stats` 工作流，`version` 留空时读取 `versions.lock`，也可指定上游标签（如 `v1.14.0`）。推送至 `main` 时，仅统计版构建文件或相关版本锁输入变化才进入准备流程；已完整发布的统计包不会重复构建，无关锁变化直接跳过。两个架构均须通过启动、Naive/Cronet 加载、Hysteria2/TUIC 实际传输和用户统计检查，才会发布二进制包、对应源码包和 `SHA256SUMS`；二进制包包含 `LICENSE` 和构建信息。统计版 release 不占用 padm 自身的 latest 标记。首次使用前需等待该工作流成功发布。
 
-升级到新的上游版本时，先指定 `version` 运行该统计版工作流并完成发布，再运行或等待 `Refresh Upstream Versions` 更新 Docker 版本锁。自动刷新只选择本仓库已发布的正式统计版，忽略草稿和预发布版；Docker CI 在两种架构上检查统计标签、API 启动及 Cronet 加载后才允许发布镜像。
+`Refresh Upstream Versions` 每天北京时间 11:17 调度检查官方 sing-box 最新稳定版（GitHub 调度可能延迟），也可手动运行。发现尚未发布的统计版时，自动调用上述双架构构建工作流；已完整发布的版本直接复用。构建、验证和发布成功后，继续刷新 Docker 版本锁并创建更新 PR；构建失败会停止刷新，下次运行重试。已有待处理的上游更新 PR 时仍检查并构建统计版，但暂不新建版本锁 PR。自动刷新只选择本仓库已发布的正式统计版，忽略草稿和预发布版；更新 PR 仍需合并，Docker CI 在两种架构上检查统计标签、API 启动及 Cronet 加载后才允许发布镜像。需要预发布版时仍可手动指定 `version` 运行统计版工作流。
 
 ## 系统与脚本
 

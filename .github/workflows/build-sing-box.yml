@@ -1,6 +1,12 @@
 name: Build sing-box Traffic Stats
 
 on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Upstream sing-box tag to build'
+        required: true
+        type: string
   push:
     branches: [main]
     paths:
