@@ -15,10 +15,6 @@ on:
       - 'install.sh'
       - 'install-docker.sh'
       - 'shell/**'
-      - '!shell/regression/**'
-      - '!shell/subscription_groups_regression.sh'
-      - '!shell/validate_install.sh'
-      - '!shell/build-sing-box.sh'
       - 'docker/**'
       - 'docker-bake.hcl'
       - 'versions.lock'
@@ -194,6 +190,25 @@ jobs:
               ? 'true'
               : 'false';
           result-encoding: string
+
+      - name: Lint workflows
+        if: steps.revision.outputs.deferred != 'true'
+        uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color
+
+      - name: Check shell syntax and native regressions
+        if: steps.revision.outputs.deferred != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git ls-files -z -- '*.sh' | xargs -0 -r -n 1 bash -n
+          bash shell/subscription_groups_regression.sh ci
+
+      - name: Preflight pinned APK dependencies
+        if: steps.scope.outputs.changed == 'true' && steps.existing.outputs.result != 'true'
+        shell: bash
+        run: bash docker/release.sh preflight
 
       - name: Bump script and lock version
         id: bump

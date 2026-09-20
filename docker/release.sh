@@ -6,6 +6,23 @@ LOCK_FILE=${PROJECT_ROOT}/versions.lock
 VERSION_FILE=${PROJECT_ROOT}/shell/core/version.sh
 MANIFEST_SCHEMA=${PROJECT_ROOT}/docker/contracts/release-manifest.schema.json
 IMAGE_NAMES=(xray sing-box nginx ops net)
+APK_PACKAGES=(ca-certificates gcompat libgcc unzip nginx python3 openssl socat bash iproute2 iptables nftables wireguard-tools fail2ban)
+declare -A APK_LOCK_KEYS=(
+    [ca-certificates]=PADM_LOCK_CA_CERTIFICATES_VERSION
+    [gcompat]=PADM_LOCK_GCOMPAT_VERSION
+    [libgcc]=PADM_LOCK_LIBGCC_VERSION
+    [unzip]=PADM_LOCK_UNZIP_VERSION
+    [nginx]=PADM_LOCK_NGINX_PACKAGE_VERSION
+    [python3]=PADM_LOCK_PYTHON3_VERSION
+    [openssl]=PADM_LOCK_OPENSSL_VERSION
+    [socat]=PADM_LOCK_SOCAT_VERSION
+    [bash]=PADM_LOCK_BASH_VERSION
+    [iproute2]=PADM_LOCK_IPROUTE2_VERSION
+    [iptables]=PADM_LOCK_IPTABLES_VERSION
+    [nftables]=PADM_LOCK_NFTABLES_VERSION
+    [wireguard-tools]=PADM_LOCK_WIREGUARD_TOOLS_VERSION
+    [fail2ban]=PADM_LOCK_FAIL2BAN_VERSION
+)
 
 die() {
     printf 'padm-release: %s\n' "$*" >&2
@@ -239,31 +256,70 @@ alpine_tag_metadata() {
 apk_index_package_versions() {
     local index=$1 package=$2
     tar -xOzf "${index}" APKINDEX | awk -v package="${package}" '
+        function emit() {
+            if (!record) return
+            if (name == "" || version == "") exit 1
+            if (name == package) print version
+            entries++
+            name = version = ""
+            record = 0
+        }
+        NF { record = 1 }
         /^P:/ { name = substr($0, 3); sub(/^[[:space:]]+/, "", name) }
         /^V:/ { version = substr($0, 3); sub(/^[[:space:]]+/, "", version) }
-        /^$/ {
-            if (name == package) print version
-            name = ""
-            version = ""
-        }
-        END { if (name == package) print version }
+        /^[[:space:]]*$/ { emit() }
+        END { emit(); if (!entries) exit 1 }
     '
 }
 
-refresh_alpine_packages() {
-    local minor=$1 tmpRoot=$2 package arch repo index candidate best candidates
-    shift 2
-    local -a packages=("$@")
-    local -A latest=()
+download_apk_indexes() {
+    local minor=$1 tmpRoot=$2 arch repo index
     for arch in x86_64 aarch64; do
         for repo in main community; do
             index="${tmpRoot}/apkindex-${repo}-${arch}.tar.gz"
             curl --fail --location --silent --show-error --retry 3 --connect-timeout 15 --max-time 120 \
                 --max-filesize 16777216 --output "${index}" \
                 "https://dl-cdn.alpinelinux.org/alpine/v${minor}/${repo}/${arch}/APKINDEX.tar.gz" ||
-                die "failed to download Alpine ${minor} ${repo}/${arch} APK index"
-            [[ -s "${index}" ]] || die "empty Alpine ${minor} ${repo}/${arch} APK index"
+                die "failed to download Alpine ${minor} ${repo}/${arch} APK index; retry or run Refresh Upstream Versions"
+            [[ -s "${index}" ]] || die "empty Alpine ${minor} ${repo}/${arch} APK index; retry or run Refresh Upstream Versions"
         done
+    done
+}
+
+preflight() (
+    local tool tmpRoot minor arch repo package key expected candidates found
+    validate_lock
+    for tool in curl tar awk grep; do
+        command -v "${tool}" >/dev/null 2>&1 || die "missing preflight tool: ${tool}"
+    done
+    tmpRoot=$(mktemp -d "${PROJECT_ROOT}/.tmp-release-preflight.XXXXXX")
+    trap 'rm -rf -- "${tmpRoot}"' EXIT
+    minor=${PADM_LOCK_ALPINE_VERSION%.*}
+    download_apk_indexes "${minor}" "${tmpRoot}"
+    for arch in x86_64 aarch64; do
+        for package in "${APK_PACKAGES[@]}"; do
+            key=${APK_LOCK_KEYS[${package}]}
+            expected=${!key}
+            found=false
+            for repo in main community; do
+                candidates=$(apk_index_package_versions "${tmpRoot}/apkindex-${repo}-${arch}.tar.gz" "${package}") ||
+                    die "invalid Alpine ${minor} ${repo}/${arch} APK index while checking ${package}=${expected}; retry or run Refresh Upstream Versions"
+                if grep -Fxq -- "${expected}" <<<"${candidates}"; then found=true; fi
+            done
+            [[ "${found}" == true ]] ||
+                die "Alpine ${minor} ${arch} locked APK ${package}=${expected} is unavailable; run Refresh Upstream Versions and merge its versions.lock update before publishing"
+        done
+    done
+    printf 'release-preflight-ok\n'
+)
+
+refresh_alpine_packages() {
+    local minor=$1 tmpRoot=$2 package arch repo index candidate best candidates
+    shift 2
+    local -a packages=("$@")
+    local -A latest=()
+    download_apk_indexes "${minor}" "${tmpRoot}"
+    for arch in x86_64 aarch64; do
         for package in "${packages[@]}"; do
             best=
             for repo in main community; do
@@ -297,23 +353,7 @@ refresh_upstreams() {
     local nginxVersion nginxPackageVersion lockUpdates
     local arch asset expectedDigest actualDigest current apkLockKey
     local updateXray=false updateSingBox=false updateAcme=false updateAlpine=false updateApk=false
-    local -a apkPackages=(ca-certificates gcompat libgcc unzip nginx python3 openssl socat bash iproute2 iptables nftables wireguard-tools fail2ban)
-    local -A apkVersions=() apkLockKeys=(
-        [ca-certificates]=PADM_LOCK_CA_CERTIFICATES_VERSION
-        [gcompat]=PADM_LOCK_GCOMPAT_VERSION
-        [libgcc]=PADM_LOCK_LIBGCC_VERSION
-        [unzip]=PADM_LOCK_UNZIP_VERSION
-        [nginx]=PADM_LOCK_NGINX_PACKAGE_VERSION
-        [python3]=PADM_LOCK_PYTHON3_VERSION
-        [openssl]=PADM_LOCK_OPENSSL_VERSION
-        [socat]=PADM_LOCK_SOCAT_VERSION
-        [bash]=PADM_LOCK_BASH_VERSION
-        [iproute2]=PADM_LOCK_IPROUTE2_VERSION
-        [iptables]=PADM_LOCK_IPTABLES_VERSION
-        [nftables]=PADM_LOCK_NFTABLES_VERSION
-        [wireguard-tools]=PADM_LOCK_WIREGUARD_TOOLS_VERSION
-        [fail2ban]=PADM_LOCK_FAIL2BAN_VERSION
-    )
+    local -A apkVersions=()
     for tool in gh jq curl sha256sum sort tail awk tar; do
         command -v "${tool}" >/dev/null 2>&1 || die "missing upstream refresh tool: ${tool}"
     done
@@ -362,9 +402,9 @@ refresh_upstreams() {
     fi
     tmpRoot=$(mktemp -d "${TMPDIR:-/tmp}/padm-upstream-refresh.XXXXXX")
     trap 'rm -rf -- "${tmpRoot}"' RETURN
-    apkUpdates=$(refresh_alpine_packages "${alpineMinor}" "${tmpRoot}" "${apkPackages[@]}")
+    apkUpdates=$(refresh_alpine_packages "${alpineMinor}" "${tmpRoot}" "${APK_PACKAGES[@]}")
     while IFS=$'\t' read -r package packageVersion; do
-        apkLockKey=${apkLockKeys[${package}]:-}
+        apkLockKey=${APK_LOCK_KEYS[${package}]:-}
         [[ -n "${apkLockKey}" ]] || die "unexpected Alpine package: ${package}"
         current=${!apkLockKey}
         apkVersions["${package}"]=${packageVersion}
@@ -497,8 +537,8 @@ refresh_upstreams() {
         "PADM_LOCK_ACME_SH_VERSION=${acmeVersion}" \
         "PADM_LOCK_ACME_SH_URL=${acmeUrl}" \
         "PADM_LOCK_ACME_SH_SHA256=${acmeSha256}")
-    for package in "${apkPackages[@]}"; do
-        lockUpdates+=$'\n'"${apkLockKeys[${package}]}=${apkVersions[${package}]}"
+    for package in "${APK_PACKAGES[@]}"; do
+        lockUpdates+=$'\n'"${APK_LOCK_KEYS[${package}]}=${apkVersions[${package}]}"
     done
     apply_lock_updates "${LOCK_FILE}" "${tmpRoot}/versions.lock" "${lockUpdates}"
     cp -- "${LOCK_FILE}" "${tmpRoot}/versions.lock.original"
@@ -687,6 +727,7 @@ usage() {
     cat >&2 <<'EOF'
 usage:
   docker/release.sh validate-lock [VERSION]
+  docker/release.sh preflight
   docker/release.sh set-version VERSION
   docker/release.sh refresh-upstreams
   docker/release.sh image-inputs-unchanged BASE HEAD IMAGE
@@ -707,6 +748,10 @@ validate-lock)
 set-version)
     [[ "$#" -eq 2 ]] || { usage; exit 2; }
     set_version "$2"
+    ;;
+preflight)
+    [[ "$#" -eq 1 ]] || { usage; exit 2; }
+    preflight
     ;;
 refresh-upstreams)
     [[ "$#" -eq 1 ]] || { usage; exit 2; }

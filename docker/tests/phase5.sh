@@ -17,7 +17,7 @@ fail() {
     exit 1
 }
 
-for tool in bash cmp git jq grep sha256sum tar; do
+for tool in bash cmp git jq grep node sha256sum tar; do
     command -v "${tool}" >/dev/null 2>&1 || fail "missing tool: ${tool}"
 done
 
@@ -39,6 +39,9 @@ done
 bash -n "${RELEASE_SCRIPT}" "${PROJECT_ROOT}/docker/tests/image-smoke.sh" || fail 'phase 5 shell syntax is invalid'
 jq empty "${SCHEMA_FILE}" || fail 'release manifest schema is invalid JSON'
 bash "${RELEASE_SCRIPT}" validate-lock | grep -qx 'release-lock-ok' || fail 'release lock validation failed'
+bash "${PROJECT_ROOT}/docker/tests/refresh-upstreams.sh"
+node "${PROJECT_ROOT}/docker/tests/sing-box-build.cjs"
+bash "${PROJECT_ROOT}/docker/tests/preflight.sh"
 
 INPUT_ROOT=${TEST_ROOT}/image-inputs
 mkdir -p "${INPUT_ROOT}/docker/tests" "${INPUT_ROOT}/.github/workflows" "${INPUT_ROOT}/shell"
@@ -672,6 +675,7 @@ CI_WAIT_SCRIPT=${TEST_ROOT}/wait-upstream-ci.sh
 cat >"${CI_WAIT_SCRIPT}" <<'EOF'
 set -euo pipefail
 sleep() { :; }
+assert_pr_head() { :; }
 gh() {
     printf '%s\n' "$*" >>"${CI_TEST_ROOT}/calls"
     case "$1 $2" in
@@ -685,8 +689,14 @@ gh() {
                 '[{databaseId: 2, event: "workflow_dispatch", conclusion: $conclusion}]')
         elif [[ "${SCENARIO}" == missing || "${SCENARIO}" == dispatch-blocked ]]; then
             runs='[]'
-        elif [[ "${SCENARIO}" == cancelled && -f "${CI_TEST_ROOT}/watched" ]]; then
-            runs='[{"databaseId":2,"event":"pull_request","conclusion":"success"}]'
+        elif [[ "${SCENARIO}" == cancelled* && -f "${CI_TEST_ROOT}/watched" ]]; then
+            local polls=0
+            [[ ! -f "${CI_TEST_ROOT}/polls" ]] || polls=$(cat "${CI_TEST_ROOT}/polls")
+            printf '%s\n' "$((polls + 1))" >"${CI_TEST_ROOT}/polls"
+            runs='[{"databaseId":1,"event":"pull_request","conclusion":"cancelled"}]'
+            if [[ "${SCENARIO}" == cancelled || ( "${SCENARIO}" == cancelled-delayed && "${polls}" -ge 2 ) ]]; then
+                runs='[{"databaseId":2,"event":"pull_request","conclusion":"success"}]'
+            fi
         else
             case "${SCENARIO}" in
             success) conclusion=success ;;
@@ -695,7 +705,7 @@ gh() {
                 conclusion=
                 [[ ! -f "${CI_TEST_ROOT}/watched" ]] || conclusion=action_required ;;
             failed) conclusion=failure ;;
-            cancelled) conclusion=cancelled ;;
+            cancelled*) conclusion=cancelled ;;
             esac
             runs=$(jq -nc --arg conclusion "${conclusion}" \
                 '[{databaseId: 1, event: "pull_request", conclusion: $conclusion}]')
@@ -712,7 +722,7 @@ gh() {
         blocked|queued) printf 'action_required:pull_request\n' ;;
         dispatch-blocked) printf 'action_required:workflow_dispatch\n' ;;
         failed) printf 'failure:pull_request\n' ;;
-        cancelled) printf 'cancelled:pull_request\n' ;;
+        cancelled*) printf 'cancelled:pull_request\n' ;;
         *) return 99 ;;
         esac ;;
     *) return 99 ;;
@@ -727,7 +737,7 @@ awk '
     }
 ' "${UPSTREAM_WORKFLOW}" >>"${CI_WAIT_SCRIPT}"
 grep -q '^find_ci_run()' "${CI_WAIT_SCRIPT}" || fail 'upstream CI wait script is missing'
-for scenario in success blocked queued missing failed dispatch-blocked cancelled; do
+for scenario in success blocked queued missing failed dispatch-blocked cancelled cancelled-delayed cancelled-missing; do
     ciRoot=${TEST_ROOT}/ci-${scenario}
     mkdir -p "${ciRoot}"
     actual=success
@@ -736,7 +746,7 @@ for scenario in success blocked queued missing failed dispatch-blocked cancelled
         GITHUB_STEP_SUMMARY="${ciRoot}/summary" pr_url=https://example.invalid/pull/1 \
         bash "${CI_WAIT_SCRIPT}" >"${ciRoot}/output" 2>&1 || actual=failure
     expected=success
-    case "${scenario}" in failed|dispatch-blocked) expected=failure ;; esac
+    case "${scenario}" in failed|dispatch-blocked|cancelled-missing) expected=failure ;; esac
     [[ "${actual}" == "${expected}" ]] || { cat "${ciRoot}/output"; fail "upstream CI ${scenario}: ${actual}"; }
     dispatches=0
     case "${scenario}" in blocked|queued|missing|dispatch-blocked) dispatches=1 ;; esac
@@ -800,6 +810,35 @@ grep -Fq -- "-F force_release=\"\${FORCE_RELEASE}\"" "${RELEASE_WORKFLOW}" ||
     fail 'automatic workflow handoff loses release intent'
 grep -Fq 'is_release_commit' "${RELEASE_WORKFLOW}" || fail 'Release workflow lacks release commit guard'
 grep -Fq 'docker/release.sh set-version' "${RELEASE_WORKFLOW}" || fail 'lock/version bump is not unified'
+
+# PR 与 main 都必须覆盖原生源码、回归自身和所有工作流；纯测试变化仍由运行范围判断避免发布。
+for workflow in "${PR_WORKFLOW}" "${RELEASE_WORKFLOW}"; do
+    triggerPaths=$(awk '/^jobs:/ {exit} {print}' "${workflow}")
+    for path in '.github/workflows/**' 'install.sh' 'shell/**' 'assets/**'; do
+        grep -Fxq "      - '${path}'" <<<"${triggerPaths}" || fail "CI trigger misses ${path}: ${workflow}"
+    done
+    if grep -Eq "^[[:space:]]+- ['\"]!shell/" <<<"${triggerPaths}"; then
+        fail "CI trigger excludes native tests: ${workflow}"
+    fi
+    grep -Fq 'uses: docker://rhysd/actionlint:1.7.12' "${workflow}" || fail 'workflow lint gate is missing'
+    grep -Fq 'bash shell/subscription_groups_regression.sh ci' "${workflow}" || fail 'native CI gate is missing'
+done
+prImageNeeds=$(awk '/^  images:$/ {job = 1; next} job && /^    needs:/ {print; exit}' "${PR_WORKFLOW}")
+[[ "${prImageNeeds}" == '    needs: native' ]] || fail 'PR images can run without native validation'
+nativeLine=$(grep -n '^      - name: Check shell syntax and native regressions$' "${RELEASE_WORKFLOW}" | cut -d: -f1)
+preflightLine=$(grep -n '^      - name: Preflight pinned APK dependencies$' "${RELEASE_WORKFLOW}" | cut -d: -f1)
+bumpLine=$(grep -n '^      - name: Bump script and lock version$' "${RELEASE_WORKFLOW}" | cut -d: -f1)
+[[ -n "${nativeLine}" && -n "${preflightLine}" && -n "${bumpLine}" ]] || fail 'release preflight steps are missing'
+((nativeLine < preflightLine && preflightLine < bumpLine)) || fail 'version bump precedes release preflight'
+preflightStep=$(awk '
+    /^      - name: Preflight pinned APK dependencies$/ {step = 1; next}
+    step && /^      - / {exit}
+    step {print}
+' "${RELEASE_WORKFLOW}")
+grep -Fq "if: steps.scope.outputs.changed == 'true' && steps.existing.outputs.result != 'true'" <<<"${preflightStep}" ||
+    fail 'APK preflight must cover new releases and failed-release retries'
+grep -Fq 'run: bash docker/release.sh preflight' <<<"${preflightStep}" || fail 'APK preflight command is missing'
+
 grep -Fq "cron: '17 3 * * *'" "${UPSTREAM_WORKFLOW}" || fail 'upstream refresh is not scheduled daily'
 singBoxCall=$(awk '
     /^  workflow_call:$/ {event = 1; next}
@@ -822,6 +861,8 @@ for requirement in '    needs: latest' '    uses: ./.github/workflows/build-sing
 done
 refreshNeeds=$(awk '/^  refresh:$/ {job = 1; next} job && /^    needs:/ {print; exit}' "${UPSTREAM_WORKFLOW}")
 [[ "${refreshNeeds}" == '    needs: sing_box' ]] || fail 'upstream lock refresh does not wait for sing-box publication'
+grep -Fq "    if: \${{ !cancelled() && (needs.sing_box.result == 'success' || needs.sing_box.result == 'failure') }}" "${UPSTREAM_WORKFLOW}" ||
+    fail 'upstream refresh cannot recover published dependency locks after a failed candidate build'
 grep -Fq 'docker/release.sh refresh-upstreams' "${UPSTREAM_WORKFLOW}" ||
     fail 'upstream workflow does not refresh the lock'
 grep -Fq 'pull-requests: write' "${UPSTREAM_WORKFLOW}" || fail 'upstream workflow cannot create PRs'

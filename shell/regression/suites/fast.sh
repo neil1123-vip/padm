@@ -25,6 +25,19 @@ listRegressionFastFullChildSelectors() {
         fast-only
 }
 
+listRegressionCiChildSelectors() {
+    # platform-refresh 已覆盖 fast 中三项安装检查，完整性检查单独补齐，避免重复夹具并发。
+    printf '%s\n' \
+        fast-smoke \
+        platform-refresh \
+        install-module-manifest \
+        subscription-output \
+        subscription-state \
+        core-safety-rollback \
+        core-install-service-action-failure
+}
+
+registerRegressionFunctionLeaf install-module-manifest runInstallModuleManifestCompleteRegression
 registerRegressionFunctionLeaf fast-only-safety runRegressionFastOnlySafety
 registerRegressionFunctionLeaf fast-only-output-auto-install runRegressionFastOnlyOutputAutoInstall
 registerRegressionFunctionLeaf fast-only-output-rest runRegressionFastOnlyOutputRest
@@ -46,3 +59,5 @@ registerRegressionParallelSelectorList fast-full runFrameworkParallelRegressionS
     "${TMP_DIR}/fast-full-parallel-${BASHPID:-$$}" listRegressionFastFullChildSelectors
 registerRegressionParallelSelectorList fast runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/fast-parallel-${BASHPID:-$$}" listRegressionFastChildSelectors
+registerRegressionParallelSelectorList ci runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/ci-parallel-${BASHPID:-$$}" listRegressionCiChildSelectors 2

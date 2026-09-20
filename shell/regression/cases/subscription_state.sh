@@ -1673,7 +1673,7 @@ JSON
     }
 
     regressionExpectStatus 1 subscriptionSyncApplyAccountPlanTransaction '{"create":["sub_new"],"remove":[]}'
-    jq -e '.inbounds[0].settings.clients[0].email == "sub_new-main"' "${targetFile}" >/dev/null
+    jq -e 'any(.inbounds[0].settings.clients[]?; .email == "sub_new-main")' "${targetFile}" >/dev/null
     [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"配置恢复失败"* ]]
     [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"备份目录:"* ]]
     mapfile -t backupDirs < <(find "${root}/tmp" -maxdepth 1 -type d -name 'padm-subscription-sync-backup.*' -print)

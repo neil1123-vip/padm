@@ -45,39 +45,65 @@ jobs:
 
   refresh:
     needs: sing_box
+    if: ${{ !cancelled() && (needs.sing_box.result == 'success' || needs.sing_box.result == 'failure') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout main
         uses: actions/checkout@v7
         with:
           ref: main
-          fetch-depth: 1
+          fetch-depth: 0
 
-      - name: Check for a pending update
+      - name: Prepare update branch
         id: pending
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          count=$(gh pr list --repo "${GITHUB_REPOSITORY}" --base main --state open --limit 100 \
-            --json headRefName \
-            --jq '[.[] | select(.headRefName | startswith("codex/upstream-versions-"))] | length')
-          if [[ "${count}" -gt 0 ]]; then
-            echo 'skip=true' >>"${GITHUB_OUTPUT}"
-            echo 'A pending upstream update PR already exists.' >>"${GITHUB_STEP_SUMMARY}"
+          main_sha=$(git rev-parse HEAD)
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          prs=$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/pulls?state=open&base=main&per_page=100" |
+            jq --arg repo "${GITHUB_REPOSITORY}" '[.[][] |
+              select(.head.repo.full_name == $repo and (.head.ref | startswith("codex/upstream-versions-")))]')
+          count=$(jq length <<<"${prs}")
+          [[ "${count}" -le 1 ]] || { echo 'Multiple upstream update PRs require manual resolution.' >&2; exit 1; }
+          branch="codex/upstream-versions-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          pr_url=
+          original_sha=${main_sha}
+          if [[ "${count}" == 1 ]]; then
+            # 只续跑同仓分支；不能将 fork 的脚本带入具有写权限的刷新任务。
+            jq -e --arg repo "${GITHUB_REPOSITORY}" '.[0].head.repo.full_name == $repo' <<<"${prs}" >/dev/null || {
+              echo 'Refusing to execute an upstream update from another repository.' >&2; exit 1;
+            }
+            branch=$(jq -r '.[0].head.ref' <<<"${prs}")
+            pr_url=$(jq -r '.[0].html_url' <<<"${prs}")
+            original_sha=$(jq -r '.[0].head.sha' <<<"${prs}")
+            git check-ref-format --branch "${branch}" >/dev/null
+            git fetch origin "refs/heads/${branch}:refs/remotes/origin/${branch}"
+            [[ "$(git rev-parse "refs/remotes/origin/${branch}")" == "${original_sha}" ]] || {
+              echo 'The upstream PR changed while preparing it; retry after the branch settles.' >&2; exit 1;
+            }
+            git switch --create "${branch}" --track "origin/${branch}"
+            # 普通合并保留人工修复；有冲突时停止，不覆盖分支或强制推送。
+            git merge --no-edit "${main_sha}"
           else
-            echo 'skip=false' >>"${GITHUB_OUTPUT}"
+            git switch --create "${branch}"
           fi
+          printf 'branch=%s\npr_url=%s\noriginal_sha=%s\n' "${branch}" "${pr_url}" "${original_sha}" >>"${GITHUB_OUTPUT}"
 
       - name: Refresh stable upstream releases
-        if: steps.pending.outputs.skip != 'true'
         id: update
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SING_BOX_RESULT: ${{ needs.sing_box.result }}
         run: |
           set -euo pipefail
+          if [[ "${SING_BOX_RESULT}" == failure ]]; then
+            echo 'The sing-box build failed; refreshing only complete published releases. The failed build remains visible.' >>"${GITHUB_STEP_SUMMARY}"
+          fi
           bash docker/release.sh refresh-upstreams
           if git diff --quiet -- versions.lock; then
             echo 'changed=false' >>"${GITHUB_OUTPUT}"
@@ -88,7 +114,7 @@ jobs:
           fi
 
       - name: Validate the refreshed lock
-        if: steps.update.outputs.changed == 'true'
+        if: steps.update.outputs.changed == 'true' || steps.pending.outputs.pr_url != ''
         shell: bash
         run: |
           set -euo pipefail
@@ -97,34 +123,66 @@ jobs:
           bash docker/release.sh validate-lock
           bash docker/tests/phase5.sh
 
-      - name: Open update PR and ensure Docker CI
-        if: steps.update.outputs.changed == 'true'
+      - name: Save update PR
+        id: save
+        if: steps.update.outputs.changed == 'true' || steps.pending.outputs.pr_url != ''
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ steps.pending.outputs.branch }}
+          PR_URL: ${{ steps.pending.outputs.pr_url }}
+          ORIGINAL_SHA: ${{ steps.pending.outputs.original_sha }}
         run: |
           set -euo pipefail
           set -a
           . ./versions.lock
           set +a
-          branch="codex/upstream-versions-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          branch=${BRANCH}
+          pr_url=${PR_URL}
           title='chore(deps): refresh upstream versions'
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git switch -c "${branch}"
-          git add versions.lock
-          git commit -m "${title}"
-          git push --set-upstream origin "${branch}"
+          if ! git diff --quiet -- versions.lock; then
+            git add versions.lock
+            git commit -m "${title}"
+          fi
           commit_sha=$(git rev-parse HEAD)
-          body_file="${RUNNER_TEMP}/upstream-pr-body.md"
-          printf '%s\n\n%s\n%s\n%s\n\n%s\n' \
-            'Refresh the pinned stable upstream releases and their downloaded SHA-256 values.' \
-            "- Xray: ${PADM_LOCK_XRAY_VERSION}" \
-            "- sing-box: ${PADM_LOCK_SING_BOX_VERSION}" \
-            "- acme.sh: ${PADM_LOCK_ACME_SH_VERSION}" \
-            'Docker CI validates this commit; the refresh task reuses its PR run or dispatches a fallback.' >"${body_file}"
-          pr_url=$(gh pr create --repo "${GITHUB_REPOSITORY}" --base main --head "${branch}" \
-            --title "${title}" --body-file "${body_file}")
+          if [[ "${commit_sha}" != "${ORIGINAL_SHA}" ]]; then
+            git push --set-upstream origin "${branch}"
+          fi
+          if [[ -z "${pr_url}" ]]; then
+            body_file="${RUNNER_TEMP}/upstream-pr-body.md"
+            printf '%s\n\n%s\n%s\n%s\n\n%s\n' \
+              'Refresh the pinned stable upstream releases and their downloaded SHA-256 values.' \
+              "- Xray: ${PADM_LOCK_XRAY_VERSION}" \
+              "- sing-box: ${PADM_LOCK_SING_BOX_VERSION}" \
+              "- acme.sh: ${PADM_LOCK_ACME_SH_VERSION}" \
+              'Docker CI validates this commit; the refresh task reuses its PR run or dispatches a fallback.' >"${body_file}"
+            pr_url=$(gh pr create --repo "${GITHUB_REPOSITORY}" --base main --head "${branch}" \
+              --title "${title}" --body-file "${body_file}")
+          fi
+          printf 'branch=%s\npr_url=%s\ncommit_sha=%s\n' "${branch}" "${pr_url}" "${commit_sha}" >>"${GITHUB_OUTPUT}"
+
+      - name: Ensure Docker CI
+        if: steps.save.outputs.pr_url != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ steps.save.outputs.branch }}
+          PR_URL: ${{ steps.save.outputs.pr_url }}
+          COMMIT_SHA: ${{ steps.save.outputs.commit_sha }}
+        run: |
+          set -euo pipefail
+          branch=${BRANCH}
+          pr_url=${PR_URL}
+          commit_sha=${COMMIT_SHA}
+          assert_pr_head() {
+            gh pr view "${pr_url}" --repo "${GITHUB_REPOSITORY}" \
+              --json state,isCrossRepository,headRefName,headRefOid |
+              jq -e --arg branch "${branch}" --arg sha "${commit_sha}" \
+                '.state == "OPEN" and .isCrossRepository == false and .headRefName == $branch and .headRefOid == $sha' >/dev/null || {
+                  echo 'The upstream PR state or head changed during validation; rerun against its current head.' >&2; return 1;
+                }
+          }
+          assert_pr_head
           find_ci_run() {
             gh run list --repo "${GITHUB_REPOSITORY}" --workflow docker-ci.yml \
               --branch "${branch}" --commit "${commit_sha}" --limit 100 \
@@ -163,9 +221,15 @@ jobs:
             fi
             [[ "${result}" == cancelled:* ]] || exit 1
             # 两种事件同时到达时，等待同一提交取代被取消运行的验证。
-            replacement=$(find_ci_run)
+            replacement=
+            for _ in {1..30}; do
+              replacement=$(find_ci_run)
+              [[ "${replacement}" =~ ^[0-9]+$ && "${replacement}" -gt "${ci_run_id}" ]] && break
+              sleep 2
+            done
             [[ "${replacement}" =~ ^[0-9]+$ && "${replacement}" -gt "${ci_run_id}" ]] || exit 1
             ci_run_id=${replacement}
           done
           [[ "${passed}" == true ]] || { echo 'Docker CI did not complete successfully' >&2; exit 1; }
-          printf 'Created %s and Docker CI run %s passed.\n' "${pr_url}" "${ci_run_id}" >>"${GITHUB_STEP_SUMMARY}"
+          assert_pr_head
+          printf 'Updated %s and Docker CI run %s passed.\n' "${pr_url}" "${ci_run_id}" >>"${GITHUB_STEP_SUMMARY}"

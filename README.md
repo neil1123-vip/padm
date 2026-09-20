@@ -139,7 +139,7 @@ padm-docker status
 
 需要固定控制脚本版本时，把 `install` 改为 `install --ref <40 位 commit SHA>`；不要把 `latest` 当作生产版本锁。CI Release 同时提供 `release-manifest.json`、Cosign 签发的 Sigstore bundle v0.3（`release-manifest.sigstore.json`，签名内嵌）和 `padm-docker-bundle.tar.gz`，更新时会校验 bundle 签名和摘要。
 
-`main` 的安装入口、运行脚本、Docker 配置、镜像输入或版本锁存在未发布变化时才自动发布。Docker 测试、发布脚本和 CI 文件变化也会触发 `Release` 检查；没有待发布运行变化时只跑 Docker 契约测试，不递增版本、不构建镜像、不发布附件。若前次发布失败，修复测试或 CI 后的推送会继续处理尚未发布的运行变化。仅文档变化不触发。发布任务串行处理最新 `main`，三个附件全部上传并核对摘要后才公开 Release。需要重试或主动发布时运行 `Release` 工作流；PR 和手动镜像验证使用 `Docker CI`。
+`main` 的安装入口、运行脚本、Docker 配置、镜像输入或版本锁存在未发布变化时才自动发布。Docker 测试、发布脚本和 CI 文件变化也会触发 `Release` 检查；没有待发布运行变化时只跑 Docker 契约测试，不递增版本、不构建镜像、不发布附件。若前次发布失败，修复测试或 CI 后的推送会继续处理尚未发布的运行变化。仅文档变化不触发。PR 的 `Docker CI` 先运行 actionlint、全部 Shell 语法检查和 `bash shell/subscription_groups_regression.sh ci` 原生回归，门槛通过后才构建镜像；`Release` 会在版本递增前执行同一门槛，并只读预检两架构 Alpine 索引中的锁定 APK 版本。发布任务串行处理最新 `main`，三个附件全部上传并核对摘要后才公开 Release。需要重试或主动发布时运行 `Release` 工作流；PR 和手动镜像验证使用 `Docker CI`。
 
 CI 按每个镜像的目录、共享构建定义及实际锁定依赖判断是否重建；未变化的镜像沿用上一份已验签 manifest 的 `tag@sha256`，其标签可能早于当前脚本版本。每个变化镜像的两个架构各构建一次，按精确摘要测试后合并并签名；所有复用镜像仍执行双架构 smoke 和签名验证。无法确认可信基线时完整重建。SBOM、provenance 和镜像签名保存在 OCI 仓库，诊断 JSON 仅作为保留 7 天的 Actions artifact，不再作为 Release 附件重复上传。
 
@@ -567,9 +567,9 @@ Docker 镜像按 `versions.lock` 固定统计包版本和双架构 SHA256；官�
 
 稳定版、预发布版试跑和版本回退均只选择本仓库已发布的 `sing-box-v<上游版本>`，安装时校验资产摘要、实际版本和 `with_v2ray_api` 标签；缺少安装包或校验失败会停止，不会替换当前核心。
 
-维护者可运行 Actions 的 `Build sing-box Traffic Stats` 工作流，`version` 留空时读取 `versions.lock`，也可指定上游标签（如 `v1.14.0`）。推送至 `main` 时，仅统计版构建文件或相关版本锁输入变化才进入准备流程；已完整发布的统计包不会重复构建，无关锁变化直接跳过。两个架构均须通过启动、Naive/Cronet 加载、Hysteria2/TUIC 实际传输和用户统计检查，才会发布二进制包、对应源码包和 `SHA256SUMS`；二进制包包含 `LICENSE` 和构建信息。统计版 release 不占用 padm 自身的 latest 标记。首次使用前需等待该工作流成功发布。
+维护者可运行 Actions 的 `Build sing-box Traffic Stats` 工作流，`version` 留空时读取 `versions.lock`，也可指定上游标签（如 `v1.14.0`）。推送至 `main` 时，仅统计版构建文件、统计解码器、镜像检查或相关版本锁输入变化才进入构建准备；无关锁变化跳过。构建逻辑、Alpine 运行依赖或同版本官方摘要变化，以及手动运行，都会重新验证已发布版本，但不会覆盖已发布资产；日常巡检和已发布版本的锁升级仍可复用统计包。两个架构均须通过原生启动、Naive/Cronet 加载、Hysteria2/TUIC 实际传输和用户统计检查，再将本次候选包放入实际 Dockerfile，使用锁定的 Alpine 依赖完成镜像 smoke，才会发布二进制包、对应源码包和 `SHA256SUMS`。二进制包包含 `LICENSE` 和构建信息；统计版 release 不占用 padm 自身的 latest 标记。首次使用前需等待该工作流成功发布。
 
-`Refresh Upstream Versions` 每天北京时间 11:17 调度检查官方 sing-box 最新稳定版（GitHub 调度可能延迟），也可手动运行。发现尚未发布的统计版时，自动调用上述双架构构建工作流；已完整发布的版本直接复用。构建、验证和发布成功后，继续刷新 Docker 版本锁并创建更新 PR；构建失败会停止刷新，下次运行重试。已有待处理的上游更新 PR 时仍检查并构建统计版，但暂不新建版本锁 PR。自动刷新只选择本仓库已发布的正式统计版，忽略草稿和预发布版；更新 PR 仍需合并，Docker CI 在两种架构上检查统计标签、API 启动及 Cronet 加载后才允许发布镜像。需要预发布版时仍可手动指定 `version` 运行统计版工作流。
+`Refresh Upstream Versions` 每天北京时间 11:17 调度检查官方 sing-box 最新稳定版（GitHub 调度可能延迟），也可手动运行。发现尚未发布的统计版时，自动调用上述双架构构建工作流；日常巡检复用已完整发布的版本。刷新会更新 Docker 版本锁并创建或继续更新同一个 PR：保留人工提交，合并 `main` 后刷新锁，以普通 push 更新分支；冲突、多个候选 PR 或并发分支变更会明确失败。即使锁没有变化，也会继续检查该 PR 当前提交的 Docker CI，补派缺失或待审批的检查，真实测试失败则保留失败。统计版构建失败时工作流仍报告失败，但允许为已发布版本刷新依赖锁，避免旧 APK 下架阻断修复；失败候选不会进入锁。自动刷新只选择本仓库已发布的正式统计版，忽略草稿和预发布版。更新 PR 仍需合并，Docker CI 在两种架构上检查统计标签、API 启动及 Cronet 加载后才允许发布镜像。需要预发布版时仍可手动指定 `version` 运行统计版工作流。
 
 ## 系统与脚本
 
