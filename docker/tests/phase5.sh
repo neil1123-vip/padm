@@ -667,6 +667,88 @@ for scenario in new draft untagged stale-untagged duplicate published conflictin
     [[ "${scenario}" == new || ! -f "${publishRoot}/created" ]] || fail "publish ${scenario} created a duplicate release"
 done
 
+# 执行实际 CI 等待逻辑；待审批的 PR 可以派发，真实失败不能绕过。
+CI_WAIT_SCRIPT=${TEST_ROOT}/wait-upstream-ci.sh
+cat >"${CI_WAIT_SCRIPT}" <<'EOF'
+set -euo pipefail
+sleep() { :; }
+gh() {
+    printf '%s\n' "$*" >>"${CI_TEST_ROOT}/calls"
+    case "$1 $2" in
+    'run list')
+        [[ "$*" == *" --branch ${branch} --commit ${commit_sha} "* ]]
+        local runs conclusion
+        if [[ -f "${CI_TEST_ROOT}/dispatched" ]]; then
+            conclusion=success
+            [[ "${SCENARIO}" != dispatch-blocked ]] || conclusion=action_required
+            runs=$(jq -nc --arg conclusion "${conclusion}" \
+                '[{databaseId: 2, event: "workflow_dispatch", conclusion: $conclusion}]')
+        elif [[ "${SCENARIO}" == missing || "${SCENARIO}" == dispatch-blocked ]]; then
+            runs='[]'
+        elif [[ "${SCENARIO}" == cancelled && -f "${CI_TEST_ROOT}/watched" ]]; then
+            runs='[{"databaseId":2,"event":"pull_request","conclusion":"success"}]'
+        else
+            case "${SCENARIO}" in
+            success) conclusion=success ;;
+            blocked) conclusion=action_required ;;
+            queued)
+                conclusion=
+                [[ ! -f "${CI_TEST_ROOT}/watched" ]] || conclusion=action_required ;;
+            failed) conclusion=failure ;;
+            cancelled) conclusion=cancelled ;;
+            esac
+            runs=$(jq -nc --arg conclusion "${conclusion}" \
+                '[{databaseId: 1, event: "pull_request", conclusion: $conclusion}]')
+        fi
+        jq -r "${!#}" <<<"${runs}" ;;
+    'workflow run')
+        [[ "$*" == "workflow run docker-ci.yml --repo ${GITHUB_REPOSITORY} --ref ${branch}" ]]
+        touch "${CI_TEST_ROOT}/dispatched" ;;
+    'run watch')
+        touch "${CI_TEST_ROOT}/watched"
+        [[ "${SCENARIO}" == success || ( "$3" == 2 && "${SCENARIO}" != dispatch-blocked ) ]] ;;
+    'run view')
+        case "${SCENARIO}" in
+        blocked|queued) printf 'action_required:pull_request\n' ;;
+        dispatch-blocked) printf 'action_required:workflow_dispatch\n' ;;
+        failed) printf 'failure:pull_request\n' ;;
+        cancelled) printf 'cancelled:pull_request\n' ;;
+        *) return 99 ;;
+        esac ;;
+    *) return 99 ;;
+    esac
+}
+EOF
+awk '
+    /^          find_ci_run\(\) \{$/ {code = 1}
+    code {
+        if ($0 !~ /^          / && $0 !~ /^[[:space:]]*$/) exit
+        sub(/^          /, ""); print
+    }
+' "${UPSTREAM_WORKFLOW}" >>"${CI_WAIT_SCRIPT}"
+grep -q '^find_ci_run()' "${CI_WAIT_SCRIPT}" || fail 'upstream CI wait script is missing'
+for scenario in success blocked queued missing failed dispatch-blocked cancelled; do
+    ciRoot=${TEST_ROOT}/ci-${scenario}
+    mkdir -p "${ciRoot}"
+    actual=success
+    SCENARIO="${scenario}" CI_TEST_ROOT="${ciRoot}" branch=codex/upstream-versions-test \
+        commit_sha="${COMMIT}" GITHUB_REPOSITORY=example/padm \
+        GITHUB_STEP_SUMMARY="${ciRoot}/summary" pr_url=https://example.invalid/pull/1 \
+        bash "${CI_WAIT_SCRIPT}" >"${ciRoot}/output" 2>&1 || actual=failure
+    expected=success
+    case "${scenario}" in failed|dispatch-blocked) expected=failure ;; esac
+    [[ "${actual}" == "${expected}" ]] || { cat "${ciRoot}/output"; fail "upstream CI ${scenario}: ${actual}"; }
+    dispatches=0
+    case "${scenario}" in blocked|queued|missing|dispatch-blocked) dispatches=1 ;; esac
+    [[ "$(grep -c '^workflow run ' "${ciRoot}/calls" || true)" == "${dispatches}" ]] ||
+        fail "upstream CI ${scenario} dispatched the wrong number of runs"
+    if [[ "${expected}" == success ]]; then
+        grep -Fq 'passed.' "${ciRoot}/summary" || fail "upstream CI ${scenario} did not confirm success"
+    else
+        [[ ! -s "${ciRoot}/summary" ]] || fail "upstream CI ${scenario} reported false success"
+    fi
+done
+
 grep -Fq 'workflow_call:' "${BUILD_WORKFLOW}" || fail 'build workflow is not reusable'
 smokeRunner=$(awk '
     /^  smoke:$/ { inSmoke = 1; next }
