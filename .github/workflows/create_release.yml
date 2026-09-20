@@ -32,14 +32,15 @@ jobs:
     name: Resolve release
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     permissions:
       contents: write
       actions: write
     outputs:
       release_version: ${{ steps.resolve.outputs.release_version }}
       release_sha: ${{ steps.target.outputs.release_sha }}
-      deferred: ${{ steps.revision.outputs.deferred }}
-      skip: ${{ steps.revision.outputs.deferred == 'true' || steps.scope.outputs.changed != 'true' || steps.existing.outputs.result == 'true' }}
+      deferred: ${{ steps.revision.outputs.deferred == 'true' || steps.bump.outputs.handoff == 'true' }}
+      skip: ${{ steps.revision.outputs.deferred == 'true' || steps.bump.outputs.handoff == 'true' || steps.scope.outputs.changed != 'true' || steps.existing.outputs.result == 'true' }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v7
@@ -237,6 +238,11 @@ jobs:
             fi
             exit 1
           fi
+          # GITHUB_TOKEN 推送不会自动触发新的 workflow；交给新 run 接管，避免本 run 重复构建同一版本。
+          gh workflow run create_release.yml --repo "${GITHUB_REPOSITORY}" --ref main \
+            -F force_release="${FORCE_RELEASE}"
+          echo 'handoff=true' >>"${GITHUB_OUTPUT}"
+          echo 'Release version commit pushed; the next run will perform the build and publication.' >>"${GITHUB_STEP_SUMMARY}"
           echo "release_sha=${release_sha}" >>"${GITHUB_OUTPUT}"
 
       - name: Resolve build commit
@@ -273,6 +279,7 @@ jobs:
     needs: [prepare, images]
     if: ${{ needs.prepare.outputs.skip != 'true' && needs.images.result == 'success' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
       id-token: write

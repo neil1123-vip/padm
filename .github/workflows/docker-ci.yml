@@ -21,24 +21,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  native:
-    name: Native shell and workflow checks
+  static:
+    name: Native static checks
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - name: Lint workflows
         uses: docker://rhysd/actionlint:1.7.12
         with:
           args: -color
-      - name: Check shell syntax and native regressions
+      - name: Check shell syntax
         shell: bash
         run: |
           set -euo pipefail
           git ls-files -z -- '*.sh' | xargs -0 -r -n 1 bash -n
-          bash shell/subscription_groups_regression.sh ci
+
+  native:
+    name: Native shell and workflow checks
+    needs: static
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Run native regression profile
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          selector=ci
+          if [[ "${GITHUB_EVENT_NAME}" == pull_request && "${PR_BASE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            changed=$(git diff --name-only "${PR_BASE_SHA}" HEAD)
+            if ! grep -Eq '^(shell/subscription/|shell/regression/(framework|cases/subscription[.]sh|suites/subscription[.]sh)|shell/subscription_groups_regression[.]sh)' <<<"${changed}"; then
+              selector=ci-pr
+            fi
+          fi
+          printf 'Native regression selector: %s\n' "${selector}" >>"${GITHUB_STEP_SUMMARY}"
+          bash shell/subscription_groups_regression.sh "${selector}"
 
   images:
-    needs: native
+    needs: [static, native]
     uses: ./.github/workflows/build-images.yml
     concurrency:
       group: docker-ci-head-${{ github.event.pull_request.head.sha || github.sha }}

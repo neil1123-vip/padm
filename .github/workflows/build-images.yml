@@ -34,11 +34,14 @@ on:
 jobs:
   contract:
     name: Docker contracts
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     permissions:
       contents: read
     outputs:
       images: ${{ steps.plan.outputs.images }}
+      build_images: ${{ steps.plan.outputs.build_images }}
+      build_required: ${{ steps.plan.outputs.build_required }}
       registry_host: ${{ steps.plan.outputs.registry_host }}
     steps:
       - name: Checkout source
@@ -92,6 +95,7 @@ jobs:
             echo '::notice::No verified release baseline; all images will be rebuilt.'
           fi
           images='[]'
+          build_images='[]'
           for name in xray sing-box nginx ops net; do
             reference=
             if [[ -n "${baseline}" ]] &&
@@ -103,19 +107,30 @@ jobs:
             fi
             images=$(jq -c --arg name "${name}" --arg reference "${reference}" \
               '. + [{name: $name, reference: $reference}]' <<<"${images}")
+            if [[ -z "${reference}" ]]; then
+              build_images=$(jq -c --arg name "${name}" \
+                '. + [{name: $name, reference: ""}]' <<<"${build_images}")
+            fi
             printf '%s: %s\n' "${name}" "${reference:-rebuild}" >>"${GITHUB_STEP_SUMMARY}"
           done
           echo "images=${images}" >>"${GITHUB_OUTPUT}"
+          echo "build_images=${build_images}" >>"${GITHUB_OUTPUT}"
+          if [[ "${build_images}" == '[]' ]]; then
+            echo 'build_required=false' >>"${GITHUB_OUTPUT}"
+          else
+            echo 'build_required=true' >>"${GITHUB_OUTPUT}"
+          fi
           echo "registry_host=${PADM_REGISTRY%%/*}" >>"${GITHUB_OUTPUT}"
 
   smoke:
     name: Smoke ${{ matrix.image.name }} (${{ matrix.platform.name }})
+    timeout-minutes: 30
     needs: contract
-    if: ${{ !inputs.contracts_only }}
+    if: ${{ !inputs.contracts_only && needs.contract.outputs.build_required == 'true' }}
     strategy:
       fail-fast: true
       matrix:
-        image: ${{ fromJSON(needs.contract.outputs.images) }}
+        image: ${{ fromJSON(needs.contract.outputs.build_images) }}
         platform:
           - name: amd64
             value: linux/amd64
@@ -217,7 +232,8 @@ jobs:
 
   publish:
     name: Publish ${{ matrix.image.name }}
-    if: ${{ inputs.push && !inputs.contracts_only }}
+    timeout-minutes: 15
+    if: ${{ always() && inputs.push && !inputs.contracts_only && needs.contract.result == 'success' && (needs.smoke.result == 'success' || needs.smoke.result == 'skipped') }}
     needs: [contract, smoke]
     runs-on: ubuntu-latest
     strategy:
@@ -335,6 +351,7 @@ jobs:
 
   assemble:
     name: Assemble release assets
+    timeout-minutes: 10
     if: ${{ inputs.push && !inputs.contracts_only }}
     needs: publish
     runs-on: ubuntu-latest

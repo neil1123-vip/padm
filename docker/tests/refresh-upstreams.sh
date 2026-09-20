@@ -35,6 +35,10 @@ extract_step 'Ensure Docker CI' | sed '/^find_ci_run()/,$d' >"${test_root}/check
 # 无锁变化的已有 PR 也必须进入保存和同 head CI 校验。
 grep -Fq "if: steps.update.outputs.changed == 'true' || steps.pending.outputs.pr_url != ''" "${workflow}" || fail 'existing PR continuation is gated by lock changes'
 grep -Fq "if: steps.save.outputs.pr_url != ''" "${workflow}" || fail 'existing PR CI is not ensured'
+grep -Fq 'bash docker/release.sh validate-lock' "${workflow}" || fail 'refreshed lock validation is missing'
+if grep -Fq 'bash docker/tests/phase5.sh' "${workflow}"; then
+    fail 'refresh workflow duplicates the Docker contract suite'
+fi
 
 gh() {
     printf '%s\n' "$*" >>"${case_root}/gh-calls"

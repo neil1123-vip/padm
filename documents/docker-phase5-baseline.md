@@ -14,7 +14,8 @@
   和迁移列表；未知字段或缺失字段拒绝。
 - `.github/workflows/build-images.yml` 仅作为可复用 workflow，按镜像输入变化决定构建或复用。
   发布时每架构只构建一次，携带 SBOM/provenance 按 digest 推送；精确摘要通过 smoke 后
-  才合并双架构 index 并签名。普通验证使用 `--load`，复用镜像仍做双架构 smoke 和验签。
+  才合并双架构 index 并签名。普通验证使用 `--load`，复用镜像只做 manifest、平台摘要
+  和签名校验；无法确认可信基线时完整重建。
   分镜像/架构使用 Actions 构建缓存，复用基线须来自已验签且可追溯的旧 manifest。
 - `.github/workflows/docker-ci.yml` 为 Pull Request 复用同一 workflow，禁止推送。
 - `.github/workflows/create_release.yml` 只对运行内容变化自动发布，串行处理最新 `main`，

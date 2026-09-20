@@ -37,6 +37,16 @@ listRegressionCiChildSelectors() {
         core-install-service-action-failure
 }
 
+listRegressionCiPrChildSelectors() {
+    # PR 默认只跑不依赖大型状态夹具的安全门；订阅和 harness 变更由工作流按范围升级到 ci。
+    printf '%s\n' \
+        fast-smoke \
+        platform-refresh \
+        install-module-manifest \
+        core-safety-rollback \
+        core-install-service-action-failure
+}
+
 registerRegressionFunctionLeaf install-module-manifest runInstallModuleManifestCompleteRegression
 registerRegressionFunctionLeaf fast-only-safety runRegressionFastOnlySafety
 registerRegressionFunctionLeaf fast-only-output-auto-install runRegressionFastOnlyOutputAutoInstall
@@ -61,3 +71,5 @@ registerRegressionParallelSelectorList fast runFrameworkParallelRegressionSelect
     "${TMP_DIR}/fast-parallel-${BASHPID:-$$}" listRegressionFastChildSelectors
 registerRegressionParallelSelectorList ci runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/ci-parallel-${BASHPID:-$$}" listRegressionCiChildSelectors 2
+registerRegressionParallelSelectorList ci-pr runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/ci-pr-parallel-${BASHPID:-$$}" listRegressionCiPrChildSelectors 2
