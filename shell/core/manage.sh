@@ -2880,6 +2880,7 @@ refreshPublishedSubscriptions() {
         "${SUBSCRIPTION_GROUPS_LOCK_HELD:-}" != "1" ]] &&
         subscriptionRemoteScopeEnabled &&
         subscriptionHasEnabledRemoteSources; then
+        export SUBSCRIPTION_SYNC_PUBLISHED=false
         runSubscriptionGroupSync
         return $?
     fi

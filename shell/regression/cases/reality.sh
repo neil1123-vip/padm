@@ -1497,6 +1497,11 @@ runRealityConfigRefreshSubscriptionRegression() {
     refreshSubscriptionsAfterRealityTargetChange >/dev/null
     [[ "${refreshCalls}" == "2" && "${subscribeCalls}" == "0" ]]
 
+    refreshPublishedSubscriptions() { refreshCalls=$((refreshCalls + 1)); return 1; }
+    SUBSCRIPTION_SYNC_PUBLISHED=true
+    refreshSubscriptionsAfterRealityTargetChange >/dev/null
+    [[ "${refreshCalls}" == "3" && "${subscribeCalls}" == "0" ]]
+
     nginxConfigPath="${oldNginxConfigPath}"
     subscribePort="${oldSubscribePort}"
 }

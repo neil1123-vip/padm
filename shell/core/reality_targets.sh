@@ -3278,7 +3278,10 @@ refreshSubscriptionsAfterRealityTargetChange() {
     fi
     readNginxSubscribe
     if [[ -n "${subscribePort:-}" || -f "${nginxConfigPath:-/etc/nginx/conf.d/}subscribe.conf" ]]; then
-        refreshPublishedSubscriptions
+        if refreshPublishedSubscriptions; then
+            return 0
+        fi
+        [[ "${SUBSCRIPTION_SYNC_PUBLISHED:-false}" == "true" ]]
     else
         realityTargetStatusBlock yellow "REALITY 目标站" "未启用订阅服务，已跳过订阅刷新"
     fi

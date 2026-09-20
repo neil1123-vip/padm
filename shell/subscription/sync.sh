@@ -1229,6 +1229,7 @@ runSubscriptionGroupSyncUnlocked() {
     local quotaAutoApply=false
     local failureDetails='[]'
     local rc=0
+    export SUBSCRIPTION_SYNC_PUBLISHED=false
     ensureSubscriptionGroupsState || return 1
     readInstallType
     readInstallProtocolType
@@ -1451,8 +1452,11 @@ runSubscriptionGroupSyncUnlocked() {
             if ! refreshPublishedSubscriptions "${remoteSnapshots}" >/dev/null 2>&1; then
                 failureMessages+=("同步完成后公网订阅刷新失败")
                 rc=1
-            elif [[ "${remoteFailures}" != "[]" ]]; then
-                publishedWithRemoteFailures=true
+            else
+                export SUBSCRIPTION_SYNC_PUBLISHED=true
+                if [[ "${remoteFailures}" != "[]" ]]; then
+                    publishedWithRemoteFailures=true
+                fi
             fi
             local publishedAccountCount
             local remoteSourceCount

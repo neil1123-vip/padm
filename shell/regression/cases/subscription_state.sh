@@ -1981,6 +1981,7 @@ JSON
         jq -e '. == [{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"edge.example.com","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"}]' "${remoteArgFile}" >/dev/null
         grep -q '被控服务器同步失败' "${resultFailures}"
         [[ -f "${refreshLog}" ]]
+        [[ "${SUBSCRIPTION_SYNC_PUBLISHED}" == "true" ]]
         jq -e '."edge-a" == null' "${snapshotFile}" >/dev/null
         grep -q '已按可用来源发布订阅' "${statusLog}"
     fi
@@ -2069,6 +2070,7 @@ assert lines.index('remote-sync') < lines.index('refresh-publish')
 PY
     [[ "$(<"${resultFailures}")" == "[]" ]]
     grep -qx 'success' "${resultStatus}"
+    [[ "${SUBSCRIPTION_SYNC_PUBLISHED}" == "true" ]]
     grep -q '自动同步完成' "${statusLog}"
     if regressionFindHasMatches "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \); then
         return 1
