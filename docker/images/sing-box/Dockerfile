@@ -60,6 +60,8 @@ LABEL org.opencontainers.image.source="${SOURCE_URL}" \
       io.padm.writable-paths="/tmp,/var/lib/padm/sing-box"
 
 ENV LD_LIBRARY_PATH=/usr/local/lib
+# 让 Cronet 在 libc 前加载，确保 musl 下 RTLD_NEXT 能找到 close 符号。
+ENV LD_PRELOAD=/usr/local/lib/libcronet.so
 USER 10001:10001
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["/usr/local/bin/sing-box"]
