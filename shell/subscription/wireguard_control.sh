@@ -581,6 +581,7 @@ subscriptionWireGuardRestoreStateAndConfig() {
     fi
     if [[ -n "${nginxBackupDir}" ]]; then
         checkLogBackupRestore "${nginxBackupDir}" >/dev/null 2>&1 || restoreFailed=true
+        subscriptionWireGuardNginxSystemdDaemonReload || restoreFailed=true
         if [[ "${nginxWasRunning}" == "true" ]]; then
             if nginxRunning && ! runCoreServiceActionAllowFailure handleNginx stop; then
                 restoreFailed=true
@@ -913,6 +914,45 @@ subscriptionWireGuardNginxConfigFile() {
     padmRequireSafeAbsolutePath "${targetPath}"
 }
 
+subscriptionWireGuardNginxSystemdDropInFile() {
+    padmRequireSafeAbsolutePath "${PADM_WIREGUARD_NGINX_SYSTEMD_DROPIN_FILE:-/etc/systemd/system/nginx.service.d/10-padm-wg.conf}"
+}
+
+subscriptionWireGuardNginxSystemdDaemonReload() {
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl daemon-reload >/dev/null 2>&1
+    fi
+}
+
+ensureSubscriptionWireGuardNginxSystemdDropIn() {
+    local targetPath
+    local tmpPath
+    command -v systemctl >/dev/null 2>&1 || return 0
+    targetPath=$(subscriptionWireGuardNginxSystemdDropInFile) || return 1
+    padmCommitTargetIsFileLike "${targetPath}" || return 1
+    padmCreateTempFileForTarget tmpPath "${targetPath}" nginx || return 1
+    cat >"${tmpPath}" <<'EOF' || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
+[Unit]
+Requires=wg-quick@wg-padm.service
+After=wg-quick@wg-padm.service
+EOF
+    commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
+    subscriptionWireGuardNginxSystemdDaemonReload
+}
+
+removeSubscriptionWireGuardNginxSystemdDropIn() {
+    local targetPath
+    local targetExists=false
+    targetPath=$(subscriptionWireGuardNginxSystemdDropInFile) || return 1
+    if [[ -e "${targetPath}" || -L "${targetPath}" ]]; then
+        targetExists=true
+    fi
+    removeManagedFileIfPresent "${targetPath}" || return 1
+    if [[ "${targetExists}" == "true" ]]; then
+        subscriptionWireGuardNginxSystemdDaemonReload
+    fi
+}
+
 removeSubscriptionWireGuardNginxConfig() {
     local targetPath
     targetPath=$(subscriptionWireGuardNginxConfigFile) || return 1
@@ -927,7 +967,10 @@ ensureSubscriptionWireGuardNginx() {
 }
 
 refreshSubscriptionWireGuardNginxControl() {
-    ensureSubscriptionWireGuardNginx && ensureSubscriptionWireGuardNginxConfig && serviceQueueRefresh nginx
+    ensureSubscriptionWireGuardNginx &&
+        ensureSubscriptionWireGuardNginxConfig &&
+        ensureSubscriptionWireGuardNginxSystemdDropIn &&
+        serviceQueueRefresh nginx
 }
 
 subscriptionWireGuardWaitForAddress() {
@@ -1032,6 +1075,7 @@ subscriptionWireGuardInstallControlPlane() {
     local previousState=$1
     local roleLabel=$2
     local nginxTarget
+    local nginxDropInTarget
     local nginxBackupDir=
     local nginxWasRunning=false
     local previousServiceActions
@@ -1041,7 +1085,12 @@ subscriptionWireGuardInstallControlPlane() {
         errorCard "WireGuard Nginx 控制面配置路径异常"
         return 1
     }
-    checkLogBackupCreate nginxBackupDir "${nginxTarget}" || {
+    nginxDropInTarget=$(subscriptionWireGuardNginxSystemdDropInFile) || {
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard Nginx systemd 配置路径异常" || return 1
+        errorCard "WireGuard Nginx systemd 配置路径异常"
+        return 1
+    }
+    checkLogBackupCreate nginxBackupDir "${nginxTarget}" "${nginxDropInTarget}" || {
         subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard Nginx 控制面配置备份失败" || return 1
         errorCard "WireGuard Nginx 控制面配置备份失败"
         return 1
@@ -1958,6 +2007,7 @@ restartSubscriptionWireGuardControlApply() {
     local listenPort
     local firewallOwned=false
     local nginxTarget
+    local nginxDropInTarget
     local nginxBackupDir=
     local nginxWasRunning=false
     local previousServiceActions
@@ -1980,7 +2030,11 @@ restartSubscriptionWireGuardControlApply() {
         errorCard "WireGuard Nginx 控制面配置路径异常"
         return 1
     }
-    checkLogBackupCreate nginxBackupDir "${nginxTarget}" || {
+    nginxDropInTarget=$(subscriptionWireGuardNginxSystemdDropInFile) || {
+        errorCard "WireGuard Nginx systemd 配置路径异常"
+        return 1
+    }
+    checkLogBackupCreate nginxBackupDir "${nginxTarget}" "${nginxDropInTarget}" || {
         errorCard "WireGuard Nginx 控制面配置备份失败"
         return 1
     }
@@ -2032,6 +2086,7 @@ disableSubscriptionWireGuardControl() {
     local listenPort
     local firewallOwned=false
     local nginxTarget
+    local nginxDropInTarget
     local nginxBackupDir=
     local nginxWasRunning=false
     local previousServiceActions
@@ -2046,8 +2101,12 @@ disableSubscriptionWireGuardControl() {
         errorCard "WireGuard Nginx 控制面配置路径异常"
         return 1
     }
-    if [[ -e "${nginxTarget}" || -L "${nginxTarget}" ]]; then
-        checkLogBackupCreate nginxBackupDir "${nginxTarget}" || {
+    nginxDropInTarget=$(subscriptionWireGuardNginxSystemdDropInFile) || {
+        errorCard "WireGuard Nginx systemd 配置路径异常"
+        return 1
+    }
+    if [[ -e "${nginxTarget}" || -L "${nginxTarget}" || -e "${nginxDropInTarget}" || -L "${nginxDropInTarget}" ]]; then
+        checkLogBackupCreate nginxBackupDir "${nginxTarget}" "${nginxDropInTarget}" || {
             errorCard "WireGuard Nginx 控制面配置备份失败"
             return 1
         }
@@ -2070,6 +2129,12 @@ disableSubscriptionWireGuardControl() {
             SERVICE_ACTIONS="${previousServiceActions}"
             subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard Nginx 控制面配置移除失败" "${nginxBackupDir}" "${nginxWasRunning}" || return 1
             errorCard "WireGuard Nginx 控制面配置移除失败"
+            return 1
+        }
+        removeSubscriptionWireGuardNginxSystemdDropIn || {
+            SERVICE_ACTIONS="${previousServiceActions}"
+            subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard Nginx systemd 配置移除失败" "${nginxBackupDir}" "${nginxWasRunning}" || return 1
+            errorCard "WireGuard Nginx systemd 配置移除失败"
             return 1
         }
         serviceQueueRefresh nginx

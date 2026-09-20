@@ -391,7 +391,9 @@ runUninstallWireGuardCleanupRegression() (
     local targetDir="${TMP_DIR}/uninstall-wireguard"
     local oldWireGuardDir="${PADM_WIREGUARD_CONTROL_DIR:-}"
     PADM_WIREGUARD_CONTROL_DIR="${targetDir}/state"
+    PADM_WIREGUARD_NGINX_SYSTEMD_DROPIN_FILE="${targetDir}/systemd/nginx.service.d/10-padm-wg.conf"
     mkdir -p "${PADM_WIREGUARD_CONTROL_DIR}" "${targetDir}/etc-wireguard" "${targetDir}/systemd"
+    mkdir -p "$(dirname "${PADM_WIREGUARD_NGINX_SYSTEMD_DROPIN_FILE}")"
     subscriptionWireGuardWriteState '.'
     printf 'private\n' >"$(subscriptionWireGuardPrivateKeyFile)"
     printf 'public\n' >"$(subscriptionWireGuardPublicKeyFile)"
@@ -417,6 +419,7 @@ runUninstallWireGuardCleanupRegression() (
     subscriptionControlServiceFile() { printf '%s\n' "${targetDir}/systemd/padm-subscription-control.service"; }
     printf 'wg\n' >"$(subscriptionWireGuardConfigFile)"
     printf 'svc\n' >"$(subscriptionControlServiceFile)"
+    printf 'drop-in\n' >"${PADM_WIREGUARD_NGINX_SYSTEMD_DROPIN_FILE}"
 
     for mode in wg-stop-fail control-stop-fail; do
         actions=
@@ -426,18 +429,21 @@ runUninstallWireGuardCleanupRegression() (
         [[ -e "$(subscriptionWireGuardPrivateKeyFile)" ]]
         [[ -e "$(subscriptionWireGuardPublicKeyFile)" ]]
         [[ -e "$(subscriptionControlServiceFile)" ]]
+        [[ -e "${PADM_WIREGUARD_NGINX_SYSTEMD_DROPIN_FILE}" ]]
     done
 
     mode=success
     actions=
     cleanupSubscriptionWireGuardControlOnUninstall
     grep -qxF 'systemctl:disable --now wg-quick@wg-padm' <<<"${actions}"
+    grep -qxF 'systemctl:daemon-reload' <<<"${actions}"
     grep -qxF 'systemctl:disable --now padm-subscription-control.service' <<<"${actions}"
     [[ ! -e "$(subscriptionWireGuardConfigFile)" ]]
     [[ ! -e "$(subscriptionWireGuardStateFile)" ]]
     [[ ! -e "$(subscriptionWireGuardPrivateKeyFile)" ]]
     [[ ! -e "$(subscriptionWireGuardPublicKeyFile)" ]]
     [[ ! -e "$(subscriptionControlServiceFile)" ]]
+    [[ ! -e "${PADM_WIREGUARD_NGINX_SYSTEMD_DROPIN_FILE}" ]]
     [[ -e "${PADM_WIREGUARD_CONTROL_DIR}/unmanaged" ]]
 
     local nginxTarget="${targetDir}/nginx/padm-control-wg.conf"

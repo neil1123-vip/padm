@@ -612,6 +612,30 @@ runWriteWireGuardControlNginxPathSafetyRegression() {
     )
 }
 
+runSubscriptionWireGuardNginxSystemdDropInRegression() (
+    set -euo pipefail
+    # shellcheck source=/dev/null
+    source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+
+    local root="${TMP_DIR}/wireguard-nginx-systemd-dropin"
+    local dropIn="${root}/systemd/nginx.service.d/10-padm-wg.conf"
+    local reloadLog="${root}/systemctl.log"
+    mkdir -p "${root}"
+    export PADM_WIREGUARD_NGINX_SYSTEMD_DROPIN_FILE="${dropIn}"
+    systemctl() {
+        printf '%s\n' "$*" >>"${reloadLog}"
+        [[ "$1" == "daemon-reload" ]]
+    }
+
+    ensureSubscriptionWireGuardNginxSystemdDropIn
+    grep -qx '\[Unit\]' "${dropIn}"
+    grep -qx 'Requires=wg-quick@wg-padm.service' "${dropIn}"
+    grep -qx 'After=wg-quick@wg-padm.service' "${dropIn}"
+    removeSubscriptionWireGuardNginxSystemdDropIn
+    [[ ! -e "${dropIn}" ]]
+    [[ "$(grep -c '^daemon-reload$' "${reloadLog}")" == "2" ]]
+)
+
 runSubscriptionWireGuardFirewallLifecycleRegression() (
     set -euo pipefail
     # shellcheck source=/dev/null
@@ -5877,6 +5901,7 @@ runRegressionFastSmoke() {
         runParallelRegressionRunners "${TMP_DIR}/fast-smoke-${BASHPID:-$$}" \
         commit-generated-file-directory-target runCommitGeneratedFileRejectsDirectoryTargetRegression \
         wireguard-nginx-path-safety runWriteWireGuardControlNginxPathSafetyRegression \
+        wireguard-nginx-systemd-dropin runSubscriptionWireGuardNginxSystemdDropInRegression \
         random-uuid-entropy runRandomUuidEntropyFallbackRegression \
         auto-install-user-validation runAutoInstallUserValidationRegression \
         remove-install-path-safety runRemoveInstallPathSafetyRegression \

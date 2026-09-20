@@ -1509,6 +1509,10 @@ cleanupSubscriptionWireGuardControlOnUninstall() {
             fi
         fi
     fi
+    if ! removeSubscriptionWireGuardNginxSystemdDropIn; then
+        errorCard "WireGuard Nginx systemd 配置清理失败，已取消删除控制面文件"
+        return 1
+    fi
     removeInstallPath "${wireGuardConfigFile}" "WireGuard控制面配置" || return 1
     removeInstallPath "${wireGuardStateFile}" "WireGuard控制面状态" || return 1
     removeInstallPath "${wireGuardPrivateKeyFile}" "WireGuard控制面私钥" || return 1
