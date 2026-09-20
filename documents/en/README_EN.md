@@ -654,7 +654,7 @@ All regressions use the selector dispatcher and fall into three levels:
 | Main product regression | `bash shell/subscription_groups_regression.sh all` | The main validation set for larger changes; schedules core product suites within a resource budget, but is not the union of every public selector. |
 | Focused checks | `bash shell/subscription_groups_regression.sh <selector>` | Adds protocol, deep rollback, or harness checks according to the changed area. |
 
-The PR native gate uses `ci-pr` as its default fast set; subscription or harness changes are promoted to `ci`, while the main-branch release gate always uses the full `ci` set.
+The PR native gate uses `ci-pr` as its default fast set; subscription or harness changes are promoted to `ci`, while the main-branch release gate always uses the full `ci` set. Both selectors default to 3 top-level workers; set `PADM_REGRESSION_CI_PARALLEL_JOBS` or the Docker CI manual input to choose 2 through 4 when needed. Release static checks, native regressions, and release preparation use the same commit, so later pushes to main cannot replace the validated candidate source.
 
 `all` runs `subscription`, `ui`, `transaction-core-main`, `routing`, `runtime`, `remote-control-smoke`, and both remote-control contracts within one resource budget. Add the full `transaction-core`, `fast-full`, `protocol-capabilities`, `remote-control-deep`, and harness contracts when relevant.
 

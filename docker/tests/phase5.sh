@@ -923,6 +923,20 @@ grep -Eq '^  static:' "${RELEASE_WORKFLOW}" || fail 'Release static gate is not 
 grep -Eq '^  native:' "${RELEASE_WORKFLOW}" || fail 'Release native gate is not a separate job'
 grep -Fq 'needs: [static, native]' "${RELEASE_WORKFLOW}" ||
     fail 'Release resolution can bypass static or native gates'
+# 拆分 job 后固定到静态门槛检出的提交，避免并发推送绕过原生回归。
+grep -Fq 'source_sha: ${{ steps.checked.outputs.source_sha }}' "${RELEASE_WORKFLOW}" ||
+    fail 'Release static gate does not expose the checked source commit'
+grep -Fq "git rev-parse HEAD | sed 's/^/source_sha=/'" "${RELEASE_WORKFLOW}" ||
+    fail 'Release static gate does not record its checkout commit'
+for job in native prepare; do
+    jobDefinition=$(awk -v job="${job}" '
+        $0 == "  " job ":" {inside = 1; next}
+        inside && /^  [^ ]/ {exit}
+        inside {print}
+    ' "${RELEASE_WORKFLOW}")
+    grep -Fq 'ref: ${{ needs.static.outputs.source_sha }}' <<<"${jobDefinition}" ||
+        fail "Release ${job} does not use the checked source commit"
+done
 
 # PR 与 main 都必须覆盖原生源码、回归自身和所有工作流；纯测试变化仍由运行范围判断避免发布。
 for workflow in "${PR_WORKFLOW}" "${RELEASE_WORKFLOW}"; do
@@ -1000,7 +1014,7 @@ grep -Fq 'Preflight pinned Alpine dependencies' "${SING_BOX_WORKFLOW}" ||
     fail 'sing-box workflow does not preflight the candidate Alpine runtime'
 grep -Fq 'cancel-in-progress: ${{ github.event_name == '\''push'\'' }}' "${SING_BOX_WORKFLOW}" ||
     fail 'sing-box workflow does not cancel stale push builds'
-grep -Fq 'PADM_REGRESSION_CI_PARALLEL_JOBS:-2' "${FAST_SUITE}" ||
+grep -Fq 'PADM_REGRESSION_CI_PARALLEL_JOBS:-3' "${FAST_SUITE}" ||
     fail 'native CI selector does not expose the measured concurrency default'
 grep -Fq 'uses: ./.github/workflows/build-images.yml' "${PR_WORKFLOW}" ||
     fail 'PR workflow does not reuse image workflow'

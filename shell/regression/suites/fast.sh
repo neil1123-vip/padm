@@ -69,7 +69,8 @@ registerRegressionParallelSelectorList fast-full runFrameworkParallelRegressionS
     "${TMP_DIR}/fast-full-parallel-${BASHPID:-$$}" listRegressionFastFullChildSelectors
 registerRegressionParallelSelectorList fast runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/fast-parallel-${BASHPID:-$$}" listRegressionFastChildSelectors
+# Ubuntu runner 实测 3 个顶层 worker 的原生门槛最快，4 个 worker 没有缩短完整 CI。
 registerRegressionParallelSelectorList ci runFrameworkParallelRegressionSelectorListWithJobs \
-    "${TMP_DIR}/ci-parallel-${BASHPID:-$$}" listRegressionCiChildSelectors "${PADM_REGRESSION_CI_PARALLEL_JOBS:-2}"
+    "${TMP_DIR}/ci-parallel-${BASHPID:-$$}" listRegressionCiChildSelectors "${PADM_REGRESSION_CI_PARALLEL_JOBS:-3}"
 registerRegressionParallelSelectorList ci-pr runFrameworkParallelRegressionSelectorListWithJobs \
-    "${TMP_DIR}/ci-pr-parallel-${BASHPID:-$$}" listRegressionCiPrChildSelectors "${PADM_REGRESSION_CI_PARALLEL_JOBS:-2}"
+    "${TMP_DIR}/ci-pr-parallel-${BASHPID:-$$}" listRegressionCiPrChildSelectors "${PADM_REGRESSION_CI_PARALLEL_JOBS:-3}"

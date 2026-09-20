@@ -16,7 +16,7 @@ on:
       native_parallel_jobs:
         description: Top-level native regression workers (2-4 for benchmark/recovery)
         required: false
-        default: '2'
+        default: '3'
         type: string
 
 permissions:

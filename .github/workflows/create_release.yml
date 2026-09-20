@@ -35,6 +35,8 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+    outputs:
+      source_sha: ${{ steps.checked.outputs.source_sha }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v7
@@ -46,10 +48,12 @@ jobs:
         with:
           args: -color
       - name: Check shell syntax
+        id: checked
         shell: bash
         run: |
           set -euo pipefail
           git ls-files -z -- '*.sh' | xargs -0 -r -n 1 bash -n
+          git rev-parse HEAD | sed 's/^/source_sha=/' >>"${GITHUB_OUTPUT}"
 
   native:
     name: Release native regressions
@@ -63,7 +67,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v7
         with:
-          ref: main
+          ref: ${{ needs.static.outputs.source_sha }}
           fetch-depth: 0
       - name: Check native regressions
         shell: bash
@@ -89,7 +93,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v7
         with:
-          ref: main
+          ref: ${{ needs.static.outputs.source_sha }}
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
