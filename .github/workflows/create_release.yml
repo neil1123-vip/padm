@@ -198,12 +198,18 @@ jobs:
         with:
           args: -color
 
-      - name: Check shell syntax and native regressions
+      - name: Check shell syntax
         if: steps.revision.outputs.deferred != 'true'
         shell: bash
         run: |
           set -euo pipefail
           git ls-files -z -- '*.sh' | xargs -0 -r -n 1 bash -n
+
+      - name: Check native regressions
+        if: steps.revision.outputs.deferred != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
           bash shell/subscription_groups_regression.sh ci
 
       - name: Preflight pinned APK dependencies

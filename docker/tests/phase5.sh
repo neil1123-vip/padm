@@ -935,7 +935,7 @@ grep -Fq 'uses: docker://rhysd/actionlint:1.7.12' "${RELEASE_WORKFLOW}" || fail 
 grep -Fq 'bash shell/subscription_groups_regression.sh ci' "${RELEASE_WORKFLOW}" || fail 'Release native CI gate is missing'
 prImageNeeds=$(awk '/^  images:$/ {job = 1; next} job && /^    needs:/ {print; exit}' "${PR_WORKFLOW}")
 [[ "${prImageNeeds}" == '    needs: [static, native]' ]] || fail 'PR images can run without native validation'
-nativeLine=$(grep -n '^      - name: Check shell syntax and native regressions$' "${RELEASE_WORKFLOW}" | cut -d: -f1)
+nativeLine=$(grep -n '^      - name: Check native regressions$' "${RELEASE_WORKFLOW}" | cut -d: -f1)
 preflightLine=$(grep -n '^      - name: Preflight pinned APK dependencies$' "${RELEASE_WORKFLOW}" | cut -d: -f1)
 bumpLine=$(grep -n '^      - name: Bump script and lock version$' "${RELEASE_WORKFLOW}" | cut -d: -f1)
 [[ -n "${nativeLine}" && -n "${preflightLine}" && -n "${bumpLine}" ]] || fail 'release preflight steps are missing'
