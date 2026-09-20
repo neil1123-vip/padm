@@ -425,6 +425,8 @@ runSubscriptionGroupStateStructureSourceStatusRegression() {
 }
 
 runSubscriptionGroupStateStructureSyncCronRegression() {
+    local PADM_SUBSCRIPTION_GROUPS_DIR="${TMP_DIR}/subscription-state-sync-cron-groups"
+    export PADM_SUBSCRIPTION_GROUPS_DIR
     mkdir -p "$(subscriptionGroupsDir)"
     [[ "$(subscriptionGroupSyncDefaultInterval)" == "10" ]]
     writeDefaultSubscriptionGroupsState "${TMP_DIR}/sync-defaults.json"
