@@ -123,7 +123,16 @@ MOCK_BIN=${TEST_ROOT}/mock-bin
 APK_FIXTURE_ROOT=${TEST_ROOT}/apk-fixtures
 mkdir -p "${UPDATER_ROOT}/docker" "${UPDATER_ROOT}/shell/core" "${MOCK_BIN}" "${APK_FIXTURE_ROOT}"
 cp "${RELEASE_SCRIPT}" "${UPDATER_ROOT}/docker/release.sh"
-cp "${PROJECT_ROOT}/versions.lock" "${UPDATER_ROOT}/versions.lock"
+# 模拟升级使用固定起点，避免真实锁升级后超过模拟上游；真实锁已在前面单独验证。
+sed -E \
+    -e 's/^(PADM_LOCK_[A-Z0-9_]+_VERSION)=.*/\1=0.0.1/' \
+    -e 's/^PADM_LOCK_ALPINE_VERSION=.*/PADM_LOCK_ALPINE_VERSION=3.24.1/' \
+    -e "s|^PADM_LOCK_ALPINE_BASE=.*|PADM_LOCK_ALPINE_BASE=alpine:3.24.1@sha256:${IMAGE_DIGEST}|" \
+    -e 's/^(PADM_LOCK_(XRAY|SING_BOX)_VERSION)=.*/\1=v0.0.1/' \
+    -e 's/^PADM_LOCK_SING_BOX_AMD64_ASSET=.*/PADM_LOCK_SING_BOX_AMD64_ASSET=sing-box-0.0.1-linux-amd64.tar.gz/' \
+    -e 's/^PADM_LOCK_SING_BOX_ARM64_ASSET=.*/PADM_LOCK_SING_BOX_ARM64_ASSET=sing-box-0.0.1-linux-arm64.tar.gz/' \
+    -e 's|^PADM_LOCK_ACME_SH_URL=.*|PADM_LOCK_ACME_SH_URL=https://codeload.github.com/acmesh-official/acme.sh/tar.gz/refs/tags/0.0.1|' \
+    "${PROJECT_ROOT}/versions.lock" >"${UPDATER_ROOT}/versions.lock"
 cp "${UPDATER_ROOT}/versions.lock" "${UPDATER_ROOT}/versions.lock.original"
 cp "${PROJECT_ROOT}/shell/core/version.sh" "${UPDATER_ROOT}/shell/core/version.sh"
 ALPINE_DIGEST=$(printf 'd%.0s' {1..64})
@@ -449,6 +458,18 @@ cmp -s "${TEST_ROOT}/core-lock.before" "${TEST_ROOT}/core-lock.after" ||
         [[ "${!key}" == "${expected#*=}" ]]
     done
 ) || fail 'Alpine/APK-only refresh produced wrong values'
+
+# 固定模拟起点后，真正的包版本降级仍必须拒绝且保留原锁。
+cp "${UPDATER_ROOT}/versions.lock" "${UPDATER_ROOT}/versions.lock.newer"
+if PATH="${MOCK_BIN}:${PATH}" PADM_TEST_ALPINE_TAGS="${TEST_ROOT}/alpine-tags-next.json" \
+    PADM_TEST_APK_FIXTURES="${APK_FIXTURE_ROOT}" PADM_TEST_APK_MODE=normal \
+    bash "${UPDATER_ROOT}/docker/release.sh" refresh-upstreams >"${TEST_ROOT}/downgrade.log" 2>&1; then
+    fail 'upstream refresh accepted an APK downgrade'
+fi
+grep -Fq 'ca-certificates latest version 20260612-r0 is older than lock 20260613-r0' \
+    "${TEST_ROOT}/downgrade.log" || fail 'upstream refresh did not reach the APK downgrade guard'
+cmp -s "${UPDATER_ROOT}/versions.lock.newer" "${UPDATER_ROOT}/versions.lock" ||
+    fail 'upstream refresh changed the lock after an APK downgrade'
 
 # 发布不完整或下载失败时，任何核心的锁值都必须保持原样。
 for failure in no-stable missing-asset missing-digest duplicate-asset download checksum \
