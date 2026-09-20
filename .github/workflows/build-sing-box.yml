@@ -30,11 +30,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: padm-sing-box-build
-  cancel-in-progress: false
+  group: padm-sing-box-build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
   prepare:
+    name: Resolve and verify sing-box
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -90,6 +91,12 @@ jobs:
           . ./versions.lock
           printf 'version=%s\namd64=%s\narm64=%s\n' "${PADM_LOCK_SING_BOX_VERSION}" \
             "${PADM_LOCK_SING_BOX_AMD64_UPSTREAM_SHA256}" "${PADM_LOCK_SING_BOX_ARM64_UPSTREAM_SHA256}" >>"${GITHUB_OUTPUT}"
+
+      - name: Preflight pinned Alpine dependencies
+        if: steps.inputs.outputs.changed == 'true'
+        shell: bash
+        run: bash docker/release.sh preflight
+
       - name: Resolve immutable source and release assets
         if: steps.inputs.outputs.changed == 'true'
         id: resolve
@@ -147,11 +154,13 @@ jobs:
             core.setOutput('matrix', JSON.stringify(matrix));
 
   build:
+    name: Build sing-box (${{ matrix.arch }})
     needs: prepare
     if: needs.prepare.outputs.skip != 'true'
     timeout-minutes: 35
     strategy:
       fail-fast: false
+      max-parallel: 2
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     steps:
@@ -208,6 +217,7 @@ jobs:
           retention-days: 7
 
   publish:
+    name: Publish sing-box release
     needs: [prepare, build]
     if: needs.prepare.outputs.publish == 'true' && needs.build.result == 'success'
     runs-on: ubuntu-latest

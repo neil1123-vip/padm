@@ -859,6 +859,10 @@ grep -Fq 'linux/arm64' "${BUILD_WORKFLOW}" || fail 'build workflow lacks arm64'
 grep -Eq '^[[:space:]]+provenance:.*mode=max' "${BUILD_WORKFLOW}" || fail 'provenance attestation is not enabled'
 grep -Eq '^[[:space:]]+sbom:.*inputs[.]push' "${BUILD_WORKFLOW}" || fail 'SBOM attestation is not enabled'
 grep -Fq 'cosign sign' "${BUILD_WORKFLOW}" || fail 'image signing is not enabled'
+grep -Fq 'Preflight pinned Alpine dependencies' "${BUILD_WORKFLOW}" ||
+    fail 'image workflow does not preflight pinned Alpine dependencies'
+grep -Fq 'max-parallel: 4' "${BUILD_WORKFLOW}" ||
+    fail 'image matrices do not cap runner burst concurrency'
 grep -Fq 'packages: write' "${RELEASE_WORKFLOW}" || fail 'Release caller lacks package write permission'
 grep -Fq 'id-token: write' "${RELEASE_WORKFLOW}" || fail 'Release caller lacks OIDC permission'
 grep -Fq 'release-manifest.json' "${BUILD_WORKFLOW}" || fail 'release manifest is not an artifact'
@@ -915,6 +919,10 @@ grep -Fq "echo 'handoff=true'" <<<"${bumpStep}" ||
     fail 'version bump does not stop the current Release run'
 grep -Fq 'steps.bump.outputs.handoff' "${RELEASE_WORKFLOW}" ||
     fail 'Release outputs do not propagate the handoff state'
+grep -Eq '^  static:' "${RELEASE_WORKFLOW}" || fail 'Release static gate is not a separate job'
+grep -Eq '^  native:' "${RELEASE_WORKFLOW}" || fail 'Release native gate is not a separate job'
+grep -Fq 'needs: [static, native]' "${RELEASE_WORKFLOW}" ||
+    fail 'Release resolution can bypass static or native gates'
 
 # PR 与 main 都必须覆盖原生源码、回归自身和所有工作流；纯测试变化仍由运行范围判断避免发布。
 for workflow in "${PR_WORKFLOW}" "${RELEASE_WORKFLOW}"; do
@@ -933,6 +941,9 @@ grep -Fq 'selector=ci-pr' "${PR_WORKFLOW}" || fail 'PR fast native profile is mi
 grep -Fq 'selector=ci' "${PR_WORKFLOW}" || fail 'PR heavy native fallback is missing'
 grep -Fq 'uses: docker://rhysd/actionlint:1.7.12' "${RELEASE_WORKFLOW}" || fail 'Release workflow lint gate is missing'
 grep -Fq 'bash shell/subscription_groups_regression.sh ci' "${RELEASE_WORKFLOW}" || fail 'Release native CI gate is missing'
+grep -Fq 'native_parallel_jobs:' "${PR_WORKFLOW}" || fail 'PR workflow lacks reproducible native concurrency input'
+grep -Fq 'PADM_REGRESSION_CI_PARALLEL_JOBS' "${PR_WORKFLOW}" ||
+    fail 'PR workflow does not pass native concurrency to the selector'
 prImageNeeds=$(awk '/^  images:$/ {job = 1; next} job && /^    needs:/ {print; exit}' "${PR_WORKFLOW}")
 [[ "${prImageNeeds}" == '    needs: [static, native]' ]] || fail 'PR images can run without native validation'
 nativeLine=$(grep -n '^      - name: Check native regressions$' "${RELEASE_WORKFLOW}" | cut -d: -f1)
@@ -983,6 +994,14 @@ grep -Fq 'gh workflow run docker-ci.yml' "${UPSTREAM_WORKFLOW}" ||
 grep -Fq 'gh run watch' "${UPSTREAM_WORKFLOW}" || fail 'upstream workflow does not wait for Docker CI'
 grep -Fq 'permissions: {}' "${UPSTREAM_WORKFLOW}" || fail 'upstream workflow keeps broad top-level write permissions'
 grep -Fq 'timeout-minutes: 30' "${UPSTREAM_WORKFLOW}" || fail 'upstream refresh has no timeout'
+grep -Fq 'Preflight refreshed Alpine dependencies' "${UPSTREAM_WORKFLOW}" ||
+    fail 'upstream refresh does not preflight the refreshed Alpine lock'
+grep -Fq 'Preflight pinned Alpine dependencies' "${SING_BOX_WORKFLOW}" ||
+    fail 'sing-box workflow does not preflight the candidate Alpine runtime'
+grep -Fq 'cancel-in-progress: ${{ github.event_name == '\''push'\'' }}' "${SING_BOX_WORKFLOW}" ||
+    fail 'sing-box workflow does not cancel stale push builds'
+grep -Fq 'PADM_REGRESSION_CI_PARALLEL_JOBS:-2' "${FAST_SUITE}" ||
+    fail 'native CI selector does not expose the measured concurrency default'
 grep -Fq 'uses: ./.github/workflows/build-images.yml' "${PR_WORKFLOW}" ||
     fail 'PR workflow does not reuse image workflow'
 grep -Fq 'runDockerPhase5Regression' "${FAST_CASES}" || fail 'phase 5 is not in fast regression cases'
@@ -1000,7 +1019,7 @@ for unsafeLine in 'image: alpine:latest' 'image: "alpine:latest"' "image: 'alpin
         fail "latest image check missed an unpinned tag: ${unsafeLine}"
 done
 if grep -En "${LATEST_IMAGE_PATTERN}" \
-    "${BUILD_WORKFLOW}" "${PR_WORKFLOW}" "${RELEASE_WORKFLOW}" "${UPSTREAM_WORKFLOW}"; then
+    "${BUILD_WORKFLOW}" "${PR_WORKFLOW}" "${RELEASE_WORKFLOW}" "${UPSTREAM_WORKFLOW}" "${SING_BOX_WORKFLOW}"; then
     fail 'phase 5 workflow contains latest image tags'
 fi
 

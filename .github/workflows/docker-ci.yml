@@ -12,6 +12,12 @@ on:
       - 'versions.lock'
       - 'assets/**'
   workflow_dispatch:
+    inputs:
+      native_parallel_jobs:
+        description: Top-level native regression workers (2-4 for benchmark/recovery)
+        required: false
+        default: '2'
+        type: string
 
 permissions:
   contents: read
@@ -44,6 +50,8 @@ jobs:
     needs: static
     timeout-minutes: 20
     runs-on: ubuntu-latest
+    env:
+      PADM_REGRESSION_CI_PARALLEL_JOBS: ${{ github.event_name == 'workflow_dispatch' && inputs.native_parallel_jobs || '' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -54,6 +62,11 @@ jobs:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
+          if [[ -n "${PADM_REGRESSION_CI_PARALLEL_JOBS}" &&
+            ! "${PADM_REGRESSION_CI_PARALLEL_JOBS}" =~ ^[2-4]$ ]]; then
+            echo 'native_parallel_jobs must be 2, 3 or 4' >&2
+            exit 2
+          fi
           selector=ci
           if [[ "${GITHUB_EVENT_NAME}" == pull_request && "${PR_BASE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
             changed=$(git diff --name-only "${PR_BASE_SHA}" HEAD)

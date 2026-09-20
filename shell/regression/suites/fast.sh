@@ -70,6 +70,6 @@ registerRegressionParallelSelectorList fast-full runFrameworkParallelRegressionS
 registerRegressionParallelSelectorList fast runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/fast-parallel-${BASHPID:-$$}" listRegressionFastChildSelectors
 registerRegressionParallelSelectorList ci runFrameworkParallelRegressionSelectorListWithJobs \
-    "${TMP_DIR}/ci-parallel-${BASHPID:-$$}" listRegressionCiChildSelectors 2
+    "${TMP_DIR}/ci-parallel-${BASHPID:-$$}" listRegressionCiChildSelectors "${PADM_REGRESSION_CI_PARALLEL_JOBS:-2}"
 registerRegressionParallelSelectorList ci-pr runFrameworkParallelRegressionSelectorListWithJobs \
-    "${TMP_DIR}/ci-pr-parallel-${BASHPID:-$$}" listRegressionCiPrChildSelectors 2
+    "${TMP_DIR}/ci-pr-parallel-${BASHPID:-$$}" listRegressionCiPrChildSelectors "${PADM_REGRESSION_CI_PARALLEL_JOBS:-2}"

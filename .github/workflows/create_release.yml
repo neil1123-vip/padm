@@ -28,8 +28,52 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  static:
+    name: Release static checks
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Lint workflows
+        uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color
+      - name: Check shell syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          git ls-files -z -- '*.sh' | xargs -0 -r -n 1 bash -n
+
+  native:
+    name: Release native regressions
+    needs: static
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Check native regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash shell/subscription_groups_regression.sh ci
+
   prepare:
     name: Resolve release
+    needs: [static, native]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -191,26 +235,6 @@ jobs:
               ? 'true'
               : 'false';
           result-encoding: string
-
-      - name: Lint workflows
-        if: steps.revision.outputs.deferred != 'true'
-        uses: docker://rhysd/actionlint:1.7.12
-        with:
-          args: -color
-
-      - name: Check shell syntax
-        if: steps.revision.outputs.deferred != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          git ls-files -z -- '*.sh' | xargs -0 -r -n 1 bash -n
-
-      - name: Check native regressions
-        if: steps.revision.outputs.deferred != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          bash shell/subscription_groups_regression.sh ci
 
       - name: Preflight pinned APK dependencies
         if: steps.scope.outputs.changed == 'true' && steps.existing.outputs.result != 'true'

@@ -126,6 +126,11 @@ jobs:
           bash docker/release.sh validate-lock
           # 完整 Docker contract 由同一提交的 PR Docker CI 统一执行，避免刷新任务重复等待 phase5。
 
+      - name: Preflight refreshed Alpine dependencies
+        if: steps.update.outputs.changed == 'true'
+        shell: bash
+        run: bash docker/release.sh preflight
+
       - name: Save update PR
         id: save
         if: steps.update.outputs.changed == 'true' || steps.pending.outputs.pr_url != ''

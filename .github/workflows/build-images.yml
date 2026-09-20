@@ -65,6 +65,10 @@ jobs:
           bash docker/tests/phase6.sh
           bash docker/tests/traffic.sh
 
+      - name: Preflight pinned Alpine dependencies
+        shell: bash
+        run: bash docker/release.sh preflight
+
       - name: Install Cosign
         if: ${{ !inputs.contracts_only }}
         uses: sigstore/cosign-installer@v4.1.2
@@ -129,6 +133,7 @@ jobs:
     if: ${{ !inputs.contracts_only && needs.contract.outputs.build_required == 'true' }}
     strategy:
       fail-fast: true
+      max-parallel: 4
       matrix:
         image: ${{ fromJSON(needs.contract.outputs.build_images) }}
         platform:
@@ -238,6 +243,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
+      max-parallel: 4
       matrix:
         image: ${{ fromJSON(needs.contract.outputs.images) }}
     steps:
