@@ -446,6 +446,7 @@ runSubscriptionGroupStateStructureSyncCronRegression() {
         local crontabReadMode=default
         local crontabInstallShouldFail=false
         local syncCalls=0
+        subscriptionGroupSyncCronFile() { printf '%s\n' "${TMP_DIR}/subscription-sync-cron.log"; }
         crontab() {
             case "${1:-}" in
             -l)
@@ -483,11 +484,11 @@ runSubscriptionGroupStateStructureSyncCronRegression() {
         }
         installSubscriptionGroupSyncCron
         grep -qx '5 0 \* \* \* /bin/bash /etc/padm/install.sh RenewTLS' "${crontabLog}" || return 1
-        grep -qxF '* * * * * padm_minute=$(( $(date +\%s) / 60 )); [ $((padm_minute / 17 * 17)) -eq "$padm_minute" ] && /bin/bash /etc/padm/install.sh SyncSubscriptionGroups >> /etc/padm/crontab_subscription_groups.log 2>&1' "${crontabLog}" || return 1
+        grep -qxF "* * * * * padm_minute=\$(( \$(date +\\%s) / 60 )); [ \$((padm_minute / 17 * 17)) -eq \"\$padm_minute\" ] && /bin/bash /etc/padm/install.sh SyncSubscriptionGroups >> ${TMP_DIR}/subscription-sync-cron.log 2>&1" "${crontabLog}" || return 1
         [[ "$(grep -c 'SyncSubscriptionGroups' "${crontabLog}")" == "1" ]] || return 1
 
         setSubscriptionGroupSyncInterval 59
-        [[ "$(subscriptionGroupSyncCronCommand)" == '* * * * * padm_minute=$(( $(date +\%s) / 60 )); [ $((padm_minute / 59 * 59)) -eq "$padm_minute" ] && /bin/bash /etc/padm/install.sh SyncSubscriptionGroups >> /etc/padm/crontab_subscription_groups.log 2>&1' ]]
+        [[ "$(subscriptionGroupSyncCronCommand)" == "* * * * * padm_minute=\$(( \$(date +\\%s) / 60 )); [ \$((padm_minute / 59 * 59)) -eq \"\$padm_minute\" ] && /bin/bash /etc/padm/install.sh SyncSubscriptionGroups >> ${TMP_DIR}/subscription-sync-cron.log 2>&1" ]]
         setSubscriptionGroupSyncInterval 17
 
         setSubscriptionGroupSyncEnabled false
