@@ -1301,6 +1301,7 @@ JSON
     }
 
     reloadCore() {
+        [[ "${PADM_SKIP_CONTROLLER_REFRESH:-}" != "1" ]] || return 98
         reloadCalls=$((reloadCalls + 1))
         [[ "${reloadCalls}" == "1" ]] && return 1
         return 0

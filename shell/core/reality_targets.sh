@@ -3360,7 +3360,7 @@ changeInstalledRealityTarget() {
         realityTargetStatusBlock red "REALITY 目标站" "配置校验失败，已回滚" "Xray 日志: $(realityTargetTmpPath padm-reality-target-xray-test.log)" "sing-box 日志: $(realityTargetTmpPath padm-reality-target-sing-box-test.log)"
         return 1
     fi
-    if ! PADM_SKIP_CONTROLLER_REFRESH=1 reloadCore; then
+    if ! reloadCore; then
         if ! restoreRealityTargetConfigs "${backupDir}"; then
             realityTargetStatusBlock red "REALITY 目标站" "核心重载失败，且回滚配置失败" "备份目录: ${backupDir}"
             padmForgetCleanupPath "${backupDir}"
