@@ -358,7 +358,7 @@ jobs:
   assemble:
     name: Assemble release assets
     timeout-minutes: 10
-    if: ${{ inputs.push && !inputs.contracts_only }}
+    if: ${{ always() && inputs.push && !inputs.contracts_only && needs.publish.result == 'success' }}
     needs: publish
     runs-on: ubuntu-latest
     permissions:
