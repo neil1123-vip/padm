@@ -422,7 +422,7 @@ Reality Vision、Reality XHTTP 和 Reality gRPC 均不申请本机 TLS 证书；
 
 Reality entry 按 `--entry-host`、`--domain`、`/etc/padm/reality_entry_host`、`currentHost`、公网 IP 的顺序选择。普通单选 Reality 端口按显式 `--port`、历史端口、`443` 的顺序选择；多协议继续使用各自端口，不把顶层 `--port` 注入 Reality 子端口。启用 443 共存后，客户端仍连接记录的公网端口，核心继续复用已记录的内部端口。
 
-未传 `--reality-target` 时，脚本会进入目标站选择器。自动选择优先使用 `cdn_risk=no` 且评分为 A 的实测结果；全新 sing-box 安装没有 Xray 检测器时，才允许回退到本次由 OpenSSL 验证 TLS 1.3 的临时 `no + C` 结果，该结果不会写入主结果库。没有可接受结果时安装终止，不写入未经检测的兜底目标。手工目标会枚举全部 A/AAAA，每个地址独立评分并取最差结果：任一地址属于 AS13335 或可响应 `cloudflare.com` SNI 即标记 `cloudflare_relay`；DNS CNAME 指向已知 CDN 边缘域名，或 ASN/组织属于已知专属 CDN 时标记 `cdn_edge`，两者都会拒绝。DNS、ASN 或 TLS 探测不完整则标记 `unknown` 并拒绝。手工仅接受 `no + A/B/C`，其中 B/C 会明确警告；检测当前已安装目标只告警，不会静默切换配置。`java.com`、`nodejs.org` 与 `riotcdn.net` 及其子域名属于不可覆盖的静态硬风险，候选刷新、扫描导入、自动/手工选择和 Docker 部署都会拒绝。
+未传 `--reality-target` 时，脚本会进入目标站选择器。自动选择优先使用 `cdn_risk=no` 且评分为 A 的实测结果；全新 sing-box 安装没有 Xray 检测器时，才允许回退到本次由 OpenSSL 验证 TLS 1.3 的临时 `no + C` 结果，该结果不会写入主结果库。候选列表会先检测全部内置候选，再展示通过检测的结果供选择，不会把未经检测的候选直接交给用户。没有可接受结果时安装终止，不写入未经检测的兜底目标。手工目标会枚举全部 A/AAAA，每个地址独立评分并取最差结果：任一地址属于 AS13335 或可响应 `cloudflare.com` SNI 即标记 `cloudflare_relay`；DNS CNAME 指向已知 CDN 边缘域名，或 ASN/组织属于已知专属 CDN 时标记 `cdn_edge`，两者都会拒绝。DNS、ASN 或 TLS 探测不完整则标记 `unknown` 并拒绝。手工仅接受 `no + A/B/C`，其中 B/C 会明确警告；检测当前已安装目标只告警，不会静默切换配置。`java.com`、`nodejs.org` 与 `riotcdn.net` 及其子域名属于不可覆盖的静态硬风险，候选刷新、扫描导入、自动/手工选择和 Docker 部署都会拒绝。
 
 内置候选池物理上仅保留 37 项未命中已知 CDN/边缘代理及静态风险的候选。原始 194 项中的 154 项 CDN/边缘代理域名仍保留在独立黑名单清单中，用于运行时过滤、审计和黑名单展示，不再从候选池输出。池内其余候选的未知或 TLS 失败状态仍需实时检测，不会被自动选用；目前有明确直连证据并作为默认推荐的是 `www.gnu.org`、`www.debian.org`、`www.ubuntu.com` 和 `mariadb.org`。候选筛选统一按关键词处理，`dev`、`developer`、`开发者` 是同一筛选别名。
 

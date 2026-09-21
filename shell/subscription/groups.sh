@@ -206,6 +206,10 @@ validateSubscriptionGroupsState() {
       def sync_error:
         exact(["type", "message"]; []) and
         (.type | nonempty_string) and (.message | nonempty_string);
+      def sync_failure_detail:
+        exact(["type", "message"]; ["source_id"]) and
+        (.type | nonempty_string) and (.message | type == "string") and
+        ((has("source_id") | not) or (.source_id | state_id));
       def source:
         if .role == "main" then
           exact(["id", "name", "role", "scheme", "transport", "host", "port", "enabled", "sync_status"]; []) and
@@ -258,13 +262,14 @@ validateSubscriptionGroupsState() {
       (all(.user_groups[]?.id; state_id)) and
       ([.sources[]?.id] as $sourceIds | all(.user_groups[]?.allowed_sources[]?; . as $sourceId | $sourceId == "*" or ($sourceIds | index($sourceId)) != null)) and
       (.sync |
-        exact(["enabled", "interval_minutes", "last_run", "last_status", "failures", "quota_auto_apply"]; []) and
+        exact(["enabled", "interval_minutes", "last_run", "last_status", "failures", "quota_auto_apply"]; ["failure_details"]) and
         (.enabled | type == "boolean") and
         (.interval_minutes | type == "number" and . == floor and . >= 1 and . <= 59) and
         (.last_run | type == "string") and
         (.last_status == "pending" or .last_status == "success" or .last_status == "partial") and
         (.failures | type == "array" and all(.[]; type == "string")) and
-        (.quota_auto_apply | type == "boolean")) and
+        (.quota_auto_apply | type == "boolean") and
+        ((has("failure_details") | not) or (.failure_details | type == "array" and all(.[]; sync_failure_detail)))) and
       (.traffic |
         exact(["admin", "user_groups", "sources"]; []) and
         (.admin | scoped_traffic) and

@@ -893,6 +893,8 @@ grep -Fq 'needs.smoke.result == '\''skipped'\''' "${BUILD_WORKFLOW}" ||
     fail 'publish job cannot continue when all images are reused'
 grep -Fq 'needs.contract.result == '\''success'\''' "${BUILD_WORKFLOW}" ||
     fail 'publish job can bypass a failed contract job'
+grep -Fq "if: \${{ always() && inputs.push && !inputs.contracts_only && needs.publish.result == 'success' }}" "${BUILD_WORKFLOW}" ||
+    fail 'release assets can be skipped after reused image publication'
 # 测试和发布流程修复必须进入检查，是否发布由相对已发布版本的运行差异决定。
 grep -Fq "      - '.github/workflows/**'" "${RELEASE_WORKFLOW}" ||
     fail 'main workflow does not receive workflow changes'
