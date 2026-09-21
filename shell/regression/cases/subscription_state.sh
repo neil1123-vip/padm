@@ -1998,6 +1998,7 @@ JSON
 )
 
 runSubscriptionGroupSyncRemoteBeforePublishRefreshRegression() (
+    eval "$(declare -f subscriptionSyncMarkResult | sed '1s/^subscriptionSyncMarkResult/originalSubscriptionSyncMarkResult/')"
     local syncRoot="${TMP_DIR}/subscription-group-sync-remote-before-publish-refresh"
     local syncConfigFile="${syncRoot}/xray/02_VLESS_TCP_inbounds.json"
     local callLog="${syncRoot}/calls.log"
@@ -2010,6 +2011,13 @@ runSubscriptionGroupSyncRemoteBeforePublishRefreshRegression() (
     prepareSubscriptionGroupSyncFixture "${syncRoot}" "" <<'JSON'
 {"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-b","name":"Edge B","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"10.77.0.2","port":39778,"enabled":true,"sync_status":"pending","control_token":"token-b"}],"user_groups":[{"id":"real-sync-6","name":"Real Sync 6","enabled":true,"allowed_sources":["edge-b"],"traffic_limit_gb":0,"token":"","uuid":"3004d897-c06d-45a1-aa64-3d3266ca63d5"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
+    subscriptionSyncMarkResult() {
+        originalSubscriptionSyncMarkResult "$@"
+        local status=$?
+        printf '%s\n' "$1" >"${resultStatus}"
+        printf '%s\n' "$2" >"${resultFailures}"
+        return "${status}"
+    }
     : >"${callLog}"
 
     subscriptionCurrentRoleNormalized() { printf 'main\n'; }
@@ -2049,6 +2057,12 @@ JSON
 {"failures":[],"snapshots":{"edge-b":{"sub_real_sync_6":{"default":"dmxlc3M6Ly9yZW1vdGUtc25hcHNob3Q=","clash_meta":"proxies:\n- name: sub_real_sync_6-node","sing_box":[{"tag":"sub_real_sync_6-node"}]}}}}
 JSON
     }
+    collectSubscriptionTraffic() {
+        printf 'traffic\n' >>"${callLog}"
+        writeSubscriptionTrafficSnapshot \
+            '{"ok":true,"items":[{"account":"admin","upload":1,"download":2},{"account":"sub_real_sync_6","upload":3,"download":4}]}' \
+            '[{"source_id":"edge-b","status":"success","response":{"items":[{"account":"admin","upload":5,"download":6},{"account":"sub_real_sync_6","upload":7,"download":8}]}}]'
+    }
     refreshPublishedSubscriptions() {
         printf 'refresh-publish\n' >>"${callLog}"
         printf '%s\n' "$1" >"${snapshotFile}"
@@ -2073,6 +2087,8 @@ assert lines.index('remote-sync') < lines.index('refresh-publish')
 PY
     [[ "$(<"${resultFailures}")" == "[]" ]]
     grep -qx 'success' "${resultStatus}"
+    syncStatus=$(subscriptionGroupsStateRead -c '.sync')
+    jq -e '.last_status == "success" and .failure_details == []' <<<"${syncStatus}" >/dev/null
     [[ "${SUBSCRIPTION_SYNC_PUBLISHED}" == "true" ]]
     grep -q '自动同步完成' "${statusLog}"
     if regressionFindHasMatches "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \); then
