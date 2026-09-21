@@ -360,6 +360,9 @@ realityTargetCandidates() {
     while IFS= read -r line; do
         IFS='|' read -r host _sni _name _region _category cdn _rest <<<"${line}"
         [[ "${cdn,,}" == "yes" ]] && continue
+        if [[ "${PADM_REALITY_TARGET_SELECTION_REQUIRE_SCAN:-}" == "1" ]]; then
+            realityTargetResultLine "$(formatRealityTarget "${host}" 443)" >/dev/null 2>&1 || continue
+        fi
         skip=false
         for blocked in "${blockedHosts[@]}"; do
             if realityTargetBlockedHostMatches "${host}" "${blocked}"; then
@@ -443,10 +446,10 @@ realityTargetResultField() {
 
 realityTargetResultLine() {
     local target=$1
-    local resultsFile
+    local resultsFile allowNonARanks=${PADM_REALITY_TARGET_SELECTION_REQUIRE_SCAN:-}
     resultsFile=$(realityTargetManagedResultsFile) || return 1
     [[ -n "${target}" && -f "${resultsFile}" ]] || return 1
-    awk -F'\t' -v target="${target}" '$1 == target {line = $0; keep = ($5 == "no" && $10 == "A")} END {if (keep) print line; else exit 1}' "${resultsFile}"
+    awk -F'\t' -v target="${target}" -v allowNonARanks="${allowNonARanks}" '$1 == target {line = $0; keep = ($5 == "no" && ($10 == "A" || (allowNonARanks == "1" && ($10 == "B" || $10 == "C"))))} END {if (keep) print line; else exit 1}' "${resultsFile}"
 }
 
 realityTargetCachedAsnSummary() {
@@ -519,7 +522,7 @@ writeRealityTargetResultLine() {
 
 writeRealityTargetResultLines() {
     local linesFile=$1
-    local resultsFile mergedFile stagedFile line target parsed host
+    local resultsFile mergedFile stagedFile line target parsed host keepNonARanks=${PADM_REALITY_TARGET_SELECTION_SCAN:-}
     local -a sourceFiles=()
     [[ -f "${linesFile}" ]] || return 0
     resultsFile=$(realityTargetManagedResultsFile) || return 1
@@ -529,12 +532,12 @@ writeRealityTargetResultLines() {
     padmEnsureSafeDirectory "$(dirname -- "${resultsFile}")" || return 1
     padmCreateTempFileForTarget mergedFile "${resultsFile}" reality-merge || return 1
     padmCreateTempFileForTarget stagedFile "${resultsFile}" reality || { padmRemoveCleanupPath "${mergedFile}"; return 1; }
-    awk -F'\t' '
+    awk -F'\t' -v keepNonARanks="${keepNonARanks}" '
       {
         if (!($1 in seen)) order[++count] = $1
         seen[$1] = 1
         line[$1] = $0
-        keep[$1] = ($5 == "no" && $10 == "A")
+        keep[$1] = ($5 == "no" && ($10 == "A" || (keepNonARanks == "1" && ($10 == "B" || $10 == "C"))))
       }
       END {
         for (i = 1; i <= count; i++) {
@@ -1676,7 +1679,7 @@ showRealityTargetCandidatePage() {
     local filter=${1:-all}
     local page=${2:-1}
     local pageSize=${3:-12}
-    local total start end line index=1 host sni name region category _cdn rank recommended note
+    local total start end line index=1 host sni name region category _cdn rank recommended note resultLine score cdnRisk ip asn asOrg networkMatch
     total=$(realityTargetFilteredCandidateCount "${filter}")
     start=$(( (page - 1) * pageSize + 1 ))
     end=$(( page * pageSize ))
@@ -1692,8 +1695,20 @@ showRealityTargetCandidatePage() {
     while IFS= read -r line; do
         if (( index >= start && index <= end )); then
             IFS='|' read -r host sni name region category _cdn rank recommended note <<<"${line}"
-            menuItem "${index}" "${host}:443" "${name} ${region}/${category} SNI=${sni}"
-            [[ -n "${note}" ]] && menuLine "    ${note}"
+            resultLine=$(realityTargetResultLine "$(formatRealityTarget "${host}" 443)" 2>/dev/null || true)
+            if [[ -n "${resultLine}" ]]; then
+                cdnRisk=$(realityTargetResultField "${resultLine}" 5)
+                ip=$(realityTargetResultField "${resultLine}" 6)
+                asn=$(realityTargetResultField "${resultLine}" 7)
+                asOrg=$(realityTargetResultField "${resultLine}" 8)
+                networkMatch=$(realityTargetResultField "${resultLine}" 9)
+                score=$(realityTargetResultField "${resultLine}" 10)
+                menuItem "${index}" "${host}:443" "${name} ${region}/${category} 评分=${score} SNI=${sni}"
+                menuLine "    cdn_risk=${cdnRisk} IP=${ip} ASN=${asn} ${asOrg} network=${networkMatch}"
+            else
+                menuItem "${index}" "${host}:443" "${name} ${region}/${category} SNI=${sni}"
+                [[ -n "${note}" ]] && menuLine "    ${note}"
+            fi
         fi
         index=$((index + 1))
     done < <(realityTargetFilteredCandidates "${filter}")
@@ -1701,10 +1716,20 @@ showRealityTargetCandidatePage() {
 }
 
 selectRealityTargetCandidateInteractive() {
-    local filter=${1:-all}
+    local selectionMode=${1:-}
+    local filter=all
     local page=1
     local pageSize=${REALITY_TARGET_PAGE_SIZE:-12}
     local total maxPage choice selectedLine targetInput
+
+    if [[ "${selectionMode}" == "detect-first" ]]; then
+        local PADM_REALITY_TARGET_SELECTION_SCAN=1
+        scanLocalAsnRealityTargets all || return 1
+        local PADM_REALITY_TARGET_SELECTION_REQUIRE_SCAN=1
+        filter=all
+    else
+        filter=${selectionMode:-all}
+    fi
 
     while true; do
         total=$(realityTargetFilteredCandidateCount "${filter}")
@@ -2929,18 +2954,16 @@ scanLocalAsnRealityTargets() {
     recommended | all) ;;
     *) return 1 ;;
     esac
-    if ! detector=$(realityTargetDetector); then
-        realityTargetStatusBlock yellow "REALITY 目标站扫描" "未找到 xray，无法扫描目标质量" "安装核心后再执行扫描"
+    detector=$(realityTargetDetector 2>/dev/null || true)
+    if [[ -z "${detector}" ]] && ! command -v openssl >/dev/null 2>&1; then
+        realityTargetStatusBlock yellow "REALITY 目标站扫描" "未找到 Xray/OpenSSL，无法扫描目标质量" "安装核心或 OpenSSL 后再执行扫描"
         return 1
     fi
     if ! command -v timeout >/dev/null 2>&1; then
         realityTargetStatusBlock yellow "REALITY 目标站扫描" "未找到 timeout，无法安全限制 TLS 检测时长"
         return 1
     fi
-    if ! networkProfile=$(currentRealityNetworkProfile); then
-        realityTargetStatusBlock yellow "REALITY 目标站扫描" "无法识别本机公网 ASN" "已跳过同 ASN 扫描"
-        return 1
-    fi
+    networkProfile=$(currentRealityNetworkProfile 2>/dev/null || true)
     [[ "${maxJobs}" =~ ^[1-9][0-9]*$ ]] || maxJobs=8
     (( maxJobs > 16 )) && maxJobs=16
     resultsFile=$(realityTargetManagedResultsFile) || return 1
@@ -2965,6 +2988,7 @@ scanLocalAsnRealityTargets() {
     rest=${networkProfile#*$'\t'}
     currentAsn=${rest%%$'\t'*}
     currentOrg=${rest#*$'\t'}
+    currentIp=${currentIp:-unknown}
     realityTargetStatusBlock yellow "REALITY 目标库刷新" "本机公网网络: ${currentIp} ${currentAsn} ${currentOrg}" "检测来源: ${refreshSource}" "目标库文件: ${resultsFile}"
     if (( totalCandidates > 0 )); then
         realityTargetProgressLine "REALITY 目标库刷新 0/${totalCandidates} 并发：${maxJobs} 已耗时：0s"

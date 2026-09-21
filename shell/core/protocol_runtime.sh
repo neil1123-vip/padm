@@ -869,7 +869,7 @@ collectRealityProfile() {
         menuClose
         echoContent title "┌─ REALITY 目标站选择 ───────────────────────────────"
         menuRecommendedItem 1 "自动推荐" "优先 A 级；sing-box 无 Xray 时仅回退到安全 C 级"
-        menuItem 2 "候选列表" "选择后实时检测全部 A/AAAA"
+        menuItem 2 "候选列表" "先检测全部候选，再从通过检测的结果中选择"
         menuItem 3 "手动输入" "输入 host 或 host:port，端口默认 443"
         menuClose
         autoRead reality_target_mode "请选择[默认1]:" selectRealityTargetMode
@@ -877,7 +877,7 @@ collectRealityProfile() {
 
         case "${selectRealityTargetMode}" in
         2)
-            selectRealityTargetCandidateInteractive || return 1
+            selectRealityTargetCandidateInteractive detect-first || return 1
             ;;
         3)
             autoRead reality_target "请输入REALITY伪装目标域名，默认端口443:" targetInput

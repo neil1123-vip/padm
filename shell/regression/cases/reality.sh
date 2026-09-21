@@ -370,6 +370,23 @@ manual.example.com:8443
 "
     [[ "${realityTargetHost}" == "manual.example.com" ]]
     [[ "${realityTargetPort}" == "8443" ]]
+    (
+        local selectionResultsFile="${TMP_DIR}/reality-candidate-selection-results.tsv"
+        local selectionOrderFile="${TMP_DIR}/reality-candidate-selection-order.log"
+        export PADM_REALITY_TARGET_RESULTS_FILE="${selectionResultsFile}"
+        : >"${selectionOrderFile}"
+        scanLocalAsnRealityTargets() {
+            printf 'scan\n' >>"${selectionOrderFile}"
+            formatRealityTargetResultLine "fixture-primary.example.com:443" "fixture-primary.example.com" "Fixture Primary" "large_site" "no" "192.0.2.44" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "检测通过" >"${selectionResultsFile}"
+        }
+        selectRealityTargetCandidateInteractive detect-first <<<"1" >/dev/null
+        printf 'select\n' >>"${selectionOrderFile}"
+        [[ "${realityTargetHost}" == "fixture-primary.example.com" ]]
+        [[ "$(<"${selectionOrderFile}")" == $'scan\nselect' ]]
+        PADM_REALITY_TARGET_SELECTION_REQUIRE_SCAN=1
+        [[ "$(realityTargetCandidateCount)" == "1" ]]
+        unset PADM_REALITY_TARGET_SELECTION_REQUIRE_SCAN
+    )
     if selectRealityTargetCandidateInteractive <<<"r
 "; then
         return 1
