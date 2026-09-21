@@ -3299,6 +3299,7 @@ changeInstalledRealityTarget() {
     local previousXrayVLESSRealityXHTTPSNI="${xrayVLESSRealityXHTTPSNI:-}"
     local previousSingBoxVLESSRealityVisionSNI="${singBoxVLESSRealityVisionSNI:-}"
     local previousSingBoxVLESSRealityGRPCSNI="${singBoxVLESSRealityGRPCSNI:-}"
+    sni=${sni:-${target%:*}}
     validateRealityTargetSelection manual "${target}" "${sni}" || return 1
     padmCreateTempPath backupDir -d "$(realityTargetTmpPath 'padm-reality-target.XXXXXX')" || return 1
     if ! backupRealityTargetConfigs "${backupDir}"; then

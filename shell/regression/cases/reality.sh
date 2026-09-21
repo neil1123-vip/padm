@@ -1399,14 +1399,14 @@ JSON
         printf '%s\n' "$*" >>"${statusLog}"
     }
 
-    regressionExpectStatus 1 changeInstalledRealityTarget "new.example.com:8443" "new-sni.example.com"
+    regressionExpectStatus 1 changeInstalledRealityTarget "new.example.com:8443" ""
     [[ "${reloadCalls}" == "1" ]]
     [[ "${refreshCalls}" == "1" ]]
     [[ "$(jq -r '.inbounds[1].streamSettings.realitySettings.target' "${xrayVision}")" == "new.example.com:8443" ]]
-    [[ "$(jq -r '.inbounds[1].streamSettings.realitySettings.serverNames[0]' "${xrayVision}")" == "new-sni.example.com" ]]
+    [[ "$(jq -r '.inbounds[1].streamSettings.realitySettings.serverNames[0]' "${xrayVision}")" == "new.example.com" ]]
     [[ "${realityTargetHost}" == "new.example.com" ]]
     [[ "${realityTargetPort}" == "8443" ]]
-    [[ "${realitySNI}" == "new-sni.example.com" ]]
+    [[ "${realitySNI}" == "new.example.com" ]]
     grep -q '订阅刷新失败' "${statusLog}"
     ! grep -q '^green REALITY 目标站 已更新为' "${statusLog}"
 )
