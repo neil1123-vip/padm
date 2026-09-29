@@ -623,7 +623,11 @@ getPublicIP() {
         echo "${currentHost}"
     else
         local currentIP=
-        currentIP=$(fetchPublicIP "${type}" 2>/dev/null || true)
+        if [[ -z "${1:-}" ]] && declare -F realityTargetPublicIPv4 >/dev/null 2>&1; then
+            currentIP=$(realityTargetPublicIPv4 2>/dev/null || true)
+        else
+            currentIP=$(fetchPublicIP "${type}" 2>/dev/null || true)
+        fi
         if [[ -z "${currentIP}" && -z "${1:-}" ]]; then
             currentIP=$(fetchPublicIP 6 2>/dev/null || true)
         fi

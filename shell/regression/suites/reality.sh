@@ -4,12 +4,14 @@ listRegressionRealitySuiteCandidatesChildSelectors() {
     printf '%s\n' \
         reality-candidates-fast \
         reality-asn-scan-plan \
-        reality-candidates-full
+        reality-candidates-full \
+        reality-public-ip
 }
 
 registerRegressionFunctionLeaf reality-candidates-fast runRealityCandidateFastRegression
 registerRegressionFunctionLeaf reality-asn-scan-plan runRealityAsnScanPlanRegression
 registerRegressionFunctionLeaf reality-candidates-full runRealityCandidateFullRegression
+registerRegressionFunctionLeaf reality-public-ip runPublicIPIPv4FallbackRegression
 registerRegressionFunctionLeaf reality-profile-failure runRealityProfileFailureRegression
 
 listRegressionRealityConfigChildSelectors() {

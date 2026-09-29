@@ -215,6 +215,27 @@ runRealityProfileFailureRegression() (
     [[ ! -e "${singBoxRoot}07_VLESS_vision_reality_inbounds.json" ]]
 )
 
+runPublicIPIPv4FallbackRegression() (
+    set -euo pipefail
+    unset currentHost singBoxVLESSRealityVisionSNI singBoxVLESSRealityGRPCSNI xrayVLESSRealitySNI
+
+    fetchPublicIP() {
+        case "$1" in
+        4) return 1 ;;
+        6) printf '2001:db8::10\n' ;;
+        *) return 1 ;;
+        esac
+    }
+    fetchUrlToStdout() {
+        [[ "$1" == 'https://api.ipify.org' ]] || return 1
+        printf '203.0.113.10\n'
+    }
+
+    [[ "$(getPublicIP)" == '203.0.113.10' ]]
+    [[ -z "$(getPublicIP 4)" ]]
+    [[ "$(getPublicIP 6)" == '2001:db8::10' ]]
+)
+
 runRealityCandidateFastRegression() {
     local fixtureFile="${TMP_DIR}/reality-candidates-fast.txt"
     local cacheFile="${TMP_DIR}/reality-target-cache-fast.tsv"
