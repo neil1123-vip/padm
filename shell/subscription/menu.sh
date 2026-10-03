@@ -1428,7 +1428,7 @@ manageSubscriptionSyncDiagnostics() {
     role=$(subscriptionCurrentRoleNormalized) || return 1
     [[ "${role}" == "main" || "${role}" == "uninitialized" ]] || return 1
     if [[ "${role}" == "main" ]]; then
-        returnChoice=7
+        returnChoice=8
         roleAction=remote
     fi
     while true; do

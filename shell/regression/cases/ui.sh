@@ -2155,6 +2155,17 @@ main
         coreInstallType=1
         ensureSubscriptionGroupsState
         setMenuSmokeRole main
+        (
+            runSubscriptionGroupSync() {
+                recordMenuAction "forced-sync:${SUBSCRIPTION_SYNC_FORCE_RETRY:-false}"
+                return 1
+            }
+            resetMenuActions
+            manageSubscriptionSyncDiagnostics <<< $'7\n2\n8'
+            assertMenuAction 'forced-sync:true' || return 1
+            assertMenuAction showSubscriptionServiceStatus || return 1
+            [[ "${SUBSCRIPTION_SYNC_FORCE_RETRY:-false}" != "true" ]]
+        ) || return 1
         resetMenuActions
         output=
         manageSubscriptionSyncSettings <<<"6"
@@ -2207,27 +2218,27 @@ main
         resetMenuActions
         manageSubscriptionSyncSettings <<<"4
 1
-7
+8
 6"
         assertMenuAction showSubscriptionGroupsStateSummary
         assertMenuAction showSubscriptionSources
         resetMenuActions
         manageSubscriptionSyncDiagnostics <<<"2
-7"
+8"
         assertMenuAction showSubscriptionServiceStatus
         resetMenuActions
         manageSubscriptionSyncDiagnostics <<<"3
-7"
+8"
         assertMenuAction showSubscriptionLocalSyncPlan
         assertMenuAction subscriptionSyncPlan
         resetMenuActions
         manageSubscriptionSyncDiagnostics <<<"4
-7"
+8"
         assertMenuAction showSubscriptionRemoteSyncPlan
         assertMenuAction subscriptionRemoteSyncPlan
         resetMenuActions
         manageSubscriptionSyncDiagnostics <<<"5
-7"
+8"
         assertMenuAction showSubscriptionRemoteHealthPlan
         assertMenuAction subscriptionRemoteControlHealthAll
         resetMenuActions

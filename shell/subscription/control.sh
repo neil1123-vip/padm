@@ -141,7 +141,7 @@ subscriptionRemoteControlCurl() {
     padmCreateTmpRootPath headerFile padm-control-auth.XXXXXX || return 1
     chmod 600 "${headerFile}" || { padmRemoveCleanupPath "${headerFile}"; return 1; }
     printf 'Authorization: Bearer %s\n' "${token}" >"${headerFile}" || { padmRemoveCleanupPath "${headerFile}"; return 1; }
-    curl -H "@${headerFile}" "$@"
+    curl --noproxy '*' -H "@${headerFile}" "$@"
     curlStatus=$?
     padmRemoveCleanupPath "${headerFile}"
     return "${curlStatus}"

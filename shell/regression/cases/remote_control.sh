@@ -349,6 +349,7 @@ runRemoteControlInlineRequestHelpersRegression() (
     [[ "${healthResponse}" == *'"id":"edge-remote"'* ]] || return 1
     [[ "${healthResponse}" == *'"name":"Edge Remote"'* ]] || return 1
     [[ "$(grep -c -- '--max-filesize 1048576' "${curlArgsLog}")" == "2" ]] || return 1
+    [[ "$(grep -cF -- '--noproxy *' "${curlArgsLog}")" == "2" ]] || return 1
     ! grep -qF 'Authorization: Bearer token' "${curlArgsLog}"
     [[ "$(wc -l <"${curlHeaderFilesLog}" | tr -d ' ')" == "2" ]] || return 1
     [[ "$(grep -c '^600 .*/padm-control-auth\.' "${curlChmodLog}")" == "2" ]] || return 1
