@@ -257,6 +257,11 @@ runControl 10 compose-v1 "${TEST_ROOT}/compose-v1" "${NATIVE_ROOT}" "${TEST_ROOT
 [[ ! -e "${TEST_ROOT}/compose-v1" ]] || fail 'Compose v1 preflight wrote state'
 unset FAKE_COMPOSE_VERSION
 
+export FAKE_COMPOSE_VERSION=5.6.0
+runControl 0 compose-v5 "${TEST_ROOT}/compose-v5" "${NATIVE_ROOT}" "${TEST_ROOT}/compose-v5-bin" install --source "${PROJECT_ROOT}"
+[[ -f "${TEST_ROOT}/compose-v5/mode" ]] || fail 'Compose v5 preflight did not initialize state'
+unset FAKE_COMPOSE_VERSION
+
 export FAKE_UNAME_ARCH=riscv64
 runControl 10 unsupported-arch "${TEST_ROOT}/bad-arch" "${NATIVE_ROOT}" "${TEST_ROOT}/bad-arch-bin" install --source "${PROJECT_ROOT}"
 [[ ! -e "${TEST_ROOT}/bad-arch" ]] || fail 'unsupported architecture preflight wrote state'

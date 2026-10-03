@@ -129,10 +129,10 @@ dockerHostPreflight() {
         return 1
     }
     composeVersion=$(docker compose version --short 2>/dev/null) || {
-        dockerError '缺少 Docker Compose v2 插件'
+        dockerError '缺少 Docker Compose CLI 插件'
         return 1
     }
-    [[ "${composeVersion}" =~ ^v?2([.][0-9]+){1,2}([+-].*)?$ ]] || {
+    [[ "${composeVersion}" =~ ^v?([2-9]|[1-9][0-9]+)([.][0-9]+){1,2}([+-].*)?$ ]] || {
         dockerError "Docker Compose 版本不受支持: ${composeVersion:-unknown}"
         return 1
     }

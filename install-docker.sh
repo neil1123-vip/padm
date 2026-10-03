@@ -190,7 +190,7 @@ dockerEntryStartAndVerifyDocker() {
         fi
         sleep 1
     done
-    dockerEntryError 'Docker daemon 或 Compose v2 安装后仍不可用'
+    dockerEntryError 'Docker daemon 或 Compose CLI 插件安装后仍不可用'
     return 1
 }
 
@@ -217,7 +217,7 @@ dockerEntryInstallDockerEngine() {
         ;;
     *)
         dockerEntryError "当前发行版不在自动安装支持范围: ${DOCKER_ENTRY_OS_ID:-unknown}"
-        dockerEntryError '请先按 Docker 官方文档安装 Docker Engine 和 Compose v2，再重试: https://docs.docker.com/engine/install/'
+        dockerEntryError '请先按 Docker 官方文档安装 Docker Engine 和 Compose CLI 插件，再重试: https://docs.docker.com/engine/install/'
         return 1
         ;;
     esac
@@ -269,7 +269,7 @@ dockerEntryEnsureDockerForInstall() {
     [[ "${DOCKER_ENTRY_ENGINE_READY:-0}" == '1' ]] && return 0
     dockerEntryDockerAvailable && return 0
     dockerEntryNativeInstallAllowed || return 10
-    printf '未检测到 Docker。是否使用 Docker 官方软件源安装 Docker Engine 和 Compose v2？[y/N]: ' >&2
+    printf '未检测到 Docker。是否使用 Docker 官方软件源安装 Docker Engine 和 Compose CLI 插件？[y/N]: ' >&2
     local answer=
     IFS= read -r answer || answer=
     case "${answer}" in
@@ -279,7 +279,7 @@ dockerEntryEnsureDockerForInstall() {
         return 10
         ;;
     esac
-    printf '正在安装 Docker Engine 和 Compose v2，请稍候...\n' >&2
+    printf '正在安装 Docker Engine 和 Compose CLI 插件，请稍候...\n' >&2
     dockerEntryInstallDockerEngine || return 10
     DOCKER_ENTRY_ENGINE_READY=1
 }
