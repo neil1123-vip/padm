@@ -399,6 +399,8 @@ manual.example.com:8443
         scanLocalAsnRealityTargets() {
             printf 'scan\n' >>"${selectionOrderFile}"
             formatRealityTargetResultLine "fixture-primary.example.com:443" "fixture-primary.example.com" "Fixture Primary" "large_site" "no" "192.0.2.44" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "检测通过" >"${selectionResultsFile}"
+            formatRealityTargetResultLine "fixture-secondary.example.com:443" "fixture-secondary.example.com" "Fixture Secondary" "large_site" "no" "192.0.2.45" "AS64500" "ExampleNet" "same_asn" "B" "yes" "2048" "yes" "1234567890" "B 级排除" >>"${selectionResultsFile}"
+            formatRealityTargetResultLine "fixture-media.example.com:443" "fixture-media.example.com" "Fixture Media" "media" "no" "192.0.2.46" "AS64500" "ExampleNet" "same_asn" "C" "yes" "1024" "yes" "1234567890" "C 级排除" >>"${selectionResultsFile}"
         }
         selectRealityTargetCandidateInteractive detect-first <<<"1" >/dev/null
         printf 'select\n' >>"${selectionOrderFile}"
@@ -406,6 +408,7 @@ manual.example.com:8443
         [[ "$(<"${selectionOrderFile}")" == $'scan\nselect' ]]
         PADM_REALITY_TARGET_SELECTION_REQUIRE_SCAN=1
         [[ "$(realityTargetCandidateCount)" == "1" ]]
+        [[ "$(realityTargetCandidateField "$(realityTargetCandidateLineByIndex 1)" 1)" == "fixture-primary.example.com" ]]
         unset PADM_REALITY_TARGET_SELECTION_REQUIRE_SCAN
     )
     if selectRealityTargetCandidateInteractive <<<"r

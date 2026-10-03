@@ -352,7 +352,7 @@ realityTargetCandidateBlocked() {
 }
 
 realityTargetCandidates() {
-    local line host _sni _name _region _category cdn _rest blocked skip
+    local line host _sni _name _region _category cdn _rest blocked skip resultLine
     local blockedHosts=()
     while IFS='|' read -r blocked _rest; do
         blockedHosts+=("${blocked}")
@@ -361,7 +361,9 @@ realityTargetCandidates() {
         IFS='|' read -r host _sni _name _region _category cdn _rest <<<"${line}"
         [[ "${cdn,,}" == "yes" ]] && continue
         if [[ "${PADM_REALITY_TARGET_SELECTION_REQUIRE_SCAN:-}" == "1" ]]; then
-            realityTargetResultLine "$(formatRealityTarget "${host}" 443)" >/dev/null 2>&1 || continue
+            resultLine=$(realityTargetResultLine "$(formatRealityTarget "${host}" 443)" 2>/dev/null || true)
+            [[ -n "${resultLine}" ]] || continue
+            [[ "$(realityTargetResultField "${resultLine}" 10)" == "A" ]] || continue
         fi
         skip=false
         for blocked in "${blockedHosts[@]}"; do
