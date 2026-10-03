@@ -546,6 +546,63 @@ runRemoteControlInlineWireGuardPeerHelpersRegression() (
     [[ "$(wc -l <"${endpointLog}")" == "2" ]] || return 1
     [[ "$(wc -l <"${handshakeLog}")" == "2" ]] || return 1
     [[ "$(wc -l <"${curlLog}")" == "2" ]] || return 1
+
+    (
+        local recentHandshake
+        local response
+        local endpoint
+        local retryCountFile="${TMP_DIR}/remote-control-stable-peer-retry-count"
+        local waitSleepLog="${TMP_DIR}/remote-control-stable-peer-wait-sleep"
+        recentHandshake=$(date +%s) || return 1
+        wg() {
+            [[ "$1" == "show" && "$2" == "wg-padm" ]] || return 1
+            case "$3" in
+            endpoints) printf 'pub-edge 203.0.113.10:51820\n' ;;
+            latest-handshakes) printf 'pub-edge %s\n' "${recentHandshake}" ;;
+            *) return 1 ;;
+            esac
+        }
+        curl() {
+            local count
+            count=$(<"${retryCountFile}")
+            count=$((count + 1))
+            printf '%s\n' "${count}" >"${retryCountFile}"
+            ((count > 1)) || return 7
+            case "$*" in
+            *'https://control.example/health'*)
+                printf '{"ok":true,"version":"test","capabilities":["health","sync","traffic"]}\n200'
+                ;;
+            *)
+                printf '{"ok":true,"dry_run":false,"changed":false,"plan":{"create":[],"remove":[]}}\n200'
+                ;;
+            esac
+        }
+        sleep() {
+            printf '%s\n' "$1" >>"${waitSleepLog}"
+            SECONDS=$((SECONDS + 1))
+        }
+        for endpoint in health traffic sync; do
+            printf '0\n' >"${retryCountFile}"
+            : >"${waitSleepLog}"
+            SECONDS=0
+            if [[ "${endpoint}" == "health" ]]; then
+                response=$(subscriptionRemoteControlHealth "${source}") || return 1
+            else
+                response=$(subscriptionRemoteControlRequest "${source}" "${endpoint}" '{}') || return 1
+            fi
+            jq -e '.ok == true' <<<"${response}" >/dev/null || return 1
+            [[ "$(<"${retryCountFile}")" == "2" ]] || return 1
+            ! grep -qx '0.25' "${waitSleepLog}" || return 1
+        done
+        for recentHandshake in 0 "$(( $(date +%s) - 600 ))"; do
+            : >"${waitSleepLog}"
+            SECONDS=0
+            if subscriptionRemoteWireGuardWaitForPeerEndpointFromSource "${source}" 2 0.25 "203.0.113.10:51820" "${recentHandshake}"; then
+                return 1
+            fi
+            [[ "$(wc -l <"${waitSleepLog}")" == "2" ]] || return 1
+        done
+    ) || return 1
 )
 
 runRemoteControlInlineTokenConsumersRegression() (

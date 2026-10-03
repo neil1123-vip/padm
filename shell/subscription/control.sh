@@ -92,19 +92,22 @@ subscriptionRemoteWireGuardWaitForPeerEndpointFromSource() {
     local publicKey=
     local endpoint=
     local handshake=0
+    local now
     local tryIndex
     if [[ -n "${deadline}" ]] && ((SECONDS >= deadline)); then
         return 1
     fi
     peerState=$(subscriptionRemoteWireGuardPeerStateFromSource "${source}" 2>/dev/null || true)
     [[ -n "${peerState}" ]] || return 0
+    now=$(date +%s) || return 1
     [[ "${baselineHandshake}" =~ ^[0-9]+$ ]] || baselineHandshake=0
     IFS=$'\t' read -r publicKey endpoint handshake <<<"${peerState}"
     if [[ -n "${endpoint}" && "${endpoint}" != "(none)" ]]; then
         if [[ -z "${baselineEndpoint}" || "${baselineEndpoint}" == "(none)" || "${endpoint}" != "${baselineEndpoint}" ]]; then
             return 0
         fi
-        if [[ "${handshake}" =~ ^[0-9]+$ ]] && ((handshake > baselineHandshake)); then
+        # 已有近期握手时可直接重试，不必等待握手时间再次更新。
+        if [[ "${handshake}" =~ ^[0-9]+$ ]] && ((handshake > baselineHandshake || (handshake > 0 && now - handshake <= 180))); then
             return 0
         fi
     fi
@@ -119,7 +122,7 @@ subscriptionRemoteWireGuardWaitForPeerEndpointFromSource() {
                 if [[ -z "${baselineEndpoint}" || "${baselineEndpoint}" == "(none)" || "${endpoint}" != "${baselineEndpoint}" ]]; then
                     return 0
                 fi
-                if [[ "${handshake}" =~ ^[0-9]+$ ]] && ((handshake > baselineHandshake)); then
+                if [[ "${handshake}" =~ ^[0-9]+$ ]] && ((handshake > baselineHandshake || (handshake > 0 && now - handshake <= 180))); then
                     return 0
                 fi
             fi
