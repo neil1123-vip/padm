@@ -1939,6 +1939,17 @@ n"
         manageSubscriptionLocalHome <<<"10
 5"
         [[ "${actions}" == $'installSubscribe\nshowSubscriptionServiceStatus\n' ]]
+        (
+            resetMenuActions
+            initSubscriptionWireGuardMain() { recordMenuAction init-failed; return 1; }
+            manageSubscriptionLocalHome <<< $'8\n1\n5'
+            [[ "${actions}" == $'init-failed\nshowPublishedSubscriptionLinks:\n' ]]
+        )
+        (
+            resetMenuActions
+            manageSubscriptionLocalHome <<< $'9\ninvalid-invite\n1\n5'
+            [[ "${actions}" == $'errorCard:主控邀请无效\nshowPublishedSubscriptionLinks:\n' ]]
+        )
         resetMenuActions
         output=
         setMenuSmokeRole uninitialized
@@ -1953,7 +1964,9 @@ invite-credential"
         manageSubscription <<<"4"
         grep -q "查看当前订阅链接" <<<"${output}"
         grep -q "订阅同步" <<<"${output}"
-        grep -q "协同与控制" <<<"${output}"
+        grep -q "管理被控服务器" <<<"${output}"
+        grep -q "维护本机控制面" <<<"${output}"
+        ! grep -q "协同与控制" <<<"${output}"
         ! grep -q "服务器与协同" <<<"${output}"
         ! grep -q "控制面与连接" <<<"${output}"
         if grep -q '^发布订阅 ' <<<"${output}" || grep -q '^多服务器协同 ' <<<"${output}" || grep -q '^主控维护与排障 ' <<<"${output}" || grep -q '^被控维护与排障 ' <<<"${output}"; then
@@ -1975,7 +1988,9 @@ invite-credential"
         ! grep -q "新建并发布订阅" <<<"${output}"
         ! grep -q "刷新并查看我的订阅链接" <<<"${output}"
         ! grep -q "查看并处理已有订阅" <<<"${output}"
-        grep -q "协同与控制" <<<"${output}"
+        grep -q "管理被控服务器" <<<"${output}"
+        grep -q "维护本机控制面" <<<"${output}"
+        ! grep -q "协同与控制" <<<"${output}"
         ! grep -q "服务器与协同" <<<"${output}"
         ! grep -q "控制面与连接" <<<"${output}"
         if grep -q "同步订阅变更" <<<"${output}" || grep -q "预览同步变更" <<<"${output}" || grep -q "查看我的可用服务器" <<<"${output}"; then
@@ -2182,6 +2197,65 @@ main
             return 1
         fi
         (
+            local syncEnabled=true syncInterval=10
+            local settingWrites=0 cronWrites=0 cronShouldFail=false
+            subscriptionActiveGroupRead() {
+                case "${@: -1}" in
+                '.sync.enabled == true') printf '%s\n' "${syncEnabled}" ;;
+                '.sync.interval_minutes') printf '%s\n' "${syncInterval}" ;;
+                *)
+                    command jq -cn --argjson enabled "${syncEnabled}" --argjson interval "${syncInterval}" \
+                        '{enabled:$enabled,interval_minutes:$interval,last_run:"",last_status:"pending",failure_count:0}'
+                    ;;
+                esac
+            }
+            setSubscriptionGroupSyncEnabled() {
+                [[ "${SUBSCRIPTION_GROUPS_LOCK_HELD:-}" == "1" ]] || return 1
+                settingWrites=$((settingWrites + 1))
+                syncEnabled=$1
+            }
+            setSubscriptionGroupSyncInterval() {
+                [[ "${SUBSCRIPTION_GROUPS_LOCK_HELD:-}" == "1" ]] || return 1
+                settingWrites=$((settingWrites + 1))
+                syncInterval=$1
+            }
+            refreshSubscriptionGroupSyncCron() {
+                [[ "${SUBSCRIPTION_GROUPS_LOCK_HELD:-}" == "1" ]] || return 1
+                cronWrites=$((cronWrites + 1))
+                [[ "${cronShouldFail}" != "true" || "${cronWrites}" != "1" ]]
+            }
+            autoRead() { read -r "$3"; }
+            resetMenuActions
+            manageSubscriptionSyncSettings <<< $'3\n\n6'
+            manageSubscriptionSyncSettings <<< $'3\n10\n6'
+            manageSubscriptionSyncSettings < <(printf '3\n20')
+            [[ "${settingWrites}" == "0" && "${cronWrites}" == "0" && "${syncInterval}" == "10" ]]
+            manageSubscriptionSyncSettings <<< $'3\ninvalid\n60\n17\n6'
+            [[ "${settingWrites}" == "1" && "${cronWrites}" == "1" && "${syncInterval}" == "17" ]]
+            setSubscriptionGroupSyncIntervalWithCron 17
+            [[ "${settingWrites}" == "2" && "${cronWrites}" == "2" ]]
+
+            (
+                local settingWrites=0 cronWrites=0
+                eval "$(declare -f menuReadChoice | sed '1s/^menuReadChoice/originalSyncMenuReadChoice/')"
+                menuReadChoice() {
+                    originalSyncMenuReadChoice "$@" || return $?
+                    if [[ "$1" == "sync_settings_menu" && "${!3}" == "2" ]]; then
+                        syncEnabled=false
+                    fi
+                }
+                resetMenuActions
+                manageSubscriptionSyncSettings <<< $'2\n6'
+                [[ "${settingWrites}" == "0" && "${cronWrites}" == "0" && "${syncEnabled}" == "false" ]]
+                assertMenuAction 'errorCard:同步设置已变化，请重新读取后重试'
+            )
+            settingWrites=0
+            cronWrites=0
+            cronShouldFail=true
+            regressionExpectStatus 1 setSubscriptionGroupSyncEnabledWithCron false true
+            [[ "${settingWrites}" == "2" && "${cronWrites}" == "2" && "${syncEnabled}" == "true" ]]
+        ) || return 1
+        (
             local syncStatusJqLog="${TMP_DIR}/sync-status-jq.log"
             subscriptionCurrentRoleNormalized() { printf 'main\n'; }
             subscriptionActiveGroupRead() {
@@ -2353,18 +2427,15 @@ main
         resetMenuActions
         output=
         manageSubscriptionMainHome <<<"8
-1
 7
-3
 4"
+        [[ -z "${actions}" ]]
         grep -q "管理被控服务器" <<<"${output}"
         grep -q "维护本机控制面" <<<"${output}"
         ! grep -q "查看协同状态" <<<"${output}"
         resetMenuActions
-        manageSubscriptionMainHome <<<"8
-2
+        manageSubscriptionMainHome <<<"9
 5
-3
 4"
         assertMenuAction showSubscriptionWireGuardStatus
         for wgAction in \

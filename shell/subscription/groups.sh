@@ -692,13 +692,35 @@ subscriptionApplyUserGroupState() {
 removeUserSubscriptionState() {
     local id=$1
     subscriptionStateIdValid "${id}" || return 1
-    subscriptionActiveGroupWrite --arg id "${id}" '
-        if any(.user_groups[]?; .id == $id) then
-          .user_groups = ([.user_groups[]? | select(.id != $id)]) |
-          .traffic.user_groups |= (del(.[$id]) // {})
-        else
-          error("user subscription not found")
-        end
+    local idsJson
+    idsJson=$(jq -cn --arg id "${id}" '[$id]') || return 1
+    removeUserSubscriptionsState "${idsJson}" "${2:-}"
+}
+
+removeUserSubscriptionsState() {
+    local idsJson=${1:-'[]'}
+    local expectedJson=${2:-null}
+    subscriptionActiveGroupWrite --argjson ids "${idsJson}" --argjson expected "${expectedJson}" '
+      def selected: .id as $id | ($ids | index($id)) != null;
+      if ($ids | type) != "array" then
+        error("请选择有效的订阅")
+      elif ($ids | length) == 0 or
+          (all($ids[]; type == "string" and length <= 64 and test("^[A-Za-z0-9_-]+$")) | not) or
+          (($ids | length) != ($ids | unique | length)) then
+        error("订阅 ID 必须非空、唯一且有效")
+      else . end |
+      . as $state |
+      if (all($ids[]; . as $id | any($state.user_groups[]?; .id == $id)) | not) then
+        error("所选订阅已不存在，请重新选择")
+      else . end |
+      [.user_groups[]? | select(selected) |
+        {id, uuid, name, enabled, allowed_sources, traffic_limit_gb}] as $current |
+      if $expected != null and ($expected | sort_by(.id)) != ($current | sort_by(.id)) then
+        error("订阅已被其他操作修改，请重新确认删除")
+      else . end |
+      .user_groups |= map(select(selected | not)) |
+      .traffic.user_groups |= ((. // {}) |
+        with_entries(select(.key as $id | ($ids | index($id)) == null)))
     '
 }
 
