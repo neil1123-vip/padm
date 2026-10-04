@@ -55,7 +55,7 @@ runSubscriptionMenuWorkflowRegression() (
     )
 
     (
-        local selectedSources= before sourceId=stale sourcesJson
+        local selectedSources= sourceId=stale sourcesJson
         sourcesJson=$(subscriptionActiveGroupRead -c '[.sources[] | select(.role != "main")]')
         selectSubscriptionSourceId "${sourcesJson}" "选择被控:" sourceId <<< $'missing\n1'
         [[ "${sourceId}" == "edge" ]]
@@ -69,24 +69,16 @@ runSubscriptionMenuWorkflowRegression() (
         [[ "${selectedSources}" == '["edge"]' ]]
         selectUserSubscriptionSources user_subscription_sources "选择来源:" selectedSources <<<'*'
         [[ "${selectedSources}" == '["*"]' ]]
-
-        runUserSubscriptionMutationAndSyncUnlocked() { return 99; }
-        setUserSubscriptionSourcesMenu 2 <<<""
-        setUserSubscriptionTrafficLimitMenu 2 <<<""
-        before=$(subscriptionGroupsStateRead -c '.user_groups')
-        regressionExpectStatus 1 setUserSubscriptionSourcesMenu 2 </dev/null
-        regressionExpectStatus 1 setUserSubscriptionTrafficLimitMenu 2 </dev/null
-        [[ "$(subscriptionGroupsStateRead -c '.user_groups')" == "${before}" ]]
-        setUserSubscriptionTrafficLimitMenu 2 <<< $'wrong\n7'
-        subscriptionActiveGroupRead -e '.user_groups[0].traffic_limit_gb == 7' >/dev/null
     )
 
     (
-        local syncCount=0 syncStatus=0
-        ensureSubscriptionServiceForSharedLinks() { return 1; }
+        local syncCount=0 syncStatus=0 published=false serviceCount=0 linkCount=0
+        ensureSubscriptionServiceForSharedLinks() { serviceCount=$((serviceCount + 1)); return 2; }
+        showUserSubscriptionLinks() { linkCount=$((linkCount + 1)); return 99; }
         setSubscriptionGroupSyncEnabledWithCron() { return 99; }
         runSubscriptionGroupSync() {
             syncCount=$((syncCount + 1))
+            SUBSCRIPTION_SYNC_PUBLISHED=${published}
             return "${syncStatus}"
         }
         createAndSyncUserSubscriptionWizard <<< $'new-team\n1,2\n3'
@@ -104,30 +96,36 @@ runSubscriptionMenuWorkflowRegression() (
         local openedId=
         manageUserSubscriptionItem() { openedId=$1; }
         manageSharedSubscriptions <<< $'+\nretry-team\n1\n0\n\n'
-        [[ "${openedId}" == "retry-team" ]]
+        [[ "${openedId}" == "retry-team" && "${syncCount}" == "3" ]]
         userSubscriptionExists retry-team
+        published=true
+        manageSharedSubscriptions <<< $'+\npartial-team\n1\n0\n\n'
+        [[ "${openedId}" == "partial-team" && "${syncCount}" == "4" ]]
+        userSubscriptionExists partial-team
+        grep -q '首次同步部分失败但链接已发布' "${statusLog}"
+        [[ "${serviceCount}" == "0" && "${linkCount}" == "0" ]]
     )
 
     (
         local syncCount=0 publishCount=0 publishedCount=0
         ensureSubscriptionServiceForSharedLinks() { return 0; }
         runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
-        refreshSubscriptionLinks() { publishCount=$((publishCount + 1)); }
+        refreshSubscriptionLinks() { publishCount=$((publishCount + 1)); return 99; }
         showPublishedUserSubscriptionLinks() { publishedCount=$((publishedCount + 1)); }
         setUserSubscriptionEnabled alpha false
         regressionExpectStatus 1 showUserSubscriptionLinks alpha
         [[ "${syncCount}" == "0" && "${publishCount}" == "0" ]]
         setUserSubscriptionEnabled alpha true
         showUserSubscriptionLinks alpha
-        [[ "${syncCount}" == "1" && "${publishCount}" == "1" ]]
-        showUserSubscriptionLinks alpha true
-        [[ "${syncCount}" == "1" && "${publishCount}" == "2" ]]
+        [[ "${syncCount}" == "1" && "${publishCount}" == "0" && "${publishedCount}" == "1" ]]
+        showUserSubscriptionLinks alpha
+        [[ "${syncCount}" == "2" && "${publishCount}" == "0" && "${publishedCount}" == "2" ]]
         runSubscriptionGroupSync() {
             syncCount=$((syncCount + 1))
             setUserSubscriptionEnabled alpha false
         }
         regressionExpectStatus 1 showUserSubscriptionLinks alpha
-        [[ "${syncCount}" == "2" && "${publishCount}" == "2" ]]
+        [[ "${syncCount}" == "3" && "${publishCount}" == "0" && "${publishedCount}" == "2" ]]
         setUserSubscriptionEnabled alpha true
         runSubscriptionGroupSync() {
             syncCount=$((syncCount + 1))
@@ -135,13 +133,20 @@ runSubscriptionMenuWorkflowRegression() (
             return 1
         }
         showUserSubscriptionLinks alpha
-        [[ "${syncCount}" == "3" && "${publishCount}" == "2" && "${publishedCount}" == "1" ]]
+        [[ "${syncCount}" == "4" && "${publishCount}" == "0" && "${publishedCount}" == "3" ]]
         runSubscriptionGroupSync() {
             syncCount=$((syncCount + 1))
             return 1
         }
         regressionExpectStatus 1 showUserSubscriptionLinks alpha
-        [[ "${syncCount}" == "4" && "${publishedCount}" == "1" ]]
+        [[ "${syncCount}" == "5" && "${publishedCount}" == "3" ]]
+        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
+        showPublishedUserSubscriptionLinks() { publishedCount=$((publishedCount + 1)); return 1; }
+        regressionExpectStatus 1 showUserSubscriptionLinks alpha
+        [[ "${syncCount}" == "6" && "${publishCount}" == "0" && "${publishedCount}" == "4" ]]
+        ensureSubscriptionServiceForSharedLinks() { return 1; }
+        regressionExpectStatus 1 showUserSubscriptionLinks alpha
+        [[ "${syncCount}" == "6" && "${publishedCount}" == "4" ]]
     )
 
     (
@@ -337,10 +342,17 @@ runSubscriptionMenuDraftRegression() (
         subscriptionActiveGroupRead -e '.user_groups[0].traffic_limit_gb == 7 and .user_groups[0].allowed_sources == ["main"]' >/dev/null
         resetDraftFixture
         before=$(subscriptionGroupsStateRead -c '.')
-        local SUBSCRIPTION_USER_MUTATION_FORCE_SYNC=sentinel
         editUserSubscriptionsMenu '["alpha"]' <<< $'3\n1\n6'
-        [[ "${syncCount}" == "1" && "${SUBSCRIPTION_USER_MUTATION_FORCE_SYNC}" == "sentinel" ]]
+        [[ "${syncCount}" == "1" ]]
         [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+
+        syncCount=0
+        manageUserSubscriptionItem alpha <<< $'5\n7'
+        [[ "${syncCount}" == "1" ]]
+        subscriptionActiveGroupRead -e '.sync.enabled == false and .user_groups[0].enabled == false' >/dev/null
+        manageUserSubscriptionItem alpha <<< $'5\n7'
+        [[ "${syncCount}" == "2" ]]
+        subscriptionActiveGroupRead -e '.sync.enabled == false and .user_groups[0].enabled == true' >/dev/null
     )
 
     (
@@ -430,13 +442,13 @@ runSubscriptionMenuDraftRegression() (
     )
 
     (
-        local syncCount=0
+        local syncCount=0 ensureCount=0
         resetDraftFixture
-        ensureSubscriptionServiceForSharedLinks() { return 1; }
+        ensureSubscriptionServiceForSharedLinks() { ensureCount=$((ensureCount + 1)); return 99; }
         runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
         setUserSubscriptionEnabled alpha false
         createAndSyncUserSubscriptionWizard alpha <<< $'copied-alpha\n\n\n'
-        [[ "${syncCount}" == "1" && "${createdUserSubscriptionId}" == "copied-alpha" ]]
+        [[ "${syncCount}" == "1" && "${ensureCount}" == "0" && "${createdUserSubscriptionId}" == "copied-alpha" ]]
         subscriptionActiveGroupRead -e '
           . as $state |
           ($state.user_groups | map(select(.id == "copied-alpha")) | first) as $copy |
@@ -448,6 +460,7 @@ runSubscriptionMenuDraftRegression() (
         ' >/dev/null
 
         createAndSyncUserSubscriptionWizard beta <<<zero-template-copy
+        [[ "${ensureCount}" == "0" ]]
         subscriptionActiveGroupRead -e '
           any(.user_groups[]; .id == "zero-template-copy" and .traffic_limit_gb == 0 and .allowed_sources == ["main"])
         ' >/dev/null
@@ -456,7 +469,7 @@ runSubscriptionMenuDraftRegression() (
     (
         local syncCount=0
         resetDraftFixture
-        setSubscriptionGroupSyncEnabled true
+        setSubscriptionGroupSyncEnabled false
         subscriptionSyncRestoreConfigBackups() { :; }
         subscriptionSyncRestoreSubscribeOutputBackups() { :; }
         subscriptionSyncReconcileLocalServices() { :; }
@@ -474,7 +487,7 @@ runSubscriptionMenuDraftRegression() (
         ' >/dev/null
 
         resetDraftFixture
-        setSubscriptionGroupSyncEnabled true
+        setSubscriptionGroupSyncEnabled false
         syncCount=0
         collectSubscriptionTraffic() {
             subscriptionActiveGroupWrite '

@@ -1189,7 +1189,6 @@ runMenuSmokeRegression() {
     }
     eval "$(declare -f menu | sed '1s/^menu /originalCoreMainMenu /')"
     eval "$(declare -f manageSubscriptionPendingInvites | sed '1s/^manageSubscriptionPendingInvites /originalManageSubscriptionPendingInvites /')"
-    eval "$(declare -f setUserSubscriptionSourcesMenu | sed '1s/^setUserSubscriptionSourcesMenu /originalSetUserSubscriptionSourcesMenu /')"
     eval "$(declare -f changeSubscriptionSourceEnabledMenu | sed '1s/^changeSubscriptionSourceEnabledMenu /originalChangeSubscriptionSourceEnabledMenu /')"
     eval "$(declare -f removeSubscriptionControlledServerMenu | sed '1s/^removeSubscriptionControlledServerMenu /originalRemoveSubscriptionControlledServerMenu /')"
     menu() { recordMenuAction menu; }
@@ -1983,9 +1982,7 @@ invite-credential"
         fi
         resetMenuActions
         manageSubscriptionMainHome <<<"1
-1
-1
-3
+5
 4
 4"
         assertMenuAction installSubscribe
@@ -1993,8 +1990,6 @@ invite-credential"
         resetMenuActions
         manageSubscriptionMainHome <<<"1
 1
-2
-3
 4
 4"
         assertMenuAction subscribe
@@ -2004,15 +1999,15 @@ invite-credential"
 4
 4"
         grep -q "本机自用订阅来自协议配置" <<<"${output}"
-        grep -q "发布与链接" <<<"${output}"
+        grep -q "刷新并查看订阅链接" <<<"${output}"
+        grep -q "安装/更新发布服务" <<<"${output}"
+        ! grep -q "发布与链接" <<<"${output}"
         grep -q "分享订阅" <<<"${output}"
         grep -q "流量与限额" <<<"${output}"
         grep -q "返回主控首页" <<<"${output}"
         resetMenuActions
         output=
         manageSubscriptionMainHome <<<"1
-1
-3
 4
 4"
         grep -q "安装/更新发布服务" <<<"${output}"

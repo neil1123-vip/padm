@@ -117,7 +117,7 @@ ensureSubscriptionServiceForSharedLinks() {
         return 0
     fi
 
-    statusCard "已跳过订阅服务安装" "本次仍可保存订阅对象和执行同步" "等之后安装好订阅服务，再到 订阅与用户 -> 发布与链接 -> 刷新并查看订阅链接"
+    statusCard "已跳过订阅服务安装" "订阅对象不受影响" "稍后可从 订阅与用户 -> 安装/更新发布服务 配置发布入口"
     return 1
 }
 
@@ -313,7 +313,7 @@ runUserSubscriptionMutationAndSyncUnlocked() {
         "${rollbackState}" \
         "${SUBSCRIPTION_USER_MUTATION_CONFIG_BACKUP_DIR}" \
         "" \
-        "${SUBSCRIPTION_USER_MUTATION_FORCE_SYNC:-false}"
+        true
 }
 
 subscriptionRequireRole() {
@@ -367,7 +367,7 @@ subscriptionPublisherHome() {
     while true; do
         echoContent title "\n┌─ ${homeTitle} ─────────────────────────────────────"
         showSubscriptionServerRoleSummary
-        menuItem 1 "订阅与用户" "发布与链接、分享订阅、流量与限额"
+        menuItem 1 "订阅与用户" "订阅链接、分享订阅、流量与限额"
         menuItem 2 "订阅同步" "立即同步、自动同步、状态排障和状态备份"
         if [[ "${publisherRole}" == "main" ]]; then
             menuItem 3 "协同与控制" "管理被控服务器和本机控制面；状态在对应页面查看"
@@ -529,7 +529,7 @@ showSubscriptionServiceStatus() {
     if [[ -n "${subscribePort}" ]]; then
         statusCard "订阅服务" "状态：已配置" "协议：${subscribeType:-https}" "域名：${subscribeDomain}" "端口：${subscribePort}"
     else
-        statusCard "订阅服务" "状态：未检测到可用订阅发布配置" "如需本机向客户端发布订阅，请进入 订阅与用户 -> 发布与链接" "仅作为被控加入主控时，不需要安装公网订阅服务"
+        statusCard "订阅服务" "状态：未检测到可用订阅发布配置" "如需发布订阅，请进入 订阅与用户 -> 安装/更新发布服务" "仅作为被控加入主控时，不需要安装公网订阅服务"
     fi
 }
 
@@ -611,26 +611,6 @@ showSubscriptionQuotaPlanJson() {
     showSubscriptionJsonWithSummary "超限处理计划" "${plan}" "${summary}"
 }
 
-manageSubscriptionPublishMenu() {
-    subscriptionRequireLocalPublisherRole || return 1
-    local publishStatus=
-    while true; do
-        echoContent title "\n┌─ 发布与链接 ───────────────────────────────────────"
-        menuLine "安装/更新公网订阅服务，或刷新本机和分享订阅链接。"
-        menuItem 1 "安装/更新发布服务" "只处理订阅服务和公网发布状态"
-        menuItem 2 "刷新并查看订阅链接" "重新生成本机自用和已启用分享订阅，并显示链接"
-        menuReturnItem 3 "返回订阅与用户" "回到上级菜单"
-        menuClose
-        menuReadChoice subscription_publish_menu "请选择:" publishStatus || return 0
-        case "${publishStatus}" in
-        1) installSubscribe && showSubscriptionServiceStatus ;;
-        2) refreshSubscriptionLinks ;;
-        3) return ;;
-        *) coreSelectionErrorCard ;;
-        esac
-    done
-}
-
 manageSharedSubscriptions() {
     subscriptionRequireLocalPublisherRole || return 1
     while true; do
@@ -658,17 +638,19 @@ manageSubscriptionCatalog() {
     while true; do
         echoContent title "\n┌─ 订阅与用户 ───────────────────────────────────────"
         menuLine "本机自用订阅来自协议配置；这里统一处理发布、分享订阅和流量。"
-        menuItem 1 "发布与链接" "安装/更新发布服务，或刷新并查看订阅链接"
+        menuItem 1 "刷新并查看订阅链接" "更新本机自用和已启用分享订阅的链接"
         menuItem 2 "分享订阅" "新建或维护已有分享订阅"
         menuItem 3 "流量与限额" "查看流量明细，并处理超限和自动限额"
+        menuItem 5 "安装/更新发布服务" "配置公网发布入口"
         menuReturnItem 4 "${returnText}" "回到上级菜单"
         menuClose
         menuReadChoice subscription_catalog_menu "请选择:" subscriptionCatalogStatus || return 0
         case "${subscriptionCatalogStatus}" in
-        1) manageSubscriptionPublishMenu ;;
+        1) refreshSubscriptionLinks ;;
         2) manageSharedSubscriptions ;;
         3) manageTrafficAndQuota ;;
         4) return ;;
+        5) installSubscribe && showSubscriptionServiceStatus ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -844,8 +826,6 @@ createAndSyncUserSubscriptionWizard() {
     local id=
     local sourceJson=
     local limit=0
-    local canShowLinks=true
-    local subscriptionServiceStatus=0
     createdUserSubscriptionId=
     menuReadChoice user_subscription_id "请输入分享订阅 ID[例 team-a，回车取消]:" id || return 1
     if ! subscriptionStateIdValid "${id}"; then
@@ -875,30 +855,20 @@ createAndSyncUserSubscriptionWizard() {
         limit=$(jq -nr --arg value "${limit}" '$value | tonumber') || return 1
     fi
 
-    if ensureSubscriptionServiceForSharedLinks; then
-        :
-    else
-        subscriptionServiceStatus=$?
-        if [[ "${subscriptionServiceStatus}" == "2" ]]; then
-            return 1
-        fi
-        canShowLinks=false
-    fi
-
     if ! addUserSubscriptionState "${id}" "${id}" "${sourceJson}" "${limit}"; then
         errorCard "分享订阅创建失败，订阅 ID 可能已存在或状态写入失败"
         return 1
     fi
     createdUserSubscriptionId=${id}
     statusCard "分享订阅已创建" "订阅 ID：${id}" "服务器范围：$(jq -r 'join("、")' <<<"${sourceJson}")" "订阅额度 GB：${limit}" "正在立即同步；不改变后续自动同步设置"
+    SUBSCRIPTION_SYNC_PUBLISHED=false
     if ! runSubscriptionGroupSync; then
-        warnCard "订阅已保存，但首次同步失败" "可在该订阅详情中重试同步并获取链接，无需重新创建"
+        if [[ "${SUBSCRIPTION_SYNC_PUBLISHED:-false}" == "true" ]]; then
+            warnCard "订阅已保存，首次同步部分失败但链接已发布" "可在该订阅详情查看已发布链接，无需重新创建"
+        else
+            warnCard "订阅已保存，但首次同步失败" "可在该订阅详情中重试同步并获取链接，无需重新创建"
+        fi
         return 1
-    fi
-    if [[ "${canShowLinks}" == "true" ]]; then
-        showUserSubscriptionLinks "${id}" true
-    else
-        statusCard "同步完成，尚未发布链接" "安装发布服务后，可直接从该订阅详情获取链接"
     fi
 }
 
@@ -936,7 +906,7 @@ selectUserSubscriptionId() {
         fi
         menuItem "${itemIndex}" "${name}（${id}）" "状态：${enabled} / 额度：${limit}"
     done <<<"${userRows}"
-    [[ "${allowCreate}" == "true" ]] && menuItem "+" "新建分享订阅" "创建后立即同步并获取链接"
+    [[ "${allowCreate}" == "true" ]] && menuItem "+" "新建分享订阅" "创建后立即同步并进入详情"
     if [[ "${allowMultiple}" == "true" ]]; then
         menuLine "输入编号或订阅 ID；逗号分隔可多选，* 选择全部；纯数字 ID 使用 id:ID；直接回车返回"
     else
@@ -997,27 +967,22 @@ selectUserSubscriptionId() {
 
 showUserSubscriptionLinks() {
     local userSubscriptionId=$1
-    local alreadySynced=${2:-false}
-    local accountName
     local enabled
     enabled=$(subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" 'first(.user_groups[]? | select(.id == $id)).enabled // false') || return 1
     if [[ "${enabled}" != "true" ]]; then
         warnCard "该订阅已停用或不存在" "启用后再同步获取链接"
         return 1
     fi
-    accountName=$(subscriptionSyncAccountName "${userSubscriptionId}")
     if ! ensureSubscriptionServiceForSharedLinks; then
         return 1
     fi
-    if [[ "${alreadySynced}" != "true" ]]; then
-        SUBSCRIPTION_SYNC_PUBLISHED=false
-        if ! runSubscriptionGroupSync; then
-            if [[ "${SUBSCRIPTION_SYNC_PUBLISHED:-false}" == "true" ]]; then
-                warnCard "订阅同步部分失败，但本机已发布可用链接" "失败来源沿用旧快照；请到 订阅同步 -> 状态与排障 查看详情"
-            else
-                errorCard "订阅同步失败，未生成新的分享链接" "修复同步问题后可在当前订阅重试"
-                return 1
-            fi
+    SUBSCRIPTION_SYNC_PUBLISHED=false
+    if ! runSubscriptionGroupSync; then
+        if [[ "${SUBSCRIPTION_SYNC_PUBLISHED:-false}" == "true" ]]; then
+            warnCard "订阅同步部分失败，但本机已发布可用链接" "失败来源沿用旧快照；请到 订阅同步 -> 状态与排障 查看详情"
+        else
+            errorCard "订阅同步失败，未生成新的分享链接" "修复同步问题后可在当前订阅重试"
+            return 1
         fi
     fi
     # 同步中的自动限额处理可能停用订阅，发布前重新确认状态。
@@ -1026,14 +991,7 @@ showUserSubscriptionLinks() {
         warnCard "该订阅已停用或不存在" "检查流量和额度，启用后再同步获取链接"
         return 1
     fi
-    if [[ "${SUBSCRIPTION_SYNC_PUBLISHED:-false}" == "true" ]]; then
-        showPublishedUserSubscriptionLinks "${userSubscriptionId}"
-        return $?
-    fi
-    if ! refreshSubscriptionLinks "${accountName}" true; then
-        return 1
-    fi
-    statusCard "用户订阅链接" "已刷新 ${accountName} 的订阅输出，请把上方该账号的链接发给对方" "如果上方没有该账号，先执行同步生成托管账号"
+    showPublishedUserSubscriptionLinks "${userSubscriptionId}"
 }
 
 showPublishedUserSubscriptionLinks() {
@@ -1220,7 +1178,6 @@ editUserSubscriptionsMenu() {
     local reload=
     local pendingFields
     local hasChanges
-    local SUBSCRIPTION_USER_MUTATION_FORCE_SYNC=true
     selectedCount=$(jq -r 'length' <<<"${idsJson}" 2>/dev/null) || return 1
     [[ "${selectedCount}" -gt 0 ]] || return 1
     expectedJson=$(subscriptionActiveGroupRead -c --argjson ids "${idsJson}" '
@@ -1428,46 +1385,6 @@ manageUserSubscriptionItem() {
     done
 }
 
-setUserSubscriptionSourcesMenu() {
-    local userSubscriptionId=$1
-    local sourceJson=
-    local currentSources
-    currentSources=$(subscriptionActiveGroupRead -ec --arg id "${userSubscriptionId}" 'first(.user_groups[]? | select(.id == $id)).allowed_sources') || return 1
-    selectUserSubscriptionSources user_subscription_sources "请选择节点范围[回车保留当前范围]:" sourceJson "${currentSources}" || return 1
-    if jq -en --argjson current "${currentSources}" --argjson selected "${sourceJson}" '$current | sort == ($selected | sort)' >/dev/null; then
-        statusCard "节点范围未变更"
-        return 0
-    fi
-    if subscriptionGroupsWithLock runUserSubscriptionMutationAndSyncUnlocked \
-        "用户订阅节点范围更新" "节点范围更新失败" \
-        setUserSubscriptionSources "${userSubscriptionId}" "${sourceJson}"; then
-        successCard "节点范围已更新"
-        return 0
-    fi
-    return 1
-}
-
-setUserSubscriptionTrafficLimitMenu() {
-    local userSubscriptionId=$1
-    local limit=
-    local currentLimit
-    currentLimit=$(subscriptionActiveGroupRead -er --arg id "${userSubscriptionId}" 'first(.user_groups[]? | select(.id == $id)).traffic_limit_gb') || return 1
-    while true; do
-        menuReadChoice user_subscription_traffic_limit "请输入订阅额度 GB[当前 ${currentLimit}，回车保留，0 为不限]:" limit true || return 1
-        limit=${limit:-${currentLimit}}
-        [[ "${limit}" =~ ^[0-9]+$ ]] && break
-        errorCard "订阅额度必须是数字"
-    done
-    if [[ "${limit}" == "${currentLimit}" ]]; then
-        statusCard "订阅额度未变更"
-        return 0
-    fi
-    if ! setUserSubscriptionTrafficLimit "${userSubscriptionId}" "${limit}"; then
-        errorCard "订阅额度更新失败"
-        return 1
-    fi
-    successCard "订阅额度已更新" "超限停用和批量处理请到 订阅与用户 -> 流量与限额 执行"
-}
 # 添加服务器源
 createSubscriptionWireGuardInviteMenu() {
     local alias= inviteCredential=
@@ -1895,7 +1812,7 @@ manageSubscriptionSyncSettings() {
         menuLine "最近结果：${lastStatus} / ${lastRun}"
         menuLine "失败数量：${failureCount}"
         menuItem 1 "立即完整同步" "同步本机和所有启用来源，成功后发布完整订阅"
-        menuItem 2 "开启/关闭自动同步" "同时控制菜单变更后的即时同步和 cron"
+        menuItem 2 "开启/关闭自动同步" "控制后台定时同步和服务器来源变更后的即时同步"
         menuItem 3 "设置同步间隔" "设置 1-59 分钟间隔，不隐式开启自动同步"
         menuItem 4 "状态与排障" "查看失败、健康、计划和定时任务"
         menuItem 5 "状态备份与恢复" "查看、备份、恢复或重建 groups.json"
