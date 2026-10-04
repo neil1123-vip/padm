@@ -1276,6 +1276,8 @@ runSubscriptionSyncMissingProtocolPlanRegression() (
 
 runSubscriptionUserRemovalTransactionLockRegression() (
     local logFile="${TMP_DIR}/subscription-user-removal-lock.log"
+    local stateSnapshot='{"traffic":"old"}'
+    local postSync=false
     : >"${logFile}"
     autoRead() { printf -v "$3" '%s' yes; }
     subscriptionGroupsWithLock() {
@@ -1285,21 +1287,45 @@ runSubscriptionUserRemovalTransactionLockRegression() (
         printf '%s\n' lock-end >>"${logFile}"
         return "${status}"
     }
-    subscriptionGroupsStateRead() { printf '%s\n' '{}'; }
-    subscriptionSyncCreateConfigBackups() { printf -v "$1" '%s' "${TMP_DIR}/user-removal-config"; mkdir -p "${!1}"; }
+    subscriptionGroupsStateRead() { printf '%s\n' "${stateSnapshot}"; }
+    subscriptionSyncCreateConfigBackups() {
+        [[ "${postSync}" == "true" ]] || return 99
+        printf '%s\n' sync-backup >>"${logFile}"
+    }
     subscriptionLocalTrafficBaselineExists() { return 1; }
-    collectSubscriptionTraffic() { printf '%s\n' pre-traffic >>"${logFile}"; }
-    subscriptionSyncAccountName() { printf 'sub_%s\n' "$1"; }
+    collectSubscriptionTraffic() {
+        printf '%s\n' pre-traffic >>"${logFile}"
+        stateSnapshot='{"traffic":"latest"}'
+    }
     removeUserSubscriptionState() { printf '%s\n' remove-state >>"${logFile}"; }
-    subscriptionSyncRemoveAccount() { printf '%s\n' remove-account >>"${logFile}"; }
-    reloadCoreWithTrafficStatsConfig() { printf '%s\n' reload >>"${logFile}"; }
-    subscriptionSyncReleaseLocalApplyBackups() { :; }
-    padmRemoveCleanupPath() { :; }
+    subscriptionSyncRemoveAccount() {
+        [[ "${postSync}" == "true" ]] || return 99
+        printf '%s\n' remove-account >>"${logFile}"
+    }
+    reloadCoreWithTrafficStatsConfig() {
+        [[ "${postSync}" == "true" ]] || return 99
+        printf '%s\n' reload >>"${logFile}"
+    }
     successCard() { :; }
-    runSubscriptionSyncAfterMutation() { printf '%s\n' post-sync >>"${logFile}"; }
+    errorCard() { :; }
+    runSubscriptionSyncAfterMutation() {
+        [[ $# == 3 && "$2" == '{"traffic":"latest"}' && "$3" == "true" ]] || return 99
+        postSync=true
+        printf '%s\n' post-sync >>"${logFile}"
+        subscriptionSyncCreateConfigBackups
+        subscriptionSyncRemoveAccount
+        reloadCoreWithTrafficStatsConfig
+    }
 
     removeUserSubscriptionMenu team-a
-    [[ "$(<"${logFile}")" == $'lock-start\npre-traffic\nremove-state\nremove-account\nreload\npost-sync\nlock-end' ]]
+    [[ "$(<"${logFile}")" == $'lock-start\npre-traffic\nremove-state\npost-sync\nsync-backup\nremove-account\nreload\nlock-end' ]]
+
+    : >"${logFile}"
+    postSync=false
+    subscriptionLocalTrafficBaselineExists() { return 0; }
+    collectSubscriptionTraffic() { printf '%s\n' pre-traffic >>"${logFile}"; return 1; }
+    regressionExpectStatus 1 removeUserSubscriptionMenu team-a
+    [[ "$(<"${logFile}")" == $'lock-start\npre-traffic\nlock-end' ]]
 )
 
 runSubscriptionStateMaintenanceRollbackRegression() (
@@ -2324,6 +2350,67 @@ runSubscriptionGroupSyncTrafficReloadOrderRegression() (
     prepareSubscriptionGroupSyncFixture "${syncRoot}" <<'JSON'
 {"version":6,"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"admin":{"sources":{}},"user_groups":{},"sources":{}}}
 JSON
+    (
+        local removalRoot="${syncRoot}/removal"
+        local removalState
+        local counter=100
+        local callLog="${removalRoot}/calls.log"
+        local resultStatus="${removalRoot}/mark-status.log"
+        local resultFailures="${removalRoot}/mark-failures.log"
+        local statusLog="${removalRoot}/status.log"
+        removalState=$(subscriptionGroupsStateRead -c '.')
+        prepareSubscriptionGroupSyncFixture "${removalRoot}" <<<"${removalState}"
+        addUserSubscriptionState team-b "Team B" '["main"]' 0
+        subscriptionActiveGroupWrite '
+          .sync.enabled = false |
+          (.user_groups[] | select(.id == "team-b")).uuid = "22222222-2222-4222-8222-222222222222"
+        '
+        printf '%s\n' '{"inbounds":[{"settings":{"clients":[{"id":"11111111-1111-1111-1111-111111111111","email":"sub_team_a-VLESS_TCP/TLS_Vision"},{"id":"22222222-2222-4222-8222-222222222222","email":"sub_team_b-VLESS_TCP/TLS_Vision"}]}}]}' >"${configPath}02_VLESS_TCP_inbounds.json"
+        coreInstallType=1
+        protocolCapabilityRegistry() {
+            printf '%s\n' '1|VLESS|node|x|both|xray|x|x|x|x|x|x|x|x|x|x|x|x|02_VLESS_TCP_inbounds.json'
+        }
+        collectSubscriptionTraffic() {
+            local accounts snapshot
+            printf 'traffic\n' >>"${callLog}"
+            accounts=$(subscriptionSyncCurrentManagedUsers) || return 1
+            snapshot=$(jq -cn --argjson accounts "${accounts}" --argjson counter "${counter}" '
+              {ok:true,items:($accounts | map({
+                account:.,upload:$counter,download:0,
+                cores:{xray:{upload:$counter,download:0}}
+              }))}
+            ') || return 1
+            writeSubscriptionTrafficSnapshot "${snapshot}"
+        }
+        ensureSingBoxTrafficStatsConfig() { printf 'stats\n' >>"${callLog}"; }
+        reloadCore() {
+            jq -e '[.inbounds[0].settings.clients[].email] == ["sub_team_b-VLESS_TCP/TLS_Vision"]' \
+                "${configPath}02_VLESS_TCP_inbounds.json" >/dev/null
+            printf 'reload\n' >>"${callLog}"
+            counter=0
+        }
+        subscriptionCurrentRoleNormalized() { printf 'main\n'; }
+        readNginxSubscribe() { subscribePort=; }
+        autoRead() { printf -v "$3" '%s' yes; }
+
+        collectSubscriptionTraffic
+        : >"${callLog}"
+        removeUserSubscriptionMenu team-a
+        [[ "$(<"${callLog}")" == $'traffic\ntraffic\nstats\nreload\ntraffic' ]]
+        subscriptionActiveGroupRead -e '
+          (.user_groups | map(.id)) == ["team-b"] and
+          .traffic.user_groups["team-b"].sources.main.upload == 100 and
+          .traffic.user_groups["team-b"].sources.main.counters.sub_team_b.xray.upload == 0 and
+          .traffic.sources.main.counters.sub_team_b.xray.upload == 0
+        ' >/dev/null
+        counter=150
+        collectSubscriptionTraffic
+        subscriptionActiveGroupRead -e '
+          .traffic.user_groups["team-b"].sources.main.upload == 250 and
+          .traffic.sources.main.upload == 350
+        ' >/dev/null
+    )
+
     subscriptionSyncPlan() {
         if [[ "${planMode}" == "changed" ]]; then
             printf '{"create":["sub_team_a"],"remove":[]}'

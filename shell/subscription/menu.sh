@@ -145,9 +145,9 @@ restoreUserSubscriptionMutationState() {
 runSubscriptionSyncAfterMutation() {
     local reason=${1:-subscription-change}
     local previousState=${2:-}
-    local configBackupDir=${3:-}
-    local outputBackupDir=${4:-}
-    local forceSync=${5:-false}
+    local forceSync=${3:-false}
+    local configBackupDir=
+    local outputBackupDir=
     local restoreState=true
     local rollbackStateRestored=true
     local configRestored=true
@@ -156,53 +156,18 @@ runSubscriptionSyncAfterMutation() {
     local restoreMessage=
     local restoreDetail=
     if [[ "${forceSync}" != "true" ]] && ! subscriptionGroupSyncEnabled; then
-        if [[ -n "${configBackupDir}" || -n "${outputBackupDir}" ]]; then
-            subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
-        fi
         statusCard "订阅变更已保存" "自动同步已关闭，等待手动完整同步（${reason}）"
         return 0
     fi
     if [[ -n "${previousState}" ]]; then
-        if [[ -z "${configBackupDir}" && -z "${outputBackupDir}" ]]; then
-            subscriptionSyncCreateLocalApplyBackups configBackupDir outputBackupDir || {
-                if restoreUserSubscriptionMutationState "${previousState}" >/dev/null 2>&1; then
-                    warnCard "变更未完成" "无法创建回滚用的本机配置和订阅输出备份，已恢复变更前状态（${reason}）"
-                else
-                    warnCard "变更未完成" "无法创建回滚用的本机配置和订阅输出备份，且变更前状态恢复失败（${reason}）"
-                fi
-                return 1
-            }
-        elif [[ -z "${outputBackupDir}" ]]; then
-            subscriptionSyncCreateSubscribeOutputBackups outputBackupDir || {
-                if subscriptionSyncRestoreConfigBackups "${configBackupDir}" >/dev/null 2>&1; then
-                    if ! restoreUserSubscriptionMutationState "${previousState}" >/dev/null 2>&1; then
-                        restoreState=false
-                    fi
-                    if ! subscriptionSyncReconcileLocalServices >/dev/null 2>&1; then
-                        servicesRestored=false
-                    fi
-                    if [[ "${restoreState}" == "true" && "${servicesRestored}" == "true" ]]; then
-                        subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}"
-                    else
-                        subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}"
-                    fi
-                else
-                    subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}"
-                    restoreState=false
-                fi
-                if [[ "${restoreState}" == "true" && "${servicesRestored}" == "true" ]]; then
-                    warnCard "变更未完成" "后置同步前备份失败，已恢复变更前状态（${reason}）"
-                else
-                    warnCard "变更未完成" "后置同步前备份失败，且变更前状态或本机服务恢复失败，请检查备份目录（${reason}）"
-                fi
-                return 1
-            }
-        elif [[ -z "${configBackupDir}" ]]; then
-            subscriptionSyncCreateConfigBackups configBackupDir || {
-                warnCard "变更未完成" "后置同步前配置备份失败，请检查变更状态（${reason}）"
-                return 1
-            }
-        fi
+        subscriptionSyncCreateLocalApplyBackups configBackupDir outputBackupDir || {
+            if restoreUserSubscriptionMutationState "${previousState}" >/dev/null 2>&1; then
+                warnCard "变更未完成" "无法创建回滚用的本机配置和订阅输出备份，已恢复变更前状态（${reason}）"
+            else
+                warnCard "变更未完成" "无法创建回滚用的本机配置和订阅输出备份，且变更前状态恢复失败（${reason}）"
+            fi
+            return 1
+        }
     fi
     statusCard "订阅变更已保存" "正在执行完整同步（${reason}）"
     if runSubscriptionGroupSync; then
@@ -288,7 +253,6 @@ runSubscriptionSyncAfterMutation() {
     return 1
 }
 
-SUBSCRIPTION_USER_MUTATION_CONFIG_BACKUP_DIR=
 SUBSCRIPTION_USER_MUTATION_PREVIOUS_STATE_OVERRIDE=
 
 runUserSubscriptionMutationAndSyncUnlocked() {
@@ -297,7 +261,6 @@ runUserSubscriptionMutationAndSyncUnlocked() {
     shift 2
     local previousState
     local rollbackState
-    SUBSCRIPTION_USER_MUTATION_CONFIG_BACKUP_DIR=
     SUBSCRIPTION_USER_MUTATION_PREVIOUS_STATE_OVERRIDE=
     previousState=$(subscriptionGroupsStateRead -c '.') || {
         errorCard "用户订阅状态读取失败"
@@ -311,8 +274,6 @@ runUserSubscriptionMutationAndSyncUnlocked() {
     runSubscriptionSyncAfterMutation \
         "${reason}" \
         "${rollbackState}" \
-        "${SUBSCRIPTION_USER_MUTATION_CONFIG_BACKUP_DIR}" \
-        "" \
         true
 }
 
@@ -1061,47 +1022,12 @@ showPublishedSubscriptionLinks() {
     return 1
 }
 
-removeUserSubscriptionRollback() {
-    local previousGroupsState=$1
-    local configBackupDir=$2
-    local reason=$3
-    local stateRestored=true
-    local configRestored=true
-    local rollbackMessage
-
-    if ! subscriptionGroupsStateWrite --argjson previousGroupsState "${previousGroupsState}" '$previousGroupsState' >/dev/null 2>&1; then
-        stateRestored=false
-    fi
-    if ! subscriptionSyncRestoreConfigBackups "${configBackupDir}" >/dev/null 2>&1; then
-        configRestored=false
-    fi
-
-    if [[ "${configRestored}" == "true" ]]; then
-        padmRemoveCleanupPath "${configBackupDir}"
-    else
-        padmForgetCleanupPath "${configBackupDir}"
-    fi
-
-    if ! subscriptionSyncSetRestorePairFailureMessage \
-        rollbackMessage \
-        "${reason}" \
-        "${stateRestored}" "订阅状态" "$(subscriptionGroupsFile)" \
-        "${configRestored}" "托管账号配置" "备份目录: ${configBackupDir}" \
-        "$(subscriptionGroupsFile) 和备份目录: ${configBackupDir}"; then
-        errorCard "${rollbackMessage}"
-        return 1
-    fi
-}
-
 removeUserSubscriptionTransactionUnlocked() {
     local userSubscriptionId=$1
     local previousGroupsState
-    local createdConfigBackupDir
-    local accountName
     local manualCheckMessage
     local localTrafficBaseline=false
     local localTrafficReady=false
-    SUBSCRIPTION_USER_MUTATION_CONFIG_BACKUP_DIR=
     if subscriptionLocalTrafficBaselineExists; then
         localTrafficBaseline=true
     fi
@@ -1120,36 +1046,10 @@ removeUserSubscriptionTransactionUnlocked() {
     }
     # 删除前采集流量可能更新状态，后置同步失败时必须回滚到这份最新快照。
     SUBSCRIPTION_USER_MUTATION_PREVIOUS_STATE_OVERRIDE=${previousGroupsState}
-    subscriptionSyncCreateConfigBackups createdConfigBackupDir || {
-        subscriptionSyncSetManualCheckMessage manualCheckMessage "删除订阅前托管账号配置备份失败" "本机配置"
-        errorCard "${manualCheckMessage}"
-        return 1
-    }
-    accountName=$(subscriptionSyncAccountName "${userSubscriptionId}")
     if ! removeUserSubscriptionState "${userSubscriptionId}"; then
-        padmRemoveCleanupPath "${createdConfigBackupDir}"
         errorCard "用户订阅状态删除失败"
         return 1
     fi
-    if ! subscriptionSyncRemoveAccount "${accountName}"; then
-        if ! removeUserSubscriptionRollback "${previousGroupsState}" "${createdConfigBackupDir}" "托管账号配置移除失败"; then
-            return 1
-        fi
-        local rollbackMessage
-        subscriptionSyncSetRollbackResultMessage rollbackMessage "托管账号配置移除失败" "已恢复旧配置"
-        errorCard "${rollbackMessage}"
-        return 1
-    fi
-    if ! reloadCoreWithTrafficStatsConfig; then
-        if ! removeUserSubscriptionRollback "${previousGroupsState}" "${createdConfigBackupDir}" "核心重载失败"; then
-            return 1
-        fi
-        local rollbackMessage
-        subscriptionSyncSetRollbackRetryMessage rollbackMessage "核心重载失败" reloadCoreWithTrafficStatsConfig "恢复旧配置后核心重载仍失败，请检查核心服务日志"
-        errorCard "${rollbackMessage}"
-        return 1
-    fi
-    SUBSCRIPTION_USER_MUTATION_CONFIG_BACKUP_DIR=${createdConfigBackupDir}
 }
 
 removeUserSubscriptionMenu() {
@@ -1175,6 +1075,8 @@ editUserSubscriptionsMenu() {
     local patchJson='{}'
     local effectiveJson
     local choice=
+    local fieldChoices=
+    local -a selectedFields=()
     local value=
     local currentSources
     local currentSourcesLabel
@@ -1242,87 +1144,98 @@ editUserSubscriptionsMenu() {
         menuItem 6 "保存并立即同步" "不改变自动同步设置"
         menuReturnItem 7 "取消并丢弃草稿" "返回分享订阅"
         menuItem 8 "重新读取并丢弃草稿" "放弃当前草稿，读取最新状态"
+        menuLine "配置字段可用逗号连续选择（例 2,3）；保存、取消和重新读取单独选择"
         menuClose
         menuReadChoice edit_user_subscription_menu "请选择:" choice || return 1
-        case "${choice}" in
-        1)
-            [[ "${selectedCount}" == "1" ]] || { errorCard "批量编辑不支持同时修改名称"; continue; }
-            value=
-            menuReadChoice edit_user_subscription_name "请输入新名称[回车保留]:" value true || continue
-            [[ -n "${value}" ]] || continue
-            patchJson=$(jq -c --arg value "${value}" '. + {name:$value}' <<<"${patchJson}") || return 1
-            ;;
-        2)
-            value=
-            sourcesChanged=false
-            selectUserSubscriptionSources \
-                edit_user_subscription_sources \
-                "请选择节点范围[回车保留各自设置]:" \
-                value \
-                "${currentSources}" \
-                "${currentSourcesLabel}" \
-                sourcesChanged || continue
-            if [[ "${sourcesChanged}" == "true" ]]; then
-                patchJson=$(jq -c --argjson value "${value}" '. + {allowed_sources:$value}' <<<"${patchJson}") || return 1
-            fi
-            ;;
-        3)
-            value=
-            menuReadChoice edit_user_subscription_limit "请输入订阅额度 GB[回车保留各自设置，0 为不限]:" value true || continue
-            [[ -n "${value}" ]] || continue
-            [[ "${value}" =~ ^[0-9]+$ ]] || { errorCard "订阅额度必须是数字"; continue; }
-            patchJson=$(jq -c --arg value "${value}" '. + {traffic_limit_gb:($value | tonumber)}' <<<"${patchJson}") || return 1
-            ;;
-        4)
-            patchJson=$(jq -c '. + {enabled:true}' <<<"${patchJson}") || return 1
-            ;;
-        5)
-            patchJson=$(jq -c '. + {enabled:false}' <<<"${patchJson}") || return 1
-            ;;
-        6)
-            hasChanges=$(jq -r '
-              . as $base |
-              ($base | map(.allowed_sources |= sort) | sort_by(.id)) as $before |
-              ($base | map(. + $patch | .allowed_sources |= sort) | sort_by(.id)) as $after |
-              ($before != $after)
-            ' --argjson patch "${patchJson}" <<<"${expectedJson}") || return 1
-            if [[ "${hasChanges}" != "true" ]]; then
-                statusCard "没有待保存的订阅变更"
-                return 0
-            fi
-            if subscriptionGroupsWithLock runUserSubscriptionMutationAndSyncUnlocked \
-                "分享订阅批量编辑" "分享订阅编辑失败" \
-                setUserSubscriptionsFields "${idsJson}" "${patchJson}" "${expectedJson}"; then
-                if jq -e '.enabled == true' <<<"${patchJson}" >/dev/null &&
-                    ! subscriptionActiveGroupRead -e --argjson ids "${idsJson}" \
-                        'all(.user_groups[] | select(.id as $id | ($ids | index($id)) != null); .enabled == true)' >/dev/null; then
-                    warnCard "订阅已保存并同步，部分订阅被额度策略停用" "请提高额度或重置流量后再启用"
-                else
-                    successCard "分享订阅已保存并同步"
+        fieldChoices=$(jq -ern --arg choice "${choice}" --argjson count "${selectedCount}" '
+          $choice | split(",") | map(gsub("^\\s+|\\s+$"; "")) |
+          select(all(.[]; test("^[1-8]$"))) | map(tonumber) |
+          select(length == (unique | length)) |
+          select(length == 1 or all(.[]; . <= 5)) |
+          select($count == 1 or index(1) == null) |
+          select(index(4) == null or index(5) == null) | .[]
+        ') || { coreSelectionErrorCard; continue; }
+        mapfile -t selectedFields <<<"${fieldChoices}"
+        for choice in "${selectedFields[@]}"; do
+            case "${choice}" in
+            1)
+                value=
+                menuReadChoice edit_user_subscription_name "请输入新名称[回车保留]:" value true || continue 2
+                [[ -n "${value}" ]] || continue
+                patchJson=$(jq -c --arg value "${value}" '. + {name:$value}' <<<"${patchJson}") || return 1
+                ;;
+            2)
+                value=
+                sourcesChanged=false
+                selectUserSubscriptionSources \
+                    edit_user_subscription_sources \
+                    "请选择节点范围[回车保留各自设置]:" \
+                    value \
+                    "${currentSources}" \
+                    "${currentSourcesLabel}" \
+                    sourcesChanged || continue 2
+                if [[ "${sourcesChanged}" == "true" ]]; then
+                    patchJson=$(jq -c --argjson value "${value}" '. + {allowed_sources:$value}' <<<"${patchJson}") || return 1
                 fi
-                return 0
-            fi
-            warnCard "订阅编辑未完成" "草稿仍保留，可修正后重试；如状态已被其他操作修改，请先重新读取"
-            ;;
-        7)
-            coreCancelledStatusCard "操作未执行"
-            return 1
-            ;;
-        8)
-            reload=$(subscriptionActiveGroupRead -c --argjson ids "${idsJson}" '
-              [.user_groups[]? | select(.id as $id | ($ids | index($id)) != null) |
-                {id, name, enabled, allowed_sources, traffic_limit_gb}]
-            ') || continue
-            [[ "$(jq 'length' <<<"${reload}")" == "${selectedCount}" ]] || {
-                errorCard "所选订阅已不存在，请重新选择"
+                ;;
+            3)
+                value=
+                menuReadChoice edit_user_subscription_limit "请输入订阅额度 GB[回车保留各自设置，0 为不限]:" value true || continue 2
+                [[ -n "${value}" ]] || continue
+                [[ "${value}" =~ ^[0-9]+$ ]] || { errorCard "订阅额度必须是数字"; continue 2; }
+                patchJson=$(jq -c --arg value "${value}" '. + {traffic_limit_gb:($value | tonumber)}' <<<"${patchJson}") || return 1
+                ;;
+            4)
+                patchJson=$(jq -c '. + {enabled:true}' <<<"${patchJson}") || return 1
+                ;;
+            5)
+                patchJson=$(jq -c '. + {enabled:false}' <<<"${patchJson}") || return 1
+                ;;
+            6)
+                hasChanges=$(jq -r '
+                  . as $base |
+                  ($base | map(.allowed_sources |= sort) | sort_by(.id)) as $before |
+                  ($base | map(. + $patch | .allowed_sources |= sort) | sort_by(.id)) as $after |
+                  ($before != $after)
+                ' --argjson patch "${patchJson}" <<<"${expectedJson}") || return 1
+                if [[ "${hasChanges}" != "true" ]]; then
+                    statusCard "没有待保存的订阅变更"
+                    return 0
+                fi
+                if subscriptionGroupsWithLock runUserSubscriptionMutationAndSyncUnlocked \
+                    "分享订阅批量编辑" "分享订阅编辑失败" \
+                    setUserSubscriptionsFields "${idsJson}" "${patchJson}" "${expectedJson}"; then
+                    if jq -e '.enabled == true' <<<"${patchJson}" >/dev/null &&
+                        ! subscriptionActiveGroupRead -e --argjson ids "${idsJson}" \
+                            'all(.user_groups[] | select(.id as $id | ($ids | index($id)) != null); .enabled == true)' >/dev/null; then
+                        warnCard "订阅已保存并同步，部分订阅被额度策略停用" "请提高额度或重置流量后再启用"
+                    else
+                        successCard "分享订阅已保存并同步"
+                    fi
+                    return 0
+                fi
+                warnCard "订阅编辑未完成" "草稿仍保留，可修正后重试；如状态已被其他操作修改，请先重新读取"
+                ;;
+            7)
+                coreCancelledStatusCard "操作未执行"
                 return 1
-            }
-            expectedJson=${reload}
-            patchJson='{}'
-            statusCard "已重新读取订阅状态，草稿已丢弃"
-            ;;
-        *) coreSelectionErrorCard ;;
-        esac
+                ;;
+            8)
+                reload=$(subscriptionActiveGroupRead -c --argjson ids "${idsJson}" '
+                  [.user_groups[]? | select(.id as $id | ($ids | index($id)) != null) |
+                    {id, name, enabled, allowed_sources, traffic_limit_gb}]
+                ') || continue
+                [[ "$(jq 'length' <<<"${reload}")" == "${selectedCount}" ]] || {
+                    errorCard "所选订阅已不存在，请重新选择"
+                    return 1
+                }
+                expectedJson=${reload}
+                patchJson='{}'
+                statusCard "已重新读取订阅状态，草稿已丢弃"
+                ;;
+            *) coreSelectionErrorCard ;;
+            esac
+        done
     done
 }
 

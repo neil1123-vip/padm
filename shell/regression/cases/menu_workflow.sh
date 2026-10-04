@@ -399,7 +399,7 @@ runSubscriptionMenuDraftRegression() (
             mutationCount=$((mutationCount + 1))
             originalSetUserSubscriptionsFields "$@"
         }
-        editUserSubscriptionsMenu '["alpha"]' <<< $'1\nAlpha revised\n2\n1,2\n3\n6\n5\n6'
+        editUserSubscriptionsMenu '["alpha"]' <<< $'1,2,3,5\nAlpha revised\n1,2\n6\n6'
         [[ "${mutationCount}" == "1" && "${syncCount}" == "1" ]]
         subscriptionActiveGroupRead -e '
           .sync.enabled == false and
@@ -408,11 +408,30 @@ runSubscriptionMenuDraftRegression() (
           .user_groups[0].traffic_limit_gb == 6 and .user_groups[0].enabled == false and
           .user_groups[1].name == "Beta"
         ' >/dev/null
-        editUserSubscriptionsMenu '["alpha","beta"]' <<< $'2\n2\n3\n8\n4\n6'
+        editUserSubscriptionsMenu '["alpha","beta"]' <<< $'2,3,4\n2\n8\n6'
         [[ "${mutationCount}" == "2" && "${syncCount}" == "2" ]]
         subscriptionActiveGroupRead -e '
           .sync.enabled == false and
           all(.user_groups[]; .allowed_sources == ["edge"] and .traffic_limit_gb == 8 and .enabled)
+        ' >/dev/null
+
+        resetDraftFixture
+        local before
+        before=$(subscriptionGroupsStateRead -c '.')
+        editUserSubscriptionsMenu '["alpha","beta"]' <<< $'2,3\n\n\n6'
+        [[ "${mutationCount}" == "2" && "${syncCount}" == "2" ]]
+        [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'2,6\n2,2\n4,5\nmissing\n7'
+        [[ "${mutationCount}" == "2" && "${syncCount}" == "2" ]]
+        [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'1,2,3\nDiscarded\n1\n'
+        [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+        resetDraftFixture
+        editUserSubscriptionsMenu '["alpha"]' <<< $'1,3,5\nDrafted\ninvalid\n6'
+        [[ "${mutationCount}" == "3" && "${syncCount}" == "3" ]]
+        subscriptionActiveGroupRead -e '
+          .user_groups[0].name == "Drafted" and
+          .user_groups[0].traffic_limit_gb == 1 and .user_groups[0].enabled
         ' >/dev/null
 
         local openedIds=
@@ -531,10 +550,8 @@ runSubscriptionMenuDraftRegression() (
             '
         }
         subscriptionLocalTrafficBaselineExists() { return 0; }
-        subscriptionSyncCreateConfigBackups() { printf -v "$1" '%s' "${root}/config-backup"; }
-        subscriptionSyncCreateSubscribeOutputBackups() { printf -v "$1" '%s' "${root}/output-backup"; }
-        subscriptionSyncRemoveAccount() { :; }
-        reloadCoreWithTrafficStatsConfig() { :; }
+        subscriptionSyncRemoveAccount() { return 99; }
+        reloadCoreWithTrafficStatsConfig() { return 99; }
         runSubscriptionGroupSync() {
             syncCount=$((syncCount + 1))
             subscriptionActiveGroupWrite '.traffic.sources.main.upload += 25'
@@ -547,5 +564,12 @@ runSubscriptionMenuDraftRegression() (
           .traffic.user_groups.alpha.sources.main.upload == 1073741874 and
           .traffic.sources.main.upload == 100
         ' >/dev/null
+        resetDraftFixture
+        local before
+        before=$(subscriptionGroupsStateRead -c '.')
+        syncCount=0
+        collectSubscriptionTraffic() { return 1; }
+        regressionExpectStatus 1 removeUserSubscriptionMenu alpha <<<yes
+        [[ "${syncCount}" == "0" && "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
     )
 )
