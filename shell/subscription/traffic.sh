@@ -797,30 +797,6 @@ showSubscriptionTrafficOverview() {
 }
 
 
-manageTrafficDetails() {
-    subscriptionRequireLocalPublisherRole || return 1
-    local trafficDetailsStatus=
-    while true; do
-        echoContent title "\n┌─ 流量明细 ─────────────────────────────────────────"
-        menuLine "按账号、分享订阅或服务器源查看累计流量。"
-        menuItem 1 "我的流量" "自用账号按服务器统计"
-        menuItem 2 "分享订阅概览" "额度、状态和服务器范围"
-        menuItem 3 "单个分享订阅" "选择订阅查看累计流量"
-        menuItem 4 "服务器流量" "全部账号按服务器统计"
-        menuReturnItem 5 "返回流量与限额" "回到上级菜单"
-        menuClose
-        menuReadChoice traffic_details_menu "请选择:" trafficDetailsStatus || return 0
-        case "${trafficDetailsStatus}" in
-        1) showAdminSubscriptionTraffic ;;
-        2) showUserSubscriptions ;;
-        3) selectUserSubscriptionTrafficMenu ;;
-        4) showSubscriptionSourcesTraffic ;;
-        5) return ;;
-        *) coreSelectionErrorCard ;;
-        esac
-    done
-}
-
 manageTrafficAndQuota() {
     subscriptionRequireLocalPublisherRole || return 1
     local quotaAutoApplyText
@@ -834,10 +810,13 @@ manageTrafficAndQuota() {
         menuLine "总览来自已保存的统计；采集和超限处理按需执行。"
         menuLine "自动执行超限处理：${quotaAutoApplyText}"
         menuItem 1 "刷新并显示总览" "采集本机账号流量，写入 groups.json 后显示治理摘要"
-        menuItem 2 "流量明细" "按账号、分享订阅或服务器源查看累计流量"
+        menuItem 2 "单个分享订阅流量" "选择订阅查看累计流量"
+        menuItem 6 "我的流量" "自用账号按服务器统计"
+        menuItem 7 "服务器流量" "全部账号按服务器统计"
+        menuItem 8 "分享订阅概览" "额度、状态和服务器范围"
         menuDangerItem 3 "执行超限处理并同步" "停用超额订阅，更新本机、被控服务器和订阅发布"
         menuItem 4 "开启/关闭自动执行超限处理" "切换同步前的自动限额事务"
-        menuReturnItem 5 "返回订阅与用户" "回到上级菜单"
+        menuReturnItem 5 "返回订阅首页" "回到本机或主控首页"
         menuClose
         menuReadChoice traffic_quota_menu "请选择:" trafficQuotaStatus || return 0
         case "${trafficQuotaStatus}" in
@@ -845,7 +824,10 @@ manageTrafficAndQuota() {
             collectSubscriptionTraffic || true
             showSubscriptionTrafficOverview || errorCard "流量总览暂不可读"
             ;;
-        2) manageTrafficDetails ;;
+        2) selectUserSubscriptionTrafficMenu ;;
+        6) showAdminSubscriptionTraffic ;;
+        7) showSubscriptionSourcesTraffic ;;
+        8) showUserSubscriptions ;;
         3) executeSubscriptionQuotaPlanMenu ;;
         4)
             if toggleSubscriptionGroupQuotaAutoApplyEnabled; then

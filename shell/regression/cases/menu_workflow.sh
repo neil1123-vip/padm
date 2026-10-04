@@ -399,6 +399,31 @@ runSubscriptionMenuDraftRegression() (
     )
 
     (
+        local syncCount=0 mutationCount=0 before
+        resetDraftFixture
+        before=$(subscriptionGroupsStateRead -c '.')
+        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
+        eval "$(declare -f setUserSubscriptionsFields | sed '1s/^setUserSubscriptionsFields/originalSetUserSubscriptionsFields/')"
+        setUserSubscriptionsFields() {
+            mutationCount=$((mutationCount + 1))
+            originalSetUserSubscriptionsFields "$@"
+        }
+        editUserSubscriptionsMenu '["alpha"]' <<<""
+        [[ "${mutationCount}" == "0" && "${syncCount}" == "0" ]]
+        editUserSubscriptionsMenu '["alpha"]' <<< $'3\n1\n'
+        [[ "${mutationCount}" == "0" && "${syncCount}" == "0" ]]
+        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' </dev/null
+        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'1\nDiscarded draft\n3'
+        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' < <(printf '3\n9')
+        [[ "${mutationCount}" == "0" && "${syncCount}" == "0" ]]
+        [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+
+        editUserSubscriptionsMenu '["alpha"]' <<< $'3\n9\n'
+        [[ "${mutationCount}" == "1" && "${syncCount}" == "1" ]]
+        subscriptionActiveGroupRead -e '.sync.enabled == false and .user_groups[0].traffic_limit_gb == 9' >/dev/null
+    )
+
+    (
         local syncCount=0 mutationCount=0 targetPatch= expectedSnapshot= concurrentChanged=false
         resetDraftFixture
         runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
@@ -487,7 +512,8 @@ runSubscriptionMenuDraftRegression() (
             [[ "${mutationCount}" != "1" ]] || return 1
             originalSetUserSubscriptionsFields "$@"
         }
-        editUserSubscriptionsMenu '["alpha"]' <<< $'1\nRetained draft\n3\n9\n6\n6'
+        # here-string 补上的末尾换行与显式换行形成两次空回车，失败后仍用草稿重试。
+        editUserSubscriptionsMenu '["alpha"]' <<< $'1\nRetained draft\n3\n9\n\n'
         [[ "${mutationCount}" == "2" && "${syncCount}" == "1" ]]
         subscriptionActiveGroupRead -e '.user_groups[0].name == "Retained draft" and .user_groups[0].traffic_limit_gb == 9' >/dev/null
     )
@@ -499,7 +525,7 @@ runSubscriptionMenuDraftRegression() (
             syncCount=$((syncCount + 1))
             [[ "${syncCount}" != "1" ]]
         }
-        editUserSubscriptionsMenu '["alpha"]' <<< $'1\nRetry after sync\n3\n3\n6\n6'
+        editUserSubscriptionsMenu '["alpha"]' <<< $'1\nRetry after sync\n3\n3\n\n'
         [[ "${syncCount}" == "3" ]]
         subscriptionActiveGroupRead -e '.sync.enabled == false and .user_groups[0].name == "Retry after sync" and .user_groups[0].traffic_limit_gb == 3' >/dev/null
     )

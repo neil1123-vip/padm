@@ -310,66 +310,14 @@ subscriptionRequireControlledRole() {
         "当前机器已初始化为主控" "请进入主控首页管理订阅、同步或控制面"
 }
 
-subscriptionPublisherHome() {
-    local publisherRole=$1
-    local homeTitle
-    local menuKey
-    local homeStatus=
-    local returnChoice
-    if [[ "${publisherRole}" == "main" ]]; then
-        homeTitle="主控首页"
-        menuKey=subscription_main_home_menu
-        returnChoice=4
-    else
-        homeTitle="本机订阅首页"
-        menuKey=subscription_local_home_menu
-        returnChoice=5
-    fi
-    while true; do
-        echoContent title "\n┌─ ${homeTitle} ─────────────────────────────────────"
-        showSubscriptionServerRoleSummary
-        menuItem 1 "订阅与用户" "订阅链接、分享订阅、流量与限额"
-        menuItem 2 "订阅同步" "立即同步、自动同步、状态排障和状态备份"
-        if [[ "${publisherRole}" == "main" ]]; then
-            menuItem 3 "协同与控制" "管理被控服务器和本机控制面；状态在对应页面查看"
-        else
-            menuItem 3 "启用主控协同" "将本机初始化为主控，保留现有订阅状态和服务"
-            menuItem 4 "接入主控" "粘贴主控邀请，将本机初始化为被控"
-        fi
-        menuReturnItem "${returnChoice}" "返回主菜单" "回到 padm 管理面板"
-        menuClose
-        menuReadChoice "${menuKey}" "请选择:" homeStatus || return 0
-        if [[ "${homeStatus}" == "${returnChoice}" ]]; then
-            return 0
-        fi
-        case "${homeStatus}" in
-        1) manageSubscriptionCatalog ;;
-        2) manageSubscriptionSyncSettings ;;
-        3)
-            if [[ "${publisherRole}" == "main" ]]; then
-                manageSubscriptionCoordination
-            else
-                runSubscriptionMainControllerWizard
-                return
-            fi
-            ;;
-        4)
-            runSubscriptionControlledWizard
-            return
-            ;;
-        *) coreSelectionErrorCard ;;
-        esac
-    done
-}
-
 manageSubscriptionLocalHome() {
     subscriptionRequireLocalPublisherRole || return 1
-    subscriptionPublisherHome uninitialized
+    manageSubscriptionCatalog uninitialized
 }
 
 manageSubscriptionMainHome() {
     subscriptionRequireMainRole || return 1
-    subscriptionPublisherHome main
+    manageSubscriptionCatalog main
 }
 
 manageSubscriptionControlledHome() {
@@ -592,28 +540,67 @@ manageSharedSubscriptions() {
 manageSubscriptionCatalog() {
     subscriptionRequireLocalPublisherRole || return 1
     local subscriptionCatalogStatus=
-    local role
-    local returnText
-    role=$(subscriptionCurrentRoleNormalized) || return 1
-    [[ "${role}" == "main" ]] && returnText="返回主控首页" || returnText="返回本机订阅首页"
+    local role=${1:-}
+    local homeTitle menuKey
+    local returnChoice publishServiceChoice
+    [[ -n "${role}" ]] || role=$(subscriptionCurrentRoleNormalized) || return 1
+    if [[ "${role}" == "main" ]]; then
+        homeTitle="主控首页"
+        menuKey=subscription_main_home_menu
+        returnChoice=4
+        publishServiceChoice=5
+    else
+        homeTitle="本机订阅首页"
+        menuKey=subscription_local_home_menu
+        returnChoice=5
+        publishServiceChoice=10
+    fi
     while true; do
-        echoContent title "\n┌─ 订阅与用户 ───────────────────────────────────────"
+        echoContent title "\n┌─ ${homeTitle} ─────────────────────────────────────"
+        showSubscriptionServerRoleSummary
         menuLine "本机自用订阅来自协议配置；这里统一处理发布、分享订阅和流量。"
         menuItem 1 "查看当前订阅链接" "只读查看已发布的本机自用和分享订阅"
         menuItem 2 "分享订阅" "新建或维护已有分享订阅"
         menuItem 3 "流量与限额" "查看流量明细，并处理超限和自动限额"
-        menuItem 5 "安装/更新发布服务" "配置公网发布入口"
         menuItem 6 "立即同步并更新链接" "更新本机和分享订阅后显示链接"
-        menuReturnItem 4 "${returnText}" "回到上级菜单"
+        menuItem 7 "订阅同步" "自动同步、同步间隔、状态排障和状态备份"
+        menuItem "${publishServiceChoice}" "安装/更新发布服务" "配置公网发布入口"
+        if [[ "${role}" == "main" ]]; then
+            menuItem 8 "协同与控制" "管理被控服务器和本机控制面"
+        else
+            menuItem 8 "启用主控协同" "将本机初始化为主控，保留现有订阅状态和服务"
+            menuItem 9 "接入主控" "粘贴主控邀请，将本机初始化为被控"
+        fi
+        menuReturnItem "${returnChoice}" "返回主菜单" "回到 padm 管理面板"
         menuClose
-        menuReadChoice subscription_catalog_menu "请选择:" subscriptionCatalogStatus || return 0
+        menuReadChoice "${menuKey}" "请选择:" subscriptionCatalogStatus || return 0
+        [[ "${subscriptionCatalogStatus}" != "${returnChoice}" ]] || return 0
+        if [[ "${subscriptionCatalogStatus}" == "${publishServiceChoice}" ]]; then
+            installSubscribe && showSubscriptionServiceStatus
+            continue
+        fi
         case "${subscriptionCatalogStatus}" in
         1) showPublishedSubscriptionLinks ;;
         2) manageSharedSubscriptions ;;
         3) manageTrafficAndQuota ;;
         4) return ;;
-        5) installSubscribe && showSubscriptionServiceStatus ;;
         6) syncAndShowSubscriptionLinks ;;
+        7) manageSubscriptionSyncSettings ;;
+        8)
+            if [[ "${role}" == "main" ]]; then
+                manageSubscriptionCoordination
+            else
+                runSubscriptionMainControllerWizard
+                return
+            fi
+            ;;
+        9)
+            if [[ "${role}" == "uninitialized" ]]; then
+                runSubscriptionControlledWizard
+                return
+            fi
+            coreSelectionErrorCard
+            ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -1091,6 +1078,7 @@ editUserSubscriptionsMenu() {
     local reload=
     local pendingFields
     local hasChanges
+    local editPrompt
     selectedCount=$(jq -r 'length' <<<"${idsJson}" 2>/dev/null) || return 1
     [[ "${selectedCount}" -gt 0 ]] || return 1
     expectedJson=$(subscriptionActiveGroupRead -c --argjson ids "${idsJson}" '
@@ -1151,7 +1139,16 @@ editUserSubscriptionsMenu() {
         menuItem 8 "重新读取并丢弃草稿" "放弃当前草稿，读取最新状态"
         menuLine "配置字段可用逗号连续选择（例 2,3）；保存、取消和重新读取单独选择"
         menuClose
-        menuReadChoice edit_user_subscription_menu "请选择:" choice || return 1
+        if [[ -n "${pendingFields}" ]]; then
+            editPrompt="请选择[回车保存并立即同步]:"
+        else
+            editPrompt="请选择[回车返回]:"
+        fi
+        menuReadChoice edit_user_subscription_menu "${editPrompt}" choice true || return 1
+        if [[ -z "${choice}" ]]; then
+            [[ -n "${pendingFields}" ]] || return 0
+            choice=6
+        fi
         fieldChoices=$(jq -ern --arg choice "${choice}" --argjson count "${selectedCount}" '
           $choice | split(",") | map(gsub("^\\s+|\\s+$"; "")) |
           select(all(.[]; test("^[1-8]$"))) | map(tonumber) |
