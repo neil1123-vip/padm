@@ -704,7 +704,19 @@ removeUserSubscriptionState() {
 
 toggleUserSubscriptionState() {
     local id=$1
-    subscriptionActiveGroupSetById user_groups "${id}" "user subscription not found" '.enabled = (.enabled | not)'
+    local enabled
+    if [[ "${SUBSCRIPTION_GROUPS_LOCK_HELD:-}" != "1" ]]; then
+        subscriptionGroupsWithLock toggleUserSubscriptionState "${id}"
+        return $?
+    fi
+    enabled=$(subscriptionActiveGroupRead -r --arg id "${id}" \
+        'first(.user_groups[]? | select(.id == $id)).enabled') || return 1
+    [[ "${enabled}" == "true" || "${enabled}" == "false" ]] || return 1
+    if [[ "${enabled}" == "true" ]]; then
+        setUserSubscriptionEnabled "${id}" false
+    else
+        setUserSubscriptionEnabled "${id}" true
+    fi
 }
 
 setUserSubscriptionSources() {
@@ -727,8 +739,82 @@ setUserSubscriptionEnabled() {
     local id=$1
     local enabled=$2
     subscriptionStateIdValid "${id}" || return 1
-    subscriptionActiveGroupSetById user_groups "${id}" "user subscription not found" \
-        --argjson enabled "${enabled}" '.enabled = $enabled'
+    [[ "${enabled}" == "true" || "${enabled}" == "false" ]] || return 1
+    setUserSubscriptionsFields "[\"${id}\"]" "{\"enabled\":${enabled}}"
+}
+
+setUserSubscriptionsFields() {
+    local idsJson=${1:-'[]'}
+    local patchJson=${2:-'{}'}
+    local expectedJson=${3:-}
+    local checkExpected=false
+    local trafficQuery
+    if [[ -n "${expectedJson}" ]]; then
+        checkExpected=true
+    else
+        expectedJson=null
+    fi
+    trafficQuery=$(subscriptionTrafficTotalsJq) || return 1
+    # 编辑快照与更新在同一把状态锁内核对，避免覆盖并发修改。
+    subscriptionActiveGroupWrite \
+        --argjson ids "${idsJson}" \
+        --argjson patch "${patchJson}" \
+        --argjson expected "${expectedJson}" \
+        --argjson checkExpected "${checkExpected}" \
+        "${trafficQuery}"'
+      def state_id:
+        if type == "string" then length <= 64 and test("^[A-Za-z0-9_-]+$") else false end;
+      def nonempty_string: if type == "string" then length > 0 else false end;
+      def count: if type == "number" then . == floor and . >= 0 else false end;
+      def selected: .id as $id | ($ids | index($id)) != null;
+      def editable: {id, name, enabled, allowed_sources, traffic_limit_gb};
+      if ($ids | type) != "array" then
+        error("请选择有效的订阅")
+      elif ($ids | length) == 0 or
+          (all($ids[]; state_id) | not) or
+          (($ids | length) != ($ids | unique | length)) then
+        error("订阅 ID 必须非空、唯一且有效")
+      elif ($patch | type) != "object" then
+        error("订阅更新必须是字段对象")
+      elif ($patch | length) == 0 or
+          (all($patch | to_entries[];
+            if .key == "name" then .value | nonempty_string
+            elif .key == "allowed_sources" then .value | type == "array"
+            elif .key == "traffic_limit_gb" then .value | count
+            elif .key == "enabled" then .value | type == "boolean"
+            else false end) | not) then
+        error("订阅字段无效：仅可修改名称、节点范围、流量额度和启用状态")
+      else . end |
+      . as $state |
+      if (all($ids[]; . as $id | any($state.user_groups[]?; .id == $id)) | not) then
+        error("所选订阅已不存在，请重新选择")
+      else . end |
+      [.user_groups[]? | select(selected) | editable] as $current |
+      if $checkExpected then
+        if ($expected | type) != "array" then
+          error("订阅编辑快照无效，请重新打开编辑")
+        elif (all($expected[];
+          if type == "object" then
+            keys == ["allowed_sources", "enabled", "id", "name", "traffic_limit_gb"]
+          else false end) | not) then
+          error("订阅编辑快照无效，请重新打开编辑")
+        elif ($expected | sort_by(.id)) != ($current | sort_by(.id)) then
+          error("订阅已被其他操作修改，请重新打开编辑")
+        else . end
+      else . end |
+      .user_groups |= map(if selected then . + $patch else . end) |
+      . as $updated |
+      if $patch.enabled == true and .sync.quota_auto_apply == true then
+        [.user_groups[]? | select(selected and .traffic_limit_gb > 0) |
+          . as $user |
+          subscriptionTrafficTotal($updated.traffic.user_groups[$user.id].sources) as $traffic |
+          select(($traffic.upload + $traffic.download) >= ($user.traffic_limit_gb * 1073741824)) |
+          .name] as $overQuota |
+        if ($overQuota | length) > 0 then
+          error("订阅已达到流量额度，无法启用：" + ($overQuota | join("、")) + "。请先提高额度或重置流量")
+        else . end
+      else . end
+    '
 }
 
 userSubscriptionExists() {

@@ -121,11 +121,33 @@ ensureSubscriptionServiceForSharedLinks() {
     return 1
 }
 
+restoreUserSubscriptionMutationState() {
+    local previousState=$1
+    # 回滚配置而非流量：保留同步期间已入账的累计值和计数器基线。
+    subscriptionGroupsStateWrite --argjson previousState "${previousState}" '
+      .traffic as $latest |
+      $previousState |
+      (.sources | map(.id)) as $sourceIds |
+      (.user_groups | map(.id)) as $userIds |
+      def keepSources: with_entries(.key as $id | select(($sourceIds | index($id)) != null));
+      .traffic.admin.sources = ((.traffic.admin.sources + ($latest.admin.sources // {})) | keepSources) |
+      .traffic.sources = ((.traffic.sources + ($latest.sources // {})) | keepSources) |
+      .traffic.user_groups |= with_entries(
+        .key as $id |
+        .value.sources = ((.value.sources + ($latest.user_groups[$id].sources // {})) | keepSources)) |
+      reduce $userIds[] as $id (.;
+        if (.traffic.user_groups | has($id) | not) and ($latest.user_groups | has($id)) then
+          .traffic.user_groups[$id] = {sources:($latest.user_groups[$id].sources | keepSources)}
+        else . end)
+    '
+}
+
 runSubscriptionSyncAfterMutation() {
     local reason=${1:-subscription-change}
     local previousState=${2:-}
     local configBackupDir=${3:-}
     local outputBackupDir=${4:-}
+    local forceSync=${5:-false}
     local restoreState=true
     local rollbackStateRestored=true
     local configRestored=true
@@ -133,7 +155,7 @@ runSubscriptionSyncAfterMutation() {
     local servicesRestored=true
     local restoreMessage=
     local restoreDetail=
-    if ! subscriptionGroupSyncEnabled; then
+    if [[ "${forceSync}" != "true" ]] && ! subscriptionGroupSyncEnabled; then
         if [[ -n "${configBackupDir}" || -n "${outputBackupDir}" ]]; then
             subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
         fi
@@ -143,7 +165,7 @@ runSubscriptionSyncAfterMutation() {
     if [[ -n "${previousState}" ]]; then
         if [[ -z "${configBackupDir}" && -z "${outputBackupDir}" ]]; then
             subscriptionSyncCreateLocalApplyBackups configBackupDir outputBackupDir || {
-                if subscriptionGroupsStateWrite --argjson previousState "${previousState}" '$previousState' >/dev/null 2>&1; then
+                if restoreUserSubscriptionMutationState "${previousState}" >/dev/null 2>&1; then
                     warnCard "变更未完成" "无法创建回滚用的本机配置和订阅输出备份，已恢复变更前状态（${reason}）"
                 else
                     warnCard "变更未完成" "无法创建回滚用的本机配置和订阅输出备份，且变更前状态恢复失败（${reason}）"
@@ -153,7 +175,7 @@ runSubscriptionSyncAfterMutation() {
         elif [[ -z "${outputBackupDir}" ]]; then
             subscriptionSyncCreateSubscribeOutputBackups outputBackupDir || {
                 if subscriptionSyncRestoreConfigBackups "${configBackupDir}" >/dev/null 2>&1; then
-                    if ! subscriptionGroupsStateWrite --argjson previousState "${previousState}" '$previousState' >/dev/null 2>&1; then
+                    if ! restoreUserSubscriptionMutationState "${previousState}" >/dev/null 2>&1; then
                         restoreState=false
                     fi
                     if ! subscriptionSyncReconcileLocalServices >/dev/null 2>&1; then
@@ -188,7 +210,7 @@ runSubscriptionSyncAfterMutation() {
         return 0
     fi
     if [[ -n "${previousState}" ]]; then
-        if ! subscriptionGroupsStateWrite --argjson previousState "${previousState}" '$previousState' >/dev/null 2>&1; then
+        if ! restoreUserSubscriptionMutationState "${previousState}" >/dev/null 2>&1; then
             restoreState=false
         fi
         if [[ "${restoreState}" == "true" ]]; then
@@ -196,7 +218,7 @@ runSubscriptionSyncAfterMutation() {
                 subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
                 warnCard "变更未完成" "后置完整同步失败，已恢复变更前状态并完成回滚同步（${reason}）"
             else
-                if ! subscriptionGroupsStateWrite --argjson previousState "${previousState}" '$previousState' >/dev/null 2>&1; then
+                if ! restoreUserSubscriptionMutationState "${previousState}" >/dev/null 2>&1; then
                     rollbackStateRestored=false
                 fi
                 if ! subscriptionSyncRestoreConfigBackups "${configBackupDir}" >/dev/null 2>&1; then
@@ -267,13 +289,16 @@ runSubscriptionSyncAfterMutation() {
 }
 
 SUBSCRIPTION_USER_MUTATION_CONFIG_BACKUP_DIR=
+SUBSCRIPTION_USER_MUTATION_PREVIOUS_STATE_OVERRIDE=
 
 runUserSubscriptionMutationAndSyncUnlocked() {
     local reason=$1
     local mutationError=${2:-}
     shift 2
     local previousState
+    local rollbackState
     SUBSCRIPTION_USER_MUTATION_CONFIG_BACKUP_DIR=
+    SUBSCRIPTION_USER_MUTATION_PREVIOUS_STATE_OVERRIDE=
     previousState=$(subscriptionGroupsStateRead -c '.') || {
         errorCard "用户订阅状态读取失败"
         return 1
@@ -282,10 +307,13 @@ runUserSubscriptionMutationAndSyncUnlocked() {
         [[ -n "${mutationError}" ]] && errorCard "${mutationError}"
         return 1
     fi
+    rollbackState=${SUBSCRIPTION_USER_MUTATION_PREVIOUS_STATE_OVERRIDE:-${previousState}}
     runSubscriptionSyncAfterMutation \
         "${reason}" \
-        "${previousState}" \
-        "${SUBSCRIPTION_USER_MUTATION_CONFIG_BACKUP_DIR}"
+        "${rollbackState}" \
+        "${SUBSCRIPTION_USER_MUTATION_CONFIG_BACKUP_DIR}" \
+        "" \
+        "${SUBSCRIPTION_USER_MUTATION_FORCE_SYNC:-false}"
 }
 
 subscriptionRequireRole() {
@@ -606,12 +634,14 @@ manageSubscriptionPublishMenu() {
 manageSharedSubscriptions() {
     subscriptionRequireLocalPublisherRole || return 1
     while true; do
-        selectUserSubscriptionId true || return 0
+        selectUserSubscriptionId true true || return 0
         if [[ "${selectedUserSubscriptionId}" == "+" ]]; then
             createAndSyncUserSubscriptionWizard || true
             if [[ -n "${createdUserSubscriptionId:-}" ]]; then
                 manageUserSubscriptionItem "${createdUserSubscriptionId}"
             fi
+        elif [[ -n "${selectedUserSubscriptionIds:-}" && "${selectedUserSubscriptionIds}" != '[]' ]]; then
+            editUserSubscriptionsMenu "${selectedUserSubscriptionIds}" || true
         else
             manageUserSubscriptionItem "${selectedUserSubscriptionId}"
         fi
@@ -759,14 +789,21 @@ selectUserSubscriptionSources() {
     local prompt=$2
     local resultVar=$3
     local currentSources=${4:-'["main"]'}
+    local currentLabel=${5:-}
+    local changedVar=${6:-}
     local sourcesJson sourceRows sourceId sourceName sourceEnabled
     local sourceIndex=0
     local sourceChoice= resolvedSources=
     printf -v "${resultVar}" '%s' ""
+    [[ -z "${changedVar}" ]] || printf -v "${changedVar}" '%s' false
     sourcesJson=$(subscriptionActiveGroupRead -c '.sources') || return 1
     sourceRows=$(jq -r '.[] | [.id, .name, (if .enabled then "启用" else "停用" end)] | @tsv' <<<"${sourcesJson}") || return 1
     userResultCard "选择节点范围"
-    menuLine "当前范围：$(jq -r 'join("、")' <<<"${currentSources}")"
+    if [[ -n "${currentLabel}" ]]; then
+        menuLine "当前范围：${currentLabel}"
+    else
+        menuLine "当前范围：$(jq -r 'join("、")' <<<"${currentSources}")"
+    fi
     while IFS=$'\t' read -r sourceId sourceName sourceEnabled; do
         [[ -n "${sourceId}" ]] || continue
         sourceIndex=$((sourceIndex + 1))
@@ -778,6 +815,7 @@ selectUserSubscriptionSources() {
         menuReadChoice "${menuKey}" "${prompt}" sourceChoice true || return 1
         if [[ -z "${sourceChoice}" ]]; then
             printf -v "${resultVar}" '%s' "${currentSources}"
+            [[ -z "${changedVar}" ]] || printf -v "${changedVar}" '%s' false
             return 0
         fi
         if resolvedSources=$(jq -cen --arg choice "${sourceChoice}" --argjson sources "${sourcesJson}" '
@@ -793,6 +831,7 @@ selectUserSubscriptionSources() {
           unique | if index("*") then ["*"] else . end
         '); then
             printf -v "${resultVar}" '%s' "${resolvedSources}"
+            [[ -z "${changedVar}" ]] || printf -v "${changedVar}" '%s' true
             return 0
         fi
         errorCard "节点范围无效，请选择列表编号、服务器 ID 或 *"
@@ -800,6 +839,8 @@ selectUserSubscriptionSources() {
 }
 
 createAndSyncUserSubscriptionWizard() {
+    local templateId=${1:-}
+    local templateJson
     local id=
     local sourceJson=
     local limit=0
@@ -815,13 +856,24 @@ createAndSyncUserSubscriptionWizard() {
         errorCard "分享订阅 ID 已存在"
         return 1
     fi
-    selectUserSubscriptionSources user_subscription_sources "请选择节点范围[回车默认 main]:" sourceJson || return 1
-    while true; do
-        menuReadChoice user_subscription_traffic_limit "请输入订阅额度 GB[回车/0 为不限]:" limit true || return 1
-        limit=${limit:-0}
-        [[ "${limit}" =~ ^[0-9]+$ ]] && break
-        errorCard "订阅额度必须是数字"
-    done
+    if [[ -n "${templateId}" ]]; then
+        templateJson=$(subscriptionActiveGroupRead -ec --arg id "${templateId}" \
+            'first(.user_groups[]? | select(.id == $id)) | select(. != null)') || {
+            errorCard "复制模板订阅失败：原订阅不存在"
+            return 1
+        }
+        sourceJson=$(jq -c '.allowed_sources' <<<"${templateJson}") || return 1
+        limit=$(jq -r '.traffic_limit_gb' <<<"${templateJson}") || return 1
+    else
+        selectUserSubscriptionSources user_subscription_sources "请选择节点范围[回车默认 main]:" sourceJson || return 1
+        while true; do
+            menuReadChoice user_subscription_traffic_limit "请输入订阅额度 GB[回车/0 为不限]:" limit true || return 1
+            limit=${limit:-0}
+            [[ "${limit}" =~ ^[0-9]+$ ]] && break
+            errorCard "订阅额度必须是数字"
+        done
+        limit=$(jq -nr --arg value "${limit}" '$value | tonumber') || return 1
+    fi
 
     if ensureSubscriptionServiceForSharedLinks; then
         :
@@ -852,6 +904,7 @@ createAndSyncUserSubscriptionWizard() {
 
 selectUserSubscriptionId() {
     local allowCreate=${1:-false}
+    local allowMultiple=${2:-false}
     local id
     local name
     local enabled
@@ -862,6 +915,7 @@ selectUserSubscriptionId() {
     local itemIndex=0
     local usersJson
     selectedUserSubscriptionId=
+    selectedUserSubscriptionIds='[]'
     usersJson=$(PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 subscriptionActiveGroupRead -c '.user_groups') || {
         errorCard "用户订阅读取失败"
         return 1
@@ -883,12 +937,47 @@ selectUserSubscriptionId() {
         menuItem "${itemIndex}" "${name}（${id}）" "状态：${enabled} / 额度：${limit}"
     done <<<"${userRows}"
     [[ "${allowCreate}" == "true" ]] && menuItem "+" "新建分享订阅" "创建后立即同步并获取链接"
-    menuLine "输入编号或订阅 ID；纯数字 ID 使用 id:ID；直接回车返回"
+    if [[ "${allowMultiple}" == "true" ]]; then
+        menuLine "输入编号或订阅 ID；逗号分隔可多选，* 选择全部；纯数字 ID 使用 id:ID；直接回车返回"
+    else
+        menuLine "输入编号或订阅 ID；纯数字 ID 使用 id:ID；直接回车返回"
+    fi
     menuClose
     while true; do
         menuReadChoice select_user_subscription_id "请选择订阅:" choice || return 1
         if [[ "${allowCreate}" == "true" && "${choice}" == "+" ]]; then
             selectedUserSubscriptionId=+
+            selectedUserSubscriptionIds='[]'
+            return 0
+        fi
+        if [[ "${allowMultiple}" == "true" && "${choice}" == "*" ]]; then
+            selectedUserSubscriptionIds=$(jq -c '[.[].id]' <<<"${usersJson}") || return 1
+            if [[ "$(jq 'length' <<<"${selectedUserSubscriptionIds}")" == "1" ]]; then
+                selectedUserSubscriptionId=$(jq -r '.[0]' <<<"${selectedUserSubscriptionIds}")
+                selectedUserSubscriptionIds='[]'
+            fi
+            return 0
+        fi
+        if [[ "${allowMultiple}" == "true" && "${choice}" == *","* ]]; then
+            selectedUserSubscriptionIds=$(jq -c --arg choice "${choice}" '
+              ($choice | split(",") | map(gsub("^\\s+|\\s+$"; ""))) as $items |
+              if ($items | length) == 0 or any($items[]; . == "") then error("empty") else . end |
+              [$items[] as $item |
+                if $item | test("^[0-9]+$") then
+                  ($item | tonumber) as $index |
+                  if $index >= 1 and $index <= length then .[$index - 1].id else error("index") end
+                else
+                  ($item | sub("^id:"; "")) as $id |
+                  first(.[]? | select(.id == $id)).id // error("id")
+                end] | unique
+            ' <<<"${usersJson}" 2>/dev/null) || {
+                errorCard "用户订阅选择无效，请输入列表编号、完整 ID 或逗号多选"
+                continue
+            }
+            if [[ "$(jq 'length' <<<"${selectedUserSubscriptionIds}")" == "1" ]]; then
+                selectedUserSubscriptionId=$(jq -r '.[0]' <<<"${selectedUserSubscriptionIds}")
+                selectedUserSubscriptionIds='[]'
+            fi
             return 0
         fi
         selected=$(jq -r --arg choice "${choice}" '
@@ -899,6 +988,7 @@ selectUserSubscriptionId() {
         ' <<<"${usersJson}") || return 1
         if [[ -n "${selected}" ]]; then
             selectedUserSubscriptionId=${selected}
+            selectedUserSubscriptionIds='[]'
             return 0
         fi
         errorCard "用户订阅选择无效，请输入列表编号或完整 ID"
@@ -919,9 +1009,16 @@ showUserSubscriptionLinks() {
     if ! ensureSubscriptionServiceForSharedLinks; then
         return 1
     fi
-    if [[ "${alreadySynced}" != "true" ]] && ! runSubscriptionGroupSync; then
-        errorCard "订阅同步失败，未生成新的分享链接" "修复同步问题后可在当前订阅重试"
-        return 1
+    if [[ "${alreadySynced}" != "true" ]]; then
+        SUBSCRIPTION_SYNC_PUBLISHED=false
+        if ! runSubscriptionGroupSync; then
+            if [[ "${SUBSCRIPTION_SYNC_PUBLISHED:-false}" == "true" ]]; then
+                warnCard "订阅同步部分失败，但本机已发布可用链接" "失败来源沿用旧快照；请到 订阅同步 -> 状态与排障 查看详情"
+            else
+                errorCard "订阅同步失败，未生成新的分享链接" "修复同步问题后可在当前订阅重试"
+                return 1
+            fi
+        fi
     fi
     # 同步中的自动限额处理可能停用订阅，发布前重新确认状态。
     enabled=$(subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" 'first(.user_groups[]? | select(.id == $id)).enabled // false') || return 1
@@ -929,10 +1026,66 @@ showUserSubscriptionLinks() {
         warnCard "该订阅已停用或不存在" "检查流量和额度，启用后再同步获取链接"
         return 1
     fi
+    if [[ "${SUBSCRIPTION_SYNC_PUBLISHED:-false}" == "true" ]]; then
+        showPublishedUserSubscriptionLinks "${userSubscriptionId}"
+        return $?
+    fi
     if ! refreshSubscriptionLinks "${accountName}" true; then
         return 1
     fi
     statusCard "用户订阅链接" "已刷新 ${accountName} 的订阅输出，请把上方该账号的链接发给对方" "如果上方没有该账号，先执行同步生成托管账号"
+}
+
+showPublishedUserSubscriptionLinks() {
+    local userSubscriptionId=$1
+    local enabled accountName salt accountHash domain publicBase format title
+    local shown=false
+    if [[ "${SUBSCRIPTION_GROUPS_LOCK_HELD:-}" != "1" ]]; then
+        local SUBSCRIPTION_GROUPS_LOCK_SKIPPED=false
+        local readStatus=0
+        PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 PADM_SUBSCRIPTION_GROUPS_LOCK_SKIP_BUSY=true \
+            subscriptionGroupsWithLock showPublishedUserSubscriptionLinks "${userSubscriptionId}" || readStatus=$?
+        if [[ "${SUBSCRIPTION_GROUPS_LOCK_SKIPPED}" == "true" ]]; then
+            statusCard "订阅正在同步或修改" "请稍后重试查看已发布链接"
+            return 1
+        fi
+        return "${readStatus}"
+    fi
+    enabled=$(subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" \
+        'first(.user_groups[]? | select(.id == $id)).enabled') || return 1
+    if [[ "${enabled}" != "true" ]]; then
+        warnCard "该订阅已停用或不存在" "启用后再同步获取链接"
+        return 1
+    fi
+    subscribePort= subscribeDomain= subscribeType=
+    readNginxSubscribe || { errorCard "订阅服务配置读取失败"; return 1; }
+    domain=$(resolveSubscribePublicDomain)
+    salt=$(readSubscribeSalt "$(subscribeLocalBaseDir)/subscribeSalt")
+    if [[ -z "${domain}" || -z "${subscribeType}" || -z "${salt}" ]]; then
+        statusCard "当前没有可用的已发布链接" "请执行立即同步并更新链接"
+        return 1
+    fi
+    if [[ -n "${subscribePort}" ]]; then
+        domain+=":${subscribePort}"
+    elif [[ -n "${currentDefaultPort:-}" && "${currentDefaultPort}" != "443" ]]; then
+        domain+=":${currentDefaultPort}"
+    fi
+    accountName=$(subscriptionSyncAccountName "${userSubscriptionId}") || return 1
+    accountHash=$(printf '%s\n' "${accountName}${salt}" | md5sum | awk '{print $1}') || return 1
+    publicBase=$(subscribePublicBaseDir)
+    for format in default clashMetaProfiles sing-box; do
+        [[ -s "${publicBase}/${format}/${accountHash}" ]] || continue
+        case "${format}" in
+        default) title="默认订阅" ;;
+        clashMetaProfiles) title="Clash Meta 订阅" ;;
+        sing-box) title="sing-box 订阅" ;;
+        esac
+        showSubscriptionUrlCard "${title}" "${accountName}" "${subscribeType}://${domain}/s/${format}/${accountHash}"
+        shown=true
+    done
+    [[ "${shown}" == "true" ]] && return 0
+    statusCard "当前没有可用的已发布链接" "请执行立即同步并更新链接"
+    return 1
 }
 
 refreshSubscriptionLinks() {
@@ -1001,6 +1154,8 @@ removeUserSubscriptionTransactionUnlocked() {
         errorCard "${manualCheckMessage}"
         return 1
     }
+    # 删除前采集流量可能更新状态，后置同步失败时必须回滚到这份最新快照。
+    SUBSCRIPTION_USER_MUTATION_PREVIOUS_STATE_OVERRIDE=${previousGroupsState}
     subscriptionSyncCreateConfigBackups createdConfigBackupDir || {
         subscriptionSyncSetManualCheckMessage manualCheckMessage "删除订阅前托管账号配置备份失败" "本机配置"
         errorCard "${manualCheckMessage}"
@@ -1050,6 +1205,164 @@ removeUserSubscriptionMenu() {
     return 1
 }
 
+editUserSubscriptionsMenu() {
+    local idsJson=${1:-'[]'}
+    local expectedJson
+    local patchJson='{}'
+    local effectiveJson
+    local choice=
+    local value=
+    local currentSources
+    local currentSourcesLabel
+    local sourcesChanged=false
+    local currentName
+    local selectedCount
+    local reload=
+    local pendingFields
+    local hasChanges
+    local SUBSCRIPTION_USER_MUTATION_FORCE_SYNC=true
+    selectedCount=$(jq -r 'length' <<<"${idsJson}" 2>/dev/null) || return 1
+    [[ "${selectedCount}" -gt 0 ]] || return 1
+    expectedJson=$(subscriptionActiveGroupRead -c --argjson ids "${idsJson}" '
+      [.user_groups[]? | select(.id as $id | ($ids | index($id)) != null) |
+        {id, name, enabled, allowed_sources, traffic_limit_gb}]
+    ') || return 1
+    [[ "$(jq 'length' <<<"${expectedJson}")" == "${selectedCount}" ]] || {
+        errorCard "所选订阅已不存在，请重新选择"
+        return 1
+    }
+    while true; do
+        effectiveJson=$(jq -c --argjson patch "${patchJson}" 'map(. + $patch)' <<<"${expectedJson}") || return 1
+        pendingFields=$(jq -r '
+          keys |
+          map(
+            if . == "name" then "名称"
+            elif . == "allowed_sources" then "节点范围"
+            elif . == "traffic_limit_gb" then "订阅额度"
+            elif . == "enabled" then "启用状态"
+            else empty end
+          ) |
+          join("、")
+        ' <<<"${patchJson}") || return 1
+        echoContent title "\n┌─ 编辑分享订阅 ─────────────────────────────────────"
+        menuLine "已选订阅：${selectedCount} 个；修改会先保留为草稿，保存时一次性同步"
+        if [[ -n "${pendingFields}" ]]; then
+            menuLine "待保存字段：${pendingFields}"
+        else
+            menuLine "待保存字段：无"
+        fi
+        if [[ "${selectedCount}" == "1" ]]; then
+            currentName=$(jq -r '.[0].name' <<<"${effectiveJson}")
+            menuLine "当前名称：${currentName}"
+            menuItem 1 "设置名称" "当前：${currentName}"
+        else
+            menuLine "批量编辑不会修改订阅名称"
+        fi
+        currentSources=$(jq -c '.[0].allowed_sources' <<<"${effectiveJson}") || return 1
+        if [[ "$(jq -r 'map(.allowed_sources | tojson) | unique | length' <<<"${effectiveJson}")" == "1" ]]; then
+            currentSourcesLabel="固定：$(jq -r '.[0].allowed_sources | join("、")' <<<"${effectiveJson}")"
+        else
+            currentSourcesLabel="多个值（回车保留各自设置）"
+        fi
+        menuLine "当前节点范围：${currentSourcesLabel}"
+        menuLine "当前启用状态：$(jq -r 'map(.enabled) | unique |
+          if length > 1 then "多个值" elif .[0] then "启用" else "停用" end' <<<"${effectiveJson}")"
+        if [[ "$(jq -r 'map(.traffic_limit_gb) | unique | length' <<<"${effectiveJson}")" == "1" ]]; then
+            menuLine "当前订阅额度：$(jq -r '.[0].traffic_limit_gb' <<<"${effectiveJson}") GB（0 表示不限）"
+        else
+            menuLine "当前订阅额度：多个值（回车保留各自设置）"
+        fi
+        menuItem 2 "设置节点范围" "批量订阅使用相同节点范围"
+        menuItem 3 "设置订阅额度" "0 表示不限"
+        menuItem 4 "启用所选订阅" "额度超限时会拒绝启用"
+        menuItem 5 "停用所选订阅" "保存后同步移除对应托管账号"
+        menuItem 6 "保存并立即同步" "不改变自动同步设置"
+        menuReturnItem 7 "取消并丢弃草稿" "返回分享订阅"
+        menuItem 8 "重新读取并丢弃草稿" "放弃当前草稿，读取最新状态"
+        menuClose
+        menuReadChoice edit_user_subscription_menu "请选择:" choice || return 1
+        case "${choice}" in
+        1)
+            [[ "${selectedCount}" == "1" ]] || { errorCard "批量编辑不支持同时修改名称"; continue; }
+            value=
+            menuReadChoice edit_user_subscription_name "请输入新名称[回车保留]:" value true || continue
+            [[ -n "${value}" ]] || continue
+            patchJson=$(jq -c --arg value "${value}" '. + {name:$value}' <<<"${patchJson}") || return 1
+            ;;
+        2)
+            value=
+            sourcesChanged=false
+            selectUserSubscriptionSources \
+                edit_user_subscription_sources \
+                "请选择节点范围[回车保留各自设置]:" \
+                value \
+                "${currentSources}" \
+                "${currentSourcesLabel}" \
+                sourcesChanged || continue
+            if [[ "${sourcesChanged}" == "true" ]]; then
+                patchJson=$(jq -c --argjson value "${value}" '. + {allowed_sources:$value}' <<<"${patchJson}") || return 1
+            fi
+            ;;
+        3)
+            value=
+            menuReadChoice edit_user_subscription_limit "请输入订阅额度 GB[回车保留各自设置，0 为不限]:" value true || continue
+            [[ -n "${value}" ]] || continue
+            [[ "${value}" =~ ^[0-9]+$ ]] || { errorCard "订阅额度必须是数字"; continue; }
+            patchJson=$(jq -c --arg value "${value}" '. + {traffic_limit_gb:($value | tonumber)}' <<<"${patchJson}") || return 1
+            ;;
+        4)
+            patchJson=$(jq -c '. + {enabled:true}' <<<"${patchJson}") || return 1
+            ;;
+        5)
+            patchJson=$(jq -c '. + {enabled:false}' <<<"${patchJson}") || return 1
+            ;;
+        6)
+            hasChanges=$(jq -r '
+              . as $base |
+              ($base | map(.allowed_sources |= sort) | sort_by(.id)) as $before |
+              ($base | map(. + $patch | .allowed_sources |= sort) | sort_by(.id)) as $after |
+              ($before != $after)
+            ' --argjson patch "${patchJson}" <<<"${expectedJson}") || return 1
+            if [[ "${hasChanges}" != "true" ]]; then
+                statusCard "没有待保存的订阅变更"
+                return 0
+            fi
+            if subscriptionGroupsWithLock runUserSubscriptionMutationAndSyncUnlocked \
+                "分享订阅批量编辑" "分享订阅编辑失败" \
+                setUserSubscriptionsFields "${idsJson}" "${patchJson}" "${expectedJson}"; then
+                if jq -e '.enabled == true' <<<"${patchJson}" >/dev/null &&
+                    ! subscriptionActiveGroupRead -e --argjson ids "${idsJson}" \
+                        'all(.user_groups[] | select(.id as $id | ($ids | index($id)) != null); .enabled == true)' >/dev/null; then
+                    warnCard "订阅已保存并同步，部分订阅被额度策略停用" "请提高额度或重置流量后再启用"
+                else
+                    successCard "分享订阅已保存并同步"
+                fi
+                return 0
+            fi
+            warnCard "订阅编辑未完成" "草稿仍保留，可修正后重试；如状态已被其他操作修改，请先重新读取"
+            ;;
+        7)
+            coreCancelledStatusCard "操作未执行"
+            return 1
+            ;;
+        8)
+            reload=$(subscriptionActiveGroupRead -c --argjson ids "${idsJson}" '
+              [.user_groups[]? | select(.id as $id | ($ids | index($id)) != null) |
+                {id, name, enabled, allowed_sources, traffic_limit_gb}]
+            ') || continue
+            [[ "$(jq 'length' <<<"${reload}")" == "${selectedCount}" ]] || {
+                errorCard "所选订阅已不存在，请重新选择"
+                return 1
+            }
+            expectedJson=${reload}
+            patchJson='{}'
+            statusCard "已重新读取订阅状态，草稿已丢弃"
+            ;;
+        *) coreSelectionErrorCard ;;
+        esac
+    done
+}
+
 manageUserSubscriptionItem() {
     local userSubscriptionId=${1:-}
     local userSubscriptionItemStatus=
@@ -1067,26 +1380,34 @@ manageUserSubscriptionItem() {
         echoContent title "\n┌─ 管理分享订阅 ─────────────────────────────────────"
         menuLine "当前订阅：${userSubscriptionId}"
         while IFS= read -r line; do menuLine "${line}"; done <<<"${summary}"
-        menuItem 1 "同步并获取当前链接" "立即同步并生成该订阅链接，不改变自动同步设置"
+        menuItem 1 "查看当前已发布链接" "只读查看，不等待同步或重建订阅"
         menuItem 2 "查看当前流量" "只读查看累计流量和额度状态"
-        menuItem 3 "设置节点范围" "选择 main、被控服务器 ID 或 *"
-        menuItem 4 "设置订阅额度" "0 表示不限；这里只设置额度，不执行超限处理"
+        menuItem 3 "编辑订阅配置" "名称、节点范围、额度和启停一次保存并同步"
+        menuItem 4 "立即同步并更新链接" "同步后查看当前链接，不改变自动同步设置"
         menuItem 5 "启用/停用当前订阅" "停用后同步会移除对应托管账号"
         menuDangerItem 6 "删除订阅" "删除记录；同步后移除对应托管账号"
         menuReturnItem 7 "返回订阅列表" "回到分享订阅"
         menuItem 8 "切换订阅" "选择另一订阅继续管理"
+        menuItem 9 "按当前配置新建订阅" "复制节点范围和额度，不复制身份、流量和令牌"
         menuClose
         menuReadChoice user_subscription_item_menu "请选择:" userSubscriptionItemStatus || return 0
         case "${userSubscriptionItemStatus}" in
-        1) showUserSubscriptionLinks "${userSubscriptionId}" ;;
+        1) showPublishedUserSubscriptionLinks "${userSubscriptionId}" ;;
         2) showUserSubscriptionTraffic "${userSubscriptionId}" ;;
-        3) setUserSubscriptionSourcesMenu "${userSubscriptionId}" ;;
-        4) setUserSubscriptionTrafficLimitMenu "${userSubscriptionId}" ;;
+        3) editUserSubscriptionsMenu "[\"${userSubscriptionId}\"]" || true ;;
+        4) showUserSubscriptionLinks "${userSubscriptionId}" ;;
         5)
             if subscriptionGroupsWithLock runUserSubscriptionMutationAndSyncUnlocked \
                 "用户订阅状态切换" "用户订阅状态切换失败" \
                 toggleUserSubscriptionState "${userSubscriptionId}"; then
-                successCard "用户订阅状态已切换"
+                local enabled
+                enabled=$(subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" \
+                    'first(.user_groups[]? | select(.id == $id)).enabled') || continue
+                if [[ "${enabled}" == "true" ]]; then
+                    successCard "用户订阅已启用"
+                else
+                    statusCard "用户订阅当前已停用" "如刚执行启用，请检查自动额度策略和当前累计流量"
+                fi
             fi
             ;;
         6) removeUserSubscriptionMenu "${userSubscriptionId}" && return ;;
@@ -1094,6 +1415,12 @@ manageUserSubscriptionItem() {
         8)
             if selectUserSubscriptionId; then
                 userSubscriptionId=${selectedUserSubscriptionId}
+            fi
+            ;;
+        9)
+            createAndSyncUserSubscriptionWizard "${userSubscriptionId}" || true
+            if [[ -n "${createdUserSubscriptionId:-}" ]]; then
+                userSubscriptionId=${createdUserSubscriptionId}
             fi
             ;;
         *) coreSelectionErrorCard ;;

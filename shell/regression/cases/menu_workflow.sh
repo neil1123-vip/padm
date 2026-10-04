@@ -109,10 +109,11 @@ runSubscriptionMenuWorkflowRegression() (
     )
 
     (
-        local syncCount=0 publishCount=0
+        local syncCount=0 publishCount=0 publishedCount=0
         ensureSubscriptionServiceForSharedLinks() { return 0; }
         runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
         refreshSubscriptionLinks() { publishCount=$((publishCount + 1)); }
+        showPublishedUserSubscriptionLinks() { publishedCount=$((publishedCount + 1)); }
         setUserSubscriptionEnabled alpha false
         regressionExpectStatus 1 showUserSubscriptionLinks alpha
         [[ "${syncCount}" == "0" && "${publishCount}" == "0" ]]
@@ -127,6 +128,51 @@ runSubscriptionMenuWorkflowRegression() (
         }
         regressionExpectStatus 1 showUserSubscriptionLinks alpha
         [[ "${syncCount}" == "2" && "${publishCount}" == "2" ]]
+        setUserSubscriptionEnabled alpha true
+        runSubscriptionGroupSync() {
+            syncCount=$((syncCount + 1))
+            SUBSCRIPTION_SYNC_PUBLISHED=true
+            return 1
+        }
+        showUserSubscriptionLinks alpha
+        [[ "${syncCount}" == "3" && "${publishCount}" == "2" && "${publishedCount}" == "1" ]]
+        runSubscriptionGroupSync() {
+            syncCount=$((syncCount + 1))
+            return 1
+        }
+        regressionExpectStatus 1 showUserSubscriptionLinks alpha
+        [[ "${syncCount}" == "4" && "${publishedCount}" == "1" ]]
+    )
+
+    (
+        local publicBase="${root}/public" localBase="${root}/local"
+        local linkLog="${root}/links.log" accountHash before
+        export PADM_SUBSCRIBE_DIR="${publicBase}" PADM_SUBSCRIBE_LOCAL_DIR="${localBase}"
+        mkdir -p "${publicBase}/default" "${publicBase}/clashMetaProfiles" "${localBase}"
+        printf 'fixed-salt\n' >"${localBase}/subscribeSalt"
+        accountHash=$(printf '%s\n' "$(subscriptionSyncAccountName alpha)fixed-salt" | md5sum | awk '{print $1}')
+        readNginxSubscribe() { subscribeDomain=links.example.com; subscribeType=https; subscribePort=39778; }
+        showSubscriptionUrlCard() { printf '%s\n' "$*" >>"${linkLog}"; }
+        runSubscriptionGroupSync() { return 99; }
+        subscribe() { return 99; }
+        regressionExpectStatus 1 showPublishedUserSubscriptionLinks alpha
+        printf 'published-default\n' >"${publicBase}/default/${accountHash}"
+        printf 'published-clash\n' >"${publicBase}/clashMetaProfiles/${accountHash}"
+        before=$(subscriptionGroupsStateRead -c '.')
+        showPublishedUserSubscriptionLinks alpha
+        grep -qF "https://links.example.com:39778/s/default/${accountHash}" "${linkLog}"
+        grep -qF "https://links.example.com:39778/s/clashMetaProfiles/${accountHash}" "${linkLog}"
+        [[ "$(wc -l <"${linkLog}")" == "2" && "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+        setUserSubscriptionEnabled alpha false
+        regressionExpectStatus 1 showPublishedUserSubscriptionLinks alpha
+        [[ "$(wc -l <"${linkLog}")" == "2" ]]
+        subscriptionGroupsWithLock() {
+            [[ "${PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT}" == "0" && "${PADM_SUBSCRIPTION_GROUPS_LOCK_SKIP_BUSY}" == "true" ]]
+            SUBSCRIPTION_GROUPS_LOCK_SKIPPED=true
+        }
+        regressionExpectStatus 1 showPublishedUserSubscriptionLinks alpha
+        [[ "$(wc -l <"${linkLog}")" == "2" ]]
+        grep -qF "订阅正在同步或修改" "${statusLog}"
     )
 
     (
@@ -144,5 +190,314 @@ runSubscriptionMenuWorkflowRegression() (
         trafficId=
         manageSharedSubscriptions <<< $'2\n2\n7\n\n'
         [[ "${trafficId}" == "alpha" ]]
+    )
+
+    (
+        local viewedId= syncedId= editedIds=
+        showPublishedUserSubscriptionLinks() { viewedId=$1; }
+        showUserSubscriptionLinks() { syncedId=$1; }
+        editUserSubscriptionsMenu() { editedIds=$1; }
+        manageUserSubscriptionItem alpha <<< $'1\n4\n3\n7'
+        [[ "${viewedId}" == "alpha" && "${syncedId}" == "alpha" && "${editedIds}" == '["alpha"]' ]]
+    )
+
+    runSubscriptionMenuDraftRegression
+)
+
+runSubscriptionMenuDraftRegression() (
+    source "${PROJECT_ROOT}/shell/core/runtime.sh"
+    source "${PROJECT_ROOT}/shell/subscription/groups.sh"
+    source "${PROJECT_ROOT}/shell/subscription/menu.sh"
+    local root="${TMP_DIR}/subscription-menu-draft"
+    local displayLog="${root}/display.log"
+    local errorLog="${root}/errors.log"
+    local statusLog="${root}/status.log"
+    local fixture
+    export PADM_SUBSCRIPTION_GROUPS_DIR="${root}/groups"
+    unset AUTO_INSTALL
+    mkdir -p "${PADM_SUBSCRIPTION_GROUPS_DIR}"
+    writeDefaultSubscriptionGroupsState "$(subscriptionGroupsFile)"
+    addSubscriptionSourceState edge "Edge" 203.0.113.20 39778
+    addUserSubscriptionState alpha "Alpha" '["edge"]' 1
+    addUserSubscriptionState beta "Beta" '["main"]' 0
+    setSubscriptionGroupSyncEnabled false
+    subscriptionActiveGroupWrite '
+      .user_groups |= map(
+        if .id == "alpha" then .uuid = "11111111-1111-4111-8111-111111111111" else . end) |
+      .traffic.user_groups.alpha = {sources:{main:{upload:1073741824,download:1}}}
+    '
+    fixture=$(subscriptionGroupsStateRead -c '.')
+
+    echoContent() { printf '%s\n' "$*" >>"${displayLog}"; }
+    userResultCard() { printf '%s\n' "$*" >>"${displayLog}"; }
+    menuLine() { printf '%s\n' "$*" >>"${displayLog}"; }
+    menuItem() { printf '%s\n' "$*" >>"${displayLog}"; }
+    menuDangerItem() { printf '%s\n' "$*" >>"${displayLog}"; }
+    menuReturnItem() { printf '%s\n' "$*" >>"${displayLog}"; }
+    menuClose() { :; }
+    errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+    statusCard() { printf '%s\n' "$*" >>"${statusLog}"; }
+    warnCard() { printf '%s\n' "$*" >>"${statusLog}"; }
+    successCard() { printf '%s\n' "$*" >>"${statusLog}"; }
+    subscriptionRequireLocalPublisherRole() { return 0; }
+    subscriptionCurrentRoleNormalized() { printf 'uninitialized\n'; }
+    subscriptionSyncCreateLocalApplyBackups() { :; }
+    subscriptionSyncReleaseLocalApplyBackups() { :; }
+    resetDraftFixture() {
+        subscriptionGroupsStateWrite --argjson fixture "${fixture}" '$fixture'
+    }
+
+    (
+        local before expected
+        setUserSubscriptionsFields '["alpha","beta"]' '{"allowed_sources":["main"],"traffic_limit_gb":4,"enabled":false}'
+        subscriptionActiveGroupRead -e '
+          all(.user_groups[]; .allowed_sources == ["main"] and .traffic_limit_gb == 4 and .enabled == false) and
+          .user_groups[0].uuid == "11111111-1111-4111-8111-111111111111" and
+          .traffic.user_groups.alpha.sources.main.upload == 1073741824
+        ' >/dev/null
+        before=$(subscriptionGroupsStateRead -c '.')
+        regressionExpectStatus 1 setUserSubscriptionsFields '["alpha","missing"]' '{"enabled":true}'
+        regressionExpectStatus 1 setUserSubscriptionsFields '["alpha","alpha"]' '{"traffic_limit_gb":8}'
+        regressionExpectStatus 1 setUserSubscriptionsFields '[]' '{"enabled":true}'
+        regressionExpectStatus 1 setUserSubscriptionsFields '["alpha"]' '{"uuid":"22222222-2222-4222-8222-222222222222"}'
+        regressionExpectStatus 1 setUserSubscriptionsFields '["alpha"]' '{"traffic_limit_gb":-1}'
+        regressionExpectStatus 1 setUserSubscriptionsFields '["alpha"]' '{"allowed_sources":["missing"]}'
+        [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+
+        expected=$(subscriptionActiveGroupRead -c '[.user_groups[] | {id,name,enabled,allowed_sources,traffic_limit_gb}]')
+        setUserSubscriptionTrafficLimit alpha 9
+        before=$(subscriptionGroupsStateRead -c '.')
+        regressionExpectStatus 1 setUserSubscriptionsFields '["alpha","beta"]' '{"enabled":true}' "${expected}"
+        [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+        expected=$(subscriptionActiveGroupRead -c '[.user_groups[] | {id,name,enabled,allowed_sources,traffic_limit_gb}]')
+        subscriptionActiveGroupWrite '.traffic.user_groups.alpha.sources.main.download += 1'
+        setUserSubscriptionsFields '["alpha","beta"]' '{"enabled":true}' "${expected}"
+        subscriptionActiveGroupRead -e 'all(.user_groups[]; .enabled) and .traffic.user_groups.alpha.sources.main.download == 2' >/dev/null
+    )
+
+    (
+        local before
+        resetDraftFixture
+        setUserSubscriptionEnabled alpha false
+        subscriptionActiveGroupWrite '.sync.quota_auto_apply = true'
+        before=$(subscriptionGroupsStateRead -c '.')
+        regressionExpectStatus 1 setUserSubscriptionsFields '["alpha","beta"]' '{"enabled":true}'
+        [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+        setUserSubscriptionsFields '["alpha"]' '{"traffic_limit_gb":3,"enabled":true}'
+        subscriptionActiveGroupRead -e '.user_groups[0].enabled and .user_groups[0].traffic_limit_gb == 3' >/dev/null
+        setUserSubscriptionsFields '["alpha"]' '{"traffic_limit_gb":1,"enabled":false}'
+        setUserSubscriptionsFields '["alpha"]' '{"traffic_limit_gb":0,"enabled":true}'
+        subscriptionActiveGroupRead -e '.user_groups[0].enabled and .user_groups[0].traffic_limit_gb == 0' >/dev/null
+
+        setUserSubscriptionsFields '["alpha"]' '{"traffic_limit_gb":1,"enabled":false}'
+        before=$(subscriptionGroupsStateRead -c '.')
+        regressionExpectStatus 1 toggleUserSubscriptionState alpha
+        regressionExpectStatus 1 setUserSubscriptionEnabled alpha true
+        [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+        setUserSubscriptionTrafficLimit alpha 2
+        toggleUserSubscriptionState alpha
+        subscriptionActiveGroupRead -e '.user_groups[0].enabled == true' >/dev/null
+        toggleUserSubscriptionState alpha
+        subscriptionActiveGroupRead -e '.user_groups[0].enabled == false' >/dev/null
+    )
+
+    (
+        local before
+        resetDraftFixture
+        selectUserSubscriptionId true true <<<1,2
+        jq -e 'sort == ["alpha","beta"]' <<<"${selectedUserSubscriptionIds}" >/dev/null
+        [[ -z "${selectedUserSubscriptionId}" ]]
+        selectUserSubscriptionId true true <<<'*'
+        jq -e 'sort == ["alpha","beta"]' <<<"${selectedUserSubscriptionIds}" >/dev/null
+        selectUserSubscriptionId true true <<< $'1,missing\n1,1'
+        [[ "${selectedUserSubscriptionIds}" == '[]' && "${selectedUserSubscriptionId}" == "alpha" ]]
+        selectedUserSubscriptionIds='["stale"]'
+        regressionExpectStatus 1 selectUserSubscriptionId true true </dev/null
+        [[ "${selectedUserSubscriptionIds}" == '[]' ]]
+
+        before=$(subscriptionGroupsStateRead -c '.')
+        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'1\nDiscarded name\n3\n7\n7'
+        [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'3\n7'
+        [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'2'
+        [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+        editUserSubscriptionsMenu '["alpha"]' <<< $'3\n7\n8\n6'
+        [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+
+        resetDraftFixture
+        before=$(subscriptionGroupsStateRead -c '.')
+        editUserSubscriptionsMenu '["alpha","beta"]' <<< $'2\n\n3\n\n6'
+        [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+
+        local syncCount=0
+        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
+        editUserSubscriptionsMenu '["alpha"]' <<< $'3\n007\n3\n\n2\n1\n2\n\n6'
+        [[ "${syncCount}" == "1" ]]
+        subscriptionActiveGroupRead -e '.user_groups[0].traffic_limit_gb == 7 and .user_groups[0].allowed_sources == ["main"]' >/dev/null
+        resetDraftFixture
+        before=$(subscriptionGroupsStateRead -c '.')
+        local SUBSCRIPTION_USER_MUTATION_FORCE_SYNC=sentinel
+        editUserSubscriptionsMenu '["alpha"]' <<< $'3\n1\n6'
+        [[ "${syncCount}" == "1" && "${SUBSCRIPTION_USER_MUTATION_FORCE_SYNC}" == "sentinel" ]]
+        [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+    )
+
+    (
+        local syncCount=0 mutationCount=0
+        resetDraftFixture
+        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
+        eval "$(declare -f setUserSubscriptionsFields | sed '1s/^setUserSubscriptionsFields/originalSetUserSubscriptionsFields/')"
+        setUserSubscriptionsFields() {
+            mutationCount=$((mutationCount + 1))
+            originalSetUserSubscriptionsFields "$@"
+        }
+        editUserSubscriptionsMenu '["alpha"]' <<< $'1\nAlpha revised\n2\n1,2\n3\n6\n5\n6'
+        [[ "${mutationCount}" == "1" && "${syncCount}" == "1" ]]
+        subscriptionActiveGroupRead -e '
+          .sync.enabled == false and
+          .user_groups[0].name == "Alpha revised" and
+          (.user_groups[0].allowed_sources | sort) == ["edge","main"] and
+          .user_groups[0].traffic_limit_gb == 6 and .user_groups[0].enabled == false and
+          .user_groups[1].name == "Beta"
+        ' >/dev/null
+        editUserSubscriptionsMenu '["alpha","beta"]' <<< $'2\n2\n3\n8\n4\n6'
+        [[ "${mutationCount}" == "2" && "${syncCount}" == "2" ]]
+        subscriptionActiveGroupRead -e '
+          .sync.enabled == false and
+          all(.user_groups[]; .allowed_sources == ["edge"] and .traffic_limit_gb == 8 and .enabled)
+        ' >/dev/null
+
+        local openedIds=
+        editUserSubscriptionsMenu() { openedIds=$1; }
+        manageSharedSubscriptions <<< $'1,2\n\n'
+        jq -e 'sort == ["alpha","beta"]' <<<"${openedIds}" >/dev/null
+    )
+
+    (
+        local syncCount=0 mutationCount=0
+        resetDraftFixture
+        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
+        eval "$(declare -f setUserSubscriptionsFields | sed '1s/^setUserSubscriptionsFields/originalSetUserSubscriptionsFields/')"
+        setUserSubscriptionsFields() {
+            mutationCount=$((mutationCount + 1))
+            [[ "${mutationCount}" != "1" ]] || return 1
+            originalSetUserSubscriptionsFields "$@"
+        }
+        editUserSubscriptionsMenu '["alpha"]' <<< $'1\nRetained draft\n3\n9\n6\n6'
+        [[ "${mutationCount}" == "2" && "${syncCount}" == "1" ]]
+        subscriptionActiveGroupRead -e '.user_groups[0].name == "Retained draft" and .user_groups[0].traffic_limit_gb == 9' >/dev/null
+    )
+
+    (
+        local syncCount=0
+        resetDraftFixture
+        runSubscriptionGroupSync() {
+            syncCount=$((syncCount + 1))
+            [[ "${syncCount}" != "1" ]]
+        }
+        editUserSubscriptionsMenu '["alpha"]' <<< $'1\nRetry after sync\n3\n3\n6\n6'
+        [[ "${syncCount}" == "3" ]]
+        subscriptionActiveGroupRead -e '.sync.enabled == false and .user_groups[0].name == "Retry after sync" and .user_groups[0].traffic_limit_gb == 3' >/dev/null
+    )
+
+    (
+        local syncCount=0 before
+        resetDraftFixture
+        setUserSubscriptionEnabled alpha false
+        subscriptionActiveGroupWrite '.sync.quota_auto_apply = true'
+        before=$(subscriptionGroupsStateRead -c '.')
+        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
+        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'4\n6\n7'
+        [[ "${syncCount}" == "0" && "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+        editUserSubscriptionsMenu '["alpha"]' <<< $'4\n3\n2\n6'
+        [[ "${syncCount}" == "1" ]]
+        subscriptionActiveGroupRead -e '.user_groups[0].enabled and .user_groups[0].traffic_limit_gb == 2' >/dev/null
+    )
+
+    (
+        local syncCount=0
+        resetDraftFixture
+        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
+        eval "$(declare -f setUserSubscriptionsFields | sed '1s/^setUserSubscriptionsFields/originalSetUserSubscriptionsFields/')"
+        setUserSubscriptionsFields() {
+            setUserSubscriptionTrafficLimit beta 11
+            originalSetUserSubscriptionsFields "$@"
+        }
+        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha","beta"]' <<< $'3\n7\n6\n7'
+        [[ "${syncCount}" == "0" ]]
+        subscriptionActiveGroupRead -e '.user_groups[0].traffic_limit_gb == 1 and .user_groups[1].traffic_limit_gb == 11' >/dev/null
+    )
+
+    (
+        local syncCount=0
+        resetDraftFixture
+        ensureSubscriptionServiceForSharedLinks() { return 1; }
+        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
+        setUserSubscriptionEnabled alpha false
+        createAndSyncUserSubscriptionWizard alpha <<< $'copied-alpha\n\n\n'
+        [[ "${syncCount}" == "1" && "${createdUserSubscriptionId}" == "copied-alpha" ]]
+        subscriptionActiveGroupRead -e '
+          . as $state |
+          ($state.user_groups | map(select(.id == "copied-alpha")) | first) as $copy |
+          ($state.sync.enabled == false) and
+          ($copy.allowed_sources == ["edge"] and $copy.traffic_limit_gb == 1 and
+            $copy.enabled == true and ($copy | has("uuid") | not)) and
+          (($state.traffic.user_groups | has("copied-alpha")) | not) and
+          ($state.user_groups[0].uuid == "11111111-1111-4111-8111-111111111111")
+        ' >/dev/null
+
+        createAndSyncUserSubscriptionWizard beta <<<zero-template-copy
+        subscriptionActiveGroupRead -e '
+          any(.user_groups[]; .id == "zero-template-copy" and .traffic_limit_gb == 0 and .allowed_sources == ["main"])
+        ' >/dev/null
+    )
+
+    (
+        local syncCount=0
+        resetDraftFixture
+        setSubscriptionGroupSyncEnabled true
+        subscriptionSyncRestoreConfigBackups() { :; }
+        subscriptionSyncRestoreSubscribeOutputBackups() { :; }
+        subscriptionSyncReconcileLocalServices() { :; }
+        subscriptionSyncMarkResult() { :; }
+        runSubscriptionGroupSync() {
+            syncCount=$((syncCount + 1))
+            subscriptionActiveGroupWrite '.traffic.user_groups.alpha.sources.main.upload += 50'
+            return 1
+        }
+        regressionExpectStatus 1 subscriptionGroupsWithLock runUserSubscriptionMutationAndSyncUnlocked \
+            "回滚流量检查" "" setUserSubscriptionsFields '["alpha"]' '{"enabled":false}'
+        [[ "${syncCount}" == "2" ]]
+        subscriptionActiveGroupRead -e '
+          .user_groups[0].enabled and .traffic.user_groups.alpha.sources.main.upload == 1073741924
+        ' >/dev/null
+
+        resetDraftFixture
+        setSubscriptionGroupSyncEnabled true
+        syncCount=0
+        collectSubscriptionTraffic() {
+            subscriptionActiveGroupWrite '
+              .traffic.user_groups.alpha.sources.main.upload += 50 |
+              .traffic.sources.main = {upload:50,download:0}
+            '
+        }
+        subscriptionLocalTrafficBaselineExists() { return 0; }
+        subscriptionSyncCreateConfigBackups() { printf -v "$1" '%s' "${root}/config-backup"; }
+        subscriptionSyncCreateSubscribeOutputBackups() { printf -v "$1" '%s' "${root}/output-backup"; }
+        subscriptionSyncRemoveAccount() { :; }
+        reloadCoreWithTrafficStatsConfig() { :; }
+        runSubscriptionGroupSync() {
+            syncCount=$((syncCount + 1))
+            subscriptionActiveGroupWrite '.traffic.sources.main.upload += 25'
+            return 1
+        }
+        regressionExpectStatus 1 removeUserSubscriptionMenu alpha <<<yes
+        [[ "${syncCount}" == "2" ]]
+        subscriptionActiveGroupRead -e '
+          any(.user_groups[]; .id == "alpha") and
+          .traffic.user_groups.alpha.sources.main.upload == 1073741874 and
+          .traffic.sources.main.upload == 100
+        ' >/dev/null
     )
 )

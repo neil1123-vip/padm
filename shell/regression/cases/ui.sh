@@ -2095,19 +2095,19 @@ main
 2
 demo-user
 2
-4
+3
+3
 2
+6
 7
 
 4
 4"
-        grep -q "同步并获取当前链接" <<<"${output}"
+        grep -q "查看当前已发布链接" <<<"${output}"
+        grep -q "立即同步并更新链接" <<<"${output}"
         grep -q "查看当前流量" <<<"${output}"
         subscriptionGroupsStateRead -e 'any(.user_groups[]?; .id == "demo-user" and .traffic_limit_gb == 2)' >/dev/null
-        if assertMenuAction 'runSubscriptionGroupSync:'; then
-            printf 'menu-smoke failed: quota setter ran a full sync\n' >&2
-            return 1
-        fi
+        assertMenuAction 'runSubscriptionGroupSync:'
         resetMenuActions
     fi
 
