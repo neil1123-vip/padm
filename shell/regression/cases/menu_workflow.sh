@@ -72,9 +72,15 @@ runSubscriptionMenuWorkflowRegression() (
     )
 
     (
-        local syncCount=0 syncStatus=0 published=false serviceCount=0 linkCount=0
+        local syncCount=0 syncStatus=0 published=true serviceCount=0 linkCount=0
+        local shownCount=0 shownId=
         ensureSubscriptionServiceForSharedLinks() { serviceCount=$((serviceCount + 1)); return 2; }
         syncAndShowSubscriptionLinks() { linkCount=$((linkCount + 1)); return 99; }
+        showPublishedSubscriptionLinks() {
+            shownCount=$((shownCount + 1))
+            shownId=$1
+            return 1
+        }
         setSubscriptionGroupSyncEnabledWithCron() { return 99; }
         runSubscriptionGroupSync() {
             syncCount=$((syncCount + 1))
@@ -82,25 +88,27 @@ runSubscriptionMenuWorkflowRegression() (
             return "${syncStatus}"
         }
         createAndSyncUserSubscriptionWizard <<< $'new-team\n1,2\n3'
-        [[ "${syncCount}" == "1" ]]
+        [[ "${syncCount}" == "1" && "${shownCount}" == "1" && "${shownId}" == "new-team" ]]
         subscriptionActiveGroupRead -e '
           .sync.enabled == false and
           any(.user_groups[]; .id == "new-team" and .traffic_limit_gb == 3 and (.allowed_sources | sort) == ["edge","main"])
         ' >/dev/null
         syncStatus=1
+        published=false
         regressionExpectStatus 1 createAndSyncUserSubscriptionWizard <<< $'pending-team\n1\n0'
-        [[ "${syncCount}" == "2" ]]
+        [[ "${syncCount}" == "2" && "${shownCount}" == "1" ]]
         userSubscriptionExists pending-team
         subscriptionActiveGroupRead -e '.sync.enabled == false' >/dev/null
         grep -q '已保存' "${statusLog}"
         local openedId=
         manageUserSubscriptionItem() { openedId=$1; }
         manageSharedSubscriptions <<< $'+\nretry-team\n1\n0\n\n'
-        [[ "${openedId}" == "retry-team" && "${syncCount}" == "3" ]]
+        [[ "${openedId}" == "retry-team" && "${syncCount}" == "3" && "${shownCount}" == "1" ]]
         userSubscriptionExists retry-team
         published=true
         manageSharedSubscriptions <<< $'+\npartial-team\n1\n0\n\n'
-        [[ "${openedId}" == "partial-team" && "${syncCount}" == "4" ]]
+        [[ "${openedId}" == "partial-team" && "${syncCount}" == "4" &&
+            "${shownCount}" == "2" && "${shownId}" == "partial-team" ]]
         userSubscriptionExists partial-team
         grep -q '首次同步部分失败但链接已发布' "${statusLog}"
         [[ "${serviceCount}" == "0" && "${linkCount}" == "0" ]]
@@ -391,6 +399,35 @@ runSubscriptionMenuDraftRegression() (
     )
 
     (
+        local syncCount=0 mutationCount=0 targetPatch= expectedSnapshot= concurrentChanged=false
+        resetDraftFixture
+        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
+        eval "$(declare -f menuReadChoice | sed '1s/^menuReadChoice/originalMenuReadChoice/')"
+        menuReadChoice() {
+            local resultVar=$3
+            originalMenuReadChoice "$@" || return $?
+            if [[ "$1" == "user_subscription_item_menu" && "${!resultVar}" == "5" &&
+                "${concurrentChanged}" == "false" ]]; then
+                concurrentChanged=true
+                subscriptionActiveGroupWrite '.user_groups[0].enabled = false'
+            fi
+        }
+        eval "$(declare -f setUserSubscriptionsFields | sed '1s/^setUserSubscriptionsFields/originalSetUserSubscriptionsFields/')"
+        setUserSubscriptionsFields() {
+            mutationCount=$((mutationCount + 1))
+            targetPatch=$2
+            expectedSnapshot=${3:-}
+            originalSetUserSubscriptionsFields "$@"
+        }
+        manageUserSubscriptionItem alpha <<< $'5\n7'
+        [[ "${concurrentChanged}" == "true" && "${mutationCount}" == "1" && "${syncCount}" == "0" ]]
+        jq -e '.enabled == false' <<<"${targetPatch}" >/dev/null
+        jq -e 'length == 1 and .[0].id == "alpha" and .[0].enabled == true' <<<"${expectedSnapshot}" >/dev/null
+        subscriptionActiveGroupRead -e '.user_groups[0].enabled == false' >/dev/null
+        grep -q '停用当前订阅' "${displayLog}"
+    )
+
+    (
         local syncCount=0 mutationCount=0
         resetDraftFixture
         runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
@@ -496,13 +533,22 @@ runSubscriptionMenuDraftRegression() (
     )
 
     (
-        local syncCount=0 ensureCount=0
+        local syncCount=0 ensureCount=0 shownCount=0 shownId=
         resetDraftFixture
         ensureSubscriptionServiceForSharedLinks() { ensureCount=$((ensureCount + 1)); return 99; }
-        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
+        runSubscriptionGroupSync() {
+            syncCount=$((syncCount + 1))
+            SUBSCRIPTION_SYNC_PUBLISHED=true
+        }
+        showPublishedSubscriptionLinks() {
+            shownCount=$((shownCount + 1))
+            shownId=$1
+            return 1
+        }
         setUserSubscriptionEnabled alpha false
         createAndSyncUserSubscriptionWizard alpha <<< $'copied-alpha\n\n\n'
-        [[ "${syncCount}" == "1" && "${ensureCount}" == "0" && "${createdUserSubscriptionId}" == "copied-alpha" ]]
+        [[ "${syncCount}" == "1" && "${ensureCount}" == "0" && "${createdUserSubscriptionId}" == "copied-alpha" &&
+            "${shownCount}" == "1" && "${shownId}" == "copied-alpha" ]]
         subscriptionActiveGroupRead -e '
           . as $state |
           ($state.user_groups | map(select(.id == "copied-alpha")) | first) as $copy |
@@ -514,7 +560,8 @@ runSubscriptionMenuDraftRegression() (
         ' >/dev/null
 
         createAndSyncUserSubscriptionWizard beta <<<zero-template-copy
-        [[ "${ensureCount}" == "0" ]]
+        [[ "${syncCount}" == "2" && "${ensureCount}" == "0" && "${shownCount}" == "2" &&
+            "${shownId}" == "zero-template-copy" ]]
         subscriptionActiveGroupRead -e '
           any(.user_groups[]; .id == "zero-template-copy" and .traffic_limit_gb == 0 and .allowed_sources == ["main"])
         ' >/dev/null

@@ -1094,32 +1094,39 @@ applySubscriptionQuotaPlanAccounts() {
     return "${rc}"
 }
 
-applySubscriptionQuotaPlanTransactionUnlocked() {
-    local quotaPlan=$1
+subscriptionQuotaRecheckPlan() {
+    local resultVar=$1
+    local quotaPlan=$2
     local requestedIds
     local currentPlan
-    local effectivePlan
-    local backupFile
-    local quotaError=
-
+    local recheckedPlan
     SUBSCRIPTION_SYNC_TRANSACTION_ERROR=
     ensureSubscriptionGroupsState || return 1
     subscriptionQuotaValidatePlan "${quotaPlan}" || return 1
     requestedIds=$(jq -c '[.[].id]' <<<"${quotaPlan}") || return 1
     currentPlan=$(subscriptionQuotaDryRunPlan) || {
-        SUBSCRIPTION_SYNC_TRANSACTION_ERROR="限额自动执行时重新检查超额状态失败"
+        SUBSCRIPTION_SYNC_TRANSACTION_ERROR="限额处理时重新检查超额状态失败"
         return 1
     }
     subscriptionQuotaValidatePlan "${currentPlan}" || {
-        SUBSCRIPTION_SYNC_TRANSACTION_ERROR="限额自动执行时重新检查计划格式失败"
+        SUBSCRIPTION_SYNC_TRANSACTION_ERROR="限额处理时重新检查计划格式失败"
         return 1
     }
-    effectivePlan=$(jq -c --argjson requestedIds "${requestedIds}" '
+    recheckedPlan=$(jq -c --argjson requestedIds "${requestedIds}" '
       [.[]? | .id as $id | select(($requestedIds | index($id)) != null)]
     ' <<<"${currentPlan}") || {
-        SUBSCRIPTION_SYNC_TRANSACTION_ERROR="限额自动执行时重新检查计划格式失败"
+        SUBSCRIPTION_SYNC_TRANSACTION_ERROR="限额处理时重新检查计划格式失败"
         return 1
     }
+    printf -v "${resultVar}" '%s' "${recheckedPlan}"
+}
+
+applySubscriptionQuotaPlanTransactionUnlocked() {
+    local quotaPlan=$1
+    local effectivePlan
+    local backupFile
+    local quotaError=
+    subscriptionQuotaRecheckPlan effectivePlan "${quotaPlan}" || return 1
     [[ "${effectivePlan}" != '[]' ]] || return 0
 
     backupFile=$(createSubscriptionGroupsBackup) || {
@@ -1163,10 +1170,30 @@ applySubscriptionQuotaPlanTransaction() {
     subscriptionGroupsWithLock applySubscriptionQuotaPlanTransactionUnlocked "$@"
 }
 
+runSubscriptionQuotaMutationAndSyncUnlocked() {
+    local effectivePlan
+    # 本次只处理已经确认的订阅，不让后置同步的自动限额扩大处理范围。
+    local SUBSCRIPTION_SYNC_SKIP_QUOTA_AUTO_APPLY=true
+    subscriptionQuotaRecheckPlan effectivePlan "$1" || {
+        errorCard "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-超限处理计划重新检查失败}"
+        return 1
+    }
+    if [[ "${effectivePlan}" == '[]' ]]; then
+        statusCard "无需处理" "已确认订阅当前不再需要超限处理"
+        return 0
+    fi
+    if runUserSubscriptionMutationAndSyncUnlocked \
+        "超限处理" "停用超额分享订阅失败" \
+        applySubscriptionQuotaPlan "${effectivePlan}"; then
+        successCard "超限处理已执行并同步" "已停用超额分享订阅，更新托管账号和已配置的订阅发布"
+        return 0
+    fi
+    return 1
+}
+
 executeSubscriptionQuotaPlanMenu() {
     local quotaPlan
     local confirm=
-    local rc=0
     if ! collectSubscriptionTraffic >/dev/null 2>&1; then
         errorCard "流量快照不完整，已取消超限处理"
         return 1
@@ -1180,20 +1207,16 @@ executeSubscriptionQuotaPlanMenu() {
         statusCard "无需处理" "当前没有已超额且仍启用的分享订阅"
         return 0
     fi
-    autoRead subscription_quota_apply_confirm "执行后会停用超额订阅并移除本机托管账号。确认请输入 yes:" confirm
+    autoRead subscription_quota_apply_confirm "执行后会停用超额订阅，并同步本机、被控服务器和已配置的订阅发布。确认请输入 yes:" confirm
     if [[ "${confirm}" != "yes" ]]; then
         coreCancelledStatusCard "超限处理未执行"
         return 0
     fi
-    if ! applySubscriptionQuotaPlanTransaction "${quotaPlan}"; then
-        rc=1
+    if subscriptionGroupsWithLock runSubscriptionQuotaMutationAndSyncUnlocked "${quotaPlan}"; then
+        return 0
     fi
-    if [[ "${rc}" -eq 0 ]]; then
-        successCard "超限处理已执行" "已停用超额分享订阅，并移除本机托管账号" "如需同步被控服务器，请再执行同步"
-    else
-        errorCard "超限处理执行失败" "已尽力执行可完成的部分，请检查本机配置后重试"
-    fi
-    return "${rc}"
+    errorCard "超限处理未完成" "请检查同步及回滚结果，修复后重试"
+    return 1
 }
 
 runSubscriptionGroupSyncUnlocked() {
@@ -1253,7 +1276,8 @@ runSubscriptionGroupSyncUnlocked() {
             localSyncWorkRequired=true
         fi
     fi
-    if [[ "${SUBSCRIPTION_SYNC_ROLLBACK:-false}" != "true" ]] && subscriptionGroupQuotaAutoApplyEnabled; then
+    if [[ "${SUBSCRIPTION_SYNC_ROLLBACK:-false}" != "true" && "${SUBSCRIPTION_SYNC_SKIP_QUOTA_AUTO_APPLY:-false}" != "true" ]] &&
+        subscriptionGroupQuotaAutoApplyEnabled; then
         quotaAutoApply=true
     fi
 

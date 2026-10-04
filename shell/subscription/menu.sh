@@ -789,6 +789,7 @@ createAndSyncUserSubscriptionWizard() {
     local id=
     local sourceJson=
     local limit=0
+    local syncResult=0
     createdUserSubscriptionId=
     menuReadChoice user_subscription_id "请输入分享订阅 ID[例 team-a，回车取消]:" id || return 1
     if ! subscriptionStateIdValid "${id}"; then
@@ -826,13 +827,17 @@ createAndSyncUserSubscriptionWizard() {
     statusCard "分享订阅已创建" "订阅 ID：${id}" "服务器范围：$(jq -r 'join("、")' <<<"${sourceJson}")" "订阅额度 GB：${limit}" "正在立即同步；不改变后续自动同步设置"
     SUBSCRIPTION_SYNC_PUBLISHED=false
     if ! runSubscriptionGroupSync; then
+        syncResult=1
         if [[ "${SUBSCRIPTION_SYNC_PUBLISHED:-false}" == "true" ]]; then
             warnCard "订阅已保存，首次同步部分失败但链接已发布" "可在该订阅详情查看已发布链接，无需重新创建"
         else
             warnCard "订阅已保存，但首次同步失败" "可在该订阅详情中重试同步并获取链接，无需重新创建"
         fi
-        return 1
     fi
+    if [[ "${SUBSCRIPTION_SYNC_PUBLISHED:-false}" == "true" ]]; then
+        showPublishedSubscriptionLinks "${createdUserSubscriptionId}" || true
+    fi
+    return "${syncResult}"
 }
 
 selectUserSubscriptionId() {
@@ -1242,17 +1247,22 @@ editUserSubscriptionsMenu() {
 manageUserSubscriptionItem() {
     local userSubscriptionId=${1:-}
     local userSubscriptionItemStatus=
-    local summary line
+    local userJson summary line enabled targetEnabled expectedJson
     if [[ -z "${userSubscriptionId}" ]]; then
         selectUserSubscriptionId || return 0
         userSubscriptionId=${selectedUserSubscriptionId}
     fi
     while true; do
-        summary=$(PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 subscriptionActiveGroupRead -er --arg id "${userSubscriptionId}" '
+        userJson=$(PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 subscriptionActiveGroupRead -ec --arg id "${userSubscriptionId}" '
           first(.user_groups[]? | select(.id == $id)) |
           select(. != null) |
-          "名称：\(.name // .id) / 状态：\(if .enabled then "启用" else "停用" end)\n节点：\(.allowed_sources | join("、")) / 额度：\(if .traffic_limit_gb == 0 then "不限" else "\(.traffic_limit_gb) GB" end)"
+          {id, name, enabled, allowed_sources, traffic_limit_gb}
         ') || { errorCard "当前订阅读取失败或已被删除"; return 1; }
+        summary=$(jq -r '
+          "名称：\(.name // .id) / 状态：\(if .enabled then "启用" else "停用" end)\n节点：\(.allowed_sources | join("、")) / 额度：\(if .traffic_limit_gb == 0 then "不限" else "\(.traffic_limit_gb) GB" end)"
+        ' <<<"${userJson}") || return 1
+        enabled=$(jq -r '.enabled' <<<"${userJson}") || return 1
+        [[ "${enabled}" == "true" ]] && targetEnabled=false || targetEnabled=true
         echoContent title "\n┌─ 管理分享订阅 ─────────────────────────────────────"
         menuLine "当前订阅：${userSubscriptionId}"
         while IFS= read -r line; do menuLine "${line}"; done <<<"${summary}"
@@ -1260,7 +1270,11 @@ manageUserSubscriptionItem() {
         menuItem 2 "查看当前流量" "只读查看累计流量和额度状态"
         menuItem 3 "编辑订阅配置" "名称、节点范围、额度和启停一次保存并同步"
         menuItem 4 "立即同步并更新链接" "同步后查看当前链接，不改变自动同步设置"
-        menuItem 5 "启用/停用当前订阅" "停用后同步会移除对应托管账号"
+        if [[ "${targetEnabled}" == "true" ]]; then
+            menuItem 5 "启用当前订阅" "启用后立即同步，额度超限时会拒绝启用"
+        else
+            menuItem 5 "停用当前订阅" "停用后立即同步并移除对应托管账号"
+        fi
         menuDangerItem 6 "删除订阅" "删除记录；同步后移除对应托管账号"
         menuReturnItem 7 "返回订阅列表" "回到分享订阅"
         menuItem 8 "切换订阅" "选择另一订阅继续管理"
@@ -1273,10 +1287,10 @@ manageUserSubscriptionItem() {
         3) editUserSubscriptionsMenu "[\"${userSubscriptionId}\"]" || true ;;
         4) syncAndShowSubscriptionLinks "${userSubscriptionId}" ;;
         5)
+            expectedJson=$(jq -c '[.]' <<<"${userJson}") || continue
             if subscriptionGroupsWithLock runUserSubscriptionMutationAndSyncUnlocked \
-                "用户订阅状态切换" "用户订阅状态切换失败" \
-                toggleUserSubscriptionState "${userSubscriptionId}"; then
-                local enabled
+                "用户订阅状态更新" "用户订阅状态更新失败" \
+                setUserSubscriptionsFields "[\"${userSubscriptionId}\"]" "{\"enabled\":${targetEnabled}}" "${expectedJson}"; then
                 enabled=$(subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" \
                     'first(.user_groups[]? | select(.id == $id)).enabled') || continue
                 if [[ "${enabled}" == "true" ]]; then

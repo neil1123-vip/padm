@@ -835,7 +835,7 @@ manageTrafficAndQuota() {
         menuLine "自动执行超限处理：${quotaAutoApplyText}"
         menuItem 1 "刷新并显示总览" "采集本机账号流量，写入 groups.json 后显示治理摘要"
         menuItem 2 "流量明细" "按账号、分享订阅或服务器源查看累计流量"
-        menuDangerItem 3 "执行超限处理" "停用超额订阅并移除本机托管账号"
+        menuDangerItem 3 "执行超限处理并同步" "停用超额订阅，更新本机、被控服务器和订阅发布"
         menuItem 4 "开启/关闭自动执行超限处理" "切换同步前的自动限额事务"
         menuReturnItem 5 "返回订阅与用户" "回到上级菜单"
         menuClose

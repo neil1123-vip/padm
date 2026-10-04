@@ -816,7 +816,13 @@ runSubscriptionGroupStateQuotaMenuPreviewFailureRegression() {
         local quotaMenuStatus
         menuLine() { printf 'menu:%s\n' "$*"; }
         collectSubscriptionTraffic() { return 0; }
-        subscriptionSyncApplyAccountPlanTransaction() {
+        subscriptionSyncCreateLocalApplyBackups() { return 0; }
+        subscriptionSyncReleaseLocalApplyBackups() { return 0; }
+        subscriptionSyncRestoreConfigBackups() { return 0; }
+        subscriptionSyncRestoreSubscribeOutputBackups() { return 0; }
+        subscriptionSyncReconcileLocalServices() { return 0; }
+        subscriptionSyncMarkResult() { return 0; }
+        runSubscriptionGroupSync() {
             return 42
         }
         reloadCore() {
@@ -831,6 +837,7 @@ runSubscriptionGroupStateQuotaMenuPreviewFailureRegression() {
         fi
         [[ "${quotaMenuOutput}" == *"待处理订阅：1"* ]]
         [[ "${quotaMenuOutput}" == *"动作：停用超额订阅并移除本机托管账号"* ]]
+        subscriptionActiveGroupRead -e '.user_groups[0].enabled == true' >/dev/null
     )
 }
 
@@ -893,6 +900,21 @@ runSubscriptionGroupStateQuotaTransactionRecheckRegression() (
 
     regressionExpectStatus 0 applySubscriptionQuotaPlanTransaction "${confirmedPlan}"
     [[ ! -e "${mutationMarker}" ]]
+
+    (
+        runUserSubscriptionMutationAndSyncUnlocked() {
+            : >"${mutationMarker}"
+            return 1
+        }
+        subscriptionActiveGroupWrite() {
+            : >"${mutationMarker}"
+            return 1
+        }
+        regressionExpectStatus 0 \
+            subscriptionGroupsWithLock runSubscriptionQuotaMutationAndSyncUnlocked "${confirmedPlan}"
+        [[ ! -e "${mutationMarker}" ]]
+        [[ "${SUBSCRIPTION_SYNC_SKIP_QUOTA_AUTO_APPLY:-false}" != "true" ]]
+    )
 )
 
 runSubscriptionGroupStateQuotaPartialSyncApplyFailureRegression() {
@@ -2410,6 +2432,91 @@ JSON
           .traffic.sources.main.upload == 350
         ' >/dev/null
     )
+
+    local quotaAutoMode
+    for quotaAutoMode in false true; do
+        (
+            local quotaRoot="${syncRoot}/manual-quota-${quotaAutoMode}"
+            local quotaState
+            local counter=100
+            local callLog="${quotaRoot}/calls.log"
+            local resultStatus="${quotaRoot}/mark-status.log"
+            local resultFailures="${quotaRoot}/mark-failures.log"
+            local statusLog="${quotaRoot}/status.log"
+            quotaState=$(subscriptionGroupsStateRead -c '.')
+            prepareSubscriptionGroupSyncFixture "${quotaRoot}" <<<"${quotaState}"
+            addUserSubscriptionState team-b "Team B" '["main"]' 0
+            addUserSubscriptionState team-c "Team C" '["main"]' 0
+            subscriptionActiveGroupWrite --argjson quotaAutoMode "${quotaAutoMode}" '
+              .sync.enabled = false |
+              .sync.quota_auto_apply = $quotaAutoMode |
+              (.user_groups[] | select(.id == "team-a")).traffic_limit_gb = 1 |
+              (.user_groups[] | select(.id == "team-b")).uuid = "22222222-2222-4222-8222-222222222222" |
+              (.user_groups[] | select(.id == "team-c")).uuid = "33333333-3333-4333-8333-333333333333" |
+              .traffic.user_groups["team-a"].sources.main = {upload:1073741824, download:0}
+            '
+            printf '%s\n' '{"inbounds":[{"settings":{"clients":[{"id":"11111111-1111-1111-1111-111111111111","email":"sub_team_a-VLESS_TCP/TLS_Vision"},{"id":"22222222-2222-4222-8222-222222222222","email":"sub_team_b-VLESS_TCP/TLS_Vision"},{"id":"33333333-3333-4333-8333-333333333333","email":"sub_team_c-VLESS_TCP/TLS_Vision"}]}}]}' >"${configPath}02_VLESS_TCP_inbounds.json"
+            coreInstallType=1
+            protocolCapabilityRegistry() {
+                printf '%s\n' '1|VLESS|node|x|both|xray|x|x|x|x|x|x|x|x|x|x|x|x|02_VLESS_TCP_inbounds.json'
+            }
+            subscriptionGroupQuotaAutoApplyEnabled() {
+                subscriptionActiveGroupRead -e '.sync.quota_auto_apply == true' >/dev/null
+            }
+            collectSubscriptionTraffic() {
+                local accounts snapshot
+                printf 'traffic\n' >>"${callLog}"
+                accounts=$(subscriptionSyncCurrentManagedUsers) || return 1
+                snapshot=$(jq -cn --argjson accounts "${accounts}" --argjson counter "${counter}" '
+                  {ok:true,items:($accounts | map({
+                    account:.,upload:$counter,download:0,
+                    cores:{xray:{upload:$counter,download:0}}
+                  }))}
+                ') || return 1
+                writeSubscriptionTrafficSnapshot "${snapshot}"
+            }
+            applySubscriptionQuotaPlanAccounts() { return 99; }
+            ensureSingBoxTrafficStatsConfig() { printf 'stats\n' >>"${callLog}"; }
+            reloadCore() {
+                [[ "${SUBSCRIPTION_GROUPS_LOCK_HELD:-}" == "1" ]]
+                [[ "${SUBSCRIPTION_SYNC_SKIP_QUOTA_AUTO_APPLY:-false}" == "true" ]]
+                jq -e '[.inbounds[0].settings.clients[].email] == ["sub_team_b-VLESS_TCP/TLS_Vision","sub_team_c-VLESS_TCP/TLS_Vision"]' \
+                    "${configPath}02_VLESS_TCP_inbounds.json" >/dev/null
+                printf 'reload\n' >>"${callLog}"
+                counter=0
+            }
+            subscriptionCurrentRoleNormalized() { printf 'main\n'; }
+            readNginxSubscribe() { subscribePort=; }
+            autoRead() {
+                subscriptionActiveGroupWrite '
+                  (.user_groups[] | select(.id == "team-c")).traffic_limit_gb = 1 |
+                  .traffic.user_groups["team-c"].sources.main.upload += 1073741824
+                ' || return 1
+                printf -v "$3" '%s' yes
+            }
+
+            collectSubscriptionTraffic
+            : >"${callLog}"
+            executeSubscriptionQuotaPlanMenu
+            [[ "$(<"${callLog}")" == $'traffic\ntraffic\nstats\nreload\ntraffic' ]]
+            subscriptionActiveGroupRead -e --argjson quotaAutoMode "${quotaAutoMode}" '
+              .sync.enabled == false and .sync.quota_auto_apply == $quotaAutoMode and
+              ([.user_groups[] | {id,enabled}] == [
+                {id:"team-a",enabled:false},{id:"team-b",enabled:true},{id:"team-c",enabled:true}
+              ]) and
+              .traffic.user_groups["team-b"].sources.main.upload == 100 and
+              .traffic.user_groups["team-b"].sources.main.counters.sub_team_b.xray.upload == 0 and
+              .traffic.sources.main.counters.sub_team_b.xray.upload == 0
+            ' >/dev/null
+            [[ "${SUBSCRIPTION_SYNC_SKIP_QUOTA_AUTO_APPLY:-false}" != "true" ]]
+            counter=150
+            collectSubscriptionTraffic
+            subscriptionActiveGroupRead -e '
+              .traffic.user_groups["team-b"].sources.main.upload == 250 and
+              .traffic.sources.main.upload == 600
+            ' >/dev/null
+        )
+    done
 
     subscriptionSyncPlan() {
         if [[ "${planMode}" == "changed" ]]; then
