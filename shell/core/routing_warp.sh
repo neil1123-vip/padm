@@ -256,7 +256,8 @@ warpRoutingReg() {
     menuDangerItem 4 "卸载 WARP 分流" "移除 WARP ${type} 分流配置"
     menuReturnItem 5 "返回 WARP 出站" "回到 WARP 出站菜单"
     menuClose
-    autoRead warp_ipv4_menu "请选择:" warpStatus || return 0
+    warpStatus=
+    menuReadChoice warp_ipv4_menu "请选择:" warpStatus || return 0
 
     if [[ "${warpStatus}" == "1" ]]; then
         showWireGuardDomain "${type}"
@@ -315,7 +316,7 @@ warpRoutingMenu() {
         menuReturnItem 3 "返回分流工具" "回到上一级分流菜单"
         menuClose
         warpRoutingType=
-        autoRead warp_routing_type_menu "请选择:" warpRoutingType || return 0
+        menuReadChoice warp_routing_type_menu "请选择:" warpRoutingType || return 0
 
         case "${warpRoutingType}" in
         1) warpRoutingReg 1 IPv4 || true; continue ;;

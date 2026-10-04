@@ -1228,6 +1228,27 @@ autoRead() {
     read -r -p "${prompt}" "${resultVar}"
 }
 
+menuReadChoice() {
+    local key=$1
+    local prompt=$2
+    local resultVar=$3
+    local allowEmpty=${4:-false}
+    local readStatus
+
+    [[ -n "${resultVar}" ]] || return 2
+    printf -v "${resultVar}" '%s' ""
+    autoRead "${key}" "${prompt}" "${resultVar}"
+    readStatus=$?
+    if [[ "${readStatus}" -ne 0 ]]; then
+        printf -v "${resultVar}" '%s' ""
+        return "${readStatus}"
+    fi
+    if [[ -z "${!resultVar}" && "${allowEmpty}" != "true" ]]; then
+        return 1
+    fi
+    return 0
+}
+
 argumentHasValue() {
     [[ $# -ge 2 && -n "${2}" && "${2}" != -* ]]
 }

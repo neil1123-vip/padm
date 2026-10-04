@@ -996,7 +996,7 @@ selectRealityAsnSampleSize() {
     menuItem 6 "全量扫描 高风险" "扫描全部公告前缀，可能数量很大"
     menuReturnItem 7 "返回" "回到 REALITY 目标站管理"
     menuClose
-    autoRead reality_asn_sample_size "请选择抽样规模[默认2]:" selected
+    menuReadChoice reality_asn_sample_size "请选择抽样规模[默认2]:" selected true || return 1
     case "${selected:-2}" in
     1) selectedRealityAsnSampleSize=300 ;;
     2) selectedRealityAsnSampleSize=1000 ;;
@@ -1740,7 +1740,7 @@ selectRealityTargetCandidateInteractive() {
         (( page > maxPage )) && page=${maxPage}
         (( page < 1 )) && page=1
         showRealityTargetCandidatePage "${filter}" "${page}" "${pageSize}"
-        autoRead reality_target_candidate "请选择候选编号或操作:" choice
+        menuReadChoice reality_target_candidate "请选择候选编号或操作:" choice || return 1
         case "${choice}" in
         n | N)
             (( page < maxPage )) && page=$((page + 1))
@@ -2304,7 +2304,7 @@ selectRealityScannerRange() {
     menuItem 8 "扩大 /18（16382 台）" "${range18:-无法自动计算，需手动输入}"
     menuItem 9 "手动输入" "输入自定义 IP/CIDR、IP、域名或 RealiTLScanner 支持的 addr"
     menuClose
-    autoRead reality_scanner_range_menu "请选择扫描范围[默认1]:" selectRange
+    menuReadChoice reality_scanner_range_menu "请选择扫描范围[默认1]:" selectRange true || return 1
     case "${selectRange:-1}" in
     1)
         selectedRealityScannerRange=${range24}
@@ -2704,7 +2704,7 @@ showRealityTargetQualityActions() {
     menuItem 2 "加入目标站黑名单" "后续不参与目标库刷新和扫描导入"
     menuReturnItem 3 "返回" "回到 REALITY 目标站管理"
     menuClose
-    autoRead reality_target_quality_action "请选择后续操作[默认3=返回]:" action
+    menuReadChoice reality_target_quality_action "请选择后续操作[默认3=返回]:" action true || return 0
     case "${action:-3}" in
     1)
         if selectRealityTargetFromScanResults; then
@@ -2782,7 +2782,7 @@ selectRealityTargetScanResultFilter() {
         menuReturnItem 6 "返回" "回到 REALITY 目标站管理"
         menuClose
     } >&2
-    autoRead reality_target_result_filter "请选择筛选条件[默认1=全部]：" selected
+    menuReadChoice reality_target_result_filter "请选择筛选条件[默认1=全部]：" selected true || return 1
     case "${selected:-1}" in
     1) printf 'all\n' ;;
     2) printf 'same_asn\n' ;;
@@ -2843,7 +2843,7 @@ showRealityTargetScanResults() {
         if [[ "${mode}" == "once" ]]; then
             return 0
         fi
-        autoRead reality_target_result_page "请选择本页编号切换，n/p/f/r，回车返回:" choice
+        menuReadChoice reality_target_result_page "请选择本页编号切换，n/p/f/r，回车返回:" choice || return 0
         case "${choice}" in
         n|N)
             (( page < maxPage )) && page=$((page + 1))

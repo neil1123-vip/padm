@@ -552,7 +552,10 @@ configureRealityStreamSplitApply() {
         menuRecommendedItem 1 "Reality Vision" "公网 443 默认转发到 Vision"
         menuRecommendedItem 2 "Reality XHTTP" "公网 443 默认转发到 XHTTP"
         menuClose
-        autoRead reality_stream_default_protocol "请选择:" selectDefaultRealityProtocol
+        menuReadChoice reality_stream_default_protocol "请选择[默认 Vision]:" selectDefaultRealityProtocol true || {
+            removeRealityStreamBackup "${backupDir}"
+            return 1
+        }
         if [[ "${selectDefaultRealityProtocol}" == "2" ]]; then
             defaultProtocol=xhttp
         else

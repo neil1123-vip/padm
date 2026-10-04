@@ -1831,6 +1831,13 @@ EOF
     fi
 
     if menuSmokePartSelected subscription-main-entry; then
+        (
+            configPath=
+            resetMenuActions
+            manageSubscription
+            [[ "$?" == "0" ]]
+            assertMenuAction 'errorCard:未安装'
+        )
         configPath="${TMP_DIR}/menu-smoke-xray/"
         coreInstallType=1
         ensureSubscriptionGroupsState
@@ -1849,24 +1856,28 @@ EOF
         )
         (
             local sourceReadLog="${TMP_DIR}/user-source-menu-read.log"
-            local prompt= mutationSources=
+            local observedPrompt= mutationSources=
             subscriptionActiveGroupRead() {
                 printf 'read\n' >>"${sourceReadLog}"
-                printf '%s\n' '[{"id":"main","name":"本机","role":"main","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}]'
+                if [[ "${*: -1}" == ".sources" ]]; then
+                    printf '%s\n' '[{"id":"edge-a","name":"边缘 A","enabled":true}]'
+                else
+                    printf '%s\n' '["edge-a"]'
+                fi
             }
             subscriptionGroupsWithLock() {
                 mutationSources=${!#}
                 return 0
             }
             autoRead() {
-                prompt=$2
+                observedPrompt=$2
                 printf -v "$3" '%s' ''
             }
             : >"${sourceReadLog}"
             originalSetUserSubscriptionSourcesMenu demo-user
-            [[ "$(wc -l <"${sourceReadLog}")" == "1" ]]
-            [[ "${mutationSources}" == '["main"]' ]]
-            [[ "${prompt}" == *'回车默认 main'* ]]
+            [[ "$(wc -l <"${sourceReadLog}")" == "2" ]]
+            [[ -z "${mutationSources}" ]]
+            [[ "${observedPrompt}" == *'回车保留当前范围'* ]]
         )
         (
             local sourceReadLog="${TMP_DIR}/source-toggle-menu-read.log"
@@ -2010,11 +2021,11 @@ invite-credential"
         output=
         manageSubscriptionMainHome <<<"1
 2
-3
+
 4
 4"
         grep -q "新建分享订阅" <<<"${output}"
-        grep -q "管理分享订阅" <<<"${output}"
+        grep -q "暂无分享订阅" <<<"${output}"
         resetMenuActions
     fi
 
@@ -2026,8 +2037,7 @@ invite-credential"
         resetMenuActions
         manageSubscriptionMainHome <<<"1
 2
-2
-3
+
 4
 4" || true
         subscriptionGroupsStateRead -e '((.user_groups // []) | length) == 0' >/dev/null
@@ -2041,11 +2051,12 @@ invite-credential"
         resetMenuActions
         manageSubscriptionMainHome <<<"1
 2
-1
++
 demo-user
 main
 0
-3
+7
+
 4
 4"
         subscriptionGroupsStateRead -e 'any(.user_groups[]?; .id == "demo-user" and .name == "demo-user")' >/dev/null
@@ -2069,11 +2080,12 @@ main
         if [[ "${menuSmokePart}" == "subscription-main-publish-user-inspect" ]]; then
             manageSubscriptionMainHome <<<"1
 2
-1
++
 demo-user
 main
 0
-3
+7
+
 4
 4"
         fi
@@ -2081,16 +2093,15 @@ main
         output=
         manageSubscriptionMainHome <<<"1
 2
-2
 demo-user
 2
 4
 2
 7
-3
+
 4
 4"
-        grep -q "管理分享订阅" <<<"${output}"
+        grep -q "同步并获取当前链接" <<<"${output}"
         grep -q "查看当前流量" <<<"${output}"
         subscriptionGroupsStateRead -e 'any(.user_groups[]?; .id == "demo-user" and .traffic_limit_gb == 2)' >/dev/null
         if assertMenuAction 'runSubscriptionGroupSync:'; then
@@ -2109,21 +2120,18 @@ demo-user
         subscriptionGroupsStateWrite '.sync.enabled = false'
         manageSubscriptionMainHome <<<"1
 2
-1
++
 team-a
 *
 0
-n
-3
+7
+
 4
 4"
         subscriptionGroupsStateRead -e 'any(.user_groups[]?; .id == "team-a" and .name == "team-a")' >/dev/null
         subscriptionGroupsStateRead -e '.sync.enabled == false' >/dev/null
-        if assertMenuAction 'runSubscriptionGroupSync:'; then
-            printf 'menu-smoke failed: disabled auto sync still ran a full sync\n' >&2
-            return 1
-        fi
-        assertMenuAction 'statusCard:订阅变更已保存'
+        assertMenuAction 'runSubscriptionGroupSync:'
+        ! assertMenuAction refreshSubscriptionGroupSyncCron
     fi
 
     if menuSmokePartSelected subscription-main-publish-sync || menuSmokePartSelected subscription-main-publish-sync-enable; then
@@ -2134,18 +2142,18 @@ n
         resetMenuActions
         rm -rf "${PADM_SUBSCRIPTION_GROUPS_DIR}"
         ensureSubscriptionGroupsState
-        subscriptionGroupsStateWrite '.sync.enabled = false'
+        subscriptionGroupsStateWrite '.sync.enabled = true'
         manageSubscriptionMainHome <<<"1
 2
-1
++
 team-b
 main
 0
+7
 
-3
 4
 4"
-        assertMenuAction refreshSubscriptionGroupSyncCron
+        ! assertMenuAction refreshSubscriptionGroupSyncCron
         assertMenuAction 'runSubscriptionGroupSync:'
         subscriptionGroupsStateRead -e '.sync.enabled == true' >/dev/null
     fi

@@ -113,6 +113,53 @@ runAutoReadUnsetAutoInstallRegression() (
     [[ "${value}" == "manual-value" ]]
 )
 
+runMenuReadChoiceRegression() (
+    local value=previous
+    set +e
+    menuReadChoice regression_menu_eof "请选择:" value </dev/null
+    local readStatus=$?
+    set -e
+    [[ "${readStatus}" -ne 0 ]]
+    [[ -z "${value}" ]]
+
+    value=previous
+    set +e
+    menuReadChoice regression_menu_empty "请选择:" value < <(printf '\n')
+    readStatus=$?
+    set -e
+    [[ "${readStatus}" -ne 0 ]]
+    [[ -z "${value}" ]]
+
+    value=previous
+    menuReadChoice regression_menu_allow_empty "请选择:" value true < <(printf '\n')
+    [[ -z "${value}" ]]
+
+    AUTO_INSTALL=true
+    AUTO_INSTALL_TYPE=reality
+    AUTO_INSTALL_SUMMARY_SHOWN=
+    value=previous
+    menuReadChoice install_type "请选择:" value </dev/null
+    [[ "${value}" == "3" ]]
+    unset AUTO_INSTALL AUTO_INSTALL_TYPE AUTO_INSTALL_SUMMARY_SHOWN
+
+    (
+        tuicAlgorithm=
+        lastInstallationConfig=
+        initTuicProtocol <<<""
+        [[ "${tuicAlgorithm}" == "cubic" ]]
+        tuicAlgorithm=
+        regressionExpectStatus 1 initTuicProtocol </dev/null
+        [[ -z "${tuicAlgorithm}" ]]
+    )
+    (
+        realityEntryHost=entry.example.com
+        realityTargetHost=
+        AUTO_REALITY_TARGET=
+        regressionExpectStatus 1 collectRealityProfile </dev/null
+        [[ -z "${realityTargetHost}" ]]
+    )
+)
+
 runRuntimeAndRealityRegression() {
     local oldCurrentClients="${currentClients:-}"
     local xhttpClients

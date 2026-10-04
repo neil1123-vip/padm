@@ -431,7 +431,7 @@ manageVlessEncryptionExperiment() {
         menuReturnItem 3 "返回主菜单" "回到 padm 管理面板"
         echoContent title "└──────────────────────────────────────────────────"
         selectVlessEncryptionMenu=
-        autoRead vless_encryption_menu "请选择:" selectVlessEncryptionMenu || return 0
+        menuReadChoice vless_encryption_menu "请选择:" selectVlessEncryptionMenu || return 0
         case "${selectVlessEncryptionMenu}" in
         1)
             warnCard \
@@ -787,7 +787,7 @@ manageTraditionalTlsFallback() {
         menuReturnItem 7 "返回站点与证书" "回到上级菜单"
         menuClose
         selectTraditionalTlsMenu=
-        autoRead traditional_tls_menu "请选择:" selectTraditionalTlsMenu || return 0
+        menuReadChoice traditional_tls_menu "请选择:" selectTraditionalTlsMenu || return 0
 
         case "${selectTraditionalTlsMenu}" in
         1) ensureTraditionalTlsFallbackNginxConfig || true ;;
@@ -867,7 +867,7 @@ manageTraditionalTlsStaticSite() {
         menuReturnItem 21 "返回" "回到传统 TLS fallback 维护"
         menuClose
         selectInstallNginxBlogType=
-        autoRead nginx_blog_menu "请选择:" selectInstallNginxBlogType || return 0
+        menuReadChoice nginx_blog_menu "请选择:" selectInstallNginxBlogType || return 0
 
         if [[ "${selectInstallNginxBlogType}" =~ ^([1-9]|1[0-9]|20)$ ]]; then
             installNginxStaticTemplate "${selectInstallNginxBlogType}" || true
@@ -891,7 +891,7 @@ manageTraditionalTlsRedirect() {
         menuReturnItem 3 "返回" "回到传统 TLS fallback 维护"
         menuClose
         redirectStatus=
-        autoRead nginx_redirect_menu "请选择:" redirectStatus || return 0
+        menuReadChoice nginx_redirect_menu "请选择:" redirectStatus || return 0
 
         if [[ "${redirectStatus}" == "1" ]]; then
             if ! ensureTraditionalTlsFallbackNginxConfig; then
@@ -1057,7 +1057,7 @@ setTraditionalTlsAlpnManual() {
         menuReturnItem 4 "返回" "回到传统 TLS fallback 维护"
         menuClose
         selectAlpnManual=
-        autoRead traditional_tls_alpn_manual "请选择:" selectAlpnManual || return 0
+        menuReadChoice traditional_tls_alpn_manual "请选择:" selectAlpnManual || return 0
         case "${selectAlpnManual}" in
         1) applyTraditionalTlsAlpn '["h2","http/1.1"]' || true ;;
         2) applyTraditionalTlsAlpn '["http/1.1","h2"]' || true ;;
@@ -1357,7 +1357,7 @@ addCorePort() {
         menuReturnItem 4 "返回协议与入口" "回到上级菜单"
         menuClose
         selectNewPortType=
-        autoRead core_port_menu "请选择:" selectNewPortType || return 0
+        menuReadChoice core_port_menu "请选择:" selectNewPortType || return 0
         case "${selectNewPortType}" in
         1)
             corePortListExtra || true
@@ -1659,8 +1659,7 @@ unInstall() {
     autoRead uninstall_confirm "是否确认卸载安装内容？[y/n]:" unInstallStatus
     if [[ "${unInstallStatus}" != "y" ]]; then
         successCard "放弃卸载"
-        menu
-        exit 0
+        return 0
     fi
     local nginxWasRunning=false
     local uninstallStatus=0
@@ -1952,7 +1951,7 @@ manageCDN() {
         menuReturnItem 4 "返回协议与入口" "回到上级菜单"
         menuClose
         selectCDNType=
-        autoRead cdn_menu "请选择:" selectCDNType || return 0
+        menuReadChoice cdn_menu "请选择:" selectCDNType || return 0
 
         case "${selectCDNType}" in
         1)
@@ -2954,7 +2953,8 @@ manageRealityTarget() {
     menuItem 9 "复测全部候选" "复测全部内置/托管候选并更新目标库，耗时较长"
     menuReturnItem 10 "返回" "回到 REALITY 管理"
     menuClose
-    autoRead reality_target_manage_menu "请选择：" selectTargetMenu
+    selectTargetMenu=
+    menuReadChoice reality_target_manage_menu "请选择：" selectTargetMenu || return 0
     case "${selectTargetMenu}" in
     1)
         if [[ "${currentTarget}" != "未读取到" ]]; then
@@ -3046,7 +3046,7 @@ manageReality() {
         menuLine "分流时只填写真实网站域名，其他 SNI 默认转给 Reality"
         menuClose
         selectRealityManageType=
-        autoRead reality_manage_menu "请选择:" selectRealityManageType || return 0
+        menuReadChoice reality_manage_menu "请选择:" selectRealityManageType || return 0
 
         case "${selectRealityManageType}" in
         1) regenerateRealityProfile || true ;;
@@ -3419,7 +3419,7 @@ manageXHTTPPresets() {
         menuReturnItem 5 "返回" "回到 XHTTP 管理"
         menuClose
         selectXHTTPPreset=
-        autoRead xhttp_preset_menu "请选择:" selectXHTTPPreset || return 0
+        menuReadChoice xhttp_preset_menu "请选择:" selectXHTTPPreset || return 0
         case "${selectXHTTPPreset}" in
         1) setXHTTPPreset daily || true ;;
         2) setXHTTPPreset compatible || true ;;
@@ -3441,7 +3441,7 @@ manageXHTTPMode() {
         menuReturnItem 4 "返回" "回到 XHTTP 管理"
         menuClose
         selectXHTTPMode=
-        autoRead xhttp_mode_menu "请选择:" selectXHTTPMode || return 0
+        menuReadChoice xhttp_mode_menu "请选择:" selectXHTTPMode || return 0
         case "${selectXHTTPMode}" in
         1) setXHTTPMode auto || true ;;
         2) setXHTTPMode packet-up || true ;;
@@ -3462,7 +3462,7 @@ manageXHTTPXmux() {
         menuReturnItem 4 "返回" "回到 XHTTP 管理"
         menuClose
         selectXHTTPXmux=
-        autoRead xhttp_xmux_menu "请选择:" selectXHTTPXmux || return 0
+        menuReadChoice xhttp_xmux_menu "请选择:" selectXHTTPXmux || return 0
         case "${selectXHTTPXmux}" in
         1) setXHTTPPreset daily || true ;;
         2) setXHTTPPreset single || true ;;
@@ -3485,7 +3485,7 @@ manageXHTTPNormal() {
         menuReturnItem 5 "返回 XHTTP 管理" "回到上级菜单"
         menuClose
         selectXHTTPNormal=
-        autoRead xhttp_normal_menu "请选择:" selectXHTTPNormal || return 0
+        menuReadChoice xhttp_normal_menu "请选择:" selectXHTTPNormal || return 0
         case "${selectXHTTPNormal}" in
         1) xhttpSettingsSummary || true ;;
         2) manageXHTTPPresets || true ;;
@@ -3509,7 +3509,7 @@ manageXHTTPAdvanced() {
         menuReturnItem 5 "返回 XHTTP 管理" "回到上级菜单"
         menuClose
         selectXHTTPAdvanced=
-        autoRead xhttp_advanced_menu "请选择:" selectXHTTPAdvanced || return 0
+        menuReadChoice xhttp_advanced_menu "请选择:" selectXHTTPAdvanced || return 0
         case "${selectXHTTPAdvanced}" in
         1) manageXHTTPXmux || true ;;
         2) setXHTTPPathHost || true ;;
@@ -3531,7 +3531,7 @@ manageXHTTPExperiment() {
         menuReturnItem 3 "返回 XHTTP 管理" "回到上级菜单"
         menuClose
         selectXHTTPExperiment=
-        autoRead xhttp_experiment_menu "请选择:" selectXHTTPExperiment || return 0
+        menuReadChoice xhttp_experiment_menu "请选择:" selectXHTTPExperiment || return 0
         case "${selectXHTTPExperiment}" in
         1) setXHTTPDownloadSettings || true ;;
         2) disableXHTTPDownloadSettings || true ;;
@@ -3572,7 +3572,7 @@ manageXHTTP() {
         menuReturnItem 5 "返回协议与入口" "回到上级菜单"
         menuClose
         selectXHTTPManageType=
-        autoRead xhttp_manage_menu "请选择:" selectXHTTPManageType || return 0
+        menuReadChoice xhttp_manage_menu "请选择:" selectXHTTPManageType || return 0
 
         case "${selectXHTTPManageType}" in
         1) manageXHTTPNormal || true ;;
@@ -3696,7 +3696,7 @@ manageHysteria2Bandwidth() {
         menuReturnItem 3 "返回" "回到 Hysteria2 管理"
         menuClose
         selectMode=
-        autoRead hysteria_bandwidth_manage_menu "请选择:" selectMode || return 0
+        menuReadChoice hysteria_bandwidth_manage_menu "请选择:" selectMode || return 0
         case "${selectMode}" in
         1) setHysteria2BandwidthMode brutal || true ;;
         2) setHysteria2BandwidthMode bbr || true ;;
@@ -3731,7 +3731,7 @@ manageHysteria() {
 
         menuClose
         installHysteria2Status=
-        autoRead hysteria_menu "请选择:" installHysteria2Status || return 0
+        menuReadChoice hysteria_menu "请选择:" installHysteria2Status || return 0
         if [[ "${installHysteria2Status}" == "1" ]]; then
             singBoxHysteria2Install || true
         elif [[ "${installHysteria2Status}" == "2" && "${hysteria2Status}" == "true" ]]; then
@@ -3869,7 +3869,7 @@ manageTuicCongestionControl() {
         menuReturnItem 4 "返回" "回到 Tuic 管理"
         menuClose
         selectTuicCongestion=
-        autoRead tuic_congestion_menu "请选择:" selectTuicCongestion || return 0
+        menuReadChoice tuic_congestion_menu "请选择:" selectTuicCongestion || return 0
         case "${selectTuicCongestion}" in
         1) setTuicCongestionControl cubic || true ;;
         2) setTuicCongestionControl bbr || true ;;
@@ -3892,7 +3892,7 @@ manageTuicAdvanced() {
         menuReturnItem 5 "返回 Tuic 管理" "回到上级菜单"
         menuClose
         selectTuicAdvanced=
-        autoRead tuic_advanced_menu "请选择:" selectTuicAdvanced || return 0
+        menuReadChoice tuic_advanced_menu "请选择:" selectTuicAdvanced || return 0
         case "${selectTuicAdvanced}" in
         1) setTuicConnectionParams || true ;;
         2) setTuicZeroRtt true || true ;;
@@ -3929,7 +3929,7 @@ manageTuic() {
 
         menuClose
         installTuicStatus=
-        autoRead tuic_menu "请选择:" installTuicStatus || return 0
+        menuReadChoice tuic_menu "请选择:" installTuicStatus || return 0
         if [[ "${installTuicStatus}" == "1" ]]; then
             singBoxTuicInstall || true
         elif [[ "${installTuicStatus}" == "2" && "${tuicStatus}" == "true" ]]; then

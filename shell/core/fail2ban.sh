@@ -905,7 +905,7 @@ manageFail2ban() {
         menuReturnItem 9 "返回系统与脚本" "回到上级菜单"
         menuClose
         selectFail2banMenuType=
-        autoRead fail2ban_menu "请选择:" selectFail2banMenuType || return 0
+        menuReadChoice fail2ban_menu "请选择:" selectFail2banMenuType || return 0
         case "${selectFail2banMenuType}" in
         1) showFail2banRuntimeStatus || true ;;
         2) fail2banApplyProfile "$(fail2banRecommendedProfileName)" || true ;;

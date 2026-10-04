@@ -17,7 +17,7 @@ routingToolsMenu() {
         menuClose
 
         selectType=
-        autoRead routing_tools_menu "请选择:" selectType || return 0
+        menuReadChoice routing_tools_menu "请选择:" selectType || return 0
         case "${selectType}" in
         1) warpRoutingMenu || true; continue ;;
         2) ipv6Routing 1 || true; continue ;;

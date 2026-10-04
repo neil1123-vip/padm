@@ -806,7 +806,7 @@ manageTrafficDetails() {
         menuItem 4 "服务器流量" "全部账号按服务器统计"
         menuReturnItem 5 "返回流量与限额" "回到上级菜单"
         menuClose
-        autoRead traffic_details_menu "请选择:" trafficDetailsStatus || return 0
+        menuReadChoice traffic_details_menu "请选择:" trafficDetailsStatus || return 0
         case "${trafficDetailsStatus}" in
         1) showAdminSubscriptionTraffic ;;
         2) showUserSubscriptions ;;
@@ -835,7 +835,7 @@ manageTrafficAndQuota() {
         menuItem 4 "开启/关闭自动执行超限处理" "切换同步前的自动限额事务"
         menuReturnItem 5 "返回订阅与用户" "回到上级菜单"
         menuClose
-        autoRead traffic_quota_menu "请选择:" trafficQuotaStatus || return 0
+        menuReadChoice traffic_quota_menu "请选择:" trafficQuotaStatus || return 0
         case "${trafficQuotaStatus}" in
         1) collectSubscriptionTraffic && showSubscriptionTrafficOverview ;;
         2) manageTrafficDetails ;;
@@ -854,15 +854,8 @@ manageTrafficAndQuota() {
 }
 
 selectUserSubscriptionTrafficMenu() {
-    local userSubscriptionId=
-    showUserSubscriptions || return 1
-    autoRead user_subscription_traffic_id "请输入用户订阅 ID:" userSubscriptionId
-    if [[ -z "${userSubscriptionId}" ]] ||
-        ! PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 userSubscriptionExists "${userSubscriptionId}"; then
-        errorCard "用户订阅 ID 无效"
-        return 1
-    fi
-    showUserSubscriptionTraffic "${userSubscriptionId}"
+    selectUserSubscriptionId || return 1
+    showUserSubscriptionTraffic "${selectedUserSubscriptionId}"
 }
 
 showSubscriptionSourcesTraffic() {

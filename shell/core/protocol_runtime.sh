@@ -575,7 +575,7 @@ portHoppingMenu() {
         menuItem 3 "查看端口跳跃" "显示当前端口跳跃范围"
         menuClose
         selectPortHoppingStatus=
-        autoRead port_hopping_menu "请选择:" selectPortHoppingStatus || return 0
+        menuReadChoice port_hopping_menu "请选择:" selectPortHoppingStatus || return 0
         case "${selectPortHoppingStatus}" in
         1)
             addPortHopping "${type}" "${targetPort}" || return 1
@@ -656,7 +656,8 @@ initTuicProtocol() {
         menuItem 2 "bbr" "高带宽或长距离链路可尝试"
         menuItem 3 "new_reno" "兼容保守拥塞控制"
         menuClose
-        autoRead tuic_algorithm_menu "请选择:" selectTuicAlgorithm
+        selectTuicAlgorithm=
+        menuReadChoice tuic_algorithm_menu "请选择[默认 cubic]:" selectTuicAlgorithm true || return 1
         case ${selectTuicAlgorithm} in
         2)
             tuicAlgorithm="bbr"
@@ -872,7 +873,8 @@ collectRealityProfile() {
         menuItem 2 "候选列表" "先检测全部候选，再从通过检测的结果中选择"
         menuItem 3 "手动输入" "输入 host 或 host:port，端口默认 443"
         menuClose
-        autoRead reality_target_mode "请选择[默认1]:" selectRealityTargetMode
+        selectRealityTargetMode=
+        menuReadChoice reality_target_mode "请选择[默认1]:" selectRealityTargetMode true || return 1
         selectRealityTargetMode=${selectRealityTargetMode:-1}
 
         case "${selectRealityTargetMode}" in

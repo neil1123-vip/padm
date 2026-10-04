@@ -574,7 +574,7 @@ runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
         [[ "${trafficOutput}" == *"remote-edge：上传 1 MB / 下载 0 B"* ]]
         [[ "${trafficOutput}" != *'"upload"'* ]]
         trafficOutput=$(showUserSubscriptions)
-        [[ "${trafficOutput}" == *"订阅：Team A（team-a）"* ]]
+        [[ "${trafficOutput}" == *"订阅 1：Team A（team-a）"* ]]
         [[ "${trafficOutput}" == *"状态：已启用 / 额度：1 GB / 限额：已超限(100%)"* ]]
         [[ "${trafficOutput}" == *"服务器：全部"* ]]
         [[ "${trafficOutput}" != *"状态：true"* ]]
@@ -649,7 +649,6 @@ runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
         trafficOutput=$(showSubscriptionTrafficOverview || true)
         trafficOutput=$(showSubscriptionSourcesTraffic || true)
         trafficOutput=$(showUserSubscriptions || true)
-        showUserSubscriptions() { :; }
         trafficOutput=$(selectUserSubscriptionTrafficMenu || true)
         subscriptionCurrentRoleNormalized() { printf '%s\n' main; }
         trafficOutput=$(subscriptionGroupsStateSummaryJson || true)
@@ -657,6 +656,17 @@ runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
         trafficOutput=$(showSubscriptionSourceControlUrls || true)
         [[ "$(wc -l <"${lockTimeoutLog}")" == "9" ]]
         ! grep -vq '^0$' "${lockTimeoutLog}"
+    )
+    (
+        local trafficOutput
+        selectUserSubscriptionId() {
+            selectedUserSubscriptionId=team-a
+        }
+        showUserSubscriptions() { return 99; }
+        autoRead() { return 99; }
+        showUserSubscriptionTraffic() { printf 'traffic:%s\n' "$1"; }
+        trafficOutput=$(selectUserSubscriptionTrafficMenu)
+        [[ "${trafficOutput}" == "traffic:team-a" ]]
     )
     subscriptionQuotaDryRunPlan | jq -e 'length == 1 and .[0].id == "team-a" and .[0].limit_gb == 1 and .[0].percent >= 100 and .[0].action == "disable-and-remove-local-account"' >/dev/null
 }

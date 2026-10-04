@@ -81,7 +81,7 @@ selectSubscriptionGroupsBackupFile() {
         menuLine "$((index + 1)). ${backups[${index}]}"
     done
     menuClose
-    autoRead subscription_backup_choice "请输入备份编号或完整路径:" backupChoice
+    menuReadChoice subscription_backup_choice "请输入备份编号或完整路径:" backupChoice || return 0
     if [[ "${backupChoice}" =~ ^[0-9]+$ ]] && [[ "${backupChoice}" -ge 1 && "${backupChoice}" -le "${#backups[@]}" ]]; then
         backupFile=${backups[$((backupChoice - 1))]}
     else
@@ -254,7 +254,7 @@ manageSubscriptionStateBackups() {
         menuDangerItem 4 "重建订阅状态" "确认后先备份当前状态，再重置为空的默认订阅组"
         menuReturnItem 5 "${returnText}" "回到上级菜单"
         menuClose
-        autoRead subscription_state_backup_menu "请选择:" subscriptionStateBackupStatus || return 0
+        menuReadChoice subscription_state_backup_menu "请选择:" subscriptionStateBackupStatus || return 0
         case "${subscriptionStateBackupStatus}" in
         1) showSubscriptionGroupsStateSummary ;;
         2) createSubscriptionGroupsBackupMenu ;;

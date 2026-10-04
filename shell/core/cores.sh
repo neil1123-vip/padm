@@ -2157,7 +2157,7 @@ selectRollbackVersion() {
     menuLine "只列出最近稳定版本；回退前会使用目标二进制校验当前配置"
     awk '{print "│ "NR". "$0}' <<<"${versions}"
     menuClose
-    autoRead core_rollback_version "请输入要回退的版本序号:" selection
+    menuReadChoice core_rollback_version "请输入要回退的版本序号:" selection || return 1
     version=$(awk -v selected="${selection}" 'NR==selected {print $0}' <<<"${versions}")
     [[ -n "${version}" ]] || return 1
     if [[ -n "${resultVar}" ]]; then
@@ -2661,7 +2661,7 @@ configureRealityDomainMode() {
         menuItem 2 "严格域名 Reality" "客户端入口必须是解析到本机的自有域名"
         menuLine "entry 是客户端连接地址；target/SNI 是 REALITY 伪装目标"
         menuClose
-        autoRead reality_domain "请选择[默认1]:" realityOnlyInstallType
+        menuReadChoice reality_domain "请选择[默认1]:" realityOnlyInstallType true || return 1
         if [[ "${realityOnlyInstallType:-1}" == "2" ]]; then
             strictRequested=true
         elif [[ -n "${realityOnlyInstallType:-}" && "${realityOnlyInstallType}" != "1" ]]; then
@@ -2925,7 +2925,7 @@ selectCoreInstall() {
         menuItem 2 "sing-box" "适合 Hysteria2、Tuic、Naive、AnyTLS 或统一 sing-box 配置"
         menuClose
         selectCoreType=
-        autoRead core "请选择:" selectCoreType || return 0
+        menuReadChoice core "请选择:" selectCoreType || return 0
         case "${selectCoreType}" in
         1)
             if [[ "${selectInstallType}" == "1" ]]; then

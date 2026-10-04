@@ -23,7 +23,7 @@ accessControlMenu() {
         menuClose
 
         accessControlStatus=
-        autoRead access_control_menu "请选择:" accessControlStatus || return 0
+        menuReadChoice access_control_menu "请选择:" accessControlStatus || return 0
         case "${accessControlStatus}" in
         1) showAccessControlStatus || true; continue ;;
         2) addBlockedDomains || true; continue ;;
@@ -184,7 +184,7 @@ manageRegionalBlockPolicy() {
         menuReturnItem 4 "返回" "回到访问控制"
         menuClose
         policyStatus=
-        autoRead access_region_policy "请选择:" policyStatus || return 0
+        menuReadChoice access_region_policy "请选择:" policyStatus || return 0
         case "${policyStatus}" in
         4) return 0 ;;
         1 | 2 | 3) ;;
@@ -236,7 +236,7 @@ removeAccessControlMenu() {
         menuReturnItem 6 "返回" "回到访问控制"
         menuClose
         removeStatus=
-        autoRead access_remove_menu "请选择:" removeStatus || return 0
+        menuReadChoice access_remove_menu "请选择:" removeStatus || return 0
         case "${removeStatus}" in
         1|2|3|4|5) ;;
         6) return 0 ;;

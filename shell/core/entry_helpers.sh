@@ -973,7 +973,7 @@ bbrInstall() {
         menuReturnItem 5 "返回主菜单" "回到 padm 管理面板"
         menuClose
         installBBRStatus=
-        autoRead bbr_menu "请选择:" installBBRStatus || return 0
+        menuReadChoice bbr_menu "请选择:" installBBRStatus || return 0
         case "${installBBRStatus}" in
         1) showNetworkOptimizationStatus || true ;;
         2) enableOfficialBbrFq || true ;;
@@ -1102,7 +1102,7 @@ checkLog() {
     menuItem 6 "清空日志" "清理当前日志文件"
     menuClose
 
-    autoRead log_menu "请选择:" selectAccessLogType || return 0
+    menuReadChoice log_menu "请选择:" selectAccessLogType || return 0
     local configPathLog=${configPath//conf\//}
 
     case ${selectAccessLogType} in

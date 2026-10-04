@@ -17,7 +17,7 @@ socks5Routing() {
         menuReturnItem 4 "返回分流工具" "回到上一级分流菜单"
         menuClose
         selectType=
-        autoRead socks5_menu "请选择:" selectType || return 0
+        menuReadChoice socks5_menu "请选择:" selectType || return 0
 
         case "${selectType}" in
         1) socks5OutboundRoutingMenu || true; continue ;;
@@ -43,7 +43,7 @@ socks5InboundRoutingMenu() {
         menuReturnItem 5 "返回 Socks5 分流" "回到上级菜单"
         menuClose
         selectType=
-        autoRead socks5_inbound_menu "请选择:" selectType || return 0
+        menuReadChoice socks5_inbound_menu "请选择:" selectType || return 0
         case "${selectType}" in
         1)
             totalProgress=1
@@ -123,7 +123,7 @@ socks5OutboundRoutingMenu() {
         menuReturnItem 5 "返回 Socks5 分流" "回到上级菜单"
         menuClose
         selectType=
-        autoRead socks5_outbound_menu "请选择:" selectType || return 0
+        menuReadChoice socks5_outbound_menu "请选择:" selectType || return 0
         case "${selectType}" in
         1)
             backupDir=
@@ -332,7 +332,7 @@ removeSocks5Routing() {
         menuReturnItem 4 "返回 Socks5 分流" "回到上级菜单"
         menuClose
         unInstallSocks5RoutingStatus=
-        autoRead socks5_uninstall_menu "请选择:" unInstallSocks5RoutingStatus || return 0
+        menuReadChoice socks5_uninstall_menu "请选择:" unInstallSocks5RoutingStatus || return 0
         case "${unInstallSocks5RoutingStatus}" in
         1 | 2 | 3)
             socks5RoutingBackupCreate backupDir || { errorCard "Socks5 卸载配置备份失败"; return 1; }

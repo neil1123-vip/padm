@@ -21,7 +21,7 @@ installMenu() {
         menuReturnItem 7 "返回主菜单" "回到 padm 管理面板"
         menuClose
         selectInstallType=
-        autoRead install_type "请选择:" selectInstallType || return 0
+        menuReadChoice install_type "请选择:" selectInstallType || return 0
         case "${selectInstallType}" in
         1)
             selectInstallType=2
@@ -78,7 +78,7 @@ protocolEntryMenu() {
         menuReturnItem 7 "返回主菜单" "回到 padm 管理面板"
         menuClose
         selectProtocolMenuType=
-        autoRead protocol_entry_menu "请选择:" selectProtocolMenuType || return 0
+        menuReadChoice protocol_entry_menu "请选择:" selectProtocolMenuType || return 0
         case "${selectProtocolMenuType}" in
         1) manageReality 1 || true; continue ;;
         2) manageXHTTP || true; continue ;;
@@ -104,7 +104,7 @@ siteCertificateMenu() {
         menuReturnItem 3 "返回主菜单" "回到 padm 管理面板"
         menuClose
         selectSiteCertificateMenuType=
-        autoRead site_certificate_menu "请选择:" selectSiteCertificateMenuType || return 0
+        menuReadChoice site_certificate_menu "请选择:" selectSiteCertificateMenuType || return 0
         case "${selectSiteCertificateMenuType}" in
         1) manageTraditionalTlsFallback 1 || true; continue ;;
         2) manageTLSCertificates || true; continue ;;
@@ -126,7 +126,7 @@ routingAccessMenu() {
         menuReturnItem 4 "返回主菜单" "回到 padm 管理面板"
         menuClose
         selectRoutingAccessMenuType=
-        autoRead routing_access_menu "请选择:" selectRoutingAccessMenuType || return 0
+        menuReadChoice routing_access_menu "请选择:" selectRoutingAccessMenuType || return 0
         case "${selectRoutingAccessMenuType}" in
         1) routingToolsMenu 1 || true; continue ;;
         2) btTools 1 || true; continue ;;
@@ -150,7 +150,7 @@ systemScriptMenu() {
         menuReturnItem 5 "返回主菜单" "回到 padm 管理面板"
         menuClose
         selectSystemMenuType=
-        autoRead system_script_menu "请选择:" selectSystemMenuType || return 0
+        menuReadChoice system_script_menu "请选择:" selectSystemMenuType || return 0
         case "${selectSystemMenuType}" in
         1) updatePadm 1 || true; continue ;;
         2) showPadmScriptInstallStatus || true; continue ;;
@@ -172,7 +172,7 @@ advancedDangerMenu() {
         menuReturnItem 3 "返回主菜单" "回到 padm 管理面板"
         menuClose
         selectDangerMenuType=
-        autoRead danger_menu "请选择:" selectDangerMenuType || return 0
+        menuReadChoice danger_menu "请选择:" selectDangerMenuType || return 0
         case "${selectDangerMenuType}" in
         1) unInstall 1; return $? ;;
         2) manageVlessEncryptionExperiment || true; continue ;;
@@ -275,7 +275,7 @@ xrayVersionManageMenu() {
         menuReturnItem 7 "返回核心与服务" "回到核心与服务"
         menuClose
         selectXrayType=
-        autoRead xray_lifecycle_menu "请选择:" selectXrayType || return 0
+        menuReadChoice xray_lifecycle_menu "请选择:" selectXrayType || return 0
         case "${selectXrayType}" in
         1 | 2 | 3 | 4)
             if ! xrayInstalled; then
@@ -319,7 +319,7 @@ singBoxVersionManageMenu() {
         menuReturnItem 7 "返回核心与服务" "回到核心与服务"
         menuClose
         selectSingBoxType=
-        autoRead singbox_lifecycle_menu "请选择:" selectSingBoxType || return 0
+        menuReadChoice singbox_lifecycle_menu "请选择:" selectSingBoxType || return 0
         case "${selectSingBoxType}" in
         1 | 2 | 3 | 4)
             if ! singBoxInstalled; then
@@ -397,7 +397,7 @@ coreServiceControlMenu() {
         fi
         menuClose
         selectServiceAction=
-        autoRead core_service_control "请选择:" selectServiceAction || return 0
+        menuReadChoice core_service_control "请选择:" selectServiceAction || return 0
         case "${selectServiceAction}" in
         1) coreServiceControlAction "${serviceName}" start || true ;;
         2)
@@ -443,7 +443,7 @@ coreAllServicesMenu() {
         menuReturnItem 4 "返回核心与服务" "回到核心与服务"
         menuClose
         selectCoreService=
-        autoRead core_services_menu "请选择:" selectCoreService || return 0
+        menuReadChoice core_services_menu "请选择:" selectCoreService || return 0
         case "${selectCoreService}" in
         1) coreServiceControlMenu xray ;;
         2) coreServiceControlMenu sing-box ;;
@@ -479,7 +479,7 @@ coreLogsMenu() {
         menuReturnItem 5 "返回核心与服务" "回到核心与服务"
         menuClose
         selectLogs=
-        autoRead core_logs_menu "请选择:" selectLogs || return 0
+        menuReadChoice core_logs_menu "请选择:" selectLogs || return 0
         case "${selectLogs}" in
         1) checkLog 1 || true ;;
         2)
@@ -511,7 +511,7 @@ xrayGeoDataMenu() {
         menuReturnItem 4 "返回核心与服务" "回到核心与服务"
         menuClose
         selectGeoAction=
-        autoRead xray_geo_menu "请选择:" selectGeoAction || return 0
+        menuReadChoice xray_geo_menu "请选择:" selectGeoAction || return 0
         case "${selectGeoAction}" in
         1) updateGeoSite || true ;;
         2) showXrayGeoStatus || true ;;
@@ -536,7 +536,7 @@ coreVersionManageMenu() {
         menuReturnItem 6 "返回主菜单" "回到 padm 管理面板"
         menuClose
         selectCore=
-        autoRead core_manage_menu "请选择:" selectCore || return 0
+        menuReadChoice core_manage_menu "请选择:" selectCore || return 0
         case "${selectCore}" in
         1) xrayVersionManageMenu ;;
         2) singBoxVersionManageMenu ;;
@@ -580,7 +580,7 @@ menu() {
         menuLine "新人建议：1 安装与重装里先看怎么选；安装后 2 查看订阅"
         menuClose
         selectMainMenuType=
-        autoRead main_menu "请选择:" selectMainMenuType || return 0
+        menuReadChoice main_menu "请选择:" selectMainMenuType || return 0
         PADM_INSTALL_STATUS_READY=0
         case ${selectMainMenuType} in
         1)

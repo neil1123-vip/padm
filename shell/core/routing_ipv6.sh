@@ -40,7 +40,7 @@ ipv6Routing() {
     menuClose
 
     ipv6Status=
-    autoRead ipv6_menu "请选择:" ipv6Status || return 0
+    menuReadChoice ipv6_menu "请选择:" ipv6Status || return 0
 
     if [[ "${ipv6Status}" == "1" ]]; then
 

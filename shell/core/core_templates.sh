@@ -1320,7 +1320,7 @@ EOF
         echo
         readSingBoxPortResult result "${singBoxTuicPort}" || return 1
         statusCard "Tuic端口" "${result[-1]}"
-        initTuicProtocol
+        initTuicProtocol || return 1
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/09_tuic_inbounds.json padm-sing-box-tuic <<EOF || { errorCard "sing-box TUIC 入站模板提交失败"; return 1; }
 {
      "inbounds": [

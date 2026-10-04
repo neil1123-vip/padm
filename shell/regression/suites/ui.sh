@@ -326,6 +326,7 @@ runUiLeafSelectorListRegression() {
 
 listRegressionUiFullChildSelectors() {
     printf '%s\n' \
+        ui-subscription-workflow \
         ui-full-subscription-main-entry \
         ui-full-subscription-main-publish-service \
         ui-full-subscription-main-publish-user \
@@ -338,6 +339,7 @@ listRegressionUiFullChildSelectors() {
 
 listRegressionUiFullSubscriptionMainChildSelectors() {
     printf '%s\n' \
+        ui-subscription-workflow \
         ui-full-subscription-main-entry \
         ui-full-subscription-main-publish-service \
         ui-full-subscription-main-publish-user \
@@ -411,6 +413,7 @@ listRegressionWireGuardMenuFlowPeerSourceControlChildSelectors() {
 
 listRegressionUiChildSelectors() {
     printf '%s\n' \
+        ui-subscription-workflow \
         ui-full-subscription-main-publish-sync-enable \
         wireguard-menu-flow-peer-rollback-apply-service \
         wireguard-menu-flow-peer-rollback-credential-write \
@@ -439,6 +442,7 @@ listRegressionUiChildSelectors() {
 
 listRegressionUiAllProfileChildSelectors() {
     printf '%s\n' \
+        ui-subscription-workflow \
         wireguard-menu-flow-peer-rollback-credential \
         wireguard-menu-flow-peer-rollback-apply \
         wireguard-menu-flow-peer-rollback-source \
@@ -471,6 +475,7 @@ runRegressionUiSuiteRoot() {
 }
 
 registerRegressionFunctionLeaf ui-smoke runRegressionUiSmokeSuiteRoot
+registerRegressionFunctionLeaf ui-subscription-workflow runSubscriptionMenuWorkflowRegression
 registerRegressionFunctionLeaf ui-full-core runMenuSmokeRegression core
 registerRegressionFunctionLeaf ui-full-subscription-main-entry runMenuSmokeRegression subscription-main-entry
 registerRegressionFunctionLeaf ui-full-subscription-main-publish-service runMenuSmokeRegression subscription-main-publish-service

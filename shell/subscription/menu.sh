@@ -106,7 +106,7 @@ ensureSubscriptionServiceForSharedLinks() {
     fi
 
     statusCard "当前还不能直接发分享链接" "未检测到可用的公网订阅发布服务" "如果要把订阅链接发给客户端，请先安装/更新订阅服务" "仅作为被控接入主控时，可以先跳过这一步"
-    autoRead shared_subscription_install_service "现在先安装/更新订阅服务？[yes/no，默认 yes]:" confirm
+    autoRead shared_subscription_install_service "现在先安装/更新订阅服务？[yes/no，默认 yes]:" confirm || return 2
     confirm=${confirm:-yes}
     if [[ "${confirm}" == "yes" || "${confirm}" == "y" ]]; then
         if ! installSubscribe; then
@@ -349,7 +349,7 @@ subscriptionPublisherHome() {
         fi
         menuReturnItem "${returnChoice}" "返回主菜单" "回到 padm 管理面板"
         menuClose
-        autoRead "${menuKey}" "请选择:" homeStatus || return 0
+        menuReadChoice "${menuKey}" "请选择:" homeStatus || return 0
         if [[ "${homeStatus}" == "${returnChoice}" ]]; then
             return 0
         fi
@@ -398,7 +398,7 @@ manageSubscriptionControlledHome() {
         menuDangerItem 7 "关闭被控控制面" "停止本机 WireGuard 控制面"
         menuReturnItem 8 "返回主菜单" "回到 padm 管理面板"
         menuClose
-        autoRead subscription_controlled_home_menu "请选择:" controlledHomeStatus || return 0
+        menuReadChoice subscription_controlled_home_menu "请选择:" controlledHomeStatus || return 0
         case "${controlledHomeStatus}" in
         1) runSubscriptionControlledWizard ;;
         2)
@@ -435,7 +435,7 @@ manageSubscriptionMainControlDetails() {
         menuDangerItem 4 "关闭主控控制面" "停止本机 WireGuard 控制面"
         menuReturnItem 5 "返回主控首页" "回到上级菜单"
         menuClose
-        autoRead subscription_main_control_details_menu "请选择:" mainControlDetailsStatus || return 0
+        menuReadChoice subscription_main_control_details_menu "请选择:" mainControlDetailsStatus || return 0
         case "${mainControlDetailsStatus}" in
         1) showSubscriptionWireGuardMainCredential ;;
         2) showSubscriptionWireGuardPeers; showSubscriptionSourceControlUrls ;;
@@ -457,7 +457,7 @@ manageSubscriptionCoordination() {
         menuItem 2 "维护本机控制面" "查看 WireGuard 状态、凭据、地址和 Peer，或重启/关闭"
         menuReturnItem 3 "返回主控首页" "回到上级菜单"
         menuClose
-        autoRead subscription_coordination_menu "请选择:" coordinationStatus || return 0
+        menuReadChoice subscription_coordination_menu "请选择:" coordinationStatus || return 0
         case "${coordinationStatus}" in
         1) manageSubscriptionServers ;;
         2) manageSubscriptionMainControlDetails ;;
@@ -479,7 +479,7 @@ manageSubscription() {
     local role
     if [[ -z "${configPath}" ]]; then
         errorCard "未安装"
-        exit 0
+        return 0
     fi
 
     role=$(subscriptionCurrentRoleNormalized) || {
@@ -593,7 +593,7 @@ manageSubscriptionPublishMenu() {
         menuItem 2 "刷新并查看订阅链接" "重新生成本机自用和已启用分享订阅，并显示链接"
         menuReturnItem 3 "返回订阅与用户" "回到上级菜单"
         menuClose
-        autoRead subscription_publish_menu "请选择:" publishStatus || return 0
+        menuReadChoice subscription_publish_menu "请选择:" publishStatus || return 0
         case "${publishStatus}" in
         1) installSubscribe && showSubscriptionServiceStatus ;;
         2) refreshSubscriptionLinks ;;
@@ -605,21 +605,16 @@ manageSubscriptionPublishMenu() {
 
 manageSharedSubscriptions() {
     subscriptionRequireLocalPublisherRole || return 1
-    local sharedStatus=
     while true; do
-        echoContent title "\n┌─ 分享订阅 ─────────────────────────────────────────"
-        menuLine "创建新订阅，或选择已有订阅进行日常维护。"
-        menuItem 1 "新建分享订阅" "填写 ID、节点范围和额度，然后同步并拿到可发送的链接"
-        menuItem 2 "管理分享订阅" "刷新单个链接、改范围、改额度、启停或删除"
-        menuReturnItem 3 "返回订阅与用户" "回到上级菜单"
-        menuClose
-        autoRead shared_subscription_menu "请选择:" sharedStatus || return 0
-        case "${sharedStatus}" in
-        1) createAndSyncUserSubscriptionWizard ;;
-        2) manageUserSubscriptionItem ;;
-        3) return ;;
-        *) coreSelectionErrorCard ;;
-        esac
+        selectUserSubscriptionId true || return 0
+        if [[ "${selectedUserSubscriptionId}" == "+" ]]; then
+            createAndSyncUserSubscriptionWizard || true
+            if [[ -n "${createdUserSubscriptionId:-}" ]]; then
+                manageUserSubscriptionItem "${createdUserSubscriptionId}"
+            fi
+        else
+            manageUserSubscriptionItem "${selectedUserSubscriptionId}"
+        fi
     done
 }
 
@@ -638,7 +633,7 @@ manageSubscriptionCatalog() {
         menuItem 3 "流量与限额" "查看流量明细，并处理超限和自动限额"
         menuReturnItem 4 "${returnText}" "回到上级菜单"
         menuClose
-        autoRead subscription_catalog_menu "请选择:" subscriptionCatalogStatus || return 0
+        menuReadChoice subscription_catalog_menu "请选择:" subscriptionCatalogStatus || return 0
         case "${subscriptionCatalogStatus}" in
         1) manageSubscriptionPublishMenu ;;
         2) manageSharedSubscriptions ;;
@@ -663,6 +658,7 @@ showUserSubscriptions() {
     local quotaText
     local jqProgram
     local quotaStatusJq
+    local itemIndex=0
     quotaStatusJq=$(subscriptionUserQuotaStatusJq) || return 1
     jqProgram=$(printf '%s\n%s\n%s\n' "$(subscriptionTrafficTotalsJq)" "${quotaStatusJq}" '
       . as $group |
@@ -679,10 +675,11 @@ showUserSubscriptions() {
     fi
     userResultCard "用户订阅列表"
     while IFS=$'\037' read -r id name enabled sources limit quota; do
+        itemIndex=$((itemIndex + 1))
         if [[ "${name}" == "${id}" ]]; then
-            menuLine "订阅：$(uiStyle value "${id}")"
+            menuLine "订阅 ${itemIndex}：$(uiStyle value "${id}")"
         else
-            menuLine "订阅：$(uiStyle value "${name}")（${id}）"
+            menuLine "订阅 ${itemIndex}：$(uiStyle value "${name}")（${id}）"
         fi
         if [[ "${enabled}" == "true" ]]; then
             enabledText=$(uiStyle ok "已启用")
@@ -708,34 +705,108 @@ showUserSubscriptions() {
     menuClose
 }
 
-parseUserSubscriptionSources() {
-    local sourceIds=$1
-    printf '%s' "${sourceIds}" | jq -R -e -c 'split(",") | map(gsub("^ +| +$"; "")) | map(select(length > 0)) | unique | if index("*") then ["*"] else . end | select(length > 0)'
+selectSubscriptionSourceId() {
+    local sourcesJson=$1
+    local prompt=$2
+    local resultVar=$3
+    local menuKey=${4:-subscription_source_select}
+    local sourceRows
+    local rowSourceId
+    local sourceName
+    local sourceHost
+    local sourcePort
+    local sourceEnabled
+    local sourceStatus
+    local sourceIndex=0
+    local choice=
+    local selected=
+    local sourceCount
+
+    [[ -n "${resultVar}" ]] || return 2
+    printf -v "${resultVar}" '%s' ""
+    sourceCount=$(jq 'length' <<<"${sourcesJson}") || return 1
+    if [[ "${sourceCount}" == "0" ]]; then
+        statusCard "暂无可选被控服务器"
+        return 1
+    fi
+
+    sourceRows=$(jq -r '.[] | [.id, .name, .role, .host, (.port | tostring), (if .enabled == true then "启用" else "停用" end), (.sync_status // "pending")] | @tsv' <<<"${sourcesJson}") || return 1
+    while IFS=$'\t' read -r rowSourceId sourceName _sourceRole sourceHost sourcePort sourceEnabled sourceStatus; do
+        [[ -n "${rowSourceId}" ]] || continue
+        sourceIndex=$((sourceIndex + 1))
+        menuItem "${sourceIndex}" "${sourceName}（${rowSourceId}）" "${sourceHost}:${sourcePort} / ${sourceEnabled} / 同步：${sourceStatus}"
+    done <<<"${sourceRows}"
+    menuLine "输入编号或服务器 ID；纯数字 ID 使用 id:ID；直接回车返回"
+    menuClose
+    while true; do
+        menuReadChoice "${menuKey}" "${prompt}" choice || return 1
+        selected=$(jq -r --arg choice "${choice}" '
+          if $choice | test("^[0-9]+$") then
+            ($choice | tonumber) as $index |
+            if $index >= 1 and $index <= length then .[$index - 1].id else empty end
+          else first(.[]? | select(.id == ($choice | sub("^id:"; "")))).id // empty end
+        ' <<<"${sourcesJson}") || return 1
+        if [[ -n "${selected}" ]]; then
+            printf -v "${resultVar}" '%s' "${selected}"
+            return 0
+        fi
+        errorCard "服务器源选择无效，请输入列表编号或完整 ID"
+    done
 }
 
-validateUserSubscriptionSourcesJson() {
-    local sourceJson=$1
-    local knownSources=${2:-}
-    if [[ -z "${knownSources}" ]]; then
-        knownSources=$(subscriptionActiveGroupRead -r '.sources[]?.id' | jq -R -s -c 'split("\n") | map(select(length > 0))') || return 1
-    fi
-    jq -n -e --argjson sources "${sourceJson}" --argjson knownSources "${knownSources}" \
-        'all($sources[]; . as $source | $source == "*" or ($knownSources | index($source)))' >/dev/null
+selectUserSubscriptionSources() {
+    local menuKey=$1
+    local prompt=$2
+    local resultVar=$3
+    local currentSources=${4:-'["main"]'}
+    local sourcesJson sourceRows sourceId sourceName sourceEnabled
+    local sourceIndex=0
+    local sourceChoice= resolvedSources=
+    printf -v "${resultVar}" '%s' ""
+    sourcesJson=$(subscriptionActiveGroupRead -c '.sources') || return 1
+    sourceRows=$(jq -r '.[] | [.id, .name, (if .enabled then "启用" else "停用" end)] | @tsv' <<<"${sourcesJson}") || return 1
+    userResultCard "选择节点范围"
+    menuLine "当前范围：$(jq -r 'join("、")' <<<"${currentSources}")"
+    while IFS=$'\t' read -r sourceId sourceName sourceEnabled; do
+        [[ -n "${sourceId}" ]] || continue
+        sourceIndex=$((sourceIndex + 1))
+        menuItem "${sourceIndex}" "${sourceName}（${sourceId}）" "${sourceEnabled}"
+    done <<<"${sourceRows}"
+    menuLine "*：全部服务器；可用逗号多选编号或 ID；纯数字 ID 使用 id:ID"
+    menuClose
+    while true; do
+        menuReadChoice "${menuKey}" "${prompt}" sourceChoice true || return 1
+        if [[ -z "${sourceChoice}" ]]; then
+            printf -v "${resultVar}" '%s' "${currentSources}"
+            return 0
+        fi
+        if resolvedSources=$(jq -cen --arg choice "${sourceChoice}" --argjson sources "${sourcesJson}" '
+          $choice | split(",") | map(gsub("^\\s+|\\s+$"; "")) |
+          map(. as $item |
+            if . == "*" then .
+            elif test("^[0-9]+$") then
+              tonumber as $index |
+              if $index >= 1 and $index <= ($sources | length) then $sources[$index - 1].id else null end
+            else sub("^id:"; "") as $id |
+              first($sources[] | select(.id == $id)).id // null end) |
+          select(length > 0 and all(.[]; . != null)) |
+          unique | if index("*") then ["*"] else . end
+        '); then
+            printf -v "${resultVar}" '%s' "${resolvedSources}"
+            return 0
+        fi
+        errorCard "节点范围无效，请选择列表编号、服务器 ID 或 *"
+    done
 }
 
 createAndSyncUserSubscriptionWizard() {
     local id=
-    local sourceIds=main
     local sourceJson=
     local limit=0
-    local enableSync=
     local canShowLinks=true
-    local syncWillRun=false
     local subscriptionServiceStatus=0
-    local sourceOutput
-    local sourcesJson
-    local knownSourcesJson
-    autoRead user_subscription_id "请输入分享订阅ID[只用于管理，例 team-a]:" id
+    createdUserSubscriptionId=
+    menuReadChoice user_subscription_id "请输入分享订阅 ID[例 team-a，回车取消]:" id || return 1
     if ! subscriptionStateIdValid "${id}"; then
         errorCard "输入有误，ID 最多 64 个字符，且只能包含英文、数字、下划线或短横线"
         return 1
@@ -744,32 +815,13 @@ createAndSyncUserSubscriptionWizard() {
         errorCard "分享订阅 ID 已存在"
         return 1
     fi
-
-    userResultCard "这个订阅可使用的服务器"
-    menuLine "这里设置这个订阅的服务器范围。"
-    menuLine "建议先确保远端服务器已接入，再输入 main、远端服务器 ID 或 *；多个服务器用英文逗号分隔，例如 main,remote-a。"
-    sourcesJson=$(subscriptionActiveGroupRead -c '.sources') || return 1
-    sourceOutput=$(jq -r '.[] | "\(.id):\(.name):\(.role):\(.scheme):\(.host):\(.port):\(.enabled):\(.sync_status)"' <<<"${sourcesJson}") || return 1
-    printf '%s\n' "${sourceOutput}"
-    menuClose
-    autoRead user_subscription_sources "请输入服务器范围[回车默认 main]:" sourceIds
-    sourceIds=${sourceIds:-main}
-    if ! sourceJson=$(parseUserSubscriptionSources "${sourceIds}"); then
-        errorCard "服务器范围不能为空；直接回车使用本机 main"
-        return 1
-    fi
-    knownSourcesJson=$(jq -c '[.[].id]' <<<"${sourcesJson}") || return 1
-    if ! validateUserSubscriptionSourcesJson "${sourceJson}" "${knownSourcesJson}"; then
-        errorCard "服务器范围包含不存在的服务器源"
-        return 1
-    fi
-
-    autoRead user_subscription_traffic_limit "请输入订阅额度GB[回车/0为不限；这里只设置额度，超限处理在 订阅与用户 -> 流量与限额 中执行]:" limit
-    limit=${limit:-0}
-    if ! echo "${limit}" | grep -qE '^[0-9]+$'; then
+    selectUserSubscriptionSources user_subscription_sources "请选择节点范围[回车默认 main]:" sourceJson || return 1
+    while true; do
+        menuReadChoice user_subscription_traffic_limit "请输入订阅额度 GB[回车/0 为不限]:" limit true || return 1
+        limit=${limit:-0}
+        [[ "${limit}" =~ ^[0-9]+$ ]] && break
         errorCard "订阅额度必须是数字"
-        return 1
-    fi
+    done
 
     if ensureSubscriptionServiceForSharedLinks; then
         :
@@ -785,62 +837,96 @@ createAndSyncUserSubscriptionWizard() {
         errorCard "分享订阅创建失败，订阅 ID 可能已存在或状态写入失败"
         return 1
     fi
-    statusCard "分享订阅已创建" "订阅ID：${id}" "实际托管账号：$(subscriptionSyncAccountName "${id}")" "服务器范围：${sourceIds}" "订阅额度GB：${limit}" "超限停用和批量处理请到 订阅与用户 -> 流量与限额 执行"
-
-    if ! subscriptionGroupSyncEnabled; then
-        autoRead user_subscription_enable_auto_sync "是否开启后续自动同步？[yes/no，默认 yes]：" enableSync
-        enableSync=${enableSync:-yes}
-        if [[ "${enableSync}" == "yes" || "${enableSync}" == "y" ]]; then
-            if setSubscriptionGroupSyncEnabledWithCron true; then
-                successCard "自动同步已开启" "后续会按当前间隔同步；可在 订阅同步 中调整间隔"
-            else
-                errorCard "自动同步开启失败"
-                return 1
-            fi
-        else
-            statusCard "自动同步未开启" "本次变更已保存，需稍后手动执行完整同步"
-        fi
+    createdUserSubscriptionId=${id}
+    statusCard "分享订阅已创建" "订阅 ID：${id}" "服务器范围：$(jq -r 'join("、")' <<<"${sourceJson}")" "订阅额度 GB：${limit}" "正在立即同步；不改变后续自动同步设置"
+    if ! runSubscriptionGroupSync; then
+        warnCard "订阅已保存，但首次同步失败" "可在该订阅详情中重试同步并获取链接，无需重新创建"
+        return 1
     fi
-
-    if subscriptionGroupSyncEnabled; then
-        syncWillRun=true
-    fi
-    runSubscriptionSyncAfterMutation "用户订阅创建" || return 1
-    if [[ "${syncWillRun}" == "true" ]]; then
-        if [[ "${canShowLinks}" == "true" ]]; then
-            showUserSubscriptionLinks "${id}"
-        else
-            statusCard "同步完成，但暂时还不能查看链接" "订阅对象和托管账号已生成" "等安装好订阅服务后，到 订阅与用户 -> 发布与链接中再刷新并查看链接"
-        fi
+    if [[ "${canShowLinks}" == "true" ]]; then
+        showUserSubscriptionLinks "${id}" true
+    else
+        statusCard "同步完成，尚未发布链接" "安装发布服务后，可直接从该订阅详情获取链接"
     fi
 }
 
 selectUserSubscriptionId() {
-    local id=
+    local allowCreate=${1:-false}
+    local id
+    local name
+    local enabled
+    local limit
+    local userRows
+    local choice=
+    local selected=
+    local itemIndex=0
+    local usersJson
     selectedUserSubscriptionId=
-    local hasUsers
-    hasUsers=$(subscriptionActiveGroupRead -r 'any(.user_groups[]?; true)') || {
+    usersJson=$(PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 subscriptionActiveGroupRead -c '.user_groups') || {
         errorCard "用户订阅读取失败"
         return 1
     }
-    if [[ "${hasUsers}" != "true" ]]; then
-        statusCard "用户订阅" "暂无用户订阅" "先到 订阅与用户 -> 分享订阅 -> 新建分享订阅创建一个"
-        return 1
+    userRows=$(jq -r '.[]? | [.id, (.name // .id), (if .enabled == true then "启用" else "停用" end), (.traffic_limit_gb // 0 | tostring)] | @tsv' <<<"${usersJson}") || return 1
+    userResultCard "分享订阅"
+    if [[ -z "${userRows}" ]]; then
+        menuLine "暂无分享订阅"
+        [[ "${allowCreate}" == "true" ]] || { menuClose; return 1; }
     fi
-    showUserSubscriptions || return 1
-    autoRead select_user_subscription_id "请输入用户订阅ID:" id
-    if [[ -z "${id}" ]] || ! userSubscriptionExists "${id}"; then
-        errorCard "用户订阅 ID 无效，请按上面的列表重新输入"
-        return 1
-    fi
-    selectedUserSubscriptionId=${id}
+    while IFS=$'\t' read -r id name enabled limit; do
+        [[ -n "${id}" ]] || continue
+        itemIndex=$((itemIndex + 1))
+        if [[ "${limit}" == "0" ]]; then
+            limit="不限额"
+        else
+            limit="${limit} GB"
+        fi
+        menuItem "${itemIndex}" "${name}（${id}）" "状态：${enabled} / 额度：${limit}"
+    done <<<"${userRows}"
+    [[ "${allowCreate}" == "true" ]] && menuItem "+" "新建分享订阅" "创建后立即同步并获取链接"
+    menuLine "输入编号或订阅 ID；纯数字 ID 使用 id:ID；直接回车返回"
+    menuClose
+    while true; do
+        menuReadChoice select_user_subscription_id "请选择订阅:" choice || return 1
+        if [[ "${allowCreate}" == "true" && "${choice}" == "+" ]]; then
+            selectedUserSubscriptionId=+
+            return 0
+        fi
+        selected=$(jq -r --arg choice "${choice}" '
+          if $choice | test("^[0-9]+$") then
+            ($choice | tonumber) as $index |
+            if $index >= 1 and $index <= length then .[$index - 1].id else empty end
+          else first(.[]? | select(.id == ($choice | sub("^id:"; "")))).id // empty end
+        ' <<<"${usersJson}") || return 1
+        if [[ -n "${selected}" ]]; then
+            selectedUserSubscriptionId=${selected}
+            return 0
+        fi
+        errorCard "用户订阅选择无效，请输入列表编号或完整 ID"
+    done
 }
 
 showUserSubscriptionLinks() {
     local userSubscriptionId=$1
+    local alreadySynced=${2:-false}
     local accountName
+    local enabled
+    enabled=$(subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" 'first(.user_groups[]? | select(.id == $id)).enabled // false') || return 1
+    if [[ "${enabled}" != "true" ]]; then
+        warnCard "该订阅已停用或不存在" "启用后再同步获取链接"
+        return 1
+    fi
     accountName=$(subscriptionSyncAccountName "${userSubscriptionId}")
     if ! ensureSubscriptionServiceForSharedLinks; then
+        return 1
+    fi
+    if [[ "${alreadySynced}" != "true" ]] && ! runSubscriptionGroupSync; then
+        errorCard "订阅同步失败，未生成新的分享链接" "修复同步问题后可在当前订阅重试"
+        return 1
+    fi
+    # 同步中的自动限额处理可能停用订阅，发布前重新确认状态。
+    enabled=$(subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" 'first(.user_groups[]? | select(.id == $id)).enabled // false') || return 1
+    if [[ "${enabled}" != "true" ]]; then
+        warnCard "该订阅已停用或不存在" "检查流量和额度，启用后再同步获取链接"
         return 1
     fi
     if ! refreshSubscriptionLinks "${accountName}" true; then
@@ -965,24 +1051,32 @@ removeUserSubscriptionMenu() {
 }
 
 manageUserSubscriptionItem() {
-    local userSubscriptionId
+    local userSubscriptionId=${1:-}
     local userSubscriptionItemStatus=
-    selectUserSubscriptionId || return
-    userSubscriptionId=${selectedUserSubscriptionId}
+    local summary line
+    if [[ -z "${userSubscriptionId}" ]]; then
+        selectUserSubscriptionId || return 0
+        userSubscriptionId=${selectedUserSubscriptionId}
+    fi
     while true; do
+        summary=$(PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 subscriptionActiveGroupRead -er --arg id "${userSubscriptionId}" '
+          first(.user_groups[]? | select(.id == $id)) |
+          select(. != null) |
+          "名称：\(.name // .id) / 状态：\(if .enabled then "启用" else "停用" end)\n节点：\(.allowed_sources | join("、")) / 额度：\(if .traffic_limit_gb == 0 then "不限" else "\(.traffic_limit_gb) GB" end)"
+        ') || { errorCard "当前订阅读取失败或已被删除"; return 1; }
         echoContent title "\n┌─ 管理分享订阅 ─────────────────────────────────────"
         menuLine "当前订阅：${userSubscriptionId}"
-        menuLine "这里处理一个已有订阅的日常维护。"
-        menuLine "订阅变更随同步生效；流量与限额在订阅与用户中处理。"
-        menuItem 1 "刷新并查看当前链接" "重新生成订阅输出并显示该订阅当前链接"
+        while IFS= read -r line; do menuLine "${line}"; done <<<"${summary}"
+        menuItem 1 "同步并获取当前链接" "立即同步并生成该订阅链接，不改变自动同步设置"
         menuItem 2 "查看当前流量" "只读查看累计流量和额度状态"
         menuItem 3 "设置节点范围" "选择 main、被控服务器 ID 或 *"
         menuItem 4 "设置订阅额度" "0 表示不限；这里只设置额度，不执行超限处理"
         menuItem 5 "启用/停用当前订阅" "停用后同步会移除对应托管账号"
         menuDangerItem 6 "删除订阅" "删除记录；同步后移除对应托管账号"
-        menuReturnItem 7 "返回上级" "回到订阅与用户"
+        menuReturnItem 7 "返回订阅列表" "回到分享订阅"
+        menuItem 8 "切换订阅" "选择另一订阅继续管理"
         menuClose
-        autoRead user_subscription_item_menu "请选择:" userSubscriptionItemStatus || return 0
+        menuReadChoice user_subscription_item_menu "请选择:" userSubscriptionItemStatus || return 0
         case "${userSubscriptionItemStatus}" in
         1) showUserSubscriptionLinks "${userSubscriptionId}" ;;
         2) showUserSubscriptionTraffic "${userSubscriptionId}" ;;
@@ -993,12 +1087,15 @@ manageUserSubscriptionItem() {
                 "用户订阅状态切换" "用户订阅状态切换失败" \
                 toggleUserSubscriptionState "${userSubscriptionId}"; then
                 successCard "用户订阅状态已切换"
-            else
-                return 1
             fi
             ;;
         6) removeUserSubscriptionMenu "${userSubscriptionId}" && return ;;
         7) return ;;
+        8)
+            if selectUserSubscriptionId; then
+                userSubscriptionId=${selectedUserSubscriptionId}
+            fi
+            ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -1006,32 +1103,13 @@ manageUserSubscriptionItem() {
 
 setUserSubscriptionSourcesMenu() {
     local userSubscriptionId=$1
-    local sourceIds=
     local sourceJson=
-    local line=
-    local sourceOutput
-    local sourcesJson
-    local knownSourcesJson
-
-    userResultCard "这个订阅可使用的服务器"
-    menuLine "这里设置这个订阅的服务器范围。"
-    menuLine "建议先确保远端服务器已添加凭据，再输入 main、远端服务器 ID 或 *；多个服务器用英文逗号分隔，例如 main,remote-a；直接回车默认使用 main。"
-    sourcesJson=$(subscriptionActiveGroupRead -c '.sources') || return 1
-    sourceOutput=$(jq -r '.[] | "\(.id):\(.name):\(.role):\(.scheme):\(.host):\(.port):\(.enabled):\(.sync_status)"' <<<"${sourcesJson}") || return 1
-    while IFS= read -r line; do
-        menuLine "${line}"
-    done <<<"${sourceOutput}"
-    menuClose
-    autoRead user_subscription_sources "请输入服务器范围[回车默认 main]，多个用逗号分隔:" sourceIds
-    sourceIds=${sourceIds:-main}
-    if ! sourceJson=$(parseUserSubscriptionSources "${sourceIds}"); then
-        errorCard "服务器范围不能为空；直接回车使用本机 main"
-        return 1
-    fi
-    knownSourcesJson=$(jq -c '[.[].id]' <<<"${sourcesJson}") || return 1
-    if ! validateUserSubscriptionSourcesJson "${sourceJson}" "${knownSourcesJson}"; then
-        errorCard "服务器范围包含不存在的服务器源"
-        return 1
+    local currentSources
+    currentSources=$(subscriptionActiveGroupRead -ec --arg id "${userSubscriptionId}" 'first(.user_groups[]? | select(.id == $id)).allowed_sources') || return 1
+    selectUserSubscriptionSources user_subscription_sources "请选择节点范围[回车保留当前范围]:" sourceJson "${currentSources}" || return 1
+    if jq -en --argjson current "${currentSources}" --argjson selected "${sourceJson}" '$current | sort == ($selected | sort)' >/dev/null; then
+        statusCard "节点范围未变更"
+        return 0
     fi
     if subscriptionGroupsWithLock runUserSubscriptionMutationAndSyncUnlocked \
         "用户订阅节点范围更新" "节点范围更新失败" \
@@ -1045,10 +1123,17 @@ setUserSubscriptionSourcesMenu() {
 setUserSubscriptionTrafficLimitMenu() {
     local userSubscriptionId=$1
     local limit=
-    autoRead user_subscription_traffic_limit "请输入订阅额度GB[0为不限；这里只设置额度，不执行超限处理]:" limit
-    if [[ -z "${limit}" ]] || ! echo "${limit}" | grep -qE '^[0-9]+$'; then
+    local currentLimit
+    currentLimit=$(subscriptionActiveGroupRead -er --arg id "${userSubscriptionId}" 'first(.user_groups[]? | select(.id == $id)).traffic_limit_gb') || return 1
+    while true; do
+        menuReadChoice user_subscription_traffic_limit "请输入订阅额度 GB[当前 ${currentLimit}，回车保留，0 为不限]:" limit true || return 1
+        limit=${limit:-${currentLimit}}
+        [[ "${limit}" =~ ^[0-9]+$ ]] && break
         errorCard "订阅额度必须是数字"
-        return 1
+    done
+    if [[ "${limit}" == "${currentLimit}" ]]; then
+        statusCard "订阅额度未变更"
+        return 0
     fi
     if ! setUserSubscriptionTrafficLimit "${userSubscriptionId}" "${limit}"; then
         errorCard "订阅额度更新失败"
@@ -1122,23 +1207,13 @@ manageSubscriptionPendingInvites() {
 
 removeSubscriptionControlledServerMenu() {
     local sourceId=
-    local sourceOutput sourcesJson
+    local sourcesJson
     local localOnlyConfirm=
     echoContent title "\n┌─ 移除被控服务器 ───────────────────────────────────"
     menuLine "这里列出当前可移除的被控服务器。"
     menuLine "删除前会自动清理用户订阅中的该来源；使用 * 的订阅范围会保留。"
     sourcesJson=$(subscriptionActiveGroupRead -c '[.sources[]? | select(.role != "main")]') || return 1
-    sourceOutput=$(jq -r '
-      to_entries[] |
-      "│ \(.key + 1). \(.value.id):\(.value.name):\(.value.role):\(.value.scheme):\(.value.host):\(.value.port):\(.value.enabled):\(.value.sync_status)"' <<<"${sourcesJson}") || return 1
-    printf '%s\n' "${sourceOutput}"
-    menuClose
-    autoRead delete_subscription_source "请输入要删除的被控服务器源ID:" sourceId
-    if ! subscriptionStateIdValid "${sourceId}" ||
-        ! jq -e --arg id "${sourceId}" 'any(.[]?; .id == $id)' <<<"${sourcesJson}" >/dev/null 2>&1; then
-        errorCard "被控服务器源 ID 无效"
-        return 1
-    fi
+    selectSubscriptionSourceId "${sourcesJson}" "请选择要删除的被控服务器:" sourceId delete_subscription_source || return 1
     if ! subscriptionWireGuardRemovePeerAndSource "${sourceId}"; then
         if [[ "${SUBSCRIPTION_WIREGUARD_SOURCE_REMOVE_ERROR:-}" == "remote" ]]; then
             warnCard "远端服务器不可达或清理失败" "仅本地移除会删除本机来源和 WireGuard Peer，但不会删除远端账号；请在远端手工清理后再确认"
@@ -1174,21 +1249,14 @@ changeSubscriptionSourceEnabledMenu() {
     local actionText=
     local effectText=
     local confirm=
-    local sourceOutput sourcesJson sourceName
+    local sourcesJson sourceName
 
     userResultCard "被控服务器启用状态"
     sourcesJson=$(subscriptionActiveGroupRead -c '[.sources[]? | select(.role != "main")]') || return 1
-    sourceOutput=$(jq -r '.[] | "ID:\(.id)  名称:\(.name)  当前状态:" + (if .enabled == true then "启用" else "停用" end)' <<<"${sourcesJson}") || return 1
-    printf '%s\n' "${sourceOutput}"
-    menuClose
-    autoRead subscription_source_enabled_id "请输入要启用或停用的被控服务器 ID:" sourceId
-    if ! subscriptionStateIdValid "${sourceId}"; then
-        errorCard "被控服务器源 ID 无效"
-        return 1
-    fi
+    selectSubscriptionSourceId "${sourcesJson}" "请选择要启用或停用的被控服务器:" sourceId subscription_source_enabled_id || return 1
     source=$(jq -c --arg id "${sourceId}" 'first(.[]? | select(.id == $id))' <<<"${sourcesJson}") || return 1
     if [[ -z "${source}" || "${source}" == "null" ]]; then
-        errorCard "被控服务器源 ID 无效"
+        errorCard "被控服务器源已不存在，请刷新后重试"
         return 1
     fi
     enabled=$(jq -r '.enabled == true' <<<"${source}") || return 1
@@ -1210,7 +1278,7 @@ changeSubscriptionSourceEnabledMenu() {
         return 1
     fi
     successCard "被控服务器已${actionText}" "来源：${sourceId}"
-    runSubscriptionSyncAfterMutation "被控服务器${actionText}" || true
+    runSubscriptionSyncAfterMutation "被控服务器${actionText}"
 }
 
 manageSubscriptionServers() {
@@ -1227,7 +1295,7 @@ manageSubscriptionServers() {
         menuDangerItem 6 "移除被控服务器" "删除已有被控来源和 WireGuard Peer"
         menuReturnItem 7 "返回主控首页" "回到上级菜单"
         menuClose
-        autoRead server_source_menu "请选择:" serverStatus || return 0
+        menuReadChoice server_source_menu "请选择:" serverStatus || return 0
         case "${serverStatus}" in
         1) createSubscriptionWireGuardInviteMenu ;;
         2) addOtherSubscribe ;;
@@ -1264,7 +1332,7 @@ addOtherSubscribe() {
     fi
     subscriptionWireGuardCompleteInvite "${credentialJson}" completedAlias || return 1
     successCard "被控接入已完成" "别名：${completedAlias}" "Peer、服务器源和 Token 已保存；可到 订阅同步 -> 状态与排障 执行健康检查"
-    runSubscriptionSyncAfterMutation "被控服务器接入" || true
+    runSubscriptionSyncAfterMutation "被控服务器接入"
 }
 
 
@@ -1358,17 +1426,11 @@ setSubscriptionSourceControlTokenMenu() {
         sourceId=$(jq -r --arg host "${host}" --argjson port "${port}" \
             'first(.[]? | select(.host == $host and .port == $port)).id' <<<"${sourcesJson}") || return 1
     else
-        sourceOutput=$(jq -r '.[]? | "\(.id):\(.name):\(.scheme):\(.host):\(.port):\(.sync_status)"' <<<"${sourcesJson}") || return 1
-        printf '%s\n' "${sourceOutput}"
-        autoRead subscription_source_id "请输入要更新的被控服务器别名:" sourceId
-    fi
-    if ! subscriptionStateIdValid "${sourceId}"; then
-        errorCard "被控服务器别名无效"
-        return 1
+        selectSubscriptionSourceId "${sourcesJson}" "请选择要更新凭据的被控服务器:" sourceId subscription_source_id || return 1
     fi
     source=$(jq -c --arg id "${sourceId}" 'first(.[]? | select(.id == $id))' <<<"${sourcesJson}") || return 1
     if [[ -z "${source}" || "${source}" == "null" ]]; then
-        errorCard "被控服务器别名无效"
+        errorCard "被控服务器源已不存在，请刷新后重试"
         return 1
     fi
     subscriptionWireGuardUpdatePeerAndCredential "${sourceId}" "${credentialJson}" || {
@@ -1449,7 +1511,7 @@ manageSubscriptionSyncDiagnostics() {
         fi
         menuReturnItem "${returnChoice}" "返回订阅同步" "回到上级菜单"
         menuClose
-        autoRead subscription_sync_diagnostics_menu "请选择:" diagnosticStatus || return 0
+        menuReadChoice subscription_sync_diagnostics_menu "请选择:" diagnosticStatus || return 0
         case "${diagnosticStatus}" in
         1) showSubscriptionGroupsStateSummary; showSubscriptionSources ;;
         2) showSubscriptionServerRoleSummary; showSubscriptionServiceStatus ;;
@@ -1512,7 +1574,7 @@ manageSubscriptionSyncSettings() {
         menuItem 5 "状态备份与恢复" "查看、备份、恢复或重建 groups.json"
         menuReturnItem 6 "${returnText}" "回到上级菜单"
         menuClose
-        autoRead sync_settings_menu "请选择:" syncSettingsStatus || return 0
+        menuReadChoice sync_settings_menu "请选择:" syncSettingsStatus || return 0
         case "${syncSettingsStatus}" in
         1) runSubscriptionGroupSync || true ;;
         2)

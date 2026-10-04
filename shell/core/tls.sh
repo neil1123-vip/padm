@@ -647,7 +647,8 @@ manageTLSCertificates() {
         menuItem 3 "查看续签定时任务" "显示是否已配置 RenewTLS cron"
         menuReturnItem 4 "返回站点与证书" "回到上级菜单"
         menuClose
-        autoRead tls_certificate_menu "请选择:" tlsCertificateMenuStatus
+        tlsCertificateMenuStatus=
+        menuReadChoice tls_certificate_menu "请选择:" tlsCertificateMenuStatus || return 0
         case "${tlsCertificateMenuStatus}" in
         1) showTLSCertificateStatus ;;
         2) renewalTLS 1 ;;

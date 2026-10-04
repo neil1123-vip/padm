@@ -18,7 +18,7 @@ dnsRouting() {
         menuReturnItem 3 "返回分流工具" "回到上一级分流菜单"
         menuClose
         selectType=
-        autoRead dns_routing_menu "请选择:" selectType || return 0
+        menuReadChoice dns_routing_menu "请选择:" selectType || return 0
 
         case "${selectType}" in
         1) setUnlockDNS || true; continue ;;
@@ -45,7 +45,7 @@ sniRouting() {
         menuReturnItem 3 "返回分流工具" "回到上一级分流菜单"
         menuClose
         selectType=
-        autoRead sni_routing_menu "请选择:" selectType || return 0
+        menuReadChoice sni_routing_menu "请选择:" selectType || return 0
 
         case "${selectType}" in
         1) setUnlockSNI || true; continue ;;

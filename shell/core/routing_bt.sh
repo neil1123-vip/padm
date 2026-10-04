@@ -38,7 +38,7 @@ btTools() {
     menuClose
 
     btStatus=
-    autoRead bt_menu "请选择:" btStatus || return 0
+    menuReadChoice bt_menu "请选择:" btStatus || return 0
 
     if [[ "${btStatus}" == "1" ]]; then
 
