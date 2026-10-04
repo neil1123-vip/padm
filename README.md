@@ -211,7 +211,9 @@ padm-docker update \
   [--control-bundle <URL|文件>]
 ```
 
-更新事务依次验签 manifest、预拉取五个固定 digest 镜像、校验当前配置、保存 `backups/update.*` 快照、原子切换镜像引用并运行 Compose health check。拉取、校验、启动或健康检查任一步失败，都会恢复旧配置和旧镜像引用；生产机不会在线编译镜像。需要新版本时，先由 CI 根据新的锁文件构建并发布，再在生产机执行 `padm-docker update`。
+`padm-docker update` 同时更新五个镜像和宿主控制脚本，无需另行执行 `install`。更新事务依次验签 manifest、校验并暂存控制 bundle、预拉取五个固定 digest 镜像、校验当前配置、保存 `backups/update.*` 快照、切换镜像引用和控制 bundle 原子指针，再运行 Compose health check。拉取或校验失败时不切换现有部署；切换、启动、健康检查或采集调度失败时会尝试恢复旧配置、旧镜像引用和旧控制脚本。生产机不会在线编译镜像。需要新版本时，先由 CI 根据新的锁文件构建并发布，再在生产机执行 `padm-docker update`。
+
+尚不支持控制脚本自更新的旧版需一次过渡：重新下载 `/root/install-docker.sh`，执行 `bash /root/install-docker.sh install --ref <本次发布的 40 位 commit SHA>`，再执行 `padm-docker update`。之后只需 `padm-docker update`。
 
 ### 回滚
 
@@ -219,7 +221,7 @@ padm-docker update \
 padm-docker rollback
 ```
 
-回滚只使用受管的最近一次 `update.*` 快照，默认退回一个版本；没有有效快照时直接失败，不猜测或拼接任意历史版本。已启用用户统计时，回滚目标 sing-box 必须具备 `with_v2ray_api`，否则会在停止现有部署前拒绝，避免丢失额度约束。回滚失败会尝试恢复当前版本，并保留备份路径供排障。
+回滚只使用受管的最近一次 `update.*` 快照，默认退回一个版本，并同时恢复快照记录的控制脚本；旧快照没有控制 bundle 指针时只恢复部署配置和镜像，不猜测旧脚本版本。没有有效快照时直接失败，不猜测或拼接任意历史版本。已启用用户统计时，回滚目标 sing-box 必须具备 `with_v2ray_api`，否则会在停止现有部署前拒绝，避免丢失额度约束。回滚失败会尝试恢复当前版本，并保留备份路径供排障。
 
 ### 卸载
 
@@ -555,7 +557,7 @@ Nginx 只在当前协议、站点或订阅配置确实依赖它时可启动、�
 
 `with_grpc` 控制完整的 gRPC 传输实现；未启用时仍有默认 gRPC lite，本项目的 Reality gRPC 配置可以使用。按用户统计由 `with_v2ray_api` 独立启用，Hysteria2 和 TUIC 也不依赖 `with_grpc`。
 
-Docker 镜像按 `versions.lock` 固定统计包版本和双架构 SHA256；官方包摘要单独保留，用于统计版构建时校验 Cronet 来源。Docker 已接入上述用户采集和额度管理。已有部署先按 Docker 安装命令重新下载 `/root/install-docker.sh`，再执行 `bash /root/install-docker.sh install --ref <本次发布的40位commit SHA>` 刷新宿主控制 bundle，最后执行 `padm-docker update` 更新镜像并初始化统计。首次升级必须使用新下载的入口，旧 `padm-docker install` 会遗漏新增的共享模块；`update` 本身也不替换宿主控制脚本。现有协议配置会保留，协议入口仍以 Docker 支持矩阵为准。以下菜单步骤适用于原生部署。
+Docker 镜像按 `versions.lock` 固定统计包版本和双架构 SHA256；官方包摘要单独保留，用于统计版构建时校验 Cronet 来源。Docker 已接入上述用户采集和额度管理，执行 `padm-docker update` 会同时更新镜像、宿主控制 bundle 并初始化统计。尚不支持自更新的旧版先按“更新”章节完成一次过渡刷新，必须使用新下载的入口，避免旧 `padm-docker install` 遗漏新增共享模块。现有协议配置会保留，协议入口仍以 Docker 支持矩阵为准。以下菜单步骤适用于原生部署。
 
 若旧核心出现 `v2ray api is not included in this build`，或曾清理统计配置后恢复连接，请在运行 sing-box 的服务器上执行：
 

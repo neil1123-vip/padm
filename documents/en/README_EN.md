@@ -211,7 +211,9 @@ padm-docker update \
   [--control-bundle <URL|file>]
 ```
 
-The transaction verifies the manifest, pre-pulls all five digest-pinned images, validates the current configuration, saves a `backups/update.*` snapshot, atomically switches image references, and waits for Compose health checks. A pull, validation, startup, or health-check failure restores the old configuration and image references; production hosts never build images online. To publish a new version, update the lock inputs and let CI publish a Release, then run `padm-docker update` on the production host.
+`padm-docker update` updates all five images and the host control scripts together; a separate `install` is no longer needed. The transaction verifies the manifest, validates and stages the control bundle, pre-pulls all five digest-pinned images, validates the current configuration, saves a `backups/update.*` snapshot, switches image references and the atomic control bundle pointer, and waits for Compose health checks. Pull or validation failures leave the current deployment unchanged. A switch, startup, health-check, or collection-schedule failure attempts to restore the old configuration, image references, and control scripts. Production hosts never build images online. To publish a new version, update the lock inputs and let CI publish a Release, then run `padm-docker update` on the production host.
+
+Older versions without control script self-updates need a one-time transition: download `/root/install-docker.sh` again, run `bash /root/install-docker.sh install --ref <40-character commit SHA of this release>`, then run `padm-docker update`. Subsequent updates need only `padm-docker update`.
 
 ### Rollback
 
@@ -219,7 +221,7 @@ The transaction verifies the manifest, pre-pulls all five digest-pinned images, 
 padm-docker rollback
 ```
 
-Rollback uses only the most recent managed `update.*` snapshot and moves back one version. It fails rather than guessing at an arbitrary historical version when no valid snapshot exists. Once user statistics are enabled, a sing-box rollback target must include `with_v2ray_api`; incompatible targets are rejected before stopping the current deployment to preserve quota enforcement. If rollback itself fails, the command attempts to restore the current version and keeps the backup path for diagnosis.
+Rollback uses only the most recent managed `update.*` snapshot and moves back one version, also restoring its recorded control scripts. Legacy snapshots without a control bundle pointer restore only deployment configuration and images, without guessing an old script version. It fails rather than guessing at an arbitrary historical version when no valid snapshot exists. Once user statistics are enabled, a sing-box rollback target must include `with_v2ray_api`; incompatible targets are rejected before stopping the current deployment to preserve quota enforcement. If rollback itself fails, the command attempts to restore the current version and keeps the backup path for diagnosis.
 
 ### Uninstall
 
@@ -555,7 +557,7 @@ Native sing-box installations, as either the primary or auxiliary core, and the 
 
 `with_grpc` selects the full gRPC transport implementation. Without it, the default gRPC lite implementation still supports this project's Reality gRPC configuration. User statistics are enabled independently by `with_v2ray_api`; Hysteria2 and TUIC do not depend on `with_grpc` either.
 
-Docker pins the stats archive version and both architecture SHA256 values in `versions.lock`. Official archive digests are kept separately to verify the Cronet source during stats builds. Docker includes the user collection and quota management described above. Existing deployments should download `/root/install-docker.sh` again using the Docker installation command, run `bash /root/install-docker.sh install --ref <40-character commit SHA of this release>` to refresh the host control bundle, and then run `padm-docker update` to update images and initialize statistics. This first upgrade must use the freshly downloaded entry: the old `padm-docker install` omits the new shared module, and `update` itself does not replace the host control script. Existing protocol configuration is preserved, and available protocol entries still follow the Docker support matrix. The following menu steps apply to native deployments.
+Docker pins the stats archive version and both architecture SHA256 values in `versions.lock`. Official archive digests are kept separately to verify the Cronet source during stats builds. Docker includes the user collection and quota management described above. `padm-docker update` updates images and the host control bundle together and initializes statistics. Older versions without self-updates need the one-time transition described under Updates, using a freshly downloaded entry to avoid the old `padm-docker install` omitting new shared modules. Existing protocol configuration is preserved, and available protocol entries still follow the Docker support matrix. The following menu steps apply to native deployments.
 
 If an older core reports `v2ray api is not included in this build`, or connectivity was restored by removing the stats configuration, perform these steps on the server running sing-box:
 

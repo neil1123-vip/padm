@@ -1179,10 +1179,14 @@ dockerValidateCandidate() {
 }
 
 dockerBackupConfiguration() {
-    local root backup relative source prefix=${1:-configure}
+    local root backup relative source bundlePath prefix=${1:-configure}
     root=$(dockerInstallRoot) || return 1
     [[ "${prefix}" =~ ^[a-z][a-z0-9_-]*$ ]] || return 1
     backup=$(mktemp -d "${root}/backups/${prefix}.XXXXXX") || return 1
+    if [[ "${prefix}" == update || "${prefix}" == rollback ]]; then
+        bundlePath=$(dockerCurrentBundlePath) || return 1
+        printf '%s\n' "${bundlePath#"${root}/"}" >"${backup}/bundle.target" || return 1
+    fi
     : >"${backup}/present"
     while IFS= read -r relative; do
         source="${root}/${relative}"
@@ -1270,6 +1274,7 @@ dockerCreateUpdateCandidate() {
     previous=$(jq -r '.manifest.sha256 // empty' "${root}/deployment.json") || return 1
     jq -n --slurpfile deployment "${root}/deployment.json" \
         --arg version "${version}" --arg manifestSha "${manifestSha}" \
+        --arg bundleRef "$(jq -er '.release.commit' "${PADM_DOCKER_MANIFEST_FILE}")" \
         --arg identity "${PADM_DOCKER_MANIFEST_SIGNATURE_IDENTITY}" \
         --arg previous "${previous}" \
         --arg xray "$(dockerManifestImageDigest xray)" \
@@ -1279,6 +1284,7 @@ dockerCreateUpdateCandidate() {
         --arg net "$(dockerManifestImageDigest net)" '
       $deployment[0] |
       .padm_version = $version |
+      .bundle_version = $bundleRef |
       .manifest = {sha256: $manifestSha, signature_identity: $identity} |
       .previous_manifest_sha256 = (if $previous == "" then null else $previous end) |
       .images.xray.index_digest = $xray |
@@ -1378,9 +1384,14 @@ dockerEnsureRuntimeDataPermissions() {
 }
 
 dockerRestoreConfiguration() {
-    local root backup=${DOCKER_CONFIG_BACKUP:-} relative core
+    local root backup=${DOCKER_CONFIG_BACKUP:-} relative core bundleTarget=
     [[ "${DOCKER_CONFIG_SWITCHED:-0}" == "1" && -n "${backup}" ]] || return 0
     root=$(dockerInstallRoot) || return 1
+    if [[ -e "${backup}/bundle.target" || -L "${backup}/bundle.target" ]]; then
+        [[ -f "${backup}/bundle.target" && ! -L "${backup}/bundle.target" && -O "${backup}/bundle.target" ]] || return 1
+        bundleTarget=$(<"${backup}/bundle.target")
+        dockerBundlePathForTarget "${bundleTarget}" >/dev/null || return 1
+    fi
     dockerComposeRun down >/dev/null 2>&1 || true
     dockerRemoveConfigurationTargets || return 1
     while IFS= read -r relative; do
@@ -1388,7 +1399,7 @@ dockerRestoreConfiguration() {
         mkdir -p -- "${root}/$(dirname -- "${relative}")" || return 1
         cp -a -- "${backup}/${relative}" "${root}/${relative}" || return 1
     done <"${backup}/present"
-    DOCKER_CONFIG_SWITCHED=0
+    [[ -z "${bundleTarget}" ]] || dockerActivateBundle "${bundleTarget}" || return 1
     if [[ -f "${root}/deployment.json" && -f "${root}/compose.json" && -f "${root}/images.env" ]]; then
         core=$(jq -r '.core.type' "${root}/deployment.json") || return 1
         if [[ -f "${root}/config/${core}/users.base" || -f "${root}/data/traffic/state.json" ]]; then
@@ -1399,6 +1410,7 @@ dockerRestoreConfiguration() {
     else
         dockerTrafficScheduleRemove || return 1
     fi
+    DOCKER_CONFIG_SWITCHED=0
 }
 
 dockerCleanupConfigurationCandidate() {

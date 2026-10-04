@@ -7,11 +7,14 @@ MOCK_BIN=${TEST_ROOT}/bin
 STATE_ROOT=${TEST_ROOT}/state
 DOCKER_LOG=${TEST_ROOT}/docker.log
 MANIFEST=${TEST_ROOT}/release-manifest.json
+CONTROL_SOURCE=${TEST_ROOT}/control-old
+CONTROL_BUNDLE=${TEST_ROOT}/control-new.tar.gz
+FAILED_CONTROL_BUNDLE=${TEST_ROOT}/control-failed.tar.gz
 OLD_DIGEST=$(printf '1%.0s' {1..64})
 NEW_DIGEST=$(printf '2%.0s' {1..64})
 ROLLBACK_DIGEST=$(printf '3%.0s' {1..64})
 REF_PREFIX=ghcr.io/example/padm
-mkdir -p "${MOCK_BIN}" "${STATE_ROOT}"/{backups,config/xray,config/sing-box,config/nginx,config/net,data/subscription,logs,secrets,locks}
+mkdir -p "${MOCK_BIN}" "${STATE_ROOT}"/{.bundles,backups,config/xray,config/sing-box,config/nginx,config/net,data/subscription,logs,secrets,locks}
 trap 'rm -rf -- "${TEST_ROOT}"' EXIT
 
 fail() {
@@ -19,7 +22,7 @@ fail() {
     exit 1
 }
 
-for tool in bash jq sha256sum awk sed find mktemp stat; do
+for tool in bash jq sha256sum awk sed find mktemp stat tar readlink; do
     command -v "${tool}" >/dev/null 2>&1 || fail "missing tool: ${tool}"
 done
 
@@ -44,6 +47,24 @@ esac
 EOF
 chmod 0755 "${MOCK_BIN}/docker"
 
+copyControlFixture() {
+    local target=$1 marker=$2 relative
+    for relative in \
+        docker/lib/bootstrap.sh docker/lib/bundle.sh docker/lib/manifest.sh \
+        docker/lib/services.sh docker/lib/traffic.sh docker/lib/lifecycle.sh \
+        docker/contracts/configure.schema.json docker/contracts/deployment.schema.json \
+        docker/contracts/features.json shell/core/deployment_mode.sh shell/core/stats_grpc.sh; do
+        mkdir -p "${target}/$(dirname -- "${relative}")"
+        cp "${PROJECT_ROOT}/${relative}" "${target}/${relative}"
+    done
+    printf '#!/usr/bin/env bash\nprintf "%%s\\n" "%s"\n' "${marker}" >"${target}/install-docker.sh"
+}
+copyControlFixture "${CONTROL_SOURCE}" old-control
+copyControlFixture "${TEST_ROOT}/control-new" new-control
+copyControlFixture "${TEST_ROOT}/control-failed" failed-control
+tar -czf "${CONTROL_BUNDLE}" -C "${TEST_ROOT}/control-new" install-docker.sh docker shell
+tar -czf "${FAILED_CONTROL_BUNDLE}" -C "${TEST_ROOT}/control-failed" install-docker.sh docker shell
+
 cat >"${MANIFEST}" <<EOF
 $(jq -n --arg old "${OLD_DIGEST}" --arg new "${NEW_DIGEST}" --arg prefix "${REF_PREFIX}" '
   def image($name): {reference: ($prefix + "-" + $name + ":3.2.0@sha256:" + $new), index_digest: ("sha256:" + $new),
@@ -60,19 +81,27 @@ EOF
 MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" \
     FAKE_DOCKER_FAIL_MARK="${TEST_ROOT}/fail-up" \
     PHASE6_PROJECT_ROOT="${PROJECT_ROOT}" PHASE6_MANIFEST="${MANIFEST}" \
+    PHASE6_CONTROL_SOURCE="${CONTROL_SOURCE}" PHASE6_CONTROL_BUNDLE="${CONTROL_BUNDLE}" \
+    PHASE6_FAILED_CONTROL_BUNDLE="${FAILED_CONTROL_BUNDLE}" \
+    PADM_DOCKER_BIN_DIR="${TEST_ROOT}/installed-bin" \
     PADM_DOCKER_INSTALL_DIR="${STATE_ROOT}" PADM_DOCKER_SKIP_CHOWN=1 \
     bash -uc '
         set -euo pipefail
-        source "$PHASE6_PROJECT_ROOT/docker/lib/bootstrap.sh"
-        source "$PHASE6_PROJECT_ROOT/docker/lib/manifest.sh"
-        source "$PHASE6_PROJECT_ROOT/docker/lib/services.sh"
-        source "$PHASE6_PROJECT_ROOT/docker/lib/lifecycle.sh"
+        source "$PHASE6_PROJECT_ROOT/install-docker.sh" help
         root=$(dockerInstallRoot)
+        oldCommit=$(printf "f%.0s" {1..40})
+        newCommit=$(printf "a%.0s" {1..40})
+        failedCommit=$(printf "d%.0s" {1..40})
+        dockerInstallBundle "$PHASE6_CONTROL_SOURCE" "$oldCommit"
+        dockerInstallCli
+        oldBundle=$(readlink "$root/bundle")
+        cli="$PADM_DOCKER_BIN_DIR/padm-docker"
+        test "$(bash "$cli")" == old-control
         printf "docker\n" >"$root/mode"
         digest=$(printf "1%.0s" {1..64})
         ref="ghcr.io/example/padm-xray:3.1.9@sha256:$digest"
-        jq -n --arg d "sha256:$digest" --arg r "$ref" "
-          {schema_version: 1, mode: \"docker\", padm_version: \"3.1.9\", bundle_version: \"test\",
+        jq -n --arg d "sha256:$digest" --arg r "$ref" --arg bundle "$oldCommit" "
+          {schema_version: 1, mode: \"docker\", padm_version: \"3.1.9\", bundle_version: \$bundle,
            manifest: {sha256: (\"a\" * 64), signature_identity: \"test\"},
            compose: {project: \"padm-docker\", profiles: [\"core-xray\"]}, core: {type: \"xray\", protocol_ids: [1]},
            listeners: [{service: \"xray\", public_port: 24443, container_port: 24443, transport: \"tcp\", address_families: [\"ipv4\"]}],
@@ -101,36 +130,100 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
             PADM_DOCKER_MANIFEST_FILE=$source
             PADM_DOCKER_MANIFEST_SHA256=$(printf "a%.0s" {1..64})
             PADM_DOCKER_MANIFEST_SIGNATURE_IDENTITY=test
+            PADM_DOCKER_MANIFEST_TEMP_DIR="$root/.manifest-fixture"
+            mkdir -p "$PADM_DOCKER_MANIFEST_TEMP_DIR"
+            PADM_DOCKER_CONTROL_BUNDLE=$control
         }
         dockerManifestImageReference() { jq -er --arg n "$1" ".images[\$n].reference" "$PADM_DOCKER_MANIFEST_FILE"; }
         dockerManifestImageDigest() { jq -er --arg n "$1" ".images[\$n].index_digest" "$PADM_DOCKER_MANIFEST_FILE"; }
         dockerManifestReleaseVersion() { printf "3.2.0\n"; }
         dockerComposeFile() { printf "%s/compose.json\n" "$(dockerInstallRoot)"; }
         dockerRemoveCli() { :; }
+        assertCurrent() {
+            local bundle=$1 commit=$2 marker=$3 imageDigest=$4 path
+            test "$(readlink "$root/bundle")" == "$bundle"
+            path=$(dockerCurrentBundlePath)
+            test "$(<"$path/$PADM_DOCKER_BUNDLE_REF")" == "$commit"
+            test "$(readlink "$cli")" == "$root/bundle/install-docker.sh"
+            test "$(bash "$cli")" == "$marker"
+            jq -e --arg bundle "$commit" --arg digest "sha256:$imageDigest" \
+                ".bundle_version == \$bundle and (.images | length) == 5 and all(.images[]; .index_digest == \$digest)" \
+                "$root/deployment.json" >/dev/null
+            test "$(grep -c "@sha256:$imageDigest$" "$root/images.env")" -eq 5
+        }
+        control=$PHASE6_CONTROL_BUNDLE
         dockerUpdateCommand --manifest "$source"
         test "$(grep -c "^pull " "${FAKE_DOCKER_LOG}")" -eq 5
-        grep -q "3.2.0@sha256:$(printf 2%.0s {1..64})" "$root/images.env"
-        test -n "$(find "$root/backups" -maxdepth 1 -type d -name "update.*" -print -quit)"
+        newBundle=$(readlink "$root/bundle")
+        test "$newBundle" != "$oldBundle"
+        assertCurrent "$newBundle" "$newCommit" new-control "$(printf 2%.0s {1..64})"
+        successfulBackup=$DOCKER_CONFIG_BACKUP
+        test "$(<"$successfulBackup/bundle.target")" == "$oldBundle"
+        ! grep -qxF bundle.target "$successfulBackup/present"
+        dockerCleanupStagedBundle
 
-        jq ".images.xray.index_digest = \"sha256:$(printf 3%.0s {1..64})\"" "$source" >"$source.rollback"
+        jq --arg commit "$failedCommit" --arg digest "$(printf 3%.0s {1..64})" \
+            ".release.commit = \$commit | .images |= with_entries(.value.index_digest = \"sha256:\" + \$digest |
+              .value.reference |= sub(\"@sha256:[0-9a-f]+$\"; \"@sha256:\" + \$digest))" \
+            "$source" >"$source.rollback"
         source="$source.rollback"
-        export FAKE_DOCKER_FAIL_UP=1
-        dockerManifestPrepare() { PADM_DOCKER_MANIFEST_FILE=$source; PADM_DOCKER_MANIFEST_SHA256=$(printf "c%.0s" {1..64}); }
-        dockerManifestImageReference() { jq -er --arg n "$1" ".images[\$n].reference" "$PADM_DOCKER_MANIFEST_FILE"; }
-        dockerManifestImageDigest() { jq -er --arg n "$1" ".images[\$n].index_digest" "$PADM_DOCKER_MANIFEST_FILE"; }
-        ! dockerUpdateCommand --manifest "$source"
-        grep -q "3.2.0@sha256:$(printf 2%.0s {1..64})" "$root/images.env"
-        latest=$(find "$root/backups" -maxdepth 1 -type d -name "update.*" -printf "%T@ %p\n" | sort -nr | head -n 1 | cut -d" " -f2-)
-        rm -rf -- "$latest"
-        unset FAKE_DOCKER_FAIL_UP
+        control=$PHASE6_FAILED_CONTROL_BUNDLE
+        # 所有切换后的故障都必须恢复同一组控制脚本、镜像与部署记录。
+        for failure in health schedule activation; do
+            case "$failure" in
+            health) export FAKE_DOCKER_FAIL_UP=1 ;;
+            schedule) dockerTrafficScheduleInstall() { return 1; } ;;
+            activation) mkdir "$root/.bundle-link.${BASHPID:-$$}" ;;
+            esac
+            ! dockerUpdateCommand --manifest "$source"
+            assertCurrent "$newBundle" "$newCommit" new-control "$(printf 2%.0s {1..64})"
+            test "$DOCKER_CONFIG_BACKUP" != "$successfulBackup"
+            test -d "$DOCKER_CONFIG_BACKUP"
+            test "$(<"$DOCKER_CONFIG_BACKUP/bundle.target")" == "$newBundle"
+            dockerRemoveManagedTree "$root" "$DOCKER_CONFIG_BACKUP"
+            dockerCleanupStagedBundle
+            unset FAKE_DOCKER_FAIL_UP
+            dockerTrafficScheduleInstall() { :; }
+            if [[ "$failure" == activation ]]; then
+                dockerRemoveManagedTree "$root" "$root/.bundle-link.${BASHPID:-$$}"
+            fi
+        done
+        # 缺失内容和越界成员在拉取镜像、停止现有服务之前被拒绝。
+        mkdir "$root/incomplete-control"
+        printf "incomplete\n" >"$root/incomplete-control/install-docker.sh"
+        tar -czf "$root/incomplete-control.tar.gz" -C "$root/incomplete-control" install-docker.sh
+        tar -czf "$root/unsafe-control.tar.gz" --transform="s|^install-docker.sh$|../outside-control|" \
+            -C "$PHASE6_CONTROL_SOURCE" install-docker.sh
+        for control in "$root/missing-control.tar.gz" "$root/incomplete-control.tar.gz" "$root/unsafe-control.tar.gz"; do
+            logBefore=$(wc -l <"$FAKE_DOCKER_LOG")
+            ! dockerUpdateCommand --manifest "$source"
+            test "$(wc -l <"$FAKE_DOCKER_LOG")" == "$logBefore"
+            assertCurrent "$newBundle" "$newCommit" new-control "$(printf 2%.0s {1..64})"
+        done
+        # 损坏的新快照不能绕过校验，恢复也不能先停止当前服务。
+        printf "../outside-control\n" >"$successfulBackup/bundle.target"
+        ! dockerValidateConfigurationBackup "$successfulBackup"
+        DOCKER_CONFIG_BACKUP=$successfulBackup
+        DOCKER_CONFIG_SWITCHED=1
+        logBefore=$(wc -l <"$FAKE_DOCKER_LOG")
+        ! dockerRestoreConfiguration
+        test "$(wc -l <"$FAKE_DOCKER_LOG")" == "$logBefore"
+        ! dockerRollbackCommand
+        test "$(wc -l <"$FAKE_DOCKER_LOG")" == "$logBefore"
+        assertCurrent "$newBundle" "$newCommit" new-control "$(printf 2%.0s {1..64})"
+        printf "%s\n" "$oldBundle" >"$successfulBackup/bundle.target"
+        DOCKER_CONFIG_SWITCHED=0
         scheduleAttempts=0
         dockerTrafficScheduleInstall() { scheduleAttempts=$((scheduleAttempts + 1)); [[ "$scheduleAttempts" -gt 1 ]]; }
         ! dockerRollbackCommand
-        grep -q "3.2.0@sha256:$(printf 2%.0s {1..64})" "$root/images.env"
+        assertCurrent "$newBundle" "$newCommit" new-control "$(printf 2%.0s {1..64})"
         [[ "$scheduleAttempts" == 2 ]]
         dockerTrafficScheduleInstall() { :; }
         dockerRollbackCommand
-        grep -q "3.1.9@sha256:$(printf 1%.0s {1..64})" "$root/images.env"
+        assertCurrent "$oldBundle" "$oldCommit" old-control "$(printf 1%.0s {1..64})"
+        dockerValidateConfigurationBackup "$successfulBackup"
+        rm -f -- "$successfulBackup/bundle.target"
+        dockerValidateConfigurationBackup "$successfulBackup"
         test -d "$root"
         ! dockerUninstallCommand --purge
         test -d "$root"

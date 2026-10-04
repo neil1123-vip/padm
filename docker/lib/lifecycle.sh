@@ -426,6 +426,10 @@ dockerUpdateCommand() {
     }
     dockerManifestPrepare "${manifest}" "${bundle}" "${controlBundle}" ||
         return "${PADM_DOCKER_RC_MANIFEST}"
+    dockerStageReleaseBundle || {
+        dockerError '无法准备 release 控制 bundle，现有部署未切换'
+        return "${PADM_DOCKER_RC_BUNDLE}"
+    }
     dockerPullManifestImages || return "${PADM_DOCKER_RC_COMPOSE}"
     dockerTrafficRuntimeCheck || return "${PADM_DOCKER_RC_HOST}"
     dockerTrafficBeforeChange
@@ -445,9 +449,10 @@ dockerUpdateCommand() {
     backup=${DOCKER_CONFIG_BACKUP}
     if ! dockerInstallCandidate "${candidate}" "${backup}" ||
         ! dockerEnsureRuntimeDataPermissions ||
+        ! dockerActivateStagedBundle ||
         ! dockerComposeRun up -d --force-recreate --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" ||
         ! dockerTrafficScheduleInstall; then
-        dockerError '更新启动或健康检查失败，正在恢复旧配置'
+        dockerError '控制脚本切换、启动或健康检查失败，正在恢复旧配置和控制脚本'
         if ! dockerRestoreConfiguration; then
             dockerError "旧版本恢复失败，请检查备份: ${backup}"
         fi
@@ -456,7 +461,7 @@ dockerUpdateCommand() {
     fi
     DOCKER_CONFIG_SWITCHED=0
     dockerCleanupConfigurationCandidate || return "${PADM_DOCKER_RC_STATE}"
-    printf 'Docker 更新已提交，回滚快照: %s\n' "${backup}"
+    printf 'Docker 镜像和控制脚本更新已提交，回滚快照: %s\n' "${backup}"
 }
 
 dockerConfigurationBackupAllowed() {
@@ -473,6 +478,10 @@ dockerValidateConfigurationBackup() {
     [[ "${backup}" == "${root%/}/backups/"* && -d "${backup}" && ! -L "${backup}" && -O "${backup}" ]] || return 1
     [[ -f "${backup}/present" && ! -L "${backup}/present" && -O "${backup}/present" ]] || return 1
     [[ -z "$(find "${backup}" -type l -print -quit 2>/dev/null)" ]] || return 1
+    if [[ -e "${backup}/bundle.target" ]]; then
+        [[ -f "${backup}/bundle.target" && -O "${backup}/bundle.target" ]] || return 1
+        dockerBundlePathForTarget "$(<"${backup}/bundle.target")" >/dev/null || return 1
+    fi
     while IFS= read -r relative; do
         dockerConfigurationBackupAllowed "${relative}" || return 1
         [[ -n "${relative}" && -e "${backup}/${relative}" && ! -L "${backup}/${relative}" &&
@@ -480,7 +489,8 @@ dockerValidateConfigurationBackup() {
     done <"${backup}/present"
     [[ -z "$(sort "${backup}/present" | uniq -d)" ]] || return 1
     while IFS= read -r entry; do
-        [[ "${entry}" == "${backup}/present" || "${entry}" == "${backup}/deployment.json" ||
+        [[ "${entry}" == "${backup}/present" || "${entry}" == "${backup}/bundle.target" ||
+            "${entry}" == "${backup}/deployment.json" ||
             "${entry}" == "${backup}/deployment.previous.json" || "${entry}" == "${backup}/images.env" ||
             "${entry}" == "${backup}/compose.json" || "${entry}" == "${backup}/config" ||
             "${entry}" == "${backup}/data" || "${entry}" == "${backup}/config/"* ||
@@ -653,6 +663,7 @@ dockerCommandInterrupted() {
         dockerConfigurationInterrupted || true
     fi
     dockerReleaseDeploymentLock || true
+    dockerCleanupStagedBundle || true
     dockerManifestCleanup || true
     dockerEntryCleanup || true
     exit "${status}"
@@ -693,6 +704,7 @@ dockerMain() {
     esac
     status=${status:-$?}
     dockerReleaseDeploymentLock || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_LOCK}
+    dockerCleanupStagedBundle || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_BUNDLE}
     dockerManifestCleanup || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_MANIFEST}
     dockerEntryCleanup || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_BUNDLE}
     trap - INT TERM

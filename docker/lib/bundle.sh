@@ -245,8 +245,39 @@ dockerStageBundle() {
     DOCKER_STAGED_BUNDLE_PATH=${candidate}
 }
 
+dockerCleanupStagedBundle() {
+    local root stageDir=${DOCKER_STAGED_BUNDLE_DIR:-}
+    [[ -n "${stageDir}" ]] || return 0
+    root=$(dockerInstallRoot) || return 1
+    if [[ -e "${stageDir}" || -L "${stageDir}" ]]; then
+        dockerRemoveManagedTree "${root}" "${stageDir}" || return 1
+    fi
+    DOCKER_STAGED_BUNDLE_DIR=
+    DOCKER_STAGED_BUNDLE_PATH=
+}
+
+dockerStageReleaseBundle() {
+    local root tempDir sourceRoot ref
+    root=$(dockerInstallRoot) || return 1
+    tempDir=${PADM_DOCKER_MANIFEST_TEMP_DIR:-}
+    dockerManagedPathIsSafe "${root}" "${tempDir}" &&
+        [[ -d "${tempDir}" && ! -L "${tempDir}" ]] || return 1
+    [[ -f "${PADM_DOCKER_CONTROL_BUNDLE:-}" && ! -L "${PADM_DOCKER_CONTROL_BUNDLE}" ]] || return 1
+    dockerCleanupStagedBundle || return 1
+    # 签名和摘要已校验，解压前仍拒绝越界路径、链接和超大归档。
+    dockerEntryArchiveIsSafe "${PADM_DOCKER_CONTROL_BUNDLE}" \
+        "${tempDir}/control.entries" "${tempDir}/control.details" || {
+        dockerError 'release 控制 bundle 归档不安全或损坏'
+        return 1
+    }
+    sourceRoot=$(mktemp -d "${tempDir}/control.XXXXXX") || return 1
+    tar -xzf "${PADM_DOCKER_CONTROL_BUNDLE}" --no-same-owner -C "${sourceRoot}" || return 1
+    ref=$(jq -er '.release.commit' "${PADM_DOCKER_MANIFEST_FILE}") || return 1
+    dockerStageBundle "${sourceRoot}" "${ref}"
+}
+
 dockerActivateStagedBundle() {
-    local root stageDir candidate manifest digest releaseDir existingDigest linkTarget tempLink currentTarget
+    local root stageDir candidate manifest digest releaseDir existingDigest
     root=$(dockerInstallRoot) || return 1
     stageDir=${DOCKER_STAGED_BUNDLE_DIR:-}
     candidate=${DOCKER_STAGED_BUNDLE_PATH:-}
@@ -274,7 +305,25 @@ dockerActivateStagedBundle() {
         mv -- "${candidate}" "${releaseDir}" || return 1
         rmdir -- "${stageDir}" || return 1
     fi
-    linkTarget=".bundles/${digest}"
+    dockerActivateBundle ".bundles/${digest}"
+}
+
+dockerBundlePathForTarget() {
+    local target=$1 root digest
+    root=$(dockerInstallRoot) || return 1
+    [[ "${target}" =~ ^[.]bundles/([0-9a-f]{64})$ ]] || return 1
+    digest=${BASH_REMATCH[1]}
+    [[ -d "${root}/.bundles" && ! -L "${root}/.bundles" &&
+        -d "${root}/${target}" && ! -L "${root}/${target}" ]] || return 1
+    [[ "$(sha256sum "${root}/${target}/${PADM_DOCKER_BUNDLE_MANIFEST}" | cut -d ' ' -f 1)" == "${digest}" ]] || return 1
+    dockerValidateBundle "${root}/${target}" || return 1
+    printf '%s\n' "${root}/${target}"
+}
+
+dockerActivateBundle() {
+    local linkTarget=$1 root tempLink currentTarget
+    root=$(dockerInstallRoot) || return 1
+    dockerBundlePathForTarget "${linkTarget}" >/dev/null || return 1
     if [[ -e "${root}/bundle" || -L "${root}/bundle" ]]; then
         [[ -L "${root}/bundle" ]] || {
             dockerError "Docker bundle 目标不是受管符号链接: ${root}/bundle"
@@ -300,14 +349,9 @@ dockerInstallBundle() {
 }
 
 dockerCurrentBundlePath() {
-    local root target digest
+    local root target
     root=$(dockerInstallRoot) || return 1
     [[ -L "${root}/bundle" ]] || return 1
     target=$(readlink "${root}/bundle" 2>/dev/null) || return 1
-    [[ "${target}" =~ ^[.]bundles/([0-9a-f]{64})$ ]] || return 1
-    digest=${BASH_REMATCH[1]}
-    [[ -d "${root}/${target}" && ! -L "${root}/${target}" ]] || return 1
-    [[ "$(sha256sum "${root}/${target}/${PADM_DOCKER_BUNDLE_MANIFEST}" | cut -d ' ' -f 1)" == "${digest}" ]] || return 1
-    dockerValidateBundle "${root}/${target}" || return 1
-    printf '%s\n' "${root}/${target}"
+    dockerBundlePathForTarget "${target}"
 }
