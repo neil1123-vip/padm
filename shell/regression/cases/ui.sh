@@ -1355,6 +1355,7 @@ EOF
     subscriptionWireGuardConfigFile() { echo "${TMP_DIR}/menu-smoke-wireguard/wg-padm.conf"; }
     readNginxSubscribe() { subscribePort=39778; subscribeDomain=main.example.com; subscribeType=https; }
     showAccounts() { recordMenuAction showAccounts; }
+    showPublishedSubscriptionLinks() { recordMenuAction "showPublishedSubscriptionLinks:$*"; }
     installSubscribe() { recordMenuAction installSubscribe; }
     runSubscriptionGroupSync() { recordMenuAction "runSubscriptionGroupSync:$*"; }
     subscriptionSyncPlan() { recordMenuAction subscriptionSyncPlan; jq -n '{create:[], remove:[]}'; }
@@ -1992,14 +1993,23 @@ invite-credential"
 1
 4
 4"
-        assertMenuAction subscribe
+        [[ "${actions}" == $'showPublishedSubscriptionLinks:\n' ]]
+        resetMenuActions
+        manageSubscriptionMainHome <<<"1
+6
+4
+4"
+        [[ "${actions}" == $'runSubscriptionGroupSync:\nshowPublishedSubscriptionLinks:\n' ]]
+        ! assertMenuAction installSubscribe
+        ! assertMenuAction subscribe
         resetMenuActions
         output=
         manageSubscriptionMainHome <<<"1
 4
 4"
         grep -q "本机自用订阅来自协议配置" <<<"${output}"
-        grep -q "刷新并查看订阅链接" <<<"${output}"
+        grep -q "查看当前订阅链接" <<<"${output}"
+        grep -q "立即同步并更新链接" <<<"${output}"
         grep -q "安装/更新发布服务" <<<"${output}"
         ! grep -q "发布与链接" <<<"${output}"
         grep -q "分享订阅" <<<"${output}"
@@ -2011,7 +2021,7 @@ invite-credential"
 4
 4"
         grep -q "安装/更新发布服务" <<<"${output}"
-        grep -q "刷新并查看订阅链接" <<<"${output}"
+        grep -q "查看当前订阅链接" <<<"${output}"
         resetMenuActions
         output=
         manageSubscriptionMainHome <<<"1
@@ -2254,9 +2264,41 @@ main
         output=
         manageTrafficAndQuota <<<"1
 5"
-        assertMenuAction collectSubscriptionTraffic
-        assertMenuAction showSubscriptionTrafficOverview
+        [[ "${actions}" == $'showSubscriptionTrafficOverview\ncollectSubscriptionTraffic\nshowSubscriptionTrafficOverview\n' ]]
         grep -q "返回订阅与用户" <<<"${output}"
+        resetMenuActions
+        (
+            local trafficActions=
+            showSubscriptionTrafficOverview() { trafficActions+="overview"$'\n'; }
+            collectSubscriptionTraffic() { trafficActions+="collect"$'\n'; return 0; }
+            manageTrafficAndQuota <<<"5"
+            [[ "${trafficActions}" == $'overview\n' ]]
+        )
+        resetMenuActions
+        local trafficCommitted
+        for trafficCommitted in true false; do
+            (
+                local trafficActions=
+                showSubscriptionTrafficOverview() { trafficActions+="overview"$'\n'; }
+                collectSubscriptionTraffic() {
+                    trafficActions+="collect"$'\n'
+                    SUBSCRIPTION_TRAFFIC_LOCAL_COMMITTED=${trafficCommitted}
+                    return 1
+                }
+                manageTrafficAndQuota <<<"1
+5"
+                [[ "${trafficActions}" == $'overview\ncollect\noverview\n' ]]
+            )
+        done
+        (
+            local trafficActions=
+            showSubscriptionTrafficOverview() { trafficActions+="overview"$'\n'; return 1; }
+            collectSubscriptionTraffic() { trafficActions+="collect"$'\n'; return 1; }
+            manageTrafficAndQuota <<<"1
+5"
+            [[ "${trafficActions}" == $'overview\ncollect\noverview\n' ]]
+            [[ "${actions}" == $'errorCard:流量总览暂不可读\nerrorCard:流量总览暂不可读\n' ]]
+        )
         resetMenuActions
         manageTrafficAndQuota <<<"2
 1
@@ -2443,7 +2485,7 @@ y
         resetMenuActions
         setMenuSmokeRole uninitialized
         manageTrafficAndQuota <<<"5"
-        [[ -z "${actions}" ]]
+        [[ "${actions}" == $'showSubscriptionTrafficOverview\n' ]]
         resetMenuActions
         manageSubscriptionStateBackups <<<"5"
         [[ -z "${actions}" ]]

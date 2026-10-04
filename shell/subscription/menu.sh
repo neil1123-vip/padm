@@ -638,19 +638,21 @@ manageSubscriptionCatalog() {
     while true; do
         echoContent title "\n┌─ 订阅与用户 ───────────────────────────────────────"
         menuLine "本机自用订阅来自协议配置；这里统一处理发布、分享订阅和流量。"
-        menuItem 1 "刷新并查看订阅链接" "更新本机自用和已启用分享订阅的链接"
+        menuItem 1 "查看当前订阅链接" "只读查看已发布的本机自用和分享订阅"
         menuItem 2 "分享订阅" "新建或维护已有分享订阅"
         menuItem 3 "流量与限额" "查看流量明细，并处理超限和自动限额"
         menuItem 5 "安装/更新发布服务" "配置公网发布入口"
+        menuItem 6 "立即同步并更新链接" "更新本机和分享订阅后显示链接"
         menuReturnItem 4 "${returnText}" "回到上级菜单"
         menuClose
         menuReadChoice subscription_catalog_menu "请选择:" subscriptionCatalogStatus || return 0
         case "${subscriptionCatalogStatus}" in
-        1) refreshSubscriptionLinks ;;
+        1) showPublishedSubscriptionLinks ;;
         2) manageSharedSubscriptions ;;
         3) manageTrafficAndQuota ;;
         4) return ;;
         5) installSubscribe && showSubscriptionServiceStatus ;;
+        6) syncAndShowSubscriptionLinks ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -965,13 +967,15 @@ selectUserSubscriptionId() {
     done
 }
 
-showUserSubscriptionLinks() {
-    local userSubscriptionId=$1
+syncAndShowSubscriptionLinks() {
+    local userSubscriptionId=${1:-}
     local enabled
-    enabled=$(subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" 'first(.user_groups[]? | select(.id == $id)).enabled // false') || return 1
-    if [[ "${enabled}" != "true" ]]; then
-        warnCard "该订阅已停用或不存在" "启用后再同步获取链接"
-        return 1
+    if [[ -n "${userSubscriptionId}" ]]; then
+        enabled=$(subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" 'first(.user_groups[]? | select(.id == $id)).enabled // false') || return 1
+        if [[ "${enabled}" != "true" ]]; then
+            warnCard "该订阅已停用或不存在" "启用后再同步获取链接"
+            return 1
+        fi
     fi
     if ! ensureSubscriptionServiceForSharedLinks; then
         return 1
@@ -981,39 +985,48 @@ showUserSubscriptionLinks() {
         if [[ "${SUBSCRIPTION_SYNC_PUBLISHED:-false}" == "true" ]]; then
             warnCard "订阅同步部分失败，但本机已发布可用链接" "失败来源沿用旧快照；请到 订阅同步 -> 状态与排障 查看详情"
         else
-            errorCard "订阅同步失败，未生成新的分享链接" "修复同步问题后可在当前订阅重试"
+            errorCard "订阅同步失败，未生成新的订阅链接" "修复同步问题后重试，或只读查看现有链接"
             return 1
         fi
     fi
-    # 同步中的自动限额处理可能停用订阅，发布前重新确认状态。
-    enabled=$(subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" 'first(.user_groups[]? | select(.id == $id)).enabled // false') || return 1
-    if [[ "${enabled}" != "true" ]]; then
-        warnCard "该订阅已停用或不存在" "检查流量和额度，启用后再同步获取链接"
-        return 1
-    fi
-    showPublishedUserSubscriptionLinks "${userSubscriptionId}"
+    showPublishedSubscriptionLinks "${userSubscriptionId}"
 }
 
-showPublishedUserSubscriptionLinks() {
-    local userSubscriptionId=$1
+showPublishedSubscriptionLinks() {
+    local userSubscriptionId=${1:-}
     local enabled accountName salt accountHash domain publicBase format title
+    local accounts= enabledUsers defaultFile
     local shown=false
     if [[ "${SUBSCRIPTION_GROUPS_LOCK_HELD:-}" != "1" ]]; then
         local SUBSCRIPTION_GROUPS_LOCK_SKIPPED=false
         local readStatus=0
         PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 PADM_SUBSCRIPTION_GROUPS_LOCK_SKIP_BUSY=true \
-            subscriptionGroupsWithLock showPublishedUserSubscriptionLinks "${userSubscriptionId}" || readStatus=$?
+            subscriptionGroupsWithLock showPublishedSubscriptionLinks "${userSubscriptionId}" || readStatus=$?
         if [[ "${SUBSCRIPTION_GROUPS_LOCK_SKIPPED}" == "true" ]]; then
             statusCard "订阅正在同步或修改" "请稍后重试查看已发布链接"
             return 1
         fi
         return "${readStatus}"
     fi
-    enabled=$(subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" \
-        'first(.user_groups[]? | select(.id == $id)).enabled') || return 1
-    if [[ "${enabled}" != "true" ]]; then
-        warnCard "该订阅已停用或不存在" "启用后再同步获取链接"
-        return 1
+    if [[ -n "${userSubscriptionId}" ]]; then
+        # 同步中的额度处理可能停用订阅，统一在读取链接时复核。
+        enabled=$(subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" \
+            'first(.user_groups[]? | select(.id == $id)).enabled') || return 1
+        if [[ "${enabled}" != "true" ]]; then
+            warnCard "该订阅已停用或不存在" "检查流量和额度，启用后再同步获取链接"
+            return 1
+        fi
+        accounts=$(subscriptionSyncAccountName "${userSubscriptionId}") || return 1
+    else
+        enabledUsers=$(subscriptionActiveEnabledUsersJson) || return 1
+        # 本地旧输出可能仍有已停用或已删除的托管账号，不展示这些链接。
+        for defaultFile in "$(subscribeLocalBaseDir)"/default/*; do
+            [[ -f "${defaultFile}" ]] || continue
+            accountName=${defaultFile##*/}
+            [[ "${accountName}" == sub_* ]] && continue
+            accounts+="${accountName}"$'\n'
+        done
+        accounts+=$(jq -r '.[].account' <<<"${enabledUsers}") || return 1
     fi
     subscribePort= subscribeDomain= subscribeType=
     readNginxSubscribe || { errorCard "订阅服务配置读取失败"; return 1; }
@@ -1028,31 +1041,24 @@ showPublishedUserSubscriptionLinks() {
     elif [[ -n "${currentDefaultPort:-}" && "${currentDefaultPort}" != "443" ]]; then
         domain+=":${currentDefaultPort}"
     fi
-    accountName=$(subscriptionSyncAccountName "${userSubscriptionId}") || return 1
-    accountHash=$(printf '%s\n' "${accountName}${salt}" | md5sum | awk '{print $1}') || return 1
     publicBase=$(subscribePublicBaseDir)
-    for format in default clashMetaProfiles sing-box; do
-        [[ -s "${publicBase}/${format}/${accountHash}" ]] || continue
-        case "${format}" in
-        default) title="默认订阅" ;;
-        clashMetaProfiles) title="Clash Meta 订阅" ;;
-        sing-box) title="sing-box 订阅" ;;
-        esac
-        showSubscriptionUrlCard "${title}" "${accountName}" "${subscribeType}://${domain}/s/${format}/${accountHash}"
-        shown=true
-    done
+    while IFS= read -r accountName; do
+        [[ -n "${accountName}" ]] || continue
+        accountHash=$(printf '%s\n' "${accountName}${salt}" | md5sum | awk '{print $1}') || return 1
+        for format in default clashMetaProfiles sing-box; do
+            [[ -s "${publicBase}/${format}/${accountHash}" ]] || continue
+            case "${format}" in
+            default) title="默认订阅" ;;
+            clashMetaProfiles) title="Clash Meta 订阅" ;;
+            sing-box) title="sing-box 订阅" ;;
+            esac
+            showSubscriptionUrlCard "${title}" "${accountName}" "${subscribeType}://${domain}/s/${format}/${accountHash}"
+            shown=true
+        done
+    done <<<"${accounts}"
     [[ "${shown}" == "true" ]] && return 0
     statusCard "当前没有可用的已发布链接" "请执行立即同步并更新链接"
     return 1
-}
-
-refreshSubscriptionLinks() {
-    local accountName=${1:-}
-    local skipCleanup=${2:-}
-    if ! subscribe false "" "${accountName}" "${skipCleanup}"; then
-        errorCard "订阅输出刷新失败，请检查订阅配置"
-        return 1
-    fi
 }
 
 removeUserSubscriptionRollback() {
@@ -1349,10 +1355,10 @@ manageUserSubscriptionItem() {
         menuClose
         menuReadChoice user_subscription_item_menu "请选择:" userSubscriptionItemStatus || return 0
         case "${userSubscriptionItemStatus}" in
-        1) showPublishedUserSubscriptionLinks "${userSubscriptionId}" ;;
+        1) showPublishedSubscriptionLinks "${userSubscriptionId}" ;;
         2) showUserSubscriptionTraffic "${userSubscriptionId}" ;;
         3) editUserSubscriptionsMenu "[\"${userSubscriptionId}\"]" || true ;;
-        4) showUserSubscriptionLinks "${userSubscriptionId}" ;;
+        4) syncAndShowSubscriptionLinks "${userSubscriptionId}" ;;
         5)
             if subscriptionGroupsWithLock runUserSubscriptionMutationAndSyncUnlocked \
                 "用户订阅状态切换" "用户订阅状态切换失败" \

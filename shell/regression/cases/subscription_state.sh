@@ -610,6 +610,11 @@ runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
         [[ "${trafficOutput}" == *"总下载：2 B"* ]]
         [[ "${trafficOutput}" == *"来源明细："* ]]
         [[ "${trafficOutput}" != *'"upload"'* ]]
+        errorCard() { printf 'error:%s\n' "$*"; }
+        trafficReadResult='{"user_groups":[],"traffic":{"user_groups":{"team-a":{"sources":{"main":{"upload":1,"download":2}}}}}}'
+        trafficOutput=$(showUserSubscriptionTraffic team-a) && return 1
+        [[ "${trafficOutput}" == *"订阅流量读取失败"* ]]
+        [[ "${trafficOutput}" != *"总上传"* && "${trafficOutput}" != *"来源明细"* ]]
     )
     (
         local lockTimeoutLog="${TMP_DIR}/subscription-state-quota-menu-lock-timeout.log"
@@ -628,7 +633,7 @@ runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
         menuReturnItem() { :; }
         menuClose() { :; }
         trafficOutput=$(manageTrafficAndQuota)
-        [[ "$(<"${lockTimeoutLog}")" == "0" ]]
+        [[ "$(<"${lockTimeoutLog}")" == $'0\n0' ]]
         [[ "${trafficOutput}" == *"自动执行超限处理：暂不可读"* ]]
     )
     (

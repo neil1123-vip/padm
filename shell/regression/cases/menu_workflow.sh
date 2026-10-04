@@ -74,7 +74,7 @@ runSubscriptionMenuWorkflowRegression() (
     (
         local syncCount=0 syncStatus=0 published=false serviceCount=0 linkCount=0
         ensureSubscriptionServiceForSharedLinks() { serviceCount=$((serviceCount + 1)); return 2; }
-        showUserSubscriptionLinks() { linkCount=$((linkCount + 1)); return 99; }
+        syncAndShowSubscriptionLinks() { linkCount=$((linkCount + 1)); return 99; }
         setSubscriptionGroupSyncEnabledWithCron() { return 99; }
         runSubscriptionGroupSync() {
             syncCount=$((syncCount + 1))
@@ -110,73 +110,108 @@ runSubscriptionMenuWorkflowRegression() (
         local syncCount=0 publishCount=0 publishedCount=0
         ensureSubscriptionServiceForSharedLinks() { return 0; }
         runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
-        refreshSubscriptionLinks() { publishCount=$((publishCount + 1)); return 99; }
-        showPublishedUserSubscriptionLinks() { publishedCount=$((publishedCount + 1)); }
+        subscribe() { publishCount=$((publishCount + 1)); return 99; }
+        showPublishedSubscriptionLinks() { publishedCount=$((publishedCount + 1)); }
         setUserSubscriptionEnabled alpha false
-        regressionExpectStatus 1 showUserSubscriptionLinks alpha
+        regressionExpectStatus 1 syncAndShowSubscriptionLinks alpha
         [[ "${syncCount}" == "0" && "${publishCount}" == "0" ]]
         setUserSubscriptionEnabled alpha true
-        showUserSubscriptionLinks alpha
+        syncAndShowSubscriptionLinks alpha
         [[ "${syncCount}" == "1" && "${publishCount}" == "0" && "${publishedCount}" == "1" ]]
-        showUserSubscriptionLinks alpha
+        syncAndShowSubscriptionLinks alpha
         [[ "${syncCount}" == "2" && "${publishCount}" == "0" && "${publishedCount}" == "2" ]]
-        runSubscriptionGroupSync() {
-            syncCount=$((syncCount + 1))
-            setUserSubscriptionEnabled alpha false
-        }
-        regressionExpectStatus 1 showUserSubscriptionLinks alpha
-        [[ "${syncCount}" == "3" && "${publishCount}" == "0" && "${publishedCount}" == "2" ]]
-        setUserSubscriptionEnabled alpha true
+        syncAndShowSubscriptionLinks
+        [[ "${syncCount}" == "3" && "${publishCount}" == "0" && "${publishedCount}" == "3" ]]
         runSubscriptionGroupSync() {
             syncCount=$((syncCount + 1))
             SUBSCRIPTION_SYNC_PUBLISHED=true
             return 1
         }
-        showUserSubscriptionLinks alpha
-        [[ "${syncCount}" == "4" && "${publishCount}" == "0" && "${publishedCount}" == "3" ]]
+        syncAndShowSubscriptionLinks alpha
+        [[ "${syncCount}" == "4" && "${publishCount}" == "0" && "${publishedCount}" == "4" ]]
+        syncAndShowSubscriptionLinks
+        [[ "${syncCount}" == "5" && "${publishCount}" == "0" && "${publishedCount}" == "5" ]]
         runSubscriptionGroupSync() {
             syncCount=$((syncCount + 1))
             return 1
         }
-        regressionExpectStatus 1 showUserSubscriptionLinks alpha
-        [[ "${syncCount}" == "5" && "${publishedCount}" == "3" ]]
+        regressionExpectStatus 1 syncAndShowSubscriptionLinks alpha
+        [[ "${syncCount}" == "6" && "${publishedCount}" == "5" ]]
+        regressionExpectStatus 1 syncAndShowSubscriptionLinks
+        [[ "${syncCount}" == "7" && "${publishedCount}" == "5" ]]
         runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
-        showPublishedUserSubscriptionLinks() { publishedCount=$((publishedCount + 1)); return 1; }
-        regressionExpectStatus 1 showUserSubscriptionLinks alpha
-        [[ "${syncCount}" == "6" && "${publishCount}" == "0" && "${publishedCount}" == "4" ]]
+        showPublishedSubscriptionLinks() { publishedCount=$((publishedCount + 1)); return 1; }
+        regressionExpectStatus 1 syncAndShowSubscriptionLinks alpha
+        [[ "${syncCount}" == "8" && "${publishCount}" == "0" && "${publishedCount}" == "6" ]]
         ensureSubscriptionServiceForSharedLinks() { return 1; }
-        regressionExpectStatus 1 showUserSubscriptionLinks alpha
-        [[ "${syncCount}" == "6" && "${publishedCount}" == "4" ]]
+        regressionExpectStatus 1 syncAndShowSubscriptionLinks alpha
+        [[ "${syncCount}" == "8" && "${publishedCount}" == "6" ]]
     )
 
     (
         local publicBase="${root}/public" localBase="${root}/local"
-        local linkLog="${root}/links.log" accountHash before
+        local linkLog="${root}/links.log" accountHash before personalHash disabledHash removedHash
+        local serviceCount=0 syncCount=0 publishCount=0
         export PADM_SUBSCRIBE_DIR="${publicBase}" PADM_SUBSCRIBE_LOCAL_DIR="${localBase}"
-        mkdir -p "${publicBase}/default" "${publicBase}/clashMetaProfiles" "${localBase}"
+        mkdir -p "${publicBase}/default" "${publicBase}/clashMetaProfiles" "${publicBase}/sing-box" "${localBase}/default"
         printf 'fixed-salt\n' >"${localBase}/subscribeSalt"
         accountHash=$(printf '%s\n' "$(subscriptionSyncAccountName alpha)fixed-salt" | md5sum | awk '{print $1}')
         readNginxSubscribe() { subscribeDomain=links.example.com; subscribeType=https; subscribePort=39778; }
         showSubscriptionUrlCard() { printf '%s\n' "$*" >>"${linkLog}"; }
-        runSubscriptionGroupSync() { return 99; }
-        subscribe() { return 99; }
-        regressionExpectStatus 1 showPublishedUserSubscriptionLinks alpha
+        installSubscribe() { serviceCount=$((serviceCount + 1)); return 99; }
+        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); return 99; }
+        subscribe() { publishCount=$((publishCount + 1)); return 99; }
+        regressionExpectStatus 1 showPublishedSubscriptionLinks alpha
+        regressionExpectStatus 1 showPublishedSubscriptionLinks
         printf 'published-default\n' >"${publicBase}/default/${accountHash}"
         printf 'published-clash\n' >"${publicBase}/clashMetaProfiles/${accountHash}"
         before=$(subscriptionGroupsStateRead -c '.')
-        showPublishedUserSubscriptionLinks alpha
+        showPublishedSubscriptionLinks alpha
         grep -qF "https://links.example.com:39778/s/default/${accountHash}" "${linkLog}"
         grep -qF "https://links.example.com:39778/s/clashMetaProfiles/${accountHash}" "${linkLog}"
         [[ "$(wc -l <"${linkLog}")" == "2" && "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+
+        personalHash=$(printf '%s\n' personalfixed-salt | md5sum | awk '{print $1}')
+        disabledHash=$(printf '%s\n' "$(subscriptionSyncAccountName 2)fixed-salt" | md5sum | awk '{print $1}')
+        removedHash=$(printf '%s\n' "$(subscriptionSyncAccountName removed)fixed-salt" | md5sum | awk '{print $1}')
+        printf 'local-personal\n' >"${localBase}/default/personal"
+        printf 'stale-disabled\n' >"${localBase}/default/$(subscriptionSyncAccountName 2)"
+        printf 'stale-removed\n' >"${localBase}/default/$(subscriptionSyncAccountName removed)"
+        printf 'personal-default\n' >"${publicBase}/default/${personalHash}"
+        printf 'personal-sing-box\n' >"${publicBase}/sing-box/${personalHash}"
+        printf 'disabled-output\n' >"${publicBase}/default/${disabledHash}"
+        printf 'removed-output\n' >"${publicBase}/default/${removedHash}"
+        setUserSubscriptionEnabled 2 false
+        before=$(subscriptionGroupsStateRead -c '.')
+        showPublishedSubscriptionLinks
+        [[ "$(wc -l <"${linkLog}")" == "6" && "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+        grep -qF "https://links.example.com:39778/s/default/${personalHash}" "${linkLog}"
+        grep -qF "https://links.example.com:39778/s/sing-box/${personalHash}" "${linkLog}"
+        ! grep -qF "${disabledHash}" "${linkLog}"
+        ! grep -qF "${removedHash}" "${linkLog}"
+        [[ "${serviceCount}" == "0" && "${syncCount}" == "0" && "${publishCount}" == "0" ]]
+        [[ "$(<"${localBase}/subscribeSalt")" == "fixed-salt" ]]
         setUserSubscriptionEnabled alpha false
-        regressionExpectStatus 1 showPublishedUserSubscriptionLinks alpha
-        [[ "$(wc -l <"${linkLog}")" == "2" ]]
+        regressionExpectStatus 1 showPublishedSubscriptionLinks alpha
+        [[ "$(wc -l <"${linkLog}")" == "6" ]]
+        showPublishedSubscriptionLinks
+        [[ "$(wc -l <"${linkLog}")" == "8" ]]
+        setUserSubscriptionEnabled alpha true
+        ensureSubscriptionServiceForSharedLinks() { return 0; }
+        runSubscriptionGroupSync() {
+            syncCount=$((syncCount + 1))
+            setUserSubscriptionEnabled alpha false
+            SUBSCRIPTION_SYNC_PUBLISHED=true
+        }
+        regressionExpectStatus 1 syncAndShowSubscriptionLinks alpha
+        [[ "${syncCount}" == "1" && "$(wc -l <"${linkLog}")" == "8" ]]
         subscriptionGroupsWithLock() {
             [[ "${PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT}" == "0" && "${PADM_SUBSCRIPTION_GROUPS_LOCK_SKIP_BUSY}" == "true" ]]
             SUBSCRIPTION_GROUPS_LOCK_SKIPPED=true
         }
-        regressionExpectStatus 1 showPublishedUserSubscriptionLinks alpha
-        [[ "$(wc -l <"${linkLog}")" == "2" ]]
+        regressionExpectStatus 1 showPublishedSubscriptionLinks alpha
+        regressionExpectStatus 1 showPublishedSubscriptionLinks
+        [[ "$(wc -l <"${linkLog}")" == "8" ]]
         grep -qF "订阅正在同步或修改" "${statusLog}"
     )
 
@@ -199,8 +234,8 @@ runSubscriptionMenuWorkflowRegression() (
 
     (
         local viewedId= syncedId= editedIds=
-        showPublishedUserSubscriptionLinks() { viewedId=$1; }
-        showUserSubscriptionLinks() { syncedId=$1; }
+        showPublishedSubscriptionLinks() { viewedId=$1; }
+        syncAndShowSubscriptionLinks() { syncedId=$1; }
         editUserSubscriptionsMenu() { editedIds=$1; }
         manageUserSubscriptionItem alpha <<< $'1\n4\n3\n7'
         [[ "${viewedId}" == "alpha" && "${syncedId}" == "alpha" && "${editedIds}" == '["alpha"]' ]]

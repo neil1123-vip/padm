@@ -748,17 +748,20 @@ showUserSubscriptionTraffic() {
     quotaStatusJq=$(subscriptionUserQuotaStatusJq) || return 1
     jqProgram=$(printf '%s\n%s\n%s\n%s\n' "$(subscriptionTrafficTotalsJq)" "$(subscriptionTrafficDisplayJq)" "${quotaStatusJq}" '
       . as $group |
-      (first($group.user_groups[]? | select(.id == $id))) as $userGroup |
+      (first($group.user_groups[]? | select(.id == $id)) // error("订阅不存在或已删除")) as $userGroup |
       ($group.traffic.user_groups[$id].sources // {}) as $traffic |
       ($group.sources // [] | map({key:.id, value:(.name // .id)}) | from_entries) as $sourceNames |
       ($userGroup.name // $id) as $name |
-      (if ($userGroup | type) == "object" then subscriptionUserQuotaStatus($userGroup; subscriptionTrafficTotal($traffic); true) else "未知" end) as $quotaStatus |
+      subscriptionUserQuotaStatus($userGroup; subscriptionTrafficTotal($traffic); true) as $quotaStatus |
       ([
         ("订阅：" + $name + (if $name == $id then "" else "（" + $id + "）" end)),
         ("限额状态：" + $quotaStatus)
       ] + subscriptionTrafficLines($traffic; $sourceNames; "user")) | .[]')
     output=$(PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 \
-        subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" "${jqProgram}") || return 1
+        subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" "${jqProgram}") || {
+        errorCard "订阅流量读取失败" "订阅可能已删除或状态暂不可读"
+        return 1
+    }
     showSubscriptionTrafficCard "用户订阅流量" "${output}"
 }
 
@@ -822,12 +825,13 @@ manageTrafficAndQuota() {
     subscriptionRequireLocalPublisherRole || return 1
     local quotaAutoApplyText
     local trafficQuotaStatus=
+    showSubscriptionTrafficOverview || errorCard "流量总览暂不可读"
     while true; do
         quotaAutoApplyText=$(PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 \
             subscriptionActiveGroupRead -r 'if (.sync.quota_auto_apply // false) == true then "开启" else "关闭" end' 2>/dev/null) || \
             quotaAutoApplyText="暂不可读"
         echoContent title "\n┌─ 流量与限额 ───────────────────────────────────────"
-        menuLine "先刷新总览；明细、超限和自动处理按需进入。"
+        menuLine "总览来自已保存的统计；采集和超限处理按需执行。"
         menuLine "自动执行超限处理：${quotaAutoApplyText}"
         menuItem 1 "刷新并显示总览" "采集本机账号流量，写入 groups.json 后显示治理摘要"
         menuItem 2 "流量明细" "按账号、分享订阅或服务器源查看累计流量"
@@ -837,7 +841,10 @@ manageTrafficAndQuota() {
         menuClose
         menuReadChoice traffic_quota_menu "请选择:" trafficQuotaStatus || return 0
         case "${trafficQuotaStatus}" in
-        1) collectSubscriptionTraffic && showSubscriptionTrafficOverview ;;
+        1)
+            collectSubscriptionTraffic || true
+            showSubscriptionTrafficOverview || errorCard "流量总览暂不可读"
+            ;;
         2) manageTrafficDetails ;;
         3) executeSubscriptionQuotaPlanMenu ;;
         4)
