@@ -1494,14 +1494,13 @@ cleanupSubscriptionWireGuardControlOnUninstall() {
         -e "${wireGuardStateFile}" || -L "${wireGuardStateFile}" ||
         -e "${wireGuardPrivateKeyFile}" || -L "${wireGuardPrivateKeyFile}" ||
         -e "${wireGuardPublicKeyFile}" || -L "${wireGuardPublicKeyFile}" ]]; then
-        if ! stopSubscriptionWireGuardControlService; then
+        if ! stopSubscriptionWireGuardControlService true; then
             errorCard "WireGuard 控制面停止失败，已取消删除控制面文件"
             return 1
         fi
     fi
     if command -v systemctl >/dev/null 2>&1; then
-        if [[ -e "${controlServiceFile}" || -L "${controlServiceFile}" ]] ||
-            systemctl is-active --quiet padm-subscription-control.service ||
+        if systemctl is-active --quiet padm-subscription-control.service ||
             systemctl is-enabled --quiet padm-subscription-control.service; then
             if ! systemctl disable --now padm-subscription-control.service >/dev/null 2>&1; then
                 errorCard "订阅控制服务停止失败，已取消删除控制面文件"
@@ -1509,7 +1508,7 @@ cleanupSubscriptionWireGuardControlOnUninstall() {
             fi
         fi
     fi
-    if ! removeSubscriptionWireGuardNginxSystemdDropIn; then
+    if ! removeSubscriptionWireGuardNginxSystemdDropIn true; then
         errorCard "WireGuard Nginx systemd 配置清理失败，已取消删除控制面文件"
         return 1
     fi

@@ -325,7 +325,7 @@ subscriptionPublisherHome() {
     local publisherRole=$1
     local homeTitle
     local menuKey
-    local homeStatus
+    local homeStatus=
     local returnChoice
     if [[ "${publisherRole}" == "main" ]]; then
         homeTitle="主控首页"
@@ -349,7 +349,7 @@ subscriptionPublisherHome() {
         fi
         menuReturnItem "${returnChoice}" "返回主菜单" "回到 padm 管理面板"
         menuClose
-        autoRead "${menuKey}" "请选择:" homeStatus
+        autoRead "${menuKey}" "请选择:" homeStatus || return 0
         if [[ "${homeStatus}" == "${returnChoice}" ]]; then
             return 0
         fi
@@ -385,6 +385,7 @@ manageSubscriptionMainHome() {
 
 manageSubscriptionControlledHome() {
     subscriptionRequireControlledRole || return 1
+    local controlledHomeStatus=
     while true; do
         echoContent title "\n┌─ 被控首页 ─────────────────────────────────────────"
         showSubscriptionServerRoleSummary
@@ -397,7 +398,7 @@ manageSubscriptionControlledHome() {
         menuDangerItem 7 "关闭被控控制面" "停止本机 WireGuard 控制面"
         menuReturnItem 8 "返回主菜单" "回到 padm 管理面板"
         menuClose
-        autoRead subscription_controlled_home_menu "请选择:" controlledHomeStatus
+        autoRead subscription_controlled_home_menu "请选择:" controlledHomeStatus || return 0
         case "${controlledHomeStatus}" in
         1) runSubscriptionControlledWizard ;;
         2)
@@ -422,6 +423,7 @@ manageSubscriptionControlledHome() {
 
 manageSubscriptionMainControlDetails() {
     subscriptionRequireMainRole || return 1
+    local mainControlDetailsStatus=
     while true; do
         echoContent title "\n┌─ 本机控制面 ───────────────────────────────────────"
         menuLine "这里处理主控控制面的状态、连接和恢复动作。"
@@ -433,7 +435,7 @@ manageSubscriptionMainControlDetails() {
         menuDangerItem 4 "关闭主控控制面" "停止本机 WireGuard 控制面"
         menuReturnItem 5 "返回主控首页" "回到上级菜单"
         menuClose
-        autoRead subscription_main_control_details_menu "请选择:" mainControlDetailsStatus
+        autoRead subscription_main_control_details_menu "请选择:" mainControlDetailsStatus || return 0
         case "${mainControlDetailsStatus}" in
         1) showSubscriptionWireGuardMainCredential ;;
         2) showSubscriptionWireGuardPeers; showSubscriptionSourceControlUrls ;;
@@ -455,7 +457,7 @@ manageSubscriptionCoordination() {
         menuItem 2 "维护本机控制面" "查看 WireGuard 状态、凭据、地址和 Peer，或重启/关闭"
         menuReturnItem 3 "返回主控首页" "回到上级菜单"
         menuClose
-        autoRead subscription_coordination_menu "请选择:" coordinationStatus
+        autoRead subscription_coordination_menu "请选择:" coordinationStatus || return 0
         case "${coordinationStatus}" in
         1) manageSubscriptionServers ;;
         2) manageSubscriptionMainControlDetails ;;
@@ -591,7 +593,7 @@ manageSubscriptionPublishMenu() {
         menuItem 2 "刷新并查看订阅链接" "重新生成本机自用和已启用分享订阅，并显示链接"
         menuReturnItem 3 "返回订阅与用户" "回到上级菜单"
         menuClose
-        autoRead subscription_publish_menu "请选择:" publishStatus
+        autoRead subscription_publish_menu "请选择:" publishStatus || return 0
         case "${publishStatus}" in
         1) installSubscribe && showSubscriptionServiceStatus ;;
         2) refreshSubscriptionLinks ;;
@@ -611,7 +613,7 @@ manageSharedSubscriptions() {
         menuItem 2 "管理分享订阅" "刷新单个链接、改范围、改额度、启停或删除"
         menuReturnItem 3 "返回订阅与用户" "回到上级菜单"
         menuClose
-        autoRead shared_subscription_menu "请选择:" sharedStatus
+        autoRead shared_subscription_menu "请选择:" sharedStatus || return 0
         case "${sharedStatus}" in
         1) createAndSyncUserSubscriptionWizard ;;
         2) manageUserSubscriptionItem ;;
@@ -636,7 +638,7 @@ manageSubscriptionCatalog() {
         menuItem 3 "流量与限额" "查看流量明细，并处理超限和自动限额"
         menuReturnItem 4 "${returnText}" "回到上级菜单"
         menuClose
-        autoRead subscription_catalog_menu "请选择:" subscriptionCatalogStatus
+        autoRead subscription_catalog_menu "请选择:" subscriptionCatalogStatus || return 0
         case "${subscriptionCatalogStatus}" in
         1) manageSubscriptionPublishMenu ;;
         2) manageSharedSubscriptions ;;
@@ -964,6 +966,7 @@ removeUserSubscriptionMenu() {
 
 manageUserSubscriptionItem() {
     local userSubscriptionId
+    local userSubscriptionItemStatus=
     selectUserSubscriptionId || return
     userSubscriptionId=${selectedUserSubscriptionId}
     while true; do
@@ -979,7 +982,7 @@ manageUserSubscriptionItem() {
         menuDangerItem 6 "删除订阅" "删除记录；同步后移除对应托管账号"
         menuReturnItem 7 "返回上级" "回到订阅与用户"
         menuClose
-        autoRead user_subscription_item_menu "请选择:" userSubscriptionItemStatus
+        autoRead user_subscription_item_menu "请选择:" userSubscriptionItemStatus || return 0
         case "${userSubscriptionItemStatus}" in
         1) showUserSubscriptionLinks "${userSubscriptionId}" ;;
         2) showUserSubscriptionTraffic "${userSubscriptionId}" ;;
@@ -1107,7 +1110,7 @@ manageSubscriptionPendingInvites() {
         menuLine "别名：${alias}；地址：${address}；过期：$(subscriptionWireGuardInviteLocalTime "${expiresAt}")；剩余：$(subscriptionWireGuardInviteRemainingText "${remainingSeconds}")；状态：${statusText}"
     done <<<"${inviteRows}"
     menuClose
-    autoRead subscription_cancel_invite_alias "输入要取消的唯一别名[直接回车返回]:" alias
+    autoRead subscription_cancel_invite_alias "输入要取消的唯一别名[直接回车返回]:" alias || return 0
     [[ -n "${alias}" ]] || return 0
     jq -e --arg alias "${alias}" 'any(.[]; .alias == $alias)' <<<"${pendingJson}" >/dev/null 2>&1 || { errorCard "待完成邀请别名无效"; return 1; }
     warnCard "取消邀请" "若接入曾中断，将同时清理该别名的部分 Peer、来源和凭据"
@@ -1224,7 +1227,7 @@ manageSubscriptionServers() {
         menuDangerItem 6 "移除被控服务器" "删除已有被控来源和 WireGuard Peer"
         menuReturnItem 7 "返回主控首页" "回到上级菜单"
         menuClose
-        autoRead server_source_menu "请选择:" serverStatus
+        autoRead server_source_menu "请选择:" serverStatus || return 0
         case "${serverStatus}" in
         1) createSubscriptionWireGuardInviteMenu ;;
         2) addOtherSubscribe ;;
@@ -1446,7 +1449,7 @@ manageSubscriptionSyncDiagnostics() {
         fi
         menuReturnItem "${returnChoice}" "返回订阅同步" "回到上级菜单"
         menuClose
-        autoRead subscription_sync_diagnostics_menu "请选择:" diagnosticStatus
+        autoRead subscription_sync_diagnostics_menu "请选择:" diagnosticStatus || return 0
         case "${diagnosticStatus}" in
         1) showSubscriptionGroupsStateSummary; showSubscriptionSources ;;
         2) showSubscriptionServerRoleSummary; showSubscriptionServiceStatus ;;
@@ -1509,7 +1512,7 @@ manageSubscriptionSyncSettings() {
         menuItem 5 "状态备份与恢复" "查看、备份、恢复或重建 groups.json"
         menuReturnItem 6 "${returnText}" "回到上级菜单"
         menuClose
-        autoRead sync_settings_menu "请选择:" syncSettingsStatus
+        autoRead sync_settings_menu "请选择:" syncSettingsStatus || return 0
         case "${syncSettingsStatus}" in
         1) runSubscriptionGroupSync || true ;;
         2)

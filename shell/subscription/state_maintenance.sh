@@ -238,6 +238,7 @@ resetSubscriptionGroupsStateMenu() {
 manageSubscriptionStateBackups() {
     subscriptionRequireLocalPublisherRole || return 1
     local role returnText returnMenu=${1:-home}
+    local subscriptionStateBackupStatus=
     role=$(subscriptionCurrentRoleNormalized) || return 1
     if [[ "${returnMenu}" == "sync" ]]; then
         returnText="返回订阅同步"
@@ -253,7 +254,7 @@ manageSubscriptionStateBackups() {
         menuDangerItem 4 "重建订阅状态" "确认后先备份当前状态，再重置为空的默认订阅组"
         menuReturnItem 5 "${returnText}" "回到上级菜单"
         menuClose
-        autoRead subscription_state_backup_menu "请选择:" subscriptionStateBackupStatus
+        autoRead subscription_state_backup_menu "请选择:" subscriptionStateBackupStatus || return 0
         case "${subscriptionStateBackupStatus}" in
         1) showSubscriptionGroupsStateSummary ;;
         2) createSubscriptionGroupsBackupMenu ;;

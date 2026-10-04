@@ -943,13 +943,15 @@ EOF
 removeSubscriptionWireGuardNginxSystemdDropIn() {
     local targetPath
     local targetExists=false
+    local allowDaemonReloadFailure=${1:-false}
     targetPath=$(subscriptionWireGuardNginxSystemdDropInFile) || return 1
     if [[ -e "${targetPath}" || -L "${targetPath}" ]]; then
         targetExists=true
     fi
     removeManagedFileIfPresent "${targetPath}" || return 1
     if [[ "${targetExists}" == "true" ]]; then
-        subscriptionWireGuardNginxSystemdDaemonReload
+        subscriptionWireGuardNginxSystemdDaemonReload ||
+            [[ "${allowDaemonReloadFailure}" == "true" ]]
     fi
 }
 
@@ -992,10 +994,23 @@ subscriptionWireGuardWaitForAddress() {
 
 stopSubscriptionWireGuardControlService() {
     local allowMissingBackend=${1:-false}
+    local interface
+    local unit
+    interface=$(subscriptionWireGuardInterface) || return 1
+    unit="wg-quick@${interface}"
     if command -v systemctl >/dev/null 2>&1; then
-        systemctl disable --now "wg-quick@$(subscriptionWireGuardInterface)" >/dev/null 2>&1
+        if systemctl is-active --quiet "${unit}" ||
+            systemctl is-enabled --quiet "${unit}"; then
+            systemctl disable --now "${unit}" >/dev/null 2>&1
+        else
+            return 0
+        fi
     elif command -v wg-quick >/dev/null 2>&1; then
-        wg-quick down "$(subscriptionWireGuardInterface)" >/dev/null 2>&1
+        if command -v ip >/dev/null 2>&1 &&
+            ! ip link show dev "${interface}" >/dev/null 2>&1; then
+            return 0
+        fi
+        wg-quick down "${interface}" >/dev/null 2>&1
     else
         [[ "${allowMissingBackend}" == "true" ]]
     fi

@@ -2195,10 +2195,15 @@ main
         )
         (
             local pendingInviteJqLog="${TMP_DIR}/pending-invite-jq.log"
+            local cancelCalled=
             subscriptionWireGuardListPendingInvites() {
                 printf '%s\n' '[{"alias":"edge-a","address":"10.77.0.2/24","expires_at":1770000000,"remaining_seconds":3600,"status":"pending"}]'
             }
-            autoRead() { printf -v "$3" '%s' ''; }
+            autoRead() {
+                printf -v "$3" '%s' ''
+                return 1
+            }
+            subscriptionWireGuardCancelInvite() { cancelCalled=true; }
             jq() {
                 printf 'jq\n' >>"${pendingInviteJqLog}"
                 command jq "$@"
@@ -2208,6 +2213,7 @@ main
             originalManageSubscriptionPendingInvites
             grep -q '别名：edge-a' <<<"${output}"
             [[ "$(wc -l <"${pendingInviteJqLog}")" == "1" ]]
+            [[ -z "${cancelCalled}" ]]
         )
         resetMenuActions
         output=
@@ -2263,6 +2269,28 @@ main
 5"
         assertMenuAction 'successCard:限额自动执行状态已切换'
         subscriptionGroupsStateRead -e '.sync.quota_auto_apply == true' >/dev/null
+        (
+            local menuReadCount=0 quotaToggleCount=0
+            autoRead() {
+                menuReadCount=$((menuReadCount + 1))
+                if [[ "${menuReadCount}" == "1" ]]; then
+                    printf -v "$3" '%s' 4
+                    return 0
+                fi
+                printf -v "$3" '%s' 4
+                return 1
+            }
+            subscriptionActiveGroupRead() {
+                printf '%s\n' '{"sync":{"quota_auto_apply":false}}'
+            }
+            toggleSubscriptionGroupQuotaAutoApplyEnabled() {
+                quotaToggleCount=$((quotaToggleCount + 1))
+                return 0
+            }
+            manageTrafficAndQuota
+            [[ "${menuReadCount}" == "2" ]]
+            [[ "${quotaToggleCount}" == "1" ]]
+        )
         resetMenuActions
         manageSubscriptionMainControlDetails <<<"1
 5"
@@ -2325,6 +2353,20 @@ main
         manageSubscriptionStateBackups <<<"4
 5"
         assertMenuAction resetSubscriptionGroupsStateMenu
+        (
+            local menuReadCount=0 backupActionCount=0
+            autoRead() {
+                menuReadCount=$((menuReadCount + 1))
+                printf -v "$3" '%s' 4
+                return 1
+            }
+            resetSubscriptionGroupsStateMenu() {
+                backupActionCount=$((backupActionCount + 1))
+            }
+            manageSubscriptionStateBackups
+            [[ "${menuReadCount}" == "1" ]]
+            [[ "${backupActionCount}" == "0" ]]
+        )
     fi
 
     if menuSmokePartSelected subscription-controlled; then

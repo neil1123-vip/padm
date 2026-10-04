@@ -401,6 +401,19 @@ runUninstallWireGuardCleanupRegression() (
     removeInstallPath() { actions+="remove:$1:$2"$'\n'; rm -rf "$1"; }
     systemctl() {
         actions+="systemctl:$*"$'\n'
+        if [[ "${mode}" == "wg-unit-missing" ]] &&
+            { [[ "$*" == "is-active --quiet wg-quick@wg-padm" ]] ||
+                [[ "$*" == "is-enabled --quiet wg-quick@wg-padm" ]]; }; then
+            return 1
+        fi
+        if [[ "${mode}" == "control-unit-missing" ]] &&
+            { [[ "$*" == "is-active --quiet padm-subscription-control.service" ]] ||
+                [[ "$*" == "is-enabled --quiet padm-subscription-control.service" ]]; }; then
+            return 1
+        fi
+        if [[ "${mode}" == "daemon-reload-fail" && "$*" == "daemon-reload" ]]; then
+            return 1
+        fi
         if [[ "${mode}" == "wg-stop-fail" && "$*" == "disable --now wg-quick@wg-padm" ]]; then
             return 1
         fi
@@ -446,6 +459,77 @@ runUninstallWireGuardCleanupRegression() (
     [[ ! -e "${PADM_WIREGUARD_NGINX_SYSTEMD_DROPIN_FILE}" ]]
     [[ -e "${PADM_WIREGUARD_CONTROL_DIR}/unmanaged" ]]
 
+    local wireGuardTestPublicKey='AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+    local endpointHost
+    for role in main controlled; do
+        actions=
+        endpointHost=
+        [[ "${role}" == "main" ]] && endpointHost=example.com
+        subscriptionWireGuardWriteState \
+            --arg role "${role}" \
+            --arg publicKey "${wireGuardTestPublicKey}" \
+            --arg endpointHost "${endpointHost}" \
+            '.role = $role | .enabled = true | .address = "10.77.0.2/24" |
+             .public_key = $publicKey | .endpoint_host = $endpointHost'
+        printf 'wg\n' >"$(subscriptionWireGuardConfigFile)"
+        printf 'private\n' >"$(subscriptionWireGuardPrivateKeyFile)"
+        printf 'public\n' >"$(subscriptionWireGuardPublicKeyFile)"
+        printf 'svc\n' >"$(subscriptionControlServiceFile)"
+        printf 'drop-in\n' >"${PADM_WIREGUARD_NGINX_SYSTEMD_DROPIN_FILE}"
+        mode=wg-unit-missing
+        cleanupSubscriptionWireGuardControlOnUninstall
+        ! grep -qxF 'systemctl:disable --now wg-quick@wg-padm' <<<"${actions}"
+        [[ ! -e "$(subscriptionWireGuardConfigFile)" ]]
+        [[ ! -e "$(subscriptionWireGuardStateFile)" ]]
+        [[ ! -e "$(subscriptionWireGuardPrivateKeyFile)" ]]
+        [[ ! -e "$(subscriptionWireGuardPublicKeyFile)" ]]
+        [[ ! -e "$(subscriptionControlServiceFile)" ]]
+        [[ ! -e "${PADM_WIREGUARD_NGINX_SYSTEMD_DROPIN_FILE}" ]]
+    done
+
+    actions=
+    subscriptionWireGuardWriteState \
+        --arg role main \
+        --arg publicKey "${wireGuardTestPublicKey}" \
+        --arg endpointHost example.com \
+        '.role = $role | .enabled = true | .address = "10.77.0.2/24" |
+         .public_key = $publicKey | .endpoint_host = $endpointHost'
+    printf 'wg\n' >"$(subscriptionWireGuardConfigFile)"
+    printf 'private\n' >"$(subscriptionWireGuardPrivateKeyFile)"
+    printf 'public\n' >"$(subscriptionWireGuardPublicKeyFile)"
+    printf 'svc\n' >"$(subscriptionControlServiceFile)"
+    printf 'drop-in\n' >"${PADM_WIREGUARD_NGINX_SYSTEMD_DROPIN_FILE}"
+    mode=control-unit-missing
+    cleanupSubscriptionWireGuardControlOnUninstall
+    ! grep -qxF 'systemctl:disable --now padm-subscription-control.service' <<<"${actions}"
+    [[ ! -e "$(subscriptionWireGuardConfigFile)" ]]
+    [[ ! -e "$(subscriptionWireGuardStateFile)" ]]
+    [[ ! -e "$(subscriptionWireGuardPrivateKeyFile)" ]]
+    [[ ! -e "$(subscriptionWireGuardPublicKeyFile)" ]]
+    [[ ! -e "$(subscriptionControlServiceFile)" ]]
+    [[ ! -e "${PADM_WIREGUARD_NGINX_SYSTEMD_DROPIN_FILE}" ]]
+
+    subscriptionWireGuardWriteState \
+        --arg role main \
+        --arg publicKey "${wireGuardTestPublicKey}" \
+        --arg endpointHost example.com \
+        '.role = $role | .enabled = true | .address = "10.77.0.2/24" |
+         .public_key = $publicKey | .endpoint_host = $endpointHost'
+    printf 'wg\n' >"$(subscriptionWireGuardConfigFile)"
+    printf 'private\n' >"$(subscriptionWireGuardPrivateKeyFile)"
+    printf 'public\n' >"$(subscriptionWireGuardPublicKeyFile)"
+    printf 'svc\n' >"$(subscriptionControlServiceFile)"
+    printf 'drop-in\n' >"${PADM_WIREGUARD_NGINX_SYSTEMD_DROPIN_FILE}"
+    actions=
+    mode=daemon-reload-fail
+    cleanupSubscriptionWireGuardControlOnUninstall
+    [[ ! -e "$(subscriptionWireGuardConfigFile)" ]]
+    [[ ! -e "$(subscriptionWireGuardStateFile)" ]]
+    [[ ! -e "$(subscriptionWireGuardPrivateKeyFile)" ]]
+    [[ ! -e "$(subscriptionControlServiceFile)" ]]
+    [[ ! -e "${PADM_WIREGUARD_NGINX_SYSTEMD_DROPIN_FILE}" ]]
+
+    mode=success
     local nginxTarget="${targetDir}/nginx/padm-control-wg.conf"
     local nginxBackupDir=
     local nginxRuntimeState=true

@@ -579,6 +579,7 @@ menu() {
         menuDangerItem 8 "高级/危险操作" "卸载和实验性高风险开关"
         menuLine "新人建议：1 安装与重装里先看怎么选；安装后 2 查看订阅"
         menuClose
+        selectMainMenuType=
         autoRead main_menu "请选择:" selectMainMenuType || return 0
         PADM_INSTALL_STATUS_READY=0
         case ${selectMainMenuType} in
