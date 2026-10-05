@@ -1098,6 +1098,50 @@ removeUserSubscriptionMenu() {
     return 1
 }
 
+validateUserSubscriptionDraftSnapshot() {
+    local expectedJson=$1 patchJson=$2 currentJson=$3 conflictingFields
+    jq -e --argjson expected "${expectedJson}" '
+      (map(.id) | sort) == ($expected | map(.id) | sort)
+    ' <<<"${currentJson}" >/dev/null || {
+        errorCard "所选订阅已不存在，请重新选择"
+        return 1
+    }
+    jq -e --argjson expected "${expectedJson}" '
+      (map({id,uuid}) | sort_by(.id)) == ($expected | map({id,uuid}) | sort_by(.id))
+    ' <<<"${currentJson}" >/dev/null || {
+        errorCard "所选订阅身份已变化，无法保留草稿" "请选 8 重新读取并丢弃草稿"
+        return 1
+    }
+    conflictingFields=$(jq -r --argjson expected "${expectedJson}" --argjson patch "${patchJson}" '
+      def normalized($key): if $key == "allowed_sources" then sort else . end;
+      . as $current |
+      [$patch | keys[] as $key |
+        select(any($expected[]; . as $before |
+          first($current[] | select(.id == $before.id)) as $after |
+          ($before[$key] | normalized($key)) != ($after[$key] | normalized($key)))) |
+        if $key == "name" then "名称"
+        elif $key == "allowed_sources" then "节点范围"
+        elif $key == "traffic_limit_gb" then "订阅额度"
+        elif $key == "enabled" then "启用状态"
+        else empty end] | join("、")
+    ' <<<"${currentJson}") || return 1
+    if [[ -n "${conflictingFields}" ]]; then
+        errorCard "草稿字段已被其他操作修改，未刷新" "冲突字段：${conflictingFields}" "请选 8 重新读取并丢弃草稿"
+        return 1
+    fi
+}
+
+setUserSubscriptionsFieldsWithDraftRefreshUnlocked() {
+    local idsJson=$1 patchJson=$2 expectedJson=$3 currentJson
+    currentJson=$(subscriptionActiveGroupRead -c --argjson ids "${idsJson}" '
+      [.user_groups[]? | select(.id as $id | ($ids | index($id)) != null) |
+        {id, uuid, name, enabled, allowed_sources, traffic_limit_gb}]
+    ') || return 1
+    validateUserSubscriptionDraftSnapshot "${expectedJson}" "${patchJson}" "${currentJson}" || return 1
+    # 锁内刷新无关字段后仍使用完整 CAS，保留校验后的竞争保护。
+    setUserSubscriptionsFields "${idsJson}" "${patchJson}" "${currentJson}"
+}
+
 editUserSubscriptionsMenu() {
     local idsJson=${1:-'[]'}
     local expectedJson
@@ -1114,7 +1158,6 @@ editUserSubscriptionsMenu() {
     local selectedCount
     local reload=
     local pendingFields
-    local conflictingFields
     local editPrompt
     local prunePatchJq='
       def normalized($key): if $key == "allowed_sources" then sort else . end;
@@ -1177,7 +1220,7 @@ editUserSubscriptionsMenu() {
         menuItem 3 "设置订阅额度" "0 表示不限"
         menuItem 4 "启用所选订阅" "额度超限时会拒绝启用"
         menuItem 5 "停用所选订阅" "保存后同步移除对应托管账号"
-        menuItem 6 "保存并立即同步" "不改变自动同步设置"
+        menuItem 6 "保存并立即同步" "自动保留其他字段的最新变化；冲突时保留草稿"
         menuReturnItem 7 "取消并丢弃草稿" "返回分享订阅"
         menuItem 8 "重新读取并丢弃草稿" "放弃当前草稿，读取最新状态"
         menuItem 9 "刷新并保留草稿" "读取最新状态；身份或草稿字段冲突时拒绝刷新"
@@ -1249,7 +1292,7 @@ editUserSubscriptionsMenu() {
                 fi
                 if subscriptionGroupsWithLock runUserSubscriptionMutationAndSyncUnlocked \
                     "分享订阅批量编辑" "分享订阅编辑失败" \
-                    setUserSubscriptionsFields "${idsJson}" "${patchJson}" "${expectedJson}"; then
+                    setUserSubscriptionsFieldsWithDraftRefreshUnlocked "${idsJson}" "${patchJson}" "${expectedJson}"; then
                     if jq -e '.enabled == true' <<<"${patchJson}" >/dev/null &&
                         ! subscriptionActiveGroupRead -e --argjson ids "${idsJson}" \
                             'all(.user_groups[] | select(.id as $id | ($ids | index($id)) != null); .enabled == true)' >/dev/null; then
@@ -1259,7 +1302,7 @@ editUserSubscriptionsMenu() {
                     fi
                     return 0
                 fi
-                warnCard "订阅编辑未完成" "草稿仍保留，可修正后重试；无关字段变化可选 9 刷新并保留草稿，同字段冲突请选 8 重读"
+                warnCard "订阅编辑未完成" "草稿仍保留，可修正后重试；身份或同字段冲突请选 8 重读"
                 ;;
             7)
                 coreCancelledStatusCard "操作未执行"
@@ -1275,24 +1318,7 @@ editUserSubscriptionsMenu() {
                     return 1
                 }
                 if [[ "${choice}" == "9" ]]; then
-                    jq -e --argjson expected "${expectedJson}" '
-                      (map({id,uuid}) | sort_by(.id)) == ($expected | map({id,uuid}) | sort_by(.id))
-                    ' <<<"${reload}" >/dev/null || {
-                        errorCard "所选订阅身份已变化，无法保留草稿" "请选 8 重新读取并丢弃草稿"
-                        continue
-                    }
-                    conflictingFields=$(jq -r --argjson expected "${expectedJson}" --argjson patch "${patchJson}" '
-                      def normalized($key): if $key == "allowed_sources" then sort else . end;
-                      . as $current |
-                      [$patch | keys[] as $key |
-                        select(any($expected[]; . as $before |
-                          first($current[] | select(.id == $before.id)) as $after |
-                          ($before[$key] | normalized($key)) != ($after[$key] | normalized($key)))) |
-                        $key] | '"${fieldLabelsJq}" <<<"${reload}") || return 1
-                    if [[ -n "${conflictingFields}" ]]; then
-                        errorCard "草稿字段已被其他操作修改，未刷新" "冲突字段：${conflictingFields}" "请选 8 重新读取并丢弃草稿"
-                        continue
-                    fi
+                    validateUserSubscriptionDraftSnapshot "${expectedJson}" "${patchJson}" "${reload}" || continue
                     expectedJson=${reload}
                     statusCard "已刷新订阅状态，草稿仍保留" "请确认当前配置后保存"
                     continue

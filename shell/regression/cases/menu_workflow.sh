@@ -846,6 +846,7 @@ runSubscriptionMenuDraftRegression() (
         [[ "${caseGroup}" == all || "${caseGroup}" == conflicts ]] || exit 0
         local syncCount=0 mutationCount=0 identityChanged=false
         resetDraftFixture
+        : >"${displayLog}"
         eval "$(declare -f menuReadChoice | sed '1s/^menuReadChoice/originalIdentityConflictMenuReadChoice/')"
         menuReadChoice() {
             local resultVar=$3
@@ -867,8 +868,12 @@ runSubscriptionMenuDraftRegression() (
         }
         runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
         regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'3\n9\n\n7'
-        [[ "${identityChanged}" == "true" && "${mutationCount}" == "1" && "${syncCount}" == "0" ]]
-        subscriptionActiveGroupRead -e '.user_groups[0].traffic_limit_gb == 1' >/dev/null
+        [[ "${identityChanged}" == "true" && "${mutationCount}" == "0" && "${syncCount}" == "0" ]]
+        [[ "$(grep -c '待保存字段：订阅额度' "${displayLog}")" -ge 2 ]]
+        subscriptionActiveGroupRead -e '
+          .user_groups[0].traffic_limit_gb == 1 and
+          .user_groups[0].uuid == "22222222-2222-4222-8222-222222222222"
+        ' >/dev/null
         resetDraftFixture
         identityChanged=false
         mutationCount=0
@@ -924,8 +929,9 @@ runSubscriptionMenuDraftRegression() (
         local scenario
         for scenario in field identity; do
             (
-                local syncCount=0 mutationCount=0 changed=false targetPatch= expectedSnapshot=
+                local syncCount=0 mutationCount=0 changed=false
                 resetDraftFixture
+                : >"${displayLog}"
                 : >"${errorLog}"
                 runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
                 eval "$(declare -f menuReadChoice | sed '1s/^menuReadChoice/originalRefreshConflictMenuReadChoice/')"
@@ -944,15 +950,12 @@ runSubscriptionMenuDraftRegression() (
                 eval "$(declare -f setUserSubscriptionsFields | sed '1s/^setUserSubscriptionsFields/originalRefreshConflictSetUserSubscriptionsFields/')"
                 setUserSubscriptionsFields() {
                     mutationCount=$((mutationCount + 1))
-                    targetPatch=$2
-                    expectedSnapshot=$3
                     originalRefreshConflictSetUserSubscriptionsFields "$@"
                 }
                 regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'1\nRetained draft\n9\n6\n7'
-                [[ "${changed}" == true && "${mutationCount}" == 1 && "${syncCount}" == 0 ]]
-                jq -e '.name == "Retained draft"' <<<"${targetPatch}" >/dev/null
-                jq -e '.[0].name == "Alpha" and .[0].uuid == "11111111-1111-4111-8111-111111111111"' \
-                    <<<"${expectedSnapshot}" >/dev/null
+                [[ "${changed}" == true && "${mutationCount}" == 0 && "${syncCount}" == 0 ]]
+                [[ "$(grep -c '待保存字段：名称' "${displayLog}")" -ge 3 ]]
+                grep -q '当前名称：Retained draft' "${displayLog}"
                 if [[ "${scenario}" == field ]]; then
                     grep -q '冲突字段：名称' "${errorLog}"
                     subscriptionActiveGroupRead -e '.user_groups[0].name == "Concurrent name"' >/dev/null
@@ -1000,24 +1003,44 @@ runSubscriptionMenuDraftRegression() (
     )
 
     (
-        [[ "${caseGroup}" == all || "${caseGroup}" == recovery ]] || exit 0
-        local syncCount=0 mutationCount=0 changed=false refreshSelected=false expectedSnapshot=
+        [[ "${caseGroup}" == all || "${caseGroup}" == conflicts ]] || exit 0
+        local syncCount=0 mutationCount=0 reordered=false expectedSnapshot=
         resetDraftFixture
-        : >"${displayLog}"
+        setUserSubscriptionSources alpha '["main","edge"]'
+        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
+        eval "$(declare -f menuReadChoice | sed '1s/^menuReadChoice/originalReorderSaveMenuReadChoice/')"
+        menuReadChoice() {
+            local resultVar=$3
+            originalReorderSaveMenuReadChoice "$@" || return $?
+            if [[ "$1" == edit_user_subscription_menu && "${!resultVar}" == 6 && "${reordered}" == false ]]; then
+                reordered=true
+                subscriptionActiveGroupWrite '.user_groups[0].allowed_sources |= reverse'
+            fi
+        }
+        eval "$(declare -f setUserSubscriptionsFields | sed '1s/^setUserSubscriptionsFields/originalReorderSaveSetUserSubscriptionsFields/')"
+        setUserSubscriptionsFields() {
+            mutationCount=$((mutationCount + 1))
+            expectedSnapshot=$3
+            originalReorderSaveSetUserSubscriptionsFields "$@"
+        }
+        editUserSubscriptionsMenu '["alpha"]' <<< $'2\n2\n6'
+        [[ "${reordered}" == true && "${mutationCount}" == 1 && "${syncCount}" == 1 ]]
+        jq -e '.[0].allowed_sources == ["edge","main"]' <<<"${expectedSnapshot}" >/dev/null
+        subscriptionActiveGroupRead -e '.user_groups[0].allowed_sources == ["edge"]' >/dev/null
+    )
+
+    (
+        [[ "${caseGroup}" == all || "${caseGroup}" == recovery ]] || exit 0
+        local syncCount=0 mutationCount=0 changed=false expectedSnapshot=
+        resetDraftFixture
         runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
         eval "$(declare -f menuReadChoice | sed '1s/^menuReadChoice/originalPreservedRefreshMenuReadChoice/')"
         menuReadChoice() {
             local resultVar=$3
             originalPreservedRefreshMenuReadChoice "$@" || return $?
-            if [[ "$1" == edit_user_subscription_menu && "${!resultVar}" == 6 ]]; then
-                if [[ "${refreshSelected}" == true ]]; then
-                    [[ "${mutationCount}" == 1 && "${syncCount}" == 0 ]]
-                elif [[ "${changed}" == false ]]; then
-                    changed=true
-                    subscriptionActiveGroupWrite '.user_groups[0].traffic_limit_gb = 11'
-                fi
-            elif [[ "$1" == edit_user_subscription_menu && "${!resultVar}" == 9 ]]; then
-                refreshSelected=true
+            if [[ "$1" == edit_user_subscription_menu && "${!resultVar}" == 6 && "${changed}" == false ]]; then
+                changed=true
+                subscriptionActiveGroupWrite '.user_groups[0].traffic_limit_gb = 11'
             fi
         }
         eval "$(declare -f setUserSubscriptionsFields | sed '1s/^setUserSubscriptionsFields/originalPreservedRefreshSetUserSubscriptionsFields/')"
@@ -1026,53 +1049,98 @@ runSubscriptionMenuDraftRegression() (
             expectedSnapshot=$3
             originalPreservedRefreshSetUserSubscriptionsFields "$@"
         }
-        editUserSubscriptionsMenu '["alpha"]' <<< $'1\nRefreshed draft\n6\n9\n6'
-        [[ "${changed}" == true && "${refreshSelected}" == true && "${mutationCount}" == 2 && "${syncCount}" == 1 ]]
+        editUserSubscriptionsMenu '["alpha"]' <<< $'1\nRefreshed draft\n6'
+        [[ "${changed}" == true && "${mutationCount}" == 1 && "${syncCount}" == 1 ]]
         jq -e '.[0].name == "Alpha" and .[0].traffic_limit_gb == 11' <<<"${expectedSnapshot}" >/dev/null
-        grep -q '当前订阅额度：11 GB' "${displayLog}"
         subscriptionActiveGroupRead -e '.user_groups[0].name == "Refreshed draft" and .user_groups[0].traffic_limit_gb == 11' >/dev/null
     )
 
     (
         [[ "${caseGroup}" == all || "${caseGroup}" == recovery ]] || exit 0
-        local fault
-        for fault in failure missing; do
-            (
-                local syncCount=0 mutationCount=0 failRefresh=false before
-                resetDraftFixture
-                before=$(subscriptionGroupsStateRead -c '.')
-                : >"${displayLog}"
-                : >"${errorLog}"
-                runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
-                setUserSubscriptionsFields() { mutationCount=$((mutationCount + 1)); return 99; }
-                eval "$(declare -f menuReadChoice | sed '1s/^menuReadChoice/originalFailedRefreshMenuReadChoice/')"
-                menuReadChoice() {
-                    local resultVar=$3
-                    originalFailedRefreshMenuReadChoice "$@" || return $?
-                    if [[ "$1" == edit_user_subscription_menu && "${!resultVar}" == 9 ]]; then
-                        failRefresh=true
+        local fault action
+        for action in 9 6; do
+            for fault in failure missing; do
+                (
+                    local syncCount=0 mutationCount=0 writeCount=0 failRefresh=false before
+                    resetDraftFixture
+                    before=$(subscriptionGroupsStateRead -c '.')
+                    : >"${displayLog}"
+                    : >"${errorLog}"
+                    runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
+                    setUserSubscriptionsFields() { mutationCount=$((mutationCount + 1)); return 99; }
+                    eval "$(declare -f subscriptionGroupsStateWriteUnlocked | sed '1s/^subscriptionGroupsStateWriteUnlocked/originalFailedRefreshStateWriteUnlocked/')"
+                    subscriptionGroupsStateWriteUnlocked() {
+                        writeCount=$((writeCount + 1))
+                        originalFailedRefreshStateWriteUnlocked "$@"
+                    }
+                    eval "$(declare -f menuReadChoice | sed '1s/^menuReadChoice/originalFailedRefreshMenuReadChoice/')"
+                    menuReadChoice() {
+                        local resultVar=$3
+                        originalFailedRefreshMenuReadChoice "$@" || return $?
+                        if [[ "$1" == edit_user_subscription_menu && "${!resultVar}" == "${action}" ]]; then
+                            failRefresh=true
+                        fi
+                    }
+                    eval "$(declare -f subscriptionActiveGroupRead | sed '1s/^subscriptionActiveGroupRead/originalFailedRefreshGroupRead/')"
+                    subscriptionActiveGroupRead() {
+                        if [[ "${failRefresh}" != true ]]; then
+                            originalFailedRefreshGroupRead "$@"
+                        elif [[ "${fault}" == failure ]]; then
+                            return 1
+                        else
+                            printf '[]\n'
+                        fi
+                    }
+                    regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'1\nUnsaved draft\n'"${action}"
+                    [[ "${failRefresh}" == true && "${mutationCount}" == 0 && "${writeCount}" == 0 && "${syncCount}" == 0 &&
+                        "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+                    if [[ "${fault}" == failure || "${action}" == 6 ]]; then
+                        [[ "$(grep -c '待保存字段：名称' "${displayLog}")" -ge 2 ]]
                     fi
-                }
-                eval "$(declare -f subscriptionActiveGroupRead | sed '1s/^subscriptionActiveGroupRead/originalFailedRefreshGroupRead/')"
-                subscriptionActiveGroupRead() {
-                    if [[ "${failRefresh}" != true ]]; then
-                        originalFailedRefreshGroupRead "$@"
-                    elif [[ "${fault}" == failure ]]; then
-                        return 1
-                    else
-                        printf '[]\n'
+                    if [[ "${fault}" == missing ]]; then
+                        grep -q '所选订阅已不存在，请重新选择' "${errorLog}"
                     fi
-                }
-                regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'1\nUnsaved draft\n9'
-                [[ "${failRefresh}" == true && "${mutationCount}" == 0 && "${syncCount}" == 0 &&
-                    "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
-                if [[ "${fault}" == failure ]]; then
-                    [[ "$(grep -c '待保存字段：名称' "${displayLog}")" -ge 2 ]]
-                else
-                    grep -q '所选订阅已不存在，请重新选择' "${errorLog}"
-                fi
-            )
+                )
+            done
         done
+    )
+
+    (
+        [[ "${caseGroup}" == all || "${caseGroup}" == recovery ]] || exit 0
+        local syncCount=0 mutationCount=0 changed=false expectedSnapshot=
+        resetDraftFixture
+        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
+        eval "$(declare -f menuReadChoice | sed '1s/^menuReadChoice/originalBatchRefreshMenuReadChoice/')"
+        menuReadChoice() {
+            local resultVar=$3
+            originalBatchRefreshMenuReadChoice "$@" || return $?
+            if [[ "$1" == edit_user_subscription_menu && "${!resultVar}" == 6 && "${changed}" == false ]]; then
+                changed=true
+                subscriptionActiveGroupWrite '
+                  .user_groups |= map(
+                    if .id == "alpha" then .name = "Concurrent alpha" | .allowed_sources = ["main"]
+                    elif .id == "beta" then .name = "Concurrent beta" | .enabled = false
+                    else . end)
+                '
+            fi
+        }
+        eval "$(declare -f setUserSubscriptionsFields | sed '1s/^setUserSubscriptionsFields/originalBatchRefreshSetUserSubscriptionsFields/')"
+        setUserSubscriptionsFields() {
+            mutationCount=$((mutationCount + 1))
+            expectedSnapshot=$3
+            originalBatchRefreshSetUserSubscriptionsFields "$@"
+        }
+        editUserSubscriptionsMenu '["alpha","beta"]' <<< $'3\n7\n6'
+        [[ "${changed}" == true && "${mutationCount}" == 1 && "${syncCount}" == 1 ]]
+        jq -e '
+          .[0].name == "Concurrent alpha" and .[0].allowed_sources == ["main"] and
+          .[1].name == "Concurrent beta" and .[1].enabled == false
+        ' <<<"${expectedSnapshot}" >/dev/null
+        subscriptionActiveGroupRead -e '
+          all(.user_groups[]; .traffic_limit_gb == 7) and
+          .user_groups[0].name == "Concurrent alpha" and .user_groups[0].allowed_sources == ["main"] and
+          .user_groups[1].name == "Concurrent beta" and .user_groups[1].enabled == false
+        ' >/dev/null
     )
 
     (
@@ -1145,16 +1213,18 @@ runSubscriptionMenuDraftRegression() (
 
     (
         [[ "${caseGroup}" == all || "${caseGroup}" == conflicts ]] || exit 0
-        local syncCount=0
+        local syncCount=0 mutationCount=0
         resetDraftFixture
         runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
         eval "$(declare -f setUserSubscriptionsFields | sed '1s/^setUserSubscriptionsFields/originalSetUserSubscriptionsFields/')"
         setUserSubscriptionsFields() {
+            # 安全刷新之后、严格写入之前发生竞争，仍需拒绝整个批次。
+            mutationCount=$((mutationCount + 1))
             setUserSubscriptionTrafficLimit beta 11
             originalSetUserSubscriptionsFields "$@"
         }
         regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha","beta"]' <<< $'3\n7\n6\n7'
-        [[ "${syncCount}" == "0" ]]
+        [[ "${mutationCount}" == "1" && "${syncCount}" == "0" ]]
         subscriptionActiveGroupRead -e '.user_groups[0].traffic_limit_gb == 1 and .user_groups[1].traffic_limit_gb == 11' >/dev/null
     )
 
