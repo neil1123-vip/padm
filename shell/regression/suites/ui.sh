@@ -474,8 +474,31 @@ runRegressionUiSuiteRoot() {
         listRegressionUiChildSelectors
 }
 
+listRegressionUiSubscriptionDraftChildSelectors() {
+    printf '%s\n' \
+        ui-subscription-workflow-draft-validation \
+        ui-subscription-workflow-draft-editing \
+        ui-subscription-workflow-draft-conflicts \
+        ui-subscription-workflow-draft-recovery
+}
+
+listRegressionUiSubscriptionWorkflowChildSelectors() {
+    printf '%s\n' ui-subscription-workflow-core
+    listRegressionUiSubscriptionDraftChildSelectors
+    printf '%s\n' ui-subscription-workflow-batch
+}
+
 registerRegressionFunctionLeaf ui-smoke runRegressionUiSmokeSuiteRoot
-registerRegressionFunctionLeaf ui-subscription-workflow runSubscriptionMenuWorkflowRegression
+registerRegressionFunctionLeaf ui-subscription-workflow-core runSubscriptionMenuWorkflowCoreRegression
+registerRegressionFunctionLeaf ui-subscription-workflow-draft-validation runSubscriptionMenuDraftRegression validation
+registerRegressionFunctionLeaf ui-subscription-workflow-draft-editing runSubscriptionMenuDraftRegression editing
+registerRegressionFunctionLeaf ui-subscription-workflow-draft-conflicts runSubscriptionMenuDraftRegression conflicts
+registerRegressionFunctionLeaf ui-subscription-workflow-draft-recovery runSubscriptionMenuDraftRegression recovery
+registerRegressionFunctionLeaf ui-subscription-workflow-batch runSubscriptionMenuBatchRegression
+registerRegressionParallelSelectorList ui-subscription-workflow-draft runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/ui-subscription-draft-parallel-${BASHPID:-$$}" listRegressionUiSubscriptionDraftChildSelectors 4
+registerRegressionParallelSelectorList ui-subscription-workflow runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/ui-subscription-workflow-parallel-${BASHPID:-$$}" listRegressionUiSubscriptionWorkflowChildSelectors 4
 registerRegressionFunctionLeaf ui-full-core runMenuSmokeRegression core
 registerRegressionFunctionLeaf ui-full-subscription-main-entry runMenuSmokeRegression subscription-main-entry
 registerRegressionFunctionLeaf ui-full-subscription-main-publish-service runMenuSmokeRegression subscription-main-publish-service

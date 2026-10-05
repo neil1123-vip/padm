@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-runSubscriptionMenuWorkflowRegression() (
+runSubscriptionMenuWorkflowCoreRegression() (
     source "${PROJECT_ROOT}/shell/core/runtime.sh"
     source "${PROJECT_ROOT}/shell/subscription/groups.sh"
     source "${PROJECT_ROOT}/shell/subscription/menu.sh"
@@ -279,16 +279,19 @@ runSubscriptionMenuWorkflowRegression() (
         [[ "${viewedId}" == "alpha" && "${syncedId}" == "alpha" && "${editedIds}" == '["alpha"]' ]]
     )
 
-    runSubscriptionMenuDraftRegression
-    runSubscriptionMenuBatchRegression
 )
 
 runSubscriptionMenuDraftRegression() (
+    local caseGroup=${1:-all}
+    case "${caseGroup}" in
+    all|validation|editing|conflicts|recovery) ;;
+    *) return 2 ;;
+    esac
     source "${PROJECT_ROOT}/shell/core/runtime.sh"
     source "${PROJECT_ROOT}/shell/subscription/groups.sh"
     source "${PROJECT_ROOT}/shell/subscription/menu.sh"
     source "${PROJECT_ROOT}/shell/subscription/traffic.sh"
-    local root="${TMP_DIR}/subscription-menu-draft"
+    local root="${TMP_DIR}/subscription-menu-draft-${caseGroup}"
     local displayLog="${root}/display.log"
     local errorLog="${root}/errors.log"
     local statusLog="${root}/status.log"
@@ -328,6 +331,7 @@ runSubscriptionMenuDraftRegression() (
     }
 
     (
+        [[ "${caseGroup}" == all || "${caseGroup}" == validation ]] || exit 0
         local before expected
         setUserSubscriptionsFields '["alpha","beta"]' '{"allowed_sources":["main"],"traffic_limit_gb":4,"enabled":false}'
         subscriptionActiveGroupRead -e '
@@ -356,6 +360,7 @@ runSubscriptionMenuDraftRegression() (
     )
 
     (
+        [[ "${caseGroup}" == all || "${caseGroup}" == validation ]] || exit 0
         local before
         resetDraftFixture
         setUserSubscriptionEnabled alpha false
@@ -382,6 +387,7 @@ runSubscriptionMenuDraftRegression() (
     )
 
     (
+        [[ "${caseGroup}" == all || "${caseGroup}" == editing ]] || exit 0
         local before
         resetDraftFixture
         selectUserSubscriptionId true true <<<1,2
@@ -431,6 +437,7 @@ runSubscriptionMenuDraftRegression() (
     )
 
     (
+        [[ "${caseGroup}" == all || "${caseGroup}" == editing ]] || exit 0
         local syncCount=0 mutationCount=0 before
         resetDraftFixture
         before=$(subscriptionGroupsStateRead -c '.')
@@ -456,6 +463,7 @@ runSubscriptionMenuDraftRegression() (
     )
 
     (
+        [[ "${caseGroup}" == all || "${caseGroup}" == conflicts ]] || exit 0
         local syncCount=0 mutationCount=0 targetPatch= expectedSnapshot= concurrentChanged=false
         resetDraftFixture
         runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
@@ -485,6 +493,7 @@ runSubscriptionMenuDraftRegression() (
     )
 
     (
+        [[ "${caseGroup}" == all || "${caseGroup}" == editing ]] || exit 0
         local syncCount=0 mutationCount=0
         resetDraftFixture
         runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
@@ -538,6 +547,7 @@ runSubscriptionMenuDraftRegression() (
     )
 
     (
+        [[ "${caseGroup}" == all || "${caseGroup}" == conflicts ]] || exit 0
         local syncCount=0 mutationCount=0 pickedCount=0 trafficChanged=false expectedSnapshot=
         resetDraftFixture
         : >"${displayLog}"
@@ -573,6 +583,7 @@ runSubscriptionMenuDraftRegression() (
     )
 
     (
+        [[ "${caseGroup}" == all || "${caseGroup}" == conflicts ]] || exit 0
         local syncCount=0 mutationCount=0 identityChanged=false
         resetDraftFixture
         eval "$(declare -f menuReadChoice | sed '1s/^menuReadChoice/originalIdentityConflictMenuReadChoice/')"
@@ -609,6 +620,7 @@ runSubscriptionMenuDraftRegression() (
     )
 
     (
+        [[ "${caseGroup}" == all || "${caseGroup}" == conflicts ]] || exit 0
         local toggleCount=0
         resetDraftFixture
         toggleSubscriptionGroupQuotaAutoApplyEnabled
@@ -648,6 +660,7 @@ runSubscriptionMenuDraftRegression() (
     )
 
     (
+        [[ "${caseGroup}" == all || "${caseGroup}" == recovery ]] || exit 0
         local syncCount=0 mutationCount=0
         resetDraftFixture
         runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
@@ -664,6 +677,7 @@ runSubscriptionMenuDraftRegression() (
     )
 
     (
+        [[ "${caseGroup}" == all || "${caseGroup}" == recovery ]] || exit 0
         local syncCount=0
         resetDraftFixture
         runSubscriptionGroupSync() {
@@ -676,6 +690,7 @@ runSubscriptionMenuDraftRegression() (
     )
 
     (
+        [[ "${caseGroup}" == all || "${caseGroup}" == validation ]] || exit 0
         local syncCount=0 before
         resetDraftFixture
         setUserSubscriptionEnabled alpha false
@@ -690,6 +705,7 @@ runSubscriptionMenuDraftRegression() (
     )
 
     (
+        [[ "${caseGroup}" == all || "${caseGroup}" == conflicts ]] || exit 0
         local syncCount=0
         resetDraftFixture
         runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
@@ -704,6 +720,7 @@ runSubscriptionMenuDraftRegression() (
     )
 
     (
+        [[ "${caseGroup}" == all || "${caseGroup}" == recovery ]] || exit 0
         local syncCount=0 ensureCount=0 shownCount=0 shownId=
         resetDraftFixture
         ensureSubscriptionServiceForSharedLinks() { ensureCount=$((ensureCount + 1)); return 99; }
@@ -739,6 +756,7 @@ runSubscriptionMenuDraftRegression() (
     )
 
     (
+        [[ "${caseGroup}" == all || "${caseGroup}" == recovery ]] || exit 0
         local syncCount=0
         resetDraftFixture
         setSubscriptionGroupSyncEnabled false
