@@ -39,7 +39,11 @@ openssl req -x509 -new -key "${KEY_FILE}" -days 2 -set_serial 1 -subj "/CN=${DOM
 printf 'DNS_API_TOKEN=private-dns-token\n' >"${CREDENTIALS}"
 chmod 0600 "${KEY_FILE}" "${CREDENTIALS}"
 
-fail() { printf 'docker-tls-regression-fail: %s\n' "$*" >&2; exit 1; }
+fail() {
+    printf 'docker-tls-regression-fail: %s\n' "$*" >&2
+    [[ ! -f "${TEST_ROOT}/control.log" ]] || cat "${TEST_ROOT}/control.log" >&2
+    exit 1
+}
 reject() { if "$@" >"${TEST_ROOT}/rejected.log" 2>&1; then fail "应拒绝: $*"; fi; }
 dockerHostPreflight() { :; }
 dockerRequireInstalledBundle() { [[ "$(<"${PADM_DOCKER_INSTALL_DIR}/mode")" == docker ]]; }
@@ -108,8 +112,24 @@ dockerAcmeRun() {
 }
 
 dockerComposeRun() {
+    local generation=old
+    cmp -s "${CERT_FILE}" "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/${DOMAIN}.crt" && generation=new
     printf '%s\n' "$*" >>"${TEST_ROOT}/compose.log"
+    printf '%s:%s\n' "${generation}" "$*" >>"${TEST_ROOT}/events.log"
     [[ -d "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]] || fail 'TLS 重载未持有部署锁'
+    if [[ "${MODE}" == core-check-fail && "$1" == run && "$4" == sing-box ]]; then return 1; fi
+    if [[ "$1" == up && "${*: -1}" == sing-box && ! -e "${TEST_ROOT}/failed-once" &&
+        ( "${MODE}" == second-core-fail || "${MODE}" == restore-first-fail ) ]]; then
+        : >"${TEST_ROOT}/failed-once"
+        return 1
+    fi
+    if [[ "${MODE}" == restore-first-fail && "$1" == up && "${*: -1}" == xray &&
+        -e "${TEST_ROOT}/failed-once" ]]; then return 1; fi
+    if [[ "${MODE}" == term-core && "$1" == up && "${*: -1}" == sing-box &&
+        ! -e "${TEST_ROOT}/failed-once" ]]; then
+        : >"${TEST_ROOT}/failed-once"
+        kill -TERM "${BASHPID}"
+    fi
     if [[ ! -e "${TEST_ROOT}/failed-once" ]]; then
         if [[ ( "${MODE}" == nginx-test-fail && "$*" == 'exec -T nginx nginx -t' ) ||
             ( "${MODE}" == reload-fail && "$*" == 'exec -T nginx nginx -s reload' ) ||
@@ -122,6 +142,18 @@ dockerComposeRun() {
             kill -TERM "${BASHPID}"
         fi
     fi
+}
+
+dockerTrafficSnapshot() {
+    local generation=old
+    cmp -s "${CERT_FILE}" "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/${DOMAIN}.crt" && generation=new
+    printf 'snapshot-%s\n' "${generation}" >>"${TEST_ROOT}/compose.log"
+    [[ "${MODE}" != snapshot-fail ]]
+}
+
+dockerCandidateCompose() {
+    shift
+    dockerComposeRun "$@"
 }
 
 newState() {
@@ -165,11 +197,98 @@ newState() {
     dockerDeploymentFileValidate "${PADM_DOCKER_INSTALL_DIR}/deployment.json" || fail '部署夹具格式错误'
     dockerManagedSpecMatchesDeployment "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" \
         "${PADM_DOCKER_INSTALL_DIR}/deployment.json" "${PADM_DOCKER_INSTALL_DIR}/images.env" || fail '规格夹具不一致'
+    mkdir -p "${PADM_DOCKER_INSTALL_DIR}/config/xray" "${PADM_DOCKER_INSTALL_DIR}/config/nginx"
+    dockerGenerateXrayConfig "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" \
+        "${PADM_DOCKER_INSTALL_DIR}/config/xray/config.json"
+    dockerGenerateNginxConfig "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" \
+        "${PADM_DOCKER_INSTALL_DIR}/config/nginx/default.conf"
+    dockerGenerateCompose "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" \
+        "${PADM_DOCKER_INSTALL_DIR}/compose.json"
     MODE=ok
     rm -f -- "${TEST_ROOT}/failed-once"
     : >"${TEST_ROOT}/compose.log"
+    : >"${TEST_ROOT}/events.log"
     : >"${TEST_ROOT}/acme.log"
     : >"${TEST_ROOT}/ops.log"
+}
+
+coreTlsState() {
+    local name=$1 core=$2 nginx=${3:-false}
+    newState "${name}"
+    # 内部 TLS 底座夹具直接构造核心配置；不放宽菜单的协议规格。
+    if [[ "${core}" == both ]]; then
+        jq '
+          .schema_version = 3 | .core.secondary_type = "sing-box" |
+          .core.protocols |= map(. + {listener_id:"entry-ws",core:"xray"} |
+            .websocket += {backend_port:31297,tls_port:8443}) |
+          .core.protocols += [{id:1,listener_id:"entry-sing",core:"sing-box",server:"proxy.example.com",
+            public_port:24444,address_families:["ipv4"],name:"sing",uuid:"11111111-1111-4111-8111-111111111111",
+            reality:{server_name:"www.example.com",target_host:"www.example.com",target_port:443,
+              private_key:"dwdtCnMYpX08FsFyUbJmRd9ML4frwJkqsXf7pR25LCo",
+              public_key:"hSDwCYkwp1R0i33ctD73Wg2_Og0mOBr066SpjqqbTmo",short_id:"6ba85179e30d4fc2"}}]
+        ' "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" >"${TEST_ROOT}/core-spec.json"
+        cp -- "${TEST_ROOT}/core-spec.json" "${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+        jq '.core += {secondary_type:"sing-box",protocol_ids:[1,21]} |
+          .compose.profiles += ["core-sing-box"] |
+          .listeners[0] += {listener_id:"entry-ws"} |
+          .listeners += [{listener_id:"entry-sing",service:"sing-box",public_port:24444,container_port:24444,
+            transport:"tcp",address_families:["ipv4"]}]' \
+            "${PADM_DOCKER_INSTALL_DIR}/deployment.json" >"${TEST_ROOT}/core-deployment.json"
+        cp -- "${TEST_ROOT}/core-deployment.json" "${PADM_DOCKER_INSTALL_DIR}/deployment.json"
+        mkdir -p "${PADM_DOCKER_INSTALL_DIR}/config/sing-box"
+        dockerGenerateSingBoxConfig "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" \
+            "${PADM_DOCKER_INSTALL_DIR}/config/sing-box/config.json"
+    fi
+    jq --arg domain "${DOMAIN}" '.inbounds += [
+      {tag:"internal-tls",port:25443,protocol:"trojan",settings:{clients:[]},
+       streamSettings:{network:"tcp",security:"tls",tlsSettings:{certificates:[
+         {certificateFile:("/etc/padm/secrets/tls/"+$domain+".crt"),
+          keyFile:("/etc/padm/secrets/tls/"+$domain+".key")},
+         {certificateFile:("/etc/padm/secrets/tls/"+$domain+".crt"),
+          keyFile:("/etc/padm/secrets/tls/"+$domain+".key")}]}}}]' \
+        "${PADM_DOCKER_INSTALL_DIR}/config/xray/config.json" >"${TEST_ROOT}/core-config.json"
+    cp -- "${TEST_ROOT}/core-config.json" "${PADM_DOCKER_INSTALL_DIR}/config/xray/config.json"
+    if [[ "${core}" == both ]]; then
+        jq --arg domain "${DOMAIN}" '.inbounds += [
+          {type:"trojan",tag:"internal-tls",listen_port:25444,users:[],
+           tls:{enabled:true,certificate_path:("/etc/padm/secrets/tls/"+$domain+".crt"),
+             key_path:("/etc/padm/secrets/tls/"+$domain+".key")}}]' \
+            "${PADM_DOCKER_INSTALL_DIR}/config/sing-box/config.json" >"${TEST_ROOT}/core-config.json"
+        cp -- "${TEST_ROOT}/core-config.json" "${PADM_DOCKER_INSTALL_DIR}/config/sing-box/config.json"
+    fi
+    if [[ "${nginx}" == false ]]; then
+        jq '.compose.profiles -= ["nginx"]' "${PADM_DOCKER_INSTALL_DIR}/deployment.json" >"${TEST_ROOT}/core-deployment.json"
+        cp -- "${TEST_ROOT}/core-deployment.json" "${PADM_DOCKER_INSTALL_DIR}/deployment.json"
+        rm -- "${PADM_DOCKER_INSTALL_DIR}/config/nginx/default.conf"
+    fi
+    dockerGenerateCompose "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" "${PADM_DOCKER_INSTALL_DIR}/compose.json"
+    if [[ "${nginx}" == false ]]; then
+        jq 'del(.services.nginx, .services.subscription)' "${PADM_DOCKER_INSTALL_DIR}/compose.json" >"${TEST_ROOT}/core-compose.json"
+        cp -- "${TEST_ROOT}/core-compose.json" "${PADM_DOCKER_INSTALL_DIR}/compose.json"
+    fi
+}
+
+runCoreCommit() {
+    local expected=$1 status
+    if (
+        trap 'dockerCommandInterrupted 143' TERM
+        dockerAcquireDeploymentLock
+        dockerCreateTlsCandidate
+        cp -- "${CERT_FILE}" "${DOCKER_TLS_CANDIDATE}/${DOMAIN}.crt"
+        cp -- "${KEY_FILE}" "${DOCKER_TLS_CANDIDATE}/${DOMAIN}.key"
+        if dockerCommitTlsCandidate "${DOCKER_TLS_CANDIDATE}" "${DOMAIN}"; then status=0; else status=$?; fi
+        dockerRestoreTlsFiles || true
+        dockerCleanupTlsCandidate
+        dockerReleaseDeploymentLock
+        exit "${status}"
+    ) >"${TEST_ROOT}/control.log" 2>&1; then status=0; else status=$?; fi
+    if [[ "${expected}" == failure ]]; then
+        [[ "${status}" != 0 ]] || fail '核心 TLS 失败场景被接受'
+    elif [[ "${status}" != "${expected}" ]]; then
+        cat "${TEST_ROOT}/control.log" >&2
+        fail "核心 TLS 预期 ${expected}，实际 ${status}"
+    fi
+    assertClean
 }
 
 materials() (
@@ -281,6 +400,11 @@ jq '.images.ops |= sub("sha256:a"; "sha256:b")' "${PADM_DOCKER_INSTALL_DIR}/conf
 cp -- "${TEST_ROOT}/invalid-spec.json" "${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
 runControl 15 tls validate --domain "${DOMAIN}"
 [[ "$(materials)" == "${before}" && ! -s "${TEST_ROOT}/ops.log" ]] || fail '规格不一致时执行了证书工具'
+newState legacy-no-spec
+rm -- "${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+runControl 0 tls install --domain "${DOMAIN}" --cert "${CERT_FILE}" --key "${KEY_FILE}"
+[[ "$(head -n 2 "${TEST_ROOT}/compose.log")" == $'exec -T nginx nginx -t\nexec -T nginx nginx -s reload' ]] ||
+    fail '旧部署缺少规格文件时未重载实际 Nginx 消费者'
 
 # 校验复用真实 openssl，覆盖错域名、错私钥与损坏证书，不能只相信模拟退出码。
 newState invalid-materials
@@ -371,4 +495,179 @@ ln -s "${DOMAIN}.key.real" "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/${DOMAIN}.key
 runControl 15 tls validate --domain "${DOMAIN}"
 runControl 15 tls install --domain "${DOMAIN}" --cert "${CERT_FILE}" --key "${KEY_FILE}"
 [[ -L "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/${DOMAIN}.key" ]] || fail '覆盖了私钥符号链接'
+
+# 解析只认入站普通 TLS，忽略客户端出站、Reality 与 Xray verify 证书。
+PARSER=${TEST_ROOT}/core-parser.json
+jq -n '{inbounds:[{streamSettings:{security:"tls",tlsSettings:{certificates:[
+  {certificateFile:"/etc/padm/secrets/tls/example.com.crt",keyFile:"/etc/padm/secrets/tls/example.com.key"},
+  {certificateFile:"/etc/padm/secrets/tls/other.example.com.crt",keyFile:"/etc/padm/secrets/tls/other.example.com.key"},
+  {certificateFile:"/etc/padm/secrets/tls/example.com.crt",keyFile:"/etc/padm/secrets/tls/example.com.key"}]}}}]}' >"${PARSER}"
+[[ "$(dockerCoreTlsDomains xray "${PARSER}")" == '["example.com","other.example.com"]' ]] || fail 'Xray TLS 多域解析或去重错误'
+cp -- "${PARSER}" "${TEST_ROOT}/valid-xray-parser.json"
+for CHANGE in \
+    '.inbounds[0].streamSettings.tlsSettings.certificates[0].keyFile = "/etc/padm/secrets/tls/other.example.com.key"' \
+    '.inbounds[0].streamSettings.tlsSettings.certificates[0].certificateFile = "/tmp/example.com.crt"' \
+    '.inbounds[0].streamSettings.tlsSettings.certificates[0].certificateFile = "/etc/padm/secrets/tls/../example.com.crt"' \
+    'del(.inbounds[0].streamSettings.tlsSettings.certificates[0].keyFile)'; do
+    jq "${CHANGE}" "${TEST_ROOT}/valid-xray-parser.json" >"${PARSER}"
+    if dockerCoreTlsDomains xray "${PARSER}" >"${TEST_ROOT}/rejected.log" 2>&1; then
+        fail "非法 Xray TLS 路径被接受: ${CHANGE}"
+    fi
+done
+jq -n '{inbounds:[
+  {streamSettings:{security:"reality",tlsSettings:{certificates:[{certificateFile:"/outside.crt"}]}}},
+  {streamSettings:{security:"tls",tlsSettings:{certificates:[{usage:"verify",certificateFile:"/outside.crt"}]}}}],
+  outbounds:[{streamSettings:{security:"tls",tlsSettings:{certificates:[{certificateFile:"/outside.crt"}]}}}]}' >"${PARSER}"
+[[ "$(dockerCoreTlsDomains xray "${PARSER}")" == '[]' ]] || fail 'Xray 将出站、Reality 或 verify 当成服务端 TLS'
+jq -n '{inbounds:[
+  {tls:{enabled:true,certificate_path:"/etc/padm/secrets/tls/example.com.crt",key_path:"/etc/padm/secrets/tls/example.com.key"}},
+  {tls:{enabled:true,certificate_path:"/etc/padm/secrets/tls/example.com.crt",key_path:"/etc/padm/secrets/tls/example.com.key"}}]}' >"${PARSER}"
+[[ "$(dockerCoreTlsDomains sing-box "${PARSER}")" == '["example.com"]' ]] || fail 'sing-box TLS 解析或去重错误'
+cp -- "${PARSER}" "${TEST_ROOT}/valid-sing-parser.json"
+for CHANGE in \
+    '.inbounds[0].tls.key_path = "/etc/padm/secrets/tls/other.example.com.key"' \
+    '.inbounds[0].tls.certificate_path = "/tmp/example.com.crt"' \
+    '.inbounds[0].tls.certificate_path = "/etc/padm/secrets/tls/../example.com.crt"' \
+    'del(.inbounds[0].tls.key_path)'; do
+    jq "${CHANGE}" "${TEST_ROOT}/valid-sing-parser.json" >"${PARSER}"
+    if dockerCoreTlsDomains sing-box "${PARSER}" >"${TEST_ROOT}/rejected.log" 2>&1; then
+        fail "非法 sing-box TLS 路径被接受: ${CHANGE}"
+    fi
+done
+jq -n '{inbounds:[{tls:{enabled:true,reality:{enabled:true},certificate_path:"/outside.crt"}},
+  {tls:{enabled:false,certificate_path:"/outside.crt"}}],
+  outbounds:[{tls:{enabled:true,certificate_path:"/outside.crt"}}]}' >"${PARSER}"
+[[ "$(dockerCoreTlsDomains sing-box "${PARSER}")" == '[]' ]] || fail 'sing-box 将出站、Reality 或关闭 TLS 当成消费者'
+printf '{"inbounds":\n' >"${PARSER}"
+reject dockerCoreTlsDomains xray "${PARSER}"
+reject dockerCoreTlsDomains sing-box "${PARSER}"
+reject dockerCoreTlsDomains unknown "${PARSER}"
+
+coreTlsState core-only xray
+[[ "$(dockerTlsConsumers "${DOMAIN}")" == '["xray"]' ]] || fail '核心独立消费者识别错误'
+[[ "$(dockerTlsConsumers unused.example.com)" == '[]' ]] || fail '未使用域名误选消费者'
+(
+    dockerAcquireDeploymentLock
+    dockerValidateCandidate "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" "${PADM_DOCKER_INSTALL_DIR}" ||
+        fail '核心独立 TLS 候选验证失败'
+    if grep -q ' nginx' "${TEST_ROOT}/compose.log"; then fail '核心独立候选验证调用了 Nginx'; fi
+    printf 'corrupt-certificate\n' >"${PADM_DOCKER_INSTALL_DIR}/secrets/tls/${DOMAIN}.crt"
+    reject dockerValidateCandidate "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" "${PADM_DOCKER_INSTALL_DIR}"
+    if grep -q '^up ' "${TEST_ROOT}/compose.log"; then fail '候选证书验证触发了服务启动'; fi
+    cp -- "${TEST_ROOT}/old.crt" "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/${DOMAIN}.crt"
+    dockerReleaseDeploymentLock
+)
+: >"${TEST_ROOT}/compose.log"
+: >"${TEST_ROOT}/events.log"
+dockerBackupTlsFiles unused.example.com
+dockerReloadTlsConsumers "${DOCKER_TLS_BACKUP}"
+[[ ! -s "${TEST_ROOT}/compose.log" ]] || fail '无人使用的证书触发了消费者动作'
+runCoreCommit 0
+grep -q '^snapshot-old$' "${TEST_ROOT}/compose.log" || fail '核心换证前未采样'
+grep -q '^up -d --force-recreate --no-deps --wait --wait-timeout 1 xray$' "${TEST_ROOT}/compose.log" ||
+    fail '核心换证未定向重建'
+if grep -Eq ' nginx( |$)| sing-box( |$)' "${TEST_ROOT}/compose.log"; then fail '核心换证启动了无关消费者'; fi
+assertPermissions
+
+coreTlsState both-nginx both true
+dockerTlsConsumers "${DOMAIN}" | jq -e 'sort == ["nginx","sing-box","xray"]' >/dev/null ||
+    fail '双核与 Nginx 消费者识别错误'
+runCoreCommit 0
+for CORE in xray sing-box; do
+    grep -q "^up -d --force-recreate --no-deps --wait --wait-timeout 1 ${CORE}$" "${TEST_ROOT}/compose.log" ||
+        fail "${CORE}: TLS 换证未定向重建"
+done
+grep -q '^up -d --no-deps --wait --wait-timeout 1 nginx$' "${TEST_ROOT}/compose.log" ||
+    fail 'Nginx 换证健康检查扩大到其他服务'
+awk '/^run / {if (started) exit 1} /^up / {started=1} END {if (!started) exit 1}' "${TEST_ROOT}/compose.log" ||
+    fail '核心配置没有全部先校验再重建'
+assertPermissions
+
+for MODE_CASE in core-check-fail snapshot-fail second-core-fail restore-first-fail term-core; do
+    coreTlsState "core-${MODE_CASE}" both true
+    before=$(materials)
+    MODE=${MODE_CASE}
+    EXPECTED=failure
+    [[ "${MODE}" != term-core ]] || EXPECTED=143
+    runCoreCommit "${EXPECTED}"
+    [[ "$(materials)" == "${before}" ]] || fail "${MODE}: 核心 TLS 失败没有整体恢复证书和账户"
+    if [[ "${MODE}" == snapshot-fail ]]; then
+        if grep -Eq '^up |^run ' "${TEST_ROOT}/compose.log"; then fail '采样失败仍校验或重建消费者'; fi
+        [[ "$(cat "${TEST_ROOT}/compose.log")" == snapshot-old ]] || fail '采样失败发生在证书切换之后'
+    elif [[ "${MODE}" == core-check-fail ]]; then
+        if grep -q '^new:up ' "${TEST_ROOT}/events.log"; then fail '候选核心校验失败仍然重建了新证书服务'; fi
+        grep -q '^old:up -d --force-recreate --no-deps --wait --wait-timeout 1 xray$' "${TEST_ROOT}/events.log" &&
+            grep -q '^old:up -d --force-recreate --no-deps --wait --wait-timeout 1 sing-box$' "${TEST_ROOT}/events.log" ||
+            fail '恢复校验失败后没有尝试恢复所有核心'
+    else
+        [[ "$(grep -c '^up -d --force-recreate --no-deps --wait --wait-timeout 1 xray$' "${TEST_ROOT}/compose.log")" -ge 2 &&
+            "$(grep -c '^up -d --force-recreate --no-deps --wait --wait-timeout 1 sing-box$' "${TEST_ROOT}/compose.log")" -ge 2 ]] ||
+            fail '第二核失败或恢复第一核失败后没有尝试恢复全部核心'
+    fi
+done
+
+coreTlsState bad-consumers both true
+dockerBackupTlsFiles "${DOMAIN}"
+BACKUP=${DOCKER_TLS_BACKUP}
+DOCKER_TLS_SWITCHED=1
+cp -- "${CERT_FILE}" "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/${DOMAIN}.crt"
+before=$(materials)
+for CONSUMERS in '["ops"]' '["xray","xray"]' '{}' '["xray",false]'; do
+    printf '%s\n' "${CONSUMERS}" >"${BACKUP}/consumers"
+    reject dockerRestoreTlsFiles
+    [[ "$(materials)" == "${before}" ]] || fail '坏消费者元数据导致部分恢复'
+done
+rm -- "${BACKUP}/consumers"
+reject dockerRestoreTlsFiles
+[[ "$(materials)" == "${before}" ]] || fail '消费者元数据缺失导致部分恢复'
+DOCKER_TLS_SWITCHED=0
+
+coreTlsState unsafe-consumers both true
+cp -- "${PADM_DOCKER_INSTALL_DIR}/compose.json" "${TEST_ROOT}/valid-consumer-compose.json"
+for CHANGE in \
+    '.services.xray.image = "untrusted:latest"' \
+    '.services.xray.profiles = []' \
+    '(.services.xray.volumes[] | select(.target == "/etc/padm/secrets/tls") | .read_only) = false' \
+    '.services.xray.volumes |= map(select(.target != "/etc/padm/secrets/tls"))' \
+    '(.services.xray.volumes[] | select(.target == "/etc/padm/xray") | .source) = "/outside/config"' \
+    '.services.xray.volumes += [{type:"bind",source:"/outside/config.json",target:"/etc/padm/xray/config.json",read_only:true}]' \
+    '.services.xray.volumes += [{type:"bind",source:"/outside/key",target:"/etc/padm/secrets/tls/example.com.key",read_only:true}]' \
+    '(.services.nginx.volumes[] | select(.target == "/etc/nginx/http.d") | .source) = "/outside/nginx"' \
+    '.services.nginx.volumes += [{type:"bind",source:"/outside/nginx.conf",target:"/etc/nginx/http.d/default.conf",read_only:true}]' \
+    '.services.nginx.volumes += [{type:"bind",source:"/outside/key",target:"/etc/padm/secrets/tls/example.com.key",read_only:true}]'; do
+    jq "${CHANGE}" "${TEST_ROOT}/valid-consumer-compose.json" >"${PADM_DOCKER_INSTALL_DIR}/compose.json"
+    if dockerTlsConsumers "${DOMAIN}" >"${TEST_ROOT}/rejected.log" 2>&1; then fail "不安全消费者被接受: ${CHANGE}"; fi
+done
+cp -- "${TEST_ROOT}/valid-consumer-compose.json" "${PADM_DOCKER_INSTALL_DIR}/compose.json"
+cp -- "${PADM_DOCKER_INSTALL_DIR}/images.env" "${TEST_ROOT}/valid-consumer-images.env"
+sed 's|^PADM_DOCKER_ROOT=.*|PADM_DOCKER_ROOT=/outside/root|' "${TEST_ROOT}/valid-consumer-images.env" \
+    >"${PADM_DOCKER_INSTALL_DIR}/images.env"
+reject dockerTlsConsumers "${DOMAIN}"
+cp -- "${TEST_ROOT}/valid-consumer-images.env" "${PADM_DOCKER_INSTALL_DIR}/images.env"
+mv "${PADM_DOCKER_INSTALL_DIR}/config/sing-box/config.json" "${PADM_DOCKER_INSTALL_DIR}/config/sing-box/config.real"
+ln -s config.real "${PADM_DOCKER_INSTALL_DIR}/config/sing-box/config.json"
+reject dockerTlsConsumers "${DOMAIN}"
+rm -- "${PADM_DOCKER_INSTALL_DIR}/config/sing-box/config.json"
+mv "${PADM_DOCKER_INSTALL_DIR}/config/sing-box/config.real" "${PADM_DOCKER_INSTALL_DIR}/config/sing-box/config.json"
+sed 's|/etc/padm/secrets/tls/example.com.key|/etc/padm/secrets/tls/wrong.example.com.key|' \
+    "${PADM_DOCKER_INSTALL_DIR}/config/nginx/default.conf" >"${TEST_ROOT}/bad-nginx.conf"
+cp -- "${TEST_ROOT}/bad-nginx.conf" "${PADM_DOCKER_INSTALL_DIR}/config/nginx/default.conf"
+reject dockerTlsConsumers "${DOMAIN}"
+for CORE in xray sing-box nginx; do
+    coreTlsState "unsafe-image-${CORE}" both true
+    rm -- "${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+    case "${CORE}" in
+    xray) IMAGE_KEY=PADM_XRAY_IMAGE ;;
+    sing-box) IMAGE_KEY=PADM_SINGBOX_IMAGE ;;
+    nginx) IMAGE_KEY=PADM_NGINX_IMAGE ;;
+    esac
+    BAD_IMAGE="ghcr.io/example/padm-${CORE}:3.2.0@sha256:$(printf 'b%.0s' {1..64})"
+    sed "s|^${IMAGE_KEY}=.*|${IMAGE_KEY}=${BAD_IMAGE}|" "${PADM_DOCKER_INSTALL_DIR}/images.env" \
+        >"${TEST_ROOT}/unsafe-consumer-images.env"
+    cp -- "${TEST_ROOT}/unsafe-consumer-images.env" "${PADM_DOCKER_INSTALL_DIR}/images.env"
+    before=$(materials)
+    runCoreCommit failure
+    [[ "$(materials)" == "${before}" && ! -s "${TEST_ROOT}/compose.log" ]] ||
+        fail "${CORE}: 无规格时镜像漂移仍触发证书切换或重建"
+done
 printf 'docker-tls-regression-ok\n'

@@ -255,7 +255,7 @@
       "profiles": ["nginx", "acme"],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "Docker 菜单和 CLI 支持受管 TLS 校验、导入轮换及挂载；Nginx 校验、重载或健康检查失败恢复旧证书，核心端 TLS 尚未开放。"
+      "reason": "Docker 菜单和 CLI 支持受管 TLS 校验、导入轮换及只读挂载；Nginx 与 Xray/sing-box 逐消费者校验、重载或重建，失败恢复旧证书。核心端仅交付受管 TLS 文件底座，不代表新增协议或完整管理。"
     },
     "acme-dns": {
       "status": "supported",

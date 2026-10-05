@@ -27,8 +27,8 @@ Reality 可跨核心复制，删除副核心最后入口会关闭副核心，主
 复制复用凭据，同 UUID 跨核心共享流量与额度；两核采样全部复验后才写累计，
 额度应用失败或中断恢复全部配置，既有身份、核心归属和 WS 内部端口不改排。
 Xray 仅 Reality/WS TLS，sing-box 仅 Reality；双核心暂不能组合宿主集成。
-新协议类型、
-TLS 轮换及完整管理未交付，协议的 `management_status` 继续为 `deferred`。
+Nginx 与核心端 TLS 轮换底座已交付；新协议类型和完整管理尚未交付，
+协议的 `management_status` 继续为 `deferred`。
 Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布、业务镜像及
 双架构客户端连通仍待验，不能由工具容器回归推断完成。
 
@@ -96,7 +96,7 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 | 功能键 | 原生入口 | Docker 状态 | Profile | 网络/权限边界 | 当前说明 |
 | --- | --- | --- | --- | --- | --- |
 | `nginx` | 站点与证书 -> 传统 TLS fallback | `supported` | `nginx` | bridge | 独立 Nginx 容器，承载 WS 反代和静态入口。 |
-| `tls-files` | 站点与证书 -> 本机 TLS 证书 | `supported` | `nginx` / `acme` | bridge | 菜单/CLI 校验、导入轮换和只读挂载；Nginx 校验、重载或健康检查失败恢复旧证书。核心端 TLS 待 3B.2。 |
+| `tls-files` | 站点与证书 -> 本机 TLS 证书 | `supported` | `nginx` / `acme` | bridge | 菜单/CLI 校验、导入轮换和只读挂载；Nginx 与 Xray/sing-box 逐消费者校验、重载/重建及健康失败恢复旧证书。核心端仅交付受管 TLS 文件底座，不代表新增协议或完整管理。 |
 | `acme-dns` | 站点与证书 -> 本机 TLS 证书 | `supported` | `acme` | bridge | 菜单/CLI 显式 DNS-01 issue/renew；候选账户与证书同事务，保留其他域名。自动调度待 3B.3。 |
 | `subscription` | 订阅与用户 -> 订阅发布 | `supported` | `core-xray` / `nginx` / `subscription` | bridge | token 保护的发布；要求主核心或副核心中的 Xray 协议 `21` 和受管 TLS，可包含两核心 Reality 链接；没有 Xray WS TLS 入口时不可发布。 |
 | `subscription-traffic` | 订阅与用户 -> 流量与额度 | `supported` | 核心 profile | 宿主 CLI | 定时采集以及 show/limit/reset。 |

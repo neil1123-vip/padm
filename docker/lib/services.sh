@@ -932,8 +932,16 @@ EOF
 }
 
 dockerGenerateCompose() {
-    local specFile=$1 target=$2
-    jq -n --slurpfile request "${specFile}" '
+    local specFile=$1 target=$2 core domains directory tlsCores='[]'
+    directory=$(dirname -- "${target}")
+    while IFS= read -r core; do
+        [[ -e "${directory}/config/${core}/config.json" ]] || continue
+        domains=$(dockerCoreTlsDomains "${core}" "${directory}/config/${core}/config.json") || return 1
+        if [[ "${domains}" != '[]' ]]; then
+            tlsCores=$(jq -c --arg core "${core}" '. + [$core]' <<<"${tlsCores}") || return 1
+        fi
+    done < <(jq -r '[.core.type, .core.secondary_type] | .[] | select(. != null)' "${specFile}")
+    jq -n --slurpfile request "${specFile}" --argjson tlsCores "${tlsCores}" '
       $request[0] as $r |
       def defaults: {
         init: true,
@@ -992,7 +1000,9 @@ dockerGenerateCompose() {
             profiles: ["core-xray"],
             labels: labels("xray"),
             volumes: (mounts("config/xray"; "/etc/padm/xray"; true) +
-              mounts("data/xray"; "/var/lib/padm/xray"; false)),
+                mounts("data/xray"; "/var/lib/padm/xray"; false) +
+                if ($tlsCores | index("xray")) != null then
+                  mounts("secrets/tls"; "/etc/padm/secrets/tls"; true) else [] end),
             ports: [$direct[] | select((.core // $r.core.type) == "xray") |
               . as $protocol | ports($protocol; $protocol.public_port)[]],
             tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=16m"],
@@ -1008,7 +1018,9 @@ dockerGenerateCompose() {
             profiles: ["core-sing-box"],
             labels: labels("sing-box"),
             volumes: (mounts("config/sing-box"; "/etc/padm/sing-box"; true) +
-              mounts("data/sing-box"; "/var/lib/padm/sing-box"; false)),
+                mounts("data/sing-box"; "/var/lib/padm/sing-box"; false) +
+                if ($tlsCores | index("sing-box")) != null then
+                  mounts("secrets/tls"; "/etc/padm/secrets/tls"; true) else [] end),
             ports: [$direct[] | select((.core // $r.core.type) == "sing-box") |
               . as $protocol | ports($protocol; $protocol.public_port)[]],
             tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=16m"],
@@ -1410,7 +1422,7 @@ dockerValidateHostIntegrations() {
 }
 
 dockerValidateCandidate() {
-    local specFile=$1 candidate=$2 core domain jsonFile image
+    local specFile=$1 candidate=$2 core domain jsonFile image tlsDomains='[]' domains
     while IFS= read -r jsonFile; do
         [[ -s "${jsonFile}" ]] && jq empty "${jsonFile}" >/dev/null 2>&1 || {
             dockerError "候选 JSON 配置无效: ${jsonFile}"
@@ -1432,6 +1444,8 @@ dockerValidateCandidate() {
     }
     dockerValidateHostIntegrations "${specFile}" "${candidate}" || return 1
     while IFS= read -r core; do
+        domains=$(dockerCoreTlsDomains "${core}" "${candidate}/config/${core}/config.json") || return 1
+        tlsDomains=$(jq -c --argjson domains "${domains}" '. + $domains | unique' <<<"${tlsDomains}") || return 1
         case "${core}" in
         xray)
             dockerCandidateCompose "${candidate}" run --rm --no-deps xray \
@@ -1452,11 +1466,16 @@ dockerValidateCandidate() {
     done < <(jq -r '[.core.type, .core.secondary_type] | .[] | select(. != null)' "${specFile}")
     if jq -e '.tls != null' "${specFile}" >/dev/null; then
         domain=$(jq -r '.tls.domain' "${specFile}") || return 1
-        image=$(jq -r '.images.ops' "${specFile}") || return 1
+        tlsDomains=$(jq -c --arg domain "${domain}" '. + [$domain] | unique' <<<"${tlsDomains}") || return 1
+    fi
+    image=$(jq -r '.images.ops' "${specFile}") || return 1
+    while IFS= read -r domain; do
         dockerTlsValidateCandidate "${image}" "${candidate}/secrets/tls" "${domain}" || {
             dockerError 'TLS 证书、私钥或域名校验失败'
             return 1
         }
+    done < <(jq -r '.[]' <<<"${tlsDomains}")
+    if jq -e '.services | has("nginx")' "${candidate}/compose.json" >/dev/null; then
         dockerCandidateCompose "${candidate}" run --rm --no-deps nginx -t >/dev/null || {
             dockerError 'Nginx 候选配置校验失败'
             return 1
@@ -2009,14 +2028,176 @@ if not (values["notBefore"] <= now < values["notAfter"]):
     }
 }
 
-dockerBackupTlsFiles() {
-    local domain=$1 candidate=${2:-} root backup extension source
+dockerCoreTlsDomains() {
+    local core=$1 config=$2
+    [[ "${core}" == xray || "${core}" == sing-box ]] &&
+        [[ -f "${config}" && ! -L "${config}" ]] || return 1
+    jq -ces --arg core "${core}" '
+      def domain: type == "string" and test("^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z]{2,63}$");
+      def pair:
+        if (.cert | type) != "string" or (.key | type) != "string" then
+          error("核心 TLS 必须使用受管文件")
+        else
+          . as $pair |
+          ($pair.cert | ltrimstr("/etc/padm/secrets/tls/") | rtrimstr(".crt")) as $d |
+          if ($d | domain) and
+            $pair.cert == ("/etc/padm/secrets/tls/" + $d + ".crt") and
+            $pair.key == ("/etc/padm/secrets/tls/" + $d + ".key") then $d
+          else error("核心 TLS 证书和私钥必须属于同一受管域名") end
+        end;
+      if length != 1 or (.[0] | type) != "object" or (.[0].inbounds | type) != "array" then
+        error("核心 TLS 输入必须是单个核心配置")
+      else .[0] end |
+      [if $core == "xray" then
+        .inbounds[] | select(.streamSettings.security == "tls") |
+        .streamSettings.tlsSettings.certificates |
+        if type != "array" or length == 0 then error("Xray TLS 缺少证书") else .[] end |
+        select((.usage // "encipherment") == "encipherment") |
+        {cert: .certificateFile, key: .keyFile} | pair
+       else
+        .inbounds[] | select(.tls.enabled == true and .tls.reality.enabled != true) |
+        {cert: .tls.certificate_path, key: .tls.key_path} | pair
+       end] | unique
+    ' "${config}"
+}
+
+dockerTlsConsumers() {
+    local domain=$1 root core cores domains consumers='[]' image config nginxDomain count imageKey
     root=$(dockerInstallRoot) || return 1
+    dockerDomainIsValid "${domain}" &&
+        dockerTrafficSafePath "${root}" "${root}/deployment.json" || return 1
+    [[ -e "${root}/deployment.json" ]] || { printf '[]\n'; return 0; }
+    dockerTrafficSafePath "${root}" "${root}/compose.json" &&
+        dockerTrafficSafePath "${root}" "${root}/images.env" &&
+        [[ -f "${root}/compose.json" && ! -L "${root}/compose.json" ]] &&
+        dockerDeploymentFileValidate "${root}/deployment.json" || return 1
+    [[ -f "${root}/images.env" && ! -L "${root}/images.env" ]] || return 1
+    count=$(grep -c '^PADM_DOCKER_ROOT=' "${root}/images.env" || true)
+    [[ "${count}" == 1 && "$(sed -n 's/^PADM_DOCKER_ROOT=//p' "${root}/images.env")" == "${root}" ]] || return 1
+    cores=$(dockerTrafficCore) || return 1
+    while IFS= read -r core; do
+        config="${root}/config/${core}/config.json"
+        jq -e --arg core "${core}" '
+          [.services[$core].volumes[]? |
+            select(.target == ("/etc/padm/" + $core) or
+              (.target | startswith("/etc/padm/" + $core + "/")))] |
+          length == 1 and .[0].target == ("/etc/padm/" + $core) and
+          .[0].type == "bind" and .[0].read_only == true and
+          .[0].source == ("${PADM_DOCKER_ROOT}/config/" + $core)
+        ' "${root}/compose.json" >/dev/null || return 1
+        dockerTrafficSafePath "${root}" "${config}" &&
+            [[ -z "$(find "${root}/config/${core}" ! -type f ! -type d -print -quit)" ]] || return 1
+        [[ -z "$(find "${root}/config/${core}" -name '*.json' ! -name config.json -print -quit)" ]] || return 1
+        domains=$(dockerCoreTlsDomains "${core}" "${config}") || return 1
+        jq -e --arg domain "${domain}" 'index($domain) != null' <<<"${domains}" >/dev/null || continue
+        jq -e --arg core "${core}" '.compose.profiles | index("core-" + $core) != null' \
+            "${root}/deployment.json" >/dev/null || return 1
+        if [[ "${core}" == xray ]]; then
+            image='${PADM_XRAY_IMAGE:?PADM_XRAY_IMAGE is required}'
+        else
+            image='${PADM_SINGBOX_IMAGE:?PADM_SINGBOX_IMAGE is required}'
+        fi
+        jq -e --arg core "${core}" --arg image "${image}" '
+          .services[$core] |
+          .image == $image and (.profiles | index("core-" + $core)) != null and
+          ([.volumes[]? | select(.target == "/etc/padm/secrets/tls" or
+              (.target | startswith("/etc/padm/secrets/tls/")))] |
+            length == 1 and .[0].type == "bind" and .[0].read_only == true and
+            .[0].target == "/etc/padm/secrets/tls" and
+            .[0].source == "${PADM_DOCKER_ROOT}/secrets/tls")
+        ' "${root}/compose.json" >/dev/null || return 1
+        consumers=$(jq -c --arg core "${core}" '. + [$core]' <<<"${consumers}") || return 1
+    done <<<"${cores}"
+    if jq -e '.compose.profiles | index("nginx") != null' "${root}/deployment.json" >/dev/null; then
+        jq -e '[.services.nginx.volumes[]? |
+          select(.target == "/etc/nginx/http.d" or (.target | startswith("/etc/nginx/http.d/")))] |
+          length == 1 and .[0].type == "bind" and .[0].read_only == true and
+          .[0].target == "/etc/nginx/http.d" and .[0].source == "${PADM_DOCKER_ROOT}/config/nginx"
+        ' "${root}/compose.json" >/dev/null || return 1
+        dockerTrafficSafePath "${root}" "${root}/config/nginx/default.conf" || return 1
+        [[ -f "${root}/config/nginx/default.conf" && ! -L "${root}/config/nginx/default.conf" ]] || return 1
+        [[ -z "$(find "${root}/config/nginx" ! -type f ! -type d -print -quit)" &&
+            -z "$(find "${root}/config/nginx" -name '*.conf' ! -name default.conf -print -quit)" ]] || return 1
+        nginxDomain=$(awk '
+          $1 == "ssl_certificate" {
+            if ($2 !~ /^\/etc\/padm\/secrets\/tls\/[A-Za-z0-9.-]+\.crt;$/) bad=1
+            else { value=$2; sub(/^\/etc\/padm\/secrets\/tls\//, "", value); sub(/\.crt;$/, "", value);
+              if (cert != "" && cert != value) bad=1; cert=value }
+          }
+          $1 == "ssl_certificate_key" {
+            if ($2 !~ /^\/etc\/padm\/secrets\/tls\/[A-Za-z0-9.-]+\.key;$/) bad=1
+            else { value=$2; sub(/^\/etc\/padm\/secrets\/tls\//, "", value); sub(/\.key;$/, "", value);
+              if (key != "" && key != value) bad=1; key=value }
+          }
+          END { if (bad || cert == "" || key == "" || cert != key) exit 1; print cert }
+        ' "${root}/config/nginx/default.conf") || return 1
+        dockerDomainIsValid "${nginxDomain}" || return 1
+        if [[ "${domain}" == "${nginxDomain}" ]]; then
+            jq -e '.services.nginx |
+              .image == "${PADM_NGINX_IMAGE:?PADM_NGINX_IMAGE is required}" and
+              (.profiles | index("nginx")) != null and
+              ([.volumes[]? | select(.target == "/etc/padm/secrets/tls" or
+                  (.target | startswith("/etc/padm/secrets/tls/")))] |
+                length == 1 and .[0].type == "bind" and .[0].read_only == true and
+                .[0].target == "/etc/padm/secrets/tls" and
+                .[0].source == "${PADM_DOCKER_ROOT}/secrets/tls")
+            ' "${root}/compose.json" >/dev/null || return 1
+            consumers=$(jq -c '. + ["nginx"]' <<<"${consumers}") || return 1
+        fi
+    fi
+    while IFS= read -r core; do
+        [[ -n "${core}" ]] || continue
+        case "${core}" in
+        xray) imageKey=PADM_XRAY_IMAGE ;;
+        sing-box) imageKey=PADM_SINGBOX_IMAGE ;;
+        nginx) imageKey=PADM_NGINX_IMAGE ;;
+        esac
+        count=$(grep -c "^${imageKey}=" "${root}/images.env" || true)
+        image=$(sed -n "s/^${imageKey}=//p" "${root}/images.env") || return 1
+        [[ "${count}" == 1 ]] && dockerImageReferenceIsValid "${image}" &&
+            jq -e --arg core "${core}" --arg digest "${image##*@}" \
+                '.images[$core].index_digest == $digest' "${root}/deployment.json" >/dev/null || return 1
+    done < <(jq -r '.[]' <<<"${consumers}")
+    printf '%s\n' "${consumers}"
+}
+
+dockerReloadTlsConsumers() {
+    local backup=$1 restore=${2:-} service failed=0 consumers
+    consumers=$(jq -r '.[]' "${backup}/consumers") || return 1
+    [[ -n "${consumers}" ]] || return 0
+    # 所有核心先校验，再重建；恢复时不因首个服务失败遗漏其它消费者。
+    while IFS= read -r service; do
+        case "${service}" in
+        xray) dockerComposeRun run --rm --no-deps xray -test -confdir /etc/padm/xray >/dev/null || failed=1 ;;
+        sing-box) dockerComposeRun run --rm --no-deps sing-box check -D /var/lib/padm/sing-box -c /etc/padm/sing-box/config.json >/dev/null || failed=1 ;;
+        nginx) dockerComposeRun exec -T nginx nginx -t >/dev/null || failed=1 ;;
+        *) return 1 ;;
+        esac
+    done <<<"${consumers}"
+    [[ "${failed}" == 0 || "${restore}" == restore ]] || return 1
+    while IFS= read -r service; do
+        if [[ "${service}" == nginx ]]; then
+            dockerComposeRun exec -T nginx nginx -s reload >/dev/null &&
+                dockerComposeRun up -d --no-deps --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" nginx >/dev/null || failed=1
+        else
+            dockerComposeRun up -d --force-recreate --no-deps --wait \
+                --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" "${service}" >/dev/null || failed=1
+        fi
+        [[ "${failed}" == 0 || "${restore}" == restore ]] || return 1
+    done <<<"${consumers}"
+    [[ "${failed}" == 0 ]]
+}
+
+dockerBackupTlsFiles() {
+    local domain=$1 candidate=${2:-} root backup extension source consumers
+    root=$(dockerInstallRoot) || return 1
+    consumers=$(dockerTlsConsumers "${domain}") || return 1
     dockerTrafficSafePath "${root}" "${root}/secrets/tls" &&
         dockerTrafficSafePath "${root}" "${root}/backups" || return 1
     backup=$(mktemp -d "${root}/backups/tls.XXXXXX") || return 1
     : >"${backup}/present"
     printf '%s\n' "${domain}" >"${backup}/domain" || return 1
+    printf '%s\n' "${consumers}" >"${backup}/consumers" || return 1
     for extension in crt key; do
         source="${root}/secrets/tls/${domain}.${extension}"
         [[ -e "${source}" || -L "${source}" ]] || continue
@@ -2039,19 +2220,6 @@ dockerBackupTlsFiles() {
     [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == 1 ]] || chown -R 0:0 "${backup}" || return 1
     chmod -R go-rwx "${backup}" || return 1
     DOCKER_TLS_BACKUP=${backup}
-}
-
-dockerReloadNginxAfterTlsChange() {
-    local root enabled
-    root=$(dockerInstallRoot) || return 1
-    [[ -e "${root}/deployment.json" || -L "${root}/deployment.json" ]] || return 0
-    [[ -f "${root}/deployment.json" && ! -L "${root}/deployment.json" ]] || return 1
-    jq -e '.compose.profiles | type == "array"' "${root}/deployment.json" >/dev/null 2>&1 || return 1
-    enabled=$(jq -r '.compose.profiles | index("nginx") != null' "${root}/deployment.json") || return 1
-    [[ "${enabled}" == "true" ]] || return 0
-    dockerComposeRun exec -T nginx nginx -t >/dev/null &&
-        dockerComposeRun exec -T nginx nginx -s reload >/dev/null &&
-        dockerComposeRun up -d --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" >/dev/null
 }
 
 dockerCommitTlsCandidate() {
@@ -2078,6 +2246,12 @@ dockerCommitTlsCandidate() {
         chown "0:${PADM_DOCKER_CONTAINER_GID}" "${targetDir}" || return 1
     fi
     dockerBackupTlsFiles "${domain}" "${candidate}" || return 1
+    if jq -e 'any(.[]; . == "xray" or . == "sing-box")' "${DOCKER_TLS_BACKUP}/consumers" >/dev/null; then
+        dockerTrafficSnapshot || {
+            dockerError '核心 TLS 轮换前流量采集失败，已拒绝替换证书'
+            return 1
+        }
+    fi
     DOCKER_TLS_SWITCHED=1
     for extension in crt key; do
         tempFile="${targetDir}/.${domain}.${extension}.${BASHPID:-$$}"
@@ -2113,8 +2287,8 @@ dockerCommitTlsCandidate() {
             return 1
         }
     fi
-    if ! dockerReloadNginxAfterTlsChange; then
-        dockerError 'Nginx 校验、reload 或健康检查失败，正在恢复旧证书与 ACME 状态'
+    if ! dockerReloadTlsConsumers "${DOCKER_TLS_BACKUP}"; then
+        dockerError 'TLS 消费者校验、重载或健康检查失败，正在恢复旧证书与 ACME 状态'
         dockerRestoreTlsFiles || return 1
         return 1
     fi
@@ -2131,7 +2305,11 @@ dockerRestoreTlsFiles() {
         dockerTrafficSafePath "${root}" "${root}/data/acme" || return 1
     [[ "${backup}" == "${root}/backups/tls."* && -d "${backup}" && -O "${backup}" &&
         -z "$(find "${backup}" ! -type f ! -type d -print -quit)" &&
-        -f "${backup}/present" && ! -L "${backup}/present" ]] || return 1
+        -f "${backup}/present" && ! -L "${backup}/present" &&
+        -f "${backup}/consumers" ]] || return 1
+    jq -es 'length == 1 and (.[0] | type == "array" and
+      length == (unique | length) and all(.[]; . == "xray" or . == "sing-box" or . == "nginx"))' \
+        "${backup}/consumers" >/dev/null || return 1
     [[ -f "${backup}/domain" && ! -L "${backup}/domain" ]] || return 1
     domain=$(<"${backup}/domain")
     dockerDomainIsValid "${domain}" || return 1
@@ -2155,6 +2333,9 @@ dockerRestoreTlsFiles() {
         esac
     else
         [[ ! -e "${backup}/acme" ]] || return 1
+    fi
+    if jq -e 'any(.[]; . == "xray" or . == "sing-box")' "${backup}/consumers" >/dev/null; then
+        dockerTrafficSnapshot || dockerError 'TLS 恢复前采集失败，已保留累计流量并继续恢复服务'
     fi
     for extension in crt key; do
         target="${root}/secrets/tls/${domain}.${extension}"
@@ -2187,7 +2368,7 @@ dockerRestoreTlsFiles() {
                 find "${root}/data/acme" -type f -exec chmod 0600 {} + || return 1
         fi
     fi
-    dockerReloadNginxAfterTlsChange || return 1
+    dockerReloadTlsConsumers "${backup}" restore || return 1
     DOCKER_TLS_SWITCHED=0
 }
 
