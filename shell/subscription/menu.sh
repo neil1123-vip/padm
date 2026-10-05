@@ -740,6 +740,7 @@ createAndSyncUserSubscriptionWizard() {
     local sourceJson=
     local limit=0
     local syncResult=0
+    local createStatus
     local -a linkArgs=()
     createdUserSubscriptionId=
     createdUserSubscriptionIds='[]'
@@ -759,34 +760,42 @@ createAndSyncUserSubscriptionWizard() {
         }
         if jq -e --argjson ids "${idsJson}" 'any(.[]; . as $id | ($ids | index($id)) != null)' <<<"${existingIds}" >/dev/null; then
             errorCard "分享订阅 ID 已存在，请使用其他 ID"
-        else
-            break
+            continue
         fi
-    done
-    if [[ -n "${templateId}" ]]; then
-        templateJson=$(subscriptionActiveGroupRead -ec --arg id "${templateId}" \
-            'first(.user_groups[]? | select(.id == $id)) | select(. != null)') || {
-            errorCard "复制模板订阅失败：原订阅不存在"
-            return 1
-        }
-        sourceJson=$(jq -c '.allowed_sources' <<<"${templateJson}") || return 1
-        limit=$(jq -r '.traffic_limit_gb' <<<"${templateJson}") || return 1
-    else
-        selectUserSubscriptionSources user_subscription_sources "请选择节点范围[回车默认 main]:" sourceJson || return 1
-        while true; do
-            menuReadChoice user_subscription_traffic_limit "请输入订阅额度 GB[回车/0 为不限]:" limit true || return 1
-            limit=${limit:-0}
-            [[ "${limit}" =~ ^[0-9]+$ ]] && break
-            errorCard "订阅额度必须是数字"
-        done
-        limit=$(jq -nr --arg value "${limit}" '$value | tonumber') || return 1
-    fi
+        if [[ -z "${sourceJson}" ]]; then
+            if [[ -n "${templateId}" ]]; then
+                templateJson=$(subscriptionActiveGroupRead -ec --arg id "${templateId}" \
+                    'first(.user_groups[]? | select(.id == $id)) | select(. != null)') || {
+                    errorCard "复制模板订阅失败：原订阅不存在"
+                    return 1
+                }
+                sourceJson=$(jq -c '.allowed_sources' <<<"${templateJson}") || return 1
+                limit=$(jq -r '.traffic_limit_gb' <<<"${templateJson}") || return 1
+            else
+                selectUserSubscriptionSources user_subscription_sources "请选择节点范围[回车默认 main]:" sourceJson || return 1
+                while true; do
+                    menuReadChoice user_subscription_traffic_limit "请输入订阅额度 GB[回车/0 为不限]:" limit true || return 1
+                    limit=${limit:-0}
+                    [[ "${limit}" =~ ^[0-9]+$ ]] && break
+                    errorCard "订阅额度必须是数字"
+                done
+                limit=$(jq -nr --arg value "${limit}" '$value | tonumber') || return 1
+            fi
+        fi
 
-    usersJson=$(jq -c 'map({id:.,name:.})' <<<"${idsJson}") || return 1
-    if ! addUserSubscriptionsState "${usersJson}" "${sourceJson}" "${limit}"; then
-        errorCard "分享订阅创建失败，订阅 ID 可能已存在或状态写入失败"
+        usersJson=$(jq -c 'map({id:.,name:.})' <<<"${idsJson}") || return 1
+        if addUserSubscriptionsState "${usersJson}" "${sourceJson}" "${limit}"; then
+            break
+        else
+            createStatus=$?
+        fi
+        if [[ "${createStatus}" == "2" ]]; then
+            warnCard "分享订阅 ID 已被其他操作占用" "节点范围和额度仍保留，请更换 ID；回车取消"
+            continue
+        fi
+        errorCard "分享订阅状态写入或检查失败" "请先查看订阅列表，确认是否已保存后再重试"
         return 1
-    fi
+    done
     createdUserSubscriptionIds=${idsJson}
     id=$(jq -r 'join("、")' <<<"${idsJson}") || return 1
     if [[ "$(jq 'length' <<<"${idsJson}")" == "1" ]]; then

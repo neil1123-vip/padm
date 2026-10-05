@@ -197,12 +197,16 @@ runSubscriptionMenuWorkflowCoreRegression() (
     )
 
     (
-        local before syncCount=0 writeCount=0
+        local before syncCount=0 writeCount=0 raceInjected=false raceId=raced-id
         before=$(subscriptionGroupsStateRead -c '.')
-        regressionExpectStatus 1 addUserSubscriptionsState '[{"id":"atomic-new","name":"New"},{"id":"alpha","name":"Existing"}]' '["main"]' 1
+        regressionExpectStatus 2 addUserSubscriptionsState '[{"id":"atomic-new","name":"New"},{"id":"alpha","name":"Existing"}]' '["main"]' 1
         regressionExpectStatus 1 addUserSubscriptionsState '[{"id":"duplicate","name":"A"},{"id":"duplicate","name":"B"}]' '["main"]' 1
         regressionExpectStatus 1 addUserSubscriptionsState '[{"id":"atomic-new","name":"New"},{"id":"bad id","name":"Bad"}]' '["main"]' 1
         regressionExpectStatus 1 addUserSubscriptionsState '[]' '["main"]' 1
+        (
+            subscriptionActiveGroupWrite() { return 2; }
+            regressionExpectStatus 1 addUserSubscriptionsState '[{"id":"write-status-two","name":"Failure"}]' '["main"]' 1
+        )
         [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
         eval "$(declare -f subscriptionGroupsStateWriteUnlocked | sed '1s/^subscriptionGroupsStateWriteUnlocked/originalAtomicCreateStateWriteUnlocked/')"
         subscriptionGroupsStateWriteUnlocked() {
@@ -222,10 +226,13 @@ runSubscriptionMenuWorkflowCoreRegression() (
         ' >/dev/null
         eval "$(declare -f addUserSubscriptionsState | sed '1s/^addUserSubscriptionsState/originalRaceAddUserSubscriptionsState/')"
         addUserSubscriptionsState() {
-            originalRaceAddUserSubscriptionsState '[{"id":"raced-id","name":"Concurrent"}]' '["main"]' 0
+            if [[ "${raceInjected}" == false ]]; then
+                raceInjected=true
+                originalRaceAddUserSubscriptionsState "$(jq -cn --arg id "${raceId}" '[{id:$id,name:"Concurrent"}]')" '["main"]' 0
+            fi
             originalRaceAddUserSubscriptionsState "$@"
         }
-        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); return 99; }
+        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
         createdUserSubscriptionId=stale
         createdUserSubscriptionIds='["stale"]'
         regressionExpectStatus 1 createAndSyncUserSubscriptionWizard <<< $'raced-id,race-not-created\n1\n2'
@@ -234,7 +241,64 @@ runSubscriptionMenuWorkflowCoreRegression() (
           any(.user_groups[]; .id == "raced-id" and .name == "Concurrent") and
           all(.user_groups[]; .id != "race-not-created")
         ' >/dev/null
+        raceInjected=false
+        raceId=raced-empty
+        regressionExpectStatus 1 createAndSyncUserSubscriptionWizard <<< $'raced-empty,race-empty-not-created\n1\n2\n'
+        [[ "${syncCount}" == "0" && -z "${createdUserSubscriptionId}" && "${createdUserSubscriptionIds}" == '[]' ]]
+        subscriptionActiveGroupRead -e '
+          any(.user_groups[]; .id == "raced-empty" and .name == "Concurrent") and
+          all(.user_groups[]; .id != "race-empty-not-created")
+        ' >/dev/null
+        local sourceChoiceCount=0 limitPromptCount=0
+        eval "$(declare -f selectUserSubscriptionSources | sed '1s/^selectUserSubscriptionSources/originalRaceSelectUserSubscriptionSources/')"
+        selectUserSubscriptionSources() {
+            sourceChoiceCount=$((sourceChoiceCount + 1))
+            originalRaceSelectUserSubscriptionSources "$@"
+        }
+        eval "$(declare -f menuReadChoice | sed '1s/^menuReadChoice/originalRaceMenuReadChoice/')"
+        menuReadChoice() {
+            [[ "$1" != user_subscription_traffic_limit ]] || limitPromptCount=$((limitPromptCount + 1))
+            originalRaceMenuReadChoice "$@"
+        }
+        raceInjected=false
+        raceId=raced-retry
+        createAndSyncUserSubscriptionWizard <<< $'raced-retry,race-retry-not-created\n1,2\n11\nbad id\nalpha\nrace-recovered-a,race-recovered-b'
+        [[ "${syncCount}" == "1" && "${sourceChoiceCount}" == "1" && "${limitPromptCount}" == "1" &&
+            -z "${createdUserSubscriptionId}" && "${createdUserSubscriptionIds}" == '["race-recovered-a","race-recovered-b"]' ]]
+        subscriptionActiveGroupRead -e '
+          all(.user_groups[]; .id != "race-retry-not-created") and
+          ([.user_groups[] | select(.id == "race-recovered-a" or .id == "race-recovered-b")] |
+            length == 2 and all(.[]; .traffic_limit_gb == 11 and (.allowed_sources | sort) == ["edge","main"]))
+        ' >/dev/null
     )
+
+    for fault in before after; do
+        (
+            local before syncCount=0 addCount=0 remaining
+            before=$(subscriptionGroupsStateRead -c '.')
+            eval "$(declare -f addUserSubscriptionsState | sed '1s/^addUserSubscriptionsState/originalFailedAddUserSubscriptionsState/')"
+            addUserSubscriptionsState() {
+                addCount=$((addCount + 1))
+                [[ "${fault}" != after ]] || originalFailedAddUserSubscriptionsState "$@" || return 1
+                return 1
+            }
+            runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
+            exec 3<<<"${fault}-write-failure"$'\n1\n4\n'"${fault}-must-not-retry"
+            regressionExpectStatus 1 createAndSyncUserSubscriptionWizard <&3
+            IFS= read -r remaining <&3
+            exec 3<&-
+            [[ "${remaining}" == "${fault}-must-not-retry" && "${addCount}" == "1" && "${syncCount}" == "0" &&
+                -z "${createdUserSubscriptionId}" && "${createdUserSubscriptionIds}" == '[]' ]]
+            if [[ "${fault}" == before ]]; then
+                [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+            else
+                subscriptionActiveGroupRead -e '
+                  any(.user_groups[]; .id == "after-write-failure") and
+                  all(.user_groups[]; .id != "after-must-not-retry")
+                ' >/dev/null
+            fi
+        )
+    done
 
     (
         local PADM_SUBSCRIPTION_GROUPS_DIR="${root}/empty-selection" openedCount=0
@@ -1090,6 +1154,24 @@ runSubscriptionMenuDraftRegression() (
         regressionExpectStatus 1 createAndSyncUserSubscriptionWizard missing <<<"missing-copy-a,missing-copy-b"
         [[ -z "${createdUserSubscriptionId}" && "${createdUserSubscriptionIds}" == '[]' && "${syncCount}" == "3" &&
             "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+        local raceInjected=false
+        eval "$(declare -f addUserSubscriptionsState | sed '1s/^addUserSubscriptionsState/originalCopyRaceAddUserSubscriptionsState/')"
+        addUserSubscriptionsState() {
+            if [[ "${raceInjected}" == false ]]; then
+                raceInjected=true
+                originalCopyRaceAddUserSubscriptionsState '[{"id":"copy-raced","name":"Concurrent"}]' '["main"]' 0
+                setUserSubscriptionsFields '["alpha"]' '{"allowed_sources":["main"],"traffic_limit_gb":6}'
+            fi
+            originalCopyRaceAddUserSubscriptionsState "$@"
+        }
+        createAndSyncUserSubscriptionWizard alpha <<< $'copy-raced,copy-race-unused\nalpha\ncopy-race-recovered'
+        [[ "${syncCount}" == "4" && "${createdUserSubscriptionId}" == "copy-race-recovered" &&
+            "${copySourcePromptCount}" == "0" && "${copyLimitPromptCount}" == "0" ]]
+        subscriptionActiveGroupRead -e '
+          any(.user_groups[]; .id == "copy-race-recovered" and .allowed_sources == ["edge"] and .traffic_limit_gb == 1) and
+          any(.user_groups[]; .id == "alpha" and .allowed_sources == ["main"] and .traffic_limit_gb == 6) and
+          all(.user_groups[]; .id != "copy-race-unused")
+        ' >/dev/null
     )
 
     (

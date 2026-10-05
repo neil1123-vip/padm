@@ -664,23 +664,33 @@ addUserSubscriptionState() {
     addUserSubscriptionsState "${usersJson}" "${sources}" "${limit}"
 }
 
-addUserSubscriptionsState() {
+addUserSubscriptionsStateUnlocked() {
     local usersJson=$1
     local sources=${2:-'["main"]'}
     local limit=${3:-0}
-    subscriptionActiveGroupWrite --argjson users "${usersJson}" --argjson sources "${sources}" --argjson limit "${limit}" '
-        (.user_groups | map(.id)) as $existing |
+    local conflictingIds
+    conflictingIds=$(subscriptionActiveGroupRead -c --argjson users "${usersJson}" '
         if ($users | type) != "array" then
           error("user subscriptions must be an array")
         elif ($users | length) == 0 or
             ([$users[].id] | length) != ([$users[].id] | unique | length) then
           error("user subscription IDs must be nonempty and unique")
-        elif any($users[]; .id as $id | ($existing | index($id)) != null) then
-          error("user subscription already exists")
         else
-          .user_groups += ($users | map({id, name, enabled:true, allowed_sources:$sources, traffic_limit_gb:$limit}))
+            [.user_groups[].id | select(. as $id | any($users[]; .id == $id))]
         end
-    '
+    ') || return 1
+    if [[ "${conflictingIds}" != '[]' ]]; then
+        printf 'user subscription already exists: %s\n' "${conflictingIds}" >&2
+        # 返回 2 仅表示锁内确认的 ID 冲突，此时尚未写入任何订阅。
+        return 2
+    fi
+    subscriptionActiveGroupWrite --argjson users "${usersJson}" --argjson sources "${sources}" --argjson limit "${limit}" '
+        .user_groups += ($users | map({id, name, enabled:true, allowed_sources:$sources, traffic_limit_gb:$limit}))
+    ' || return 1
+}
+
+addUserSubscriptionsState() {
+    subscriptionGroupsWithLock addUserSubscriptionsStateUnlocked "$@"
 }
 
 subscriptionApplyUserGroupState() {
