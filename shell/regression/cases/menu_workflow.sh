@@ -567,6 +567,19 @@ runSubscriptionMenuDraftRegression() (
         [[ "${mutationCount}" == "0" && "${syncCount}" == "0" ]]
         editUserSubscriptionsMenu '["alpha"]' <<< $'3\n1\n'
         [[ "${mutationCount}" == "0" && "${syncCount}" == "0" ]]
+        : >"${displayLog}"
+        editUserSubscriptionsMenu '["alpha"]' <<< $'1,2,3,4\nAlpha\n2\n001\n'
+        ! grep -qE '待保存字段：(名称|节点范围|订阅额度|启用状态)' "${displayLog}"
+        editUserSubscriptionsMenu '["alpha"]' <<< $'1\nTemporary name\n1\nAlpha\n'
+        [[ "${mutationCount}" == "0" && "${syncCount}" == "0" ]]
+        (
+            setUserSubscriptionSources alpha '["main","edge"]'
+            before=$(subscriptionGroupsStateRead -c '.')
+            editUserSubscriptionsMenu '["alpha"]' <<< $'2\n2,1\n'
+            [[ "${mutationCount}" == "0" && "${syncCount}" == "0" &&
+                "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+        )
+        resetDraftFixture
         regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' </dev/null
         regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'1\nDiscarded draft\n3'
         regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' < <(printf '3\n9')
@@ -640,7 +653,7 @@ runSubscriptionMenuDraftRegression() (
         editUserSubscriptionsMenu '["alpha","beta"]' <<< $'2,3\n\n\n6'
         [[ "${mutationCount}" == "2" && "${syncCount}" == "2" ]]
         [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
-        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'6,2\n2,6,3\n2,7\n2,8\n2,2\n4,5,6\nmissing\n7'
+        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'6,2\n2,6,3\n2,7\n2,8\n9,6\n2,9\n2,2\n4,5,6\nmissing\n7'
         [[ "${mutationCount}" == "2" && "${syncCount}" == "2" ]]
         [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
         regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha","beta"]' <<< $'1,3,6\n7'
@@ -779,6 +792,162 @@ runSubscriptionMenuDraftRegression() (
     )
 
     (
+        [[ "${caseGroup}" == all || "${caseGroup}" == conflicts ]] || exit 0
+        local scenario
+        for scenario in field identity; do
+            (
+                local syncCount=0 mutationCount=0 changed=false targetPatch= expectedSnapshot=
+                resetDraftFixture
+                : >"${errorLog}"
+                runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
+                eval "$(declare -f menuReadChoice | sed '1s/^menuReadChoice/originalRefreshConflictMenuReadChoice/')"
+                menuReadChoice() {
+                    local resultVar=$3
+                    originalRefreshConflictMenuReadChoice "$@" || return $?
+                    if [[ "$1" == edit_user_subscription_menu && "${!resultVar}" == 9 && "${changed}" == false ]]; then
+                        changed=true
+                        if [[ "${scenario}" == field ]]; then
+                            subscriptionActiveGroupWrite '.user_groups[0].name = "Concurrent name"'
+                        else
+                            subscriptionActiveGroupWrite '.user_groups[0].uuid = "22222222-2222-4222-8222-222222222222"'
+                        fi
+                    fi
+                }
+                eval "$(declare -f setUserSubscriptionsFields | sed '1s/^setUserSubscriptionsFields/originalRefreshConflictSetUserSubscriptionsFields/')"
+                setUserSubscriptionsFields() {
+                    mutationCount=$((mutationCount + 1))
+                    targetPatch=$2
+                    expectedSnapshot=$3
+                    originalRefreshConflictSetUserSubscriptionsFields "$@"
+                }
+                regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'1\nRetained draft\n9\n6\n7'
+                [[ "${changed}" == true && "${mutationCount}" == 1 && "${syncCount}" == 0 ]]
+                jq -e '.name == "Retained draft"' <<<"${targetPatch}" >/dev/null
+                jq -e '.[0].name == "Alpha" and .[0].uuid == "11111111-1111-4111-8111-111111111111"' \
+                    <<<"${expectedSnapshot}" >/dev/null
+                if [[ "${scenario}" == field ]]; then
+                    grep -q '冲突字段：名称' "${errorLog}"
+                    subscriptionActiveGroupRead -e '.user_groups[0].name == "Concurrent name"' >/dev/null
+                else
+                    grep -q '所选订阅身份已变化，无法保留草稿' "${errorLog}"
+                    subscriptionActiveGroupRead -e '
+                      .user_groups[0].name == "Alpha" and
+                      .user_groups[0].uuid == "22222222-2222-4222-8222-222222222222"
+                    ' >/dev/null
+                fi
+            )
+        done
+    )
+
+    (
+        [[ "${caseGroup}" == all || "${caseGroup}" == conflicts ]] || exit 0
+        local syncCount=0 mutationCount=0 reorderSnapshot=false before
+        resetDraftFixture
+        setUserSubscriptionSources alpha '["main","edge"]'
+        before=$(subscriptionGroupsStateRead -c '.')
+        : >"${errorLog}"
+        : >"${statusLog}"
+        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
+        setUserSubscriptionsFields() { mutationCount=$((mutationCount + 1)); return 99; }
+        eval "$(declare -f menuReadChoice | sed '1s/^menuReadChoice/originalReorderRefreshMenuReadChoice/')"
+        menuReadChoice() {
+            local resultVar=$3
+            originalReorderRefreshMenuReadChoice "$@" || return $?
+            if [[ "$1" == edit_user_subscription_menu && "${!resultVar}" == 9 ]]; then
+                reorderSnapshot=true
+            fi
+        }
+        eval "$(declare -f subscriptionActiveGroupRead | sed '1s/^subscriptionActiveGroupRead/originalReorderRefreshGroupRead/')"
+        subscriptionActiveGroupRead() {
+            if [[ "${reorderSnapshot}" == true ]]; then
+                originalReorderRefreshGroupRead "$@" | jq -c 'map(.allowed_sources |= reverse)'
+            else
+                originalReorderRefreshGroupRead "$@"
+            fi
+        }
+        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'2\n2\n9'
+        grep -q '已刷新订阅状态，草稿仍保留' "${statusLog}"
+        [[ ! -s "${errorLog}" && "${mutationCount}" == 0 && "${syncCount}" == 0 &&
+            "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+    )
+
+    (
+        [[ "${caseGroup}" == all || "${caseGroup}" == recovery ]] || exit 0
+        local syncCount=0 mutationCount=0 changed=false refreshSelected=false expectedSnapshot=
+        resetDraftFixture
+        : >"${displayLog}"
+        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
+        eval "$(declare -f menuReadChoice | sed '1s/^menuReadChoice/originalPreservedRefreshMenuReadChoice/')"
+        menuReadChoice() {
+            local resultVar=$3
+            originalPreservedRefreshMenuReadChoice "$@" || return $?
+            if [[ "$1" == edit_user_subscription_menu && "${!resultVar}" == 6 ]]; then
+                if [[ "${refreshSelected}" == true ]]; then
+                    [[ "${mutationCount}" == 1 && "${syncCount}" == 0 ]]
+                elif [[ "${changed}" == false ]]; then
+                    changed=true
+                    subscriptionActiveGroupWrite '.user_groups[0].traffic_limit_gb = 11'
+                fi
+            elif [[ "$1" == edit_user_subscription_menu && "${!resultVar}" == 9 ]]; then
+                refreshSelected=true
+            fi
+        }
+        eval "$(declare -f setUserSubscriptionsFields | sed '1s/^setUserSubscriptionsFields/originalPreservedRefreshSetUserSubscriptionsFields/')"
+        setUserSubscriptionsFields() {
+            mutationCount=$((mutationCount + 1))
+            expectedSnapshot=$3
+            originalPreservedRefreshSetUserSubscriptionsFields "$@"
+        }
+        editUserSubscriptionsMenu '["alpha"]' <<< $'1\nRefreshed draft\n6\n9\n6'
+        [[ "${changed}" == true && "${refreshSelected}" == true && "${mutationCount}" == 2 && "${syncCount}" == 1 ]]
+        jq -e '.[0].name == "Alpha" and .[0].traffic_limit_gb == 11' <<<"${expectedSnapshot}" >/dev/null
+        grep -q '当前订阅额度：11 GB' "${displayLog}"
+        subscriptionActiveGroupRead -e '.user_groups[0].name == "Refreshed draft" and .user_groups[0].traffic_limit_gb == 11' >/dev/null
+    )
+
+    (
+        [[ "${caseGroup}" == all || "${caseGroup}" == recovery ]] || exit 0
+        local fault
+        for fault in failure missing; do
+            (
+                local syncCount=0 mutationCount=0 failRefresh=false before
+                resetDraftFixture
+                before=$(subscriptionGroupsStateRead -c '.')
+                : >"${displayLog}"
+                : >"${errorLog}"
+                runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
+                setUserSubscriptionsFields() { mutationCount=$((mutationCount + 1)); return 99; }
+                eval "$(declare -f menuReadChoice | sed '1s/^menuReadChoice/originalFailedRefreshMenuReadChoice/')"
+                menuReadChoice() {
+                    local resultVar=$3
+                    originalFailedRefreshMenuReadChoice "$@" || return $?
+                    if [[ "$1" == edit_user_subscription_menu && "${!resultVar}" == 9 ]]; then
+                        failRefresh=true
+                    fi
+                }
+                eval "$(declare -f subscriptionActiveGroupRead | sed '1s/^subscriptionActiveGroupRead/originalFailedRefreshGroupRead/')"
+                subscriptionActiveGroupRead() {
+                    if [[ "${failRefresh}" != true ]]; then
+                        originalFailedRefreshGroupRead "$@"
+                    elif [[ "${fault}" == failure ]]; then
+                        return 1
+                    else
+                        printf '[]\n'
+                    fi
+                }
+                regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'1\nUnsaved draft\n9'
+                [[ "${failRefresh}" == true && "${mutationCount}" == 0 && "${syncCount}" == 0 &&
+                    "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+                if [[ "${fault}" == failure ]]; then
+                    [[ "$(grep -c '待保存字段：名称' "${displayLog}")" -ge 2 ]]
+                else
+                    grep -q '所选订阅已不存在，请重新选择' "${errorLog}"
+                fi
+            )
+        done
+    )
+
+    (
         [[ "${caseGroup}" == all || "${caseGroup}" == recovery ]] || exit 0
         local syncCount=0 mutationCount=0
         resetDraftFixture
@@ -821,6 +990,29 @@ runSubscriptionMenuDraftRegression() (
         editUserSubscriptionsMenu '["alpha"]' <<< $'4\n3\n2\n6'
         [[ "${syncCount}" == "1" ]]
         subscriptionActiveGroupRead -e '.user_groups[0].enabled and .user_groups[0].traffic_limit_gb == 2' >/dev/null
+
+        local mutationCount=0 targetPatch=
+        resetDraftFixture
+        subscriptionActiveGroupWrite '.sync.quota_auto_apply = true'
+        eval "$(declare -f setUserSubscriptionsFields | sed '1s/^setUserSubscriptionsFields/originalNoopEnabledSetUserSubscriptionsFields/')"
+        setUserSubscriptionsFields() {
+            mutationCount=$((mutationCount + 1))
+            targetPatch=$2
+            originalNoopEnabledSetUserSubscriptionsFields "$@"
+        }
+        editUserSubscriptionsMenu '["alpha"]' <<< $'4,1,6\nQuota name only'
+        [[ "${mutationCount}" == 1 && "${syncCount}" == 2 ]]
+        jq -e 'keys == ["name"] and .name == "Quota name only"' <<<"${targetPatch}" >/dev/null
+        subscriptionActiveGroupRead -e '
+          .user_groups[0].name == "Quota name only" and .user_groups[0].enabled and .user_groups[0].traffic_limit_gb == 1
+        ' >/dev/null
+        resetDraftFixture
+        subscriptionActiveGroupWrite '.sync.quota_auto_apply = true | .user_groups[0].enabled = false'
+        before=$(subscriptionGroupsStateRead -c '.')
+        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha","beta"]' <<< $'4,6\n7'
+        [[ "${mutationCount}" == 2 && "${syncCount}" == 2 &&
+            "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+        jq -e 'keys == ["enabled"] and .enabled' <<<"${targetPatch}" >/dev/null
     )
 
     (
