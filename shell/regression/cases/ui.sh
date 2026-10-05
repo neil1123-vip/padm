@@ -253,6 +253,7 @@ main.example.com
 
     wireGuardMenuAddEdgePeer() {
         local receiptJson receiptCredential reservedInvite
+        local itemChoices=${1:-7}
         resetMenuActions
         if subscriptionWireGuardCreateInvite main reservedInvite >/dev/null 2>&1; then
             return 1
@@ -264,6 +265,7 @@ main.example.com
         resetMenuActions
         manageSubscriptionServers <<<"2
 ${receiptCredential}
+${itemChoices}
 7"
         [[ "${healthCallCount}" == "0" ]]
         assertMenuAction 'runSubscriptionGroupSync:'
@@ -323,7 +325,19 @@ SH
             return 1
         fi
         [[ "$(subscriptionWireGuardReadState)" == "${mainStateSnapshot}" ]]
-        wireGuardMenuAddEdgePeer
+        (
+            local healthLog="${TMP_DIR}/completed-peer-health.log"
+            local sourceSelectCount=0
+            : >"${healthLog}"
+            subscriptionRemoteControlHealth() {
+                jq -r '.id' <<<"$1" >>"${healthLog}"
+                printf '{"ok":true}\n'
+            }
+            selectSubscriptionSourceId() { sourceSelectCount=$((sourceSelectCount + 1)); return 99; }
+            wireGuardMenuAddEdgePeer $'3\n7'
+            [[ "${sourceSelectCount}" == "0" && "$(<"${healthLog}")" == edge-a ]]
+            [[ "$(grep -cxF 'runSubscriptionGroupSync:' <<<"${actions}")" == "1" ]]
+        )
 
         resetMenuActions
         setSubscriptionSourceControlTokenMenu <<<"${updatedCredential}
@@ -1263,6 +1277,7 @@ runMenuSmokeRegression() {
     }
     eval "$(declare -f menu | sed '1s/^menu /originalCoreMainMenu /')"
     eval "$(declare -f manageSubscriptionPendingInvites | sed '1s/^manageSubscriptionPendingInvites /originalManageSubscriptionPendingInvites /')"
+    eval "$(declare -f addOtherSubscribe | sed '1s/^addOtherSubscribe /originalMenuSmokeAddOtherSubscribe /')"
     eval "$(declare -f changeSubscriptionSourceEnabledMenu | sed '1s/^changeSubscriptionSourceEnabledMenu /originalChangeSubscriptionSourceEnabledMenu /')"
     eval "$(declare -f removeSubscriptionControlledServerMenu | sed '1s/^removeSubscriptionControlledServerMenu /originalRemoveSubscriptionControlledServerMenu /')"
     menu() { recordMenuAction menu; }
@@ -2621,6 +2636,45 @@ main
 7"
             assertMenuAction "${wgAction#*:}"
         done
+        (
+            local syncStatus=0 completionShouldFail=false completedId=stale
+            addOtherSubscribe() { originalMenuSmokeAddOtherSubscribe "$@"; }
+            subscriptionWireGuardCredentialDecode() {
+                case "$1" in
+                valid-receipt) printf '{"kind":"receipt"}\n' ;;
+                not-receipt) printf '{"kind":"invite"}\n' ;;
+                *) return 1 ;;
+                esac
+            }
+            subscriptionWireGuardCompleteInvite() {
+                recordMenuAction complete-invite
+                [[ "${completionShouldFail}" != true ]] || return 1
+                printf -v "$2" '%s' edge-new
+            }
+            runSubscriptionSyncAfterMutation() {
+                [[ "${3:-}" == true ]] || return 99
+                recordMenuAction forced-sync
+                return "${syncStatus}"
+            }
+            manageSubscriptionServerItem() { recordMenuAction "server-detail:${1:-}"; }
+            resetMenuActions
+            manageSubscriptionServers <<< $'2\nvalid-receipt\n7'
+            [[ "${actions}" == $'complete-invite\nsuccessCard:被控接入已完成\nforced-sync\nserver-detail:edge-new\n' ]]
+            syncStatus=1
+            resetMenuActions
+            manageSubscriptionServers <<< $'2\nvalid-receipt\n2\ninvalid-receipt\n2\nnot-receipt\n2\n\n2'
+            [[ "${actions}" == $'complete-invite\nsuccessCard:被控接入已完成\nforced-sync\nserver-detail:edge-new\nerrorCard:接入回执无效，请复制被控端完整输出\nerrorCard:请粘贴接入回执\nerrorCard:接入回执不可为空\n' ]]
+            completionShouldFail=true
+            resetMenuActions
+            manageSubscriptionServers <<< $'2\nvalid-receipt\n7'
+            [[ "${actions}" == $'complete-invite\n' ]]
+            completionShouldFail=false
+            regressionExpectStatus 1 addOtherSubscribe completedId <<<valid-receipt
+            [[ "${completedId}" == edge-new ]]
+            regressionExpectStatus 1 addOtherSubscribe completedId </dev/null
+            [[ -z "${completedId}" ]]
+            regressionExpectStatus 1 addOtherSubscribe <<<valid-receipt
+        )
         (
             manageSubscriptionServerItem() { recordMenuAction manageSubscriptionServerItem; }
             resetMenuActions

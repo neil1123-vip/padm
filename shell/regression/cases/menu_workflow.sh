@@ -515,7 +515,7 @@ runSubscriptionMenuDraftRegression() (
             mutationCount=$((mutationCount + 1))
             originalSetUserSubscriptionsFields "$@"
         }
-        editUserSubscriptionsMenu '["alpha"]' <<< $'1,2,3,5\nAlpha revised\n1,2\n6\n6'
+        editUserSubscriptionsMenu '["alpha"]' <<< $'1,2,3,5,6\nAlpha revised\n1,2\n6'
         [[ "${mutationCount}" == "1" && "${syncCount}" == "1" ]]
         subscriptionActiveGroupRead -e '
           .sync.enabled == false and
@@ -524,7 +524,7 @@ runSubscriptionMenuDraftRegression() (
           .user_groups[0].traffic_limit_gb == 6 and .user_groups[0].enabled == false and
           .user_groups[1].name == "Beta"
         ' >/dev/null
-        editUserSubscriptionsMenu '["alpha","beta"]' <<< $'2,3,4\n2\n8\n6'
+        editUserSubscriptionsMenu '["alpha","beta"]' <<< $'2,3,4,6\n2\n8'
         [[ "${mutationCount}" == "2" && "${syncCount}" == "2" ]]
         subscriptionActiveGroupRead -e '
           .sync.enabled == false and
@@ -537,13 +537,16 @@ runSubscriptionMenuDraftRegression() (
         editUserSubscriptionsMenu '["alpha","beta"]' <<< $'2,3\n\n\n6'
         [[ "${mutationCount}" == "2" && "${syncCount}" == "2" ]]
         [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
-        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'2,6\n2,2\n4,5\nmissing\n7'
+        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'6,2\n2,6,3\n2,7\n2,8\n2,2\n4,5,6\nmissing\n7'
         [[ "${mutationCount}" == "2" && "${syncCount}" == "2" ]]
         [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha","beta"]' <<< $'1,3,6\n7'
+        [[ "${mutationCount}" == "2" && "${syncCount}" == "2" &&
+            "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
         regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'1,2,3\nDiscarded\n1\n'
         [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
         resetDraftFixture
-        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' < <(printf '1,3,5\nDiscarded\n')
+        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' < <(printf '1,3,5,6\nDiscarded\n')
         [[ "${mutationCount}" == "2" && "${syncCount}" == "2" &&
             "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
         editUserSubscriptionsMenu '["alpha"]' <<< $'1,3,5\nDrafted\ninvalid\n9\n'
@@ -683,8 +686,8 @@ runSubscriptionMenuDraftRegression() (
             [[ "${mutationCount}" != "1" ]] || return 1
             originalSetUserSubscriptionsFields "$@"
         }
-        # here-string 补上的末尾换行与显式换行形成两次空回车，失败后仍用草稿重试。
-        editUserSubscriptionsMenu '["alpha"]' <<< $'1\nRetained draft\n3\n9\n\n'
+        # 组合保存失败后，下一次空回车仍使用保留的草稿重试。
+        editUserSubscriptionsMenu '["alpha"]' <<< $'1,3,6\nRetained draft\n9\n'
         [[ "${mutationCount}" == "2" && "${syncCount}" == "1" ]]
         subscriptionActiveGroupRead -e '.user_groups[0].name == "Retained draft" and .user_groups[0].traffic_limit_gb == 9' >/dev/null
     )

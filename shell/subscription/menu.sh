@@ -1148,7 +1148,7 @@ editUserSubscriptionsMenu() {
         menuItem 6 "保存并立即同步" "不改变自动同步设置"
         menuReturnItem 7 "取消并丢弃草稿" "返回分享订阅"
         menuItem 8 "重新读取并丢弃草稿" "放弃当前草稿，读取最新状态"
-        menuLine "配置字段可用逗号连续选择（例 2,3）；保存、取消和重新读取单独选择"
+        menuLine "字段可用逗号连续选择（例 2,3）；末尾加 6 填写后直接保存（例 2,3,6）；取消和重新读取单独选择"
         menuClose
         if [[ -n "${pendingFields}" ]]; then
             editPrompt="请选择[回车保存并立即同步]:"
@@ -1164,7 +1164,8 @@ editUserSubscriptionsMenu() {
           $choice | split(",") | map(gsub("^\\s+|\\s+$"; "")) |
           select(all(.[]; test("^[1-8]$"))) | map(tonumber) |
           select(length == (unique | length)) |
-          select(length == 1 or all(.[]; . <= 5)) |
+          select(length == 1 or all(.[]; . <= 5) or
+            (.[-1] == 6 and all(.[:-1][]; . <= 5))) |
           select($count == 1 or index(1) == null) |
           select(index(4) == null or index(5) == null) | .[]
         ') || { coreSelectionErrorCard; continue; }
@@ -1564,7 +1565,7 @@ changeSubscriptionSourceEnabledMenu() {
 
 manageSubscriptionServers() {
     subscriptionRequireMainRole || return 1
-    local serverStatus=
+    local serverStatus= completedSourceId=
     while true; do
         echoContent title "\n┌─ 被控服务器 ───────────────────────────────────────"
         menuLine "待接入服务器使用邀请和回执；已有服务器选择一次即可连续维护。"
@@ -1578,7 +1579,10 @@ manageSubscriptionServers() {
         menuReadChoice server_source_menu "请选择:" serverStatus || return 0
         case "${serverStatus}" in
         1) createSubscriptionWireGuardInviteMenu ;;
-        2) addOtherSubscribe ;;
+        2)
+            addOtherSubscribe completedSourceId || true
+            [[ -z "${completedSourceId}" ]] || manageSubscriptionServerItem "${completedSourceId}"
+            ;;
         3) manageSubscriptionPendingInvites ;;
         4) manageSubscriptionServerItem ;;
         # 保留旧动作编号，已有输入仍经过目标选择和确认。
@@ -1677,9 +1681,11 @@ manageSubscriptionServerItem() {
 
 # 添加被控服务器
 addOtherSubscribe() {
+    local resultVar=${1:-}
     local credential=
     local credentialJson=
     local completedAlias=
+    [[ -z "${resultVar}" ]] || printf -v "${resultVar}" '%s' ""
     echoContent title "\n┌─ 完成被控接入 ─────────────────────────────────────"
     menuLine "粘贴接入回执，自动使用创建邀请时预留的别名和地址。"
     menuClose
@@ -1697,7 +1703,8 @@ addOtherSubscribe() {
         return 1
     fi
     subscriptionWireGuardCompleteInvite "${credentialJson}" completedAlias || return 1
-    successCard "被控接入已完成" "别名：${completedAlias}" "Peer、服务器源和 Token 已保存；可到 订阅同步 -> 状态与排障 执行健康检查"
+    [[ -z "${resultVar}" ]] || printf -v "${resultVar}" '%s' "${completedAlias}"
+    successCard "被控接入已完成" "别名：${completedAlias}" "Peer、服务器源和 Token 已保存；可在该服务器详情检查连接和重试同步"
     runSubscriptionSyncAfterMutation "被控服务器接入" "" true
 }
 
