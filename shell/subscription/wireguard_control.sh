@@ -1339,7 +1339,8 @@ subscriptionWireGuardCreateInvite() {
 }
 
 subscriptionWireGuardListPendingInvitesUnlocked() {
-    local state groupsState now invite alias address expiresAt status result='[]'
+    local state groupsState now invite alias address expiresAt inviteId status result='[]'
+    local includeInviteId=${1:-false}
     subscriptionWireGuardReadPreviousStateAndGroups state groupsState "WireGuard 状态读取失败" "订阅组状态读取失败" || return 1
     [[ "$(jq -r '.role' <<<"${state}")" == "main" ]] || return 1
     now=$(subscriptionWireGuardNow) || return 1
@@ -1347,6 +1348,7 @@ subscriptionWireGuardListPendingInvitesUnlocked() {
     while IFS= read -r invite; do
         [[ -n "${invite}" ]] || continue
         alias=$(jq -r '.alias' <<<"${invite}") || return 1
+        inviteId=$(jq -r '.invite_id' <<<"${invite}") || return 1
         address=$(jq -r '.address' <<<"${invite}") || return 1
         expiresAt=$(jq -r '.expires_at' <<<"${invite}") || return 1
         status=pending
@@ -1354,7 +1356,11 @@ subscriptionWireGuardListPendingInvitesUnlocked() {
             subscriptionWireGuardActiveSourcesFromGroupsState "${groupsState}" | jq -e --arg alias "${alias}" 'any(.[]?; .id == $alias)' >/dev/null 2>&1; then
             status=incomplete
         fi
-        result=$(jq -c --arg alias "${alias}" --arg address "${address}" --argjson expiresAt "${expiresAt}" --arg status "${status}" --argjson now "${now}" '. + [{alias:$alias,address:$address,expires_at:$expiresAt,remaining_seconds:($expiresAt-$now),status:$status}]' <<<"${result}") || return 1
+        result=$(jq -c --arg alias "${alias}" --arg address "${address}" --arg inviteId "${inviteId}" \
+            --argjson expiresAt "${expiresAt}" --arg status "${status}" --argjson now "${now}" \
+            --argjson includeInviteId "${includeInviteId}" \
+            '. + [{alias:$alias,address:$address,expires_at:$expiresAt,remaining_seconds:($expiresAt-$now),status:$status} |
+              if $includeInviteId then .invite_id = $inviteId else . end]' <<<"${result}") || return 1
     done < <(jq -c '.pending_invites[]?' <<<"${state}")
     printf '%s\n' "${result}"
 }
@@ -1365,7 +1371,8 @@ subscriptionWireGuardListPendingInvites() {
 
 subscriptionWireGuardCancelInviteUnlocked() {
     local alias=$1
-    local previousState previousGroupsState now currentPending cleanPending invite peerExists=false sourceExists=false workingPending
+    local expectedInviteId=${2:-}
+    local previousState previousGroupsState now currentPending cleanPending invite currentInviteId peerExists=false sourceExists=false workingPending
     local source=
     local originalUsers=
     subscriptionWireGuardValidAlias "${alias}" || return 1
@@ -1373,6 +1380,14 @@ subscriptionWireGuardCancelInviteUnlocked() {
     [[ "$(jq -r '.role' <<<"${previousState}")" == "main" ]] || return 1
     now=$(subscriptionWireGuardNow) || return 1
     currentPending=$(jq -c '.pending_invites // []' <<<"${previousState}") || return 1
+    if [[ -n "${expectedInviteId}" ]]; then
+        currentInviteId=$(jq -r --arg alias "${alias}" \
+            'first(.pending_invites[]? | select(.alias == $alias)).invite_id // empty' <<<"${previousState}") || return 1
+        [[ "${currentInviteId}" == "${expectedInviteId}" ]] || {
+            errorCard "待完成邀请已变化，请刷新后重试"
+            return 1
+        }
+    fi
     cleanPending=$(subscriptionWireGuardCleanPendingInvitesJson "${previousState}" "${previousGroupsState}" "${now}") || return 1
     invite=$(jq -c --arg alias "${alias}" 'first(.[]? | select(.alias == $alias)) // empty' <<<"${cleanPending}") || return 1
     if [[ -z "${invite}" ]]; then

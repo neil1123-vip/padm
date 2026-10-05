@@ -944,6 +944,40 @@ runSubscriptionWireGuardInviteReceiptRegression() (
     if grep -q "$(jq -r '.invite_id' <<<"${inviteJsonA}")" <<<"${pendingJson}"; then
         return 1
     fi
+    pendingJson=$(subscriptionWireGuardListPendingInvites true)
+    jq -e --arg inviteId "$(jq -r '.invite_id' <<<"${inviteJsonA}")" \
+        'length == 2 and any(.[]; .alias == "hk-1" and .invite_id == $inviteId)' <<<"${pendingJson}" >/dev/null
+    (
+        local oldInvite newInvite oldInviteId newInviteJson errorText=
+        local stateWrites=0 groupWrites=0 drains=0 applies=0
+        local stateMarker="${root}/stale-cancel-state.json" wireGuardConfig="${root}/stale-cancel-wg.conf"
+        subscriptionWireGuardCreateInvite stale-cancel oldInvite
+        oldInviteId=$(subscriptionWireGuardCredentialDecode "${oldInvite}" | jq -r '.invite_id')
+        subscriptionWireGuardCancelInvite stale-cancel
+        subscriptionWireGuardCreateInvite stale-cancel newInvite
+        newInviteJson=$(subscriptionWireGuardCredentialDecode "${newInvite}")
+        subscriptionWireGuardWriteState --arg address "$(jq -r '.address' <<<"${newInviteJson}")" \
+            --arg key "${controlledPublicKeyC}" \
+            '.peers += [{id:"stale-cancel",name:"stale-cancel",address:$address,public_key:$key,endpoint:"",enabled:true}]'
+        addSubscriptionSourceState stale-cancel stale-cancel \
+            "$(subscriptionWireGuardAddressHost "$(jq -r '.address' <<<"${newInviteJson}")")" 39778
+        stateBefore=$(subscriptionWireGuardReadState)
+        groupsBefore=$(subscriptionGroupsStateRead -c '.')
+        eval "$(declare -f subscriptionWireGuardWriteState | sed '1s/^subscriptionWireGuardWriteState/originalStaleCancelStateWrite/')"
+        eval "$(declare -f subscriptionGroupsStateWrite | sed '1s/^subscriptionGroupsStateWrite/originalStaleCancelGroupsWrite/')"
+        subscriptionWireGuardWriteState() { stateWrites=$((stateWrites + 1)); originalStaleCancelStateWrite "$@"; }
+        subscriptionGroupsStateWrite() { groupWrites=$((groupWrites + 1)); originalStaleCancelGroupsWrite "$@"; }
+        subscriptionRemoteDrainSource() { drains=$((drains + 1)); return 99; }
+        applySubscriptionWireGuardService() { applies=$((applies + 1)); return 99; }
+        errorCard() { errorText=$1; }
+        regressionExpectStatus 1 subscriptionWireGuardCancelInvite stale-cancel "${oldInviteId}"
+        [[ "${errorText}" == "待完成邀请已变化，请刷新后重试" &&
+            "${stateWrites}" == "0" && "${groupWrites}" == "0" && "${drains}" == "0" && "${applies}" == "0" ]]
+        [[ "$(subscriptionWireGuardReadState)" == "${stateBefore}" &&
+            "$(subscriptionGroupsStateRead -c '.')" == "${groupsBefore}" ]]
+        jq -e --arg oldId "${oldInviteId}" 'any(.pending_invites[]; .alias == "stale-cancel" and .invite_id != $oldId) and
+            any(.peers[]; .id == "stale-cancel")' <<<"${stateBefore}" >/dev/null
+    )
 
     subscriptionWireGuardCancelInvite hk-1
     subscriptionWireGuardCreateInvite hk-3 inviteCredentialC
@@ -2526,7 +2560,8 @@ main
             local pendingInviteJqLog="${TMP_DIR}/pending-invite-jq.log"
             local cancelCalled=
             subscriptionWireGuardListPendingInvites() {
-                printf '%s\n' '[{"alias":"edge-a","address":"10.77.0.2/24","expires_at":1770000000,"remaining_seconds":3600,"status":"pending"}]'
+                [[ "${1:-}" == true ]] || return 99
+                printf '%s\n' '[{"invite_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","alias":"edge-a","address":"10.77.0.2/24","expires_at":1770000000,"remaining_seconds":3600,"status":"pending"}]'
             }
             autoRead() {
                 printf -v "$3" '%s' ''
@@ -2543,6 +2578,60 @@ main
             grep -q '别名：edge-a' <<<"${output}"
             [[ "$(wc -l <"${pendingInviteJqLog}")" == "1" ]]
             [[ -z "${cancelCalled}" ]]
+        )
+        (
+            local pendingState initialPending listLog="${TMP_DIR}/pending-menu-reads.log"
+            local cancelLog= cancelCount=0 cancelShouldFail=false pendingStdout="${TMP_DIR}/pending-menu-stdout.log"
+            local inviteIdA='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            local inviteIdB='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+            initialPending=$(command jq -cn --arg idA "${inviteIdA}" --arg idB "${inviteIdB}" '
+              [{invite_id:$idA,alias:"edge-a",address:"10.77.0.2/24",expires_at:1770000000,remaining_seconds:3600,status:"pending"},
+               {invite_id:$idB,alias:"2",address:"10.77.0.3/24",expires_at:1770000000,remaining_seconds:3600,status:"incomplete",token:"never-print-token"}]')
+            pendingState=${initialPending}
+            subscriptionWireGuardListPendingInvites() {
+                [[ "${1:-}" == true ]] || return 99
+                printf 'read\n' >>"${listLog}"
+                printf '%s\n' "${pendingState}"
+            }
+            subscriptionWireGuardCancelInvite() {
+                cancelCount=$((cancelCount + 1))
+                cancelLog+="$1:$2"$'\n'
+                [[ "${cancelShouldFail}" != true ]] || return 1
+                pendingState=$(command jq -c --arg alias "$1" --arg id "$2" '
+                  [.[] | select(.alias != $alias or .invite_id != $id)]' <<<"${pendingState}")
+            }
+            statusCard() { output+="$*"$'\n'; recordMenuAction "statusCard:$1"; }
+            warnCard() { output+="$*"$'\n'; recordMenuAction "warnCard:$1"; }
+            successCard() { output+="$*"$'\n'; recordMenuAction "successCard:$1"; }
+            errorCard() { output+="$*"$'\n'; recordMenuAction "errorCard:$1"; }
+            : >"${listLog}"
+            resetMenuActions
+            output=
+            originalManageSubscriptionPendingInvites >"${pendingStdout}" <<< $'invalid\nedge-a\nn\nedge-a\ny\n2\ny'
+            [[ "${cancelCount}" == "2" && "${cancelLog}" == "edge-a:${inviteIdA}"$'\n'"2:${inviteIdB}"$'\n' &&
+                "${pendingState}" == '[]' && "$(wc -l <"${listLog}")" == "4" ]]
+            assertMenuAction 'errorCard:待完成邀请别名无效，请重新输入'
+            assertMenuAction 'statusCard:已保留待完成邀请'
+            [[ "$(grep -cxF 'successCard:待完成邀请已取消' <<<"${actions}")" == "2" ]]
+            grep -q '当前没有待完成邀请' <<<"${output}"
+            ! grep -qE "${inviteIdA}|${inviteIdB}|never-print-token" <<<"${output}"
+            ! grep -qE "${inviteIdA}|${inviteIdB}|never-print-token" "${pendingStdout}"
+            pendingState=${initialPending}
+            cancelCount=0
+            cancelLog=
+            originalManageSubscriptionPendingInvites <<<""
+            originalManageSubscriptionPendingInvites </dev/null
+            originalManageSubscriptionPendingInvites < <(printf edge-a)
+            originalManageSubscriptionPendingInvites < <(printf 'edge-a\n')
+            originalManageSubscriptionPendingInvites < <(printf 'edge-a\ny')
+            [[ "${cancelCount}" == "0" && -z "${cancelLog}" && "${pendingState}" == "${initialPending}" ]]
+            : >"${listLog}"
+            cancelShouldFail=true
+            resetMenuActions
+            regressionExpectStatus 1 originalManageSubscriptionPendingInvites <<< $'edge-a\ny\n2\ny'
+            [[ "${cancelCount}" == "1" && "${cancelLog}" == "edge-a:${inviteIdA}"$'\n' &&
+                "$(wc -l <"${listLog}")" == "1" && "${pendingState}" == "${initialPending}" ]]
+            ! assertMenuAction 'successCard:待完成邀请已取消'
         )
         resetMenuActions
         output=
