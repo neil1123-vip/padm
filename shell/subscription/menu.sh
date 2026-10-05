@@ -477,20 +477,19 @@ showSubscriptionQuotaPlanJson() {
 
 manageSharedSubscriptions() {
     subscriptionRequireLocalPublisherRole || return 1
+    local idsJson
     while true; do
         selectUserSubscriptionId true true || return 0
         if [[ "${selectedUserSubscriptionId}" == "+" ]]; then
             createAndSyncUserSubscriptionWizard || true
-            if [[ -n "${createdUserSubscriptionId:-}" ]]; then
-                manageUserSubscriptionItem "${createdUserSubscriptionId}"
-            elif [[ "${createdUserSubscriptionIds:-'[]'}" != '[]' ]]; then
-                manageUserSubscriptionsMenu "${createdUserSubscriptionIds}" || true
-            fi
-        elif [[ -n "${selectedUserSubscriptionIds:-}" && "${selectedUserSubscriptionIds}" != '[]' ]]; then
-            manageUserSubscriptionsMenu "${selectedUserSubscriptionIds}" || true
+            idsJson=${createdUserSubscriptionIds:-'[]'}
+        elif [[ "${selectedUserSubscriptionIds:-'[]'}" != '[]' ]]; then
+            idsJson=${selectedUserSubscriptionIds}
         else
-            manageUserSubscriptionItem "${selectedUserSubscriptionId}"
+            idsJson=$(jq -cn --arg id "${selectedUserSubscriptionId}" '[$id]') || return 1
         fi
+        [[ "${idsJson}" != '[]' ]] || continue
+        manageUserSubscriptionsMenu "${idsJson}" || true
     done
 }
 
@@ -1320,7 +1319,7 @@ manageUserSubscriptionsMenu() {
     local idsJson=${1:-'[]'}
     local userSubscriptionItemStatus=
     local userSubscriptionId= usersJson summary line enabled targetEnabled selectedCount
-    local selectedIds id hasChanges batchScope menuKey expectedFields
+    local selectedIds id hasChanges batchScope menuKey expectedFields templateId
     local displayJq displayJson
     local -a linkArgs=()
     selectedCount=$(jq -er 'select(type == "array" and length > 0) | length' <<<"${idsJson}") || return 1
@@ -1380,6 +1379,7 @@ manageUserSubscriptionsMenu() {
         menuDangerItem 6 "删除订阅" "删除记录；同步后移除对应托管账号"
         menuReturnItem 7 "返回订阅列表" "回到分享订阅"
         menuItem 8 "切换订阅" "选择另一订阅继续管理"
+        menuItem "+" "新建分享订阅" "创建后立即同步并进入详情"
         if [[ "${selectedCount}" == "1" ]]; then
             menuItem 9 "按当前配置新建订阅" "复制节点范围和额度，不复制身份、流量和令牌"
         fi
@@ -1434,12 +1434,16 @@ manageUserSubscriptionsMenu() {
                 selectedCount=$(jq 'length' <<<"${idsJson}") || return 1
             fi
             ;;
-        9)
-            if [[ "${selectedCount}" != "1" ]]; then
-                coreSelectionErrorCard
-                continue
+        9 | +)
+            templateId=
+            if [[ "${userSubscriptionItemStatus}" == "9" ]]; then
+                if [[ "${selectedCount}" != "1" ]]; then
+                    coreSelectionErrorCard
+                    continue
+                fi
+                templateId=${userSubscriptionId}
             fi
-            createAndSyncUserSubscriptionWizard "${userSubscriptionId}" || true
+            createAndSyncUserSubscriptionWizard "${templateId}" || true
             if [[ "${createdUserSubscriptionIds:-'[]'}" != '[]' ]]; then
                 idsJson=${createdUserSubscriptionIds}
                 selectedCount=$(jq 'length' <<<"${idsJson}") || return 1

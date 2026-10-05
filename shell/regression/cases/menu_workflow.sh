@@ -103,14 +103,16 @@ runSubscriptionMenuWorkflowCoreRegression() (
         userSubscriptionExists pending-team
         subscriptionActiveGroupRead -e '.sync.enabled == false' >/dev/null
         grep -q '已保存' "${statusLog}"
-        local openedId=
-        manageUserSubscriptionItem() { openedId=$1; }
+        local openedIds=
+        manageUserSubscriptionsMenu() { openedIds=$1; }
+        manageSharedSubscriptions <<< $'alpha\n\n'
+        [[ "${openedIds}" == '["alpha"]' && "${syncCount}" == "2" ]]
         manageSharedSubscriptions <<< $'+\nretry-team\n1\n0\n\n'
-        [[ "${openedId}" == "retry-team" && "${syncCount}" == "3" && "${shownCount}" == "1" ]]
+        [[ "${openedIds}" == '["retry-team"]' && "${syncCount}" == "3" && "${shownCount}" == "1" ]]
         userSubscriptionExists retry-team
         published=true
         manageSharedSubscriptions <<< $'+\npartial-team\n1\n0\n\n'
-        [[ "${openedId}" == "partial-team" && "${syncCount}" == "4" &&
+        [[ "${openedIds}" == '["partial-team"]' && "${syncCount}" == "4" &&
             "${shownCount}" == "2" && "${shownId}" == "partial-team" ]]
         userSubscriptionExists partial-team
         grep -q '首次同步部分失败但链接已发布' "${statusLog}"
@@ -122,12 +124,9 @@ runSubscriptionMenuWorkflowCoreRegression() (
             -z "${createdUserSubscriptionId}" && "${createdUserSubscriptionIds}" == '["local-a","local-b"]' ]]
         [[ "${SUBSCRIPTION_SYNC_PUBLISHED}" == false ]]
         grep -q '账号同步已完成，未发布订阅链接' "${statusLog}"
-        local openedIds=
-        manageUserSubscriptionsMenu() { openedIds=$1; }
         syncStatus=1
-        openedId=
         manageSharedSubscriptions <<< $'+\nbatch-pending-a,batch-pending-b\n1,2\n4\n\n'
-        [[ "${syncCount}" == "6" && "${shownCount}" == "2" && -z "${openedId}" &&
+        [[ "${syncCount}" == "6" && "${shownCount}" == "2" &&
             "${openedIds}" == '["batch-pending-a","batch-pending-b"]' &&
             "${createdUserSubscriptionIds}" == "${openedIds}" ]]
         subscriptionActiveGroupRead -e '
@@ -1200,6 +1199,100 @@ runSubscriptionMenuBatchRegression() (
           length == 2 and all(.[]; .enabled and .allowed_sources == ["main"] and .traffic_limit_gb == 1 and
             (has("uuid") | not) and (has("token") | not))
         ' >/dev/null
+        resetBatchFixture
+    )
+
+    (
+        local syncCount=0 syncStatus=0 createCount=0 sourcePromptCount=0 limitPromptCount=0 selectorPromptCount=0
+        local viewedId= viewedIds= trafficIds= scope before writeCount=0
+        local -a templateArgs=()
+        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); return "${syncStatus}"; }
+        showPublishedSubscriptionLinks() { viewedId=${1:-}; viewedIds=${2:-}; }
+        showUserSubscriptionTraffic() { trafficIds+="$1,"; }
+        eval "$(declare -f createAndSyncUserSubscriptionWizard | sed '1s/^createAndSyncUserSubscriptionWizard/originalDirectCreateAndSyncUserSubscriptionWizard/')"
+        createAndSyncUserSubscriptionWizard() {
+            createCount=$((createCount + 1))
+            templateArgs+=("${1:-}")
+            originalDirectCreateAndSyncUserSubscriptionWizard "$@"
+        }
+        eval "$(declare -f menuReadChoice | sed '1s/^menuReadChoice/originalDirectCreateMenuReadChoice/')"
+        menuReadChoice() {
+            case "$1" in
+            user_subscription_sources) sourcePromptCount=$((sourcePromptCount + 1)) ;;
+            user_subscription_traffic_limit) limitPromptCount=$((limitPromptCount + 1)) ;;
+            select_user_subscription_id) selectorPromptCount=$((selectorPromptCount + 1)) ;;
+            esac
+            originalDirectCreateMenuReadChoice "$@"
+        }
+        resetDirectCreateFixture() {
+            resetBatchFixture
+            syncCount=0 syncStatus=0 createCount=0 sourcePromptCount=0 limitPromptCount=0 selectorPromptCount=0
+            viewedId= viewedIds= trafficIds= writeCount=0
+            templateArgs=()
+        }
+
+        resetDirectCreateFixture
+        addSubscriptionSourceState edge "Edge" 203.0.113.20 39778
+        subscriptionActiveGroupWrite '.user_groups[0].allowed_sources = ["edge"] | .user_groups[0].traffic_limit_gb = 6'
+        manageUserSubscriptionsMenu '["alpha"]' <<< $'+\ndirect-new-single\n1\n0\n1\n2\n7'
+        [[ "${syncCount}" == 1 && "${createCount}" == 1 && "${viewedId}" == direct-new-single &&
+            -z "${viewedIds}" && "${trafficIds}" == direct-new-single, && -z "${templateArgs[0]}" &&
+            "${sourcePromptCount}" == 1 && "${limitPromptCount}" == 1 && "${selectorPromptCount}" == 0 ]]
+        subscriptionActiveGroupRead -e '
+          any(.user_groups[]; .id == "direct-new-single" and .allowed_sources == ["main"] and .traffic_limit_gb == 0) and
+          any(.user_groups[]; .id == "alpha" and .allowed_sources == ["edge"] and .traffic_limit_gb == 6)
+        ' >/dev/null
+
+        resetDirectCreateFixture
+        manageUserSubscriptionsMenu "${idsJson}" <<< $'+\ndirect-new-batch-a,direct-new-batch-b\n1\n2\n1\n2\n7'
+        [[ "${syncCount}" == 1 && "${createCount}" == 1 && -z "${viewedId}" && -z "${templateArgs[0]}" &&
+            "${viewedIds}" == '["direct-new-batch-a","direct-new-batch-b"]' &&
+            "${createdUserSubscriptionIds}" == "${viewedIds}" &&
+            "${trafficIds}" == direct-new-batch-a,direct-new-batch-b, && "${selectorPromptCount}" == 0 ]]
+        subscriptionActiveGroupRead -e '
+          [.user_groups[] | select(.id == "direct-new-batch-a" or .id == "direct-new-batch-b")] |
+          length == 2 and all(.[]; .allowed_sources == ["main"] and .traffic_limit_gb == 2)
+        ' >/dev/null
+
+        resetDirectCreateFixture
+        syncStatus=1
+        manageUserSubscriptionsMenu '["alpha"]' <<< $'+\ndirect-pending-a,direct-pending-b\n1\n0\n1\n2\n7'
+        [[ "${syncCount}" == 1 && "${createCount}" == 1 && -z "${viewedId}" &&
+            "${viewedIds}" == '["direct-pending-a","direct-pending-b"]' &&
+            "${createdUserSubscriptionIds}" == "${viewedIds}" &&
+            "${trafficIds}" == direct-pending-a,direct-pending-b, && "${selectorPromptCount}" == 0 ]]
+        subscriptionActiveGroupRead -e '
+          [.user_groups[] | select(.id == "direct-pending-a" or .id == "direct-pending-b")] | length == 2
+        ' >/dev/null
+
+        resetDirectCreateFixture
+        manageUserSubscriptionsMenu "${idsJson}" <<< $'+\ndirect-batch-to-single\n1\n3\n9\ndirect-copy-from-new\n2\n7'
+        [[ "${syncCount}" == 2 && "${createCount}" == 2 && -z "${templateArgs[0]}" &&
+            "${templateArgs[1]}" == direct-batch-to-single && "${trafficIds}" == direct-copy-from-new, &&
+            "${sourcePromptCount}" == 1 && "${limitPromptCount}" == 1 && "${selectorPromptCount}" == 0 ]]
+        subscriptionActiveGroupRead -e '
+          [.user_groups[] | select(.id == "direct-batch-to-single" or .id == "direct-copy-from-new")] |
+          length == 2 and all(.[]; .allowed_sources == ["main"] and .traffic_limit_gb == 3)
+        ' >/dev/null
+
+        for scope in '["alpha"]' "${idsJson}"; do
+            resetDirectCreateFixture
+            before=$(subscriptionGroupsStateRead -c '.')
+            manageUserSubscriptionsMenu "${scope}" <<< $'+\n\n2\n7'
+            [[ "${syncCount}" == 0 && "${createCount}" == 1 && "${createdUserSubscriptionIds}" == '[]' &&
+                "${sourcePromptCount}" == 0 && "${limitPromptCount}" == 0 && "${selectorPromptCount}" == 0 &&
+                "${trafficIds}" == "$(jq -r 'join(",") + ","' <<<"${scope}")" &&
+                "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+            (
+                writeCount=0 trafficIds=
+                subscriptionGroupsStateWriteUnlocked() { writeCount=$((writeCount + 1)); return 1; }
+                manageUserSubscriptionsMenu "${scope}" <<< $'+\ndirect-write-failed\n1\n0\n2\n7'
+                [[ "${writeCount}" == 1 && "${syncCount}" == 0 && "${createCount}" == 2 &&
+                    "${createdUserSubscriptionIds}" == '[]' && "${selectorPromptCount}" == 0 &&
+                    "${trafficIds}" == "$(jq -r 'join(",") + ","' <<<"${scope}")" &&
+                    "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+            )
+        done
         resetBatchFixture
     )
 
