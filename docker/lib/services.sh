@@ -41,6 +41,10 @@ dockerConfigureSpecValidate() {
         dockerError '配置规格或阶段 4 契约不是有效 JSON'
         return 1
     }
+    jq -es 'length == 1 and (.[0] | type == "object")' "${specFile}" >/dev/null 2>&1 || {
+        dockerError '配置规格必须是单个 JSON 对象'
+        return 1
+    }
     jq -e --slurpfile matrix "${matrixFile}" '
       def exact($keys): type == "object" and ((keys_unsorted | sort) == ($keys | sort));
       def port: type == "number" and floor == . and . >= 1 and . <= 65535;
@@ -201,6 +205,100 @@ PADM_NGINX_IMAGE|nginx
 PADM_OPS_IMAGE|ops
 PADM_NET_IMAGE|net
 EOF
+}
+
+dockerEditBaselineValidate() {
+    local specFile=$1 workspace=$2 root baseline core directory state token
+    root=$(dockerInstallRoot) || return 1
+    for token in config data/subscription data/xray data/sing-box data/static data/acme data/net \
+        secrets/tls secrets/net/wireguard logs/nginx logs/subscription logs/acme \
+        compose.json deployment.json images.env; do
+        dockerTrafficSafePath "${root}" "${root}/${token}" || return 1
+        if [[ -e "${root}/${token}" ]]; then
+            [[ -z "$(find "${root}/${token}" ! -type f ! -type d -print -quit)" ]] || return 1
+        fi
+    done
+    dockerManagedSpecMatchesDeployment "${specFile}" "${root}/deployment.json" "${root}/images.env" || {
+        dockerError '完整原始规格与部署记录不一致，不能接入编辑'
+        return 1
+    }
+    baseline="${workspace}/baseline"
+    mkdir -p -- "${baseline}/config/"{xray,sing-box,nginx,net/fail2ban,net/transparent} \
+        "${baseline}/data/subscription" "${baseline}/logs/nginx" || return 1
+    core=$(jq -r '.core.type' "${specFile}") || return 1
+    case "${core}" in
+    xray) dockerGenerateXrayConfig "${specFile}" "${baseline}/config/xray/config.json" || return 1 ;;
+    sing-box) dockerGenerateSingBoxConfig "${specFile}" "${baseline}/config/sing-box/config.json" || return 1 ;;
+    esac
+    if [[ -e "${root}/config/${core}/users.base" ]]; then
+        cp -- "${baseline}/config/${core}/config.json" "${baseline}/config/${core}/users.base" || return 1
+        state=$(dockerTrafficReadState) || return 1
+        dockerTrafficRender "${core}" "${baseline}/config/${core}/users.base" "${state}" \
+            >"${baseline}/config/${core}/config.json" || return 1
+    elif [[ -e "${root}/data/traffic/state.json" ]]; then
+        dockerError '旧部署有流量记录但缺少完整账号输入，不能无损接入编辑'
+        return 1
+    fi
+    dockerGenerateNginxConfig "${specFile}" "${baseline}/config/nginx/default.conf" &&
+        dockerGenerateFail2banConfig "${specFile}" "${baseline}" || return 1
+    if jq -e '.subscription.enabled' "${specFile}" >/dev/null; then
+        token=$(jq -r '.subscription.token' "${specFile}") || return 1
+        dockerGenerateSubscription "${specFile}" "${baseline}/data/subscription/${token}" || return 1
+    fi
+    # 整目录替换前核对所有受影响的输入，不把额外账号、路由或手写配置默默丢弃。
+    for directory in config/xray config/sing-box config/nginx config/net data/subscription; do
+        dockerTrafficSafePath "${root}" "${root}/${directory}" &&
+            [[ -d "${root}/${directory}" &&
+                -z "$(find "${root}/${directory}" ! -type f ! -type d -print -quit)" ]] || return 1
+        if [[ "${directory}" == "config/${core}" ]]; then
+            while IFS= read -r token; do
+                [[ "${token}" == "${root}/${directory}/config.json" ||
+                    "${token}" == "${root}/${directory}/users.base" ]] || {
+                    dockerError '核心含未纳入完整规格的文件，不能无损接入编辑'
+                    return 1
+                }
+            done < <(find "${root}/${directory}" -mindepth 1 -print)
+            for token in config.json users.base; do
+                [[ -e "${baseline}/${directory}/${token}" ]] || continue
+                [[ -f "${root}/${directory}/${token}" ]] &&
+                    jq -e -n --slurpfile expected "${baseline}/${directory}/${token}" \
+                        --slurpfile actual "${root}/${directory}/${token}" \
+                        '$expected == $actual' >/dev/null 2>&1 || {
+                    dockerError '核心账号或参数与完整规格不一致，不能无损接入编辑'
+                    return 1
+                }
+            done
+        else
+            diff -qr -- "${baseline}/${directory}" "${root}/${directory}" >/dev/null 2>&1 || {
+                dockerError '存在完整规格之外的站点、订阅或宿主配置，不能无损接入编辑'
+                return 1
+            }
+        fi
+    done
+    dockerGenerateCompose "${specFile}" "${baseline}/compose.json" &&
+        dockerGenerateDeployment "${specFile}" "${baseline}/deployment.json" || return 1
+    : >"${baseline}/images.env"
+    dockerGenerateImagesEnv "${specFile}" "${baseline}/images.env" "${root}" || return 1
+    LC_ALL=C sort "${root}/images.env" >"${baseline}/images.actual.env" &&
+        LC_ALL=C sort "${baseline}/images.env" >"${baseline}/images.expected.env" &&
+        cmp -s -- "${baseline}/images.expected.env" "${baseline}/images.actual.env" || {
+        dockerError '镜像环境文件或挂载根路径与部署不一致，已拒绝编辑'
+        return 1
+    }
+    jq -en --slurpfile expected "${baseline}/compose.json" --slurpfile actual "${root}/compose.json" '
+      def comparable: .services |= with_entries(.value.labels |= del(."io.padm.release"));
+      ($actual | length) == 1 and ($expected[0] | comparable) == ($actual[0] | comparable)
+    ' >/dev/null 2>&1 &&
+        jq -en --slurpfile expected "${baseline}/deployment.json" \
+            --slurpfile actual "${root}/deployment.json" '
+          def input: {core: (.core | .protocol_ids |= sort),
+            listeners: (.listeners | sort_by(.service, .public_port, .transport)),
+            profiles: (.compose.profiles | sort), host_integrations, formats};
+          ($actual | length) == 1 and ($expected[0] | input) == ($actual[0] | input)
+        ' >/dev/null 2>&1 || {
+        dockerError '监听器、编排或宿主集成不能从完整规格无损重建，已拒绝编辑'
+        return 1
+    }
 }
 
 dockerRealityTlsPingState() {
@@ -1573,10 +1671,11 @@ dockerConfigurationInterrupted() {
 }
 
 dockerConfigureApply() {
-    local sourceSpec=$1 tlsSource=${2:-} acmeSource=${3:-} specFile candidate backup
+    local sourceSpec=$1 tlsSource=${2:-} acmeSource=${3:-} mode=${4:-configure} specFile candidate backup answer
+    case "${mode}" in configure|preview|interactive|confirmed) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
     dockerConfigureSpecValidate "${sourceSpec}" || return "${PADM_DOCKER_RC_STATE}"
     dockerTrafficRuntimeCheck "$(jq -r '.core.type' "${sourceSpec}")" || return "${PADM_DOCKER_RC_HOST}"
-    dockerTrafficBeforeChange
+    [[ "${mode}" != configure ]] || dockerTrafficBeforeChange
     dockerCreateConfigurationCandidate || return "${PADM_DOCKER_RC_STATE}"
     candidate=${DOCKER_CONFIG_CANDIDATE}
     specFile="${candidate}/request.json"
@@ -1608,6 +1707,32 @@ dockerConfigureApply() {
         ! dockerValidateCandidate "${specFile}" "${candidate}"; then
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_STATE}"
+    fi
+    if [[ "${mode}" == preview ]]; then
+        printf '候选配置校验通过，预览未提交。\n'
+        dockerCleanupConfigurationCandidate || return "${PADM_DOCKER_RC_STATE}"
+        return 0
+    fi
+    if [[ "${mode}" == interactive ]]; then
+        dockerSetupRead answer '候选配置已验证，确认提交？[y/N]: ' n || answer=n
+        case "${answer}" in
+        y|Y|yes|YES) ;;
+        *)
+            printf '已取消配置编辑。\n'
+            dockerCleanupConfigurationCandidate || return "${PADM_DOCKER_RC_STATE}"
+            return 0
+            ;;
+        esac
+    fi
+    if [[ "${mode}" != configure ]]; then
+        # 确认后才采集旧核心，并以最新额度状态重渲染候选账号。
+        dockerTrafficBeforeChange
+        dockerTrafficPrepareCandidate "${candidate}" &&
+            dockerPrepareCandidatePermissions "${candidate}" &&
+            dockerValidateCandidate "${specFile}" "${candidate}" || {
+            dockerCleanupConfigurationCandidate || true
+            return "${PADM_DOCKER_RC_STATE}"
+        }
     fi
     dockerBackupConfiguration || {
         dockerCleanupConfigurationCandidate || true

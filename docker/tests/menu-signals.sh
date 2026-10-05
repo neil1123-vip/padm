@@ -27,7 +27,7 @@ cat >"${TEST_ROOT}/cli.sh" <<'EOF'
 set -u
 case "${1:-}" in
 status) exit 0 ;;
-setup)
+setup|edit)
     printf '%s\n' "${BASHPID}" >"${SIGNAL_TEST_ROOT}/setup.pid"
     trap 'printf "setup-cleaned\n"; exit 143' TERM
     source "${SIGNAL_PROJECT_ROOT}/docker/lib/setup.sh"
@@ -67,19 +67,19 @@ waitText() {
     done
     return 1
 }
-for mode in input worker; do
+for mode in input worker edit-input edit-worker; do
+    export SIGNAL_MODE="${mode#edit-}"
     # Linux /proc 的后代终止另行实测；MSYS2 只覆盖真实 PTY 输入。
-    [[ "${mode}" != worker || "$(uname -s)" == Linux ]] || continue
-    export SIGNAL_MODE="${mode}"
+    [[ "${SIGNAL_MODE}" != worker || "$(uname -s)" == Linux ]] || continue
     rm -f -- "${TEST_ROOT}/menu.pid" "${TEST_ROOT}/setup.pid" "${TEST_ROOT}/worker.pid" \
         "${TEST_ROOT}/input" "${TEST_ROOT}/control.log"
     mkfifo "${TEST_ROOT}/input"
     (
         exec 3>"${TEST_ROOT}/input"
         waitText 'Docker 管理菜单' || exit 11
-        printf '2\n' >&3
+        if [[ "${mode}" == edit-* ]]; then printf '7\n' >&3; else printf '2\n' >&3; fi
         waitText 'setup-ready' || exit 12
-        if [[ "${mode}" == worker ]]; then
+        if [[ "${SIGNAL_MODE}" == worker ]]; then
             for ((attempt = 0; attempt < 200; attempt++)); do
                 [[ ! -f "${TEST_ROOT}/worker.pid" ]] || break
                 sleep 0.05
@@ -107,7 +107,7 @@ for mode in input worker; do
     [[ "${rc}" -eq 143 ]] || fail "${mode}: expected 143, got ${rc}"
     grep -Fq setup-cleaned "${TEST_ROOT}/control.log" || fail "${mode}: CLI did not clean up"
     ! kill -0 "$(<"${TEST_ROOT}/setup.pid")" 2>/dev/null || fail "${mode}: CLI survived"
-    if [[ "${mode}" == worker ]]; then
+    if [[ "${SIGNAL_MODE}" == worker ]]; then
         ! kill -0 "$(<"${TEST_ROOT}/worker.pid")" 2>/dev/null || fail 'worker survived'
     fi
 done

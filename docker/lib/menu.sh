@@ -57,8 +57,8 @@ dockerMenuRun() {
     # 子进程从已安装 bundle 读取合同，不继承菜单中的锁和候选配置。
     # 独立进程组便于中断整个动作，包括 CLI 正在等待的 Docker 命令。
     [[ $- != *m* ]] || monitorEnabled=1
-    if [[ "${1:-}" == setup ]]; then
-        # 首次配置必须与菜单共用前台进程组，否则后台 read 会收到 SIGTTIN。
+    if [[ "${1:-}" == setup || "${1:-}" == edit ]]; then
+        # 交互配置必须与菜单共用前台进程组，否则后台 read 会收到 SIGTTIN。
         setupMode=1
         set +m
     else
@@ -112,6 +112,7 @@ dockerMenu() {
             '4. 停止服务' \
             '5. 重启服务' \
             '6. 查看日志' \
+            '7. 编辑配置/导入原始规格' \
             '0. 退出'
         printf '请选择: '
         if ! IFS= read -r choice; then
@@ -128,6 +129,7 @@ dockerMenu() {
         4) dockerMenuRun down || true ;;
         5) dockerMenuRun restart || true ;;
         6) dockerMenuRun logs --tail 100 --follow || true ;;
+        7) dockerMenuRun edit || true ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

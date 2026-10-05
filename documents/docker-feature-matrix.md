@@ -31,7 +31,7 @@ Docker 现在能否通过受管控制命令完成对应能力，不表示底层�
 
 | 原生菜单 | Docker 当前状态 | 已覆盖 | 尚未覆盖或边界 |
 | --- | --- | --- | --- |
-| 安装与重装 | 部分已交付，完整管理 `deferred` | `install`、可信发布输入 `release`、交互首配 `setup`、`configure`、候选校验及恢复 | 首配仅支持 `1`、`21` 及受支持组合；已有部署编辑/导入、重装和真实发布连通仍待验收。 |
+| 安装与重装 | 部分已交付，完整管理 `deferred` | `install`、可信发布输入 `release`、交互首配 `setup`、`edit`、`configure`、候选校验及恢复 | 支持 `1`、`21` 现有字段编辑及完整原始 spec 接入；多入口、主/副核心、重装和真实发布连通仍待验收。 |
 | 订阅与用户 | `supported` + `host-integrated` + `deferred` | 有条件的订阅发布、流量采集/额度、WireGuard 宿主集成 | 发布仅支持包含协议 `21` 和受管 TLS 的 Xray 配置；用户 CRUD 和多服务器工作流未迁移；WireGuard 需 `net-wireguard`。 |
 | 协议与入口 | 部分 `supported`，管理工作流 `deferred` | 协议 `1` Reality Vision、`21` VLESS WS TLS 的初始配置运行 | 完整协议管理、Reality 目标库/扫描/参数重生成/443 共存、其余公开协议、内部路由协议、入口端口追加和 CDN 地址覆盖尚未开放。 |
 | 站点与证书 | 部分 `supported`，其余 `deferred` | TLS 文件安装、DNS-01 ACME、Nginx WebSocket 入口 | webroot/standalone ACME、静态站点/302/ALPN 管理尚未迁移。 |
@@ -111,7 +111,7 @@ Docker 现在能否通过受管控制命令完成对应能力，不表示底层�
 | `internal-205-redirect-tproxy` | 路由与访问控制 -> Redirect/TProxy | `host-integrated` | `net-transparent` | host + `NET_ADMIN` | 依赖宿主路由和防火墙。 |
 | `internal-206-routing-rules` | 路由与访问控制 -> DNS/Direct/Block | `deferred` | 无 | bridge | 规则编辑及核心适配尚未迁移。 |
 | `internal-207-access-control` | 路由与访问控制 -> Tunnel/dokodemo-door | `deferred` | 无 | bridge | 入站和防火墙合同尚未迁移。 |
-| `interactive-menu` | 全部主菜单 | `deferred` | 无 | 宿主 CLI | 已有菜单、状态、启停日志及可信首配；完整协议/用户/维护管理、真实签名发布和双架构连通仍待验收。 |
+| `interactive-menu` | 全部主菜单 | `deferred` | 无 | 宿主 CLI | 已有菜单、状态、启停日志、可信首配及现有规格编辑/完整旧输入接入；多入口、完整协议/用户/维护管理、真实发布和双架构连通待验。 |
 | `core-lifecycle` | 核心与服务 | `supported` | 核心 profile | 宿主 CLI | 基础 `status/up/down/restart/logs/update/rollback/validate` 已可用，不代表原生全部升级管理。 |
 | `core-upgrade-assessment` | 核心与服务 -> Xray / sing-box 生命周期 | `deferred` | 核心 profile | 宿主 CLI | 原生预发布试跑和升级风险扫描尚未迁移。 |
 | `geo-data` | 核心与服务 -> Xray Geo 数据 | `deferred` | `core-xray` | bridge | 尚未提供 Geo 更新和自动任务合同。 |

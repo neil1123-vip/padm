@@ -262,6 +262,13 @@ jq -e '
 ' "${DOCKER_ROOT}/compose.json" >/dev/null || fail 'Fail2ban privilege boundary is wrong'
 grep -q 'net-fail2ban preflight fail2ban 24444' "${DOCKER_LOG}" || fail 'Fail2ban preflight was not called'
 
+jq '.core.protocols[0].public_port = 25444' "${FAIL2BAN_SPEC}" >"${TEST_ROOT}/fail2ban-edit.json"
+runControl 15 reject-fail2ban-port-edit edit --spec "${TEST_ROOT}/fail2ban-edit.json" --preview
+grep -qF '带 Fail2ban 的 WS 入口端口需联动封禁规则' "${CONTROL_LOG}" ||
+    fail 'Fail2ban port edit did not expose its unsupported coordinated rule change'
+cmp -s "${FAIL2BAN_SPEC}" "${DOCKER_ROOT}/config/spec.json" ||
+    fail 'rejected Fail2ban port edit changed the managed spec'
+
 FAIL2BAN_HASH=$(sha256sum "${DOCKER_ROOT}/config/net/fail2ban/padm.local" | cut -d ' ' -f 1)
 DEPLOYMENT_HASH=$(sha256sum "${DOCKER_ROOT}/deployment.json" | cut -d ' ' -f 1)
 SPEC_HASH=$(sha256sum "${DOCKER_ROOT}/config/spec.json" | cut -d ' ' -f 1)

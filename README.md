@@ -151,6 +151,25 @@ WS TLS 可选择已有受管证书、导入完整证书链与私钥，或使用 
 完整规格保存于 `/etc/padm-docker/config/spec.json`，由 root 持有、权限 `0600`；
 取消不提交，配置失败恢复旧规格、证书及 ACME 状态。该文件含秘密，不应打印或公开。
 
+已有受管规格可从菜单的“编辑配置/导入原始规格”或 `padm-docker edit` 修改入口端口、
+服务器地址、地址族、节点名称、Reality 目标/SNI、WS 路径和订阅开关。
+编辑先生成私有草稿，显示不含秘密值的差异，候选验证通过并确认后才提交；
+不改变其它协议、UUID、密钥、token、证书、宿主集成或累计流量。
+旧部署没有 `config/spec.json` 时，必须导入保留的完整原始 spec，匹配运行配置后才能接入；
+缺字段、额外账号、手写路由/站点或不匹配的挂载路径会拒绝编辑，不从运行摘要伪造输入。
+
+```bash
+padm-docker edit
+padm-docker edit --spec /root/original-spec.json --preview
+padm-docker edit --spec /root/original-spec.json --confirm PADM-DOCKER-EDIT
+```
+
+`--preview` 不提交、不采集流量、不启停业务服务；验证仍会验签发布、拉取镜像并运行候选检查。
+`edit` 默认验证当前部署版本而非 latest，也可传入下述同版本发布资产参数。
+当前仍为 schema v1、单主核心、每种协议一个入口，
+最多 2 个协议；新增/删除协议、多入口、证书轮换和完整协议管理尚未开放。
+带 Fail2ban 的 WS 入口暂不允许修改端口，需后续联动封禁规则的管理事务。
+
 离线使用同一 Release 的三个资产：
 
 ```bash

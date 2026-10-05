@@ -11,6 +11,10 @@ NATIVE_ROOT="${TEST_ROOT}/native"
 CLI_DIR="${TEST_ROOT}/bin-installed"
 IMAGE_DIGEST=$(printf '1%.0s' {1..64})
 OPS_IMAGE="ghcr.io/example/padm-ops:test@sha256:${IMAGE_DIGEST}"
+TEST_SKIP_CHOWN=1
+if [[ "$(/usr/bin/uname -s)" == Linux && "$(/usr/bin/id -u)" == 0 ]]; then
+    TEST_SKIP_CHOWN=0
+fi
 mkdir -p "${MOCK_BIN}" "${NATIVE_ROOT}" "${TEST_ROOT}/systemd"
 cleanup() {
     if [[ "${PADM_TEST_KEEP:-0}" == "1" ]]; then
@@ -91,7 +95,16 @@ run)
         exit $?
     fi
     if [[ " ${*} " == *' --entrypoint python3 '* ]]; then
-        if [[ "${mode}" == "reality-dns-failure" ]]; then
+        if [[ " ${*} " == *'302e020100300506032b656e04220420'* ]]; then
+            previous=
+            for argument in "$@"; do
+                if [[ "${previous}" == -c ]]; then
+                    exec python3 -c "${argument}"
+                fi
+                previous=${argument}
+            done
+            exit 1
+        elif [[ "${mode}" == "reality-dns-failure" ]]; then
             exit 2
         elif [[ "${mode}" == "reality-asn-risk" ]]; then
             printf '203.0.113.35\tAS13335\tCloudflare\n'
@@ -146,7 +159,8 @@ cp "${MOCK_BIN}/systemctl" "${MOCK_BIN}/nsenter"
 runControl() {
     local expected=$1 name=$2 actual=0
     shift 2
-    if [[ "${1:-}" == configure ]]; then
+    if [[ "${CONTROL_USE_DEFAULT_ASSETS:-0}" != 1 &&
+        ( "${1:-}" == configure || "${1:-}" == edit ) ]]; then
         set -- "$@" --manifest "${CONFIGURE_MANIFEST}" --bundle "${CONFIGURE_BUNDLE}" \
             --control-bundle "${CONFIGURE_CONTROL}"
     fi
@@ -161,7 +175,7 @@ runControl() {
         PADM_DOCKER_SYSTEMD_DIR="${TEST_ROOT}/systemd" \
         PADM_DOCKER_LOCK_TIMEOUT=2 \
         PADM_DOCKER_HEALTH_TIMEOUT=1 \
-        PADM_DOCKER_SKIP_CHOWN=1 \
+        PADM_DOCKER_SKIP_CHOWN="${TEST_SKIP_CHOWN}" \
         FAKE_DOCKER_LOG="${DOCKER_LOG}" \
         FAKE_DOCKER_MODE="${FAKE_DOCKER_MODE:-ok}" \
         FAKE_DOCKER_FAIL_ONCE="${TEST_ROOT}/fail-once" \
@@ -213,8 +227,8 @@ writeRealitySpec() {
               server_name: "www.example.com",
               target_host: "www.example.com",
               target_port: 443,
-              private_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-              public_key: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+              private_key: "dwdtCnMYpX08FsFyUbJmRd9ML4frwJkqsXf7pR25LCo",
+              public_key: "hSDwCYkwp1R0i33ctD73Wg2_Og0mOBr066SpjqqbTmo",
               short_id: "6ba85179e30d4fc2"
             }
           }]
@@ -312,6 +326,13 @@ jq -e '(.services | keys | sort) == ["acme", "xray"]' \
     "${DOCKER_ROOT}/compose.json" >/dev/null || fail 'Xray Compose services are wrong'
 grep -q ' run --rm --no-deps xray -test -confdir /etc/padm/xray' "${DOCKER_LOG}" ||
     fail 'Xray candidate was not validated in its image'
+cp -- "${DOCKER_ROOT}/config/spec.json" "${TEST_ROOT}/edit-original-xray.json"
+jq '.core.protocols[0].reality.public_key = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"' \
+    "${TEST_ROOT}/edit-original-xray.json" >"${DOCKER_ROOT}/config/spec.json"
+runControl 15 edit-reject-current-wrong-key edit --preview
+grep -qF 'Reality 公私钥不匹配' "${CONTROL_LOG}" ||
+    fail 'editing an existing mismatched public key did not reach the key derivation guard'
+cp -- "${TEST_ROOT}/edit-original-xray.json" "${DOCKER_ROOT}/config/spec.json"
 
 runControl 15 reject-reality-static-relay configure --spec "${REALITY_RELAY_SPEC}"
 grep -qF '命中已知 CDN 中继风险域名' "${CONTROL_LOG}" || fail 'known relay Reality target was not rejected'
@@ -332,6 +353,7 @@ jq -e '.core.type == "sing-box" and .core.protocol_ids == [1]' \
 jq -e '.inbounds[0].type == "vless" and .inbounds[0].tls.reality.enabled == true' \
     "${DOCKER_ROOT}/config/sing-box/config.json" >/dev/null || fail 'sing-box Reality config is wrong'
 [[ ! -s "${DOCKER_ROOT}/config/xray/config.json" ]] || fail 'old Xray config survived core switch'
+runControl 0 edit-sing-box-preview edit --preview
 
 CERT_FILE="${TEST_ROOT}/proxy.example.com.crt"
 KEY_FILE="${TEST_ROOT}/proxy.example.com.key"
@@ -371,6 +393,256 @@ grep -q 'vless://11111111-1111-4111-8111-111111111111@proxy.example.com:24443.*s
 grep -q 'vless://22222222-2222-4222-8222-222222222222@proxy.example.com:24444' \
     "${DOCKER_ROOT}/data/subscription/0123456789abcdef" ||
     fail 'mixed Xray deployment lost its WebSocket node'
+
+# 编辑回归复用真实生成器和原有事务模拟，只比较生效配置，不把备份算作状态变化。
+editLiveHash() {
+    {
+        sha256sum "${DOCKER_ROOT}/deployment.json" "${DOCKER_ROOT}/compose.json" \
+            "${DOCKER_ROOT}/images.env"
+        find "${DOCKER_ROOT}/config" "${DOCKER_ROOT}/data/subscription" \
+            "${DOCKER_ROOT}/data/traffic" "${DOCKER_ROOT}/secrets/tls" \
+            -type f -print0 | sort -z | xargs -0 sha256sum
+    } | sha256sum | cut -d ' ' -f 1
+}
+assertEditCleanup() {
+    [[ -z "$(find "${DOCKER_ROOT}" -maxdepth 1 -type d \
+        \( -name '.candidate.*' -o -name '.edit.*' \) -print -quit)" ]] ||
+        fail 'edit left a configuration candidate or draft directory'
+}
+runEditPty() {
+    local command fifo="${TEST_ROOT}/edit-pty.input" completed="${TEST_ROOT}/edit-pty.done"
+    local input=${1:-$'1\n1\n25446\n8\nn\n'} expected=${2:-0}
+    local feeder actual=0 feederStatus=0
+    rm -f -- "${fifo}" "${completed}"
+    mkfifo "${fifo}"
+    printf -v command '%q ' bash -u "${PROJECT_ROOT}/install-docker.sh" edit \
+        --manifest "${CONFIGURE_MANIFEST}" --bundle "${CONFIGURE_BUNDLE}" \
+        --control-bundle "${CONFIGURE_CONTROL}"
+    printf -v command '%s; status=$?; printf "%%s\\n" "$status" >%q; exit "$status"' "${command}" "${completed}"
+    (
+        exec 3>"${fifo}"
+        printf '%s' "${input}" >&3
+        # 等命令结束再关闭输入，避免 script 丢弃已排队的交互行。
+        for ((attempt = 0; attempt < 2400; attempt++)); do
+            [[ ! -f "${completed}" ]] || exit 0
+            sleep 0.05
+        done
+        exit 1
+    ) &
+    feeder=$!
+    env MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" DOCKER_HOST= \
+        PADM_DOCKER_INSTALL_DIR="${DOCKER_ROOT}" PADM_NATIVE_INSTALL_DIR="${NATIVE_ROOT}" \
+        PADM_DOCKER_BIN_DIR="${CLI_DIR}" PADM_DOCKER_SYSTEMD_DIR="${TEST_ROOT}/systemd" \
+        PADM_DOCKER_LOCK_TIMEOUT=2 PADM_DOCKER_HEALTH_TIMEOUT=1 PADM_DOCKER_SKIP_CHOWN="${TEST_SKIP_CHOWN}" \
+        FAKE_DOCKER_LOG="${DOCKER_LOG}" FAKE_DOCKER_MODE=ok \
+        FAKE_DOCKER_FAIL_ONCE="${TEST_ROOT}/fail-once" \
+        timeout 120 script -q -e -E never -f -c "${command}" "${CONTROL_LOG}" \
+            <"${fifo}" >"${TEST_ROOT}/edit-pty.stdout" 2>&1 || actual=$?
+    wait "${feeder}" || feederStatus=$?
+    [[ "${actual}" -eq "${expected}" && "${feederStatus}" -eq 0 ]] ||
+        fail "interactive edit PTY expected rc=${expected}, got rc=${actual}"
+}
+
+EDIT_SPEC="${TEST_ROOT}/edit.json"
+jq '.core.protocols[1].public_port = 25443' "${MIXED_WS_SPEC}" >"${EDIT_SPEC}"
+mkdir -p "${DOCKER_ROOT}/data/traffic"
+printf '%s\n' '{"schema_version":1,"accounts":{"11111111-1111-4111-8111-111111111111":{"name":"main-xray","upload":7,"download":11,"limit_bytes":0,"baseline":{}}}}' \
+    >"${DOCKER_ROOT}/data/traffic/state.json"
+chmod 0600 "${DOCKER_ROOT}/data/traffic/state.json"
+EDIT_LIVE_HASH=$(editLiveHash)
+NGINX_HASH=$(sha256sum "${DOCKER_ROOT}/config/nginx/default.conf" | cut -d ' ' -f 1)
+TRAFFIC_HASH=$(sha256sum "${DOCKER_ROOT}/data/traffic/state.json" | cut -d ' ' -f 1)
+: >"${DOCKER_LOG}"
+runControl 0 edit-preview edit --spec "${EDIT_SPEC}" --preview
+[[ "$(editLiveHash)" == "${EDIT_LIVE_HASH}" ]] || fail 'edit preview changed live configuration'
+! grep -Eq ' (up|down|restart|exec) ' "${DOCKER_LOG}" || fail 'edit preview changed services or collected traffic'
+while IFS= read -r secret; do
+    ! grep -Fq -- "${secret}" "${CONTROL_LOG}" || fail 'edit preview exposed a credential or WebSocket path'
+done < <(jq -r '[.subscription.token, .core.protocols[] |
+    if type == "object" then .uuid, .websocket.path, .reality.private_key,
+      .reality.public_key, .reality.short_id else . end] |
+    .[] | select(type == "string" and length > 0)' "${EDIT_SPEC}")
+assertEditCleanup
+export FAKE_EDIT_REAL_CURL
+FAKE_EDIT_REAL_CURL=$(command -v curl)
+export FAKE_EDIT_ASSET_MANIFEST="${CONFIGURE_MANIFEST}" FAKE_EDIT_ASSET_BUNDLE="${CONFIGURE_BUNDLE}"
+export FAKE_EDIT_ASSET_CONTROL="${CONFIGURE_CONTROL}" FAKE_EDIT_ASSET_LOG="${TEST_ROOT}/edit-default-assets.log"
+cat >"${MOCK_BIN}/curl" <<'EOF'
+#!/usr/bin/env bash
+target= url= previous=
+for argument in "$@"; do
+    [[ "${previous}" != -o ]] || target=${argument}
+    [[ "${argument}" != https://* ]] || url=${argument}
+    previous=${argument}
+done
+case "${url}" in
+https://github.com/neil1123-vip/padm/releases/download/v3.1.8/release-manifest.json)
+    sourceFile=${FAKE_EDIT_ASSET_MANIFEST:?} ;;
+https://github.com/neil1123-vip/padm/releases/download/v3.1.8/release-manifest.sigstore.json)
+    sourceFile=${FAKE_EDIT_ASSET_BUNDLE:?} ;;
+https://example.invalid/control.tar.gz)
+    sourceFile=${FAKE_EDIT_ASSET_CONTROL:?} ;;
+*) exec "${FAKE_EDIT_REAL_CURL:?}" "$@" ;;
+esac
+[[ -n "${target}" ]] || exit 1
+printf '%s\n' "${url}" >>"${FAKE_EDIT_ASSET_LOG:?}"
+cp -- "${sourceFile}" "${target}"
+EOF
+chmod 0755 "${MOCK_BIN}/curl"
+CONTROL_USE_DEFAULT_ASSETS=1 runControl 0 edit-default-current-release edit --preview
+rm -- "${MOCK_BIN}/curl"
+[[ "$(wc -l <"${FAKE_EDIT_ASSET_LOG}")" -eq 3 ]] ||
+    fail 'default edit did not download exactly three current-release assets'
+for url in \
+    https://github.com/neil1123-vip/padm/releases/download/v3.1.8/release-manifest.json \
+    https://github.com/neil1123-vip/padm/releases/download/v3.1.8/release-manifest.sigstore.json \
+    https://example.invalid/control.tar.gz; do
+    grep -qxF "${url}" "${FAKE_EDIT_ASSET_LOG}" || fail 'default edit did not pin the deployed release assets'
+done
+! grep -q latest "${FAKE_EDIT_ASSET_LOG}" || fail 'default edit requested latest release assets'
+[[ "$(editLiveHash)" == "${EDIT_LIVE_HASH}" ]] || fail 'default edit preview changed live configuration'
+unset FAKE_EDIT_REAL_CURL FAKE_EDIT_ASSET_MANIFEST FAKE_EDIT_ASSET_BUNDLE FAKE_EDIT_ASSET_CONTROL FAKE_EDIT_ASSET_LOG
+assertEditCleanup
+runControl 2 edit-needs-explicit-mode edit --spec "${EDIT_SPEC}"
+runControl 2 edit-reject-invalid-confirmation edit --spec "${EDIT_SPEC}" --confirm no
+if [[ "$(/usr/bin/uname -s)" == Linux ]]; then
+    : >"${DOCKER_LOG}"
+    runEditPty
+    grep -qF 'core.protocols.1.public_port' "${CONTROL_LOG}" ||
+        fail 'interactive edit did not preview the entered Reality port change'
+    [[ "$(editLiveHash)" == "${EDIT_LIVE_HASH}" ]] || fail 'cancelled interactive edit changed live configuration'
+    ! grep -Eq ' (up|down|restart|exec) ' "${DOCKER_LOG}" ||
+        fail 'cancelled interactive edit changed services or collected traffic'
+    assertEditCleanup
+    EDIT_LIVE_HASH=$(editLiveHash)
+    runEditPty $'1\n1\nabc\n' 15
+    [[ "$(editLiveHash)" == "${EDIT_LIVE_HASH}" ]] || fail 'invalid interactive edit changed live configuration'
+    assertEditCleanup
+    mv -- "${DOCKER_ROOT}/secrets" "${TEST_ROOT}/saved-secrets"
+    ln -s "${TEST_ROOT}/saved-secrets" "${DOCKER_ROOT}/secrets"
+    SECRETS_HASH=$(find "${TEST_ROOT}/saved-secrets" -type f -print0 | sort -z |
+        xargs -0 sha256sum | sha256sum | cut -d ' ' -f 1)
+    runControl 15 edit-reject-symlinked-secrets edit --spec "${EDIT_SPEC}" --preview
+    [[ "$(find "${TEST_ROOT}/saved-secrets" -type f -print0 | sort -z |
+        xargs -0 sha256sum | sha256sum | cut -d ' ' -f 1)" == "${SECRETS_HASH}" ]] ||
+        fail 'edit changed TLS files through a secrets ancestor symlink'
+    rm -- "${DOCKER_ROOT}/secrets"
+    mv -- "${TEST_ROOT}/saved-secrets" "${DOCKER_ROOT}/secrets"
+    [[ "$(editLiveHash)" == "${EDIT_LIVE_HASH}" ]] || fail 'rejected secrets symlink edit changed live configuration'
+    assertEditCleanup
+fi
+for directory in config/sing-box config/net; do
+    printf 'unmanaged-input\n' >"${DOCKER_ROOT}/${directory}/edit-unknown"
+    UNKNOWN_LIVE_HASH=$(editLiveHash)
+    runControl 15 edit-reject-unknown-input edit --spec "${EDIT_SPEC}" --preview
+    [[ "$(editLiveHash)" == "${UNKNOWN_LIVE_HASH}" ]] || fail 'edit discarded an unknown inactive configuration file'
+    rm -- "${DOCKER_ROOT}/${directory}/edit-unknown"
+done
+cp -- "${DOCKER_ROOT}/images.env" "${TEST_ROOT}/edit-images.env"
+sed 's|^PADM_DOCKER_ROOT=.*|PADM_DOCKER_ROOT=/tmp/padm-docker-other|' \
+    "${TEST_ROOT}/edit-images.env" >"${DOCKER_ROOT}/images.env"
+UNKNOWN_LIVE_HASH=$(editLiveHash)
+runControl 15 edit-reject-altered-mount-root edit --spec "${EDIT_SPEC}" --preview
+[[ "$(editLiveHash)" == "${UNKNOWN_LIVE_HASH}" ]] || fail 'edit discarded the altered image environment input'
+cp -- "${TEST_ROOT}/edit-images.env" "${DOCKER_ROOT}/images.env"
+cp -- "${DOCKER_ROOT}/config/xray/config.json" "${TEST_ROOT}/edit-before-quota.json"
+cp -- "${DOCKER_ROOT}/data/traffic/state.json" "${TEST_ROOT}/edit-before-quota-state.json"
+USERS_BASE_HASH=$(sha256sum "${DOCKER_ROOT}/config/xray/users.base" | cut -d ' ' -f 1)
+jq '.accounts["11111111-1111-4111-8111-111111111111"].limit_bytes = 1' \
+    "${TEST_ROOT}/edit-before-quota-state.json" >"${DOCKER_ROOT}/data/traffic/state.json"
+bash -u -c '
+    source "$1/docker/lib/bootstrap.sh"
+    source "$1/docker/lib/traffic.sh"
+    dockerTrafficRender xray "$2" "$(<"$3")"
+' _ "${PROJECT_ROOT}" "${DOCKER_ROOT}/config/xray/users.base" \
+    "${DOCKER_ROOT}/data/traffic/state.json" >"${DOCKER_ROOT}/config/xray/config.json"
+jq -e '[.inbounds[].settings.clients[]? |
+    select(.id == "11111111-1111-4111-8111-111111111111")] | length == 0' \
+    "${DOCKER_ROOT}/config/xray/config.json" >/dev/null || fail 'quota fixture did not disable its exceeded account'
+QUOTA_LIVE_HASH=$(editLiveHash)
+runControl 0 edit-preview-over-quota edit --spec "${EDIT_SPEC}" --preview
+[[ "$(editLiveHash)" == "${QUOTA_LIVE_HASH}" &&
+    "$(sha256sum "${DOCKER_ROOT}/config/xray/users.base" | cut -d ' ' -f 1)" == "${USERS_BASE_HASH}" ]] ||
+    fail 'edit preview lost an over-quota account or changed quota state'
+cp -- "${TEST_ROOT}/edit-before-quota.json" "${DOCKER_ROOT}/config/xray/config.json"
+cp -- "${TEST_ROOT}/edit-before-quota-state.json" "${DOCKER_ROOT}/data/traffic/state.json"
+for mutation in 'del(.core.protocols[0].uuid)' '.schema_version = 2' '.unexpected = true'; do
+    jq "${mutation}" "${EDIT_SPEC}" >"${TEST_ROOT}/edit-invalid.json"
+    runControl 15 edit-reject-invalid-spec edit --spec "${TEST_ROOT}/edit-invalid.json" --preview
+done
+for mutation in \
+    '.core.protocols[0].uuid = "33333333-3333-4333-8333-333333333333"' \
+    '.subscription.token = "fedcba9876543210"' \
+    '.core.protocols |= map(select(.id != 1))'; do
+    jq "${mutation}" "${EDIT_SPEC}" >"${TEST_ROOT}/edit-invalid.json"
+    runControl 15 edit-reject-fixed-field-change edit --spec "${TEST_ROOT}/edit-invalid.json" --preview
+done
+cat "${EDIT_SPEC}" "${EDIT_SPEC}" >"${TEST_ROOT}/edit-invalid.json"
+runControl 15 edit-reject-multiple-json edit --spec "${TEST_ROOT}/edit-invalid.json" --preview
+jq '.release.manifest_sha256 = ("f" * 64)' "${EDIT_SPEC}" >"${TEST_ROOT}/edit-invalid.json"
+runControl 16 edit-reject-untrusted-release edit --spec "${TEST_ROOT}/edit-invalid.json" --preview
+jq '.core.protocols[1].reality.public_key = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"' \
+    "${EDIT_SPEC}" >"${TEST_ROOT}/edit-invalid.json"
+runControl 15 edit-reject-wrong-reality-key edit --spec "${TEST_ROOT}/edit-invalid.json" --preview
+FAKE_DOCKER_MODE=core-validate-fail runControl 15 edit-reject-invalid-candidate edit --spec "${EDIT_SPEC}" --preview
+[[ "$(editLiveHash)" == "${EDIT_LIVE_HASH}" ]] || fail 'rejected edit changed live configuration'
+assertEditCleanup
+
+runControl 0 edit-confirm-port edit --spec "${EDIT_SPEC}" --confirm PADM-DOCKER-EDIT
+jq -e --slurpfile original "${MIXED_WS_SPEC}" \
+    '. == ($original[0] | .core.protocols[1].public_port = 25443)' \
+    "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail 'edit changed unselected complete spec fields'
+jq -e 'any(.inbounds[]; .port == 25443 and .streamSettings.security == "reality")' \
+    "${DOCKER_ROOT}/config/xray/config.json" >/dev/null || fail 'edit did not commit the Reality port'
+[[ "$(sha256sum "${DOCKER_ROOT}/config/nginx/default.conf" | cut -d ' ' -f 1)" == "${NGINX_HASH}" ]] ||
+    fail 'editing the Reality port changed WebSocket Nginx config'
+[[ "$(sha256sum "${DOCKER_ROOT}/data/traffic/state.json" | cut -d ' ' -f 1)" == "${TRAFFIC_HASH}" ]] ||
+    fail 'edit lost cumulative traffic or quota state'
+grep -q 'vless://22222222-2222-4222-8222-222222222222@proxy.example.com:24444' \
+    "${DOCKER_ROOT}/data/subscription/0123456789abcdef" || fail 'edit lost the WebSocket subscription node'
+grep -q 'vless://11111111-1111-4111-8111-111111111111@proxy.example.com:25443' \
+    "${DOCKER_ROOT}/data/subscription/0123456789abcdef" || fail 'edit did not update the Reality subscription port'
+if [[ "$(/usr/bin/uname -s)" == Linux ]]; then
+    [[ "$(/usr/bin/stat -c %a "${DOCKER_ROOT}/config/spec.json")" == 600 &&
+        "$(/usr/bin/stat -c %a "${DOCKER_ROOT}/config/xray/users.base")" == 640 &&
+        "$(/usr/bin/stat -c %a "${DOCKER_ROOT}/config/nginx/default.conf")" == 640 ]] ||
+        fail 'edit did not retain private spec and runtime configuration permissions'
+    if [[ "${TEST_SKIP_CHOWN}" == 0 ]]; then
+        [[ "$(/usr/bin/stat -c %u:%g "${DOCKER_ROOT}/config/spec.json")" == 0:0 &&
+            "$(/usr/bin/stat -c %u:%g "${DOCKER_ROOT}/config/xray/users.base")" == 0:10001 &&
+            "$(/usr/bin/stat -c %u:%g "${DOCKER_ROOT}/config/nginx/default.conf")" == 0:10001 ]] ||
+            fail 'edit did not retain root-only spec and runtime container-group ownership'
+    fi
+fi
+EDIT_LIVE_HASH=$(editLiveHash)
+jq '.core.protocols[1].public_port = 25444' "${EDIT_SPEC}" >"${TEST_ROOT}/edit-invalid.json"
+rm -f -- "${TEST_ROOT}/fail-once"
+FAKE_DOCKER_MODE=fail-next-up runControl 14 edit-failed-start-rolls-back \
+    edit --spec "${TEST_ROOT}/edit-invalid.json" --confirm PADM-DOCKER-EDIT
+[[ "$(editLiveHash)" == "${EDIT_LIVE_HASH}" ]] || fail 'failed edit did not restore spec, core, TLS, Nginx and subscription'
+assertEditCleanup
+
+rm -- "${DOCKER_ROOT}/config/spec.json"
+EDIT_LIVE_HASH=$(editLiveHash)
+runControl 15 edit-legacy-needs-original-spec edit --preview
+runControl 15 edit-legacy-reject-invented-spec edit --spec "${MIXED_WS_SPEC}" --preview
+runControl 0 edit-legacy-preview edit --spec "${EDIT_SPEC}" --preview
+[[ ! -e "${DOCKER_ROOT}/config/spec.json" && "$(editLiveHash)" == "${EDIT_LIVE_HASH}" ]] ||
+    fail 'legacy preview committed its imported spec'
+cp -- "${DOCKER_ROOT}/config/xray/users.base" "${TEST_ROOT}/edit-users.base"
+for mutation in \
+    '.inbounds[0].settings.clients += [{id:"33333333-3333-4333-8333-333333333333",email:"extra-account"}]' \
+    '.routing.rules += [{type:"field",domain:["custom.example.com"],outboundTag:"direct"}]'; do
+    jq "${mutation}" "${TEST_ROOT}/edit-users.base" >"${DOCKER_ROOT}/config/xray/users.base"
+    EDIT_LIVE_HASH=$(editLiveHash)
+    runControl 15 edit-reject-unmanaged-core-input edit --spec "${EDIT_SPEC}" --preview
+    [[ "$(editLiveHash)" == "${EDIT_LIVE_HASH}" ]] || fail 'rejected edit discarded custom accounts or routing'
+done
+cp -- "${TEST_ROOT}/edit-users.base" "${DOCKER_ROOT}/config/xray/users.base"
+runControl 0 edit-legacy-confirm-import edit --spec "${EDIT_SPEC}" --confirm PADM-DOCKER-EDIT
+jq -e --slurpfile original "${EDIT_SPEC}" '. == $original[0]' \
+    "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail 'legacy import did not retain the complete original spec'
+assertEditCleanup
 
 DEPLOYMENT_HASH=$(sha256sum "${DOCKER_ROOT}/deployment.json" | cut -d ' ' -f 1)
 CONFIG_HASH=$(sha256sum "${DOCKER_ROOT}/config/xray/config.json" | cut -d ' ' -f 1)

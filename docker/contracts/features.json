@@ -13,7 +13,7 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "支持交互首配或 JSON spec 配置 Reality Vision 和配置时目标风险检测；目标库、扫描、PQC、参数重生成及 443 共存管理尚未迁移。"
+      "reason": "支持交互首配、完整规格导入及现有入口/目标字段编辑，配置时进行目标风险检测；目标库、扫描、PQC、参数重生成及 443 共存管理尚未迁移。"
     },
     {
       "id": 2,
@@ -83,7 +83,7 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "支持交互首配或 JSON spec 配置 Xray WebSocket 后端、Nginx 反代和 TLS 文件；不代表原生菜单管理已迁移。"
+      "reason": "支持交互首配、完整规格导入及现有入口/WS 路径编辑，配置 Xray 后端和 Nginx TLS 反代；证书轮换和完整协议管理尚未迁移。"
     },
     {
       "id": 22,
@@ -350,7 +350,7 @@
       "profiles": ["core-xray", "core-sing-box"],
       "network_mode": "host-cli",
       "host_capabilities": [],
-      "reason": "Docker 仅在 configure 时检测手写目标的风险，尚无目标扫描、目标库管理及 PQC 工作流。"
+      "reason": "Docker 配置及 edit 目标字段变更均进行风险检测，尚无目标扫描、目标库管理及 PQC 工作流。"
     },
     "reality-parameter-management": {
       "status": "deferred",
@@ -422,7 +422,7 @@
       "profiles": [],
       "network_mode": "host-cli",
       "host_capabilities": [],
-      "reason": "已提供交互菜单、状态、启停日志和可信首次配置；完整协议、用户及维护管理尚未迁移，真实签名发布和双架构连通仍待验收。"
+      "reason": "已提供交互菜单、状态、启停日志、可信首配及现有规格编辑/完整旧输入接入；多入口、完整协议、用户及维护管理尚未迁移，真实发布和双架构连通待验。"
     },
     "routing-tools": {
       "status": "deferred",

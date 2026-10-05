@@ -13,6 +13,7 @@ dockerUsage() {
   install-docker.sh install [--source <目录>] [--ref <commit|latest>] [--no-menu]
   padm-docker release [--manifest <URL|文件> --bundle <URL|文件> [--control-bundle <URL|文件>]]
   padm-docker setup [--manifest <URL|文件> --bundle <URL|文件> [--control-bundle <URL|文件>]]
+  padm-docker edit [--spec <完整 JSON 文件>] [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker configure --spec <JSON 文件> [--manifest <URL|文件> --bundle <URL|文件> [--control-bundle <URL|文件>]]
   padm-docker tls install --domain <域名> --cert <文件> --key <文件> [--ops-image <tag@digest>]
   padm-docker acme <issue|renew> --domain <域名> --email <邮箱> --dns <dns_*> --credentials <文件> [--ops-image <tag@digest>]
@@ -729,6 +730,7 @@ dockerMain() {
     install) dockerInstallCommand "$@" ;;
     release) dockerReleaseCommand "$@" ;;
     setup) dockerSetupCommand "$@" ;;
+    edit) dockerEditCommand "$@" ;;
     configure) dockerConfigureCommand "$@" ;;
     tls)
         if [[ "${1:-}" == "install" ]]; then

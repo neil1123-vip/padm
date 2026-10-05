@@ -156,6 +156,31 @@ The complete input is saved as root-owned `/etc/padm-docker/config/spec.json` wi
 Cancellation does not commit; failures restore the previous spec, certificates, and ACME state.
 The spec contains secrets and must not be printed or published.
 
+Use the menu's configuration editor or `padm-docker edit` to change public ports,
+server addresses, address families, node names, Reality targets/SNI, WS paths, or
+subscription enablement. It uses a private draft, a value-redacted diff, and candidate
+validation before confirmation and commit. Other protocols, UUIDs, keys, tokens,
+certificates, host integrations, and accumulated traffic remain unchanged.
+An older deployment without `config/spec.json` requires its complete original spec;
+missing fields, additional accounts, custom routes/sites, or mismatched mount roots
+reject editing rather than reconstructing an invented spec from runtime summaries.
+
+```bash
+padm-docker edit
+padm-docker edit --spec /root/original-spec.json --preview
+padm-docker edit --spec /root/original-spec.json --confirm PADM-DOCKER-EDIT
+```
+
+`--preview` does not commit, collect traffic, or start/stop application services.
+Validation still verifies the release, pulls images, and runs candidate checks.
+`edit` verifies the current deployment version rather than latest by default; it also
+accepts the same-version release asset options below. Schema v1, one primary core,
+one listener per protocol, and the two-protocol limit remain in place; adding/removing
+protocols, multiple listeners, certificate rotation, and full protocol management
+are not yet available.
+WS ports managed by Fail2ban cannot yet be edited; changing them requires coordinated
+firewall-rule management.
+
 For offline use, provide all three assets from the same Release:
 
 ```bash
