@@ -488,6 +488,13 @@ listRegressionUiSubscriptionWorkflowChildSelectors() {
     printf '%s\n' ui-subscription-workflow-batch
 }
 
+listRegressionUiSubscriptionWorkflowFocusedChildSelectors() {
+    printf '%s\n' \
+        ui-subscription-workflow-core \
+        ui-subscription-workflow-batch \
+        ui-subscription-workflow-draft-recovery
+}
+
 registerRegressionFunctionLeaf ui-smoke runRegressionUiSmokeSuiteRoot
 registerRegressionFunctionLeaf ui-subscription-workflow-core runSubscriptionMenuWorkflowCoreRegression
 registerRegressionFunctionLeaf ui-subscription-workflow-draft-validation runSubscriptionMenuDraftRegression validation
@@ -497,6 +504,9 @@ registerRegressionFunctionLeaf ui-subscription-workflow-draft-recovery runSubscr
 registerRegressionFunctionLeaf ui-subscription-workflow-batch runSubscriptionMenuBatchRegression
 registerRegressionParallelSelectorList ui-subscription-workflow-draft runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/ui-subscription-draft-parallel-${BASHPID:-$$}" listRegressionUiSubscriptionDraftChildSelectors 4
+registerRegressionParallelSelectorList ui-subscription-workflow-focused runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/ui-subscription-workflow-focused-parallel-${BASHPID:-$$}" \
+    listRegressionUiSubscriptionWorkflowFocusedChildSelectors 3
 registerRegressionParallelSelectorList ui-subscription-workflow runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/ui-subscription-workflow-parallel-${BASHPID:-$$}" listRegressionUiSubscriptionWorkflowChildSelectors 4
 registerRegressionFunctionLeaf ui-full-core runMenuSmokeRegression core
