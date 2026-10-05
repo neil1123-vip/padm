@@ -129,7 +129,9 @@ Docker 入口会安装并校验 Docker 控制 bundle；缺少 Docker 时，`inst
 
 ```bash
 wget -O /root/install-docker.sh "https://raw.githubusercontent.com/neil1123-vip/padm/main/install-docker.sh" && chmod 700 /root/install-docker.sh && /root/install-docker.sh install
+```
 
+```bash
 # 以 docker/configure.example.json 为字段模板，替换域名、密钥、UUID、token、
 # release manifest 摘要和五个 CI 镜像的 tag@sha256 引用后再执行：
 padm-docker configure --spec /root/padm-docker-config.json

@@ -129,7 +129,9 @@ The Docker entry installs and verifies the Docker control bundle. If Docker is m
 
 ```bash
 wget -O /root/install-docker.sh "https://raw.githubusercontent.com/neil1123-vip/padm/main/install-docker.sh" && chmod 700 /root/install-docker.sh && /root/install-docker.sh install
+```
 
+```bash
 # Use docker/configure.example.json as the field template. Replace domains,
 # keys, UUIDs, tokens, release metadata, and all five CI tag@sha256 references:
 padm-docker configure --spec /root/padm-docker-config.json
