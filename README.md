@@ -340,6 +340,10 @@ Docker 部署的实际状态源：
 | `/etc/padm-docker/compose.json`、`images.env` | 🐳 当前 Compose 配置和固定镜像引用。 |
 | `/etc/padm-docker/config/`、`data/`、`secrets/`、`backups/` | 💾 配置、运行数据、密钥和更新/卸载备份。 |
 
+Docker 与原生菜单的逐项支持边界见
+[Docker 版功能对照表](documents/docker-feature-matrix.md)。新增 Docker 能力时先更新
+该矩阵和 `docker/contracts/features.json`，避免把“已有镜像”误认为“已有菜单功能”。
+
 公网订阅和服务器间控制面是两套地址体系：
 
 - 🌍 客户端订阅走 `/s/default/...`、`/s/clashMeta/...`、`/s/sing-box...` 等 HTTPS 路径。

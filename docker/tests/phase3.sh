@@ -253,12 +253,15 @@ REALITY_XRAY_SPEC="${TEST_ROOT}/xray.json"
 REALITY_SINGBOX_SPEC="${TEST_ROOT}/sing-box.json"
 REALITY_RELAY_SPEC="${TEST_ROOT}/reality-relay.json"
 WS_SPEC="${TEST_ROOT}/ws.json"
+MIXED_WS_SPEC="${TEST_ROOT}/mixed-ws.json"
 UNSUPPORTED_SPEC="${TEST_ROOT}/unsupported.json"
 ROLLBACK_SPEC="${TEST_ROOT}/rollback.json"
 writeRealitySpec "${REALITY_XRAY_SPEC}" xray main-xray
 writeRealitySpec "${REALITY_SINGBOX_SPEC}" sing-box main-sing-box
 jq '.core.protocols[0].reality.target_host = "WWW.JAVA.COM"' "${REALITY_XRAY_SPEC}" >"${REALITY_RELAY_SPEC}"
 writeWebSocketSpec "${WS_SPEC}"
+jq --slurpfile reality "${REALITY_XRAY_SPEC}" '.core.protocols += $reality[0].core.protocols' \
+    "${WS_SPEC}" >"${MIXED_WS_SPEC}"
 jq '.core.protocols[0].id = 3' "${REALITY_XRAY_SPEC}" >"${UNSUPPORTED_SPEC}"
 writeRealitySpec "${ROLLBACK_SPEC}" xray changed-after-failure 24444
 
@@ -343,6 +346,17 @@ jq -e '
   all(.services[].volumes[]?; (.source | contains("docker.sock") | not))
 ' "${DOCKER_ROOT}/compose.json" >/dev/null || fail 'generated Compose privilege boundary is wrong'
 
+runControl 0 configure-mixed-subscription configure --spec "${MIXED_WS_SPEC}"
+jq -e '(.core.protocol_ids | sort) == [1, 21] and
+  (.compose.profiles | sort) == ["core-xray", "nginx", "subscription"]' \
+    "${DOCKER_ROOT}/deployment.json" >/dev/null || fail 'mixed subscription deployment is wrong'
+grep -q 'vless://11111111-1111-4111-8111-111111111111@proxy.example.com:24443.*security=reality' \
+    "${DOCKER_ROOT}/data/subscription/0123456789abcdef" ||
+    fail 'mixed Xray deployment did not publish its Reality node'
+grep -q 'vless://22222222-2222-4222-8222-222222222222@proxy.example.com:24444' \
+    "${DOCKER_ROOT}/data/subscription/0123456789abcdef" ||
+    fail 'mixed Xray deployment lost its WebSocket node'
+
 DEPLOYMENT_HASH=$(sha256sum "${DOCKER_ROOT}/deployment.json" | cut -d ' ' -f 1)
 CONFIG_HASH=$(sha256sum "${DOCKER_ROOT}/config/xray/config.json" | cut -d ' ' -f 1)
 rm -f -- "${TEST_ROOT}/fail-once"
@@ -358,6 +372,14 @@ FAKE_DOCKER_MODE=core-validate-fail runControl 15 failed-validation-keeps-live c
 runControl 15 unsupported-protocol configure --spec "${UNSUPPORTED_SPEC}"
 [[ "$(sha256sum "${DOCKER_ROOT}/deployment.json" | cut -d ' ' -f 1)" == "${DEPLOYMENT_HASH}" ]] ||
     fail 'unsupported protocol changed live deployment'
+for spec in "${REALITY_XRAY_SPEC}" "${REALITY_SINGBOX_SPEC}"; do
+    jq '.subscription.enabled = true' "${spec}" >"${TEST_ROOT}/invalid-subscription.json"
+    runControl 15 reject-standalone-reality-subscription configure --spec "${TEST_ROOT}/invalid-subscription.json"
+done
+jq '.tls = null' "${WS_SPEC}" >"${TEST_ROOT}/invalid-subscription.json"
+runControl 15 reject-subscription-without-tls configure --spec "${TEST_ROOT}/invalid-subscription.json"
+[[ "$(sha256sum "${DOCKER_ROOT}/deployment.json" | cut -d ' ' -f 1)" == "${DEPLOYMENT_HASH}" ]] ||
+    fail 'rejected subscription topology changed live deployment'
 
 CREDENTIALS="${TEST_ROOT}/dns.env"
 printf 'CF_Token=test-token\n' >"${CREDENTIALS}"
@@ -376,9 +398,127 @@ runControl 0 validate-persistence validate
 grep -qxF 'Docker 部署配置校验通过' "${CONTROL_LOG}" || fail 'validate did not report success'
 runControl 0 restart-up up
 
-registryIds=$(bash -c 'source "$1"; protocolCapabilityRegistry' _ \
-    "${PROJECT_ROOT}/shell/core/protocols.sh" | awk -F '|' '$3 == "node" { print $1 }' | sort -n | paste -sd, -)
-matrixIds=$(jq -r '.protocols[].id' "${PROJECT_ROOT}/docker/contracts/features.json" | sort -n | paste -sd, -)
-[[ "${registryIds}" == "${matrixIds}" ]] || fail 'Docker feature matrix drifted from protocol registry'
+MATRIX_FILE="${PROJECT_ROOT}/docker/contracts/features.json"
+REGISTRY_FILE="${TEST_ROOT}/protocol-registry.json"
+bash -c 'source "$1"; protocolCapabilityRegistry' _ "${PROJECT_ROOT}/shell/core/protocols.sh" |
+    jq -Rs 'split("\n") | map(select(length > 0) | split("|") | select(.[2] == "node") |
+      {id: (.[0] | tonumber), cores: (.[5] | split(",")), transport: .[7], udp_support: .[14]})' \
+        >"${REGISTRY_FILE}"
+
+validateFeatureMatrix() {
+    jq -e --slurpfile registry "${REGISTRY_FILE}" '
+      def state: . == "supported" or . == "host-integrated" or . == "deferred" or . == "unsupported";
+      def text: type == "string" and length > 0;
+      def names($allowed): type == "array" and (unique | length) == length and
+        all(.[]; . as $name | ($allowed | index($name)) != null);
+      def metadata:
+        (.status | state) and (.native_menu | text) and (.native_action | text) and (.reason | text) and
+        (.profiles | names(["core-xray", "core-sing-box", "nginx", "acme", "subscription",
+          "net-wireguard", "net-fail2ban", "net-transparent"])) and
+        (.network_mode == "bridge" or .network_mode == "host" or .network_mode == "host-cli") and
+        (.host_capabilities | names(["NET_ADMIN", "/dev/net/tun"])) and
+        (if .network_mode != "host" then
+          .host_capabilities == [] and all(.profiles[]; startswith("net-") | not)
+        else true end) and
+        (if .status == "host-integrated" then
+          .network_mode == "host" and (.host_capabilities | index("NET_ADMIN")) != null and
+          any(.profiles[]; startswith("net-"))
+        else true end) and
+        (if .status == "supported" then .network_mode == "host-cli" or (.profiles | length) > 0
+        else true end);
+      ["nginx", "tls-files", "acme-dns", "subscription", "acme-webroot", "acme-standalone",
+        "fail2ban", "wireguard", "tun", "tproxy"] as $legacy |
+      ["subscription-traffic", "interactive-menu", "routing-tools", "core-lifecycle",
+        "core-upgrade-assessment", "script-update", "uninstall", "reality-target-management",
+        "reality-parameter-management", "reality-coexistence"] as $host_cli |
+      ["subscription-multiserver", "acme-standalone", "fail2ban", "wireguard", "tun", "tproxy",
+        "internal-203-wireguard", "internal-204-tun", "internal-205-redirect-tproxy",
+        "network-optimization"] as $host |
+      ($legacy + $host_cli + $host + ["subscription-users", "site-static-redirect-alpn",
+        "entry-port-management", "cdn-entry-management", "internal-201-socks-relay",
+        "internal-202-http-relay", "internal-206-routing-rules", "internal-207-access-control",
+        "geo-data", "vless-encryption"] | unique) as $required |
+      . as $matrix |
+      .schema_version == 1 and
+      (.protocols | type == "array" and length > 0) and
+      ([.protocols[] | {id, cores, transport, udp_support}] | sort_by(.id)) == ($registry[0] | sort_by(.id)) and
+      all(.protocols[];
+        metadata and .management_status == "deferred" and
+        .network_mode == "bridge" and .host_capabilities == [] and
+        if .status == "supported" then
+          (.profiles | sort) == ([.cores[] | "core-\(.)"] +
+            (if .id == 21 then ["nginx"] else [] end) | sort)
+        else .profiles == [] end) and
+      (.features | type == "object" and keys == ($legacy | sort)) and
+      (.feature_matrix | type == "object" and length > 0) and
+      ($required - (.feature_matrix | keys) | length) == 0 and
+      all(.features | to_entries[];
+        . as $entry | (($entry.value | state) and
+          $matrix.feature_matrix[$entry.key].status == $entry.value)) and
+      all(.feature_matrix | to_entries[];
+        . as $entry | (.value | metadata) and
+        .value.network_mode == (if ($host_cli | index($entry.key)) != null then "host-cli"
+          elif ($host | index($entry.key)) != null then "host" else "bridge" end)) and
+      (.host_integrations | type == "object" and keys == (["fail2ban", "tun", "tproxy", "wireguard"] | sort)) and
+      all(.host_integrations | to_entries[];
+        . as $entry |
+        (.value | .status == "host-integrated" and .network_mode == "host" and
+          .capabilities == ["NET_ADMIN"] and
+          .devices == (if $entry.key == "tun" then ["/dev/net/tun"] else [] end)) and
+        ($matrix.feature_matrix[$entry.key] |
+          .status == $entry.value.status and .network_mode == $entry.value.network_mode and
+          .profiles == [$entry.value.profile] and
+          (.host_capabilities | sort) == ($entry.value.capabilities + $entry.value.devices | sort))) and
+      all({
+        nginx: ["nginx"], "tls-files": ["nginx", "acme"], "acme-dns": ["acme"],
+        subscription: ["core-xray", "nginx", "subscription"],
+        "subscription-traffic": ["core-xray", "core-sing-box"],
+        "core-lifecycle": ["core-xray", "core-sing-box"], "script-update": [], uninstall: []
+      } | to_entries[];
+        . as $entry | ($matrix.feature_matrix[$entry.key].profiles | sort) == ($entry.value | sort)) and
+      all({
+        "internal-203-wireguard": "wireguard", "internal-204-tun": "tun",
+        "internal-205-redirect-tproxy": "tproxy"
+      } | to_entries[];
+        . as $entry |
+        ($matrix.feature_matrix[$entry.key] | {status, profiles, network_mode, host_capabilities}) ==
+          ($matrix.feature_matrix[$entry.value] | {status, profiles, network_mode, host_capabilities})) and
+      all(["interactive-menu", "reality-target-management", "reality-parameter-management",
+        "reality-coexistence", "core-upgrade-assessment"][]; $matrix.feature_matrix[.].status == "deferred") and
+      ([.protocols[] | select(.status == "supported") | .id] | sort) == [1, 21] and
+      .feature_matrix.subscription.requires == {core: "xray", protocol_ids: [21], tls: true} and
+      (.feature_matrix.subscription.profiles | sort) == ["core-xray", "nginx", "subscription"]
+    ' "$1" >/dev/null 2>&1
+}
+
+validateFeatureMatrix "${MATRIX_FILE}" || fail 'Docker feature matrix drift or invalid metadata'
+while IFS= read -r mutation; do
+    jq "${mutation}" "${MATRIX_FILE}" >"${TEST_ROOT}/invalid-matrix.json"
+    if validateFeatureMatrix "${TEST_ROOT}/invalid-matrix.json"; then
+        fail "invalid feature matrix was accepted: ${mutation}"
+    fi
+done <<'EOF'
+.features.subscription = "deferred"
+.features = {}
+.feature_matrix = {}
+del(.feature_matrix["reality-target-management"])
+.protocols[0].profiles = ["invalid-profile"]
+.feature_matrix.nginx.profiles = ["net-wireguard"]
+.feature_matrix.nginx.profiles = ["core-sing-box"]
+.feature_matrix["subscription-traffic"].profiles = []
+.feature_matrix.nginx.network_mode = "host"
+.feature_matrix.wireguard.host_capabilities = ["SYS_ADMIN"]
+.host_integrations.wireguard.capabilities = ["SYS_ADMIN"]
+.feature_matrix["internal-203-wireguard"].profiles = ["net-fail2ban"]
+.feature_matrix["internal-204-tun"].host_capabilities = ["NET_ADMIN"]
+.protocols[3].transport = "quic"
+.protocols[14].udp_support = "no"
+.protocols[0].management_status = "supported"
+.protocols[1].status = "supported" | .protocols[1].profiles = ["core-xray"]
+.feature_matrix.subscription.requires.core = "sing-box"
+.feature_matrix.subscription.requires.protocol_ids = [1]
+.feature_matrix.subscription.requires.tls = false
+.feature_matrix["core-upgrade-assessment"].status = "supported"
+EOF
 
 printf 'docker-phase3-regression-ok\n'

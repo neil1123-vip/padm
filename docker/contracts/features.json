@@ -4,98 +4,226 @@
     {
       "id": 1,
       "status": "supported",
+      "management_status": "deferred",
       "cores": ["xray", "sing-box"],
-      "profiles": ["core-xray", "core-sing-box"]
+      "profiles": ["core-xray", "core-sing-box"],
+      "native_menu": "安装与重装 / 协议与入口",
+      "native_action": "REALITY 管理",
+      "transport": "tcp",
+      "udp_support": "no",
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "仅支持通过 JSON spec 初始配置 Reality Vision 和配置时目标风险检测；目标库、扫描、PQC、参数重生成及 443 共存管理尚未迁移。"
     },
     {
       "id": 2,
       "status": "deferred",
+      "management_status": "deferred",
       "cores": ["xray"],
-      "profiles": []
+      "profiles": [],
+      "native_menu": "协议与入口",
+      "native_action": "XHTTP 管理",
+      "transport": "xhttp",
+      "udp_support": "no",
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "原生已有 XHTTP 参数管理，Docker 配置合同尚未接入。"
     },
     {
       "id": 3,
       "status": "deferred",
+      "management_status": "deferred",
       "cores": ["sing-box"],
-      "profiles": []
+      "profiles": [],
+      "native_menu": "协议与入口",
+      "native_action": "Hysteria2 管理",
+      "transport": "quic",
+      "udp_support": "yes",
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "需要 UDP 监听、端口跳跃和对应订阅输出，Docker 合同尚未接入。"
     },
     {
       "id": 4,
       "status": "deferred",
+      "management_status": "deferred",
       "cores": ["sing-box"],
-      "profiles": []
+      "profiles": [],
+      "native_menu": "安装与重装 / 自定义协议选择",
+      "native_action": "AnyTLS",
+      "transport": "tcp",
+      "udp_support": "no",
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "需要 TCP/TLS 监听和 sing-box AnyTLS 入站及订阅输出，Docker 合同尚未接入。"
     },
     {
       "id": 5,
       "status": "deferred",
+      "management_status": "deferred",
       "cores": ["sing-box"],
-      "profiles": []
+      "profiles": [],
+      "native_menu": "安装与重装 / 自定义协议选择",
+      "native_action": "NaiveProxy",
+      "transport": "tcp",
+      "udp_support": "no",
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "需要域名、证书和 sing-box NaiveProxy 配置，Docker 合同尚未接入。"
     },
     {
       "id": 21,
       "status": "supported",
+      "management_status": "deferred",
       "cores": ["xray"],
-      "profiles": ["core-xray", "nginx"]
+      "profiles": ["core-xray", "nginx"],
+      "native_menu": "安装与重装",
+      "native_action": "自定义协议选择 / 传统 TLS 兼容安装",
+      "transport": "ws",
+      "udp_support": "no",
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "支持通过 JSON spec 初始配置 Xray WebSocket 后端、Nginx 反代和 TLS 文件；不代表原生菜单管理已迁移。"
     },
     {
       "id": 22,
       "status": "deferred",
+      "management_status": "deferred",
       "cores": ["xray"],
-      "profiles": []
+      "profiles": [],
+      "native_menu": "安装与重装 / 自定义协议选择",
+      "native_action": "VMess WS TLS",
+      "transport": "ws",
+      "udp_support": "no",
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "原生有生成模板，Docker 当前只开放 VLESS WebSocket 合同。"
     },
     {
       "id": 23,
       "status": "deferred",
+      "management_status": "deferred",
       "cores": ["xray", "sing-box"],
-      "profiles": []
+      "profiles": [],
+      "native_menu": "安装与重装 / 自定义协议选择",
+      "native_action": "VMess HTTPUpgrade TLS",
+      "transport": "httpupgrade",
+      "udp_support": "no",
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "需要 HTTPUpgrade 入口和订阅输出，Docker 合同尚未接入。"
     },
     {
       "id": 24,
       "status": "deferred",
+      "management_status": "deferred",
       "cores": ["xray"],
-      "profiles": []
+      "profiles": [],
+      "native_menu": "安装与重装 / 自定义协议选择",
+      "native_action": "VLESS gRPC TLS",
+      "transport": "grpc",
+      "udp_support": "no",
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "需要 gRPC 反代、HTTP/2 和 fallback 端口合同，Docker 当前未开放。"
     },
     {
       "id": 25,
       "status": "deferred",
+      "management_status": "deferred",
       "cores": ["xray"],
-      "profiles": []
+      "profiles": [],
+      "native_menu": "安装与重装 / 自定义协议选择",
+      "native_action": "Trojan gRPC TLS",
+      "transport": "grpc",
+      "udp_support": "no",
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "需要 gRPC 反代和 Trojan 订阅输出，Docker 当前未开放。"
     },
     {
       "id": 26,
       "status": "deferred",
+      "management_status": "deferred",
       "cores": ["xray", "sing-box"],
-      "profiles": []
+      "profiles": [],
+      "native_menu": "安装与重装 / 自定义协议选择",
+      "native_action": "VLESS Reality gRPC",
+      "transport": "grpc",
+      "udp_support": "no",
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "需要 Reality gRPC 配置和双核心订阅输出，Docker 合同尚未接入。"
     },
     {
       "id": 27,
       "status": "deferred",
+      "management_status": "deferred",
       "cores": ["xray"],
-      "profiles": []
+      "profiles": [],
+      "native_menu": "安装与重装 / 传统 TLS 兼容安装",
+      "native_action": "VLESS TCP TLS Vision",
+      "transport": "tcp",
+      "udp_support": "no",
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "需要 Xray fallback 后端和传统 TLS 站点合同，Docker 当前未开放。"
     },
     {
       "id": 28,
       "status": "deferred",
+      "management_status": "deferred",
       "cores": ["xray", "sing-box"],
-      "profiles": []
+      "profiles": [],
+      "native_menu": "安装与重装 / 自定义协议选择",
+      "native_action": "Trojan TCP TLS direct",
+      "transport": "tcp",
+      "udp_support": "no",
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "需要双核心 Trojan 配置和订阅输出，Docker 合同尚未接入。"
     },
     {
       "id": 29,
       "status": "deferred",
+      "management_status": "deferred",
       "cores": ["xray"],
-      "profiles": []
+      "profiles": [],
+      "native_menu": "安装与重装 / 传统 TLS 兼容安装",
+      "native_action": "Trojan TCP TLS fallback",
+      "transport": "tcp",
+      "udp_support": "no",
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "需要 Xray fallback 后端和传统 TLS 站点合同，Docker 当前未开放。"
     },
     {
       "id": 30,
       "status": "deferred",
+      "management_status": "deferred",
       "cores": ["sing-box"],
-      "profiles": []
+      "profiles": [],
+      "native_menu": "安装与重装 / 自定义协议选择",
+      "native_action": "Shadowsocks",
+      "transport": "tcp",
+      "udp_support": "yes",
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "需要 sing-box Shadowsocks TCP + UDP 监听及订阅输出，Docker 合同尚未接入。"
     },
     {
       "id": 31,
       "status": "deferred",
+      "management_status": "deferred",
       "cores": ["sing-box"],
-      "profiles": []
+      "profiles": [],
+      "native_menu": "协议与入口",
+      "native_action": "Tuic 管理",
+      "transport": "quic",
+      "udp_support": "yes",
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "需要 UDP 监听、端口跳跃和 sing-box Tuic 配置，Docker 合同尚未接入。"
     }
   ],
   "features": {
@@ -109,6 +237,328 @@
     "wireguard": "host-integrated",
     "tun": "host-integrated",
     "tproxy": "host-integrated"
+  },
+  "feature_matrix": {
+    "nginx": {
+      "status": "supported",
+      "native_menu": "站点与证书",
+      "native_action": "传统 TLS fallback 维护",
+      "profiles": ["nginx"],
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "Docker 已有独立 Nginx 容器，可承载 WebSocket 反代和静态入口。"
+    },
+    "tls-files": {
+      "status": "supported",
+      "native_menu": "站点与证书",
+      "native_action": "本机 TLS 证书管理",
+      "profiles": ["nginx", "acme"],
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "Docker 支持受管 TLS 文件安装、校验和挂载。"
+    },
+    "acme-dns": {
+      "status": "supported",
+      "native_menu": "站点与证书",
+      "native_action": "本机 TLS 证书管理",
+      "profiles": ["acme"],
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "Docker ops 容器支持显式 DNS-01 issue/renew。"
+    },
+    "subscription": {
+      "status": "supported",
+      "native_menu": "订阅与用户",
+      "native_action": "订阅发布",
+      "profiles": ["core-xray", "nginx", "subscription"],
+      "requires": {
+        "core": "xray",
+        "protocol_ids": [21],
+        "tls": true
+      },
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "仅 Xray 同时配置协议 21 和受管 TLS 时可通过 Nginx 发布 token 保护的订阅；可包含同一 Xray 部署的 Reality 节点，单独 Reality 或 sing-box 部署不可发布。"
+    },
+    "subscription-traffic": {
+      "status": "supported",
+      "native_menu": "订阅与用户",
+      "native_action": "流量采集、额度、重置",
+      "profiles": ["core-xray", "core-sing-box"],
+      "network_mode": "host-cli",
+      "host_capabilities": [],
+      "reason": "宿主定时采集任务和 padm-docker traffic 命令已覆盖流量管理。"
+    },
+    "subscription-users": {
+      "status": "deferred",
+      "native_menu": "订阅与用户",
+      "native_action": "创建、编辑、移除用户和分享订阅",
+      "profiles": ["core-xray", "core-sing-box", "subscription"],
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "Docker 当前可配置账号和发布订阅，但尚无交互式用户 CRUD 工作流。"
+    },
+    "subscription-multiserver": {
+      "status": "deferred",
+      "native_menu": "订阅与用户",
+      "native_action": "主控/被控、多服务器同步和备份恢复",
+      "profiles": ["subscription", "net-wireguard"],
+      "network_mode": "host",
+      "host_capabilities": ["NET_ADMIN"],
+      "reason": "WireGuard 宿主集成已存在，多服务器角色、同步事务和恢复向导尚未迁移。"
+    },
+    "acme-webroot": {
+      "status": "deferred",
+      "native_menu": "站点与证书",
+      "native_action": "传统 TLS fallback 维护",
+      "profiles": ["acme", "nginx"],
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "需要 webroot 挑战、80/443 归属检查和 Nginx 原子 reload。"
+    },
+    "acme-standalone": {
+      "status": "deferred",
+      "native_menu": "站点与证书",
+      "native_action": "本机 TLS 证书管理",
+      "profiles": ["acme"],
+      "network_mode": "host",
+      "host_capabilities": [],
+      "reason": "需要 standalone 挑战的宿主端口归属和停机回滚流程。"
+    },
+    "site-static-redirect-alpn": {
+      "status": "deferred",
+      "native_menu": "站点与证书",
+      "native_action": "静态站点、302 重定向、ALPN 诊断/修复",
+      "profiles": ["nginx"],
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "Docker 当前没有站点内容管理及 ALPN 诊断/事务修复命令。"
+    },
+    "entry-port-management": {
+      "status": "deferred",
+      "native_menu": "协议与入口",
+      "native_action": "追加或移除入口端口",
+      "profiles": ["core-xray"],
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "需要在配置合同中表达多个监听器、端口映射和原子回滚。"
+    },
+    "reality-target-management": {
+      "status": "deferred",
+      "native_menu": "协议与入口 / REALITY 管理",
+      "native_action": "目标扫描、候选库、黑名单和 PQC",
+      "profiles": ["core-xray", "core-sing-box"],
+      "network_mode": "host-cli",
+      "host_capabilities": [],
+      "reason": "Docker 仅在 configure 时检测手写目标的风险，尚无目标扫描、目标库管理及 PQC 工作流。"
+    },
+    "reality-parameter-management": {
+      "status": "deferred",
+      "native_menu": "协议与入口 / REALITY 管理",
+      "native_action": "Reality 参数重生成",
+      "profiles": ["core-xray", "core-sing-box"],
+      "network_mode": "host-cli",
+      "host_capabilities": [],
+      "reason": "Docker 当前接收 JSON spec 中的密钥、short ID 和 SNI，尚无参数重生成管理工作流。"
+    },
+    "reality-coexistence": {
+      "status": "deferred",
+      "native_menu": "协议与入口 / REALITY 管理",
+      "native_action": "443 共存分流开启与关闭",
+      "profiles": ["core-xray", "nginx"],
+      "network_mode": "host-cli",
+      "host_capabilities": [],
+      "reason": "Docker 尚未覆盖原生 Reality 443 共存分流拓扑和开启/关闭事务。"
+    },
+    "cdn-entry-management": {
+      "status": "deferred",
+      "native_menu": "协议与入口",
+      "native_action": "订阅入口地址覆盖和 CDN/H3 使用设置",
+      "profiles": ["subscription"],
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "Docker 尚未暴露独立的订阅 entry 覆盖及 CDN 参数管理。"
+    },
+    "fail2ban": {
+      "status": "host-integrated",
+      "native_menu": "系统与脚本",
+      "native_action": "Fail2ban 防护",
+      "profiles": ["net-fail2ban"],
+      "network_mode": "host",
+      "host_capabilities": ["NET_ADMIN"],
+      "reason": "封禁规则属于宿主防火墙，容器只提供受控工具。"
+    },
+    "wireguard": {
+      "status": "host-integrated",
+      "native_menu": "订阅与用户 / 路由与访问控制",
+      "native_action": "多服务器控制面 / WireGuard",
+      "profiles": ["net-wireguard"],
+      "network_mode": "host",
+      "host_capabilities": ["NET_ADMIN"],
+      "reason": "WireGuard 接口和密钥由宿主内核拥有，默认不启用。"
+    },
+    "tun": {
+      "status": "host-integrated",
+      "native_menu": "路由与访问控制",
+      "native_action": "TUN 透明代理",
+      "profiles": ["net-transparent"],
+      "network_mode": "host",
+      "host_capabilities": ["NET_ADMIN", "/dev/net/tun"],
+      "reason": "TUN 设备和转发规则属于宿主内核，需显式 profile。"
+    },
+    "tproxy": {
+      "status": "host-integrated",
+      "native_menu": "路由与访问控制",
+      "native_action": "Redirect/TProxy",
+      "profiles": ["net-transparent"],
+      "network_mode": "host",
+      "host_capabilities": ["NET_ADMIN"],
+      "reason": "透明代理依赖宿主路由和防火墙规则，需显式 profile。"
+    },
+    "interactive-menu": {
+      "status": "deferred",
+      "native_menu": "全部主菜单",
+      "native_action": "交互式管理面板",
+      "profiles": [],
+      "network_mode": "host-cli",
+      "host_capabilities": [],
+      "reason": "当前 padm-docker 是子命令入口；菜单式配置向导属于后续阶段。"
+    },
+    "routing-tools": {
+      "status": "deferred",
+      "native_menu": "路由与访问控制",
+      "native_action": "WARP、IPv6、Socks5、DNS/hosts、BT、访问控制",
+      "profiles": [],
+      "network_mode": "host-cli",
+      "host_capabilities": [],
+      "reason": "Docker 当前只有 TUN/TProxy 宿主集成合同，尚未迁移原生路由策略菜单。"
+    },
+    "internal-201-socks-relay": {
+      "status": "deferred",
+      "native_menu": "路由与访问控制",
+      "native_action": "Socks 中继",
+      "profiles": [],
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "原生内部能力 201 尚未纳入 Docker 路由配置合同。"
+    },
+    "internal-202-http-relay": {
+      "status": "deferred",
+      "native_menu": "路由与访问控制",
+      "native_action": "HTTP 中继",
+      "profiles": [],
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "原生内部能力 202 尚未纳入 Docker 路由配置合同。"
+    },
+    "internal-203-wireguard": {
+      "status": "host-integrated",
+      "native_menu": "订阅与用户 / 路由与访问控制",
+      "native_action": "WireGuard 控制面与路由",
+      "profiles": ["net-wireguard"],
+      "network_mode": "host",
+      "host_capabilities": ["NET_ADMIN"],
+      "reason": "原生内部能力 203 使用宿主 WireGuard 接口和防火墙集成。"
+    },
+    "internal-204-tun": {
+      "status": "host-integrated",
+      "native_menu": "路由与访问控制",
+      "native_action": "TUN 透明代理",
+      "profiles": ["net-transparent"],
+      "network_mode": "host",
+      "host_capabilities": ["NET_ADMIN", "/dev/net/tun"],
+      "reason": "原生内部能力 204 依赖宿主 TUN 设备和路由规则。"
+    },
+    "internal-205-redirect-tproxy": {
+      "status": "host-integrated",
+      "native_menu": "路由与访问控制",
+      "native_action": "Redirect/TProxy",
+      "profiles": ["net-transparent"],
+      "network_mode": "host",
+      "host_capabilities": ["NET_ADMIN"],
+      "reason": "原生内部能力 205 依赖宿主转发与防火墙规则。"
+    },
+    "internal-206-routing-rules": {
+      "status": "deferred",
+      "native_menu": "路由与访问控制",
+      "native_action": "DNS/Direct/Block 路由规则",
+      "profiles": [],
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "原生内部能力 206 的规则编辑、冲突检测和核心适配尚未迁移。"
+    },
+    "internal-207-access-control": {
+      "status": "deferred",
+      "native_menu": "路由与访问控制",
+      "native_action": "Tunnel/dokodemo-door 访问控制",
+      "profiles": [],
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "原生内部能力 207 尚未纳入 Docker 入站/防火墙配置合同。"
+    },
+    "core-lifecycle": {
+      "status": "supported",
+      "native_menu": "核心与服务",
+      "native_action": "基础服务生命周期与日志诊断",
+      "profiles": ["core-xray", "core-sing-box"],
+      "network_mode": "host-cli",
+      "host_capabilities": [],
+      "reason": "仅 up/down/restart/logs/update/rollback/status/validate 已由宿主命令提供；预发布试跑和升级风险扫描另列为 deferred。"
+    },
+    "core-upgrade-assessment": {
+      "status": "deferred",
+      "native_menu": "核心与服务 / 核心生命周期",
+      "native_action": "预发布试跑与升级风险扫描",
+      "profiles": ["core-xray", "core-sing-box"],
+      "network_mode": "host-cli",
+      "host_capabilities": [],
+      "reason": "Docker 受管更新和候选配置校验不等同于原生预发布试跑、升级风险扫描；这些管理工作流尚未迁移。"
+    },
+    "geo-data": {
+      "status": "deferred",
+      "native_menu": "核心与服务",
+      "native_action": "Xray Geo 数据",
+      "profiles": ["core-xray"],
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "Docker 尚未提供 Geo 文件更新和定时任务合同。"
+    },
+    "script-update": {
+      "status": "supported",
+      "native_menu": "系统与脚本",
+      "native_action": "更新 padm 脚本",
+      "profiles": [],
+      "network_mode": "host-cli",
+      "host_capabilities": [],
+      "reason": "padm-docker update 已支持签名 bundle、镜像和配置事务更新。"
+    },
+    "network-optimization": {
+      "status": "unsupported",
+      "native_menu": "系统与脚本",
+      "native_action": "网络优化 / BBR",
+      "profiles": [],
+      "network_mode": "host",
+      "host_capabilities": [],
+      "reason": "Docker 控制 bundle 不修改宿主内核拥塞控制参数。"
+    },
+    "uninstall": {
+      "status": "supported",
+      "native_menu": "高级/危险操作",
+      "native_action": "卸载脚本",
+      "profiles": [],
+      "network_mode": "host-cli",
+      "host_capabilities": [],
+      "reason": "Docker 已提供受管 uninstall、remove-images 和显式 purge。"
+    },
+    "vless-encryption": {
+      "status": "unsupported",
+      "native_menu": "高级/危险操作",
+      "native_action": "VLESS Encryption 实验",
+      "profiles": ["core-xray"],
+      "network_mode": "bridge",
+      "host_capabilities": [],
+      "reason": "该实验开关尚未纳入 Docker 配置合同和回滚边界。"
+    }
   },
   "host_integrations": {
     "wireguard": {
