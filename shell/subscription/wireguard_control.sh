@@ -1177,6 +1177,29 @@ subscriptionWireGuardCredentialDecode() {
     printf '%s\n' "${payload}"
 }
 
+subscriptionWireGuardReadCredential() {
+    local expectedKind=$1
+    local label=$2
+    local outputVar=$3
+    local __padmCredential=
+    local __padmCredentialJson=
+    printf -v "${outputVar}" '%s' ""
+    while true; do
+        subscriptionWireGuardReadSecret __padmCredential "请粘贴${label}[回车取消]:" || return 1
+        [[ -n "${__padmCredential}" ]] || return 1
+        if ! __padmCredentialJson=$(subscriptionWireGuardCredentialDecode "${__padmCredential}" 2>/dev/null); then
+            errorCard "${label}无效，请复制完整内容后重试"
+            continue
+        fi
+        if ! jq -e --arg kind "${expectedKind}" '.kind == $kind' <<<"${__padmCredentialJson}" >/dev/null 2>&1; then
+            errorCard "请粘贴${label}"
+            continue
+        fi
+        printf -v "${outputVar}" '%s' "${__padmCredentialJson}"
+        return 0
+    done
+}
+
 subscriptionWireGuardActiveSourcesFromGroupsState() {
     local groupsState=$1
     jq -c '[.sources[]?]' <<<"${groupsState}"
@@ -1722,15 +1745,9 @@ subscriptionWireGuardImportMainCredentialJson() {
 }
 
 importSubscriptionWireGuardMainCredential() {
-    local credential=
     local credentialJson
     local endpoint
-    subscriptionWireGuardReadSecret credential "请粘贴主控接入凭据:" || return 1
-    credentialJson=$(subscriptionWireGuardCredentialDecode "${credential}") || { errorCard "主控接入凭据无效"; return 1; }
-    if [[ "$(jq -r '.kind' <<<"${credentialJson}")" != "main" ]]; then
-        errorCard "请粘贴主控接入凭据"
-        return 1
-    fi
+    subscriptionWireGuardReadCredential main "主控接入凭据" credentialJson || return 1
     subscriptionWireGuardImportMainCredentialJson "${credentialJson}" || return 1
     endpoint="$(jq -r '.endpoint_host' <<<"${credentialJson}"):$(jq -r '.listen_port' <<<"${credentialJson}")"
     successCard "主控接入凭据已导入" "主控端点：${endpoint}" "如身份信息发生变化，请在主控更新这个已有被控连接"

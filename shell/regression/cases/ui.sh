@@ -404,6 +404,7 @@ edge-a"
         )
         (
             local explicitId= expectedSource expectedPeer baselineGroups
+            local updateCount=0 sourceSelectCount=0
             baselineGroups=$(subscriptionGroupsStateRead -c '.')
             addSubscriptionSourceState edge-b "Edge B" 10.77.0.9 48779
             subscriptionActiveGroupWrite '
@@ -412,11 +413,22 @@ edge-a"
             '
             expectedSource=$(subscriptionActiveGroupRead -c 'first(.sources[] | select(.id == "edge-a"))')
             expectedPeer=$(subscriptionWireGuardReadState | jq -c 'first(.peers[] | select(.id == "edge-a") | {id,address,public_key})')
-            subscriptionWireGuardUpdatePeerAndCredential() { explicitId=$1; }
+            subscriptionWireGuardUpdatePeerAndCredential() { explicitId=$1; updateCount=$((updateCount + 1)); }
+            selectSubscriptionSourceId() { sourceSelectCount=$((sourceSelectCount + 1)); return 99; }
             resetMenuActions
-            setSubscriptionSourceControlTokenMenu edge-a "${expectedSource}" "${expectedPeer}" <<<"${updatedCredential}"
-            [[ "${explicitId}" == "edge-a" ]]
+            setSubscriptionSourceControlTokenMenu edge-a "${expectedSource}" "${expectedPeer}" <<<"invalid
+$(subscriptionWireGuardCredentialEncode receipt "$(jq -cn --arg key "${controlledPublicKey}" --arg token "${controlledToken}" \
+    '{invite_id:("a"*64),public_key:$key,control_port:39778,token:$token}')")
+${updatedCredential}"
+            [[ "${explicitId}" == "edge-a" && "${updateCount}" == "1" && "${sourceSelectCount}" == "0" ]]
+            assertMenuAction 'errorCard:被控接入凭据无效，请复制完整内容后重试'
+            assertMenuAction 'errorCard:请粘贴被控接入凭据'
             assertMenuAction 'runSubscriptionGroupSync:'
+            [[ "$(grep -cxF 'runSubscriptionGroupSync:' <<<"${actions}")" == "1" ]]
+            regressionExpectStatus 1 setSubscriptionSourceControlTokenMenu edge-a "${expectedSource}" "${expectedPeer}" <<<""
+            regressionExpectStatus 1 setSubscriptionSourceControlTokenMenu edge-a "${expectedSource}" "${expectedPeer}" </dev/null
+            regressionExpectStatus 1 setSubscriptionSourceControlTokenMenu edge-a "${expectedSource}" "${expectedPeer}" < <(printf '%s' "${updatedCredential}")
+            [[ "${updateCount}" == "1" && "${sourceSelectCount}" == "0" ]]
             subscriptionGroupsStateWrite --argjson baseline "${baselineGroups}" '$baseline'
         )
     fi
@@ -725,6 +737,46 @@ runSubscriptionWireGuardInviteCreateRegression() (
     decoded=$(subscriptionWireGuardCredentialDecode "${credential}")
     jq -e '.alias == "b" and .address == "10.77.0.2/24"' <<<"${decoded}" >/dev/null
     subscriptionWireGuardReadState | jq -e '.pending_invites | length == 1' >/dev/null
+    (
+        local kind payload kindCredential wrongCredential credentialJson=stale readErrors=
+        local mainCredential invalidCredential
+        errorCard() { readErrors+="$1"$'\n'; }
+        mainCredential=$(subscriptionWireGuardCredentialEncode main "$(jq -c \
+            '{endpoint_host,listen_port,network,address:.main_address,public_key:.main_public_key}' <<<"${decoded}")")
+        invalidCredential=$(subscriptionWireGuardCredentialEncode invite "$(jq -c '.alias = ""' <<<"${decoded}")")
+        for kind in invite main controlled receipt; do
+            case "${kind}" in
+            invite) kindCredential=${credential}; wrongCredential=${mainCredential} ;;
+            main) kindCredential=${mainCredential}; wrongCredential=${credential} ;;
+            controlled)
+                payload=$(jq -c '{address,public_key:.main_public_key,control_port:39778,token:("A"*64)}' <<<"${decoded}")
+                kindCredential=$(subscriptionWireGuardCredentialEncode controlled "${payload}")
+                wrongCredential=${credential}
+                ;;
+            receipt)
+                payload=$(jq -c '{invite_id,public_key:.main_public_key,control_port:39778,token:("A"*64)}' <<<"${decoded}")
+                kindCredential=$(subscriptionWireGuardCredentialEncode receipt "${payload}")
+                wrongCredential=${credential}
+                ;;
+            esac
+            readErrors=
+            subscriptionWireGuardReadCredential "${kind}" "测试凭据" credentialJson <<<"${invalidCredential}
+${wrongCredential}
+${kindCredential}"
+            jq -e --arg kind "${kind}" '.kind == $kind' <<<"${credentialJson}" >/dev/null
+            [[ "${readErrors}" == $'测试凭据无效，请复制完整内容后重试\n请粘贴测试凭据\n' ]]
+        done
+        readErrors=
+        credentialJson=stale
+        regressionExpectStatus 1 subscriptionWireGuardReadCredential invite "主控邀请" credentialJson <<<""
+        [[ -z "${credentialJson}" ]]
+        credentialJson=stale
+        regressionExpectStatus 1 subscriptionWireGuardReadCredential invite "主控邀请" credentialJson </dev/null
+        [[ -z "${credentialJson}" ]]
+        credentialJson=stale
+        regressionExpectStatus 1 subscriptionWireGuardReadCredential invite "主控邀请" credentialJson < <(printf '%s' "${credential}")
+        [[ -z "${credentialJson}" && -z "${readErrors}" ]]
+    )
 
     : >"${processLog}"
     subscriptionWireGuardValidateInviteCredentialJson "${decoded}"
@@ -1278,6 +1330,9 @@ runMenuSmokeRegression() {
     eval "$(declare -f menu | sed '1s/^menu /originalCoreMainMenu /')"
     eval "$(declare -f manageSubscriptionPendingInvites | sed '1s/^manageSubscriptionPendingInvites /originalManageSubscriptionPendingInvites /')"
     eval "$(declare -f addOtherSubscribe | sed '1s/^addOtherSubscribe /originalMenuSmokeAddOtherSubscribe /')"
+    eval "$(declare -f createSubscriptionWireGuardInviteMenu | sed '1s/^createSubscriptionWireGuardInviteMenu /originalMenuSmokeCreateInvite /')"
+    eval "$(declare -f importSubscriptionWireGuardMainCredential | sed '1s/^importSubscriptionWireGuardMainCredential /originalMenuSmokeImportMainCredential /')"
+    eval "$(declare -f subscriptionWireGuardCredentialDecode | sed '1s/^subscriptionWireGuardCredentialDecode /originalMenuSmokeCredentialDecode /')"
     eval "$(declare -f changeSubscriptionSourceEnabledMenu | sed '1s/^changeSubscriptionSourceEnabledMenu /originalChangeSubscriptionSourceEnabledMenu /')"
     eval "$(declare -f removeSubscriptionControlledServerMenu | sed '1s/^removeSubscriptionControlledServerMenu /originalRemoveSubscriptionControlledServerMenu /')"
     menu() { recordMenuAction menu; }
@@ -2051,8 +2106,33 @@ n"
         )
         (
             resetMenuActions
-            manageSubscription <<< $'9\ninvalid-invite\n1\n5'
-            [[ "${actions}" == $'errorCard:主控邀请无效\nshowPublishedSubscriptionLinks:\n' ]]
+            manageSubscription <<< $'9\ninvalid-invite\n\n1\n5'
+            [[ "${actions}" == $'errorCard:主控邀请无效，请复制完整内容后重试\nshowPublishedSubscriptionLinks:\n' ]]
+            [[ "$(subscriptionCurrentRoleNormalized)" == uninitialized ]]
+        )
+        (
+            local joinCount=0 credentialJson=stale
+            local credentialStderr="${TMP_DIR}/credential-read-stderr.log"
+            subscriptionWireGuardCredentialDecode() {
+                case "$1" in
+                valid-invite) printf '{"kind":"invite","invite_id":"test-id"}\n' ;;
+                wrong-kind) printf '{"kind":"receipt"}\n' ;;
+                *) printf 'credential-must-not-leak\n' >&2; return 1 ;;
+                esac
+            }
+            subscriptionWireGuardJoinInvite() { joinCount=$((joinCount + 1)); recordMenuAction join-invite; }
+            setMenuSmokeRole uninitialized
+            resetMenuActions
+            runSubscriptionControlledWizard <<< $'invalid-invite\nwrong-kind\nvalid-invite' 2>"${credentialStderr}"
+            [[ "${joinCount}" == "1" && ! -s "${credentialStderr}" ]]
+            [[ "${actions}" == $'errorCard:主控邀请无效，请复制完整内容后重试\nerrorCard:请粘贴主控邀请\njoin-invite\nsuccessCard:被控已按邀请完成初始化\nshowSubscriptionWireGuardJoinReceipt\nshowSubscriptionWireGuardStatus\n' ]]
+            resetMenuActions
+            regressionExpectStatus 1 runSubscriptionControlledWizard <<<""
+            regressionExpectStatus 1 runSubscriptionControlledWizard </dev/null
+            regressionExpectStatus 1 runSubscriptionControlledWizard < <(printf 'valid-invite')
+            [[ "${joinCount}" == "1" && -z "${actions}" ]]
+            regressionExpectStatus 1 subscriptionWireGuardReadCredential invite "主控邀请" credentialJson <<<""
+            [[ -z "${credentialJson}" ]]
         )
         (
             setMenuSmokeRole uninitialized
@@ -2662,8 +2742,8 @@ main
             [[ "${actions}" == $'complete-invite\nsuccessCard:被控接入已完成\nforced-sync\nserver-detail:edge-new\n' ]]
             syncStatus=1
             resetMenuActions
-            manageSubscriptionServers <<< $'2\nvalid-receipt\n2\ninvalid-receipt\n2\nnot-receipt\n2\n\n2'
-            [[ "${actions}" == $'complete-invite\nsuccessCard:被控接入已完成\nforced-sync\nserver-detail:edge-new\nerrorCard:接入回执无效，请复制被控端完整输出\nerrorCard:请粘贴接入回执\nerrorCard:接入回执不可为空\n' ]]
+            manageSubscriptionServers <<< $'2\ninvalid-receipt\nnot-receipt\nvalid-receipt\n2\ninvalid-receipt\n\n2'
+            [[ "${actions}" == $'errorCard:接入回执无效，请复制完整内容后重试\nerrorCard:请粘贴接入回执\ncomplete-invite\nsuccessCard:被控接入已完成\nforced-sync\nserver-detail:edge-new\nerrorCard:接入回执无效，请复制完整内容后重试\n' ]]
             completionShouldFail=true
             resetMenuActions
             manageSubscriptionServers <<< $'2\nvalid-receipt\n7'
@@ -2673,7 +2753,29 @@ main
             [[ "${completedId}" == edge-new ]]
             regressionExpectStatus 1 addOtherSubscribe completedId </dev/null
             [[ -z "${completedId}" ]]
+            completedId=stale
+            regressionExpectStatus 1 addOtherSubscribe completedId <<<""
+            [[ -z "${completedId}" ]]
+            completedId=stale
+            regressionExpectStatus 1 addOtherSubscribe completedId < <(printf valid-receipt)
+            [[ -z "${completedId}" ]]
             regressionExpectStatus 1 addOtherSubscribe <<<valid-receipt
+        )
+        (
+            local inviteCreateCount=0 invitedAlias=
+            subscriptionWireGuardCreateInvite() {
+                inviteCreateCount=$((inviteCreateCount + 1))
+                invitedAlias=$1
+                printf -v "$2" '%s' valid-created-invite
+            }
+            resetMenuActions
+            regressionExpectStatus 1 originalMenuSmokeCreateInvite </dev/null
+            regressionExpectStatus 1 originalMenuSmokeCreateInvite <<<""
+            regressionExpectStatus 1 originalMenuSmokeCreateInvite < <(printf must-not-create)
+            [[ "${inviteCreateCount}" == "0" && -z "${actions}" ]]
+            originalMenuSmokeCreateInvite <<<edge-once
+            [[ "${inviteCreateCount}" == "1" && "${invitedAlias}" == edge-once ]]
+            [[ "${actions}" == $'statusCard:正在创建被控邀请\nstatusCard:被控邀请已创建\n' ]]
         )
         (
             manageSubscriptionServerItem() { recordMenuAction manageSubscriptionServerItem; }
@@ -2862,6 +2964,40 @@ y
         assertMenuAction subscriptionWireGuardJoinInvite
         assertMenuAction showSubscriptionWireGuardJoinReceipt
         assertMenuAction showSubscriptionWireGuardStatus
+        (
+            local importCount=0 importedJson= mainCredential wrongCredential importStatus=0
+            mainCredential=$(subscriptionWireGuardCredentialEncode main \
+                '{"endpoint_host":"main.example.com","listen_port":51820,"network":"10.77.0.0/24","address":"10.77.0.1/24","public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}')
+            wrongCredential=$(subscriptionWireGuardCredentialEncode controlled \
+                '{"address":"10.77.0.2/24","control_port":39778,"public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}')
+            subscriptionWireGuardCredentialDecode() { originalMenuSmokeCredentialDecode "$@"; }
+            subscriptionWireGuardImportMainCredentialJson() {
+                importCount=$((importCount + 1))
+                importedJson=$1
+                return "${importStatus}"
+            }
+            resetMenuActions
+            originalMenuSmokeImportMainCredential <<<"invalid
+${wrongCredential}
+${mainCredential}"
+            [[ "${importCount}" == "1" ]]
+            jq -e '.kind == "main" and .endpoint_host == "main.example.com"' <<<"${importedJson}" >/dev/null
+            [[ "${actions}" == $'errorCard:主控接入凭据无效，请复制完整内容后重试\nerrorCard:请粘贴主控接入凭据\nsuccessCard:主控接入凭据已导入\n' ]]
+            resetMenuActions
+            regressionExpectStatus 1 originalMenuSmokeImportMainCredential <<<"${wrongCredential}
+
+"
+            [[ "${actions}" == $'errorCard:请粘贴主控接入凭据\n' ]]
+            resetMenuActions
+            regressionExpectStatus 1 originalMenuSmokeImportMainCredential <<<""
+            regressionExpectStatus 1 originalMenuSmokeImportMainCredential </dev/null
+            regressionExpectStatus 1 originalMenuSmokeImportMainCredential < <(printf '%s' "${mainCredential}")
+            [[ "${importCount}" == "1" && -z "${actions}" ]]
+            importStatus=1
+            regressionExpectStatus 1 originalMenuSmokeImportMainCredential <<<"${mainCredential}
+${mainCredential}"
+            [[ "${importCount}" == "2" && -z "${actions}" ]]
+        )
         resetMenuActions
         output=
         manageSubscriptionControlledHome <<<"2

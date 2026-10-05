@@ -69,13 +69,8 @@ runSubscriptionMainControllerWizard() {
 }
 
 runSubscriptionControlledWizard() {
-    local credential= credentialJson state existingInviteId replaceConfirmed=false confirmReplace=
-    subscriptionWireGuardReadSecret credential "请粘贴主控邀请:" || return 1
-    credentialJson=$(subscriptionWireGuardCredentialDecode "${credential}") || { errorCard "主控邀请无效"; return 1; }
-    if [[ "$(jq -r '.kind' <<<"${credentialJson}")" != "invite" ]]; then
-        errorCard "请粘贴主控邀请"
-        return 1
-    fi
+    local credentialJson state existingInviteId replaceConfirmed=false confirmReplace=
+    subscriptionWireGuardReadCredential invite "主控邀请" credentialJson || return 1
     state=$(subscriptionWireGuardReadState) || { errorCard "WireGuard 状态读取失败"; return 1; }
     if [[ "$(jq -r '.role' <<<"${state}")" == "controlled" ]]; then
         existingInviteId=$(jq -r '.join_invite_id // empty' <<<"${state}") || return 1
@@ -1407,7 +1402,8 @@ createSubscriptionWireGuardInviteMenu() {
     echoContent title "\n┌─ 创建被控邀请 ─────────────────────────────────────"
     menuLine "主控将自动预留别名和 WireGuard 地址；邀请只在本次结果中显示。"
     menuClose
-    autoRead subscription_invite_alias "请输入被控服务器别名[英文/数字/短横线，例 hk-1]:" alias
+    autoRead subscription_invite_alias "请输入被控服务器别名[英文/数字/短横线，例 hk-1，回车取消]:" alias || return 1
+    [[ -n "${alias}" ]] || return 1
     statusCard "正在创建被控邀请" "正在检查别名并预留地址；若有同步任务运行，将等待它完成"
     subscriptionWireGuardCreateInvite "${alias}" inviteCredential || return 1
     statusCard "被控邀请已创建" "被控别名：${alias}" "被控邀请：${inviteCredential}" "邀请有效期 24 小时，请通过可信通道传递；丢失时取消并重建" "WireGuard 使用 UDP，控制 API 只在隧道内使用 HTTP；此步骤不需要 TLS 证书"
@@ -1682,26 +1678,13 @@ manageSubscriptionServerItem() {
 # 添加被控服务器
 addOtherSubscribe() {
     local resultVar=${1:-}
-    local credential=
     local credentialJson=
     local completedAlias=
     [[ -z "${resultVar}" ]] || printf -v "${resultVar}" '%s' ""
     echoContent title "\n┌─ 完成被控接入 ─────────────────────────────────────"
     menuLine "粘贴接入回执，自动使用创建邀请时预留的别名和地址。"
     menuClose
-    subscriptionWireGuardReadSecret credential "请粘贴接入回执:" || return 1
-    if [[ -z "${credential}" ]]; then
-        errorCard "接入回执不可为空"
-        return 1
-    fi
-    credentialJson=$(subscriptionWireGuardCredentialDecode "${credential}") || {
-        errorCard "接入回执无效，请复制被控端完整输出"
-        return 1
-    }
-    if [[ "$(jq -r '.kind' <<<"${credentialJson}")" != "receipt" ]]; then
-        errorCard "请粘贴接入回执"
-        return 1
-    fi
+    subscriptionWireGuardReadCredential receipt "接入回执" credentialJson || return 1
     subscriptionWireGuardCompleteInvite "${credentialJson}" completedAlias || return 1
     [[ -z "${resultVar}" ]] || printf -v "${resultVar}" '%s' "${completedAlias}"
     successCard "被控接入已完成" "别名：${completedAlias}" "Peer、服务器源和 Token 已保存；可在该服务器详情检查连接和重试同步"
@@ -1762,7 +1745,6 @@ setSubscriptionSourceControlTokenMenu() {
     subscriptionRequireMainRole || return 1
     local sourceId=${1:-}
     local expectedSource=${2:-} expectedPeer=${3:-}
-    local credential=
     local credentialJson=
     local host=
     local port=
@@ -1775,19 +1757,7 @@ setSubscriptionSourceControlTokenMenu() {
     menuLine "仅用于更新已有被控连接；首次接入请使用邀请和回执。系统会更新地址、端口和 Token。"
     [[ -z "${sourceId}" ]] || menuLine "当前目标：${sourceId}"
     menuClose
-    subscriptionWireGuardReadSecret credential "请粘贴被控接入凭据:" || return 1
-    if [[ -z "${credential}" ]]; then
-        errorCard "被控接入凭据不可为空"
-        return 1
-    fi
-    credentialJson=$(subscriptionWireGuardCredentialDecode "${credential}") || {
-        errorCard "被控接入凭据无效，请复制被控端完整输出"
-        return 1
-    }
-    if [[ "$(jq -r '.kind' <<<"${credentialJson}")" != "controlled" ]]; then
-        errorCard "请粘贴被控接入凭据"
-        return 1
-    fi
+    subscriptionWireGuardReadCredential controlled "被控接入凭据" credentialJson || return 1
     subscriptionWireGuardValidateControlledCredentialJson "${credentialJson}" || {
         errorCard "被控接入凭据字段不完整或格式无效"
         return 1
