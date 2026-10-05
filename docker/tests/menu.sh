@@ -140,7 +140,7 @@ runPty() {
         fi
         if [[ "${driver}" == setup ]]; then
             printf '2\n' >&3
-            waitForText '核心 [1=Xray, 2=sing-box, 0=取消]' "${CONTROL_LOG}" || exit 11
+            waitForText '核心 [1=Xray, 2=sing-box, 3=Xray+sing-box, 4=sing-box+Xray, 0=取消]' "${CONTROL_LOG}" || exit 11
             printf '0\n' >&3
             waitForText 'Docker 管理菜单' "${CONTROL_LOG}" 2 || exit 12
             printf '0\n' >&3

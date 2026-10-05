@@ -79,7 +79,12 @@ dockerTrafficCore() {
     local root
     root=$(dockerInstallRoot) || return 1
     dockerTrafficSafePath "${root}" "${root}/deployment.json" || return 1
-    jq -er '.core.type | select(. == "xray" or . == "sing-box")' "${root}/deployment.json"
+    jq -er '
+      [.core.type, (.core.secondary_type | select(. != null))] |
+      if length >= 1 and length <= 2 and
+        all(.[]; . == "xray" or . == "sing-box") and length == (unique | length)
+      then .[] else error("Docker 核心列表无效") end
+    ' "${root}/deployment.json"
 }
 
 dockerTrafficAccounts() {
@@ -209,19 +214,32 @@ dockerTrafficQuery() (
 )
 
 dockerTrafficSnapshot() {
-    local core accounts before after stats state counters next generation
-    core=$(dockerTrafficCore) || return 1
-    accounts=$(dockerTrafficAccounts "${core}") || return 1
+    local cores core after state counters next generation
+    local -A accounts=() before=() stats=()
+    cores=$(dockerTrafficCore) || return 1
     state=$(dockerTrafficReadState) || return 1
-    before=$(dockerTrafficContainerState "${core}") || return 1
-    stats=$(dockerTrafficQuery "${core}" "$(jq -r '.pid' <<<"${before}")") || {
-        dockerError '用户统计 API 采集失败，已保留累计流量'
-        return 1
-    }
-    after=$(dockerTrafficContainerState "${core}") || return 1
-    [[ "${before}" == "${after}" ]] || { dockerError '采样期间核心容器发生变化，已丢弃本次结果'; return 1; }
-    generation=$(jq -r '.id + ":" + .started_at' <<<"${before}") || return 1
-    counters=$(jq -ce --argjson accounts "${accounts}" '
+    # 两核心共享累计，所有查询和容器复验完成后才提交一次状态。
+    while IFS= read -r core; do
+        accounts[${core}]=$(dockerTrafficAccounts "${core}") || return 1
+        before[${core}]=$(dockerTrafficContainerState "${core}") || return 1
+    done <<<"${cores}"
+    while IFS= read -r core; do
+        stats[${core}]=$(dockerTrafficQuery "${core}" "$(jq -r '.pid' <<<"${before[${core}]}")") || {
+            dockerError "用户统计 API 采集失败: ${core}，已保留累计流量"
+            return 1
+        }
+    done <<<"${cores}"
+    while IFS= read -r core; do
+        after=$(dockerTrafficContainerState "${core}") || return 1
+        [[ "${before[${core}]}" == "${after}" ]] || {
+            dockerError "采样期间核心容器发生变化: ${core}，已丢弃本次结果"
+            return 1
+        }
+    done <<<"${cores}"
+    next=${state}
+    while IFS= read -r core; do
+        generation=$(jq -r '.id + ":" + .started_at' <<<"${before[${core}]}") || return 1
+        counters=$(jq -ce --argjson accounts "${accounts[${core}]}" '
       def count: type == "number" and . >= 0 and . <= 9007199254740991 and . == floor;
       if type != "object" then error("统计响应格式无效") else . end |
       (if has("stat") then .stat else [] end) |
@@ -236,8 +254,8 @@ dockerTrafficSnapshot() {
           if ($value | count | not) or .[$key.account][$direction] != null then error("统计计数无效或重复")
           else .[$key.account][$direction] = $value end
         end)
-    ' <<<"${stats}") || return 1
-    next=$(jq -c --arg core "${core}" --arg generation "${generation}" --argjson accounts "${accounts}" --argjson counters "${counters}" '
+        ' <<<"${stats[${core}]}") || return 1
+        next=$(jq -c --arg core "${core}" --arg generation "${generation}" --argjson accounts "${accounts[${core}]}" --argjson counters "${counters}" '
       reduce $accounts[] as $account (.;
         .accounts[$account.account] = ((.accounts[$account.account] //
           {upload:0, download:0, limit_bytes:0, baseline:{}}) + {name:$account.name}) |
@@ -250,7 +268,8 @@ dockerTrafficSnapshot() {
                then $value - ($previous.value // 0) else $value end) |
             .accounts[$account.account].baseline[$core][$direction] = {generation:$generation, value:$value}
           end))
-    ' <<<"${state}") || return 1
+        ' <<<"${next}") || return 1
+    done <<<"${cores}"
     dockerTrafficWriteState <<<"${next}"
 }
 
@@ -261,40 +280,69 @@ dockerTrafficRestartCore() {
 }
 
 dockerTrafficApplyQuotas() (
-    local core root directory base config state temporary backup='' keep=false
-    core=$(dockerTrafficCore) || return 1
+    local coreList core root directory base config state switching=false committed=false
+    local -a cores=() changed=() restored=()
+    local -A temporary=() backup=() keep=()
+    coreList=$(dockerTrafficCore) || return 1
+    mapfile -t cores <<<"${coreList}"
     root=$(dockerInstallRoot) || return 1
-    directory=${root}/config/${core}
-    base=${directory}/users.base
-    config=${directory}/config.json
-    dockerTrafficSafePath "${root}" "${base}" && dockerTrafficSafePath "${root}" "${config}" || return 1
-    [[ -f "${base}" && -f "${config}" ]] || return 1
     state=$(dockerTrafficReadState) || return 1
-    temporary=$(mktemp "${directory}/.traffic-candidate.XXXXXX") || return 1
-    trap 'rm -f -- "${temporary}"; [[ "${keep}" == true || -z "${backup}" ]] || rm -f -- "${backup}"' EXIT
-    dockerTrafficRender "${core}" "${base}" "${state}" >"${temporary}" || return 1
-    cmp -s "${temporary}" "${config}" && return 0
-    chmod 0640 "${temporary}" || return 1
-    if [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" != 1 ]]; then
-        chown "0:${PADM_DOCKER_CONTAINER_GID:-10001}" "${temporary}" || return 1
+    trap 'if [[ "${switching}" == true && "${committed}" == false ]]; then
+        for core in "${changed[@]}"; do
+            if mv -f -- "${backup[${core}]}" "${root}/config/${core}/config.json"; then
+                restored+=("${core}")
+            else
+                keep[${core}]=true
+                dockerError "额度配置恢复失败: ${core}，累计流量已保留；备份: ${backup[${core}]}"
+            fi
+        done
+        for core in "${restored[@]}"; do
+            dockerTrafficRestartCore "${core}" || dockerError "额度配置已恢复，但核心重启失败: ${core}"
+        done
+        dockerError "额度应用失败，已尝试恢复所有核心配置并保留累计流量"
     fi
-    if [[ "${core}" == xray ]]; then
-        dockerComposeRun run --rm --no-deps xray -test -format json -config "/etc/padm/xray/${temporary##*/}" || return 1
-    else
-        dockerComposeRun run --rm --no-deps sing-box check -D /var/lib/padm/sing-box -c "/etc/padm/sing-box/${temporary##*/}" || return 1
-    fi
-    backup=$(mktemp "${directory}/.traffic-backup.XXXXXX") || return 1
-    cp -p -- "${config}" "${backup}" && mv -f -- "${temporary}" "${config}" || return 1
-    if ! dockerTrafficRestartCore "${core}"; then
-        if ! mv -f -- "${backup}" "${config}"; then
-            keep=true
-            dockerError "额度配置恢复失败，累计流量已保留；备份: ${backup}"
-            return 1
+    for core in "${cores[@]}"; do
+        [[ -z "${temporary[${core}]:-}" ]] || rm -f -- "${temporary[${core}]}"
+        [[ "${keep[${core}]:-false}" == true || -z "${backup[${core}]:-}" ]] || rm -f -- "${backup[${core}]}"
+    done' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    for core in "${cores[@]}"; do
+        directory=${root}/config/${core}
+        base=${directory}/users.base
+        config=${directory}/config.json
+        dockerTrafficSafePath "${root}" "${base}" && dockerTrafficSafePath "${root}" "${config}" || return 1
+        [[ -f "${base}" && -f "${config}" ]] || return 1
+        temporary[${core}]=$(mktemp "${directory}/.traffic-candidate.XXXXXX") || return 1
+        dockerTrafficRender "${core}" "${base}" "${state}" >"${temporary[${core}]}" || return 1
+        cmp -s "${temporary[${core}]}" "${config}" || changed+=("${core}")
+    done
+    [[ "${#changed[@]}" -gt 0 ]] || return 0
+    # 全部候选验证通过后统一切换；失败或中断都由退出事务恢复两核心配置。
+    for core in "${cores[@]}"; do
+        chmod 0640 "${temporary[${core}]}" || return 1
+        if [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" != 1 ]]; then
+            chown "0:${PADM_DOCKER_CONTAINER_GID:-10001}" "${temporary[${core}]}" || return 1
         fi
-        dockerTrafficRestartCore "${core}" || dockerError '额度配置已恢复，但核心重启失败'
-        dockerError '额度应用失败，已恢复旧配置并保留累计流量'
-        return 1
-    fi
+        if [[ "${core}" == xray ]]; then
+            dockerComposeRun run --rm --no-deps xray -test -format json -config "/etc/padm/xray/${temporary[${core}]##*/}" || return 1
+        else
+            dockerComposeRun run --rm --no-deps sing-box check -D /var/lib/padm/sing-box -c "/etc/padm/sing-box/${temporary[${core}]##*/}" || return 1
+        fi
+    done
+    for core in "${changed[@]}"; do
+        config=${root}/config/${core}/config.json
+        backup[${core}]=$(mktemp "${root}/config/${core}/.traffic-backup.XXXXXX") || return 1
+        cp -p -- "${config}" "${backup[${core}]}" || return 1
+    done
+    switching=true
+    for core in "${changed[@]}"; do
+        mv -f -- "${temporary[${core}]}" "${root}/config/${core}/config.json" || return 1
+    done
+    for core in "${changed[@]}"; do
+        dockerTrafficRestartCore "${core}" || return 1
+    done
+    committed=true
 )
 
 dockerTrafficCollect() {

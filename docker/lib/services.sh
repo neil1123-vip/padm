@@ -64,28 +64,41 @@ dockerConfigureSpecValidate() {
       . as $request |
       ($matrix[0]) as $features |
       exact(["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"]) and
-      (.schema_version == 1 or .schema_version == 2) and
+      (.schema_version == 1 or .schema_version == 2 or .schema_version == 3) and
       (.release | exact(["version", "manifest_sha256", "signature_identity"]) and
         (.version | type == "string" and length > 0) and
         (.manifest_sha256 | test("^[a-f0-9]{64}$")) and
         (.signature_identity | type == "string" and length > 0)) and
-      (.core | exact(["type", "protocols"]) and
+      (.core | exact(["type", "protocols"] +
+          if $request.schema_version == 3 then ["secondary_type"] else [] end) and
         (.type == "xray" or .type == "sing-box") and
         (.protocols | type == "array" and length >= 1 and
           (if $request.schema_version == 1 then length <= 2 and
             ([.[].id] | unique | length) == length
            else length <= 16 and ([.[].listener_id] | unique | length) == length end) and
           ([.[].public_port] | unique | length) == length)) and
+      (if .schema_version == 3 then
+        (.core.secondary_type == null or
+          (.core.secondary_type != .core.type and
+            (.core.secondary_type == "xray" or .core.secondary_type == "sing-box"))) and
+        any(.core.protocols[]; .core == $request.core.type) and
+        (if .core.secondary_type != null then
+          any(.core.protocols[]; .core == $request.core.secondary_type) and .host_integrations == []
+         else true end) and
+        all(.core.protocols[]; .core == $request.core.type or
+          ($request.core.secondary_type != null and .core == $request.core.secondary_type))
+       else true end) and
       all(.core.protocols[];
         protocol_base and
-        (if $request.schema_version == 2 then
+        (if $request.schema_version >= 2 then
           (.listener_id | listener_id) or
           (.id == 1 and .listener_id == "vless-reality") or
           (.id == 21 and .listener_id == "vless-ws")
          else true end) and
         if .id == 1 then
           exact(["id", "server", "public_port", "address_families", "name", "uuid", "reality"] +
-            if $request.schema_version == 2 then ["listener_id"] else [] end) and
+            if $request.schema_version >= 2 then ["listener_id"] else [] end +
+            if $request.schema_version == 3 then ["core"] else [] end) and
           (.reality | exact(["server_name", "target_host", "target_port", "private_key", "public_key", "short_id"]) and
             (.server_name | hostname) and (.target_host | hostname) and (.target_port | port) and
             (.private_key | test("^[A-Za-z0-9_-]{43}$")) and
@@ -93,10 +106,11 @@ dockerConfigureSpecValidate() {
             (.short_id | test("^(?:[a-f0-9]{2}){1,8}$")))
         elif .id == 21 then
           exact(["id", "server", "public_port", "address_families", "name", "uuid", "websocket"] +
-            if $request.schema_version == 2 then ["listener_id"] else [] end) and
+            if $request.schema_version >= 2 then ["listener_id"] else [] end +
+            if $request.schema_version == 3 then ["core"] else [] end) and
           (.websocket | exact(["domain", "path"] +
-            if $request.schema_version == 2 then ["backend_port", "tls_port"] else [] end) and
-            (if $request.schema_version == 2 then
+            if $request.schema_version >= 2 then ["backend_port", "tls_port"] else [] end) and
+            (if $request.schema_version >= 2 then
               (.backend_port | port) and (.tls_port | port) and .tls_port != 8080
              else true end) and (.domain | hostname) and
             (.path | test("^[A-Za-z0-9_-]{8,64}$")))
@@ -105,7 +119,7 @@ dockerConfigureSpecValidate() {
         . as $protocol |
         any($features.protocols[];
           .id == $protocol.id and .status == "supported" and
-          (.cores | index($request.core.type)) != null)) and
+          (.cores | index($protocol.core // $request.core.type)) != null)) and
       (.tls == null or (.tls | exact(["domain"]) and (.domain | hostname))) and
       (.subscription | exact(["enabled", "token"]) and (.enabled | type == "boolean") and
         (.token | test("^[A-Za-z0-9_-]{16,128}$"))) and
@@ -146,7 +160,8 @@ dockerConfigureSpecValidate() {
             (.mark | type == "number" and floor == . and . >= 1 and . <= 2147483647))
         else false end) and
       if any(.core.protocols[]; .id == 21) then
-        .core.type == "xray" and .tls != null and
+        .tls != null and
+        all(.core.protocols[] | select(.id == 21); (.core // $request.core.type) == "xray") and
         all(.core.protocols[] | select(.id == 21); .websocket.domain == $request.tls.domain)
       else
         .tls == null and .subscription.enabled == false
@@ -163,12 +178,14 @@ dockerConfigureSpecValidate() {
       else true end and
       all(.host_integrations[] | select(.type == "tproxy");
         .settings.port as $port | all($request.core.protocols[]; .public_port != $port)) and
-      # 核心内部监听与统计 API 共用网络空间，不能只检查宿主发布端口。
-      (([.core.protocols[] |
-          if .id == 21 then (.websocket.backend_port // 31297) else .public_port end] +
-        [.host_integrations[] | select(.type == "tproxy") | .settings.port] +
-        [if .core.type == "xray" then 10085 else 10087 end]) as $corePorts |
-      ($corePorts | unique | length) == ($corePorts | length) and
+      # 内部监听按实际核心网络空间检查，公开端口仍在宿主全局唯一。
+      (all([.core.type, .core.secondary_type] | map(select(. != null))[];
+        . as $core |
+        ([$request.core.protocols[] | select((.core // $request.core.type) == $core) |
+            if .id == 21 then (.websocket.backend_port // 31297) else .public_port end] +
+          [$request.host_integrations[] | select(.type == "tproxy") | .settings.port] +
+          [if $core == "xray" then 10085 else 10087 end]) as $corePorts |
+        ($corePorts | unique | length) == ($corePorts | length)) and
       (([.core.protocols[] | select(.id == 21) | (.websocket.tls_port // 8443)] + [8080]) as $tlsPorts |
       ($tlsPorts | unique | length) == ($tlsPorts | length)))
     ' "${specFile}" >/dev/null 2>&1 || {
@@ -181,11 +198,15 @@ dockerConfigureSpecMigrate() {
     local source=$1 target=$2
     dockerConfigureSpecValidate "${source}" || return 1
     jq '
-      if .schema_version == 1 then
+      (if .schema_version == 1 then
         .schema_version = 2 |
         .core.protocols |= map(
           .listener_id = (if .id == 1 then "vless-reality" else "vless-ws" end) |
           if .id == 21 then .websocket += {backend_port: 31297, tls_port: 8443} else . end)
+       else . end) |
+      if .schema_version == 2 then
+        .schema_version = 3 | .core.type as $core |
+        .core.secondary_type = null | .core.protocols |= map(.core = $core)
       else . end
     ' "${source}" >"${target}" &&
         chmod 0600 "${target}" && dockerConfigureSpecValidate "${target}"
@@ -224,9 +245,17 @@ dockerManagedSpecMatchesDeployment() {
       .release.manifest_sha256 == $d.manifest.sha256 and
       .release.signature_identity == $d.manifest.signature_identity and
       .core.type == $d.core.type and
+      (if .schema_version == 3 then
+        ($d.core | has("secondary_type")) and .core.secondary_type == $d.core.secondary_type
+       else ($d.core | has("secondary_type") | not) end) and
+      (([.core.type, .core.secondary_type] | map(select(. != null) | "core-\(.)")) +
+        [if any(.core.protocols[]; .id == 21) then "nginx" else empty end] +
+        [if .subscription.enabled then "subscription" else empty end] +
+        [.host_integrations[].profile] | sort) == ($d.compose.profiles | sort) and
+      (.host_integrations | sort_by(.type)) == ($d.host_integrations | sort_by(.type)) and
       ([.core.protocols[].id] | unique) == ($d.core.protocol_ids | sort) and
-      (if .schema_version == 2 then
-        [.core.protocols[] | {listener_id, service: (if .id == 21 then "nginx" else $d.core.type end),
+      (if .schema_version >= 2 then
+        [.core.protocols[] | {listener_id, service: (if .id == 21 then "nginx" else (.core // $d.core.type) end),
           public_port, container_port: (if .id == 21 then .websocket.tls_port else .public_port end),
           transport: "tcp", address_families}] | sort_by(.listener_id) as $expected |
         $expected == ([$d.listeners[] | select(.listener_id | startswith("host-") | not)] | sort_by(.listener_id))
@@ -267,20 +296,22 @@ dockerEditBaselineValidate() {
     baseline="${workspace}/baseline"
     mkdir -p -- "${baseline}/config/"{xray,sing-box,nginx,net/fail2ban,net/transparent} \
         "${baseline}/data/subscription" "${baseline}/logs/nginx" || return 1
-    core=$(jq -r '.core.type' "${specFile}") || return 1
-    case "${core}" in
-    xray) dockerGenerateXrayConfig "${specFile}" "${baseline}/config/xray/config.json" || return 1 ;;
-    sing-box) dockerGenerateSingBoxConfig "${specFile}" "${baseline}/config/sing-box/config.json" || return 1 ;;
-    esac
-    if [[ -e "${root}/config/${core}/users.base" ]]; then
-        cp -- "${baseline}/config/${core}/config.json" "${baseline}/config/${core}/users.base" || return 1
-        state=$(dockerTrafficReadState) || return 1
-        dockerTrafficRender "${core}" "${baseline}/config/${core}/users.base" "${state}" \
-            >"${baseline}/config/${core}/config.json" || return 1
-    elif [[ -e "${root}/data/traffic/state.json" ]]; then
-        dockerError '旧部署有流量记录但缺少完整账号输入，不能无损接入编辑'
-        return 1
-    fi
+    state=$(dockerTrafficReadState) || return 1
+    while IFS= read -r core; do
+        case "${core}" in
+        xray) dockerGenerateXrayConfig "${specFile}" "${baseline}/config/xray/config.json" || return 1 ;;
+        sing-box) dockerGenerateSingBoxConfig "${specFile}" "${baseline}/config/sing-box/config.json" || return 1 ;;
+        *) return 1 ;;
+        esac
+        if [[ -e "${root}/config/${core}/users.base" ]]; then
+            cp -- "${baseline}/config/${core}/config.json" "${baseline}/config/${core}/users.base" || return 1
+            dockerTrafficRender "${core}" "${baseline}/config/${core}/users.base" "${state}" \
+                >"${baseline}/config/${core}/config.json" || return 1
+        elif [[ -e "${root}/data/traffic/state.json" ]]; then
+            dockerError '旧部署有流量记录但缺少完整账号输入，不能无损接入编辑'
+            return 1
+        fi
+    done < <(jq -r '[.core.type, .core.secondary_type] | .[] | select(. != null)' "${specFile}")
     dockerGenerateNginxConfig "${specFile}" "${baseline}/config/nginx/default.conf" &&
         dockerGenerateFail2banConfig "${specFile}" "${baseline}" || return 1
     if jq -e '.subscription.enabled' "${specFile}" >/dev/null; then
@@ -292,7 +323,7 @@ dockerEditBaselineValidate() {
         dockerTrafficSafePath "${root}" "${root}/${directory}" &&
             [[ -d "${root}/${directory}" &&
                 -z "$(find "${root}/${directory}" ! -type f ! -type d -print -quit)" ]] || return 1
-        if [[ "${directory}" == "config/${core}" ]]; then
+        if [[ -f "${baseline}/${directory}/config.json" ]]; then
             while IFS= read -r token; do
                 [[ "${token}" == "${root}/${directory}/config.json" ||
                     "${token}" == "${root}/${directory}/users.base" ]] || {
@@ -679,7 +710,7 @@ dockerGenerateXrayConfig() {
       {
         log: {loglevel: "warning"},
         inbounds: ([
-          $r.core.protocols[] |
+          $r.core.protocols[] | select((.core // $r.core.type) == "xray") |
           if .id == 1 then {
             listen: "0.0.0.0",
             port: .public_port,
@@ -745,7 +776,7 @@ dockerGenerateSingBoxConfig() {
       {
         log: {disabled: false, level: "warn", timestamp: true},
         inbounds: ([
-          $r.core.protocols[] |
+          $r.core.protocols[] | select((.core // $r.core.type) == "sing-box") |
           {
             type: "vless",
             tag: (.listener_id // "vless-reality"),
@@ -937,6 +968,7 @@ dockerGenerateCompose() {
         if . == "ipv4" then "0.0.0.0:\($protocol.public_port):\($containerPort)/tcp"
         else "[::]:\($protocol.public_port):\($containerPort)/tcp" end
       ];
+      [$r.core.type, $r.core.secondary_type] | map(select(. != null)) as $cores |
       ($r.core.protocols | map(select(.id == 1))) as $direct |
       ($r.core.protocols | map(select(.id == 21))) as $websocket |
       ($r.host_integrations | map(select(.type == "wireguard"))) as $wireguard |
@@ -954,35 +986,38 @@ dockerGenerateCompose() {
           }
         }
       }
-      | if $r.core.type == "xray" then
+      | if ($cores | index("xray")) != null then
           .services.xray = (defaults + {
             image: "${PADM_XRAY_IMAGE:?PADM_XRAY_IMAGE is required}",
             profiles: ["core-xray"],
             labels: labels("xray"),
             volumes: (mounts("config/xray"; "/etc/padm/xray"; true) +
               mounts("data/xray"; "/var/lib/padm/xray"; false)),
-            ports: [$direct[] as $protocol | ports($protocol; $protocol.public_port)[]],
+            ports: [$direct[] | select((.core // $r.core.type) == "xray") |
+              . as $protocol | ports($protocol; $protocol.public_port)[]],
             tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=16m"],
             healthcheck: {
               test: ["CMD", "/usr/local/bin/xray", "-test", "-confdir", "/etc/padm/xray"],
               interval: "30s", timeout: "5s", start_period: "5s", retries: 3
             }
           })
-        else
+        else . end
+      | if ($cores | index("sing-box")) != null then
           .services["sing-box"] = (defaults + {
             image: "${PADM_SINGBOX_IMAGE:?PADM_SINGBOX_IMAGE is required}",
             profiles: ["core-sing-box"],
             labels: labels("sing-box"),
             volumes: (mounts("config/sing-box"; "/etc/padm/sing-box"; true) +
               mounts("data/sing-box"; "/var/lib/padm/sing-box"; false)),
-            ports: [$direct[] as $protocol | ports($protocol; $protocol.public_port)[]],
+            ports: [$direct[] | select((.core // $r.core.type) == "sing-box") |
+              . as $protocol | ports($protocol; $protocol.public_port)[]],
             tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=16m"],
             healthcheck: {
               test: ["CMD", "/usr/local/bin/sing-box", "check", "-D", "/var/lib/padm/sing-box", "-c", "/etc/padm/sing-box/config.json"],
               interval: "30s", timeout: "5s", start_period: "5s", retries: 3
             }
           })
-        end
+        else . end
       | if $transparent then
           .services[$r.core.type].profiles += ["net-transparent"]
           | .services[$r.core.type].network_mode = "host"
@@ -1125,7 +1160,7 @@ dockerGenerateDeployment() {
       $request[0] as $r |
       def digest: capture("@(?<value>sha256:[a-f0-9]{64})$").value;
       def profiles:
-        ([if $r.core.type == "xray" then "core-xray" else "core-sing-box" end] +
+        ([[$r.core.type, $r.core.secondary_type][] | select(. != null) | "core-\(.)"] +
         [if any($r.core.protocols[]; .id == 21) then "nginx" else empty end] +
         [if $r.subscription.enabled then "subscription" else empty end] +
         [$r.host_integrations[].profile]);
@@ -1139,31 +1174,32 @@ dockerGenerateDeployment() {
           signature_identity: $r.release.signature_identity
         },
         compose: {project: "padm-docker", profiles: profiles},
-        core: {type: $r.core.type, protocol_ids: ([$r.core.protocols[].id] | unique)},
+        core: ({type: $r.core.type, protocol_ids: ([$r.core.protocols[].id] | unique)} +
+          if $r.schema_version == 3 then {secondary_type: $r.core.secondary_type} else {} end),
         listeners: (
           [
           $r.core.protocols[] |
           ({
-            service: (if .id == 21 then "nginx" else $r.core.type end),
+            service: (if .id == 21 then "nginx" else (.core // $r.core.type) end),
             public_port: .public_port,
             container_port: (if .id == 21 then (.websocket.tls_port // 8443) else .public_port end),
             transport: "tcp",
             address_families: .address_families
-          } + if $r.schema_version == 2 then {listener_id: .listener_id} else {} end)
+          } + if $r.schema_version >= 2 then {listener_id: .listener_id} else {} end)
           ] + [
           $r.host_integrations[] |
           if .type == "wireguard" then {
             service: "net-wireguard", public_port: $wireguardPort,
             container_port: $wireguardPort, transport: "udp",
             address_families: ["ipv4", "ipv6"]
-          } + if $r.schema_version == 2 then {listener_id: "host-wireguard"} else {} end
+          } + if $r.schema_version >= 2 then {listener_id: "host-wireguard"} else {} end
           elif .type == "tproxy" then
             ({service: $r.core.type, public_port: .settings.port,
               container_port: .settings.port, transport: "tcp", address_families: ["ipv4"]} +
-              if $r.schema_version == 2 then {listener_id: "host-tproxy-tcp"} else {} end),
+              if $r.schema_version >= 2 then {listener_id: "host-tproxy-tcp"} else {} end),
             ({service: $r.core.type, public_port: .settings.port,
               container_port: .settings.port, transport: "udp", address_families: ["ipv4"]} +
-              if $r.schema_version == 2 then {listener_id: "host-tproxy-udp"} else {} end)
+              if $r.schema_version >= 2 then {listener_id: "host-tproxy-udp"} else {} end)
           else empty end
           ]
         ),
@@ -1190,6 +1226,12 @@ dockerDeploymentFileValidate() {
       .compose.project == "padm-docker" and
       (.compose.profiles | type == "array" and (unique | length) == length) and
       (.core.type == "xray" or .core.type == "sing-box") and
+      (if .core.secondary_type != null then
+        (.core.secondary_type == "xray" or .core.secondary_type == "sing-box") and
+        .core.secondary_type != .core.type and .host_integrations == [] and
+        (.compose.profiles | index("core-xray")) != null and
+        (.compose.profiles | index("core-sing-box")) != null
+       else true end) and
       (.core.protocol_ids | type == "array" and length >= 1 and (unique | length) == length) and
       (.listeners | type == "array" and length >= 1 and
         all(.[]; (.public_port | type == "number" and floor == . and . >= 1 and . <= 65535) and
@@ -1277,12 +1319,13 @@ dockerPrepareCandidatePermissions() {
 dockerGenerateCandidate() {
     local specFile=$1 candidate=$2 tlsSource=${3:-} acmeSource=${4:-} root core token
     root=$(dockerInstallRoot) || return 1
-    core=$(jq -r '.core.type' "${specFile}") || return 1
-    case "${core}" in
-    xray) dockerGenerateXrayConfig "${specFile}" "${candidate}/config/xray/config.json" || return 1 ;;
-    sing-box) dockerGenerateSingBoxConfig "${specFile}" "${candidate}/config/sing-box/config.json" || return 1 ;;
-    *) return 1 ;;
-    esac
+    while IFS= read -r core; do
+        case "${core}" in
+        xray) dockerGenerateXrayConfig "${specFile}" "${candidate}/config/xray/config.json" || return 1 ;;
+        sing-box) dockerGenerateSingBoxConfig "${specFile}" "${candidate}/config/sing-box/config.json" || return 1 ;;
+        *) return 1 ;;
+        esac
+    done < <(jq -r '[.core.type, .core.secondary_type] | .[] | select(. != null)' "${specFile}")
     dockerStageHostIntegrationFiles "${specFile}" "${candidate}" || return 1
     dockerGenerateFail2banConfig "${specFile}" "${candidate}" || return 1
     dockerStageTlsFiles "${specFile}" "${candidate}" "${tlsSource}" || return 1
@@ -1388,23 +1431,25 @@ dockerValidateCandidate() {
         return 1
     }
     dockerValidateHostIntegrations "${specFile}" "${candidate}" || return 1
-    core=$(jq -r '.core.type' "${specFile}") || return 1
-    case "${core}" in
-    xray)
-        dockerCandidateCompose "${candidate}" run --rm --no-deps xray \
-            -test -confdir /etc/padm/xray >/dev/null || {
-            dockerError 'Xray 候选配置校验失败'
-            return 1
-        }
-        ;;
-    sing-box)
-        dockerCandidateCompose "${candidate}" run --rm --no-deps sing-box \
-            check -D /var/lib/padm/sing-box -c /etc/padm/sing-box/config.json >/dev/null || {
-            dockerError 'sing-box 候选配置校验失败'
-            return 1
-        }
-        ;;
-    esac
+    while IFS= read -r core; do
+        case "${core}" in
+        xray)
+            dockerCandidateCompose "${candidate}" run --rm --no-deps xray \
+                -test -confdir /etc/padm/xray >/dev/null || {
+                dockerError 'Xray 候选配置校验失败'
+                return 1
+            }
+            ;;
+        sing-box)
+            dockerCandidateCompose "${candidate}" run --rm --no-deps sing-box \
+                check -D /var/lib/padm/sing-box -c /etc/padm/sing-box/config.json >/dev/null || {
+                dockerError 'sing-box 候选配置校验失败'
+                return 1
+            }
+            ;;
+        *) return 1 ;;
+        esac
+    done < <(jq -r '[.core.type, .core.secondary_type] | .[] | select(. != null)' "${specFile}")
     if jq -e '.tls != null' "${specFile}" >/dev/null; then
         domain=$(jq -r '.tls.domain' "${specFile}") || return 1
         image=$(jq -r '.images.ops' "${specFile}") || return 1
@@ -1688,8 +1733,8 @@ dockerRestoreConfiguration() {
     done <"${backup}/present"
     [[ -z "${bundleTarget}" ]] || dockerActivateBundle "${bundleTarget}" || return 1
     if [[ -f "${root}/deployment.json" && -f "${root}/compose.json" && -f "${root}/images.env" ]]; then
-        core=$(jq -r '.core.type' "${root}/deployment.json") || return 1
-        if [[ -f "${root}/config/${core}/users.base" || -f "${root}/data/traffic/state.json" ]]; then
+        if [[ -f "${root}/config/xray/users.base" || -f "${root}/config/sing-box/users.base" ||
+            -f "${root}/data/traffic/state.json" ]]; then
             dockerTrafficPrepareCandidate "${root}" || return 1
         fi
         dockerEnsureRuntimeDataPermissions || return 1
@@ -1728,7 +1773,8 @@ dockerConfigureApply() {
     local sourceSpec=$1 tlsSource=${2:-} acmeSource=${3:-} mode=${4:-configure} specFile candidate backup answer
     case "${mode}" in configure|preview|interactive|confirmed) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
     dockerConfigureSpecValidate "${sourceSpec}" || return "${PADM_DOCKER_RC_STATE}"
-    dockerTrafficRuntimeCheck "$(jq -r '.core.type' "${sourceSpec}")" || return "${PADM_DOCKER_RC_HOST}"
+    dockerTrafficRuntimeCheck "$(jq -r '[.core.type, .core.secondary_type] | .[] | select(. != null)' "${sourceSpec}")" ||
+        return "${PADM_DOCKER_RC_HOST}"
     [[ "${mode}" != configure ]] || dockerTrafficBeforeChange
     dockerCreateConfigurationCandidate || return "${PADM_DOCKER_RC_STATE}"
     candidate=${DOCKER_CONFIG_CANDIDATE}
@@ -2185,19 +2231,20 @@ dockerValidateInstalledCommand() {
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     dockerComposeFile >/dev/null || return "${PADM_DOCKER_RC_COMPOSE}"
     dockerComposeRun config --format json >/dev/null || return "${PADM_DOCKER_RC_COMPOSE}"
-    core=$(jq -er '.core.type' "${root}/deployment.json") || return "${PADM_DOCKER_RC_STATE}"
-    case "${core}" in
-    xray)
-        dockerComposeRun run --rm --no-deps xray -test -confdir /etc/padm/xray >/dev/null ||
-            return "${PADM_DOCKER_RC_STATE}"
-        ;;
-    sing-box)
-        dockerComposeRun run --rm --no-deps sing-box \
-            check -D /var/lib/padm/sing-box -c /etc/padm/sing-box/config.json >/dev/null ||
-            return "${PADM_DOCKER_RC_STATE}"
-        ;;
-    *) return "${PADM_DOCKER_RC_STATE}" ;;
-    esac
+    while IFS= read -r core; do
+        case "${core}" in
+        xray)
+            dockerComposeRun run --rm --no-deps xray -test -confdir /etc/padm/xray >/dev/null ||
+                return "${PADM_DOCKER_RC_STATE}"
+            ;;
+        sing-box)
+            dockerComposeRun run --rm --no-deps sing-box \
+                check -D /var/lib/padm/sing-box -c /etc/padm/sing-box/config.json >/dev/null ||
+                return "${PADM_DOCKER_RC_STATE}"
+            ;;
+        *) return "${PADM_DOCKER_RC_STATE}" ;;
+        esac
+    done < <(jq -r '[.core.type, .core.secondary_type] | .[] | select(. != null)' "${root}/deployment.json")
     if jq -e '.compose.profiles | index("nginx") != null' "${root}/deployment.json" >/dev/null; then
         dockerComposeRun run --rm --no-deps nginx -t >/dev/null || return "${PADM_DOCKER_RC_STATE}"
     fi

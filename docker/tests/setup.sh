@@ -454,8 +454,9 @@ runPty 0 xray-success "${REALITY_INPUT}" setup "${ASSET_ARGS[@]}"
 SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
 [[ -f "${SPEC}" && ! -L "${SPEC}" ]] || fail 'setup did not preserve full configuration spec'
 jq -e --arg sha "$(sha256sum "${MANIFEST}" | cut -d ' ' -f 1)" '
-    .release.version == "3.2.0" and .release.manifest_sha256 == $sha and
-    .core.type == "xray" and (.core.protocols | length) == 1 and .core.protocols[0].id == 1 and
+    .schema_version == 3 and .release.version == "3.2.0" and .release.manifest_sha256 == $sha and
+    .core.type == "xray" and .core.secondary_type == null and (.core.protocols | length) == 1 and
+    .core.protocols[0].core == "xray" and .core.protocols[0].id == 1 and
     .core.protocols[0].uuid == "11111111-1111-4111-8111-111111111111" and
     (.core.protocols[0].reality.private_key | length) == 43 and
     (.core.protocols[0].reality.public_key | length) == 43 and
@@ -489,8 +490,42 @@ done
 
 newState singbox-success
 runPty 0 singbox-success "${SINGBOX_INPUT}" setup "${ASSET_ARGS[@]}"
-jq -e '.core.type == "sing-box" and .core.protocols[0].id == 1' \
+jq -e '.schema_version == 3 and .core.type == "sing-box" and .core.secondary_type == null and
+    .core.protocols[0].core == "sing-box" and .core.protocols[0].id == 1' \
     "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" >/dev/null || fail 'sing-box first configuration did not succeed'
+
+# 双核心共用账号与 Reality 密钥，但入口身份和公开端口必须独立。
+DUAL_XRAY_INPUT=$'3\n1\nproxy.example.com\n1\n24443\ntarget.example.com\n443\ntarget.example.com\n24445\ny\n'
+DUAL_SINGBOX_INPUT=$'4\nproxy.example.com\n1\n24443\ntarget.example.com\n443\ntarget.example.com\n24445\ny\n'
+for dualCase in dual-xray dual-singbox; do
+    newState "${dualCase}"
+    if [[ "${dualCase}" == dual-xray ]]; then
+        input=${DUAL_XRAY_INPUT}; primary=xray; secondary=sing-box
+    else
+        input=${DUAL_SINGBOX_INPUT}; primary=sing-box; secondary=xray
+    fi
+    runPty 0 "${dualCase}" "${input}" setup "${ASSET_ARGS[@]}"
+    jq -e --arg primary "${primary}" --arg secondary "${secondary}" '
+        .schema_version == 3 and .core.type == $primary and .core.secondary_type == $secondary and
+        (.core.protocols | length) == 2 and
+        [.core.protocols[].listener_id] == ["vless-reality", "entry-secondary-reality"] and
+        [.core.protocols[].public_port] == [24443,24445] and
+        [.core.protocols[].core] == [$primary,$secondary] and
+        all(.core.protocols[]; .id == 1) and
+        .core.protocols[0].uuid == .core.protocols[1].uuid and
+        .core.protocols[0].reality == .core.protocols[1].reality
+    ' "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" >/dev/null ||
+        fail "${dualCase}: setup lost core ownership, independent listeners or shared credentials"
+    jq -e '.services | has("xray") and has("sing-box")' \
+        "${PADM_DOCKER_INSTALL_DIR}/compose.json" >/dev/null ||
+        fail "${dualCase}: setup did not install both core services"
+done
+
+newState dual-port-conflict
+before=$(snapshot)
+runPty 11 dual-port-conflict "${DUAL_XRAY_INPUT/24445/24443}" setup "${ASSET_ARGS[@]}"
+[[ "$(snapshot)" == "${before}" && ! -s "${EVENTS}" && ! -s "${VERIFY_LOG}" ]] ||
+    fail 'dual-core conflicting ports reached confirmation, signature verification or generation'
 
 printf 'fake-cert\n' >"${TEST_ROOT}/cert.pem"
 printf 'fake-key\n' >"${TEST_ROOT}/key.pem"
@@ -514,6 +549,19 @@ for tlsCase in tls-fail ws-success; do
             fail 'WS setup did not commit imported TLS material'
     fi
 done
+
+newState dual-ws-reality
+printf -v DUAL_WS_INPUT '3\n2\nproxy.example.com\n1\ntarget.example.com\n443\ntarget.example.com\n24445\nws.example.com\n24444\n2\n%s\n%s\ny\ny\n' \
+    "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
+runPty 0 dual-ws-reality "${DUAL_WS_INPUT}" setup "${ASSET_ARGS[@]}"
+jq -e '.schema_version == 3 and .core.type == "xray" and .core.secondary_type == "sing-box" and
+    ([.core.protocols[].id] | sort) == [1,21] and
+    any(.core.protocols[]; .id == 21 and .core == "xray") and
+    any(.core.protocols[]; .id == 1 and .core == "sing-box" and
+        (.reality.private_key | length) == 43 and (.reality.public_key | length) == 43) and
+    .core.protocols[0].uuid == .core.protocols[1].uuid and .subscription.enabled' \
+    "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" >/dev/null ||
+    fail 'WS-only primary did not generate the secondary Reality credentials or core ownership'
 
 newState both-managed
 mkdir -p "${PADM_DOCKER_INSTALL_DIR}/secrets/tls" "${PADM_DOCKER_INSTALL_DIR}/data/acme"

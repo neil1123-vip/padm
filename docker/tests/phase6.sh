@@ -11,6 +11,7 @@ CONTROL_SOURCE=${TEST_ROOT}/control-old
 CONTROL_BUNDLE=${TEST_ROOT}/control-new.tar.gz
 FAILED_CONTROL_BUNDLE=${TEST_ROOT}/control-failed.tar.gz
 LEGACY_CONTROL_BUNDLE=${TEST_ROOT}/control-legacy.tar.gz
+COMPAT_CONTROL_BUNDLE=${TEST_ROOT}/control-v2.tar.gz
 OLD_DIGEST=$(printf '1%.0s' {1..64})
 NEW_DIGEST=$(printf '2%.0s' {1..64})
 ROLLBACK_DIGEST=$(printf '3%.0s' {1..64})
@@ -34,6 +35,8 @@ printf '%s\n' "$*" >>"${FAKE_DOCKER_LOG:?}"
 case "${1:-}" in
 compose)
     [[ "${2:-}" == version ]] && { printf 'v2.29.1\n'; exit 0; }
+    [[ " ${*} " != *' run --rm --no-deps sing-box version '* ]] ||
+        printf 'sing-box version 1.14.0\nTags: with_quic,with_v2ray_api\n'
     if [[ " ${*} " == *' up -d '* && "${FAKE_DOCKER_FAIL_UP:-0}" == 1 &&
         ! -e "${FAKE_DOCKER_FAIL_MARK:?}" ]]; then
         : >"${FAKE_DOCKER_FAIL_MARK}"
@@ -47,6 +50,13 @@ image) ;;
 esac
 EOF
 chmod 0755 "${MOCK_BIN}/docker"
+printf '#!/usr/bin/env bash\nexit 0\n' >"${MOCK_BIN}/nsenter"
+cat >"${MOCK_BIN}/curl" <<'EOF'
+#!/usr/bin/env bash
+[[ "${1:-}" == --version ]] || exit 1
+printf 'curl 8.0.0\nFeatures: HTTP2 SSL\n'
+EOF
+chmod 0755 "${MOCK_BIN}/nsenter" "${MOCK_BIN}/curl"
 
 copyControlFixture() {
     local target=$1 marker=$2 relative
@@ -66,9 +76,14 @@ jq '.properties.schema_version = {const: 1}' \
 mv -- "${TEST_ROOT}/legacy-schema.json" "${CONTROL_SOURCE}/docker/contracts/configure.schema.json"
 copyControlFixture "${TEST_ROOT}/control-new" new-control
 copyControlFixture "${TEST_ROOT}/control-failed" failed-control
+copyControlFixture "${TEST_ROOT}/control-v2" compatible-control
+jq '.properties.schema_version = {enum: [1, 2]}' \
+    "${TEST_ROOT}/control-v2/docker/contracts/configure.schema.json" >"${TEST_ROOT}/v2-schema.json"
+mv -- "${TEST_ROOT}/v2-schema.json" "${TEST_ROOT}/control-v2/docker/contracts/configure.schema.json"
 tar -czf "${CONTROL_BUNDLE}" -C "${TEST_ROOT}/control-new" install-docker.sh docker shell
 tar -czf "${FAILED_CONTROL_BUNDLE}" -C "${TEST_ROOT}/control-failed" install-docker.sh docker shell
 tar -czf "${LEGACY_CONTROL_BUNDLE}" -C "${CONTROL_SOURCE}" install-docker.sh docker shell
+tar -czf "${COMPAT_CONTROL_BUNDLE}" -C "${TEST_ROOT}/control-v2" install-docker.sh docker shell
 
 cat >"${MANIFEST}" <<EOF
 $(jq -n --arg old "${OLD_DIGEST}" --arg new "${NEW_DIGEST}" --arg prefix "${REF_PREFIX}" '
@@ -89,6 +104,7 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
     PHASE6_CONTROL_SOURCE="${CONTROL_SOURCE}" PHASE6_CONTROL_BUNDLE="${CONTROL_BUNDLE}" \
     PHASE6_FAILED_CONTROL_BUNDLE="${FAILED_CONTROL_BUNDLE}" \
     PHASE6_NEW_CONTROL_SOURCE="${TEST_ROOT}/control-new" PHASE6_LEGACY_CONTROL_BUNDLE="${LEGACY_CONTROL_BUNDLE}" \
+    PHASE6_COMPAT_CONTROL_SOURCE="${TEST_ROOT}/control-v2" PHASE6_COMPAT_CONTROL_BUNDLE="${COMPAT_CONTROL_BUNDLE}" \
     PADM_DOCKER_BIN_DIR="${TEST_ROOT}/installed-bin" \
     PADM_DOCKER_INSTALL_DIR="${STATE_ROOT}" PADM_DOCKER_SKIP_CHOWN=1 \
     bash -uc '
@@ -359,7 +375,8 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
         multiOldSpec="$root/.spec-v2-before-update.json"
         multiNewSpec="$root/.spec-v2-after-update.json"
         dockerConfigureSpecMigrate "$oldSpec" "$root/.spec-v2-migrated.json"
-        jq ".core.protocols += [(.core.protocols[0] |
+        jq ".schema_version = 2 | del(.core.secondary_type) | .core.protocols |= map(del(.core)) |
+          .core.protocols += [(.core.protocols[0] |
           .listener_id = \"entry-secondary\" | .public_port = 25443 | .name = \"secondary\")]" \
             "$root/.spec-v2-migrated.json" >"$multiOldSpec"
         cp -- "$multiOldSpec" "$root/config/spec.json"
@@ -414,7 +431,109 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
         dockerCleanupStagedBundle
         unset FAKE_DOCKER_FAIL_UP
 
-        # 恢复先验证目标规格与目标 bundle，不能误拿仍在运行的 v2 规格限制合法 v1 回滚。
+        # 共存更新保留两核配置、入口和累计流量；旧 bundle 在停服务之前拒绝 v3。
+        dockerInstallBundle "$PHASE6_COMPAT_CONTROL_SOURCE" "$(printf c%.0s {1..40})"
+        compatBundle=$(readlink "$root/bundle")
+        dockerActivateBundle "$newBundle"
+        dockerCleanupStagedBundle
+        dualOldSpec="$root/.spec-v3-before-update.json"
+        dualNewSpec="$root/.spec-v3-after-update.json"
+        dockerConfigureSpecMigrate "$multiNewSpec" "$root/.spec-v3-migrated.json"
+        jq ".core.secondary_type = \"sing-box\" |
+          .core.protocols += [(.core.protocols[0] | .core = \"sing-box\" |
+            .listener_id = \"entry-sing-box\" | .public_port = 26443 | .name = \"sing-box-secondary\")]" \
+            "$root/.spec-v3-migrated.json" >"$dualOldSpec"
+        cp -- "$dualOldSpec" "$root/config/spec.json"
+        chmod 0600 "$dualOldSpec" "$root/config/spec.json"
+        dockerGenerateXrayConfig "$dualOldSpec" "$root/config/xray/config.json"
+        dockerGenerateSingBoxConfig "$dualOldSpec" "$root/config/sing-box/config.json"
+        cp -- "$root/config/xray/config.json" "$root/config/xray/users.base"
+        cp -- "$root/config/sing-box/config.json" "$root/config/sing-box/users.base"
+        dockerTrafficPrepareCandidate "$root"
+        trafficBefore=$(jq -Sc . "$root/data/traffic/state.json")
+        dockerGenerateCompose "$dualOldSpec" "$root/compose.json"
+        dockerGenerateDeployment "$dualOldSpec" "$root/deployment.json"
+        dockerManagedSpecMatchesDeployment "$root/config/spec.json" "$root/deployment.json" "$root/images.env"
+        dualListeners=$(jq -Sc ".listeners" "$root/deployment.json")
+        dualProfiles=$(jq -Sc ".compose.profiles" "$root/deployment.json")
+        dualXray=$(jq -Sc . "$root/config/xray/config.json")
+        dualSingBox=$(jq -Sc . "$root/config/sing-box/config.json")
+        source="$PHASE6_MANIFEST.rollback"
+        manifestSha=$(sha256sum "$source" | awk "{print \$1}")
+        jq --arg sha "$manifestSha" --slurpfile manifest "$source" "
+          .release = {version: \$manifest[0].release.version, manifest_sha256: \$sha, signature_identity: \"test\"} |
+          .images = (\$manifest[0].images | map_values(.reference))
+        " "$dualOldSpec" >"$dualNewSpec"
+        control=$PHASE6_FAILED_CONTROL_BUNDLE
+        dockerUpdateCommand --manifest "$source"
+        dualBundle=$(readlink "$root/bundle")
+        assertCurrent "$dualBundle" "$failedCommit" failed-control "$(printf 3%.0s {1..64})"
+        test "$(jq -Sc . "$root/config/spec.json")" == "$(jq -Sc . "$dualNewSpec")"
+        test "$(jq -Sc ".listeners" "$root/deployment.json")" == "$dualListeners"
+        test "$(jq -Sc ".compose.profiles" "$root/deployment.json")" == "$dualProfiles"
+        jq -e ".core.secondary_type == \"sing-box\"" "$root/deployment.json" >/dev/null
+        test "$(jq -Sc . "$root/config/xray/config.json")" == "$dualXray"
+        test "$(jq -Sc . "$root/config/sing-box/config.json")" == "$dualSingBox"
+        test "$(jq -Sc . "$root/data/traffic/state.json")" == "$trafficBefore"
+        dualBackup=$DOCKER_CONFIG_BACKUP
+        dockerValidateConfigurationBackup "$dualBackup"
+        cp -- "$dualBackup/deployment.json" "$root/.dual-backup-deployment.json"
+        jq ".compose.profiles += [\"subscription\"]" "$root/.dual-backup-deployment.json" >"$dualBackup/deployment.json"
+        ! dockerValidateConfigurationBackup "$dualBackup"
+        cp -- "$root/.dual-backup-deployment.json" "$dualBackup/deployment.json"
+        dockerCleanupStagedBundle
+        source="$PHASE6_MANIFEST"
+        control=$PHASE6_CONTROL_BUNDLE
+        rm -f -- "$FAKE_DOCKER_FAIL_MARK"
+        export FAKE_DOCKER_FAIL_UP=1
+        ! dockerUpdateCommand --manifest "$source"
+        assertCurrent "$dualBundle" "$failedCommit" failed-control "$(printf 3%.0s {1..64})"
+        test "$(jq -Sc . "$root/config/spec.json")" == "$(jq -Sc . "$dualNewSpec")"
+        test "$(jq -Sc ".listeners" "$root/deployment.json")" == "$dualListeners"
+        test "$(jq -Sc . "$root/config/xray/config.json")" == "$dualXray"
+        test "$(jq -Sc . "$root/config/sing-box/config.json")" == "$dualSingBox"
+        test "$(jq -Sc . "$root/data/traffic/state.json")" == "$trafficBefore"
+        dockerRemoveManagedTree "$root" "$DOCKER_CONFIG_BACKUP"
+        dockerCleanupStagedBundle
+        unset FAKE_DOCKER_FAIL_UP
+        for control in "$PHASE6_LEGACY_CONTROL_BUNDLE" "$PHASE6_COMPAT_CONTROL_BUNDLE"; do
+            logBefore=$(wc -l <"$FAKE_DOCKER_LOG")
+            ! dockerUpdateCommand --manifest "$source"
+            ! tail -n "+$((logBefore + 1))" "$FAKE_DOCKER_LOG" |
+                grep -Eq "^pull | (up|down|restart|exec) "
+            assertCurrent "$dualBundle" "$failedCommit" failed-control "$(printf 3%.0s {1..64})"
+            dockerCleanupStagedBundle
+        done
+        for target in "$oldBundle" "$compatBundle"; do
+            printf "%s\n" "$target" >"$dualBackup/bundle.target"
+            ! dockerValidateConfigurationBackup "$dualBackup"
+            DOCKER_CONFIG_BACKUP=$dualBackup
+            DOCKER_CONFIG_SWITCHED=1
+            logBefore=$(wc -l <"$FAKE_DOCKER_LOG")
+            ! dockerRestoreConfiguration
+            test "$(wc -l <"$FAKE_DOCKER_LOG")" == "$logBefore"
+            assertCurrent "$dualBundle" "$failedCommit" failed-control "$(printf 3%.0s {1..64})"
+        done
+        printf "%s\n" "$newBundle" >"$dualBackup/bundle.target"
+        DOCKER_CONFIG_SWITCHED=0
+        dockerValidateConfigurationBackup "$dualBackup"
+        dockerLatestUpdateBackup() { printf "%s\n" "$dualBackup"; }
+        dockerRollbackCommand
+        assertCurrent "$newBundle" "$newCommit" new-control "$(printf 2%.0s {1..64})"
+        test "$(jq -Sc . "$root/config/spec.json")" == "$(jq -Sc . "$dualOldSpec")"
+        test "$(jq -Sc ".listeners" "$root/deployment.json")" == "$dualListeners"
+        test "$(jq -Sc . "$root/config/xray/config.json")" == "$dualXray"
+        test "$(jq -Sc . "$root/config/sing-box/config.json")" == "$dualSingBox"
+        test "$(jq -Sc . "$root/data/traffic/state.json")" == "$trafficBefore"
+        dockerLatestUpdateBackup() { printf "%s\n" "$multiBackup"; }
+        dockerRollbackCommand
+        assertCurrent "$newBundle" "$newCommit" new-control "$(printf 1%.0s {1..64})"
+        test "$(jq -Sc . "$root/config/spec.json")" == "$(jq -Sc . "$multiOldSpec")"
+        test "$(jq -Sc ".listeners" "$root/deployment.json")" == "$listenersBefore"
+        test ! -s "$root/config/sing-box/config.json"
+        test "$(jq -Sc . "$root/data/traffic/state.json")" == "$trafficBefore"
+
+        # 恢复先验证目标规格与目标 bundle，不能误拿仍在运行的规格限制合法 v1 回滚。
         printf "%s\n" "$oldBundle" >"$multiBackup/bundle.target"
         ! dockerValidateConfigurationBackup "$multiBackup"
         DOCKER_CONFIG_BACKUP=$multiBackup
@@ -422,7 +541,7 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
         logBefore=$(wc -l <"$FAKE_DOCKER_LOG")
         ! dockerRestoreConfiguration
         test "$(wc -l <"$FAKE_DOCKER_LOG")" == "$logBefore"
-        assertCurrent "$newBundle" "$newCommit" new-control "$(printf 2%.0s {1..64})"
+        assertCurrent "$newBundle" "$newCommit" new-control "$(printf 1%.0s {1..64})"
         printf "%s\n" "$newBundle" >"$multiBackup/bundle.target"
         DOCKER_CONFIG_SWITCHED=0
         dockerValidateConfigurationBackup "$multiBackup"

@@ -161,8 +161,10 @@ server addresses, address families, node names, Reality targets/SNI, WS paths, o
 subscription enablement. It uses a private draft, a value-redacted diff, and candidate
 validation before confirmation and commit. Unselected listeners, UUIDs, keys, tokens,
 certificates, host integrations, and accumulated traffic remain unchanged.
-The menu can copy or delete an existing protocol listener by listener ID; at least one
-listener must remain. Copies reuse the original credentials. Listeners with the same
+The menu can copy or delete an existing protocol listener by listener ID; the primary
+core must retain at least one listener. Reality can be copied to the other core.
+Deleting the last secondary-core listener disables that core; existing listener ownership cannot change.
+Copies reuse the original credentials. Listeners with the same
 UUID share accumulated traffic and quota rather than creating separate users.
 Add and delete operations must be confirmed in separate transactions so a replacement
 cannot bypass existing identity or internal-port protections.
@@ -180,11 +182,16 @@ padm-docker edit --spec /root/original-spec.json --confirm PADM-DOCKER-EDIT
 Validation still verifies the release, pulls images, and runs candidate checks.
 `edit` verifies the current deployment version rather than latest by default; it also
 accepts the same-version release asset options below.
-First configuration writes `schema_version: 2`; `configure` and backup restoration
-continue to accept v1. Editing first verifies the original spec against the deployment,
-then migrates only the private draft to v2 without changing managed state before confirmation.
-V2 supports up to 16 listeners on one core: Reality/WS TLS with Xray, or Reality with
-sing-box. Mixing cores is not supported. Each listener keeps its `listener_id`;
+First configuration writes `schema_version: 3`; `configure` and backup restoration
+continue to accept v1/v2. Editing first verifies the original spec against the deployment,
+then migrates only the private draft to v3 without changing managed state before confirmation.
+V3 records each listener's `core` and `core.secondary_type` (`null` for a single core),
+with up to 16 listeners across both cores. V2 remains single-core.
+Xray supports Reality/WS TLS; sing-box supports Reality.
+The wizard offers either primary-core order, with a Reality listener on the secondary core.
+Initial WS TLS on a secondary Xray core requires a complete v3 spec; existing Xray WS listeners can still be copied.
+Dual-core deployments currently require ordinary bridge networking and no host integrations.
+Each listener keeps its `listener_id`;
 migration preserves `vless-reality` / `vless-ws`, while new listeners use `entry-*`.
 Each WS listener gets independent `websocket.backend_port` and `websocket.tls_port`
 values without renumbering existing internal ports. Listener identities, public ports,
@@ -193,10 +200,10 @@ For an existing managed deployment, `edit --spec` supports these listener change
 through the same preview, validation, and confirmation flow.
 Deleting the last WS listener disables subscription publishing and sets the spec's
 `tls` to `null`, while retaining TLS/ACME files and the token.
-New protocol types, multiple cores, certificate rotation, and full protocol management
+New protocol types, certificate rotation, and full protocol management
 remain unavailable. WS listeners managed by Fail2ban cannot yet be added, deleted,
 or assigned a different public port; those changes require coordinated firewall rules.
-3A.2 has passed local transaction, PTY, and Linux permission regressions. Real signed releases,
+3A.3 has passed local dual-core transaction, PTY, traffic, update/rollback, and Linux permission regressions. Real signed releases,
 application images, and dual-architecture client connectivity remain unverified.
 
 For offline use, provide all three assets from the same Release:
@@ -213,8 +220,8 @@ a signature proof; `configure` re-verifies the original assets. Replace example 
 actual parameters, and match every release field and image to the verified manifest.
 Updates and rollbacks preserve the complete spec; corrupt or mismatched specs are rejected
 before stopping the current services.
-V2 editing also requires both the installed control scripts and trusted release assets
-for the deployed version to support v2. Refresh to published v2-capable control scripts
+V3 editing also requires both the installed control scripts and trusted release assets
+for the deployed version to support v3. Refresh to published v3-capable control scripts
 first when they do not. The spec's `schema_version` and runtime `formats.config`
 are versioned separately; the latter remains `1`.
 
@@ -292,6 +299,10 @@ padm-docker traffic reset <account-id>
 
 The complete user configuration is kept in `config/<core>/users.base`; users over quota are removed only from the runtime configuration. Totals, limits, and sampling baselines are stored in `/etc/padm-docker/data/traffic/state.json` and survive core restarts, configuration regeneration, and version rollback. Collection failures preserve existing totals. Quotas are checked every minute, so usage may exceed the limit by one sampling interval plus scheduling delays. Traffic not yet sampled before an unexpected exit cannot be recovered.
 
+Dual-core collection samples and rechecks both cores before writing totals once.
+The same UUID shares one quota across cores. Both candidates are validated before quota application;
+a restart failure or interruption attempts to restore all core configurations without reverting totals.
+
 sing-box collection requires host `nsenter` and an HTTP/2-capable `curl`, which access `127.0.0.1:10087` inside the container network namespace. Xray uses its in-container stats command at `127.0.0.1:10085`. Stats ports are not published publicly, and containers do not mount the Docker Socket. `down` and `uninstall` remove the collection schedule; `up` and `restart` restore it.
 
 ### Updates
@@ -317,8 +328,9 @@ padm-docker rollback
 ```
 
 Rollback uses only the most recent managed `update.*` snapshot and moves back one version, also restoring its recorded control scripts. Legacy snapshots without a control bundle pointer restore only deployment configuration and images, without guessing an old script version. It fails rather than guessing at an arbitrary historical version when no valid snapshot exists. Once user statistics are enabled, a sing-box rollback target must include `with_v2ray_api`; incompatible targets are rejected before stopping the current deployment to preserve quota enforcement. If rollback itself fails, the command attempts to restore the current version and keeps the backup path for diagnosis.
-The control bundle must declare support for the snapshot's spec version. A snapshot
-containing a v2 spec cannot be rolled back to a bundle that supports only v1.
+The control bundle must declare support for the snapshot's spec version. A v2 snapshot
+cannot use a v1-only bundle, and a v3 snapshot cannot use a v1/v2-only bundle.
+Valid older single-core snapshots remain restorable; unused core services are removed and accumulated traffic is retained.
 
 ### Uninstall
 

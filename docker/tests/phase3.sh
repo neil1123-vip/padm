@@ -78,12 +78,16 @@ compose)
         printf 'v2.29.1\n'
         exit 0
     fi
-    if [[ " ${*} " == *' up -d '* && "${mode}" == "fail-next-up" &&
-        ! -e "${FAKE_DOCKER_FAIL_ONCE:?}" ]]; then
+    if [[ " ${*} " == *' up -d '* && ! -e "${FAKE_DOCKER_FAIL_ONCE:?}" &&
+        ( "${mode}" == "fail-next-up" ||
+            ( "${mode}" == "fail-next-sing-box-up" && " ${*} " == *' --profile core-sing-box '* ) ) ]]; then
         : >"${FAKE_DOCKER_FAIL_ONCE}"
         exit 1
     fi
     if [[ " ${*} " == *' run --rm --no-deps xray '* && "${mode}" == "core-validate-fail" ]]; then
+        exit 1
+    fi
+    if [[ " ${*} " == *' run --rm --no-deps sing-box '* && "${mode}" == "sing-box-validate-fail" ]]; then
         exit 1
     fi
     ;;
@@ -459,7 +463,7 @@ jq '
     if .id == 21 then .websocket += {backend_port: 31297, tls_port: 8443} else . end) |
   .core.protocols[1].public_port = 25443
 ' "${MIXED_WS_SPEC}" >"${EDIT_SPEC}"
-# 旧控制包只能接收 v1，新控制包明确声明兼容 v1 与 v2。
+# 旧控制包只能接收 v1，新控制包声明兼容三个受管规格版本。
 OLD_SCHEMA_BUNDLE="${TEST_ROOT}/old-schema-bundle"
 NEW_SCHEMA_BUNDLE="${TEST_ROOT}/new-schema-bundle"
 mkdir -p "${OLD_SCHEMA_BUNDLE}/docker/contracts" "${NEW_SCHEMA_BUNDLE}/docker/contracts"
@@ -467,19 +471,22 @@ jq -n '{properties:{schema_version:{const:1}}}' \
     >"${OLD_SCHEMA_BUNDLE}/docker/contracts/configure.schema.json"
 cp -- "${PROJECT_ROOT}/docker/contracts/configure.schema.json" \
     "${NEW_SCHEMA_BUNDLE}/docker/contracts/configure.schema.json"
+jq '.schema_version = 3 | .core.secondary_type = null |
+    .core.protocols |= map(.core = "xray")' "${EDIT_SPEC}" >"${TEST_ROOT}/edit-v3.json"
 bash -euo pipefail -c '
     source "$1/docker/lib/bootstrap.sh"
     source "$1/docker/lib/bundle.sh"
     dockerBundleSupportsSpec "$2" "$4"
     dockerBundleSupportsSpec "$3" "$4"
     dockerBundleSupportsSpec "$3" "$5"
+    dockerBundleSupportsSpec "$3" "$6"
     if dockerBundleSupportsSpec "$2" "$5"; then
         exit 1
     fi
     ! dockerBundleSupportsSpec "$3" <(jq "del(.schema_version)" "$5")
     ! dockerBundleSupportsSpec "$3" <(jq ".,." "$5")
 ' _ "${PROJECT_ROOT}" "${OLD_SCHEMA_BUNDLE}" "${NEW_SCHEMA_BUNDLE}" \
-    "${MIXED_WS_SPEC}" "${EDIT_SPEC}" ||
+    "${MIXED_WS_SPEC}" "${EDIT_SPEC}" "${TEST_ROOT}/edit-v3.json" ||
     fail 'control bundle format gate lost legacy compatibility or accepted v2 in a const-v1 bundle'
 mkdir -p "${DOCKER_ROOT}/data/traffic"
 printf '%s\n' '{"schema_version":1,"accounts":{"11111111-1111-4111-8111-111111111111":{"name":"main-xray","upload":7,"download":11,"limit_bytes":0,"baseline":{}}}}' \
@@ -628,7 +635,9 @@ FAKE_DOCKER_MODE=core-validate-fail runControl 15 edit-reject-invalid-candidate 
 assertEditCleanup
 
 runControl 0 edit-confirm-port edit --spec "${EDIT_SPEC}" --confirm PADM-DOCKER-EDIT
-jq -e --slurpfile original "${EDIT_SPEC}" '. == $original[0]' \
+jq -e --slurpfile original "${EDIT_SPEC}" '
+  . == ($original[0] | .schema_version = 3 | .core.secondary_type = null |
+    .core.protocols |= map(.core = "xray"))' \
     "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail 'edit changed unselected complete spec fields'
 jq -e 'any(.inbounds[]; .port == 25443 and .streamSettings.security == "reality")' \
     "${DOCKER_ROOT}/config/xray/config.json" >/dev/null || fail 'edit did not commit the Reality port'
@@ -660,11 +669,13 @@ FAKE_DOCKER_MODE=fail-next-up runControl 14 edit-failed-start-rolls-back \
 [[ "$(editLiveHash)" == "${EDIT_LIVE_HASH}" ]] || fail 'failed edit did not restore spec, core, TLS, Nginx and subscription'
 assertEditCleanup
 
+EDIT_IMPORT_SPEC="${TEST_ROOT}/edit-import-v3.json"
+cp -- "${DOCKER_ROOT}/config/spec.json" "${EDIT_IMPORT_SPEC}"
 rm -- "${DOCKER_ROOT}/config/spec.json"
 EDIT_LIVE_HASH=$(editLiveHash)
 runControl 15 edit-legacy-needs-original-spec edit --preview
 runControl 15 edit-legacy-reject-invented-spec edit --spec "${MIXED_WS_SPEC}" --preview
-runControl 0 edit-legacy-preview edit --spec "${EDIT_SPEC}" --preview
+runControl 0 edit-legacy-preview edit --spec "${EDIT_IMPORT_SPEC}" --preview
 [[ ! -e "${DOCKER_ROOT}/config/spec.json" && "$(editLiveHash)" == "${EDIT_LIVE_HASH}" ]] ||
     fail 'legacy preview committed its imported spec'
 cp -- "${DOCKER_ROOT}/config/xray/users.base" "${TEST_ROOT}/edit-users.base"
@@ -673,18 +684,20 @@ for mutation in \
     '.routing.rules += [{type:"field",domain:["custom.example.com"],outboundTag:"direct"}]'; do
     jq "${mutation}" "${TEST_ROOT}/edit-users.base" >"${DOCKER_ROOT}/config/xray/users.base"
     EDIT_LIVE_HASH=$(editLiveHash)
-    runControl 15 edit-reject-unmanaged-core-input edit --spec "${EDIT_SPEC}" --preview
+    runControl 15 edit-reject-unmanaged-core-input edit --spec "${EDIT_IMPORT_SPEC}" --preview
     [[ "$(editLiveHash)" == "${EDIT_LIVE_HASH}" ]] || fail 'rejected edit discarded custom accounts or routing'
 done
 cp -- "${TEST_ROOT}/edit-users.base" "${DOCKER_ROOT}/config/xray/users.base"
-runControl 0 edit-legacy-confirm-import edit --spec "${EDIT_SPEC}" --confirm PADM-DOCKER-EDIT
-jq -e --slurpfile original "${EDIT_SPEC}" '. == $original[0]' \
+runControl 0 edit-legacy-confirm-import edit --spec "${EDIT_IMPORT_SPEC}" --confirm PADM-DOCKER-EDIT
+jq -e --slurpfile original "${EDIT_SPEC}" '
+  . == ($original[0] | .schema_version = 3 | .core.secondary_type = null |
+    .core.protocols |= map(.core = "xray"))' \
     "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail 'legacy import did not retain the complete original spec'
 assertEditCleanup
 
 # 真实终端分别提交复制与删除；多实例下数字协议 ID 不能误选其他入口。
 if [[ "$(/usr/bin/uname -s)" == Linux ]]; then
-    runEditPty $'9\n21\n28444\n8\ny\n'
+    runEditPty $'9\n21\n\n28444\n8\ny\n'
     jq -e '(.core.protocols | length) == 3 and
       any(.core.protocols[]; .listener_id == "entry-1" and .id == 21 and .public_port == 28444 and
         .websocket.backend_port == 31298 and .websocket.tls_port == 8444)' \
@@ -699,7 +712,9 @@ if [[ "$(/usr/bin/uname -s)" == Linux ]]; then
         fail 'ambiguous numeric protocol selection changed a multi-entry deployment'
     assertEditCleanup
     runEditPty $'10\nentry-1\n8\ny\n'
-    jq -e --slurpfile original "${EDIT_SPEC}" '. == $original[0]' \
+    jq -e --slurpfile original "${EDIT_SPEC}" '
+      . == ($original[0] | .schema_version = 3 | .core.secondary_type = null |
+        .core.protocols |= map(.core = "xray"))' \
         "${DOCKER_ROOT}/config/spec.json" >/dev/null ||
         fail 'interactive entry deletion did not retain the original complete spec'
     jq -e '[.listeners[].listener_id] | sort == ["vless-reality", "vless-ws"]' \
@@ -814,7 +829,7 @@ REMOVE_WS_LOG_START=$(wc -l <"${DOCKER_LOG}")
 runControl 0 edit-remove-last-websocket edit --spec "${TEST_ROOT}/reality-only-v2.json" --confirm PADM-DOCKER-EDIT
 tail -n "+$((REMOVE_WS_LOG_START + 1))" "${DOCKER_LOG}" | grep -q -- ' up -d .*--remove-orphans' ||
     fail 'removing the last WebSocket did not clean up orphaned project services'
-jq -e '.schema_version == 2 and .tls == null and .subscription.enabled == false and
+jq -e '.schema_version == 3 and .core.secondary_type == null and .tls == null and .subscription.enabled == false and
   .subscription.token == "0123456789abcdef" and .core.protocols[0].listener_id == "vless-reality"' \
     "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail 'removing the last WebSocket lost retained spec inputs'
 [[ "$(find "${DOCKER_ROOT}/secrets/tls" -type f -print0 | sort -z |
@@ -839,6 +854,145 @@ jq -e '(.listeners | length) == 16 and ([.listeners[].listener_id] | unique | le
     "${DOCKER_ROOT}/deployment.json" >/dev/null || fail 'maximum entry count lost stable listener identities'
 runControl 0 configure-multi-xray configure --spec "${MULTI_SPEC}"
 runControl 0 edit-multi-baseline-preview edit --preview
+assertEditCleanup
+
+if [[ "$(/usr/bin/uname -s)" == Linux ]]; then
+    runEditPty $'9\nvless-reality\n2\n27443\n8\ny\n'
+    jq -e '.core.secondary_type == "sing-box" and
+      any(.core.protocols[]; .listener_id == "entry-1" and .core == "sing-box" and .public_port == 27443)' \
+        "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail 'interactive clone did not enable the secondary core'
+    runEditPty $'10\nentry-1\n8\ny\n'
+    jq -e '.core.secondary_type == null' "${DOCKER_ROOT}/config/spec.json" >/dev/null ||
+        fail 'interactive deletion did not disable the last secondary listener'
+    jq -e '.services | has("sing-box") | not' "${DOCKER_ROOT}/compose.json" >/dev/null ||
+        fail 'interactive deletion left the secondary service'
+    SINGLE_CORE_LIVE_HASH=$(editLiveHash)
+    runEditPty $'9\nvless-ws\n2\n' 15
+    [[ "$(editLiveHash)" == "${SINGLE_CORE_LIVE_HASH}" ]] || fail 'unsupported WS core changed live state'
+    runEditPty $'10\nvless-reality\n10\nentry-extra-reality\n10\nvless-ws\n10\nentry-extra-ws\n' 15
+    [[ "$(editLiveHash)" == "${SINGLE_CORE_LIVE_HASH}" ]] || fail 'deleting the last primary listener changed live state'
+    assertEditCleanup
+    runControl 0 configure-multi-xray configure --spec "${MULTI_SPEC}"
+fi
+
+# 主副核心共享部署事务和订阅；内部端口只在各自容器命名空间冲突。
+DUAL_SPEC="${TEST_ROOT}/dual-v3.json"
+jq '
+  .schema_version = 3 | .core.secondary_type = "sing-box" |
+  .core.protocols |= map(.core = "xray") |
+  .core.protocols += [
+    (.core.protocols[] | select(.listener_id == "vless-reality") |
+      .core = "sing-box" | .listener_id = "entry-sing-box" |
+      .name = "sing-box-reality" | .public_port = 31297)
+  ]
+' "${MULTI_SPEC}" >"${DUAL_SPEC}"
+: >"${DOCKER_LOG}"
+runControl 0 configure-dual-core configure --spec "${DUAL_SPEC}"
+jq -e '.schema_version == 1 and .formats.config == 1 and
+  .core.type == "xray" and .core.secondary_type == "sing-box" and .core.protocol_ids == [1,21] and
+  (.compose.profiles | sort) == ["core-sing-box","core-xray","nginx","subscription"] and
+  any(.listeners[]; .listener_id == "entry-sing-box" and .service == "sing-box" and
+    .public_port == 31297 and .container_port == 31297)' \
+    "${DOCKER_ROOT}/deployment.json" >/dev/null || fail 'dual-core deployment contract is wrong'
+jq -e '([.inbounds[] | select(.protocol == "vless")] | length) == 4 and
+  all(.inbounds[] | select(.protocol == "vless"); .tag != "entry-sing-box")' \
+    "${DOCKER_ROOT}/config/xray/config.json" >/dev/null || fail 'Xray config contains a sing-box entry'
+jq -e '[.inbounds[] | select(.type == "vless") | {tag,listen_port}] ==
+  [{tag:"entry-sing-box",listen_port:31297}]' \
+    "${DOCKER_ROOT}/config/sing-box/config.json" >/dev/null || fail 'sing-box config lost its owned entry'
+jq -e '(.services | keys | sort) == ["acme","nginx","sing-box","subscription","xray"] and
+  .services["sing-box"].ports ==
+    ["0.0.0.0:31297:31297/tcp","[::]:31297:31297/tcp"] and
+  (.services.nginx.ports | length) > 0' \
+    "${DOCKER_ROOT}/compose.json" >/dev/null || fail 'dual-core Compose services or mappings are wrong'
+grep -q ' run --rm --no-deps xray -test ' "${DOCKER_LOG}" ||
+    fail 'dual-core Xray candidate was not validated'
+grep -q ' run --rm --no-deps sing-box check ' "${DOCKER_LOG}" ||
+    fail 'dual-core sing-box candidate was not validated'
+[[ "$(wc -l <"${DOCKER_ROOT}/data/subscription/0123456789abcdef")" -eq 5 ]] ||
+    fail 'dual-core subscription did not publish all entries'
+grep -q '@proxy.example.com:31297.*security=reality' \
+    "${DOCKER_ROOT}/data/subscription/0123456789abcdef" ||
+    fail 'dual-core subscription lost the secondary-core Reality entry'
+DUAL_SUBSCRIPTION_HASH=$(sha256sum "${DOCKER_ROOT}/data/subscription/0123456789abcdef" | cut -d ' ' -f 1)
+jq '.core.type = "sing-box" | .core.secondary_type = "xray"' \
+    "${DUAL_SPEC}" >"${TEST_ROOT}/dual-sing-box-primary.json"
+runControl 0 configure-sing-box-primary-websocket-secondary configure \
+    --spec "${TEST_ROOT}/dual-sing-box-primary.json"
+jq -e '.core.type == "sing-box" and .core.secondary_type == "xray" and
+  (.compose.profiles | sort) == ["core-sing-box","core-xray","nginx","subscription"]' \
+    "${DOCKER_ROOT}/deployment.json" >/dev/null || fail 'swapping primary and secondary lost dual-core profiles'
+jq -e '.services.nginx.depends_on.xray.condition == "service_healthy" and
+  (.services.xray.ports | length) == 4' "${DOCKER_ROOT}/compose.json" >/dev/null ||
+    fail 'WebSocket proxy did not retain its secondary Xray dependency'
+[[ "$(sha256sum "${DOCKER_ROOT}/data/subscription/0123456789abcdef" | cut -d ' ' -f 1)" == \
+    "${DUAL_SUBSCRIPTION_HASH}" ]] || fail 'swapping primary and secondary changed subscription nodes'
+runControl 0 configure-restore-xray-primary configure --spec "${DUAL_SPEC}"
+runControl 0 edit-dual-core-preview edit --preview
+assertEditCleanup
+cp -- "${DOCKER_ROOT}/deployment.json" "${TEST_ROOT}/dual-deployment.json"
+for mutation in \
+    '.compose.profiles |= map(select(. != "nginx"))' \
+    '.compose.profiles |= map(select(. != "subscription"))' \
+    '.compose.profiles += ["net-wireguard"]'; do
+    jq "${mutation}" "${TEST_ROOT}/dual-deployment.json" >"${DOCKER_ROOT}/deployment.json"
+    runControl 15 edit-reject-mismatched-profiles edit --preview
+    assertEditCleanup
+done
+cp -- "${TEST_ROOT}/dual-deployment.json" "${DOCKER_ROOT}/deployment.json"
+DUAL_LIVE_HASH=$(editLiveHash)
+for mutation in \
+    'del(.core.protocols[0].core)' \
+    '.core.secondary_type = null' \
+    '.core.secondary_type = "xray"' \
+    '.core.protocols |= map(select(.core == "xray"))' \
+    '.core.protocols |= map(select(.core == "sing-box")) | .tls = null | .subscription.enabled = false' \
+    '(.core.protocols[] | select(.id == 21) | .core) = "sing-box"' \
+    '.core.protocols[-1].public_port = .core.protocols[1].public_port' \
+    '.core.protocols[-1].public_port = 10087' \
+    '.host_integrations = [{type:"wireguard",profile:"net-wireguard",
+      firewall_rules:[],devices:["wg-padm"],schedules:[],
+      settings:{config_file:"wg-padm.conf",interface:"wg-padm"}}]'; do
+    jq "${mutation}" "${DUAL_SPEC}" >"${TEST_ROOT}/dual-invalid.json"
+    runControl 15 reject-dual-core-conflict configure --spec "${TEST_ROOT}/dual-invalid.json"
+    [[ "$(editLiveHash)" == "${DUAL_LIVE_HASH}" ]] || fail 'invalid dual-core request changed live state'
+    assertEditCleanup
+done
+jq '(.core.protocols[] | select(.listener_id == "vless-reality") | .core) = "sing-box"' \
+    "${DUAL_SPEC}" >"${TEST_ROOT}/dual-invalid.json"
+runControl 15 edit-reject-existing-entry-core-change edit --spec "${TEST_ROOT}/dual-invalid.json" --preview
+[[ "$(editLiveHash)" == "${DUAL_LIVE_HASH}" ]] || fail 'entry ownership rewrite changed live configuration'
+for mode in core-validate-fail sing-box-validate-fail; do
+    FAKE_DOCKER_MODE="${mode}" runControl 15 reject-invalid-dual-core-candidate \
+        configure --spec "${DUAL_SPEC}"
+    [[ "$(editLiveHash)" == "${DUAL_LIVE_HASH}" ]] || fail 'one invalid core changed the other live core'
+done
+jq '.core.protocols[-1].public_port = 32443' "${DUAL_SPEC}" >"${TEST_ROOT}/dual-changed.json"
+for mode in fail-next-up fail-next-sing-box-up; do
+    rm -f -- "${TEST_ROOT}/fail-once"
+    : >"${DOCKER_LOG}"
+    FAKE_DOCKER_MODE="${mode}" runControl 14 dual-core-start-failure-restores-both \
+        configure --spec "${TEST_ROOT}/dual-changed.json"
+    [[ "$(editLiveHash)" == "${DUAL_LIVE_HASH}" ]] ||
+        fail 'dual-core startup failure did not restore both configs, TLS, subscription and traffic'
+    grep ' up -d ' "${DOCKER_LOG}" | grep ' --profile core-xray ' |
+        grep -q ' --profile core-sing-box ' ||
+        fail 'dual-core recovery did not restart both core profiles'
+    assertEditCleanup
+done
+REMOVE_SECONDARY_LOG_START=$(wc -l <"${DOCKER_LOG}")
+jq '.core.secondary_type = null | .core.protocols |= map(select(.core == "xray"))' \
+    "${DUAL_SPEC}" >"${TEST_ROOT}/dual-primary-only.json"
+runControl 0 edit-disable-secondary-core edit --spec "${TEST_ROOT}/dual-primary-only.json" --confirm PADM-DOCKER-EDIT
+tail -n "+$((REMOVE_SECONDARY_LOG_START + 1))" "${DOCKER_LOG}" | grep -q -- ' up -d .*--remove-orphans' ||
+    fail 'disabling the secondary core did not remove orphaned services'
+[[ ! -s "${DOCKER_ROOT}/config/sing-box/config.json" ]] ||
+    fail 'secondary-core configuration survived disabling it'
+jq -e '.core.secondary_type == null and (.compose.profiles | index("core-sing-box")) == null and
+  all(.listeners[]; .service != "sing-box")' "${DOCKER_ROOT}/deployment.json" >/dev/null ||
+    fail 'disabled secondary core survived deployment state'
+[[ "$(wc -l <"${DOCKER_ROOT}/data/subscription/0123456789abcdef")" -eq 4 ]] ||
+    fail 'secondary-core removal retained a stale subscription node'
 assertEditCleanup
 
 DEPLOYMENT_HASH=$(sha256sum "${DOCKER_ROOT}/deployment.json" | cut -d ' ' -f 1)

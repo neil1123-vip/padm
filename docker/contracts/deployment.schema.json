@@ -70,6 +70,9 @@
         "type": {
           "enum": ["xray", "sing-box"]
         },
+        "secondary_type": {
+          "enum": ["xray", "sing-box", null]
+        },
         "protocol_ids": {
           "type": "array",
           "minItems": 1,
@@ -214,6 +217,38 @@
       }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "core": {
+            "required": ["secondary_type"],
+            "properties": {"secondary_type": {"type": "string"}}
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "host_integrations": {"const": []},
+          "compose": {
+            "properties": {
+              "profiles": {
+                "allOf": [
+                  {"contains": {"const": "core-xray"}},
+                  {"contains": {"const": "core-sing-box"}}
+                ]
+              }
+            }
+          },
+          "core": {
+            "if": {"properties": {"type": {"const": "xray"}}},
+            "then": {"properties": {"secondary_type": {"const": "sing-box"}}},
+            "else": {"properties": {"secondary_type": {"const": "xray"}}}
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
     "non_empty_string": {
       "type": "string",

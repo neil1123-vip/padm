@@ -155,7 +155,8 @@ WS TLS 可选择已有受管证书、导入完整证书链与私钥，或使用 
 服务器地址、地址族、节点名称、Reality 目标/SNI、WS 路径和订阅开关。
 编辑先生成私有草稿，显示不含秘密值的差异，候选验证通过并确认后才提交；
 未选中的入口、UUID、密钥、token、证书、宿主集成和累计流量保持不变。
-菜单可按入口 ID 复制或删除现有协议入口，至少保留一个入口。
+菜单可按入口 ID 复制或删除现有协议入口，主核心至少保留一个入口。
+Reality 可复制到另一核心；删除副核心的最后入口会关闭副核心，不能改写已有入口的核心归属。
 新增与删除须分次确认提交，不能在同一事务中用替换绕过已有身份及内部端口保护。
 复制复用原入口凭据；同一 UUID 的多个入口共享累计流量与额度，不会创建独立用户。
 旧部署没有 `config/spec.json` 时，必须导入保留的完整原始 spec，匹配运行配置后才能接入；
@@ -169,17 +170,21 @@ padm-docker edit --spec /root/original-spec.json --confirm PADM-DOCKER-EDIT
 
 `--preview` 不提交、不采集流量、不启停业务服务；验证仍会验签发布、拉取镜像并运行候选检查。
 `edit` 默认验证当前部署版本而非 latest，也可传入下述同版本发布资产参数。
-首次配置输出 `schema_version: 2`；`configure` 和备份恢复继续接受 v1。
-编辑先严格核对原规格与部署，再将草稿迁到 v2，确认前不改写受管规格。
-v2 为单核心、最多 16 个入口：Xray 可用 Reality/WS TLS，sing-box 仅 Reality，不允许跨核心混装。
+首次配置输出 `schema_version: 3`；`configure` 和备份恢复继续接受 v1/v2。
+编辑先严格核对原规格与部署，再将草稿迁到 v3，确认前不改写受管规格。
+v3 明确每个入口的 `core` 归属及 `core.secondary_type`（不用副核心时为 `null`），
+两核心合计最多 16 个入口；v2 仍为单核心。Xray 可用 Reality/WS TLS，sing-box 仅 Reality。
+首次向导支持 Xray+sing-box 或 sing-box+Xray，副核心首配为 Reality；
+主 sing-box、副 Xray 的 WS TLS 首次需使用完整 v3 spec；已有 Xray WS 入口可继续复制。
+双核心目前只支持普通 bridge 部署，不能与宿主集成组合。
 每个入口的 `listener_id` 固定；旧入口迁移保留 `vless-reality` / `vless-ws`，
 新入口使用 `entry-*`。WS 的 `websocket.backend_port` 与 `websocket.tls_port`
 按入口独立分配，不重排已有内部端口；身份、公开端口及同一容器网络空间的内部监听不得冲突。
 已有部署的 `edit --spec` 也支持这些入口变更，仍经过相同的预览、校验与确认。
 删除最后一个 WS 入口会关闭订阅并将规格的 `tls` 设为 `null`，但保留 TLS/ACME 文件与 token。
-新协议类型、双核心共存、证书轮换和完整协议管理尚未开放。
+新协议类型、证书轮换和完整协议管理尚未开放。
 带 Fail2ban 的 WS 入口暂不允许增删或修改公开端口，需后续联动封禁规则的管理事务。
-3A.2 已通过本地事务、PTY 和 Linux 权限回归；真实签名发布、业务镜像及双架构客户端连通仍待验。
+3A.3 已通过本地双核心事务、PTY、流量、更新/回滚和 Linux 权限回归；真实签名发布、业务镜像及双架构客户端连通仍待验。
 
 离线使用同一 Release 的三个资产：
 
@@ -193,7 +198,7 @@ padm-docker setup --manifest /root/release-manifest.json \
 `release` 可输出已验证的 `release`、`images` 输入，但它不是签名证明，`configure`
 会重新验证原资产。示例字段须替换为实际参数，并让发布字段和全部镜像与验签清单完全一致。
 更新/回滚会同步保存完整规格；损坏或不匹配的规格在停止当前服务前被拒绝。
-v2 编辑还要求当前控制脚本及同部署版本的可信发布资产支持 v2；不支持时先刷新到支持 v2 的已发布控制脚本。
+v3 编辑还要求当前控制脚本及同部署版本的可信发布资产支持 v3；不支持时先刷新到支持 v3 的已发布控制脚本。
 规格的 `schema_version` 与运行格式 `formats.config` 分开版本化，后者当前仍为 `1`。
 
 需要固定控制脚本版本时，把 `install` 改为 `install --ref <40 位 commit SHA>`；不要把 `latest` 当作生产版本锁。CI Release 同时提供 `release-manifest.json`、Cosign 签发的 Sigstore bundle v0.3（`release-manifest.sigstore.json`，签名内嵌）和 `padm-docker-bundle.tar.gz`，更新时会校验 bundle 签名和摘要。
@@ -270,6 +275,8 @@ padm-docker traffic reset <账号ID>
 
 完整用户配置保存在 `config/<核心>/users.base`，超额用户仅从运行配置中停用。累计量、额度与采样基线保存在 `/etc/padm-docker/data/traffic/state.json`，不随核心重启、配置重建或版本回滚清零。采集失败会保留已有累计量；额度检查按分钟执行，可能有一个采样周期及任务延迟的超额，意外退出前尚未采集的流量无法补算。
 
+双核心逐核采样、统一复验后一次提交累计；跨核心同 UUID 共享额度。两核候选均验证后才应用额度，任一重启失败或中断都会尝试恢复两核配置，累计量不回退。
+
 sing-box 采集要求宿主提供 `nsenter` 和支持 HTTP/2 的 `curl`，通过容器网络命名空间访问 `127.0.0.1:10087`；Xray 使用容器内的统计命令访问 `127.0.0.1:10085`。统计端口不发布到公网，容器不挂载 Docker Socket。`down` 和 `uninstall` 会移除采集调度，`up` 和 `restart` 会恢复调度。
 
 ### 更新
@@ -295,7 +302,7 @@ padm-docker rollback
 ```
 
 回滚只使用受管的最近一次 `update.*` 快照，默认退回一个版本，并同时恢复快照记录的控制脚本；旧快照没有控制 bundle 指针时只恢复部署配置和镜像，不猜测旧脚本版本。没有有效快照时直接失败，不猜测或拼接任意历史版本。已启用用户统计时，回滚目标 sing-box 必须具备 `with_v2ray_api`，否则会在停止现有部署前拒绝，避免丢失额度约束。回滚失败会尝试恢复当前版本，并保留备份路径供排障。
-控制 bundle 必须声明支持快照规格版本；包含 v2 规格的快照不能回滚到仅支持 v1 的 bundle。
+控制 bundle 必须声明支持快照规格版本；v2 快照不能交给仅支持 v1 的 bundle，v3 快照不能交给仅支持 v1/v2 的 bundle。合法旧版单核心快照仍可恢复，移除多余核心服务但保留累计流量。
 
 ### 卸载
 

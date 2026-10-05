@@ -65,18 +65,23 @@ dockerTrafficCronRemove() {
 }
 
 dockerTrafficRuntimeCheck() {
-    local core=${1:-} root
-    if [[ -z "${core}" ]]; then
-        root=$(dockerInstallRoot) || return 1
-        core=$(jq -er '.core.type' "${root}/deployment.json") || return 1
+    local cores=${1:-} core
+    if [[ -z "${cores}" ]]; then
+        cores=$(dockerTrafficCore) || return 1
     fi
-    if [[ "${core}" == sing-box ]]; then
-        dockerRequireCommand nsenter && dockerRequireCommand curl || return 1
-        curl --version | grep -q 'HTTP2' || {
-            dockerError 'sing-box 自动流量采集需要支持 HTTP/2 的宿主 curl'
-            return 1
-        }
-    fi
+    while IFS= read -r core; do
+        case "${core}" in
+        xray) ;;
+        sing-box)
+            dockerRequireCommand nsenter && dockerRequireCommand curl || return 1
+            curl --version | grep -Eq '^Features:.*[[:space:]]HTTP2([[:space:]]|$)' || {
+                dockerError 'sing-box 自动流量采集需要支持 HTTP/2 的宿主 curl'
+                return 1
+            }
+            ;;
+        *) dockerError "流量采集核心无效: ${core}"; return 1 ;;
+        esac
+    done <<<"${cores}"
     dockerTrafficScheduleCheck
 }
 
@@ -153,13 +158,16 @@ dockerTrafficScheduleRemove() {
 }
 
 dockerTrafficBeforeChange() {
-    local root core
+    local root cores core
     root=$(dockerInstallRoot) || return 0
     [[ -f "${root}/deployment.json" ]] || return 0
-    core=$(jq -r '.core.type' "${root}/deployment.json") || return 0
-    if [[ -f "${root}/config/${core}/users.base" ]]; then
-        dockerTrafficSnapshot || dockerError '变更前采集失败，已保留历史流量；本次未采集的增量无法恢复'
-    fi
+    cores=$(dockerTrafficCore) || return 0
+    while IFS= read -r core; do
+        if [[ -f "${root}/config/${core}/users.base" ]]; then
+            dockerTrafficSnapshot || dockerError '变更前采集失败，已保留历史流量；本次未采集的增量无法恢复'
+            break
+        fi
+    done <<<"${cores}"
     return 0
 }
 
@@ -572,7 +580,8 @@ dockerLatestUpdateBackup() {
 
 dockerTrafficRollbackCheck() {
     local backup=$1 root version
-    [[ "$(jq -r '.core.type' "${backup}/deployment.json")" == sing-box ]] || return 0
+    jq -e '[.core.type, .core.secondary_type] | index("sing-box") != null' "${backup}/deployment.json" >/dev/null ||
+        return 0
     root=$(dockerInstallRoot) || return 1
     if [[ -f "${root}/data/traffic/state.json" || -f "${root}/config/sing-box/users.base" ||
         -f "${backup}/config/sing-box/users.base" ]]; then
@@ -598,7 +607,8 @@ dockerRollbackCommand() {
         return "${PADM_DOCKER_RC_STATE}"
     }
     dockerTrafficRollbackCheck "${backup}" || return "${PADM_DOCKER_RC_STATE}"
-    dockerTrafficRuntimeCheck "$(jq -r '.core.type' "${backup}/deployment.json")" || return "${PADM_DOCKER_RC_HOST}"
+    dockerTrafficRuntimeCheck "$(jq -r '.core.type, (.core.secondary_type // empty)' "${backup}/deployment.json")" ||
+        return "${PADM_DOCKER_RC_HOST}"
     dockerTrafficBeforeChange
     dockerBackupConfiguration rollback || return "${PADM_DOCKER_RC_STATE}"
     currentBackup=${DOCKER_CONFIG_BACKUP}

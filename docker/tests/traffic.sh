@@ -10,9 +10,13 @@ export MSYS=winsymlinks:sys
 source "${PROJECT_ROOT}/docker/lib/bootstrap.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/docker/lib/traffic.sh"
+# shellcheck source=/dev/null
+source "${PROJECT_ROOT}/docker/lib/lifecycle.sh"
 
 ACCOUNT=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
 CONTAINER_ID=$(printf 'a%.0s' {1..64})
+SECONDARY_CONTAINER_ID=$(printf 'b%.0s' {1..64})
+DUAL=0
 GENERATION=1
 MODE=ok
 HTTP2=1
@@ -27,11 +31,24 @@ reject() {
 dockerComposeRun() {
     printf '%s\n' "$*" >>"${COMPOSE_LOG}"
     case "$1" in
-    ps) printf '%s\n' "${CONTAINER_ID}" ;;
-    exec) [[ "${QUERY_MODE}" != api-fail ]] && printf '%s\n' "${STATS}" ;;
-    run) [[ "${MODE}" != check-fail ]] ;;
+    ps)
+        if [[ "${DUAL}" == 1 && "$3" == sing-box ]]; then printf '%s\n' "${SECONDARY_CONTAINER_ID}";
+        else printf '%s\n' "${CONTAINER_ID}"; fi
+        ;;
+    exec)
+        [[ "${QUERY_MODE}" != api-fail && "${QUERY_MODE}" != api-fail-xray ]] || return 1
+        [[ "${QUERY_MODE}" != changed-during-primary ]] || : >"${TEST_ROOT}/changed-during-primary"
+        printf '%s\n' "${XSTATS:-${STATS}}"
+        ;;
+    run) [[ "${MODE}" != check-fail && ( "${MODE}" != check-fail-singbox || "$4" != sing-box ) ]] ;;
     restart)
-        if [[ "${MODE}" == restart-fail && ! -e "${TEST_ROOT}/restart-failed" ]]; then
+        if [[ "${MODE}" == restart-interrupt-singbox && "$3" == sing-box &&
+            ! -e "${TEST_ROOT}/restart-failed" ]]; then
+            : >"${TEST_ROOT}/restart-failed"
+            kill -TERM "${BASHPID}"
+        fi
+        if [[ ( "${MODE}" == restart-fail || ( "${MODE}" == restart-fail-singbox && "$3" == sing-box ) ) &&
+            ! -e "${TEST_ROOT}/restart-failed" ]]; then
             : >"${TEST_ROOT}/restart-failed"
             return 1
         fi
@@ -43,13 +60,22 @@ dockerComposeRun() {
 
 docker() {
     [[ "$1" == inspect ]] || return 1
-    local count started pid=1234
-    count=$(<"${TEST_ROOT}/inspect-count")
-    printf '%s\n' "$((count + 1))" >"${TEST_ROOT}/inspect-count"
+    local count started pid=1234 core=${CORE} id=${CONTAINER_ID} countFile=${TEST_ROOT}/inspect-count
+    if [[ "${DUAL}" == 1 ]]; then
+        if [[ "$4" == "${SECONDARY_CONTAINER_ID}" ]]; then core=sing-box; id=${SECONDARY_CONTAINER_ID};
+        else core=xray; fi
+        countFile=${TEST_ROOT}/inspect-count-${core}
+    fi
+    count=$(<"${countFile}")
+    printf '%s\n' "$((count + 1))" >"${countFile}"
     started=${GENERATION}
-    if [[ "${QUERY_MODE}" == changed && "$((count % 2))" == 1 ]]; then started=changed; fi
-    if [[ "${QUERY_MODE}" == changed-pid && "$((count % 2))" == 1 ]]; then pid=5678; fi
-    jq -cn --arg id "${CONTAINER_ID}" --arg start "${started}" --arg core "${CORE}" --argjson pid "${pid}" '
+    if [[ ( "${core}" == xray && -e "${TEST_ROOT}/changed-during-secondary" ) ||
+        ( "${core}" == sing-box && -e "${TEST_ROOT}/changed-during-primary" ) ]]; then started=changed; fi
+    if [[ ( "${QUERY_MODE}" == changed || "${QUERY_MODE}" == "changed-${core}" ) &&
+        "$((count % 2))" == 1 ]]; then started=changed; fi
+    if [[ ( "${QUERY_MODE}" == changed-pid || "${QUERY_MODE}" == "changed-pid-${core}" ) &&
+        "$((count % 2))" == 1 ]]; then pid=5678; fi
+    jq -cn --arg id "${id}" --arg start "${started}" --arg core "${core}" --argjson pid "${pid}" '
       {Id:$id, State:{Running:true, Pid:$pid, StartedAt:$start},
        Config:{Labels:{"com.docker.compose.project":"padm-docker", "com.docker.compose.service":$core}}}'
 }
@@ -67,7 +93,7 @@ varint() {
 }
 
 grpcResponse() {
-    local payload=${TEST_ROOT}/payload.bin entry=${TEST_ROOT}/entry.bin name value length byte
+    local stats=${1:-${STATS}} payload=${TEST_ROOT}/payload.bin entry=${TEST_ROOT}/entry.bin name value length byte
     : >"${payload}"
     while IFS=$'\t' read -r name value; do
         printf '\012' >"${entry}"
@@ -77,7 +103,7 @@ grpcResponse() {
         printf '\012' >>"${payload}"
         varint "$(wc -c <"${entry}")" >>"${payload}"
         cat "${entry}" >>"${payload}"
-    done < <(jq -r '.stat[]? | [.name, (.value // 0)] | @tsv' <<<"${STATS}")
+    done < <(jq -r '.stat[]? | [.name, (.value // 0)] | @tsv' <<<"${stats}")
     length=$(wc -c <"${payload}")
     printf '\000'
     for shift in 24 16 8 0; do
@@ -94,7 +120,8 @@ curl() {
 
 nsenter() {
     local headers='' output='' request='' status=0
-    [[ "${QUERY_MODE}" != api-fail ]] || return 1
+    [[ "${QUERY_MODE}" != api-fail && "${QUERY_MODE}" != api-fail-singbox ]] || return 1
+    [[ "${QUERY_MODE}" != changed-during-secondary ]] || : >"${TEST_ROOT}/changed-during-secondary"
     [[ "$1 $2 $3 $4 $5" == '--target 1234 --net curl -fsS' ]] || fail 'nsenter 参数错误'
     shift 4
     while (($#)); do
@@ -109,7 +136,7 @@ nsenter() {
     [[ "${QUERY_MODE}" != grpc-fail ]] || status=13
     printf 'HTTP/2 200\r\ngrpc-status: %s\r\n\r\n' "${status}" >"${headers}"
     if [[ "${QUERY_MODE}" == malformed ]]; then printf '\000\000\000\000\001' >"${output}";
-    else grpcResponse >"${output}"; fi
+    else grpcResponse "${SSTATS:-${STATS}}" >"${output}"; fi
 }
 
 counters() {
@@ -133,6 +160,9 @@ assertEnabled() {
 assertSnapshotRejected() {
     cp "${STATE}" "${TEST_ROOT}/before-state"
     printf '0\n' >"${TEST_ROOT}/inspect-count"
+    printf '0\n' >"${TEST_ROOT}/inspect-count-xray"
+    printf '0\n' >"${TEST_ROOT}/inspect-count-sing-box"
+    rm -f -- "${TEST_ROOT}/changed-during-primary" "${TEST_ROOT}/changed-during-secondary"
     reject dockerTrafficSnapshot
     cmp -s "${STATE}" "${TEST_ROOT}/before-state" || fail '失败采样修改了累计状态'
 }
@@ -237,6 +267,115 @@ for CORE in xray sing-box; do
     dockerTrafficApplyQuotas
     assertEnabled 0
     cmp -s "${BASE}" "${TEST_ROOT}/original-${CORE}.json" || fail '额度流程修改了原始凭据'
+done
+
+# 两核心复用同 UUID，累计按核心基线求和，任一失败不能写入半份采样。
+DUAL=1
+PADM_DOCKER_INSTALL_DIR=${TEST_ROOT}/dual
+STATE=${PADM_DOCKER_INSTALL_DIR}/data/traffic/state.json
+for CORE in xray sing-box; do
+    mkdir -p "${PADM_DOCKER_INSTALL_DIR}/config/${CORE}"
+    cp "${TEST_ROOT}/original-${CORE}.json" "${PADM_DOCKER_INSTALL_DIR}/config/${CORE}/config.json"
+done
+jq -n '{schema_version:3,core:{type:"xray",secondary_type:"sing-box"}}' >"${PADM_DOCKER_INSTALL_DIR}/deployment.json"
+dockerTrafficPrepareCandidate "${PADM_DOCKER_INSTALL_DIR}"
+[[ "$(dockerTrafficCore)" == $'xray\nsing-box' ]] || fail '双核心列表错误'
+for CORE in xray sing-box; do
+    cp "${PADM_DOCKER_INSTALL_DIR}/config/${CORE}/config.json" "${TEST_ROOT}/dual-enabled-${CORE}.json"
+done
+GENERATION=1
+printf '0\n' >"${TEST_ROOT}/inspect-count-xray"
+printf '0\n' >"${TEST_ROOT}/inspect-count-sing-box"
+counters 100 200; XSTATS=${STATS}
+counters 10 20; SSTATS=${STATS}
+dockerTrafficCollect
+assertCounts 110 220
+dockerTrafficCollect
+assertCounts 110 220
+counters 130 220; XSTATS=${STATS}
+counters 20 30; SSTATS=${STATS}
+dockerTrafficCollect
+assertCounts 150 250
+jq -e --arg account "${ACCOUNT}" '.accounts | length == 1 and
+  (.[$account].baseline | keys == ["sing-box","xray"])' "${STATE}" >/dev/null || fail '双核心账号或基线没有共享'
+for QUERY_MODE in api-fail-xray api-fail-singbox changed-xray changed-sing-box changed-pid-xray changed-pid-sing-box \
+    changed-during-primary changed-during-secondary grpc-fail malformed; do
+    assertSnapshotRejected
+done
+rm -f -- "${TEST_ROOT}/changed-during-primary" "${TEST_ROOT}/changed-during-secondary"
+QUERY_MODE=ok
+HTTP2=0
+assertSnapshotRejected
+dockerTrafficScheduleCheck() { :; }
+reject dockerTrafficRuntimeCheck
+reject dockerTrafficRuntimeCheck $'xray\nsing-box'
+HTTP2=1
+dockerTrafficRuntimeCheck
+dockerTrafficRuntimeCheck $'sing-box\nxray'
+reject dockerTrafficRuntimeCheck $'xray\nunknown'
+ROLLBACK_STATS=0
+dockerCandidateCompose() {
+    [[ "$2 $3 $4 $5 $6" == 'run --rm --no-deps sing-box version' ]] || fail '回滚统计版本检查参数错误'
+    if [[ "${ROLLBACK_STATS}" == 1 ]]; then printf 'sing-box with_v2ray_api\n'; else printf 'sing-box without_stats\n'; fi
+}
+reject dockerTrafficRollbackCheck "${PADM_DOCKER_INSTALL_DIR}"
+ROLLBACK_STATS=1
+dockerTrafficRollbackCheck "${PADM_DOCKER_INSTALL_DIR}"
+cp "${PADM_DOCKER_INSTALL_DIR}/deployment.json" "${TEST_ROOT}/dual-deployment.json"
+for SECONDARY in '"xray"' false '{}' '""'; do
+    jq --argjson core "${SECONDARY}" '.core.secondary_type = $core' "${TEST_ROOT}/dual-deployment.json" \
+        >"${PADM_DOCKER_INSTALL_DIR}/deployment.json"
+    reject dockerTrafficCore
+done
+cp "${TEST_ROOT}/dual-deployment.json" "${PADM_DOCKER_INSTALL_DIR}/deployment.json"
+
+# 额度必须两份候选都通过验证才切换，任一启动失败恢复两份原配置。
+MODE=ok
+: >"${COMPOSE_LOG}"
+dockerTrafficSetLimit "${ACCOUNT}" 400
+for CORE in xray sing-box; do
+    CONFIG=${PADM_DOCKER_INSTALL_DIR}/config/${CORE}/config.json
+    assertEnabled 0
+    grep -q "^restart --no-deps ${CORE}$" "${COMPOSE_LOG}" || fail '双核心额度没有同步重启'
+done
+dockerTrafficReset "${ACCOUNT}"
+assertCounts 0 0
+for CORE in xray sing-box; do
+    CONFIG=${PADM_DOCKER_INSTALL_DIR}/config/${CORE}/config.json
+    assertEnabled 2
+    cmp -s "${CONFIG}" "${TEST_ROOT}/dual-enabled-${CORE}.json" || fail '双核心归零没有恢复原凭据'
+done
+counters 330 220; XSTATS=${STATS}
+dockerTrafficCollect
+assertCounts 200 0
+MODE=check-fail-singbox
+: >"${COMPOSE_LOG}"
+reject dockerTrafficSetLimit "${ACCOUNT}" 1
+if grep -q '^restart ' "${COMPOSE_LOG}"; then fail '副核心验证失败仍然重启了服务'; fi
+for CORE in xray sing-box; do
+    cmp -s "${PADM_DOCKER_INSTALL_DIR}/config/${CORE}/config.json" "${TEST_ROOT}/dual-enabled-${CORE}.json" ||
+        fail '副核心验证失败修改了运行配置'
+done
+for MODE in restart-fail-singbox restart-interrupt-singbox; do
+    rm -f -- "${TEST_ROOT}/restart-failed"
+    cp "${STATE}" "${TEST_ROOT}/dual-before-state"
+    : >"${COMPOSE_LOG}"
+    reject dockerTrafficApplyQuotas
+    cmp -s "${STATE}" "${TEST_ROOT}/dual-before-state" || fail '副核心重启失败或中断修改累计'
+    for CORE in xray sing-box; do
+        cmp -s "${PADM_DOCKER_INSTALL_DIR}/config/${CORE}/config.json" "${TEST_ROOT}/dual-enabled-${CORE}.json" ||
+            fail '副核心重启失败或中断未恢复两核心配置'
+        [[ "$(grep -c "^restart --no-deps ${CORE}$" "${COMPOSE_LOG}")" == 2 ]] ||
+            fail '副核心启动失败或中断后没有重启恢复的两核心'
+    done
+done
+MODE=ok
+dockerTrafficApplyQuotas
+for CORE in xray sing-box; do
+    CONFIG=${PADM_DOCKER_INSTALL_DIR}/config/${CORE}/config.json
+    BASE=${PADM_DOCKER_INSTALL_DIR}/config/${CORE}/users.base
+    assertEnabled 0
+    cmp -s "${BASE}" "${TEST_ROOT}/original-${CORE}.json" || fail '双核心额度修改了原始凭据'
 done
 
 # 大计数必须逐字保留，不能采用 awk 默认的六位有效数字。

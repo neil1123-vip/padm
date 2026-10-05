@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:padm:docker-configure:2",
+  "$id": "urn:padm:docker-configure:3",
   "title": "padm Docker configuration request",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"],
   "properties": {
     "schema_version": {
-      "enum": [1, 2]
+      "enum": [1, 2, 3]
     },
     "release": {
       "type": "object",
@@ -32,6 +32,9 @@
       "properties": {
         "type": {
           "enum": ["xray", "sing-box"]
+        },
+        "secondary_type": {
+          "enum": ["xray", "sing-box", null]
         },
         "protocols": {
           "type": "array",
@@ -179,7 +182,94 @@
     },
     {
       "if": {
+        "properties": {"schema_version": {"enum": [1, 2]}}
+      },
+      "then": {
         "properties": {
+          "core": {
+            "not": {"required": ["secondary_type"]},
+            "properties": {
+              "protocols": {
+                "items": {"not": {"required": ["core"]}}
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "core": {
+            "required": ["secondary_type"],
+            "properties": {
+              "protocols": {
+                "items": {
+                  "required": ["core"],
+                  "if": {"properties": {"id": {"const": 21}}},
+                  "then": {"properties": {"core": {"const": "xray"}}}
+                }
+              }
+            },
+            "allOf": [
+              {
+                "if": {"properties": {"type": {"const": "xray"}}},
+                "then": {
+                  "properties": {
+                    "secondary_type": {"enum": ["sing-box", null]},
+                    "protocols": {
+                      "contains": {"properties": {"core": {"const": "xray"}}}
+                    }
+                  }
+                },
+                "else": {
+                  "properties": {
+                    "secondary_type": {"enum": ["xray", null]},
+                    "protocols": {
+                      "contains": {"properties": {"core": {"const": "sing-box"}}}
+                    }
+                  }
+                }
+              },
+              {
+                "if": {"properties": {"secondary_type": {"const": null}}},
+                "then": {
+                  "if": {"properties": {"type": {"const": "xray"}}},
+                  "then": {
+                    "properties": {
+                      "protocols": {"items": {"properties": {"core": {"const": "xray"}}}}
+                    }
+                  },
+                  "else": {
+                    "properties": {
+                      "protocols": {"items": {"properties": {"core": {"const": "sing-box"}}}}
+                    }
+                  }
+                },
+                "else": {
+                  "properties": {
+                    "protocols": {
+                      "allOf": [
+                        {"contains": {"properties": {"core": {"const": "xray"}}}},
+                        {"contains": {"properties": {"core": {"const": "sing-box"}}}}
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "if": {
+          "properties": {
+            "core": {"properties": {"secondary_type": {"type": "string"}}}
+          }
+        },
+        "then": {"properties": {"host_integrations": {"const": []}}}
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {"enum": [1, 2]},
           "core": {
             "properties": {"type": {"const": "sing-box"}}
           }
@@ -418,6 +508,9 @@
               "type": "string",
               "pattern": "^(?:entry-[a-z0-9][a-z0-9-]{0,47}|vless-reality)$"
             },
+            "core": {
+              "enum": ["xray", "sing-box"]
+            },
             "server": {
               "$ref": "#/$defs/server_address"
             },
@@ -481,6 +574,9 @@
             "listener_id": {
               "type": "string",
               "pattern": "^(?:entry-[a-z0-9][a-z0-9-]{0,47}|vless-ws)$"
+            },
+            "core": {
+              "enum": ["xray", "sing-box"]
             },
             "server": {
               "$ref": "#/$defs/server_address"

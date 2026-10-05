@@ -13,7 +13,7 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "支持交互首配、完整规格导入及现有入口/目标字段编辑，配置时进行目标风险检测；目标库、扫描、PQC、参数重生成及 443 共存管理尚未迁移。"
+      "reason": "支持单核心或 Xray/sing-box 主副核心首配、完整规格导入、入口编辑及跨核心复制，配置时进行目标风险检测；目标库、扫描、PQC、参数重生成及 443 共存管理尚未迁移。"
     },
     {
       "id": 2,
@@ -83,7 +83,7 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "支持交互首配、完整规格导入及现有入口/WS 路径编辑，配置 Xray 后端和 Nginx TLS 反代；证书轮换和完整协议管理尚未迁移。"
+      "reason": "支持交互首配、完整规格导入及现有入口/WS 路径编辑，Xray 可为主核心或副核心，仍由 Nginx 终止 TLS；证书轮换和完整协议管理尚未迁移。"
     },
     {
       "id": 22,
@@ -278,7 +278,7 @@
       },
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "仅 Xray 同时配置协议 21 和受管 TLS 时可通过 Nginx 发布 token 保护的订阅；可包含同一 Xray 部署的 Reality 节点，单独 Reality 或 sing-box 部署不可发布。"
+      "reason": "部署必须包含 Xray 协议 21 和受管 TLS，无论 Xray 为主核心还是副核心；Nginx 发布 token 保护的订阅可包含两核心 Reality 节点。没有 Xray WS TLS 入口时不可发布。"
     },
     "subscription-traffic": {
       "status": "supported",
@@ -287,7 +287,7 @@
       "profiles": ["core-xray", "core-sing-box"],
       "network_mode": "host-cli",
       "host_capabilities": [],
-      "reason": "宿主定时采集任务和 padm-docker traffic 命令已覆盖流量管理。"
+      "reason": "宿主定时采集和 padm-docker traffic 支持单核及双核全量采样；同 UUID 共享累计与额度，两核心全部复验后才写状态，额度失败或中断恢复全部配置。"
     },
     "subscription-users": {
       "status": "deferred",
@@ -341,7 +341,7 @@
       "profiles": ["core-xray"],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "需要在配置合同中表达多个监听器、端口映射和原子回滚。"
+      "reason": "v2/v3 已支持最多 16 个入口、同协议复制/删除及端口事务，v3 明确核心归属；既有身份和内部端口冻结，Fail2ban 联动及 443 共存等完整管理仍未交付。"
     },
     "reality-target-management": {
       "status": "deferred",
@@ -422,7 +422,7 @@
       "profiles": [],
       "network_mode": "host-cli",
       "host_capabilities": [],
-      "reason": "已提供交互菜单、状态、启停日志、可信首配及现有规格编辑/完整旧输入接入；多入口、完整协议、用户及维护管理尚未迁移，真实发布和双架构连通待验。"
+      "reason": "已提供交互菜单、状态、启停日志、可信首配、规格编辑/完整旧输入接入、多入口及主副核心共存；完整协议、用户及维护管理尚未迁移，真实发布和双架构连通待验。"
     },
     "routing-tools": {
       "status": "deferred",
