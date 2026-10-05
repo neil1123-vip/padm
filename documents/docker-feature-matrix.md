@@ -6,6 +6,9 @@
 Docker 现在能否通过受管控制命令完成对应能力，不表示底层镜像里是否包含某个
 上游程序。
 
+后续实施顺序和验收门槛见
+[Docker 菜单与功能对齐实施计划](docker-menu-parity-plan.md)。计划安排不改变本表的当前支持状态。
+
 ## 状态定义
 
 | 状态 | 含义 |
@@ -121,7 +124,7 @@ Docker 现在能否通过受管控制命令完成对应能力，不表示底层�
 
 完成本阶段后，后续实现必须满足：
 
-1. 新增 Docker 能力先更新 `features.json`，再更新配置合同、Compose 和控制命令。
+1. 新增 Docker 能力必须同步更新配置合同、Compose、控制命令和回归；实现及验证齐备后再升级 `features.json` 的支持状态。
 2. 配置运行状态为 `supported` 的协议必须同时有核心、profile、生成配置和回归证据；管理工作流必须单独更新 `management_status`。
 3. `host-integrated` 必须写明 `network_mode`、capability、device 和宿主规则所有权。
 4. `deferred` 和 `unsupported` 必须在安装前明确拒绝，不能偷偷调用原生安装器。
