@@ -24,7 +24,7 @@ dockerManifestCleanup() {
     local tempDir=${PADM_DOCKER_MANIFEST_TEMP_DIR:-}
     [[ -n "${tempDir}" ]] || return 0
     dockerManagedPathIsSafe "$(dockerInstallRoot)" "${tempDir}" 2>/dev/null || return 1
-    rm -rf -- "${tempDir}"
+    rm -rf -- "${tempDir}" || return 1
     PADM_DOCKER_MANIFEST_TEMP_DIR=
     PADM_DOCKER_MANIFEST_FILE=
     PADM_DOCKER_MANIFEST_BUNDLE=
@@ -91,15 +91,21 @@ dockerManifestValidate() {
 
 dockerManifestVerifySignature() {
     local manifest=$1 bundle=$2
-    dockerRequireCommand cosign || {
-        dockerError '缺少 cosign，拒绝验证 Docker release manifest'
-        return 1
-    }
+    dockerManifestVerifierCheck || return 1
     cosign verify-blob --bundle "${bundle}" \
         --certificate-identity-regexp "${PADM_DOCKER_COSIGN_IDENTITY_REGEX}" \
         --certificate-oidc-issuer "${PADM_DOCKER_COSIGN_OIDC_ISSUER}" \
         "${manifest}" >/dev/null 2>&1 || {
-        dockerError 'release manifest Cosign 验签失败'
+        dockerError 'release manifest Cosign 验签失败；请检查签名、固定发布身份及 Sigstore bundle v0.3 支持'
+        return 1
+    }
+}
+
+dockerManifestVerifierCheck() {
+    dockerRequireCommand cosign || {
+        dockerError '缺少 cosign，拒绝获取可信 Docker 发布输入或更新'
+        dockerError '请从独立受信的软件源安装支持 Sigstore bundle v0.3 的 cosign，或按 Sigstore 官方发布说明核验工具来源后安装，再重试原命令'
+        dockerError '不能使用尚未验签的 manifest 提供验证器，也不能跳过验签；本命令不会自动安装宿主工具'
         return 1
     }
 }
@@ -109,6 +115,7 @@ dockerManifestPrepare() {
     local bundle=${2:-} controlSource=${3:-}
     local root tempDir arch controlUrl controlSha expectedSha
     dockerManifestCleanup || return 1
+    dockerManifestVerifierCheck || return 1
     root=$(dockerInstallRoot) || return 1
     tempDir=$(mktemp -d "${root}/.manifest.XXXXXX") || return 1
     dockerManagedPathIsSafe "${root}" "${tempDir}" || {
@@ -179,4 +186,18 @@ dockerManifestImageDigest() {
 dockerManifestReleaseVersion() {
     [[ -n "${PADM_DOCKER_MANIFEST_FILE}" ]] || return 1
     jq -er '.release.version' "${PADM_DOCKER_MANIFEST_FILE}"
+}
+
+dockerManifestConfigurationInputs() {
+    local currentSha
+    [[ -n "${PADM_DOCKER_MANIFEST_FILE}" &&
+        "${PADM_DOCKER_MANIFEST_SHA256}" =~ ^[0-9a-f]{64}$ &&
+        -f "${PADM_DOCKER_MANIFEST_FILE}" && ! -L "${PADM_DOCKER_MANIFEST_FILE}" ]] || return 1
+    currentSha=$(sha256sum "${PADM_DOCKER_MANIFEST_FILE}" | cut -d ' ' -f 1) || return 1
+    [[ "${currentSha}" == "${PADM_DOCKER_MANIFEST_SHA256}" ]] || return 1
+    jq -e --arg sha "${PADM_DOCKER_MANIFEST_SHA256}" \
+        --arg identity "${PADM_DOCKER_MANIFEST_SIGNATURE_IDENTITY}" '
+      {release: {version: .release.version, manifest_sha256: $sha, signature_identity: $identity},
+       images: (.images | with_entries(.value = .value.reference))}
+    ' "${PADM_DOCKER_MANIFEST_FILE}"
 }

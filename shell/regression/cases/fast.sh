@@ -5916,6 +5916,10 @@ runDockerMenuRegression() {
     bash "${PROJECT_ROOT}/docker/tests/menu.sh"
 }
 
+runDockerReleaseRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/release.sh"
+}
+
 runDockerPhase2Regression() {
     bash "${PROJECT_ROOT}/docker/tests/phase2.sh"
 }

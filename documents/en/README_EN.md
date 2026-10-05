@@ -190,6 +190,20 @@ padm-docker acme <issue|renew> --domain example.com --email admin@example.com --
 
 Configuration changes generate and validate a candidate, check ports and Compose, back up the current state, and then run health checks. A failure leaves the old configuration in place. The installed host command is `/usr/local/bin/padm-docker`; the bundle, configuration, data, secrets, logs, and backups live below the state root in `bundle/`, `config/`, `data/`, `secrets/`, `logs/`, and `backups/`.
 
+### Trusted Release Inputs
+
+The first-configuration wizard is still under development. After installing the control scripts, check a signed release, its control bundle, and all five digest-pinned images to obtain release inputs for configuration:
+
+```bash
+padm-docker release
+padm-docker release --manifest /path/release-manifest.json \
+  --bundle /path/release-manifest.sigstore.json --control-bundle /path/padm-docker-bundle.tar.gz
+```
+
+On success, stdout contains only JSON with `release` and `images`. It is emitted after signature verification, archive validation, and all image pulls succeed; progress and errors use stderr. This command does not generate a complete spec or credentials, switch installed control scripts, or start or reconfigure services. Image pulls do update the host Docker cache; local release assets do not imply offline image availability. The JSON output is not a signature proof: subsequent configuration must still check the original manifest and Sigstore bundle.
+
+`cosign` must support Sigstore bundle v0.3. A missing tool stops the command without bypassing verification or automatically installing host tools. Install it from an independently trusted package source or verify its provenance using Sigstore's official release instructions, then retry. An unverified manifest cannot choose the trusted publisher identity or verifier source.
+
 ### User Traffic and Quotas
 
 `configure` and `update` configure user statistics for the active core and install a host collection task that runs every minute. The task prefers `padm-docker-traffic.timer`, with a running cron daemon as the fallback. Both Xray and sing-box accumulate upload and download bytes by stable account ID. The same UUID across protocol inbounds shares one total, while display names are preserved separately.
@@ -267,7 +281,7 @@ padm is designed for Linux servers. The code detects Debian, Ubuntu, RHEL/CentOS
 | Permission and connection | root, a rootful Docker Engine, and the local rootful Unix socket; rootless daemons, remote contexts, and user sockets are unsupported. |
 | Compose | Docker Compose CLI plugin (major version v2 or later). |
 | Architecture | `amd64` or `arm64`, with matching host and daemon architecture. |
-| Host commands | Bash 4+, `jq`, `sha256sum`, `tar`, and either `curl` or `wget`; signed updates also require Cosign with Sigstore bundle v0.3 support (CI currently uses 3.x). If Docker is missing, `install-docker.sh install` asks whether to install Engine, the Compose CLI plugin, and the host prerequisites from Docker's official repository. |
+| Host commands | Bash 4+, `jq`, `sha256sum`, `tar`, and either `curl` or `wget`; trusted release inputs and signed updates also require Cosign with Sigstore bundle v0.3 support (CI currently uses 3.x). If Docker is missing, `install-docker.sh install` asks whether to install Engine, the Compose CLI plugin, and the host prerequisites from Docker's official repository. |
 | User statistics | A running systemd or cron daemon. sing-box also needs host `nsenter` (usually from `util-linux`) and an HTTP/2-capable `curl`. Configuration and updates stop if these requirements are missing. |
 | Kernel capabilities | The regular profiles need no extra capability. WireGuard, Fail2ban, TUN/TProxy, and other `net-*` profiles require the capability, host networking, or `/dev/net/tun` specified by the support matrix. |
 

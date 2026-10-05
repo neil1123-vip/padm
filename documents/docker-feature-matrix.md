@@ -31,7 +31,7 @@ Docker 现在能否通过受管控制命令完成对应能力，不表示底层�
 
 | 原生菜单 | Docker 当前状态 | 已覆盖 | 尚未覆盖或边界 |
 | --- | --- | --- | --- |
-| 安装与重装 | `deferred` | `install`、`configure`、候选配置校验、回滚 | 没有交互式安装向导；需要先写 JSON spec。 |
+| 安装与重装 | `deferred` | `install`、可信发布输入 `release`、`configure`、候选配置校验、回滚 | `release` 不生成完整 spec；没有交互式安装向导，仍需要先写 JSON spec。 |
 | 订阅与用户 | `supported` + `host-integrated` + `deferred` | 有条件的订阅发布、流量采集/额度、WireGuard 宿主集成 | 发布仅支持包含协议 `21` 和受管 TLS 的 Xray 配置；用户 CRUD 和多服务器工作流未迁移；WireGuard 需 `net-wireguard`。 |
 | 协议与入口 | 部分 `supported`，管理工作流 `deferred` | 协议 `1` Reality Vision、`21` VLESS WS TLS 的初始配置运行 | 完整协议管理、Reality 目标库/扫描/参数重生成/443 共存、其余公开协议、内部路由协议、入口端口追加和 CDN 地址覆盖尚未开放。 |
 | 站点与证书 | 部分 `supported`，其余 `deferred` | TLS 文件安装、DNS-01 ACME、Nginx WebSocket 入口 | webroot/standalone ACME、静态站点/302/ALPN 管理尚未迁移。 |

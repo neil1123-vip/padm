@@ -11,6 +11,7 @@ dockerUsage() {
   padm-docker                          # 交互终端进入菜单；非交互显示帮助
   padm-docker menu
   install-docker.sh install [--source <目录>] [--ref <commit|latest>] [--no-menu]
+  padm-docker release [--manifest <URL|文件> --bundle <URL|文件> [--control-bundle <URL|文件>]]
   padm-docker configure --spec <JSON 文件>
   padm-docker tls install --domain <域名> --cert <文件> --key <文件> [--ops-image <tag@digest>]
   padm-docker acme <issue|renew> --domain <域名> --email <邮箱> --dns <dns_*> --credentials <文件> [--ops-image <tag@digest>]
@@ -403,6 +404,32 @@ dockerPullManifestImages() {
     done
 }
 
+dockerReleaseCommand() {
+    local manifest= bundle= controlBundle=
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+        --manifest|--bundle|--control-bundle)
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* ]] || return "${PADM_DOCKER_RC_USAGE}"
+            case "$1" in
+            --manifest) manifest=$2 ;;
+            --bundle) bundle=$2 ;;
+            --control-bundle) controlBundle=$2 ;;
+            esac
+            shift 2
+            ;;
+        *) dockerUsage; return "${PADM_DOCKER_RC_USAGE}" ;;
+        esac
+    done
+    dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+    dockerLockInstalledDeployment || return $?
+    dockerManifestPrepare "${manifest}" "${bundle}" "${controlBundle}" ||
+        return "${PADM_DOCKER_RC_MANIFEST}"
+    # 仅校验候选控制脚本，不切换当前 bundle；标准输出只保留可信 JSON。
+    dockerStageReleaseBundle >&2 || return "${PADM_DOCKER_RC_BUNDLE}"
+    dockerPullManifestImages >&2 || return "${PADM_DOCKER_RC_COMPOSE}"
+    dockerManifestConfigurationInputs || return "${PADM_DOCKER_RC_MANIFEST}"
+}
+
 dockerUpdateCommand() {
     local manifest= bundle= controlBundle= candidate backup
     while [[ "$#" -gt 0 ]]; do
@@ -691,6 +718,7 @@ dockerMain() {
     trap 'dockerCommandInterrupted 143' TERM
     case "${command}" in
     install) dockerInstallCommand "$@" ;;
+    release) dockerReleaseCommand "$@" ;;
     configure) dockerConfigureCommand "$@" ;;
     tls)
         if [[ "${1:-}" == "install" ]]; then

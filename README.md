@@ -188,6 +188,20 @@ padm-docker acme <issue|renew> --domain example.com --email admin@example.com --
 
 配置变更先生成候选文件、校验端口和 Compose，再备份当前状态并执行健康检查；失败时保留旧配置。Docker 入口安装的控制命令是 `/usr/local/bin/padm-docker`，实际 bundle、配置、数据、密钥、日志和备份分别位于状态根下的 `bundle/`、`config/`、`data/`、`secrets/`、`logs/` 和 `backups/`。
 
+### 可信发布输入
+
+首次配置向导仍在开发中。已安装控制脚本后，可先检查签名发布、控制 bundle 和 5 个固定 digest 镜像，取得后续配置所需的发布输入：
+
+```bash
+padm-docker release
+padm-docker release --manifest /path/release-manifest.json \
+  --bundle /path/release-manifest.sigstore.json --control-bundle /path/padm-docker-bundle.tar.gz
+```
+
+成功时标准输出只有包含 `release`、`images` 的 JSON；签名验证、归档校验和全部镜像拉取完成前不输出该结果，进度与错误写入标准错误。该命令不生成完整 spec 或凭据、不切换已安装控制脚本、不启动或重配服务；镜像拉取会更新宿主 Docker 缓存，本地发布资产也不代表离线镜像可用。输出 JSON 不是签名证明，后续配置仍须核对原 manifest 与 Sigstore bundle。
+
+需要支持 Sigstore bundle v0.3 的 `cosign`。缺少该工具时命令停止，不跳过验签、不自动安装宿主工具；先通过独立受信的软件源或 Sigstore 官方发布说明核验并安装，再重试。固定发布身份和验证器信任来源不能由尚未验签的 manifest 指定。
+
 ### 用户流量与额度
 
 `configure` 和 `update` 会为当前核心配置用户统计，并安装每分钟执行的宿主采集任务：优先使用 `padm-docker-traffic.timer`，无 systemd 时使用已运行的 cron。Xray 和 sing-box 均按稳定账号 ID 累计上传、下载流量；同一 UUID 在多个协议入口中合并计量，显示名称独立保留。
@@ -265,7 +279,7 @@ padm 面向 Linux 服务器运行。代码会识别 Debian、Ubuntu、RHEL/CentO
 | 权限与连接 | root，rootful Docker Engine，本机 rootful Unix socket；不支持 rootless daemon、远程 context 或用户级 socket。 |
 | Compose | Docker Compose CLI 插件（主版本 v2 及以上）。 |
 | 架构 | `amd64` 或 `arm64`，主机和 daemon 架构必须一致。 |
-| 主机命令 | `bash` 4+、`jq`、`sha256sum`、`tar`，以及 `curl` 或 `wget`；签名更新还需要支持 Sigstore bundle v0.3 的 `cosign`（CI 当前使用 3.x）。缺少 Docker 时，`install-docker.sh install` 会先询问是否从 Docker 官方软件源安装 Engine、Compose CLI 插件及其宿主前置工具。 |
+| 主机命令 | `bash` 4+、`jq`、`sha256sum`、`tar`，以及 `curl` 或 `wget`；可信发布输入和签名更新还需要支持 Sigstore bundle v0.3 的 `cosign`（CI 当前使用 3.x）。缺少 Docker 时，`install-docker.sh install` 会先询问是否从 Docker 官方软件源安装 Engine、Compose CLI 插件及其宿主前置工具。 |
 | 用户统计 | 正在运行的 systemd 或 cron；sing-box 还需宿主 `nsenter`（通常来自 `util-linux`）及支持 HTTP/2 的 `curl`。配置或更新时检查，缺少则停止。 |
 | 内核能力 | 普通 profile 不需要额外 capability；WireGuard、Fail2ban、TUN/TProxy 等 `net-*` profile 需要按支持矩阵提供 `NET_ADMIN`、host network 或 `/dev/net/tun`。 |
 
