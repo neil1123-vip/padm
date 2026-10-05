@@ -135,7 +135,7 @@ Installation opens the menu automatically when it succeeds in an interactive ter
 After installation, run `padm-docker` or `padm-docker menu` for status, start/stop/restart,
 and logs. Select first configuration to choose the core, protocols, addresses, and certificates.
 The wizard covers Reality with Xray or sing-box, and Xray WS TLS or Reality + WS TLS.
-It never overwrites an existing deployment; protocol editing and full management remain deferred.
+It never overwrites an existing deployment; use the editor below instead. Full protocol management remains deferred.
 `install --no-menu` disables the automatic menu. A non-interactive invocation without
 arguments only prints help without installing Docker, downloading the bundle, or
 initializing state. Existing explicit CLI commands remain available.
@@ -159,8 +159,13 @@ The spec contains secrets and must not be printed or published.
 Use the menu's configuration editor or `padm-docker edit` to change public ports,
 server addresses, address families, node names, Reality targets/SNI, WS paths, or
 subscription enablement. It uses a private draft, a value-redacted diff, and candidate
-validation before confirmation and commit. Other protocols, UUIDs, keys, tokens,
+validation before confirmation and commit. Unselected listeners, UUIDs, keys, tokens,
 certificates, host integrations, and accumulated traffic remain unchanged.
+The menu can copy or delete an existing protocol listener by listener ID; at least one
+listener must remain. Copies reuse the original credentials. Listeners with the same
+UUID share accumulated traffic and quota rather than creating separate users.
+Add and delete operations must be confirmed in separate transactions so a replacement
+cannot bypass existing identity or internal-port protections.
 An older deployment without `config/spec.json` requires its complete original spec;
 missing fields, additional accounts, custom routes/sites, or mismatched mount roots
 reject editing rather than reconstructing an invented spec from runtime summaries.
@@ -174,12 +179,25 @@ padm-docker edit --spec /root/original-spec.json --confirm PADM-DOCKER-EDIT
 `--preview` does not commit, collect traffic, or start/stop application services.
 Validation still verifies the release, pulls images, and runs candidate checks.
 `edit` verifies the current deployment version rather than latest by default; it also
-accepts the same-version release asset options below. Schema v1, one primary core,
-one listener per protocol, and the two-protocol limit remain in place; adding/removing
-protocols, multiple listeners, certificate rotation, and full protocol management
-are not yet available.
-WS ports managed by Fail2ban cannot yet be edited; changing them requires coordinated
-firewall-rule management.
+accepts the same-version release asset options below.
+First configuration writes `schema_version: 2`; `configure` and backup restoration
+continue to accept v1. Editing first verifies the original spec against the deployment,
+then migrates only the private draft to v2 without changing managed state before confirmation.
+V2 supports up to 16 listeners on one core: Reality/WS TLS with Xray, or Reality with
+sing-box. Mixing cores is not supported. Each listener keeps its `listener_id`;
+migration preserves `vless-reality` / `vless-ws`, while new listeners use `entry-*`.
+Each WS listener gets independent `websocket.backend_port` and `websocket.tls_port`
+values without renumbering existing internal ports. Listener identities, public ports,
+and internal listeners in the same container network namespace must not conflict.
+For an existing managed deployment, `edit --spec` supports these listener changes
+through the same preview, validation, and confirmation flow.
+Deleting the last WS listener disables subscription publishing and sets the spec's
+`tls` to `null`, while retaining TLS/ACME files and the token.
+New protocol types, multiple cores, certificate rotation, and full protocol management
+remain unavailable. WS listeners managed by Fail2ban cannot yet be added, deleted,
+or assigned a different public port; those changes require coordinated firewall rules.
+3A.2 has passed local transaction, PTY, and Linux permission regressions. Real signed releases,
+application images, and dual-architecture client connectivity remain unverified.
 
 For offline use, provide all three assets from the same Release:
 
@@ -195,6 +213,10 @@ a signature proof; `configure` re-verifies the original assets. Replace example 
 actual parameters, and match every release field and image to the verified manifest.
 Updates and rollbacks preserve the complete spec; corrupt or mismatched specs are rejected
 before stopping the current services.
+V2 editing also requires both the installed control scripts and trusted release assets
+for the deployed version to support v2. Refresh to published v2-capable control scripts
+first when they do not. The spec's `schema_version` and runtime `formats.config`
+are versioned separately; the latter remains `1`.
 
 To pin the control script version, change `install` to `install --ref <40-character commit SHA>`; do not treat `latest` as a production lock. A CI Release provides `release-manifest.json`, a Cosign-signed Sigstore bundle v0.3 (`release-manifest.sigstore.json`, with the signature embedded), and `padm-docker-bundle.tar.gz`; updates verify the bundle signature and digests.
 
@@ -295,6 +317,8 @@ padm-docker rollback
 ```
 
 Rollback uses only the most recent managed `update.*` snapshot and moves back one version, also restoring its recorded control scripts. Legacy snapshots without a control bundle pointer restore only deployment configuration and images, without guessing an old script version. It fails rather than guessing at an arbitrary historical version when no valid snapshot exists. Once user statistics are enabled, a sing-box rollback target must include `with_v2ray_api`; incompatible targets are rejected before stopping the current deployment to preserve quota enforcement. If rollback itself fails, the command attempts to restore the current version and keeps the backup path for diagnosis.
+The control bundle must declare support for the snapshot's spec version. A snapshot
+containing a v2 spec cannot be rolled back to a bundle that supports only v1.
 
 ### Uninstall
 

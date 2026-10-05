@@ -10,6 +10,7 @@ MANIFEST=${TEST_ROOT}/release-manifest.json
 CONTROL_SOURCE=${TEST_ROOT}/control-old
 CONTROL_BUNDLE=${TEST_ROOT}/control-new.tar.gz
 FAILED_CONTROL_BUNDLE=${TEST_ROOT}/control-failed.tar.gz
+LEGACY_CONTROL_BUNDLE=${TEST_ROOT}/control-legacy.tar.gz
 OLD_DIGEST=$(printf '1%.0s' {1..64})
 NEW_DIGEST=$(printf '2%.0s' {1..64})
 ROLLBACK_DIGEST=$(printf '3%.0s' {1..64})
@@ -60,10 +61,14 @@ copyControlFixture() {
     printf '#!/usr/bin/env bash\nprintf "%%s\\n" "%s"\n' "${marker}" >"${target}/install-docker.sh"
 }
 copyControlFixture "${CONTROL_SOURCE}" old-control
+jq '.properties.schema_version = {const: 1}' \
+    "${CONTROL_SOURCE}/docker/contracts/configure.schema.json" >"${TEST_ROOT}/legacy-schema.json"
+mv -- "${TEST_ROOT}/legacy-schema.json" "${CONTROL_SOURCE}/docker/contracts/configure.schema.json"
 copyControlFixture "${TEST_ROOT}/control-new" new-control
 copyControlFixture "${TEST_ROOT}/control-failed" failed-control
 tar -czf "${CONTROL_BUNDLE}" -C "${TEST_ROOT}/control-new" install-docker.sh docker shell
 tar -czf "${FAILED_CONTROL_BUNDLE}" -C "${TEST_ROOT}/control-failed" install-docker.sh docker shell
+tar -czf "${LEGACY_CONTROL_BUNDLE}" -C "${CONTROL_SOURCE}" install-docker.sh docker shell
 
 cat >"${MANIFEST}" <<EOF
 $(jq -n --arg old "${OLD_DIGEST}" --arg new "${NEW_DIGEST}" --arg prefix "${REF_PREFIX}" '
@@ -83,6 +88,7 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
     PHASE6_PROJECT_ROOT="${PROJECT_ROOT}" PHASE6_MANIFEST="${MANIFEST}" \
     PHASE6_CONTROL_SOURCE="${CONTROL_SOURCE}" PHASE6_CONTROL_BUNDLE="${CONTROL_BUNDLE}" \
     PHASE6_FAILED_CONTROL_BUNDLE="${FAILED_CONTROL_BUNDLE}" \
+    PHASE6_NEW_CONTROL_SOURCE="${TEST_ROOT}/control-new" PHASE6_LEGACY_CONTROL_BUNDLE="${LEGACY_CONTROL_BUNDLE}" \
     PADM_DOCKER_BIN_DIR="${TEST_ROOT}/installed-bin" \
     PADM_DOCKER_INSTALL_DIR="${STATE_ROOT}" PADM_DOCKER_SKIP_CHOWN=1 \
     bash -uc '
@@ -345,6 +351,87 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
         ! dockerBackupConfiguration configure
         test "$(wc -l <"$FAKE_DOCKER_LOG")" == "$logBefore"
         cp -- "$root/.spec-before-invalid-backup" "$root/config/spec.json"
+
+        # 多入口更新保留稳定身份和累计流量，旧格式控制脚本不能接管 v2。
+        legacySpecBackup=$successfulBackup
+        dockerInstallBundle "$PHASE6_NEW_CONTROL_SOURCE" "$newCommit"
+        newBundle=$(readlink "$root/bundle")
+        multiOldSpec="$root/.spec-v2-before-update.json"
+        multiNewSpec="$root/.spec-v2-after-update.json"
+        dockerConfigureSpecMigrate "$oldSpec" "$root/.spec-v2-migrated.json"
+        jq ".core.protocols += [(.core.protocols[0] |
+          .listener_id = \"entry-secondary\" | .public_port = 25443 | .name = \"secondary\")]" \
+            "$root/.spec-v2-migrated.json" >"$multiOldSpec"
+        cp -- "$multiOldSpec" "$root/config/spec.json"
+        chmod 0600 "$multiOldSpec" "$root/config/spec.json"
+        dockerGenerateXrayConfig "$multiOldSpec" "$root/config/xray/config.json"
+        cp -- "$root/config/xray/config.json" "$root/config/xray/users.base"
+        mkdir -p "$root/data/traffic"
+        jq -n --arg account "$(jq -r ".core.protocols[0].uuid" "$multiOldSpec")" "
+          {schema_version:1, accounts:{(\$account):{name:\"main-reality\", upload:7,
+            download:11, limit_bytes:0, baseline:{}}}}" >"$root/data/traffic/state.json"
+        trafficBefore=$(jq -Sc . "$root/data/traffic/state.json")
+        dockerTrafficPrepareCandidate "$root"
+        dockerGenerateCompose "$multiOldSpec" "$root/compose.json"
+        dockerGenerateDeployment "$multiOldSpec" "$root/deployment.json"
+        dockerManagedSpecMatchesDeployment "$root/config/spec.json" "$root/deployment.json" "$root/images.env"
+        listenersBefore=$(jq -Sc ".listeners" "$root/deployment.json")
+        source="$PHASE6_MANIFEST"
+        manifestSha=$(sha256sum "$source" | awk "{print \$1}")
+        jq --arg sha "$manifestSha" --slurpfile manifest "$source" "
+          .release = {version: \$manifest[0].release.version, manifest_sha256: \$sha, signature_identity: \"test\"} |
+          .images = (\$manifest[0].images | map_values(.reference))
+        " "$multiOldSpec" >"$multiNewSpec"
+        control=$PHASE6_CONTROL_BUNDLE
+        dockerUpdateCommand --manifest "$source"
+        assertCurrent "$newBundle" "$newCommit" new-control "$(printf 2%.0s {1..64})"
+        test "$(jq -Sc . "$root/config/spec.json")" == "$(jq -Sc . "$multiNewSpec")"
+        test "$(jq -Sc ".listeners" "$root/deployment.json")" == "$listenersBefore"
+        test "$(jq -Sc . "$root/data/traffic/state.json")" == "$trafficBefore"
+        multiBackup=$DOCKER_CONFIG_BACKUP
+        dockerValidateConfigurationBackup "$multiBackup"
+        dockerCleanupStagedBundle
+
+        ! dockerInstallBundle "$PHASE6_CONTROL_SOURCE" "$oldCommit"
+        assertCurrent "$newBundle" "$newCommit" new-control "$(printf 2%.0s {1..64})"
+        dockerCleanupStagedBundle
+        control=$PHASE6_LEGACY_CONTROL_BUNDLE
+        ! dockerUpdateCommand --manifest "$source"
+        assertCurrent "$newBundle" "$newCommit" new-control "$(printf 2%.0s {1..64})"
+        test "$(jq -Sc . "$root/config/spec.json")" == "$(jq -Sc . "$multiNewSpec")"
+        dockerCleanupStagedBundle
+
+        source="$PHASE6_MANIFEST.rollback"
+        control=$PHASE6_FAILED_CONTROL_BUNDLE
+        rm -f -- "$FAKE_DOCKER_FAIL_MARK"
+        export FAKE_DOCKER_FAIL_UP=1
+        ! dockerUpdateCommand --manifest "$source"
+        assertCurrent "$newBundle" "$newCommit" new-control "$(printf 2%.0s {1..64})"
+        test "$(jq -Sc . "$root/config/spec.json")" == "$(jq -Sc . "$multiNewSpec")"
+        test "$(jq -Sc ".listeners" "$root/deployment.json")" == "$listenersBefore"
+        test "$(jq -Sc . "$root/data/traffic/state.json")" == "$trafficBefore"
+        dockerRemoveManagedTree "$root" "$DOCKER_CONFIG_BACKUP"
+        dockerCleanupStagedBundle
+        unset FAKE_DOCKER_FAIL_UP
+
+        # 恢复先验证目标规格与目标 bundle，不能误拿仍在运行的 v2 规格限制合法 v1 回滚。
+        printf "%s\n" "$oldBundle" >"$multiBackup/bundle.target"
+        ! dockerValidateConfigurationBackup "$multiBackup"
+        DOCKER_CONFIG_BACKUP=$multiBackup
+        DOCKER_CONFIG_SWITCHED=1
+        logBefore=$(wc -l <"$FAKE_DOCKER_LOG")
+        ! dockerRestoreConfiguration
+        test "$(wc -l <"$FAKE_DOCKER_LOG")" == "$logBefore"
+        assertCurrent "$newBundle" "$newCommit" new-control "$(printf 2%.0s {1..64})"
+        printf "%s\n" "$newBundle" >"$multiBackup/bundle.target"
+        DOCKER_CONFIG_SWITCHED=0
+        dockerValidateConfigurationBackup "$multiBackup"
+        dockerLatestUpdateBackup() { printf "%s\n" "$legacySpecBackup"; }
+        dockerRollbackCommand
+        assertCurrent "$oldBundle" "$oldCommit" old-control "$(printf 1%.0s {1..64})"
+        test "$(jq -Sc . "$root/config/spec.json")" == "$(jq -Sc . "$oldSpec")"
+        test "$(jq -Sc . "$root/data/traffic/state.json")" == "$trafficBefore"
+
         test -d "$root"
         ! dockerUninstallCommand --purge
         test -d "$root"

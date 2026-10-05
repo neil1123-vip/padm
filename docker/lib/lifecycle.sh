@@ -511,7 +511,7 @@ dockerConfigurationBackupAllowed() {
 }
 
 dockerValidateConfigurationBackup() {
-    local backup=$1 root relative entry
+    local backup=$1 root relative entry bundlePath
     root=$(dockerInstallRoot) || return 1
     dockerManagedPathIsSafe "${root}" "${backup}" || return 1
     [[ "${backup}" == "${root%/}/backups/"* && -d "${backup}" && ! -L "${backup}" && -O "${backup}" ]] || return 1
@@ -546,6 +546,12 @@ dockerValidateConfigurationBackup() {
         grep -qxF config/spec.json "${backup}/present" || return 1
         dockerManagedSpecMatchesDeployment "${backup}/config/spec.json" \
             "${backup}/deployment.json" "${backup}/images.env" || return 1
+        if [[ -f "${backup}/bundle.target" ]]; then
+            bundlePath=$(dockerBundlePathForTarget "$(<"${backup}/bundle.target")") || return 1
+        else
+            bundlePath=$(dockerCurrentBundlePath) || return 1
+        fi
+        dockerBundleSupportsSpec "${bundlePath}" "${backup}/config/spec.json" || return 1
     fi
 }
 

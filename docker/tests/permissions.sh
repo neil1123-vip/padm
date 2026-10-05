@@ -65,6 +65,7 @@ assertRuntimeSecrets() {
 
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/configured"
 dockerInitializeStateRoot
+dockerInstallBundle "${PROJECT_ROOT}" "$(printf 'a%.0s' {1..40})"
 mkdir -p "${PADM_DOCKER_INSTALL_DIR}/config/xray" "${PADM_DOCKER_INSTALL_DIR}/data/subscription"
 seedRuntimeSecrets
 jq -n '

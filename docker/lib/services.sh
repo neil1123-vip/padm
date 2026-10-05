@@ -10,8 +10,6 @@ PADM_DOCKER_SERVICES_LOADED=1
 
 readonly PADM_DOCKER_CONTAINER_UID=10001
 readonly PADM_DOCKER_CONTAINER_GID=10001
-readonly PADM_DOCKER_WS_BACKEND_PORT=31297
-readonly PADM_DOCKER_NGINX_TLS_PORT=8443
 readonly PADM_DOCKER_SUBSCRIPTION_PORT=8081
 
 DOCKER_CONFIG_CANDIDATE=
@@ -62,31 +60,45 @@ dockerConfigureSpecValidate() {
         (unique | length) == length and all(.[]; type == "string" and test("^[A-Za-z0-9._:/-]{1,128}$"));
       def protocol_base: (.server | server) and (.public_port | port) and
         (.address_families | families) and (.name | name) and (.uuid | uuid);
+      def listener_id: type == "string" and test("^entry-[a-z0-9][a-z0-9-]{0,47}$");
       . as $request |
       ($matrix[0]) as $features |
       exact(["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"]) and
-      .schema_version == 1 and
+      (.schema_version == 1 or .schema_version == 2) and
       (.release | exact(["version", "manifest_sha256", "signature_identity"]) and
         (.version | type == "string" and length > 0) and
         (.manifest_sha256 | test("^[a-f0-9]{64}$")) and
         (.signature_identity | type == "string" and length > 0)) and
       (.core | exact(["type", "protocols"]) and
         (.type == "xray" or .type == "sing-box") and
-        (.protocols | type == "array" and length >= 1 and length <= 2 and
-          ([.[].id] | unique | length) == length and
+        (.protocols | type == "array" and length >= 1 and
+          (if $request.schema_version == 1 then length <= 2 and
+            ([.[].id] | unique | length) == length
+           else length <= 16 and ([.[].listener_id] | unique | length) == length end) and
           ([.[].public_port] | unique | length) == length)) and
       all(.core.protocols[];
         protocol_base and
+        (if $request.schema_version == 2 then
+          (.listener_id | listener_id) or
+          (.id == 1 and .listener_id == "vless-reality") or
+          (.id == 21 and .listener_id == "vless-ws")
+         else true end) and
         if .id == 1 then
-          exact(["id", "server", "public_port", "address_families", "name", "uuid", "reality"]) and
+          exact(["id", "server", "public_port", "address_families", "name", "uuid", "reality"] +
+            if $request.schema_version == 2 then ["listener_id"] else [] end) and
           (.reality | exact(["server_name", "target_host", "target_port", "private_key", "public_key", "short_id"]) and
             (.server_name | hostname) and (.target_host | hostname) and (.target_port | port) and
             (.private_key | test("^[A-Za-z0-9_-]{43}$")) and
             (.public_key | test("^[A-Za-z0-9_-]{43}$")) and
             (.short_id | test("^(?:[a-f0-9]{2}){1,8}$")))
         elif .id == 21 then
-          exact(["id", "server", "public_port", "address_families", "name", "uuid", "websocket"]) and
-          (.websocket | exact(["domain", "path"]) and (.domain | hostname) and
+          exact(["id", "server", "public_port", "address_families", "name", "uuid", "websocket"] +
+            if $request.schema_version == 2 then ["listener_id"] else [] end) and
+          (.websocket | exact(["domain", "path"] +
+            if $request.schema_version == 2 then ["backend_port", "tls_port"] else [] end) and
+            (if $request.schema_version == 2 then
+              (.backend_port | port) and (.tls_port | port) and .tls_port != 8080
+             else true end) and (.domain | hostname) and
             (.path | test("^[A-Za-z0-9_-]{8,64}$")))
         else false end) and
       all(.core.protocols[];
@@ -150,11 +162,33 @@ dockerConfigureSpecValidate() {
         all(.core.protocols[]; .id != 21)
       else true end and
       all(.host_integrations[] | select(.type == "tproxy");
-        .settings.port as $port | all($request.core.protocols[]; .public_port != $port))
+        .settings.port as $port | all($request.core.protocols[]; .public_port != $port)) and
+      # 核心内部监听与统计 API 共用网络空间，不能只检查宿主发布端口。
+      (([.core.protocols[] |
+          if .id == 21 then (.websocket.backend_port // 31297) else .public_port end] +
+        [.host_integrations[] | select(.type == "tproxy") | .settings.port] +
+        [if .core.type == "xray" then 10085 else 10087 end]) as $corePorts |
+      ($corePorts | unique | length) == ($corePorts | length) and
+      (([.core.protocols[] | select(.id == 21) | (.websocket.tls_port // 8443)] + [8080]) as $tlsPorts |
+      ($tlsPorts | unique | length) == ($tlsPorts | length)))
     ' "${specFile}" >/dev/null 2>&1 || {
         dockerError '配置规格不满足阶段 4 schema、支持矩阵或拓扑约束'
         return 1
     }
+}
+
+dockerConfigureSpecMigrate() {
+    local source=$1 target=$2
+    dockerConfigureSpecValidate "${source}" || return 1
+    jq '
+      if .schema_version == 1 then
+        .schema_version = 2 |
+        .core.protocols |= map(
+          .listener_id = (if .id == 1 then "vless-reality" else "vless-ws" end) |
+          if .id == 21 then .websocket += {backend_port: 31297, tls_port: 8443} else . end)
+      else . end
+    ' "${source}" >"${target}" &&
+        chmod 0600 "${target}" && dockerConfigureSpecValidate "${target}"
 }
 
 dockerConfigureReleasePrepare() {
@@ -175,6 +209,8 @@ dockerConfigureReleaseValidate() {
         dockerError '配置中的版本、签名摘要或镜像与已验证发布清单不一致'
         return 1
     }
+    dockerBundleSupportsSpec "${DOCKER_STAGED_BUNDLE_PATH}" "${specFile}" || return 1
+    dockerBundleSupportsSpec "$(dockerCurrentBundlePath)" "${specFile}"
 }
 
 dockerManagedSpecMatchesDeployment() {
@@ -188,7 +224,13 @@ dockerManagedSpecMatchesDeployment() {
       .release.manifest_sha256 == $d.manifest.sha256 and
       .release.signature_identity == $d.manifest.signature_identity and
       .core.type == $d.core.type and
-      ([.core.protocols[].id] | sort) == ($d.core.protocol_ids | sort) and
+      ([.core.protocols[].id] | unique) == ($d.core.protocol_ids | sort) and
+      (if .schema_version == 2 then
+        [.core.protocols[] | {listener_id, service: (if .id == 21 then "nginx" else $d.core.type end),
+          public_port, container_port: (if .id == 21 then .websocket.tls_port else .public_port end),
+          transport: "tcp", address_families}] | sort_by(.listener_id) as $expected |
+        $expected == ([$d.listeners[] | select(.listener_id | startswith("host-") | not)] | sort_by(.listener_id))
+       else true end) and
       all(.images | to_entries[];
         (.value | split("@") | last) == $d.images[.key].index_digest)
     ' "${specFile}" >/dev/null 2>&1 || return 1
@@ -642,7 +684,7 @@ dockerGenerateXrayConfig() {
             listen: "0.0.0.0",
             port: .public_port,
             protocol: "vless",
-            tag: "vless-reality",
+            tag: (.listener_id // "vless-reality"),
             settings: {
               clients: [{id: .uuid, email: .name, flow: "xtls-rprx-vision"}],
               decryption: "none"
@@ -662,9 +704,9 @@ dockerGenerateXrayConfig() {
             sniffing: {enabled: true, destOverride: ["http", "tls", "quic"], routeOnly: true}
           } elif .id == 21 then {
             listen: "0.0.0.0",
-            port: 31297,
+            port: (.websocket.backend_port // 31297),
             protocol: "vless",
-            tag: "vless-ws",
+            tag: (.listener_id // "vless-ws"),
             settings: {
               clients: [{id: .uuid, email: .name}],
               decryption: "none"
@@ -706,7 +748,7 @@ dockerGenerateSingBoxConfig() {
           $r.core.protocols[] |
           {
             type: "vless",
-            tag: "vless-reality",
+            tag: (.listener_id // "vless-reality"),
             listen: "::",
             listen_port: .public_port,
             users: [{uuid: .uuid, name: .name, flow: "xtls-rprx-vision"}],
@@ -769,10 +811,9 @@ dockerStageTlsFiles() {
 }
 
 dockerGenerateNginxConfig() {
-    local specFile=$1 target=$2 domain path token subscriptionEnabled fail2banEnabled
+    local specFile=$1 target=$2 domain path token subscriptionEnabled fail2banEnabled backendPort tlsPort
     jq -e 'any(.core.protocols[]; .id == 21)' "${specFile}" >/dev/null || return 0
     domain=$(jq -r '.tls.domain' "${specFile}") || return 1
-    path=$(jq -r '.core.protocols[] | select(.id == 21) | .websocket.path' "${specFile}") || return 1
     token=$(jq -r '.subscription.token' "${specFile}") || return 1
     subscriptionEnabled=$(jq -r '.subscription.enabled' "${specFile}") || return 1
     fail2banEnabled=$(jq -r 'any(.host_integrations[]; .type == "fail2ban")' "${specFile}") || return 1
@@ -788,10 +829,13 @@ server {
         return 200 "ok\n";
     }
 }
+EOF
+    while IFS=$'\t' read -r path backendPort tlsPort; do
+        cat >>"${target}" <<EOF
 
 server {
-    listen ${PADM_DOCKER_NGINX_TLS_PORT} ssl;
-    listen [::]:${PADM_DOCKER_NGINX_TLS_PORT} ssl;
+    listen ${tlsPort} ssl;
+    listen [::]:${tlsPort} ssl;
     server_name ${domain};
 
     ssl_certificate /etc/padm/secrets/tls/${domain}.crt;
@@ -803,7 +847,7 @@ EOF
     fi
     cat >>"${target}" <<EOF
     location = /${path}ws {
-        proxy_pass http://xray:${PADM_DOCKER_WS_BACKEND_PORT};
+        proxy_pass http://xray:${backendPort};
         proxy_http_version 1.1;
         proxy_read_timeout 5d;
         proxy_set_header Host \$host;
@@ -821,7 +865,9 @@ EOF
     }
 EOF
     fi
-    printf '}\n' >>"${target}"
+        printf '}\n' >>"${target}" || return 1
+    done < <(jq -r '.core.protocols[] | select(.id == 21) |
+      [.websocket.path, (.websocket.backend_port // 31297), (.websocket.tls_port // 8443)] | @tsv' "${specFile}")
 }
 
 dockerGenerateSubscription() {
@@ -949,7 +995,7 @@ dockerGenerateCompose() {
               }]
             else . end
         else . end
-      | if ($websocket | length) == 1 then
+      | if ($websocket | length) > 0 then
           .services.nginx = (defaults + {
             image: "${PADM_NGINX_IMAGE:?PADM_NGINX_IMAGE is required}",
             profiles: ["nginx"],
@@ -959,7 +1005,7 @@ dockerGenerateCompose() {
               mounts("data/static"; "/srv/padm"; true) +
               mounts("secrets/tls"; "/etc/padm/secrets/tls"; true) +
               mounts("logs/nginx"; "/var/log/nginx"; false)),
-            ports: [ports($websocket[0]; 8443)[]],
+            ports: [$websocket[] as $protocol | ports($protocol; ($protocol.websocket.tls_port // 8443))[]],
             tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=32m"]
           })
         else . end
@@ -1093,28 +1139,31 @@ dockerGenerateDeployment() {
           signature_identity: $r.release.signature_identity
         },
         compose: {project: "padm-docker", profiles: profiles},
-        core: {type: $r.core.type, protocol_ids: [$r.core.protocols[].id]},
+        core: {type: $r.core.type, protocol_ids: ([$r.core.protocols[].id] | unique)},
         listeners: (
           [
           $r.core.protocols[] |
-          {
+          ({
             service: (if .id == 21 then "nginx" else $r.core.type end),
             public_port: .public_port,
-            container_port: (if .id == 21 then 8443 else .public_port end),
+            container_port: (if .id == 21 then (.websocket.tls_port // 8443) else .public_port end),
             transport: "tcp",
             address_families: .address_families
-          }
+          } + if $r.schema_version == 2 then {listener_id: .listener_id} else {} end)
           ] + [
           $r.host_integrations[] |
           if .type == "wireguard" then {
             service: "net-wireguard", public_port: $wireguardPort,
             container_port: $wireguardPort, transport: "udp",
             address_families: ["ipv4", "ipv6"]
-          } elif .type == "tproxy" then
+          } + if $r.schema_version == 2 then {listener_id: "host-wireguard"} else {} end
+          elif .type == "tproxy" then
             ({service: $r.core.type, public_port: .settings.port,
-              container_port: .settings.port, transport: "tcp", address_families: ["ipv4"]}),
+              container_port: .settings.port, transport: "tcp", address_families: ["ipv4"]} +
+              if $r.schema_version == 2 then {listener_id: "host-tproxy-tcp"} else {} end),
             ({service: $r.core.type, public_port: .settings.port,
-              container_port: .settings.port, transport: "udp", address_families: ["ipv4"]})
+              container_port: .settings.port, transport: "udp", address_families: ["ipv4"]} +
+              if $r.schema_version == 2 then {listener_id: "host-tproxy-udp"} else {} end)
           else empty end
           ]
         ),
@@ -1143,9 +1192,14 @@ dockerDeploymentFileValidate() {
       (.core.type == "xray" or .core.type == "sing-box") and
       (.core.protocol_ids | type == "array" and length >= 1 and (unique | length) == length) and
       (.listeners | type == "array" and length >= 1 and
-        all(.[]; (.public_port >= 1 and .public_port <= 65535) and
-          (.container_port >= 1 and .container_port <= 65535) and
-          (.transport == "tcp" or .transport == "udp"))) and
+        all(.[]; (.public_port | type == "number" and floor == . and . >= 1 and . <= 65535) and
+          (.container_port | type == "number" and floor == . and . >= 1 and . <= 65535) and
+          (.transport == "tcp" or .transport == "udp")) and
+        (if any(.[]; has("listener_id")) then
+          ([.[].listener_id] | unique | length) == length and
+          all(.[]; .listener_id | type == "string" and
+            test("^(entry-[a-z0-9][a-z0-9-]{0,47}|vless-reality|vless-ws|host-wireguard|host-tproxy-tcp|host-tproxy-udp)$"))
+         else true end)) and
       (.images | keys | sort) == (["xray", "sing-box", "nginx", "ops", "net"] | sort) and
       all(.images[]; .index_digest | test("^sha256:[a-f0-9]{64}$")) and
       (.host_integrations | type == "array" and length <= 3 and

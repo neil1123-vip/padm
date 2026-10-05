@@ -322,6 +322,10 @@ jq -e '.inbounds[0].streamSettings.security == "reality"' \
     jq '.inbounds[0]' "${DOCKER_ROOT}/config/xray/config.json" >&2 || true
     fail 'Xray Reality config is wrong'
 }
+jq -e '.schema_version == 1' "${DOCKER_ROOT}/config/spec.json" >/dev/null ||
+    fail 'configuring a legacy spec silently rewrote its format'
+jq -e '.inbounds[0].tag == "vless-reality"' "${DOCKER_ROOT}/config/xray/config.json" >/dev/null ||
+    fail 'legacy Reality tag changed'
 jq -e '(.services | keys | sort) == ["acme", "xray"]' \
     "${DOCKER_ROOT}/compose.json" >/dev/null || fail 'Xray Compose services are wrong'
 grep -q ' run --rm --no-deps xray -test -confdir /etc/padm/xray' "${DOCKER_LOG}" ||
@@ -369,6 +373,10 @@ jq -e '(.compose.profiles | sort) == ["core-xray", "nginx", "subscription"]' \
     "${DOCKER_ROOT}/deployment.json" >/dev/null || fail 'Nginx profiles are wrong'
 grep -q 'proxy_pass http://xray:31297;' "${DOCKER_ROOT}/config/nginx/default.conf" ||
     fail 'Nginx did not proxy the WebSocket backend'
+jq -e '.services.nginx.ports == ["0.0.0.0:24444:8443/tcp"]' \
+    "${DOCKER_ROOT}/compose.json" >/dev/null || fail 'legacy WebSocket TLS port changed'
+jq -e 'any(.inbounds[]; .tag == "vless-ws" and .port == 31297)' \
+    "${DOCKER_ROOT}/config/xray/config.json" >/dev/null || fail 'legacy WebSocket identity or backend changed'
 grep -q 'proxy_read_timeout 5d;' "${DOCKER_ROOT}/config/nginx/default.conf" ||
     fail 'Nginx WebSocket read timeout is missing'
 ! grep -q 'proxy_send_timeout' "${DOCKER_ROOT}/config/nginx/default.conf" ||
@@ -444,7 +452,35 @@ runEditPty() {
 }
 
 EDIT_SPEC="${TEST_ROOT}/edit.json"
-jq '.core.protocols[1].public_port = 25443' "${MIXED_WS_SPEC}" >"${EDIT_SPEC}"
+jq '
+  .schema_version = 2 |
+  .core.protocols |= map(
+    .listener_id = (if .id == 1 then "vless-reality" else "vless-ws" end) |
+    if .id == 21 then .websocket += {backend_port: 31297, tls_port: 8443} else . end) |
+  .core.protocols[1].public_port = 25443
+' "${MIXED_WS_SPEC}" >"${EDIT_SPEC}"
+# 旧控制包只能接收 v1，新控制包明确声明兼容 v1 与 v2。
+OLD_SCHEMA_BUNDLE="${TEST_ROOT}/old-schema-bundle"
+NEW_SCHEMA_BUNDLE="${TEST_ROOT}/new-schema-bundle"
+mkdir -p "${OLD_SCHEMA_BUNDLE}/docker/contracts" "${NEW_SCHEMA_BUNDLE}/docker/contracts"
+jq -n '{properties:{schema_version:{const:1}}}' \
+    >"${OLD_SCHEMA_BUNDLE}/docker/contracts/configure.schema.json"
+cp -- "${PROJECT_ROOT}/docker/contracts/configure.schema.json" \
+    "${NEW_SCHEMA_BUNDLE}/docker/contracts/configure.schema.json"
+bash -euo pipefail -c '
+    source "$1/docker/lib/bootstrap.sh"
+    source "$1/docker/lib/bundle.sh"
+    dockerBundleSupportsSpec "$2" "$4"
+    dockerBundleSupportsSpec "$3" "$4"
+    dockerBundleSupportsSpec "$3" "$5"
+    if dockerBundleSupportsSpec "$2" "$5"; then
+        exit 1
+    fi
+    ! dockerBundleSupportsSpec "$3" <(jq "del(.schema_version)" "$5")
+    ! dockerBundleSupportsSpec "$3" <(jq ".,." "$5")
+' _ "${PROJECT_ROOT}" "${OLD_SCHEMA_BUNDLE}" "${NEW_SCHEMA_BUNDLE}" \
+    "${MIXED_WS_SPEC}" "${EDIT_SPEC}" ||
+    fail 'control bundle format gate lost legacy compatibility or accepted v2 in a const-v1 bundle'
 mkdir -p "${DOCKER_ROOT}/data/traffic"
 printf '%s\n' '{"schema_version":1,"accounts":{"11111111-1111-4111-8111-111111111111":{"name":"main-xray","upload":7,"download":11,"limit_bytes":0,"baseline":{}}}}' \
     >"${DOCKER_ROOT}/data/traffic/state.json"
@@ -566,14 +602,17 @@ runControl 0 edit-preview-over-quota edit --spec "${EDIT_SPEC}" --preview
     fail 'edit preview lost an over-quota account or changed quota state'
 cp -- "${TEST_ROOT}/edit-before-quota.json" "${DOCKER_ROOT}/config/xray/config.json"
 cp -- "${TEST_ROOT}/edit-before-quota-state.json" "${DOCKER_ROOT}/data/traffic/state.json"
-for mutation in 'del(.core.protocols[0].uuid)' '.schema_version = 2' '.unexpected = true'; do
+for mutation in 'del(.core.protocols[0].uuid)' '.schema_version = 3' '.unexpected = true'; do
     jq "${mutation}" "${EDIT_SPEC}" >"${TEST_ROOT}/edit-invalid.json"
     runControl 15 edit-reject-invalid-spec edit --spec "${TEST_ROOT}/edit-invalid.json" --preview
 done
 for mutation in \
+    'del(.core.protocols[0].listener_id)' \
     '.core.protocols[0].uuid = "33333333-3333-4333-8333-333333333333"' \
     '.subscription.token = "fedcba9876543210"' \
-    '.core.protocols |= map(select(.id != 1))'; do
+    '.core.protocols[0].listener_id = "entry-renamed"' \
+    '.core.protocols[0].websocket.backend_port = 31298' \
+    '.core.protocols[0].websocket.tls_port = 8444'; do
     jq "${mutation}" "${EDIT_SPEC}" >"${TEST_ROOT}/edit-invalid.json"
     runControl 15 edit-reject-fixed-field-change edit --spec "${TEST_ROOT}/edit-invalid.json" --preview
 done
@@ -589,8 +628,7 @@ FAKE_DOCKER_MODE=core-validate-fail runControl 15 edit-reject-invalid-candidate 
 assertEditCleanup
 
 runControl 0 edit-confirm-port edit --spec "${EDIT_SPEC}" --confirm PADM-DOCKER-EDIT
-jq -e --slurpfile original "${MIXED_WS_SPEC}" \
-    '. == ($original[0] | .core.protocols[1].public_port = 25443)' \
+jq -e --slurpfile original "${EDIT_SPEC}" '. == $original[0]' \
     "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail 'edit changed unselected complete spec fields'
 jq -e 'any(.inbounds[]; .port == 25443 and .streamSettings.security == "reality")' \
     "${DOCKER_ROOT}/config/xray/config.json" >/dev/null || fail 'edit did not commit the Reality port'
@@ -642,6 +680,165 @@ cp -- "${TEST_ROOT}/edit-users.base" "${DOCKER_ROOT}/config/xray/users.base"
 runControl 0 edit-legacy-confirm-import edit --spec "${EDIT_SPEC}" --confirm PADM-DOCKER-EDIT
 jq -e --slurpfile original "${EDIT_SPEC}" '. == $original[0]' \
     "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail 'legacy import did not retain the complete original spec'
+assertEditCleanup
+
+# 真实终端分别提交复制与删除；多实例下数字协议 ID 不能误选其他入口。
+if [[ "$(/usr/bin/uname -s)" == Linux ]]; then
+    runEditPty $'9\n21\n28444\n8\ny\n'
+    jq -e '(.core.protocols | length) == 3 and
+      any(.core.protocols[]; .listener_id == "entry-1" and .id == 21 and .public_port == 28444 and
+        .websocket.backend_port == 31298 and .websocket.tls_port == 8444)' \
+        "${DOCKER_ROOT}/config/spec.json" >/dev/null ||
+        fail 'interactive WebSocket clone did not allocate a stable identity and independent internal ports'
+    jq -e 'any(.listeners[]; .listener_id == "entry-1" and
+      .public_port == 28444 and .container_port == 8444)' "${DOCKER_ROOT}/deployment.json" >/dev/null ||
+        fail 'interactive clone was not committed to the deployment listeners'
+    PTY_CLONE_HASH=$(editLiveHash)
+    runEditPty $'1\n21\n' 15
+    [[ "$(editLiveHash)" == "${PTY_CLONE_HASH}" ]] ||
+        fail 'ambiguous numeric protocol selection changed a multi-entry deployment'
+    assertEditCleanup
+    runEditPty $'10\nentry-1\n8\ny\n'
+    jq -e --slurpfile original "${EDIT_SPEC}" '. == $original[0]' \
+        "${DOCKER_ROOT}/config/spec.json" >/dev/null ||
+        fail 'interactive entry deletion did not retain the original complete spec'
+    jq -e '[.listeners[].listener_id] | sort == ["vless-reality", "vless-ws"]' \
+        "${DOCKER_ROOT}/deployment.json" >/dev/null ||
+        fail 'interactive entry deletion left a stale deployment listener'
+    assertEditCleanup
+fi
+
+# 多入口复用既有凭据；身份、核心端口与 TLS 端口必须由完整规格明确记录。
+MULTI_SPEC="${TEST_ROOT}/multi-v2.json"
+jq '
+  .core.protocols += [
+    (.core.protocols[] | select(.id == 1) |
+      .listener_id = "entry-extra-reality" | .name = "extra-reality" | .public_port = 26443),
+    (.core.protocols[] | select(.id == 21) |
+      .listener_id = "entry-extra-ws" | .name = "extra-ws" | .public_port = 26444 |
+      .websocket.path = "second_ws_path" | .websocket.backend_port = 31300 |
+      .websocket.tls_port = 8543)
+  ]
+' "${EDIT_SPEC}" >"${MULTI_SPEC}"
+MULTI_LIVE_HASH=$(editLiveHash)
+runControl 0 edit-multi-preview edit --spec "${MULTI_SPEC}" --preview
+[[ "$(editLiveHash)" == "${MULTI_LIVE_HASH}" ]] || fail 'multi-entry preview changed live configuration'
+assertEditCleanup
+runControl 0 edit-add-multiple-entries edit --spec "${MULTI_SPEC}" --confirm PADM-DOCKER-EDIT
+jq -e '
+  .core.protocol_ids == [1, 21] and
+  ([.listeners[] | .listener_id] | sort) ==
+    ["entry-extra-reality", "entry-extra-ws", "vless-reality", "vless-ws"] and
+  any(.listeners[]; .listener_id == "entry-extra-ws" and .service == "nginx" and
+    .public_port == 26444 and .container_port == 8543) and
+  any(.listeners[]; .listener_id == "vless-ws" and .public_port == 24444 and .container_port == 8443)
+' "${DOCKER_ROOT}/deployment.json" >/dev/null || fail 'multi-entry deployment lost stable listener identities'
+jq -e '
+  [.inbounds[] | select(.protocol == "vless") | {tag, port}] | sort_by(.tag) ==
+    ([{tag:"entry-extra-reality",port:26443},{tag:"entry-extra-ws",port:31300},
+      {tag:"vless-reality",port:25443},{tag:"vless-ws",port:31297}] | sort_by(.tag))
+' "${DOCKER_ROOT}/config/xray/config.json" >/dev/null || fail 'multi-entry Xray tags or backend ports are wrong'
+for backend in 31297 31300; do
+    grep -q "proxy_pass http://xray:${backend};" "${DOCKER_ROOT}/config/nginx/default.conf" ||
+        fail "multi-entry Nginx lost backend ${backend}"
+done
+for port in 8443 8543; do
+    grep -Eq "listen ${port} .*ssl;" "${DOCKER_ROOT}/config/nginx/default.conf" ||
+        fail "multi-entry Nginx lost TLS listener ${port}"
+done
+[[ "$(grep -c '^[[:space:]]*server {' "${DOCKER_ROOT}/config/nginx/default.conf")" -eq 3 ]] ||
+    fail 'multiple WebSocket entries did not retain separate TLS servers and one health server'
+jq -e '.services.nginx.ports | sort ==
+  ["0.0.0.0:24444:8443/tcp", "0.0.0.0:26444:8543/tcp"]' \
+    "${DOCKER_ROOT}/compose.json" >/dev/null || fail 'multi-entry Compose TLS mappings are wrong'
+[[ "$(wc -l <"${DOCKER_ROOT}/data/subscription/0123456789abcdef")" -eq 4 ]] ||
+    fail 'multi-entry subscription did not contain every entry'
+for port in 24444 25443 26443 26444; do
+    grep -q "@proxy.example.com:${port}" "${DOCKER_ROOT}/data/subscription/0123456789abcdef" ||
+        fail "multi-entry subscription lost public port ${port}"
+done
+MULTI_TAGS=$(jq -c '[.inbounds[] | select(.protocol == "vless") | {tag,port}] | sort_by(.tag)' \
+    "${DOCKER_ROOT}/config/xray/config.json")
+MULTI_LISTENERS=$(jq -c '.listeners | sort_by(.listener_id)' "${DOCKER_ROOT}/deployment.json")
+jq '.core.protocols |= reverse' "${MULTI_SPEC}" >"${TEST_ROOT}/multi-reordered.json"
+runControl 0 edit-reorder-stable-identity edit --spec "${TEST_ROOT}/multi-reordered.json" --confirm PADM-DOCKER-EDIT
+[[ "$(jq -c '[.inbounds[] | select(.protocol == "vless") | {tag,port}] | sort_by(.tag)' \
+    "${DOCKER_ROOT}/config/xray/config.json")" == "${MULTI_TAGS}" &&
+    "$(jq -c '.listeners | sort_by(.listener_id)' "${DOCKER_ROOT}/deployment.json")" == "${MULTI_LISTENERS}" ]] ||
+    fail 'reordering protocol entries renumbered listener identities or ports'
+MULTI_LIVE_HASH=$(editLiveHash)
+for mutation in \
+    '(.core.protocols[] | select(.listener_id == "entry-extra-reality") | .listener_id) = "entry-renamed"' \
+    '(.core.protocols[] | select(.listener_id == "entry-extra-ws") | .listener_id) = "entry-renamed-ws" |
+      (.core.protocols[] | select(.listener_id == "entry-renamed-ws") | .websocket.backend_port) = 31400' \
+    '(.core.protocols[] | select(.listener_id == "entry-extra-ws") | .listener_id) = "entry-renamed-ws" |
+      (.core.protocols[] | select(.listener_id == "entry-renamed-ws") | .websocket.tls_port) = 8643'; do
+    jq "${mutation}" "${MULTI_SPEC}" >"${TEST_ROOT}/multi-invalid.json"
+    runControl 15 edit-reject-identity-replacement edit --spec "${TEST_ROOT}/multi-invalid.json" --preview
+    [[ "$(editLiveHash)" == "${MULTI_LIVE_HASH}" ]] ||
+        fail 'same-credential identity replacement changed live configuration'
+    assertEditCleanup
+done
+for mutation in \
+    '.core.protocols[0].listener_id = .core.protocols[1].listener_id' \
+    '.core.protocols[0].listener_id = "vless-reality"' \
+    '.core.protocols[0].public_port = .core.protocols[1].public_port' \
+    '.core.protocols[3].websocket.backend_port = .core.protocols[0].websocket.backend_port' \
+    '.core.protocols[1].public_port = .core.protocols[0].websocket.backend_port' \
+    '.core.protocols[3].websocket.tls_port = .core.protocols[0].websocket.tls_port' \
+    '.core.protocols[0].websocket.tls_port = 8080' \
+    '.core.protocols[1].public_port = 10085' \
+    '.core.protocols[0].websocket.backend_port = 10085' \
+    '.core.protocols |= [range(17) as $n | .[1] |
+      .listener_id = ("entry-limit-" + ($n | tostring)) | .public_port = (27000 + $n)] |
+      .tls = null | .subscription.enabled = false' \
+    '.core.type = "sing-box"'; do
+    jq "${mutation}" "${MULTI_SPEC}" >"${TEST_ROOT}/multi-invalid.json"
+    runControl 15 reject-multi-entry-conflict configure --spec "${TEST_ROOT}/multi-invalid.json"
+    [[ "$(editLiveHash)" == "${MULTI_LIVE_HASH}" ]] || fail 'rejected multi-entry spec changed live configuration'
+    assertEditCleanup
+done
+jq '.core.protocols += [(.core.protocols[] | select(.listener_id == "entry-extra-reality") |
+  .listener_id = "entry-bad-clone" | .public_port = 28443 |
+  .uuid = "33333333-3333-4333-8333-333333333333")]' "${MULTI_SPEC}" >"${TEST_ROOT}/multi-invalid.json"
+runControl 15 edit-reject-new-entry-credentials edit --spec "${TEST_ROOT}/multi-invalid.json" --preview
+[[ "$(editLiveHash)" == "${MULTI_LIVE_HASH}" ]] || fail 'rejected entry credentials changed live configuration'
+runControl 0 edit-remove-multiple-entries edit --spec "${EDIT_SPEC}" --confirm PADM-DOCKER-EDIT
+jq '
+  .core.protocols |= map(select(.id == 1)) |
+  .tls = null | .subscription.enabled = false
+' "${EDIT_SPEC}" >"${TEST_ROOT}/reality-only-v2.json"
+TLS_HASH=$(find "${DOCKER_ROOT}/secrets/tls" -type f -print0 | sort -z |
+    xargs -0 sha256sum | sha256sum | cut -d ' ' -f 1)
+REMOVE_WS_LOG_START=$(wc -l <"${DOCKER_LOG}")
+runControl 0 edit-remove-last-websocket edit --spec "${TEST_ROOT}/reality-only-v2.json" --confirm PADM-DOCKER-EDIT
+tail -n "+$((REMOVE_WS_LOG_START + 1))" "${DOCKER_LOG}" | grep -q -- ' up -d .*--remove-orphans' ||
+    fail 'removing the last WebSocket did not clean up orphaned project services'
+jq -e '.schema_version == 2 and .tls == null and .subscription.enabled == false and
+  .subscription.token == "0123456789abcdef" and .core.protocols[0].listener_id == "vless-reality"' \
+    "${DOCKER_ROOT}/config/spec.json" >/dev/null || fail 'removing the last WebSocket lost retained spec inputs'
+[[ "$(find "${DOCKER_ROOT}/secrets/tls" -type f -print0 | sort -z |
+    xargs -0 sha256sum | sha256sum | cut -d ' ' -f 1)" == "${TLS_HASH}" ]] ||
+    fail 'removing the last WebSocket deleted retained TLS files'
+jq '.core.type = "sing-box" | .core.protocols |= map(select(.id == 1)) |
+  .tls = null | .subscription.enabled = false' "${MULTI_SPEC}" >"${TEST_ROOT}/multi-sing-box.json"
+runControl 0 configure-multi-sing-box configure --spec "${TEST_ROOT}/multi-sing-box.json"
+jq -e '[.inbounds[] | select(.type == "vless") | {tag,listen_port}] | sort_by(.tag) ==
+  ([{tag:"entry-extra-reality",listen_port:26443},{tag:"vless-reality",listen_port:25443}] | sort_by(.tag))' \
+    "${DOCKER_ROOT}/config/sing-box/config.json" >/dev/null || fail 'multi-entry sing-box Reality listeners are wrong'
+jq '.core.protocols[0].public_port = 10087' "${TEST_ROOT}/multi-sing-box.json" \
+    >"${TEST_ROOT}/multi-invalid.json"
+runControl 15 reject-sing-box-stats-port configure --spec "${TEST_ROOT}/multi-invalid.json"
+jq '.core.protocols |= [range(16) as $n | .[1] |
+  .listener_id = ("entry-limit-" + ($n | tostring)) | .public_port = (27000 + $n)] |
+  .tls = null | .subscription.enabled = false' "${MULTI_SPEC}" >"${TEST_ROOT}/multi-limit.json"
+runControl 0 configure-sixteen-entries configure --spec "${TEST_ROOT}/multi-limit.json"
+jq -e '[.inbounds[] | select(.protocol == "vless")] | length == 16' \
+    "${DOCKER_ROOT}/config/xray/config.json" >/dev/null || fail 'maximum supported entry count was not rendered'
+jq -e '(.listeners | length) == 16 and ([.listeners[].listener_id] | unique | length) == 16' \
+    "${DOCKER_ROOT}/deployment.json" >/dev/null || fail 'maximum entry count lost stable listener identities'
+runControl 0 configure-multi-xray configure --spec "${MULTI_SPEC}"
+runControl 0 edit-multi-baseline-preview edit --preview
 assertEditCleanup
 
 DEPLOYMENT_HASH=$(sha256sum "${DOCKER_ROOT}/deployment.json" | cut -d ' ' -f 1)

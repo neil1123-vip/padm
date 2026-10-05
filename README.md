@@ -134,7 +134,7 @@ wget -O /root/install-docker.sh "https://raw.githubusercontent.com/neil1123-vip/
 交互终端安装成功后自动进入菜单；已安装后直接运行 `padm-docker` 或
 `padm-docker menu` 可查看状态、启停重启和日志，选择“首次配置”收集核心、协议、地址和证书。
 当前向导支持 Xray/sing-box Reality，以及 Xray WS TLS 或 Reality + WS TLS；
-已有部署不会被向导覆盖，协议编辑和完整管理仍待后续阶段交付。
+已有部署不会被向导覆盖，可改用下述编辑入口；完整协议管理仍待后续阶段交付。
 `install --no-menu` 禁止安装后自动进入菜单；无参数非交互调用只显示帮助，
 不会安装 Docker、下载 bundle 或初始化状态，现有显式 CLI 命令保持可用。
 
@@ -154,7 +154,10 @@ WS TLS 可选择已有受管证书、导入完整证书链与私钥，或使用 
 已有受管规格可从菜单的“编辑配置/导入原始规格”或 `padm-docker edit` 修改入口端口、
 服务器地址、地址族、节点名称、Reality 目标/SNI、WS 路径和订阅开关。
 编辑先生成私有草稿，显示不含秘密值的差异，候选验证通过并确认后才提交；
-不改变其它协议、UUID、密钥、token、证书、宿主集成或累计流量。
+未选中的入口、UUID、密钥、token、证书、宿主集成和累计流量保持不变。
+菜单可按入口 ID 复制或删除现有协议入口，至少保留一个入口。
+新增与删除须分次确认提交，不能在同一事务中用替换绕过已有身份及内部端口保护。
+复制复用原入口凭据；同一 UUID 的多个入口共享累计流量与额度，不会创建独立用户。
 旧部署没有 `config/spec.json` 时，必须导入保留的完整原始 spec，匹配运行配置后才能接入；
 缺字段、额外账号、手写路由/站点或不匹配的挂载路径会拒绝编辑，不从运行摘要伪造输入。
 
@@ -166,9 +169,17 @@ padm-docker edit --spec /root/original-spec.json --confirm PADM-DOCKER-EDIT
 
 `--preview` 不提交、不采集流量、不启停业务服务；验证仍会验签发布、拉取镜像并运行候选检查。
 `edit` 默认验证当前部署版本而非 latest，也可传入下述同版本发布资产参数。
-当前仍为 schema v1、单主核心、每种协议一个入口，
-最多 2 个协议；新增/删除协议、多入口、证书轮换和完整协议管理尚未开放。
-带 Fail2ban 的 WS 入口暂不允许修改端口，需后续联动封禁规则的管理事务。
+首次配置输出 `schema_version: 2`；`configure` 和备份恢复继续接受 v1。
+编辑先严格核对原规格与部署，再将草稿迁到 v2，确认前不改写受管规格。
+v2 为单核心、最多 16 个入口：Xray 可用 Reality/WS TLS，sing-box 仅 Reality，不允许跨核心混装。
+每个入口的 `listener_id` 固定；旧入口迁移保留 `vless-reality` / `vless-ws`，
+新入口使用 `entry-*`。WS 的 `websocket.backend_port` 与 `websocket.tls_port`
+按入口独立分配，不重排已有内部端口；身份、公开端口及同一容器网络空间的内部监听不得冲突。
+已有部署的 `edit --spec` 也支持这些入口变更，仍经过相同的预览、校验与确认。
+删除最后一个 WS 入口会关闭订阅并将规格的 `tls` 设为 `null`，但保留 TLS/ACME 文件与 token。
+新协议类型、双核心共存、证书轮换和完整协议管理尚未开放。
+带 Fail2ban 的 WS 入口暂不允许增删或修改公开端口，需后续联动封禁规则的管理事务。
+3A.2 已通过本地事务、PTY 和 Linux 权限回归；真实签名发布、业务镜像及双架构客户端连通仍待验。
 
 离线使用同一 Release 的三个资产：
 
@@ -182,6 +193,8 @@ padm-docker setup --manifest /root/release-manifest.json \
 `release` 可输出已验证的 `release`、`images` 输入，但它不是签名证明，`configure`
 会重新验证原资产。示例字段须替换为实际参数，并让发布字段和全部镜像与验签清单完全一致。
 更新/回滚会同步保存完整规格；损坏或不匹配的规格在停止当前服务前被拒绝。
+v2 编辑还要求当前控制脚本及同部署版本的可信发布资产支持 v2；不支持时先刷新到支持 v2 的已发布控制脚本。
+规格的 `schema_version` 与运行格式 `formats.config` 分开版本化，后者当前仍为 `1`。
 
 需要固定控制脚本版本时，把 `install` 改为 `install --ref <40 位 commit SHA>`；不要把 `latest` 当作生产版本锁。CI Release 同时提供 `release-manifest.json`、Cosign 签发的 Sigstore bundle v0.3（`release-manifest.sigstore.json`，签名内嵌）和 `padm-docker-bundle.tar.gz`，更新时会校验 bundle 签名和摘要。
 
@@ -282,6 +295,7 @@ padm-docker rollback
 ```
 
 回滚只使用受管的最近一次 `update.*` 快照，默认退回一个版本，并同时恢复快照记录的控制脚本；旧快照没有控制 bundle 指针时只恢复部署配置和镜像，不猜测旧脚本版本。没有有效快照时直接失败，不猜测或拼接任意历史版本。已启用用户统计时，回滚目标 sing-box 必须具备 `with_v2ray_api`，否则会在停止现有部署前拒绝，避免丢失额度约束。回滚失败会尝试恢复当前版本，并保留备份路径供排障。
+控制 bundle 必须声明支持快照规格版本；包含 v2 规格的快照不能回滚到仅支持 v1 的 bundle。
 
 ### 卸载
 

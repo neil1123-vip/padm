@@ -116,16 +116,17 @@ dockerSetupGenerateSpec() {
       ($credentials | split("\n")) as $secrets |
       $secrets[0] as $uuid | $secrets[1] as $privateKey | $secrets[2] as $publicKey |
       $secrets[3] as $shortId | $secrets[4] as $wsPath | $secrets[5] as $token |
-      . + {schema_version: 1, core: {type: $core, protocols:
+      . + {schema_version: 2, core: {type: $core, protocols:
         (if $protocols == 1 or $protocols == 3 then [{
           id: 1, server: $server, public_port: $realityPort, address_families: $families,
-          name: "main-reality", uuid: $uuid,
+          listener_id: "vless-reality", name: "main-reality", uuid: $uuid,
           reality: {server_name: $sni, target_host: $target, target_port: $targetPort,
             private_key: $privateKey, public_key: $publicKey, short_id: $shortId}
         }] else [] end) +
         (if $protocols == 2 or $protocols == 3 then [{
           id: 21, server: $server, public_port: $wsPort, address_families: $families,
-          name: "main-ws", uuid: $uuid, websocket: {domain: $domain, path: $wsPath}
+          listener_id: "vless-ws", name: "main-ws", uuid: $uuid,
+          websocket: {domain: $domain, path: $wsPath, backend_port: 31297, tls_port: 8443}
         }] else [] end)},
         tls: (if $protocols == 2 or $protocols == 3 then {domain: $domain} else null end),
         subscription: {enabled: $subscription, token: $token}, host_integrations: []}
@@ -332,14 +333,14 @@ dockerEditPreview() {
       ($path | map(tostring) | join(".")) | "  修改: \(.)"
     ' || return 1
     jq -r '.core.protocols[] |
-      "  协议 \(.id): \(.server):\(.public_port) [\(.address_families | join(","))]"' \
+      "  入口 \(.listener_id // (.id | tostring))，协议 \(.id): \(.server):\(.public_port) [\(.address_families | join(","))]"' \
         "${draft}"
 }
 
 dockerEditFields() {
-    local draft=$1 choice protocol field value= defaultValue= valueFile="${1}.value" temporary="${1}.next"
+    local draft=$1 choice protocol listener field value= defaultValue= valueFile="${1}.value" temporary="${1}.next"
     while :; do
-        printf '\n1. 入口端口\n2. 服务器地址\n3. 地址族\n4. 节点名称\n5. Reality 目标/SNI\n6. WS 路径\n7. 订阅开关\n8. 验证并预览\n0. 取消\n'
+        printf '\n1. 入口端口\n2. 服务器地址\n3. 地址族\n4. 节点名称\n5. Reality 目标/SNI\n6. WS 路径\n7. 订阅开关\n8. 验证并预览\n9. 复制入口\n10. 删除入口\n0. 取消\n'
         dockerSetupRead choice '编辑项目: ' || return 3
         [[ "${choice}" != 8 ]] || return 0
         if [[ "${choice}" == 7 ]]; then
@@ -347,11 +348,45 @@ dockerEditFields() {
             case "${value}" in y|Y|yes|YES) value=true ;; n|N|no|NO) value=false ;; *) return 1 ;; esac
             jq --argjson enabled "${value}" '.subscription.enabled = $enabled' "${draft}" >"${temporary}" || return 1
         else
-            jq -r '.core.protocols[] | "协议 \(.id): \(.server):\(.public_port)"' "${draft}" || return 1
-            dockerSetupRead protocol '协议 ID（0 取消）: ' || return 3
-            [[ "${protocol}" =~ ^(1|21)$ ]] &&
-                jq -e --argjson id "${protocol}" 'any(.core.protocols[]; .id == $id)' "${draft}" >/dev/null ||
+            jq -r '.core.protocols[] | "入口 \(.listener_id)，协议 \(.id): \(.server):\(.public_port)"' "${draft}" || return 1
+            dockerSetupRead listener '入口 ID（单入口也可填协议 ID，0 取消）: ' || return 3
+            listener=$(jq -er --arg key "${listener}" '
+              [.core.protocols[] | select(.listener_id == $key or (.id | tostring) == $key)] |
+              if length == 1 then .[0].listener_id else error("入口选择不唯一") end
+            ' "${draft}" 2>/dev/null) || return 1
+            protocol=$(jq -r --arg key "${listener}" '.core.protocols[] | select(.listener_id == $key) | .id' "${draft}") || return 1
+            if [[ "${protocol}" == 21 && ( "${choice}" == 1 || "${choice}" == 9 || "${choice}" == 10 ) ]] &&
+                jq -e 'any(.host_integrations[]; .type == "fail2ban")' "${draft}" >/dev/null; then
+                dockerError '带 Fail2ban 的 WS 入口需联动封禁规则，本阶段未开放端口或入口数量修改'
                 return 1
+            fi
+            if [[ "${choice}" == 10 ]]; then
+                jq --arg key "${listener}" '
+                  .core.protocols |= map(select(.listener_id != $key)) |
+                  if (.core.protocols | length) == 0 then error("至少保留一个入口")
+                  elif any(.core.protocols[]; .id == 21) then .
+                  else .tls = null | .subscription.enabled = false end
+                ' "${draft}" >"${temporary}" 2>/dev/null || return 1
+            elif [[ "${choice}" == 9 ]]; then
+                dockerSetupRead value '新入口端口（0 取消）: ' || return 3
+                [[ "${value}" =~ ^[0-9]{1,5}$ ]] || return 1
+                jq --arg key "${listener}" --argjson port "${value}" '
+                  . as $r |
+                  if (.core.protocols | length) >= 16 then error("最多16个入口") else . end |
+                  first(range(1; 18) | "entry-\(.)" | . as $id |
+                    select(all($r.core.protocols[]; .listener_id != $id))) as $newId |
+                  (.core.protocols[] | select(.listener_id == $key)) as $source |
+                  ($source | .listener_id = $newId | .public_port = $port |
+                    if .id == 21 then
+                      ([$r.core.protocols[] | if .id == 21 then .websocket.backend_port else .public_port end] +
+                       [$r.host_integrations[] | select(.type == "tproxy") | .settings.port] + [10085]) as $used |
+                      .websocket.backend_port = first(range(31297; 65536) | . as $p | select(($used | index($p)) == null)) |
+                      [$r.core.protocols[] | select(.id == 21) | .websocket.tls_port] as $tls |
+                      .websocket.tls_port = first(range(8443; 65536) | . as $p | select(($tls | index($p)) == null))
+                    else . end) as $new |
+                  .core.protocols += [$new]
+                ' "${draft}" >"${temporary}" 2>/dev/null || return 1
+            else
             case "${choice}" in
             1)
                 if [[ "${protocol}" == 21 ]] &&
@@ -377,8 +412,8 @@ dockerEditFields() {
             6) [[ "${protocol}" == 21 ]] || return 1; field=websocket.path ;;
             *) return 1 ;;
             esac
-            defaultValue=$(jq -r --argjson id "${protocol}" --arg field "${field}" '
-              .core.protocols[] | select(.id == $id) | getpath($field | split(".")) |
+            defaultValue=$(jq -r --arg key "${listener}" --arg field "${field}" '
+              .core.protocols[] | select(.listener_id == $key) | getpath($field | split(".")) |
               if type == "array" then
                 if . == ["ipv4"] then "1" elif . == ["ipv6"] then "2" else "3" end
               else tostring end
@@ -392,13 +427,14 @@ dockerEditFields() {
             # 输入值可能含账号或 WS 路径，只经私密文件传给 jq。
             printf '%s' "${value}" >"${valueFile}" || return 1
             chmod 0600 "${valueFile}" || return 1
-            jq --argjson id "${protocol}" --arg field "${field}" --rawfile value "${valueFile}" '
+            jq --arg key "${listener}" --arg field "${field}" --rawfile value "${valueFile}" '
               (if $field == "public_port" or $field == "reality.target_port" then ($value | tonumber)
                elif $field == "address_families" then
                  if $value == "1" then ["ipv4"] elif $value == "2" then ["ipv6"] else ["ipv4","ipv6"] end
                else $value end) as $input |
-              .core.protocols |= map(if .id == $id then setpath($field | split("."); $input) else . end)
+              .core.protocols |= map(if .listener_id == $key then setpath($field | split("."); $input) else . end)
             ' "${draft}" >"${temporary}" 2>/dev/null || return 1
+            fi
         fi
         chmod 0600 "${temporary}" && mv -f -- "${temporary}" "${draft}" || return 1
     done
@@ -406,7 +442,7 @@ dockerEditFields() {
 
 dockerEditCommand() {
     local specFile= manifest= bundle= controlBundle= mode=interactive root workspace original draft imported=0 status=0
-    local privateKey publicKey derivedKey opsImage version
+    local privateKey publicKey derivedKey opsImage version normalized
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
         --spec|--manifest|--bundle|--control-bundle)
@@ -467,6 +503,8 @@ dockerEditCommand() {
     fi
     chmod 0600 "${original}" || return "${PADM_DOCKER_RC_STATE}"
     dockerEditBaselineValidate "${original}" "${workspace}" || return "${PADM_DOCKER_RC_STATE}"
+    normalized="${workspace}/normalized.json"
+    dockerConfigureSpecMigrate "${original}" "${normalized}" || return "${PADM_DOCKER_RC_STATE}"
     if [[ -n "${specFile}" && "${imported}" -eq 0 ]]; then
         specFile=$(dockerResolveRegularFile "${specFile}") || return "${PADM_DOCKER_RC_STATE}"
         cp -- "${specFile}" "${draft}" || return "${PADM_DOCKER_RC_STATE}"
@@ -474,6 +512,18 @@ dockerEditCommand() {
         cp -- "${original}" "${draft}" || return "${PADM_DOCKER_RC_STATE}"
     fi
     chmod 0600 "${draft}" || return "${PADM_DOCKER_RC_STATE}"
+    jq -es 'length == 1 and (.[0] | type == "object")' "${draft}" >/dev/null 2>&1 ||
+        return "${PADM_DOCKER_RC_STATE}"
+    if jq -en --slurpfile before "${original}" --slurpfile after "${draft}" '
+      any($before[0].host_integrations[]; .type == "fail2ban") and
+      (([$before[0].core.protocols[] | select(.id == 21) | .public_port] | sort) !=
+       ([$after[0].core.protocols[] | select(.id == 21) | .public_port] | sort))
+    ' >/dev/null 2>&1; then
+        dockerError '带 Fail2ban 的 WS 入口端口需联动封禁规则，本阶段未开放端口或入口数量修改'
+        return "${PADM_DOCKER_RC_STATE}"
+    fi
+    dockerConfigureSpecMigrate "${draft}" "${draft}.v2" &&
+        mv -f -- "${draft}.v2" "${draft}" || return "${PADM_DOCKER_RC_STATE}"
     # 旧规格先接入，不能同时把未经证明的字段改动当作无损导入。
     if [[ "${mode}" == interactive && -z "${specFile}" && "${imported}" -eq 0 ]]; then
         dockerEditFields "${draft}" || status=$?
@@ -487,14 +537,6 @@ dockerEditCommand() {
     fi
     jq -es 'length == 1 and (.[0] | type == "object")' "${draft}" >/dev/null 2>&1 ||
         return "${PADM_DOCKER_RC_STATE}"
-    if jq -en --slurpfile before "${original}" --slurpfile after "${draft}" '
-      any($before[0].host_integrations[]; .type == "fail2ban") and
-      ([$before[0].core.protocols[] | select(.id == 21) | .public_port] !=
-       [$after[0].core.protocols[] | select(.id == 21) | .public_port])
-    ' >/dev/null 2>&1; then
-        dockerError '带 Fail2ban 的 WS 入口端口需联动封禁规则，本阶段未开放端口修改'
-        return "${PADM_DOCKER_RC_STATE}"
-    fi
     dockerConfigureSpecValidate "${draft}" || return "${PADM_DOCKER_RC_STATE}"
     dockerEditPreview "${original}" "${draft}" || return "${PADM_DOCKER_RC_STATE}"
     [[ "${imported}" -eq 0 ]] || printf '完整原始规格已匹配，确认后接入受管输入。\n'
@@ -506,14 +548,28 @@ dockerEditCommand() {
     fi
     dockerConfigureReleasePrepare "${manifest}" "${bundle}" "${controlBundle}" || return $?
     dockerConfigureReleaseValidate "${draft}" || return "${PADM_DOCKER_RC_MANIFEST}"
-    jq -en --slurpfile before "${original}" --slurpfile after "${draft}" '
-      def fixed:
-        .core.protocols |= (map(del(.server, .public_port, .address_families, .name,
-          .reality.target_host, .reality.target_port, .reality.server_name, .websocket.path)) | sort_by(.id)) |
-        del(.subscription.enabled);
-      ($before[0] | fixed) == ($after[0] | fixed)
+    jq -en --slurpfile before "${normalized}" --slurpfile after "${draft}" '
+      def fixed: del(.server, .public_port, .address_families, .name,
+        .reality.target_host, .reality.target_port, .reality.server_name, .websocket.path);
+      def root: del(.core.protocols, .tls, .subscription.enabled);
+      $before[0] as $old | $after[0] as $new |
+      [$old.core.protocols[].listener_id] as $oldIds |
+      [$new.core.protocols[].listener_id] as $newIds |
+      # 分次提交新增与删除，防止借同凭据入口绕过已有身份和内部端口冻结。
+      ((($oldIds - $newIds) | length) == 0 or (($newIds - $oldIds) | length) == 0) and
+      ($old | root) == ($new | root) and
+      $new.tls == (if any($new.core.protocols[]; .id == 21) then $old.tls else null end) and
+      all($new.core.protocols[];
+        . as $entry | [$old.core.protocols[] | select(.listener_id == $entry.listener_id)] as $existing |
+        if ($existing | length) == 1 then ($existing[0] | fixed) == ($entry | fixed)
+        else
+          any($old.core.protocols[];
+            .listener_id as $sourceId | any($new.core.protocols[]; .listener_id == $sourceId) and
+            (fixed | del(.listener_id, .websocket.backend_port, .websocket.tls_port)) ==
+            ($entry | fixed | del(.listener_id, .websocket.backend_port, .websocket.tls_port)))
+        end)
     ' >/dev/null 2>&1 || {
-        dockerError '本阶段只支持入口、节点名称、Reality 目标、WS 路径及订阅开关；密钥、协议组合、证书和发布需独立管理'
+        dockerError '仅支持现有协议的入口编辑、复制和删除；账号、密钥、已有入口身份、内部端口、核心、证书和发布不能改写'
         return "${PADM_DOCKER_RC_STATE}"
     }
     opsImage=$(dockerManifestImageReference ops) || return "${PADM_DOCKER_RC_MANIFEST}"
