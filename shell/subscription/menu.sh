@@ -92,35 +92,6 @@ runSubscriptionControlledWizard() {
     showSubscriptionWireGuardStatus
 }
 
-ensureSubscriptionServiceForSharedLinks() {
-    local confirm=
-    subscribePort=
-    subscribeDomain=
-    subscribeType=
-    if ! readNginxSubscribe; then
-        errorCard "订阅 Nginx 配置损坏" "请先修复受管 subscribe.conf，再生成分享链接"
-        return 2
-    fi
-    if [[ -n "${subscribePort:-}" ]]; then
-        return 0
-    fi
-
-    statusCard "当前还不能直接发分享链接" "未检测到可用的公网订阅发布服务" "如果要把订阅链接发给客户端，请先安装/更新订阅服务" "仅作为被控接入主控时，可以先跳过这一步"
-    autoRead shared_subscription_install_service "现在先安装/更新订阅服务？[yes/no，默认 yes]:" confirm || return 2
-    confirm=${confirm:-yes}
-    if [[ "${confirm}" == "yes" || "${confirm}" == "y" ]]; then
-        if ! installSubscribe; then
-            errorCard "订阅服务安装或更新失败，暂时不能生成分享链接"
-            return 2
-        fi
-        showSubscriptionServiceStatus
-        return 0
-    fi
-
-    statusCard "已跳过订阅服务安装" "订阅对象不受影响" "稍后可从 订阅与用户 -> 安装/更新发布服务 配置发布入口"
-    return 1
-}
-
 restoreUserSubscriptionMutationState() {
     local previousState=$1
     # 回滚配置而非流量：保留同步期间已入账的累计值和计数器基线。
@@ -393,7 +364,7 @@ showSubscriptionWireGuardControlledAccessCredential() {
 
 # 订阅与用户入口
 manageSubscription() {
-    local role
+    local role nextRole homeStatus
     if [[ -z "${configPath}" ]]; then
         errorCard "未安装"
         return 0
@@ -403,11 +374,20 @@ manageSubscription() {
         errorCard "WireGuard 控制面状态损坏或不可读" "请先修复 $(subscriptionWireGuardStateFile)，本机模式不会绕过损坏状态"
         return 1
     }
-    case "${role}" in
-    uninitialized) manageSubscriptionLocalHome ;;
-    main) manageSubscriptionMainHome ;;
-    controlled) manageSubscriptionControlledHome ;;
-    esac
+    while true; do
+        homeStatus=0
+        case "${role}" in
+        uninitialized) manageSubscriptionLocalHome || homeStatus=$? ;;
+        main) manageSubscriptionMainHome || homeStatus=$? ;;
+        controlled) manageSubscriptionControlledHome || homeStatus=$? ;;
+        esac
+        nextRole=$(subscriptionCurrentRoleNormalized) || {
+            errorCard "WireGuard 控制面状态损坏或不可读" "请先修复 $(subscriptionWireGuardStateFile)，本机模式不会绕过损坏状态"
+            return 1
+        }
+        [[ "${nextRole}" != "${role}" ]] || return "${homeStatus}"
+        role=${nextRole}
+    done
 }
 
 showSubscriptionServiceStatus() {
@@ -542,7 +522,7 @@ manageSubscriptionCatalog() {
         menuItem 1 "查看当前订阅链接" "只读查看已发布的本机自用和分享订阅"
         menuItem 2 "分享订阅" "新建或维护已有分享订阅"
         menuItem 3 "流量与限额" "查看流量明细，并处理超限和自动限额"
-        menuItem 6 "立即同步并更新链接" "更新本机和分享订阅后显示链接"
+        menuItem 6 "立即完整同步" "同步账号及启用来源；已配置发布服务时更新并显示链接"
         menuItem 7 "订阅同步" "自动同步、同步间隔、状态排障和状态备份"
         menuItem "${publishServiceChoice}" "安装/更新发布服务" "配置公网发布入口"
         if [[ "${role}" == "main" ]]; then
@@ -937,9 +917,6 @@ syncAndShowSubscriptionLinks() {
             return 1
         fi
     fi
-    if ! ensureSubscriptionServiceForSharedLinks; then
-        return 1
-    fi
     SUBSCRIPTION_SYNC_PUBLISHED=false
     if ! runSubscriptionGroupSync; then
         if [[ "${SUBSCRIPTION_SYNC_PUBLISHED:-false}" == "true" ]]; then
@@ -948,6 +925,10 @@ syncAndShowSubscriptionLinks() {
             errorCard "订阅同步失败，未生成新的订阅链接" "修复同步问题后重试，或只读查看现有链接"
             return 1
         fi
+    fi
+    if [[ "${SUBSCRIPTION_SYNC_PUBLISHED:-false}" != "true" ]]; then
+        statusCard "账号同步已完成，未发布订阅链接" "如需分享链接，请从订阅首页安装/更新发布服务，再执行立即完整同步"
+        return 0
     fi
     if [[ -n "${idsJson}" ]]; then
         showPublishedSubscriptionLinks "" "${idsJson}"
@@ -1003,7 +984,7 @@ showPublishedSubscriptionLinks() {
     domain=$(resolveSubscribePublicDomain)
     salt=$(readSubscribeSalt "$(subscribeLocalBaseDir)/subscribeSalt")
     if [[ -z "${domain}" || -z "${subscribeType}" || -z "${salt}" ]]; then
-        statusCard "当前没有可用的已发布链接" "请执行立即同步并更新链接"
+        statusCard "当前没有可用的已发布链接" "未配置发布服务时，请先从订阅首页安装/更新发布服务；已配置时，请执行立即完整同步"
         return 1
     fi
     if [[ -n "${subscribePort}" ]]; then
@@ -1027,7 +1008,7 @@ showPublishedSubscriptionLinks() {
         done
     done <<<"${accounts}"
     [[ "${shown}" == "true" ]] && return 0
-    statusCard "当前没有可用的已发布链接" "请执行立即同步并更新链接"
+    statusCard "当前没有可用的已发布链接" "未配置发布服务时，请先从订阅首页安装/更新发布服务；已配置时，请执行立即完整同步"
     return 1
 }
 
@@ -1971,7 +1952,6 @@ manageSubscriptionSyncSettings() {
         menuLine "同步间隔：${interval} 分钟"
         menuLine "最近结果：${lastStatus} / ${lastRun}"
         menuLine "失败数量：${failureCount}"
-        menuItem 1 "立即完整同步" "同步本机和所有启用来源，成功后发布完整订阅"
         menuItem 2 "开启/关闭自动同步" "控制后台定时同步及节点配置变更通知；手动管理动作仍立即同步"
         menuItem 3 "设置同步间隔" "设置 1-59 分钟间隔，不隐式开启自动同步"
         menuItem 4 "状态与排障" "查看失败、健康、计划和定时任务"
@@ -1980,7 +1960,7 @@ manageSubscriptionSyncSettings() {
         menuClose
         menuReadChoice sync_settings_menu "请选择:" syncSettingsStatus || return 0
         case "${syncSettingsStatus}" in
-        1) runSubscriptionGroupSync || true ;;
+        1) syncAndShowSubscriptionLinks || true ;;
         2)
             expectedSyncEnabled=$(jq -r '.enabled' <<<"${syncStatus}") || return 1
             targetSyncEnabled=true

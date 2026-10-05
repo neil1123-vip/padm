@@ -1431,7 +1431,10 @@ EOF
     showAccounts() { recordMenuAction showAccounts; }
     showPublishedSubscriptionLinks() { recordMenuAction "showPublishedSubscriptionLinks:$*"; }
     installSubscribe() { recordMenuAction installSubscribe; }
-    runSubscriptionGroupSync() { recordMenuAction "runSubscriptionGroupSync:$*"; }
+    runSubscriptionGroupSync() {
+        recordMenuAction "runSubscriptionGroupSync:$*"
+        SUBSCRIPTION_SYNC_PUBLISHED=true
+    }
     subscriptionSyncPlan() { recordMenuAction subscriptionSyncPlan; jq -n '{create:[], remove:[]}'; }
     subscriptionRemoteControlHealthAll() { recordMenuAction subscriptionRemoteControlHealthAll; jq -n '[{id:"edge-a", ok:true}]'; }
     subscriptionRemoteSyncPlan() { recordMenuAction subscriptionRemoteSyncPlan; jq -n '[{source_id:"edge-a", status:"success", response:{plan:{create:[], remove:[]}}}]'; }
@@ -2028,13 +2031,68 @@ n"
         (
             resetMenuActions
             initSubscriptionWireGuardMain() { recordMenuAction init-failed; return 1; }
-            manageSubscriptionLocalHome <<< $'8\n1\n5'
+            manageSubscription <<< $'8\n1\n5'
             [[ "${actions}" == $'init-failed\nshowPublishedSubscriptionLinks:\n' ]]
         )
         (
             resetMenuActions
-            manageSubscriptionLocalHome <<< $'9\ninvalid-invite\n1\n5'
+            manageSubscription <<< $'9\ninvalid-invite\n1\n5'
             [[ "${actions}" == $'errorCard:主控邀请无效\nshowPublishedSubscriptionLinks:\n' ]]
+        )
+        (
+            setMenuSmokeRole uninitialized
+            resetMenuActions
+            output=
+            manageSubscription <<< $'8\nn\n1\n4'
+            assertMenuAction initSubscriptionWireGuardMain
+            assertMenuAction 'showPublishedSubscriptionLinks:'
+            [[ "$(subscriptionCurrentRoleNormalized)" == main ]]
+            grep -q "管理被控服务器" <<<"${output}"
+        )
+        (
+            setMenuSmokeRole uninitialized
+            resetMenuActions
+            output=
+            manageSubscription <<< $'9\ninvite-credential\n2\n8'
+            assertMenuAction subscriptionWireGuardJoinInvite
+            [[ "$(grep -cxF showSubscriptionWireGuardStatus <<<"${actions}")" == "2" ]]
+            [[ "$(subscriptionCurrentRoleNormalized)" == controlled ]]
+            grep -q "显示被控更新凭据" <<<"${output}"
+        )
+        (
+            local readCount=0
+            setMenuSmokeRole uninitialized
+            resetMenuActions
+            autoRead() {
+                readCount=$((readCount + 1))
+                IFS= read -r "$3"
+            }
+            manageSubscription <<< $'8\nn'
+            [[ "${readCount}" == "2" && "$(subscriptionCurrentRoleNormalized)" == main ]]
+        )
+        (
+            local currentRole=uninitialized
+            resetMenuActions
+            subscriptionCurrentRoleNormalized() { printf '%s\n' "${currentRole}"; }
+            manageSubscriptionLocalHome() { recordMenuAction local-home; currentRole=main; return 1; }
+            manageSubscriptionMainHome() { recordMenuAction main-home; return 7; }
+            regressionExpectStatus 7 manageSubscription </dev/null
+            [[ "${actions}" == $'local-home\nmain-home\n' ]]
+        )
+        (
+            local currentRole=uninitialized
+            resetMenuActions
+            subscriptionCurrentRoleNormalized() {
+                [[ "${currentRole}" != invalid ]] || return 1
+                printf '%s\n' "${currentRole}"
+            }
+            manageSubscriptionLocalHome() { recordMenuAction local-home; currentRole=invalid; }
+            manageSubscriptionMainHome() { recordMenuAction main-home; }
+            regressionExpectStatus 1 manageSubscription </dev/null
+            [[ "${actions}" == $'local-home\nerrorCard:WireGuard 控制面状态损坏或不可读\n' ]]
+            resetMenuActions
+            regressionExpectStatus 1 manageSubscription </dev/null
+            [[ "${actions}" == $'errorCard:WireGuard 控制面状态损坏或不可读\n' ]]
         )
         resetMenuActions
         output=
@@ -2098,6 +2156,16 @@ invite-credential"
         [[ "${actions}" == $'runSubscriptionGroupSync:\nshowPublishedSubscriptionLinks:\n' ]]
         ! assertMenuAction installSubscribe
         ! assertMenuAction subscribe
+        (
+            resetMenuActions
+            runSubscriptionGroupSync() { recordMenuAction 'runSubscriptionGroupSync:'; }
+            readNginxSubscribe() { recordMenuAction readNginxSubscribe; return 99; }
+            installSubscribe() { recordMenuAction installSubscribe; return 99; }
+            SUBSCRIPTION_SYNC_PUBLISHED=true
+            manageSubscriptionMainHome <<< $'6\n4'
+            [[ "${actions}" == $'runSubscriptionGroupSync:\nstatusCard:账号同步已完成，未发布订阅链接\n' ]]
+            [[ "${SUBSCRIPTION_SYNC_PUBLISHED}" == false ]]
+        )
         resetMenuActions
         manageSubscriptionMainHome <<<"3
 5
@@ -2115,7 +2183,7 @@ invite-credential"
         manageSubscriptionMainHome <<<"4"
         grep -q "本机自用订阅来自协议配置" <<<"${output}"
         grep -q "查看当前订阅链接" <<<"${output}"
-        grep -q "立即同步并更新链接" <<<"${output}"
+        grep -q "立即完整同步" <<<"${output}"
         grep -q "安装/更新发布服务" <<<"${output}"
         ! grep -q "发布与链接" <<<"${output}"
         grep -q "分享订阅" <<<"${output}"
@@ -2272,7 +2340,7 @@ main
         resetMenuActions
         output=
         manageSubscriptionSyncSettings <<<"6"
-        grep -q "立即完整同步" <<<"${output}"
+        ! grep -q "立即完整同步" <<<"${output}"
         grep -q "开启/关闭自动同步" <<<"${output}"
         grep -q "设置同步间隔" <<<"${output}"
         grep -q "状态与排障" <<<"${output}"
@@ -2282,6 +2350,10 @@ main
             printf 'menu-smoke failed: unified sync menu still exposes legacy toggles\n' >&2
             return 1
         fi
+        resetMenuActions
+        manageSubscriptionSyncSettings <<< $'1\n6'
+        [[ "${actions}" == $'runSubscriptionGroupSync:\nshowPublishedSubscriptionLinks:\n' ]]
+        resetMenuActions
         (
             local syncEnabled=true syncInterval=10
             local settingWrites=0 cronWrites=0 cronShouldFail=false
@@ -2462,9 +2534,18 @@ main
 7
 8
 5"
-            [[ "${actions}" == $'showSubscriptionTrafficOverview\nmanageSharedSubscriptions\nshowSubscriptionSourcesTraffic\nshowUserSubscriptions\n' ]]
+            [[ "${actions}" == $'showSubscriptionTrafficOverview\nmanageSharedSubscriptions\nshowSubscriptionTrafficOverview\nshowSubscriptionSourcesTraffic\nshowSubscriptionTrafficOverview\nshowUserSubscriptions\nshowSubscriptionTrafficOverview\n' ]]
             grep -q '管理分享订阅与额度' <<<"${output}"
             ! grep -q '分享订阅概览' <<<"${output}"
+        )
+        (
+            local savedLimit=1
+            resetMenuActions
+            showSubscriptionTrafficOverview() { recordMenuAction "overview:${savedLimit}"; }
+            manageSharedSubscriptions() { recordMenuAction edit-limit; savedLimit=2; }
+            collectSubscriptionTraffic() { recordMenuAction collect; return 99; }
+            manageTrafficAndQuota <<< $'2\n5'
+            [[ "${actions}" == $'overview:1\nedit-limit\noverview:2\n' ]]
         )
         resetMenuActions
         manageTrafficAndQuota <<<"3
@@ -2780,7 +2861,7 @@ y
         resetMenuActions
         output=
         manageSubscriptionSyncSettings <<<"6"
-        grep -q "立即完整同步" <<<"${output}"
+        ! grep -q "立即完整同步" <<<"${output}"
         grep -q "状态与排障" <<<"${output}"
         grep -q "状态备份与恢复" <<<"${output}"
         ! grep -q "流量与限额" <<<"${output}"

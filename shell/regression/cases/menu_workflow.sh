@@ -72,9 +72,10 @@ runSubscriptionMenuWorkflowCoreRegression() (
     )
 
     (
-        local syncCount=0 syncStatus=0 published=true serviceCount=0 linkCount=0
+        local syncCount=0 syncStatus=0 published=true serviceCount=0 serviceReadCount=0 linkCount=0
         local shownCount=0 shownId=
-        ensureSubscriptionServiceForSharedLinks() { serviceCount=$((serviceCount + 1)); return 2; }
+        installSubscribe() { serviceCount=$((serviceCount + 1)); return 99; }
+        readNginxSubscribe() { serviceReadCount=$((serviceReadCount + 1)); return 99; }
         syncAndShowSubscriptionLinks() { linkCount=$((linkCount + 1)); return 99; }
         showPublishedSubscriptionLinks() {
             shownCount=$((shownCount + 1))
@@ -111,7 +112,7 @@ runSubscriptionMenuWorkflowCoreRegression() (
             "${shownCount}" == "2" && "${shownId}" == "partial-team" ]]
         userSubscriptionExists partial-team
         grep -q '首次同步部分失败但链接已发布' "${statusLog}"
-        [[ "${serviceCount}" == "0" && "${linkCount}" == "0" ]]
+        [[ "${serviceCount}" == "0" && "${serviceReadCount}" == "0" && "${linkCount}" == "0" ]]
     )
 
     (
@@ -145,14 +146,20 @@ runSubscriptionMenuWorkflowCoreRegression() (
     )
 
     (
-        local syncCount=0 publishCount=0 publishedCount=0
-        ensureSubscriptionServiceForSharedLinks() { return 0; }
-        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
+        local syncCount=0 publishCount=0 publishedCount=0 serviceCount=0 serviceReadCount=0
+        installSubscribe() { serviceCount=$((serviceCount + 1)); return 99; }
+        readNginxSubscribe() { serviceReadCount=$((serviceReadCount + 1)); return 99; }
+        runSubscriptionGroupSync() {
+            syncCount=$((syncCount + 1))
+            SUBSCRIPTION_SYNC_PUBLISHED=true
+        }
         subscribe() { publishCount=$((publishCount + 1)); return 99; }
         showPublishedSubscriptionLinks() { publishedCount=$((publishedCount + 1)); }
         setUserSubscriptionEnabled alpha false
         regressionExpectStatus 1 syncAndShowSubscriptionLinks alpha
         [[ "${syncCount}" == "0" && "${publishCount}" == "0" ]]
+        regressionExpectStatus 1 syncAndShowSubscriptionLinks missing
+        [[ "${syncCount}" == "0" && "${publishedCount}" == "0" ]]
         setUserSubscriptionEnabled alpha true
         syncAndShowSubscriptionLinks alpha
         [[ "${syncCount}" == "1" && "${publishCount}" == "0" && "${publishedCount}" == "1" ]]
@@ -160,30 +167,37 @@ runSubscriptionMenuWorkflowCoreRegression() (
         [[ "${syncCount}" == "2" && "${publishCount}" == "0" && "${publishedCount}" == "2" ]]
         syncAndShowSubscriptionLinks
         [[ "${syncCount}" == "3" && "${publishCount}" == "0" && "${publishedCount}" == "3" ]]
+        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
+        SUBSCRIPTION_SYNC_PUBLISHED=true
+        syncAndShowSubscriptionLinks alpha
+        [[ "${syncCount}" == "4" && "${publishedCount}" == "3" && "${SUBSCRIPTION_SYNC_PUBLISHED}" == "false" ]]
+        grep -q '账号同步已完成，未发布订阅链接' "${statusLog}"
         runSubscriptionGroupSync() {
             syncCount=$((syncCount + 1))
             SUBSCRIPTION_SYNC_PUBLISHED=true
             return 1
         }
         syncAndShowSubscriptionLinks alpha
-        [[ "${syncCount}" == "4" && "${publishCount}" == "0" && "${publishedCount}" == "4" ]]
+        [[ "${syncCount}" == "5" && "${publishCount}" == "0" && "${publishedCount}" == "4" ]]
         syncAndShowSubscriptionLinks
-        [[ "${syncCount}" == "5" && "${publishCount}" == "0" && "${publishedCount}" == "5" ]]
+        [[ "${syncCount}" == "6" && "${publishCount}" == "0" && "${publishedCount}" == "5" ]]
         runSubscriptionGroupSync() {
             syncCount=$((syncCount + 1))
             return 1
         }
+        SUBSCRIPTION_SYNC_PUBLISHED=true
         regressionExpectStatus 1 syncAndShowSubscriptionLinks alpha
-        [[ "${syncCount}" == "6" && "${publishedCount}" == "5" ]]
+        [[ "${syncCount}" == "7" && "${publishedCount}" == "5" && "${SUBSCRIPTION_SYNC_PUBLISHED}" == "false" ]]
         regressionExpectStatus 1 syncAndShowSubscriptionLinks
-        [[ "${syncCount}" == "7" && "${publishedCount}" == "5" ]]
-        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
+        [[ "${syncCount}" == "8" && "${publishedCount}" == "5" ]]
+        runSubscriptionGroupSync() {
+            syncCount=$((syncCount + 1))
+            SUBSCRIPTION_SYNC_PUBLISHED=true
+        }
         showPublishedSubscriptionLinks() { publishedCount=$((publishedCount + 1)); return 1; }
         regressionExpectStatus 1 syncAndShowSubscriptionLinks alpha
-        [[ "${syncCount}" == "8" && "${publishCount}" == "0" && "${publishedCount}" == "6" ]]
-        ensureSubscriptionServiceForSharedLinks() { return 1; }
-        regressionExpectStatus 1 syncAndShowSubscriptionLinks alpha
-        [[ "${syncCount}" == "8" && "${publishedCount}" == "6" ]]
+        [[ "${syncCount}" == "9" && "${publishCount}" == "0" && "${publishedCount}" == "6" ]]
+        [[ "${serviceCount}" == "0" && "${serviceReadCount}" == "0" ]]
     )
 
     (
@@ -235,7 +249,6 @@ runSubscriptionMenuWorkflowCoreRegression() (
         showPublishedSubscriptionLinks
         [[ "$(wc -l <"${linkLog}")" == "8" ]]
         setUserSubscriptionEnabled alpha true
-        ensureSubscriptionServiceForSharedLinks() { return 0; }
         runSubscriptionGroupSync() {
             syncCount=$((syncCount + 1))
             setUserSubscriptionEnabled alpha false
@@ -721,9 +734,9 @@ runSubscriptionMenuDraftRegression() (
 
     (
         [[ "${caseGroup}" == all || "${caseGroup}" == recovery ]] || exit 0
-        local syncCount=0 ensureCount=0 shownCount=0 shownId=
+        local syncCount=0 installCount=0 shownCount=0 shownId=
         resetDraftFixture
-        ensureSubscriptionServiceForSharedLinks() { ensureCount=$((ensureCount + 1)); return 99; }
+        installSubscribe() { installCount=$((installCount + 1)); return 99; }
         runSubscriptionGroupSync() {
             syncCount=$((syncCount + 1))
             SUBSCRIPTION_SYNC_PUBLISHED=true
@@ -735,7 +748,7 @@ runSubscriptionMenuDraftRegression() (
         }
         setUserSubscriptionEnabled alpha false
         createAndSyncUserSubscriptionWizard alpha <<< $'copied-alpha\n\n\n'
-        [[ "${syncCount}" == "1" && "${ensureCount}" == "0" && "${createdUserSubscriptionId}" == "copied-alpha" &&
+        [[ "${syncCount}" == "1" && "${installCount}" == "0" && "${createdUserSubscriptionId}" == "copied-alpha" &&
             "${shownCount}" == "1" && "${shownId}" == "copied-alpha" ]]
         subscriptionActiveGroupRead -e '
           . as $state |
@@ -748,7 +761,7 @@ runSubscriptionMenuDraftRegression() (
         ' >/dev/null
 
         createAndSyncUserSubscriptionWizard beta <<<zero-template-copy
-        [[ "${syncCount}" == "2" && "${ensureCount}" == "0" && "${shownCount}" == "2" &&
+        [[ "${syncCount}" == "2" && "${installCount}" == "0" && "${shownCount}" == "2" &&
             "${shownId}" == "zero-template-copy" ]]
         subscriptionActiveGroupRead -e '
           any(.user_groups[]; .id == "zero-template-copy" and .traffic_limit_gb == 0 and .allowed_sources == ["main"])
@@ -881,7 +894,7 @@ runSubscriptionMenuBatchRegression() (
     (
         local publicBase="${root}/public" localBase="${root}/local"
         local linkLog="${root}/links.log" trafficLog="${root}/traffic.log" id accountHash
-        local syncCount=0 ensureCount=0 copyCount=0 before editedIds=
+        local syncCount=0 installCount=0 copyCount=0 before editedIds=
         resetBatchFixture
         setUserSubscriptionEnabled beta false
         before=$(subscriptionGroupsStateRead -c '.')
@@ -895,12 +908,15 @@ runSubscriptionMenuBatchRegression() (
         readNginxSubscribe() { subscribeDomain=links.example.com; subscribeType=https; subscribePort=39778; }
         showSubscriptionUrlCard() { printf '%s\n' "$*" >>"${linkLog}"; }
         showUserSubscriptionTraffic() { printf '%s\n' "$1" >>"${trafficLog}"; }
-        ensureSubscriptionServiceForSharedLinks() { ensureCount=$((ensureCount + 1)); }
-        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
+        installSubscribe() { installCount=$((installCount + 1)); return 99; }
+        runSubscriptionGroupSync() {
+            syncCount=$((syncCount + 1))
+            SUBSCRIPTION_SYNC_PUBLISHED=true
+        }
         createAndSyncUserSubscriptionWizard() { copyCount=$((copyCount + 1)); }
         editUserSubscriptionsMenu() { editedIds=$1; }
         manageUserSubscriptionItem gamma <<< $'8\nalpha,beta\n1\n2\n4\n3\n9\n7'
-        [[ "${syncCount}" == "1" && "${ensureCount}" == "1" && "${copyCount}" == "0" ]]
+        [[ "${syncCount}" == "1" && "${installCount}" == "0" && "${copyCount}" == "0" ]]
         [[ "${editedIds}" == "${idsJson}" ]]
         [[ "$(wc -l <"${linkLog}")" == "2" && "$(<"${trafficLog}")" == $'alpha\nbeta' ]]
         accountHash=$(printf '%s\n' "$(subscriptionSyncAccountName alpha)batch-salt" | md5sum | awk '{print $1}')
@@ -908,7 +924,7 @@ runSubscriptionMenuBatchRegression() (
         [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
         setUserSubscriptionEnabled alpha false
         regressionExpectStatus 1 syncAndShowSubscriptionLinks "" "${idsJson}"
-        [[ "${syncCount}" == "1" && "${ensureCount}" == "1" ]]
+        [[ "${syncCount}" == "1" && "${installCount}" == "0" ]]
     )
 
     (

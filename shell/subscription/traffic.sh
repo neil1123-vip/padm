@@ -801,8 +801,8 @@ manageTrafficAndQuota() {
     subscriptionRequireLocalPublisherRole || return 1
     local quotaAutoApplyText quotaAutoApplyEnabled quotaAutoApplyTarget
     local trafficQuotaStatus=
-    showSubscriptionTrafficOverview || errorCard "流量总览暂不可读"
     while true; do
+        showSubscriptionTrafficOverview || errorCard "流量总览暂不可读"
         quotaAutoApplyEnabled=$(PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 \
             subscriptionActiveGroupRead -r '.sync.quota_auto_apply // false' 2>/dev/null) || quotaAutoApplyEnabled=
         case "${quotaAutoApplyEnabled}" in
@@ -833,7 +833,6 @@ manageTrafficAndQuota() {
             if ! collectSubscriptionTraffic; then
                 warnCard "流量未完整刷新" "以下显示已保存的统计，请检查失败来源后重试"
             fi
-            showSubscriptionTrafficOverview || errorCard "流量总览暂不可读"
             ;;
         2) selectUserSubscriptionTrafficMenu ;;
         6) showAdminSubscriptionTraffic ;;
