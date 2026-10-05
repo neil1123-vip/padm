@@ -1348,10 +1348,12 @@ manageUserSubscriptionsMenu() {
     local idsJson=${1:-'[]'}
     local userSubscriptionItemStatus=
     local userSubscriptionId= usersJson summary line enabled targetEnabled selectedCount
-    local selectedIds id hasChanges batchScope menuKey expectedFields templateId
+    local selectedIds id hasChanges batchScope menuKey expectedFields templateId currentCount removedIds
     local displayJq displayJson
     local -a linkArgs=()
-    selectedCount=$(jq -er 'select(type == "array" and length > 0) | length' <<<"${idsJson}") || return 1
+    selectedCount=$(jq -er 'select(type == "array" and length > 0 and
+      length == (unique | length) and all(.[]; type == "string" and length > 0)) |
+      length' <<<"${idsJson}") || return 1
     displayJq=$(printf '%s\n%s\n%s\n' "$(subscriptionTrafficTotalsJq)" \
         "$(subscriptionTrafficDisplayJq)" "$(subscriptionUserQuotaStatusJq)")
     while true; do
@@ -1365,10 +1367,17 @@ manageUserSubscriptionsMenu() {
               quota_status:subscriptionUserQuotaStatus($user; $traffic; true)}]
         ') || { errorCard "当前订阅读取失败或已被删除"; return 1; }
         usersJson=$(jq -c 'map(del(.usage, .quota_status))' <<<"${displayJson}") || return 1
-        [[ "$(jq 'length' <<<"${usersJson}")" == "${selectedCount}" ]] || {
+        currentCount=$(jq 'length' <<<"${usersJson}") || return 1
+        [[ "${currentCount}" != "0" ]] || {
             errorCard "所选订阅已不存在，请重新选择"
             return 1
         }
+        if [[ "${currentCount}" != "${selectedCount}" ]]; then
+            removedIds=$(jq -r --argjson ids "${idsJson}" '$ids - map(.id) | join("、")' <<<"${usersJson}") || return 1
+            idsJson=$(jq -c 'map(.id)' <<<"${usersJson}") || return 1
+            selectedCount=${currentCount}
+            warnCard "已移除不存在的订阅：${removedIds}" "保留剩余 ${selectedCount} 个订阅，请重新选择操作"
+        fi
         selectedIds=$(jq -r '.[].id' <<<"${usersJson}") || return 1
         if [[ "${selectedCount}" == "1" ]]; then
             userSubscriptionId=${selectedIds}

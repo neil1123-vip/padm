@@ -1514,6 +1514,115 @@ runSubscriptionMenuBatchRegression() (
     )
 
     (
+        local menuKeys= selectorCount=0 syncCount=0 warnCount=0 linkCount=0 dropOnView=true
+        local firstLinkId= firstLinkScope= viewedId= viewedScope= trafficIds= editedIds=
+        local syncId= syncScope= removedId= removedScope= removedExpected= before
+        resetBatchFixture
+        eval "$(declare -f menuReadChoice | sed '1s/^menuReadChoice/originalSurvivingMenuReadChoice/')"
+        menuReadChoice() {
+            menuKeys+="${menuKeys:+,}$1"
+            originalSurvivingMenuReadChoice "$@"
+        }
+        warnCard() { warnCount=$((warnCount + 1)); }
+        selectUserSubscriptionId() { selectorCount=$((selectorCount + 1)); return 1; }
+        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
+        showPublishedSubscriptionLinks() {
+            linkCount=$((linkCount + 1))
+            viewedId=${1:-} viewedScope=${2:-}
+            if [[ "${dropOnView}" == true && "${linkCount}" == 1 ]]; then
+                firstLinkId=${viewedId} firstLinkScope=${viewedScope}
+                subscriptionActiveGroupWrite '.user_groups |= map(select(.id != "beta")) | del(.traffic.user_groups.beta)'
+                before=$(subscriptionGroupsStateRead -c '.')
+            fi
+        }
+        showUserSubscriptionTraffic() { trafficIds+="$1,"; }
+        editUserSubscriptionsMenu() { editedIds=$1; }
+        syncAndShowSubscriptionLinks() { syncId=${1:-} syncScope=${2:-}; }
+        removeUserSubscriptionMenu() {
+            removedId=${1:-} removedScope=${2:-} removedExpected=${3:-}
+        }
+
+        # 只读操作后批量目标减少为一个，后续入口和所有动作都必须使用存活目标。
+        manageUserSubscriptionsMenu "${idsJson}" <<< $'1\n1\n2\n3\n4\n6'
+        [[ "${menuKeys}" == user_subscription_batch_menu,user_subscription_item_menu,user_subscription_item_menu,user_subscription_item_menu,user_subscription_item_menu,user_subscription_item_menu &&
+            "${warnCount}" == 1 && "${selectorCount}" == 0 && "${syncCount}" == 0 &&
+            -z "${firstLinkId}" && "${firstLinkScope}" == "${idsJson}" &&
+            "${viewedId}" == alpha && -z "${viewedScope}" && "${trafficIds}" == alpha, &&
+            "${editedIds}" == '["alpha"]' && "${syncId}" == alpha && -z "${syncScope}" &&
+            "${removedId}" == alpha && -z "${removedScope}" &&
+            "$(jq -c 'map(.id)' <<<"${removedExpected}")" == '["alpha"]' &&
+            "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+
+        resetBatchFixture
+        before=$(subscriptionGroupsStateRead -c '.')
+        dropOnView=false menuKeys= warnCount=0 editedIds= removedId= removedScope= removedExpected=
+        manageUserSubscriptionsMenu '["alpha","missing","beta"]' <<< $'3\n6'
+        [[ "${menuKeys}" == user_subscription_batch_menu,user_subscription_batch_menu &&
+            "${warnCount}" == 1 && "${selectorCount}" == 0 && "${syncCount}" == 0 &&
+            "${editedIds}" == "${idsJson}" && -z "${removedId}" && "${removedScope}" == "${idsJson}" &&
+            "$(jq -c 'map(.id)' <<<"${removedExpected}")" == "${idsJson}" &&
+            "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+        resetBatchFixture
+    )
+
+    (
+        local menuKeys= mutationCount=0 syncCount=0 warnCount=0 mutatedIds= expectedIds= trafficIds= before
+        resetBatchFixture
+        eval "$(declare -f menuReadChoice | sed '1s/^menuReadChoice/originalVanishingMenuReadChoice/')"
+        menuReadChoice() {
+            if [[ -z "${menuKeys}" ]]; then
+                subscriptionActiveGroupWrite '.user_groups |= map(select(.id != "beta")) | del(.traffic.user_groups.beta)'
+                before=$(subscriptionGroupsStateRead -c '.')
+            fi
+            menuKeys+="${menuKeys:+,}$1"
+            originalVanishingMenuReadChoice "$@"
+        }
+        eval "$(declare -f setUserSubscriptionsFields | sed '1s/^setUserSubscriptionsFields/originalVanishingSetUserSubscriptionsFields/')"
+        setUserSubscriptionsFields() {
+            mutationCount=$((mutationCount + 1))
+            mutatedIds=$1
+            expectedIds=$(jq -c 'map(.id)' <<<"$3")
+            originalVanishingSetUserSubscriptionsFields "$@"
+        }
+        warnCard() { warnCount=$((warnCount + 1)); }
+        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
+        showUserSubscriptionTraffic() { trafficIds+="$1,"; }
+        # 当前操作仍以完整快照失败；下次渲染恢复选择，不能把失败操作偷偷重试到剩余目标。
+        manageUserSubscriptionsMenu "${idsJson}" <<< $'10\n2\n7'
+        [[ "${menuKeys}" == user_subscription_batch_menu,user_subscription_item_menu,user_subscription_item_menu &&
+            "${mutationCount}" == 1 && "${mutatedIds}" == "${idsJson}" && "${expectedIds}" == "${idsJson}" &&
+            "${warnCount}" == 1 && "${syncCount}" == 0 && "${trafficIds}" == alpha, &&
+            "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+        resetBatchFixture
+    )
+
+    (
+        local scope remaining
+        local readLog="${root}/invalid-scope-reads.log"
+        # 无效范围必须先拒绝；全部失踪或读取失败也不得消费后续操作输入。
+        for scope in '["alpha","alpha"]' '[null,"alpha"]' '[1,"alpha"]' '["","alpha"]' '["missing"]' "${idsJson}"; do
+            (
+                resetBatchFixture
+                : >"${readLog}"
+                if [[ "${scope}" != '["missing"]' ]]; then
+                    subscriptionActiveGroupRead() { printf 'read\n' >>"${readLog}"; return 1; }
+                fi
+                exec 3<<<must-not-consume
+                regressionExpectStatus 1 manageUserSubscriptionsMenu "${scope}" <&3
+                IFS= read -r remaining <&3
+                exec 3<&-
+                [[ "${remaining}" == must-not-consume ]]
+                if [[ "${scope}" == "${idsJson}" ]]; then
+                    [[ "$(<"${readLog}")" == read ]]
+                else
+                    [[ ! -s "${readLog}" ]]
+                fi
+            )
+        done
+        resetBatchFixture
+    )
+
+    (
         local mutationCount=0 writeCount=0 syncCount=0
         runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
         eval "$(declare -f setUserSubscriptionsFields | sed '1s/^setUserSubscriptionsFields/originalSetUserSubscriptionsFields/')"
