@@ -104,10 +104,10 @@ runSubscriptionMenuWorkflowCoreRegression() (
             [[ "${selectedUserSubscriptionId}" == 2 && "${selectedUserSubscriptionIds}" == '[]' ]]
         )
         editUserSubscriptionsMenu() { editedIds=$1; }
-        manageUserSubscriptionItem alpha <<< $'8\n@over\n3\n7'
+        manageUserSubscriptionItem alpha <<< $'7\n@over\n3\n9'
         jq -e 'sort == ["2","beta"]' <<<"${editedIds}" >/dev/null
         runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
-        manageSharedSubscriptions <<< $'@on\n10\n7\n\n'
+        manageSharedSubscriptions <<< $'@on\n6\n9\n\n'
         [[ "${syncCount}" == 1 ]]
         subscriptionActiveGroupRead -e 'all(.user_groups[]; .enabled == false)' >/dev/null
         regressionExpectStatus 1 selectUserSubscriptionId true true <<<'@on'
@@ -504,13 +504,13 @@ runSubscriptionMenuWorkflowCoreRegression() (
             return 1
         }
         showUserSubscriptionTraffic() { trafficId=$1; }
-        manageUserSubscriptionItem alpha <<< $'5\n2\n7'
+        manageUserSubscriptionItem alpha <<< $'5\n2\n9'
         [[ "${mutationCount}" == "1" && "${trafficId}" == "alpha" ]]
         trafficId=
-        manageUserSubscriptionItem 2 <<< $'8\n2\n2\n7'
+        manageUserSubscriptionItem 2 <<< $'7\n2\n2\n9'
         [[ "${trafficId}" == "alpha" ]]
         trafficId=
-        manageSharedSubscriptions <<< $'2\n2\n7\n\n'
+        manageSharedSubscriptions <<< $'2\n2\n9\n\n'
         [[ "${trafficId}" == "alpha" ]]
     )
 
@@ -519,7 +519,7 @@ runSubscriptionMenuWorkflowCoreRegression() (
         showPublishedSubscriptionLinks() { viewedId=$1; }
         syncAndShowSubscriptionLinks() { syncedId=$1; }
         editUserSubscriptionsMenu() { editedIds=$1; }
-        manageUserSubscriptionItem alpha <<< $'1\n4\n3\n7'
+        manageUserSubscriptionItem alpha <<< $'1\n4\n3\n9'
         [[ "${viewedId}" == "alpha" && "${syncedId}" == "alpha" && "${editedIds}" == '["alpha"]' ]]
     )
 
@@ -645,19 +645,42 @@ runSubscriptionMenuDraftRegression() (
         regressionExpectStatus 1 selectUserSubscriptionId true true </dev/null
         [[ "${selectedUserSubscriptionIds}" == '[]' ]]
 
+        (
+            local menuNumbers= beforeMenu
+            beforeMenu=$(subscriptionGroupsStateRead -c '.')
+            menuItem() { menuNumbers+="$1"$'\n'; }
+            menuDangerItem() { menuNumbers+="$1"$'\n'; }
+            menuReturnItem() { menuNumbers+="$1:return"$'\n'; }
+            regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<<9
+            [[ "${menuNumbers}" == $'1\n2\n3\n4\n5\n6\n7\n8\n9:return\n' ]]
+            menuNumbers=
+            regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha","beta"]' <<<8
+            [[ "${menuNumbers}" == $'1\n2\n3\n4\n5\n6\n7\n8:return\n' ]]
+            menuNumbers=
+            manageUserSubscriptionItem alpha <<<9
+            [[ "${menuNumbers}" == $'1\n2\n3\n4\n5\n6\n7\n8\n+\n9:return\n' ]]
+            menuNumbers=
+            manageUserSubscriptionsMenu '["alpha","beta"]' <<<9
+            [[ "${menuNumbers}" == $'1\n2\n3\n4\n5\n6\n7\n8\n+\n9:return\n' ]]
+            : >"${errorLog}"
+            manageUserSubscriptionItem alpha <<< $'10\n9'
+            grep -q '选择错误，请重新选择' "${errorLog}"
+            [[ "$(subscriptionGroupsStateRead -c '.')" == "${beforeMenu}" ]]
+        )
+
         before=$(subscriptionGroupsStateRead -c '.')
-        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'1\nDiscarded name\n3\n7\n7'
+        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'1\nDiscarded name\n3\n7\n9'
         [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
         regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'3\n7'
         [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
         regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'2'
         [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
-        editUserSubscriptionsMenu '["alpha"]' <<< $'3\n7\n8\n6'
+        editUserSubscriptionsMenu '["alpha"]' <<< $'3\n7\n7\n6'
         [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
 
         resetDraftFixture
         before=$(subscriptionGroupsStateRead -c '.')
-        editUserSubscriptionsMenu '["alpha","beta"]' <<< $'2\n\n3\n\n6'
+        editUserSubscriptionsMenu '["alpha","beta"]' <<< $'1\n\n2\n\n5'
         [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
 
         local syncCount=0
@@ -672,10 +695,10 @@ runSubscriptionMenuDraftRegression() (
         [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
 
         syncCount=0
-        manageUserSubscriptionItem alpha <<< $'5\n7'
+        manageUserSubscriptionItem alpha <<< $'5\n9'
         [[ "${syncCount}" == "1" ]]
         subscriptionActiveGroupRead -e '.sync.enabled == false and .user_groups[0].enabled == false' >/dev/null
-        manageUserSubscriptionItem alpha <<< $'5\n7'
+        manageUserSubscriptionItem alpha <<< $'5\n9'
         [[ "${syncCount}" == "2" ]]
         subscriptionActiveGroupRead -e '.sync.enabled == false and .user_groups[0].enabled == true' >/dev/null
     )
@@ -741,7 +764,7 @@ runSubscriptionMenuDraftRegression() (
             expectedSnapshot=${3:-}
             originalSetUserSubscriptionsFields "$@"
         }
-        manageUserSubscriptionItem alpha <<< $'5\n7'
+        manageUserSubscriptionItem alpha <<< $'5\n9'
         [[ "${concurrentChanged}" == "true" && "${mutationCount}" == "1" && "${syncCount}" == "0" ]]
         jq -e '.enabled == false' <<<"${targetPatch}" >/dev/null
         jq -e 'length == 1 and .[0].id == "alpha" and .[0].enabled == true' <<<"${expectedSnapshot}" >/dev/null
@@ -768,7 +791,7 @@ runSubscriptionMenuDraftRegression() (
           .user_groups[0].traffic_limit_gb == 6 and .user_groups[0].enabled == false and
           .user_groups[1].name == "Beta"
         ' >/dev/null
-        editUserSubscriptionsMenu '["alpha","beta"]' <<< $'2,3,4,6\n2\n8'
+        editUserSubscriptionsMenu '["alpha","beta"]' <<< $'1,2,3,5\n2\n8'
         [[ "${mutationCount}" == "2" && "${syncCount}" == "2" ]]
         subscriptionActiveGroupRead -e '
           .sync.enabled == false and
@@ -778,13 +801,13 @@ runSubscriptionMenuDraftRegression() (
         resetDraftFixture
         local before
         before=$(subscriptionGroupsStateRead -c '.')
-        editUserSubscriptionsMenu '["alpha","beta"]' <<< $'2,3\n\n\n6'
+        editUserSubscriptionsMenu '["alpha","beta"]' <<< $'1,2\n\n\n5'
         [[ "${mutationCount}" == "2" && "${syncCount}" == "2" ]]
         [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
-        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'6,2\n2,6,3\n2,7\n2,8\n9,6\n2,9\n2,2\n4,5,6\nmissing\n7'
+        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'6,2\n2,6,3\n2,9\n2,7\n8,6\n2,8\n2,2\n4,5,6\nmissing\n9'
         [[ "${mutationCount}" == "2" && "${syncCount}" == "2" ]]
         [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
-        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha","beta"]' <<< $'1,3,6\n7'
+        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha","beta"]' <<< $'9,2,5\n8'
         [[ "${mutationCount}" == "2" && "${syncCount}" == "2" &&
             "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
         regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'1,2,3\nDiscarded\n1\n'
@@ -814,7 +837,7 @@ runSubscriptionMenuDraftRegression() (
         selectUserSubscriptionId <<<alpha
         grep -q '已超限' "${displayLog}"
         grep -q '用量' "${displayLog}"
-        manageUserSubscriptionItem alpha <<<7
+        manageUserSubscriptionItem alpha <<<9
         [[ "$(grep -c '已超限' "${displayLog}")" -ge 2 ]]
         eval "$(declare -f menuReadChoice | sed '1s/^menuReadChoice/originalTrafficManagementMenuReadChoice/')"
         menuReadChoice() {
@@ -833,7 +856,7 @@ runSubscriptionMenuDraftRegression() (
             originalTrafficManagementSetUserSubscriptionsFields "$@"
         }
         runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
-        selectUserSubscriptionTrafficMenu <<< $'alpha\n3\n3\n9\n\n7\n\n'
+        selectUserSubscriptionTrafficMenu <<< $'alpha\n3\n3\n9\n\n9\n\n'
         [[ "${pickedCount}" == "1" && "${mutationCount}" == "1" && "${syncCount}" == "1" && "${trafficChanged}" == "true" ]]
         jq -e 'all(.[]; keys == ["allowed_sources","enabled","id","name","traffic_limit_gb","uuid"])' <<<"${expectedSnapshot}" >/dev/null
         subscriptionActiveGroupRead -e '
@@ -867,7 +890,7 @@ runSubscriptionMenuDraftRegression() (
             originalIdentityConflictSetUserSubscriptionsFields "$@"
         }
         runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
-        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'3\n9\n\n7'
+        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'3\n9\n\n9'
         [[ "${identityChanged}" == "true" && "${mutationCount}" == "0" && "${syncCount}" == "0" ]]
         [[ "$(grep -c '待保存字段：订阅额度' "${displayLog}")" -ge 2 ]]
         subscriptionActiveGroupRead -e '
@@ -877,7 +900,7 @@ runSubscriptionMenuDraftRegression() (
         resetDraftFixture
         identityChanged=false
         mutationCount=0
-        manageUserSubscriptionItem alpha <<< $'5\n7'
+        manageUserSubscriptionItem alpha <<< $'5\n9'
         [[ "${identityChanged}" == "true" && "${mutationCount}" == "1" && "${syncCount}" == "0" ]]
         subscriptionActiveGroupRead -e '
           .user_groups[0].enabled and .user_groups[0].uuid == "22222222-2222-4222-8222-222222222222"
@@ -902,11 +925,11 @@ runSubscriptionMenuDraftRegression() (
         menuReadChoice() {
             local resultVar=$3
             originalQuotaConflictMenuReadChoice "$@" || return $?
-            if [[ "$1" == "traffic_quota_menu" && "${!resultVar}" == "4" ]]; then
+            if [[ "$1" == "traffic_quota_menu" && "${!resultVar}" == "6" ]]; then
                 subscriptionActiveGroupWrite '.sync.quota_auto_apply = true'
             fi
         }
-        manageTrafficAndQuota <<< $'4\n5'
+        manageTrafficAndQuota <<< $'6\n7'
         [[ "${toggleCount}" == "1" ]]
         subscriptionActiveGroupRead -e '.sync.quota_auto_apply == true' >/dev/null
         (
@@ -918,7 +941,7 @@ runSubscriptionMenuDraftRegression() (
                 stateWriteCount=$((stateWriteCount + 1))
                 originalUnreadableQuotaStateWriteUnlocked "$@"
             }
-            manageTrafficAndQuota <<< $'4\n5'
+            manageTrafficAndQuota <<< $'6\n7'
             manageTrafficAndQuota </dev/null
             [[ "${toggleCount}" == "1" && "${stateWriteCount}" == "0" ]]
         )
@@ -938,7 +961,7 @@ runSubscriptionMenuDraftRegression() (
                 menuReadChoice() {
                     local resultVar=$3
                     originalRefreshConflictMenuReadChoice "$@" || return $?
-                    if [[ "$1" == edit_user_subscription_menu && "${!resultVar}" == 9 && "${changed}" == false ]]; then
+                    if [[ "$1" == edit_user_subscription_menu && "${!resultVar}" == 8 && "${changed}" == false ]]; then
                         changed=true
                         if [[ "${scenario}" == field ]]; then
                             subscriptionActiveGroupWrite '.user_groups[0].name = "Concurrent name"'
@@ -952,7 +975,7 @@ runSubscriptionMenuDraftRegression() (
                     mutationCount=$((mutationCount + 1))
                     originalRefreshConflictSetUserSubscriptionsFields "$@"
                 }
-                regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'1\nRetained draft\n9\n6\n7'
+                regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'1\nRetained draft\n8\n6\n9'
                 [[ "${changed}" == true && "${mutationCount}" == 0 && "${syncCount}" == 0 ]]
                 [[ "$(grep -c '待保存字段：名称' "${displayLog}")" -ge 3 ]]
                 grep -q '当前名称：Retained draft' "${displayLog}"
@@ -984,7 +1007,7 @@ runSubscriptionMenuDraftRegression() (
         menuReadChoice() {
             local resultVar=$3
             originalReorderRefreshMenuReadChoice "$@" || return $?
-            if [[ "$1" == edit_user_subscription_menu && "${!resultVar}" == 9 ]]; then
+            if [[ "$1" == edit_user_subscription_menu && "${!resultVar}" == 8 ]]; then
                 reorderSnapshot=true
             fi
         }
@@ -996,7 +1019,7 @@ runSubscriptionMenuDraftRegression() (
                 originalReorderRefreshGroupRead "$@"
             fi
         }
-        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'2\n2\n9'
+        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'2\n2\n8'
         grep -q '已刷新订阅状态，草稿仍保留' "${statusLog}"
         [[ ! -s "${errorLog}" && "${mutationCount}" == 0 && "${syncCount}" == 0 &&
             "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
@@ -1058,7 +1081,7 @@ runSubscriptionMenuDraftRegression() (
     (
         [[ "${caseGroup}" == all || "${caseGroup}" == recovery ]] || exit 0
         local fault action
-        for action in 9 6; do
+        for action in 8 6; do
             for fault in failure missing; do
                 (
                     local syncCount=0 mutationCount=0 writeCount=0 failRefresh=false before
@@ -1114,7 +1137,7 @@ runSubscriptionMenuDraftRegression() (
         menuReadChoice() {
             local resultVar=$3
             originalBatchRefreshMenuReadChoice "$@" || return $?
-            if [[ "$1" == edit_user_subscription_menu && "${!resultVar}" == 6 && "${changed}" == false ]]; then
+            if [[ "$1" == edit_user_subscription_menu && "${!resultVar}" == 5 && "${changed}" == false ]]; then
                 changed=true
                 subscriptionActiveGroupWrite '
                   .user_groups |= map(
@@ -1130,7 +1153,7 @@ runSubscriptionMenuDraftRegression() (
             expectedSnapshot=$3
             originalBatchRefreshSetUserSubscriptionsFields "$@"
         }
-        editUserSubscriptionsMenu '["alpha","beta"]' <<< $'3\n7\n6'
+        editUserSubscriptionsMenu '["alpha","beta"]' <<< $'2\n7\n5'
         [[ "${changed}" == true && "${mutationCount}" == 1 && "${syncCount}" == 1 ]]
         jq -e '
           .[0].name == "Concurrent alpha" and .[0].allowed_sources == ["main"] and
@@ -1181,7 +1204,7 @@ runSubscriptionMenuDraftRegression() (
         subscriptionActiveGroupWrite '.sync.quota_auto_apply = true'
         before=$(subscriptionGroupsStateRead -c '.')
         runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
-        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'4\n6\n7'
+        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'4\n6\n9'
         [[ "${syncCount}" == "0" && "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
         editUserSubscriptionsMenu '["alpha"]' <<< $'4\n3\n2\n6'
         [[ "${syncCount}" == "1" ]]
@@ -1205,7 +1228,7 @@ runSubscriptionMenuDraftRegression() (
         resetDraftFixture
         subscriptionActiveGroupWrite '.sync.quota_auto_apply = true | .user_groups[0].enabled = false'
         before=$(subscriptionGroupsStateRead -c '.')
-        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha","beta"]' <<< $'4,6\n7'
+        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha","beta"]' <<< $'3,5\n8'
         [[ "${mutationCount}" == 2 && "${syncCount}" == 2 &&
             "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
         jq -e 'keys == ["enabled"] and .enabled' <<<"${targetPatch}" >/dev/null
@@ -1223,7 +1246,7 @@ runSubscriptionMenuDraftRegression() (
             setUserSubscriptionTrafficLimit beta 11
             originalSetUserSubscriptionsFields "$@"
         }
-        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha","beta"]' <<< $'3\n7\n6\n7'
+        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha","beta"]' <<< $'2\n7\n5\n8'
         [[ "${mutationCount}" == "1" && "${syncCount}" == "0" ]]
         subscriptionActiveGroupRead -e '.user_groups[0].traffic_limit_gb == 1 and .user_groups[1].traffic_limit_gb == 11' >/dev/null
     )
@@ -1407,7 +1430,7 @@ runSubscriptionMenuBatchRegression() (
         resetBatchFixture
         runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); return 1; }
         showPublishedSubscriptionLinks() { viewedId=${1:-}; viewedIds=${2:-}; }
-        manageUserSubscriptionItem alpha <<< $'9\ncopy-route-a,copy-route-b\n1\n7'
+        manageUserSubscriptionItem alpha <<< $'8\ncopy-route-a,copy-route-b\n1\n9'
         [[ "${syncCount}" == "1" && -z "${viewedId}" &&
             "${viewedIds}" == '["copy-route-a","copy-route-b"]' &&
             "${createdUserSubscriptionIds}" == "${viewedIds}" ]]
@@ -1451,7 +1474,7 @@ runSubscriptionMenuBatchRegression() (
         resetDirectCreateFixture
         addSubscriptionSourceState edge "Edge" 203.0.113.20 39778
         subscriptionActiveGroupWrite '.user_groups[0].allowed_sources = ["edge"] | .user_groups[0].traffic_limit_gb = 6'
-        manageUserSubscriptionsMenu '["alpha"]' <<< $'+\ndirect-new-single\n1\n0\n1\n2\n7'
+        manageUserSubscriptionsMenu '["alpha"]' <<< $'+\ndirect-new-single\n1\n0\n1\n2\n9'
         [[ "${syncCount}" == 1 && "${createCount}" == 1 && "${viewedId}" == direct-new-single &&
             -z "${viewedIds}" && "${trafficIds}" == direct-new-single, && -z "${templateArgs[0]}" &&
             "${sourcePromptCount}" == 1 && "${limitPromptCount}" == 1 && "${selectorPromptCount}" == 0 ]]
@@ -1461,7 +1484,7 @@ runSubscriptionMenuBatchRegression() (
         ' >/dev/null
 
         resetDirectCreateFixture
-        manageUserSubscriptionsMenu "${idsJson}" <<< $'+\ndirect-new-batch-a,direct-new-batch-b\n1\n2\n1\n2\n7'
+        manageUserSubscriptionsMenu "${idsJson}" <<< $'+\ndirect-new-batch-a,direct-new-batch-b\n1\n2\n1\n2\n9'
         [[ "${syncCount}" == 1 && "${createCount}" == 1 && -z "${viewedId}" && -z "${templateArgs[0]}" &&
             "${viewedIds}" == '["direct-new-batch-a","direct-new-batch-b"]' &&
             "${createdUserSubscriptionIds}" == "${viewedIds}" &&
@@ -1473,7 +1496,7 @@ runSubscriptionMenuBatchRegression() (
 
         resetDirectCreateFixture
         syncStatus=1
-        manageUserSubscriptionsMenu '["alpha"]' <<< $'+\ndirect-pending-a,direct-pending-b\n1\n0\n1\n2\n7'
+        manageUserSubscriptionsMenu '["alpha"]' <<< $'+\ndirect-pending-a,direct-pending-b\n1\n0\n1\n2\n9'
         [[ "${syncCount}" == 1 && "${createCount}" == 1 && -z "${viewedId}" &&
             "${viewedIds}" == '["direct-pending-a","direct-pending-b"]' &&
             "${createdUserSubscriptionIds}" == "${viewedIds}" &&
@@ -1483,7 +1506,7 @@ runSubscriptionMenuBatchRegression() (
         ' >/dev/null
 
         resetDirectCreateFixture
-        manageUserSubscriptionsMenu "${idsJson}" <<< $'+\ndirect-batch-to-single\n1\n3\n9\ndirect-copy-from-new\n2\n7'
+        manageUserSubscriptionsMenu "${idsJson}" <<< $'+\ndirect-batch-to-single\n1\n3\n8\ndirect-copy-from-new\n2\n9'
         [[ "${syncCount}" == 2 && "${createCount}" == 2 && -z "${templateArgs[0]}" &&
             "${templateArgs[1]}" == direct-batch-to-single && "${trafficIds}" == direct-copy-from-new, &&
             "${sourcePromptCount}" == 1 && "${limitPromptCount}" == 1 && "${selectorPromptCount}" == 0 ]]
@@ -1495,7 +1518,7 @@ runSubscriptionMenuBatchRegression() (
         for scope in '["alpha"]' "${idsJson}"; do
             resetDirectCreateFixture
             before=$(subscriptionGroupsStateRead -c '.')
-            manageUserSubscriptionsMenu "${scope}" <<< $'+\n\n2\n7'
+            manageUserSubscriptionsMenu "${scope}" <<< $'+\n\n2\n9'
             [[ "${syncCount}" == 0 && "${createCount}" == 1 && "${createdUserSubscriptionIds}" == '[]' &&
                 "${sourcePromptCount}" == 0 && "${limitPromptCount}" == 0 && "${selectorPromptCount}" == 0 &&
                 "${trafficIds}" == "$(jq -r 'join(",") + ","' <<<"${scope}")" &&
@@ -1503,7 +1526,7 @@ runSubscriptionMenuBatchRegression() (
             (
                 writeCount=0 trafficIds=
                 subscriptionGroupsStateWriteUnlocked() { writeCount=$((writeCount + 1)); return 1; }
-                manageUserSubscriptionsMenu "${scope}" <<< $'+\ndirect-write-failed\n1\n0\n2\n7'
+                manageUserSubscriptionsMenu "${scope}" <<< $'+\ndirect-write-failed\n1\n0\n2\n9'
                 [[ "${writeCount}" == 1 && "${syncCount}" == 0 && "${createCount}" == 2 &&
                     "${createdUserSubscriptionIds}" == '[]' && "${selectorPromptCount}" == 0 &&
                     "${trafficIds}" == "$(jq -r 'join(",") + ","' <<<"${scope}")" &&
@@ -1556,7 +1579,7 @@ runSubscriptionMenuBatchRegression() (
         resetBatchFixture
         before=$(subscriptionGroupsStateRead -c '.')
         dropOnView=false menuKeys= warnCount=0 editedIds= removedId= removedScope= removedExpected=
-        manageUserSubscriptionsMenu '["alpha","missing","beta"]' <<< $'3\n6'
+        manageUserSubscriptionsMenu '["alpha","missing","beta"]' <<< $'3\n7'
         [[ "${menuKeys}" == user_subscription_batch_menu,user_subscription_batch_menu &&
             "${warnCount}" == 1 && "${selectorCount}" == 0 && "${syncCount}" == 0 &&
             "${editedIds}" == "${idsJson}" && -z "${removedId}" && "${removedScope}" == "${idsJson}" &&
@@ -1588,7 +1611,7 @@ runSubscriptionMenuBatchRegression() (
         runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
         showUserSubscriptionTraffic() { trafficIds+="$1,"; }
         # 当前操作仍以完整快照失败；下次渲染恢复选择，不能把失败操作偷偷重试到剩余目标。
-        manageUserSubscriptionsMenu "${idsJson}" <<< $'10\n2\n7'
+        manageUserSubscriptionsMenu "${idsJson}" <<< $'6\n2\n9'
         [[ "${menuKeys}" == user_subscription_batch_menu,user_subscription_item_menu,user_subscription_item_menu &&
             "${mutationCount}" == 1 && "${mutatedIds}" == "${idsJson}" && "${expectedIds}" == "${idsJson}" &&
             "${warnCount}" == 1 && "${syncCount}" == 0 && "${trafficIds}" == alpha, &&
@@ -1635,7 +1658,7 @@ runSubscriptionMenuBatchRegression() (
             writeCount=$((writeCount + 1))
             originalSubscriptionGroupsStateWriteUnlocked "$@"
         }
-        manageUserSubscriptionsMenu "${idsJson}" <<< $'10\n10\n5\n5\n7'
+        manageUserSubscriptionsMenu "${idsJson}" <<< $'6\n6\n5\n5\n9'
         [[ "${mutationCount}" == "2" && "${writeCount}" == "2" && "${syncCount}" == "2" ]]
         subscriptionActiveGroupRead -e '
           .sync.enabled == false and all(.user_groups[]; .enabled) and
@@ -1647,7 +1670,7 @@ runSubscriptionMenuBatchRegression() (
         local before
         before=$(subscriptionGroupsStateRead -c '.')
         mutationCount=0 writeCount=0 syncCount=0
-        manageUserSubscriptionsMenu "${idsJson}" <<< $'5\n7'
+        manageUserSubscriptionsMenu "${idsJson}" <<< $'5\n9'
         [[ "${mutationCount}" == "1" && "${writeCount}" == "1" && "${syncCount}" == "0" ]]
         [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
     )
@@ -1680,7 +1703,7 @@ runSubscriptionMenuBatchRegression() (
             copyCount=$((copyCount + 1))
         }
         editUserSubscriptionsMenu() { editedIds=$1; }
-        manageUserSubscriptionItem gamma <<< $'8\nalpha,beta\n1\n2\n4\n3\n9\n7'
+        manageUserSubscriptionItem gamma <<< $'7\nalpha,beta\n1\n2\n4\n3\n10\n9'
         [[ "${syncCount}" == "1" && "${installCount}" == "0" && "${copyCount}" == "0" ]]
         [[ "${editedIds}" == "${idsJson}" ]]
         [[ "$(wc -l <"${linkLog}")" == "2" && "$(<"${trafficLog}")" == $'alpha\nbeta' ]]
@@ -1712,7 +1735,7 @@ runSubscriptionMenuBatchRegression() (
             writeCount=0
         }
         runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
-        manageUserSubscriptionsMenu "${idsJson}" <<< $'6\nyes'
+        manageUserSubscriptionsMenu "${idsJson}" <<< $'7\nyes'
         [[ "${collectCount}" == "1" && "${writeCount}" == "1" &&
             "${syncCount}" == "1" && "${confirmCount}" == "1" ]]
         subscriptionActiveGroupRead -e '

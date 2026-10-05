@@ -498,18 +498,13 @@ manageSubscriptionCatalog() {
     local subscriptionCatalogStatus=
     local role=${1:-} currentRole
     local homeTitle menuKey
-    local returnChoice publishServiceChoice
     [[ -n "${role}" ]] || role=$(subscriptionCurrentRoleNormalized) || return 1
     if [[ "${role}" == "main" ]]; then
         homeTitle="主控首页"
         menuKey=subscription_main_home_menu
-        returnChoice=4
-        publishServiceChoice=5
     else
         homeTitle="本机订阅首页"
         menuKey=subscription_local_home_menu
-        returnChoice=5
-        publishServiceChoice=10
     fi
     while true; do
         echoContent title "\n┌─ ${homeTitle} ─────────────────────────────────────"
@@ -518,32 +513,27 @@ manageSubscriptionCatalog() {
         menuItem 1 "查看当前订阅链接" "只读查看已发布的本机自用和分享订阅"
         menuItem 2 "分享订阅" "新建或维护已有分享订阅"
         menuItem 3 "流量与限额" "查看流量明细，并处理超限和自动限额"
-        menuItem 6 "立即完整同步" "同步账号及启用来源；已配置发布服务时更新并显示链接"
-        menuItem 7 "订阅同步" "自动同步、同步间隔、状态排障和状态备份"
-        menuItem "${publishServiceChoice}" "安装/更新发布服务" "配置公网发布入口"
+        menuItem 4 "立即完整同步" "同步账号及启用来源；已配置发布服务时更新并显示链接"
+        menuItem 5 "订阅同步" "自动同步、同步间隔、状态排障和状态备份"
+        menuItem 6 "安装/更新发布服务" "配置公网发布入口"
         if [[ "${role}" == "main" ]]; then
-            menuItem 8 "管理被控服务器" "创建/完成接入，管理邀请、凭据、启停和移除"
-            menuItem 9 "维护本机控制面" "查看 WireGuard 状态、凭据、地址和 Peer，或重启/关闭"
+            menuItem 7 "管理被控服务器" "创建/完成接入，管理邀请、凭据、启停和移除"
+            menuItem 8 "维护本机控制面" "查看 WireGuard 状态、凭据、地址和 Peer，或重启/关闭"
         else
-            menuItem 8 "启用主控协同" "将本机初始化为主控，保留现有订阅状态和服务"
-            menuItem 9 "接入主控" "粘贴主控邀请，将本机初始化为被控"
+            menuItem 7 "启用主控协同" "将本机初始化为主控，保留现有订阅状态和服务"
+            menuItem 8 "接入主控" "粘贴主控邀请，将本机初始化为被控"
         fi
-        menuReturnItem "${returnChoice}" "返回主菜单" "回到 padm 管理面板"
+        menuReturnItem 9 "返回主菜单" "回到 padm 管理面板"
         menuClose
         menuReadChoice "${menuKey}" "请选择:" subscriptionCatalogStatus || return 0
-        [[ "${subscriptionCatalogStatus}" != "${returnChoice}" ]] || return 0
-        if [[ "${subscriptionCatalogStatus}" == "${publishServiceChoice}" ]]; then
-            installSubscribe && showSubscriptionServiceStatus
-            continue
-        fi
         case "${subscriptionCatalogStatus}" in
         1) showPublishedSubscriptionLinks ;;
         2) manageSharedSubscriptions ;;
         3) manageTrafficAndQuota ;;
-        4) return ;;
-        6) syncAndShowSubscriptionLinks ;;
-        7) manageSubscriptionSyncSettings ;;
-        8)
+        4) syncAndShowSubscriptionLinks ;;
+        5) manageSubscriptionSyncSettings ;;
+        6) installSubscribe && showSubscriptionServiceStatus ;;
+        7)
             if [[ "${role}" == "main" ]]; then
                 manageSubscriptionServers
             else
@@ -552,7 +542,7 @@ manageSubscriptionCatalog() {
                 [[ "${currentRole}" != "${role}" ]] && return
             fi
             ;;
-        9)
+        8)
             if [[ "${role}" == "uninitialized" ]]; then
                 runSubscriptionControlledWizard || true
                 currentRole=$(subscriptionCurrentRoleNormalized 2>/dev/null) || return
@@ -563,6 +553,7 @@ manageSubscriptionCatalog() {
                 coreSelectionErrorCard
             fi
             ;;
+        9) return 0 ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -1159,6 +1150,7 @@ editUserSubscriptionsMenu() {
     local reload=
     local pendingFields
     local editPrompt
+    local fieldOffset=0
     local prunePatchJq='
       def normalized($key): if $key == "allowed_sources" then sort else . end;
       with_entries(. as $field |
@@ -1176,6 +1168,7 @@ editUserSubscriptionsMenu() {
     '
     selectedCount=$(jq -r 'length' <<<"${idsJson}" 2>/dev/null) || return 1
     [[ "${selectedCount}" -gt 0 ]] || return 1
+    [[ "${selectedCount}" == "1" ]] || fieldOffset=1
     expectedJson=$(subscriptionActiveGroupRead -c --argjson ids "${idsJson}" '
       [.user_groups[]? | select(.id as $id | ($ids | index($id)) != null) |
         {id, uuid, name, enabled, allowed_sources, traffic_limit_gb}]
@@ -1216,15 +1209,15 @@ editUserSubscriptionsMenu() {
         else
             menuLine "当前订阅额度：多个值（回车保留各自设置）"
         fi
-        menuItem 2 "设置节点范围" "批量订阅使用相同节点范围"
-        menuItem 3 "设置订阅额度" "0 表示不限"
-        menuItem 4 "启用所选订阅" "额度超限时会拒绝启用"
-        menuItem 5 "停用所选订阅" "保存后同步移除对应托管账号"
-        menuItem 6 "保存并立即同步" "自动保留其他字段的最新变化；冲突时保留草稿"
-        menuReturnItem 7 "取消并丢弃草稿" "返回分享订阅"
-        menuItem 8 "重新读取并丢弃草稿" "放弃当前草稿，读取最新状态"
-        menuItem 9 "刷新并保留草稿" "读取最新状态；身份或草稿字段冲突时拒绝刷新"
-        menuLine "字段可用逗号连续选择（例 2,3）；末尾加 6 填写后直接保存（例 2,3,6）；取消和重新读取单独选择"
+        menuItem "$((2 - fieldOffset))" "设置节点范围" "批量订阅使用相同节点范围"
+        menuItem "$((3 - fieldOffset))" "设置订阅额度" "0 表示不限"
+        menuItem "$((4 - fieldOffset))" "启用所选订阅" "额度超限时会拒绝启用"
+        menuItem "$((5 - fieldOffset))" "停用所选订阅" "保存后同步移除对应托管账号"
+        menuItem "$((6 - fieldOffset))" "保存并立即同步" "自动保留其他字段的最新变化；冲突时保留草稿"
+        menuItem "$((7 - fieldOffset))" "重新读取并丢弃草稿" "放弃当前草稿，读取最新状态"
+        menuItem "$((8 - fieldOffset))" "刷新并保留草稿" "读取最新状态；身份或草稿字段冲突时拒绝刷新"
+        menuReturnItem "$((9 - fieldOffset))" "取消并丢弃草稿" "返回分享订阅"
+        menuLine "字段可用逗号连续选择（例 $((2 - fieldOffset)),$((3 - fieldOffset))）；末尾加 $((6 - fieldOffset)) 填写后直接保存；取消和重新读取单独选择"
         menuClose
         if [[ -n "${pendingFields}" ]]; then
             editPrompt="请选择[回车保存并立即同步]:"
@@ -1234,15 +1227,15 @@ editUserSubscriptionsMenu() {
         menuReadChoice edit_user_subscription_menu "${editPrompt}" choice true || return 1
         if [[ -z "${choice}" ]]; then
             [[ -n "${pendingFields}" ]] || return 0
-            choice=6
+            choice=$((6 - fieldOffset))
         fi
-        fieldChoices=$(jq -ern --arg choice "${choice}" --argjson count "${selectedCount}" '
+        fieldChoices=$(jq -ern --arg choice "${choice}" --argjson offset "${fieldOffset}" '
           $choice | split(",") | map(gsub("^\\s+|\\s+$"; "")) |
-          select(all(.[]; test("^[1-9]$"))) | map(tonumber) |
+          select(all(.[]; test("^[1-9]$"))) | map(tonumber + $offset) |
+          select(all(.[]; . <= 9)) |
           select(length == (unique | length)) |
           select(length == 1 or all(.[]; . <= 5) or
             (.[-1] == 6 and all(.[:-1][]; . <= 5))) |
-          select($count == 1 or index(1) == null) |
           select(index(4) == null or index(5) == null) | .[]
         ') || { coreSelectionErrorCard; continue; }
         mapfile -t selectedFields <<<"${fieldChoices}"
@@ -1302,13 +1295,13 @@ editUserSubscriptionsMenu() {
                     fi
                     return 0
                 fi
-                warnCard "订阅编辑未完成" "草稿仍保留，可修正后重试；身份或同字段冲突请选 8 重读"
+                warnCard "订阅编辑未完成" "草稿仍保留，可修正后重试；身份或同字段冲突请选 $((7 - fieldOffset)) 重读"
                 ;;
-            7)
+            9)
                 coreCancelledStatusCard "操作未执行"
                 return 1
                 ;;
-            8 | 9)
+            7 | 8)
                 reload=$(subscriptionActiveGroupRead -c --argjson ids "${idsJson}" '
                   [.user_groups[]? | select(.id as $id | ($ids | index($id)) != null) |
                     {id, uuid, name, enabled, allowed_sources, traffic_limit_gb}]
@@ -1317,7 +1310,7 @@ editUserSubscriptionsMenu() {
                     errorCard "所选订阅已不存在，请重新选择"
                     return 1
                 }
-                if [[ "${choice}" == "9" ]]; then
+                if [[ "${choice}" == "8" ]]; then
                     validateUserSubscriptionDraftSnapshot "${expectedJson}" "${patchJson}" "${reload}" || continue
                     expectedJson=${reload}
                     statusCard "已刷新订阅状态，草稿仍保留" "请确认当前配置后保存"
@@ -1350,6 +1343,7 @@ manageUserSubscriptionsMenu() {
     local userSubscriptionId= usersJson summary line enabled targetEnabled selectedCount
     local selectedIds id hasChanges batchScope menuKey expectedFields templateId currentCount removedIds
     local displayJq displayJson
+    local disableChoice deleteChoice switchChoice copyChoice
     local -a linkArgs=()
     selectedCount=$(jq -er 'select(type == "array" and length > 0 and
       length == (unique | length) and all(.[]; type == "string" and length > 0)) |
@@ -1384,11 +1378,19 @@ manageUserSubscriptionsMenu() {
             batchScope=
             menuKey=user_subscription_item_menu
             linkArgs=("${userSubscriptionId}")
+            disableChoice=5
+            deleteChoice=6
+            switchChoice=7
+            copyChoice=8
         else
             userSubscriptionId=
             batchScope=${idsJson}
             menuKey=user_subscription_batch_menu
             linkArgs=("" "${idsJson}")
+            disableChoice=6
+            deleteChoice=7
+            switchChoice=8
+            copyChoice=+
         fi
         summary=$(jq -r '
           .[] | "名称：\(.name // .id)（\(.id)） / 状态：\(if .enabled then "启用" else "停用" end)\n节点：\(.allowed_sources | join("、")) / 已保存用量：\(.usage) / 额度：\(if .traffic_limit_gb == 0 then "不限" else "\(.traffic_limit_gb) GB" end) / \(.quota_status)"
@@ -1408,19 +1410,19 @@ manageUserSubscriptionsMenu() {
         menuItem 4 "立即同步并更新链接" "同步后查看当前链接，不改变自动同步设置"
         if [[ "${selectedCount}" != "1" ]]; then
             menuItem 5 "启用所选订阅" "整批启用并同步，任一订阅超限则不写入"
-            menuItem 10 "停用所选订阅" "整批停用并同步移除对应托管账号"
+            menuItem "${disableChoice}" "停用所选订阅" "整批停用并同步移除对应托管账号"
         elif [[ "${targetEnabled}" == "true" ]]; then
             menuItem 5 "启用当前订阅" "启用后立即同步，额度超限时会拒绝启用"
         else
             menuItem 5 "停用当前订阅" "停用后立即同步并移除对应托管账号"
         fi
-        menuDangerItem 6 "删除订阅" "删除记录；同步后移除对应托管账号"
-        menuReturnItem 7 "返回订阅列表" "回到分享订阅"
-        menuItem 8 "切换订阅" "选择另一订阅继续管理"
-        menuItem "+" "新建分享订阅" "创建后立即同步并进入详情"
+        menuDangerItem "${deleteChoice}" "删除订阅" "删除记录；同步后移除对应托管账号"
+        menuItem "${switchChoice}" "切换订阅" "选择另一订阅继续管理"
         if [[ "${selectedCount}" == "1" ]]; then
-            menuItem 9 "按当前配置新建订阅" "复制节点范围和额度，不复制身份、流量和令牌"
+            menuItem "${copyChoice}" "按当前配置新建订阅" "复制节点范围和额度，不复制身份、流量和令牌"
         fi
+        menuItem "+" "新建分享订阅" "创建后立即同步并进入详情"
+        menuReturnItem 9 "返回订阅列表" "回到分享订阅"
         menuClose
         menuReadChoice "${menuKey}" "请选择:" userSubscriptionItemStatus || return 0
         case "${userSubscriptionItemStatus}" in
@@ -1430,12 +1432,9 @@ manageUserSubscriptionsMenu() {
             ;;
         3) editUserSubscriptionsMenu "${idsJson}" || true ;;
         4) syncAndShowSubscriptionLinks "${linkArgs[@]}" ;;
-        5 | 10)
+        5 | "${disableChoice}")
             if [[ "${selectedCount}" != "1" ]]; then
                 [[ "${userSubscriptionItemStatus}" == "5" ]] && targetEnabled=true || targetEnabled=false
-            elif [[ "${userSubscriptionItemStatus}" == "10" ]]; then
-                coreSelectionErrorCard
-                continue
             fi
             hasChanges=$(jq -r --argjson target "${targetEnabled}" 'any(.[]; .enabled != $target)' <<<"${usersJson}") || continue
             if [[ "${hasChanges}" != "true" ]]; then
@@ -1459,11 +1458,11 @@ manageUserSubscriptionsMenu() {
                 fi
             fi
             ;;
-        6)
+        "${deleteChoice}")
             removeUserSubscriptionMenu "${userSubscriptionId}" "${batchScope}" "${usersJson}" && return
             ;;
-        7) return ;;
-        8)
+        9) return ;;
+        "${switchChoice}")
             if selectUserSubscriptionId false true; then
                 idsJson=${selectedUserSubscriptionIds}
                 if [[ "${idsJson}" == '[]' ]]; then
@@ -1472,15 +1471,9 @@ manageUserSubscriptionsMenu() {
                 selectedCount=$(jq 'length' <<<"${idsJson}") || return 1
             fi
             ;;
-        9 | +)
+        "${copyChoice}" | +)
             templateId=
-            if [[ "${userSubscriptionItemStatus}" == "9" ]]; then
-                if [[ "${selectedCount}" != "1" ]]; then
-                    coreSelectionErrorCard
-                    continue
-                fi
-                templateId=${userSubscriptionId}
-            fi
+            [[ "${userSubscriptionItemStatus}" == "+" ]] || templateId=${userSubscriptionId}
             createAndSyncUserSubscriptionWizard "${templateId}" || true
             if [[ "${createdUserSubscriptionIds:-'[]'}" != '[]' ]]; then
                 idsJson=${createdUserSubscriptionIds}
@@ -1671,8 +1664,8 @@ manageSubscriptionServers() {
         menuItem 2 "完成被控接入" "粘贴接入回执，自动使用预留别名和地址"
         menuItem 3 "查看/取消待完成邀请" "按别名查看状态或释放预留地址"
         menuItem 4 "管理已有被控服务器" "状态、凭据、启停、连接检查和移除"
-        menuItem 8 "查看服务器总览" "只读查看所有来源的状态"
-        menuReturnItem 7 "返回主控首页" "回到上级菜单"
+        menuItem 5 "查看服务器总览" "只读查看所有来源的状态"
+        menuReturnItem 6 "返回主控首页" "回到上级菜单"
         menuClose
         menuReadChoice server_source_menu "请选择:" serverStatus || return 0
         case "${serverStatus}" in
@@ -1683,11 +1676,8 @@ manageSubscriptionServers() {
             ;;
         3) manageSubscriptionPendingInvites ;;
         4) manageSubscriptionServerItem ;;
-        # 保留旧动作编号，已有输入仍经过目标选择和确认。
-        5) changeSubscriptionSourceEnabledMenu ;;
-        6) removeSubscriptionControlledServerMenu ;;
-        7) return ;;
-        8) showSubscriptionSources ;;
+        5) showSubscriptionSources ;;
+        6) return ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -1727,8 +1717,8 @@ manageSubscriptionServerItem() {
         menuItem 4 "立即完整同步" "更新本机、所有启用来源和已配置的订阅发布"
         menuItem 5 "刷新当前状态" "重新读取已保存的服务器状态"
         menuDangerItem 6 "移除当前服务器" "清理远端托管账号并移除来源和 Peer"
-        menuReturnItem 7 "返回服务器列表" "回到被控服务器"
-        menuItem 8 "切换服务器" "选择另一服务器继续维护"
+        menuItem 7 "切换服务器" "选择另一服务器继续维护"
+        menuReturnItem 8 "返回服务器列表" "回到被控服务器"
         menuClose
         menuReadChoice subscription_server_item_menu "请选择:" choice || return 0
         case "${choice}" in
@@ -1765,8 +1755,8 @@ manageSubscriptionServerItem() {
                 'any(.sources[]?; .id == $id and .role != "main")') || return 1
             [[ "${idExists}" == "true" ]] || return 0
             ;;
-        7) return 0 ;;
-        8)
+        8) return 0 ;;
+        7)
             sourcesJson=$(subscriptionActiveGroupRead -c '[.sources[]? | select(.role != "main")]') || continue
             if selectSubscriptionSourceId "${sourcesJson}" "请选择要管理的被控服务器:" chosenId; then
                 sourceId=${chosenId}
@@ -1987,14 +1977,16 @@ manageSubscriptionSyncDiagnostics() {
             ;;
         "${returnChoice}") return ;;
         5)
-            if [[ "${roleAction}" == "remote" ]]; then
-                showSubscriptionRemoteHealthPlan
-            else
-                crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true
-            fi
+            showSubscriptionRemoteHealthPlan
             ;;
-        6) crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true ;;
-        7) runSubscriptionGroupSyncForceRetry || true ;;
+        6)
+            [[ "${roleAction}" == "remote" ]] || { coreSelectionErrorCard; continue; }
+            crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true
+            ;;
+        7)
+            [[ "${roleAction}" == "remote" ]] || { coreSelectionErrorCard; continue; }
+            runSubscriptionGroupSyncForceRetry || true
+            ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -2031,16 +2023,15 @@ manageSubscriptionSyncSettings() {
         menuLine "同步间隔：${interval} 分钟"
         menuLine "最近结果：${lastStatus} / ${lastRun}"
         menuLine "失败数量：${failureCount}"
-        menuItem 2 "开启/关闭自动同步" "控制后台定时同步及节点配置变更通知；手动管理动作仍立即同步"
-        menuItem 3 "设置同步间隔" "设置 1-59 分钟间隔，不隐式开启自动同步"
-        menuItem 4 "状态与排障" "查看失败、健康、计划和定时任务"
-        menuItem 5 "状态备份与恢复" "查看、备份、恢复或重建 groups.json"
-        menuReturnItem 6 "${returnText}" "回到上级菜单"
+        menuItem 1 "开启/关闭自动同步" "控制后台定时同步及节点配置变更通知；手动管理动作仍立即同步"
+        menuItem 2 "设置同步间隔" "设置 1-59 分钟间隔，不隐式开启自动同步"
+        menuItem 3 "状态与排障" "查看失败、健康、计划和定时任务"
+        menuItem 4 "状态备份与恢复" "查看、备份、恢复或重建 groups.json"
+        menuReturnItem 5 "${returnText}" "回到上级菜单"
         menuClose
         menuReadChoice sync_settings_menu "请选择:" syncSettingsStatus || return 0
         case "${syncSettingsStatus}" in
-        1) syncAndShowSubscriptionLinks || true ;;
-        2)
+        1)
             expectedSyncEnabled=$(jq -r '.enabled' <<<"${syncStatus}") || return 1
             targetSyncEnabled=true
             [[ "${expectedSyncEnabled}" != "true" ]] || targetSyncEnabled=false
@@ -2050,7 +2041,7 @@ manageSubscriptionSyncSettings() {
                 errorCard "自动同步状态切换失败"
             fi
             ;;
-        3)
+        2)
             expectedInterval=${interval}
             while true; do
                 menuReadChoice sync_interval_minutes \
@@ -2073,9 +2064,9 @@ manageSubscriptionSyncSettings() {
                 break
             done
             ;;
-        4) manageSubscriptionSyncDiagnostics ;;
-        5) manageSubscriptionStateBackups sync ;;
-        6) return ;;
+        3) manageSubscriptionSyncDiagnostics ;;
+        4) manageSubscriptionStateBackups sync ;;
+        5) return ;;
         *) coreSelectionErrorCard ;;
         esac
     done

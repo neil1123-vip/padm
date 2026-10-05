@@ -625,7 +625,7 @@ runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
             printf '%s\n' "${PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT:-unset}" >>"${lockTimeoutLog}"
             return 1
         }
-        autoRead() { printf -v "$3" '%s' 5; }
+        autoRead() { printf -v "$3" '%s' 7; }
         echoContent() { :; }
         menuLine() { printf '%s\n' "$*"; }
         menuItem() { :; }
@@ -1264,6 +1264,38 @@ runSubscriptionSyncProcessSubstitutionFailureRegression() {
         listSubscriptionGroupsBackups() { return 7; }
         regressionExpectStatus 1 selectSubscriptionGroupsBackupFile >/dev/null 2>&1
         [[ "$(grep -c '^状态备份列表读取失败$' <<<"${errors}")" == "1" ]]
+    )
+    (
+        local backupRoot="${TMP_DIR}/subscription-backup-number-selection"
+        local backupSelectionInput selectedSubscriptionGroupsBackupFile
+        local index
+        mkdir -p "${backupRoot}"
+        for index in {1..10}; do
+            printf '{}\n' >"${backupRoot}/${index}.json"
+        done
+        listSubscriptionGroupsBackups() {
+            local backupIndex
+            for backupIndex in {1..10}; do
+                printf '%s/%s.json\n' "${backupRoot}" "${backupIndex}"
+            done
+        }
+        menuReadChoice() { printf -v "$3" '%s' "${backupSelectionInput}"; }
+        userResultCard() { :; }
+        menuLine() { :; }
+        menuClose() { :; }
+        errorCard() { :; }
+        for backupSelectionInput in 08 09 010; do
+            selectSubscriptionGroupsBackupFile
+            [[ "${selectedSubscriptionGroupsBackupFile}" == "${backupRoot}/$((10#${backupSelectionInput})).json" ]]
+        done
+        for backupSelectionInput in 0 00 11 99999999999999999999999999999999999999999999; do
+            selectedSubscriptionGroupsBackupFile=stale
+            regressionExpectStatus 1 selectSubscriptionGroupsBackupFile
+            [[ -z "${selectedSubscriptionGroupsBackupFile}" ]]
+        done
+        backupSelectionInput="${backupRoot}/10.json"
+        selectSubscriptionGroupsBackupFile
+        [[ "${selectedSubscriptionGroupsBackupFile}" == "${backupSelectionInput}" ]]
     )
 }
 

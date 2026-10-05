@@ -66,6 +66,7 @@ selectSubscriptionGroupsBackupFile() {
     local backupsOutput
     local backups=()
     local index
+    local backupIndex backupCount
     selectedSubscriptionGroupsBackupFile=
     backupsOutput=$(listSubscriptionGroupsBackups) || {
         errorCard "状态备份列表读取失败"
@@ -82,8 +83,13 @@ selectSubscriptionGroupsBackupFile() {
     done
     menuClose
     menuReadChoice subscription_backup_choice "请输入备份编号或完整路径:" backupChoice || return 0
-    if [[ "${backupChoice}" =~ ^[0-9]+$ ]] && [[ "${backupChoice}" -ge 1 && "${backupChoice}" -le "${#backups[@]}" ]]; then
-        backupFile=${backups[$((backupChoice - 1))]}
+    if [[ "${backupChoice}" =~ ^[0-9]+$ ]]; then
+        backupIndex=${backupChoice#"${backupChoice%%[!0]*}"}
+        backupCount=${#backups[@]}
+        if [[ -n "${backupIndex}" && "${#backupIndex}" -le "${#backupCount}" ]] &&
+            (( 10#${backupIndex} >= 1 && 10#${backupIndex} <= backupCount )); then
+            backupFile=${backups[$((10#${backupIndex} - 1))]}
+        fi
     else
         backupFile=${backupChoice}
     fi

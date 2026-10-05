@@ -815,17 +815,17 @@ manageTrafficAndQuota() {
         menuLine "自动执行超限处理：${quotaAutoApplyText}"
         menuItem 1 "刷新并显示总览" "采集本机账号流量，写入 groups.json 后显示治理摘要"
         menuItem 2 "管理分享订阅与额度" "选择一次查看用量、修改额度、启停或同步；支持多选"
-        menuItem 6 "我的流量" "自用账号按服务器统计"
-        menuItem 7 "服务器流量" "全部账号按服务器统计"
-        menuDangerItem 3 "执行超限处理并同步" "停用超额订阅，更新本机、被控服务器和订阅发布"
+        menuItem 3 "我的流量" "自用账号按服务器统计"
+        menuItem 4 "服务器流量" "全部账号按服务器统计"
+        menuDangerItem 5 "执行超限处理并同步" "停用超额订阅，更新本机、被控服务器和订阅发布"
         if [[ "${quotaAutoApplyTarget}" == "true" ]]; then
-            menuItem 4 "开启自动执行超限处理" "完整同步前自动停用超额订阅"
+            menuItem 6 "开启自动执行超限处理" "完整同步前自动停用超额订阅"
         elif [[ "${quotaAutoApplyTarget}" == "false" ]]; then
-            menuItem 4 "关闭自动执行超限处理" "保留流量统计，超额订阅改为手动处理"
+            menuItem 6 "关闭自动执行超限处理" "保留流量统计，超额订阅改为手动处理"
         else
-            menuItem 4 "自动限额状态暂不可读" "恢复状态后再修改"
+            menuItem 6 "自动限额状态暂不可读" "恢复状态后再修改"
         fi
-        menuReturnItem 5 "返回订阅首页" "回到本机或主控首页"
+        menuReturnItem 7 "返回订阅首页" "回到本机或主控首页"
         menuClose
         menuReadChoice traffic_quota_menu "请选择:" trafficQuotaStatus || return 0
         case "${trafficQuotaStatus}" in
@@ -835,11 +835,10 @@ manageTrafficAndQuota() {
             fi
             ;;
         2) selectUserSubscriptionTrafficMenu ;;
-        6) showAdminSubscriptionTraffic ;;
-        7) showSubscriptionSourcesTraffic ;;
-        8) showUserSubscriptions ;;
-        3) executeSubscriptionQuotaPlanMenu ;;
-        4)
+        3) showAdminSubscriptionTraffic ;;
+        4) showSubscriptionSourcesTraffic ;;
+        5) executeSubscriptionQuotaPlanMenu ;;
+        6)
             [[ -n "${quotaAutoApplyTarget}" ]] || { errorCard "自动限额状态暂不可读，未修改"; continue; }
             if toggleSubscriptionGroupQuotaAutoApplyEnabled "${quotaAutoApplyEnabled}" "${quotaAutoApplyTarget}"; then
                 successCard "限额自动执行状态已更新" "当前状态：$(if [[ "${quotaAutoApplyTarget}" == "true" ]]; then printf '开启'; else printf '关闭'; fi)"
@@ -847,7 +846,7 @@ manageTrafficAndQuota() {
                 errorCard "限额自动执行状态切换失败"
             fi
             ;;
-        5) return ;;
+        7) return ;;
         *) coreSelectionErrorCard ;;
         esac
     done
