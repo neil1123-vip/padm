@@ -73,13 +73,14 @@ runSubscriptionMenuWorkflowCoreRegression() (
 
     (
         local syncCount=0 syncStatus=0 published=true serviceCount=0 serviceReadCount=0 linkCount=0
-        local shownCount=0 shownId=
+        local shownCount=0 shownId= shownIds=
         installSubscribe() { serviceCount=$((serviceCount + 1)); return 99; }
         readNginxSubscribe() { serviceReadCount=$((serviceReadCount + 1)); return 99; }
         syncAndShowSubscriptionLinks() { linkCount=$((linkCount + 1)); return 99; }
         showPublishedSubscriptionLinks() {
             shownCount=$((shownCount + 1))
             shownId=$1
+            shownIds=${2:-}
             return 1
         }
         setSubscriptionGroupSyncEnabledWithCron() { return 99; }
@@ -90,6 +91,7 @@ runSubscriptionMenuWorkflowCoreRegression() (
         }
         createAndSyncUserSubscriptionWizard <<< $'new-team\n1,2\n3'
         [[ "${syncCount}" == "1" && "${shownCount}" == "1" && "${shownId}" == "new-team" ]]
+        [[ "${createdUserSubscriptionId}" == "new-team" && "${createdUserSubscriptionIds}" == '["new-team"]' ]]
         subscriptionActiveGroupRead -e '
           .sync.enabled == false and
           any(.user_groups[]; .id == "new-team" and .traffic_limit_gb == 3 and (.allowed_sources | sort) == ["edge","main"])
@@ -112,11 +114,36 @@ runSubscriptionMenuWorkflowCoreRegression() (
             "${shownCount}" == "2" && "${shownId}" == "partial-team" ]]
         userSubscriptionExists partial-team
         grep -q '首次同步部分失败但链接已发布' "${statusLog}"
+        syncStatus=0
+        published=false
+        SUBSCRIPTION_SYNC_PUBLISHED=true
+        createAndSyncUserSubscriptionWizard <<< $'local-a,local-b\n1\n0'
+        [[ "${syncCount}" == "5" && "${shownCount}" == "2" &&
+            -z "${createdUserSubscriptionId}" && "${createdUserSubscriptionIds}" == '["local-a","local-b"]' ]]
+        [[ "${SUBSCRIPTION_SYNC_PUBLISHED}" == false ]]
+        grep -q '账号同步已完成，未发布订阅链接' "${statusLog}"
+        local openedIds=
+        manageUserSubscriptionsMenu() { openedIds=$1; }
+        syncStatus=1
+        openedId=
+        manageSharedSubscriptions <<< $'+\nbatch-pending-a,batch-pending-b\n1,2\n4\n\n'
+        [[ "${syncCount}" == "6" && "${shownCount}" == "2" && -z "${openedId}" &&
+            "${openedIds}" == '["batch-pending-a","batch-pending-b"]' &&
+            "${createdUserSubscriptionIds}" == "${openedIds}" ]]
+        subscriptionActiveGroupRead -e '
+          all(.user_groups[] | select(.id == "batch-pending-a" or .id == "batch-pending-b");
+            (.allowed_sources | sort) == ["edge","main"] and .traffic_limit_gb == 4 and .enabled)
+        ' >/dev/null
+        published=true
+        regressionExpectStatus 1 createAndSyncUserSubscriptionWizard <<< $'batch-partial-a,batch-partial-b\n1\n0'
+        [[ "${syncCount}" == "7" && "${shownCount}" == "3" && -z "${shownId}" &&
+            "${shownIds}" == '["batch-partial-a","batch-partial-b"]' &&
+            "${createdUserSubscriptionIds}" == "${shownIds}" ]]
         [[ "${serviceCount}" == "0" && "${serviceReadCount}" == "0" && "${linkCount}" == "0" ]]
     )
 
     (
-        local syncCount=0 sourceChoiceCount=0 limitPromptCount=0 before
+        local syncCount=0 sourceChoiceCount=0 limitPromptCount=0 writeCount=0 before
         runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
         eval "$(declare -f selectUserSubscriptionSources | sed '1s/^selectUserSubscriptionSources/originalCreateRetrySelectUserSubscriptionSources/')"
         selectUserSubscriptionSources() {
@@ -134,15 +161,91 @@ runSubscriptionMenuWorkflowCoreRegression() (
         subscriptionActiveGroupRead -e '
           any(.user_groups[]; .id == "retry-id" and .allowed_sources == ["main"] and .traffic_limit_gb == 9)
         ' >/dev/null
+        eval "$(declare -f subscriptionGroupsStateWriteUnlocked | sed '1s/^subscriptionGroupsStateWriteUnlocked/originalCreateBatchStateWriteUnlocked/')"
+        subscriptionGroupsStateWriteUnlocked() {
+            [[ "${SUBSCRIPTION_GROUPS_LOCK_HELD:-}" == "1" ]] || return 99
+            writeCount=$((writeCount + 1))
+            originalCreateBatchStateWriteUnlocked "$@"
+        }
+        createAndSyncUserSubscriptionWizard <<< $'bad id,unused\nempty,\nrepeat,repeat\nnew-id,alpha\n retry-batch-a , retry-batch-b \n1,2\n9'
+        [[ -z "${createdUserSubscriptionId}" && "${createdUserSubscriptionIds}" == '["retry-batch-a","retry-batch-b"]' &&
+            "${syncCount}" == "2" && "${sourceChoiceCount}" == "2" &&
+            "${limitPromptCount}" == "2" && "${writeCount}" == "1" ]]
+        subscriptionActiveGroupRead -e '
+          ([.user_groups[] | select(.id == "retry-batch-a" or .id == "retry-batch-b")] |
+            length == 2 and all(.[]; .traffic_limit_gb == 9 and (.allowed_sources | sort) == ["edge","main"])) and
+          all(.user_groups[]; .id != "unused" and .id != "empty" and .id != "repeat" and .id != "new-id")
+        ' >/dev/null
         before=$(subscriptionGroupsStateRead -c '.')
         createdUserSubscriptionId=stale
+        createdUserSubscriptionIds='["stale"]'
         regressionExpectStatus 1 createAndSyncUserSubscriptionWizard <<<""
-        [[ -z "${createdUserSubscriptionId}" ]]
+        [[ -z "${createdUserSubscriptionId}" && "${createdUserSubscriptionIds}" == '[]' ]]
         createdUserSubscriptionId=stale
+        createdUserSubscriptionIds='["stale"]'
         regressionExpectStatus 1 createAndSyncUserSubscriptionWizard </dev/null
-        [[ -z "${createdUserSubscriptionId}" && "${syncCount}" == "1" &&
-            "${sourceChoiceCount}" == "1" && "${limitPromptCount}" == "1" ]]
+        [[ -z "${createdUserSubscriptionId}" && "${createdUserSubscriptionIds}" == '[]' &&
+            "${syncCount}" == "2" && "${sourceChoiceCount}" == "2" && "${limitPromptCount}" == "2" ]]
+        createdUserSubscriptionId=stale
+        createdUserSubscriptionIds='["stale"]'
+        regressionExpectStatus 1 createAndSyncUserSubscriptionWizard < <(printf 'no-lf-a,no-lf-b')
+        [[ -z "${createdUserSubscriptionId}" && "${createdUserSubscriptionIds}" == '[]' ]]
+        regressionExpectStatus 1 createAndSyncUserSubscriptionWizard < <(printf 'source-eof-a,source-eof-b\n')
+        regressionExpectStatus 1 createAndSyncUserSubscriptionWizard < <(printf 'limit-eof-a,limit-eof-b\n1\n7')
+        [[ -z "${createdUserSubscriptionId}" && "${createdUserSubscriptionIds}" == '[]' &&
+            "${syncCount}" == "2" && "${writeCount}" == "1" ]]
         [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+    )
+
+    (
+        local before syncCount=0 writeCount=0
+        before=$(subscriptionGroupsStateRead -c '.')
+        regressionExpectStatus 1 addUserSubscriptionsState '[{"id":"atomic-new","name":"New"},{"id":"alpha","name":"Existing"}]' '["main"]' 1
+        regressionExpectStatus 1 addUserSubscriptionsState '[{"id":"duplicate","name":"A"},{"id":"duplicate","name":"B"}]' '["main"]' 1
+        regressionExpectStatus 1 addUserSubscriptionsState '[{"id":"atomic-new","name":"New"},{"id":"bad id","name":"Bad"}]' '["main"]' 1
+        regressionExpectStatus 1 addUserSubscriptionsState '[]' '["main"]' 1
+        [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+        eval "$(declare -f subscriptionGroupsStateWriteUnlocked | sed '1s/^subscriptionGroupsStateWriteUnlocked/originalAtomicCreateStateWriteUnlocked/')"
+        subscriptionGroupsStateWriteUnlocked() {
+            [[ "${SUBSCRIPTION_GROUPS_LOCK_HELD:-}" == "1" ]] || return 99
+            writeCount=$((writeCount + 1))
+            originalAtomicCreateStateWriteUnlocked "$@"
+        }
+        addUserSubscriptionsState '[{"id":"atomic-a","name":"Custom A"},{"id":"atomic-b","name":"Custom B"}]' '["main"]' 2
+        [[ "${writeCount}" == "1" ]]
+        addUserSubscriptionState single-custom "Custom Single" '["edge"]' 3
+        [[ "${writeCount}" == "2" ]]
+        subscriptionActiveGroupRead -e '
+          any(.user_groups[]; .id == "atomic-a" and .name == "Custom A") and
+          any(.user_groups[]; .id == "atomic-b" and .name == "Custom B") and
+          any(.user_groups[]; .id == "single-custom" and .name == "Custom Single" and
+            .allowed_sources == ["edge"] and .traffic_limit_gb == 3)
+        ' >/dev/null
+        eval "$(declare -f addUserSubscriptionsState | sed '1s/^addUserSubscriptionsState/originalRaceAddUserSubscriptionsState/')"
+        addUserSubscriptionsState() {
+            originalRaceAddUserSubscriptionsState '[{"id":"raced-id","name":"Concurrent"}]' '["main"]' 0
+            originalRaceAddUserSubscriptionsState "$@"
+        }
+        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); return 99; }
+        createdUserSubscriptionId=stale
+        createdUserSubscriptionIds='["stale"]'
+        regressionExpectStatus 1 createAndSyncUserSubscriptionWizard <<< $'raced-id,race-not-created\n1\n2'
+        [[ "${syncCount}" == "0" && -z "${createdUserSubscriptionId}" && "${createdUserSubscriptionIds}" == '[]' ]]
+        subscriptionActiveGroupRead -e '
+          any(.user_groups[]; .id == "raced-id" and .name == "Concurrent") and
+          all(.user_groups[]; .id != "race-not-created")
+        ' >/dev/null
+    )
+
+    (
+        local PADM_SUBSCRIPTION_GROUPS_DIR="${root}/empty-selection" openedCount=0
+        mkdir -p "${PADM_SUBSCRIPTION_GROUPS_DIR}"
+        writeDefaultSubscriptionGroupsState "$(subscriptionGroupsFile)"
+        manageUserSubscriptionItem() { openedCount=$((openedCount + 1)); }
+        manageUserSubscriptionsMenu() { openedCount=$((openedCount + 1)); }
+        manageSharedSubscriptions <<< $'*\n'
+        [[ "${openedCount}" == "0" && -z "${selectedUserSubscriptionId}" && "${selectedUserSubscriptionIds}" == '[]' ]]
+        grep -q '暂无可选分享订阅' "${errorLog}"
     )
 
     (
@@ -737,7 +840,7 @@ runSubscriptionMenuDraftRegression() (
 
     (
         [[ "${caseGroup}" == all || "${caseGroup}" == recovery ]] || exit 0
-        local syncCount=0 installCount=0 shownCount=0 shownId=
+        local syncCount=0 installCount=0 shownCount=0 shownId= shownIds= copySourcePromptCount=0 copyLimitPromptCount=0
         resetDraftFixture
         installSubscribe() { installCount=$((installCount + 1)); return 99; }
         runSubscriptionGroupSync() {
@@ -747,7 +850,14 @@ runSubscriptionMenuDraftRegression() (
         showPublishedSubscriptionLinks() {
             shownCount=$((shownCount + 1))
             shownId=$1
+            shownIds=${2:-}
             return 1
+        }
+        eval "$(declare -f menuReadChoice | sed '1s/^menuReadChoice/originalCopyMenuReadChoice/')"
+        menuReadChoice() {
+            [[ "$1" != user_subscription_sources ]] || copySourcePromptCount=$((copySourcePromptCount + 1))
+            [[ "$1" != user_subscription_traffic_limit ]] || copyLimitPromptCount=$((copyLimitPromptCount + 1))
+            originalCopyMenuReadChoice "$@"
         }
         setUserSubscriptionEnabled alpha false
         createAndSyncUserSubscriptionWizard alpha <<< $'copied-alpha\n\n\n'
@@ -769,6 +879,26 @@ runSubscriptionMenuDraftRegression() (
         subscriptionActiveGroupRead -e '
           any(.user_groups[]; .id == "zero-template-copy" and .traffic_limit_gb == 0 and .allowed_sources == ["main"])
         ' >/dev/null
+        createAndSyncUserSubscriptionWizard alpha <<<"copied-batch-a, copied-batch-b"
+        [[ "${syncCount}" == "3" && "${installCount}" == "0" && "${shownCount}" == "3" &&
+            -z "${createdUserSubscriptionId}" && -z "${shownId}" &&
+            "${createdUserSubscriptionIds}" == '["copied-batch-a","copied-batch-b"]' &&
+            "${shownIds}" == "${createdUserSubscriptionIds}" &&
+            "${copySourcePromptCount}" == "0" && "${copyLimitPromptCount}" == "0" ]]
+        subscriptionActiveGroupRead -e '
+          . as $state |
+          ([$state.user_groups[] | select(.id == "copied-batch-a" or .id == "copied-batch-b")] |
+            length == 2 and all(.[]; .allowed_sources == ["edge"] and .traffic_limit_gb == 1 and
+              .enabled and (has("uuid") | not) and (has("token") | not))) and
+          (($state.traffic.user_groups | has("copied-batch-a") or has("copied-batch-b")) | not) and
+          ($state.user_groups[0].uuid == "11111111-1111-4111-8111-111111111111") and
+          ($state.traffic.user_groups.alpha.sources.main.upload == 1073741824)
+        ' >/dev/null
+        local before
+        before=$(subscriptionGroupsStateRead -c '.')
+        regressionExpectStatus 1 createAndSyncUserSubscriptionWizard missing <<<"missing-copy-a,missing-copy-b"
+        [[ -z "${createdUserSubscriptionId}" && "${createdUserSubscriptionIds}" == '[]' && "${syncCount}" == "3" &&
+            "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
     )
 
     (
@@ -865,6 +995,23 @@ runSubscriptionMenuBatchRegression() (
     }
 
     (
+        local syncCount=0 viewedId= viewedIds=
+        resetBatchFixture
+        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); return 1; }
+        showPublishedSubscriptionLinks() { viewedId=${1:-}; viewedIds=${2:-}; }
+        manageUserSubscriptionItem alpha <<< $'9\ncopy-route-a,copy-route-b\n1\n7'
+        [[ "${syncCount}" == "1" && -z "${viewedId}" &&
+            "${viewedIds}" == '["copy-route-a","copy-route-b"]' &&
+            "${createdUserSubscriptionIds}" == "${viewedIds}" ]]
+        subscriptionActiveGroupRead -e '
+          [.user_groups[] | select(.id == "copy-route-a" or .id == "copy-route-b")] |
+          length == 2 and all(.[]; .enabled and .allowed_sources == ["main"] and .traffic_limit_gb == 1 and
+            (has("uuid") | not) and (has("token") | not))
+        ' >/dev/null
+        resetBatchFixture
+    )
+
+    (
         local mutationCount=0 writeCount=0 syncCount=0
         runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
         eval "$(declare -f setUserSubscriptionsFields | sed '1s/^setUserSubscriptionsFields/originalSetUserSubscriptionsFields/')"
@@ -916,7 +1063,11 @@ runSubscriptionMenuBatchRegression() (
             syncCount=$((syncCount + 1))
             SUBSCRIPTION_SYNC_PUBLISHED=true
         }
-        createAndSyncUserSubscriptionWizard() { copyCount=$((copyCount + 1)); }
+        createAndSyncUserSubscriptionWizard() {
+            createdUserSubscriptionId=
+            createdUserSubscriptionIds='[]'
+            copyCount=$((copyCount + 1))
+        }
         editUserSubscriptionsMenu() { editedIds=$1; }
         manageUserSubscriptionItem gamma <<< $'8\nalpha,beta\n1\n2\n4\n3\n9\n7'
         [[ "${syncCount}" == "1" && "${installCount}" == "0" && "${copyCount}" == "0" ]]

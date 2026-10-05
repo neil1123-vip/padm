@@ -658,10 +658,27 @@ addUserSubscriptionState() {
     local name=$2
     local sources=${3:-'["main"]'}
     local limit=${4:-0}
+    local usersJson
     subscriptionStateIdValid "${id}" || return 1
-    subscriptionActiveGroupWrite --arg id "${id}" --arg name "${name}" --argjson sources "${sources}" --argjson limit "${limit}" '
-        if any(.user_groups[]?; .id == $id) then error("user subscription already exists") else
-          .user_groups += [{"id": $id, "name": $name, "enabled": true, "allowed_sources": $sources, "traffic_limit_gb": $limit}]
+    usersJson=$(jq -cn --arg id "${id}" --arg name "${name}" '[{id:$id,name:$name}]') || return 1
+    addUserSubscriptionsState "${usersJson}" "${sources}" "${limit}"
+}
+
+addUserSubscriptionsState() {
+    local usersJson=$1
+    local sources=${2:-'["main"]'}
+    local limit=${3:-0}
+    subscriptionActiveGroupWrite --argjson users "${usersJson}" --argjson sources "${sources}" --argjson limit "${limit}" '
+        (.user_groups | map(.id)) as $existing |
+        if ($users | type) != "array" then
+          error("user subscriptions must be an array")
+        elif ($users | length) == 0 or
+            ([$users[].id] | length) != ([$users[].id] | unique | length) then
+          error("user subscription IDs must be nonempty and unique")
+        elif any($users[]; .id as $id | ($existing | index($id)) != null) then
+          error("user subscription already exists")
+        else
+          .user_groups += ($users | map({id, name, enabled:true, allowed_sources:$sources, traffic_limit_gb:$limit}))
         end
     '
 }

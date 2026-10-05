@@ -483,6 +483,8 @@ manageSharedSubscriptions() {
             createAndSyncUserSubscriptionWizard || true
             if [[ -n "${createdUserSubscriptionId:-}" ]]; then
                 manageUserSubscriptionItem "${createdUserSubscriptionId}"
+            elif [[ "${createdUserSubscriptionIds:-'[]'}" != '[]' ]]; then
+                manageUserSubscriptionsMenu "${createdUserSubscriptionIds}" || true
             fi
         elif [[ -n "${selectedUserSubscriptionIds:-}" && "${selectedUserSubscriptionIds}" != '[]' ]]; then
             manageUserSubscriptionsMenu "${selectedUserSubscriptionIds}" || true
@@ -735,15 +737,28 @@ createAndSyncUserSubscriptionWizard() {
     local templateId=${1:-}
     local templateJson
     local id=
+    local idsJson usersJson existingIds
     local sourceJson=
     local limit=0
     local syncResult=0
+    local -a linkArgs=()
     createdUserSubscriptionId=
+    createdUserSubscriptionIds='[]'
     while true; do
-        menuReadChoice user_subscription_id "请输入分享订阅 ID[例 team-a，回车取消]:" id || return 1
-        if ! subscriptionStateIdValid "${id}"; then
-            errorCard "输入有误，ID 最多 64 个字符，且只能包含英文、数字、下划线或短横线"
-        elif userSubscriptionExists "${id}"; then
+        menuReadChoice user_subscription_id "请输入分享订阅 ID[逗号分隔可批量新建，回车取消]:" id || return 1
+        idsJson=$(jq -ecn --arg value "${id}" '
+          $value | split(",") | map(gsub("^\\s+|\\s+$"; "")) |
+          select(length > 0 and all(.[]; length <= 64 and test("^[A-Za-z0-9_-]+$"))) |
+          select(length == (unique | length))
+        ') || {
+            errorCard "ID 不可为空或重复，每个 ID 最多 64 个字符，且只能包含英文、数字、下划线或短横线"
+            continue
+        }
+        existingIds=$(subscriptionActiveGroupRead -c '[.user_groups[].id]') || {
+            errorCard "用户订阅读取失败"
+            return 1
+        }
+        if jq -e --argjson ids "${idsJson}" 'any(.[]; . as $id | ($ids | index($id)) != null)' <<<"${existingIds}" >/dev/null; then
             errorCard "分享订阅 ID 已存在，请使用其他 ID"
         else
             break
@@ -768,11 +783,19 @@ createAndSyncUserSubscriptionWizard() {
         limit=$(jq -nr --arg value "${limit}" '$value | tonumber') || return 1
     fi
 
-    if ! addUserSubscriptionState "${id}" "${id}" "${sourceJson}" "${limit}"; then
+    usersJson=$(jq -c 'map({id:.,name:.})' <<<"${idsJson}") || return 1
+    if ! addUserSubscriptionsState "${usersJson}" "${sourceJson}" "${limit}"; then
         errorCard "分享订阅创建失败，订阅 ID 可能已存在或状态写入失败"
         return 1
     fi
-    createdUserSubscriptionId=${id}
+    createdUserSubscriptionIds=${idsJson}
+    id=$(jq -r 'join("、")' <<<"${idsJson}") || return 1
+    if [[ "$(jq 'length' <<<"${idsJson}")" == "1" ]]; then
+        createdUserSubscriptionId=$(jq -r '.[0]' <<<"${idsJson}") || return 1
+        linkArgs=("${createdUserSubscriptionId}")
+    else
+        linkArgs=("" "${idsJson}")
+    fi
     statusCard "分享订阅已创建" "订阅 ID：${id}" "服务器范围：$(jq -r 'join("、")' <<<"${sourceJson}")" "订阅额度 GB：${limit}" "正在立即同步；不改变后续自动同步设置"
     SUBSCRIPTION_SYNC_PUBLISHED=false
     if ! runSubscriptionGroupSync; then
@@ -784,7 +807,9 @@ createAndSyncUserSubscriptionWizard() {
         fi
     fi
     if [[ "${SUBSCRIPTION_SYNC_PUBLISHED:-false}" == "true" ]]; then
-        showPublishedSubscriptionLinks "${createdUserSubscriptionId}" || true
+        showPublishedSubscriptionLinks "${linkArgs[@]}" || true
+    elif [[ "${syncResult}" == "0" ]]; then
+        statusCard "账号同步已完成，未发布订阅链接" "订阅已保存；请从订阅首页安装/更新发布服务后同步，无需重新创建"
     fi
     return "${syncResult}"
 }
@@ -850,6 +875,10 @@ selectUserSubscriptionId() {
         fi
         if [[ "${allowMultiple}" == "true" && "${choice}" == "*" ]]; then
             selectedUserSubscriptionIds=$(jq -c '[.[].id]' <<<"${usersJson}") || return 1
+            if [[ "${selectedUserSubscriptionIds}" == '[]' ]]; then
+                errorCard "暂无可选分享订阅，请先新建"
+                continue
+            fi
             if [[ "$(jq 'length' <<<"${selectedUserSubscriptionIds}")" == "1" ]]; then
                 selectedUserSubscriptionId=$(jq -r '.[0]' <<<"${selectedUserSubscriptionIds}")
                 selectedUserSubscriptionIds='[]'
@@ -1386,9 +1415,9 @@ manageUserSubscriptionsMenu() {
                 continue
             fi
             createAndSyncUserSubscriptionWizard "${userSubscriptionId}" || true
-            if [[ -n "${createdUserSubscriptionId:-}" ]]; then
-                idsJson=$(jq -cn --arg id "${createdUserSubscriptionId}" '[$id]') || return 1
-                selectedCount=1
+            if [[ "${createdUserSubscriptionIds:-'[]'}" != '[]' ]]; then
+                idsJson=${createdUserSubscriptionIds}
+                selectedCount=$(jq 'length' <<<"${idsJson}") || return 1
             fi
             ;;
         *) coreSelectionErrorCard ;;
