@@ -55,6 +55,71 @@ runSubscriptionMenuWorkflowCoreRegression() (
     )
 
     (
+        local selectionFixture before token editedIds= syncCount=0
+        selectionFixture=$(subscriptionGroupsStateRead -c '.')
+        local PADM_SUBSCRIPTION_GROUPS_DIR="${root}/status-selection"
+        mkdir -p "${PADM_SUBSCRIPTION_GROUPS_DIR}"
+        subscriptionGroupsStateWrite --argjson fixture "${selectionFixture}" '$fixture'
+        addUserSubscriptionState beta "Beta" '["main"]' 1
+        addUserSubscriptionState gamma "Gamma" '["main"]' 2
+        subscriptionActiveGroupWrite '
+          .user_groups |= map(if .id == "beta" then .enabled = false else . end) |
+          .traffic.user_groups = {
+            "2":{sources:{edge:{upload:5368709120,download:0}}},
+            alpha:{sources:{main:{upload:5368709120,download:0}}},
+            beta:{sources:{main:{upload:1073741824,download:0}}},
+            gamma:{sources:{main:{upload:1717986918,download:0}}}
+          }
+        '
+        before=$(subscriptionGroupsStateRead -c '.')
+        selectUserSubscriptionId true true <<<'@on'
+        jq -e 'sort == ["2","alpha","gamma"]' <<<"${selectedUserSubscriptionIds}" >/dev/null
+        [[ -z "${selectedUserSubscriptionId}" ]]
+        selectUserSubscriptionId true true <<<'@off'
+        [[ "${selectedUserSubscriptionId}" == beta && "${selectedUserSubscriptionIds}" == '[]' ]]
+        selectUserSubscriptionId true true <<<'@over'
+        jq -e 'sort == ["2","beta"]' <<<"${selectedUserSubscriptionIds}" >/dev/null
+        [[ -z "${selectedUserSubscriptionId}" ]]
+        selectUserSubscriptionId true true <<< $'1,missing\n  id:2, 1 '
+        [[ "${selectedUserSubscriptionId}" == 2 && "${selectedUserSubscriptionIds}" == '[]' ]]
+        for token in '1,missing' '1,' '@on,1'; do
+            selectedUserSubscriptionId=stale
+            selectedUserSubscriptionIds='["stale"]'
+            regressionExpectStatus 1 selectUserSubscriptionId true true <<<"${token}"
+            [[ -z "${selectedUserSubscriptionId}" && "${selectedUserSubscriptionIds}" == '[]' ]]
+        done
+        for token in '@on' '@off' '@over' '*' '1,2'; do
+            regressionExpectStatus 1 selectUserSubscriptionId <<<"${token}"
+            [[ -z "${selectedUserSubscriptionId}" && "${selectedUserSubscriptionIds}" == '[]' ]]
+        done
+        [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+        (
+            local readCount=0
+            menuReadChoice() {
+                readCount=$((readCount + 1))
+                [[ "${readCount}" == 1 ]] || return 1
+                printf -v "$3" '%s' '  id:2  '
+            }
+            selectUserSubscriptionId
+            [[ "${selectedUserSubscriptionId}" == 2 && "${selectedUserSubscriptionIds}" == '[]' ]]
+        )
+        editUserSubscriptionsMenu() { editedIds=$1; }
+        manageUserSubscriptionItem alpha <<< $'8\n@over\n3\n7'
+        jq -e 'sort == ["2","beta"]' <<<"${editedIds}" >/dev/null
+        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
+        manageSharedSubscriptions <<< $'@on\n10\n7\n\n'
+        [[ "${syncCount}" == 1 ]]
+        subscriptionActiveGroupRead -e 'all(.user_groups[]; .enabled == false)' >/dev/null
+        regressionExpectStatus 1 selectUserSubscriptionId true true <<<'@on'
+        [[ -z "${selectedUserSubscriptionId}" && "${selectedUserSubscriptionIds}" == '[]' ]]
+        selectUserSubscriptionId true true <<< $'@on\n@off'
+        jq -e 'sort == ["2","alpha","beta","gamma"]' <<<"${selectedUserSubscriptionIds}" >/dev/null
+        subscriptionActiveGroupWrite '.traffic.user_groups = {}'
+        regressionExpectStatus 1 selectUserSubscriptionId true true <<<'@over'
+        [[ -z "${selectedUserSubscriptionId}" && "${selectedUserSubscriptionIds}" == '[]' ]]
+    )
+
+    (
         local selectedSources= sourceId=stale sourcesJson
         sourcesJson=$(subscriptionActiveGroupRead -c '[.sources[] | select(.role != "main")]')
         selectSubscriptionSourceId "${sourcesJson}" "选择被控:" sourceId <<< $'missing\n1'

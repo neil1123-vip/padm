@@ -834,6 +834,7 @@ selectUserSubscriptionId() {
     local userRows
     local choice=
     local selected=
+    local selectedIds
     local itemIndex=0
     local usersJson
     selectedUserSubscriptionId=
@@ -869,6 +870,9 @@ selectUserSubscriptionId() {
     done <<<"${userRows}"
     [[ "${allowCreate}" == "true" ]] && menuItem "+" "新建分享订阅" "创建后立即同步并进入详情"
     if [[ "${allowMultiple}" == "true" ]]; then
+        menuItem "@on" "选择全部已启用订阅"
+        menuItem "@off" "选择全部已停用订阅"
+        menuItem "@over" "选择全部已超限订阅" "包含已停用但仍超限的订阅"
         menuLine "输入编号或订阅 ID；逗号分隔可多选，* 选择全部；纯数字 ID 使用 id:ID；直接回车返回"
     else
         menuLine "输入编号或订阅 ID；纯数字 ID 使用 id:ID；直接回车返回"
@@ -881,22 +885,16 @@ selectUserSubscriptionId() {
             selectedUserSubscriptionIds='[]'
             return 0
         fi
-        if [[ "${allowMultiple}" == "true" && "${choice}" == "*" ]]; then
-            selectedUserSubscriptionIds=$(jq -c '[.[].id]' <<<"${usersJson}") || return 1
-            if [[ "${selectedUserSubscriptionIds}" == '[]' ]]; then
-                errorCard "暂无可选分享订阅，请先新建"
-                continue
-            fi
-            if [[ "$(jq 'length' <<<"${selectedUserSubscriptionIds}")" == "1" ]]; then
-                selectedUserSubscriptionId=$(jq -r '.[0]' <<<"${selectedUserSubscriptionIds}")
-                selectedUserSubscriptionIds='[]'
-            fi
-            return 0
-        fi
-        if [[ "${allowMultiple}" == "true" && "${choice}" == *","* ]]; then
-            selectedUserSubscriptionIds=$(jq -c --arg choice "${choice}" '
+        selectedIds=$(jq -c --arg choice "${choice}" --argjson multiple "${allowMultiple}" '
+          ($choice | gsub("^\\s+|\\s+$"; "")) as $choice |
+          if $multiple and $choice == "*" then map(.id)
+          elif $multiple and $choice == "@on" then map(select(.enabled == true) | .id)
+          elif $multiple and $choice == "@off" then map(select(.enabled == false) | .id)
+          elif $multiple and $choice == "@over" then map(select(.quota_status | startswith("已超限")) | .id)
+          else
               ($choice | split(",") | map(gsub("^\\s+|\\s+$"; ""))) as $items |
-              if ($items | length) == 0 or any($items[]; . == "") then error("empty") else . end |
+              if any($items[]; . == "") or ($multiple == false and ($items | length) != 1)
+              then error("selection") else . end |
               [$items[] as $item |
                 if $item | test("^[0-9]+$") then
                   ($item | tonumber) as $index |
@@ -905,28 +903,24 @@ selectUserSubscriptionId() {
                   ($item | sub("^id:"; "")) as $id |
                   first(.[]? | select(.id == $id)).id // error("id")
                 end] | unique
-            ' <<<"${usersJson}" 2>/dev/null) || {
-                errorCard "用户订阅选择无效，请输入列表编号、完整 ID 或逗号多选"
-                continue
-            }
-            if [[ "$(jq 'length' <<<"${selectedUserSubscriptionIds}")" == "1" ]]; then
-                selectedUserSubscriptionId=$(jq -r '.[0]' <<<"${selectedUserSubscriptionIds}")
-                selectedUserSubscriptionIds='[]'
-            fi
-            return 0
+          end
+        ' <<<"${usersJson}" 2>/dev/null) || {
+            errorCard "用户订阅选择无效，请输入列表编号、完整 ID 或菜单中的选择项"
+            continue
+        }
+        if [[ "${selectedIds}" == '[]' ]]; then
+            errorCard "暂无可选分享订阅，请更换选择或先新建"
+            continue
         fi
-        selected=$(jq -r --arg choice "${choice}" '
-          if $choice | test("^[0-9]+$") then
-            ($choice | tonumber) as $index |
-            if $index >= 1 and $index <= length then .[$index - 1].id else empty end
-          else first(.[]? | select(.id == ($choice | sub("^id:"; "")))).id // empty end
-        ' <<<"${usersJson}") || return 1
+        selected=$(jq -r '
+          if length == 1 then .[0] else empty end
+        ' <<<"${selectedIds}") || return 1
         if [[ -n "${selected}" ]]; then
             selectedUserSubscriptionId=${selected}
-            selectedUserSubscriptionIds='[]'
-            return 0
+        else
+            selectedUserSubscriptionIds=${selectedIds}
         fi
-        errorCard "用户订阅选择无效，请输入列表编号或完整 ID"
+        return 0
     done
 }
 
