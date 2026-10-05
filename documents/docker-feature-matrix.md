@@ -111,7 +111,7 @@ Docker 现在能否通过受管控制命令完成对应能力，不表示底层�
 | `internal-205-redirect-tproxy` | 路由与访问控制 -> Redirect/TProxy | `host-integrated` | `net-transparent` | host + `NET_ADMIN` | 依赖宿主路由和防火墙。 |
 | `internal-206-routing-rules` | 路由与访问控制 -> DNS/Direct/Block | `deferred` | 无 | bridge | 规则编辑及核心适配尚未迁移。 |
 | `internal-207-access-control` | 路由与访问控制 -> Tunnel/dokodemo-door | `deferred` | 无 | bridge | 入站和防火墙合同尚未迁移。 |
-| `interactive-menu` | 全部主菜单 | `deferred` | 无 | 宿主 CLI | 当前只有子命令入口，后续再做菜单适配层。 |
+| `interactive-menu` | 全部主菜单 | `deferred` | 无 | 宿主 CLI | 已有菜单壳、状态、启停重启和日志；可信首次配置向导及完整管理尚未交付。 |
 | `core-lifecycle` | 核心与服务 | `supported` | 核心 profile | 宿主 CLI | 基础 `status/up/down/restart/logs/update/rollback/validate` 已可用，不代表原生全部升级管理。 |
 | `core-upgrade-assessment` | 核心与服务 -> Xray / sing-box 生命周期 | `deferred` | 核心 profile | 宿主 CLI | 原生预发布试跑和升级风险扫描尚未迁移。 |
 | `geo-data` | 核心与服务 -> Xray Geo 数据 | `deferred` | `core-xray` | bridge | 尚未提供 Geo 更新和自动任务合同。 |

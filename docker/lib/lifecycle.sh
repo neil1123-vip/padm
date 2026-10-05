@@ -8,7 +8,9 @@ PADM_DOCKER_LIFECYCLE_LOADED=1
 dockerUsage() {
     cat >&2 <<'EOF'
 用法:
-  install-docker.sh install [--source <目录>] [--ref <commit|latest>]  # 缺 Docker 时询问是否安装
+  padm-docker                          # 交互终端进入菜单；非交互显示帮助
+  padm-docker menu
+  install-docker.sh install [--source <目录>] [--ref <commit|latest>] [--no-menu]
   padm-docker configure --spec <JSON 文件>
   padm-docker tls install --domain <域名> --cert <文件> --key <文件> [--ops-image <tag@digest>]
   padm-docker acme <issue|renew> --domain <域名> --email <邮箱> --dns <dns_*> --credentials <文件> [--ops-image <tag@digest>]
@@ -200,6 +202,10 @@ dockerInstallCommand() {
     local sourceRoot= requestedRef= root
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
+        --no-menu)
+            DOCKER_MENU_AFTER_INSTALL=0
+            shift
+            ;;
         --source)
             [[ "$#" -ge 2 && -n "$2" ]] || return "${PADM_DOCKER_RC_USAGE}"
             sourceRoot=$2
@@ -310,6 +316,10 @@ dockerComposeRun() {
     done < <(jq -r '.compose.profiles[]' "${root}/deployment.json")
     case "${1:-}" in
     up|down) extraArgs+=(--remove-orphans) ;;
+    logs)
+        # 日志只读且可能持续跟随，不能长期阻塞管理命令或流量采集。
+        dockerReleaseDeploymentLock || return "${PADM_DOCKER_RC_LOCK}"
+        ;;
     esac
     "${commandArgs[@]}" "$@" "${extraArgs[@]}" || {
         dockerError 'Docker Compose 操作失败'
@@ -670,8 +680,13 @@ dockerCommandInterrupted() {
 }
 
 dockerMain() {
-    local command=${1:-install} status
+    local command=${1:-menu} status
     [[ "$#" -gt 0 ]] && shift
+    # 菜单不持有部署锁，各操作由独立 CLI 进程完成清理。
+    if [[ "${command}" == menu ]]; then
+        dockerMenu "$@"
+        return $?
+    fi
     trap 'dockerCommandInterrupted 130' INT
     trap 'dockerCommandInterrupted 143' TERM
     case "${command}" in
@@ -706,7 +721,9 @@ dockerMain() {
     dockerReleaseDeploymentLock || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_LOCK}
     dockerCleanupStagedBundle || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_BUNDLE}
     dockerManifestCleanup || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_MANIFEST}
-    dockerEntryCleanup || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_BUNDLE}
+    if [[ "${command}" != install || "${status}" -ne 0 || "${DOCKER_MENU_AFTER_INSTALL:-0}" -ne 1 ]]; then
+        dockerEntryCleanup || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_BUNDLE}
+    fi
     trap - INT TERM
     return "${status}"
 }

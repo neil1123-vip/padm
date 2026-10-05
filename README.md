@@ -131,6 +131,11 @@ Docker 入口会安装并校验 Docker 控制 bundle；缺少 Docker 时，`inst
 wget -O /root/install-docker.sh "https://raw.githubusercontent.com/neil1123-vip/padm/main/install-docker.sh" && chmod 700 /root/install-docker.sh && /root/install-docker.sh install
 ```
 
+交互终端安装成功后自动进入菜单；已安装后直接运行 `padm-docker` 或
+`padm-docker menu` 可查看状态、启停重启和日志。首次配置向导尚未开放，仍需下面的
+JSON 规格配置。`install --no-menu` 禁止安装后自动进入菜单；无参数非交互调用只显示帮助，
+不会安装 Docker、下载 bundle 或初始化状态，现有显式 CLI 命令保持可用。
+
 ```bash
 # 以 docker/configure.example.json 为字段模板，替换域名、密钥、UUID、token、
 # release manifest 摘要和五个 CI 镜像的 tag@sha256 引用后再执行：

@@ -1,5 +1,33 @@
 #!/usr/bin/env bash
 
+dockerEntryUsage() {
+    cat >&2 <<'EOF'
+用法:
+  padm-docker                          # 交互终端进入菜单；非交互显示帮助
+  padm-docker menu
+  install-docker.sh install [--source <目录>] [--ref <commit|latest>] [--no-menu]
+  padm-docker help                     # 查看全部命令
+EOF
+}
+
+# 无参数非交互入口不安装依赖、不下载模块，也不初始化状态。
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    if [[ "$#" -eq 0 ]]; then
+        if [[ ! -t 0 || ! -t 1 ]]; then
+            dockerEntryUsage
+            exit 0
+        elif [[ -f "${PADM_DOCKER_INSTALL_DIR:-/etc/padm-docker}/mode" ||
+            "${0##*/}" == padm-docker ]]; then
+            set -- menu
+        else
+            set -- install
+        fi
+    elif [[ "$1" == menu && ( ! -t 0 || ! -t 1 ) ]]; then
+        dockerEntryUsage
+        exit 2
+    fi
+fi
+
 dockerEntryResolvePath() {
     local sourcePath=${1:-${BASH_SOURCE[0]}}
     local sourceDir targetPath resolvedTarget
@@ -286,7 +314,7 @@ dockerEntryEnsureDockerForInstall() {
 
 dockerEntryInstallCommandRequested() {
     [[ "${BASH_SOURCE[0]}" == "$0" ]] || return 1
-    [[ -z "${1:-}" || "${1}" == 'install' ]]
+    [[ "${1:-}" == 'install' ]]
 }
 
 dockerEntryArchivePathIsSafe() {
@@ -364,6 +392,7 @@ dockerEntryFetchBundle() {
             -f "${candidate}/docker/lib/bundle.sh" &&
             -f "${candidate}/docker/lib/manifest.sh" &&
             -f "${candidate}/docker/lib/lifecycle.sh" &&
+            -f "${candidate}/docker/lib/menu.sh" &&
             -f "${candidate}/shell/core/deployment_mode.sh" ]] || continue
         DOCKER_ENTRY_SOURCE_DIR=${candidate}
         found=$((found + 1))
@@ -387,6 +416,10 @@ DOCKER_ENTRY_SOURCE_DIR=${DOCKER_ENTRY_DIR}
 DOCKER_ENTRY_TEMP_DIR=
 DOCKER_ENTRY_FETCHED_REF=
 DOCKER_ENTRY_ENGINE_READY=0
+DOCKER_MENU_AFTER_INSTALL=0
+if [[ "${1:-}" == install && -t 0 && -t 1 ]]; then
+    DOCKER_MENU_AFTER_INSTALL=1
+fi
 
 if dockerEntryInstallCommandRequested "${1:-}"; then
     dockerEntryEnsureDockerForInstall
@@ -414,9 +447,16 @@ source "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/manifest.sh"
 source "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/services.sh"
 # shellcheck source=/dev/null
 source "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/lifecycle.sh"
+# shellcheck source=/dev/null
+source "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/menu.sh"
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     trap 'dockerEntryCleanup || true' EXIT
     dockerMain "$@"
-    exit $?
+    DOCKER_ENTRY_STATUS=$?
+    if [[ "${DOCKER_ENTRY_STATUS}" -eq 0 && "${DOCKER_MENU_AFTER_INSTALL}" -eq 1 ]]; then
+        dockerMenu
+        DOCKER_ENTRY_STATUS=$?
+    fi
+    exit "${DOCKER_ENTRY_STATUS}"
 fi

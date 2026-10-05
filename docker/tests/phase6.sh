@@ -51,7 +51,7 @@ copyControlFixture() {
     local target=$1 marker=$2 relative
     for relative in \
         docker/lib/bootstrap.sh docker/lib/bundle.sh docker/lib/manifest.sh \
-        docker/lib/services.sh docker/lib/traffic.sh docker/lib/lifecycle.sh \
+        docker/lib/services.sh docker/lib/traffic.sh docker/lib/lifecycle.sh docker/lib/menu.sh \
         docker/contracts/configure.schema.json docker/contracts/deployment.schema.json \
         docker/contracts/features.json shell/core/deployment_mode.sh shell/core/stats_grpc.sh; do
         mkdir -p "${target}/$(dirname -- "${relative}")"

@@ -131,6 +131,13 @@ The Docker entry installs and verifies the Docker control bundle. If Docker is m
 wget -O /root/install-docker.sh "https://raw.githubusercontent.com/neil1123-vip/padm/main/install-docker.sh" && chmod 700 /root/install-docker.sh && /root/install-docker.sh install
 ```
 
+Installation opens the menu automatically when it succeeds in an interactive terminal.
+After installation, run `padm-docker` or `padm-docker menu` for status, start/stop/restart,
+and logs. The first-configuration wizard is not available yet; use the JSON spec below.
+`install --no-menu` disables the automatic menu. A non-interactive invocation without
+arguments only prints help without installing Docker, downloading the bundle, or
+initializing state. Existing explicit CLI commands remain available.
+
 ```bash
 # Use docker/configure.example.json as the field template. Replace domains,
 # keys, UUIDs, tokens, release metadata, and all five CI tag@sha256 references:

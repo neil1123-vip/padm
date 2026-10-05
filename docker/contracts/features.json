@@ -422,7 +422,7 @@
       "profiles": [],
       "network_mode": "host-cli",
       "host_capabilities": [],
-      "reason": "当前 padm-docker 是子命令入口；菜单式配置向导属于后续阶段。"
+      "reason": "已提供交互终端菜单壳、状态、生命周期和日志；可信首次配置向导及完整管理尚未交付。"
     },
     "routing-tools": {
       "status": "deferred",
