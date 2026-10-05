@@ -68,6 +68,7 @@ info)
 context)
     printf 'unix:///var/run/docker.sock\n'
     ;;
+pull) ;;
 compose)
     if [[ "${2:-}" == "version" ]]; then
         printf 'v2.29.1\n'
@@ -85,6 +86,10 @@ compose)
 ps)
     ;;
 run)
+    if [[ " ${*} " == *'ssl.cert_time_to_seconds'* ]]; then
+        [[ "${mode}" != "tls-validity-fail" ]]
+        exit $?
+    fi
     if [[ " ${*} " == *' --entrypoint python3 '* ]]; then
         if [[ "${mode}" == "reality-dns-failure" ]]; then
             exit 2
@@ -141,6 +146,10 @@ cp "${MOCK_BIN}/systemctl" "${MOCK_BIN}/nsenter"
 runControl() {
     local expected=$1 name=$2 actual=0
     shift 2
+    if [[ "${1:-}" == configure ]]; then
+        set -- "$@" --manifest "${CONFIGURE_MANIFEST}" --bundle "${CONFIGURE_BUNDLE}" \
+            --control-bundle "${CONFIGURE_CONTROL}"
+    fi
     : >"${CONTROL_LOG}"
     env \
         MSYS=winsymlinks:sys \
@@ -167,12 +176,17 @@ imageReference() {
     printf 'ghcr.io/example/padm-%s:test@sha256:%s' "$1" "${IMAGE_DIGEST}"
 }
 
+# shellcheck source=/dev/null
+source "${PROJECT_ROOT}/docker/tests/configure-fixture.sh"
+dockerConfigureTestFixture
+
 writeRealitySpec() {
     local target=$1 core=$2 accountName=$3 port=${4:-24443}
     jq -n \
         --arg core "${core}" \
         --arg name "${accountName}" \
         --arg digest "${IMAGE_DIGEST}" \
+        --arg manifestSha "${CONFIGURE_MANIFEST_SHA}" --arg identity "${CONFIGURE_IDENTITY}" \
         --arg xray "$(imageReference xray)" \
         --arg singbox "$(imageReference sing-box)" \
         --arg nginx "$(imageReference nginx)" \
@@ -183,8 +197,8 @@ writeRealitySpec() {
         schema_version: 1,
         release: {
           version: "3.1.8",
-          manifest_sha256: $digest,
-          signature_identity: "test-workflow"
+          manifest_sha256: $manifestSha,
+          signature_identity: $identity
         },
         core: {
           type: $core,
@@ -217,6 +231,7 @@ writeWebSocketSpec() {
     local target=$1
     jq -n \
         --arg digest "${IMAGE_DIGEST}" \
+        --arg manifestSha "${CONFIGURE_MANIFEST_SHA}" --arg identity "${CONFIGURE_IDENTITY}" \
         --arg xray "$(imageReference xray)" \
         --arg singbox "$(imageReference sing-box)" \
         --arg nginx "$(imageReference nginx)" \
@@ -226,8 +241,8 @@ writeWebSocketSpec() {
         schema_version: 1,
         release: {
           version: "3.1.8",
-          manifest_sha256: $digest,
-          signature_identity: "test-workflow"
+          manifest_sha256: $manifestSha,
+          signature_identity: $identity
         },
         core: {
           type: "xray",

@@ -51,6 +51,7 @@ info)
     esac
     ;;
 context) printf 'unix:///var/run/docker.sock\n' ;;
+pull) ;;
 compose)
     if [[ "${2:-}" == version ]]; then printf 'v2.29.1\n'; exit 0; fi
     if [[ " ${*} " == *' up -d '* && "${FAKE_DOCKER_MODE:-ok}" == fail-next-up &&
@@ -61,6 +62,10 @@ compose)
     ;;
 ps) ;;
 run)
+    if [[ " ${*} " == *'ssl.cert_time_to_seconds'* ]]; then
+        [[ "${FAKE_DOCKER_MODE:-ok}" != tls-validity-fail ]]
+        exit $?
+    fi
     if [[ " ${*} " == *' --entrypoint python3 '* ]]; then
         printf '192.0.2.1\tAS64500\tExampleNet\n'
     elif [[ " ${*} " == *' tls ping '* ]]; then
@@ -81,7 +86,27 @@ cp "${MOCK_BIN}/systemctl" "${MOCK_BIN}/nsenter"
 
 runControl() {
     local expected=$1 name=$2 actual=0
+    local -a command=(bash -u "${PROJECT_ROOT}/install-docker.sh")
     shift 2
+    if [[ "${1:-}" == configure ]]; then
+        set -- "$@" --manifest "${CONFIGURE_MANIFEST}" --bundle "${CONFIGURE_BUNDLE}" \
+            --control-bundle "${CONFIGURE_CONTROL}"
+    elif [[ "${1:-}" == apply-staged ]]; then
+        shift
+        command=(bash -u -c '
+          source "$1"
+          dockerHostPreflight || exit 10
+          dockerLockInstalledDeployment || exit $?
+          dockerConfigureReleasePrepare "$2" "$3" "$4" || exit $?
+          dockerConfigureApply "$5" "$6" "$7"
+          status=$?
+          dockerReleaseDeploymentLock
+          dockerCleanupStagedBundle
+          dockerManifestCleanup
+          exit "${status}"
+        ' test "${PROJECT_ROOT}/install-docker.sh"
+            "${CONFIGURE_MANIFEST}" "${CONFIGURE_BUNDLE}" "${CONFIGURE_CONTROL}")
+    fi
     : >"${CONTROL_LOG}"
     env MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" DOCKER_HOST= \
         PADM_DOCKER_INSTALL_DIR="${DOCKER_ROOT}" PADM_NATIVE_INSTALL_DIR="${NATIVE_ROOT}" \
@@ -90,7 +115,7 @@ runControl() {
         PADM_DOCKER_HEALTH_TIMEOUT=1 PADM_DOCKER_SKIP_CHOWN=1 \
         FAKE_DOCKER_LOG="${DOCKER_LOG}" FAKE_DOCKER_MODE="${FAKE_DOCKER_MODE:-ok}" \
         FAKE_DOCKER_FAIL_ONCE="${TEST_ROOT}/fail-once" \
-        bash -u "${PROJECT_ROOT}/install-docker.sh" "$@" >"${CONTROL_LOG}" 2>&1 || actual=$?
+        "${command[@]}" "$@" >"${CONTROL_LOG}" 2>&1 || actual=$?
     if [[ "${actual}" -ne "${expected}" ]]; then
         sed 's/^/  /' "${CONTROL_LOG}" >&2
         fail "${name}: expected rc=${expected}, got rc=${actual}"
@@ -99,14 +124,19 @@ runControl() {
 
 imageReference() { printf 'ghcr.io/example/padm-%s:test@sha256:%s' "$1" "${IMAGE_DIGEST}"; }
 
+# shellcheck source=/dev/null
+source "${PROJECT_ROOT}/docker/tests/configure-fixture.sh"
+dockerConfigureTestFixture
+
 writeRealitySpec() {
     local target=$1 core=$2
     jq -n --arg core "${core}" --arg digest "${IMAGE_DIGEST}" \
+        --arg manifestSha "${CONFIGURE_MANIFEST_SHA}" --arg identity "${CONFIGURE_IDENTITY}" \
         --arg xray "$(imageReference xray)" --arg singbox "$(imageReference sing-box)" \
         --arg nginx "$(imageReference nginx)" --arg ops "${OPS_IMAGE}" --arg net "$(imageReference net)" '
       {
         schema_version: 1,
-        release: {version: "3.1.8", manifest_sha256: $digest, signature_identity: "test-workflow"},
+        release: {version: "3.1.8", manifest_sha256: $manifestSha, signature_identity: $identity},
         core: {type: $core, protocols: [{
           id: 1, server: "proxy.example.com", public_port: 24443,
           address_families: ["ipv4", "ipv6"], name: "main",
@@ -178,7 +208,20 @@ EOF
 chmod 0600 "${DOCKER_ROOT}/secrets/net/wireguard/wg-padm.conf"
 
 : >"${DOCKER_LOG}"
+for field in '.release.signature_identity = "untrusted"' '.images.xray |= sub("1$"; "2")'; do
+    jq "${field}" "${WIREGUARD_SPEC}" >"${TEST_ROOT}/untrusted.json"
+    runControl 16 untrusted-input configure --spec "${TEST_ROOT}/untrusted.json"
+    [[ ! -e "${DOCKER_ROOT}/deployment.json" ]] || fail 'untrusted release inputs changed deployment'
+done
 runControl 0 wireguard configure --spec "${WIREGUARD_SPEC}"
+cmp -s "${WIREGUARD_SPEC}" "${DOCKER_ROOT}/config/spec.json" || fail 'complete spec was not persisted'
+if [[ "$(/usr/bin/uname -s)" == Linux ]]; then
+    [[ "$(/usr/bin/stat --format=%a "${DOCKER_ROOT}/config/spec.json")" == 600 ]] ||
+        fail 'complete spec permissions are not 0600'
+fi
+jq -e 'all(.services[].volumes[]?; .source != "${PADM_DOCKER_ROOT}/config" and
+  .source != "${PADM_DOCKER_ROOT}/config/spec.json")' "${DOCKER_ROOT}/compose.json" >/dev/null ||
+    fail 'complete spec is mounted into a container'
 jq -e '
   (.compose.profiles | index("net-wireguard")) != null and
   any(.listeners[]; .service == "net-wireguard" and .public_port == 51820 and .transport == "udp") and
@@ -198,6 +241,10 @@ printf 'fake-private-key\n' >"${KEY_FILE}"
 chmod 0600 "${KEY_FILE}"
 runControl 0 tls-install tls install --domain proxy.example.com --cert "${CERT_FILE}" \
     --key "${KEY_FILE}" --ops-image "${OPS_IMAGE}"
+BEFORE_TLS_RECONFIGURE=$(sha256sum "${DOCKER_ROOT}/deployment.json" | cut -d ' ' -f 1)
+FAKE_DOCKER_MODE=tls-validity-fail runControl 15 reject-expired-candidate configure --spec "${FAIL2BAN_SPEC}"
+[[ "$(sha256sum "${DOCKER_ROOT}/deployment.json" | cut -d ' ' -f 1)" == "${BEFORE_TLS_RECONFIGURE}" ]] ||
+    fail 'invalid certificate lifetime changed deployment'
 : >"${DOCKER_LOG}"
 runControl 0 fail2ban configure --spec "${FAIL2BAN_SPEC}"
 grep -q 'access_log /var/log/nginx/access.log combined;' "${DOCKER_ROOT}/config/nginx/default.conf" ||
@@ -217,12 +264,39 @@ grep -q 'net-fail2ban preflight fail2ban 24444' "${DOCKER_LOG}" || fail 'Fail2ba
 
 FAIL2BAN_HASH=$(sha256sum "${DOCKER_ROOT}/config/net/fail2ban/padm.local" | cut -d ' ' -f 1)
 DEPLOYMENT_HASH=$(sha256sum "${DOCKER_ROOT}/deployment.json" | cut -d ' ' -f 1)
+SPEC_HASH=$(sha256sum "${DOCKER_ROOT}/config/spec.json" | cut -d ' ' -f 1)
 rm -f -- "${TEST_ROOT}/fail-once"
 FAKE_DOCKER_MODE=fail-next-up runControl 14 rollback-net configure --spec "${TPROXY_SPEC}"
 [[ "$(sha256sum "${DOCKER_ROOT}/config/net/fail2ban/padm.local" | cut -d ' ' -f 1)" == "${FAIL2BAN_HASH}" ]] ||
     fail 'failed deployment did not restore config/net'
 [[ "$(sha256sum "${DOCKER_ROOT}/deployment.json" | cut -d ' ' -f 1)" == "${DEPLOYMENT_HASH}" ]] ||
     fail 'failed deployment did not restore deployment state'
+[[ "$(sha256sum "${DOCKER_ROOT}/config/spec.json" | cut -d ' ' -f 1)" == "${SPEC_HASH}" ]] ||
+    fail 'failed deployment did not restore complete spec'
+
+# 首配证书和 ACME 数据只暂存，健康检查失败时一起恢复。
+STAGED_TLS="${DOCKER_ROOT}/.staged-tls"
+STAGED_ACME="${DOCKER_ROOT}/.staged-acme"
+mkdir -p "${STAGED_TLS}" "${STAGED_ACME}" "${DOCKER_ROOT}/data/acme"
+printf 'old-acme-account\n' >"${DOCKER_ROOT}/data/acme/account"
+cp -a "${DOCKER_ROOT}/secrets/tls/." "${STAGED_TLS}/"
+printf 'new-certificate\n' >"${STAGED_TLS}/proxy.example.com.crt"
+printf 'new-private-key\n' >"${STAGED_TLS}/proxy.example.com.key"
+printf 'new-acme-account\n' >"${STAGED_ACME}/account"
+rm -f -- "${TEST_ROOT}/fail-once"
+FAKE_DOCKER_MODE=fail-next-up runControl 14 rollback-staged apply-staged \
+    "${FAIL2BAN_SPEC}" "${STAGED_TLS}" "${STAGED_ACME}"
+grep -qxF fake-certificate "${DOCKER_ROOT}/secrets/tls/proxy.example.com.crt" ||
+    fail 'failed deployment committed candidate TLS'
+grep -qxF old-acme-account "${DOCKER_ROOT}/data/acme/account" ||
+    fail 'failed deployment committed candidate ACME data'
+[[ "$(sha256sum "${DOCKER_ROOT}/config/spec.json" | cut -d ' ' -f 1)" == "${SPEC_HASH}" ]] ||
+    fail 'failed staged deployment did not restore complete spec'
+runControl 0 commit-staged apply-staged "${FAIL2BAN_SPEC}" "${STAGED_TLS}" "${STAGED_ACME}"
+grep -qxF new-certificate "${DOCKER_ROOT}/secrets/tls/proxy.example.com.crt" ||
+    fail 'successful deployment did not commit candidate TLS'
+grep -qxF new-acme-account "${DOCKER_ROOT}/data/acme/account" ||
+    fail 'successful deployment did not commit candidate ACME data'
 
 : >"${DOCKER_LOG}"
 runControl 0 tun configure --spec "${TUN_SPEC}"

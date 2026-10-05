@@ -125,7 +125,7 @@ Docker mode isolates the cores, Nginx, subscription services, and operations tas
 
 ### Installation
 
-The Docker entry installs and verifies the Docker control bundle. If Docker is missing, `install` asks for explicit confirmation before bootstrapping Docker Engine and the Compose CLI plugin (v2 or later). It does not run `docker build` on production hosts or install Xray, sing-box, Nginx, or their application dependencies on the host. Images are prebuilt and published by this repository's CI; after the control bundle is installed, generate the Compose state from a configuration spec:
+The Docker entry installs and verifies the Docker control bundle. If Docker is missing, `install` asks for explicit confirmation before bootstrapping Docker Engine and the Compose CLI plugin (v2 or later). It does not run `docker build` on production hosts or install Xray, sing-box, Nginx, or their application dependencies on the host. Images are prebuilt and published by this repository's CI; complete first configuration in the menu:
 
 ```bash
 wget -O /root/install-docker.sh "https://raw.githubusercontent.com/neil1123-vip/padm/main/install-docker.sh" && chmod 700 /root/install-docker.sh && /root/install-docker.sh install
@@ -133,18 +133,43 @@ wget -O /root/install-docker.sh "https://raw.githubusercontent.com/neil1123-vip/
 
 Installation opens the menu automatically when it succeeds in an interactive terminal.
 After installation, run `padm-docker` or `padm-docker menu` for status, start/stop/restart,
-and logs. The first-configuration wizard is not available yet; use the JSON spec below.
+and logs. Select first configuration to choose the core, protocols, addresses, and certificates.
+The wizard covers Reality with Xray or sing-box, and Xray WS TLS or Reality + WS TLS.
+It never overwrites an existing deployment; protocol editing and full management remain deferred.
 `install --no-menu` disables the automatic menu. A non-interactive invocation without
 arguments only prints help without installing Docker, downloading the bundle, or
 initializing state. Existing explicit CLI commands remain available.
 
 ```bash
-# Use docker/configure.example.json as the field template. Replace domains,
-# keys, UUIDs, tokens, release metadata, and all five CI tag@sha256 references:
-padm-docker configure --spec /root/padm-docker-config.json
+padm-docker setup
 padm-docker validate
 padm-docker status
 ```
+
+Only the final confirmation permits release verification, UUID/Reality/token generation,
+and candidate configuration or certificate preparation. Missing `cosign` stops the operation;
+the wizard neither installs an untrusted verifier nor allows verification to be skipped.
+WS TLS can use managed certificates, an imported full certificate chain and private key,
+or DNS-01. Private keys and DNS credentials must be regular files readable only by their owner.
+Subscription publishing still requires Xray, WS TLS, and managed TLS.
+The complete input is saved as root-owned `/etc/padm-docker/config/spec.json` with mode `0600`.
+Cancellation does not commit; failures restore the previous spec, certificates, and ACME state.
+The spec contains secrets and must not be printed or published.
+
+For offline use, provide all three assets from the same Release:
+
+```bash
+padm-docker setup --manifest /root/release-manifest.json \
+  --bundle /root/release-manifest.sigstore.json \
+  --control-bundle /root/padm-docker-bundle.tar.gz
+```
+
+Non-interactive deployments can still use `configure --spec /root/padm-docker-config.json`
+with the same release options. `release` emits verified `release` and `images` inputs, not
+a signature proof; `configure` re-verifies the original assets. Replace example fields with
+actual parameters, and match every release field and image to the verified manifest.
+Updates and rollbacks preserve the complete spec; corrupt or mismatched specs are rejected
+before stopping the current services.
 
 To pin the control script version, change `install` to `install --ref <40-character commit SHA>`; do not treat `latest` as a production lock. A CI Release provides `release-manifest.json`, a Cosign-signed Sigstore bundle v0.3 (`release-manifest.sigstore.json`, with the signature embedded), and `padm-docker-bundle.tar.gz`; updates verify the bundle signature and digests.
 
@@ -192,7 +217,7 @@ Configuration changes generate and validate a candidate, check ports and Compose
 
 ### Trusted Release Inputs
 
-The first-configuration wizard is still under development. After installing the control scripts, check a signed release, its control bundle, and all five digest-pinned images to obtain release inputs for configuration:
+The first-configuration wizard verifies release inputs automatically. To inspect a release independently or prepare non-interactive configuration, check the signed release, its control bundle, and all five digest-pinned images:
 
 ```bash
 padm-docker release

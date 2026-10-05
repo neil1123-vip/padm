@@ -5920,6 +5920,14 @@ runDockerReleaseRegression() {
     bash "${PROJECT_ROOT}/docker/tests/release.sh"
 }
 
+runDockerSetupRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/setup.sh"
+}
+
+runDockerPermissionsRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/permissions.sh"
+}
+
 runDockerPhase2Regression() {
     bash "${PROJECT_ROOT}/docker/tests/phase2.sh"
 }

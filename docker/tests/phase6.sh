@@ -51,7 +51,7 @@ copyControlFixture() {
     local target=$1 marker=$2 relative
     for relative in \
         docker/lib/bootstrap.sh docker/lib/bundle.sh docker/lib/manifest.sh \
-        docker/lib/services.sh docker/lib/traffic.sh docker/lib/lifecycle.sh docker/lib/menu.sh \
+        docker/lib/services.sh docker/lib/traffic.sh docker/lib/lifecycle.sh docker/lib/setup.sh docker/lib/menu.sh \
         docker/contracts/configure.schema.json docker/contracts/deployment.schema.json \
         docker/contracts/features.json shell/core/deployment_mode.sh shell/core/stats_grpc.sh; do
         mkdir -p "${target}/$(dirname -- "${relative}")"
@@ -86,8 +86,9 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
     PADM_DOCKER_BIN_DIR="${TEST_ROOT}/installed-bin" \
     PADM_DOCKER_INSTALL_DIR="${STATE_ROOT}" PADM_DOCKER_SKIP_CHOWN=1 \
     bash -uc '
-        set -euo pipefail
+        set -Eeuo pipefail
         source "$PHASE6_PROJECT_ROOT/install-docker.sh" help
+        trap "printf \"docker-phase6-error: source=%s line=%s stack=%s callers=%s command=%s\\n\" \"\${BASH_SOURCE[*]:-fixture}\" \"\${LINENO}\" \"\${FUNCNAME[*]:-main}\" \"\${BASH_LINENO[*]:-0}\" \"\${BASH_COMMAND}\" >&2" ERR
         root=$(dockerInstallRoot)
         oldCommit=$(printf "f%.0s" {1..40})
         newCommit=$(printf "a%.0s" {1..40})
@@ -128,7 +129,7 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
         dockerTrafficBeforeChange() { :; }
         dockerManifestPrepare() {
             PADM_DOCKER_MANIFEST_FILE=$source
-            PADM_DOCKER_MANIFEST_SHA256=$(printf "a%.0s" {1..64})
+            PADM_DOCKER_MANIFEST_SHA256=$(sha256sum "$source" | awk "{print \$1}")
             PADM_DOCKER_MANIFEST_SIGNATURE_IDENTITY=test
             PADM_DOCKER_MANIFEST_TEMP_DIR="$root/.manifest-fixture"
             mkdir -p "$PADM_DOCKER_MANIFEST_TEMP_DIR"
@@ -160,6 +161,10 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
         successfulBackup=$DOCKER_CONFIG_BACKUP
         test "$(<"$successfulBackup/bundle.target")" == "$oldBundle"
         ! grep -qxF bundle.target "$successfulBackup/present"
+        # 旧版没有原始规格的部署与快照仍能更新和回滚。
+        ! grep -qxF config/spec.json "$successfulBackup/present"
+        test ! -e "$root/config/spec.json"
+        dockerValidateConfigurationBackup "$successfulBackup"
         dockerCleanupStagedBundle
 
         jq --arg commit "$failedCommit" --arg digest "$(printf 3%.0s {1..64})" \
@@ -180,6 +185,7 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
             test "$DOCKER_CONFIG_BACKUP" != "$successfulBackup"
             test -d "$DOCKER_CONFIG_BACKUP"
             test "$(<"$DOCKER_CONFIG_BACKUP/bundle.target")" == "$newBundle"
+            test ! -e "$root/config/spec.json"
             dockerRemoveManagedTree "$root" "$DOCKER_CONFIG_BACKUP"
             dockerCleanupStagedBundle
             unset FAKE_DOCKER_FAIL_UP
@@ -211,6 +217,7 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
         ! dockerRollbackCommand
         test "$(wc -l <"$FAKE_DOCKER_LOG")" == "$logBefore"
         assertCurrent "$newBundle" "$newCommit" new-control "$(printf 2%.0s {1..64})"
+        test ! -e "$root/config/spec.json"
         printf "%s\n" "$oldBundle" >"$successfulBackup/bundle.target"
         DOCKER_CONFIG_SWITCHED=0
         scheduleAttempts=0
@@ -221,9 +228,123 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
         dockerTrafficScheduleInstall() { :; }
         dockerRollbackCommand
         assertCurrent "$oldBundle" "$oldCommit" old-control "$(printf 1%.0s {1..64})"
+        test ! -e "$root/config/spec.json"
         dockerValidateConfigurationBackup "$successfulBackup"
         rm -f -- "$successfulBackup/bundle.target"
         dockerValidateConfigurationBackup "$successfulBackup"
+        dockerRemoveManagedTree "$root" "$successfulBackup"
+
+        # 受管规格只更新发布输入，其余账号、参数和协议输入必须完整保留。
+        oldSpec="$root/.spec-before-update.json"
+        newSpec="$root/.spec-after-update.json"
+        jq --arg ref "ghcr.io/example/padm-test:3.1.9@sha256:$digest" "
+          .release = {version: \"3.1.9\", manifest_sha256: (\"a\" * 64), signature_identity: \"test\"} |
+          .core.protocols[0].public_port = 24443 |
+          .core.protocols[0].address_families = [\"ipv4\"] |
+          .images |= map_values(\$ref)
+        " "$PHASE6_PROJECT_ROOT/docker/configure.example.json" >"$oldSpec"
+        cp -- "$oldSpec" "$root/config/spec.json"
+        chmod 0600 "$oldSpec" "$root/config/spec.json"
+        dockerManagedSpecMatchesDeployment "$root/config/spec.json" \
+            "$root/deployment.json" "$root/images.env"
+        source="$PHASE6_MANIFEST"
+        manifestSha=$(sha256sum "$source" | awk "{print \$1}")
+        jq --arg sha "$manifestSha" --slurpfile manifest "$source" "
+          .release = {version: \$manifest[0].release.version, manifest_sha256: \$sha, signature_identity: \"test\"} |
+          .images = (\$manifest[0].images | map_values(.reference))
+        " "$oldSpec" >"$newSpec"
+        chmod 0600 "$newSpec"
+        control=$PHASE6_CONTROL_BUNDLE
+        dockerUpdateCommand --manifest "$source"
+        newBundle=$(readlink "$root/bundle")
+        assertCurrent "$newBundle" "$newCommit" new-control "$(printf 2%.0s {1..64})"
+        test "$(jq -Sc . "$root/config/spec.json")" == "$(jq -Sc . "$newSpec")"
+        dockerManagedSpecMatchesDeployment "$root/config/spec.json" \
+            "$root/deployment.json" "$root/images.env"
+        successfulBackup=$DOCKER_CONFIG_BACKUP
+        grep -qxF config/spec.json "$successfulBackup/present"
+        test "$(jq -Sc . "$successfulBackup/config/spec.json")" == "$(jq -Sc . "$oldSpec")"
+        dockerManagedSpecMatchesDeployment "$successfulBackup/config/spec.json" \
+            "$successfulBackup/deployment.json" "$successfulBackup/images.env"
+        dockerValidateConfigurationBackup "$successfulBackup"
+        dockerCleanupStagedBundle
+
+        source="$PHASE6_MANIFEST.rollback"
+        control=$PHASE6_FAILED_CONTROL_BUNDLE
+        rm -f -- "$FAKE_DOCKER_FAIL_MARK"
+        export FAKE_DOCKER_FAIL_UP=1
+        ! dockerUpdateCommand --manifest "$source"
+        assertCurrent "$newBundle" "$newCommit" new-control "$(printf 2%.0s {1..64})"
+        test "$(jq -Sc . "$root/config/spec.json")" == "$(jq -Sc . "$newSpec")"
+        dockerManagedSpecMatchesDeployment "$root/config/spec.json" \
+            "$root/deployment.json" "$root/images.env"
+        test "$DOCKER_CONFIG_BACKUP" != "$successfulBackup"
+        dockerValidateConfigurationBackup "$DOCKER_CONFIG_BACKUP"
+        dockerRemoveManagedTree "$root" "$DOCKER_CONFIG_BACKUP"
+        dockerCleanupStagedBundle
+        unset FAKE_DOCKER_FAIL_UP
+
+        # 每种损坏快照都在调用 Docker 前拒绝，不能回退选中另一份有效更新快照。
+        cp -- "$successfulBackup/present" "$root/.spec-backup-present"
+        for corruption in json release digest reference unlisted deployment-unlisted; do
+            cp -- "$root/.spec-backup-present" "$successfulBackup/present"
+            case "$corruption" in
+            json) printf "{\n" >"$successfulBackup/config/spec.json" ;;
+            release)
+                jq ".release.version = \"9.9.9\"" "$oldSpec" >"$successfulBackup/config/spec.json"
+                ;;
+            digest)
+                jq ".images.ops |= sub(\"@sha256:[0-9a-f]+$\"; \"@sha256:\" + (\"3\" * 64))" \
+                    "$oldSpec" >"$successfulBackup/config/spec.json"
+                ;;
+            reference)
+                jq ".images.ops |= sub(\"padm-test\"; \"padm-wrong\")" \
+                    "$oldSpec" >"$successfulBackup/config/spec.json"
+                ;;
+            unlisted)
+                cp -- "$oldSpec" "$successfulBackup/config/spec.json"
+                sed "/^config\\/spec\\.json$/d" "$root/.spec-backup-present" >"$successfulBackup/present"
+                ;;
+            deployment-unlisted)
+                cp -- "$oldSpec" "$successfulBackup/config/spec.json"
+                sed "/^deployment\\.json$/d" "$root/.spec-backup-present" >"$successfulBackup/present"
+                ;;
+            esac
+            ! dockerValidateConfigurationBackup "$successfulBackup"
+            logBefore=$(wc -l <"$FAKE_DOCKER_LOG")
+            DOCKER_CONFIG_BACKUP=$successfulBackup
+            DOCKER_CONFIG_SWITCHED=1
+            ! dockerRestoreConfiguration
+            test "$(wc -l <"$FAKE_DOCKER_LOG")" == "$logBefore"
+            DOCKER_CONFIG_SWITCHED=0
+            ! dockerRollbackCommand
+            test "$(wc -l <"$FAKE_DOCKER_LOG")" == "$logBefore"
+            assertCurrent "$newBundle" "$newCommit" new-control "$(printf 2%.0s {1..64})"
+            test "$(jq -Sc . "$root/config/spec.json")" == "$(jq -Sc . "$newSpec")"
+        done
+        cp -- "$oldSpec" "$successfulBackup/config/spec.json"
+        cp -- "$root/.spec-backup-present" "$successfulBackup/present"
+        dockerValidateConfigurationBackup "$successfulBackup"
+        scheduleAttempts=0
+        dockerTrafficScheduleInstall() { scheduleAttempts=$((scheduleAttempts + 1)); [[ "$scheduleAttempts" -gt 1 ]]; }
+        ! dockerRollbackCommand
+        assertCurrent "$newBundle" "$newCommit" new-control "$(printf 2%.0s {1..64})"
+        test "$(jq -Sc . "$root/config/spec.json")" == "$(jq -Sc . "$newSpec")"
+        dockerManagedSpecMatchesDeployment "$root/config/spec.json" \
+            "$root/deployment.json" "$root/images.env"
+        [[ "$scheduleAttempts" == 2 ]]
+        dockerTrafficScheduleInstall() { :; }
+        dockerRollbackCommand
+        assertCurrent "$oldBundle" "$oldCommit" old-control "$(printf 1%.0s {1..64})"
+        test "$(jq -Sc . "$root/config/spec.json")" == "$(jq -Sc . "$oldSpec")"
+        dockerManagedSpecMatchesDeployment "$root/config/spec.json" \
+            "$root/deployment.json" "$root/images.env"
+        cp -- "$root/config/spec.json" "$root/.spec-before-invalid-backup"
+        jq ".release.version = \"9.9.9\"" "$root/.spec-before-invalid-backup" >"$root/config/spec.json"
+        logBefore=$(wc -l <"$FAKE_DOCKER_LOG")
+        ! dockerBackupConfiguration configure
+        test "$(wc -l <"$FAKE_DOCKER_LOG")" == "$logBefore"
+        cp -- "$root/.spec-before-invalid-backup" "$root/config/spec.json"
         test -d "$root"
         ! dockerUninstallCommand --purge
         test -d "$root"

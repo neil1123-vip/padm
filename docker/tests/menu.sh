@@ -21,6 +21,7 @@ fail() {
 
 command -v script >/dev/null 2>&1 || fail 'util-linux script is required for real PTY checks'
 command -v timeout >/dev/null 2>&1 || fail 'timeout is required for bounded PTY checks'
+bash "${PROJECT_ROOT}/docker/tests/menu-signals.sh"
 
 cat >"${MOCK_BIN}/uname" <<'EOF'
 #!/usr/bin/env bash
@@ -137,7 +138,13 @@ runPty() {
             # 等待输入时现场检查，避免只验证退出后的清理。
             [[ ! -e "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]] || exit 2
         fi
-        if [[ "${driver}" == logs || "${driver}" == term ]]; then
+        if [[ "${driver}" == setup ]]; then
+            printf '2\n' >&3
+            waitForText '核心 [1=Xray, 2=sing-box, 0=取消]' "${CONTROL_LOG}" || exit 11
+            printf '0\n' >&3
+            waitForText 'Docker 管理菜单' "${CONTROL_LOG}" 2 || exit 12
+            printf '0\n' >&3
+        elif [[ "${driver}" == logs || "${driver}" == term ]]; then
             printf '6\n' >&3
             waitForText 'mock-log-ready' "${CONTROL_LOG}" || exit 3
             # 跟随日志期间也允许独立状态与定时采集争取部署锁。
@@ -254,13 +261,12 @@ assertMenu
 
 snapshotBefore=$(find "${PADM_DOCKER_INSTALL_DIR}/config" "${PADM_DOCKER_INSTALL_DIR}/data" \
     "${PADM_DOCKER_INSTALL_DIR}/secrets" "${PADM_DOCKER_INSTALL_DIR}/backups" -type f -print)
-runPty first-config-deferred menu $'2\n0\n' "${CLI}" menu
-grep -Fq '首次配置向导尚未开放；当前可使用 padm-docker configure --spec <JSON 文件>。' \
-    "${CONTROL_LOG}" || fail 'first-config action did not explain the unavailable wizard'
-[[ ! -e "${PADM_DOCKER_INSTALL_DIR}/deployment.json" ]] || fail 'deferred first-config action wrote a deployment'
+runPty first-config-cancel setup '' "${CLI}" menu
+grep -Fq 'Docker 首次配置' "${CONTROL_LOG}" || fail 'first-config action did not enter the wizard'
+[[ ! -e "${PADM_DOCKER_INSTALL_DIR}/deployment.json" ]] || fail 'cancelled first-config action wrote a deployment'
 snapshotAfter=$(find "${PADM_DOCKER_INSTALL_DIR}/config" "${PADM_DOCKER_INSTALL_DIR}/data" \
     "${PADM_DOCKER_INSTALL_DIR}/secrets" "${PADM_DOCKER_INSTALL_DIR}/backups" -type f -print)
-[[ "${snapshotBefore}" == "${snapshotAfter}" ]] || fail 'deferred first-config action changed persistent files'
+[[ "${snapshotBefore}" == "${snapshotAfter}" ]] || fail 'cancelled first-config action changed persistent files'
 
 # 最小已配置夹具只覆盖调度和命令分发，不宣称真实容器可用。
 cat >"${PADM_DOCKER_INSTALL_DIR}/deployment.json" <<'EOF'

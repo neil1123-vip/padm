@@ -125,24 +125,44 @@ Docker 版用于把核心、Nginx、订阅和运维任务与宿主系统隔离�
 
 ### 安装
 
-Docker 入口会安装并校验 Docker 控制 bundle；缺少 Docker 时，`install` 会在明确确认后引导安装 Docker Engine 和 Compose CLI 插件（v2 及以上）。它不在生产机执行 `docker build`，也不会把 Xray、sing-box、Nginx 或其它业务依赖安装到宿主机。镜像由本仓库 CI 预构建并发布，首次部署需要再用配置规格生成 Compose 状态：
+Docker 入口会安装并校验 Docker 控制 bundle；缺少 Docker 时，`install` 会在明确确认后引导安装 Docker Engine 和 Compose CLI 插件（v2 及以上）。它不在生产机执行 `docker build`，也不会把 Xray、sing-box、Nginx 或其它业务依赖安装到宿主机。镜像由本仓库 CI 预构建并发布，首次部署可在菜单中完成：
 
 ```bash
 wget -O /root/install-docker.sh "https://raw.githubusercontent.com/neil1123-vip/padm/main/install-docker.sh" && chmod 700 /root/install-docker.sh && /root/install-docker.sh install
 ```
 
 交互终端安装成功后自动进入菜单；已安装后直接运行 `padm-docker` 或
-`padm-docker menu` 可查看状态、启停重启和日志。首次配置向导尚未开放，仍需下面的
-JSON 规格配置。`install --no-menu` 禁止安装后自动进入菜单；无参数非交互调用只显示帮助，
+`padm-docker menu` 可查看状态、启停重启和日志，选择“首次配置”收集核心、协议、地址和证书。
+当前向导支持 Xray/sing-box Reality，以及 Xray WS TLS 或 Reality + WS TLS；
+已有部署不会被向导覆盖，协议编辑和完整管理仍待后续阶段交付。
+`install --no-menu` 禁止安装后自动进入菜单；无参数非交互调用只显示帮助，
 不会安装 Docker、下载 bundle 或初始化状态，现有显式 CLI 命令保持可用。
 
 ```bash
-# 以 docker/configure.example.json 为字段模板，替换域名、密钥、UUID、token、
-# release manifest 摘要和五个 CI 镜像的 tag@sha256 引用后再执行：
-padm-docker configure --spec /root/padm-docker-config.json
+padm-docker setup
 padm-docker validate
 padm-docker status
 ```
+
+向导最终确认后才验签发布、生成 UUID/Reality 参数/订阅 token，并准备候选配置与证书。
+没有 `cosign` 时停止，不自动从未验证来源安装验证器，也不能跳过验签。
+WS TLS 可选择已有受管证书、导入完整证书链与私钥，或使用 DNS-01；
+私钥和 DNS 凭据必须是仅持有者可读的普通文件。订阅发布仍要求 Xray、WS TLS 和受管证书。
+完整规格保存于 `/etc/padm-docker/config/spec.json`，由 root 持有、权限 `0600`；
+取消不提交，配置失败恢复旧规格、证书及 ACME 状态。该文件含秘密，不应打印或公开。
+
+离线使用同一 Release 的三个资产：
+
+```bash
+padm-docker setup --manifest /root/release-manifest.json \
+  --bundle /root/release-manifest.sigstore.json \
+  --control-bundle /root/padm-docker-bundle.tar.gz
+```
+
+非交互部署继续使用 `configure --spec /root/padm-docker-config.json`，可传入相同发布参数；
+`release` 可输出已验证的 `release`、`images` 输入，但它不是签名证明，`configure`
+会重新验证原资产。示例字段须替换为实际参数，并让发布字段和全部镜像与验签清单完全一致。
+更新/回滚会同步保存完整规格；损坏或不匹配的规格在停止当前服务前被拒绝。
 
 需要固定控制脚本版本时，把 `install` 改为 `install --ref <40 位 commit SHA>`；不要把 `latest` 当作生产版本锁。CI Release 同时提供 `release-manifest.json`、Cosign 签发的 Sigstore bundle v0.3（`release-manifest.sigstore.json`，签名内嵌）和 `padm-docker-bundle.tar.gz`，更新时会校验 bundle 签名和摘要。
 
@@ -190,7 +210,7 @@ padm-docker acme <issue|renew> --domain example.com --email admin@example.com --
 
 ### 可信发布输入
 
-首次配置向导仍在开发中。已安装控制脚本后，可先检查签名发布、控制 bundle 和 5 个固定 digest 镜像，取得后续配置所需的发布输入：
+首次配置向导会自动验证发布输入。需要独立检查或准备非交互配置时，也可先检查签名发布、控制 bundle 和 5 个固定 digest 镜像：
 
 ```bash
 padm-docker release

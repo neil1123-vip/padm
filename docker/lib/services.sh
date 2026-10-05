@@ -153,6 +153,56 @@ dockerConfigureSpecValidate() {
     }
 }
 
+dockerConfigureReleasePrepare() {
+    dockerManifestPrepare "${1:-}" "${2:-}" "${3:-}" || return "${PADM_DOCKER_RC_MANIFEST}"
+    dockerStageReleaseBundle >&2 || return "${PADM_DOCKER_RC_BUNDLE}"
+    dockerPullManifestImages >&2 || return "${PADM_DOCKER_RC_COMPOSE}"
+}
+
+dockerConfigureReleaseValidate() {
+    local specFile=$1 inputs
+    inputs=$(dockerManifestConfigurationInputs) || {
+        dockerError '可信发布输入缺失或已变更，拒绝配置'
+        return 1
+    }
+    jq -e --argjson trusted "${inputs}" '
+      .release == $trusted.release and .images == $trusted.images
+    ' "${specFile}" >/dev/null 2>&1 || {
+        dockerError '配置中的版本、签名摘要或镜像与已验证发布清单不一致'
+        return 1
+    }
+}
+
+dockerManagedSpecMatchesDeployment() {
+    local specFile=$1 deployment=$2 imagesEnv=$3 key value expected count name
+    dockerConfigureSpecValidate "${specFile}" || return 1
+    [[ -f "${deployment}" && ! -L "${deployment}" &&
+        -f "${imagesEnv}" && ! -L "${imagesEnv}" ]] || return 1
+    jq -e --slurpfile deployment "${deployment}" '
+      $deployment[0] as $d |
+      .release.version == $d.padm_version and
+      .release.manifest_sha256 == $d.manifest.sha256 and
+      .release.signature_identity == $d.manifest.signature_identity and
+      .core.type == $d.core.type and
+      ([.core.protocols[].id] | sort) == ($d.core.protocol_ids | sort) and
+      all(.images | to_entries[];
+        (.value | split("@") | last) == $d.images[.key].index_digest)
+    ' "${specFile}" >/dev/null 2>&1 || return 1
+    while IFS='|' read -r key name; do
+        count=$(grep -c "^${key}=" "${imagesEnv}" 2>/dev/null || true)
+        [[ "${count}" == 1 ]] || return 1
+        value=$(sed -n "s/^${key}=//p" "${imagesEnv}") || return 1
+        expected=$(jq -er --arg name "${name}" '.images[$name]' "${specFile}") || return 1
+        [[ "${value}" == "${expected}" ]] || return 1
+    done <<'EOF'
+PADM_XRAY_IMAGE|xray
+PADM_SINGBOX_IMAGE|sing-box
+PADM_NGINX_IMAGE|nginx
+PADM_OPS_IMAGE|ops
+PADM_NET_IMAGE|net
+EOF
+}
+
 dockerRealityTlsPingState() {
     local output=$1
     printf '%s\n' "${output}" | awk '
@@ -599,18 +649,24 @@ dockerGenerateSingBoxConfig() {
 }
 
 dockerStageTlsFiles() {
-    local specFile=$1 candidate=$2 root domain sourceDir
-    jq -e '.tls != null' "${specFile}" >/dev/null || return 0
+    local specFile=$1 candidate=$2 sourceDir=${3:-} root domain extension
     root=$(dockerInstallRoot) || return 1
+    [[ -z "${sourceDir}" || ( -d "${sourceDir}" && ! -L "${sourceDir}" ) ]] || return 1
+    [[ -n "${sourceDir}" ]] || sourceDir="${root}/secrets/tls"
+    if [[ -e "${sourceDir}" || -L "${sourceDir}" ]]; then
+        dockerManagedPathIsSafe "${root}" "${sourceDir}" &&
+            [[ -d "${sourceDir}" && ! -L "${sourceDir}" ]] &&
+            [[ -z "$(find "${sourceDir}" -type l -print -quit)" ]] || return 1
+        cp -a -- "${sourceDir}/." "${candidate}/secrets/tls/" || return 1
+    fi
+    jq -e '.tls != null' "${specFile}" >/dev/null || return 0
     domain=$(jq -r '.tls.domain' "${specFile}") || return 1
-    sourceDir="${root}/secrets/tls"
     for extension in crt key; do
-        [[ -f "${sourceDir}/${domain}.${extension}" &&
-            ! -L "${sourceDir}/${domain}.${extension}" ]] || {
-            dockerError "TLS 文件缺失，请先执行 tls install 或 acme issue: ${domain}.${extension}"
+        [[ -f "${candidate}/secrets/tls/${domain}.${extension}" &&
+            ! -L "${candidate}/secrets/tls/${domain}.${extension}" ]] || {
+            dockerError "候选 TLS 文件缺失: ${domain}.${extension}"
             return 1
         }
-        cp -- "${sourceDir}/${domain}.${extension}" "${candidate}/secrets/tls/${domain}.${extension}" || return 1
     done
 }
 
@@ -803,7 +859,7 @@ dockerGenerateCompose() {
             depends_on: {xray: {condition: "service_healthy"}},
             volumes: (mounts("config/nginx"; "/etc/nginx/http.d"; true) +
               mounts("data/static"; "/srv/padm"; true) +
-              mounts("secrets"; "/etc/padm/secrets"; true) +
+              mounts("secrets/tls"; "/etc/padm/secrets/tls"; true) +
               mounts("logs/nginx"; "/var/log/nginx"; false)),
             ports: [ports($websocket[0]; 8443)[]],
             tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=32m"]
@@ -831,7 +887,7 @@ dockerGenerateCompose() {
           restart: "no",
           labels: labels("acme"),
           volumes: (mounts("data/acme"; "/var/lib/padm/acme"; false) +
-            mounts("secrets"; "/etc/padm/secrets"; true)),
+            mounts("secrets/tls"; "/etc/padm/secrets/tls"; true)),
           tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=16m"]
         })
       | if ($wireguard | length) == 1 then
@@ -1012,10 +1068,32 @@ dockerDeploymentFileValidate() {
     ' "$1" >/dev/null 2>&1
 }
 
+dockerTlsRuntimePermissions() {
+    local directory=$1
+    [[ -e "${directory}" || -L "${directory}" ]] || return 0
+    [[ -d "${directory}" && ! -L "${directory}" ]] &&
+        [[ -z "$(find "${directory}" -type l -print -quit)" ]] || return 1
+    find "${directory}" -type d -exec chmod 0750 {} + || return 1
+    find "${directory}" -type f ! -name '*.key' -exec chmod 0640 {} + || return 1
+    find "${directory}" -type f -name '*.key' -exec chmod 0600 {} + || return 1
+    if [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" != "1" ]]; then
+        find "${directory}" ! -name '*.key' \
+            -exec chown "0:${PADM_DOCKER_CONTAINER_GID}" {} + || return 1
+        # 私钥仅供实际运行的容器用户读取，不赋予整个容器组读取权限。
+        find "${directory}" -type f -name '*.key' \
+            -exec chown "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" {} + || return 1
+    fi
+}
+
 dockerPrepareCandidatePermissions() {
     local candidate=$1 directory
+    if [[ -e "${candidate}/config/spec.json" || -L "${candidate}/config/spec.json" ]]; then
+        [[ -f "${candidate}/config/spec.json" && ! -L "${candidate}/config/spec.json" ]] || return 1
+        chmod 0600 "${candidate}/config/spec.json" || return 1
+    fi
     find "${candidate}/config" "${candidate}/data" "${candidate}/logs" -type d -exec chmod 0750 {} + || return 1
-    find "${candidate}/config" "${candidate}/data" "${candidate}/logs" -type f -exec chmod 0640 {} + || return 1
+    find "${candidate}/config" "${candidate}/data" "${candidate}/logs" -type f \
+        ! -path "${candidate}/config/spec.json" -exec chmod 0640 {} + || return 1
     find "${candidate}/secrets" -type d -exec chmod 0750 {} + || return 1
     find "${candidate}/secrets" -type f -exec chmod 0640 {} + || return 1
     chmod 0640 "${candidate}/deployment.json" "${candidate}/compose.json" \
@@ -1024,8 +1102,9 @@ dockerPrepareCandidatePermissions() {
         chmod 0600 "${candidate}/secrets/net/wireguard/wg-padm.conf" || return 1
     fi
     if [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" != "1" ]]; then
-        chown -R "0:${PADM_DOCKER_CONTAINER_GID}" \
-            "${candidate}/config" "${candidate}/data/subscription" \
+        find "${candidate}/config" ! -path "${candidate}/config/spec.json" \
+            -exec chown "0:${PADM_DOCKER_CONTAINER_GID}" {} + || return 1
+        chown -R "0:${PADM_DOCKER_CONTAINER_GID}" "${candidate}/data/subscription" \
             "${candidate}/logs" "${candidate}/secrets" || return 1
         chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" \
             "${candidate}/logs/nginx" || return 1
@@ -1033,10 +1112,18 @@ dockerPrepareCandidatePermissions() {
             chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" "${directory}" || return 1
         done
     fi
+    # 完整规格包含所有协议秘密，只允许宿主 root 读取，不交给容器组。
+    if [[ -e "${candidate}/config/spec.json" || -L "${candidate}/config/spec.json" ]]; then
+        [[ -f "${candidate}/config/spec.json" && ! -L "${candidate}/config/spec.json" ]] || return 1
+        chmod 0600 "${candidate}/config/spec.json" || return 1
+        [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == "1" ]] ||
+            chown 0:0 "${candidate}/config/spec.json" || return 1
+    fi
+    dockerTlsRuntimePermissions "${candidate}/secrets/tls"
 }
 
 dockerGenerateCandidate() {
-    local specFile=$1 candidate=$2 root core token
+    local specFile=$1 candidate=$2 tlsSource=${3:-} acmeSource=${4:-} root core token
     root=$(dockerInstallRoot) || return 1
     core=$(jq -r '.core.type' "${specFile}") || return 1
     case "${core}" in
@@ -1046,7 +1133,17 @@ dockerGenerateCandidate() {
     esac
     dockerStageHostIntegrationFiles "${specFile}" "${candidate}" || return 1
     dockerGenerateFail2banConfig "${specFile}" "${candidate}" || return 1
-    dockerStageTlsFiles "${specFile}" "${candidate}" || return 1
+    dockerStageTlsFiles "${specFile}" "${candidate}" "${tlsSource}" || return 1
+    [[ -z "${acmeSource}" || ( -d "${acmeSource}" && ! -L "${acmeSource}" ) ]] || return 1
+    [[ -n "${acmeSource}" ]] || acmeSource="${root}/data/acme"
+    if [[ -e "${acmeSource}" || -L "${acmeSource}" ]]; then
+        dockerManagedPathIsSafe "${root}" "${acmeSource}" &&
+            [[ -d "${acmeSource}" && ! -L "${acmeSource}" ]] &&
+            [[ -z "$(find "${acmeSource}" -type l -print -quit)" ]] || return 1
+        cp -a -- "${acmeSource}/." "${candidate}/data/acme/" || return 1
+    fi
+    cp -- "${specFile}" "${candidate}/config/spec.json" || return 1
+    chmod 0600 "${candidate}/config/spec.json" || return 1
     dockerGenerateNginxConfig "${specFile}" "${candidate}/config/nginx/default.conf" || return 1
     if jq -e '.subscription.enabled == true' "${specFile}" >/dev/null; then
         token=$(jq -r '.subscription.token' "${specFile}") || return 1
@@ -1118,7 +1215,7 @@ dockerValidateHostIntegrations() {
 }
 
 dockerValidateCandidate() {
-    local specFile=$1 candidate=$2 core domain jsonFile
+    local specFile=$1 candidate=$2 core domain jsonFile image
     while IFS= read -r jsonFile; do
         [[ -s "${jsonFile}" ]] && jq empty "${jsonFile}" >/dev/null 2>&1 || {
             dockerError "候选 JSON 配置无效: ${jsonFile}"
@@ -1158,9 +1255,8 @@ dockerValidateCandidate() {
     esac
     if jq -e '.tls != null' "${specFile}" >/dev/null; then
         domain=$(jq -r '.tls.domain' "${specFile}") || return 1
-        dockerCandidateCompose "${candidate}" run --rm --no-deps acme tls-check \
-            "/etc/padm/secrets/tls/${domain}.crt" "/etc/padm/secrets/tls/${domain}.key" \
-            "${domain}" >/dev/null || {
+        image=$(jq -r '.images.ops' "${specFile}") || return 1
+        dockerTlsValidateCandidate "${image}" "${candidate}/secrets/tls" "${domain}" || {
             dockerError 'TLS 证书、私钥或域名校验失败'
             return 1
         }
@@ -1205,9 +1301,17 @@ config/xray
 config/sing-box
 config/nginx
 config/net
+config/spec.json
 data/subscription
+secrets/tls
+data/acme
 EOF
     chmod -R go-rwx "${backup}" || return 1
+    # 备份是宿主 root 的私有快照，运行时属主在恢复后按目录用途重建。
+    [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == "1" ]] || chown -R 0:0 "${backup}" || return 1
+    if [[ -e "${backup}/deployment.json" || -L "${backup}/deployment.json" ]]; then
+        dockerValidateConfigurationBackup "${backup}" || return 1
+    fi
     DOCKER_CONFIG_BACKUP=${backup}
 }
 
@@ -1293,6 +1397,16 @@ dockerCreateUpdateCandidate() {
       .images.ops.index_digest = $ops |
       .images.net.index_digest = $net
     ' >"${candidate}/deployment.json" || return 1
+    if [[ -e "${root}/config/spec.json" || -L "${root}/config/spec.json" ]]; then
+        [[ -f "${root}/config/spec.json" && ! -L "${root}/config/spec.json" ]] || return 1
+        dockerManagedSpecMatchesDeployment "${root}/config/spec.json" \
+            "${root}/deployment.json" "${root}/images.env" || return 1
+        jq --argjson inputs "$(dockerManifestConfigurationInputs)" '
+          .release = $inputs.release | .images = $inputs.images
+        ' "${root}/config/spec.json" >"${candidate}/config/spec.json" || return 1
+        dockerConfigureSpecValidate "${candidate}/config/spec.json" &&
+            dockerConfigureReleaseValidate "${candidate}/config/spec.json" || return 1
+    fi
     dockerTrafficPrepareCandidate "${candidate}" || return 1
     dockerPrepareCandidatePermissions "${candidate}" || return 1
     DOCKER_CONFIG_CANDIDATE=${candidate}
@@ -1326,7 +1440,10 @@ config/xray
 config/sing-box
 config/nginx
 config/net
+config/spec.json
 data/subscription
+secrets/tls
+data/acme
 EOF
 }
 
@@ -1339,12 +1456,15 @@ dockerInstallCandidate() {
         cp -- "${backup}/deployment.json" "${root}/deployment.previous.json" || return 1
         chmod 0640 "${root}/deployment.previous.json" || return 1
     fi
-    for relative in config/xray config/sing-box config/nginx config/net data/subscription; do
+    for relative in config/xray config/sing-box config/nginx config/net data/subscription secrets/tls data/acme; do
         source="${candidate}/${relative}"
         target="${root}/${relative}"
         mkdir -p -- "$(dirname -- "${target}")" || return 1
         mv -- "${source}" "${target}" || return 1
     done
+    if [[ -f "${candidate}/config/spec.json" && ! -L "${candidate}/config/spec.json" ]]; then
+        mv -- "${candidate}/config/spec.json" "${root}/config/spec.json" || return 1
+    fi
     mv -- "${candidate}/compose.json" "${root}/compose.json" || return 1
     mv -- "${candidate}/images.runtime.env" "${root}/images.env" || return 1
     mv -- "${candidate}/deployment.json" "${root}/deployment.json" || return 1
@@ -1369,18 +1489,28 @@ dockerEnsureRuntimeDataPermissions() {
         [[ -d "${root}/${directory}" && ! -L "${root}/${directory}" ]] || return 1
         [[ -z "$(find "${root}/${directory}" -type l -print -quit)" ]] || return 1
         find "${root}/${directory}" -type d -exec chmod 0750 {} + || return 1
-        find "${root}/${directory}" -type f -exec chmod 0640 {} + || return 1
+        find "${root}/${directory}" -type f ! -path "${root}/config/spec.json" \
+            -exec chmod 0640 {} + || return 1
     done
     if [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" != "1" ]]; then
         chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" \
             "${root}/data/xray" "${root}/data/sing-box" "${root}/data/acme" || return 1
+        find "${root}/config" ! -path "${root}/config/spec.json" \
+            -exec chown "0:${PADM_DOCKER_CONTAINER_GID}" {} + || return 1
         chown -R "0:${PADM_DOCKER_CONTAINER_GID}" "${root}/data/static" \
             "${root}/logs/subscription" "${root}/logs/acme" \
-            "${root}/config" "${root}/data/subscription" || return 1
+            "${root}/data/subscription" || return 1
         chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" \
             "${root}/logs/nginx" || return 1
         chown -R 0:0 "${root}/data/net" || return 1
     fi
+    if [[ -e "${root}/config/spec.json" || -L "${root}/config/spec.json" ]]; then
+        [[ -f "${root}/config/spec.json" && ! -L "${root}/config/spec.json" ]] || return 1
+        chmod 0600 "${root}/config/spec.json" || return 1
+        [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == "1" ]] ||
+            chown 0:0 "${root}/config/spec.json" || return 1
+    fi
+    dockerTlsRuntimePermissions "${root}/secrets/tls"
 }
 
 dockerRestoreConfiguration() {
@@ -1391,6 +1521,11 @@ dockerRestoreConfiguration() {
         [[ -f "${backup}/bundle.target" && ! -L "${backup}/bundle.target" && -O "${backup}/bundle.target" ]] || return 1
         bundleTarget=$(<"${backup}/bundle.target")
         dockerBundlePathForTarget "${bundleTarget}" >/dev/null || return 1
+    fi
+    # 已配置快照须先验证完整输入，损坏恢复点不能先停止现有服务。
+    if [[ -e "${backup}/deployment.json" || -L "${backup}/deployment.json" ]] ||
+        grep -qxF deployment.json "${backup}/present"; then
+        dockerValidateConfigurationBackup "${backup}" || return 1
     fi
     dockerComposeRun down >/dev/null 2>&1 || true
     dockerRemoveConfigurationTargets || return 1
@@ -1408,6 +1543,13 @@ dockerRestoreConfiguration() {
         dockerEnsureRuntimeDataPermissions || return 1
         dockerComposeRun up -d --force-recreate --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" >/dev/null 2>&1 || return 1
     else
+        dockerTlsRuntimePermissions "${root}/secrets/tls" || return 1
+        if [[ -e "${root}/data/acme" || -L "${root}/data/acme" ]]; then
+            [[ -d "${root}/data/acme" && ! -L "${root}/data/acme" ]] &&
+                [[ -z "$(find "${root}/data/acme" -type l -print -quit)" ]] || return 1
+            [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == "1" ]] ||
+                chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" "${root}/data/acme" || return 1
+        fi
         dockerTrafficScheduleRemove || return 1
     fi
     DOCKER_CONFIG_SWITCHED=0
@@ -1431,7 +1573,7 @@ dockerConfigurationInterrupted() {
 }
 
 dockerConfigureApply() {
-    local sourceSpec=$1 specFile candidate backup
+    local sourceSpec=$1 tlsSource=${2:-} acmeSource=${3:-} specFile candidate backup
     dockerConfigureSpecValidate "${sourceSpec}" || return "${PADM_DOCKER_RC_STATE}"
     dockerTrafficRuntimeCheck "$(jq -r '.core.type' "${sourceSpec}")" || return "${PADM_DOCKER_RC_HOST}"
     dockerTrafficBeforeChange
@@ -1446,6 +1588,10 @@ dockerConfigureApply() {
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_STATE}"
     }
+    dockerConfigureReleaseValidate "${specFile}" || {
+        dockerCleanupConfigurationCandidate || true
+        return "${PADM_DOCKER_RC_MANIFEST}"
+    }
     dockerRealityTargetsValidate "${specFile}" || {
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_STATE}"
@@ -1458,7 +1604,7 @@ dockerConfigureApply() {
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_CONFLICT}"
     }
-    if ! dockerGenerateCandidate "${specFile}" "${candidate}" ||
+    if ! dockerGenerateCandidate "${specFile}" "${candidate}" "${tlsSource}" "${acmeSource}" ||
         ! dockerValidateCandidate "${specFile}" "${candidate}"; then
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_STATE}"
@@ -1485,12 +1631,21 @@ dockerConfigureApply() {
 }
 
 dockerConfigureCommand() {
-    local specFile=
+    local specFile= manifest= bundle= controlBundle=
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
         --spec)
-            [[ "$#" -ge 2 && -n "$2" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* ]] || return "${PADM_DOCKER_RC_USAGE}"
             specFile=$2
+            shift 2
+            ;;
+        --manifest|--bundle|--control-bundle)
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* ]] || return "${PADM_DOCKER_RC_USAGE}"
+            case "$1" in
+            --manifest) manifest=$2 ;;
+            --bundle) bundle=$2 ;;
+            --control-bundle) controlBundle=$2 ;;
+            esac
             shift 2
             ;;
         *) return "${PADM_DOCKER_RC_USAGE}" ;;
@@ -1504,6 +1659,9 @@ dockerConfigureCommand() {
         return "${PADM_DOCKER_RC_USAGE}"
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
     dockerLockInstalledDeployment || return $?
+    dockerConfigureSpecValidate "${specFile}" || return "${PADM_DOCKER_RC_STATE}"
+    dockerConfigureReleasePrepare "${manifest}" "${bundle}" "${controlBundle}" || return $?
+    dockerConfigureReleaseValidate "${specFile}" || return "${PADM_DOCKER_RC_MANIFEST}"
     dockerConfigureApply "${specFile}"
 }
 
@@ -1578,6 +1736,31 @@ dockerCleanupTlsCandidate() {
 
 dockerTlsValidateCandidate() {
     local image=$1 candidate=$2 domain=$3
+    docker run --rm --read-only --cap-drop ALL \
+        --security-opt no-new-privileges --tmpfs /tmp:rw,noexec,nosuid,nodev,size=8m \
+        --label io.padm.mode=docker --label io.padm.project="${PADM_DOCKER_PROJECT}" \
+        --volume "${candidate}:/candidate:ro" --entrypoint python3 "${image}" -c '
+import ssl
+import subprocess
+import sys
+import time
+
+path = sys.argv[1]
+text = subprocess.run(
+    ["openssl", "x509", "-in", path, "-noout", "-startdate", "-enddate"],
+    check=True, capture_output=True, text=True,
+).stdout.splitlines()
+values = {}
+for line in text:
+    name, value = line.split("=", 1)
+    values[name] = ssl.cert_time_to_seconds(value)
+now = time.time()
+if not (values["notBefore"] <= now < values["notAfter"]):
+    raise SystemExit(1)
+' "/candidate/${domain}.crt" >/dev/null || {
+        dockerError '候选证书尚未生效或已过期'
+        return 1
+    }
     docker run --rm --read-only --cap-drop ALL \
         --security-opt no-new-privileges --tmpfs /tmp:rw,noexec,nosuid,nodev,size=8m \
         --label io.padm.mode=docker --label io.padm.project="${PADM_DOCKER_PROJECT}" \

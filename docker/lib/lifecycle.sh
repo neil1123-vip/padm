@@ -12,7 +12,8 @@ dockerUsage() {
   padm-docker menu
   install-docker.sh install [--source <目录>] [--ref <commit|latest>] [--no-menu]
   padm-docker release [--manifest <URL|文件> --bundle <URL|文件> [--control-bundle <URL|文件>]]
-  padm-docker configure --spec <JSON 文件>
+  padm-docker setup [--manifest <URL|文件> --bundle <URL|文件> [--control-bundle <URL|文件>]]
+  padm-docker configure --spec <JSON 文件> [--manifest <URL|文件> --bundle <URL|文件> [--control-bundle <URL|文件>]]
   padm-docker tls install --domain <域名> --cert <文件> --key <文件> [--ops-image <tag@digest>]
   padm-docker acme <issue|renew> --domain <域名> --email <邮箱> --dns <dns_*> --credentials <文件> [--ops-image <tag@digest>]
   padm-docker validate
@@ -503,7 +504,7 @@ dockerUpdateCommand() {
 
 dockerConfigurationBackupAllowed() {
     case "$1" in
-    deployment.json|deployment.previous.json|images.env|compose.json|config/xray|config/sing-box|config/nginx|config/net|data/subscription) return 0 ;;
+    deployment.json|deployment.previous.json|images.env|compose.json|config/xray|config/sing-box|config/nginx|config/net|config/spec.json|data/subscription|secrets/tls|data/acme) return 0 ;;
     *) return 1 ;;
     esac
 }
@@ -530,14 +531,21 @@ dockerValidateConfigurationBackup() {
             "${entry}" == "${backup}/deployment.json" ||
             "${entry}" == "${backup}/deployment.previous.json" || "${entry}" == "${backup}/images.env" ||
             "${entry}" == "${backup}/compose.json" || "${entry}" == "${backup}/config" ||
-            "${entry}" == "${backup}/data" || "${entry}" == "${backup}/config/"* ||
+            "${entry}" == "${backup}/data" || "${entry}" == "${backup}/secrets" ||
+            "${entry}" == "${backup}/secrets/tls" || "${entry}" == "${backup}/secrets/tls/"* ||
+            "${entry}" == "${backup}/config/"* ||
             "${entry}" == "${backup}/data/"* ]] || return 1
         [[ -O "${entry}" ]] || return 1
     done < <(find "${backup}" -mindepth 1 -print)
     grep -qxF deployment.json "${backup}/present" || return 1
     grep -qxF compose.json "${backup}/present" || return 1
     grep -qxF images.env "${backup}/present" || return 1
-    dockerDeploymentFileValidate "${backup}/deployment.json"
+    dockerDeploymentFileValidate "${backup}/deployment.json" || return 1
+    if [[ -e "${backup}/config/spec.json" || -L "${backup}/config/spec.json" ]]; then
+        grep -qxF config/spec.json "${backup}/present" || return 1
+        dockerManagedSpecMatchesDeployment "${backup}/config/spec.json" \
+            "${backup}/deployment.json" "${backup}/images.env" || return 1
+    fi
 }
 
 dockerLatestUpdateBackup() {
@@ -699,6 +707,7 @@ dockerCommandInterrupted() {
     if declare -F dockerConfigurationInterrupted >/dev/null 2>&1; then
         dockerConfigurationInterrupted || true
     fi
+    dockerSetupCleanup || true
     dockerReleaseDeploymentLock || true
     dockerCleanupStagedBundle || true
     dockerManifestCleanup || true
@@ -719,6 +728,7 @@ dockerMain() {
     case "${command}" in
     install) dockerInstallCommand "$@" ;;
     release) dockerReleaseCommand "$@" ;;
+    setup) dockerSetupCommand "$@" ;;
     configure) dockerConfigureCommand "$@" ;;
     tls)
         if [[ "${1:-}" == "install" ]]; then
@@ -746,6 +756,7 @@ dockerMain() {
         ;;
     esac
     status=${status:-$?}
+    dockerSetupCleanup || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_STATE}
     dockerReleaseDeploymentLock || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_LOCK}
     dockerCleanupStagedBundle || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_BUNDLE}
     dockerManifestCleanup || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_MANIFEST}

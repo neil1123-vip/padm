@@ -60,6 +60,8 @@ jobs:
           bash docker/tests/phase1.sh
           bash docker/tests/menu.sh
           bash docker/tests/release.sh
+          bash docker/tests/setup.sh
+          sudo bash docker/tests/permissions.sh
           bash docker/tests/phase2.sh
           bash docker/tests/phase3.sh
           bash docker/tests/phase4.sh

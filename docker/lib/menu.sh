@@ -7,13 +7,29 @@ PADM_DOCKER_MENU_LOADED=1
 DOCKER_MENU_CHILD_PID=
 DOCKER_MENU_SIGNAL=0
 
+dockerMenuTerminateTree() {
+    local pid=$1 task child
+    local -a children=() taskChildren=()
+    # 首配与菜单共用前台组，只终止该 CLI 的后代，避免误杀菜单所在组。
+    for task in /proc/"${pid}"/task/*; do
+        [[ -r "${task}/children" ]] || continue
+        taskChildren=()
+        IFS=' ' read -r -a taskChildren <"${task}/children" 2>/dev/null || true
+        children+=("${taskChildren[@]}")
+    done
+    kill -TERM "${pid}" 2>/dev/null || true
+    for child in "${children[@]}"; do
+        [[ "${child}" =~ ^[0-9]+$ ]] || continue
+        dockerMenuTerminateTree "${child}"
+    done
+}
+
 dockerMenuInterrupted() {
     DOCKER_MENU_SIGNAL=$1
     if [[ -n "${DOCKER_MENU_CHILD_PID}" ]]; then
         if ! kill -TERM -- "-${DOCKER_MENU_CHILD_PID}" 2>/dev/null &&
             kill -0 "${DOCKER_MENU_CHILD_PID}" 2>/dev/null; then
-            dockerError '无法终止菜单动作进程组，正在终止 CLI 子进程'
-            kill -TERM "${DOCKER_MENU_CHILD_PID}" || true
+            dockerMenuTerminateTree "${DOCKER_MENU_CHILD_PID}"
         fi
         wait "${DOCKER_MENU_CHILD_PID}" 2>/dev/null || true
     fi
@@ -36,16 +52,22 @@ dockerMenuCli() {
 }
 
 dockerMenuRun() {
-    local cli status=0 monitorEnabled=0
+    local cli status=0 monitorEnabled=0 setupMode=0
     cli=$(dockerMenuCli) || return $?
     # 子进程从已安装 bundle 读取合同，不继承菜单中的锁和候选配置。
     # 独立进程组便于中断整个动作，包括 CLI 正在等待的 Docker 命令。
     [[ $- != *m* ]] || monitorEnabled=1
+    if [[ "${1:-}" == setup ]]; then
+        # 首次配置必须与菜单共用前台进程组，否则后台 read 会收到 SIGTTIN。
+        setupMode=1
+        set +m
+    else
+        set -m
+    fi
     DOCKER_MENU_SIGNAL=0
-    set -m
     bash "${cli}" "$@" <&0 &
     DOCKER_MENU_CHILD_PID=$!
-    if [[ "$(jobs -p %+)" != "${DOCKER_MENU_CHILD_PID}" ]]; then
+    if [[ "${setupMode}" -eq 0 && "$(jobs -p %+)" != "${DOCKER_MENU_CHILD_PID}" ]]; then
         dockerError '无法建立菜单动作独立进程组'
         kill -TERM "${DOCKER_MENU_CHILD_PID}" 2>/dev/null || true
         wait "${DOCKER_MENU_CHILD_PID}" 2>/dev/null || true
@@ -53,8 +75,12 @@ dockerMenuRun() {
         [[ "${monitorEnabled}" -eq 1 ]] || set +m
         return "${PADM_DOCKER_RC_STATE}"
     fi
-    [[ "${monitorEnabled}" -eq 1 ]] || set +m
     wait "${DOCKER_MENU_CHILD_PID}" || status=$?
+    if [[ "${monitorEnabled}" -eq 1 ]]; then
+        set -m
+    else
+        set +m
+    fi
     if [[ "${DOCKER_MENU_SIGNAL}" -ne 0 ]]; then
         wait "${DOCKER_MENU_CHILD_PID}" 2>/dev/null || true
         status=${DOCKER_MENU_SIGNAL}
@@ -81,7 +107,7 @@ dockerMenu() {
         printf '\nDocker 管理菜单\n'
         printf '%s\n' \
             '1. 查看状态' \
-            '2. 首次配置（尚未开放）' \
+            '2. 首次配置' \
             '3. 启动服务' \
             '4. 停止服务' \
             '5. 重启服务' \
@@ -97,9 +123,7 @@ dockerMenu() {
         case "${choice}" in
         0) break ;;
         1) dockerMenuRun status || true ;;
-        2)
-            printf '首次配置向导尚未开放；当前可使用 padm-docker configure --spec <JSON 文件>。\n'
-            ;;
+        2) dockerMenuRun setup || true ;;
         3) dockerMenuRun up || true ;;
         4) dockerMenuRun down || true ;;
         5) dockerMenuRun restart || true ;;
