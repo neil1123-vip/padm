@@ -76,6 +76,9 @@ jobs:
           fi
           printf 'Native regression selector: %s\n' "${selector}" >>"${GITHUB_STEP_SUMMARY}"
           bash shell/subscription_groups_regression.sh "${selector}"
+      - name: Check Docker TLS transactions
+        shell: bash
+        run: sudo bash shell/subscription_groups_regression.sh docker-tls
 
   images:
     needs: [static, native]

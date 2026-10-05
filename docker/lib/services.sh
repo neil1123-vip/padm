@@ -1907,17 +1907,30 @@ dockerImageReferenceIsValid() {
 
 dockerResolveOpsImage() {
     local requested=${1:-} root value count
-    if [[ -n "${requested}" ]]; then
+    root=$(dockerInstallRoot) || return 1
+    dockerTrafficSafePath "${root}" "${root}/deployment.json" &&
+        dockerTrafficSafePath "${root}" "${root}/config/spec.json" &&
+        dockerTrafficSafePath "${root}" "${root}/images.env" || return 1
+    if [[ -n "${requested}" && ! -e "${root}/deployment.json" ]]; then
         dockerImageReferenceIsValid "${requested}" || return 1
         printf '%s\n' "${requested}"
         return 0
     fi
-    root=$(dockerInstallRoot) || return 1
     [[ -f "${root}/images.env" && ! -L "${root}/images.env" ]] || return 1
     count=$(grep -c '^PADM_OPS_IMAGE=' "${root}/images.env" 2>/dev/null || true)
     [[ "${count}" == "1" ]] || return 1
     value=$(sed -n 's/^PADM_OPS_IMAGE=//p' "${root}/images.env") || return 1
     dockerImageReferenceIsValid "${value}" || return 1
+    [[ -z "${requested}" || "${requested}" == "${value}" ]] || return 1
+    if [[ -e "${root}/deployment.json" ]]; then
+        padmDockerDeploymentIdentityValid "${root}/deployment.json" &&
+            jq -e --arg digest "${value##*@}" '.images.ops.index_digest == $digest' \
+                "${root}/deployment.json" >/dev/null || return 1
+        if [[ -e "${root}/config/spec.json" ]]; then
+            dockerManagedSpecMatchesDeployment "${root}/config/spec.json" \
+                "${root}/deployment.json" "${root}/images.env" || return 1
+        fi
+    fi
     printf '%s\n' "${value}"
 }
 
@@ -1941,6 +1954,7 @@ dockerCreateTlsCandidate() {
     local root candidate
     root=$(dockerInstallRoot) || return 1
     candidate=$(mktemp -d "${root}/.tls.XXXXXX") || return 1
+    DOCKER_TLS_CANDIDATE=${candidate}
     dockerManagedPathIsSafe "${root}" "${candidate}" || return 1
     chmod 0750 "${candidate}" || return 1
     if [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" != "1" ]]; then
@@ -1948,7 +1962,6 @@ dockerCreateTlsCandidate() {
     fi
     DOCKER_TLS_BACKUP=
     DOCKER_TLS_SWITCHED=0
-    DOCKER_TLS_CANDIDATE=${candidate}
 }
 
 dockerCleanupTlsCandidate() {
@@ -1997,8 +2010,10 @@ if not (values["notBefore"] <= now < values["notAfter"]):
 }
 
 dockerBackupTlsFiles() {
-    local domain=$1 root backup extension source
+    local domain=$1 candidate=${2:-} root backup extension source
     root=$(dockerInstallRoot) || return 1
+    dockerTrafficSafePath "${root}" "${root}/secrets/tls" &&
+        dockerTrafficSafePath "${root}" "${root}/backups" || return 1
     backup=$(mktemp -d "${root}/backups/tls.XXXXXX") || return 1
     : >"${backup}/present"
     printf '%s\n' "${domain}" >"${backup}/domain" || return 1
@@ -2009,6 +2024,19 @@ dockerBackupTlsFiles() {
         cp -- "${source}" "${backup}/${domain}.${extension}" || return 1
         printf '%s\n' "${extension}" >>"${backup}/present" || return 1
     done
+    if [[ -n "${candidate}" && -d "${candidate}/acme" ]]; then
+        source="${root}/data/acme"
+        dockerTrafficSafePath "${root}" "${source}" || return 1
+        if [[ -e "${source}" ]]; then
+            [[ -d "${source}" &&
+                -z "$(find "${source}" ! -type f ! -type d -print -quit)" ]] || return 1
+            cp -a -- "${source}" "${backup}/acme" || return 1
+            printf 'present\n' >"${backup}/acme.changed" || return 1
+        else
+            printf 'absent\n' >"${backup}/acme.changed" || return 1
+        fi
+    fi
+    [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == 1 ]] || chown -R 0:0 "${backup}" || return 1
     chmod -R go-rwx "${backup}" || return 1
     DOCKER_TLS_BACKUP=${backup}
 }
@@ -2021,7 +2049,8 @@ dockerReloadNginxAfterTlsChange() {
     jq -e '.compose.profiles | type == "array"' "${root}/deployment.json" >/dev/null 2>&1 || return 1
     enabled=$(jq -r '.compose.profiles | index("nginx") != null' "${root}/deployment.json") || return 1
     [[ "${enabled}" == "true" ]] || return 0
-    dockerComposeRun exec -T nginx nginx -s reload >/dev/null &&
+    dockerComposeRun exec -T nginx nginx -t >/dev/null &&
+        dockerComposeRun exec -T nginx nginx -s reload >/dev/null &&
         dockerComposeRun up -d --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" >/dev/null
 }
 
@@ -2029,19 +2058,33 @@ dockerCommitTlsCandidate() {
     local candidate=$1 domain=$2 root targetDir extension tempFile
     root=$(dockerInstallRoot) || return 1
     targetDir="${root}/secrets/tls"
+    dockerDomainIsValid "${domain}" &&
+        dockerTrafficSafePath "${root}" "${candidate}" &&
+        dockerTrafficSafePath "${root}" "${targetDir}" || return 1
+    [[ -d "${candidate}" && ! -L "${candidate}" &&
+        -z "$(find "${candidate}" ! -type f ! -type d -print -quit)" ]] || return 1
     if [[ -e "${targetDir}" || -L "${targetDir}" ]]; then
-        [[ -d "${targetDir}" && ! -L "${targetDir}" ]] || return 1
+        [[ -d "${targetDir}" && ! -L "${targetDir}" &&
+            -z "$(find "${targetDir}" ! -type f ! -type d -print -quit)" ]] || return 1
     else
         mkdir -- "${targetDir}" || return 1
     fi
+    for extension in crt key; do
+        tempFile="${targetDir}/.${domain}.${extension}.${BASHPID:-$$}"
+        [[ ! -e "${tempFile}" && ! -L "${tempFile}" ]] || return 1
+    done
     chmod 0750 "${targetDir}" || return 1
     if [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" != "1" ]]; then
         chown "0:${PADM_DOCKER_CONTAINER_GID}" "${targetDir}" || return 1
     fi
-    dockerBackupTlsFiles "${domain}" || return 1
+    dockerBackupTlsFiles "${domain}" "${candidate}" || return 1
     DOCKER_TLS_SWITCHED=1
     for extension in crt key; do
         tempFile="${targetDir}/.${domain}.${extension}.${BASHPID:-$$}"
+        [[ ! -e "${tempFile}" && ! -L "${tempFile}" ]] || {
+            dockerRestoreTlsFiles || true
+            return 1
+        }
         cp -- "${candidate}/${domain}.${extension}" "${tempFile}" || {
             dockerRestoreTlsFiles || true
             return 1
@@ -2062,8 +2105,16 @@ dockerCommitTlsCandidate() {
             return 1
         }
     done
+    dockerTlsRuntimePermissions "${targetDir}" || { dockerRestoreTlsFiles || true; return 1; }
+    if [[ -d "${candidate}/acme" ]]; then
+        dockerRemoveManagedTree "${root}" "${root}/data/acme" &&
+            cp -a -- "${candidate}/acme" "${root}/data/acme" || {
+            dockerRestoreTlsFiles || true
+            return 1
+        }
+    fi
     if ! dockerReloadNginxAfterTlsChange; then
-        dockerError 'Nginx reload 或健康检查失败，正在恢复旧证书'
+        dockerError 'Nginx 校验、reload 或健康检查失败，正在恢复旧证书与 ACME 状态'
         dockerRestoreTlsFiles || return 1
         return 1
     fi
@@ -2075,12 +2126,42 @@ dockerRestoreTlsFiles() {
     local root backup=${DOCKER_TLS_BACKUP:-} domain extension target
     [[ "${DOCKER_TLS_SWITCHED:-0}" == "1" && -n "${backup}" ]] || return 0
     root=$(dockerInstallRoot) || return 1
+    dockerTrafficSafePath "${root}" "${backup}" &&
+        dockerTrafficSafePath "${root}" "${root}/secrets/tls" &&
+        dockerTrafficSafePath "${root}" "${root}/data/acme" || return 1
+    [[ "${backup}" == "${root}/backups/tls."* && -d "${backup}" && -O "${backup}" &&
+        -z "$(find "${backup}" ! -type f ! -type d -print -quit)" &&
+        -f "${backup}/present" && ! -L "${backup}/present" ]] || return 1
     [[ -f "${backup}/domain" && ! -L "${backup}/domain" ]] || return 1
     domain=$(<"${backup}/domain")
     dockerDomainIsValid "${domain}" || return 1
+    [[ -z "$(grep -vxE 'crt|key' "${backup}/present")" &&
+        -z "$(sort "${backup}/present" | uniq -d)" ]] || return 1
+    [[ -z "$(find "${root}/secrets/tls" ! -type f ! -type d -print -quit)" ]] || return 1
+    # 先检查整份备份，缺失私钥或账户不能触发部分恢复。
     for extension in crt key; do
         target="${root}/secrets/tls/${domain}.${extension}"
+        [[ ! -e "${target}" || -f "${target}" ]] && [[ ! -L "${target}" ]] || return 1
         if grep -qxF "${extension}" "${backup}/present"; then
+            [[ -f "${backup}/${domain}.${extension}" ]] || return 1
+        fi
+    done
+    if [[ -e "${backup}/acme.changed" ]]; then
+        [[ -f "${backup}/acme.changed" ]] || return 1
+        case "$(<"${backup}/acme.changed")" in
+        present) [[ -d "${backup}/acme" ]] || return 1 ;;
+        absent) [[ ! -e "${backup}/acme" ]] || return 1 ;;
+        *) return 1 ;;
+        esac
+    else
+        [[ ! -e "${backup}/acme" ]] || return 1
+    fi
+    for extension in crt key; do
+        target="${root}/secrets/tls/${domain}.${extension}"
+        [[ ! -L "${target}" ]] || return 1
+        rm -f -- "${root}/secrets/tls/.${domain}.${extension}.${BASHPID:-$$}" || return 1
+        if grep -qxF "${extension}" "${backup}/present"; then
+            [[ -f "${backup}/${domain}.${extension}" ]] || return 1
             cp -- "${backup}/${domain}.${extension}" "${target}" || return 1
             if [[ "${extension}" == "key" ]]; then
                 chmod 0600 "${target}" || return 1
@@ -2094,8 +2175,37 @@ dockerRestoreTlsFiles() {
             rm -f -- "${target}" || return 1
         fi
     done
+    dockerTlsRuntimePermissions "${root}/secrets/tls" || return 1
+    if [[ -f "${backup}/acme.changed" ]]; then
+        dockerRemoveManagedTree "${root}" "${root}/data/acme" || return 1
+        if [[ -d "${backup}/acme" ]]; then
+            cp -a -- "${backup}/acme" "${root}/data/acme" || return 1
+            if [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" != 1 ]]; then
+                chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" "${root}/data/acme" || return 1
+            fi
+            find "${root}/data/acme" -type d -exec chmod 0750 {} + &&
+                find "${root}/data/acme" -type f -exec chmod 0600 {} + || return 1
+        fi
+    fi
+    dockerReloadNginxAfterTlsChange || return 1
     DOCKER_TLS_SWITCHED=0
-    dockerReloadNginxAfterTlsChange
+}
+
+dockerTlsValidateCommand() {
+    local domain= root image
+    [[ "$#" -eq 2 && "$1" == --domain ]] || return "${PADM_DOCKER_RC_USAGE}"
+    domain=$2
+    dockerDomainIsValid "${domain}" || return "${PADM_DOCKER_RC_USAGE}"
+    dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+    dockerLockInstalledDeployment || return $?
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    image=$(dockerResolveOpsImage) || return "${PADM_DOCKER_RC_STATE}"
+    dockerTrafficSafePath "${root}" "${root}/secrets/tls" &&
+        [[ -f "${root}/secrets/tls/${domain}.crt" && ! -L "${root}/secrets/tls/${domain}.crt" &&
+            -f "${root}/secrets/tls/${domain}.key" && ! -L "${root}/secrets/tls/${domain}.key" ]] &&
+        dockerTlsValidateCandidate "${image}" "${root}/secrets/tls" "${domain}" ||
+        return "${PADM_DOCKER_RC_STATE}"
+    printf '受管 TLS 证书校验通过: %s\n' "${domain}"
 }
 
 dockerTlsInstallCommand() {
@@ -2187,34 +2297,50 @@ dockerAcmeCommand() {
         return "${PADM_DOCKER_RC_STATE}"
     }
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
-    mkdir -p -- "${root}/data/acme" || return "${PADM_DOCKER_RC_STATE}"
-    chmod 0750 "${root}/data/acme" || return "${PADM_DOCKER_RC_STATE}"
-    if [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" != "1" ]]; then
-        chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" "${root}/data/acme" ||
-            return "${PADM_DOCKER_RC_STATE}"
-    fi
     dockerCreateTlsCandidate || return "${PADM_DOCKER_RC_STATE}"
     candidate=${DOCKER_TLS_CANDIDATE}
+    # ACME 工具只能改候选账户，校验和重载失败时旧账户与其它域名不受影响。
+    dockerTrafficSafePath "${root}" "${root}/data/acme" || return "${PADM_DOCKER_RC_STATE}"
+    mkdir -- "${candidate}/acme" || return "${PADM_DOCKER_RC_STATE}"
+    if [[ -e "${root}/data/acme" ]]; then
+        [[ -d "${root}/data/acme" &&
+            -z "$(find "${root}/data/acme" ! -type f ! -type d -print -quit)" ]] ||
+            return "${PADM_DOCKER_RC_STATE}"
+        cp -a -- "${root}/data/acme/." "${candidate}/acme/" || return "${PADM_DOCKER_RC_STATE}"
+    fi
+    find "${candidate}/acme" -type d -exec chmod 0750 {} + &&
+        find "${candidate}/acme" -type f -exec chmod 0600 {} + || return "${PADM_DOCKER_RC_STATE}"
+    if [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" != 1 ]]; then
+        chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" "${candidate}/acme" ||
+            return "${PADM_DOCKER_RC_STATE}"
+    fi
     if [[ "${action}" == "issue" ]]; then
-        dockerAcmeRun "${image}" "${credentials}" "${root}/data/acme" "${candidate}" \
-            --issue --dns "${provider}" -d "${domain}" --accountemail "${email}" || {
+        dockerAcmeRun "${image}" "${credentials}" "${candidate}/acme" "${candidate}" \
+            --issue --dns "${provider}" -d "${domain}" --accountemail "${email}" >/dev/null 2>&1 || {
+            dockerError '候选 DNS-01 申请失败，现有证书和 ACME 账户未修改'
             dockerCleanupTlsCandidate || true
             return "${PADM_DOCKER_RC_STATE}"
         }
     else
-        dockerAcmeRun "${image}" "${credentials}" "${root}/data/acme" "${candidate}" \
-            --renew -d "${domain}" || {
+        dockerAcmeRun "${image}" "${credentials}" "${candidate}/acme" "${candidate}" \
+            --renew -d "${domain}" >/dev/null 2>&1 || {
+            dockerError '候选 DNS-01 续期失败，现有证书和 ACME 账户未修改'
             dockerCleanupTlsCandidate || true
             return "${PADM_DOCKER_RC_STATE}"
         }
     fi
-    dockerAcmeRun "${image}" "${credentials}" "${root}/data/acme" "${candidate}" \
+    dockerAcmeRun "${image}" "${credentials}" "${candidate}/acme" "${candidate}" \
         --install-cert -d "${domain}" \
         --fullchain-file "/var/lib/padm/tls-output/${domain}.crt" \
-        --key-file "/var/lib/padm/tls-output/${domain}.key" || {
+        --key-file "/var/lib/padm/tls-output/${domain}.key" >/dev/null 2>&1 || {
+        dockerError '候选证书导出失败，现有证书和 ACME 账户未修改'
         dockerCleanupTlsCandidate || true
         return "${PADM_DOCKER_RC_STATE}"
     }
+    # acme.sh 可能创建宽权限文件，提交前恢复最小账户读取权限。
+    [[ -z "$(find "${candidate}/acme" ! -type f ! -type d -print -quit)" ]] &&
+        find "${candidate}/acme" -type d -exec chmod 0750 {} + &&
+        find "${candidate}/acme" -type f -exec chmod 0600 {} + || return "${PADM_DOCKER_RC_STATE}"
     if ! dockerTlsValidateCandidate "${image}" "${candidate}" "${domain}" ||
         ! dockerCommitTlsCandidate "${candidate}" "${domain}"; then
         dockerCleanupTlsCandidate || true

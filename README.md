@@ -182,7 +182,7 @@ v3 明确每个入口的 `core` 归属及 `core.secondary_type`（不用副核�
 按入口独立分配，不重排已有内部端口；身份、公开端口及同一容器网络空间的内部监听不得冲突。
 已有部署的 `edit --spec` 也支持这些入口变更，仍经过相同的预览、校验与确认。
 删除最后一个 WS 入口会关闭订阅并将规格的 `tls` 设为 `null`，但保留 TLS/ACME 文件与 token。
-新协议类型、证书轮换和完整协议管理尚未开放。
+Nginx 端证书轮换已开放；新协议类型、核心端 TLS 和完整协议管理尚未开放。
 带 Fail2ban 的 WS 入口暂不允许增删或修改公开端口，需后续联动封禁规则的管理事务。
 3A.3 已通过本地双核心事务、PTY、流量、更新/回滚和 Linux 权限回归；真实签名发布、业务镜像及双架构客户端连通仍待验。
 
@@ -239,9 +239,17 @@ padm-docker validate
 证书和 ACME 任务也由同一个宿主控制命令分发到 `ops` 镜像：
 
 ```bash
+padm-docker tls manage
+padm-docker tls validate --domain example.com
 padm-docker tls install --domain example.com --cert /path/fullchain.pem --key /path/privkey.pem
 padm-docker acme <issue|renew> --domain example.com --email admin@example.com --dns <dns_provider> --credentials /path/credentials
 ```
+
+主菜单第 8 项可查看/校验证书、导入轮换、DNS-01 申请或续期；最终确认前不持有部署锁。
+已配置部署必须使用部署记录的 ops 镜像，不能用 `--ops-image` 换成其他镜像。
+候选证书检查有效期、域名和私钥匹配后，先执行 `nginx -t` 再重载并检查健康；
+失败或中断恢复旧证书和 ACME 账户，保留其他域名及累计流量。
+其他域名只保存或校验证书，不修改当前入口和规格。自动续期调度与核心端 TLS 尚未开放。
 
 配置变更先生成候选文件、校验端口和 Compose，再备份当前状态并执行健康检查；失败时保留旧配置。Docker 入口安装的控制命令是 `/usr/local/bin/padm-docker`，实际 bundle、配置、数据、密钥、日志和备份分别位于状态根下的 `bundle/`、`config/`、`data/`、`secrets/`、`logs/` 和 `backups/`。
 

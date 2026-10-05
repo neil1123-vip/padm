@@ -96,8 +96,8 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 | 功能键 | 原生入口 | Docker 状态 | Profile | 网络/权限边界 | 当前说明 |
 | --- | --- | --- | --- | --- | --- |
 | `nginx` | 站点与证书 -> 传统 TLS fallback | `supported` | `nginx` | bridge | 独立 Nginx 容器，承载 WS 反代和静态入口。 |
-| `tls-files` | 站点与证书 -> 本机 TLS 证书 | `supported` | `nginx` / `acme` | bridge | 证书安装、校验和只读挂载。 |
-| `acme-dns` | 站点与证书 -> 本机 TLS 证书 | `supported` | `acme` | bridge | ops 容器支持显式 DNS-01 issue/renew。 |
+| `tls-files` | 站点与证书 -> 本机 TLS 证书 | `supported` | `nginx` / `acme` | bridge | 菜单/CLI 校验、导入轮换和只读挂载；Nginx 校验、重载或健康检查失败恢复旧证书。核心端 TLS 待 3B.2。 |
+| `acme-dns` | 站点与证书 -> 本机 TLS 证书 | `supported` | `acme` | bridge | 菜单/CLI 显式 DNS-01 issue/renew；候选账户与证书同事务，保留其他域名。自动调度待 3B.3。 |
 | `subscription` | 订阅与用户 -> 订阅发布 | `supported` | `core-xray` / `nginx` / `subscription` | bridge | token 保护的发布；要求主核心或副核心中的 Xray 协议 `21` 和受管 TLS，可包含两核心 Reality 链接；没有 Xray WS TLS 入口时不可发布。 |
 | `subscription-traffic` | 订阅与用户 -> 流量与额度 | `supported` | 核心 profile | 宿主 CLI | 定时采集以及 show/limit/reset。 |
 | `subscription-users` | 订阅与用户 -> 用户和分享订阅 | `deferred` | 核心、订阅 | bridge | 规格能声明账号，但交互式增删改工作流尚未迁移。 |

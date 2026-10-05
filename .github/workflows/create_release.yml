@@ -74,6 +74,9 @@ jobs:
         run: |
           set -euo pipefail
           bash shell/subscription_groups_regression.sh ci
+      - name: Check Docker TLS transactions
+        shell: bash
+        run: sudo bash shell/subscription_groups_regression.sh docker-tls
 
   prepare:
     name: Resolve release

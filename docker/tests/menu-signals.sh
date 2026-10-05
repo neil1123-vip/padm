@@ -4,6 +4,10 @@ set -euo pipefail
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/padm-menu-signals.XXXXXX")
 export SIGNAL_PROJECT_ROOT="${PROJECT_ROOT}" SIGNAL_TEST_ROOT="${TEST_ROOT}"
+mkdir -p "${TEST_ROOT}/config"
+printf '{"tls":{"domain":"ws.example.com"}}\n' >"${TEST_ROOT}/config/spec.json"
+printf '{}\n' >"${TEST_ROOT}/deployment.json"
+printf 'PADM_OPS_IMAGE=fixture\n' >"${TEST_ROOT}/images.env"
 cleanup() {
     local file pid
     for file in "${TEST_ROOT}/menu.pid" "${TEST_ROOT}/setup.pid" "${TEST_ROOT}/worker.pid"; do
@@ -27,14 +31,12 @@ cat >"${TEST_ROOT}/cli.sh" <<'EOF'
 set -u
 case "${1:-}" in
 status) exit 0 ;;
-setup|edit)
+setup|edit|tls)
     printf '%s\n' "${BASHPID}" >"${SIGNAL_TEST_ROOT}/setup.pid"
     trap 'printf "setup-cleaned\n"; exit 143' TERM
     source "${SIGNAL_PROJECT_ROOT}/docker/lib/setup.sh"
     printf 'setup-ready\n'
-    if [[ "${SIGNAL_MODE}" == input ]]; then
-        dockerSetupRead answer 'setup-input: '
-    else
+    waitWorker() {
         # 耗时命令与孙进程均实际运行，不能仅终止 CLI 伪造清理完成。
         workerOutput=$(
             bash -c '
@@ -44,6 +46,23 @@ setup|edit)
             printf 'worker-finished\n'
         )
         printf '%s\n' "${workerOutput}"
+    }
+    if [[ "${1:-}" == tls ]]; then
+        [[ "${2:-}" == manage ]] || exit 2
+        dockerInstallRoot() { printf '%s\n' "${SIGNAL_TEST_ROOT}"; }
+        dockerError() { printf '%s\n' "$*" >&2; }
+        dockerDomainIsValid() { [[ "$1" == ws.example.com ]]; }
+        dockerConfigureSpecValidate() { return 0; }
+        dockerManagedSpecMatchesDeployment() { return 0; }
+        dockerResolveOpsImage() { printf 'fixture\n'; }
+        dockerTlsValidateCommand() { waitWorker; }
+        PADM_DOCKER_RC_STATE=1
+        PADM_DOCKER_RC_USAGE=2
+        dockerTlsManageCommand
+    elif [[ "${SIGNAL_MODE}" == input ]]; then
+        dockerSetupRead answer 'setup-input: '
+    else
+        waitWorker
     fi
     ;;
 menu)
@@ -67,8 +86,8 @@ waitText() {
     done
     return 1
 }
-for mode in input worker edit-input edit-worker; do
-    export SIGNAL_MODE="${mode#edit-}"
+for mode in input worker edit-input edit-worker tls-input tls-worker; do
+    export SIGNAL_MODE="${mode##*-}"
     # Linux /proc 的后代终止另行实测；MSYS2 只覆盖真实 PTY 输入。
     [[ "${SIGNAL_MODE}" != worker || "$(uname -s)" == Linux ]] || continue
     rm -f -- "${TEST_ROOT}/menu.pid" "${TEST_ROOT}/setup.pid" "${TEST_ROOT}/worker.pid" \
@@ -77,8 +96,16 @@ for mode in input worker edit-input edit-worker; do
     (
         exec 3>"${TEST_ROOT}/input"
         waitText 'Docker 管理菜单' || exit 11
-        if [[ "${mode}" == edit-* ]]; then printf '7\n' >&3; else printf '2\n' >&3; fi
+        case "${mode}" in
+        edit-*) printf '7\n' >&3 ;;
+        tls-*) printf '8\n' >&3 ;;
+        *) printf '2\n' >&3 ;;
+        esac
         waitText 'setup-ready' || exit 12
+        if [[ "${mode}" == tls-* ]]; then
+            waitText '证书操作: ' || exit 17
+            if [[ "${SIGNAL_MODE}" == worker ]]; then printf '1\n\ny\n' >&3; fi
+        fi
         if [[ "${SIGNAL_MODE}" == worker ]]; then
             for ((attempt = 0; attempt < 200; attempt++)); do
                 [[ ! -f "${TEST_ROOT}/worker.pid" ]] || break
@@ -86,7 +113,7 @@ for mode in input worker edit-input edit-worker; do
             done
             [[ -f "${TEST_ROOT}/worker.pid" ]] || exit 13
         else
-            waitText 'setup-input: ' || exit 14
+            if [[ "${mode}" != tls-* ]]; then waitText 'setup-input: ' || exit 14; fi
         fi
         kill -TERM "$(<"${TEST_ROOT}/menu.pid")" || exit 15
         for ((attempt = 0; attempt < 100; attempt++)); do

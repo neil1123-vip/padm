@@ -200,8 +200,8 @@ For an existing managed deployment, `edit --spec` supports these listener change
 through the same preview, validation, and confirmation flow.
 Deleting the last WS listener disables subscription publishing and sets the spec's
 `tls` to `null`, while retaining TLS/ACME files and the token.
-New protocol types, certificate rotation, and full protocol management
-remain unavailable. WS listeners managed by Fail2ban cannot yet be added, deleted,
+Nginx-side certificate rotation is available. New protocol types, core-side TLS,
+and full protocol management remain unavailable. WS listeners managed by Fail2ban cannot yet be added, deleted,
 or assigned a different public port; those changes require coordinated firewall rules.
 3A.3 has passed local dual-core transaction, PTY, traffic, update/rollback, and Linux permission regressions. Real signed releases,
 application images, and dual-architecture client connectivity remain unverified.
@@ -263,9 +263,19 @@ padm-docker validate
 Certificate and ACME tasks are dispatched to the `ops` image by the same host command:
 
 ```bash
+padm-docker tls manage
+padm-docker tls validate --domain example.com
 padm-docker tls install --domain example.com --cert /path/fullchain.pem --key /path/privkey.pem
 padm-docker acme <issue|renew> --domain example.com --email admin@example.com --dns <dns_provider> --credentials /path/credentials
 ```
+
+Main menu item 8 validates certificates, imports replacements, or runs DNS-01 issue/renew.
+No deployment lock is held before final confirmation. Configured deployments use their recorded
+ops image; `--ops-image` cannot substitute a different image.
+After checking validity dates, hostname and key match, rotation runs `nginx -t`, reloads and
+checks health. Failure or interruption restores both certificates and ACME accounts, preserving
+other domains and cumulative traffic. Other domains can only be stored or validated, without
+changing listeners or the spec. Automatic renewal scheduling and core-side TLS remain unavailable.
 
 Configuration changes generate and validate a candidate, check ports and Compose, back up the current state, and then run health checks. A failure leaves the old configuration in place. The installed host command is `/usr/local/bin/padm-docker`; the bundle, configuration, data, secrets, logs, and backups live below the state root in `bundle/`, `config/`, `data/`, `secrets/`, `logs/`, and `backups/`.
 

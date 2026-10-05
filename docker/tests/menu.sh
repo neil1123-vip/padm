@@ -144,6 +144,19 @@ runPty() {
             printf '0\n' >&3
             waitForText 'Docker 管理菜单' "${CONTROL_LOG}" 2 || exit 12
             printf '0\n' >&3
+        elif [[ "${driver}" == tls ]]; then
+            printf '8\n' >&3
+            waitForText 'Docker 证书管理' "${CONTROL_LOG}" || exit 13
+            [[ ! -e "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]] || exit 14
+            if [[ "${input}" == eof ]]; then
+                printf '2\n\ncertificate.pem\n' >&3
+                waitForText '私钥文件' "${CONTROL_LOG}" || exit 15
+                printf '\004' >&3
+            else
+                printf '%s' "${input}" >&3
+            fi
+            waitForText 'Docker 管理菜单' "${CONTROL_LOG}" 2 || exit 16
+            printf '0\n' >&3
         elif [[ "${driver}" == logs || "${driver}" == term ]]; then
             printf '6\n' >&3
             waitForText 'mock-log-ready' "${CONTROL_LOG}" || exit 3
@@ -267,6 +280,80 @@ grep -Fq 'Docker 首次配置' "${CONTROL_LOG}" || fail 'first-config action did
 snapshotAfter=$(find "${PADM_DOCKER_INSTALL_DIR}/config" "${PADM_DOCKER_INSTALL_DIR}/data" \
     "${PADM_DOCKER_INSTALL_DIR}/secrets" "${PADM_DOCKER_INSTALL_DIR}/backups" -type f -print)
 [[ "${snapshotBefore}" == "${snapshotAfter}" ]] || fail 'cancelled first-config action changed persistent files'
+
+runPty tls-unconfigured menu $'8\n0\n' "${CLI}" menu
+grep -Fq '请先使用首次配置' "${CONTROL_LOG}" || fail 'unconfigured TLS action did not direct the user to first configuration'
+[[ ! -e "${PADM_DOCKER_INSTALL_DIR}/deployment.json" ]] || fail 'unconfigured TLS action wrote a deployment'
+
+# 隔离业务命令，只用真实 PTY 检查生产证书向导的确认门禁与参数分发。
+TLS_WIZARD_ROOT="${TEST_ROOT}/tls-wizard"
+TLS_WIZARD_CLI="${TEST_ROOT}/tls-wizard-cli.sh"
+TLS_WIZARD_ACTIONS="${TEST_ROOT}/tls-wizard.actions"
+mkdir -p "${TLS_WIZARD_ROOT}/config"
+printf '{"tls":{"domain":"ws.example.com"}}\n' >"${TLS_WIZARD_ROOT}/config/spec.json"
+printf '{}\n' >"${TLS_WIZARD_ROOT}/deployment.json"
+printf 'PADM_OPS_IMAGE=fixture\n' >"${TLS_WIZARD_ROOT}/images.env"
+export TLS_WIZARD_ROOT TLS_WIZARD_CLI TLS_WIZARD_ACTIONS PROJECT_ROOT
+cat >"${TLS_WIZARD_CLI}" <<'EOF'
+#!/usr/bin/env bash
+set -u
+source "${PROJECT_ROOT}/docker/lib/setup.sh"
+dockerError() { printf '%s\n' "$*" >&2; }
+dockerInstallRoot() { printf '%s\n' "${TLS_WIZARD_ROOT}"; }
+dockerDomainIsValid() { [[ "$1" == ws.example.com || "$1" == other.example.com ]]; }
+dockerEmailIsValid() { [[ "$1" == admin@example.com ]]; }
+dockerConfigureSpecValidate() { return 0; }
+dockerManagedSpecMatchesDeployment() { return 0; }
+dockerResolveOpsImage() { printf 'fixture\n'; }
+recordAction() {
+    printf '%s' "$1" >>"${TLS_WIZARD_ACTIONS}"
+    shift
+    printf ' %s' "$@" >>"${TLS_WIZARD_ACTIONS}"
+    printf '\n' >>"${TLS_WIZARD_ACTIONS}"
+}
+dockerTlsValidateCommand() { recordAction validate "$@"; }
+dockerTlsInstallCommand() { recordAction install "$@"; }
+dockerAcmeCommand() { recordAction acme "$@"; }
+PADM_DOCKER_RC_STATE=15
+PADM_DOCKER_RC_USAGE=2
+case "${1:-}" in
+status) exit 0 ;;
+tls) [[ "${2:-}" == manage ]] || exit 2; dockerTlsManageCommand ;;
+menu)
+    source "${PROJECT_ROOT}/docker/lib/menu.sh"
+    dockerMenuCli() { printf '%s\n' "${TLS_WIZARD_CLI}"; }
+    dockerMenu
+    ;;
+esac
+EOF
+printf '{"tls":null}\n' >"${TLS_WIZARD_ROOT}/config/spec.json"
+: >"${TLS_WIZARD_ACTIONS}"
+runPty tls-no-domain menu $'8\n0\n' "${TLS_WIZARD_CLI}" menu
+grep -Fq '当前部署没有 TLS 域名' "${CONTROL_LOG}" || fail 'TLS menu accepted a deployment without a TLS domain'
+[[ ! -s "${TLS_WIZARD_ACTIONS}" ]] || fail 'missing TLS domain reached a business command'
+printf '{"tls":{"domain":"ws.example.com"}}\n' >"${TLS_WIZARD_ROOT}/config/spec.json"
+for tlsCase in cancel final-no eof validate install issue renew; do
+    : >"${TLS_WIZARD_ACTIONS}"
+    expectedAction=
+    case "${tlsCase}" in
+    cancel) input=$'0\n' ;;
+    final-no) input=$'3\n\nadmin@example.com\ndns_cf\ncredentials.env\nn\n' ;;
+    eof) input=eof ;;
+    validate) input=$'1\n\ny\n'; expectedAction='validate --domain ws.example.com' ;;
+    install)
+        input=$'2\nother.example.com\ncertificate.pem\nprivate-key.pem\ny\n'
+        expectedAction='install --domain other.example.com --cert certificate.pem --key private-key.pem'
+        ;;
+    issue|renew)
+        if [[ "${tlsCase}" == issue ]]; then choice=3; else choice=4; fi
+        printf -v input '%s\n\nadmin@example.com\ndns_cf\ncredentials.env\ny\n' "${choice}"
+        expectedAction="acme ${tlsCase} --domain ws.example.com --email admin@example.com --dns dns_cf --credentials credentials.env"
+        ;;
+    esac
+    runPty "tls-${tlsCase}" tls "${input}" "${TLS_WIZARD_CLI}" menu
+    [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedAction}" ]] ||
+        fail "TLS ${tlsCase} bypassed confirmation or dispatched incorrect arguments"
+done
 
 # 最小已配置夹具只覆盖调度和命令分发，不宣称真实容器可用。
 cat >"${PADM_DOCKER_INSTALL_DIR}/deployment.json" <<'EOF'

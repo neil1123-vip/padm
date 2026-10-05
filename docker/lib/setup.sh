@@ -216,6 +216,70 @@ dockerSetupStageCertificate() {
     dockerTlsValidateCandidate "${opsImage}" "${candidate}/tls" "${domain}"
 }
 
+dockerTlsManageCommand() {
+    local root currentDomain domain choice answer cert= key= email= provider= credentials= action
+    [[ "$#" -eq 0 && -t 0 && -t 1 ]] || {
+        dockerError '证书管理需要交互终端，非交互操作请使用 tls 或 acme 命令'
+        return "${PADM_DOCKER_RC_USAGE}"
+    }
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    [[ -f "${root}/deployment.json" && ! -L "${root}/deployment.json" &&
+        -f "${root}/config/spec.json" && ! -L "${root}/config/spec.json" &&
+        -f "${root}/images.env" && ! -L "${root}/images.env" ]] || {
+        dockerError '尚未完整配置 Docker 部署，请先使用首次配置'
+        return "${PADM_DOCKER_RC_STATE}"
+    }
+    currentDomain=$(jq -er '.tls.domain | select(type == "string" and length > 0)' \
+        "${root}/config/spec.json" 2>/dev/null) && dockerDomainIsValid "${currentDomain}" || {
+        dockerError '当前部署没有 TLS 域名，请先配置 WS TLS 入口'
+        return "${PADM_DOCKER_RC_STATE}"
+    }
+    dockerConfigureSpecValidate "${root}/config/spec.json" &&
+        dockerManagedSpecMatchesDeployment "${root}/config/spec.json" \
+            "${root}/deployment.json" "${root}/images.env" &&
+        dockerResolveOpsImage >/dev/null || {
+        dockerError '当前规格与部署或 ops 镜像不一致，不能管理证书'
+        return "${PADM_DOCKER_RC_STATE}"
+    }
+    printf '\nDocker 证书管理\n当前 TLS 域名: %s\n' "${currentDomain}"
+    printf '%s\n' '1. 查看/校验受管证书' '2. 导入证书轮换' '3. DNS-01 申请' '4. DNS-01 续期' '0. 返回'
+    dockerSetupRead choice '证书操作: ' || return 0
+    [[ "${choice}" =~ ^[1-4]$ ]] || return "${PADM_DOCKER_RC_USAGE}"
+    dockerSetupRead domain "证书域名 [${currentDomain}]（0 取消）: " "${currentDomain}" || return 0
+    dockerDomainIsValid "${domain}" || return "${PADM_DOCKER_RC_USAGE}"
+    case "${choice}" in
+    1) action=查看/校验 ;;
+    2)
+        action=导入轮换
+        dockerSetupRead cert '完整证书链文件（0 取消）: ' || return 0
+        dockerSetupRead key '私钥文件（0 取消）: ' || return 0
+        [[ -n "${cert}" && -n "${key}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+        ;;
+    3|4)
+        if [[ "${choice}" == 3 ]]; then action=DNS-01申请; else action=DNS-01续期; fi
+        dockerSetupRead email 'ACME 邮箱（0 取消）: ' || return 0
+        dockerSetupRead provider 'DNS provider（dns_*，0 取消）: ' || return 0
+        dockerSetupRead credentials 'DNS 凭据文件（0 取消）: ' || return 0
+        dockerEmailIsValid "${email}" && [[ "${provider}" =~ ^dns_[a-z0-9_]+$ ]] &&
+            [[ -n "${credentials}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+        ;;
+    esac
+    printf '\n证书操作: %s\n域名: %s\n' "${action}" "${domain}"
+    [[ "${domain}" == "${currentDomain}" ]] ||
+        printf '其他域名只保存或校验证书，不修改当前入口和部署。\n'
+    dockerSetupRead answer '确认执行证书操作？[y/N]: ' n || return 0
+    case "${answer}" in y|Y|yes|YES) ;; *) printf '已取消证书操作。\n'; return 0 ;; esac
+    case "${choice}" in
+    1) dockerTlsValidateCommand --domain "${domain}" ;;
+    2) dockerTlsInstallCommand --domain "${domain}" --cert "${cert}" --key "${key}" ;;
+    3|4)
+        if [[ "${choice}" == 3 ]]; then action=issue; else action=renew; fi
+        dockerAcmeCommand "${action}" --domain "${domain}" --email "${email}" \
+            --dns "${provider}" --credentials "${credentials}"
+        ;;
+    esac
+}
+
 dockerSetupCommand() {
     local manifest= bundle= controlBundle= coreChoice core protocols=1 server familyChoice families
     local secondaryCore= secondaryPort=8444

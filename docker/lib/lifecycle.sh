@@ -16,6 +16,8 @@ dockerUsage() {
   padm-docker edit [--spec <完整 JSON 文件>] [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker configure --spec <JSON 文件> [--manifest <URL|文件> --bundle <URL|文件> [--control-bundle <URL|文件>]]
   padm-docker tls install --domain <域名> --cert <文件> --key <文件> [--ops-image <tag@digest>]
+  padm-docker tls validate --domain <域名>
+  padm-docker tls manage
   padm-docker acme <issue|renew> --domain <域名> --email <邮箱> --dns <dns_*> --credentials <文件> [--ops-image <tag@digest>]
   padm-docker validate
   padm-docker status
@@ -749,12 +751,12 @@ dockerMain() {
     edit) dockerEditCommand "$@" ;;
     configure) dockerConfigureCommand "$@" ;;
     tls)
-        if [[ "${1:-}" == "install" ]]; then
-            shift
-            dockerTlsInstallCommand "$@"
-        else
-            status=${PADM_DOCKER_RC_USAGE}
-        fi
+        case "${1:-}" in
+        install) shift; dockerTlsInstallCommand "$@" ;;
+        validate) shift; dockerTlsValidateCommand "$@" ;;
+        manage) shift; dockerTlsManageCommand "$@" ;;
+        *) status=${PADM_DOCKER_RC_USAGE} ;;
+        esac
         ;;
     acme) dockerAcmeCommand "$@" ;;
     validate) dockerValidateInstalledCommand "$@" ;;
@@ -774,6 +776,11 @@ dockerMain() {
         ;;
     esac
     status=${status:-$?}
+    if [[ "${DOCKER_TLS_SWITCHED:-0}" == 1 ]]; then
+        dockerRestoreTlsFiles || dockerError "TLS 事务恢复失败，请检查备份: ${DOCKER_TLS_BACKUP:-}"
+        [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_STATE}
+    fi
+    dockerCleanupTlsCandidate || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_STATE}
     dockerSetupCleanup || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_STATE}
     dockerReleaseDeploymentLock || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_LOCK}
     dockerCleanupStagedBundle || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_BUNDLE}

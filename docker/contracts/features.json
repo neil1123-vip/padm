@@ -83,7 +83,7 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "支持交互首配、完整规格导入及现有入口/WS 路径编辑，Xray 可为主核心或副核心，仍由 Nginx 终止 TLS；证书轮换和完整协议管理尚未迁移。"
+      "reason": "支持交互首配、完整规格导入及现有入口/WS 路径编辑，Xray 可为主核心或副核心；已有 Nginx 端证书轮换，完整协议管理尚未迁移。"
     },
     {
       "id": 22,
@@ -255,7 +255,7 @@
       "profiles": ["nginx", "acme"],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "Docker 支持受管 TLS 文件安装、校验和挂载。"
+      "reason": "Docker 菜单和 CLI 支持受管 TLS 校验、导入轮换及挂载；Nginx 校验、重载或健康检查失败恢复旧证书，核心端 TLS 尚未开放。"
     },
     "acme-dns": {
       "status": "supported",
@@ -264,7 +264,7 @@
       "profiles": ["acme"],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "Docker ops 容器支持显式 DNS-01 issue/renew。"
+      "reason": "Docker 菜单和 CLI 支持显式 DNS-01 issue/renew；候选账户与证书同事务，保留其他域名，自动续期调度尚未开放。"
     },
     "subscription": {
       "status": "supported",
