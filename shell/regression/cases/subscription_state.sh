@@ -648,6 +648,7 @@ runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
         menuLine() { :; }
         menuClose() { :; }
         errorCard() { :; }
+        subscriptionRequireLocalPublisherRole() { return 0; }
         autoRead() { printf -v "$3" '%s' team-a; }
         trafficOutput=$(showAdminSubscriptionTraffic || true)
         trafficOutput=$(showUserSubscriptionTraffic team-a || true)
@@ -664,14 +665,12 @@ runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
     )
     (
         local trafficOutput
-        selectUserSubscriptionId() {
-            selectedUserSubscriptionId=team-a
-        }
+        manageSharedSubscriptions() { printf 'manage-shared\n'; }
         showUserSubscriptions() { return 99; }
         autoRead() { return 99; }
         showUserSubscriptionTraffic() { printf 'traffic:%s\n' "$1"; }
         trafficOutput=$(selectUserSubscriptionTrafficMenu)
-        [[ "${trafficOutput}" == "traffic:team-a" ]]
+        [[ "${trafficOutput}" == "manage-shared" ]]
     )
     subscriptionQuotaDryRunPlan | jq -e 'length == 1 and .[0].id == "team-a" and .[0].limit_gb == 1 and .[0].percent >= 100 and .[0].action == "disable-and-remove-local-account"' >/dev/null
 }

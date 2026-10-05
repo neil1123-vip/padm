@@ -764,15 +764,16 @@ createAndSyncUserSubscriptionWizard() {
     local limit=0
     local syncResult=0
     createdUserSubscriptionId=
-    menuReadChoice user_subscription_id "请输入分享订阅 ID[例 team-a，回车取消]:" id || return 1
-    if ! subscriptionStateIdValid "${id}"; then
-        errorCard "输入有误，ID 最多 64 个字符，且只能包含英文、数字、下划线或短横线"
-        return 1
-    fi
-    if userSubscriptionExists "${id}"; then
-        errorCard "分享订阅 ID 已存在"
-        return 1
-    fi
+    while true; do
+        menuReadChoice user_subscription_id "请输入分享订阅 ID[例 team-a，回车取消]:" id || return 1
+        if ! subscriptionStateIdValid "${id}"; then
+            errorCard "输入有误，ID 最多 64 个字符，且只能包含英文、数字、下划线或短横线"
+        elif userSubscriptionExists "${id}"; then
+            errorCard "分享订阅 ID 已存在，请使用其他 ID"
+        else
+            break
+        fi
+    done
     if [[ -n "${templateId}" ]]; then
         templateJson=$(subscriptionActiveGroupRead -ec --arg id "${templateId}" \
             'first(.user_groups[]? | select(.id == $id)) | select(. != null)') || {
@@ -820,6 +821,8 @@ selectUserSubscriptionId() {
     local name
     local enabled
     local limit
+    local usage quota
+    local displayJq
     local userRows
     local choice=
     local selected=
@@ -827,17 +830,26 @@ selectUserSubscriptionId() {
     local usersJson
     selectedUserSubscriptionId=
     selectedUserSubscriptionIds='[]'
-    usersJson=$(PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 subscriptionActiveGroupRead -c '.user_groups') || {
+    displayJq=$(printf '%s\n%s\n%s\n' "$(subscriptionTrafficTotalsJq)" \
+        "$(subscriptionTrafficDisplayJq)" "$(subscriptionUserQuotaStatusJq)")
+    usersJson=$(PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 subscriptionActiveGroupRead -c "${displayJq}"'
+      . as $group | .user_groups | map(
+        . as $user |
+        subscriptionTrafficTotal(($group.traffic.user_groups[.id] // {}).sources) as $traffic |
+        . + {usage:subscriptionTrafficSize($traffic.upload + $traffic.download),
+          quota_status:subscriptionUserQuotaStatus($user; $traffic; true)})
+    ') || {
         errorCard "用户订阅读取失败"
         return 1
     }
-    userRows=$(jq -r '.[]? | [.id, (.name // .id), (if .enabled == true then "启用" else "停用" end), (.traffic_limit_gb // 0 | tostring)] | @tsv' <<<"${usersJson}") || return 1
+    userRows=$(jq -r '.[]? | [.id, (.name // .id), (if .enabled == true then "启用" else "停用" end),
+      (.traffic_limit_gb // 0 | tostring), .usage, .quota_status] | @tsv' <<<"${usersJson}") || return 1
     userResultCard "分享订阅"
     if [[ -z "${userRows}" ]]; then
         menuLine "暂无分享订阅"
         [[ "${allowCreate}" == "true" ]] || { menuClose; return 1; }
     fi
-    while IFS=$'\t' read -r id name enabled limit; do
+    while IFS=$'\t' read -r id name enabled limit usage quota; do
         [[ -n "${id}" ]] || continue
         itemIndex=$((itemIndex + 1))
         if [[ "${limit}" == "0" ]]; then
@@ -845,7 +857,7 @@ selectUserSubscriptionId() {
         else
             limit="${limit} GB"
         fi
-        menuItem "${itemIndex}" "${name}（${id}）" "状态：${enabled} / 额度：${limit}"
+        menuItem "${itemIndex}" "${name}（${id}）" "状态：${enabled} / 已保存用量：${usage} / 额度：${limit} / ${quota}"
     done <<<"${userRows}"
     [[ "${allowCreate}" == "true" ]] && menuItem "+" "新建分享订阅" "创建后立即同步并进入详情"
     if [[ "${allowMultiple}" == "true" ]]; then
@@ -1101,7 +1113,7 @@ editUserSubscriptionsMenu() {
     [[ "${selectedCount}" -gt 0 ]] || return 1
     expectedJson=$(subscriptionActiveGroupRead -c --argjson ids "${idsJson}" '
       [.user_groups[]? | select(.id as $id | ($ids | index($id)) != null) |
-        {id, name, enabled, allowed_sources, traffic_limit_gb}]
+        {id, uuid, name, enabled, allowed_sources, traffic_limit_gb}]
     ') || return 1
     [[ "$(jq 'length' <<<"${expectedJson}")" == "${selectedCount}" ]] || {
         errorCard "所选订阅已不存在，请重新选择"
@@ -1180,7 +1192,7 @@ editUserSubscriptionsMenu() {
             case "${choice}" in
             1)
                 value=
-                menuReadChoice edit_user_subscription_name "请输入新名称[回车保留]:" value true || continue 2
+                menuReadChoice edit_user_subscription_name "请输入新名称[回车保留]:" value true || return 1
                 [[ -n "${value}" ]] || continue
                 patchJson=$(jq -c --arg value "${value}" '. + {name:$value}' <<<"${patchJson}") || return 1
                 ;;
@@ -1193,16 +1205,19 @@ editUserSubscriptionsMenu() {
                     value \
                     "${currentSources}" \
                     "${currentSourcesLabel}" \
-                    sourcesChanged || continue 2
+                    sourcesChanged || return 1
                 if [[ "${sourcesChanged}" == "true" ]]; then
                     patchJson=$(jq -c --argjson value "${value}" '. + {allowed_sources:$value}' <<<"${patchJson}") || return 1
                 fi
                 ;;
             3)
-                value=
-                menuReadChoice edit_user_subscription_limit "请输入订阅额度 GB[回车保留各自设置，0 为不限]:" value true || continue 2
+                while true; do
+                    value=
+                    menuReadChoice edit_user_subscription_limit "请输入订阅额度 GB[回车保留各自设置，0 为不限]:" value true || return 1
+                    [[ -z "${value}" || "${value}" =~ ^[0-9]+$ ]] && break
+                    errorCard "订阅额度必须是数字"
+                done
                 [[ -n "${value}" ]] || continue
-                [[ "${value}" =~ ^[0-9]+$ ]] || { errorCard "订阅额度必须是数字"; continue 2; }
                 patchJson=$(jq -c --arg value "${value}" '. + {traffic_limit_gb:($value | tonumber)}' <<<"${patchJson}") || return 1
                 ;;
             4)
@@ -1243,7 +1258,7 @@ editUserSubscriptionsMenu() {
             8)
                 reload=$(subscriptionActiveGroupRead -c --argjson ids "${idsJson}" '
                   [.user_groups[]? | select(.id as $id | ($ids | index($id)) != null) |
-                    {id, name, enabled, allowed_sources, traffic_limit_gb}]
+                    {id, uuid, name, enabled, allowed_sources, traffic_limit_gb}]
                 ') || continue
                 [[ "$(jq 'length' <<<"${reload}")" == "${selectedCount}" ]] || {
                     errorCard "所选订阅已不存在，请重新选择"
@@ -1275,13 +1290,22 @@ manageUserSubscriptionsMenu() {
     local userSubscriptionItemStatus=
     local userSubscriptionId= usersJson summary line enabled targetEnabled selectedCount
     local selectedIds id hasChanges batchScope menuKey expectedFields
+    local displayJq displayJson
     local -a linkArgs=()
     selectedCount=$(jq -er 'select(type == "array" and length > 0) | length' <<<"${idsJson}") || return 1
+    displayJq=$(printf '%s\n%s\n%s\n' "$(subscriptionTrafficTotalsJq)" \
+        "$(subscriptionTrafficDisplayJq)" "$(subscriptionUserQuotaStatusJq)")
     while true; do
-        usersJson=$(PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 subscriptionActiveGroupRead -c --argjson ids "${idsJson}" '
+        displayJson=$(PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 subscriptionActiveGroupRead -c --argjson ids "${idsJson}" "${displayJq}"'
+          . as $group |
           [.user_groups[]? | select(.id as $id | ($ids | index($id)) != null) |
-            {id, uuid, name, enabled, allowed_sources, traffic_limit_gb}]
+            . as $user |
+            subscriptionTrafficTotal(($group.traffic.user_groups[.id] // {}).sources) as $traffic |
+            {id, uuid, name, enabled, allowed_sources, traffic_limit_gb,
+              usage:subscriptionTrafficSize($traffic.upload + $traffic.download),
+              quota_status:subscriptionUserQuotaStatus($user; $traffic; true)}]
         ') || { errorCard "当前订阅读取失败或已被删除"; return 1; }
+        usersJson=$(jq -c 'map(del(.usage, .quota_status))' <<<"${displayJson}") || return 1
         [[ "$(jq 'length' <<<"${usersJson}")" == "${selectedCount}" ]] || {
             errorCard "所选订阅已不存在，请重新选择"
             return 1
@@ -1299,8 +1323,8 @@ manageUserSubscriptionsMenu() {
             linkArgs=("" "${idsJson}")
         fi
         summary=$(jq -r '
-          .[] | "名称：\(.name // .id)（\(.id)） / 状态：\(if .enabled then "启用" else "停用" end)\n节点：\(.allowed_sources | join("、")) / 额度：\(if .traffic_limit_gb == 0 then "不限" else "\(.traffic_limit_gb) GB" end)"
-        ' <<<"${usersJson}") || return 1
+          .[] | "名称：\(.name // .id)（\(.id)） / 状态：\(if .enabled then "启用" else "停用" end)\n节点：\(.allowed_sources | join("、")) / 已保存用量：\(.usage) / 额度：\(if .traffic_limit_gb == 0 then "不限" else "\(.traffic_limit_gb) GB" end) / \(.quota_status)"
+        ' <<<"${displayJson}") || return 1
         enabled=$(jq -r 'all(.[]; .enabled == true)' <<<"${usersJson}") || return 1
         [[ "${enabled}" == "true" ]] && targetEnabled=false || targetEnabled=true
         echoContent title "\n┌─ 管理分享订阅 ─────────────────────────────────────"
@@ -1349,7 +1373,7 @@ manageUserSubscriptionsMenu() {
                 statusCard "所选订阅状态未变化"
                 continue
             fi
-            expectedFields=$(jq -c 'map(del(.uuid))' <<<"${usersJson}") || continue
+            expectedFields=${usersJson}
             if subscriptionGroupsWithLock runUserSubscriptionMutationAndSyncUnlocked \
                 "用户订阅状态更新" "用户订阅状态更新失败" \
                 setUserSubscriptionsFields "${idsJson}" "{\"enabled\":${targetEnabled}}" "${expectedFields}"; then

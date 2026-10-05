@@ -777,7 +777,7 @@ setUserSubscriptionsFields() {
         expectedJson=null
     fi
     trafficQuery=$(subscriptionTrafficTotalsJq) || return 1
-    # 编辑快照与更新在同一把状态锁内核对，避免覆盖并发修改。
+    # 编辑快照与可选 UUID 在同一把状态锁内核对，避免覆盖并发修改或重建身份。
     subscriptionActiveGroupWrite \
         --argjson ids "${idsJson}" \
         --argjson patch "${patchJson}" \
@@ -817,10 +817,16 @@ setUserSubscriptionsFields() {
           error("订阅编辑快照无效，请重新打开编辑")
         elif (all($expected[];
           if type == "object" then
-            keys == ["allowed_sources", "enabled", "id", "name", "traffic_limit_gb"]
+            (keys == ["allowed_sources", "enabled", "id", "name", "traffic_limit_gb"] or
+             keys == ["allowed_sources", "enabled", "id", "name", "traffic_limit_gb", "uuid"]) and
+            ((has("uuid") | not) or .uuid == null or (.uuid | type == "string"))
           else false end) | not) then
           error("订阅编辑快照无效，请重新打开编辑")
-        elif ($expected | sort_by(.id)) != ($current | sort_by(.id)) then
+        elif ($expected | map(editable) | sort_by(.id)) != ($current | sort_by(.id)) or
+          any($expected[]; has("uuid") and
+            (. as $snapshot |
+             first($state.user_groups[]? | select(.id == $snapshot.id)) |
+             (.uuid // null) != ($snapshot.uuid // null))) then
           error("订阅已被其他操作修改，请重新打开编辑")
         else . end
       else . end |
@@ -859,7 +865,19 @@ subscriptionGroupQuotaAutoApplyEnabled() {
 }
 
 toggleSubscriptionGroupQuotaAutoApplyEnabled() {
-    subscriptionActiveGroupWrite '.sync.quota_auto_apply = ((.sync.quota_auto_apply // false) | not)'
+    if [[ "$#" == "0" ]]; then
+        subscriptionActiveGroupWrite '.sync.quota_auto_apply = ((.sync.quota_auto_apply // false) | not)'
+        return $?
+    fi
+    [[ "$#" == "2" && "$1" =~ ^(true|false)$ && "$2" =~ ^(true|false)$ ]] || return 1
+    # 使用页面显示的快照提交明确目标，状态变化时不反向切换。
+    subscriptionActiveGroupWrite --argjson expected "$1" --argjson target "$2" '
+      if (.sync.quota_auto_apply // false) == $expected then
+        .sync.quota_auto_apply = $target
+      else
+        error("自动限额设置已变化，请刷新后重试")
+      end
+    '
 }
 
 setSubscriptionGroupSyncInterval() {

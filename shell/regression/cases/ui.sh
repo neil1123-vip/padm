@@ -2446,7 +2446,7 @@ main
             manageTrafficAndQuota <<<"1
 5"
             [[ "${trafficActions}" == $'overview\ncollect\noverview\n' ]]
-            [[ "${actions}" == $'errorCard:流量总览暂不可读\nerrorCard:流量总览暂不可读\n' ]]
+            [[ "${actions}" == $'errorCard:流量总览暂不可读\nwarnCard:流量未完整刷新\nerrorCard:流量总览暂不可读\n' ]]
         )
         resetMenuActions
         manageTrafficAndQuota <<<"6
@@ -2454,14 +2454,17 @@ main
         assertMenuAction showAdminSubscriptionTraffic
         (
             resetMenuActions
-            selectUserSubscriptionTrafficMenu() { recordMenuAction selectUserSubscriptionTrafficMenu; }
+            manageSharedSubscriptions() { recordMenuAction manageSharedSubscriptions; }
             showSubscriptionSourcesTraffic() { recordMenuAction showSubscriptionSourcesTraffic; }
             showUserSubscriptions() { recordMenuAction showUserSubscriptions; }
+            output=
             manageTrafficAndQuota <<<"2
 7
 8
 5"
-            [[ "${actions}" == $'showSubscriptionTrafficOverview\nselectUserSubscriptionTrafficMenu\nshowSubscriptionSourcesTraffic\nshowUserSubscriptions\n' ]]
+            [[ "${actions}" == $'showSubscriptionTrafficOverview\nmanageSharedSubscriptions\nshowSubscriptionSourcesTraffic\nshowUserSubscriptions\n' ]]
+            grep -q '管理分享订阅与额度' <<<"${output}"
+            ! grep -q '分享订阅概览' <<<"${output}"
         )
         resetMenuActions
         manageTrafficAndQuota <<<"3
@@ -2470,7 +2473,7 @@ main
         resetMenuActions
         manageTrafficAndQuota <<<"4
 5"
-        assertMenuAction 'successCard:限额自动执行状态已切换'
+        assertMenuAction 'successCard:限额自动执行状态已更新'
         subscriptionGroupsStateRead -e '.sync.quota_auto_apply == true' >/dev/null
         (
             local menuReadCount=0 quotaToggleCount=0
@@ -2484,9 +2487,10 @@ main
                 return 1
             }
             subscriptionActiveGroupRead() {
-                printf '%s\n' '{"sync":{"quota_auto_apply":false}}'
+                printf '%s\n' false
             }
             toggleSubscriptionGroupQuotaAutoApplyEnabled() {
+                [[ "$1" == "false" && "$2" == "true" ]]
                 quotaToggleCount=$((quotaToggleCount + 1))
                 return 0
             }

@@ -115,6 +115,36 @@ runSubscriptionMenuWorkflowRegression() (
     )
 
     (
+        local syncCount=0 sourceChoiceCount=0 limitPromptCount=0 before
+        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
+        eval "$(declare -f selectUserSubscriptionSources | sed '1s/^selectUserSubscriptionSources/originalCreateRetrySelectUserSubscriptionSources/')"
+        selectUserSubscriptionSources() {
+            sourceChoiceCount=$((sourceChoiceCount + 1))
+            originalCreateRetrySelectUserSubscriptionSources "$@"
+        }
+        eval "$(declare -f menuReadChoice | sed '1s/^menuReadChoice/originalCreateRetryMenuReadChoice/')"
+        menuReadChoice() {
+            [[ "$1" != "user_subscription_traffic_limit" ]] || limitPromptCount=$((limitPromptCount + 1))
+            originalCreateRetryMenuReadChoice "$@"
+        }
+        createAndSyncUserSubscriptionWizard <<< $'bad id\nalpha\nretry-id\n1\n9'
+        [[ "${createdUserSubscriptionId}" == "retry-id" && "${syncCount}" == "1" &&
+            "${sourceChoiceCount}" == "1" && "${limitPromptCount}" == "1" ]]
+        subscriptionActiveGroupRead -e '
+          any(.user_groups[]; .id == "retry-id" and .allowed_sources == ["main"] and .traffic_limit_gb == 9)
+        ' >/dev/null
+        before=$(subscriptionGroupsStateRead -c '.')
+        createdUserSubscriptionId=stale
+        regressionExpectStatus 1 createAndSyncUserSubscriptionWizard <<<""
+        [[ -z "${createdUserSubscriptionId}" ]]
+        createdUserSubscriptionId=stale
+        regressionExpectStatus 1 createAndSyncUserSubscriptionWizard </dev/null
+        [[ -z "${createdUserSubscriptionId}" && "${syncCount}" == "1" &&
+            "${sourceChoiceCount}" == "1" && "${limitPromptCount}" == "1" ]]
+        [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+    )
+
+    (
         local syncCount=0 publishCount=0 publishedCount=0
         ensureSubscriptionServiceForSharedLinks() { return 0; }
         runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
@@ -257,6 +287,7 @@ runSubscriptionMenuDraftRegression() (
     source "${PROJECT_ROOT}/shell/core/runtime.sh"
     source "${PROJECT_ROOT}/shell/subscription/groups.sh"
     source "${PROJECT_ROOT}/shell/subscription/menu.sh"
+    source "${PROJECT_ROOT}/shell/subscription/traffic.sh"
     local root="${TMP_DIR}/subscription-menu-draft"
     local displayLog="${root}/display.log"
     local errorLog="${root}/errors.log"
@@ -490,17 +521,130 @@ runSubscriptionMenuDraftRegression() (
         regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'1,2,3\nDiscarded\n1\n'
         [[ "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
         resetDraftFixture
-        editUserSubscriptionsMenu '["alpha"]' <<< $'1,3,5\nDrafted\ninvalid\n6'
+        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' < <(printf '1,3,5\nDiscarded\n')
+        [[ "${mutationCount}" == "2" && "${syncCount}" == "2" &&
+            "$(subscriptionGroupsStateRead -c '.')" == "${before}" ]]
+        editUserSubscriptionsMenu '["alpha"]' <<< $'1,3,5\nDrafted\ninvalid\n9\n'
         [[ "${mutationCount}" == "3" && "${syncCount}" == "3" ]]
         subscriptionActiveGroupRead -e '
           .user_groups[0].name == "Drafted" and
-          .user_groups[0].traffic_limit_gb == 1 and .user_groups[0].enabled
+          .user_groups[0].traffic_limit_gb == 9 and .user_groups[0].enabled == false
         ' >/dev/null
 
         local openedIds=
         manageUserSubscriptionsMenu() { openedIds=$1; }
         manageSharedSubscriptions <<< $'1,2\n\n'
         jq -e 'sort == ["alpha","beta"]' <<<"${openedIds}" >/dev/null
+    )
+
+    (
+        local syncCount=0 mutationCount=0 pickedCount=0 trafficChanged=false expectedSnapshot=
+        resetDraftFixture
+        : >"${displayLog}"
+        selectUserSubscriptionId <<<alpha
+        grep -q '已超限' "${displayLog}"
+        grep -q '用量' "${displayLog}"
+        manageUserSubscriptionItem alpha <<<7
+        [[ "$(grep -c '已超限' "${displayLog}")" -ge 2 ]]
+        eval "$(declare -f menuReadChoice | sed '1s/^menuReadChoice/originalTrafficManagementMenuReadChoice/')"
+        menuReadChoice() {
+            local resultVar=$3
+            originalTrafficManagementMenuReadChoice "$@" || return $?
+            [[ "$1" != "select_user_subscription_id" ]] || pickedCount=$((pickedCount + 1))
+            if [[ "$1" == "edit_user_subscription_menu" && -z "${!resultVar}" && "${trafficChanged}" == "false" ]]; then
+                trafficChanged=true
+                subscriptionActiveGroupWrite '.traffic.user_groups.alpha.sources.main.download += 100'
+            fi
+        }
+        eval "$(declare -f setUserSubscriptionsFields | sed '1s/^setUserSubscriptionsFields/originalTrafficManagementSetUserSubscriptionsFields/')"
+        setUserSubscriptionsFields() {
+            mutationCount=$((mutationCount + 1))
+            expectedSnapshot=$3
+            originalTrafficManagementSetUserSubscriptionsFields "$@"
+        }
+        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
+        selectUserSubscriptionTrafficMenu <<< $'alpha\n3\n3\n9\n\n7\n\n'
+        [[ "${pickedCount}" == "1" && "${mutationCount}" == "1" && "${syncCount}" == "1" && "${trafficChanged}" == "true" ]]
+        jq -e 'all(.[]; keys == ["allowed_sources","enabled","id","name","traffic_limit_gb","uuid"])' <<<"${expectedSnapshot}" >/dev/null
+        subscriptionActiveGroupRead -e '
+          .user_groups[0].traffic_limit_gb == 9 and
+          .traffic.user_groups.alpha.sources.main.download == 101
+        ' >/dev/null
+    )
+
+    (
+        local syncCount=0 mutationCount=0 identityChanged=false
+        resetDraftFixture
+        eval "$(declare -f menuReadChoice | sed '1s/^menuReadChoice/originalIdentityConflictMenuReadChoice/')"
+        menuReadChoice() {
+            local resultVar=$3
+            originalIdentityConflictMenuReadChoice "$@" || return $?
+            if [[ "${identityChanged}" == "false" &&
+                ( "$1" == "edit_user_subscription_menu" && -z "${!resultVar}" ||
+                  "$1" == "user_subscription_item_menu" && "${!resultVar}" == "5" ) ]]; then
+                identityChanged=true
+                subscriptionActiveGroupWrite '
+                  .user_groups |= map(if .id == "alpha" then .uuid = "22222222-2222-4222-8222-222222222222" else . end)
+                '
+            fi
+        }
+        eval "$(declare -f setUserSubscriptionsFields | sed '1s/^setUserSubscriptionsFields/originalIdentityConflictSetUserSubscriptionsFields/')"
+        setUserSubscriptionsFields() {
+            mutationCount=$((mutationCount + 1))
+            jq -e '.[0].uuid == "11111111-1111-4111-8111-111111111111"' <<<"$3" >/dev/null
+            originalIdentityConflictSetUserSubscriptionsFields "$@"
+        }
+        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); }
+        regressionExpectStatus 1 editUserSubscriptionsMenu '["alpha"]' <<< $'3\n9\n\n7'
+        [[ "${identityChanged}" == "true" && "${mutationCount}" == "1" && "${syncCount}" == "0" ]]
+        subscriptionActiveGroupRead -e '.user_groups[0].traffic_limit_gb == 1' >/dev/null
+        resetDraftFixture
+        identityChanged=false
+        mutationCount=0
+        manageUserSubscriptionItem alpha <<< $'5\n7'
+        [[ "${identityChanged}" == "true" && "${mutationCount}" == "1" && "${syncCount}" == "0" ]]
+        subscriptionActiveGroupRead -e '
+          .user_groups[0].enabled and .user_groups[0].uuid == "22222222-2222-4222-8222-222222222222"
+        ' >/dev/null
+    )
+
+    (
+        local toggleCount=0
+        resetDraftFixture
+        toggleSubscriptionGroupQuotaAutoApplyEnabled
+        subscriptionActiveGroupRead -e '.sync.quota_auto_apply == true' >/dev/null
+        toggleSubscriptionGroupQuotaAutoApplyEnabled
+        subscriptionActiveGroupRead -e '.sync.quota_auto_apply == false' >/dev/null
+        showSubscriptionTrafficOverview() { :; }
+        eval "$(declare -f toggleSubscriptionGroupQuotaAutoApplyEnabled | sed '1s/^toggleSubscriptionGroupQuotaAutoApplyEnabled/originalConflictToggleSubscriptionGroupQuotaAutoApplyEnabled/')"
+        toggleSubscriptionGroupQuotaAutoApplyEnabled() {
+            toggleCount=$((toggleCount + 1))
+            originalConflictToggleSubscriptionGroupQuotaAutoApplyEnabled "$@"
+        }
+        eval "$(declare -f menuReadChoice | sed '1s/^menuReadChoice/originalQuotaConflictMenuReadChoice/')"
+        menuReadChoice() {
+            local resultVar=$3
+            originalQuotaConflictMenuReadChoice "$@" || return $?
+            if [[ "$1" == "traffic_quota_menu" && "${!resultVar}" == "4" ]]; then
+                subscriptionActiveGroupWrite '.sync.quota_auto_apply = true'
+            fi
+        }
+        manageTrafficAndQuota <<< $'4\n5'
+        [[ "${toggleCount}" == "1" ]]
+        subscriptionActiveGroupRead -e '.sync.quota_auto_apply == true' >/dev/null
+        (
+            local stateWriteCount=0
+            subscriptionActiveGroupRead() { return 1; }
+            menuReadChoice() { originalQuotaConflictMenuReadChoice "$@"; }
+            eval "$(declare -f subscriptionGroupsStateWriteUnlocked | sed '1s/^subscriptionGroupsStateWriteUnlocked/originalUnreadableQuotaStateWriteUnlocked/')"
+            subscriptionGroupsStateWriteUnlocked() {
+                stateWriteCount=$((stateWriteCount + 1))
+                originalUnreadableQuotaStateWriteUnlocked "$@"
+            }
+            manageTrafficAndQuota <<< $'4\n5'
+            manageTrafficAndQuota </dev/null
+            [[ "${toggleCount}" == "1" && "${stateWriteCount}" == "0" ]]
+        )
     )
 
     (

@@ -799,29 +799,40 @@ showSubscriptionTrafficOverview() {
 
 manageTrafficAndQuota() {
     subscriptionRequireLocalPublisherRole || return 1
-    local quotaAutoApplyText
+    local quotaAutoApplyText quotaAutoApplyEnabled quotaAutoApplyTarget
     local trafficQuotaStatus=
     showSubscriptionTrafficOverview || errorCard "流量总览暂不可读"
     while true; do
-        quotaAutoApplyText=$(PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 \
-            subscriptionActiveGroupRead -r 'if (.sync.quota_auto_apply // false) == true then "开启" else "关闭" end' 2>/dev/null) || \
-            quotaAutoApplyText="暂不可读"
+        quotaAutoApplyEnabled=$(PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 \
+            subscriptionActiveGroupRead -r '.sync.quota_auto_apply // false' 2>/dev/null) || quotaAutoApplyEnabled=
+        case "${quotaAutoApplyEnabled}" in
+        true) quotaAutoApplyText="开启"; quotaAutoApplyTarget=false ;;
+        false) quotaAutoApplyText="关闭"; quotaAutoApplyTarget=true ;;
+        *) quotaAutoApplyText="暂不可读"; quotaAutoApplyTarget= ;;
+        esac
         echoContent title "\n┌─ 流量与限额 ───────────────────────────────────────"
         menuLine "总览来自已保存的统计；采集和超限处理按需执行。"
         menuLine "自动执行超限处理：${quotaAutoApplyText}"
         menuItem 1 "刷新并显示总览" "采集本机账号流量，写入 groups.json 后显示治理摘要"
-        menuItem 2 "单个分享订阅流量" "选择订阅查看累计流量"
+        menuItem 2 "管理分享订阅与额度" "选择一次查看用量、修改额度、启停或同步；支持多选"
         menuItem 6 "我的流量" "自用账号按服务器统计"
         menuItem 7 "服务器流量" "全部账号按服务器统计"
-        menuItem 8 "分享订阅概览" "额度、状态和服务器范围"
         menuDangerItem 3 "执行超限处理并同步" "停用超额订阅，更新本机、被控服务器和订阅发布"
-        menuItem 4 "开启/关闭自动执行超限处理" "切换同步前的自动限额事务"
+        if [[ "${quotaAutoApplyTarget}" == "true" ]]; then
+            menuItem 4 "开启自动执行超限处理" "完整同步前自动停用超额订阅"
+        elif [[ "${quotaAutoApplyTarget}" == "false" ]]; then
+            menuItem 4 "关闭自动执行超限处理" "保留流量统计，超额订阅改为手动处理"
+        else
+            menuItem 4 "自动限额状态暂不可读" "恢复状态后再修改"
+        fi
         menuReturnItem 5 "返回订阅首页" "回到本机或主控首页"
         menuClose
         menuReadChoice traffic_quota_menu "请选择:" trafficQuotaStatus || return 0
         case "${trafficQuotaStatus}" in
         1)
-            collectSubscriptionTraffic || true
+            if ! collectSubscriptionTraffic; then
+                warnCard "流量未完整刷新" "以下显示已保存的统计，请检查失败来源后重试"
+            fi
             showSubscriptionTrafficOverview || errorCard "流量总览暂不可读"
             ;;
         2) selectUserSubscriptionTrafficMenu ;;
@@ -830,8 +841,9 @@ manageTrafficAndQuota() {
         8) showUserSubscriptions ;;
         3) executeSubscriptionQuotaPlanMenu ;;
         4)
-            if toggleSubscriptionGroupQuotaAutoApplyEnabled; then
-                successCard "限额自动执行状态已切换"
+            [[ -n "${quotaAutoApplyTarget}" ]] || { errorCard "自动限额状态暂不可读，未修改"; continue; }
+            if toggleSubscriptionGroupQuotaAutoApplyEnabled "${quotaAutoApplyEnabled}" "${quotaAutoApplyTarget}"; then
+                successCard "限额自动执行状态已更新" "当前状态：$(if [[ "${quotaAutoApplyTarget}" == "true" ]]; then printf '开启'; else printf '关闭'; fi)"
             else
                 errorCard "限额自动执行状态切换失败"
             fi
@@ -843,8 +855,7 @@ manageTrafficAndQuota() {
 }
 
 selectUserSubscriptionTrafficMenu() {
-    selectUserSubscriptionId || return 1
-    showUserSubscriptionTraffic "${selectedUserSubscriptionId}"
+    manageSharedSubscriptions
 }
 
 showSubscriptionSourcesTraffic() {
