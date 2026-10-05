@@ -19,6 +19,8 @@ dockerUsage() {
   padm-docker tls validate --domain <域名>
   padm-docker tls manage
   padm-docker acme <issue|renew> --domain <域名> --email <邮箱> --dns <dns_*> --credentials <文件> [--ops-image <tag@digest>]
+  padm-docker acme schedule <enable|disable|status> [续期输入参数]
+  padm-docker acme auto-renew
   padm-docker validate
   padm-docker status
   padm-docker traffic <show|collect>
@@ -157,6 +159,236 @@ dockerTrafficScheduleRemove() {
     done
     [[ "${changed}" == 0 ]] || systemctl daemon-reload || return 1
     dockerTrafficCronRemove
+}
+
+dockerRenewalScheduleRestore() {
+    local snapshot=$1 unitDir=$2 systemdReady=$3 timerEnabled=$4 timerActive=$5 file failed=0
+    if [[ "${systemdReady}" == 1 ]]; then
+        [[ ! -f "${unitDir}/padm-docker-renewal.timer" ]] ||
+            systemctl disable --now padm-docker-renewal.timer >/dev/null 2>&1 || return 1
+        [[ ! -f "${unitDir}/padm-docker-renewal.service" ]] ||
+            systemctl stop padm-docker-renewal.service >/dev/null 2>&1 || return 1
+    fi
+    for file in padm-docker-renewal.service padm-docker-renewal.timer; do
+        if [[ -f "${snapshot}/${file}" ]]; then
+            install -m 0644 "${snapshot}/${file}" "${unitDir}/${file}" || failed=1
+        else
+            rm -f -- "${unitDir}/${file}" || failed=1
+        fi
+    done
+    if [[ "${systemdReady}" == 1 ]]; then
+        systemctl daemon-reload || failed=1
+    fi
+    if [[ "${timerEnabled}" == 1 ]]; then
+        systemctl enable padm-docker-renewal.timer >/dev/null || failed=1
+    fi
+    if [[ "${systemdReady}" == 1 && "${timerActive}" == 1 ]]; then
+        systemctl start padm-docker-renewal.timer >/dev/null || failed=1
+    fi
+    if [[ -f "${snapshot}/crontab" ]]; then
+        crontab - <"${snapshot}/crontab" || failed=1
+    fi
+    [[ "${failed}" == 0 ]]
+}
+
+dockerRenewalScheduleInterrupted() {
+    local snapshot=${DOCKER_RENEWAL_SCHEDULE_SNAPSHOT:-} root
+    [[ -n "${snapshot}" ]] || return 0
+    root=$(dockerInstallRoot) || return 1
+    if [[ "${DOCKER_RENEWAL_SCHEDULE_CHANGED:-0}" == 1 ]]; then
+        dockerRenewalScheduleRestore "${snapshot}" "${DOCKER_RENEWAL_SCHEDULE_UNIT_DIR}" \
+            "${DOCKER_RENEWAL_SCHEDULE_SYSTEMD_READY}" "${DOCKER_RENEWAL_SCHEDULE_TIMER_ENABLED}" \
+            "${DOCKER_RENEWAL_SCHEDULE_TIMER_ACTIVE}" || {
+            dockerError "TLS 调度恢复失败，请检查: ${snapshot}"
+            return 1
+        }
+    fi
+    dockerRemoveManagedTree "${root}" "${snapshot}" || return 1
+    DOCKER_RENEWAL_SCHEDULE_SNAPSHOT=
+    DOCKER_RENEWAL_SCHEDULE_CHANGED=0
+}
+
+dockerRenewalScheduleCommit() {
+    if [[ -n "${DOCKER_RENEWAL_STAGE:-}" && "${DOCKER_RENEWAL_SWITCHED:-0}" == 1 ]]; then
+        # 输入与调度同时结束恢复窗口，TERM 不能只回退其中一份。
+        DOCKER_RENEWAL_SCHEDULE_CHANGED=0 DOCKER_RENEWAL_SWITCHED=0
+    else
+        DOCKER_RENEWAL_SCHEDULE_CHANGED=0
+    fi
+    dockerRenewalScheduleInterrupted
+}
+
+dockerRenewalScheduleApply() {
+    local action=$1 root cli bashPath unitDir file fragment snapshot= cronText= cronLine line
+    local systemdReady=0 cronReady=0 timerEnabled=0 timerActive=0 haveUnits=0 haveCron=0
+    [[ -z "${DOCKER_RENEWAL_SCHEDULE_SNAPSHOT:-}" ]] || return 1
+    root=$(dockerInstallRoot) || return 1
+    cli="${PADM_DOCKER_BIN_DIR:-/usr/local/bin}/padm-docker"
+    bashPath=$(command -v bash) || return 1
+    unitDir=${PADM_DOCKER_SYSTEMD_DIR:-/etc/systemd/system}
+    [[ "${root}" =~ ^/[A-Za-z0-9._/-]+$ && "${cli}" =~ ^/[A-Za-z0-9._/-]+$ &&
+        "${bashPath}" =~ ^/[A-Za-z0-9._/-]+$ && "${unitDir}" =~ ^/[A-Za-z0-9._/-]+$ ]] || return 1
+    if command -v systemctl >/dev/null 2>&1 && systemctl show-environment >/dev/null 2>&1; then
+        systemdReady=1
+    fi
+    if command -v crontab >/dev/null 2>&1; then
+        cronText=$(dockerTrafficReadCrontab) || return 1
+        if command -v pgrep >/dev/null 2>&1 && { pgrep -x cron >/dev/null || pgrep -x crond >/dev/null; }; then
+            cronReady=1
+        fi
+    fi
+    cronLine="17 3 * * * PADM_DOCKER_INSTALL_DIR=${root} ${bashPath} ${cli} acme auto-renew # padm-docker TLS 自动续期 root=${root}"
+    # 全部来源先确认归本部署所有，不能覆盖同名外部 unit 或其它 root 的任务。
+    while IFS= read -r line; do
+        [[ "${line}" == *'# padm-docker TLS 自动续期'* ]] || continue
+        [[ "${line}" == "${cronLine}" ]] || return 1
+        haveCron=1
+    done <<<"${cronText}"
+    if [[ -e "${unitDir}" || -L "${unitDir}" ]]; then
+        [[ -d "${unitDir}" && ! -L "${unitDir}" && -O "${unitDir}" &&
+            "$(cd -- "${unitDir}" && pwd -P)" == "${unitDir}" ]] || return 1
+    fi
+    for file in padm-docker-renewal.service padm-docker-renewal.timer; do
+        [[ ! -L "${unitDir}/${file}" ]] || return 1
+        if [[ -e "${unitDir}/${file}" ]]; then
+            [[ -f "${unitDir}/${file}" && -O "${unitDir}/${file}" ]] &&
+                grep -qxF '# padm-docker TLS 自动续期' "${unitDir}/${file}" &&
+                grep -qxF "# padm-docker root=${root}" "${unitDir}/${file}" || return 1
+            if [[ "${file}" == *.service ]]; then
+                grep -qxF "Environment=PADM_DOCKER_INSTALL_DIR=${root}" "${unitDir}/${file}" &&
+                    grep -qxF "ExecStart=${bashPath} ${cli} acme auto-renew" "${unitDir}/${file}" || return 1
+            else
+                grep -qxF 'Unit=padm-docker-renewal.service' "${unitDir}/${file}" || return 1
+            fi
+            haveUnits=1
+        fi
+        if [[ "${systemdReady}" == 1 ]]; then
+            fragment=$(systemctl show --property=FragmentPath --value "${file}" 2>/dev/null) || return 1
+            [[ -z "${fragment}" ||
+                ( "${fragment}" == "${unitDir}/${file}" && -f "${unitDir}/${file}" ) ]] || return 1
+        fi
+    done
+    if [[ "${action}" == install ]]; then
+        if [[ "${systemdReady}" == 1 ]]; then
+            [[ -d "${unitDir}" ]] || return 1
+        elif [[ "${cronReady}" != 1 ]]; then
+            dockerError 'TLS 自动续期需要正在运行的 systemd 或 cron'
+            return 1
+        fi
+    elif [[ "${haveUnits}" == 0 && "${haveCron}" == 0 ]]; then
+        return 0
+    fi
+    [[ "${haveUnits}" == 0 ]] || command -v systemctl >/dev/null 2>&1 || return 1
+    if [[ -f "${unitDir}/padm-docker-renewal.timer" ]]; then
+        if systemctl is-enabled --quiet padm-docker-renewal.timer; then timerEnabled=1; fi
+        if [[ "${systemdReady}" == 1 ]] && systemctl is-active --quiet padm-docker-renewal.timer; then timerActive=1; fi
+    fi
+    dockerManagedPathIsSafe "${root}" "${root}/locks" &&
+        [[ -d "${root}/locks" && ! -L "${root}/locks" && -O "${root}/locks" ]] || return 1
+    snapshot=$(mktemp -d "${root}/locks/renewal-schedule.XXXXXX") || return 1
+    DOCKER_RENEWAL_SCHEDULE_SNAPSHOT=${snapshot}
+    DOCKER_RENEWAL_SCHEDULE_UNIT_DIR=${unitDir}
+    DOCKER_RENEWAL_SCHEDULE_SYSTEMD_READY=${systemdReady}
+    DOCKER_RENEWAL_SCHEDULE_TIMER_ENABLED=${timerEnabled}
+    DOCKER_RENEWAL_SCHEDULE_TIMER_ACTIVE=${timerActive}
+    DOCKER_RENEWAL_SCHEDULE_CHANGED=0
+    chmod 0700 "${snapshot}" || return 1
+    for file in padm-docker-renewal.service padm-docker-renewal.timer; do
+        [[ ! -f "${unitDir}/${file}" ]] || cp -- "${unitDir}/${file}" "${snapshot}/${file}" || return 1
+    done
+    [[ "${haveCron}" == 0 && ( "${action}" == remove || "${systemdReady}" == 1 ) ]] ||
+        printf '%s\n' "${cronText}" >"${snapshot}/crontab" || return 1
+    DOCKER_RENEWAL_SCHEDULE_CHANGED=1
+    if (
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    if [[ "${haveUnits}" == 1 ]]; then
+        if [[ "${systemdReady}" == 1 ]]; then
+            [[ ! -f "${unitDir}/padm-docker-renewal.timer" ]] ||
+                systemctl disable --now padm-docker-renewal.timer >/dev/null || exit 1
+            [[ ! -f "${unitDir}/padm-docker-renewal.service" ]] ||
+                systemctl stop padm-docker-renewal.service >/dev/null || exit 1
+        else
+            [[ ! -f "${unitDir}/padm-docker-renewal.timer" ]] ||
+                systemctl disable padm-docker-renewal.timer >/dev/null || exit 1
+        fi
+    fi
+    if [[ "${haveCron}" == 1 ]]; then
+        printf '%s\n' "${cronText}" | awk -v owned="${cronLine}" '$0 != owned' | crontab - || exit 1
+    fi
+    if [[ "${action}" == install && "${systemdReady}" == 1 ]]; then
+        cat >"${snapshot}/new.service" <<EOF
+# padm-docker TLS 自动续期
+# padm-docker root=${root}
+[Unit]
+Description=padm Docker TLS renewal
+After=docker.service
+[Service]
+Type=oneshot
+Environment=PADM_DOCKER_INSTALL_DIR=${root}
+ExecStart=${bashPath} ${cli} acme auto-renew
+TimeoutStartSec=1800
+EOF
+        cat >"${snapshot}/new.timer" <<EOF
+# padm-docker TLS 自动续期
+# padm-docker root=${root}
+[Unit]
+Description=Renew padm Docker TLS daily
+[Timer]
+OnCalendar=*-*-* 03:17:00
+RandomizedDelaySec=300
+Persistent=true
+Unit=padm-docker-renewal.service
+[Install]
+WantedBy=timers.target
+EOF
+        install -m 0644 "${snapshot}/new.service" "${unitDir}/padm-docker-renewal.service" &&
+            install -m 0644 "${snapshot}/new.timer" "${unitDir}/padm-docker-renewal.timer" &&
+            systemctl daemon-reload &&
+            systemctl enable --now padm-docker-renewal.timer >/dev/null || exit 1
+    else
+        rm -f -- "${unitDir}/padm-docker-renewal.service" "${unitDir}/padm-docker-renewal.timer" || exit 1
+        [[ "${systemdReady}" == 0 || "${haveUnits}" == 0 ]] || systemctl daemon-reload || exit 1
+        if [[ "${action}" == install ]]; then
+            { printf '%s\n' "${cronText}" | awk -v owned="${cronLine}" '$0 != owned'; printf '%s\n' "${cronLine}"; } | crontab - || exit 1
+        fi
+    fi
+    ); then
+        if [[ -n "${DOCKER_RENEWAL_STAGE:-}" && "${DOCKER_RENEWAL_SWITCHED:-0}" == 1 ]]; then
+            return 0
+        fi
+        dockerRenewalScheduleCommit
+    else
+        dockerRenewalScheduleInterrupted || true
+        return 1
+    fi
+}
+
+dockerRenewalScheduleInstall() {
+    local root
+    root=$(dockerInstallRoot) || return 1
+    if [[ ! -e "${root}/secrets/renewal" && ! -L "${root}/secrets/renewal" ]]; then
+        dockerRenewalScheduleRemove
+        return $?
+    fi
+    dockerTrafficSafePath "${root}" "${root}/secrets/renewal" &&
+        dockerRenewalRegistryValidate "${root}/secrets/renewal" || return 1
+    if dockerRenewalEnabled "${root}/secrets/renewal"; then
+        dockerRenewalScheduleApply install
+    else
+        dockerRenewalScheduleRemove
+    fi
+}
+
+dockerRenewalScheduleRemove() {
+    local unitDir=${PADM_DOCKER_SYSTEMD_DIR:-/etc/systemd/system} content
+    if [[ ! -e "${unitDir}/padm-docker-renewal.service" && ! -L "${unitDir}/padm-docker-renewal.service" &&
+        ! -e "${unitDir}/padm-docker-renewal.timer" && ! -L "${unitDir}/padm-docker-renewal.timer" ]]; then
+        command -v crontab >/dev/null 2>&1 || return 0
+        content=$(dockerTrafficReadCrontab) || return 1
+        [[ "${content}" == *'# padm-docker TLS 自动续期'* ]] || return 0
+    fi
+    dockerRenewalScheduleApply remove
 }
 
 dockerTrafficBeforeChange() {
@@ -388,10 +620,11 @@ dockerLifecycleCommand() {
     up)
         [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
         dockerTrafficRuntimeCheck || return "${PADM_DOCKER_RC_HOST}"
-        dockerTrafficScheduleInstall && dockerComposeRun up -d
+        dockerTrafficScheduleInstall && dockerRenewalScheduleInstall && dockerComposeRun up -d
         ;;
     down)
         [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
+        dockerRenewalScheduleRemove || return "${PADM_DOCKER_RC_STATE}"
         dockerTrafficBeforeChange
         dockerComposeRun down && dockerTrafficScheduleRemove
         ;;
@@ -399,7 +632,7 @@ dockerLifecycleCommand() {
         [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
         dockerTrafficRuntimeCheck || return "${PADM_DOCKER_RC_HOST}"
         dockerTrafficBeforeChange
-        dockerTrafficScheduleInstall && dockerComposeRun restart
+        dockerTrafficScheduleInstall && dockerRenewalScheduleInstall && dockerComposeRun restart
         ;;
     logs) dockerComposeRun logs "$@" ;;
     esac
@@ -479,6 +712,7 @@ dockerUpdateCommand() {
         dockerError '无法准备 release 控制 bundle，现有部署未切换'
         return "${PADM_DOCKER_RC_BUNDLE}"
     }
+    dockerRenewalBundleCheck "${DOCKER_STAGED_BUNDLE_PATH}" || return "${PADM_DOCKER_RC_BUNDLE}"
     dockerPullManifestImages || return "${PADM_DOCKER_RC_COMPOSE}"
     dockerTrafficRuntimeCheck || return "${PADM_DOCKER_RC_HOST}"
     dockerTrafficBeforeChange
@@ -500,7 +734,8 @@ dockerUpdateCommand() {
         ! dockerEnsureRuntimeDataPermissions ||
         ! dockerActivateStagedBundle ||
         ! dockerComposeRun up -d --force-recreate --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" ||
-        ! dockerTrafficScheduleInstall; then
+        ! dockerTrafficScheduleInstall ||
+        ! dockerRenewalScheduleInstall; then
         dockerError '控制脚本切换、启动或健康检查失败，正在恢复旧配置和控制脚本'
         if ! dockerRestoreConfiguration; then
             dockerError "旧版本恢复失败，请检查备份: ${backup}"
@@ -596,7 +831,7 @@ dockerTrafficRollbackCheck() {
 }
 
 dockerRollbackCommand() {
-    local backup currentBackup
+    local backup currentBackup bundlePath root
     [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
     dockerLockInstalledDeployment || return $?
@@ -608,6 +843,19 @@ dockerRollbackCommand() {
         dockerError '没有可用的更新回滚快照'
         return "${PADM_DOCKER_RC_STATE}"
     }
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    dockerTrafficSafePath "${root}" "${root}/secrets/renewal" &&
+        dockerRenewalRegistryValidate "${root}/secrets/renewal" || return "${PADM_DOCKER_RC_STATE}"
+    if dockerRenewalEnabled "${root}/secrets/renewal"; then
+        if [[ -e "${backup}/bundle.target" || -L "${backup}/bundle.target" ]]; then
+            [[ -f "${backup}/bundle.target" && ! -L "${backup}/bundle.target" &&
+                -O "${backup}/bundle.target" ]] || return "${PADM_DOCKER_RC_BUNDLE}"
+            bundlePath=$(dockerBundlePathForTarget "$(<"${backup}/bundle.target")") || return "${PADM_DOCKER_RC_BUNDLE}"
+        else
+            bundlePath=$(dockerCurrentBundlePath) || return "${PADM_DOCKER_RC_BUNDLE}"
+        fi
+        dockerRenewalBundleCheck "${bundlePath}" || return "${PADM_DOCKER_RC_BUNDLE}"
+    fi
     dockerTrafficRollbackCheck "${backup}" || return "${PADM_DOCKER_RC_STATE}"
     dockerTrafficRuntimeCheck "$(jq -r '.core.type, (.core.secondary_type // empty)' "${backup}/deployment.json")" ||
         return "${PADM_DOCKER_RC_HOST}"
@@ -698,6 +946,7 @@ dockerUninstallCommand() {
         backup=${DOCKER_CONFIG_BACKUP}
     fi
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    dockerRenewalScheduleRemove || return "${PADM_DOCKER_RC_STATE}"
     if [[ -e "${root}/compose.json" || -e "${root}/deployment.json" || -e "${root}/images.env" ]]; then
         dockerComposeFile >/dev/null || {
             dockerError 'Docker Compose 状态不完整，已拒绝卸载'
@@ -723,6 +972,10 @@ dockerUninstallCommand() {
 
 dockerCommandInterrupted() {
     local status=$1
+    dockerRenewalScheduleInterrupted || true
+    if declare -F dockerRenewalInterrupted >/dev/null 2>&1; then
+        dockerRenewalInterrupted || true
+    fi
     if declare -F dockerConfigurationInterrupted >/dev/null 2>&1; then
         dockerConfigurationInterrupted || true
     fi
@@ -758,7 +1011,13 @@ dockerMain() {
         *) status=${PADM_DOCKER_RC_USAGE} ;;
         esac
         ;;
-    acme) dockerAcmeCommand "$@" ;;
+    acme)
+        case "${1:-}" in
+        schedule) shift; dockerRenewalCommand "$@" ;;
+        auto-renew) shift; dockerRenewalCommand run "$@" ;;
+        *) dockerAcmeCommand "$@" ;;
+        esac
+        ;;
     validate) dockerValidateInstalledCommand "$@" ;;
     status) dockerStatusCommand "$@" ;;
     traffic) dockerTrafficCommand "$@" ;;
@@ -776,6 +1035,10 @@ dockerMain() {
         ;;
     esac
     status=${status:-$?}
+    dockerRenewalScheduleInterrupted || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_STATE}
+    if declare -F dockerRenewalInterrupted >/dev/null 2>&1; then
+        dockerRenewalInterrupted || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_STATE}
+    fi
     if [[ "${DOCKER_TLS_SWITCHED:-0}" == 1 ]]; then
         dockerRestoreTlsFiles || dockerError "TLS 事务恢复失败，请检查备份: ${DOCKER_TLS_BACKUP:-}"
         [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_STATE}

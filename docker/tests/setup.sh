@@ -135,7 +135,7 @@ run)
         bytes=${!#}
         [[ "${bytes}" =~ ^[0-9]+$ ]] || exit 1
         printf '%*s\n' "$((bytes * 2))" '' | tr ' ' a
-    elif [[ " $* " == *' --entrypoint python3 '* ]]; then
+    elif [[ " $* " == *' --entrypoint python3 '* && " $* " != *'/opt/acme/acme.sh'* ]]; then
         if [[ " $* " == *'private_key = base64.b64decode'* ]]; then
             IFS= read -r privateKey || exit 1
             [[ "${privateKey}" == AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA ]] || exit 1
@@ -156,7 +156,7 @@ run)
         fi
     elif [[ " $* " == *' tls-check '* ]]; then
         [[ "${mode}" != tls-fail ]] || exit 1
-    elif [[ " $* " == *' acme '* ]]; then
+    elif [[ " $* " == *'/opt/acme/acme.sh'* ]]; then
         [[ "${mode}" != acme-fail ]] || exit 1
         output= account= domain= previous=
         for argument in "$@"; do
@@ -243,7 +243,7 @@ export FAKE_SETUP_ARGV_LOG="${ARGV_LOG}" FAKE_SETUP_CHILD_PID="${TEST_ROOT}/chil
 
 for relative in \
     install-docker.sh docker/lib/bootstrap.sh docker/lib/bundle.sh docker/lib/manifest.sh \
-    docker/lib/services.sh docker/lib/traffic.sh docker/lib/lifecycle.sh docker/lib/menu.sh docker/lib/setup.sh \
+    docker/lib/services.sh docker/lib/traffic.sh docker/lib/renewal.sh docker/lib/lifecycle.sh docker/lib/menu.sh docker/lib/setup.sh \
     docker/contracts/configure.schema.json docker/contracts/deployment.schema.json \
     docker/contracts/features.json shell/core/deployment_mode.sh shell/core/stats_grpc.sh; do
     mkdir -p "${SOURCE_ROOT}/$(dirname -- "${relative}")"

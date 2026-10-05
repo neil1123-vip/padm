@@ -268,9 +268,14 @@ padm-docker tls manage
 padm-docker tls validate --domain example.com
 padm-docker tls install --domain example.com --cert /path/fullchain.pem --key /path/privkey.pem
 padm-docker acme <issue|renew> --domain example.com --email admin@example.com --dns <dns_provider> --credentials /path/credentials
+padm-docker acme schedule enable --domain example.com --email admin@example.com --dns <dns_provider> --credentials /path/credentials
+padm-docker acme schedule status
+padm-docker acme schedule disable --domain example.com
+padm-docker acme auto-renew
 ```
 
 Main menu item 8 validates certificates, imports replacements, or runs DNS-01 issue/renew.
+It also shows, enables, or disables automatic renewal.
 No deployment lock is held before final confirmation. Configured deployments use their recorded
 ops image; `--ops-image` cannot substitute a different image.
 After checking validity dates, hostname and key match, rotation runs `nginx -t`, reloads and
@@ -280,8 +285,19 @@ without changing listeners or the spec. Core-side TLS only handles same-domain m
 pairs referenced by the configuration, through a read-only `/etc/padm/secrets/tls` mount.
 All consumers are validated first, then affected cores are recreated or Nginx is reloaded with
 per-service health checks. Recovery attempts every consumer without reverting cumulative traffic.
-Automatic renewal scheduling remains unavailable; this foundation does not establish support for
-new protocols, full management, or verified real application connectivity.
+Automatic renewal requires an existing managed ACME account for the domain and matching DNS
+provider; imported certificates alone are insufficient. Enabling it stores `NAME=value`
+credentials and renewal inputs in host-only `secrets/renewal/<domain>/`, with root-owned
+`0700` directories and `0600` files. Credentials reach the tool through standard input, not
+schedules, arguments, or Docker environment metadata.
+All domains share one daily 03:17 task: a systemd timer with up to five minutes of random delay,
+or a running cron daemon. The backends are mutually exclusive, repeated enablement creates
+no extra job, and certificates that are not due are skipped normally.
+`down` and uninstall remove the job but retain private inputs; `up` reinstalls it.
+Updates and rollbacks preserve the latest inputs and reject incompatible older control bundles
+while renewal is enabled. External tasks with the same name are never overwritten.
+This foundation does not establish support for new protocols, full management, or verified
+real application connectivity.
 
 Configuration changes generate and validate a candidate, check ports and Compose, back up the current state, and then run health checks. A failure leaves the old configuration in place. The installed host command is `/usr/local/bin/padm-docker`; the bundle, configuration, data, secrets, logs, and backups live below the state root in `bundle/`, `config/`, `data/`, `secrets/`, `logs/`, and `backups/`.
 

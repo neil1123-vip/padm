@@ -98,7 +98,7 @@ run)
         [[ "${mode}" != "tls-validity-fail" ]]
         exit $?
     fi
-    if [[ " ${*} " == *' --entrypoint python3 '* ]]; then
+    if [[ " ${*} " == *' --entrypoint python3 '* && " ${*} " != *'/opt/acme/acme.sh'* ]]; then
         if [[ " ${*} " == *'302e020100300506032b656e04220420'* ]]; then
             previous=
             for argument in "$@"; do

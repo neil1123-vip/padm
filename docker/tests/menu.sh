@@ -152,6 +152,10 @@ runPty() {
                 printf '2\n\ncertificate.pem\n' >&3
                 waitForText '私钥文件' "${CONTROL_LOG}" || exit 15
                 printf '\004' >&3
+            elif [[ "${input}" == renewal-eof ]]; then
+                printf '6\n\nadmin@example.com\ndns_cf\n' >&3
+                waitForText 'DNS 凭据文件' "${CONTROL_LOG}" || exit 17
+                printf '\004' >&3
             else
                 printf '%s' "${input}" >&3
             fi
@@ -314,6 +318,7 @@ recordAction() {
 dockerTlsValidateCommand() { recordAction validate "$@"; }
 dockerTlsInstallCommand() { recordAction install "$@"; }
 dockerAcmeCommand() { recordAction acme "$@"; }
+dockerRenewalCommand() { recordAction schedule "$@"; }
 PADM_DOCKER_RC_STATE=15
 PADM_DOCKER_RC_USAGE=2
 case "${1:-}" in
@@ -332,7 +337,8 @@ runPty tls-no-domain menu $'8\n0\n' "${TLS_WIZARD_CLI}" menu
 grep -Fq '当前部署没有 TLS 域名' "${CONTROL_LOG}" || fail 'TLS menu accepted a deployment without a TLS domain'
 [[ ! -s "${TLS_WIZARD_ACTIONS}" ]] || fail 'missing TLS domain reached a business command'
 printf '{"tls":{"domain":"ws.example.com"}}\n' >"${TLS_WIZARD_ROOT}/config/spec.json"
-for tlsCase in cancel final-no eof validate install issue renew; do
+for tlsCase in cancel final-no eof validate install issue renew \
+    renewal-status renewal-enable renewal-disable renewal-final-no renewal-eof; do
     : >"${TLS_WIZARD_ACTIONS}"
     expectedAction=
     case "${tlsCase}" in
@@ -349,6 +355,14 @@ for tlsCase in cancel final-no eof validate install issue renew; do
         printf -v input '%s\n\nadmin@example.com\ndns_cf\ncredentials.env\ny\n' "${choice}"
         expectedAction="acme ${tlsCase} --domain ws.example.com --email admin@example.com --dns dns_cf --credentials credentials.env"
         ;;
+    renewal-status) input=$'5\n\ny\n'; expectedAction='schedule status' ;;
+    renewal-enable)
+        input=$'6\n\nadmin@example.com\ndns_cf\ncredentials.env\ny\n'
+        expectedAction='schedule enable --domain ws.example.com --email admin@example.com --dns dns_cf --credentials credentials.env'
+        ;;
+    renewal-disable) input=$'7\n\ny\n'; expectedAction='schedule disable --domain ws.example.com' ;;
+    renewal-final-no) input=$'6\n\nadmin@example.com\ndns_cf\ncredentials.env\nn\n' ;;
+    renewal-eof) input=renewal-eof ;;
     esac
     runPty "tls-${tlsCase}" tls "${input}" "${TLS_WIZARD_CLI}" menu
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedAction}" ]] ||

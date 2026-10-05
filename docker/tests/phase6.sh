@@ -62,7 +62,7 @@ copyControlFixture() {
     local target=$1 marker=$2 relative
     for relative in \
         docker/lib/bootstrap.sh docker/lib/bundle.sh docker/lib/manifest.sh \
-        docker/lib/services.sh docker/lib/traffic.sh docker/lib/lifecycle.sh docker/lib/setup.sh docker/lib/menu.sh \
+        docker/lib/services.sh docker/lib/traffic.sh docker/lib/renewal.sh docker/lib/lifecycle.sh docker/lib/setup.sh docker/lib/menu.sh \
         docker/contracts/configure.schema.json docker/contracts/deployment.schema.json \
         docker/contracts/features.json shell/core/deployment_mode.sh shell/core/stats_grpc.sh; do
         mkdir -p "${target}/$(dirname -- "${relative}")"
@@ -149,6 +149,19 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
         dockerTrafficScheduleInstall() { :; }
         dockerTrafficScheduleRemove() { :; }
         dockerTrafficBeforeChange() { :; }
+        dockerRenewalScheduleInstall() { printf "synced\n" >>"$root/renewal-schedule.log"; }
+        # 私有续期输入保留最新值，不能被配置更新或回滚快照覆盖。
+        renewalBefore=
+        if [[ "${EUID}" == 0 ]]; then
+            mkdir -p "$root/secrets/renewal/proxy.example.com"
+            jq -n "{schema_version:1,domain:\"proxy.example.com\",email:\"admin@example.com\",
+              provider:\"dns_test\",enabled:true}" >"$root/secrets/renewal/proxy.example.com/request.json"
+            printf "DNS_TOKEN=private-latest-value\n" >"$root/secrets/renewal/proxy.example.com/credentials.env"
+            chmod 0700 "$root/secrets/renewal" "$root/secrets/renewal/proxy.example.com"
+            chmod 0600 "$root/secrets/renewal/proxy.example.com/"*
+            chown -R 0:0 "$root/secrets/renewal"
+            renewalBefore=$(find "$root/secrets/renewal" -type f -print0 | sort -z | xargs -0 sha256sum)
+        fi
         dockerManifestPrepare() {
             PADM_DOCKER_MANIFEST_FILE=$source
             PADM_DOCKER_MANIFEST_SHA256=$(sha256sum "$source" | awk "{print \$1}")
@@ -173,6 +186,8 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
                 ".bundle_version == \$bundle and (.images | length) == 5 and all(.images[]; .index_digest == \$digest)" \
                 "$root/deployment.json" >/dev/null
             test "$(grep -c "@sha256:$imageDigest$" "$root/images.env")" -eq 5
+            [[ -z "$renewalBefore" ]] ||
+                test "$(find "$root/secrets/renewal" -type f -print0 | sort -z | xargs -0 sha256sum)" == "$renewalBefore"
         }
         control=$PHASE6_CONTROL_BUNDLE
         dockerUpdateCommand --manifest "$source"
@@ -187,6 +202,8 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
         ! grep -qxF config/spec.json "$successfulBackup/present"
         test ! -e "$root/config/spec.json"
         dockerValidateConfigurationBackup "$successfulBackup"
+        ! grep -q "secrets/renewal" "$successfulBackup/present"
+        test -s "$root/renewal-schedule.log"
         dockerCleanupStagedBundle
 
         jq --arg commit "$failedCommit" --arg digest "$(printf 3%.0s {1..64})" \
@@ -602,6 +619,7 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
 
 (
     source "${PROJECT_ROOT}/docker/lib/bootstrap.sh"
+    source "${PROJECT_ROOT}/docker/lib/services.sh"
     source "${PROJECT_ROOT}/docker/lib/lifecycle.sh"
     rollbackRoot="${TEST_ROOT}/rollback-capability"
     rollbackFixture="${rollbackRoot}/backups/update.test"

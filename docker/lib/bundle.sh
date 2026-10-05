@@ -62,6 +62,9 @@ dockerBundleSourceIsComplete() {
         shell/core/stats_grpc.sh; do
         [[ -f "${sourceRoot}/${required}" && ! -L "${sourceRoot}/${required}" ]] || return 1
     done
+    if grep -qF '/renewal.sh"' "${sourceRoot}/docker/lib/services.sh"; then
+        [[ -f "${sourceRoot}/docker/lib/renewal.sh" && ! -L "${sourceRoot}/docker/lib/renewal.sh" ]] || return 1
+    fi
     dockerBundlePayloadPaths "${sourceRoot}" >/dev/null
 }
 
@@ -370,6 +373,7 @@ dockerInstallBundle() {
         [[ -f "${root}/config/spec.json" && ! -L "${root}/config/spec.json" ]] &&
             dockerBundleSupportsSpec "${DOCKER_STAGED_BUNDLE_PATH}" "${root}/config/spec.json" || return 1
     fi
+    dockerRenewalBundleCheck "${DOCKER_STAGED_BUNDLE_PATH}" || return 1
     dockerActivateStagedBundle
 }
 

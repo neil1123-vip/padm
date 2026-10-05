@@ -243,9 +243,13 @@ padm-docker tls manage
 padm-docker tls validate --domain example.com
 padm-docker tls install --domain example.com --cert /path/fullchain.pem --key /path/privkey.pem
 padm-docker acme <issue|renew> --domain example.com --email admin@example.com --dns <dns_provider> --credentials /path/credentials
+padm-docker acme schedule enable --domain example.com --email admin@example.com --dns <dns_provider> --credentials /path/credentials
+padm-docker acme schedule status
+padm-docker acme schedule disable --domain example.com
+padm-docker acme auto-renew
 ```
 
-主菜单第 8 项可查看/校验证书、导入轮换、DNS-01 申请或续期；最终确认前不持有部署锁。
+主菜单第 8 项可查看/校验证书、导入轮换、DNS-01 申请或续期，并查看、启用或停用自动续期；最终确认前不持有部署锁。
 已配置部署必须使用部署记录的 ops 镜像，不能用 `--ops-image` 换成其他镜像。
 候选证书检查有效期、域名和私钥匹配后，先执行 `nginx -t` 再重载并检查健康；
 失败或中断恢复旧证书和 ACME 账户，保留其他域名及累计流量。
@@ -253,7 +257,15 @@ padm-docker acme <issue|renew> --domain example.com --email admin@example.com --
 核心端 TLS 只处理配置中引用的同域名受管 `.crt/.key` 对，使用只读
 `/etc/padm/secrets/tls` 挂载；全部消费者先校验，再定向重建核心或 reload Nginx，
 逐服务检查健康，失败时尝试恢复全部消费者且累计流量不回退。
-自动续期调度尚未开放；核心 TLS 底座不表示新增协议、完整管理或真实业务连通已验收。
+自动续期需要该域名已有与 DNS provider 匹配的受管 ACME 账户，不能为仅导入的外部证书
+直接开启。启用后将 `NAME=value` DNS 凭据和续期输入保存在宿主
+`secrets/renewal/<域名>/`，目录为 `0700 root:root`、文件为 `0600 root:root`；
+凭据经标准输入进入工具，不放在调度、参数或 Docker 环境变量元数据中。
+多个域名共用一个每日 03:17 的任务，优先 systemd timer（最多随机延迟 5 分钟），
+否则使用正在运行的 cron；两个后端互斥，重复启用不增加任务，未到期正常跳过。
+`down` 和卸载移除任务但保留私有输入，`up` 恢复；更新/回滚保留最新输入，
+已启用时拒绝切到不支持续期的旧控制 bundle，外部同名任务不覆盖。
+核心 TLS 底座不表示新增协议、完整管理或真实业务连通已验收。
 
 配置变更先生成候选文件、校验端口和 Compose，再备份当前状态并执行健康检查；失败时保留旧配置。Docker 入口安装的控制命令是 `/usr/local/bin/padm-docker`，实际 bundle、配置、数据、密钥、日志和备份分别位于状态根下的 `bundle/`、`config/`、`data/`、`secrets/`、`logs/` 和 `backups/`。
 

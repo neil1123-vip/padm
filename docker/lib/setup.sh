@@ -242,9 +242,10 @@ dockerTlsManageCommand() {
         return "${PADM_DOCKER_RC_STATE}"
     }
     printf '\nDocker 证书管理\n当前 TLS 域名: %s\n' "${currentDomain}"
-    printf '%s\n' '1. 查看/校验受管证书' '2. 导入证书轮换' '3. DNS-01 申请' '4. DNS-01 续期' '0. 返回'
+    printf '%s\n' '1. 查看/校验受管证书' '2. 导入证书轮换' '3. DNS-01 申请' '4. DNS-01 续期' \
+        '5. 自动续期状态' '6. 启用自动续期' '7. 停用自动续期' '0. 返回'
     dockerSetupRead choice '证书操作: ' || return 0
-    [[ "${choice}" =~ ^[1-4]$ ]] || return "${PADM_DOCKER_RC_USAGE}"
+    [[ "${choice}" =~ ^[1-7]$ ]] || return "${PADM_DOCKER_RC_USAGE}"
     dockerSetupRead domain "证书域名 [${currentDomain}]（0 取消）: " "${currentDomain}" || return 0
     dockerDomainIsValid "${domain}" || return "${PADM_DOCKER_RC_USAGE}"
     case "${choice}" in
@@ -255,18 +256,25 @@ dockerTlsManageCommand() {
         dockerSetupRead key '私钥文件（0 取消）: ' || return 0
         [[ -n "${cert}" && -n "${key}" ]] || return "${PADM_DOCKER_RC_USAGE}"
         ;;
-    3|4)
-        if [[ "${choice}" == 3 ]]; then action=DNS-01申请; else action=DNS-01续期; fi
+    3|4|6)
+        case "${choice}" in
+        3) action=DNS-01申请 ;;
+        4) action=DNS-01续期 ;;
+        6) action=启用自动续期 ;;
+        esac
         dockerSetupRead email 'ACME 邮箱（0 取消）: ' || return 0
         dockerSetupRead provider 'DNS provider（dns_*，0 取消）: ' || return 0
         dockerSetupRead credentials 'DNS 凭据文件（0 取消）: ' || return 0
         dockerEmailIsValid "${email}" && [[ "${provider}" =~ ^dns_[a-z0-9_]+$ ]] &&
             [[ -n "${credentials}" ]] || return "${PADM_DOCKER_RC_USAGE}"
         ;;
+    5) action=自动续期状态 ;;
+    7) action=停用自动续期 ;;
     esac
     printf '\n证书操作: %s\n域名: %s\n' "${action}" "${domain}"
-    [[ "${domain}" == "${currentDomain}" ]] ||
+    if [[ "${domain}" != "${currentDomain}" && "${choice}" -le 4 ]]; then
         printf '其他域名只保存或校验证书，不修改当前入口和部署。\n'
+    fi
     dockerSetupRead answer '确认执行证书操作？[y/N]: ' n || return 0
     case "${answer}" in y|Y|yes|YES) ;; *) printf '已取消证书操作。\n'; return 0 ;; esac
     case "${choice}" in
@@ -277,6 +285,12 @@ dockerTlsManageCommand() {
         dockerAcmeCommand "${action}" --domain "${domain}" --email "${email}" \
             --dns "${provider}" --credentials "${credentials}"
         ;;
+    5) dockerRenewalCommand status ;;
+    6)
+        dockerRenewalCommand enable --domain "${domain}" --email "${email}" \
+            --dns "${provider}" --credentials "${credentials}"
+        ;;
+    7) dockerRenewalCommand disable --domain "${domain}" ;;
     esac
 }
 

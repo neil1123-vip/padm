@@ -5932,6 +5932,10 @@ runDockerTlsRegression() {
     bash "${PROJECT_ROOT}/docker/tests/tls.sh"
 }
 
+runDockerRenewalRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/renewal.sh"
+}
+
 runDockerPhase2Regression() {
     bash "${PROJECT_ROOT}/docker/tests/phase2.sh"
 }

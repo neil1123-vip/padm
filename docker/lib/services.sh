@@ -2,6 +2,8 @@
 
 # shellcheck source=/dev/null
 source "$(dirname -- "${BASH_SOURCE[0]}")/traffic.sh" || return 1
+# shellcheck source=/dev/null
+source "$(dirname -- "${BASH_SOURCE[0]}")/renewal.sh" || return 1
 
 if [[ "${PADM_DOCKER_SERVICES_LOADED:-}" == "1" ]]; then
     return 0 2>/dev/null || exit 0
@@ -1768,6 +1770,7 @@ dockerRestoreConfiguration() {
         fi
         dockerTrafficScheduleRemove || return 1
     fi
+    dockerRenewalScheduleInstall || return 1
     DOCKER_CONFIG_SWITCHED=0
 }
 
@@ -1861,7 +1864,8 @@ dockerConfigureApply() {
     if ! dockerInstallCandidate "${candidate}" "${backup}" ||
         ! dockerEnsureRuntimeDataPermissions ||
         ! dockerComposeRun up -d --force-recreate --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" ||
-        ! dockerTrafficScheduleInstall; then
+        ! dockerTrafficScheduleInstall ||
+        ! dockerRenewalScheduleInstall; then
         dockerError '候选部署启动或健康检查失败，正在恢复旧配置'
         if ! dockerRestoreConfiguration; then
             dockerError "旧配置恢复失败，请检查备份: ${backup}"
@@ -2437,18 +2441,39 @@ dockerTlsInstallCommand() {
 dockerAcmeRun() {
     local image=$1 credentials=$2 acmeData=$3 output=$4
     shift 4
-    docker run --rm --read-only --cap-drop ALL \
+    dockerRenewalCredentialsValidate "${credentials}" || return 1
+    docker run --rm -i --read-only --cap-drop ALL \
         --security-opt no-new-privileges --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m \
         --label io.padm.mode=docker --label io.padm.project="${PADM_DOCKER_PROJECT}" \
-        --env-file "${credentials}" \
         --volume "${acmeData}:/var/lib/padm/acme" \
         --volume "${output}:/var/lib/padm/tls-output" \
-        "${image}" acme "$@"
+        --entrypoint python3 "${image}" -c '
+import os
+import re
+import sys
+
+env = os.environ.copy()
+seen = set()
+for line in sys.stdin.read().splitlines():
+    if not line or line.startswith("#"):
+        continue
+    name, value = line.split("=", 1)
+    if (not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) or "\0" in value
+        or name in seen or name in {
+            "PATH", "HOME", "ENV", "BASH_ENV", "IFS", "SHELLOPTS", "BASHOPTS",
+            "CDPATH", "GLOBIGNORE", "PS4", "DEBUG", "TMPDIR"}
+        or name.startswith(("PYTHON", "LD_", "PADM_", "LE_", "ACME_", "Le_"))):
+        raise SystemExit(1)
+    seen.add(name)
+    env[name] = value
+os.execvpe("/opt/acme/acme.sh",
+    ["acme.sh", "--home", "/var/lib/padm/acme", *sys.argv[1:]], env)
+' "$@" <"${credentials}"
 }
 
 dockerAcmeCommand() {
     local action=${1:-} domain= email= provider= credentials= requestedImage=
-    local root image candidate
+    local image status
     [[ "$#" -gt 0 ]] && shift
     [[ "${action}" == "issue" || "${action}" == "renew" ]] || return "${PADM_DOCKER_RC_USAGE}"
     while [[ "$#" -gt 0 ]]; do
@@ -2467,8 +2492,8 @@ dockerAcmeCommand() {
         return "${PADM_DOCKER_RC_USAGE}"
     }
     credentials=$(dockerResolveRegularFile "${credentials}") || return "${PADM_DOCKER_RC_USAGE}"
-    dockerPrivateFileIsRestricted "${credentials}" || {
-        dockerError 'DNS 凭据文件不能允许 group/other 读取'
+    dockerRenewalCredentialsValidate "${credentials}" || {
+        dockerError 'DNS 凭据必须为仅持有者读取的 NAME=value 文件，不得改写工具运行环境'
         return "${PADM_DOCKER_RC_STATE}"
     }
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
@@ -2477,7 +2502,25 @@ dockerAcmeCommand() {
         dockerError '缺少有效的 ops tag@digest 镜像引用'
         return "${PADM_DOCKER_RC_STATE}"
     }
+    if dockerAcmeApply "${action}" "${domain}" "${email}" "${provider}" "${credentials}" "${image}"; then
+        return 0
+    else
+        status=$?
+        [[ "${status}" != 2 ]] || { printf '证书未到续期时间: %s\n' "${domain}"; return 0; }
+        return "${status}"
+    fi
+}
+
+dockerAcmeApply() {
+    local action=$1 domain=$2 email=$3 provider=$4 credentials=$5 image=$6
+    local root candidate status
+    local -a keyArgs=()
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    if [[ "${action}" == renew &&
+        -f "${root}/data/acme/${domain}_ecc/${domain}.conf" &&
+        ! -f "${root}/data/acme/${domain}/${domain}.conf" ]]; then
+        keyArgs=(--ecc)
+    fi
     dockerCreateTlsCandidate || return "${PADM_DOCKER_RC_STATE}"
     candidate=${DOCKER_TLS_CANDIDATE}
     # ACME 工具只能改候选账户，校验和重载失败时旧账户与其它域名不受影响。
@@ -2503,15 +2546,21 @@ dockerAcmeCommand() {
             return "${PADM_DOCKER_RC_STATE}"
         }
     else
-        dockerAcmeRun "${image}" "${credentials}" "${candidate}/acme" "${candidate}" \
-            --renew -d "${domain}" >/dev/null 2>&1 || {
+        if dockerAcmeRun "${image}" "${credentials}" "${candidate}/acme" "${candidate}" \
+            --renew -d "${domain}" "${keyArgs[@]}" >/dev/null 2>&1; then
+            status=0
+        else
+            status=$?
+        fi
+        if [[ "${status}" != 0 ]]; then
+            dockerCleanupTlsCandidate || return "${PADM_DOCKER_RC_STATE}"
+            [[ "${status}" != 2 ]] || return 2
             dockerError '候选 DNS-01 续期失败，现有证书和 ACME 账户未修改'
-            dockerCleanupTlsCandidate || true
             return "${PADM_DOCKER_RC_STATE}"
-        }
+        fi
     fi
     dockerAcmeRun "${image}" "${credentials}" "${candidate}/acme" "${candidate}" \
-        --install-cert -d "${domain}" \
+        --install-cert -d "${domain}" "${keyArgs[@]}" \
         --fullchain-file "/var/lib/padm/tls-output/${domain}.crt" \
         --key-file "/var/lib/padm/tls-output/${domain}.key" >/dev/null 2>&1 || {
         dockerError '候选证书导出失败，现有证书和 ACME 账户未修改'
