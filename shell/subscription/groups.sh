@@ -872,6 +872,22 @@ subscriptionGroupSyncIntervalValid() {
     [[ "${interval}" =~ ^[0-9]{1,2}$ ]] && ((10#${interval} >= 1 && 10#${interval} <= 59))
 }
 
+subscriptionSourceSnapshotMatches() {
+    local source=$1
+    local expected=${2:-}
+    [[ -n "${expected}" ]] || return 0
+    jq -e --argjson expected "${expected}" '
+      def snapshot: {id,name,role,transport,scheme,host,port,enabled,control_token};
+      ($expected | type == "object" and
+        all(["id","name","role","transport","scheme","host"][]; . as $key |
+          $expected[$key] | type == "string" and length > 0) and
+        (.port | type == "number" and . == floor) and
+        (.enabled | type == "boolean") and
+        ((has("control_token") | not) or .control_token == null or (.control_token | type == "string"))) and
+      (type == "object") and (snapshot == ($expected | snapshot))
+    ' <<<"${source}" >/dev/null 2>&1
+}
+
 addSubscriptionSourceState() {
     local id=$1
     local name=$2

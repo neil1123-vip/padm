@@ -331,6 +331,80 @@ edge-a"
         assertMenuAction 'runSubscriptionGroupSync:'
         subscriptionWireGuardReadState | jq -e --arg publicKey "${updatedPublicKey}" '.peers[] | select(.id == "edge-a" and .address == "10.77.0.3/24" and .public_key == $publicKey and .endpoint == "")' >/dev/null
         subscriptionGroupsStateRead -e '.sources[] | select(.id == "edge-a" and .host == "10.77.0.3" and .port == 48779 and .control_token == "token-b")' >/dev/null
+        (
+            local expectedSource expectedPeer credentialJson sourceChange currentState currentGroups
+            local baselineState baselineGroups
+            baselineState=$(subscriptionWireGuardReadState)
+            baselineGroups=$(subscriptionGroupsStateRead -c '.')
+            expectedSource=$(subscriptionActiveGroupRead -c 'first(.sources[] | select(.id == "edge-a"))')
+            expectedPeer=$(subscriptionWireGuardReadState | jq -c 'first(.peers[] | select(.id == "edge-a") | {id,address,public_key})')
+            credentialJson=$(subscriptionWireGuardCredentialDecode "${updatedCredential}")
+            for sourceChange in '.control_token = "rotated-token"' '.enabled = false'; do
+                (
+                    subscriptionActiveGroupWrite ".sources |= map(if .id == \"edge-a\" then ${sourceChange} else . end)"
+                    currentState=$(subscriptionWireGuardReadState)
+                    currentGroups=$(subscriptionGroupsStateRead -c '.')
+                    resetMenuActions
+                    regressionExpectStatus 1 setSubscriptionRemoteSourceEnabled edge-a false "${expectedSource}"
+                    regressionExpectStatus 1 subscriptionWireGuardUpdatePeerAndCredential edge-a "${credentialJson}" "${expectedSource}" "${expectedPeer}"
+                    regressionExpectStatus 1 subscriptionWireGuardRemovePeerAndSource edge-a "${expectedSource}" "${expectedPeer}"
+                    [[ "${SUBSCRIPTION_WIREGUARD_SOURCE_REMOVE_ERROR}" == "state" ]]
+                    [[ "$(subscriptionWireGuardReadState)" == "${currentState}" && "$(subscriptionGroupsStateRead -c '.')" == "${currentGroups}" ]]
+                    ! grep -q '^subscriptionRemoteApplyDesiredUsersForSource:' <<<"${actions}"
+                    ! assertMenuAction applySubscriptionWireGuardService
+                    subscriptionGroupsStateWrite --argjson baseline "${baselineGroups}" '$baseline'
+                )
+            done
+            subscriptionWireGuardWriteState --arg publicKey "${failingPublicKey}" \
+                '.peers |= map(if .id == "edge-a" then .public_key = $publicKey else . end)'
+            currentState=$(subscriptionWireGuardReadState)
+            currentGroups=$(subscriptionGroupsStateRead -c '.')
+            resetMenuActions
+            regressionExpectStatus 1 subscriptionWireGuardUpdatePeerAndCredential edge-a "${credentialJson}" "${expectedSource}" "${expectedPeer}"
+            regressionExpectStatus 1 subscriptionWireGuardRemovePeerAndSource edge-a "${expectedSource}" "${expectedPeer}"
+            [[ "${SUBSCRIPTION_WIREGUARD_SOURCE_REMOVE_ERROR}" == "state" ]]
+            regressionExpectStatus 1 subscriptionWireGuardRemovePeerAndSourceLocalOnly edge-a "${expectedSource}" "${expectedPeer}"
+            [[ "${SUBSCRIPTION_WIREGUARD_SOURCE_REMOVE_ERROR}" == "state" ]]
+            [[ "$(subscriptionWireGuardReadState)" == "${currentState}" && "$(subscriptionGroupsStateRead -c '.')" == "${currentGroups}" ]]
+            ! grep -q '^subscriptionRemoteApplyDesiredUsersForSource:' <<<"${actions}"
+            ! assertMenuAction applySubscriptionWireGuardService
+            subscriptionWireGuardWriteState --argjson baseline "${baselineState}" '$baseline'
+            subscriptionGroupsStateWrite --argjson baseline "${baselineGroups}" '$baseline'
+        )
+        (
+            local expectedSource expectedPeer credentialJson baselineGroups
+            baselineGroups=$(subscriptionGroupsStateRead -c '.')
+            expectedSource=$(subscriptionActiveGroupRead -c 'first(.sources[] | select(.id == "edge-a"))')
+            expectedPeer=$(subscriptionWireGuardReadState | jq -c 'first(.peers[] | select(.id == "edge-a") | {id,address,public_key})')
+            credentialJson=$(subscriptionWireGuardCredentialDecode "${updatedCredential}")
+            subscriptionActiveGroupWrite '
+              .sources |= map(if .id == "edge-a" then .sync_status = "failed" | .sync_failure_count = 2 else . end) |
+              .traffic.sources["edge-a"] = {upload:50,download:20}
+            '
+            resetMenuActions
+            setSubscriptionRemoteSourceEnabled edge-a true "${expectedSource}"
+            subscriptionWireGuardUpdatePeerAndCredential edge-a "${credentialJson}" "${expectedSource}" "${expectedPeer}"
+            assertMenuAction applySubscriptionWireGuardService
+            ! grep -q '^subscriptionRemoteApplyDesiredUsersForSource:' <<<"${actions}"
+            subscriptionGroupsStateWrite --argjson baseline "${baselineGroups}" '$baseline'
+        )
+        (
+            local explicitId= expectedSource expectedPeer baselineGroups
+            baselineGroups=$(subscriptionGroupsStateRead -c '.')
+            addSubscriptionSourceState edge-b "Edge B" 10.77.0.9 48779
+            subscriptionActiveGroupWrite '
+              .sources |= map(if .id == "edge-a" then .host = "10.77.0.2"
+                elif .id == "edge-b" then .host = "10.77.0.3" else . end)
+            '
+            expectedSource=$(subscriptionActiveGroupRead -c 'first(.sources[] | select(.id == "edge-a"))')
+            expectedPeer=$(subscriptionWireGuardReadState | jq -c 'first(.peers[] | select(.id == "edge-a") | {id,address,public_key})')
+            subscriptionWireGuardUpdatePeerAndCredential() { explicitId=$1; }
+            resetMenuActions
+            setSubscriptionSourceControlTokenMenu edge-a "${expectedSource}" "${expectedPeer}" <<<"${updatedCredential}"
+            [[ "${explicitId}" == "edge-a" ]]
+            assertMenuAction 'runSubscriptionGroupSync:'
+            subscriptionGroupsStateWrite --argjson baseline "${baselineGroups}" '$baseline'
+        )
     fi
 
     if wireGuardMenuPartSelected peer-rollback-apply || wireGuardMenuPartSelected peer-rollback-apply-service; then
@@ -1881,23 +1955,35 @@ EOF
                 printf 'read\n' >>"${sourceReadLog}"
                 printf '%s\n' '[{"id":"edge-a","name":"边缘 A","role":"secondary","scheme":"wireguard","host":"10.77.0.2","port":39778,"enabled":false,"sync_status":"pending"}]'
             }
-            autoRead() { printf -v "$3" '%s' edge-a; }
-            autoConfirm() { printf -v "$4" '%s' n; }
+            autoRead() {
+                if [[ "$1" == "subscription_source_enabled_confirm" ]]; then
+                    printf -v "$3" '%s' n
+                else
+                    printf -v "$3" '%s' edge-a
+                fi
+            }
             warnCard() { warning=$*; }
             setSubscriptionRemoteSourceEnabled() { return 0; }
             runSubscriptionSyncAfterMutation() { return 0; }
             : >"${sourceReadLog}"
             originalChangeSubscriptionSourceEnabledMenu
             [[ "$(wc -l <"${sourceReadLog}")" == "1" ]]
-            [[ "${warning}" == *'启用后，后续同步和公网发布会包含该来源'* ]]
+            [[ "${warning}" == *'启用后立即同步并更新公网发布'* ]]
         )
         (
             local sourceReadLog="${TMP_DIR}/source-remove-menu-read.log"
+            subscriptionRequireMainRole() { return 0; }
             subscriptionActiveGroupRead() {
                 printf 'read\n' >>"${sourceReadLog}"
                 printf '%s\n' '[{"id":"edge-a","name":"边缘 A","role":"secondary","scheme":"wireguard","host":"10.77.0.2","port":39778,"enabled":true,"sync_status":"pending"}]'
             }
-            autoRead() { printf -v "$3" '%s' edge-a; }
+            autoRead() {
+                if [[ "$1" == "delete_subscription_source_confirm" ]]; then
+                    printf -v "$3" '%s' yes
+                else
+                    printf -v "$3" '%s' edge-a
+                fi
+            }
             subscriptionWireGuardRemovePeerAndSource() { return 0; }
             runSubscriptionSyncAfterMutation() { return 0; }
             : >"${sourceReadLog}"
@@ -2442,7 +2528,6 @@ main
             "1:createSubscriptionWireGuardInviteMenu" \
             "2:addOtherSubscribe" \
             "3:manageSubscriptionPendingInvites" \
-            "4:setSubscriptionSourceControlTokenMenu" \
             "5:changeSubscriptionSourceEnabledMenu" \
             "6:removeSubscriptionControlledServerMenu"; do
             wgChoice=${wgAction%%:*}
@@ -2451,6 +2536,136 @@ main
 7"
             assertMenuAction "${wgAction#*:}"
         done
+        (
+            manageSubscriptionServerItem() { recordMenuAction manageSubscriptionServerItem; }
+            resetMenuActions
+            manageSubscriptionServers <<<"4
+8
+7"
+            [[ "${actions}" == $'manageSubscriptionServerItem\nshowSubscriptionSources\n' ]]
+        )
+        (
+            local PADM_SUBSCRIPTION_GROUPS_DIR="${TMP_DIR}/server-item-groups"
+            local serverActionLog="${TMP_DIR}/server-item-actions.log"
+            local serverStdoutLog="${TMP_DIR}/server-item-stdout.log"
+            local serverCardLog="${TMP_DIR}/server-item-cards.log"
+            local serverSelectCount=0
+            local serverHealthOk=true
+            local serverHealthObjectError=false
+            errorCard() {
+                recordMenuAction "errorCard:$1"
+                printf '%s\n' "$*" >>"${serverCardLog}"
+            }
+            mkdir -p "${PADM_SUBSCRIPTION_GROUPS_DIR}"
+            writeDefaultSubscriptionGroupsState "$(subscriptionGroupsFile)"
+            addSubscriptionSourceState edge-a "Edge A" 10.77.0.2 39778
+            addSubscriptionSourceState edge-b "Edge B" 10.77.0.3 39778
+            subscriptionActiveGroupWrite '
+              .sources |= map(if .role != "main" then .control_token = "secret-server-token" else . end)
+            '
+            eval "$(declare -f selectSubscriptionSourceId | sed '1s/^selectSubscriptionSourceId/originalServerItemSelectSubscriptionSourceId/')"
+            selectSubscriptionSourceId() {
+                serverSelectCount=$((serverSelectCount + 1))
+                originalServerItemSelectSubscriptionSourceId "$@"
+            }
+            setSubscriptionSourceControlTokenMenu() {
+                command jq -e --arg id "$1" '.id == $id' <<<"$2" >/dev/null
+                printf 'update:%s\n' "$1" >>"${serverActionLog}"
+                return 1
+            }
+            changeSubscriptionSourceEnabledMenu() {
+                command jq -e --arg id "$1" '.id == $id and .enabled == true' <<<"$2" >/dev/null
+                [[ "$3" == "false" ]]
+                printf 'enabled:%s:%s\n' "$1" "$3" >>"${serverActionLog}"
+            }
+            subscriptionRemoteControlHealth() {
+                local checkedId
+                checkedId=$(command jq -r '.id' <<<"$1")
+                printf 'health:%s\n' "${checkedId}" >>"${serverActionLog}"
+                command jq -cn --arg id "${checkedId}" --argjson ok "${serverHealthOk}" --argjson objectError "${serverHealthObjectError}" \
+                    '{id:$id,ok:$ok,capabilities:["health","sync","traffic"],control_token:"secret-health-token",status:"unauthorized",status_code:401,error:"remote secret-health-token",error_detail:{type:"unauthorized",message:"remote secret-health-token"}} |
+                     if $objectError then .error = {control_token:"secret-health-token"} |
+                       .error_detail.message = .error | .status_code = "secret-health-token" else . end'
+            }
+            runSubscriptionGroupSync() { printf 'sync\n' >>"${serverActionLog}"; }
+            : >"${serverActionLog}"
+            output=
+            manageSubscriptionServerItem >"${serverStdoutLog}" <<<"edge-a
+1
+2
+3
+4
+5
+8
+edge-b
+1
+7"
+            [[ "${serverSelectCount}" == "2" ]]
+            [[ "$(<"${serverActionLog}")" == $'update:edge-a\nenabled:edge-a:false\nhealth:edge-a\nsync\nupdate:edge-b' ]]
+            ! grep -qF 'secret-server-token' <<<"${output}"
+            ! grep -qF 'secret-health-token' "${serverStdoutLog}"
+            assertMenuAction 'successCard:被控服务器连接正常'
+            : >"${serverActionLog}"
+            manageSubscriptionServerItem edge-a </dev/null
+            [[ "${serverSelectCount}" == "2" && ! -s "${serverActionLog}" ]]
+            manageSubscriptionServerItem edge-a <<<"8
+
+3
+7"
+            [[ "${serverSelectCount}" == "3" && "$(<"${serverActionLog}")" == 'health:edge-a' ]]
+            : >"${serverActionLog}"
+            serverHealthOk=false
+            resetMenuActions
+            manageSubscriptionServerItem edge-a >"${serverStdoutLog}" <<<"3
+7"
+            serverHealthObjectError=true
+            manageSubscriptionServerItem edge-a >>"${serverStdoutLog}" <<<"3
+7"
+            [[ "$(<"${serverActionLog}")" == $'health:edge-a\nhealth:edge-a' ]]
+            assertMenuAction 'errorCard:被控服务器连接检查失败'
+            ! grep -qF 'secret-health-token' "${serverStdoutLog}"
+            ! grep -qF 'secret-health-token' "${serverCardLog}"
+            grep -qF '控制 Token 验证失败（HTTP 401）' "${serverCardLog}"
+        )
+        (
+            local PADM_SUBSCRIPTION_GROUPS_DIR="${TMP_DIR}/server-item-remove-groups"
+            local serverActionLog="${TMP_DIR}/server-item-remove-actions.log"
+            local sourceSnapshot=
+            mkdir -p "${PADM_SUBSCRIPTION_GROUPS_DIR}"
+            writeDefaultSubscriptionGroupsState "$(subscriptionGroupsFile)"
+            addSubscriptionSourceState edge-a "Edge A" 10.77.0.2 39778
+            sourceSnapshot=$(subscriptionActiveGroupRead -c 'first(.sources[] | select(.id == "edge-a"))')
+            autoRead() { read -r "$3"; }
+            setSubscriptionRemoteSourceEnabled() {
+                printf 'enabled:%s:%s\n' "$1" "$2" >>"${serverActionLog}"
+            }
+            subscriptionWireGuardRemovePeerAndSource() {
+                command jq -e --arg id "$1" '.id == $id' <<<"$2" >/dev/null
+                printf 'remove:%s\n' "$1" >>"${serverActionLog}"
+                subscriptionActiveGroupWrite --arg id "$1" '.sources |= map(select(.id != $id))'
+            }
+            runSubscriptionSyncAfterMutation() {
+                [[ "${3:-}" == "true" ]]
+                printf 'sync\n' >>"${serverActionLog}"
+                return 1
+            }
+            subscriptionRemoteControlHealth() {
+                printf 'health\n' >>"${serverActionLog}"
+                printf '{"ok":true}\n'
+            }
+            removeSubscriptionControlledServerMenu() { originalRemoveSubscriptionControlledServerMenu "$@"; }
+            : >"${serverActionLog}"
+            regressionExpectStatus 1 originalChangeSubscriptionSourceEnabledMenu edge-a "${sourceSnapshot}" false </dev/null
+            regressionExpectStatus 1 originalChangeSubscriptionSourceEnabledMenu edge-a "${sourceSnapshot}" false < <(printf y)
+            regressionExpectStatus 1 originalRemoveSubscriptionControlledServerMenu edge-a "${sourceSnapshot}" </dev/null
+            regressionExpectStatus 1 originalRemoveSubscriptionControlledServerMenu edge-a "${sourceSnapshot}" < <(printf yes)
+            [[ ! -s "${serverActionLog}" ]]
+            manageSubscriptionServerItem edge-a <<<"6
+yes
+3"
+            [[ "$(<"${serverActionLog}")" == $'remove:edge-a\nsync' ]]
+            subscriptionActiveGroupRead -e 'all(.sources[]; .id != "edge-a")' >/dev/null
+        )
         resetMenuActions
         manageSubscriptionStateBackups <<<"1
 5"

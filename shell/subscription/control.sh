@@ -765,11 +765,23 @@ subscriptionRemoteRestoreSourceUsersIfEnabled() {
 setSubscriptionRemoteSourceEnabledUnlocked() {
     local id=$1
     local enabled=$2
+    local expectedSource=${3:-}
     local source
     local originalUsers=
     local restoreError
     SUBSCRIPTION_REMOTE_SOURCE_MUTATION_ERROR=
-    source=$(subscriptionActiveGroupRead -ce --arg id "${id}" 'first(.sources[]? | select(.id == $id and .role != "main"))') || return 1
+    source=$(subscriptionActiveGroupRead -ce --arg id "${id}" 'first(.sources[]? | select(.id == $id and .role != "main"))') || {
+        SUBSCRIPTION_REMOTE_SOURCE_MUTATION_ERROR="被控服务器源已变化，请刷新后重试"
+        return 1
+    }
+    if ! subscriptionSourceSnapshotMatches "${source}" "${expectedSource}"; then
+        SUBSCRIPTION_REMOTE_SOURCE_MUTATION_ERROR="被控服务器源已变化，请刷新后重试"
+        return 1
+    fi
+    if [[ -n "${expectedSource}" ]] &&
+        jq -e --argjson enabled "${enabled}" '.enabled == $enabled' <<<"${source}" >/dev/null 2>&1; then
+        return 0
+    fi
     if [[ "${enabled}" == "false" ]] && jq -e '.enabled == true' <<<"${source}" >/dev/null 2>&1; then
         if ! subscriptionRemoteDrainSource "${source}" originalUsers; then
             SUBSCRIPTION_REMOTE_SOURCE_MUTATION_ERROR="${SUBSCRIPTION_REMOTE_SOURCE_ERROR:-远端用户清理失败}"

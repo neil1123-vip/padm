@@ -1460,21 +1460,33 @@ manageSubscriptionPendingInvites() {
 }
 
 removeSubscriptionControlledServerMenu() {
-    local sourceId=
-    local sourcesJson
+    subscriptionRequireMainRole || return 1
+    local sourceId=${1:-}
+    local expectedSource=${2:-} expectedPeer=${3:-}
+    local sourcesJson source confirm=
     local localOnlyConfirm=
     echoContent title "\n┌─ 移除被控服务器 ───────────────────────────────────"
-    menuLine "这里列出当前可移除的被控服务器。"
     menuLine "删除前会自动清理用户订阅中的该来源；使用 * 的订阅范围会保留。"
     sourcesJson=$(subscriptionActiveGroupRead -c '[.sources[]? | select(.role != "main")]') || return 1
-    selectSubscriptionSourceId "${sourcesJson}" "请选择要删除的被控服务器:" sourceId delete_subscription_source || return 1
-    if ! subscriptionWireGuardRemovePeerAndSource "${sourceId}"; then
+    if [[ -z "${sourceId}" ]]; then
+        selectSubscriptionSourceId "${sourcesJson}" "请选择要删除的被控服务器:" sourceId delete_subscription_source || return 1
+    fi
+    source=$(jq -ce --arg id "${sourceId}" 'first(.[]? | select(.id == $id))' <<<"${sourcesJson}") || {
+        errorCard "被控服务器源已不存在，请刷新后重试"
+        return 1
+    }
+    expectedSource=${expectedSource:-${source}}
+    menuReadChoice delete_subscription_source_confirm \
+        "确认移除 ${sourceId} 及对应 WireGuard Peer？请输入 yes:" confirm true || return 1
+    [[ "${confirm}" == "yes" ]] || { coreCancelledStatusCard "服务器源未移除"; return 0; }
+    if ! subscriptionWireGuardRemovePeerAndSource "${sourceId}" "${expectedSource}" "${expectedPeer}"; then
         if [[ "${SUBSCRIPTION_WIREGUARD_SOURCE_REMOVE_ERROR:-}" == "remote" ]]; then
             warnCard "远端服务器不可达或清理失败" "仅本地移除会删除本机来源和 WireGuard Peer，但不会删除远端账号；请在远端手工清理后再确认"
-            autoConfirm subscription_source_local_remove_confirm "确认仅本地移除 ${sourceId}？" n localOnlyConfirm
-            if [[ "${localOnlyConfirm}" == "y" ]]; then
-                if subscriptionWireGuardRemovePeerAndSourceLocalOnly "${sourceId}"; then
-                    if runSubscriptionSyncAfterMutation "被控服务器仅本地移除"; then
+            menuReadChoice subscription_source_local_remove_confirm \
+                "确认仅本地移除 ${sourceId}？[y/N]:" localOnlyConfirm true || return 1
+            if [[ "$(normalizeYesNo "${localOnlyConfirm}")" == "y" ]]; then
+                if subscriptionWireGuardRemovePeerAndSourceLocalOnly "${sourceId}" "${expectedSource}" "${expectedPeer}"; then
+                    if runSubscriptionSyncAfterMutation "被控服务器仅本地移除" "" true; then
                         successCard "被控服务器已仅本地移除" "本机来源和 WireGuard Peer 已移除" "远端账号未清理，请手工处理"
                         return 0
                     fi
@@ -1487,7 +1499,7 @@ removeSubscriptionControlledServerMenu() {
         errorCard "被控服务器删除失败"
         return 1
     fi
-    if runSubscriptionSyncAfterMutation "被控服务器删除"; then
+    if runSubscriptionSyncAfterMutation "被控服务器删除" "" true; then
         successCard "被控服务器删除成功" "服务器源和 WireGuard Peer 已移除"
         return 0
     fi
@@ -1496,10 +1508,11 @@ removeSubscriptionControlledServerMenu() {
 
 changeSubscriptionSourceEnabledMenu() {
     subscriptionRequireMainRole || return 1
-    local sourceId=
+    local sourceId=${1:-}
+    local expectedSource=${2:-}
     local source=
     local enabled=
-    local targetEnabled=
+    local targetEnabled=${3:-}
     local actionText=
     local effectText=
     local confirm=
@@ -1507,32 +1520,41 @@ changeSubscriptionSourceEnabledMenu() {
 
     userResultCard "被控服务器启用状态"
     sourcesJson=$(subscriptionActiveGroupRead -c '[.sources[]? | select(.role != "main")]') || return 1
-    selectSubscriptionSourceId "${sourcesJson}" "请选择要启用或停用的被控服务器:" sourceId subscription_source_enabled_id || return 1
+    if [[ -z "${sourceId}" ]]; then
+        selectSubscriptionSourceId "${sourcesJson}" "请选择要启用或停用的被控服务器:" sourceId subscription_source_enabled_id || return 1
+    fi
     source=$(jq -c --arg id "${sourceId}" 'first(.[]? | select(.id == $id))' <<<"${sourcesJson}") || return 1
     if [[ -z "${source}" || "${source}" == "null" ]]; then
         errorCard "被控服务器源已不存在，请刷新后重试"
         return 1
     fi
-    enabled=$(jq -r '.enabled == true' <<<"${source}") || return 1
+    expectedSource=${expectedSource:-${source}}
+    enabled=$(jq -r '.enabled == true' <<<"${expectedSource}") || return 1
     sourceName=$(jq -r '.name' <<<"${source}") || return 1
-    if [[ "${enabled}" == "true" ]]; then
-        targetEnabled=false
+    if [[ -z "${targetEnabled}" ]]; then
+        [[ "${enabled}" == "true" ]] && targetEnabled=false || targetEnabled=true
+    fi
+    [[ "${targetEnabled}" == "true" || "${targetEnabled}" == "false" ]] || return 1
+    if [[ "${targetEnabled}" == "${enabled}" ]]; then
+        statusCard "被控服务器状态未变化"
+        return 0
+    fi
+    if [[ "${targetEnabled}" == "false" ]]; then
         actionText="停用"
-        effectText="停用只影响后续同步和公网发布，不删除 Peer、Token 或历史状态"
+        effectText="清理远端托管账号后停用并立即同步；保留 Peer、Token 和历史状态"
     else
-        targetEnabled=true
         actionText="启用"
-        effectText="启用后，后续同步和公网发布会包含该来源，不删除或重建 Peer、Token 和历史状态"
+        effectText="启用后立即同步并更新公网发布；保留 Peer、Token 和历史状态"
     fi
     warnCard "${actionText}被控服务器" "目标：${sourceId}（${sourceName}）" "${effectText}"
-    autoConfirm subscription_source_enabled_confirm "确认${actionText} ${sourceId}？" n confirm
-    [[ "${confirm}" == "y" ]] || { coreCancelledStatusCard "服务器源状态未修改"; return 0; }
-    if ! setSubscriptionRemoteSourceEnabled "${sourceId}" "${targetEnabled}"; then
+    menuReadChoice subscription_source_enabled_confirm "确认${actionText} ${sourceId}？[y/N]:" confirm true || return 1
+    [[ "$(normalizeYesNo "${confirm}")" == "y" ]] || { coreCancelledStatusCard "服务器源状态未修改"; return 0; }
+    if ! setSubscriptionRemoteSourceEnabled "${sourceId}" "${targetEnabled}" "${expectedSource}"; then
         errorCard "${SUBSCRIPTION_REMOTE_SOURCE_MUTATION_ERROR:-被控服务器状态更新失败}"
         return 1
     fi
     successCard "被控服务器已${actionText}" "来源：${sourceId}"
-    runSubscriptionSyncAfterMutation "被控服务器${actionText}"
+    runSubscriptionSyncAfterMutation "被控服务器${actionText}" "" true
 }
 
 manageSubscriptionServers() {
@@ -1540,13 +1562,12 @@ manageSubscriptionServers() {
     local serverStatus=
     while true; do
         echoContent title "\n┌─ 被控服务器 ───────────────────────────────────────"
-        menuLine "来源状态和健康检查请到 订阅同步 -> 状态与排障 查看；推荐按 创建邀请 -> 被控导入 -> 完成接入 操作。"
+        menuLine "待接入服务器使用邀请和回执；已有服务器选择一次即可连续维护。"
         menuItem 1 "创建被控邀请" "输入一次别名，自动预留 WireGuard 地址"
         menuItem 2 "完成被控接入" "粘贴接入回执，自动使用预留别名和地址"
         menuItem 3 "查看/取消待完成邀请" "按别名查看状态或释放预留地址"
-        menuItem 4 "更新被控服务器凭据" "更新内网地址、公钥、控制端口和 Token"
-        menuItem 5 "启用/停用被控服务器" "保留凭据，只调整该来源是否参加同步和发布"
-        menuDangerItem 6 "移除被控服务器" "删除已有被控来源和 WireGuard Peer"
+        menuItem 4 "管理已有被控服务器" "状态、凭据、启停、连接检查和移除"
+        menuItem 8 "查看服务器总览" "只读查看所有来源的状态"
         menuReturnItem 7 "返回主控首页" "回到上级菜单"
         menuClose
         menuReadChoice server_source_menu "请选择:" serverStatus || return 0
@@ -1554,10 +1575,96 @@ manageSubscriptionServers() {
         1) createSubscriptionWireGuardInviteMenu ;;
         2) addOtherSubscribe ;;
         3) manageSubscriptionPendingInvites ;;
-        4) setSubscriptionSourceControlTokenMenu ;;
+        4) manageSubscriptionServerItem ;;
+        # 保留旧动作编号，已有输入仍经过目标选择和确认。
         5) changeSubscriptionSourceEnabledMenu ;;
         6) removeSubscriptionControlledServerMenu ;;
         7) return ;;
+        8) showSubscriptionSources ;;
+        *) coreSelectionErrorCard ;;
+        esac
+    done
+}
+
+manageSubscriptionServerItem() {
+    subscriptionRequireMainRole || return 1
+    local sourceId=${1:-}
+    local sourcesJson source peerState expectedPeer summary targetEnabled line health healthStatus healthCode
+    local choice= idExists chosenId=
+    if [[ -z "${sourceId}" ]]; then
+        sourcesJson=$(subscriptionActiveGroupRead -c '[.sources[]? | select(.role != "main")]') || return 1
+        selectSubscriptionSourceId "${sourcesJson}" "请选择要管理的被控服务器:" sourceId || return 0
+    fi
+    while true; do
+        source=$(PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 subscriptionActiveGroupRead -ce --arg id "${sourceId}" \
+            'first(.sources[]? | select(.id == $id and .role != "main"))') || {
+            errorCard "被控服务器读取失败或已被移除"
+            return 1
+        }
+        peerState=$(subscriptionWireGuardReadState) || return 1
+        expectedPeer=$(jq -c --arg id "${sourceId}" \
+            'first(.peers[]? | select(.id == $id) | {id,address,public_key}) // null' <<<"${peerState}") || return 1
+        summary=$(jq -r '
+          "名称：\(.name)（\(.id)） / 状态：\(if .enabled then "启用" else "停用" end)\n地址：\(.host):\(.port) / 同步：\(.sync_status // "pending")"
+        ' <<<"${source}") || return 1
+        targetEnabled=$(jq -r '.enabled != true' <<<"${source}") || return 1
+        echoContent title "\n┌─ 管理被控服务器 ───────────────────────────────────"
+        while IFS= read -r line; do menuLine "${line}"; done <<<"${summary}"
+        menuItem 1 "更新当前服务器凭据" "更新地址、公钥、控制端口和 Token"
+        if [[ "${targetEnabled}" == "true" ]]; then
+            menuItem 2 "启用当前服务器并同步" "保留现有凭据"
+        else
+            menuItem 2 "停用当前服务器并同步" "清理远端托管账号，保留 Peer、Token 和历史状态"
+        fi
+        menuItem 3 "检查当前服务器连接" "只请求当前服务器的 Health"
+        menuItem 4 "立即完整同步" "更新本机、所有启用来源和已配置的订阅发布"
+        menuItem 5 "刷新当前状态" "重新读取已保存的服务器状态"
+        menuDangerItem 6 "移除当前服务器" "清理远端托管账号并移除来源和 Peer"
+        menuReturnItem 7 "返回服务器列表" "回到被控服务器"
+        menuItem 8 "切换服务器" "选择另一服务器继续维护"
+        menuClose
+        menuReadChoice subscription_server_item_menu "请选择:" choice || return 0
+        case "${choice}" in
+        1) setSubscriptionSourceControlTokenMenu "${sourceId}" "${source}" "${expectedPeer}" || true ;;
+        2) changeSubscriptionSourceEnabledMenu "${sourceId}" "${source}" "${targetEnabled}" || true ;;
+        3)
+            statusCard "被控服务器连接检查" "正在检查 ${sourceId}，最长等待 15 秒"
+            if health=$(subscriptionRemoteControlHealth "${source}"); then
+                if jq -e '.ok == true' <<<"${health}" >/dev/null 2>&1; then
+                    successCard "被控服务器连接正常" "来源：${sourceId}"
+                else
+                    healthStatus=$(jq -r '.status // .error_detail.type // "unknown"' <<<"${health}" 2>/dev/null) || healthStatus=unknown
+                    healthCode=$(jq -r '(.status_code // "" | tostring) as $code |
+                      if ($code | test("^[1-5][0-9]{2}$")) then "HTTP " + $code else empty end' <<<"${health}" 2>/dev/null) || healthCode=
+                    case "${healthStatus}" in
+                    missing_token) healthStatus="未配置控制 Token" ;;
+                    unauthorized) healthStatus="控制 Token 验证失败" ;;
+                    unreachable) healthStatus="远端服务器不可达" ;;
+                    remote_error) healthStatus="远端控制接口返回错误" ;;
+                    invalid_response) healthStatus="远端响应格式无效" ;;
+                    *) healthStatus="连接检查未通过" ;;
+                    esac
+                    errorCard "被控服务器连接检查失败" "来源：${sourceId}" "原因：${healthStatus}${healthCode:+（${healthCode}）}"
+                fi
+            else
+                errorCard "被控服务器连接检查失败" "来源：${sourceId}"
+            fi
+            ;;
+        4) runSubscriptionGroupSync || true ;;
+        5) continue ;;
+        6)
+            removeSubscriptionControlledServerMenu "${sourceId}" "${source}" "${expectedPeer}" || true
+            idExists=$(subscriptionActiveGroupRead -r --arg id "${sourceId}" \
+                'any(.sources[]?; .id == $id and .role != "main")') || return 1
+            [[ "${idExists}" == "true" ]] || return 0
+            ;;
+        7) return 0 ;;
+        8)
+            sourcesJson=$(subscriptionActiveGroupRead -c '[.sources[]? | select(.role != "main")]') || continue
+            if selectSubscriptionSourceId "${sourcesJson}" "请选择要管理的被控服务器:" chosenId; then
+                sourceId=${chosenId}
+            fi
+            ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -1586,7 +1693,7 @@ addOtherSubscribe() {
     fi
     subscriptionWireGuardCompleteInvite "${credentialJson}" completedAlias || return 1
     successCard "被控接入已完成" "别名：${completedAlias}" "Peer、服务器源和 Token 已保存；可到 订阅同步 -> 状态与排障 执行健康检查"
-    runSubscriptionSyncAfterMutation "被控服务器接入"
+    runSubscriptionSyncAfterMutation "被控服务器接入" "" true
 }
 
 
@@ -1641,11 +1748,12 @@ showSubscriptionSourceControlUrls() {
 
 setSubscriptionSourceControlTokenMenu() {
     subscriptionRequireMainRole || return 1
+    local sourceId=${1:-}
+    local expectedSource=${2:-} expectedPeer=${3:-}
     local credential=
     local credentialJson=
     local host=
     local port=
-    local sourceId=
     local matchCount=0
     local sourcesJson=
     local sourceOutput=
@@ -1653,6 +1761,7 @@ setSubscriptionSourceControlTokenMenu() {
     echoContent title "\n┌─ 更新被控服务器凭据 ───────────────────────────────"
     menuLine "这里更新一个被控服务器的接入凭据。"
     menuLine "仅用于更新已有被控连接；首次接入请使用邀请和回执。系统会更新地址、端口和 Token。"
+    [[ -z "${sourceId}" ]] || menuLine "当前目标：${sourceId}"
     menuClose
     subscriptionWireGuardReadSecret credential "请粘贴被控接入凭据:" || return 1
     if [[ -z "${credential}" ]]; then
@@ -1674,25 +1783,28 @@ setSubscriptionSourceControlTokenMenu() {
     host=$(subscriptionWireGuardAddressHost "$(jq -r '.address' <<<"${credentialJson}")")
     port=$(jq -r '.control_port' <<<"${credentialJson}")
     sourcesJson=$(subscriptionActiveGroupRead -c '[.sources[]? | select(.role != "main")]') || return 1
-    matchCount=$(jq -r --arg host "${host}" --argjson port "${port}" \
-        '[.[]? | select(.host == $host and .port == $port)] | length' <<<"${sourcesJson}") || return 1
-    if [[ "${matchCount}" == "1" ]]; then
-        sourceId=$(jq -r --arg host "${host}" --argjson port "${port}" \
-            'first(.[]? | select(.host == $host and .port == $port)).id' <<<"${sourcesJson}") || return 1
-    else
-        selectSubscriptionSourceId "${sourcesJson}" "请选择要更新凭据的被控服务器:" sourceId subscription_source_id || return 1
+    if [[ -z "${sourceId}" ]]; then
+        matchCount=$(jq -r --arg host "${host}" --argjson port "${port}" \
+            '[.[]? | select(.host == $host and .port == $port)] | length' <<<"${sourcesJson}") || return 1
+        if [[ "${matchCount}" == "1" ]]; then
+            sourceId=$(jq -r --arg host "${host}" --argjson port "${port}" \
+                'first(.[]? | select(.host == $host and .port == $port)).id' <<<"${sourcesJson}") || return 1
+        else
+            selectSubscriptionSourceId "${sourcesJson}" "请选择要更新凭据的被控服务器:" sourceId subscription_source_id || return 1
+        fi
     fi
     source=$(jq -c --arg id "${sourceId}" 'first(.[]? | select(.id == $id))' <<<"${sourcesJson}") || return 1
     if [[ -z "${source}" || "${source}" == "null" ]]; then
         errorCard "被控服务器源已不存在，请刷新后重试"
         return 1
     fi
-    subscriptionWireGuardUpdatePeerAndCredential "${sourceId}" "${credentialJson}" || {
+    expectedSource=${expectedSource:-${source}}
+    subscriptionWireGuardUpdatePeerAndCredential "${sourceId}" "${credentialJson}" "${expectedSource}" "${expectedPeer}" || {
         errorCard "被控服务器凭据更新失败"
         return 1
     }
     successCard "被控服务器凭据已更新" "内网地址：${host}:${port}" "别名：${sourceId}" "Peer 公钥和 Token 已保存，可继续测试被控连接"
-    runSubscriptionSyncAfterMutation "被控服务器凭据更新"
+    runSubscriptionSyncAfterMutation "被控服务器凭据更新" "" true
 }
 
 refreshSubscriptionGroupSyncCron() {
@@ -1836,7 +1948,7 @@ manageSubscriptionSyncSettings() {
         menuLine "最近结果：${lastStatus} / ${lastRun}"
         menuLine "失败数量：${failureCount}"
         menuItem 1 "立即完整同步" "同步本机和所有启用来源，成功后发布完整订阅"
-        menuItem 2 "开启/关闭自动同步" "控制后台定时同步和服务器来源变更后的即时同步"
+        menuItem 2 "开启/关闭自动同步" "控制后台定时同步及节点配置变更通知；手动管理动作仍立即同步"
         menuItem 3 "设置同步间隔" "设置 1-59 分钟间隔，不隐式开启自动同步"
         menuItem 4 "状态与排障" "查看失败、健康、计划和定时任务"
         menuItem 5 "状态备份与恢复" "查看、备份、恢复或重建 groups.json"

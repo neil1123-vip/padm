@@ -1795,9 +1795,26 @@ subscriptionWireGuardUpdatePeerFromCredentialUnlocked() {
        end'
 }
 
+subscriptionWireGuardPeerSnapshotMatches() {
+    local state=$1
+    local id=$2
+    local expected=${3:-}
+    [[ -n "${expected}" ]] || return 0
+    jq -e --arg id "${id}" --argjson expected "${expected}" '
+      def snapshot: {id,address,public_key};
+      ($expected == null or ($expected | type == "object" and
+        all(["id","address","public_key"][]; . as $key | $expected[$key] | type == "string" and length > 0))) and
+      ((first(.peers[]? | select(.id == $id) | snapshot) // null) ==
+        (if $expected == null then null else $expected | snapshot end))
+    ' <<<"${state}" >/dev/null 2>&1
+}
+
 subscriptionWireGuardUpdatePeerAndCredentialUnlocked() {
     local id=$1
     local credentialJson=$2
+    local expectedSource=${3:-}
+    local expectedPeer=${4:-}
+    local source
     local address host controlPort token previousState previousGroupsState
     [[ -n "${id}" ]] || return 1
     subscriptionWireGuardValidateControlledCredentialJson "${credentialJson}" || return 1
@@ -1807,7 +1824,13 @@ subscriptionWireGuardUpdatePeerAndCredentialUnlocked() {
     token=$(jq -r '.token' <<<"${credentialJson}") || return 1
     subscriptionWireGuardReadPreviousStateAndGroups previousState previousGroupsState "WireGuard 状态读取失败" "订阅组状态读取失败" || return 1
     if ! subscriptionSourceExists "${id}" || subscriptionSourceIsMain "${id}"; then
-        errorCard "被控服务器源已变化" "请重新选择后重试"
+        errorCard "被控服务器源已变化，请刷新后重试"
+        return 1
+    fi
+    source=$(subscriptionActiveGroupRead -ce --arg id "${id}" 'first(.sources[]? | select(.id == $id and .role != "main"))') || return 1
+    if ! subscriptionSourceSnapshotMatches "${source}" "${expectedSource}" ||
+        ! subscriptionWireGuardPeerSnapshotMatches "${previousState}" "${id}" "${expectedPeer}"; then
+        errorCard "被控服务器源已变化，请刷新后重试"
         return 1
     fi
     subscriptionWireGuardUpdatePeerFromCredentialUnlocked "${id}" "${credentialJson}" || return 1
@@ -1950,6 +1973,8 @@ subscriptionWireGuardCleanupRemovedSources() {
 subscriptionWireGuardRemovePeerAndSourceUnlocked() {
     local id=$1
     local localOnly=${2:-false}
+    local expectedSource=${3:-}
+    local expectedPeer=${4:-}
     local previousState
     local previousGroupsState
     local source
@@ -1962,10 +1987,17 @@ subscriptionWireGuardRemovePeerAndSourceUnlocked() {
     fi
     subscriptionWireGuardReadPreviousStateAndGroups previousState previousGroupsState "" "订阅组状态读取失败" || return 1
     if ! subscriptionSourceExists "${id}" || subscriptionSourceIsMain "${id}"; then
-        errorCard "被控服务器源已变化" "请重新选择后重试"
+        SUBSCRIPTION_WIREGUARD_SOURCE_REMOVE_ERROR=state
+        errorCard "被控服务器源已变化，请刷新后重试"
         return 1
     fi
     source=$(subscriptionActiveGroupRead -ce --arg id "${id}" 'first(.sources[]? | select(.id == $id and .role != "main"))') || return 1
+    if ! subscriptionSourceSnapshotMatches "${source}" "${expectedSource}" ||
+        ! subscriptionWireGuardPeerSnapshotMatches "${previousState}" "${id}" "${expectedPeer}"; then
+        SUBSCRIPTION_WIREGUARD_SOURCE_REMOVE_ERROR=state
+        errorCard "被控服务器源已变化，请刷新后重试"
+        return 1
+    fi
     if [[ "${localOnly}" != "true" ]] && ! subscriptionRemoteDrainSource "${source}" originalUsers "${previousGroupsState}"; then
         # shellcheck disable=SC2034
         SUBSCRIPTION_WIREGUARD_SOURCE_REMOVE_ERROR=remote
@@ -1993,11 +2025,11 @@ subscriptionWireGuardRemovePeerAndSourceUnlocked() {
 }
 
 subscriptionWireGuardRemovePeerAndSource() {
-    subscriptionGroupsWithLock subscriptionWireGuardRemovePeerAndSourceUnlocked "$@"
+    subscriptionGroupsWithLock subscriptionWireGuardRemovePeerAndSourceUnlocked "$1" false "${2:-}" "${3:-}"
 }
 
 subscriptionWireGuardRemovePeerAndSourceLocalOnly() {
-    subscriptionGroupsWithLock subscriptionWireGuardRemovePeerAndSourceUnlocked "$1" true
+    subscriptionGroupsWithLock subscriptionWireGuardRemovePeerAndSourceUnlocked "$1" true "${2:-}" "${3:-}"
 }
 
 showSubscriptionWireGuardStatus() {
