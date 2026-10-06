@@ -496,6 +496,10 @@ readInstallProtocolType() {
 # 读取Tuic配置
 readSingBoxConfig() {
     tuicPort=
+    tuicAlgorithm=
+    tuicAuthTimeout=
+    tuicHeartbeat=
+    tuicZeroRttHandshake=
     hysteriaPort=
     hysteria2BandwidthMode=
     hysteria2ClientDownloadSpeed=
@@ -795,6 +799,12 @@ cleanLastInstallationConfigApply() {
     currentCDNAddress=
     customPort=
     hysteriaPort=
+    hysteria2BandwidthMode=
+    hysteria2ClientDownloadSpeed=
+    hysteria2ClientUploadSpeed=
+    hysteria2ObfsType=
+    hysteria2ObfsPassword=
+    hysteria2Masquerade=
     tuicPort=
     tuicAlgorithm=
     tuicAuthTimeout=
@@ -830,15 +840,31 @@ cleanLastInstallationConfigApply() {
 
 # 读取上次安装的配置
 readLastInstallationConfig() {
-    if [[ -n "${configPath}" ]]; then
-        showLastInstallationConfig || return 1
-        autoRead reuse_last "是否使用以上上次安装配置？选择[n]会清空上次安装配置[y/n]:" lastInstallationConfigStatus
-        if [[ "${lastInstallationConfigStatus}" == "y" ]]; then
-            lastInstallationConfig=true
+    local lastInstallationConfigStatus=
+    lastInstallationConfig=
+    [[ -n "${configPath:-}" ]] || return 0
+    showLastInstallationConfig || return 1
+    while true; do
+        if [[ "${AUTO_INSTALL:-}" == "true" ]]; then
+            lastInstallationConfigStatus=${AUTO_REUSE_LAST:-}
         else
-            cleanLastInstallationConfig || return 1
+            menuReadChoice reuse_last "是否复用以上配置？[Y/n，回车保留；n 清空配置]:" lastInstallationConfigStatus true || return 1
         fi
-    fi
+        case "${lastInstallationConfigStatus}" in
+        "" | y | Y | yes | YES | Yes | true | TRUE | True | 1)
+            lastInstallationConfig=true
+            return 0
+            ;;
+        n | N | no | NO | No | false | FALSE | False | 0)
+            cleanLastInstallationConfig || return 1
+            return 0
+            ;;
+        *)
+            errorCard "请输入 y 保留配置，或 n 清空配置"
+            [[ "${AUTO_INSTALL:-}" != "true" ]] || return 1
+            ;;
+        esac
+    done
 }
 
 # 检查文件目录以及path路径

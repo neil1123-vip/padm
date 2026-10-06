@@ -20,6 +20,7 @@ listRegressionRuntimeLightChildSelectors() {
         runtime-core \
         runtime-autoread-unset-auto-install \
         runtime-menu-read-choice \
+        runtime-install-workflow \
         runtime-auto-install-reality-route \
         runtime-tempdir
 }
@@ -38,6 +39,7 @@ listRegressionRuntimeChildSelectors() {
 registerRegressionFunctionLeaf runtime-core runRuntimeAndRealityRegression
 registerRegressionFunctionLeaf runtime-autoread-unset-auto-install runAutoReadUnsetAutoInstallRegression
 registerRegressionFunctionLeaf runtime-menu-read-choice runMenuReadChoiceRegression
+registerRegressionFunctionLeaf runtime-install-workflow runInstallWorkflowRegression
 registerRegressionFunctionLeaf runtime-auto-install-reality-route runAutoInstallRealityRouteRegression
 registerRegressionFunctionLeaf runtime-tempdir runRuntimeTempDirRegression
 

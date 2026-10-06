@@ -1331,9 +1331,9 @@ EOF
             "listen_port": ${result[-1]},
             "users": $(initSingBoxClients 31),
             "congestion_control": "${tuicAlgorithm}",
-            "auth_timeout": "3s",
-            "zero_rtt_handshake": false,
-            "heartbeat": "10s",
+            "auth_timeout": "${tuicAuthTimeout:-3s}",
+            "zero_rtt_handshake": ${tuicZeroRttHandshake:-false},
+            "heartbeat": "${tuicHeartbeat:-10s}",
             "tls": {
                 "enabled": true,
                 "server_name":"${sslDomain}",

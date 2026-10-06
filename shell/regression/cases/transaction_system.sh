@@ -1551,7 +1551,14 @@ runCleanLastInstallationConfigFailureRegression() (
     }
     mode=
     : >"${cleanupLog}"
+    hysteria2BandwidthMode=bbr
+    hysteria2ClientDownloadSpeed=240
+    hysteria2ClientUploadSpeed=90
+    hysteria2ObfsType=salamander
+    hysteria2ObfsPassword=old-secret
+    hysteria2Masquerade=https://old.example.com
     cleanLastInstallationConfig >/dev/null 2>&1
+    [[ -z "${hysteria2BandwidthMode}${hysteria2ClientDownloadSpeed}${hysteria2ClientUploadSpeed}${hysteria2ObfsType}${hysteria2ObfsPassword}${hysteria2Masquerade}" ]]
     grep -qx 'rc-update:del xray default' "${cleanupLog}"
     grep -qx 'rc-update:del sing-box default' "${cleanupLog}"
     grep -qxF "rm:-f -- ${xrayOpenRcServiceFile}" "${cleanupLog}"

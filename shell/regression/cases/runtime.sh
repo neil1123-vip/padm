@@ -160,6 +160,278 @@ runMenuReadChoiceRegression() (
     )
 )
 
+runInstallWorkflowRegression() (
+    local renderedIds= errors=0 shown=0 cleaned=0 cleanStatus=0
+    local answer inputFd nextInput output apply protocols
+    unset AUTO_INSTALL AUTO_INSTALL_TYPE AUTO_INSTALL_SUMMARY_SHOWN AUTO_PROTOCOLS AUTO_REUSE_LAST
+    echoContent() { :; }
+    menuLine() { :; }
+    menuMutedLine() { :; }
+    menuSection() { :; }
+    menuClose() { :; }
+    statusCard() { :; }
+    menuItem() { renderedIds+="$1"$'\n'; }
+    protocolMenuDescription() { printf 'regression'; }
+    errorCard() { errors=$((errors + 1)); }
+    showAutoInstallSummary() { :; }
+    showLastInstallationConfig() { shown=$((shown + 1)); }
+    cleanLastInstallationConfig() { cleaned=$((cleaned + 1)); return "${cleanStatus}"; }
+
+    # 纠错只读取当前安装输入，中文逗号与两位协议号都使用真实能力库校验。
+    exec {inputFd}< <(printf '999\n1，2\nnext-parent-action\n')
+    selectCoreInstallProtocols xray <&"${inputFd}"
+    [[ "${selectCustomInstallType}" == ",1,2," && "${errors}" == "1" ]]
+    read -r -u "${inputFd}" nextInput
+    [[ "${nextInput}" == "next-parent-action" ]]
+    exec {inputFd}<&-
+    selectCoreInstallProtocols sing-box <<<"31"
+    [[ "${selectCustomInstallType}" == ",31," ]]
+
+    renderedIds=
+    exec {inputFd}< <(printf 'next-parent-action\n')
+    selectCoreInstallProtocols xray "1,21" <&"${inputFd}"
+    [[ "${selectCustomInstallType}" == ",1,21," ]]
+    [[ "${renderedIds}" == $'1\n21\n' ]]
+    read -r -u "${inputFd}" nextInput
+    [[ "${nextInput}" == "next-parent-action" ]]
+    exec {inputFd}<&-
+    regressionExpectStatus 1 selectCoreInstallProtocols sing-box 2 </dev/null
+    [[ -z "${selectCustomInstallType}" ]]
+
+    selectCustomInstallType=previous
+    regressionExpectStatus 1 selectCoreInstallProtocols xray </dev/null
+    [[ -z "${selectCustomInstallType}" ]]
+    selectCustomInstallType=previous
+    regressionExpectStatus 1 selectCoreInstallProtocols xray < <(printf 'invalid')
+    [[ -z "${selectCustomInstallType}" ]]
+    exec {inputFd}< <(printf '\nnext-parent-action\n')
+    regressionExpectStatus 1 selectCoreInstallProtocols xray <&"${inputFd}"
+    [[ -z "${selectCustomInstallType}" ]]
+    read -r -u "${inputFd}" nextInput
+    [[ "${nextInput}" == "next-parent-action" ]]
+    exec {inputFd}<&-
+
+    AUTO_INSTALL=true
+    AUTO_PROTOCOLS=999
+    exec {inputFd}< <(printf '1\nnext-parent-action\n')
+    regressionExpectStatus 1 selectCoreInstallProtocols xray <&"${inputFd}"
+    [[ -z "${selectCustomInstallType}" ]]
+    read -r -u "${inputFd}" nextInput
+    [[ "${nextInput}" == "1" ]]
+    exec {inputFd}<&-
+    AUTO_PROTOCOLS="1，31"
+    selectCoreInstallProtocols sing-box </dev/null
+    [[ "${selectCustomInstallType}" == ",1,31," ]]
+    unset AUTO_INSTALL AUTO_PROTOCOLS
+
+    configPath=
+    lastInstallationConfig=true
+    exec {inputFd}< <(printf 'next-parent-action\n')
+    readLastInstallationConfig <&"${inputFd}"
+    [[ -z "${lastInstallationConfig}" && "${shown}" == "0" && "${cleaned}" == "0" ]]
+    read -r -u "${inputFd}" nextInput
+    [[ "${nextInput}" == "next-parent-action" ]]
+    exec {inputFd}<&-
+
+    configPath=/regression/installed/
+    for answer in "" y Y yes YES true True 1; do
+        lastInstallationConfig=previous
+        readLastInstallationConfig <<<"${answer}"
+        [[ "${lastInstallationConfig}" == "true" && "${cleaned}" == "0" ]]
+    done
+    for answer in n N no NO false False 0; do
+        cleaned=0
+        lastInstallationConfig=previous
+        readLastInstallationConfig <<<"${answer}"
+        [[ -z "${lastInstallationConfig}" && "${cleaned}" == "1" ]]
+    done
+    cleaned=0
+    shown=0
+    exec {inputFd}< <(printf 'maybe\n\nnext-parent-action\n')
+    readLastInstallationConfig <&"${inputFd}"
+    [[ "${lastInstallationConfig}" == "true" && "${cleaned}" == "0" && "${shown}" == "1" ]]
+    read -r -u "${inputFd}" nextInput
+    [[ "${nextInput}" == "next-parent-action" ]]
+    exec {inputFd}<&-
+    lastInstallationConfig=previous
+    regressionExpectStatus 1 readLastInstallationConfig </dev/null
+    [[ -z "${lastInstallationConfig}" && "${cleaned}" == "0" ]]
+    lastInstallationConfig=previous
+    cleaned=0
+    regressionExpectStatus 1 readLastInstallationConfig < <(printf 'n')
+    [[ -z "${lastInstallationConfig}" && "${cleaned}" == "0" ]]
+    readLastInstallationConfig <<<"n"
+    [[ -z "${lastInstallationConfig}" && "${cleaned}" == "1" ]]
+    cleanStatus=1
+    cleaned=0
+    regressionExpectStatus 1 readLastInstallationConfig <<<"n"
+    [[ -z "${lastInstallationConfig}" && "${cleaned}" == "1" ]]
+    cleanStatus=0
+    cleaned=0
+
+    AUTO_INSTALL=true
+    unset AUTO_REUSE_LAST
+    readLastInstallationConfig </dev/null
+    [[ "${lastInstallationConfig}" == "true" && "${cleaned}" == "0" ]]
+    AUTO_REUSE_LAST=maybe
+    exec {inputFd}< <(printf 'next-parent-action\n')
+    regressionExpectStatus 1 readLastInstallationConfig <&"${inputFd}"
+    [[ -z "${lastInstallationConfig}" && "${cleaned}" == "0" ]]
+    read -r -u "${inputFd}" nextInput
+    [[ "${nextInput}" == "next-parent-action" ]]
+    exec {inputFd}<&-
+    AUTO_REUSE_LAST=yes
+    readLastInstallationConfig </dev/null
+    [[ "${lastInstallationConfig}" == "true" ]]
+    AUTO_REUSE_LAST=no
+    readLastInstallationConfig </dev/null
+    [[ -z "${lastInstallationConfig}" && "${cleaned}" == "1" ]]
+    unset AUTO_INSTALL AUTO_REUSE_LAST
+
+    # 结束标记防止旧 exit 0 把回归提前结束；递归旧入口返回不同状态便于识别。
+    customXrayInstall() { return 99; }
+    customSingBoxInstall() { return 99; }
+    for apply in customXrayInstallApply customSingBoxInstallApply; do
+        protocols="1，2"
+        [[ "${apply}" != "customSingBoxInstallApply" ]] || protocols="1，31"
+        output=$(
+            configureRealityDomainMode() { printf 'configured:%s\n' "$1"; return 1; }
+            applyStatus=0
+            "${apply}" < <(printf '999\n%s\nnext-parent-action\n' "${protocols}") || applyStatus=$?
+            printf 'apply-result:%s\n' "${applyStatus}"
+        )
+        grep -qxF "configured:,${protocols//，/,}," <<<"${output}"
+        grep -qxF 'apply-result:1' <<<"${output}"
+        output=$(
+            configureRealityDomainMode() { return 0; }
+            collectEntryProfile() { return 0; }
+            protocolSelectionShowRiskNotes() { :; }
+            installTools() { printf 'unexpected-install\n'; return 99; }
+            cleaned=0
+            applyStatus=0
+            "${apply}" <<<"1" || applyStatus=$?
+            printf 'apply-result:%s:cleaned=%s\n' "${applyStatus}" "${cleaned}"
+        )
+        grep -qxF 'apply-result:1:cleaned=0' <<<"${output}"
+        ! grep -qxF 'unexpected-install' <<<"${output}"
+    done
+
+    # 历史读取不能覆盖本轮入口；失败必须在下载、停服务之前返回。
+    (
+        local entryReads=0
+        readLastInstallationConfig() { realityEntryHost=old.example.com; }
+        collectEntryProfile() {
+            [[ "${realityEntryHost}" == old.example.com ]] || return 1
+            realityEntryHost=new.example.com
+            entryReads=$((entryReads + 1))
+            return 1
+        }
+        installTools() { return 1; }
+        configureRealityDomainMode() { return 0; }
+        protocolSelectionShowRiskNotes() { :; }
+        for apply in installXrayRealityApply installSingBoxRealityApply customXrayInstallApply customSingBoxInstallApply; do
+            regressionExpectStatus 1 "${apply}" 1
+            [[ "${realityEntryHost}" == new.example.com ]]
+        done
+        [[ "${entryReads}" == "4" ]]
+    )
+
+    (
+        local networkReads=0 invalidKey
+        lastInstallationConfig=true
+        hysteria2BandwidthMode=brutal
+        hysteria2ClientDownloadSpeed=240
+        hysteria2ClientUploadSpeed=90
+        hysteria2ObfsType=salamander
+        hysteria2ObfsPassword=stored-secret
+        hysteria2Masquerade=https://masquerade.example.com
+        getSingBoxCurrentVersion() { printf '1.14.0'; }
+        autoRead() { networkReads=$((networkReads + 1)); return 1; }
+        initHysteria2Network </dev/null
+        [[ "${networkReads}" == "0" && "${hysteria2ClientDownloadSpeed}" == "240" && "${hysteria2ClientUploadSpeed}" == "90" ]]
+        [[ "${hysteria2ObfsPassword}" == stored-secret && "${hysteria2Masquerade}" == https://masquerade.example.com ]]
+        hysteria2ClientDownloadSpeed=invalid
+        regressionExpectStatus 1 initHysteria2Network
+        hysteria2BandwidthMode=bbr
+        hysteria2ClientDownloadSpeed=
+        hysteria2ClientUploadSpeed=
+        initHysteria2Network
+        getSingBoxCurrentVersion() { printf '1.10.0'; }
+        regressionExpectStatus 1 initHysteria2Network
+        getSingBoxCurrentVersion() { printf '1.14.0'; }
+
+        # 复用其他协议时新增 Hysteria2，仍需采集新协议参数。
+        hysteria2BandwidthMode=
+        hysteria2ObfsType=
+        hysteria2ObfsPassword=
+        hysteria2Masquerade=
+        autoRead() {
+            networkReads=$((networkReads + 1))
+            case "$1" in
+            hysteria_bandwidth_mode) printf -v "$3" '%s' 2 ;;
+            *) printf -v "$3" '%s' "" ;;
+            esac
+        }
+        initHysteria2Network
+        [[ "${networkReads}" == "3" && "${hysteria2BandwidthMode}" == bbr ]]
+
+        hysteria2BandwidthMode=
+        autoRead() { return 1; }
+        regressionExpectStatus 1 initHysteria2Network </dev/null
+        AUTO_INSTALL=true
+        autoRead() {
+            if [[ "$1" == "${invalidKey}" ]]; then
+                printf -v "$3" '%s' invalid
+            elif [[ "$1" == hysteria_bandwidth_mode ]]; then
+                printf -v "$3" '%s' 1
+            else
+                printf -v "$3" '%s' 100
+            fi
+        }
+        for invalidKey in hysteria_bandwidth_mode hysteria_download_speed hysteria_upload_speed; do
+            hysteria2BandwidthMode=
+            regressionExpectStatus 1 initHysteria2Network
+        done
+    )
+
+    (
+        local tuicJson=
+        lastInstallationConfig=true
+        currentUUID=11111111-1111-4111-8111-111111111111
+        currentClients='[{"uuid":"11111111-1111-4111-8111-111111111111","name":"regression"}]'
+        selectCustomInstallType=",31,"
+        singBoxTuicPort=
+        tuicAlgorithm=bbr
+        tuicAuthTimeout=8s
+        tuicHeartbeat=20s
+        tuicZeroRttHandshake=true
+        collectTLSProfile() { tlsCertDomain=tls.example.com; }
+        readSingBoxPortResult() { local -n ports=$1; ports=(443); }
+        setSniffRouting() { return 0; }
+        autoRead() { return 1; }
+        writeGeneratedJsonFile() { tuicJson=$(cat); }
+        initSingBoxConfigApply custom 1 true >/dev/null
+        jq -e '.inbounds[0] | .congestion_control == "bbr" and .auth_timeout == "8s" and .heartbeat == "20s" and .zero_rtt_handshake == true' <<<"${tuicJson}" >/dev/null
+        tuicAuthTimeout=
+        tuicHeartbeat=
+        tuicZeroRttHandshake=
+        initSingBoxConfigApply custom 1 true >/dev/null
+        jq -e '.inbounds[0] | .auth_timeout == "3s" and .heartbeat == "10s" and .zero_rtt_handshake == false' <<<"${tuicJson}" >/dev/null
+    )
+
+    (
+        # 协议已删除时，重新读取不能留下本轮会话中的旧参数。
+        singBoxConfigPath="${TMP_DIR}/install-without-tuic/"
+        mkdir -p "${singBoxConfigPath}"
+        tuicAlgorithm=bbr
+        tuicAuthTimeout=8s
+        tuicHeartbeat=20s
+        tuicZeroRttHandshake=true
+        readSingBoxConfig
+        [[ -z "${tuicAlgorithm}${tuicAuthTimeout}${tuicHeartbeat}${tuicZeroRttHandshake}" ]]
+    )
+)
+
 runRuntimeAndRealityRegression() {
     local oldCurrentClients="${currentClients:-}"
     local xhttpClients

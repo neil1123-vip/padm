@@ -156,7 +156,9 @@ runRealityProfileFailureRegression() (
     if customSingBoxInstallApply 26 domain >/dev/null 2>&1; then return 1; fi
     if customXrayInstallApply 1 domain >/dev/null 2>&1; then return 1; fi
     if customSingBoxInstallApply 1 domain >/dev/null 2>&1; then return 1; fi
-    [[ ! -s "${sideEffectLog}" ]]
+    # 合法协议先读取历史入口，但入口校验失败时仍不得下载或变更服务。
+    [[ "$(grep -c '^read-last$' "${sideEffectLog}")" == "2" ]]
+    ! grep -q '^install-tools$' "${sideEffectLog}"
 
     AUTO_INSTALL=
     AUTO_REALITY_DOMAIN=
