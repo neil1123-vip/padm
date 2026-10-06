@@ -848,7 +848,7 @@ readLastInstallationConfig() {
     [[ -n "${configPath:-}" ]] || return 0
     showLastInstallationConfig || return 1
     while true; do
-        if [[ "${AUTO_INSTALL:-}" == "true" ]]; then
+        if [[ -n "${AUTO_INSTALL:-}" ]]; then
             lastInstallationConfigStatus=${AUTO_REUSE_LAST:-}
         else
             menuReadChoice reuse_last "是否复用以上配置？[Y/n，回车保留；n 清空配置]:" lastInstallationConfigStatus true || return 1
@@ -864,7 +864,7 @@ readLastInstallationConfig() {
             ;;
         *)
             errorCard "请输入 y 保留配置，或 n 清空配置"
-            [[ "${AUTO_INSTALL:-}" != "true" ]] || return 1
+            [[ -z "${AUTO_INSTALL:-}" ]] || return 1
             ;;
         esac
     done

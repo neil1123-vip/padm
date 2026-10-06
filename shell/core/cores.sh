@@ -2671,7 +2671,7 @@ configureRealityDomainMode() {
                 ;;
             esac
             coreSelectionErrorCard "选择错误"
-            [[ "${AUTO_INSTALL:-}" != "true" ]] || return 1
+            [[ -z "${AUTO_INSTALL:-}" ]] || return 1
         done
     fi
     if [[ "${strictRequested}" == "true" ]]; then
@@ -2775,7 +2775,7 @@ selectCoreInstallProtocols() {
         else
             errorCard "输入不合法"
         fi
-        if [[ -n "${preselectedProtocols}" || "${AUTO_INSTALL:-}" == "true" ]]; then
+        if [[ -n "${preselectedProtocols}" || -n "${AUTO_INSTALL:-}" ]]; then
             selectCustomInstallType=
             return 1
         fi
@@ -2784,11 +2784,6 @@ selectCoreInstallProtocols() {
 
 # Xray-core个性化安装
 customXrayInstallApply() {
-    local preselectedProtocols=${1:-}
-    local preselectedMode=${2:-}
-    realityOnlyWithDomain=
-    selectCoreInstallProtocols xray "${preselectedProtocols}" || return 1
-    configureRealityDomainMode "${selectCustomInstallType}" "${preselectedMode}" || return 1
     protocolSelectionShowRiskNotes "${selectCustomInstallType}"
     readLastInstallationConfig || return 1
     if protocolSelectionHasAny "${selectCustomInstallType}" 1 2 26; then
@@ -2851,17 +2846,14 @@ customXrayInstallApply() {
 }
 
 customXrayInstall() {
-    runCoreInstallRestoringNginxOnFailure coreSwitchConfigTransaction xray padmRunPortAllowTransaction customXrayInstallApply "$@"
+    selectCoreInstallProtocols xray "${1:-}" || return 1
+    configureRealityDomainMode "${selectCustomInstallType}" "${2:-}" || return 1
+    runCoreInstallRestoringNginxOnFailure coreSwitchConfigTransaction xray padmRunPortAllowTransaction customXrayInstallApply
 }
 
 
 # sing-box 个性化安装
 customSingBoxInstallApply() {
-    local preselectedProtocols=${1:-}
-    local preselectedMode=${2:-}
-    realityOnlyWithDomain=
-    selectCoreInstallProtocols sing-box "${preselectedProtocols}" || return 1
-    configureRealityDomainMode "${selectCustomInstallType}" "${preselectedMode}" || return 1
     protocolSelectionShowRiskNotes "${selectCustomInstallType}"
     readLastInstallationConfig || return 1
     if protocolSelectionHasAny "${selectCustomInstallType}" 1 26; then
@@ -2899,7 +2891,9 @@ customSingBoxInstallApply() {
 }
 
 customSingBoxInstall() {
-    runCoreInstallRestoringNginxOnFailure coreSwitchConfigTransaction sing-box padmRunPortAllowTransaction customSingBoxInstallApply "$@"
+    selectCoreInstallProtocols sing-box "${1:-}" || return 1
+    configureRealityDomainMode "${selectCustomInstallType}" "${2:-}" || return 1
+    runCoreInstallRestoringNginxOnFailure coreSwitchConfigTransaction sing-box padmRunPortAllowTransaction customSingBoxInstallApply
 }
 
 

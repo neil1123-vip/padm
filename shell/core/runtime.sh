@@ -835,7 +835,7 @@ validManualAccountNameValue() {
 }
 
 autoInstallValidateRequiredInputs() {
-    [[ "${AUTO_INSTALL:-}" == "true" ]] || return 0
+    [[ -n "${AUTO_INSTALL:-}" ]] || return 0
 
     case "${AUTO_INSTALL_TYPE:-}" in
     '' | custom | any | 任意组合 | 2 | install | full | traditional | 1 | reality | reality-only | no-domain-reality | 3)
@@ -988,8 +988,11 @@ autoValueForKey() {
         ;;
     install_type)
         case "${AUTO_INSTALL_TYPE}" in
-        '' | custom | any | 任意组合 | 2 | install | full | traditional | 1)
+        '' | custom | any | 任意组合 | 2)
             printf '5'
+            ;;
+        install | full | traditional | 1)
+            printf '6'
             ;;
         reality | reality-only | no-domain-reality | 3)
             printf '3'

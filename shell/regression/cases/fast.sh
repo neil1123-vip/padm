@@ -1204,7 +1204,8 @@ runAutoInstallTwoDigitSingleProtocolRegression() {
         readLastInstallationConfig() { :; }
         unInstallSubscribe() { :; }
         protocolSelectionShowRiskNotes() { :; }
-        customSingBoxInstallApply 31
+        selectCoreInstallProtocols sing-box 31
+        customSingBoxInstallApply
     ) >"${outputFile}" 2>&1 || true
     ! grep -q '多选请使用英文逗号分隔' "${outputFile}"
     grep -q 'TUIC' "${outputFile}"

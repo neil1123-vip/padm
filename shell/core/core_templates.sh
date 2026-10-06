@@ -66,7 +66,7 @@ coreTemplateCollectInitialClients() {
     fi
 
     if [[ "${hasExistingClients}" == "true" ]]; then
-        while [[ -z "${lastInstallationConfig:-}" && "${AUTO_INSTALL:-}" != "true" ]]; do
+        while [[ -z "${lastInstallationConfig:-}" && -z "${AUTO_INSTALL:-}" ]]; do
             menuReadChoice core_history_user "是否复用现有用户配置？[Y/n，回车保留]:" historyChoice true || return 1
             case "${historyChoice}" in
             "" | y | Y | yes | YES | Yes | true | TRUE | True | 1) break ;;
@@ -106,14 +106,14 @@ coreTemplateCollectInitialClients() {
             break
         fi
         errorCard "UUID 格式不合法"
-        [[ -z "${AUTO_UUID:-}" && "${AUTO_INSTALL:-}" != "true" ]] || return 1
+        [[ -z "${AUTO_UUID:-}" && -z "${AUTO_INSTALL:-}" ]] || return 1
     done
 
     while true; do
         username=
         if [[ -n "${AUTO_USER:-}" ]]; then
             username=${AUTO_USER}
-        elif [[ "${AUTO_INSTALL:-}" != "true" ]]; then
+        elif [[ -z "${AUTO_INSTALL:-}" ]]; then
             menuReadChoice core_init_username "用户名[回车随机]:" username true || return 1
         fi
         if [[ -z "${username}" ]]; then
@@ -124,7 +124,7 @@ coreTemplateCollectInitialClients() {
             fi
         fi
         coreTemplateValidateManualAccountName "${username}" && break
-        [[ -z "${AUTO_USER:-}" && "${AUTO_INSTALL:-}" != "true" ]] || return 1
+        [[ -z "${AUTO_USER:-}" && -z "${AUTO_INSTALL:-}" ]] || return 1
     done
 
     if [[ "${core}" == "xray" ]]; then

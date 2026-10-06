@@ -284,18 +284,19 @@ runRealityProfileFailureRegression() (
     : >"${sideEffectLog}"
     readLastInstallationConfig() { printf 'read-last\n' >>"${sideEffectLog}"; return 0; }
     installTools() { printf 'install-tools\n' >>"${sideEffectLog}"; return 0; }
+    runCoreInstallRestoringNginxOnFailure() { "${4}"; }
     AUTO_INSTALL=true
     AUTO_ENTRY_HOST=
     AUTO_DOMAIN=
     domain=
     currentHost=
     rm -f "${entryHostFile}"
-    if customXrayInstallApply 2 domain >/dev/null 2>&1; then return 1; fi
-    if customXrayInstallApply 26 domain >/dev/null 2>&1; then return 1; fi
-    if customXrayInstallApply 1,2 domain >/dev/null 2>&1; then return 1; fi
-    if customSingBoxInstallApply 26 domain >/dev/null 2>&1; then return 1; fi
-    if customXrayInstallApply 1 domain >/dev/null 2>&1; then return 1; fi
-    if customSingBoxInstallApply 1 domain >/dev/null 2>&1; then return 1; fi
+    if customXrayInstall 2 domain >/dev/null 2>&1; then return 1; fi
+    if customXrayInstall 26 domain >/dev/null 2>&1; then return 1; fi
+    if customXrayInstall 1,2 domain >/dev/null 2>&1; then return 1; fi
+    if customSingBoxInstall 26 domain >/dev/null 2>&1; then return 1; fi
+    if customXrayInstall 1 domain >/dev/null 2>&1; then return 1; fi
+    if customSingBoxInstall 1 domain >/dev/null 2>&1; then return 1; fi
     # 合法协议先读取历史入口，但入口校验失败时仍不得下载或变更服务。
     [[ "$(grep -c '^read-last$' "${sideEffectLog}")" == "2" ]]
     ! grep -q '^install-tools$' "${sideEffectLog}"

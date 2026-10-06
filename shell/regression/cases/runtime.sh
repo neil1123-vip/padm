@@ -162,7 +162,7 @@ runMenuReadChoiceRegression() (
 
 runInstallWorkflowRegression() (
     local renderedIds= errors=0 shown=0 cleaned=0 cleanStatus=0
-    local answer inputFd nextInput output apply protocols
+    local answer inputFd nextInput output apply
     unset AUTO_INSTALL AUTO_INSTALL_TYPE AUTO_INSTALL_SUMMARY_SHOWN AUTO_PROTOCOLS AUTO_REUSE_LAST AUTO_DOMAIN AUTO_PORT
     echoContent() { :; }
     menuLine() { :; }
@@ -274,14 +274,15 @@ runInstallWorkflowRegression() (
     [[ "${nextInput}" == "next-parent-action" ]]
     exec {inputFd}<&-
 
-    AUTO_INSTALL=true
     AUTO_PROTOCOLS=999
-    exec {inputFd}< <(printf '1\nnext-parent-action\n')
-    regressionExpectStatus 1 selectCoreInstallProtocols xray <&"${inputFd}"
-    [[ -z "${selectCustomInstallType}" ]]
-    read -r -u "${inputFd}" nextInput
-    [[ "${nextInput}" == "1" ]]
-    exec {inputFd}<&-
+    for AUTO_INSTALL in true 1 false; do
+        exec {inputFd}< <(printf '1\nnext-parent-action\n')
+        regressionExpectStatus 1 selectCoreInstallProtocols xray <&"${inputFd}"
+        [[ -z "${selectCustomInstallType}" ]]
+        read -r -u "${inputFd}" nextInput
+        [[ "${nextInput}" == "1" ]]
+        exec {inputFd}<&-
+    done
     AUTO_PROTOCOLS="1，31"
     selectCoreInstallProtocols sing-box </dev/null
     [[ "${selectCustomInstallType}" == ",1,31," ]]
@@ -332,17 +333,20 @@ runInstallWorkflowRegression() (
     cleanStatus=0
     cleaned=0
 
-    AUTO_INSTALL=true
-    unset AUTO_REUSE_LAST
-    readLastInstallationConfig </dev/null
-    [[ "${lastInstallationConfig}" == "true" && "${cleaned}" == "0" ]]
+    for AUTO_INSTALL in true 1 false; do
+        unset AUTO_REUSE_LAST
+        readLastInstallationConfig </dev/null
+        [[ "${lastInstallationConfig}" == "true" && "${cleaned}" == "0" ]]
+    done
     AUTO_REUSE_LAST=maybe
-    exec {inputFd}< <(printf 'next-parent-action\n')
-    regressionExpectStatus 1 readLastInstallationConfig <&"${inputFd}"
-    [[ -z "${lastInstallationConfig}" && "${cleaned}" == "0" ]]
-    read -r -u "${inputFd}" nextInput
-    [[ "${nextInput}" == "next-parent-action" ]]
-    exec {inputFd}<&-
+    for AUTO_INSTALL in true 1 false; do
+        exec {inputFd}< <(printf 'next-parent-action\n')
+        regressionExpectStatus 1 readLastInstallationConfig <&"${inputFd}"
+        [[ -z "${lastInstallationConfig}" && "${cleaned}" == "0" ]]
+        read -r -u "${inputFd}" nextInput
+        [[ "${nextInput}" == "next-parent-action" ]]
+        exec {inputFd}<&-
+    done
     AUTO_REUSE_LAST=yes
     readLastInstallationConfig </dev/null
     [[ "${lastInstallationConfig}" == "true" ]]
@@ -351,33 +355,60 @@ runInstallWorkflowRegression() (
     [[ -z "${lastInstallationConfig}" && "${cleaned}" == "1" ]]
     unset AUTO_INSTALL AUTO_REUSE_LAST
 
-    # 结束标记防止旧 exit 0 把回归提前结束；递归旧入口返回不同状态便于识别。
-    customXrayInstall() { return 99; }
-    customSingBoxInstall() { return 99; }
-    for apply in customXrayInstallApply customSingBoxInstallApply; do
-        protocols="1，2"
-        [[ "${apply}" != "customSingBoxInstallApply" ]] || protocols="1，31"
-        output=$(
-            configureRealityDomainMode() { printf 'configured:%s\n' "$1"; return 1; }
-            applyStatus=0
-            "${apply}" < <(printf '999\n%s\nnext-parent-action\n' "${protocols}") || applyStatus=$?
-            printf 'apply-result:%s\n' "${applyStatus}"
-        )
-        grep -qxF "configured:,${protocols//，/,}," <<<"${output}"
-        grep -qxF 'apply-result:1' <<<"${output}"
-        output=$(
-            configureRealityDomainMode() { return 0; }
-            collectEntryProfile() { return 0; }
-            protocolSelectionShowRiskNotes() { :; }
-            installTools() { printf 'unexpected-install\n'; return 99; }
-            cleaned=0
-            applyStatus=0
-            "${apply}" <<<"1" || applyStatus=$?
-            printf 'apply-result:%s:cleaned=%s\n' "${applyStatus}" "${cleaned}"
-        )
-        grep -qxF 'apply-result:1:cleaned=0' <<<"${output}"
-        ! grep -qxF 'unexpected-install' <<<"${output}"
-    done
+    (
+        # 协议和模式在事务外确认；取消不能触发原事务的备份、回滚或服务恢复。
+        local core install input mode events= selectionErrors=0 inputFd nextInput
+        local PADM_CORE_TEMPLATE_TRANSACTION_ACTIVE=
+        unset AUTO_INSTALL AUTO_PROTOCOLS AUTO_REALITY_DOMAIN
+        coreSelectionErrorCard() { selectionErrors=$((selectionErrors + 1)); }
+        protocolSelectionShowRiskNotes() { :; }
+        coreTemplateConfigBackupCreate() {
+            events+=$'backup\n'
+            printf -v "$1" '%s' "${TMP_DIR}/install-selection-backup"
+        }
+        coreSwitchCleanupBackupCreate() { printf -v "$1" '%s' ""; }
+        checkLogBackupRestore() { events+=$'rollback\n'; }
+        padmRemoveCleanupPath() { :; }
+        nginxRunning() { return 0; }
+        xrayRunning() { return 0; }
+        singBoxRunning() { return 0; }
+        handleXray() { events+="xray:$1"$'\n'; }
+        handleSingBox() { events+="sing-box:$1"$'\n'; }
+        handleNginx() { events+="nginx:$1"$'\n'; }
+        padmRunPortAllowTransaction() { "$@"; }
+        readLastInstallationConfig() { events+=$'read-last\n'; return 1; }
+        for core in xray sing-box; do
+            install=customXrayInstall
+            [[ "${core}" != sing-box ]] || install=customSingBoxInstall
+            for input in "" $'\n' $'1\n' $'1\n2'; do
+                events=
+                regressionExpectStatus 1 "${install}" < <(printf '%s' "${input}")
+                [[ -z "${events}" ]]
+            done
+            exec {inputFd}< <(printf '\nnext-parent-action\n')
+            regressionExpectStatus 1 "${install}" <&"${inputFd}"
+            read -r -u "${inputFd}" nextInput
+            [[ -z "${events}" && "${nextInput}" == next-parent-action ]]
+            exec {inputFd}<&-
+
+            # 纠错只读取当前字段；回车保留普通模式，后续 Apply 不再重复选择。
+            for mode in "" 2; do
+                events=
+                selectionErrors=0
+                exec {inputFd}< <(printf '999\n1\n9\n%s\nnext-parent-action\n' "${mode}")
+                regressionExpectStatus 1 "${install}" <&"${inputFd}"
+                read -r -u "${inputFd}" nextInput
+                [[ "${selectCustomInstallType}" == ,1, && "${nextInput}" == next-parent-action && "${selectionErrors}" == 1 ]]
+                [[ "${events}" == $'backup\nread-last\nrollback\n'"${core}:stop"$'\n'"${core}:start"$'\n' ]]
+                if [[ "${mode}" == 2 ]]; then
+                    [[ "${realityOnlyWithDomain}" == true ]]
+                else
+                    [[ -z "${realityOnlyWithDomain}" ]]
+                fi
+                exec {inputFd}<&-
+            done
+        done
+    )
 
     # 历史读取不能覆盖本轮入口；失败必须在下载、停服务之前返回。
     (
@@ -393,6 +424,7 @@ runInstallWorkflowRegression() (
         configureRealityDomainMode() { return 0; }
         protocolSelectionShowRiskNotes() { :; }
         for apply in installXrayRealityApply installSingBoxRealityApply customXrayInstallApply customSingBoxInstallApply; do
+            selectCustomInstallType=,1,
             regressionExpectStatus 1 "${apply}" 1
             [[ "${realityEntryHost}" == new.example.com ]]
         done
@@ -517,12 +549,11 @@ runInstallWorkflowRegression() (
     (
         # 四个 TLS 安装入口先确认域名；取消或参数错误不能开始依赖安装。
         local apply events= currentHost= currentPort= customPort= btDomain= domain=
-        local lastInstallationConfig= selectCoreType= inputFd nextInput
+        local lastInstallationConfig= selectCoreType= selectCustomInstallType=,28, inputFd nextInput
         unset AUTO_INSTALL AUTO_DOMAIN AUTO_PORT
         readLastInstallationConfig() { :; }
         configureRealityDomainMode() { :; }
         protocolSelectionShowRiskNotes() { :; }
-        selectCoreInstallProtocols() { selectCustomInstallType=,28,; }
         installTools() { events+="tools:${domain}"$'\n'; }
         installTLS() { events+=$'tls\n'; return 1; }
         handleNginx() { events+="nginx:$1"$'\n'; }
@@ -572,6 +603,7 @@ runInstallWorkflowRegression() (
         for apply in installXrayRealityApply installSingBoxRealityApply customXrayInstallApply customSingBoxInstallApply xrayCoreInstallApply singBoxInstallApply; do
             output=$(
                 installCalls=0
+                selectCustomInstallType=,1,
                 regressionExpectStatus 1 "${apply}" 1 || exit 1
                 printf 'install-calls:%s\n' "${installCalls}"
             )
@@ -591,6 +623,7 @@ runInstallWorkflowRegression() (
         handleXray() { serviceCalls=$((serviceCalls + 1)); }
         allowPort() { allowCalls=$((allowCalls + 1)); }
         for apply in customXrayInstallApply xrayCoreInstallApply singBoxInstallApply; do
+            selectCustomInstallType=,21,
             unset AUTO_PORT
             regressionExpectStatus 1 "${apply}" 21 </dev/null
             AUTO_PORT=1+2
@@ -872,9 +905,11 @@ runInstallWorkflowRegression() (
     )
 
     (
-        local route= value= nextInput inputFd invalid flag core coreInstallType=
+        local route= value= nextInput inputFd invalid flag core alias coreInstallType=
         customXrayInstall() { route=xray; }
         customSingBoxInstall() { route=sing-box; }
+        xrayCoreInstall() { route=traditional-xray; }
+        singBoxInstall() { route=traditional-sing-box; }
         for core in xray sing-box; do
             parseInstallArgs --core "${core}" --protocols 1
             autoInstallValidateRequiredInputs
@@ -885,6 +920,17 @@ runInstallWorkflowRegression() (
             read -r -u "${inputFd}" nextInput
             [[ "${route}" == "${core}" && "${nextInput}" == next-parent-action ]]
             exec {inputFd}<&-
+            for alias in install full traditional 1; do
+                parseInstallArgs --core "${core}" --install-type "${alias}"
+                [[ -z "${AUTO_PROTOCOLS}" ]]
+                autoInstallValidateRequiredInputs
+                [[ "$(autoValueForKey install_type)" == 6 ]]
+                exec {inputFd}< <(printf 'next-parent-action\n')
+                installMenu <&"${inputFd}"
+                read -r -u "${inputFd}" nextInput
+                [[ "${route}" == "traditional-${core}" && "${nextInput}" == next-parent-action ]]
+                exec {inputFd}<&-
+            done
         done
         for flag in --install-type --core; do
             for invalid in typo 4 6; do

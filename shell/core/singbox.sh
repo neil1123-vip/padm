@@ -674,7 +674,7 @@ initSingBoxPort() {
         promptHistory=false
     fi
 
-    if [[ -n "${port}" && ( "${promptHistory}" != "true" || ( "${singleReality}" == "true" && "${AUTO_INSTALL:-}" == "true" ) ) ]]; then
+    if [[ -n "${port}" && ( "${promptHistory}" != "true" || ( "${singleReality}" == "true" && -n "${AUTO_INSTALL:-}" ) ) ]]; then
         openPort=true
     elif [[ -z "${port}" || -z "${lastInstallationConfig:-}" ]]; then
         local defaultPort=${port} prompt

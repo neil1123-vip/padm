@@ -182,7 +182,7 @@ initHysteria2Network() {
             ;;
         *)
             statusCard "Hysteria2 拥塞模式" "模式不合法"
-            [[ "${AUTO_INSTALL:-}" != "true" ]] || return 1
+            [[ -z "${AUTO_INSTALL:-}" ]] || return 1
             ;;
         esac
     done
@@ -197,7 +197,7 @@ initHysteria2Network() {
                 break
             fi
             statusCard "Hysteria2 带宽" "带宽不合法"
-            [[ "${AUTO_INSTALL:-}" != "true" ]] || return 1
+            [[ -z "${AUTO_INSTALL:-}" ]] || return 1
         done
 
         while true; do
@@ -209,7 +209,7 @@ initHysteria2Network() {
                 break
             fi
             statusCard "Hysteria2 带宽" "带宽不合法"
-            [[ "${AUTO_INSTALL:-}" != "true" ]] || return 1
+            [[ -z "${AUTO_INSTALL:-}" ]] || return 1
         done
     fi
 
@@ -866,10 +866,10 @@ collectEntryProfile() {
         while ! padmIsValidHostName "${realityEntryHost}" || [[ "${realityEntryHost}" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; do
             if [[ -n "${realityEntryHost}" ]]; then
                 errorCard "Reality 入口域名不合法" "${realityEntryHost}"
-            elif [[ "${AUTO_INSTALL:-}" == "true" ]]; then
+            elif [[ -n "${AUTO_INSTALL:-}" ]]; then
                 errorCard "严格域名 Reality 缺少入口域名，请传 --entry-host 或 --domain"
             fi
-            [[ "${implicitEntry}" == "true" && "${AUTO_INSTALL:-}" != "true" ]] || return 1
+            [[ "${implicitEntry}" == "true" && -z "${AUTO_INSTALL:-}" ]] || return 1
             statusCard "Reality 入口域名" "请输入客户端实际连接的域名，回车取消"
             menuReadChoice entry_host "入口域名:" realityEntryHost || return 1
         done
@@ -934,7 +934,7 @@ collectRealityProfile() {
                 ;;
             *)
                 errorCard "选择错误"
-                [[ "${AUTO_INSTALL:-}" != "true" ]] || return 1
+                [[ -z "${AUTO_INSTALL:-}" ]] || return 1
                 continue
                 ;;
             esac
@@ -1018,7 +1018,7 @@ initXrayRealityProtocolPort() {
     if [[ "${coexistStatus}" != "0" && "${singleProtocol}" == "true" && -n "${AUTO_PORT:-}" ]]; then
         portRef=${AUTO_PORT}
     elif [[ "${coexistStatus}" != "0" && -z "${portRef}" && -n "${historyPort}" ]]; then
-        if [[ -n "${lastInstallationConfig:-}" || ( "${singleProtocol}" == "true" && "${AUTO_INSTALL:-}" == "true" ) ]]; then
+        if [[ -n "${lastInstallationConfig:-}" || ( "${singleProtocol}" == "true" && -n "${AUTO_INSTALL:-}" ) ]]; then
             portRef=${historyPort}
         fi
     fi

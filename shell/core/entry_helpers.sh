@@ -421,7 +421,7 @@ nginxBlog() {
     fi
 
     if [[ -d "${nginxStaticPath}" && -f "${nginxStaticPath}/check" ]]; then
-        if [[ "${PADM_NGINX_BLOG_REINSTALL_PROMPT:-true}" == "true" && -z "${lastInstallationConfig}" && "${AUTO_INSTALL:-}" != "true" ]]; then
+        if [[ "${PADM_NGINX_BLOG_REINSTALL_PROMPT:-true}" == "true" && -z "${lastInstallationConfig}" && -z "${AUTO_INSTALL:-}" ]]; then
             echo
             autoRead nginx_blog_reinstall "检测到已安装传统 TLS fallback 静态站点，是否需要重新安装[y/n]:" nginxBlogInstallStatus
         else
