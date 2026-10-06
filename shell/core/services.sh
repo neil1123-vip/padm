@@ -166,7 +166,6 @@ runServiceAction() {
         "${handler}" start
         ;;
     stop)
-        serviceRunning "${serviceName}" || return 0
         "${handler}" stop
         ;;
     restart)
@@ -327,15 +326,16 @@ handleNginx() {
             return 1
         done
 
-    elif nginxRunning && [[ "$1" == "stop" ]]; then
+    elif [[ "$1" == "stop" ]]; then
 
-        if [[ "${release}" == "alpine" ]]; then
+        if [[ "${release}" == "alpine" ]] && nginxServiceInstalled && padmCommandExists rc-service; then
             rc-service nginx stop
-        elif nginxServiceInstalled && padmCommandExists systemctl; then
+        elif [[ "${release}" != "alpine" ]] && nginxServiceInstalled && padmCommandExists systemctl; then
             systemctl stop nginx
         else
-            nginx -s stop >/dev/null 2>&1 || true
-        fi
+            nginxRunning || return 0
+            nginx -s stop >/dev/null 2>&1
+        fi || { errorCard "Nginx关闭失败"; return 1; }
         sleep 0.5
 
         if nginxRunning; then
@@ -372,7 +372,7 @@ singBoxRunning() {
             "${procArgs[2]:-}" == -c && "${procArgs[3]:-}" == "${mergedConfig}" ]] || continue
         return 0
     done < <(pgrep -x sing-box 2>/dev/null)
-    if [[ -n "${systemdServiceFile}" && -f "${systemdServiceFile}" ]] && padmCommandExists systemctl; then
+    if [[ "${release:-}" != "alpine" && -f "${systemdServiceFile}" ]] && padmCommandExists systemctl; then
         systemctl is-active --quiet sing-box.service && return 0
     fi
     if [[ -n "${openRcServiceFile}" && -f "${openRcServiceFile}" ]] && padmCommandExists rc-service; then
@@ -395,7 +395,8 @@ handleSingBoxMergeFailure() {
 # 操作 sing-box
 handleSingBox() {
     local serviceManager=
-    if [[ -f "${PADM_SINGBOX_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/sing-box.service}" ]] &&
+    if [[ "${release:-}" != "alpine" ]] &&
+        [[ -f "${PADM_SINGBOX_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/sing-box.service}" ]] &&
         padmCommandExists systemctl; then
         serviceManager=systemd
     elif [[ -f "${PADM_SINGBOX_OPENRC_SERVICE_FILE:-/etc/init.d/sing-box}" ]] &&
@@ -412,11 +413,11 @@ handleSingBox() {
             systemd) coreSystemdStart sing-box.service ;;
             openrc) rc-service sing-box start ;;
             esac
-        elif singBoxRunning && [[ "$1" == "stop" ]]; then
+        elif [[ "$1" == "stop" ]]; then
             case "${serviceManager}" in
             systemd) systemctl stop sing-box.service ;;
             openrc) rc-service sing-box stop ;;
-            esac
+            esac || { errorCard "sing-box关闭失败"; return 1; }
         fi
     fi
     if [[ "$1" == "start" ]]; then
@@ -474,7 +475,7 @@ xrayRunning() {
         [[ "${configMatched}" == true && "${testMode}" == false ]] || continue
         return 0
     done < <(pgrep -x xray 2>/dev/null)
-    if [[ -n "${systemdServiceFile}" && -f "${systemdServiceFile}" ]] && padmCommandExists systemctl; then
+    if [[ "${release:-}" != "alpine" && -f "${systemdServiceFile}" ]] && padmCommandExists systemctl; then
         systemctl is-active --quiet xray.service && return 0
     fi
     if [[ -n "${openRcServiceFile}" && -f "${openRcServiceFile}" ]] && padmCommandExists rc-service; then
@@ -490,7 +491,9 @@ handleXray() {
     local xrayConfigDir
     xrayBinary=$(xrayServiceBinaryPath)
     xrayConfigDir=$(xrayServiceConfigDir)
-    if [[ -f "${PADM_XRAY_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/xray.service}" ]] && padmCommandExists systemctl; then
+    if [[ "${release:-}" != "alpine" ]] &&
+        [[ -f "${PADM_XRAY_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/xray.service}" ]] &&
+        padmCommandExists systemctl; then
         serviceManager=systemd
     elif [[ -f "${PADM_XRAY_OPENRC_SERVICE_FILE:-/etc/init.d/xray}" ]] &&
         padmCommandExists rc-service; then
@@ -507,11 +510,11 @@ handleXray() {
             systemd) coreSystemdStart xray.service ;;
             openrc) rc-service xray start ;;
             esac
-        elif xrayRunning && [[ "$1" == "stop" ]]; then
+        elif [[ "$1" == "stop" ]]; then
             case "${serviceManager}" in
             systemd) systemctl stop xray.service ;;
             openrc) rc-service xray stop ;;
-            esac
+            esac || { errorCard "Xray关闭失败"; return 1; }
         fi
     fi
     if [[ "$1" == "start" ]]; then

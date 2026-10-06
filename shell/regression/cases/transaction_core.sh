@@ -362,6 +362,21 @@ runCoreReleaseArchiveRejectsRegression() (
 
     [[ "${xrayRc}" -ne 0 ]]
     [[ "${singBoxRc}" -ne 0 ]]
+    (
+        local candidateVersion=1.2.2
+        local xrayPath="${tmpDir}/version-check/xray"
+        mkdir -p "$(dirname -- "${xrayPath}")"
+        validateCoreZipArchive() { return 0; }
+        unzip() {
+            printf '#!/usr/bin/env bash\nprintf "Xray %s\\n"\n' "${candidateVersion}" >"${xrayPath}"
+            chmod 755 "${xrayPath}"
+        }
+        regressionExpectStatus 4 downloadXrayReleaseBinaryToTempDir v1.2.3 "$(dirname -- "${xrayPath}")"
+        candidateVersion=
+        regressionExpectStatus 4 downloadXrayReleaseBinaryToTempDir v1.2.3 "$(dirname -- "${xrayPath}")"
+        candidateVersion=1.2.3
+        downloadXrayReleaseBinaryToTempDir v1.2.3 "$(dirname -- "${xrayPath}")"
+    )
 )
 
 runCoreFirstInstallCommitFailureRollbackRegression() (
@@ -549,7 +564,7 @@ runCoreInstallRejectsUnsafeBinaryPathRegression() (
                 ;;
             esac
         done
-        printf '#!/usr/bin/env bash\nexit 0\n' >"${dest}/xray"
+        printf '#!/usr/bin/env bash\nprintf "Xray 1.2.3\\n"\n' >"${dest}/xray"
         chmod 755 "${dest}/xray"
     }
     tar() {

@@ -114,6 +114,7 @@ downloadXrayReleaseBinaryToTempDir() {
     local version=$1
     local tmpDir=$2
     local binary="${tmpDir}/xray"
+    local actualVersion
 
     if ! downloadGitHubReleaseAsset -P "${tmpDir}/" XTLS/Xray-core "${version}" "${xrayCoreCPUVendor}.zip"; then
         return 1
@@ -125,6 +126,11 @@ downloadXrayReleaseBinaryToTempDir() {
         return 2
     fi
     coreExtractedFileIsRegular "${binary}" && [[ -x "${binary}" ]] || return 3
+    actualVersion=$(xrayBinaryVersion "${binary}" || true)
+    if [[ -z "${actualVersion}" || "${actualVersion#v}" != "${version#v}" ]]; then
+        errorCard "Xray-core 版本校验失败: 目标 ${version}，实际 ${actualVersion:-无法解析}"
+        return 4
+    fi
 }
 
 downloadSingBoxReleaseBinaryToTempDir() {
@@ -464,6 +470,7 @@ installXrayApply() {
             case "${rc}" in
             2) errorCard "Xray-core解压失败" ;;
             3) errorCard "Xray-core安装失败" ;;
+            4) ;;
             *) errorCard "Xray-core下载失败" ;;
             esac
             exit 1

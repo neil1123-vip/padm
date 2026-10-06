@@ -162,6 +162,56 @@ SH
     [[ "$(<"${PADM_FAKE_NGINX_STATE_FILE}")" == "true" ]]
     [[ ! -s "${PADM_FAKE_NGINX_FORCE_KILL_LOG}" ]]
 
+    (
+        # 没有进程也必须取消管理器中的待启动任务，管理器失败不能被瞬时停止态遮蔽。
+        source "${PROJECT_ROOT}/shell/core/services.sh"
+        local manager service stopRc=0 stopLog="${serviceTmp}/idle-stop.log"
+        local PADM_XRAY_SYSTEMD_SERVICE_FILE="${serviceTmp}/idle-xray.service"
+        local PADM_SINGBOX_SYSTEMD_SERVICE_FILE="${serviceTmp}/idle-sing-box.service"
+        local PADM_XRAY_OPENRC_SERVICE_FILE="${serviceTmp}/idle-xray.init"
+        local PADM_SINGBOX_OPENRC_SERVICE_FILE="${serviceTmp}/idle-sing-box.init"
+        xrayRunning() { return 1; }
+        singBoxRunning() { return 1; }
+        nginxRunning() { return 1; }
+        nginxServiceInstalled() { return 0; }
+        padmCommandExists() { [[ "$1" == systemctl || "$1" == rc-service ]]; }
+        sleep() { return 0; }
+        systemctl() { printf 'systemd:%s\n' "$*" >>"${stopLog}"; return "${stopRc}"; }
+        rc-service() { printf 'openrc:%s\n' "$*" >>"${stopLog}"; return "${stopRc}"; }
+        for manager in systemd openrc; do
+            release=debian
+            : >"${PADM_XRAY_SYSTEMD_SERVICE_FILE}"
+            : >"${PADM_SINGBOX_SYSTEMD_SERVICE_FILE}"
+            if [[ "${manager}" == openrc ]]; then
+                release=alpine
+                : >"${PADM_XRAY_OPENRC_SERVICE_FILE}"
+                : >"${PADM_SINGBOX_OPENRC_SERVICE_FILE}"
+            fi
+            for service in xray sing-box nginx; do
+                : >"${stopLog}"
+                stopRc=0
+                runServiceAction "${service}" stop >/dev/null 2>&1
+                if [[ "${manager}" == systemd && "${service}" != nginx ]]; then
+                    [[ "$(<"${stopLog}")" == "systemd:stop ${service}.service" ]]
+                elif [[ "${manager}" == systemd ]]; then
+                    [[ "$(<"${stopLog}")" == "systemd:stop nginx" ]]
+                else
+                    [[ "$(<"${stopLog}")" == "openrc:${service} stop" ]]
+                fi
+                stopRc=1
+                regressionExpectStatus 1 runServiceAction "${service}" stop >/dev/null 2>&1
+            done
+        done
+        source "${PROJECT_ROOT}/shell/core/services.sh"
+        pgrep() { return 1; }
+        systemctl() { printf 'systemd:%s\n' "$*" >>"${stopLog}"; return 0; }
+        rc-service() { printf 'openrc:%s\n' "$*" >>"${stopLog}"; return 1; }
+        : >"${stopLog}"
+        regressionExpectStatus 1 xrayRunning
+        regressionExpectStatus 1 singBoxRunning
+        [[ "$(<"${stopLog}")" == $'openrc:xray status\nopenrc:sing-box status' ]]
+    )
+
     mkdir -p "${serviceTmp}/nginx"
     nginxConfigPath="${serviceTmp}/nginx/"
     selectCustomInstallType=",1,"
@@ -1649,6 +1699,7 @@ runCleanLastInstallationConfigFailureRegression() (
     : >"${installLog}"
     btDomain=panel.example.com
     customPortFunction() { return 0; }
+    readInstallTLSPort() { port=443; }
     coreTemplateCollectInitialClients() { return 0; }
     SERVICE_QUEUE_ALLOW_FAILURE=previous
     regressionExpectStatus 1 xrayCoreInstall >/dev/null 2>&1
