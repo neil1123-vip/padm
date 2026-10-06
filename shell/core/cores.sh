@@ -1765,6 +1765,12 @@ runCoreServiceActionAllowFailure() {
 runCoreInstall() {
     local core=$1 operation=$2
     shift 2
+    local selectCoreType
+    case "${core}" in
+    xray) selectCoreType=1 ;;
+    sing-box) selectCoreType=2 ;;
+    *) return 1 ;;
+    esac
     local PADM_INSTALL_RESET_HISTORY=false PADM_INSTALL_CLIENTS_PREPARED=false
     local AUTO_UUID="${AUTO_UUID:-}" AUTO_USER="${AUTO_USER:-}" AUTO_PORT="${AUTO_PORT:-}"
     prepareCoreInstallInputs "${core}" || return 1

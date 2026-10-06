@@ -445,7 +445,7 @@ coreTemplateConfigTransaction() {
 # 初始化 Xray 配置文件
 initXrayConfigApply() {
     set -- "${1:-}" "${2:-}" "${3:-}"
-    local configPath
+    local configPath selectCoreType=1
     configPath="$(xrayTemplateConfigDir)/" || return 1
     progressCard "$2" "初始化 Xray 配置"
     echo
@@ -999,7 +999,7 @@ stopSingBoxBeforeTemplateWrite() {
 
 initSingBoxConfigApply() {
     set -- "${1:-}" "${2:-}" "${3:-}"
-    local singBoxConfigPath
+    local singBoxConfigPath selectCoreType=2
     local hysteria2CredentialMode="${singBoxHysteria2CredentialMode:-false}"
     singBoxConfigPath="$(singBoxTemplateConfigDir)/" || return 1
     progressCard "$2" "初始化 sing-box 配置"

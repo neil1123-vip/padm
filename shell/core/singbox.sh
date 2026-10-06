@@ -683,6 +683,11 @@ initSingBoxPort() {
         [[ -n "${realityProtocolId}" && "${singleReality}" != "true" ]]; then
         AUTO_PORT=
     fi
+    if [[ "${promptHistory}" == true && -n "${port}" && -z "${AUTO_PORT}${AUTO_INSTALL:-}" ]] &&
+        ! validPortNumber "${port}"; then
+        corePortInputErrorCard
+        port=
+    fi
     if [[ "${promptHistory}" == "true" && -n "${AUTO_PORT}" ]]; then
         port=${AUTO_PORT}
         promptHistory=false

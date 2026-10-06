@@ -126,6 +126,8 @@ initHysteriaPort() {
 initHysteria2Network() {
 
     local bandwidthMode existingBandwidthMode=${hysteria2BandwidthMode:-brutal}
+    local defaultDownload=${hysteria2ClientDownloadSpeed:-100} defaultUpload=${hysteria2ClientUploadSpeed:-50}
+    local parameterInput= existingMasquerade=${hysteria2Masquerade:-}
 
     if [[ -n "${lastInstallationConfig:-}" && -n "${hysteria2BandwidthMode:-}" ]]; then
         case "${hysteria2BandwidthMode:-}" in
@@ -188,10 +190,12 @@ initHysteria2Network() {
     done
 
     if [[ "${hysteria2BandwidthMode}" == "brutal" ]]; then
+        [[ "${defaultDownload}" =~ ^[0-9]{1,6}$ ]] && ((10#${defaultDownload} > 0)) || defaultDownload=100
+        [[ "${defaultUpload}" =~ ^[0-9]{1,6}$ ]] && ((10#${defaultUpload} > 0)) || defaultUpload=50
         while true; do
-            echoContent yellow "请输入客户端下行带宽峰值（服务端→客户端，默认：100，单位：Mbps）"
+            echoContent yellow "请输入客户端下行带宽峰值（服务端→客户端，回车保持 ${defaultDownload}，单位：Mbps）"
             menuReadChoice hysteria_download_speed "下行速度:" hysteria2ClientDownloadSpeed true || return 1
-            hysteria2ClientDownloadSpeed=${hysteria2ClientDownloadSpeed:-100}
+            hysteria2ClientDownloadSpeed=${hysteria2ClientDownloadSpeed:-${defaultDownload}}
             if [[ "${hysteria2ClientDownloadSpeed}" =~ ^[0-9]{1,6}$ ]] && ((10#${hysteria2ClientDownloadSpeed} > 0)); then
                 statusCard "Hysteria2 客户端下行（服务端→客户端）" "${hysteria2ClientDownloadSpeed} Mbps"
                 break
@@ -201,9 +205,9 @@ initHysteria2Network() {
         done
 
         while true; do
-            echoContent yellow "请输入客户端上行带宽峰值（客户端→服务端，默认：50，单位：Mbps）"
+            echoContent yellow "请输入客户端上行带宽峰值（客户端→服务端，回车保持 ${defaultUpload}，单位：Mbps）"
             menuReadChoice hysteria_upload_speed "上行速度:" hysteria2ClientUploadSpeed true || return 1
-            hysteria2ClientUploadSpeed=${hysteria2ClientUploadSpeed:-50}
+            hysteria2ClientUploadSpeed=${hysteria2ClientUploadSpeed:-${defaultUpload}}
             if [[ "${hysteria2ClientUploadSpeed}" =~ ^[0-9]{1,6}$ ]] && ((10#${hysteria2ClientUploadSpeed} > 0)); then
                 statusCard "Hysteria2 客户端上行（客户端→服务端）" "${hysteria2ClientUploadSpeed} Mbps"
                 break
@@ -215,19 +219,25 @@ initHysteria2Network() {
 
     local existingObfsType=${hysteria2ObfsType:-}
     local existingObfsPassword=${hysteria2ObfsPassword:-}
-    hysteria2ObfsType=
-    hysteria2ObfsPassword=
-    echoContent yellow "请输入 Hysteria2 混淆类型[回车保持 ${existingObfsType:-关闭}，off 关闭，salamander/gecko]"
-    menuReadChoice hysteria_obfs_type "混淆类型:" hysteria2ObfsType true || return 1
-    hysteria2ObfsType=${hysteria2ObfsType,,}
-    [[ -n "${hysteria2ObfsType}" ]] || hysteria2ObfsType=${existingObfsType}
-    if [[ "${hysteria2ObfsType}" == "off" || "${hysteria2ObfsType}" == "none" ]]; then
-        hysteria2ObfsType=
+    if [[ -n "${existingObfsType}" && "${existingObfsType}" != salamander && "${existingObfsType}" != gecko ]]; then
+        errorCard "上次 Hysteria2 混淆类型不合法，请重新输入"
+        [[ -z "${AUTO_INSTALL:-}" ]] || return 1
+        existingObfsType=
     fi
-    if [[ -n "${hysteria2ObfsType}" && "${hysteria2ObfsType}" != salamander && "${hysteria2ObfsType}" != gecko ]]; then
+    while true; do
+        echoContent yellow "请输入 Hysteria2 混淆类型[回车保持 ${existingObfsType:-关闭}，off 关闭，salamander/gecko]"
+        menuReadChoice hysteria_obfs_type "混淆类型:" parameterInput true || return 1
+        parameterInput=${parameterInput,,}
+        parameterInput=${parameterInput:-${existingObfsType}}
+        case "${parameterInput}" in
+        off | none) parameterInput=; break ;;
+        "" | salamander | gecko) break ;;
+        esac
         errorCard "Hysteria2 混淆类型仅支持 salamander 或 gecko"
-        return 1
-    fi
+        [[ -z "${AUTO_INSTALL:-}" ]] || return 1
+    done
+    hysteria2ObfsType=${parameterInput}
+    hysteria2ObfsPassword=
     if [[ -n "${hysteria2ObfsType}" ]]; then
         menuReadChoice hysteria_obfs_password "混淆密码:" hysteria2ObfsPassword true || return 1
         hysteria2ObfsPassword=${hysteria2ObfsPassword:-${existingObfsPassword}}
@@ -241,12 +251,23 @@ initHysteria2Network() {
     fi
 
     hysteria2RequireSingBoxField masquerade 1.11.0 || return 1
-    echoContent yellow "请输入 Hysteria2 认证失败伪装 URL[http/https/file，回车使用固定404响应]"
-    menuReadChoice hysteria_masquerade "伪装URL:" hysteria2Masquerade true || return 1
-    if [[ -n "${hysteria2Masquerade}" && ! "${hysteria2Masquerade}" =~ ^(https?|file):// ]]; then
-        errorCard "Hysteria2 masquerade 仅支持 http://、https:// 或 file:// URL"
-        return 1
+    if [[ -n "${existingMasquerade}" && ! "${existingMasquerade}" =~ ^(https?|file):// ]]; then
+        errorCard "上次 Hysteria2 masquerade 不合法，请重新输入"
+        [[ -z "${AUTO_INSTALL:-}" ]] || return 1
+        existingMasquerade=
     fi
+    while true; do
+        echoContent yellow "请输入 Hysteria2 认证失败伪装 URL[http/https/file，回车保持 ${existingMasquerade:-固定404响应}，off 恢复固定404响应]"
+        menuReadChoice hysteria_masquerade "伪装URL:" parameterInput true || return 1
+        parameterInput=${parameterInput:-${existingMasquerade}}
+        [[ "${parameterInput}" != off && "${parameterInput}" != none ]] || parameterInput=
+        if [[ -z "${parameterInput}" || "${parameterInput}" =~ ^(https?|file):// ]]; then
+            hysteria2Masquerade=${parameterInput}
+            break
+        fi
+        errorCard "Hysteria2 masquerade 仅支持 http://、https:// 或 file:// URL"
+        [[ -z "${AUTO_INSTALL:-}" ]] || return 1
+    done
     statusCard "Hysteria2 masquerade" "${hysteria2Masquerade:-固定404响应}"
 }
 
@@ -676,39 +697,41 @@ initTuicPort() {
 
 # 初始化 TUIC 协议参数
 initTuicProtocol() {
-    if [[ -n "${tuicAlgorithm}" && -z "${lastInstallationConfig}" ]]; then
-        autoRead tuic_history_algorithm "读取到上次使用的算法 [${tuicAlgorithm}]，是否使用？[y/n]:" historyTuicAlgorithm
-        if [[ "${historyTuicAlgorithm}" != "y" ]]; then
-            tuicAlgorithm=
-        else
-            tuicAlgorithmStatusCard "${tuicAlgorithm}"
-        fi
-    elif [[ -n "${tuicAlgorithm}" && -n "${lastInstallationConfig}" ]]; then
+    local defaultAlgorithm=${tuicAlgorithm:-cubic} selectedAlgorithm=
+    case "${defaultAlgorithm}" in
+    cubic | bbr | new_reno) ;;
+    *)
+        errorCard "上次 Tuic 拥塞算法不合法，请重新选择"
+        [[ -z "${AUTO_INSTALL:-}" ]] || return 1
+        defaultAlgorithm=cubic
+        ;;
+    esac
+    if [[ -n "${tuicAlgorithm:-}" &&
+        "${tuicAlgorithm}" == "${defaultAlgorithm}" && -n "${lastInstallationConfig:-}" ]]; then
         tuicAlgorithmStatusCard "${tuicAlgorithm}"
+        return 0
     fi
 
-    if [[ -z "${tuicAlgorithm}" ]]; then
-
-        echoContent title "\n┌─ Tuic 拥塞控制算法 ─────────────────────────────────"
-        menuRecommendedItem 1 "cubic" "sing-box 默认算法"
-        menuItem 2 "bbr" "高带宽或长距离链路可尝试"
-        menuItem 3 "new_reno" "兼容保守拥塞控制"
-        menuClose
-        selectTuicAlgorithm=
-        menuReadChoice tuic_algorithm_menu "请选择[默认 cubic]:" selectTuicAlgorithm true || return 1
-        case ${selectTuicAlgorithm} in
-        2)
-            tuicAlgorithm="bbr"
-            ;;
-        3)
-            tuicAlgorithm="new_reno"
-            ;;
+    echoContent title "\n┌─ Tuic 拥塞控制算法 ─────────────────────────────────"
+    menuRecommendedItem 1 "cubic" "sing-box 默认算法"
+    menuItem 2 "bbr" "高带宽或长距离链路可尝试"
+    menuItem 3 "new_reno" "兼容保守拥塞控制"
+    menuClose
+    while true; do
+        menuReadChoice tuic_algorithm_menu "请选择[回车保持 ${defaultAlgorithm}]:" selectedAlgorithm true || return 1
+        case "${selectedAlgorithm:-${defaultAlgorithm}}" in
+        1 | cubic) tuicAlgorithm=cubic ;;
+        2 | bbr) tuicAlgorithm=bbr ;;
+        3 | new_reno) tuicAlgorithm=new_reno ;;
         *)
-            tuicAlgorithm="cubic"
+            errorCard "请选择 1、2 或 3"
+            [[ -z "${AUTO_INSTALL:-}" ]] || return 1
+            continue
             ;;
         esac
         tuicAlgorithmStatusCard "${tuicAlgorithm}"
-    fi
+        return 0
+    done
 }
 
 
@@ -718,7 +741,7 @@ initRealityKey() {
     menuLine "生成 Reality key"
     menuClose
     if [[ -n "${currentRealityPublicKey}" && -z "${lastInstallationConfig}" ]]; then
-        autoRead reality_history_key "读取到上次安装记录，PublicKey为 [${currentRealityPublicKey}]，是否复用上次的PublicKey/PrivateKey？[y/n]:" historyKeyStatus
+        menuReadChoice reality_history_key "读取到上次安装记录，PublicKey为 [${currentRealityPublicKey}]，是否复用上次的PublicKey/PrivateKey？[y/n]:" historyKeyStatus true || return 1
         if [[ "${historyKeyStatus}" == "y" ]]; then
             realityPrivateKey=${currentRealityPrivateKey}
             realityPublicKey=${currentRealityPublicKey}
@@ -728,7 +751,7 @@ initRealityKey() {
         realityPublicKey=${currentRealityPublicKey}
     fi
     if [[ -z "${realityPrivateKey}" ]]; then
-        if [[ "${selectCoreType}" == "2" || "${coreInstallType}" == "2" ]]; then
+        if [[ "${selectCoreType:-${coreInstallType:-}}" == "2" ]]; then
             local singBoxBinary="$(coreSingBoxBinaryPath)"
             if ! realityX25519Key=$("${singBoxBinary}" generate reality-keypair); then
                 errorCard "Reality Key 生成失败"
@@ -741,7 +764,7 @@ initRealityKey() {
                 return 1
             fi
         else
-            autoRead reality_private_key "请输入Private Key[回车自动生成]:" historyPrivateKey
+            menuReadChoice reality_private_key "请输入Private Key[回车自动生成]:" historyPrivateKey true || return 1
             if [[ -n "${historyPrivateKey}" ]]; then
                 realityX25519Key=$("$(coreXrayBinaryPath)" x25519 -i "${historyPrivateKey}") || return 1
             else
@@ -756,7 +779,7 @@ initRealityKey() {
             statusCard "Reality Key" "publicKey:${realityPublicKey}"
         fi
     fi
-    if [[ "${selectCoreType}" == "2" || "${coreInstallType}" == "2" ]]; then
+    if [[ "${selectCoreType:-${coreInstallType:-}}" == "2" ]]; then
         local realityKeyPath realityKeyStage
         realityKeyPath=$(realityKeyFile) || return 1
         padmCreateTempFileForTarget realityKeyStage "${realityKeyPath}" reality || return 1
@@ -1015,6 +1038,13 @@ initXrayRealityProtocolPort() {
         fi
     fi
 
+    if [[ -n "${historyPort}" && -z "${AUTO_INSTALL:-}" &&
+        ( "${singleProtocol}" != true || -z "${AUTO_PORT:-}" ) ]] &&
+        ! validPortNumber "${historyPort}"; then
+        errorCard "${label} 上次端口不合法，请重新输入"
+        [[ "${portRef}" != "${historyPort}" ]] || portRef=
+        historyPort=
+    fi
     if [[ "${coexistStatus}" != "0" && "${singleProtocol}" == "true" && -n "${AUTO_PORT:-}" ]]; then
         portRef=${AUTO_PORT}
     elif [[ "${coexistStatus}" != "0" && -z "${portRef}" && -n "${historyPort}" ]]; then

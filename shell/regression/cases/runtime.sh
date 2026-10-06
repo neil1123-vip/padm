@@ -948,6 +948,93 @@ runInstallWorkflowRegression() (
     )
 
     (
+        # 重装编辑回车保留原值；非法字段原地纠正，不重新填写已确认的带宽和密码。
+        local inputFd nextInput errors=0
+        unset AUTO_INSTALL
+        lastInstallationConfig=
+        hysteria2BandwidthMode=brutal
+        hysteria2ClientDownloadSpeed=240
+        hysteria2ClientUploadSpeed=90
+        hysteria2ObfsType=salamander
+        hysteria2ObfsPassword=stored-secret
+        hysteria2Masquerade=https://masquerade.example.com
+        getSingBoxCurrentVersion() { printf '1.14.0'; }
+        errorCard() { errors=$((errors + 1)); }
+        exec {inputFd}< <(printf '\ninvalid\n\n\ninvalid\n\n\ninvalid\n\nnext-parent-action\n')
+        initHysteria2Network <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        exec {inputFd}<&-
+        [[ "${nextInput}" == next-parent-action && "${errors}" == 2 ]]
+        [[ "${hysteria2BandwidthMode}" == brutal && "${hysteria2ClientDownloadSpeed}" == 240 && "${hysteria2ClientUploadSpeed}" == 90 ]]
+        [[ "${hysteria2ObfsType}" == salamander && "${hysteria2ObfsPassword}" == stored-secret && "${hysteria2Masquerade}" == https://masquerade.example.com ]]
+        exec {inputFd}< <(printf '2\noff\noff\nnext-parent-action\n')
+        initHysteria2Network <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        exec {inputFd}<&-
+        [[ "${nextInput}" == next-parent-action && "${hysteria2BandwidthMode}" == bbr &&
+            -z "${hysteria2ClientDownloadSpeed}${hysteria2ClientUploadSpeed}${hysteria2ObfsType}${hysteria2ObfsPassword}${hysteria2Masquerade}" ]]
+        hysteria2Masquerade=https://masquerade.example.com
+        regressionExpectStatus 1 initHysteria2Network < <(printf '\n\ninvalid')
+        [[ "${hysteria2Masquerade}" == https://masquerade.example.com ]]
+
+        AUTO_INSTALL=true
+        local invalidKey
+        autoRead() {
+            case "$1" in
+            hysteria_bandwidth_mode) printf -v "$3" '%s' 2 ;;
+            "${invalidKey}") printf -v "$3" '%s' invalid ;;
+            *) printf -v "$3" '%s' "" ;;
+            esac
+        }
+        for invalidKey in hysteria_obfs_type hysteria_masquerade; do
+            hysteria2ObfsType=
+            exec {inputFd}< <(printf 'next-parent-action\n')
+            regressionExpectStatus 1 initHysteria2Network <&"${inputFd}"
+            read -r -u "${inputFd}" nextInput
+            exec {inputFd}<&-
+            [[ "${nextInput}" == next-parent-action ]]
+        done
+    )
+
+    (
+        # 一个选择同时完成算法保留或修改；错误编号不再静默降为 cubic。
+        local inputFd nextInput errors=0 algorithm
+        unset AUTO_INSTALL
+        lastInstallationConfig=
+        errorCard() { errors=$((errors + 1)); }
+        for algorithm in cubic bbr new_reno; do
+            tuicAlgorithm=${algorithm}
+            exec {inputFd}< <(printf '\nnext-parent-action\n')
+            initTuicProtocol <&"${inputFd}"
+            read -r -u "${inputFd}" nextInput
+            exec {inputFd}<&-
+            [[ "${tuicAlgorithm}" == "${algorithm}" && "${nextInput}" == next-parent-action ]]
+            regressionExpectStatus 1 initTuicProtocol < <(printf '2')
+            [[ "${tuicAlgorithm}" == "${algorithm}" ]]
+            lastInstallationConfig=true
+            initTuicProtocol </dev/null
+            [[ "${tuicAlgorithm}" == "${algorithm}" ]]
+            lastInstallationConfig=
+        done
+        exec {inputFd}< <(printf '9\n2\nnext-parent-action\n')
+        initTuicProtocol <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        exec {inputFd}<&-
+        [[ "${tuicAlgorithm}" == bbr && "${nextInput}" == next-parent-action && "${errors}" == 1 ]]
+        tuicAlgorithm=invalid
+        lastInstallationConfig=true
+        initTuicProtocol <<<"3"
+        [[ "${tuicAlgorithm}" == new_reno && "${errors}" == 2 ]]
+        AUTO_INSTALL=true
+        tuicAlgorithm=invalid
+        exec {inputFd}< <(printf 'next-parent-action\n')
+        regressionExpectStatus 1 initTuicProtocol <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        exec {inputFd}<&-
+        [[ "${nextInput}" == next-parent-action && "${tuicAlgorithm}" == invalid ]]
+    )
+
+    (
         local tuicJson=
         lastInstallationConfig=true
         currentUUID=11111111-1111-4111-8111-111111111111
@@ -970,6 +1057,99 @@ runInstallWorkflowRegression() (
         tuicZeroRttHandshake=
         initSingBoxConfigApply custom 1 true >/dev/null
         jq -e '.inbounds[0] | .auth_timeout == "3s" and .heartbeat == "10s" and .zero_rtt_handshake == false' <<<"${tuicJson}" >/dev/null
+    )
+
+    (
+        # 安装目标优先于旧核心；切换 Xray 不写 sing-box 密钥，选择也不泄漏到父菜单。
+        local core targetType input inputFd nextInput calls="${TMP_DIR}/install-target-key-calls"
+        local selectCoreType=parent-choice coreInstallType= targetCore=
+        local currentRealityPrivateKey= currentRealityPublicKey= realityPrivateKey= realityPublicKey=
+        local lastInstallationConfig= keyFile="${TMP_DIR}/install-target-reality-key"
+        unset AUTO_INSTALL
+        prepareCoreInstallInputs() {
+            [[ "$1" == "${targetCore}" && "${selectCoreType}" == "${targetType}" &&
+                "${coreInstallType}" != "${targetType}" ]]
+        }
+        coreSwitchConfigTransaction() { shift; "$@"; }
+        padmRunPortAllowTransaction() { "$@"; }
+        coreXrayBinaryPath() { printf xrayKeyTool; }
+        coreSingBoxBinaryPath() { printf singBoxKeyTool; }
+        realityKeyFile() { printf '%s\n' "${keyFile}"; }
+        xrayKeyTool() {
+            [[ "$*" == "x25519 -i manual-seed" ]] || return 1
+            printf 'xray\n' >>"${calls}"
+            printf 'PrivateKey: xray-private\nPassword (PublicKey): xray-public\n'
+        }
+        singBoxKeyTool() {
+            [[ "$*" == "generate reality-keypair" ]] || return 1
+            printf 'sing-box\n' >>"${calls}"
+            printf 'PrivateKey: singbox-private\nPublicKey: singbox-public\n'
+        }
+        for core in xray sing-box; do
+            targetCore=${core}
+            targetType=1
+            coreInstallType=2
+            [[ "${core}" != sing-box ]] || { targetType=2; coreInstallType=1; }
+            printf 'old-public\n' >"${keyFile}"
+            : >"${calls}"
+            realityPrivateKey=
+            realityPublicKey=
+            exec {inputFd}< <(printf 'manual-seed\nnext-parent-action\n')
+            runCoreInstall "${core}" initRealityKey <&"${inputFd}"
+            [[ "${selectCoreType}" == parent-choice && "${coreInstallType}" != "${targetType}" && "$(<"${calls}")" == "${core}" ]]
+            if [[ "${core}" == xray ]]; then
+                [[ "${realityPrivateKey}" == xray-private && "${realityPublicKey}" == xray-public && "$(<"${keyFile}")" == old-public ]]
+            else
+                read -r -u "${inputFd}" nextInput
+                [[ "${nextInput}" == manual-seed && "$(<"${keyFile}")" == publicKey:singbox-public ]]
+            fi
+            read -r -u "${inputFd}" nextInput
+            exec {inputFd}<&-
+            [[ "${nextInput}" == next-parent-action ]]
+        done
+        selectCoreType=
+        coreInstallType=2
+        realityPrivateKey=
+        realityPublicKey=
+        : >"${calls}"
+        initRealityKey </dev/null
+        [[ "$(<"${calls}")" == sing-box && "$(<"${keyFile}")" == publicKey:singbox-public ]]
+
+        # 管理入口直接调用模板，也必须忽略父菜单残留的选择。
+        local template PADM_INSTALL_CLIENTS_PREPARED=false
+        currentClients=
+        collectTLSProfile() { :; }
+        coreTemplateCollectInitialClients() {
+            [[ "${selectCoreType}" == "${targetType}" ]] || return 1
+            initRealityKey || return 1
+            return 1
+        }
+        for template in initXrayConfigApply initSingBoxConfigApply; do
+            selectCoreType=2
+            targetType=1
+            [[ "${template}" != initSingBoxConfigApply ]] || { selectCoreType=1; targetType=2; }
+            local parentType=${selectCoreType}
+            realityPrivateKey=
+            realityPublicKey=
+            : >"${calls}"
+            regressionExpectStatus 1 "${template}" custom 1 true <<<"manual-seed"
+            [[ "${selectCoreType}" == "${parentType}" && -s "${calls}" ]]
+        done
+
+        # EOF 或无换行的输入都不能生成密钥、写文件或保留截断的私钥。
+        selectCoreType=1
+        coreInstallType=2
+        realityPrivateKey=
+        realityPublicKey=
+        : >"${calls}"
+        for input in "" manual-seed; do
+            regressionExpectStatus 1 initRealityKey < <(printf '%s' "${input}")
+            [[ -z "${realityPrivateKey}${realityPublicKey}" && ! -s "${calls}" ]]
+        done
+        currentRealityPrivateKey=stored-private
+        currentRealityPublicKey=stored-public
+        regressionExpectStatus 1 initRealityKey </dev/null
+        [[ -z "${realityPrivateKey}${realityPublicKey}" && ! -s "${calls}" ]]
     )
 
     (
@@ -1222,6 +1402,22 @@ runInstallWorkflowRegression() (
         initSingBoxPort 9443 true tcp singbox_custom_port </dev/null >"${outputFile}"
         result=$(<"${outputFile}")
         [[ "${result}" == "9443" && -z "${allowLog}" ]]
+        exec {inputFd}< <(printf '1+2\n8443\nnext-parent-action\n')
+        initSingBoxPort invalid true tcp singbox_custom_port <&"${inputFd}" >"${outputFile}"
+        result=$(<"${outputFile}")
+        read -r -u "${inputFd}" nextInput
+        exec {inputFd}<&-
+        [[ "${result}" == 8443 && "${nextInput}" == next-parent-action && "${allowLog}" == $'tcp:8443\n' ]]
+        allowLog=
+        regressionExpectStatus 1 initSingBoxPort invalid true tcp singbox_custom_port </dev/null
+        [[ -z "${allowLog}" ]]
+        AUTO_INSTALL=true
+        exec {inputFd}< <(printf 'next-parent-action\n')
+        regressionExpectStatus 1 initSingBoxPort invalid true tcp singbox_custom_port <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        exec {inputFd}<&-
+        [[ "${nextInput}" == next-parent-action && -z "${allowLog}" ]]
+        unset AUTO_INSTALL
         lastInstallationConfig=
         exec {inputFd}< <(printf '\nnext-parent-action\n')
         initSingBoxPort 9443 true tcp singbox_custom_port <&"${inputFd}" >"${outputFile}"
@@ -1391,6 +1587,38 @@ runInstallWorkflowRegression() (
             checkCalls=0
             allowLog=
         done
+
+        # 坏历史端口可在当前字段补正；自动安装仍拒绝并保留原历史值。
+        for index in "${!applies[@]}"; do
+            apply=${applies[index]}
+            portVar=${portVars[index]}
+            selectCustomInstallType=",${protocolIds[index]},"
+            xrayVLESSRealityPort=invalid
+            xrayVLESSRealityXHTTPort=invalid
+            xrayVLESSRealityGRPCPort=invalid
+            lastInstallationConfig=true
+            printf -v "${portVar}" '%s' ""
+            exec {inputFd}< <(printf '1+2\n8443\nnext-parent-action\n')
+            "${apply}" <&"${inputFd}"
+            read -r -u "${inputFd}" nextInput
+            exec {inputFd}<&-
+            [[ "${!portVar}" == 8443 && "${nextInput}" == next-parent-action && "${checkCalls}" == 1 &&
+                "${allowLog}" == "${transports[index]}:8443"$'\n' && "${xrayVLESSRealityPort}" == invalid ]]
+            checkCalls=0
+            allowLog=
+            printf -v "${portVar}" '%s' ""
+            regressionExpectStatus 1 "${apply}" </dev/null
+            [[ -z "${!portVar}" && "${checkCalls}" == 0 && -z "${allowLog}" ]]
+            AUTO_INSTALL=true
+            exec {inputFd}< <(printf 'next-parent-action\n')
+            regressionExpectStatus 1 "${apply}" <&"${inputFd}"
+            read -r -u "${inputFd}" nextInput
+            exec {inputFd}<&-
+            [[ "${nextInput}" == next-parent-action && "${checkCalls}" == 0 && -z "${allowLog}" ]]
+            unset AUTO_INSTALL
+            printf -v "${portVar}" '%s' ""
+        done
+        lastInstallationConfig=
 
         # 多选使用各入口的内部端口默认值，不能套用公共 --port。
         AUTO_INSTALL=true
