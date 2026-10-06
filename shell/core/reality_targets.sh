@@ -386,13 +386,9 @@ realityTargetScannerRecordAllowed() {
 }
 
 showRealityTargetBlockedCandidates() {
-    local line index=1 host name reason note
+    local index=1 host name reason note _extra
     echoContent title "\n┌─ REALITY 目标站黑名单 ─────────────────────────────"
-    while IFS= read -r line; do
-        host=$(printf '%s\n' "${line}" | awk -F'|' '{print $1}')
-        name=$(printf '%s\n' "${line}" | awk -F'|' '{print $2}')
-        reason=$(printf '%s\n' "${line}" | awk -F'|' '{print $3}')
-        note=$(printf '%s\n' "${line}" | awk -F'|' '{print $4}')
+    while IFS='|' read -r host name reason note _extra; do
         menuItem "${index}" "${host}" "${name} reason=${reason}"
         menuLine "    ${note}"
         index=$((index + 1))
@@ -2243,7 +2239,7 @@ importRealityScannerResults() {
         case "${probeStatus}" in
         OK)
             if [[ -n "${probePayload}" ]]; then
-                printf '%s\n' "${probePayload}" >>"${resultLinesFile}"
+                printf '%s\n' "${probePayload}" >>"${resultLinesFile}" || { commitStatus=1; break; }
                 score=$(realityTargetResultField "${probePayload}" 10)
                 cdnRisk=$(realityTargetResultField "${probePayload}" 5)
                 case "${score}" in
@@ -2261,24 +2257,26 @@ importRealityScannerResults() {
                 *) countFail=$((countFail + 1)); skipped=$((skipped + 1)) ;;
                 esac
             else
-                printf '%s\n' "${target}" >>"${failedTargetsFile}"
+                printf '%s\n' "${target}" >>"${failedTargetsFile}" || { commitStatus=1; break; }
                 countFail=$((countFail + 1))
                 skipped=$((skipped + 1))
             fi
             ;;
         FAIL)
-            printf '%s\n' "${probePayload:-${target}}" >>"${failedTargetsFile}"
+            printf '%s\n' "${probePayload:-${target}}" >>"${failedTargetsFile}" || { commitStatus=1; break; }
             countFail=$((countFail + 1))
             skipped=$((skipped + 1))
             ;;
         *)
-            printf '%s\n' "${target}" >>"${failedTargetsFile}"
+            printf '%s\n' "${target}" >>"${failedTargetsFile}" || { commitStatus=1; break; }
             countFail=$((countFail + 1))
             skipped=$((skipped + 1))
             ;;
         esac
     done
-    updateRealityTargetLibrary "${resultLinesFile}" "${failedTargetsFile}" || commitStatus=1
+    if (( commitStatus == 0 )); then
+        updateRealityTargetLibrary "${resultLinesFile}" "${failedTargetsFile}" || commitStatus=1
+    fi
     padmRemoveCleanupPath "${normalizedFile}"
     padmRemoveCleanupPath "${resultLinesFile}"
     padmRemoveCleanupPath "${failedTargetsFile}"
@@ -3061,7 +3059,7 @@ scanLocalAsnRealityTargets() {
         case "${probeStatus}" in
         OK)
             if [[ -n "${probePayload}" ]]; then
-                printf '%s\n' "${probePayload}" >>"${resultLinesFile}"
+                printf '%s\n' "${probePayload}" >>"${resultLinesFile}" || { commitStatus=1; break; }
                 score=$(realityTargetResultField "${probePayload}" 10)
                 cdnRisk=$(realityTargetResultField "${probePayload}" 5)
                 if [[ "${cdnRisk}" == "no" && "${score}" == "A" ]]; then
@@ -3077,22 +3075,24 @@ scanLocalAsnRealityTargets() {
                     failed=$((failed + 1))
                 fi
             else
-                printf '%s\n' "${target}" >>"${failedTargetsFile}"
+                printf '%s\n' "${target}" >>"${failedTargetsFile}" || { commitStatus=1; break; }
                 failed=$((failed + 1))
             fi
             ;;
         NETWORK_FAIL|FAIL)
-            printf '%s\n' "${probePayload:-${target}}" >>"${failedTargetsFile}"
+            printf '%s\n' "${probePayload:-${target}}" >>"${failedTargetsFile}" || { commitStatus=1; break; }
             failed=$((failed + 1))
             ;;
         *)
-            printf '%s\n' "${target}" >>"${failedTargetsFile}"
+            printf '%s\n' "${target}" >>"${failedTargetsFile}" || { commitStatus=1; break; }
             failed=$((failed + 1))
             ;;
         esac
     done
 
-    updateRealityTargetLibrary "${resultLinesFile}" "${failedTargetsFile}" || commitStatus=1
+    if (( commitStatus == 0 )); then
+        updateRealityTargetLibrary "${resultLinesFile}" "${failedTargetsFile}" || commitStatus=1
+    fi
     padmRemoveCleanupPath "${resultLinesFile}"
     padmRemoveCleanupPath "${failedTargetsFile}"
     padmRemoveCleanupPath "${probeDir}"

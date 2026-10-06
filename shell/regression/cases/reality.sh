@@ -754,6 +754,21 @@ EOF
     AUTO_INSTALL=
 
     (
+        local output
+        realityTargetBlockedCandidates() {
+            printf '%s\n' 'blocked.example.com|Blocked Site|manual|Note \ path|ignored' \
+                'empty.example.com|||'
+        }
+        echoContent() { :; }
+        menuItem() { printf '%s\t%s\t%s\n' "$1" "$2" "$3"; }
+        menuLine() { printf '%s\n' "$1"; }
+        menuClose() { :; }
+        awk() { return 99; }
+        output=$(showRealityTargetBlockedCandidates)
+        [[ "${output}" == $'1\tblocked.example.com\tBlocked Site reason=manual\n    Note \\ path\n2\tempty.example.com\t reason=\n    ' ]]
+    )
+
+    (
         local selectedTarget selectedSni switched=0 confirmation=n menuSequence="2 1 2 2 5 8" scope=
         realityTargetHost=installed.example.com
         realityTargetPort=443
@@ -981,6 +996,42 @@ EOF
             ! grep -q '^green' "${persistenceStatusLog}"
             [[ -z "$(find "${TMPDIR}" -mindepth 1 -print -quit)" ]]
         done
+        (
+            local probeCase collectionRecord updateCalls=0
+            local collectionTarget=persist-failure.example.com:443
+            collectionRecord=$(formatRealityTargetResultLine "${collectionTarget}" persist-failure.example.com \
+                "Collection Failure" scanner no 192.0.2.1 AS64500 ExampleNet same_asn A yes 4096 yes 1 fixture)
+            builtin printf 'unchanged\n' >"${PADM_REALITY_TARGET_RESULTS_FILE}"
+            normalizeRealityScannerCsv() {
+                builtin printf '192.0.2.1\tAS64500\tpersist-failure.example.com\tExample CA\tUS\n'
+            }
+            runRealityTargetProbeJobs() {
+                case "${probeCase}" in
+                result) builtin printf 'OK\t%s\n' "${collectionRecord}" >"$3/0.result" ;;
+                empty) builtin printf 'OK\t\n' >"$3/0.result" ;;
+                fail) builtin printf 'FAIL\t%s\n' "${collectionTarget}" >"$3/0.result" ;;
+                missing) : ;;
+                esac
+            }
+            # 模拟结果或失败目标追加失败，不影响探测输出及菜单提示。
+            printf() {
+                if [[ "$1" == '%s\n' && ( "${2:-}" == "${collectionRecord}" || "${2:-}" == "${collectionTarget}" ) ]]; then
+                    return 1
+                fi
+                builtin printf "$@"
+            }
+            updateRealityTargetLibrary() { updateCalls=$((updateCalls + 1)); }
+            for probeCase in result empty fail missing; do
+                : >"${persistenceStatusLog}"
+                regressionExpectStatus 1 scanLocalAsnRealityTargets
+                summary=unchanged
+                regressionExpectStatus 1 importRealityScannerResults "${persistenceRoot}/empty.csv" AS64500 ExampleNet summary
+                [[ "${updateCalls}" == 0 && "${summary}" == unchanged ]]
+                [[ "$(<"${PADM_REALITY_TARGET_RESULTS_FILE}")" == unchanged ]]
+                [[ -z "$(find "${TMPDIR}" -mindepth 1 -print -quit)" ]]
+                ! grep -q '^green' "${persistenceStatusLog}"
+            done
+        )
         ensureRealityScannerBinary() { :; }
         realityScannerOutputPath() { printf '%s\n' "${persistenceRoot}/scan.csv"; }
         runRealityScannerQuietly() { printf 'IP,ORIGIN,CERT_DOMAIN,CERT_ISSUER,GEO_CODE\n' >"$1"; }
