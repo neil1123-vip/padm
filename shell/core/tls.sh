@@ -165,92 +165,112 @@ customSSLEmail() {
 
 # DNS API申请证书
 switchDNSAPI() {
-    autoRead dns_api "是否使用DNS API申请证书[支持NAT]？[y/n]:" dnsAPIStatus
-    if [[ "${dnsAPIStatus}" == "y" ]]; then
+    local nextDNSAPIStatus selectDNSAPIType nextDNSAPIType
+    autoRead dns_api "是否使用DNS API申请证书[支持NAT]？[y/n]:" nextDNSAPIStatus || return 1
+    if [[ "${nextDNSAPIStatus}" == "y" ]]; then
         echoContent title "\n┌─ DNS API ──────────────────────────────────────────"
         menuRecommendedItem 1 "cloudflare" "默认 DNS API"
         menuItem 2 "aliyun" "阿里云 DNS API"
         menuClose
-        autoRead dns_api_type "请选择[回车]使用默认:" selectDNSAPIType
+        autoRead dns_api_type "请选择[回车]使用默认:" selectDNSAPIType || return 1
         case ${selectDNSAPIType} in
         2)
-            dnsAPIType="aliyun"
+            nextDNSAPIType="aliyun"
             ;;
         *)
-            dnsAPIType="cloudflare"
+            nextDNSAPIType="cloudflare"
             ;;
         esac
-        initDNSAPIConfig "${dnsAPIType}" || return 1
+        initDNSAPIConfig "${nextDNSAPIType}" || return 1
+        dnsAPIType=${nextDNSAPIType}
+    else
+        dnsAPIStatus=${nextDNSAPIStatus}
+        dnsAPIType=
     fi
 }
 
 # 初始化 DNS API 配置
 initDNSAPIConfig() {
+    local apiToken apiZone apiKey apiSecret wildcardStatus
     if [[ "$1" == "cloudflare" ]]; then
         echoContent title "\n┌─ Cloudflare DNS API ──────────────────────────────"
         menuLine "请创建限制到目标 Zone 的 API Token"
         menuLine "权限建议：Zone:DNS:Edit；如需自动识别 Zone，可附加 Zone:Zone:Read"
         menuClose
-        autoRead cloudflare_api_token "请输入API Token:" cfAPIToken
-        if [[ -z "${cfAPIToken}" ]]; then
+        while :; do
+            autoRead cloudflare_api_token "请输入API Token:" apiToken || return 1
+            [[ -n "${apiToken}" ]] && break
             errorCard "输入为空，请重新输入"
-            initDNSAPIConfig "$1" || return 1
-        else
-            autoRead cloudflare_zone_id "请输入Zone ID[可选，回车自动识别]:" cfZoneID
-            echo
-            if ! echo "${dnsTLSDomain}" | grep -q "\." || [[ -z $(echo "${dnsTLSDomain}" | awk -F "[.]" '{print $1}') ]]; then
-                successCard "不支持此域名申请通配符证书，建议使用此格式[xx.xx.xx]"
-                return 1
-            fi
-            autoRead dns_api_wildcard "是否使用*.${dnsTLSDomain}进行API申请通配符证书？[y/n]:" dnsAPIStatus
-        fi
+            [[ -z "${AUTO_INSTALL:-}" ]] || return 1
+        done
+        autoRead cloudflare_zone_id "请输入Zone ID[可选，回车自动识别]:" apiZone || return 1
     elif [[ "$1" == "aliyun" ]]; then
-        autoRead aliyun_api_key "请输入Ali Key:" aliKey
-        autoRead aliyun_api_secret "请输入Ali Secret:" aliSecret
-        if [[ -z "${aliKey}" || -z "${aliSecret}" ]]; then
+        while :; do
+            autoRead aliyun_api_key "请输入Ali Key:" apiKey || return 1
+            [[ -n "${apiKey}" ]] && break
             errorCard "输入为空，请重新输入"
-            initDNSAPIConfig "$1" || return 1
-        else
-            echo
-            if ! echo "${dnsTLSDomain}" | grep -q "\." || [[ -z $(echo "${dnsTLSDomain}" | awk -F "[.]" '{print $1}') ]]; then
-                successCard "不支持此域名申请通配符证书，建议使用此格式[xx.xx.xx]"
-                return 1
-            fi
-            autoRead dns_api_wildcard "是否使用*.${dnsTLSDomain}进行API申请通配符证书？[y/n]:" dnsAPIStatus
-        fi
+            [[ -z "${AUTO_INSTALL:-}" ]] || return 1
+        done
+        while :; do
+            autoRead aliyun_api_secret "请输入Ali Secret:" apiSecret || return 1
+            [[ -n "${apiSecret}" ]] && break
+            errorCard "输入为空，请重新输入"
+            [[ -z "${AUTO_INSTALL:-}" ]] || return 1
+        done
+    else
+        return 1
     fi
+    echo
+    autoRead dns_api_wildcard "是否使用*.${dnsTLSDomain}进行API申请通配符证书？[y/n]:" wildcardStatus || return 1
+    if [[ "${wildcardStatus}" == "y" && ( "${dnsTLSDomain}" != *.* || -z "${dnsTLSDomain%%.*}" ) ]]; then
+        successCard "不支持此域名申请通配符证书，建议使用此格式[xx.xx.xx]"
+        return 1
+    fi
+    if [[ "$1" == "cloudflare" ]]; then
+        cfAPIToken=${apiToken}
+        cfZoneID=${apiZone}
+    else
+        aliKey=${apiKey}
+        aliSecret=${apiSecret}
+    fi
+    dnsAPIStatus=${wildcardStatus}
 }
 
 # 选择ssl安装类型
 switchSSLType() {
-    if [[ -z "${sslType:-}" ]]; then
-        local sslTypeFile sslTypeStage
+    local nextSSLType="${sslType:-}" selectSSLType sslTypeFile sslTypeStage
+    if [[ -z "${nextSSLType}" ||
+        -n "${AUTO_TLS_CA:-}" ||
+        ( -n "${dnsAPIType:-}" && "${nextSSLType}" == "buypass" ) ]]; then
         echoContent title "\n┌─ 证书 CA ──────────────────────────────────────────"
         menuRecommendedItem 1 "letsencrypt" "默认 CA"
         menuItem 2 "zerossl" "ZeroSSL CA"
         menuItem 3 "buypass" "不支持 DNS 申请"
         menuClose
-        autoRead tls_ca "请选择[回车]使用默认:" selectSSLType
+        autoRead tls_ca "请选择[回车]使用默认:" selectSSLType || return 1
         case ${selectSSLType} in
         2)
-            sslType="zerossl"
+            nextSSLType="zerossl"
             ;;
         3)
-            sslType="buypass"
+            nextSSLType="buypass"
             ;;
         *)
-            sslType="letsencrypt"
+            nextSSLType="letsencrypt"
             ;;
         esac
-        if [[ -n "${dnsAPIType:-}" && "${sslType}" == "buypass" ]]; then
-            errorCard "buypass不支持API申请证书"
-            return 1
-        fi
+    fi
+    if [[ -n "${dnsAPIType:-}" && "${nextSSLType}" == "buypass" ]]; then
+        errorCard "buypass不支持API申请证书"
+        return 1
+    fi
+    if [[ "${nextSSLType}" != "${sslType:-}" ]]; then
         sslTypeFile=$(tlsSslTypeFile) || return 1
         padmEnsureSafeDirectory "$(dirname -- "${sslTypeFile}")" || return 1
         padmCreateTempFileForTarget sslTypeStage "${sslTypeFile}" ssltype || return 1
-        printf '%s\n' "${sslType}" >"${sslTypeStage}" || { padmRemoveCleanupPath "${sslTypeStage}"; return 1; }
+        printf '%s\n' "${nextSSLType}" >"${sslTypeStage}" || { padmRemoveCleanupPath "${sslTypeStage}"; return 1; }
         commitGeneratedFile "${sslTypeStage}" "${sslTypeFile}" 644 || { padmRemoveCleanupPath "${sslTypeStage}"; return 1; }
+        sslType=${nextSSLType}
     fi
 }
 

@@ -1621,6 +1621,7 @@ runCleanLastInstallationConfigFailureRegression() (
     : >"${installLog}"
     btDomain=panel.example.com
     customPortFunction() { return 0; }
+    coreTemplateCollectInitialClients() { return 0; }
     SERVICE_QUEUE_ALLOW_FAILURE=previous
     regressionExpectStatus 1 xrayCoreInstall >/dev/null 2>&1
     grep -qx 'xray:stop:true' "${serviceLog}"

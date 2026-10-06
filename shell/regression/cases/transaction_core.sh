@@ -579,6 +579,7 @@ runCoreCleanupFailurePropagationRegression() (
     : >"${queueLog}"
     command rm -f "${reachedFile}"
     readLastInstallationConfig() { return 0; }
+    coreTemplateCollectInitialClients() { return 0; }
     collectEntryProfile() { realityEntryHost=cleanup.example.com; return 0; }
     persistRealityEntryProfile() { printf 'persist\n' >>"${queueLog}"; return 0; }
     unInstallSubscribe() { return 0; }
@@ -933,8 +934,8 @@ runCoreTemplateReturnFailureRegression() (
     PADM_FIREWALL_STATE_FILE="${firewallState}"
     PADM_REALITY_ENTRY_HOST_FILE="${entryHostFile}"
     : >"${firewallLog}"
-    currentUUID=existing-user
-    currentClients='[]'
+    currentUUID=11111111-1111-4111-8111-111111111111
+    currentClients='[{"id":"11111111-1111-4111-8111-111111111111","email":"regression"}]'
     domain=tls.example.com
     currentHost=tls.example.com
     lastInstallationConfig=true
@@ -1154,7 +1155,8 @@ runCoreTemplateReturnFailureRegression() (
     [[ "${xrayRc}" != "0" && "${singBoxRc}" != "0" ]]
     [[ "$(grep -c '^call$' "${uuidGenerationLog}")" == "2" ]]
     [[ "${writeCalls}" == "0" ]]
-    currentUUID=existing-user
+    currentUUID=11111111-1111-4111-8111-111111111111
+    currentClients='[{"id":"11111111-1111-4111-8111-111111111111","email":"regression"}]'
     lastInstallationConfig=true
     unset AUTO_INSTALL AUTO_UUID AUTO_USER
 
@@ -1204,6 +1206,7 @@ runCoreInstallServiceActionFailureRegression() (
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
     protocolRegistryMenu() { return 0; }
     readLastInstallationConfig() { return 0; }
+    coreTemplateCollectInitialClients() { return 0; }
     unInstallSubscribe() { return 0; }
     installTools() { printf 'installTools:%s\n' "$*" >>"${callLog}"; return 0; }
     initTLSNginxConfig() { printf 'initTLS:%s\n' "$*" >>"${callLog}"; return 0; }

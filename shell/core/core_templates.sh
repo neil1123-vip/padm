@@ -53,7 +53,7 @@ coreTemplateValidateManualAccountName() {
 
 # 两核共享用户输入；采集成功前不替换现有用户。
 coreTemplateCollectInitialClients() {
-    local core=$1 passwordMode=${2:-false}
+    local core=$1 passwordMode=${2:-false} inputsOnly=${3:-false}
     local hasExistingClients=false historyChoice= storedCredentials= storedCredential=
     local credential= username= clients label=UUID suffix=VLESS_TCP/TLS_Vision
     if [[ "${passwordMode}" == "true" ]]; then
@@ -77,7 +77,7 @@ coreTemplateCollectInitialClients() {
             esac
         done
         if [[ "${hasExistingClients}" == "true" ]]; then
-            if [[ -z "${currentUUID:-}" && "${passwordMode}" != "true" ]] &&
+            if [[ "${passwordMode}" != "true" ]] &&
                 protocolSelectionHasAny "${selectCustomInstallType:-,1,}" 1 2 21 22 23 24 26 27 31; then
                 storedCredentials=$(jq -r '.[] | .id // .uuid // .password // ""' <<<"${currentClients}") || return 1
                 while IFS= read -r storedCredential; do
@@ -126,6 +126,15 @@ coreTemplateCollectInitialClients() {
         coreTemplateValidateManualAccountName "${username}" && break
         [[ -z "${AUTO_USER:-}" && -z "${AUTO_INSTALL:-}" ]] || return 1
     done
+
+    # 新机器此时可能没有 jq，先保留本次安装局部输入，工具就绪后再生成 JSON。
+    if [[ "${inputsOnly}" == true ]]; then
+        AUTO_UUID=${credential}
+        AUTO_USER=${username}
+        currentUUID=
+        currentClients=
+        return 0
+    fi
 
     if [[ "${core}" == "xray" ]]; then
         clients=$(jq -nc --arg uuid "${credential}" --arg add "${add:-}" --arg email "${username}" '[{id:$uuid,add:$add,flow:"xtls-rprx-vision",email:$email}]') || return 1
@@ -408,7 +417,7 @@ initXrayConfigApply() {
     configPath="$(xrayTemplateConfigDir)/" || return 1
     progressCard "$2" "初始化 Xray 配置"
     echo
-    coreTemplateCollectInitialClients xray || return 1
+    [[ "${PADM_INSTALL_CLIENTS_PREPARED:-}" == true && -n "${currentClients:-}" ]] || coreTemplateCollectInitialClients xray || return 1
 
     # log
     if [[ ! -f "/etc/padm/xray/conf/00_log.json" ]]; then
@@ -967,7 +976,7 @@ initSingBoxConfigApply() {
     local sslDomain=
     collectTLSProfile
     sslDomain=${tlsCertDomain}
-    coreTemplateCollectInitialClients sing-box "${hysteria2CredentialMode}" || return 1
+    [[ "${PADM_INSTALL_CLIENTS_PREPARED:-}" == true && -n "${currentClients:-}" ]] || coreTemplateCollectInitialClients sing-box "${hysteria2CredentialMode}" || return 1
 
     # VLESS Vision
     if protocolSelectionIncludes "${selectCustomInstallType}" 27 "$1"; then

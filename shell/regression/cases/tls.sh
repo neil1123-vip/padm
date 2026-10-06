@@ -11,16 +11,19 @@ runTlsFailureReturnRegression() (
     local chmodLog="${root}/chmod.log"
     local reachedFile="${root}/reached"
     local shellRc
+    local autoReadDefinition
+    autoReadDefinition=$(declare -f autoRead)
 
     mkdir -p "${root}/home"
     HOME="${root}/home"
     errorCard() { return 0; }
     autoRead() {
-        case "$3" in
-        sslEmailStatus) printf -v "$3" 'n' ;;
-        cfAPIToken) printf -v "$3" 'token' ;;
-        cfZoneID) printf -v "$3" '' ;;
-        selectSSLType) printf -v "$3" '3' ;;
+        case "$1" in
+        tls_email_retry) printf -v "$3" 'n' ;;
+        cloudflare_api_token) printf -v "$3" 'token' ;;
+        cloudflare_zone_id) printf -v "$3" '' ;;
+        dns_api_wildcard) printf -v "$3" 'y' ;;
+        tls_ca) printf -v "$3" '3' ;;
         *) printf -v "$3" '' ;;
         esac
     }
@@ -49,6 +52,123 @@ runTlsFailureReturnRegression() (
     dnsAPIType=cloudflare
     sslType=
     captureFailureReturn "${caRcFile}" switchSSLType
+
+    (
+        eval "${autoReadDefinition}"
+        local dnsTLSDomain=example.com input inputFd remaining
+        local AUTO_INSTALL= AUTO_DNS_API AUTO_DNS_API_TYPE AUTO_DNS_API_WILDCARD=n
+        local AUTO_CLOUDFLARE_API_TOKEN= PADM_CLOUDFLARE_API_TOKEN=
+        local AUTO_ALIYUN_API_KEY= PADM_ALIYUN_API_KEY=
+        local AUTO_ALIYUN_API_SECRET= PADM_ALIYUN_API_SECRET=
+        local AUTO_TLS_CA
+        export PADM_TLS_DIR="${root}/input-tls"
+
+        # 每个读取点的 EOF 都必须失败，不能缓存半份配置或跳过下轮采集。
+        for input in '' $'y\n' $'y\n\n' $'y\n\ntoken\n' $'y\n\ntoken\nzone\n'; do
+            unset dnsAPIStatus dnsAPIType cfAPIToken cfZoneID
+            regressionExpectStatus 1 switchDNSAPI < <(printf '%s' "${input}")
+            [[ -z "${dnsAPIStatus+x}" && -z "${dnsAPIType+x}" &&
+                -z "${cfAPIToken+x}" && -z "${cfZoneID+x}" ]]
+        done
+
+        # 空输入原地重填一次，不重复读取 Zone 或吞掉下一层菜单输入。
+        exec {inputFd}< <(printf 'y\n\n\ntoken\n\nn\nnext-action\n')
+        switchDNSAPI <&"${inputFd}"
+        [[ "${dnsAPIType}" == cloudflare && "${dnsAPIStatus}" == n &&
+            "${cfAPIToken}" == token && -z "${cfZoneID}" ]]
+        read -r -u "${inputFd}" remaining
+        [[ "${remaining}" == next-action ]]
+        exec {inputFd}<&-
+
+        # 单域名 DNS 申请不受通配符父域限制；选择通配符才校验父域。
+        dnsTLSDomain=com
+        unset dnsAPIStatus dnsAPIType cfAPIToken cfZoneID
+        switchDNSAPI < <(printf 'y\n\ntoken\n\nn\n')
+        [[ "${dnsAPIType}" == cloudflare && "${dnsAPIStatus}" == n && "${cfAPIToken}" == token ]]
+        unset dnsAPIStatus dnsAPIType cfAPIToken cfZoneID
+        regressionExpectStatus 1 switchDNSAPI < <(printf 'y\n\ntoken\n\ny\n')
+        [[ -z "${dnsAPIStatus+x}" && -z "${dnsAPIType+x}" &&
+            -z "${cfAPIToken+x}" && -z "${cfZoneID+x}" ]]
+        dnsTLSDomain=example.com
+
+        (
+            local keyReads=0
+            autoRead() {
+                [[ "$1" != aliyun_api_key ]] || keyReads=$((keyReads + 1))
+                read -r "$3"
+            }
+            exec {inputFd}< <(printf 'y\n2\nkey\n\nsecret\nn\nnext-parent-action\n')
+            switchDNSAPI <&"${inputFd}"
+            [[ "${keyReads}" == 1 && "${aliKey}" == key && "${aliSecret}" == secret ]]
+            read -r -u "${inputFd}" remaining
+            [[ "${remaining}" == next-parent-action ]]
+            exec {inputFd}<&-
+        )
+
+        for AUTO_DNS_API_TYPE in cloudflare aliyun; do
+            unset dnsAPIStatus dnsAPIType cfAPIToken cfZoneID aliKey aliSecret
+            AUTO_INSTALL=true
+            AUTO_DNS_API=y
+            regressionExpectStatus 1 switchDNSAPI </dev/null
+            [[ -z "${dnsAPIStatus+x}" && -z "${dnsAPIType+x}" &&
+                -z "${cfAPIToken+x}" && -z "${cfZoneID+x}" &&
+                -z "${aliKey+x}" && -z "${aliSecret+x}" ]]
+        done
+        AUTO_ALIYUN_API_KEY=key
+        regressionExpectStatus 1 switchDNSAPI </dev/null
+        AUTO_ALIYUN_API_SECRET=secret
+        switchDNSAPI </dev/null
+        [[ "${dnsAPIType}" == aliyun && "${dnsAPIStatus}" == n &&
+            "${aliKey}" == key && "${aliSecret}" == secret ]]
+
+        # 冲突、EOF、落盘失败均不能缓存 CA；下一次有效选择正常生效。
+        unset sslType
+        AUTO_TLS_CA=buypass
+        regressionExpectStatus 1 switchSSLType </dev/null
+        regressionExpectStatus 1 switchSSLType </dev/null
+        [[ -z "${sslType+x}" && ! -e "${PADM_TLS_DIR}/ssl_type" ]]
+        sslType=buypass
+        regressionExpectStatus 1 switchSSLType </dev/null
+        [[ "${sslType}" == buypass && ! -e "${PADM_TLS_DIR}/ssl_type" ]]
+        unset sslType
+        AUTO_INSTALL=
+        regressionExpectStatus 1 switchSSLType </dev/null
+        [[ -z "${sslType+x}" && ! -e "${PADM_TLS_DIR}/ssl_type" ]]
+        (
+            AUTO_INSTALL=true
+            AUTO_TLS_CA=letsencrypt
+            commitGeneratedFile() { return 1; }
+            regressionExpectStatus 1 switchSSLType </dev/null
+            [[ -z "${sslType+x}" && ! -e "${PADM_TLS_DIR}/ssl_type" ]]
+        )
+        switchSSLType <<<"1"
+        [[ "${sslType}" == letsencrypt && "$(<"${PADM_TLS_DIR}/ssl_type")" == letsencrypt ]]
+
+        # 缓存 CA 与 DNS 冲突时允许重新选择；自动参数可以替换已有合法 CA。
+        sslType=buypass
+        AUTO_TLS_CA=
+        regressionExpectStatus 1 switchSSLType </dev/null
+        [[ "${sslType}" == buypass && "$(<"${PADM_TLS_DIR}/ssl_type")" == letsencrypt ]]
+        switchSSLType <<<"1"
+        [[ "${sslType}" == letsencrypt && "$(<"${PADM_TLS_DIR}/ssl_type")" == letsencrypt ]]
+        AUTO_INSTALL=true
+        AUTO_TLS_CA=zerossl
+        switchSSLType </dev/null
+        [[ "${sslType}" == zerossl && "$(<"${PADM_TLS_DIR}/ssl_type")" == zerossl ]]
+        (
+            AUTO_TLS_CA=letsencrypt
+            commitGeneratedFile() { return 1; }
+            regressionExpectStatus 1 switchSSLType </dev/null
+            [[ "${sslType}" == zerossl && "$(<"${PADM_TLS_DIR}/ssl_type")" == zerossl ]]
+        )
+        AUTO_TLS_CA=buypass
+        regressionExpectStatus 1 switchSSLType </dev/null
+        [[ "${sslType}" == zerossl && "$(<"${PADM_TLS_DIR}/ssl_type")" == zerossl ]]
+        sslType=buypass
+        AUTO_TLS_CA=letsencrypt
+        switchSSLType </dev/null
+        [[ "${sslType}" == letsencrypt && "$(<"${PADM_TLS_DIR}/ssl_type")" == letsencrypt ]]
+    )
 
     domain=missing.example.com
     currentHost=

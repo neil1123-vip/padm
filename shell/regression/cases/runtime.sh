@@ -445,6 +445,7 @@ runInstallWorkflowRegression() (
         padmRunPortAllowTransaction() { "$@"; }
         readLastInstallationConfig() { events+=$'read-last\n'; return 0; }
         collectEntryProfile() { events+=$'entry\n'; }
+        coreTemplateCollectInitialClients() { events+=$'clients\n'; }
         installTools() { events+=$'tools\n'; return 1; }
         for core in xray sing-box; do
             install=customXrayInstall
@@ -468,7 +469,7 @@ runInstallWorkflowRegression() (
                 regressionExpectStatus 1 "${install}" <&"${inputFd}"
                 read -r -u "${inputFd}" nextInput
                 [[ "${selectCustomInstallType}" == ,1, && "${nextInput}" == next-parent-action && "${selectionErrors}" == 1 ]]
-                [[ "${events}" == $'read-last\nentry\nbackup\ntools\n'"${core}:stop"$'\nrollback\n'"${core}:start"$'\n' ]]
+                [[ "${events}" == $'read-last\nentry\nclients\nbackup\ntools\n'"${core}:stop"$'\nrollback\n'"${core}:start"$'\n' ]]
                 if [[ "${mode}" == 2 ]]; then
                     [[ "${realityOnlyWithDomain}" == true ]]
                 else
@@ -512,6 +513,7 @@ runInstallWorkflowRegression() (
         }
         nginxRunning() { events+=$'nginx\n'; return 0; }
         handleNginx() { events+=$'service\n'; }
+        coreTemplateCollectInitialClients() { :; }
         coreSwitchConfigTransaction() { events+="transaction:${PADM_INSTALL_RESET_HISTORY}"$'\n'; return 17; }
         for install in installXrayReality installSingBoxReality customXrayInstall customSingBoxInstall xrayCoreInstall singBoxInstall; do
             for input in "" n $'n\n' $'n\n\n'; do
@@ -553,6 +555,57 @@ runInstallWorkflowRegression() (
         events=
         regressionExpectStatus 1 customSingBoxInstall 3 </dev/null
         [[ "${tlsReads}" == 1 && -z "${events}" && "${PADM_INSTALL_RESET_HISTORY}" == parent-value ]]
+    )
+
+    (
+        # 账号在六个入口的事务前确认；取消不动服务，模板阶段不再读取同一份输入。
+        local install input inputFd nextInput events= currentUUID= currentClients= lastInstallationConfig=
+        local configPath= btDomain= PADM_INSTALL_CLIENTS_PREPARED=parent-value
+        local -a installs=(installXrayReality installSingBoxReality customXrayInstall customSingBoxInstall xrayCoreInstall singBoxInstall)
+        unset AUTO_INSTALL AUTO_UUID AUTO_USER AUTO_REALITY_DOMAIN
+        readLastInstallationConfig() { currentUUID=; currentClients=; lastInstallationConfig=; }
+        configureRealityDomainMode() { :; }
+        collectEntryProfile() { :; }
+        readInstallTLSDomain() { :; }
+        nginxRunning() { events+=$'nginx\n'; return 1; }
+        coreSwitchConfigTransaction() {
+            [[ "${PADM_INSTALL_CLIENTS_PREPARED}" == true ]]
+            events+=$'transaction\n'
+            shift
+            "$@"
+        }
+        padmRunPortAllowTransaction() { "$@"; }
+        collectTLSProfile() { tlsCertDomain=tls.example.com; }
+        writeGeneratedJsonFile() { events+=$'write\n'; return 1; }
+        addXrayOutbound() { events+=$'write\n'; return 1; }
+        readSingBoxPortResult() { events+=$'write\n'; return 1; }
+        installTools() {
+            unset -f jq
+            events+=$'tools\n'
+            selectCustomInstallType=,27,
+            if [[ "${install}" == *SingBox* || "${install}" == singBox* ]]; then
+                initSingBoxConfigApply custom 1
+            else
+                initXrayConfigApply custom 1
+            fi
+        }
+        for install in "${installs[@]}"; do
+            jq() { return 127; }
+            for input in "" $'11111111-1111-4111-8111-111111111111\n' $'11111111-1111-4111-8111-111111111111\ninvalid/name\n'; do
+                events=
+                regressionExpectStatus 1 "${install}" 28 < <(printf '%s' "${input}")
+                [[ -z "${events}${currentClients}" && "${PADM_INSTALL_CLIENTS_PREPARED}" == parent-value ]]
+            done
+            events=
+            exec {inputFd}< <(printf '11111111-1111-4111-8111-111111111111\nalice\nnext-parent-action\n')
+            regressionExpectStatus 1 "${install}" 28 <&"${inputFd}"
+            read -r -u "${inputFd}" nextInput
+            [[ "${nextInput}" == next-parent-action && "${events}" == $'nginx\ntransaction\ntools\nwrite\n' ]]
+            [[ "${PADM_INSTALL_CLIENTS_PREPARED}" == parent-value ]]
+            [[ -z "${AUTO_UUID:-}${AUTO_USER:-}" ]]
+            jq -e '.[0] | (.id // .uuid) == "11111111-1111-4111-8111-111111111111" and (.email // .name) == "alice"' <<<"${currentClients}" >/dev/null
+            exec {inputFd}<&-
+        done
     )
 
     (
@@ -676,6 +729,7 @@ runInstallWorkflowRegression() (
         local lastInstallationConfig= selectCoreType= selectCustomInstallType=,28, inputFd nextInput
         unset AUTO_INSTALL AUTO_DOMAIN AUTO_PORT
         readLastInstallationConfig() { :; }
+        coreTemplateCollectInitialClients() { :; }
         configureRealityDomainMode() { :; }
         protocolSelectionShowRiskNotes() { :; }
         installTools() { events+="tools:${domain}"$'\n'; }
@@ -958,6 +1012,13 @@ runInstallWorkflowRegression() (
         read -r -u "${inputFd}" nextInput
         [[ "${nextInput}" == next-parent-action && "${currentClients}" == "${result}" && ! -s "${generationLog}" ]]
         exec {inputFd}<&-
+        # 首个 UUID 不能掩盖其余用户的不兼容凭据。
+        currentUUID=11111111-1111-4111-8111-111111111111
+        currentClients='[{"id":"11111111-1111-4111-8111-111111111111","email":"alice"},{"password":"bob-secret","name":"bob"}]'
+        result=${currentClients}
+        regressionExpectStatus 1 coreTemplateCollectInitialClients xray </dev/null
+        [[ "${currentClients}" == "${result}" && ! -s "${generationLog}" ]]
+        currentUUID=
         currentClients='[{"password":"11111111-1111-4111-8111-111111111111","name":"alice"},{"password":"22222222-2222-4222-8222-222222222222","name":"bob"}]'
         result=${currentClients}
         coreTemplateCollectInitialClients sing-box </dev/null
