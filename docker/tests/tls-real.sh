@@ -137,27 +137,6 @@ mv "${TEST_ROOT}/config.json" "${PADM_DOCKER_INSTALL_DIR}/config/sing-box/config
 dockerGenerateDeployment "${spec}" "${PADM_DOCKER_INSTALL_DIR}/deployment.json"
 dockerGenerateImagesEnv "${spec}" "${PADM_DOCKER_INSTALL_DIR}/images.env" "${PADM_DOCKER_INSTALL_DIR}"
 dockerGenerateCompose "${spec}" "${PADM_DOCKER_INSTALL_DIR}/compose.json"
-jq -n --arg domain "${DOMAIN}" --arg uuid "${UUID}" --slurpfile request "${spec}" '
-  {inbounds:([{tag:"socks-xray",listen_port:2081},{tag:"socks-sing",listen_port:2082},
-    {tag:"socks-ws",listen_port:2083},{tag:"socks-xray-reality",listen_port:2084},
-    {tag:"socks-sing-box-reality",listen_port:2085}] | map(. + {type:"socks",listen:"0.0.0.0"})),
-   outbounds:(([
-    {type:"trojan",tag:"xray",server:"xray",server_port:35443,password:"test-only"},
-    {type:"trojan",tag:"sing",server:"sing-box",server_port:35444,password:"test-only"},
-    {type:"vless",tag:"ws",server:"nginx",server_port:8443,uuid:$uuid,
-      transport:{type:"ws",path:"/padmtestws"}}] |
-    map(. + {tls:{enabled:true,server_name:$domain,certificate_path:"/etc/padm/client/ca.crt"}})) +
-    [$request[0].core.protocols[] | select(.id == 1) |
-      {type:"vless",tag:(.core+"-reality"),server:.core,server_port:.public_port,
-       uuid:.uuid,flow:"xtls-rprx-vision",packet_encoding:"xudp",
-       tls:{enabled:true,server_name:.reality.server_name,utls:{enabled:true,fingerprint:"chrome"},
-         reality:{enabled:true,public_key:.reality.public_key,short_id:.reality.short_id}}}]),
-   route:{rules:[{inbound:["socks-xray"],action:"route",outbound:"xray"},
-     {inbound:["socks-sing"],action:"route",outbound:"sing"},
-     {inbound:["socks-ws"],action:"route",outbound:"ws"},
-     {inbound:["socks-xray-reality"],action:"route",outbound:"xray-reality"},
-     {inbound:["socks-sing-box-reality"],action:"route",outbound:"sing-box-reality"}]}}
-' >"${PADM_DOCKER_INSTALL_DIR}/client/config.json"
 jq --arg ops "${OPS_IMAGE}" --arg sing "${SINGBOX_IMAGE}" --arg domain "${DOMAIN}" '
   .services.xray.ports = [] | .services["sing-box"].ports = [] | .services.nginx.ports = [] |
   .services.nginx.networks = {default:{aliases:[$domain]}} |
@@ -190,10 +169,11 @@ dockerManagedSpecMatchesDeployment "${spec}" "${PADM_DOCKER_INSTALL_DIR}/deploym
     "${PADM_DOCKER_INSTALL_DIR}/images.env"
 [[ "$(dockerTlsConsumers "${DOMAIN}")" == '["xray","sing-box","nginx"]' ]]
 started=1
-dockerComposeRun up -d --wait --wait-timeout 60
+dockerComposeRun up -d --wait --wait-timeout 60 xray sing-box nginx origin
 
 probe() {
     local clientPid status=0
+    # 客户端只从实际 HTTPS 订阅生成；spec 公开字段仅作独立断言和隔离端点映射。
     docker run --rm --init --pull=never --network padm-docker --entrypoint python3 \
         --mount "type=bind,source=${TEST_ROOT}/certs/ca.crt,target=/test-ca.crt,readonly" "${OPS_IMAGE}" -c '
 import json
@@ -203,7 +183,7 @@ import sys
 import urllib.parse
 import urllib.request
 
-expected, domain, token, public_reality = sys.argv[1:]
+expected, domain, token, public_protocols = sys.argv[1:]
 context = ssl.create_default_context(cafile="/test-ca.crt")
 for host, port in (("xray",35443),("sing-box",35444),("nginx",8443)):
     with context.wrap_socket(socket.create_connection((host,port),timeout=5),server_hostname=domain) as s:
@@ -212,25 +192,95 @@ for host, port in (("xray",35443),("sing-box",35444),("nginx",8443)):
     serial = subprocess.check_output(["openssl","x509","-noout","-serial"],input=pem.encode()).decode().strip()
     assert serial == "serial=" + expected, (host,serial)
 data = urllib.request.urlopen("https://"+domain+":8443/subscriptions/"+token,context=context,timeout=5).read()
-assert b"vless://" in data and b"type=ws" in data and b"security=reality" in data
-reality = {p["public_port"]: p for p in json.loads(public_reality)}
-reality_ports = []
-for line in data.decode().splitlines():
+protocols = {p["public_port"]: p for p in json.loads(public_protocols)}
+ports = []
+routes = {"xray":2081,"sing":2082,"ws":2083,"xray-reality":2084,"sing-box-reality":2085}
+outbounds = [
+    {"type":"trojan","tag":tag,"server":host,"server_port":port,"password":"test-only",
+     "tls":{"enabled":True,"server_name":domain,"certificate_path":"/etc/padm/client/ca.crt"}}
+    for tag, host, port in (("xray","xray",35443),("sing","sing-box",35444))
+]
+def parse_link(line):
     link = urllib.parse.urlsplit(line)
-    query = urllib.parse.parse_qs(link.query)
-    if query.get("security") == ["reality"]:
-        p = reality[link.port]
-        assert link.scheme == "vless" and link.hostname == p["server"] and link.username == p["uuid"], link
+    query = urllib.parse.parse_qs(link.query, keep_blank_values=True)
+    p = protocols[link.port]
+    assert (link.scheme == "vless" and link.hostname == p["server"] and
+            link.username == p["uuid"] and link.password is None), link
+    if p["id"] == 1:
         expected_query = {"sni":p["reality"]["server_name"],"pbk":p["reality"]["public_key"],
                           "sid":p["reality"]["short_id"],"flow":"xtls-rprx-vision",
-                          "type":"tcp","fp":"chrome","encryption":"none"}
-        for key, value in expected_query.items():
-            assert query.get(key) == [value], (link.port,key,query)
-        reality_ports.append(link.port)
-assert sorted(reality_ports) == sorted(reality), reality_ports
+                          "type":"tcp","fp":"chrome","encryption":"none","security":"reality"}
+    else:
+        assert p["id"] == 21
+        expected_query = {"sni":p["websocket"]["domain"],"host":p["websocket"]["domain"],
+                          "path":"/"+p["websocket"]["path"]+"ws","type":"ws",
+                          "encryption":"none","security":"tls"}
+    assert set(query) == set(expected_query), (link.port,query)
+    for key, value in expected_query.items():
+        assert query.get(key) == [value], (link.port,key,query)
+    return link, p, {key: values[0] for key, values in query.items()}
+
+sample = urllib.parse.urlsplit(data.decode().splitlines()[0])
+for invalid in (
+    sample._replace(scheme="trojan").geturl(),
+    sample._replace(netloc=f"{sample.username}:extra@{sample.hostname}:{sample.port}").geturl(),
+    sample._replace(query=sample.query+"&sni=").geturl(),
+    sample._replace(query=sample.query+"&unknown=").geturl(),
+):
+    try:
+        parse_link(invalid)
+    except (AssertionError, KeyError, ValueError):
+        pass
+    else:
+        raise AssertionError("invalid subscription URI was accepted")
+
+for line in data.decode().splitlines():
+    link, p, value = parse_link(line)
+    tls = {"enabled":True,"server_name":value["sni"]}
+    if value["security"] == "reality":
+        tag = p["core"]+"-reality"
+        tls.update({"utls":{"enabled":True,"fingerprint":value["fp"]},
+                    "reality":{"enabled":True,"public_key":value["pbk"],"short_id":value["sid"]}})
+        outbound = {"flow":value["flow"],"packet_encoding":"xudp",
+                    "server":p["core"],"server_port":link.port}
+    else:
+        tag = "ws"
+        tls["certificate_path"] = "/etc/padm/client/ca.crt"
+        outbound = {"server":"nginx","server_port":p["websocket"]["tls_port"],
+                    "transport":{"type":value["type"],"path":value["path"],"headers":{"Host":value["host"]}}}
+    outbounds.append(dict(outbound,type="vless",tag=tag,uuid=link.username,tls=tls))
+    ports.append(link.port)
+assert sorted(ports) == sorted(protocols), ports
+config = {"inbounds":[{"type":"socks","tag":"socks-"+tag,"listen":"0.0.0.0","listen_port":port}
+                      for tag, port in routes.items()], "outbounds":outbounds,
+          "route":{"rules":[{"inbound":["socks-"+tag],"action":"route","outbound":tag} for tag in routes]}}
+print(json.dumps(config))
 ' "$1" "${DOMAIN}" "${TOKEN}" "$(jq -c '[.core.protocols[] | select(.id == 1) |
-    {public_port,server,uuid,reality:(.reality | del(.private_key))}]' "${spec}")"
+    {id,core,public_port,server,uuid,reality:(.reality | del(.private_key))}] +
+    [.core.protocols[] | select(.id == 21) | {id,core,public_port,server,uuid,websocket}]' \
+    "${spec}")" >"${PADM_DOCKER_INSTALL_DIR}/client/config.candidate.json"
+    chmod 0640 "${PADM_DOCKER_INSTALL_DIR}/client/config.candidate.json"
+    chown 0:10001 "${PADM_DOCKER_INSTALL_DIR}/client/config.candidate.json"
+    dockerComposeRun run --rm --no-deps client check -c /etc/padm/client/config.candidate.json >/dev/null
+    mv "${PADM_DOCKER_INSTALL_DIR}/client/config.candidate.json" "${PADM_DOCKER_INSTALL_DIR}/client/config.json"
+    dockerComposeRun up -d --no-deps --force-recreate client
     clientPid=$(docker inspect --format '{{.State.Pid}}' "$(dockerComposeRun ps -q client)")
+    # 容器 started 不代表仿真进程已监听；仅等待端口就绪，不重试协议握手。
+    nsenter --target "${clientPid}" --net python3 -c '
+import socket
+import time
+
+deadline = time.monotonic() + 10
+for port in (2081,2082,2083,2084,2085):
+    while True:
+        try:
+            with socket.create_connection(("127.0.0.1",port),timeout=0.2):
+                break
+        except OSError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.05)
+'
     for port in 2081 2082 2083 2084 2085; do
         if ! nsenter --target "${clientPid}" --net curl -fsS --max-time 10 --noproxy "" \
             --socks5-hostname "127.0.0.1:${port}" http://origin:8088/proof.txt |
@@ -240,7 +290,7 @@ assert sorted(reality_ports) == sorted(reality), reality_ports
         fi
     done
     [[ "${status}" == 0 ]] || return 1
-    printf 'docker-tls-real-probe-ok: serial=%s socks=2081,2082,2083,2084,2085\n' "$1"
+    printf 'docker-tls-real-probe-ok: serial=%s source=https-subscription socks=2081,2082,2083,2084,2085\n' "$1"
 }
 rotate() (
     trap 'dockerCommandInterrupted 143' TERM

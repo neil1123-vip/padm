@@ -267,8 +267,9 @@ padm-docker acme auto-renew
 已启用时拒绝切到不支持续期的旧控制 bundle，外部同名任务不覆盖。
 核心 TLS 底座不表示新增协议或完整管理。Linux amd64 与 arm64 仿真已通过双核心
 TLS 夹具、WS 客户端流量及轮换恢复，全部 TLS 探测校验测试 CA/域名；
-amd64 另通过两核 Reality Vision 的公网目标握手、五路流量及恢复，
-新增 Reality 未复验 arm64，也不代表订阅导入或其它目标兼容性通过。
+amd64 与 arm64 仿真另通过实际 HTTPS 订阅解析生成 sing-box 客户端、
+两核 Reality Vision 公网目标握手、五路流量及恢复；隔离端点映射不代表公网入口、
+第三方导入 UI 或其它目标兼容性通过。
 真实 DNS、完整宿主重启、原生 arm64 和可信发布仍待验，
 详见[真实 TLS 验收基线](documents/docker-tls-real-baseline.md)。
 真实 systemd/cron 的隔离调度探针、双向迁移与容器重启已验证，不替代整机或 DNS 验收。

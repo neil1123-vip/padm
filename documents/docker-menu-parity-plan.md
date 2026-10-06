@@ -345,9 +345,12 @@ CI 与 Release；Bash、ShellCheck error 和只读复审通过。
 镜像已完成双核心 TLS 与 Nginx 联合轮换，arm64 仿真也通过原三路用例。
 三个使用测试 CA 正常校验的客户端出站取得实际 HTTP 内容，
 覆盖两个核心 TLS 夹具与 VLESS WS TLS；Python 证书及 HTTPS 订阅探测也校验 CA/域名。
-新增 amd64 五路验收通过：两核心 Reality Vision 经 Debian 公网目标完成握手，
-首装、换证、真实健康故障及 TERM 恢复后均取得 HTTP 内容，耗时 69.897 秒。
-订阅两核参数逐项匹配 spec，未验证订阅导入；新增 Reality 未复验 arm64。
+最终五路脚本在 amd64 / arm64 仿真均通过，耗时 72.719 / 95.714 秒：
+两核心 Reality Vision 经 Debian 公网目标握手，首装、换证、真实健康故障与 TERM
+恢复后均重新解析实际 HTTPS 订阅生成 sing-box 客户端，取得 HTTP 内容。
+订阅参数独立匹配公开 spec，四个坏 URI 反例拒绝；真实候选校验后才替换/重建。
+仅隔离端点映射，不代表公网入口、第三方导入 UI 或原生 arm64 验收。
+仿真暴露客户端监听竞态，增加共享 10 秒端口就绪门禁，不重试协议握手。
 订阅访问、成功换证、真实 sing-box 健康故障恢复及 TERM 恢复通过，
 累计流量不回退。真实测试发现 Compose 会吞掉消费者循环的 stdin，已在共享
 管理调用修复并增加删除修复即失败的最小检查。
