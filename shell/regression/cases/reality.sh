@@ -164,12 +164,30 @@ runRealityProfileFailureRegression() (
     )
 
     (
-        local input inputFd nextInput targetValidations=0 defaultTargetCalls=0 autoReads=0
+        local input inputFd nextInput targetValidations=0 defaultTargetCalls=0 candidateCalls=0 autoReads=0
+        local autoTargetCalls=0 autoTargetStatus=0 validationPolicy= validationStatus=0
+        local menuLog="${root}/target-menu.log"
         unset AUTO_INSTALL AUTO_REALITY_TARGET AUTO_REALITY_SERVER_NAME
         realityEntryHost=node.example.com
-        validateRealityTargetSelection() { targetValidations=$((targetValidations + 1)); }
+        validateRealityTargetSelection() {
+            targetValidations=$((targetValidations + 1))
+            validationPolicy=$1
+            return "${validationStatus}"
+        }
         printRealityTargetProfile() { :; }
+        menuItem() { printf '%s %s\n' "$1" "$2"; }
+        menuRecommendedItem() { menuItem "$@"; }
         selectDefaultRealityTarget() { defaultTargetCalls=$((defaultTargetCalls + 1)); return 1; }
+        selectAutoRecommendedRealityTarget() {
+            autoTargetCalls=$((autoTargetCalls + 1))
+            (( autoTargetStatus == 0 )) || return "${autoTargetStatus}"
+            parseRealityTargetInput random-a.example.com:443
+        }
+        selectRealityTargetCandidateInteractive() {
+            [[ "$1" == detect-first ]] || return 1
+            candidateCalls=$((candidateCalls + 1))
+            parseRealityTargetInput candidate.example.com:443
+        }
         # 复用目标保留自定义 SNI；显式 SNI 优先，新目标默认使用新域名。
         realityTargetHost=old.example.com
         realityTargetPort=8443
@@ -184,15 +202,37 @@ runRealityProfileFailureRegression() (
         collectRealityProfile </dev/null
         [[ "${realityTargetHost}" == new.example.com && "${realityTargetPort}" == 9443 && "${realitySNI}" == new.example.com ]]
         unset AUTO_REALITY_TARGET
+        # 默认和选项 1 都进入检测后选择，不调用自动推荐，也不消费上级菜单输入。
+        for input in "" 1; do
+            realityTargetHost=
+            realityTargetPort=
+            realitySNI=
+            exec {inputFd}< <(printf '%s\nnext-parent-action\n' "${input}")
+            collectRealityProfile <&"${inputFd}" >"${menuLog}"
+            read -r -u "${inputFd}" nextInput
+            [[ "${realityTargetHost}" == candidate.example.com && "${nextInput}" == next-parent-action ]]
+            [[ "${defaultTargetCalls}" == 0 ]]
+            [[ "$(<"${menuLog}")" == $'1 检测候选后选择\n2 手动输入' ]]
+            exec {inputFd}<&-
+        done
+        [[ "${candidateCalls}" == 2 ]]
         targetValidations=0
         for input in "" manual.example.com:9443; do
             realityTargetHost=
             realityTargetPort=
             realitySNI=
-            regressionExpectStatus 1 collectRealityProfile < <(printf '3\n%s' "${input}")
+            regressionExpectStatus 1 collectRealityProfile < <(printf '2\n%s' "${input}")
             [[ -z "${realityTargetHost}${realityTargetPort}${realitySNI}" && "${targetValidations}" == 0 && "${defaultTargetCalls}" == 0 ]]
         done
-        exec {inputFd}< <(printf '3\nmanual.example.com:9443\nnext-parent-action\n')
+        realityTargetHost=
+        realityTargetPort=
+        realitySNI=
+        exec {inputFd}< <(printf '2\n\nnext-parent-action\n')
+        regressionExpectStatus 1 collectRealityProfile <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        [[ -z "${realityTargetHost}${realityTargetPort}${realitySNI}" && "${nextInput}" == next-parent-action && "${defaultTargetCalls}" == 0 ]]
+        exec {inputFd}<&-
+        exec {inputFd}< <(printf '2\nmanual.example.com:9443\nnext-parent-action\n')
         collectRealityProfile <&"${inputFd}"
         read -r -u "${inputFd}" nextInput
         [[ "${realityTargetHost}" == manual.example.com && "${realityTargetPort}" == 9443 && "${realitySNI}" == manual.example.com ]]
@@ -201,7 +241,7 @@ runRealityProfileFailureRegression() (
         realityTargetHost=
         realityTargetPort=
         realitySNI=
-        exec {inputFd}< <(printf '9\n3\ncorrected.example.com\nnext-parent-action\n')
+        exec {inputFd}< <(printf '3\n2\ncorrected.example.com\nnext-parent-action\n')
         collectRealityProfile <&"${inputFd}"
         read -r -u "${inputFd}" nextInput
         [[ "${realityTargetHost}" == corrected.example.com && "${nextInput}" == next-parent-action && "${defaultTargetCalls}" == 0 ]]
@@ -213,8 +253,83 @@ runRealityProfileFailureRegression() (
         [[ "${defaultTargetCalls}" == 0 ]]
         AUTO_INSTALL=true
         autoRead() { autoReads=$((autoReads + 1)); printf -v "$3" '%s' 9; }
+        exec {inputFd}< <(printf 'next-parent-action\n')
+        collectRealityProfile <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        [[ "${realityTargetHost}" == random-a.example.com && "${validationPolicy}" == auto && "${autoTargetCalls}" == 1 ]]
+        [[ "${nextInput}" == next-parent-action && "${autoReads}" == 0 && "${defaultTargetCalls}" == 0 && "${candidateCalls}" == 2 ]]
+        exec {inputFd}<&-
+        realityTargetHost=
+        autoTargetStatus=1
         regressionExpectStatus 1 collectRealityProfile </dev/null
-        [[ "${autoReads}" == 1 && "${defaultTargetCalls}" == 0 ]]
+        [[ -z "${realityTargetHost}" && "${autoTargetCalls}" == 2 && "${autoReads}" == 0 ]]
+        autoTargetStatus=0
+        validationStatus=1
+        regressionExpectStatus 1 collectRealityProfile </dev/null
+        [[ "${validationPolicy}" == auto && "${autoTargetCalls}" == 3 && "${autoReads}" == 0 ]]
+        validationStatus=0
+        AUTO_REALITY_TARGET=explicit.example.com:9443
+        collectRealityProfile </dev/null
+        [[ "${realityTargetHost}" == explicit.example.com && "${realityTargetPort}" == 9443 && "${autoReads}" == 0 && "${validationPolicy}" == manual && "${autoTargetCalls}" == 3 ]]
+        unset AUTO_REALITY_TARGET
+        realitySNI=reused-sni.example.com
+        collectRealityProfile </dev/null
+        [[ "${realitySNI}" == reused-sni.example.com && "${autoReads}" == 0 && "${autoTargetCalls}" == 3 ]]
+    )
+
+    (
+        local scanCalls=0 scanStatus=0 detectorStatus=0 goodCount=1 i testIndex scanRecords selectedHost
+        export PADM_REALITY_TARGET_CANDIDATES_FILE="${root}/random-candidates.tsv"
+        export PADM_REALITY_TARGET_RESULTS_FILE="${root}/random-results.tsv"
+        export PADM_REALITY_TARGET_SCAN_FILE="${PADM_REALITY_TARGET_RESULTS_FILE}"
+        local recordsFile="${root}/random-scan-records.tsv"
+        local PADM_REALITY_AUTO_PROBE_LIMIT=1 PADM_REALITY_TARGET_SELECTION_REQUIRE_SCAN=1
+        unset AUTO_REALITY_SERVER_NAME
+        : >"${PADM_REALITY_TARGET_CANDIDATES_FILE}"
+        for ((i = 1; i <= 13; i++)); do
+            printf 'random-%s.example.com|sni-%s.example.com|Random %s|global|test|unknown|%s|yes|fixture\n' "${i}" "${i}" "${i}" "${i}" >>"${PADM_REALITY_TARGET_CANDIDATES_FILE}"
+        done
+        printf 'manual-only.example.com|manual-only.example.com|Manual|global|test|unknown|14|no|fixture\n' >>"${PADM_REALITY_TARGET_CANDIDATES_FILE}"
+        realityTargetDetector() { (( detectorStatus == 0 )) || return 1; printf 'fake-xray\n'; }
+        scanLocalAsnRealityTargets() {
+            [[ "$1" == recommended_only && "${PADM_REALITY_TARGET_SELECTION_REQUIRE_SCAN}" == 0 ]] || return 1
+            scanCalls=$((scanCalls + 1))
+            (( scanStatus == 0 )) || return "${scanStatus}"
+            realityTargetRefreshRecords "$1" >"${recordsFile}"
+            [[ "$(wc -l <"${recordsFile}")" == 13 ]] || return 1
+            # 旧库和非推荐项保持 A，但不能进入本次随机候选。
+            formatRealityTargetResultLine old-library.example.com:443 old-library.example.com Old test no 192.0.2.1 AS64500 ExampleNet same_asn A yes 4096 yes 1 fixture >"${PADM_REALITY_TARGET_RESULTS_FILE}"
+            formatRealityTargetResultLine manual-only.example.com:443 manual-only.example.com Manual test no 192.0.2.1 AS64500 ExampleNet same_asn A yes 4096 yes 1 fixture >>"${PADM_REALITY_TARGET_RESULTS_FILE}"
+            for ((i = 1; i <= 13; i++)); do
+                local score=B
+                if (( goodCount > 0 && i == 13 || goodCount > 1 && i == 1 )); then score=A; fi
+                formatRealityTargetResultLine "random-${i}.example.com:443" "sni-${i}.example.com" Random test no 192.0.2.1 AS64500 ExampleNet same_asn "${score}" yes 4096 yes 2 fixture >>"${PADM_REALITY_TARGET_RESULTS_FILE}"
+            done
+        }
+        selectAutoRecommendedRealityTarget </dev/null
+        [[ "${realityTargetHost}" == random-13.example.com && "${realityTargetPort}" == 443 && "${realitySNI}" == sni-13.example.com && "${scanCalls}" == 1 ]]
+        AUTO_REALITY_SERVER_NAME=override.example.com
+        selectAutoRecommendedRealityTarget </dev/null
+        [[ "${realitySNI}" == override.example.com ]]
+        unset AUTO_REALITY_SERVER_NAME
+        goodCount=2
+        for ((testIndex = 0; testIndex < 4; testIndex++)); do
+            selectAutoRecommendedRealityTarget </dev/null
+            selectedHost=${realityTargetHost}
+            [[ "${selectedHost}" == random-1.example.com || "${selectedHost}" == random-13.example.com ]]
+            [[ "${realitySNI}" == "sni-${selectedHost#random-}" ]]
+        done
+        realityTargetHost=unchanged.example.com
+        goodCount=0
+        regressionExpectStatus 1 selectAutoRecommendedRealityTarget </dev/null
+        [[ "${realityTargetHost}" == unchanged.example.com ]]
+        scanStatus=1
+        regressionExpectStatus 1 selectAutoRecommendedRealityTarget </dev/null
+        [[ "${realityTargetHost}" == unchanged.example.com ]]
+        scanRecords=${scanCalls}
+        detectorStatus=1
+        regressionExpectStatus 1 selectAutoRecommendedRealityTarget </dev/null
+        [[ "${scanCalls}" == "${scanRecords}" && "${realityTargetHost}" == unchanged.example.com ]]
     )
 
     AUTO_INSTALL=

@@ -907,7 +907,7 @@ showInstallArgsHelp() {
 ├─ 关键概念
 │ TLS 域名/端口: 普通 TLS 协议入口；当前不作为新人首选，传统 TLS 类协议存在更高识别风险
 │ Reality entry: 客户端实际连接地址，通常是自有域名、CDN 入口或服务器 IP
-│ Reality target: REALITY 伪装目标站；自动仅接受实测 no+A，需要 Xray 检测，不使用 B/C 级备选
+│ Reality target: 交互安装检测后选 A 级或手动输入；非交互未指定时检测全部推荐候选并随机选 A 级
 │ 手工目标: 实测全部 A/AAAA；B/C 警告，Cloudflare 中继风险或探测未知均拒绝
 │ Reality SNI: REALITY 握手 SNI，默认等于 target host
 │ Reality 不申请本机 TLS 证书，也不因安装操作 Nginx；严格域名仅支持单选 Vision 1
@@ -935,7 +935,7 @@ showInstallArgsHelp() {
 │ --reuse-last <yes|no|y|n>               是否复用上次安装配置
 │ --clean-acme <yes|no|y|n>               清空上次配置时是否清理 acme
 │ --reality-domain <yes|no|y|n>           严格域名模式，仅支持单选 Reality Vision 1
-│ --reality-target <host[:port]>          REALITY 伪装目标站；未传自动选择，无可接受的安全结果则失败
+│ --reality-target <host[:port]>          REALITY 伪装目标站；非交互未传且无可复用目标时检测后随机选 A 级
 │ --reality-server-name <sni>             REALITY SNI，默认等于 target host
 │ --entry-host <host>                     Reality entry；优先于 --domain、历史 entry、currentHost 和公网 IP
 │ --subscribe-port <port>                 订阅服务端口
@@ -1201,7 +1201,7 @@ showAutoInstallSummary() {
         "用户名：$(autoInstallSummaryValue user "${AUTO_USER:-随机生成}")" \
         "TLS 域名：$(autoInstallSummaryValue domain "${AUTO_DOMAIN:-未设置}")" \
         "入口地址：$(autoInstallSummaryValue entry_host "${AUTO_ENTRY_HOST:-自动推导}")" \
-        "REALITY target：$(autoInstallSummaryValue reality_target "${AUTO_REALITY_TARGET:-默认推荐}")" \
+        "REALITY target：$(autoInstallSummaryValue reality_target "${AUTO_REALITY_TARGET:-复用已有目标，否则检测后随机选 A 级}")" \
         "订阅端口：$(autoInstallSummaryValue subscribe_port "${AUTO_SUBSCRIBE_PORT:-按安装流程选择}")"
 }
 

@@ -1873,46 +1873,26 @@ selectRealityTargetCandidateInteractive() {
 }
 
 selectAutoRecommendedRealityTarget() {
-    local detector='' line host sni name category target record probeRecord probeStatus probePayload
-    local currentProfile rest currentAsn='' currentOrg='' probeLimit probed=0 selectedTarget
-    local resultTarget resultSni resultName resultCategory cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note location
+    local detector='' line host sni _rest
+    local PADM_REALITY_TARGET_SELECTION_REQUIRE_SCAN=0
+    local -a candidates=()
 
     detector=$(realityTargetDetector 2>/dev/null || true)
     if [[ -z "${detector}" ]]; then
         realityTargetStatusBlock red "REALITY 自动推荐" "缺少 Xray，无法验证 A 级目标" "自动模式不接受 OpenSSL 的 B/C 级回退"
         return 1
     fi
-    if currentProfile=$(currentRealityNetworkProfile 2>/dev/null); then
-        rest=${currentProfile#*$'\t'}
-        currentAsn=${rest%%$'\t'*}
-        currentOrg=${rest#*$'\t'}
-    fi
-
-    probeLimit=${PADM_REALITY_AUTO_PROBE_LIMIT:-10}
-    [[ "${probeLimit}" =~ ^[0-9]+$ && "${probeLimit}" -gt 0 ]] || probeLimit=10
-
-    while IFS= read -r line; do
-        IFS='|' read -r host sni name _region category _cdn _rank _recommended _note <<<"${line}"
-        target=$(formatRealityTarget "${host}" 443)
-        probed=$((probed + 1))
-        realityTargetStatusBlock yellow "REALITY 自动推荐" "正在检测全部 A/AAAA: ${target}" "SNI: ${sni}" "进度: ${probed}/${probeLimit}"
-        record=$(formatRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" unknown unknown unknown unknown unknown unknown unknown unknown unknown 0 "自动推荐")
-        probeRecord=$(probeRealityTargetRecord "${detector}" "${record}" "${currentAsn}" "${currentOrg}")
-        IFS=$'\t' read -r probeStatus probePayload <<<"${probeRecord}"
-        if [[ "${probeStatus}" == "OK" && -n "${probePayload}" ]]; then
-            IFS=$'\x1f' read -r resultTarget resultSni resultName resultCategory cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note location <<<"${probePayload//$'\t'/$'\x1f'}"
-            writeRealityTargetResultLine "${resultTarget}" "${resultSni}" "${resultName}" "${resultCategory}" "${cdnRisk}" \
-                "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}" "${location}" || return 1
-        fi
-        (( probed >= probeLimit )) && break
-    done < <(realityTargetFilteredCandidates recommended)
-
-    if ! selectScannedRealityTarget; then
+    scanLocalAsnRealityTargets recommended_only || return 1
+    PADM_REALITY_TARGET_SELECTION_REQUIRE_SCAN=1
+    mapfile -t candidates < <(realityTargetFilteredCandidates recommended)
+    if (( ${#candidates[@]} == 0 )); then
         realityTargetStatusBlock red "REALITY 自动推荐" "未找到 cdn_risk=no 的实测 A 级目标" "未写入 B/C 级或未经检测的兜底目标"
         return 1
     fi
-    selectedTarget=$(formatRealityTarget "${realityTargetHost}" "${realityTargetPort}")
-    realityTargetStatusBlock green "REALITY 自动推荐" "已选择: ${selectedTarget}" "cdn_risk=no，评分=A" "实测候选: ${probed}"
+    line=${candidates[RANDOM % ${#candidates[@]}]}
+    IFS='|' read -r host sni _rest <<<"${line}"
+    AUTO_REALITY_SERVER_NAME=${AUTO_REALITY_SERVER_NAME:-${sni}} parseRealityTargetInput "$(formatRealityTarget "${host}" 443)" || return 1
+    realityTargetStatusBlock green "REALITY 自动推荐" "随机选择: ${realityTargetHost}:${realityTargetPort}" "cdn_risk=no，评分=A" "可选 A 级: ${#candidates[@]}"
     return 0
 }
 
@@ -3103,7 +3083,7 @@ scanLocalAsnRealityTargets() {
     scanSeconds=$(( $(date +%s) - scanStart ))
     realityTargetStatusBlock green "REALITY 目标库刷新" "复测完成" "目标: ${totalCandidates}" "并发: ${maxJobs}" "A 级目标: ${resolved}" "same_asn: ${sameAsn}" "same_provider: ${sameProvider}" "different_network: ${differentNetwork}" "unknown: ${unknownNetwork}" "非候选/失败: ${failed}" "耗时: ${scanSeconds}s"
     if [[ "$(realityTargetResultCount)" -gt 0 ]]; then
-        realityTargetStatusBlock green "REALITY 目标库刷新" "自动推荐将只使用 cdn_risk=no 的 A 级目标"
+        realityTargetStatusBlock green "REALITY 目标库刷新" "候选列表仅展示 cdn_risk=no 的 A 级目标"
     else
         realityTargetStatusBlock yellow "REALITY 目标库刷新" "未得到 cdn_risk=no 的 A 级目标" "不会写入未经检测的兜底目标"
     fi

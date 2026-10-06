@@ -926,41 +926,33 @@ collectRealityProfile() {
     elif [[ -n "${realityTargetHost:-}" ]]; then
         AUTO_REALITY_SERVER_NAME=${AUTO_REALITY_SERVER_NAME:-${realitySNI:-}} \
             parseRealityTargetInput "${realityTargetHost}:${realityTargetPort:-443}" || return 1
+    elif [[ -n "${AUTO_INSTALL:-}" ]]; then
+        selectionPolicy=auto
+        selectAutoRecommendedRealityTarget || return 1
     else
         echoContent title "\n┌─ Reality 伪装目标 ─────────────────────────────────"
         menuLine "entry：客户端连接到你的服务器地址，已在订阅中作为 server/@host 使用"
         menuLine "target：REALITY 伪装访问的外部真实 HTTPS 站点，写入服务端握手配置"
         menuLine "SNI：REALITY 握手域名，默认等于 target host；除非明确知道原因，不要单独改"
-        menuLine "自动推荐仅接受 cdn_risk=no 的实测 A 级结果，不使用 B/C 级备选"
+        menuLine "候选列表仅展示 cdn_risk=no 的实测 A 级结果，不推荐 B/C 级备选"
         menuLine "PQC/ML-DSA-65 场景需要目标站支持 X25519MLKEM768 且证书链足够长"
         menuClose
         echoContent title "┌─ REALITY 目标站选择 ───────────────────────────────"
-        menuRecommendedItem 1 "自动推荐" "仅实测 A 级；需要 Xray 检测"
-        menuItem 2 "候选列表" "先检测全部候选，再从通过检测的结果中选择"
-        menuItem 3 "手动输入" "输入 host 或 host:port，端口默认 443"
+        menuItem 1 "检测候选后选择" "先检测全部候选，再从 A 级结果中选择"
+        menuItem 2 "手动输入" "输入 host 或 host:port，端口默认 443"
         menuClose
         while true; do
             menuReadChoice reality_target_mode "请选择[默认1]:" selectRealityTargetMode true || return 1
             case "${selectRealityTargetMode:-1}" in
             1)
-                selectionPolicy=auto
-                selectDefaultRealityTarget || return 1
-                ;;
-            2)
                 selectRealityTargetCandidateInteractive detect-first || return 1
                 ;;
-            3)
-                menuReadChoice reality_target "请输入REALITY伪装目标域名，默认端口443:" targetInput true || return 1
-                if [[ -z "${targetInput}" ]]; then
-                    selectionPolicy=auto
-                    selectDefaultRealityTarget || return 1
-                else
-                    parseRealityTargetInput "${targetInput}" || return 1
-                fi
+            2)
+                menuReadChoice reality_target "请输入REALITY伪装目标 host[:port]，默认端口443[回车取消]:" targetInput || return 1
+                parseRealityTargetInput "${targetInput}" || return 1
                 ;;
             *)
                 errorCard "选择错误"
-                [[ -z "${AUTO_INSTALL:-}" ]] || return 1
                 continue
                 ;;
             esac
