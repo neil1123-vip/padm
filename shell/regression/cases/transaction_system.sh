@@ -289,6 +289,25 @@ SH
         return 1
     fi
     [[ -z "${SERVICE_ACTIONS}" ]]
+    (
+        local SERVICE_QUEUE_ALLOW_FAILURE=previous actions= handlerRc=7
+        runServiceAction() {
+            [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == true ]] || return 99
+            actions+="$1:$2"$'\n'
+            [[ "$1" != xray ]] || return "${handlerRc}"
+        }
+        serviceQueueStart nginx
+        serviceQueueStop xray
+        serviceQueueStart nginx
+        serviceQueueRestart nginx
+        [[ "${SERVICE_ACTIONS}" == $'\nnginx:start\nxray:stop\nnginx:restart' ]]
+        regressionExpectStatus 1 serviceQueueApply
+        [[ "${actions}" == $'nginx:start\nxray:stop\nnginx:restart\n' ]]
+        [[ -z "${SERVICE_ACTIONS}" && "${SERVICE_QUEUE_ALLOW_FAILURE}" == previous ]]
+        actions=
+        regressionExpectStatus 7 runCoreServiceActionAllowFailure runServiceAction xray stop
+        [[ "${actions}" == $'xray:stop\n' && "${SERVICE_QUEUE_ALLOW_FAILURE}" == previous ]]
+    )
 
     local xrayWaitLog="${serviceTmp}/xray-wait.log"
     export PADM_XRAY_SYSTEMD_SERVICE_FILE="${serviceTmp}/xray.service"

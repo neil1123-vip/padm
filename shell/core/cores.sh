@@ -1760,12 +1760,8 @@ appendSingBoxCompatibilityHints() {
 }
 
 runCoreServiceActionAllowFailure() {
-    local previousAllowFailure="${SERVICE_QUEUE_ALLOW_FAILURE:-}"
-    SERVICE_QUEUE_ALLOW_FAILURE=true
+    local SERVICE_QUEUE_ALLOW_FAILURE=true
     "$@"
-    local rc=$?
-    SERVICE_QUEUE_ALLOW_FAILURE="${previousAllowFailure}"
-    return "${rc}"
 }
 
 runCoreInstall() {
@@ -1993,12 +1989,9 @@ installDownloadedSingBoxBinary() {
     local tmpDir=${2:-}
     local singBoxConfigPath=${singBoxConfigPath:-$(singBoxConfigShardDir)}
     local oldBinary backupBinary extractedDir newBinary logFile cronetPath cronetBackup actualVersion migrationBackupDir=
-    local reusedPreparedDir=false
     local rc
     logFile=$(coreTmpFilePath padm-core-sing-box-upgrade-test.log)
-    if [[ -n "${tmpDir}" ]]; then
-        reusedPreparedDir=true
-    else
+    if [[ -z "${tmpDir}" ]]; then
         padmCreateTempPath tmpDir -d /etc/padm/tmp.sing-box.XXXXXX || return 1
         downloadSingBoxReleaseBinaryToTempDir "${version}" "${tmpDir}"
         rc=$?
@@ -2019,13 +2012,11 @@ installDownloadedSingBoxBinary() {
         errorCard "sing-box 已校验临时文件不可用"
         return 1
     fi
-    if [[ "${reusedPreparedDir}" == "true" ]]; then
-        actualVersion=$(singBoxBinaryVersion "${newBinary}" || true)
-        if [[ -z "${actualVersion}" || "${actualVersion#v}" != "${version#v}" ]]; then
-            padmRemoveCleanupPath "${tmpDir}"
-            statusCard "sing-box 更新失败" "已校验二进制版本发生变化" "目标版本: ${version}" "实际版本: ${actualVersion:-无法解析}"
-            return 1
-        fi
+    actualVersion=$(singBoxBinaryVersion "${newBinary}" || true)
+    if [[ -z "${actualVersion}" || "${actualVersion#v}" != "${version#v}" ]]; then
+        padmRemoveCleanupPath "${tmpDir}"
+        statusCard "sing-box 更新失败" "已校验二进制版本发生变化" "目标版本: ${version}" "实际版本: ${actualVersion:-无法解析}"
+        return 1
     fi
     if [[ "$(singBoxV2rayApiCapability "${newBinary}")" != supported ]]; then
         padmRemoveCleanupPath "${tmpDir}"

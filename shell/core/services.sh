@@ -84,7 +84,7 @@ serviceQueueAdd() {
     local serviceName=$1
     local action=$2
     local entry="${serviceName}:${action}"
-    if ! printf '%s\n' "${SERVICE_ACTIONS}" | grep -qx "${entry}"; then
+    if [[ $'\n'"${SERVICE_ACTIONS}"$'\n' != *$'\n'"${entry}"$'\n'* ]]; then
         SERVICE_ACTIONS="${SERVICE_ACTIONS}
 ${entry}"
     fi
@@ -194,8 +194,7 @@ runServiceAction() {
 serviceQueueApply() {
     local entry serviceName action
     local status=0
-    local previousAllowFailure="${SERVICE_QUEUE_ALLOW_FAILURE:-}"
-    SERVICE_QUEUE_ALLOW_FAILURE=true
+    local SERVICE_QUEUE_ALLOW_FAILURE=true
     while read -r entry; do
         [[ -n "${entry}" ]] || continue
         serviceName=${entry%%:*}
@@ -203,7 +202,6 @@ serviceQueueApply() {
         runServiceAction "${serviceName}" "${action}" || status=1
     done <<<"${SERVICE_ACTIONS}"
     SERVICE_ACTIONS=
-    SERVICE_QUEUE_ALLOW_FAILURE="${previousAllowFailure}"
     return "${status}"
 }
 
@@ -374,8 +372,7 @@ singBoxRunning() {
     done < <(pgrep -x sing-box 2>/dev/null)
     if [[ "${release:-}" != "alpine" && -f "${systemdServiceFile}" ]] && padmCommandExists systemctl; then
         systemctl is-active --quiet sing-box.service && return 0
-    fi
-    if [[ -n "${openRcServiceFile}" && -f "${openRcServiceFile}" ]] && padmCommandExists rc-service; then
+    elif [[ -n "${openRcServiceFile}" && -f "${openRcServiceFile}" ]] && padmCommandExists rc-service; then
         rc-service sing-box status >/dev/null 2>&1 && return 0
     fi
     return 1
@@ -477,8 +474,7 @@ xrayRunning() {
     done < <(pgrep -x xray 2>/dev/null)
     if [[ "${release:-}" != "alpine" && -f "${systemdServiceFile}" ]] && padmCommandExists systemctl; then
         systemctl is-active --quiet xray.service && return 0
-    fi
-    if [[ -n "${openRcServiceFile}" && -f "${openRcServiceFile}" ]] && padmCommandExists rc-service; then
+    elif [[ -n "${openRcServiceFile}" && -f "${openRcServiceFile}" ]] && padmCommandExists rc-service; then
         rc-service xray status >/dev/null 2>&1 && return 0
     fi
     return 1

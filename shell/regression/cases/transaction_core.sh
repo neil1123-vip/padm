@@ -106,6 +106,41 @@ runSingBoxStatsBuildRegression() (
         printf 'stats\n' >>"${root}/stats-calls"
         return "${statsResult}"
     }
+    (
+        local entry candidate candidateVersion downloadCalls=0
+        local oldCronet
+        oldCronet=$(<"${root}/installed/libcronet.so")
+        padmCreateTempPath() {
+            local candidateTmp
+            [[ "$2" == -d ]] || return 1
+            candidateTmp=$(mktemp -d "${PADM_TMP_DIR}/candidate.XXXXXX") || return 1
+            printf -v "$1" '%s' "${candidateTmp}"
+        }
+        # 两种入口都在迁移和停服前重新核对版本，不依赖下载 helper 的旧校验结果。
+        downloadSingBoxReleaseBinaryToTempDir() {
+            local extractedDir="$2/${packageDir}"
+            downloadCalls=$((downloadCalls + 1))
+            mkdir -p "${extractedDir}"
+            printf '#!/usr/bin/env bash\nprintf "sing-box version %s\\nTags: with_v2ray_api\\n"\n' "${candidateVersion}" >"${extractedDir}/sing-box"
+            chmod 755 "${extractedDir}/sing-box"
+            printf 'new-cronet\n' >"${extractedDir}/libcronet.so"
+        }
+        for entry in downloaded prepared; do
+            for candidateVersion in 1.13.0 ''; do
+                candidate=
+                downloadCalls=0
+                if [[ "${entry}" == prepared ]]; then
+                    candidate="${root}/candidate"
+                    downloadSingBoxReleaseBinaryToTempDir "${version}" "${candidate}"
+                fi
+                regressionExpectStatus 1 installDownloadedSingBoxBinary "${version}" "${candidate}"
+                [[ "${downloadCalls}" == 1 ]]
+                [[ "${serviceStops}" == 0 && "${migrationCalls}" == 0 && ! -s "${root}/stats-calls" ]]
+                [[ "$(<"${PADM_SINGBOX_BINARY}")" == "${originalBinary}" ]]
+                [[ "$(<"${root}/installed/libcronet.so")" == "${oldCronet}" ]]
+            done
+        done
+    )
     regressionExpectStatus 1 installDownloadedSingBoxBinary "${version}" "${root}/unsupported"
     [[ "${serviceStops}" == 0 && "${migrationCalls}" == 0 && ! -s "${root}/stats-calls" ]]
     [[ "$(<"${PADM_SINGBOX_BINARY}")" == "${originalBinary}" ]]
@@ -225,6 +260,36 @@ runSingBoxCustomPathsRegression() (
         waitForServiceState() { return 0; }
         handleSingBox start >/dev/null 2>&1
         [[ "$(<"${managerLog}")" == 'openrc:sing-box start' ]]
+    )
+    (
+        # 两套服务文件并存时，状态检查和启停必须使用同一个管理器。
+        local service managerRc=3 managerLog="${root}/mixed-manager.log"
+        release=debian
+        pgrep() { return 1; }
+        sleep() { return 0; }
+        singBoxMergeConfig() { return 0; }
+        padmCommandExists() { [[ "$1" == systemctl || "$1" == rc-service ]]; }
+        systemctl() {
+            printf 'systemd:%s\n' "$*" >>"${managerLog}"
+            case "$1" in
+            is-active) return "${managerRc}" ;;
+            start) managerRc=0 ;;
+            stop) managerRc=3 ;;
+            esac
+        }
+        rc-service() { printf 'openrc:%s\n' "$*" >>"${managerLog}"; return 0; }
+        for service in xray sing-box; do
+            managerRc=3
+            : >"${managerLog}"
+            regressionExpectStatus 1 serviceRunning "${service}"
+            runServiceAction "${service}" start >/dev/null 2>&1
+            serviceRunning "${service}"
+            runServiceAction "${service}" stop >/dev/null 2>&1
+            regressionExpectStatus 1 serviceRunning "${service}"
+            grep -qx "systemd:start ${service}.service" "${managerLog}"
+            grep -qx "systemd:stop ${service}.service" "${managerLog}"
+            ! grep -q '^openrc:' "${managerLog}"
+        done
     )
 
     local -a procArgsFixture=("${PADM_SINGBOX_BINARY}" run -c "${root}/conf/config.json") parsedArgs=()
