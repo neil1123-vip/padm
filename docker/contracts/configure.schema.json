@@ -52,6 +52,9 @@
                 "$ref": "#/$defs/grpc_reality_protocol"
               },
               {
+                "$ref": "#/$defs/trojan_protocol"
+              },
+              {
                 "$ref": "#/$defs/hysteria2_protocol"
               },
               {
@@ -316,7 +319,7 @@
         "properties": {
           "core": {
             "properties": {
-              "protocols": {"contains": {"properties": {"id": {"enum": [3, 4, 5, 21, 31]}}}}
+              "protocols": {"contains": {"properties": {"id": {"enum": [3, 4, 5, 21, 28, 31]}}}}
             }
           }
         }
@@ -350,7 +353,7 @@
         "properties": {
           "core": {
             "properties": {
-              "protocols": {"contains": {"properties": {"id": {"enum": [3, 4, 5, 30, 31]}}}}
+              "protocols": {"contains": {"properties": {"id": {"enum": [3, 4, 5, 28, 30, 31]}}}}
             }
           }
         }
@@ -737,6 +740,40 @@
                 "service_name": {
                   "type": "string",
                   "pattern": "^[A-Za-z0-9._-]{1,64}$",
+                  "not": {"pattern": "[\\s\\u0000-\\u001f\\u007f]"}
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "trojan_protocol": {
+      "allOf": [
+        {"$ref": "#/$defs/protocol_base"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "core", "listener_id", "server", "public_port", "address_families", "name", "uuid", "trojan"],
+          "properties": {
+            "id": {"const": 28},
+            "core": {"enum": ["xray", "sing-box"]},
+            "listener_id": {
+              "type": "string",
+              "pattern": "^entry-[a-z0-9][a-z0-9-]{0,47}$"
+            },
+            "server": {"$ref": "#/$defs/server_address"},
+            "public_port": {"$ref": "#/$defs/port"},
+            "address_families": {"$ref": "#/$defs/address_families"},
+            "name": {"$ref": "#/$defs/account_name"},
+            "uuid": {"$ref": "#/$defs/uuid"},
+            "trojan": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["domain"],
+              "properties": {
+                "domain": {
+                  "$ref": "#/$defs/hostname",
                   "not": {"pattern": "[\\s\\u0000-\\u001f\\u007f]"}
                 }
               }

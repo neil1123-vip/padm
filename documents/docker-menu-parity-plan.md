@@ -16,13 +16,13 @@
 | --- | --- | --- |
 | 1. 功能矩阵 | 已完成，提交 `7fe6a9e` | 协议与功能边界、管理状态、合同回归 |
 | 2. 菜单与可信首次配置 | 2A–2C 已实现；本地 PTY、事务和 Linux 权限通过，真实发布/连通待验 | 安装后进入菜单、独立命令生命周期、无需手填镜像的首次配置 |
-| 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2–3C.7 Reality/Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC 基础入口已通过本地与 amd64 传输验收 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
+| 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2–3C.8 Reality/Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC/direct Trojan 基础入口已通过本地与 amd64 传输验收 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
 | 4. 用户、订阅与服务维护 | 未开始 | 本机用户业务、多服务器后端、分范围备份恢复、核心运维 |
 | 5. 站点、路由与宿主集成 | 未开始 | 站点管理、内部能力、规则所有权及可撤销宿主操作 |
 | 6. 发布与完整验收 | 未开始 | 迁移文档、真实 Linux 与双架构证据、受门禁保护的 Release |
 
 当前机器可读支持状态以
-[`features.json`](../docker/contracts/features.json)为准：协议 `1`、`2`、`3`、`4`、`5`、`21`、`26`、`30`、`31` 的初始
+[`features.json`](../docker/contracts/features.json)为准：协议 `1`、`2`、`3`、`4`、`5`、`21`、`26`、`28`、`30`、`31` 的初始
 配置运行已支持，协议管理工作流仍为 `deferred`。发布订阅要求 Xray、协议 `21`
 和受管 TLS；不能由“可以生成链接”推断任意核心已经支持 HTTPS 订阅发布。
 第一步的回归使用模拟 Docker，不能代替真实容器、SSH 终端和客户端连通验证。
@@ -712,7 +712,53 @@ bash docker/tests/tuic-real.sh \
 
 未验公网 UDP 宿主入口、第三方导入 UI、保持打开的长会话、真实 0-RTT 重放行为、
 原生 arm64、真实 DNS/整机重启或可信发布；完整用户管理及端口跳跃尚未开放。
-3B.4、其余 3C、3D、4A、5C 仍待完成，下个普通协议为 `28` direct Trojan。
+3B.4、其余 3C、3D、4A、5C 仍待完成；direct Trojan 交付见 3C.8。
+
+#### 3C.8 Direct Trojan 基础入口
+
+协议 `28` 仅接受 v3，Xray 与 sing-box 首配均选 `11`；副核心首配仍为 Reality Vision。
+TCP/TLS 双栈直连，不需要 Nginx 或 fallback；复用受管 TLS/ACME 和现有候选事务。
+UUID 同时作为密码与统计账号，跨核心复制仍共享累计流量和额度。
+首配、完整规格导入、通用字段编辑、跨核心复制/删除及 `trojan://` 分享链接接入。
+服务器地址与 TLS 域名可不同，URI 使用独立 SNI、百分号编码和 IPv6 authority。
+TLS 域名、凭据及已有入口身份冻结；删除最后 TLS 消费者清空规格引用，但保留受管证书。
+HTTPS 发布仍要求 Xray WS TLS；包含 Trojan 暂拒绝宿主集成，fallback 留给后续传统 TLS 子步骤。
+完整 `management_status` 仍为 `deferred`。
+
+本地验收：固定 Linux 源码快照、可执行 tmpfs、前台 `--init` 工具容器；
+`trojan.sh` `71.021` 秒一次包含 TUIC 及全部旧协议基线，setup PTY `183.191` 秒、
+phase3 `135.666` 秒通过。覆盖四首配拓扑、取消、字段编辑、同/跨核心复制、身份冻结、
+WS/末个 TLS 删除、精确 URI、运行漂移、端口冲突、共享额度及失败恢复/更新/回滚。
+Draft 2020-12 Schema 的 6 正例/21 反例、Bash、ShellCheck、JSON 与嵌入 Python 检查通过，
+两项独立只读生产审阅无可操作问题。CI 使用 `trojan.sh` 根入口，新增 `docker-trojan` selector。
+首轮末 TLS 删除夹具违反主核心冻结合同，补验保留主核心 Reality 后通过，未放宽生产规则。
+
+真实 amd64 `54.229` 秒通过，沿用 3C.2 的固定业务镜像；客户端从实际 URI 解析凭据、
+SNI/ALPN/指纹，隔离 CA 严格校验 TLS，未开启 insecure。
+两核心各 IPv4/IPv6 的 TCP HTTP 与 UDP-through-TCP echo proof、错误密码拒绝通过；
+Xray/sing-box UUID 实际上/下行计数均为 `186/336`。
+生产额度事务撤销两核认证后全部请求拒绝且源站计数不增，解除后同一客户端恢复，
+两核 `users.base` 哈希不变，恢复精确增加源站 TCP/UDP 各 4 次。
+测试适配初版漏掉生产 `dockerComposeRun` 的 stdin 保护，导致统计循环漏采；
+补回 `</dev/null` 并断言两核查询完整后重跑通过，`lifecycle.sh` 既有修复保持不变。
+非 root、只读根、cap drop、init、健康检查和权限保持，未发布宿主端口。
+第 4 参数的 HTTP/2 curl 临时工具镜像 ID 为
+`sha256:1cd9dcda948bceebc8eeca8c959c720ea9bb8e9102471c719970869ab0f0edc0`，
+只用于验收，不替换业务镜像，验收后清理容器、网络、卷、工具镜像与临时文件。
+复现时准备工具镜像，再运行：
+
+```bash
+bash docker/tests/trojan.sh
+bash docker/tests/trojan-real.sh \
+  padm-local/padm-xray:tls-3b4 \
+  padm-local/padm-sing-box:tls-3b4 \
+  padm-local/padm-ops:tls-3b4 \
+  local-http2-curl:test
+```
+
+独立服务器/SNI 仅通过合同与输出检查，真实测试入口与 TLS 同域。
+未验公网宿主入口、第三方导入 UI、既有长会话、原生 arm64、真实 DNS/整机重启或可信发布；
+3B.4、3D、4A、5C 仍待完成，下一协议为 `22` VMess WS TLS。
 
 ### 3D. 协议管理与入口维护
 
@@ -871,7 +917,7 @@ Fail2ban 1.1.0），只读挂载当前生成配置及入口，未重建或发布
 | `network-optimization`、`vless-encryption` | 5C 独立宿主/实验子项；未验收仍不支持 |
 
 新增能力提交时同步更新文档、配置合同、生成器/Compose、控制入口及证据。
-[`phase3.sh`](../docker/tests/phase3.sh)当前固定 `supported` 协议为 `[1, 2, 3, 4, 5, 21, 26, 30, 31]`，
+[`phase3.sh`](../docker/tests/phase3.sh)当前固定 `supported` 协议为 `[1, 2, 3, 4, 5, 21, 26, 28, 30, 31]`，
 并要求菜单和管理差距为 `deferred`；后续按真实交付更新这些基线断言，
 保留协议注册表、核心/profile、网络权限和前置条件的一致性检查。
 不得只删除断言或只修改 `features.json` 来宣称完成。

@@ -1383,4 +1383,146 @@ for tuicFailure in tls-fail health-fail; do
     assertUnconfigured
 done
 export FAKE_SETUP_MODE=ok
+
+# Trojan direct 在两核心共用 UUID/password，复制和删除沿用受管编辑事务。
+printf -v TROJAN_INPUT '1\n11\nproxy.example.com\n3\ntrojan.example.com\n24476\n2\n%s\n%s\ny\n' \
+    "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
+printf -v SING_TROJAN_INPUT '2\n11\nproxy.example.com\n3\ntrojan.example.com\n24476\n2\n%s\n%s\ny\n' \
+    "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
+printf -v DUAL_TROJAN_INPUT '3\n11\nproxy.example.com\n3\ntarget.example.com\n443\ntarget.example.com\n24445\ntrojan.example.com\n24476\n2\n%s\n%s\ny\n' \
+    "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
+printf -v DUAL_SING_TROJAN_INPUT '4\n11\nproxy.example.com\n3\ntarget.example.com\n443\ntarget.example.com\n24445\ntrojan.example.com\n24476\n2\n%s\n%s\ny\n' \
+    "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
+for trojanCase in trojan-xray trojan-sing dual-trojan-xray dual-trojan-sing; do
+    newState "${trojanCase}"
+    case "${trojanCase}" in
+    trojan-xray) input=${TROJAN_INPUT}; core=xray; single=true ;;
+    trojan-sing) input=${SING_TROJAN_INPUT}; core=sing-box; single=true ;;
+    dual-trojan-xray) input=${DUAL_TROJAN_INPUT}; core=xray; single=false ;;
+    dual-trojan-sing) input=${DUAL_SING_TROJAN_INPUT}; core=sing-box; single=false ;;
+    esac
+    before=$(snapshot)
+    runPty 0 "${trojanCase}-cancel" "${input%$'y\n'}"$'n\n' setup "${ASSET_ARGS[@]}"
+    [[ "$(snapshot)" == "${before}" && ! -s "${EVENTS}" && ! -s "${VERIFY_LOG}" ]] ||
+        fail "${trojanCase}: 取消首配提前生成凭据或写入部署"
+    runPty 0 "${trojanCase}" "${input}" setup "${ASSET_ARGS[@]}"
+    SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+    jq -e --arg core "${core}" --argjson single "${single}" '
+      .schema_version == 3 and .core.type == $core and .tls.domain == "trojan.example.com" and
+      .subscription.enabled == false and
+      (.core.protocols[0] | .id == 28 and .core == $core and .listener_id == "entry-trojan" and
+        .public_port == 24476 and .address_families == ["ipv4","ipv6"] and
+        .name == "main-trojan" and .server == "proxy.example.com" and
+        .uuid == "11111111-1111-4111-8111-111111111111" and .reality == null and
+        .trojan == {domain:"trojan.example.com"}) and
+      if $single then .core.secondary_type == null and (.core.protocols | length) == 1
+      else .core.secondary_type == (if $core == "xray" then "sing-box" else "xray" end) and
+        (.core.protocols | length) == 2 and .core.protocols[1].id == 1 and
+        .core.protocols[1].public_port == 24445 and .core.protocols[0].uuid == .core.protocols[1].uuid end
+    ' "${SPEC}" >/dev/null || fail "${trojanCase}: Trojan 首配丢失核心归属或共享凭据"
+    jq -e --arg core "${core}" --slurpfile spec "${SPEC}" '
+      $spec[0].core.protocols[0] as $p |
+      if $core == "xray" then
+        any(.inbounds[]; .protocol == "trojan" and .settings.clients == [{email:$p.uuid,password:$p.uuid}] and
+          .streamSettings.security == "tls" and .streamSettings.tlsSettings.alpn == ["http/1.1"])
+      else any(.inbounds[]; .type == "trojan" and .users == [{name:$p.uuid,password:$p.uuid}] and
+        .tls.enabled and .tls.alpn == ["http/1.1"]) end
+    ' "${PADM_DOCKER_INSTALL_DIR}/config/${core}/config.json" >/dev/null ||
+        fail "${trojanCase}: Trojan 认证或统计身份错误"
+    jq -e --arg core "${core}" '.services[$core].ports ==
+      ["0.0.0.0:24476:24476/tcp","[::]:24476:24476/tcp"] and
+      (.services | has("nginx") | not)' "${PADM_DOCKER_INSTALL_DIR}/compose.json" >/dev/null ||
+        fail "${trojanCase}: Trojan direct 非 TCP 双栈或启动 Nginx"
+    if [[ "${single}" == true ]]; then
+        ! grep -Eq ' x25519( |$)|derived-stdin' "${EVENTS}" || fail 'Trojan 单核生成了无用 Reality 密钥'
+    fi
+    assertClean
+    assertNoSecrets
+done
+
+export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-trojan-xray"
+export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-trojan-xray"
+CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
+SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+cp -- "${SPEC}" "${TEST_ROOT}/trojan-original.json"
+before=$(snapshot)
+runPty 0 trojan-edit-cancel $'1\n28\n0\n' edit "${ASSET_ARGS[@]}"
+[[ "$(snapshot)" == "${before}" ]] || fail 'Trojan 取消编辑改变部署'
+runPty 0 trojan-edit $'1\n28\n24477\n2\n28\nnext.example.com\n3\n28\n2\n4\n28\nnext-trojan\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e --slurpfile before "${TEST_ROOT}/trojan-original.json" '
+  .tls == $before[0].tls and .subscription == $before[0].subscription and
+  (.core.protocols[0] | .uuid == $before[0].core.protocols[0].uuid and
+    .listener_id == "entry-trojan" and .public_port == 24477 and .server == "next.example.com" and
+    .address_families == ["ipv6"] and .name == "next-trojan" and
+    .trojan == {domain:"trojan.example.com"})
+' "${SPEC}" >/dev/null || fail 'Trojan 通用编辑改写了 TLS 或账号身份'
+runPty 0 trojan-copy-xray $'9\n28\n1\n24478\n8\ny\n' edit "${ASSET_ARGS[@]}"
+runPty 0 trojan-copy-sing $'9\nentry-trojan\n2\n24479\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.core.protocols[0] as $source | .core.secondary_type == "sing-box" and
+  (.core.protocols | length) == 3 and
+  all(.core.protocols[1:][]; .uuid == $source.uuid and .trojan == $source.trojan and
+    .server == $source.server and .name == $source.name and .address_families == $source.address_families) and
+  (.core.protocols[1] | .core == "xray" and .listener_id == "entry-1" and .public_port == 24478) and
+  (.core.protocols[2] | .core == "sing-box" and .listener_id == "entry-2" and .public_port == 24479)
+' "${SPEC}" >/dev/null || fail 'Trojan 同核/跨核复制改变原始身份或 TLS'
+before=$(snapshot)
+for rejectedEdit in uuid domain core listener new-account new-anytls; do
+    case "${rejectedEdit}" in
+    uuid) filter='.core.protocols[0].uuid = "22222222-2222-4222-8222-222222222222"' ;;
+    domain) filter='.tls.domain = "next.example.com" | .core.protocols |= map(.trojan.domain = "next.example.com")' ;;
+    core) filter='.core.protocols[0].core = "sing-box"' ;;
+    listener) filter='.core.protocols[0].listener_id = "entry-renamed"' ;;
+    new-account) filter='.core.protocols += [.core.protocols[0] | .listener_id = "entry-3" |
+      .public_port = 24480 | .uuid = "22222222-2222-4222-8222-222222222222"]' ;;
+    new-anytls) filter='.core.protocols += [.core.protocols[0] | .listener_id = "entry-3" |
+      .core = "sing-box" | .public_port = 24480 | .id = 4 | .anytls = {domain:.trojan.domain} | del(.trojan)]' ;;
+    esac
+    jq "${filter}" "${SPEC}" >"${TEST_ROOT}/trojan-rejected.json"
+    chmod 0600 "${TEST_ROOT}/trojan-rejected.json"
+    CONTROL_LOG="${TEST_ROOT}/trojan-rejected-${rejectedEdit}.log"
+    actual=0
+    bash -u "${CLI}" edit --spec "${TEST_ROOT}/trojan-rejected.json" --preview "${ASSET_ARGS[@]}" \
+        >"${CONTROL_LOG}" 2>&1 || actual=$?
+    [[ "${actual}" == 15 && "$(snapshot)" == "${before}" ]] ||
+        fail "${rejectedEdit}: Trojan 编辑绕过身份边界"
+    assertClean
+done
+runPty 0 trojan-delete-secondary $'10\nentry-2\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.core.secondary_type == null and .tls.domain == "trojan.example.com" and
+  (.core.protocols | length) == 2' "${SPEC}" >/dev/null || fail '删除 Trojan 副核心丢失 TLS'
+runPty 0 trojan-delete-copy $'10\nentry-1\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.tls.domain == "trojan.example.com" and (.core.protocols | length) == 1' "${SPEC}" >/dev/null ||
+    fail '删除 Trojan 副本撤销仍需 TLS 的入口'
+
+# 混合 WS 删除不影响 direct TLS；最后消费者删除仅撤销规格引用。
+export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-dual-trojan-xray"
+export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-dual-trojan-xray"
+CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
+SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+jq '.core.protocols += [
+  (.core.protocols[1] | .core = "xray" | .listener_id = "entry-primary-reality" | .public_port = 24481), {
+  id:21,core:"xray",listener_id:"vless-ws",server:"proxy.example.com",public_port:24444,
+  address_families:["ipv4"],name:"main-ws",uuid:.core.protocols[0].uuid,
+  websocket:{domain:.tls.domain,path:"abcdefghws",backend_port:31297,tls_port:8443}}] |
+  .subscription.enabled = true' "${SPEC}" >"${TEST_ROOT}/trojan-with-ws.json"
+chmod 0600 "${TEST_ROOT}/trojan-with-ws.json"
+runPty 0 trojan-ws-configure '' configure --spec "${TEST_ROOT}/trojan-with-ws.json" "${ASSET_ARGS[@]}"
+runPty 0 trojan-delete-ws $'10\nvless-ws\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.tls.domain == "trojan.example.com" and .subscription.enabled == false and
+  any(.core.protocols[]; .id == 28)' "${SPEC}" >/dev/null || fail '删除 WS 丢失 Trojan TLS'
+runPty 0 trojan-delete-last-tls $'10\nentry-trojan\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.tls == null and .subscription.enabled == false and .core.type == "xray" and
+  .core.secondary_type == "sing-box" and (.core.protocols | length) == 2 and
+  all(.core.protocols[]; .id == 1)' \
+    "${SPEC}" >/dev/null || fail '删除最后 Trojan TLS 消费者未清理规格引用或核心归属'
+[[ -f "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/trojan.example.com.key" ]] ||
+    fail '删除 Trojan 错误删除受管证书'
+for trojanFailure in tls-fail health-fail; do
+    newState "trojan-${trojanFailure}"
+    export FAKE_SETUP_MODE="${trojanFailure}"
+    if [[ "${trojanFailure}" == tls-fail ]]; then expected=15; else expected=14; fi
+    runPty "${expected}" "trojan-${trojanFailure}" "${TROJAN_INPUT}" setup "${ASSET_ARGS[@]}"
+    assertUnconfigured
+done
+export FAKE_SETUP_MODE=ok
 printf 'docker-setup-regression-ok\n'

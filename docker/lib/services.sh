@@ -128,6 +128,12 @@ dockerConfigureSpecValidate() {
                (.service_name | type == "string" and test("^[A-Za-z0-9._-]{1,64}$") and
                  (explode | all(. > 32 and . != 127))))
            else true end)
+        elif .id == 28 then
+          $request.schema_version == 3 and
+          (.core == "xray" or .core == "sing-box") and
+          exact(["id", "core", "listener_id", "server", "public_port", "address_families", "name", "uuid", "trojan"]) and
+          (.trojan | exact(["domain"]) and
+            (.domain | hostname and (explode | all(. > 32 and . != 127))))
         elif .id == 3 then
           $request.schema_version == 3 and .core == "sing-box" and
           exact(["id", "core", "listener_id", "server", "public_port", "address_families", "name", "uuid", "hy2"]) and
@@ -219,19 +225,20 @@ dockerConfigureSpecValidate() {
           (.settings | exact(["port", "mark"]) and (.port | port) and
             (.mark | type == "number" and floor == . and . >= 1 and . <= 2147483647))
         else false end) and
-      if any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 21 or .id == 31) then
+      if any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 21 or .id == 28 or .id == 31) then
         .tls != null and
         all(.core.protocols[] | select(.id == 21); (.core // $request.core.type) == "xray") and
         all(.core.protocols[] | select(.id == 21); .websocket.domain == $request.tls.domain) and
         all(.core.protocols[] | select(.id == 3); .hy2.domain == $request.tls.domain) and
         all(.core.protocols[] | select(.id == 4); .anytls.domain == $request.tls.domain) and
         all(.core.protocols[] | select(.id == 5); .naive.domain == $request.tls.domain) and
+        all(.core.protocols[] | select(.id == 28); .trojan.domain == $request.tls.domain) and
         all(.core.protocols[] | select(.id == 31); .tuic.domain == $request.tls.domain)
       else
         .tls == null and .subscription.enabled == false
       end and
       if .subscription.enabled then any(.core.protocols[]; .id == 21) else true end and
-      if any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 30 or .id == 31) then .host_integrations == [] else true end and
+      if any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 28 or .id == 30 or .id == 31) then .host_integrations == [] else true end and
       if any(.host_integrations[]; .type == "fail2ban") then
         any(.core.protocols[]; .id == 21) and
         all(.host_integrations[] | select(.type == "fail2ban") | .settings.ports[];
@@ -821,6 +828,26 @@ dockerGenerateXrayConfig() {
                 xmux: {maxConcurrency: "16-32", hMaxRequestTimes: "600-900", hMaxReusableSecs: "1800-3000"}}
             } elif .id == 26 then {grpcSettings: {serviceName: .grpc.service_name}} else {} end),
             sniffing: {enabled: true, destOverride: ["http", "tls", "quic"], routeOnly: true}
+          } elif .id == 28 then {
+            listen: "::",
+            port: .public_port,
+            protocol: "trojan",
+            tag: .listener_id,
+            settings: {clients: [{password: .uuid, email: .uuid}]},
+            streamSettings: {
+              network: "tcp",
+              security: "tls",
+              tlsSettings: {
+                serverName: .trojan.domain,
+                alpn: ["http/1.1"],
+                rejectUnknownSni: true,
+                minVersion: "1.2",
+                certificates: [{
+                  certificateFile: "/etc/padm/secrets/tls/\(.trojan.domain).crt",
+                  keyFile: "/etc/padm/secrets/tls/\(.trojan.domain).key"
+                }]
+              }
+            }
           } elif .id == 21 then {
             listen: "0.0.0.0",
             port: (.websocket.backend_port // 31297),
@@ -865,7 +892,21 @@ dockerGenerateSingBoxConfig() {
         log: {disabled: false, level: "warn", timestamp: true},
         inbounds: ([
           $r.core.protocols[] | select((.core // $r.core.type) == "sing-box") |
-          if .id == 3 then {
+          if .id == 28 then {
+            type: "trojan",
+            tag: .listener_id,
+            listen: "::",
+            listen_port: .public_port,
+            users: [{name: .uuid, password: .uuid}],
+            tls: {
+              enabled: true,
+              server_name: .trojan.domain,
+              alpn: ["http/1.1"],
+              certificate_path: "/etc/padm/secrets/tls/\(.trojan.domain).crt",
+              key_path: "/etc/padm/secrets/tls/\(.trojan.domain).key"
+            }
+          }
+          elif .id == 3 then {
             type: "hysteria2",
             tag: .listener_id,
             listen: "::",
@@ -1074,6 +1115,8 @@ dockerGenerateSubscription() {
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=xhttp&host=\(.xhttp.host | @uri)&path=\(.xhttp.path | @uri)&mode=\(.xhttp.mode)#\(.name | @uri)"
       elif .id == 26 then
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=grpc&alpn=h2&path=\(.grpc.service_name | @uri)&serviceName=\(.grpc.service_name | @uri)#\(.name | @uri)"
+      elif .id == 28 then
+        "trojan://\(.uuid | @uri)@\(.server | authority):\(.public_port)?peer=\(.trojan.domain | @uri)&fp=chrome&sni=\(.trojan.domain | @uri)&alpn=\("http/1.1" | @uri)#\(.name | @uri)"
       elif .id == 3 then
         # 服务端上行对应客户端下行，分享链接需要交换带宽方向。
         "hysteria2://\(.uuid | @uri)@\(.server | authority):\(.public_port)?peer=\(.hy2.domain | @uri)&insecure=0&sni=\(.hy2.domain | @uri)&alpn=h3" +
@@ -1158,7 +1201,7 @@ dockerGenerateCompose() {
         else "[::]:\($protocol.public_port):\($containerPort)/\($transport)" end
       ];
       [$r.core.type, $r.core.secondary_type] | map(select(. != null)) as $cores |
-      ($r.core.protocols | map(select(.id == 1 or .id == 2 or .id == 3 or .id == 4 or .id == 5 or .id == 26 or .id == 30 or .id == 31))) as $direct |
+      ($r.core.protocols | map(select(.id == 1 or .id == 2 or .id == 3 or .id == 4 or .id == 5 or .id == 26 or .id == 28 or .id == 30 or .id == 31))) as $direct |
       ($r.core.protocols | map(select(.id == 21))) as $websocket |
       ($r.host_integrations | map(select(.type == "wireguard"))) as $wireguard |
       ($r.host_integrations | map(select(.type == "fail2ban"))) as $fail2ban |

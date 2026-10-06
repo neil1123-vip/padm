@@ -5953,6 +5953,10 @@ runDockerTuicRegression() {
     bash "${PROJECT_ROOT}/docker/tests/tuic.sh"
 }
 
+runDockerTrojanRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/trojan.sh"
+}
+
 runDockerPermissionsRegression() {
     bash "${PROJECT_ROOT}/docker/tests/permissions.sh"
 }
