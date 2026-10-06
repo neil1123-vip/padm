@@ -151,7 +151,7 @@ dockerWriteBundleManifest() {
 }
 
 dockerValidateBundle() {
-    local bundleRoot=$1 manifest expectedList manifestList line expectedHash relativePath actualHash status directory
+    local bundleRoot=$1 manifest expectedList manifestList line expectedHash relativePath status directory
     manifest="${bundleRoot}/${PADM_DOCKER_BUNDLE_MANIFEST}"
     [[ -d "${bundleRoot}" && ! -L "${bundleRoot}" && -O "${bundleRoot}" &&
         -f "${manifest}" && ! -L "${manifest}" && -O "${manifest}" ]] || return 1
@@ -185,18 +185,12 @@ dockerValidateBundle() {
             rm -f -- "${expectedList}" "${manifestList}"
             return 1
         }
-        actualHash=$(sha256sum "${bundleRoot}/${relativePath}" | cut -d ' ' -f 1) || {
-            rm -f -- "${expectedList}" "${manifestList}"
-            return 1
-        }
-        [[ "${actualHash}" == "${expectedHash}" ]] || {
-            rm -f -- "${expectedList}" "${manifestList}"
-            return 1
-        }
-        printf '%s\n' "${relativePath}" >>"${manifestList}"
+        printf '%s  %s\n' "${expectedHash}" "${relativePath}" >>"${manifestList}"
     done <"${manifest}"
-    LC_ALL=C sort "${manifestList}" -o "${manifestList}"
-    [[ -z "$(uniq -d "${manifestList}")" ]] && cmp -s "${expectedList}" "${manifestList}"
+    LC_ALL=C sort -k2,2 "${manifestList}" -o "${manifestList}"
+    [[ -z "$(cut -c 67- "${manifestList}" | uniq -d)" ]] &&
+        cmp -s "${expectedList}" <(cut -c 67- "${manifestList}") &&
+        (cd -- "${bundleRoot}" && sha256sum --check --status --strict) <"${manifestList}"
     status=$?
     rm -f -- "${expectedList}" "${manifestList}"
     return "${status}"

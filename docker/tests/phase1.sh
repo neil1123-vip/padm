@@ -196,6 +196,44 @@ done
     sha256sum -c "./.padm-docker-bundle-manifest" >/dev/null
 ) || fail 'installed bundle manifest does not validate'
 
+(
+    source "${PROJECT_ROOT}/docker/lib/bundle.sh"
+    validationRoot="${TEST_ROOT}/bundle-validation"
+    mkdir -- "${validationRoot}"
+    cp -R "${DOCKER_ROOT}/bundle/." "${validationRoot}/"
+    manifest="${validationRoot}/${PADM_DOCKER_BUNDLE_MANIFEST}"
+    cp -- "${manifest}" "${TEST_ROOT}/bundle-manifest"
+    dockerValidateBundle "${validationRoot}" || fail 'valid bundle was rejected'
+    manifestText=$(<"${manifest}")
+    printf '%s' "${manifestText//  /$'\t\t'}" >"${manifest}"
+    dockerValidateBundle "${validationRoot}" ||
+        fail 'tab-separated manifest without a final newline was rejected'
+    cp -- "${TEST_ROOT}/bundle-manifest" "${manifest}"
+    printf 'changed\n' >>"${validationRoot}/install-docker.sh"
+    if dockerValidateBundle "${validationRoot}"; then
+        fail 'bundle with changed contents was accepted'
+    fi
+    rm -f -- "${validationRoot}/install-docker.sh"
+    if dockerValidateBundle "${validationRoot}"; then
+        fail 'bundle with a missing file was accepted'
+    fi
+    cp -- "${DOCKER_ROOT}/bundle/install-docker.sh" "${validationRoot}/install-docker.sh"
+    head -n 1 "${TEST_ROOT}/bundle-manifest" >>"${manifest}"
+    if dockerValidateBundle "${validationRoot}"; then
+        fail 'bundle with a duplicate manifest entry was accepted'
+    fi
+    cp -- "${TEST_ROOT}/bundle-manifest" "${manifest}"
+    printf 'invalid manifest entry\n' >>"${manifest}"
+    if dockerValidateBundle "${validationRoot}"; then
+        fail 'bundle with an invalid manifest entry was accepted'
+    fi
+    cp -- "${TEST_ROOT}/bundle-manifest" "${manifest}"
+    printf '%064d  ../outside\n' 0 >>"${manifest}"
+    if dockerValidateBundle "${validationRoot}"; then
+        fail 'bundle with an unsafe manifest path was accepted'
+    fi
+) || fail 'bundle checksum validation cases failed'
+
 if [[ "$(/usr/bin/env uname -s 2>/dev/null || true)" == "Linux" ]]; then
     [[ "$(stat -c %a "${DOCKER_ROOT}")" == "750" ]] || fail 'state root mode is not 0750'
     [[ "$(stat -c %a "${DOCKER_ROOT}/secrets")" == "700" ]] || fail 'secrets mode is not 0700'

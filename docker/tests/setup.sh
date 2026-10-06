@@ -308,10 +308,9 @@ newState() {
 }
 
 snapshot() {
-    local path
     find "${PADM_DOCKER_INSTALL_DIR}" -printf '%P %y %l\n' | LC_ALL=C sort
-    while IFS= read -r path; do sha256sum "${path}"; done \
-        < <(find "${PADM_DOCKER_INSTALL_DIR}" -type f -print | LC_ALL=C sort)
+    find "${PADM_DOCKER_INSTALL_DIR}" -type f -print0 | LC_ALL=C sort -z |
+        xargs -0 -r sha256sum --
 }
 
 assertClean() {
@@ -333,31 +332,30 @@ assertUnconfigured() {
 }
 
 assertNoSecrets() {
-    local secret
-    for secret in AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA \
-        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-        hy2-obfs-private-1234 MDEyMzQ1Njc4OWFiY2RlZg== ZmVkY2JhOTg3NjU0MzIxMA== \
-        MDEyMzQ1Njc4OWFiY2RlZh==; do
-        ! grep -Fq "${secret}" "${CONTROL_LOG}" || fail 'setup printed a secret'
-        ! grep -Fq "${secret}" "${ARGV_LOG}" || fail 'setup passed a secret through process arguments'
-    done
+    local -a secrets=(
+        -e AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+        -e aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        -e hy2-obfs-private-1234 -e MDEyMzQ1Njc4OWFiY2RlZg== -e ZmVkY2JhOTg3NjU0MzIxMA==
+        -e MDEyMzQ1Njc4OWFiY2RlZh==
+    )
+    ! grep -Fq "${secrets[@]}" "${CONTROL_LOG}" || fail 'setup printed a secret'
+    ! grep -Fq "${secrets[@]}" "${ARGV_LOG}" || fail 'setup passed a secret through process arguments'
 }
 
 runPty() {
-    local expected=$1 name=$2 input=$3 actual=0 feederStatus=0 command fifo feeder completed
+    local expected=$1 name=$2 input=$3 actual=0 feederStatus=0 command fifo feeder inputFd
     local interruptMode=0
     shift 3
     CONTROL_LOG="${TEST_ROOT}/${name}.log"
     fifo="${TEST_ROOT}/${name}.input"
-    completed="${TEST_ROOT}/${name}.done"
     mkfifo "${fifo}"
+    # 父进程保持写端打开，输入发送后不产生 EOF，也不再轮询命令完成。
+    exec {inputFd}<>"${fifo}"
     printf -v command '%q ' bash -u "${CLI}" "$@"
     if [[ "${FAKE_SETUP_MODE:-}" == interrupt-int || "${FAKE_SETUP_MODE:-}" == interrupt-term ]]; then
         interruptMode=1
         rm -f -- "${FAKE_SETUP_CHILD_PID}"
         printf -v command 'printf "%%s\\n" "$$" >%q; exec %s' "${TEST_ROOT}/${name}.pid" "${command}"
-    else
-        printf -v command '%s; status=$?; printf "%%s\\n" "$status" >%q; exit "$status"' "${command}" "${completed}"
     fi
     (
         exec 3>"${fifo}"
@@ -390,16 +388,11 @@ runPty() {
             done
             exit 4
         fi
-        # 保持 PTY 输入打开到命令结束，避免 script 在 EOF 时丢弃排队输入。
-        for ((attempt = 0; attempt < 3600; attempt++)); do
-            [[ ! -f "${completed}" ]] || exit 0
-            sleep 0.05
-        done
-        exit 1
     ) &
     feeder=$!
     timeout 240 script -q -e -E never -f -c "${command}" "${CONTROL_LOG}" \
         <"${fifo}" >"${TEST_ROOT}/${name}.stdout" 2>&1 || actual=$?
+    exec {inputFd}>&-
     wait "${feeder}" || feederStatus=$?
     [[ "${feederStatus}" -eq 0 ]] || fail "${name}: PTY command did not finish"
     [[ "${actual}" -eq "${expected}" ]] || fail "${name}: expected rc=${expected}, got rc=${actual}"
