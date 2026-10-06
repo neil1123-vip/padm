@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+for tool in script timeout mkfifo find; do
+    command -v "${tool}" >/dev/null 2>&1 || { printf 'missing tool: %s\n' "${tool}" >&2; exit 1; }
+done
+find . -maxdepth 0 -printf '' 2>/dev/null ||
+    { printf 'docker-setup-regression requires find with -printf\n' >&2; exit 1; }
+export FAKE_SETUP_HOST_SYSTEM FAKE_SETUP_HOST_STAT
+FAKE_SETUP_HOST_SYSTEM=$(uname -s)
+FAKE_SETUP_HOST_STAT=$(command -v stat)
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/padm-docker-setup.XXXXXX")
 MOCK_BIN="${TEST_ROOT}/bin"
@@ -57,7 +65,7 @@ if [[ -n "${PYTHON}" ]] && command -v openssl >/dev/null 2>&1; then
     fi
     [[ ! -s "${TEST_ROOT}/bad-derived.stdout" ]] || fail 'malformed private key emitted a derived public key'
 else
-    if [[ "${CI:-}" == true && "$(/usr/bin/uname -s)" == Linux ]]; then
+    if [[ "${CI:-}" == true && "${FAKE_SETUP_HOST_SYSTEM}" == Linux ]]; then
         fail 'Linux CI requires Python 3 and OpenSSL for the production X25519 check'
     fi
     printf 'docker-setup-derivation-skip: Python 3 or OpenSSL is unavailable\n' >&2
@@ -77,10 +85,10 @@ EOF
 cat >"${MOCK_BIN}/stat" <<'EOF'
 #!/usr/bin/env bash
 # MSYS2 的权限显示受 Windows ACL 影响；Linux 仍检查真实权限。
-if [[ "${1:-}" == --format=%a && "$(/usr/bin/uname -s)" != Linux ]]; then
+if [[ "${1:-}" == --format=%a && "${FAKE_SETUP_HOST_SYSTEM}" != Linux ]]; then
     printf '600\n'
 else
-    exec /usr/bin/stat "$@"
+    exec "${FAKE_SETUP_HOST_STAT}" "$@"
 fi
 EOF
 cat >"${MOCK_BIN}/docker" <<'EOF'
@@ -312,7 +320,8 @@ assertUnconfigured() {
 assertNoSecrets() {
     local secret
     for secret in AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA \
-        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; do
+        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+        hy2-obfs-private-1234; do
         ! grep -Fq "${secret}" "${CONTROL_LOG}" || fail 'setup printed a secret'
         ! grep -Fq "${secret}" "${ARGV_LOG}" || fail 'setup passed a secret through process arguments'
     done
@@ -465,8 +474,8 @@ jq -e --arg sha "$(sha256sum "${MANIFEST}" | cut -d ' ' -f 1)" '
 ' "${SPEC}" >/dev/null || fail 'preserved spec omitted verified metadata or generated Reality credentials'
 jq -e 'all(.services[].volumes[]?; (.source != "${PADM_DOCKER_ROOT}/config") and (.source | endswith("/config/spec.json") | not))' \
     "${PADM_DOCKER_INSTALL_DIR}/compose.json" >/dev/null || fail 'configuration spec was exposed to containers'
-if [[ "$(/usr/bin/uname -s)" == Linux ]]; then
-    [[ "$(/usr/bin/stat -c %a "${SPEC}")" == 600 ]] || fail 'spec permissions were not 0600'
+if [[ "${FAKE_SETUP_HOST_SYSTEM}" == Linux ]]; then
+    [[ "$("${FAKE_SETUP_HOST_STAT}" -c %a "${SPEC}")" == 600 ]] || fail 'spec permissions were not 0600'
 fi
 [[ "$(grep -c '^pull ' "${EVENTS}")" -eq 5 ]] || fail 'setup did not use the five verified image references'
 ! grep -Fq AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA "${CONTROL_LOG}" || fail 'setup printed the private key'
@@ -583,6 +592,130 @@ runPty 11 dual-port-conflict "${DUAL_XRAY_INPUT/24445/24443}" setup "${ASSET_ARG
 printf 'fake-cert\n' >"${TEST_ROOT}/cert.pem"
 printf 'fake-key\n' >"${TEST_ROOT}/key.pem"
 chmod 0600 "${TEST_ROOT}/key.pem"
+printf -v HY2_INPUT '2\n6\nproxy.example.com\n1\nhy2.example.com\n24449\n\n\n\nn\n\n2\n%s\n%s\ny\n' \
+    "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
+printf -v DUAL_HY2_INPUT '4\n6\nproxy.example.com\n3\ntarget.example.com\n443\ntarget.example.com\n24445\nhy2.example.com\n24449\nbrutal\n120\n60\ny\nhttps://www.example.com/health\n2\n%s\n%s\ny\n' \
+    "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
+for hy2Case in hy2-default dual-hy2; do
+    newState "${hy2Case}"
+    if [[ "${hy2Case}" == hy2-default ]]; then input=${HY2_INPUT}; else input=${DUAL_HY2_INPUT}; fi
+    before=$(snapshot)
+    runPty 0 "${hy2Case}-cancel" "${input%$'y\n'}"$'n\n' setup "${ASSET_ARGS[@]}"
+    [[ "$(snapshot)" == "${before}" && ! -s "${EVENTS}" && ! -s "${VERIFY_LOG}" ]] ||
+        fail "${hy2Case}: cancellation reached credentials, TLS or deployment writes"
+    runPty 0 "${hy2Case}" "${input}" setup "${ASSET_ARGS[@]}"
+    SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+    jq -e --arg mode "${hy2Case}" '
+      .schema_version == 3 and .core.type == "sing-box" and
+      .tls.domain == "hy2.example.com" and (.subscription.enabled | not) and
+      (.core.protocols[0] | .id == 3 and .core == "sing-box" and
+        .listener_id == "entry-hysteria2" and .public_port == 24449 and
+        .uuid == "11111111-1111-4111-8111-111111111111" and
+        .reality == null and .hy2.domain == "hy2.example.com" and
+        if $mode == "hy2-default" then
+          .hy2 == {domain: "hy2.example.com", bandwidth_mode: "bbr",
+            up_mbps: 100, down_mbps: 50, obfs: null, masquerade: ""}
+        else .hy2.bandwidth_mode == "brutal" and .hy2.up_mbps == 120 and
+          .hy2.down_mbps == 60 and .hy2.obfs.type == "salamander" and
+          (.hy2.obfs.password | test("^[a-f0-9]{32}$")) and
+          .hy2.masquerade == "https://www.example.com/health" end) and
+      if $mode == "hy2-default" then
+        .core.secondary_type == null and (.core.protocols | length) == 1
+      else .core.secondary_type == "xray" and (.core.protocols | length) == 2 and
+        (.core.protocols[1] | .id == 1 and .core == "xray" and .public_port == 24445 and
+          .listener_id == "entry-secondary-reality" and
+          (.reality.private_key | length) == 43) and
+        .core.protocols[0].uuid == .core.protocols[1].uuid end
+    ' "${SPEC}" >/dev/null || fail "${hy2Case}: setup lost TLS, Hysteria2 parameters or the secondary Reality"
+    [[ -f "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/hy2.example.com.crt" &&
+        -f "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/hy2.example.com.key" ]] ||
+        fail "${hy2Case}: setup did not commit Hysteria2 TLS"
+    if [[ "${hy2Case}" == hy2-default ]]; then
+        ! grep -Eq ' x25519( |$)|derived-stdin' "${EVENTS}" ||
+            fail 'Hysteria2-only setup generated unused Reality keys'
+    fi
+    CONTROL_LOG="${TEST_ROOT}/${hy2Case}-list.log"
+    bash -u "${CLI}" protocol list >"${CONTROL_LOG}" 2>&1 || fail "${hy2Case}: protocol list failed"
+    grep -Fq Hysteria2 "${CONTROL_LOG}" || fail "${hy2Case}: protocol list mislabeled Hysteria2"
+    assertNoSecrets
+done
+
+# 复用首配部署验证参数菜单、复制和取消，账号与 TLS 身份始终保持不变。
+export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-hy2-default"
+export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-hy2-default"
+CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
+SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+cp -- "${SPEC}" "${TEST_ROOT}/hy2-original.json"
+before=$(snapshot)
+runPty 0 hy2-edit-cancel $'13\n3\n4\n2\n0\n' edit "${ASSET_ARGS[@]}"
+[[ "$(snapshot)" == "${before}" ]] || fail 'cancelling a Hysteria2 password edit changed deployment'
+runPty 0 hy2-edit $'13\n3\n1\nbrutal\n13\n3\n2\n180\n13\n3\n3\n90\n13\n3\n4\n2\nhy2-obfs-private-1234\n13\n3\n5\nhttps://www.example.com/proxy\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e --slurpfile before "${TEST_ROOT}/hy2-original.json" '
+  .core.protocols[0] as $p | $before[0].core.protocols[0] as $old |
+  .tls == $before[0].tls and .subscription == $before[0].subscription and
+  ($p | del(.hy2)) == ($old | del(.hy2)) and
+  ($p.hy2 | del(.obfs.password)) ==
+    {domain: "hy2.example.com", bandwidth_mode: "brutal", up_mbps: 180, down_mbps: 90,
+     obfs: {type: "salamander"}, masquerade: "https://www.example.com/proxy"}
+' "${SPEC}" >/dev/null || fail 'Hysteria2 parameter editing changed identity or did not update all selected values'
+[[ "$(jq -r '.core.protocols[0].hy2.obfs.password' "${SPEC}")" == hy2-obfs-private-1234 ]] ||
+    fail 'Hysteria2 password editing did not preserve the private input'
+runPty 0 hy2-copy $'9\n3\n2\n24450\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.core.protocols[0] as $first | .core.protocols[1] as $copy |
+  $copy.listener_id == "entry-1" and $copy.public_port == 24450 and
+  ($copy | del(.listener_id, .public_port)) == ($first | del(.listener_id, .public_port))
+' "${SPEC}" >/dev/null || fail 'Hysteria2 copy did not preserve account, obfuscation, parameters and core'
+runPty 0 hy2-clear $'13\nentry-1\n4\n1\n13\nentry-1\n5\noff\n13\nentry-1\n1\nbbr\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.core.protocols[1].hy2 | .bandwidth_mode == "bbr" and .obfs == null and .masquerade == ""' \
+    "${SPEC}" >/dev/null || fail 'Hysteria2 clearing of obfuscation or masquerade failed'
+before=$(snapshot)
+runPty 15 hy2-copy-xray $'9\n3\n1\n' edit "${ASSET_ARGS[@]}"
+[[ "$(snapshot)" == "${before}" ]] || fail 'copying Hysteria2 to Xray changed deployment'
+runPty 15 hy2-invalid-speed $'13\nentry-1\n2\n1000001\n8\n' edit "${ASSET_ARGS[@]}"
+[[ "$(snapshot)" == "${before}" ]] || fail 'out-of-range Hysteria2 bandwidth changed deployment'
+for rejectedEdit in uuid domain core listener new-account; do
+    case "${rejectedEdit}" in
+    uuid) filter='.core.protocols[0].uuid = "22222222-2222-4222-8222-222222222222"' ;;
+    domain) filter='.tls.domain = "next.example.com" | .core.protocols |= map(.hy2.domain = "next.example.com")' ;;
+    core) filter='.core.protocols[0].core = "xray" | .core.secondary_type = "xray"' ;;
+    listener) filter='.core.protocols[0].listener_id = "entry-renamed"' ;;
+    new-account) filter='.core.protocols += [.core.protocols[0] | .listener_id = "entry-3" |
+        .public_port = 24451 | .uuid = "22222222-2222-4222-8222-222222222222"]' ;;
+    esac
+    jq "${filter}" "${SPEC}" >"${TEST_ROOT}/hy2-rejected.json"
+    chmod 0600 "${TEST_ROOT}/hy2-rejected.json"
+    CONTROL_LOG="${TEST_ROOT}/hy2-rejected-${rejectedEdit}.log"
+    actual=0
+    bash -u "${CLI}" edit --spec "${TEST_ROOT}/hy2-rejected.json" --preview "${ASSET_ARGS[@]}" \
+        >"${CONTROL_LOG}" 2>&1 || actual=$?
+    [[ "${actual}" -eq 15 && "$(snapshot)" == "${before}" ]] ||
+        fail "${rejectedEdit}: Hysteria2 edit bypassed the identity boundary"
+    assertClean
+    assertNoSecrets
+done
+
+# 同一 TLS 的 WS 与 Hysteria2 删除顺序不得误删证书关系或继续发布订阅。
+export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-dual-hy2"
+export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-dual-hy2"
+CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
+SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+jq '.core.protocols += [
+  (.core.protocols[1] | .core = "sing-box" | .listener_id = "entry-sing-reality" | .public_port = 24446),
+  {id: 21, core: "xray", listener_id: "vless-ws", server: "proxy.example.com", public_port: 24444,
+   address_families: ["ipv4"], name: "main-ws", uuid: .core.protocols[0].uuid,
+   websocket: {domain: .tls.domain, path: "abcdefghws", backend_port: 31297, tls_port: 8443}}] |
+  .subscription.enabled = true' "${SPEC}" >"${TEST_ROOT}/hy2-with-ws.json"
+chmod 0600 "${TEST_ROOT}/hy2-with-ws.json"
+runPty 0 hy2-ws-configure '' configure --spec "${TEST_ROOT}/hy2-with-ws.json" "${ASSET_ARGS[@]}"
+runPty 0 hy2-delete-ws $'10\nvless-ws\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.tls.domain == "hy2.example.com" and (.subscription.enabled | not) and
+  any(.core.protocols[]; .id == 3) and all(.core.protocols[]; .id != 21)' "${SPEC}" >/dev/null ||
+    fail 'deleting the last WS removed Hysteria2 TLS or kept HTTPS publication enabled'
+runPty 0 hy2-delete-last-tls $'10\nentry-hysteria2\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.tls == null and (.subscription.enabled | not) and
+  all(.core.protocols[]; .id != 3 and .id != 21)' "${SPEC}" >/dev/null ||
+    fail 'deleting the last TLS protocol retained its deployment TLS reference'
+
 printf -v WS_INPUT '1\n2\nproxy.example.com\n1\nws.example.com\n24444\n2\n%s\n%s\ny\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
 for tlsCase in tls-fail ws-success; do

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export FAKE_PHASE3_HOST_SYSTEM FAKE_PHASE3_HOST_STAT
+FAKE_PHASE3_HOST_SYSTEM=$(uname -s)
+FAKE_PHASE3_HOST_STAT=$(command -v stat)
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/padm-docker-phase3.XXXXXX")
 MOCK_BIN="${TEST_ROOT}/bin"
@@ -12,7 +15,7 @@ CLI_DIR="${TEST_ROOT}/bin-installed"
 IMAGE_DIGEST=$(printf '1%.0s' {1..64})
 OPS_IMAGE="ghcr.io/example/padm-ops:test@sha256:${IMAGE_DIGEST}"
 TEST_SKIP_CHOWN=1
-if [[ "$(/usr/bin/uname -s)" == Linux && "$(/usr/bin/id -u)" == 0 ]]; then
+if [[ "${FAKE_PHASE3_HOST_SYSTEM}" == Linux && "$(id -u)" == 0 ]]; then
     TEST_SKIP_CHOWN=0
 fi
 mkdir -p "${MOCK_BIN}" "${NATIVE_ROOT}" "${TEST_ROOT}/systemd"
@@ -49,7 +52,7 @@ cat >"${MOCK_BIN}/stat" <<'EOF'
 if [[ "${1:-}" == "--format=%a" ]]; then
     printf '600\n'
 else
-    exec /usr/bin/stat "$@"
+    exec "${FAKE_PHASE3_HOST_STAT}" "$@"
 fi
 EOF
 
@@ -551,7 +554,7 @@ unset FAKE_EDIT_REAL_CURL FAKE_EDIT_ASSET_MANIFEST FAKE_EDIT_ASSET_BUNDLE FAKE_E
 assertEditCleanup
 runControl 2 edit-needs-explicit-mode edit --spec "${EDIT_SPEC}"
 runControl 2 edit-reject-invalid-confirmation edit --spec "${EDIT_SPEC}" --confirm no
-if [[ "$(/usr/bin/uname -s)" == Linux ]]; then
+if [[ "${FAKE_PHASE3_HOST_SYSTEM}" == Linux ]]; then
     : >"${DOCKER_LOG}"
     runEditPty
     grep -qF 'core.protocols.1.public_port' "${CONTROL_LOG}" ||
@@ -652,15 +655,15 @@ grep -q 'vless://22222222-2222-4222-8222-222222222222@proxy.example.com:24444' \
     "${DOCKER_ROOT}/data/subscription/0123456789abcdef" || fail 'edit lost the WebSocket subscription node'
 grep -q 'vless://11111111-1111-4111-8111-111111111111@proxy.example.com:25443' \
     "${DOCKER_ROOT}/data/subscription/0123456789abcdef" || fail 'edit did not update the Reality subscription port'
-if [[ "$(/usr/bin/uname -s)" == Linux ]]; then
-    [[ "$(/usr/bin/stat -c %a "${DOCKER_ROOT}/config/spec.json")" == 600 &&
-        "$(/usr/bin/stat -c %a "${DOCKER_ROOT}/config/xray/users.base")" == 640 &&
-        "$(/usr/bin/stat -c %a "${DOCKER_ROOT}/config/nginx/default.conf")" == 640 ]] ||
+if [[ "${FAKE_PHASE3_HOST_SYSTEM}" == Linux ]]; then
+    [[ "$("${FAKE_PHASE3_HOST_STAT}" -c %a "${DOCKER_ROOT}/config/spec.json")" == 600 &&
+        "$("${FAKE_PHASE3_HOST_STAT}" -c %a "${DOCKER_ROOT}/config/xray/users.base")" == 640 &&
+        "$("${FAKE_PHASE3_HOST_STAT}" -c %a "${DOCKER_ROOT}/config/nginx/default.conf")" == 640 ]] ||
         fail 'edit did not retain private spec and runtime configuration permissions'
     if [[ "${TEST_SKIP_CHOWN}" == 0 ]]; then
-        [[ "$(/usr/bin/stat -c %u:%g "${DOCKER_ROOT}/config/spec.json")" == 0:0 &&
-            "$(/usr/bin/stat -c %u:%g "${DOCKER_ROOT}/config/xray/users.base")" == 0:10001 &&
-            "$(/usr/bin/stat -c %u:%g "${DOCKER_ROOT}/config/nginx/default.conf")" == 0:10001 ]] ||
+        [[ "$("${FAKE_PHASE3_HOST_STAT}" -c %u:%g "${DOCKER_ROOT}/config/spec.json")" == 0:0 &&
+            "$("${FAKE_PHASE3_HOST_STAT}" -c %u:%g "${DOCKER_ROOT}/config/xray/users.base")" == 0:10001 &&
+            "$("${FAKE_PHASE3_HOST_STAT}" -c %u:%g "${DOCKER_ROOT}/config/nginx/default.conf")" == 0:10001 ]] ||
             fail 'edit did not retain root-only spec and runtime container-group ownership'
     fi
 fi
@@ -699,7 +702,7 @@ jq -e --slurpfile original "${EDIT_SPEC}" '
 assertEditCleanup
 
 # 真实终端分别提交复制与删除；多实例下数字协议 ID 不能误选其他入口。
-if [[ "$(/usr/bin/uname -s)" == Linux ]]; then
+if [[ "${FAKE_PHASE3_HOST_SYSTEM}" == Linux ]]; then
     runEditPty $'9\n21\n\n28444\n8\ny\n'
     jq -e '(.core.protocols | length) == 3 and
       any(.core.protocols[]; .listener_id == "entry-1" and .id == 21 and .public_port == 28444 and
@@ -859,7 +862,7 @@ runControl 0 configure-multi-xray configure --spec "${MULTI_SPEC}"
 runControl 0 edit-multi-baseline-preview edit --preview
 assertEditCleanup
 
-if [[ "$(/usr/bin/uname -s)" == Linux ]]; then
+if [[ "${FAKE_PHASE3_HOST_SYSTEM}" == Linux ]]; then
     runEditPty $'9\nvless-reality\n2\n27443\n8\ny\n'
     jq -e '.core.secondary_type == "sing-box" and
       any(.core.protocols[]; .listener_id == "entry-1" and .core == "sing-box" and .public_port == 27443)' \
@@ -1126,7 +1129,7 @@ validateFeatureMatrix() {
           ($matrix.feature_matrix[$entry.value] | {status, profiles, network_mode, host_capabilities})) and
       all(["interactive-menu", "reality-target-management", "reality-parameter-management",
         "reality-coexistence", "core-upgrade-assessment"][]; $matrix.feature_matrix[.].status == "deferred") and
-      ([.protocols[] | select(.status == "supported") | .id] | sort) == [1, 2, 21, 26] and
+      ([.protocols[] | select(.status == "supported") | .id] | sort) == [1, 2, 3, 21, 26] and
       .feature_matrix.subscription.requires == {core: "xray", protocol_ids: [21], tls: true} and
       (.feature_matrix.subscription.profiles | sort) == ["core-xray", "nginx", "subscription"]
     ' "$1" >/dev/null 2>&1
@@ -1155,7 +1158,7 @@ del(.feature_matrix["reality-target-management"])
 .protocols[3].transport = "quic"
 .protocols[14].udp_support = "no"
 .protocols[0].management_status = "supported"
-.protocols[2].status = "supported" | .protocols[2].profiles = ["core-sing-box"]
+(.protocols[] | select(.id == 4)) |= (.status = "supported" | .profiles = ["core-sing-box"])
 .feature_matrix.subscription.requires.core = "sing-box"
 .feature_matrix.subscription.requires.protocol_ids = [1]
 .feature_matrix.subscription.requires.tls = false

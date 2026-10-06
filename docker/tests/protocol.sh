@@ -5,9 +5,11 @@ if [[ "$(uname -s)" != Linux || "$(id -u)" != 0 ]]; then
     printf 'docker-protocol-regression-skip: Linux root is required\n'
     exit 0
 fi
-for tool in jq stat chown chmod curl sha256sum tar diff; do
+for tool in jq stat chown chmod curl sha256sum tar diff find; do
     command -v "${tool}" >/dev/null 2>&1 || { printf 'missing tool: %s\n' "${tool}" >&2; exit 1; }
 done
+find . -maxdepth 0 -printf '' 2>/dev/null ||
+    { printf 'docker-protocol-regression requires find with -printf\n' >&2; exit 1; }
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/padm-docker-protocol.XXXXXX")
 MOCK_BIN="${TEST_ROOT}/bin"

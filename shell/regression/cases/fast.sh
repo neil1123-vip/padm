@@ -5932,6 +5932,10 @@ runDockerRealityRegression() {
     bash "${PROJECT_ROOT}/docker/tests/reality.sh"
 }
 
+runDockerHysteria2Regression() {
+    bash "${PROJECT_ROOT}/docker/tests/hysteria2.sh"
+}
+
 runDockerPermissionsRegression() {
     bash "${PROJECT_ROOT}/docker/tests/permissions.sh"
 }

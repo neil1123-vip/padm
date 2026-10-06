@@ -80,13 +80,14 @@ print(base64.urlsafe_b64encode(result[12:]).decode("ascii").rstrip("="))
 dockerSetupGenerateSpec() {
     local core=$1 protocols=$2 server=$3 families=$4 realityPort=$5 target=$6 targetPort=$7 sni=$8
     local domain=$9 wsPort=${10} subscription=${11} output=${12} secondaryCore=${13:-} secondaryPort=${14:-8444}
-    local xrayImage opsImage uuid token shortId= privateKey= publicKey= keyPair derivedPair derivedPublic wsPath= inputsFile
+    local hy2Mode=${15:-bbr} hy2Up=${16:-100} hy2Down=${17:-50} hy2Obfs=${18:-false} hy2Masquerade=${19:-}
+    local xrayImage opsImage uuid token shortId= privateKey= publicKey= keyPair derivedPair derivedPublic wsPath= inputsFile obfsPassword=
     xrayImage=$(dockerManifestImageReference xray) || return 1
     opsImage=$(dockerManifestImageReference ops) || return 1
     uuid=$(dockerSetupTool "${xrayImage}" uuid 2>/dev/null) || return 1
     [[ "${uuid}" =~ ^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$ ]] || return 1
     token=$(dockerSetupRandomHex "${opsImage}" 32) || return 1
-    if [[ "${protocols}" != 2 || -n "${secondaryCore}" ]]; then
+    if [[ ( "${protocols}" != 2 && "${protocols}" != 6 ) || -n "${secondaryCore}" ]]; then
         keyPair=$(dockerSetupTool "${xrayImage}" x25519 2>/dev/null) || return 1
         privateKey=$(awk '/^PrivateKey:/ { print $2; exit }' <<<"${keyPair}")
         publicKey=$(awk '/^Password \(PublicKey\):/ { print $3; exit } /^PublicKey:/ { print $2; exit }' <<<"${keyPair}")
@@ -100,12 +101,15 @@ dockerSetupGenerateSpec() {
     if [[ "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 4 ]]; then
         wsPath=$(dockerSetupRandomHex "${opsImage}" 16) || return 1
     fi
+    if [[ "${protocols}" == 6 && "${hy2Obfs}" == true ]]; then
+        obfsPassword=$(dockerSetupRandomHex "${opsImage}" 16) || return 1
+    fi
     inputsFile="${output}.credentials"
     # 秘密只经私密文件交给 jq，不放进宿主进程参数或 Docker Cmd。
     (
         umask 077
-        printf '%s\n%s\n%s\n%s\n%s\n%s\n' "${uuid}" "${privateKey}" "${publicKey}" \
-            "${shortId}" "${wsPath}" "${token}" >"${inputsFile}"
+        printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n' "${uuid}" "${privateKey}" "${publicKey}" \
+            "${shortId}" "${wsPath}" "${token}" "${obfsPassword}" >"${inputsFile}"
     ) || return 1
     dockerManifestConfigurationInputs | jq \
         --arg core "${core}" --argjson protocols "${protocols}" --arg server "${server}" \
@@ -113,13 +117,16 @@ dockerSetupGenerateSpec() {
         --arg target "${target}" --argjson targetPort "${targetPort:-443}" --arg sni "${sni}" \
         --arg domain "${domain}" --argjson wsPort "${wsPort:-443}" \
         --arg secondaryCore "${secondaryCore}" --argjson secondaryPort "${secondaryPort}" \
+        --arg hy2Mode "${hy2Mode}" --argjson hy2Up "${hy2Up}" --argjson hy2Down "${hy2Down}" \
+        --arg hy2Masquerade "${hy2Masquerade}" \
         --rawfile credentials "${inputsFile}" --argjson subscription "${subscription}" '
       ($credentials | split("\n")) as $secrets |
       $secrets[0] as $uuid | $secrets[1] as $privateKey | $secrets[2] as $publicKey |
       $secrets[3] as $shortId | $secrets[4] as $wsPath | $secrets[5] as $token |
+      $secrets[6] as $obfsPassword |
       . + {schema_version: 3, core: {type: $core,
         secondary_type: (if $secondaryCore == "" then null else $secondaryCore end), protocols: [
-        (if $protocols != 2 then {
+        (if $protocols != 2 and $protocols != 6 then {
           id: (if $protocols == 4 then 2 elif $protocols == 5 then 26 else 1 end),
           core: $core, server: $server, public_port: $realityPort, address_families: $families,
           listener_id: (if $protocols == 4 then "entry-reality-xhttp"
@@ -135,13 +142,20 @@ dockerSetupGenerateSpec() {
           listener_id: "vless-ws", name: "main-ws", uuid: $uuid,
           websocket: {domain: $domain, path: $wsPath, backend_port: 31297, tls_port: 8443}
         } else empty end),
+        (if $protocols == 6 then {
+          id: 3, core: $core, server: $server, public_port: $wsPort, address_families: $families,
+          listener_id: "entry-hysteria2", name: "main-hysteria2", uuid: $uuid,
+          hy2: {domain: $domain, bandwidth_mode: $hy2Mode, up_mbps: $hy2Up, down_mbps: $hy2Down,
+            obfs: (if $obfsPassword == "" then null else {type: "salamander", password: $obfsPassword} end),
+            masquerade: $hy2Masquerade}
+        } else empty end),
         (if $secondaryCore != "" then {
           id: 1, core: $secondaryCore, server: $server, public_port: $secondaryPort, address_families: $families,
           listener_id: "entry-secondary-reality", name: "secondary-reality", uuid: $uuid,
           reality: {server_name: $sni, target_host: $target, target_port: $targetPort,
             private_key: $privateKey, public_key: $publicKey, short_id: $shortId}
         } else empty end)]},
-        tls: (if $protocols == 2 or $protocols == 3 then {domain: $domain} else null end),
+        tls: (if $protocols == 2 or $protocols == 3 or $protocols == 6 then {domain: $domain} else null end),
         subscription: {enabled: $subscription, token: $token}, host_integrations: []}
     ' >"${output}" || return 1
     rm -f -- "${inputsFile}" || return 1
@@ -236,7 +250,7 @@ dockerTlsManageCommand() {
     }
     currentDomain=$(jq -er '.tls.domain | select(type == "string" and length > 0)' \
         "${root}/config/spec.json" 2>/dev/null) && dockerDomainIsValid "${currentDomain}" || {
-        dockerError '当前部署没有 TLS 域名，请先配置 WS TLS 入口'
+        dockerError '当前部署没有 TLS 域名，请先配置 WS TLS 或 Hysteria2 入口'
         return "${PADM_DOCKER_RC_STATE}"
     }
     dockerConfigureSpecValidate "${root}/config/spec.json" &&
@@ -303,6 +317,7 @@ dockerSetupCommand() {
     local manifest= bundle= controlBundle= coreChoice core protocols=1 server familyChoice families
     local secondaryCore= secondaryPort=8444
     local realityPort=443 target= targetPort=443 sni= domain= wsPort=443 tlsMode= cert= key=
+    local hy2Mode=bbr hy2Up=100 hy2Down=50 hy2Obfs=false hy2Masquerade=
     local email= provider= credentials= subscription=false answer= root candidate status=0
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
@@ -334,8 +349,8 @@ dockerSetupCommand() {
     2|4)
         core=sing-box
         [[ "${coreChoice}" != 4 ]] || secondaryCore=xray
-        dockerSetupRead protocols '协议 [1=Reality Vision, 5=Reality gRPC, 0=取消]: ' 1 || return 0
-        [[ "${protocols}" == 1 || "${protocols}" == 5 ]] || return "${PADM_DOCKER_RC_USAGE}"
+        dockerSetupRead protocols '协议 [1=Reality Vision, 5=Reality gRPC, 6=Hysteria2, 0=取消]: ' 1 || return 0
+        [[ "${protocols}" == 1 || "${protocols}" == 5 || "${protocols}" == 6 ]] || return "${PADM_DOCKER_RC_USAGE}"
         ;;
     *) return "${PADM_DOCKER_RC_USAGE}" ;;
     esac
@@ -348,8 +363,8 @@ dockerSetupCommand() {
     3) families='["ipv4","ipv6"]' ;;
     *) return "${PADM_DOCKER_RC_USAGE}" ;;
     esac
-    if [[ "${protocols}" != 2 || -n "${secondaryCore}" ]]; then
-        if [[ "${protocols}" != 2 ]]; then
+    if [[ ( "${protocols}" != 2 && "${protocols}" != 6 ) || -n "${secondaryCore}" ]]; then
+        if [[ "${protocols}" != 2 && "${protocols}" != 6 ]]; then
             dockerSetupRead realityPort '主核心 Reality 入口端口 [443]: ' 443 || return 0
         fi
         dockerSetupRead target 'Reality 目标域名（0 取消）: ' || return 0
@@ -361,11 +376,34 @@ dockerSetupCommand() {
     if [[ -n "${secondaryCore}" ]]; then
         dockerSetupRead secondaryPort "副核心 ${secondaryCore} Reality 入口端口 [8444]: " 8444 || return 0
     fi
-    if [[ "${protocols}" == 2 || "${protocols}" == 3 ]]; then
+    if [[ "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 6 ]]; then
         [[ "${protocols}" != 3 ]] || wsPort=8443
-        dockerSetupRead domain 'WS TLS 域名（0 取消）: ' || return 0
+        if [[ "${protocols}" == 6 ]]; then
+            dockerSetupRead domain 'Hysteria2 TLS 域名（0 取消）: ' || return 0
+        else
+            dockerSetupRead domain 'WS TLS 域名（0 取消）: ' || return 0
+        fi
         dockerDomainIsValid "${domain}" || return "${PADM_DOCKER_RC_USAGE}"
-        dockerSetupRead wsPort "WS TLS 入口端口 [${wsPort}]: " "${wsPort}" || return 0
+        if [[ "${protocols}" == 6 ]]; then
+            dockerSetupRead wsPort "Hysteria2 UDP 入口端口 [${wsPort}]: " "${wsPort}" || return 0
+            dockerSetupRead hy2Mode '拥塞模式 [bbr=自适应, brutal=固定带宽，默认 bbr]: ' bbr || return 0
+            [[ "${hy2Mode}" == bbr || "${hy2Mode}" == brutal ]] || return "${PADM_DOCKER_RC_USAGE}"
+            dockerSetupRead hy2Up '服务端上行带宽 Mbps（服务端→客户端）[100]: ' 100 || return 0
+            dockerSetupRead hy2Down '服务端下行带宽 Mbps（客户端→服务端）[50]: ' 50 || return 0
+            for answer in "${hy2Up}" "${hy2Down}"; do
+                [[ "${answer}" =~ ^[1-9][0-9]{0,6}$ && "${answer}" -le 1000000 ]] ||
+                    return "${PADM_DOCKER_RC_USAGE}"
+            done
+            dockerSetupRead answer '启用 Salamander 混淆（确认后随机密码）？[y/N]: ' n || return 0
+            case "${answer}" in
+            y|Y|yes|YES) hy2Obfs=true ;;
+            n|N|no|NO) hy2Obfs=false ;;
+            *) return "${PADM_DOCKER_RC_USAGE}" ;;
+            esac
+            dockerSetupRead hy2Masquerade '伪装 HTTPS 地址（空输入不启用，0 取消）: ' || return 0
+        else
+            dockerSetupRead wsPort "WS TLS 入口端口 [${wsPort}]: " "${wsPort}" || return 0
+        fi
         dockerSetupRead tlsMode '证书 [1=已有受管, 2=导入, 3=DNS-01, 0=取消]: ' 1 || return 0
         case "${tlsMode}" in
         1) ;;
@@ -382,12 +420,14 @@ dockerSetupCommand() {
             ;;
         *) return "${PADM_DOCKER_RC_USAGE}" ;;
         esac
-        dockerSetupRead answer '启用 HTTPS 订阅发布？[y/N]: ' n || return 0
-        case "${answer}" in
-        y|Y|yes|YES) subscription=true ;;
-        n|N|no|NO) subscription=false ;;
-        *) return "${PADM_DOCKER_RC_USAGE}" ;;
-        esac
+        if [[ "${protocols}" != 6 ]]; then
+            dockerSetupRead answer '启用 HTTPS 订阅发布？[y/N]: ' n || return 0
+            case "${answer}" in
+            y|Y|yes|YES) subscription=true ;;
+            n|N|no|NO) subscription=false ;;
+            *) return "${PADM_DOCKER_RC_USAGE}" ;;
+            esac
+        fi
     fi
     for answer in "${realityPort}" "${targetPort}" "${wsPort}" "${secondaryPort}"; do
         [[ "${answer}" =~ ^[1-9][0-9]{0,4}$ && "${answer}" -le 65535 ]] ||
@@ -396,15 +436,19 @@ dockerSetupCommand() {
     [[ "${protocols}" != 3 || "${realityPort}" != "${wsPort}" ]] ||
         { dockerError 'Reality 和 WS TLS 不能使用同一入口端口'; return "${PADM_DOCKER_RC_CONFLICT}"; }
     if [[ -n "${secondaryCore}" ]] &&
-        { [[ "${protocols}" != 2 && "${secondaryPort}" == "${realityPort}" ]] ||
-          [[ ( "${protocols}" == 2 || "${protocols}" == 3 ) && "${secondaryPort}" == "${wsPort}" ]]; }; then
+        { [[ "${protocols}" != 2 && "${protocols}" != 6 && "${secondaryPort}" == "${realityPort}" ]] ||
+          [[ ( "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 6 ) && "${secondaryPort}" == "${wsPort}" ]]; }; then
         dockerError '主副核心不能使用同一入口端口'
         return "${PADM_DOCKER_RC_CONFLICT}"
     fi
     printf '\n核心: %s\n协议组合: %s\n服务器: %s\n地址族: %s\n' "${core}" "${protocols}" "${server}" "${families}"
-    [[ "${protocols}" == 2 ]] || printf 'Reality: %s -> %s:%s，SNI %s\n' "${realityPort}" "${target}" "${targetPort}" "${sni}"
+    [[ "${protocols}" == 2 || "${protocols}" == 6 ]] ||
+        printf 'Reality: %s -> %s:%s，SNI %s\n' "${realityPort}" "${target}" "${targetPort}" "${sni}"
     if [[ "${protocols}" == 2 || "${protocols}" == 3 ]]; then
         printf 'WS TLS: %s:%s，证书方式 %s，订阅 %s\n' "${domain}" "${wsPort}" "${tlsMode}" "${subscription}"
+    elif [[ "${protocols}" == 6 ]]; then
+        printf 'Hysteria2: %s:%s/udp，证书方式 %s，拥塞 %s，服务端上行/下行 %s/%s Mbps，混淆 %s\n' \
+            "${domain}" "${wsPort}" "${tlsMode}" "${hy2Mode}" "${hy2Up}" "${hy2Down}" "${hy2Obfs}"
     fi
     [[ -z "${secondaryCore}" ]] || printf '副核心: %s，Reality 入口端口 %s\n' "${secondaryCore}" "${secondaryPort}"
     printf '确认后将验证发布、生成账号参数并配置服务。\n'
@@ -419,12 +463,13 @@ dockerSetupCommand() {
     chmod 0700 "${candidate}" || return "${PADM_DOCKER_RC_STATE}"
     dockerSetupGenerateSpec "${core}" "${protocols}" "${server}" "${families}" "${realityPort}" \
         "${target}" "${targetPort}" "${sni}" "${domain}" "${wsPort}" "${subscription}" \
-        "${candidate}/spec.json" "${secondaryCore}" "${secondaryPort}" || {
+        "${candidate}/spec.json" "${secondaryCore}" "${secondaryPort}" \
+        "${hy2Mode}" "${hy2Up}" "${hy2Down}" "${hy2Obfs}" "${hy2Masquerade}" || {
         dockerError '账号参数生成或规格校验失败，未提交配置'
         return "${PADM_DOCKER_RC_STATE}"
     }
     dockerConfigureReleaseValidate "${candidate}/spec.json" || return "${PADM_DOCKER_RC_MANIFEST}"
-    if [[ "${protocols}" == 2 || "${protocols}" == 3 ]]; then
+    if [[ "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 6 ]]; then
         dockerSetupStageCertificate "${candidate}" "${tlsMode}" "${domain}" "${cert}" "${key}" \
             "${email}" "${provider}" "${credentials}" || return "${PADM_DOCKER_RC_STATE}"
         dockerConfigureApply "${candidate}/spec.json" "${candidate}/tls" "${candidate}/acme" || status=$?
@@ -493,7 +538,8 @@ dockerProtocolCommand() (
         jq -r 'def authority: if contains(":") then "[\(.)]" else . end;
           .core.protocols[] |
           "\(.listener_id)  \(.core)  \(if .id == 1 then "Reality Vision"
-            elif .id == 2 then "Reality XHTTP" elif .id == 26 then "Reality gRPC" else "WS TLS" end)  \(.server | authority):\(.public_port)  [\(.address_families | join(","))]  \(.name)"' \
+            elif .id == 2 then "Reality XHTTP" elif .id == 26 then "Reality gRPC"
+            elif .id == 3 then "Hysteria2" else "WS TLS" end)  \(.server | authority):\(.public_port)  [\(.address_families | join(","))]  \(.name)"' \
             "${normalized}"
         return $?
     fi
@@ -514,9 +560,9 @@ dockerProtocolCommand() (
 
 dockerEditFields() {
     local draft=$1 choice protocol listener field value= defaultValue= valueFile="${1}.value" temporary="${1}.next"
-    local sourceCore targetCore coreChoice primaryCore targetProtocol
+    local sourceCore targetCore coreChoice primaryCore targetProtocol obfsChoice opsImage
     while :; do
-        printf '\n1. 入口端口\n2. 服务器地址\n3. 地址族\n4. 节点名称\n5. Reality 目标/SNI\n6. WS 路径\n7. 订阅开关\n8. 验证并预览\n9. 复制入口\n10. 删除入口\n11. 安装其它 Reality 传输入口\n12. Reality 传输参数\n0. 取消\n'
+        printf '\n1. 入口端口\n2. 服务器地址\n3. 地址族\n4. 节点名称\n5. Reality 目标/SNI\n6. WS 路径\n7. 订阅开关\n8. 验证并预览\n9. 复制入口\n10. 删除入口\n11. 安装其它 Reality 传输入口\n12. Reality 传输参数\n13. Hysteria2 参数\n0. 取消\n'
         dockerSetupRead choice '编辑项目: ' || return 3
         [[ "${choice}" != 8 ]] || return 0
         if [[ "${choice}" == 7 ]]; then
@@ -542,6 +588,7 @@ dockerEditFields() {
                   .core.protocols |= map(select(.listener_id != $key)) |
                   if all(.core.protocols[]; .core != $primary) then error("主核心至少保留一个入口")
                   elif any(.core.protocols[]; .id == 21) then .
+                  elif any(.core.protocols[]; .id == 3) then .subscription.enabled = false
                   else .tls = null | .subscription.enabled = false end |
                   .core.secondary_type = ([.core.protocols[] | select(.core != $primary) | .core] | first // null)
                 ' "${draft}" >"${temporary}" 2>/dev/null || {
@@ -562,6 +609,10 @@ dockerEditFields() {
                 case "${coreChoice}" in 1) targetCore=xray ;; 2) targetCore=sing-box ;; *) return 1 ;; esac
                 if [[ ( "${targetProtocol}" == 21 || "${targetProtocol}" == 2 ) && "${targetCore}" != xray ]]; then
                     dockerError 'WS TLS 和 Reality XHTTP 入口仅支持 Xray，不能复制到 sing-box'
+                    return 1
+                fi
+                if [[ "${targetProtocol}" == 3 && "${targetCore}" != sing-box ]]; then
+                    dockerError 'Hysteria2 入口仅支持 sing-box，不能复制到 Xray'
                     return 1
                 fi
                 if [[ "${targetCore}" != "${primaryCore}" ]] &&
@@ -630,6 +681,21 @@ dockerEditFields() {
                     return 1
                 fi
                 ;;
+            13)
+                [[ "${protocol}" == 3 ]] || {
+                    dockerError '仅支持编辑已有 Hysteria2 入口；安装新 Hysteria2 请导入完整 configure 规格'
+                    return 1
+                }
+                dockerSetupRead value 'Hysteria2 参数 [1=拥塞模式, 2=服务端上行 Mbps, 3=服务端下行 Mbps, 4=混淆, 5=伪装 HTTPS 地址]: ' || return 3
+                case "${value}" in
+                1) field=hy2.bandwidth_mode ;;
+                2) field=hy2.up_mbps ;;
+                3) field=hy2.down_mbps ;;
+                4) field=hy2.obfs ;;
+                5) field=hy2.masquerade ;;
+                *) return 1 ;;
+                esac
+                ;;
             *) return 1 ;;
             esac
             defaultValue=$(jq -r --arg key "${listener}" --arg field "${field}" '
@@ -638,9 +704,37 @@ dockerEditFields() {
                 if . == ["ipv4"] then "1" elif . == ["ipv6"] then "2" else "3" end
               else tostring end
             ' "${draft}") || return 1
-            if [[ "${field}" == address_families ]]; then
+            if [[ "${field}" == hy2.obfs ]]; then
+                if [[ "${defaultValue}" == null ]]; then defaultValue=1; else defaultValue=2; fi
+                dockerSetupRead obfsChoice 'Salamander 混淆 [1=关闭, 2=启用或修改密码，空输入保留]: ' "${defaultValue}" || return 3
+                case "${obfsChoice}" in
+                1) value= ;;
+                2)
+                    defaultValue=$(jq -r --arg key "${listener}" '
+                      .core.protocols[] | select(.listener_id == $key) | .hy2.obfs.password // ""
+                    ' "${draft}") || return 1
+                    printf '混淆密码（16..128 位字母/数字/_/-，空输入保留或随机生成，0 取消）: '
+                    IFS= read -r -s value || return 3
+                    printf '\n'
+                    [[ "${value}" != 0 ]] || return 3
+                    value=${value:-${defaultValue}}
+                    if [[ -z "${value}" ]]; then
+                        opsImage=$(dockerResolveOpsImage) || return 1
+                        value=$(dockerSetupRandomHex "${opsImage}" 16) || return 1
+                    fi
+                    [[ "${value}" =~ ^[A-Za-z0-9_-]{16,128}$ ]] || return 1
+                    ;;
+                *) return 1 ;;
+                esac
+            elif [[ "${field}" == address_families ]]; then
                 dockerSetupRead value '地址族 [1=IPv4, 2=IPv6, 3=双栈，空输入保留]: ' "${defaultValue}" || return 3
                 [[ "${value}" =~ ^[123]$ ]] || return 1
+            elif [[ "${field}" == hy2.bandwidth_mode ]]; then
+                dockerSetupRead value "拥塞模式 [bbr=自适应, brutal=固定带宽，空输入保留 ${defaultValue}]: " "${defaultValue}" || return 3
+                [[ "${value}" == bbr || "${value}" == brutal ]] || return 1
+            elif [[ "${field}" == hy2.masquerade ]]; then
+                dockerSetupRead value '伪装 HTTPS 地址（空输入保留，off 关闭，0 取消）: ' "${defaultValue}" || return 3
+                [[ "${value}" != off ]] || value=
             else
                 dockerSetupRead value '新值（空输入保留，0 取消）: ' "${defaultValue}" || return 3
             fi
@@ -648,7 +742,10 @@ dockerEditFields() {
             printf '%s' "${value}" >"${valueFile}" || return 1
             chmod 0600 "${valueFile}" || return 1
             jq --arg key "${listener}" --arg field "${field}" --rawfile value "${valueFile}" '
-              (if $field == "public_port" or $field == "reality.target_port" then ($value | tonumber)
+              (if $field == "public_port" or $field == "reality.target_port" or
+                  $field == "hy2.up_mbps" or $field == "hy2.down_mbps" then ($value | tonumber)
+               elif $field == "hy2.obfs" then
+                 if $value == "" then null else {type: "salamander", password: $value} end
                elif $field == "address_families" then
                  if $value == "1" then ["ipv4"] elif $value == "2" then ["ipv6"] else ["ipv4","ipv6"] end
                else $value end) as $input |
@@ -771,7 +868,8 @@ dockerEditCommand() {
     jq -en --slurpfile before "${normalized}" --slurpfile after "${draft}" '
       def fixed: del(.server, .public_port, .address_families, .name,
         .reality.target_host, .reality.target_port, .reality.server_name, .websocket.path,
-        .xhttp.path, .xhttp.host, .xhttp.mode, .grpc.service_name);
+        .xhttp.path, .xhttp.host, .xhttp.mode, .grpc.service_name,
+        .hy2.bandwidth_mode, .hy2.up_mbps, .hy2.down_mbps, .hy2.obfs, .hy2.masquerade);
       def reality: .id == 1 or .id == 2 or .id == 26;
       def shared: fixed | del(.listener_id, .core, .id, .xhttp, .grpc);
       def root: del(.core.protocols, .core.secondary_type, .tls, .subscription.enabled);
@@ -781,13 +879,14 @@ dockerEditCommand() {
       # 分次提交新增与删除，防止借同凭据入口绕过已有身份和内部端口冻结。
       ((($oldIds - $newIds) | length) == 0 or (($newIds - $oldIds) | length) == 0) and
       ($old | root) == ($new | root) and
-      $new.tls == (if any($new.core.protocols[]; .id == 21) then $old.tls else null end) and
+      $new.tls == (if any($new.core.protocols[]; .id == 21 or .id == 3) then $old.tls else null end) and
       all($new.core.protocols[];
         . as $entry | [$old.core.protocols[] | select(.listener_id == $entry.listener_id)] as $existing |
         if ($existing | length) == 1 then ($existing[0] | fixed) == ($entry | fixed)
         else
           ((($entry.id == 1 or $entry.id == 26) and ($entry.core == "xray" or $entry.core == "sing-box")) or
            ($entry.id == 2 and $entry.core == "xray") or
+           ($entry.id == 3 and $entry.core == "sing-box") or
            ($entry.id == 21 and $entry.core == "xray")) and
           any($old.core.protocols[];
             .listener_id as $sourceId | any($new.core.protocols[]; .listener_id == $sourceId) and

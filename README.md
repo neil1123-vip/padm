@@ -133,7 +133,7 @@ wget -O /root/install-docker.sh "https://raw.githubusercontent.com/neil1123-vip/
 
 交互终端安装成功后自动进入菜单；已安装后直接运行 `padm-docker` 或
 `padm-docker menu` 可查看状态、启停重启和日志，选择“首次配置”收集核心、协议、地址和证书。
-当前向导支持 Xray Reality Vision/XHTTP/gRPC、sing-box Reality Vision/gRPC，
+当前向导支持 Xray Reality Vision/XHTTP/gRPC、sing-box Reality Vision/gRPC/Hysteria2，
 以及 Xray WS TLS 或 Reality Vision + WS TLS；
 已有部署不会被向导覆盖，可改用下述编辑入口；完整协议管理仍待后续阶段交付。
 `install --no-menu` 禁止安装后自动进入菜单；无参数非交互调用只显示帮助，
@@ -147,18 +147,21 @@ padm-docker status
 
 向导最终确认后才验签发布、生成 UUID/Reality 参数/订阅 token，并准备候选配置与证书。
 没有 `cosign` 时停止，不自动从未验证来源安装验证器，也不能跳过验签。
-WS TLS 可选择已有受管证书、导入完整证书链与私钥，或使用 DNS-01；
+WS TLS 和 Hysteria2 可选择已有受管证书、导入完整证书链与私钥，或使用 DNS-01；
 私钥和 DNS 凭据必须是仅持有者可读的普通文件。订阅发布仍要求 Xray、WS TLS 和受管证书。
+Hysteria2 使用单 UDP 入口，支持 BBR/Brutal、Salamander 混淆和 HTTPS 伪装；
+带宽按服务端方向输入，分享链接自动转换为客户端方向。端口跳跃及 Gecko 尚未开放。
 完整规格保存于 `/etc/padm-docker/config/spec.json`，由 root 持有、权限 `0600`；
 取消不提交，配置失败恢复旧规格、证书及 ACME 状态。该文件含秘密，不应打印或公开。
 
 已有受管规格可从菜单的“编辑配置/导入原始规格”或 `padm-docker edit` 修改入口端口、
 服务器地址、地址族、节点名称、Reality 目标/SNI、XHTTP 路径/Host/模式、
-gRPC service name、WS 路径和订阅开关。
+gRPC service name、WS 路径、Hysteria2 拥塞/带宽/混淆/伪装和订阅开关。
 编辑先生成私有草稿，显示不含秘密值的差异，候选验证通过并确认后才提交；
 未选中的入口、UUID、密钥、token、证书、宿主集成和累计流量保持不变。
 菜单可按入口 ID 复制或删除现有协议入口，主核心至少保留一个入口。
 Reality Vision/gRPC 可复制到另一核心，XHTTP 仅支持 Xray；
+Hysteria2 仅支持 sing-box 内复制；已有部署新增 Hysteria2 类型须导入完整 v3 `configure` 规格。
 编辑器可从现有 Reality 入口派生其它 Reality 传输入口，不生成新账号或密钥。
 删除副核心的最后入口会关闭副核心，不能改写已有入口的核心归属。
 新增与删除须分次确认提交，不能在同一事务中用替换绕过已有身份及内部端口保护。
@@ -189,17 +192,19 @@ padm-docker protocol links vless-reality
 首次配置输出 `schema_version: 3`；`configure` 和备份恢复继续接受 v1/v2。
 编辑先严格核对原规格与部署，再将草稿迁到 v3，确认前不改写受管规格。
 v3 明确每个入口的 `core` 归属及 `core.secondary_type`（不用副核心时为 `null`），
-两核心合计最多 16 个入口；v2 仍为单核心。新增协议 `2`/`26` 仅接受 v3；
-Xray 可用 Reality Vision/XHTTP/gRPC 和 WS TLS，sing-box 可用 Reality Vision/gRPC。
+两核心合计最多 16 个入口；v2 仍为单核心。新增协议 `2`/`3`/`26` 仅接受 v3；
+Xray 可用 Reality Vision/XHTTP/gRPC 和 WS TLS，sing-box 可用 Reality Vision/gRPC/Hysteria2。
 首次向导支持 Xray+sing-box 或 sing-box+Xray，副核心首配为 Reality Vision；
 主 sing-box、副 Xray 的 WS TLS 首次需使用完整 v3 spec；已有 Xray WS 入口可继续复制。
 双核心目前只支持普通 bridge 部署，不能与宿主集成组合。
+包含 Hysteria2 的单核心部署也暂不接受宿主集成。
 每个入口的 `listener_id` 固定；旧入口迁移保留 `vless-reality` / `vless-ws`，
 新入口使用 `entry-*`。WS 的 `websocket.backend_port` 与 `websocket.tls_port`
 按入口独立分配，不重排已有内部端口；身份、公开端口及同一容器网络空间的内部监听不得冲突。
 已有部署的 `edit --spec` 也支持这些入口变更，仍经过相同的预览、校验与确认。
-删除最后一个 WS 入口会关闭订阅并将规格的 `tls` 设为 `null`，但保留 TLS/ACME 文件与 token。
-Nginx 端轮换、核心端受管 TLS 底座及 Reality XHTTP/gRPC 基础入口已交付；
+删除最后一个 WS 入口会关闭订阅；仍有 Hysteria2 时保留规格中的 TLS，
+否则将 `tls` 设为 `null`，受管 TLS/ACME 文件与 token 均保留。
+Nginx 端轮换、核心端受管 TLS 底座及 Reality XHTTP/gRPC、Hysteria2 基础入口已交付；
 高级 XHTTP 参数、Reality 目标库/扫描/参数重生成/443 共存与完整协议管理仍未开放。
 更新或回滚的目标 bundle 必须同时支持规格版本及每个入口的协议/核心组合。
 带 Fail2ban 的 WS 入口暂不允许增删或修改公开端口，需后续联动封禁规则的管理事务。

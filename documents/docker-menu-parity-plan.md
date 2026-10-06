@@ -16,13 +16,13 @@
 | --- | --- | --- |
 | 1. 功能矩阵 | 已完成，提交 `7fe6a9e` | 协议与功能边界、管理状态、合同回归 |
 | 2. 菜单与可信首次配置 | 2A–2C 已实现；本地 PTY、事务和 Linux 权限通过，真实发布/连通待验 | 安装后进入菜单、独立命令生命周期、无需手填镜像的首次配置 |
-| 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2 Reality 扩展已通过本地与 amd64 实际传输验收 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
+| 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2 Reality 与 3C.3 Hysteria2 已通过本地与 amd64 实际传输验收 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
 | 4. 用户、订阅与服务维护 | 未开始 | 本机用户业务、多服务器后端、分范围备份恢复、核心运维 |
 | 5. 站点、路由与宿主集成 | 未开始 | 站点管理、内部能力、规则所有权及可撤销宿主操作 |
 | 6. 发布与完整验收 | 未开始 | 迁移文档、真实 Linux 与双架构证据、受门禁保护的 Release |
 
 当前机器可读支持状态以
-[`features.json`](../docker/contracts/features.json)为准：协议 `1`、`21` 的初始
+[`features.json`](../docker/contracts/features.json)为准：协议 `1`、`2`、`3`、`21`、`26` 的初始
 配置运行已支持，协议管理工作流仍为 `deferred`。发布订阅要求 Xray、协议 `21`
 和受管 TLS；不能由“可以生成链接”推断任意核心已经支持 HTTPS 订阅发布。
 第一步的回归使用模拟 Docker，不能代替真实容器、SSH 终端和客户端连通验证。
@@ -478,6 +478,58 @@ bash docker/tests/reality-real.sh \
 第三方导入 UI、XHTTP packet-up/stream-up 实际传输及其它目标/客户端；
 真实脚本直接验生成配置和传输，不冒充生产 DNS/ASN 风险门禁通过。
 3B.4 剩余环境条件和 3D 完整管理仍未完成。
+
+#### 3C.3 Hysteria2 基础入口
+
+新增协议 `3`，仅支持 sing-box 的 v3 合同，继续复用配置候选事务、受管 TLS、
+同 UUID 流量账号与额度；v1/v2 拒绝新增协议，不另建凭据或统计状态。
+共享 UUID 校验与 schema 均限制为 36 字符，拒绝尾换行，避免统计名称失配。
+首配的 sing-box 协议选项 `6` 提供单 UDP 入口和 BBR/Brutal，
+带宽按服务端方向填写，分享 URI 转为客户端方向。
+Salamander 密码随机生成或私密输入，不经 argv 或普通输出；
+HTTPS 伪装仅接受受约束的域名/路径，不接受凭据、查询串或控制字符。
+参数编辑、同核心复制、删除及完整 `configure` 规格导入均已接入。
+已有部署安装新 Hysteria2 类型仍需完整规格，不能从其它协议派生身份；
+删除最后一个 WS 后关闭发布，仍有 Hysteria2 时保留 TLS 关系。
+
+生成器按入口发布 IPv4/IPv6 UDP，部署记录与占用检查同样使用 UDP；
+单核心及 Hysteria2 作为主/副核心组合均覆盖。包含 Hysteria2 时暂拒绝宿主集成，
+HTTPS 订阅发布仍要求 Xray WS TLS；本地链接不依赖发布。
+协议 `3` 的配置运行状态为 `supported`，完整管理仍 `deferred`；
+端口跳跃、Gecko、独立用户 CRUD 和其它高级管理尚未开放。
+
+本地验收：固定 Linux 源码快照与 `--init` 工具容器；
+`hysteria2.sh` 复用 Reality/旧协议基线，审计修复后 `22.417` 秒通过，
+覆盖严格合同、旧版本拒绝、UDP 双栈、BBR/Brutal、混淆/伪装、
+精确 URI、共享账号额度、端口占用、失败事务及更新/回滚。
+首配/编辑 PTY `60.235` 秒通过，覆盖确认前取消、秘密不外泄、
+身份冻结、参数编辑/关闭、跨核心拒绝及删除时的 TLS/发布关系。
+`phase3` `126.583` 秒、`phase4` `17.636` 秒、TLS `13.122` 秒、
+流量 `5.253` 秒、菜单/信号 `17.339` 秒、Linux 权限 `1.730` 秒通过。
+测试在插入 mock PATH 前记录真实 `uname/stat`，不再依赖 `/usr/bin` 布局；
+缺 PTY 工具或 GNU `find -printf` 时早失败，不跳过快照断言。
+Bash、生产 ShellCheck error、测试 warning、JSON、Draft 2020-12 的
+10 个正例/22 个反例与 diff check 均通过。
+新增 `docker-hysteria2` selector，CI root 协议门槛改为 `hysteria2.sh`，
+一次包含 Hysteria2、Reality 与旧协议基线。
+
+真实 Linux amd64 验收 `11.704` 秒通过：使用上节相同的 3 个固定本机 image ID，
+不拉取镜像、不发布宿主端口；唯一 Compose 项目/网络/卷保持生产权限与健康检查。
+客户端仅从 `protocol links` URI 提取参数并信任测试 CA，
+BBR、Brutal、Salamander 各 IPv4/IPv6，共 6 条 SOCKS HTTP proof 并行通过。
+复现命令：
+
+```bash
+bash docker/tests/hysteria2.sh
+bash docker/tests/hysteria2-real.sh \
+  padm-local/padm-xray:tls-3b4 \
+  padm-local/padm-sing-box:tls-3b4 \
+  padm-local/padm-ops:tls-3b4
+```
+
+未重建或发布镜像，未验公网 UDP 宿主入口、第三方导入 UI、HTTPS 伪装实际响应、
+原生 arm64、真实 DNS 服务商和可信签名发布；隔离传输不代替这些条件。
+3B.4 剩余验收、3C 其它协议、3D、4A 与 5C 仍未完成。
 
 ### 3D. 协议管理与入口维护
 

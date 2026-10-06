@@ -34,6 +34,11 @@ Reality 可跨核心复制，删除副核心最后入口会关闭副核心，主
 首配、完整 v3 规格导入、基础参数编辑、传输派生及本地分享链接已接入。
 Vision/gRPC 可跨核心复制，XHTTP 仅限 Xray；副核心首配仍默认 Vision。
 双核心暂不能组合宿主集成；目标 bundle 版本与协议/核心支持均需匹配。
+3C.3 新增 sing-box Hysteria2：首配、完整 v3 规格导入、参数编辑、复制/删除及本地分享链接，
+支持单 UDP 入口、BBR/Brutal、Salamander 和 HTTPS 伪装；复用 TLS 和 UUID 流量账号。
+带宽为服务端方向，链接转为客户端方向；包含 Hysteria2 时暂不接受宿主集成。
+真实 amd64 的 BBR/Brutal/Salamander 各 IPv4/IPv6 共 6 条 HTTP proof 已通过；
+端口跳跃、Gecko、第三方导入 UI、公网宿主入口和原生 arm64 未验或尚未开放。
 Nginx 与核心端 TLS 轮换底座已交付；其它新协议类型和完整管理尚未交付，
 协议的 `management_status` 继续为 `deferred`。
 Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布、业务镜像及
@@ -49,9 +54,9 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 
 | 原生菜单 | Docker 当前状态 | 已覆盖 | 尚未覆盖或边界 |
 | --- | --- | --- | --- |
-| 安装与重装 | 部分已交付，完整管理 `deferred` | `install`、可信发布输入 `release`、交互首配 `setup`、`edit`、`configure`、候选校验及恢复 | 支持 `1`、`2`、`21`、`26` 字段编辑、完整原始 spec 接入、多入口及主副核心；重装和真实发布连通未完成。 |
+| 安装与重装 | 部分已交付，完整管理 `deferred` | `install`、可信发布输入 `release`、交互首配 `setup`、`edit`、`configure`、候选校验及恢复 | 支持 `1`、`2`、`3`、`21`、`26` 字段编辑、完整原始 spec 接入、多入口及主副核心；重装和真实发布连通未完成。 |
 | 订阅与用户 | `supported` + `host-integrated` + `deferred` | 有条件的订阅发布、流量采集/额度、WireGuard 宿主集成 | 发布仅支持包含协议 `21` 和受管 TLS 的 Xray 配置；用户 CRUD 和多服务器工作流未迁移；WireGuard 需 `net-wireguard`。 |
-| 协议与入口 | 部分 `supported`，管理工作流 `deferred` | `1` Reality Vision、`2` XHTTP、`26` gRPC、`21` WS TLS 的配置运行、字段编辑、分享链接、多入口和 Reality 传输派生 | XHTTP 仅限 Xray；完整协议管理、Reality 目标库/扫描/参数重生成/443 共存、其余公开协议、内部路由协议和 CDN 地址覆盖尚未开放；Fail2ban WS 增删及端口联动未交付。 |
+| 协议与入口 | 部分 `supported`，管理工作流 `deferred` | `1` Reality Vision、`2` XHTTP、`3` Hysteria2、`26` gRPC、`21` WS TLS 的配置运行、字段编辑、分享链接、多入口和 Reality 传输派生 | XHTTP 仅限 Xray、Hysteria2 仅限 sing-box；完整协议管理、UDP 端口跳跃、Reality 目标库/扫描/参数重生成/443 共存、其余公开协议、内部路由协议和 CDN 地址覆盖尚未开放；Fail2ban WS 增删及端口联动未交付。 |
 | 站点与证书 | 部分 `supported`，其余 `deferred` | TLS 文件安装、DNS-01 ACME、Nginx WebSocket 入口 | webroot/standalone ACME、静态站点/302/ALPN 管理尚未迁移。 |
 | 路由与访问控制 | `host-integrated` + `deferred` | WireGuard、TUN/TProxy 宿主集成合同 | WARP、IPv6 调优、Socks/HTTP 中继、DNS/hosts、BT、访问控制和路由规则尚未迁移。 |
 | 核心与服务 | `supported` + `deferred` | 基础状态、启动、停止、重启、日志、更新、回滚、配置校验 | 预发布试跑、升级风险扫描、Xray Geo 文件更新和自动任务尚未迁移；当前使用宿主子命令，不是原生全部生命周期管理。 |
@@ -68,7 +73,7 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | VLESS Reality Vision | 安装与重装；协议与入口 -> REALITY 管理 | `supported` | `deferred` | Xray / sing-box | `core-xray` / `core-sing-box` | bridge / TCP | 支持单核心或主副核心配置、字段编辑及跨核心同协议多入口；完整管理未迁移。 |
 | 2 | VLESS Reality XHTTP | 协议与入口 -> XHTTP 管理 | `supported` | `deferred` | Xray | `core-xray` | bridge / TCP | v3 支持首配、导入、路径/Host/模式编辑、复制及分享链接；高级 XHTTP 管理未迁移。 |
-| 3 | Hysteria2 | 协议与入口 -> Hysteria2 管理 | `deferred` | `deferred` | sing-box | 无 | bridge / UDP | UDP、端口跳跃、拥塞模式和订阅输出尚未接入。 |
+| 3 | Hysteria2 | 协议与入口 -> Hysteria2 管理 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / UDP | v3 支持首配、导入、BBR/Brutal、Salamander/HTTPS 伪装编辑、复制及分享链接；复用受管 TLS 和 UUID 流量账号，端口跳跃与完整管理未开放。 |
 | 4 | AnyTLS | 安装与重装 -> 自定义安装 | `deferred` | `deferred` | sing-box | 无 | bridge / TCP | AnyTLS 入站、TLS 和订阅合同尚未接入。 |
 | 5 | NaiveProxy | 安装与重装 -> TLS 指纹抗性 | `deferred` | `deferred` | sing-box | 无 | bridge / TCP | 域名、证书和 NaiveProxy 配置尚未接入。 |
 | 21 | VLESS WS TLS | 安装与重装 -> 自定义安装 / 传统 TLS 兼容安装 | `supported` | `deferred` | Xray | `core-xray` / `nginx` | bridge / TCP + Nginx | 已有多入口 Xray 后端、Nginx 反代和同域 TLS；Fail2ban 关联入口增删/改端口及完整管理未迁移。 |
@@ -105,7 +110,7 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 | `nginx` | 站点与证书 -> 传统 TLS fallback | `supported` | `nginx` | bridge | 独立 Nginx 容器，承载 WS 反代和静态入口。 |
 | `tls-files` | 站点与证书 -> 本机 TLS 证书 | `supported` | `nginx` / `acme` | bridge | 菜单/CLI 校验、导入轮换和只读挂载；Nginx 与 Xray/sing-box 逐消费者校验、重载/重建及健康失败恢复旧证书。核心端仅交付受管 TLS 文件底座，不代表新增协议或完整管理。 |
 | `acme-dns` | 站点与证书 -> 本机 TLS 证书 | `supported` | `acme` | bridge + 宿主 CLI 调度 | 菜单/CLI DNS-01 issue/renew 及自动续期启停/状态；root 私有输入、唯一 systemd/cron 任务、部署锁和候选账户/证书事务；未到期跳过，更新/回滚保留最新输入，卸载只撤销受管任务。 |
-| `subscription` | 订阅与用户 -> 订阅发布 | `supported` | `core-xray` / `nginx` / `subscription` | bridge | token 保护的发布；要求主核心或副核心中的 Xray 协议 `21` 和受管 TLS，可包含两核心 Reality 链接；没有 Xray WS TLS 入口时不可发布。 |
+| `subscription` | 订阅与用户 -> 订阅发布 | `supported` | `core-xray` / `nginx` / `subscription` | bridge | token 保护的发布；要求主核心或副核心中的 Xray 协议 `21` 和受管 TLS，可包含两核心 Reality 和 sing-box Hysteria2 链接；没有 Xray WS TLS 入口时不可发布。 |
 | `subscription-traffic` | 订阅与用户 -> 流量与额度 | `supported` | 核心 profile | 宿主 CLI | 定时采集以及 show/limit/reset。 |
 | `subscription-users` | 订阅与用户 -> 用户和分享订阅 | `deferred` | 核心、订阅 | bridge | 规格能声明账号，但交互式增删改工作流尚未迁移。 |
 | `subscription-multiserver` | 订阅与用户 -> 主控/被控、多服务器同步 | `deferred` | 订阅、WireGuard | host | WireGuard 集成存在；角色管理、同步事务和恢复向导未迁移。 |

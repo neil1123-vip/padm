@@ -53,7 +53,7 @@ dockerConfigureSpecValidate() {
         ($parts | length) == 4 and all($parts[]; test("^[0-9]{1,3}$") and (tonumber <= 255)));
       def ipv6: type == "string" and contains(":") and test("^[A-Fa-f0-9:]+$");
       def server: hostname or ipv4 or ipv6;
-      def uuid: type == "string" and test("^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$");
+      def uuid: type == "string" and length == 36 and test("^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$");
       def name: type == "string" and test("^[A-Za-z0-9._~@+=:-]{1,64}$");
       def families: type == "array" and length >= 1 and length <= 2 and
         (unique | length) == length and all(.[]; . == "ipv4" or . == "ipv6");
@@ -63,6 +63,11 @@ dockerConfigureSpecValidate() {
       def protocol_base: (.server | server) and (.public_port | port) and
         (.address_families | families) and (.name | name) and (.uuid | uuid);
       def listener_id: type == "string" and test("^entry-[a-z0-9][a-z0-9-]{0,47}$");
+      def bandwidth: type == "number" and floor == . and . >= 1 and . <= 1000000;
+      def masquerade: type == "string" and length <= 2048 and
+        (. == "" or (test("^https://(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z]{2,63}(?:/[A-Za-z0-9._~/-]*)?$") and
+          (ltrimstr("https://") | split("/")[0] | hostname))) and
+        (explode | all(. > 32 and . != 127));
       . as $request |
       ($matrix[0]) as $features |
       exact(["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"]) and
@@ -120,6 +125,17 @@ dockerConfigureSpecValidate() {
                (.service_name | type == "string" and test("^[A-Za-z0-9._-]{1,64}$") and
                  (explode | all(. > 32 and . != 127))))
            else true end)
+        elif .id == 3 then
+          $request.schema_version == 3 and .core == "sing-box" and
+          exact(["id", "core", "listener_id", "server", "public_port", "address_families", "name", "uuid", "hy2"]) and
+          (.hy2 | exact(["domain", "bandwidth_mode", "up_mbps", "down_mbps", "obfs", "masquerade"]) and
+            (.domain | hostname and (explode | all(. > 32 and . != 127))) and
+            (.bandwidth_mode == "bbr" or .bandwidth_mode == "brutal") and
+            (.up_mbps | bandwidth) and (.down_mbps | bandwidth) and
+            (.obfs == null or (.obfs | exact(["type", "password"]) and .type == "salamander" and
+              (.password | type == "string" and test("^[A-Za-z0-9_-]{16,128}$") and
+                (explode | all(. > 32 and . != 127))))) and
+            (.masquerade | masquerade))
         elif .id == 21 then
           exact(["id", "server", "public_port", "address_families", "name", "uuid", "websocket"] +
             if $request.schema_version >= 2 then ["listener_id"] else [] end +
@@ -175,14 +191,16 @@ dockerConfigureSpecValidate() {
           (.settings | exact(["port", "mark"]) and (.port | port) and
             (.mark | type == "number" and floor == . and . >= 1 and . <= 2147483647))
         else false end) and
-      if any(.core.protocols[]; .id == 21) then
+      if any(.core.protocols[]; .id == 3 or .id == 21) then
         .tls != null and
         all(.core.protocols[] | select(.id == 21); (.core // $request.core.type) == "xray") and
-        all(.core.protocols[] | select(.id == 21); .websocket.domain == $request.tls.domain)
+        all(.core.protocols[] | select(.id == 21); .websocket.domain == $request.tls.domain) and
+        all(.core.protocols[] | select(.id == 3); .hy2.domain == $request.tls.domain)
       else
         .tls == null and .subscription.enabled == false
       end and
       if .subscription.enabled then any(.core.protocols[]; .id == 21) else true end and
+      if any(.core.protocols[]; .id == 3) then .host_integrations == [] else true end and
       if any(.host_integrations[]; .type == "fail2ban") then
         any(.core.protocols[]; .id == 21) and
         all(.host_integrations[] | select(.type == "fail2ban") | .settings.ports[];
@@ -273,7 +291,7 @@ dockerManagedSpecMatchesDeployment() {
       (if .schema_version >= 2 then
         [.core.protocols[] | {listener_id, service: (if .id == 21 then "nginx" else (.core // $d.core.type) end),
           public_port, container_port: (if .id == 21 then .websocket.tls_port else .public_port end),
-          transport: "tcp", address_families}] | sort_by(.listener_id) as $expected |
+          transport: (if .id == 3 then "udp" else "tcp" end), address_families}] | sort_by(.listener_id) as $expected |
         $expected == ([$d.listeners[] | select(.listener_id | startswith("host-") | not)] | sort_by(.listener_id))
        else true end) and
       all(.images | to_entries[];
@@ -584,7 +602,7 @@ dockerConfigurePortsAvailable() {
         fi
     done < <(
         jq -r '
-          ([.core.protocols[] | "\(.public_port)|tcp"] +
+          ([.core.protocols[] | "\(.public_port)|\(if .id == 3 then "udp" else "tcp" end)"] +
           [.host_integrations[] | select(.type == "tproxy") |
             "\(.settings.port)|tcp", "\(.settings.port)|udp"]) | unique[]
         ' "${specFile}"
@@ -812,7 +830,25 @@ dockerGenerateSingBoxConfig() {
         log: {disabled: false, level: "warn", timestamp: true},
         inbounds: ([
           $r.core.protocols[] | select((.core // $r.core.type) == "sing-box") |
-          {
+          if .id == 3 then {
+            type: "hysteria2",
+            tag: .listener_id,
+            listen: "::",
+            listen_port: .public_port,
+            # 密码和统计名称都固定为 UUID，使多入口共享现有流量账号。
+            users: [{name: .uuid, password: .uuid}],
+            tls: {
+              enabled: true,
+              server_name: .hy2.domain,
+              alpn: ["h3"],
+              certificate_path: "/etc/padm/secrets/tls/\(.hy2.domain).crt",
+              key_path: "/etc/padm/secrets/tls/\(.hy2.domain).key"
+            }
+          } + (if .hy2.bandwidth_mode == "bbr" then {ignore_client_bandwidth: true}
+            else {up_mbps: .hy2.up_mbps, down_mbps: .hy2.down_mbps} end) +
+            (if .hy2.obfs != null then {obfs: .hy2.obfs} else {} end) +
+            (if .hy2.masquerade != "" then {masquerade: .hy2.masquerade} else {} end)
+          else {
             type: "vless",
             tag: (.listener_id // "vless-reality"),
             listen: "::",
@@ -829,7 +865,7 @@ dockerGenerateSingBoxConfig() {
                 short_id: ["", .reality.short_id]
               }
             }
-          } + (if .id == 26 then {transport: {type: "grpc", service_name: .grpc.service_name}} else {} end)
+          } + (if .id == 26 then {transport: {type: "grpc", service_name: .grpc.service_name}} else {} end) end
         ] + [
           $r.host_integrations[] |
           if .type == "tun" then {
@@ -949,6 +985,12 @@ dockerGenerateSubscription() {
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=xhttp&host=\(.xhttp.host | @uri)&path=\(.xhttp.path | @uri)&mode=\(.xhttp.mode)#\(.name | @uri)"
       elif .id == 26 then
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=grpc&alpn=h2&path=\(.grpc.service_name | @uri)&serviceName=\(.grpc.service_name | @uri)#\(.name | @uri)"
+      elif .id == 3 then
+        # 服务端上行对应客户端下行，分享链接需要交换带宽方向。
+        "hysteria2://\(.uuid | @uri)@\(.server | authority):\(.public_port)?peer=\(.hy2.domain | @uri)&insecure=0&sni=\(.hy2.domain | @uri)&alpn=h3" +
+          (if .hy2.bandwidth_mode == "brutal" then "&upmbps=\(.hy2.down_mbps)&downmbps=\(.hy2.up_mbps)" else "" end) +
+          (if .hy2.obfs != null then "&obfs=\(.hy2.obfs.type | @uri)&obfs-password=\(.hy2.obfs.password | @uri)" else "" end) +
+          "#\(.name | @uri)"
       elif .id == 21 then
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&security=tls&sni=\(.websocket.domain | @uri)&type=ws&host=\(.websocket.domain | @uri)&path=\("/" + .websocket.path + "ws" | @uri)#\(.name | @uri)"
       else empty end
@@ -1013,11 +1055,12 @@ dockerGenerateCompose() {
       }];
       def ports($protocol; $containerPort): [
         $protocol.address_families[] |
-        if . == "ipv4" then "0.0.0.0:\($protocol.public_port):\($containerPort)/tcp"
-        else "[::]:\($protocol.public_port):\($containerPort)/tcp" end
+        (if $protocol.id == 3 then "udp" else "tcp" end) as $transport |
+        if . == "ipv4" then "0.0.0.0:\($protocol.public_port):\($containerPort)/\($transport)"
+        else "[::]:\($protocol.public_port):\($containerPort)/\($transport)" end
       ];
       [$r.core.type, $r.core.secondary_type] | map(select(. != null)) as $cores |
-      ($r.core.protocols | map(select(.id == 1 or .id == 2 or .id == 26))) as $direct |
+      ($r.core.protocols | map(select(.id == 1 or .id == 2 or .id == 3 or .id == 26))) as $direct |
       ($r.core.protocols | map(select(.id == 21))) as $websocket |
       ($r.host_integrations | map(select(.type == "wireguard"))) as $wireguard |
       ($r.host_integrations | map(select(.type == "fail2ban"))) as $fail2ban |
@@ -1235,7 +1278,7 @@ dockerGenerateDeployment() {
             service: (if .id == 21 then "nginx" else (.core // $r.core.type) end),
             public_port: .public_port,
             container_port: (if .id == 21 then (.websocket.tls_port // 8443) else .public_port end),
-            transport: "tcp",
+            transport: (if .id == 3 then "udp" else "tcp" end),
             address_families: .address_families
           } + if $r.schema_version >= 2 then {listener_id: .listener_id} else {} end)
           ] + [

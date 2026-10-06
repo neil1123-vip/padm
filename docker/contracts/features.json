@@ -31,17 +31,17 @@
     },
     {
       "id": 3,
-      "status": "deferred",
+      "status": "supported",
       "management_status": "deferred",
       "cores": ["sing-box"],
-      "profiles": [],
+      "profiles": ["core-sing-box"],
       "native_menu": "协议与入口",
       "native_action": "Hysteria2 管理",
       "transport": "quic",
       "udp_support": "yes",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "需要 UDP 监听、端口跳跃和对应订阅输出，Docker 合同尚未接入。"
+      "reason": "v3 支持 sing-box Hysteria2 首配、完整规格导入、入口与带宽模式编辑、Salamander 混淆、HTTPS 伪装及分享链接；复用受管证书和 UUID 流量账号，端口跳跃尚未开放，宿主集成组合暂不接受。"
     },
     {
       "id": 4,
@@ -278,7 +278,7 @@
       },
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "部署必须包含 Xray 协议 21 和受管 TLS，无论 Xray 为主核心还是副核心；Nginx 发布 token 保护的订阅可包含两核心 Reality 节点。没有 Xray WS TLS 入口时不可发布。"
+      "reason": "部署必须包含 Xray 协议 21 和受管 TLS，无论 Xray 为主核心还是副核心；Nginx 发布 token 保护的订阅可包含两核心 Reality 和 sing-box Hysteria2 节点。没有 Xray WS TLS 入口时不可发布。"
     },
     "subscription-traffic": {
       "status": "supported",
