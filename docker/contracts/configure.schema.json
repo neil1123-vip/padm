@@ -74,6 +74,9 @@
               },
               {
                 "$ref": "#/$defs/vmess_protocol"
+              },
+              {
+                "$ref": "#/$defs/httpupgrade_protocol"
               }
             ]
           }
@@ -322,7 +325,7 @@
         "properties": {
           "core": {
             "properties": {
-              "protocols": {"contains": {"properties": {"id": {"enum": [3, 4, 5, 21, 22, 28, 31]}}}}
+              "protocols": {"contains": {"properties": {"id": {"enum": [3, 4, 5, 21, 22, 23, 28, 31]}}}}
             }
           }
         }
@@ -356,7 +359,7 @@
         "properties": {
           "core": {
             "properties": {
-              "protocols": {"contains": {"properties": {"id": {"enum": [3, 4, 5, 22, 28, 30, 31]}}}}
+              "protocols": {"contains": {"properties": {"id": {"enum": [3, 4, 5, 22, 23, 28, 30, 31]}}}}
             }
           }
         }
@@ -990,6 +993,35 @@
                 },
                 "zero_rtt_handshake": {"type": "boolean"}
               }
+            }
+          }
+        }
+      ]
+    },
+    "httpupgrade_protocol": {
+      "allOf": [
+        {"$ref": "#/$defs/protocol_base"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "core", "listener_id", "server", "public_port", "address_families", "name", "uuid", "httpupgrade"],
+          "properties": {
+            "id": {"const": 23},
+            "core": {"enum": ["xray", "sing-box"]},
+            "listener_id": {
+              "type": "string",
+              "pattern": "^entry-[a-z0-9][a-z0-9-]{0,47}(?![\\s\\S])"
+            },
+            "server": {"$ref": "#/$defs/server_address"},
+            "public_port": {"$ref": "#/$defs/port"},
+            "address_families": {"$ref": "#/$defs/address_families"},
+            "name": {"$ref": "#/$defs/account_name"},
+            "uuid": {"$ref": "#/$defs/uuid"},
+            "httpupgrade": {
+              "allOf": [
+                {"$ref": "#/$defs/websocket_protocol/allOf/1/properties/websocket"},
+                {"required": ["backend_port", "tls_port"]}
+              ]
             }
           }
         }

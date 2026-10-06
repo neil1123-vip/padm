@@ -1627,4 +1627,129 @@ for vmessFailure in tls-fail health-fail; do
     assertUnconfigured
 done
 export FAKE_SETUP_MODE=ok
+
+# HTTPUpgrade 与 WS 共用受管 TLS，但入口路径及两核后端保持独立。
+printf -v HTTPUPGRADE_INPUT '1\n13\nproxy.example.com\n3\nhttpupgrade.example.com\n24485\n2\n%s\n%s\ny\n' \
+    "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
+for httpupgradeCase in httpupgrade-xray httpupgrade-sing dual-httpupgrade-xray dual-httpupgrade-sing; do
+    core=xray; coreChoice=1; single=true
+    case "${httpupgradeCase}" in
+    httpupgrade-sing) core=sing-box; coreChoice=2 ;;
+    dual-httpupgrade-xray) coreChoice=3; single=false ;;
+    dual-httpupgrade-sing) core=sing-box; coreChoice=4; single=false ;;
+    esac
+    if [[ "${single}" == true ]]; then
+        printf -v input '%s\n13\nproxy.example.com\n3\nhttpupgrade.example.com\n24485\n2\n%s\n%s\ny\n' \
+            "${coreChoice}" "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
+    else
+        printf -v input '%s\n13\nproxy.example.com\n3\ntarget.example.com\n443\ntarget.example.com\n24445\nhttpupgrade.example.com\n24485\n2\n%s\n%s\ny\n' \
+            "${coreChoice}" "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
+    fi
+    newState "${httpupgradeCase}"
+    before=$(snapshot)
+    runPty 0 "${httpupgradeCase}-cancel" "${input%$'y\n'}"$'n\n' setup "${ASSET_ARGS[@]}"
+    [[ "$(snapshot)" == "${before}" && ! -s "${EVENTS}" && ! -s "${VERIFY_LOG}" ]] ||
+        fail "${httpupgradeCase}: 取消首配提前生成凭据或写入部署"
+    runPty 0 "${httpupgradeCase}" "${input}" setup "${ASSET_ARGS[@]}"
+    SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+    jq -e --arg core "${core}" --argjson single "${single}" '
+      .schema_version == 3 and .core.type == $core and .tls.domain == "httpupgrade.example.com" and
+      .subscription.enabled == false and
+      (.core.protocols[0] | .id == 23 and .core == $core and .listener_id == "entry-vmess-httpupgrade" and
+        .name == "main-vmess-httpupgrade" and .public_port == 24485 and
+        .address_families == ["ipv4","ipv6"] and .server == "proxy.example.com" and
+        .uuid == "11111111-1111-4111-8111-111111111111" and
+        (.httpupgrade | .domain == "httpupgrade.example.com" and .backend_port == 31306 and .tls_port == 8443)) and
+      if $single then .core.secondary_type == null and (.core.protocols | length) == 1
+      else .core.secondary_type == (if $core == "xray" then "sing-box" else "xray" end) and
+        (.core.protocols | length) == 2 and .core.protocols[1].id == 1 and
+        .core.protocols[1].public_port == 24445 and .core.protocols[0].uuid == .core.protocols[1].uuid end
+    ' "${SPEC}" >/dev/null || fail "${httpupgradeCase}: HTTPUpgrade 首配规格错误"
+    jq -e --arg core "${core}" --slurpfile spec "${SPEC}" '
+      $spec[0].core.protocols[0] as $p |
+      if $core == "xray" then any(.inbounds[]; .tag == $p.listener_id and .protocol == "vmess" and
+        .settings.clients == [{id:$p.uuid,email:$p.uuid,alterId:0}] and .port == $p.httpupgrade.backend_port and
+        .streamSettings == {network:"httpupgrade",security:"none",
+          httpupgradeSettings:{path:("/"+$p.httpupgrade.path),host:$p.httpupgrade.domain}})
+      else any(.inbounds[]; .tag == $p.listener_id and .type == "vmess" and
+        .users == [{uuid:$p.uuid,name:$p.uuid,alterId:0}] and .listen_port == $p.httpupgrade.backend_port and
+        .transport == {type:"httpupgrade",path:("/"+$p.httpupgrade.path),host:$p.httpupgrade.domain}) end
+    ' "${PADM_DOCKER_INSTALL_DIR}/config/${core}/config.json" >/dev/null ||
+        fail "${httpupgradeCase}: HTTPUpgrade 认证、host 或路径错误"
+    jq -e --arg core "${core}" '.services[$core].ports == [] and
+      .services.nginx.ports == ["0.0.0.0:24485:8443/tcp","[::]:24485:8443/tcp"] and
+      (.services.nginx.depends_on | keys) == [$core] and (.services | has("subscription") | not)' \
+        "${PADM_DOCKER_INSTALL_DIR}/compose.json" >/dev/null ||
+        fail "${httpupgradeCase}: HTTPUpgrade Nginx 双栈或 upstream 依赖错误"
+    if [[ "${single}" == true ]]; then
+        ! grep -Eq ' x25519( |$)|derived-stdin' "${EVENTS}" || fail 'HTTPUpgrade 单核生成无用 Reality 密钥'
+    fi
+    assertClean
+    assertNoSecrets
+done
+export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-httpupgrade-xray"
+export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-httpupgrade-xray"
+CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
+SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+cp -- "${SPEC}" "${TEST_ROOT}/httpupgrade-original.json"
+before=$(snapshot)
+runPty 0 httpupgrade-edit-cancel $'1\n23\n0\n' edit "${ASSET_ARGS[@]}"
+[[ "$(snapshot)" == "${before}" ]] || fail 'HTTPUpgrade 取消编辑改变部署'
+runPty 0 httpupgrade-edit $'1\n23\n24486\n2\n23\nnext.example.com\n3\n23\n2\n4\n23\nnext-httpupgrade\n6\n23\nnewupgradepath\n8\ny\n' \
+    edit "${ASSET_ARGS[@]}"
+jq -e --slurpfile before "${TEST_ROOT}/httpupgrade-original.json" '
+  .tls == $before[0].tls and .subscription == $before[0].subscription and
+  (.core.protocols[0] | .uuid == $before[0].core.protocols[0].uuid and .listener_id == "entry-vmess-httpupgrade" and
+    .public_port == 24486 and .server == "next.example.com" and .address_families == ["ipv6"] and
+    .name == "next-httpupgrade" and
+    .httpupgrade == {domain:"httpupgrade.example.com",path:"newupgradepath",backend_port:31306,tls_port:8443})' \
+    "${SPEC}" >/dev/null || fail 'HTTPUpgrade 编辑改写 TLS 或账号/内部端口身份'
+runPty 0 httpupgrade-copy-xray $'9\n23\n1\n24487\n8\ny\n' edit "${ASSET_ARGS[@]}"
+runPty 0 httpupgrade-copy-sing $'9\nentry-vmess-httpupgrade\n2\n24488\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.core.protocols[0] as $source | .core.secondary_type == "sing-box" and
+  (.core.protocols | length) == 3 and
+  all(.core.protocols[1:][]; .id == 23 and .uuid == $source.uuid and
+    .httpupgrade.domain == $source.httpupgrade.domain and .httpupgrade.path == $source.httpupgrade.path and
+    .name == $source.name and .server == $source.server and .address_families == $source.address_families) and
+  (.core.protocols[1] | .core == "xray" and .listener_id == "entry-1" and .public_port == 24487 and
+    .httpupgrade.backend_port == 31307 and .httpupgrade.tls_port == 8444) and
+  (.core.protocols[2] | .core == "sing-box" and .listener_id == "entry-2" and .public_port == 24488 and
+    .httpupgrade.backend_port == 31306 and .httpupgrade.tls_port == 8445)' \
+    "${SPEC}" >/dev/null || fail 'HTTPUpgrade 同核/跨核复制丢失身份或端口隔离'
+before=$(snapshot)
+for rejectedEdit in uuid domain backend tls-port core aid id; do
+    case "${rejectedEdit}" in
+    uuid) filter='.core.protocols[0].uuid = "22222222-2222-4222-8222-222222222222"' ;;
+    domain) filter='.tls.domain = "next.example.com" | .core.protocols |= map(.httpupgrade.domain = "next.example.com")' ;;
+    backend) filter='.core.protocols[0].httpupgrade.backend_port = 31308' ;;
+    tls-port) filter='.core.protocols[0].httpupgrade.tls_port = 8446' ;;
+    core) filter='.core.protocols[0].core = "sing-box"' ;;
+    aid) filter='.core.protocols[0].alterId = 1' ;;
+    id) filter='.core.protocols[0] |= (.id = 22 | .websocket = .httpupgrade | del(.httpupgrade))' ;;
+    esac
+    jq "${filter}" "${SPEC}" >"${TEST_ROOT}/httpupgrade-rejected.json"
+    chmod 0600 "${TEST_ROOT}/httpupgrade-rejected.json"
+    CONTROL_LOG="${TEST_ROOT}/httpupgrade-rejected-${rejectedEdit}.log"
+    actual=0
+    bash -u "${CLI}" edit --spec "${TEST_ROOT}/httpupgrade-rejected.json" --preview "${ASSET_ARGS[@]}" \
+        >"${CONTROL_LOG}" 2>&1 || actual=$?
+    [[ "${actual}" == 15 && "$(snapshot)" == "${before}" ]] ||
+        fail "${rejectedEdit}: HTTPUpgrade 编辑绕过身份冻结"
+    assertClean
+done
+runPty 0 httpupgrade-delete-secondary $'10\nentry-2\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.core.secondary_type == null and .tls.domain == "httpupgrade.example.com" and
+  (.core.protocols | length) == 2' "${SPEC}" >/dev/null || fail '删除 HTTPUpgrade 副核心丢失 TLS'
+runPty 0 httpupgrade-delete-copy $'10\nentry-1\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.tls.domain == "httpupgrade.example.com" and (.core.protocols | length) == 1' \
+    "${SPEC}" >/dev/null || fail 'HTTPUpgrade 删除副本撤销 TLS'
+runPty 15 httpupgrade-enable-publish $'7\ny\n8\n' edit "${ASSET_ARGS[@]}"
+for httpupgradeFailure in tls-fail health-fail; do
+    newState "httpupgrade-${httpupgradeFailure}"
+    export FAKE_SETUP_MODE="${httpupgradeFailure}"
+    if [[ "${httpupgradeFailure}" == tls-fail ]]; then expected=15; else expected=14; fi
+    runPty "${expected}" "httpupgrade-${httpupgradeFailure}" "${HTTPUPGRADE_INPUT}" setup "${ASSET_ARGS[@]}"
+    assertUnconfigured
+done
+export FAKE_SETUP_MODE=ok
 printf 'docker-setup-regression-ok\n'

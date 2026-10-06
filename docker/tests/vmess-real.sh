@@ -2,20 +2,39 @@
 set -euo pipefail
 umask 077
 
-# 仅使用隔离项目、网络和命名卷；真实 Nginx TLS/WS 流量不发布宿主端口。
-[[ "$#" == 4 ]] || { printf 'usage: vmess-real.sh <local-xray> <local-sing-box> <local-ops> <local-nginx>\n' >&2; exit 2; }
+# 仅使用隔离项目、网络和命名卷；两类真实 Nginx TLS 传输复用同一验证流程。
+[[ "$#" == 4 || "$#" == 6 ]] || {
+    printf 'usage: vmess-real.sh <local-xray> <local-sing-box> <local-ops> <local-nginx> [22|23 xray|sing-box]\n' >&2
+    exit 2
+}
 [[ "$(uname -s)" == Linux && "$(id -u)" == 0 ]] || { printf 'vmess-real.sh requires Linux root\n' >&2; exit 1; }
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 XRAY_REF=$1 SING_REF=$2 OPS_REF=$3 NGINX_REF=$4
+PROTOCOL=${5:-22} CORE=${6:-xray}
+[[ "${PROTOCOL}:${CORE}" == 22:xray || "${PROTOCOL}:${CORE}" == 23:xray ||
+    "${PROTOCOL}:${CORE}" == 23:sing-box ]] || exit 2
+TRANSPORT=ws TRANSPORT_KEY=websocket BACKEND_PORT=31297 TEST_NAME=vmess-real
+if [[ "${PROTOCOL}" == 23 ]]; then
+    TRANSPORT=httpupgrade TRANSPORT_KEY=httpupgrade BACKEND_PORT=31306 TEST_NAME=httpupgrade-real
+fi
 for tool in docker jq python3 sha256sum tar openssl awk; do command -v "${tool}" >/dev/null; done
 XRAY_ID=$(docker image inspect --format '{{.Id}}' "${XRAY_REF}")
 SING_ID=$(docker image inspect --format '{{.Id}}' "${SING_REF}")
 OPS_ID=$(docker image inspect --format '{{.Id}}' "${OPS_REF}")
 NGINX_ID=$(docker image inspect --format '{{.Id}}' "${NGINX_REF}")
+CURL_ID=
+if [[ "${CORE}" == sing-box ]]; then
+    [[ -n "${PADM_TEST_HTTP2_CURL_REF:-}" ]] || {
+        printf 'sing-box real stats requires PADM_TEST_HTTP2_CURL_REF (local HTTP2 curl image)\n' >&2
+        exit 2
+    }
+    CURL_ID=$(docker image inspect --format '{{.Id}}' "${PADM_TEST_HTTP2_CURL_REF}")
+    [[ "${CURL_ID}" =~ ^sha256:[a-f0-9]{64}$ ]]
+fi
 for image in "${XRAY_ID}" "${SING_ID}" "${OPS_ID}" "${NGINX_ID}"; do
     [[ "${image}" =~ ^sha256:[a-f0-9]{64}$ ]]
 done
-project="padm-vmess-$(date +%s)-$$-${RANDOM}"
+project="padm-${TEST_NAME}-${CORE}-$(date +%s)-$$-${RANDOM}"
 volume="${project}-files"
 subnet=$(printf 'fd42:7061:646d:%x::/64' "${RANDOM}")
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/padm-vmess-real.XXXXXX")
@@ -62,6 +81,7 @@ dockerStageBundle "${PROJECT_ROOT}" 0000000000000000000000000000000000000000
 dockerActivateStagedBundle
 dockerCleanupStagedBundle
 DOMAIN=vmess.padm.test
+[[ "${PROTOCOL}" != 23 ]] || DOMAIN=HttpUpgrade.padm.test
 UUID=11111111-1111-4111-8111-111111111111
 TLS_DIR="${PADM_DOCKER_INSTALL_DIR}/secrets/tls"
 mkdir -p "${TEST_ROOT}/certs" "${TLS_DIR}" "${TEST_ROOT}/runtime/"{client,origin}
@@ -76,14 +96,15 @@ openssl x509 -req -in "${TEST_ROOT}/certs/server.csr" -days 1 -set_serial 1 \
     -extfile "${TEST_ROOT}/certs/extensions" -out "${TLS_DIR}/${DOMAIN}.crt" >/dev/null 2>&1
 openssl verify -CAfile "${TEST_ROOT}/certs/ca.crt" "${TLS_DIR}/${DOMAIN}.crt" >/dev/null
 SPEC="${TEST_ROOT}/spec.json"
-jq -n --arg uuid "${UUID}" --arg domain "${DOMAIN}" '
+jq -n --arg uuid "${UUID}" --arg domain "${DOMAIN}" --arg core "${CORE}" --arg name "${TEST_NAME}" \
+    --arg key "${TRANSPORT_KEY}" --argjson protocol "${PROTOCOL}" --argjson backend "${BACKEND_PORT}" '
   def image($name): "ghcr.io/example/padm-"+$name+":test@sha256:"+("a"*64);
   {schema_version:3,
    release:{version:"3.9.9",manifest_sha256:("a"*64),signature_identity:"local-test-only"},
-   core:{type:"xray",secondary_type:null,protocols:[
-     {id:22,listener_id:"entry-vmess",core:"xray",server:$domain,public_port:35468,
-      address_families:["ipv4","ipv6"],name:"vmess-real",uuid:$uuid,
-      websocket:{domain:$domain,path:"padmvmess",backend_port:31297,tls_port:8443}}]},
+   core:{type:$core,secondary_type:null,protocols:[
+     {id:$protocol,listener_id:"entry-vmess",core:$core,server:$domain,public_port:35468,
+      address_families:["ipv4","ipv6"],name:$name,uuid:$uuid,
+      ($key):{domain:$domain,path:"padmvmess",backend_port:$backend,tls_port:8443}}]},
    tls:{domain:$domain},subscription:{enabled:false,token:"0123456789abcdef"},
    images:{xray:image("xray"),"sing-box":image("sing-box"),nginx:image("nginx"),ops:image("ops"),net:image("net")},
    host_integrations:[]}
@@ -93,11 +114,17 @@ dockerConfigureSpecValidate "${SPEC}"
 dockerCreateConfigurationCandidate
 candidate=${DOCKER_CONFIG_CANDIDATE}
 dockerGenerateCandidate "${SPEC}" "${candidate}"
-jq -e --arg uuid "${UUID}" '
-  any(.inbounds[]; .protocol == "vmess" and .tag == "entry-vmess" and .port == 31297 and
+jq -e --arg uuid "${UUID}" --arg core "${CORE}" --arg transport "${TRANSPORT}" \
+    --arg domain "${DOMAIN}" --argjson backend "${BACKEND_PORT}" '
+  if $core == "xray" then any(.inbounds[]; .protocol == "vmess" and .tag == "entry-vmess" and .port == $backend and
     .settings.clients == [{id:$uuid,email:$uuid,alterId:0}] and
-    .streamSettings == {network:"ws",security:"none",wsSettings:{path:"/padmvmessws"}})' \
-    "${candidate}/config/xray/config.json" >/dev/null
+    .streamSettings == ({network:$transport,security:"none"} +
+      if $transport == "ws" then {wsSettings:{path:"/padmvmessws"}}
+      else {httpupgradeSettings:{path:"/padmvmess",host:$domain}} end))
+  else any(.inbounds[]; .type == "vmess" and .tag == "entry-vmess" and .listen_port == $backend and
+    .users == [{uuid:$uuid,name:$uuid,alterId:0}] and
+    .transport == {type:"httpupgrade",path:"/padmvmess",host:$domain}) end' \
+    "${candidate}/config/${CORE}/config.json" >/dev/null
 jq -e '.listeners == [{listener_id:"entry-vmess",service:"nginx",public_port:35468,
   container_port:8443,transport:"tcp",address_families:["ipv4","ipv6"]}]' \
     "${candidate}/deployment.json" >/dev/null
@@ -110,11 +137,11 @@ cp "${candidate}/images.runtime.env" "${PADM_DOCKER_INSTALL_DIR}/images.env"
 dockerCleanupConfigurationCandidate
 dockerManagedSpecMatchesDeployment "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" \
     "${PADM_DOCKER_INSTALL_DIR}/deployment.json" "${PADM_DOCKER_INSTALL_DIR}/images.env"
-dockerTrafficAccounts xray | jq -e --arg uuid "${UUID}" 'length == 1 and .[0].account == $uuid' >/dev/null
+dockerTrafficAccounts "${CORE}" | jq -e --arg uuid "${UUID}" 'length == 1 and .[0].account == $uuid' >/dev/null
 for file in config.json users.base; do
-    [[ "$(stat -c '%u:%g:%a' "${PADM_DOCKER_INSTALL_DIR}/config/xray/${file}")" == 0:10001:640 ]]
+    [[ "$(stat -c '%u:%g:%a' "${PADM_DOCKER_INSTALL_DIR}/config/${CORE}/${file}")" == 0:10001:640 ]]
 done
-base_hash=$(sha256sum "${PADM_DOCKER_INSTALL_DIR}/config/xray/users.base")
+base_hash=$(sha256sum "${PADM_DOCKER_INSTALL_DIR}/config/${CORE}/users.base")
 dockerProtocolCommand links >"${TEST_ROOT}/links.txt"
 [[ "$(wc -l <"${TEST_ROOT}/links.txt")" == 1 ]]
 cp -a "${PADM_DOCKER_INSTALL_DIR}/config" "${PADM_DOCKER_INSTALL_DIR}/data" \
@@ -165,13 +192,13 @@ tar -cpf - -C "${TEST_ROOT}" runtime |
     docker run --rm -i --pull=never --label "io.padm.test=${project}" --user 0 \
         --mount "type=volume,source=${volume},target=/test" --entrypoint tar "${OPS_ID}" -xpf - -C /test
 COMPOSE="${TEST_ROOT}/compose.json"
-jq --arg project "${project}" --arg volume "${volume}" --arg xray "${XRAY_ID}" \
+jq --arg project "${project}" --arg volume "${volume}" --arg core "${CORE}" --arg xray "${XRAY_ID}" \
     --arg sing "${SING_ID}" --arg ops "${OPS_ID}" --arg nginx "${NGINX_ID}" --arg subnet "${subnet}" '
   .name = $project | .networks.default.name = $project |
   .networks.default.labels["io.padm.test"] = $project |
   .networks.default.enable_ipv6 = true | .networks.default.ipam = {config:[{subnet:$subnet}]} |
   del(.services.acme) | .volumes = {files:{external:true,name:$volume}} |
-  .services.xray.image = $xray | .services.nginx.image = $nginx |
+  .services[$core].image = (if $core == "xray" then $xray else $sing end) | .services.nginx.image = $nginx |
   .services |= with_entries(.value.ports = [] | .value.init = true | .value.pull_policy = "never" |
     .value.labels["io.padm.test"] = $project |
     .value.volumes |= map(.source as $source |
@@ -192,13 +219,17 @@ jq --arg project "${project}" --arg volume "${volume}" --arg xray "${XRAY_ID}" \
 ' "${PADM_DOCKER_INSTALL_DIR}/compose.json" >"${COMPOSE}"
 compose() { docker compose --project-name "${project}" --file "${COMPOSE}" --profile '*' "$@" </dev/null; }
 compose config --format json >/dev/null
-compose run --rm --no-deps xray -test -config /etc/padm/xray/config.json >/dev/null
-compose up -d --pull never --wait --wait-timeout 60 xray origin
+if [[ "${CORE}" == xray ]]; then
+    compose run --rm --no-deps xray -test -config /etc/padm/xray/config.json >/dev/null
+else
+    compose run --rm --no-deps sing-box check -D /var/lib/padm/sing-box -c /etc/padm/sing-box/config.json >/dev/null
+fi
+compose up -d --pull never --wait --wait-timeout 60 "${CORE}" origin
 compose run --rm --no-deps nginx -t >/dev/null
 compose up -d --pull never --wait --wait-timeout 60 nginx
-for service in xray nginx; do
+for service in "${CORE}" nginx; do
     container=$(compose ps -q "${service}")
-    image=${XRAY_ID}; [[ "${service}" != nginx ]] || image=${NGINX_ID}
+    case "${service}" in xray) image=${XRAY_ID} ;; sing-box) image=${SING_ID} ;; nginx) image=${NGINX_ID} ;; esac
     docker inspect "${container}" | jq -e --arg project "${project}" --arg image "${image}" '
       .[0] | .State.Running and .Config.Image == $image and .Config.User == "10001:10001" and
       .HostConfig.ReadonlyRootfs and .HostConfig.Init and .HostConfig.CapDrop == ["ALL"] and
@@ -207,7 +238,7 @@ for service in xray nginx; do
 done
 addresses=$(docker inspect "$(compose ps -q nginx)" |
     jq -cer --arg project "${project}" '.[0].NetworkSettings.Networks[$project] | [.IPAddress,.GlobalIPv6Address]')
-python3 - "${TEST_ROOT}/links.txt" "${TEST_ROOT}/runtime/client/config.json" "${addresses}" <<'PY'
+python3 - "${TEST_ROOT}/links.txt" "${TEST_ROOT}/runtime/client/config.json" "${addresses}" "${TRANSPORT}" "${TEST_NAME}" "${DOMAIN}" <<'PY'
 import base64
 import ipaddress
 import json
@@ -217,6 +248,7 @@ import uuid
 
 lines = pathlib.Path(sys.argv[1]).read_text().splitlines()
 endpoints = json.loads(sys.argv[3])
+transport, name, domain = sys.argv[4:7]
 assert len(lines) == 1 and [ipaddress.ip_address(x).version for x in endpoints] == [4, 6]
 def parse(line):
     assert line.startswith("vmess://") and "#" not in line and "?" not in line
@@ -226,9 +258,10 @@ def parse(line):
     value = json.loads(raw)
     assert list(value) == ["v","ps","add","port","id","aid","scy","net","type","host","path","tls","sni"]
     assert raw.decode() == json.dumps(value, separators=(",", ":"), ensure_ascii=False)
-    assert value == {"v":"2","ps":"vmess-real","add":"vmess.padm.test","port":"35468",
-                     "id":"11111111-1111-4111-8111-111111111111","aid":"0","scy":"auto","net":"ws",
-                     "type":"none","host":"vmess.padm.test","path":"/padmvmessws","tls":"tls","sni":"vmess.padm.test"}
+    assert value == {"v":"2","ps":name,"add":domain,"port":"35468",
+                     "id":"11111111-1111-4111-8111-111111111111","aid":"0","scy":"auto","net":transport,
+                     "type":"none","host":domain,"path":"/padmvmess"+("ws" if transport == "ws" else ""),
+                     "tls":"tls","sni":domain}
     assert str(uuid.UUID(value["id"])) == value["id"]
     return value
 value = parse(lines[0])
@@ -251,7 +284,8 @@ for wrong in (False, True):
             "uuid":("22222222-2222-4222-8222-222222222222" if wrong else value["id"]),
             "security":value["scy"],"alter_id":int(value["aid"]),
             "tls":{"enabled":True,"server_name":value["sni"],"certificate_path":"/etc/padm/client/ca.crt"},
-            "transport":{"type":value["net"],"path":value["path"],"headers":{"Host":value["host"]}}})
+            "transport":dict({"type":value["net"],"path":value["path"]},
+                **({"headers":{"Host":value["host"]}} if transport == "ws" else {"host":value["host"]}))})
         config["route"]["rules"].append({"inbound":["socks-"+tag],"action":"route","outbound":tag})
 pathlib.Path(sys.argv[2]).write_text(json.dumps(config))
 PY
@@ -276,6 +310,7 @@ import time
 import urllib.request
 
 phase = sys.argv[1]
+test_name, core, transport_name = sys.argv[2:5]
 assert phase in ("allow","deny")
 proof = b"padm-vmess-real-proof\n"
 def read(sock, size):
@@ -359,16 +394,17 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
 after = counts()
 expected_delta = 2 if phase == "allow" else 0
 assert {key:after[key]-before[key] for key in before} == {"tcp":expected_delta,"udp":expected_delta}
-print("docker-vmess-real-probe-ok: phase="+phase+" source=protocol-links tls=nginx-ws family=ipv4,ipv6 socks="+",".join(results))
-' "$1"
+print("docker-"+test_name+"-probe-ok: core="+core+" phase="+phase+" source=protocol-links tls=nginx-"+
+      transport_name+" family=ipv4,ipv6 socks="+",".join(results))
+' "$1" "${TEST_NAME}" "${CORE}" "${TRANSPORT}"
 }
 # 只适配命名卷与隔离网络，额度/验证/重启/恢复仍走生产函数。
 dockerComposeRun() {
     local action=$1
     shift
     if [[ "${action}" == run || "${action}" == restart ]]; then
-        cp -a "${PADM_DOCKER_INSTALL_DIR}/config/xray/." "${TEST_ROOT}/runtime/config/xray/"
-        tar -cpf - -C "${TEST_ROOT}" runtime/config/xray |
+        cp -a "${PADM_DOCKER_INSTALL_DIR}/config/${CORE}/." "${TEST_ROOT}/runtime/config/${CORE}/"
+        tar -cpf - -C "${TEST_ROOT}" "runtime/config/${CORE}" |
             docker run --rm --init -i --pull=never --label "io.padm.test=${project}" --user 0 \
                 --mount "type=volume,source=${volume},target=/test" --entrypoint tar "${OPS_ID}" -xpf - -C /test
     fi
@@ -384,31 +420,55 @@ dockerTrafficContainerState() {
         .Config.Labels["com.docker.compose.service"] == $core) |
       {id:.Id,started_at:.State.StartedAt,pid:.State.Pid}'
 }
+# Docker Desktop 的宿主 PID 不可 nsenter；只替换 sing-box 查询的隔离网络，复用生产解析器。
+if [[ "${CORE}" == sing-box ]]; then
+    dockerTrafficQuery() (
+        [[ "$1" == sing-box ]]
+        local container
+        container=$(compose ps -q sing-box)
+        printf '\000\000\000\000\006\032\004user' >"${TEST_ROOT}/request.bin"
+        docker run --rm --init -i --pull=never --read-only --cap-drop ALL \
+            --network "container:${container}" --label "io.padm.test=${project}" --entrypoint curl "${CURL_ID}" \
+            -fsS --http2-prior-knowledge --noproxy '*' --connect-timeout 2 --max-time 5 -D /dev/stderr \
+            -H 'Content-Type: application/grpc' -H 'TE: trailers' --data-binary @- --output - \
+            http://127.0.0.1:10087/v2ray.core.app.stats.command.StatsService/QueryStats \
+            <"${TEST_ROOT}/request.bin" >"${TEST_ROOT}/response.bin" 2>"${TEST_ROOT}/headers" || {
+            cat "${TEST_ROOT}/headers" >&2
+            exit 1
+        }
+        awk '{sub(/\r$/, ""); if (tolower($0) == "grpc-status: 0") ok=1} END {exit !ok}' "${TEST_ROOT}/headers"
+        singBoxGrpcResponseToStatsJson "${TEST_ROOT}/response.bin"
+    )
+fi
 probe allow
-stats=$(dockerTrafficQuery xray 0)
+stats=$(dockerTrafficQuery "${CORE}" 0)
 jq -e --arg uuid "${UUID}" '
   def positive($direction):
     [.stat[]? | select(.name == ("user>>>"+$uuid+">>>traffic>>>"+$direction)) | (.value|tonumber)] |
     length == 1 and .[0] > 0;
   positive("uplink") and positive("downlink")' <<<"${stats}" >/dev/null
-printf 'docker-vmess-real-stats-ok: identity=%s counters=%s\n' "${UUID}" "${stats}"
+printf 'docker-%s-stats-ok: core=%s identity=%s counters=%s\n' "${TEST_NAME}" "${CORE}" "${UUID}" "${stats}"
 dockerTrafficSetLimit "${UUID}" 1
-jq -e 'all(.inbounds[] | select(.protocol == "vmess"); .settings.clients == [])' \
-    "${PADM_DOCKER_INSTALL_DIR}/config/xray/config.json" >/dev/null
-[[ "$(sha256sum "${PADM_DOCKER_INSTALL_DIR}/config/xray/users.base")" == "${base_hash}" ]]
+jq -e --arg core "${CORE}" 'if $core == "xray" then
+  all(.inbounds[] | select(.protocol == "vmess"); .settings.clients == [])
+  else all(.inbounds[] | select(.type == "vmess"); .users == []) end' \
+    "${PADM_DOCKER_INSTALL_DIR}/config/${CORE}/config.json" >/dev/null
+[[ "$(sha256sum "${PADM_DOCKER_INSTALL_DIR}/config/${CORE}/users.base")" == "${base_hash}" ]]
 [[ "$(compose ps -q client)" == "${client}" ]]
 probe deny
 dockerTrafficSetLimit "${UUID}" 0
-jq -e --arg uuid "${UUID}" '
-  any(.inbounds[]; .protocol == "vmess" and .settings.clients == [{id:$uuid,email:$uuid,alterId:0}])' \
-    "${PADM_DOCKER_INSTALL_DIR}/config/xray/config.json" >/dev/null
-[[ "$(sha256sum "${PADM_DOCKER_INSTALL_DIR}/config/xray/users.base")" == "${base_hash}" ]]
+jq -e --arg uuid "${UUID}" --arg core "${CORE}" '
+  if $core == "xray" then any(.inbounds[]; .protocol == "vmess" and
+    .settings.clients == [{id:$uuid,email:$uuid,alterId:0}])
+  else any(.inbounds[]; .type == "vmess" and .users == [{uuid:$uuid,name:$uuid,alterId:0}]) end' \
+    "${PADM_DOCKER_INSTALL_DIR}/config/${CORE}/config.json" >/dev/null
+[[ "$(sha256sum "${PADM_DOCKER_INSTALL_DIR}/config/${CORE}/users.base")" == "${base_hash}" ]]
 [[ "$(compose ps -q client)" == "${client}" ]]
 probe allow
 dockerTrafficSnapshot
-jq -e --arg uuid "${UUID}" '(.accounts | keys) == [$uuid] and
-  (.accounts[$uuid] | .upload > 0 and .download > 0 and .limit_bytes == 0 and (.baseline | keys) == ["xray"])' \
+jq -e --arg uuid "${UUID}" --arg core "${CORE}" '(.accounts | keys) == [$uuid] and
+  (.accounts[$uuid] | .upload > 0 and .download > 0 and .limit_bytes == 0 and (.baseline | keys) == [$core])' \
     "${PADM_DOCKER_INSTALL_DIR}/data/traffic/state.json" >/dev/null
-[[ "$(docker inspect --format '{{.State.Health.Status}}' "$(compose ps -q xray)")" == healthy ]]
-printf 'docker-vmess-real-ok: tls=nginx-ws quota=deny-restore same-client family=ipv4,ipv6 xray=%s sing-box=%s ops=%s nginx=%s\n' \
-    "${XRAY_ID}" "${SING_ID}" "${OPS_ID}" "${NGINX_ID}"
+[[ "$(docker inspect --format '{{.State.Health.Status}}' "$(compose ps -q "${CORE}")")" == healthy ]]
+printf 'docker-%s-ok: core=%s tls=nginx-%s quota=deny-restore same-client family=ipv4,ipv6 xray=%s sing-box=%s ops=%s nginx=%s\n' \
+    "${TEST_NAME}" "${CORE}" "${TRANSPORT}" "${XRAY_ID}" "${SING_ID}" "${OPS_ID}" "${NGINX_ID}"

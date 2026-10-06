@@ -5961,6 +5961,10 @@ runDockerVmessRegression() {
     bash "${PROJECT_ROOT}/docker/tests/vmess.sh"
 }
 
+runDockerHttpupgradeRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/httpupgrade.sh"
+}
+
 runDockerPermissionsRegression() {
     bash "${PROJECT_ROOT}/docker/tests/permissions.sh"
 }
