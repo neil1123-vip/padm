@@ -813,13 +813,13 @@ net.ipv4.tcp_congestion_control = bbr
 | `--cloudflare-zone-id` | zone id | 可选，也可用 `PADM_CLOUDFLARE_ZONE_ID` | 设置 `CF_Zone_ID`，减少 Zone 查询依赖。 |
 | `--aliyun-api-key` | key | 也可用 `PADM_ALIYUN_API_KEY` | 阿里云 AccessKey ID。 |
 | `--aliyun-api-secret` | secret | 也可用 `PADM_ALIYUN_API_SECRET` | 阿里云 AccessKey Secret。 |
-| `--reuse-last` | `yes`、`no`、`y`、`n` | `no` | 是否复用上次安装配置。 |
+| `--reuse-last` | `yes`、`no`、`y`、`n` | 已有配置时默认复用；交互回车保留 | `no` 重新填写安装参数和用户，保留证书和订阅，不清空现有安装。 |
 | `--clean-acme` | `yes`、`no`、`y`、`n` | `no` | 清空上次配置时是否同时清理 acme。 |
 | `--reality-domain` | `yes`、`no`、`y`、`n` | `no` | 严格域名模式，仅支持单选 Reality Vision `1`；优先用 `--entry-host`，其次 `--domain`。 |
 | `--subscribe-port` | 端口号 | 无固定默认 | 订阅发布服务端口。 |
 | `--install-nginx` | `yes`、`no`、`y`、`n` | `no` | 订阅或反代需要 Nginx 时是否自动安装。 |
-| `--uuid` | UUID | 随机生成 | 初始用户 UUID。 |
-| `--user` | 用户名 | 随机生成 | 初始用户名。 |
+| `--uuid` | UUID | 新建时随机生成；复用时保留已有用户 | 初始用户 UUID；复用历史时，显式值须匹配已有用户，否则在安装前失败。 |
+| `--user` | 用户名 | 新建时随机生成；复用时保留已有用户 | 初始用户名；与 `--uuid` 同传时须匹配同一已有用户。需要新建用户时指定 `--reuse-last no`。 |
 
 完整参数以 `bash install.sh --help` 为准。
 

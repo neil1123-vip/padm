@@ -691,6 +691,62 @@ runInstallWorkflowRegression() (
     )
 
     (
+        # 显式初始用户必须匹配同一历史用户，不能静默忽略或覆盖已有多用户。
+        local core selection inputFd nextInput result= events= errors=
+        local configPath=/regression/installed/ btDomain= currentUUID= currentClients= lastInstallationConfig=
+        local AUTO_INSTALL=true AUTO_UUID= AUTO_USER= AUTO_REUSE_LAST= AUTO_REALITY_DOMAIN=
+        local alice=11111111-1111-4111-8111-111111111111 bob=22222222-2222-4222-8222-222222222222
+        local oldClients='[{"id":"11111111-1111-4111-8111-111111111111","email":"alice-VLESS_WS"},{"uuid":"22222222-2222-4222-8222-222222222222","name":"bob-singbox_tuic"}]'
+        local selectCustomInstallType=,1,
+        errorCard() { errors+="$*"$'\n'; }
+        showLastInstallationConfig() { currentClients=${oldClients}; currentUUID=${alice}; }
+        collectEntryProfile() { return 0; }
+        readInstallTLSDomain() { return 0; }
+        prepareXrayInstallInputs() { return 0; }
+        prepareSingBoxInstallInputs() { return 0; }
+        coreSwitchConfigTransaction() { events+=$'transaction\n'; }
+        for core in xray sing-box; do
+            for selection in ,1, ,28,; do
+                selectCustomInstallType=${selection}
+                AUTO_REUSE_LAST=
+                for result in both uuid user crossed wrong-uuid wrong-user; do
+                    AUTO_UUID=${alice} AUTO_USER=alice events= errors=
+                    case "${result}" in
+                    uuid) AUTO_USER= ;;
+                    user) AUTO_UUID=; AUTO_USER=bob ;;
+                    crossed) AUTO_USER=bob ;;
+                    wrong-uuid) AUTO_UUID=33333333-3333-4333-8333-333333333333 ;;
+                    wrong-user) AUTO_USER=unknown ;;
+                    esac
+                    exec {inputFd}< <(printf 'next-parent-action\n')
+                    case "${result}" in
+                    both | uuid | user)
+                        runCoreInstall "${core}" true <&"${inputFd}"
+                        [[ "${events}" == $'transaction\n' && -z "${errors}" ]]
+                        ;;
+                    *)
+                        regressionExpectStatus 1 runCoreInstall "${core}" true <&"${inputFd}"
+                        [[ -z "${events}" && "${errors}" == *"--reuse-last no"* ]]
+                        ;;
+                    esac
+                    read -r -u "${inputFd}" nextInput
+                    exec {inputFd}<&-
+                    [[ "${nextInput}" == next-parent-action && "${currentClients}" == "${oldClients}" ]]
+                done
+            done
+        done
+        # 密码型用户也按 password/username 核对，复用不生成新用户。
+        currentClients='[{"password":"stored-secret","username":"alice-singbox_hysteria2"}]'
+        AUTO_UUID=stored-secret AUTO_USER=alice lastInstallationConfig=true
+        coreTemplateCollectInitialClients sing-box true </dev/null
+        [[ "${currentClients}" == '[{"password":"stored-secret","username":"alice-singbox_hysteria2"}]' ]]
+        AUTO_UUID=${bob} AUTO_USER=new-user AUTO_REUSE_LAST=no
+        readLastInstallationConfig </dev/null
+        coreTemplateCollectInitialClients xray </dev/null
+        jq -e --arg uuid "${bob}" 'length == 1 and .[0].id == $uuid and .[0].email == "new-user"' <<<"${currentClients}" >/dev/null
+    )
+
+    (
         # 账号在六个入口的事务前确认；取消不动服务，模板阶段不再读取同一份输入。
         local install input inputFd nextInput events= currentUUID= currentClients= lastInstallationConfig=
         local configPath= btDomain= PADM_INSTALL_CLIENTS_PREPARED=parent-value

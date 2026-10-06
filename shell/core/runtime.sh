@@ -932,7 +932,7 @@ showInstallArgsHelp() {
 │ --cloudflare-zone-id <zone_id>           可选，也可用 PADM_CLOUDFLARE_ZONE_ID
 │ --aliyun-api-key <key>                   阿里云 DNS AccessKey ID，也可用 PADM_ALIYUN_API_KEY
 │ --aliyun-api-secret <secret>             阿里云 DNS AccessKey Secret，也可用 PADM_ALIYUN_API_SECRET
-│ --reuse-last <yes|no|y|n>               是否复用上次安装配置
+│ --reuse-last <yes|no|y|n>               已有配置时默认复用；no 重新填写，保留证书和订阅
 │ --clean-acme <yes|no|y|n>               清空上次配置时是否清理 acme
 │ --reality-domain <yes|no|y|n>           严格域名模式，仅支持单选 Reality Vision 1
 │ --reality-target <host[:port]>          REALITY 伪装目标站；非交互未传且无可复用目标时检测后随机选 A 级
@@ -940,8 +940,8 @@ showInstallArgsHelp() {
 │ --entry-host <host>                     Reality entry；优先于 --domain、历史 entry、currentHost 和公网 IP
 │ --subscribe-port <port>                 订阅服务端口
 │ --install-nginx <yes|no|y|n>            订阅需要 nginx 时是否自动安装
-│ --uuid <uuid>                           初始用户 UUID，默认随机生成
-│ --user <name>                           初始用户名，默认随机生成
+│ --uuid <uuid>                           新建用户 UUID，默认随机；复用时须匹配已有用户
+│ --user <name>                           新建用户名，默认随机；与 UUID 同传须匹配同一已有用户
 └──────────────────────────────────────────────────
 EOF
 }

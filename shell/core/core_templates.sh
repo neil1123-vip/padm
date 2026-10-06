@@ -84,6 +84,16 @@ coreTemplateCollectInitialClients() {
             esac
         done
         if [[ "${hasExistingClients}" == "true" ]]; then
+            if [[ -n "${AUTO_UUID:-}${AUTO_USER:-}" ]] &&
+                ! jq -e --arg uuid "${AUTO_UUID:-}" --arg user "$(stripClientNameSuffix "${AUTO_USER:-}")" \
+                    --arg suffixes "$(clientNameSuffixRegex)" '
+                    any(.[];
+                        ($uuid == "" or (.id // .uuid // .password // "") == $uuid) and
+                        ($user == "" or ((.email // .name // .username // "") | sub("-(" + $suffixes + ")$"; "")) == $user)
+                    )' <<<"${currentClients}" >/dev/null 2>&1; then
+                errorCard "初始用户参数与现有用户不匹配；保留历史用户请省略 --uuid/--user，重新创建用户请指定 --reuse-last no"
+                return 1
+            fi
             if [[ "${requiresUuid}" == true ]]; then
                 storedCredentials=$(jq -r '.[] | .id // .uuid // .password // ""' <<<"${currentClients}") || return 1
                 while IFS= read -r storedCredential; do
