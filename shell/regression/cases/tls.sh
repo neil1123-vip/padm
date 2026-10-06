@@ -391,9 +391,12 @@ runTlsFailureReturnRegression() (
         unset PADM_REQUIRE_USABLE_TLS_CERTIFICATE
         readAcmeTLS() { return 0; }
         collectTLSProfile() { tlsCertDomain=${certDomain}; }
-        openssl req -new -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 \
+        openssl req -new -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 2 \
             -subj "/CN=${certDomain}" -addext "subjectAltName=DNS:${certDomain}" \
             -keyout "${certificateRoot}/valid.key" -out "${certificateRoot}/valid.crt" >/dev/null 2>&1
+        openssl req -new -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 \
+            -subj "/CN=${certDomain}" -addext "subjectAltName=DNS:${certDomain}" \
+            -keyout "${certificateRoot}/expiring.key" -out "${certificateRoot}/expiring.crt" >/dev/null 2>&1
         openssl req -new -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 \
             -subj "/CN=wrong.example.com" -addext "subjectAltName=DNS:wrong.example.com" \
             -keyout "${certificateRoot}/wrong.key" -out "${certificateRoot}/wrong.crt" >/dev/null 2>&1
@@ -401,10 +404,19 @@ runTlsFailureReturnRegression() (
         # 自签证书可正常复用；错域名、错私钥和损坏 PEM 均不能冒充安装成功。
         cp "${certificateRoot}/valid.crt" "${PADM_TLS_DIR}/${certDomain}.crt"
         cp "${certificateRoot}/valid.key" "${PADM_TLS_DIR}/${certDomain}.key"
+        chmod 644 "${PADM_TLS_DIR}/${certDomain}.key"
+        local renewalCalls=0
+        renewalTLS() { renewalCalls=$((renewalCalls + 1)); return 37; }
         installTLS 1 >/dev/null 2>&1
+        [[ "${renewalCalls}" == 0 && "$(stat -c %a "${PADM_TLS_DIR}/${certDomain}.key")" == 600 ]]
         singBoxLocalCertificateAvailable
+        cp "${certificateRoot}/expiring.crt" "${PADM_TLS_DIR}/${certDomain}.crt"
+        cp "${certificateRoot}/expiring.key" "${PADM_TLS_DIR}/${certDomain}.key"
+        regressionExpectStatus 1 installTLS 1 >/dev/null 2>&1
+        [[ "${renewalCalls}" == 1 ]]
         cp "${certificateRoot}/wrong.crt" "${PADM_TLS_DIR}/${certDomain}.crt"
         regressionExpectStatus 1 installTLS 1 >/dev/null 2>&1
+        [[ "${renewalCalls}" == 2 ]]
         ! singBoxLocalCertificateAvailable
         cp "${certificateRoot}/valid.crt" "${PADM_TLS_DIR}/${certDomain}.crt"
         cp "${certificateRoot}/wrong.key" "${PADM_TLS_DIR}/${certDomain}.key"
@@ -943,8 +955,13 @@ runTlsReinstallRollbackRegression() (
     statusCard() { printf '%s\n' "$*" >>"${statusLog}"; }
     successCard() { printf '%s\n' "$*" >>"${statusLog}"; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+    # 文本证书夹具仅验证回滚；有效期检查由真实 OpenSSL 证书场景覆盖。
     tlsCertificatePairUsable() { return 0; }
-    renewalTLS() { printf 'renew\n' >>"${cleanLog}"; }
+    openssl() { return 0; }
+    renewalTLS() {
+        printf 'renew\n' >>"${cleanLog}"
+        return 37
+    }
     allowPort() { return 0; }
     switchDNSAPI() { return 0; }
     switchSSLType() { return 0; }
@@ -994,7 +1011,7 @@ runTlsReinstallRollbackRegression() (
         exec {inputFd}< <(printf '%s\nnext-parent-action\n' "${answer}")
         installTLS 1 <&"${inputFd}"
         read -r -u "${inputFd}" nextInput
-        [[ "${nextInput}" == next-parent-action && "$(<"${cleanLog}")" == renew ]]
+        [[ "${nextInput}" == next-parent-action && ! -s "${cleanLog}" ]]
         exec {inputFd}<&-
         [[ "$(<"${tlsDir}/reinstall.example.com.crt")" == "old-cert" ]]
     done
@@ -1031,7 +1048,7 @@ runTlsReinstallRollbackRegression() (
         : >"${cleanLog}"
         exec {inputFd}< <(printf 'next-parent-action\n')
         installTLS 1 <&"${inputFd}"
-        [[ "$(<"${cleanLog}")" == renew ]]
+        [[ ! -s "${cleanLog}" ]]
         read -r -u "${inputFd}" nextInput
         [[ "${nextInput}" == next-parent-action ]]
         exec {inputFd}<&-
@@ -1040,7 +1057,7 @@ runTlsReinstallRollbackRegression() (
     lastInstallationConfig=true
     reInstallStatus=y
     installTLS 1 </dev/null
-    [[ "$(<"${cleanLog}")" == renew ]]
+    [[ ! -s "${cleanLog}" ]]
 
     if [[ -n "${oldTlsDir}" ]]; then
         PADM_TLS_DIR="${oldTlsDir}"

@@ -437,7 +437,8 @@ installTLS() {
         fi
         if [[ "$(normalizeYesNo "${reInstallStatus}")" == "y" ]]; then
             installTLSFromAcme || return 1
-        else
+        elif ! tlsCertificatePairUsable "${tlsDir}" "${tlsDomain}" ||
+            ! openssl x509 -in "${tlsDir}/${tlsDomain}.crt" -checkend 86400 -noout >/dev/null 2>&1; then
             renewalTLS || return 1
             if ! tlsCertificatePairExists "${tlsDir}" "${tlsDomain}"; then
                 installTLSFromAcme || return 1
@@ -466,6 +467,11 @@ installTLS() {
         installTLSFromAcme || return 1
     else
         statusCard "acme.sh" "未安装 acme.sh"
+        return 1
+    fi
+    if [[ -f "${tlsDir}/${tlsDomain}.key" ]] &&
+        ! chmod 600 -- "${tlsDir}/${tlsDomain}.key"; then
+        errorCard "TLS 私钥权限收紧失败"
         return 1
     fi
     if ! tlsCertificatePairUsable "${tlsDir}" "${tlsDomain}"; then
