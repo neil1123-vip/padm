@@ -342,9 +342,12 @@ CI 与 Release；Bash、ShellCheck error 和只读复审通过。
 连通继续由 3B.4 验收，不因本地成功开放新协议或完整管理。
 
 3B.4 当前进度：真实 Linux amd64 daemon 上的本仓库 Xray、sing-box、Nginx、ops
-镜像已完成双核心 TLS 与 Nginx 联合轮换，arm64 仿真也通过同一用例。
+镜像已完成双核心 TLS 与 Nginx 联合轮换，arm64 仿真也通过原三路用例。
 三个使用测试 CA 正常校验的客户端出站取得实际 HTTP 内容，
 覆盖两个核心 TLS 夹具与 VLESS WS TLS；Python 证书及 HTTPS 订阅探测也校验 CA/域名。
+新增 amd64 五路验收通过：两核心 Reality Vision 经 Debian 公网目标完成握手，
+首装、换证、真实健康故障及 TERM 恢复后均取得 HTTP 内容，耗时 69.897 秒。
+订阅两核参数逐项匹配 spec，未验证订阅导入；新增 Reality 未复验 arm64。
 订阅访问、成功换证、真实 sing-box 健康故障恢复及 TERM 恢复通过，
 累计流量不回退。真实测试发现 Compose 会吞掉消费者循环的 stdin，已在共享
 管理调用修复并增加删除修复即失败的最小检查。
@@ -358,7 +361,8 @@ Docker CI/Release 使用 `docker-tls-focused`，phase5/phase6 与静态检查通
 重启要求新 PID 1 标识的实际执行事件，不用旧计数替代；不伪装 `systemctl/crontab`。
 probe 不执行 ACME 或完整业务 CLI，这些证据不能替代整机重启与真实 DNS。
 本轮使用 Docker Desktop 的 Linux daemon，不扩大 Windows/生产支持范围；
-内部 TLS 夹具不开放 Trojan，Reality 客户端未验。真实 DNS、完整宿主重启、
+内部 TLS 夹具不开放 Trojan；Microsoft 目标的 Xray EOF 仍有未确认原因，见基线。
+真实 DNS、完整宿主重启、
 原生 Linux/SSH、原生 arm64 与可信发布继续待验，3B.4 不能标为完成或升级协议状态。
 
 ### 3C. 按协议逐项交付

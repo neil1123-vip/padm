@@ -6,14 +6,15 @@
 
 - Docker Desktop 的 rootful Linux daemon：Docker 29.8.2、amd64、
   内核 `6.6.87.2-microsoft-standard-WSL2`；验收驱动使用 Compose 5.5.1。
-- amd64 原生容器与 arm64 仿真容器均通过同一最终脚本。脚本读取实际镜像架构，
-  拒绝四个输入混用架构，并分别输出 daemon 与镜像架构；arm64 不算原生主机证据。
+- `975fdda` 的三路 TLS/WS 用例在 amd64 原生容器与 arm64 仿真容器均通过；
+  本轮新增双核 Reality 的五路用例仅在 amd64 通过，未复验 arm64。
+  脚本拒绝四个输入混用架构，分别输出 daemon 与镜像架构；仿真不算原生主机证据。
 - 四个业务镜像按本仓库 Dockerfile、Bake 与现有 `versions.lock` 构建，
   无依赖锁变更；这不是已验签的正式发布。
 - 驱动运行真实 Docker/Compose、实际 bundle、配置生成器、统计准备和 TLS 事务，
   不替换 Docker，也不伪造重建或健康检查成功。
 - 测试 CA 包含 CA 约束和 `keyCertSign/cRLSign`，签发三张不同 serial 的同域证书；
-  三个 sing-box 客户端、Python 证书序列号及 HTTPS 订阅探测均正常校验 CA 与域名，
+  三条普通 TLS/WS 客户端、Python 证书序列号及 HTTPS 订阅探测均正常校验 CA 与域名，
   不使用跳过证书校验的连接。
 
 | 镜像 | 本轮实际引用 |
@@ -35,7 +36,8 @@
 在无现有 `padm-docker` 容器或同名网络的独立 rootful Linux 主机上运行。
 四个镜像必须已存在，参数必须为实际的 `tag@digest`，不能使用示例 digest。
 宿主需要已有安装前置工具及 `openssl`、`python3`、`nsenter`，
-并提供支持 HTTP/2 的 `curl`；当前生产支持范围仍不包含 Windows/Docker Desktop。
+并提供支持 HTTP/2 的 `curl`，两核心可访问 Reality 目标 `www.debian.org:443`；
+当前生产支持范围仍不包含 Windows/Docker Desktop。
 
 ```bash
 sudo bash docker/tests/tls-real.sh \
@@ -57,17 +59,35 @@ Linux 绝对路径，`HOME` 和 `TMPDIR` 指向卷，保证业务 bind source �
 ## 已通过的断言
 
 - 双核心、Nginx、订阅服务、客户端和 HTTP origin 均运行真实镜像；
-  以下断言在 amd64 与 arm64 仿真分别通过，均退出 `0`。
+  原有三路 TLS/WS 断言在 amd64 与 arm64 仿真分别通过，均退出 `0`。
 - Xray 和 sing-box 的核心 TLS 夹具，以及 Xray VLESS WS TLS，
-  三条 SOCKS 路径均取得真实 HTTP 内容；订阅 HTTPS 返回 WS 与 Reality 链接。
+  三条 SOCKS 路径均取得真实 HTTP 内容。
+- 本轮 amd64 增加 Xray 与 sing-box 的 Reality Vision 入口及客户端，
+  SOCKS `2084/2085` 使用正式生成器的入口、spec 中的公开密钥与 short ID，
+  经公网 Debian 目标完成 Reality 握手并取得私有 origin 的真实 HTTP 内容。
+  无直连旁路或握手失败重试，任一路失败则整个脚本失败。
+- HTTPS 订阅返回 WS 和两核 Reality 链接；逐项对比协议、服务器、端口、UUID、
+  SNI、public key、short ID、Vision、TCP、指纹及 encryption，并拒绝缺失/重复入口。
+  客户端由 spec 生成，不宣称已验证客户端从订阅导入的流程。
 - 证书 serial `01` 成功轮换为 `02`，三个 TLS 消费者都持有新证书，
-  三路客户端流量和订阅仍可用。
+  原有三路在两架构通过，本轮 amd64 五路客户端流量和订阅仍可用。
 - serial `03` 仅通过修改独立 `health.check` 注入 sing-box 健康故障；
   注入 marker 与实际 Compose `is unhealthy` 错误同时断言，避免提前失败假通过。
   失败后所有消费者恢复 `02`，客户端及订阅重新通过。
 - 对实际事务进程 `BASHPID` 发送 TERM，等待退出码 `143`；
-  恢复 `02` 后重新检查三路流量，累计流量不回退，候选与部署锁无残留。
+  恢复 `02` 后重新检查客户端流量，累计流量不回退，候选与部署锁无残留。
 - 内部 Trojan TLS 只用于测试已有 TLS 底座，不开放协议 `28` 或其它菜单协议。
+
+本轮最终五路脚本退出 `0`，耗时 `69.897` 秒；首装 `01`、成功轮换 `02`、
+真实健康故障恢复 `02`、TERM/`143` 恢复 `02` 四次均输出五路 probe 成功。
+Bash 语法、ShellCheck 0.11.0 warning/error 和 `git diff --check` 通过；
+全级 ShellCheck 仍有两处原有 SC2015 信息提示，不宣称全级零提示。
+
+原夹具目标 `www.microsoft.com:443` 的直连 TLS 1.3/h2/证书校验通过，
+sing-box Reality 也取得 HTTP 内容，但 Xray Reality 连续两次返回 EOF。
+临时握手日志显示密钥、时间和 short ID 认证成功、目标握手未完成；
+未确认更深原因，不归因于生产生成器，也不据此宣称 Microsoft 目标兼容。
+最终脚本固定使用 Debian 目标，不在失败后自动替换目标；临时 debug 已撤除。
 
 真实测试暴露了 Compose 读取 stdin、吞掉 `while read` 中后续消费者的问题。
 共享 `dockerComposeRun` 的管理调用统一使用 `</dev/null`；现有调用均无需交互输入。
@@ -156,7 +176,8 @@ docker exec -e PADM_RENEWAL_REAL_ISOLATED=1 padm-renewal-real-systemd-return bas
 真实 DNS 服务商的 DNS-01 申请/续期、完整宿主 systemd/cron 重启、
 原生 Linux/SSH 安装生命周期、原生 arm64 业务路径，以及可信签名发布仍待补证据。
 隔离容器内的真实调度器执行、双向迁移和容器重启证据见上节，不等同整机重启。
-Reality 链接在订阅中检查，但此脚本不验证 Reality 客户端连接。
+本轮新增 Reality 的 arm64 仿真和原生 arm64、其它客户端实现、订阅导入、
+公网入口/SSH 路径及其它 Reality 目标兼容性未验；amd64 五路证据不能代替这些项。
 Nginx `-t`/reload 仍输出默认日志路径的 `Permission denied` 提示；
 命令、健康检查与实际 TLS/流量通过，该提示未被隐藏，不能据此宣称无运行告警。
 arm64 仿真还会显示平台不匹配和 `io_setup() ... Function not implemented`，

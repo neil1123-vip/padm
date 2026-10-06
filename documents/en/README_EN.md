@@ -299,6 +299,9 @@ while renewal is enabled. External tasks with the same name are never overwritte
 This foundation does not establish support for new protocols or full management.
 Linux amd64 and emulated arm64 tests cover dual-core TLS fixtures, WS client traffic and
 rotation recovery; all TLS probes verify the test CA and hostname.
+Additional amd64 tests cover both cores' Reality Vision handshakes with a public target,
+five traffic paths and recovery; the new Reality paths are not retested on arm64
+and do not establish subscription import or compatibility with other targets.
 Real DNS, full host restarts, native arm64 and trusted releases remain unverified.
 See the [real TLS acceptance baseline](../docker-tls-real-baseline.md) for evidence and limits.
 Isolated systemd/cron probes, backend migration and container restarts are verified,
