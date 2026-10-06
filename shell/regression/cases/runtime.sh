@@ -592,6 +592,47 @@ runInstallWorkflowRegression() (
     )
 
     (
+        # 自动重装确认复用后无需重复传域名；重新填写或首次缺域名仍在事务前失败。
+        local core events= inputFd nextInput configPath=/regression/installed/ btDomain=
+        local currentHost= currentPort= customPort= domain= port= lastInstallationConfig=
+        local singBoxTrojanPort= currentClients= currentUUID= selectCustomInstallType=,28,
+        local AUTO_INSTALL=true AUTO_DOMAIN= AUTO_PORT= AUTO_UUID= AUTO_USER= AUTO_REUSE_LAST=
+        local AUTO_INSTALL_TYPE=custom AUTO_PROTOCOLS=28 AUTO_CORE= AUTO_REALITY_DOMAIN=
+        showLastInstallationConfig() { currentHost=old.example.com; currentPort=9443; singBoxTrojanPort=9443; }
+        coreTemplateCollectInitialClients() { :; }
+        coreSwitchConfigTransaction() {
+            [[ "${domain}" == "${AUTO_DOMAIN:-old.example.com}" ]] || return 1
+            if [[ "$1" == xray ]]; then
+                [[ "${AUTO_PORT}" == 9443 ]] || return 1
+            else
+                [[ "${PADM_INSTALL_SINGBOX_PORTS[28]}" == 9443 ]] || return 1
+            fi
+            events+="$1"$'\n'
+        }
+        for core in xray sing-box; do
+            AUTO_CORE=${core} AUTO_REUSE_LAST= AUTO_DOMAIN= events=
+            autoInstallValidateRequiredInputs
+            exec {inputFd}< <(printf 'next-parent-action\n')
+            runCoreInstall "${core}" true <&"${inputFd}"
+            read -r -u "${inputFd}" nextInput
+            exec {inputFd}<&-
+            [[ "${nextInput}" == next-parent-action && "${events}" == "${core}"$'\n' && -z "${AUTO_DOMAIN}" ]]
+            AUTO_DOMAIN=new.example.com
+            runCoreInstall "${core}" true </dev/null
+            [[ "${domain}" == new.example.com ]]
+            AUTO_DOMAIN= AUTO_REUSE_LAST=no events=
+            exec {inputFd}< <(printf 'next-parent-action\n')
+            regressionExpectStatus 1 runCoreInstall "${core}" true <&"${inputFd}"
+            read -r -u "${inputFd}" nextInput
+            exec {inputFd}<&-
+            [[ "${nextInput}" == next-parent-action && -z "${events}${domain}" ]]
+        done
+        configPath= currentHost= currentPort= singBoxTrojanPort=
+        regressionExpectStatus 1 runCoreInstall xray true </dev/null
+        [[ -z "${events}${domain}" ]]
+    )
+
+    (
         # 账号在六个入口的事务前确认；取消不动服务，模板阶段不再读取同一份输入。
         local install input inputFd nextInput events= currentUUID= currentClients= lastInstallationConfig=
         local configPath= btDomain= PADM_INSTALL_CLIENTS_PREPARED=parent-value
@@ -1363,6 +1404,38 @@ runInstallWorkflowRegression() (
         events= allowLog= featureChecks=0 currentClients= currentUUID=
         regressionExpectStatus 1 runCoreInstall sing-box consumePreparedSingBoxInputs < <(printf '15000\n2\noff\noff\n15000')
         [[ -z "${events}${allowLog}" && "${featureChecks}" == 0 && "${PADM_INSTALL_SINGBOX_PORTS[4]}" == parent ]]
+    )
+
+    (
+        # 共存内部端口先于历史端口；多选不能用公共 --port 误拒绝，模板只消费采集结果。
+        local selectCustomInstallType=,1,28, AUTO_INSTALL=true AUTO_PORT=8443 lastInstallationConfig=true
+        local checks=0 allowLog= inputFd nextInput
+        local -A PADM_INSTALL_SINGBOX_PORTS=() singBoxInstallListeners=()
+        local -a ports=()
+        realityStreamSplitEnabled() { return 0; }
+        realityStreamInternalPortForProtocol() { [[ "$1" != vision ]] || printf '15443'; }
+        realityStreamPublicPortForProtocol() { printf '443'; }
+        checkPort() { checks=$((checks + 1)); }
+        allowPort() { allowLog+="tcp:$1"$'\n'; }
+        exec {inputFd}< <(printf 'next-parent-action\n')
+        readSingBoxProtocolPort ports 1 9443 true <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        exec {inputFd}<&-
+        [[ "${ports[-1]}" == 15443 && "${checks}" == 0 && -z "${allowLog}" &&
+            "${nextInput}" == next-parent-action && "${AUTO_PORT}" == 8443 ]]
+        PADM_INSTALL_SINGBOX_PORTS[1]=${ports[-1]}
+        singBoxInstallListeners=()
+        readSingBoxProtocolPort ports 1 9443 </dev/null
+        [[ "${ports[-1]}" == 15443 && "${checks}" == 1 && "${allowLog}" == $'tcp:15443\n' && "${AUTO_PORT}" == 8443 ]]
+        selectCustomInstallType=,1, AUTO_PORT=443 checks=0 allowLog= singBoxInstallListeners=()
+        readSingBoxProtocolPort ports 1 9443 true </dev/null
+        [[ "${ports[-1]}" == 15443 && "${checks}" == 0 && -z "${allowLog}" && "${AUTO_PORT}" == 443 ]]
+        AUTO_PORT=8443 singBoxInstallListeners=()
+        exec {inputFd}< <(printf 'next-parent-action\n')
+        regressionExpectStatus 1 readSingBoxProtocolPort ports 1 9443 true <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        exec {inputFd}<&-
+        [[ "${nextInput}" == next-parent-action && -z "${allowLog}" && "${checks}" == 0 && "${AUTO_PORT}" == 8443 ]]
     )
 
     (

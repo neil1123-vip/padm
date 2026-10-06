@@ -882,12 +882,7 @@ autoInstallValidateRequiredInputs() {
         fi
     fi
 
-    [[ -n "${AUTO_PROTOCOLS:-}" ]] || return 0
-
-    if protocolSelectionNeedsLocalCertificate "${AUTO_PROTOCOLS}" && [[ -z "${AUTO_DOMAIN:-}" ]]; then
-        coreDomainRequiredErrorCard
-        return 1
-    fi
+    return 0
 }
 
 showInstallArgsHelp() {

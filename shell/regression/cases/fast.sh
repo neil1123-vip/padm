@@ -1163,12 +1163,17 @@ runAutoInstallTlsDomainMissingReturnsRegression() {
         initVar() { printf 'initVar\n' >>"${logFile}"; }
         mkdirTools() { printf 'mkdirTools\n' >>"${logFile}"; }
 
-        set +e
         autoInstallValidateRequiredInputs
+        local currentHost= lastInstallationConfig= inputFd nextInput domain=
+        exec {inputFd}< <(printf 'next-parent-action\n')
+        set +e
+        readInstallTLSDomain domain <&"${inputFd}"
         local status=$?
         set -e
+        read -r -u "${inputFd}" nextInput
+        exec {inputFd}<&-
 
-        [[ "${status}" -ne 0 ]]
+        [[ "${status}" -ne 0 && "${nextInput}" == next-parent-action && -z "${domain}" ]]
         grep -q '域名不可为空' "${logFile}"
         ! grep -q 'initVar' "${logFile}"
         ! grep -q 'mkdirTools' "${logFile}"

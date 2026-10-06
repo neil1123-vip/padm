@@ -762,20 +762,20 @@ initSingBoxPort() {
     if [[ -n "${realityProtocolId}" ]]; then
         [[ "${realityProtocolId}" == "26" ]] && realityLabel="Reality gRPC"
         protocolSelectionIsExactly "${selection}" "${realityProtocolId}" && singleReality=true
-        if [[ -n "${streamProtocol}" ]]; then
-            if resolveRealityInstallCoexistPort port "${streamProtocol}" "${realityLabel}"; then
-                coexistStatus=0
-                promptHistory=false
-            else
-                coexistStatus=$?
-                [[ "${coexistStatus}" == "2" ]] && return 1
-            fi
-        fi
     fi
     # 公共端口仅用于单选入口，不能覆盖共存内部端口或重复套用到多协议。
     if ! protocolSelectionIsExactly "${selection}" "${selection//,/}" ||
         [[ -n "${realityProtocolId}" && "${singleReality}" != "true" ]]; then
         AUTO_PORT=
+    fi
+    if [[ -n "${realityProtocolId}" && -n "${streamProtocol}" ]]; then
+        if resolveRealityInstallCoexistPort port "${streamProtocol}" "${realityLabel}"; then
+            coexistStatus=0
+            promptHistory=false
+        else
+            coexistStatus=$?
+            [[ "${coexistStatus}" == "2" ]] && return 1
+        fi
     fi
     if [[ "${promptHistory}" == true && -n "${port}" && -z "${AUTO_PORT}${AUTO_INSTALL:-}" ]] &&
         ! validPortNumber "${port}"; then

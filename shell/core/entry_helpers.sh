@@ -48,6 +48,10 @@ readInstallTLSDomain() {
             menuReadChoice domain "TLS 域名[回车保留 ${historyDomain}]:" domainInput true || return 1
             domainInput=${domainInput:-${historyDomain}}
         else
+            if [[ -n "${AUTO_INSTALL:-}" ]]; then
+                coreDomainRequiredErrorCard
+                return 1
+            fi
             menuReadChoice domain "TLS 域名[回车取消]:" domainInput || return 1
         fi
         if padmIsValidHostName "${domainInput}"; then
