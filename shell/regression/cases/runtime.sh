@@ -683,6 +683,133 @@ runInstallWorkflowRegression() (
             done
         done
     )
+
+    (
+        local events= answer output inputFd nextInput
+        local nginxTestVersion=1.13.12 nginxAvailable=true
+        local release=debian packageManager=apt upgrade=update removeType=remove rhelLike=false
+        local selectCustomInstallType=",24,"
+        padmAssertNativeInstallAllowed() { :; }
+        progressCard() { :; }
+        nginx() { printf 'nginx version: nginx/%s\n' "${nginxTestVersion}" >&2; }
+        command() {
+            if [[ "$*" == "-v nginx" ]]; then
+                [[ "${nginxAvailable}" == true ]]
+            else
+                builtin command "$@"
+            fi
+        }
+        beginPackageInstallTransaction() { events+=$'begin\n'; PADM_PACKAGE_TRANSACTION_STARTED=true; }
+        endPackageInstallTransaction() { events+=$'end\n'; }
+        waitAptProcess() { :; }
+        initInstallProgress() { :; }
+        adapterInstallLogPath() { printf '%s' "${TMP_DIR}/install-tools-preflight.log"; }
+        runWithTimeout() { events+="timeout:$*"$'\n'; }
+        runPackageCommandWithProgress() { events+=$'update\n'; }
+        installBasePackages() { events+=$'base\n'; }
+        installOptionalPackageTracked() { :; }
+        installNginxTools() { events+=$'nginx-install\n'; }
+        installAcmeTool() { events+=$'acme\n'; }
+
+        # 结束标记能识别旧 exit 0；取消不能开始包事务或消费上级输入。
+        for answer in n "" yes; do
+            output=$(
+                local status=0
+                events=
+                installTools 1 < <(printf '%s' "${answer}") || status=$?
+                printf 'result:%s:%s\n' "${status}" "${events}"
+            )
+            grep -qxF 'result:1:' <<<"${output}"
+        done
+        events=
+        exec {inputFd}< <(printf 'n\nnext-parent-action\n')
+        regressionExpectStatus 1 installTools 1 <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        [[ "${nextInput}" == next-parent-action && -z "${events}" ]]
+        exec {inputFd}<&-
+        output=$(
+            status=0
+            installTools 1 <<<"" || status=$?
+            printf 'result:%s:%s\n' "${status}" "${events}"
+        )
+        grep -qxF 'result:1:' <<<"${output}"
+        for answer in y Y yes YES true 1; do
+            events=
+            installTools 1 <<<"${answer}"
+            [[ "${events}" == $'begin\ntimeout:120 dpkg --configure -a\nupdate\nbase\ntimeout:300 remove nginx\nnginx-install\nacme\nend\n' ]]
+        done
+        events=
+        selectCustomInstallType=",1,"
+        installTools 1 </dev/null
+        [[ "${events}" == $'begin\ntimeout:120 dpkg --configure -a\nupdate\nbase\nend\n' ]]
+        events=
+        selectCustomInstallType=",24,"
+        nginxTestVersion=1.24.0
+        installTools 1 </dev/null
+        [[ "${events}" == $'begin\ntimeout:120 dpkg --configure -a\nupdate\nbase\nacme\nend\n' ]]
+        events=
+        nginxAvailable=false
+        installTools 1 </dev/null
+        [[ "${events}" == $'begin\ntimeout:120 dpkg --configure -a\nupdate\nbase\nnginx-install\nacme\nend\n' ]]
+        installNginxTools() { return 1; }
+        failPackageInstallTransaction() { printf 'failed:%s\n' "$1"; exit 1; }
+        for nginxAvailable in true false; do
+            nginxTestVersion=1.13.12
+            output=$(
+                (installTools 1 <<<y; printf 'unexpected-continue\n') || printf 'result:1\n'
+            )
+            [[ "${output}" == $'failed:Nginx安装失败\nresult:1' ]]
+        done
+    )
+
+    (
+        local core action expected status
+        lastInstallationConfig=
+        readInstallType() { :; }
+        progressCard() { :; }
+        successCard() { :; }
+        xrayInstalled() { return 0; }
+        singBoxInstalled() { return 0; }
+        singBoxV2rayApiCapability() { printf supported; }
+        coreXrayCurrentVersion() { printf 1.0.0; }
+        getSingBoxCurrentVersion() { printf 1.0.0; }
+        coreXrayInstallDir() { printf '%s' "${TMP_DIR}"; }
+        ensureXrayGeoFiles() { printf 'geo\n'; }
+        coreLatestReleaseTag() { printf v1.0.1; }
+        checkVersionNotEmpty() { [[ -n "$1" ]]; }
+        installDownloadedXrayBinary() { printf 'upgrade\n'; }
+        installDownloadedSingBoxBinary() { printf 'upgrade\n'; }
+        for core in Xray SingBox; do
+            action="install${core}"
+            # EOF 和截断肯定输入不能准备 Geo、升级核心或继续配置。
+            for answer in "" y yes; do
+                output=$(
+                    status=0
+                    "${action}" 1 < <(printf '%s' "${answer}") || status=$?
+                    printf 'result:%s\n' "${status}"
+                )
+                [[ "${output}" == result:1 ]]
+            done
+            for answer in "" n y Y yes YES true 1; do
+                expected=
+                [[ "${core}" == Xray ]] && expected+=$'geo\n'
+                [[ "$(normalizeYesNo "${answer}")" == y ]] && expected+=$'upgrade\n'
+                output=$(
+                    "${action}" 1 <<<"${answer}" || exit 1
+                    printf 'result:0\n'
+                )
+                [[ "${output}" == "${expected}result:0" ]]
+            done
+            lastInstallationConfig=true
+            exec {inputFd}< <(printf 'next-parent-action\n')
+            output=$("${action}" 1 <&"${inputFd}") || exit 1
+            [[ -z "${output}" ]]
+            read -r -u "${inputFd}" nextInput
+            [[ "${nextInput}" == next-parent-action ]]
+            exec {inputFd}<&-
+            lastInstallationConfig=
+        done
+    )
 )
 
 runRuntimeAndRealityRegression() {

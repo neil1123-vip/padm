@@ -415,9 +415,9 @@ installSingBoxApply() {
                 statusCard "sing-box 用户统计" "当前核心缺少统计能力，将升级到已发布的统计版"
                 reInstallSingBoxStatus=y
             else
-                autoRead singbox_reinstall "是否更新、升级？[y/n]:" reInstallSingBoxStatus
+                menuReadChoice singbox_reinstall "是否更新、升级？[y/N]:" reInstallSingBoxStatus true || exit 1
             fi
-            if [[ "${reInstallSingBoxStatus}" == "y" ]]; then
+            if [[ "$(normalizeYesNo "${reInstallSingBoxStatus}")" == "y" ]]; then
                 version=$(coreLatestReleaseTag SagerNet/sing-box "${prereleaseStatus}") || exit 1
                 checkVersionNotEmpty "${version}"
                 successCard "最新版本:${version}"
@@ -483,11 +483,11 @@ installXrayApply() {
     else
         if [[ -z "${lastInstallationConfig:-}" ]]; then
             successCard "Xray-core版本:$(coreXrayCurrentVersion)"
+            menuReadChoice xray_reinstall "是否更新、升级？[y/N]:" reInstallXrayStatus true || exit 1
             if ! ensureXrayGeoFiles "$(coreXrayInstallDir)"; then
                 exit 1
             fi
-            autoRead xray_reinstall "是否更新、升级？[y/n]:" reInstallXrayStatus
-            if [[ "${reInstallXrayStatus}" == "y" ]]; then
+            if [[ "$(normalizeYesNo "${reInstallXrayStatus}")" == "y" ]]; then
                 version=$(coreLatestReleaseTag XTLS/Xray-core "${prereleaseStatus}")
                 checkVersionNotEmpty "${version}"
                 installDownloadedXrayBinary "${version}" || exit 1

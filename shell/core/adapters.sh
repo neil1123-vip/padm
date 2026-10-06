@@ -803,6 +803,21 @@ installAcmeTool() {
 installTools() {
     padmAssertNativeInstallAllowed || return 1
     progressCard "$1" "安装工具"
+    local reinstallNginx=false nginxReinstallChoice=
+    if ! protocolSelectionSkipsNginx "${selectCustomInstallType}" && command -v nginx >/dev/null 2>&1; then
+        local nginxVersion
+        nginxVersion=$(nginx -v 2>&1)
+        nginxVersion=$(echo "${nginxVersion}" | awk -F "[n][g][i][n][x][/]" '{print $2}' | awk -F "[.]" '{print $2}')
+        if [[ ${nginxVersion} -lt 14 ]]; then
+            menuReadChoice nginx_grpc_reinstall "当前 Nginx 不支持 gRPC，是否重装？[y/N]:" nginxReinstallChoice true || return 1
+            if [[ "$(normalizeYesNo "${nginxReinstallChoice}")" != "y" ]]; then
+                coreCancelledStatusCard "未重装 Nginx，本次安装未继续"
+                return 1
+            fi
+            reinstallNginx=true
+        fi
+    fi
+
     beginPackageInstallTransaction
     local packageTransactionOwner=${PADM_PACKAGE_TRANSACTION_STARTED}
     # 修复 apt/dpkg 中断状态
@@ -852,29 +867,16 @@ installTools() {
         fi
     fi
 
-    # 检查 Nginx 版本并确认是否重装
     if protocolSelectionSkipsNginx "${selectCustomInstallType}"; then
         successCard "检测到无需依赖Nginx的服务，跳过安装"
     else
-        if ! command -v nginx >/dev/null 2>&1; then
+        if [[ "${reinstallNginx}" == "true" ]]; then
+            runWithTimeout 300 "${removeType} nginx" >/dev/null 2>&1 || failPackageInstallTransaction "旧版Nginx卸载失败"
+            statusCard "Nginx 状态" "nginx 卸载完成"
+        fi
+        if [[ "${reinstallNginx}" == "true" ]] || ! command -v nginx >/dev/null 2>&1; then
             successCard "安装nginx"
-            installNginxTools
-        else
-            nginxVersion=$(nginx -v 2>&1)
-            nginxVersion=$(echo "${nginxVersion}" | awk -F "[n][g][i][n][x][/]" '{print $2}' | awk -F "[.]" '{print $2}')
-            if [[ ${nginxVersion} -lt 14 ]]; then
-                autoRead nginx_grpc_reinstall "读取到当前的Nginx版本不支持gRPC，会导致安装失败，是否卸载Nginx后重新安装？[y/n]:" unInstallNginxStatus
-                if [[ "${unInstallNginxStatus}" == "y" ]]; then
-                    if ! runWithTimeout 300 "${removeType} nginx" >/dev/null 2>&1; then
-                        failPackageInstallTransaction "旧版Nginx卸载失败"
-                    fi
-                    statusCard "Nginx 状态" "nginx 卸载完成"
-                    successCard "安装nginx"
-                    installNginxTools || failPackageInstallTransaction "Nginx重装失败"
-                else
-                    exit 0
-                fi
-            fi
+            installNginxTools || failPackageInstallTransaction "Nginx安装失败"
         fi
     fi
 
