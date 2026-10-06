@@ -568,7 +568,6 @@ EOF
 runTlsReinstallRollbackRegression() (
     local root="${TMP_DIR}/tls-reinstall-rollback"
     local tlsDir="${root}/tls"
-    local resolvedTlsDir
     local homeDir="${root}/home"
     local statusLog="${root}/status.log"
     local errorLog="${root}/error.log"
@@ -584,11 +583,15 @@ runTlsReinstallRollbackRegression() (
     local oldSslType="${sslType:-}"
     local oldDnsAPIType="${dnsAPIType:-}"
     local oldDnsAPIStatus="${dnsAPIStatus:-}"
-    local shellRc
+    local shellRc answer inputFd nextInput
+    local acmeInstallFailure=true
 
     mkdir -p "${tlsDir}" "${homeDir}/.acme.sh/reinstall.example.com_ecc"
     printf 'old-cert\n' >"${tlsDir}/reinstall.example.com.crt"
     printf 'old-key\n' >"${tlsDir}/reinstall.example.com.key"
+    printf 'other-cert\n' >"${tlsDir}/other.example.com.crt"
+    printf 'other-key\n' >"${tlsDir}/other.example.com.key"
+    printf 'letsencrypt\n' >"${tlsDir}/ssl_type"
     printf 'acme-cert\n' >"${homeDir}/.acme.sh/reinstall.example.com_ecc/reinstall.example.com.cer"
     printf 'acme-key\n' >"${homeDir}/.acme.sh/reinstall.example.com_ecc/reinstall.example.com.key"
     printf '#!/usr/bin/env sh\n' >"${homeDir}/.acme.sh/acme.sh"
@@ -596,7 +599,6 @@ runTlsReinstallRollbackRegression() (
     : >"${statusLog}"
     : >"${errorLog}"
     : >"${cleanLog}"
-    resolvedTlsDir=$(cd -- "${tlsDir}" && pwd -P) || return 1
 
     HOME="${homeDir}"
     PADM_TLS_DIR="${tlsDir}"
@@ -609,50 +611,83 @@ runTlsReinstallRollbackRegression() (
     sslType=letsencrypt
     dnsAPIType=
     dnsAPIStatus=
+    unset AUTO_INSTALL
     export REGRESSION_STATUS_CARD_LOG="${statusLog}"
     export REGRESSION_ERROR_CARD_LOG="${errorLog}"
 
     statusCard() { printf '%s\n' "$*" >>"${statusLog}"; }
     successCard() { printf '%s\n' "$*" >>"${statusLog}"; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
-    autoRead() {
-        case "$3" in
-        reInstallStatus) printf -v "$3" 'y' ;;
-        *) printf -v "$3" '' ;;
-        esac
-    }
-    renewalTLS() { return 0; }
+    renewalTLS() { printf 'renew\n' >>"${cleanLog}"; }
     allowPort() { return 0; }
     switchDNSAPI() { return 0; }
     switchSSLType() { return 0; }
     customSSLEmail() { return 0; }
     cleanDirectoryContent() {
         printf 'clean:%s\n' "$1" >>"${cleanLog}"
-        mkdir -p "$1" || return 1
-        find "$1" -mindepth 1 -maxdepth 1 -exec rm -rf {} + || return 1
+        return 1
     }
     selectAcmeInstallSSL() { return 0; }
     sudo() {
         printf 'sudo:%s\n' "$*" >>"${cleanLog}"
-        return 1
+        printf 'acme-cert\n' >"${PADM_TLS_DIR}/reinstall.example.com.crt"
+        printf 'acme-key\n' >"${PADM_TLS_DIR}/reinstall.example.com.key"
+        [[ "${acmeInstallFailure}" != "true" ]]
     }
 
     set +e
     (
         set +e
-        installTLS 1 >/dev/null 2>&1
+        installTLS 1 <<<y >/dev/null 2>&1
         printf '%s\n' "$?" >"${root}/install.rc"
     )
     shellRc=$?
     set -e
     [[ "${shellRc}" == "0" ]]
     [[ "$(<"${root}/install.rc")" == "1" ]]
-    grep -qx "clean:${resolvedTlsDir}" "${cleanLog}"
+    ! grep -q '^clean:' "${cleanLog}"
     grep -q '^sudo:.*--installcert -d reinstall.example.com' "${cleanLog}"
     [[ "$(<"${tlsDir}/reinstall.example.com.crt")" == "old-cert" ]]
     [[ "$(<"${tlsDir}/reinstall.example.com.key")" == "old-key" ]]
+    [[ "$(<"${tlsDir}/other.example.com.crt")" == "other-cert" ]]
+    [[ "$(<"${tlsDir}/other.example.com.key")" == "other-key" ]]
+    [[ "$(<"${tlsDir}/ssl_type")" == "letsencrypt" ]]
     grep -q 'TLS安装失败' "${errorLog}"
     ! grep -q 'TLS生成成功' "${statusLog}"
+
+    # 未完成输入不能先续签；回车或 n 保留证书，不消费上级菜单输入。
+    for answer in "" y yes; do
+        : >"${cleanLog}"
+        regressionExpectStatus 1 installTLS 1 < <(printf '%s' "${answer}")
+        [[ ! -s "${cleanLog}" ]]
+    done
+    for answer in "" n; do
+        : >"${cleanLog}"
+        exec {inputFd}< <(printf '%s\nnext-parent-action\n' "${answer}")
+        installTLS 1 <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        [[ "${nextInput}" == next-parent-action && "$(<"${cleanLog}")" == renew ]]
+        exec {inputFd}<&-
+        [[ "$(<"${tlsDir}/reinstall.example.com.crt")" == "old-cert" ]]
+    done
+
+    acmeInstallFailure=false
+    for answer in y Y yes YES true 1; do
+        : >"${cleanLog}"
+        installTLS 1 <<<"${answer}"
+        [[ "$(<"${tlsDir}/reinstall.example.com.crt")" == "acme-cert" ]]
+        [[ "$(<"${tlsDir}/reinstall.example.com.key")" == "acme-key" ]]
+        [[ "$(<"${tlsDir}/other.example.com.crt")" == "other-cert" ]]
+        [[ "$(<"${tlsDir}/other.example.com.key")" == "other-key" ]]
+        [[ "$(<"${tlsDir}/ssl_type")" == "letsencrypt" ]]
+        ! grep -q '^clean:' "${cleanLog}"
+        [[ "$(grep -c '^sudo:' "${cleanLog}")" == 1 ]]
+    done
+    : >"${cleanLog}"
+    lastInstallationConfig=true
+    reInstallStatus=y
+    installTLS 1 </dev/null
+    [[ "$(<"${cleanLog}")" == renew ]]
 
     if [[ -n "${oldTlsDir}" ]]; then
         PADM_TLS_DIR="${oldTlsDir}"

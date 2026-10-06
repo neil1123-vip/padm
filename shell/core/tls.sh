@@ -398,44 +398,22 @@ installTLS() {
     readAcmeTLS || return 1
     local tlsDomain=${domain}
     local tlsDir
-    local crtFile
-    local keyFile
-    local reinstallBackupDir=
+    local reInstallStatus=n
     tlsDomainNameIsSafe "${tlsDomain}" || { errorCard "TLS 域名不合法"; return 1; }
     tlsDir=$(tlsManagedDir) || return 1
-    crtFile="${tlsDir}/${tlsDomain}.crt"
-    keyFile="${tlsDir}/${tlsDomain}.key"
 
     if { [[ "${PADM_REQUIRE_USABLE_TLS_CERTIFICATE:-}" == "true" ]] && tlsCertificatePairUsable "${tlsDir}" "${tlsDomain}"; } ||
         { [[ "${PADM_REQUIRE_USABLE_TLS_CERTIFICATE:-}" != "true" ]] && tlsCertificatePairExists "${tlsDir}" "${tlsDomain}"; }; then
         successCard "检测到证书"
+        if [[ -z "${lastInstallationConfig:-}" ]] &&
+            { [[ -d "$HOME/.acme.sh/${tlsDomain}_ecc" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.key" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; }; then
+            tlsCertificateCard "回车保留现有证书；重新安装仅同步当前域名证书"
+            menuReadChoice tls_reinstall "是否重新安装当前域名证书？[y/N]:" reInstallStatus true || return 1
+        fi
         renewalTLS || return 1
 
-        if ! tlsCertificatePairExists "${tlsDir}" "${tlsDomain}"; then
+        if [[ "$(normalizeYesNo "${reInstallStatus}")" == "y" ]] || ! tlsCertificatePairExists "${tlsDir}" "${tlsDomain}"; then
             installTLSFromAcme || return 1
-        else
-            if [[ -d "$HOME/.acme.sh/${tlsDomain}_ecc" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.key" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
-                if [[ -z "${lastInstallationConfig}" ]]; then
-                    tlsCertificateCard "如未过期或者自定义证书请选择 [n]"
-                    autoRead tls_reinstall "是否重新安装？[y/n]:" reInstallStatus
-                    if [[ "${reInstallStatus}" == "y" ]]; then
-                        padmCreateTmpRootPath reinstallBackupDir padm-tls-reinstall.XXXXXX -d || return 1
-                        if ! cp -a "${tlsDir}/." "${reinstallBackupDir}/" >/dev/null 2>&1; then
-                            padmRemoveCleanupPath "${reinstallBackupDir}"
-                            return 1
-                        fi
-                        if ! cleanDirectoryContent "${tlsDir}"; then
-                            restoreTLSReinstallBackup "${reinstallBackupDir}" "${tlsDir}" "TLS 目录清理失败" || return 1
-                            return 1
-                        fi
-                        if ! installTLSFromAcme; then
-                            restoreTLSReinstallBackup "${reinstallBackupDir}" "${tlsDir}" "TLS安装失败" || return 1
-                            return 1
-                        fi
-                        padmRemoveCleanupPath "${reinstallBackupDir}"
-                    fi
-                fi
-            fi
         fi
 
     elif [[ -d "$HOME/.acme.sh/${tlsDomain}_ecc" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.key" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; then

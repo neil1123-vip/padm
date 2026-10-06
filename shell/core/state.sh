@@ -661,6 +661,16 @@ cleanLastInstallationConfigApply() {
     local oldPorts
     local xrayOpenRcServiceFile=${PADM_XRAY_OPENRC_SERVICE_FILE:-/etc/init.d/xray}
     local singBoxOpenRcServiceFile=${PADM_SINGBOX_OPENRC_SERVICE_FILE:-/etc/init.d/sing-box}
+    local acmeDir cleanAcmeStatus=n
+    acmeDir=$(acmeHomeDir) || return 1
+    if [[ -d "${acmeDir}" ]]; then
+        menuReadChoice clean_acme "是否清理 acme 证书和账号配置？[y/N，回车保留]:" cleanAcmeStatus true || return 1
+        cleanAcmeStatus=$(normalizeYesNo "${cleanAcmeStatus}")
+        if [[ "${cleanAcmeStatus}" == "y" ]] && ! acmeDir=$(acmeSafeHomeDir); then
+            errorCard "acme证书和账号配置目录异常"
+            return 1
+        fi
+    fi
     oldPorts=$(printf '%s\n' "${currentDefaultPort}" "${currentPort}" "${customPort}" "${xrayVLESSRealityPort}" "${xrayVLESSRealityXHTTPort}" "${singBoxVLESSVisionPort}" "${singBoxVLESSRealityVisionPort}" "${singBoxVLESSRealityGRPCPort}" "${singBoxHysteria2Port}" "${singBoxTuicPort}" "${singBoxSocks5Port}" "${hysteriaPort}" "${tuicPort}" | grep -E '^[0-9]+$' | sort -n | uniq)
 
     statusCard "安装配置" "清空上次安装配置"
@@ -759,22 +769,12 @@ cleanLastInstallationConfigApply() {
         done <<<"${oldPorts}"
     fi
 
-    local acmeDir
-    acmeDir=$(acmeHomeDir)
-    if [[ -d "${acmeDir}" ]]; then
-        echo
-        autoRead clean_acme "是否清理acme证书和账号配置？[y/n]:" cleanAcmeStatus
-        if [[ "${cleanAcmeStatus}" == "y" ]]; then
-            if ! acmeDir=$(acmeSafeHomeDir); then
-                errorCard "acme证书和账号配置目录异常"
-                return 1
-            fi
-            if rm -rf -- "${acmeDir}" >/dev/null 2>&1; then
-                successCard "acme证书和账号配置已清理"
-            else
-                errorCard "acme证书和账号配置清理失败"
-                return 1
-            fi
+    if [[ "${cleanAcmeStatus}" == "y" ]]; then
+        if rm -rf -- "${acmeDir}" >/dev/null 2>&1; then
+            successCard "acme证书和账号配置已清理"
+        else
+            errorCard "acme证书和账号配置清理失败"
+            return 1
         fi
     fi
 

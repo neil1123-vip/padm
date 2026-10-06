@@ -1449,6 +1449,44 @@ runCleanLastInstallationConfigFailureRegression() (
     checkGFWStatue() { printf 'check-gfw:%s\n' "$*" >>"${installLog}"; return 0; }
     showAccounts() { printf 'show-accounts:%s\n' "$*" >>"${installLog}"; return 0; }
 
+    (
+        local HOME="${root}/acme-home" answer
+        local expectedAcmeDir="${HOME}/.acme.sh"
+        mkdir -p "${expectedAcmeDir}"
+        unset AUTO_INSTALL
+        mode=
+        autoRead() { read -r "$3"; }
+
+        # 所有清理选择必须先完整读取，EOF 和截断输入不能停服务或删除配置。
+        for answer in "" y n; do
+            : >"${serviceLog}"
+            : >"${cleanupLog}"
+            currentHost=kept.example.com
+            regressionExpectStatus 1 cleanLastInstallationConfig < <(printf '%s' "${answer}")
+            [[ ! -s "${serviceLog}" && ! -s "${cleanupLog}" && "${currentHost}" == kept.example.com ]]
+            [[ "${nginxState}" == true ]]
+        done
+        for answer in "" n N no y Y yes true 1; do
+            : >"${cleanupLog}"
+            cleanLastInstallationConfig <<<"${answer}" >/dev/null 2>&1
+            if [[ "$(normalizeYesNo "${answer}")" == y ]]; then
+                grep -qxF "rm:-rf -- ${expectedAcmeDir}" "${cleanupLog}"
+            else
+                ! grep -qxF "rm:-rf -- ${expectedAcmeDir}" "${cleanupLog}"
+            fi
+        done
+        (
+            acmeSafeHomeDir() { return 1; }
+            : >"${serviceLog}"
+            : >"${cleanupLog}"
+            regressionExpectStatus 1 cleanLastInstallationConfig <<<"y"
+            [[ ! -s "${serviceLog}" && ! -s "${cleanupLog}" ]]
+        )
+        HOME="${root}/without-acme"
+        autoRead() { return 99; }
+        cleanLastInstallationConfig </dev/null >/dev/null 2>&1
+    )
+
     runCleanFailureCase() {
         local failureMode=$1
         mode="${failureMode}"
@@ -1615,6 +1653,7 @@ runCleanLastInstallationConfigAcmeHomeRegression() (
     local resolvedAcmeDir="${homeDir}/.acme.sh"
     local cleanupLog="${root}/cleanup.log"
     local errorLog="${root}/error.log"
+    local acmeRemoved=false
     mkdir -p "${workDir}/nginx" "${workDir}/static" "${resolvedAcmeDir}"
     : >"${cleanupLog}"
     : >"${errorLog}"
@@ -1654,7 +1693,10 @@ runCleanLastInstallationConfigAcmeHomeRegression() (
             [[ "$*" != "-rf -- ${resolvedAcmeDir}" ]]
             return
         fi
-        command rm "$@"
+        if [[ "$*" == "-rf -- ${resolvedAcmeDir}" ]]; then
+            acmeRemoved=true
+        fi
+        return 0
     }
 
     (
@@ -1667,7 +1709,7 @@ runCleanLastInstallationConfigAcmeHomeRegression() (
             grep -q "acme证书和账号配置清理失败" "${errorLog}"
             ;;
         relative-home)
-            [[ ! -d "${resolvedAcmeDir}" ]]
+            [[ "${acmeRemoved}" == true && -d "${resolvedAcmeDir}" ]]
             ! grep -q 'rm:-rf -- relative-home/.acme.sh' "${cleanupLog}"
             [[ ! -s "${errorLog}" ]]
             ;;
