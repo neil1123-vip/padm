@@ -35,6 +35,6 @@ LABEL org.opencontainers.image.source="${SOURCE_URL}" \
 USER 10001:10001
 EXPOSE 8080
 STOPSIGNAL SIGQUIT
-ENTRYPOINT ["/usr/sbin/nginx"]
+ENTRYPOINT ["/usr/sbin/nginx", "-e", "/dev/stderr"]
 CMD ["-g", "daemon off;"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 CMD ["/usr/bin/wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]

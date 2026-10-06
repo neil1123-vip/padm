@@ -84,7 +84,14 @@ sing-box)
     [[ "$(docker inspect --format '{{.State.Running}}' "${container_id}")" == true ]]
     ;;
 nginx)
-    docker run --rm --pull=never "${image}" -t >/dev/null
+    if ! nginx_output=$(docker run --rm --pull=never --read-only --cap-drop=ALL \
+        --security-opt=no-new-privileges --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m \
+        "${image}" -t 2>&1); then
+        printf '%s\n' "${nginx_output}" >&2
+        exit 1
+    fi
+    printf '%s\n' "${nginx_output}" >&2
+    if grep -Fq 'could not open error log file:' <<<"${nginx_output}"; then exit 1; fi
     ;;
 ops|net)
     docker run --rm --pull=never "${image}" health >/dev/null

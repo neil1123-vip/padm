@@ -365,6 +365,11 @@ Docker CI/Release 使用 `docker-tls-focused`，phase5/phase6 与静态检查通
 probe 不执行 ACME 或完整业务 CLI，这些证据不能替代整机重启与真实 DNS。
 本轮使用 Docker Desktop 的 Linux daemon，不扩大 Windows/生产支持范围；
 内部 TLS 夹具不开放 Trojan；Microsoft 目标的 Xray EOF 仍有未确认原因，见基线。
+Nginx 读取配置前的默认日志权限提示已通过镜像入口与容器内校验/reload 的
+`-e /dev/stderr` 修复，访问日志及权限合同不变；现有 smoke 拒绝旧镜像反例，
+新两架构通过。完整五路联合验收再次在 amd64/arm64 仿真通过，
+耗时 71.178/93.993 秒；现有并行 TLS/续期门禁 15.094 秒通过。
+本次工具环境不同，不跨环境比较耗时；arm64 平台/io_setup 仿真告警仍保留。
 真实 DNS、完整宿主重启、
 原生 Linux/SSH、原生 arm64 与可信发布继续待验，3B.4 不能标为完成或升级协议状态。
 

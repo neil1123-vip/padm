@@ -17,14 +17,14 @@
   三条普通 TLS/WS 客户端、Python 证书序列号及 HTTPS 订阅探测均正常校验 CA 与域名，
   不使用跳过证书校验的连接。
 
-| 镜像 | 本轮实际引用 |
+| 镜像 | 初轮 HTTPS 订阅验收引用 |
 | --- | --- |
 | Xray | `padm-local/padm-xray:tls-3b4@sha256:edb005cb17f2961596b42cd2266a87ef5adcd3c6601cf529b6a088ac5f37dacd` |
 | sing-box | `padm-local/padm-sing-box:tls-3b4@sha256:5fdff482ad9c65aa0e583a20e27d5f322b2539e673432e2cf78c7f460028fcb3` |
 | Nginx | `padm-local/padm-nginx:tls-3b4@sha256:26a968bf692d1ccaf46e400e967ecc223534672eb8bfdb764c9751f7ec98ac9d` |
 | ops | `padm-local/padm-ops:tls-3b4@sha256:ca6bf4a8b7936718eb9d3633fb8580e6e50de388c93275394f5c3768bb2587f6` |
 
-| arm64 镜像 | 仿真验收实际引用 |
+| arm64 镜像 | 初轮 HTTPS 订阅仿真验收引用 |
 | --- | --- |
 | Xray | `padm-local/padm-xray:tls-subscription-3b4-arm64@sha256:3686b2673cb4044703d1200d3b092d8f1a8cb09b2a4fe26cac27170334bf5abb` |
 | sing-box | `padm-local/padm-sing-box:tls-subscription-3b4-arm64@sha256:74d011dc6c4c069f17541dea2d040ec2e927bcfc9f8c544b4577c771a663badf` |
@@ -112,6 +112,40 @@ Docker CI 与 Release 均改用该门禁；更新/回滚 `phase6` 38 秒，
 Windows 文件复制到 phase5 的 Linux 临时副本时仅将版本锁 CRLF 转为 LF，
 仓库中的锁文件未改。原始日志和本轮测试资源验收后清理，证据由本文件和脚本保留。
 
+## Nginx 初始日志修复复验
+
+同日真实复现：原镜像 `nginx -t` 返回 `0`，但打开编译时默认路径
+`/var/lib/nginx/logs/error.log` 报权限错误。主配置的 `error_log /dev/stderr`
+不影响读取配置之前的日志初始化；镜像入口统一加 `-e /dev/stderr`，
+容器内 `exec` 的校验与 reload 同步显式传入该参数。
+不修改 UID、只读文件系统、能力、常态错误日志或 fail2ban 访问日志。
+
+`image-smoke.sh` 以只读、无能力、`/tmp` tmpfs 运行 Nginx 校验，
+保留原始输出并拒绝打开错误日志失败；旧镜像反例被拒绝，新两架构镜像通过。
+缺失配置文件仍返回失败并显示真实错误，不通过吞 stderr 消除告警。
+`phase2` 合同通过；现有 `docker-tls-focused` 并行 TLS/续期回归 `15.094` 秒通过。
+Bash 语法、测试文件 ShellCheck warning/error 和生产文件 ShellCheck error 通过；
+生产文件原有 SC1007 warning 未改，不宣称全级零提示。
+
+完整 `tls-real.sh` 在 amd64 / arm64 仿真分别 `71.178 / 93.993` 秒、退出 `0`，
+四次五路 HTTPS 订阅客户端探测、换证、健康失败与 TERM 恢复均通过，
+校验和 reload 不再显示默认日志权限告警。驱动 Bash `5.3.9`、jq `1.8.2`、
+Docker CLI `29.8.2`、Compose `5.1.4`；不同于初轮环境，不跨环境比较耗时。
+amd64 Xray、sing-box、ops 复用上表引用，Nginx 与 arm64 输入如下：
+
+| 镜像 | 日志修复复验引用 |
+| --- | --- |
+| amd64 Nginx | `padm-local/padm-nginx:nginx-log-3b4@sha256:708da59214b2b57315932a55f54f6b6909de7952d65d6f6bdec89cd9411fa568` |
+| arm64 Xray | `padm-local/padm-xray:nginx-log-3b4-arm64@sha256:ac6c679fefab385c06ce55e519c07830890ae1c14870f47dbd7def1cdf64eeae` |
+| arm64 sing-box | `padm-local/padm-sing-box:nginx-log-3b4-arm64@sha256:25bd9f8d8986d8399de1381d567f78b606c9614f73a55ba50ca2a442cd6fe388` |
+| arm64 Nginx | `padm-local/padm-nginx:nginx-log-3b4-arm64@sha256:a3efb3af574c920602b607f82f5fb46a38b469df5428b1838ad02ee114f782b7` |
+| arm64 ops | `padm-local/padm-ops:nginx-log-3b4-arm64@sha256:46d1998cada2ed624b3f5b2232fd6721fcb690f7cfaef421c9fde6db7f7c93c0` |
+
+业务镜像仍由现有锁和 Bake 构建，不更改发布或依赖合同。
+测试驱动、两个测试卷、五个业务候选镜像及本轮临时文件验收后精确清理；
+原有 amd64 镜像与其他任务文件保留。arm64 的平台/io_setup 仿真告警仍在，
+原生主机、真实 DNS、可信发布等边界不因本次修复升级。
+
 ## 真实调度器
 
 `docker/tests/renewal-real.sh` 仅允许明确设置 `PADM_RENEWAL_REAL_ISOLATED=1` 的
@@ -190,8 +224,7 @@ docker exec -e PADM_RENEWAL_REAL_ISOLATED=1 padm-renewal-real-systemd-return bas
 已验证的是测试解析器从真实 HTTPS 订阅导入 sing-box；Reality 的服务地址及 WS
 公开端口映射到同一入口的隔离网络端点，不测试公网入口、SSH 或第三方客户端导入 UI。
 原生 arm64、其它客户端实现和其它 Reality 目标兼容性未验，仿真五路证据不能代替。
-Nginx `-t`/reload 仍输出默认日志路径的 `Permission denied` 提示；
-命令、健康检查与实际 TLS/流量通过，该提示未被隐藏，不能据此宣称无运行告警。
+Nginx 默认日志路径权限提示已修复并复验，证据见上节；不宣称无其它运行告警。
 arm64 仿真还会显示平台不匹配和 `io_setup() ... Function not implemented`，
 不能以已通过的网络行为推断原生内核兼容性。
 3B.4 保持进行中，协议支持及 `management_status` 不因本次验收升级。

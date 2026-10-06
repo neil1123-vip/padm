@@ -131,13 +131,13 @@ dockerComposeRun() {
         kill -TERM "${BASHPID}"
     fi
     if [[ ! -e "${TEST_ROOT}/failed-once" ]]; then
-        if [[ ( "${MODE}" == nginx-test-fail && "$*" == 'exec -T nginx nginx -t' ) ||
-            ( "${MODE}" == reload-fail && "$*" == 'exec -T nginx nginx -s reload' ) ||
+        if [[ ( "${MODE}" == nginx-test-fail && "$*" == 'exec -T nginx nginx -e /dev/stderr -t' ) ||
+            ( "${MODE}" == reload-fail && "$*" == 'exec -T nginx nginx -e /dev/stderr -s reload' ) ||
             ( "${MODE}" == health-fail && "$1" == up ) ]]; then
             : >"${TEST_ROOT}/failed-once"
             return 1
         fi
-        if [[ "${MODE}" == term-reload && "$*" == 'exec -T nginx nginx -s reload' ]]; then
+        if [[ "${MODE}" == term-reload && "$*" == 'exec -T nginx nginx -e /dev/stderr -s reload' ]]; then
             : >"${TEST_ROOT}/failed-once"
             kill -TERM "${BASHPID}"
         fi
@@ -336,7 +336,7 @@ for ACTION in issue renew; do
     [[ "$(<"${PADM_DOCKER_INSTALL_DIR}/data/acme/other.example.com/domain.conf")" == other-domain &&
         "$(<"${PADM_DOCKER_INSTALL_DIR}/secrets/tls/other.example.com.crt")" == other-certificate &&
         "$(<"${PADM_DOCKER_INSTALL_DIR}/secrets/tls/other.example.com.key")" == other-key ]] || fail '修改了其它域名'
-    [[ "$(head -n 2 "${TEST_ROOT}/compose.log")" == $'exec -T nginx nginx -t\nexec -T nginx nginx -s reload' ]] ||
+    [[ "$(head -n 2 "${TEST_ROOT}/compose.log")" == $'exec -T nginx nginx -e /dev/stderr -t\nexec -T nginx nginx -e /dev/stderr -s reload' ]] ||
         fail '重载未先校验 Nginx'
     assertPermissions
     before=$(materials)
@@ -403,7 +403,7 @@ runControl 15 tls validate --domain "${DOMAIN}"
 newState legacy-no-spec
 rm -- "${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
 runControl 0 tls install --domain "${DOMAIN}" --cert "${CERT_FILE}" --key "${KEY_FILE}"
-[[ "$(head -n 2 "${TEST_ROOT}/compose.log")" == $'exec -T nginx nginx -t\nexec -T nginx nginx -s reload' ]] ||
+[[ "$(head -n 2 "${TEST_ROOT}/compose.log")" == $'exec -T nginx nginx -e /dev/stderr -t\nexec -T nginx nginx -e /dev/stderr -s reload' ]] ||
     fail '旧部署缺少规格文件时未重载实际 Nginx 消费者'
 
 # 校验复用真实 openssl，覆盖错域名、错私钥与损坏证书，不能只相信模拟退出码。

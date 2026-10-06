@@ -2174,14 +2174,14 @@ dockerReloadTlsConsumers() {
         case "${service}" in
         xray) dockerComposeRun run --rm --no-deps xray -test -confdir /etc/padm/xray >/dev/null || failed=1 ;;
         sing-box) dockerComposeRun run --rm --no-deps sing-box check -D /var/lib/padm/sing-box -c /etc/padm/sing-box/config.json >/dev/null || failed=1 ;;
-        nginx) dockerComposeRun exec -T nginx nginx -t >/dev/null || failed=1 ;;
+        nginx) dockerComposeRun exec -T nginx nginx -e /dev/stderr -t >/dev/null || failed=1 ;;
         *) return 1 ;;
         esac
     done <<<"${consumers}"
     [[ "${failed}" == 0 || "${restore}" == restore ]] || return 1
     while IFS= read -r service; do
         if [[ "${service}" == nginx ]]; then
-            dockerComposeRun exec -T nginx nginx -s reload >/dev/null &&
+            dockerComposeRun exec -T nginx nginx -e /dev/stderr -s reload >/dev/null &&
                 dockerComposeRun up -d --no-deps --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" nginx >/dev/null || failed=1
         else
             dockerComposeRun up -d --force-recreate --no-deps --wait \

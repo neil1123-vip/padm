@@ -80,6 +80,9 @@ for imageName in "${imageNames[@]}"; do
     grep -Eq '^HEALTHCHECK[[:space:]]+' "${dockerfile}" || fail "${imageName} lacks HEALTHCHECK"
 done
 
+grep -Fxq 'ENTRYPOINT ["/usr/sbin/nginx", "-e", "/dev/stderr"]' \
+    "${PROJECT_ROOT}/docker/images/nginx/Dockerfile" || fail 'Nginx 初始错误日志未接入 stderr'
+
 if grep -ERni 'fail2ban|wireguard|iptables|nftables|python3|acme[.]sh' \
     "${PROJECT_ROOT}/docker/images/xray" "${PROJECT_ROOT}/docker/images/sing-box" >/dev/null; then
     fail 'core images contain ops or net tooling'
