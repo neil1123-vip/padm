@@ -837,6 +837,24 @@ validManualAccountNameValue() {
 autoInstallValidateRequiredInputs() {
     [[ "${AUTO_INSTALL:-}" == "true" ]] || return 0
 
+    case "${AUTO_INSTALL_TYPE:-}" in
+    '' | custom | any | 任意组合 | 2 | install | full | traditional | 1 | reality | reality-only | no-domain-reality | 3)
+        ;;
+    *)
+        errorCard "--install-type 参数不合法"
+        return 1
+        ;;
+    esac
+
+    case "${AUTO_CORE:-}" in
+    '' | xray | 1 | sing-box | singbox | 2)
+        ;;
+    *)
+        errorCard "--core 参数不合法"
+        return 1
+        ;;
+    esac
+
     if [[ -n "${AUTO_UUID:-}" ]] && ! validUuidValue "${AUTO_UUID}"; then
         errorCard "--uuid 格式不合法"
         return 1
@@ -970,7 +988,7 @@ autoValueForKey() {
         ;;
     install_type)
         case "${AUTO_INSTALL_TYPE}" in
-        custom | any | 任意组合 | 2 | install | full | traditional | 1)
+        '' | custom | any | 任意组合 | 2 | install | full | traditional | 1)
             printf '5'
             ;;
         reality | reality-only | no-domain-reality | 3)
@@ -1210,7 +1228,7 @@ autoRead() {
 
     prompt=$(formatReadPrompt "${prompt}")
 
-    if [[ -n "${AUTO_INSTALL:-}" && ( "${key}" != "install_type" || -n "${AUTO_INSTALL_TYPE:-}" ) ]]; then
+    if [[ -n "${AUTO_INSTALL:-}" ]]; then
         autoValue=$(autoValueForKey "${key}") || return 1
         if [[ -n "${autoValue}" ]]; then
             showAutoInstallSummary

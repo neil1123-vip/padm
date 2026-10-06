@@ -51,6 +51,73 @@ coreTemplateValidateManualAccountName() {
     fi
 }
 
+# 两核共享用户输入；采集成功前不替换现有用户。
+coreTemplateCollectInitialClients() {
+    local core=$1 passwordMode=${2:-false}
+    local hasExistingClients=false historyChoice=
+    local credential= username= clients label=UUID suffix=VLESS_TCP/TLS_Vision
+    if [[ "${passwordMode}" == "true" ]]; then
+        label="Hysteria2 密码"
+        suffix=singbox_hysteria2
+        jq -e 'type == "array" and length > 0' <<<"${currentClients:-}" >/dev/null 2>&1 && hasExistingClients=true
+    elif [[ -n "${currentUUID:-}" ]]; then
+        hasExistingClients=true
+    fi
+
+    if [[ "${hasExistingClients}" == "true" ]]; then
+        while [[ -z "${lastInstallationConfig:-}" && "${AUTO_INSTALL:-}" != "true" ]]; do
+            menuReadChoice core_history_user "是否复用现有用户配置？[Y/n，回车保留]:" historyChoice true || return 1
+            case "${historyChoice}" in
+            "" | y | Y | yes | YES | Yes | true | TRUE | True | 1) break ;;
+            n | N | no | NO | No | false | FALSE | False | 0) hasExistingClients=false; break ;;
+            *)
+                errorCard "请输入 y 保留用户配置，或 n 新建用户"
+                ;;
+            esac
+        done
+        if [[ "${hasExistingClients}" == "true" ]]; then
+            successCard "已复用现有用户配置"
+            return 0
+        fi
+    fi
+
+    if [[ -n "${AUTO_UUID:-}" ]]; then
+        credential=${AUTO_UUID}
+    else
+        menuReadChoice core_init_uuid "${label}[回车随机]:" credential true || return 1
+    fi
+    if [[ -z "${credential}" ]]; then
+        credential=$(generateRandomUuidValue) || { errorCard "${label}生成失败"; return 1; }
+    fi
+    if [[ "${passwordMode}" != "true" ]]; then
+        validUuidValue "${credential}" || { errorCard "UUID 格式不合法"; return 1; }
+    fi
+
+    if [[ -n "${AUTO_USER:-}" ]]; then
+        username=${AUTO_USER}
+    elif [[ "${AUTO_INSTALL:-}" != "true" ]]; then
+        menuReadChoice core_init_username "用户名[回车随机]:" username true || return 1
+    fi
+    if [[ -z "${username}" ]]; then
+        if validUuidValue "${credential}"; then
+            username="$(defaultRandomUserNameFromUuid "${credential}")-${suffix}"
+        else
+            username="padm-hysteria2-${suffix}"
+        fi
+    fi
+    coreTemplateValidateManualAccountName "${username}" || return 1
+
+    if [[ "${core}" == "xray" ]]; then
+        clients=$(jq -nc --arg uuid "${credential}" --arg add "${add:-}" --arg email "${username}" '[{id:$uuid,add:$add,flow:"xtls-rprx-vision",email:$email}]') || return 1
+    elif [[ "${passwordMode}" == "true" ]]; then
+        clients=$(jq -nc --arg password "${credential}" --arg name "${username}" '[{password:$password,name:$name}]') || return 1
+    else
+        clients=$(jq -nc --arg uuid "${credential}" --arg name "${username}" '[{uuid:$uuid,flow:"xtls-rprx-vision",name:$name}]') || return 1
+    fi
+    currentClients=${clients}
+    echoContent green "\n ${username}:${credential}"
+}
+
 coreTemplateConfigBackupCreate() {
     local resultVar=$1
     local core=$2
@@ -306,42 +373,7 @@ initXrayConfigApply() {
     configPath="$(xrayTemplateConfigDir)/" || return 1
     progressCard "$2" "初始化 Xray 配置"
     echo
-    local uuid=
-    local addClientsStatus=
-    if [[ -n "${currentUUID}" && -z "${lastInstallationConfig}" ]]; then
-        autoRead core_history_user "读取到上次用户配置，UUID为 [${currentUUID}]，是否复用上次安装的用户配置？[y/n]:" historyUUIDStatus
-        if [[ "${historyUUIDStatus}" == "y" ]]; then
-            addClientsStatus=true
-            successCard "使用成功"
-        fi
-    elif [[ -n "${currentUUID}" && -n "${lastInstallationConfig}" ]]; then
-        addClientsStatus=true
-    fi
-
-    if [[ -z "${addClientsStatus}" ]]; then
-        echoContent yellow "请输入自定义UUID[需合法]，[回车]随机UUID"
-        autoRead core_init_uuid "UUID:" customUUID
-
-        if [[ -n ${customUUID} ]]; then
-            validUuidValue "${customUUID}" || { errorCard "UUID 格式不合法"; return 1; }
-            uuid=${customUUID}
-        else
-            uuid=$(generateRandomUuidValue) || { errorCard "UUID 生成失败"; return 1; }
-        fi
-
-        echoContent yellow "\n请输入自定义用户名[需合法]，[回车]随机用户名"
-        autoRead core_init_username "用户名:" customEmail
-        if [[ -z ${customEmail} ]]; then
-            customEmail="$(defaultRandomUserNameFromUuid "${uuid}")-VLESS_TCP/TLS_Vision"
-        fi
-        coreTemplateValidateManualAccountName "${customEmail}" || return 1
-    fi
-
-    if [[ -n "${uuid}" ]]; then
-        currentClients=$(jq -nc --arg uuid "${uuid}" --arg add "${add}" --arg email "${customEmail}" '[{id:$uuid,add:$add,flow:"xtls-rprx-vision",email:$email}]') || return 1
-        echoContent green "\n ${customEmail}:${uuid}"
-        echo
-    fi
+    coreTemplateCollectInitialClients xray || return 1
 
     # log
     if [[ ! -f "/etc/padm/xray/conf/00_log.json" ]]; then
@@ -897,91 +929,10 @@ initSingBoxConfigApply() {
     progressCard "$2" "初始化 sing-box 配置"
 
     echo
-    local uuid=
-    local addClientsStatus=
     local sslDomain=
     collectTLSProfile
     sslDomain=${tlsCertDomain}
-    local hasExistingClients=false
-    if jq -e 'type == "array" and length > 0' <<<"${currentClients:-}" >/dev/null 2>&1; then
-        hasExistingClients=true
-    fi
-    if [[ "${hysteria2CredentialMode}" == "true" && "${hasExistingClients}" == "true" && -z "${lastInstallationConfig}" ]]; then
-        if [[ -n "${currentUUID}" ]]; then
-            autoRead core_history_user "读取到上次用户配置，UUID为 [${currentUUID}]，是否将其复用为 Hysteria2 密码？[y/n]:" historyUUIDStatus
-        else
-            autoRead core_history_user "读取到上次 Hysteria2 用户配置，是否复用现有密码？[y/n]:" historyUUIDStatus
-        fi
-        if [[ "${historyUUIDStatus}" == "y" ]]; then
-            addClientsStatus=true
-            successCard "复用成功"
-        fi
-    elif [[ "${hysteria2CredentialMode}" != "true" && -n "${currentUUID}" && -z "${lastInstallationConfig}" ]]; then
-        autoRead core_history_user "读取到上次用户配置，UUID为 [${currentUUID}]，是否复用上次安装的用户配置？[y/n]:" historyUUIDStatus
-        if [[ "${historyUUIDStatus}" == "y" ]]; then
-            addClientsStatus=true
-            successCard "使用成功"
-        fi
-    elif [[ "${hysteria2CredentialMode}" != "true" && -n "${currentUUID}" && -n "${lastInstallationConfig}" ]]; then
-        addClientsStatus=true
-    fi
-
-    if [[ -z "${addClientsStatus}" ]]; then
-        if [[ "${hysteria2CredentialMode}" == "true" ]]; then
-            echoContent yellow "请输入自定义 Hysteria2 密码[回车]随机生成"
-        else
-            echoContent yellow "请输入自定义UUID[需合法]，[回车]随机UUID"
-        fi
-        if [[ "${hysteria2CredentialMode}" == "true" ]]; then
-            autoRead core_init_uuid "Hysteria2密码:" customUUID
-        else
-            autoRead core_init_uuid "UUID:" customUUID
-        fi
-
-        if [[ -n ${customUUID} ]]; then
-            if [[ "${hysteria2CredentialMode}" != "true" ]]; then
-                validUuidValue "${customUUID}" || { errorCard "UUID 格式不合法"; return 1; }
-            fi
-            uuid=${customUUID}
-        else
-            uuid=$(generateRandomUuidValue) || {
-                if [[ "${hysteria2CredentialMode}" == "true" ]]; then
-                    errorCard "Hysteria2 密码生成失败"
-                else
-                    errorCard "UUID 生成失败"
-                fi
-                return 1
-            }
-        fi
-
-        if [[ "${hysteria2CredentialMode}" == "true" ]]; then
-            echoContent yellow "\n请输入 Hysteria2 用户名[需合法]，[回车]随机用户名"
-        else
-            echoContent yellow "\n请输入自定义用户名[需合法]，[回车]随机用户名"
-        fi
-        autoRead core_init_username "用户名:" customEmail
-        if [[ -z ${customEmail} ]]; then
-            if [[ "${hysteria2CredentialMode}" == "true" ]]; then
-                if validUuidValue "${uuid}"; then
-                    customEmail="$(defaultRandomUserNameFromUuid "${uuid}")-singbox_hysteria2"
-                else
-                    customEmail="padm-hysteria2-singbox_hysteria2"
-                fi
-            else
-                customEmail="$(defaultRandomUserNameFromUuid "${uuid}")-VLESS_TCP/TLS_Vision"
-            fi
-        fi
-        coreTemplateValidateManualAccountName "${customEmail}" || return 1
-    fi
-
-    if [[ -n "${uuid}" ]]; then
-        if [[ "${hysteria2CredentialMode}" == "true" ]]; then
-            currentClients=$(jq -nc --arg password "${uuid}" --arg name "${customEmail}" '[{password:$password,name:$name}]') || return 1
-        else
-            currentClients=$(jq -nc --arg uuid "${uuid}" --arg name "${customEmail}" '[{uuid:$uuid,flow:"xtls-rprx-vision",name:$name}]') || return 1
-        fi
-        echoContent yellow "\n ${customEmail}:${uuid}"
-    fi
+    coreTemplateCollectInitialClients sing-box "${hysteria2CredentialMode}" || return 1
 
     # VLESS Vision
     if protocolSelectionIncludes "${selectCustomInstallType}" 27 "$1"; then

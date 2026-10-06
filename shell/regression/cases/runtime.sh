@@ -559,6 +559,130 @@ runInstallWorkflowRegression() (
         readSingBoxConfig
         [[ -z "${tuicAlgorithm}${tuicAuthTimeout}${tuicHeartbeat}${tuicZeroRttHandshake}" ]]
     )
+
+    (
+        local core targetCore passwordMode nextInput inputFd result
+        local oldClients='[{"id":"11111111-1111-4111-8111-111111111111","email":"old-user"}]'
+        local testUuid=22222222-2222-4222-8222-222222222222
+        local generationLog="${TMP_DIR}/install-initial-client-generation.log"
+        generateRandomUuidValue() { printf 'generated\n' >>"${generationLog}"; printf '%s' "${testUuid}"; }
+        for core in xray sing-box password; do
+            targetCore=${core}
+            passwordMode=false
+            if [[ "${core}" == password ]]; then
+                targetCore=sing-box
+                passwordMode=true
+            fi
+            currentClients=${oldClients}
+            currentUUID=11111111-1111-4111-8111-111111111111
+            lastInstallationConfig=true
+            coreTemplateCollectInitialClients "${targetCore}" "${passwordMode}" </dev/null
+            [[ "${currentClients}" == "${oldClients}" ]]
+            lastInstallationConfig=
+            exec {inputFd}< <(printf 'maybe\n\nnext-parent-action\n')
+            coreTemplateCollectInitialClients "${targetCore}" "${passwordMode}" <&"${inputFd}"
+            read -r -u "${inputFd}" nextInput
+            [[ "${currentClients}" == "${oldClients}" && "${nextInput}" == next-parent-action ]]
+            exec {inputFd}<&-
+            regressionExpectStatus 1 coreTemplateCollectInitialClients "${targetCore}" "${passwordMode}" </dev/null
+            [[ "${currentClients}" == "${oldClients}" ]]
+
+            currentClients='[]'
+            currentUUID=
+            : >"${generationLog}"
+            regressionExpectStatus 1 coreTemplateCollectInitialClients "${targetCore}" "${passwordMode}" </dev/null
+            regressionExpectStatus 1 coreTemplateCollectInitialClients "${targetCore}" "${passwordMode}" < <(printf '%s' "${testUuid}")
+            regressionExpectStatus 1 coreTemplateCollectInitialClients "${targetCore}" "${passwordMode}" <<<"${testUuid}"
+            regressionExpectStatus 1 coreTemplateCollectInitialClients "${targetCore}" "${passwordMode}" < <(printf '%s\nalice' "${testUuid}")
+            [[ "${currentClients}" == '[]' && ! -s "${generationLog}" ]]
+
+            coreTemplateCollectInitialClients "${targetCore}" "${passwordMode}" < <(printf '\n\n')
+            [[ "$(grep -c '^generated$' "${generationLog}")" == 1 ]]
+            if [[ "${core}" == xray ]]; then
+                jq -e --arg uuid "${testUuid}" '.[0].id == $uuid and .[0].email == "padm-22222222-VLESS_TCP/TLS_Vision"' <<<"${currentClients}" >/dev/null
+            elif [[ "${passwordMode}" == true ]]; then
+                jq -e --arg uuid "${testUuid}" '.[0].password == $uuid and .[0].name == "padm-22222222-singbox_hysteria2"' <<<"${currentClients}" >/dev/null
+            else
+                jq -e --arg uuid "${testUuid}" '.[0].uuid == $uuid and .[0].name == "padm-22222222-VLESS_TCP/TLS_Vision"' <<<"${currentClients}" >/dev/null
+            fi
+            currentClients='[]'
+            AUTO_INSTALL=true
+            : >"${generationLog}"
+            coreTemplateCollectInitialClients "${targetCore}" "${passwordMode}" </dev/null
+            [[ "$(grep -c '^generated$' "${generationLog}")" == 1 ]]
+            result=${currentClients}
+            currentUUID=${testUuid}
+            : >"${generationLog}"
+            coreTemplateCollectInitialClients "${targetCore}" "${passwordMode}" </dev/null
+            [[ "${currentClients}" == "${result}" && ! -s "${generationLog}" ]]
+            unset AUTO_INSTALL
+        done
+
+        currentClients='[{"password":"stored-secret","name":"old-user"}]'
+        currentUUID=
+        lastInstallationConfig=true
+        : >"${generationLog}"
+        coreTemplateCollectInitialClients sing-box true </dev/null
+        jq -e '.[0].password == "stored-secret" and .[0].name == "old-user"' <<<"${currentClients}" >/dev/null
+        [[ ! -s "${generationLog}" ]]
+        lastInstallationConfig=
+        currentClients='[]'
+        coreTemplateCollectInitialClients sing-box true < <(printf 'arbitrary-secret\nalice\n')
+        jq -e '.[0].password == "arbitrary-secret" and .[0].name == "alice"' <<<"${currentClients}" >/dev/null
+        currentClients='[]'
+        AUTO_UUID=${testUuid}
+        AUTO_USER=alice
+        coreTemplateCollectInitialClients xray </dev/null
+        jq -e --arg uuid "${testUuid}" '.[0].id == $uuid and .[0].email == "alice"' <<<"${currentClients}" >/dev/null
+        result=${currentClients}
+        AUTO_USER=sub_reserved
+        regressionExpectStatus 1 coreTemplateCollectInitialClients xray </dev/null
+        [[ "${currentClients}" == "${result}" ]]
+        AUTO_USER=alice
+        (
+            jq() { return 1; }
+            regressionExpectStatus 1 coreTemplateCollectInitialClients xray </dev/null
+            [[ "${currentClients}" == "${result}" ]]
+        )
+        unset AUTO_UUID AUTO_USER
+    )
+
+    (
+        local apply writeCalls=0
+        currentUUID=
+        currentClients='[]'
+        lastInstallationConfig=
+        collectTLSProfile() { tlsCertDomain=tls.example.com; }
+        writeGeneratedJsonFile() { writeCalls=$((writeCalls + 1)); return 1; }
+        for apply in initXrayConfigApply initSingBoxConfigApply; do
+            regressionExpectStatus 1 "${apply}" custom 1 true </dev/null
+            regressionExpectStatus 1 "${apply}" custom 1 true <<<"11111111-1111-4111-8111-111111111111"
+        done
+        [[ "${writeCalls}" == 0 && "${currentClients}" == '[]' ]]
+    )
+
+    (
+        local route= value= nextInput inputFd invalid flag core coreInstallType=
+        customXrayInstall() { route=xray; }
+        customSingBoxInstall() { route=sing-box; }
+        for core in xray sing-box; do
+            parseInstallArgs --core "${core}" --protocols 1
+            autoInstallValidateRequiredInputs
+            autoRead install_type "请选择:" value </dev/null
+            [[ "${value}" == 5 ]]
+            exec {inputFd}< <(printf 'next-parent-action\n')
+            installMenu <&"${inputFd}"
+            read -r -u "${inputFd}" nextInput
+            [[ "${route}" == "${core}" && "${nextInput}" == next-parent-action ]]
+            exec {inputFd}<&-
+        done
+        for flag in --install-type --core; do
+            for invalid in typo 4 6; do
+                parseInstallArgs "${flag}" "${invalid}"
+                regressionExpectStatus 1 autoInstallValidateRequiredInputs
+            done
+        done
+    )
 )
 
 runRuntimeAndRealityRegression() {
