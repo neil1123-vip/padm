@@ -458,6 +458,10 @@ runCoreFirstInstallCommitFailureRollbackRegression() (
     root=$(cd -- "${rootRel}" && pwd -P)
     xrayDir="${root}/xray"
     singBoxDir="${root}/sing-box"
+    mkdir -p "${xrayDir}"
+    printf 'old-geoip\n' >"${xrayDir}/geoip.dat"
+    printf 'old-geosite\n' >"${xrayDir}/geosite.dat"
+    printf 'old-geo-version\n' >"${xrayDir}/geo.version"
     printf 'old-cronet\n' >"${singBoxDir}/libcronet.so"
     errorLog="${root}/error.log"
     copyLog="${root}/copy.log"
@@ -556,6 +560,9 @@ runCoreFirstInstallCommitFailureRollbackRegression() (
     [[ "${xrayRc}" == "1" ]]
     [[ "${singBoxRc}" == "1" ]]
     [[ ! -e "${xrayDir}/xray" ]]
+    [[ "$(<"${xrayDir}/geoip.dat")" == 'old-geoip' ]] || return 1
+    [[ "$(<"${xrayDir}/geosite.dat")" == 'old-geosite' ]] || return 1
+    [[ "$(<"${xrayDir}/geo.version")" == 'old-geo-version' ]] || return 1
     [[ ! -e "${singBoxDir}/sing-box" ]]
     [[ -e "${singBoxDir}/libcronet.so" ]] || return 1
     [[ "$(<"${singBoxDir}/libcronet.so")" == 'old-cronet' ]] || return 1

@@ -1,18 +1,5 @@
 #!/usr/bin/env bash
 
-# 清理 Xray geo 数据文件
-removeXrayGeoManagedFiles() {
-    local targetDir=$1
-    local geoipFile
-    local geositeFile
-    local geoVersionFile
-
-    geoipFile=$(padmManagedFilePath "${targetDir}" "geoip.dat") || return 1
-    geositeFile=$(padmManagedFilePath "${targetDir}" "geosite.dat") || return 1
-    geoVersionFile=$(padmManagedFilePath "${targetDir}" "geo.version") || return 1
-    removeManagedFilesIfPresent "${geositeFile}" "${geoipFile}" "${geoVersionFile}"
-}
-
 coreArchiveEntryIsSafe() {
     local entryPath=$1
     local normalizedPath segment
@@ -486,7 +473,6 @@ installXrayApply() {
         fi
         if ! ensureXrayGeoFiles "${targetDir}" force; then
             removeManagedFilesIfPresentIgnoreFailure "${targetBinary}"
-            removeXrayGeoManagedFiles "${targetDir}"
             padmRemoveCleanupPath "${tmpDir}"
             exit 1
         fi

@@ -159,9 +159,7 @@ coreTemplateConfigBackupCreate() {
     local core=$2
     local configDir fileName targetPath
     local -a fileNames=()
-    local -a existingTargets=()
     local -a targets=()
-    local -A seenTargets=()
 
     case "${core}" in
     xray)
@@ -197,29 +195,19 @@ coreTemplateConfigBackupCreate() {
 
     configDir=$(padmRequireSafeAbsolutePath "${configDir%/}") || return 1
     if [[ -d "${configDir}" ]]; then
-        existingTargets=("${configDir}"/*.json)
-        for targetPath in "${existingTargets[@]}"; do
+        for targetPath in "${configDir}"/*.json; do
             [[ -f "${targetPath}" || -L "${targetPath}" ]] || continue
-            if [[ -z "${seenTargets[${targetPath}]+x}" ]]; then
-                targets+=("${targetPath}")
-                seenTargets["${targetPath}"]=1
-            fi
+            targets+=("${targetPath}")
         done
     fi
     for fileName in "${fileNames[@]}"; do
         targetPath=$(padmManagedFilePath "${configDir}" "${fileName}") || return 1
-        if [[ -z "${seenTargets[${targetPath}]+x}" ]]; then
-            targets+=("${targetPath}")
-            seenTargets["${targetPath}"]=1
-        fi
+        targets+=("${targetPath}")
     done
 
     if [[ "${core}" == "sing-box" ]] && declare -F realityKeyFile >/dev/null 2>&1; then
         targetPath=$(realityKeyFile) || return 1
-        if [[ -z "${seenTargets[${targetPath}]+x}" ]]; then
-            targets+=("${targetPath}")
-            seenTargets["${targetPath}"]=1
-        fi
+        targets+=("${targetPath}")
     fi
 
     local -a nginxFiles=()
@@ -237,10 +225,7 @@ coreTemplateConfigBackupCreate() {
     if [[ -n "${nginxConfigPath:-}" ]]; then
         for fileName in "${nginxFiles[@]}"; do
             targetPath=$(nginxConfigFilePath "${fileName}") || return 1
-            if [[ -z "${seenTargets[${targetPath}]+x}" ]]; then
-                targets+=("${targetPath}")
-                seenTargets["${targetPath}"]=1
-            fi
+            targets+=("${targetPath}")
         done
     fi
 
@@ -249,9 +234,7 @@ coreTemplateConfigBackupCreate() {
     else
         targetPath=${PADM_REALITY_ENTRY_HOST_FILE:-/etc/padm/reality_entry_host}
     fi
-    if [[ -z "${seenTargets[${targetPath}]+x}" ]]; then
-        targets+=("${targetPath}")
-    fi
+    targets+=("${targetPath}")
 
     checkLogBackupCreate "${resultVar}" "${targets[@]}"
 }

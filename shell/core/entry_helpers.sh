@@ -1038,6 +1038,7 @@ checkLogBackupCreate() {
     local targetPath
     local backupIndex=0
     local -a backupArgs=()
+    local -A seenTargets=()
 
     padmCreateTmpRootPath backupPathRoot padm-check-log-backup.XXXXXX -d || return 1
     for targetPath in "$@"; do
@@ -1046,6 +1047,8 @@ checkLogBackupCreate() {
             padmRemoveCleanupPath "${backupPathRoot}"
             return 1
         }
+        [[ -z "${seenTargets[${targetPath}]+x}" ]] || continue
+        seenTargets["${targetPath}"]=1
         backupArgs+=("$(printf '%06d.json' "${backupIndex}")" "${targetPath}")
         backupIndex=$((backupIndex + 1))
     done

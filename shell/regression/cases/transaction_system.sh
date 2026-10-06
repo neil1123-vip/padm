@@ -212,6 +212,50 @@ SH
         [[ "$(<"${stopLog}")" == $'openrc:xray status\nopenrc:sing-box status' ]]
     )
 
+    (
+        # 缺少 OpenRC 服务或命令时使用原生 Nginx，启动和停止必须选择同一管理方式。
+        source "${PROJECT_ROOT}/shell/core/services.sh"
+        local scenario nginxState=stopped actions= rcServiceAvailable=true
+        local PADM_NGINX_OPENRC_SERVICE_FILE="${serviceTmp}/raw-nginx.init"
+        release=alpine
+        nginxRunning() { [[ "${nginxState}" == running ]]; }
+        nginxRuntimeRequired() { return 0; }
+        padmCommandExists() { [[ "$1" != rc-service || "${rcServiceAvailable}" == true ]]; }
+        sleep() { return 0; }
+        nginx() {
+            actions+="nginx:$*"$'\n'
+            case "$*" in
+            "") nginxState=running ;;
+            "-s stop") nginxState=stopped ;;
+            esac
+        }
+        rc-service() {
+            actions+="openrc:$*"$'\n'
+            case "${2:-}" in
+            start) nginxState=running ;;
+            stop) nginxState=stopped ;;
+            esac
+        }
+        systemctl() { actions+="systemd:$*"$'\n'; return 1; }
+        for scenario in missing-service missing-command installed; do
+            actions=
+            rcServiceAvailable=true
+            if [[ "${scenario}" != missing-service ]]; then
+                : >"${PADM_NGINX_OPENRC_SERVICE_FILE}"
+            fi
+            [[ "${scenario}" != missing-command ]] || rcServiceAvailable=false
+            runServiceAction nginx start >/dev/null 2>&1
+            [[ "${nginxState}" == running ]]
+            runServiceAction nginx stop >/dev/null 2>&1
+            [[ "${nginxState}" == stopped ]]
+            if [[ "${scenario}" == installed ]]; then
+                [[ "${actions}" == $'openrc:nginx start\nopenrc:nginx stop\n' ]]
+            else
+                [[ "${actions}" == $'nginx:\nnginx:-s stop\n' ]]
+            fi
+        done
+    )
+
     mkdir -p "${serviceTmp}/nginx"
     nginxConfigPath="${serviceTmp}/nginx/"
     selectCustomInstallType=",1,"
@@ -1720,6 +1764,7 @@ runCleanLastInstallationConfigFailureRegression() (
     customPortFunction() { return 0; }
     readInstallTLSPort() { port=443; }
     coreTemplateCollectInitialClients() { return 0; }
+    prepareXrayInstallInputs() { return 0; }
     SERVICE_QUEUE_ALLOW_FAILURE=previous
     regressionExpectStatus 1 xrayCoreInstall >/dev/null 2>&1
     grep -qx 'xray:stop:true' "${serviceLog}"

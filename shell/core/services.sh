@@ -301,9 +301,9 @@ handleNginx() {
 
     if [[ "$1" == "start" ]] && { [[ "${2:-}" == "restore" ]] || nginxRuntimeRequired; } && ! nginxRunning; then
         while true; do
-            if [[ "${release}" == "alpine" ]]; then
+            if [[ "${release}" == "alpine" ]] && nginxServiceInstalled && padmCommandExists rc-service; then
                 rc-service nginx start 2>"${nginxErrorLog}"
-            elif nginxServiceInstalled && padmCommandExists systemctl; then
+            elif [[ "${release}" != "alpine" ]] && nginxServiceInstalled && padmCommandExists systemctl; then
                 systemctl start nginx 2>"${nginxErrorLog}"
             else
                 nginx 2>"${nginxErrorLog}"

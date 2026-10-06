@@ -2339,7 +2339,9 @@ runCheckLogBackupMissingRestoreRegression() (
     [[ -n "${backupDir}" && -d "${backupDir}" ]]
     padmRemoveCleanupPath "${backupDir}"
 
-    checkLogBackupCreate restoreBackupDir "${root}/stats.json" "${root}/policy.json"
+    checkLogBackupCreate restoreBackupDir "${root}/stats.json" "${root}/policy.json" \
+        "${root}/policy.json" "${root}/stats.json"
+    [[ "$(cut -f 2 "${restoreBackupDir}/manifest")" == "${root}/stats.json"$'\n'"${root}/policy.json" ]]
     printf 'new-stats\n' >"${root}/stats.json"
     printf 'new-policy\n' >"${root}/policy.json"
 
