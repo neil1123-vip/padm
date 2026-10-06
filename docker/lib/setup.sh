@@ -89,7 +89,7 @@ dockerSetupGenerateSpec() {
     uuid=$(dockerSetupTool "${xrayImage}" uuid 2>/dev/null) || return 1
     [[ "${uuid}" =~ ^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$ ]] || return 1
     token=$(dockerSetupRandomHex "${opsImage}" 32) || return 1
-    if [[ ( "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 && "${protocols}" != 9 && "${protocols}" != 10 && "${protocols}" != 11 ) || -n "${secondaryCore}" ]]; then
+    if [[ ( "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 && "${protocols}" != 9 && "${protocols}" != 10 && "${protocols}" != 11 && "${protocols}" != 12 ) || -n "${secondaryCore}" ]]; then
         keyPair=$(dockerSetupTool "${xrayImage}" x25519 2>/dev/null) || return 1
         privateKey=$(awk '/^PrivateKey:/ { print $2; exit }' <<<"${keyPair}")
         publicKey=$(awk '/^Password \(PublicKey\):/ { print $3; exit } /^PublicKey:/ { print $2; exit }' <<<"${keyPair}")
@@ -100,7 +100,7 @@ dockerSetupGenerateSpec() {
         [[ "${derivedPublic}" == "${publicKey}" ]] || return 1
         shortId=$(dockerSetupRandomHex "${opsImage}" 8) || return 1
     fi
-    if [[ "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 4 ]]; then
+    if [[ "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 4 || "${protocols}" == 12 ]]; then
         wsPath=$(dockerSetupRandomHex "${opsImage}" 16) || return 1
     fi
     if [[ "${protocols}" == 6 && "${hy2Obfs}" == true ]]; then
@@ -137,7 +137,7 @@ dockerSetupGenerateSpec() {
       $secrets[6] as $obfsPassword | $secrets[7] as $serverPassword | $secrets[8] as $userPassword |
       . + {schema_version: 3, core: {type: $core,
         secondary_type: (if $secondaryCore == "" then null else $secondaryCore end), protocols: [
-        (if $protocols != 2 and $protocols != 6 and $protocols != 7 and $protocols != 8 and $protocols != 9 and $protocols != 10 and $protocols != 11 then {
+        (if $protocols != 2 and $protocols != 6 and $protocols != 7 and $protocols != 8 and $protocols != 9 and $protocols != 10 and $protocols != 11 and $protocols != 12 then {
           id: (if $protocols == 4 then 2 elif $protocols == 5 then 26 else 1 end),
           core: $core, server: $server, public_port: $realityPort, address_families: $families,
           listener_id: (if $protocols == 4 then "entry-reality-xhttp"
@@ -148,9 +148,11 @@ dockerSetupGenerateSpec() {
             private_key: $privateKey, public_key: $publicKey, short_id: $shortId}
         } + (if $protocols == 4 then {xhttp: {path: ("/" + $wsPath), host: $sni, mode: "auto"}}
           elif $protocols == 5 then {grpc: {service_name: "grpc"}} else {} end) else empty end),
-        (if $protocols == 2 or $protocols == 3 then {
-          id: 21, core: $core, server: $server, public_port: $wsPort, address_families: $families,
-          listener_id: "vless-ws", name: "main-ws", uuid: $uuid,
+        (if $protocols == 2 or $protocols == 3 or $protocols == 12 then {
+          id: (if $protocols == 12 then 22 else 21 end),
+          core: $core, server: $server, public_port: $wsPort, address_families: $families,
+          listener_id: (if $protocols == 12 then "entry-vmess-ws" else "vless-ws" end),
+          name: (if $protocols == 12 then "main-vmess-ws" else "main-ws" end), uuid: $uuid,
           websocket: {domain: $domain, path: $wsPath, backend_port: 31297, tls_port: 8443}
         } else empty end),
         (if $protocols == 6 then {
@@ -190,7 +192,7 @@ dockerSetupGenerateSpec() {
           reality: {server_name: $sni, target_host: $target, target_port: $targetPort,
             private_key: $privateKey, public_key: $publicKey, short_id: $shortId}
         } else empty end)]},
-        tls: (if $protocols == 2 or $protocols == 3 or $protocols == 6 or $protocols == 7 or $protocols == 8 or $protocols == 10 or $protocols == 11 then {domain: $domain} else null end),
+        tls: (if $protocols == 2 or $protocols == 3 or $protocols == 6 or $protocols == 7 or $protocols == 8 or $protocols == 10 or $protocols == 11 or $protocols == 12 then {domain: $domain} else null end),
         subscription: {enabled: $subscription, token: $token}, host_integrations: []}
     ' >"${output}" || return 1
     rm -f -- "${inputsFile}" || return 1
@@ -379,8 +381,8 @@ dockerSetupCommand() {
     1|3)
         core=xray
         [[ "${coreChoice}" != 3 ]] || secondaryCore=sing-box
-        dockerSetupRead protocols '协议 [1=Reality Vision, 2=WS TLS, 3=两者, 4=Reality XHTTP, 5=Reality gRPC, 11=Trojan direct, 0=取消]: ' 1 || return 0
-        [[ "${protocols}" =~ ^[1-5]$ || "${protocols}" == 11 ]] || return "${PADM_DOCKER_RC_USAGE}"
+        dockerSetupRead protocols '协议 [1=Reality Vision, 2=WS TLS, 3=两者, 4=Reality XHTTP, 5=Reality gRPC, 11=Trojan direct, 12=VMess WS TLS, 0=取消]: ' 1 || return 0
+        [[ "${protocols}" =~ ^[1-5]$ || "${protocols}" == 11 || "${protocols}" == 12 ]] || return "${PADM_DOCKER_RC_USAGE}"
         ;;
     2|4)
         core=sing-box
@@ -401,8 +403,8 @@ dockerSetupCommand() {
     3) families='["ipv4","ipv6"]' ;;
     *) return "${PADM_DOCKER_RC_USAGE}" ;;
     esac
-    if [[ ( "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 && "${protocols}" != 9 && "${protocols}" != 10 && "${protocols}" != 11 ) || -n "${secondaryCore}" ]]; then
-        if [[ "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 && "${protocols}" != 9 && "${protocols}" != 10 && "${protocols}" != 11 ]]; then
+    if [[ ( "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 && "${protocols}" != 9 && "${protocols}" != 10 && "${protocols}" != 11 && "${protocols}" != 12 ) || -n "${secondaryCore}" ]]; then
+        if [[ "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 && "${protocols}" != 9 && "${protocols}" != 10 && "${protocols}" != 11 && "${protocols}" != 12 ]]; then
             dockerSetupRead realityPort '主核心 Reality 入口端口 [443]: ' 443 || return 0
         fi
         dockerSetupRead target 'Reality 目标域名（0 取消）: ' || return 0
@@ -417,7 +419,7 @@ dockerSetupCommand() {
     if [[ "${protocols}" == 9 ]]; then
         dockerSetupRead wsPort "Shadowsocks TCP/UDP 入口端口 [${wsPort}]: " "${wsPort}" || return 0
     fi
-    if [[ "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 || "${protocols}" == 10 || "${protocols}" == 11 ]]; then
+    if [[ "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 || "${protocols}" == 10 || "${protocols}" == 11 || "${protocols}" == 12 ]]; then
         [[ "${protocols}" != 3 ]] || wsPort=8443
         if [[ "${protocols}" == 6 ]]; then
             dockerSetupRead domain 'Hysteria2 TLS 域名（0 取消）: ' || return 0
@@ -511,16 +513,18 @@ dockerSetupCommand() {
     [[ "${protocols}" != 3 || "${realityPort}" != "${wsPort}" ]] ||
         { dockerError 'Reality 和 WS TLS 不能使用同一入口端口'; return "${PADM_DOCKER_RC_CONFLICT}"; }
     if [[ -n "${secondaryCore}" ]] &&
-        { [[ "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 && "${protocols}" != 9 && "${protocols}" != 10 && "${protocols}" != 11 && "${secondaryPort}" == "${realityPort}" ]] ||
-          [[ ( "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 || "${protocols}" == 9 || "${protocols}" == 10 || "${protocols}" == 11 ) && "${secondaryPort}" == "${wsPort}" ]]; }; then
+        { [[ "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 && "${protocols}" != 9 && "${protocols}" != 10 && "${protocols}" != 11 && "${protocols}" != 12 && "${secondaryPort}" == "${realityPort}" ]] ||
+          [[ ( "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 || "${protocols}" == 9 || "${protocols}" == 10 || "${protocols}" == 11 || "${protocols}" == 12 ) && "${secondaryPort}" == "${wsPort}" ]]; }; then
         dockerError '主副核心不能使用同一入口端口'
         return "${PADM_DOCKER_RC_CONFLICT}"
     fi
     printf '\n核心: %s\n协议组合: %s\n服务器: %s\n地址族: %s\n' "${core}" "${protocols}" "${server}" "${families}"
-    [[ "${protocols}" == 2 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 || "${protocols}" == 9 || "${protocols}" == 10 || "${protocols}" == 11 ]] ||
+    [[ "${protocols}" == 2 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 || "${protocols}" == 9 || "${protocols}" == 10 || "${protocols}" == 11 || "${protocols}" == 12 ]] ||
         printf 'Reality: %s -> %s:%s，SNI %s\n' "${realityPort}" "${target}" "${targetPort}" "${sni}"
     if [[ "${protocols}" == 2 || "${protocols}" == 3 ]]; then
         printf 'WS TLS: %s:%s，证书方式 %s，订阅 %s\n' "${domain}" "${wsPort}" "${tlsMode}" "${subscription}"
+    elif [[ "${protocols}" == 12 ]]; then
+        printf 'VMess WS TLS: %s:%s，TLS 域名 %s，证书方式 %s\n' "${server}" "${wsPort}" "${domain}" "${tlsMode}"
     elif [[ "${protocols}" == 6 ]]; then
         printf 'Hysteria2: %s:%s/udp，证书方式 %s，拥塞 %s，服务端上行/下行 %s/%s Mbps，混淆 %s\n' \
             "${domain}" "${wsPort}" "${tlsMode}" "${hy2Mode}" "${hy2Up}" "${hy2Down}" "${hy2Obfs}"
@@ -556,7 +560,7 @@ dockerSetupCommand() {
         return "${PADM_DOCKER_RC_STATE}"
     }
     dockerConfigureReleaseValidate "${candidate}/spec.json" || return "${PADM_DOCKER_RC_MANIFEST}"
-    if [[ "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 || "${protocols}" == 10 || "${protocols}" == 11 ]]; then
+    if [[ "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 || "${protocols}" == 10 || "${protocols}" == 11 || "${protocols}" == 12 ]]; then
         dockerSetupStageCertificate "${candidate}" "${tlsMode}" "${domain}" "${cert}" "${key}" \
             "${email}" "${provider}" "${credentials}" || return "${PADM_DOCKER_RC_STATE}"
         dockerConfigureApply "${candidate}/spec.json" "${candidate}/tls" "${candidate}/acme" || status=$?
@@ -629,6 +633,7 @@ dockerProtocolCommand() (
             elif .id == 3 then "Hysteria2" elif .id == 4 then "AnyTLS"
             elif .id == 5 then "NaiveProxy" elif .id == 30 then "Shadowsocks"
             elif .id == 31 then "TUIC" elif .id == 28 then "Trojan direct"
+            elif .id == 22 then "VMess WS TLS"
             else "WS TLS" end)  \(.server | authority):\(.public_port)  [\(.address_families | join(","))]  \(.name)"' \
             "${normalized}"
         return $?
@@ -667,7 +672,7 @@ dockerEditFields() {
               if length == 1 then .[0].listener_id else error("入口选择不唯一") end
             ' "${draft}" 2>/dev/null) || return 1
             protocol=$(jq -r --arg key "${listener}" '.core.protocols[] | select(.listener_id == $key) | .id' "${draft}") || return 1
-            if [[ "${protocol}" == 21 && ( "${choice}" == 1 || "${choice}" == 9 || "${choice}" == 10 ) ]] &&
+            if [[ ( "${protocol}" == 21 || "${protocol}" == 22 ) && ( "${choice}" == 1 || "${choice}" == 9 || "${choice}" == 10 ) ]] &&
                 jq -e 'any(.host_integrations[]; .type == "fail2ban")' "${draft}" >/dev/null; then
                 dockerError '带 Fail2ban 的 WS 入口需联动封禁规则，本阶段未开放端口或入口数量修改'
                 return 1
@@ -678,7 +683,7 @@ dockerEditFields() {
                   .core.protocols |= map(select(.listener_id != $key)) |
                   if all(.core.protocols[]; .core != $primary) then error("主核心至少保留一个入口")
                   elif any(.core.protocols[]; .id == 21) then .
-                  elif any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 28 or .id == 31) then .subscription.enabled = false
+                  elif any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 22 or .id == 28 or .id == 31) then .subscription.enabled = false
                   else .tls = null | .subscription.enabled = false end |
                   .core.secondary_type = ([.core.protocols[] | select(.core != $primary) | .core] | first // null)
                 ' "${draft}" >"${temporary}" 2>/dev/null || {
@@ -697,7 +702,7 @@ dockerEditFields() {
                 if [[ "${sourceCore}" == xray ]]; then defaultValue=1; else defaultValue=2; fi
                 dockerSetupRead coreChoice "目标核心 [1=Xray, 2=sing-box，空输入保留 ${sourceCore}，0=取消]: " "${defaultValue}" || return 3
                 case "${coreChoice}" in 1) targetCore=xray ;; 2) targetCore=sing-box ;; *) return 1 ;; esac
-                if [[ ( "${targetProtocol}" == 21 || "${targetProtocol}" == 2 ) && "${targetCore}" != xray ]]; then
+                if [[ ( "${targetProtocol}" == 21 || "${targetProtocol}" == 22 || "${targetProtocol}" == 2 ) && "${targetCore}" != xray ]]; then
                     dockerError 'WS TLS 和 Reality XHTTP 入口仅支持 Xray，不能复制到 sing-box'
                     return 1
                 fi
@@ -742,11 +747,11 @@ dockerEditFields() {
                         .xhttp = {path: ("/" + $newId + "xhttp"), host: .reality.server_name, mode: "auto"}
                       elif .id == 26 then .grpc = {service_name: "grpc"} else . end
                     else . end |
-                    if .id == 21 then
-                      ([$r.core.protocols[] | if .id == 21 then .websocket.backend_port else .public_port end] +
+                    if .id == 21 or .id == 22 then
+                      ([$r.core.protocols[] | if .id == 21 or .id == 22 then .websocket.backend_port else .public_port end] +
                        [$r.host_integrations[] | select(.type == "tproxy") | .settings.port] + [10085]) as $used |
                       .websocket.backend_port = first(range(31297; 65536) | . as $p | select(($used | index($p)) == null)) |
-                      [$r.core.protocols[] | select(.id == 21) | .websocket.tls_port] as $tls |
+                      [$r.core.protocols[] | select(.id == 21 or .id == 22) | .websocket.tls_port] as $tls |
                       .websocket.tls_port = first(range(8443; 65536) | . as $p | select(($tls | index($p)) == null))
                     else . end) as $new |
                   .core.protocols += [$new] |
@@ -756,7 +761,7 @@ dockerEditFields() {
             else
             case "${choice}" in
             1)
-                if [[ "${protocol}" == 21 ]] &&
+                if [[ "${protocol}" == 21 || "${protocol}" == 22 ]] &&
                     jq -e 'any(.host_integrations[]; .type == "fail2ban")' "${draft}" >/dev/null; then
                     dockerError '带 Fail2ban 的 WS 入口端口需联动封禁规则，本阶段未开放端口修改'
                     return 1
@@ -776,7 +781,7 @@ dockerEditFields() {
                 *) return 1 ;;
                 esac
                 ;;
-            6) [[ "${protocol}" == 21 ]] || return 1; field=websocket.path ;;
+            6) [[ "${protocol}" == 21 || "${protocol}" == 22 ]] || return 1; field=websocket.path ;;
             12)
                 if [[ "${protocol}" == 2 ]]; then
                     dockerSetupRead value 'XHTTP 参数 [1=路径, 2=Host, 3=模式]: ' || return 3
@@ -976,8 +981,8 @@ dockerEditCommand() {
         return "${PADM_DOCKER_RC_STATE}"
     if jq -en --slurpfile before "${original}" --slurpfile after "${draft}" '
       any($before[0].host_integrations[]; .type == "fail2ban") and
-      (([$before[0].core.protocols[] | select(.id == 21) | .public_port] | sort) !=
-       ([$after[0].core.protocols[] | select(.id == 21) | .public_port] | sort))
+      (([$before[0].core.protocols[] | select(.id == 21 or .id == 22) | .public_port] | sort) !=
+       ([$after[0].core.protocols[] | select(.id == 21 or .id == 22) | .public_port] | sort))
     ' >/dev/null 2>&1; then
         dockerError '带 Fail2ban 的 WS 入口端口需联动封禁规则，本阶段未开放端口或入口数量修改'
         return "${PADM_DOCKER_RC_STATE}"
@@ -1023,7 +1028,7 @@ dockerEditCommand() {
       # 分次提交新增与删除，防止借同凭据入口绕过已有身份和内部端口冻结。
       ((($oldIds - $newIds) | length) == 0 or (($newIds - $oldIds) | length) == 0) and
       ($old | root) == ($new | root) and
-      $new.tls == (if any($new.core.protocols[]; .id == 21 or .id == 3 or .id == 4 or .id == 5 or .id == 28 or .id == 31) then $old.tls else null end) and
+      $new.tls == (if any($new.core.protocols[]; .id == 21 or .id == 22 or .id == 3 or .id == 4 or .id == 5 or .id == 28 or .id == 31) then $old.tls else null end) and
       all($new.core.protocols[];
         . as $entry | [$old.core.protocols[] | select(.listener_id == $entry.listener_id)] as $existing |
         if ($existing | length) == 1 then ($existing[0] | fixed) == ($entry | fixed)
@@ -1036,7 +1041,7 @@ dockerEditCommand() {
            ($entry.id == 28 and ($entry.core == "xray" or $entry.core == "sing-box")) or
            ($entry.id == 30 and $entry.core == "sing-box") or
            ($entry.id == 31 and $entry.core == "sing-box") or
-           ($entry.id == 21 and $entry.core == "xray")) and
+           (($entry.id == 21 or $entry.id == 22) and $entry.core == "xray")) and
           any($old.core.protocols[];
             .listener_id as $sourceId | any($new.core.protocols[]; .listener_id == $sourceId) and
             (if reality and ($entry | reality) then shared == ($entry | shared)

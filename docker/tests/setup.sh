@@ -1525,4 +1525,106 @@ for trojanFailure in tls-fail health-fail; do
     assertUnconfigured
 done
 export FAKE_SETUP_MODE=ok
+
+# VMess WS TLS 复用现有 WS 事务，aid 固定为零，单入口不开放 HTTPS 发布。
+printf -v VMESS_INPUT '1\n12\nproxy.example.com\n3\nvmess.example.com\n24481\n2\n%s\n%s\ny\n' \
+    "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
+printf -v DUAL_VMESS_INPUT '3\n12\nproxy.example.com\n3\ntarget.example.com\n443\ntarget.example.com\n24445\nvmess.example.com\n24481\n2\n%s\n%s\ny\n' \
+    "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
+for vmessCase in vmess-single vmess-dual; do
+    newState "${vmessCase}"
+    input=${VMESS_INPUT}; single=true
+    if [[ "${vmessCase}" == vmess-dual ]]; then input=${DUAL_VMESS_INPUT}; single=false; fi
+    before=$(snapshot)
+    runPty 0 "${vmessCase}-cancel" "${input%$'y\n'}"$'n\n' setup "${ASSET_ARGS[@]}"
+    [[ "$(snapshot)" == "${before}" && ! -s "${EVENTS}" && ! -s "${VERIFY_LOG}" ]] ||
+        fail "${vmessCase}: 取消首配提前生成凭据或写入部署"
+    runPty 0 "${vmessCase}" "${input}" setup "${ASSET_ARGS[@]}"
+    SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+    jq -e --argjson single "${single}" '
+      .schema_version == 3 and .core.type == "xray" and .tls.domain == "vmess.example.com" and
+      .subscription.enabled == false and
+      (.core.protocols[0] | .id == 22 and .core == "xray" and .public_port == 24481 and
+        .address_families == ["ipv4","ipv6"] and .server == "proxy.example.com" and
+        .uuid == "11111111-1111-4111-8111-111111111111" and
+        (.websocket | .domain == "vmess.example.com" and .backend_port == 31297 and .tls_port == 8443)) and
+      if $single then .core.secondary_type == null and (.core.protocols | length) == 1
+      else .core.secondary_type == "sing-box" and (.core.protocols | length) == 2 and
+        .core.protocols[1].id == 1 and .core.protocols[1].public_port == 24445 end
+    ' "${SPEC}" >/dev/null || fail "${vmessCase}: VMess 首配规格错误"
+    jq -e --slurpfile spec "${SPEC}" '$spec[0].core.protocols[0] as $p |
+      any(.inbounds[]; .protocol == "vmess" and .tag == $p.listener_id and
+        .settings.clients == [{id:$p.uuid,email:$p.uuid,alterId:0}] and
+        .port == $p.websocket.backend_port and .streamSettings == {
+          network:"ws",security:"none",wsSettings:{path:("/"+$p.websocket.path+"ws")}})' \
+        "${PADM_DOCKER_INSTALL_DIR}/config/xray/config.json" >/dev/null ||
+        fail "${vmessCase}: VMess 认证、aid 或 WS 配置错误"
+    jq -e '.services.xray.ports == [] and .services.nginx.ports ==
+      ["0.0.0.0:24481:8443/tcp","[::]:24481:8443/tcp"] and
+      (.services | has("subscription") | not)' "${PADM_DOCKER_INSTALL_DIR}/compose.json" >/dev/null ||
+        fail "${vmessCase}: VMess Nginx 双栈或发布拓扑错误"
+    if [[ "${single}" == true ]]; then
+        ! grep -Eq ' x25519( |$)|derived-stdin' "${EVENTS}" || fail 'VMess 单核生成无用 Reality 密钥'
+    fi
+done
+export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-vmess-single"
+export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-vmess-single"
+CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
+SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+VMESS_LISTENER=$(jq -r '.core.protocols[0].listener_id' "${SPEC}")
+cp -- "${SPEC}" "${TEST_ROOT}/vmess-original.json"
+before=$(snapshot)
+runPty 0 vmess-edit-cancel $'1\n22\n0\n' edit "${ASSET_ARGS[@]}"
+[[ "$(snapshot)" == "${before}" ]] || fail 'VMess 取消编辑改变部署'
+runPty 0 vmess-edit $'1\n22\n24482\n2\n22\nnext.example.com\n3\n22\n2\n4\n22\nnext-vmess\n6\n22\nnewvmesspath\n8\ny\n' \
+    edit "${ASSET_ARGS[@]}"
+jq -e --slurpfile before "${TEST_ROOT}/vmess-original.json" '
+  .tls == $before[0].tls and .subscription == $before[0].subscription and
+  (.core.protocols[0] | .uuid == $before[0].core.protocols[0].uuid and
+    .listener_id == $before[0].core.protocols[0].listener_id and
+    .public_port == 24482 and .server == "next.example.com" and
+    .address_families == ["ipv6"] and .name == "next-vmess" and
+    .websocket == {domain:"vmess.example.com",path:"newvmesspath",backend_port:31297,tls_port:8443})' \
+    "${SPEC}" >/dev/null || fail 'VMess 编辑改写 TLS 或账号/内部端口身份'
+runPty 0 vmess-copy-xray $'9\n22\n1\n24483\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.core.protocols[0] as $source | (.core.protocols | length) == 2 and
+  (.core.protocols[1] | .id == 22 and .core == "xray" and .listener_id == "entry-1" and
+    .public_port == 24483 and .uuid == $source.uuid and .name == $source.name and
+    .websocket == {domain:"vmess.example.com",path:"newvmesspath",backend_port:31298,tls_port:8444})' \
+    "${SPEC}" >/dev/null || fail 'VMess 复制丢失身份或内部端口隔离'
+before=$(snapshot)
+printf -v input '9\n%s\n2\n24484\n' "${VMESS_LISTENER}"
+runPty 15 vmess-copy-sing "${input}" edit "${ASSET_ARGS[@]}"
+[[ "$(snapshot)" == "${before}" ]] || fail 'VMess 错误复制到 sing-box'
+for rejectedEdit in uuid domain backend tls-port core aid; do
+    case "${rejectedEdit}" in
+    uuid) filter='.core.protocols[0].uuid = "22222222-2222-4222-8222-222222222222"' ;;
+    domain) filter='.tls.domain = "next.example.com" | .core.protocols |= map(.websocket.domain = "next.example.com")' ;;
+    backend) filter='.core.protocols[0].websocket.backend_port = 31300' ;;
+    tls-port) filter='.core.protocols[0].websocket.tls_port = 8445' ;;
+    core) filter='.core.protocols[0].core = "sing-box" | .core.secondary_type = "sing-box"' ;;
+    aid) filter='.core.protocols[0].alterId = 1' ;;
+    esac
+    jq "${filter}" "${SPEC}" >"${TEST_ROOT}/vmess-rejected.json"
+    chmod 0600 "${TEST_ROOT}/vmess-rejected.json"
+    CONTROL_LOG="${TEST_ROOT}/vmess-rejected-${rejectedEdit}.log"
+    actual=0
+    bash -u "${CLI}" edit --spec "${TEST_ROOT}/vmess-rejected.json" --preview "${ASSET_ARGS[@]}" \
+        >"${CONTROL_LOG}" 2>&1 || actual=$?
+    [[ "${actual}" == 15 && "$(snapshot)" == "${before}" ]] ||
+        fail "${rejectedEdit}: VMess 编辑绕过身份冻结"
+    assertClean
+done
+runPty 0 vmess-delete-copy $'10\nentry-1\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.tls.domain == "vmess.example.com" and (.core.protocols | length) == 1' \
+    "${SPEC}" >/dev/null || fail 'VMess 删除副本撤销 TLS'
+runPty 15 vmess-enable-publish $'7\ny\n8\n' edit "${ASSET_ARGS[@]}"
+for vmessFailure in tls-fail health-fail; do
+    newState "vmess-${vmessFailure}"
+    export FAKE_SETUP_MODE="${vmessFailure}"
+    if [[ "${vmessFailure}" == tls-fail ]]; then expected=15; else expected=14; fi
+    runPty "${expected}" "vmess-${vmessFailure}" "${VMESS_INPUT}" setup "${ASSET_ARGS[@]}"
+    assertUnconfigured
+done
+export FAKE_SETUP_MODE=ok
 printf 'docker-setup-regression-ok\n'

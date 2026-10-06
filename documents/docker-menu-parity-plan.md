@@ -16,7 +16,7 @@
 | --- | --- | --- |
 | 1. 功能矩阵 | 已完成，提交 `7fe6a9e` | 协议与功能边界、管理状态、合同回归 |
 | 2. 菜单与可信首次配置 | 2A–2C 已实现；本地 PTY、事务和 Linux 权限通过，真实发布/连通待验 | 安装后进入菜单、独立命令生命周期、无需手填镜像的首次配置 |
-| 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2–3C.8 Reality/Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC/direct Trojan 基础入口已通过本地与 amd64 传输验收 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
+| 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2–3C.9 Reality/Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC/direct Trojan/VMess WS 基础入口已通过本地与 amd64 传输验收 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
 | 4. 用户、订阅与服务维护 | 未开始 | 本机用户业务、多服务器后端、分范围备份恢复、核心运维 |
 | 5. 站点、路由与宿主集成 | 未开始 | 站点管理、内部能力、规则所有权及可撤销宿主操作 |
 | 6. 发布与完整验收 | 未开始 | 迁移文档、真实 Linux 与双架构证据、受门禁保护的 Release |
@@ -758,7 +758,48 @@ bash docker/tests/trojan-real.sh \
 
 独立服务器/SNI 仅通过合同与输出检查，真实测试入口与 TLS 同域。
 未验公网宿主入口、第三方导入 UI、既有长会话、原生 arm64、真实 DNS/整机重启或可信发布；
-3B.4、3D、4A、5C 仍待完成，下一协议为 `22` VMess WS TLS。
+3B.4、3D、4A、5C 仍待完成。
+
+#### 3C.9 VMess WS TLS 基础入口
+
+协议 `22` 仅接受 v3 和 Xray，沿用 `websocket` 字段、Nginx 反代、受管 TLS、
+UUID 流量账号和每入口内部 `backend_port`/`tls_port`。`alterId` 固定为 `0`，
+不接受额外字段；首配选项为 `12`，单核心首配不生成 Reality 密钥，不开放单协议 HTTPS 订阅。
+首配、完整 v3 规格导入、入口/WS 路径编辑、同核复制/删除和 `vmess://` 本地分享链接已接入；
+复制会重新分配未占用的内部端口，跨核心复制、宿主集成和完整管理仍拒绝。
+协议 21 与 22 可共用 Nginx/TLS，订阅发布仍只由 21 触发；删除最后 21 时关闭发布，
+删除最后 22 时在没有其它 TLS 协议的情况下清理规格中的 `tls`。
+
+本地 Linux 协议基线 `vmess.sh` `176.837` 秒一次包含全部旧协议，
+覆盖合同/生成拓扑、精确 URI、漂移检测、共享额度、混合端口池、TLS 删除和失败恢复。
+Draft 2020-12 Schema 的 6 正例/30 反例，Bash、ShellCheck、JSON、内嵌 Python 和 CI 工作流检查通过。
+菜单 PTY `395.400` 秒、phase3 `248.473` 秒通过；覆盖单/双核心首配、取消、编辑、
+复制/删除、身份冻结、TLS/健康失败恢复、支持矩阵及 bundle 兼容性。
+最后定向补验确认合法 VLESS+Fail2ban 基线可用，混合 VMess 宿主集成被拒绝；
+混合入口重复内部端口及尾换行也均拒绝。两项独立只读生产审阅无可操作发现。
+
+真实 amd64 `47.838` 秒通过：沿用既有 Xray、sing-box 客户端、ops 和 Nginx 镜像，
+客户端从实际 `protocol links` 解析 VMess Base64 字段，严格校验隔离 CA 与 SNI，
+双栈 TCP HTTP/UDP-over-WS proof、错误 UUID 拒绝、UUID 实际上/下行计数 `184/332`。
+生产额度事务撤销认证后全部请求拒绝、源站计数不增，解除后同客户端恢复，
+`users.base` 哈希不变，非 root/只读根/cap drop/init/健康与文件权限保持。
+未发布宿主端口，测试容器、网络和卷自动清理；复现：
+
+```bash
+bash docker/tests/vmess.sh
+bash docker/tests/vmess-real.sh \
+  padm-local/padm-xray:tls-3b4 \
+  padm-local/padm-sing-box:tls-3b4 \
+  padm-local/padm-ops:tls-3b4 \
+  padm-local/padm-nginx:tls-3b4
+```
+
+验收同时修正共享生成器的 jq 1.6 对象合并括号，以及尾换行绕过 `$` 的公共规格校验；
+字符串控制字符统一拒绝，域名/名称/入口 ID/WS 路径的 Schema 使用绝对结尾约束。
+真实测试仅调整本地 Compose `pull_policy` 和启动顺序，保持生产验签及配置合同；
+`lifecycle.sh` 无本阶段差异，既有 stdin 修复来自代理。
+公网入口、第三方导入 UI、既有长会话、原生 arm64、真实 DNS/整机重启、可信发布、
+协议 22 独立 HTTPS 发布和完整管理尚未验收；3B.4、其余 3C、3D、4A、5C 仍待完成。
 
 ### 3D. 协议管理与入口维护
 
@@ -917,7 +958,7 @@ Fail2ban 1.1.0），只读挂载当前生成配置及入口，未重建或发布
 | `network-optimization`、`vless-encryption` | 5C 独立宿主/实验子项；未验收仍不支持 |
 
 新增能力提交时同步更新文档、配置合同、生成器/Compose、控制入口及证据。
-[`phase3.sh`](../docker/tests/phase3.sh)当前固定 `supported` 协议为 `[1, 2, 3, 4, 5, 21, 26, 28, 30, 31]`，
+[`phase3.sh`](../docker/tests/phase3.sh)当前固定 `supported` 协议为 `[1, 2, 3, 4, 5, 21, 22, 26, 28, 30, 31]`，
 并要求菜单和管理差距为 `deferred`；后续按真实交付更新这些基线断言，
 保留协议注册表、核心/profile、网络权限和前置条件的一致性检查。
 不得只删除断言或只修改 `features.json` 来宣称完成。

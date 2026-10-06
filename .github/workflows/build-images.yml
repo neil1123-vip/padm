@@ -62,7 +62,7 @@ jobs:
           bash docker/tests/release.sh
           bash docker/tests/setup.sh
           sudo bash docker/tests/permissions.sh
-          sudo bash docker/tests/trojan.sh
+          sudo bash docker/tests/vmess.sh
           bash docker/tests/phase2.sh
           bash docker/tests/phase3.sh
           bash docker/tests/phase4.sh

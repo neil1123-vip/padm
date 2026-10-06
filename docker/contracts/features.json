@@ -87,17 +87,17 @@
     },
     {
       "id": 22,
-      "status": "deferred",
+      "status": "supported",
       "management_status": "deferred",
       "cores": ["xray"],
-      "profiles": [],
+      "profiles": ["core-xray", "nginx"],
       "native_menu": "安装与重装 / 自定义协议选择",
       "native_action": "VMess WS TLS",
       "transport": "ws",
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "原生有生成模板，Docker 当前只开放 VLESS WebSocket 合同。"
+      "reason": "v3 支持 Xray VMess WS TLS 首配、完整规格导入、入口与 WS 路径编辑、同核复制与删除及 vmess 分享链接；alterId 固定为 0，复用 Nginx、受管 TLS 和 UUID 流量账号，宿主集成组合及完整管理尚未开放。"
     },
     {
       "id": 23,

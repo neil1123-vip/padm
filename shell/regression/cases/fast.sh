@@ -5957,6 +5957,10 @@ runDockerTrojanRegression() {
     bash "${PROJECT_ROOT}/docker/tests/trojan.sh"
 }
 
+runDockerVmessRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/vmess.sh"
+}
+
 runDockerPermissionsRegression() {
     bash "${PROJECT_ROOT}/docker/tests/permissions.sh"
 }

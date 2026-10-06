@@ -71,6 +71,9 @@
               },
               {
                 "$ref": "#/$defs/websocket_protocol"
+              },
+              {
+                "$ref": "#/$defs/vmess_protocol"
               }
             ]
           }
@@ -231,7 +234,7 @@
               "protocols": {
                 "items": {
                   "required": ["core"],
-                  "if": {"properties": {"id": {"const": 21}}},
+                  "if": {"properties": {"id": {"enum": [21, 22]}}},
                   "then": {"properties": {"core": {"const": "xray"}}}
                 }
               }
@@ -319,7 +322,7 @@
         "properties": {
           "core": {
             "properties": {
-              "protocols": {"contains": {"properties": {"id": {"enum": [3, 4, 5, 21, 28, 31]}}}}
+              "protocols": {"contains": {"properties": {"id": {"enum": [3, 4, 5, 21, 22, 28, 31]}}}}
             }
           }
         }
@@ -353,7 +356,7 @@
         "properties": {
           "core": {
             "properties": {
-              "protocols": {"contains": {"properties": {"id": {"enum": [3, 4, 5, 28, 30, 31]}}}}
+              "protocols": {"contains": {"properties": {"id": {"enum": [3, 4, 5, 22, 28, 30, 31]}}}}
             }
           }
         }
@@ -374,7 +377,7 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 253,
-      "pattern": "^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z]{2,63}$"
+      "pattern": "^(?=.{1,253}(?![\\s\\S]))(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z]{2,63}(?![\\s\\S])"
     },
     "uuid": {
       "type": "string",
@@ -398,7 +401,7 @@
     },
     "account_name": {
       "type": "string",
-      "pattern": "^[A-Za-z0-9._~@+=:-]{1,64}$"
+      "pattern": "^[A-Za-z0-9._~@+=:-]{1,64}(?![\\s\\S])"
     },
     "server_address": {
       "oneOf": [
@@ -581,7 +584,7 @@
             },
             "listener_id": {
               "type": "string",
-              "pattern": "^(?:entry-[a-z0-9][a-z0-9-]{0,47}|vless-reality)$"
+              "pattern": "^(?:entry-[a-z0-9][a-z0-9-]{0,47}|vless-reality)(?![\\s\\S])"
             },
             "core": {
               "enum": ["xray", "sing-box"]
@@ -648,7 +651,7 @@
             },
             "listener_id": {
               "type": "string",
-              "pattern": "^entry-[a-z0-9][a-z0-9-]{0,47}$"
+              "pattern": "^entry-[a-z0-9][a-z0-9-]{0,47}(?![\\s\\S])"
             },
             "core": {
               "const": "xray"
@@ -709,7 +712,7 @@
             },
             "listener_id": {
               "type": "string",
-              "pattern": "^entry-[a-z0-9][a-z0-9-]{0,47}$"
+              "pattern": "^entry-[a-z0-9][a-z0-9-]{0,47}(?![\\s\\S])"
             },
             "core": {
               "enum": ["xray", "sing-box"]
@@ -760,7 +763,7 @@
             "core": {"enum": ["xray", "sing-box"]},
             "listener_id": {
               "type": "string",
-              "pattern": "^entry-[a-z0-9][a-z0-9-]{0,47}$"
+              "pattern": "^entry-[a-z0-9][a-z0-9-]{0,47}(?![\\s\\S])"
             },
             "server": {"$ref": "#/$defs/server_address"},
             "public_port": {"$ref": "#/$defs/port"},
@@ -794,7 +797,7 @@
             "core": {"const": "sing-box"},
             "listener_id": {
               "type": "string",
-              "pattern": "^entry-[a-z0-9][a-z0-9-]{0,47}$"
+              "pattern": "^entry-[a-z0-9][a-z0-9-]{0,47}(?![\\s\\S])"
             },
             "server": {"$ref": "#/$defs/server_address"},
             "public_port": {"$ref": "#/$defs/port"},
@@ -855,7 +858,7 @@
             "core": {"const": "sing-box"},
             "listener_id": {
               "type": "string",
-              "pattern": "^entry-[a-z0-9][a-z0-9-]{0,47}$"
+              "pattern": "^entry-[a-z0-9][a-z0-9-]{0,47}(?![\\s\\S])"
             },
             "server": {"$ref": "#/$defs/server_address"},
             "public_port": {"$ref": "#/$defs/port"},
@@ -889,7 +892,7 @@
             "core": {"const": "sing-box"},
             "listener_id": {
               "type": "string",
-              "pattern": "^entry-[a-z0-9][a-z0-9-]{0,47}$"
+              "pattern": "^entry-[a-z0-9][a-z0-9-]{0,47}(?![\\s\\S])"
             },
             "server": {"$ref": "#/$defs/hostname"},
             "public_port": {"$ref": "#/$defs/port"},
@@ -923,7 +926,7 @@
             "core": {"const": "sing-box"},
             "listener_id": {
               "type": "string",
-              "pattern": "^entry-[a-z0-9][a-z0-9-]{0,47}$"
+              "pattern": "^entry-[a-z0-9][a-z0-9-]{0,47}(?![\\s\\S])"
             },
             "server": {"$ref": "#/$defs/server_address"},
             "public_port": {"$ref": "#/$defs/port"},
@@ -956,7 +959,7 @@
             "core": {"const": "sing-box"},
             "listener_id": {
               "type": "string",
-              "pattern": "^entry-[a-z0-9][a-z0-9-]{0,47}$"
+              "pattern": "^entry-[a-z0-9][a-z0-9-]{0,47}(?![\\s\\S])"
             },
             "server": {"$ref": "#/$defs/server_address"},
             "public_port": {"$ref": "#/$defs/port"},
@@ -992,6 +995,30 @@
         }
       ]
     },
+    "vmess_protocol": {
+      "allOf": [
+        {"$ref": "#/$defs/protocol_base"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "core", "listener_id", "server", "public_port", "address_families", "name", "uuid", "websocket"],
+          "properties": {
+            "id": {"const": 22},
+            "core": {"const": "xray"},
+            "listener_id": {
+              "type": "string",
+              "pattern": "^entry-[a-z0-9][a-z0-9-]{0,47}(?![\\s\\S])"
+            },
+            "server": {"$ref": "#/$defs/server_address"},
+            "public_port": {"$ref": "#/$defs/port"},
+            "address_families": {"$ref": "#/$defs/address_families"},
+            "name": {"$ref": "#/$defs/account_name"},
+            "uuid": {"$ref": "#/$defs/uuid"},
+            "websocket": {"$ref": "#/$defs/websocket_protocol/allOf/1/properties/websocket"}
+          }
+        }
+      ]
+    },
     "websocket_protocol": {
       "allOf": [
         {
@@ -1007,7 +1034,7 @@
             },
             "listener_id": {
               "type": "string",
-              "pattern": "^(?:entry-[a-z0-9][a-z0-9-]{0,47}|vless-ws)$"
+              "pattern": "^(?:entry-[a-z0-9][a-z0-9-]{0,47}|vless-ws)(?![\\s\\S])"
             },
             "core": {
               "enum": ["xray", "sing-box"]
@@ -1037,7 +1064,7 @@
                 },
                 "path": {
                   "type": "string",
-                  "pattern": "^[A-Za-z0-9_-]{8,64}$"
+                  "pattern": "^[A-Za-z0-9_-]{8,64}(?![\\s\\S])"
                 },
                 "backend_port": {
                   "$ref": "#/$defs/port"

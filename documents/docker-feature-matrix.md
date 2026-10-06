@@ -59,6 +59,11 @@ AnyTLS 单独部署不能发布 HTTPS 订阅，组合 Xray WS TLS 后可包含 A
 TCP/TLS 双栈直连，不依赖 Nginx；UUID 密码与统计标识复用既有共享流量/额度。
 真实 amd64 两核各双栈 TCP/UDP-through-TCP、错误密码拒绝、UUID 正统计及同客户端额度恢复通过。
 TLS 域名与凭据冻结，fallback、宿主集成及完整用户管理尚未开放。
+3C.9 新增 Xray VMess WS TLS：v3 首配、导入、入口与 WS 路径编辑、同核复制/删除及 `vmess://`
+分享链接；固定 `alterId=0`，复用 Nginx、受管 TLS 和 UUID 流量账号。
+真实 amd64 Nginx TLS/WS 双栈、错误 UUID 拒绝、UUID 正统计及同客户端额度拒绝/恢复已通过。
+协议 22 单独部署不开放 HTTPS 订阅发布，暂不接受宿主集成，完整管理仍为 `deferred`；
+公网宿主入口、第三方导入 UI、业务镜像签名发布和原生 arm64 客户端仍待验。
 Nginx 与核心端 TLS 轮换底座已交付；其它新协议类型和完整管理尚未交付，
 协议的 `management_status` 继续为 `deferred`。
 Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布、业务镜像及
@@ -74,9 +79,9 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 
 | 原生菜单 | Docker 当前状态 | 已覆盖 | 尚未覆盖或边界 |
 | --- | --- | --- | --- |
-| 安装与重装 | 部分已交付，完整管理 `deferred` | `install`、可信发布输入 `release`、交互首配 `setup`、`edit`、`configure`、候选校验及恢复 | 支持 `1`、`2`、`3`、`4`、`5`、`21`、`26`、`28`、`30`、`31` 字段编辑、完整原始 spec 接入、多入口及主副核心；重装和真实发布连通未完成。 |
+| 安装与重装 | 部分已交付，完整管理 `deferred` | `install`、可信发布输入 `release`、交互首配 `setup`、`edit`、`configure`、候选校验及恢复 | 支持 `1`、`2`、`3`、`4`、`5`、`21`、`22`、`26`、`28`、`30`、`31` 字段编辑、完整原始 spec 接入、多入口及主副核心；重装和真实发布连通未完成。 |
 | 订阅与用户 | `supported` + `host-integrated` + `deferred` | 有条件的订阅发布、流量采集/额度、WireGuard 宿主集成 | 发布仅支持包含协议 `21` 和受管 TLS 的 Xray 配置；用户 CRUD 和多服务器工作流未迁移；WireGuard 需 `net-wireguard`。 |
-| 协议与入口 | 部分 `supported`，管理工作流 `deferred` | `1` Reality Vision、`2` XHTTP、`3` Hysteria2、`4` AnyTLS、`5` NaiveProxy、`26` gRPC、`21` WS TLS、`28` direct Trojan、`30` Shadowsocks、`31` TUIC 的配置运行、字段编辑、分享链接、多入口和 Reality 传输派生 | XHTTP 仅限 Xray、Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC 仅限 sing-box；完整协议管理、UDP 端口跳跃、Reality 目标库/扫描/参数重生成/443 共存、其余公开协议、内部路由协议和 CDN 地址覆盖尚未开放；Fail2ban WS 增删及端口联动未交付。 |
+| 协议与入口 | 部分 `supported`，管理工作流 `deferred` | `1` Reality Vision、`2` XHTTP、`3` Hysteria2、`4` AnyTLS、`5` NaiveProxy、`21` VLESS WS TLS、`22` VMess WS TLS、`26` gRPC、`28` direct Trojan、`30` Shadowsocks、`31` TUIC 的配置运行、字段编辑、分享链接、多入口和 Reality 传输派生 | XHTTP 和 VMess 仅限 Xray、Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC 仅限 sing-box；完整协议管理、UDP 端口跳跃、Reality 目标库/扫描/参数重生成/443 共存、其余公开协议、内部路由协议和 CDN 地址覆盖尚未开放；Fail2ban WS 增删及端口联动未交付。 |
 | 站点与证书 | 部分 `supported`，其余 `deferred` | TLS 文件安装、DNS-01 ACME、Nginx WebSocket 入口 | webroot/standalone ACME、静态站点/302/ALPN 管理尚未迁移。 |
 | 路由与访问控制 | `host-integrated` + `deferred` | WireGuard、TUN/TProxy 宿主集成合同 | WARP、IPv6 调优、Socks/HTTP 中继、DNS/hosts、BT、访问控制和路由规则尚未迁移。 |
 | 核心与服务 | `supported` + `deferred` | 基础状态、启动、停止、重启、日志、更新、回滚、配置校验 | 预发布试跑、升级风险扫描、Xray Geo 文件更新和自动任务尚未迁移；当前使用宿主子命令，不是原生全部生命周期管理。 |
@@ -97,7 +102,7 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 | 4 | AnyTLS | 安装与重装 -> 自定义安装 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / TCP | v3 支持首配、导入、通用字段编辑、同核复制/删除及分享链接；复用受管 TLS 与 UUID 流量账号，域名与凭据冻结，宿主集成组合及完整管理未开放。 |
 | 5 | NaiveProxy | 安装与重装 -> TLS 指纹抗性 | `supported` | `deferred` | sing-box | `core-sing-box` | bridge / TCP | v3 支持首配、导入、通用编辑、同核复制/删除及原生 URI；入口与 TLS 同域，UUID 用户名/密码共享统计额度；QUIC、独立 IP/SNI 覆盖及完整管理未开放。 |
 | 21 | VLESS WS TLS | 安装与重装 -> 自定义安装 / 传统 TLS 兼容安装 | `supported` | `deferred` | Xray | `core-xray` / `nginx` | bridge / TCP + Nginx | 已有多入口 Xray 后端、Nginx 反代和同域 TLS；Fail2ban 关联入口增删/改端口及完整管理未迁移。 |
-| 22 | VMess WS TLS | 安装与重装 -> 自定义安装 | `deferred` | `deferred` | Xray | 无 | bridge / TCP | Docker 当前只开放 VLESS WebSocket 合同。 |
+| 22 | VMess WS TLS | 安装与重装 -> 自定义安装 | `supported` | `deferred` | Xray | `core-xray` / `nginx` | bridge / TCP + Nginx | v3 支持首配、导入、入口与 WS 路径编辑、同核复制/删除及 `vmess://` 分享；固定 `alterId=0`，单独部署不发布 HTTPS 订阅，宿主集成及完整管理未开放。 |
 | 23 | VMess HTTPUpgrade TLS | 安装与重装 -> 自定义安装 | `deferred` | `deferred` | Xray / sing-box | 无 | bridge / TCP + Nginx | HTTPUpgrade 入口和订阅输出尚未接入。 |
 | 24 | VLESS gRPC TLS | 安装与重装 -> 自定义安装 | `deferred` | `deferred` | Xray | 无 | bridge / TCP + Nginx | gRPC 反代和 HTTP/2 合同尚未接入。 |
 | 25 | Trojan gRPC TLS | 安装与重装 -> 自定义安装 | `deferred` | `deferred` | Xray | 无 | bridge / TCP + Nginx | gRPC 反代和 Trojan 输出尚未接入。 |

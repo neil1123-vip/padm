@@ -1091,7 +1091,7 @@ validateFeatureMatrix() {
         .network_mode == "bridge" and .host_capabilities == [] and
         if .status == "supported" then
           (.profiles | sort) == ([.cores[] | "core-\(.)"] +
-            (if .id == 21 then ["nginx"] else [] end) | sort)
+            (if .id == 21 or .id == 22 then ["nginx"] else [] end) | sort)
         else .profiles == [] end) and
       (.features | type == "object" and keys == ($legacy | sort)) and
       (.feature_matrix | type == "object" and length > 0) and
@@ -1129,7 +1129,7 @@ validateFeatureMatrix() {
           ($matrix.feature_matrix[$entry.value] | {status, profiles, network_mode, host_capabilities})) and
       all(["interactive-menu", "reality-target-management", "reality-parameter-management",
         "reality-coexistence", "core-upgrade-assessment"][]; $matrix.feature_matrix[.].status == "deferred") and
-      ([.protocols[] | select(.status == "supported") | .id] | sort) == [1, 2, 3, 4, 5, 21, 26, 28, 30, 31] and
+      ([.protocols[] | select(.status == "supported") | .id] | sort) == [1, 2, 3, 4, 5, 21, 22, 26, 28, 30, 31] and
       .feature_matrix.subscription.requires == {core: "xray", protocol_ids: [21], tls: true} and
       (.feature_matrix.subscription.profiles | sort) == ["core-xray", "nginx", "subscription"]
     ' "$1" >/dev/null 2>&1

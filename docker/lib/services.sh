@@ -73,6 +73,7 @@ dockerConfigureSpecValidate() {
         (explode | all(. > 32 and . != 127));
       . as $request |
       ($matrix[0]) as $features |
+      ([.. | strings] | all(.[]; explode | all(. >= 32 and . != 127))) and
       exact(["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"]) and
       (.schema_version == 1 or .schema_version == 2 or .schema_version == 3) and
       (.release | exact(["version", "manifest_sha256", "signature_identity"]) and
@@ -170,7 +171,8 @@ dockerConfigureSpecValidate() {
             (.congestion_control == "cubic" or .congestion_control == "new_reno" or .congestion_control == "bbr") and
             (.auth_timeout | duration) and (.heartbeat | duration) and
             (.zero_rtt_handshake | type == "boolean"))
-        elif .id == 21 then
+        elif .id == 21 or .id == 22 then
+          (if .id == 22 then $request.schema_version == 3 and .core == "xray" else true end) and
           exact(["id", "server", "public_port", "address_families", "name", "uuid", "websocket"] +
             if $request.schema_version >= 2 then ["listener_id"] else [] end +
             if $request.schema_version == 3 then ["core"] else [] end) and
@@ -225,10 +227,10 @@ dockerConfigureSpecValidate() {
           (.settings | exact(["port", "mark"]) and (.port | port) and
             (.mark | type == "number" and floor == . and . >= 1 and . <= 2147483647))
         else false end) and
-      if any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 21 or .id == 28 or .id == 31) then
+      if any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 21 or .id == 22 or .id == 28 or .id == 31) then
         .tls != null and
-        all(.core.protocols[] | select(.id == 21); (.core // $request.core.type) == "xray") and
-        all(.core.protocols[] | select(.id == 21); .websocket.domain == $request.tls.domain) and
+        all(.core.protocols[] | select(.id == 21 or .id == 22); (.core // $request.core.type) == "xray") and
+        all(.core.protocols[] | select(.id == 21 or .id == 22); .websocket.domain == $request.tls.domain) and
         all(.core.protocols[] | select(.id == 3); .hy2.domain == $request.tls.domain) and
         all(.core.protocols[] | select(.id == 4); .anytls.domain == $request.tls.domain) and
         all(.core.protocols[] | select(.id == 5); .naive.domain == $request.tls.domain) and
@@ -238,7 +240,7 @@ dockerConfigureSpecValidate() {
         .tls == null and .subscription.enabled == false
       end and
       if .subscription.enabled then any(.core.protocols[]; .id == 21) else true end and
-      if any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 28 or .id == 30 or .id == 31) then .host_integrations == [] else true end and
+      if any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 22 or .id == 28 or .id == 30 or .id == 31) then .host_integrations == [] else true end and
       if any(.host_integrations[]; .type == "fail2ban") then
         any(.core.protocols[]; .id == 21) and
         all(.host_integrations[] | select(.type == "fail2ban") | .settings.ports[];
@@ -246,7 +248,7 @@ dockerConfigureSpecValidate() {
       else true end and
       if any(.host_integrations[]; .type == "tun") then .core.type == "sing-box" else true end and
       if any(.host_integrations[]; .type == "tun" or .type == "tproxy") then
-        all(.core.protocols[]; .id != 21)
+        all(.core.protocols[]; .id != 21 and .id != 22)
       else true end and
       all(.host_integrations[] | select(.type == "tproxy");
         .settings.port as $port | all($request.core.protocols[]; .public_port != $port)) and
@@ -254,11 +256,11 @@ dockerConfigureSpecValidate() {
       (all([.core.type, .core.secondary_type] | map(select(. != null))[];
         . as $core |
         ([$request.core.protocols[] | select((.core // $request.core.type) == $core) |
-            if .id == 21 then (.websocket.backend_port // 31297) else .public_port end] +
+            if .id == 21 or .id == 22 then (.websocket.backend_port // 31297) else .public_port end] +
           [$request.host_integrations[] | select(.type == "tproxy") | .settings.port] +
           [if $core == "xray" then 10085 else 10087 end]) as $corePorts |
         ($corePorts | unique | length) == ($corePorts | length)) and
-      (([.core.protocols[] | select(.id == 21) | (.websocket.tls_port // 8443)] + [8080]) as $tlsPorts |
+      (([.core.protocols[] | select(.id == 21 or .id == 22) | (.websocket.tls_port // 8443)] + [8080]) as $tlsPorts |
       ($tlsPorts | unique | length) == ($tlsPorts | length)))
     ' "${specFile}" >/dev/null 2>&1 || {
         dockerError '配置规格不满足阶段 4 schema、支持矩阵或拓扑约束'
@@ -321,7 +323,7 @@ dockerManagedSpecMatchesDeployment() {
         ($d.core | has("secondary_type")) and .core.secondary_type == $d.core.secondary_type
        else ($d.core | has("secondary_type") | not) end) and
       (([.core.type, .core.secondary_type] | map(select(. != null) | "core-\(.)")) +
-        [if any(.core.protocols[]; .id == 21) then "nginx" else empty end] +
+        [if any(.core.protocols[]; .id == 21 or .id == 22) then "nginx" else empty end] +
         [if .subscription.enabled then "subscription" else empty end] +
         [.host_integrations[].profile] | sort) == ($d.compose.profiles | sort) and
       (.host_integrations | sort_by(.type)) == ($d.host_integrations | sort_by(.type)) and
@@ -329,8 +331,8 @@ dockerManagedSpecMatchesDeployment() {
       (if .schema_version >= 2 then
         [.core.protocols[] |
           (if .id == 30 then "tcp", "udp" elif .id == 3 or .id == 31 then "udp" else "tcp" end) as $transport |
-          {listener_id, service: (if .id == 21 then "nginx" else (.core // $d.core.type) end),
-          public_port, container_port: (if .id == 21 then .websocket.tls_port else .public_port end),
+          {listener_id, service: (if .id == 21 or .id == 22 then "nginx" else (.core // $d.core.type) end),
+          public_port, container_port: (if .id == 21 or .id == 22 then .websocket.tls_port else .public_port end),
           transport: $transport, address_families}] | sort_by(.listener_id, .transport) as $expected |
         $expected == ([$d.listeners[] | select(.listener_id | startswith("host-") | not)] | sort_by(.listener_id, .transport))
        else true end) and
@@ -812,7 +814,7 @@ dockerGenerateXrayConfig() {
                 if .id == 1 then {flow: "xtls-rprx-vision"} else {} end],
               decryption: "none"
             },
-            streamSettings: {
+            streamSettings: ({
               network: (if .id == 1 then "tcp" elif .id == 2 then "xhttp" else "grpc" end),
               security: "reality",
               realitySettings: {
@@ -826,7 +828,7 @@ dockerGenerateXrayConfig() {
             } + (if .id == 2 then {
               xhttpSettings: {path: .xhttp.path, host: .xhttp.host, mode: .xhttp.mode,
                 xmux: {maxConcurrency: "16-32", hMaxRequestTimes: "600-900", hMaxReusableSecs: "1800-3000"}}
-            } elif .id == 26 then {grpcSettings: {serviceName: .grpc.service_name}} else {} end),
+            } elif .id == 26 then {grpcSettings: {serviceName: .grpc.service_name}} else {} end)),
             sniffing: {enabled: true, destOverride: ["http", "tls", "quic"], routeOnly: true}
           } elif .id == 28 then {
             listen: "::",
@@ -848,15 +850,15 @@ dockerGenerateXrayConfig() {
                 }]
               }
             }
-          } elif .id == 21 then {
+          } elif .id == 21 or .id == 22 then {
             listen: "0.0.0.0",
             port: (.websocket.backend_port // 31297),
-            protocol: "vless",
+            protocol: (if .id == 22 then "vmess" else "vless" end),
             tag: (.listener_id // "vless-ws"),
-            settings: {
-              clients: [{id: .uuid, email: .name}],
-              decryption: "none"
-            },
+            settings: ({
+              clients: [{id: .uuid, email: .name} +
+                if .id == 22 then {alterId: 0} else {} end]
+            } + (if .id == 21 then {decryption: "none"} else {} end)),
             streamSettings: {
               network: "ws",
               security: "none",
@@ -1045,7 +1047,7 @@ dockerStageTlsFiles() {
 
 dockerGenerateNginxConfig() {
     local specFile=$1 target=$2 domain path token subscriptionEnabled fail2banEnabled backendPort tlsPort
-    jq -e 'any(.core.protocols[]; .id == 21)' "${specFile}" >/dev/null || return 0
+    jq -e 'any(.core.protocols[]; .id == 21 or .id == 22)' "${specFile}" >/dev/null || return 0
     domain=$(jq -r '.tls.domain' "${specFile}") || return 1
     token=$(jq -r '.subscription.token' "${specFile}") || return 1
     subscriptionEnabled=$(jq -r '.subscription.enabled' "${specFile}") || return 1
@@ -1099,7 +1101,7 @@ EOF
 EOF
     fi
         printf '}\n' >>"${target}" || return 1
-    done < <(jq -r '.core.protocols[] | select(.id == 21) |
+    done < <(jq -r '.core.protocols[] | select(.id == 21 or .id == 22) |
       [.websocket.path, (.websocket.backend_port // 31297), (.websocket.tls_port // 8443)] | @tsv' "${specFile}")
 }
 
@@ -1134,6 +1136,12 @@ dockerGenerateSubscription() {
         "tuic://\(.uuid | @uri):\(.uuid | @uri)@\(.server | authority):\(.public_port)?congestion_control=\(.tuic.congestion_control | @uri)&alpn=h3&sni=\(.tuic.domain | @uri)&udp_relay_mode=native&allow_insecure=0#\(.name | @uri)"
       elif .id == 21 then
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&security=tls&sni=\(.websocket.domain | @uri)&type=ws&host=\(.websocket.domain | @uri)&path=\("/" + .websocket.path + "ws" | @uri)#\(.name | @uri)"
+      elif .id == 22 then
+        "vmess://" + ({
+          v: "2", ps: .name, add: .server, port: (.public_port | tostring), id: .uuid,
+          aid: "0", scy: "auto", net: "ws", type: "none", host: .websocket.domain,
+          path: ("/" + .websocket.path + "ws"), tls: "tls", sni: .websocket.domain
+        } | tojson | @base64)
       else empty end
     ' "${specFile}" >"${target}"
 }
@@ -1202,7 +1210,7 @@ dockerGenerateCompose() {
       ];
       [$r.core.type, $r.core.secondary_type] | map(select(. != null)) as $cores |
       ($r.core.protocols | map(select(.id == 1 or .id == 2 or .id == 3 or .id == 4 or .id == 5 or .id == 26 or .id == 28 or .id == 30 or .id == 31))) as $direct |
-      ($r.core.protocols | map(select(.id == 21))) as $websocket |
+      ($r.core.protocols | map(select(.id == 21 or .id == 22))) as $websocket |
       ($r.host_integrations | map(select(.type == "wireguard"))) as $wireguard |
       ($r.host_integrations | map(select(.type == "fail2ban"))) as $fail2ban |
       ($r.host_integrations | map(select(.type == "tun"))) as $tun |
@@ -1397,7 +1405,7 @@ dockerGenerateDeployment() {
       def digest: capture("@(?<value>sha256:[a-f0-9]{64})$").value;
       def profiles:
         ([[$r.core.type, $r.core.secondary_type][] | select(. != null) | "core-\(.)"] +
-        [if any($r.core.protocols[]; .id == 21) then "nginx" else empty end] +
+        [if any($r.core.protocols[]; .id == 21 or .id == 22) then "nginx" else empty end] +
         [if $r.subscription.enabled then "subscription" else empty end] +
         [$r.host_integrations[].profile]);
       {
@@ -1417,9 +1425,9 @@ dockerGenerateDeployment() {
           $r.core.protocols[] |
           (if .id == 30 then "tcp", "udp" elif .id == 3 or .id == 31 then "udp" else "tcp" end) as $transport |
           ({
-            service: (if .id == 21 then "nginx" else (.core // $r.core.type) end),
+            service: (if .id == 21 or .id == 22 then "nginx" else (.core // $r.core.type) end),
             public_port: .public_port,
-            container_port: (if .id == 21 then (.websocket.tls_port // 8443) else .public_port end),
+            container_port: (if .id == 21 or .id == 22 then (.websocket.tls_port // 8443) else .public_port end),
             transport: $transport,
             address_families: .address_families
           } + if $r.schema_version >= 2 then {listener_id: .listener_id} else {} end)
