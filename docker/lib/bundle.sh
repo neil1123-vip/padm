@@ -264,16 +264,26 @@ dockerCleanupStagedBundle() {
 dockerBundleSupportsSpec() {
     local bundlePath=$1 specFile=$2
     [[ -f "${bundlePath}/docker/contracts/configure.schema.json" &&
-        ! -L "${bundlePath}/docker/contracts/configure.schema.json" ]] &&
+        ! -L "${bundlePath}/docker/contracts/configure.schema.json" &&
+        -f "${bundlePath}/docker/contracts/features.json" &&
+        ! -L "${bundlePath}/docker/contracts/features.json" ]] &&
         jq -en --slurpfile schema "${bundlePath}/docker/contracts/configure.schema.json" \
+            --slurpfile features "${bundlePath}/docker/contracts/features.json" \
             --slurpfile spec "${specFile}" '
           ($spec | length) == 1 and ($spec[0] | type == "object") and
           ($spec[0].schema_version | type == "number" and floor == . and . >= 1) and
           ($spec[0].schema_version as $version |
             $schema[0].properties.schema_version |
-            (.const == $version) or ((.enum // []) | index($version)) != null)
+            (.const == $version) or ((.enum // []) | index($version)) != null) and
+          ($features | length) == 1 and ($features[0].protocols | type == "array") and
+          all($spec[0].core.protocols[];
+            . as $entry |
+            (.core // $spec[0].core.type) as $core |
+            [$features[0].protocols[] | select(.id == $entry.id)] as $matches |
+            ($matches | length) == 1 and $matches[0].status == "supported" and
+            ($matches[0].cores | index($core)) != null)
         ' >/dev/null 2>&1 || {
-        dockerError '目标控制 bundle 不支持该规格版本，拒绝切换配置或回滚'
+        dockerError '目标控制 bundle 不支持该规格版本或协议/核心组合，拒绝切换配置或回滚'
         return 1
     }
 }

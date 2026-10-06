@@ -17,17 +17,17 @@
     },
     {
       "id": 2,
-      "status": "deferred",
+      "status": "supported",
       "management_status": "deferred",
       "cores": ["xray"],
-      "profiles": [],
+      "profiles": ["core-xray"],
       "native_menu": "协议与入口",
       "native_action": "XHTTP 管理",
       "transport": "xhttp",
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "原生已有 XHTTP 参数管理，Docker 配置合同尚未接入。"
+      "reason": "v3 支持 Xray XHTTP Reality 首配、完整规格导入、概览和分享链接、入口及基础 XHTTP 参数编辑与复制；高级 XHTTP 参数、目标库、扫描、PQC、参数重生成及 443 共存管理尚未迁移。"
     },
     {
       "id": 3,
@@ -143,17 +143,17 @@
     },
     {
       "id": 26,
-      "status": "deferred",
+      "status": "supported",
       "management_status": "deferred",
       "cores": ["xray", "sing-box"],
-      "profiles": [],
+      "profiles": ["core-xray", "core-sing-box"],
       "native_menu": "安装与重装 / 自定义协议选择",
       "native_action": "VLESS Reality gRPC",
       "transport": "grpc",
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "需要 Reality gRPC 配置和双核心订阅输出，Docker 合同尚未接入。"
+      "reason": "v3 支持 Xray/sing-box Reality gRPC 首配、完整规格导入、概览和分享链接、入口及 serviceName 编辑与跨核心复制；目标库、扫描、PQC、参数重生成及 443 共存管理尚未迁移。"
     },
     {
       "id": 27,

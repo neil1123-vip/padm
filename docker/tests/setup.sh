@@ -223,7 +223,7 @@ exec "${FAKE_SETUP_REAL_JQ:?}" "$@"
 EOF
 chmod 0755 "${MOCK_BIN}/jq"
 
-export PATH="${MOCK_BIN}:${PATH}" MSYS=winsymlinks:sys DOCKER_HOST= SHELL
+export PATH="${MOCK_BIN}:${PATH}" MSYS=winsymlinks:sys DOCKER_HOST='' SHELL
 SHELL=$(command -v bash)
 export PADM_NATIVE_INSTALL_DIR="${TEST_ROOT}/native"
 export PADM_DOCKER_SYSTEMD_DIR="${TEST_ROOT}/systemd"
@@ -294,7 +294,8 @@ snapshot() {
 assertClean() {
     [[ ! -e "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]] || fail 'setup retained deployment lock'
     [[ -z "$(find "${PADM_DOCKER_INSTALL_DIR}" -maxdepth 2 -type d \
-        \( -name '.setup.*' -o -name '.candidate.*' -o -name '.manifest.*' -o -name '.stage.*' \) -print -quit)" ]] ||
+        \( -name '.setup.*' -o -name '.edit.*' -o -name '.protocol.*' -o \
+            -name '.candidate.*' -o -name '.manifest.*' -o -name '.stage.*' \) -print -quit)" ]] ||
         fail 'setup retained a candidate directory'
 }
 
@@ -386,7 +387,7 @@ runPty() {
 }
 
 REALITY_INPUT=$'1\n1\nproxy.example.com\n1\n24443\ntarget.example.com\n443\ntarget.example.com\ny\n'
-SINGBOX_INPUT=$'2\nproxy.example.com\n1\n24443\ntarget.example.com\n443\ntarget.example.com\ny\n'
+SINGBOX_INPUT=$'2\n1\nproxy.example.com\n1\n24443\ntarget.example.com\n443\ntarget.example.com\ny\n'
 for cancellation in first eof partial final empty; do
     newState "cancel-${cancellation}"
     before=$(snapshot)
@@ -494,26 +495,78 @@ jq -e '.schema_version == 3 and .core.type == "sing-box" and .core.secondary_typ
     .core.protocols[0].core == "sing-box" and .core.protocols[0].id == 1' \
     "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" >/dev/null || fail 'sing-box first configuration did not succeed'
 
+# 新传输仍在确认后生成凭据；首配不借 TLS 或订阅发布开启其它服务。
+for transportCase in xray-xhttp xray-grpc singbox-grpc; do
+    newState "${transportCase}"
+    case "${transportCase}" in
+    xray-xhttp) core=xray; protocol=2; input=${REALITY_INPUT/$'1\n1\n'/$'1\n4\n'} ;;
+    xray-grpc) core=xray; protocol=26; input=${REALITY_INPUT/$'1\n1\n'/$'1\n5\n'} ;;
+    singbox-grpc) core=sing-box; protocol=26; input=${SINGBOX_INPUT/$'2\n1\n'/$'2\n5\n'} ;;
+    esac
+    before=$(snapshot)
+    runPty 0 "${transportCase}-cancel" "${input%$'y\n'}"$'n\n' setup "${ASSET_ARGS[@]}"
+    [[ "$(snapshot)" == "${before}" && ! -s "${EVENTS}" && ! -s "${VERIFY_LOG}" ]] ||
+        fail "${transportCase}: cancellation generated credentials or changed deployment"
+    runPty 0 "${transportCase}" "${input}" setup "${ASSET_ARGS[@]}"
+    SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+    jq -e --arg core "${core}" --argjson protocol "${protocol}" '
+      .core.type == $core and .core.secondary_type == null and .tls == null and
+      (.subscription.enabled | not) and (.core.protocols | length) == 1 and
+      (.core.protocols[0] | .id == $protocol and .core == $core and
+        (.reality.private_key | length) == 43 and
+        if $protocol == 2 then
+          .listener_id == "entry-reality-xhttp" and
+          .xhttp.host == .reality.server_name and .xhttp.mode == "auto" and
+          (.xhttp.path | test("^/[a-f0-9]{32}$")) and (.grpc == null)
+        else .listener_id == "entry-reality-grpc" and
+          .grpc == {service_name: "grpc"} and (.xhttp == null) end)
+    ' "${SPEC}" >/dev/null || fail "${transportCase}: generated transport or credentials were incorrect"
+    CONTROL_LOG="${TEST_ROOT}/${transportCase}-list.log"
+    bash -u "${CLI}" protocol list >"${CONTROL_LOG}" 2>&1 || fail "${transportCase}: protocol list failed"
+    if [[ "${protocol}" == 2 ]]; then label='Reality XHTTP'; else label='Reality gRPC'; fi
+    grep -Fq "${label}" "${CONTROL_LOG}" || fail "${transportCase}: protocol list used the wrong name"
+    assertClean
+    assertNoSecrets
+done
+
 # 双核心共用账号与 Reality 密钥，但入口身份和公开端口必须独立。
 DUAL_XRAY_INPUT=$'3\n1\nproxy.example.com\n1\n24443\ntarget.example.com\n443\ntarget.example.com\n24445\ny\n'
-DUAL_SINGBOX_INPUT=$'4\nproxy.example.com\n1\n24443\ntarget.example.com\n443\ntarget.example.com\n24445\ny\n'
-for dualCase in dual-xray dual-singbox; do
+DUAL_SINGBOX_INPUT=$'4\n1\nproxy.example.com\n1\n24443\ntarget.example.com\n443\ntarget.example.com\n24445\ny\n'
+for dualCase in dual-xray dual-singbox dual-xray-xhttp dual-xray-grpc dual-singbox-grpc; do
     newState "${dualCase}"
-    if [[ "${dualCase}" == dual-xray ]]; then
-        input=${DUAL_XRAY_INPUT}; primary=xray; secondary=sing-box
-    else
-        input=${DUAL_SINGBOX_INPUT}; primary=sing-box; secondary=xray
-    fi
+    protocol=1; listener=vless-reality
+    case "${dualCase}" in
+    dual-xray*) input=${DUAL_XRAY_INPUT}; primary=xray; secondary=sing-box ;;
+    dual-singbox*) input=${DUAL_SINGBOX_INPUT}; primary=sing-box; secondary=xray ;;
+    esac
+    case "${dualCase}" in
+    dual-xray-xhttp)
+        input=${input/$'3\n1\n'/$'3\n4\n'}; protocol=2; listener=entry-reality-xhttp
+        ;;
+    dual-xray-grpc)
+        input=${input/$'3\n1\n'/$'3\n5\n'}; protocol=26; listener=entry-reality-grpc
+        ;;
+    dual-singbox-grpc)
+        input=${input/$'4\n1\n'/$'4\n5\n'}; protocol=26; listener=entry-reality-grpc
+        ;;
+    esac
     runPty 0 "${dualCase}" "${input}" setup "${ASSET_ARGS[@]}"
-    jq -e --arg primary "${primary}" --arg secondary "${secondary}" '
+    jq -e --arg primary "${primary}" --arg secondary "${secondary}" \
+        --argjson protocol "${protocol}" --arg listener "${listener}" '
         .schema_version == 3 and .core.type == $primary and .core.secondary_type == $secondary and
         (.core.protocols | length) == 2 and
-        [.core.protocols[].listener_id] == ["vless-reality", "entry-secondary-reality"] and
+        [.core.protocols[].listener_id] == [$listener, "entry-secondary-reality"] and
         [.core.protocols[].public_port] == [24443,24445] and
         [.core.protocols[].core] == [$primary,$secondary] and
-        all(.core.protocols[]; .id == 1) and
+        .core.protocols[0].id == $protocol and .core.protocols[1].id == 1 and
+        .core.protocols[1].xhttp == null and .core.protocols[1].grpc == null and
         .core.protocols[0].uuid == .core.protocols[1].uuid and
-        .core.protocols[0].reality == .core.protocols[1].reality
+        .core.protocols[0].reality == .core.protocols[1].reality and
+        (.core.protocols[0] |
+          if $protocol == 2 then .xhttp.host == .reality.server_name and .xhttp.mode == "auto" and
+            (.xhttp.path | test("^/[a-f0-9]{32}$")) and .grpc == null
+          elif $protocol == 26 then .grpc == {service_name: "grpc"} and .xhttp == null
+          else .xhttp == null and .grpc == null end)
     ' "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" >/dev/null ||
         fail "${dualCase}: setup lost core ownership, independent listeners or shared credentials"
     jq -e '.services | has("xray") and has("sing-box")' \
@@ -603,6 +656,57 @@ for dnsCase in acme-fail dns-success; do
             -f "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/ws.example.com.crt" ]] ||
             fail 'DNS-01 setup did not commit certificate and ACME account together'
     fi
+done
+
+# 安装新传输只派生已有 Reality 凭据，原入口和内部身份不得被替换。
+export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-xray-success"
+export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-xray-success"
+CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
+: >"${EVENTS}"; : >"${VERIFY_LOG}"; : >"${ARGV_LOG}"
+SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+SOURCE_SPEC="${TEST_ROOT}/derive-source.json"
+cp -- "${SPEC}" "${SOURCE_SPEC}"
+runPty 0 derive-xhttp $'11\nvless-reality\n2\n1\n24446\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e --slurpfile before "${SOURCE_SPEC}" '
+  .core.protocols[0] == $before[0].core.protocols[0] and
+  (.core.protocols[1] | .id == 2 and .listener_id == "entry-1" and .core == "xray" and
+    .public_port == 24446 and .uuid == $before[0].core.protocols[0].uuid and
+    .reality == $before[0].core.protocols[0].reality and
+    .xhttp == {path: "/entry-1xhttp", host: "target.example.com", mode: "auto"})
+' "${SPEC}" >/dev/null || fail 'Reality XHTTP derivation changed source identity or transport defaults'
+runPty 0 edit-xhttp $'12\nentry-1\n1\n/new-xhttp\n12\nentry-1\n2\ncdn.example.com\n12\nentry-1\n3\npacket-up\n5\nentry-1\n3\nnext.example.com\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.core.protocols[1] | .id == 2 and .reality.server_name == "next.example.com" and
+    .xhttp == {path: "/new-xhttp", host: "cdn.example.com", mode: "packet-up"}' "${SPEC}" >/dev/null ||
+    fail 'existing XHTTP transport or Reality parameter editing failed'
+runPty 0 derive-grpc $'11\nentry-1\n26\n2\n24447\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.core.secondary_type == "sing-box" and
+  (.core.protocols[2] | .id == 26 and .listener_id == "entry-2" and .core == "sing-box" and
+    .grpc == {service_name: "grpc"} and .xhttp == null) and
+  .core.protocols[2].uuid == .core.protocols[1].uuid and
+  .core.protocols[2].reality == .core.protocols[1].reality' "${SPEC}" >/dev/null ||
+    fail 'Reality gRPC derivation did not preserve credentials across cores'
+runPty 0 edit-grpc $'12\nentry-2\ncustom-grpc\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.core.protocols[2].grpc.service_name == "custom-grpc"' "${SPEC}" >/dev/null ||
+    fail 'existing gRPC service editing failed'
+before=$(snapshot)
+runPty 15 copy-xhttp-singbox $'9\nentry-1\n2\n' edit "${ASSET_ARGS[@]}"
+[[ "$(snapshot)" == "${before}" ]] || fail 'copying XHTTP to sing-box changed state'
+for rejectedEdit in existing-id new-credential invalid-transport; do
+    case "${rejectedEdit}" in
+    existing-id) filter='.core.protocols[1] |= (.id = 26 | del(.xhttp) | .grpc = {service_name: "grpc"})' ;;
+    new-credential) filter='.core.protocols += [.core.protocols[0] | .listener_id = "entry-3" |
+        .public_port = 24448 | .uuid = "22222222-2222-4222-8222-222222222222"]' ;;
+    invalid-transport) filter='.core.protocols[1].xhttp.mode = "invalid-mode"' ;;
+    esac
+    jq "${filter}" "${SPEC}" >"${TEST_ROOT}/rejected-edit.json"
+    chmod 0600 "${TEST_ROOT}/rejected-edit.json"
+    CONTROL_LOG="${TEST_ROOT}/rejected-${rejectedEdit}.log"
+    actual=0
+    bash -u "${CLI}" edit --spec "${TEST_ROOT}/rejected-edit.json" --preview "${ASSET_ARGS[@]}" \
+        >"${CONTROL_LOG}" 2>&1 || actual=$?
+    [[ "${actual}" -eq 15 && "$(snapshot)" == "${before}" ]] ||
+        fail "${rejectedEdit}: rejected edit changed state or bypassed identity/transport validation"
+    assertClean
 done
 
 printf 'docker-setup-regression-ok\n'

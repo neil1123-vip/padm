@@ -5928,6 +5928,10 @@ runDockerProtocolRegression() {
     bash "${PROJECT_ROOT}/docker/tests/protocol.sh"
 }
 
+runDockerRealityRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/reality.sh"
+}
+
 runDockerPermissionsRegression() {
     bash "${PROJECT_ROOT}/docker/tests/permissions.sh"
 }

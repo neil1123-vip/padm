@@ -30,8 +30,11 @@ Docker 现在能否通过受管控制命令完成对应能力，不表示底层�
 Reality 可跨核心复制，删除副核心最后入口会关闭副核心，主核心至少保留一个入口。
 复制复用凭据，同 UUID 跨核心共享流量与额度；两核采样全部复验后才写累计，
 额度应用失败或中断恢复全部配置，既有身份、核心归属和 WS 内部端口不改排。
-Xray 仅 Reality/WS TLS，sing-box 仅 Reality；双核心暂不能组合宿主集成。
-Nginx 与核心端 TLS 轮换底座已交付；新协议类型和完整管理尚未交付，
+3C.2 新增 Xray Reality XHTTP 和 Xray/sing-box Reality gRPC：
+首配、完整 v3 规格导入、基础参数编辑、传输派生及本地分享链接已接入。
+Vision/gRPC 可跨核心复制，XHTTP 仅限 Xray；副核心首配仍默认 Vision。
+双核心暂不能组合宿主集成；目标 bundle 版本与协议/核心支持均需匹配。
+Nginx 与核心端 TLS 轮换底座已交付；其它新协议类型和完整管理尚未交付，
 协议的 `management_status` 继续为 `deferred`。
 Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布、业务镜像及
 双架构客户端连通仍待验，不能由工具容器回归推断完成。
@@ -46,9 +49,9 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 
 | 原生菜单 | Docker 当前状态 | 已覆盖 | 尚未覆盖或边界 |
 | --- | --- | --- | --- |
-| 安装与重装 | 部分已交付，完整管理 `deferred` | `install`、可信发布输入 `release`、交互首配 `setup`、`edit`、`configure`、候选校验及恢复 | 支持 `1`、`21` 字段编辑、完整原始 spec 接入、多入口及主副核心；重装和真实发布连通未完成。 |
+| 安装与重装 | 部分已交付，完整管理 `deferred` | `install`、可信发布输入 `release`、交互首配 `setup`、`edit`、`configure`、候选校验及恢复 | 支持 `1`、`2`、`21`、`26` 字段编辑、完整原始 spec 接入、多入口及主副核心；重装和真实发布连通未完成。 |
 | 订阅与用户 | `supported` + `host-integrated` + `deferred` | 有条件的订阅发布、流量采集/额度、WireGuard 宿主集成 | 发布仅支持包含协议 `21` 和受管 TLS 的 Xray 配置；用户 CRUD 和多服务器工作流未迁移；WireGuard 需 `net-wireguard`。 |
-| 协议与入口 | 部分 `supported`，管理工作流 `deferred` | 协议 `1` Reality Vision、`21` VLESS WS TLS 的配置运行、字段编辑、多入口和跨核心 Reality 复制/删除 | 完整协议管理、Reality 目标库/扫描/参数重生成/443 共存、其余公开协议、内部路由协议和 CDN 地址覆盖尚未开放；Fail2ban WS 增删及端口联动未交付。 |
+| 协议与入口 | 部分 `supported`，管理工作流 `deferred` | `1` Reality Vision、`2` XHTTP、`26` gRPC、`21` WS TLS 的配置运行、字段编辑、分享链接、多入口和 Reality 传输派生 | XHTTP 仅限 Xray；完整协议管理、Reality 目标库/扫描/参数重生成/443 共存、其余公开协议、内部路由协议和 CDN 地址覆盖尚未开放；Fail2ban WS 增删及端口联动未交付。 |
 | 站点与证书 | 部分 `supported`，其余 `deferred` | TLS 文件安装、DNS-01 ACME、Nginx WebSocket 入口 | webroot/standalone ACME、静态站点/302/ALPN 管理尚未迁移。 |
 | 路由与访问控制 | `host-integrated` + `deferred` | WireGuard、TUN/TProxy 宿主集成合同 | WARP、IPv6 调优、Socks/HTTP 中继、DNS/hosts、BT、访问控制和路由规则尚未迁移。 |
 | 核心与服务 | `supported` + `deferred` | 基础状态、启动、停止、重启、日志、更新、回滚、配置校验 | 预发布试跑、升级风险扫描、Xray Geo 文件更新和自动任务尚未迁移；当前使用宿主子命令，不是原生全部生命周期管理。 |
@@ -64,7 +67,7 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 | ID | 能力 | 原生入口 | 配置运行状态 | 管理状态 | 核心 | Compose profile | 网络/监听 | 原因 |
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | VLESS Reality Vision | 安装与重装；协议与入口 -> REALITY 管理 | `supported` | `deferred` | Xray / sing-box | `core-xray` / `core-sing-box` | bridge / TCP | 支持单核心或主副核心配置、字段编辑及跨核心同协议多入口；完整管理未迁移。 |
-| 2 | VLESS Reality XHTTP | 协议与入口 -> XHTTP 管理 | `deferred` | `deferred` | Xray | 无 | bridge / TCP | XHTTP 入站及参数管理尚未进入 Docker 合同。 |
+| 2 | VLESS Reality XHTTP | 协议与入口 -> XHTTP 管理 | `supported` | `deferred` | Xray | `core-xray` | bridge / TCP | v3 支持首配、导入、路径/Host/模式编辑、复制及分享链接；高级 XHTTP 管理未迁移。 |
 | 3 | Hysteria2 | 协议与入口 -> Hysteria2 管理 | `deferred` | `deferred` | sing-box | 无 | bridge / UDP | UDP、端口跳跃、拥塞模式和订阅输出尚未接入。 |
 | 4 | AnyTLS | 安装与重装 -> 自定义安装 | `deferred` | `deferred` | sing-box | 无 | bridge / TCP | AnyTLS 入站、TLS 和订阅合同尚未接入。 |
 | 5 | NaiveProxy | 安装与重装 -> TLS 指纹抗性 | `deferred` | `deferred` | sing-box | 无 | bridge / TCP | 域名、证书和 NaiveProxy 配置尚未接入。 |
@@ -73,7 +76,7 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 | 23 | VMess HTTPUpgrade TLS | 安装与重装 -> 自定义安装 | `deferred` | `deferred` | Xray / sing-box | 无 | bridge / TCP + Nginx | HTTPUpgrade 入口和订阅输出尚未接入。 |
 | 24 | VLESS gRPC TLS | 安装与重装 -> 自定义安装 | `deferred` | `deferred` | Xray | 无 | bridge / TCP + Nginx | gRPC 反代和 HTTP/2 合同尚未接入。 |
 | 25 | Trojan gRPC TLS | 安装与重装 -> 自定义安装 | `deferred` | `deferred` | Xray | 无 | bridge / TCP + Nginx | gRPC 反代和 Trojan 输出尚未接入。 |
-| 26 | VLESS Reality gRPC | 安装与重装 -> 自定义安装 | `deferred` | `deferred` | Xray / sing-box | 无 | bridge / TCP | Reality gRPC 配置和双核心输出尚未接入。 |
+| 26 | VLESS Reality gRPC | 安装与重装 -> 自定义安装 | `supported` | `deferred` | Xray / sing-box | `core-xray` / `core-sing-box` | bridge / TCP | v3 支持首配、导入、service name 编辑、跨核心复制及分享链接；完整管理未迁移。 |
 | 27 | VLESS TCP TLS Vision | 安装与重装 -> 自定义安装 / 传统 TLS 兼容安装 | `deferred` | `deferred` | Xray | 无 | bridge / TCP + fallback | fallback 后端和传统 TLS 站点合同尚未接入；站点菜单只维护已有站点。 |
 | 28 | Trojan TCP TLS direct | 安装与重装 -> 自定义安装 | `deferred` | `deferred` | Xray / sing-box | 无 | bridge / TCP | 双核心 Trojan 配置和订阅输出尚未接入。 |
 | 29 | Trojan TCP TLS fallback | 安装与重装 -> 自定义安装 / 传统 TLS 兼容安装 | `deferred` | `deferred` | Xray | 无 | bridge / TCP + fallback | fallback 后端和传统 TLS 站点合同尚未接入；站点菜单只维护已有站点。 |

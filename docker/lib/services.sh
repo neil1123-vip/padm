@@ -97,15 +97,29 @@ dockerConfigureSpecValidate() {
           (.id == 1 and .listener_id == "vless-reality") or
           (.id == 21 and .listener_id == "vless-ws")
          else true end) and
-        if .id == 1 then
+        if .id == 1 or .id == 2 or .id == 26 then
           exact(["id", "server", "public_port", "address_families", "name", "uuid", "reality"] +
             if $request.schema_version >= 2 then ["listener_id"] else [] end +
-            if $request.schema_version == 3 then ["core"] else [] end) and
+            if $request.schema_version == 3 then ["core"] else [] end +
+            if .id == 2 then ["xhttp"] elif .id == 26 then ["grpc"] else [] end) and
+          (if .id == 1 then true else $request.schema_version == 3 end) and
           (.reality | exact(["server_name", "target_host", "target_port", "private_key", "public_key", "short_id"]) and
             (.server_name | hostname) and (.target_host | hostname) and (.target_port | port) and
             (.private_key | test("^[A-Za-z0-9_-]{43}$")) and
             (.public_key | test("^[A-Za-z0-9_-]{43}$")) and
-            (.short_id | test("^(?:[a-f0-9]{2}){1,8}$")))
+            (.short_id | test("^(?:[a-f0-9]{2}){1,8}$"))) and
+          (if .id == 2 then
+             .core == "xray" and
+             (.xhttp | exact(["path", "host", "mode"]) and
+               (.path | type == "string" and test("^/[A-Za-z0-9._~/-]{1,128}$") and
+                 (explode | all(. > 32 and . != 127))) and
+               (.host | hostname and (explode | all(. > 32 and . != 127))) and
+               (.mode == "auto" or .mode == "packet-up" or .mode == "stream-up"))
+           elif .id == 26 then
+             (.grpc | exact(["service_name"]) and
+               (.service_name | type == "string" and test("^[A-Za-z0-9._-]{1,64}$") and
+                 (explode | all(. > 32 and . != 127))))
+           else true end)
         elif .id == 21 then
           exact(["id", "server", "public_port", "address_families", "name", "uuid", "websocket"] +
             if $request.schema_version >= 2 then ["listener_id"] else [] end +
@@ -472,7 +486,7 @@ dockerRealityTargetTlsPing() {
 dockerRealityTargetsValidate() {
     local specFile=$1 xrayImage opsImage host port sni records ip asn _org
     local targetResult targetState cfResult cfState incomplete=false
-    jq -e 'any(.core.protocols[]; .id == 1)' "${specFile}" >/dev/null || return 0
+    jq -e 'any(.core.protocols[]; .id == 1 or .id == 2 or .id == 26)' "${specFile}" >/dev/null || return 0
     command -v timeout >/dev/null 2>&1 || {
         dockerError '缺少 timeout，无法限制 REALITY 目标站探测时长'
         return 1
@@ -523,7 +537,8 @@ dockerRealityTargetsValidate() {
             dockerError "REALITY 目标风险检测不完整，已拒绝部署: ${host}:${port}"
             return 1
         fi
-    done < <(jq -r '.core.protocols[] | select(.id == 1) | [.reality.target_host, (.reality.target_port | tostring), .reality.server_name] | @tsv' "${specFile}")
+    done < <(jq -r '[.core.protocols[] | select(.id == 1 or .id == 2 or .id == 26) |
+      [.reality.target_host, (.reality.target_port | tostring), .reality.server_name]] | unique[] | @tsv' "${specFile}")
 }
 
 dockerCurrentOwnsPort() {
@@ -727,17 +742,18 @@ dockerGenerateXrayConfig() {
         log: {loglevel: "warning"},
         inbounds: ([
           $r.core.protocols[] | select((.core // $r.core.type) == "xray") |
-          if .id == 1 then {
+          if .id == 1 or .id == 2 or .id == 26 then {
             listen: "0.0.0.0",
             port: .public_port,
             protocol: "vless",
             tag: (.listener_id // "vless-reality"),
             settings: {
-              clients: [{id: .uuid, email: .name, flow: "xtls-rprx-vision"}],
+              clients: [{id: .uuid, email: .name} +
+                if .id == 1 then {flow: "xtls-rprx-vision"} else {} end],
               decryption: "none"
             },
             streamSettings: {
-              network: "tcp",
+              network: (if .id == 1 then "tcp" elif .id == 2 then "xhttp" else "grpc" end),
               security: "reality",
               realitySettings: {
                 show: false,
@@ -747,7 +763,10 @@ dockerGenerateXrayConfig() {
                 privateKey: .reality.private_key,
                 shortIds: ["", .reality.short_id]
               }
-            },
+            } + (if .id == 2 then {
+              xhttpSettings: {path: .xhttp.path, host: .xhttp.host, mode: .xhttp.mode,
+                xmux: {maxConcurrency: "16-32", hMaxRequestTimes: "600-900", hMaxReusableSecs: "1800-3000"}}
+            } elif .id == 26 then {grpcSettings: {serviceName: .grpc.service_name}} else {} end),
             sniffing: {enabled: true, destOverride: ["http", "tls", "quic"], routeOnly: true}
           } elif .id == 21 then {
             listen: "0.0.0.0",
@@ -798,7 +817,8 @@ dockerGenerateSingBoxConfig() {
             tag: (.listener_id // "vless-reality"),
             listen: "::",
             listen_port: .public_port,
-            users: [{uuid: .uuid, name: .name, flow: "xtls-rprx-vision"}],
+            users: [{uuid: .uuid, name: .name} +
+              if .id == 1 then {flow: "xtls-rprx-vision"} else {} end],
             tls: {
               enabled: true,
               server_name: .reality.server_name,
@@ -809,7 +829,7 @@ dockerGenerateSingBoxConfig() {
                 short_id: ["", .reality.short_id]
               }
             }
-          }
+          } + (if .id == 26 then {transport: {type: "grpc", service_name: .grpc.service_name}} else {} end)
         ] + [
           $r.host_integrations[] |
           if .type == "tun" then {
@@ -925,6 +945,10 @@ dockerGenerateSubscription() {
       .core.protocols[] |
       if .id == 1 then
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&flow=xtls-rprx-vision&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=tcp#\(.name | @uri)"
+      elif .id == 2 then
+        "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=xhttp&host=\(.xhttp.host | @uri)&path=\(.xhttp.path | @uri)&mode=\(.xhttp.mode)#\(.name | @uri)"
+      elif .id == 26 then
+        "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=grpc&alpn=h2&path=\(.grpc.service_name | @uri)&serviceName=\(.grpc.service_name | @uri)#\(.name | @uri)"
       elif .id == 21 then
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&security=tls&sni=\(.websocket.domain | @uri)&type=ws&host=\(.websocket.domain | @uri)&path=\("/" + .websocket.path + "ws" | @uri)#\(.name | @uri)"
       else empty end
@@ -993,7 +1017,7 @@ dockerGenerateCompose() {
         else "[::]:\($protocol.public_port):\($containerPort)/tcp" end
       ];
       [$r.core.type, $r.core.secondary_type] | map(select(. != null)) as $cores |
-      ($r.core.protocols | map(select(.id == 1))) as $direct |
+      ($r.core.protocols | map(select(.id == 1 or .id == 2 or .id == 26))) as $direct |
       ($r.core.protocols | map(select(.id == 21))) as $websocket |
       ($r.host_integrations | map(select(.type == "wireguard"))) as $wireguard |
       ($r.host_integrations | map(select(.type == "fail2ban"))) as $fail2ban |

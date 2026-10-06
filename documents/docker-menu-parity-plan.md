@@ -16,7 +16,7 @@
 | --- | --- | --- |
 | 1. 功能矩阵 | 已完成，提交 `7fe6a9e` | 协议与功能边界、管理状态、合同回归 |
 | 2. 菜单与可信首次配置 | 2A–2C 已实现；本地 PTY、事务和 Linux 权限通过，真实发布/连通待验 | 安装后进入菜单、独立命令生命周期、无需手填镜像的首次配置 |
-| 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付只读入口与现有编辑入口 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
+| 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2 Reality 扩展已通过本地与 amd64 实际传输验收 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
 | 4. 用户、订阅与服务维护 | 未开始 | 本机用户业务、多服务器后端、分范围备份恢复、核心运维 |
 | 5. 站点、路由与宿主集成 | 未开始 | 站点管理、内部能力、规则所有权及可撤销宿主操作 |
 | 6. 发布与完整验收 | 未开始 | 迁移文档、真实 Linux 与双架构证据、受门禁保护的 Release |
@@ -423,6 +423,62 @@ Docker/网络边界使用模拟命令，本项不新增真实客户端、SSH 或
 完整 `management_status` 继续 `deferred`：3D 高级管理与 4A 用户/分享订阅尚未交付，
 3C 的新协议及完整管理验收不能据此标为完成。
 
+#### 3C.2 Reality XHTTP 与 gRPC
+
+新增协议 `2`（仅 Xray）与 `26`（Xray/sing-box），沿用 v3 和现有候选事务。
+首配支持 XHTTP/gRPC，双核心的副核心仍默认 Reality Vision；
+已有 Reality 入口可派生其它传输入口，复用 UUID、密钥和 short ID，
+不能替换已有入口身份或新造凭据。XHTTP 支持 path、Host、auto/packet-up/stream-up；
+gRPC 支持 service name；概览、本地分享链接及 HTTPS 发布内容均复用原生成器，
+发布仍要求 Xray WS TLS 和受管证书。新传输不附加 Vision flow。
+目标风险校验覆盖三种 Reality，相同目标/SNI 去重检测。
+
+更新、配置切换和备份恢复的 bundle 门槛同时核对规格版本与每个协议/核心组合，
+拒绝旧 v3 bundle 中 `deferred`、缺失或核心不匹配的新增协议；不新增规格版本。
+功能矩阵的协议 `2`/`26` 为基础配置运行 `supported`，完整管理仍 `deferred`。
+高级 XHTTP 参数、目标库/扫描/PQC/参数重生成/443 共存继续归后续管理阶段。
+
+本地验收：Docker Desktop Linux daemon `29.8.2`，固定 Linux 源码快照，
+首配/编辑真实 PTY `38.143` 秒通过，新增 Reality 定向回归 `14.340` 秒通过，
+配置/编辑/更新回滚与功能矩阵 `phase3` `123.583` 秒通过。
+覆盖新首配和取消、三种新双核心首配、派生/编辑、跨核心拒绝、凭据不变、
+严格字段反例、旧 v1/v2 拒绝新协议、旧 bundle 拒绝、双栈 TCP 映射、
+关闭发布时精确 URI、运行漂移拒绝、各传输共享 UUID 账号/额度、双核心失败事务恢复，
+以及新协议组合的实际控制命令更新/回滚后配置、链接和流量状态保持。
+Draft 2020-12 JSON Schema 正反例、Bash、ShellCheck 与 diff check 通过。
+`docker-reality` selector 已接入；CI root 门槛运行 `reality.sh`，
+该套件复用并包含原 `protocol.sh` 回归，不额外重复运行。
+
+真实 amd64 验收 `15.416` 秒通过：唯一 Compose 项目/网络/命名卷，
+不发布宿主端口，不改现有部署；两核心服务端及两个客户端配置检查、
+生成的服务健康检查均通过。客户端仅从 `protocol links` URI 生成，
+Xray auto XHTTP、sing-box gRPC 到 Xray、sing-box gRPC 到 sing-box
+三条 SOCKS 实际 HTTP proof 并行通过，Reality 目标为 `www.debian.org`。
+测试卷经 tar 流保留 `0:10001` 和 `0750/0640`，未放宽运行权限；
+测试项目 `padm-reality-1791265518-73507-25456` 的容器、网络和卷无残留。
+复现命令：
+
+```bash
+bash docker/tests/reality.sh
+bash docker/tests/reality-real.sh \
+  padm-local/padm-xray:tls-3b4 \
+  padm-local/padm-sing-box:tls-3b4 \
+  padm-local/padm-ops:tls-3b4
+```
+
+本机镜像固定 ID：
+
+| 镜像 | ID |
+| --- | --- |
+| Xray | `sha256:edb005cb17f2961596b42cd2266a87ef5adcd3c6601cf529b6a088ac5f37dacd` |
+| sing-box | `sha256:5fdff482ad9c65aa0e583a20e27d5f322b2539e673432e2cf78c7f460028fcb3` |
+| ops | `sha256:ca6bf4a8b7936718eb9d3633fb8580e6e50de388c93275394f5c3768bb2587f6` |
+
+本项未重建、签名发布或部署镜像，未验公网宿主入口、原生 arm64、
+第三方导入 UI、XHTTP packet-up/stream-up 实际传输及其它目标/客户端；
+真实脚本直接验生成配置和传输，不冒充生产 DNS/ASN 风险门禁通过。
+3B.4 剩余环境条件和 3D 完整管理仍未完成。
+
 ### 3D. 协议管理与入口维护
 
 - Reality：目标检测/扫描、候选库、黑名单、PQC 状态、参数重生成；
@@ -580,7 +636,7 @@ Fail2ban 1.1.0），只读挂载当前生成配置及入口，未重建或发布
 | `network-optimization`、`vless-encryption` | 5C 独立宿主/实验子项；未验收仍不支持 |
 
 新增能力提交时同步更新文档、配置合同、生成器/Compose、控制入口及证据。
-[`phase3.sh`](../docker/tests/phase3.sh)当前固定 `supported` 协议为 `[1, 21]`，
+[`phase3.sh`](../docker/tests/phase3.sh)当前固定 `supported` 协议为 `[1, 2, 21, 26]`，
 并要求菜单和管理差距为 `deferred`；后续按真实交付更新这些基线断言，
 保留协议注册表、核心/profile、网络权限和前置条件的一致性检查。
 不得只删除断言或只修改 `features.json` 来宣称完成。

@@ -471,6 +471,9 @@ jq -n '{properties:{schema_version:{const:1}}}' \
     >"${OLD_SCHEMA_BUNDLE}/docker/contracts/configure.schema.json"
 cp -- "${PROJECT_ROOT}/docker/contracts/configure.schema.json" \
     "${NEW_SCHEMA_BUNDLE}/docker/contracts/configure.schema.json"
+for bundle in "${OLD_SCHEMA_BUNDLE}" "${NEW_SCHEMA_BUNDLE}"; do
+    cp -- "${PROJECT_ROOT}/docker/contracts/features.json" "${bundle}/docker/contracts/features.json"
+done
 jq '.schema_version = 3 | .core.secondary_type = null |
     .core.protocols |= map(.core = "xray")' "${EDIT_SPEC}" >"${TEST_ROOT}/edit-v3.json"
 bash -euo pipefail -c '
@@ -1123,7 +1126,7 @@ validateFeatureMatrix() {
           ($matrix.feature_matrix[$entry.value] | {status, profiles, network_mode, host_capabilities})) and
       all(["interactive-menu", "reality-target-management", "reality-parameter-management",
         "reality-coexistence", "core-upgrade-assessment"][]; $matrix.feature_matrix[.].status == "deferred") and
-      ([.protocols[] | select(.status == "supported") | .id] | sort) == [1, 21] and
+      ([.protocols[] | select(.status == "supported") | .id] | sort) == [1, 2, 21, 26] and
       .feature_matrix.subscription.requires == {core: "xray", protocol_ids: [21], tls: true} and
       (.feature_matrix.subscription.profiles | sort) == ["core-xray", "nginx", "subscription"]
     ' "$1" >/dev/null 2>&1
@@ -1152,7 +1155,7 @@ del(.feature_matrix["reality-target-management"])
 .protocols[3].transport = "quic"
 .protocols[14].udp_support = "no"
 .protocols[0].management_status = "supported"
-.protocols[1].status = "supported" | .protocols[1].profiles = ["core-xray"]
+.protocols[2].status = "supported" | .protocols[2].profiles = ["core-sing-box"]
 .feature_matrix.subscription.requires.core = "sing-box"
 .feature_matrix.subscription.requires.protocol_ids = [1]
 .feature_matrix.subscription.requires.tls = false

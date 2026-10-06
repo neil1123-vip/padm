@@ -46,6 +46,12 @@
                 "$ref": "#/$defs/reality_protocol"
               },
               {
+                "$ref": "#/$defs/xhttp_reality_protocol"
+              },
+              {
+                "$ref": "#/$defs/grpc_reality_protocol"
+              },
+              {
                 "$ref": "#/$defs/websocket_protocol"
               }
             ]
@@ -190,7 +196,10 @@
             "not": {"required": ["secondary_type"]},
             "properties": {
               "protocols": {
-                "items": {"not": {"required": ["core"]}}
+                "items": {
+                  "not": {"required": ["core"]},
+                  "properties": {"id": {"enum": [1, 21]}}
+                }
               }
             }
           }
@@ -551,6 +560,121 @@
                 "short_id": {
                   "type": "string",
                   "pattern": "^(?:[a-f0-9]{2}){1,8}$"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "xhttp_reality_protocol": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/protocol_base"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "server", "public_port", "address_families", "name", "uuid", "reality", "xhttp"],
+          "properties": {
+            "id": {
+              "const": 2
+            },
+            "listener_id": {
+              "type": "string",
+              "pattern": "^entry-[a-z0-9][a-z0-9-]{0,47}$"
+            },
+            "core": {
+              "const": "xray"
+            },
+            "server": {
+              "$ref": "#/$defs/server_address"
+            },
+            "public_port": {
+              "$ref": "#/$defs/port"
+            },
+            "address_families": {
+              "$ref": "#/$defs/address_families"
+            },
+            "name": {
+              "$ref": "#/$defs/account_name"
+            },
+            "uuid": {
+              "$ref": "#/$defs/uuid"
+            },
+            "reality": {
+              "$ref": "#/$defs/reality_protocol/allOf/1/properties/reality"
+            },
+            "xhttp": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["path", "host", "mode"],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "pattern": "^/[A-Za-z0-9._~/-]{1,128}$",
+                  "not": {"pattern": "[\\s\\u0000-\\u001f\\u007f]"}
+                },
+                "host": {
+                  "$ref": "#/$defs/hostname",
+                  "not": {"pattern": "[\\s\\u0000-\\u001f\\u007f]"}
+                },
+                "mode": {
+                  "enum": ["auto", "packet-up", "stream-up"]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "grpc_reality_protocol": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/protocol_base"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "server", "public_port", "address_families", "name", "uuid", "reality", "grpc"],
+          "properties": {
+            "id": {
+              "const": 26
+            },
+            "listener_id": {
+              "type": "string",
+              "pattern": "^entry-[a-z0-9][a-z0-9-]{0,47}$"
+            },
+            "core": {
+              "enum": ["xray", "sing-box"]
+            },
+            "server": {
+              "$ref": "#/$defs/server_address"
+            },
+            "public_port": {
+              "$ref": "#/$defs/port"
+            },
+            "address_families": {
+              "$ref": "#/$defs/address_families"
+            },
+            "name": {
+              "$ref": "#/$defs/account_name"
+            },
+            "uuid": {
+              "$ref": "#/$defs/uuid"
+            },
+            "reality": {
+              "$ref": "#/$defs/reality_protocol/allOf/1/properties/reality"
+            },
+            "grpc": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["service_name"],
+              "properties": {
+                "service_name": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9._-]{1,64}$",
+                  "not": {"pattern": "[\\s\\u0000-\\u001f\\u007f]"}
                 }
               }
             }

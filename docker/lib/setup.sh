@@ -86,7 +86,7 @@ dockerSetupGenerateSpec() {
     uuid=$(dockerSetupTool "${xrayImage}" uuid 2>/dev/null) || return 1
     [[ "${uuid}" =~ ^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$ ]] || return 1
     token=$(dockerSetupRandomHex "${opsImage}" 32) || return 1
-    if [[ "${protocols}" == 1 || "${protocols}" == 3 || -n "${secondaryCore}" ]]; then
+    if [[ "${protocols}" != 2 || -n "${secondaryCore}" ]]; then
         keyPair=$(dockerSetupTool "${xrayImage}" x25519 2>/dev/null) || return 1
         privateKey=$(awk '/^PrivateKey:/ { print $2; exit }' <<<"${keyPair}")
         publicKey=$(awk '/^Password \(PublicKey\):/ { print $3; exit } /^PublicKey:/ { print $2; exit }' <<<"${keyPair}")
@@ -97,7 +97,7 @@ dockerSetupGenerateSpec() {
         [[ "${derivedPublic}" == "${publicKey}" ]] || return 1
         shortId=$(dockerSetupRandomHex "${opsImage}" 8) || return 1
     fi
-    if [[ "${protocols}" == 2 || "${protocols}" == 3 ]]; then
+    if [[ "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 4 ]]; then
         wsPath=$(dockerSetupRandomHex "${opsImage}" 16) || return 1
     fi
     inputsFile="${output}.credentials"
@@ -119,12 +119,17 @@ dockerSetupGenerateSpec() {
       $secrets[3] as $shortId | $secrets[4] as $wsPath | $secrets[5] as $token |
       . + {schema_version: 3, core: {type: $core,
         secondary_type: (if $secondaryCore == "" then null else $secondaryCore end), protocols: [
-        (if $protocols == 1 or $protocols == 3 then {
-          id: 1, core: $core, server: $server, public_port: $realityPort, address_families: $families,
-          listener_id: "vless-reality", name: "main-reality", uuid: $uuid,
+        (if $protocols != 2 then {
+          id: (if $protocols == 4 then 2 elif $protocols == 5 then 26 else 1 end),
+          core: $core, server: $server, public_port: $realityPort, address_families: $families,
+          listener_id: (if $protocols == 4 then "entry-reality-xhttp"
+            elif $protocols == 5 then "entry-reality-grpc" else "vless-reality" end),
+          name: (if $protocols == 4 then "main-reality-xhttp"
+            elif $protocols == 5 then "main-reality-grpc" else "main-reality" end), uuid: $uuid,
           reality: {server_name: $sni, target_host: $target, target_port: $targetPort,
             private_key: $privateKey, public_key: $publicKey, short_id: $shortId}
-        } else empty end),
+        } + (if $protocols == 4 then {xhttp: {path: ("/" + $wsPath), host: $sni, mode: "auto"}}
+          elif $protocols == 5 then {grpc: {service_name: "grpc"}} else {} end) else empty end),
         (if $protocols == 2 or $protocols == 3 then {
           id: 21, core: $core, server: $server, public_port: $wsPort, address_families: $families,
           listener_id: "vless-ws", name: "main-ws", uuid: $uuid,
@@ -323,12 +328,14 @@ dockerSetupCommand() {
     1|3)
         core=xray
         [[ "${coreChoice}" != 3 ]] || secondaryCore=sing-box
-        dockerSetupRead protocols '协议 [1=Reality, 2=WS TLS, 3=两者, 0=取消]: ' 1 || return 0
-        [[ "${protocols}" == 1 || "${protocols}" == 2 || "${protocols}" == 3 ]] || return "${PADM_DOCKER_RC_USAGE}"
+        dockerSetupRead protocols '协议 [1=Reality Vision, 2=WS TLS, 3=两者, 4=Reality XHTTP, 5=Reality gRPC, 0=取消]: ' 1 || return 0
+        [[ "${protocols}" =~ ^[1-5]$ ]] || return "${PADM_DOCKER_RC_USAGE}"
         ;;
     2|4)
         core=sing-box
         [[ "${coreChoice}" != 4 ]] || secondaryCore=xray
+        dockerSetupRead protocols '协议 [1=Reality Vision, 5=Reality gRPC, 0=取消]: ' 1 || return 0
+        [[ "${protocols}" == 1 || "${protocols}" == 5 ]] || return "${PADM_DOCKER_RC_USAGE}"
         ;;
     *) return "${PADM_DOCKER_RC_USAGE}" ;;
     esac
@@ -341,7 +348,7 @@ dockerSetupCommand() {
     3) families='["ipv4","ipv6"]' ;;
     *) return "${PADM_DOCKER_RC_USAGE}" ;;
     esac
-    if [[ "${protocols}" == 1 || "${protocols}" == 3 || -n "${secondaryCore}" ]]; then
+    if [[ "${protocols}" != 2 || -n "${secondaryCore}" ]]; then
         if [[ "${protocols}" != 2 ]]; then
             dockerSetupRead realityPort '主核心 Reality 入口端口 [443]: ' 443 || return 0
         fi
@@ -390,13 +397,15 @@ dockerSetupCommand() {
         { dockerError 'Reality 和 WS TLS 不能使用同一入口端口'; return "${PADM_DOCKER_RC_CONFLICT}"; }
     if [[ -n "${secondaryCore}" ]] &&
         { [[ "${protocols}" != 2 && "${secondaryPort}" == "${realityPort}" ]] ||
-          [[ "${protocols}" != 1 && "${secondaryPort}" == "${wsPort}" ]]; }; then
+          [[ ( "${protocols}" == 2 || "${protocols}" == 3 ) && "${secondaryPort}" == "${wsPort}" ]]; }; then
         dockerError '主副核心不能使用同一入口端口'
         return "${PADM_DOCKER_RC_CONFLICT}"
     fi
     printf '\n核心: %s\n协议组合: %s\n服务器: %s\n地址族: %s\n' "${core}" "${protocols}" "${server}" "${families}"
     [[ "${protocols}" == 2 ]] || printf 'Reality: %s -> %s:%s，SNI %s\n' "${realityPort}" "${target}" "${targetPort}" "${sni}"
-    [[ "${protocols}" == 1 ]] || printf 'WS TLS: %s:%s，证书方式 %s，订阅 %s\n' "${domain}" "${wsPort}" "${tlsMode}" "${subscription}"
+    if [[ "${protocols}" == 2 || "${protocols}" == 3 ]]; then
+        printf 'WS TLS: %s:%s，证书方式 %s，订阅 %s\n' "${domain}" "${wsPort}" "${tlsMode}" "${subscription}"
+    fi
     [[ -z "${secondaryCore}" ]] || printf '副核心: %s，Reality 入口端口 %s\n' "${secondaryCore}" "${secondaryPort}"
     printf '确认后将验证发布、生成账号参数并配置服务。\n'
     dockerSetupRead answer '确认首次配置？[y/N]: ' n || return 0
@@ -483,7 +492,8 @@ dockerProtocolCommand() (
     if [[ "${action}" == list ]]; then
         jq -r 'def authority: if contains(":") then "[\(.)]" else . end;
           .core.protocols[] |
-          "\(.listener_id)  \(.core)  \(if .id == 1 then "Reality Vision" else "WS TLS" end)  \(.server | authority):\(.public_port)  [\(.address_families | join(","))]  \(.name)"' \
+          "\(.listener_id)  \(.core)  \(if .id == 1 then "Reality Vision"
+            elif .id == 2 then "Reality XHTTP" elif .id == 26 then "Reality gRPC" else "WS TLS" end)  \(.server | authority):\(.public_port)  [\(.address_families | join(","))]  \(.name)"' \
             "${normalized}"
         return $?
     fi
@@ -504,9 +514,9 @@ dockerProtocolCommand() (
 
 dockerEditFields() {
     local draft=$1 choice protocol listener field value= defaultValue= valueFile="${1}.value" temporary="${1}.next"
-    local sourceCore targetCore coreChoice primaryCore
+    local sourceCore targetCore coreChoice primaryCore targetProtocol
     while :; do
-        printf '\n1. 入口端口\n2. 服务器地址\n3. 地址族\n4. 节点名称\n5. Reality 目标/SNI\n6. WS 路径\n7. 订阅开关\n8. 验证并预览\n9. 复制入口\n10. 删除入口\n0. 取消\n'
+        printf '\n1. 入口端口\n2. 服务器地址\n3. 地址族\n4. 节点名称\n5. Reality 目标/SNI\n6. WS 路径\n7. 订阅开关\n8. 验证并预览\n9. 复制入口\n10. 删除入口\n11. 安装其它 Reality 传输入口\n12. Reality 传输参数\n0. 取消\n'
         dockerSetupRead choice '编辑项目: ' || return 3
         [[ "${choice}" != 8 ]] || return 0
         if [[ "${choice}" == 7 ]]; then
@@ -538,14 +548,20 @@ dockerEditFields() {
                     dockerError '主核心至少保留一个入口；删除副核心的最后入口会关闭副核心'
                     return 1
                 }
-            elif [[ "${choice}" == 9 ]]; then
+            elif [[ "${choice}" == 9 || "${choice}" == 11 ]]; then
+                targetProtocol=${protocol}
+                if [[ "${choice}" == 11 ]]; then
+                    [[ "${protocol}" == 1 || "${protocol}" == 2 || "${protocol}" == 26 ]] || return 1
+                    dockerSetupRead targetProtocol 'Reality 传输 [1=Vision, 2=XHTTP, 26=gRPC，0=取消]: ' "${protocol}" || return 3
+                    [[ "${targetProtocol}" == 1 || "${targetProtocol}" == 2 || "${targetProtocol}" == 26 ]] || return 1
+                fi
                 sourceCore=$(jq -r --arg key "${listener}" '.core.protocols[] | select(.listener_id == $key) | .core' "${draft}") || return 1
                 primaryCore=$(jq -r '.core.type' "${draft}") || return 1
                 if [[ "${sourceCore}" == xray ]]; then defaultValue=1; else defaultValue=2; fi
                 dockerSetupRead coreChoice "目标核心 [1=Xray, 2=sing-box，空输入保留 ${sourceCore}，0=取消]: " "${defaultValue}" || return 3
                 case "${coreChoice}" in 1) targetCore=xray ;; 2) targetCore=sing-box ;; *) return 1 ;; esac
-                if [[ "${protocol}" == 21 && "${targetCore}" != xray ]]; then
-                    dockerError 'WS TLS 入口仅支持 Xray，不能复制到 sing-box'
+                if [[ ( "${targetProtocol}" == 21 || "${targetProtocol}" == 2 ) && "${targetCore}" != xray ]]; then
+                    dockerError 'WS TLS 和 Reality XHTTP 入口仅支持 Xray，不能复制到 sing-box'
                     return 1
                 fi
                 if [[ "${targetCore}" != "${primaryCore}" ]] &&
@@ -555,13 +571,20 @@ dockerEditFields() {
                 fi
                 dockerSetupRead value '新入口端口（0 取消）: ' || return 3
                 [[ "${value}" =~ ^[0-9]{1,5}$ ]] || return 1
-                jq --arg key "${listener}" --arg targetCore "${targetCore}" --argjson port "${value}" '
+                jq --arg key "${listener}" --arg targetCore "${targetCore}" --argjson port "${value}" \
+                    --argjson targetProtocol "${targetProtocol}" --argjson derive "$([[ "${choice}" == 11 ]] && printf true || printf false)" '
                   . as $r |
                   if (.core.protocols | length) >= 16 then error("最多16个入口") else . end |
                   first(range(1; 18) | "entry-\(.)" | . as $id |
                     select(all($r.core.protocols[]; .listener_id != $id))) as $newId |
                   (.core.protocols[] | select(.listener_id == $key)) as $source |
                   ($source | .listener_id = $newId | .core = $targetCore | .public_port = $port |
+                    if $derive then
+                      del(.xhttp, .grpc) | .id = $targetProtocol |
+                      if .id == 2 then
+                        .xhttp = {path: ("/" + $newId + "xhttp"), host: .reality.server_name, mode: "auto"}
+                      elif .id == 26 then .grpc = {service_name: "grpc"} else . end
+                    else . end |
                     if .id == 21 then
                       ([$r.core.protocols[] | if .id == 21 then .websocket.backend_port else .public_port end] +
                        [$r.host_integrations[] | select(.type == "tproxy") | .settings.port] + [10085]) as $used |
@@ -587,7 +610,7 @@ dockerEditFields() {
             3) field=address_families ;;
             4) field=name ;;
             5)
-                [[ "${protocol}" == 1 ]] || return 1
+                [[ "${protocol}" == 1 || "${protocol}" == 2 || "${protocol}" == 26 ]] || return 1
                 dockerSetupRead value 'Reality 参数 [1=目标域名, 2=目标端口, 3=SNI]: ' || return 3
                 case "${value}" in
                 1) field=reality.target_host ;;
@@ -597,6 +620,16 @@ dockerEditFields() {
                 esac
                 ;;
             6) [[ "${protocol}" == 21 ]] || return 1; field=websocket.path ;;
+            12)
+                if [[ "${protocol}" == 2 ]]; then
+                    dockerSetupRead value 'XHTTP 参数 [1=路径, 2=Host, 3=模式]: ' || return 3
+                    case "${value}" in 1) field=xhttp.path ;; 2) field=xhttp.host ;; 3) field=xhttp.mode ;; *) return 1 ;; esac
+                elif [[ "${protocol}" == 26 ]]; then
+                    field=grpc.service_name
+                else
+                    return 1
+                fi
+                ;;
             *) return 1 ;;
             esac
             defaultValue=$(jq -r --arg key "${listener}" --arg field "${field}" '
@@ -737,7 +770,10 @@ dockerEditCommand() {
     dockerConfigureReleaseValidate "${draft}" || return "${PADM_DOCKER_RC_MANIFEST}"
     jq -en --slurpfile before "${normalized}" --slurpfile after "${draft}" '
       def fixed: del(.server, .public_port, .address_families, .name,
-        .reality.target_host, .reality.target_port, .reality.server_name, .websocket.path);
+        .reality.target_host, .reality.target_port, .reality.server_name, .websocket.path,
+        .xhttp.path, .xhttp.host, .xhttp.mode, .grpc.service_name);
+      def reality: .id == 1 or .id == 2 or .id == 26;
+      def shared: fixed | del(.listener_id, .core, .id, .xhttp, .grpc);
       def root: del(.core.protocols, .core.secondary_type, .tls, .subscription.enabled);
       $before[0] as $old | $after[0] as $new |
       [$old.core.protocols[].listener_id] as $oldIds |
@@ -750,15 +786,19 @@ dockerEditCommand() {
         . as $entry | [$old.core.protocols[] | select(.listener_id == $entry.listener_id)] as $existing |
         if ($existing | length) == 1 then ($existing[0] | fixed) == ($entry | fixed)
         else
-          (($entry.id == 1 and ($entry.core == "xray" or $entry.core == "sing-box")) or
+          ((($entry.id == 1 or $entry.id == 26) and ($entry.core == "xray" or $entry.core == "sing-box")) or
+           ($entry.id == 2 and $entry.core == "xray") or
            ($entry.id == 21 and $entry.core == "xray")) and
           any($old.core.protocols[];
             .listener_id as $sourceId | any($new.core.protocols[]; .listener_id == $sourceId) and
-            (fixed | del(.listener_id, .core, .websocket.backend_port, .websocket.tls_port)) ==
-            ($entry | fixed | del(.listener_id, .core, .websocket.backend_port, .websocket.tls_port)))
+            (if reality and ($entry | reality) then shared == ($entry | shared)
+            else
+              (fixed | del(.listener_id, .core, .websocket.backend_port, .websocket.tls_port)) ==
+              ($entry | fixed | del(.listener_id, .core, .websocket.backend_port, .websocket.tls_port))
+            end))
         end)
     ' >/dev/null 2>&1 || {
-        dockerError '仅支持现有协议的入口编辑、复制和删除；账号、密钥、已有入口身份、内部端口与核心、主核心、证书和发布不能改写'
+        dockerError '仅支持现有入口编辑、复制、Reality 传输派生和删除；账号、密钥、已有入口身份、内部端口与核心、主核心、证书和发布不能改写'
         return "${PADM_DOCKER_RC_STATE}"
     }
     opsImage=$(dockerManifestImageReference ops) || return "${PADM_DOCKER_RC_MANIFEST}"
@@ -769,7 +809,7 @@ dockerEditCommand() {
             dockerError 'Reality 公私钥不匹配，拒绝提交'
             return "${PADM_DOCKER_RC_STATE}"
         }
-    done < <(jq -r '.core.protocols[] | select(.id == 1) |
+    done < <(jq -r '.core.protocols[] | select(.id == 1 or .id == 2 or .id == 26) |
       [.reality.private_key, .reality.public_key] | @tsv' "${draft}")
     dockerConfigureApply "${draft}" '' '' "${mode}"
 }
