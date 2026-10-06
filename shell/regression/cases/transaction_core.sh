@@ -1304,6 +1304,7 @@ runCoreInstallServiceActionFailureRegression() (
     readLastInstallationConfig() { return 0; }
     coreTemplateCollectInitialClients() { return 0; }
     readInstallTLSPort() { port=2443; return 0; }
+    prepareXrayInstallInputs() { return 0; }
     prepareSingBoxInstallInputs() { return 0; }
     unInstallSubscribe() { return 0; }
     installTools() { printf 'installTools:%s\n' "$*" >>"${callLog}"; return 0; }

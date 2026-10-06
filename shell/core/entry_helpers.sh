@@ -193,6 +193,10 @@ readInstallTLSPort() {
         corePortInputErrorCard
         historyPort=
     fi
+    if [[ -z "${AUTO_PORT:-}" ]] && validPortNumber "${historyPort}" && ! xrayInstallPortAvailable "${historyPort}"; then
+        [[ -z "${AUTO_INSTALL:-}" ]] || return 1
+        historyPort=
+    fi
     if [[ -n "${AUTO_PORT:-}" ]]; then
         port=${AUTO_PORT}
     elif [[ -n "${lastInstallationConfig:-}" && -n "${historyPort}" ]]; then
@@ -210,13 +214,18 @@ readInstallTLSPort() {
         while true; do
             menuReadChoice port "${prompt}" port true || return 1
             port=${port:-${defaultPort:-$((RANDOM % 20001 + 10000))}}
-            validPortNumber "${port}" && break
-            corePortInputErrorCard
+            if validPortNumber "${port}"; then
+                xrayInstallPortAvailable "${port}" && break
+            else
+                corePortInputErrorCard
+            fi
             [[ -z "${AUTO_INSTALL:-}" ]] || return 1
         done
     fi
 
     validPortNumber "${port}" || { corePortInputErrorCard; return 1; }
+    xrayInstallPortAvailable "${port}" || return 1
+    port=$((10#${port}))
 }
 
 # 自定义端口

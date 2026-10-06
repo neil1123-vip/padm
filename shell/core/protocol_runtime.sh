@@ -1039,6 +1039,44 @@ resolveRealityInstallCoexistPort() {
     resultRef=${internalPort}
 }
 
+# 本次 Xray 的公网 TCP 监听也不能与固定回落后端重叠。
+xrayInstallPortAvailable() {
+    declare -p xrayInstallListeners >/dev/null 2>&1 || return 0
+    local port=$((10#$1))
+    [[ -n "${xrayInstallListeners[${port}]:-}" ]] || return 0
+    errorCard "${port}/tcp 已用于本次安装的 ${xrayInstallListeners[${port}]}，请选择不同端口"
+    return 1
+}
+
+# 与模板顺序一致，只采集输入，不停止服务或开放防火墙。
+prepareXrayInstallInputs() {
+    local mode=custom entry protocolId portVar
+    local -A xrayInstallListeners=()
+    [[ -n "${selectCustomInstallType:-}" ]] || mode=all
+    for entry in 1:45987 21:31297 22:31299 23:31306 24:31301 25:31304 29:31296; do
+        protocolSelectionIncludes "${selectCustomInstallType:-}" "${entry%%:*}" "${mode}" || continue
+        xrayInstallListeners[${entry#*:}]="协议 ${entry%%:*} 固定后端"
+    done
+    if [[ "${mode}" == all ]] || protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
+        xrayInstallListeners[31300]="Nginx 回落后端"
+        xrayInstallListeners[31302]="Nginx HTTP/2 后端"
+        readInstallTLSPort || return 1
+        AUTO_PORT=${port}
+        xrayInstallListeners[$((10#${port}))]="TLS 入口"
+    fi
+    for entry in 2:xHTTPort 1:realityPort 26:realityGrpcPort; do
+        protocolId=${entry%%:*}
+        portVar=${entry#*:}
+        protocolSelectionIncludes "${selectCustomInstallType:-}" "${protocolId}" "${mode}" || continue
+        case "${protocolId}" in
+        2) initXrayXHTTPort true || return 1 ;;
+        1) initXrayRealityPort true || return 1 ;;
+        26) initXrayRealityGrpcPort true || return 1 ;;
+        esac
+        xrayInstallListeners[${!portVar}]="协议 ${protocolId} 入口"
+    done
+}
+
 initXrayRealityProtocolPort() {
     local -n portRef=$1
     local historyPort=${2:-}
@@ -1047,9 +1085,12 @@ initXrayRealityProtocolPort() {
     local label=$5
     local transport=${6:-tcp}
     local streamProtocol=${7:-}
+    local inputsOnly=${8:-false}
     local coexistStatus=1 singleProtocol=false
+    local AUTO_PORT="${AUTO_PORT:-}"
 
     protocolSelectionIsExactly "${selectCustomInstallType:-}" "${protocolId}" && singleProtocol=true
+    [[ "${singleProtocol}" == true ]] || AUTO_PORT=
     if [[ -n "${streamProtocol}" ]]; then
         if resolveRealityInstallCoexistPort portRef "${streamProtocol}" "${label}"; then
             coexistStatus=0
@@ -1073,6 +1114,12 @@ initXrayRealityProtocolPort() {
             portRef=${historyPort}
         fi
     fi
+    if validPortNumber "${portRef}" && ! xrayInstallPortAvailable "${portRef}"; then
+        [[ -z "${AUTO_INSTALL:-}" && "${coexistStatus}" != 0 &&
+            ( "${singleProtocol}" != true || -z "${AUTO_PORT:-}" ) ]] || return 1
+        portRef=
+        historyPort=
+    fi
 
     if [[ -z "${portRef}" ]]; then
         local defaultPort=${historyPort} prompt
@@ -1088,8 +1135,12 @@ initXrayRealityProtocolPort() {
         while true; do
             menuReadChoice "${promptKey}" "${prompt}" portRef true || return 1
             portRef=${portRef:-${defaultPort:-$((RANDOM % 20001 + 10000))}}
-            validPortNumber "${portRef}" && break
-            errorCard "${label} 端口输入错误"
+            if validPortNumber "${portRef}"; then
+                xrayInstallPortAvailable "${portRef}" && break
+            else
+                errorCard "${label} 端口输入错误"
+            fi
+            portRef=
             [[ -z "${AUTO_INSTALL:-}" ]] || return 1
         done
     fi
@@ -1098,6 +1149,8 @@ initXrayRealityProtocolPort() {
         errorCard "${label} 端口输入错误"
         return 1
     fi
+    portRef=$((10#${portRef}))
+    [[ "${inputsOnly}" != true ]] || return 0
     checkPort "${portRef}" || return 1
     if [[ "${transport}" == "tcp+udp" ]]; then
         allowPortTcpAndUdp "${portRef}" || return 1
@@ -1112,13 +1165,13 @@ initXrayRealityProtocolPort() {
 }
 
 initXrayRealityPort() {
-    initXrayRealityProtocolPort realityPort "${xrayVLESSRealityPort:-}" 1 reality_port "Reality" tcp vision
+    initXrayRealityProtocolPort realityPort "${xrayVLESSRealityPort:-}" 1 reality_port "Reality" tcp vision "${1:-false}"
 }
 
 initXrayRealityGrpcPort() {
-    initXrayRealityProtocolPort realityGrpcPort "${xrayVLESSRealityGRPCPort:-}" 26 reality_port "Reality gRPC"
+    initXrayRealityProtocolPort realityGrpcPort "${xrayVLESSRealityGRPCPort:-}" 26 reality_port "Reality gRPC" tcp "" "${1:-false}"
 }
 
 initXrayXHTTPort() {
-    initXrayRealityProtocolPort xHTTPort "${xrayVLESSRealityXHTTPort:-}" 2 xhttp_port "Reality XHTTP" tcp+udp xhttp
+    initXrayRealityProtocolPort xHTTPort "${xrayVLESSRealityXHTTPort:-}" 2 xhttp_port "Reality XHTTP" tcp+udp xhttp "${1:-false}"
 }

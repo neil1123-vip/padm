@@ -475,6 +475,7 @@ runInstallWorkflowRegression() (
         readLastInstallationConfig() { events+=$'read-last\n'; return 0; }
         collectEntryProfile() { events+=$'entry\n'; }
         coreTemplateCollectInitialClients() { events+=$'clients\n'; }
+        prepareXrayInstallInputs() { :; }
         prepareSingBoxInstallInputs() { :; }
         installTools() { events+=$'tools\n'; return 1; }
         for core in xray sing-box; do
@@ -545,6 +546,7 @@ runInstallWorkflowRegression() (
         handleNginx() { events+=$'service\n'; }
         coreTemplateCollectInitialClients() { :; }
         readInstallTLSPort() { :; }
+        prepareXrayInstallInputs() { :; }
         prepareSingBoxInstallInputs() { :; }
         coreSwitchConfigTransaction() { events+="transaction:${PADM_INSTALL_RESET_HISTORY}"$'\n'; return 17; }
         for install in installXrayReality installSingBoxReality customXrayInstall customSingBoxInstall xrayCoreInstall singBoxInstall; do
@@ -600,6 +602,7 @@ runInstallWorkflowRegression() (
         collectEntryProfile() { :; }
         readInstallTLSDomain() { :; }
         readInstallTLSPort() { :; }
+        prepareXrayInstallInputs() { :; }
         prepareSingBoxInstallInputs() { :; }
         nginxRunning() { events+=$'nginx\n'; return 1; }
         coreSwitchConfigTransaction() {
@@ -657,6 +660,7 @@ runInstallWorkflowRegression() (
         installTools() { events+=$'tools\n'; }
         installTLS() { events+=$'tls\n'; return 1; }
         installSingBox() { events+=$'download\n'; return 1; }
+        prepareXrayInstallInputs() { readInstallTLSPort || return 1; AUTO_PORT=${port}; }
         prepareSingBoxInstallInputs() { :; }
         handleNginx() { events+="nginx:$1"$'\n'; }
         handleXray() { events+="xray:$1"$'\n'; }
@@ -839,6 +843,7 @@ runInstallWorkflowRegression() (
         unset AUTO_INSTALL AUTO_DOMAIN AUTO_PORT
         readLastInstallationConfig() { :; }
         coreTemplateCollectInitialClients() { :; }
+        prepareXrayInstallInputs() { readInstallTLSPort || return 1; AUTO_PORT=${port}; }
         prepareSingBoxInstallInputs() { :; }
         configureRealityDomainMode() { :; }
         protocolSelectionShowRiskNotes() { :; }
@@ -1925,6 +1930,117 @@ runInstallWorkflowRegression() (
             "${applies[index]}" </dev/null
             [[ "${!portVar}" =~ ^[0-9]+$ && "${!portVar}" -ge 10000 && "${!portVar}" -le 30000 &&
                 "${checkCalls}" == 1 && "${allowLog}" == "${transports[index]}:${!portVar}"$'\n' ]]
+        done
+    )
+
+    (
+        # Reality 输入全部在事务前完成；模板复用结果，失败重试不继承临时端口。
+        local events= input inputFd nextInput expectedXHTTP expectedVision expectedGrpc checks=0
+        local realityPort=7001 xHTTPort=7002 realityGrpcPort=7003
+        local xrayVLESSRealityPort= xrayVLESSRealityXHTTPort= xrayVLESSRealityGRPCPort=
+        local lastInstallationConfig= currentPort= customPort= port= btDomain=
+        local AUTO_PORT= AUTO_DOMAIN=tls.example.com
+        unset AUTO_INSTALL AUTO_PROTOCOLS
+        readLastInstallationConfig() { lastInstallationConfig=; }
+        configureRealityDomainMode() { :; }
+        collectEntryProfile() { :; }
+        coreTemplateCollectInitialClients() { :; }
+        protocolSelectionShowRiskNotes() { :; }
+        statusCard() { :; }
+        errorCard() { :; }
+        realityStreamSplitEnabled() { return 1; }
+        checkPort() { checks=$((checks + 1)); }
+        allowPort() { events+="tcp:$1"$'\n'; }
+        allowPortTcpAndUdp() { events+="tcp+udp:$1"$'\n'; }
+        coreSwitchConfigTransaction() {
+            events+=$'backup\n'
+            [[ "${xHTTPort}" == "${expectedXHTTP}" && "${realityPort}" == "${expectedVision}" &&
+                "${realityGrpcPort}" == "${expectedGrpc}" ]]
+            initXrayXHTTPort </dev/null
+            initXrayRealityPort </dev/null
+            initXrayRealityGrpcPort </dev/null
+            return 17
+        }
+        for input in "" $'08443\n' $'08443\n9443'; do
+            regressionExpectStatus 1 customXrayInstall 1,2,26 < <(printf '%s' "${input}")
+            [[ -z "${events}" && "${checks}" == 0 &&
+                "${xHTTPort}" == 7002 && "${realityPort}" == 7001 && "${realityGrpcPort}" == 7003 ]]
+        done
+        for input in $'08443\n08443\n45987\n9443\n9443\n10443\n' $'12001\n12002\n12003\n'; do
+            events= checks=0
+            expectedXHTTP=8443 expectedVision=9443 expectedGrpc=10443
+            [[ "${input}" != 12001* ]] || { expectedXHTTP=12001; expectedVision=12002; expectedGrpc=12003; }
+            exec {inputFd}< <(printf '%snext-parent-action\n' "${input}")
+            regressionExpectStatus 17 customXrayInstall 1,2,26 <&"${inputFd}"
+            read -r -u "${inputFd}" nextInput
+            exec {inputFd}<&-
+            [[ "${nextInput}" == next-parent-action && "${checks}" == 3 &&
+                "${events}" == $'backup\n'"tcp+udp:${expectedXHTTP}"$'\n'"tcp:${expectedVision}"$'\n'"tcp:${expectedGrpc}"$'\n' ]]
+            [[ "${xHTTPort}" == 7002 && "${realityPort}" == 7001 && "${realityGrpcPort}" == 7003 && -z "${AUTO_PORT}" ]]
+        done
+
+        # TLS、固定后端及其它 Reality 端口冲突均在当前字段修正。
+        realityPort= xHTTPort= realityGrpcPort= events= checks=0
+        selectCustomInstallType=,1,27,26,
+        lastInstallationConfig=true currentPort=45987 xrayVLESSRealityPort=8443
+        exec {inputFd}< <(printf '45987\n31300\n8443\n8443\n45987\n9443\n9443\n10443\nnext-parent-action\n')
+        prepareXrayInstallInputs <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        exec {inputFd}<&-
+        [[ "${port}" == 8443 && "${realityPort}" == 9443 && "${realityGrpcPort}" == 10443 &&
+            "${nextInput}" == next-parent-action && -z "${events}" && "${checks}" == 0 ]]
+
+        # 自动冲突立即失败，不能读取后续菜单输入。
+        AUTO_INSTALL=true AUTO_PORT= currentPort=45987 lastInstallationConfig=true
+        selectCustomInstallType=,1,27,
+        exec {inputFd}< <(printf 'next-parent-action\n')
+        regressionExpectStatus 1 prepareXrayInstallInputs <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        exec {inputFd}<&-
+        [[ "${nextInput}" == next-parent-action && "${currentPort}" == 45987 && -z "${events}" && "${checks}" == 0 ]]
+        AUTO_INSTALL=true lastInstallationConfig=
+        for input in 1:45987 25:31304; do
+            selectCustomInstallType=",${input%%:*},"
+            AUTO_PORT=${input#*:}
+            realityPort=
+            exec {inputFd}< <(printf 'next-parent-action\n')
+            regressionExpectStatus 1 prepareXrayInstallInputs <&"${inputFd}"
+            read -r -u "${inputFd}" nextInput
+            exec {inputFd}<&-
+            [[ "${nextInput}" == next-parent-action && -z "${events}" && "${checks}" == 0 ]]
+        done
+
+        # 多选 TLS 的公共端口不能被共存解析器误当作 Reality 公共端口。
+        realityStreamSplitEnabled() { return 0; }
+        realityStreamInternalPortForProtocol() {
+            case "$1" in vision) printf '15443' ;; xhttp) printf '15444' ;; esac
+        }
+        realityStreamPublicPortForProtocol() { printf '443'; }
+        selectCustomInstallType=,1,2,27,
+        AUTO_PORT=8443 realityPort= xHTTPort=
+        prepareXrayInstallInputs </dev/null
+        [[ "${port}" == 8443 && "${realityPort}" == 15443 && "${xHTTPort}" == 15444 && -z "${events}" && "${checks}" == 0 ]]
+    )
+
+    (
+        # 两种 gRPC 单选和共选必须转发到各自实际监听的后端。
+        local selectCustomInstallType= domain=tls.example.com port=443 currentPath=path nginxStaticPath=/regression/www
+        local selection outputFile="${TMP_DIR}/xray-grpc-nginx.conf"
+        nginx() { printf 'nginx version: nginx/1.24.0\n' >&2; }
+        writeAloneNginxConfig() { cat >"${outputFile}"; }
+        for selection in ,24, ,25, ,24,25,; do
+            selectCustomInstallType=${selection}
+            updateRedirectNginxConf
+            if protocolSelectionHasAny "${selection}" 24; then
+                grep -qF 'grpc_pass grpc://127.0.0.1:31301;' "${outputFile}"
+            else
+                ! grep -qF 'grpc_pass grpc://127.0.0.1:31301;' "${outputFile}"
+            fi
+            if protocolSelectionHasAny "${selection}" 25; then
+                grep -qF 'grpc_pass grpc://127.0.0.1:31304;' "${outputFile}"
+            else
+                ! grep -qF 'grpc_pass grpc://127.0.0.1:31304;' "${outputFile}"
+            fi
         done
     )
 

@@ -1780,6 +1780,7 @@ runCoreInstall() {
     local PADM_INSTALL_RESET_HISTORY=false PADM_INSTALL_CLIENTS_PREPARED=false
     local PADM_NGINX_BLOG_REINSTALL_PROMPT=false
     local PADM_INSTALL_REALITY_PROFILE_CACHE=
+    local realityPort= realityGrpcPort= xHTTPort=
     local -A PADM_INSTALL_SINGBOX_PORTS=()
     local PADM_INSTALL_HY2_INPUTS_PREPARED=false PADM_INSTALL_TUIC_INPUTS_PREPARED=false
     local hysteria2BandwidthMode="${hysteria2BandwidthMode:-}"
@@ -2739,13 +2740,15 @@ prepareCoreInstallInputs() {
     fi
     coreTemplateCollectInitialClients "${core}" false true || return 1
     PADM_INSTALL_CLIENTS_PREPARED=true
-    if { [[ "${core}" == xray ]] &&
-        { [[ -z "${selectCustomInstallType:-}" ]] || protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; }; } ||
-        [[ "${core}" == sing-box && -z "${selectCustomInstallType:-}" && -n "${btDomain:-}" ]]; then
+    if [[ "${core}" == sing-box && -z "${selectCustomInstallType:-}" && -n "${btDomain:-}" ]]; then
         readInstallTLSPort || return 1
         AUTO_PORT=${port}
     fi
-    [[ "${core}" != sing-box ]] || prepareSingBoxInstallInputs || return 1
+    if [[ "${core}" == xray ]]; then
+        prepareXrayInstallInputs || return 1
+    else
+        prepareSingBoxInstallInputs || return 1
+    fi
     return 0
 }
 
