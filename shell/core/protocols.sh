@@ -398,6 +398,11 @@ protocolCoreUnsupportedReason() {
             return 0
         fi
     done
+    if [[ "${core}" == xray ]] && protocolSelectionHasAny "${selection}" 28 &&
+        protocolSelectionHasAny "${selection}" 21 22 23 24 25 27 29; then
+        printf 'Trojan TCP TLS direct（28）不能与 TLS 回落协议共用入口；需要组合时请将 28 改为 29'
+        return 0
+    fi
     return 1
 }
 

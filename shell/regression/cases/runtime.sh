@@ -261,6 +261,35 @@ runInstallWorkflowRegression() (
     regressionExpectStatus 1 selectCoreInstallProtocols sing-box 2 </dev/null
     [[ -z "${selectCustomInstallType}" ]]
 
+    (
+        # 冲突组合在选择页纠正；预选和自动安装失败时不消费后续输入。
+        local protocolId core inputFd nextInput errors=0
+        for protocolId in 21 22 23 24 25 27 29; do
+            exec {inputFd}< <(printf 'next-parent-action\n')
+            regressionExpectStatus 1 selectCoreInstallProtocols xray "28,${protocolId}" <&"${inputFd}"
+            [[ -z "${selectCustomInstallType}" ]]
+            read -r -u "${inputFd}" nextInput
+            [[ "${nextInput}" == next-parent-action ]]
+            exec {inputFd}<&-
+        done
+        exec {inputFd}< <(printf '28,25\n29,25\nnext-parent-action\n')
+        selectCoreInstallProtocols xray <&"${inputFd}"
+        [[ "${selectCustomInstallType}" == ,29,25, && "${errors}" == 8 ]]
+        read -r -u "${inputFd}" nextInput
+        [[ "${nextInput}" == next-parent-action ]]
+        exec {inputFd}<&-
+        local AUTO_INSTALL=true AUTO_PROTOCOLS=28,27
+        exec {inputFd}< <(printf 'next-parent-action\n')
+        regressionExpectStatus 1 selectCoreInstallProtocols xray <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        [[ -z "${selectCustomInstallType}" && "${nextInput}" == next-parent-action ]]
+        exec {inputFd}<&-
+        for core in xray sing-box; do
+            selectCoreInstallProtocols "${core}" 1,28 </dev/null
+            [[ "${selectCustomInstallType}" == ,1,28, ]]
+        done
+    )
+
     selectCustomInstallType=previous
     regressionExpectStatus 1 selectCoreInstallProtocols xray </dev/null
     [[ -z "${selectCustomInstallType}" ]]
@@ -1122,6 +1151,7 @@ runInstallWorkflowRegression() (
 
         # 管理入口直接调用模板，也必须忽略父菜单残留的选择。
         local template PADM_INSTALL_CLIENTS_PREPARED=false
+        local selectCustomInstallType=,1,
         currentClients=
         collectTLSProfile() { :; }
         coreTemplateCollectInitialClients() {

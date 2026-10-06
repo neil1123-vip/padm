@@ -1041,6 +1041,8 @@ runCoreTemplateReturnFailureRegression() (
     }
     checkPortOpen() { return 0; }
     initSingBoxPort() {
+        # 输入预采集不能提前写防火墙，否则事务会误认为端口规则原本存在。
+        [[ "${7:-false}" != true ]] || { printf '10890\n'; return 0; }
         if [[ "${mode}" == "state-drift" ]]; then
             padmTrackPortAllowTransactionKey "port:ufw:tcp:10890"
         else

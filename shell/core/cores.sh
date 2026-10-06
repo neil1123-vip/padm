@@ -2834,7 +2834,9 @@ selectCoreInstallProtocols() {
             menuReadChoice protocols "请选择协议[逗号分隔多选，回车取消]:" selectCustomInstallType || return 1
         fi
         selectCustomInstallType=$(protocolSelectionNormalizeCsv "${selectCustomInstallType}") || return 1
-        if [[ "${selectCustomInstallType//,/}" =~ ^[0-9]+$ ]] && protocolSelectionIdsValid "${selectCustomInstallType}" "${allowedIds}"; then
+        unsupportedReason=$(protocolCoreUnsupportedReason "${core}" "${selectCustomInstallType}" 2>/dev/null || true)
+        if [[ -z "${unsupportedReason}" && "${selectCustomInstallType//,/}" =~ ^[0-9]+$ ]] &&
+            protocolSelectionIdsValid "${selectCustomInstallType}" "${allowedIds}"; then
             if [[ -n "${preselectedProtocols}" ]]; then
                 statusCard "推荐安装" "已选择协议编号: ${selectCustomInstallType}"
                 protocolRegistryMenu "${selectCustomInstallType}"
@@ -2842,7 +2844,6 @@ selectCoreInstallProtocols() {
             fi
             return 0
         fi
-        unsupportedReason=$(protocolCoreUnsupportedReason "${core}" "${selectCustomInstallType}" 2>/dev/null || true)
         if [[ -n "${unsupportedReason}" ]]; then
             errorCard "${unsupportedReason}"
         else

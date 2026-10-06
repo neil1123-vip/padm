@@ -249,7 +249,11 @@ readInstallProtocolType() {
         row=${row%.json}
         local protocolId=
         protocolId=$(protocolCapabilityIdByConfigFile "${row##*/}.json" 2>/dev/null || true)
-        protocolStateAdd "${protocolId}"
+        if [[ "${coreInstallType}" == 1 && "${protocolId}" == 27 ]] &&
+            jq -e '.inbounds[0].tag == "TLSFallback"' "${row}.json" >/dev/null 2>&1; then
+            protocolId=
+        fi
+        [[ -z "${protocolId}" ]] || protocolStateAdd "${protocolId}"
         if [[ "${row}" == *VLESS_TCP_inbounds* ]]; then
             frontingType=02_VLESS_TCP_inbounds
             if [[ "${coreInstallType}" == "2" ]]; then
@@ -961,7 +965,7 @@ readConfigHostPathUUID() {
             if [[ -z "${currentDefaultPort}" || "${currentDefaultPort}" == "null" ]]; then
                 currentDefaultPort=${currentPort}
             fi
-            currentUUID=$(jq -r .inbounds[0].settings.clients[0].id ${configPath}${frontingType}.json)
+            currentUUID=$(jq -r '.inbounds[0].settings.clients[0] | .id // .password // empty' "${configPath}${frontingType}.json")
             currentClients=$(jq -r .inbounds[0].settings.clients ${configPath}${frontingType}.json)
         fi
 
@@ -986,9 +990,18 @@ readConfigHostPathUUID() {
             fi
             currentPath=$(jq -r .inbounds[0].streamSettings.xhttpSettings.path ${configPath}12_VLESS_XHTTP_inbounds.json | awk -F "[/]" '{print $2}' | awk -F "[x][H][T][T][P]" '{print $1}')
         fi
-        if [[ -z "${currentClients}" ]] && currentProtocolHas 26 && [[ -f "${configPath}08_VLESS_vision_gRPC_inbounds.json" ]]; then
-            currentClients=$(jq -r '.inbounds[0].settings.clients' "${configPath}08_VLESS_vision_gRPC_inbounds.json")
-            currentUUID=$(jq -r '.inbounds[0].settings.clients[0].id' "${configPath}08_VLESS_vision_gRPC_inbounds.json")
+        # 回落前端没有用户时，从实际启用的协议读取，保留重装凭据。
+        if ! jq -e 'type == "array" and length > 0' <<<"${currentClients:-[]}" >/dev/null 2>&1; then
+            local protocolId storedClients
+            for protocolId in 26 21 22 23 24 25 28 29; do
+                currentProtocolHas "${protocolId}" || continue
+                configFile=$(protocolConfigFile "${protocolId}") || continue
+                storedClients=$(jq -c '.inbounds[0].settings.clients // []' "${configFile}") || return 1
+                jq -e 'type == "array" and length > 0' <<<"${storedClients}" >/dev/null 2>&1 || continue
+                currentClients=${storedClients}
+                currentUUID=$(jq -r '.[0] | .id // .password // empty' <<<"${currentClients}") || return 1
+                break
+            done
         fi
     elif [[ "${coreInstallType}" == "2" ]]; then
         if [[ -n "${frontingType}" ]]; then

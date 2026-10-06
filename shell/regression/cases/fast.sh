@@ -5135,7 +5135,13 @@ runTrojanFallbackTemplateCreatesTlsFrontendRegression() {
         local tlsRoot="${root}/etc/padm/tls"
         local vlessFile="${xrayRoot}/02_VLESS_TCP_inbounds.json"
         local trojanFile="${xrayRoot}/04_trojan_TCP_inbounds.json"
+        local selection credential protocolId file before
+        local -a selectedIds=()
+        local uuid=11111111-1111-4111-8111-111111111111
+        local password='ordinary password longer than thirty bytes'
         mkdir -p "${xrayRoot}" "${tlsRoot}"
+        local PADM_XRAY_BINARY="${root}/xray" PADM_XRAY_CONF_DIR="${xrayRoot}"
+        cp /usr/bin/true "${PADM_XRAY_BINARY}"
 
         selectCustomInstallType=",29,"
         currentUUID="11111111-1111-4111-8111-111111111111"
@@ -5148,8 +5154,13 @@ runTrojanFallbackTemplateCreatesTlsFrontendRegression() {
         configPath="${xrayRoot}/"
         lastInstallationConfig=true
 
+        coreInstallType=1
+        singBoxConfigPath=
+        nginxConfigPath="${root}/nginx/"
+        corePortDefaultFile() { :; }
+        xrayTemplateConfigDir() { printf '%s\n' "${xrayRoot}"; }
         addXrayOutbound() { return 0; }
-        removeXrayTemplateConfigFiles() { return 0; }
+        removeXrayOutbound() { return 0; }
         randomPathFunction() { currentPath=padm; customPath=padm; }
         initRealityProfile() { return 0; }
         initXrayXHTTPort() { return 0; }
@@ -5165,13 +5176,68 @@ runTrojanFallbackTemplateCreatesTlsFrontendRegression() {
             cat >"${targetPath}"
         }
 
-        initXrayConfig custom 1 true >/dev/null
+        for selection in 29 25 25,29 21 22 23 24 27 21,27 28; do
+            selectCustomInstallType=",${selection},"
+            credential=${uuid}
+            [[ "${selection}" != 29 && "${selection}" != 25 && "${selection}" != 25,29 && "${selection}" != 28 ]] || credential=${password}
+            currentUUID=${credential}
+            currentClients=$(jq -nc --arg id "${credential}" '[{id:$id,email:"main"}]')
+            initXrayConfig custom 1 >/dev/null
 
-        [[ -f "${trojanFile}" ]]
-        [[ -f "${vlessFile}" ]]
-        jq -e '.inbounds[0].port == 443' "${vlessFile}" >/dev/null
-        jq -e '.inbounds[0].streamSettings.tlsSettings.certificates[0].certificateFile == "/etc/padm/tls/example.com.crt"' "${vlessFile}" >/dev/null
-        jq -e '.inbounds[0].settings.fallbacks[] | select(.dest == 31296 or .dest == "31296")' "${vlessFile}" >/dev/null
+            if [[ "${selection}" == 28 ]]; then
+                [[ ! -f "${vlessFile}" ]]
+            else
+                jq -e '.inbounds[0].port == 443 and .inbounds[0].streamSettings.tlsSettings.certificates[0].certificateFile == "/etc/padm/tls/example.com.crt"' "${vlessFile}" >/dev/null
+                if protocolSelectionHasAny "${selectCustomInstallType}" 27; then
+                    jq -e '.inbounds[0].tag == "VLESSTCP" and (.inbounds[0].settings.clients | length) == 1' "${vlessFile}" >/dev/null
+                else
+                    jq -e '.inbounds[0].tag == "TLSFallback" and .inbounds[0].settings.clients == []' "${vlessFile}" >/dev/null
+                fi
+            fi
+            if protocolSelectionHasAny "${selectCustomInstallType}" 29; then
+                [[ -f "${trojanFile}" ]]
+                jq -e '.inbounds[0].settings.fallbacks[] | select(.dest == 31296 or .dest == "31296")' "${vlessFile}" >/dev/null
+            fi
+
+            readInstallProtocolType
+            if protocolSelectionHasAny "${selectCustomInstallType}" 27; then
+                currentProtocolHas 27
+            else
+                ! currentProtocolHas 27
+            fi
+            readConfigHostPathUUID
+            [[ "${currentUUID}" == "${credential}" && "${currentHost}" == example.com && "${currentPort}" == 443 ]]
+            before=${currentClients}
+            coreTemplateCollectInitialClients xray </dev/null
+            [[ "${currentClients}" == "${before}" ]]
+
+            # 新用户只加入所选协议，不能把承接前端重新启用为 Vision。
+            subscriptionSyncAppendProtocolBatch "${configPath}" "${uuid}" sub_new xray
+            IFS=',' read -ra selectedIds <<<"${selection}"
+            for protocolId in "${selectedIds[@]}"; do
+                file=$(protocolConfigFile "${protocolId}")
+                jq -e '.inbounds[0].settings.clients | length == 2' "${file}" >/dev/null
+            done
+            if [[ -f "${vlessFile}" ]] && ! protocolSelectionHasAny "${selectCustomInstallType}" 27; then
+                jq -e '.inbounds[0].settings.clients == []' "${vlessFile}" >/dev/null
+            fi
+        done
+
+        # 明确选择的 Vision 即使暂时无用户，同步仍可恢复，不能用空数组推断协议未启用。
+        selectCustomInstallType=,27,
+        currentClients=$(jq -nc --arg id "${uuid}" '[{id:$id,email:"main"}]')
+        initXrayConfig custom 1 >/dev/null
+        subscriptionSyncSetUsersInFile "${vlessFile}" .inbounds[0].settings.clients '[]'
+        readInstallProtocolType
+        currentProtocolHas 27
+        subscriptionSyncAppendProtocolBatch "${configPath}" "${uuid}" sub_restored xray
+        jq -e '.inbounds[0].settings.clients | length == 1' "${vlessFile}" >/dev/null
+
+        # 绕过选择页直接调用模板也必须在写文件前拒绝冲突。
+        selectCustomInstallType=,28,27,
+        before=$(<"${vlessFile}")
+        regressionExpectStatus 1 initXrayConfigApply custom 1 </dev/null >/dev/null
+        [[ "$(<"${vlessFile}")" == "${before}" ]]
     )
 }
 

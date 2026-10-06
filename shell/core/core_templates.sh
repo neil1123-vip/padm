@@ -452,7 +452,11 @@ coreTemplateConfigTransaction() {
 # 初始化 Xray 配置文件
 initXrayConfigApply() {
     set -- "${1:-}" "${2:-}" "${3:-}"
-    local configPath selectCoreType=1
+    local configPath selectCoreType=1 unsupportedReason=
+    if [[ "$1" != all ]]; then
+        unsupportedReason=$(protocolCoreUnsupportedReason xray "${selectCustomInstallType}" 2>/dev/null || true)
+        [[ -z "${unsupportedReason}" ]] || { errorCard "${unsupportedReason}"; return 1; }
+    fi
     configPath="$(xrayTemplateConfigDir)/" || return 1
     progressCard "$2" "初始化 Xray 配置"
     echo
@@ -753,18 +757,22 @@ EOF
     elif [[ -z "$3" ]]; then
         removeXrayTemplateConfigFiles 04_trojan_GRPc_inbounds.json || return 1
     fi
-    # VLESS Vision / traditional TLS fallback frontend
+    # 未选择 Vision 时，TLS 前端只负责回落，不创建额外用户。
     if [[ "$1" == "all" ]] || protocolSelectionHasAny "${selectCustomInstallType}" 21 22 23 24 25 27 29; then
-
+        local frontendClients='[]' frontendTag=TLSFallback
+        if protocolSelectionIncludes "${selectCustomInstallType}" 27 "$1"; then
+            frontendClients=$(initXrayClients 27) || return 1
+            frontendTag=VLESSTCP
+        fi
         writeGeneratedJsonFile /etc/padm/xray/conf/02_VLESS_TCP_inbounds.json padm-xray-vless-tcp <<EOF || { errorCard "Xray VLESS TCP 入站模板提交失败"; return 1; }
 {
     "inbounds":[
         {
           "port": ${port},
           "protocol": "vless",
-          "tag":"VLESSTCP",
+          "tag":"${frontendTag}",
           "settings": {
-            "clients":$(initXrayClients 27),
+            "clients":${frontendClients},
             "decryption": "none",
             "fallbacks": [
                 ${fallbacksList}

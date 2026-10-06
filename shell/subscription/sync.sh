@@ -448,6 +448,11 @@ subscriptionSyncAppendProtocolUser() {
     # Generate only the new client; keep existing credentials and fields unchanged.
     local currentClients='[]'
     [[ -f "${file}" ]] || return 0
+    # 只负责 TLS 回落的前端不能被订阅同步重新启用为 Vision。
+    if [[ "${protocolId}" == 27 && "${mode:-${coreInstallType:-}}" != singbox && "${mode:-${coreInstallType:-}}" != 2 ]] &&
+        jq -e '.inbounds[0].tag == "TLSFallback"' "${file}" >/dev/null 2>&1; then
+        return 0
+    fi
     if [[ -n "${preferredPath}" ]]; then
         userPath="${preferredPath}"
     else
