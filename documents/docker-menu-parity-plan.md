@@ -16,13 +16,13 @@
 | --- | --- | --- |
 | 1. 功能矩阵 | 已完成，提交 `7fe6a9e` | 协议与功能边界、管理状态、合同回归 |
 | 2. 菜单与可信首次配置 | 2A–2C 已实现；本地 PTY、事务和 Linux 权限通过，真实发布/连通待验 | 安装后进入菜单、独立命令生命周期、无需手填镜像的首次配置 |
-| 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2–3C.11 基础入口已通过本地与 amd64 传输验收 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
+| 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2–3C.12 基础入口已通过本地与 amd64 传输验收 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
 | 4. 用户、订阅与服务维护 | 未开始 | 本机用户业务、多服务器后端、分范围备份恢复、核心运维 |
 | 5. 站点、路由与宿主集成 | 未开始 | 站点管理、内部能力、规则所有权及可撤销宿主操作 |
 | 6. 发布与完整验收 | 未开始 | 迁移文档、真实 Linux 与双架构证据、受门禁保护的 Release |
 
 当前机器可读支持状态以
-[`features.json`](../docker/contracts/features.json)为准：协议 `1`、`2`、`3`、`4`、`5`、`21`、`22`、`23`、`26`、`28`、`30`、`31` 的初始
+[`features.json`](../docker/contracts/features.json)为准：协议 `1`、`2`、`3`、`4`、`5`、`21`、`22`、`23`、`24`、`25`、`26`、`27`、`28`、`29`、`30`、`31` 的初始
 配置运行已支持，协议管理工作流仍为 `deferred`。发布订阅要求 Xray、协议 `21`
 和受管 TLS；不能由“可以生成链接”推断任意核心已经支持 HTTPS 订阅发布。
 第一步的回归使用模拟 Docker，不能代替真实容器、SSH 终端和客户端连通验证。
@@ -722,7 +722,7 @@ UUID 同时作为密码与统计账号，跨核心复制仍共享累计流量和
 首配、完整规格导入、通用字段编辑、跨核心复制/删除及 `trojan://` 分享链接接入。
 服务器地址与 TLS 域名可不同，URI 使用独立 SNI、百分号编码和 IPv6 authority。
 TLS 域名、凭据及已有入口身份冻结；删除最后 TLS 消费者清空规格引用，但保留受管证书。
-HTTPS 发布仍要求 Xray WS TLS；包含 Trojan 暂拒绝宿主集成，fallback 留给后续传统 TLS 子步骤。
+HTTPS 发布仍要求 Xray WS TLS；包含 Trojan 暂拒绝宿主集成，传统 TLS fallback 基础入口见 3C.12。
 完整 `management_status` 仍为 `deferred`。
 
 本地验收：固定 Linux 源码快照、可执行 tmpfs、前台 `--init` 工具容器；
@@ -889,7 +889,72 @@ bash docker/tests/grpc-tls-real.sh \
 
 CI 根入口改为 `grpc-tls.sh`，新增 `docker-grpc-tls` selector；复用共享工具镜像和独立源码快照。
 公网宿主入口、第三方导入 UI、既有长会话、原生 arm64、真实 DNS/整机重启及可信发布仍未验。
-其余传统 TLS/fallback 协议、3B.4、3D、4A、5C 仍待完成；`lifecycle.sh` 无本阶段差异。
+3B.4、3D、4A、5C 仍待完成；传统 TLS fallback 基础入口见 3C.12，`lifecycle.sh` 无本阶段差异。
+
+#### 3C.12 VLESS TCP TLS Vision / Trojan TCP TLS fallback 基础入口
+
+已完成基础入口交付与验收；协议 `27`/`29` 仅接受 v3 和 Xray。
+两类入口共享严格 `fallback_tls` 合同：`domain/http_port/http2_port`，
+默认后端端口为 `31300`/`31302`，域名必须等于受管 `tls.domain`。
+入口由 Xray 直接终止 TLS，公开双栈端口映射到自身 `public_port`；
+协议 27 使用 VLESS `xtls-rprx-vision`，协议 29 使用 Trojan TCP TLS，不额外增加 VLESS 前端。
+两协议 TLS ALPN 固定为 `h2/http/1.1`，默认 fallback 转到 `nginx:http_port`，
+协商 `h2` 时转到 `nginx:http2_port`，两条回落均固定 `xver=1`。
+Nginx 通过两个独立监听接收 PROXY v1，只有 HTTP/2 后端启用 `http2 on`；
+后端端口、WS/HTTPUpgrade/gRPC 的 TLS 端口和健康端口 `8080` 共用全局冲突检查。
+公开端口仍按宿主全局唯一，核心监听和 API 端口按实际核心网络空间避让。
+仅 fallback 的 Nginx 不发布宿主端口、不挂载 TLS 私钥，也不依赖核心；
+混合 WS/HTTPUpgrade/gRPC 时只依赖实际反代核心，核心不反向依赖 Nginx，避免 Compose 依赖环。
+fallback 提供最小静态首页：优先读取已有 `data/static/index.html`，缺失时返回内联默认页，
+其余路径只读取受管静态目录；本阶段不写入或替换静态内容，也不宣称站点/302/ALPN 管理完成。
+
+首配、完整规格导入、通用字段编辑、同核复制/删除与分享 URI 同步接入；
+既有身份、TLS 域名和内部后端端口冻结，复制共享原完整后端端口对并去重；
+完整规格可使用其它端口对，但部分共享或交叉冲突拒绝，UUID 共享额度保持。
+协议 27 链接包含 TCP、TLS、Vision flow、SNI 和 ALPN；29 包含 Trojan、TCP、TLS、SNI 和 ALPN。
+单独 27/29 不开放 HTTPS 订阅，组合协议 21 后可发布其节点链接；
+宿主集成、sing-box、跨核心复制、站点内容管理和完整协议管理仍不接受。
+
+验收已覆盖两类严格合同、旧版/bundle 拒绝、生成/URI/漂移、Nginx PROXY/分监听 HTTP/2、
+同域混合 21–29 端口池、共享额度、TLS 删除及配置/更新/回滚失败恢复；
+菜单验证单/双核心首配、取消、通用编辑、复制删除、身份冻结和失败事务。
+真实 amd64 已以当前锁定业务镜像执行严格 CA/SNI、双栈代理连接、
+普通 HTTPS 的 HTTP/1.1 与 HTTP/2 静态回落、错误凭据拒绝、UUID 正统计及同客户端额度拒绝/恢复。
+Docker Linux 最终定向回归 `docker-traditional-tls` `109.543` 秒通过，
+证据 `.tmp-regression-docker-2d4acdcded4d4b6b8e0ac5f4392e82d0`；
+菜单 PTY `252.249` 秒通过，证据 `.tmp-regression-docker-030f446bd92d42d184432cc1b845e9e1`。
+phase3 首轮前序事务已执行，末项 profile 断言漏列 27/29；补齐后定向执行原矩阵正反例通过，
+不把初次失败计为整套通过。最终 Bash/ShellCheck、Draft 2020-12 Schema `4` 正例/`50` 反例通过，
+证据 `.tmp-padm-traditional-verify-9f7936a6163a4dce89f48edb3275bb88`。
+共享 TLS 消费者修复拒绝 inline/include、秘密来源别名及 Nginx 主配置覆盖：
+明文 fallback 仅接受受管生成配置及三组精确 bind 来源/目标/读写权限，重复或额外挂载拒绝。
+目标覆盖、只读改写、重复、volume 类型反例均通过；TLS/续期兼容回归 `11.796` 秒通过，
+证据 `.tmp-regression-docker-ab1716f185b6469ebfffd5295810251f`。
+
+真实 amd64 27/29 及旧 24/25、默认 22 的顺序验收共 `277` 秒通过，
+证据 `.tmp-padm-traditional-verify-10c57608358c47fc892fcd7b0a330f46`。
+各协议严格 CA/SNI、双栈 TCP/UDP 隧道及错误凭据拒绝通过，实际 UUID 上/下行 `184/332`；
+27/29 的默认首页、既有静态首页、缺失资源 404、HTTP/1.1/HTTP/2 协商及 PROXY 客户端来源均通过，
+额度拒绝/恢复保持同一客户端和 `users.base` 哈希，拒绝时源站计数不增且静态回落仍可用。
+业务镜像沿用 3C.2，第 5 参数只提供支持 HTTP/2 的 curl 工具镜像；
+夹具初次漏调生产 `dockerEnsureRuntimeDataPermissions` 导致静态目录读取失败，补齐权限收尾后通过，
+未改变生产权限。真实快照早于最后挂载守卫收紧；配置生成与真实夹具一致，守卫由上述最终定向验收覆盖。
+CI 根入口改为 `traditional-tls.sh`，新增 `docker-traditional-tls` selector，只串接一次旧协议基线。
+复现：
+
+```bash
+bash docker/tests/traditional-tls.sh
+bash docker/tests/traditional-tls-real.sh \
+  padm-local/padm-xray:tls-3b4 \
+  padm-local/padm-sing-box:tls-3b4 \
+  padm-local/padm-ops:tls-3b4 \
+  padm-local/padm-nginx:tls-3b4 \
+  local-http2-curl:test
+```
+
+临时控制容器及隔离业务项目、网络、卷已自动清理，未公开宿主端口；`lifecycle.sh` 无本阶段差异，
+既有 stdin 修复来自代理。公开协议基础入口均已接入，但 3B.4、3D、4A、5A、5C 和完整管理仍未完成。
+公网宿主入口、第三方导入 UI、既有长会话、原生 arm64、真实 DNS/整机重启及可信发布仍需独立验收。
 
 ### 3D. 协议管理与入口维护
 
@@ -1048,7 +1113,7 @@ Fail2ban 1.1.0），只读挂载当前生成配置及入口，未重建或发布
 | `network-optimization`、`vless-encryption` | 5C 独立宿主/实验子项；未验收仍不支持 |
 
 新增能力提交时同步更新文档、配置合同、生成器/Compose、控制入口及证据。
-[`phase3.sh`](../docker/tests/phase3.sh)当前固定 `supported` 协议为 `[1, 2, 3, 4, 5, 21, 22, 23, 24, 25, 26, 28, 30, 31]`，
+[`phase3.sh`](../docker/tests/phase3.sh)当前固定 `supported` 协议为 `[1, 2, 3, 4, 5, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]`，
 并要求菜单和管理差距为 `deferred`；后续按真实交付更新这些基线断言，
 保留协议注册表、核心/profile、网络权限和前置条件的一致性检查。
 不得只删除断言或只修改 `features.json` 来宣称完成。

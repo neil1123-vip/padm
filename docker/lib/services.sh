@@ -135,6 +135,12 @@ dockerConfigureSpecValidate() {
           exact(["id", "core", "listener_id", "server", "public_port", "address_families", "name", "uuid", "trojan"]) and
           (.trojan | exact(["domain"]) and
             (.domain | hostname and (explode | all(. > 32 and . != 127))))
+        elif .id == 27 or .id == 29 then
+          $request.schema_version == 3 and .core == "xray" and
+          exact(["id", "core", "listener_id", "server", "public_port", "address_families", "name", "uuid", "fallback_tls"]) and
+          (.fallback_tls | exact(["domain", "http_port", "http2_port"]) and
+            (.domain | hostname) and (.http_port | port) and (.http2_port | port) and
+            .http_port != .http2_port)
         elif .id == 3 then
           $request.schema_version == 3 and .core == "sing-box" and
           exact(["id", "core", "listener_id", "server", "public_port", "address_families", "name", "uuid", "hy2"]) and
@@ -236,20 +242,21 @@ dockerConfigureSpecValidate() {
           (.settings | exact(["port", "mark"]) and (.port | port) and
             (.mark | type == "number" and floor == . and . >= 1 and . <= 2147483647))
         else false end) and
-      if any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 28 or .id == 31) then
+      if any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 28 or .id == 29 or .id == 31) then
         .tls != null and
         all(.core.protocols[] | select(.id == 21 or .id == 22); (.core // $request.core.type) == "xray") and
         all(.core.protocols[] | select(.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25); (.websocket // .httpupgrade // .grpc_tls).domain == $request.tls.domain) and
         all(.core.protocols[] | select(.id == 3); .hy2.domain == $request.tls.domain) and
         all(.core.protocols[] | select(.id == 4); .anytls.domain == $request.tls.domain) and
         all(.core.protocols[] | select(.id == 5); .naive.domain == $request.tls.domain) and
+        all(.core.protocols[] | select(.id == 27 or .id == 29); .fallback_tls.domain == $request.tls.domain) and
         all(.core.protocols[] | select(.id == 28); .trojan.domain == $request.tls.domain) and
         all(.core.protocols[] | select(.id == 31); .tuic.domain == $request.tls.domain)
       else
         .tls == null and .subscription.enabled == false
       end and
       if .subscription.enabled then any(.core.protocols[]; .id == 21) else true end and
-      if any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 28 or .id == 30 or .id == 31) then .host_integrations == [] else true end and
+      if any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 28 or .id == 29 or .id == 30 or .id == 31) then .host_integrations == [] else true end and
       if any(.host_integrations[]; .type == "fail2ban") then
         any(.core.protocols[]; .id == 21) and
         all(.host_integrations[] | select(.type == "fail2ban") | .settings.ports[];
@@ -270,7 +277,11 @@ dockerConfigureSpecValidate() {
           [$request.host_integrations[] | select(.type == "tproxy") | .settings.port] +
           [if $core == "xray" then 10085 else 10087 end]) as $corePorts |
         ($corePorts | unique | length) == ($corePorts | length)) and
-      (([.core.protocols[] | select(.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25) | ((.websocket // .httpupgrade // .grpc_tls).tls_port // 8443)] + [8080]) as $tlsPorts |
+      (([.core.protocols[] | select(.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25) |
+          ((.websocket // .httpupgrade // .grpc_tls).tls_port // 8443)] +
+        ([.core.protocols[] | select(.id == 27 or .id == 29) |
+          [.fallback_tls.http_port, .fallback_tls.http2_port]] | unique | flatten) +
+        [8080]) as $tlsPorts |
       ($tlsPorts | unique | length) == ($tlsPorts | length)))
     ' "${specFile}" >/dev/null 2>&1 || {
         dockerError '配置规格不满足阶段 4 schema、支持矩阵或拓扑约束'
@@ -333,7 +344,7 @@ dockerManagedSpecMatchesDeployment() {
         ($d.core | has("secondary_type")) and .core.secondary_type == $d.core.secondary_type
        else ($d.core | has("secondary_type") | not) end) and
       (([.core.type, .core.secondary_type] | map(select(. != null) | "core-\(.)")) +
-        [if any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25) then "nginx" else empty end] +
+        [if any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29) then "nginx" else empty end] +
         [if .subscription.enabled then "subscription" else empty end] +
         [.host_integrations[].profile] | sort) == ($d.compose.profiles | sort) and
       (.host_integrations | sort_by(.type)) == ($d.host_integrations | sort_by(.type)) and
@@ -840,23 +851,29 @@ dockerGenerateXrayConfig() {
                 xmux: {maxConcurrency: "16-32", hMaxRequestTimes: "600-900", hMaxReusableSecs: "1800-3000"}}
             } elif .id == 26 then {grpcSettings: {serviceName: .grpc.service_name}} else {} end)),
             sniffing: {enabled: true, destOverride: ["http", "tls", "quic"], routeOnly: true}
-          } elif .id == 28 then {
+          } elif .id == 27 or .id == 28 or .id == 29 then {
             listen: "::",
             port: .public_port,
-            protocol: "trojan",
+            protocol: (if .id == 27 then "vless" else "trojan" end),
             tag: .listener_id,
-            settings: {clients: [{password: .uuid, email: .uuid}]},
+            settings: ((if .id == 27 then {
+              clients: [{id: .uuid, email: .name, flow: "xtls-rprx-vision"}], decryption: "none"
+            } else {clients: [{password: .uuid, email: .uuid}]} end) +
+              if .id == 27 or .id == 29 then {fallbacks: [
+                {dest: ("nginx:" + (.fallback_tls.http_port | tostring)), xver: 1},
+                {alpn: "h2", dest: ("nginx:" + (.fallback_tls.http2_port | tostring)), xver: 1}
+              ]} else {} end),
             streamSettings: {
               network: "tcp",
               security: "tls",
               tlsSettings: {
-                serverName: .trojan.domain,
-                alpn: ["http/1.1"],
+                serverName: (.fallback_tls // .trojan).domain,
+                alpn: (if .id == 28 then ["http/1.1"] else ["h2", "http/1.1"] end),
                 rejectUnknownSni: true,
                 minVersion: "1.2",
                 certificates: [{
-                  certificateFile: "/etc/padm/secrets/tls/\(.trojan.domain).crt",
-                  keyFile: "/etc/padm/secrets/tls/\(.trojan.domain).key"
+                  certificateFile: "/etc/padm/secrets/tls/\((.fallback_tls // .trojan).domain).crt",
+                  keyFile: "/etc/padm/secrets/tls/\((.fallback_tls // .trojan).domain).key"
                 }]
               }
             }
@@ -1078,7 +1095,8 @@ dockerStageTlsFiles() {
 
 dockerGenerateNginxConfig() {
     local specFile=$1 target=$2 domain path token subscriptionEnabled fail2banEnabled backendPort tlsPort backendCore protocolId hostHeader
-    jq -e 'any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25)' "${specFile}" >/dev/null || return 0
+    local httpPort http2Port
+    jq -e 'any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29)' "${specFile}" >/dev/null || return 0
     domain=$(jq -r '.tls.domain' "${specFile}") || return 1
     token=$(jq -r '.subscription.token' "${specFile}") || return 1
     subscriptionEnabled=$(jq -r '.subscription.enabled' "${specFile}") || return 1
@@ -1096,6 +1114,61 @@ server {
     }
 }
 EOF
+    if jq -e 'any(.core.protocols[]; .id == 27 or .id == 29)' "${specFile}" >/dev/null; then
+        cat >>"${target}" <<'EOF'
+
+log_format padm_fallback '$proxy_protocol_addr - $remote_user [$time_local] "$request" '
+                         '$status $body_bytes_sent "$http_referer" "$http_user_agent"';
+EOF
+    fi
+    while IFS=$'\t' read -r httpPort http2Port; do
+        cat >>"${target}" <<EOF
+
+server {
+    listen ${httpPort} proxy_protocol;
+    listen [::]:${httpPort} proxy_protocol;
+    server_name ${domain};
+    root /srv/padm;
+    access_log /var/log/nginx/access.log padm_fallback;
+
+    location = / {
+        try_files /index.html @padm_fallback;
+    }
+
+    location / {
+        try_files \$uri =404;
+    }
+
+    location @padm_fallback {
+        default_type text/html;
+        return 200 '<!doctype html><title>Welcome</title><h1>Welcome</h1>';
+    }
+}
+
+server {
+    listen ${http2Port} proxy_protocol;
+    listen [::]:${http2Port} proxy_protocol;
+    http2 on;
+    server_name ${domain};
+    root /srv/padm;
+    access_log /var/log/nginx/access.log padm_fallback;
+
+    location = / {
+        try_files /index.html @padm_fallback;
+    }
+
+    location / {
+        try_files \$uri =404;
+    }
+
+    location @padm_fallback {
+        default_type text/html;
+        return 200 '<!doctype html><title>Welcome</title><h1>Welcome</h1>';
+    }
+}
+EOF
+    done < <(jq -r '[.core.protocols[] | select(.id == 27 or .id == 29) |
+      [.fallback_tls.http_port, .fallback_tls.http2_port]] | unique[] | @tsv' "${specFile}")
     while IFS=$'\t' read -r path backendPort tlsPort backendCore protocolId; do
         hostHeader='$host'
         [[ "${protocolId}" != 23 ]] || hostHeader=${domain}
@@ -1172,6 +1245,10 @@ dockerGenerateSubscription() {
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=grpc&alpn=h2&path=\(.grpc.service_name | @uri)&serviceName=\(.grpc.service_name | @uri)#\(.name | @uri)"
       elif .id == 28 then
         "trojan://\(.uuid | @uri)@\(.server | authority):\(.public_port)?peer=\(.trojan.domain | @uri)&fp=chrome&sni=\(.trojan.domain | @uri)&alpn=\("http/1.1" | @uri)#\(.name | @uri)"
+      elif .id == 27 then
+        "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&flow=xtls-rprx-vision&security=tls&sni=\(.fallback_tls.domain | @uri)&fp=chrome&alpn=\("h2,http/1.1" | @uri)&type=tcp#\(.name | @uri)"
+      elif .id == 29 then
+        "trojan://\(.uuid | @uri)@\(.server | authority):\(.public_port)?peer=\(.fallback_tls.domain | @uri)&security=tls&fp=chrome&sni=\(.fallback_tls.domain | @uri)&alpn=\("h2,http/1.1" | @uri)&type=tcp#\(.name | @uri)"
       elif .id == 3 then
         # 服务端上行对应客户端下行，分享链接需要交换带宽方向。
         "hysteria2://\(.uuid | @uri)@\(.server | authority):\(.public_port)?peer=\(.hy2.domain | @uri)&insecure=0&sni=\(.hy2.domain | @uri)&alpn=h3" +
@@ -1269,8 +1346,9 @@ dockerGenerateCompose() {
         else "[::]:\($protocol.public_port):\($containerPort)/\($transport)" end
       ];
       [$r.core.type, $r.core.secondary_type] | map(select(. != null)) as $cores |
-      ($r.core.protocols | map(select(.id == 1 or .id == 2 or .id == 3 or .id == 4 or .id == 5 or .id == 26 or .id == 28 or .id == 30 or .id == 31))) as $direct |
+      ($r.core.protocols | map(select(.id == 1 or .id == 2 or .id == 3 or .id == 4 or .id == 5 or .id == 26 or .id == 27 or .id == 28 or .id == 29 or .id == 30 or .id == 31))) as $direct |
       ($r.core.protocols | map(select(.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25))) as $websocket |
+      ($r.core.protocols | map(select(.id == 27 or .id == 29))) as $fallback |
       ($r.host_integrations | map(select(.type == "wireguard"))) as $wireguard |
       ($r.host_integrations | map(select(.type == "fail2ban"))) as $fail2ban |
       ($r.host_integrations | map(select(.type == "tun"))) as $tun |
@@ -1334,7 +1412,7 @@ dockerGenerateCompose() {
               }]
             else . end
         else . end
-      | if ($websocket | length) > 0 then
+      | if (($websocket | length) + ($fallback | length)) > 0 then
           .services.nginx = (defaults + {
             image: "${PADM_NGINX_IMAGE:?PADM_NGINX_IMAGE is required}",
             profiles: ["nginx"],
@@ -1343,7 +1421,7 @@ dockerGenerateCompose() {
               ({}; .[$core] = {condition: "service_healthy"})),
             volumes: (mounts("config/nginx"; "/etc/nginx/http.d"; true) +
               mounts("data/static"; "/srv/padm"; true) +
-              mounts("secrets/tls"; "/etc/padm/secrets/tls"; true) +
+              (if ($websocket | length) > 0 then mounts("secrets/tls"; "/etc/padm/secrets/tls"; true) else [] end) +
               mounts("logs/nginx"; "/var/log/nginx"; false)),
             ports: [$websocket[] as $protocol |
                 ports($protocol; (($protocol.websocket // $protocol.httpupgrade // $protocol.grpc_tls).tls_port // 8443))[]],
@@ -1467,7 +1545,7 @@ dockerGenerateDeployment() {
       def digest: capture("@(?<value>sha256:[a-f0-9]{64})$").value;
       def profiles:
         ([[$r.core.type, $r.core.secondary_type][] | select(. != null) | "core-\(.)"] +
-        [if any($r.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25) then "nginx" else empty end] +
+        [if any($r.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29) then "nginx" else empty end] +
         [if $r.subscription.enabled then "subscription" else empty end] +
         [$r.host_integrations[].profile]);
       {
@@ -2361,6 +2439,7 @@ dockerCoreTlsDomains() {
 
 dockerTlsConsumers() {
     local domain=$1 root core cores domains consumers='[]' image config nginxDomain count imageKey
+    local nginxTlsExpected=true specFile
     root=$(dockerInstallRoot) || return 1
     dockerDomainIsValid "${domain}" &&
         dockerTrafficSafePath "${root}" "${root}/deployment.json" || return 1
@@ -2416,6 +2495,14 @@ dockerTlsConsumers() {
         [[ -f "${root}/config/nginx/default.conf" && ! -L "${root}/config/nginx/default.conf" ]] || return 1
         [[ -z "$(find "${root}/config/nginx" ! -type f ! -type d -print -quit)" &&
             -z "$(find "${root}/config/nginx" -name '*.conf' ! -name default.conf -print -quit)" ]] || return 1
+        specFile="${root}/config/spec.json"
+        if [[ -e "${specFile}" || -L "${specFile}" ]]; then
+            dockerTrafficSafePath "${root}" "${specFile}" &&
+                dockerConfigureSpecValidate "${specFile}" || return 1
+            nginxTlsExpected=$(jq -r 'any(.core.protocols[];
+              .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25)' "${specFile}") || return 1
+        fi
+        if [[ "${nginxTlsExpected}" == true ]]; then
         nginxDomain=$(awk '
           $1 == "ssl_certificate" {
             if ($2 !~ /^\/etc\/padm\/secrets\/tls\/[A-Za-z0-9.-]+\.crt;$/) bad=1
@@ -2441,6 +2528,17 @@ dockerTlsConsumers() {
                 .[0].source == "${PADM_DOCKER_ROOT}/secrets/tls")
             ' "${root}/compose.json" >/dev/null || return 1
             consumers=$(jq -c '. + ["nginx"]' <<<"${consumers}") || return 1
+        fi
+        else
+            # 明文 fallback 只接受受管生成结果和固定挂载，拒绝配置漂移及主配置覆盖。
+            cmp -s -- "${root}/config/nginx/default.conf" \
+                <(dockerGenerateNginxConfig "${specFile}" /dev/stdout) &&
+                jq -e '(.services.nginx.volumes | sort_by(.target)) == ([
+                  {type:"bind",source:"${PADM_DOCKER_ROOT}/config/nginx",target:"/etc/nginx/http.d",read_only:true},
+                  {type:"bind",source:"${PADM_DOCKER_ROOT}/data/static",target:"/srv/padm",read_only:true},
+                  {type:"bind",source:"${PADM_DOCKER_ROOT}/logs/nginx",target:"/var/log/nginx",read_only:false}
+                ] | sort_by(.target))' \
+                    "${root}/compose.json" >/dev/null || return 1
         fi
     fi
     while IFS= read -r core; do

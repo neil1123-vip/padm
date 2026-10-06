@@ -5969,6 +5969,10 @@ runDockerGrpcTlsRegression() {
     bash "${PROJECT_ROOT}/docker/tests/grpc-tls.sh"
 }
 
+runDockerTraditionalTlsRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/traditional-tls.sh"
+}
+
 runDockerPermissionsRegression() {
     bash "${PROJECT_ROOT}/docker/tests/permissions.sh"
 }

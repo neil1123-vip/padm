@@ -1872,4 +1872,100 @@ for grpcProtocol in 24 25; do
     done
     export FAKE_SETUP_MODE=ok
 done
+# 传统 TLS 首配仍走同一候选事务，fallback 后端不承担 TLS。
+for fallbackProtocol in 27 29; do
+    fallbackChoice=16; listener=entry-vless-tls-vision
+    [[ "${fallbackProtocol}" != 29 ]] || { fallbackChoice=17; listener=entry-trojan-tls-fallback; }
+    printf -v fallbackInput '1\n%s\nproxy.example.com\n3\nfallback.example.com\n24501\n2\n%s\n%s\ny\n' \
+        "${fallbackChoice}" "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
+    for fallbackTopology in single dual; do
+        newState "fallback-${fallbackProtocol}-${fallbackTopology}"
+        input=${fallbackInput}; single=true
+        if [[ "${fallbackTopology}" == dual ]]; then
+            single=false
+            printf -v input '3\n%s\nproxy.example.com\n3\ntarget.example.com\n443\ntarget.example.com\n24445\nfallback.example.com\n24501\n2\n%s\n%s\ny\n' \
+                "${fallbackChoice}" "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
+        fi
+        before=$(snapshot)
+        runPty 0 "fallback-${fallbackProtocol}-${fallbackTopology}-cancel" "${input%$'y\n'}"$'n\n' setup "${ASSET_ARGS[@]}"
+        [[ "$(snapshot)" == "${before}" && ! -s "${EVENTS}" && ! -s "${VERIFY_LOG}" ]] ||
+            fail "${fallbackProtocol}/${fallbackTopology}: 取消传统 TLS 首配改变状态"
+        runPty 0 "fallback-${fallbackProtocol}-${fallbackTopology}" "${input}" setup "${ASSET_ARGS[@]}"
+        SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+        jq -e --argjson protocol "${fallbackProtocol}" --arg listener "${listener}" --argjson single "${single}" '
+          .schema_version == 3 and .core.type == "xray" and .tls.domain == "fallback.example.com" and
+          .subscription.enabled == false and
+          (.core.protocols[0] | .id == $protocol and .core == "xray" and .listener_id == $listener and
+            .server == "proxy.example.com" and .public_port == 24501 and
+            .address_families == ["ipv4","ipv6"] and .uuid == "11111111-1111-4111-8111-111111111111" and
+            .fallback_tls == {domain:"fallback.example.com",http_port:31300,http2_port:31302}) and
+          if $single then .core.secondary_type == null and (.core.protocols | length) == 1
+          else .core.secondary_type == "sing-box" and (.core.protocols | length) == 2 and
+            .core.protocols[1].id == 1 and .core.protocols[1].public_port == 24445 and
+            .core.protocols[0].uuid == .core.protocols[1].uuid end
+        ' "${SPEC}" >/dev/null || fail "${fallbackProtocol}/${fallbackTopology}: 传统 TLS 首配规格错误"
+        jq -e '.services.xray.ports == ["0.0.0.0:24501:24501/tcp","[::]:24501:24501/tcp"] and
+          (.services.xray.depends_on // {}) == {} and (.services.nginx.depends_on // {}) == {} and
+          .services.nginx.ports == [] and
+          any(.services.xray.volumes[]; .target == "/etc/padm/secrets/tls" and .read_only) and
+          all(.services.nginx.volumes[]; .target != "/etc/padm/secrets/tls")' \
+            "${PADM_DOCKER_INSTALL_DIR}/compose.json" >/dev/null ||
+            fail "${fallbackProtocol}/${fallbackTopology}: TLS 终止或 fallback 依赖错误"
+        if [[ "${single}" == true ]]; then
+            ! grep -Eq ' x25519( |$)|derived-stdin' "${EVENTS}" || fail '单核传统 TLS 生成无用 Reality 密钥'
+        fi
+        assertClean
+        assertNoSecrets
+    done
+    export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-fallback-${fallbackProtocol}-single"
+    export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-fallback-${fallbackProtocol}-single"
+    CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
+    SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+    cp -- "${SPEC}" "${TEST_ROOT}/fallback-original.json"
+    before=$(snapshot)
+    printf -v input '1\n%s\n0\n' "${fallbackProtocol}"
+    runPty 0 "fallback-${fallbackProtocol}-edit-cancel" "${input}" edit "${ASSET_ARGS[@]}"
+    [[ "$(snapshot)" == "${before}" ]] || fail "${fallbackProtocol}: 取消编辑改变部署"
+    printf -v input '1\n%s\n24502\n2\n%s\nnext.example.com\n3\n%s\n2\n4\n%s\nnext-fallback\n9\n%s\n1\n24503\n8\ny\n' \
+        "${fallbackProtocol}" "${fallbackProtocol}" "${fallbackProtocol}" "${fallbackProtocol}" "${fallbackProtocol}"
+    runPty 0 "fallback-${fallbackProtocol}-edit-copy" "${input}" edit "${ASSET_ARGS[@]}"
+    jq -e --slurpfile before "${TEST_ROOT}/fallback-original.json" '
+      .core.secondary_type == null and .tls == $before[0].tls and (.core.protocols | length) == 2 and
+      (.core.protocols[0] | .public_port == 24502 and .server == "next.example.com" and
+        .address_families == ["ipv6"] and .name == "next-fallback" and
+        .uuid == $before[0].core.protocols[0].uuid and .fallback_tls == $before[0].core.protocols[0].fallback_tls) and
+      (.core.protocols[1] | .listener_id == "entry-1" and .public_port == 24503 and
+        .uuid == $before[0].core.protocols[0].uuid and .fallback_tls == $before[0].core.protocols[0].fallback_tls)
+    ' "${SPEC}" >/dev/null || fail "${fallbackProtocol}: 编辑复制丢失身份或共享后端"
+    before=$(snapshot)
+    printf -v input '9\n%s\n2\n24504\n' "${listener}"
+    runPty 15 "fallback-${fallbackProtocol}-copy-sing" "${input}" edit "${ASSET_ARGS[@]}"
+    [[ "$(snapshot)" == "${before}" ]] || fail "${fallbackProtocol}: 复制接受 sing-box"
+    for filter in \
+        '.core.protocols[0].uuid = "22222222-2222-4222-8222-222222222222"' \
+        '.tls.domain = "next.example.com" | .core.protocols |= map(.fallback_tls.domain = "next.example.com")' \
+        '.core.protocols[0].fallback_tls.http_port = 31308' \
+        '.core.protocols[0].fallback_tls.http2_port = 31309'; do
+        jq "${filter}" "${SPEC}" >"${TEST_ROOT}/fallback-rejected.json"
+        chmod 0600 "${TEST_ROOT}/fallback-rejected.json"
+        CONTROL_LOG="${TEST_ROOT}/fallback-${fallbackProtocol}-rejected.log"
+        actual=0
+        bash -u "${CLI}" edit --spec "${TEST_ROOT}/fallback-rejected.json" --preview "${ASSET_ARGS[@]}" \
+            >"${CONTROL_LOG}" 2>&1 || actual=$?
+        [[ "${actual}" == 15 && "$(snapshot)" == "${before}" ]] || fail "${fallbackProtocol}: 编辑绕过固定身份"
+        assertClean
+    done
+    runPty 0 "fallback-${fallbackProtocol}-delete-copy" $'10\nentry-1\n8\ny\n' edit "${ASSET_ARGS[@]}"
+    jq -e '.tls.domain == "fallback.example.com" and (.core.protocols | length) == 1' "${SPEC}" >/dev/null ||
+        fail "${fallbackProtocol}: 删除副本撤销 TLS"
+    runPty 15 "fallback-${fallbackProtocol}-enable-publish" $'7\ny\n8\n' edit "${ASSET_ARGS[@]}"
+    for fallbackFailure in tls-fail health-fail; do
+        newState "fallback-${fallbackProtocol}-${fallbackFailure}"
+        export FAKE_SETUP_MODE="${fallbackFailure}"
+        if [[ "${fallbackFailure}" == tls-fail ]]; then expected=15; else expected=14; fi
+        runPty "${expected}" "fallback-${fallbackProtocol}-${fallbackFailure}" "${fallbackInput}" setup "${ASSET_ARGS[@]}"
+        assertUnconfigured
+    done
+    export FAKE_SETUP_MODE=ok
+done
 printf 'docker-setup-regression-ok\n'
