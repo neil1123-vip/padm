@@ -593,7 +593,14 @@ runRealityTargetLocationRegression() (
         lookupRealityTargetLocation() {
             local retries=0
             printf 'start\t%s\n' "$1" >>"${parallelLog}"
-            if [[ "$1" != "192.0.2.243" ]]; then
+            if [[ "$1" == "192.0.2.241" ]]; then
+                # 首个请求必须等第三个完成，整批等待会在这里超时。
+                while ! grep -qxF $'end\t192.0.2.243' "${parallelLog}" && (( retries < 200 )); do
+                    sleep 0.01
+                    retries=$((retries + 1))
+                done
+                (( retries < 200 )) || return 1
+            elif [[ "$1" != "192.0.2.243" ]]; then
                 while [[ "$(grep -c '^start' "${parallelLog}")" -lt 2 && "${retries}" -lt 200 ]]; do
                     sleep 0.01
                     retries=$((retries + 1))
@@ -663,7 +670,7 @@ runRealityTargetLocationRegression() (
             TMPDIR="${cancelRoot}/tmp"
             PADM_REALITY_TARGET_RESULTS_FILE="${cancelRoot}/early-cancel-results.tsv"
             set -T
-            trap 'if [[ "${BASH_COMMAND}" == '\''geoPids[geoIndex]=$!'\'' ]]; then trap - DEBUG; kill -TERM "${BASHPID}"; fi' DEBUG
+            trap 'if [[ "${BASH_COMMAND}" == '\''jobPids[jobIndex]=$!'\'' ]]; then trap - DEBUG; kill -TERM "${BASHPID}"; fi' DEBUG
             writeRealityTargetResultLines "${parallelLinesFile}"
         ) >"${cancelRoot}/early-output" 2>&1 || rc=$?
         [[ "${rc}" == "143" && ! -e "${cancelRoot}/early-cancel-results.tsv" ]]

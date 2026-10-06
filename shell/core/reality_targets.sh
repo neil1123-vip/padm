@@ -511,6 +511,12 @@ writeRealityTargetResultLine() {
     return "${status}"
 }
 
+probeRealityTargetLocationRecord() {
+    local _detector=$1
+    local ip=$2
+    lookupRealityTargetLocation "${ip}" 2>/dev/null || printf 'Unknown'
+}
+
 cleanupRealityTargetJobs() {
     local status=$? signal=$1 previousPid=$2 pid
     shift 2
@@ -532,10 +538,10 @@ cleanupRealityTargetJobs() {
 writeRealityTargetResultLines() {
     local linesFile=$1
     local resultsFile mergedFile stagedFile geoDir line target parsed host ip location keepNonARanks=${PADM_REALITY_TARGET_SELECTION_SCAN:-}
-    local geoMaxJobs=${PADM_REALITY_SECONDARY_JOBS:-8} geoCount=0 geoStart geoEnd geoIndex geoPid geoTraps geoMonitor= geoPreviousPid
+    local geoMaxJobs=${PADM_REALITY_SECONDARY_JOBS:-8} geoCount=0 geoIndex
     local sni name category cdnRisk asn asOrg networkMatch score pqc certLength tls13 checkedAt note
     local -a sourceFiles=() retainedLines=()
-    local -a geoIps=() geoPids=()
+    local -a geoIps=()
     local -A locations=() incomingTargets=() pendingLocations=()
     [[ -f "${linesFile}" ]] || return 0
     resultsFile=$(realityTargetManagedResultsFile) || return 1
@@ -585,42 +591,11 @@ writeRealityTargetResultLines() {
     done <"${mergedFile}"
     if (( geoCount > 0 )); then
         padmCreateTempPath geoDir -d || { padmRemoveCleanupPath "${mergedFile}"; padmRemoveCleanupPath "${stagedFile}"; return 1; }
-        geoTraps=$(trap -p EXIT INT TERM)
-        [[ $- != *m* ]] || geoMonitor=1
-        geoPreviousPid=${!:-}
-        set -m
-        # 包含尚未登记的最后一个后台任务，但不触碰进入本函数前的任务。
-        trap 'cleanupRealityTargetJobs "" "${geoPreviousPid}" "${geoPids[@]}" "${!:-}"' EXIT
-        trap 'cleanupRealityTargetJobs INT "${geoPreviousPid}" "${geoPids[@]}" "${!:-}"' INT
-        trap 'cleanupRealityTargetJobs TERM "${geoPreviousPid}" "${geoPids[@]}" "${!:-}"' TERM
-        realityTargetProgressLine "REALITY 地理位置查询 0/${geoCount} 并发：${geoMaxJobs}"
-        # ponytail: 按并发上限分批等待；请求时差明显时再复用滚动队列。
-        for ((geoStart = 0; geoStart < geoCount; geoStart += geoMaxJobs)); do
-            geoEnd=$((geoStart + geoMaxJobs))
-            (( geoEnd > geoCount )) && geoEnd=${geoCount}
-            geoPids=()
-            for ((geoIndex = geoStart; geoIndex < geoEnd; geoIndex++)); do
-                (
-                    trap - EXIT INT TERM
-                    set +m
-                    export TMPDIR="${geoDir}"
-                    lookupRealityTargetLocation "${geoIps[geoIndex]}" 2>/dev/null || printf 'Unknown'
-                ) >"${geoDir}/${geoIndex}.location" &
-                geoPids[geoIndex]=$!
-            done
-            for geoPid in "${geoPids[@]}"; do
-                wait "${geoPid}" 2>/dev/null || true
-            done
-            geoPids=()
-            geoPreviousPid=${!:-}
-            realityTargetProgressLine "REALITY 地理位置查询 ${geoEnd}/${geoCount} 并发：${geoMaxJobs}"
-        done
-        [[ -n "${geoMonitor}" ]] || set +m
-        trap - EXIT INT TERM
-        eval "${geoTraps}"
+        runRealityTargetProbeJobs geoIps geoIps "${geoDir}" "${geoMaxJobs}" \
+            "REALITY 地理位置查询" "$(date +%s)" probeRealityTargetLocationRecord ""
         for ((geoIndex = 0; geoIndex < geoCount; geoIndex++)); do
             location=Unknown
-            [[ ! -s "${geoDir}/${geoIndex}.location" ]] || location=$(<"${geoDir}/${geoIndex}.location")
+            [[ ! -s "${geoDir}/${geoIndex}.result" ]] || location=$(<"${geoDir}/${geoIndex}.result")
             locations["${geoIps[geoIndex]}"]=${location:-Unknown}
         done
         padmRemoveCleanupPath "${geoDir}"
