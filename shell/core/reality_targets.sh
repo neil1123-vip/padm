@@ -3243,15 +3243,16 @@ applyRealityTargetToInstalledConfigs() {
     local target=$1
     local sni=$2
     local parsed host port changed=false
-    local applyLog
-    local xrayRealityConfigPath xrayGrpcConfigPath xrayXhttpConfigPath singBoxRealityConfigPath singBoxGrpcConfigPath
+    local applyLog configFile configIndex filter
+    local -a configFiles=(
+        "$(realityXrayVisionConfigPath)"
+        "$(realityXrayGrpcConfigPath)"
+        "$(realityXrayXhttpConfigPath)"
+        "$(realitySingBoxVisionConfigPath)"
+        "$(realitySingBoxGrpcConfigPath)"
+    )
     REALITY_TARGET_APPLY_FAILURE_LOG=
     REALITY_TARGET_APPLY_FAILURE_PATH=
-    xrayRealityConfigPath=$(realityXrayVisionConfigPath)
-    xrayGrpcConfigPath=$(realityXrayGrpcConfigPath)
-    xrayXhttpConfigPath=$(realityXrayXhttpConfigPath)
-    singBoxRealityConfigPath=$(realitySingBoxVisionConfigPath)
-    singBoxGrpcConfigPath=$(realitySingBoxGrpcConfigPath)
     applyLog=$(realityTargetTmpPath padm-reality-target-apply.log)
     rm -f "${applyLog}" >/dev/null 2>&1 || true
     parsed=$(parseHostPort "${target}" 443)
@@ -3267,68 +3268,31 @@ applyRealityTargetToInstalledConfigs() {
         return 1
     fi
 
-    if [[ -f "${xrayRealityConfigPath}" ]]; then
-        if ! updateRoutingJsonConfig "${xrayRealityConfigPath}" '
-          .inbounds[1].streamSettings.realitySettings.target = $target |
-          .inbounds[1].streamSettings.realitySettings.serverNames = [$sni]
-        ' --arg target "${host}:${port}" --arg sni "${sni}" 2>"${applyLog}"; then
+    for configIndex in "${!configFiles[@]}"; do
+        configFile=${configFiles[configIndex]}
+        [[ -f "${configFile}" ]] || continue
+        case "${configIndex}" in
+        0|1|2)
+            # Xray Vision 使用第 2 个入站，其余使用第 1 个；XHTTP 同步 host。
+            filter='.inbounds[$index].streamSettings.realitySettings.target = $target |
+                .inbounds[$index].streamSettings.realitySettings.serverNames = [$sni]'
+            [[ "${configIndex}" != 2 ]] || filter+=' | .inbounds[0].streamSettings.xhttpSettings.host = $sni'
+            ;;
+        3|4)
+            filter='.inbounds[0].tls.server_name = $sni |
+                .inbounds[0].tls.reality.handshake.server = $host |
+                .inbounds[0].tls.reality.handshake.server_port = ($port | tonumber)'
+            ;;
+        esac
+        if ! updateRoutingJsonConfig "${configFile}" "${filter}" \
+            --argjson index "$((configIndex == 0 ? 1 : 0))" --arg target "${host}:${port}" \
+            --arg host "${host}" --arg port "${port}" --arg sni "${sni}" 2>"${applyLog}"; then
             REALITY_TARGET_APPLY_FAILURE_LOG="${applyLog}"
-            REALITY_TARGET_APPLY_FAILURE_PATH="${xrayRealityConfigPath}"
+            REALITY_TARGET_APPLY_FAILURE_PATH="${configFile}"
             return 1
         fi
         changed=true
-    fi
-
-    if [[ -f "${xrayGrpcConfigPath}" ]]; then
-        if ! updateRoutingJsonConfig "${xrayGrpcConfigPath}" '
-          .inbounds[0].streamSettings.realitySettings.target = $target |
-          .inbounds[0].streamSettings.realitySettings.serverNames = [$sni]
-        ' --arg target "${host}:${port}" --arg sni "${sni}" 2>"${applyLog}"; then
-            REALITY_TARGET_APPLY_FAILURE_LOG="${applyLog}"
-            REALITY_TARGET_APPLY_FAILURE_PATH="${xrayGrpcConfigPath}"
-            return 1
-        fi
-        changed=true
-    fi
-
-    if [[ -f "${xrayXhttpConfigPath}" ]]; then
-        if ! updateRoutingJsonConfig "${xrayXhttpConfigPath}" '
-          .inbounds[0].streamSettings.realitySettings.target = $target |
-          .inbounds[0].streamSettings.realitySettings.serverNames = [$sni] |
-          .inbounds[0].streamSettings.xhttpSettings.host = $sni
-        ' --arg target "${host}:${port}" --arg sni "${sni}" 2>"${applyLog}"; then
-            REALITY_TARGET_APPLY_FAILURE_LOG="${applyLog}"
-            REALITY_TARGET_APPLY_FAILURE_PATH="${xrayXhttpConfigPath}"
-            return 1
-        fi
-        changed=true
-    fi
-
-    if [[ -f "${singBoxRealityConfigPath}" ]]; then
-        if ! updateRoutingJsonConfig "${singBoxRealityConfigPath}" '
-          .inbounds[0].tls.server_name = $sni |
-          .inbounds[0].tls.reality.handshake.server = $host |
-          .inbounds[0].tls.reality.handshake.server_port = ($port | tonumber)
-        ' --arg host "${host}" --arg port "${port}" --arg sni "${sni}" 2>"${applyLog}"; then
-            REALITY_TARGET_APPLY_FAILURE_LOG="${applyLog}"
-            REALITY_TARGET_APPLY_FAILURE_PATH="${singBoxRealityConfigPath}"
-            return 1
-        fi
-        changed=true
-    fi
-
-    if [[ -f "${singBoxGrpcConfigPath}" ]]; then
-        if ! updateRoutingJsonConfig "${singBoxGrpcConfigPath}" '
-          .inbounds[0].tls.server_name = $sni |
-          .inbounds[0].tls.reality.handshake.server = $host |
-          .inbounds[0].tls.reality.handshake.server_port = ($port | tonumber)
-        ' --arg host "${host}" --arg port "${port}" --arg sni "${sni}" 2>"${applyLog}"; then
-            REALITY_TARGET_APPLY_FAILURE_LOG="${applyLog}"
-            REALITY_TARGET_APPLY_FAILURE_PATH="${singBoxGrpcConfigPath}"
-            return 1
-        fi
-        changed=true
-    fi
+    done
 
     if [[ "${changed}" != "true" ]]; then
         rm -f "${applyLog}" >/dev/null 2>&1 || true
