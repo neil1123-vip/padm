@@ -2758,7 +2758,7 @@ completeCoreInstall() {
     serviceQueueRestart "${core}"
     if [[ -z "${selectCustomInstallType:-}" ]]; then
         serviceQueueStart nginx
-    elif [[ "${core}" == "sing-box" ]] && protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
+    elif [[ "${core}" == "sing-box" ]] && nginxRuntimeRequired; then
         serviceQueueRestart nginx
     fi
     serviceQueueApply || return 1

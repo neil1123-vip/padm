@@ -530,6 +530,64 @@ runInstallWorkflowRegression() (
         done
     )
 
+    (
+        # 收尾按实际入口决定 Nginx 依赖，不能让直连安装因未安装 Nginx 回滚。
+        source "${PROJECT_ROOT}/shell/core/services.sh"
+        local root="${TMP_DIR}/install-nginx-dependencies"
+        local nginxConfigPath="${root}/nginx/" currentInstallProtocolType= selectCustomInstallType=
+        local PADM_NGINX_ERROR_LOG="${root}/nginx-error.log"
+        local events= nginxStatus=127 id file
+        mkdir -p "${nginxConfigPath}"
+        realityStreamSplitConfFile() { printf '%s\n' "${root}/stream.conf"; }
+        realityStreamSplitEnabled() { return 1; }
+        subscriptionWireGuardControlEnabled() { return 1; }
+        singBoxMergeConfig() { return 0; }
+        handleXray() { events+="xray:$1"$'\n'; }
+        handleSingBox() { events+="sing-box:$1"$'\n'; }
+        handleNginx() { events+="nginx:$1"$'\n'; }
+        nginx() { events+="nginx:$1"$'\n'; return "${nginxStatus}"; }
+        persistRealityEntryProfile() { return 0; }
+        checkGFWStatue() { events+="check:$1:$2"$'\n'; }
+        cleanUp() { events+="cleanup:$1"$'\n'; }
+        showAccounts() { events+="accounts:$1"$'\n'; }
+        local coreEvents=$'xray:stop\nsing-box:stop\nsing-box:start\n'
+        local finishEvents=$'check:8:sing-box\ncleanup:xrayDel\naccounts:9\n'
+
+        for id in 1 26 3 4 5 28 30 31 201; do
+            selectCustomInstallType=",${id},"
+            events=
+            completeCoreInstall sing-box 8 9
+            [[ "${events}" == "${coreEvents}${finishEvents}" && -z "${SERVICE_ACTIONS}" ]]
+        done
+
+        # 有证书不等于依赖 Nginx；HTTPUpgrade、已有订阅及共存入口仍须恢复。
+        nginxStatus=0
+        selectCustomInstallType=,23,
+        events=
+        completeCoreInstall sing-box 8 9
+        [[ "${events}" == "${coreEvents}"$'nginx:-t\nnginx:stop\nnginx:start\n'"${finishEvents}" ]]
+        for id in 1 3; do
+            selectCustomInstallType=",${id},"
+            for file in "${nginxConfigPath}subscribe.conf" "${root}/stream.conf"; do
+                : >"${file}"
+                events=
+                completeCoreInstall sing-box 8 9
+                [[ "${events}" == "${coreEvents}"$'nginx:-t\nnginx:stop\nnginx:start\n'"${finishEvents}" ]]
+                nginxStatus=1
+                events=
+                regressionExpectStatus 1 completeCoreInstall sing-box 8 9
+                [[ "${events}" == "${coreEvents}"$'nginx:-t\n' && -z "${SERVICE_ACTIONS}" ]]
+                nginxStatus=0
+                rm -f "${file}"
+            done
+        done
+        selectCustomInstallType=
+        nginxRunning() { return 1; }
+        events=
+        completeCoreInstall sing-box 8 9
+        [[ "${events}" == "${coreEvents}"$'nginx:start\n'"${finishEvents}" ]]
+    )
+
     # 六个入口先确认历史和连接地址；取消不进入事务，重填标记只在本次安装可见。
     (
         local install input events= historyReads=0 inputFd nextInput
