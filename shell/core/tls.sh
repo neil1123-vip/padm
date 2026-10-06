@@ -367,12 +367,10 @@ installTLSFromAcme() {
                 [[ -n "${backupDir}" ]] && padmRemoveCleanupPath "${backupDir}"
                 return 1
             }
-            [[ -n "${backupDir}" ]] && padmRemoveCleanupPath "${backupDir}"
-            installTLSFromAcme || return 1
-        else
-            [[ -n "${backupDir}" ]] && padmRemoveCleanupPath "${backupDir}"
-            installTLSFromAcme || return 1
         fi
+        [[ -n "${backupDir}" ]] && padmRemoveCleanupPath "${backupDir}"
+        installTLSFromAcme
+        return $?
     fi
 
     [[ -n "${backupDir}" ]] && padmRemoveCleanupPath "${backupDir}"
@@ -400,6 +398,7 @@ installTLS() {
     local tlsDomain=${domain}
     local tlsDir
     local reInstallStatus=n
+    local installTLSCount=0
     tlsDomainNameIsSafe "${tlsDomain}" || { errorCard "TLS 域名不合法"; return 1; }
     tlsDir=$(tlsManagedDir) || return 1
 
@@ -411,10 +410,13 @@ installTLS() {
             tlsCertificateCard "回车保留现有证书；重新安装仅同步当前域名证书"
             menuReadChoice tls_reinstall "是否重新安装当前域名证书？[y/N]:" reInstallStatus true || return 1
         fi
-        renewalTLS || return 1
-
-        if [[ "$(normalizeYesNo "${reInstallStatus}")" == "y" ]] || ! tlsCertificatePairExists "${tlsDir}" "${tlsDomain}"; then
+        if [[ "$(normalizeYesNo "${reInstallStatus}")" == "y" ]]; then
             installTLSFromAcme || return 1
+        else
+            renewalTLS || return 1
+            if ! tlsCertificatePairExists "${tlsDir}" "${tlsDomain}"; then
+                installTLSFromAcme || return 1
+            fi
         fi
 
     elif [[ -d "$HOME/.acme.sh/${tlsDomain}_ecc" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.key" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; then

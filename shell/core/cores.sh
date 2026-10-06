@@ -1767,7 +1767,6 @@ runCoreInstallRestoringNginxOnFailure() {
     shift
     local nginxWasRunning=false
     local installStatus=0
-    local PADM_INSTALL_RESET_HISTORY=false
     nginxRunning && nginxWasRunning=true
     "${operation}" "$@" || installStatus=$?
     if [[ "${installStatus}" != "0" && "${nginxWasRunning}" == "true" ]] && ! nginxRunning; then
@@ -2681,13 +2680,26 @@ configureRealityDomainMode() {
     fi
 }
 
+# 安装输入在事务外确认，取消时不备份或恢复服务。
+prepareCoreInstallInputs() {
+    local core=$1
+    readLastInstallationConfig || return 1
+    if [[ -z "${selectCustomInstallType:-}" ]]; then
+        [[ -n "${btDomain:-}" ]] || readInstallTLSDomain domain || return 1
+    else
+        if protocolSelectionHasAny "${selectCustomInstallType}" 1 2 26; then
+            collectEntryProfile || return 1
+        fi
+        if protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}" &&
+            [[ "${core}" == "sing-box" || -z "${btDomain:-}" ]]; then
+            readInstallTLSDomain domain || return 1
+        fi
+    fi
+    return 0
+}
+
 # 安装 Xray-core
 installXrayRealityApply() {
-    selectCustomInstallType=",1,"
-    realityOnlyWithDomain=
-    [[ "$(normalizeYesNo "${AUTO_REALITY_DOMAIN:-}")" == "y" ]] && realityOnlyWithDomain=true
-    readLastInstallationConfig || return 1
-    collectEntryProfile || return 1
     totalProgress=6
     installTools 1 || return 1
 
@@ -2703,17 +2715,16 @@ installXrayRealityApply() {
 }
 
 installXrayReality() {
+    local PADM_INSTALL_RESET_HISTORY=false
+    selectCustomInstallType=",1,"
+    realityOnlyWithDomain=
+    [[ "$(normalizeYesNo "${AUTO_REALITY_DOMAIN:-}")" == "y" ]] && realityOnlyWithDomain=true
+    prepareCoreInstallInputs xray || return 1
     runCoreInstallRestoringNginxOnFailure coreSwitchConfigTransaction xray padmRunPortAllowTransaction installXrayRealityApply "$@"
 }
 
 # 安装 sing-box Reality
 installSingBoxRealityApply() {
-
-    selectCustomInstallType=",1,"
-    realityOnlyWithDomain=
-    [[ "$(normalizeYesNo "${AUTO_REALITY_DOMAIN:-}")" == "y" ]] && realityOnlyWithDomain=true
-    readLastInstallationConfig || return 1
-    collectEntryProfile || return 1
     totalProgress=6
     installTools 1 || return 1
 
@@ -2729,6 +2740,11 @@ installSingBoxRealityApply() {
 }
 
 installSingBoxReality() {
+    local PADM_INSTALL_RESET_HISTORY=false
+    selectCustomInstallType=",1,"
+    realityOnlyWithDomain=
+    [[ "$(normalizeYesNo "${AUTO_REALITY_DOMAIN:-}")" == "y" ]] && realityOnlyWithDomain=true
+    prepareCoreInstallInputs sing-box || return 1
     runCoreInstallRestoringNginxOnFailure coreSwitchConfigTransaction sing-box padmRunPortAllowTransaction installSingBoxRealityApply "$@"
 }
 
@@ -2786,13 +2802,6 @@ selectCoreInstallProtocols() {
 # Xray-core个性化安装
 customXrayInstallApply() {
     protocolSelectionShowRiskNotes "${selectCustomInstallType}"
-    readLastInstallationConfig || return 1
-    if protocolSelectionHasAny "${selectCustomInstallType}" 1 2 26; then
-        collectEntryProfile || return 1
-    fi
-    if [[ -z "${btDomain:-}" ]] && protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
-        readInstallTLSDomain domain || return 1
-    fi
     # checkBTPanel
     # check1Panel
     totalProgress=12
@@ -2847,8 +2856,10 @@ customXrayInstallApply() {
 }
 
 customXrayInstall() {
+    local PADM_INSTALL_RESET_HISTORY=false
     selectCoreInstallProtocols xray "${1:-}" || return 1
     configureRealityDomainMode "${selectCustomInstallType}" "${2:-}" || return 1
+    prepareCoreInstallInputs xray || return 1
     runCoreInstallRestoringNginxOnFailure coreSwitchConfigTransaction xray padmRunPortAllowTransaction customXrayInstallApply
 }
 
@@ -2856,13 +2867,6 @@ customXrayInstall() {
 # sing-box 个性化安装
 customSingBoxInstallApply() {
     protocolSelectionShowRiskNotes "${selectCustomInstallType}"
-    readLastInstallationConfig || return 1
-    if protocolSelectionHasAny "${selectCustomInstallType}" 1 26; then
-        collectEntryProfile || return 1
-    fi
-    if protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
-        readInstallTLSDomain domain || return 1
-    fi
     totalProgress=9
     installTools 1 || return 1
     # 申请tls
@@ -2892,8 +2896,10 @@ customSingBoxInstallApply() {
 }
 
 customSingBoxInstall() {
+    local PADM_INSTALL_RESET_HISTORY=false
     selectCoreInstallProtocols sing-box "${1:-}" || return 1
     configureRealityDomainMode "${selectCustomInstallType}" "${2:-}" || return 1
+    prepareCoreInstallInputs sing-box || return 1
     runCoreInstallRestoringNginxOnFailure coreSwitchConfigTransaction sing-box padmRunPortAllowTransaction customSingBoxInstallApply
 }
 
@@ -2939,11 +2945,8 @@ selectCoreInstall() {
 
 # Xray-core 个性化安装
 xrayCoreInstallApply() {
-    readLastInstallationConfig || return 1
     # checkBTPanel
     # check1Panel
-    selectCustomInstallType=
-    [[ -n "${btDomain:-}" ]] || readInstallTLSDomain domain || return 1
     totalProgress=12
     installTools 2 || return 1
     if [[ -n "${btDomain}" ]]; then
@@ -2981,17 +2984,17 @@ xrayCoreInstallApply() {
 }
 
 xrayCoreInstall() {
+    local PADM_INSTALL_RESET_HISTORY=false
+    selectCustomInstallType=
+    prepareCoreInstallInputs xray || return 1
     runCoreInstallRestoringNginxOnFailure coreSwitchConfigTransaction xray padmRunPortAllowTransaction xrayCoreInstallApply "$@"
 }
 
 
 # sing-box 全部安装
 singBoxInstallApply() {
-    readLastInstallationConfig || return 1
     # checkBTPanel
     # check1Panel
-    selectCustomInstallType=
-    [[ -n "${btDomain:-}" ]] || readInstallTLSDomain domain || return 1
     totalProgress=8
     installTools 2 || return 1
 
@@ -3021,6 +3024,9 @@ singBoxInstallApply() {
 }
 
 singBoxInstall() {
+    local PADM_INSTALL_RESET_HISTORY=false
+    selectCustomInstallType=
+    prepareCoreInstallInputs sing-box || return 1
     runCoreInstallRestoringNginxOnFailure coreSwitchConfigTransaction sing-box padmRunPortAllowTransaction singBoxInstallApply "$@"
 }
 

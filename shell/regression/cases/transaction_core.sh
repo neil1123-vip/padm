@@ -1315,7 +1315,7 @@ $1:refresh"
         currentHost=install.example.com
         domain=install.example.com
         AUTO_ENTRY_HOST=
-        AUTO_DOMAIN=
+        AUTO_DOMAIN=install.example.com
         AUTO_REALITY_DOMAIN=
         realityEntryHost=
         nginxRuntimeState=true

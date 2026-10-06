@@ -694,6 +694,7 @@ runTlsReinstallRollbackRegression() (
     local oldDnsAPIStatus="${dnsAPIStatus:-}"
     local shellRc answer inputFd nextInput
     local acmeInstallFailure=true
+    local acmeInstallTransient=false acmeInstallAttempts=0
 
     mkdir -p "${tlsDir}" "${homeDir}/.acme.sh/reinstall.example.com_ecc"
     printf 'old-cert\n' >"${tlsDir}/reinstall.example.com.crt"
@@ -739,9 +740,11 @@ runTlsReinstallRollbackRegression() (
     }
     selectAcmeInstallSSL() { return 0; }
     sudo() {
+        acmeInstallAttempts=$((acmeInstallAttempts + 1))
         printf 'sudo:%s\n' "$*" >>"${cleanLog}"
         printf 'acme-cert\n' >"${PADM_TLS_DIR}/reinstall.example.com.crt"
         printf 'acme-key\n' >"${PADM_TLS_DIR}/reinstall.example.com.key"
+        [[ "${acmeInstallTransient}" != true || "${acmeInstallAttempts}" != 1 ]] || return 1
         [[ "${acmeInstallFailure}" != "true" ]]
     }
 
@@ -791,8 +794,22 @@ runTlsReinstallRollbackRegression() (
         [[ "$(<"${tlsDir}/other.example.com.key")" == "other-key" ]]
         [[ "$(<"${tlsDir}/ssl_type")" == "letsencrypt" ]]
         ! grep -q '^clean:' "${cleanLog}"
+        ! grep -q '^renew$' "${cleanLog}"
         [[ "$(grep -c '^sudo:' "${cleanLog}")" == 1 ]]
     done
+    (
+        # 明确重装不先续签；单次重试状态不受历史失败影响，也不能重复报告成功。
+        installTLSCount=1
+        acmeInstallTransient=true
+        acmeInstallAttempts=0
+        renewalTLS() { printf 'renew\n' >>"${cleanLog}"; return 37; }
+        : >"${cleanLog}"
+        : >"${statusLog}"
+        installTLS 1 <<<y
+        [[ "${acmeInstallAttempts}" == 2 && "${installTLSCount}" == 1 ]]
+        ! grep -q '^renew$' "${cleanLog}"
+        [[ "$(grep -c '^TLS生成成功$' "${statusLog}")" == 1 ]]
+    )
     : >"${cleanLog}"
     lastInstallationConfig=true
     reInstallStatus=y

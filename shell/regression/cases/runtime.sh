@@ -362,7 +362,7 @@ runInstallWorkflowRegression() (
 
     (
         # 重新填写后取消两核安装，证书、订阅、服务和 ACME 文件必须原样保留。
-        local root="${TMP_DIR}/install-reset-inputs" file before core events=
+        local root="${TMP_DIR}/install-reset-inputs" file before core protocols events=
         local PADM_INSTALL_RESET_HISTORY=false
         local PADM_REALITY_ENTRY_HOST_FILE="${root}/reality_entry_host"
         mkdir -p "${root}/tls" "${root}/subscribe" "${root}/services" "${root}/home/.acme.sh" "${root}/conf"
@@ -384,12 +384,13 @@ runInstallWorkflowRegression() (
         }
         cleanLastInstallationConfig() { events+=$'cleanup\n'; return 1; }
         installTools() { events+=$'tools\n'; return 1; }
+        coreTemplateConfigBackupCreate() { events+=$'backup\n'; return 1; }
         nginxRunning() { return 1; }
         for core in xray sing-box; do
-            selectCustomInstallType=",21,"
-            apply=customXrayInstallApply
-            [[ "${core}" != sing-box ]] || { selectCustomInstallType=",3,"; apply=customSingBoxInstallApply; }
-            regressionExpectStatus 1 runCoreInstallRestoringNginxOnFailure "${apply}" < <(printf 'n\n\n')
+            apply=customXrayInstall
+            protocols=21
+            [[ "${core}" != sing-box ]] || { protocols=3; apply=customSingBoxInstall; }
+            regressionExpectStatus 1 "${apply}" "${protocols}" < <(printf 'n\n\n')
             [[ -z "${events}${currentHost}${currentUUID}${currentClients}${currentPath}${customPort}${realityPort}${realityGrpcPort}${xHTTPort}${singBoxVLESSRealityVisionSNI}" ]]
             [[ "${PADM_INSTALL_RESET_HISTORY}" == false && "${configPath}" == "${root}/conf/" ]]
             [[ "$(find "${root}" -type f -exec sha256sum {} + | LC_ALL=C sort)" == "${before}" ]]
@@ -442,7 +443,9 @@ runInstallWorkflowRegression() (
         handleSingBox() { events+="sing-box:$1"$'\n'; }
         handleNginx() { events+="nginx:$1"$'\n'; }
         padmRunPortAllowTransaction() { "$@"; }
-        readLastInstallationConfig() { events+=$'read-last\n'; return 1; }
+        readLastInstallationConfig() { events+=$'read-last\n'; return 0; }
+        collectEntryProfile() { events+=$'entry\n'; }
+        installTools() { events+=$'tools\n'; return 1; }
         for core in xray sing-box; do
             install=customXrayInstall
             [[ "${core}" != sing-box ]] || install=customSingBoxInstall
@@ -465,7 +468,7 @@ runInstallWorkflowRegression() (
                 regressionExpectStatus 1 "${install}" <&"${inputFd}"
                 read -r -u "${inputFd}" nextInput
                 [[ "${selectCustomInstallType}" == ,1, && "${nextInput}" == next-parent-action && "${selectionErrors}" == 1 ]]
-                [[ "${events}" == $'backup\nread-last\nrollback\n'"${core}:stop"$'\n'"${core}:start"$'\n' ]]
+                [[ "${events}" == $'read-last\nentry\nbackup\ntools\nrollback\n'"${core}:stop"$'\n'"${core}:start"$'\n' ]]
                 if [[ "${mode}" == 2 ]]; then
                     [[ "${realityOnlyWithDomain}" == true ]]
                 else
@@ -476,25 +479,61 @@ runInstallWorkflowRegression() (
         done
     )
 
-    # 历史读取不能覆盖本轮入口；失败必须在下载、停服务之前返回。
+    # 六个入口先确认历史和连接地址；取消不进入事务，重填标记只在本次安装可见。
     (
-        local entryReads=0
-        readLastInstallationConfig() { realityEntryHost=old.example.com; }
-        collectEntryProfile() {
-            [[ "${realityEntryHost}" == old.example.com ]] || return 1
-            realityEntryHost=new.example.com
-            entryReads=$((entryReads + 1))
-            return 1
+        local install input events= historyReads=0 inputFd nextInput
+        local configPath=/regression/installed/ currentHost= btDomain= domain=
+        local PADM_INSTALL_RESET_HISTORY=parent-value
+        unset AUTO_INSTALL AUTO_PROTOCOLS AUTO_REUSE_LAST AUTO_DOMAIN AUTO_ENTRY_HOST
+        AUTO_REALITY_DOMAIN=yes
+        showLastInstallationConfig() {
+            historyReads=$((historyReads + 1))
+            currentHost=old.example.com
+            realityEntryHost=old.example.com
         }
-        installTools() { return 1; }
-        configureRealityDomainMode() { return 0; }
-        protocolSelectionShowRiskNotes() { :; }
-        for apply in installXrayRealityApply installSingBoxRealityApply customXrayInstallApply customSingBoxInstallApply; do
-            selectCustomInstallType=,1,
-            regressionExpectStatus 1 "${apply}" 1
-            [[ "${realityEntryHost}" == new.example.com ]]
+        nginxRunning() { events+=$'nginx\n'; return 0; }
+        handleNginx() { events+=$'service\n'; }
+        coreSwitchConfigTransaction() { events+="transaction:${PADM_INSTALL_RESET_HISTORY}"$'\n'; return 17; }
+        for install in installXrayReality installSingBoxReality customXrayInstall customSingBoxInstall xrayCoreInstall singBoxInstall; do
+            for input in "" n $'n\n' $'n\n\n'; do
+                events=
+                historyReads=0
+                regressionExpectStatus 1 "${install}" 1 domain < <(printf '%s' "${input}")
+                [[ -z "${events}" && "${historyReads}" == 1 && "${PADM_INSTALL_RESET_HISTORY}" == parent-value ]]
+            done
+            AUTO_INSTALL=false
+            AUTO_REUSE_LAST=no
+            AUTO_ENTRY_HOST=new.example.com
+            AUTO_DOMAIN=new.example.com
+            events=
+            historyReads=0
+            exec {inputFd}< <(printf 'next-parent-action\n')
+            regressionExpectStatus 17 "${install}" 1 domain <&"${inputFd}"
+            read -r -u "${inputFd}" nextInput
+            [[ "${events}" == $'nginx\ntransaction:true\nnginx\n' && "${historyReads}" == 1 ]]
+            [[ "${nextInput}" == next-parent-action && "${PADM_INSTALL_RESET_HISTORY}" == parent-value ]]
+            if [[ "${selectCustomInstallType}" == ,1, ]]; then
+                [[ "${realityEntryHost}" == new.example.com ]]
+            else
+                [[ "${domain}" == new.example.com ]]
+            fi
+            exec {inputFd}<&-
+            unset AUTO_INSTALL AUTO_REUSE_LAST AUTO_ENTRY_HOST AUTO_DOMAIN
         done
-        [[ "${entryReads}" == "4" ]]
+
+        # 面板路径仍跳过全量和 Xray 域名页；sing-box 自定义 TLS 仍需确认域名。
+        btDomain=panel.example.com
+        unset AUTO_REALITY_DOMAIN
+        local tlsReads=0
+        readLastInstallationConfig() { return 0; }
+        readInstallTLSDomain() { tlsReads=$((tlsReads + 1)); return 1; }
+        for install in xrayCoreInstall singBoxInstall customXrayInstall; do
+            regressionExpectStatus 17 "${install}" 21 </dev/null
+            [[ "${tlsReads}" == 0 && "${PADM_INSTALL_RESET_HISTORY}" == parent-value ]]
+        done
+        events=
+        regressionExpectStatus 1 customSingBoxInstall 3 </dev/null
+        [[ "${tlsReads}" == 1 && -z "${events}" && "${PADM_INSTALL_RESET_HISTORY}" == parent-value ]]
     )
 
     (
@@ -613,7 +652,7 @@ runInstallWorkflowRegression() (
     )
 
     (
-        # 四个 TLS 安装入口先确认域名；取消或参数错误不能开始依赖安装。
+        # 四个 TLS 安装入口先确认域名；取消或参数错误不能创建备份或开始依赖安装。
         local apply events= currentHost= currentPort= customPort= btDomain= domain=
         local lastInstallationConfig= selectCoreType= selectCustomInstallType=,28, inputFd nextInput
         unset AUTO_INSTALL AUTO_DOMAIN AUTO_PORT
@@ -622,20 +661,23 @@ runInstallWorkflowRegression() (
         protocolSelectionShowRiskNotes() { :; }
         installTools() { events+="tools:${domain}"$'\n'; }
         installTLS() { events+=$'tls\n'; return 1; }
+        coreSwitchConfigTransaction() { events+=$'backup\n'; shift; "$@"; }
+        padmRunPortAllowTransaction() { "$@"; }
+        nginxRunning() { return 1; }
         handleNginx() { events+="nginx:$1"$'\n'; }
         allowPort() { events+="allow:$1"$'\n'; }
         checkDNSIP() { :; }
         removeNginxDefaultConf() { :; }
         checkPortOpen() { :; }
-        for apply in customXrayInstallApply customSingBoxInstallApply xrayCoreInstallApply singBoxInstallApply; do
+        for apply in customXrayInstall customSingBoxInstall xrayCoreInstall singBoxInstall; do
             events=
             selectCoreType=2
             [[ "${apply}" != *Xray* && "${apply}" != xray* ]] || selectCoreType=1
-            regressionExpectStatus 1 "${apply}" </dev/null
+            regressionExpectStatus 1 "${apply}" 28 </dev/null
             [[ -z "${events}" && -z "${domain}" ]]
             AUTO_DOMAIN=invalid/domain
             exec {inputFd}< <(printf 'next-parent-action\n')
-            regressionExpectStatus 1 "${apply}" <&"${inputFd}"
+            regressionExpectStatus 1 "${apply}" 28 <&"${inputFd}"
             read -r -u "${inputFd}" nextInput
             [[ "${nextInput}" == next-parent-action && -z "${events}" && -z "${domain}" ]]
             exec {inputFd}<&-
@@ -645,10 +687,10 @@ runInstallWorkflowRegression() (
             else
                 exec {inputFd}< <(printf 'invalid/domain\ntls.example.com\nnext-parent-action\n')
             fi
-            regressionExpectStatus 1 "${apply}" <&"${inputFd}"
+            regressionExpectStatus 1 "${apply}" 28 <&"${inputFd}"
             read -r -u "${inputFd}" nextInput
             [[ "${domain}" == tls.example.com && "${nextInput}" == next-parent-action ]]
-            [[ "${events}" == tools:tls.example.com$'\n'* && "${events}" == *$'nginx:stop\ntls\n' ]]
+            [[ "${events}" == $'backup\ntools:tls.example.com\n'* && "${events}" == *$'nginx:stop\ntls\n' ]]
             exec {inputFd}<&-
         done
     )
