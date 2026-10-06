@@ -2584,7 +2584,7 @@ initSingBoxClients() {
     local type=",$1,"
     local newUUID=${2:-}
     local newName=${3:-}
-    local clientRows user uuid name
+    local clientRows user uuid name password
 
     jq -e 'type == "array"' <<<"${currentClients}" >/dev/null 2>&1 || return 1
     if [[ -n "${newUUID}" ]]; then
@@ -2625,7 +2625,10 @@ initSingBoxClients() {
         appendSelectedCoreClient users "${type}" 3 '{password:$password,name:$name}' --arg password "${uuid}" --arg name "${name}-singbox_hysteria2" || return 1
 
         # TUIC
-        appendSelectedCoreClient users "${type}" 31 '{uuid:$uuid,password:$password,name:$name}' --arg uuid "${uuid}" --arg password "${uuid}" --arg name "${name}-singbox_tuic" || return 1
+        if protocolSelectionIncludes "${type}" 31; then
+            password=$(jq -r '.password // .uuid // .id // empty' <<<"${user}") || return 1
+            users=$(appendJsonObject "${users}" '{uuid:$uuid,password:$password,name:$name}' --arg uuid "${uuid}" --arg password "${password}" --arg name "${name}-singbox_tuic") || return 1
+        fi
 
         # Naive
         appendSelectedCoreClient users "${type}" 5 '{password:$password,username:$username}' --arg password "${uuid}" --arg username "${name}-singbox_naive" || return 1

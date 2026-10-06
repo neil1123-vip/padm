@@ -514,52 +514,65 @@ singBoxEnsureTLSDependency() {
     return 1
 }
 
-# sing-box TUIC 安装
-singBoxTuicInstallApply() {
-    singBoxEnsureTLSDependency Tuic || return 1
+# 辅助协议只增量写入 sing-box，不切换或清理主核心。
+singBoxProtocolInstallApply() {
+    singBoxEnsureTLSDependency "$1" || return 1
 
     totalProgress=5
     installSingBox 1 || return 1
-    selectCustomInstallType=",31,"
     initSingBoxConfig custom 2 true || return 1
     installSingBoxService 3 || return 1
     serviceQueueRestart sing-box
     serviceQueueApply || return 1
-    showAccounts 4
+    showAccounts 4 || return 1
     if declare -F subscriptionNotifyControllerRefresh >/dev/null 2>&1; then
         subscriptionNotifyControllerRefresh || true
     fi
+    return 0
+}
+
+singBoxProtocolInstall() {
+    local protocolId=$1 protocolName configFile
+    shift
+    local selectCustomInstallType=",${protocolId},"
+    local singBoxHysteria2CredentialMode=false PADM_INSTALL_CLIENTS_PREPARED=true
+    local AUTO_UUID="${AUTO_UUID:-}" AUTO_USER="${AUTO_USER:-}"
+    local currentClients="${currentClients:-}" currentUUID="${currentUUID:-}" lastInstallationConfig=
+    case "${protocolId}" in
+    3) singBoxHysteria2CredentialMode=true ;;
+    31) ;;
+    *) return 1 ;;
+    esac
+    protocolName=$(protocolCapabilityMeta "${protocolId}" name) || return 1
+    configFile=$(protocolCapabilityMeta "${protocolId}" config_file) || return 1
+    configFile=$(singBoxTemplateConfigFile "${configFile}") || return 1
+
+    # 重装优先保留本协议用户，避免主核心用户覆盖独立密码或独立账号。
+    if [[ -f "${configFile}" ]]; then
+        currentClients=$(jq -ce --arg id "${protocolId}" '
+            .inbounds[0].users | select(type == "array" and length > 0 and all(.[];
+                type == "object" and (.name | type == "string" and length > 0) and
+                (.password | type == "string" and length > 0) and
+                ($id != "31" or (.uuid | type == "string" and length > 0))
+            ))
+        ' "${configFile}") || {
+            errorCard "${protocolName} 现有用户配置读取失败，已取消重装"
+            return 1
+        }
+        currentUUID=
+    fi
+    coreTemplateCollectInitialClients sing-box "${singBoxHysteria2CredentialMode}" true || return 1
+    singBoxEnsureTLSDependency "${protocolName}" true || return 1
+    coreInstallConfigTransaction sing-box padmRunPortAllowTransaction singBoxProtocolInstallApply "${protocolName}" "$@"
 }
 
 singBoxTuicInstall() {
-    singBoxEnsureTLSDependency Tuic true || return 1
-    coreInstallConfigTransaction sing-box padmRunPortAllowTransaction singBoxTuicInstallApply "$@"
-}
-
-
-# sing-box Hysteria2 安装
-singBoxHysteria2InstallApply() {
-    local singBoxHysteria2CredentialMode=true
-    singBoxEnsureTLSDependency Hysteria2 || return 1
-
-    totalProgress=5
-    installSingBox 1 || return 1
-    selectCustomInstallType=",3,"
-    initSingBoxConfig custom 2 true || return 1
-    installSingBoxService 3 || return 1
-    serviceQueueRestart sing-box
-    serviceQueueApply || return 1
-    showAccounts 4
-    if declare -F subscriptionNotifyControllerRefresh >/dev/null 2>&1; then
-        subscriptionNotifyControllerRefresh || true
-    fi
+    singBoxProtocolInstall 31 "$@"
 }
 
 singBoxHysteria2Install() {
-    singBoxEnsureTLSDependency Hysteria2 true || return 1
-    coreInstallConfigTransaction sing-box padmRunPortAllowTransaction singBoxHysteria2InstallApply "$@"
+    singBoxProtocolInstall 3 "$@"
 }
-
 
 singBoxConfigShardDir() {
     local configDir="${singBoxConfigPath:-${PADM_SINGBOX_CONFIG_DIR:-/etc/padm/sing-box/conf/config/}}"

@@ -1936,11 +1936,14 @@ runSingBoxProtocolReloadFailureRegression() (
     local reachedFile="${root}/accounts"
     local callLog="${root}/calls.log"
     local anyTlsLog="${root}/anytls.log"
-    local tuicRc hysteriaRc
+    local tuicRc hysteriaRc install collectionSource
+    local PADM_SINGBOX_CONFIG_DIR="${root}/config"
 
-    mkdir -p "${root}"
+    collectionSource=$(declare -f coreTemplateCollectInitialClients)
+    mkdir -p "${PADM_SINGBOX_CONFIG_DIR}"
     : >"${callLog}"
     : >"${anyTlsLog}"
+    coreTemplateCollectInitialClients() { return 0; }
 
     (
         local dependencyRoot="${root}/reality-tls"
@@ -2008,9 +2011,9 @@ runSingBoxProtocolReloadFailureRegression() (
         return 1
     }
     set +e
-    (singBoxTuicInstallApply >/dev/null 2>&1)
+    (singBoxProtocolInstallApply TUIC >/dev/null 2>&1)
     tuicRc=$?
-    (singBoxHysteria2InstallApply >/dev/null 2>&1)
+    (singBoxProtocolInstallApply Hysteria2 >/dev/null 2>&1)
     hysteriaRc=$?
     set -e
     [[ "${tuicRc}" == "1" ]]
@@ -2095,9 +2098,99 @@ runSingBoxProtocolReloadFailureRegression() (
         printf 'notify\n' >>"${callLog}"
         return 0
     }
-    singBoxTuicInstallApply >/dev/null 2>&1
-    singBoxHysteria2InstallApply >/dev/null 2>&1
+    singBoxProtocolInstallApply TUIC >/dev/null 2>&1
+    singBoxProtocolInstallApply Hysteria2 >/dev/null 2>&1
     [[ "$(grep -c '^notify$' "${callLog}")" == "2" ]]
+
+    # 账号输出失败必须让安装事务失败，不能通知控制器刷新。
+    showAccounts() { printf 'accounts\n' >"${reachedFile}"; return 7; }
+    for install in singBoxTuicInstall singBoxHysteria2Install; do
+        : >"${callLog}"
+        regressionExpectStatus 1 "${install}" >/dev/null 2>&1
+        [[ -f "${reachedFile}" ]]
+        ! grep -qx 'notify' "${callLog}"
+    done
+
+    (
+        # 使用真实账号采集和转换，覆盖提前确认、独立账号重装及局部状态隔离。
+        eval "${collectionSource}"
+        local PADM_SINGBOX_CONFIG_DIR="${root}/accounts-config"
+        local mainUuid=11111111-1111-4111-8111-111111111111
+        local newUuid=22222222-2222-4222-8222-222222222222
+        local currentUUID="${mainUuid}" currentClients lastInstallationConfig=parent-history
+        local selectCustomInstallType=,1, singBoxHysteria2CredentialMode=parent-mode
+        local PADM_INSTALL_CLIENTS_PREPARED=parent-value
+        local events= capturedUsers= inputFd nextInput protocolId credential configFile sourceClients input invalid
+        currentClients="[{\"id\":\"${mainUuid}\",\"email\":\"main\"}]"
+        sourceClients=${currentClients}
+        unset AUTO_INSTALL AUTO_UUID AUTO_USER
+        mkdir -p "${PADM_SINGBOX_CONFIG_DIR}"
+        singBoxEnsureTLSDependency() { events+=$'tls\n'; }
+        coreInstallConfigTransaction() { events+=$'transaction\n'; shift; "$@"; }
+        installSingBox() { events+=$'download\n'; }
+        initSingBoxConfig() {
+            [[ "${PADM_INSTALL_CLIENTS_PREPARED}" == true ]] || return 1
+            [[ -n "${currentClients:-}" ]] ||
+                coreTemplateCollectInitialClients sing-box "${singBoxHysteria2CredentialMode}" || return 1
+            capturedUsers=$(initSingBoxClients "${selectCustomInstallType//,/}") || return 1
+        }
+        installSingBoxService() { return 0; }
+        serviceQueueRestart() { [[ "$1" == sing-box ]]; }
+        serviceQueueApply() { return 0; }
+        showAccounts() { events+=$'accounts\n'; }
+        subscriptionNotifyControllerRefresh() { events+=$'notify\n'; }
+
+        for install in singBoxHysteria2Install singBoxTuicInstall; do
+            protocolId=3 credential=independent-password
+            [[ "${install}" != singBoxTuicInstall ]] || { protocolId=31; credential=${newUuid}; }
+            configFile=$(singBoxTemplateConfigFile "$(protocolCapabilityMeta "${protocolId}" config_file)")
+
+            # 拒绝复用后在密码或用户名处 EOF，不申请证书、不下载、不进入事务。
+            for input in n $'n\nindependent-password\n'; do
+                events=
+                regressionExpectStatus 1 "${install}" < <(printf '%s' "${input}") >/dev/null 2>&1
+                [[ -z "${events}" && "${currentClients}" == "${sourceClients}" ]]
+            done
+            events=
+            exec {inputFd}< <(printf 'n\n%s\nindependent\nnext-parent-action\n' "${credential}")
+            "${install}" <&"${inputFd}" >/dev/null 2>&1
+            read -r -u "${inputFd}" nextInput
+            [[ "${nextInput}" == next-parent-action &&
+                "${events}" == $'tls\ntransaction\ntls\ndownload\naccounts\nnotify\n' ]]
+            [[ "${currentClients}" == "${sourceClients}" && "${currentUUID}" == "${mainUuid}" &&
+                "${selectCustomInstallType}" == ,1, && "${lastInstallationConfig}" == parent-history &&
+                "${singBoxHysteria2CredentialMode}" == parent-mode &&
+                "${PADM_INSTALL_CLIENTS_PREPARED}" == parent-value && -z "${AUTO_UUID:-}${AUTO_USER:-}" ]]
+            exec {inputFd}<&-
+            jq -e --arg credential "${credential}" --arg suffix "$(protocolCapabilityMeta "${protocolId}" protocol)" '
+                length == 1 and .[0].password == $credential and .[0].name == ("independent-singbox_" + $suffix)
+            ' <<<"${capturedUsers}" >/dev/null
+            # TUIC 的密码可以独立于 UUID，重装不得将它替换成 UUID。
+            [[ "${protocolId}" != 31 ]] || capturedUsers=$(jq '.[0].password = "tuic-independent-password"' <<<"${capturedUsers}")
+            jq -n --argjson users "${capturedUsers}" '{inbounds:[{users:$users}]}' >"${configFile}"
+            events=
+            exec {inputFd}< <(printf '\nnext-parent-action\n')
+            "${install}" <&"${inputFd}" >/dev/null 2>&1
+            read -r -u "${inputFd}" nextInput
+            [[ "${nextInput}" == next-parent-action && "${currentClients}" == "${sourceClients}" ]]
+            if [[ "${protocolId}" == 3 ]]; then
+                jq -e '.[0].password == "independent-password"' <<<"${capturedUsers}" >/dev/null
+            else
+                jq -e --arg uuid "${newUuid}" '.[0].uuid == $uuid and .[0].password == "tuic-independent-password"' <<<"${capturedUsers}" >/dev/null
+            fi
+            exec {inputFd}<&-
+
+            # 空或损坏的目标用户不能回退主核心用户并覆盖原文件。
+            for invalid in null '[]' '[{}]' '[{"name":"broken","password":""}]' '[{"name":"broken","password":7}]'; do
+                jq -n --argjson users "${invalid}" '{inbounds:[{users:$users}]}' >"${configFile}"
+                events=
+                AUTO_INSTALL=true regressionExpectStatus 1 "${install}" </dev/null >/dev/null 2>&1
+                [[ -z "${events}" && "${currentClients}" == "${sourceClients}" ]]
+                jq -e --argjson users "${invalid}" '.inbounds[0].users == $users' "${configFile}" >/dev/null
+            done
+            rm -f "${configFile}"
+        done
+    )
 
     (
         local transactionRoot="${root}/transaction"
