@@ -850,7 +850,7 @@ collectEntryProfile() {
         implicitEntry=true
         realityEntryHost=
         entryHostFile=$(realityEntryHostFile)
-        if [[ -f "${entryHostFile}" ]]; then
+        if [[ "${PADM_INSTALL_RESET_HISTORY:-}" != "true" && -f "${entryHostFile}" ]]; then
             storedEntry=$(head -n 1 "${entryHostFile}")
         fi
         if [[ -n "${storedEntry}" ]]; then

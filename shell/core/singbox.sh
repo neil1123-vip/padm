@@ -439,13 +439,14 @@ singBoxLocalCertificateAvailable() {
     collectTLSProfile || return 1
     [[ -n "${tlsCertDomain:-}" ]] || return 1
     tlsDir=$(tlsManagedDir) || return 1
-    tlsCertificatePairExists "${tlsDir}" "${tlsCertDomain}"
+    tlsCertificatePairUsable "${tlsDir}" "${tlsCertDomain}"
 }
 
 singBoxInstallLocalTLSCertificate() {
     local nginxWasRunning=false xrayWasRunning=false singBoxWasRunning=false
     local selectCoreType=
 
+    readInstallTLSDomain domain || return 1
     installAcmeTool || return 1
     nginxRunning && nginxWasRunning=true
     xrayRunning && xrayWasRunning=true
@@ -455,7 +456,7 @@ singBoxInstallLocalTLSCertificate() {
         "先申请或复用证书，成功后再继续安装"
 
     # 只借用域名和 ACME 流程，避免 initTLSNginxConfig 触发 Xray 端口改动。
-    if ! initTLSNginxConfig 1; then
+    if ! initTLSNginxConfig 1 "${domain}"; then
         restoreServicesAfterTLSRenewal "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}" ||
             errorCard "TLS 初始化失败，且服务恢复失败"
         return 1

@@ -1767,6 +1767,7 @@ runCoreInstallRestoringNginxOnFailure() {
     shift
     local nginxWasRunning=false
     local installStatus=0
+    local PADM_INSTALL_RESET_HISTORY=false
     nginxRunning && nginxWasRunning=true
     "${operation}" "$@" || installStatus=$?
     if [[ "${installStatus}" != "0" && "${nginxWasRunning}" == "true" ]] && ! nginxRunning; then

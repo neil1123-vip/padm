@@ -59,9 +59,9 @@ coreTemplateCollectInitialClients() {
     if [[ "${passwordMode}" == "true" ]]; then
         label="Hysteria2 密码"
         suffix=singbox_hysteria2
-        jq -e 'type == "array" and length > 0' <<<"${currentClients:-}" >/dev/null 2>&1 && hasExistingClients=true
+        jq -e 'type == "array" and length > 0' <<<"${currentClients:-[]}" >/dev/null 2>&1 && hasExistingClients=true
     elif [[ -n "${currentUUID:-}" ]] ||
-        jq -e 'type == "array" and length > 0' <<<"${currentClients:-}" >/dev/null 2>&1; then
+        jq -e 'type == "array" and length > 0' <<<"${currentClients:-[]}" >/dev/null 2>&1; then
         hasExistingClients=true
     fi
 
@@ -197,6 +197,14 @@ coreTemplateConfigBackupCreate() {
             seenTargets["${targetPath}"]=1
         fi
     done
+
+    if [[ "${core}" == "sing-box" ]] && declare -F realityKeyFile >/dev/null 2>&1; then
+        targetPath=$(realityKeyFile) || return 1
+        if [[ -z "${seenTargets[${targetPath}]+x}" ]]; then
+            targets+=("${targetPath}")
+            seenTargets["${targetPath}"]=1
+        fi
+    fi
 
     if [[ "${core}" == "sing-box" && -n "${nginxConfigPath:-}" ]]; then
         for fileName in default.conf sing_box_VMess_HTTPUpgrade.conf; do

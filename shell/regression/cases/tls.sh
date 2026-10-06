@@ -77,6 +77,9 @@ runTlsFailureReturnRegression() (
     command chmod 755 "${HOME}/.acme.sh/acme.sh"
     printf 'old-cert\n' >"${PADM_TLS_DIR}/secure.example.com.crt"
     printf 'old-key\n' >"${PADM_TLS_DIR}/secure.example.com.key"
+    openssl req -new -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 \
+        -subj '/CN=secure.example.com' -addext 'subjectAltName=DNS:secure.example.com' \
+        -keyout "${secureTlsRoot}/new.key" -out "${secureTlsRoot}/new.crt" >/dev/null 2>&1
     command chmod 644 "${PADM_TLS_DIR}/secure.example.com.key"
     : >"${chmodLog}"
     chmod() {
@@ -84,13 +87,13 @@ runTlsFailureReturnRegression() (
         command chmod "$@"
     }
     sudo() {
-        printf 'new-cert\n' >"${PADM_TLS_DIR}/secure.example.com.crt"
-        printf 'new-key\n' >"${PADM_TLS_DIR}/secure.example.com.key"
+        cp "${secureTlsRoot}/new.crt" "${PADM_TLS_DIR}/secure.example.com.crt"
+        cp "${secureTlsRoot}/new.key" "${PADM_TLS_DIR}/secure.example.com.key"
         return 0
     }
     installTLSFromAcme >/dev/null 2>&1
     grep -F -q -- "600 -- ${PADM_TLS_DIR}/secure.example.com.key" "${chmodLog}"
-    [[ "$(<"${PADM_TLS_DIR}/secure.example.com.key")" == "new-key" ]]
+    cmp "${secureTlsRoot}/new.key" "${PADM_TLS_DIR}/secure.example.com.key"
     unset -f chmod
     unset -f sudo
 
@@ -161,8 +164,83 @@ runTlsFailureReturnRegression() (
         local acmeInstallFromHomeCalled=false
         readAcmeTLS() { return 0; }
         installTLSFromAcme() { acmeInstallFromHomeCalled=true; return 0; }
+        tlsCertificatePairUsable() { return 0; }
         installTLS 1 >/dev/null 2>&1
         [[ "${acmeInstallFromHomeCalled}" == "true" ]]
+    )
+
+    (
+        local certificateRoot="${root}/usable-certificate"
+        local certDomain=custom.example.com
+        mkdir -p "${certificateRoot}/home" "${certificateRoot}/tls"
+        export PADM_TLS_DIR="${certificateRoot}/tls"
+        HOME="${certificateRoot}/home"
+        domain=${certDomain}
+        currentHost=${certDomain}
+        tlsDomain=${certDomain}
+        lastInstallationConfig=true
+        installedDNSAPIStatus=
+        unset PADM_REQUIRE_USABLE_TLS_CERTIFICATE
+        readAcmeTLS() { return 0; }
+        collectTLSProfile() { tlsCertDomain=${certDomain}; }
+        openssl req -new -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 \
+            -subj "/CN=${certDomain}" -addext "subjectAltName=DNS:${certDomain}" \
+            -keyout "${certificateRoot}/valid.key" -out "${certificateRoot}/valid.crt" >/dev/null 2>&1
+        openssl req -new -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 \
+            -subj "/CN=wrong.example.com" -addext "subjectAltName=DNS:wrong.example.com" \
+            -keyout "${certificateRoot}/wrong.key" -out "${certificateRoot}/wrong.crt" >/dev/null 2>&1
+
+        # 自签证书可正常复用；错域名、错私钥和损坏 PEM 均不能冒充安装成功。
+        cp "${certificateRoot}/valid.crt" "${PADM_TLS_DIR}/${certDomain}.crt"
+        cp "${certificateRoot}/valid.key" "${PADM_TLS_DIR}/${certDomain}.key"
+        installTLS 1 >/dev/null 2>&1
+        singBoxLocalCertificateAvailable
+        cp "${certificateRoot}/wrong.crt" "${PADM_TLS_DIR}/${certDomain}.crt"
+        regressionExpectStatus 1 installTLS 1 >/dev/null 2>&1
+        ! singBoxLocalCertificateAvailable
+        cp "${certificateRoot}/valid.crt" "${PADM_TLS_DIR}/${certDomain}.crt"
+        cp "${certificateRoot}/wrong.key" "${PADM_TLS_DIR}/${certDomain}.key"
+        regressionExpectStatus 1 installTLS 1 >/dev/null 2>&1
+        ! singBoxLocalCertificateAvailable
+        printf 'invalid-pem\n' >"${PADM_TLS_DIR}/${certDomain}.crt"
+        regressionExpectStatus 1 installTLS 1 >/dev/null 2>&1
+        ! singBoxLocalCertificateAvailable
+
+        # ACME 退出成功但写入错误证书时，在删除备份前恢复合法旧证书和私钥。
+        local badPair oldPairHash
+        acmeExecutable() { printf '/bin/true\n'; }
+        sudo() {
+            cp "${certificateRoot}/valid.key" "${PADM_TLS_DIR}/${certDomain}.key"
+            case "${badPair}" in
+            domain) cp "${certificateRoot}/wrong.crt" "${PADM_TLS_DIR}/${certDomain}.crt" ;;
+            key)
+                cp "${certificateRoot}/valid.crt" "${PADM_TLS_DIR}/${certDomain}.crt"
+                cp "${certificateRoot}/wrong.key" "${PADM_TLS_DIR}/${certDomain}.key"
+                ;;
+            pem) printf 'invalid-pem\n' >"${PADM_TLS_DIR}/${certDomain}.crt" ;;
+            esac
+        }
+        for badPair in domain key pem; do
+            cp "${certificateRoot}/valid.crt" "${PADM_TLS_DIR}/${certDomain}.crt"
+            cp "${certificateRoot}/valid.key" "${PADM_TLS_DIR}/${certDomain}.key"
+            oldPairHash=$(sha256sum "${PADM_TLS_DIR}/${certDomain}.crt" "${PADM_TLS_DIR}/${certDomain}.key")
+            installTLSCount=1
+            regressionExpectStatus 1 installTLSFromAcme >/dev/null 2>&1
+            [[ "$(sha256sum "${PADM_TLS_DIR}/${certDomain}.crt" "${PADM_TLS_DIR}/${certDomain}.key")" == "${oldPairHash}" ]]
+            tlsCertificatePairUsable "${PADM_TLS_DIR}" "${certDomain}"
+        done
+        unset -f sudo
+
+        # ACME 同步返回成功也必须验证实际落盘文件，不能只相信命令状态。
+        mkdir -p "${HOME}/.acme.sh/${certDomain}_ecc"
+        cp "${certificateRoot}/valid.crt" "${HOME}/.acme.sh/${certDomain}_ecc/${certDomain}.cer"
+        cp "${certificateRoot}/valid.key" "${HOME}/.acme.sh/${certDomain}_ecc/${certDomain}.key"
+        rm -f "${PADM_TLS_DIR}/${certDomain}.crt" "${PADM_TLS_DIR}/${certDomain}.key"
+        installTLSFromAcme() {
+            printf 'invalid-pem\n' >"${PADM_TLS_DIR}/${certDomain}.crt"
+            cp "${certificateRoot}/valid.key" "${PADM_TLS_DIR}/${certDomain}.key"
+        }
+        regressionExpectStatus 1 installTLS 1 >/dev/null 2>&1
     )
 
     (
@@ -177,6 +255,37 @@ runTlsFailureReturnRegression() (
         readAcmeTLS() { return 0; }
         errorCard() { return 0; }
         ! renewalTLS >/dev/null 2>&1
+    )
+
+    (
+        # 增量申请在域名取消时不能安装 ACME 或操作服务。
+        local events= currentHost= lastInstallationConfig= domain=stale.example.com
+        unset AUTO_DOMAIN AUTO_INSTALL
+        installAcmeTool() { events+=$'acme\n'; return 0; }
+        nginxRunning() { events+=$'nginx\n'; return 1; }
+        regressionExpectStatus 1 singBoxInstallLocalTLSCertificate <<<""
+        [[ -z "${events}" ]]
+    )
+
+    (
+        # 域名只读一次，并保留给证书就绪后的协议模板使用。
+        local domain= currentHost=old-entry.example.com lastInstallationConfig=
+        local AUTO_DOMAIN=prepared.example.com inputFd nextInput
+        installAcmeTool() { return 0; }
+        nginxRunning() { return 1; }
+        xrayRunning() { return 1; }
+        singBoxRunning() { return 1; }
+        initTLSNginxConfig() { [[ "$2" == prepared.example.com ]] || return 1; domain=$2; }
+        installTLS() { return 0; }
+        singBoxLocalCertificateAvailable() { [[ "${domain}" == prepared.example.com ]]; }
+        installCronTLS() { return 0; }
+        restoreServicesAfterTLSRenewal() { return 0; }
+        exec {inputFd}< <(printf 'next-parent-action\n')
+        singBoxInstallLocalTLSCertificate <&"${inputFd}"
+        [[ "${domain}" == prepared.example.com ]]
+        read -r -u "${inputFd}" nextInput
+        [[ "${nextInput}" == next-parent-action ]]
+        exec {inputFd}<&-
     )
 
     btDomain=
@@ -618,6 +727,7 @@ runTlsReinstallRollbackRegression() (
     statusCard() { printf '%s\n' "$*" >>"${statusLog}"; }
     successCard() { printf '%s\n' "$*" >>"${statusLog}"; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+    tlsCertificatePairUsable() { return 0; }
     renewalTLS() { printf 'renew\n' >>"${cleanLog}"; }
     allowPort() { return 0; }
     switchDNSAPI() { return 0; }

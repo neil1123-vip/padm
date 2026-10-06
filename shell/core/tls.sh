@@ -336,7 +336,8 @@ installTLSFromAcme() {
 
     if [[ "${installStatus}" -ne 0 || ! -f "${crtFile}" || ! -f "${keyFile}" ]] ||
         [[ -z $(cat "${keyFile}") || -z $(cat "${crtFile}") ]] ||
-        ! chmod 600 -- "${keyFile}"; then
+        ! chmod 600 -- "${keyFile}" ||
+        ! tlsCertificatePairUsable "${tlsDir}" "${tlsDomain}"; then
         tail -n 10 "${acmeLogFile}" 2>/dev/null || true
         if [[ -n "${backupDir}" ]]; then
             if ! restoreManagedFileFromBackup "${backupCrt}" "${crtFile}" 644; then
@@ -439,6 +440,10 @@ installTLS() {
         installTLSFromAcme || return 1
     else
         statusCard "acme.sh" "未安装 acme.sh"
+        return 1
+    fi
+    if ! tlsCertificatePairUsable "${tlsDir}" "${tlsDomain}"; then
+        errorCard "本机 TLS 证书不可用" "请检查证书有效期、域名及私钥是否匹配: ${tlsDir}/${tlsDomain}"
         return 1
     fi
 }

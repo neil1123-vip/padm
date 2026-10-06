@@ -306,8 +306,13 @@ runInstallWorkflowRegression() (
     for answer in n N no NO false False 0; do
         cleaned=0
         lastInstallationConfig=previous
+        currentHost=old.example.com
+        currentUUID=old-user
+        currentClients='[{"id":"old-user"}]'
+        customPort=8443
         readLastInstallationConfig <<<"${answer}"
-        [[ -z "${lastInstallationConfig}" && "${cleaned}" == "1" ]]
+        [[ -z "${lastInstallationConfig}${currentHost}${currentUUID}${currentClients}${customPort}" && "${cleaned}" == "0" ]]
+        [[ "${PADM_INSTALL_RESET_HISTORY}" == true ]]
     done
     cleaned=0
     shown=0
@@ -325,11 +330,11 @@ runInstallWorkflowRegression() (
     regressionExpectStatus 1 readLastInstallationConfig < <(printf 'n')
     [[ -z "${lastInstallationConfig}" && "${cleaned}" == "0" ]]
     readLastInstallationConfig <<<"n"
-    [[ -z "${lastInstallationConfig}" && "${cleaned}" == "1" ]]
+    [[ -z "${lastInstallationConfig}" && "${cleaned}" == "0" ]]
     cleanStatus=1
     cleaned=0
-    regressionExpectStatus 1 readLastInstallationConfig <<<"n"
-    [[ -z "${lastInstallationConfig}" && "${cleaned}" == "1" ]]
+    readLastInstallationConfig <<<"n"
+    [[ -z "${lastInstallationConfig}" && "${cleaned}" == "0" ]]
     cleanStatus=0
     cleaned=0
 
@@ -352,8 +357,69 @@ runInstallWorkflowRegression() (
     [[ "${lastInstallationConfig}" == "true" ]]
     AUTO_REUSE_LAST=no
     readLastInstallationConfig </dev/null
-    [[ -z "${lastInstallationConfig}" && "${cleaned}" == "1" ]]
+    [[ -z "${lastInstallationConfig}" && "${cleaned}" == "0" ]]
     unset AUTO_INSTALL AUTO_REUSE_LAST
+
+    (
+        # 重新填写后取消两核安装，证书、订阅、服务和 ACME 文件必须原样保留。
+        local root="${TMP_DIR}/install-reset-inputs" file before core events=
+        local PADM_INSTALL_RESET_HISTORY=false
+        local PADM_REALITY_ENTRY_HOST_FILE="${root}/reality_entry_host"
+        mkdir -p "${root}/tls" "${root}/subscribe" "${root}/services" "${root}/home/.acme.sh" "${root}/conf"
+        for file in tls/example.crt tls/example.key subscribe/user services/xray.service home/.acme.sh/account.conf conf/inbound.json reality_entry_host; do
+            printf 'old.example.com\n' >"${root}/${file}"
+        done
+        before=$(find "${root}" -type f -exec sha256sum {} + | LC_ALL=C sort)
+        configPath="${root}/conf/"
+        showLastInstallationConfig() {
+            currentHost=old.example.com
+            currentUUID=11111111-1111-4111-8111-111111111111
+            currentClients='[{"id":"11111111-1111-4111-8111-111111111111"}]'
+            currentPath=old-path
+            customPort=8443
+            realityPort=10001
+            realityGrpcPort=10002
+            xHTTPort=10003
+            singBoxVLESSRealityVisionSNI=old-target.example.com
+        }
+        cleanLastInstallationConfig() { events+=$'cleanup\n'; return 1; }
+        installTools() { events+=$'tools\n'; return 1; }
+        nginxRunning() { return 1; }
+        for core in xray sing-box; do
+            selectCustomInstallType=",21,"
+            apply=customXrayInstallApply
+            [[ "${core}" != sing-box ]] || { selectCustomInstallType=",3,"; apply=customSingBoxInstallApply; }
+            regressionExpectStatus 1 runCoreInstallRestoringNginxOnFailure "${apply}" < <(printf 'n\n\n')
+            [[ -z "${events}${currentHost}${currentUUID}${currentClients}${currentPath}${customPort}${realityPort}${realityGrpcPort}${xHTTPort}${singBoxVLESSRealityVisionSNI}" ]]
+            [[ "${PADM_INSTALL_RESET_HISTORY}" == false && "${configPath}" == "${root}/conf/" ]]
+            [[ "$(find "${root}" -type f -exec sha256sum {} + | LC_ALL=C sort)" == "${before}" ]]
+        done
+
+        # 重填不能从磁盘捡回旧入口；显式自动参数仍优先，管理路径仍可读取原入口。
+        readLastInstallationConfig <<<"n"
+        realityOnlyWithDomain=true
+        unset AUTO_ENTRY_HOST AUTO_DOMAIN
+        regressionExpectStatus 1 collectEntryProfile <<<""
+        [[ -z "${realityEntryHost}" ]]
+        AUTO_DOMAIN=new.example.com
+        AUTO_UUID=22222222-2222-4222-8222-222222222222
+        AUTO_USER=new-user
+        AUTO_PORT=9443
+        readLastInstallationConfig <<<"n"
+        collectEntryProfile </dev/null
+        coreTemplateCollectInitialClients xray </dev/null
+        [[ "${realityEntryHost}" == new.example.com && "$(jq -r '.[0].id' <<<"${currentClients}")" == "${AUTO_UUID}" && "${AUTO_PORT}" == 9443 ]]
+        currentClients=
+        coreTemplateCollectInitialClients sing-box </dev/null
+        [[ "$(jq -r '.[0].uuid' <<<"${currentClients}")" == "${AUTO_UUID}" ]]
+        currentClients=
+        coreTemplateCollectInitialClients sing-box true </dev/null
+        [[ "$(jq -r '.[0].password' <<<"${currentClients}")" == "${AUTO_UUID}" ]]
+        unset AUTO_DOMAIN AUTO_UUID AUTO_USER AUTO_PORT
+        PADM_INSTALL_RESET_HISTORY=false
+        collectEntryProfile </dev/null
+        [[ "${realityEntryHost}" == old.example.com ]]
+    )
 
     (
         # 协议和模式在事务外确认；取消不能触发原事务的备份、回滚或服务恢复。

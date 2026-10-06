@@ -1611,19 +1611,20 @@ runCleanLastInstallationConfigFailureRegression() (
     : >"${serviceLog}"
     : >"${cleanupLog}"
     SERVICE_QUEUE_ALLOW_FAILURE=previous
-    regressionExpectStatus 1 readLastInstallationConfig >/dev/null 2>&1
-    grep -qx 'xray:stop:true' "${serviceLog}"
+    readLastInstallationConfig >/dev/null 2>&1
+    [[ ! -s "${serviceLog}" && ! -s "${cleanupLog}" && "${PADM_INSTALL_RESET_HISTORY}" == true ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     mode=xray-stop-fail
     : >"${serviceLog}"
     : >"${cleanupLog}"
     : >"${installLog}"
-    btDomain=
+    btDomain=panel.example.com
+    customPortFunction() { return 0; }
     SERVICE_QUEUE_ALLOW_FAILURE=previous
     regressionExpectStatus 1 xrayCoreInstall >/dev/null 2>&1
     grep -qx 'xray:stop:true' "${serviceLog}"
-    [[ ! -s "${installLog}" ]]
+    [[ "$(<"${installLog}")" == install-tools:2 ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 )
 

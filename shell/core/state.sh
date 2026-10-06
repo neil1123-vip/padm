@@ -641,6 +641,88 @@ showLastInstallationConfig() {
 }
 
 
+# 只重置安装输入，保留磁盘配置供安装事务替换或恢复。
+resetLastInstallationConfigInputs() {
+    domain=
+    port=
+    customPath=
+    currentPath=
+    currentDefaultPort=
+    currentUUID=
+    currentClients=
+    currentHost=
+    currentPort=
+    currentCDNAddress=
+    customPort=
+    realityPort=
+    realityGrpcPort=
+    xHTTPort=
+    hysteriaPort=
+    hysteria2BandwidthMode=
+    hysteria2ClientDownloadSpeed=
+    hysteria2ClientUploadSpeed=
+    hysteria2ObfsType=
+    hysteria2ObfsPassword=
+    hysteria2Masquerade=
+    tuicPort=
+    tuicAlgorithm=
+    tuicAuthTimeout=
+    tuicHeartbeat=
+    tuicZeroRttHandshake=
+    singBoxVLESSVisionPort=
+    singBoxVLESSWSPort=
+    singBoxVMessWSPort=
+    singBoxVMessHTTPUpgradePort=
+    singBoxHysteria2Port=
+    singBoxTrojanPort=
+    singBoxShadowsocksPort=
+    singBoxTuicPort=
+    singBoxNaivePort=
+    singBoxAnyTLSPort=
+    singBoxSocks5Port=
+    singBoxVMessWSPath=
+    singBoxVLESSWSPath=
+    singBoxVMessHTTPUpgradePath=
+    singBoxVLESSRealityVisionPort=
+    singBoxVLESSRealityVisionSNI=
+    singBoxVLESSRealityGRPCPort=
+    singBoxVLESSRealityGRPCSNI=
+    singBoxVLESSRealityPublicKey=
+    tlsEnabled=
+    tlsCertDomain=
+    tlsSNI=
+    tlsCertFile=
+    tlsKeyFile=
+    dnsTLSDomain=
+    installedDNSAPIStatus=
+    realityPrivateKey=
+    realityPublicKey=
+    realitySNI=
+    realityTargetHost=
+    realityTargetPort=
+    realityEntryHost=
+    realityDestDomain=
+    realityMldsa65Seed=
+    realityMldsa65Verify=
+    xrayVLESSRealityPort=
+    xrayVLESSRealityVisionPort=
+    xrayVLESSRealitySNI=
+    xrayVLESSRealityXHTTPort=
+    xrayVLESSRealityXHTTPSNI=
+    xrayVLESSRealityGRPCPort=
+    xrayVLESSRealityGRPCSNI=
+    xrayVLESSRealityGRPCPublicKey=
+    xrayVLESSRealityGRPCMldsa65Verify=
+    currentRealityXHTTPPublicKey=
+    currentRealityPublicKey=
+    currentRealityPrivateKey=
+    currentRealityMldsa65Seed=
+    currentRealityMldsa65Verify=
+    currentInstallProtocolType=
+    frontingType=
+    frontingTypeReality=
+}
+
 # 清空上次安装配置
 cleanLastInstallationConfig() {
     local nginxWasRunning=false
@@ -793,45 +875,7 @@ cleanLastInstallationConfigApply() {
         fi
     fi
 
-    currentPath=
-    currentDefaultPort=
-    currentUUID=
-    currentClients=
-    currentHost=
-    currentPort=
-    currentCDNAddress=
-    customPort=
-    hysteriaPort=
-    hysteria2BandwidthMode=
-    hysteria2ClientDownloadSpeed=
-    hysteria2ClientUploadSpeed=
-    hysteria2ObfsType=
-    hysteria2ObfsPassword=
-    hysteria2Masquerade=
-    tuicPort=
-    tuicAlgorithm=
-    tuicAuthTimeout=
-    tuicHeartbeat=
-    tuicZeroRttHandshake=
-    realityPrivateKey=
-    realityPublicKey=
-    realitySNI=
-    realityTargetHost=
-    realityTargetPort=
-    realityEntryHost=
-    xrayVLESSRealityPort=
-    xrayVLESSRealityXHTTPort=
-    xrayVLESSRealityGRPCPort=
-    xrayVLESSRealityGRPCSNI=
-    xrayVLESSRealityGRPCPublicKey=
-    xrayVLESSRealityGRPCMldsa65Verify=
-    currentRealityPublicKey=
-    currentRealityPrivateKey=
-    currentRealityMldsa65Seed=
-    currentRealityMldsa65Verify=
-    currentInstallProtocolType=
-    frontingType=
-    frontingTypeReality=
+    resetLastInstallationConfigInputs
     readInstallType
     if ! mkdirTools; then
         errorCard "初始化安装目录失败"
@@ -845,13 +889,14 @@ cleanLastInstallationConfigApply() {
 readLastInstallationConfig() {
     local lastInstallationConfigStatus=
     lastInstallationConfig=
+    PADM_INSTALL_RESET_HISTORY=false
     [[ -n "${configPath:-}" ]] || return 0
     showLastInstallationConfig || return 1
     while true; do
         if [[ -n "${AUTO_INSTALL:-}" ]]; then
             lastInstallationConfigStatus=${AUTO_REUSE_LAST:-}
         else
-            menuReadChoice reuse_last "是否复用以上配置？[Y/n，回车保留；n 清空配置]:" lastInstallationConfigStatus true || return 1
+            menuReadChoice reuse_last "是否复用以上参数？[Y/n，回车保留；n 重新填写，证书和订阅保留]:" lastInstallationConfigStatus true || return 1
         fi
         case "${lastInstallationConfigStatus}" in
         "" | y | Y | yes | YES | Yes | true | TRUE | True | 1)
@@ -859,11 +904,12 @@ readLastInstallationConfig() {
             return 0
             ;;
         n | N | no | NO | No | false | FALSE | False | 0)
-            cleanLastInstallationConfig || return 1
+            resetLastInstallationConfigInputs
+            PADM_INSTALL_RESET_HISTORY=true
             return 0
             ;;
         *)
-            errorCard "请输入 y 保留配置，或 n 清空配置"
+            errorCard "请输入 y 保留参数，或 n 重新填写"
             [[ -z "${AUTO_INSTALL:-}" ]] || return 1
             ;;
         esac

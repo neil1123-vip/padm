@@ -1105,6 +1105,7 @@ runCoreTemplateReturnFailureRegression() (
     local manualUuid=11111111-1111-1111-1111-111111111111
     local manualUser=sub_manual
     local uuidGenerationLog="${root}/uuid-generation.log"
+    local AUTO_INSTALL=true AUTO_UUID=${manualUuid} AUTO_USER=${manualUser}
     autoRead() {
         case "$1" in
         core_init_uuid) printf -v "$3" '%s' "${manualUuid}" ;;
@@ -1114,6 +1115,7 @@ runCoreTemplateReturnFailureRegression() (
     }
     collectTLSProfile() { tlsCertDomain=tls.example.com; }
     currentUUID=
+    currentClients='[]'
     lastInstallationConfig=
     writeCalls=0
     regressionExpectFailure initXrayConfigApply custom 1 true 2>/dev/null
@@ -1124,6 +1126,7 @@ runCoreTemplateReturnFailureRegression() (
     [[ "${writeCalls}" == "0" ]]
 
     manualUuid=not-a-uuid
+    AUTO_UUID=${manualUuid}
     set +e
     initXrayConfigApply custom 1 true 2>/dev/null
     xrayRc=$?
@@ -1135,6 +1138,8 @@ runCoreTemplateReturnFailureRegression() (
 
     manualUuid=
     manualUser=manual
+    AUTO_UUID=
+    AUTO_USER=${manualUser}
     : >"${uuidGenerationLog}"
     generateRandomUuidValue() {
         printf 'call\n' >>"${uuidGenerationLog}"
@@ -1151,6 +1156,7 @@ runCoreTemplateReturnFailureRegression() (
     [[ "${writeCalls}" == "0" ]]
     currentUUID=existing-user
     lastInstallationConfig=true
+    unset AUTO_INSTALL AUTO_UUID AUTO_USER
 
     mode=template
     initRealityProfile() { return 0; }
@@ -2968,6 +2974,7 @@ EOF
 
     PADM_SINGBOX_BINARY="${singBoxBinary}"
     PADM_SINGBOX_REALITY_KEY_FILE="${keyFile}"
+    PADM_SINGBOX_CONFIG_DIR="${root}/config"
     selectCoreType=2
     coreInstallType=2
     lastInstallationConfig=
@@ -3001,6 +3008,23 @@ EOF
     [[ "$(<"${keyFile}")" == "publicKey:public-generated" ]]
     ! compgen -G "${root}/config/.reality_key.reality.*" >/dev/null
     ! grep -qF 'statusCard "Reality Key" "privateKey:${realityPrivateKey}"' "${PROJECT_ROOT}/shell/core/protocol_runtime.sh"
+
+    # 密钥已成功落盘后模板失败，也必须恢复旧密钥或删除首次安装的新文件。
+    xrayRunning() { return 1; }
+    singBoxRunning() { return 1; }
+    realityKeyThenFail() {
+        realityPrivateKey=
+        realityPublicKey=
+        initRealityKey >/dev/null || return 1
+        [[ "$(<"${keyFile}")" == publicKey:public-generated ]] || return 2
+        return 1
+    }
+    printf 'publicKey:old-public\n' >"${keyFile}"
+    regressionExpectStatus 1 coreTemplateConfigTransaction sing-box realityKeyThenFail
+    [[ "$(<"${keyFile}")" == "publicKey:old-public" ]]
+    rm -f "${keyFile}"
+    regressionExpectStatus 1 coreTemplateConfigTransaction sing-box realityKeyThenFail
+    [[ ! -e "${keyFile}" ]]
 
     lastInstallationConfig=true
     currentRealityPrivateKey=private-reused
