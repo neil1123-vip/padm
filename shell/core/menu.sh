@@ -445,7 +445,7 @@ coreAllServicesMenu() {
 }
 
 coreLogsMenu() {
-    local logStatus= selectLogs=
+    local logStatus= selectLogs= logFile=
     while true; do
         logStatus=false
         if [[ -f "$(singBoxLogConfigFile)" ]] && [[ "$(jq -r .log.disabled "$(singBoxLogConfigFile)" 2>/dev/null)" == "false" ]]; then
@@ -466,17 +466,15 @@ coreLogsMenu() {
         menuReadChoice core_logs_menu "请选择:" selectLogs || return 0
         case "${selectLogs}" in
         1) checkLog 1 || true ;;
-        2)
-            mkdir -p /etc/padm/sing-box/conf
-            touch /etc/padm/sing-box/conf/box.log >/dev/null 2>&1
-            tail -f /etc/padm/sing-box/conf/box.log
-            ;;
-        3)
-            if singBoxLog "${logStatus}" && [[ "${logStatus}" == "false" ]]; then
-                mkdir -p /etc/padm/sing-box/conf
-                touch /etc/padm/sing-box/conf/box.log >/dev/null 2>&1
-                tail -f /etc/padm/sing-box/conf/box.log
+        2 | 3)
+            if [[ "${selectLogs}" == 3 ]]; then
+                singBoxLog "${logStatus}" || continue
+                [[ "${logStatus}" == false ]] || continue
             fi
+            logFile=$(singBoxLogOutputFile) || continue
+            padmEnsureSafeDirectory "$(dirname -- "${logFile}")" &&
+                touch "${logFile}" >/dev/null 2>&1 &&
+                tail -f "${logFile}"
             ;;
         4) checkNginxConfig || true ;;
         5) return 0 ;;

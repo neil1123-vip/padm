@@ -306,7 +306,7 @@ handleNginx() {
         while true; do
             if [[ "${release}" == "alpine" ]]; then
                 rc-service nginx start 2>"${nginxErrorLog}"
-            elif nginxServiceInstalled; then
+            elif nginxServiceInstalled && padmCommandExists systemctl; then
                 systemctl start nginx 2>"${nginxErrorLog}"
             else
                 nginx 2>"${nginxErrorLog}"
@@ -331,7 +331,7 @@ handleNginx() {
 
         if [[ "${release}" == "alpine" ]]; then
             rc-service nginx stop
-        elif nginxServiceInstalled; then
+        elif nginxServiceInstalled && padmCommandExists systemctl; then
             systemctl stop nginx
         else
             nginx -s stop >/dev/null 2>&1 || true
@@ -395,9 +395,11 @@ handleSingBoxMergeFailure() {
 # 操作 sing-box
 handleSingBox() {
     local serviceManager=
-    if [[ -f "${PADM_SINGBOX_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/sing-box.service}" ]]; then
+    if [[ -f "${PADM_SINGBOX_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/sing-box.service}" ]] &&
+        padmCommandExists systemctl; then
         serviceManager=systemd
-    elif [[ -f "${PADM_SINGBOX_OPENRC_SERVICE_FILE:-/etc/init.d/sing-box}" ]]; then
+    elif [[ -f "${PADM_SINGBOX_OPENRC_SERVICE_FILE:-/etc/init.d/sing-box}" ]] &&
+        padmCommandExists rc-service; then
         serviceManager=openrc
     fi
     if [[ -n "${serviceManager}" ]]; then
@@ -490,7 +492,8 @@ handleXray() {
     xrayConfigDir=$(xrayServiceConfigDir)
     if [[ -f "${PADM_XRAY_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/xray.service}" ]] && padmCommandExists systemctl; then
         serviceManager=systemd
-    elif [[ -f "${PADM_XRAY_OPENRC_SERVICE_FILE:-/etc/init.d/xray}" ]]; then
+    elif [[ -f "${PADM_XRAY_OPENRC_SERVICE_FILE:-/etc/init.d/xray}" ]] &&
+        padmCommandExists rc-service; then
         serviceManager=openrc
     fi
     if [[ -n "${serviceManager}" ]]; then

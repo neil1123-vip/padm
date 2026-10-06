@@ -2257,12 +2257,15 @@ command_background=true
 pidfile="/var/run/sing-box.pid"
 EOF
     elif [[ "${serviceName}" == "xray" ]]; then
+        local xrayBinary xrayConfigDir
+        xrayBinary=$(coreServicePathArgument "$(coreXrayBinaryPath)") || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+        xrayConfigDir=$(coreServicePathArgument "$(coreXrayConfigDir)") || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
         cat <<EOF >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 #!/sbin/openrc-run
 
 description="xray service"
-command="/etc/padm/xray/xray"
-command_args="run -confdir /etc/padm/xray/conf"
+command=${xrayBinary}
+command_args='run -confdir ${xrayConfigDir}'
 command_background=true
 pidfile="/var/run/xray.pid"
 EOF
@@ -2367,7 +2370,7 @@ installSingBoxService() {
     local serviceBackupDir=
     local serviceWasEnabled=false
 
-    if [[ -n $(find /bin /usr/bin -name "systemctl") && "${release}" != "alpine" ]]; then
+    if [[ "${release}" != "alpine" ]] && padmCommandExists systemctl; then
         serviceFile=${PADM_SINGBOX_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/sing-box.service}
         local tmpFile
         padmCreateTempPath tmpFile "$(coreTmpFilePath padm-sing-box.service.XXXXXX)" || return 1
@@ -2431,11 +2434,14 @@ EOF
 # Xray-core 开机自启
 installXrayService() {
     progressCard "$1" "配置 Xray 开机自启"
-    local execStart='/etc/padm/xray/xray run -confdir /etc/padm/xray/conf'
+    local binaryArg configArg execStart
+    binaryArg=$(coreServicePathArgument "$(coreXrayBinaryPath)") || return 1
+    configArg=$(coreServicePathArgument "$(coreXrayConfigDir)") || return 1
+    execStart="${binaryArg} run -confdir ${configArg}"
     local serviceFile=
     local serviceBackupDir=
     local serviceWasEnabled=false
-    if [[ -n $(find /bin /usr/bin -name "systemctl") ]]; then
+    if [[ "${release}" != "alpine" ]] && padmCommandExists systemctl; then
         serviceFile=${PADM_XRAY_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/xray.service}
         local tmpFile
         padmCreateTempPath tmpFile "$(coreTmpFilePath padm-xray.service.XXXXXX)" || return 1
@@ -2454,7 +2460,7 @@ LimitNOFILE=infinity
 [Install]
 WantedBy=multi-user.target
 EOF
-        if ! grep -q '^\[Service\]$' "${tmpFile}" || ! grep -q "^ExecStart=${execStart}$" "${tmpFile}"; then
+        if ! grep -q '^\[Service\]$' "${tmpFile}" || ! grep -Fxq "ExecStart=${execStart}" "${tmpFile}"; then
             padmRemoveCleanupPath "${tmpFile}"
             errorCard "Xray systemd 模板生成失败"
             return 1
@@ -2470,7 +2476,7 @@ EOF
             failCoreStartupServiceInstall "${serviceBackupDir}" xray "${serviceWasEnabled}" "Xray 开机自启配置失败"
             return 1
         fi
-        padmRemoveCleanupPath "${serviceBackupDir}"
+        coreInstallServiceBackupFinalize "${serviceBackupDir}" xray "${serviceWasEnabled}"
         successCard "配置Xray开机自启成功"
     elif [[ "${release}" == "alpine" ]]; then
         serviceFile=${PADM_XRAY_OPENRC_SERVICE_FILE:-/etc/init.d/xray}
@@ -2484,7 +2490,7 @@ EOF
             failCoreStartupServiceInstall "${serviceBackupDir}" xray "${serviceWasEnabled}" "Xray 开机自启配置失败"
             return 1
         fi
-        padmRemoveCleanupPath "${serviceBackupDir}"
+        coreInstallServiceBackupFinalize "${serviceBackupDir}" xray "${serviceWasEnabled}"
     fi
 }
 
@@ -3044,7 +3050,18 @@ singBoxInstall() {
 
 
 singBoxLogConfigFile() {
-    printf '%s\n' "${PADM_SINGBOX_LOG_CONFIG_FILE:-/etc/padm/sing-box/conf/config/log.json}"
+    printf '%s\n' "${PADM_SINGBOX_LOG_CONFIG_FILE:-$(singBoxConfigShardDir)log.json}"
+}
+
+singBoxLogOutputFile() {
+    local configFile outputPath
+    configFile=$(singBoxLogConfigFile)
+    outputPath=$(jq -r '.log.output // empty' "${configFile}" 2>/dev/null || true)
+    if [[ "${outputPath}" == /* ]]; then
+        printf '%s\n' "${outputPath}"
+    else
+        printf '%s/box.log\n' "$(singBoxConfigConfDir)"
+    fi
 }
 
 # sing-box 日志
@@ -3067,16 +3084,11 @@ singBoxLog() {
         backupManagedFileToPath "${targetPath}" "${backupPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
         hadBackup=true
     fi
-    cat <<EOF >"${tmpPath}"
-{
-  "log": {
-    "disabled": $1,
-    "level": "debug",
-    "output": "/etc/padm/sing-box/conf/box.log",
-    "timestamp": true
-  }
-}
-EOF
+    local outputPath
+    outputPath=$(singBoxLogOutputFile) || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
+    jq -n --argjson disabled "$1" --arg output "${outputPath}" \
+        '{log:{disabled:$disabled,level:"debug",output:$output,timestamp:true}}' >"${tmpPath}" ||
+        { padmRemoveCleanupPath "${tmpPath}"; return 1; }
     if ! commitGeneratedJsonFile "${tmpPath}" "${targetPath}"; then
         if [[ -n "${backupPath}" ]]; then
             removeManagedFilesIfPresentIgnoreFailure "${backupPath}"

@@ -173,19 +173,25 @@ runSingBoxCustomPathsRegression() (
     export PADM_SINGBOX_CONFIG_DIR="${root}/conf/config"
     export PADM_SINGBOX_SYSTEMD_SERVICE_FILE="${root}/sing-box.service"
     export PADM_SINGBOX_OPENRC_SERVICE_FILE="${root}/sing-box.init"
+    export PADM_XRAY_BINARY="${root}/bin/xray"
+    export PADM_XRAY_CONF_DIR="${root}/xray/conf"
+    export PADM_XRAY_SYSTEMD_SERVICE_FILE="${root}/xray.service"
+    export PADM_XRAY_OPENRC_SERVICE_FILE="${root}/xray.init"
     export PADM_TMP_DIR="${root}/tmp"
-    mkdir -p "${root}/tmp" "${PADM_SINGBOX_CONFIG_DIR}"
+    mkdir -p "${root}/tmp" "${PADM_SINGBOX_CONFIG_DIR}" "${PADM_XRAY_CONF_DIR}"
+    local serviceFinalizeLog="${root}/service-finalize.log"
+    : >"${serviceFinalizeLog}"
     [[ "$(singBoxConfigShardDir)" == "${PADM_SINGBOX_CONFIG_DIR}/" ]]
     [[ "$(tuicConfigFile)" == "${PADM_SINGBOX_CONFIG_DIR}/09_tuic_inbounds.json" ]]
     singBoxConfigPath="${root}/staged/"
     [[ "$(singBoxConfigShardDir)" == "${singBoxConfigPath}" ]]
     singBoxConfigPath=
 
-    find() { printf '/usr/bin/systemctl\n'; }
+    padmCommandExists() { [[ "$1" == systemctl || "$1" == rc-service ]]; }
     bootStartup() { return 0; }
     coreStartupServiceEnabled() { return 1; }
     checkLogBackupCreate() { printf -v "$1" '%s' ''; }
-    coreInstallServiceBackupFinalize() { return 0; }
+    coreInstallServiceBackupFinalize() { printf '%s\n' "$2" >>"${serviceFinalizeLog}"; }
     local release=debian
     installSingBoxService test >/dev/null
     grep -Fxq "ExecStart=\"${PADM_SINGBOX_BINARY}\" run -c \"${root}/conf/config.json\"" "${PADM_SINGBOX_SYSTEMD_SERVICE_FILE}"
@@ -194,6 +200,32 @@ runSingBoxCustomPathsRegression() (
     source "${PADM_SINGBOX_OPENRC_SERVICE_FILE}"
     [[ "${command}" == "${PADM_SINGBOX_BINARY}" ]]
     [[ "${command_args}" == "run -c \"${root}/conf/config.json\"" ]]
+    installXrayService test >/dev/null
+    grep -qx 'xray' "${serviceFinalizeLog}"
+    grep -Fxq "ExecStart=\"${PADM_XRAY_BINARY}\" run -confdir \"${PADM_XRAY_CONF_DIR}\"" "${PADM_XRAY_SYSTEMD_SERVICE_FILE}"
+    installAlpineStartup xray
+    bash -n "${PADM_XRAY_OPENRC_SERVICE_FILE}"
+    source "${PADM_XRAY_OPENRC_SERVICE_FILE}"
+    [[ "${command}" == "${PADM_XRAY_BINARY}" ]]
+    [[ "${command_args}" == "run -confdir \"${PADM_XRAY_CONF_DIR}\"" ]]
+
+    local PADM_SINGBOX_LOG_CONFIG_FILE="${root}/conf/config/log.json"
+    jq -n --arg output "${root}/conf/custom.log" '{log:{output:$output}}' >"${PADM_SINGBOX_LOG_CONFIG_FILE}"
+    [[ "$(singBoxLogOutputFile)" == "${root}/conf/custom.log" ]]
+    rm -f "${PADM_SINGBOX_LOG_CONFIG_FILE}"
+    [[ "$(singBoxLogOutputFile)" == "${root}/conf/box.log" ]]
+    (
+        local managerLog="${root}/service-manager.log"
+        : >"${managerLog}"
+        padmCommandExists() { [[ "$1" == rc-service ]]; }
+        systemctl() { printf 'systemd:%s\n' "$*" >>"${managerLog}"; return 1; }
+        rc-service() { printf 'openrc:%s\n' "$*" >>"${managerLog}"; return 0; }
+        singBoxRunning() { return 1; }
+        singBoxMergeConfig() { return 0; }
+        waitForServiceState() { return 0; }
+        handleSingBox start >/dev/null 2>&1
+        [[ "$(<"${managerLog}")" == 'openrc:sing-box start' ]]
+    )
 
     local -a procArgsFixture=("${PADM_SINGBOX_BINARY}" run -c "${root}/conf/config.json") parsedArgs=()
     printf '%s\0' "${procArgsFixture[@]}" >"${root}/cmdline"
@@ -1979,6 +2011,7 @@ runSingBoxLogTransactionRegression() (
     set +e
     mkdir -p "$(dirname "${targetPath}")" || return 1
     export PADM_SINGBOX_LOG_CONFIG_FILE="${targetPath}"
+    export PADM_SINGBOX_CONFIG_DIR="${root}/conf/config"
     REGRESSION_ERROR_CARD_LOG="${errorLog}"
     serviceQueueRestart() {
         printf 'restart:%s\n' "$1" >>"${serviceLog}"
@@ -2000,6 +2033,7 @@ runSingBoxLogTransactionRegression() (
                 set +e
                 source "$1/shell/core/runtime.sh"
                 source "$1/shell/core/services.sh"
+                source "$1/shell/core/singbox.sh"
                 source "$1/shell/core/cores.sh"
                 serviceLog=$2
                 errorLog=$3
@@ -2061,6 +2095,7 @@ runSingBoxLogTransactionRegression() (
             set +e
             source "$1/shell/core/runtime.sh"
             source "$1/shell/core/services.sh"
+            source "$1/shell/core/singbox.sh"
             source "$1/shell/core/cores.sh"
             serviceLog=$2
             errorLog=$3
@@ -2081,7 +2116,7 @@ runSingBoxLogTransactionRegression() (
         ' _ "${PROJECT_ROOT}" "${serviceLog}" "${errorLog}" "${root}/sing-box-log-restore-fail.rc" || return 1
     rc=$(<"${root}/sing-box-log-restore-fail.rc") || return 1
     [[ "${rc}" == "1" ]] || return 1
-    jq -e '.log.disabled == false and .log.level == "debug" and .log.output == "/etc/padm/sing-box/conf/box.log"' "${targetPath}" >/dev/null || return 1
+    jq -e --arg output "${root}/conf/box.log" '.log.disabled == false and .log.level == "debug" and .log.output == $output' "${targetPath}" >/dev/null || return 1
     grep -qx 'restart:sing-box' "${serviceLog}" || return 1
     grep -qx 'apply:fail' "${serviceLog}" || return 1
     grep -q '旧配置恢复失败' "${errorLog}" || return 1
@@ -2095,7 +2130,7 @@ runSingBoxLogTransactionRegression() (
     : >"${errorLog}" || return 1
     applyMode=success
     runSingBoxLogCase false 0 || return 1
-    jq -e '.log.disabled == false and .log.level == "debug" and .log.output == "/etc/padm/sing-box/conf/box.log"' "${targetPath}" >/dev/null || return 1
+    jq -e --arg output "${root}/conf/box.log" '.log.disabled == false and .log.level == "debug" and .log.output == $output' "${targetPath}" >/dev/null || return 1
     grep -qx 'restart:sing-box' "${serviceLog}" || return 1
     grep -qx 'apply:success' "${serviceLog}" || return 1
     [[ ! -s "${errorLog}" ]] || return 1
