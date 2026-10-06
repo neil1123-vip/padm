@@ -64,6 +64,9 @@
                 "$ref": "#/$defs/shadowsocks_protocol"
               },
               {
+                "$ref": "#/$defs/tuic_protocol"
+              },
+              {
                 "$ref": "#/$defs/websocket_protocol"
               }
             ]
@@ -313,7 +316,7 @@
         "properties": {
           "core": {
             "properties": {
-              "protocols": {"contains": {"properties": {"id": {"enum": [3, 4, 5, 21]}}}}
+              "protocols": {"contains": {"properties": {"id": {"enum": [3, 4, 5, 21, 31]}}}}
             }
           }
         }
@@ -347,7 +350,7 @@
         "properties": {
           "core": {
             "properties": {
-              "protocols": {"contains": {"properties": {"id": {"enum": [3, 4, 5, 30]}}}}
+              "protocols": {"contains": {"properties": {"id": {"enum": [3, 4, 5, 30, 31]}}}}
             }
           }
         }
@@ -898,6 +901,54 @@
                 "method": {"const": "2022-blake3-aes-128-gcm"},
                 "server_password": {"type": "string", "minLength": 24, "maxLength": 24, "pattern": "^[A-Za-z0-9+/]{21}[AQgw]==$"},
                 "user_password": {"type": "string", "minLength": 24, "maxLength": 24, "pattern": "^[A-Za-z0-9+/]{21}[AQgw]==$"}
+              }
+            }
+          }
+        }
+      ]
+    },
+    "tuic_protocol": {
+      "allOf": [
+        {"$ref": "#/$defs/protocol_base"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "core", "listener_id", "server", "public_port", "address_families", "name", "uuid", "tuic"],
+          "properties": {
+            "id": {"const": 31},
+            "core": {"const": "sing-box"},
+            "listener_id": {
+              "type": "string",
+              "pattern": "^entry-[a-z0-9][a-z0-9-]{0,47}$"
+            },
+            "server": {"$ref": "#/$defs/server_address"},
+            "public_port": {"$ref": "#/$defs/port"},
+            "address_families": {"$ref": "#/$defs/address_families"},
+            "name": {"$ref": "#/$defs/account_name"},
+            "uuid": {"$ref": "#/$defs/uuid"},
+            "tuic": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["domain", "congestion_control", "auth_timeout", "heartbeat", "zero_rtt_handshake"],
+              "properties": {
+                "domain": {
+                  "$ref": "#/$defs/hostname",
+                  "not": {"pattern": "[\\s\\u0000-\\u001f\\u007f]"}
+                },
+                "congestion_control": {"enum": ["cubic", "new_reno", "bbr"]},
+                "auth_timeout": {
+                  "type": "string",
+                  "maxLength": 8,
+                  "pattern": "^[1-9][0-9]{0,5}(ms|s|m|h)$",
+                  "not": {"pattern": "[\\s\\u0000-\\u001f\\u007f]"}
+                },
+                "heartbeat": {
+                  "type": "string",
+                  "maxLength": 8,
+                  "pattern": "^[1-9][0-9]{0,5}(ms|s|m|h)$",
+                  "not": {"pattern": "[\\s\\u0000-\\u001f\\u007f]"}
+                },
+                "zero_rtt_handshake": {"type": "boolean"}
               }
             }
           }

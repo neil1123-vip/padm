@@ -16,13 +16,13 @@
 | --- | --- | --- |
 | 1. 功能矩阵 | 已完成，提交 `7fe6a9e` | 协议与功能边界、管理状态、合同回归 |
 | 2. 菜单与可信首次配置 | 2A–2C 已实现；本地 PTY、事务和 Linux 权限通过，真实发布/连通待验 | 安装后进入菜单、独立命令生命周期、无需手填镜像的首次配置 |
-| 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2–3C.6 Reality/Hysteria2/AnyTLS/NaiveProxy/Shadowsocks 基础入口已通过本地与 amd64 传输验收 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
+| 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2–3C.7 Reality/Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC 基础入口已通过本地与 amd64 传输验收 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
 | 4. 用户、订阅与服务维护 | 未开始 | 本机用户业务、多服务器后端、分范围备份恢复、核心运维 |
 | 5. 站点、路由与宿主集成 | 未开始 | 站点管理、内部能力、规则所有权及可撤销宿主操作 |
 | 6. 发布与完整验收 | 未开始 | 迁移文档、真实 Linux 与双架构证据、受门禁保护的 Release |
 
 当前机器可读支持状态以
-[`features.json`](../docker/contracts/features.json)为准：协议 `1`、`2`、`3`、`4`、`5`、`21`、`26`、`30` 的初始
+[`features.json`](../docker/contracts/features.json)为准：协议 `1`、`2`、`3`、`4`、`5`、`21`、`26`、`30`、`31` 的初始
 配置运行已支持，协议管理工作流仍为 `deferred`。发布订阅要求 Xray、协议 `21`
 和受管 TLS；不能由“可以生成链接”推断任意核心已经支持 HTTPS 订阅发布。
 第一步的回归使用模拟 Docker，不能代替真实容器、SSH 终端和客户端连通验证。
@@ -664,7 +664,55 @@ bash docker/tests/shadowsocks-real.sh \
 
 未验公网 TCP/UDP 宿主入口、第三方导入 UI、保持打开的既有会话、原生 arm64、
 真实 DNS/整机重启或可信发布；凭据轮换与用户 CRUD 未开放。
-3B.4、其余 3C、3D、4A、5C 仍待完成，下个普通协议为 `31` TUIC。
+3B.4、其余 3C、3D、4A、5C 仍待完成；后续 TUIC 交付见 3C.7。
+
+#### 3C.7 TUIC 基础入口与参数管理
+
+新增协议 `31`，仅接受 sing-box v3，单 UDP 入口支持 IPv4/IPv6。
+首配选项 `10`，可选主 sing-box 与副 Xray Reality；UUID 复用为用户 ID、密码与统计账号。
+默认拥塞 `cubic`、认证超时 `3s`、心跳 `10s`、关闭 0-RTT；支持 `bbr` 和 `new_reno`，
+时长接受 1–6 位正整数及 `ms/s/m/h` 单位，0-RTT 严格布尔值，菜单明确提示重放风险。
+复用受管 TLS/ACME、`h3`、生产候选验证和失败恢复；TLS 域名与入口身份冻结。
+首配、完整规格导入、通用字段编辑、编辑项 `14` 四项协议参数、同核复制与删除均接入。
+本地 `tuic://` 采用百分号编码、原生 UDP 中继和严格 TLS 校验；
+认证超时、服务端心跳与服务端 0-RTT 不导出到客户端 URI。
+HTTPS 发布仍要求 Xray WS TLS，包含 TUIC 时暂拒绝宿主集成；已有部署安装新类型须完整 v3 spec。
+删除最后 WS 时保留 TUIC TLS 关系，删除最后 TLS 消费者清除规格引用但不删除受管证书。
+UUID 复用既有流量/额度过滤；完整 `management_status` 仍为 `deferred`，端口跳跃归属 5C。
+
+本地验收：固定 Linux 源码快照、可执行 tmpfs、前台 `--init` 工具容器；
+`tuic.sh` `64.369` 秒一次包含 Shadowsocks/Naive/AnyTLS/Hysteria2/Reality/旧协议完整基线；
+首配/编辑 PTY `144.002` 秒、`phase3` 合同/矩阵 `135.263` 秒通过，
+覆盖单/双核心、取消、参数编辑、复制拒绝、身份冻结、TLS 删除和失败恢复。
+严格合同、v1/v2/旧 bundle 拒绝、三拓扑、UDP 占用与归属、漂移、精确 URI、共享额度、更新回滚通过。
+Bash、ShellCheck、JSON、嵌入 Python 及 Draft 2020-12 Schema 7 正例/33 反例通过；
+独立只读生产审阅无可操作问题。CI 使用 `tuic.sh` 根入口，新增 `docker-tuic` selector，不重复旧基线。
+
+真实 amd64 `52.152` 秒通过，沿用 3C.2 的固定业务镜像；
+客户端只从实际链接解析认证/端口/拥塞/SNI，使用隔离 CA 校验 TLS，未开启 insecure。
+三个拥塞算法各自 IPv4/IPv6 的 TCP HTTP 与 UDP echo proof 均通过，双栈错误密码拒绝；
+UUID 实际上/下行计数 `546/984` 均为正。生产额度事务拒绝请求且源站计数不增，
+解除后仍使用同一客户端恢复，新请求精确增加源站 TCP/UDP 各 6 次，`users.base` 哈希不变。
+TUIC 客户端缓存 QUIC 连接的失效识别是异步的，允许路径最多等待 60 秒重连；
+本次恢复 `cubic` 的 TCP/UDP 各重试 4 次，其余算法 0 次，拒绝路径无重试。
+生产非 root、只读根、cap drop、init、健康和权限保持，未发布宿主端口。
+第 4 参数的 HTTP/2 curl 临时验收镜像 ID 为
+`sha256:fc76205557045809abceda494dd21dfb8c9913e6a579cc46f07cb0ff8ebc01d5`，
+工具镜像不替换业务镜像，验收后清理容器、网络、卷、工具镜像与临时文件。
+复现时准备 HTTP/2 curl 工具镜像，再运行：
+
+```bash
+bash docker/tests/tuic.sh
+bash docker/tests/tuic-real.sh \
+  padm-local/padm-xray:tls-3b4 \
+  padm-local/padm-sing-box:tls-3b4 \
+  padm-local/padm-ops:tls-3b4 \
+  local-http2-curl:test
+```
+
+未验公网 UDP 宿主入口、第三方导入 UI、保持打开的长会话、真实 0-RTT 重放行为、
+原生 arm64、真实 DNS/整机重启或可信发布；完整用户管理及端口跳跃尚未开放。
+3B.4、其余 3C、3D、4A、5C 仍待完成，下个普通协议为 `28` direct Trojan。
 
 ### 3D. 协议管理与入口维护
 
@@ -823,7 +871,7 @@ Fail2ban 1.1.0），只读挂载当前生成配置及入口，未重建或发布
 | `network-optimization`、`vless-encryption` | 5C 独立宿主/实验子项；未验收仍不支持 |
 
 新增能力提交时同步更新文档、配置合同、生成器/Compose、控制入口及证据。
-[`phase3.sh`](../docker/tests/phase3.sh)当前固定 `supported` 协议为 `[1, 2, 3, 4, 5, 21, 26, 30]`，
+[`phase3.sh`](../docker/tests/phase3.sh)当前固定 `supported` 协议为 `[1, 2, 3, 4, 5, 21, 26, 30, 31]`，
 并要求菜单和管理差距为 `deferred`；后续按真实交付更新这些基线断言，
 保留协议注册表、核心/profile、网络权限和前置条件的一致性检查。
 不得只删除断言或只修改 `features.json` 来宣称完成。

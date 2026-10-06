@@ -5948,6 +5948,10 @@ runDockerShadowsocksRegression() {
     bash "${PROJECT_ROOT}/docker/tests/shadowsocks.sh"
 }
 
+runDockerTuicRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/tuic.sh"
+}
+
 runDockerPermissionsRegression() {
     bash "${PROJECT_ROOT}/docker/tests/permissions.sh"
 }

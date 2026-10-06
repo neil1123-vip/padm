@@ -81,6 +81,7 @@ dockerSetupGenerateSpec() {
     local core=$1 protocols=$2 server=$3 families=$4 realityPort=$5 target=$6 targetPort=$7 sni=$8
     local domain=$9 wsPort=${10} subscription=${11} output=${12} secondaryCore=${13:-} secondaryPort=${14:-8444}
     local hy2Mode=${15:-bbr} hy2Up=${16:-100} hy2Down=${17:-50} hy2Obfs=${18:-false} hy2Masquerade=${19:-}
+    local tuicCongestion=${20:-cubic} tuicAuthTimeout=${21:-3s} tuicHeartbeat=${22:-10s} tuicZeroRtt=${23:-false}
     local xrayImage opsImage singBoxImage uuid token shortId= privateKey= publicKey= keyPair derivedPair derivedPublic wsPath= inputsFile obfsPassword=
     local serverPassword= userPassword=
     xrayImage=$(dockerManifestImageReference xray) || return 1
@@ -88,7 +89,7 @@ dockerSetupGenerateSpec() {
     uuid=$(dockerSetupTool "${xrayImage}" uuid 2>/dev/null) || return 1
     [[ "${uuid}" =~ ^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$ ]] || return 1
     token=$(dockerSetupRandomHex "${opsImage}" 32) || return 1
-    if [[ ( "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 && "${protocols}" != 9 ) || -n "${secondaryCore}" ]]; then
+    if [[ ( "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 && "${protocols}" != 9 && "${protocols}" != 10 ) || -n "${secondaryCore}" ]]; then
         keyPair=$(dockerSetupTool "${xrayImage}" x25519 2>/dev/null) || return 1
         privateKey=$(awk '/^PrivateKey:/ { print $2; exit }' <<<"${keyPair}")
         publicKey=$(awk '/^Password \(PublicKey\):/ { print $3; exit } /^PublicKey:/ { print $2; exit }' <<<"${keyPair}")
@@ -127,6 +128,8 @@ dockerSetupGenerateSpec() {
         --arg secondaryCore "${secondaryCore}" --argjson secondaryPort "${secondaryPort}" \
         --arg hy2Mode "${hy2Mode}" --argjson hy2Up "${hy2Up}" --argjson hy2Down "${hy2Down}" \
         --arg hy2Masquerade "${hy2Masquerade}" \
+        --arg tuicCongestion "${tuicCongestion}" --arg tuicAuthTimeout "${tuicAuthTimeout}" \
+        --arg tuicHeartbeat "${tuicHeartbeat}" --argjson tuicZeroRtt "${tuicZeroRtt}" \
         --rawfile credentials "${inputsFile}" --argjson subscription "${subscription}" '
       ($credentials | split("\n")) as $secrets |
       $secrets[0] as $uuid | $secrets[1] as $privateKey | $secrets[2] as $publicKey |
@@ -134,7 +137,7 @@ dockerSetupGenerateSpec() {
       $secrets[6] as $obfsPassword | $secrets[7] as $serverPassword | $secrets[8] as $userPassword |
       . + {schema_version: 3, core: {type: $core,
         secondary_type: (if $secondaryCore == "" then null else $secondaryCore end), protocols: [
-        (if $protocols != 2 and $protocols != 6 and $protocols != 7 and $protocols != 8 and $protocols != 9 then {
+        (if $protocols != 2 and $protocols != 6 and $protocols != 7 and $protocols != 8 and $protocols != 9 and $protocols != 10 then {
           id: (if $protocols == 4 then 2 elif $protocols == 5 then 26 else 1 end),
           core: $core, server: $server, public_port: $realityPort, address_families: $families,
           listener_id: (if $protocols == 4 then "entry-reality-xhttp"
@@ -170,13 +173,19 @@ dockerSetupGenerateSpec() {
           shadowsocks: {method: "2022-blake3-aes-128-gcm",
             server_password: $serverPassword, user_password: $userPassword}
         } else empty end),
+        (if $protocols == 10 then {
+          id: 31, core: $core, server: $server, public_port: $wsPort, address_families: $families,
+          listener_id: "entry-tuic", name: "main-tuic", uuid: $uuid,
+          tuic: {domain: $domain, congestion_control: $tuicCongestion, auth_timeout: $tuicAuthTimeout,
+            heartbeat: $tuicHeartbeat, zero_rtt_handshake: $tuicZeroRtt}
+        } else empty end),
         (if $secondaryCore != "" then {
           id: 1, core: $secondaryCore, server: $server, public_port: $secondaryPort, address_families: $families,
           listener_id: "entry-secondary-reality", name: "secondary-reality", uuid: $uuid,
           reality: {server_name: $sni, target_host: $target, target_port: $targetPort,
             private_key: $privateKey, public_key: $publicKey, short_id: $shortId}
         } else empty end)]},
-        tls: (if $protocols == 2 or $protocols == 3 or $protocols == 6 or $protocols == 7 or $protocols == 8 then {domain: $domain} else null end),
+        tls: (if $protocols == 2 or $protocols == 3 or $protocols == 6 or $protocols == 7 or $protocols == 8 or $protocols == 10 then {domain: $domain} else null end),
         subscription: {enabled: $subscription, token: $token}, host_integrations: []}
     ' >"${output}" || return 1
     rm -f -- "${inputsFile}" || return 1
@@ -271,7 +280,7 @@ dockerTlsManageCommand() {
     }
     currentDomain=$(jq -er '.tls.domain | select(type == "string" and length > 0)' \
         "${root}/config/spec.json" 2>/dev/null) && dockerDomainIsValid "${currentDomain}" || {
-        dockerError '当前部署没有 TLS 域名，请先配置 WS TLS、Hysteria2、AnyTLS 或 NaiveProxy 入口'
+        dockerError '当前部署没有 TLS 域名，请先配置 WS TLS、Hysteria2、AnyTLS、NaiveProxy 或 TUIC 入口'
         return "${PADM_DOCKER_RC_STATE}"
     }
     dockerConfigureSpecValidate "${root}/config/spec.json" &&
@@ -339,6 +348,7 @@ dockerSetupCommand() {
     local secondaryCore= secondaryPort=8444
     local realityPort=443 target= targetPort=443 sni= domain= wsPort=443 tlsMode= cert= key=
     local hy2Mode=bbr hy2Up=100 hy2Down=50 hy2Obfs=false hy2Masquerade=
+    local tuicCongestion=cubic tuicAuthTimeout=3s tuicHeartbeat=10s tuicZeroRtt=false
     local email= provider= credentials= subscription=false answer= root candidate status=0
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
@@ -370,8 +380,8 @@ dockerSetupCommand() {
     2|4)
         core=sing-box
         [[ "${coreChoice}" != 4 ]] || secondaryCore=xray
-        dockerSetupRead protocols '协议 [1=Reality Vision, 5=Reality gRPC, 6=Hysteria2, 7=AnyTLS, 8=NaiveProxy, 9=Shadowsocks, 0=取消]: ' 1 || return 0
-        [[ "${protocols}" == 1 || "${protocols}" == 5 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 || "${protocols}" == 9 ]] || return "${PADM_DOCKER_RC_USAGE}"
+        dockerSetupRead protocols '协议 [1=Reality Vision, 5=Reality gRPC, 6=Hysteria2, 7=AnyTLS, 8=NaiveProxy, 9=Shadowsocks, 10=TUIC, 0=取消]: ' 1 || return 0
+        [[ "${protocols}" == 1 || "${protocols}" == 5 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 || "${protocols}" == 9 || "${protocols}" == 10 ]] || return "${PADM_DOCKER_RC_USAGE}"
         ;;
     *) return "${PADM_DOCKER_RC_USAGE}" ;;
     esac
@@ -386,8 +396,8 @@ dockerSetupCommand() {
     3) families='["ipv4","ipv6"]' ;;
     *) return "${PADM_DOCKER_RC_USAGE}" ;;
     esac
-    if [[ ( "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 && "${protocols}" != 9 ) || -n "${secondaryCore}" ]]; then
-        if [[ "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 && "${protocols}" != 9 ]]; then
+    if [[ ( "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 && "${protocols}" != 9 && "${protocols}" != 10 ) || -n "${secondaryCore}" ]]; then
+        if [[ "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 && "${protocols}" != 9 && "${protocols}" != 10 ]]; then
             dockerSetupRead realityPort '主核心 Reality 入口端口 [443]: ' 443 || return 0
         fi
         dockerSetupRead target 'Reality 目标域名（0 取消）: ' || return 0
@@ -402,7 +412,7 @@ dockerSetupCommand() {
     if [[ "${protocols}" == 9 ]]; then
         dockerSetupRead wsPort "Shadowsocks TCP/UDP 入口端口 [${wsPort}]: " "${wsPort}" || return 0
     fi
-    if [[ "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 ]]; then
+    if [[ "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 || "${protocols}" == 10 ]]; then
         [[ "${protocols}" != 3 ]] || wsPort=8443
         if [[ "${protocols}" == 6 ]]; then
             dockerSetupRead domain 'Hysteria2 TLS 域名（0 取消）: ' || return 0
@@ -410,6 +420,8 @@ dockerSetupCommand() {
             dockerSetupRead domain 'AnyTLS TLS 域名（0 取消）: ' || return 0
         elif [[ "${protocols}" == 8 ]]; then
             dockerSetupRead domain "NaiveProxy TLS 域名 [${server}]（0 取消）: " "${server}" || return 0
+        elif [[ "${protocols}" == 10 ]]; then
+            dockerSetupRead domain 'TUIC TLS 域名（0 取消）: ' || return 0
         else
             dockerSetupRead domain 'WS TLS 域名（0 取消）: ' || return 0
         fi
@@ -439,6 +451,22 @@ dockerSetupCommand() {
             dockerSetupRead wsPort "AnyTLS TCP 入口端口 [${wsPort}]: " "${wsPort}" || return 0
         elif [[ "${protocols}" == 8 ]]; then
             dockerSetupRead wsPort "NaiveProxy TCP 入口端口 [${wsPort}]: " "${wsPort}" || return 0
+        elif [[ "${protocols}" == 10 ]]; then
+            dockerSetupRead wsPort "TUIC UDP 入口端口 [${wsPort}]: " "${wsPort}" || return 0
+            dockerSetupRead tuicCongestion '拥塞控制 [cubic/bbr/new_reno，默认 cubic]: ' cubic || return 0
+            [[ "${tuicCongestion}" == cubic || "${tuicCongestion}" == bbr || "${tuicCongestion}" == new_reno ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            dockerSetupRead tuicAuthTimeout '认证超时 auth_timeout [3s]: ' 3s || return 0
+            dockerSetupRead tuicHeartbeat '心跳间隔 heartbeat [10s]: ' 10s || return 0
+            for answer in "${tuicAuthTimeout}" "${tuicHeartbeat}"; do
+                [[ "${answer}" =~ ^[1-9][0-9]{0,5}(ms|s|m|h)$ ]] || return "${PADM_DOCKER_RC_USAGE}"
+            done
+            dockerSetupRead answer '启用 0-RTT（会增加重放风险，默认关闭）？[y/N]: ' n || return 0
+            case "${answer}" in
+            y|Y|yes|YES) tuicZeroRtt=true ;;
+            n|N|no|NO) tuicZeroRtt=false ;;
+            *) return "${PADM_DOCKER_RC_USAGE}" ;;
+            esac
         else
             dockerSetupRead wsPort "WS TLS 入口端口 [${wsPort}]: " "${wsPort}" || return 0
         fi
@@ -474,13 +502,13 @@ dockerSetupCommand() {
     [[ "${protocols}" != 3 || "${realityPort}" != "${wsPort}" ]] ||
         { dockerError 'Reality 和 WS TLS 不能使用同一入口端口'; return "${PADM_DOCKER_RC_CONFLICT}"; }
     if [[ -n "${secondaryCore}" ]] &&
-        { [[ "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 && "${protocols}" != 9 && "${secondaryPort}" == "${realityPort}" ]] ||
-          [[ ( "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 || "${protocols}" == 9 ) && "${secondaryPort}" == "${wsPort}" ]]; }; then
+        { [[ "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 && "${protocols}" != 9 && "${protocols}" != 10 && "${secondaryPort}" == "${realityPort}" ]] ||
+          [[ ( "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 || "${protocols}" == 9 || "${protocols}" == 10 ) && "${secondaryPort}" == "${wsPort}" ]]; }; then
         dockerError '主副核心不能使用同一入口端口'
         return "${PADM_DOCKER_RC_CONFLICT}"
     fi
     printf '\n核心: %s\n协议组合: %s\n服务器: %s\n地址族: %s\n' "${core}" "${protocols}" "${server}" "${families}"
-    [[ "${protocols}" == 2 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 || "${protocols}" == 9 ]] ||
+    [[ "${protocols}" == 2 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 || "${protocols}" == 9 || "${protocols}" == 10 ]] ||
         printf 'Reality: %s -> %s:%s，SNI %s\n' "${realityPort}" "${target}" "${targetPort}" "${sni}"
     if [[ "${protocols}" == 2 || "${protocols}" == 3 ]]; then
         printf 'WS TLS: %s:%s，证书方式 %s，订阅 %s\n' "${domain}" "${wsPort}" "${tlsMode}" "${subscription}"
@@ -493,6 +521,9 @@ dockerSetupCommand() {
         printf 'NaiveProxy: %s:%s/tcp，证书方式 %s\n' "${domain}" "${wsPort}" "${tlsMode}"
     elif [[ "${protocols}" == 9 ]]; then
         printf 'Shadowsocks: %s:%s/tcp+udp，方法 2022-blake3-aes-128-gcm\n' "${server}" "${wsPort}"
+    elif [[ "${protocols}" == 10 ]]; then
+        printf 'TUIC: %s:%s/udp，证书方式 %s，拥塞 %s，认证超时 %s，心跳 %s，0-RTT %s\n' \
+            "${domain}" "${wsPort}" "${tlsMode}" "${tuicCongestion}" "${tuicAuthTimeout}" "${tuicHeartbeat}" "${tuicZeroRtt}"
     fi
     [[ -z "${secondaryCore}" ]] || printf '副核心: %s，Reality 入口端口 %s\n' "${secondaryCore}" "${secondaryPort}"
     printf '确认后将验证发布、生成账号参数并配置服务。\n'
@@ -508,12 +539,13 @@ dockerSetupCommand() {
     dockerSetupGenerateSpec "${core}" "${protocols}" "${server}" "${families}" "${realityPort}" \
         "${target}" "${targetPort}" "${sni}" "${domain}" "${wsPort}" "${subscription}" \
         "${candidate}/spec.json" "${secondaryCore}" "${secondaryPort}" \
-        "${hy2Mode}" "${hy2Up}" "${hy2Down}" "${hy2Obfs}" "${hy2Masquerade}" || {
+        "${hy2Mode}" "${hy2Up}" "${hy2Down}" "${hy2Obfs}" "${hy2Masquerade}" \
+        "${tuicCongestion}" "${tuicAuthTimeout}" "${tuicHeartbeat}" "${tuicZeroRtt}" || {
         dockerError '账号参数生成或规格校验失败，未提交配置'
         return "${PADM_DOCKER_RC_STATE}"
     }
     dockerConfigureReleaseValidate "${candidate}/spec.json" || return "${PADM_DOCKER_RC_MANIFEST}"
-    if [[ "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 ]]; then
+    if [[ "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 || "${protocols}" == 10 ]]; then
         dockerSetupStageCertificate "${candidate}" "${tlsMode}" "${domain}" "${cert}" "${key}" \
             "${email}" "${provider}" "${credentials}" || return "${PADM_DOCKER_RC_STATE}"
         dockerConfigureApply "${candidate}/spec.json" "${candidate}/tls" "${candidate}/acme" || status=$?
@@ -585,6 +617,7 @@ dockerProtocolCommand() (
             elif .id == 2 then "Reality XHTTP" elif .id == 26 then "Reality gRPC"
             elif .id == 3 then "Hysteria2" elif .id == 4 then "AnyTLS"
             elif .id == 5 then "NaiveProxy" elif .id == 30 then "Shadowsocks"
+            elif .id == 31 then "TUIC"
             else "WS TLS" end)  \(.server | authority):\(.public_port)  [\(.address_families | join(","))]  \(.name)"' \
             "${normalized}"
         return $?
@@ -606,9 +639,9 @@ dockerProtocolCommand() (
 
 dockerEditFields() {
     local draft=$1 choice protocol listener field value= defaultValue= valueFile="${1}.value" temporary="${1}.next"
-    local sourceCore targetCore coreChoice primaryCore targetProtocol obfsChoice opsImage
+    local sourceCore targetCore coreChoice primaryCore targetProtocol obfsChoice opsImage zeroRttChoice
     while :; do
-        printf '\n1. 入口端口\n2. 服务器地址\n3. 地址族\n4. 节点名称\n5. Reality 目标/SNI\n6. WS 路径\n7. 订阅开关\n8. 验证并预览\n9. 复制入口\n10. 删除入口\n11. 安装其它 Reality 传输入口\n12. Reality 传输参数\n13. Hysteria2 参数\n0. 取消\n'
+        printf '\n1. 入口端口\n2. 服务器地址\n3. 地址族\n4. 节点名称\n5. Reality 目标/SNI\n6. WS 路径\n7. 订阅开关\n8. 验证并预览\n9. 复制入口\n10. 删除入口\n11. 安装其它 Reality 传输入口\n12. Reality 传输参数\n13. Hysteria2 参数\n14. TUIC 参数\n0. 取消\n'
         dockerSetupRead choice '编辑项目: ' || return 3
         [[ "${choice}" != 8 ]] || return 0
         if [[ "${choice}" == 7 ]]; then
@@ -634,7 +667,7 @@ dockerEditFields() {
                   .core.protocols |= map(select(.listener_id != $key)) |
                   if all(.core.protocols[]; .core != $primary) then error("主核心至少保留一个入口")
                   elif any(.core.protocols[]; .id == 21) then .
-                  elif any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5) then .subscription.enabled = false
+                  elif any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 31) then .subscription.enabled = false
                   else .tls = null | .subscription.enabled = false end |
                   .core.secondary_type = ([.core.protocols[] | select(.core != $primary) | .core] | first // null)
                 ' "${draft}" >"${temporary}" 2>/dev/null || {
@@ -671,6 +704,10 @@ dockerEditFields() {
                 fi
                 if [[ "${targetProtocol}" == 30 && "${targetCore}" != sing-box ]]; then
                     dockerError 'Shadowsocks 入口仅支持 sing-box，不能复制到 Xray'
+                    return 1
+                fi
+                if [[ "${targetProtocol}" == 31 && "${targetCore}" != sing-box ]]; then
+                    dockerError 'TUIC 入口仅支持复制到同一 sing-box 核心'
                     return 1
                 fi
                 if [[ "${targetCore}" != "${primaryCore}" ]] &&
@@ -754,6 +791,20 @@ dockerEditFields() {
                 *) return 1 ;;
                 esac
                 ;;
+            14)
+                [[ "${protocol}" == 31 ]] || {
+                    dockerError '仅支持编辑已有 TUIC 入口；安装新 TUIC 请导入完整 configure 规格'
+                    return 1
+                }
+                dockerSetupRead value 'TUIC 参数 [1=拥塞控制, 2=认证超时, 3=心跳间隔, 4=0-RTT]: ' || return 3
+                case "${value}" in
+                1) field=tuic.congestion_control ;;
+                2) field=tuic.auth_timeout ;;
+                3) field=tuic.heartbeat ;;
+                4) field=tuic.zero_rtt_handshake ;;
+                *) return 1 ;;
+                esac
+                ;;
             *) return 1 ;;
             esac
             defaultValue=$(jq -r --arg key "${listener}" --arg field "${field}" '
@@ -793,6 +844,21 @@ dockerEditFields() {
             elif [[ "${field}" == hy2.masquerade ]]; then
                 dockerSetupRead value '伪装 HTTPS 地址（空输入保留，off 关闭，0 取消）: ' "${defaultValue}" || return 3
                 [[ "${value}" != off ]] || value=
+            elif [[ "${field}" == tuic.congestion_control ]]; then
+                dockerSetupRead value "拥塞控制 [cubic/bbr/new_reno，空输入保留 ${defaultValue}]: " "${defaultValue}" || return 3
+                [[ "${value}" == cubic || "${value}" == bbr || "${value}" == new_reno ]] || return 1
+            elif [[ "${field}" == tuic.auth_timeout || "${field}" == tuic.heartbeat ]]; then
+                dockerSetupRead value "时长 [正整数加 ms/s/m/h，空输入保留 ${defaultValue}]: " "${defaultValue}" || return 3
+                [[ "${value}" =~ ^[1-9][0-9]{0,5}(ms|s|m|h)$ ]] || return 1
+            elif [[ "${field}" == tuic.zero_rtt_handshake ]]; then
+                zeroRttChoice=n
+                [[ "${defaultValue}" == true ]] && zeroRttChoice=y
+                dockerSetupRead value "0-RTT [y/n，开启会增加重放风险，空输入保留 ${zeroRttChoice}]: " "${zeroRttChoice}" || return 3
+                case "${value}" in
+                y|Y|yes|YES) value=true ;;
+                n|N|no|NO) value=false ;;
+                *) return 1 ;;
+                esac
             else
                 dockerSetupRead value '新值（空输入保留，0 取消）: ' "${defaultValue}" || return 3
             fi
@@ -811,6 +877,7 @@ dockerEditFields() {
                   $field == "hy2.up_mbps" or $field == "hy2.down_mbps" then ($value | tonumber)
                elif $field == "hy2.obfs" then
                  if $value == "" then null else {type: "salamander", password: $value} end
+               elif $field == "tuic.zero_rtt_handshake" then ($value | fromjson)
                elif $field == "address_families" then
                  if $value == "1" then ["ipv4"] elif $value == "2" then ["ipv6"] else ["ipv4","ipv6"] end
                else $value end) as $input |
@@ -934,7 +1001,8 @@ dockerEditCommand() {
       def fixed: del(.server, .public_port, .address_families, .name,
         .reality.target_host, .reality.target_port, .reality.server_name, .websocket.path,
         .xhttp.path, .xhttp.host, .xhttp.mode, .grpc.service_name,
-        .hy2.bandwidth_mode, .hy2.up_mbps, .hy2.down_mbps, .hy2.obfs, .hy2.masquerade);
+        .hy2.bandwidth_mode, .hy2.up_mbps, .hy2.down_mbps, .hy2.obfs, .hy2.masquerade,
+        .tuic.congestion_control, .tuic.auth_timeout, .tuic.heartbeat, .tuic.zero_rtt_handshake);
       def reality: .id == 1 or .id == 2 or .id == 26;
       def shared: fixed | del(.listener_id, .core, .id, .xhttp, .grpc);
       def root: del(.core.protocols, .core.secondary_type, .tls, .subscription.enabled);
@@ -944,7 +1012,7 @@ dockerEditCommand() {
       # 分次提交新增与删除，防止借同凭据入口绕过已有身份和内部端口冻结。
       ((($oldIds - $newIds) | length) == 0 or (($newIds - $oldIds) | length) == 0) and
       ($old | root) == ($new | root) and
-      $new.tls == (if any($new.core.protocols[]; .id == 21 or .id == 3 or .id == 4 or .id == 5) then $old.tls else null end) and
+      $new.tls == (if any($new.core.protocols[]; .id == 21 or .id == 3 or .id == 4 or .id == 5 or .id == 31) then $old.tls else null end) and
       all($new.core.protocols[];
         . as $entry | [$old.core.protocols[] | select(.listener_id == $entry.listener_id)] as $existing |
         if ($existing | length) == 1 then ($existing[0] | fixed) == ($entry | fixed)
@@ -955,6 +1023,7 @@ dockerEditCommand() {
            ($entry.id == 4 and $entry.core == "sing-box") or
            ($entry.id == 5 and $entry.core == "sing-box") or
            ($entry.id == 30 and $entry.core == "sing-box") or
+           ($entry.id == 31 and $entry.core == "sing-box") or
            ($entry.id == 21 and $entry.core == "xray")) and
           any($old.core.protocols[];
             .listener_id as $sourceId | any($new.core.protocols[]; .listener_id == $sourceId) and

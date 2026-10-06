@@ -213,17 +213,17 @@
     },
     {
       "id": 31,
-      "status": "deferred",
+      "status": "supported",
       "management_status": "deferred",
       "cores": ["sing-box"],
-      "profiles": [],
+      "profiles": ["core-sing-box"],
       "native_menu": "协议与入口",
       "native_action": "Tuic 管理",
       "transport": "quic",
       "udp_support": "yes",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "需要 UDP 监听、端口跳跃和 sing-box Tuic 配置，Docker 合同尚未接入。"
+      "reason": "v3 支持 sing-box TUIC 首配、完整规格导入、入口与拥塞控制/认证超时/心跳/0-RTT 参数编辑、同核复制与删除及分享链接；单 UDP 入口双栈，复用受管 TLS 和 UUID 流量账号，端口跳跃、宿主集成组合及完整管理尚未开放。"
     }
   ],
   "features": {

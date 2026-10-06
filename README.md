@@ -133,7 +133,7 @@ wget -O /root/install-docker.sh "https://raw.githubusercontent.com/neil1123-vip/
 
 交互终端安装成功后自动进入菜单；已安装后直接运行 `padm-docker` 或
 `padm-docker menu` 可查看状态、启停重启和日志，选择“首次配置”收集核心、协议、地址和证书。
-当前向导支持 Xray Reality Vision/XHTTP/gRPC、sing-box Reality Vision/gRPC/Hysteria2/AnyTLS/NaiveProxy/Shadowsocks，
+当前向导支持 Xray Reality Vision/XHTTP/gRPC、sing-box Reality Vision/gRPC/Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC，
 以及 Xray WS TLS 或 Reality Vision + WS TLS；
 已有部署不会被向导覆盖，可改用下述编辑入口；完整协议管理仍待后续阶段交付。
 `install --no-menu` 禁止安装后自动进入菜单；无参数非交互调用只显示帮助，
@@ -158,6 +158,10 @@ UUID 同时作为用户名、密码及流量账号，分享链接使用 `naive+h
 Shadowsocks 在 sing-box 首配中选 `9`，固定为 `2022-blake3-aes-128-gcm` 多用户模式；
 同端口支持 TCP/UDP 双栈，不需要 TLS。确认后独立生成服务器与用户密钥，UUID 作为流量账号。
 `ss://` 按 SIP002 百分号编码组合密码；超额时撤销运行入站，解除额度后恢复原密钥和监听。
+TUIC 在 sing-box 首配中选 `10`，使用单 UDP 双栈入口和受管 TLS；
+UUID 同时作为用户 ID、密码及流量账号。拥塞控制支持 `cubic`、`bbr`、`new_reno`，
+认证超时、心跳和 0-RTT 可在编辑菜单 `14` 管理，默认 `3s`、`10s`、关闭 0-RTT。
+`tuic://` 使用 `h3`、原生 UDP 中继及严格 TLS 校验；端口跳跃尚未开放。
 完整规格保存于 `/etc/padm-docker/config/spec.json`，由 root 持有、权限 `0600`；
 取消不提交，配置失败恢复旧规格、证书及 ACME 状态。该文件含秘密，不应打印或公开。
 
@@ -168,7 +172,7 @@ gRPC service name、WS 路径、Hysteria2 拥塞/带宽/混淆/伪装和订阅�
 未选中的入口、UUID、密钥、token、证书、宿主集成和累计流量保持不变。
 菜单可按入口 ID 复制或删除现有协议入口，主核心至少保留一个入口。
 Reality Vision/gRPC 可复制到另一核心，XHTTP 仅支持 Xray；
-Hysteria2/AnyTLS/NaiveProxy/Shadowsocks 仅支持 sing-box 内复制；已有部署新增这些类型须导入完整 v3 `configure` 规格。
+Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC 仅支持 sing-box 内复制；已有部署新增这些类型须导入完整 v3 `configure` 规格。
 Shadowsocks 的方法、服务器/用户密钥、UUID 和已有入口身份冻结，不通过通用编辑轮换凭据。
 AnyTLS/NaiveProxy 复用通用入口字段编辑，TLS 域名与 UUID 冻结，证书轮换使用证书管理入口。
 NaiveProxy 的入口域名随 TLS 身份固定，不能单独修改为其它域名或 IP。
@@ -202,19 +206,19 @@ padm-docker protocol links vless-reality
 首次配置输出 `schema_version: 3`；`configure` 和备份恢复继续接受 v1/v2。
 编辑先严格核对原规格与部署，再将草稿迁到 v3，确认前不改写受管规格。
 v3 明确每个入口的 `core` 归属及 `core.secondary_type`（不用副核心时为 `null`），
-两核心合计最多 16 个入口；v2 仍为单核心。新增协议 `2`/`3`/`4`/`5`/`26`/`30` 仅接受 v3；
-Xray 可用 Reality Vision/XHTTP/gRPC 和 WS TLS，sing-box 可用 Reality Vision/gRPC/Hysteria2/AnyTLS/NaiveProxy/Shadowsocks。
+两核心合计最多 16 个入口；v2 仍为单核心。新增协议 `2`/`3`/`4`/`5`/`26`/`30`/`31` 仅接受 v3；
+Xray 可用 Reality Vision/XHTTP/gRPC 和 WS TLS，sing-box 可用 Reality Vision/gRPC/Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC。
 首次向导支持 Xray+sing-box 或 sing-box+Xray，副核心首配为 Reality Vision；
 主 sing-box、副 Xray 的 WS TLS 首次需使用完整 v3 spec；已有 Xray WS 入口可继续复制。
 双核心目前只支持普通 bridge 部署，不能与宿主集成组合。
-包含 Hysteria2、AnyTLS、NaiveProxy 或 Shadowsocks 的单核心部署也暂不接受宿主集成。
+包含 Hysteria2、AnyTLS、NaiveProxy、Shadowsocks 或 TUIC 的单核心部署也暂不接受宿主集成。
 每个入口的 `listener_id` 固定；旧入口迁移保留 `vless-reality` / `vless-ws`，
 新入口使用 `entry-*`。WS 的 `websocket.backend_port` 与 `websocket.tls_port`
 按入口独立分配，不重排已有内部端口；身份、公开端口及同一容器网络空间的内部监听不得冲突。
 已有部署的 `edit --spec` 也支持这些入口变更，仍经过相同的预览、校验与确认。
-删除最后一个 WS 入口会关闭订阅；仍有 Hysteria2、AnyTLS 或 NaiveProxy 时保留规格中的 TLS，
+删除最后一个 WS 入口会关闭订阅；仍有 Hysteria2、AnyTLS、NaiveProxy 或 TUIC 时保留规格中的 TLS，
 否则将 `tls` 设为 `null`，受管 TLS/ACME 文件与 token 均保留。
-Nginx 端轮换、核心端受管 TLS 底座及 Reality XHTTP/gRPC、Hysteria2/AnyTLS/NaiveProxy/Shadowsocks 基础入口已交付；
+Nginx 端轮换、核心端受管 TLS 底座及 Reality XHTTP/gRPC、Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC 基础入口已交付；
 高级 XHTTP 参数、Reality 目标库/扫描/参数重生成/443 共存与完整协议管理仍未开放。
 更新或回滚的目标 bundle 必须同时支持规格版本及每个入口的协议/核心组合。
 带 Fail2ban 的 WS 入口暂不允许增删或修改公开端口，需后续联动封禁规则的管理事务。

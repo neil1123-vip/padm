@@ -1252,4 +1252,135 @@ for rejectedEdit in existing-id new-credential invalid-transport; do
     assertClean
 done
 
+# TUIC 复用首配与编辑事务；取消、凭据冻结和 TLS 消费者删除均检查受管状态。
+printf -v TUIC_INPUT '2\n10\nproxy.example.com\n3\ntuic.example.com\n24465\n\n\n\nn\n2\n%s\n%s\ny\n' \
+    "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
+printf -v DUAL_TUIC_INPUT '4\n10\nproxy.example.com\n3\ntarget.example.com\n443\ntarget.example.com\n24445\ntuic.example.com\n24465\nbbr\n8s\n20s\ny\n2\n%s\n%s\ny\n' \
+    "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
+for tuicCase in tuic-default dual-tuic; do
+    newState "${tuicCase}"
+    if [[ "${tuicCase}" == tuic-default ]]; then input=${TUIC_INPUT}; single=true
+    else input=${DUAL_TUIC_INPUT}; single=false; fi
+    before=$(snapshot)
+    runPty 0 "${tuicCase}-cancel" "${input%$'y\n'}"$'n\n' setup "${ASSET_ARGS[@]}"
+    [[ "$(snapshot)" == "${before}" && ! -s "${EVENTS}" && ! -s "${VERIFY_LOG}" ]] ||
+        fail "${tuicCase}: 取消首配提前生成账号或写入部署"
+    runPty 0 "${tuicCase}" "${input}" setup "${ASSET_ARGS[@]}"
+    SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+    jq -e --argjson single "${single}" '
+      .schema_version == 3 and .core.type == "sing-box" and
+      .tls.domain == "tuic.example.com" and .subscription.enabled == false and
+      (.core.protocols[0] | .id == 31 and .core == "sing-box" and
+        .listener_id == "entry-tuic" and .public_port == 24465 and
+        .uuid == "11111111-1111-4111-8111-111111111111" and .reality == null and
+        .tuic == (if $single then {domain:"tuic.example.com",congestion_control:"cubic",
+          auth_timeout:"3s",heartbeat:"10s",zero_rtt_handshake:false}
+        else {domain:"tuic.example.com",congestion_control:"bbr",
+          auth_timeout:"8s",heartbeat:"20s",zero_rtt_handshake:true} end)) and
+      if $single then .core.secondary_type == null and (.core.protocols | length) == 1
+      else .core.secondary_type == "xray" and (.core.protocols | length) == 2 and
+        .core.protocols[1].id == 1 and .core.protocols[1].public_port == 24445 and
+        .core.protocols[0].uuid == .core.protocols[1].uuid end
+    ' "${SPEC}" >/dev/null || fail "${tuicCase}: TUIC 首配参数或双核心身份错误"
+    jq -e --slurpfile spec "${SPEC}" '
+      $spec[0].core.protocols[0] as $p |
+      .inbounds[] | select(.type == "tuic") |
+      .users == [{name:$p.uuid,uuid:$p.uuid,password:$p.uuid}] and .tls.alpn == ["h3"] and
+      .congestion_control == $p.tuic.congestion_control and .auth_timeout == $p.tuic.auth_timeout and
+      .heartbeat == $p.tuic.heartbeat and .zero_rtt_handshake == $p.tuic.zero_rtt_handshake
+    ' "${PADM_DOCKER_INSTALL_DIR}/config/sing-box/config.json" >/dev/null ||
+        fail "${tuicCase}: TUIC 生成参数或流量身份错误"
+    jq -e '.services["sing-box"].ports ==
+      ["0.0.0.0:24465:24465/udp","[::]:24465:24465/udp"]' \
+        "${PADM_DOCKER_INSTALL_DIR}/compose.json" >/dev/null || fail 'TUIC 非 UDP 双栈发布'
+    if [[ "${single}" == true ]]; then
+        ! grep -Eq ' x25519( |$)|derived-stdin' "${EVENTS}" || fail 'TUIC 单核生成了无用 Reality 密钥'
+    fi
+    assertClean
+    assertNoSecrets
+done
+
+export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-tuic-default"
+export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-tuic-default"
+CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
+SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+cp -- "${SPEC}" "${TEST_ROOT}/tuic-original.json"
+before=$(snapshot)
+runPty 0 tuic-edit-cancel $'14\n31\n1\n0\n' edit "${ASSET_ARGS[@]}"
+[[ "$(snapshot)" == "${before}" ]] || fail 'TUIC 参数取消改变部署'
+runPty 0 tuic-edit $'14\n31\n1\nnew_reno\n14\n31\n2\n5s\n14\n31\n3\n12s\n14\n31\n4\ny\n1\n31\n24466\n2\n31\nnext.example.com\n3\n31\n2\n4\n31\nnext-tuic\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e --slurpfile before "${TEST_ROOT}/tuic-original.json" '
+  .tls == $before[0].tls and .subscription == $before[0].subscription and
+  (.core.protocols[0] | .uuid == $before[0].core.protocols[0].uuid and
+    .listener_id == "entry-tuic" and .public_port == 24466 and .server == "next.example.com" and
+    .address_families == ["ipv6"] and .name == "next-tuic" and
+    .tuic == {domain:"tuic.example.com",congestion_control:"new_reno",
+      auth_timeout:"5s",heartbeat:"12s",zero_rtt_handshake:true})
+' "${SPEC}" >/dev/null || fail 'TUIC 参数/通用编辑未更新或改写身份'
+runPty 0 tuic-copy $'9\n31\n2\n24467\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.core.protocols[0] as $source | .core.protocols[1] as $copy |
+  $copy.listener_id == "entry-1" and $copy.public_port == 24467 and
+  ($copy | del(.listener_id,.public_port)) == ($source | del(.listener_id,.public_port))
+' "${SPEC}" >/dev/null || fail 'TUIC 同核复制改变账号或参数'
+before=$(snapshot)
+runPty 15 tuic-copy-xray $'9\nentry-tuic\n1\n' edit "${ASSET_ARGS[@]}"
+runPty 15 tuic-invalid-duration $'14\nentry-tuic\n2\n0s\n' edit "${ASSET_ARGS[@]}"
+[[ "$(snapshot)" == "${before}" ]] || fail 'TUIC 非法编辑或跨核复制改变部署'
+for rejectedEdit in uuid domain core listener new-account new-anytls; do
+    case "${rejectedEdit}" in
+    uuid) filter='.core.protocols[0].uuid = "22222222-2222-4222-8222-222222222222"' ;;
+    domain) filter='.tls.domain = "next.example.com" | .core.protocols |= map(.tuic.domain = "next.example.com")' ;;
+    core) filter='.core.protocols[0].core = "xray" | .core.secondary_type = "xray"' ;;
+    listener) filter='.core.protocols[0].listener_id = "entry-renamed"' ;;
+    new-account) filter='.core.protocols += [.core.protocols[0] | .listener_id = "entry-3" |
+      .public_port = 24468 | .uuid = "22222222-2222-4222-8222-222222222222"]' ;;
+    new-anytls) filter='.core.protocols += [.core.protocols[0] | .listener_id = "entry-3" |
+      .public_port = 24468 | .id = 4 | .anytls = {domain:.tuic.domain} | del(.tuic)]' ;;
+    esac
+    jq "${filter}" "${SPEC}" >"${TEST_ROOT}/tuic-rejected.json"
+    chmod 0600 "${TEST_ROOT}/tuic-rejected.json"
+    CONTROL_LOG="${TEST_ROOT}/tuic-rejected-${rejectedEdit}.log"
+    actual=0
+    bash -u "${CLI}" edit --spec "${TEST_ROOT}/tuic-rejected.json" --preview "${ASSET_ARGS[@]}" \
+        >"${CONTROL_LOG}" 2>&1 || actual=$?
+    [[ "${actual}" == 15 && "$(snapshot)" == "${before}" ]] ||
+        fail "${rejectedEdit}: TUIC 编辑绕过身份边界"
+    assertClean
+done
+runPty 0 tuic-delete-copy $'10\nentry-1\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.tls.domain == "tuic.example.com" and (.core.protocols | length) == 1' "${SPEC}" >/dev/null ||
+    fail '删除 TUIC 副本移除了仍需 TLS 的入口'
+
+# 混合入口删除仍保留 TUIC 证书关系；最后删除 TUIC 后只撤销规格引用。
+export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-dual-tuic"
+export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-dual-tuic"
+CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
+SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+jq --slurpfile ss "${TEST_ROOT}/ss-original.json" '
+  .core.protocols += [$ss[0].core.protocols[0], {
+    id:21,core:"xray",listener_id:"vless-ws",server:"proxy.example.com",public_port:24444,
+    address_families:["ipv4"],name:"main-ws",uuid:.core.protocols[0].uuid,
+    websocket:{domain:.tls.domain,path:"abcdefghws",backend_port:31297,tls_port:8443}}] |
+  .subscription.enabled = true
+' "${SPEC}" >"${TEST_ROOT}/tuic-with-ws.json"
+chmod 0600 "${TEST_ROOT}/tuic-with-ws.json"
+runPty 0 tuic-ws-configure '' configure --spec "${TEST_ROOT}/tuic-with-ws.json" "${ASSET_ARGS[@]}"
+runPty 0 tuic-delete-ws $'10\nvless-ws\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.tls.domain == "tuic.example.com" and .subscription.enabled == false and
+  any(.core.protocols[]; .id == 31)' "${SPEC}" >/dev/null ||
+    fail '删除 WS 丢失了 TUIC TLS 关系'
+runPty 0 tuic-delete-last-tls $'10\nentry-tuic\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.tls == null and .subscription.enabled == false and
+  any(.core.protocols[]; .id == 30) and all(.core.protocols[]; .id != 31)' "${SPEC}" >/dev/null ||
+    fail '删除最后 TUIC TLS 消费者未清理规格引用'
+[[ -f "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/tuic.example.com.key" ]] ||
+    fail '删除 TUIC 错误删除了受管证书'
+for tuicFailure in tls-fail health-fail; do
+    newState "tuic-${tuicFailure}"
+    export FAKE_SETUP_MODE="${tuicFailure}"
+    if [[ "${tuicFailure}" == tls-fail ]]; then expected=15; else expected=14; fi
+    runPty "${expected}" "tuic-${tuicFailure}" "${TUIC_INPUT}" setup "${ASSET_ARGS[@]}"
+    assertUnconfigured
+done
+export FAKE_SETUP_MODE=ok
 printf 'docker-setup-regression-ok\n'
