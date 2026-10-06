@@ -673,23 +673,29 @@ realityTargetRefreshRecords() {
 }
 
 removeRealityTargetsFromUnifiedLibrary() {
-    local targetsFile=$1
-    local resultsFile candidatesFile resultsStageFile candidatesStageFile hostsFile normalizationFile target parsed host libraryBackupDir=
-    [[ -s "${targetsFile}" ]] || return 0
+    local linesFile status
+    [[ -s "$1" ]] || return 0
+    padmCreateTempPath linesFile || return 1
+    updateRealityTargetLibrary "${linesFile}" "$1"
+    status=$?
+    padmRemoveCleanupPath "${linesFile}"
+    return "${status}"
+}
+
+updateRealityTargetLibrary() {
+    local linesFile=$1 targetsFile=$2
+    local resultsFile candidatesFile resultsStageFile candidatesStageFile hostsFile target parsed host libraryBackupDir=
+    [[ -f "${linesFile}" ]] || return 1
+    if [[ ! -s "${targetsFile}" ]]; then
+        writeRealityTargetResultLines "${linesFile}"
+        return $?
+    fi
     resultsFile=$(realityTargetManagedResultsFile) || return 1
     candidatesFile=$(realityTargetManagedCandidatesFile 2>/dev/null || true)
     checkLogBackupCreate libraryBackupDir "${resultsFile}" "${candidatesFile}" || return 1
-    if [[ -f "${resultsFile}" ]]; then
-        if ! padmCreateTempPath normalizationFile; then
-            realityTargetRestoreManagedBackup "${libraryBackupDir}" || true
-            return 1
-        fi
-        if ! writeRealityTargetResultLines "${normalizationFile}"; then
-            padmRemoveCleanupPath "${normalizationFile}"
-            realityTargetRestoreManagedBackup "${libraryBackupDir}" || return 1
-            return 1
-        fi
-        padmRemoveCleanupPath "${normalizationFile}"
+    if ! writeRealityTargetResultLines "${linesFile}"; then
+        realityTargetRestoreManagedBackup "${libraryBackupDir}" || return 1
+        return 1
     fi
     if [[ -f "${resultsFile}" ]]; then
         padmCreateTempFileForTarget resultsStageFile "${resultsFile}" reality || {
@@ -1838,6 +1844,7 @@ selectRealityTargetCandidateInteractive() {
     local page=1
     local pageSize=${REALITY_TARGET_PAGE_SIZE:-12}
     local total maxPage choice selectedLine targetInput
+    [[ "${pageSize}" =~ ^[1-9][0-9]*$ ]] || pageSize=12
 
     if [[ "${selectionMode}" == "detect-first" ]]; then
         local PADM_REALITY_TARGET_SELECTION_SCAN=1
@@ -1871,12 +1878,12 @@ selectRealityTargetCandidateInteractive() {
             echoContent title "\n┌─ REALITY 候选筛选 ─────────────────────────────────"
             menuLine "可输入：recommended/manual/all，或域名、名称、区域、分类关键词"
             menuClose
-            autoRead reality_target_filter "请输入筛选条件[回车全部]：" filter
+            autoRead reality_target_filter "请输入筛选条件[回车全部]：" filter || return 1
             filter=${filter:-all}
             page=1
             ;;
         m | M)
-            autoRead reality_target "请输入REALITY伪装目标 host[:port]:" targetInput
+            autoRead reality_target "请输入REALITY伪装目标 host[:port]:" targetInput || return 1
             [[ -n "${targetInput}" ]] || continue
             parseRealityTargetInput "${targetInput}" || continue
             statusCard "已选择 REALITY 目标站" "目标: ${realityTargetHost}:${realityTargetPort}" "SNI: ${realitySNI}"
@@ -2372,8 +2379,7 @@ importRealityScannerResults() {
             ;;
         esac
     done
-    writeRealityTargetResultLines "${resultLinesFile}" &&
-        removeRealityTargetsFromUnifiedLibrary "${failedTargetsFile}" || commitStatus=1
+    updateRealityTargetLibrary "${resultLinesFile}" "${failedTargetsFile}" || commitStatus=1
     padmRemoveCleanupPath "${normalizedFile}"
     padmRemoveCleanupPath "${resultLinesFile}"
     padmRemoveCleanupPath "${failedTargetsFile}"
@@ -3113,7 +3119,7 @@ scanLocalAsnRealityTargets() {
     (( maxJobs > 16 )) && maxJobs=16
     resultsFile=$(realityTargetManagedResultsFile) || return 1
     if [[ "${refreshScope}" == "all" ]]; then
-        refreshSource="全部内置候选"
+        refreshSource="全部候选清单（不含目标库）"
     elif [[ -s "${resultsFile}" ]]; then
         refreshSource="目标库"
     else
@@ -3182,8 +3188,7 @@ scanLocalAsnRealityTargets() {
         esac
     done
 
-    writeRealityTargetResultLines "${resultLinesFile}" &&
-        removeRealityTargetsFromUnifiedLibrary "${failedTargetsFile}" || commitStatus=1
+    updateRealityTargetLibrary "${resultLinesFile}" "${failedTargetsFile}" || commitStatus=1
     padmRemoveCleanupPath "${resultLinesFile}"
     padmRemoveCleanupPath "${failedTargetsFile}"
     padmRemoveCleanupPath "${probeDir}"
@@ -3379,52 +3384,16 @@ validateRealityTargetConfigAfterChange() {
 }
 
 backupRealityTargetConfigs() {
-    local backupDir=$1
-    local xrayRealityConfigPath xrayGrpcConfigPath singBoxRealityConfigPath singBoxGrpcConfigPath xrayXhttpConfigPath
-    local status=0
-    xrayRealityConfigPath=$(realityXrayVisionConfigPath)
-    xrayGrpcConfigPath=$(realityXrayGrpcConfigPath)
-    xrayXhttpConfigPath=$(realityXrayXhttpConfigPath)
-    singBoxRealityConfigPath=$(realitySingBoxVisionConfigPath)
-    singBoxGrpcConfigPath=$(realitySingBoxGrpcConfigPath)
-    mkdir -p "${backupDir}/xray" "${backupDir}/sing-box" || return 1
-    if [[ -f "${xrayRealityConfigPath}" ]]; then
-        cp "${xrayRealityConfigPath}" "${backupDir}/xray/07_VLESS_vision_reality_inbounds.json" || status=1
-    fi
-    if [[ -f "${xrayGrpcConfigPath}" ]]; then
-        cp "${xrayGrpcConfigPath}" "${backupDir}/xray/08_VLESS_vision_gRPC_inbounds.json" || status=1
-    fi
-    if [[ -f "${xrayXhttpConfigPath}" ]]; then
-        cp "${xrayXhttpConfigPath}" "${backupDir}/xray/12_VLESS_XHTTP_inbounds.json" || status=1
-    fi
-    if [[ -f "${singBoxRealityConfigPath}" ]]; then
-        cp "${singBoxRealityConfigPath}" "${backupDir}/sing-box/07_VLESS_vision_reality_inbounds.json" || status=1
-    fi
-    if [[ -f "${singBoxGrpcConfigPath}" ]]; then
-        cp "${singBoxGrpcConfigPath}" "${backupDir}/sing-box/08_VLESS_vision_gRPC_inbounds.json" || status=1
-    fi
-    return "${status}"
+    padmWriteManagedFileBackupManifest "$1" \
+        "xray/07_VLESS_vision_reality_inbounds.json" "$(realityXrayVisionConfigPath)" \
+        "xray/08_VLESS_vision_gRPC_inbounds.json" "$(realityXrayGrpcConfigPath)" \
+        "xray/12_VLESS_XHTTP_inbounds.json" "$(realityXrayXhttpConfigPath)" \
+        "sing-box/07_VLESS_vision_reality_inbounds.json" "$(realitySingBoxVisionConfigPath)" \
+        "sing-box/08_VLESS_vision_gRPC_inbounds.json" "$(realitySingBoxGrpcConfigPath)"
 }
 
 restoreRealityTargetConfigs() {
-    local backupDir=$1
-    local status=0
-    if [[ -f "${backupDir}/xray/07_VLESS_vision_reality_inbounds.json" ]]; then
-        restoreManagedFileFromBackup "${backupDir}/xray/07_VLESS_vision_reality_inbounds.json" "$(realityXrayVisionConfigPath)" 644 || status=1
-    fi
-    if [[ -f "${backupDir}/xray/08_VLESS_vision_gRPC_inbounds.json" ]]; then
-        restoreManagedFileFromBackup "${backupDir}/xray/08_VLESS_vision_gRPC_inbounds.json" "$(realityXrayGrpcConfigPath)" 644 || status=1
-    fi
-    if [[ -f "${backupDir}/xray/12_VLESS_XHTTP_inbounds.json" ]]; then
-        restoreManagedFileFromBackup "${backupDir}/xray/12_VLESS_XHTTP_inbounds.json" "$(realityXrayXhttpConfigPath)" 644 || status=1
-    fi
-    if [[ -f "${backupDir}/sing-box/07_VLESS_vision_reality_inbounds.json" ]]; then
-        restoreManagedFileFromBackup "${backupDir}/sing-box/07_VLESS_vision_reality_inbounds.json" "$(realitySingBoxVisionConfigPath)" 644 || status=1
-    fi
-    if [[ -f "${backupDir}/sing-box/08_VLESS_vision_gRPC_inbounds.json" ]]; then
-        restoreManagedFileFromBackup "${backupDir}/sing-box/08_VLESS_vision_gRPC_inbounds.json" "$(realitySingBoxGrpcConfigPath)" 644 || status=1
-    fi
-    return "${status}"
+    padmRestoreManagedFileBackupManifest "$1"
 }
 
 refreshSubscriptionsAfterRealityTargetChange() {

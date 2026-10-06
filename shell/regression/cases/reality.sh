@@ -785,6 +785,33 @@ EOF
         changeRealityTargetFromScanResults() { switched=$((switched + 1)); }
         manageRealityTarget
         [[ "${scope}" == "recommended all " && "${switched}" == 2 ]]
+        local failedRead
+        autoRead() {
+            printf -v "$3" '%s' 'partial.example.com:8443'
+            [[ "$1" != "${failedRead}" ]]
+        }
+        changeInstalledRealityTarget() { switched=$((switched + 1)); }
+        parseRealityTargetInput() { switched=$((switched + 1)); }
+        for failedRead in reality_target reality_server_name; do
+            menuSequence='6'
+            switched=0
+            regressionExpectStatus 1 manageRealityTarget
+            [[ "${switched}" == 0 && "${realityTargetHost}" == installed.example.com && "${realitySNI}" == installed-sni.example.com ]]
+        done
+        for failedRead in reality_target reality_target_filter; do
+            if [[ "${failedRead}" == reality_target ]]; then menuSequence=m; else menuSequence=f; fi
+            switched=0
+            regressionExpectStatus 1 selectRealityTargetCandidateInteractive
+            [[ "${switched}" == 0 && "${realityTargetHost}" == installed.example.com && "${realitySNI}" == installed-sni.example.com ]]
+        done
+        autoRead() { printf -v "$3" '%s' ''; }
+        menuSequence='6 8'
+        manageRealityTarget
+        [[ "${menuSequence}" == 8 && "${switched}" == 0 ]]
+        for REALITY_TARGET_PAGE_SIZE in 0 invalid; do
+            menuSequence=r
+            regressionExpectStatus 1 selectRealityTargetCandidateInteractive
+        done
     )
 
     [[ "$(realityTargetCandidateCount)" == "5" ]]
@@ -894,7 +921,11 @@ EOF
         realityTargetProgressLine() { :; }
         realityTargetStatusBlock() { printf '%s\n' "$*" >>"${persistenceStatusLog}"; }
         writeRealityTargetResultLines() { [[ "${failureStage}" != write ]]; }
-        removeRealityTargetsFromUnifiedLibrary() { removed=1; return 1; }
+        updateRealityTargetLibrary() {
+            writeRealityTargetResultLines "$1" || return 1
+            removed=1
+            return 1
+        }
         printf 'IP,ORIGIN,CERT_DOMAIN,CERT_ISSUER,GEO_CODE\n' >"${persistenceRoot}/empty.csv"
         for failureStage in write remove; do
             removed=0
@@ -1972,13 +2003,75 @@ CSV
     unset PADM_FAKE_XRAY_ONLY_HOST
 }
 
+runRealityLibraryUpdateRollbackRegression() (
+    local root="${TMP_DIR}/reality-library-update-rollback" oldResults oldCandidates consumer mergeCalls=0 failCandidateWrite
+    mkdir -p "${root}/tmp"
+    export TMPDIR="${root}/tmp"
+    export PADM_REALITY_TARGET_RESULTS_FILE="${root}/results.tsv"
+    export PADM_REALITY_TARGET_SCAN_FILE="${PADM_REALITY_TARGET_RESULTS_FILE}"
+    export PADM_REALITY_TARGET_CANDIDATES_FILE="${root}/candidates.tsv"
+    oldResults=$(
+        formatRealityTargetResultLine "remove.example.com:443" "remove.example.com" "Remove" "test" "no" \
+            "192.0.2.1" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "old remove" "London, United Kingdom"
+        formatRealityTargetResultLine "keep.example.com:443" "keep.example.com" "Keep" "test" "no" \
+            "192.0.2.2" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "old keep" "London, United Kingdom"
+    )
+    oldCandidates=$'remove.example.com|remove.example.com|Remove|global|test|unknown|1|yes|fixture\nkeep.example.com|keep.example.com|Keep|global|test|unknown|2|yes|fixture'
+    printf 'IP,ORIGIN,CERT_DOMAIN,CERT_ISSUER,GEO_CODE\n192.0.2.1,192.0.2.0/24,remove.example.com,Test CA,N/A\n192.0.2.2,192.0.2.0/24,keep.example.com,Test CA,N/A\n' >"${root}/scanner.csv"
+    realityTargetDetector() { printf 'fake-xray\n'; }
+    currentRealityNetworkProfile() { printf '192.0.2.10\tAS64500\tExampleNet\n'; }
+    realityTargetRefreshRecords() { printf '%s\n' "${oldResults}"; }
+    realityTargetProgressLine() { :; }
+    realityTargetStatusBlock() { :; }
+    libraryFixtureProbe() {
+        if [[ "$1" == remove.example.com:443 ]]; then
+            printf 'FAIL\t%s\n' "$1"
+            return 0
+        fi
+        printf 'OK\t'
+        formatRealityTargetResultLine "keep.example.com:443" "keep.example.com" "Keep" "test" "no" \
+            "192.0.2.2" "AS64500" "ExampleNet" "same_asn" "A" "yes" "8192" "yes" "1234567891" "new keep" "London, United Kingdom"
+    }
+    probeRealityTargetRecord() { libraryFixtureProbe "${2%%$'\t'*}"; }
+    probeRealityScannerCandidate() { libraryFixtureProbe "${3}:443"; }
+    eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/libraryOriginalCommitGeneratedFile/')"
+    eval "$(declare -f writeRealityTargetResultLines | sed '1s/^writeRealityTargetResultLines/libraryOriginalWriteRealityTargetResultLines/')"
+    commitGeneratedFile() {
+        if [[ "$2" == "${PADM_REALITY_TARGET_CANDIDATES_FILE}" && "${failCandidateWrite}" == true ]]; then
+            failCandidateWrite=false
+            return 1
+        fi
+        libraryOriginalCommitGeneratedFile "$@"
+    }
+    writeRealityTargetResultLines() {
+        mergeCalls=$((mergeCalls + 1))
+        libraryOriginalWriteRealityTargetResultLines "$@"
+    }
+    for consumer in refresh scanner; do
+        printf '%s\n' "${oldResults}" >"${PADM_REALITY_TARGET_RESULTS_FILE}"
+        printf '%s\n' "${oldCandidates}" >"${PADM_REALITY_TARGET_CANDIDATES_FILE}"
+        mergeCalls=0
+        failCandidateWrite=true
+        if [[ "${consumer}" == refresh ]]; then
+            regressionExpectStatus 1 scanLocalAsnRealityTargets
+        else
+            regressionExpectStatus 1 importRealityScannerResults "${root}/scanner.csv" AS64500 ExampleNet
+        fi
+        [[ "${mergeCalls}" == 1 && "${failCandidateWrite}" == false ]]
+        [[ "$(<"${PADM_REALITY_TARGET_RESULTS_FILE}")" == "${oldResults}" ]]
+        [[ "$(<"${PADM_REALITY_TARGET_CANDIDATES_FILE}")" == "${oldCandidates}" ]]
+        [[ -z "$(find "${root}/tmp" -mindepth 1 -print -quit)" ]]
+    done
+)
+
 runRealityUnifiedLibraryRollbackRegression() (
+    runRegressionStep reality-library-update-rollback runRealityLibraryUpdateRollbackRegression
     local rootRel="${TMP_DIR}/reality-unified-library-rollback"
     local root resultsFile candidatesFile targetsFile
     local oldResultsFile="${PADM_REALITY_TARGET_RESULTS_FILE:-}"
     local oldScanFile="${PADM_REALITY_TARGET_SCAN_FILE:-}"
     local oldCandidatesFile="${PADM_REALITY_TARGET_CANDIDATES_FILE:-}"
-    local rc
+    local oldResults oldCandidates failCandidateWrite=true
 
     mkdir -p "${rootRel}"
     root=$(cd -- "${rootRel}" && pwd -P)
@@ -1998,20 +2091,21 @@ runRealityUnifiedLibraryRollbackRegression() (
         printf '%s\n' 'keep.example.com|keep.example.com|Keep Example|global|scanner|unknown|10|yes|keep candidate'
     } >"${candidatesFile}"
     printf '%s\n' 'remove.example.com:443' >"${targetsFile}"
+    oldResults=$(<"${resultsFile}")
+    oldCandidates=$(<"${candidatesFile}")
 
     eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
     commitGeneratedFile() {
-        if [[ "$2" == "${candidatesFile}" ]]; then
+        if [[ "$2" == "${candidatesFile}" && "${failCandidateWrite}" == true ]]; then
+            failCandidateWrite=false
             return 1
         fi
         originalCommitGeneratedFile "$@"
     }
 
     regressionExpectStatus 1 removeRealityTargetsFromUnifiedLibrary "${targetsFile}" >/dev/null 2>&1
-    ! grep -qF $'remove.example.com:443\t' "${resultsFile}"
-    grep -qF $'keep.example.com:443\t' "${resultsFile}"
-    grep -q '^remove.example.com|' "${candidatesFile}"
-    grep -q '^keep.example.com|' "${candidatesFile}"
+    [[ "$(<"${resultsFile}")" == "${oldResults}" ]]
+    [[ "$(<"${candidatesFile}")" == "${oldCandidates}" ]]
     ! compgen -G "${root}/.reality_targets_results.tsv.reality.*" >/dev/null
     ! compgen -G "${root}/.reality_candidates.tsv.reality.*" >/dev/null
     if regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-check-log-backup.*'; then

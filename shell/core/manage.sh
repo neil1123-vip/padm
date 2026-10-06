@@ -2984,9 +2984,9 @@ manageRealityTarget() {
         changeRealityTargetFromScanResults || true
         ;;
     6)
-        autoRead reality_target "请输入 REALITY 伪装目标 host[:port]：" targetInput
-        [[ -n "${targetInput}" ]] || return 1
-        autoRead reality_server_name "请输入 SNI[回车默认等于目标 host]：" sniInput
+        autoRead reality_target "请输入 REALITY 伪装目标 host[:port]：" targetInput || return 1
+        [[ -n "${targetInput}" ]] || continue
+        autoRead reality_server_name "请输入 SNI[回车默认等于目标 host]：" sniInput || return 1
         changeInstalledRealityTarget "${targetInput}" "${sniInput}"
         ;;
     7)
