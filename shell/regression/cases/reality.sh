@@ -78,7 +78,7 @@ runRealityProfileFailureRegression() (
     }
 
     (
-        local input inputFd nextInput
+        local input inputFd nextInput legacySource explicitSource
         unset AUTO_INSTALL AUTO_ENTRY_HOST AUTO_DOMAIN
         AUTO_REALITY_DOMAIN=yes
         domain=
@@ -99,10 +99,72 @@ runRealityProfileFailureRegression() (
         read -r -u "${inputFd}" nextInput
         [[ "${realityEntryHost}" == strict.example.com && "${nextInput}" == next-parent-action ]]
         exec {inputFd}<&-
+
+        # 普通模式的历史 IP 切换为严格域名时，只补填入口；错误输入在当前字段重试。
+        for legacySource in current stored; do
+            currentHost=192.0.2.10
+            if [[ "${legacySource}" == stored ]]; then
+                printf '192.0.2.20\n' >"${entryHostFile}"
+            fi
+            exec {inputFd}< <(printf 'bad entry\nstrict.example.com\nnext-parent-action\n')
+            collectEntryProfile <&"${inputFd}"
+            read -r -u "${inputFd}" nextInput
+            [[ "${realityEntryHost}" == strict.example.com && "${nextInput}" == next-parent-action ]]
+            exec {inputFd}<&-
+        done
+        rm -f "${entryHostFile}"
+        exec {inputFd}< <(printf '\nnext-parent-action\n')
+        regressionExpectStatus 1 collectEntryProfile <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        [[ -z "${realityEntryHost}" && "${nextInput}" == next-parent-action ]]
+        exec {inputFd}<&-
+
+        # 显式入口错误和自动安装仍快速失败，不能读取后续交互输入。
+        for explicitSource in AUTO_ENTRY_HOST AUTO_DOMAIN domain; do
+            AUTO_ENTRY_HOST=
+            AUTO_DOMAIN=
+            domain=
+            printf -v "${explicitSource}" '%s' 192.0.2.30
+            exec {inputFd}< <(printf 'next-parent-action\n')
+            regressionExpectStatus 1 collectEntryProfile <&"${inputFd}"
+            read -r -u "${inputFd}" nextInput
+            [[ "${nextInput}" == next-parent-action ]]
+            exec {inputFd}<&-
+        done
+        domain=
+        AUTO_INSTALL=true
+        exec {inputFd}< <(printf 'next-parent-action\n')
+        regressionExpectStatus 1 collectEntryProfile <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        [[ "${nextInput}" == next-parent-action ]]
+        exec {inputFd}<&-
+        unset AUTO_INSTALL
+        currentHost=stored-valid.example.com
+        exec {inputFd}< <(printf 'next-parent-action\n')
+        collectEntryProfile <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        [[ "${realityEntryHost}" == stored-valid.example.com && "${nextInput}" == next-parent-action ]]
+        exec {inputFd}<&-
     )
 
     (
-        local input inputFd nextInput targetValidations=0 defaultTargetCalls=0
+        local inputFd nextInput autoReads=0
+        unset AUTO_INSTALL AUTO_REALITY_DOMAIN
+        exec {inputFd}< <(printf '9\n2\nnext-parent-action\n')
+        configureRealityDomainMode ",1," <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        [[ "${realityOnlyWithDomain}" == true && "${nextInput}" == next-parent-action ]]
+        exec {inputFd}<&-
+        regressionExpectStatus 1 configureRealityDomainMode ",1," < <(printf '9\n')
+        [[ -z "${realityOnlyWithDomain}" ]]
+        AUTO_INSTALL=true
+        autoRead() { autoReads=$((autoReads + 1)); printf -v "$3" '%s' 9; }
+        regressionExpectStatus 1 configureRealityDomainMode ",1," </dev/null
+        [[ "${autoReads}" == 1 && -z "${realityOnlyWithDomain}" ]]
+    )
+
+    (
+        local input inputFd nextInput targetValidations=0 defaultTargetCalls=0 autoReads=0
         unset AUTO_INSTALL AUTO_REALITY_TARGET AUTO_REALITY_SERVER_NAME
         realityEntryHost=node.example.com
         validateRealityTargetSelection() { targetValidations=$((targetValidations + 1)); }
@@ -136,6 +198,23 @@ runRealityProfileFailureRegression() (
         [[ "${realityTargetHost}" == manual.example.com && "${realityTargetPort}" == 9443 && "${realitySNI}" == manual.example.com ]]
         [[ "${nextInput}" == next-parent-action && "${targetValidations}" == 1 && "${defaultTargetCalls}" == 0 ]]
         exec {inputFd}<&-
+        realityTargetHost=
+        realityTargetPort=
+        realitySNI=
+        exec {inputFd}< <(printf '9\n3\ncorrected.example.com\nnext-parent-action\n')
+        collectRealityProfile <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        [[ "${realityTargetHost}" == corrected.example.com && "${nextInput}" == next-parent-action && "${defaultTargetCalls}" == 0 ]]
+        exec {inputFd}<&-
+        realityTargetHost=
+        realityTargetPort=
+        realitySNI=
+        regressionExpectStatus 1 collectRealityProfile < <(printf '9\n')
+        [[ "${defaultTargetCalls}" == 0 ]]
+        AUTO_INSTALL=true
+        autoRead() { autoReads=$((autoReads + 1)); printf -v "$3" '%s' 9; }
+        regressionExpectStatus 1 collectRealityProfile </dev/null
+        [[ "${autoReads}" == 1 && "${defaultTargetCalls}" == 0 ]]
     )
 
     AUTO_INSTALL=

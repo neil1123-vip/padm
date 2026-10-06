@@ -2661,13 +2661,18 @@ configureRealityDomainMode() {
         menuItem 2 "严格域名 Reality" "客户端入口必须是解析到本机的自有域名"
         menuLine "entry 是客户端连接地址；target/SNI 是 REALITY 伪装目标"
         menuClose
-        menuReadChoice reality_domain "请选择[默认1]:" realityOnlyInstallType true || return 1
-        if [[ "${realityOnlyInstallType:-1}" == "2" ]]; then
-            strictRequested=true
-        elif [[ -n "${realityOnlyInstallType:-}" && "${realityOnlyInstallType}" != "1" ]]; then
+        while true; do
+            menuReadChoice reality_domain "请选择[默认1]:" realityOnlyInstallType true || return 1
+            case "${realityOnlyInstallType:-1}" in
+            1) break ;;
+            2)
+                strictRequested=true
+                break
+                ;;
+            esac
             coreSelectionErrorCard "选择错误"
-            return 1
-        fi
+            [[ "${AUTO_INSTALL:-}" != "true" ]] || return 1
+        done
     fi
     if [[ "${strictRequested}" == "true" ]]; then
         realityOnlyWithDomain=true

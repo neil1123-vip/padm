@@ -837,7 +837,7 @@ collectTLSProfile() {
 }
 
 collectEntryProfile() {
-    local entryHostFile storedEntry= strictDomain=false
+    local entryHostFile storedEntry= strictDomain=false implicitEntry=false
     realityStrictDomainModeEnabled && strictDomain=true
 
     if [[ -n "${AUTO_ENTRY_HOST:-}" ]]; then
@@ -847,6 +847,8 @@ collectEntryProfile() {
     elif [[ -n "${domain:-}" ]]; then
         realityEntryHost=${domain}
     else
+        implicitEntry=true
+        realityEntryHost=
         entryHostFile=$(realityEntryHostFile)
         if [[ -f "${entryHostFile}" ]]; then
             storedEntry=$(head -n 1 "${entryHostFile}")
@@ -855,23 +857,22 @@ collectEntryProfile() {
             realityEntryHost=${storedEntry}
         elif [[ -n "${currentHost:-}" ]]; then
             realityEntryHost=${currentHost}
-        elif [[ "${strictDomain}" == "true" ]]; then
-            if [[ "${AUTO_INSTALL:-}" == "true" ]]; then
-                errorCard "严格域名 Reality 缺少入口域名，请传 --entry-host 或 --domain"
-                return 1
-            fi
-            statusCard "Reality 入口域名" "请输入客户端实际连接的域名"
-            menuReadChoice entry_host "入口域名:" realityEntryHost || return 1
-        else
+        elif [[ "${strictDomain}" != "true" ]]; then
             realityEntryHost=$(getPublicIP)
         fi
     fi
 
     if [[ "${strictDomain}" == "true" ]]; then
-        if ! padmIsValidHostName "${realityEntryHost}" || [[ "${realityEntryHost}" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then
-            errorCard "Reality 入口域名不合法" "${realityEntryHost}"
-            return 1
-        fi
+        while ! padmIsValidHostName "${realityEntryHost}" || [[ "${realityEntryHost}" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; do
+            if [[ -n "${realityEntryHost}" ]]; then
+                errorCard "Reality 入口域名不合法" "${realityEntryHost}"
+            elif [[ "${AUTO_INSTALL:-}" == "true" ]]; then
+                errorCard "严格域名 Reality 缺少入口域名，请传 --entry-host 或 --domain"
+            fi
+            [[ "${implicitEntry}" == "true" && "${AUTO_INSTALL:-}" != "true" ]] || return 1
+            statusCard "Reality 入口域名" "请输入客户端实际连接的域名，回车取消"
+            menuReadChoice entry_host "入口域名:" realityEntryHost || return 1
+        done
     elif ! padmIsValidConnectAddress "${realityEntryHost}"; then
         errorCard "Reality 客户端入口不合法" "${realityEntryHost}"
         return 1
@@ -912,28 +913,33 @@ collectRealityProfile() {
         menuItem 2 "候选列表" "先检测全部候选，再从通过检测的结果中选择"
         menuItem 3 "手动输入" "输入 host 或 host:port，端口默认 443"
         menuClose
-        selectRealityTargetMode=
-        menuReadChoice reality_target_mode "请选择[默认1]:" selectRealityTargetMode true || return 1
-        selectRealityTargetMode=${selectRealityTargetMode:-1}
-
-        case "${selectRealityTargetMode}" in
-        2)
-            selectRealityTargetCandidateInteractive detect-first || return 1
-            ;;
-        3)
-            menuReadChoice reality_target "请输入REALITY伪装目标域名，默认端口443:" targetInput true || return 1
-            if [[ -z "${targetInput}" ]]; then
+        while true; do
+            menuReadChoice reality_target_mode "请选择[默认1]:" selectRealityTargetMode true || return 1
+            case "${selectRealityTargetMode:-1}" in
+            1)
                 selectionPolicy=auto
                 selectDefaultRealityTarget || return 1
-            else
-                parseRealityTargetInput "${targetInput}" || return 1
-            fi
-            ;;
-        *)
-            selectionPolicy=auto
-            selectDefaultRealityTarget || return 1
-            ;;
-        esac
+                ;;
+            2)
+                selectRealityTargetCandidateInteractive detect-first || return 1
+                ;;
+            3)
+                menuReadChoice reality_target "请输入REALITY伪装目标域名，默认端口443:" targetInput true || return 1
+                if [[ -z "${targetInput}" ]]; then
+                    selectionPolicy=auto
+                    selectDefaultRealityTarget || return 1
+                else
+                    parseRealityTargetInput "${targetInput}" || return 1
+                fi
+                ;;
+            *)
+                errorCard "选择错误"
+                [[ "${AUTO_INSTALL:-}" != "true" ]] || return 1
+                continue
+                ;;
+            esac
+            break
+        done
     fi
 
     if ! validateRealityTarget "${realityTargetHost}" "${realityTargetPort:-443}"; then

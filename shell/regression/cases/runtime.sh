@@ -624,7 +624,7 @@ runInstallWorkflowRegression() (
     )
 
     (
-        local core targetCore passwordMode nextInput inputFd result
+        local core targetCore passwordMode nextInput inputFd result selectCustomInstallType=,28,
         local oldClients='[{"id":"11111111-1111-4111-8111-111111111111","email":"old-user"}]'
         local testUuid=22222222-2222-4222-8222-222222222222
         local generationLog="${TMP_DIR}/install-initial-client-generation.log"
@@ -714,6 +714,23 @@ runInstallWorkflowRegression() (
         coreTemplateCollectInitialClients sing-box true </dev/null
         jq -e '.[0].password == "stored-secret" and .[0].name == "old-user"' <<<"${currentClients}" >/dev/null
         [[ ! -s "${generationLog}" ]]
+        # 两核重装复用密码型用户，不依赖不存在的 UUID 字段。
+        currentClients='[{"password":"alice-secret","name":"alice"},{"password":"bob-secret","name":"bob"}]'
+        result=${currentClients}
+        for core in xray sing-box; do
+            coreTemplateCollectInitialClients "${core}" </dev/null
+            [[ "${currentClients}" == "${result}" && ! -s "${generationLog}" ]]
+        done
+        selectCustomInstallType=,1,
+        exec {inputFd}< <(printf 'next-parent-action\n')
+        regressionExpectStatus 1 coreTemplateCollectInitialClients sing-box <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        [[ "${nextInput}" == next-parent-action && "${currentClients}" == "${result}" && ! -s "${generationLog}" ]]
+        exec {inputFd}<&-
+        currentClients='[{"password":"11111111-1111-4111-8111-111111111111","name":"alice"},{"password":"22222222-2222-4222-8222-222222222222","name":"bob"}]'
+        result=${currentClients}
+        coreTemplateCollectInitialClients sing-box </dev/null
+        [[ "${currentClients}" == "${result}" && ! -s "${generationLog}" ]]
         lastInstallationConfig=
         currentClients='[]'
         coreTemplateCollectInitialClients sing-box true < <(printf 'arbitrary-secret\nalice\n')
@@ -725,11 +742,11 @@ runInstallWorkflowRegression() (
         jq -e --arg uuid "${testUuid}" '.[0].id == $uuid and .[0].email == "alice"' <<<"${currentClients}" >/dev/null
         result=${currentClients}
         AUTO_USER=sub_reserved
-        regressionExpectStatus 1 coreTemplateCollectInitialClients xray </dev/null
+        regressionExpectStatus 1 coreTemplateCollectInitialClients xray <<<"n"
         [[ "${currentClients}" == "${result}" ]]
         AUTO_UUID=invalid
         AUTO_USER=alice
-        exec {inputFd}< <(printf '%s\nnext-parent-action\n' "${testUuid}")
+        exec {inputFd}< <(printf 'n\n%s\nnext-parent-action\n' "${testUuid}")
         regressionExpectStatus 1 coreTemplateCollectInitialClients xray <&"${inputFd}"
         read -r -u "${inputFd}" nextInput
         [[ "${nextInput}" == "${testUuid}" && "${currentClients}" == "${result}" ]]

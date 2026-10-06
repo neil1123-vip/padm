@@ -54,13 +54,14 @@ coreTemplateValidateManualAccountName() {
 # 两核共享用户输入；采集成功前不替换现有用户。
 coreTemplateCollectInitialClients() {
     local core=$1 passwordMode=${2:-false}
-    local hasExistingClients=false historyChoice=
+    local hasExistingClients=false historyChoice= storedCredentials= storedCredential=
     local credential= username= clients label=UUID suffix=VLESS_TCP/TLS_Vision
     if [[ "${passwordMode}" == "true" ]]; then
         label="Hysteria2 密码"
         suffix=singbox_hysteria2
         jq -e 'type == "array" and length > 0' <<<"${currentClients:-}" >/dev/null 2>&1 && hasExistingClients=true
-    elif [[ -n "${currentUUID:-}" ]]; then
+    elif [[ -n "${currentUUID:-}" ]] ||
+        jq -e 'type == "array" and length > 0' <<<"${currentClients:-}" >/dev/null 2>&1; then
         hasExistingClients=true
     fi
 
@@ -76,6 +77,16 @@ coreTemplateCollectInitialClients() {
             esac
         done
         if [[ "${hasExistingClients}" == "true" ]]; then
+            if [[ -z "${currentUUID:-}" && "${passwordMode}" != "true" ]] &&
+                protocolSelectionHasAny "${selectCustomInstallType:-,1,}" 1 2 21 22 23 24 26 27 31; then
+                storedCredentials=$(jq -r '.[] | .id // .uuid // .password // ""' <<<"${currentClients}") || return 1
+                while IFS= read -r storedCredential; do
+                    if ! validUuidValue "${storedCredential}"; then
+                        errorCard "现有用户密码不是 UUID，不能复用到所选协议；请保留原配置并单独创建兼容用户"
+                        return 1
+                    fi
+                done <<<"${storedCredentials}"
+            fi
             successCard "已复用现有用户配置"
             return 0
         fi
