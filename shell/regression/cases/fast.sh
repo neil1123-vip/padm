@@ -5936,6 +5936,10 @@ runDockerHysteria2Regression() {
     bash "${PROJECT_ROOT}/docker/tests/hysteria2.sh"
 }
 
+runDockerAnyTlsRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/anytls.sh"
+}
+
 runDockerPermissionsRegression() {
     bash "${PROJECT_ROOT}/docker/tests/permissions.sh"
 }

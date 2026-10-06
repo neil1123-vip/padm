@@ -45,17 +45,17 @@
     },
     {
       "id": 4,
-      "status": "deferred",
+      "status": "supported",
       "management_status": "deferred",
       "cores": ["sing-box"],
-      "profiles": [],
+      "profiles": ["core-sing-box"],
       "native_menu": "安装与重装 / 自定义协议选择",
       "native_action": "AnyTLS",
       "transport": "tcp",
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "需要 TCP/TLS 监听和 sing-box AnyTLS 入站及订阅输出，Docker 合同尚未接入。"
+      "reason": "v3 支持 sing-box AnyTLS 首配、完整规格导入、入口编辑、同核复制与删除及分享链接；复用受管证书和 UUID 流量账号，TLS 域名按身份合同冻结，宿主集成组合及完整用户/订阅管理尚未开放。"
     },
     {
       "id": 5,

@@ -55,6 +55,9 @@
                 "$ref": "#/$defs/hysteria2_protocol"
               },
               {
+                "$ref": "#/$defs/anytls_protocol"
+              },
+              {
                 "$ref": "#/$defs/websocket_protocol"
               }
             ]
@@ -304,7 +307,7 @@
         "properties": {
           "core": {
             "properties": {
-              "protocols": {"contains": {"properties": {"id": {"enum": [3, 21]}}}}
+              "protocols": {"contains": {"properties": {"id": {"enum": [3, 4, 21]}}}}
             }
           }
         }
@@ -338,7 +341,7 @@
         "properties": {
           "core": {
             "properties": {
-              "protocols": {"contains": {"properties": {"id": {"const": 3}}}}
+              "protocols": {"contains": {"properties": {"id": {"enum": [3, 4]}}}}
             }
           }
         }
@@ -786,6 +789,40 @@
                   "type": "string",
                   "maxLength": 2048,
                   "pattern": "^(?:|https://(?=.{1,253}(?:/|$))(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z]{2,63}(?:/[A-Za-z0-9._~/-]*)?)$",
+                  "not": {"pattern": "[\\s\\u0000-\\u001f\\u007f]"}
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "anytls_protocol": {
+      "allOf": [
+        {"$ref": "#/$defs/protocol_base"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "core", "listener_id", "server", "public_port", "address_families", "name", "uuid", "anytls"],
+          "properties": {
+            "id": {"const": 4},
+            "core": {"const": "sing-box"},
+            "listener_id": {
+              "type": "string",
+              "pattern": "^entry-[a-z0-9][a-z0-9-]{0,47}$"
+            },
+            "server": {"$ref": "#/$defs/server_address"},
+            "public_port": {"$ref": "#/$defs/port"},
+            "address_families": {"$ref": "#/$defs/address_families"},
+            "name": {"$ref": "#/$defs/account_name"},
+            "uuid": {"$ref": "#/$defs/uuid"},
+            "anytls": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["domain"],
+              "properties": {
+                "domain": {
+                  "$ref": "#/$defs/hostname",
                   "not": {"pattern": "[\\s\\u0000-\\u001f\\u007f]"}
                 }
               }

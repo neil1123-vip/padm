@@ -16,13 +16,13 @@
 | --- | --- | --- |
 | 1. 功能矩阵 | 已完成，提交 `7fe6a9e` | 协议与功能边界、管理状态、合同回归 |
 | 2. 菜单与可信首次配置 | 2A–2C 已实现；本地 PTY、事务和 Linux 权限通过，真实发布/连通待验 | 安装后进入菜单、独立命令生命周期、无需手填镜像的首次配置 |
-| 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2 Reality 与 3C.3 Hysteria2 已通过本地与 amd64 实际传输验收 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
+| 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2 Reality、3C.3 Hysteria2 与 3C.4 AnyTLS 已通过本地与 amd64 实际传输验收 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
 | 4. 用户、订阅与服务维护 | 未开始 | 本机用户业务、多服务器后端、分范围备份恢复、核心运维 |
 | 5. 站点、路由与宿主集成 | 未开始 | 站点管理、内部能力、规则所有权及可撤销宿主操作 |
 | 6. 发布与完整验收 | 未开始 | 迁移文档、真实 Linux 与双架构证据、受门禁保护的 Release |
 
 当前机器可读支持状态以
-[`features.json`](../docker/contracts/features.json)为准：协议 `1`、`2`、`3`、`21`、`26` 的初始
+[`features.json`](../docker/contracts/features.json)为准：协议 `1`、`2`、`3`、`4`、`21`、`26` 的初始
 配置运行已支持，协议管理工作流仍为 `deferred`。发布订阅要求 Xray、协议 `21`
 和受管 TLS；不能由“可以生成链接”推断任意核心已经支持 HTTPS 订阅发布。
 第一步的回归使用模拟 Docker，不能代替真实容器、SSH 终端和客户端连通验证。
@@ -529,6 +529,51 @@ bash docker/tests/hysteria2-real.sh \
 
 未重建或发布镜像，未验公网 UDP 宿主入口、第三方导入 UI、HTTPS 伪装实际响应、
 原生 arm64、真实 DNS 服务商和可信签名发布；隔离传输不代替这些条件。
+3B.4 剩余验收、3C 其它协议、3D、4A 与 5C 仍未完成。
+
+#### 3C.4 AnyTLS 基础入口
+
+新增协议 `4`，仅支持 sing-box 的 v3 合同，复用受管 TLS、候选事务及 UUID 流量账号。
+UUID 同时作为 AnyTLS 密码与统计名称，不另建账号状态；域名不得包含控制字符。
+首配选择 sing-box 后使用协议选项 `7`，支持单核心或主 sing-box、副 Xray Reality。
+AnyTLS 单独首配不收集 Reality 参数、Hysteria2 参数或 HTTPS 发布开关。
+完整 `configure` 规格导入、通用字段编辑、同核复制与删除均已接入；
+既有 UUID、TLS 域名、核心归属和入口身份冻结，不能从其它协议派生新 AnyTLS 类型。
+已有部署新增类型须使用完整 v3 spec；跨核心复制在变更前拒绝。
+
+生成 sing-box TCP/TLS 入站、IPv4/IPv6 TCP 映射及 `anytls://` 分享链接，不经过 Nginx。
+支持 AnyTLS 作为主/副核心入口，包含 AnyTLS 时暂拒绝宿主集成。
+HTTPS 发布仍要求 Xray WS TLS 与同域受管证书；关闭发布时可只读输出本地 URI。
+删除最后 WS 关闭发布；只要 Hysteria2 或 AnyTLS 仍在就保留 TLS 关系，
+删除最后 TLS 入口才清空规格引用，受管证书文件仍保留。
+协议 `4` 的配置运行为 `supported`，完整 `management_status` 继续 `deferred`。
+
+本地验收：Docker Desktop Linux daemon `29.8.2`，固定 Linux 源码快照；
+`anytls.sh` `30.853` 秒通过，串接 Hysteria2、Reality 与旧协议基线。
+新增检查覆盖严格字段、v1/v2 拒绝、旧 bundle 拒绝、三种主副核心拓扑、
+TCP 双栈与占用检查、TLS 挂载、精确 URI、运行漂移、共享额度和失败/更新/回滚恢复。
+首配/编辑真实 PTY 在 `--init` 容器中 `73.76` 秒通过，覆盖取消、TLS 失败、
+无秘密 argv、通用编辑、身份冻结、同核复制、跨核拒绝及 WS/Hysteria2/AnyTLS 删除关系。
+功能矩阵与配置事务 `phase3` 约 `114` 秒通过；Bash、ShellCheck 与 JSON 检查通过，
+Draft 2020-12 Schema 的 6 个正例/17 个反例通过，跨字段关系继续由生产校验器验证。
+新增 `docker-anytls` selector，CI root 协议门槛改为 `anytls.sh`，一次运行完整既有基线。
+
+真实 Linux amd64 验收 `12.296` 秒通过：复用 3C.2 的 3 个固定本机 image ID，
+不拉取镜像、不发布宿主端口；唯一 Compose 项目/网络/卷保持生产权限和健康检查。
+客户端只从 `protocol links` URI 解析参数并信任测试 CA，
+IPv4/IPv6 两条 AnyTLS SOCKS HTTP proof 通过，验收资源已清理。
+复现命令：
+
+```bash
+bash docker/tests/anytls.sh
+bash docker/tests/anytls-real.sh \
+  padm-local/padm-xray:tls-3b4 \
+  padm-local/padm-sing-box:tls-3b4 \
+  padm-local/padm-ops:tls-3b4
+```
+
+未重建、签名发布或部署镜像，未验公网 TCP 宿主入口、第三方导入 UI、原生 arm64、
+真实 DNS 服务商和完整宿主重启；这些限制不由隔离连接成功推断完成。
 3B.4 剩余验收、3C 其它协议、3D、4A 与 5C 仍未完成。
 
 ### 3D. 协议管理与入口维护

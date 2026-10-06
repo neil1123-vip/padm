@@ -596,6 +596,115 @@ printf -v HY2_INPUT '2\n6\nproxy.example.com\n1\nhy2.example.com\n24449\n\n\n\nn
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
 printf -v DUAL_HY2_INPUT '4\n6\nproxy.example.com\n3\ntarget.example.com\n443\ntarget.example.com\n24445\nhy2.example.com\n24449\nbrutal\n120\n60\ny\nhttps://www.example.com/health\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
+printf -v ANYTLS_INPUT '2\n7\nproxy.example.com\n3\nanytls.example.com\n24451\n2\n%s\n%s\ny\n' \
+    "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
+printf -v DUAL_ANYTLS_INPUT '4\n7\nproxy.example.com\n3\ntarget.example.com\n443\ntarget.example.com\n24445\nanytls.example.com\n24451\n2\n%s\n%s\ny\n' \
+    "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
+for anytlsCase in anytls-default dual-anytls; do
+    newState "${anytlsCase}"
+    if [[ "${anytlsCase}" == anytls-default ]]; then input=${ANYTLS_INPUT}; else input=${DUAL_ANYTLS_INPUT}; fi
+    before=$(snapshot)
+    runPty 0 "${anytlsCase}-cancel" "${input%$'y\n'}"$'n\n' setup "${ASSET_ARGS[@]}"
+    [[ "$(snapshot)" == "${before}" && ! -s "${EVENTS}" && ! -s "${VERIFY_LOG}" ]] ||
+        fail "${anytlsCase}: cancellation reached credentials, TLS or deployment writes"
+    runPty 0 "${anytlsCase}" "${input}" setup "${ASSET_ARGS[@]}"
+    ! grep -Fq '11111111-1111-4111-8111-111111111111' "${ARGV_LOG}" ||
+        fail "${anytlsCase}: the generated AnyTLS password appeared in process arguments"
+    ! grep -Eq '拥塞模式|上行带宽|下行带宽|Salamander|伪装 HTTPS|启用 HTTPS 订阅' "${CONTROL_LOG}" ||
+        fail "${anytlsCase}: setup collected unrelated Hysteria2 or publication parameters"
+    SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+    jq -e --arg mode "${anytlsCase}" '
+      .schema_version == 3 and .core.type == "sing-box" and
+      .tls.domain == "anytls.example.com" and (.subscription.enabled | not) and
+      .host_integrations == [] and
+      (.core.protocols[0] | .id == 4 and .core == "sing-box" and
+        .listener_id == "entry-anytls" and .name == "main-anytls" and .public_port == 24451 and
+        .address_families == ["ipv4","ipv6"] and
+        .uuid == "11111111-1111-4111-8111-111111111111" and .reality == null and
+        .hy2 == null and .anytls == {domain: "anytls.example.com"}) and
+      if $mode == "anytls-default" then
+        .core.secondary_type == null and (.core.protocols | length) == 1
+      else .core.secondary_type == "xray" and (.core.protocols | length) == 2 and
+        (.core.protocols[1] | .id == 1 and .core == "xray" and .public_port == 24445 and
+          .listener_id == "entry-secondary-reality" and
+          (.reality.private_key | length) == 43) and
+        .core.protocols[0].uuid == .core.protocols[1].uuid end
+    ' "${SPEC}" >/dev/null || fail "${anytlsCase}: setup lost AnyTLS parameters, shared account or secondary Reality"
+    [[ -f "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/anytls.example.com.crt" &&
+        -f "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/anytls.example.com.key" ]] ||
+        fail "${anytlsCase}: setup did not commit AnyTLS TLS"
+    jq -e '.inbounds[] | select(.type == "anytls") |
+      .users == [{name: "11111111-1111-4111-8111-111111111111",
+        password: "11111111-1111-4111-8111-111111111111"}] and
+      .tls.enabled and .tls.server_name == "anytls.example.com"' \
+        "${PADM_DOCKER_INSTALL_DIR}/config/sing-box/config.json" >/dev/null ||
+        fail "${anytlsCase}: AnyTLS runtime did not reuse the UUID for the password and account"
+    if [[ "${anytlsCase}" == anytls-default ]]; then
+        ! grep -Eq ' x25519( |$)|derived-stdin' "${EVENTS}" ||
+            fail 'AnyTLS-only setup generated unused Reality keys'
+        ! grep -Fq 'Reality 目标' "${CONTROL_LOG}" || fail 'AnyTLS-only setup collected an unused Reality target'
+    fi
+    CONTROL_LOG="${TEST_ROOT}/${anytlsCase}-list.log"
+    bash -u "${CLI}" protocol list >"${CONTROL_LOG}" 2>&1 || fail "${anytlsCase}: protocol list failed"
+    grep -Fq AnyTLS "${CONTROL_LOG}" || fail "${anytlsCase}: protocol list mislabeled AnyTLS"
+    assertNoSecrets
+done
+
+newState anytls-tls-fail
+export FAKE_SETUP_MODE=tls-fail
+runPty 15 anytls-tls-fail "${ANYTLS_INPUT}" setup "${ASSET_ARGS[@]}"
+assertUnconfigured
+unset FAKE_SETUP_MODE
+
+# AnyTLS 复用通用字段编辑与同核复制，凭据、域名、核心和入口身份不能被重写。
+export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-anytls-default"
+export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-anytls-default"
+CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
+SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+cp -- "${SPEC}" "${TEST_ROOT}/anytls-original.json"
+before=$(snapshot)
+runPty 0 anytls-edit-cancel $'1\n4\n0\n' edit "${ASSET_ARGS[@]}"
+[[ "$(snapshot)" == "${before}" ]] || fail 'cancelling an AnyTLS edit changed deployment'
+runPty 0 anytls-edit $'1\n4\n24452\n2\n4\nnext.example.com\n3\n4\n2\n4\n4\nnext-anytls\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e --slurpfile before "${TEST_ROOT}/anytls-original.json" '
+  .tls == $before[0].tls and .subscription == $before[0].subscription and
+  (.core.protocols[0] | del(.public_port, .server, .address_families, .name)) ==
+    ($before[0].core.protocols[0] | del(.public_port, .server, .address_families, .name)) and
+  (.core.protocols[0] | .public_port == 24452 and .server == "next.example.com" and
+    .address_families == ["ipv6"] and .name == "next-anytls")
+' "${SPEC}" >/dev/null || fail 'AnyTLS generic editing changed identity or did not apply selected values'
+runPty 0 anytls-copy $'9\n4\n2\n24453\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.core.protocols[0] as $first | .core.protocols[1] as $copy |
+  $copy.listener_id == "entry-1" and $copy.public_port == 24453 and
+  ($copy | del(.listener_id, .public_port)) == ($first | del(.listener_id, .public_port))
+' "${SPEC}" >/dev/null || fail 'AnyTLS copy did not preserve the shared account, TLS and core'
+before=$(snapshot)
+runPty 15 anytls-copy-xray $'9\nentry-anytls\n1\n' edit "${ASSET_ARGS[@]}"
+[[ "$(snapshot)" == "${before}" ]] || fail 'copying AnyTLS to Xray changed deployment'
+for rejectedEdit in uuid domain core listener new-account new-hy2; do
+    case "${rejectedEdit}" in
+    uuid) filter='.core.protocols[0].uuid = "22222222-2222-4222-8222-222222222222"' ;;
+    domain) filter='.tls.domain = "next.example.com" | .core.protocols |= map(.anytls.domain = "next.example.com")' ;;
+    core) filter='.core.protocols[0].core = "xray" | .core.secondary_type = "xray"' ;;
+    listener) filter='.core.protocols[0].listener_id = "entry-renamed"' ;;
+    new-account) filter='.core.protocols += [.core.protocols[0] | .listener_id = "entry-3" |
+        .public_port = 24454 | .uuid = "22222222-2222-4222-8222-222222222222"]' ;;
+    new-hy2) filter='.core.protocols += [.core.protocols[0] | .listener_id = "entry-3" |
+        .public_port = 24454 | .id = 3 | .hy2 = {domain: .anytls.domain,
+          bandwidth_mode: "bbr", up_mbps: 100, down_mbps: 50, obfs: null, masquerade: ""} | del(.anytls)]' ;;
+    esac
+    jq "${filter}" "${SPEC}" >"${TEST_ROOT}/anytls-rejected.json"
+    chmod 0600 "${TEST_ROOT}/anytls-rejected.json"
+    CONTROL_LOG="${TEST_ROOT}/anytls-rejected-${rejectedEdit}.log"
+    actual=0
+    bash -u "${CLI}" edit --spec "${TEST_ROOT}/anytls-rejected.json" --preview "${ASSET_ARGS[@]}" \
+        >"${CONTROL_LOG}" 2>&1 || actual=$?
+    [[ "${actual}" -eq 15 && "$(snapshot)" == "${before}" ]] ||
+        fail "${rejectedEdit}: AnyTLS edit bypassed the identity boundary"
+    assertClean
+    assertNoSecrets
+done
+
 for hy2Case in hy2-default dual-hy2; do
     newState "${hy2Case}"
     if [[ "${hy2Case}" == hy2-default ]]; then input=${HY2_INPUT}; else input=${DUAL_HY2_INPUT}; fi
@@ -673,7 +782,7 @@ runPty 15 hy2-copy-xray $'9\n3\n1\n' edit "${ASSET_ARGS[@]}"
 [[ "$(snapshot)" == "${before}" ]] || fail 'copying Hysteria2 to Xray changed deployment'
 runPty 15 hy2-invalid-speed $'13\nentry-1\n2\n1000001\n8\n' edit "${ASSET_ARGS[@]}"
 [[ "$(snapshot)" == "${before}" ]] || fail 'out-of-range Hysteria2 bandwidth changed deployment'
-for rejectedEdit in uuid domain core listener new-account; do
+for rejectedEdit in uuid domain core listener new-account new-anytls; do
     case "${rejectedEdit}" in
     uuid) filter='.core.protocols[0].uuid = "22222222-2222-4222-8222-222222222222"' ;;
     domain) filter='.tls.domain = "next.example.com" | .core.protocols |= map(.hy2.domain = "next.example.com")' ;;
@@ -681,6 +790,8 @@ for rejectedEdit in uuid domain core listener new-account; do
     listener) filter='.core.protocols[0].listener_id = "entry-renamed"' ;;
     new-account) filter='.core.protocols += [.core.protocols[0] | .listener_id = "entry-3" |
         .public_port = 24451 | .uuid = "22222222-2222-4222-8222-222222222222"]' ;;
+    new-anytls) filter='.core.protocols += [.core.protocols[0] | .listener_id = "entry-3" |
+        .public_port = 24451 | .id = 4 | .anytls = {domain: .hy2.domain} | del(.hy2)]' ;;
     esac
     jq "${filter}" "${SPEC}" >"${TEST_ROOT}/hy2-rejected.json"
     chmod 0600 "${TEST_ROOT}/hy2-rejected.json"
@@ -694,13 +805,16 @@ for rejectedEdit in uuid domain core listener new-account; do
     assertNoSecrets
 done
 
-# 同一 TLS 的 WS 与 Hysteria2 删除顺序不得误删证书关系或继续发布订阅。
+# 同一 TLS 的 WS、Hysteria2 与 AnyTLS 删除顺序不得误删证书关系或继续发布订阅。
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-dual-hy2"
 export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-dual-hy2"
 CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
 SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
 jq '.core.protocols += [
   (.core.protocols[1] | .core = "sing-box" | .listener_id = "entry-sing-reality" | .public_port = 24446),
+  {id: 4, core: "sing-box", listener_id: "entry-anytls", server: "proxy.example.com", public_port: 24451,
+   address_families: ["ipv4","ipv6"], name: "main-anytls", uuid: .core.protocols[0].uuid,
+   anytls: {domain: .tls.domain}},
   {id: 21, core: "xray", listener_id: "vless-ws", server: "proxy.example.com", public_port: 24444,
    address_families: ["ipv4"], name: "main-ws", uuid: .core.protocols[0].uuid,
    websocket: {domain: .tls.domain, path: "abcdefghws", backend_port: 31297, tls_port: 8443}}] |
@@ -709,11 +823,16 @@ chmod 0600 "${TEST_ROOT}/hy2-with-ws.json"
 runPty 0 hy2-ws-configure '' configure --spec "${TEST_ROOT}/hy2-with-ws.json" "${ASSET_ARGS[@]}"
 runPty 0 hy2-delete-ws $'10\nvless-ws\n8\ny\n' edit "${ASSET_ARGS[@]}"
 jq -e '.tls.domain == "hy2.example.com" and (.subscription.enabled | not) and
-  any(.core.protocols[]; .id == 3) and all(.core.protocols[]; .id != 21)' "${SPEC}" >/dev/null ||
-    fail 'deleting the last WS removed Hysteria2 TLS or kept HTTPS publication enabled'
-runPty 0 hy2-delete-last-tls $'10\nentry-hysteria2\n8\ny\n' edit "${ASSET_ARGS[@]}"
+  any(.core.protocols[]; .id == 3) and any(.core.protocols[]; .id == 4) and
+  all(.core.protocols[]; .id != 21)' "${SPEC}" >/dev/null ||
+    fail 'deleting the last WS removed Hysteria2/AnyTLS TLS or kept HTTPS publication enabled'
+runPty 0 hy2-delete-retain-anytls $'10\nentry-hysteria2\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.tls.domain == "hy2.example.com" and (.subscription.enabled | not) and
+  any(.core.protocols[]; .id == 4) and all(.core.protocols[]; .id != 3 and .id != 21)' "${SPEC}" >/dev/null ||
+    fail 'deleting Hysteria2 removed the remaining AnyTLS TLS reference'
+runPty 0 anytls-delete-last-tls $'10\nentry-anytls\n8\ny\n' edit "${ASSET_ARGS[@]}"
 jq -e '.tls == null and (.subscription.enabled | not) and
-  all(.core.protocols[]; .id != 3 and .id != 21)' "${SPEC}" >/dev/null ||
+  all(.core.protocols[]; .id != 3 and .id != 4 and .id != 21)' "${SPEC}" >/dev/null ||
     fail 'deleting the last TLS protocol retained its deployment TLS reference'
 
 printf -v WS_INPUT '1\n2\nproxy.example.com\n1\nws.example.com\n24444\n2\n%s\n%s\ny\ny\n' \
