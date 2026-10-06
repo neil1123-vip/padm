@@ -3193,9 +3193,9 @@ JSON
     )
 
     (
-        local serviceLog="${TMP_DIR}/entry-helper-tls-init-service.log"
-        local errorLog="${TMP_DIR}/entry-helper-tls-init-error.log"
-        local rc
+        local serviceLog="${TMP_DIR}/entry-helper-tls-issue-service.log"
+        local errorLog="${TMP_DIR}/entry-helper-tls-issue-error.log"
+        local rc allowFailure=false
         : >"${serviceLog}"
         : >"${errorLog}"
         SERVICE_QUEUE_ALLOW_FAILURE=previous
@@ -3204,16 +3204,33 @@ JSON
         selectCoreType=2
         domain=
         handleNginx() {
+            [[ "${sslType}" == letsencrypt && "${dnsAPIStatus}" == n && "${sslEmail}" == prepared@example.com ]] || return 1
             printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
             return 1
         }
         errorCard() {
             printf '%s\n' "$*" >>"${errorLog}"
         }
-        regressionExpectStatus 1 initTLSNginxConfig 1 >/dev/null 2>&1
-        grep -qx 'nginx:stop:true' "${serviceLog}"
-        grep -q 'TLS 初始化' "${errorLog}"
+        initTLSNginxConfig 1 >/dev/null 2>&1
+        [[ ! -s "${serviceLog}" ]]
+        local tlsDomain=${domain} dnsAPIType= dnsAPIStatus=n sslType=letsencrypt sslEmail=prepared@example.com
+        acmeExecutable() { printf acmeIssueTool; }
+        tlsAcmeLogFile() { printf '%s\n' "${TMP_DIR}/entry-helper-tls-issue-acme.log"; }
+        acmeIssueTool() { printf 'issue\n' >>"${serviceLog}"; }
+        sudo() { "$@"; }
+        allowPort() {
+            printf 'allow:%s\n' "$1" >>"${serviceLog}"
+            [[ "${allowFailure}" != true ]]
+        }
+        regressionExpectStatus 1 acmeInstallSSL >/dev/null 2>&1
+        [[ "$(<"${serviceLog}")" == $'allow:80\nnginx:stop:true' ]]
+        ! grep -q '^issue$' "${serviceLog}"
+        grep -q 'TLS 签发' "${errorLog}"
         [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+        : >"${serviceLog}"
+        allowFailure=true
+        regressionExpectStatus 1 acmeInstallSSL >/dev/null 2>&1
+        [[ "$(<"${serviceLog}")" == allow:80 && "${SERVICE_QUEUE_ALLOW_FAILURE}" == previous ]]
     )
 
     (

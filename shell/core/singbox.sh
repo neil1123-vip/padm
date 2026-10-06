@@ -445,6 +445,7 @@ singBoxLocalCertificateAvailable() {
 singBoxInstallLocalTLSCertificate() {
     local nginxWasRunning=false xrayWasRunning=false singBoxWasRunning=false
     local selectCoreType=
+    local dnsAPIStatus dnsAPIType cfAPIToken cfZoneID aliKey aliSecret sslIPv6
 
     readInstallTLSDomain domain || return 1
     installAcmeTool || return 1

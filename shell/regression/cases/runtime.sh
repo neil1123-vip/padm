@@ -692,7 +692,7 @@ runInstallWorkflowRegression() (
         initTLSNginxConfig 1 <&"${inputFd}"
         read -r -u "${inputFd}" nextInput
         [[ "${domain}" == tls.example.com && "${port}" == 8443 && "${nextInput}" == next-parent-action ]]
-        [[ "${events}" == $'allow:8443\ndns:tls.example.com\nclean\ncheck:8443:tls.example.com\nnginx:stop\n' ]]
+        [[ "${events}" == $'allow:8443\ndns:tls.example.com\nclean\ncheck:8443:tls.example.com\n' ]]
         exec {inputFd}<&-
         events=
         regressionExpectStatus 1 initTLSNginxConfig 1 < <(printf 'invalid/domain\n')
@@ -705,7 +705,7 @@ runInstallWorkflowRegression() (
         currentPort=443
         exec {inputFd}< <(printf '\n\nnext-parent-action\n')
         initTLSNginxConfig 1 <&"${inputFd}"
-        [[ "${domain}" == old.example.com && "${port}" == 443 && "${events}" == $'nginx:stop\n' ]]
+        [[ "${domain}" == old.example.com && "${port}" == 443 && -z "${events}" ]]
         read -r -u "${inputFd}" nextInput
         [[ "${nextInput}" == next-parent-action ]]
         exec {inputFd}<&-
@@ -714,7 +714,7 @@ runInstallWorkflowRegression() (
         initTLSNginxConfig 1 <&"${inputFd}"
         read -r -u "${inputFd}" nextInput
         [[ "${domain}" == old.example.com && "${port}" == 443 &&
-            "${nextInput}" == next-parent-action && "${events}" == $'nginx:stop\n' ]]
+            "${nextInput}" == next-parent-action && -z "${events}" ]]
         exec {inputFd}<&-
         events=
         currentHost=invalid/domain
@@ -729,7 +729,7 @@ runInstallWorkflowRegression() (
         currentHost=old.example.com
         lastInstallationConfig=true
         initTLSNginxConfig 1 </dev/null
-        [[ "${domain}" == old.example.com && "${port}" == 443 && "${events}" == $'nginx:stop\n' ]]
+        [[ "${domain}" == old.example.com && "${port}" == 443 && -z "${events}" ]]
         events=
         currentPort=1+2
         regressionExpectStatus 1 initTLSNginxConfig 1 </dev/null
@@ -746,7 +746,7 @@ runInstallWorkflowRegression() (
             read -r -u "${inputFd}" nextInput
             [[ "${nextInput}" == next-parent-action && "${currentClients}" == "${beforeClients}" ]]
             [[ "${domain}" == fixed.example.com && "${port}" == 8443 ]]
-            [[ "${events}" == $'allow:8443\ndns:fixed.example.com\nclean\ncheck:8443:fixed.example.com\nnginx:stop\n' ]]
+            [[ "${events}" == $'allow:8443\ndns:fixed.example.com\nclean\ncheck:8443:fixed.example.com\n' ]]
             exec {inputFd}<&-
             events=
             exec {inputFd}< <(printf '\nnext-parent-action\n')
@@ -764,21 +764,21 @@ runInstallWorkflowRegression() (
             exec {inputFd}<&-
         )
 
-        # 显式参数覆盖历史值；仅改域名也重新验证，成功后才停 Nginx。
+        # 显式参数覆盖历史值；仅改域名也重新验证，不提前停 Nginx 等待证书输入。
         AUTO_DOMAIN=new.example.com
         AUTO_PORT=8443
         initTLSNginxConfig 1 </dev/null
-        expected=$'allow:8443\ndns:new.example.com\nclean\ncheck:8443:new.example.com\nnginx:stop\n'
+        expected=$'allow:8443\ndns:new.example.com\nclean\ncheck:8443:new.example.com\n'
         [[ "${domain}" == new.example.com && "${port}" == 8443 && "${events}" == "${expected}" ]]
         events=
         unset AUTO_PORT
         initTLSNginxConfig 1 </dev/null
-        expected=$'allow:443\ndns:new.example.com\nclean\ncheck:443:new.example.com\nnginx:stop\n'
+        expected=$'allow:443\ndns:new.example.com\nclean\ncheck:443:new.example.com\n'
         [[ "${port}" == 443 && "${events}" == "${expected}" ]]
         events=
         checkPortOpen() { events+="check:$1:$2"$'\n'; return 1; }
         regressionExpectStatus 1 initTLSNginxConfig 1 </dev/null
-        [[ "${events}" == "${expected%nginx:stop$'\n'}" ]]
+        [[ "${events}" == "${expected}" ]]
         unset AUTO_DOMAIN
 
         events=
@@ -839,7 +839,7 @@ runInstallWorkflowRegression() (
             regressionExpectStatus 1 "${apply}" 28 <&"${inputFd}"
             read -r -u "${inputFd}" nextInput
             [[ "${domain}" == tls.example.com && "${nextInput}" == next-parent-action ]]
-            [[ "${events}" == $'backup\ntools:tls.example.com\n'* && "${events}" == *$'nginx:stop\ntls\n' ]]
+            [[ "${events}" == $'backup\ntools:tls.example.com\n'* && "${events}" == *$'tls\n' && "${events}" != *nginx:stop* ]]
             exec {inputFd}<&-
         done
     )
@@ -1150,6 +1150,93 @@ runInstallWorkflowRegression() (
         currentRealityPublicKey=stored-public
         regressionExpectStatus 1 initRealityKey </dev/null
         [[ -z "${realityPrivateKey}${realityPublicKey}" && ! -s "${calls}" ]]
+    )
+
+    (
+        # 多协议仅在本次完整安装内复用成功检测；上下文变化或失败必须重验。
+        local AUTO_REALITY_TARGET=first.example.com AUTO_REALITY_SERVER_NAME=first.example.com
+        local AUTO_DOMAIN= AUTO_ENTRY_HOST= AUTO_REALITY_DOMAIN= AUTO_INSTALL=
+        local realityTargetHost= realityTargetPort= realitySNI= realityEntryHost=entry.example.com
+        local realityOnlyWithDomain= domain= currentHost= coreInstallType=1 selectCustomInstallType=,1,2,26,
+        local validations=0 dnsChecks=0 targetStatus=0 dnsStatus=0 core
+        unset PADM_INSTALL_REALITY_PROFILE_CACHE
+        prepareCoreInstallInputs() { :; }
+        coreSwitchConfigTransaction() { shift; "$@"; }
+        padmRunPortAllowTransaction() { "$@"; }
+        validateRealityTargetSelection() { validations=$((validations + 1)); return "${targetStatus}"; }
+        checkDNSIP() { dnsChecks=$((dnsChecks + 1)); return "${dnsStatus}"; }
+        printRealityTargetProfile() { :; }
+        repeatedRealityProfiles() {
+            initRealityProfile || return 1
+            initRealityProfile || return 1
+            initRealityProfile || return 1
+        }
+        for core in xray sing-box; do
+            runCoreInstall "${core}" repeatedRealityProfiles </dev/null
+        done
+        [[ "${validations}" == 2 && -z "${PADM_INSTALL_REALITY_PROFILE_CACHE+x}" ]]
+        repeatedRealityProfiles </dev/null
+        [[ "${validations}" == 5 ]]
+
+        changingRealityProfiles() {
+            repeatedRealityProfiles || return 1
+            [[ "${validations}" == 6 ]] || return 1
+            AUTO_REALITY_TARGET=changed.example.com
+            repeatedRealityProfiles || return 1
+            [[ "${validations}" == 7 ]] || return 1
+            AUTO_REALITY_SERVER_NAME=sni.example.com
+            repeatedRealityProfiles || return 1
+            [[ "${validations}" == 8 ]] || return 1
+            realityEntryHost=changed-entry.example.com
+            realityOnlyWithDomain=true
+            repeatedRealityProfiles || return 1
+            [[ "${validations}" == 9 && "${dnsChecks}" == 1 ]] || return 1
+            domain=changed-domain.example.com
+            coreInstallType=2
+            repeatedRealityProfiles || return 1
+            [[ "${validations}" == 10 && "${dnsChecks}" == 2 ]] || return 1
+
+            AUTO_REALITY_TARGET=retry.example.com
+            targetStatus=1
+            regressionExpectStatus 1 initRealityProfile || return 1
+            [[ -z "${PADM_INSTALL_REALITY_PROFILE_CACHE}" ]] || return 1
+            targetStatus=0 dnsStatus=1
+            regressionExpectStatus 1 initRealityProfile || return 1
+            [[ -z "${PADM_INSTALL_REALITY_PROFILE_CACHE}" ]] || return 1
+            dnsStatus=0
+            repeatedRealityProfiles || return 1
+            [[ "${validations}" == 13 && "${dnsChecks}" == 4 ]]
+        }
+        PADM_INSTALL_REALITY_PROFILE_CACHE=parent-value
+        runCoreInstall xray changingRealityProfiles </dev/null
+        [[ "${PADM_INSTALL_REALITY_PROFILE_CACHE}" == parent-value ]]
+    )
+
+    (
+        # 失败重试重新读取 DNS 选择，凭据和通配符状态不能跨安装传播。
+        local dnsAPIStatus=y dnsAPIType=cloudflare cfAPIToken=old-token cfZoneID=old-zone
+        local aliKey=old-key aliSecret=old-secret sslIPv6=--listen-v6
+        local AUTO_INSTALL=true AUTO_DNS_API=n AUTO_DNS_API_TYPE= AUTO_DNS_API_WILDCARD=n
+        local AUTO_CLOUDFLARE_API_TOKEN=new-token AUTO_CLOUDFLARE_ZONE_ID=new-zone
+        local events= core
+        prepareCoreInstallInputs() { :; }
+        coreSwitchConfigTransaction() { shift; "$@"; }
+        padmRunPortAllowTransaction() { "$@"; }
+        installWithDNSInputs() {
+            [[ -z "${dnsAPIStatus+x}${dnsAPIType+x}${cfAPIToken+x}${cfZoneID+x}${aliKey+x}${aliSecret+x}${sslIPv6+x}" ]] || return 1
+            [[ -n "${dnsAPIStatus+x}" ]] || switchDNSAPI || return 1
+            events+="${dnsAPIStatus}:${dnsAPIType}:${cfAPIToken:-}:${cfZoneID:-}"$'\n'
+            return 7
+        }
+        for core in xray sing-box; do
+            regressionExpectStatus 7 runCoreInstall "${core}" installWithDNSInputs </dev/null
+            AUTO_DNS_API=y
+            regressionExpectStatus 7 runCoreInstall "${core}" installWithDNSInputs </dev/null
+            AUTO_DNS_API=n
+        done
+        [[ "${events}" == $'n:::\nn:cloudflare:new-token:new-zone\nn:::\nn:cloudflare:new-token:new-zone\n' ]]
+        [[ "${dnsAPIStatus}" == y && "${dnsAPIType}" == cloudflare && "${cfAPIToken}" == old-token &&
+            "${cfZoneID}" == old-zone && "${aliKey}" == old-key && "${aliSecret}" == old-secret && "${sslIPv6}" == --listen-v6 ]]
     )
 
     (

@@ -200,6 +200,64 @@ runTlsFailureReturnRegression() (
         [[ "${sslType}" == letsencrypt && "$(<"${PADM_TLS_DIR}/ssl_type")" == letsencrypt ]]
     )
 
+    (
+        # 签发参数读完才释放 HTTP 端口；DNS API 不需要停止 Nginx。
+        eval "${autoReadDefinition}"
+        local HOME="${root}/decision-home" AUTO_INSTALL= currentHost= domain=decision.example.com
+        local lastInstallationConfig= ipType=4 sslIPv6= SERVICE_QUEUE_ALLOW_FAILURE=previous
+        local PADM_REQUIRE_USABLE_TLS_CERTIFICATE= PADM_CORE_SWITCH_TRANSACTION_ACTIVE=
+        local dnsAPIStatus dnsAPIType cfAPIToken cfZoneID aliKey aliSecret sslType sslEmail
+        local input inputFd remaining provider accountFile before decisionLog="${root}/decision.log"
+        export PADM_TLS_DIR="${root}/decision-tls"
+        mkdir -p "${HOME}/.acme.sh"
+        accountFile=$(acmeAccountFile)
+        acmeExecutable() { printf tlsIssueTool; }
+        tlsAcmeLogFile() { printf '%s\n' "${root}/decision-acme.log"; }
+        tlsIssueTool() { printf 'issue:%s:%s\n' "${CF_Token:-${Ali_Key:-}}" "$*" >>"${decisionLog}"; }
+        sudo() { "$@"; }
+        handleNginx() {
+            [[ "$1" == stop && "${sslType}" == zerossl && "${sslEmail}" == new@example.com &&
+                "${SERVICE_QUEUE_ALLOW_FAILURE}" == true ]] || return 1
+            printf 'stop\n' >>"${decisionLog}"
+        }
+        allowPort() { printf 'allow:%s\n' "$1" >>"${decisionLog}"; }
+        installTLSFromAcme() { printf 'sync\n' >>"${decisionLog}"; }
+        tlsCertificatePairUsable() { return 0; }
+
+        for input in '' $'n\n' $'y\n\n' $'y\n\ntoken\n\nn\n' $'n\n2\n' $'n\n2\nnew@example.com'; do
+            unset dnsAPIStatus dnsAPIType cfAPIToken cfZoneID aliKey aliSecret sslType sslEmail
+            printf 'SAVED=unchanged\n' >"${accountFile}"
+            before=$(<"${accountFile}")
+            : >"${decisionLog}"
+            regressionExpectStatus 1 installTLS 1 < <(printf '%s' "${input}")
+            ! grep -Eq '^(allow|stop|issue|sync)' "${decisionLog}"
+            [[ "$(<"${accountFile}")" == "${before}" && "${SERVICE_QUEUE_ALLOW_FAILURE}" == previous ]]
+        done
+        for provider in cloudflare aliyun; do
+            unset dnsAPIStatus dnsAPIType cfAPIToken cfZoneID aliKey aliSecret sslType sslEmail
+            : >"${decisionLog}"
+            input=$'y\n1\ntoken\nzone\nn\n1\n'
+            [[ "${provider}" != aliyun ]] || input=$'y\n2\nkey\nsecret\nn\n1\n'
+            exec {inputFd}< <(printf '%snext-parent-action\n' "${input}")
+            installTLS 1 <&"${inputFd}"
+            ! grep -Eq '^(stop|allow)' "${decisionLog}"
+            grep -q "^issue:.*--dns dns_" "${decisionLog}"
+            [[ "$(<"${decisionLog}")" == issue:*$'\n'sync ]]
+            read -r -u "${inputFd}" remaining
+            [[ "${remaining}" == next-parent-action ]]
+            exec {inputFd}<&-
+        done
+        unset dnsAPIStatus dnsAPIType cfAPIToken cfZoneID aliKey aliSecret sslType sslEmail
+        : >"${decisionLog}"
+        exec {inputFd}< <(printf 'n\n2\nnew@example.com\nnext-parent-action\n')
+        installTLS 1 <&"${inputFd}"
+        [[ "$(<"${decisionLog}")" == $'allow:80\nstop\n'issue:*--standalone*$'\n'sync ]]
+        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == previous ]]
+        read -r -u "${inputFd}" remaining
+        [[ "${remaining}" == next-parent-action ]]
+        exec {inputFd}<&-
+    )
+
     domain=missing.example.com
     currentHost=
     installedDNSAPIStatus=
@@ -421,18 +479,25 @@ runTlsFailureReturnRegression() (
         # 域名只读一次，并保留给证书就绪后的协议模板使用。
         local domain= currentHost=old-entry.example.com lastInstallationConfig=
         local AUTO_DOMAIN=prepared.example.com inputFd nextInput
+        local dnsAPIStatus=y dnsAPIType=cloudflare cfAPIToken=parent-token cfZoneID=parent-zone
+        local aliKey=parent-key aliSecret=parent-secret sslIPv6=--listen-v6
         installAcmeTool() { return 0; }
         nginxRunning() { return 1; }
         xrayRunning() { return 1; }
         singBoxRunning() { return 1; }
         initTLSNginxConfig() { [[ "$2" == prepared.example.com ]] || return 1; domain=$2; }
-        installTLS() { return 0; }
+        installTLS() {
+            [[ -z "${dnsAPIStatus+x}${dnsAPIType+x}${cfAPIToken+x}${cfZoneID+x}${aliKey+x}${aliSecret+x}${sslIPv6+x}" ]]
+        }
         singBoxLocalCertificateAvailable() { [[ "${domain}" == prepared.example.com ]]; }
         installCronTLS() { return 0; }
         restoreServicesAfterTLSRenewal() { return 0; }
         exec {inputFd}< <(printf 'next-parent-action\n')
         singBoxInstallLocalTLSCertificate <&"${inputFd}"
         [[ "${domain}" == prepared.example.com ]]
+        [[ "${dnsAPIStatus}" == y && "${dnsAPIType}" == cloudflare &&
+            "${cfAPIToken}" == parent-token && "${cfZoneID}" == parent-zone &&
+            "${aliKey}" == parent-key && "${aliSecret}" == parent-secret && "${sslIPv6}" == --listen-v6 ]]
         read -r -u "${inputFd}" nextInput
         [[ "${nextInput}" == next-parent-action ]]
         exec {inputFd}<&-
@@ -959,6 +1024,17 @@ runTlsReinstallRollbackRegression() (
         [[ "${acmeInstallAttempts}" == 2 && "${installTLSCount}" == 1 ]]
         ! grep -q '^renew$' "${cleanLog}"
         [[ "$(grep -c '^TLS生成成功$' "${statusLog}")" == 1 ]]
+    )
+    (
+        # 完整重装保留证书，不再重问；独立安装仍沿用上面的确认合同。
+        local PADM_CORE_SWITCH_TRANSACTION_ACTIVE=true lastInstallationConfig=
+        : >"${cleanLog}"
+        exec {inputFd}< <(printf 'next-parent-action\n')
+        installTLS 1 <&"${inputFd}"
+        [[ "$(<"${cleanLog}")" == renew ]]
+        read -r -u "${inputFd}" nextInput
+        [[ "${nextInput}" == next-parent-action ]]
+        exec {inputFd}<&-
     )
     : >"${cleanLog}"
     lastInstallationConfig=true

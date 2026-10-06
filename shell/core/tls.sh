@@ -311,6 +311,11 @@ acmeInstallSSL() {
         successCard "DNS API 生成证书中"
         Ali_Key="${aliKey}" Ali_Secret="${aliSecret}" "${acmeBin}" --issue -d "${dnsAPIDomain}" ${dnsAPIExtraDomain} --dns dns_ali -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a "${acmeLogFile}" >/dev/null
     else
+        allowPort 80 || return 1
+        if ! runCoreServiceActionAllowFailure handleNginx stop; then
+            errorCard "Nginx 服务停止失败，已取消 TLS 签发"
+            return 1
+        fi
         successCard "生成证书中"
         sudo "${acmeBin}" --issue -d "${tlsDomain}" --standalone -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a "${acmeLogFile}" >/dev/null
     fi
@@ -425,7 +430,7 @@ installTLS() {
     if { [[ "${PADM_REQUIRE_USABLE_TLS_CERTIFICATE:-}" == "true" ]] && tlsCertificatePairUsable "${tlsDir}" "${tlsDomain}"; } ||
         { [[ "${PADM_REQUIRE_USABLE_TLS_CERTIFICATE:-}" != "true" ]] && tlsCertificatePairExists "${tlsDir}" "${tlsDomain}"; }; then
         successCard "检测到证书"
-        if [[ -z "${lastInstallationConfig:-}" ]] &&
+        if [[ "${PADM_CORE_SWITCH_TRANSACTION_ACTIVE:-}" != true && -z "${lastInstallationConfig:-}" ]] &&
             { [[ -d "$HOME/.acme.sh/${tlsDomain}_ecc" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.key" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; }; then
             tlsCertificateCard "回车保留现有证书；重新安装仅同步当前域名证书"
             menuReadChoice tls_reinstall "是否重新安装当前域名证书？[y/N]:" reInstallStatus true || return 1
@@ -452,7 +457,6 @@ installTLS() {
         if [[ -z "${dnsAPIType:-}" ]]; then
             statusCard "TLS 证书申请方式" "不采用 API 申请证书"
             successCard "安装TLS证书，需要依赖80端口"
-            allowPort 80 || return 1
         fi
 
         switchSSLType || return 1

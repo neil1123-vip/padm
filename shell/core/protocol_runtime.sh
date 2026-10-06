@@ -991,12 +991,30 @@ persistRealityEntryProfile() {
     commitGeneratedFile "${tmpFile}" "${entryHostFile}" 600 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
 
+realityInstallProfileKey() {
+    printf '%q\n' "${realityTargetHost:-}" "${realityTargetPort:-443}" "${realitySNI:-}" "${realityEntryHost:-}" \
+        "${AUTO_REALITY_TARGET:-}" "${AUTO_REALITY_SERVER_NAME:-}" "${AUTO_ENTRY_HOST:-}" \
+        "${AUTO_DOMAIN:-}" "${AUTO_REALITY_DOMAIN:-}" "${domain:-}" "${realityOnlyWithDomain:-}" \
+        "${selectCoreType:-}" "${coreInstallType:-}" "${selectCustomInstallType:-}"
+}
+
 # 初始化REALITY配置
 initRealityProfile() {
+    local profileKey
+    if [[ -n "${PADM_INSTALL_REALITY_PROFILE_CACHE+x}" ]]; then
+        profileKey=$(realityInstallProfileKey) || return 1
+        # 仅本次完整安装复用成功检测，参数变化或失败后必须重新验证。
+        [[ -z "${PADM_INSTALL_REALITY_PROFILE_CACHE}" || "${PADM_INSTALL_REALITY_PROFILE_CACHE}" != "${profileKey}" ]] || return 0
+        PADM_INSTALL_REALITY_PROFILE_CACHE=
+    fi
     collectRealityProfile || return 1
     if realityStrictDomainModeEnabled; then
         checkDNSIP "${realityEntryHost}" || return 1
     fi
+    if [[ -n "${PADM_INSTALL_REALITY_PROFILE_CACHE+x}" ]]; then
+        PADM_INSTALL_REALITY_PROFILE_CACHE=$(realityInstallProfileKey) || return 1
+    fi
+    return 0
 }
 
 

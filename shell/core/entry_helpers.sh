@@ -75,10 +75,6 @@ initTLSNginxConfig() {
     if [[ "${selectCoreType:-}" == "1" ]]; then
         customPortFunction || return 1
     fi
-    if ! runCoreServiceActionAllowFailure handleNginx stop; then
-        errorCard "Nginx 服务停止失败，已取消 TLS 初始化"
-        return 1
-    fi
 }
 
 # sing-box Nginx 配置
