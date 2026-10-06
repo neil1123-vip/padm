@@ -477,7 +477,23 @@ showSubscriptionQuotaPlanJson() {
 
 manageSharedSubscriptions() {
     subscriptionRequireLocalPublisherRole || return 1
-    local idsJson
+    local idsJson selectedCount
+    idsJson=$(PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 \
+        subscriptionActiveGroupRead -c '[.user_groups[].id]') || {
+        errorCard "用户订阅读取失败"
+        return 1
+    }
+    selectedCount=$(jq 'length' <<<"${idsJson}") || return 1
+    if [[ "${selectedCount}" -le 1 ]]; then
+        if [[ "${selectedCount}" == "0" ]]; then
+            userResultCard "新建分享订阅"
+            menuLine "暂无分享订阅"
+            createAndSyncUserSubscriptionWizard || true
+            idsJson=${createdUserSubscriptionIds:-'[]'}
+        fi
+        [[ "${idsJson}" == '[]' ]] || manageUserSubscriptionsMenu "${idsJson}" || true
+        return 0
+    fi
     while true; do
         selectUserSubscriptionId true true || return 0
         if [[ "${selectedUserSubscriptionId}" == "+" ]]; then
@@ -1422,7 +1438,7 @@ manageUserSubscriptionsMenu() {
             menuItem "${copyChoice}" "按当前配置新建订阅" "复制节点范围和额度，不复制身份、流量和令牌"
         fi
         menuItem "+" "新建分享订阅" "创建后立即同步并进入详情"
-        menuReturnItem 9 "返回订阅列表" "回到分享订阅"
+        menuReturnItem 9 "返回上级菜单" "结束当前订阅管理"
         menuClose
         menuReadChoice "${menuKey}" "请选择:" userSubscriptionItemStatus || return 0
         case "${userSubscriptionItemStatus}" in
@@ -1690,7 +1706,10 @@ manageSubscriptionServerItem() {
     local choice= idExists chosenId=
     if [[ -z "${sourceId}" ]]; then
         sourcesJson=$(subscriptionActiveGroupRead -c '[.sources[]? | select(.role != "main")]') || return 1
-        selectSubscriptionSourceId "${sourcesJson}" "请选择要管理的被控服务器:" sourceId || return 0
+        sourceId=$(jq -r 'if length == 1 then .[0].id else empty end' <<<"${sourcesJson}") || return 1
+        if [[ -z "${sourceId}" ]]; then
+            selectSubscriptionSourceId "${sourcesJson}" "请选择要管理的被控服务器:" sourceId || return 0
+        fi
     fi
     while true; do
         source=$(PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT=0 subscriptionActiveGroupRead -ce --arg id "${sourceId}" \
@@ -1757,8 +1776,15 @@ manageSubscriptionServerItem() {
             ;;
         8) return 0 ;;
         7)
-            sourcesJson=$(subscriptionActiveGroupRead -c '[.sources[]? | select(.role != "main")]') || continue
-            if selectSubscriptionSourceId "${sourcesJson}" "请选择要管理的被控服务器:" chosenId; then
+            sourcesJson=$(subscriptionActiveGroupRead -c --arg id "${sourceId}" \
+                '[.sources[]? | select(.role != "main" and .id != $id)]') || continue
+            if [[ "${sourcesJson}" == '[]' ]]; then
+                statusCard "没有其他被控服务器"
+                continue
+            fi
+            chosenId=$(jq -r 'if length == 1 then .[0].id else empty end' <<<"${sourcesJson}") || continue
+            if [[ -n "${chosenId}" ]] ||
+                selectSubscriptionSourceId "${sourcesJson}" "请选择要切换的被控服务器:" chosenId; then
                 sourceId=${chosenId}
             fi
             ;;

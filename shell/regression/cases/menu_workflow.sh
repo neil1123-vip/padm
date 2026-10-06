@@ -366,14 +366,60 @@ runSubscriptionMenuWorkflowCoreRegression() (
     done
 
     (
-        local PADM_SUBSCRIPTION_GROUPS_DIR="${root}/empty-selection" openedCount=0
+        local PADM_SUBSCRIPTION_GROUPS_DIR="${root}/direct-entry"
+        local openedCount=0 selectorCount=0 syncCount=0 openedIds= trafficIds= remaining
         mkdir -p "${PADM_SUBSCRIPTION_GROUPS_DIR}"
         writeDefaultSubscriptionGroupsState "$(subscriptionGroupsFile)"
-        manageUserSubscriptionItem() { openedCount=$((openedCount + 1)); }
-        manageUserSubscriptionsMenu() { openedCount=$((openedCount + 1)); }
-        manageSharedSubscriptions <<< $'*\n'
-        [[ "${openedCount}" == "0" && -z "${selectedUserSubscriptionId}" && "${selectedUserSubscriptionIds}" == '[]' ]]
-        grep -q '暂无可选分享订阅' "${errorLog}"
+        eval "$(declare -f selectUserSubscriptionId | sed '1s/^selectUserSubscriptionId/originalDirectEntrySelectUserSubscriptionId/')"
+        selectUserSubscriptionId() {
+            selectorCount=$((selectorCount + 1))
+            originalDirectEntrySelectUserSubscriptionId "$@"
+        }
+        eval "$(declare -f manageUserSubscriptionsMenu | sed '1s/^manageUserSubscriptionsMenu/originalDirectEntryManageUserSubscriptionsMenu/')"
+        manageUserSubscriptionsMenu() {
+            openedCount=$((openedCount + 1))
+            openedIds=$1
+            originalDirectEntryManageUserSubscriptionsMenu "$@"
+        }
+        runSubscriptionGroupSync() { syncCount=$((syncCount + 1)); return 1; }
+        showUserSubscriptionTraffic() { trafficIds+="$1,"; }
+
+        createdUserSubscriptionIds='["stale"]'
+        manageSharedSubscriptions <<<""
+        [[ "${openedCount}" == 0 && "${selectorCount}" == 0 && "${syncCount}" == 0 &&
+            "${createdUserSubscriptionIds}" == '[]' ]]
+        # 空列表直接新建；同步失败仍管理已保存的订阅，返回不消费上级输入。
+        exec 3<<< $'direct-entry\n1\n0\n2\n9\nnext-parent-action'
+        manageSharedSubscriptions <&3
+        IFS= read -r remaining <&3
+        exec 3<&-
+        [[ "${openedCount}" == 1 && "${selectorCount}" == 0 && "${syncCount}" == 1 &&
+            "${openedIds}" == '["direct-entry"]' && "${trafficIds}" == direct-entry, &&
+            "${remaining}" == next-parent-action ]]
+        trafficIds=
+        exec 3<<< $'2\n9\nnext-parent-action'
+        manageSharedSubscriptions <&3
+        IFS= read -r remaining <&3
+        exec 3<&-
+        [[ "${openedCount}" == 2 && "${selectorCount}" == 0 && "${syncCount}" == 1 &&
+            "${openedIds}" == '["direct-entry"]' && "${trafficIds}" == direct-entry, &&
+            "${remaining}" == next-parent-action ]]
+
+        writeDefaultSubscriptionGroupsState "$(subscriptionGroupsFile)"
+        manageSharedSubscriptions <<< $'direct-a,direct-b\n1\n0\n9'
+        [[ "${openedCount}" == 3 && "${selectorCount}" == 0 && "${syncCount}" == 2 &&
+            "${openedIds}" == '["direct-a","direct-b"]' ]]
+        manageSharedSubscriptions <<< $'direct-b\n9\n\n'
+        [[ "${openedCount}" == 4 && "${selectorCount}" == 2 &&
+            "${openedIds}" == '["direct-b"]' && "${syncCount}" == 2 ]]
+        (
+            subscriptionActiveGroupRead() { return 1; }
+            exec 3<<<must-not-consume
+            regressionExpectStatus 1 manageSharedSubscriptions <&3
+            IFS= read -r remaining <&3
+            exec 3<&-
+            [[ "${remaining}" == must-not-consume && "${openedCount}" == 4 && "${selectorCount}" == 2 ]]
+        )
     )
 
     (

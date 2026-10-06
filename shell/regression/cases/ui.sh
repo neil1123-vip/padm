@@ -2334,8 +2334,9 @@ invite-credential"
         manageSubscriptionMainHome <<<"2
 
 9"
-        grep -q "新建分享订阅" <<<"${output}"
         grep -q "暂无分享订阅" <<<"${output}"
+        ! grep -q "输入编号或订阅 ID" <<<"${output}"
+        [[ -z "${actions}" ]]
         resetMenuActions
     fi
 
@@ -2347,8 +2348,10 @@ invite-credential"
         resetMenuActions
         manageSubscriptionMainHome <<<"2
 
+1
 9" || true
         subscriptionGroupsStateRead -e '((.user_groups // []) | length) == 0' >/dev/null
+        [[ "${actions}" == $'showPublishedSubscriptionLinks:\n' ]]
     fi
 
     if menuSmokePartSelected subscription-main-publish-user || menuSmokePartSelected subscription-main-publish-user-create; then
@@ -2358,14 +2361,15 @@ invite-credential"
         setMenuSmokeRole main
         resetMenuActions
         manageSubscriptionMainHome <<<"2
-+
 demo-user
 main
 0
 9
-
+1
 9"
         subscriptionGroupsStateRead -e 'any(.user_groups[]?; .id == "demo-user" and .name == "demo-user")' >/dev/null
+        assertMenuAction 'showPublishedSubscriptionLinks:'
+        ! assertMenuAction 'errorCard:用户订阅选择无效，请输入列表编号、完整 ID 或菜单中的选择项'
         local duplicateSideEffectMarker="${TMP_DIR}/duplicate-user-side-effect"
         rm -f "${duplicateSideEffectMarker}"
         (
@@ -2385,31 +2389,32 @@ main
         setMenuSmokeRole main
         if [[ "${menuSmokePart}" == "subscription-main-publish-user-inspect" ]]; then
             manageSubscriptionMainHome <<<"2
-+
 demo-user
 main
 0
 9
-
 9"
         fi
         resetMenuActions
         output=
         manageSubscriptionMainHome <<<"2
-demo-user
 2
 3
 3
 2
 6
 9
-
+1
 9"
         grep -q "查看当前已发布链接" <<<"${output}"
         grep -q "立即同步并更新链接" <<<"${output}"
         grep -q "查看当前流量" <<<"${output}"
+        grep -q "返回上级菜单" <<<"${output}"
+        ! grep -q "输入编号或订阅 ID" <<<"${output}"
         subscriptionGroupsStateRead -e 'any(.user_groups[]?; .id == "demo-user" and .traffic_limit_gb == 2)' >/dev/null
         assertMenuAction 'runSubscriptionGroupSync:'
+        assertMenuAction 'showPublishedSubscriptionLinks:'
+        ! assertMenuAction 'errorCard:用户订阅选择无效，请输入列表编号、完整 ID 或菜单中的选择项'
         resetMenuActions
     fi
 
@@ -2419,14 +2424,12 @@ demo-user
         ensureSubscriptionGroupsState
         setMenuSmokeRole main
         resetMenuActions
-        subscriptionGroupsStateWrite '.sync.enabled = false'
+        subscriptionGroupsStateWrite '.user_groups = [] | .sync.enabled = false'
         manageSubscriptionMainHome <<<"2
-+
 team-a
 *
 0
 9
-
 9"
         subscriptionGroupsStateRead -e 'any(.user_groups[]?; .id == "team-a" and .name == "team-a")' >/dev/null
         subscriptionGroupsStateRead -e '.sync.enabled == false' >/dev/null
@@ -2444,12 +2447,10 @@ team-a
         ensureSubscriptionGroupsState
         subscriptionGroupsStateWrite '.sync.enabled = true'
         manageSubscriptionMainHome <<<"2
-+
 team-b
 main
 0
 9
-
 9"
         ! assertMenuAction refreshSubscriptionGroupSyncCron
         assertMenuAction 'runSubscriptionGroupSync:'
@@ -2897,6 +2898,7 @@ main
             local serverStdoutLog="${TMP_DIR}/server-item-stdout.log"
             local serverCardLog="${TMP_DIR}/server-item-cards.log"
             local serverSelectCount=0
+            local serverSourcesJson=
             local serverHealthOk=true
             local serverHealthObjectError=false
             errorCard() {
@@ -2940,6 +2942,25 @@ main
             manageSubscriptionServerItem edge-a <<<"8"
             [[ "${menuNumbers}" == $'1\n2\n3\n4\n5\n6\n7\n8:return\n' ]]
             [[ "${serverSelectCount}" == "0" && ! -s "${serverActionLog}" ]]
+            serverSourcesJson=$(subscriptionActiveGroupRead -c '.sources')
+            (
+                subscriptionActiveGroupWrite '.sources |= map(select(.id != "edge-b"))'
+                resetMenuActions
+                resetMenuRender
+                manageSubscriptionServerItem <<<"7
+3
+8"
+                [[ "${serverSelectCount}" == "0" && "$(<"${serverActionLog}")" == 'health:edge-a' ]]
+                assertMenuAction 'statusCard:没有其他被控服务器'
+                grep -qF '名称：Edge A（edge-a）' <<<"${output}"
+            )
+            : >"${serverActionLog}"
+            (
+                subscriptionActiveGroupWrite '.sources |= map(select(.role == "main"))'
+                manageSubscriptionServerItem </dev/null
+                [[ "${serverSelectCount}" == "1" && ! -s "${serverActionLog}" ]]
+            )
+            subscriptionActiveGroupWrite --argjson sources "${serverSourcesJson}" '.sources = $sources'
             output=
             manageSubscriptionServerItem >"${serverStdoutLog}" <<<"edge-a
 1
@@ -2948,22 +2969,25 @@ main
 4
 5
 7
-edge-b
 1
 8"
-            [[ "${serverSelectCount}" == "2" ]]
+            [[ "${serverSelectCount}" == "1" ]]
             [[ "$(<"${serverActionLog}")" == $'update:edge-a\nenabled:edge-a:false\nhealth:edge-a\nsync\nupdate:edge-b' ]]
             ! grep -qF 'secret-server-token' <<<"${output}"
             ! grep -qF 'secret-health-token' "${serverStdoutLog}"
             assertMenuAction 'successCard:被控服务器连接正常'
             : >"${serverActionLog}"
             manageSubscriptionServerItem edge-a </dev/null
-            [[ "${serverSelectCount}" == "2" && ! -s "${serverActionLog}" ]]
-            manageSubscriptionServerItem edge-a <<<"7
+            [[ "${serverSelectCount}" == "1" && ! -s "${serverActionLog}" ]]
+            (
+                addSubscriptionSourceState edge-c "Edge C" 10.77.0.4 39778
+                manageSubscriptionServerItem edge-a <<<"7
 
 3
 8"
-            [[ "${serverSelectCount}" == "3" && "$(<"${serverActionLog}")" == 'health:edge-a' ]]
+                [[ "${serverSelectCount}" == "2" && "$(<"${serverActionLog}")" == 'health:edge-a' ]]
+            )
+            subscriptionActiveGroupWrite --argjson sources "${serverSourcesJson}" '.sources = $sources'
             : >"${serverActionLog}"
             serverHealthOk=false
             resetMenuActions
