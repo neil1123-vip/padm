@@ -1445,6 +1445,105 @@ JSON
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 )
 
+runRealityProbeQueueRegression() (
+    local queueRoot="${TMP_DIR}/reality-probe-queue" consumer cancelMode monitorMode writerPid workerPid retries rc oldResults monitorTraps
+    mkdir -p "${queueRoot}/tmp"
+    export TMPDIR="${queueRoot}/tmp"
+    export PADM_REALITY_TARGET_RESULTS_FILE="${queueRoot}/results.tsv"
+    export PADM_REALITY_TARGET_SCAN_FILE="${PADM_REALITY_TARGET_RESULTS_FILE}"
+    export PADM_REALITY_SECONDARY_JOBS=2
+    printf 'IP,ORIGIN,CERT_DOMAIN,CERT_ISSUER,GEO_CODE\n192.0.2.1,192.0.2.0/24,queue.example.com,Test CA,N/A\n' >"${queueRoot}/scanner.csv"
+    oldResults=$(formatRealityTargetResultLine "queue.example.com:443" "queue.example.com" "Queue" "test" "no" \
+        "192.0.2.1" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "original" "London, United Kingdom")
+    realityTargetDetector() { printf 'fake-xray\n'; }
+    currentRealityNetworkProfile() { printf '192.0.2.10\tunknown\tunknown\n'; }
+    realityTargetRefreshRecords() { printf '%s\n' "${oldResults}"; }
+    realityTargetProgressLine() { return 0; }
+    realityTargetStatusBlock() { printf '%s\n' "$@" >>"${queueRoot}/status.log"; }
+    cancelProbe() {
+        printf '%s\n' "${BASHPID}" >>"${queueRoot}/workers"
+        mktemp "${TMPDIR}/probe-download.XXXXXX" >/dev/null
+        command sleep 30 &
+        printf '%s\n' "$!" >>"${queueRoot}/workers"
+        wait "$!"
+    }
+    probeRealityTargetRecord() {
+        if [[ "${cancelMode}" != normal ]]; then cancelProbe; return; fi
+        printf 'OK\t'
+        formatRealityTargetResultLine "queue.example.com:443" "queue.example.com" "Queue" "test" "no" \
+            "192.0.2.1" "AS64500" "ExampleNet" "$(realityTargetNetworkMatch "$3" "$4" AS64500 ExampleNet)" \
+            "A" "yes" "4096" "yes" "1234567891" "updated"
+    }
+    probeRealityScannerCandidate() {
+        if [[ "${cancelMode}" != normal ]]; then cancelProbe; return; fi
+        [[ "$8" == 192.0.2.0/24 && -f "$9" ]]
+        printf 'OK\t'
+        formatRealityTargetResultLine "${3}:443" "$3" "$3" "scanner" "no" "$2" \
+            "AS64500" "ExampleNet" "unknown" "A" "yes" "4096" "yes" "1234567891" "updated"
+    }
+    runProbeConsumer() {
+        if [[ "${consumer}" == refresh ]]; then
+            scanLocalAsnRealityTargets
+        else
+            importRealityScannerResults "${queueRoot}/scanner.csv" "unknown" "unknown"
+        fi
+    }
+    for consumer in refresh scanner; do
+        for cancelMode in term early; do
+            printf '%s\n' "${oldResults}" >"${PADM_REALITY_TARGET_RESULTS_FILE}"
+            : >"${queueRoot}/workers"
+            rc=0
+            (
+                PADM_CLEANUP_PATHS=()
+                PADM_CLEANUP_TRAP_INSTALLED=
+                if [[ "${cancelMode}" == early ]]; then
+                    set -T
+                    trap 'if [[ "${BASH_COMMAND}" == '\''jobPids[jobIndex]=$!'\'' ]]; then trap - DEBUG; kill -TERM "${BASHPID}"; fi' DEBUG
+                fi
+                runProbeConsumer
+            ) >"${queueRoot}/${consumer}-${cancelMode}.output" 2>&1 &
+            writerPid=$!
+            if [[ "${cancelMode}" == term ]]; then
+                retries=0
+                while [[ "$(wc -l <"${queueRoot}/workers")" -lt 2 && "${retries}" -lt 200 ]]; do
+                    command sleep 0.01
+                    retries=$((retries + 1))
+                done
+                [[ "$(wc -l <"${queueRoot}/workers")" -eq 2 ]]
+                kill -TERM "${writerPid}"
+            fi
+            wait "${writerPid}" || rc=$?
+            [[ "${rc}" == 143 ]]
+            while IFS= read -r workerPid; do
+                ! kill -0 "${workerPid}" 2>/dev/null
+            done <"${queueRoot}/workers"
+            [[ "$(<"${PADM_REALITY_TARGET_RESULTS_FILE}")" == "${oldResults}" ]]
+            [[ -z "$(find "${queueRoot}/tmp" -mindepth 1 -print -quit)" ]]
+        done
+        cancelMode=normal
+        for monitorMode in off on; do
+            [[ "${monitorMode}" != on ]] || set -m
+            monitorTraps=$(trap -p EXIT INT TERM)
+            : >"${queueRoot}/status.log"
+            runProbeConsumer >"${queueRoot}/${consumer}-${monitorMode}.output" 2>&1
+            [[ "$(trap -p EXIT INT TERM)" == "${monitorTraps}" ]]
+            if [[ "${monitorMode}" == on ]]; then
+                [[ $- == *m* ]]
+                set +m
+            else
+                [[ $- != *m* ]]
+            fi
+            ! grep -Eq '^\[[0-9]+\].*(Done|Terminated)' "${queueRoot}/${consumer}-${monitorMode}.output"
+            [[ "$(realityTargetResultField "$(realityTargetResultLine queue.example.com:443)" 9)" == unknown ]]
+            if [[ "${consumer}" == refresh ]]; then
+                grep -qxF 'different_network: 0' "${queueRoot}/status.log"
+                grep -qxF 'unknown: 1' "${queueRoot}/status.log"
+            fi
+            [[ -z "$(find "${queueRoot}/tmp" -mindepth 1 -print -quit)" ]]
+        done
+    done
+)
+
 runRealityConfigScannerRegression() {
     local scannerCandidatesFile="${TMP_DIR}/reality-config-scanner-candidates.txt"
     local oldCandidatesFile="${PADM_REALITY_TARGET_CANDIDATES_FILE:-}"
@@ -1456,6 +1555,7 @@ runRealityConfigScannerRegression() {
     local refreshTimeoutLog="${TMP_DIR}/reality-refresh-timeout.log"
     local maxConcurrency refreshMaxConcurrency
     local scannerImported scannerSkipped scannerA scannerB scannerC scannerFail
+    runRegressionStep reality-config-probe-queue runRealityProbeQueueRegression
     cat >"${scannerCandidatesFile}" <<'EOF'
 fail-auto.example.com|fail-auto.example.com|Fail Auto|global|large_site|unknown|1|yes|fixture failing candidate
 fixture-fallback.example.com|fixture-fallback.example.com|Fixture Fallback|global|large_site|unknown|2|yes|fixture fallback candidate

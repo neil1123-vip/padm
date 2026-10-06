@@ -511,7 +511,7 @@ writeRealityTargetResultLine() {
     return "${status}"
 }
 
-cleanupRealityTargetLocationJobs() {
+cleanupRealityTargetJobs() {
     local status=$? signal=$1 previousPid=$2 pid
     shift 2
     for pid in "$@"; do
@@ -590,9 +590,9 @@ writeRealityTargetResultLines() {
         geoPreviousPid=${!:-}
         set -m
         # 包含尚未登记的最后一个后台任务，但不触碰进入本函数前的任务。
-        trap 'cleanupRealityTargetLocationJobs "" "${geoPreviousPid}" "${geoPids[@]}" "${!:-}"' EXIT
-        trap 'cleanupRealityTargetLocationJobs INT "${geoPreviousPid}" "${geoPids[@]}" "${!:-}"' INT
-        trap 'cleanupRealityTargetLocationJobs TERM "${geoPreviousPid}" "${geoPids[@]}" "${!:-}"' TERM
+        trap 'cleanupRealityTargetJobs "" "${geoPreviousPid}" "${geoPids[@]}" "${!:-}"' EXIT
+        trap 'cleanupRealityTargetJobs INT "${geoPreviousPid}" "${geoPids[@]}" "${!:-}"' INT
+        trap 'cleanupRealityTargetJobs TERM "${geoPreviousPid}" "${geoPids[@]}" "${!:-}"' TERM
         realityTargetProgressLine "REALITY 地理位置查询 0/${geoCount} 并发：${geoMaxJobs}"
         # ponytail: 按并发上限分批等待；请求时差明显时再复用滚动队列。
         for ((geoStart = 0; geoStart < geoCount; geoStart += geoMaxJobs)); do
@@ -2186,6 +2186,76 @@ probeRealityScannerCandidate() {
     formatRealityTargetResultLine "${target}" "${domain}" "${domain}" "scanner" "${cdnRisk}" "${ip}" "${candidateAsn}" "${candidateOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "RealiTLScanner: ${issuer}; ${note}"
 }
 
+probeRealityScannerRecord() {
+    local detector=$1 record=$2 ip origin domain issuer _geo
+    IFS=$'\x1f' read -r ip origin domain issuer _geo <<<"${record//$'\t'/$'\x1f'}"
+    probeRealityScannerCandidate "${detector}" "${ip}" "${domain}" "${issuer}" "${3:-}" "${4:-}" "${5:-lookup}" "${origin}" "${6:-}"
+}
+
+runRealityTargetProbeJobs() {
+    local -n probeRecords=$1 probeLabels=$2
+    local probeDir=$3 maxJobs=$4 progressTitle=$5 startedAt=$6 probeFunction=$7 detector=$8
+    shift 8
+    local total=${#probeRecords[@]} jobIndex=0 activeIndex slot pid running=0 processed=0 madeProgress
+    local currentLabel= lastProgressAt=${startedAt} now jobTraps jobMonitor= jobPreviousPid
+    local -a activeSlots=() jobPids=()
+    (( total > 0 )) || return 0
+    jobTraps=$(trap -p EXIT INT TERM)
+    [[ $- != *m* ]] || jobMonitor=1
+    jobPreviousPid=${!:-}
+    set -m
+    # 最后的后台 PID 同时覆盖 fork 到登记之间的取消窗口。
+    trap 'cleanupRealityTargetJobs "" "${jobPreviousPid}" "${jobPids[@]}" "${!:-}"' EXIT
+    trap 'cleanupRealityTargetJobs INT "${jobPreviousPid}" "${jobPids[@]}" "${!:-}"' INT
+    trap 'cleanupRealityTargetJobs TERM "${jobPreviousPid}" "${jobPids[@]}" "${!:-}"' TERM
+    realityTargetProgressLine "${progressTitle} 0/${total} 并发：${maxJobs} 已耗时：0s"
+    while (( jobIndex < total || running > 0 )); do
+        while (( jobIndex < total && running < maxJobs )); do
+            (
+                trap - EXIT INT TERM
+                set +m
+                export TMPDIR="${probeDir}"
+                "${probeFunction}" "${detector}" "${probeRecords[jobIndex]}" "$@" >"${probeDir}/${jobIndex}.result"
+                : >"${probeDir}/${jobIndex}.done"
+            ) &
+            jobPids[jobIndex]=$!
+            activeSlots+=("${jobIndex}")
+            jobIndex=$((jobIndex + 1))
+            running=$((running + 1))
+        done
+        madeProgress=false
+        for activeIndex in "${!activeSlots[@]}"; do
+            slot=${activeSlots[activeIndex]}
+            pid=${jobPids[slot]}
+            if [[ -f "${probeDir}/${slot}.done" ]] || ! kill -0 "${pid}" 2>/dev/null; then
+                wait "${pid}" 2>/dev/null || true
+                [[ "${pid}" != "${!:-}" ]] || jobPreviousPid=${pid}
+                jobPids[slot]=
+                unset "activeSlots[${activeIndex}]"
+                running=$((running - 1))
+                processed=$((processed + 1))
+                currentLabel=${probeLabels[slot]}
+                madeProgress=true
+            fi
+        done
+        activeSlots=("${activeSlots[@]}")
+        if [[ "${madeProgress}" == false && "${running}" -gt 0 ]]; then
+            command sleep 0.05
+            continue
+        fi
+        if [[ "${madeProgress}" == true ]]; then
+            now=$(date +%s)
+            if (( now - lastProgressAt >= 10 || processed == total )); then
+                realityTargetProgressLine "${progressTitle} ${processed}/${total} 当前：${currentLabel} 并发：${maxJobs} 已耗时：$((now - startedAt))s"
+                lastProgressAt=${now}
+            fi
+        fi
+    done
+    [[ -n "${jobMonitor}" ]] || set +m
+    trap - EXIT INT TERM
+    eval "${jobTraps}"
+}
+
 importRealityScannerResults() {
     local sourceFile=$1
     local currentAsn=${2:-}
@@ -2195,9 +2265,9 @@ importRealityScannerResults() {
     local seenDomainsFile=${6:-}
     local maxJobs=${PADM_REALITY_SECONDARY_JOBS:-8}
     local detector ip origin domain issuer domainKey record target score cdnRisk _geo
-    local normalizedFile resultLinesFile failedTargetsFile probeDir asnCacheFile jobFile doneFile probeRecord probeStatus probePayload currentDomain
-    local index=0 activeIndex slot pid running=0 madeProgress imported=0 skipped=0 duplicateCount=0 processed=0 totalRecords importStart lastProgressAt=0 now countA=0 countB=0 countC=0 countFail=0 commitStatus=0
-    local -a candidates=() activeSlots=() jobPids=() jobFiles=() jobDoneFiles=() jobTargets=() jobDomains=()
+    local normalizedFile resultLinesFile failedTargetsFile probeDir asnCacheFile probeRecord probeStatus probePayload
+    local slot imported=0 skipped=0 duplicateCount=0 totalRecords importStart countA=0 countB=0 countC=0 countFail=0 commitStatus=0
+    local -a candidates=() jobDomains=()
     local -A seenDomains=()
     [[ -f "${sourceFile}" ]] || {
         realityTargetStatusBlock red "RealiTLScanner 导入" "CSV 不存在: ${sourceFile}"
@@ -2230,7 +2300,7 @@ importRealityScannerResults() {
         done <"${seenDomainsFile}"
     fi
     while IFS= read -r record; do
-        IFS=$'\t' read -r ip origin domain issuer _geo <<<"${record}"
+        IFS=$'\x1f' read -r ip origin domain issuer _geo <<<"${record//$'\t'/$'\x1f'}"
         if ! realityTargetScannerRecordAllowed "${domain}"; then
             skipped=$((skipped + 1))
             continue
@@ -2246,6 +2316,7 @@ importRealityScannerResults() {
             printf '%s\n' "${domainKey}" >>"${seenDomainsFile}" || return 1
         fi
         candidates+=("${record}")
+        jobDomains+=("${domain}")
     done <"${normalizedFile}"
     totalRecords=${#candidates[@]}
     padmCreateTempPath resultLinesFile || { padmRemoveCleanupPath "${normalizedFile}"; return 1; }
@@ -2253,62 +2324,14 @@ importRealityScannerResults() {
     padmCreateTempPath probeDir -d || { padmRemoveCleanupPath "${normalizedFile}"; padmRemoveCleanupPath "${resultLinesFile}"; padmRemoveCleanupPath "${failedTargetsFile}"; return 1; }
     asnCacheFile="${probeDir}/asn-cache.tsv"
     : >"${asnCacheFile}"
-    if (( totalRecords > 0 )); then
-        realityTargetProgressLine "RealiTLScanner TLS/CDN 二次检测 0/${totalRecords} 并发：${maxJobs} 已耗时：0s"
-        lastProgressAt=${importStart}
-    fi
-    while (( index < totalRecords || running > 0 )); do
-        while (( index < totalRecords && running < maxJobs )); do
-            IFS=$'\t' read -r ip origin domain issuer _geo <<<"${candidates[${index}]}"
-            target=$(formatRealityTarget "${domain}" 443)
-            jobFile="${probeDir}/${index}.result"
-            doneFile="${jobFile}.done"
-            (
-                probeRealityScannerCandidate "${detector}" "${ip}" "${domain}" "${issuer}" "${currentAsn}" "${currentOrg}" "${networkMode}" "${origin}" "${asnCacheFile}" >"${jobFile}"
-                : >"${doneFile}"
-            ) &
-            jobPids[${index}]=$!
-            jobFiles[${index}]=${jobFile}
-            jobDoneFiles[${index}]=${doneFile}
-            jobTargets[${index}]=${target}
-            jobDomains[${index}]=${domain}
-            activeSlots+=("${index}")
-            index=$((index + 1))
-            running=$((running + 1))
-        done
-
-        madeProgress=false
-        for activeIndex in "${!activeSlots[@]}"; do
-            slot=${activeSlots[${activeIndex}]}
-            pid=${jobPids[${slot}]}
-            if [[ -f "${jobDoneFiles[${slot}]}" ]] || ! kill -0 "${pid}" 2>/dev/null; then
-                wait "${pid}" 2>/dev/null || true
-                jobPids[${slot}]=
-                unset "activeSlots[${activeIndex}]"
-                running=$((running - 1))
-                processed=$((processed + 1))
-                currentDomain=${jobDomains[${slot}]}
-                madeProgress=true
-            fi
-        done
-        activeSlots=("${activeSlots[@]}")
-
-        if [[ "${madeProgress}" == "false" && "${running}" -gt 0 ]]; then
-            command sleep 0.05
-            continue
-        fi
-        if [[ "${madeProgress}" == "true" ]]; then
-            now=$(date +%s)
-            if (( lastProgressAt == 0 || now - lastProgressAt >= 10 || processed == totalRecords )); then
-                realityTargetProgressLine "RealiTLScanner TLS/CDN 二次检测 ${processed}/${totalRecords} 当前：${currentDomain:-未知} 并发：${maxJobs} 已耗时：$((now - importStart))s"
-                lastProgressAt=${now}
-            fi
-        fi
-    done
+    runRealityTargetProbeJobs candidates jobDomains "${probeDir}" "${maxJobs}" \
+        "RealiTLScanner TLS/CDN 二次检测" "${importStart}" probeRealityScannerRecord \
+        "${detector}" "${currentAsn}" "${currentOrg}" "${networkMode}" "${asnCacheFile}"
 
     for ((slot = 0; slot < totalRecords; slot++)); do
+        target=$(formatRealityTarget "${jobDomains[slot]}" 443)
         probeRecord=
-        [[ -f "${jobFiles[${slot}]}" ]] && probeRecord=$(<"${jobFiles[${slot}]}")
+        [[ -f "${probeDir}/${slot}.result" ]] && probeRecord=$(<"${probeDir}/${slot}.result")
         probeStatus=${probeRecord%%$'\t'*}
         probePayload=${probeRecord#*$'\t'}
         case "${probeStatus}" in
@@ -2332,18 +2355,18 @@ importRealityScannerResults() {
                 *) countFail=$((countFail + 1)); skipped=$((skipped + 1)) ;;
                 esac
             else
-                printf '%s\n' "${jobTargets[${slot}]}" >>"${failedTargetsFile}"
+                printf '%s\n' "${target}" >>"${failedTargetsFile}"
                 countFail=$((countFail + 1))
                 skipped=$((skipped + 1))
             fi
             ;;
         FAIL)
-            printf '%s\n' "${probePayload:-${jobTargets[${slot}]}}" >>"${failedTargetsFile}"
+            printf '%s\n' "${probePayload:-${target}}" >>"${failedTargetsFile}"
             countFail=$((countFail + 1))
             skipped=$((skipped + 1))
             ;;
         *)
-            printf '%s\n' "${jobTargets[${slot}]}" >>"${failedTargetsFile}"
+            printf '%s\n' "${target}" >>"${failedTargetsFile}"
             countFail=$((countFail + 1))
             skipped=$((skipped + 1))
             ;;
@@ -3067,11 +3090,11 @@ probeRealityTargetRecord() {
 
 scanLocalAsnRealityTargets() {
     local refreshScope=${1:-recommended}
-    local detector networkProfile currentIp currentAsn currentOrg rest line parsed host target networkMatch score cdnRisk scanStart scanSeconds totalCandidates lastProgressAt=0 now
+    local detector networkProfile currentIp currentAsn currentOrg rest line parsed host target networkMatch score cdnRisk scanStart scanSeconds totalCandidates
     local maxJobs=${PADM_REALITY_SECONDARY_JOBS:-8}
-    local resultsFile refreshSource resultLinesFile failedTargetsFile probeDir asnCacheFile jobFile doneFile probeRecord probeStatus probePayload
-    local index=0 activeIndex slot pid running=0 madeProgress processed=0 resolved=0 failed=0 sameAsn=0 sameProvider=0 differentNetwork=0 commitStatus=0
-    local -a candidates=() activeSlots=() jobPids=() jobFiles=() jobDoneFiles=() jobTargets=()
+    local resultsFile refreshSource resultLinesFile failedTargetsFile probeDir asnCacheFile probeRecord probeStatus probePayload
+    local slot resolved=0 failed=0 sameAsn=0 sameProvider=0 differentNetwork=0 unknownNetwork=0 commitStatus=0
+    local -a candidates=() jobHosts=()
     case "${refreshScope}" in
     recommended | all) ;;
     *) return 1 ;;
@@ -3098,6 +3121,9 @@ scanLocalAsnRealityTargets() {
     fi
     while IFS= read -r line; do
         candidates+=("${line}")
+        parsed=$(parseHostPort "${line%%$'\t'*}" 443)
+        host=${parsed%:*}
+        jobHosts+=("${host}")
     done < <(realityTargetRefreshRecords "${refreshScope}")
     scanStart=$(date +%s)
     totalCandidates=${#candidates[@]}
@@ -3112,63 +3138,14 @@ scanLocalAsnRealityTargets() {
     currentOrg=${rest#*$'\t'}
     currentIp=${currentIp:-unknown}
     realityTargetStatusBlock yellow "REALITY 目标库刷新" "本机公网网络: ${currentIp} ${currentAsn} ${currentOrg}" "检测来源: ${refreshSource}" "目标库文件: ${resultsFile}"
-    if (( totalCandidates > 0 )); then
-        realityTargetProgressLine "REALITY 目标库刷新 0/${totalCandidates} 并发：${maxJobs} 已耗时：0s"
-        lastProgressAt=${scanStart}
-    fi
-    while (( index < totalCandidates || running > 0 )); do
-        while (( index < totalCandidates && running < maxJobs )); do
-            line=${candidates[${index}]}
-            target=${line%%$'\t'*}
-            jobFile="${probeDir}/${index}.result"
-            doneFile="${jobFile}.done"
-            (
-                probeRealityTargetRecord "${detector}" "${line}" "${currentAsn}" "${currentOrg}" "${asnCacheFile}" >"${jobFile}"
-                : >"${doneFile}"
-            ) &
-            jobPids[${index}]=$!
-            jobFiles[${index}]=${jobFile}
-            jobDoneFiles[${index}]=${doneFile}
-            jobTargets[${index}]=${target}
-            activeSlots+=("${index}")
-            index=$((index + 1))
-            running=$((running + 1))
-        done
-
-        madeProgress=false
-        for activeIndex in "${!activeSlots[@]}"; do
-            slot=${activeSlots[${activeIndex}]}
-            pid=${jobPids[${slot}]}
-            if [[ -f "${jobDoneFiles[${slot}]}" ]] || ! kill -0 "${pid}" 2>/dev/null; then
-                wait "${pid}" 2>/dev/null || true
-                jobPids[${slot}]=
-                unset "activeSlots[${activeIndex}]"
-                running=$((running - 1))
-                processed=$((processed + 1))
-                target=${jobTargets[${slot}]}
-                madeProgress=true
-            fi
-        done
-        activeSlots=("${activeSlots[@]}")
-
-        if [[ "${madeProgress}" == "false" && "${running}" -gt 0 ]]; then
-            command sleep 0.05
-            continue
-        fi
-        if [[ "${madeProgress}" == "true" ]]; then
-            now=$(date +%s)
-            if (( lastProgressAt == 0 || now - lastProgressAt >= 10 || processed == totalCandidates )); then
-                parsed=$(parseHostPort "${target}" 443)
-                host=${parsed%:*}
-                realityTargetProgressLine "REALITY 目标库刷新 ${processed}/${totalCandidates} 当前：${host} 并发：${maxJobs} 已耗时：$((now - scanStart))s"
-                lastProgressAt=${now}
-            fi
-        fi
-    done
+    runRealityTargetProbeJobs candidates jobHosts "${probeDir}" "${maxJobs}" \
+        "REALITY 目标库刷新" "${scanStart}" probeRealityTargetRecord \
+        "${detector}" "${currentAsn}" "${currentOrg}" "${asnCacheFile}"
 
     for ((slot = 0; slot < totalCandidates; slot++)); do
+        target=${candidates[slot]%%$'\t'*}
         probeRecord=
-        [[ -f "${jobFiles[${slot}]}" ]] && probeRecord=$(<"${jobFiles[${slot}]}")
+        [[ -f "${probeDir}/${slot}.result" ]] && probeRecord=$(<"${probeDir}/${slot}.result")
         probeStatus=${probeRecord%%$'\t'*}
         probePayload=${probeRecord#*$'\t'}
         case "${probeStatus}" in
@@ -3182,23 +3159,24 @@ scanLocalAsnRealityTargets() {
                     case "${networkMatch}" in
                     same_asn) sameAsn=$((sameAsn + 1)) ;;
                     same_provider) sameProvider=$((sameProvider + 1)) ;;
-                    *) differentNetwork=$((differentNetwork + 1)) ;;
+                    different_network) differentNetwork=$((differentNetwork + 1)) ;;
+                    *) unknownNetwork=$((unknownNetwork + 1)) ;;
                     esac
                     resolved=$((resolved + 1))
                 else
                     failed=$((failed + 1))
                 fi
             else
-                printf '%s\n' "${jobTargets[${slot}]}" >>"${failedTargetsFile}"
+                printf '%s\n' "${target}" >>"${failedTargetsFile}"
                 failed=$((failed + 1))
             fi
             ;;
         NETWORK_FAIL|FAIL)
-            printf '%s\n' "${probePayload:-${jobTargets[${slot}]}}" >>"${failedTargetsFile}"
+            printf '%s\n' "${probePayload:-${target}}" >>"${failedTargetsFile}"
             failed=$((failed + 1))
             ;;
         *)
-            printf '%s\n' "${jobTargets[${slot}]}" >>"${failedTargetsFile}"
+            printf '%s\n' "${target}" >>"${failedTargetsFile}"
             failed=$((failed + 1))
             ;;
         esac
@@ -3214,7 +3192,7 @@ scanLocalAsnRealityTargets() {
         return 1
     fi
     scanSeconds=$(( $(date +%s) - scanStart ))
-    realityTargetStatusBlock green "REALITY 目标库刷新" "复测完成" "目标: ${processed}" "并发: ${maxJobs}" "A 级目标: ${resolved}" "same_asn: ${sameAsn}" "same_provider: ${sameProvider}" "different_network: ${differentNetwork}" "非候选/失败: ${failed}" "耗时: ${scanSeconds}s"
+    realityTargetStatusBlock green "REALITY 目标库刷新" "复测完成" "目标: ${totalCandidates}" "并发: ${maxJobs}" "A 级目标: ${resolved}" "same_asn: ${sameAsn}" "same_provider: ${sameProvider}" "different_network: ${differentNetwork}" "unknown: ${unknownNetwork}" "非候选/失败: ${failed}" "耗时: ${scanSeconds}s"
     if [[ "$(realityTargetResultCount)" -gt 0 ]]; then
         realityTargetStatusBlock green "REALITY 目标库刷新" "自动推荐将只使用 cdn_risk=no 的 A 级目标"
     else
