@@ -5940,6 +5940,10 @@ runDockerAnyTlsRegression() {
     bash "${PROJECT_ROOT}/docker/tests/anytls.sh"
 }
 
+runDockerNaiveRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/naive.sh"
+}
+
 runDockerPermissionsRegression() {
     bash "${PROJECT_ROOT}/docker/tests/permissions.sh"
 }

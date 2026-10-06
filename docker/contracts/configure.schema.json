@@ -58,6 +58,9 @@
                 "$ref": "#/$defs/anytls_protocol"
               },
               {
+                "$ref": "#/$defs/naive_protocol"
+              },
+              {
                 "$ref": "#/$defs/websocket_protocol"
               }
             ]
@@ -307,7 +310,7 @@
         "properties": {
           "core": {
             "properties": {
-              "protocols": {"contains": {"properties": {"id": {"enum": [3, 4, 21]}}}}
+              "protocols": {"contains": {"properties": {"id": {"enum": [3, 4, 5, 21]}}}}
             }
           }
         }
@@ -341,7 +344,7 @@
         "properties": {
           "core": {
             "properties": {
-              "protocols": {"contains": {"properties": {"id": {"enum": [3, 4]}}}}
+              "protocols": {"contains": {"properties": {"id": {"enum": [3, 4, 5]}}}}
             }
           }
         }
@@ -817,6 +820,40 @@
             "name": {"$ref": "#/$defs/account_name"},
             "uuid": {"$ref": "#/$defs/uuid"},
             "anytls": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["domain"],
+              "properties": {
+                "domain": {
+                  "$ref": "#/$defs/hostname",
+                  "not": {"pattern": "[\\s\\u0000-\\u001f\\u007f]"}
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "naive_protocol": {
+      "allOf": [
+        {"$ref": "#/$defs/protocol_base"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "core", "listener_id", "server", "public_port", "address_families", "name", "uuid", "naive"],
+          "properties": {
+            "id": {"const": 5},
+            "core": {"const": "sing-box"},
+            "listener_id": {
+              "type": "string",
+              "pattern": "^entry-[a-z0-9][a-z0-9-]{0,47}$"
+            },
+            "server": {"$ref": "#/$defs/hostname"},
+            "public_port": {"$ref": "#/$defs/port"},
+            "address_families": {"$ref": "#/$defs/address_families"},
+            "name": {"$ref": "#/$defs/account_name"},
+            "uuid": {"$ref": "#/$defs/uuid"},
+            "naive": {
               "type": "object",
               "additionalProperties": false,
               "required": ["domain"],

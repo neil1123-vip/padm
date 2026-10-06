@@ -5,7 +5,7 @@ source "${DOCKER_BUNDLE_SOURCE_ROOT}/shell/core/stats_grpc.sh"
 
 DOCKER_TRAFFIC_USERS_JQ='
   def traffic_id:
-    (.uuid // .id // .name // .email // "") |
+    (.uuid // .id // .name // .email // .username // "") |
     if type != "string" or (test("^[A-Za-z0-9_.@+-]{1,128}$") | not) then
       error("用户缺少有效的稳定统计标识")
     elif test("^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$") then ascii_downcase
@@ -121,7 +121,11 @@ dockerTrafficRender() {
         .routing.rules = ([{type:"field", inboundTag:[$api], outboundTag:$api}] +
           [(.routing.rules // [])[] | select(((.inboundTag // []) | index($api)) == null)])
       else
-        .inbounds |= map(if .users? != null then .users |= map(select(enabled) | .name = traffic_id) else . end) |
+        # Naive 以 username 认证及统计，不接受其它协议的 name 字段。
+        .inbounds |= map(if .users? != null then
+          if .type == "naive" then .users |= map(select(enabled))
+          else .users |= map(select(enabled) | .name = traffic_id) end
+          else . end) |
         .experimental.v2ray_api.listen = "127.0.0.1:10087" |
         .experimental.v2ray_api.stats.enabled = true |
         .experimental.v2ray_api.stats.users = [$accounts[].account]

@@ -59,17 +59,17 @@
     },
     {
       "id": 5,
-      "status": "deferred",
+      "status": "supported",
       "management_status": "deferred",
       "cores": ["sing-box"],
-      "profiles": [],
+      "profiles": ["core-sing-box"],
       "native_menu": "安装与重装 / 自定义协议选择",
       "native_action": "NaiveProxy",
       "transport": "tcp",
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "需要域名、证书和 sing-box NaiveProxy 配置，Docker 合同尚未接入。"
+      "reason": "v3 支持 sing-box NaiveProxy 首配、完整规格导入、入口编辑、同核复制与删除及分享链接；域名入口与证书域名一致，复用受管 TLS 和 UUID 流量账号，宿主集成组合及完整管理尚未开放。"
     },
     {
       "id": 21,

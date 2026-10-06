@@ -141,6 +141,12 @@ dockerConfigureSpecValidate() {
           exact(["id", "core", "listener_id", "server", "public_port", "address_families", "name", "uuid", "anytls"]) and
           (.anytls | exact(["domain"]) and
             (.domain | hostname and (explode | all(. > 32 and . != 127))))
+        elif .id == 5 then
+          $request.schema_version == 3 and .core == "sing-box" and
+          exact(["id", "core", "listener_id", "server", "public_port", "address_families", "name", "uuid", "naive"]) and
+          (.naive | exact(["domain"]) and
+            (.domain | hostname and (explode | all(. > 32 and . != 127)))) and
+          .server == .naive.domain
         elif .id == 21 then
           exact(["id", "server", "public_port", "address_families", "name", "uuid", "websocket"] +
             if $request.schema_version >= 2 then ["listener_id"] else [] end +
@@ -196,17 +202,18 @@ dockerConfigureSpecValidate() {
           (.settings | exact(["port", "mark"]) and (.port | port) and
             (.mark | type == "number" and floor == . and . >= 1 and . <= 2147483647))
         else false end) and
-      if any(.core.protocols[]; .id == 3 or .id == 4 or .id == 21) then
+      if any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 21) then
         .tls != null and
         all(.core.protocols[] | select(.id == 21); (.core // $request.core.type) == "xray") and
         all(.core.protocols[] | select(.id == 21); .websocket.domain == $request.tls.domain) and
         all(.core.protocols[] | select(.id == 3); .hy2.domain == $request.tls.domain) and
-        all(.core.protocols[] | select(.id == 4); .anytls.domain == $request.tls.domain)
+        all(.core.protocols[] | select(.id == 4); .anytls.domain == $request.tls.domain) and
+        all(.core.protocols[] | select(.id == 5); .naive.domain == $request.tls.domain)
       else
         .tls == null and .subscription.enabled == false
       end and
       if .subscription.enabled then any(.core.protocols[]; .id == 21) else true end and
-      if any(.core.protocols[]; .id == 3 or .id == 4) then .host_integrations == [] else true end and
+      if any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5) then .host_integrations == [] else true end and
       if any(.host_integrations[]; .type == "fail2ban") then
         any(.core.protocols[]; .id == 21) and
         all(.host_integrations[] | select(.type == "fail2ban") | .settings.ports[];
@@ -867,6 +874,20 @@ dockerGenerateSingBoxConfig() {
               key_path: "/etc/padm/secrets/tls/\(.anytls.domain).key"
             }
           }
+          elif .id == 5 then {
+            type: "naive",
+            tag: .listener_id,
+            listen: "::",
+            listen_port: .public_port,
+            network: "tcp",
+            users: [{username: .uuid, password: .uuid}],
+            tls: {
+              enabled: true,
+              server_name: .naive.domain,
+              certificate_path: "/etc/padm/secrets/tls/\(.naive.domain).crt",
+              key_path: "/etc/padm/secrets/tls/\(.naive.domain).key"
+            }
+          }
           else {
             type: "vless",
             tag: (.listener_id // "vless-reality"),
@@ -1012,6 +1033,8 @@ dockerGenerateSubscription() {
           "#\(.name | @uri)"
       elif .id == 4 then
         "anytls://\(.uuid | @uri)@\(.server | authority):\(.public_port)?security=tls&sni=\(.anytls.domain | @uri)#\(.name | @uri)"
+      elif .id == 5 then
+        "naive+https://\(.uuid | @uri):\(.uuid | @uri)@\(.server | authority):\(.public_port)?padding=true#\(.name | @uri)"
       elif .id == 21 then
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&security=tls&sni=\(.websocket.domain | @uri)&type=ws&host=\(.websocket.domain | @uri)&path=\("/" + .websocket.path + "ws" | @uri)#\(.name | @uri)"
       else empty end
@@ -1081,7 +1104,7 @@ dockerGenerateCompose() {
         else "[::]:\($protocol.public_port):\($containerPort)/\($transport)" end
       ];
       [$r.core.type, $r.core.secondary_type] | map(select(. != null)) as $cores |
-      ($r.core.protocols | map(select(.id == 1 or .id == 2 or .id == 3 or .id == 4 or .id == 26))) as $direct |
+      ($r.core.protocols | map(select(.id == 1 or .id == 2 or .id == 3 or .id == 4 or .id == 5 or .id == 26))) as $direct |
       ($r.core.protocols | map(select(.id == 21))) as $websocket |
       ($r.host_integrations | map(select(.type == "wireguard"))) as $wireguard |
       ($r.host_integrations | map(select(.type == "fail2ban"))) as $fail2ban |

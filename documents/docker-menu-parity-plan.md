@@ -16,13 +16,13 @@
 | --- | --- | --- |
 | 1. 功能矩阵 | 已完成，提交 `7fe6a9e` | 协议与功能边界、管理状态、合同回归 |
 | 2. 菜单与可信首次配置 | 2A–2C 已实现；本地 PTY、事务和 Linux 权限通过，真实发布/连通待验 | 安装后进入菜单、独立命令生命周期、无需手填镜像的首次配置 |
-| 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2 Reality、3C.3 Hysteria2 与 3C.4 AnyTLS 已通过本地与 amd64 实际传输验收 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
+| 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2–3C.5 Reality/Hysteria2/AnyTLS/NaiveProxy 基础入口已通过本地与 amd64 传输验收 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
 | 4. 用户、订阅与服务维护 | 未开始 | 本机用户业务、多服务器后端、分范围备份恢复、核心运维 |
 | 5. 站点、路由与宿主集成 | 未开始 | 站点管理、内部能力、规则所有权及可撤销宿主操作 |
 | 6. 发布与完整验收 | 未开始 | 迁移文档、真实 Linux 与双架构证据、受门禁保护的 Release |
 
 当前机器可读支持状态以
-[`features.json`](../docker/contracts/features.json)为准：协议 `1`、`2`、`3`、`4`、`21`、`26` 的初始
+[`features.json`](../docker/contracts/features.json)为准：协议 `1`、`2`、`3`、`4`、`5`、`21`、`26` 的初始
 配置运行已支持，协议管理工作流仍为 `deferred`。发布订阅要求 Xray、协议 `21`
 和受管 TLS；不能由“可以生成链接”推断任意核心已经支持 HTTPS 订阅发布。
 第一步的回归使用模拟 Docker，不能代替真实容器、SSH 终端和客户端连通验证。
@@ -575,6 +575,46 @@ bash docker/tests/anytls-real.sh \
 未重建、签名发布或部署镜像，未验公网 TCP 宿主入口、第三方导入 UI、原生 arm64、
 真实 DNS 服务商和完整宿主重启；这些限制不由隔离连接成功推断完成。
 3B.4 剩余验收、3C 其它协议、3D、4A 与 5C 仍未完成。
+
+#### 3C.5 NaiveProxy 基础入口
+
+新增协议 `5`，仅支持 sing-box 的 v3 合同，沿用受管 TLS、候选事务和固定 UUID。
+首配选项 `8` 支持单核心或主 sing-box、副 Xray Reality，确认前拒绝异域与双核端口冲突。
+入口服务器必须与 `naive.domain` 及 TLS 根域一致，按原生格式输出
+`naive+https://username:password@domain:port?padding=true#name`，不添加独立 SNI 覆盖参数。
+用户名、密码和统计标识均为 UUID；流量渲染保留 `username/password`，不能添加 `name`。
+仅发布 IPv4/IPv6 TCP，明确 `network: tcp`，不隐式开启 UDP/QUIC。
+已有证书、导入与 DNS-01 复用原事务；入口端口/地址族/名称编辑、同核复制和删除已接入。
+域名、UUID、核心归属及身份冻结；新类型需要完整 `configure` 规格，跨核复制与宿主集成拒绝。
+删除其它 TLS 协议时保留 Naive 的 TLS；最后 TLS 入口删除才清空规格引用。
+HTTPS 发布仍要求 Xray WS TLS，组合发布可包含 Naive 链接；完整管理仍 `deferred`。
+
+本地验收：固定 Linux 快照和 `--init` 工具容器，
+`naive.sh` `39.26` 秒包含 AnyTLS/Hysteria2/Reality/旧协议基线，
+首配/编辑 PTY `94.97` 秒、流量 `4.95` 秒、`phase3` `113.31` 秒通过。
+覆盖严格合同、v1/v2/旧 bundle 拒绝、三拓扑、双栈 TCP、TLS/URI/运行漂移、
+共享额度、失败/更新/回滚及最后 TLS 消费者关系；Schema 6 正例/19 反例、Bash/ShellCheck/JSON 通过。
+`docker-naive` selector 与 CI `naive.sh` 入口一次覆盖全部既有协议，不额外重复运行旧套件。
+
+真实 amd64 `11.94` 秒通过：沿用 3C.2 的固定业务镜像、生产权限及健康检查，
+客户端仅从 URI 提取认证/TLS 参数并信任临时测试 CA，IPv4/IPv6 两条 SOCKS HTTP proof 通过。
+共享服务端网络查询真实 gRPC，UUID 上/下行均为正计数，未修改生产统计监听地址。
+第 4 参数为具备 HTTP/2 curl 的本地工具镜像，不允许隐式拉取；本次工具镜像 ID
+`sha256:4d65c50b17a9478c1272f88fad4a1dad1127909e8ac293e6d7d625a337d9e5a6`，
+仅用于验收，业务端未改镜像或权限；本轮容器、网络、卷和工具镜像已清理。
+复现时先准备本地 HTTP/2 curl 工具镜像，再运行：
+
+```bash
+bash docker/tests/naive.sh
+bash docker/tests/naive-real.sh \
+  padm-local/padm-xray:tls-3b4 \
+  padm-local/padm-sing-box:tls-3b4 \
+  padm-local/padm-ops:tls-3b4 \
+  local-http2-curl:test
+```
+
+隔离 CA 不证明生产证书、指纹或公网连通；第三方导入 UI、公网入口、原生 arm64、
+真实 DNS、整机重启及可信发布仍待验，3B.4/其余 3C/3D/4A/5C 不能标完成。
 
 ### 3D. 协议管理与入口维护
 

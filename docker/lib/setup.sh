@@ -87,7 +87,7 @@ dockerSetupGenerateSpec() {
     uuid=$(dockerSetupTool "${xrayImage}" uuid 2>/dev/null) || return 1
     [[ "${uuid}" =~ ^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$ ]] || return 1
     token=$(dockerSetupRandomHex "${opsImage}" 32) || return 1
-    if [[ ( "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 ) || -n "${secondaryCore}" ]]; then
+    if [[ ( "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 ) || -n "${secondaryCore}" ]]; then
         keyPair=$(dockerSetupTool "${xrayImage}" x25519 2>/dev/null) || return 1
         privateKey=$(awk '/^PrivateKey:/ { print $2; exit }' <<<"${keyPair}")
         publicKey=$(awk '/^Password \(PublicKey\):/ { print $3; exit } /^PublicKey:/ { print $2; exit }' <<<"${keyPair}")
@@ -126,7 +126,7 @@ dockerSetupGenerateSpec() {
       $secrets[6] as $obfsPassword |
       . + {schema_version: 3, core: {type: $core,
         secondary_type: (if $secondaryCore == "" then null else $secondaryCore end), protocols: [
-        (if $protocols != 2 and $protocols != 6 and $protocols != 7 then {
+        (if $protocols != 2 and $protocols != 6 and $protocols != 7 and $protocols != 8 then {
           id: (if $protocols == 4 then 2 elif $protocols == 5 then 26 else 1 end),
           core: $core, server: $server, public_port: $realityPort, address_families: $families,
           listener_id: (if $protocols == 4 then "entry-reality-xhttp"
@@ -149,18 +149,20 @@ dockerSetupGenerateSpec() {
             obfs: (if $obfsPassword == "" then null else {type: "salamander", password: $obfsPassword} end),
             masquerade: $hy2Masquerade}
         } else empty end),
-        (if $protocols == 7 then {
-          id: 4, core: $core, server: $server, public_port: $wsPort, address_families: $families,
-          listener_id: "entry-anytls", name: "main-anytls", uuid: $uuid,
-          anytls: {domain: $domain}
-        } else empty end),
+        (if $protocols == 7 or $protocols == 8 then {
+          id: (if $protocols == 7 then 4 else 5 end), core: $core, server: $server,
+          public_port: $wsPort, address_families: $families,
+          listener_id: (if $protocols == 7 then "entry-anytls" else "entry-naive" end),
+          name: (if $protocols == 7 then "main-anytls" else "main-naive" end), uuid: $uuid
+        } + (if $protocols == 7 then {anytls: {domain: $domain}} else {naive: {domain: $domain}} end)
+        else empty end),
         (if $secondaryCore != "" then {
           id: 1, core: $secondaryCore, server: $server, public_port: $secondaryPort, address_families: $families,
           listener_id: "entry-secondary-reality", name: "secondary-reality", uuid: $uuid,
           reality: {server_name: $sni, target_host: $target, target_port: $targetPort,
             private_key: $privateKey, public_key: $publicKey, short_id: $shortId}
         } else empty end)]},
-        tls: (if $protocols == 2 or $protocols == 3 or $protocols == 6 or $protocols == 7 then {domain: $domain} else null end),
+        tls: (if $protocols == 2 or $protocols == 3 or $protocols == 6 or $protocols == 7 or $protocols == 8 then {domain: $domain} else null end),
         subscription: {enabled: $subscription, token: $token}, host_integrations: []}
     ' >"${output}" || return 1
     rm -f -- "${inputsFile}" || return 1
@@ -255,7 +257,7 @@ dockerTlsManageCommand() {
     }
     currentDomain=$(jq -er '.tls.domain | select(type == "string" and length > 0)' \
         "${root}/config/spec.json" 2>/dev/null) && dockerDomainIsValid "${currentDomain}" || {
-        dockerError '当前部署没有 TLS 域名，请先配置 WS TLS、Hysteria2 或 AnyTLS 入口'
+        dockerError '当前部署没有 TLS 域名，请先配置 WS TLS、Hysteria2、AnyTLS 或 NaiveProxy 入口'
         return "${PADM_DOCKER_RC_STATE}"
     }
     dockerConfigureSpecValidate "${root}/config/spec.json" &&
@@ -354,11 +356,13 @@ dockerSetupCommand() {
     2|4)
         core=sing-box
         [[ "${coreChoice}" != 4 ]] || secondaryCore=xray
-        dockerSetupRead protocols '协议 [1=Reality Vision, 5=Reality gRPC, 6=Hysteria2, 7=AnyTLS, 0=取消]: ' 1 || return 0
-        [[ "${protocols}" == 1 || "${protocols}" == 5 || "${protocols}" == 6 || "${protocols}" == 7 ]] || return "${PADM_DOCKER_RC_USAGE}"
+        dockerSetupRead protocols '协议 [1=Reality Vision, 5=Reality gRPC, 6=Hysteria2, 7=AnyTLS, 8=NaiveProxy, 0=取消]: ' 1 || return 0
+        [[ "${protocols}" == 1 || "${protocols}" == 5 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 ]] || return "${PADM_DOCKER_RC_USAGE}"
         ;;
     *) return "${PADM_DOCKER_RC_USAGE}" ;;
     esac
+    [[ "${protocols}" != 8 ]] ||
+        printf 'NaiveProxy 服务器必须与 TLS 域名一致，原生 naive+https URI 不支持独立 SNI。\n'
     dockerSetupRead server '服务器域名或 IP（0 取消）: ' || return 0
     [[ -n "${server}" ]] || return "${PADM_DOCKER_RC_USAGE}"
     dockerSetupRead familyChoice '地址族 [1=IPv4, 2=IPv6, 3=双栈, 默认 1]: ' 1 || return 0
@@ -368,8 +372,8 @@ dockerSetupCommand() {
     3) families='["ipv4","ipv6"]' ;;
     *) return "${PADM_DOCKER_RC_USAGE}" ;;
     esac
-    if [[ ( "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 ) || -n "${secondaryCore}" ]]; then
-        if [[ "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 ]]; then
+    if [[ ( "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 ) || -n "${secondaryCore}" ]]; then
+        if [[ "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 ]]; then
             dockerSetupRead realityPort '主核心 Reality 入口端口 [443]: ' 443 || return 0
         fi
         dockerSetupRead target 'Reality 目标域名（0 取消）: ' || return 0
@@ -381,16 +385,22 @@ dockerSetupCommand() {
     if [[ -n "${secondaryCore}" ]]; then
         dockerSetupRead secondaryPort "副核心 ${secondaryCore} Reality 入口端口 [8444]: " 8444 || return 0
     fi
-    if [[ "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 6 || "${protocols}" == 7 ]]; then
+    if [[ "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 ]]; then
         [[ "${protocols}" != 3 ]] || wsPort=8443
         if [[ "${protocols}" == 6 ]]; then
             dockerSetupRead domain 'Hysteria2 TLS 域名（0 取消）: ' || return 0
         elif [[ "${protocols}" == 7 ]]; then
             dockerSetupRead domain 'AnyTLS TLS 域名（0 取消）: ' || return 0
+        elif [[ "${protocols}" == 8 ]]; then
+            dockerSetupRead domain "NaiveProxy TLS 域名 [${server}]（0 取消）: " "${server}" || return 0
         else
             dockerSetupRead domain 'WS TLS 域名（0 取消）: ' || return 0
         fi
         dockerDomainIsValid "${domain}" || return "${PADM_DOCKER_RC_USAGE}"
+        if [[ "${protocols}" == 8 && "${server}" != "${domain}" ]]; then
+            dockerError 'NaiveProxy 服务器必须与 TLS 域名一致，原生 URI 不支持独立 SNI'
+            return "${PADM_DOCKER_RC_USAGE}"
+        fi
         if [[ "${protocols}" == 6 ]]; then
             dockerSetupRead wsPort "Hysteria2 UDP 入口端口 [${wsPort}]: " "${wsPort}" || return 0
             dockerSetupRead hy2Mode '拥塞模式 [bbr=自适应, brutal=固定带宽，默认 bbr]: ' bbr || return 0
@@ -410,6 +420,8 @@ dockerSetupCommand() {
             dockerSetupRead hy2Masquerade '伪装 HTTPS 地址（空输入不启用，0 取消）: ' || return 0
         elif [[ "${protocols}" == 7 ]]; then
             dockerSetupRead wsPort "AnyTLS TCP 入口端口 [${wsPort}]: " "${wsPort}" || return 0
+        elif [[ "${protocols}" == 8 ]]; then
+            dockerSetupRead wsPort "NaiveProxy TCP 入口端口 [${wsPort}]: " "${wsPort}" || return 0
         else
             dockerSetupRead wsPort "WS TLS 入口端口 [${wsPort}]: " "${wsPort}" || return 0
         fi
@@ -445,13 +457,13 @@ dockerSetupCommand() {
     [[ "${protocols}" != 3 || "${realityPort}" != "${wsPort}" ]] ||
         { dockerError 'Reality 和 WS TLS 不能使用同一入口端口'; return "${PADM_DOCKER_RC_CONFLICT}"; }
     if [[ -n "${secondaryCore}" ]] &&
-        { [[ "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${secondaryPort}" == "${realityPort}" ]] ||
-          [[ ( "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 6 || "${protocols}" == 7 ) && "${secondaryPort}" == "${wsPort}" ]]; }; then
+        { [[ "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 && "${secondaryPort}" == "${realityPort}" ]] ||
+          [[ ( "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 ) && "${secondaryPort}" == "${wsPort}" ]]; }; then
         dockerError '主副核心不能使用同一入口端口'
         return "${PADM_DOCKER_RC_CONFLICT}"
     fi
     printf '\n核心: %s\n协议组合: %s\n服务器: %s\n地址族: %s\n' "${core}" "${protocols}" "${server}" "${families}"
-    [[ "${protocols}" == 2 || "${protocols}" == 6 || "${protocols}" == 7 ]] ||
+    [[ "${protocols}" == 2 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 ]] ||
         printf 'Reality: %s -> %s:%s，SNI %s\n' "${realityPort}" "${target}" "${targetPort}" "${sni}"
     if [[ "${protocols}" == 2 || "${protocols}" == 3 ]]; then
         printf 'WS TLS: %s:%s，证书方式 %s，订阅 %s\n' "${domain}" "${wsPort}" "${tlsMode}" "${subscription}"
@@ -460,6 +472,8 @@ dockerSetupCommand() {
             "${domain}" "${wsPort}" "${tlsMode}" "${hy2Mode}" "${hy2Up}" "${hy2Down}" "${hy2Obfs}"
     elif [[ "${protocols}" == 7 ]]; then
         printf 'AnyTLS: %s:%s/tcp，证书方式 %s\n' "${domain}" "${wsPort}" "${tlsMode}"
+    elif [[ "${protocols}" == 8 ]]; then
+        printf 'NaiveProxy: %s:%s/tcp，证书方式 %s\n' "${domain}" "${wsPort}" "${tlsMode}"
     fi
     [[ -z "${secondaryCore}" ]] || printf '副核心: %s，Reality 入口端口 %s\n' "${secondaryCore}" "${secondaryPort}"
     printf '确认后将验证发布、生成账号参数并配置服务。\n'
@@ -480,7 +494,7 @@ dockerSetupCommand() {
         return "${PADM_DOCKER_RC_STATE}"
     }
     dockerConfigureReleaseValidate "${candidate}/spec.json" || return "${PADM_DOCKER_RC_MANIFEST}"
-    if [[ "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 6 || "${protocols}" == 7 ]]; then
+    if [[ "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 ]]; then
         dockerSetupStageCertificate "${candidate}" "${tlsMode}" "${domain}" "${cert}" "${key}" \
             "${email}" "${provider}" "${credentials}" || return "${PADM_DOCKER_RC_STATE}"
         dockerConfigureApply "${candidate}/spec.json" "${candidate}/tls" "${candidate}/acme" || status=$?
@@ -550,7 +564,8 @@ dockerProtocolCommand() (
           .core.protocols[] |
           "\(.listener_id)  \(.core)  \(if .id == 1 then "Reality Vision"
             elif .id == 2 then "Reality XHTTP" elif .id == 26 then "Reality gRPC"
-            elif .id == 3 then "Hysteria2" elif .id == 4 then "AnyTLS" else "WS TLS" end)  \(.server | authority):\(.public_port)  [\(.address_families | join(","))]  \(.name)"' \
+            elif .id == 3 then "Hysteria2" elif .id == 4 then "AnyTLS"
+            elif .id == 5 then "NaiveProxy" else "WS TLS" end)  \(.server | authority):\(.public_port)  [\(.address_families | join(","))]  \(.name)"' \
             "${normalized}"
         return $?
     fi
@@ -599,7 +614,7 @@ dockerEditFields() {
                   .core.protocols |= map(select(.listener_id != $key)) |
                   if all(.core.protocols[]; .core != $primary) then error("主核心至少保留一个入口")
                   elif any(.core.protocols[]; .id == 21) then .
-                  elif any(.core.protocols[]; .id == 3 or .id == 4) then .subscription.enabled = false
+                  elif any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5) then .subscription.enabled = false
                   else .tls = null | .subscription.enabled = false end |
                   .core.secondary_type = ([.core.protocols[] | select(.core != $primary) | .core] | first // null)
                 ' "${draft}" >"${temporary}" 2>/dev/null || {
@@ -628,6 +643,10 @@ dockerEditFields() {
                 fi
                 if [[ "${targetProtocol}" == 4 && "${targetCore}" != sing-box ]]; then
                     dockerError 'AnyTLS 入口仅支持 sing-box，不能复制到 Xray'
+                    return 1
+                fi
+                if [[ "${targetProtocol}" == 5 && "${targetCore}" != sing-box ]]; then
+                    dockerError 'NaiveProxy 入口仅支持 sing-box，不能复制到 Xray'
                     return 1
                 fi
                 if [[ "${targetCore}" != "${primaryCore}" ]] &&
@@ -752,6 +771,13 @@ dockerEditFields() {
                 [[ "${value}" != off ]] || value=
             else
                 dockerSetupRead value '新值（空输入保留，0 取消）: ' "${defaultValue}" || return 3
+            fi
+            if [[ "${protocol}" == 5 && "${field}" == server ]] &&
+                ! jq -e --arg key "${listener}" --arg server "${value}" '
+                  .core.protocols[] | select(.listener_id == $key) | .naive.domain == $server
+                ' "${draft}" >/dev/null; then
+                dockerError 'NaiveProxy 服务器必须与 TLS 域名一致，原生 URI 不支持独立 SNI'
+                return 1
             fi
             # 输入值可能含账号或 WS 路径，只经私密文件传给 jq。
             printf '%s' "${value}" >"${valueFile}" || return 1
@@ -894,7 +920,7 @@ dockerEditCommand() {
       # 分次提交新增与删除，防止借同凭据入口绕过已有身份和内部端口冻结。
       ((($oldIds - $newIds) | length) == 0 or (($newIds - $oldIds) | length) == 0) and
       ($old | root) == ($new | root) and
-      $new.tls == (if any($new.core.protocols[]; .id == 21 or .id == 3 or .id == 4) then $old.tls else null end) and
+      $new.tls == (if any($new.core.protocols[]; .id == 21 or .id == 3 or .id == 4 or .id == 5) then $old.tls else null end) and
       all($new.core.protocols[];
         . as $entry | [$old.core.protocols[] | select(.listener_id == $entry.listener_id)] as $existing |
         if ($existing | length) == 1 then ($existing[0] | fixed) == ($entry | fixed)
@@ -903,6 +929,7 @@ dockerEditCommand() {
            ($entry.id == 2 and $entry.core == "xray") or
            ($entry.id == 3 and $entry.core == "sing-box") or
            ($entry.id == 4 and $entry.core == "sing-box") or
+           ($entry.id == 5 and $entry.core == "sing-box") or
            ($entry.id == 21 and $entry.core == "xray")) and
           any($old.core.protocols[];
             .listener_id as $sourceId | any($new.core.protocols[]; .listener_id == $sourceId) and
