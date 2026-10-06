@@ -378,7 +378,203 @@ runPublicIPIPv4FallbackRegression() (
     [[ "$(getPublicIP 6)" == '2001:db8::10' ]]
 )
 
+runRealityTargetLocationRegression() (
+    local resultsFile="${TMP_DIR}/reality-location-results.tsv"
+    local linesFile="${TMP_DIR}/reality-location-lines.tsv"
+    local lookupLog="${TMP_DIR}/reality-location-lookups.log"
+    local line location
+    local note="TLS 1.3 + X25519MLKEM768 可用"
+
+    formatRealityTargetResultLine "legacy-location.example.com:443" "legacy-location.example.com" "Legacy" "test" "no" "192.0.2.201" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "${note}" >"${resultsFile}"
+    line=$(<"${resultsFile}")
+    [[ "$(awk -F'\t' '{print NF}' <<<"${line}")" == "16" ]]
+    [[ "$(realityTargetResultField "${line}" 15)" == "${note}" ]]
+    [[ "$(realityTargetResultField "${line}" 16)" == "Unknown" ]]
+    formatRealityTargetResultLine "untouched-location.example.com:443" "untouched-location.example.com" "Untouched" "test" "no" "192.0.2.203" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "${note}" >>"${resultsFile}"
+    : >"${linesFile}"
+    {
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "legacy-location.example.com:443" "legacy-location.example.com" "Legacy" "test" "no" "192.0.2.201" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567891" "${note}"
+        formatRealityTargetResultLine "same-ip-location.example.com:443" "same-ip-location.example.com" "Same IP" "test" "no" "192.0.2.201" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567892" "${note}"
+        formatRealityTargetResultLine "same-asn-location.example.com:443" "same-asn-location.example.com" "Same ASN" "test" "no" "192.0.2.202" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567893" "${note}"
+        formatRealityTargetResultLine "known-location.example.com:443" "known-location.example.com" "Known" "test" "no" "198.51.100.210" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567894" "${note}" "Known, United Kingdom"
+        formatRealityTargetResultLine "non-a-location.example.com:443" "non-a-location.example.com" "Non-A" "test" "no" "198.51.100.211" "AS64500" "ExampleNet" "same_asn" "B" "yes" "4096" "yes" "1234567895" "${note}"
+    } >"${linesFile}"
+    export PADM_REALITY_TARGET_RESULTS_FILE="${resultsFile}"
+    export PADM_REALITY_TARGET_SCAN_FILE="${resultsFile}"
+    export REALITY_LOCATION_LOOKUP_ARGS_FILE="${lookupLog}"
+    : >"${lookupLog}"
+    writeRealityTargetResultLines "${linesFile}"
+    line=$(realityTargetResultLine "legacy-location.example.com:443")
+    [[ "$(realityTargetResultField "${line}" 15)" == "${note}" ]]
+    [[ "$(realityTargetResultField "${line}" 16)" == "Los Angeles, United States" ]]
+    line=$(realityTargetResultLine "same-ip-location.example.com:443")
+    [[ "$(realityTargetResultField "${line}" 16)" == "Los Angeles, United States" ]]
+    line=$(realityTargetResultLine "same-asn-location.example.com:443")
+    [[ "$(realityTargetResultField "${line}" 16)" == "New York, United States" ]]
+    [[ "$(wc -l <"${lookupLog}" | tr -d ' ')" == "2" ]]
+    grep -qxF '192.0.2.201' "${lookupLog}"
+    grep -qxF '192.0.2.202' "${lookupLog}"
+    ! grep -qF '192.0.2.203' "${lookupLog}"
+    ! grep -qF '198.51.100.211' "${lookupLog}"
+    [[ "$(realityTargetResultCount)" == "5" ]]
+    line=$(realityTargetResultLine "untouched-location.example.com:443")
+    [[ "$(realityTargetResultField "${line}" 16)" == "Unknown" ]]
+    [[ "$(awk -F'\t' '{print NF}' <<<"${line}")" == "16" ]]
+
+    # 既存位置只对同一个 IP 有效，目标 IP 改变后重新查询。
+    : >"${lookupLog}"
+    formatRealityTargetResultLine "changed-ip-location.example.com:443" "changed-ip-location.example.com" "Changed" "test" "no" "192.0.2.201" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567896" "${note}" >"${linesFile}"
+    writeRealityTargetResultLines "${linesFile}"
+    [[ ! -s "${lookupLog}" ]]
+    : >"${linesFile}"
+    formatRealityTargetResultLine "changed-ip-location.example.com:443" "changed-ip-location.example.com" "Changed" "test" "no" "198.51.100.212" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567897" "${note}" >"${linesFile}"
+    writeRealityTargetResultLines "${linesFile}"
+    line=$(realityTargetResultLine "changed-ip-location.example.com:443")
+    [[ "$(realityTargetResultField "${line}" 16)" == "London, United Kingdom" ]]
+    grep -qxF '198.51.100.212' "${lookupLog}"
+    [[ "$(wc -l <"${lookupLog}" | tr -d ' ')" == "1" ]]
+    writeRealityTargetCacheLine "changed-ip-location.example.com:443" "A" "yes" "4096" "yes" "1234567898" "${note}" "192.0.2.202" "AS64500" "ExampleNet" "same_asn" "no"
+    line=$(realityTargetResultLine "changed-ip-location.example.com:443")
+    [[ "$(realityTargetResultField "${line}" 16)" == "New York, United States" ]]
+    [[ "$(wc -l <"${lookupLog}" | tr -d ' ')" == "1" ]]
+
+    # 同批失败 IP 只查询一次，显式 Unknown 不在写入时重试。
+    : >"${lookupLog}"
+    {
+        formatRealityTargetResultLine "changed-ip-location.example.com:443" "changed-ip-location.example.com" "Changed" "test" "no" "203.0.113.250" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567898" "${note}"
+        formatRealityTargetResultLine "failed-location.example.com:443" "failed-location.example.com" "Failed" "test" "no" "203.0.113.250" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567898" "${note}"
+    } >"${linesFile}"
+    writeRealityTargetResultLines "${linesFile}"
+    [[ "$(wc -l <"${lookupLog}" | tr -d ' ')" == "1" ]]
+    line=$(realityTargetResultLine "failed-location.example.com:443")
+    [[ "$(realityTargetResultField "${line}" 16)" == "Unknown" ]]
+    : >"${lookupLog}"
+    formatRealityTargetResultLine "failed-location.example.com:443" "failed-location.example.com" "Failed" "test" "no" "203.0.113.250" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567898" "${note}" "Unknown" >"${linesFile}"
+    writeRealityTargetResultLines "${linesFile}"
+    [[ ! -s "${lookupLog}" ]]
+
+    (
+        local fetchLog="${TMP_DIR}/reality-location-fetch.log"
+        local longCity longLocation
+        fetchUrlToStdout() {
+            printf '%s\n' "$1" >>"${fetchLog}"
+            case "$1" in
+            *192.0.2.221?*) printf '%s\n' '{"success":true,"city":"Los Angeles","region":"California","country":"United States"}' ;;
+            *198.51.100.221?*) printf '%s\n' '{"success":true,"city":"London","region":"England","country":"United Kingdom"}' ;;
+            *2001:db8::221?*) printf '%s\n' '{"success":true,"city":null,"region":"Tokyo","country":"Japan"}' ;;
+            *192.0.2.222?*) printf '%s\n' '{"success":true,"city":null,"region":null,"country":"United States"}' ;;
+            *192.0.2.223?*) printf '%s\n' '{"success":' ;;
+            *192.0.2.224?*) printf '%s\n' '{"success":false,"message":"Reserved range"}' ;;
+            *192.0.2.225?*) printf '%s\n' '{"success":true,"city":"Bad\tCity","region":"Bad\rRegion","country":"United\nStates"}' ;;
+            *192.0.2.226?*)
+                printf -v longCity '%150s' ''
+                printf '{"success":true,"city":"%s","country":"United States"}\n' "${longCity// /x}"
+                ;;
+            *192.0.2.227?*) return 1 ;;
+            *192.0.2.228?*) printf '%s\n' '{"success":true}' ;;
+            *) return 1 ;;
+            esac
+        }
+        : >"${fetchLog}"
+        [[ "$(padmRealLookupRealityTargetLocation "192.0.2.221")" == "Los Angeles, United States" ]]
+        [[ "$(padmRealLookupRealityTargetLocation "198.51.100.221")" == "London, United Kingdom" ]]
+        [[ "$(padmRealLookupRealityTargetLocation "2001:db8::221")" == "Tokyo, Japan" ]]
+        [[ "$(padmRealLookupRealityTargetLocation "192.0.2.222")" == "United States" ]]
+        ! padmRealLookupRealityTargetLocation "192.0.2.223" >/dev/null
+        ! padmRealLookupRealityTargetLocation "192.0.2.224" >/dev/null
+        location=$(padmRealLookupRealityTargetLocation "192.0.2.225")
+        [[ "${location}" != *$'\t'* && "${location}" != *$'\n'* && "${location}" != *$'\r'* ]]
+        [[ "${location}" == "Bad City, United States" ]]
+        longLocation=$(padmRealLookupRealityTargetLocation "192.0.2.226")
+        [[ "${#longLocation}" -le 115 ]]
+        ! padmRealLookupRealityTargetLocation "192.0.2.227" >/dev/null
+        ! padmRealLookupRealityTargetLocation "192.0.2.228" >/dev/null
+        ! padmRealLookupRealityTargetLocation "not-an-ip" >/dev/null
+        ! padmRealLookupRealityTargetLocation "999.2.3.4" >/dev/null
+        ! padmRealLookupRealityTargetLocation ":::" >/dev/null
+        grep -qxF 'https://ipwho.is/2001:db8::221?lang=en&fields=success,city,region,country' "${fetchLog}"
+        [[ "$(wc -l <"${fetchLog}" | tr -d ' ')" == "10" ]]
+    )
+
+    (
+        local detailLog="${TMP_DIR}/reality-location-detail.log"
+        local statusLog="${TMP_DIR}/reality-location-status.log"
+        local unknownLog="${TMP_DIR}/reality-location-unknown.log"
+        : >"${detailLog}"
+        : >"${statusLog}"
+        REALITY_LOCATION_LOOKUP_ARGS_FILE="${detailLog}"
+        realityTargetDetector() { printf 'fake-xray\n'; }
+        currentRealityNetworkProfile() { printf '203.0.113.10\tAS64500\tExampleNet\n'; }
+        probeRealityTargetEndpoint() {
+            printf 'no\t198.51.100.221\tAS64501\tRemoteNet\tA\tyes\t4096\tyes\tprimary probe fixture\n'
+        }
+        realityTargetStatusBlock() { printf '%s\n' "$*" >>"${statusLog}"; }
+        showRealityTargetQuality "location-detail.example.com:443" >/dev/null
+        grep -qxF '198.51.100.221' "${detailLog}"
+        [[ "$(wc -l <"${detailLog}" | tr -d ' ')" == "1" ]]
+        grep -qF '地理位置: London, United Kingdom' "${statusLog}"
+        line=$(realityTargetResultLine "location-detail.example.com:443")
+        [[ "$(realityTargetResultField "${line}" 6)" == "198.51.100.221" ]]
+        [[ "$(realityTargetResultField "${line}" 16)" == "London, United Kingdom" ]]
+        : >"${detailLog}"
+        showRealityTargetQuality "location-detail.example.com:443" >/dev/null
+        [[ ! -s "${detailLog}" ]]
+        showRealityTargetQuality "same-ip-detail.example.com:443" >/dev/null
+        [[ ! -s "${detailLog}" ]]
+        line=$(realityTargetResultLine "same-ip-detail.example.com:443")
+        [[ "$(realityTargetResultField "${line}" 16)" == "London, United Kingdom" ]]
+
+        REALITY_LOCATION_LOOKUP_ARGS_FILE="${unknownLog}"
+        : >"${unknownLog}"
+        lookupRealityTargetLocation() { printf '%s\n' "$1" >>"${unknownLog}"; return 1; }
+        probeRealityTargetEndpoint() {
+            printf 'no\t198.51.100.222\tAS64501\tRemoteNet\tA\tyes\t4096\tyes\tvalidation fixture\n'
+        }
+        validateRealityTargetSelection manual "location-unknown.example.com:443" "location-unknown.example.com"
+        line=$(realityTargetResultLine "location-unknown.example.com:443")
+        [[ "$(realityTargetResultField "${line}" 16)" == "Unknown" ]]
+        grep -qxF '198.51.100.222' "${unknownLog}"
+        [[ "$(wc -l <"${unknownLog}" | tr -d ' ')" == "1" ]]
+        : >"${unknownLog}"
+        showRealityTargetQuality "location-detail-unknown.example.com:443" >/dev/null
+        [[ "$(wc -l <"${unknownLog}" | tr -d ' ')" == "1" ]]
+        grep -qF '地理位置: Unknown' "${statusLog}"
+    )
+
+    (
+        local pageLog="${TMP_DIR}/reality-location-page.log"
+        local pageOutput
+        menuLine() { printf '%s\n' "$*"; }
+        : >"${pageLog}"
+        formatRealityTargetResultLine "location-page.example.com:443" "location-page.example.com" "Page" "test" "no" "198.51.100.230" "AS64501" "RemoteNet" "different_network" "A" "yes" "4096" "yes" "1234567898" "${note}" "London, United Kingdom" >"${resultsFile}"
+        REALITY_LOCATION_LOOKUP_ARGS_FILE="${pageLog}"
+        pageOutput=$(showRealityTargetScanResults all once)
+        [[ "${pageOutput}" == *"location=London, United Kingdom"* ]]
+        [[ ! -s "${pageLog}" ]]
+        [[ "$(realityTargetResultField "$(<"${resultsFile}")" 16)" == "London, United Kingdom" ]]
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "legacy-page.example.com:443" "legacy-page.example.com" "Legacy" "test" "no" "192.0.2.231" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567898" "${note}" >"${resultsFile}"
+        pageOutput=$(showRealityTargetScanResults all once)
+        [[ "${pageOutput}" == *"location=Unknown"* ]]
+        [[ ! -s "${pageLog}" ]]
+        [[ "$(awk -F'\t' '{print NF}' "${resultsFile}")" == "15" ]]
+        formatRealityTargetResultLine "empty-note.example.com:443" "empty-note.example.com" "" "test" "no" "192.0.2.201" "AS64500" "" "same_asn" "A" "yes" "4096" "yes" "1234567898" "" >"${linesFile}"
+        writeRealityTargetResultLines "${linesFile}"
+        line=$(realityTargetResultLine "empty-note.example.com:443")
+        [[ "$(realityTargetResultField "${line}" 3)" == "" ]]
+        [[ "$(realityTargetResultField "${line}" 8)" == "" ]]
+        [[ "$(realityTargetResultField "${line}" 15)" == "" ]]
+        [[ "$(realityTargetResultField "${line}" 16)" == "Los Angeles, United States" ]]
+        pageOutput=$(showRealityTargetScanResults all once)
+        [[ "${pageOutput}" == *"location=Los Angeles, United States"* ]]
+        [[ "$(realityTargetResultField "${line}" 0)" == "" ]]
+        [[ "$(realityTargetResultField "${line}" 17)" == "" ]]
+    )
+)
+
 runRealityCandidateFastRegression() {
+    runRealityTargetLocationRegression
     local fixtureFile="${TMP_DIR}/reality-candidates-fast.txt"
     local cacheFile="${TMP_DIR}/reality-target-cache-fast.tsv"
     local emptyResultsFile="${TMP_DIR}/reality-target-empty-fast.tsv"
@@ -415,11 +611,17 @@ EOF
     firstRecommendedRealityCandidate=$(realityTargetFilteredCandidateLineByIndex recommended 1)
     [[ "$(realityTargetCandidateField "${firstRecommendedRealityCandidate}" 1)" == "fixture-primary.example.com" ]]
     export PADM_REALITY_TARGET_RESULTS_FILE="${cacheFile}"
-    formatRealityTargetResultLine "fixture-primary.example.com:443" "fixture-primary.example.com" "Fixture Primary" "large_site" "no" "192.0.2.44" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "cached" >"${cacheFile}"
+    formatRealityTargetResultLine "fixture-primary.example.com:443" "fixture-primary.example.com" "Fixture Primary" "large_site" "no" "192.0.2.44" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "cached" "Los Angeles, United States" >"${cacheFile}"
     formatRealityTargetResultLine "fixture-secondary.example.com:8443" "fixture-secondary.example.com" "Fixture Secondary Alternate Port" "large_site" "unknown" "192.0.2.45" "AS64500" "ExampleNet" "same_asn" "B" "yes" "2048" "yes" "1234567890" "alternate port cache" >>"${cacheFile}"
     [[ "$(realityTargetCachedAsnSummary "fixture-primary.example.com:443")" == "192.0.2.44 AS64500 ExampleNet" ]]
     [[ "$(realityTargetCachedNetworkSummary "fixture-primary.example.com:443")" == "同 ASN" ]]
     [[ "$(realityTargetCachedAsnSummary "missing.example.com:443")" == "暂无缓存" ]]
+    (
+        local candidatePageOutput
+        menuLine() { printf '%s\n' "$*"; }
+        candidatePageOutput=$(showRealityTargetCandidatePage all 1 2)
+        [[ "${candidatePageOutput}" == *"location=Los Angeles, United States"* ]]
+    )
     formatRealityTargetResultLine "stale.example.com:443" "stale.example.com" "Stale" "test" "no" "192.0.2.40" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "old A" >"${staleResultsFile}"
     formatRealityTargetResultLine "stale.example.com:443" "stale.example.com" "Stale" "test" "no" "192.0.2.40" "AS64500" "ExampleNet" "same_asn" "B" "yes" "4096" "yes" "1234567891" "latest B" >>"${staleResultsFile}"
     (
@@ -902,6 +1104,7 @@ runRealityConfigScannerRegression() {
     local oldCandidatesFile="${PADM_REALITY_TARGET_CANDIDATES_FILE:-}"
     local scannerLine refreshScannerLine sameAsnLine batchLinesFile failedTargetsFile emptyLinesFile scannerSummary sameAsnSummary seenDomainsFile endpointResult asnCacheFile asnCacheProfile asnLookupCount
     local asnLookupFile="${TMP_DIR}/reality-scanner-asn-lookups.log"
+    local locationLookupFile="${TMP_DIR}/reality-scanner-location-lookups.log"
     local concurrencyDir="${TMP_DIR}/reality-scanner-concurrency"
     local refreshConcurrencyDir="${TMP_DIR}/reality-refresh-concurrency"
     local refreshTimeoutLog="${TMP_DIR}/reality-refresh-timeout.log"
@@ -970,10 +1173,14 @@ EOF
         shift 3
         "$@"
     }
+    export REALITY_LOCATION_LOOKUP_ARGS_FILE="${locationLookupFile}"
+    : >"${locationLookupFile}"
     scanLocalAsnRealityTargets
     [[ "$(wc -l <"${REALITY_TLS_PING_ARGS_FILE}" | tr -d ' ')" == "3" ]]
     asnLookupCount=$(wc -l <"${asnLookupFile}" | tr -d ' ')
     [[ "${asnLookupCount}" == "1" ]]
+    [[ "$(wc -l <"${locationLookupFile}" | tr -d ' ')" == "1" ]]
+    grep -qxF '192.0.2.1' "${locationLookupFile}"
     [[ "$(grep -cFx -- '-k 2 15' "${refreshTimeoutLog}")" == "3" ]]
     ! grep -qF $'fail-auto.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
     grep -qF $'fixture-fallback.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
@@ -986,6 +1193,7 @@ EOF
         printf '192.0.2.1\n'
     }
     rm -f "${REALITY_TLS_PING_ARGS_FILE}" "${asnLookupFile}" "${refreshTimeoutLog}"
+    : >"${locationLookupFile}"
     scanLocalAsnRealityTargets
     [[ "$(wc -l <"${REALITY_TLS_PING_ARGS_FILE}" | tr -d ' ')" == "5" ]]
     grep -qxF "tls ping -ip 192.0.2.1 fixture-fallback.example.com:443" "${REALITY_TLS_PING_ARGS_FILE}"
@@ -998,9 +1206,11 @@ EOF
     refreshScannerLine=$(grep -F $'refresh-scanner.example.com:8443\tsni.refresh-scanner.example.com\tRefresh Scanner\tscanner\tno\t' "${PADM_REALITY_TARGET_SCAN_FILE}")
     [[ "$(realityTargetResultField "${refreshScannerLine}" 9)" == "same_asn" ]]
     [[ "$(realityTargetResultField "${refreshScannerLine}" 15)" == "RealiTLScanner: Fixture CA; TLS 1.3 + X25519MLKEM768 可用，证书链长度满足 Xray 要求" ]]
+    [[ "$(realityTargetResultField "${refreshScannerLine}" 16)" == "Los Angeles, United States" ]]
+    [[ ! -s "${locationLookupFile}" ]]
     resolveRealityTargetAddresses() { printf '192.0.2.1\n'; }
     unset -f timeout
-    unset REALITY_ASN_LOOKUP_ARGS_FILE PADM_FAKE_XRAY_CONCURRENCY_DIR PADM_REALITY_SECONDARY_JOBS
+    unset REALITY_ASN_LOOKUP_ARGS_FILE REALITY_LOCATION_LOOKUP_ARGS_FILE PADM_FAKE_XRAY_CONCURRENCY_DIR PADM_REALITY_SECONDARY_JOBS
 
     (
         local rollingDir="${TMP_DIR}/reality-refresh-rolling"
@@ -1170,6 +1380,8 @@ CSV
     rm -f "${asnLookupFile}"
     export PADM_FAKE_XRAY_CONCURRENCY_DIR="${concurrencyDir}"
     export PADM_REALITY_SECONDARY_JOBS=4
+    export REALITY_LOCATION_LOOKUP_ARGS_FILE="${locationLookupFile}"
+    : >"${locationLookupFile}"
     importRealityScannerResults "${TMP_DIR}/realitlscanner.csv" "AS64500" "ExampleNet" scannerSummary
     IFS=$'\t' read -r scannerImported scannerSkipped scannerA scannerB scannerC scannerFail <<<"${scannerSummary}"
     [[ "${scannerImported}" == "5" ]]
@@ -1193,10 +1405,15 @@ CSV
     [[ "$(realityTargetResultField "${scannerLine}" 8)" == "RemoteNet" ]]
     [[ "$(realityTargetResultField "${scannerLine}" 9)" == "different_network" ]]
     [[ "$(realityTargetResultField "${scannerLine}" 15)" == *"RealiTLScanner: Let's Encrypt, Inc.;"* ]]
+    [[ "$(realityTargetResultField "${scannerLine}" 16)" == "London, United Kingdom" ]]
+    [[ "$(wc -l <"${locationLookupFile}" | tr -d ' ')" == "5" ]]
+    grep -qxF '198.51.100.11' "${locationLookupFile}"
+    ! grep -qxF '198.51.100.12' "${locationLookupFile}"
+    ! grep -qxF '198.51.100.17' "${locationLookupFile}"
     ! grep -qF $'scanner-unknown-asn.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
     grep -qF $'scanner-five.example.com:443\tscanner-five.example.com' "${PADM_REALITY_TARGET_SCAN_FILE}"
 
-    unset PADM_FAKE_XRAY_CONCURRENCY_DIR
+    unset PADM_FAKE_XRAY_CONCURRENCY_DIR REALITY_LOCATION_LOOKUP_ARGS_FILE
     seenDomainsFile="${TMP_DIR}/reality-scanner-seen-domains.txt"
     : >"${seenDomainsFile}"
     cat >"${TMP_DIR}/realitlscanner-same-asn-1.csv" <<'CSV'
@@ -1219,6 +1436,7 @@ CSV
     sameAsnLine=$(grep -F $'sameasn.example.com:443\tsameasn.example.com' "${PADM_REALITY_TARGET_SCAN_FILE}")
     [[ "$(realityTargetResultField "${sameAsnLine}" 7)" == "AS64500" ]]
     [[ "$(realityTargetResultField "${sameAsnLine}" 9)" == "same_asn" ]]
+    [[ "$(realityTargetResultField "${sameAsnLine}" 16)" == "Los Angeles, United States" ]]
     unset REALITY_ASN_LOOKUP_ARGS_FILE PADM_REALITY_SECONDARY_JOBS
     batchLinesFile="${TMP_DIR}/reality-batch-lines.tsv"
     failedTargetsFile="${TMP_DIR}/reality-failed-targets.txt"

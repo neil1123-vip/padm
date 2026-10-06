@@ -423,26 +423,14 @@ realityTargetResultCount() {
 realityTargetResultField() {
     local line=$1
     local field=$2
-    local value
-    IFS=$'\t' read -r _f1 _f2 _f3 _f4 _f5 _f6 _f7 _f8 _f9 _f10 _f11 _f12 _f13 _f14 _f15 <<<"${line}"
-    case "${field}" in
-    1) value=${_f1} ;;
-    2) value=${_f2} ;;
-    3) value=${_f3} ;;
-    4) value=${_f4} ;;
-    5) value=${_f5} ;;
-    6) value=${_f6} ;;
-    7) value=${_f7} ;;
-    8) value=${_f8} ;;
-    9) value=${_f9} ;;
-    10) value=${_f10} ;;
-    11) value=${_f11} ;;
-    12) value=${_f12} ;;
-    13) value=${_f13} ;;
-    14) value=${_f14} ;;
-    15) value=${_f15} ;;
-    *) value= ;;
-    esac
+    local value=
+    local -a fields=()
+    # 非空白分隔符保留 TSV 空列，避免备注与位置错位。
+    IFS=$'\x1f' read -r -a fields <<<"${line//$'\t'/$'\x1f'}"
+    if [[ "${field}" =~ ^([1-9]|1[0-6])$ ]]; then
+        value=${fields[field - 1]:-}
+        [[ "${field}" != "16" || -n "${value}" ]] || value=Unknown
+    fi
     printf '%s\n' "${value}"
 }
 
@@ -509,7 +497,8 @@ formatRealityTargetResultLine() {
     local tls13=${13}
     local checkedAt=${14}
     local note=${15}
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}"
+    local location=${16:-}
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}" "${location}"
 }
 
 writeRealityTargetResultLine() {
@@ -524,10 +513,20 @@ writeRealityTargetResultLine() {
 
 writeRealityTargetResultLines() {
     local linesFile=$1
-    local resultsFile mergedFile stagedFile line target parsed host keepNonARanks=${PADM_REALITY_TARGET_SELECTION_SCAN:-}
+    local resultsFile mergedFile stagedFile line target parsed host ip location keepNonARanks=${PADM_REALITY_TARGET_SELECTION_SCAN:-}
+    local sni name category cdnRisk asn asOrg networkMatch score pqc certLength tls13 checkedAt note
     local -a sourceFiles=()
+    local -A locations=() incomingTargets=()
     [[ -f "${linesFile}" ]] || return 0
     resultsFile=$(realityTargetManagedResultsFile) || return 1
+    if [[ -f "${resultsFile}" ]]; then
+        while IFS=$'\t' read -r ip location; do
+            locations["${ip}"]=${location}
+        done < <(awk -F'\t' '$6 != "" && $16 != "" && $16 != "Unknown" {print $6 "\t" $16}' "${resultsFile}")
+    fi
+    while IFS= read -r target; do
+        incomingTargets["${target}"]=1
+    done < <(awk -F'\t' '$1 != "" {print $1}' "${linesFile}")
     [[ -f "${resultsFile}" ]] && sourceFiles+=("${resultsFile}")
     [[ -s "${linesFile}" ]] && sourceFiles+=("${linesFile}")
     ((${#sourceFiles[@]} > 0)) || return 0
@@ -553,7 +552,17 @@ writeRealityTargetResultLines() {
         parsed=$(parseHostPort "${target}" 443)
         host=${parsed%:*}
         realityTargetCandidateBlocked "${host}" && continue
-        printf '%s\n' "${line}" >>"${stagedFile}" || { padmRemoveCleanupPath "${mergedFile}"; padmRemoveCleanupPath "${stagedFile}"; return 1; }
+        IFS=$'\x1f' read -r target sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note location <<<"${line//$'\t'/$'\x1f'}"
+        if [[ -z "${location}" && -n "${ip}" && "${ip}" != "unknown" ]]; then
+            if [[ -n "${locations["${ip}"]+cached}" ]]; then
+                location=${locations["${ip}"]}
+            elif [[ -n "${incomingTargets["${target}"]+incoming}" ]]; then
+                location=$(lookupRealityTargetLocation "${ip}" 2>/dev/null || printf 'Unknown')
+                locations["${ip}"]=${location}
+            fi
+        fi
+        location=${location:-Unknown}
+        formatRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}" "${location}" >>"${stagedFile}" || { padmRemoveCleanupPath "${mergedFile}"; padmRemoveCleanupPath "${stagedFile}"; return 1; }
     done <"${mergedFile}"
     padmRemoveCleanupPath "${mergedFile}"
     commitGeneratedFile "${stagedFile}" "${resultsFile}" 644 || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
@@ -561,7 +570,7 @@ writeRealityTargetResultLines() {
 
 realityTargetRefreshRecords() {
     local scope=${1:-recommended}
-    local resultsFile line target parsed host port candidateKey sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note
+    local resultsFile line target parsed host port candidateKey sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note _location
     local -A seenTargets=()
     case "${scope}" in
     recommended | all) ;;
@@ -570,7 +579,7 @@ realityTargetRefreshRecords() {
     resultsFile=$(realityTargetManagedResultsFile) || return 1
     if [[ "${scope}" != "all" && -s "${resultsFile}" ]]; then
         while IFS= read -r line; do
-            IFS=$'\t' read -r target sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note <<<"${line}"
+            IFS=$'\x1f' read -r target sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note _location <<<"${line//$'\t'/$'\x1f'}"
             [[ -n "${target}" ]] || continue
             parsed=$(parseHostPort "${target}" 443)
             host=${parsed%:*}
@@ -756,6 +765,30 @@ resolveRealityTargetIPv4() {
 normalizeAsnOrg() {
     local value=$1
     printf '%s\n' "${value}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g; s/[[:space:]]+/ /g'
+}
+
+lookupRealityTargetLocation() {
+    local ip=$1 response
+    if [[ "${ip}" == *:* ]]; then
+        padmIsValidIPv6Address "${ip}" || return 1
+    else
+        [[ "${ip}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] && padmIsValidHostName "${ip}" || return 1
+    fi
+    command -v jq >/dev/null 2>&1 || return 1
+    response=$(fetchUrlToStdout "https://ipwho.is/${ip}?lang=en&fields=success,city,region,country" 1 5 2>/dev/null) || return 1
+    printf '%s\n' "${response}" | jq -ers '
+        def place:
+            if type == "string" then
+                gsub("[\u0000-\u001f\u007f]"; " ") | gsub("^\\s+|\\s+$"; "") | .[0:100]
+            else "" end;
+        select(length == 1) | .[0] | select(type == "object" and .success == true) |
+        (.city | place) as $city |
+        (.region | place) as $region |
+        (if $city != "" then $city else $region end) as $place |
+        (.country | place) as $country |
+        [$place, (if $country != $place then $country else "" end)] |
+        map(select(. != "")) | join(", ") | select(. != "")
+    ' 2>/dev/null
 }
 
 lookupRealityTargetAsn() {
@@ -1681,7 +1714,7 @@ showRealityTargetCandidatePage() {
     local filter=${1:-all}
     local page=${2:-1}
     local pageSize=${3:-12}
-    local total start end line index=1 host sni name region category _cdn rank recommended note resultLine score cdnRisk ip asn asOrg networkMatch
+    local total start end line index=1 host sni name region category _cdn rank recommended note resultLine score cdnRisk ip asn asOrg networkMatch location
     total=$(realityTargetFilteredCandidateCount "${filter}")
     start=$(( (page - 1) * pageSize + 1 ))
     end=$(( page * pageSize ))
@@ -1705,8 +1738,10 @@ showRealityTargetCandidatePage() {
                 asOrg=$(realityTargetResultField "${resultLine}" 8)
                 networkMatch=$(realityTargetResultField "${resultLine}" 9)
                 score=$(realityTargetResultField "${resultLine}" 10)
+                location=$(realityTargetResultField "${resultLine}" 16)
                 menuItem "${index}" "${host}:443" "${name} ${region}/${category} 评分=${score} SNI=${sni}"
                 menuLine "    cdn_risk=${cdnRisk} IP=${ip} ASN=${asn} ${asOrg} network=${networkMatch}"
+                menuLine "    location=${location}"
             else
                 menuItem "${index}" "${host}:443" "${name} ${region}/${category} SNI=${sni}"
                 [[ -n "${note}" ]] && menuLine "    ${note}"
@@ -1792,7 +1827,7 @@ selectRealityTargetCandidateInteractive() {
 selectAutoRecommendedRealityTarget() {
     local detector='' line host sni name category target record probeRecord probeStatus probePayload
     local currentProfile rest currentAsn='' currentOrg='' probeLimit probed=0 selectedLine selectedTarget selectedScore fallbackLine='' parsed
-    local resultTarget resultSni resultName resultCategory cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note
+    local resultTarget resultSni resultName resultCategory cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note location
 
     detector=$(realityTargetDetector 2>/dev/null || true)
     if [[ -z "${detector}" ]] && ! command -v openssl >/dev/null 2>&1; then
@@ -1817,12 +1852,12 @@ selectAutoRecommendedRealityTarget() {
         probeRecord=$(probeRealityTargetRecord "${detector}" "${record}" "${currentAsn}" "${currentOrg}")
         IFS=$'\t' read -r probeStatus probePayload <<<"${probeRecord}"
         if [[ "${probeStatus}" == "OK" && -n "${probePayload}" ]]; then
-            IFS=$'\t' read -r resultTarget resultSni resultName resultCategory cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note <<<"${probePayload}"
+            IFS=$'\x1f' read -r resultTarget resultSni resultName resultCategory cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note location <<<"${probePayload//$'\t'/$'\x1f'}"
             if [[ -z "${fallbackLine}" && "${cdnRisk}" == "no" && "${score}" == "C" ]]; then
                 fallbackLine=${probePayload}
             fi
             writeRealityTargetResultLine "${resultTarget}" "${resultSni}" "${resultName}" "${resultCategory}" "${cdnRisk}" \
-                "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}" || return 1
+                "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}" "${location}" || return 1
         fi
         (( probed >= probeLimit )) && break
     done < <(realityTargetFilteredCandidates recommended)
@@ -1894,7 +1929,7 @@ writeRealityTargetCacheLine() {
     local refreshedAsOrg=${10:-}
     local refreshedNetworkMatch=${11:-}
     local refreshedCdnRisk=${12:-}
-    local parsed host line sni name category cdnRisk ip asn asOrg networkMatch
+    local parsed host line sni name category cdnRisk ip asn asOrg networkMatch location=
     parsed=$(parseHostPort "${target}" 443)
     host=${parsed%:*}
     sni=${host}
@@ -1915,15 +1950,18 @@ writeRealityTargetCacheLine() {
         asn=$(realityTargetResultField "${line}" 7)
         asOrg=$(realityTargetResultField "${line}" 8)
         networkMatch=$(realityTargetResultField "${line}" 9)
+        location=$(realityTargetResultField "${line}" 16)
+        [[ "${location}" != "Unknown" ]] || location=
     fi
     if [[ -n "${refreshedIp}" ]]; then
+        [[ "${ip}" == "${refreshedIp}" ]] || location=
         ip=${refreshedIp}
         asn=${refreshedAsn:-unknown}
         asOrg=${refreshedAsOrg:-unknown}
         networkMatch=${refreshedNetworkMatch:-unknown}
     fi
     [[ -z "${refreshedCdnRisk}" ]] || cdnRisk=${refreshedCdnRisk}
-    writeRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}"
+    writeRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}" "${location}"
 }
 
 scoreRealityTargetFromTlsPing() {
@@ -2647,7 +2685,7 @@ showRealityTargetCertificateChain() {
 showRealityTargetQuality() {
     local target=$1
     local detector='' probeResult cdnRisk score pqc certLength tls13 note checkedAt detectStart detectSeconds
-    local parsed host port sni ip asn asOrg networkProfile rest currentAsn='' currentOrg='' networkMatch=unknown color=green cachedLine='' name category
+    local parsed host port sni ip asn asOrg networkProfile rest currentAsn='' currentOrg='' networkMatch=unknown color=green cachedLine='' name category location=Unknown resultsFile
     detector=$(realityTargetDetector 2>/dev/null || true)
     if [[ -z "${detector}" ]] && ! command -v openssl >/dev/null 2>&1; then
         realityTargetStatusBlock yellow "REALITY 目标站检测" "缺少 Xray/OpenSSL，无法在线检测"
@@ -2675,6 +2713,19 @@ showRealityTargetQuality() {
         return 1
     fi
     IFS=$'\t' read -r cdnRisk ip asn asOrg score pqc certLength tls13 note <<<"${probeResult}"
+    if [[ -n "${cachedLine}" && "$(realityTargetResultField "${cachedLine}" 6)" == "${ip}" ]]; then
+        location=$(realityTargetResultField "${cachedLine}" 16)
+    fi
+    if [[ "${location}" == "Unknown" ]]; then
+        resultsFile=$(realityTargetManagedResultsFile) || return 1
+        if [[ -s "${resultsFile}" ]]; then
+            location=$(awk -F'\t' -v ip="${ip}" '$6 == ip && $16 != "" && $16 != "Unknown" {location = $16} END {print location}' "${resultsFile}")
+            location=${location:-Unknown}
+        fi
+    fi
+    if [[ "${location}" == "Unknown" ]]; then
+        location=$(lookupRealityTargetLocation "${ip}" 2>/dev/null || printf 'Unknown')
+    fi
     if networkProfile=$(currentRealityNetworkProfile 2>/dev/null); then
         rest=${networkProfile#*$'\t'}
         currentAsn=${rest%%$'\t'*}
@@ -2689,10 +2740,10 @@ showRealityTargetQuality() {
     fi
     checkedAt=$(date +%s)
     detectSeconds=$((checkedAt - detectStart))
-    writeRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}" || return 1
+    writeRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}" "${location}" || return 1
     [[ "${cdnRisk}" == "no" && "${score}" != "FAIL" ]] || color=red
     [[ "${cdnRisk}" == "no" && ( "${score}" == "B" || "${score}" == "C" ) ]] && color=yellow
-    realityTargetStatusBlock "${color}" "REALITY 目标站检测" "cdn_risk: ${cdnRisk}" "评分: $(realityTargetScoreStyle "${score}")" "X25519MLKEM768: ${pqc}" "TLS1.3: ${tls13}" "证书链长度: ${certLength}" "目标地址: ${ip} ${asn} ${asOrg}" "网络关系: ${networkMatch}" "耗时: ${detectSeconds}s" "结论: ${note}" "仅检测告警，未自动切换配置"
+    realityTargetStatusBlock "${color}" "REALITY 目标站检测" "cdn_risk: ${cdnRisk}" "评分: $(realityTargetScoreStyle "${score}")" "X25519MLKEM768: ${pqc}" "TLS1.3: ${tls13}" "证书链长度: ${certLength}" "目标地址: ${ip} ${asn} ${asOrg}" "地理位置: ${location}" "网络关系: ${networkMatch}" "耗时: ${detectSeconds}s" "结论: ${note}" "仅检测告警，未自动切换配置"
     [[ "${cdnRisk}" == "no" && "${score}" != "FAIL" ]]
 }
 
@@ -2798,7 +2849,7 @@ showRealityTargetScanResults() {
     local filter=${1:-all}
     local mode=${2:-interactive}
     local page=${3:-1} pageSize=${REALITY_TARGET_RESULT_PAGE_SIZE:-10} total maxPage choice
-    local line itemIndex=0 pageIndex=1 start end target sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note checkedTime titleFilter selectedLine selectedTarget selectedSni parsed absoluteIndex
+    local line itemIndex=0 pageIndex=1 start end target sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note location checkedTime titleFilter selectedLine selectedTarget selectedSni parsed absoluteIndex
     local -a sortedResults=()
     # Keep one sorted snapshot while paging; results change only after leaving this menu.
     mapfile -t sortedResults < <(sortedRealityTargetResults)
@@ -2812,7 +2863,7 @@ showRealityTargetScanResults() {
     while true; do
         total=0
         for line in "${sortedResults[@]}"; do
-            IFS=$'\t' read -r _target _sni _name category _cdnRisk _ip _asn _asOrg networkMatch score _pqc _certLength _tls13 _checkedAt _note <<<"${line}"
+            IFS=$'\x1f' read -r _target _sni _name category _cdnRisk _ip _asn _asOrg networkMatch score _pqc _certLength _tls13 _checkedAt _note _location <<<"${line//$'\t'/$'\x1f'}"
             realityTargetScanResultFilterMatches "${score}" "${networkMatch}" "${filter}" "${category}" && total=$((total + 1))
         done
         maxPage=$(( (total + pageSize - 1) / pageSize ))
@@ -2827,14 +2878,14 @@ showRealityTargetScanResults() {
         itemIndex=0
         pageIndex=1
         for line in "${sortedResults[@]}"; do
-            IFS=$'\t' read -r target sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note <<<"${line}"
+            IFS=$'\x1f' read -r target sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note location <<<"${line//$'\t'/$'\x1f'}"
             realityTargetScanResultFilterMatches "${score}" "${networkMatch}" "${filter}" "${category}" || continue
             itemIndex=$((itemIndex + 1))
             (( itemIndex < start || itemIndex > end )) && continue
             checkedTime=$(date -d "@${checkedAt}" "+%F %T" 2>/dev/null || printf '%s' "${checkedAt}")
             menuItem "${pageIndex}" "${target}" "${score} | X25519MLKEM768=${pqc} | cert=${certLength} | TLS1.3=${tls13} | network=${networkMatch}"
             menuLine "    cdn_risk=${cdnRisk} checked=${checkedTime} SNI=${sni} IP=${ip} ASN=${asn} ${asOrg}"
-            menuLine "    name=${name} category=${category}"
+            menuLine "    name=${name} category=${category} location=${location:-Unknown}"
             [[ -n "${note}" ]] && menuLine "    ${note}"
             pageIndex=$((pageIndex + 1))
         done
@@ -2865,7 +2916,7 @@ showRealityTargetScanResults() {
                 selectedLine=
                 itemIndex=0
                 for line in "${sortedResults[@]}"; do
-                    IFS=$'\t' read -r _target _sni _name category _cdnRisk _ip _asn _asOrg networkMatch score _pqc _certLength _tls13 _checkedAt _note <<<"${line}"
+                    IFS=$'\x1f' read -r _target _sni _name category _cdnRisk _ip _asn _asOrg networkMatch score _pqc _certLength _tls13 _checkedAt _note _location <<<"${line//$'\t'/$'\x1f'}"
                     realityTargetScanResultFilterMatches "${score}" "${networkMatch}" "${filter}" "${category}" || continue
                     itemIndex=$((itemIndex + 1))
                     if [[ "${itemIndex}" == "${absoluteIndex}" ]]; then
@@ -2897,7 +2948,7 @@ realityTargetResultLineByFilteredIndex() {
     local line score networkMatch index=0
     [[ "${wanted}" =~ ^[0-9]+$ ]] || return 1
     while IFS= read -r line; do
-        IFS=$'\t' read -r _target _sni _name category _cdnRisk _ip _asn _asOrg networkMatch score _pqc _certLength _tls13 _checkedAt _note <<<"${line}"
+        IFS=$'\x1f' read -r _target _sni _name category _cdnRisk _ip _asn _asOrg networkMatch score _pqc _certLength _tls13 _checkedAt _note _location <<<"${line//$'\t'/$'\x1f'}"
         realityTargetScanResultFilterMatches "${score}" "${networkMatch}" "${filter}" "${category}" || continue
         index=$((index + 1))
         if [[ "${index}" == "${wanted}" ]]; then
@@ -2919,11 +2970,11 @@ probeRealityTargetRecord() {
     local currentAsn=$3
     local currentOrg=$4
     local asnCacheFile=${5:-}
-    local target sni name category cdnRisk _oldIp _oldAsn _oldAsOrg _oldNetworkMatch _oldScore _oldPqc _oldCertLength _oldTls13 _oldCheckedAt _oldNote
+    local target sni name category cdnRisk _oldIp _oldAsn _oldAsOrg _oldNetworkMatch _oldScore _oldPqc _oldCertLength _oldTls13 _oldCheckedAt _oldNote _oldLocation
     local endpointResult ip candidateAsn candidateOrg score pqc certLength tls13 note networkMatch checkedAt
 
     trap - EXIT INT TERM
-    IFS=$'\t' read -r target sni name category cdnRisk _oldIp _oldAsn _oldAsOrg _oldNetworkMatch _oldScore _oldPqc _oldCertLength _oldTls13 _oldCheckedAt _oldNote <<<"${record}"
+    IFS=$'\x1f' read -r target sni name category cdnRisk _oldIp _oldAsn _oldAsOrg _oldNetworkMatch _oldScore _oldPqc _oldCertLength _oldTls13 _oldCheckedAt _oldNote _oldLocation <<<"${record//$'\t'/$'\x1f'}"
     if ! endpointResult=$(probeRealityTargetEndpoint "${detector}" "${target}" "${sni}" "" all "${asnCacheFile}"); then
         printf 'NETWORK_FAIL\t%s\n' "${target}"
         return 0

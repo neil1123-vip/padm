@@ -617,7 +617,7 @@ Reality entry 按 `--entry-host`、`--domain`、`/etc/padm/reality_entry_host`�
 
 内置候选池物理上仅保留 37 项未命中已知 CDN/边缘代理及静态风险的候选。原始 194 项中的 154 项 CDN/边缘代理域名仍保留在独立黑名单清单中，用于运行时过滤、审计和黑名单展示，不再从候选池输出。池内其余候选的未知或 TLS 失败状态仍需实时检测，不会被自动选用；目前有明确直连证据并作为默认推荐的是 `www.gnu.org`、`www.debian.org`、`www.ubuntu.com` 和 `mariadb.org`。候选筛选统一按关键词处理，`dev`、`developer`、`开发者` 是同一筛选别名。
 
-Reality 目标站主结果库继续使用 15 列 TSV 写入 `/etc/padm/reality_targets_results.tsv`，物理上仅保留每个目标最新状态仍为 `cdn_risk=no`、评分为 A 且未命中静态或自定义黑名单的记录。目标的新结果降为 B/C/FAIL、风险或 `unknown` 时会移除旧 A；空批次写入也会清理旧格式风险记录。评分包含 TLS 1.3、`X25519MLKEM768` 和证书链长度；可选目标按 `same_asn > same_provider > different_network > unknown`、证书链长度、检测时间排序。
+Reality 目标站主结果库使用 16 列 TSV 写入 `/etc/padm/reality_targets_results.tsv`，末列为实测 IP 的英文地理位置，例如 `Los Angeles, United States`；兼容旧 15 列记录。位置来自 IP 地理查询，成功结果按完整 IP 复用；城市缺失时回退区域或国家，查询失败显示 `Unknown`，不影响评分与切换。物理上仅保留每个目标最新状态仍为 `cdn_risk=no`、评分为 A 且未命中静态或自定义黑名单的记录。目标的新结果降为 B/C/FAIL、风险或 `unknown` 时会移除旧 A；空批次写入也会清理旧格式风险记录。评分包含 TLS 1.3、`X25519MLKEM768` 和证书链长度；可选目标按 `same_asn > same_provider > different_network > unknown`、证书链长度、检测时间排序。
 
 `协议与入口` -> `REALITY 管理` 可检测当前目标、刷新目标库、运行 RealiTLScanner、切换 A 级目标、查看 PQC/ML-DSA-65 状态和配置 443 共存分流。普通刷新会保留已有合格结果，并自动补测候选池中尚未出现在结果文件的 `recommended=yes` 目标，新增目标不会因已有结果而跳过；需要覆盖全部内置/托管候选时可使用“复测全部候选”。
 

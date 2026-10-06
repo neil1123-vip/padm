@@ -9,6 +9,9 @@ fi
 if ! declare -F padmRealResolveRealityTargetAddresses >/dev/null 2>&1; then
     eval "$(declare -f resolveRealityTargetAddresses | sed '1s/^resolveRealityTargetAddresses/padmRealResolveRealityTargetAddresses/')"
 fi
+if ! declare -F padmRealLookupRealityTargetLocation >/dev/null 2>&1; then
+    eval "$(declare -f lookupRealityTargetLocation | sed '1s/^lookupRealityTargetLocation/padmRealLookupRealityTargetLocation/')"
+fi
 
 REALITY_TLS_PING_ARGS_FILE="${TMP_DIR}/tls_ping_args.txt"
 SUBSCRIBE_CAPTURE_DIR="${TMP_DIR}/subscribe_local"
@@ -52,6 +55,20 @@ lookupRealityTargetAsn() {
     198.51.100.254) return 1 ;;
     198.51.100.*) printf 'AS64501\tRemoteNet\n' ;;
     *) printf 'AS64500\tExampleNet\n' ;;
+    esac
+}
+
+lookupRealityTargetLocation() {
+    if [[ -n "${REALITY_LOCATION_LOOKUP_ARGS_FILE:-}" ]]; then
+        printf '%s\n' "$1" >>"${REALITY_LOCATION_LOOKUP_ARGS_FILE}"
+    fi
+    case "$1" in
+    192.0.2.201) printf 'Los Angeles, United States\n' ;;
+    192.0.2.202) printf 'New York, United States\n' ;;
+    192.0.2.*) printf 'Los Angeles, United States\n' ;;
+    198.51.100.*) printf 'London, United Kingdom\n' ;;
+    2001:db8:*) printf 'Tokyo, Japan\n' ;;
+    *) return 1 ;;
     esac
 }
 
