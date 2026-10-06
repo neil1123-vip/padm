@@ -171,6 +171,13 @@ dockerConfigureSpecValidate() {
             (.congestion_control == "cubic" or .congestion_control == "new_reno" or .congestion_control == "bbr") and
             (.auth_timeout | duration) and (.heartbeat | duration) and
             (.zero_rtt_handshake | type == "boolean"))
+        elif .id == 24 or .id == 25 then
+          $request.schema_version == 3 and .core == "xray" and
+          exact(["id", "core", "listener_id", "server", "public_port", "address_families", "name", "uuid", "grpc_tls"]) and
+          (.grpc_tls | exact(["domain", "service_name", "backend_port", "tls_port"]) and
+            (.domain | hostname) and
+            (.service_name | type == "string" and test("^[A-Za-z0-9_-]{1,64}$")) and
+            (.backend_port | port) and (.tls_port | port) and .tls_port != 8080)
         elif .id == 21 or .id == 22 or .id == 23 then
           (if .id == 22 then $request.schema_version == 3 and .core == "xray"
            elif .id == 23 then $request.schema_version == 3 else true end) and
@@ -229,10 +236,10 @@ dockerConfigureSpecValidate() {
           (.settings | exact(["port", "mark"]) and (.port | port) and
             (.mark | type == "number" and floor == . and . >= 1 and . <= 2147483647))
         else false end) and
-      if any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 21 or .id == 22 or .id == 23 or .id == 28 or .id == 31) then
+      if any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 28 or .id == 31) then
         .tls != null and
         all(.core.protocols[] | select(.id == 21 or .id == 22); (.core // $request.core.type) == "xray") and
-        all(.core.protocols[] | select(.id == 21 or .id == 22 or .id == 23); (.websocket // .httpupgrade).domain == $request.tls.domain) and
+        all(.core.protocols[] | select(.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25); (.websocket // .httpupgrade // .grpc_tls).domain == $request.tls.domain) and
         all(.core.protocols[] | select(.id == 3); .hy2.domain == $request.tls.domain) and
         all(.core.protocols[] | select(.id == 4); .anytls.domain == $request.tls.domain) and
         all(.core.protocols[] | select(.id == 5); .naive.domain == $request.tls.domain) and
@@ -242,7 +249,7 @@ dockerConfigureSpecValidate() {
         .tls == null and .subscription.enabled == false
       end and
       if .subscription.enabled then any(.core.protocols[]; .id == 21) else true end and
-      if any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 22 or .id == 23 or .id == 28 or .id == 30 or .id == 31) then .host_integrations == [] else true end and
+      if any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 28 or .id == 30 or .id == 31) then .host_integrations == [] else true end and
       if any(.host_integrations[]; .type == "fail2ban") then
         any(.core.protocols[]; .id == 21) and
         all(.host_integrations[] | select(.type == "fail2ban") | .settings.ports[];
@@ -250,7 +257,7 @@ dockerConfigureSpecValidate() {
       else true end and
       if any(.host_integrations[]; .type == "tun") then .core.type == "sing-box" else true end and
       if any(.host_integrations[]; .type == "tun" or .type == "tproxy") then
-        all(.core.protocols[]; .id != 21 and .id != 22 and .id != 23)
+        all(.core.protocols[]; .id != 21 and .id != 22 and .id != 23 and .id != 24 and .id != 25)
       else true end and
       all(.host_integrations[] | select(.type == "tproxy");
         .settings.port as $port | all($request.core.protocols[]; .public_port != $port)) and
@@ -258,12 +265,12 @@ dockerConfigureSpecValidate() {
       (all([.core.type, .core.secondary_type] | map(select(. != null))[];
         . as $core |
         ([$request.core.protocols[] | select((.core // $request.core.type) == $core) |
-            if .id == 21 or .id == 22 or .id == 23 then
-              ((.websocket // .httpupgrade).backend_port // 31297) else .public_port end] +
+            if .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 then
+              ((.websocket // .httpupgrade // .grpc_tls).backend_port // 31297) else .public_port end] +
           [$request.host_integrations[] | select(.type == "tproxy") | .settings.port] +
           [if $core == "xray" then 10085 else 10087 end]) as $corePorts |
         ($corePorts | unique | length) == ($corePorts | length)) and
-      (([.core.protocols[] | select(.id == 21 or .id == 22 or .id == 23) | ((.websocket // .httpupgrade).tls_port // 8443)] + [8080]) as $tlsPorts |
+      (([.core.protocols[] | select(.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25) | ((.websocket // .httpupgrade // .grpc_tls).tls_port // 8443)] + [8080]) as $tlsPorts |
       ($tlsPorts | unique | length) == ($tlsPorts | length)))
     ' "${specFile}" >/dev/null 2>&1 || {
         dockerError '配置规格不满足阶段 4 schema、支持矩阵或拓扑约束'
@@ -326,7 +333,7 @@ dockerManagedSpecMatchesDeployment() {
         ($d.core | has("secondary_type")) and .core.secondary_type == $d.core.secondary_type
        else ($d.core | has("secondary_type") | not) end) and
       (([.core.type, .core.secondary_type] | map(select(. != null) | "core-\(.)")) +
-        [if any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23) then "nginx" else empty end] +
+        [if any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25) then "nginx" else empty end] +
         [if .subscription.enabled then "subscription" else empty end] +
         [.host_integrations[].profile] | sort) == ($d.compose.profiles | sort) and
       (.host_integrations | sort_by(.type)) == ($d.host_integrations | sort_by(.type)) and
@@ -334,8 +341,8 @@ dockerManagedSpecMatchesDeployment() {
       (if .schema_version >= 2 then
         [.core.protocols[] |
           (if .id == 30 then "tcp", "udp" elif .id == 3 or .id == 31 then "udp" else "tcp" end) as $transport |
-          {listener_id, service: (if .id == 21 or .id == 22 or .id == 23 then "nginx" else (.core // $d.core.type) end),
-          public_port, container_port: (if .id == 21 or .id == 22 or .id == 23 then (.websocket // .httpupgrade).tls_port else .public_port end),
+          {listener_id, service: (if .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 then "nginx" else (.core // $d.core.type) end),
+          public_port, container_port: (if .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 then (.websocket // .httpupgrade // .grpc_tls).tls_port else .public_port end),
           transport: $transport, address_families}] | sort_by(.listener_id, .transport) as $expected |
         $expected == ([$d.listeners[] | select(.listener_id | startswith("host-") | not)] | sort_by(.listener_id, .transport))
        else true end) and
@@ -853,6 +860,18 @@ dockerGenerateXrayConfig() {
                 }]
               }
             }
+          } elif .id == 24 or .id == 25 then {
+            listen: "0.0.0.0",
+            port: .grpc_tls.backend_port,
+            protocol: (if .id == 24 then "vless" else "trojan" end),
+            tag: .listener_id,
+            settings: (if .id == 24 then {
+              clients: [{id: .uuid, email: .name}], decryption: "none"
+            } else {clients: [{password: .uuid, email: .uuid}]} end),
+            streamSettings: {
+              network: "grpc", security: "none",
+              grpcSettings: {serviceName: .grpc_tls.service_name}
+            }
           } elif .id == 21 or .id == 22 or .id == 23 then {
             listen: "0.0.0.0",
             port: ((.websocket // .httpupgrade).backend_port // 31297),
@@ -1059,7 +1078,7 @@ dockerStageTlsFiles() {
 
 dockerGenerateNginxConfig() {
     local specFile=$1 target=$2 domain path token subscriptionEnabled fail2banEnabled backendPort tlsPort backendCore protocolId hostHeader
-    jq -e 'any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23)' "${specFile}" >/dev/null || return 0
+    jq -e 'any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25)' "${specFile}" >/dev/null || return 0
     domain=$(jq -r '.tls.domain' "${specFile}") || return 1
     token=$(jq -r '.subscription.token' "${specFile}") || return 1
     subscriptionEnabled=$(jq -r '.subscription.enabled' "${specFile}") || return 1
@@ -1091,10 +1110,25 @@ server {
     ssl_certificate_key /etc/padm/secrets/tls/${domain}.key;
     ssl_protocols TLSv1.2 TLSv1.3;
 EOF
+    if [[ "${protocolId}" == 24 || "${protocolId}" == 25 ]]; then
+        printf '    http2 on;\n' >>"${target}" || return 1
+    fi
     if [[ "${fail2banEnabled}" == "true" ]]; then
         printf '    access_log /var/log/nginx/access.log combined;\n\n' >>"${target}" || return 1
     fi
-    cat >>"${target}" <<EOF
+    if [[ "${protocolId}" == 24 || "${protocolId}" == 25 ]]; then
+        cat >>"${target}" <<EOF
+    location ^~ ${path} {
+        grpc_pass grpc://${backendCore}:${backendPort};
+        grpc_set_header Host ${domain};
+        client_max_body_size 0;
+        client_body_timeout 5d;
+        grpc_read_timeout 5d;
+        grpc_send_timeout 5d;
+    }
+EOF
+    else
+        cat >>"${target}" <<EOF
     location = ${path} {
         proxy_pass http://${backendCore}:${backendPort};
         proxy_http_version 1.1;
@@ -1104,6 +1138,7 @@ EOF
         proxy_set_header Connection "upgrade";
     }
 EOF
+    fi
     if [[ "${subscriptionEnabled}" == "true" ]]; then
         cat >>"${target}" <<EOF
 
@@ -1116,9 +1151,10 @@ EOF
     fi
         printf '}\n' >>"${target}" || return 1
     done < <(jq -r '.core.type as $core |
-      .core.protocols[] | select(.id == 21 or .id == 22 or .id == 23) |
-      (.websocket // .httpupgrade) as $transport |
-      [("/" + $transport.path + (if .id == 23 then "" else "ws" end)),
+      .core.protocols[] | select(.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25) |
+      (.websocket // .httpupgrade // .grpc_tls) as $transport |
+      [(if .id == 24 or .id == 25 then "/" + $transport.service_name + "/"
+        else "/" + $transport.path + (if .id == 23 then "" else "ws" end) end),
        ($transport.backend_port // 31297), ($transport.tls_port // 8443), (.core // $core), .id] | @tsv' "${specFile}")
 }
 
@@ -1153,6 +1189,10 @@ dockerGenerateSubscription() {
         "tuic://\(.uuid | @uri):\(.uuid | @uri)@\(.server | authority):\(.public_port)?congestion_control=\(.tuic.congestion_control | @uri)&alpn=h3&sni=\(.tuic.domain | @uri)&udp_relay_mode=native&allow_insecure=0#\(.name | @uri)"
       elif .id == 21 then
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&security=tls&sni=\(.websocket.domain | @uri)&type=ws&host=\(.websocket.domain | @uri)&path=\("/" + .websocket.path + "ws" | @uri)#\(.name | @uri)"
+      elif .id == 24 then
+        "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&security=tls&sni=\(.grpc_tls.domain | @uri)&type=grpc&alpn=h2&serviceName=\(.grpc_tls.service_name | @uri)#\(.name | @uri)"
+      elif .id == 25 then
+        "trojan://\(.uuid | @uri)@\(.server | authority):\(.public_port)?peer=\(.grpc_tls.domain | @uri)&fp=chrome&sni=\(.grpc_tls.domain | @uri)&type=grpc&alpn=h2&serviceName=\(.grpc_tls.service_name | @uri)#\(.name | @uri)"
       elif .id == 22 or .id == 23 then
         (.websocket // .httpupgrade) as $transport |
         "vmess://" + ({
@@ -1230,7 +1270,7 @@ dockerGenerateCompose() {
       ];
       [$r.core.type, $r.core.secondary_type] | map(select(. != null)) as $cores |
       ($r.core.protocols | map(select(.id == 1 or .id == 2 or .id == 3 or .id == 4 or .id == 5 or .id == 26 or .id == 28 or .id == 30 or .id == 31))) as $direct |
-      ($r.core.protocols | map(select(.id == 21 or .id == 22 or .id == 23))) as $websocket |
+      ($r.core.protocols | map(select(.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25))) as $websocket |
       ($r.host_integrations | map(select(.type == "wireguard"))) as $wireguard |
       ($r.host_integrations | map(select(.type == "fail2ban"))) as $fail2ban |
       ($r.host_integrations | map(select(.type == "tun"))) as $tun |
@@ -1306,7 +1346,7 @@ dockerGenerateCompose() {
               mounts("secrets/tls"; "/etc/padm/secrets/tls"; true) +
               mounts("logs/nginx"; "/var/log/nginx"; false)),
             ports: [$websocket[] as $protocol |
-              ports($protocol; (($protocol.websocket // $protocol.httpupgrade).tls_port // 8443))[]],
+                ports($protocol; (($protocol.websocket // $protocol.httpupgrade // $protocol.grpc_tls).tls_port // 8443))[]],
             tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=32m"]
           })
         else . end
@@ -1427,7 +1467,7 @@ dockerGenerateDeployment() {
       def digest: capture("@(?<value>sha256:[a-f0-9]{64})$").value;
       def profiles:
         ([[$r.core.type, $r.core.secondary_type][] | select(. != null) | "core-\(.)"] +
-        [if any($r.core.protocols[]; .id == 21 or .id == 22 or .id == 23) then "nginx" else empty end] +
+        [if any($r.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25) then "nginx" else empty end] +
         [if $r.subscription.enabled then "subscription" else empty end] +
         [$r.host_integrations[].profile]);
       {
@@ -1447,10 +1487,10 @@ dockerGenerateDeployment() {
           $r.core.protocols[] |
           (if .id == 30 then "tcp", "udp" elif .id == 3 or .id == 31 then "udp" else "tcp" end) as $transport |
           ({
-            service: (if .id == 21 or .id == 22 or .id == 23 then "nginx" else (.core // $r.core.type) end),
+            service: (if .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 then "nginx" else (.core // $r.core.type) end),
             public_port: .public_port,
-            container_port: (if .id == 21 or .id == 22 or .id == 23 then
-              ((.websocket // .httpupgrade).tls_port // 8443) else .public_port end),
+            container_port: (if .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 then
+              ((.websocket // .httpupgrade // .grpc_tls).tls_port // 8443) else .public_port end),
             transport: $transport,
             address_families: .address_families
           } + if $r.schema_version >= 2 then {listener_id: .listener_id} else {} end)

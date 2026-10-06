@@ -5965,6 +5965,10 @@ runDockerHttpupgradeRegression() {
     bash "${PROJECT_ROOT}/docker/tests/httpupgrade.sh"
 }
 
+runDockerGrpcTlsRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/grpc-tls.sh"
+}
+
 runDockerPermissionsRegression() {
     bash "${PROJECT_ROOT}/docker/tests/permissions.sh"
 }

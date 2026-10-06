@@ -2,9 +2,9 @@
 set -euo pipefail
 umask 077
 
-# 仅使用隔离项目、网络和命名卷；两类真实 Nginx TLS 传输复用同一验证流程。
+# 仅使用隔离项目、网络和命名卷；真实 Nginx TLS 传输复用同一验证流程。
 [[ "$#" == 4 || "$#" == 6 ]] || {
-    printf 'usage: vmess-real.sh <local-xray> <local-sing-box> <local-ops> <local-nginx> [22|23 xray|sing-box]\n' >&2
+    printf 'usage: vmess-real.sh <local-xray> <local-sing-box> <local-ops> <local-nginx> [22|23|24|25 xray|sing-box]\n' >&2
     exit 2
 }
 [[ "$(uname -s)" == Linux && "$(id -u)" == 0 ]] || { printf 'vmess-real.sh requires Linux root\n' >&2; exit 1; }
@@ -12,11 +12,14 @@ PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 XRAY_REF=$1 SING_REF=$2 OPS_REF=$3 NGINX_REF=$4
 PROTOCOL=${5:-22} CORE=${6:-xray}
 [[ "${PROTOCOL}:${CORE}" == 22:xray || "${PROTOCOL}:${CORE}" == 23:xray ||
-    "${PROTOCOL}:${CORE}" == 23:sing-box ]] || exit 2
-TRANSPORT=ws TRANSPORT_KEY=websocket BACKEND_PORT=31297 TEST_NAME=vmess-real
-if [[ "${PROTOCOL}" == 23 ]]; then
-    TRANSPORT=httpupgrade TRANSPORT_KEY=httpupgrade BACKEND_PORT=31306 TEST_NAME=httpupgrade-real
-fi
+    "${PROTOCOL}:${CORE}" == 23:sing-box || "${PROTOCOL}:${CORE}" == 24:xray ||
+    "${PROTOCOL}:${CORE}" == 25:xray ]] || exit 2
+TRANSPORT=ws TRANSPORT_KEY=websocket BACKEND_PORT=31297 TEST_NAME=vmess-real APP_PROTOCOL=vmess
+case "${PROTOCOL}" in
+23) TRANSPORT=httpupgrade TRANSPORT_KEY=httpupgrade BACKEND_PORT=31306 TEST_NAME=httpupgrade-real ;;
+24) TRANSPORT=grpc TRANSPORT_KEY=grpc_tls BACKEND_PORT=31301 TEST_NAME=vless-grpc-tls-real APP_PROTOCOL=vless ;;
+25) TRANSPORT=grpc TRANSPORT_KEY=grpc_tls BACKEND_PORT=31304 TEST_NAME=trojan-grpc-tls-real APP_PROTOCOL=trojan ;;
+esac
 for tool in docker jq python3 sha256sum tar openssl awk; do command -v "${tool}" >/dev/null; done
 XRAY_ID=$(docker image inspect --format '{{.Id}}' "${XRAY_REF}")
 SING_ID=$(docker image inspect --format '{{.Id}}' "${SING_REF}")
@@ -82,6 +85,7 @@ dockerActivateStagedBundle
 dockerCleanupStagedBundle
 DOMAIN=vmess.padm.test
 [[ "${PROTOCOL}" != 23 ]] || DOMAIN=HttpUpgrade.padm.test
+[[ "${TRANSPORT}" != grpc ]] || DOMAIN=grpc-tls.padm.test
 UUID=11111111-1111-4111-8111-111111111111
 TLS_DIR="${PADM_DOCKER_INSTALL_DIR}/secrets/tls"
 mkdir -p "${TEST_ROOT}/certs" "${TLS_DIR}" "${TEST_ROOT}/runtime/"{client,origin}
@@ -104,7 +108,8 @@ jq -n --arg uuid "${UUID}" --arg domain "${DOMAIN}" --arg core "${CORE}" --arg n
    core:{type:$core,secondary_type:null,protocols:[
      {id:$protocol,listener_id:"entry-vmess",core:$core,server:$domain,public_port:35468,
       address_families:["ipv4","ipv6"],name:$name,uuid:$uuid,
-      ($key):{domain:$domain,path:"padmvmess",backend_port:$backend,tls_port:8443}}]},
+      ($key):({domain:$domain,backend_port:$backend,tls_port:8443} +
+        if $protocol == 24 or $protocol == 25 then {service_name:"padm_grpc-1"} else {path:"padmvmess"} end)}]},
    tls:{domain:$domain},subscription:{enabled:false,token:"0123456789abcdef"},
    images:{xray:image("xray"),"sing-box":image("sing-box"),nginx:image("nginx"),ops:image("ops"),net:image("net")},
    host_integrations:[]}
@@ -115,16 +120,24 @@ dockerCreateConfigurationCandidate
 candidate=${DOCKER_CONFIG_CANDIDATE}
 dockerGenerateCandidate "${SPEC}" "${candidate}"
 jq -e --arg uuid "${UUID}" --arg core "${CORE}" --arg transport "${TRANSPORT}" \
-    --arg domain "${DOMAIN}" --argjson backend "${BACKEND_PORT}" '
-  if $core == "xray" then any(.inbounds[]; .protocol == "vmess" and .tag == "entry-vmess" and .port == $backend and
-    .settings.clients == [{id:$uuid,email:$uuid,alterId:0}] and
+    --arg domain "${DOMAIN}" --argjson backend "${BACKEND_PORT}" --arg app "${APP_PROTOCOL}" '
+  if $core == "xray" then any(.inbounds[]; .protocol == $app and .tag == "entry-vmess" and .port == $backend and
+    .settings == (if $app == "trojan" then {clients:[{password:$uuid,email:$uuid}]}
+      elif $app == "vless" then {clients:[{id:$uuid,email:$uuid}],decryption:"none"}
+      else {clients:[{id:$uuid,email:$uuid,alterId:0}]} end) and
     .streamSettings == ({network:$transport,security:"none"} +
       if $transport == "ws" then {wsSettings:{path:"/padmvmessws"}}
+      elif $transport == "grpc" then {grpcSettings:{serviceName:"padm_grpc-1"}}
       else {httpupgradeSettings:{path:"/padmvmess",host:$domain}} end))
   else any(.inbounds[]; .type == "vmess" and .tag == "entry-vmess" and .listen_port == $backend and
     .users == [{uuid:$uuid,name:$uuid,alterId:0}] and
     .transport == {type:"httpupgrade",path:"/padmvmess",host:$domain}) end' \
     "${candidate}/config/${CORE}/config.json" >/dev/null
+if [[ "${TRANSPORT}" == grpc ]]; then
+    grep -qF 'http2 on;' "${candidate}/config/nginx/default.conf"
+    grep -qF 'location ^~ /padm_grpc-1/ {' "${candidate}/config/nginx/default.conf"
+    grep -qF "grpc_pass grpc://xray:${BACKEND_PORT};" "${candidate}/config/nginx/default.conf"
+fi
 jq -e '.listeners == [{listener_id:"entry-vmess",service:"nginx",public_port:35468,
   container_port:8443,transport:"tcp",address_families:["ipv4","ipv6"]}]' \
     "${candidate}/deployment.json" >/dev/null
@@ -238,19 +251,33 @@ for service in "${CORE}" nginx; do
 done
 addresses=$(docker inspect "$(compose ps -q nginx)" |
     jq -cer --arg project "${project}" '.[0].NetworkSettings.Networks[$project] | [.IPAddress,.GlobalIPv6Address]')
-python3 - "${TEST_ROOT}/links.txt" "${TEST_ROOT}/runtime/client/config.json" "${addresses}" "${TRANSPORT}" "${TEST_NAME}" "${DOMAIN}" <<'PY'
+python3 - "${TEST_ROOT}/links.txt" "${TEST_ROOT}/runtime/client/config.json" "${addresses}" "${TRANSPORT}" "${TEST_NAME}" "${DOMAIN}" "${APP_PROTOCOL}" <<'PY'
 import base64
 import ipaddress
 import json
 import pathlib
 import sys
+import urllib.parse
 import uuid
 
 lines = pathlib.Path(sys.argv[1]).read_text().splitlines()
 endpoints = json.loads(sys.argv[3])
-transport, name, domain = sys.argv[4:7]
+transport, name, domain, app = sys.argv[4:8]
 assert len(lines) == 1 and [ipaddress.ip_address(x).version for x in endpoints] == [4, 6]
 def parse(line):
+    if transport == "grpc":
+        uri = urllib.parse.urlsplit(line)
+        pairs = urllib.parse.parse_qsl(uri.query, keep_blank_values=True)
+        query = dict(pairs)
+        expected = ({"encryption":"none","security":"tls","sni":domain} if app == "vless" else
+                    {"peer":domain,"fp":"chrome","sni":domain})
+        expected.update(type="grpc", alpn="h2", serviceName="padm_grpc-1")
+        assert uri.scheme == app and uri.username == "11111111-1111-4111-8111-111111111111"
+        assert uri.password is None and uri.hostname == domain and uri.port == 35468 and not uri.path
+        assert urllib.parse.unquote(uri.fragment) == name
+        assert pairs == list(expected.items())
+        assert str(uuid.UUID(uri.username)) == uri.username
+        return {"id":uri.username,"sni":query["sni"],"service":query["serviceName"],"alpn":query["alpn"]}
     assert line.startswith("vmess://") and "#" not in line and "?" not in line
     payload = line.removeprefix("vmess://")
     raw = base64.b64decode(payload, validate=True)
@@ -265,27 +292,45 @@ def parse(line):
     assert str(uuid.UUID(value["id"])) == value["id"]
     return value
 value = parse(lines[0])
-for field, bad in (("aid","1"),("net","tcp"),("tls",""),("path","/wrong"),("scy","none")):
-    invalid = dict(value, **{field:bad})
-    uri = "vmess://"+base64.b64encode(json.dumps(invalid, separators=(",", ":")).encode()).decode()
+if transport == "grpc":
+    sample = urllib.parse.urlsplit(lines[0])
+    invalids = []
+    for field, bad in (("alpn","http/1.1"),("serviceName","wrong"),("type","tcp"),("sni","wrong.test")):
+        query = dict(urllib.parse.parse_qsl(sample.query))
+        query[field] = bad
+        invalids.append(sample._replace(query=urllib.parse.urlencode(query)).geturl())
+    invalids.append(sample._replace(query=sample.query+"&serviceName=padm_grpc-1").geturl())
+else:
+    invalids = ["vmess://"+base64.b64encode(json.dumps(dict(value, **{field:bad}),
+        separators=(",", ":")).encode()).decode() for field, bad in
+        (("aid","1"),("net","tcp"),("tls",""),("path","/wrong"),("scy","none"))]
+for uri in invalids:
     try:
         parse(uri)
     except (AssertionError, ValueError):
         pass
     else:
-        raise AssertionError("invalid VMess URI accepted")
+        raise AssertionError("invalid transport URI accepted")
 config = {"log":{"level":"warn"},"inbounds":[],"outbounds":[],"route":{"rules":[]}}
 for wrong in (False, True):
     for family, endpoint in zip((4,6), endpoints):
         tag = "vmess-v"+str(family)+("-wrong" if wrong else "")
         port = 2081+len(config["inbounds"])
         config["inbounds"].append({"type":"socks","tag":"socks-"+tag,"listen":"0.0.0.0","listen_port":port})
-        config["outbounds"].append({"type":"vmess","tag":tag,"server":endpoint,"server_port":8443,
-            "uuid":("22222222-2222-4222-8222-222222222222" if wrong else value["id"]),
-            "security":value["scy"],"alter_id":int(value["aid"]),
-            "tls":{"enabled":True,"server_name":value["sni"],"certificate_path":"/etc/padm/client/ca.crt"},
-            "transport":dict({"type":value["net"],"path":value["path"]},
-                **({"headers":{"Host":value["host"]}} if transport == "ws" else {"host":value["host"]}))})
+        outbound = {"type":app,"tag":tag,"server":endpoint,"server_port":8443,
+            ("password" if app == "trojan" else "uuid"):
+                ("22222222-2222-4222-8222-222222222222" if wrong else value["id"]),
+            "tls":{"enabled":True,"server_name":value["sni"],"certificate_path":"/etc/padm/client/ca.crt"}}
+        if transport == "grpc":
+            outbound["tls"]["alpn"] = [value["alpn"]]
+            outbound["transport"] = {"type":"grpc","service_name":value["service"]}
+            if app == "vless":
+                outbound["packet_encoding"] = "xudp"
+        else:
+            outbound.update(security=value["scy"], alter_id=int(value["aid"]),
+                transport=dict({"type":value["net"],"path":value["path"]},
+                    **({"headers":{"Host":value["host"]}} if transport == "ws" else {"host":value["host"]})))
+        config["outbounds"].append(outbound)
         config["route"]["rules"].append({"inbound":["socks-"+tag],"action":"route","outbound":tag})
 pathlib.Path(sys.argv[2]).write_text(json.dumps(config))
 PY
@@ -449,17 +494,18 @@ jq -e --arg uuid "${UUID}" '
   positive("uplink") and positive("downlink")' <<<"${stats}" >/dev/null
 printf 'docker-%s-stats-ok: core=%s identity=%s counters=%s\n' "${TEST_NAME}" "${CORE}" "${UUID}" "${stats}"
 dockerTrafficSetLimit "${UUID}" 1
-jq -e --arg core "${CORE}" 'if $core == "xray" then
-  all(.inbounds[] | select(.protocol == "vmess"); .settings.clients == [])
+jq -e --arg core "${CORE}" --arg app "${APP_PROTOCOL}" 'if $core == "xray" then
+  all(.inbounds[] | select(.protocol == $app); .settings.clients == [])
   else all(.inbounds[] | select(.type == "vmess"); .users == []) end' \
     "${PADM_DOCKER_INSTALL_DIR}/config/${CORE}/config.json" >/dev/null
 [[ "$(sha256sum "${PADM_DOCKER_INSTALL_DIR}/config/${CORE}/users.base")" == "${base_hash}" ]]
 [[ "$(compose ps -q client)" == "${client}" ]]
 probe deny
 dockerTrafficSetLimit "${UUID}" 0
-jq -e --arg uuid "${UUID}" --arg core "${CORE}" '
-  if $core == "xray" then any(.inbounds[]; .protocol == "vmess" and
-    .settings.clients == [{id:$uuid,email:$uuid,alterId:0}])
+jq -e --arg uuid "${UUID}" --arg core "${CORE}" --arg app "${APP_PROTOCOL}" '
+  if $core == "xray" then any(.inbounds[]; .protocol == $app and
+    .settings.clients == (if $app == "trojan" then [{password:$uuid,email:$uuid}]
+      elif $app == "vless" then [{id:$uuid,email:$uuid}] else [{id:$uuid,email:$uuid,alterId:0}] end))
   else any(.inbounds[]; .type == "vmess" and .users == [{uuid:$uuid,name:$uuid,alterId:0}]) end' \
     "${PADM_DOCKER_INSTALL_DIR}/config/${CORE}/config.json" >/dev/null
 [[ "$(sha256sum "${PADM_DOCKER_INSTALL_DIR}/config/${CORE}/users.base")" == "${base_hash}" ]]

@@ -1752,4 +1752,124 @@ for httpupgradeFailure in tls-fail health-fail; do
     assertUnconfigured
 done
 export FAKE_SETUP_MODE=ok
+
+# 两类 Xray gRPC TLS 复用首配事务，不生成无用 Reality 凭据。
+for grpcProtocol in 24 25; do
+    grpcChoice=14; backend=31301; scheme=vless; listener=entry-vless-grpc-tls
+    [[ "${grpcProtocol}" != 25 ]] || { grpcChoice=15; backend=31304; scheme=trojan; listener=entry-trojan-grpc-tls; }
+    printf -v grpcInput '1\n%s\nproxy.example.com\n3\ngrpc.example.com\n24491\n2\n%s\n%s\ny\n' \
+        "${grpcChoice}" "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
+    for grpcTopology in single dual; do
+        newState "grpc-tls-${grpcProtocol}-${grpcTopology}"
+        input=${grpcInput}; single=true
+        if [[ "${grpcTopology}" == dual ]]; then
+            single=false
+            printf -v input '3\n%s\nproxy.example.com\n3\ntarget.example.com\n443\ntarget.example.com\n24445\ngrpc.example.com\n24491\n2\n%s\n%s\ny\n' \
+                "${grpcChoice}" "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
+        fi
+        before=$(snapshot)
+        runPty 0 "grpc-tls-${grpcProtocol}-${grpcTopology}-cancel" "${input%$'y\n'}"$'n\n' setup "${ASSET_ARGS[@]}"
+        [[ "$(snapshot)" == "${before}" && ! -s "${EVENTS}" && ! -s "${VERIFY_LOG}" ]] ||
+            fail "${grpcProtocol}/${grpcTopology}: 取消 gRPC TLS 首配改变状态或生成秘密"
+        runPty 0 "grpc-tls-${grpcProtocol}-${grpcTopology}" "${input}" setup "${ASSET_ARGS[@]}"
+        SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+        jq -e --argjson protocol "${grpcProtocol}" --argjson backend "${backend}" \
+            --arg listener "${listener}" --arg scheme "${scheme}" --argjson single "${single}" '
+          .schema_version == 3 and .core.type == "xray" and .tls.domain == "grpc.example.com" and
+          .subscription.enabled == false and
+          (.core.protocols[0] | .id == $protocol and .core == "xray" and .listener_id == $listener and
+            .name == "main-"+$scheme+"-grpc-tls" and .server == "proxy.example.com" and .public_port == 24491 and
+            .address_families == ["ipv4","ipv6"] and .uuid == "11111111-1111-4111-8111-111111111111" and
+            (.grpc_tls | .domain == "grpc.example.com" and .backend_port == $backend and .tls_port == 8443 and
+              (.service_name | test("^[a-f0-9]{16}$")))) and
+          if $single then .core.secondary_type == null and (.core.protocols | length) == 1
+          else .core.secondary_type == "sing-box" and (.core.protocols | length) == 2 and
+            .core.protocols[1].id == 1 and .core.protocols[1].public_port == 24445 and
+            .core.protocols[0].uuid == .core.protocols[1].uuid end
+        ' "${SPEC}" >/dev/null || fail "${grpcProtocol}/${grpcTopology}: gRPC TLS 首配规格错误"
+        jq -e --arg scheme "${scheme}" --slurpfile spec "${SPEC}" '
+          $spec[0].core.protocols[0] as $p |
+          any(.inbounds[]; .tag == $p.listener_id and .protocol == $scheme and .port == $p.grpc_tls.backend_port and
+            .settings == (if $scheme == "vless" then {decryption:"none",clients:[{id:$p.uuid,email:$p.uuid}]}
+              else {clients:[{password:$p.uuid,email:$p.uuid}]} end) and .streamSettings == {
+              network:"grpc",security:"none",grpcSettings:{serviceName:$p.grpc_tls.service_name}})' \
+            "${PADM_DOCKER_INSTALL_DIR}/config/xray/config.json" >/dev/null ||
+            fail "${grpcProtocol}/${grpcTopology}: gRPC TLS 认证或 serviceName 错误"
+        jq -e '.services.xray.ports == [] and .services.nginx.ports ==
+          ["0.0.0.0:24491:8443/tcp","[::]:24491:8443/tcp"] and
+          .services.nginx.depends_on == {xray:{condition:"service_healthy"}} and
+          (.services | has("subscription") | not)' "${PADM_DOCKER_INSTALL_DIR}/compose.json" >/dev/null ||
+            fail "${grpcProtocol}/${grpcTopology}: gRPC TLS 双栈或 Nginx 依赖错误"
+        if [[ "${single}" == true ]]; then
+            ! grep -Eq ' x25519( |$)|derived-stdin' "${EVENTS}" || fail '单核 gRPC TLS 生成无用 Reality 密钥'
+        fi
+        assertClean
+        assertNoSecrets
+    done
+    export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-grpc-tls-${grpcProtocol}-single"
+    export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-grpc-tls-${grpcProtocol}-single"
+    CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
+    SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+    cp -- "${SPEC}" "${TEST_ROOT}/grpc-tls-original.json"
+    before=$(snapshot)
+    printf -v input '1\n%s\n0\n' "${grpcProtocol}"
+    runPty 0 "grpc-tls-${grpcProtocol}-edit-cancel" "${input}" edit "${ASSET_ARGS[@]}"
+    [[ "$(snapshot)" == "${before}" ]] || fail "${grpcProtocol}: 取消 gRPC TLS 编辑改变部署"
+    printf -v input '1\n%s\n24492\n2\n%s\nnext.example.com\n3\n%s\n2\n4\n%s\nnext-grpc\n12\n%s\ncustom_grpc-1\n8\ny\n' \
+        "${grpcProtocol}" "${grpcProtocol}" "${grpcProtocol}" "${grpcProtocol}" "${grpcProtocol}"
+    runPty 0 "grpc-tls-${grpcProtocol}-edit" "${input}" edit "${ASSET_ARGS[@]}"
+    jq -e --argjson backend "${backend}" --slurpfile before "${TEST_ROOT}/grpc-tls-original.json" '
+      .tls == $before[0].tls and .subscription == $before[0].subscription and
+      (.core.protocols[0] | .uuid == $before[0].core.protocols[0].uuid and
+        .listener_id == $before[0].core.protocols[0].listener_id and .public_port == 24492 and
+        .server == "next.example.com" and .address_families == ["ipv6"] and .name == "next-grpc" and
+        .grpc_tls == {domain:"grpc.example.com",service_name:"custom_grpc-1",backend_port:$backend,tls_port:8443})' \
+        "${SPEC}" >/dev/null || fail "${grpcProtocol}: gRPC TLS 编辑改写固定身份或未编辑服务名"
+    printf -v input '9\n%s\n1\n24493\n8\ny\n' "${grpcProtocol}"
+    runPty 0 "grpc-tls-${grpcProtocol}-copy" "${input}" edit "${ASSET_ARGS[@]}"
+    jq -e --argjson backend "${backend}" '.core.protocols[0] as $p |
+      (.core.protocols | length) == 2 and .core.secondary_type == null and
+      (.core.protocols[1] | .id == $p.id and .core == "xray" and .listener_id == "entry-1" and .public_port == 24493 and
+        .uuid == $p.uuid and .name == $p.name and .grpc_tls ==
+        ($p.grpc_tls + {backend_port:($backend+1),tls_port:8444}))' "${SPEC}" >/dev/null ||
+        fail "${grpcProtocol}: gRPC TLS 复制丢失身份或内部端口隔离"
+    before=$(snapshot)
+    printf -v input '9\n%s\n2\n24494\n' "${listener}"
+    runPty 15 "grpc-tls-${grpcProtocol}-copy-sing" "${input}" edit "${ASSET_ARGS[@]}"
+    [[ "$(snapshot)" == "${before}" ]] || fail "${grpcProtocol}: gRPC TLS 被复制到 sing-box"
+    for rejectedEdit in uuid domain backend tls-port core id new-protocol; do
+        case "${rejectedEdit}" in
+        uuid) filter='.core.protocols[0].uuid = "22222222-2222-4222-8222-222222222222"' ;;
+        domain) filter='.tls.domain = "next.example.com" | .core.protocols |= map(.grpc_tls.domain = "next.example.com")' ;;
+        backend) filter='.core.protocols[0].grpc_tls.backend_port = 31309' ;;
+        tls-port) filter='.core.protocols[0].grpc_tls.tls_port = 8445' ;;
+        core) filter='.core.protocols[0].core = "sing-box" | .core.secondary_type = "sing-box"' ;;
+        id) filter='.core.protocols[0].id = (if .core.protocols[0].id == 24 then 25 else 24 end)' ;;
+        new-protocol) filter='.core.protocols += [.core.protocols[0] |
+          .id = (if .id == 24 then 25 else 24 end) | .listener_id = "entry-new-other" | .public_port = 24495 |
+          .grpc_tls.backend_port = 31309 | .grpc_tls.tls_port = 8445]' ;;
+        esac
+        jq "${filter}" "${SPEC}" >"${TEST_ROOT}/grpc-tls-rejected.json"
+        chmod 0600 "${TEST_ROOT}/grpc-tls-rejected.json"
+        CONTROL_LOG="${TEST_ROOT}/grpc-tls-${grpcProtocol}-${rejectedEdit}.log"
+        actual=0
+        bash -u "${CLI}" edit --spec "${TEST_ROOT}/grpc-tls-rejected.json" --preview "${ASSET_ARGS[@]}" \
+            >"${CONTROL_LOG}" 2>&1 || actual=$?
+        [[ "${actual}" == 15 && "$(snapshot)" == "${before}" ]] ||
+            fail "${grpcProtocol}/${rejectedEdit}: gRPC TLS 编辑绕过身份冻结"
+        assertClean
+    done
+    runPty 0 "grpc-tls-${grpcProtocol}-delete-copy" $'10\nentry-1\n8\ny\n' edit "${ASSET_ARGS[@]}"
+    jq -e '.tls.domain == "grpc.example.com" and (.core.protocols | length) == 1' "${SPEC}" >/dev/null ||
+        fail "${grpcProtocol}: 删除 gRPC TLS 副本撤销证书引用"
+    runPty 15 "grpc-tls-${grpcProtocol}-enable-publish" $'7\ny\n8\n' edit "${ASSET_ARGS[@]}"
+    for grpcFailure in tls-fail health-fail; do
+        newState "grpc-tls-${grpcProtocol}-${grpcFailure}"
+        export FAKE_SETUP_MODE="${grpcFailure}"
+        if [[ "${grpcFailure}" == tls-fail ]]; then expected=15; else expected=14; fi
+        runPty "${expected}" "grpc-tls-${grpcProtocol}-${grpcFailure}" "${grpcInput}" setup "${ASSET_ARGS[@]}"
+        assertUnconfigured
+    done
+    export FAKE_SETUP_MODE=ok
+done
 printf 'docker-setup-regression-ok\n'

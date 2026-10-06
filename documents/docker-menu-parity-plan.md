@@ -16,7 +16,7 @@
 | --- | --- | --- |
 | 1. 功能矩阵 | 已完成，提交 `7fe6a9e` | 协议与功能边界、管理状态、合同回归 |
 | 2. 菜单与可信首次配置 | 2A–2C 已实现；本地 PTY、事务和 Linux 权限通过，真实发布/连通待验 | 安装后进入菜单、独立命令生命周期、无需手填镜像的首次配置 |
-| 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2–3C.10 Reality/Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC/direct Trojan/VMess WS/HTTPUpgrade 基础入口已通过本地与 amd64 传输验收 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
+| 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2–3C.11 基础入口已通过本地与 amd64 传输验收 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
 | 4. 用户、订阅与服务维护 | 未开始 | 本机用户业务、多服务器后端、分范围备份恢复、核心运维 |
 | 5. 站点、路由与宿主集成 | 未开始 | 站点管理、内部能力、规则所有权及可撤销宿主操作 |
 | 6. 发布与完整验收 | 未开始 | 迁移文档、真实 Linux 与双架构证据、受门禁保护的 Release |
@@ -843,6 +843,54 @@ Draft 2020-12 Schema `6` 正例/`52` 反例、Bash、ShellCheck、JSON、内嵌 
 公网宿主入口、第三方导入 UI、既有长会话、原生 arm64、真实 DNS/整机重启及可信发布未验；
 3B.4、其余 3C、3D、4A、5C 仍待完成，`lifecycle.sh` 无本阶段差异。
 
+#### 3C.11 VLESS/Trojan gRPC TLS 基础入口
+
+协议 `24`/`25` 仅接受 v3 和 Xray，首配分别选 `14`/`15`；副核心首配仍为 Reality Vision。
+独立 `grpc_tls` 合同固定为 `domain/service_name/backend_port/tls_port`，
+服务名只接受 1–64 位字母、数字、下划线或连字符；单核首配不生成 Reality 密钥。
+默认后端端口为 `31301`/`31304`，Nginx TLS 监听默认 `8443`，不依赖原生 fallback/PROXY 拓扑。
+Nginx 明确启用 `http2 on`，按 `/service_name/` 前缀 `grpc_pass` 到 Xray，不重写 gRPC 方法路径；
+Host 固定受管域名，关闭请求体大小限制并将 body/read/send 超时设为 `5d`。
+公开双栈入口仅映射到 Nginx，核心 gRPC 后端不暴露宿主端口，TLS 文件只挂载到终止 TLS 的服务。
+首配、完整规格导入、通用字段和服务名编辑、同核复制/删除及两类分享 URI 已接入。
+链接保留 `type=grpc/serviceName/alpn=h2` 与 TLS SNI，复用 UUID 身份、累计和额度。
+复制按 Xray 监听/API 端口避让，TLS 端口与 WS/HTTPUpgrade 共用全局池；已有内部端口和身份冻结。
+单协议 24/25 不发布 HTTPS 订阅；含协议 21 的混合部署可发布其链接；
+删除最后 21 关闭发布，保留 gRPC TLS 的规格引用；宿主集成、sing-box 和完整管理继续拒绝。
+
+本地根回归 `219.575` 秒通过，只串接一次此前协议基线，覆盖两协议严格合同、旧版/bundle 拒绝、
+生成/Nginx HTTP/2/URI/漂移、混合 21–25 与直接入口端口池、共享额度、TLS 删除及失败/更新/回滚。
+Draft 2020-12 Schema `6` 正例/`68` 反例、Bash、ShellCheck、JSON、内嵌 Python AST 和 CI actionlint 通过。
+Schema 首轮验证脚本遗漏 IPv4/IPv6 `format_checker`，补齐后通过，未改生产合同。
+菜单测试首轮发现预期入口 ID/名称漏写 `-tls`，仅修断言并替换源码快照。
+phase3 `239.356` 秒、菜单 PTY `503.252` 秒通过。
+菜单覆盖两协议各单/双核心首配、取消、通用字段与服务名编辑、同核复制、跨核拒绝、
+既有身份和新增异协议冻结、删除副本、独立发布拒绝及 TLS/健康失败恢复。
+两项限定范围的只读生产交叉审阅无可操作问题。
+真实 Linux amd64 的 24/25 与 VMess WS 原 4 参数兼容顺序验收共 `147.075` 秒通过。
+客户端从实际 `protocol links` 解析认证、SNI、`alpn=h2` 和服务名，隔离 CA 严格校验 TLS；
+两协议各双栈 TCP HTTP/UDP 隧道、错误凭据拒绝、UUID 上/下行 `184/332` 和同客户端额度拒绝/恢复通过，
+额度拒绝期间源站计数不增，`users.base` 哈希保持，业务服务非 root/只读根/cap drop/init/权限/健康不变。
+业务镜像沿用 3C.2，无 HTTP/2 curl 额外参数；原 VMess/HTTPUpgrade 参数合同保留。
+VLESS 客户端显式 `packet_encoding=xudp` 以最终源码快照定向复验 `47.445` 秒通过；
+该两行仅在测试客户端中，未修改协议 URI 或生产生成器。
+临时工具容器仅为真实测试挂 Docker socket，所有业务容器、网络及命名卷已按独立标签自动清理，
+未发布宿主端口；前两次并行回归容器被误停或回收，结果无效，顺序独立重跑后 phase3 通过，
+未据此修改生产合同或回归入口。复现：
+
+```bash
+bash docker/tests/grpc-tls.sh
+bash docker/tests/grpc-tls-real.sh \
+  padm-local/padm-xray:tls-3b4 \
+  padm-local/padm-sing-box:tls-3b4 \
+  padm-local/padm-ops:tls-3b4 \
+  padm-local/padm-nginx:tls-3b4
+```
+
+CI 根入口改为 `grpc-tls.sh`，新增 `docker-grpc-tls` selector；复用共享工具镜像和独立源码快照。
+公网宿主入口、第三方导入 UI、既有长会话、原生 arm64、真实 DNS/整机重启及可信发布仍未验。
+其余传统 TLS/fallback 协议、3B.4、3D、4A、5C 仍待完成；`lifecycle.sh` 无本阶段差异。
+
 ### 3D. 协议管理与入口维护
 
 - Reality：目标检测/扫描、候选库、黑名单、PQC 状态、参数重生成；
@@ -1000,7 +1048,7 @@ Fail2ban 1.1.0），只读挂载当前生成配置及入口，未重建或发布
 | `network-optimization`、`vless-encryption` | 5C 独立宿主/实验子项；未验收仍不支持 |
 
 新增能力提交时同步更新文档、配置合同、生成器/Compose、控制入口及证据。
-[`phase3.sh`](../docker/tests/phase3.sh)当前固定 `supported` 协议为 `[1, 2, 3, 4, 5, 21, 22, 23, 26, 28, 30, 31]`，
+[`phase3.sh`](../docker/tests/phase3.sh)当前固定 `supported` 协议为 `[1, 2, 3, 4, 5, 21, 22, 23, 24, 25, 26, 28, 30, 31]`，
 并要求菜单和管理差距为 `deferred`；后续按真实交付更新这些基线断言，
 保留协议注册表、核心/profile、网络权限和前置条件的一致性检查。
 不得只删除断言或只修改 `features.json` 来宣称完成。

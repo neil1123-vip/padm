@@ -115,31 +115,31 @@
     },
     {
       "id": 24,
-      "status": "deferred",
+      "status": "supported",
       "management_status": "deferred",
       "cores": ["xray"],
-      "profiles": [],
+      "profiles": ["core-xray", "nginx"],
       "native_menu": "安装与重装 / 自定义协议选择",
       "native_action": "VLESS gRPC TLS",
       "transport": "grpc",
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "需要 gRPC 反代、HTTP/2 和 fallback 端口合同，Docker 当前未开放。"
+      "reason": "v3 支持 Xray VLESS gRPC TLS 首配、完整规格导入、入口与服务名编辑、同核复制与删除及 vless 分享链接；复用 Nginx HTTP/2 反代、受管 TLS 和 UUID 流量账号，不依赖原生 fallback/PROXY 拓扑，宿主集成组合及完整管理尚未开放。"
     },
     {
       "id": 25,
-      "status": "deferred",
+      "status": "supported",
       "management_status": "deferred",
       "cores": ["xray"],
-      "profiles": [],
+      "profiles": ["core-xray", "nginx"],
       "native_menu": "安装与重装 / 自定义协议选择",
       "native_action": "Trojan gRPC TLS",
       "transport": "grpc",
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "需要 gRPC 反代和 Trojan 订阅输出，Docker 当前未开放。"
+      "reason": "v3 支持 Xray Trojan gRPC TLS 首配、完整规格导入、入口与服务名编辑、同核复制与删除及 trojan 分享链接；复用 Nginx HTTP/2 反代、受管 TLS 和 UUID 流量账号，不依赖原生 fallback/PROXY 拓扑，宿主集成组合及完整管理尚未开放。"
     },
     {
       "id": 26,
@@ -246,7 +246,7 @@
       "profiles": ["nginx"],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "Docker 已有独立 Nginx 容器，可承载 WebSocket 反代和静态入口。"
+      "reason": "Docker 已有独立 Nginx 容器，可承载 WebSocket、HTTPUpgrade、gRPC HTTP/2 反代和静态入口。"
     },
     "tls-files": {
       "status": "supported",
