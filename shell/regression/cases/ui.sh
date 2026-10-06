@@ -1370,6 +1370,7 @@ runMenuSmokeRegression() {
     eval "$(declare -f subscriptionWireGuardCredentialDecode | sed '1s/^subscriptionWireGuardCredentialDecode /originalMenuSmokeCredentialDecode /')"
     eval "$(declare -f changeSubscriptionSourceEnabledMenu | sed '1s/^changeSubscriptionSourceEnabledMenu /originalChangeSubscriptionSourceEnabledMenu /')"
     eval "$(declare -f removeSubscriptionControlledServerMenu | sed '1s/^removeSubscriptionControlledServerMenu /originalRemoveSubscriptionControlledServerMenu /')"
+    eval "$(declare -f showXrayGeoStatus | sed '1s/^showXrayGeoStatus /originalMenuShowXrayGeoStatus /')"
     menu() { recordMenuAction menu; }
     uiStyle() { printf '%s' "$2"; }
     menuLine() { output+="$*"$'\n'; }
@@ -1654,20 +1655,26 @@ EOF
         originalSubscriptionGroupsStateRead "$@"
     }
     local geoOverviewDir="${TMP_DIR}/menu-smoke-xray-geo"
-    mkdir -p "${geoOverviewDir}/conf"
-    printf '#!/usr/bin/env bash\ncase "$1" in --version) printf "Xray 1.0.0 test\\n" ;; -test) exit 0 ;; *) exit 1 ;; esac\n' >"${geoOverviewDir}/xray"
-    chmod +x "${geoOverviewDir}/xray"
-    printf 'geoip' >"${geoOverviewDir}/geoip.dat"
-    printf 'geosite' >"${geoOverviewDir}/geosite.dat"
-    printf 'v20260513' >"${geoOverviewDir}/geo.version"
+    mkdir -p "${geoOverviewDir}/bin" "${geoOverviewDir}/settings/conf"
+    printf '#!/usr/bin/env bash\ncase "$1" in --version) printf "Xray 1.0.0 test\\n" ;; -test) exit 0 ;; *) exit 1 ;; esac\n' >"${geoOverviewDir}/bin/xray"
+    chmod +x "${geoOverviewDir}/bin/xray"
+    printf 'geoip' >"${geoOverviewDir}/bin/geoip.dat"
+    printf 'geosite' >"${geoOverviewDir}/bin/geosite.dat"
+    printf 'v20260513' >"${geoOverviewDir}/bin/geo.version"
     output=
     if menuSmokePartSelected core; then
         resetMenuActions
         resetMenuRender
-        PADM_XRAY_DIR="${geoOverviewDir}" PADM_XRAY_BINARY="${geoOverviewDir}/xray" PADM_SINGBOX_BINARY="${geoOverviewDir}/missing-sing-box" showCoreStatusOverview
+        PADM_XRAY_CONF_DIR="${geoOverviewDir}/settings/conf" PADM_XRAY_BINARY="${geoOverviewDir}/bin/xray" PADM_SINGBOX_BINARY="${geoOverviewDir}/missing-sing-box" showCoreStatusOverview
         [[ "${output}" == *"Xray Geo:"*"版本 v20260513"* ]]
         [[ "${output}" == *"sing-box 用户统计能力: 无法检查"* ]]
         ! assertMenuAction unexpected-network-version-fetch
+        (
+            statusCard() { printf '%s\n' "$*"; }
+            local geoStatusOutput
+            geoStatusOutput=$(PADM_XRAY_CONF_DIR="${geoOverviewDir}/settings/conf" PADM_XRAY_BINARY="${geoOverviewDir}/bin/xray" originalMenuShowXrayGeoStatus)
+            [[ "${geoStatusOutput}" == *"geoip.dat：已安装"*"geosite.dat：已安装"*"版本 v20260513"* ]]
+        )
 
         (
             local apiCapability

@@ -331,7 +331,7 @@ xrayGeoDisplayVersion() {
 }
 
 showXrayGeoStatus() {
-    local targetDir="${1:-/etc/padm/xray}"
+    local targetDir="${1:-$(coreXrayInstallDir)}"
     local geoipStatus="缺失"
     local geositeStatus="缺失"
     local cronStatus="未设置"
@@ -1367,7 +1367,7 @@ validateSingBoxPrereleaseConfigWithMigration() {
     local binary=$1
     local version=$2
     local logFile=$3
-    local originalConfDir stagingRoot stagingConfDir migrationLog
+    local originalConfDir originalShardDir shardName stagingRoot stagingConfDir migrationLog
     local migrationBackup= validationRc=0
 
     if ! singBoxVersionAtLeast "${version}" 1.14.0; then
@@ -1375,6 +1375,8 @@ validateSingBoxPrereleaseConfigWithMigration() {
         return $?
     fi
     originalConfDir=$(singBoxConfigConfDir) || return 1
+    originalShardDir=$(singBoxConfigShardDir) || return 1
+    shardName=$(basename -- "${originalShardDir%/}") || return 1
     padmCreateTmpRootPath stagingRoot padm-sing-box-prerelease-config.XXXXXX -d || return 1
     stagingConfDir="${stagingRoot}/conf"
     if ! padmEnsureSafeDirectory "${stagingConfDir}" || ! cp -a "${originalConfDir}/." "${stagingConfDir}/"; then
@@ -1385,7 +1387,10 @@ validateSingBoxPrereleaseConfigWithMigration() {
     (
         migrationBackup=
         validationRc=0
-        singBoxConfigPath="${stagingConfDir}/config/"
+        singBoxConfigPath="${stagingConfDir}/${shardName}/"
+        if compgen -G "${singBoxConfigPath}*.json" >/dev/null; then
+            removeManagedFileIfPresent "${stagingConfDir}/config.json" || exit 1
+        fi
         if ! migrateSingBox116DeprecatedConfig migrationBackup "${migrationLog}"; then
             [[ -n "${migrationBackup}" ]] && padmRemoveCleanupPath "${migrationBackup}"
             exit 1
@@ -1805,7 +1810,9 @@ finalizeFailedCoreBinaryInstall() {
         if restoreCoreBinaryBackup "${backupBinary}" "${targetBinary}"; then
             restoreMessage="已恢复旧二进制"
             restoredBinary=true
-            removeManagedFilesIfPresentIgnoreFailure "${backupBinary}"
+            if [[ "${startRestoredService}" == "true" ]]; then
+                removeManagedFilesIfPresentIgnoreFailure "${backupBinary}"
+            fi
         else
             restoreMessage="旧二进制恢复失败"
         fi
@@ -1817,7 +1824,7 @@ finalizeFailedCoreBinaryInstall() {
             coreSetManualCheckMessage serviceRestoreMessage "旧服务恢复启动失败" "服务状态"
         fi
     elif [[ "${restoredBinary}" == "true" ]]; then
-        serviceRestoreMessage="旧服务未启动，等待依赖恢复"
+        serviceRestoreMessage="旧服务未启动，等待配置或依赖恢复"
     elif [[ -f "${backupBinary}" ]]; then
         serviceRestoreMessage="旧二进制未恢复，已跳过服务启动"
     fi
@@ -1843,13 +1850,25 @@ finalizeFailedSingBoxBinaryInstall() {
     local cronetBackup=$3
     local cronetPath=$4
     local logFile=$5
+    local migrationBackupDir=${6:-}
     local restoreStatus=0
-    local cronetRestored=true
+    local cronetRestored=true migrationRestored=true startRestoredService=true
 
+    if ! singBoxUpgradeMigrationRollback "${migrationBackupDir}"; then
+        migrationRestored=false
+        startRestoredService=false
+    fi
     if ! restoreCoreOptionalFileBackup "${cronetBackup}" "${cronetPath}" 644; then
         cronetRestored=false
+        startRestoredService=false
     fi
-    finalizeFailedCoreBinaryInstall "sing-box" "${backupBinary}" "${targetBinary}" handleSingBox "${logFile}" "${cronetRestored}" || restoreStatus=$?
+    finalizeFailedCoreBinaryInstall "sing-box" "${backupBinary}" "${targetBinary}" handleSingBox "${logFile}" \
+        "${startRestoredService}" || restoreStatus=$?
+    if [[ "${migrationRestored}" != "true" ]]; then
+        statusCard "sing-box 更新失败" "迁移配置恢复失败，已跳过旧服务启动" \
+            "已保留备份：二进制 ${backupBinary}，Cronet ${cronetBackup}，配置 ${migrationBackupDir}" "排查日志: ${logFile}"
+        return 1
+    fi
     if [[ "${cronetRestored}" != "true" ]]; then
         local manualCheckMessage
         coreSetManualCheckMessage manualCheckMessage "libcronet.so 恢复失败" " ${cronetPath}"
@@ -2056,14 +2075,12 @@ installDownloadedSingBoxBinary() {
     fi
     if ! commitStagedCoreInstallFile "${newBinary}" "${oldBinary}" 655; then
         padmRemoveCleanupPath "${tmpDir}"
-        singBoxUpgradeMigrationRollback "${migrationBackupDir}" || true
-        finalizeFailedSingBoxBinaryInstall "${backupBinary}" "${oldBinary}" "${cronetBackup}" "${cronetPath}" "${logFile}"
+        finalizeFailedSingBoxBinaryInstall "${backupBinary}" "${oldBinary}" "${cronetBackup}" "${cronetPath}" "${logFile}" "${migrationBackupDir}"
         return 1
     fi
     if ! commitStagedCoreInstallFile "${extractedDir}/libcronet.so" "${cronetPath}" 644; then
         padmRemoveCleanupPath "${tmpDir}"
-        singBoxUpgradeMigrationRollback "${migrationBackupDir}" || true
-        finalizeFailedSingBoxBinaryInstall "${backupBinary}" "${oldBinary}" "${cronetBackup}" "${cronetPath}" "${logFile}"
+        finalizeFailedSingBoxBinaryInstall "${backupBinary}" "${oldBinary}" "${cronetBackup}" "${cronetPath}" "${logFile}" "${migrationBackupDir}"
         return 1
     fi
     runCoreServiceActionAllowFailure handleSingBox start || true
@@ -2089,8 +2106,7 @@ installDownloadedSingBoxBinary() {
         fi
     fi
     padmRemoveCleanupPath "${tmpDir}"
-    singBoxUpgradeMigrationRollback "${migrationBackupDir}" || true
-    finalizeFailedSingBoxBinaryInstall "${backupBinary}" "${oldBinary}" "${cronetBackup}" "${cronetPath}" "${logFile}"
+    finalizeFailedSingBoxBinaryInstall "${backupBinary}" "${oldBinary}" "${cronetBackup}" "${cronetPath}" "${logFile}" "${migrationBackupDir}"
 }
 
 confirmCoreUpgrade() {

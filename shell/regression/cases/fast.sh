@@ -5813,34 +5813,58 @@ JSON
 
             (
                 local failureOrder= installBackupDir="${installRoot}/migration-backup"
+                local rollbackRc originalBinary originalCronet failureStatus="${installRoot}/failure-status.log"
                 preparedVersion=v1.16.0
-                preparedDir=$(makePreparedDir "${preparedVersion}")
                 migrateSingBox116DeprecatedConfig() {
                     printf -v "$1" '%s' "${installBackupDir}"
                     return 0
                 }
-                singBoxUpgradeMigrationRollback() {
+                checkLogBackupRestore() {
                     failureOrder+=$'rollback\n'
-                    return 0
+                    return "${rollbackRc}"
                 }
-                finalizeFailedSingBoxBinaryInstall() {
-                    failureOrder+=$'finalize\n'
-                    return 1
+                runCoreServiceActionAllowFailure() {
+                    if [[ "$2" == stop ]]; then
+                        serviceRunning=false
+                    else
+                        failureOrder+=$'start\n'
+                        serviceRunning=true
+                    fi
                 }
+                statusCard() { printf '%s\n' "$*" >>"${failureStatus}"; }
                 commitStagedCoreInstallFile() { return 1; }
-                installDownloadedSingBoxBinary "${preparedVersion}" "${preparedDir}" || true
-                [[ "${failureOrder}" == $'rollback\nfinalize\n' ]]
+                originalBinary=$(<"${currentBinary}")
+                originalCronet=$(<"${currentCronet}")
+                for rollbackRc in 0 1; do
+                    mkdir -p "${installBackupDir}"
+                    preparedDir=$(makePreparedDir "${preparedVersion}")
+                    failureOrder=
+                    : >"${failureStatus}"
+                    regressionExpectStatus 1 installDownloadedSingBoxBinary "${preparedVersion}" "${preparedDir}"
+                    [[ "$(<"${currentBinary}")" == "${originalBinary}" && "$(<"${currentCronet}")" == "${originalCronet}" ]]
+                    if [[ "${rollbackRc}" == 0 ]]; then
+                        [[ "${failureOrder}" == $'rollback\nstart\n' && "${serviceRunning}" == true && ! -e "${installBackupDir}" ]]
+                    else
+                        [[ "${failureOrder}" == $'rollback\n' && "${serviceRunning}" == false && -d "${installBackupDir}" ]]
+                        compgen -G "${currentBinary}.bak.*" >/dev/null
+                        compgen -G "${currentCronet}.bak.*" >/dev/null
+                        grep -q '迁移配置恢复失败，已跳过旧服务启动' "${failureStatus}"
+                    fi
+                done
             )
         )
 
         (
             local preflightRoot="${root}/prerelease-migration"
-            local preflightConfigDir="${preflightRoot}/conf/config/"
+            local preflightConfigDir="${preflightRoot}/conf/shards/"
             local preflightFile="${preflightConfigDir}01_rules.json"
             local preflightLog="${preflightRoot}/prerelease.log"
+            local preflightMerged="${preflightRoot}/conf/config.json" preflightMergedBefore
             local preflightBefore validationCallsFile="${preflightRoot}/validation-calls" validationConfigDirFile="${preflightRoot}/validation-config-dir"
             mkdir -p "${preflightConfigDir}"
             printf '%s\n' '{"outbounds":[{"type":"direct","tag":"direct","domain_strategy":"prefer_ipv4"}],"route":{"rule_set":[{"type":"remote","tag":"legacy","url":"https://example.com/legacy.srs","download_detour":"direct"}]}}' >"${preflightFile}"
+            printf '%s\n' '{"outbounds":[{"type":"wireguard"}]}' >"${preflightMerged}"
+            preflightMergedBefore=$(<"${preflightMerged}")
             printf '0\n' >"${validationCallsFile}"
             preflightBefore=$(<"${preflightFile}")
             singBoxConfigPath="${preflightConfigDir}"
@@ -5863,8 +5887,8 @@ JSON
                 printf '%s\n' "$((validationCalls + 1))" >"${validationCallsFile}"
                 validationConfigDir=$(singBoxConfigShardDir)
                 printf '%s\n' "${validationConfigDir}" >"${validationConfigDirFile}"
-                if compgen -G "${validationConfigDir}*.json" >/dev/null &&
-                    grep -Eq 'download_detour|domain_strategy' "${validationConfigDir}"*.json; then
+                [[ -s "${validationConfigDir}01_rules.json" ]] || return 1
+                if grep -Eq 'download_detour|domain_strategy' "${validationConfigDir}"*.json; then
                     return 1
                 fi
                 return 0
@@ -5873,13 +5897,13 @@ JSON
 
             checkSingBoxPrereleaseCompatibility v1.16.0 "${preflightLog}"
             [[ "$(<"${validationCallsFile}")" == "1" ]]
-            [[ "$(<"${validationConfigDirFile}")" != "${preflightConfigDir}" ]]
-            [[ "$(<"${preflightFile}")" == "${preflightBefore}" ]]
+            [[ "$(<"${validationConfigDirFile}")" != "${preflightConfigDir}" && "$(<"${validationConfigDirFile}")" == */conf/shards/ ]]
+            [[ "$(<"${preflightFile}")" == "${preflightBefore}" && "$(<"${preflightMerged}")" == "${preflightMergedBefore}" ]]
             grep -q '已迁移' "${preflightLog}"
             printf '%s\n' '{"outbounds":[{"type":"direct","domain_strategy":"prefer_ipv4","domain_resolver":"dns-conflict"}]}' >"${preflightFile}"
             preflightBefore=$(<"${preflightFile}")
             regressionExpectStatus 1 checkSingBoxPrereleaseCompatibility v1.16.0 "${preflightLog}"
-            [[ "$(<"${preflightFile}")" == "${preflightBefore}" && "$(<"${validationCallsFile}")" == 1 ]]
+            [[ "$(<"${preflightFile}")" == "${preflightBefore}" && "$(<"${preflightMerged}")" == "${preflightMergedBefore}" && "$(<"${validationCallsFile}")" == 1 ]]
         )
 
         jq -e '

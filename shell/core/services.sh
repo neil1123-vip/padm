@@ -7,10 +7,11 @@ xrayStartTestLog() {
     padmTmpFilePath padm-xray-start-test.log
 }
 
-xraySystemdStart() {
-    systemctl start xray.service && return 0
-    systemctl reset-failed xray.service >/dev/null 2>&1 || true
-    systemctl start xray.service
+coreSystemdStart() {
+    local unit=$1
+    systemctl start "${unit}" && return 0
+    systemctl reset-failed "${unit}" >/dev/null 2>&1 || true
+    systemctl start "${unit}"
 }
 
 xrayServiceBinaryPath() {
@@ -65,6 +66,14 @@ padmReadProcCmdline() {
     local path=$1
     [[ -r "${path}" ]] || return 0
     tr '\0' ' ' <"${path}" 2>/dev/null || true
+}
+
+padmReadProcArgs() {
+    local -n resultRef=$1
+    local path=$2
+    resultRef=()
+    [[ -r "${path}" ]] || return 1
+    mapfile -d '' -t resultRef 2>/dev/null <"${path}"
 }
 
 padmCommandExists() {
@@ -344,7 +353,7 @@ handleNginx() {
 singBoxRunning() {
     local pid
     local exe
-    local cmdline
+    local -a procArgs=()
     local mergedConfig
     local systemdServiceFile
     local openRcServiceFile
@@ -357,15 +366,10 @@ singBoxRunning() {
     while IFS= read -r pid; do
         [[ -n "${pid}" ]] || continue
         exe=$(padmReadProcExe "/proc/${pid}/exe")
-        cmdline=$(padmReadProcCmdline "/proc/${pid}/cmdline")
-        [[ "${cmdline}" == *"${binary} run -c "* ]] || continue
-        if [[ -z "${mergedConfig}" || "${cmdline}" != *" -c ${mergedConfig}"* ]]; then
-            continue
-        fi
         [[ "${exe}" == "${binary}" || "${exe}" == "${binary} (deleted)" ]] || continue
-        if [[ -n "${systemdServiceFile}" && -f "${systemdServiceFile}" ]] || [[ -n "${openRcServiceFile}" && -f "${openRcServiceFile}" ]]; then
-            [[ "${cmdline}" == *"${binary} run -c ${mergedConfig}"* ]] || continue
-        fi
+        padmReadProcArgs procArgs "/proc/${pid}/cmdline" || continue
+        [[ -n "${mergedConfig}" && "${procArgs[0]:-}" == "${binary}" && "${procArgs[1]:-}" == run &&
+            "${procArgs[2]:-}" == -c && "${procArgs[3]:-}" == "${mergedConfig}" ]] || continue
         return 0
     done < <(pgrep -x sing-box 2>/dev/null)
     if [[ -n "${systemdServiceFile}" && -f "${systemdServiceFile}" ]] && padmCommandExists systemctl; then
@@ -403,7 +407,7 @@ handleSingBox() {
                 return 1
             fi
             case "${serviceManager}" in
-            systemd) systemctl start sing-box.service ;;
+            systemd) coreSystemdStart sing-box.service ;;
             openrc) rc-service sing-box start ;;
             esac
         elif singBoxRunning && [[ "$1" == "stop" ]]; then
@@ -444,17 +448,28 @@ handleSingBox() {
 xrayRunning() {
     local pid
     local exe
-    local cmdline
+    local -a procArgs=()
+    local index configMatched testMode
     local xrayBinary
+    local xrayConfigDir
     local systemdServiceFile=${PADM_XRAY_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/xray.service}
     local openRcServiceFile=${PADM_XRAY_OPENRC_SERVICE_FILE:-/etc/init.d/xray}
     xrayBinary=$(xrayServiceBinaryPath)
+    xrayConfigDir=$(xrayServiceConfigDir)
     while IFS= read -r pid; do
         [[ -n "${pid}" ]] || continue
         exe=$(padmReadProcExe "/proc/${pid}/exe")
-        cmdline=$(padmReadProcCmdline "/proc/${pid}/cmdline")
-        [[ "${exe}" == "${xrayBinary}" || "${exe}" == "${xrayBinary} (deleted)" || "${cmdline}" == *"${xrayBinary}"* ]] || continue
-        [[ "${cmdline}" == *" api statsquery "* ]] && continue
+        [[ "${exe}" == "${xrayBinary}" || "${exe}" == "${xrayBinary} (deleted)" ]] || continue
+        padmReadProcArgs procArgs "/proc/${pid}/cmdline" || continue
+        configMatched=false
+        testMode=false
+        for ((index = 1; index < ${#procArgs[@]}; index++)); do
+            case "${procArgs[index]}" in
+            -confdir) [[ "${procArgs[index + 1]:-}" != "${xrayConfigDir}" ]] || configMatched=true ;;
+            -test | -test=*) testMode=true ;;
+            esac
+        done
+        [[ "${configMatched}" == true && "${testMode}" == false ]] || continue
         return 0
     done < <(pgrep -x xray 2>/dev/null)
     if [[ -n "${systemdServiceFile}" && -f "${systemdServiceFile}" ]] && padmCommandExists systemctl; then
@@ -486,7 +501,7 @@ handleXray() {
                 return 1
             fi
             case "${serviceManager}" in
-            systemd) xraySystemdStart ;;
+            systemd) coreSystemdStart xray.service ;;
             openrc) rc-service xray start ;;
             esac
         elif xrayRunning && [[ "$1" == "stop" ]]; then

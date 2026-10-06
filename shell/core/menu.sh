@@ -202,15 +202,14 @@ coreMenuServiceState() {
 }
 
 showCoreStatusOverview() {
-    local xrayConfigDir xrayDir xrayBinary reason
+    local xrayDir xrayBinary reason
     local xrayServiceStatus singBoxServiceStatus nginxServiceStatus
     local xrayVersion="未安装" singBoxVersion="未安装" singBoxApiStatus="无法检查"
     local geoStatus="未安装" geoVersion= geoCron="未设置"
     local xrayConfigStatus="未配置" singBoxConfigStatus="未配置"
     local nginxReasons= nginxReasonText=
 
-    xrayConfigDir=$(coreXrayConfigDir)
-    xrayDir=$(dirname "${xrayConfigDir}")
+    xrayDir=$(coreXrayInstallDir)
     xrayBinary=$(coreXrayBinaryPath)
     if coreExecutableFile "${xrayBinary}"; then
         xrayVersion=$(xrayBinaryVersion "${xrayBinary}")

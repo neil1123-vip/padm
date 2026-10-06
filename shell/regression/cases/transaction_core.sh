@@ -195,14 +195,49 @@ runSingBoxCustomPathsRegression() (
     [[ "${command}" == "${PADM_SINGBOX_BINARY}" ]]
     [[ "${command_args}" == "run -c \"${root}/conf/config.json\"" ]]
 
-    local runningConfig="${root}/conf/config.json"
+    local -a procArgsFixture=("${PADM_SINGBOX_BINARY}" run -c "${root}/conf/config.json") parsedArgs=()
+    printf '%s\0' "${procArgsFixture[@]}" >"${root}/cmdline"
+    padmReadProcArgs parsedArgs "${root}/cmdline"
+    [[ "${#parsedArgs[@]}" == 4 && "${parsedArgs[3]}" == "${root}/conf/config.json" ]]
     pgrep() { printf '123\n'; }
     padmReadProcExe() { printf '%s\n' "${PADM_SINGBOX_BINARY}"; }
-    padmReadProcCmdline() { printf '%s run -c %s\n' "${PADM_SINGBOX_BINARY}" "${runningConfig}"; }
+    padmReadProcArgs() { local -n argsRef=$1; argsRef=("${procArgsFixture[@]}"); }
     padmCommandExists() { return 1; }
     singBoxRunning
-    runningConfig="${root}/other.json"
+    procArgsFixture[3]="${root}/conf/config.json.old"
     regressionExpectStatus 1 singBoxRunning
+    procArgsFixture[3]="${root}/conf/config.json old"
+    regressionExpectStatus 1 singBoxRunning
+    procArgsFixture[3]="${root}/other.json"
+    regressionExpectStatus 1 singBoxRunning
+    procArgsFixture[3]="${root}/conf/config.json"
+    padmReadProcExe() { printf '%s (deleted)\n' "${PADM_SINGBOX_BINARY}"; }
+    singBoxRunning
+
+    local PADM_XRAY_BINARY="${root}/bin/xray" PADM_XRAY_CONF_DIR="${root}/xray/conf"
+    local processBinary="${PADM_XRAY_BINARY}"
+    procArgsFixture=("${PADM_XRAY_BINARY}" run -confdir "${PADM_XRAY_CONF_DIR}")
+    padmReadProcExe() { printf '%s\n' "${processBinary}"; }
+    xrayRunning
+    procArgsFixture+=(-test)
+    regressionExpectStatus 1 xrayRunning
+    procArgsFixture[4]=-test=true
+    regressionExpectStatus 1 xrayRunning
+    unset 'procArgsFixture[4]'
+    procArgsFixture[3]="${PADM_XRAY_CONF_DIR}.old"
+    regressionExpectStatus 1 xrayRunning
+    procArgsFixture[3]="${PADM_XRAY_CONF_DIR} old"
+    regressionExpectStatus 1 xrayRunning
+    procArgsFixture[3]=${PADM_XRAY_CONF_DIR}
+    processBinary="${root}/other/xray"
+    regressionExpectStatus 1 xrayRunning
+    processBinary="${PADM_XRAY_BINARY} (deleted)"
+    xrayRunning
+    PADM_XRAY_CONF_DIR="${root}/xray/ -test /conf"
+    procArgsFixture[3]=${PADM_XRAY_CONF_DIR}
+    xrayRunning
+    procArgsFixture=("${PADM_XRAY_BINARY}" -confdir "${PADM_XRAY_CONF_DIR}")
+    xrayRunning
     PADM_SINGBOX_BINARY="${root}/unsafe%path"
     regressionExpectStatus 1 installSingBoxService test >/dev/null
 )

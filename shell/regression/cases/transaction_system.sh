@@ -270,7 +270,7 @@ SH
         printf '%s\n' "$*" >>"${xrayStartLimitLog}"
         case "$1" in
         start)
-            if ! grep -qx 'reset-failed xray.service' "${xrayStartLimitLog}"; then
+            if ! grep -qx "reset-failed $2" "${xrayStartLimitLog}"; then
                 return 1
             fi
             printf 'true\n' >"${xrayRunningState}"
@@ -293,10 +293,23 @@ SH
     grep -qx 'xrayRunning:running:25:0.1' "${xrayWaitLog}" || return 1
     [[ "$(<"${xrayRunningState}")" == "true" ]] || return 1
 
+    (
+        local PADM_SINGBOX_SYSTEMD_SERVICE_FILE="${serviceTmp}/sing-box-retry.service"
+        : >"${PADM_SINGBOX_SYSTEMD_SERVICE_FILE}"
+        : >"${xrayStartLimitLog}"
+        printf 'false\n' >"${xrayRunningState}"
+        singBoxRunning() { xrayRunning; }
+        singBoxMergeConfig() { return 0; }
+        handleSingBox start >/dev/null 2>&1 || return 1
+        grep -qx 'reset-failed sing-box.service' "${xrayStartLimitLog}" || return 1
+        [[ "$(grep -c '^start sing-box.service$' "${xrayStartLimitLog}")" == 2 ]] || return 1
+        [[ "$(<"${xrayRunningState}")" == true ]] || return 1
+    ) || return 1
+
     local xrayNoExitMarker="${serviceTmp}/xray-no-exit"
     SERVICE_QUEUE_ALLOW_FAILURE=
     xrayRunning() { return 1; }
-    xraySystemdStart() { return 1; }
+    coreSystemdStart() { return 1; }
     waitForServiceState() { return 1; }
     (
         set +e
