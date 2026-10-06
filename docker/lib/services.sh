@@ -656,12 +656,18 @@ dockerStageHostIntegrationFiles() {
 }
 
 dockerGenerateFail2banConfig() {
-    local specFile=$1 candidate=$2 ports maxRetry findTime banTime
+    local specFile=$1 candidate=$2 ports maxRetry findTime banTime allowIPv6
     jq -e 'any(.host_integrations[]; .type == "fail2ban")' "${specFile}" >/dev/null || return 0
     ports=$(jq -r '.host_integrations[] | select(.type == "fail2ban") | .settings.ports | join(",")' "${specFile}") || return 1
     maxRetry=$(jq -r '.host_integrations[] | select(.type == "fail2ban") | .settings.max_retry' "${specFile}") || return 1
     findTime=$(jq -r '.host_integrations[] | select(.type == "fail2ban") | .settings.find_time' "${specFile}") || return 1
     banTime=$(jq -r '.host_integrations[] | select(.type == "fail2ban") | .settings.ban_time' "${specFile}") || return 1
+    allowIPv6=$(jq -r '
+      [.host_integrations[] | select(.type == "fail2ban") | .settings.ports[]] as $ports |
+      if any(.core.protocols[]; .id == 21 and
+        (.public_port as $port | ($ports | index($port)) != null) and
+        (.address_families | index("ipv6")) != null) then "yes" else "no" end
+    ' "${specFile}") || return 1
     cat >"${candidate}/config/net/fail2ban/padm-nginx.conf" <<'EOF'
 [Definition]
 failregex = ^<HOST> - .* "(GET|POST|HEAD) /(?:\.env(?:\.[^/?"]+)?|\.git|wp-login\.php|wp-admin|phpmyadmin|cgi-bin|manager/html|actuator|boaform)(?:/[^ ?"]*)?(?:\?[^ "]*)? HTTP/[^"]*" (40[34]|444)\b
@@ -669,15 +675,16 @@ ignoreregex =
 EOF
     cat >"${candidate}/config/net/fail2ban/padm-docker-user.conf" <<'EOF'
 [INCLUDES]
-before = iptables-common.conf
+before = iptables.conf
 
 [Definition]
-actionstart = <iptables> -N padm-f2b
-              <iptables> -I DOCKER-USER 1 -p <protocol> -m conntrack --ctstate NEW --ctorigdstport <port> -j padm-f2b
-actionstop = <iptables> -D DOCKER-USER -p <protocol> -m conntrack --ctstate NEW --ctorigdstport <port> -j padm-f2b
-             <iptables> -F padm-f2b
+actionstart = <iptables> -N padm-f2b || exit 1
+              for port in $(echo '<port>' | tr ',' ' '); do <iptables> -I DOCKER-USER 1 -p <protocol> -m conntrack --ctstate NEW --ctorigdstport "$port" -j padm-f2b || { <actionstop>; exit 1; }; done
+actionstop = for port in $(echo '<port>' | tr ',' ' '); do <iptables> -D DOCKER-USER -p <protocol> -m conntrack --ctstate NEW --ctorigdstport "$port" -j padm-f2b || true; done
+             <actionflush>
              <iptables> -X padm-f2b
-actioncheck = <iptables> -n -L padm-f2b
+actionflush = <iptables> -F padm-f2b
+actioncheck = for port in $(echo '<port>' | tr ',' ' '); do <iptables> -C DOCKER-USER -p <protocol> -m conntrack --ctstate NEW --ctorigdstport "$port" -j padm-f2b || exit 1; done
 actionban = <iptables> -I padm-f2b 1 -s <ip> -j DROP
 actionunban = <iptables> -D padm-f2b -s <ip> -j DROP
 EOF
@@ -688,6 +695,12 @@ bantime = ${banTime}
 findtime = ${findTime}
 maxretry = ${maxRetry}
 
+[sshd]
+enabled = false
+
+[sshd-ddos]
+enabled = false
+
 [padm-nginx]
 enabled = true
 filter = padm-nginx
@@ -695,8 +708,9 @@ logpath = /var/log/padm/nginx/access.log
 port = ${ports}
 action = padm-docker-user[port="${ports}", protocol=tcp]
 EOF
-    cat >"${candidate}/config/net/fail2ban/fail2ban.local" <<'EOF'
+    cat >"${candidate}/config/net/fail2ban/fail2ban.local" <<EOF
 [Definition]
+allowipv6 = ${allowIPv6}
 logtarget = STDOUT
 socket = /run/fail2ban/fail2ban.sock
 pidfile = /run/fail2ban/fail2ban.pid

@@ -36,7 +36,7 @@ cat >"${MOCK_BIN}/id" <<'EOF'
 EOF
 cat >"${MOCK_BIN}/stat" <<'EOF'
 #!/usr/bin/env bash
-if [[ "${1:-}" == "--format=%a" ]]; then printf '600\n'; else exec /usr/bin/stat "$@"; fi
+if [[ "${1:-}" == "--format=%a" ]]; then printf '600\n'; else command -p stat "$@"; fi
 EOF
 cat >"${MOCK_BIN}/docker" <<'EOF'
 #!/usr/bin/env bash
@@ -158,10 +158,15 @@ writeWebSocketSpec() {
     local target=$1
     writeRealitySpec "${target}" xray
     jq '
-      .core.protocols = [{id: 21, server: "proxy.example.com", public_port: 24444,
+      .schema_version = 2 |
+      .core.protocols = [{id: 21, listener_id: "entry-main-ws", server: "proxy.example.com", public_port: 24444,
         address_families: ["ipv4"], name: "main-ws",
         uuid: "22222222-2222-4222-8222-222222222222",
-        websocket: {domain: "proxy.example.com", path: "websocket_path"}}] |
+        websocket: {domain: "proxy.example.com", path: "websocket_path", backend_port: 31297, tls_port: 8443}},
+       {id: 21, listener_id: "entry-alt-ws", server: "proxy.example.com", public_port: 24445,
+        address_families: ["ipv4"], name: "alt-ws",
+        uuid: "33333333-3333-4333-8333-333333333333",
+        websocket: {domain: "proxy.example.com", path: "alternate_path", backend_port: 31296, tls_port: 8444}}] |
       .tls = {domain: "proxy.example.com"}
     ' "${target}" >"${target}.tmp"
     mv -- "${target}.tmp" "${target}"
@@ -181,7 +186,7 @@ jq '.host_integrations = [{type: "wireguard", profile: "net-wireguard", firewall
   devices: ["wg-padm"], schedules: [], settings: {config_file: "wg-padm.conf", interface: "wg-padm"}}]' \
   "${REALITY_XRAY}" >"${WIREGUARD_SPEC}"
 jq '.host_integrations = [{type: "fail2ban", profile: "net-fail2ban", firewall_rules: ["DOCKER-USER"],
-  devices: [], schedules: [], settings: {log_file: "access.log", ports: [24444],
+  devices: [], schedules: [], settings: {log_file: "access.log", ports: [24444, 24445],
   max_retry: 6, find_time: 600, ban_time: 3600}}]' "${FAIL2BAN_SPEC}" >"${FAIL2BAN_SPEC}.tmp"
 mv -- "${FAIL2BAN_SPEC}.tmp" "${FAIL2BAN_SPEC}"
 jq '.host_integrations = [{type: "tun", profile: "net-transparent",
@@ -215,8 +220,8 @@ for field in '.release.signature_identity = "untrusted"' '.images.xray |= sub("1
 done
 runControl 0 wireguard configure --spec "${WIREGUARD_SPEC}"
 cmp -s "${WIREGUARD_SPEC}" "${DOCKER_ROOT}/config/spec.json" || fail 'complete spec was not persisted'
-if [[ "$(/usr/bin/uname -s)" == Linux ]]; then
-    [[ "$(/usr/bin/stat --format=%a "${DOCKER_ROOT}/config/spec.json")" == 600 ]] ||
+if [[ "$(command -p uname -s)" == Linux ]]; then
+    [[ "$(command -p stat --format=%a "${DOCKER_ROOT}/config/spec.json")" == 600 ]] ||
         fail 'complete spec permissions are not 0600'
 fi
 jq -e 'all(.services[].volumes[]?; .source != "${PADM_DOCKER_ROOT}/config" and
@@ -251,8 +256,17 @@ grep -q 'access_log /var/log/nginx/access.log combined;' "${DOCKER_ROOT}/config/
     fail 'Nginx real-source access log was not enabled'
 grep -q 'DOCKER-USER' "${DOCKER_ROOT}/config/net/fail2ban/padm-docker-user.conf" ||
     fail 'Fail2ban action does not own DOCKER-USER'
-grep -q -- '--ctorigdstport <port>' "${DOCKER_ROOT}/config/net/fail2ban/padm-docker-user.conf" ||
+grep -qF "before = iptables.conf" "${DOCKER_ROOT}/config/net/fail2ban/padm-docker-user.conf" ||
+    fail 'Fail2ban does not inherit native address-family commands'
+grep -qF "for port in \$(echo '<port>' | tr ',' ' '); do" \
+    "${DOCKER_ROOT}/config/net/fail2ban/padm-docker-user.conf" ||
+    fail 'Fail2ban does not expand each published port before matching conntrack'
+grep -qF -- '--ctorigdstport "$port" -j padm-f2b || { <actionstop>; exit 1; }' "${DOCKER_ROOT}/config/net/fail2ban/padm-docker-user.conf" ||
     fail 'Fail2ban does not match the original published port after Docker DNAT'
+grep -qF 'port="24444,24445"' "${DOCKER_ROOT}/config/net/fail2ban/padm.local" ||
+    fail 'Fail2ban did not preserve all protected published ports'
+grep -qx 'allowipv6 = no' "${DOCKER_ROOT}/config/net/fail2ban/fail2ban.local" ||
+    fail 'IPv4-only Fail2ban unnecessarily requires IPv6'
 grep -q '^logtarget = STDOUT$' "${DOCKER_ROOT}/config/net/fail2ban/fail2ban.local" ||
     fail 'Fail2ban does not log to stdout on a read-only root'
 jq -e '
@@ -260,7 +274,7 @@ jq -e '
   .services["net-fail2ban"].cap_add == ["NET_ADMIN"] and
   ((.services.nginx.cap_add // []) | length) == 0
 ' "${DOCKER_ROOT}/compose.json" >/dev/null || fail 'Fail2ban privilege boundary is wrong'
-grep -q 'net-fail2ban preflight fail2ban 24444' "${DOCKER_LOG}" || fail 'Fail2ban preflight was not called'
+grep -q 'net-fail2ban preflight fail2ban 24444,24445' "${DOCKER_LOG}" || fail 'Fail2ban preflight was not called for all ports'
 
 jq '.core.protocols[0].public_port = 25444' "${FAIL2BAN_SPEC}" >"${TEST_ROOT}/fail2ban-edit.json"
 runControl 15 reject-fail2ban-port-edit edit --spec "${TEST_ROOT}/fail2ban-edit.json" --preview

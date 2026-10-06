@@ -83,6 +83,10 @@ fail2ban_preflight() {
     [ -f /var/log/padm/nginx/access.log ] && [ ! -L /var/log/padm/nginx/access.log ] ||
         die "Nginx access log is missing"
     iptables -w -n -L DOCKER-USER >/dev/null 2>&1 || die "DOCKER-USER chain is unavailable"
+    if grep -qx 'allowipv6 = yes' /etc/fail2ban/fail2ban.local; then
+        need ip6tables
+        ip6tables -w -n -L DOCKER-USER >/dev/null 2>&1 || die "IPv6 DOCKER-USER chain is unavailable"
+    fi
     fail2ban-client -t >/dev/null 2>&1 || die "Fail2ban configuration is invalid"
 }
 
@@ -92,10 +96,17 @@ mark_rule_present() {
 }
 
 fail2ban_cleanup() {
-    ports=$1
-    iptables -w -D DOCKER-USER -p tcp -m conntrack --ctstate NEW --ctorigdstport "$ports" -j padm-f2b >/dev/null 2>&1 || true
+    old_ifs=$IFS
+    IFS=,
+    for port in $1; do
+        iptables -w -D DOCKER-USER -p tcp -m conntrack --ctstate NEW --ctorigdstport "$port" -j padm-f2b >/dev/null 2>&1 || true
+        ip6tables -w -D DOCKER-USER -p tcp -m conntrack --ctstate NEW --ctorigdstport "$port" -j padm-f2b >/dev/null 2>&1 || true
+    done
+    IFS=$old_ifs
     iptables -w -F padm-f2b >/dev/null 2>&1 || true
     iptables -w -X padm-f2b >/dev/null 2>&1 || true
+    ip6tables -w -F padm-f2b >/dev/null 2>&1 || true
+    ip6tables -w -X padm-f2b >/dev/null 2>&1 || true
 }
 
 fail2ban_run() {
@@ -108,9 +119,14 @@ fail2ban_run() {
     printf 'ports=%s\n' "$ports" >"$STATE_ROOT/fail2ban.state"
     fail2ban-server -f -x -s /run/fail2ban/fail2ban.sock &
     server=$!
-    trap 'fail2ban-client stop >/dev/null 2>&1 || kill "$server" >/dev/null 2>&1 || true' INT TERM
+    stopped=0
+    trap 'stopped=1; fail2ban-client stop >/dev/null 2>&1 || kill "$server" >/dev/null 2>&1 || true' INT TERM
     status=0
     wait "$server" || status=$?
+    if [ "$stopped" -eq 1 ]; then
+        status=0
+        wait "$server" || status=$?
+    fi
     fail2ban_cleanup "$ports"
     rm -f "$STATE_ROOT/fail2ban.state"
     return "$status"
@@ -215,6 +231,7 @@ health)
     need fail2ban-client
     need ip
     need iptables
+    need ip6tables
     need nft
     need wg
     ;;

@@ -500,6 +500,21 @@ challenge 后服务恢复，证书和控制凭据不被站点发布。
 验收：真实 Linux 内核下覆盖预检、启停、失败恢复、重启及卸载；
 外部接口、规则和其他项目不受影响；5C 完成对应跳跃测试后才能升级协议完整管理状态。
 
+现有 Fail2ban profile 的基线修正（2026-10-06，不计为 5C 完成）：
+使用 Fail2ban 原生地址族动作，逐公开端口生成和清理 conntrack hook；
+按受保护 WS 的地址族决定 IPv6 预检，禁用 Alpine 默认 SSH jail。
+第二端口安装失败会撤销本次新链及 hook；TERM 等待服务退出后清理规则，
+旧状态端口清理不覆盖当前启动参数。
+`docker/tests/fail2ban-real.sh` 在隔离网络空间验证配置解析、IPv4-only、IPv6 缺链拒绝、
+双栈双端口规则、IPv4 解封、部分安装失败后重试、TERM 清理及同容器 SQLite 恢复；
+最终耗时 43.449 秒，Linux 源码快照 `phase4` 14.38 秒通过。
+实测使用 amd64 本地 net 镜像 `padm-local/padm-net:fail2ban-before-3c1`
+（ID `sha256:f84a3720bebef4035d36346081d68fbf70603aef38c9731200ae8afca4fc9900`，
+Fail2ban 1.1.0），只读挂载当前生成配置及入口，未重建或发布镜像。
+复现：`PADM_TEST_NET_IMAGE=<已有 net 镜像> bash docker/tests/fail2ban-real.sh`。
+未验证日志触发、真实来源及网络丢包、IPv6 解封、容器重建、宿主重启或卸载；
+因此完整管理仍为 `deferred`，不扩大发行版、防火墙后端或架构支持范围。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。
