@@ -81,31 +81,40 @@ coreTemplateCollectInitialClients() {
         fi
     fi
 
-    if [[ -n "${AUTO_UUID:-}" ]]; then
-        credential=${AUTO_UUID}
-    else
-        menuReadChoice core_init_uuid "${label}[回车随机]:" credential true || return 1
-    fi
-    if [[ -z "${credential}" ]]; then
-        credential=$(generateRandomUuidValue) || { errorCard "${label}生成失败"; return 1; }
-    fi
-    if [[ "${passwordMode}" != "true" ]]; then
-        validUuidValue "${credential}" || { errorCard "UUID 格式不合法"; return 1; }
-    fi
-
-    if [[ -n "${AUTO_USER:-}" ]]; then
-        username=${AUTO_USER}
-    elif [[ "${AUTO_INSTALL:-}" != "true" ]]; then
-        menuReadChoice core_init_username "用户名[回车随机]:" username true || return 1
-    fi
-    if [[ -z "${username}" ]]; then
-        if validUuidValue "${credential}"; then
-            username="$(defaultRandomUserNameFromUuid "${credential}")-${suffix}"
+    while true; do
+        if [[ -n "${AUTO_UUID:-}" ]]; then
+            credential=${AUTO_UUID}
         else
-            username="padm-hysteria2-${suffix}"
+            menuReadChoice core_init_uuid "${label}[回车随机]:" credential true || return 1
         fi
-    fi
-    coreTemplateValidateManualAccountName "${username}" || return 1
+        if [[ -z "${credential}" ]]; then
+            credential=$(generateRandomUuidValue) || { errorCard "${label}生成失败"; return 1; }
+            [[ "${passwordMode}" == "true" ]] || validUuidValue "${credential}" || { errorCard "UUID 生成失败"; return 1; }
+        fi
+        if [[ "${passwordMode}" == "true" ]] || validUuidValue "${credential}"; then
+            break
+        fi
+        errorCard "UUID 格式不合法"
+        [[ -z "${AUTO_UUID:-}" && "${AUTO_INSTALL:-}" != "true" ]] || return 1
+    done
+
+    while true; do
+        username=
+        if [[ -n "${AUTO_USER:-}" ]]; then
+            username=${AUTO_USER}
+        elif [[ "${AUTO_INSTALL:-}" != "true" ]]; then
+            menuReadChoice core_init_username "用户名[回车随机]:" username true || return 1
+        fi
+        if [[ -z "${username}" ]]; then
+            if validUuidValue "${credential}"; then
+                username="$(defaultRandomUserNameFromUuid "${credential}")-${suffix}"
+            else
+                username="padm-hysteria2-${suffix}"
+            fi
+        fi
+        coreTemplateValidateManualAccountName "${username}" && break
+        [[ -z "${AUTO_USER:-}" && "${AUTO_INSTALL:-}" != "true" ]] || return 1
+    done
 
     if [[ "${core}" == "xray" ]]; then
         clients=$(jq -nc --arg uuid "${credential}" --arg add "${add:-}" --arg email "${username}" '[{id:$uuid,add:$add,flow:"xtls-rprx-vision",email:$email}]') || return 1

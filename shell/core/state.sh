@@ -46,7 +46,8 @@ readAcmeTLS() {
 
 # 读取默认自定义端口
 readCustomPort() {
-    if [[ -n "${configPath}" && -z "${realityStatus}" && "${coreInstallType}" == "1" ]]; then
+    customPort=
+    if [[ -n "${configPath}" && -n "${frontingType}" && -z "${realityStatus}" && "${coreInstallType}" == "1" ]]; then
         local port=
         port=$(jq -r .inbounds[0].port "${configPath}${frontingType}.json")
         if [[ "${port}" != "443" ]]; then
@@ -146,7 +147,9 @@ readNginxSubscribe() {
 readInstallType() {
     PADM_INSTALL_STATUS_READY=0
     coreInstallType=
+    ctlPath=
     configPath=
+    realityStatus=
     singBoxConfigPath=
     local configFile
     local xrayBinary="${PADM_XRAY_BINARY:-/etc/padm/xray/xray}"
@@ -936,6 +939,10 @@ readConfigHostPathUUID() {
                 xrayVLESSRealityXHTTPort="${currentDefaultPort}"
             fi
             currentPath=$(jq -r .inbounds[0].streamSettings.xhttpSettings.path ${configPath}12_VLESS_XHTTP_inbounds.json | awk -F "[/]" '{print $2}' | awk -F "[x][H][T][T][P]" '{print $1}')
+        fi
+        if [[ -z "${currentClients}" ]] && currentProtocolHas 26 && [[ -f "${configPath}08_VLESS_vision_gRPC_inbounds.json" ]]; then
+            currentClients=$(jq -r '.inbounds[0].settings.clients' "${configPath}08_VLESS_vision_gRPC_inbounds.json")
+            currentUUID=$(jq -r '.inbounds[0].settings.clients[0].id' "${configPath}08_VLESS_vision_gRPC_inbounds.json")
         fi
     elif [[ "${coreInstallType}" == "2" ]]; then
         if [[ -n "${frontingType}" ]]; then

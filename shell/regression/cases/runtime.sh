@@ -177,6 +177,69 @@ runInstallWorkflowRegression() (
     showLastInstallationConfig() { shown=$((shown + 1)); }
     cleanLastInstallationConfig() { cleaned=$((cleaned + 1)); return "${cleanStatus}"; }
 
+    (
+        # 同一会话重新检测安装状态，不能沿用旧核心路径或 Reality 标记。
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/state.sh"
+        local root="${TMP_DIR}/install-state-refresh"
+        local coreInstallType= ctlPath=stale realityStatus=12 customPort=
+        local configPath= singBoxConfigPath= frontingType=02_VLESS_TCP_inbounds
+        local PADM_XRAY_BINARY="${root}/xray"
+        local PADM_XRAY_CONF_DIR="${root}/reality"
+        local PADM_SINGBOX_BINARY="${root}/sing-box"
+        local PADM_SINGBOX_CONFIG_DIR="${root}/sing-box-config"
+        mkdir -p "${PADM_XRAY_CONF_DIR}" "${root}/tls" "${PADM_SINGBOX_CONFIG_DIR}"
+        cp /usr/bin/true "${PADM_XRAY_BINARY}"
+        cp /usr/bin/true "${PADM_SINGBOX_BINARY}"
+        printf '{}\n' >"${PADM_XRAY_CONF_DIR}/07_VLESS_vision_reality_inbounds.json"
+        printf '{}\n' >"${PADM_XRAY_CONF_DIR}/12_VLESS_XHTTP_inbounds.json"
+        readInstallType
+        [[ "${coreInstallType}" == 1 && "${ctlPath}" == "${PADM_XRAY_BINARY}" && "${realityStatus}" == 12 ]]
+
+        PADM_XRAY_CONF_DIR="${root}/tls"
+        printf '{"inbounds":[{"port":8443}]}\n' >"${PADM_XRAY_CONF_DIR}/02_VLESS_TCP_inbounds.json"
+        readInstallType
+        [[ "${coreInstallType}" == 1 && -z "${realityStatus}" ]]
+        readCustomPort
+        [[ "${customPort}" == 8443 ]]
+        printf '{"inbounds":[{"port":443}]}\n' >"${PADM_XRAY_CONF_DIR}/02_VLESS_TCP_inbounds.json"
+        readCustomPort
+        [[ -z "${customPort}" ]]
+
+        PADM_XRAY_CONF_DIR="${root}/grpc"
+        mkdir -p "${PADM_XRAY_CONF_DIR}"
+        local storedClients='[{"id":"11111111-1111-4111-8111-111111111111","email":"alice"},{"id":"22222222-2222-4222-8222-222222222222","email":"bob"}]'
+        printf '{"inbounds":[{"settings":{"clients":%s}}]}\n' "${storedClients}" >"${PADM_XRAY_CONF_DIR}/08_VLESS_vision_gRPC_inbounds.json"
+        readInstallType
+        currentInstallProtocolType=",26,"
+        frontingType=
+        customPort=8443
+        readCustomPort
+        [[ -z "${customPort}" ]]
+        readConfigHostPathUUID
+        [[ "${currentUUID}" == 11111111-1111-4111-8111-111111111111 ]]
+        [[ "$(jq -c . <<<"${currentClients}")" == "${storedClients}" ]]
+        lastInstallationConfig=true
+        local inputFd nextInput
+        exec {inputFd}< <(printf 'next-parent-action\n')
+        coreTemplateCollectInitialClients xray <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        [[ "${nextInput}" == next-parent-action && "$(jq -c . <<<"${currentClients}")" == "${storedClients}" ]]
+        exec {inputFd}<&-
+
+        PADM_XRAY_CONF_DIR="${root}/missing-xray"
+        printf '{}\n' >"${PADM_SINGBOX_CONFIG_DIR}/07_VLESS_vision_reality_inbounds.json"
+        readInstallType
+        [[ "${coreInstallType}" == 2 && "${ctlPath}" == "${PADM_SINGBOX_BINARY}" && -z "${realityStatus}" ]]
+
+        PADM_SINGBOX_CONFIG_DIR="${root}/missing-sing-box"
+        readInstallType
+        [[ -z "${coreInstallType}${ctlPath}${configPath}${singBoxConfigPath}${realityStatus}" ]]
+        customPort=8443
+        readCustomPort
+        [[ -z "${customPort}" ]]
+    )
+
     # 纠错只读取当前安装输入，中文逗号与两位协议号都使用真实能力库校验。
     exec {inputFd}< <(printf '999\n1，2\nnext-parent-action\n')
     selectCoreInstallProtocols xray <&"${inputFd}"
@@ -584,8 +647,34 @@ runInstallWorkflowRegression() (
             read -r -u "${inputFd}" nextInput
             [[ "${currentClients}" == "${oldClients}" && "${nextInput}" == next-parent-action ]]
             exec {inputFd}<&-
+
+            # 原地纠正当前字段；用户名纠错不能重读已经确认的 UUID。
+            if [[ "${passwordMode}" == true ]]; then
+                exec {inputFd}< <(printf 'n\narbitrary-secret\ninvalid/name\nsub_reserved\nalice\nnext-parent-action\n')
+            else
+                exec {inputFd}< <(printf 'n\nnot-a-uuid\n%s\ninvalid/name\nsub_reserved\nalice\nnext-parent-action\n' "${testUuid}")
+            fi
+            coreTemplateCollectInitialClients "${targetCore}" "${passwordMode}" <&"${inputFd}"
+            read -r -u "${inputFd}" nextInput
+            [[ "${nextInput}" == next-parent-action ]]
+            if [[ "${core}" == xray ]]; then
+                jq -e --arg uuid "${testUuid}" '.[0].id == $uuid and .[0].email == "alice"' <<<"${currentClients}" >/dev/null
+            elif [[ "${passwordMode}" == true ]]; then
+                jq -e '.[0].password == "arbitrary-secret" and .[0].name == "alice"' <<<"${currentClients}" >/dev/null
+            else
+                jq -e --arg uuid "${testUuid}" '.[0].uuid == $uuid and .[0].name == "alice"' <<<"${currentClients}" >/dev/null
+            fi
+            exec {inputFd}<&-
+
+            currentClients=${oldClients}
             regressionExpectStatus 1 coreTemplateCollectInitialClients "${targetCore}" "${passwordMode}" </dev/null
             [[ "${currentClients}" == "${oldClients}" ]]
+            regressionExpectStatus 1 coreTemplateCollectInitialClients "${targetCore}" "${passwordMode}" < <(printf 'n\n%s\ninvalid/name\n' "${testUuid}")
+            [[ "${currentClients}" == "${oldClients}" ]]
+            if [[ "${passwordMode}" != true ]]; then
+                regressionExpectStatus 1 coreTemplateCollectInitialClients "${targetCore}" "${passwordMode}" < <(printf 'n\nnot-a-uuid\n')
+                [[ "${currentClients}" == "${oldClients}" ]]
+            fi
 
             currentClients='[]'
             currentUUID=
@@ -638,6 +727,14 @@ runInstallWorkflowRegression() (
         AUTO_USER=sub_reserved
         regressionExpectStatus 1 coreTemplateCollectInitialClients xray </dev/null
         [[ "${currentClients}" == "${result}" ]]
+        AUTO_UUID=invalid
+        AUTO_USER=alice
+        exec {inputFd}< <(printf '%s\nnext-parent-action\n' "${testUuid}")
+        regressionExpectStatus 1 coreTemplateCollectInitialClients xray <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        [[ "${nextInput}" == "${testUuid}" && "${currentClients}" == "${result}" ]]
+        exec {inputFd}<&-
+        AUTO_UUID=${testUuid}
         AUTO_USER=alice
         (
             jq() { return 1; }
