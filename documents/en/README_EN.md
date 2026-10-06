@@ -297,9 +297,12 @@ no extra job, and certificates that are not due are skipped normally.
 Updates and rollbacks preserve the latest inputs and reject incompatible older control bundles
 while renewal is enabled. External tasks with the same name are never overwritten.
 This foundation does not establish support for new protocols or full management.
-Real Linux amd64 tests cover dual-core TLS fixtures, WS client traffic and rotation recovery;
-real DNS, scheduler restarts, arm64 and trusted releases remain unverified.
+Linux amd64 and emulated arm64 tests cover dual-core TLS fixtures, WS client traffic and
+rotation recovery; all TLS probes verify the test CA and hostname.
+Real DNS, full host restarts, native arm64 and trusted releases remain unverified.
 See the [real TLS acceptance baseline](../docker-tls-real-baseline.md) for evidence and limits.
+Isolated systemd/cron probes, backend migration and container restarts are verified,
+but do not replace host reboot or real DNS acceptance.
 
 Configuration changes generate and validate a candidate, check ports and Compose, back up the current state, and then run health checks. A failure leaves the old configuration in place. The installed host command is `/usr/local/bin/padm-docker`; the bundle, configuration, data, secrets, logs, and backups live below the state root in `bundle/`, `config/`, `data/`, `secrets/`, `logs/`, and `backups/`.
 

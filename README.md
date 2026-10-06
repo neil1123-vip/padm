@@ -265,9 +265,11 @@ padm-docker acme auto-renew
 否则使用正在运行的 cron；两个后端互斥，重复启用不增加任务，未到期正常跳过。
 `down` 和卸载移除任务但保留私有输入，`up` 恢复；更新/回滚保留最新输入，
 已启用时拒绝切到不支持续期的旧控制 bundle，外部同名任务不覆盖。
-核心 TLS 底座不表示新增协议或完整管理。Linux amd64 已通过双核心 TLS 夹具、
-WS 客户端流量及轮换恢复实测；真实 DNS、调度重启、arm64 和可信发布仍待验，
+核心 TLS 底座不表示新增协议或完整管理。Linux amd64 与 arm64 仿真已通过双核心
+TLS 夹具、WS 客户端流量及轮换恢复，全部 TLS 探测校验测试 CA/域名；
+真实 DNS、完整宿主重启、原生 arm64 和可信发布仍待验，
 详见[真实 TLS 验收基线](documents/docker-tls-real-baseline.md)。
+真实 systemd/cron 的隔离调度探针、双向迁移与容器重启已验证，不替代整机或 DNS 验收。
 
 配置变更先生成候选文件、校验端口和 Compose，再备份当前状态并执行健康检查；失败时保留旧配置。Docker 入口安装的控制命令是 `/usr/local/bin/padm-docker`，实际 bundle、配置、数据、密钥、日志和备份分别位于状态根下的 `bundle/`、`config/`、`data/`、`secrets/`、`logs/` 和 `backups/`。
 

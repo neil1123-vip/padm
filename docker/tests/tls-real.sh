@@ -9,9 +9,16 @@ PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 source "${PROJECT_ROOT}/install-docker.sh"
 
 XRAY_IMAGE=$1 SINGBOX_IMAGE=$2 NGINX_IMAGE=$3 OPS_IMAGE=$4
+imageArchitecture=
 for image in "$@"; do
     dockerImageReferenceIsValid "${image}"
-    docker image inspect "${image}" >/dev/null
+    architecture=$(docker image inspect --format '{{.Architecture}}' "${image}")
+    [[ "${architecture}" == amd64 || "${architecture}" == arm64 ]]
+    [[ -z "${imageArchitecture}" || "${imageArchitecture}" == "${architecture}" ]] || {
+        dockerError '真实 TLS 验收要求四个镜像使用同一架构'
+        exit 1
+    }
+    imageArchitecture=${architecture}
 done
 dockerHostPreflight
 for tool in openssl python3 nsenter; do dockerRequireCommand "${tool}"; done
@@ -75,7 +82,8 @@ mkdir -p "${TEST_ROOT}/certs" "${PADM_DOCKER_INSTALL_DIR}/client" \
     "${PADM_DOCKER_INSTALL_DIR}/config/"{xray,sing-box,nginx} \
     "${PADM_DOCKER_INSTALL_DIR}/data/subscription" "${PADM_DOCKER_INSTALL_DIR}/secrets/tls"
 openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=padm-test-ca \
-    -addext basicConstraints=critical,CA:TRUE -keyout "${TEST_ROOT}/certs/ca.key" \
+    -addext basicConstraints=critical,CA:TRUE -addext keyUsage=critical,keyCertSign,cRLSign \
+    -keyout "${TEST_ROOT}/certs/ca.key" \
     -out "${TEST_ROOT}/certs/ca.crt" >/dev/null 2>&1
 printf 'subjectAltName=DNS:%s\nextendedKeyUsage=serverAuth\n' "${DOMAIN}" >"${TEST_ROOT}/certs/extensions"
 for serial in 1 2 3; do
@@ -139,8 +147,9 @@ jq -n --arg domain "${DOMAIN}" --arg uuid "${UUID}" '
      {inbound:["socks-sing"],action:"route",outbound:"sing"},
      {inbound:["socks-ws"],action:"route",outbound:"ws"}]}}
 ' >"${PADM_DOCKER_INSTALL_DIR}/client/config.json"
-jq --arg ops "${OPS_IMAGE}" --arg sing "${SINGBOX_IMAGE}" '
+jq --arg ops "${OPS_IMAGE}" --arg sing "${SINGBOX_IMAGE}" --arg domain "${DOMAIN}" '
   .services.xray.ports = [] | .services["sing-box"].ports = [] | .services.nginx.ports = [] |
+  .services.nginx.networks = {default:{aliases:[$domain]}} |
   .services["sing-box"].healthcheck = {
     test:["CMD","/usr/local/bin/sing-box","check","-c","/var/lib/padm/sing-box/health.check"],
     interval:"1s",timeout:"3s",retries:1,start_period:"1s"} |
@@ -174,22 +183,22 @@ dockerComposeRun up -d --wait --wait-timeout 60
 
 probe() {
     local clientPid
-    docker run --rm --init --pull=never --network padm-docker --entrypoint python3 "${OPS_IMAGE}" -c '
+    docker run --rm --init --pull=never --network padm-docker --entrypoint python3 \
+        --mount "type=bind,source=${TEST_ROOT}/certs/ca.crt,target=/test-ca.crt,readonly" "${OPS_IMAGE}" -c '
 import socket
 import ssl
 import sys
 import urllib.request
 
 expected, domain, token = sys.argv[1:]
+context = ssl.create_default_context(cafile="/test-ca.crt")
 for host, port in (("xray",35443),("sing-box",35444),("nginx",8443)):
-    context = ssl._create_unverified_context()
     with context.wrap_socket(socket.create_connection((host,port),timeout=5),server_hostname=domain) as s:
         pem = ssl.DER_cert_to_PEM_cert(s.getpeercert(binary_form=True))
     import subprocess
     serial = subprocess.check_output(["openssl","x509","-noout","-serial"],input=pem.encode()).decode().strip()
     assert serial == "serial=" + expected, (host,serial)
-context = ssl._create_unverified_context()
-data = urllib.request.urlopen("https://nginx:8443/subscriptions/"+token,context=context,timeout=5).read()
+data = urllib.request.urlopen("https://"+domain+":8443/subscriptions/"+token,context=context,timeout=5).read()
 assert b"vless://" in data and b"type=ws" in data and b"security=reality" in data
 ' "$1" "${DOMAIN}" "${TOKEN}"
     for port in 2081 2082 2083; do
@@ -239,5 +248,5 @@ probe 02
     "${PADM_DOCKER_INSTALL_DIR}/data/traffic/state.json")" -ge "${baseline}" ]]
 [[ -z "$(find "${PADM_DOCKER_INSTALL_DIR}" -maxdepth 1 -name '.tls.*' -print)" ]]
 [[ ! -e "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]]
-printf 'docker-tls-real-ok: architecture=%s xray=%s sing-box=%s nginx=%s ops=%s\n' \
-    "$(docker info --format '{{.Architecture}}')" "$@"
+printf 'docker-tls-real-ok: daemon_architecture=%s image_architecture=%s xray=%s sing-box=%s nginx=%s ops=%s\n' \
+    "$(docker info --format '{{.Architecture}}')" "${imageArchitecture}" "$@"

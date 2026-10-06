@@ -9,9 +9,9 @@ Docker 现在能否通过受管控制命令完成对应能力，不表示底层�
 后续实施顺序和验收门槛见
 [Docker 菜单与功能对齐实施计划](docker-menu-parity-plan.md)。计划安排不改变本表的当前支持状态。
 
-3B.4 的 Linux amd64 真实双核心 TLS、WS 客户端及失败/信号恢复已通过，
+3B.4 的 Linux amd64 与 arm64 仿真双核心 TLS、WS 客户端及失败/信号恢复已通过，
 证据和剩余限制见[真实 TLS 验收基线](docker-tls-real-baseline.md)。
-内部 TLS 夹具不代表新增协议支持；真实 DNS、调度重启、arm64 和可信发布仍待验。
+内部 TLS 夹具不代表新增协议支持；真实 DNS、完整宿主重启、原生 arm64 和可信发布仍待验。
 
 ## 状态定义
 
