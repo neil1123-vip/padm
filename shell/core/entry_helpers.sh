@@ -30,17 +30,23 @@ entryHelperNginxConfigFile() {
 
 readInstallTLSDomain() {
     local resultVar=$1 domainInput= fixedDomain=false
+    local historyDomain=${currentHost:-}
     printf -v "${resultVar}" '%s' ""
+    if [[ -n "${historyDomain}" && -z "${AUTO_DOMAIN:-}${AUTO_INSTALL:-}" ]] &&
+        ! padmIsValidHostName "${historyDomain}"; then
+        errorCard "历史 TLS 域名不合法，请重新填写" "${historyDomain}"
+        historyDomain=
+    fi
     while true; do
         if [[ -n "${AUTO_DOMAIN:-}" ]]; then
             domainInput=${AUTO_DOMAIN}
             fixedDomain=true
-        elif [[ -n "${currentHost:-}" && -n "${lastInstallationConfig:-}" ]]; then
-            domainInput=${currentHost}
+        elif [[ -n "${historyDomain}" && -n "${lastInstallationConfig:-}" ]]; then
+            domainInput=${historyDomain}
             fixedDomain=true
-        elif [[ -n "${currentHost:-}" ]]; then
-            menuReadChoice domain "TLS 域名[回车保留 ${currentHost}]:" domainInput true || return 1
-            domainInput=${domainInput:-${currentHost}}
+        elif [[ -n "${historyDomain}" ]]; then
+            menuReadChoice domain "TLS 域名[回车保留 ${historyDomain}]:" domainInput true || return 1
+            domainInput=${domainInput:-${historyDomain}}
         else
             menuReadChoice domain "TLS 域名[回车取消]:" domainInput || return 1
         fi
@@ -186,6 +192,11 @@ EOF
 # 仅确认入口端口，网络和服务操作留在安装事务内。
 readInstallTLSPort() {
     local historyPort=${currentPort:-${customPort:-}}
+    if [[ -n "${historyPort}" && -z "${AUTO_PORT:-}${AUTO_INSTALL:-}" ]] &&
+        ! validPortNumber "${historyPort}"; then
+        corePortInputErrorCard
+        historyPort=
+    fi
     if [[ -n "${AUTO_PORT:-}" ]]; then
         port=${AUTO_PORT}
     elif [[ -n "${lastInstallationConfig:-}" && -n "${historyPort}" ]]; then

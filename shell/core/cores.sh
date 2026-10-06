@@ -410,7 +410,8 @@ installSingBoxApply() {
     else
         successCard "当前版本:$(getSingBoxCurrentVersion)"
 
-        if [[ "${needsStatsBuild}" == true || -z "${lastInstallationConfig:-}" ]]; then
+        if [[ "${needsStatsBuild}" == true ]] ||
+            [[ "${PADM_CORE_SWITCH_TRANSACTION_ACTIVE:-}" != true && -z "${lastInstallationConfig:-}" ]]; then
             if [[ "${needsStatsBuild}" == true ]]; then
                 statusCard "sing-box 用户统计" "当前核心缺少统计能力，将升级到已发布的统计版"
                 reInstallSingBoxStatus=y
@@ -481,17 +482,16 @@ installXrayApply() {
         fi
         padmRemoveCleanupPath "${tmpDir}"
     else
-        if [[ -z "${lastInstallationConfig:-}" ]]; then
-            successCard "Xray-core版本:$(coreXrayCurrentVersion)"
+        successCard "Xray-core版本:$(coreXrayCurrentVersion)"
+        local reInstallXrayStatus=n
+        if [[ "${PADM_CORE_SWITCH_TRANSACTION_ACTIVE:-}" != true && -z "${lastInstallationConfig:-}" ]]; then
             menuReadChoice xray_reinstall "是否更新、升级？[y/N]:" reInstallXrayStatus true || exit 1
-            if ! ensureXrayGeoFiles "$(coreXrayInstallDir)"; then
-                exit 1
-            fi
-            if [[ "$(normalizeYesNo "${reInstallXrayStatus}")" == "y" ]]; then
-                version=$(coreLatestReleaseTag XTLS/Xray-core "${prereleaseStatus}")
-                checkVersionNotEmpty "${version}"
-                installDownloadedXrayBinary "${version}" || exit 1
-            fi
+        fi
+        ensureXrayGeoFiles "$(coreXrayInstallDir)" || exit 1
+        if [[ "$(normalizeYesNo "${reInstallXrayStatus}")" == "y" ]]; then
+            version=$(coreLatestReleaseTag XTLS/Xray-core "${prereleaseStatus}")
+            checkVersionNotEmpty "${version}"
+            installDownloadedXrayBinary "${version}" || exit 1
         fi
     fi
 }

@@ -736,6 +736,34 @@ runInstallWorkflowRegression() (
         [[ -z "${events}" ]]
         currentPort=443
 
+        (
+            # 坏历史字段原地修正，不清空用户，也不能在取消或纠错期间改服务。
+            local currentHost=invalid/domain currentPort=1+2 domain= port= events=
+            local currentClients='[{"id":"11111111-1111-4111-8111-111111111111","email":"alice"}]'
+            local beforeClients=${currentClients}
+            exec {inputFd}< <(printf 'still/invalid\nfixed.example.com\n1+2\n8443\nnext-parent-action\n')
+            initTLSNginxConfig 1 <&"${inputFd}"
+            read -r -u "${inputFd}" nextInput
+            [[ "${nextInput}" == next-parent-action && "${currentClients}" == "${beforeClients}" ]]
+            [[ "${domain}" == fixed.example.com && "${port}" == 8443 ]]
+            [[ "${events}" == $'allow:8443\ndns:fixed.example.com\nclean\ncheck:8443:fixed.example.com\nnginx:stop\n' ]]
+            exec {inputFd}<&-
+            events=
+            exec {inputFd}< <(printf '\nnext-parent-action\n')
+            regressionExpectStatus 1 initTLSNginxConfig 1 <&"${inputFd}"
+            read -r -u "${inputFd}" nextInput
+            [[ "${nextInput}" == next-parent-action && -z "${events}" && "${currentClients}" == "${beforeClients}" ]]
+            exec {inputFd}<&-
+            regressionExpectStatus 1 initTLSNginxConfig 1 < <(printf 'fixed.example.com\n')
+            [[ -z "${events}" && "${currentClients}" == "${beforeClients}" ]]
+            AUTO_DOMAIN=invalid/domain AUTO_PORT=1+2
+            exec {inputFd}< <(printf 'next-parent-action\n')
+            regressionExpectStatus 1 initTLSNginxConfig 1 <&"${inputFd}"
+            read -r -u "${inputFd}" nextInput
+            [[ "${nextInput}" == next-parent-action && -z "${events}" ]]
+            exec {inputFd}<&-
+        )
+
         # 显式参数覆盖历史值；仅改域名也重新验证，成功后才停 Nginx。
         AUTO_DOMAIN=new.example.com
         AUTO_PORT=8443
@@ -1461,18 +1489,21 @@ runInstallWorkflowRegression() (
     )
 
     (
-        local core action expected status
+        local core action expected status history
+        local PADM_CORE_SWITCH_TRANSACTION_ACTIVE= geoStatus=0
+        local statsCapability=supported reInstallXrayStatus=y reInstallSingBoxStatus=y
         lastInstallationConfig=
         readInstallType() { :; }
         progressCard() { :; }
         successCard() { :; }
         xrayInstalled() { return 0; }
         singBoxInstalled() { return 0; }
-        singBoxV2rayApiCapability() { printf supported; }
+        singBoxV2rayApiCapability() { printf '%s' "${statsCapability}"; }
+        singBoxConfigInstalled() { return 0; }
         coreXrayCurrentVersion() { printf 1.0.0; }
         getSingBoxCurrentVersion() { printf 1.0.0; }
         coreXrayInstallDir() { printf '%s' "${TMP_DIR}"; }
-        ensureXrayGeoFiles() { printf 'geo\n'; }
+        ensureXrayGeoFiles() { printf 'geo\n'; return "${geoStatus}"; }
         coreLatestReleaseTag() { printf v1.0.1; }
         checkVersionNotEmpty() { [[ -n "$1" ]]; }
         installDownloadedXrayBinary() { printf 'upgrade\n'; }
@@ -1501,12 +1532,31 @@ runInstallWorkflowRegression() (
             lastInstallationConfig=true
             exec {inputFd}< <(printf 'next-parent-action\n')
             output=$("${action}" 1 <&"${inputFd}") || exit 1
-            [[ -z "${output}" ]]
+            expected=
+            [[ "${core}" != Xray ]] || expected=geo
+            [[ "${output}" == "${expected}" ]]
             read -r -u "${inputFd}" nextInput
             [[ "${nextInput}" == next-parent-action ]]
             exec {inputFd}<&-
-            lastInstallationConfig=
+            # 完整重装跳过升级选择；即使重填参数或上次选择 y，也不改变版本。
+            PADM_CORE_SWITCH_TRANSACTION_ACTIVE=true
+            for history in "" true; do
+                lastInstallationConfig=${history}
+                exec {inputFd}< <(printf 'next-parent-action\n')
+                output=$("${action}" 1 <&"${inputFd}") || exit 1
+                [[ "${output}" == "${expected}" ]]
+                read -r -u "${inputFd}" nextInput
+                [[ "${nextInput}" == next-parent-action ]]
+                exec {inputFd}<&-
+            done
+            PADM_CORE_SWITCH_TRANSACTION_ACTIVE= lastInstallationConfig=
         done
+        PADM_CORE_SWITCH_TRANSACTION_ACTIVE=true
+        statsCapability=unsupported
+        [[ "$(installSingBox 1 </dev/null)" == upgrade ]]
+        geoStatus=1
+        output=$(installXray 1 </dev/null) && return 1
+        [[ "${output}" == geo ]]
     )
 )
 
