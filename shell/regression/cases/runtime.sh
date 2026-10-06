@@ -685,6 +685,181 @@ runInstallWorkflowRegression() (
     )
 
     (
+        local result= outputFile nextInput inputFd transport expected
+        local allowLog= selectCustomInstallType=",5,"
+        unset AUTO_INSTALL AUTO_PORT
+        statusCard() { :; }
+        showAutoInstallSummary() { :; }
+        errorCard() { :; }
+        corePortInputErrorCard() { :; }
+        checkPort() { :; }
+        allowPort() { allowLog+="${2:-tcp}:${1}"$'\n'; }
+        allowPortTcpAndUdp() { allowLog+="tcp+udp:${1}"$'\n'; }
+
+        # 已确认复用时不再询问；未确认时回车保留、显式输入替换，EOF 不开放端口。
+        outputFile="${TMP_DIR}/runtime-singbox-port-result"
+        lastInstallationConfig=true
+        initSingBoxPort 9443 true tcp singbox_custom_port </dev/null >"${outputFile}"
+        result=$(<"${outputFile}")
+        [[ "${result}" == "9443" && -z "${allowLog}" ]]
+        lastInstallationConfig=
+        exec {inputFd}< <(printf '\nnext-parent-action\n')
+        initSingBoxPort 9443 true tcp singbox_custom_port <&"${inputFd}" >"${outputFile}"
+        result=$(<"${outputFile}")
+        read -r -u "${inputFd}" nextInput
+        exec {inputFd}<&-
+        [[ "${result}" == "9443" && "${nextInput}" == "next-parent-action" && -z "${allowLog}" ]]
+        exec {inputFd}< <(printf '8443\nnext-parent-action\n')
+        initSingBoxPort 9443 true tcp singbox_custom_port <&"${inputFd}" >"${outputFile}"
+        result=$(<"${outputFile}")
+        read -r -u "${inputFd}" nextInput
+        exec {inputFd}<&-
+        [[ "${result}" == "8443" && "${nextInput}" == next-parent-action && "${allowLog}" == $'tcp:8443\n' ]]
+        allowLog=
+        for result in 9443 ""; do
+            regressionExpectStatus 1 initSingBoxPort "${result}" true tcp singbox_custom_port </dev/null
+            regressionExpectStatus 1 initSingBoxPort "${result}" true tcp singbox_custom_port < <(printf '8443')
+            [[ -z "${allowLog}" ]]
+        done
+        regressionExpectStatus 1 initSingBoxPort 9443 true tcp singbox_custom_port <<<"1+2"
+        [[ -z "${allowLog}" ]]
+        initSingBoxPort "" true tcp singbox_custom_port <<<"" >"${outputFile}"
+        result=$(<"${outputFile}")
+        [[ "${result}" =~ ^[0-9]+$ && "${result}" -ge 10000 && "${result}" -le 60000 &&
+            "${allowLog}" == "tcp:${result}"$'\n' ]]
+        allowLog=
+
+        # 单选自动参数覆盖历史端口；固定端口和 Reality 共存内部端口优先。
+        AUTO_INSTALL=true
+        AUTO_PORT=8443
+        lastInstallationConfig=true
+        initSingBoxPort 9443 true tcp+udp singbox_custom_port </dev/null >"${outputFile}"
+        result=$(<"${outputFile}")
+        [[ "${result}" == "8443" && "${allowLog}" == $'tcp+udp:8443\n' ]]
+        allowLog=
+        initSingBoxPort 9443 false tcp singbox_custom_port </dev/null >"${outputFile}"
+        result=$(<"${outputFile}")
+        [[ "${result}" == "9443" && "${allowLog}" == $'tcp:9443\n' ]]
+        allowLog=
+        selectCustomInstallType=",1,"
+        resolveRealityInstallCoexistPort() {
+            printf -v "$1" '%s' 31300
+            return 0
+        }
+        initSingBoxPort "" true tcp reality_subport 1 vision </dev/null >"${outputFile}"
+        result=$(<"${outputFile}")
+        [[ "${result}" == "31300" && "${allowLog}" == $'tcp:31300\n' ]]
+        allowLog=
+
+        # 多选安装不能把同一个 --port 反复套给新入口，且历史入口仍可直接复用。
+        selectCustomInstallType=",3,5,"
+        lastInstallationConfig=true
+        initSingBoxPort 9443 true tcp+udp singbox_custom_port </dev/null >"${outputFile}"
+        result=$(<"${outputFile}")
+        [[ "${result}" == "9443" && -z "${allowLog}" ]]
+        lastInstallationConfig=
+        (
+            local autoPortSeen= autoReads=0
+            autoRead() {
+                autoReads=$((autoReads + 1))
+                autoPortSeen=${AUTO_PORT:-}
+                printf -v "$3" '%s' 15555
+            }
+            initSingBoxPort "" true tcp+udp singbox_custom_port </dev/null >"${outputFile}"
+            result=$(<"${outputFile}")
+            [[ "${result}" == "15555" && -z "${autoPortSeen}" && "${autoReads}" == 1 &&
+                "${AUTO_PORT}" == "8443" && "${allowLog}" == $'tcp+udp:15555\n' ]]
+        )
+        unset AUTO_INSTALL AUTO_PORT selectCustomInstallType
+
+        # 三种传输类型分别只开放匹配的协议。
+        for transport in tcp udp tcp+udp; do
+            allowLog=
+            case "${transport}" in
+            tcp) expected='tcp:15556' ;;
+            udp) expected='udp:15556' ;;
+            tcp+udp) expected='tcp+udp:15556' ;;
+            esac
+            initSingBoxPort "" true "${transport}" singbox_custom_port <<<"15556" >"${outputFile}"
+            result=$(<"${outputFile}")
+            [[ "${result}" == "15556" && "${allowLog}" == "${expected}"$'\n' ]]
+        done
+    )
+
+    (
+        local -a applies=(initXrayRealityPort initXrayXHTTPort initXrayRealityGrpcPort)
+        local -a portVars=(realityPort xHTTPort realityGrpcPort)
+        local -a protocolIds=(1 2 26)
+        local -a transports=(tcp tcp+udp tcp)
+        local index apply portVar answer inputFd nextInput expected checkCalls=0 allowLog=
+        local realityPort= xHTTPort= realityGrpcPort= selectCustomInstallType=
+        local xrayVLESSRealityPort=9443 xrayVLESSRealityXHTTPort=9443 xrayVLESSRealityGRPCPort=9443
+        local lastInstallationConfig=
+        unset AUTO_INSTALL AUTO_PORT
+        statusCard() { :; }
+        errorCard() { :; }
+        showAutoInstallSummary() { :; }
+        resolveRealityInstallCoexistPort() { return 1; }
+        checkPort() { checkCalls=$((checkCalls + 1)); }
+        allowPort() { allowLog+="tcp:${1}"$'\n'; }
+        allowPortTcpAndUdp() { allowLog+="tcp+udp:${1}"$'\n'; }
+
+        # 三个入口统一只读一次；EOF 或截断不能检查、开放端口。
+        for index in "${!applies[@]}"; do
+            apply=${applies[index]}
+            portVar=${portVars[index]}
+            selectCustomInstallType=",${protocolIds[index]},"
+            for answer in "" 8443; do
+                printf -v "${portVar}" '%s' ""
+                regressionExpectStatus 1 "${apply}" < <(printf '%s' "${answer}")
+                [[ -z "${!portVar}" && "${checkCalls}" == 0 && -z "${allowLog}" ]]
+            done
+            for answer in "" 8443; do
+                printf -v "${portVar}" '%s' ""
+                checkCalls=0
+                allowLog=
+                exec {inputFd}< <(printf '%s\nnext-parent-action\n' "${answer}")
+                "${apply}" <&"${inputFd}"
+                read -r -u "${inputFd}" nextInput
+                exec {inputFd}<&-
+                expected="${transports[index]}:${answer:-9443}"
+                [[ "${!portVar}" == "${answer:-9443}" && "${checkCalls}" == 1 &&
+                    "${allowLog}" == "${expected}"$'\n' && "${nextInput}" == next-parent-action ]]
+            done
+
+            # 单选显式端口优先于历史；自动参数不能落入后续交互。
+            printf -v "${portVar}" '%s' ""
+            checkCalls=0
+            allowLog=
+            AUTO_INSTALL=true
+            AUTO_PORT=8443
+            "${apply}" </dev/null
+            [[ "${!portVar}" == 8443 && "${checkCalls}" == 1 &&
+                "${allowLog}" == "${transports[index]}:8443"$'\n' ]]
+            unset AUTO_INSTALL AUTO_PORT
+            checkCalls=0
+            allowLog=
+        done
+
+        # 多选使用各入口的内部端口默认值，不能套用公共 --port。
+        AUTO_INSTALL=true
+        AUTO_PORT=8443
+        selectCustomInstallType=",1,2,26,"
+        xrayVLESSRealityPort=
+        xrayVLESSRealityXHTTPort=
+        xrayVLESSRealityGRPCPort=
+        for index in "${!applies[@]}"; do
+            portVar=${portVars[index]}
+            printf -v "${portVar}" '%s' ""
+            checkCalls=0
+            allowLog=
+            "${applies[index]}" </dev/null
+            [[ "${!portVar}" =~ ^[0-9]+$ && "${!portVar}" -ge 10000 && "${!portVar}" -le 30000 &&
+                "${checkCalls}" == 1 && "${allowLog}" == "${transports[index]}:${!portVar}"$'\n' ]]
+        done
+    )
+
+    (
         local events= answer output inputFd nextInput
         local nginxTestVersion=1.13.12 nginxAvailable=true
         local release=debian packageManager=apt upgrade=update removeType=remove rhelLike=false

@@ -642,7 +642,10 @@ initSingBoxPort() {
     local promptKey=${4:-singbox_custom_port}
     local realityProtocolId=${5:-}
     local streamProtocol=${6:-}
-    local historyPort=
+    local selection=${selectCustomInstallType:-}
+    local historyPort=${port} portInput=
+    local openPort=false
+    local AUTO_PORT=${AUTO_PORT:-}
     local coexistStatus=1 singleReality=false realityLabel=Reality
     case "${transport}" in
     tcp | udp | tcp+udp) ;;
@@ -650,7 +653,7 @@ initSingBoxPort() {
     esac
     if [[ -n "${realityProtocolId}" ]]; then
         [[ "${realityProtocolId}" == "26" ]] && realityLabel="Reality gRPC"
-        protocolSelectionIsExactly "${selectCustomInstallType:-}" "${realityProtocolId}" && singleReality=true
+        protocolSelectionIsExactly "${selection}" "${realityProtocolId}" && singleReality=true
         if [[ -n "${streamProtocol}" ]]; then
             if resolveRealityInstallCoexistPort port "${streamProtocol}" "${realityLabel}"; then
                 coexistStatus=0
@@ -660,48 +663,30 @@ initSingBoxPort() {
                 [[ "${coexistStatus}" == "2" ]] && return 1
             fi
         fi
-        if [[ "${coexistStatus}" != "0" && "${singleReality}" == "true" && -n "${AUTO_PORT:-}" ]]; then
-            port=${AUTO_PORT}
-            promptHistory=false
-        fi
     fi
+    # 公共端口仅用于单选入口，不能覆盖共存内部端口或重复套用到多协议。
+    if ! protocolSelectionIsExactly "${selection}" "${selection//,/}" ||
+        [[ -n "${realityProtocolId}" && "${singleReality}" != "true" ]]; then
+        AUTO_PORT=
+    fi
+    if [[ "${promptHistory}" == "true" && -n "${AUTO_PORT}" ]]; then
+        port=${AUTO_PORT}
+        promptHistory=false
+    fi
+
     if [[ -n "${port}" && ( "${promptHistory}" != "true" || ( "${singleReality}" == "true" && "${AUTO_INSTALL:-}" == "true" ) ) ]]; then
-        if validPortNumber "${port}"; then
-            [[ -z "${realityProtocolId}" ]] || checkPort "${port}" || return 1
-            if [[ "${transport}" == "tcp+udp" ]]; then
-                allowPortTcpAndUdp "${port}" || return 1
-            elif [[ "${transport}" == "tcp" ]]; then
-                allowPort "${port}" || return 1
-            else
-                allowPort "${port}" udp || return 1
-            fi
-            echo "${port}"
-            return
+        openPort=true
+    elif [[ -z "${port}" || -z "${lastInstallationConfig:-}" ]]; then
+        local prompt
+        if [[ -n "${port}" ]]; then
+            prompt="连接端口[回车保留 ${port}]:"
+        elif [[ "${singleReality}" == "true" ]]; then
+            prompt="Reality 连接端口[回车默认 443]:"
         else
-            corePortInputErrorCard
-            return 1
+            prompt="自定义端口[端口不可重复，回车随机]:"
         fi
-    fi
-    if [[ -n "${port}" && -z "${lastInstallationConfig}" ]]; then
-        autoRead singbox_history_port "读取到上次使用的端口 [${port}]，是否使用？[y/n]:" historyPort
-        if [[ "${historyPort}" != "y" ]]; then
-            port=
-        else
-            validPortNumber "${port}" || { corePortInputErrorCard; return 1; }
-            [[ -z "${realityProtocolId}" ]] || checkPort "${port}" || return 1
-            echo "${port}"
-        fi
-    elif [[ -n "${port}" && -n "${lastInstallationConfig}" ]]; then
-        validPortNumber "${port}" || { corePortInputErrorCard; return 1; }
-        [[ -z "${realityProtocolId}" ]] || checkPort "${port}" || return 1
-        echo "${port}"
-    fi
-    if [[ -z "${port}" ]]; then
-        if [[ "${singleReality}" == "true" ]]; then
-            autoRead "${promptKey}" "请输入 Reality 连接端口[回车默认 443]:" port
-        else
-            autoRead "${promptKey}" "请输入自定义端口[需合法]，端口不可重复，[回车]随机端口:" port
-        fi
+        menuReadChoice "${promptKey}" "${prompt}" portInput true || return 1
+        port=${portInput:-${port}}
         if [[ -z "${port}" ]]; then
             if [[ "${singleReality}" == "true" ]]; then
                 port=443
@@ -709,21 +694,19 @@ initSingBoxPort() {
                 port=$((RANDOM % 50001 + 10000))
             fi
         fi
-        if validPortNumber "${port}"; then
-            [[ -z "${realityProtocolId}" ]] || checkPort "${port}" || return 1
-            if [[ "${transport}" == "tcp+udp" ]]; then
-                allowPortTcpAndUdp "${port}" || return 1
-            elif [[ "${transport}" == "tcp" ]]; then
-                allowPort "${port}" || return 1
-            else
-                allowPort "${port}" udp || return 1
-            fi
-            echo "${port}"
-        else
-            corePortInputErrorCard
-            return 1
-        fi
+        [[ "${port}" == "${historyPort}" ]] || openPort=true
     fi
+
+    validPortNumber "${port}" || { corePortInputErrorCard; return 1; }
+    [[ -z "${realityProtocolId}" ]] || checkPort "${port}" || return 1
+    if [[ "${openPort}" == "true" ]]; then
+        case "${transport}" in
+        tcp+udp) allowPortTcpAndUdp "${port}" || return 1 ;;
+        tcp) allowPort "${port}" || return 1 ;;
+        udp) allowPort "${port}" udp || return 1 ;;
+        esac
+    fi
+    printf '%s\n' "${port}"
 }
 
 readSingBoxPortResult() {

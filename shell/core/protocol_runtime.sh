@@ -861,7 +861,7 @@ collectEntryProfile() {
                 return 1
             fi
             statusCard "Reality 入口域名" "请输入客户端实际连接的域名"
-            autoRead entry_host "入口域名:" realityEntryHost
+            menuReadChoice entry_host "入口域名:" realityEntryHost || return 1
         else
             realityEntryHost=$(getPublicIP)
         fi
@@ -897,7 +897,8 @@ collectRealityProfile() {
     if [[ -n "${AUTO_REALITY_TARGET:-}" ]]; then
         parseRealityTargetInput "${AUTO_REALITY_TARGET}" || return 1
     elif [[ -n "${realityTargetHost:-}" ]]; then
-        parseRealityTargetInput "${realityTargetHost}:${realityTargetPort:-443}" || return 1
+        AUTO_REALITY_SERVER_NAME=${AUTO_REALITY_SERVER_NAME:-${realitySNI:-}} \
+            parseRealityTargetInput "${realityTargetHost}:${realityTargetPort:-443}" || return 1
     else
         echoContent title "\n┌─ Reality 伪装目标 ─────────────────────────────────"
         menuLine "entry：客户端连接到你的服务器地址，已在订阅中作为 server/@host 使用"
@@ -920,7 +921,7 @@ collectRealityProfile() {
             selectRealityTargetCandidateInteractive detect-first || return 1
             ;;
         3)
-            autoRead reality_target "请输入REALITY伪装目标域名，默认端口443:" targetInput
+            menuReadChoice reality_target "请输入REALITY伪装目标域名，默认端口443:" targetInput true || return 1
             if [[ -z "${targetInput}" ]]; then
                 selectionPolicy=auto
                 selectDefaultRealityTarget || return 1
@@ -993,11 +994,10 @@ initXrayRealityProtocolPort() {
     local historyPort=${2:-}
     local protocolId=$3
     local promptKey=$4
-    local historyKey=$5
-    local label=$6
-    local transport=${7:-tcp}
-    local streamProtocol=${8:-}
-    local historyPortStatus= coexistStatus=1 singleProtocol=false
+    local label=$5
+    local transport=${6:-tcp}
+    local streamProtocol=${7:-}
+    local coexistStatus=1 singleProtocol=false
 
     protocolSelectionIsExactly "${selectCustomInstallType:-}" "${protocolId}" && singleProtocol=true
     if [[ -n "${streamProtocol}" ]]; then
@@ -1014,22 +1014,22 @@ initXrayRealityProtocolPort() {
     elif [[ "${coexistStatus}" != "0" && -z "${portRef}" && -n "${historyPort}" ]]; then
         if [[ -n "${lastInstallationConfig:-}" || ( "${singleProtocol}" == "true" && "${AUTO_INSTALL:-}" == "true" ) ]]; then
             portRef=${historyPort}
-        else
-            autoRead "${historyKey}" "读取到上次安装记录，${label}端口为 [${historyPort}]，是否使用？[y/n]:" historyPortStatus
-            [[ "${historyPortStatus}" == "y" ]] && portRef=${historyPort}
         fi
     fi
 
     if [[ -z "${portRef}" ]]; then
-        if [[ "${singleProtocol}" == "true" ]]; then
-            echoContent yellow "请输入 ${label} 连接端口[回车默认 443]"
-            autoRead "${promptKey}" "${label} 连接端口:" portRef
-            portRef=${portRef:-443}
+        local defaultPort=${historyPort} prompt
+        if [[ -n "${defaultPort}" ]]; then
+            prompt="${label} 连接端口[回车保留 ${defaultPort}]:"
+        elif [[ "${singleProtocol}" == "true" ]]; then
+            defaultPort=443
+            prompt="${label} 连接端口[回车默认 443]:"
         else
-            echoContent yellow "请输入 ${label} 连接端口[回车随机 10000-30000]"
-            autoRead "${promptKey}_subport" "${label} 连接端口:" portRef
-            portRef=${portRef:-$((RANDOM % 20001 + 10000))}
+            prompt="${label} 连接端口[回车随机 10000-30000]:"
         fi
+        [[ "${singleProtocol}" == "true" ]] || promptKey="${promptKey}_subport"
+        menuReadChoice "${promptKey}" "${prompt}" portRef true || return 1
+        portRef=${portRef:-${defaultPort:-$((RANDOM % 20001 + 10000))}}
     fi
 
     if ! validPortNumber "${portRef}"; then
@@ -1050,13 +1050,13 @@ initXrayRealityProtocolPort() {
 }
 
 initXrayRealityPort() {
-    initXrayRealityProtocolPort realityPort "${xrayVLESSRealityPort:-}" 1 reality_port reality_history_port "Reality" tcp vision
+    initXrayRealityProtocolPort realityPort "${xrayVLESSRealityPort:-}" 1 reality_port "Reality" tcp vision
 }
 
 initXrayRealityGrpcPort() {
-    initXrayRealityProtocolPort realityGrpcPort "${xrayVLESSRealityGRPCPort:-}" 26 reality_port reality_grpc_history_port "Reality gRPC"
+    initXrayRealityProtocolPort realityGrpcPort "${xrayVLESSRealityGRPCPort:-}" 26 reality_port "Reality gRPC"
 }
 
 initXrayXHTTPort() {
-    initXrayRealityProtocolPort xHTTPort "${xrayVLESSRealityXHTTPort:-}" 2 xhttp_port xhttp_history_port "Reality XHTTP" tcp+udp xhttp
+    initXrayRealityProtocolPort xHTTPort "${xrayVLESSRealityXHTTPort:-}" 2 xhttp_port "Reality XHTTP" tcp+udp xhttp
 }

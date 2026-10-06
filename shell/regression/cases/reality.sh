@@ -77,6 +77,67 @@ runRealityProfileFailureRegression() (
         cat >"${outputFile}"
     }
 
+    (
+        local input inputFd nextInput
+        unset AUTO_INSTALL AUTO_ENTRY_HOST AUTO_DOMAIN
+        AUTO_REALITY_DOMAIN=yes
+        domain=
+        currentHost=
+        # EOF、截断和回车取消不能保留输入，也不能消费上级菜单动作。
+        for input in "" strict.example.com; do
+            realityEntryHost=previous.example.com
+            regressionExpectStatus 1 collectEntryProfile < <(printf '%s' "${input}")
+            [[ -z "${realityEntryHost}" ]]
+        done
+        exec {inputFd}< <(printf '\nnext-parent-action\n')
+        regressionExpectStatus 1 collectEntryProfile <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        [[ -z "${realityEntryHost}" && "${nextInput}" == next-parent-action ]]
+        exec {inputFd}<&-
+        exec {inputFd}< <(printf 'strict.example.com\nnext-parent-action\n')
+        collectEntryProfile <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        [[ "${realityEntryHost}" == strict.example.com && "${nextInput}" == next-parent-action ]]
+        exec {inputFd}<&-
+    )
+
+    (
+        local input inputFd nextInput targetValidations=0 defaultTargetCalls=0
+        unset AUTO_INSTALL AUTO_REALITY_TARGET AUTO_REALITY_SERVER_NAME
+        realityEntryHost=node.example.com
+        validateRealityTargetSelection() { targetValidations=$((targetValidations + 1)); }
+        printRealityTargetProfile() { :; }
+        selectDefaultRealityTarget() { defaultTargetCalls=$((defaultTargetCalls + 1)); return 1; }
+        # 复用目标保留自定义 SNI；显式 SNI 优先，新目标默认使用新域名。
+        realityTargetHost=old.example.com
+        realityTargetPort=8443
+        realitySNI=old-sni.example.com
+        collectRealityProfile </dev/null
+        [[ "${realityTargetHost}" == old.example.com && "${realityTargetPort}" == 8443 && "${realitySNI}" == old-sni.example.com ]]
+        AUTO_REALITY_SERVER_NAME=explicit.example.com
+        collectRealityProfile </dev/null
+        [[ "${realitySNI}" == explicit.example.com ]]
+        unset AUTO_REALITY_SERVER_NAME
+        AUTO_REALITY_TARGET=new.example.com:9443
+        collectRealityProfile </dev/null
+        [[ "${realityTargetHost}" == new.example.com && "${realityTargetPort}" == 9443 && "${realitySNI}" == new.example.com ]]
+        unset AUTO_REALITY_TARGET
+        targetValidations=0
+        for input in "" manual.example.com:9443; do
+            realityTargetHost=
+            realityTargetPort=
+            realitySNI=
+            regressionExpectStatus 1 collectRealityProfile < <(printf '3\n%s' "${input}")
+            [[ -z "${realityTargetHost}${realityTargetPort}${realitySNI}" && "${targetValidations}" == 0 && "${defaultTargetCalls}" == 0 ]]
+        done
+        exec {inputFd}< <(printf '3\nmanual.example.com:9443\nnext-parent-action\n')
+        collectRealityProfile <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        [[ "${realityTargetHost}" == manual.example.com && "${realityTargetPort}" == 9443 && "${realitySNI}" == manual.example.com ]]
+        [[ "${nextInput}" == next-parent-action && "${targetValidations}" == 1 && "${defaultTargetCalls}" == 0 ]]
+        exec {inputFd}<&-
+    )
+
     AUTO_INSTALL=
     AUTO_REALITY_DOMAIN=
     AUTO_DOMAIN=domain.example.com
