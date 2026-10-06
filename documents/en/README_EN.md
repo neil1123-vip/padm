@@ -296,8 +296,10 @@ no extra job, and certificates that are not due are skipped normally.
 `down` and uninstall remove the job but retain private inputs; `up` reinstalls it.
 Updates and rollbacks preserve the latest inputs and reject incompatible older control bundles
 while renewal is enabled. External tasks with the same name are never overwritten.
-This foundation does not establish support for new protocols, full management, or verified
-real application connectivity.
+This foundation does not establish support for new protocols or full management.
+Real Linux amd64 tests cover dual-core TLS fixtures, WS client traffic and rotation recovery;
+real DNS, scheduler restarts, arm64 and trusted releases remain unverified.
+See the [real TLS acceptance baseline](../docker-tls-real-baseline.md) for evidence and limits.
 
 Configuration changes generate and validate a candidate, check ports and Compose, back up the current state, and then run health checks. A failure leaves the old configuration in place. The installed host command is `/usr/local/bin/padm-docker`; the bundle, configuration, data, secrets, logs, and backups live below the state root in `bundle/`, `config/`, `data/`, `secrets/`, `logs/`, and `backups/`.
 

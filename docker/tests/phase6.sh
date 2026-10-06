@@ -579,6 +579,25 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
 
 (
     source "${PROJECT_ROOT}/docker/lib/lifecycle.sh"
+    composeRoot="${TEST_ROOT}/compose-stdin"
+    mkdir -p "${composeRoot}"
+    : >"${composeRoot}/images.env"
+    printf '%s\n' '{"compose":{"profiles":["core-xray","core-sing-box"]}}' >"${composeRoot}/deployment.json"
+    PADM_DOCKER_PROJECT=padm-docker
+    dockerInstallRoot() { printf '%s\n' "${composeRoot}"; }
+    dockerComposeFile() { printf '%s/compose.json\n' "${composeRoot}"; }
+    # 模拟 Compose 默认交互读取 stdin，不能吞掉双核心循环的下一项。
+    docker() { [[ "$1" == compose ]]; cat >/dev/null; }
+    processed=()
+    while IFS= read -r core; do
+        dockerComposeRun exec -T "${core}" true
+        processed+=("${core}")
+    done <<< $'xray\nsing-box'
+    [[ "${processed[*]}" == 'xray sing-box' ]]
+)
+
+(
+    source "${PROJECT_ROOT}/docker/lib/lifecycle.sh"
     scheduleRoot="${TEST_ROOT}/schedule"
     export PADM_DOCKER_SYSTEMD_DIR="${scheduleRoot}/units"
     export PADM_DOCKER_BIN_DIR="${scheduleRoot}/bin"

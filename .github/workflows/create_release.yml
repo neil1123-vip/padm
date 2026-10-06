@@ -74,12 +74,9 @@ jobs:
         run: |
           set -euo pipefail
           bash shell/subscription_groups_regression.sh ci
-      - name: Check Docker TLS transactions
+      - name: Check Docker TLS transactions and renewal
         shell: bash
-        run: sudo bash shell/subscription_groups_regression.sh docker-tls
-      - name: Check Docker renewal ownership and recovery
-        shell: bash
-        run: sudo bash shell/subscription_groups_regression.sh docker-renewal
+        run: sudo bash shell/subscription_groups_regression.sh docker-tls-focused
 
   prepare:
     name: Resolve release

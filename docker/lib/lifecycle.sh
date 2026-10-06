@@ -566,7 +566,8 @@ dockerComposeRun() {
         dockerReleaseDeploymentLock || return "${PADM_DOCKER_RC_LOCK}"
         ;;
     esac
-    "${commandArgs[@]}" "$@" "${extraArgs[@]}" || {
+    # 管理动作不接收交互输入，避免 Compose 吞掉调用方循环中的下一项。
+    "${commandArgs[@]}" "$@" "${extraArgs[@]}" </dev/null || {
         dockerError 'Docker Compose 操作失败'
         return "${PADM_DOCKER_RC_COMPOSE}"
     }

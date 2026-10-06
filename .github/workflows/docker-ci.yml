@@ -76,12 +76,9 @@ jobs:
           fi
           printf 'Native regression selector: %s\n' "${selector}" >>"${GITHUB_STEP_SUMMARY}"
           bash shell/subscription_groups_regression.sh "${selector}"
-      - name: Check Docker TLS transactions
+      - name: Check Docker TLS transactions and renewal
         shell: bash
-        run: sudo bash shell/subscription_groups_regression.sh docker-tls
-      - name: Check Docker renewal ownership and recovery
-        shell: bash
-        run: sudo bash shell/subscription_groups_regression.sh docker-renewal
+        run: sudo bash shell/subscription_groups_regression.sh docker-tls-focused
 
   images:
     needs: [static, native]

@@ -47,6 +47,12 @@ listRegressionCiPrChildSelectors() {
         core-install-service-action-failure
 }
 
+listRegressionDockerTlsFocusedChildSelectors() {
+    printf '%s\n' \
+        docker-tls \
+        docker-renewal
+}
+
 registerRegressionFunctionLeaf install-module-manifest runInstallModuleManifestCompleteRegression
 registerRegressionFunctionLeaf fast-only-safety runRegressionFastOnlySafety
 registerRegressionFunctionLeaf fast-only-output-auto-install runRegressionFastOnlyOutputAutoInstall
@@ -66,6 +72,8 @@ registerRegressionFunctionLeaf docker-phase4 runDockerPhase4Regression
 registerRegressionFunctionLeaf docker-phase5 runDockerPhase5Regression
 registerRegressionFunctionLeaf docker-phase6 runDockerPhase6Regression
 
+registerRegressionParallelSelectorList docker-tls-focused runFrameworkParallelRegressionSelectorList \
+    "${TMP_DIR}/docker-tls-focused-parallel-${BASHPID:-$$}" listRegressionDockerTlsFocusedChildSelectors
 registerRegressionParallelSelectorList fast-only-output runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/fast-only-output-parallel-${BASHPID:-$$}" listRegressionFastOnlyOutputChildSelectors
 registerRegressionParallelSelectorList fast-only runFrameworkParallelRegressionSelectorList \

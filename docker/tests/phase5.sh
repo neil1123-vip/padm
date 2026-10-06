@@ -942,6 +942,8 @@ done
 
 # PR 与 main 都必须覆盖原生源码、回归自身和所有工作流；纯测试变化仍由运行范围判断避免发布。
 for workflow in "${PR_WORKFLOW}" "${RELEASE_WORKFLOW}"; do
+    grep -Fxq '        run: sudo bash shell/subscription_groups_regression.sh docker-tls-focused' "${workflow}" ||
+        fail "Docker TLS and renewal parallel gate is missing: ${workflow}"
     triggerPaths=$(awk '/^jobs:/ {exit} {print}' "${workflow}")
     for path in '.github/workflows/**' 'install.sh' 'shell/**' 'assets/**'; do
         grep -Fxq "      - '${path}'" <<<"${triggerPaths}" || fail "CI trigger misses ${path}: ${workflow}"
