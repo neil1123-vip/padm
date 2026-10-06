@@ -99,7 +99,7 @@ dockerMenuProtocols() {
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 协议与入口\n'
-        printf '%s\n' '1. 查看入口' '2. 查看分享链接' '3. 编辑参数/复制或删除入口' '0. 返回'
+        printf '%s\n' '1. 查看入口' '2. 查看分享链接' '3. 编辑参数/复制或删除入口' '4. 重生成 Reality 参数' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -122,6 +122,15 @@ dockerMenuProtocols() {
             fi
             ;;
         3) dockerMenuRun edit || true ;;
+        4)
+            printf 'Reality 入口 ID（0 返回）: '
+            if ! IFS= read -r listener; then
+                [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
+                return 0
+            fi
+            [[ -n "${listener}" && "${listener}" != 0 ]] || continue
+            dockerMenuRun edit --regenerate-reality "${listener}" || true
+            ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

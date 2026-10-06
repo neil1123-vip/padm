@@ -13,7 +13,7 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "支持单核心或 Xray/sing-box 主副核心首配、完整规格导入、入口编辑及跨核心复制，配置时进行目标风险检测；目标库、扫描、PQC、参数重生成及 443 共存管理尚未迁移。"
+      "reason": "支持单核心或 Xray/sing-box 主副核心首配、完整规格导入、入口编辑、跨核心复制及逐入口 Reality 参数重生成，配置时进行目标风险检测；目标库、扫描、PQC 及 443 共存管理尚未迁移。"
     },
     {
       "id": 2,
@@ -27,7 +27,7 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 Xray XHTTP Reality 首配、完整规格导入、概览和分享链接、入口及基础 XHTTP 参数编辑与复制；高级 XHTTP 参数、目标库、扫描、PQC、参数重生成及 443 共存管理尚未迁移。"
+      "reason": "v3 支持 Xray XHTTP Reality 首配、完整规格导入、概览和分享链接、入口及基础 XHTTP 参数编辑与复制和逐入口 Reality 参数重生成；高级 XHTTP 参数、目标库、扫描、PQC 及 443 共存管理尚未迁移。"
     },
     {
       "id": 3,
@@ -153,7 +153,7 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 Xray/sing-box Reality gRPC 首配、完整规格导入、概览和分享链接、入口及 serviceName 编辑与跨核心复制；目标库、扫描、PQC、参数重生成及 443 共存管理尚未迁移。"
+      "reason": "v3 支持 Xray/sing-box Reality gRPC 首配、完整规格导入、概览和分享链接、入口及 serviceName 编辑、跨核心复制和逐入口 Reality 参数重生成；目标库、扫描、PQC 及 443 共存管理尚未迁移。"
     },
     {
       "id": 27,
@@ -353,13 +353,13 @@
       "reason": "Docker 配置及 edit 目标字段变更均进行风险检测，尚无目标扫描、目标库管理及 PQC 工作流。"
     },
     "reality-parameter-management": {
-      "status": "deferred",
+      "status": "supported",
       "native_menu": "协议与入口 / REALITY 管理",
       "native_action": "Reality 参数重生成",
       "profiles": ["core-xray", "core-sing-box"],
       "network_mode": "host-cli",
       "host_capabilities": [],
-      "reason": "Docker 首配可生成密钥和 short ID，也可接收 JSON spec；已有部署的参数重生成管理工作流尚未迁移。"
+      "reason": "菜单及 edit --regenerate-reality 逐入口重生成私钥、公钥和 short ID，支持双核心 Vision/XHTTP/gRPC；可信发布验证、公私钥派生校验、候选确认和失败恢复复用现有事务，UUID、目标站、其它入口和额度保持，分享链接与已启用发布同步更新。"
     },
     "reality-coexistence": {
       "status": "deferred",

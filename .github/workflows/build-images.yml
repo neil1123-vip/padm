@@ -63,6 +63,7 @@ jobs:
           bash docker/tests/setup.sh
           sudo bash docker/tests/permissions.sh
           sudo bash docker/tests/traditional-tls.sh
+          sudo bash docker/tests/reality-parameters.sh
           bash docker/tests/phase2.sh
           bash docker/tests/phase3.sh
           bash docker/tests/phase4.sh

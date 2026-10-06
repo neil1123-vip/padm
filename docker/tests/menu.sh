@@ -177,6 +177,14 @@ runPty() {
                 printf '3\n' >&3
                 waitForText 'Docker 协议与入口' "${CONTROL_LOG}" 3 || exit 22
             fi
+            printf '4\n' >&3
+            waitForText 'Reality 入口 ID（0 返回）' "${CONTROL_LOG}" || exit 24
+            if [[ "${input}" == cancel ]]; then
+                printf '0\n' >&3
+            else
+                printf 'entry-fixture\n' >&3
+            fi
+            waitForText 'Docker 协议与入口' "${CONTROL_LOG}" "$([[ "${input}" == cancel ]] && printf 3 || printf 4)" || exit 25
             [[ ! -e "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]] || exit 23
             printf '0\n' >&3
             waitForText 'Docker 管理菜单' "${CONTROL_LOG}" 2 || exit 24
@@ -398,8 +406,8 @@ done
 
 : >"${TLS_WIZARD_ACTIONS}"
 runPty protocols-dispatch protocols read "${TLS_WIZARD_CLI}" menu
-[[ "$(<"${TLS_WIZARD_ACTIONS}")" == $'protocol list\nprotocol links entry-fixture\nedit' ]] ||
-    fail 'protocol menu did not dispatch list, selected links and existing editor'
+[[ "$(<"${TLS_WIZARD_ACTIONS}")" == $'protocol list\nprotocol links entry-fixture\nedit\nedit --regenerate-reality entry-fixture' ]] ||
+    fail 'protocol menu did not dispatch list, selected links, editor and Reality regeneration'
 : >"${TLS_WIZARD_ACTIONS}"
 runPty protocols-links-cancel protocols cancel "${TLS_WIZARD_CLI}" menu
 [[ "$(<"${TLS_WIZARD_ACTIONS}")" == 'protocol list' ]] ||

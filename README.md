@@ -241,10 +241,23 @@ gRPC TLS 对应 `grpc_tls.backend_port` 与 `grpc_tls.tls_port`，
 删除最后一个 VLESS WS 入口会关闭订阅；仍有 VMess WS/HTTPUpgrade、gRPC TLS、传统 TLS fallback、Hysteria2、AnyTLS、NaiveProxy、TUIC 或 direct Trojan 时保留规格中的 TLS，
 否则将 `tls` 设为 `null`，受管 TLS/ACME 文件与 token 均保留。
 Nginx 端轮换、核心端受管 TLS 底座及 Reality XHTTP/gRPC、Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC/direct Trojan/VMess WS/HTTPUpgrade/gRPC TLS/传统 TLS fallback 基础入口已交付；
-高级 XHTTP 参数、Reality 目标库/扫描/参数重生成/443 共存与完整协议管理仍未开放。
+逐入口 Reality 参数重生成已交付；高级 XHTTP 参数、Reality 目标库/扫描/443 共存与完整协议管理仍未开放。
 更新或回滚的目标 bundle 必须同时支持规格版本及每个入口的协议/核心组合。
 带 Fail2ban 的 WS 入口暂不允许增删或修改公开端口，需后续联动封禁规则的管理事务。
 3A.3 已通过本地双核心事务、PTY、流量、更新/回滚和 Linux 权限回归；真实签名发布、业务镜像及双架构客户端连通仍待验。
+
+主菜单 `协议与入口` -> `重生成 Reality 参数` 可选择已有入口，确认后更新密钥对和 short ID。
+也可使用 CLI：
+
+```bash
+padm-docker edit --regenerate-reality <入口ID> --preview
+padm-docker edit --regenerate-reality <入口ID> --confirm PADM-DOCKER-EDIT
+```
+
+仅修改该 Reality 入口，保留 UUID、目标/SNI、端口、其它入口和流量额度；
+提交后需重新导入该入口链接，已启用的 HTTPS 订阅内容同步更新。
+预览不提交，确认前的候选参数不会保留到下一次命令；普通 `edit --spec` 仍禁止手工改密钥。
+失败或中断使用配置快照恢复；公开 `rollback` 仍只回滚更新快照，不是编辑撤销命令。
 
 离线使用同一 Release 的三个资产：
 

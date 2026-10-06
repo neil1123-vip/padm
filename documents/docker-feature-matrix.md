@@ -25,6 +25,12 @@ Docker 现在能否通过受管控制命令完成对应能力，不表示底层�
 协议的 `status` 只表示通过首次向导或 JSON spec 配置并运行的能力；`management_status`
 另行表示原生协议管理工作流的迁移状态。初始配置可运行不代表完整菜单管理已支持。
 
+3D.1 已接入逐入口 Reality 参数重生成：菜单或 `edit --regenerate-reality <入口 ID>`
+更新私钥、公钥和 short ID，支持两核心 Vision/gRPC 及 Xray XHTTP。
+保留 UUID、目标/SNI、端口、其它入口和额度，更新分享链接及已启用的 HTTPS 发布内容；
+预览不提交，取消、中断或健康失败恢复旧状态。该子功能为 `supported`，
+目标库/扫描/PQC、443 共存等未完成，协议完整 `management_status` 继续为 `deferred`。
+
 3A.3 已通过本地回归：v3 明确主副核心与每个入口归属，两核心合计最多 16 个入口，
 菜单和 `edit --spec` 可复制、删除现有协议入口；v1/v2 的配置及备份恢复继续兼容。
 Reality 可跨核心复制，删除副核心最后入口会关闭副核心，主核心至少保留一个入口。
@@ -163,7 +169,7 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 | `acme-standalone` | 站点与证书 -> 本机 TLS 证书 | `deferred` | `acme` | host | 需要 80/443 宿主端口和停机回滚。 |
 | `site-static-redirect-alpn` | 站点与证书 -> fallback 站点、302、ALPN | `deferred` | `nginx` | bridge | 尚无站点管理、ALPN 诊断和修复事务。 |
 | `reality-target-management` | 协议与入口 -> REALITY 管理 -> 目标站管理 | `deferred` | 核心 profile | 宿主 CLI | 配置时目标检测已有；扫描、候选库、黑名单和 PQC 管理尚未迁移。 |
-| `reality-parameter-management` | 协议与入口 -> REALITY 管理 -> 重新生成参数 | `deferred` | 核心 profile | 宿主 CLI | 初始规格可声明密钥、short ID 和 SNI，但参数重生成工作流尚未迁移。 |
+| `reality-parameter-management` | 协议与入口 -> REALITY 管理 -> 重新生成参数 | `supported` | 核心 profile | 宿主 CLI | 菜单/CLI 按入口重生成密钥对和 short ID，派生校验、候选确认和失败恢复；账号、目标、其它入口及额度保持，链接和已启用发布同步更新。 |
 | `reality-coexistence` | 协议与入口 -> REALITY 管理 -> 443 共存分流 | `deferred` | `core-xray` / `nginx` | 宿主 CLI | 共存开启、状态检查、关闭及端口恢复事务尚未迁移。 |
 | `entry-port-management` | 协议与入口 -> 入口端口管理 | `deferred` | 核心 | bridge | v2/v3 已有多入口端口映射及候选事务，v3 明确核心归属；既有内部端口冻结，Fail2ban 联动和 443 共存等完整管理未交付。 |
 | `cdn-entry-management` | 协议与入口 -> CDN 入口管理 | `deferred` | `subscription` | bridge | 尚无独立订阅入口地址覆盖管理。 |

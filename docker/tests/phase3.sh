@@ -1127,8 +1127,9 @@ validateFeatureMatrix() {
         . as $entry |
         ($matrix.feature_matrix[$entry.key] | {status, profiles, network_mode, host_capabilities}) ==
           ($matrix.feature_matrix[$entry.value] | {status, profiles, network_mode, host_capabilities})) and
-      all(["interactive-menu", "reality-target-management", "reality-parameter-management",
-        "reality-coexistence", "core-upgrade-assessment"][]; $matrix.feature_matrix[.].status == "deferred") and
+      all(["interactive-menu", "reality-target-management", "reality-coexistence",
+        "core-upgrade-assessment"][]; $matrix.feature_matrix[.].status == "deferred") and
+      $matrix.feature_matrix["reality-parameter-management"].status == "supported" and
       ([.protocols[] | select(.status == "supported") | .id] | sort) == [1, 2, 3, 4, 5, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31] and
       .feature_matrix.subscription.requires == {core: "xray", protocol_ids: [21], tls: true} and
       (.feature_matrix.subscription.profiles | sort) == ["core-xray", "nginx", "subscription"]
@@ -1163,6 +1164,7 @@ del(.feature_matrix["reality-target-management"])
 .feature_matrix.subscription.requires.protocol_ids = [1]
 .feature_matrix.subscription.requires.tls = false
 .feature_matrix["core-upgrade-assessment"].status = "supported"
+.feature_matrix["reality-parameter-management"].status = "deferred"
 EOF
 
 printf 'docker-phase3-regression-ok\n'

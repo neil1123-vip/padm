@@ -77,12 +77,48 @@ print(base64.urlsafe_b64encode(result[12:]).decode("ascii").rstrip("="))
 ' 2>/dev/null
 }
 
+dockerSetupRealityKeyPair() {
+    local xrayImage=$1 opsImage=$2 keyPair privateKey publicKey derivedPublic
+    keyPair=$(dockerSetupTool "${xrayImage}" x25519 2>/dev/null) || return 1
+    privateKey=$(awk '/^PrivateKey:/ { print $2; exit }' <<<"${keyPair}")
+    publicKey=$(awk '/^Password \(PublicKey\):/ { print $3; exit } /^PublicKey:/ { print $2; exit }' <<<"${keyPair}")
+    [[ "${privateKey}" =~ ^[A-Za-z0-9_-]{43}$ && "${publicKey}" =~ ^[A-Za-z0-9_-]{43}$ ]] || return 1
+    derivedPublic=$(printf '%s\n' "${privateKey}" | dockerSetupRealityPublicKey "${opsImage}") || return 1
+    [[ "${derivedPublic}" == "${publicKey}" ]] || return 1
+    printf '%s %s\n' "${privateKey}" "${publicKey}"
+}
+
+dockerEditRegenerateReality() {
+    local draft=$1 listener=$2 xrayImage opsImage keyPair privateKey publicKey shortId
+    local credentials="${1}.credentials" temporary="${1}.next"
+    xrayImage=$(dockerManifestImageReference xray) || return 1
+    opsImage=$(dockerManifestImageReference ops) || return 1
+    keyPair=$(dockerSetupRealityKeyPair "${xrayImage}" "${opsImage}") || return 1
+    read -r privateKey publicKey <<<"${keyPair}"
+    shortId=$(dockerSetupRandomHex "${opsImage}" 8) || return 1
+    # 重生成秘密只在私密草稿中流转，不传给进程参数或预览输出。
+    (
+        umask 077
+        printf '%s\n%s\n%s\n' "${privateKey}" "${publicKey}" "${shortId}" >"${credentials}"
+    ) || return 1
+    jq --arg listener "${listener}" --rawfile credentials "${credentials}" '
+      ($credentials | split("\n")) as $keys |
+      .core.protocols |= map(if .listener_id != $listener then . else
+        if .reality.private_key == $keys[0] or .reality.public_key == $keys[1] or .reality.short_id == $keys[2]
+        then error("Reality 参数未更新") else
+          .reality.private_key = $keys[0] | .reality.public_key = $keys[1] | .reality.short_id = $keys[2]
+        end end)
+    ' "${draft}" >"${temporary}" 2>/dev/null &&
+        chmod 0600 "${temporary}" && mv -f -- "${temporary}" "${draft}" &&
+        rm -f -- "${credentials}"
+}
+
 dockerSetupGenerateSpec() {
     local core=$1 protocols=$2 server=$3 families=$4 realityPort=$5 target=$6 targetPort=$7 sni=$8
     local domain=$9 wsPort=${10} subscription=${11} output=${12} secondaryCore=${13:-} secondaryPort=${14:-8444}
     local hy2Mode=${15:-bbr} hy2Up=${16:-100} hy2Down=${17:-50} hy2Obfs=${18:-false} hy2Masquerade=${19:-}
     local tuicCongestion=${20:-cubic} tuicAuthTimeout=${21:-3s} tuicHeartbeat=${22:-10s} tuicZeroRtt=${23:-false}
-    local xrayImage opsImage singBoxImage uuid token shortId= privateKey= publicKey= keyPair derivedPair derivedPublic wsPath= inputsFile obfsPassword=
+    local xrayImage opsImage singBoxImage uuid token shortId= privateKey= publicKey= keyPair wsPath= inputsFile obfsPassword=
     local serverPassword= userPassword= grpcService=
     xrayImage=$(dockerManifestImageReference xray) || return 1
     opsImage=$(dockerManifestImageReference ops) || return 1
@@ -90,14 +126,8 @@ dockerSetupGenerateSpec() {
     [[ "${uuid}" =~ ^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$ ]] || return 1
     token=$(dockerSetupRandomHex "${opsImage}" 32) || return 1
     if [[ ( "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 && "${protocols}" != 9 && "${protocols}" != 10 && "${protocols}" != 11 && "${protocols}" != 12 && "${protocols}" != 13 && "${protocols}" != 14 && "${protocols}" != 15 && "${protocols}" != 16 && "${protocols}" != 17 ) || -n "${secondaryCore}" ]]; then
-        keyPair=$(dockerSetupTool "${xrayImage}" x25519 2>/dev/null) || return 1
-        privateKey=$(awk '/^PrivateKey:/ { print $2; exit }' <<<"${keyPair}")
-        publicKey=$(awk '/^Password \(PublicKey\):/ { print $3; exit } /^PublicKey:/ { print $2; exit }' <<<"${keyPair}")
-        [[ "${privateKey}" =~ ^[A-Za-z0-9_-]{43}$ && "${publicKey}" =~ ^[A-Za-z0-9_-]{43}$ ]] || return 1
-        derivedPair=$(printf '%s\n' "${privateKey}" |
-            dockerSetupRealityPublicKey "${opsImage}") || return 1
-        derivedPublic=${derivedPair}
-        [[ "${derivedPublic}" == "${publicKey}" ]] || return 1
+        keyPair=$(dockerSetupRealityKeyPair "${xrayImage}" "${opsImage}") || return 1
+        read -r privateKey publicKey <<<"${keyPair}"
         shortId=$(dockerSetupRandomHex "${opsImage}" 8) || return 1
     fi
     if [[ "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 4 || "${protocols}" == 12 || "${protocols}" == 13 ]]; then
@@ -980,7 +1010,7 @@ dockerEditFields() {
 
 dockerEditCommand() {
     local specFile= manifest= bundle= controlBundle= mode=interactive root workspace original draft imported=0 status=0
-    local privateKey publicKey derivedKey opsImage version normalized
+    local privateKey publicKey derivedKey opsImage version normalized regenerateReality=
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
         --spec|--manifest|--bundle|--control-bundle)
@@ -991,6 +1021,12 @@ dockerEditCommand() {
             --bundle) bundle=$2 ;;
             --control-bundle) controlBundle=$2 ;;
             esac
+            shift 2
+            ;;
+        --regenerate-reality)
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${regenerateReality}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            regenerateReality=$2
             shift 2
             ;;
         --preview)
@@ -1007,6 +1043,10 @@ dockerEditCommand() {
         *) return "${PADM_DOCKER_RC_USAGE}" ;;
         esac
     done
+    [[ -z "${regenerateReality}" || -z "${specFile}" ]] || {
+        dockerError 'Reality 参数重生成不能与原始规格导入组合'
+        return "${PADM_DOCKER_RC_USAGE}"
+    }
     [[ "${mode}" != interactive || ( -t 0 && -t 1 ) ]] || {
         dockerError '非交互编辑需要 --preview 或 --confirm PADM-DOCKER-EDIT'
         return "${PADM_DOCKER_RC_USAGE}"
@@ -1016,6 +1056,8 @@ dockerEditCommand() {
     dockerComposeFile >/dev/null || return "${PADM_DOCKER_RC_STATE}"
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     dockerTrafficSafePath "${root}" "${root}/config/spec.json" || return "${PADM_DOCKER_RC_STATE}"
+    [[ -z "${regenerateReality}" || -f "${root}/config/spec.json" ]] ||
+        return "${PADM_DOCKER_RC_STATE}"
     if [[ ! -e "${root}/config/spec.json" && ! -L "${root}/config/spec.json" && -z "${specFile}" ]]; then
         if [[ "${mode}" == interactive ]]; then
             dockerSetupRead specFile '完整原始 spec 文件（0 取消）: ' || return 0
@@ -1063,7 +1105,7 @@ dockerEditCommand() {
     dockerConfigureSpecMigrate "${draft}" "${draft}.v3" &&
         mv -f -- "${draft}.v3" "${draft}" || return "${PADM_DOCKER_RC_STATE}"
     # 旧规格先接入，不能同时把未经证明的字段改动当作无损导入。
-    if [[ "${mode}" == interactive && -z "${specFile}" && "${imported}" -eq 0 ]]; then
+    if [[ "${mode}" == interactive && -z "${specFile}" && "${imported}" -eq 0 && -z "${regenerateReality}" ]]; then
         dockerEditFields "${draft}" || status=$?
         if [[ "${status}" -eq 3 ]]; then
             printf '已取消配置编辑。\n'
@@ -1076,8 +1118,15 @@ dockerEditCommand() {
     jq -es 'length == 1 and (.[0] | type == "object")' "${draft}" >/dev/null 2>&1 ||
         return "${PADM_DOCKER_RC_STATE}"
     dockerConfigureSpecValidate "${draft}" || return "${PADM_DOCKER_RC_STATE}"
-    dockerEditPreview "${original}" "${draft}" || return "${PADM_DOCKER_RC_STATE}"
-    [[ "${imported}" -eq 0 ]] || printf '完整原始规格已匹配，确认后接入受管输入。\n'
+    if [[ -n "${regenerateReality}" ]]; then
+        regenerateReality=$(jq -er --arg listener "${regenerateReality}" '
+          [.core.protocols[] | select(.listener_id == $listener and (.id == 1 or .id == 2 or .id == 26))] |
+          if length == 1 then .[0].listener_id else error("不是唯一 Reality 入口") end
+        ' "${draft}" 2>/dev/null) || {
+            dockerError 'Reality 参数重生成需要指定一个已有 Reality 入口 ID'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+    fi
     if [[ -z "${manifest}" ]]; then
         version=$(jq -r '.release.version' "${original}") || return "${PADM_DOCKER_RC_STATE}"
         [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return "${PADM_DOCKER_RC_STATE}"
@@ -1086,18 +1135,35 @@ dockerEditCommand() {
     fi
     dockerConfigureReleasePrepare "${manifest}" "${bundle}" "${controlBundle}" || return $?
     dockerConfigureReleaseValidate "${draft}" || return "${PADM_DOCKER_RC_MANIFEST}"
-    jq -en --slurpfile before "${normalized}" --slurpfile after "${draft}" '
+    if [[ -n "${regenerateReality}" ]]; then
+        dockerEditRegenerateReality "${draft}" "${regenerateReality}" &&
+            dockerConfigureSpecValidate "${draft}" || {
+            dockerError 'Reality 参数生成或校验失败，未改写已安装配置'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        printf '仅重生成入口 %s 的 Reality 密钥及 short ID；提交后需重新导入该入口链接。\n' "${regenerateReality}"
+    fi
+    dockerEditPreview "${original}" "${draft}" || return "${PADM_DOCKER_RC_STATE}"
+    [[ "${imported}" -eq 0 ]] || printf '完整原始规格已匹配，确认后接入受管输入。\n'
+    jq -en --arg regenerate "${regenerateReality}" --slurpfile before "${normalized}" --slurpfile after "${draft}" '
       def fixed: del(.server, .public_port, .address_families, .name,
         .reality.target_host, .reality.target_port, .reality.server_name, .websocket.path, .httpupgrade.path,
         .xhttp.path, .xhttp.host, .xhttp.mode, .grpc.service_name, .grpc_tls.service_name,
         .hy2.bandwidth_mode, .hy2.up_mbps, .hy2.down_mbps, .hy2.obfs, .hy2.masquerade,
-        .tuic.congestion_control, .tuic.auth_timeout, .tuic.heartbeat, .tuic.zero_rtt_handshake);
+        .tuic.congestion_control, .tuic.auth_timeout, .tuic.heartbeat, .tuic.zero_rtt_handshake) |
+        if .listener_id == $regenerate then del(.reality.private_key, .reality.public_key, .reality.short_id) else . end;
       def reality: .id == 1 or .id == 2 or .id == 26;
       def shared: fixed | del(.listener_id, .core, .id, .xhttp, .grpc);
       def root: del(.core.protocols, .core.secondary_type, .tls, .subscription.enabled);
       $before[0] as $old | $after[0] as $new |
       [$old.core.protocols[].listener_id] as $oldIds |
       [$new.core.protocols[].listener_id] as $newIds |
+      (if $regenerate != "" then
+        ($old | .core.protocols |= map(if .listener_id == $regenerate then
+          del(.reality.private_key, .reality.public_key, .reality.short_id) else . end)) ==
+        ($new | .core.protocols |= map(if .listener_id == $regenerate then
+          del(.reality.private_key, .reality.public_key, .reality.short_id) else . end))
+       else true end) and
       # 分次提交新增与删除，防止借同凭据入口绕过已有身份和内部端口冻结。
       ((($oldIds - $newIds) | length) == 0 or (($newIds - $oldIds) | length) == 0) and
       ($old | root) == ($new | root) and
