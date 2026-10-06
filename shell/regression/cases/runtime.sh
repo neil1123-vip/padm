@@ -424,7 +424,7 @@ runInstallWorkflowRegression() (
 
     (
         # 协议和模式在事务外确认；取消不能触发原事务的备份、回滚或服务恢复。
-        local core install input mode events= selectionErrors=0 inputFd nextInput
+        local core install input mode events= selectionErrors=0 inputFd nextInput xrayState=true singBoxState=true
         local PADM_CORE_TEMPLATE_TRANSACTION_ACTIVE=
         unset AUTO_INSTALL AUTO_PROTOCOLS AUTO_REALITY_DOMAIN
         coreSelectionErrorCard() { selectionErrors=$((selectionErrors + 1)); }
@@ -437,10 +437,10 @@ runInstallWorkflowRegression() (
         checkLogBackupRestore() { events+=$'rollback\n'; }
         padmRemoveCleanupPath() { :; }
         nginxRunning() { return 0; }
-        xrayRunning() { return 0; }
-        singBoxRunning() { return 0; }
-        handleXray() { events+="xray:$1"$'\n'; }
-        handleSingBox() { events+="sing-box:$1"$'\n'; }
+        xrayRunning() { [[ "${xrayState}" == true ]]; }
+        singBoxRunning() { [[ "${singBoxState}" == true ]]; }
+        handleXray() { events+="xray:$1"$'\n'; xrayState=false; [[ "$1" != start ]] || xrayState=true; }
+        handleSingBox() { events+="sing-box:$1"$'\n'; singBoxState=false; [[ "$1" != start ]] || singBoxState=true; }
         handleNginx() { events+="nginx:$1"$'\n'; }
         padmRunPortAllowTransaction() { "$@"; }
         readLastInstallationConfig() { events+=$'read-last\n'; return 0; }
@@ -468,7 +468,7 @@ runInstallWorkflowRegression() (
                 regressionExpectStatus 1 "${install}" <&"${inputFd}"
                 read -r -u "${inputFd}" nextInput
                 [[ "${selectCustomInstallType}" == ,1, && "${nextInput}" == next-parent-action && "${selectionErrors}" == 1 ]]
-                [[ "${events}" == $'read-last\nentry\nbackup\ntools\nrollback\n'"${core}:stop"$'\n'"${core}:start"$'\n' ]]
+                [[ "${events}" == $'read-last\nentry\nbackup\ntools\n'"${core}:stop"$'\nrollback\n'"${core}:start"$'\n' ]]
                 if [[ "${mode}" == 2 ]]; then
                     [[ "${realityOnlyWithDomain}" == true ]]
                 else
@@ -476,6 +476,25 @@ runInstallWorkflowRegression() (
                 fi
                 exec {inputFd}<&-
             done
+        done
+    )
+
+    (
+        # 双核心尚未清理时只验证安装目标，不能误读旧核心的运行状态。
+        local checks= detections=0 state=false core
+        local PADM_CHECK_GFW_SERVICE_ATTEMPTS=1 PADM_CHECK_GFW_SERVICE_INTERVAL=0
+        readInstallType() { detections=$((detections + 1)); coreInstallType=1; }
+        xrayRunning() { checks+=xray; [[ "${core}" == xray && "${state}" == true || "${core}" == sing-box ]]; }
+        singBoxRunning() { checks+=sing-box; [[ "${core}" == sing-box && "${state}" == true || "${core}" == xray ]]; }
+        for core in xray sing-box; do
+            checks=
+            state=false
+            regressionExpectStatus 1 checkGFWStatue 1 "${core}"
+            [[ "${checks}" == "${core}" && "${detections}" == 0 ]]
+            checks=
+            state=true
+            checkGFWStatue 1 "${core}"
+            [[ "${checks}" == "${core}" && "${detections}" == 0 ]]
         done
     )
 

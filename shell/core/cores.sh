@@ -2189,11 +2189,14 @@ updateGeoSite() {
 checkGFWStatue() {
     local serviceCheckAttempts=${PADM_CHECK_GFW_SERVICE_ATTEMPTS:-30}
     local serviceCheckInterval=${PADM_CHECK_GFW_SERVICE_INTERVAL:-0.2}
-    readInstallType
+    local checkFunction
+    case "$2" in
+    xray) checkFunction=xrayRunning ;;
+    sing-box) checkFunction=singBoxRunning ;;
+    *) errorCard "安装目标核心不合法"; return 1 ;;
+    esac
     progressCard "$1" "验证服务启动状态"
-    if [[ "${coreInstallType}" == "1" ]] && waitForServiceState xrayRunning running "${serviceCheckAttempts}" "${serviceCheckInterval}"; then
-        successCard "服务启动成功"
-    elif [[ "${coreInstallType}" == "2" ]] && waitForServiceState singBoxRunning running "${serviceCheckAttempts}" "${serviceCheckInterval}"; then
+    if waitForServiceState "${checkFunction}" running "${serviceCheckAttempts}" "${serviceCheckInterval}"; then
         successCard "服务启动成功"
     else
         errorCard "服务启动失败，请检查终端是否有日志打印"
@@ -2698,6 +2701,32 @@ prepareCoreInstallInputs() {
     return 0
 }
 
+# 先释放旧核心端口，验证目标核心后才清理旧文件。
+completeCoreInstall() {
+    local core=$1 checkStep=$2 accountStep=$3 oldCore oldHandler cleanupType
+    case "${core}" in
+    xray) oldCore=sing-box; oldHandler=handleSingBox; cleanupType=singBoxDel ;;
+    sing-box) oldCore=xray; oldHandler=handleXray; cleanupType=xrayDel ;;
+    *) return 1 ;;
+    esac
+    if serviceRunning "${oldCore}"; then
+        coreInstallServiceAction "旧 ${oldCore} 服务停止失败，已取消核心切换" "${oldHandler}" stop || return 1
+    fi
+    serviceQueueRestart "${core}"
+    if [[ -z "${selectCustomInstallType:-}" ]]; then
+        serviceQueueStart nginx
+    elif [[ "${core}" == "sing-box" ]] && protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
+        serviceQueueRestart nginx
+    fi
+    serviceQueueApply || return 1
+    if protocolSelectionHasAny "${selectCustomInstallType:-}" 1 2 26; then
+        persistRealityEntryProfile || return 1
+    fi
+    checkGFWStatue "${checkStep}" "${core}" || return 1
+    cleanUp "${cleanupType}" || return 1
+    showAccounts "${accountStep}"
+}
+
 # 安装 Xray-core
 installXrayRealityApply() {
     totalProgress=6
@@ -2706,12 +2735,7 @@ installXrayRealityApply() {
     (installXray 2 false) || return 1
     initXrayConfig custom 3 || return 1
     installXrayService 4 || return 1
-    serviceQueueRestart xray
-    serviceQueueApply || return 1
-    persistRealityEntryProfile || return 1
-    checkGFWStatue 5 || return 1
-    cleanUp singBoxDel || return 1
-    showAccounts 6
+    completeCoreInstall xray 5 6
 }
 
 installXrayReality() {
@@ -2731,12 +2755,7 @@ installSingBoxRealityApply() {
     installSingBox 2 || return 1
     initSingBoxConfig custom 3 || return 1
     installSingBoxService 4 || return 1
-    serviceQueueRestart sing-box
-    serviceQueueApply || return 1
-    persistRealityEntryProfile || return 1
-    checkGFWStatue 5 || return 1
-    cleanUp xrayDel || return 1
-    showAccounts 6
+    completeCoreInstall sing-box 5 6
 }
 
 installSingBoxReality() {
@@ -2845,14 +2864,7 @@ customXrayInstallApply() {
         installCronTLS 10 || return 1
     fi
 
-    serviceQueueRestart xray
-    serviceQueueApply || return 1
-    if protocolSelectionHasAny "${selectCustomInstallType}" 1 2 26; then
-        persistRealityEntryProfile || return 1
-    fi
-    checkGFWStatue 11 || return 1
-    cleanUp singBoxDel || return 1
-    showAccounts 12
+    completeCoreInstall xray 11 12
 }
 
 customXrayInstall() {
@@ -2882,17 +2894,7 @@ customSingBoxInstallApply() {
     if protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
         installCronTLS 7 || return 1
     fi
-    serviceQueueRestart sing-box
-    if protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
-        serviceQueueRestart nginx
-    fi
-    serviceQueueApply || return 1
-    if protocolSelectionHasAny "${selectCustomInstallType}" 1 26; then
-        persistRealityEntryProfile || return 1
-    fi
-    checkGFWStatue 8 || return 1
-    cleanUp xrayDel || return 1
-    showAccounts 9
+    completeCoreInstall sing-box 8 9
 }
 
 customSingBoxInstall() {
@@ -2964,7 +2966,6 @@ xrayCoreInstallApply() {
     # 安装 Xray
     installXray 6 false || return 1
     initXrayConfig all 7 || return 1
-    cleanUp singBoxDel || return 1
     installXrayService 8 || return 1
     installCronTLS 9 || return 1
     if [[ -n "${btDomain}" ]]; then
@@ -2973,14 +2974,7 @@ xrayCoreInstallApply() {
         nginxBlog 10 || return 1
     fi
     updateRedirectNginxConf || return 1
-    coreInstallServiceAction "Xray 服务停止失败，已取消安装收尾" handleXray stop || return 1
-    sleep 2
-    coreInstallServiceAction "Xray 服务启动失败，已取消安装收尾" handleXray start || return 1
-
-    coreInstallServiceAction "Nginx 服务启动失败，已取消安装收尾" handleNginx start || return 1
-    # 生成账号
-    checkGFWStatue 11 || return 1
-    showAccounts 12
+    completeCoreInstall xray 11 12
 }
 
 xrayCoreInstall() {
@@ -2995,7 +2989,7 @@ xrayCoreInstall() {
 singBoxInstallApply() {
     # checkBTPanel
     # check1Panel
-    totalProgress=8
+    totalProgress=10
     installTools 2 || return 1
 
     if [[ -n "${btDomain}" ]]; then
@@ -3012,15 +3006,10 @@ singBoxInstallApply() {
 
     installSingBox 5 || return 1
     initSingBoxConfig all 6 || return 1
-    cleanUp xrayDel || return 1
     installSingBoxService 7 || return 1
     installCronTLS 8 || return 1
 
-    serviceQueueRestart sing-box
-    serviceQueueStart nginx
-    serviceQueueApply || return 1
-    # 生成账号
-    showAccounts 9
+    completeCoreInstall sing-box 9 10
 }
 
 singBoxInstall() {

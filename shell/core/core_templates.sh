@@ -313,6 +313,7 @@ coreTemplateConfigTransaction() {
     local configRestored=true
     local cleanupRestored=true
     local serviceRestored=true
+    local newCoreStopped=true
     local restoreBackupDir=
     local title="Xray 配置初始化"
     [[ "${core}" == "sing-box" ]] && title="sing-box 配置初始化"
@@ -349,6 +350,12 @@ coreTemplateConfigTransaction() {
         return 0
     fi
 
+    # 新核心先释放端口，避免恢复旧核心时被新服务阻挡。
+    if [[ "${PADM_CORE_INSTALL_TRANSACTION_ACTIVE:-}" == "true" ]] &&
+        ! coreTemplateRestoreServiceState "${core}" false; then
+        serviceRestored=false
+        newCoreStopped=false
+    fi
     if checkLogBackupRestore "${backupDir}"; then
         padmRemoveCleanupPath "${backupDir}"
     else
@@ -371,7 +378,7 @@ coreTemplateConfigTransaction() {
             padmForgetCleanupPath "${PADM_CORE_SWITCH_CLEANUP_BACKUP_DIR}"
         fi
     fi
-    if [[ "${configRestored}" == "true" && "${cleanupRestored}" == "true" ]]; then
+    if [[ "${configRestored}" == "true" && "${cleanupRestored}" == "true" && "${newCoreStopped}" == "true" ]]; then
         if [[ "${core}" == "xray" || "${PADM_CORE_INSTALL_TRANSACTION_ACTIVE:-}" == "true" ]] &&
             ! coreTemplateRestoreServiceState xray "${xrayWasRunning}" "${xrayRestartRunning}"; then
             serviceRestored=false

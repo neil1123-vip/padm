@@ -1192,6 +1192,7 @@ runCoreInstallServiceActionFailureRegression() (
     local nginxRoot="${root}/nginx"
     local mode rc nginxRuntimeState
     local xrayRuntimeState=false singBoxRuntimeState=false
+    local failStopTarget=
 
     mkdir -p "${xrayRoot}" "${singBoxRoot}" "${nginxRoot}"
     REGRESSION_ERROR_CARD_LOG="${errorLog}"
@@ -1263,13 +1264,24 @@ runCoreInstallServiceActionFailureRegression() (
         SERVICE_ACTIONS="${SERVICE_ACTIONS}
 $1:refresh"
     }
-    serviceQueueStart() { printf 'queueStart:%s\n' "$*" >>"${callLog}"; return 0; }
+    serviceQueueRestart() { serviceQueueAdd "$1" restart; }
+    serviceQueueStart() { printf 'queueStart:%s\n' "$*" >>"${callLog}"; serviceQueueAdd "$1" start; }
     serviceQueueApply() {
+        local entry service action status=0 previousAllowFailure=${SERVICE_QUEUE_ALLOW_FAILURE:-}
         printf 'queueApply\n' >>"${callLog}"
+        SERVICE_QUEUE_ALLOW_FAILURE=true
+        while read -r entry; do
+            [[ -n "${entry}" ]] || continue
+            service=${entry%%:*}
+            action=${entry#*:}
+            runServiceAction "${service}" "${action}" || status=1
+        done <<<"${SERVICE_ACTIONS}"
         SERVICE_ACTIONS=
-        return 0
+        SERVICE_QUEUE_ALLOW_FAILURE=${previousAllowFailure}
+        return "${status}"
     }
     checkGFWStatue() {
+        printf 'health:%s:%s\n' "$1" "$2" >>"${callLog}"
         printf 'reached\n' >"${reachedFile}"
         [[ "${mode}" != "check-gfw-fail" ]]
     }
@@ -1290,12 +1302,16 @@ $1:refresh"
         printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
         [[ "${mode}" == "xray-stop-fail" && "$1" == "stop" ]] && return 1
         [[ "${mode}" == "xray-start-fail" && "$1" == "start" ]] && return 1
+        [[ "${failStopTarget}" == xray && "$1" == stop && "${xrayRuntimeState}" == true ]] && return 1
+        [[ "$1" != start || "${singBoxRuntimeState}" != true ]] || return 1
         [[ "$1" == "stop" ]] && xrayRuntimeState=false
         [[ "$1" == "start" ]] && xrayRuntimeState=true
         return 0
     }
     handleSingBox() {
         printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ "${failStopTarget}" == sing-box && "$1" == stop && "${singBoxRuntimeState}" == true ]] && return 1
+        [[ "$1" != start || "${xrayRuntimeState}" != true ]] || return 1
         [[ "$1" == "stop" ]] && singBoxRuntimeState=false
         [[ "$1" == "start" ]] && singBoxRuntimeState=true
         return 0
@@ -1303,6 +1319,7 @@ $1:refresh"
 
     resetInstallServiceFixture() {
         mode=$1
+        failStopTarget=
         : >"${serviceLog}"
         : >"${callLog}"
         : >"${errorLog}"
@@ -1407,6 +1424,7 @@ $1:refresh"
     resetInstallServiceFixture check-gfw-fail
     regressionExpectStatus 1 installXrayReality >/dev/null 2>&1
     ! grep -q '^nginx:' "${serviceLog}"
+    ! grep -q '^cleanup:' "${callLog}"
     [[ "${nginxRuntimeState}" == "true" ]] || return 1
 
     resetInstallServiceFixture nginx-start-fail
@@ -1450,7 +1468,7 @@ $1:refresh"
     grep -qx 'xray:stop:true' "${serviceLog}"
     grep -qx 'xray:start:true' "${serviceLog}"
     grep -qx 'nginx:start:true' "${serviceLog}" || return 1
-    grep -qx 'nginx-mode:start restore' "${serviceLog}" || return 1
+    grep -qx 'queueStart:nginx' "${callLog}"
     [[ "${nginxRuntimeState}" == "true" ]] || return 1
     grep -q '^installXray:' "${callLog}"
     [[ ! -e "${reachedFile}" ]]
@@ -1483,6 +1501,40 @@ $1:refresh"
     grep -qx 'nginx-mode:start restore' "${serviceLog}" || return 1
     [[ "${nginxRuntimeState}" == "true" ]] || return 1
     ! grep -q '^queueApply$' "${callLog}"
+
+    # 六个入口检查目标核心后才删除旧文件；失败时先释放新核心端口再恢复旧服务。
+    local install target oldCore
+    for install in installXrayReality customXrayInstall xrayCoreInstall installSingBoxReality customSingBoxInstall singBoxInstall; do
+        target=xray
+        oldCore=sing-box
+        [[ "${install}" != *SingBox* && "${install}" != singBox* ]] || { target=sing-box; oldCore=xray; }
+        resetInstallServiceFixture check-gfw-fail
+        [[ "${oldCore}" != xray ]] || xrayRuntimeState=true
+        [[ "${oldCore}" != sing-box ]] || singBoxRuntimeState=true
+        regressionExpectStatus 1 "${install}" 1 domain </dev/null
+        grep -q "^health:[0-9]*:${target}$" "${callLog}"
+        ! grep -q '^cleanup:' "${callLog}"
+        serviceRunning "${oldCore}"
+        ! serviceRunning "${target}"
+        grep -q "^${oldCore}:start:true$" "${serviceLog}"
+        resetInstallServiceFixture check-gfw-fail
+        failStopTarget=${target}
+        [[ "${oldCore}" != xray ]] || xrayRuntimeState=true
+        [[ "${oldCore}" != sing-box ]] || singBoxRuntimeState=true
+        regressionExpectStatus 1 "${install}" 1 domain </dev/null
+        serviceRunning "${target}"
+        ! serviceRunning "${oldCore}"
+        ! grep -q "^${oldCore}:start:" "${serviceLog}"
+        grep -q '服务运行状态恢复失败' "${errorLog}"
+        resetInstallServiceFixture success
+        [[ "${oldCore}" != xray ]] || xrayRuntimeState=true
+        [[ "${oldCore}" != sing-box ]] || singBoxRuntimeState=true
+        regressionExpectStatus 0 "${install}" 1 domain </dev/null
+        grep -q "^health:[0-9]*:${target}$" "${callLog}"
+        [[ "$(grep -E '^(health|cleanup):' "${callLog}")" == health:*"${target}"$'\n'cleanup:* ]]
+        serviceRunning "${target}"
+        ! serviceRunning "${oldCore}"
+    done
 )
 
 runSingBoxMergeConfigTransactionRegression() (
@@ -1893,6 +1945,7 @@ runSingBoxProtocolReloadFailureRegression() (
         local transactionLog="${dependencyRoot}/transaction.log"
         local xrayLog="${dependencyRoot}/xray.log"
         local certificateAvailable=false confirmValue=y rc
+        local AUTO_DOMAIN=install.example.com
 
         mkdir -p "${dependencyRoot}"
         : >"${certificateLog}"
@@ -2883,6 +2936,7 @@ JSON
     (
         local errorLog="${TMP_DIR}/entry-helper-port-expression-error.log"
         local allowLog="${TMP_DIR}/entry-helper-port-expression-allow.log"
+        local AUTO_PORT=1+2
         local rc
         : >"${errorLog}"
         : >"${allowLog}"
