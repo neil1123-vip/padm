@@ -1773,6 +1773,12 @@ runCoreInstall() {
     local PADM_INSTALL_RESET_HISTORY=false PADM_INSTALL_CLIENTS_PREPARED=false
     local PADM_NGINX_BLOG_REINSTALL_PROMPT=false
     local PADM_INSTALL_REALITY_PROFILE_CACHE=
+    local -A PADM_INSTALL_SINGBOX_PORTS=()
+    local PADM_INSTALL_HY2_INPUTS_PREPARED=false PADM_INSTALL_TUIC_INPUTS_PREPARED=false
+    local hysteria2BandwidthMode="${hysteria2BandwidthMode:-}"
+    local hysteria2ClientDownloadSpeed="${hysteria2ClientDownloadSpeed:-}" hysteria2ClientUploadSpeed="${hysteria2ClientUploadSpeed:-}"
+    local hysteria2ObfsType="${hysteria2ObfsType:-}" hysteria2ObfsPassword="${hysteria2ObfsPassword:-}" hysteria2Masquerade="${hysteria2Masquerade:-}"
+    local tuicAlgorithm="${tuicAlgorithm:-}"
     local dnsAPIStatus dnsAPIType cfAPIToken cfZoneID aliKey aliSecret sslIPv6
     local AUTO_UUID="${AUTO_UUID:-}" AUTO_USER="${AUTO_USER:-}" AUTO_PORT="${AUTO_PORT:-}"
     prepareCoreInstallInputs "${core}" || return 1
@@ -2726,6 +2732,7 @@ prepareCoreInstallInputs() {
         readInstallTLSPort || return 1
         AUTO_PORT=${port}
     fi
+    [[ "${core}" != sing-box ]] || prepareSingBoxInstallInputs || return 1
     return 0
 }
 

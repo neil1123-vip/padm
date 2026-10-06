@@ -130,7 +130,8 @@ initHysteria2Network() {
     local defaultDownload=${hysteria2ClientDownloadSpeed:-100} defaultUpload=${hysteria2ClientUploadSpeed:-50}
     local parameterInput= existingMasquerade=${hysteria2Masquerade:-}
 
-    if [[ -n "${lastInstallationConfig:-}" && -n "${hysteria2BandwidthMode:-}" ]]; then
+    if [[ ( -n "${lastInstallationConfig:-}" || "${PADM_INSTALL_HY2_INPUTS_PREPARED:-}" == true ) &&
+        -n "${hysteria2BandwidthMode:-}" ]]; then
         case "${hysteria2BandwidthMode:-}" in
         brutal)
             if [[ ! "${hysteria2ClientDownloadSpeed:-}" =~ ^[0-9]{1,6}$ ]] ||
@@ -708,7 +709,8 @@ initTuicProtocol() {
         ;;
     esac
     if [[ -n "${tuicAlgorithm:-}" &&
-        "${tuicAlgorithm}" == "${defaultAlgorithm}" && -n "${lastInstallationConfig:-}" ]]; then
+        "${tuicAlgorithm}" == "${defaultAlgorithm}" &&
+        ( -n "${lastInstallationConfig:-}" || "${PADM_INSTALL_TUIC_INPUTS_PREPARED:-}" == true ) ]]; then
         tuicAlgorithmStatusCard "${tuicAlgorithm}"
         return 0
     fi

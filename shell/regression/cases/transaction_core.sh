@@ -616,6 +616,7 @@ runCoreCleanupFailurePropagationRegression() (
     readLastInstallationConfig() { return 0; }
     coreTemplateCollectInitialClients() { return 0; }
     readInstallTLSPort() { port=2443; return 0; }
+    prepareSingBoxInstallInputs() { return 0; }
     collectEntryProfile() { realityEntryHost=cleanup.example.com; return 0; }
     persistRealityEntryProfile() { printf 'persist\n' >>"${queueLog}"; return 0; }
     unInstallSubscribe() { return 0; }
@@ -1254,6 +1255,7 @@ runCoreInstallServiceActionFailureRegression() (
     readLastInstallationConfig() { return 0; }
     coreTemplateCollectInitialClients() { return 0; }
     readInstallTLSPort() { port=2443; return 0; }
+    prepareSingBoxInstallInputs() { return 0; }
     unInstallSubscribe() { return 0; }
     installTools() { printf 'installTools:%s\n' "$*" >>"${callLog}"; return 0; }
     initTLSNginxConfig() { printf 'initTLS:%s\n' "$*" >>"${callLog}"; return 0; }
@@ -2425,7 +2427,7 @@ runSingBoxProtocolReloadFailureRegression() (
         coreInstallConfigTransaction() { transactions=$((transactions + 1)); shift; "$@"; }
         installSingBox() { downloads=$((downloads + 1)); coreVersion=1.14.0; }
         getSingBoxCurrentVersion() { printf '%s\n' "${coreVersion}"; }
-        allowPortTcpAndUdp() { allows=$((allows + 1)); [[ "$1" == "${AUTO_PORT}" ]]; }
+        allowPort() { allows=$((allows + 1)); [[ "$1" == "${AUTO_PORT}" && "${2:-tcp}" == udp ]]; }
         collectTLSProfile() { tlsCertDomain=installed.example.com; }
         writeGeneratedJsonFile() { cat >"${capturedConfig}"; }
         setSniffRouting() { return 0; }

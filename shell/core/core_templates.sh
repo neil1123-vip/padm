@@ -56,6 +56,13 @@ coreTemplateCollectInitialClients() {
     local core=$1 passwordMode=${2:-false} inputsOnly=${3:-false}
     local hasExistingClients=false historyChoice= storedCredentials= storedCredential=
     local credential= username= clients label=UUID suffix=VLESS_TCP/TLS_Vision
+    local requiresUuid=true
+    if [[ "${passwordMode}" == true ]] ||
+        { [[ -n "${selectCustomInstallType:-}" ]] &&
+            ! protocolSelectionHasAny "${selectCustomInstallType}" 1 2 21 22 23 24 26 27 31; }; then
+        requiresUuid=false
+        label="用户密码"
+    fi
     if [[ "${passwordMode}" == "true" ]]; then
         label="Hysteria2 密码"
         suffix=singbox_hysteria2
@@ -77,8 +84,7 @@ coreTemplateCollectInitialClients() {
             esac
         done
         if [[ "${hasExistingClients}" == "true" ]]; then
-            if [[ "${passwordMode}" != "true" ]] &&
-                protocolSelectionHasAny "${selectCustomInstallType:-,1,}" 1 2 21 22 23 24 26 27 31; then
+            if [[ "${requiresUuid}" == true ]]; then
                 storedCredentials=$(jq -r '.[] | .id // .uuid // .password // ""' <<<"${currentClients}") || return 1
                 while IFS= read -r storedCredential; do
                     if ! validUuidValue "${storedCredential}"; then
@@ -100,9 +106,9 @@ coreTemplateCollectInitialClients() {
         fi
         if [[ -z "${credential}" ]]; then
             credential=$(generateRandomUuidValue) || { errorCard "${label}生成失败"; return 1; }
-            [[ "${passwordMode}" == "true" ]] || validUuidValue "${credential}" || { errorCard "UUID 生成失败"; return 1; }
+            [[ "${requiresUuid}" != true ]] || validUuidValue "${credential}" || { errorCard "UUID 生成失败"; return 1; }
         fi
-        if [[ "${passwordMode}" == "true" ]] || validUuidValue "${credential}"; then
+        if [[ "${requiresUuid}" != true ]] || validUuidValue "${credential}"; then
             break
         fi
         errorCard "UUID 格式不合法"
@@ -120,7 +126,8 @@ coreTemplateCollectInitialClients() {
             if validUuidValue "${credential}"; then
                 username="$(defaultRandomUserNameFromUuid "${credential}")-${suffix}"
             else
-                username="padm-hysteria2-${suffix}"
+                username="padm-user-${suffix}"
+                [[ "${passwordMode}" != true ]] || username="padm-hysteria2-${suffix}"
             fi
         fi
         coreTemplateValidateManualAccountName "${username}" && break
@@ -1000,6 +1007,7 @@ stopSingBoxBeforeTemplateWrite() {
 initSingBoxConfigApply() {
     set -- "${1:-}" "${2:-}" "${3:-}"
     local singBoxConfigPath selectCoreType=2
+    local -A singBoxInstallListeners=()
     local hysteria2CredentialMode="${singBoxHysteria2CredentialMode:-false}"
     singBoxConfigPath="$(singBoxTemplateConfigDir)/" || return 1
     progressCard "$2" "初始化 sing-box 配置"
@@ -1009,6 +1017,9 @@ initSingBoxConfigApply() {
     collectTLSProfile
     sslDomain=${tlsCertDomain}
     [[ "${PADM_INSTALL_CLIENTS_PREPARED:-}" == true && -n "${currentClients:-}" ]] || coreTemplateCollectInitialClients sing-box "${hysteria2CredentialMode}" || return 1
+    if protocolSelectionIncludes "${selectCustomInstallType}" 23 "$1"; then
+        singBoxInstallListeners[tcp:31306]=httpupgrade
+    fi
 
     # VLESS Vision
     if protocolSelectionIncludes "${selectCustomInstallType}" 27 "$1"; then
@@ -1016,7 +1027,7 @@ initSingBoxConfigApply() {
         menuLine "开始配置 VLESS Vision 协议端口"
         menuClose
         echo
-        readSingBoxPortResult result "${singBoxVLESSVisionPort}" || return 1
+        readSingBoxProtocolPort result 27 "${singBoxVLESSVisionPort}" || return 1
         statusCard "VLESS Vision端口" "${result[-1]}"
 
         checkDNSIP "${domain}" || return 1
@@ -1052,7 +1063,7 @@ EOF
         menuLine "开始配置 VLESS WS 协议端口"
         menuClose
         echo
-        readSingBoxPortResult result "${singBoxVLESSWSPort}" || return 1
+        readSingBoxProtocolPort result 21 "${singBoxVLESSWSPort}" || return 1
         statusCard "VLESS WS端口" "${result[-1]}"
 
         checkDNSIP "${domain}" || return 1
@@ -1094,7 +1105,7 @@ EOF
         menuLine "开始配置 VMess WS 协议端口"
         menuClose
         echo
-        readSingBoxPortResult result "${singBoxVMessWSPort}" || return 1
+        readSingBoxProtocolPort result 22 "${singBoxVMessWSPort}" || return 1
         statusCard "VMess ws端口" "${result[-1]}"
 
         checkDNSIP "${domain}" || return 1
@@ -1139,7 +1150,7 @@ EOF
         initRealityProfile || return 1
         initRealityKey || return 1
         echo
-        readSingBoxPortResult result "${singBoxVLESSRealityVisionPort}" true tcp reality_subport 1 vision || return 1
+        readSingBoxProtocolPort result 1 "${singBoxVLESSRealityVisionPort}" || return 1
         if declare -F realityStreamSplitEnabled >/dev/null 2>&1 && realityStreamSplitEnabled &&
             [[ "${result[-1]}" == "$(realityStreamInternalPortForProtocol vision)" ]]; then
             statusCard "VLESS Reality Vision 共存内部端口" "${result[-1]}"
@@ -1186,7 +1197,7 @@ EOF
         initRealityProfile || return 1
         initRealityKey || return 1
         echo
-        readSingBoxPortResult result "${singBoxVLESSRealityGRPCPort}" true tcp reality_grpc_subport 26 || return 1
+        readSingBoxProtocolPort result 26 "${singBoxVLESSRealityGRPCPort}" || return 1
         statusCard "VLESS Reality gRPC 客户端连接端口" "${result[-1]}"
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/08_VLESS_vision_gRPC_inbounds.json padm-sing-box-reality-grpc <<EOF || { errorCard "sing-box Reality gRPC 入站模板提交失败"; return 1; }
 {
@@ -1230,7 +1241,7 @@ EOF
         menuLine "开始配置 Hysteria2 协议端口"
         menuClose
         echo
-        readSingBoxPortResult result "${singBoxHysteria2Port}" || return 1
+        readSingBoxProtocolPort result 3 "${singBoxHysteria2Port}" || return 1
         statusCard "Hysteria2端口" "${result[-1]}"
         initHysteria2Network || return 1
         local hysteria2MasqueradeConfig
@@ -1290,7 +1301,7 @@ EOF
         menuLine "开始配置 Trojan 协议端口"
         menuClose
         echo
-        readSingBoxPortResult result "${singBoxTrojanPort}" || return 1
+        readSingBoxProtocolPort result 28 "${singBoxTrojanPort}" || return 1
         statusCard "Trojan端口" "${result[-1]}"
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/28_trojan_TCP_direct_inbounds.json padm-sing-box-trojan <<EOF || { errorCard "sing-box Trojan TCP 入站模板提交失败"; return 1; }
 {
@@ -1319,7 +1330,7 @@ EOF
         menuLine "开始配置 Shadowsocks 协议端口"
         menuClose
         echo
-        readSingBoxPortResult result "${singBoxShadowsocksPort}" || return 1
+        readSingBoxProtocolPort result 30 "${singBoxShadowsocksPort}" || return 1
         statusCard "Shadowsocks端口" "${result[-1]}"
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/30_shadowsocks_inbounds.json padm-sing-box-shadowsocks <<EOF || { errorCard "sing-box Shadowsocks 入站模板提交失败"; return 1; }
 {
@@ -1345,7 +1356,7 @@ EOF
         menuLine "开始配置 Tuic 协议端口"
         menuClose
         echo
-        readSingBoxPortResult result "${singBoxTuicPort}" || return 1
+        readSingBoxProtocolPort result 31 "${singBoxTuicPort}" || return 1
         statusCard "Tuic端口" "${result[-1]}"
         initTuicProtocol || return 1
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/09_tuic_inbounds.json padm-sing-box-tuic <<EOF || { errorCard "sing-box TUIC 入站模板提交失败"; return 1; }
@@ -1383,7 +1394,7 @@ EOF
         menuLine "开始配置 Naive 协议端口"
         menuClose
         echo
-        readSingBoxPortResult result "${singBoxNaivePort}" || return 1
+        readSingBoxProtocolPort result 5 "${singBoxNaivePort}" || return 1
         statusCard "Naive端口" "${result[-1]}"
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/10_naive_inbounds.json padm-sing-box-naive <<EOF || { errorCard "sing-box Naive 入站模板提交失败"; return 1; }
 {
@@ -1412,7 +1423,7 @@ EOF
         menuLine "开始配置 VMess HTTPUpgrade 协议端口"
         menuClose
         echo
-        readSingBoxPortResult result "${singBoxVMessHTTPUpgradePort}" || return 1
+        readSingBoxProtocolPort result 23 "${singBoxVMessHTTPUpgradePort}" || return 1
         statusCard "VMess HTTPUpgrade端口" "${result[-1]}"
 
         checkDNSIP "${domain}" || return 1
@@ -1461,7 +1472,7 @@ EOF
         menuLine "开始配置 AnyTLS 协议端口"
         menuClose
         echo
-        readSingBoxPortResult result "${singBoxAnyTLSPort}" || return 1
+        readSingBoxProtocolPort result 4 "${singBoxAnyTLSPort}" || return 1
         statusCard "AnyTLS端口" "${result[-1]}"
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/13_anytls_inbounds.json padm-sing-box-anytls <<EOF || { errorCard "sing-box AnyTLS 入站模板提交失败"; return 1; }
 {

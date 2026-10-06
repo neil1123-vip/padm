@@ -446,6 +446,7 @@ runInstallWorkflowRegression() (
         readLastInstallationConfig() { events+=$'read-last\n'; return 0; }
         collectEntryProfile() { events+=$'entry\n'; }
         coreTemplateCollectInitialClients() { events+=$'clients\n'; }
+        prepareSingBoxInstallInputs() { :; }
         installTools() { events+=$'tools\n'; return 1; }
         for core in xray sing-box; do
             install=customXrayInstall
@@ -515,6 +516,7 @@ runInstallWorkflowRegression() (
         handleNginx() { events+=$'service\n'; }
         coreTemplateCollectInitialClients() { :; }
         readInstallTLSPort() { :; }
+        prepareSingBoxInstallInputs() { :; }
         coreSwitchConfigTransaction() { events+="transaction:${PADM_INSTALL_RESET_HISTORY}"$'\n'; return 17; }
         for install in installXrayReality installSingBoxReality customXrayInstall customSingBoxInstall xrayCoreInstall singBoxInstall; do
             for input in "" n $'n\n' $'n\n\n'; do
@@ -569,6 +571,7 @@ runInstallWorkflowRegression() (
         collectEntryProfile() { :; }
         readInstallTLSDomain() { :; }
         readInstallTLSPort() { :; }
+        prepareSingBoxInstallInputs() { :; }
         nginxRunning() { events+=$'nginx\n'; return 1; }
         coreSwitchConfigTransaction() {
             [[ "${PADM_INSTALL_CLIENTS_PREPARED}" == true ]]
@@ -625,6 +628,7 @@ runInstallWorkflowRegression() (
         installTools() { events+=$'tools\n'; }
         installTLS() { events+=$'tls\n'; return 1; }
         installSingBox() { events+=$'download\n'; return 1; }
+        prepareSingBoxInstallInputs() { :; }
         handleNginx() { events+="nginx:$1"$'\n'; }
         handleXray() { events+="xray:$1"$'\n'; }
         allowPort() { events+="allow:$1"$'\n'; }
@@ -806,6 +810,7 @@ runInstallWorkflowRegression() (
         unset AUTO_INSTALL AUTO_DOMAIN AUTO_PORT
         readLastInstallationConfig() { :; }
         coreTemplateCollectInitialClients() { :; }
+        prepareSingBoxInstallInputs() { :; }
         configureRealityDomainMode() { :; }
         protocolSelectionShowRiskNotes() { :; }
         installTools() { events+="tools:${domain}"$'\n'; }
@@ -1280,7 +1285,90 @@ runInstallWorkflowRegression() (
     )
 
     (
-        local core targetCore passwordMode nextInput inputFd result selectCustomInstallType=,28,
+        # 无 jq 的完整安装先纠正两种端口冲突，取消无副作用，模板消费时不重复输入。
+        local selectCustomInstallType=,3,28,31,4, currentClients= currentUUID= btDomain=
+        local AUTO_UUID=11111111-1111-4111-8111-111111111111 AUTO_USER=alice AUTO_PORT= AUTO_INSTALL=
+        local lastInstallationConfig= hysteria2BandwidthMode=brutal hysteria2ClientDownloadSpeed=100 hysteria2ClientUploadSpeed=50
+        local hysteria2ObfsType= hysteria2ObfsPassword= hysteria2Masquerade= tuicAlgorithm=cubic
+        local PADM_INSTALL_HY2_INPUTS_PREPARED=parent PADM_INSTALL_TUIC_INPUTS_PREPARED=parent
+        local -A PADM_INSTALL_SINGBOX_PORTS=([4]=parent)
+        local events= allowLog= featureChecks=0 inputFd nextInput
+        local -a ports=()
+        jq() { return 127; }
+        readLastInstallationConfig() { lastInstallationConfig=; }
+        readInstallTLSDomain() { domain=tls.example.com; }
+        resolveRealityInstallCoexistPort() { return 1; }
+        allowPort() { allowLog+="${2:-tcp}:$1"$'\n'; }
+        allowPortTcpAndUdp() { allowLog+="tcp+udp:$1"$'\n'; }
+        hysteria2RequireSingBoxField() { featureChecks=$((featureChecks + 1)); }
+        coreSwitchConfigTransaction() { events+=$'transaction\n'; shift; "$@"; }
+        padmRunPortAllowTransaction() { "$@"; }
+        consumePreparedSingBoxInputs() {
+            local -A singBoxInstallListeners=()
+            [[ -z "${lastInstallationConfig}" && "${hysteria2BandwidthMode}" == bbr && "${tuicAlgorithm}" == bbr ]] || return 1
+            [[ "${PADM_INSTALL_SINGBOX_PORTS[3]}" == 15000 && "${PADM_INSTALL_SINGBOX_PORTS[28]}" == 15000 &&
+                "${PADM_INSTALL_SINGBOX_PORTS[31]}" == 15001 && "${PADM_INSTALL_SINGBOX_PORTS[4]}" == 15002 ]] || return 1
+            [[ "${featureChecks}" == 0 && -z "${allowLog}" ]] || return 1
+            readSingBoxProtocolPort ports 3 "" || return 1
+            initHysteria2Network || return 1
+            readSingBoxProtocolPort ports 28 "" || return 1
+            readSingBoxProtocolPort ports 31 "" || return 1
+            initTuicProtocol || return 1
+            readSingBoxProtocolPort ports 4 "" || return 1
+            [[ "${featureChecks}" == 2 &&
+                "${allowLog}" == $'udp:15000\ntcp:15000\nudp:15001\ntcp:15002\n' ]]
+        }
+        exec {inputFd}< <(printf '15000\n2\noff\noff\n15000\n15000\n15001\n2\n15000\n15002\nnext-parent-action\n')
+        runCoreInstall sing-box consumePreparedSingBoxInputs <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        exec {inputFd}<&-
+        [[ "${nextInput}" == next-parent-action && "${events}" == $'transaction\n' ]]
+        [[ "${PADM_INSTALL_SINGBOX_PORTS[4]}" == parent && "${PADM_INSTALL_HY2_INPUTS_PREPARED}" == parent &&
+            "${PADM_INSTALL_TUIC_INPUTS_PREPARED}" == parent && "${hysteria2BandwidthMode}" == brutal && "${tuicAlgorithm}" == cubic ]]
+        events= allowLog= featureChecks=0 currentClients= currentUUID=
+        regressionExpectStatus 1 runCoreInstall sing-box consumePreparedSingBoxInputs < <(printf '15000\n2\noff\noff\n15000')
+        [[ -z "${events}${allowLog}" && "${featureChecks}" == 0 && "${PADM_INSTALL_SINGBOX_PORTS[4]}" == parent ]]
+    )
+
+    (
+        # 双监听和 HTTPUpgrade 固定后端也要参与本次端口检查。
+        local selectCustomInstallType=,5,30, AUTO_PORT= AUTO_INSTALL= lastInstallationConfig= inputFd nextInput
+        local -A singBoxInstallListeners=() PADM_INSTALL_SINGBOX_PORTS=()
+        local -a ports=()
+        resolveRealityInstallCoexistPort() { return 1; }
+        allowPort() { return 1; }
+        allowPortTcpAndUdp() { return 1; }
+        exec {inputFd}< <(printf '08443\n8443\n15001\nnext-parent-action\n')
+        readSingBoxProtocolPort ports 5 "" true <&"${inputFd}"
+        readSingBoxProtocolPort ports 30 "" true <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        exec {inputFd}<&-
+        [[ "${nextInput}" == next-parent-action && "${ports[-1]}" == 15001 &&
+            "${singBoxInstallListeners[tcp:8443]}" == 5 && "${singBoxInstallListeners[udp:8443]}" == 5 &&
+            "${singBoxInstallListeners[tcp:15001]}" == 30 && "${singBoxInstallListeners[udp:15001]}" == 30 ]]
+        singBoxInstallListeners=([tcp:31306]=httpupgrade)
+        selectCustomInstallType=,23,28,
+        exec {inputFd}< <(printf '31306\n15002\nnext-parent-action\n')
+        readSingBoxProtocolPort ports 28 "" true <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        exec {inputFd}<&-
+        [[ "${nextInput}" == next-parent-action && "${ports[-1]}" == 15002 ]]
+        lastInstallationConfig=true
+        exec {inputFd}< <(printf '15003\nnext-parent-action\n')
+        readSingBoxProtocolPort ports 28 31306 true <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        exec {inputFd}<&-
+        [[ "${nextInput}" == next-parent-action && "${ports[-1]}" == 15003 ]]
+        AUTO_INSTALL=true
+        exec {inputFd}< <(printf 'next-parent-action\n')
+        regressionExpectStatus 1 readSingBoxProtocolPort ports 28 31306 true <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        exec {inputFd}<&-
+        [[ "${nextInput}" == next-parent-action && "${singBoxInstallListeners[tcp:31306]}" == httpupgrade ]]
+    )
+
+    (
+        local core targetCore passwordMode nextInput inputFd result selectCustomInstallType=,1,
         local oldClients='[{"id":"11111111-1111-4111-8111-111111111111","email":"old-user"}]'
         local testUuid=22222222-2222-4222-8222-222222222222
         local generationLog="${TMP_DIR}/install-initial-client-generation.log"
@@ -1371,6 +1459,7 @@ runInstallWorkflowRegression() (
         jq -e '.[0].password == "stored-secret" and .[0].name == "old-user"' <<<"${currentClients}" >/dev/null
         [[ ! -s "${generationLog}" ]]
         # 两核重装复用密码型用户，不依赖不存在的 UUID 字段。
+        selectCustomInstallType=,28,
         currentClients='[{"password":"alice-secret","name":"alice"},{"password":"bob-secret","name":"bob"}]'
         result=${currentClients}
         for core in xray sing-box; do
@@ -1422,6 +1511,62 @@ runInstallWorkflowRegression() (
             [[ "${currentClients}" == "${result}" ]]
         )
         unset AUTO_UUID AUTO_USER
+    )
+
+    (
+        # 密码型安装允许普通密码；含 UUID 协议的组合仍拒绝且不消费后续输入。
+        local core selection protocolId inputFd nextInput AUTO_UUID= AUTO_USER= AUTO_INSTALL= currentUUID=
+        local currentClients= lastInstallationConfig= selectCustomInstallType=
+        local secret='ordinary password: with spaces' result
+        local -a protocolIds=()
+        for core in xray sing-box; do
+            for selection in ,28, ,25,29, ,3, ,4,5, ,3,4,28,; do
+                [[ "${core}" != xray || "${selection}" == ,28, || "${selection}" == ,25,29, ]] || continue
+                [[ "${core}" != sing-box || "${selection}" != ,25,29, ]] || continue
+                selectCustomInstallType=${selection}
+                currentClients='[]'
+                exec {inputFd}< <(printf '%s\nalice\nnext-parent-action\n' "${secret}")
+                coreTemplateCollectInitialClients "${core}" <&"${inputFd}"
+                read -r -u "${inputFd}" nextInput
+                [[ "${nextInput}" == next-parent-action ]]
+                exec {inputFd}<&-
+                if [[ "${core}" == xray ]]; then
+                    jq -e --arg password "${secret}" '.[0].id == $password and .[0].email == "alice"' <<<"${currentClients}" >/dev/null
+                else
+                    jq -e --arg password "${secret}" '.[0].uuid == $password and .[0].name == "alice"' <<<"${currentClients}" >/dev/null
+                fi
+                IFS=',' read -ra protocolIds <<<"${selection}"
+                for protocolId in "${protocolIds[@]}"; do
+                    [[ -n "${protocolId}" ]] || continue
+                    if [[ "${core}" == xray ]]; then
+                        result=$(initXrayClients "${protocolId}") || return 1
+                    else
+                        result=$(initSingBoxClients "${protocolId}") || return 1
+                    fi
+                    jq -e --arg password "${secret}" 'length == 1 and .[0].password == $password' <<<"${result}" >/dev/null
+                done
+            done
+            for selection in '' ,1, ,28,1, ,3,31, ,4,23,; do
+                selectCustomInstallType=${selection}
+                currentClients='[]'
+                AUTO_UUID=${secret}
+                exec {inputFd}< <(printf 'next-parent-action\n')
+                regressionExpectStatus 1 coreTemplateCollectInitialClients "${core}" <&"${inputFd}"
+                read -r -u "${inputFd}" nextInput
+                [[ "${currentClients}" == '[]' && "${nextInput}" == next-parent-action ]]
+                exec {inputFd}<&-
+                AUTO_UUID=
+            done
+        done
+        selectCustomInstallType=,4,
+        exec {inputFd}< <(printf '%s\n\nnext-parent-action\n' "${secret}")
+        coreTemplateCollectInitialClients sing-box false true <&"${inputFd}"
+        [[ "${AUTO_UUID}" == "${secret}" && -n "${AUTO_USER}" && -z "${currentClients}" ]]
+        coreTemplateCollectInitialClients sing-box </dev/null
+        jq -e --arg password "${secret}" '.[0].uuid == $password and .[0].name != ""' <<<"${currentClients}" >/dev/null
+        read -r -u "${inputFd}" nextInput
+        [[ "${nextInput}" == next-parent-action ]]
+        exec {inputFd}<&-
     )
 
     (

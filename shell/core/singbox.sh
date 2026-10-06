@@ -572,11 +572,11 @@ singBoxProtocolInstall() {
     coreTemplateCollectInitialClients sing-box "${singBoxHysteria2CredentialMode}" true || return 1
     case "${protocolId}" in
     3)
-        readSingBoxPortResult protocolPort "${hysteriaPort}" true tcp+udp singbox_custom_port "" "" true || return 1
+        readSingBoxProtocolPort protocolPort 3 "${hysteriaPort}" true || return 1
         initHysteria2Network true || return 1
         ;;
     31)
-        readSingBoxPortResult protocolPort "${tuicPort}" true tcp+udp singbox_custom_port "" "" true || return 1
+        readSingBoxProtocolPort protocolPort 31 "${tuicPort}" true || return 1
         initTuicProtocol || return 1
         ;;
     esac
@@ -672,6 +672,75 @@ singBoxMergeConfig() {
 }
 
 
+# 只登记本次模板实际监听的传输，允许 TCP 与 UDP 使用相同端口。
+singBoxInstallPortAvailable() {
+    local port=$((10#$1)) transport=$2 type
+    declare -p singBoxInstallListeners >/dev/null 2>&1 || return 0
+    for type in tcp udp; do
+        [[ "${transport}" == "${type}" || "${transport}" == tcp+udp ]] || continue
+        if [[ -n "${singBoxInstallListeners[${type}:${port}]:-}" ]]; then
+            errorCard "${port}/${type} 已用于本次安装的其他监听，请选择不同端口"
+            return 1
+        fi
+    done
+}
+
+readSingBoxProtocolPort() {
+    local -n protocolPortsRef=$1
+    local protocolId=$2 historyPort=${3:-} inputsOnly=${4:-false}
+    local transport=tcp promptHistory=true promptKey=singbox_custom_port realityId= stream= type
+    case "${protocolId}" in
+    1) realityId=1; stream=vision; promptKey=reality_subport ;;
+    26) realityId=26; promptKey=reality_grpc_subport ;;
+    3 | 31) transport=udp ;;
+    5 | 30) transport=tcp+udp ;;
+    esac
+    if [[ "${inputsOnly}" != true && -n "${PADM_INSTALL_SINGBOX_PORTS[${protocolId}]:-}" ]]; then
+        historyPort=${PADM_INSTALL_SINGBOX_PORTS[${protocolId}]}
+        promptHistory=false
+    fi
+    readSingBoxPortResult "$1" "${historyPort}" "${promptHistory}" "${transport}" "${promptKey}" "${realityId}" "${stream}" "${inputsOnly}" || return 1
+    if declare -p singBoxInstallListeners >/dev/null 2>&1; then
+        for type in tcp udp; do
+            [[ "${transport}" == "${type}" || "${transport}" == tcp+udp ]] || continue
+            singBoxInstallListeners["${type}:${protocolPortsRef[-1]}"]=${protocolId}
+        done
+    fi
+}
+
+# 完整安装先采集参数，模板阶段只消费本次结果并校验实际核心版本。
+prepareSingBoxInstallInputs() {
+    local mode=custom entry protocolId portVar
+    local -a ports=()
+    local -A singBoxInstallListeners=()
+    [[ -n "${selectCustomInstallType:-}" ]] || mode=all
+    if protocolSelectionIncludes "${selectCustomInstallType:-}" 23 "${mode}"; then
+        singBoxInstallListeners[tcp:31306]=httpupgrade
+    fi
+    for entry in \
+        27:singBoxVLESSVisionPort 21:singBoxVLESSWSPort 22:singBoxVMessWSPort \
+        1:singBoxVLESSRealityVisionPort 26:singBoxVLESSRealityGRPCPort 3:singBoxHysteria2Port \
+        28:singBoxTrojanPort 30:singBoxShadowsocksPort 31:singBoxTuicPort \
+        5:singBoxNaivePort 23:singBoxVMessHTTPUpgradePort 4:singBoxAnyTLSPort; do
+        protocolId=${entry%%:*}
+        portVar=${entry#*:}
+        protocolSelectionIncludes "${selectCustomInstallType:-}" "${protocolId}" "${mode}" || continue
+        statusCard "安装参数" "$(protocolCapabilityMeta "${protocolId}" name)"
+        readSingBoxProtocolPort ports "${protocolId}" "${!portVar:-}" true || return 1
+        PADM_INSTALL_SINGBOX_PORTS[${protocolId}]=${ports[-1]}
+        case "${protocolId}" in
+        3)
+            initHysteria2Network true || return 1
+            PADM_INSTALL_HY2_INPUTS_PREPARED=true
+            ;;
+        31)
+            initTuicProtocol || return 1
+            PADM_INSTALL_TUIC_INPUTS_PREPARED=true
+            ;;
+        esac
+    done
+}
+
 # 初始化 sing-box 端口
 initSingBoxPort() {
     local port=$1
@@ -717,6 +786,11 @@ initSingBoxPort() {
         port=${AUTO_PORT}
         promptHistory=false
     fi
+    if validPortNumber "${port}" && ! singBoxInstallPortAvailable "${port}" "${transport}"; then
+        [[ -z "${AUTO_INSTALL:-}${AUTO_PORT}" && "${coexistStatus}" != 0 ]] || return 1
+        port=
+        promptHistory=true
+    fi
 
     if [[ -n "${port}" && ( "${promptHistory}" != "true" || ( "${singleReality}" == "true" && -n "${AUTO_INSTALL:-}" ) ) ]]; then
         openPort=true
@@ -739,14 +813,19 @@ initSingBoxPort() {
                     port=$((RANDOM % 50001 + 10000))
                 fi
             fi
-            validPortNumber "${port}" && break
-            corePortInputErrorCard
+            if validPortNumber "${port}"; then
+                singBoxInstallPortAvailable "${port}" "${transport}" && break
+            else
+                corePortInputErrorCard
+            fi
             [[ -z "${AUTO_INSTALL:-}" ]] || return 1
         done
         [[ "${port}" == "${historyPort}" ]] || openPort=true
     fi
 
     validPortNumber "${port}" || { corePortInputErrorCard; return 1; }
+    singBoxInstallPortAvailable "${port}" "${transport}" || return 1
+    port=$((10#${port}))
     if [[ "${inputsOnly}" != true ]]; then
         [[ -z "${realityProtocolId}" ]] || checkPort "${port}" || return 1
         if [[ "${openPort}" == "true" ]]; then
