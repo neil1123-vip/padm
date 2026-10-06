@@ -1193,6 +1193,12 @@ runCoreInstallServiceActionFailureRegression() (
     local xrayRoot="${root}/xray"
     local singBoxRoot="${root}/sing-box"
     local nginxRoot="${root}/nginx"
+    local PADM_XRAY_BINARY="${xrayRoot}/xray"
+    local PADM_XRAY_CONF_DIR="${xrayRoot}"
+    local PADM_SINGBOX_CONFIG_DIR="${singBoxRoot}"
+    local PADM_REALITY_STREAM_CONF_FILE="${nginxRoot}/stream.conf"
+    local PADM_REALITY_STREAM_STATE_FILE="${nginxRoot}/stream.json"
+    local PADM_REALITY_STREAM_NGINX_CONF="${nginxRoot}/nginx.conf"
     local mode rc nginxRuntimeState
     local xrayRuntimeState=false singBoxRuntimeState=false
     local failStopTarget=
@@ -1204,6 +1210,10 @@ runCoreInstallServiceActionFailureRegression() (
     configPath="${xrayRoot}/"
     singBoxConfigPath="${singBoxRoot}/"
     nginxConfigPath="${nginxRoot}/"
+    # 真实备份和回滚只访问夹具，不能触碰 runner 预装的核心或 Nginx 配置。
+    xrayTemplateConfigDir() { printf '%s\n' "${xrayRoot}"; }
+    singBoxTemplateConfigDir() { printf '%s\n' "${singBoxRoot}"; }
+    printf 'existing-nginx-main\n' >"${PADM_REALITY_STREAM_NGINX_CONF}"
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
     protocolRegistryMenu() { return 0; }
     readLastInstallationConfig() { return 0; }
@@ -1541,6 +1551,7 @@ $1:refresh"
         ! serviceRunning "${oldCore}"
     done
 
+    grep -qx 'existing-nginx-main' "${PADM_REALITY_STREAM_NGINX_CONF}"
     (
         # 使用真实备份，保证失败后配置和 Nginx 运行态一起回到安装前。
         local rollbackRoot="${root}/nginx-rollback" core oldCore initialState failure
