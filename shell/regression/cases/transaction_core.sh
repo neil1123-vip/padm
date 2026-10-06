@@ -508,6 +508,86 @@ runCoreFirstInstallCommitFailureRollbackRegression() (
     [[ ! -e "${singBoxDir}/libcronet.so" ]] || return 1
 )
 
+runCoreUpgradePendingStartRollbackRegression() (
+    local root="${TMP_DIR}/core-upgrade-pending"
+    local core stopRc stopCalls candidateDir newBinary originalBinary serviceLog
+    local version=v1.2.3 singBoxCoreCPUVendor=-linux-amd64
+    local PADM_XRAY_BINARY PADM_SINGBOX_BINARY PADM_TMP_DIR="${root}/tmp"
+    mkdir -p "${PADM_TMP_DIR}"
+    xrayConfigInstalled() { return 1; }
+    singBoxConfigInstalled() { return 1; }
+    xrayRunning() { return 1; }
+    singBoxRunning() { return 1; }
+    handleUpgradeService() {
+        printf '%s\n' "$1" >>"${serviceLog}"
+        if [[ "$1" == stop ]]; then
+            stopCalls=$((stopCalls + 1))
+            [[ "${stopCalls}" -lt 2 ]] || return "${stopRc}"
+            return 0
+        fi
+        return 1
+    }
+    handleXray() { handleUpgradeService "$@"; }
+    handleSingBox() { handleUpgradeService "$@"; }
+
+    (
+        local core serviceLog="${root}/restore-stop.log"
+        stopCalls=2
+        for core in xray sing-box; do
+            : >"${serviceLog}"
+            stopRc=0
+            coreTemplateRestoreServiceState "${core}" false
+            [[ "$(<"${serviceLog}")" == stop ]]
+            stopRc=1
+            regressionExpectStatus 1 coreTemplateRestoreServiceState "${core}" false
+        done
+    )
+
+    # 启动失败但无进程时也要取消待启动任务；取消失败不能覆盖新文件或启动旧核心。
+    for core in xray sing-box; do
+        for stopRc in 0 1; do
+            local caseRoot="${root}/${core}-${stopRc}"
+            candidateDir="${caseRoot}/candidate"
+            serviceLog="${caseRoot}/service.log"
+            PADM_XRAY_BINARY="${caseRoot}/installed/xray"
+            PADM_SINGBOX_BINARY="${caseRoot}/installed/sing-box"
+            mkdir -p "${caseRoot}/installed" "${candidateDir}"
+            : >"${serviceLog}"
+            stopCalls=0
+            if [[ "${core}" == xray ]]; then
+                originalBinary=${PADM_XRAY_BINARY}
+                newBinary="${candidateDir}/xray"
+                printf '#!/usr/bin/env bash\nprintf "Xray 1.2.3\\n"\n' >"${newBinary}"
+            else
+                originalBinary=${PADM_SINGBOX_BINARY}
+                local extractedDir="${candidateDir}/sing-box-${version#v}${singBoxCoreCPUVendor}"
+                mkdir -p "${extractedDir}"
+                newBinary="${extractedDir}/sing-box"
+                printf '#!/usr/bin/env bash\nprintf "sing-box version 1.2.3\\nTags: with_v2ray_api\\n"\n' >"${newBinary}"
+                printf 'new-cronet\n' >"${extractedDir}/libcronet.so"
+                printf 'old-cronet\n' >"$(coreSingBoxCronetPath)"
+            fi
+            printf 'old-binary\n' >"${originalBinary}"
+            chmod 755 "${originalBinary}" "${newBinary}"
+            if [[ "${core}" == xray ]]; then
+                regressionExpectStatus 1 installDownloadedXrayBinary "${version}" "${candidateDir}"
+            else
+                regressionExpectStatus 1 installDownloadedSingBoxBinary "${version}" "${candidateDir}"
+            fi
+            if [[ "${stopRc}" == 0 ]]; then
+                [[ "$(<"${serviceLog}")" == $'stop\nstart\nstop\nstart' ]]
+                [[ "$(<"${originalBinary}")" == old-binary ]]
+                [[ "${core}" != sing-box || "$(<"$(coreSingBoxCronetPath)")" == old-cronet ]]
+            else
+                [[ "$(<"${serviceLog}")" == $'stop\nstart\nstop' ]]
+                [[ "$(<"${originalBinary}")" != old-binary ]]
+                compgen -G "${originalBinary}.bak.*" >/dev/null
+                [[ "${core}" != sing-box || "$(<"$(coreSingBoxCronetPath)")" == new-cronet ]]
+            fi
+        done
+    done
+)
+
 runCoreInstallRejectsUnsafeBinaryPathRegression() (
     local root="${TMP_DIR}/core-install-unsafe-binary"
     local errorLog="${root}/error.log"
@@ -692,8 +772,8 @@ runCoreCleanupFailurePropagationRegression() (
     regressionExpectStatus 1 installSingBoxReality >/dev/null 2>&1
     grep -qx 'xray:stop:true' "${serviceLog}"
     ! grep -q '/etc/padm/xray' "${rmLog}"
-    [[ "$(<"${queueLog}")" == $'restart:sing-box\napply\npersist\ncheck\ncleanup' ]]
-    [[ -e "${reachedFile}" ]]
+    [[ "$(<"${queueLog}")" == $'cleanup\ncleanup' ]]
+    [[ ! -e "${reachedFile}" ]]
 
     (
         local switchRoot="${root}/switch-rollback"
@@ -1636,9 +1716,14 @@ $1:refresh"
         [[ "${oldCore}" != sing-box ]] || singBoxRuntimeState=true
         regressionExpectStatus 0 "${install}" 1 domain </dev/null
         grep -q "^health:[0-9]*:${target}$" "${callLog}"
+        grep -qx "${oldCore}:stop:true" "${serviceLog}"
         [[ "$(grep -E '^(health|cleanup):' "${callLog}")" == health:*"${target}"$'\n'cleanup:* ]]
         serviceRunning "${target}"
         ! serviceRunning "${oldCore}"
+        resetInstallServiceFixture success
+        regressionExpectStatus 0 "${install}" 1 domain </dev/null
+        grep -qx "${oldCore}:stop:true" "${serviceLog}"
+        serviceRunning "${target}"
     done
 
     grep -qx 'existing-nginx-main' "${PADM_REALITY_STREAM_NGINX_CONF}"

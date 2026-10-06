@@ -142,6 +142,7 @@ runRegressionCoreSafetyRollback() (
     runCoreReleaseArchiveRejectsRegression unsafe-path
     runCoreReleaseArchiveRejectsRegression symlink-payload
     runCoreFirstInstallCommitFailureRollbackRegression
+    runCoreUpgradePendingStartRollbackRegression
     runCoreInstallRejectsUnsafeBinaryPathRegression
     runCoreCleanupFailurePropagationRegression
 )

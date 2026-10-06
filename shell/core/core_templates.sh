@@ -279,7 +279,7 @@ coreTemplateRestoreServiceState() {
             runCoreServiceActionAllowFailure "${handleFunction}" stop || return 1
         fi
         runCoreServiceActionAllowFailure "${handleFunction}" start
-    elif "${runningFunction}"; then
+    else
         runCoreServiceActionAllowFailure "${handleFunction}" stop
     fi
 }

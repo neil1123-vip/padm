@@ -1978,11 +1978,11 @@ installDownloadedXrayBinary() {
     fi
     if [[ "${installedVersion}" != "${version}" ]]; then
         printf '目标版本: %s\n实际版本: %s\n' "${version}" "${installedVersion}" >>"${logFile}"
-        if [[ "${newServiceRunning}" == "true" ]] && ! runCoreServiceActionAllowFailure handleXray stop; then
-            padmRemoveCleanupPath "${tmpDir}"
-            statusCard "Xray-core 更新失败" "版本核验失败，且 Xray 服务停止失败" "目标版本: ${version}" "实际版本: ${installedVersion}" "请手动检查服务与备份: ${backupBinary}"
-            return 1
-        fi
+    fi
+    if ! runCoreServiceActionAllowFailure handleXray stop; then
+        padmRemoveCleanupPath "${tmpDir}"
+        statusCard "Xray-core 更新失败" "新服务停止失败，已取消回滚" "目标版本: ${version}" "实际版本: ${installedVersion}" "请手动检查服务与备份: ${backupBinary}"
+        return 1
     fi
     padmRemoveCleanupPath "${tmpDir}"
     finalizeFailedCoreBinaryInstall "Xray-core" "${backupBinary}" "${oldBinary}" handleXray "${logFile}"
@@ -2111,13 +2111,13 @@ installDownloadedSingBoxBinary() {
             [[ -n "${migrationBackupDir}" ]] && padmRemoveCleanupPath "${migrationBackupDir}"
             return 0
         fi
-        if ! runCoreServiceActionAllowFailure handleSingBox stop; then
-            [[ -n "${migrationBackupDir}" ]] && padmForgetCleanupPath "${migrationBackupDir}"
-            padmRemoveCleanupPath "${tmpDir}"
-            statusCard "sing-box 更新失败" "统计配置恢复失败，且新服务无法停止，已保留备份供手动恢复" \
-                "二进制: ${backupBinary}" "Cronet: ${cronetBackup}" "配置: ${migrationBackupDir:-未迁移}"
-            return 1
-        fi
+    fi
+    if ! runCoreServiceActionAllowFailure handleSingBox stop; then
+        [[ -n "${migrationBackupDir}" ]] && padmForgetCleanupPath "${migrationBackupDir}"
+        padmRemoveCleanupPath "${tmpDir}"
+        statusCard "sing-box 更新失败" "新服务停止失败，已取消回滚并保留备份供手动恢复" \
+            "二进制: ${backupBinary}" "Cronet: ${cronetBackup}" "配置: ${migrationBackupDir:-未迁移}"
+        return 1
     fi
     padmRemoveCleanupPath "${tmpDir}"
     finalizeFailedSingBoxBinaryInstall "${backupBinary}" "${oldBinary}" "${cronetBackup}" "${cronetPath}" "${logFile}" "${migrationBackupDir}"
@@ -2760,9 +2760,7 @@ completeCoreInstall() {
     sing-box) oldCore=xray; oldHandler=handleXray; cleanupType=xrayDel ;;
     *) return 1 ;;
     esac
-    if serviceRunning "${oldCore}"; then
-        coreInstallServiceAction "旧 ${oldCore} 服务停止失败，已取消核心切换" "${oldHandler}" stop || return 1
-    fi
+    coreInstallServiceAction "旧 ${oldCore} 服务停止失败，已取消核心切换" "${oldHandler}" stop || return 1
     serviceQueueRestart "${core}"
     if [[ -z "${selectCustomInstallType:-}" ]]; then
         serviceQueueStart nginx
