@@ -571,6 +571,108 @@ runRealityTargetLocationRegression() (
         [[ "$(realityTargetResultField "${line}" 0)" == "" ]]
         [[ "$(realityTargetResultField "${line}" 17)" == "" ]]
     )
+    (
+        local parallelResultsFile="${TMP_DIR}/reality-location-parallel-results.tsv"
+        local parallelLinesFile="${TMP_DIR}/reality-location-parallel-lines.tsv"
+        local parallelLog="${TMP_DIR}/reality-location-parallel.log"
+        PADM_REALITY_TARGET_RESULTS_FILE="${parallelResultsFile}"
+        PADM_REALITY_SECONDARY_JOBS=2
+        lookupRealityTargetLocation() {
+            local retries=0
+            printf 'start\t%s\n' "$1" >>"${parallelLog}"
+            if [[ "$1" != "192.0.2.243" ]]; then
+                while [[ "$(grep -c '^start' "${parallelLog}")" -lt 2 && "${retries}" -lt 200 ]]; do
+                    sleep 0.01
+                    retries=$((retries + 1))
+                done
+                (( retries < 200 )) || return 1
+            fi
+            sleep 0.05
+            printf 'end\t%s\n' "$1" >>"${parallelLog}"
+            printf 'Los Angeles, United States\n'
+        }
+        {
+            formatRealityTargetResultLine "parallel-one.example.com:443" "parallel-one.example.com" "One" "test" "no" "192.0.2.241" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567898" "${note}"
+            formatRealityTargetResultLine "parallel-two.example.com:443" "parallel-two.example.com" "Two" "test" "no" "192.0.2.242" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567898" "${note}"
+            formatRealityTargetResultLine "parallel-three.example.com:443" "parallel-three.example.com" "Three" "test" "no" "192.0.2.243" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567898" "${note}"
+            formatRealityTargetResultLine "parallel-duplicate.example.com:443" "parallel-duplicate.example.com" "Duplicate" "test" "no" "192.0.2.241" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567898" "${note}"
+        } >"${parallelLinesFile}"
+        : >"${parallelLog}"
+        writeRealityTargetResultLines "${parallelLinesFile}"
+        awk -F'\t' '$1 == "start" {running++; started++; if (running > peak) peak = running} $1 == "end" {running--} END {exit !(peak == 2 && started == 3 && running == 0)}' "${parallelLog}"
+        [[ "$(awk -F'\t' '$16 == "Los Angeles, United States" {count++} END {print count + 0}' "${parallelResultsFile}")" == "4" ]]
+        local cancelRoot="${TMP_DIR}/reality-location-cancel" writerPid workerPid oldResults retries=0 rc=0
+        mkdir -p "${cancelRoot}/tmp"
+        oldResults=$(<"${parallelResultsFile}")
+        (
+            PADM_CLEANUP_PATHS=()
+            PADM_CLEANUP_TRAP_INSTALLED=
+            TMPDIR="${cancelRoot}/tmp"
+            PADM_REALITY_TARGET_RESULTS_FILE="${cancelRoot}/results.tsv"
+            lookupRealityTargetLocation() {
+                printf '%s\n' "${BASHPID}" >>"${cancelRoot}/workers"
+                mktemp "${TMPDIR}/padm-fetch-url.XXXXXX" >/dev/null
+                sleep 30
+                printf 'Unknown\n'
+            }
+            writeRealityTargetResultLines "${parallelLinesFile}"
+        ) >"${cancelRoot}/output" 2>&1 &
+        writerPid=$!
+        while [[ ! -s "${cancelRoot}/workers" && "${retries}" -lt 200 ]]; do
+            sleep 0.01
+            retries=$((retries + 1))
+        done
+        [[ -s "${cancelRoot}/workers" ]]
+        kill -TERM "${writerPid}"
+        wait "${writerPid}" || rc=$?
+        [[ "${rc}" == "143" ]]
+        while IFS= read -r workerPid; do
+            ! kill -0 "${workerPid}" 2>/dev/null
+        done <"${cancelRoot}/workers"
+        [[ ! -e "${cancelRoot}/results.tsv" ]]
+        [[ -z "$(find "${cancelRoot}/tmp" -mindepth 1 -print -quit)" ]]
+        [[ "$(<"${parallelResultsFile}")" == "${oldResults}" ]]
+        rc=0
+        (
+            PADM_CLEANUP_PATHS=()
+            PADM_CLEANUP_TRAP_INSTALLED=
+            TMPDIR="${cancelRoot}/tmp"
+            PADM_REALITY_TARGET_RESULTS_FILE="${cancelRoot}/exit-results.tsv"
+            realityTargetProgressLine() { exit 7; }
+            writeRealityTargetResultLines "${parallelLinesFile}"
+        ) || rc=$?
+        [[ "${rc}" == "7" && ! -e "${cancelRoot}/exit-results.tsv" ]]
+        [[ -z "$(find "${cancelRoot}/tmp" -mindepth 1 -print -quit)" ]]
+        rc=0
+        (
+            PADM_CLEANUP_PATHS=()
+            PADM_CLEANUP_TRAP_INSTALLED=
+            TMPDIR="${cancelRoot}/tmp"
+            PADM_REALITY_TARGET_RESULTS_FILE="${cancelRoot}/early-cancel-results.tsv"
+            set -T
+            trap 'if [[ "${BASH_COMMAND}" == '\''geoPids[geoIndex]=$!'\'' ]]; then trap - DEBUG; kill -TERM "${BASHPID}"; fi' DEBUG
+            writeRealityTargetResultLines "${parallelLinesFile}"
+        ) >"${cancelRoot}/early-output" 2>&1 || rc=$?
+        [[ "${rc}" == "143" && ! -e "${cancelRoot}/early-cancel-results.tsv" ]]
+        [[ -z "$(find "${cancelRoot}/tmp" -mindepth 1 -print -quit)" ]]
+        local monitorMode monitorTraps
+        lookupRealityTargetLocation() { return 1; }
+        for monitorMode in off on; do
+            PADM_REALITY_TARGET_RESULTS_FILE="${cancelRoot}/failed-${monitorMode}.tsv"
+            [[ "${monitorMode}" != on ]] || set -m
+            monitorTraps=$(trap -p EXIT INT TERM)
+            writeRealityTargetResultLines "${parallelLinesFile}" >"${cancelRoot}/failed-${monitorMode}.output" 2>&1
+            [[ "$(trap -p EXIT INT TERM)" == "${monitorTraps}" ]]
+            if [[ "${monitorMode}" == on ]]; then
+                [[ $- == *m* ]]
+                set +m
+            else
+                [[ $- != *m* ]]
+            fi
+            ! grep -Eq '^\[[0-9]+\].*(Done|Terminated)' "${cancelRoot}/failed-${monitorMode}.output"
+            [[ "$(awk -F'\t' '$16 == "Unknown" {count++} END {print count + 0}' "${PADM_REALITY_TARGET_RESULTS_FILE}")" == 4 ]]
+        done
+    )
 )
 
 runRealityCandidateFastRegression() {
@@ -603,6 +705,46 @@ EOF
     export PADM_REALITY_TARGET_CANDIDATES_FILE="${fixtureFile}"
     REALITY_TARGET_PAGE_SIZE=2
     AUTO_INSTALL=
+
+    (
+        local selectedTarget selectedSni switched=0 confirmation=n menuSequence="2 1 2 2 5 9" scope=
+        realityTargetHost=installed.example.com
+        realityTargetPort=443
+        realitySNI=installed-sni.example.com
+        showRealityTargetScanResults() {
+            realityTargetHost=chosen.example.com
+            realityTargetPort=8443
+            realitySNI=chosen-sni.example.com
+            return 2
+        }
+        autoConfirm() { printf -v "$4" '%s' "${confirmation}"; }
+        changeInstalledRealityTarget() {
+            [[ "${realityTargetHost}" == "installed.example.com" && "${realitySNI}" == "installed-sni.example.com" ]]
+            [[ "$1" == "chosen.example.com:8443" && "$2" == "chosen-sni.example.com" ]]
+            switched=$((switched + 1))
+            return 1
+        }
+        selectRealityTargetFromScanResults selectedTarget selectedSni
+        [[ "${selectedTarget}" == "chosen.example.com:8443" && "${selectedSni}" == "chosen-sni.example.com" ]]
+        [[ "${realityTargetHost}" == "installed.example.com" && "${realitySNI}" == "installed-sni.example.com" ]]
+        changeRealityTargetFromScanResults
+        [[ "${switched}" == 0 ]]
+        confirmation=y
+        regressionExpectStatus 1 changeRealityTargetFromScanResults
+        [[ "${switched}" == 1 && "${realityTargetHost}" == "installed.example.com" ]]
+        readInstallProtocolType() { :; }
+        readConfigHostPathUUID() { :; }
+        readCustomPort() { :; }
+        readSingBoxConfig() { :; }
+        menuReadChoice() {
+            printf -v "$3" '%s' "${menuSequence%% *}"
+            menuSequence=${menuSequence#* }
+        }
+        scanLocalAsnRealityTargets() { scope+="${1:-recommended} "; }
+        changeRealityTargetFromScanResults() { switched=$((switched + 1)); }
+        manageRealityTarget
+        [[ "${scope}" == "recommended all " && "${switched}" == 2 ]]
+    )
 
     [[ "$(realityTargetCandidateCount)" == "5" ]]
     [[ "$(realityTargetFilteredCandidateCount recommended)" == "4" ]]
@@ -1479,11 +1621,12 @@ CSV
     [[ "$(realityTargetFilterTitle all)" == "全部" ]]
     [[ "$(selectRealityTargetScanResultFilter <<<"2" 2>/dev/null)" == "same_asn" ]]
     ! realityTargetScanResultFilterMatches "C" "same_asn" "all" "test"
-    if ! selectRealityTargetFromScanResults <<<"1"; then
+    local selectedScanTarget selectedScanSni
+    if ! selectRealityTargetFromScanResults selectedScanTarget selectedScanSni <<<"1"; then
         return 1
     fi
-    [[ "${realityTargetHost}" == "local.example.com" ]]
-    [[ "${realitySNI}" == "sni.local.example.com" ]]
+    [[ "${selectedScanTarget}" == "local.example.com:443" ]]
+    [[ "${selectedScanSni}" == "sni.local.example.com" ]]
     scanLine=$(grep -F $'local.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}")
     [[ "$(realityTargetResultField "${scanLine}" 1)" == "local.example.com:443" ]]
     selectDefaultRealityTarget

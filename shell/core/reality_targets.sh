@@ -511,12 +511,32 @@ writeRealityTargetResultLine() {
     return "${status}"
 }
 
+cleanupRealityTargetLocationJobs() {
+    local status=$? signal=$1 previousPid=$2 pid
+    shift 2
+    for pid in "$@"; do
+        [[ -n "${pid}" && "${pid}" != "${previousPid}" ]] || continue
+        kill -TERM -- "-${pid}" 2>/dev/null || true
+    done
+    for pid in "$@"; do
+        [[ -n "${pid}" && "${pid}" != "${previousPid}" ]] || continue
+        wait "${pid}" 2>/dev/null || true
+    done
+    if [[ -z "${signal}" ]]; then
+        (padmCleanupTempPaths) || true
+        exit "${status}"
+    fi
+    padmCleanupTempPaths "${signal}"
+}
+
 writeRealityTargetResultLines() {
     local linesFile=$1
-    local resultsFile mergedFile stagedFile line target parsed host ip location keepNonARanks=${PADM_REALITY_TARGET_SELECTION_SCAN:-}
+    local resultsFile mergedFile stagedFile geoDir line target parsed host ip location keepNonARanks=${PADM_REALITY_TARGET_SELECTION_SCAN:-}
+    local geoMaxJobs=${PADM_REALITY_SECONDARY_JOBS:-8} geoCount=0 geoStart geoEnd geoIndex geoPid geoTraps geoMonitor= geoPreviousPid
     local sni name category cdnRisk asn asOrg networkMatch score pqc certLength tls13 checkedAt note
-    local -a sourceFiles=()
-    local -A locations=() incomingTargets=()
+    local -a sourceFiles=() retainedLines=()
+    local -a geoIps=() geoPids=()
+    local -A locations=() incomingTargets=() pendingLocations=()
     [[ -f "${linesFile}" ]] || return 0
     resultsFile=$(realityTargetManagedResultsFile) || return 1
     if [[ -f "${resultsFile}" ]]; then
@@ -547,23 +567,72 @@ writeRealityTargetResultLines() {
         }
       }
     ' "${sourceFiles[@]}" >"${mergedFile}" || { padmRemoveCleanupPath "${mergedFile}"; padmRemoveCleanupPath "${stagedFile}"; return 1; }
+    [[ "${geoMaxJobs}" =~ ^[1-9][0-9]*$ ]] || geoMaxJobs=8
+    (( geoMaxJobs > 16 )) && geoMaxJobs=16
     while IFS= read -r line || [[ -n "${line}" ]]; do
-        target=${line%%$'\t'*}
+        IFS=$'\x1f' read -r target sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note location <<<"${line//$'\t'/$'\x1f'}"
         parsed=$(parseHostPort "${target}" 443)
         host=${parsed%:*}
         realityTargetCandidateBlocked "${host}" && continue
+        retainedLines+=("${line}")
+        [[ -z "${location}" && -n "${ip}" && "${ip}" != "unknown" ]] || continue
+        [[ -n "${locations["${ip}"]+cached}" ]] && continue
+        [[ -n "${incomingTargets["${target}"]+incoming}" ]] || continue
+        [[ -n "${pendingLocations["${ip}"]+pending}" ]] && continue
+        pendingLocations["${ip}"]=1
+        geoIps[geoCount]=${ip}
+        geoCount=$((geoCount + 1))
+    done <"${mergedFile}"
+    if (( geoCount > 0 )); then
+        padmCreateTempPath geoDir -d || { padmRemoveCleanupPath "${mergedFile}"; padmRemoveCleanupPath "${stagedFile}"; return 1; }
+        geoTraps=$(trap -p EXIT INT TERM)
+        [[ $- != *m* ]] || geoMonitor=1
+        geoPreviousPid=${!:-}
+        set -m
+        # 包含尚未登记的最后一个后台任务，但不触碰进入本函数前的任务。
+        trap 'cleanupRealityTargetLocationJobs "" "${geoPreviousPid}" "${geoPids[@]}" "${!:-}"' EXIT
+        trap 'cleanupRealityTargetLocationJobs INT "${geoPreviousPid}" "${geoPids[@]}" "${!:-}"' INT
+        trap 'cleanupRealityTargetLocationJobs TERM "${geoPreviousPid}" "${geoPids[@]}" "${!:-}"' TERM
+        realityTargetProgressLine "REALITY 地理位置查询 0/${geoCount} 并发：${geoMaxJobs}"
+        # ponytail: 按并发上限分批等待；请求时差明显时再复用滚动队列。
+        for ((geoStart = 0; geoStart < geoCount; geoStart += geoMaxJobs)); do
+            geoEnd=$((geoStart + geoMaxJobs))
+            (( geoEnd > geoCount )) && geoEnd=${geoCount}
+            geoPids=()
+            for ((geoIndex = geoStart; geoIndex < geoEnd; geoIndex++)); do
+                (
+                    trap - EXIT INT TERM
+                    set +m
+                    export TMPDIR="${geoDir}"
+                    lookupRealityTargetLocation "${geoIps[geoIndex]}" 2>/dev/null || printf 'Unknown'
+                ) >"${geoDir}/${geoIndex}.location" &
+                geoPids[geoIndex]=$!
+            done
+            for geoPid in "${geoPids[@]}"; do
+                wait "${geoPid}" 2>/dev/null || true
+            done
+            geoPids=()
+            geoPreviousPid=${!:-}
+            realityTargetProgressLine "REALITY 地理位置查询 ${geoEnd}/${geoCount} 并发：${geoMaxJobs}"
+        done
+        [[ -n "${geoMonitor}" ]] || set +m
+        trap - EXIT INT TERM
+        eval "${geoTraps}"
+        for ((geoIndex = 0; geoIndex < geoCount; geoIndex++)); do
+            location=Unknown
+            [[ ! -s "${geoDir}/${geoIndex}.location" ]] || location=$(<"${geoDir}/${geoIndex}.location")
+            locations["${geoIps[geoIndex]}"]=${location:-Unknown}
+        done
+        padmRemoveCleanupPath "${geoDir}"
+    fi
+    for line in "${retainedLines[@]}"; do
         IFS=$'\x1f' read -r target sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note location <<<"${line//$'\t'/$'\x1f'}"
-        if [[ -z "${location}" && -n "${ip}" && "${ip}" != "unknown" ]]; then
-            if [[ -n "${locations["${ip}"]+cached}" ]]; then
-                location=${locations["${ip}"]}
-            elif [[ -n "${incomingTargets["${target}"]+incoming}" ]]; then
-                location=$(lookupRealityTargetLocation "${ip}" 2>/dev/null || printf 'Unknown')
-                locations["${ip}"]=${location}
-            fi
+        if [[ -z "${location}" && -n "${ip}" ]]; then
+            location=${locations["${ip}"]:-Unknown}
         fi
         location=${location:-Unknown}
         formatRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}" "${location}" >>"${stagedFile}" || { padmRemoveCleanupPath "${mergedFile}"; padmRemoveCleanupPath "${stagedFile}"; return 1; }
-    done <"${mergedFile}"
+    done
     padmRemoveCleanupPath "${mergedFile}"
     commitGeneratedFile "${stagedFile}" "${resultsFile}" 644 || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
 }
@@ -2758,12 +2827,7 @@ showRealityTargetQualityActions() {
     menuReadChoice reality_target_quality_action "请选择后续操作[默认3=返回]:" action true || return 0
     case "${action:-3}" in
     1)
-        if selectRealityTargetFromScanResults; then
-            autoConfirm reality_target_confirm "确认切换到 ${realityTargetHost}:${realityTargetPort}，SNI=${realitySNI}？" n confirm
-            if [[ "${confirm}" == "y" ]]; then
-                changeInstalledRealityTarget "${realityTargetHost}:${realityTargetPort}" "${realitySNI}"
-            fi
-        fi
+        changeRealityTargetFromScanResults
         ;;
     2)
         autoConfirm reality_target_block_confirm "确认将 ${target} 加入目标站黑名单？" n confirm
@@ -2960,8 +3024,20 @@ realityTargetResultLineByFilteredIndex() {
 }
 
 selectRealityTargetFromScanResults() {
-    showRealityTargetScanResults
-    [[ "$?" == "2" ]]
+    local targetVar=$1 sniVar=$2 status=0
+    local realityTargetHost="${realityTargetHost:-}" realityTargetPort="${realityTargetPort:-443}" realitySNI="${realitySNI:-}"
+    showRealityTargetScanResults || status=$?
+    [[ "${status}" == "2" ]] || return 1
+    printf -v "${targetVar}" '%s' "$(formatRealityTarget "${realityTargetHost}" "${realityTargetPort}")"
+    printf -v "${sniVar}" '%s' "${realitySNI}"
+}
+
+changeRealityTargetFromScanResults() {
+    local selectedTarget selectedSni confirm
+    selectRealityTargetFromScanResults selectedTarget selectedSni || return 0
+    autoConfirm reality_target_confirm "确认切换到 ${selectedTarget}，SNI=${selectedSni}？" n confirm || return 1
+    [[ "${confirm}" == "y" ]] || return 0
+    changeInstalledRealityTarget "${selectedTarget}" "${selectedSni}"
 }
 
 probeRealityTargetRecord() {
