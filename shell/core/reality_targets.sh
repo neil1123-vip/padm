@@ -458,17 +458,6 @@ realityTargetCachedNetworkSummary() {
     esac
 }
 
-removeRealityTargetFromUnifiedLibrary() {
-    local target=$1
-    local targetsFile
-    padmCreateTempPath targetsFile "$(realityTargetTmpPath 'padm-reality-target-remove.XXXXXX')" || return 1
-    printf '%s\n' "${target}" >"${targetsFile}" || { padmRemoveCleanupPath "${targetsFile}"; return 1; }
-    removeRealityTargetsFromUnifiedLibrary "${targetsFile}"
-    local status=$?
-    padmRemoveCleanupPath "${targetsFile}"
-    return "${status}"
-}
-
 formatRealityTargetResultLine() {
     local target=$1
     local sni=$2
@@ -1247,7 +1236,7 @@ selectRealityAsnScanPlan() {
             showRealityAsnPrefixSetSummary "${allPrefixFile}" "${asn}" "全量公告前缀"
             selectedRealityAsnPrefixTotal=${totalPrefixes}
             selectedRealityAsnAddressTotal=${totalUsable}
-            autoConfirm reality_asn_prefix_confirm "确认全量扫描 ${selectedRealityAsnPrefixTotal} 个 prefix、约 ${selectedRealityAsnAddressTotal} 个可用 IP？" n confirm
+            autoConfirm reality_asn_prefix_confirm "确认全量扫描 ${selectedRealityAsnPrefixTotal} 个 prefix、约 ${selectedRealityAsnAddressTotal} 个可用 IP？" n confirm || return 1
             if [[ "${confirm}" == "y" ]]; then
                 padmCreateTempPath selectedRealityScannerPrefixFile || return 1
                 cp "${allPrefixFile}" "${selectedRealityScannerPrefixFile}"
@@ -1267,7 +1256,10 @@ selectRealityAsnScanPlan() {
         selectedRealityAsnAddressTotal=${selectedRealityAsnSampleSize}
         strategy="均衡覆盖 prefix"
         showRealityAsnSampleSummary "${sampleFile}" "${asn}" "${totalPrefixes}" "${totalUsable}" "${selectedRealityAsnSampleSize}" "${strategy}"
-        autoConfirm reality_asn_prefix_confirm "确认扫描本次抽样出的 ${selectedRealityAsnSampleSize} 个 IP？" n confirm
+        autoConfirm reality_asn_prefix_confirm "确认扫描本次抽样出的 ${selectedRealityAsnSampleSize} 个 IP？" n confirm || {
+            padmRemoveCleanupPath "${sampleFile}"
+            return 1
+        }
         if [[ "${confirm}" == "y" ]]; then
             selectedRealityScannerPrefixFile=${sampleFile}
             selectedRealityScannerRange="本次抽样 ${selectedRealityAsnSampleSize} IP（ASN 总可用 ${totalUsable}）"
@@ -1958,54 +1950,6 @@ parseRealityTargetInput() {
     realitySNI=${AUTO_REALITY_SERVER_NAME:-${realityTargetHost}}
 }
 
-writeRealityTargetCacheLine() {
-    local target=$1
-    local score=$2
-    local pqc=$3
-    local certLength=$4
-    local tls13=$5
-    local checkedAt=$6
-    local note=$7
-    local refreshedIp=${8:-}
-    local refreshedAsn=${9:-}
-    local refreshedAsOrg=${10:-}
-    local refreshedNetworkMatch=${11:-}
-    local refreshedCdnRisk=${12:-}
-    local parsed host line sni name category cdnRisk ip asn asOrg networkMatch location=
-    parsed=$(parseHostPort "${target}" 443)
-    host=${parsed%:*}
-    sni=${host}
-    name=${host}
-    category=manual
-    cdnRisk=unknown
-    ip=unknown
-    asn=unknown
-    asOrg=unknown
-    networkMatch=unknown
-    line=$(realityTargetResultLine "${target}" 2>/dev/null || true)
-    if [[ -n "${line}" ]]; then
-        sni=$(realityTargetResultField "${line}" 2)
-        name=$(realityTargetResultField "${line}" 3)
-        category=$(realityTargetResultField "${line}" 4)
-        cdnRisk=$(realityTargetResultField "${line}" 5)
-        ip=$(realityTargetResultField "${line}" 6)
-        asn=$(realityTargetResultField "${line}" 7)
-        asOrg=$(realityTargetResultField "${line}" 8)
-        networkMatch=$(realityTargetResultField "${line}" 9)
-        location=$(realityTargetResultField "${line}" 16)
-        [[ "${location}" != "Unknown" ]] || location=
-    fi
-    if [[ -n "${refreshedIp}" ]]; then
-        [[ "${ip}" == "${refreshedIp}" ]] || location=
-        ip=${refreshedIp}
-        asn=${refreshedAsn:-unknown}
-        asOrg=${refreshedAsOrg:-unknown}
-        networkMatch=${refreshedNetworkMatch:-unknown}
-    fi
-    [[ -z "${refreshedCdnRisk}" ]] || cdnRisk=${refreshedCdnRisk}
-    writeRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}" "${location}"
-}
-
 scoreRealityTargetFromTlsPing() {
     local tlsPingResult=$1
     local sniResult
@@ -2633,7 +2577,7 @@ runRealityScannerAdvanced() {
     local currentIp scanRange confirm selectedRealityScannerRange
     currentIp=$(realityTargetPublicIPv4 2>/dev/null || true)
     realityTargetStatusBlock yellow "RealiTLScanner 风险提示" "会扫描目标网段 TLS 证书" "作者建议本地运行；云端扫描可能导致 VPS 被标记"
-    autoRead reality_scanner_confirm "确认在本机运行高级扫描？[y/n]:" confirm
+    autoRead reality_scanner_confirm "确认在本机运行高级扫描？[y/n]:" confirm || return 1
     [[ "${confirm}" == "y" ]] || return 1
     selectRealityScannerRange "${currentIp}" || {
         realityTargetStatusBlock red "RealiTLScanner 扫描" "扫描范围选择无效"
@@ -2667,7 +2611,10 @@ runRealityScannerSameAsnPrefixes() {
     fi
     padmRemoveCleanupPath "${allPrefixFile}"
     realityTargetStatusBlock yellow "RealiTLScanner 风险提示" "扫描计划: ${selectedRealityScannerRange}" "公告 prefix 数: ${selectedRealityAsnPrefixTotal}" "本次将扫描 IP: ${selectedRealityAsnAddressTotal}" "会扫描目标网段 TLS 证书；云端扫描可能导致 VPS 被标记"
-    autoRead reality_asn_scanner_confirm "确认开始扫描？[y/n]:" confirm
+    autoRead reality_asn_scanner_confirm "确认开始扫描？[y/n]:" confirm || {
+        padmRemoveCleanupPath "${selectedRealityScannerPrefixFile}"
+        return 1
+    }
     if [[ "${confirm}" != "y" ]]; then
         padmRemoveCleanupPath "${selectedRealityScannerPrefixFile}"
         return 1
@@ -2835,7 +2782,7 @@ showRealityTargetQualityActions() {
         changeRealityTargetFromScanResults
         ;;
     2)
-        autoConfirm reality_target_block_confirm "确认将 ${target} 加入目标站黑名单？" n confirm
+        autoConfirm reality_target_block_confirm "确认将 ${target} 加入目标站黑名单？" n confirm || return 1
         [[ "${confirm}" == "y" ]] && addRealityTargetBlockedCandidate "${target}" "manual_reject_after_quality_check"
         ;;
     3|r|R|"")

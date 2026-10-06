@@ -969,7 +969,8 @@ autoConfirm() {
     local suffix='[y/N]：'
 
     [[ "$(normalizeYesNo "${defaultValue}")" == "y" ]] && suffix='[Y/n]：'
-    autoRead "${key}" "${prompt}${suffix}" input
+    printf -v "${resultVar}" '%s' n
+    autoRead "${key}" "${prompt}${suffix}" input || return $?
     if [[ -z "${input}" ]]; then
         input=${defaultValue}
     fi

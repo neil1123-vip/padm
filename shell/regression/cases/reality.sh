@@ -434,7 +434,7 @@ runRealityTargetLocationRegression() (
     [[ "$(realityTargetResultField "${line}" 16)" == "London, United Kingdom" ]]
     grep -qxF '198.51.100.212' "${lookupLog}"
     [[ "$(wc -l <"${lookupLog}" | tr -d ' ')" == "1" ]]
-    writeRealityTargetCacheLine "changed-ip-location.example.com:443" "A" "yes" "4096" "yes" "1234567898" "${note}" "192.0.2.202" "AS64500" "ExampleNet" "same_asn" "no"
+    writeRealityTargetResultLine "changed-ip-location.example.com:443" "changed-ip-location.example.com" "Changed" "test" "no" "192.0.2.202" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567898" "${note}"
     line=$(realityTargetResultLine "changed-ip-location.example.com:443")
     [[ "$(realityTargetResultField "${line}" 16)" == "New York, United States" ]]
     [[ "$(wc -l <"${lookupLog}" | tr -d ' ')" == "1" ]]
@@ -821,6 +821,24 @@ EOF
         done
     )
 
+    (
+        local changed=0 blocked=0 confirm=y
+        # 读取失败即使留下 y，也不能复用旧确认或执行后续变更。
+        autoRead() { printf -v "$3" '%s' y; return 7; }
+        regressionExpectStatus 7 autoConfirm reality_target_confirm "确认切换？" y confirm
+        [[ "${confirm}" == n ]]
+        selectRealityTargetFromScanResults() {
+            printf -v "$1" '%s' chosen.example.com:443
+            printf -v "$2" '%s' chosen.example.com
+        }
+        changeInstalledRealityTarget() { changed=$((changed + 1)); }
+        regressionExpectStatus 1 changeRealityTargetFromScanResults
+        menuReadChoice() { printf -v "$3" '%s' 2; }
+        addRealityTargetBlockedCandidate() { blocked=$((blocked + 1)); }
+        regressionExpectStatus 1 showRealityTargetQualityActions chosen.example.com:443
+        [[ "${changed}" == 0 && "${blocked}" == 0 ]]
+    )
+
     [[ "$(realityTargetCandidateCount)" == "5" ]]
     [[ "$(realityTargetFilteredCandidateCount recommended)" == "4" ]]
     [[ "$(realityTargetFilteredCandidateCount asia)" == "1" ]]
@@ -867,7 +885,7 @@ EOF
         ! grep -qF $'library-only.example.com:443\t' <<<"${records}"
         ! grep -qF $'fixture-asia.example.com:443\t' <<<"${records}"
     )
-    writeRealityTargetCacheLine "fixture-primary.example.com:443" "B" "yes" "2048" "yes" "1234567891" "updated"
+    writeRealityTargetResultLine "fixture-primary.example.com:443" "fixture-primary.example.com" "Fixture Primary" "large_site" "no" "192.0.2.44" "AS64500" "ExampleNet" "same_asn" "B" "yes" "2048" "yes" "1234567891" "updated" "Los Angeles, United States"
     ! realityTargetResultLine "fixture-primary.example.com:443" >/dev/null
     [[ "$(realityTargetResultCount)" == "0" ]]
     formatRealityTargetResultLine "legacy.example.com:443" "legacy.example.com" "Legacy" "test" "yes" "192.0.2.45" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567892" "legacy risk" >"${cacheFile}"
@@ -989,6 +1007,18 @@ EOF
             regressionExpectStatus 1 runRealityScannerSameAsnPrefixes
             [[ -z "$(find "${TMPDIR}" -mindepth 1 -print -quit)" ]]
         done
+        autoRead() { printf -v "$3" '%s' y; return 1; }
+        local scanCalls=0
+        runRealityScannerRange() { scanCalls=$((scanCalls + 1)); return 99; }
+        runRealityScannerTargetFile() { scanCalls=$((scanCalls + 1)); return 99; }
+        runRealityScannerPrefixFile() { scanCalls=$((scanCalls + 1)); return 99; }
+        regressionExpectStatus 1 runRealityScannerAdvanced
+        [[ -z "$(find "${TMPDIR}" -mindepth 1 -print -quit)" ]]
+        for fullScan in true false; do
+            regressionExpectStatus 1 runRealityScannerSameAsnPrefixes
+            [[ -z "$(find "${TMPDIR}" -mindepth 1 -print -quit)" ]]
+        done
+        [[ "${scanCalls}" == 0 ]]
     )
     (
         local pqcRoot="${TMP_DIR}/reality-pqc-summary"
@@ -1284,6 +1314,25 @@ y
     [[ "${selectedRealityAsnSampleSize}" == "486" ]]
     [[ "${selectedRealityScannerRange}" == "全量公告前缀 5 prefixes" ]]
     rm -f "${selectedRealityScannerPrefixFile}"
+    (
+        local fullScan planCalls=0 failedSampleFile="${TMP_DIR}/asn-confirm-failed-sample.txt"
+        autoRead() { printf -v "$3" '%s' y; return 1; }
+        selectRealityAsnSampleSize() {
+            planCalls=$((planCalls + 1))
+            selectedRealityAsnFullScan=${fullScan}
+            selectedRealityAsnSampleSize=1
+        }
+        showRealityAsnPrefixSetSummary() { :; }
+        showRealityAsnSampleSummary() { :; }
+        padmCreateTempPath() { printf -v "$1" '%s' "${failedSampleFile}"; : >"${failedSampleFile}"; }
+        generateRealityAsnSampleIps() { printf '192.0.2.1\n' >"$3"; }
+        for fullScan in true false; do
+            planCalls=0
+            regressionExpectStatus 1 selectRealityAsnScanPlan AS64500 "${asnPrefixFile}"
+            [[ "${planCalls}" == 1 && -z "${selectedRealityScannerPrefixFile}" ]]
+            [[ ! -e "${failedSampleFile}" ]]
+        done
+    )
     if [[ -n "${oldAutoInstall}" ]]; then
         AUTO_INSTALL="${oldAutoInstall}"
     else
