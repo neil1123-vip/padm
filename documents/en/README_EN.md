@@ -134,7 +134,8 @@ wget -O /root/install-docker.sh "https://raw.githubusercontent.com/neil1123-vip/
 Installation opens the menu automatically when it succeeds in an interactive terminal.
 After installation, run `padm-docker` or `padm-docker menu` for status, start/stop/restart,
 and logs. Select first configuration to choose the core, protocols, addresses, and certificates.
-The wizard covers Reality with Xray or sing-box, and Xray WS TLS or Reality + WS TLS.
+The wizard covers Xray Reality Vision/XHTTP/gRPC and WS TLS, and sing-box
+Reality Vision/gRPC, Hysteria2, AnyTLS, NaiveProxy, and Shadowsocks.
 It never overwrites an existing deployment; use the editor below instead. Full protocol management remains deferred.
 `install --no-menu` disables the automatic menu. A non-interactive invocation without
 arguments only prints help without installing Docker, downloading the bundle, or
@@ -149,12 +150,17 @@ padm-docker status
 Only the final confirmation permits release verification, UUID/Reality/token generation,
 and candidate configuration or certificate preparation. Missing `cosign` stops the operation;
 the wizard neither installs an untrusted verifier nor allows verification to be skipped.
-WS TLS can use managed certificates, an imported full certificate chain and private key,
+WS TLS, Hysteria2, AnyTLS, and NaiveProxy can use managed certificates, an imported full certificate chain and private key,
 or DNS-01. Private keys and DNS credentials must be regular files readable only by their owner.
 Subscription publishing still requires Xray, WS TLS, and managed TLS.
 The complete input is saved as root-owned `/etc/padm-docker/config/spec.json` with mode `0600`.
 Cancellation does not commit; failures restore the previous spec, certificates, and ACME state.
 The spec contains secrets and must not be printed or published.
+Select `9=Shadowsocks` after choosing sing-box for SS2022 multi-user AES-128.
+It publishes TCP and UDP on the same port for either address family and needs no TLS.
+Confirmation generates independent server/user keys; UUID is the shared traffic identity.
+`ss://` links percent-encode the combined password according to SIP002.
+Quota exhaustion removes the runtime inbound; lifting the quota restores the original keys.
 
 Use the menu's configuration editor or `padm-docker edit` to change public ports,
 server addresses, address families, node names, Reality targets/SNI, WS paths, or
@@ -163,6 +169,9 @@ validation before confirmation and commit. Unselected listeners, UUIDs, keys, to
 certificates, host integrations, and accumulated traffic remain unchanged.
 The menu can copy or delete an existing protocol listener by listener ID; the primary
 core must retain at least one listener. Reality can be copied to the other core.
+Hysteria2, AnyTLS, NaiveProxy, and Shadowsocks can only be copied within sing-box.
+Adding these protocol types to an existing deployment requires a complete v3 `configure` spec.
+Shadowsocks method, keys, UUID, and existing listener identity remain frozen during editing.
 Deleting the last secondary-core listener disables that core; existing listener ownership cannot change.
 Copies reuse the original credentials. Listeners with the same
 UUID share accumulated traffic and quota rather than creating separate users.
@@ -200,10 +209,13 @@ continue to accept v1/v2. Editing first verifies the original spec against the d
 then migrates only the private draft to v3 without changing managed state before confirmation.
 V3 records each listener's `core` and `core.secondary_type` (`null` for a single core),
 with up to 16 listeners across both cores. V2 remains single-core.
-Xray supports Reality/WS TLS; sing-box supports Reality.
+Xray supports Reality Vision/XHTTP/gRPC and WS TLS; sing-box supports Reality
+Vision/gRPC, Hysteria2, AnyTLS, NaiveProxy, and Shadowsocks.
 The wizard offers either primary-core order, with a Reality listener on the secondary core.
 Initial WS TLS on a secondary Xray core requires a complete v3 spec; existing Xray WS listeners can still be copied.
 Dual-core deployments currently require ordinary bridge networking and no host integrations.
+Single-core deployments containing Hysteria2, AnyTLS, NaiveProxy, or Shadowsocks
+also reject host integrations for now.
 Each listener keeps its `listener_id`;
 migration preserves `vless-reality` / `vless-ws`, while new listeners use `entry-*`.
 Each WS listener gets independent `websocket.backend_port` and `websocket.tls_port`
@@ -211,10 +223,12 @@ values without renumbering existing internal ports. Listener identities, public 
 and internal listeners in the same container network namespace must not conflict.
 For an existing managed deployment, `edit --spec` supports these listener changes
 through the same preview, validation, and confirmation flow.
-Deleting the last WS listener disables subscription publishing and sets the spec's
-`tls` to `null`, while retaining TLS/ACME files and the token.
+Deleting the last WS listener disables subscription publishing. The spec retains TLS
+while Hysteria2, AnyTLS, or NaiveProxy remains; otherwise it sets `tls` to `null`,
+while retaining TLS/ACME files and the token. Shadowsocks does not require TLS.
 Nginx-side rotation and managed core-side TLS foundations are implemented.
-New protocol types and full protocol management remain unavailable.
+Reality XHTTP/gRPC, Hysteria2, AnyTLS, NaiveProxy, and Shadowsocks basic listeners
+are implemented; remaining protocol types and full protocol management remain deferred.
 WS listeners managed by Fail2ban cannot yet be added, deleted,
 or assigned a different public port; those changes require coordinated firewall rules.
 3A.3 has passed local dual-core transaction, PTY, traffic, update/rollback, and Linux permission regressions. Real signed releases,

@@ -298,7 +298,7 @@ jq '.core.protocols[0].reality.target_host = "WWW.JAVA.COM"' "${REALITY_XRAY_SPE
 writeWebSocketSpec "${WS_SPEC}"
 jq --slurpfile reality "${REALITY_XRAY_SPEC}" '.core.protocols += $reality[0].core.protocols' \
     "${WS_SPEC}" >"${MIXED_WS_SPEC}"
-jq '.core.protocols[0].id = 30' "${REALITY_XRAY_SPEC}" >"${UNSUPPORTED_SPEC}"
+jq '.core.protocols[0].id = 31' "${REALITY_XRAY_SPEC}" >"${UNSUPPORTED_SPEC}"
 writeRealitySpec "${ROLLBACK_SPEC}" xray changed-after-failure 24444
 
 SUBSCRIPTION_UNIT_ROOT="${TEST_ROOT}/subscription-unit"
@@ -1129,7 +1129,7 @@ validateFeatureMatrix() {
           ($matrix.feature_matrix[$entry.value] | {status, profiles, network_mode, host_capabilities})) and
       all(["interactive-menu", "reality-target-management", "reality-parameter-management",
         "reality-coexistence", "core-upgrade-assessment"][]; $matrix.feature_matrix[.].status == "deferred") and
-      ([.protocols[] | select(.status == "supported") | .id] | sort) == [1, 2, 3, 4, 5, 21, 26] and
+      ([.protocols[] | select(.status == "supported") | .id] | sort) == [1, 2, 3, 4, 5, 21, 26, 30] and
       .feature_matrix.subscription.requires == {core: "xray", protocol_ids: [21], tls: true} and
       (.feature_matrix.subscription.profiles | sort) == ["core-xray", "nginx", "subscription"]
     ' "$1" >/dev/null 2>&1
@@ -1158,7 +1158,7 @@ del(.feature_matrix["reality-target-management"])
 .protocols[3].transport = "quic"
 .protocols[14].udp_support = "no"
 .protocols[0].management_status = "supported"
-(.protocols[] | select(.id == 30)) |= (.status = "supported" | .profiles = ["core-sing-box"])
+(.protocols[] | select(.id == 31)) |= (.status = "supported" | .profiles = ["core-sing-box"])
 .feature_matrix.subscription.requires.core = "sing-box"
 .feature_matrix.subscription.requires.protocol_ids = [1]
 .feature_matrix.subscription.requires.tls = false

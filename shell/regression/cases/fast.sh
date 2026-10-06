@@ -5944,6 +5944,10 @@ runDockerNaiveRegression() {
     bash "${PROJECT_ROOT}/docker/tests/naive.sh"
 }
 
+runDockerShadowsocksRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/shadowsocks.sh"
+}
+
 runDockerPermissionsRegression() {
     bash "${PROJECT_ROOT}/docker/tests/permissions.sh"
 }

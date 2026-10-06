@@ -125,7 +125,9 @@ dockerTrafficRender() {
         .inbounds |= map(if .users? != null then
           if .type == "naive" then .users |= map(select(enabled))
           else .users |= map(select(enabled) | .name = traffic_id) end
-          else . end) |
+          else . end |
+          # 空用户列表会让 SS2022 退化成服务器密钥单用户认证，超额直接撤销入站。
+          select(.type != "shadowsocks" or (.users | length) > 0)) |
         .experimental.v2ray_api.listen = "127.0.0.1:10087" |
         .experimental.v2ray_api.stats.enabled = true |
         .experimental.v2ray_api.stats.users = [$accounts[].account]

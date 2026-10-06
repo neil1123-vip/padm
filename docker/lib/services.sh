@@ -63,6 +63,7 @@ dockerConfigureSpecValidate() {
       def protocol_base: (.server | server) and (.public_port | port) and
         (.address_families | families) and (.name | name) and (.uuid | uuid);
       def listener_id: type == "string" and test("^entry-[a-z0-9][a-z0-9-]{0,47}$");
+      def ss_key: type == "string" and length == 24 and test("^[A-Za-z0-9+/]{21}[AQgw]==$");
       def bandwidth: type == "number" and floor == . and . >= 1 and . <= 1000000;
       def masquerade: type == "string" and length <= 2048 and
         (. == "" or (test("^https://(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z]{2,63}(?:/[A-Za-z0-9._~/-]*)?$") and
@@ -147,6 +148,12 @@ dockerConfigureSpecValidate() {
           (.naive | exact(["domain"]) and
             (.domain | hostname and (explode | all(. > 32 and . != 127)))) and
           .server == .naive.domain
+        elif .id == 30 then
+          $request.schema_version == 3 and .core == "sing-box" and
+          exact(["id", "core", "listener_id", "server", "public_port", "address_families", "name", "uuid", "shadowsocks"]) and
+          (.shadowsocks | exact(["method", "server_password", "user_password"]) and
+            .method == "2022-blake3-aes-128-gcm" and
+            (.server_password | ss_key) and (.user_password | ss_key))
         elif .id == 21 then
           exact(["id", "server", "public_port", "address_families", "name", "uuid", "websocket"] +
             if $request.schema_version >= 2 then ["listener_id"] else [] end +
@@ -213,7 +220,7 @@ dockerConfigureSpecValidate() {
         .tls == null and .subscription.enabled == false
       end and
       if .subscription.enabled then any(.core.protocols[]; .id == 21) else true end and
-      if any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5) then .host_integrations == [] else true end and
+      if any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 30) then .host_integrations == [] else true end and
       if any(.host_integrations[]; .type == "fail2ban") then
         any(.core.protocols[]; .id == 21) and
         all(.host_integrations[] | select(.type == "fail2ban") | .settings.ports[];
@@ -302,10 +309,12 @@ dockerManagedSpecMatchesDeployment() {
       (.host_integrations | sort_by(.type)) == ($d.host_integrations | sort_by(.type)) and
       ([.core.protocols[].id] | unique) == ($d.core.protocol_ids | sort) and
       (if .schema_version >= 2 then
-        [.core.protocols[] | {listener_id, service: (if .id == 21 then "nginx" else (.core // $d.core.type) end),
+        [.core.protocols[] |
+          (if .id == 30 then "tcp", "udp" elif .id == 3 then "udp" else "tcp" end) as $transport |
+          {listener_id, service: (if .id == 21 then "nginx" else (.core // $d.core.type) end),
           public_port, container_port: (if .id == 21 then .websocket.tls_port else .public_port end),
-          transport: (if .id == 3 then "udp" else "tcp" end), address_families}] | sort_by(.listener_id) as $expected |
-        $expected == ([$d.listeners[] | select(.listener_id | startswith("host-") | not)] | sort_by(.listener_id))
+          transport: $transport, address_families}] | sort_by(.listener_id, .transport) as $expected |
+        $expected == ([$d.listeners[] | select(.listener_id | startswith("host-") | not)] | sort_by(.listener_id, .transport))
        else true end) and
       all(.images | to_entries[];
         (.value | split("@") | last) == $d.images[.key].index_digest)
@@ -615,7 +624,9 @@ dockerConfigurePortsAvailable() {
         fi
     done < <(
         jq -r '
-          ([.core.protocols[] | "\(.public_port)|\(if .id == 3 then "udp" else "tcp" end)"] +
+          ([.core.protocols[] |
+              (if .id == 30 then "tcp", "udp" elif .id == 3 then "udp" else "tcp" end) as $transport |
+              "\(.public_port)|\($transport)"] +
           [.host_integrations[] | select(.type == "tproxy") |
             "\(.settings.port)|tcp", "\(.settings.port)|udp"]) | unique[]
         ' "${specFile}"
@@ -888,6 +899,15 @@ dockerGenerateSingBoxConfig() {
               key_path: "/etc/padm/secrets/tls/\(.naive.domain).key"
             }
           }
+          elif .id == 30 then {
+            type: "shadowsocks",
+            tag: .listener_id,
+            listen: "::",
+            listen_port: .public_port,
+            method: .shadowsocks.method,
+            password: .shadowsocks.server_password,
+            users: [{name: .uuid, password: .shadowsocks.user_password}]
+          }
           else {
             type: "vless",
             tag: (.listener_id // "vless-reality"),
@@ -1035,6 +1055,9 @@ dockerGenerateSubscription() {
         "anytls://\(.uuid | @uri)@\(.server | authority):\(.public_port)?security=tls&sni=\(.anytls.domain | @uri)#\(.name | @uri)"
       elif .id == 5 then
         "naive+https://\(.uuid | @uri):\(.uuid | @uri)@\(.server | authority):\(.public_port)?padding=true#\(.name | @uri)"
+      elif .id == 30 then
+        # SIP002 的 AEAD-2022 凭据必须分别百分号编码，不整段 Base64。
+        "ss://\(.shadowsocks.method | @uri):\((.shadowsocks.server_password + ":" + .shadowsocks.user_password) | @uri)@\(.server | authority):\(.public_port)#\(.name | @uri)"
       elif .id == 21 then
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&security=tls&sni=\(.websocket.domain | @uri)&type=ws&host=\(.websocket.domain | @uri)&path=\("/" + .websocket.path + "ws" | @uri)#\(.name | @uri)"
       else empty end
@@ -1099,12 +1122,12 @@ dockerGenerateCompose() {
       }];
       def ports($protocol; $containerPort): [
         $protocol.address_families[] |
-        (if $protocol.id == 3 then "udp" else "tcp" end) as $transport |
+        (if $protocol.id == 30 then "tcp", "udp" elif $protocol.id == 3 then "udp" else "tcp" end) as $transport |
         if . == "ipv4" then "0.0.0.0:\($protocol.public_port):\($containerPort)/\($transport)"
         else "[::]:\($protocol.public_port):\($containerPort)/\($transport)" end
       ];
       [$r.core.type, $r.core.secondary_type] | map(select(. != null)) as $cores |
-      ($r.core.protocols | map(select(.id == 1 or .id == 2 or .id == 3 or .id == 4 or .id == 5 or .id == 26))) as $direct |
+      ($r.core.protocols | map(select(.id == 1 or .id == 2 or .id == 3 or .id == 4 or .id == 5 or .id == 26 or .id == 30))) as $direct |
       ($r.core.protocols | map(select(.id == 21))) as $websocket |
       ($r.host_integrations | map(select(.type == "wireguard"))) as $wireguard |
       ($r.host_integrations | map(select(.type == "fail2ban"))) as $fail2ban |
@@ -1318,11 +1341,12 @@ dockerGenerateDeployment() {
         listeners: (
           [
           $r.core.protocols[] |
+          (if .id == 30 then "tcp", "udp" elif .id == 3 then "udp" else "tcp" end) as $transport |
           ({
             service: (if .id == 21 then "nginx" else (.core // $r.core.type) end),
             public_port: .public_port,
             container_port: (if .id == 21 then (.websocket.tls_port // 8443) else .public_port end),
-            transport: (if .id == 3 then "udp" else "tcp" end),
+            transport: $transport,
             address_families: .address_families
           } + if $r.schema_version >= 2 then {listener_id: .listener_id} else {} end)
           ] + [
@@ -1377,7 +1401,7 @@ dockerDeploymentFileValidate() {
           (.container_port | type == "number" and floor == . and . >= 1 and . <= 65535) and
           (.transport == "tcp" or .transport == "udp")) and
         (if any(.[]; has("listener_id")) then
-          ([.[].listener_id] | unique | length) == length and
+          ([.[] | [.listener_id, .transport]] | unique | length) == length and
           all(.[]; .listener_id | type == "string" and
             test("^(entry-[a-z0-9][a-z0-9-]{0,47}|vless-reality|vless-ws|host-wireguard|host-tproxy-tcp|host-tproxy-udp)$"))
          else true end)) and

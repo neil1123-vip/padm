@@ -143,6 +143,21 @@ run)
         bytes=${!#}
         [[ "${bytes}" =~ ^[0-9]+$ ]] || exit 1
         printf '%*s\n' "$((bytes * 2))" '' | tr ' ' a
+    elif [[ " $* " == *' generate rand --base64 16 '* ]]; then
+        [[ " $* " == *'padm-sing-box:'* ]] || exit 1
+        # 两次工具调用分别返回独立的 16 字节密钥；失败不能留下半份首配。
+        keyCount=$(grep -c ' generate rand --base64 16$' "${FAKE_SETUP_EVENTS}")
+        if (( keyCount % 2 == 1 )); then
+            [[ "${mode}" != ss-server-key-fail ]] || exit 1
+            if [[ "${mode}" == ss-malformed-key ]]; then
+                printf 'MDEyMzQ1Njc4OWFiY2RlZh==\n'
+            else
+                printf 'MDEyMzQ1Njc4OWFiY2RlZg==\n'
+            fi
+        else
+            [[ "${mode}" != ss-user-key-fail ]] || exit 1
+            printf 'ZmVkY2JhOTg3NjU0MzIxMA==\n'
+        fi
     elif [[ " $* " == *' --entrypoint python3 '* && " $* " != *'/opt/acme/acme.sh'* ]]; then
         if [[ " $* " == *'private_key = base64.b64decode'* ]]; then
             IFS= read -r privateKey || exit 1
@@ -321,7 +336,8 @@ assertNoSecrets() {
     local secret
     for secret in AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA \
         aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-        hy2-obfs-private-1234; do
+        hy2-obfs-private-1234 MDEyMzQ1Njc4OWFiY2RlZg== ZmVkY2JhOTg3NjU0MzIxMA== \
+        MDEyMzQ1Njc4OWFiY2RlZh==; do
         ! grep -Fq "${secret}" "${CONTROL_LOG}" || fail 'setup printed a secret'
         ! grep -Fq "${secret}" "${ARGV_LOG}" || fail 'setup passed a secret through process arguments'
     done
@@ -589,6 +605,136 @@ runPty 11 dual-port-conflict "${DUAL_XRAY_INPUT/24445/24443}" setup "${ASSET_ARG
 [[ "$(snapshot)" == "${before}" && ! -s "${EVENTS}" && ! -s "${VERIFY_LOG}" ]] ||
     fail 'dual-core conflicting ports reached confirmation, signature verification or generation'
 
+# Shadowsocks 首配不读取 TLS 或订阅参数，仅在确认后生成两份独立密码。
+SS_INPUT=$'2\n9\nproxy.example.com\n3\n24459\ny\n'
+DUAL_SS_INPUT=$'4\n9\nproxy.example.com\n3\ntarget.example.com\n443\ntarget.example.com\n24445\n24459\ny\n'
+for ssCase in ss-default dual-ss; do
+    newState "${ssCase}"
+    if [[ "${ssCase}" == ss-default ]]; then input=${SS_INPUT}; single=true; else input=${DUAL_SS_INPUT}; single=false; fi
+    before=$(snapshot)
+    runPty 0 "${ssCase}-cancel" "${input%$'y\n'}"$'n\n' setup "${ASSET_ARGS[@]}"
+    [[ "$(snapshot)" == "${before}" && ! -s "${EVENTS}" && ! -s "${VERIFY_LOG}" ]] ||
+        fail "${ssCase}: cancellation reached key generation or deployment writes"
+    runPty 0 "${ssCase}" "${input}" setup "${ASSET_ARGS[@]}"
+    [[ "$(grep -c ' generate rand --base64 16$' "${EVENTS}")" -eq 2 ]] ||
+        fail "${ssCase}: setup did not generate two independent passwords"
+    ! grep -Eq 'TLS 域名|证书 \[|启用 HTTPS 订阅|拥塞模式|Salamander' "${CONTROL_LOG}" ||
+        fail "${ssCase}: setup collected unrelated TLS or Hysteria2 inputs"
+    SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+    jq -e --argjson single "${single}" '
+      .schema_version == 3 and .core.type == "sing-box" and .tls == null and
+      (.subscription.enabled | not) and .host_integrations == [] and
+      (.core.protocols[0] | .id == 30 and .core == "sing-box" and
+        .listener_id == "entry-shadowsocks" and .name == "main-shadowsocks" and
+        .server == "proxy.example.com" and .public_port == 24459 and
+        .address_families == ["ipv4","ipv6"] and
+        .uuid == "11111111-1111-4111-8111-111111111111" and
+        .reality == null and .shadowsocks.method == "2022-blake3-aes-128-gcm" and
+        (.shadowsocks.server_password | test("^[A-Za-z0-9+/]{21}[AQgw]==$")) and
+        (.shadowsocks.user_password | test("^[A-Za-z0-9+/]{21}[AQgw]==$")) and
+        .shadowsocks.server_password != .shadowsocks.user_password) and
+      if $single then .core.secondary_type == null and (.core.protocols | length) == 1
+      else .core.secondary_type == "xray" and (.core.protocols | length) == 2 and
+        (.core.protocols[1] | .id == 1 and .core == "xray" and .public_port == 24445 and
+          .listener_id == "entry-secondary-reality" and (.reality.private_key | length) == 43) and
+        .core.protocols[0].uuid == .core.protocols[1].uuid end
+    ' "${SPEC}" >/dev/null || fail "${ssCase}: setup lost Shadowsocks credentials or core ownership"
+    [[ "$(jq -r '.core.protocols[0].shadowsocks.server_password' "${SPEC}")" == MDEyMzQ1Njc4OWFiY2RlZg== &&
+        "$(jq -r '.core.protocols[0].shadowsocks.user_password' "${SPEC}")" == ZmVkY2JhOTg3NjU0MzIxMA== ]] ||
+        fail "${ssCase}: setup changed generated password bytes"
+    jq -e --slurpfile spec "${SPEC}" '
+      $spec[0].core.protocols[0] as $p | [.inbounds[] | select(.type == "shadowsocks")] |
+      length == 1 and all(.[];
+        .method == $p.shadowsocks.method and .password == $p.shadowsocks.server_password and
+        .users == [{name: $p.uuid, password: $p.shadowsocks.user_password}] and
+        .network == null and .tls == null)
+    ' "${PADM_DOCKER_INSTALL_DIR}/config/sing-box/config.json" >/dev/null ||
+        fail "${ssCase}: runtime lost the password, statistics identity or TCP/UDP default"
+    jq -e '.services["sing-box"].ports | sort ==
+      ["0.0.0.0:24459:24459/tcp", "0.0.0.0:24459:24459/udp",
+       "[::]:24459:24459/tcp", "[::]:24459:24459/udp"]' "${PADM_DOCKER_INSTALL_DIR}/compose.json" >/dev/null ||
+        fail "${ssCase}: setup did not publish TCP and UDP for both address families"
+    if [[ "${single}" == true ]]; then
+        ! grep -Eq ' x25519( |$)|derived-stdin' "${EVENTS}" ||
+            fail 'Shadowsocks-only setup generated unused Reality keys'
+        ! grep -Fq 'Reality 目标' "${CONTROL_LOG}" || fail 'Shadowsocks-only setup collected a Reality target'
+    fi
+    CONTROL_LOG="${TEST_ROOT}/${ssCase}-list.log"
+    bash -u "${CLI}" protocol list >"${CONTROL_LOG}" 2>&1 || fail "${ssCase}: protocol list failed"
+    grep -Fq Shadowsocks "${CONTROL_LOG}" || fail "${ssCase}: protocol list mislabeled Shadowsocks"
+    assertNoSecrets
+done
+for ssFailure in ss-server-key-fail ss-user-key-fail ss-malformed-key; do
+    newState "${ssFailure}"
+    export FAKE_SETUP_MODE="${ssFailure}"
+    runPty 15 "${ssFailure}" "${SS_INPUT}" setup "${ASSET_ARGS[@]}"
+    assertUnconfigured
+    unset FAKE_SETUP_MODE
+done
+newState ss-dual-port-conflict
+before=$(snapshot)
+runPty 11 ss-dual-port-conflict "${DUAL_SS_INPUT/24459/24445}" setup "${ASSET_ARGS[@]}"
+[[ "$(snapshot)" == "${before}" && ! -s "${EVENTS}" && ! -s "${VERIFY_LOG}" ]] ||
+    fail 'Shadowsocks dual-core port conflict reached generation or deployment writes'
+
+# 通用编辑、复制和删除不重写 Shadowsocks 方法、密码、统计身份或核心。
+export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-ss-default"
+export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-ss-default"
+CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
+SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+cp -- "${SPEC}" "${TEST_ROOT}/ss-original.json"
+before=$(snapshot)
+runPty 0 ss-edit-cancel $'1\n30\n0\n' edit "${ASSET_ARGS[@]}"
+[[ "$(snapshot)" == "${before}" ]] || fail 'cancelling a Shadowsocks edit changed deployment'
+runPty 0 ss-edit $'1\n30\n24460\n2\n30\nnext.example.com\n3\n30\n2\n4\n30\nnext-shadowsocks\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e --slurpfile before "${TEST_ROOT}/ss-original.json" '
+  .tls == null and .subscription == $before[0].subscription and
+  (.core.protocols[0] | del(.public_port, .server, .address_families, .name)) ==
+    ($before[0].core.protocols[0] | del(.public_port, .server, .address_families, .name)) and
+  (.core.protocols[0] | .public_port == 24460 and .server == "next.example.com" and
+    .address_families == ["ipv6"] and .name == "next-shadowsocks")
+' "${SPEC}" >/dev/null || fail 'Shadowsocks editing changed identity or did not apply selected values'
+runPty 0 ss-copy $'9\n30\n2\n24461\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.core.protocols[0] as $first | .core.protocols[1] as $copy |
+  $copy.listener_id == "entry-1" and $copy.public_port == 24461 and
+  ($copy | del(.listener_id, .public_port)) == ($first | del(.listener_id, .public_port))
+' "${SPEC}" >/dev/null || fail 'Shadowsocks copy lost passwords, account or core'
+before=$(snapshot)
+runPty 15 ss-copy-xray $'9\nentry-shadowsocks\n1\n' edit "${ASSET_ARGS[@]}"
+[[ "$(snapshot)" == "${before}" ]] || fail 'copying Shadowsocks to Xray changed deployment'
+for rejectedEdit in uuid method server-password user-password core listener new-account new-naive; do
+    case "${rejectedEdit}" in
+    uuid) filter='.core.protocols[0].uuid = "22222222-2222-4222-8222-222222222222"' ;;
+    method) filter='.core.protocols[0].shadowsocks.method = "2022-blake3-aes-256-gcm"' ;;
+    server-password) filter='.core.protocols[0].shadowsocks.server_password = ("A" * 22 + "==")' ;;
+    user-password) filter='.core.protocols[0].shadowsocks.user_password = ("A" * 22 + "==")' ;;
+    core) filter='.core.protocols[0].core = "xray" | .core.secondary_type = "xray"' ;;
+    listener) filter='.core.protocols[0].listener_id = "entry-renamed"' ;;
+    new-account) filter='.core.protocols += [.core.protocols[0] | .listener_id = "entry-3" |
+        .public_port = 24462 | .uuid = "22222222-2222-4222-8222-222222222222"]' ;;
+    new-naive) filter='.tls = {domain: "naive.example.com"} |
+        .core.protocols += [.core.protocols[0] | .listener_id = "entry-3" | .public_port = 24462 |
+          .id = 5 | .server = "naive.example.com" | .naive = {domain: "naive.example.com"} | del(.shadowsocks)]' ;;
+    esac
+    jq "${filter}" "${SPEC}" >"${TEST_ROOT}/ss-rejected.json"
+    chmod 0600 "${TEST_ROOT}/ss-rejected.json"
+    CONTROL_LOG="${TEST_ROOT}/ss-rejected-${rejectedEdit}.log"
+    actual=0
+    bash -u "${CLI}" edit --spec "${TEST_ROOT}/ss-rejected.json" --preview "${ASSET_ARGS[@]}" \
+        >"${CONTROL_LOG}" 2>&1 || actual=$?
+    [[ "${actual}" -eq 15 && "$(snapshot)" == "${before}" ]] ||
+        fail "${rejectedEdit}: Shadowsocks edit bypassed the identity boundary"
+    assertClean
+    assertNoSecrets
+done
+runPty 0 ss-delete-copy $'10\nentry-1\n8\ny\n' edit "${ASSET_ARGS[@]}"
+jq -e '.tls == null and (.core.protocols | length) == 1 and
+  .core.protocols[0].listener_id == "entry-shadowsocks"' "${SPEC}" >/dev/null ||
+    fail 'deleting a Shadowsocks copy changed the original entry or TLS state'
+before=$(snapshot)
+runPty 15 ss-delete-last-primary $'10\nentry-shadowsocks\n' edit "${ASSET_ARGS[@]}"
+[[ "$(snapshot)" == "${before}" ]] || fail 'deleting the final primary Shadowsocks entry changed deployment'
+
 printf 'fake-cert\n' >"${TEST_ROOT}/cert.pem"
 printf 'fake-key\n' >"${TEST_ROOT}/key.pem"
 chmod 0600 "${TEST_ROOT}/key.pem"
@@ -719,7 +865,7 @@ runPty 15 naive-copy-xray $'9\nentry-naive\n1\n' edit "${ASSET_ARGS[@]}"
 runPty 15 naive-edit-server $'2\nentry-naive\nnext.example.com\n' edit "${ASSET_ARGS[@]}"
 [[ "$(snapshot)" == "${before}" ]] || fail 'changing NaiveProxy server away from its TLS domain changed deployment'
 ! grep -Fq '配置差异' "${CONTROL_LOG}" || fail 'NaiveProxy server mismatch reached confirmation preview'
-for rejectedEdit in uuid domain core listener server new-account new-anytls; do
+for rejectedEdit in uuid domain core listener server new-account new-anytls new-shadowsocks; do
     case "${rejectedEdit}" in
     uuid) filter='.core.protocols[0].uuid = "22222222-2222-4222-8222-222222222222"' ;;
     domain) filter='.tls.domain = "next.example.com" |
@@ -731,8 +877,10 @@ for rejectedEdit in uuid domain core listener server new-account new-anytls; do
         .public_port = 24458 | .uuid = "22222222-2222-4222-8222-222222222222"]' ;;
     new-anytls) filter='.core.protocols += [.core.protocols[0] | .listener_id = "entry-3" |
         .public_port = 24458 | .id = 4 | .anytls = {domain: .naive.domain} | del(.naive)]' ;;
+    new-shadowsocks) filter='.core.protocols += [$ss[0].core.protocols[0] |
+        .listener_id = "entry-3" | .public_port = 24463]' ;;
     esac
-    jq "${filter}" "${SPEC}" >"${TEST_ROOT}/naive-rejected.json"
+    jq --slurpfile ss "${TEST_ROOT}/ss-original.json" "${filter}" "${SPEC}" >"${TEST_ROOT}/naive-rejected.json"
     chmod 0600 "${TEST_ROOT}/naive-rejected.json"
     CONTROL_LOG="${TEST_ROOT}/naive-rejected-${rejectedEdit}.log"
     actual=0
@@ -903,12 +1051,13 @@ for rejectedEdit in uuid domain core listener new-account new-anytls new-naive; 
     assertNoSecrets
 done
 
-# 同一 TLS 的入口删除顺序不得误删 NaiveProxy 的证书关系或继续发布订阅。
+# TLS 入口删除不得误删仍需证书的入口；最后保留 Shadowsocks 时仍清除无用 TLS 关系。
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-dual-hy2"
 export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-dual-hy2"
 CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
 SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
-jq '.core.protocols += [
+jq --slurpfile ss "${TEST_ROOT}/ss-original.json" '.core.protocols += [
+  $ss[0].core.protocols[0],
   (.core.protocols[1] | .core = "sing-box" | .listener_id = "entry-sing-reality" | .public_port = 24446),
   {id: 4, core: "sing-box", listener_id: "entry-anytls", server: "proxy.example.com", public_port: 24451,
    address_families: ["ipv4","ipv6"], name: "main-anytls", uuid: .core.protocols[0].uuid,
@@ -938,8 +1087,9 @@ jq -e '.tls.domain == "hy2.example.com" and (.subscription.enabled | not) and
     fail 'deleting AnyTLS removed the remaining NaiveProxy TLS reference'
 runPty 0 naive-delete-last-tls $'10\nentry-naive\n8\ny\n' edit "${ASSET_ARGS[@]}"
 jq -e '.tls == null and (.subscription.enabled | not) and
+  any(.core.protocols[]; .id == 30) and
   all(.core.protocols[]; .id != 3 and .id != 4 and .id != 5 and .id != 21)' "${SPEC}" >/dev/null ||
-    fail 'deleting the last TLS protocol retained its deployment TLS reference'
+    fail 'deleting the last TLS protocol removed Shadowsocks or retained its TLS reference'
 
 printf -v WS_INPUT '1\n2\nproxy.example.com\n1\nws.example.com\n24444\n2\n%s\n%s\ny\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"

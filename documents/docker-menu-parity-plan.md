@@ -16,13 +16,13 @@
 | --- | --- | --- |
 | 1. 功能矩阵 | 已完成，提交 `7fe6a9e` | 协议与功能边界、管理状态、合同回归 |
 | 2. 菜单与可信首次配置 | 2A–2C 已实现；本地 PTY、事务和 Linux 权限通过，真实发布/连通待验 | 安装后进入菜单、独立命令生命周期、无需手填镜像的首次配置 |
-| 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2–3C.5 Reality/Hysteria2/AnyTLS/NaiveProxy 基础入口已通过本地与 amd64 传输验收 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
+| 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2–3C.6 Reality/Hysteria2/AnyTLS/NaiveProxy/Shadowsocks 基础入口已通过本地与 amd64 传输验收 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
 | 4. 用户、订阅与服务维护 | 未开始 | 本机用户业务、多服务器后端、分范围备份恢复、核心运维 |
 | 5. 站点、路由与宿主集成 | 未开始 | 站点管理、内部能力、规则所有权及可撤销宿主操作 |
 | 6. 发布与完整验收 | 未开始 | 迁移文档、真实 Linux 与双架构证据、受门禁保护的 Release |
 
 当前机器可读支持状态以
-[`features.json`](../docker/contracts/features.json)为准：协议 `1`、`2`、`3`、`4`、`5`、`21`、`26` 的初始
+[`features.json`](../docker/contracts/features.json)为准：协议 `1`、`2`、`3`、`4`、`5`、`21`、`26`、`30` 的初始
 配置运行已支持，协议管理工作流仍为 `deferred`。发布订阅要求 Xray、协议 `21`
 和受管 TLS；不能由“可以生成链接”推断任意核心已经支持 HTTPS 订阅发布。
 第一步的回归使用模拟 Docker，不能代替真实容器、SSH 终端和客户端连通验证。
@@ -616,6 +616,56 @@ bash docker/tests/naive-real.sh \
 隔离 CA 不证明生产证书、指纹或公网连通；第三方导入 UI、公网入口、原生 arm64、
 真实 DNS、整机重启及可信发布仍待验，3B.4/其余 3C/3D/4A/5C 不能标完成。
 
+#### 3C.6 Shadowsocks 基础入口
+
+新增协议 `30`，仅接受 sing-box v3，固定 SS2022 `2022-blake3-aes-128-gcm` 多用户模式。
+首配选项 `9` 确认后由可信 sing-box 镜像分别生成 16 字节服务器/用户密钥；
+canonical Base64 严格校验，秘密经私密文件传入，不出现在 stdout 或进程参数。
+单协议不收集 TLS、订阅或 Reality 参数；副 Xray Reality 复用既有首配输入。
+无需 TLS/Nginx，同端口发布 TCP/UDP 双栈；部署以相同入口 ID 的两条传输记录表示，
+唯一性按 `(listener_id, transport)` 检查，端口占用与归属分别检查 TCP/UDP。
+首配、完整规格导入、通用字段编辑、同核复制与删除、精确 SIP002 链接均已接入。
+已有部署新增类型须完整 `configure` 规格；方法、两密钥、UUID、核心和入口身份冻结。
+本地 URI 不依赖发布开关；HTTPS 发布仍要求 Xray WS TLS，包含 SS 时暂拒绝宿主集成。
+UUID 复用现有流量/额度；超额撤销运行入站，避免空 `users` 回落为服务器密钥单用户认证，
+解除额度后从保留的 `users.base` 恢复原密钥和监听，不增加假用户或另一套路由状态。
+SS 保留时删除最后 TLS 消费者仍清空规格 TLS 引用，受管证书文件不删除。
+配置运行状态为 `supported`，完整 `management_status` 继续 `deferred`。
+
+本地验收：Linux 固定源码快照、`--init` 工具容器，
+`shadowsocks.sh` 前台 `51.342` 秒一次包含 Naive/AnyTLS/Hysteria2/Reality/旧协议基线；
+首配/编辑 PTY `126.908` 秒、`phase3` `132.945` 秒、流量 `5.139` 秒通过。
+覆盖严格合同、canonical 密钥、v1/v2/旧 bundle 拒绝、三拓扑、四端口映射、
+双传输监听及漂移、URI/脱敏/无秘密 argv、共享额度、失败事务和更新/回滚。
+Bash、ShellCheck、JSON、Draft 2020-12 Schema 的 6 正例/30 反例通过。
+固定 sing-box 镜像的 `generate rand --base64 16` 现场校验为 canonical 16 字节；
+两项独立只读审阅无可操作发现，真实发布验签仍不是本轮工具命令验收范围。
+信号敏感测试须前台执行；后台 shell `&` 会继承忽略 INT，不计为有效信号验收。
+CI 改为 `shadowsocks.sh` 根入口，新增 `docker-shadowsocks` selector，不重复跑旧套件。
+
+真实 amd64 `36.975` 秒通过，沿用 3C.2 的固定 Xray/sing-box/ops 镜像。
+客户端只从 `protocol links` 解析认证和 authority，IPv4/IPv6 TCP HTTP 与 UDP echo proof 通过；
+仅服务器密钥认证均拒绝，UUID 上/下行计数 `196/356` 均为正。
+超额后同客户端的新 TCP/UDP 请求全部拒绝且源站计数不增，解除后恢复原密钥与传输；
+生产权限、cap drop、只读根、init、健康检查保持，未发布宿主端口。
+第 4 参数为本机具备 HTTP/2 curl 的临时工具镜像，本轮 ID
+`sha256:3867ffeba00503d755dd5765db41981993b645d83bb9e157f01d4c8ee624b738`。
+工具镜像只用于验收，不替换业务镜像；容器、网络、卷和临时工具在验收后清理。
+复现时先准备工具镜像，再运行：
+
+```bash
+bash docker/tests/shadowsocks.sh
+bash docker/tests/shadowsocks-real.sh \
+  padm-local/padm-xray:tls-3b4 \
+  padm-local/padm-sing-box:tls-3b4 \
+  padm-local/padm-ops:tls-3b4 \
+  local-http2-curl:test
+```
+
+未验公网 TCP/UDP 宿主入口、第三方导入 UI、保持打开的既有会话、原生 arm64、
+真实 DNS/整机重启或可信发布；凭据轮换与用户 CRUD 未开放。
+3B.4、其余 3C、3D、4A、5C 仍待完成，下个普通协议为 `31` TUIC。
+
 ### 3D. 协议管理与入口维护
 
 - Reality：目标检测/扫描、候选库、黑名单、PQC 状态、参数重生成；
@@ -773,7 +823,7 @@ Fail2ban 1.1.0），只读挂载当前生成配置及入口，未重建或发布
 | `network-optimization`、`vless-encryption` | 5C 独立宿主/实验子项；未验收仍不支持 |
 
 新增能力提交时同步更新文档、配置合同、生成器/Compose、控制入口及证据。
-[`phase3.sh`](../docker/tests/phase3.sh)当前固定 `supported` 协议为 `[1, 2, 21, 26]`，
+[`phase3.sh`](../docker/tests/phase3.sh)当前固定 `supported` 协议为 `[1, 2, 3, 4, 5, 21, 26, 30]`，
 并要求菜单和管理差距为 `deferred`；后续按真实交付更新这些基线断言，
 保留协议注册表、核心/profile、网络权限和前置条件的一致性检查。
 不得只删除断言或只修改 `features.json` 来宣称完成。

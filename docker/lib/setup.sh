@@ -81,13 +81,14 @@ dockerSetupGenerateSpec() {
     local core=$1 protocols=$2 server=$3 families=$4 realityPort=$5 target=$6 targetPort=$7 sni=$8
     local domain=$9 wsPort=${10} subscription=${11} output=${12} secondaryCore=${13:-} secondaryPort=${14:-8444}
     local hy2Mode=${15:-bbr} hy2Up=${16:-100} hy2Down=${17:-50} hy2Obfs=${18:-false} hy2Masquerade=${19:-}
-    local xrayImage opsImage uuid token shortId= privateKey= publicKey= keyPair derivedPair derivedPublic wsPath= inputsFile obfsPassword=
+    local xrayImage opsImage singBoxImage uuid token shortId= privateKey= publicKey= keyPair derivedPair derivedPublic wsPath= inputsFile obfsPassword=
+    local serverPassword= userPassword=
     xrayImage=$(dockerManifestImageReference xray) || return 1
     opsImage=$(dockerManifestImageReference ops) || return 1
     uuid=$(dockerSetupTool "${xrayImage}" uuid 2>/dev/null) || return 1
     [[ "${uuid}" =~ ^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$ ]] || return 1
     token=$(dockerSetupRandomHex "${opsImage}" 32) || return 1
-    if [[ ( "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 ) || -n "${secondaryCore}" ]]; then
+    if [[ ( "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 && "${protocols}" != 9 ) || -n "${secondaryCore}" ]]; then
         keyPair=$(dockerSetupTool "${xrayImage}" x25519 2>/dev/null) || return 1
         privateKey=$(awk '/^PrivateKey:/ { print $2; exit }' <<<"${keyPair}")
         publicKey=$(awk '/^Password \(PublicKey\):/ { print $3; exit } /^PublicKey:/ { print $2; exit }' <<<"${keyPair}")
@@ -104,12 +105,19 @@ dockerSetupGenerateSpec() {
     if [[ "${protocols}" == 6 && "${hy2Obfs}" == true ]]; then
         obfsPassword=$(dockerSetupRandomHex "${opsImage}" 16) || return 1
     fi
+    if [[ "${protocols}" == 9 ]]; then
+        singBoxImage=$(dockerManifestImageReference sing-box) || return 1
+        serverPassword=$(dockerSetupTool "${singBoxImage}" generate rand --base64 16 2>/dev/null) || return 1
+        userPassword=$(dockerSetupTool "${singBoxImage}" generate rand --base64 16 2>/dev/null) || return 1
+        [[ "${serverPassword}" =~ ^[A-Za-z0-9+/]{21}[AQgw]==$ &&
+            "${userPassword}" =~ ^[A-Za-z0-9+/]{21}[AQgw]==$ ]] || return 1
+    fi
     inputsFile="${output}.credentials"
     # 秘密只经私密文件交给 jq，不放进宿主进程参数或 Docker Cmd。
     (
         umask 077
-        printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n' "${uuid}" "${privateKey}" "${publicKey}" \
-            "${shortId}" "${wsPath}" "${token}" "${obfsPassword}" >"${inputsFile}"
+        printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' "${uuid}" "${privateKey}" "${publicKey}" \
+            "${shortId}" "${wsPath}" "${token}" "${obfsPassword}" "${serverPassword}" "${userPassword}" >"${inputsFile}"
     ) || return 1
     dockerManifestConfigurationInputs | jq \
         --arg core "${core}" --argjson protocols "${protocols}" --arg server "${server}" \
@@ -123,10 +131,10 @@ dockerSetupGenerateSpec() {
       ($credentials | split("\n")) as $secrets |
       $secrets[0] as $uuid | $secrets[1] as $privateKey | $secrets[2] as $publicKey |
       $secrets[3] as $shortId | $secrets[4] as $wsPath | $secrets[5] as $token |
-      $secrets[6] as $obfsPassword |
+      $secrets[6] as $obfsPassword | $secrets[7] as $serverPassword | $secrets[8] as $userPassword |
       . + {schema_version: 3, core: {type: $core,
         secondary_type: (if $secondaryCore == "" then null else $secondaryCore end), protocols: [
-        (if $protocols != 2 and $protocols != 6 and $protocols != 7 and $protocols != 8 then {
+        (if $protocols != 2 and $protocols != 6 and $protocols != 7 and $protocols != 8 and $protocols != 9 then {
           id: (if $protocols == 4 then 2 elif $protocols == 5 then 26 else 1 end),
           core: $core, server: $server, public_port: $realityPort, address_families: $families,
           listener_id: (if $protocols == 4 then "entry-reality-xhttp"
@@ -156,6 +164,12 @@ dockerSetupGenerateSpec() {
           name: (if $protocols == 7 then "main-anytls" else "main-naive" end), uuid: $uuid
         } + (if $protocols == 7 then {anytls: {domain: $domain}} else {naive: {domain: $domain}} end)
         else empty end),
+        (if $protocols == 9 then {
+          id: 30, core: $core, server: $server, public_port: $wsPort, address_families: $families,
+          listener_id: "entry-shadowsocks", name: "main-shadowsocks", uuid: $uuid,
+          shadowsocks: {method: "2022-blake3-aes-128-gcm",
+            server_password: $serverPassword, user_password: $userPassword}
+        } else empty end),
         (if $secondaryCore != "" then {
           id: 1, core: $secondaryCore, server: $server, public_port: $secondaryPort, address_families: $families,
           listener_id: "entry-secondary-reality", name: "secondary-reality", uuid: $uuid,
@@ -356,8 +370,8 @@ dockerSetupCommand() {
     2|4)
         core=sing-box
         [[ "${coreChoice}" != 4 ]] || secondaryCore=xray
-        dockerSetupRead protocols '协议 [1=Reality Vision, 5=Reality gRPC, 6=Hysteria2, 7=AnyTLS, 8=NaiveProxy, 0=取消]: ' 1 || return 0
-        [[ "${protocols}" == 1 || "${protocols}" == 5 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 ]] || return "${PADM_DOCKER_RC_USAGE}"
+        dockerSetupRead protocols '协议 [1=Reality Vision, 5=Reality gRPC, 6=Hysteria2, 7=AnyTLS, 8=NaiveProxy, 9=Shadowsocks, 0=取消]: ' 1 || return 0
+        [[ "${protocols}" == 1 || "${protocols}" == 5 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 || "${protocols}" == 9 ]] || return "${PADM_DOCKER_RC_USAGE}"
         ;;
     *) return "${PADM_DOCKER_RC_USAGE}" ;;
     esac
@@ -372,8 +386,8 @@ dockerSetupCommand() {
     3) families='["ipv4","ipv6"]' ;;
     *) return "${PADM_DOCKER_RC_USAGE}" ;;
     esac
-    if [[ ( "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 ) || -n "${secondaryCore}" ]]; then
-        if [[ "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 ]]; then
+    if [[ ( "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 && "${protocols}" != 9 ) || -n "${secondaryCore}" ]]; then
+        if [[ "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 && "${protocols}" != 9 ]]; then
             dockerSetupRead realityPort '主核心 Reality 入口端口 [443]: ' 443 || return 0
         fi
         dockerSetupRead target 'Reality 目标域名（0 取消）: ' || return 0
@@ -384,6 +398,9 @@ dockerSetupCommand() {
     fi
     if [[ -n "${secondaryCore}" ]]; then
         dockerSetupRead secondaryPort "副核心 ${secondaryCore} Reality 入口端口 [8444]: " 8444 || return 0
+    fi
+    if [[ "${protocols}" == 9 ]]; then
+        dockerSetupRead wsPort "Shadowsocks TCP/UDP 入口端口 [${wsPort}]: " "${wsPort}" || return 0
     fi
     if [[ "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 ]]; then
         [[ "${protocols}" != 3 ]] || wsPort=8443
@@ -457,13 +474,13 @@ dockerSetupCommand() {
     [[ "${protocols}" != 3 || "${realityPort}" != "${wsPort}" ]] ||
         { dockerError 'Reality 和 WS TLS 不能使用同一入口端口'; return "${PADM_DOCKER_RC_CONFLICT}"; }
     if [[ -n "${secondaryCore}" ]] &&
-        { [[ "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 && "${secondaryPort}" == "${realityPort}" ]] ||
-          [[ ( "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 ) && "${secondaryPort}" == "${wsPort}" ]]; }; then
+        { [[ "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 && "${protocols}" != 9 && "${secondaryPort}" == "${realityPort}" ]] ||
+          [[ ( "${protocols}" == 2 || "${protocols}" == 3 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 || "${protocols}" == 9 ) && "${secondaryPort}" == "${wsPort}" ]]; }; then
         dockerError '主副核心不能使用同一入口端口'
         return "${PADM_DOCKER_RC_CONFLICT}"
     fi
     printf '\n核心: %s\n协议组合: %s\n服务器: %s\n地址族: %s\n' "${core}" "${protocols}" "${server}" "${families}"
-    [[ "${protocols}" == 2 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 ]] ||
+    [[ "${protocols}" == 2 || "${protocols}" == 6 || "${protocols}" == 7 || "${protocols}" == 8 || "${protocols}" == 9 ]] ||
         printf 'Reality: %s -> %s:%s，SNI %s\n' "${realityPort}" "${target}" "${targetPort}" "${sni}"
     if [[ "${protocols}" == 2 || "${protocols}" == 3 ]]; then
         printf 'WS TLS: %s:%s，证书方式 %s，订阅 %s\n' "${domain}" "${wsPort}" "${tlsMode}" "${subscription}"
@@ -474,6 +491,8 @@ dockerSetupCommand() {
         printf 'AnyTLS: %s:%s/tcp，证书方式 %s\n' "${domain}" "${wsPort}" "${tlsMode}"
     elif [[ "${protocols}" == 8 ]]; then
         printf 'NaiveProxy: %s:%s/tcp，证书方式 %s\n' "${domain}" "${wsPort}" "${tlsMode}"
+    elif [[ "${protocols}" == 9 ]]; then
+        printf 'Shadowsocks: %s:%s/tcp+udp，方法 2022-blake3-aes-128-gcm\n' "${server}" "${wsPort}"
     fi
     [[ -z "${secondaryCore}" ]] || printf '副核心: %s，Reality 入口端口 %s\n' "${secondaryCore}" "${secondaryPort}"
     printf '确认后将验证发布、生成账号参数并配置服务。\n'
@@ -565,7 +584,8 @@ dockerProtocolCommand() (
           "\(.listener_id)  \(.core)  \(if .id == 1 then "Reality Vision"
             elif .id == 2 then "Reality XHTTP" elif .id == 26 then "Reality gRPC"
             elif .id == 3 then "Hysteria2" elif .id == 4 then "AnyTLS"
-            elif .id == 5 then "NaiveProxy" else "WS TLS" end)  \(.server | authority):\(.public_port)  [\(.address_families | join(","))]  \(.name)"' \
+            elif .id == 5 then "NaiveProxy" elif .id == 30 then "Shadowsocks"
+            else "WS TLS" end)  \(.server | authority):\(.public_port)  [\(.address_families | join(","))]  \(.name)"' \
             "${normalized}"
         return $?
     fi
@@ -647,6 +667,10 @@ dockerEditFields() {
                 fi
                 if [[ "${targetProtocol}" == 5 && "${targetCore}" != sing-box ]]; then
                     dockerError 'NaiveProxy 入口仅支持 sing-box，不能复制到 Xray'
+                    return 1
+                fi
+                if [[ "${targetProtocol}" == 30 && "${targetCore}" != sing-box ]]; then
+                    dockerError 'Shadowsocks 入口仅支持 sing-box，不能复制到 Xray'
                     return 1
                 fi
                 if [[ "${targetCore}" != "${primaryCore}" ]] &&
@@ -930,6 +954,7 @@ dockerEditCommand() {
            ($entry.id == 3 and $entry.core == "sing-box") or
            ($entry.id == 4 and $entry.core == "sing-box") or
            ($entry.id == 5 and $entry.core == "sing-box") or
+           ($entry.id == 30 and $entry.core == "sing-box") or
            ($entry.id == 21 and $entry.core == "xray")) and
           any($old.core.protocols[];
             .listener_id as $sourceId | any($new.core.protocols[]; .listener_id == $sourceId) and

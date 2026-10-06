@@ -199,17 +199,17 @@
     },
     {
       "id": 30,
-      "status": "deferred",
+      "status": "supported",
       "management_status": "deferred",
       "cores": ["sing-box"],
-      "profiles": [],
+      "profiles": ["core-sing-box"],
       "native_menu": "安装与重装 / 自定义协议选择",
       "native_action": "Shadowsocks",
       "transport": "tcp",
       "udp_support": "yes",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "需要 sing-box Shadowsocks TCP + UDP 监听及订阅输出，Docker 合同尚未接入。"
+      "reason": "v3 支持 sing-box Shadowsocks 2022 AES-128 多用户首配、完整规格导入、入口编辑、同核复制与删除及 SIP002 分享链接；TCP/UDP 双栈，复用 UUID 流量与额度，宿主集成组合、凭据轮换及完整用户管理尚未开放。"
     },
     {
       "id": 31,
