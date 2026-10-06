@@ -2683,7 +2683,7 @@ installXrayRealityApply() {
     readLastInstallationConfig || return 1
     collectEntryProfile || return 1
     totalProgress=6
-    installTools 1
+    installTools 1 || return 1
 
     (installXray 2 false) || return 1
     initXrayConfig custom 3 || return 1
@@ -2709,7 +2709,7 @@ installSingBoxRealityApply() {
     readLastInstallationConfig || return 1
     collectEntryProfile || return 1
     totalProgress=6
-    installTools 1
+    installTools 1 || return 1
 
     installSingBox 2 || return 1
     initSingBoxConfig custom 3 || return 1
@@ -2792,12 +2792,12 @@ customXrayInstallApply() {
     # checkBTPanel
     # check1Panel
     totalProgress=12
-    installTools 1
+    installTools 1 || return 1
     if [[ -n "${btDomain}" ]]; then
         if protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
             skipTlsCertificateStatusCard "检测到宝塔面板/1Panel"
-            coreInstallServiceAction "Xray 服务停止失败，已取消端口配置" handleXray stop || return 1
             customPortFunction || return 1
+            coreInstallServiceAction "Xray 服务停止失败，已取消端口配置" handleXray stop || return 1
         else
             skipTlsCertificateStatusCard "Reality 不需要本机 TLS 证书"
         fi
@@ -2860,7 +2860,7 @@ customSingBoxInstallApply() {
         collectEntryProfile || return 1
     fi
     totalProgress=9
-    installTools 1
+    installTools 1 || return 1
     # 申请tls
     if protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
         initTLSNginxConfig 2 || return 1
@@ -2938,11 +2938,11 @@ xrayCoreInstallApply() {
     # check1Panel
     selectCustomInstallType=
     totalProgress=12
-    installTools 2
+    installTools 2 || return 1
     if [[ -n "${btDomain}" ]]; then
         skipTlsCertificateStatusCard "检测到宝塔面板/1Panel"
-        coreInstallServiceAction "Xray 服务停止失败，已取消端口配置" handleXray stop || return 1
         customPortFunction || return 1
+        coreInstallServiceAction "Xray 服务停止失败，已取消端口配置" handleXray stop || return 1
     else
         # 申请tls
         initTLSNginxConfig 3 || return 1
@@ -2985,12 +2985,12 @@ singBoxInstallApply() {
     # check1Panel
     selectCustomInstallType=
     totalProgress=8
-    installTools 2
+    installTools 2 || return 1
 
     if [[ -n "${btDomain}" ]]; then
         skipTlsCertificateStatusCard "检测到宝塔面板/1Panel"
-        coreInstallServiceAction "Xray 服务停止失败，已取消端口配置" handleXray stop || return 1
         customPortFunction || return 1
+        coreInstallServiceAction "Xray 服务停止失败，已取消端口配置" handleXray stop || return 1
     else
         # 申请tls
         initTLSNginxConfig 3 || return 1

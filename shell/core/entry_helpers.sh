@@ -29,48 +29,30 @@ entryHelperNginxConfigFile() {
 }
 
 initTLSNginxConfig() {
+    progressCard "$1" "初始化 Nginx 证书验证配置"
+    if [[ -n "${AUTO_DOMAIN:-}" ]]; then
+        domain=${AUTO_DOMAIN}
+    elif [[ -n "${currentHost:-}" && -n "${lastInstallationConfig:-}" ]]; then
+        domain=${currentHost}
+    elif [[ -n "${currentHost:-}" ]]; then
+        menuReadChoice domain "TLS 域名[回车保留 ${currentHost}]:" domain true || return 1
+        domain=${domain:-${currentHost}}
+    else
+        menuReadChoice domain "TLS 域名[回车取消]:" domain || return 1
+    fi
+
+    if ! padmIsValidHostName "${domain}"; then
+        errorCard "域名不合法" "${domain}"
+        return 1
+    fi
+    statusCard "TLS 域名" "${domain}"
+    dnsTLSDomain=$(echo "${domain}" | awk -F "." '{$1="";print $0}' | sed 's/^[[:space:]]*//' | sed 's/ /./g')
+    if [[ "${selectCoreType:-}" == "1" ]]; then
+        customPortFunction || return 1
+    fi
     if ! runCoreServiceActionAllowFailure handleNginx stop; then
         errorCard "Nginx 服务停止失败，已取消 TLS 初始化"
         return 1
-    fi
-    progressCard "$1" "初始化 Nginx 证书验证配置"
-    if [[ -n "${currentHost}" && -z "${lastInstallationConfig}" ]]; then
-        echo
-        autoRead reuse_last "读取到上次安装记录，域名为 [${currentHost}]，是否使用？[y/n]:" historyDomainStatus
-        if [[ "${historyDomainStatus}" == "y" ]]; then
-            domain=${currentHost}
-            statusCard "域名" "${domain}"
-        else
-            echo
-            statusCard "域名输入" "请输入要配置的域名，例：www.example.com"
-            autoRead domain "域名:" domain
-        fi
-    elif [[ -n "${currentHost}" && -n "${lastInstallationConfig}" ]]; then
-        domain=${currentHost}
-    else
-        echo
-        statusCard "域名输入" "请输入要配置的域名，例：www.example.com"
-        autoRead domain "域名:" domain
-    fi
-
-    if [[ -z ${domain} ]]; then
-        coreDomainRequiredErrorCard
-        [[ "${AUTO_INSTALL:-}" == "true" ]] && return 1
-        initTLSNginxConfig 3
-    else
-        if ! padmIsValidHostName "${domain}"; then
-            errorCard "域名不合法" "${domain}"
-            return 1
-        fi
-        dnsTLSDomain=$(echo "${domain}" | awk -F "." '{$1="";print $0}' | sed 's/^[[:space:]]*//' | sed 's/ /./g')
-        if [[ "${selectCoreType}" == "1" ]]; then
-            customPortFunction || return 1
-        fi
-        # 修改配置
-        if ! runCoreServiceActionAllowFailure handleNginx stop; then
-            errorCard "Nginx 服务停止失败，已取消 TLS 初始化"
-            return 1
-        fi
     fi
 }
 
@@ -184,60 +166,41 @@ EOF
 
 # 自定义端口
 customPortFunction() {
-    local historyCustomPortStatus=
-    if [[ -n "${customPort}" || -n "${currentPort}" ]]; then
-        echo
-        if [[ -z "${lastInstallationConfig}" ]]; then
-            autoRead reuse_last "读取到上次安装时的传统 TLS 入口端口 [${currentPort}]，是否使用？[y/n]:" historyCustomPortStatus
-            if [[ "${historyCustomPortStatus}" == "y" ]]; then
-                port=${currentPort}
-                statusCard "TLS 入口端口" "${port}"
-            fi
-        elif [[ -n "${lastInstallationConfig}" ]]; then
-            port=${currentPort}
+    local historyPort=${currentPort:-${customPort:-}}
+    if [[ -n "${AUTO_PORT:-}" ]]; then
+        port=${AUTO_PORT}
+    elif [[ -n "${lastInstallationConfig:-}" && -n "${historyPort}" ]]; then
+        port=${historyPort}
+    else
+        local defaultPort=${historyPort} prompt
+        if [[ -z "${defaultPort}" && -z "${btDomain:-}" ]]; then
+            defaultPort=443
         fi
+        if [[ -n "${defaultPort}" ]]; then
+            prompt="TLS 入口端口[回车使用 ${defaultPort}]:"
+        else
+            prompt="TLS 入口端口[不可与 BT Panel/1Panel 端口相同，回车随机]:"
+        fi
+        menuReadChoice port "${prompt}" port true || return 1
+        port=${port:-${defaultPort:-$((RANDOM % 20001 + 10000))}}
     fi
-    if [[ -z "${currentPort}" ]] || [[ "${historyCustomPortStatus}" == "n" ]]; then
-        echo
 
-        if [[ -n "${btDomain}" ]]; then
-            echoContent yellow "请输入 TLS 入口端口[不可与 BT Panel/1Panel 端口相同，回车随机]"
-            autoRead port "TLS 入口端口:" port
-            if [[ -z "${port}" ]]; then
-                port=$((RANDOM % 20001 + 10000))
-            fi
-        else
-            echo
-            echoContent yellow "请输入传统 TLS 入口端口[回车默认 443]"
-            autoRead port "TLS 入口端口:" port
-            if [[ -z "${port}" ]]; then
-                port=443
-            fi
-            if [[ "${port}" == "${xrayVLESSRealityPort}" ]]; then
-                if ! runCoreServiceActionAllowFailure handleXray stop; then
-                    errorCard "Xray 服务停止失败，无法复用当前 Reality 端口"
-                    return 1
-                fi
-            fi
-        fi
-
-        if [[ -n "${port}" ]]; then
-            if validPortNumber "${port}"; then
-                allowPort "${port}" || return 1
-                statusCard "TLS 入口端口" "${port}"
-                if [[ -z "${btDomain}" ]]; then
-                    checkDNSIP "${domain}" || return 1
-                    removeNginxDefaultConf || return 1
-                    checkPortOpen "${port}" "${domain}" || return 1
-                fi
-            else
-                corePortInputErrorCard
-                return 1
-            fi
-        else
-            errorCard "端口不可为空"
+    validPortNumber "${port}" || { corePortInputErrorCard; return 1; }
+    statusCard "TLS 入口端口" "${port}"
+    if [[ "${port}" == "${historyPort}" && "${domain:-}" == "${currentHost:-}" ]]; then
+        return 0
+    fi
+    if [[ -z "${btDomain:-}" && "${port}" == "${xrayVLESSRealityPort:-}" ]]; then
+        if ! runCoreServiceActionAllowFailure handleXray stop; then
+            errorCard "Xray 服务停止失败，无法复用当前 Reality 端口"
             return 1
         fi
+    fi
+    allowPort "${port}" || return 1
+    if [[ -z "${btDomain:-}" ]]; then
+        checkDNSIP "${domain}" || return 1
+        removeNginxDefaultConf || return 1
+        checkPortOpen "${port}" "${domain}" || return 1
     fi
 }
 

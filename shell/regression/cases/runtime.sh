@@ -163,7 +163,7 @@ runMenuReadChoiceRegression() (
 runInstallWorkflowRegression() (
     local renderedIds= errors=0 shown=0 cleaned=0 cleanStatus=0
     local answer inputFd nextInput output apply protocols
-    unset AUTO_INSTALL AUTO_INSTALL_TYPE AUTO_INSTALL_SUMMARY_SHOWN AUTO_PROTOCOLS AUTO_REUSE_LAST
+    unset AUTO_INSTALL AUTO_INSTALL_TYPE AUTO_INSTALL_SUMMARY_SHOWN AUTO_PROTOCOLS AUTO_REUSE_LAST AUTO_DOMAIN AUTO_PORT
     echoContent() { :; }
     menuLine() { :; }
     menuMutedLine() { :; }
@@ -334,6 +334,135 @@ runInstallWorkflowRegression() (
             [[ "${realityEntryHost}" == new.example.com ]]
         done
         [[ "${entryReads}" == "4" ]]
+    )
+
+    (
+        local events= expected input inputFd nextInput
+        local currentHost= currentPort= customPort= domain= port=
+        local lastInstallationConfig= btDomain= xrayVLESSRealityPort= selectCoreType=1
+        progressCard() { :; }
+        handleNginx() { events+="nginx:$1"$'\n'; }
+        allowPort() { events+="allow:$1"$'\n'; }
+        checkDNSIP() { events+="dns:$1"$'\n'; }
+        removeNginxDefaultConf() { events+=$'clean\n'; }
+        checkPortOpen() { events+="check:$1:$2"$'\n'; }
+
+        # 取消、截断和非法输入不能停服务或继续检测，也不能吃掉上级菜单输入。
+        for input in "" tls.example.com; do
+            regressionExpectStatus 1 initTLSNginxConfig 1 < <(printf '%s' "${input}")
+            [[ -z "${events}" ]]
+        done
+        exec {inputFd}< <(printf '\nnext-parent-action\n')
+        regressionExpectStatus 1 initTLSNginxConfig 1 <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        [[ "${nextInput}" == next-parent-action && -z "${events}" ]]
+        exec {inputFd}<&-
+        regressionExpectStatus 1 initTLSNginxConfig 1 < <(printf 'tls.example.com\n')
+        [[ -z "${events}" ]]
+        regressionExpectStatus 1 initTLSNginxConfig 1 < <(printf 'tls.example.com\n8443')
+        [[ -z "${events}" ]]
+        AUTO_DOMAIN=invalid/domain
+        regressionExpectStatus 1 initTLSNginxConfig 1 </dev/null
+        AUTO_DOMAIN=tls.example.com
+        AUTO_PORT=1+2
+        regressionExpectStatus 1 initTLSNginxConfig 1 </dev/null
+        [[ -z "${events}" ]]
+        unset AUTO_DOMAIN AUTO_PORT
+
+        # 不再先问是否复用，再分别问域名和端口是否复用。
+        currentHost=old.example.com
+        currentPort=443
+        exec {inputFd}< <(printf '\n\nnext-parent-action\n')
+        initTLSNginxConfig 1 <&"${inputFd}"
+        [[ "${domain}" == old.example.com && "${port}" == 443 && "${events}" == $'nginx:stop\n' ]]
+        read -r -u "${inputFd}" nextInput
+        [[ "${nextInput}" == next-parent-action ]]
+        exec {inputFd}<&-
+        events=
+        lastInstallationConfig=true
+        initTLSNginxConfig 1 </dev/null
+        [[ "${domain}" == old.example.com && "${port}" == 443 && "${events}" == $'nginx:stop\n' ]]
+        events=
+        currentPort=1+2
+        regressionExpectStatus 1 initTLSNginxConfig 1 </dev/null
+        [[ -z "${events}" ]]
+        currentPort=443
+
+        # 显式参数覆盖历史值；仅改域名也重新验证，成功后才停 Nginx。
+        AUTO_DOMAIN=new.example.com
+        AUTO_PORT=8443
+        initTLSNginxConfig 1 </dev/null
+        expected=$'allow:8443\ndns:new.example.com\nclean\ncheck:8443:new.example.com\nnginx:stop\n'
+        [[ "${domain}" == new.example.com && "${port}" == 8443 && "${events}" == "${expected}" ]]
+        events=
+        unset AUTO_PORT
+        initTLSNginxConfig 1 </dev/null
+        expected=$'allow:443\ndns:new.example.com\nclean\ncheck:443:new.example.com\nnginx:stop\n'
+        [[ "${port}" == 443 && "${events}" == "${expected}" ]]
+        events=
+        checkPortOpen() { events+="check:$1:$2"$'\n'; return 1; }
+        regressionExpectStatus 1 initTLSNginxConfig 1 </dev/null
+        [[ "${events}" == "${expected%nginx:stop$'\n'}" ]]
+        unset AUTO_DOMAIN
+
+        events=
+        currentHost=
+        currentPort=
+        domain=panel.example.com
+        btDomain=panel.example.com
+        lastInstallationConfig=
+        customPortFunction <<<""
+        validPortNumber "${port}"
+        [[ "${port}" -ge 10000 && "${port}" -le 30000 && "${events}" == "allow:${port}"$'\n' ]]
+        events=
+        btDomain=
+        currentHost=${domain}
+        customPort=8443
+        lastInstallationConfig=true
+        customPortFunction </dev/null
+        [[ "${port}" == 8443 && -z "${events}" ]]
+    )
+
+    (
+        local installCalls=0
+        readLastInstallationConfig() { :; }
+        collectEntryProfile() { :; }
+        configureRealityDomainMode() { :; }
+        protocolSelectionShowRiskNotes() { :; }
+        installTools() { installCalls=$((installCalls + 1)); return 1; }
+        installXray() { printf 'unexpected-install\n'; }
+        installSingBox() { printf 'unexpected-install\n'; }
+        initTLSNginxConfig() { printf 'unexpected-install\n'; }
+        customPortFunction() { printf 'unexpected-install\n'; }
+        coreInstallServiceAction() { printf 'unexpected-install\n'; }
+        for apply in installXrayRealityApply installSingBoxRealityApply customXrayInstallApply customSingBoxInstallApply xrayCoreInstallApply singBoxInstallApply; do
+            output=$(
+                installCalls=0
+                regressionExpectStatus 1 "${apply}" 1 || exit 1
+                printf 'install-calls:%s\n' "${installCalls}"
+            )
+            grep -qxF 'install-calls:1' <<<"${output}"
+            ! grep -qF 'unexpected-install' <<<"${output}" || exit 1
+        done
+    )
+
+    (
+        local serviceCalls=0 allowCalls=0
+        local btDomain=panel.example.com domain=panel.example.com
+        local currentHost= currentPort= customPort= lastInstallationConfig= xrayVLESSRealityPort=
+        readLastInstallationConfig() { :; }
+        configureRealityDomainMode() { :; }
+        protocolSelectionShowRiskNotes() { :; }
+        installTools() { :; }
+        handleXray() { serviceCalls=$((serviceCalls + 1)); }
+        allowPort() { allowCalls=$((allowCalls + 1)); }
+        for apply in customXrayInstallApply xrayCoreInstallApply singBoxInstallApply; do
+            unset AUTO_PORT
+            regressionExpectStatus 1 "${apply}" 21 </dev/null
+            AUTO_PORT=1+2
+            regressionExpectStatus 1 "${apply}" 21 </dev/null
+            [[ "${serviceCalls}" == 0 && "${allowCalls}" == 0 ]]
+        done
     )
 
     (
