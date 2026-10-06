@@ -2944,7 +2944,7 @@ manageRealityTarget() {
     menuLine "网络关系（缓存）：${networkMatchSummary}"
     showRealityTargetPqcSummary || true
     menuItem 1 "检测当前目标" "复测 TLS/PQC、ASN 与网络关系，并查看证书链"
-    menuItem 2 "刷新目标库" "复测目标库或全部候选并更新质量结果"
+    menuItem 2 "刷新目标库" "按范围复测目标库或候选清单并更新质量结果"
     menuItem 3 "扫描指定网段" "运行 RealiTLScanner，发现目标并加入目标库"
     menuItem 4 "同 ASN 抽样扫描" "从本机 ASN 公告前缀随机抽样，发现目标并加入目标库"
     menuItem 5 "查看/切换 A 级目标" "分页查看目标库中的 A 级目标并切换"
@@ -2962,14 +2962,14 @@ manageRealityTarget() {
         ;;
     2)
         echoContent title "\n┌─ REALITY 刷新范围 ───────────────────────────────"
-        menuItem 1 "目标库与推荐候选" "复测已有目标并补测新增推荐候选"
-        menuItem 2 "全部候选" "复测全部内置/托管候选"
+        menuItem 1 "目标库 + 推荐候选" "复测目标库中的 A 级目标，并补测推荐候选"
+        menuItem 2 "推荐候选" "仅复测推荐候选，不额外合并目标库"
         menuReturnItem 3 "返回" "回到目标站管理"
         menuClose
         menuReadChoice reality_target_refresh_scope "请选择刷新范围[默认1]：" refreshChoice true || return 0
         case "${refreshChoice:-1}" in
         1) scanLocalAsnRealityTargets || true ;;
-        2) scanLocalAsnRealityTargets all || true ;;
+        2) scanLocalAsnRealityTargets recommended_only || true ;;
         3|r|R) ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac

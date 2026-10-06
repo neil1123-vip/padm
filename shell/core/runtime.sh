@@ -912,7 +912,7 @@ showInstallArgsHelp() {
 ├─ 关键概念
 │ TLS 域名/端口: 普通 TLS 协议入口；当前不作为新人首选，传统 TLS 类协议存在更高识别风险
 │ Reality entry: 客户端实际连接地址，通常是自有域名、CDN 入口或服务器 IP
-│ Reality target: REALITY 伪装目标站；自动优先 no+A，sing-box 无 Xray 时可回退到 OpenSSL 验证的 no+C
+│ Reality target: REALITY 伪装目标站；自动仅接受实测 no+A，需要 Xray 检测，不使用 B/C 级备选
 │ 手工目标: 实测全部 A/AAAA；B/C 警告，Cloudflare 中继风险或探测未知均拒绝
 │ Reality SNI: REALITY 握手 SNI，默认等于 target host
 │ Reality 不申请本机 TLS 证书，也不因安装操作 Nginx；严格域名仅支持单选 Vision 1

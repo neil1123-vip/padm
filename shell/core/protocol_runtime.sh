@@ -931,11 +931,11 @@ collectRealityProfile() {
         menuLine "entry：客户端连接到你的服务器地址，已在订阅中作为 server/@host 使用"
         menuLine "target：REALITY 伪装访问的外部真实 HTTPS 站点，写入服务端握手配置"
         menuLine "SNI：REALITY 握手域名，默认等于 target host；除非明确知道原因，不要单独改"
-        menuLine "自动推荐优先使用 cdn_risk=no 的 A 级结果；全新 sing-box 无 Xray 时可回退到 OpenSSL 验证的 C 级"
+        menuLine "自动推荐仅接受 cdn_risk=no 的实测 A 级结果，不使用 B/C 级备选"
         menuLine "PQC/ML-DSA-65 场景需要目标站支持 X25519MLKEM768 且证书链足够长"
         menuClose
         echoContent title "┌─ REALITY 目标站选择 ───────────────────────────────"
-        menuRecommendedItem 1 "自动推荐" "优先 A 级；sing-box 无 Xray 时仅回退到安全 C 级"
+        menuRecommendedItem 1 "自动推荐" "仅实测 A 级；需要 Xray 检测"
         menuItem 2 "候选列表" "先检测全部候选，再从通过检测的结果中选择"
         menuItem 3 "手动输入" "输入 host 或 host:port，端口默认 443"
         menuClose

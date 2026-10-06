@@ -65,43 +65,31 @@ realityTargetCandidatePool() {
         return 0
     fi
     cat <<'EOF'
-www.gnu.org|www.gnu.org|GNU|global|developer|unknown|52|yes|远端复测确认直连，作为普通 Reality 默认候选
-www.debian.org|www.debian.org|Debian|global|developer|unknown|51|yes|远端复测确认直连，作为普通 Reality 默认候选
-www.ubuntu.com|www.ubuntu.com|Ubuntu|global|developer|unknown|50|yes|远端复测确认直连，作为普通 Reality 默认候选
-www.dropbox.com|www.dropbox.com|Dropbox|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.slack.com|www.slack.com|Slack|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-grafana.com|grafana.com|Grafana|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-elastic.co|elastic.co|Elastic|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.postgresql.org|www.postgresql.org|PostgreSQL|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-mariadb.org|mariadb.org|MariaDB|global|developer|unknown|39|yes|远端复测确认直连，作为普通 Reality 默认候选
-www.nginx.com|www.nginx.com|NGINX|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-nginx.org|nginx.org|NGINX Open Source|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-httpd.apache.org|httpd.apache.org|Apache HTTP Server|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.apache.org|www.apache.org|Apache|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-maven.apache.org|maven.apache.org|Apache Maven|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-cmake.org|cmake.org|CMake|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-llvm.org|llvm.org|LLVM|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-clang.llvm.org|clang.llvm.org|Clang|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-gcc.gnu.org|gcc.gnu.org|GCC|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.eclipse.org|www.eclipse.org|Eclipse|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-developer.android.com|developer.android.com|Android Developers|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-android.com|android.com|Android|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.chromium.org|www.chromium.org|Chromium|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.openjdk.org|www.openjdk.org|OpenJDK|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-docs.rs|docs.rs|Docs.rs|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-pypi.org|pypi.org|PyPI|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-deno.com|deno.com|Deno|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-angular.dev|angular.dev|Angular|global|developer|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-fly.io|fly.io|Fly.io|global|cloud|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.ovhcloud.com|www.ovhcloud.com|OVHcloud|global|cloud|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.hetzner.com|www.hetzner.com|Hetzner|global|cloud|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-cloud.google.com|cloud.google.com|Google Cloud|global|cloud|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.alibabacloud.com|www.alibabacloud.com|Alibaba Cloud|asia|cloud|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.cloudflarestatus.com|www.cloudflarestatus.com|Cloudflare Status|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-status.cloud.google.com|status.cloud.google.com|Google Cloud Status|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-azure.status.microsoft|azure.status.microsoft|Azure Status|global|large_site|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.stripe.com|www.stripe.com|Stripe|global|finance|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
-www.netflix.com|www.netflix.com|Netflix|global|media|unknown|39|no|未远端实测，适合手动检测或同 ASN 扫描后使用
+www.libreoffice.org|www.libreoffice.org|LibreOffice|global|developer|unknown|100|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4492 字节、异 SNI 拒绝；部署网络须复测
+www.collaboraoffice.com|www.collaboraoffice.com|Collabora Office|global|developer|unknown|99|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4449 字节、异 SNI 拒绝；部署网络须复测
+www.documentfoundation.org|www.documentfoundation.org|The Document Foundation|global|developer|unknown|98|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4283 字节、异 SNI 拒绝；部署网络须复测
+www.postgresql.org|www.postgresql.org|PostgreSQL|global|developer|unknown|97|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链至少 4405 字节、异 SNI 拒绝；部署网络须复测
+ftp.uni-stuttgart.de|ftp.uni-stuttgart.de|University of Stuttgart Mirror|global|download|unknown|96|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链至少 5417 字节、异 SNI 拒绝；部署网络须复测
+ftp.snt.utwente.nl|ftp.snt.utwente.nl|University of Twente Mirror|global|download|unknown|95|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4127 字节、异 SNI 拒绝；部署网络须复测
+ftp.lysator.liu.se|ftp.lysator.liu.se|Lysator Mirror|global|download|unknown|94|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4146 字节、异 SNI 拒绝；部署网络须复测
+mirror.init7.net|mirror.init7.net|Init7 Mirror|global|download|unknown|93|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4052 字节、异 SNI 拒绝；部署网络须复测
+enterprise.proxmox.com|enterprise.proxmox.com|Proxmox Enterprise|global|cloud|unknown|92|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4575 字节、异 SNI 拒绝；部署网络须复测
+sdk.collaboraonline.com|sdk.collaboraonline.com|Collabora Online SDK|global|developer|unknown|91|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4965 字节、异 SNI 拒绝；部署网络须复测
+blog.documentfoundation.org|blog.documentfoundation.org|Document Foundation Blog|global|developer|unknown|90|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4556 字节、异 SNI 拒绝；部署网络须复测
+bugs.documentfoundation.org|bugs.documentfoundation.org|Document Foundation Bugzilla|global|developer|unknown|89|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4310 字节、异 SNI 拒绝；部署网络须复测
+translations.documentfoundation.org|translations.documentfoundation.org|Document Foundation Weblate|global|developer|unknown|88|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4448 字节、异 SNI 拒绝；部署网络须复测
+ci.libreoffice.org|ci.libreoffice.org|LibreOffice CI|global|developer|unknown|87|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4233 字节、异 SNI 拒绝；部署网络须复测
+gerrit.libreoffice.org|gerrit.libreoffice.org|LibreOffice Gerrit|global|developer|unknown|86|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4215 字节、异 SNI 拒绝；部署网络须复测
+conference.libreoffice.org|conference.libreoffice.org|LibreOffice Conference|global|developer|unknown|85|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4358 字节、异 SNI 拒绝；部署网络须复测
+www.pgadmin.org|www.pgadmin.org|pgAdmin|global|developer|unknown|84|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4319 字节、异 SNI 拒绝；部署网络须复测
+www.postgresql.eu|www.postgresql.eu|PostgreSQL Europe|global|developer|unknown|83|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4317 字节、异 SNI 拒绝；部署网络须复测
+www.postgresql.us|www.postgresql.us|PostgreSQL US|global|developer|unknown|82|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4320 字节、异 SNI 拒绝；部署网络须复测
+pgconf.dev|pgconf.dev|PGConf.dev|global|developer|unknown|81|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4334 字节、异 SNI 拒绝；部署网络须复测
+git.postgresql.org|git.postgresql.org|PostgreSQL Git|global|developer|unknown|80|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4312 字节、异 SNI 拒绝；部署网络须复测
+commitfest.postgresql.org|commitfest.postgresql.org|PostgreSQL Commitfest|global|developer|unknown|79|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4391 字节、异 SNI 拒绝；部署网络须复测
+planet.postgresql.org|planet.postgresql.org|Planet PostgreSQL|global|developer|unknown|78|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4342 字节、异 SNI 拒绝；部署网络须复测
+pgxn.org|pgxn.org|PostgreSQL Extension Network|global|developer|unknown|77|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 4307 字节、异 SNI 拒绝；部署网络须复测
+www.netmeister.org|www.netmeister.org|Netmeister|global|developer|unknown|76|yes|2026-10-07 原生全地址实测 TLS/PQC A 级、证书链 3507 字节、异 SNI 拒绝；部署网络须复测
 EOF
 }
 
@@ -617,11 +605,11 @@ realityTargetRefreshRecords() {
     local resultsFile line target parsed host port candidateKey sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note _location
     local -A seenTargets=()
     case "${scope}" in
-    recommended | all) ;;
+    recommended | recommended_only | all) ;;
     *) return 1 ;;
     esac
     resultsFile=$(realityTargetManagedResultsFile) || return 1
-    if [[ "${scope}" != "all" && -s "${resultsFile}" ]]; then
+    if [[ "${scope}" == "recommended" && -s "${resultsFile}" ]]; then
         while IFS= read -r line; do
             IFS=$'\x1f' read -r target sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note _location <<<"${line//$'\t'/$'\x1f'}"
             [[ -n "${target}" ]] || continue
@@ -1377,13 +1365,6 @@ realityTargetDetector() {
     fi
 }
 
-realityTargetOpenSslAutoFallbackAllowed() {
-    local detector=${1:-}
-    [[ -z "${detector}" ]] || return 1
-    [[ "${coreInstallType:-}" == "2" || "${selectCoreType:-}" == "2" ]] || return 1
-    command -v openssl >/dev/null 2>&1
-}
-
 realityTargetTlsPingState() {
     local output=$1
     printf '%s\n' "${output}" | awk '
@@ -1594,6 +1575,10 @@ validateRealityTargetSelection() {
         return 1
     fi
     detector=$(realityTargetDetector 2>/dev/null || true)
+    if [[ "${policy}" == "auto" && -z "${detector}" ]]; then
+        realityTargetStatusBlock red "REALITY 自动推荐" "缺少 Xray，无法验证 A 级目标" "自动模式不接受 OpenSSL 的 B/C 级回退"
+        return 1
+    fi
     if [[ -z "${detector}" ]] && ! command -v openssl >/dev/null 2>&1; then
         realityTargetStatusBlock red "REALITY 目标站" "缺少 Xray/OpenSSL，无法完成安全检测" "已拒绝写入配置"
         return 1
@@ -1649,14 +1634,10 @@ validateRealityTargetSelection() {
         ;;
     esac
     if [[ "${policy}" == "auto" && "${score}" != "A" ]]; then
-        if [[ "${score}" != "C" ]] || ! realityTargetOpenSslAutoFallbackAllowed "${detector}"; then
-            realityTargetStatusBlock red "REALITY 自动推荐" "自动模式不接受当前目标: ${target}" "本次评分: ${score}"
-            return 1
-        fi
+        realityTargetStatusBlock red "REALITY 自动推荐" "自动模式仅接受实测 A 级目标: ${target}" "本次评分: ${score}"
+        return 1
     fi
-    if [[ "${policy}" == "auto" && "${score}" == "C" ]]; then
-        realityTargetStatusBlock yellow "REALITY 自动推荐" "sing-box 无 Xray，已使用 OpenSSL 验证的 C 级 TLS 1.3 目标" "${note}"
-    elif [[ "${score}" == "B" || "${score}" == "C" ]]; then
+    if [[ "${score}" == "B" || "${score}" == "C" ]]; then
         realityTargetStatusBlock yellow "REALITY 目标站" "手工目标已通过 CDN 风险校验，但质量为 ${score} 级" "${note}"
     else
         realityTargetStatusBlock green "REALITY 目标站" "已通过安全校验: ${target}" "cdn_risk=no，评分=${score}"
@@ -1905,12 +1886,12 @@ selectRealityTargetCandidateInteractive() {
 
 selectAutoRecommendedRealityTarget() {
     local detector='' line host sni name category target record probeRecord probeStatus probePayload
-    local currentProfile rest currentAsn='' currentOrg='' probeLimit probed=0 selectedLine selectedTarget selectedScore fallbackLine='' parsed
+    local currentProfile rest currentAsn='' currentOrg='' probeLimit probed=0 selectedTarget
     local resultTarget resultSni resultName resultCategory cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note location
 
     detector=$(realityTargetDetector 2>/dev/null || true)
-    if [[ -z "${detector}" ]] && ! command -v openssl >/dev/null 2>&1; then
-        realityTargetStatusBlock red "REALITY 自动推荐" "缺少 Xray/OpenSSL，无法实测目标质量"
+    if [[ -z "${detector}" ]]; then
+        realityTargetStatusBlock red "REALITY 自动推荐" "缺少 Xray，无法验证 A 级目标" "自动模式不接受 OpenSSL 的 B/C 级回退"
         return 1
     fi
     if currentProfile=$(currentRealityNetworkProfile 2>/dev/null); then
@@ -1932,36 +1913,18 @@ selectAutoRecommendedRealityTarget() {
         IFS=$'\t' read -r probeStatus probePayload <<<"${probeRecord}"
         if [[ "${probeStatus}" == "OK" && -n "${probePayload}" ]]; then
             IFS=$'\x1f' read -r resultTarget resultSni resultName resultCategory cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note location <<<"${probePayload//$'\t'/$'\x1f'}"
-            if [[ -z "${fallbackLine}" && "${cdnRisk}" == "no" && "${score}" == "C" ]]; then
-                fallbackLine=${probePayload}
-            fi
             writeRealityTargetResultLine "${resultTarget}" "${resultSni}" "${resultName}" "${resultCategory}" "${cdnRisk}" \
                 "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}" "${location}" || return 1
         fi
         (( probed >= probeLimit )) && break
     done < <(realityTargetFilteredCandidates recommended)
 
-    if selectScannedRealityTarget; then
-        selectedTarget=$(formatRealityTarget "${realityTargetHost}" "${realityTargetPort}")
-        selectedLine=$(realityTargetResultLine "${selectedTarget}") || return 1
-    elif realityTargetOpenSslAutoFallbackAllowed "${detector}" && [[ -n "${fallbackLine}" ]]; then
-        selectedLine=${fallbackLine}
-        selectedTarget=$(realityTargetResultField "${selectedLine}" 1)
-        resultSni=$(realityTargetResultField "${selectedLine}" 2)
-        parsed=$(parseHostPort "${selectedTarget}" 443)
-        realityTargetHost=${parsed%:*}
-        realityTargetPort=${parsed##*:}
-        realitySNI=${AUTO_REALITY_SERVER_NAME:-${resultSni:-${realityTargetHost}}}
-    else
-        realityTargetStatusBlock red "REALITY 自动推荐" "推荐候选未得到可接受的 cdn_risk=no 结果" "未写入未经检测的兜底目标"
+    if ! selectScannedRealityTarget; then
+        realityTargetStatusBlock red "REALITY 自动推荐" "未找到 cdn_risk=no 的实测 A 级目标" "未写入 B/C 级或未经检测的兜底目标"
         return 1
     fi
-    selectedScore=$(realityTargetResultField "${selectedLine}" 10)
-    if [[ "${selectedScore}" == "C" ]]; then
-        realityTargetStatusBlock yellow "REALITY 自动推荐" "已选择 OpenSSL 验证的 sing-box 回退目标: ${selectedTarget}" "cdn_risk=no，评分=C" "实测候选: ${probed}"
-    else
-        realityTargetStatusBlock green "REALITY 自动推荐" "已选择: ${selectedTarget}" "cdn_risk=no，评分=${selectedScore}" "实测候选: ${probed}"
-    fi
+    selectedTarget=$(formatRealityTarget "${realityTargetHost}" "${realityTargetPort}")
+    realityTargetStatusBlock green "REALITY 自动推荐" "已选择: ${selectedTarget}" "cdn_risk=no，评分=A" "实测候选: ${probed}"
     return 0
 }
 
@@ -3094,7 +3057,7 @@ scanLocalAsnRealityTargets() {
     local slot resolved=0 failed=0 sameAsn=0 sameProvider=0 differentNetwork=0 unknownNetwork=0 commitStatus=0
     local -a candidates=() jobHosts=()
     case "${refreshScope}" in
-    recommended | all) ;;
+    recommended | recommended_only | all) ;;
     *) return 1 ;;
     esac
     detector=$(realityTargetDetector 2>/dev/null || true)
@@ -3112,8 +3075,10 @@ scanLocalAsnRealityTargets() {
     resultsFile=$(realityTargetManagedResultsFile) || return 1
     if [[ "${refreshScope}" == "all" ]]; then
         refreshSource="全部候选清单（不含目标库）"
+    elif [[ "${refreshScope}" == "recommended_only" ]]; then
+        refreshSource="推荐候选（不含目标库）"
     elif [[ -s "${resultsFile}" ]]; then
-        refreshSource="目标库"
+        refreshSource="目标库 + 推荐候选"
     else
         refreshSource="推荐候选初始化"
     fi

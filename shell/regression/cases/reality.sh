@@ -791,7 +791,7 @@ EOF
         scanLocalAsnRealityTargets() { scope+="${1:-recommended} "; }
         changeRealityTargetFromScanResults() { switched=$((switched + 1)); }
         manageRealityTarget
-        [[ "${scope}" == "recommended all " && "${switched}" == 2 ]]
+        [[ "${scope}" == "recommended recommended_only " && "${switched}" == 2 ]]
         local failedRead
         autoRead() {
             printf -v "$3" '%s' 'partial.example.com:8443'
@@ -854,6 +854,19 @@ EOF
     grep -qF $'fixture-primary.example.com:443\t' <<<"${refreshRecordsWithNewCandidate}"
     grep -qF $'fixture-secondary.example.com:443\t' <<<"${refreshRecordsWithNewCandidate}"
     ! grep -qF $'fixture-secondary.example.com:8443\t' <<<"${refreshRecordsWithNewCandidate}"
+    (
+        local scopeResultsFile="${TMP_DIR}/reality-refresh-scope.tsv" records
+        export PADM_REALITY_TARGET_RESULTS_FILE="${scopeResultsFile}"
+        formatRealityTargetResultLine "library-only.example.com:443" "library-only.example.com" \
+            "Library Only" "test" "no" "192.0.2.99" "AS64500" "ExampleNet" \
+            "same_asn" "A" "yes" "4096" "yes" "1234567890" "library fixture" >"${scopeResultsFile}"
+        grep -qF $'library-only.example.com:443\t' <<<"$(realityTargetRefreshRecords recommended)"
+        records=$(realityTargetRefreshRecords recommended_only)
+        [[ "$(printf '%s\n' "${records}" | wc -l | tr -d ' ')" == "4" ]]
+        grep -qF $'fixture-primary.example.com:443\t' <<<"${records}"
+        ! grep -qF $'library-only.example.com:443\t' <<<"${records}"
+        ! grep -qF $'fixture-asia.example.com:443\t' <<<"${records}"
+    )
     writeRealityTargetCacheLine "fixture-primary.example.com:443" "B" "yes" "2048" "yes" "1234567891" "updated"
     ! realityTargetResultLine "fixture-primary.example.com:443" >/dev/null
     [[ "$(realityTargetResultCount)" == "0" ]]
@@ -1280,20 +1293,21 @@ y
 
 runRealityCandidateFullRegression() {
     local firstRecommendedRealityCandidate firstRealityCandidate secondRealityCandidate blockedCloudflareRealityCandidate blockedNodejsRealityCandidate candidateHost
-    [[ "$(realityTargetCandidateCount)" == "37" ]]
-    [[ "$(realityTargetCandidatePool | wc -l | tr -d ' ')" == "37" ]]
+    [[ "$(realityTargetCandidateCount)" == "25" ]]
+    [[ "$(realityTargetCandidatePool | wc -l | tr -d ' ')" == "25" ]]
     [[ "$(realityTargetFilteredCandidateCount all)" == "$(realityTargetCandidateCount)" ]]
     [[ "$(realityTargetBuiltInCdnBlockedCandidates | sort -u | wc -l | tr -d ' ')" == "154" ]]
-    [[ "$(realityTargetFilteredCandidateCount recommended)" == "4" ]]
-    [[ "$(realityTargetFilteredCandidateCount asia)" == "1" ]]
+    [[ "$(realityTargetFilteredCandidateCount recommended)" == "25" ]]
+    [[ "$(realityTargetFilteredCandidateCount manual)" == "0" ]]
     ! realityTargetCandidates | grep -qF 'www.microsoft.com|'
     [[ "$(realityTargetFilteredCandidateCount dev)" == "$(realityTargetFilteredCandidateCount developer)" ]]
     firstRecommendedRealityCandidate=$(realityTargetFilteredCandidateLineByIndex recommended 1)
-    [[ "$(realityTargetCandidateField "${firstRecommendedRealityCandidate}" 1)" == "www.gnu.org" ]]
+    [[ "$(realityTargetCandidateField "${firstRecommendedRealityCandidate}" 1)" == "www.libreoffice.org" ]]
     firstRealityCandidate=$(realityTargetCandidateLineByIndex 1)
-    [[ "$(realityTargetCandidateField "${firstRealityCandidate}" 1)" == "www.gnu.org" ]]
+    [[ "$(realityTargetCandidateField "${firstRealityCandidate}" 1)" == "www.libreoffice.org" ]]
     secondRealityCandidate=$(realityTargetCandidateLineByIndex 2)
-    [[ "$(realityTargetCandidateField "${secondRealityCandidate}" 1)" == "www.debian.org" ]]
+    [[ "$(realityTargetCandidateField "${secondRealityCandidate}" 1)" == "www.collaboraoffice.com" ]]
+    ! realityTargetFilteredCandidates recommended | grep -Eq '^(www.gnu.org|www.debian.org|www.ubuntu.com|mariadb.org)[|]'
     blockedCloudflareRealityCandidate=$(realityTargetBlockedCandidates | grep '^www.cloudflare.com|')
     [[ -n "${blockedCloudflareRealityCandidate}" ]]
     blockedNodejsRealityCandidate=$(realityTargetBlockedCandidates | grep '^nodejs.org|')
@@ -2013,16 +2027,16 @@ CSV
     rm -f "${PADM_REALITY_TARGET_SCAN_FILE}" "${REALITY_TLS_PING_ARGS_FILE}"
     unset AUTO_REALITY_SERVER_NAME
     unset PADM_REALITY_TARGET_CANDIDATES_FILE
-    PADM_FAKE_XRAY_ONLY_HOST=www.gnu.org selectDefaultRealityTarget
-    [[ "${realityTargetHost}" == "www.gnu.org" ]]
+    PADM_FAKE_XRAY_ONLY_HOST=www.libreoffice.org selectDefaultRealityTarget
+    [[ "${realityTargetHost}" == "www.libreoffice.org" ]]
     [[ "${realityTargetPort}" == "443" ]]
-    [[ "${realitySNI}" == "www.gnu.org" ]]
-    grep -q "tls ping -ip 192.0.2.1 www.gnu.org:443" "${REALITY_TLS_PING_ARGS_FILE}"
+    [[ "${realitySNI}" == "www.libreoffice.org" ]]
+    grep -q "tls ping -ip 192.0.2.1 www.libreoffice.org:443" "${REALITY_TLS_PING_ARGS_FILE}"
     (
         export PADM_REALITY_TARGET_RESULTS_FILE="${TMP_DIR}/reality-singbox-openssl-results.tsv"
         export PADM_REALITY_TARGET_SCAN_FILE="${PADM_REALITY_TARGET_RESULTS_FILE}"
         export PADM_REALITY_TARGET_CANDIDATES_FILE="${TMP_DIR}/reality-singbox-openssl-candidates.tsv"
-        printf '%s\n' 'openssl-c.example.com|openssl-c.example.com|OpenSSL C|global|large_site|unknown|1|yes|sing-box fallback fixture' >"${PADM_REALITY_TARGET_CANDIDATES_FILE}"
+        printf '%s\n' 'openssl-c.example.com|openssl-c.example.com|OpenSSL C|global|large_site|unknown|1|yes|strict A fixture' >"${PADM_REALITY_TARGET_CANDIDATES_FILE}"
         rm -f "${PADM_REALITY_TARGET_RESULTS_FILE}"
         coreInstallType=2
         selectCoreType=
@@ -2032,9 +2046,14 @@ CSV
         probeRealityTargetEndpoint() {
             printf 'no\t192.0.2.70\tAS64500\tExampleNet\tC\tno\tunknown\tyes\tOpenSSL TLS 1.3 fixture\n'
         }
-        selectAutoRecommendedRealityTarget
-        [[ "${realityTargetHost}" == "openssl-c.example.com" ]]
-        validateRealityTargetSelection auto "openssl-c.example.com:443" "openssl-c.example.com"
+        realityTargetHost=unchanged.example.com
+        ! selectAutoRecommendedRealityTarget
+        [[ "${realityTargetHost}" == "unchanged.example.com" ]]
+        ! validateRealityTargetSelection auto "openssl-c.example.com:443" "openssl-c.example.com"
+        realityTargetDetector() { printf 'fake-xray\n'; }
+        ! selectAutoRecommendedRealityTarget
+        [[ "${realityTargetHost}" == "unchanged.example.com" ]]
+        ! validateRealityTargetSelection auto "openssl-c.example.com:443" "openssl-c.example.com"
         ! realityTargetResultLine "openssl-c.example.com:443" >/dev/null
     )
     if [[ -n "${oldCandidatesFile}" ]]; then
