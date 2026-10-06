@@ -2304,7 +2304,10 @@ restoreCoreStartupServiceInstall() {
     local serviceWasEnabled=$3
     local rollbackFailed=false
 
-    checkLogBackupRestore "${backupDir}" || rollbackFailed=true
+    if ! checkLogBackupRestore "${backupDir}"; then
+        padmForgetCleanupPath "${backupDir}"
+        return 1
+    fi
     if [[ "${release}" == "alpine" ]]; then
         if command -v rc-update >/dev/null 2>&1; then
             if [[ "${serviceWasEnabled}" == "true" ]]; then

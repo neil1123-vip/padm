@@ -38,6 +38,65 @@ runSubscriptionServiceRuntimeRecoveryRegression() (
     installSubscribeApply
     grep -qx 'allow:39778' "${actionLog}"
     grep -qx 'refresh' "${actionLog}"
+    (
+        local scenario wasRunning configWasApplied stopRc restoreRc nginxState pendingStart
+        local rollbackLog="${root}/rollback.log" currentConfig="${root}/rollback.conf"
+        local backupDir="${root}/rollback-backup"
+        mkdir -p "${backupDir}"
+        printf 'backup\n' >"${backupDir}/state"
+        errorCard() { return 0; }
+        nginxRunning() { [[ "${nginxState}" == true ]]; }
+        padmForgetCleanupPath() { printf 'forget\n' >>"${rollbackLog}"; }
+        runSubscribeNginxAction() {
+            printf '%s\n' "$1" >>"${rollbackLog}"
+            case "$1" in
+            stop)
+                [[ "${stopRc}" == 0 ]] || return "${stopRc}"
+                nginxState=false
+                pendingStart=false
+                ;;
+            start) nginxState=true; pendingStart=false ;;
+            *) return 99 ;;
+            esac
+        }
+        restoreCoreStartupServiceInstall() {
+            printf 'restore\n' >>"${rollbackLog}"
+            [[ "${pendingStart}" == false ]] || return 99
+            [[ "${restoreRc}" == 0 ]] || return "${restoreRc}"
+            printf 'old-config\n' >"${currentConfig}"
+        }
+        # 无进程不代表没有待启动任务；停止或恢复失败不能继续覆盖和启动。
+        for scenario in stop-fail restore-fail running stopped unapplied-running unapplied-stopped; do
+            wasRunning=false configWasApplied=true stopRc=0 restoreRc=0 nginxState=false pendingStart=true
+            case "${scenario}" in
+            stop-fail) stopRc=1; wasRunning=true ;;
+            restore-fail) restoreRc=1; wasRunning=true ;;
+            running) wasRunning=true ;;
+            unapplied-running) configWasApplied=false; wasRunning=true; nginxState=true; pendingStart=false ;;
+            unapplied-stopped) configWasApplied=false ;;
+            esac
+            : >"${rollbackLog}"
+            printf 'new-config\n' >"${currentConfig}"
+            if [[ "${scenario}" == *-fail ]]; then
+                regressionExpectStatus 1 rollbackSubscribeNginxInstall "${backupDir}" "${wasRunning}" false failed "${configWasApplied}"
+                [[ "$(<"${currentConfig}")" == new-config && -f "${backupDir}/state" ]]
+                if [[ "${scenario}" == stop-fail ]]; then
+                    [[ "$(<"${rollbackLog}")" == $'stop\nforget' && "${pendingStart}" == true ]]
+                else
+                    [[ "$(<"${rollbackLog}")" == $'stop\nrestore' && "${pendingStart}" == false ]]
+                fi
+                [[ "${nginxState}" == false ]]
+            else
+                rollbackSubscribeNginxInstall "${backupDir}" "${wasRunning}" false failed "${configWasApplied}"
+                [[ "$(<"${currentConfig}")" == old-config && "${pendingStart}" == false ]]
+                case "${scenario}" in
+                running) [[ "$(<"${rollbackLog}")" == $'stop\nrestore\nstart' && "${nginxState}" == true ]] ;;
+                unapplied-running) [[ "$(<"${rollbackLog}")" == restore && "${nginxState}" == true ]] ;;
+                *) [[ "$(<"${rollbackLog}")" == $'stop\nrestore' && "${nginxState}" == false ]] ;;
+                esac
+            fi
+        done
+    )
 )
 
 assertCapturedSubscribeOutputs() {

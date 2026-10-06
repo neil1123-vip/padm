@@ -607,6 +607,70 @@ runCoreUpgradePendingStartRollbackRegression() (
             regressionExpectStatus 1 coreTemplateRestoreServiceState "${core}" false
         done
     )
+    (
+        local release restoreRc events= backup="${root}/startup-backup"
+        checkLogBackupRestore() { events+=$'restore\n'; return "${restoreRc}"; }
+        systemctl() { events+="systemd:$*"$'\n'; }
+        rc-update() { events+="openrc:$*"$'\n'; }
+        padmForgetCleanupPath() { events+=$'keep\n'; }
+        padmRemoveCleanupPath() { events+=$'cleanup\n'; }
+        for release in debian alpine; do
+            restoreRc=1 events=
+            regressionExpectStatus 1 restoreCoreStartupServiceInstall "${backup}" xray true
+            [[ "${events}" == $'restore\nkeep\n' ]]
+            restoreRc=0 events=
+            restoreCoreStartupServiceInstall "${backup}" xray true
+            if [[ "${release}" == debian ]]; then
+                [[ "${events}" == $'restore\nsystemd:daemon-reload\nsystemd:enable xray.service\ncleanup\n' ]]
+            else
+                [[ "${events}" == $'restore\nopenrc:add xray default\ncleanup\n' ]]
+            fi
+        done
+    )
+    (
+        local core failure events= configBackup= serviceBackup=
+        coreTemplateConfigBackupCreate() {
+            configBackup="${root}/config-backup"
+            mkdir -p "${configBackup}"
+            printf -v "$1" '%s' "${configBackup}"
+        }
+        checkLogBackupRestore() { events+=$'config-restore\n'; }
+        restoreCoreStartupServiceInstall() {
+            events+=$'service-restore\n'
+            [[ "${failure}" != unit-fail ]] || return 1
+            padmRemoveCleanupPath "$1"
+        }
+        xrayRunning() { return 0; }
+        singBoxRunning() { return 0; }
+        handleXray() { recordRecoveryAction "$@"; }
+        handleSingBox() { recordRecoveryAction "$@"; }
+        recordRecoveryAction() {
+            events+="$1"$'\n'
+            [[ "$1" != stop || "${failure}" != stop-fail ]]
+        }
+        failedServiceInstall() {
+            serviceBackup="${root}/service-backup"
+            mkdir -p "${serviceBackup}"
+            coreInstallServiceBackupFinalize "${serviceBackup}" "${core}" true
+            return 7
+        }
+        # 模板恢复前必须确认新核心已停止，恢复失败不能再启动原服务。
+        for core in xray sing-box; do
+            for failure in stop-fail unit-fail success; do
+                events=
+                regressionExpectStatus 7 coreInstallConfigTransaction "${core}" failedServiceInstall
+                if [[ "${failure}" == stop-fail ]]; then
+                    [[ "${events}" == $'stop\n' && -d "${configBackup}" && -d "${serviceBackup}" ]]
+                elif [[ "${failure}" == unit-fail ]]; then
+                    [[ "${events}" == $'stop\nconfig-restore\nservice-restore\n' && -d "${serviceBackup}" ]]
+                else
+                    [[ "${events}" == $'stop\nconfig-restore\nservice-restore\nstop\nstart\n' ]]
+                    [[ ! -d "${configBackup}" && ! -d "${serviceBackup}" ]]
+                fi
+                command rm -rf -- "${configBackup}" "${serviceBackup}"
+            done
+        done
+    )
 
     # 启动失败但无进程时也要取消待启动任务；取消失败不能覆盖新文件或启动旧核心。
     for core in xray sing-box; do
@@ -1841,6 +1905,7 @@ $1:refresh"
             printf 'new-main-without-stream\n' >"${PADM_REALITY_STREAM_NGINX_CONF}"
             printf 'new-detect\n' >"${nginxConfigPath}checkPortOpen.conf"
             nginxRuntimeState=true
+            [[ "${failure}" != pending* ]] || nginxRuntimeState=false
             if [[ "${failure}" == core-stop ]]; then
                 xrayRuntimeState=false singBoxRuntimeState=false
                 [[ "${core}" != xray ]] || xrayRuntimeState=true
@@ -1854,7 +1919,7 @@ $1:refresh"
             oldCore=sing-box
             [[ "${core}" != sing-box ]] || oldCore=xray
             for initialState in true false; do
-                for failure in none restore stop core-stop; do
+                for failure in none restore stop core-stop pending pending-stop; do
                     printf '{"old":true}\n' >"${rollbackRoot}/${core}/00_log.json"
                     for file in "${files[@]}"; do
                         printf 'old:%s\n' "${file}" >"${nginxConfigPath}${file}"
@@ -1869,14 +1934,14 @@ $1:refresh"
                     failStopTarget=
                     : >"${serviceLog}"
                     [[ "${failure}" != restore ]] || restoreFailed=true
-                    [[ "${failure}" != stop ]] || stopFailed=true
+                    [[ "${failure}" != stop && "${failure}" != pending-stop ]] || stopFailed=true
                     if [[ "${failure}" == core-stop ]]; then
                         failStopTarget=${core}
                         [[ "${oldCore}" != xray ]] || xrayRuntimeState=true
                         [[ "${oldCore}" != sing-box ]] || singBoxRuntimeState=true
                     fi
                     regressionExpectStatus 7 coreSwitchConfigTransaction "${core}" failingNginxInstall
-                    if [[ "${failure}" == none ]]; then
+                    if [[ "${failure}" == none || "${failure}" == pending ]]; then
                         after=$(find "${rollbackRoot}" -type f -exec sha256sum {} + | LC_ALL=C sort)
                         [[ "${before}" == "${after}" && "${nginxRuntimeState}" == "${initialState}" &&
                             -z "${keptBackup}" ]]
@@ -1886,7 +1951,8 @@ $1:refresh"
                         [[ -d "${keptBackup}" && "${events}" != *nginx:start* ]]
                         [[ "${failure}" != restore || "${nginxRuntimeState}" == false ]]
                         [[ "${failure}" != stop || "${nginxRuntimeState}" == true ]]
-                        if [[ "${failure}" == stop || "${failure}" == core-stop ]]; then
+                        [[ "${failure}" != pending-stop || "${nginxRuntimeState}" == false ]]
+                        if [[ "${failure}" == stop || "${failure}" == core-stop || "${failure}" == pending-stop ]]; then
                             [[ "${events}" != *restore* ]]
                             grep -qx '{"new":true}' "${rollbackRoot}/${core}/00_log.json"
                         fi

@@ -415,33 +415,25 @@ rollbackSubscribeNginxInstall() {
     local nginxWasEnabled=$3
     local reason=$4
     local configWasApplied=${5:-true}
-    local installStateRestored=true
-    local serviceRestored=true
 
-    restoreCoreStartupServiceInstall "${backupDir}" nginx "${nginxWasEnabled}" || installStateRestored=false
-
-    if [[ "${nginxWasRunning}" == "true" ]]; then
-        if [[ "${installStateRestored}" == "true" && "${configWasApplied}" == "true" ]] &&
-            nginxRunning && ! runSubscribeNginxAction stop; then
-            serviceRestored=false
-        fi
-        if ! nginxRunning && ! runSubscribeNginxAction start restore; then
-            serviceRestored=false
-        fi
-    elif nginxRunning && ! runSubscribeNginxAction stop; then
-        serviceRestored=false
+    # 取消待启动任务后才恢复配置；未应用配置时保留原有运行态。
+    if [[ "${configWasApplied}" == "true" || "${nginxWasRunning}" != "true" ]] &&
+        ! runSubscribeNginxAction stop; then
+        padmForgetCleanupPath "${backupDir}"
+        errorCard "${reason}，Nginx 停止失败，未覆盖当前配置" "备份目录: ${backupDir}"
+        return 1
     fi
-
-    if [[ "${installStateRestored}" == "true" && "${serviceRestored}" == "true" ]]; then
-        errorCard "${reason}，已恢复旧 Nginx 配置、开机自启和运行状态"
-        return 0
-    fi
-    if [[ "${installStateRestored}" != "true" ]]; then
+    if ! restoreCoreStartupServiceInstall "${backupDir}" nginx "${nginxWasEnabled}"; then
         errorCard "${reason}，且回滚未完全成功" "请手动检查 Nginx 配置和服务状态；备份目录: ${backupDir}"
-    else
-        errorCard "${reason}，旧 Nginx 配置已恢复但运行状态恢复失败" "请手动检查 Nginx 服务状态"
+        return 1
     fi
-    return 1
+    if [[ "${nginxWasRunning}" == "true" ]] &&
+        ! nginxRunning && ! runSubscribeNginxAction start restore; then
+        errorCard "${reason}，旧 Nginx 配置已恢复但运行状态恢复失败" "请手动检查 Nginx 服务状态"
+        return 1
+    fi
+    errorCard "${reason}，已恢复旧 Nginx 配置、开机自启和运行状态"
+    return 0
 }
 
 resolveSubscribePort() {

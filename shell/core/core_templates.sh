@@ -385,7 +385,7 @@ coreTemplateConfigTransaction() {
     fi
 
     # 新服务先释放端口，旧配置全部恢复成功后才重启原服务。
-    if [[ "${manageNginx}" == true ]] && nginxRunning &&
+    if [[ "${manageNginx}" == true ]] &&
         ! runCoreServiceActionAllowFailure handleNginx stop; then
         nginxStopped=false
         serviceRestored=false
@@ -403,11 +403,13 @@ coreTemplateConfigTransaction() {
         restoreBackupDir=${backupDir}
         padmForgetCleanupPath "${backupDir}"
     fi
-    if [[ -n "${PADM_CORE_INSTALL_SERVICE_BACKUP_DIR:-}" &&
-        -n "${PADM_CORE_INSTALL_SERVICE_NAME:-}" ]] &&
-        ! restoreCoreStartupServiceInstall "${PADM_CORE_INSTALL_SERVICE_BACKUP_DIR}" \
+    if [[ -n "${PADM_CORE_INSTALL_SERVICE_BACKUP_DIR:-}" && -n "${PADM_CORE_INSTALL_SERVICE_NAME:-}" ]]; then
+        if [[ "${newCoreStopped}" != true ]]; then
+            padmForgetCleanupPath "${PADM_CORE_INSTALL_SERVICE_BACKUP_DIR}"
+        elif ! restoreCoreStartupServiceInstall "${PADM_CORE_INSTALL_SERVICE_BACKUP_DIR}" \
             "${PADM_CORE_INSTALL_SERVICE_NAME}" "${PADM_CORE_INSTALL_SERVICE_WAS_ENABLED:-false}"; then
-        serviceRestored=false
+            serviceRestored=false
+        fi
     fi
     if [[ -n "${PADM_CORE_SWITCH_CLEANUP_BACKUP_DIR:-}" ]]; then
         if adapterRestoreManagedRollbackBackup "${PADM_CORE_SWITCH_CLEANUP_BACKUP_DIR}"; then
@@ -418,7 +420,8 @@ coreTemplateConfigTransaction() {
             padmForgetCleanupPath "${PADM_CORE_SWITCH_CLEANUP_BACKUP_DIR}"
         fi
     fi
-    if [[ "${configRestored}" == "true" && "${cleanupRestored}" == "true" && "${newCoreStopped}" == "true" ]]; then
+    if [[ "${configRestored}" == "true" && "${cleanupRestored}" == "true" &&
+        "${newCoreStopped}" == "true" && "${serviceRestored}" == "true" ]]; then
         if [[ "${core}" == "xray" || "${PADM_CORE_INSTALL_TRANSACTION_ACTIVE:-}" == "true" ]] &&
             ! coreTemplateRestoreServiceState xray "${xrayWasRunning}" "${xrayRestartRunning}"; then
             serviceRestored=false
@@ -436,7 +439,8 @@ coreTemplateConfigTransaction() {
     if [[ "${nginxStopped}" != true ]]; then
         errorCard "${title}失败，Nginx 停止失败，未覆盖当前配置；备份保留在: ${backupDir}"
     elif [[ "${newCoreStopped}" != true ]]; then
-        errorCard "${title}失败，新核心停止失败，未覆盖当前配置；备份保留在: ${backupDir}"
+        errorCard "${title}失败，新核心停止失败，未覆盖当前配置；备份保留在: ${backupDir}" \
+            "服务模板备份: ${PADM_CORE_INSTALL_SERVICE_BACKUP_DIR:-未生成}"
     elif [[ "${configRestored}" != "true" ]]; then
         errorCard "${title}失败，且旧配置恢复失败，请手动检查备份目录: ${backupDir}"
     elif [[ "${cleanupRestored}" != "true" ]]; then
