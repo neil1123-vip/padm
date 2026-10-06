@@ -1762,20 +1762,13 @@ runCoreServiceActionAllowFailure() {
     return "${rc}"
 }
 
-runCoreInstallRestoringNginxOnFailure() {
-    local operation=$1
-    shift
-    local nginxWasRunning=false
-    local installStatus=0
-    nginxRunning && nginxWasRunning=true
-    "${operation}" "$@" || installStatus=$?
-    if [[ "${installStatus}" != "0" && "${nginxWasRunning}" == "true" ]] && ! nginxRunning; then
-        if ! runCoreServiceActionAllowFailure handleNginx start restore; then
-            errorCard "核心安装失败，且 Nginx 原运行状态恢复失败，请手动检查 Nginx 服务"
-            return 1
-        fi
-    fi
-    return "${installStatus}"
+runCoreInstall() {
+    local core=$1 operation=$2
+    shift 2
+    local PADM_INSTALL_RESET_HISTORY=false PADM_INSTALL_CLIENTS_PREPARED=false
+    local AUTO_UUID="${AUTO_UUID:-}" AUTO_USER="${AUTO_USER:-}" AUTO_PORT="${AUTO_PORT:-}"
+    prepareCoreInstallInputs "${core}" || return 1
+    coreSwitchConfigTransaction "${core}" padmRunPortAllowTransaction "${operation}" "$@"
 }
 
 coreInstallServiceAction() {
@@ -2703,6 +2696,12 @@ prepareCoreInstallInputs() {
     fi
     coreTemplateCollectInitialClients "${core}" false true || return 1
     PADM_INSTALL_CLIENTS_PREPARED=true
+    if { [[ "${core}" == xray ]] &&
+        { [[ -z "${selectCustomInstallType:-}" ]] || protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; }; } ||
+        [[ "${core}" == sing-box && -z "${selectCustomInstallType:-}" && -n "${btDomain:-}" ]]; then
+        readInstallTLSPort || return 1
+        AUTO_PORT=${port}
+    fi
     return 0
 }
 
@@ -2744,13 +2743,10 @@ installXrayRealityApply() {
 }
 
 installXrayReality() {
-    local PADM_INSTALL_RESET_HISTORY=false PADM_INSTALL_CLIENTS_PREPARED=false
-    local AUTO_UUID="${AUTO_UUID:-}" AUTO_USER="${AUTO_USER:-}"
     selectCustomInstallType=",1,"
     realityOnlyWithDomain=
     [[ "$(normalizeYesNo "${AUTO_REALITY_DOMAIN:-}")" == "y" ]] && realityOnlyWithDomain=true
-    prepareCoreInstallInputs xray || return 1
-    runCoreInstallRestoringNginxOnFailure coreSwitchConfigTransaction xray padmRunPortAllowTransaction installXrayRealityApply "$@"
+    runCoreInstall xray installXrayRealityApply "$@"
 }
 
 # 安装 sing-box Reality
@@ -2765,13 +2761,10 @@ installSingBoxRealityApply() {
 }
 
 installSingBoxReality() {
-    local PADM_INSTALL_RESET_HISTORY=false PADM_INSTALL_CLIENTS_PREPARED=false
-    local AUTO_UUID="${AUTO_UUID:-}" AUTO_USER="${AUTO_USER:-}"
     selectCustomInstallType=",1,"
     realityOnlyWithDomain=
     [[ "$(normalizeYesNo "${AUTO_REALITY_DOMAIN:-}")" == "y" ]] && realityOnlyWithDomain=true
-    prepareCoreInstallInputs sing-box || return 1
-    runCoreInstallRestoringNginxOnFailure coreSwitchConfigTransaction sing-box padmRunPortAllowTransaction installSingBoxRealityApply "$@"
+    runCoreInstall sing-box installSingBoxRealityApply "$@"
 }
 
 # 自定义输入原地纠错，避免重复进入安装事务。
@@ -2875,12 +2868,9 @@ customXrayInstallApply() {
 }
 
 customXrayInstall() {
-    local PADM_INSTALL_RESET_HISTORY=false PADM_INSTALL_CLIENTS_PREPARED=false
-    local AUTO_UUID="${AUTO_UUID:-}" AUTO_USER="${AUTO_USER:-}"
     selectCoreInstallProtocols xray "${1:-}" || return 1
     configureRealityDomainMode "${selectCustomInstallType}" "${2:-}" || return 1
-    prepareCoreInstallInputs xray || return 1
-    runCoreInstallRestoringNginxOnFailure coreSwitchConfigTransaction xray padmRunPortAllowTransaction customXrayInstallApply
+    runCoreInstall xray customXrayInstallApply
 }
 
 
@@ -2906,12 +2896,9 @@ customSingBoxInstallApply() {
 }
 
 customSingBoxInstall() {
-    local PADM_INSTALL_RESET_HISTORY=false PADM_INSTALL_CLIENTS_PREPARED=false
-    local AUTO_UUID="${AUTO_UUID:-}" AUTO_USER="${AUTO_USER:-}"
     selectCoreInstallProtocols sing-box "${1:-}" || return 1
     configureRealityDomainMode "${selectCustomInstallType}" "${2:-}" || return 1
-    prepareCoreInstallInputs sing-box || return 1
-    runCoreInstallRestoringNginxOnFailure coreSwitchConfigTransaction sing-box padmRunPortAllowTransaction customSingBoxInstallApply
+    runCoreInstall sing-box customSingBoxInstallApply
 }
 
 
@@ -2987,11 +2974,8 @@ xrayCoreInstallApply() {
 }
 
 xrayCoreInstall() {
-    local PADM_INSTALL_RESET_HISTORY=false PADM_INSTALL_CLIENTS_PREPARED=false
-    local AUTO_UUID="${AUTO_UUID:-}" AUTO_USER="${AUTO_USER:-}"
     selectCustomInstallType=
-    prepareCoreInstallInputs xray || return 1
-    runCoreInstallRestoringNginxOnFailure coreSwitchConfigTransaction xray padmRunPortAllowTransaction xrayCoreInstallApply "$@"
+    runCoreInstall xray xrayCoreInstallApply "$@"
 }
 
 
@@ -3023,11 +3007,8 @@ singBoxInstallApply() {
 }
 
 singBoxInstall() {
-    local PADM_INSTALL_RESET_HISTORY=false PADM_INSTALL_CLIENTS_PREPARED=false
-    local AUTO_UUID="${AUTO_UUID:-}" AUTO_USER="${AUTO_USER:-}"
     selectCustomInstallType=
-    prepareCoreInstallInputs sing-box || return 1
-    runCoreInstallRestoringNginxOnFailure coreSwitchConfigTransaction sing-box padmRunPortAllowTransaction singBoxInstallApply "$@"
+    runCoreInstall sing-box singBoxInstallApply "$@"
 }
 
 

@@ -284,7 +284,6 @@ runRealityProfileFailureRegression() (
     : >"${sideEffectLog}"
     readLastInstallationConfig() { printf 'read-last\n' >>"${sideEffectLog}"; return 0; }
     installTools() { printf 'install-tools\n' >>"${sideEffectLog}"; return 0; }
-    runCoreInstallRestoringNginxOnFailure() { "${4}"; }
     AUTO_INSTALL=true
     AUTO_ENTRY_HOST=
     AUTO_DOMAIN=

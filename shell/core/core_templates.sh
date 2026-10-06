@@ -215,8 +215,20 @@ coreTemplateConfigBackupCreate() {
         fi
     fi
 
-    if [[ "${core}" == "sing-box" && -n "${nginxConfigPath:-}" ]]; then
-        for fileName in default.conf sing_box_VMess_HTTPUpgrade.conf; do
+    local -a nginxFiles=()
+    if [[ "${core}" == "sing-box" ]]; then
+        nginxFiles=(default.conf sing_box_VMess_HTTPUpgrade.conf)
+    fi
+    if [[ "${PADM_CORE_SWITCH_TRANSACTION_ACTIVE:-}" == true ]] &&
+        { [[ -z "${selectCustomInstallType:-}" ]] || protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; }; then
+        # 端口检测成功也会清理入口，外层安装失败仍需恢复整套 Nginx 承接配置。
+        nginxFiles=(default.conf alone.conf sing_box_VMess_HTTPUpgrade.conf subscribe.conf checkPortOpen.conf)
+        targets+=("$(realityStreamSplitConfFile)" "$(realityStreamSplitStateFile)")
+        targetPath=$(realityStreamSplitNginxConf)
+        [[ -z "${targetPath}" ]] || targets+=("${targetPath}")
+    fi
+    if [[ -n "${nginxConfigPath:-}" ]]; then
+        for fileName in "${nginxFiles[@]}"; do
             targetPath=$(nginxConfigFilePath "${fileName}") || return 1
             if [[ -z "${seenTargets[${targetPath}]+x}" ]]; then
                 targets+=("${targetPath}")
@@ -323,11 +335,17 @@ coreTemplateConfigTransaction() {
     local cleanupRestored=true
     local serviceRestored=true
     local newCoreStopped=true
+    local manageNginx=false nginxWasRunning=false nginxStopped=true
     local restoreBackupDir=
     local title="Xray 配置初始化"
     [[ "${core}" == "sing-box" ]] && title="sing-box 配置初始化"
     [[ "${core}" == "xray" ]] && xrayRestartRunning=true
     [[ "${core}" == "sing-box" ]] && singBoxRestartRunning=true
+    if [[ "${PADM_CORE_SWITCH_TRANSACTION_ACTIVE:-}" == true ]] &&
+        { [[ -z "${selectCustomInstallType:-}" ]] || protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; }; then
+        manageNginx=true
+        nginxRunning && nginxWasRunning=true
+    fi
 
     coreTemplateConfigBackupCreate backupDir "${core}" || {
         errorCard "${title}备份失败，已取消修改"
@@ -359,13 +377,19 @@ coreTemplateConfigTransaction() {
         return 0
     fi
 
-    # 新核心先释放端口，避免恢复旧核心时被新服务阻挡。
+    # 新服务先释放端口，旧配置全部恢复成功后才重启原服务。
+    if [[ "${manageNginx}" == true ]] && nginxRunning &&
+        ! runCoreServiceActionAllowFailure handleNginx stop; then
+        nginxStopped=false
+        serviceRestored=false
+    fi
     if [[ "${PADM_CORE_INSTALL_TRANSACTION_ACTIVE:-}" == "true" ]] &&
         ! coreTemplateRestoreServiceState "${core}" false; then
         serviceRestored=false
         newCoreStopped=false
     fi
-    if checkLogBackupRestore "${backupDir}"; then
+    if [[ "${nginxStopped}" == true && "${newCoreStopped}" == true ]] &&
+        checkLogBackupRestore "${backupDir}"; then
         padmRemoveCleanupPath "${backupDir}"
     else
         configRestored=false
@@ -396,9 +420,17 @@ coreTemplateConfigTransaction() {
             ! coreTemplateRestoreServiceState sing-box "${singBoxWasRunning}" "${singBoxRestartRunning}"; then
             serviceRestored=false
         fi
+        if [[ "${manageNginx}" == true && "${nginxWasRunning}" == true ]] &&
+            ! runCoreServiceActionAllowFailure handleNginx start restore; then
+            serviceRestored=false
+        fi
     fi
 
-    if [[ "${configRestored}" != "true" ]]; then
+    if [[ "${nginxStopped}" != true ]]; then
+        errorCard "${title}失败，Nginx 停止失败，未覆盖当前配置；备份保留在: ${backupDir}"
+    elif [[ "${newCoreStopped}" != true ]]; then
+        errorCard "${title}失败，新核心停止失败，未覆盖当前配置；备份保留在: ${backupDir}"
+    elif [[ "${configRestored}" != "true" ]]; then
         errorCard "${title}失败，且旧配置恢复失败，请手动检查备份目录: ${backupDir}"
     elif [[ "${cleanupRestored}" != "true" ]]; then
         errorCard "${title}失败，旧核心配置恢复失败，请手动检查备份目录: ${restoreBackupDir}"

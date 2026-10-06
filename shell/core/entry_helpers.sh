@@ -183,8 +183,8 @@ EOF
     fi
 }
 
-# 自定义端口
-customPortFunction() {
+# 仅确认入口端口，网络和服务操作留在安装事务内。
+readInstallTLSPort() {
     local historyPort=${currentPort:-${customPort:-}}
     if [[ -n "${AUTO_PORT:-}" ]]; then
         port=${AUTO_PORT}
@@ -210,6 +210,12 @@ customPortFunction() {
     fi
 
     validPortNumber "${port}" || { corePortInputErrorCard; return 1; }
+}
+
+# 自定义端口
+customPortFunction() {
+    readInstallTLSPort || return 1
+    local historyPort=${currentPort:-${customPort:-}}
     statusCard "TLS 入口端口" "${port}"
     if [[ "${port}" == "${historyPort}" && "${domain:-}" == "${currentHost:-}" ]]; then
         return 0

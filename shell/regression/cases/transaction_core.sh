@@ -580,6 +580,7 @@ runCoreCleanupFailurePropagationRegression() (
     command rm -f "${reachedFile}"
     readLastInstallationConfig() { return 0; }
     coreTemplateCollectInitialClients() { return 0; }
+    readInstallTLSPort() { port=2443; return 0; }
     collectEntryProfile() { realityEntryHost=cleanup.example.com; return 0; }
     persistRealityEntryProfile() { printf 'persist\n' >>"${queueLog}"; return 0; }
     unInstallSubscribe() { return 0; }
@@ -1207,6 +1208,7 @@ runCoreInstallServiceActionFailureRegression() (
     protocolRegistryMenu() { return 0; }
     readLastInstallationConfig() { return 0; }
     coreTemplateCollectInitialClients() { return 0; }
+    readInstallTLSPort() { port=2443; return 0; }
     unInstallSubscribe() { return 0; }
     installTools() { printf 'installTools:%s\n' "$*" >>"${callLog}"; return 0; }
     initTLSNginxConfig() { printf 'initTLS:%s\n' "$*" >>"${callLog}"; return 0; }
@@ -1528,7 +1530,7 @@ $1:refresh"
         serviceRunning "${target}"
         ! serviceRunning "${oldCore}"
         ! grep -q "^${oldCore}:start:" "${serviceLog}"
-        grep -q '服务运行状态恢复失败' "${errorLog}"
+        grep -q '新核心停止失败' "${errorLog}"
         resetInstallServiceFixture success
         [[ "${oldCore}" != xray ]] || xrayRuntimeState=true
         [[ "${oldCore}" != sing-box ]] || singBoxRuntimeState=true
@@ -1538,6 +1540,116 @@ $1:refresh"
         serviceRunning "${target}"
         ! serviceRunning "${oldCore}"
     done
+
+    (
+        # 使用真实备份，保证失败后配置和 Nginx 运行态一起回到安装前。
+        local rollbackRoot="${root}/nginx-rollback" core oldCore initialState failure
+        local nginxConfigPath="${rollbackRoot}/conf/"
+        local PADM_REALITY_STREAM_CONF_FILE="${rollbackRoot}/stream.conf"
+        local PADM_REALITY_STREAM_STATE_FILE="${rollbackRoot}/stream.json"
+        local PADM_REALITY_STREAM_NGINX_CONF="${rollbackRoot}/nginx.conf"
+        local PADM_REALITY_ENTRY_HOST_FILE="${rollbackRoot}/entry-host"
+        local file before after keptBackup= stopFailed=false restoreFailed=false
+        local realRestoreSource events=
+        local -a files=(default.conf alone.conf sing_box_VMess_HTTPUpgrade.conf subscribe.conf checkPortOpen.conf)
+        mkdir -p "${nginxConfigPath}" "${rollbackRoot}/xray" "${rollbackRoot}/sing-box"
+        xrayTemplateConfigDir() { printf '%s\n' "${rollbackRoot}/xray"; }
+        singBoxTemplateConfigDir() { printf '%s\n' "${rollbackRoot}/sing-box"; }
+        coreSwitchCleanupBackupCreate() { printf -v "$1" '%s' ''; }
+        realRestoreSource=$(declare -f checkLogBackupRestore)
+        eval "${realRestoreSource/checkLogBackupRestore/restoreNginxRegressionFiles}"
+        checkLogBackupRestore() {
+            events+=$'restore\n'
+            if [[ "${restoreFailed}" == true ]]; then
+                keptBackup=$1
+                return 1
+            fi
+            restoreNginxRegressionFiles "$@"
+        }
+        padmForgetCleanupPath() {
+            [[ ! -d "$1" ]] || keptBackup=$1
+            return 0
+        }
+        handleNginx() {
+            events+="nginx:$1"$'\n'
+            if [[ "$1" == stop ]]; then
+                [[ "${stopFailed}" != true ]] || return 1
+                nginxRuntimeState=false
+            else
+                # 文件未恢复完成时不能启动，尤其不能继续使用新 fallback。
+                after=$(find "${rollbackRoot}" -type f -exec sha256sum {} + | LC_ALL=C sort)
+                [[ "${after}" == "${before}" ]] || return 1
+                nginxRuntimeState=true
+            fi
+        }
+        failingNginxInstall() {
+            printf '{"new":true}\n' >"${rollbackRoot}/${core}/00_log.json"
+            printf 'new-fallback\n' >"${nginxConfigPath}alone.conf"
+            rm -f "${nginxConfigPath}default.conf" "${nginxConfigPath}subscribe.conf" \
+                "${PADM_REALITY_STREAM_CONF_FILE}" "${PADM_REALITY_STREAM_STATE_FILE}"
+            printf 'new-main-without-stream\n' >"${PADM_REALITY_STREAM_NGINX_CONF}"
+            printf 'new-detect\n' >"${nginxConfigPath}checkPortOpen.conf"
+            nginxRuntimeState=true
+            if [[ "${failure}" == core-stop ]]; then
+                xrayRuntimeState=false singBoxRuntimeState=false
+                [[ "${core}" != xray ]] || xrayRuntimeState=true
+                [[ "${core}" != sing-box ]] || singBoxRuntimeState=true
+            fi
+            events+=$'install-failed\n'
+            return 7
+        }
+        for core in xray sing-box; do
+            selectCustomInstallType=,21,
+            oldCore=sing-box
+            [[ "${core}" != sing-box ]] || oldCore=xray
+            for initialState in true false; do
+                for failure in none restore stop core-stop; do
+                    printf '{"old":true}\n' >"${rollbackRoot}/${core}/00_log.json"
+                    for file in "${files[@]}"; do
+                        printf 'old:%s\n' "${file}" >"${nginxConfigPath}${file}"
+                    done
+                    printf 'old-stream\n' >"${PADM_REALITY_STREAM_CONF_FILE}"
+                    printf '{"old":true}\n' >"${PADM_REALITY_STREAM_STATE_FILE}"
+                    printf 'old-main-with-stream\n' >"${PADM_REALITY_STREAM_NGINX_CONF}"
+                    before=$(find "${rollbackRoot}" -type f -exec sha256sum {} + | LC_ALL=C sort)
+                    nginxRuntimeState=${initialState}
+                    xrayRuntimeState=false singBoxRuntimeState=false
+                    keptBackup= events= stopFailed=false restoreFailed=false
+                    failStopTarget=
+                    : >"${serviceLog}"
+                    [[ "${failure}" != restore ]] || restoreFailed=true
+                    [[ "${failure}" != stop ]] || stopFailed=true
+                    if [[ "${failure}" == core-stop ]]; then
+                        failStopTarget=${core}
+                        [[ "${oldCore}" != xray ]] || xrayRuntimeState=true
+                        [[ "${oldCore}" != sing-box ]] || singBoxRuntimeState=true
+                    fi
+                    regressionExpectStatus 7 coreSwitchConfigTransaction "${core}" failingNginxInstall
+                    if [[ "${failure}" == none ]]; then
+                        after=$(find "${rollbackRoot}" -type f -exec sha256sum {} + | LC_ALL=C sort)
+                        [[ "${before}" == "${after}" && "${nginxRuntimeState}" == "${initialState}" &&
+                            -z "${keptBackup}" ]]
+                        [[ "${events}" == $'install-failed\nnginx:stop\nrestore\n'* ]]
+                        [[ "${initialState}" != true ]] || [[ "${events}" == *$'nginx:start\n' ]]
+                    else
+                        [[ -d "${keptBackup}" && "${events}" != *nginx:start* ]]
+                        [[ "${failure}" != restore || "${nginxRuntimeState}" == false ]]
+                        [[ "${failure}" != stop || "${nginxRuntimeState}" == true ]]
+                        if [[ "${failure}" == stop || "${failure}" == core-stop ]]; then
+                            [[ "${events}" != *restore* ]]
+                            grep -qx '{"new":true}' "${rollbackRoot}/${core}/00_log.json"
+                        fi
+                        if [[ "${failure}" == core-stop ]]; then
+                            serviceRunning "${core}"
+                            ! serviceRunning "${oldCore}"
+                            ! grep -q ':start:' "${serviceLog}"
+                        fi
+                        command rm -rf -- "${keptBackup}"
+                    fi
+                done
+            done
+        done
+    )
 )
 
 runSingBoxMergeConfigTransactionRegression() (

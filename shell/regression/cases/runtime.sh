@@ -514,6 +514,7 @@ runInstallWorkflowRegression() (
         nginxRunning() { events+=$'nginx\n'; return 0; }
         handleNginx() { events+=$'service\n'; }
         coreTemplateCollectInitialClients() { :; }
+        readInstallTLSPort() { :; }
         coreSwitchConfigTransaction() { events+="transaction:${PADM_INSTALL_RESET_HISTORY}"$'\n'; return 17; }
         for install in installXrayReality installSingBoxReality customXrayInstall customSingBoxInstall xrayCoreInstall singBoxInstall; do
             for input in "" n $'n\n' $'n\n\n'; do
@@ -531,7 +532,7 @@ runInstallWorkflowRegression() (
             exec {inputFd}< <(printf 'next-parent-action\n')
             regressionExpectStatus 17 "${install}" 1 domain <&"${inputFd}"
             read -r -u "${inputFd}" nextInput
-            [[ "${events}" == $'nginx\ntransaction:true\nnginx\n' && "${historyReads}" == 1 ]]
+            [[ "${events}" == $'transaction:true\n' && "${historyReads}" == 1 ]]
             [[ "${nextInput}" == next-parent-action && "${PADM_INSTALL_RESET_HISTORY}" == parent-value ]]
             if [[ "${selectCustomInstallType}" == ,1, ]]; then
                 [[ "${realityEntryHost}" == new.example.com ]]
@@ -567,6 +568,7 @@ runInstallWorkflowRegression() (
         configureRealityDomainMode() { :; }
         collectEntryProfile() { :; }
         readInstallTLSDomain() { :; }
+        readInstallTLSPort() { :; }
         nginxRunning() { events+=$'nginx\n'; return 1; }
         coreSwitchConfigTransaction() {
             [[ "${PADM_INSTALL_CLIENTS_PREPARED}" == true ]]
@@ -600,10 +602,56 @@ runInstallWorkflowRegression() (
             exec {inputFd}< <(printf '11111111-1111-4111-8111-111111111111\nalice\nnext-parent-action\n')
             regressionExpectStatus 1 "${install}" 28 <&"${inputFd}"
             read -r -u "${inputFd}" nextInput
-            [[ "${nextInput}" == next-parent-action && "${events}" == $'nginx\ntransaction\ntools\nwrite\n' ]]
+            [[ "${nextInput}" == next-parent-action && "${events}" == $'transaction\ntools\nwrite\n' ]]
             [[ "${PADM_INSTALL_CLIENTS_PREPARED}" == parent-value ]]
             [[ -z "${AUTO_UUID:-}${AUTO_USER:-}" ]]
             jq -e '.[0] | (.id // .uuid) == "11111111-1111-4111-8111-111111111111" and (.email // .name) == "alice"' <<<"${currentClients}" >/dev/null
+            exec {inputFd}<&-
+        done
+    )
+
+    (
+        # 公共 TLS 端口先确认；取消或非法自动参数不能备份、下载或改动服务。
+        local install input inputFd nextInput events= port= btDomain= domain=
+        local currentHost= currentPort= customPort= lastInstallationConfig=
+        local AUTO_PORT= AUTO_DOMAIN=tls.example.com
+        readLastInstallationConfig() { lastInstallationConfig=; }
+        coreTemplateCollectInitialClients() { :; }
+        configureRealityDomainMode() { :; }
+        protocolSelectionShowRiskNotes() { :; }
+        nginxRunning() { return 1; }
+        coreSwitchConfigTransaction() { events+=$'backup\n'; shift; "$@"; }
+        padmRunPortAllowTransaction() { "$@"; }
+        installTools() { events+=$'tools\n'; }
+        installTLS() { events+=$'tls\n'; return 1; }
+        installSingBox() { events+=$'download\n'; return 1; }
+        handleNginx() { events+="nginx:$1"$'\n'; }
+        handleXray() { events+="xray:$1"$'\n'; }
+        allowPort() { events+="allow:$1"$'\n'; }
+        checkDNSIP() { :; }
+        removeNginxDefaultConf() { :; }
+        checkPortOpen() { :; }
+        for install in customXrayInstall xrayCoreInstall singBoxInstall; do
+            btDomain= selectCoreType=1
+            [[ "${install}" != singBoxInstall ]] || { btDomain=panel.example.com; selectCoreType=2; }
+            for input in "" $'1+2\n'; do
+                events=
+                regressionExpectStatus 1 "${install}" 28 < <(printf '%s' "${input}")
+                [[ -z "${events}${AUTO_PORT}" ]]
+            done
+            AUTO_PORT=1+2
+            exec {inputFd}< <(printf 'next-parent-action\n')
+            regressionExpectStatus 1 "${install}" 28 <&"${inputFd}"
+            read -r -u "${inputFd}" nextInput
+            [[ "${nextInput}" == next-parent-action && -z "${events}" && "${AUTO_PORT}" == 1+2 ]]
+            exec {inputFd}<&-
+            AUTO_PORT=
+            events=
+            exec {inputFd}< <(printf '1+2\n8443\nnext-parent-action\n')
+            regressionExpectStatus 1 "${install}" 28 <&"${inputFd}"
+            read -r -u "${inputFd}" nextInput
+            [[ "${nextInput}" == next-parent-action && "${port}" == 8443 && -z "${AUTO_PORT}" ]]
+            [[ "${events}" == $'backup\ntools\nallow:8443\n'* ]]
             exec {inputFd}<&-
         done
     )
