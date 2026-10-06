@@ -658,7 +658,10 @@ realityTargetRefreshRecords() {
             [[ "${cdnRisk}" == "no" && "${score}" == "A" ]] || continue
             realityTargetCandidateBlocked "${host}" && continue
             printf '%s\n' "${line}"
-        done <"${resultsFile}"
+        done < <(awk -F'\t' '
+          $1 != "" {if (!($1 in seen)) order[++count] = $1; seen[$1] = 1; line[$1] = $0}
+          END {for (i = 1; i <= count; i++) print line[order[i]]}
+        ' "${resultsFile}")
     fi
     while IFS='|' read -r candidateHost sni name _region category cdnRisk _rank _recommended note; do
         [[ "${scope}" == "all" || "${_recommended}" == "yes" ]] || continue
@@ -771,14 +774,19 @@ sortedRealityTargetResults() {
         next
       }
       {
+        if ($1 == "") next
         target = $1
         sub(/:[^:]*$/, "", target)
-        if ($5 == "no" && $10 == score && !blockedHost(target)) {
+        keep[$1] = ($5 == "no" && $10 == score && !blockedHost(target))
+        if (keep[$1]) {
           networkRank = ($9 == "same_asn" ? 4 : ($9 == "same_provider" ? 3 : ($9 == "different_network" ? 2 : 1)))
           certRank = ($12 ~ /^[0-9]+$/ ? $12 : 0)
           checked = ($14 ~ /^[0-9]+$/ ? $14 : 0)
-          printf "%d\t%d\t%d\t%s\n", networkRank, certRank, checked, $0
+          ranked[$1] = sprintf("%d\t%d\t%d\t%s", networkRank, certRank, checked, $0)
         }
+      }
+      END {
+        for (target in ranked) if (keep[target]) print ranked[target]
       }
     ' <(realityTargetBlockedCandidates) "${resultsFile}" | sort -t $'\t' -k1,1nr -k2,2nr -k3,3nr | cut -f4-
 }
@@ -2192,7 +2200,7 @@ importRealityScannerResults() {
     local maxJobs=${PADM_REALITY_SECONDARY_JOBS:-8}
     local detector ip origin domain issuer domainKey record target score cdnRisk _geo
     local normalizedFile resultLinesFile failedTargetsFile probeDir asnCacheFile jobFile doneFile probeRecord probeStatus probePayload currentDomain
-    local index=0 activeIndex slot pid running=0 madeProgress imported=0 skipped=0 duplicateCount=0 processed=0 totalRecords importStart lastProgressAt=0 now countA=0 countB=0 countC=0 countFail=0
+    local index=0 activeIndex slot pid running=0 madeProgress imported=0 skipped=0 duplicateCount=0 processed=0 totalRecords importStart lastProgressAt=0 now countA=0 countB=0 countC=0 countFail=0 commitStatus=0
     local -a candidates=() activeSlots=() jobPids=() jobFiles=() jobDoneFiles=() jobTargets=() jobDomains=()
     local -A seenDomains=()
     [[ -f "${sourceFile}" ]] || {
@@ -2345,12 +2353,16 @@ importRealityScannerResults() {
             ;;
         esac
     done
-    writeRealityTargetResultLines "${resultLinesFile}"
-    removeRealityTargetsFromUnifiedLibrary "${failedTargetsFile}"
+    writeRealityTargetResultLines "${resultLinesFile}" &&
+        removeRealityTargetsFromUnifiedLibrary "${failedTargetsFile}" || commitStatus=1
     padmRemoveCleanupPath "${normalizedFile}"
     padmRemoveCleanupPath "${resultLinesFile}"
     padmRemoveCleanupPath "${failedTargetsFile}"
     padmRemoveCleanupPath "${probeDir}"
+    if (( commitStatus != 0 )); then
+        realityTargetStatusBlock red "RealiTLScanner 导入" "保存目标库失败，导入未完整完成"
+        return 1
+    fi
     if [[ -n "${summaryVar}" ]]; then
         printf -v "${summaryVar}" '%s\t%s\t%s\t%s\t%s\t%s' "${imported}" "${skipped}" "${countA}" "${countB}" "${countC}" "${countFail}"
     fi
@@ -2576,7 +2588,10 @@ runRealityScannerTargetFile() {
         processed=$((processed + batchCount))
         realityTargetStatusBlock green "RealiTLScanner 扫描" "抽样批次完成" "进度: ${processed}/${total}" "耗时: ${elapsed}s" "结果: ${outputFile}"
         if [[ -s "${outputFile}" ]]; then
-            importRealityScannerResults "${outputFile}" "${currentAsn}" "${currentOrg}" importSummary same_asn "${seenDomainsFile}"
+            if ! importRealityScannerResults "${outputFile}" "${currentAsn}" "${currentOrg}" importSummary same_asn "${seenDomainsFile}"; then
+                padmRemoveCleanupPath "${seenDomainsFile}"
+                return 1
+            fi
             IFS=$'\t' read -r batchImported batchSkipped batchA batchB batchC batchFail <<<"${importSummary}"
             totalImported=$((totalImported + batchImported))
             totalSkipped=$((totalSkipped + batchSkipped))
@@ -2626,7 +2641,10 @@ runRealityScannerPrefixFile() {
         fi
         elapsed=$(( $(date +%s) - startAt ))
         realityTargetStatusBlock green "RealiTLScanner 扫描" "prefix 完成: ${prefix}" "进度: ${index}/${total}" "耗时: ${elapsed}s" "结果: ${outputFile}"
-        [[ -s "${outputFile}" ]] && importRealityScannerResults "${outputFile}" "${currentAsn}" "${currentOrg}" "" same_asn "${seenDomainsFile}"
+        if [[ -s "${outputFile}" ]] && ! importRealityScannerResults "${outputFile}" "${currentAsn}" "${currentOrg}" "" same_asn "${seenDomainsFile}"; then
+            padmRemoveCleanupPath "${seenDomainsFile}"
+            return 1
+        fi
     done <"${prefixFile}"
     padmRemoveCleanupPath "${seenDomainsFile}"
 }
@@ -2647,6 +2665,7 @@ runRealityScannerAdvanced() {
 
 runRealityScannerSameAsnPrefixes() {
     local networkProfile currentIp rest currentAsn currentOrg allPrefixFile confirm selectedRealityScannerPrefixFile selectedRealityScannerRange selectedRealityAsnPrefixTotal selectedRealityAsnAddressTotal selectedRealityAsnSampleSize selectedRealityAsnFullScan
+    local scanStatus=0
     if ! networkProfile=$(currentRealityNetworkProfile); then
         realityTargetStatusBlock yellow "同 ASN 前缀扫描" "无法识别本机公网 ASN"
         return 1
@@ -2674,12 +2693,12 @@ runRealityScannerSameAsnPrefixes() {
         return 1
     fi
     if [[ "${selectedRealityAsnFullScan}" == "true" ]]; then
-        runRealityScannerPrefixFile "${selectedRealityScannerPrefixFile}" "${currentAsn}" "${currentOrg}"
-        padmRemoveCleanupPath "${selectedRealityScannerPrefixFile}"
+        runRealityScannerPrefixFile "${selectedRealityScannerPrefixFile}" "${currentAsn}" "${currentOrg}" || scanStatus=$?
     else
-        runRealityScannerTargetFile "${selectedRealityScannerPrefixFile}" "${currentAsn}" "${currentOrg}"
-        padmRemoveCleanupPath "${selectedRealityScannerPrefixFile}"
+        runRealityScannerTargetFile "${selectedRealityScannerPrefixFile}" "${currentAsn}" "${currentOrg}" || scanStatus=$?
     fi
+    padmRemoveCleanupPath "${selectedRealityScannerPrefixFile}"
+    return "${scanStatus}"
 }
 
 showRealityTargetCertificateChain() {
@@ -2843,10 +2862,11 @@ showRealityTargetQualityActions() {
 }
 
 showRealityTargetCachedQuality() {
-    local target=$1
-    showRealityTargetQuality "${target}" || return 1
+    local target=$1 status=0
+    showRealityTargetQuality "${target}" || status=$?
     showRealityTargetCertificateChain "${target}" || true
     showRealityTargetQualityActions "${target}" || true
+    return "${status}"
 }
 
 realityTargetFilterTitle() {
@@ -2913,9 +2933,11 @@ showRealityTargetScanResults() {
     local filter=${1:-all}
     local mode=${2:-interactive}
     local page=${3:-1} pageSize=${REALITY_TARGET_RESULT_PAGE_SIZE:-10} total maxPage choice
-    local line itemIndex=0 pageIndex=1 start end target sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note location checkedTime titleFilter selectedLine selectedTarget selectedSni parsed absoluteIndex
-    local -a sortedResults=()
-    # Keep one sorted snapshot while paging; results change only after leaving this menu.
+    local line itemIndex pageIndex start end target sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note location checkedTime titleFilter selectedLine selectedTarget selectedSni parsed selectedIndex appliedFilter=
+    local -a sortedResults=() filteredResults=()
+    [[ "${pageSize}" =~ ^[1-9][0-9]{0,2}$ ]] || pageSize=10
+    [[ "${page}" =~ ^[1-9][0-9]{0,8}$ ]] || page=1
+    # 分页共用排序快照，仅切换筛选时重建筛选结果。
     mapfile -t sortedResults < <(sortedRealityTargetResults)
     if [[ "${#sortedResults[@]}" -eq 0 ]]; then
         realityTargetStatusBlock yellow "REALITY A 级目标" "暂无 A 级目标"
@@ -2925,27 +2947,29 @@ showRealityTargetScanResults() {
         return 0
     fi
     while true; do
-        total=0
-        for line in "${sortedResults[@]}"; do
-            IFS=$'\x1f' read -r _target _sni _name category _cdnRisk _ip _asn _asOrg networkMatch score _pqc _certLength _tls13 _checkedAt _note _location <<<"${line//$'\t'/$'\x1f'}"
-            realityTargetScanResultFilterMatches "${score}" "${networkMatch}" "${filter}" "${category}" && total=$((total + 1))
-        done
+        if [[ "${filter}" != "${appliedFilter}" ]]; then
+            filteredResults=()
+            for line in "${sortedResults[@]}"; do
+                IFS=$'\x1f' read -r target sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note location <<<"${line//$'\t'/$'\x1f'}"
+                realityTargetScanResultFilterMatches "${score}" "${networkMatch}" "${filter}" "${category}" && filteredResults+=("${line}")
+            done
+            appliedFilter=${filter}
+        fi
+        total=${#filteredResults[@]}
         maxPage=$(( (total + pageSize - 1) / pageSize ))
         (( maxPage < 1 )) && maxPage=1
         (( page > maxPage )) && page=${maxPage}
         (( page < 1 )) && page=1
-        start=$(( (page - 1) * pageSize + 1 ))
+        start=$(( (page - 1) * pageSize ))
         end=$(( page * pageSize ))
+        (( end > total )) && end=${total}
         titleFilter=$(realityTargetFilterTitle "${filter}")
         echoContent title "\n┌─ REALITY A 级目标：${titleFilter} ───────────────────────────────"
         menuLine "筛选条件：${filter}；第 ${page}/${maxPage} 页；总数：${total}；n 下一页；p 上一页；f 重新筛选；r 返回"
-        itemIndex=0
         pageIndex=1
-        for line in "${sortedResults[@]}"; do
+        for ((itemIndex = start; itemIndex < end; itemIndex++)); do
+            line=${filteredResults[itemIndex]}
             IFS=$'\x1f' read -r target sni name category cdnRisk ip asn asOrg networkMatch score pqc certLength tls13 checkedAt note location <<<"${line//$'\t'/$'\x1f'}"
-            realityTargetScanResultFilterMatches "${score}" "${networkMatch}" "${filter}" "${category}" || continue
-            itemIndex=$((itemIndex + 1))
-            (( itemIndex < start || itemIndex > end )) && continue
             checkedTime=$(date -d "@${checkedAt}" "+%F %T" 2>/dev/null || printf '%s' "${checkedAt}")
             menuItem "${pageIndex}" "${target}" "${score} | X25519MLKEM768=${pqc} | cert=${certLength} | TLS1.3=${tls13} | network=${networkMatch}"
             menuLine "    cdn_risk=${cdnRisk} checked=${checkedTime} SNI=${sni} IP=${ip} ASN=${asn} ${asOrg}"
@@ -2976,22 +3000,13 @@ showRealityTargetScanResults() {
             ;;
         *)
             if [[ "${choice}" =~ ^[0-9]+$ ]]; then
-                absoluteIndex=$(( (page - 1) * pageSize + choice ))
-                selectedLine=
-                itemIndex=0
-                for line in "${sortedResults[@]}"; do
-                    IFS=$'\x1f' read -r _target _sni _name category _cdnRisk _ip _asn _asOrg networkMatch score _pqc _certLength _tls13 _checkedAt _note _location <<<"${line//$'\t'/$'\x1f'}"
-                    realityTargetScanResultFilterMatches "${score}" "${networkMatch}" "${filter}" "${category}" || continue
-                    itemIndex=$((itemIndex + 1))
-                    if [[ "${itemIndex}" == "${absoluteIndex}" ]]; then
-                        selectedLine=${line}
-                        break
-                    fi
-                done
-                if [[ -z "${selectedLine}" ]]; then
+                if [[ ! "${choice}" =~ ^[0-9]{1,9}$ ]] ||
+                    (( 10#${choice} < 1 || 10#${choice} > end - start )); then
                     errorCard "本页编号无效，请重新选择"
                     continue
                 fi
+                selectedIndex=$((start + 10#${choice} - 1))
+                selectedLine=${filteredResults[selectedIndex]}
                 selectedTarget=$(realityTargetResultField "${selectedLine}" 1)
                 selectedSni=$(realityTargetResultField "${selectedLine}" 2)
                 parsed=$(parseHostPort "${selectedTarget}" 443)
@@ -3004,23 +3019,6 @@ showRealityTargetScanResults() {
             ;;
         esac
     done
-}
-
-realityTargetResultLineByFilteredIndex() {
-    local filter=$1
-    local wanted=$2
-    local line score networkMatch index=0
-    [[ "${wanted}" =~ ^[0-9]+$ ]] || return 1
-    while IFS= read -r line; do
-        IFS=$'\x1f' read -r _target _sni _name category _cdnRisk _ip _asn _asOrg networkMatch score _pqc _certLength _tls13 _checkedAt _note _location <<<"${line//$'\t'/$'\x1f'}"
-        realityTargetScanResultFilterMatches "${score}" "${networkMatch}" "${filter}" "${category}" || continue
-        index=$((index + 1))
-        if [[ "${index}" == "${wanted}" ]]; then
-            printf '%s\n' "${line}"
-            return 0
-        fi
-    done < <(sortedRealityTargetResults)
-    return 1
 }
 
 selectRealityTargetFromScanResults() {
@@ -3077,7 +3075,7 @@ scanLocalAsnRealityTargets() {
     local detector networkProfile currentIp currentAsn currentOrg rest line parsed host target networkMatch score cdnRisk scanStart scanSeconds totalCandidates lastProgressAt=0 now
     local maxJobs=${PADM_REALITY_SECONDARY_JOBS:-8}
     local resultsFile refreshSource resultLinesFile failedTargetsFile probeDir asnCacheFile jobFile doneFile probeRecord probeStatus probePayload
-    local index=0 activeIndex slot pid running=0 madeProgress processed=0 resolved=0 failed=0 sameAsn=0 sameProvider=0 differentNetwork=0
+    local index=0 activeIndex slot pid running=0 madeProgress processed=0 resolved=0 failed=0 sameAsn=0 sameProvider=0 differentNetwork=0 commitStatus=0
     local -a candidates=() activeSlots=() jobPids=() jobFiles=() jobDoneFiles=() jobTargets=()
     case "${refreshScope}" in
     recommended | all) ;;
@@ -3211,11 +3209,15 @@ scanLocalAsnRealityTargets() {
         esac
     done
 
-    writeRealityTargetResultLines "${resultLinesFile}"
-    removeRealityTargetsFromUnifiedLibrary "${failedTargetsFile}"
+    writeRealityTargetResultLines "${resultLinesFile}" &&
+        removeRealityTargetsFromUnifiedLibrary "${failedTargetsFile}" || commitStatus=1
     padmRemoveCleanupPath "${resultLinesFile}"
     padmRemoveCleanupPath "${failedTargetsFile}"
     padmRemoveCleanupPath "${probeDir}"
+    if (( commitStatus != 0 )); then
+        realityTargetStatusBlock red "REALITY 目标库刷新" "保存目标库失败，刷新未完整完成"
+        return 1
+    fi
     scanSeconds=$(( $(date +%s) - scanStart ))
     realityTargetStatusBlock green "REALITY 目标库刷新" "复测完成" "目标: ${processed}" "并发: ${maxJobs}" "A 级目标: ${resolved}" "same_asn: ${sameAsn}" "same_provider: ${sameProvider}" "different_network: ${differentNetwork}" "非候选/失败: ${failed}" "耗时: ${scanSeconds}s"
     if [[ "$(realityTargetResultCount)" -gt 0 ]]; then

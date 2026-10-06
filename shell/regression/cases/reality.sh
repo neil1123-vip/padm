@@ -769,6 +769,10 @@ EOF
     (
         export PADM_REALITY_TARGET_RESULTS_FILE="${staleResultsFile}"
         ! realityTargetResultLine "stale.example.com:443" >/dev/null
+        ! grep -qF $'stale.example.com:443\t' <<<"$(sortedRealityTargetResults)"
+        [[ "$(realityTargetResultCount)" == "0" ]]
+        ! bestScannedRealityTargetLine A >/dev/null
+        ! grep -qF $'stale.example.com:443\t' <<<"$(realityTargetRefreshRecords)"
     )
     refreshRecordsWithNewCandidate=$(realityTargetRefreshRecords)
     [[ "$(printf '%s\n' "${refreshRecordsWithNewCandidate}" | wc -l | tr -d ' ')" == "4" ]]
@@ -792,6 +796,116 @@ EOF
     ! grep -qF $'fixture-asia.example.com:443\t' <<<"$(realityTargetRefreshRecords)"
     [[ "$(realityTargetRefreshRecords all | wc -l | tr -d ' ')" == "5" ]]
     grep -qF $'fixture-asia.example.com:443\t' <<<"$(realityTargetRefreshRecords all)"
+    (
+        local pageResultsFile="${TMP_DIR}/reality-page-selection-results.tsv"
+        local pageChoiceSequence pageIndex REALITY_TARGET_RESULT_PAGE_SIZE=10
+        export PADM_REALITY_TARGET_RESULTS_FILE="${pageResultsFile}"
+        : >"${pageResultsFile}"
+        for ((pageIndex = 1; pageIndex <= 11; pageIndex++)); do
+            formatRealityTargetResultLine "page-${pageIndex}.example.com:443" "page-${pageIndex}.example.com" \
+                "Page ${pageIndex}" "test" "no" "192.0.2.${pageIndex}" "AS64500" "ExampleNet" \
+                "same_asn" "A" "yes" "$((5000 - pageIndex))" "yes" "1234567890" "page fixture" >>"${pageResultsFile}"
+        done
+        echoContent() { :; }
+        menuClose() { :; }
+        menuItem() { :; }
+        menuLine() { :; }
+        errorCard() { printf '%s\n' "$*" >>"${pageResultsFile}.errors"; }
+        realityTargetStatusBlock() { :; }
+        menuReadChoice() {
+            printf -v "$3" '%s' "${pageChoiceSequence%% *}"
+            pageChoiceSequence=${pageChoiceSequence#* }
+        }
+        pageChoiceSequence="11 01"
+        regressionExpectStatus 2 showRealityTargetScanResults all interactive 1
+        [[ "${realityTargetHost}" == "page-1.example.com" ]]
+        [[ "$(wc -l <"${pageResultsFile}.errors" | tr -d ' ')" == "1" ]]
+        pageChoiceSequence="0 1"
+        regressionExpectStatus 2 showRealityTargetScanResults all interactive 2
+        [[ "${realityTargetHost}" == "page-11.example.com" ]]
+        [[ "$(wc -l <"${pageResultsFile}.errors" | tr -d ' ')" == "2" ]]
+        selectRealityTargetScanResultFilter() { printf 'scanner\n'; }
+        formatRealityTargetResultLine "page-scanner.example.com:443" "scanner-sni.example.com" \
+            "Scanner" "scanner" "no" "192.0.2.12" "AS64500" "ExampleNet" \
+            "same_asn" "A" "yes" "4000" "yes" "1234567890" "scanner fixture" >>"${pageResultsFile}"
+        pageChoiceSequence="f 2 999999999999999999999 01"
+        regressionExpectStatus 2 showRealityTargetScanResults all interactive 2
+        [[ "${realityTargetHost}" == "page-scanner.example.com" && "${realitySNI}" == "scanner-sni.example.com" ]]
+        [[ "$(wc -l <"${pageResultsFile}.errors" | tr -d ' ')" == "4" ]]
+        REALITY_TARGET_RESULT_PAGE_SIZE=0
+        showRealityTargetScanResults all once
+    )
+    (
+        local persistenceRoot="${TMP_DIR}/reality-persistence-failure"
+        local persistenceStatusLog="${persistenceRoot}/status.log"
+        local failureStage removed summary fullScan
+        mkdir -p "${persistenceRoot}/tmp"
+        TMPDIR="${persistenceRoot}/tmp"
+        export PADM_REALITY_TARGET_RESULTS_FILE="${persistenceRoot}/results.tsv"
+        realityTargetDetector() { printf 'fake-xray\n'; }
+        currentRealityNetworkProfile() { printf '203.0.113.10\tAS64500\tExampleNet\n'; }
+        realityTargetRefreshRecords() {
+            formatRealityTargetResultLine "persist-failure.example.com:443" "persist-failure.example.com" \
+                "Persist Failure" "test" "no" "unknown" "unknown" "unknown" "unknown" \
+                "unknown" "unknown" "unknown" "unknown" "0" "fixture"
+        }
+        probeRealityTargetRecord() { printf 'OK\t%s\n' "$2"; }
+        realityTargetProgressLine() { :; }
+        realityTargetStatusBlock() { printf '%s\n' "$*" >>"${persistenceStatusLog}"; }
+        writeRealityTargetResultLines() { [[ "${failureStage}" != write ]]; }
+        removeRealityTargetsFromUnifiedLibrary() { removed=1; return 1; }
+        printf 'IP,ORIGIN,CERT_DOMAIN,CERT_ISSUER,GEO_CODE\n' >"${persistenceRoot}/empty.csv"
+        for failureStage in write remove; do
+            removed=0
+            : >"${persistenceStatusLog}"
+            regressionExpectStatus 1 scanLocalAsnRealityTargets
+            grep -qF "保存目标库失败" "${persistenceStatusLog}"
+            ! grep -q '^green' "${persistenceStatusLog}"
+            [[ "${failureStage}" != write || "${removed}" == 0 ]]
+            [[ -z "$(find "${TMPDIR}" -mindepth 1 -print -quit)" ]]
+            summary=unchanged
+            : >"${persistenceStatusLog}"
+            regressionExpectStatus 1 importRealityScannerResults "${persistenceRoot}/empty.csv" AS64500 ExampleNet summary
+            [[ "${summary}" == unchanged ]]
+            grep -qF "保存目标库失败" "${persistenceStatusLog}"
+            ! grep -q '^green' "${persistenceStatusLog}"
+            [[ -z "$(find "${TMPDIR}" -mindepth 1 -print -quit)" ]]
+        done
+        ensureRealityScannerBinary() { :; }
+        realityScannerOutputPath() { printf '%s\n' "${persistenceRoot}/scan.csv"; }
+        runRealityScannerQuietly() { printf 'IP,ORIGIN,CERT_DOMAIN,CERT_ISSUER,GEO_CODE\n' >"$1"; }
+        importRealityScannerResults() { return 1; }
+        sleep() { :; }
+        printf '192.0.2.1\n' >"${persistenceRoot}/targets"
+        printf '192.0.2.0/24\n' >"${persistenceRoot}/prefixes"
+        : >"${persistenceStatusLog}"
+        regressionExpectStatus 1 runRealityScannerTargetFile "${persistenceRoot}/targets" AS64500 ExampleNet
+        ! grep -qF '抽样扫描汇总' "${persistenceStatusLog}"
+        regressionExpectStatus 1 runRealityScannerPrefixFile "${persistenceRoot}/prefixes" AS64500 ExampleNet
+        [[ -z "$(find "${TMPDIR}" -mindepth 1 -print -quit)" ]]
+        fetchRealityAsnPrefixes() { printf '192.0.2.0/24\n'; }
+        autoRead() { printf -v "$3" '%s' y; }
+        selectRealityAsnScanPlan() {
+            padmCreateTempPath selectedRealityScannerPrefixFile
+            printf '192.0.2.0/24\n' >"${selectedRealityScannerPrefixFile}"
+            selectedRealityAsnFullScan=${fullScan}
+            selectedRealityScannerRange=fixture
+            selectedRealityAsnPrefixTotal=1
+            selectedRealityAsnAddressTotal=1
+        }
+        for fullScan in true false; do
+            regressionExpectStatus 1 runRealityScannerSameAsnPrefixes
+            [[ -z "$(find "${TMPDIR}" -mindepth 1 -print -quit)" ]]
+        done
+    )
+    (
+        local qualityActions=0 qualityCertificates=0
+        showRealityTargetQuality() { return 1; }
+        showRealityTargetCertificateChain() { qualityCertificates=$((qualityCertificates + 1)); return 1; }
+        showRealityTargetQualityActions() { qualityActions=$((qualityActions + 1)); return 1; }
+        regressionExpectStatus 1 showRealityTargetCachedQuality "failed-detail.example.com:443"
+        [[ "${qualityActions}" == 1 && "${qualityCertificates}" == 1 ]]
+    )
     (
         local option5ResultsFile="${TMP_DIR}/reality-option5-results.tsv"
         local option5SortCallsFile="${TMP_DIR}/reality-option5-sort-calls.log"
