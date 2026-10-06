@@ -1800,8 +1800,16 @@ showRealityTargetCandidatePage() {
     local filter=${1:-all}
     local page=${2:-1}
     local pageSize=${3:-12}
+    local snapshotName=${4:-}
     local total start end line index=1 host sni name region category _cdn rank recommended note resultLine score cdnRisk ip asn asOrg networkMatch location
-    total=$(realityTargetFilteredCandidateCount "${filter}")
+    local -a snapshot=()
+    if [[ -n "${snapshotName}" ]]; then
+        local -n snapshotRef="${snapshotName}"
+        snapshot=("${snapshotRef[@]}")
+    else
+        mapfile -t snapshot < <(realityTargetFilteredCandidates "${filter}")
+    fi
+    total=${#snapshot[@]}
     start=$(( (page - 1) * pageSize + 1 ))
     end=$(( page * pageSize ))
 
@@ -1813,7 +1821,8 @@ showRealityTargetCandidatePage() {
         menuClose
         return 0
     fi
-    while IFS= read -r line; do
+    for ((index = 1; index <= total; index++)); do
+        line=${snapshot[index - 1]}
         if (( index >= start && index <= end )); then
             IFS='|' read -r host sni name region category _cdn rank recommended note <<<"${line}"
             resultLine=$(realityTargetResultLine "$(formatRealityTarget "${host}" 443)" 2>/dev/null || true)
@@ -1833,8 +1842,7 @@ showRealityTargetCandidatePage() {
                 [[ -n "${note}" ]] && menuLine "    ${note}"
             fi
         fi
-        index=$((index + 1))
-    done < <(realityTargetFilteredCandidates "${filter}")
+    done
     menuClose
 }
 
@@ -1843,8 +1851,9 @@ selectRealityTargetCandidateInteractive() {
     local filter=all
     local page=1
     local pageSize=${REALITY_TARGET_PAGE_SIZE:-12}
-    local total maxPage choice selectedLine targetInput
-    [[ "${pageSize}" =~ ^[1-9][0-9]*$ ]] || pageSize=12
+    local total maxPage choice selectedLine targetInput selectedIndex snapshotFilter=
+    local -a candidateSnapshot=()
+    [[ "${pageSize}" =~ ^[1-9][0-9]{0,2}$ ]] || pageSize=12
 
     if [[ "${selectionMode}" == "detect-first" ]]; then
         local PADM_REALITY_TARGET_SELECTION_SCAN=1
@@ -1856,12 +1865,16 @@ selectRealityTargetCandidateInteractive() {
     fi
 
     while true; do
-        total=$(realityTargetFilteredCandidateCount "${filter}")
+        if [[ "${filter}" != "${snapshotFilter}" ]]; then
+            mapfile -t candidateSnapshot < <(realityTargetFilteredCandidates "${filter}")
+            snapshotFilter=${filter}
+        fi
+        total=${#candidateSnapshot[@]}
         maxPage=$(( (total + pageSize - 1) / pageSize ))
         (( maxPage < 1 )) && maxPage=1
         (( page > maxPage )) && page=${maxPage}
         (( page < 1 )) && page=1
-        showRealityTargetCandidatePage "${filter}" "${page}" "${pageSize}"
+        showRealityTargetCandidatePage "${filter}" "${page}" "${pageSize}" candidateSnapshot
         menuReadChoice reality_target_candidate "请选择候选编号或操作:" choice || return 1
         case "${choice}" in
         n | N)
@@ -1872,6 +1885,7 @@ selectRealityTargetCandidateInteractive() {
             ;;
         a | A)
             filter=all
+            snapshotFilter=
             page=1
             ;;
         f | F)
@@ -1880,6 +1894,7 @@ selectRealityTargetCandidateInteractive() {
             menuClose
             autoRead reality_target_filter "请输入筛选条件[回车全部]：" filter || return 1
             filter=${filter:-all}
+            snapshotFilter=
             page=1
             ;;
         m | M)
@@ -1896,10 +1911,12 @@ selectRealityTargetCandidateInteractive() {
             ;;
         *)
             if [[ "${choice}" =~ ^[0-9]+$ ]]; then
-                selectedLine=$(realityTargetFilteredCandidateLineByIndex "${filter}" "${choice}") || {
+                if [[ ! "${choice}" =~ ^[1-9][0-9]{0,8}$ ]] || (( 10#${choice} > total )); then
                     errorCard "候选编号无效，请重新选择"
                     continue
-                }
+                fi
+                selectedIndex=$((10#${choice} - 1))
+                selectedLine=${candidateSnapshot[${selectedIndex}]}
                 realityTargetHost=$(realityTargetCandidateField "${selectedLine}" 1)
                 realityTargetPort=443
                 realitySNI=${AUTO_REALITY_SERVER_NAME:-$(realityTargetCandidateField "${selectedLine}" 2)}

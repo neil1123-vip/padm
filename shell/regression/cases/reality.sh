@@ -1105,6 +1105,41 @@ EOF
 3
 "
     [[ "${realityTargetHost}" == "fixture-media.example.com" ]]
+    (
+        local snapshotCalls="${TMP_DIR}/reality-candidate-snapshot-calls.log"
+        local snapshotItems="${TMP_DIR}/reality-candidate-snapshot-items.log"
+        local poolChanged=false
+        eval "$(declare -f realityTargetCandidatePool | sed '1s/^realityTargetCandidatePool/snapshotOriginalCandidatePool/')"
+        realityTargetCandidatePool() {
+            printf 'pool\n' >>"${snapshotCalls}"
+            if [[ "${poolChanged}" == false ]]; then
+                snapshotOriginalCandidatePool
+            else
+                printf '%s\n' 'snapshot-secondary.example.com|snapshot-sni.example.com|Snapshot Secondary|asia|developer|unknown|1|no|changed fixture'
+            fi
+        }
+        menuItem() { printf '%s\t%s\n' "$1" "$2" >>"${snapshotItems}"; }
+        menuReadChoice() {
+            read -r "$3" || return 1
+            poolChanged=true
+        }
+        autoRead() { read -r "$3"; }
+        : >"${snapshotCalls}"
+        : >"${snapshotItems}"
+        selectRealityTargetCandidateInteractive < <(printf 'n\n0\n01\n999999999999999999999999999999\n3\n') >/dev/null
+        [[ "${realityTargetHost}" == fixture-media.example.com ]]
+        [[ "$(wc -l <"${snapshotCalls}")" == 1 ]]
+        grep -qxF $'3\tfixture-media.example.com:443' "${snapshotItems}"
+        ! grep -qF snapshot-secondary "${snapshotItems}"
+        local snapshotFilter
+        for snapshotFilter in all secondary; do
+            poolChanged=false
+            : >"${snapshotCalls}"
+            selectRealityTargetCandidateInteractive < <(printf 'f\n%s\n1\n' "${snapshotFilter}") >/dev/null
+            [[ "$(wc -l <"${snapshotCalls}")" == 2 ]]
+            [[ "${realityTargetHost}" == snapshot-secondary.example.com && "${realitySNI}" == snapshot-sni.example.com ]]
+        done
+    )
     secondaryCandidate=$(realityTargetFilteredCandidateLineByIndex secondary 1)
     [[ "$(realityTargetCandidateField "${secondaryCandidate}" 1)" == "fixture-secondary.example.com" ]]
     selectRealityTargetCandidateInteractive <<<"m
