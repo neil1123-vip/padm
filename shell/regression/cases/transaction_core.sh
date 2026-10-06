@@ -228,6 +228,16 @@ runSingBoxCustomPathsRegression() (
     checkLogBackupCreate() { printf -v "$1" '%s' ''; }
     coreInstallServiceBackupFinalize() { printf '%s\n' "$2" >>"${serviceFinalizeLog}"; }
     local release=debian
+    (
+        # 缺少服务管理器时不得创建服务文件、收尾备份或误报成功。
+        local installer REGRESSION_SUCCESS_CARD_LOG="${root}/missing-manager-success.log"
+        padmCommandExists() { return 1; }
+        for installer in installSingBoxService installXrayService; do
+            regressionExpectStatus 1 "${installer}" test >/dev/null || return 1
+        done
+        [[ ! -e "${PADM_SINGBOX_SYSTEMD_SERVICE_FILE}" && ! -e "${PADM_XRAY_SYSTEMD_SERVICE_FILE}" ]] || return 1
+        [[ ! -s "${serviceFinalizeLog}" && ! -s "${REGRESSION_SUCCESS_CARD_LOG}" ]] || return 1
+    ) || return 1
     installSingBoxService test >/dev/null
     grep -Fxq "ExecStart=\"${PADM_SINGBOX_BINARY}\" run -c \"${root}/conf/config.json\"" "${PADM_SINGBOX_SYSTEMD_SERVICE_FILE}"
     installAlpineStartup sing-box
@@ -2831,6 +2841,37 @@ runGeoUpdateReloadFailureRegression() (
     local rc
 
     mkdir -p "${root}"
+    (
+        # 任一 Geo 文件提交失败都恢复整组旧数据，成功时一次替换整组。
+        local stage="${root}/stage" target="${root}/target"
+        local failAt commitCalls file
+        mkdir -p "${stage}" "${target}"
+        printf 'new-geosite\n' >"${stage}/geosite.dat"
+        printf 'new-geoip\n' >"${stage}/geoip.dat"
+        eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalGeoCommitGeneratedFile/')"
+        commitGeneratedFile() {
+            commitCalls=$((commitCalls + 1))
+            [[ "${commitCalls}" != "${failAt}" ]] || return 1
+            originalGeoCommitGeneratedFile "$@"
+        }
+        for failAt in 1 2 3 0; do
+            commitCalls=0
+            for file in geosite.dat geoip.dat geo.version; do
+                printf 'old-%s\n' "${file}" >"${target}/${file}"
+            done
+            if [[ "${failAt}" != 0 ]]; then
+                regressionExpectStatus 1 commitXrayGeoFilesFromStage "${stage}" "${target}" new-version || return 1
+                for file in geosite.dat geoip.dat geo.version; do
+                    [[ "$(<"${target}/${file}")" == "old-${file}" ]] || return 1
+                done
+            else
+                commitXrayGeoFilesFromStage "${stage}" "${target}" new-version || return 1
+                [[ "$(<"${target}/geosite.dat")" == new-geosite && "$(<"${target}/geoip.dat")" == new-geoip ]] || return 1
+                [[ "$(<"${target}/geo.version")" == new-version ]] || return 1
+            fi
+            [[ "$(find "${target}" -type f | wc -l)" == 3 ]] || return 1
+        done
+    ) || return 1
     : >"${callLog}"
     : >"${statusLog}"
     printf 'old-version\n' >"${geoVersionFile}"

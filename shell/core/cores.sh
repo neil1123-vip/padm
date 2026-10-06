@@ -233,7 +233,9 @@ commitXrayGeoFilesFromStage() {
         padmRemoveCleanupPath "${versionStage}"
         return 1
     fi
-    commitGeneratedFile "${geositeStage}" "${geositeTarget}" 644 || {
+    if ! commitGeneratedFile "${geositeStage}" "${geositeTarget}" 644 ||
+        ! commitGeneratedFile "${geoipStage}" "${geoipTarget}" 644 ||
+        ! commitGeneratedFile "${versionStage}" "${versionTarget}" 644; then
         if restoreXrayGeoCommitBackup "${backupDir}" "${geositeTarget}" "${geoipTarget}" "${versionTarget}" >/dev/null 2>&1; then
             padmRemoveCleanupPath "${backupDir}"
         else
@@ -244,28 +246,7 @@ commitXrayGeoFilesFromStage() {
         padmRemoveCleanupPath "${geoipStage}"
         padmRemoveCleanupPath "${versionStage}"
         return 1
-    }
-    commitGeneratedFile "${geoipStage}" "${geoipTarget}" 644 || {
-        if restoreXrayGeoCommitBackup "${backupDir}" "${geositeTarget}" "${geoipTarget}" "${versionTarget}" >/dev/null 2>&1; then
-            padmRemoveCleanupPath "${backupDir}"
-        else
-            printf 'Xray Geo 文件恢复失败，请手动检查备份目录: %s\n' "${backupDir}" >&2
-            padmForgetCleanupPath "${backupDir}"
-        fi
-        padmRemoveCleanupPath "${geoipStage}"
-        padmRemoveCleanupPath "${versionStage}"
-        return 1
-    }
-    commitGeneratedFile "${versionStage}" "${versionTarget}" 644 || {
-        if restoreXrayGeoCommitBackup "${backupDir}" "${geositeTarget}" "${geoipTarget}" "${versionTarget}" >/dev/null 2>&1; then
-            padmRemoveCleanupPath "${backupDir}"
-        else
-            printf 'Xray Geo 文件恢复失败，请手动检查备份目录: %s\n' "${backupDir}" >&2
-            padmForgetCleanupPath "${backupDir}"
-        fi
-        padmRemoveCleanupPath "${versionStage}"
-        return 1
-    }
+    fi
     padmRemoveCleanupPath "${backupDir}"
 }
 
@@ -1847,7 +1828,6 @@ finalizeFailedSingBoxBinaryInstall() {
     local cronetPath=$4
     local logFile=$5
     local migrationBackupDir=${6:-}
-    local restoreStatus=0
     local cronetRestored=true migrationRestored=true startRestoredService=true
 
     if ! singBoxUpgradeMigrationRollback "${migrationBackupDir}"; then
@@ -1859,7 +1839,7 @@ finalizeFailedSingBoxBinaryInstall() {
         startRestoredService=false
     fi
     finalizeFailedCoreBinaryInstall "sing-box" "${backupBinary}" "${targetBinary}" handleSingBox "${logFile}" \
-        "${startRestoredService}" || restoreStatus=$?
+        "${startRestoredService}" || true
     if [[ "${migrationRestored}" != "true" ]]; then
         statusCard "sing-box 更新失败" "迁移配置恢复失败，已跳过旧服务启动" \
             "已保留备份：二进制 ${backupBinary}，Cronet ${cronetBackup}，配置 ${migrationBackupDir}" "排查日志: ${logFile}"
@@ -1872,7 +1852,7 @@ finalizeFailedSingBoxBinaryInstall() {
         return 1
     fi
     [[ -e "${cronetBackup}" ]] && removeManagedFilesIfPresentIgnoreFailure "${cronetBackup}"
-    return "${restoreStatus}"
+    return 1
 }
 
 installDownloadedXrayBinary() {
@@ -2399,7 +2379,6 @@ EOF
             failCoreStartupServiceInstall "${serviceBackupDir}" sing-box "${serviceWasEnabled}" "sing-box 开机自启配置失败"
             return 1
         fi
-        coreInstallServiceBackupFinalize "${serviceBackupDir}" sing-box "${serviceWasEnabled}"
     elif [[ "${release}" == "alpine" ]]; then
         serviceFile=${PADM_SINGBOX_OPENRC_SERVICE_FILE:-/etc/init.d/sing-box}
         coreStartupServiceEnabled sing-box && serviceWasEnabled=true
@@ -2412,9 +2391,12 @@ EOF
             failCoreStartupServiceInstall "${serviceBackupDir}" sing-box "${serviceWasEnabled}" "sing-box 开机自启配置失败"
             return 1
         fi
-        coreInstallServiceBackupFinalize "${serviceBackupDir}" sing-box "${serviceWasEnabled}"
+    else
+        errorCard "sing-box 开机自启配置失败：缺少可用的服务管理器"
+        return 1
     fi
 
+    coreInstallServiceBackupFinalize "${serviceBackupDir}" sing-box "${serviceWasEnabled}" || return 1
     successCard "配置sing-box开机启动完毕"
 }
 
@@ -2464,8 +2446,6 @@ EOF
             failCoreStartupServiceInstall "${serviceBackupDir}" xray "${serviceWasEnabled}" "Xray 开机自启配置失败"
             return 1
         fi
-        coreInstallServiceBackupFinalize "${serviceBackupDir}" xray "${serviceWasEnabled}"
-        successCard "配置Xray开机自启成功"
     elif [[ "${release}" == "alpine" ]]; then
         serviceFile=${PADM_XRAY_OPENRC_SERVICE_FILE:-/etc/init.d/xray}
         coreStartupServiceEnabled xray && serviceWasEnabled=true
@@ -2478,8 +2458,12 @@ EOF
             failCoreStartupServiceInstall "${serviceBackupDir}" xray "${serviceWasEnabled}" "Xray 开机自启配置失败"
             return 1
         fi
-        coreInstallServiceBackupFinalize "${serviceBackupDir}" xray "${serviceWasEnabled}"
+    else
+        errorCard "Xray 开机自启配置失败：缺少可用的服务管理器"
+        return 1
     fi
+    coreInstallServiceBackupFinalize "${serviceBackupDir}" xray "${serviceWasEnabled}" || return 1
+    successCard "配置Xray开机自启成功"
 }
 
 
