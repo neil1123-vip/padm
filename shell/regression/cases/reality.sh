@@ -701,6 +701,33 @@ runRealityCandidateFastRegression() {
     local staleResultsFile="${TMP_DIR}/reality-target-stale.tsv"
     local firstRecommendedRealityCandidate secondaryCandidate resolvedAddresses refreshRecordsWithNewCandidate
 
+    (
+        local observedNetworkMatch record recordOutput
+        ! realityTargetProviderMatches Unknown unknown
+        [[ "$(realityTargetNetworkMatch AS64500 ExampleNet AS64500 RemoteNet)" == same_asn ]]
+        [[ "$(realityTargetNetworkMatch AS64500 EXAMPLENET AS64501 'ExampleNet Hosting')" == same_provider ]]
+        [[ "$(realityTargetNetworkMatch AS64500 unknown AS64501 unknown)" == different_network ]]
+        [[ "$(realityTargetNetworkMatch unknown unknown unknown unknown)" == unknown ]]
+        [[ "$(realityTargetNetworkMatch "" "" AS64501 RemoteNet)" == unknown ]]
+        [[ "$(realityTargetNetworkMatch AS64500 ExampleNet unknown unknown scanner_local)" == scanner_local ]]
+        realityTargetDetector() { printf 'fake-xray\n'; }
+        currentRealityNetworkProfile() { printf '203.0.113.10\tunknown\tunknown\n'; }
+        lookupRealityTargetAsnCached() { printf 'unknown\tunknown\n'; }
+        lookupRealityTargetLocation() { printf 'Unknown\n'; }
+        realityTargetResultLine() { return 1; }
+        realityTargetStatusBlock() { :; }
+        probeRealityTargetEndpoint() { printf 'no\t192.0.2.1\tunknown\tunknown\tA\tyes\t4096\tyes\tfixture\n'; }
+        writeRealityTargetResultLine() { observedNetworkMatch=$9; }
+        showRealityTargetQuality "network-fixture.example.com:443"
+        [[ "${observedNetworkMatch}" == unknown ]]
+        validateRealityTargetSelection manual "network-fixture.example.com:443" "network-fixture.example.com"
+        [[ "${observedNetworkMatch}" == unknown ]]
+        record=$(formatRealityTargetResultLine "network-fixture.example.com:443" "network-fixture.example.com" Fixture test no unknown unknown unknown unknown unknown unknown unknown unknown 0 fixture)
+        recordOutput=$(probeRealityTargetRecord "" "${record}" unknown unknown)
+        [[ "$(realityTargetResultField "${recordOutput#*$'\t'}" 9)" == unknown ]]
+        [[ "$(scannerRealityNetworkProfile 192.0.2.1 unknown unknown)" == $'unknown\tunknown\tscanner_local' ]]
+    )
+
     cat >"${fixtureFile}" <<'EOF'
 fixture-primary.example.com|fixture-primary.example.com|Fixture Primary|global|large_site|unknown|1|yes|fixture default
 fixture-secondary.example.com|fixture-secondary.example.com|Fixture Secondary|global|large_site|unknown|2|yes|fixture secondary
@@ -1925,6 +1952,7 @@ runRealityUnifiedLibraryRollbackRegression() (
 runRealityConfigApplyRegression() {
     local realityPatchDir="${TMP_DIR}/reality-target-patch"
     local realityPatchXrayVision="${realityPatchDir}/xray/07_VLESS_vision_reality_inbounds.json"
+    local realityPatchXrayGrpc="${realityPatchDir}/xray/08_VLESS_vision_gRPC_inbounds.json"
     local realityPatchXrayXhttp="${realityPatchDir}/xray/12_VLESS_XHTTP_inbounds.json"
     local realityPatchSingBoxVision="${realityPatchDir}/sing-box/07_VLESS_vision_reality_inbounds.json"
     local realityPatchSingBoxGrpc="${realityPatchDir}/sing-box/08_VLESS_vision_gRPC_inbounds.json"
@@ -1933,6 +1961,7 @@ runRealityConfigApplyRegression() {
     cat >"${realityPatchXrayVision}" <<'JSON'
 {"inbounds":[{}, {"streamSettings":{"realitySettings":{"target":"old.example.com:443","serverNames":["old.example.com"]}}}]}
 JSON
+    jq -n '{inbounds: [{streamSettings: {realitySettings: {target: "old.example.com:443", serverNames: ["old.example.com"]}}}]}' >"${realityPatchXrayGrpc}"
     cat >"${realityPatchXrayXhttp}" <<'JSON'
 {"inbounds":[{"streamSettings":{"realitySettings":{"target":"old.example.com:443","serverNames":["old.example.com"]},"xhttpSettings":{"host":"old.example.com"}}}]}
 JSON
@@ -1943,11 +1972,14 @@ JSON
 {"inbounds":[{"tls":{"server_name":"old.example.com","reality":{"handshake":{"server":"old.example.com","server_port":443}}}}]}
 JSON
     export PADM_REALITY_XRAY_VISION_CONFIG_FILE="${realityPatchXrayVision}"
+    export PADM_REALITY_XRAY_GRPC_CONFIG_FILE="${realityPatchXrayGrpc}"
     export PADM_REALITY_XRAY_XHTTP_CONFIG_FILE="${realityPatchXrayXhttp}"
     export PADM_REALITY_SINGBOX_VISION_CONFIG_FILE="${realityPatchSingBoxVision}"
     export PADM_REALITY_SINGBOX_GRPC_CONFIG_FILE="${realityPatchSingBoxGrpc}"
     applyRealityTargetToInstalledConfigs "new.example.com:8443" "sni.example.com"
     jq -e '.inbounds[1].streamSettings.realitySettings.target == "new.example.com:8443" and .inbounds[1].streamSettings.realitySettings.serverNames == ["sni.example.com"]' "${realityPatchXrayVision}" >/dev/null
+    jq -e '.inbounds[0].streamSettings.realitySettings.target == "new.example.com:8443" and .inbounds[0].streamSettings.realitySettings.serverNames == ["sni.example.com"]' "${realityPatchXrayGrpc}" >/dev/null
+    [[ "${xrayVLESSRealityGRPCSNI}" == sni.example.com ]]
     jq -e '.inbounds[0].streamSettings.realitySettings.target == "new.example.com:8443" and .inbounds[0].streamSettings.xhttpSettings.host == "sni.example.com"' "${realityPatchXrayXhttp}" >/dev/null
     jq -e '.inbounds[0].tls.server_name == "sni.example.com" and .inbounds[0].tls.reality.handshake.server == "new.example.com" and .inbounds[0].tls.reality.handshake.server_port == 8443' "${realityPatchSingBoxVision}" >/dev/null
     jq -e '.inbounds[0].tls.server_name == "sni.example.com" and .inbounds[0].tls.reality.handshake.server == "new.example.com" and .inbounds[0].tls.reality.handshake.server_port == 8443' "${realityPatchSingBoxGrpc}" >/dev/null
@@ -1957,10 +1989,54 @@ JSON
     fi
     [[ "$(<"${realityPatchSingBoxVision}")" == "${realityPatchOriginal}" ]]
     [[ ! -e "${realityPatchXrayVision}.tmp" ]]
+    [[ ! -e "${realityPatchXrayGrpc}.tmp" ]]
     [[ ! -e "${realityPatchXrayXhttp}.tmp" ]]
     [[ ! -e "${realityPatchSingBoxVision}.tmp" ]]
     [[ ! -e "${realityPatchSingBoxGrpc}.tmp" ]]
-    unset PADM_REALITY_XRAY_VISION_CONFIG_FILE PADM_REALITY_XRAY_XHTTP_CONFIG_FILE PADM_REALITY_SINGBOX_VISION_CONFIG_FILE PADM_REALITY_SINGBOX_GRPC_CONFIG_FILE
+    (
+        local grpcRoot="${realityPatchDir}/grpc-only"
+        local reloadCalls=0 refreshCalls=0
+        mkdir -p "${grpcRoot}"
+        PADM_REALITY_XRAY_VISION_CONFIG_FILE="${grpcRoot}/missing-vision.json"
+        PADM_REALITY_XRAY_XHTTP_CONFIG_FILE="${grpcRoot}/missing-xhttp.json"
+        PADM_REALITY_SINGBOX_VISION_CONFIG_FILE="${grpcRoot}/missing-singbox-vision.json"
+        PADM_REALITY_SINGBOX_GRPC_CONFIG_FILE="${grpcRoot}/missing-singbox-grpc.json"
+        PADM_REALITY_XRAY_GRPC_CONFIG_FILE="${grpcRoot}/08_VLESS_vision_gRPC_inbounds.json"
+        jq -n '{inbounds: [{streamSettings: {realitySettings: {target: "old.example.com:443", serverNames: ["old-grpc.example.com"]}}}]}' >"${PADM_REALITY_XRAY_GRPC_CONFIG_FILE}"
+        export REALITY_GRPC_VALIDATION_ARGS_FILE="${grpcRoot}/validate.args"
+        export REALITY_GRPC_VALIDATION_STATUS=1
+        cat >"${grpcRoot}/xray-test" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"${REALITY_GRPC_VALIDATION_ARGS_FILE}"
+exit "${REALITY_GRPC_VALIDATION_STATUS}"
+EOF
+        chmod +x "${grpcRoot}/xray-test"
+        coreXrayBinaryPath() { printf '%s\n' "${grpcRoot}/xray-test"; }
+        coreXrayConfigDir() { printf '%s\n' "${grpcRoot}"; }
+        validateRealityTargetSelection() { :; }
+        realityTargetStatusBlock() { :; }
+        refreshSubscriptionsAfterRealityTargetChange() { refreshCalls=$((refreshCalls + 1)); }
+        reloadCore() { reloadCalls=$((reloadCalls + 1)); [[ "${reloadCalls}" -gt 1 ]]; }
+        realityTargetHost=old.example.com
+        realityTargetPort=443
+        realitySNI=old-grpc.example.com
+        xrayVLESSRealityGRPCSNI=old-grpc.example.com
+        regressionExpectStatus 1 changeInstalledRealityTarget "new.example.com:8443" "new-grpc.example.com"
+        grep -qxF -- "-test -confdir ${grpcRoot}" "${REALITY_GRPC_VALIDATION_ARGS_FILE}"
+        [[ "${reloadCalls}" == 0 && "${refreshCalls}" == 0 ]]
+        [[ "${realitySNI}" == old-grpc.example.com && "${xrayVLESSRealityGRPCSNI}" == old-grpc.example.com ]]
+        jq -e '.inbounds[0].streamSettings.realitySettings.target == "old.example.com:443" and .inbounds[0].streamSettings.realitySettings.serverNames == ["old-grpc.example.com"]' "${PADM_REALITY_XRAY_GRPC_CONFIG_FILE}" >/dev/null
+        REALITY_GRPC_VALIDATION_STATUS=0
+        regressionExpectStatus 1 changeInstalledRealityTarget "new.example.com:8443" "new-grpc.example.com"
+        [[ "${reloadCalls}" == 2 && "${refreshCalls}" == 0 ]]
+        [[ "${realitySNI}" == old-grpc.example.com && "${xrayVLESSRealityGRPCSNI}" == old-grpc.example.com ]]
+        jq -e '.inbounds[0].streamSettings.realitySettings.target == "old.example.com:443" and .inbounds[0].streamSettings.realitySettings.serverNames == ["old-grpc.example.com"]' "${PADM_REALITY_XRAY_GRPC_CONFIG_FILE}" >/dev/null
+        reloadCore() { return 0; }
+        changeInstalledRealityTarget "new.example.com:8443" "new-grpc.example.com"
+        [[ "${refreshCalls}" == 1 && "${xrayVLESSRealityGRPCSNI}" == new-grpc.example.com ]]
+        jq -e '.inbounds[0].streamSettings.realitySettings.target == "new.example.com:8443" and .inbounds[0].streamSettings.realitySettings.serverNames == ["new-grpc.example.com"]' "${PADM_REALITY_XRAY_GRPC_CONFIG_FILE}" >/dev/null
+    )
+    unset PADM_REALITY_XRAY_VISION_CONFIG_FILE PADM_REALITY_XRAY_GRPC_CONFIG_FILE PADM_REALITY_XRAY_XHTTP_CONFIG_FILE PADM_REALITY_SINGBOX_VISION_CONFIG_FILE PADM_REALITY_SINGBOX_GRPC_CONFIG_FILE
 }
 
 runRealityConfigChangeReloadFailureRegression() (

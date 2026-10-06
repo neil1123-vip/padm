@@ -1309,13 +1309,22 @@ selectRealityAsnScanPlan() {
 }
 
 realityTargetProviderMatches() {
-    local currentOrg=$1
-    local candidateOrg=$2
-    local currentNorm candidateNorm
-    currentNorm=$(printf '%s\n' "${currentOrg}" | tr '[:upper:]' '[:lower:]')
-    candidateNorm=$(printf '%s\n' "${candidateOrg}" | tr '[:upper:]' '[:lower:]')
-    [[ -n "${currentNorm}" && -n "${candidateNorm}" ]] || return 1
+    local currentNorm=${1,,} candidateNorm=${2,,}
+    [[ -n "${currentNorm}" && "${currentNorm}" != "unknown" && -n "${candidateNorm}" && "${candidateNorm}" != "unknown" ]] || return 1
     [[ "${candidateNorm}" == *"${currentNorm}"* || "${currentNorm}" == *"${candidateNorm}"* ]]
+}
+
+realityTargetNetworkMatch() {
+    local currentAsn=$1 currentOrg=$2 candidateAsn=$3 candidateOrg=$4 fallback=${5:-unknown}
+    if [[ -n "${currentAsn}" && "${currentAsn}" != "unknown" && "${candidateAsn}" == "${currentAsn}" ]]; then
+        printf 'same_asn\n'
+    elif realityTargetProviderMatches "${currentOrg}" "${candidateOrg}"; then
+        printf 'same_provider\n'
+    elif [[ -n "${currentAsn}" && "${currentAsn}" != "unknown" && -n "${candidateAsn}" && "${candidateAsn}" != "unknown" ]]; then
+        printf 'different_network\n'
+    else
+        printf '%s\n' "${fallback}"
+    fi
 }
 
 realityTargetCdnProviderFromCname() {
@@ -1618,13 +1627,7 @@ validateRealityTargetSelection() {
         rest=${networkProfile#*$'\t'}
         currentAsn=${rest%%$'\t'*}
         currentOrg=${rest#*$'\t'}
-        if [[ "${asn}" == "${currentAsn}" ]]; then
-            networkMatch=same_asn
-        elif [[ "${asn}" != "unknown" ]] && realityTargetProviderMatches "${currentOrg}" "${asOrg}"; then
-            networkMatch=same_provider
-        elif [[ "${asn}" != "unknown" ]]; then
-            networkMatch=different_network
-        fi
+        networkMatch=$(realityTargetNetworkMatch "${currentAsn}" "${currentOrg}" "${asn}" "${asOrg}")
     fi
     cachedLine=$(realityTargetResultLine "${target}" 2>/dev/null || true)
     name=${host}
@@ -2095,14 +2098,7 @@ scannerRealityNetworkProfile() {
         candidateAsn=unknown
         candidateOrg=unknown
     fi
-    networkMatch=scanner_local
-    if [[ -n "${currentAsn}" && "${candidateAsn}" == "${currentAsn}" ]]; then
-        networkMatch=same_asn
-    elif [[ -n "${currentOrg}" && "${candidateOrg}" != "unknown" ]] && realityTargetProviderMatches "${currentOrg}" "${candidateOrg}"; then
-        networkMatch=same_provider
-    elif [[ "${candidateAsn}" != "unknown" ]]; then
-        networkMatch=different_network
-    fi
+    networkMatch=$(realityTargetNetworkMatch "${currentAsn}" "${currentOrg}" "${candidateAsn}" "${candidateOrg}" scanner_local)
     printf '%s\t%s\t%s\n' "${candidateAsn}" "${candidateOrg}" "${networkMatch}"
 }
 
@@ -2830,13 +2826,7 @@ showRealityTargetQuality() {
         rest=${networkProfile#*$'\t'}
         currentAsn=${rest%%$'\t'*}
         currentOrg=${rest#*$'\t'}
-        if [[ "${asn}" == "${currentAsn}" ]]; then
-            networkMatch=same_asn
-        elif [[ "${asn}" != "unknown" ]] && realityTargetProviderMatches "${currentOrg}" "${asOrg}"; then
-            networkMatch=same_provider
-        elif [[ "${asn}" != "unknown" ]]; then
-            networkMatch=different_network
-        fi
+        networkMatch=$(realityTargetNetworkMatch "${currentAsn}" "${currentOrg}" "${asn}" "${asOrg}")
     fi
     checkedAt=$(date +%s)
     detectSeconds=$((checkedAt - detectStart))
@@ -3069,14 +3059,7 @@ probeRealityTargetRecord() {
     if [[ "${category}" == "scanner" && "${_oldNote}" == RealiTLScanner:* ]]; then
         note="${_oldNote%%; *}; ${note}"
     fi
-    networkMatch=unknown
-    if [[ "${candidateAsn}" != "unknown" && "${candidateAsn}" == "${currentAsn}" ]]; then
-        networkMatch=same_asn
-    elif [[ "${candidateAsn}" != "unknown" && -n "${currentAsn}" ]] && realityTargetProviderMatches "${currentOrg}" "${candidateOrg}"; then
-        networkMatch=same_provider
-    elif [[ "${candidateAsn}" != "unknown" && -n "${currentAsn}" ]]; then
-        networkMatch=different_network
-    fi
+    networkMatch=$(realityTargetNetworkMatch "${currentAsn}" "${currentOrg}" "${candidateAsn}" "${candidateOrg}")
     checkedAt=$(date +%s)
     printf 'OK\t'
     formatRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "${ip}" "${candidateAsn}" "${candidateOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}"
@@ -3265,6 +3248,10 @@ realityXrayVisionConfigPath() {
     printf '%s\n' "${PADM_REALITY_XRAY_VISION_CONFIG_FILE:-/etc/padm/xray/conf/07_VLESS_vision_reality_inbounds.json}"
 }
 
+realityXrayGrpcConfigPath() {
+    printf '%s\n' "${PADM_REALITY_XRAY_GRPC_CONFIG_FILE:-/etc/padm/xray/conf/08_VLESS_vision_gRPC_inbounds.json}"
+}
+
 realityXrayXhttpConfigPath() {
     printf '%s\n' "${PADM_REALITY_XRAY_XHTTP_CONFIG_FILE:-/etc/padm/xray/conf/12_VLESS_XHTTP_inbounds.json}"
 }
@@ -3282,10 +3269,11 @@ applyRealityTargetToInstalledConfigs() {
     local sni=$2
     local parsed host port changed=false
     local applyLog
-    local xrayRealityConfigPath xrayXhttpConfigPath singBoxRealityConfigPath singBoxGrpcConfigPath
+    local xrayRealityConfigPath xrayGrpcConfigPath xrayXhttpConfigPath singBoxRealityConfigPath singBoxGrpcConfigPath
     REALITY_TARGET_APPLY_FAILURE_LOG=
     REALITY_TARGET_APPLY_FAILURE_PATH=
     xrayRealityConfigPath=$(realityXrayVisionConfigPath)
+    xrayGrpcConfigPath=$(realityXrayGrpcConfigPath)
     xrayXhttpConfigPath=$(realityXrayXhttpConfigPath)
     singBoxRealityConfigPath=$(realitySingBoxVisionConfigPath)
     singBoxGrpcConfigPath=$(realitySingBoxGrpcConfigPath)
@@ -3311,6 +3299,18 @@ applyRealityTargetToInstalledConfigs() {
         ' --arg target "${host}:${port}" --arg sni "${sni}" 2>"${applyLog}"; then
             REALITY_TARGET_APPLY_FAILURE_LOG="${applyLog}"
             REALITY_TARGET_APPLY_FAILURE_PATH="${xrayRealityConfigPath}"
+            return 1
+        fi
+        changed=true
+    fi
+
+    if [[ -f "${xrayGrpcConfigPath}" ]]; then
+        if ! updateRoutingJsonConfig "${xrayGrpcConfigPath}" '
+          .inbounds[0].streamSettings.realitySettings.target = $target |
+          .inbounds[0].streamSettings.realitySettings.serverNames = [$sni]
+        ' --arg target "${host}:${port}" --arg sni "${sni}" 2>"${applyLog}"; then
+            REALITY_TARGET_APPLY_FAILURE_LOG="${applyLog}"
+            REALITY_TARGET_APPLY_FAILURE_PATH="${xrayGrpcConfigPath}"
             return 1
         fi
         changed=true
@@ -3366,6 +3366,7 @@ applyRealityTargetToInstalledConfigs() {
     realityTargetPort=${port}
     realitySNI=${sni}
     xrayVLESSRealitySNI=${sni}
+    xrayVLESSRealityGRPCSNI=${sni}
     xrayVLESSRealityXHTTPSNI=${sni}
     singBoxVLESSRealityVisionSNI=${sni}
     singBoxVLESSRealityGRPCSNI=${sni}
@@ -3377,14 +3378,15 @@ restoreRealityTargetRuntimeState() {
     realityTargetPort=$2
     realitySNI=$3
     xrayVLESSRealitySNI=$4
-    xrayVLESSRealityXHTTPSNI=$5
-    singBoxVLESSRealityVisionSNI=$6
-    singBoxVLESSRealityGRPCSNI=$7
+    xrayVLESSRealityGRPCSNI=$5
+    xrayVLESSRealityXHTTPSNI=$6
+    singBoxVLESSRealityVisionSNI=$7
+    singBoxVLESSRealityGRPCSNI=$8
 }
 
 validateRealityTargetConfigAfterChange() {
     local logFile
-    if [[ -f "$(realityXrayVisionConfigPath)" || -f "$(realityXrayXhttpConfigPath)" ]]; then
+    if [[ -f "$(realityXrayVisionConfigPath)" || -f "$(realityXrayGrpcConfigPath)" || -f "$(realityXrayXhttpConfigPath)" ]]; then
         if [[ -f "$(coreXrayBinaryPath)" && -x "$(coreXrayBinaryPath)" ]]; then
             logFile=$(realityTargetTmpPath padm-reality-target-xray-test.log)
             "$(coreXrayBinaryPath)" -test -confdir "$(coreXrayConfigDir)" >"${logFile}" 2>&1 || return 1
@@ -3400,15 +3402,19 @@ validateRealityTargetConfigAfterChange() {
 
 backupRealityTargetConfigs() {
     local backupDir=$1
-    local xrayRealityConfigPath xrayXhttpConfigPath singBoxRealityConfigPath singBoxGrpcConfigPath
+    local xrayRealityConfigPath xrayGrpcConfigPath singBoxRealityConfigPath singBoxGrpcConfigPath xrayXhttpConfigPath
     local status=0
     xrayRealityConfigPath=$(realityXrayVisionConfigPath)
+    xrayGrpcConfigPath=$(realityXrayGrpcConfigPath)
     xrayXhttpConfigPath=$(realityXrayXhttpConfigPath)
     singBoxRealityConfigPath=$(realitySingBoxVisionConfigPath)
     singBoxGrpcConfigPath=$(realitySingBoxGrpcConfigPath)
     mkdir -p "${backupDir}/xray" "${backupDir}/sing-box" || return 1
     if [[ -f "${xrayRealityConfigPath}" ]]; then
         cp "${xrayRealityConfigPath}" "${backupDir}/xray/07_VLESS_vision_reality_inbounds.json" || status=1
+    fi
+    if [[ -f "${xrayGrpcConfigPath}" ]]; then
+        cp "${xrayGrpcConfigPath}" "${backupDir}/xray/08_VLESS_vision_gRPC_inbounds.json" || status=1
     fi
     if [[ -f "${xrayXhttpConfigPath}" ]]; then
         cp "${xrayXhttpConfigPath}" "${backupDir}/xray/12_VLESS_XHTTP_inbounds.json" || status=1
@@ -3427,6 +3433,9 @@ restoreRealityTargetConfigs() {
     local status=0
     if [[ -f "${backupDir}/xray/07_VLESS_vision_reality_inbounds.json" ]]; then
         restoreManagedFileFromBackup "${backupDir}/xray/07_VLESS_vision_reality_inbounds.json" "$(realityXrayVisionConfigPath)" 644 || status=1
+    fi
+    if [[ -f "${backupDir}/xray/08_VLESS_vision_gRPC_inbounds.json" ]]; then
+        restoreManagedFileFromBackup "${backupDir}/xray/08_VLESS_vision_gRPC_inbounds.json" "$(realityXrayGrpcConfigPath)" 644 || status=1
     fi
     if [[ -f "${backupDir}/xray/12_VLESS_XHTTP_inbounds.json" ]]; then
         restoreManagedFileFromBackup "${backupDir}/xray/12_VLESS_XHTTP_inbounds.json" "$(realityXrayXhttpConfigPath)" 644 || status=1
@@ -3469,6 +3478,7 @@ changeInstalledRealityTarget() {
     local previousRealityTargetPort="${realityTargetPort:-}"
     local previousRealitySNI="${realitySNI:-}"
     local previousXrayVLESSRealitySNI="${xrayVLESSRealitySNI:-}"
+    local previousXrayVLESSRealityGRPCSNI="${xrayVLESSRealityGRPCSNI:-}"
     local previousXrayVLESSRealityXHTTPSNI="${xrayVLESSRealityXHTTPSNI:-}"
     local previousSingBoxVLESSRealityVisionSNI="${singBoxVLESSRealityVisionSNI:-}"
     local previousSingBoxVLESSRealityGRPCSNI="${singBoxVLESSRealityGRPCSNI:-}"
@@ -3504,7 +3514,7 @@ changeInstalledRealityTarget() {
             padmForgetCleanupPath "${backupDir}"
             return 1
         fi
-        restoreRealityTargetRuntimeState "${previousRealityTargetHost}" "${previousRealityTargetPort}" "${previousRealitySNI}" "${previousXrayVLESSRealitySNI}" "${previousXrayVLESSRealityXHTTPSNI}" "${previousSingBoxVLESSRealityVisionSNI}" "${previousSingBoxVLESSRealityGRPCSNI}"
+        restoreRealityTargetRuntimeState "${previousRealityTargetHost}" "${previousRealityTargetPort}" "${previousRealitySNI}" "${previousXrayVLESSRealitySNI}" "${previousXrayVLESSRealityGRPCSNI}" "${previousXrayVLESSRealityXHTTPSNI}" "${previousSingBoxVLESSRealityVisionSNI}" "${previousSingBoxVLESSRealityGRPCSNI}"
         padmRemoveCleanupPath "${backupDir}"
         realityTargetStatusBlock red "REALITY 目标站" "配置校验失败，已回滚" "Xray 日志: $(realityTargetTmpPath padm-reality-target-xray-test.log)" "sing-box 日志: $(realityTargetTmpPath padm-reality-target-sing-box-test.log)"
         return 1
@@ -3515,7 +3525,7 @@ changeInstalledRealityTarget() {
             padmForgetCleanupPath "${backupDir}"
             return 1
         fi
-        restoreRealityTargetRuntimeState "${previousRealityTargetHost}" "${previousRealityTargetPort}" "${previousRealitySNI}" "${previousXrayVLESSRealitySNI}" "${previousXrayVLESSRealityXHTTPSNI}" "${previousSingBoxVLESSRealityVisionSNI}" "${previousSingBoxVLESSRealityGRPCSNI}"
+        restoreRealityTargetRuntimeState "${previousRealityTargetHost}" "${previousRealityTargetPort}" "${previousRealitySNI}" "${previousXrayVLESSRealitySNI}" "${previousXrayVLESSRealityGRPCSNI}" "${previousXrayVLESSRealityXHTTPSNI}" "${previousSingBoxVLESSRealityVisionSNI}" "${previousSingBoxVLESSRealityGRPCSNI}"
         local rollbackMessage
         coreSetRollbackResultMessage rollbackMessage "核心重载失败" "已回滚配置" reloadCore "恢复旧配置后重载仍失败，请检查核心服务日志"
         if [[ "${rollbackMessage}" == "核心重载失败，已回滚配置" ]]; then
