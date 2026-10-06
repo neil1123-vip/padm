@@ -2701,18 +2701,33 @@ runRealityScannerSameAsnPrefixes() {
     return "${scanStatus}"
 }
 
+realityTargetSni() {
+    local target=$1 line=${2:-} sni
+    if [[ -n "${realityTargetHost:-}" && "${target}" == "$(formatRealityTarget "${realityTargetHost}" "${realityTargetPort:-443}")" ]]; then
+        printf '%s\n' "${realitySNI:-${realityTargetHost}}"
+        return 0
+    fi
+    [[ $# -ge 2 ]] || line=$(realityTargetResultLine "${target}" 2>/dev/null || true)
+    sni=$(realityTargetResultField "${line}" 2)
+    printf '%s\n' "${sni:-${target%:*}}"
+}
+
 showRealityTargetCertificateChain() {
     local target=$1
-    local parsed host port tmpDir sClientOutput certCount=0 certFile subject issuer notBefore notAfter san fingerprint leafSubject leafIssuer leafSan intermediateSubject intermediateIssuer intermediateNotAfter upperSubject upperIssuer upperNotAfter analysis
+    local parsed host port sni connect tmpDir sClientOutput certCount=0 certFile subject issuer notBefore notAfter san fingerprint leafMatches=false leafIssuer leafSan intermediateSubject intermediateIssuer intermediateNotAfter upperSubject upperIssuer upperNotAfter analysis
     parsed=$(parseHostPort "${target}" 443)
     host=${parsed%:*}
     port=${parsed##*:}
+    target=$(formatRealityTarget "${host}" "${port}")
+    sni=$(realityTargetSni "${target}")
+    connect=${target}
+    [[ "${host}" != *:* || "${host}" == \[*\] ]] || connect="[${host}]:${port}"
     if ! command -v openssl >/dev/null 2>&1; then
         realityTargetStatusBlock yellow "REALITY 证书链" "未找到 openssl，无法查看证书链"
         return 1
     fi
     padmCreateTempPath tmpDir -d || return 1
-    if ! sClientOutput=$(timeout 15 openssl s_client -connect "${host}:${port}" -servername "${host}" -showcerts </dev/null 2>/dev/null); then
+    if ! sClientOutput=$(timeout 15 openssl s_client -connect "${connect}" -servername "${sni}" -showcerts </dev/null 2>/dev/null); then
         padmRemoveCleanupPath "${tmpDir}"
         realityTargetStatusBlock red "REALITY 证书链" "证书链获取失败: ${target}"
         return 1
@@ -2733,7 +2748,7 @@ showRealityTargetCertificateChain() {
         san=$(openssl x509 -in "${certFile}" -noout -ext subjectAltName 2>/dev/null | awk 'NR > 1 {gsub(/^ +/, ""); gsub(/DNS:/, ""); print}' | paste -sd ' ' -)
         case "${certCount}" in
         1)
-            leafSubject=${subject}
+            openssl x509 -in "${certFile}" -noout -checkhost "${sni}" >/dev/null 2>&1 && leafMatches=true
             leafIssuer=${issuer}
             leafSan=${san:-无 SAN}
             ;;
@@ -2756,10 +2771,10 @@ showRealityTargetCertificateChain() {
         return 1
     fi
     analysis="链长 ${certCount}"
-    if [[ " ${leafSan} " == *" ${host}"* || "${leafSubject}" == *"CN=${host}"* ]]; then
-        analysis+="，SAN/Subject 匹配 ${host}"
+    if [[ "${leafMatches}" == "true" ]]; then
+        analysis+="，SAN/Subject 匹配 ${sni}"
     else
-        analysis+="，SAN/Subject 未确认匹配 ${host}"
+        analysis+="，SAN/Subject 未确认匹配 ${sni}"
     fi
     [[ -n "${leafIssuer}" ]] && analysis+="，叶子证书由 ${leafIssuer} 签发"
     if [[ ${certCount} -ge 3 ]]; then
@@ -2784,15 +2799,12 @@ showRealityTargetQuality() {
     port=${parsed##*:}
     target=$(formatRealityTarget "${host}" "${port}")
     cachedLine=$(realityTargetResultLine "${target}" 2>/dev/null || true)
-    sni=${host}
+    sni=$(realityTargetSni "${target}" "${cachedLine}")
     name=${host}
     category=manual
     if [[ -n "${cachedLine}" ]]; then
-        sni=$(realityTargetResultField "${cachedLine}" 2)
         name=$(realityTargetResultField "${cachedLine}" 3)
         category=$(realityTargetResultField "${cachedLine}" 4)
-    elif [[ "${host}" == "${realityTargetHost:-}" ]]; then
-        sni=${realitySNI:-${host}}
     fi
     realityTargetStatusBlock yellow "REALITY 目标站检测" "正在检测全部 A/AAAA: ${target}" "SNI: ${sni}"
     detectStart=$(date +%s)
@@ -3227,20 +3239,26 @@ scanLocalAsnRealityTargets() {
     fi
 }
 
-showRealityTargetPqcStatus() {
-    local target
-    if [[ -z "${realityTargetHost:-}" ]]; then
-        realityTargetStatusBlock yellow "REALITY PQC/ML-DSA-65" "当前未读取到 Reality 目标站"
-        return 1
+showRealityTargetPqcSummary() {
+    local configFile summary line
+    local -a configFiles=()
+    if [[ -d "${configPath:-}" ]]; then
+        for configFile in "${configPath%/}/"*.json; do
+            [[ ! -f "${configFile}" ]] || configFiles+=("${configFile}")
+        done
     fi
-    target=$(formatRealityTarget "${realityTargetHost}" "${realityTargetPort:-443}")
-    echoContent title "\n┌─ REALITY PQC/ML-DSA-65 状态 ──────────────────────"
-    menuLine "目标站: ${target}"
-    menuLine "SNI: ${realitySNI:-未知}"
-    menuLine "当前 mldsa65Verify: ${currentRealityMldsa65Verify:-未启用}"
-    menuLine "说明: A 级目标适合启用 X25519MLKEM768 + ML-DSA-65"
-    menuClose
-    showRealityTargetCachedQuality "${target}" || true
+    if [[ ${#configFiles[@]} -gt 0 ]]; then
+        if ! summary=$(jq -r '.inbounds[]? | .streamSettings? |
+            select(.realitySettings? | type == "object") |
+            "ML-DSA-65 (\(.network // "tcp")): \(.realitySettings.mldsa65Verify // "" | if . == "" then "未启用" else . end)"
+        ' "${configFiles[@]}" 2>/dev/null); then
+            menuLine "ML-DSA-65: 配置读取失败"
+            return 1
+        fi
+    fi
+    while IFS= read -r line; do
+        menuLine "${line}"
+    done <<<"${summary:-ML-DSA-65: 未配置}"
 }
 
 realityXrayVisionConfigPath() {

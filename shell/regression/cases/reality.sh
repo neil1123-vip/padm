@@ -518,8 +518,21 @@ runRealityTargetLocationRegression() (
         [[ "$(realityTargetResultField "${line}" 6)" == "198.51.100.221" ]]
         [[ "$(realityTargetResultField "${line}" 16)" == "London, United Kingdom" ]]
         : >"${detailLog}"
+        realityTargetHost=location-detail.example.com
+        realityTargetPort=443
+        realitySNI=installed-detail.example.com
+        probeRealityTargetEndpoint() {
+            [[ "$3" == installed-detail.example.com ]] || return 1
+            printf 'no\t198.51.100.221\tAS64501\tRemoteNet\tA\tyes\t4096\tyes\tprimary probe fixture\n'
+        }
         showRealityTargetQuality "location-detail.example.com:443" >/dev/null
         [[ ! -s "${detailLog}" ]]
+        line=$(realityTargetResultLine "location-detail.example.com:443")
+        [[ "$(realityTargetResultField "${line}" 2)" == installed-detail.example.com ]]
+        realityTargetHost=
+        probeRealityTargetEndpoint() {
+            printf 'no\t198.51.100.221\tAS64501\tRemoteNet\tA\tyes\t4096\tyes\tprimary probe fixture\n'
+        }
         showRealityTargetQuality "same-ip-detail.example.com:443" >/dev/null
         [[ ! -s "${detailLog}" ]]
         line=$(realityTargetResultLine "same-ip-detail.example.com:443")
@@ -707,7 +720,7 @@ EOF
     AUTO_INSTALL=
 
     (
-        local selectedTarget selectedSni switched=0 confirmation=n menuSequence="2 1 2 2 5 9" scope=
+        local selectedTarget selectedSni switched=0 confirmation=n menuSequence="2 1 2 2 5 8" scope=
         realityTargetHost=installed.example.com
         realityTargetPort=443
         realitySNI=installed-sni.example.com
@@ -736,6 +749,7 @@ EOF
         readConfigHostPathUUID() { :; }
         readCustomPort() { :; }
         readSingBoxConfig() { :; }
+        showRealityTargetPqcSummary() { :; }
         menuReadChoice() {
             printf -v "$3" '%s' "${menuSequence%% *}"
             menuSequence=${menuSequence#* }
@@ -897,6 +911,55 @@ EOF
             regressionExpectStatus 1 runRealityScannerSameAsnPrefixes
             [[ -z "$(find "${TMPDIR}" -mindepth 1 -print -quit)" ]]
         done
+    )
+    (
+        local pqcRoot="${TMP_DIR}/reality-pqc-summary"
+        local configPath="${pqcRoot}/" output
+        mkdir -p "${configPath}"
+        menuLine() { printf '%s\n' "$*"; }
+        showRealityTargetCachedQuality() { printf 'unexpected probe\n'; return 1; }
+        jq -n '{inbounds: [{streamSettings: {network: "grpc", realitySettings: {mldsa65Verify: "grpc-pqv"}}}]}' >"${configPath}/grpc.json"
+        output=$(showRealityTargetPqcSummary)
+        [[ "${output}" == "ML-DSA-65 (grpc): grpc-pqv" ]]
+        jq -n '{inbounds: [{streamSettings: {network: "tcp", realitySettings: {}}},
+            {streamSettings: {network: "xhttp", realitySettings: {mldsa65Verify: "xhttp-pqv"}}}]}' >"${configPath}/mixed.json"
+        output=$(showRealityTargetPqcSummary)
+        [[ "${output}" == *"ML-DSA-65 (grpc): grpc-pqv"* && "${output}" == *"ML-DSA-65 (tcp): 未启用"* && "${output}" == *"ML-DSA-65 (xhttp): xhttp-pqv"* ]]
+        [[ "${output}" != *"unexpected probe"* ]]
+        printf '{bad json\n' >"${configPath}/invalid.json"
+        regressionExpectStatus 1 showRealityTargetPqcSummary
+        configPath=
+        [[ "$(showRealityTargetPqcSummary)" == "ML-DSA-65: 未配置" ]]
+    )
+    (
+        local certArgs="${TMP_DIR}/reality-certificate-args.log"
+        local certStatus="${TMP_DIR}/reality-certificate-status.log"
+        local cachedLine matches=true
+        realityTargetHost=2001:db8::1
+        realityTargetPort=443
+        realitySNI=installed-cert.example.com
+        cachedLine=$(formatRealityTargetResultLine "2001:db8::1:443" "cached-cert.example.com" "Cert" "test" "no" "2001:db8::1" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "fixture")
+        realityTargetResultLine() { printf '%s\n' "${cachedLine}"; }
+        realityTargetStatusBlock() { printf '%s\n' "$*" >>"${certStatus}"; }
+        timeout() { shift; "$@"; }
+        openssl() {
+            printf '%s\n' "$*" >>"${certArgs}"
+            if [[ "$1" == s_client ]]; then
+                printf '%s\n' '-----BEGIN CERTIFICATE-----' fixture '-----END CERTIFICATE-----'
+            elif [[ " $* " == *" -checkhost "* ]]; then
+                [[ "${matches}" == true ]]
+            fi
+        }
+        showRealityTargetCertificateChain "2001:db8::1:443"
+        grep -qF -- '-connect [2001:db8::1]:443 -servername installed-cert.example.com' "${certArgs}"
+        grep -qF -- '-checkhost installed-cert.example.com' "${certArgs}"
+        grep -qF 'SAN/Subject 匹配 installed-cert.example.com' "${certStatus}"
+        : >"${certStatus}"
+        realityTargetHost=
+        matches=false
+        showRealityTargetCertificateChain "2001:db8::1:443"
+        grep -qF -- '-servername cached-cert.example.com' "${certArgs}"
+        grep -qF 'SAN/Subject 未确认匹配 cached-cert.example.com' "${certStatus}"
     )
     (
         local qualityActions=0 qualityCertificates=0

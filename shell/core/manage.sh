@@ -2942,6 +2942,7 @@ manageRealityTarget() {
     menuLine "当前 SNI：${realitySNI:-未知}"
     menuLine "目标 ASN（缓存）：${targetAsnSummary}"
     menuLine "网络关系（缓存）：${networkMatchSummary}"
+    showRealityTargetPqcSummary || true
     menuItem 1 "检测当前目标" "复测 TLS/PQC、ASN 与网络关系，并查看证书链"
     menuItem 2 "刷新目标库" "复测目标库或全部候选并更新质量结果"
     menuItem 3 "扫描指定网段" "运行 RealiTLScanner，发现目标并加入目标库"
@@ -2949,8 +2950,7 @@ manageRealityTarget() {
     menuItem 5 "查看/切换 A 级目标" "分页查看目标库中的 A 级目标并切换"
     menuItem 6 "手动设置目标站" "输入 host[:port] 和可选 SNI"
     menuItem 7 "查看目标站黑名单" "显示不会参与目标库刷新或扫描导入的目标"
-    menuItem 8 "查看 PQC/ML-DSA-65 状态" "显示 ML-DSA-65 验证值与目标站评分"
-    menuReturnItem 9 "返回" "回到 REALITY 管理"
+    menuReturnItem 8 "返回" "回到 REALITY 管理"
     menuClose
     selectTargetMenu=
     menuReadChoice reality_target_manage_menu "请选择：" selectTargetMenu || return 0
@@ -2992,10 +2992,7 @@ manageRealityTarget() {
     7)
         showRealityTargetBlockedCandidates
         ;;
-    8)
-        showRealityTargetPqcStatus
-        ;;
-    9|10)
+    8|9|10)
         return 0
         ;;
     *)
