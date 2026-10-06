@@ -5924,6 +5924,10 @@ runDockerSetupRegression() {
     bash "${PROJECT_ROOT}/docker/tests/setup.sh"
 }
 
+runDockerProtocolRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/protocol.sh"
+}
+
 runDockerPermissionsRegression() {
     bash "${PROJECT_ROOT}/docker/tests/permissions.sh"
 }

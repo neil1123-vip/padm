@@ -161,6 +161,28 @@ runPty() {
             fi
             waitForText 'Docker 管理菜单' "${CONTROL_LOG}" 2 || exit 16
             printf '0\n' >&3
+        elif [[ "${driver}" == protocols ]]; then
+            printf '9\n' >&3
+            waitForText 'Docker 协议与入口' "${CONTROL_LOG}" || exit 18
+            [[ ! -e "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]] || exit 19
+            printf '2\n' >&3
+            waitForText '入口 ID（空输入查看全部，0 返回）' "${CONTROL_LOG}" || exit 20
+            if [[ "${input}" == cancel ]]; then
+                printf '0\n' >&3
+            else
+                printf 'entry-fixture\n' >&3
+            fi
+            waitForText 'Docker 协议与入口' "${CONTROL_LOG}" 2 || exit 21
+            if [[ "${input}" != cancel ]]; then
+                printf '3\n' >&3
+                waitForText 'Docker 协议与入口' "${CONTROL_LOG}" 3 || exit 22
+            fi
+            [[ ! -e "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]] || exit 23
+            printf '0\n' >&3
+            waitForText 'Docker 管理菜单' "${CONTROL_LOG}" 2 || exit 24
+            printf '1\n' >&3
+            waitForText 'Docker 管理菜单' "${CONTROL_LOG}" 3 || exit 25
+            printf '0\n' >&3
         elif [[ "${driver}" == logs || "${driver}" == term ]]; then
             printf '6\n' >&3
             waitForText 'mock-log-ready' "${CONTROL_LOG}" || exit 3
@@ -288,6 +310,9 @@ snapshotAfter=$(find "${PADM_DOCKER_INSTALL_DIR}/config" "${PADM_DOCKER_INSTALL_
 runPty tls-unconfigured menu $'8\n0\n' "${CLI}" menu
 grep -Fq '请先使用首次配置' "${CONTROL_LOG}" || fail 'unconfigured TLS action did not direct the user to first configuration'
 [[ ! -e "${PADM_DOCKER_INSTALL_DIR}/deployment.json" ]] || fail 'unconfigured TLS action wrote a deployment'
+runPty protocols-unconfigured protocols cancel "${CLI}" menu
+grep -Fq 'Docker 协议与入口' "${CONTROL_LOG}" || fail 'protocol submenu was not reachable'
+[[ ! -e "${PADM_DOCKER_INSTALL_DIR}/deployment.json" ]] || fail 'unconfigured protocol menu wrote a deployment'
 
 # 隔离业务命令，只用真实 PTY 检查生产证书向导的确认门禁与参数分发。
 TLS_WIZARD_ROOT="${TEST_ROOT}/tls-wizard"
@@ -312,7 +337,7 @@ dockerResolveOpsImage() { printf 'fixture\n'; }
 recordAction() {
     printf '%s' "$1" >>"${TLS_WIZARD_ACTIONS}"
     shift
-    printf ' %s' "$@" >>"${TLS_WIZARD_ACTIONS}"
+    [[ "$#" -eq 0 ]] || printf ' %s' "$@" >>"${TLS_WIZARD_ACTIONS}"
     printf '\n' >>"${TLS_WIZARD_ACTIONS}"
 }
 dockerTlsValidateCommand() { recordAction validate "$@"; }
@@ -323,6 +348,8 @@ PADM_DOCKER_RC_STATE=15
 PADM_DOCKER_RC_USAGE=2
 case "${1:-}" in
 status) exit 0 ;;
+protocol) recordAction "$@"; printf 'fixture-protocol-output\n' ;;
+edit) recordAction "$@" ;;
 tls) [[ "${2:-}" == manage ]] || exit 2; dockerTlsManageCommand ;;
 menu)
     source "${PROJECT_ROOT}/docker/lib/menu.sh"
@@ -368,6 +395,15 @@ for tlsCase in cancel final-no eof validate install issue renew \
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedAction}" ]] ||
         fail "TLS ${tlsCase} bypassed confirmation or dispatched incorrect arguments"
 done
+
+: >"${TLS_WIZARD_ACTIONS}"
+runPty protocols-dispatch protocols read "${TLS_WIZARD_CLI}" menu
+[[ "$(<"${TLS_WIZARD_ACTIONS}")" == $'protocol list\nprotocol links entry-fixture\nedit' ]] ||
+    fail 'protocol menu did not dispatch list, selected links and existing editor'
+: >"${TLS_WIZARD_ACTIONS}"
+runPty protocols-links-cancel protocols cancel "${TLS_WIZARD_CLI}" menu
+[[ "$(<"${TLS_WIZARD_ACTIONS}")" == 'protocol list' ]] ||
+    fail 'cancelled protocol link selection dispatched a business command'
 
 # 最小已配置夹具只覆盖调度和命令分发，不宣称真实容器可用。
 cat >"${PADM_DOCKER_INSTALL_DIR}/deployment.json" <<'EOF'

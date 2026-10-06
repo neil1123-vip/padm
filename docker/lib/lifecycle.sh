@@ -14,6 +14,8 @@ dockerUsage() {
   padm-docker release [--manifest <URL|文件> --bundle <URL|文件> [--control-bundle <URL|文件>]]
   padm-docker setup [--manifest <URL|文件> --bundle <URL|文件> [--control-bundle <URL|文件>]]
   padm-docker edit [--spec <完整 JSON 文件>] [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker protocol list
+  padm-docker protocol links [入口 ID]
   padm-docker configure --spec <JSON 文件> [--manifest <URL|文件> --bundle <URL|文件> [--control-bundle <URL|文件>]]
   padm-docker tls install --domain <域名> --cert <文件> --key <文件> [--ops-image <tag@digest>]
   padm-docker tls validate --domain <域名>
@@ -1003,6 +1005,7 @@ dockerMain() {
     release) dockerReleaseCommand "$@" ;;
     setup) dockerSetupCommand "$@" ;;
     edit) dockerEditCommand "$@" ;;
+    protocol) dockerProtocolCommand "$@" ;;
     configure) dockerConfigureCommand "$@" ;;
     tls)
         case "${1:-}" in

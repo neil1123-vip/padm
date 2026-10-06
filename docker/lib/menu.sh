@@ -93,6 +93,40 @@ dockerMenuRun() {
     return "${status}"
 }
 
+dockerMenuProtocols() {
+    local choice listener
+    dockerMenuRun protocol list || true
+    while :; do
+        DOCKER_MENU_SIGNAL=0
+        printf '\nDocker 协议与入口\n'
+        printf '%s\n' '1. 查看入口' '2. 查看分享链接' '3. 编辑参数/复制或删除入口' '0. 返回'
+        printf '请选择: '
+        if ! IFS= read -r choice; then
+            [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
+            return 0
+        fi
+        case "${choice}" in
+        0) return 0 ;;
+        1) dockerMenuRun protocol list || true ;;
+        2)
+            printf '入口 ID（空输入查看全部，0 返回）: '
+            if ! IFS= read -r listener; then
+                [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
+                return 0
+            fi
+            [[ "${listener}" != 0 ]] || continue
+            if [[ -n "${listener}" ]]; then
+                dockerMenuRun protocol links "${listener}" || true
+            else
+                dockerMenuRun protocol links || true
+            fi
+            ;;
+        3) dockerMenuRun edit || true ;;
+        *) printf '无效选项，请重新选择。\n' ;;
+        esac
+    done
+}
+
 dockerMenu() {
     local choice
     if [[ "$#" -ne 0 || ! -t 0 || ! -t 1 ]]; then
@@ -115,6 +149,7 @@ dockerMenu() {
             '6. 查看日志' \
             '7. 编辑配置/导入原始规格' \
             '8. 证书管理' \
+            '9. 协议与入口' \
             '0. 退出'
         printf '请选择: '
         if ! IFS= read -r choice; then
@@ -133,6 +168,7 @@ dockerMenu() {
         6) dockerMenuRun logs --tail 100 --follow || true ;;
         7) dockerMenuRun edit || true ;;
         8) dockerMenuRun tls manage || true ;;
+        9) dockerMenuProtocols ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

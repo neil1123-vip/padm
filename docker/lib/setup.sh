@@ -440,6 +440,68 @@ dockerEditPreview() {
         "${draft}"
 }
 
+dockerProtocolCommand() (
+    local action=${1:-} listener= root workspace original normalized selected status
+    [[ "$#" -gt 0 ]] && shift
+    case "${action}" in
+    list) [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
+    links)
+        [[ "$#" -le 1 && "${1:-}" != --* ]] || return "${PADM_DOCKER_RC_USAGE}"
+        listener=${1:-}
+        ;;
+    *) return "${PADM_DOCKER_RC_USAGE}" ;;
+    esac
+    DOCKER_SETUP_CANDIDATE=
+    # 读取只持有短期锁，独立清理工作目录，不把锁带回菜单等待输入。
+    trap 'status=$?; dockerSetupCleanup || { [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_STATE}; }; dockerReleaseDeploymentLock || { [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_LOCK}; }; exit "${status}"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+    dockerLockInstalledDeployment || return $?
+    dockerComposeFile >/dev/null || {
+        dockerError 'Docker 服务尚未配置，请先使用首次配置'
+        return "${PADM_DOCKER_RC_STATE}"
+    }
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    dockerTrafficSafePath "${root}" "${root}/config/spec.json" &&
+        dockerResolveRegularFile "${root}/config/spec.json" >/dev/null &&
+        [[ -O "${root}/config/spec.json" ]] &&
+        dockerPrivateFileIsRestricted "${root}/config/spec.json" || {
+        dockerError '完整受管规格缺失或不安全，请先用 edit 导入完整原始输入'
+        return "${PADM_DOCKER_RC_STATE}"
+    }
+    workspace=$(mktemp -d "${root}/.protocol.XXXXXX") || return "${PADM_DOCKER_RC_STATE}"
+    DOCKER_SETUP_CANDIDATE=${workspace}
+    chmod 0700 "${workspace}" || return "${PADM_DOCKER_RC_STATE}"
+    original="${workspace}/original.json"
+    normalized="${workspace}/normalized.json"
+    cp -- "${root}/config/spec.json" "${original}" &&
+        chmod 0600 "${original}" &&
+        dockerEditBaselineValidate "${original}" "${workspace}" &&
+        dockerConfigureSpecMigrate "${original}" "${normalized}" &&
+        chmod 0600 "${normalized}" || return "${PADM_DOCKER_RC_STATE}"
+    if [[ "${action}" == list ]]; then
+        jq -r 'def authority: if contains(":") then "[\(.)]" else . end;
+          .core.protocols[] |
+          "\(.listener_id)  \(.core)  \(if .id == 1 then "Reality Vision" else "WS TLS" end)  \(.server | authority):\(.public_port)  [\(.address_families | join(","))]  \(.name)"' \
+            "${normalized}"
+        return $?
+    fi
+    selected="${workspace}/selected.json"
+    # 分享链接是本地只读输出，不受 HTTPS 订阅发布开关影响；只改私密副本。
+    jq --arg listener "${listener}" '
+      .core.protocols |= map(select($listener == "" or .listener_id == $listener)) |
+      if (.core.protocols | length) > 0 then . else error("入口 ID 不存在") end |
+      .subscription.enabled = true
+    ' "${normalized}" >"${selected}" 2>/dev/null || {
+        dockerError '入口 ID 不存在，未输出链接'
+        return "${PADM_DOCKER_RC_STATE}"
+    }
+    chmod 0600 "${selected}" || return "${PADM_DOCKER_RC_STATE}"
+    # 命令标准输出只含 URI，便于直接导入或复制，不混入菜单说明。
+    dockerGenerateSubscription "${selected}" /dev/stdout
+)
+
 dockerEditFields() {
     local draft=$1 choice protocol listener field value= defaultValue= valueFile="${1}.value" temporary="${1}.next"
     local sourceCore targetCore coreChoice primaryCore

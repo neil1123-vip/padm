@@ -178,6 +178,19 @@ padm-docker edit --spec /root/original-spec.json --preview
 padm-docker edit --spec /root/original-spec.json --confirm PADM-DOCKER-EDIT
 ```
 
+The protocol/listener menu lists stable listener IDs, cores, protocols, addresses/ports,
+and address families. It displays all or selected share links and opens the existing
+editor for changes, copies, or deletion. `protocol links` writes only URIs to stdout,
+including when HTTPS subscription publishing is disabled. It does not enable publishing,
+change the managed spec, or collect traffic. Missing full input or runtime drift rejects
+the read; local links contain user credentials and must not be published.
+
+```bash
+padm-docker protocol list
+padm-docker protocol links
+padm-docker protocol links vless-reality
+```
+
 `--preview` does not commit, collect traffic, or start/stop application services.
 Validation still verifies the release, pulls images, and runs candidate checks.
 `edit` verifies the current deployment version rather than latest by default; it also

@@ -168,6 +168,18 @@ padm-docker edit --spec /root/original-spec.json --preview
 padm-docker edit --spec /root/original-spec.json --confirm PADM-DOCKER-EDIT
 ```
 
+菜单新增“协议与入口”，可查看稳定入口 ID、核心、协议、地址/端口及地址族，
+查看全部或指定入口的分享链接，并进入现有编辑器修改、复制或删除入口。
+`protocol links` 标准输出只含 URI；关闭 HTTPS 订阅发布时仍可输出本地链接，
+不会开启发布、修改受管规格或采集流量。旧部署缺少完整规格或运行配置存在漂移时拒绝输出；
+本地链接含用户凭据，不应公开。
+
+```bash
+padm-docker protocol list
+padm-docker protocol links
+padm-docker protocol links vless-reality
+```
+
 `--preview` 不提交、不采集流量、不启停业务服务；验证仍会验签发布、拉取镜像并运行候选检查。
 `edit` 默认验证当前部署版本而非 latest，也可传入下述同版本发布资产参数。
 首次配置输出 `schema_version: 3`；`configure` 和备份恢复继续接受 v1/v2。
