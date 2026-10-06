@@ -46,6 +46,36 @@ runTlsFailureReturnRegression() (
 
     captureFailureReturn "${emailRcFile}" customSSLEmail "validate email"
 
+    (
+        # 邮箱确认或邮箱字段的 EOF、截断不能提交账号配置。
+        eval "${autoReadDefinition}"
+        local HOME="${root}/email-home" AUTO_INSTALL= sslType=zerossl
+        local sslEmail=previous@example.com sslEmailStatus=y input accountFile before inputFd remaining
+        mkdir -p "${HOME}/.acme.sh"
+        accountFile=$(acmeAccountFile)
+        printf "SAVED=unchanged\nACCOUNT_EMAIL='old@example.com'\n" >"${accountFile}"
+        before=$(<"${accountFile}")
+        for input in '' y $'y\n' $'y\nnew@example.com'; do
+            sslEmail=previous@example.com
+            sslEmailStatus=y
+            regressionExpectStatus 1 customSSLEmail "validate email" < <(printf '%s' "${input}")
+            [[ "$(<"${accountFile}")" == "${before}" ]]
+        done
+        printf 'SAVED=unchanged\n' >"${accountFile}"
+        before=$(<"${accountFile}")
+        for input in '' new@example.com; do
+            sslEmail=previous@example.com
+            regressionExpectStatus 1 customSSLEmail < <(printf '%s' "${input}")
+            [[ "$(<"${accountFile}")" == "${before}" ]]
+        done
+        exec {inputFd}< <(printf 'y\nnew@example.com\nnext-parent-action\n')
+        customSSLEmail "validate email" <&"${inputFd}"
+        grep -Fxq "ACCOUNT_EMAIL='new@example.com'" "${accountFile}"
+        read -r -u "${inputFd}" remaining
+        [[ "${remaining}" == next-parent-action ]]
+        exec {inputFd}<&-
+    )
+
     dnsTLSDomain=example
     captureFailureReturn "${dnsRcFile}" initDNSAPIConfig cloudflare
 

@@ -536,8 +536,12 @@ singBoxProtocolInstall() {
     shift
     local selectCustomInstallType=",${protocolId},"
     local singBoxHysteria2CredentialMode=false PADM_INSTALL_CLIENTS_PREPARED=true
-    local AUTO_UUID="${AUTO_UUID:-}" AUTO_USER="${AUTO_USER:-}"
+    local AUTO_UUID="${AUTO_UUID:-}" AUTO_USER="${AUTO_USER:-}" AUTO_PORT="${AUTO_PORT:-}"
     local currentClients="${currentClients:-}" currentUUID="${currentUUID:-}" lastInstallationConfig=
+    local singBoxConfigPath hysteriaPort tuicPort tuicAlgorithm tuicAuthTimeout tuicHeartbeat tuicZeroRttHandshake
+    local hysteria2BandwidthMode hysteria2ClientDownloadSpeed hysteria2ClientUploadSpeed
+    local hysteria2ObfsType hysteria2ObfsPassword hysteria2Masquerade
+    local -a protocolPort=()
     case "${protocolId}" in
     3) singBoxHysteria2CredentialMode=true ;;
     31) ;;
@@ -561,8 +565,23 @@ singBoxProtocolInstall() {
         }
         currentUUID=
     fi
+    # 每次重读磁盘，采集仅保存在本次作用域，取消或失败不污染后续重装。
+    singBoxConfigPath="$(singBoxTemplateConfigDir)/" || return 1
+    readSingBoxConfig
     coreTemplateCollectInitialClients sing-box "${singBoxHysteria2CredentialMode}" true || return 1
+    case "${protocolId}" in
+    3)
+        readSingBoxPortResult protocolPort "${hysteriaPort}" true tcp+udp singbox_custom_port "" "" true || return 1
+        initHysteria2Network true || return 1
+        ;;
+    31)
+        readSingBoxPortResult protocolPort "${tuicPort}" true tcp+udp singbox_custom_port "" "" true || return 1
+        initTuicProtocol || return 1
+        ;;
+    esac
     singBoxEnsureTLSDependency "${protocolName}" true || return 1
+    AUTO_PORT=${protocolPort[-1]}
+    lastInstallationConfig=true
     coreInstallConfigTransaction sing-box padmRunPortAllowTransaction singBoxProtocolInstallApply "${protocolName}" "$@"
 }
 
@@ -656,6 +675,7 @@ initSingBoxPort() {
     local promptKey=${4:-singbox_custom_port}
     local realityProtocolId=${5:-}
     local streamProtocol=${6:-}
+    local inputsOnly=${7:-false}
     local selection=${selectCustomInstallType:-}
     local historyPort=${port} portInput=
     local openPort=false
@@ -722,13 +742,15 @@ initSingBoxPort() {
     fi
 
     validPortNumber "${port}" || { corePortInputErrorCard; return 1; }
-    [[ -z "${realityProtocolId}" ]] || checkPort "${port}" || return 1
-    if [[ "${openPort}" == "true" ]]; then
-        case "${transport}" in
-        tcp+udp) allowPortTcpAndUdp "${port}" || return 1 ;;
-        tcp) allowPort "${port}" || return 1 ;;
-        udp) allowPort "${port}" udp || return 1 ;;
-        esac
+    if [[ "${inputsOnly}" != true ]]; then
+        [[ -z "${realityProtocolId}" ]] || checkPort "${port}" || return 1
+        if [[ "${openPort}" == "true" ]]; then
+            case "${transport}" in
+            tcp+udp) allowPortTcpAndUdp "${port}" || return 1 ;;
+            tcp) allowPort "${port}" || return 1 ;;
+            udp) allowPort "${port}" udp || return 1 ;;
+            esac
+        fi
     fi
     printf '%s\n' "${port}"
 }
@@ -741,21 +763,25 @@ readSingBoxPortResult() {
     local promptKey=${5:-singbox_custom_port}
     local realityProtocolId=${6:-}
     local streamProtocol=${7:-}
+    local inputsOnly=${8:-false}
     local outputFile stateFile beforeState key backend type
 
     resultRef=()
-    stateFile=$(padmFirewallStateFile 2>/dev/null || true)
-    if [[ -n "${stateFile}" && -f "${stateFile}" ]]; then
-        beforeState=$(<"${stateFile}")
+    if [[ "${inputsOnly}" != true ]]; then
+        stateFile=$(padmFirewallStateFile 2>/dev/null || true)
+        if [[ -n "${stateFile}" && -f "${stateFile}" ]]; then
+            beforeState=$(<"${stateFile}")
+        fi
     fi
     padmCreateTmpRootPath outputFile padm-sing-box-port.XXXXXX || return 1
-    if ! initSingBoxPort "${port}" "${promptHistory}" "${transport}" "${promptKey}" "${realityProtocolId}" "${streamProtocol}" >"${outputFile}"; then
+    if ! initSingBoxPort "${port}" "${promptHistory}" "${transport}" "${promptKey}" "${realityProtocolId}" "${streamProtocol}" "${inputsOnly}" >"${outputFile}"; then
         padmRemoveCleanupPath "${outputFile}"
         return 1
     fi
     mapfile -t resultRef <"${outputFile}"
     padmRemoveCleanupPath "${outputFile}" || return 1
     [[ -n "${resultRef[-1]:-}" ]] || return 1
+    [[ "${inputsOnly}" != true ]] || return 0
     for backend in ufw firewalld iptables; do
         for type in tcp udp; do
             key="port:${backend}:${type}:${resultRef[-1]}"

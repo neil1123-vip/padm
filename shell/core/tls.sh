@@ -135,7 +135,7 @@ customSSLEmail() {
     local accountFile accountStage retryEmail=false
     accountFile=$(acmeAccountFile)
     if [[ "${1:-}" == *"validate email"* ]]; then
-        autoRead tls_email_retry "是否重新输入邮箱地址[y/n]:" sslEmailStatus
+        autoRead tls_email_retry "是否重新输入邮箱地址[y/n]:" sslEmailStatus || return 1
         if [[ "${sslEmailStatus}" == "y" ]]; then
             retryEmail=true
         else
@@ -145,7 +145,7 @@ customSSLEmail() {
 
     if [[ -d "$(acmeHomeDir)" && -f "${accountFile}" ]]; then
         if [[ "${retryEmail}" == "true" ]] || { ! grep -q "ACCOUNT_EMAIL" <"${accountFile}" && ! echo "${sslType}" | grep -q "letsencrypt"; }; then
-            autoRead tls_account_email "请输入邮箱地址:" sslEmail
+            autoRead tls_account_email "请输入邮箱地址:" sslEmail || return 1
             if tlsEmailAddressIsSafe "${sslEmail}"; then
                 padmCreateTempFileForTarget accountStage "${accountFile}" account || return 1
                 if ! sed '/ACCOUNT_EMAIL/d' "${accountFile}" >"${accountStage}" || ! printf "ACCOUNT_EMAIL='%s'\n" "${sslEmail}" >>"${accountStage}"; then

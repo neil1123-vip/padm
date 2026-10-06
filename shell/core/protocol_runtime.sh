@@ -125,6 +125,7 @@ initHysteriaPort() {
 # 初始化 Hysteria2 网络信息
 initHysteria2Network() {
 
+    local inputsOnly=${1:-false}
     local bandwidthMode existingBandwidthMode=${hysteria2BandwidthMode:-brutal}
     local defaultDownload=${hysteria2ClientDownloadSpeed:-100} defaultUpload=${hysteria2ClientUploadSpeed:-50}
     local parameterInput= existingMasquerade=${hysteria2Masquerade:-}
@@ -140,7 +141,7 @@ initHysteria2Network() {
             fi
             ;;
         bbr)
-            hysteria2RequireSingBoxField ignore_client_bandwidth 1.11.0 || return 1
+            [[ "${inputsOnly}" == true ]] || hysteria2RequireSingBoxField ignore_client_bandwidth 1.11.0 || return 1
             ;;
         *)
             errorCard "上次 Hysteria2 拥塞模式不受支持"
@@ -148,14 +149,14 @@ initHysteria2Network() {
             ;;
         esac
         if [[ -n "${hysteria2ObfsType:-}" ]]; then
-            hysteria2RequireSingBoxField obfs 1.14.0 || return 1
+            [[ "${inputsOnly}" == true ]] || hysteria2RequireSingBoxField obfs 1.14.0 || return 1
             if [[ "${hysteria2ObfsType}" != salamander && "${hysteria2ObfsType}" != gecko ]] ||
                 [[ -z "${hysteria2ObfsPassword:-}" ]]; then
                 errorCard "上次 Hysteria2 混淆配置不合法"
                 return 1
             fi
         fi
-        hysteria2RequireSingBoxField masquerade 1.11.0 || return 1
+        [[ "${inputsOnly}" == true ]] || hysteria2RequireSingBoxField masquerade 1.11.0 || return 1
         if [[ -n "${hysteria2Masquerade:-}" && ! "${hysteria2Masquerade}" =~ ^(https?|file):// ]]; then
             errorCard "上次 Hysteria2 masquerade 配置不合法"
             return 1
@@ -250,7 +251,7 @@ initHysteria2Network() {
         statusCard "Hysteria2 混淆" "${hysteria2ObfsType}"
     fi
 
-    hysteria2RequireSingBoxField masquerade 1.11.0 || return 1
+    [[ "${inputsOnly}" == true ]] || hysteria2RequireSingBoxField masquerade 1.11.0 || return 1
     if [[ -n "${existingMasquerade}" && ! "${existingMasquerade}" =~ ^(https?|file):// ]]; then
         errorCard "上次 Hysteria2 masquerade 不合法，请重新输入"
         [[ -z "${AUTO_INSTALL:-}" ]] || return 1

@@ -2048,14 +2048,21 @@ runSingBoxProtocolReloadFailureRegression() (
     local reachedFile="${root}/accounts"
     local callLog="${root}/calls.log"
     local anyTlsLog="${root}/anytls.log"
-    local tuicRc hysteriaRc install collectionSource
+    local tuicRc hysteriaRc install collectionSource portSource networkSource tuicSource
     local PADM_SINGBOX_CONFIG_DIR="${root}/config"
 
     collectionSource=$(declare -f coreTemplateCollectInitialClients)
+    portSource=$(declare -f readSingBoxPortResult)
+    networkSource=$(declare -f initHysteria2Network)
+    tuicSource=$(declare -f initTuicProtocol)
     mkdir -p "${PADM_SINGBOX_CONFIG_DIR}"
     : >"${callLog}"
     : >"${anyTlsLog}"
     coreTemplateCollectInitialClients() { return 0; }
+    # 原场景只验证事务与服务；输入前置另用真实 helper 覆盖。
+    readSingBoxPortResult() { local -n ports=$1; ports=(18443); }
+    initHysteria2Network() { return 0; }
+    initTuicProtocol() { return 0; }
 
     (
         local dependencyRoot="${root}/reality-tls"
@@ -2302,6 +2309,108 @@ runSingBoxProtocolReloadFailureRegression() (
             done
             rm -f "${configFile}"
         done
+    )
+
+    (
+        # 真实采集和模板：取消无副作用，磁盘默认值与失败重试不受会话缓存影响。
+        eval "${collectionSource}"
+        eval "${portSource}"
+        eval "${networkSource}"
+        eval "${tuicSource}"
+        local PADM_SINGBOX_CONFIG_DIR="${root}/preflight-config"
+        local capturedConfig="${root}/preflight.json" configFile protocolId input inputFd remaining
+        local uuid=11111111-1111-4111-8111-111111111111 coreVersion=1.10.0
+        local tlsCalls=0 transactions=0 downloads=0 allows=0 applyMode=success
+        local singBoxHysteria2Port=19997 singBoxTuicPort=19996
+        local singBoxConfigPath=parent-path/ hysteriaPort=19999 tuicPort=19998 tuicAlgorithm=cubic
+        local tuicAuthTimeout=stale tuicHeartbeat=stale tuicZeroRttHandshake=false
+        local hysteria2BandwidthMode=brutal hysteria2ClientDownloadSpeed=999 hysteria2ClientUploadSpeed=888
+        local hysteria2ObfsType=gecko hysteria2ObfsPassword=stale hysteria2Masquerade=https://stale.example.com
+        local lastInstallationConfig=parent-history AUTO_PORT=
+        local -a result=()
+        unset AUTO_INSTALL AUTO_UUID AUTO_USER
+        mkdir -p "${PADM_SINGBOX_CONFIG_DIR}"
+        singBoxEnsureTLSDependency() {
+            [[ "${2:-}" != true || -z "${lastInstallationConfig}" ]] || return 1
+            tlsCalls=$((tlsCalls + 1))
+        }
+        coreInstallConfigTransaction() { transactions=$((transactions + 1)); shift; "$@"; }
+        installSingBox() { downloads=$((downloads + 1)); coreVersion=1.14.0; }
+        getSingBoxCurrentVersion() { printf '%s\n' "${coreVersion}"; }
+        allowPortTcpAndUdp() { allows=$((allows + 1)); [[ "$1" == "${AUTO_PORT}" ]]; }
+        collectTLSProfile() { tlsCertDomain=installed.example.com; }
+        writeGeneratedJsonFile() { cat >"${capturedConfig}"; }
+        setSniffRouting() { return 0; }
+        initSingBoxConfig() { initSingBoxConfigApply "$@"; }
+        installSingBoxService() { return 0; }
+        serviceQueueRestart() { [[ "$1" == sing-box ]]; }
+        serviceQueueApply() { [[ "${applyMode}" == success ]]; }
+        showAccounts() { return 0; }
+        subscriptionNotifyControllerRefresh() { return 0; }
+
+        for protocolId in 3 31; do
+            configFile=$(singBoxTemplateConfigFile "$(protocolCapabilityMeta "${protocolId}" config_file)")
+            jq -n --arg uuid "${uuid}" --arg id "${protocolId}" '{
+                inbounds:[{listen_port:18443, users:[{password:"disk-password",name:"disk-user"} +
+                    (if $id == "31" then {uuid:$uuid} else {} end)],
+                    up_mbps:72,down_mbps:38,obfs:{type:"salamander",password:"disk-obfs"},
+                    masquerade:"https://disk.example.com",congestion_control:"bbr",
+                    auth_timeout:"4s",heartbeat:"12s",zero_rtt_handshake:true}]
+            }' >"${configFile}"
+
+            for input in $'\n24444' $'\n24444\n2'; do
+                regressionExpectStatus 1 singBoxProtocolInstall "${protocolId}" < <(printf '%s' "${input}") >/dev/null 2>&1
+                [[ "${tlsCalls}${transactions}${downloads}${allows}" == 0000 ]]
+            done
+            if [[ "${protocolId}" == 3 ]]; then
+                regressionExpectStatus 1 singBoxProtocolInstall 3 < <(printf '\n24444\n2\ngecko\nnew-obfs\n') >/dev/null 2>&1
+                [[ "${tlsCalls}${transactions}${downloads}${allows}" == 0000 ]]
+            fi
+            [[ "${hysteria2BandwidthMode}" == brutal && "${hysteria2ClientDownloadSpeed}" == 999 &&
+                "${hysteria2ObfsPassword}" == stale && "${tuicAlgorithm}" == cubic && -z "${AUTO_PORT}" ]]
+
+            # 版本检查发生在升级后；应用阶段使用已采集输入，不能再读取下一层菜单。
+            input=$'\n24444\n3\n'
+            [[ "${protocolId}" != 3 ]] || input=$'\n24444\n2\ngecko\nnew-obfs\nhttps://new.example.com\n'
+            coreVersion=1.10.0
+            applyMode=failure
+            regressionExpectStatus 1 singBoxProtocolInstall "${protocolId}" < <(printf '%s' "${input}") >/dev/null 2>&1
+            [[ "${tlsCalls}${transactions}${downloads}${allows}" == 2111 ]]
+            jq -e '.inbounds[0].listen_port == 24444' "${capturedConfig}" >/dev/null
+            [[ "${hysteria2BandwidthMode}" == brutal && "${hysteria2ClientDownloadSpeed}" == 999 &&
+                "${tuicAlgorithm}" == cubic && "${tuicAuthTimeout}" == stale && -z "${AUTO_PORT}" &&
+                "${singBoxConfigPath}" == parent-path/ && "${lastInstallationConfig}" == parent-history ]]
+
+            # 回车重试重新使用磁盘的端口、带宽、混淆和高级参数，不沿用失败操作。
+            input=$'\n\n\n'
+            [[ "${protocolId}" != 3 ]] || input=$'\n\n\n\n\n\n\n\n'
+            applyMode=success
+            exec {inputFd}< <(printf '%snext-parent-action\n' "${input}")
+            singBoxProtocolInstall "${protocolId}" <&"${inputFd}" >/dev/null 2>&1
+            read -r -u "${inputFd}" remaining
+            exec {inputFd}<&-
+            [[ "${remaining}" == next-parent-action && "${tlsCalls}${transactions}${downloads}${allows}" == 4222 ]]
+            jq -e '.inbounds[0].listen_port == 18443 and .inbounds[0].users[0].password == "disk-password"' "${capturedConfig}" >/dev/null
+            if [[ "${protocolId}" == 3 ]]; then
+                jq -e '.inbounds[0] | .up_mbps == 72 and .down_mbps == 38 and
+                    .obfs == {type:"salamander",password:"disk-obfs"} and .masquerade == "https://disk.example.com"' "${capturedConfig}" >/dev/null
+            else
+                jq -e '.inbounds[0] | .congestion_control == "bbr" and .auth_timeout == "4s" and
+                    .heartbeat == "12s" and .zero_rtt_handshake == true' "${capturedConfig}" >/dev/null
+            fi
+            tlsCalls=0 transactions=0 downloads=0 allows=0
+            rm -f "${configFile}"
+        done
+
+        # 非法自动端口在证书和下载之前失败；合法自动端口不消耗交互输入。
+        AUTO_INSTALL=true AUTO_PORT=invalid AUTO_UUID=${uuid} AUTO_USER=auto-user
+        currentClients= currentUUID=
+        regressionExpectStatus 1 singBoxProtocolInstall 31 </dev/null >/dev/null 2>&1
+        [[ "${tlsCalls}${transactions}${downloads}${allows}" == 0000 ]]
+        AUTO_PORT=24444
+        menuReadChoice() { printf -v "$3" '%s' 2; }
+        singBoxProtocolInstall 31 </dev/null >/dev/null 2>&1
+        [[ "${tlsCalls}${transactions}${downloads}${allows}" == 2111 && "${AUTO_PORT}" == 24444 ]]
     )
 
     (

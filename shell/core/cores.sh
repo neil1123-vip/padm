@@ -1772,6 +1772,7 @@ runCoreInstall() {
     *) return 1 ;;
     esac
     local PADM_INSTALL_RESET_HISTORY=false PADM_INSTALL_CLIENTS_PREPARED=false
+    local PADM_NGINX_BLOG_REINSTALL_PROMPT=false
     local AUTO_UUID="${AUTO_UUID:-}" AUTO_USER="${AUTO_USER:-}" AUTO_PORT="${AUTO_PORT:-}"
     prepareCoreInstallInputs "${core}" || return 1
     coreSwitchConfigTransaction "${core}" padmRunPortAllowTransaction "${operation}" "$@"
