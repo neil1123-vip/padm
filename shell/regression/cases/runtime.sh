@@ -1115,6 +1115,57 @@ runInstallWorkflowRegression() (
     )
 
     (
+        # 多协议共享监听准备，各端口仍检测；失败与重试不能沿用准备标记。
+        local domain=tls.example.com currentPath=path currentClients='[{"uuid":"11111111-1111-4111-8111-111111111111","name":"alice"}]'
+        local PADM_INSTALL_CLIENTS_PREPARED=true singBoxTemplateTLSListenerPrepared=parent
+        local selectCustomInstallType=,27,21,22,23, failure= events= checks= writes=0
+        local protocolId result=() singBoxConfigPath= nginxConfigPath="${TMP_DIR}/install-tls-listener/"
+        mkdir -p "${nginxConfigPath}"
+        collectTLSProfile() { tlsCertDomain=${domain}; }
+        readSingBoxProtocolPort() {
+            protocolId=$2
+            events+="port:${protocolId} "
+            [[ "${failure}" != port ]] || return 1
+            result=("$((15000 + protocolId))")
+        }
+        checkDNSIP() { events+="dns "; [[ "${failure}" != dns ]]; }
+        removeNginxDefaultConf() { events+="nginx "; [[ "${failure}" != nginx ]]; }
+        runCoreServiceActionAllowFailure() {
+            [[ "$1" == handleSingBox && "$2" == stop ]] || return 0
+            events+="stop "
+            [[ "${failure}" != stop ]]
+        }
+        checkPortOpen() { checks+="$1 "; [[ "${failure}" != probe ]]; }
+        randomPathFunction() { :; }
+        singBoxNginxConfig() { :; }
+        bootStartup() { :; }
+        setSniffRouting() { :; }
+        writeGeneratedJsonFile() { jq -e . >/dev/null || return 1; writes=$((writes + 1)); }
+
+        initSingBoxConfigApply custom 1 true >/dev/null
+        [[ "${events}" == "port:27 dns nginx stop port:21 port:22 port:23 " &&
+            "${checks}" == "15027 15021 15022 15023 " && "${writes}" == 4 &&
+            "${singBoxTemplateTLSListenerPrepared}" == parent ]]
+        for failure in port dns nginx stop probe; do
+            events= checks= writes=0
+            regressionExpectStatus 1 initSingBoxConfigApply custom 1 true >/dev/null
+            [[ "${writes}" == 0 && "${singBoxTemplateTLSListenerPrepared}" == parent ]]
+            case "${failure}" in
+            port) [[ "${events}" == "port:27 " ]] ;;
+            dns) [[ "${events}" == "port:27 dns " ]] ;;
+            nginx) [[ "${events}" == "port:27 dns nginx " ]] ;;
+            *) [[ "${events}" == "port:27 dns nginx stop " ]] ;;
+            esac
+            failure= events= checks= writes=0
+            initSingBoxConfigApply custom 1 true >/dev/null
+            [[ "${events}" == "port:27 dns nginx stop port:21 port:22 port:23 " && "${writes}" == 4 ]]
+        done
+        selectCustomInstallType=,28, events= checks= writes=0
+        initSingBoxConfigApply custom 1 true >/dev/null
+        [[ "${events}" == "port:28 " && -z "${checks}" && "${writes}" == 1 ]]
+    )
+
+    (
         local tuicJson=
         lastInstallationConfig=true
         currentUUID=11111111-1111-4111-8111-111111111111

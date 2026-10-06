@@ -5278,7 +5278,7 @@ runSingBoxHttpUpgradeIncrementalStartsNginxRegression() {
         initSingBoxClients() { printf '[]'; }
         checkDNSIP() { return 0; }
         removeNginxDefaultConf() { return 0; }
-        stopSingBoxBeforeTemplateWrite() { return 0; }
+        prepareSingBoxTemplateTLSListener() { return 0; }
         randomPathFunction() { currentPath=httpup; }
         checkPortOpen() { return 0; }
         singBoxNginxConfig() {
@@ -5362,7 +5362,7 @@ runSingBoxHttpUpgradeRejectsUnsafeNginxPathRegression() {
         }
         initSingBoxClients() { printf '[]'; }
         checkDNSIP() { return 0; }
-        stopSingBoxBeforeTemplateWrite() { return 0; }
+        prepareSingBoxTemplateTLSListener() { return 0; }
         randomPathFunction() { currentPath=httpup; }
         checkPortOpen() { return 0; }
         singBoxNginxConfig() { return 0; }

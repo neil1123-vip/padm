@@ -1007,14 +1007,20 @@ initXrayConfig() {
 }
 
 
-# 初始化 sing-box 配置文件
-stopSingBoxBeforeTemplateWrite() {
+# 同次模板生成只准备一次 TLS 监听环境，端口输入成功后再执行。
+prepareSingBoxTemplateTLSListener() {
+    [[ "${singBoxTemplateTLSListenerPrepared:-false}" != true ]] || return 0
+    checkDNSIP "${domain}" || return 1
+    removeNginxDefaultConf || return 1
     runCoreServiceActionAllowFailure handleSingBox stop || { errorCard "sing-box 服务停止失败，已取消写入配置"; return 1; }
+    singBoxTemplateTLSListenerPrepared=true
 }
 
+# 初始化 sing-box 配置文件
 initSingBoxConfigApply() {
     set -- "${1:-}" "${2:-}" "${3:-}"
     local singBoxConfigPath selectCoreType=2
+    local singBoxTemplateTLSListenerPrepared=false
     local -A singBoxInstallListeners=()
     local hysteria2CredentialMode="${singBoxHysteria2CredentialMode:-false}"
     singBoxConfigPath="$(singBoxTemplateConfigDir)/" || return 1
@@ -1038,9 +1044,7 @@ initSingBoxConfigApply() {
         readSingBoxProtocolPort result 27 "${singBoxVLESSVisionPort}" || return 1
         statusCard "VLESS Vision端口" "${result[-1]}"
 
-        checkDNSIP "${domain}" || return 1
-        removeNginxDefaultConf || return 1
-        stopSingBoxBeforeTemplateWrite || return 1
+        prepareSingBoxTemplateTLSListener || return 1
 
         checkPortOpen "${result[-1]}" "${domain}" || return 1
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/02_VLESS_TCP_inbounds.json padm-sing-box-vless-tcp <<EOF || { errorCard "sing-box VLESS Vision 入站模板提交失败"; return 1; }
@@ -1074,9 +1078,7 @@ EOF
         readSingBoxProtocolPort result 21 "${singBoxVLESSWSPort}" || return 1
         statusCard "VLESS WS端口" "${result[-1]}"
 
-        checkDNSIP "${domain}" || return 1
-        removeNginxDefaultConf || return 1
-        stopSingBoxBeforeTemplateWrite || return 1
+        prepareSingBoxTemplateTLSListener || return 1
         randomPathFunction || return 1
         checkPortOpen "${result[-1]}" "${domain}" || return 1
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/03_VLESS_WS_inbounds.json padm-sing-box-vless-ws <<EOF || { errorCard "sing-box VLESS WS 入站模板提交失败"; return 1; }
@@ -1116,9 +1118,7 @@ EOF
         readSingBoxProtocolPort result 22 "${singBoxVMessWSPort}" || return 1
         statusCard "VMess ws端口" "${result[-1]}"
 
-        checkDNSIP "${domain}" || return 1
-        removeNginxDefaultConf || return 1
-        stopSingBoxBeforeTemplateWrite || return 1
+        prepareSingBoxTemplateTLSListener || return 1
         randomPathFunction || return 1
         checkPortOpen "${result[-1]}" "${domain}" || return 1
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/05_VMess_WS_inbounds.json padm-sing-box-vmess-ws <<EOF || { errorCard "sing-box VMess WS 入站模板提交失败"; return 1; }
@@ -1434,9 +1434,7 @@ EOF
         readSingBoxProtocolPort result 23 "${singBoxVMessHTTPUpgradePort}" || return 1
         statusCard "VMess HTTPUpgrade端口" "${result[-1]}"
 
-        checkDNSIP "${domain}" || return 1
-        removeNginxDefaultConf || return 1
-        stopSingBoxBeforeTemplateWrite || return 1
+        prepareSingBoxTemplateTLSListener || return 1
         randomPathFunction || return 1
         local httpUpgradeNginxConf
         if ! httpUpgradeNginxConf=$(nginxConfigFilePath sing_box_VMess_HTTPUpgrade.conf); then
