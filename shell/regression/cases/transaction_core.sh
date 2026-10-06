@@ -1331,6 +1331,9 @@ $1:refresh"
         [[ "$1" == "start" ]] && singBoxRuntimeState=true
         return 0
     }
+    validateXrayConfigWithBinary() { return 0; }
+    singBoxMergeConfig() { return 0; }
+    checkNginxConfig() { return 0; }
 
     resetInstallServiceFixture() {
         mode=$1
@@ -1790,7 +1793,6 @@ SH
     grep -q '^check:' "${checkLog}"
     ! grep -qx "check:${outputFile}" "${checkLog}"
     ! compgen -G "${confDir}/.config.json.merge.*" >/dev/null
-
     : >"${checkLog}"
     export PADM_FAKE_SINGBOX_CHECK_MODE=fail
     regressionExpectStatus 1 singBoxMergeConfigForValidation "${binary}" "${logFile}" check >/dev/null 2>&1
@@ -1798,6 +1800,15 @@ SH
     grep -q '^check:' "${checkLog}"
     ! grep -qx "check:${outputFile}" "${checkLog}"
     ! compgen -G "${confDir}/.config.json.merge.*" >/dev/null
+    regressionExpectStatus 1 singBoxMergeConfig check >/dev/null 2>&1
+    [[ "$(<"${outputFile}")" == '{"runtime":true}' ]]
+    ! compgen -G "${confDir}/.config.json.merge.*" >/dev/null
+    export PADM_FAKE_SINGBOX_CHECK_MODE=success
+    singBoxV2rayApiSupported() { return 1; }
+    printf '{"experimental":{"v2ray_api":{}}}\n' >"${shardDir}/14_stats_api.json"
+    singBoxMergeConfig check
+    [[ ! -e "${shardDir}/14_stats_api.json" ]]
+    [[ "$(<"${outputFile}")" == '{"merged":true}' ]]
 )
 
 runSingBoxUninstallFailurePropagationRegression() (
@@ -1957,6 +1968,7 @@ runSingBoxLogTransactionRegression() (
                 errorLog=$3
                 disabled=$4
                 rcFile=$5
+                singBoxRunning() { return 0; }
                 serviceQueueRestart() {
                     printf "restart:%s\n" "$1" >>"${serviceLog}"
                     return 0
@@ -2016,6 +2028,7 @@ runSingBoxLogTransactionRegression() (
             serviceLog=$2
             errorLog=$3
             rcFile=$4
+            singBoxRunning() { return 0; }
             serviceQueueRestart() {
                 printf "restart:%s\n" "$1" >>"${serviceLog}"
                 return 0
@@ -2051,6 +2064,35 @@ runSingBoxLogTransactionRegression() (
     [[ ! -s "${errorLog}" ]] || return 1
     ! compgen -G "$(dirname "${targetPath}")/.log.json.*" >/dev/null || return 1
     ! compgen -G "${targetPath}.bak.*" >/dev/null || return 1
+    (
+        # 使用真实分派器验证运行态恢复，不以队列成功代替服务成功。
+        local running=true starts=0
+        source "${PROJECT_ROOT}/shell/core/services.sh"
+        singBoxRunning() { [[ "${running}" == true ]]; }
+        singBoxMergeConfig() { return 0; }
+        handleSingBox() {
+            printf '%s\n' "$1" >>"${serviceLog}"
+            if [[ "$1" == stop ]]; then
+                running=false
+            else
+                starts=$((starts + 1))
+                [[ "${starts}" -ne 1 ]] || return 1
+                running=true
+            fi
+            return 0
+        }
+        : >"${serviceLog}"
+        printf '{"log":{"disabled":true,"level":"warning"}}\n' >"${targetPath}"
+        regressionExpectStatus 1 singBoxLog false >/dev/null 2>&1 || return 1
+        [[ "${running}" == true && "${starts}" == 2 ]] || return 1
+        jq -e '.log.disabled == true and .log.level == "warning"' "${targetPath}" >/dev/null || return 1
+        [[ "$(<"${serviceLog}")" == $'stop\nstart\nstop\nstart' ]] || return 1
+        running=false
+        : >"${serviceLog}"
+        singBoxLog false >/dev/null 2>&1 || return 1
+        [[ "${running}" == false && ! -s "${serviceLog}" ]] || return 1
+        regressionExpectStatus 1 singBoxLog invalid >/dev/null 2>&1 || return 1
+    ) || return 1
     return 0
 )
 
@@ -2489,8 +2531,14 @@ runGeoUpdateReloadFailureRegression() (
         cat "${geoVersionFile}"
     }
     reloadCore() {
+        return 99
+    }
+    coreXrayInstallDir() { printf '%s\n' "${root}"; }
+    xrayRunning() { [[ "${mode}" != stopped ]]; }
+    runServiceAction() {
+        [[ "$*" == 'xray restart' ]] || return 99
         printf 'reload\n' >>"${callLog}"
-        return 1
+        [[ "${mode}" == reload-success ]]
     }
     statusCard() {
         printf '%s\n' "$*" >>"${statusLog}"
@@ -2498,17 +2546,58 @@ runGeoUpdateReloadFailureRegression() (
 
     mode=ensure-fail
     regressionExpectStatus 1 updateGeoSite >/dev/null 2>&1
-    grep -qx 'geo:/etc/padm/xray force' "${callLog}"
+    grep -qx "geo:${root} force" "${callLog}"
     ! grep -q '^reload$' "${callLog}"
 
     mode=reload-fail
     : >"${callLog}"
     printf 'old-version\n' >"${geoVersionFile}"
     regressionExpectStatus 1 updateGeoSite >/dev/null 2>&1
-    grep -qx 'geo:/etc/padm/xray force' "${callLog}"
+    grep -qx "geo:${root} force" "${callLog}"
     grep -qx 'reload' "${callLog}"
-    grep -q '核心重载失败' "${statusLog}"
+    grep -q 'Xray 重载失败' "${statusLog}"
     ! grep -q '更新完毕' "${statusLog}"
+    regressionExpectStatus 1 updateGeoSite >/dev/null 2>&1
+    [[ "$(grep -c '^reload$' "${callLog}")" == 2 && -f "${root}/geo.reload.pending" ]]
+    mode=stopped
+    regressionExpectStatus 1 updateGeoSite >/dev/null 2>&1
+    [[ "$(grep -c '^reload$' "${callLog}")" == 3 && -f "${root}/geo.reload.pending" ]]
+    mode=reload-success
+    updateGeoSite >/dev/null 2>&1
+    [[ "$(grep -c '^reload$' "${callLog}")" == 4 && ! -e "${root}/geo.reload.pending" ]]
+    mode=stopped
+    : >"${callLog}"
+    : >"${statusLog}"
+    updateGeoSite >/dev/null 2>&1
+    ! grep -q '^reload$' "${callLog}"
+    grep -q 'Xray 当前未运行，启动后生效' "${statusLog}"
+
+    (
+        local coreInstallType=1 cronMode reads="${root}/cron-reads" writes="${root}/cron-writes"
+        readUserCrontabContent() {
+            printf 'read\n' >>"${reads}"
+            [[ "${cronMode}" != read-fail ]] || return 1
+            [[ "${cronMode}" != exists ]] || printf '35 1 * * * bash /etc/padm/install.sh UpdateGeo\n'
+            return 0
+        }
+        installUserCrontabContent() {
+            printf '%s\n' "$1" >>"${writes}"
+            [[ "${cronMode}" != write-fail ]]
+        }
+        for cronMode in exists read-fail write-fail success; do
+            : >"${reads}"
+            : >"${writes}"
+            local expected=1
+            [[ "${cronMode}" != exists && "${cronMode}" != success ]] || expected=0
+            regressionExpectStatus "${expected}" installCronUpdateGeo >/dev/null 2>&1 || return 1
+            [[ "$(wc -l <"${reads}")" == 1 ]] || return 1
+            if [[ "${cronMode}" == exists || "${cronMode}" == read-fail ]]; then
+                [[ ! -s "${writes}" ]] || return 1
+            else
+                grep -q 'UpdateGeo' "${writes}" || return 1
+            fi
+        done
+    ) || return 1
 
     handlerSource=$(awk '/^handleScriptCommand\(\)/,/^}/ { print }' "${PROJECT_ROOT}/install.sh")
     handlerSource=${handlerSource//\/etc\/padm\/crontab_updateGeoSite.log/${geoCronLog}}
@@ -3184,7 +3273,9 @@ JSON
             readCalls=$((readCalls + 1))
             printf -v "$3" '1'
         }
-        reloadCore() {
+        xrayRunning() { return 0; }
+        runServiceAction() {
+            [[ "$*" == 'xray restart' ]] || return 99
             reloadCalls=$((reloadCalls + 1))
             return 1
         }
@@ -3201,6 +3292,10 @@ JSON
         if regressionFindHasMatches "${entryTmpRoot}" -maxdepth 1 -type d -name 'padm-check-log-backup.*'; then
             return 1
         fi
+        xrayRunning() { return 1; }
+        reloadCalls=0
+        checkLog >/dev/null 2>&1 || return 1
+        [[ "${reloadCalls}" == 0 ]]
     )
 
     (

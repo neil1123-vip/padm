@@ -500,20 +500,20 @@ installCronTLS() {
 # 定时任务更新geo文件
 installCronUpdateGeo() {
     if [[ "${coreInstallType}" == "1" ]]; then
-        if crontab -l 2>/dev/null | grep -q "UpdateGeo"; then
-            errorCard "已添加自动更新定时任务，请不要重复添加"
-            exit 0
-        fi
-        progressCard "1" "添加定时更新 Geo 文件" "1"
         local historyCrontab
         historyCrontab=$(readUserCrontabContent) || {
             errorCard "读取现有定时任务失败，已取消添加 Geo 更新任务"
-            exit 1
+            return 1
         }
+        if grep -q "UpdateGeo" <<<"${historyCrontab}"; then
+            statusCard "Geo 自动更新" "已设置" "保留现有定时任务"
+            return 0
+        fi
+        progressCard "1" "添加定时更新 Geo 文件" "1"
         if ! installUserCrontabContent "${historyCrontab}
 35 1 * * * /bin/bash /etc/padm/install.sh UpdateGeo >> /etc/padm/crontab_tls.log 2>&1"; then
             errorCard "添加定时更新 Geo 文件失败，已保留原定时任务"
-            exit 1
+            return 1
         fi
         successCard "添加定时更新 Geo 文件成功"
     fi

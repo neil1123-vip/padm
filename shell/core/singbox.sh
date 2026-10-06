@@ -664,6 +664,10 @@ singBoxMergeConfig() {
         fi
     fi
     singBoxMergeConfigToTemp tmpFile "${binary}" /dev/null || return 1
+    if [[ "${1:-}" == check ]] && ! "${binary}" check -c "${tmpFile}" >"$(padmTmpFilePath padm-sing-box-start-test.log)" 2>&1; then
+        padmRemoveCleanupPath "${tmpFile}"
+        return 1
+    fi
     commitGeneratedFile "${tmpFile}" "${outputFile}" 644 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
 

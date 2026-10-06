@@ -140,48 +140,45 @@ serviceActionSupported() {
 runServiceAction() {
     local serviceName=$1
     local action=$2
-    local status=0
+    local handler
 
     if ! serviceActionSupported "${serviceName}" "${action}"; then
         errorCard "不支持的服务动作: ${serviceName}:${action}"
         return 1
     fi
+    case "${serviceName}" in
+    nginx) handler=handleNginx ;;
+    xray) handler=handleXray ;;
+    sing-box) handler=handleSingBox ;;
+    esac
     case "${action}" in
     start)
         serviceRunning "${serviceName}" && return 0
-        case "${serviceName}" in
-        nginx) handleNginx start ;;
-        xray) handleXray start ;;
-        sing-box) handleSingBox start ;;
-        esac
+        "${handler}" start
         ;;
     stop)
         serviceRunning "${serviceName}" || return 0
-        case "${serviceName}" in
-        nginx) handleNginx stop ;;
-        xray) handleXray stop ;;
-        sing-box) handleSingBox stop ;;
-        esac
+        "${handler}" stop
         ;;
     restart)
+        # 停服前验证磁盘配置，避免无效配置中断仍可用的服务。
         case "${serviceName}" in
-        nginx)
-            handleNginx stop || status=1
-            handleNginx start restore || status=1
-            ;;
-        xray)
-            handleXray stop || status=1
-            handleXray start || status=1
-            ;;
-        sing-box)
-            handleSingBox stop || status=1
-            handleSingBox start || status=1
-            ;;
-        esac
-        return "${status}"
+        nginx) checkNginxConfig true ;;
+        xray) validateXrayConfigWithBinary "$(xrayServiceBinaryPath)" "$(xrayStartTestLog)" ;;
+        sing-box) singBoxMergeConfig check ;;
+        esac || {
+            errorCard "${serviceName} 配置检查失败，已取消重启"
+            return 1
+        }
+        "${handler}" stop || return 1
+        if [[ "${serviceName}" == nginx ]]; then
+            "${handler}" start restore
+        else
+            "${handler}" start
+        fi
         ;;
     reload | refresh)
-        handleNginx "${action}"
+        "${handler}" "${action}"
         ;;
     esac
 }
@@ -393,25 +390,27 @@ handleSingBoxMergeFailure() {
 
 # 操作 sing-box
 handleSingBox() {
+    local serviceManager=
     if [[ -f "${PADM_SINGBOX_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/sing-box.service}" ]]; then
-        if ! singBoxRunning && [[ "$1" == "start" ]]; then
-            if ! singBoxMergeConfig; then
-                handleSingBoxMergeFailure
-                return 1
-            fi
-            systemctl start sing-box.service
-        elif singBoxRunning && [[ "$1" == "stop" ]]; then
-            systemctl stop sing-box.service
-        fi
+        serviceManager=systemd
     elif [[ -f "${PADM_SINGBOX_OPENRC_SERVICE_FILE:-/etc/init.d/sing-box}" ]]; then
+        serviceManager=openrc
+    fi
+    if [[ -n "${serviceManager}" ]]; then
         if ! singBoxRunning && [[ "$1" == "start" ]]; then
-            if ! singBoxMergeConfig; then
+            if ! singBoxMergeConfig check; then
                 handleSingBoxMergeFailure
                 return 1
             fi
-            rc-service sing-box start
+            case "${serviceManager}" in
+            systemd) systemctl start sing-box.service ;;
+            openrc) rc-service sing-box start ;;
+            esac
         elif singBoxRunning && [[ "$1" == "stop" ]]; then
-            rc-service sing-box stop
+            case "${serviceManager}" in
+            systemd) systemctl stop sing-box.service ;;
+            openrc) rc-service sing-box stop ;;
+            esac
         fi
     fi
     if [[ "$1" == "start" ]]; then
@@ -469,32 +468,32 @@ xrayRunning() {
 
 # 操作 Xray-core
 handleXray() {
-    local logFile
+    local logFile serviceManager=
     local xrayBinary
     local xrayConfigDir
     xrayBinary=$(xrayServiceBinaryPath)
     xrayConfigDir=$(xrayServiceConfigDir)
-    if [[ -n $(find /bin /usr/bin -name "systemctl") ]] && [[ -n $(find /etc/systemd/system/ -name "xray.service") ]]; then
+    if [[ -f "${PADM_XRAY_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/xray.service}" ]] && padmCommandExists systemctl; then
+        serviceManager=systemd
+    elif [[ -f "${PADM_XRAY_OPENRC_SERVICE_FILE:-/etc/init.d/xray}" ]]; then
+        serviceManager=openrc
+    fi
+    if [[ -n "${serviceManager}" ]]; then
         if ! xrayRunning && [[ "$1" == "start" ]]; then
             logFile=$(xrayStartTestLog)
             if [[ -f "${xrayBinary}" && -x "${xrayBinary}" && -d "${xrayConfigDir}" ]] && ! "${xrayBinary}" -test -confdir "${xrayConfigDir}" >"${logFile}" 2>&1; then
                 xrayConfigValidationFailureCard "已取消启动" "排查日志: ${logFile}"
                 return 1
             fi
-            xraySystemdStart
+            case "${serviceManager}" in
+            systemd) xraySystemdStart ;;
+            openrc) rc-service xray start ;;
+            esac
         elif xrayRunning && [[ "$1" == "stop" ]]; then
-            systemctl stop xray.service
-        fi
-    elif [[ -f "/etc/init.d/xray" ]]; then
-        if ! xrayRunning && [[ "$1" == "start" ]]; then
-            logFile=$(xrayStartTestLog)
-            if [[ -f "${xrayBinary}" && -x "${xrayBinary}" && -d "${xrayConfigDir}" ]] && ! "${xrayBinary}" -test -confdir "${xrayConfigDir}" >"${logFile}" 2>&1; then
-                xrayConfigValidationFailureCard "已取消启动" "排查日志: ${logFile}"
-                return 1
-            fi
-            rc-service xray start
-        elif xrayRunning && [[ "$1" == "stop" ]]; then
-            rc-service xray stop
+            case "${serviceManager}" in
+            systemd) systemctl stop xray.service ;;
+            openrc) rc-service xray stop ;;
+            esac
         fi
     fi
     if [[ "$1" == "start" ]]; then

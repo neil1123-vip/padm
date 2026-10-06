@@ -5840,7 +5840,7 @@ JSON
             local preflightLog="${preflightRoot}/prerelease.log"
             local preflightBefore validationCallsFile="${preflightRoot}/validation-calls" validationConfigDirFile="${preflightRoot}/validation-config-dir"
             mkdir -p "${preflightConfigDir}"
-            printf '%s\n' '{"route":{"rule_set":[{"type":"remote","tag":"legacy","url":"https://example.com/legacy.srs","download_detour":"direct"}]}}' >"${preflightFile}"
+            printf '%s\n' '{"outbounds":[{"type":"direct","tag":"direct","domain_strategy":"prefer_ipv4"}],"route":{"rule_set":[{"type":"remote","tag":"legacy","url":"https://example.com/legacy.srs","download_detour":"direct"}]}}' >"${preflightFile}"
             printf '0\n' >"${validationCallsFile}"
             preflightBefore=$(<"${preflightFile}")
             singBoxConfigPath="${preflightConfigDir}"
@@ -5864,7 +5864,7 @@ JSON
                 validationConfigDir=$(singBoxConfigShardDir)
                 printf '%s\n' "${validationConfigDir}" >"${validationConfigDirFile}"
                 if compgen -G "${validationConfigDir}*.json" >/dev/null &&
-                    grep -q 'download_detour' "${validationConfigDir}"*.json; then
+                    grep -Eq 'download_detour|domain_strategy' "${validationConfigDir}"*.json; then
                     return 1
                 fi
                 return 0
@@ -5876,6 +5876,10 @@ JSON
             [[ "$(<"${validationConfigDirFile}")" != "${preflightConfigDir}" ]]
             [[ "$(<"${preflightFile}")" == "${preflightBefore}" ]]
             grep -q '已迁移' "${preflightLog}"
+            printf '%s\n' '{"outbounds":[{"type":"direct","domain_strategy":"prefer_ipv4","domain_resolver":"dns-conflict"}]}' >"${preflightFile}"
+            preflightBefore=$(<"${preflightFile}")
+            regressionExpectStatus 1 checkSingBoxPrereleaseCompatibility v1.16.0 "${preflightLog}"
+            [[ "$(<"${preflightFile}")" == "${preflightBefore}" && "$(<"${validationCallsFile}")" == 1 ]]
         )
 
         jq -e '

@@ -241,17 +241,8 @@ SH
     [[ -z "${SERVICE_ACTIONS}" ]]
 
     local xrayWaitLog="${serviceTmp}/xray-wait.log"
-    find() {
-        if [[ "$*" == *'systemctl'* ]]; then
-            printf '/usr/bin/systemctl\n'
-            return 0
-        fi
-        if [[ "$*" == *'xray.service'* ]]; then
-            printf '/etc/systemd/system/xray.service\n'
-            return 0
-        fi
-        command find "$@"
-    }
+    export PADM_XRAY_SYSTEMD_SERVICE_FILE="${serviceTmp}/xray.service"
+    : >"${PADM_XRAY_SYSTEMD_SERVICE_FILE}"
     systemctl() { return 0; }
     xrayRunning() { return 0; }
     waitForServiceState() {
@@ -325,6 +316,30 @@ SH
         printf 'reached\n' >"${singBoxNoExitMarker}"
     )
     [[ -e "${singBoxNoExitMarker}" ]]
+    (
+        local service actions= checkRc=0 stopRc=0
+        validateXrayConfigWithBinary() { actions+=$'check\n'; return "${checkRc}"; }
+        singBoxMergeConfig() { actions+=$'check\n'; return "${checkRc}"; }
+        checkNginxConfig() { actions+=$'check\n'; return "${checkRc}"; }
+        restartHandler() {
+            actions+="$1"$'\n'
+            [[ "$1" != stop ]] || return "${stopRc}"
+        }
+        handleXray() { restartHandler "$@"; }
+        handleSingBox() { restartHandler "$@"; }
+        handleNginx() { restartHandler "$@"; }
+        for service in xray sing-box nginx; do
+            checkRc=1 stopRc=0 actions=
+            regressionExpectStatus 1 runServiceAction "${service}" restart >/dev/null 2>&1
+            [[ "${actions}" == $'check\n' ]]
+            checkRc=0 stopRc=1 actions=
+            regressionExpectStatus 1 runServiceAction "${service}" restart >/dev/null 2>&1
+            [[ "${actions}" == $'check\nstop\n' ]]
+            stopRc=0 actions=
+            runServiceAction "${service}" restart >/dev/null 2>&1
+            [[ "${actions}" == $'check\nstop\nstart\n' ]]
+        done
+    )
     rm -rf "${serviceTmp}"
 )
 

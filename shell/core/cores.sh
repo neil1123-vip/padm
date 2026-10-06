@@ -286,7 +286,10 @@ ensureXrayGeoFiles() {
 
     local geoVersion
     geoVersion=$(fetchUrlToStdout "https://api.github.com/repos/Loyalsoldier/v2ray-rules-dat/releases?per_page=1" 3 | jq -r '.[]|.tag_name')
-    checkVersionNotEmpty "${geoVersion}"
+    if [[ -z "${geoVersion}" || "${geoVersion}" == null ]]; then
+        errorCard "获取 Geo 数据版本失败，请稍后重试"
+        return 1
+    fi
     echoContent title "\n┌─ Geo 数据版本 ─────────────────────────────────────"
     menuLine "version:${geoVersion}"
     menuClose
@@ -1387,7 +1390,11 @@ validateSingBoxPrereleaseConfigWithMigration() {
             [[ -n "${migrationBackup}" ]] && padmRemoveCleanupPath "${migrationBackup}"
             exit 1
         fi
-        validateSingBoxConfigWithBinary "${binary}" "${logFile}" || validationRc=$?
+        collectSingBoxCompatibilityFindings "${stagingRoot}/risk.status" "${stagingRoot}/risk.log" "${stagingRoot}/risk.warn" || validationRc=$?
+        cat "${stagingRoot}/risk.log" >>"${migrationLog}" || validationRc=1
+        if [[ "${validationRc}" -eq 0 ]]; then
+            validateSingBoxConfigWithBinary "${binary}" "${logFile}" || validationRc=$?
+        fi
         [[ -n "${migrationBackup}" ]] && padmRemoveCleanupPath "${migrationBackup}"
         exit "${validationRc}"
     )
@@ -1406,27 +1413,14 @@ checkSingBoxPrereleaseCompatibility() {
     local logFile=${2:-$(coreTmpFilePath padm-core-sing-box-prerelease-audit.log)}
     local retainedTmpDirVar=${3:-}
     local downloadedBinary= downloadTmpDir= resolvedVersion= actualVersion=
-    local riskStatus="${logFile}.risk.status"
-    local riskLog="${logFile}.risk.log"
-    local riskWarn="${logFile}.risk.warn"
     local validateLog="${logFile}.validate"
-    local scanRc=0 validateRc=0
+    local validateRc=0
 
     : >"${logFile}" || return 1
-    collectSingBoxCompatibilityFindings "${riskStatus}" "${riskLog}" "${riskWarn}" || scanRc=$?
-    {
-        printf '核心: sing-box\n配置目录: %s\n阶段: 预发布版试跑\n' "$(singBoxConfigShardDir)"
-        printf '\n[本地升级风险扫描]\n'
-        cat "${riskLog}" 2>/dev/null || true
-    } >"${logFile}" || { removeManagedFilesIfPresentIgnoreFailure "${riskStatus}" "${riskLog}" "${riskWarn}"; return 1; }
-    removeManagedFilesIfPresentIgnoreFailure "${riskStatus}" "${riskLog}" "${riskWarn}"
-    if [[ "${scanRc}" -eq 2 ]]; then
+    printf '核心: sing-box\n配置目录: %s\n阶段: 预发布版试跑\n' "$(singBoxConfigShardDir)" >>"${logFile}" || return 1
+    if ! singBoxConfigInstalled; then
         singBoxPrereleaseCompatibilityCard "无法检查" "未检测到 sing-box 配置" "排查日志: ${logFile}"
         return 2
-    fi
-    if [[ "${scanRc}" -ne 0 ]]; then
-        singBoxPrereleaseCompatibilityCard "失败" "本地升级风险扫描未通过" "排查日志: ${logFile}"
-        return 1
     fi
 
     if [[ -n "${version}" ]]; then
@@ -2150,7 +2144,7 @@ selectRollbackVersion() {
     local repo=$1
     local title=$2
     local resultVar=${3:-}
-    local selection version versions
+    local selection selectedVersion versions
     versions=$(coreReleaseTags "${repo}" false 20) || {
         errorCard "获取稳定版本列表失败，请稍后重试"
         return 2
@@ -2160,31 +2154,36 @@ selectRollbackVersion() {
     awk '{print "│ "NR". "$0}' <<<"${versions}"
     menuClose
     menuReadChoice core_rollback_version "请输入要回退的版本序号:" selection || return 1
-    version=$(awk -v selected="${selection}" 'NR==selected {print $0}' <<<"${versions}")
-    [[ -n "${version}" ]] || return 1
+    selectedVersion=$(awk -v selected="${selection}" 'NR==selected {print $0}' <<<"${versions}")
+    [[ -n "${selectedVersion}" ]] || return 1
     if [[ -n "${resultVar}" ]]; then
-        printf -v "${resultVar}" '%s' "${version}"
+        printf -v "${resultVar}" '%s' "${selectedVersion}"
     else
-        printf '%s\n' "${version}"
+        printf '%s\n' "${selectedVersion}"
     fi
 }
 
 updateGeoSite() {
-    local targetDir="/etc/padm/xray"
-    local oldVersion newVersion
-    oldVersion=$(xrayGeoDisplayVersion "${targetDir}")
+    local targetDir newVersion reloadPending pendingTmp
+    targetDir=$(coreXrayInstallDir)
+    reloadPending=$(padmManagedFilePath "${targetDir}" geo.reload.pending) || return 1
     if ! ensureXrayGeoFiles "${targetDir}" force; then
         return 1
     fi
 
     newVersion=$(xrayGeoDisplayVersion "${targetDir}")
-    if [[ "${oldVersion}" != "${newVersion}" ]]; then
-        if ! reloadCore; then
-            statusCard "Geo 数据" "Geo 数据已更新，但核心重载失败，请检查核心服务日志"
+    if [[ -f "${reloadPending}" ]] || xrayRunning; then
+        padmCreateTempFileForTarget pendingTmp "${reloadPending}" geo || return 1
+        commitGeneratedFile "${pendingTmp}" "${reloadPending}" 644 || { padmRemoveCleanupPath "${pendingTmp}"; return 1; }
+        if ! runServiceAction xray restart; then
+            statusCard "Geo 数据" "Geo 数据已更新，但 Xray 重载失败，请检查核心服务日志"
             return 1
         fi
+        removeManagedFileIfPresent "${reloadPending}" || return 1
+        statusCard "Geo 数据" "更新完毕" "当前版本：${newVersion}"
+    else
+        statusCard "Geo 数据" "文件已更新" "Xray 当前未运行，启动后生效；当前版本：${newVersion}"
     fi
-    statusCard "Geo 数据" "更新完毕" "当前版本：${newVersion}"
 }
 
 # 验证整个服务是否可用
@@ -3027,9 +3026,15 @@ singBoxLogConfigFile() {
 
 # sing-box 日志
 singBoxLog() {
+    local SERVICE_ACTIONS=
     local targetPath
     local tmpPath backupPath hadBackup=false
-    local restoreMessage rollbackMessage
+    local restoreMessage rollbackMessage serviceWasRunning=false
+    case "${1:-}" in
+    true | false) ;;
+    *) errorCard "sing-box 日志开关无效"; return 1 ;;
+    esac
+    singBoxRunning && serviceWasRunning=true
     targetPath=$(singBoxLogConfigFile)
     targetPath=$(padmResolveManagedAbsolutePath "${targetPath}") || { errorCard "sing-box 日志配置路径异常"; return 1; }
     padmEnsureSafeDirectory "$(dirname "${targetPath}")" || { errorCard "sing-box 日志目录创建失败"; return 1; }
@@ -3058,6 +3063,12 @@ EOF
         return 1
     fi
 
+    if [[ "${serviceWasRunning}" == false ]]; then
+        if [[ -n "${backupPath}" ]]; then
+            removeManagedFilesIfPresentIgnoreFailure "${backupPath}"
+        fi
+        return 0
+    fi
     serviceQueueRestart sing-box
     if serviceQueueApply; then
         if [[ -n "${backupPath}" ]]; then
@@ -3084,7 +3095,12 @@ EOF
     if [[ -n "${backupPath}" ]]; then
         removeManagedFilesIfPresentIgnoreFailure "${backupPath}"
     fi
-    coreSetRollbackResultMessage rollbackMessage "sing-box 日志配置重载失败" "已回滚日志配置"
+    serviceQueueRestart sing-box
+    if serviceQueueApply; then
+        coreSetRollbackResultMessage rollbackMessage "sing-box 日志配置重载失败" "已回滚日志配置"
+    else
+        coreSetRollbackResultMessage rollbackMessage "sing-box 日志配置重载失败" "已恢复旧配置，但 sing-box 重载仍失败"
+    fi
     errorCard "${rollbackMessage}"
     return 1
 }

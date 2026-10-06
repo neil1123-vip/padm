@@ -1082,6 +1082,8 @@ checkLog() {
     fi
     local realityLogShow=
     local logStatus=false
+    local serviceWasRunning=false
+    xrayRunning && serviceWasRunning=true
     if grep -q "access" ${configPath}00_log.json; then
         logStatus=true
     fi
@@ -1141,7 +1143,7 @@ checkLog() {
                 return 1
             fi
         fi
-        if ! reloadCore; then
+        if [[ "${serviceWasRunning}" == true ]] && ! runServiceAction xray restart; then
             if ! checkLogBackupRestore "${logBackupDir}"; then
                 padmForgetCleanupPath "${logBackupDir}"
                 local restoreMessage
@@ -1151,7 +1153,8 @@ checkLog() {
             fi
             padmRemoveCleanupPath "${logBackupDir}"
             local rollbackMessage
-            coreSetRollbackResultMessage rollbackMessage "核心重载失败" "已回滚日志配置修改" reloadCore "恢复旧配置后核心重载仍失败，请检查核心服务日志"
+            coreSetRollbackResultMessage rollbackMessage "核心重载失败" "已回滚日志配置修改" runServiceAction \
+                "恢复旧配置后核心重载仍失败，请检查核心服务日志" xray restart
             errorCard "${rollbackMessage}"
             return 1
         fi

@@ -3220,6 +3220,16 @@ ${mainCredential}"
         [[ "${menuItems}" == "${xrayLifecycleItems}" ]]
         [[ -z "${actions}" ]]
 
+        (
+            coreReleaseTags() { printf 'v1.2.3\nv1.2.2\n'; }
+            resetMenuActions
+            xrayVersionManageMenu <<<$'3\n2\n7'
+            assertMenuAction 'upgradeXrayCore:false v1.2.2'
+            resetMenuActions
+            singBoxVersionManageMenu <<<$'3\n2\n7'
+            assertMenuAction 'upgradeSingBoxCore:false v1.2.2'
+        )
+
         resetMenuActions
         resetMenuRender
         xrayVersionManageMenu <<<'4

@@ -262,92 +262,77 @@ showCoreStatusOverview() {
     menuClose
 }
 
-xrayVersionManageMenu() {
-    local selectXrayType version rollbackStatus
+coreLifecycleMenu() {
+    local core=$1 title repo menuKey installedFn upgradeFn checkFn auditFn prereleaseFn
+    local stableText prereleaseText rollbackText checkText riskText
+    local selection version rollbackStatus
+    case "${core}" in
+    xray)
+        title=Xray-core repo=XTLS/Xray-core menuKey=xray_lifecycle_menu
+        installedFn=xrayInstalled upgradeFn=upgradeXrayCore checkFn=showXrayConfigHealthCheck
+        auditFn=showXrayCompatibilityAudit prereleaseFn=checkXrayPrereleaseCompatibility
+        stableText="下载并校验最新稳定版后替换" prereleaseText="下载、试跑并确认后替换"
+        rollbackText="选择最近的稳定版本回退" checkText="执行运行检查和内部严格检查"
+        riskText="只读扫描已知不兼容配置"
+        ;;
+    sing-box)
+        title=sing-box repo=SagerNet/sing-box menuKey=singbox_lifecycle_menu
+        installedFn=singBoxInstalled upgradeFn=upgradeSingBoxCore checkFn=showSingBoxConfigValidation
+        auditFn=showSingBoxCompatibilityAudit prereleaseFn=checkSingBoxPrereleaseCompatibility
+        stableText="下载并校验最新统计版后替换" prereleaseText="下载统计版、试跑并确认后替换"
+        rollbackText="选择已发布的统计版本回退" checkText="执行 merge + check"
+        riskText="只读扫描 1.13/1.14 迁移风险"
+        ;;
+    *) return 1 ;;
+    esac
     while true; do
-        echoContent title "\n┌─ Xray-core 生命周期 ────────────────────────────────"
-        menuItem 1 "升级稳定版" "下载并校验最新稳定版后替换"
-        menuItem 2 "升级预发布版" "下载、试跑并确认后替换"
-        menuItem 3 "回退稳定版" "选择最近的稳定版本回退"
-        menuItem 4 "检查当前配置" "执行运行检查和内部严格检查"
-        menuItem 5 "扫描升级风险" "只读扫描已知不兼容配置"
+        echoContent title "\n┌─ ${title} 生命周期 ─────────────────────────────────"
+        menuItem 1 "升级稳定版" "${stableText}"
+        menuItem 2 "升级预发布版" "${prereleaseText}"
+        menuItem 3 "回退稳定版" "${rollbackText}"
+        menuItem 4 "检查当前配置" "${checkText}"
+        menuItem 5 "扫描升级风险" "${riskText}"
         menuItem 6 "试跑预发布版" "不替换二进制，不操作服务"
         menuReturnItem 7 "返回核心与服务" "回到核心与服务"
         menuClose
-        selectXrayType=
-        menuReadChoice xray_lifecycle_menu "请选择:" selectXrayType || return 0
-        case "${selectXrayType}" in
+        selection=
+        menuReadChoice "${menuKey}" "请选择:" selection || return 0
+        case "${selection}" in
         1 | 2 | 3 | 4)
-            if ! xrayInstalled; then
-                statusCard "Xray-core 生命周期" "无法检查" "未安装 Xray-core；请返回主菜单使用安装与重装"
+            if ! "${installedFn}"; then
+                statusCard "${title} 生命周期" "无法检查" "未安装 ${title}；请返回主菜单使用安装与重装"
                 continue
             fi
             ;;
         esac
-        case "${selectXrayType}" in
-        1) upgradeXrayCore false || true ;;
-        2) upgradeXrayCore true || true ;;
+        case "${selection}" in
+        1) "${upgradeFn}" false || true ;;
+        2) "${upgradeFn}" true || true ;;
         3)
             version=
             rollbackStatus=0
-            selectRollbackVersion XTLS/Xray-core "Xray-core" version || rollbackStatus=$?
+            selectRollbackVersion "${repo}" "${title}" version || rollbackStatus=$?
             if [[ "${rollbackStatus}" -eq 0 ]]; then
-                upgradeXrayCore false "${version}" || true
+                "${upgradeFn}" false "${version}" || true
             elif [[ "${rollbackStatus}" -eq 1 ]]; then
                 coreInvalidInputErrorCard
             fi
             ;;
-        4) showXrayConfigHealthCheck || true ;;
-        5) showXrayCompatibilityAudit || true ;;
-        6) checkXrayPrereleaseCompatibility || true ;;
+        4) "${checkFn}" || true ;;
+        5) "${auditFn}" || true ;;
+        6) "${prereleaseFn}" || true ;;
         7) return 0 ;;
         *) coreInvalidInputErrorCard ;;
         esac
     done
 }
 
+xrayVersionManageMenu() {
+    coreLifecycleMenu xray
+}
+
 singBoxVersionManageMenu() {
-    local selectSingBoxType version rollbackStatus
-    while true; do
-        echoContent title "\n┌─ sing-box 生命周期 ─────────────────────────────────"
-        menuItem 1 "升级稳定版" "下载并校验最新统计版后替换"
-        menuItem 2 "升级预发布版" "下载统计版、试跑并确认后替换"
-        menuItem 3 "回退稳定版" "选择已发布的统计版本回退"
-        menuItem 4 "检查当前配置" "执行 merge + check"
-        menuItem 5 "扫描升级风险" "只读扫描 1.13/1.14 迁移风险"
-        menuItem 6 "试跑预发布版" "不替换二进制，不操作服务"
-        menuReturnItem 7 "返回核心与服务" "回到核心与服务"
-        menuClose
-        selectSingBoxType=
-        menuReadChoice singbox_lifecycle_menu "请选择:" selectSingBoxType || return 0
-        case "${selectSingBoxType}" in
-        1 | 2 | 3 | 4)
-            if ! singBoxInstalled; then
-                statusCard "sing-box 生命周期" "无法检查" "未安装 sing-box；请返回主菜单使用安装与重装"
-                continue
-            fi
-            ;;
-        esac
-        case "${selectSingBoxType}" in
-        1) upgradeSingBoxCore false || true ;;
-        2) upgradeSingBoxCore true || true ;;
-        3)
-            version=
-            rollbackStatus=0
-            selectRollbackVersion SagerNet/sing-box "sing-box" version || rollbackStatus=$?
-            if [[ "${rollbackStatus}" -eq 0 ]]; then
-                upgradeSingBoxCore false "${version}" || true
-            elif [[ "${rollbackStatus}" -eq 1 ]]; then
-                coreInvalidInputErrorCard
-            fi
-            ;;
-        4) showSingBoxConfigValidation || true ;;
-        5) showSingBoxCompatibilityAudit || true ;;
-        6) checkSingBoxPrereleaseCompatibility || true ;;
-        7) return 0 ;;
-        *) coreInvalidInputErrorCard ;;
-        esac
-    done
+    coreLifecycleMenu sing-box
 }
 
 coreServiceControlAction() {
