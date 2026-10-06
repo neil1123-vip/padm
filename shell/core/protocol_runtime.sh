@@ -1034,8 +1034,13 @@ initXrayRealityProtocolPort() {
             prompt="${label} 连接端口[回车随机 10000-30000]:"
         fi
         [[ "${singleProtocol}" == "true" ]] || promptKey="${promptKey}_subport"
-        menuReadChoice "${promptKey}" "${prompt}" portRef true || return 1
-        portRef=${portRef:-${defaultPort:-$((RANDOM % 20001 + 10000))}}
+        while true; do
+            menuReadChoice "${promptKey}" "${prompt}" portRef true || return 1
+            portRef=${portRef:-${defaultPort:-$((RANDOM % 20001 + 10000))}}
+            validPortNumber "${portRef}" && break
+            errorCard "${label} 端口输入错误"
+            [[ -z "${AUTO_INSTALL:-}" ]] || return 1
+        done
     fi
 
     if ! validPortNumber "${portRef}"; then

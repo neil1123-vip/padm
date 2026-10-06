@@ -431,6 +431,17 @@ runInstallWorkflowRegression() (
         regressionExpectStatus 1 initTLSNginxConfig 1 </dev/null
         [[ -z "${events}" ]]
         unset AUTO_DOMAIN AUTO_PORT
+        exec {inputFd}< <(printf 'invalid/domain\ntls.example.com\n1+2\n8443\nnext-parent-action\n')
+        initTLSNginxConfig 1 <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        [[ "${domain}" == tls.example.com && "${port}" == 8443 && "${nextInput}" == next-parent-action ]]
+        [[ "${events}" == $'allow:8443\ndns:tls.example.com\nclean\ncheck:8443:tls.example.com\nnginx:stop\n' ]]
+        exec {inputFd}<&-
+        events=
+        regressionExpectStatus 1 initTLSNginxConfig 1 < <(printf 'invalid/domain\n')
+        [[ -z "${domain}" && -z "${events}" ]]
+        regressionExpectStatus 1 initTLSNginxConfig 1 < <(printf 'tls.example.com\n1+2\n')
+        [[ -z "${port}" && -z "${events}" ]]
 
         # 不再先问是否复用，再分别问域名和端口是否复用。
         currentHost=old.example.com
@@ -442,6 +453,23 @@ runInstallWorkflowRegression() (
         [[ "${nextInput}" == next-parent-action ]]
         exec {inputFd}<&-
         events=
+        exec {inputFd}< <(printf 'invalid/domain\n\n1+2\n\nnext-parent-action\n')
+        initTLSNginxConfig 1 <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        [[ "${domain}" == old.example.com && "${port}" == 443 &&
+            "${nextInput}" == next-parent-action && "${events}" == $'nginx:stop\n' ]]
+        exec {inputFd}<&-
+        events=
+        currentHost=invalid/domain
+        AUTO_INSTALL=false
+        AUTO_DOMAIN=
+        exec {inputFd}< <(printf 'next-parent-action\n')
+        regressionExpectStatus 1 initTLSNginxConfig 1 <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        [[ "${nextInput}" == next-parent-action && -z "${domain}" && -z "${events}" ]]
+        exec {inputFd}<&-
+        unset AUTO_INSTALL AUTO_DOMAIN
+        currentHost=old.example.com
         lastInstallationConfig=true
         initTLSNginxConfig 1 </dev/null
         [[ "${domain}" == old.example.com && "${port}" == 443 && "${events}" == $'nginx:stop\n' ]]
@@ -487,8 +515,51 @@ runInstallWorkflowRegression() (
     )
 
     (
+        # 四个 TLS 安装入口先确认域名；取消或参数错误不能开始依赖安装。
+        local apply events= currentHost= currentPort= customPort= btDomain= domain=
+        local lastInstallationConfig= selectCoreType= inputFd nextInput
+        unset AUTO_INSTALL AUTO_DOMAIN AUTO_PORT
+        readLastInstallationConfig() { :; }
+        configureRealityDomainMode() { :; }
+        protocolSelectionShowRiskNotes() { :; }
+        selectCoreInstallProtocols() { selectCustomInstallType=,28,; }
+        installTools() { events+="tools:${domain}"$'\n'; }
+        installTLS() { events+=$'tls\n'; return 1; }
+        handleNginx() { events+="nginx:$1"$'\n'; }
+        allowPort() { events+="allow:$1"$'\n'; }
+        checkDNSIP() { :; }
+        removeNginxDefaultConf() { :; }
+        checkPortOpen() { :; }
+        for apply in customXrayInstallApply customSingBoxInstallApply xrayCoreInstallApply singBoxInstallApply; do
+            events=
+            selectCoreType=2
+            [[ "${apply}" != *Xray* && "${apply}" != xray* ]] || selectCoreType=1
+            regressionExpectStatus 1 "${apply}" </dev/null
+            [[ -z "${events}" && -z "${domain}" ]]
+            AUTO_DOMAIN=invalid/domain
+            exec {inputFd}< <(printf 'next-parent-action\n')
+            regressionExpectStatus 1 "${apply}" <&"${inputFd}"
+            read -r -u "${inputFd}" nextInput
+            [[ "${nextInput}" == next-parent-action && -z "${events}" && -z "${domain}" ]]
+            exec {inputFd}<&-
+            unset AUTO_DOMAIN
+            if [[ "${selectCoreType}" == 1 ]]; then
+                exec {inputFd}< <(printf 'invalid/domain\ntls.example.com\n443\nnext-parent-action\n')
+            else
+                exec {inputFd}< <(printf 'invalid/domain\ntls.example.com\nnext-parent-action\n')
+            fi
+            regressionExpectStatus 1 "${apply}" <&"${inputFd}"
+            read -r -u "${inputFd}" nextInput
+            [[ "${domain}" == tls.example.com && "${nextInput}" == next-parent-action ]]
+            [[ "${events}" == tools:tls.example.com$'\n'* && "${events}" == *$'nginx:stop\ntls\n' ]]
+            exec {inputFd}<&-
+        done
+    )
+
+    (
         local installCalls=0
         readLastInstallationConfig() { :; }
+        readInstallTLSDomain() { domain=tls.example.com; }
         collectEntryProfile() { :; }
         configureRealityDomainMode() { :; }
         protocolSelectionShowRiskNotes() { :; }
@@ -776,6 +847,31 @@ runInstallWorkflowRegression() (
     )
 
     (
+        # 子安装取消后仍可操作主面板；自动安装保留原失败码且不读后续输入。
+        local nextInput inputFd followupCalls=0 installCalls=0 coreInstallType=
+        unset AUTO_INSTALL AUTO_PROTOCOLS AUTO_INSTALL_TYPE
+        mkdirTools() { :; }
+        aliasInstall() { :; }
+        checkWgetShowProgress() { :; }
+        getScriptVersion() { :; }
+        showInstallStatus() { :; }
+        customXrayInstall() { selectCoreInstallProtocols xray; }
+        manageSubscription() { followupCalls=$((followupCalls + 1)); }
+        menu < <(printf '1\n5\n1\n\n2\n')
+        [[ "${followupCalls}" == 1 ]]
+        installMenu() { installCalls=$((installCalls + 1)); return 17; }
+        for AUTO_INSTALL in true 1 false; do
+            installCalls=0
+            exec {inputFd}< <(printf 'next-parent-action\n')
+            regressionExpectStatus 17 menu <&"${inputFd}"
+            read -r -u "${inputFd}" nextInput
+            [[ "${installCalls}" == 1 && "${nextInput}" == next-parent-action ]]
+            exec {inputFd}<&-
+        done
+        unset AUTO_INSTALL
+    )
+
+    (
         local route= value= nextInput inputFd invalid flag core coreInstallType=
         customXrayInstall() { route=xray; }
         customSingBoxInstall() { route=sing-box; }
@@ -837,6 +933,21 @@ runInstallWorkflowRegression() (
         done
         regressionExpectStatus 1 initSingBoxPort 9443 true tcp singbox_custom_port <<<"1+2"
         [[ -z "${allowLog}" ]]
+        for result in "" 8443; do
+            exec {inputFd}< <(printf '1+2\n%s\nnext-parent-action\n' "${result}")
+            initSingBoxPort 9443 true tcp singbox_custom_port <&"${inputFd}" >"${outputFile}"
+            expected=${result:-9443}
+            result=$(<"${outputFile}")
+            read -r -u "${inputFd}" nextInput
+            exec {inputFd}<&-
+            [[ "${result}" == "${expected}" && "${nextInput}" == next-parent-action ]]
+            if [[ "${expected}" == 9443 ]]; then
+                [[ -z "${allowLog}" ]]
+            else
+                [[ "${allowLog}" == $'tcp:8443\n' ]]
+            fi
+            allowLog=
+        done
         initSingBoxPort "" true tcp singbox_custom_port <<<"" >"${outputFile}"
         result=$(<"${outputFile}")
         [[ "${result}" =~ ^[0-9]+$ && "${result}" -ge 10000 && "${result}" -le 60000 &&
@@ -845,6 +956,12 @@ runInstallWorkflowRegression() (
 
         # 单选自动参数覆盖历史端口；固定端口和 Reality 共存内部端口优先。
         AUTO_INSTALL=true
+        AUTO_PORT=1+2
+        exec {inputFd}< <(printf 'next-parent-action\n')
+        regressionExpectStatus 1 initSingBoxPort 9443 true tcp singbox_custom_port <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        exec {inputFd}<&-
+        [[ "${nextInput}" == next-parent-action && -z "${allowLog}" ]]
         AUTO_PORT=8443
         lastInstallationConfig=true
         initSingBoxPort 9443 true tcp+udp singbox_custom_port </dev/null >"${outputFile}"
@@ -918,7 +1035,7 @@ runInstallWorkflowRegression() (
         allowPort() { allowLog+="tcp:${1}"$'\n'; }
         allowPortTcpAndUdp() { allowLog+="tcp+udp:${1}"$'\n'; }
 
-        # 三个入口统一只读一次；EOF 或截断不能检查、开放端口。
+        # 三个入口原地纠错；EOF 或截断不能检查、开放端口。
         for index in "${!applies[@]}"; do
             apply=${applies[index]}
             portVar=${portVars[index]}
@@ -928,11 +1045,14 @@ runInstallWorkflowRegression() (
                 regressionExpectStatus 1 "${apply}" < <(printf '%s' "${answer}")
                 [[ -z "${!portVar}" && "${checkCalls}" == 0 && -z "${allowLog}" ]]
             done
+            printf -v "${portVar}" '%s' ""
+            regressionExpectStatus 1 "${apply}" < <(printf '1+2\n')
+            [[ -z "${!portVar}" && "${checkCalls}" == 0 && -z "${allowLog}" ]]
             for answer in "" 8443; do
                 printf -v "${portVar}" '%s' ""
                 checkCalls=0
                 allowLog=
-                exec {inputFd}< <(printf '%s\nnext-parent-action\n' "${answer}")
+                exec {inputFd}< <(printf '1+2\n%s\nnext-parent-action\n' "${answer}")
                 "${apply}" <&"${inputFd}"
                 read -r -u "${inputFd}" nextInput
                 exec {inputFd}<&-
@@ -946,6 +1066,13 @@ runInstallWorkflowRegression() (
             checkCalls=0
             allowLog=
             AUTO_INSTALL=true
+            AUTO_PORT=1+2
+            exec {inputFd}< <(printf 'next-parent-action\n')
+            regressionExpectStatus 1 "${apply}" <&"${inputFd}"
+            read -r -u "${inputFd}" nextInput
+            exec {inputFd}<&-
+            [[ "${nextInput}" == next-parent-action && "${checkCalls}" == 0 && -z "${allowLog}" ]]
+            printf -v "${portVar}" '%s' ""
             AUTO_PORT=8443
             "${apply}" </dev/null
             [[ "${!portVar}" == 8443 && "${checkCalls}" == 1 &&

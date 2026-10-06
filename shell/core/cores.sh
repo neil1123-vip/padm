@@ -2794,6 +2794,9 @@ customXrayInstallApply() {
     if protocolSelectionHasAny "${selectCustomInstallType}" 1 2 26; then
         collectEntryProfile || return 1
     fi
+    if [[ -z "${btDomain:-}" ]] && protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
+        readInstallTLSDomain domain || return 1
+    fi
     # checkBTPanel
     # check1Panel
     totalProgress=12
@@ -2809,7 +2812,7 @@ customXrayInstallApply() {
     else
         # 申请tls
         if protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
-            initTLSNginxConfig 2 || return 1
+            initTLSNginxConfig 2 "${domain}" || return 1
             installTLS 3 || return 1
         else
             skipTlsCertificateStatusCard "Reality 不需要本机 TLS 证书"
@@ -2864,11 +2867,14 @@ customSingBoxInstallApply() {
     if protocolSelectionHasAny "${selectCustomInstallType}" 1 26; then
         collectEntryProfile || return 1
     fi
+    if protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
+        readInstallTLSDomain domain || return 1
+    fi
     totalProgress=9
     installTools 1 || return 1
     # 申请tls
     if protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
-        initTLSNginxConfig 2 || return 1
+        initTLSNginxConfig 2 "${domain}" || return 1
         installTLS 3 || return 1
         coreInstallServiceAction "Nginx 服务停止失败，已取消 sing-box 安装" handleNginx stop || return 1
     fi
@@ -2942,6 +2948,7 @@ xrayCoreInstallApply() {
     # checkBTPanel
     # check1Panel
     selectCustomInstallType=
+    [[ -n "${btDomain:-}" ]] || readInstallTLSDomain domain || return 1
     totalProgress=12
     installTools 2 || return 1
     if [[ -n "${btDomain}" ]]; then
@@ -2950,7 +2957,7 @@ xrayCoreInstallApply() {
         coreInstallServiceAction "Xray 服务停止失败，已取消端口配置" handleXray stop || return 1
     else
         # 申请tls
-        initTLSNginxConfig 3 || return 1
+        initTLSNginxConfig 3 "${domain}" || return 1
         installTLS 4 || return 1
     fi
 
@@ -2989,6 +2996,7 @@ singBoxInstallApply() {
     # checkBTPanel
     # check1Panel
     selectCustomInstallType=
+    [[ -n "${btDomain:-}" ]] || readInstallTLSDomain domain || return 1
     totalProgress=8
     installTools 2 || return 1
 
@@ -2998,7 +3006,7 @@ singBoxInstallApply() {
         coreInstallServiceAction "Xray 服务停止失败，已取消端口配置" handleXray stop || return 1
     else
         # 申请tls
-        initTLSNginxConfig 3 || return 1
+        initTLSNginxConfig 3 "${domain}" || return 1
         installTLS 4 || return 1
     fi
 

@@ -677,7 +677,7 @@ initSingBoxPort() {
     if [[ -n "${port}" && ( "${promptHistory}" != "true" || ( "${singleReality}" == "true" && "${AUTO_INSTALL:-}" == "true" ) ) ]]; then
         openPort=true
     elif [[ -z "${port}" || -z "${lastInstallationConfig:-}" ]]; then
-        local prompt
+        local defaultPort=${port} prompt
         if [[ -n "${port}" ]]; then
             prompt="连接端口[回车保留 ${port}]:"
         elif [[ "${singleReality}" == "true" ]]; then
@@ -685,15 +685,20 @@ initSingBoxPort() {
         else
             prompt="自定义端口[端口不可重复，回车随机]:"
         fi
-        menuReadChoice "${promptKey}" "${prompt}" portInput true || return 1
-        port=${portInput:-${port}}
-        if [[ -z "${port}" ]]; then
-            if [[ "${singleReality}" == "true" ]]; then
-                port=443
-            else
-                port=$((RANDOM % 50001 + 10000))
+        while true; do
+            menuReadChoice "${promptKey}" "${prompt}" portInput true || return 1
+            port=${portInput:-${defaultPort}}
+            if [[ -z "${port}" ]]; then
+                if [[ "${singleReality}" == "true" ]]; then
+                    port=443
+                else
+                    port=$((RANDOM % 50001 + 10000))
+                fi
             fi
-        fi
+            validPortNumber "${port}" && break
+            corePortInputErrorCard
+            [[ -z "${AUTO_INSTALL:-}" ]] || return 1
+        done
         [[ "${port}" == "${historyPort}" ]] || openPort=true
     fi
 

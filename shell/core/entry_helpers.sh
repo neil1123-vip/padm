@@ -28,19 +28,38 @@ entryHelperNginxConfigFile() {
     padmManagedFilePath "${nginxConfigPath}" "${fileName}"
 }
 
+readInstallTLSDomain() {
+    local resultVar=$1 domainInput= fixedDomain=false
+    printf -v "${resultVar}" '%s' ""
+    while true; do
+        if [[ -n "${AUTO_DOMAIN:-}" ]]; then
+            domainInput=${AUTO_DOMAIN}
+            fixedDomain=true
+        elif [[ -n "${currentHost:-}" && -n "${lastInstallationConfig:-}" ]]; then
+            domainInput=${currentHost}
+            fixedDomain=true
+        elif [[ -n "${currentHost:-}" ]]; then
+            menuReadChoice domain "TLS 域名[回车保留 ${currentHost}]:" domainInput true || return 1
+            domainInput=${domainInput:-${currentHost}}
+        else
+            menuReadChoice domain "TLS 域名[回车取消]:" domainInput || return 1
+        fi
+        if padmIsValidHostName "${domainInput}"; then
+            printf -v "${resultVar}" '%s' "${domainInput}"
+            return 0
+        fi
+        errorCard "域名不合法" "${domainInput}"
+        [[ "${fixedDomain}" != "true" && -z "${AUTO_INSTALL:-}" ]] || return 1
+    done
+}
+
 initTLSNginxConfig() {
     progressCard "$1" "初始化 Nginx 证书验证配置"
-    if [[ -n "${AUTO_DOMAIN:-}" ]]; then
-        domain=${AUTO_DOMAIN}
-    elif [[ -n "${currentHost:-}" && -n "${lastInstallationConfig:-}" ]]; then
-        domain=${currentHost}
-    elif [[ -n "${currentHost:-}" ]]; then
-        menuReadChoice domain "TLS 域名[回车保留 ${currentHost}]:" domain true || return 1
-        domain=${domain:-${currentHost}}
+    if [[ -n "${2:-}" ]]; then
+        domain=$2
     else
-        menuReadChoice domain "TLS 域名[回车取消]:" domain || return 1
+        readInstallTLSDomain domain || return 1
     fi
-
     if ! padmIsValidHostName "${domain}"; then
         errorCard "域名不合法" "${domain}"
         return 1
@@ -181,8 +200,13 @@ customPortFunction() {
         else
             prompt="TLS 入口端口[不可与 BT Panel/1Panel 端口相同，回车随机]:"
         fi
-        menuReadChoice port "${prompt}" port true || return 1
-        port=${port:-${defaultPort:-$((RANDOM % 20001 + 10000))}}
+        while true; do
+            menuReadChoice port "${prompt}" port true || return 1
+            port=${port:-${defaultPort:-$((RANDOM % 20001 + 10000))}}
+            validPortNumber "${port}" && break
+            corePortInputErrorCard
+            [[ -z "${AUTO_INSTALL:-}" ]] || return 1
+        done
     fi
 
     validPortNumber "${port}" || { corePortInputErrorCard; return 1; }

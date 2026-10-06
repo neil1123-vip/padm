@@ -550,6 +550,7 @@ coreVersionManageMenu() {
 }
 
 menu() {
+    local installStatus=0
     cd "$HOME" || return 1
     if ! mkdirTools; then
         errorCard "初始化安装目录失败"
@@ -584,8 +585,9 @@ menu() {
         PADM_INSTALL_STATUS_READY=0
         case ${selectMainMenuType} in
         1)
-            installMenu || return $?
-            [[ "${AUTO_INSTALL:-}" == "true" ]] && return 0
+            installStatus=0
+            installMenu || installStatus=$?
+            [[ -n "${AUTO_INSTALL:-}" ]] && return "${installStatus}"
             ;;
         2)
             manageSubscription 1
