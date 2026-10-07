@@ -70,7 +70,7 @@ vlessEncryptionStateSummary() {
 
 refreshProtocolSubscriptions() {
     local label=$1 publicSuccess=$2 localSuccess=$3
-    readNginxSubscribe
+    readNginxSubscribe || return 1
     if [[ -n "${subscribePort}" || -f "${nginxConfigPath}subscribe.conf" ]]; then
         if ! refreshPublishedSubscriptions >/dev/null; then
             errorCard "刷新 ${label} 公网订阅失败"
@@ -2993,7 +2993,6 @@ manageRealityTarget() {
     menuItem 7 "查看目标站黑名单" "显示不会参与目标库刷新或扫描导入的目标"
     menuReturnItem 8 "返回" "回到 REALITY 管理"
     menuClose
-    selectTargetMenu=
     menuReadChoice reality_target_manage_menu "请选择：" selectTargetMenu || return 0
     case "${selectTargetMenu}" in
     1)
@@ -3045,17 +3044,19 @@ manageRealityTarget() {
 
 # reality管理
 regenerateRealityProfile() {
+    local selectCustomInstallType=, protocolId
+    for protocolId in 1 2 26; do
+        if currentProtocolHas "${protocolId}"; then
+            selectCustomInstallType+="${protocolId},"
+        fi
+    done
+    [[ "${selectCustomInstallType}" != , ]] || return 1
     if [[ "${coreInstallType}" == "1" ]]; then
-        selectCustomInstallType=",1,"
         initXrayConfig custom 1 true || return 1
     elif [[ "${coreInstallType}" == "2" ]]; then
-        if currentProtocolHas 1; then
-            selectCustomInstallType=",1,"
-        fi
-        if currentProtocolHas 26; then
-            selectCustomInstallType="${selectCustomInstallType},26,"
-        fi
         initSingBoxConfig custom 1 true || return 1
+    else
+        return 1
     fi
 
     reloadCore || return 1
@@ -3085,7 +3086,6 @@ manageReality() {
         menuLine "Reality 不需要本机伪装站点；443 共存分流仅用于同机真实网站"
         menuLine "分流时只填写真实网站域名，其他 SNI 默认转给 Reality"
         menuClose
-        selectRealityManageType=
         menuReadChoice reality_manage_menu "请选择:" selectRealityManageType || return 0
 
         case "${selectRealityManageType}" in
@@ -3733,6 +3733,7 @@ manageHysteria2Bandwidth() {
 manageHysteria() {
     local hysteria2Status installHysteria2Status configFile
     while true; do
+        readInstallType || return 1
         hysteria2Status=
         echoContent title "\n┌─ Hysteria2 管理 ───────────────────────────────────"
         menuLine "依赖 sing-box；已有 Xray 时可作为辅助核心增量安装，适合 UDP、移动网络场景"
@@ -3923,6 +3924,7 @@ manageTuicAdvanced() {
 manageTuic() {
     local tuicStatus installTuicStatus configFile
     while true; do
+        readInstallType || return 1
         tuicStatus=
         echoContent title "\n┌─ Tuic 管理 ────────────────────────────────────────"
         menuLine "依赖 sing-box；已有 Xray 时可作为辅助核心增量安装，适合 UDP、移动网络或 QUIC/HTTP3 客户端场景"

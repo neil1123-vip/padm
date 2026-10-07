@@ -1002,6 +1002,46 @@ runProtocolEntryConfigUpdateRegression() (
             done
         )
     )
+    (
+        # 首次增量安装的局部路径返回后，每轮按落盘状态刷新安装/卸载菜单。
+        local coreInstallType=1 singBoxConfigPath= detections=0 summaries=0 installs=0 removals=0
+        local menuLog="${root}/protocol-install-menu.log" inputFd unread
+        readInstallType() {
+            detections=$((detections + 1))
+            singBoxConfigPath=
+            [[ ! -f "${fixtureConfig}" ]] || singBoxConfigPath="${root}/"
+            return 0
+        }
+        singBoxHysteria2Install() {
+            local singBoxConfigPath="${root}/"
+            installs=$((installs + 1))
+            printf '{"inbounds":[{}]}\n' >"${fixtureConfig}"
+        }
+        singBoxTuicInstall() { singBoxHysteria2Install; }
+        unInstallSingBox() { removals=$((removals + 1)); rm "${fixtureConfig}"; }
+        hysteria2SettingsSummary() { summaries=$((summaries + 1)); }
+        tuicSettingsSummary() { summaries=$((summaries + 1)); }
+        menuItem() { printf '%s\n' "$2" >>"${menuLog}"; }
+        errorCard() { return 1; }
+        for command in manageHysteria manageTuic; do
+            rm -f "${fixtureConfig}"
+            : >"${menuLog}"
+            detections=0 summaries=0 installs=0 removals=0
+            "${command}" <<< $'1\n2\n2'
+            [[ "${detections}:${summaries}:${installs}:${removals}" == 3:1:1:1 ]]
+            [[ "${coreInstallType}" == 1 && -z "${singBoxConfigPath}" && ! -e "${fixtureConfig}" ]]
+            grep -qx 重新安装 "${menuLog}"
+            grep -qx 卸载 "${menuLog}"
+        done
+        readInstallType() { return 1; }
+        for command in manageHysteria manageTuic; do
+            exec {inputFd}<<<sentinel
+            regressionExpectStatus 1 "${command}" <&"${inputFd}"
+            read -r unread <&"${inputFd}"
+            exec {inputFd}<&-
+            [[ "${unread}" == sentinel ]]
+        done
+    )
 )
 
 runProtocolEntryPortRegression() (

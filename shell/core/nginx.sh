@@ -383,7 +383,7 @@ realityStreamRestoreXrayConfig() {
 }
 
 realityStreamRefreshSubscribeIfInstalled() {
-    readNginxSubscribe
+    readNginxSubscribe || return 1
     if [[ -n "${subscribePort}" ]]; then
         subscribe false true
     fi
@@ -481,6 +481,10 @@ showRealityStreamSplitStatus() {
 
 
 configureRealityStreamSplitApply() {
+    local installNginxStatus enableRealityStreamSplit websiteDomainsInput websiteDomains
+    local websitePort visionInternalPort= xhttpInternalPort= currentVisionPort currentXHTTPPort
+    local stateFile publicPort=443 defaultProtocol defaultInternalPort backupDir
+    local selectDefaultRealityProtocol previousVisionPort= previousXHTTPPort= firewallOwned=false
     if [[ "${coreInstallType}" != "1" ]]; then
         statusCard "Reality 443 共存不可用" "443 共存分流当前仅支持 Xray Reality Vision/XHTTP"
         return 1
@@ -489,16 +493,79 @@ configureRealityStreamSplitApply() {
         statusCard "Reality 443 共存不可用" "未检测到 Xray Reality Vision 或 Reality XHTTP"
         return 1
     fi
+    echoContent title "\n┌─ 配置 Reality 443 共存分流 ───────────────────────"
+    echoContent yellow "Reality 不需要本机伪装站点；该功能仅用于同机 443 真实网站共存。"
+    echoContent yellow "只需要填写真实网站域名，其他 SNI 默认转给 Reality。"
+    echoContent yellow "Reality 的 entry 仍输出公网 443，Reality SNI 仍保持外部伪装目标站。"
+    realityStreamWarnPublic443Status
+    autoRead reality_stream_enable "是否确实要在本机 443 同时提供真实网站？[y/n]:" enableRealityStreamSplit || return 1
+    if [[ "${enableRealityStreamSplit}" != "y" ]]; then
+        statusCard "已取消配置" "仅使用 Reality 时建议直接让 Reality 使用 443"
+        return 1
+    fi
+    autoRead reality_stream_domains "请输入真实网站域名，多个用逗号分隔:" websiteDomainsInput || return 1
+    websiteDomains=$(normalizeRealityStreamDomains "${websiteDomainsInput}")
+    if [[ -z "${websiteDomains}" ]]; then
+        errorCard "未填写合法网站域名"
+        return 1
+    fi
+
+    if currentProtocolHas 1 && currentProtocolHas 2; then
+        echoContent title "\n┌─ 默认 Reality 后端 ───────────────────────────────"
+        menuLine "SNI stream 的 default 只能转给一个 Reality 后端"
+        menuRecommendedItem 1 "Reality Vision" "公网 443 默认转发到 Vision"
+        menuRecommendedItem 2 "Reality XHTTP" "公网 443 默认转发到 XHTTP"
+        menuClose
+        menuReadChoice reality_stream_default_protocol "请选择[默认 Vision]:" selectDefaultRealityProtocol true || return 1
+        case "${selectDefaultRealityProtocol}" in
+        ""|1) defaultProtocol=vision ;;
+        2) defaultProtocol=xhttp ;;
+        *) errorCard "Reality 默认后端选择不合法"; return 1 ;;
+        esac
+    elif currentProtocolHas 2; then
+        defaultProtocol=xhttp
+    else
+        defaultProtocol=vision
+    fi
+
+    autoRead reality_stream_website_port "请输入网站后端端口，[回车]默认8443:" websitePort || return 1
+    websitePort=${websitePort:-8443}
+    if ! validPortNumber "${websitePort}"; then
+        errorCard "网站后端端口不合法"
+        return 1
+    fi
+    realityStreamWarnWebsiteDomainResolve "${websiteDomains}"
+    realityStreamWarnWebsiteBackend "${websitePort}"
+
+    if [[ "${defaultProtocol}" == "vision" ]]; then
+        autoRead reality_stream_vision_port "请输入 Reality Vision 后端端口，[回车]默认2443:" visionInternalPort || return 1
+        visionInternalPort=${visionInternalPort:-2443}
+        if ! validPortNumber "${visionInternalPort}"; then
+            errorCard "Reality Vision 后端端口不合法"
+            return 1
+        fi
+        defaultInternalPort=${visionInternalPort}
+    fi
+
+    if [[ "${defaultProtocol}" == "xhttp" ]]; then
+        autoRead reality_stream_xhttp_port "请输入 Reality XHTTP 后端端口，[回车]默认2444:" xhttpInternalPort || return 1
+        xhttpInternalPort=${xhttpInternalPort:-2444}
+        if ! validPortNumber "${xhttpInternalPort}"; then
+            errorCard "Reality XHTTP 后端端口不合法"
+            return 1
+        fi
+        defaultInternalPort=${xhttpInternalPort}
+    fi
+
     if ! command -v nginx >/dev/null 2>&1; then
         menuLine "$(uiStyle warn "未检测到 Nginx，443 共存分流需要 Nginx stream")"
-        autoRead reality_stream_install_nginx "是否安装 Nginx？[y/n]:" installNginxStatus
-        if [[ "${installNginxStatus}" == "y" ]]; then
-            if ! (installNginxTools) || ! command -v nginx >/dev/null 2>&1; then
-                errorCard "Nginx 安装失败，已取消 Reality 443 共存配置"
-                return 1
-            fi
-        else
+        autoRead reality_stream_install_nginx "是否安装 Nginx？[y/n]:" installNginxStatus || return 1
+        if [[ "${installNginxStatus}" != "y" ]]; then
             errorCard "已取消配置"
+            return 1
+        fi
+        if ! (installNginxTools) || ! command -v nginx >/dev/null 2>&1; then
+            errorCard "Nginx 安装失败，已取消 Reality 443 共存配置"
             return 1
         fi
     fi
@@ -507,29 +574,20 @@ configureRealityStreamSplitApply() {
         return 1
     fi
 
-    echoContent title "\n┌─ 配置 Reality 443 共存分流 ───────────────────────"
-    echoContent yellow "Reality 不需要本机伪装站点；该功能仅用于同机 443 真实网站共存。"
-    echoContent yellow "只需要填写真实网站域名，其他 SNI 默认转给 Reality。"
-    echoContent yellow "Reality 的 entry 仍输出公网 443，Reality SNI 仍保持外部伪装目标站。"
-    realityStreamWarnPublic443Status
-    autoRead reality_stream_enable "是否确实要在本机 443 同时提供真实网站？[y/n]:" enableRealityStreamSplit
-    if [[ "${enableRealityStreamSplit}" != "y" ]]; then
-        statusCard "已取消配置" "仅使用 Reality 时建议直接让 Reality 使用 443"
-        return 1
-    fi
-    autoRead reality_stream_domains "请输入真实网站域名，多个用逗号分隔:" websiteDomainsInput
-    local websiteDomains
-    websiteDomains=$(normalizeRealityStreamDomains "${websiteDomainsInput}")
-    if [[ -z "${websiteDomains}" ]]; then
-        errorCard "未填写合法网站域名"
-        return 1
-    fi
-
-    local websitePort visionInternalPort= xhttpInternalPort= currentVisionPort currentXHTTPPort stateFile publicPort defaultProtocol defaultInternalPort backupDir firewallOwned=false
-    publicPort=443
     stateFile=$(realityStreamSplitStateFile) || return 1
     currentVisionPort=$(jq -r '.inbounds[0].port // empty' "$(realityStreamVisionConfigFile)" 2>/dev/null)
     currentXHTTPPort=$(jq -r '.inbounds[0].port // empty' "$(realityStreamXHTTPConfigFile)" 2>/dev/null)
+    if realityStreamSplitEnabled; then
+        previousVisionPort=$(realityStreamStoredPublicPortForProtocol vision) || return 1
+        previousXHTTPPort=$(realityStreamStoredPublicPortForProtocol xhttp) || return 1
+        currentVisionPort=${previousVisionPort:-${currentVisionPort}}
+        currentXHTTPPort=${previousXHTTPPort:-${currentXHTTPPort}}
+    fi
+    if [[ "${defaultProtocol}" != vision && "${previousVisionPort}" == "${publicPort}" ]] ||
+        [[ "${defaultProtocol}" != xhttp && "${previousXHTTPPort}" == "${publicPort}" ]]; then
+        errorCard "原 Reality 后端端口为 443，无法切换默认后端；请先关闭分流并调整该协议端口"
+        return 1
+    fi
     padmCreateTempPath backupDir -d "$(realityStreamEnableBackupTemplate)" || return 1
     if ! backupRealityStreamState "${backupDir}"; then
         removeRealityStreamBackup "${backupDir}"
@@ -546,69 +604,25 @@ configureRealityStreamSplitApply() {
     fi
     [[ "${PADM_LAST_ALLOW_PORT_ADDED:-false}" == "true" ]] && firewallOwned=true
 
-    if currentProtocolHas 1 && currentProtocolHas 2; then
-        echoContent title "\n┌─ 默认 Reality 后端 ───────────────────────────────"
-        menuLine "SNI stream 的 default 只能转给一个 Reality 后端"
-        menuRecommendedItem 1 "Reality Vision" "公网 443 默认转发到 Vision"
-        menuRecommendedItem 2 "Reality XHTTP" "公网 443 默认转发到 XHTTP"
-        menuClose
-        menuReadChoice reality_stream_default_protocol "请选择[默认 Vision]:" selectDefaultRealityProtocol true || {
-            removeRealityStreamBackup "${backupDir}"
-            return 1
-        }
-        if [[ "${selectDefaultRealityProtocol}" == "2" ]]; then
-            defaultProtocol=xhttp
-        else
-            defaultProtocol=vision
-        fi
-    elif currentProtocolHas 2; then
-        defaultProtocol=xhttp
-    else
-        defaultProtocol=vision
-    fi
-
-    autoRead reality_stream_website_port "请输入网站后端端口，[回车]默认8443:" websitePort
-    websitePort=${websitePort:-8443}
-    if ! validPortNumber "${websitePort}"; then
-        errorCard "网站后端端口不合法"
-        removeRealityStreamBackup "${backupDir}"
+    # 切换默认后端先恢复旧后端，不把它遗留在仅 loopback 可达的端口。
+    if [[ "${defaultProtocol}" != vision && -n "${previousVisionPort}" ]] &&
+        ! realityStreamRestoreXrayConfig vision "${previousVisionPort}" "$(realityStreamVisionConfigFile)"; then
+        realityStreamRollbackAndFail "${backupDir}" "无法恢复原 Reality Vision 后端"
         return 1
     fi
-    realityStreamWarnWebsiteDomainResolve "${websiteDomains}"
-    realityStreamWarnWebsiteBackend "${websitePort}"
-
-    if [[ "${defaultProtocol}" == "vision" ]]; then
-        autoRead reality_stream_vision_port "请输入 Reality Vision 后端端口，[回车]默认2443:" visionInternalPort
-        visionInternalPort=${visionInternalPort:-2443}
-        if ! validPortNumber "${visionInternalPort}"; then
-            errorCard "Reality Vision 后端端口不合法"
-            removeRealityStreamBackup "${backupDir}"
-            return 1
-        fi
-        if ! realityStreamPatchXrayConfig vision "${visionInternalPort}" "$(realityStreamVisionConfigFile)"; then
-            realityStreamRollbackAndFail "${backupDir}" "无法写入 Reality Vision 后端配置"
-            return 1
-        fi
-        defaultInternalPort=${visionInternalPort}
+    if [[ "${defaultProtocol}" != xhttp && -n "${previousXHTTPPort}" ]] &&
+        ! realityStreamRestoreXrayConfig xhttp "${previousXHTTPPort}" "$(realityStreamXHTTPConfigFile)"; then
+        realityStreamRollbackAndFail "${backupDir}" "无法恢复原 Reality XHTTP 后端"
+        return 1
     fi
-
-    if [[ "${defaultProtocol}" == "xhttp" ]]; then
-        autoRead reality_stream_xhttp_port "请输入 Reality XHTTP 后端端口，[回车]默认2444:" xhttpInternalPort
-        xhttpInternalPort=${xhttpInternalPort:-2444}
-        if ! validPortNumber "${xhttpInternalPort}"; then
-            errorCard "Reality XHTTP 后端端口不合法"
-            removeRealityStreamBackup "${backupDir}"
-            return 1
-        fi
-        if ! realityStreamPatchXrayConfig xhttp "${xhttpInternalPort}" "$(realityStreamXHTTPConfigFile)"; then
-            realityStreamRollbackAndFail "${backupDir}" "无法写入 Reality XHTTP 后端配置"
-            return 1
-        fi
-        defaultInternalPort=${xhttpInternalPort}
+    local defaultConfigFile
+    if [[ "${defaultProtocol}" == vision ]]; then
+        defaultConfigFile=$(realityStreamVisionConfigFile)
+    else
+        defaultConfigFile=$(realityStreamXHTTPConfigFile)
     fi
-
-    if [[ -z "${defaultInternalPort}" ]]; then
-        realityStreamRollbackAndFail "${backupDir}" "未找到 Reality 默认后端端口"
+    if ! realityStreamPatchXrayConfig "${defaultProtocol}" "${defaultInternalPort}" "${defaultConfigFile}"; then
+        realityStreamRollbackAndFail "${backupDir}" "无法写入 Reality 默认后端配置"
         return 1
     fi
 

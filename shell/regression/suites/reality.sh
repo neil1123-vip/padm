@@ -24,6 +24,7 @@ listRegressionRealityConfigChildSelectors() {
         reality-config-change-reload-failure \
         reality-config-change-subscription-refresh-failure \
         reality-config-xhttp-download-settings \
+        reality-config-stream-split \
         reality-config-refresh-subscription \
         reality-config-controlled-refresh \
         reality-config-import-skip
@@ -63,6 +64,7 @@ runRealityConfigParallelChildRegressionIsolatedSelector() (
     reality-config-change-reload-failure) runRealityConfigChangeReloadFailureRegression ;;
     reality-config-change-subscription-refresh-failure) runRealityConfigChangeSubscriptionRefreshFailureRegression ;;
     reality-config-xhttp-download-settings) runXHTTPDownloadSettingsRegression ;;
+    reality-config-stream-split) runRealityStreamSplitRegression ;;
     reality-config-refresh-subscription) runRealityConfigRefreshSubscriptionRegression ;;
     reality-config-controlled-refresh) runRealityConfigControlledRefreshRegression ;;
     reality-config-import-skip) runRealityConfigImportSkipRegression ;;
@@ -84,6 +86,7 @@ registerRegressionFunctionLeaf reality-config-apply runRealityConfigParallelChil
 registerRegressionFunctionLeaf reality-config-change-reload-failure runRealityConfigParallelChildRegressionIsolatedSelector reality-config-change-reload-failure
 registerRegressionFunctionLeaf reality-config-change-subscription-refresh-failure runRealityConfigParallelChildRegressionIsolatedSelector reality-config-change-subscription-refresh-failure
 registerRegressionFunctionLeaf reality-config-xhttp-download-settings runRealityConfigParallelChildRegressionIsolatedSelector reality-config-xhttp-download-settings
+registerRegressionFunctionLeaf reality-config-stream-split runRealityConfigParallelChildRegressionIsolatedSelector reality-config-stream-split
 registerRegressionFunctionLeaf reality-config-refresh-subscription runRealityConfigParallelChildRegressionIsolatedSelector reality-config-refresh-subscription
 registerRegressionFunctionLeaf reality-config-controlled-refresh runRealityConfigParallelChildRegressionIsolatedSelector reality-config-controlled-refresh
 registerRegressionFunctionLeaf reality-config-import-skip runRealityConfigParallelChildRegressionIsolatedSelector reality-config-import-skip

@@ -3525,6 +3525,7 @@ JSON
     showAccounts() { return 1; }
     regressionExpectStatus 1 refreshVlessEncryptionSubscriptions >/dev/null 2>&1
 
+    currentInstallProtocolType=,1,
     initXrayConfig() { return 0; }
     reloadCore() { return 1; }
     subscribe() {
@@ -3543,6 +3544,30 @@ JSON
     rm -f "${subscribeMarker}"
     regressionExpectStatus 1 regenerateRealityProfile >/dev/null 2>&1
     [[ -e "${subscribeMarker}" ]]
+    (
+        # 重新生成只选择当前 Reality 协议，不沿用或改写上次安装选择。
+        local selectCustomInstallType=,20, currentInstallProtocolType selectedProtocol
+        initXrayConfig() { selectedProtocol=${selectCustomInstallType}; }
+        initSingBoxConfig() { selectedProtocol=${selectCustomInstallType}; }
+        reloadCore() { :; }
+        subscribe() { :; }
+        for currentInstallProtocolType in ,1, ,26, ,1,26,; do
+            coreInstallType=2
+            regenerateRealityProfile
+            [[ "${selectCustomInstallType}" == ,20, ]]
+            assertEquals "$(protocolSelectionNormalizeCsv "${currentInstallProtocolType}")" \
+                "$(protocolSelectionNormalizeCsv "${selectedProtocol}")" reality-regenerate-selection
+        done
+        for currentInstallProtocolType in ,1, ,2, ,26, ,1,2,26,; do
+            coreInstallType=1
+            regenerateRealityProfile
+            [[ "${selectCustomInstallType}" == ,20, && "${selectedProtocol}" == "${currentInstallProtocolType}" ]]
+        done
+        currentInstallProtocolType=,3,
+        selectedProtocol=
+        regressionExpectStatus 1 regenerateRealityProfile
+        [[ "${selectCustomInstallType}" == ,20, && -z "${selectedProtocol}" ]]
+    )
 )
 
 runConfigTransactionRegression() (
@@ -3863,6 +3888,17 @@ JSON
         grep -qx 'cleanDirectoryContent' "${refreshFailureLog}"
         ! grep -q '^showAccounts$' "${refreshFailureLog}"
     ) || return 1
+    (
+        # 订阅配置读取失败不能转为本地重建或公网发布，也不能继续主控通知。
+        readNginxSubscribe() { subscribePort=; return 1; }
+        subscriptionNotifyControllerRefresh() { printf 'notify\n' >>"${refreshFailureLog}"; }
+        local refreshFn
+        for refreshFn in refreshXHTTPSubscriptions refreshHysteria2Subscriptions refreshTuicSubscriptions refreshVlessEncryptionSubscriptions; do
+            : >"${refreshFailureLog}"
+            regressionExpectStatus 1 "${refreshFn}"
+            [[ ! -s "${refreshFailureLog}" ]]
+        done
+    )
 
     cat >"${fakeBinDir}/nginx" <<'SH'
 #!/usr/bin/env bash

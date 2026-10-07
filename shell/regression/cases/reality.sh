@@ -2741,6 +2741,151 @@ auto
     fi
 )
 
+runRealityStreamSplitRegression() (
+    local mode=${1:-all} root="${TMP_DIR}/reality-stream-split" failKey= defaultChoice=1
+    local visionPort=2443 xhttpPort=2444 websitePortInput=8443
+    local backupCalls=0 patchCalls=0 allowCalls=0 reloadCalls=0 installCalls=0 subscribeCalls=0
+    local reloadShouldFail=false subscribeReadStatus=0 key oldVision oldXHTTP oldNginx oldState oldStream
+    export PADM_REALITY_STREAM_STATE_FILE="${root}/state.json" \
+        PADM_REALITY_STREAM_CONF_FILE="${root}/stream.d/padm-reality.conf" \
+        PADM_REALITY_STREAM_NGINX_CONF="${root}/nginx.conf" \
+        PADM_REALITY_STREAM_VISION_CONFIG_FILE="${root}/vision.json" \
+        PADM_REALITY_STREAM_XHTTP_CONFIG_FILE="${root}/xhttp.json"
+    export TMPDIR="${root}/tmp"
+    mkdir -p "${TMPDIR}"
+    rm -f "${PADM_REALITY_STREAM_STATE_FILE}" "${PADM_REALITY_STREAM_CONF_FILE}" "${root}/install-called"
+    printf '%s\n' '{"inbounds":[{"port":443,"settings":{"marker":"vision"}},{"port":12345}]}' >"${PADM_REALITY_STREAM_VISION_CONFIG_FILE}"
+    printf '%s\n' '{"inbounds":[{"listen":"0.0.0.0","port":9443,"settings":{"marker":"xhttp"}}]}' >"${PADM_REALITY_STREAM_XHTTP_CONFIG_FILE}"
+    printf 'events {}\nhttp {}\n' >"${PADM_REALITY_STREAM_NGINX_CONF}"
+    coreInstallType=1
+    currentInstallProtocolType=",1,2,"
+    unset AUTO_INSTALL
+
+    eval "$(declare -f backupRealityStreamState | sed '1s/^backupRealityStreamState/streamOriginalBackupRealityStreamState/')"
+    eval "$(declare -f realityStreamPatchXrayConfig | sed '1s/^realityStreamPatchXrayConfig/streamOriginalPatchXrayConfig/')"
+    backupRealityStreamState() { backupCalls=$((backupCalls + 1)); streamOriginalBackupRealityStreamState "$@"; }
+    realityStreamPatchXrayConfig() { patchCalls=$((patchCalls + 1)); streamOriginalPatchXrayConfig "$@"; }
+    realityStreamNginxSupportsStream() { return 0; }
+    realityStreamWarnPublic443Status() { :; }
+    realityStreamWarnWebsiteDomainResolve() { :; }
+    realityStreamWarnWebsiteBackend() { :; }
+    realityStreamXrayBinary() { printf '/bin/true\n'; }
+    realityStreamXrayConfDir() { printf '%s\n' "${root}"; }
+    nginx() { return 0; }
+    installNginxTools() { installCalls=$((installCalls + 1)); : >"${root}/install-called"; return 0; }
+    allowPort() { allowCalls=$((allowCalls + 1)); PADM_LAST_ALLOW_PORT_ADDED=false; }
+    reloadCore() { reloadCalls=$((reloadCalls + 1)); [[ "${reloadShouldFail}" != true ]]; }
+    serviceQueueRefresh() { :; }
+    serviceQueueApply() { return 0; }
+    readNginxSubscribe() { subscribePort=; return "${subscribeReadStatus}"; }
+    subscribe() { subscribeCalls=$((subscribeCalls + 1)); }
+    autoRead() {
+        local value=
+        case "$1" in
+        reality_stream_enable|reality_stream_install_nginx) value=y ;;
+        reality_stream_domains) value=site.example.com ;;
+        reality_stream_website_port) value=${websitePortInput} ;;
+        reality_stream_vision_port) value=${visionPort} ;;
+        reality_stream_xhttp_port) value=${xhttpPort} ;;
+        *) return 99 ;;
+        esac
+        printf -v "$3" '%s' "${value}"
+        [[ "$1" != "${failKey}" ]] || return 7
+    }
+    menuReadChoice() {
+        printf -v "$3" '%s' "${defaultChoice}"
+        [[ "$1" != "${failKey}" ]] || return 7
+    }
+    oldVision=$(<"${PADM_REALITY_STREAM_VISION_CONFIG_FILE}")
+    oldXHTTP=$(<"${PADM_REALITY_STREAM_XHTTP_CONFIG_FILE}")
+    oldNginx=$(<"${PADM_REALITY_STREAM_NGINX_CONF}")
+
+    if [[ "${mode}" != restore ]]; then
+        # 每个输入失败都在备份、开放端口和配置写入之前停止。
+        for key in enable domains default_protocol website_port vision_port xhttp_port install_nginx; do
+            failKey="reality_stream_${key}"
+            defaultChoice=1
+            nginx() { return 0; }
+            [[ "${key}" != xhttp_port ]] || defaultChoice=2
+            [[ "${key}" != install_nginx ]] || unset -f nginx
+            regressionExpectStatus 1 configureRealityStreamSplit
+            [[ "${backupCalls}" == 0 && "${patchCalls}" == 0 && "${allowCalls}" == 0 && "${reloadCalls}" == 0 && "${installCalls}" == 0 ]]
+            [[ ! -e "${root}/install-called" ]]
+            [[ "$(<"${PADM_REALITY_STREAM_VISION_CONFIG_FILE}")" == "${oldVision}" ]]
+            [[ "$(<"${PADM_REALITY_STREAM_XHTTP_CONFIG_FILE}")" == "${oldXHTTP}" ]]
+            [[ "$(<"${PADM_REALITY_STREAM_NGINX_CONF}")" == "${oldNginx}" ]]
+            [[ ! -e "${PADM_REALITY_STREAM_STATE_FILE}" && ! -e "${PADM_REALITY_STREAM_CONF_FILE}" ]]
+            [[ -z "$(find "${TMPDIR}" -mindepth 1 -print -quit)" ]]
+        done
+        nginx() { return 0; }
+        failKey= defaultChoice=9
+        regressionExpectStatus 1 configureRealityStreamSplit
+        [[ "${backupCalls}" == 0 && "${patchCalls}" == 0 && "${allowCalls}" == 0 ]]
+        defaultChoice=1 websitePortInput=invalid
+        regressionExpectStatus 1 configureRealityStreamSplit
+        [[ "${backupCalls}" == 0 && "${patchCalls}" == 0 && "${allowCalls}" == 0 ]]
+        websitePortInput=8443
+    fi
+    if [[ "${mode}" == input ]]; then return 0; fi
+
+    defaultChoice= visionPort= websitePortInput=
+    configureRealityStreamSplit
+    jq -e '.inbounds[0].listen == "127.0.0.1" and .inbounds[0].port == 2443 and .inbounds[0].settings.marker == "vision"' "${PADM_REALITY_STREAM_VISION_CONFIG_FILE}" >/dev/null
+    defaultChoice=1 visionPort=2445 websitePortInput=8443
+    configureRealityStreamSplit
+    jq -e '.protocols.vision.restore_port == 443 and .protocols.vision.internal_port == 2445' "${PADM_REALITY_STREAM_STATE_FILE}" >/dev/null
+    # 原后端恢复到 443 会与 stream 冲突，切换必须在任何写入前拒绝。
+    oldVision=$(<"${PADM_REALITY_STREAM_VISION_CONFIG_FILE}")
+    oldXHTTP=$(<"${PADM_REALITY_STREAM_XHTTP_CONFIG_FILE}")
+    oldState=$(<"${PADM_REALITY_STREAM_STATE_FILE}")
+    oldNginx=$(<"${PADM_REALITY_STREAM_NGINX_CONF}")
+    oldStream=$(<"${PADM_REALITY_STREAM_CONF_FILE}")
+    local previousEffects="${backupCalls}:${patchCalls}:${allowCalls}:${reloadCalls}"
+    defaultChoice=2
+    regressionExpectStatus 1 configureRealityStreamSplit
+    [[ "${backupCalls}:${patchCalls}:${allowCalls}:${reloadCalls}" == "${previousEffects}" ]]
+    [[ "$(<"${PADM_REALITY_STREAM_VISION_CONFIG_FILE}")" == "${oldVision}" ]]
+    [[ "$(<"${PADM_REALITY_STREAM_XHTTP_CONFIG_FILE}")" == "${oldXHTTP}" ]]
+    [[ "$(<"${PADM_REALITY_STREAM_STATE_FILE}")" == "${oldState}" ]]
+    [[ "$(<"${PADM_REALITY_STREAM_NGINX_CONF}")" == "${oldNginx}" ]]
+    [[ "$(<"${PADM_REALITY_STREAM_CONF_FILE}")" == "${oldStream}" ]]
+    disableRealityStreamSplit
+    jq -e '.inbounds[0].port == 443 and (.inbounds[0] | has("listen") | not)' "${PADM_REALITY_STREAM_VISION_CONFIG_FILE}" >/dev/null
+    [[ ! -e "${PADM_REALITY_STREAM_STATE_FILE}" && ! -e "${PADM_REALITY_STREAM_CONF_FILE}" ]]
+
+    # 两协议切换时旧后端恢复公网监听，新后端关闭后也恢复自己的原端口。
+    jq '.inbounds[0].port = 11443' "${PADM_REALITY_STREAM_VISION_CONFIG_FILE}" >"${root}/vision-reset.json"
+    mv "${root}/vision-reset.json" "${PADM_REALITY_STREAM_VISION_CONFIG_FILE}"
+    defaultChoice=1 visionPort=2443
+    configureRealityStreamSplit
+    defaultChoice=2
+    configureRealityStreamSplit
+    jq -e '.inbounds[0].port == 11443 and (.inbounds[0] | has("listen") | not)' "${PADM_REALITY_STREAM_VISION_CONFIG_FILE}" >/dev/null
+    jq -e '.inbounds[0].listen == "127.0.0.1" and .inbounds[0].port == 2444' "${PADM_REALITY_STREAM_XHTTP_CONFIG_FILE}" >/dev/null
+    jq -e '.default_protocol == "xhttp" and (.protocols | has("vision") | not) and .protocols.xhttp.restore_port == 9443' "${PADM_REALITY_STREAM_STATE_FILE}" >/dev/null
+    oldVision=$(<"${PADM_REALITY_STREAM_VISION_CONFIG_FILE}")
+    oldXHTTP=$(<"${PADM_REALITY_STREAM_XHTTP_CONFIG_FILE}")
+    oldState=$(<"${PADM_REALITY_STREAM_STATE_FILE}")
+    oldNginx=$(<"${PADM_REALITY_STREAM_NGINX_CONF}")
+    oldStream=$(<"${PADM_REALITY_STREAM_CONF_FILE}")
+    reloadShouldFail=true defaultChoice=1 visionPort=2446
+    regressionExpectStatus 1 configureRealityStreamSplit
+    [[ "$(<"${PADM_REALITY_STREAM_VISION_CONFIG_FILE}")" == "${oldVision}" ]]
+    [[ "$(<"${PADM_REALITY_STREAM_XHTTP_CONFIG_FILE}")" == "${oldXHTTP}" ]]
+    [[ "$(<"${PADM_REALITY_STREAM_STATE_FILE}")" == "${oldState}" ]]
+    [[ "$(<"${PADM_REALITY_STREAM_NGINX_CONF}")" == "${oldNginx}" ]]
+    [[ "$(<"${PADM_REALITY_STREAM_CONF_FILE}")" == "${oldStream}" ]]
+    reloadShouldFail=false
+    disableRealityStreamSplit
+    jq -e '.inbounds[0].listen == "0.0.0.0" and .inbounds[0].port == 9443' "${PADM_REALITY_STREAM_XHTTP_CONFIG_FILE}" >/dev/null
+    jq -e '.inbounds[0].port == 11443' "${PADM_REALITY_STREAM_VISION_CONFIG_FILE}" >/dev/null
+    [[ "$(<"${PADM_REALITY_STREAM_NGINX_CONF}")" == $'events {}\nhttp {}' ]]
+    [[ -z "$(find "${TMPDIR}" -mindepth 1 -print -quit)" ]]
+    subscribeReadStatus=1
+    regressionExpectStatus 1 realityStreamRefreshSubscribeIfInstalled
+    [[ "${subscribeCalls}" == 0 ]]
+)
+
 runRealityConfigRefreshSubscriptionRegression() {
     local oldNginxConfigPath="${nginxConfigPath:-}"
     local oldSubscribePort="${subscribePort:-}"
@@ -2768,6 +2913,10 @@ runRealityConfigRefreshSubscriptionRegression() {
     refreshPublishedSubscriptions() { refreshCalls=$((refreshCalls + 1)); return 1; }
     SUBSCRIPTION_SYNC_PUBLISHED=true
     refreshSubscriptionsAfterRealityTargetChange >/dev/null
+    [[ "${refreshCalls}" == "3" && "${subscribeCalls}" == "0" ]]
+
+    readNginxSubscribe() { subscribePort=39778; return 1; }
+    regressionExpectStatus 1 refreshSubscriptionsAfterRealityTargetChange
     [[ "${refreshCalls}" == "3" && "${subscribeCalls}" == "0" ]]
 
     nginxConfigPath="${oldNginxConfigPath}"
@@ -2823,6 +2972,7 @@ runRealityConfigRegression() {
     runRegressionStep reality-config-change-reload-failure runRealityConfigChangeReloadFailureRegression
     runRegressionStep reality-config-change-subscription-refresh-failure runRealityConfigChangeSubscriptionRefreshFailureRegression
     runRegressionStep reality-config-xhttp-download-settings runXHTTPDownloadSettingsRegression
+    runRegressionStep reality-config-stream-split runRealityStreamSplitRegression
     runRegressionStep reality-config-refresh-subscription runRealityConfigRefreshSubscriptionRegression
     runRegressionStep reality-config-controlled-refresh runRealityConfigControlledRefreshRegression
     runRegressionStep reality-config-import-skip runRealityConfigImportSkipRegression

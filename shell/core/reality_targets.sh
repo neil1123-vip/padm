@@ -3263,7 +3263,7 @@ refreshSubscriptionsAfterRealityTargetChange() {
         realityTargetStatusBlock yellow "REALITY 目标站" "订阅刷新依赖未完整加载，已跳过订阅刷新" "通过 install.sh 菜单执行时会自动刷新"
         return 0
     fi
-    readNginxSubscribe
+    readNginxSubscribe || return 1
     if [[ -n "${subscribePort:-}" || -f "${nginxConfigPath:-/etc/nginx/conf.d/}subscribe.conf" ]]; then
         if refreshPublishedSubscriptions; then
             return 0
