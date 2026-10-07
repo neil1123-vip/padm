@@ -2652,12 +2652,23 @@ configureRealityDomainMode() {
 
 # 安装输入在事务外确认，取消时不备份或恢复服务。
 prepareCoreInstallInputs() {
-    local core=$1
+    local core=$1 nextPath
     readLastInstallationConfig || return 1
     if [[ -z "${selectCustomInstallType:-}" ]] || protocolSelectionNeedsPath "${selectCustomInstallType}"; then
         if [[ -n "${currentPath:-}" ]] && ! padmIsSafeRoutePathSegment "${currentPath}"; then
             errorCard "path 不合法" "${currentPath}"
-            return 1
+            [[ -z "${AUTO_INSTALL:-}" ]] || return 1
+            while true; do
+                menuReadChoice install_path_repair "请输入新的 path[回车随机，0 返回]:" nextPath true || return 1
+                [[ "${nextPath}" != 0 ]] || return 1
+                if [[ -z "${nextPath}" ]]; then
+                    initRandomPath
+                    nextPath=${customPath}
+                fi
+                padmIsSafeRoutePathSegment "${nextPath}" && break
+                errorCard "path 不合法" "${nextPath}"
+            done
+            currentPath=${nextPath}
         fi
     fi
     if [[ -z "${selectCustomInstallType:-}" ]]; then

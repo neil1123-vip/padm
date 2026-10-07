@@ -398,6 +398,7 @@ endPackageInstallTransaction() {
 
 rollbackPackageInstallTransaction() {
     local packageName
+    local rollbackRemoveType="${removeType:-}"
     local failedPackages=()
     local rc=0
     PADM_PACKAGE_ROLLBACK_FAILURES=
@@ -406,8 +407,13 @@ rollbackPackageInstallTransaction() {
         return 0
     fi
 
+    # 回滚只卸载本次新增包，不顺带清理原有自动依赖。
+    case "${packageManager:-}" in
+    apt) rollbackRemoveType='DEBIAN_FRONTEND=noninteractive apt-get -y -o APT::Get::AutomaticRemove=false remove' ;;
+    yum) rollbackRemoveType="${removeType} --setopt=clean_requirements_on_remove=False" ;;
+    esac
     for packageName in ${PADM_INSTALLED_PACKAGES}; do
-        if ! runWithTimeout 300 "${removeType} ${packageName}" >/dev/null 2>&1; then
+        if ! runWithTimeout 300 "${rollbackRemoveType} ${packageName}" >/dev/null 2>&1; then
             failedPackages+=("${packageName}")
             rc=1
         fi
@@ -822,6 +828,10 @@ installAcmeTool() {
 # 安装工具包
 installTools() {
     padmAssertNativeInstallAllowed || return 1
+    if protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}" && ! acmeInstallTargetIsSafe; then
+        errorCard "acme.sh 安装目标路径、所有者或权限异常"
+        return 1
+    fi
     progressCard "$1" "安装工具"
     local reinstallNginx=false nginxReinstallChoice=
     if ! protocolSelectionSkipsNginx "${selectCustomInstallType}" && command -v nginx >/dev/null 2>&1; then
@@ -907,7 +917,7 @@ installTools() {
     if ! protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
         successCard "检测到无需依赖本机 TLS 证书的服务，跳过安装 acme.sh"
     else
-        installAcmeTool || return 1
+        installAcmeTool || failPackageInstallTransaction "acme.sh 工具准备失败"
     fi
 
     endPackageInstallTransaction "${packageTransactionOwner}"

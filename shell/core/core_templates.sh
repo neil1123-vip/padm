@@ -101,16 +101,18 @@ coreTemplateCollectInitialClients() {
             fi
             if [[ -n "${AUTO_UUID:-}${AUTO_USER:-}" ]] &&
                 ! jq -e --arg uuid "${AUTO_UUID:-}" --arg user "$(stripClientNameSuffix "${AUTO_USER:-}")" \
-                    --arg suffixes "$(clientNameSuffixRegex)" '
+                    --arg suffixes "$(clientNameSuffixRegex)" --arg core "${core}" '
                     any(.[];
-                        ($uuid == "" or (.id // .uuid // .password // "") == $uuid) and
-                        ($user == "" or ((.email // .name // .username // "") | sub("-(" + $suffixes + ")$"; "")) == $user)
+                        ($uuid == "" or (if $core == "xray" then .id // .uuid // .password // "" else .uuid // .id // .password // "" end) == $uuid) and
+                        ($user == "" or ((if $core == "xray" then .email // .name // .username // "" else .name // .email // .username // "" end) | sub("-(" + $suffixes + ")$"; "")) == $user)
                     )' <<<"${currentClients}" >/dev/null 2>&1; then
                 errorCard "初始用户参数与现有用户不匹配；保留历史用户请省略 --uuid/--user，重新创建用户请指定 --reuse-last no"
                 return 1
             fi
             if [[ "${requiresUuid}" == true ]]; then
-                storedCredentials=$(jq -r '.[] | .id // .uuid // .password // ""' <<<"${currentClients}") || return 1
+                storedCredentials=$(jq -r --arg core "${core}" '.[] |
+                    if $core == "xray" then .id // .uuid // .password // "" else .uuid // .id // .password // "" end
+                ' <<<"${currentClients}") || return 1
                 while IFS= read -r storedCredential; do
                     if ! validUuidValue "${storedCredential}"; then
                         errorCard "现有用户密码不是 UUID，不能复用到所选协议；请保留原配置并单独创建兼容用户"

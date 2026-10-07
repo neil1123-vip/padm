@@ -589,7 +589,7 @@ runInstallWorkflowRegression() (
     )
 
     (
-        # 旧协议路径先检查；无需路径的协议不受影响，重新填写仍可清除坏历史值。
+        # 坏历史路径只纠正本字段；自动安装仍拒绝，无需路径的协议不受影响。
         local core selection events= currentPath= lastInstallationConfig=
         local selectCustomInstallType= configPath=/regression/installed/ btDomain= AUTO_INSTALL=true AUTO_REUSE_LAST=
         showLastInstallationConfig() { currentPath='../unsafe'; }
@@ -614,6 +614,31 @@ runInstallWorkflowRegression() (
             runCoreInstall "${core}" true </dev/null
             [[ -z "${currentPath}" && "${events}" == $'domain\nusers\nports\ntransaction\n' ]]
             AUTO_REUSE_LAST=
+            (
+                local AUTO_INSTALL= input inputFd nextInput oldUsers='[{"uuid":"saved-id","name":"saved"}]'
+                local currentClients="${oldUsers}"
+                local lastInstallationConfig=true
+                readLastInstallationConfig() { currentPath='../unsafe'; }
+                for selection in '' ,21, ,22, ,23,; do
+                    selectCustomInstallType=${selection}
+                    events=
+                    exec {inputFd}< <(printf 'bad/path\nfixed-path\nnext-parent-action\n')
+                    runCoreInstall "${core}" true <&"${inputFd}"
+                    IFS= read -r nextInput <&"${inputFd}"
+                    exec {inputFd}<&-
+                    [[ "${currentPath}" == fixed-path && "${currentClients}" == "${oldUsers}" &&
+                        "${nextInput}" == next-parent-action && "${events}" == $'domain\nusers\nports\ntransaction\n' ]]
+                done
+                for input in '' 0; do
+                    events=
+                    regressionExpectStatus 1 runCoreInstall "${core}" true < <(printf '%s' "${input}")
+                    [[ "${currentPath}" == '../unsafe' && -z "${events}" && "${currentClients}" == "${oldUsers}" ]]
+                done
+                events=
+                runCoreInstall "${core}" true <<<""
+                padmIsSafeRoutePathSegment "${currentPath}"
+                [[ "${events}" == $'domain\nusers\nports\ntransaction\n' && "${currentClients}" == "${oldUsers}" ]]
+            )
         done
     )
 
@@ -818,6 +843,31 @@ runInstallWorkflowRegression() (
                 done
             done
         done
+        (
+            # 预检、显式匹配与模板采用同一目标核心字段，不能被另一套别名遮蔽。
+            local savedClients currentClients currentUUID= AUTO_UUID AUTO_USER lastInstallationConfig=true
+            local selectCustomInstallType=,1,
+            savedClients=$(jq -nc --arg id "${alice}" --arg uuid "${bob}" \
+                '[{id:$id,email:"xray-user",uuid:$uuid,name:"singbox-user"}]')
+            for core in xray sing-box; do
+                currentClients=${savedClients}
+                AUTO_UUID=${alice} AUTO_USER=xray-user
+                [[ "${core}" != sing-box ]] || { AUTO_UUID=${bob}; AUTO_USER=singbox-user; }
+                coreTemplateCollectInitialClients "${core}" false true </dev/null
+                [[ "${currentClients}" == "${savedClients}" ]]
+                AUTO_UUID=${bob} AUTO_USER=singbox-user
+                [[ "${core}" != sing-box ]] || { AUTO_UUID=${alice}; AUTO_USER=xray-user; }
+                regressionExpectStatus 1 coreTemplateCollectInitialClients "${core}" false true </dev/null
+                [[ "${currentClients}" == "${savedClients}" ]]
+            done
+            AUTO_UUID= AUTO_USER=
+            currentClients=$(jq -nc --arg uuid "${bob}" '[{id:"not-a-uuid",email:"xray-user",uuid:$uuid,name:"singbox-user"}]')
+            coreTemplateCollectInitialClients sing-box false true </dev/null
+            regressionExpectStatus 1 coreTemplateCollectInitialClients xray false true </dev/null
+            currentClients=$(jq -nc --arg id "${alice}" '[{id:$id,email:"xray-user",uuid:"not-a-uuid",name:"singbox-user"}]')
+            coreTemplateCollectInitialClients xray false true </dev/null
+            regressionExpectStatus 1 coreTemplateCollectInitialClients sing-box false true </dev/null
+        )
         # 密码型用户也按 password/username 核对，复用不生成新用户。
         currentClients='[{"password":"stored-secret","username":"alice-singbox_hysteria2"}]'
         AUTO_UUID=stored-secret AUTO_USER=alice lastInstallationConfig=true
@@ -2664,6 +2714,59 @@ runInstallWorkflowRegression() (
         regressionExpectStatus 1 installOptionalPackageTracked "fixture" existing partial missing
         [[ "${PADM_INSTALLED_PACKAGES}" == ' partial' ]]
         ! regressionFindHasMatches "${TMPDIR}" -mindepth 1 -maxdepth 1 -name 'padm-packages.*'
+    )
+
+    (
+        # 包回滚不得清理历史自动依赖；失败记录和非 apt 路径仍保留。
+        local packageManager removeType PADM_INSTALLED_PACKAGES PADM_PACKAGE_ROLLBACK_FAILURES
+        local calls= expected
+        runWithTimeout() { calls+="$2"$'\n'; [[ "$2" != *' failed-package' ]]; }
+        unset removeType
+        PADM_INSTALLED_PACKAGES=
+        rollbackPackageInstallTransaction
+        [[ -z "${calls}${PADM_PACKAGE_ROLLBACK_FAILURES}" ]]
+        for packageManager in apt yum apk; do
+            removeType="${packageManager} -y remove"
+            [[ "${packageManager}" != apt ]] || removeType='DEBIAN_FRONTEND=noninteractive apt-get -y autoremove'
+            [[ "${packageManager}" != apk ]] || removeType='apk del'
+            calls= PADM_INSTALLED_PACKAGES=' new-tool failed-package'
+            regressionExpectStatus 1 rollbackPackageInstallTransaction
+            [[ -z "${PADM_INSTALLED_PACKAGES}" && "${PADM_PACKAGE_ROLLBACK_FAILURES}" == failed-package ]]
+            case "${packageManager}" in
+            apt) expected='DEBIAN_FRONTEND=noninteractive apt-get -y -o APT::Get::AutomaticRemove=false remove' ;;
+            yum) expected='yum -y remove --setopt=clean_requirements_on_remove=False' ;;
+            apk) expected='apk del' ;;
+            esac
+            [[ "${calls}" == "${expected} new-tool"$'\n'"${expected} failed-package"$'\n' ]]
+        done
+    )
+
+    (
+        # ACME 安全检查先于任何安装副作用；准备失败仍通过包事务回滚退出。
+        local events= selectCustomInstallType=,21, acmeSafe=false
+        local release=alpine packageManager=apk upgrade=update rhelLike=false
+        local PADM_PACKAGE_TRANSACTION_ACTIVE= PADM_INSTALLED_PACKAGES= PADM_PACKAGE_TRANSACTION_STARTED=
+        padmAssertNativeInstallAllowed() { :; }
+        acmeInstallTargetIsSafe() { [[ "${acmeSafe}" == true ]]; }
+        beginPackageInstallTransaction() { events+=$'begin\n'; PADM_PACKAGE_TRANSACTION_ACTIVE=true; PADM_PACKAGE_TRANSACTION_STARTED=true; }
+        command() { [[ "$*" != '-v nginx' ]] && builtin command "$@"; }
+        waitAptProcess() { :; }
+        runWithTimeout() { :; }
+        initInstallProgress() { :; }
+        adapterInstallLogPath() { printf '%s' "${TMP_DIR}/acme-preflight-install.log"; }
+        runPackageCommandWithProgress() { events+=$'update\n'; }
+        installBasePackages() { events+=$'base\n'; }
+        installOptionalPackageTracked() { :; }
+        installNginxTools() { :; }
+        installAcmeTool() { return 1; }
+        failPackageInstallTransaction() { printf 'failed:%s\n%s' "$1" "${events}"; exit 1; }
+        regressionExpectStatus 1 installTools 1 </dev/null
+        [[ -z "${events}${PADM_PACKAGE_TRANSACTION_ACTIVE}${PADM_INSTALLED_PACKAGES}" ]]
+        acmeSafe=true
+        output=$(
+            (installTools 1 </dev/null; printf 'unexpected-continue\n') || printf 'result:1\n'
+        )
+        [[ "${output}" == $'failed:acme.sh 工具准备失败\nbegin\nupdate\nbase\nresult:1' ]]
     )
 
     (
