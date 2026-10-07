@@ -2338,10 +2338,70 @@ SH
     ! compgen -G "${confDir}/.config.json.merge.*" >/dev/null
     export PADM_FAKE_SINGBOX_CHECK_MODE=success
     singBoxV2rayApiSupported() { return 1; }
-    printf '{"experimental":{"v2ray_api":{}}}\n' >"${shardDir}/14_stats_api.json"
+    local statsConfig="${shardDir}/14_stats_api.json"
+    local statsBefore='{"experimental":{"v2ray_api":{}}}'
+    printf '%s\n' "${statsBefore}" >"${statsConfig}"
+    (
+        # 直接服务预检失败时，统计分片和旧合并配置必须一起保持。
+        local failure commitReached=false
+        eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/realCommitGeneratedFile/')"
+        commitGeneratedFile() {
+            if [[ "${failure}" == commit && "$2" == "${outputFile}" ]]; then
+                commitReached=true
+                return 1
+            fi
+            realCommitGeneratedFile "$@"
+        }
+        for failure in merge check commit; do
+            export PADM_FAKE_SINGBOX_MERGE_MODE=success PADM_FAKE_SINGBOX_CHECK_MODE=success
+            case "${failure}" in
+            merge) export PADM_FAKE_SINGBOX_MERGE_MODE=fail ;;
+            check) export PADM_FAKE_SINGBOX_CHECK_MODE=fail ;;
+            esac
+            regressionExpectStatus 1 singBoxMergeConfig check >/dev/null 2>&1
+            [[ -f "${statsConfig}" && "$(<"${statsConfig}")" == "${statsBefore}" &&
+                "$(<"${outputFile}")" == '{"runtime":true}' ]]
+        done
+        [[ "${commitReached}" == true ]]
+    )
+    (
+        # 恢复失败时保留独立备份，不让退出清理丢失最后的原分片。
+        local keptBackup= cleanupPath
+        export PADM_FAKE_SINGBOX_CHECK_MODE=fail
+        checkLogBackupRestore() { keptBackup=$1; return 1; }
+        errorCard() { return 0; }
+        regressionExpectStatus 1 singBoxMergeConfig check
+        [[ -d "${keptBackup}" && "$(<"${keptBackup}/000000.json")" == "${statsBefore}" ]]
+        for cleanupPath in "${PADM_CLEANUP_PATHS[@]}"; do
+            [[ "${cleanupPath}" != "${keptBackup}" ]]
+        done
+        cp "${keptBackup}/000000.json" "${statsConfig}"
+        padmRemoveCleanupPath "${keptBackup}"
+    )
     singBoxMergeConfig check
-    [[ ! -e "${shardDir}/14_stats_api.json" ]]
+    [[ ! -e "${statsConfig}" ]]
     [[ "$(<"${outputFile}")" == '{"merged":true}' ]]
+    (
+        # 非普通分片必须在备份与删除前拒绝，不能把链接记作缺失后丢失它。
+        local kind
+        : >"${mergeCalls}"
+        for kind in directory fifo link dangling; do
+            case "${kind}" in
+            directory) mkdir "${statsConfig}" ;;
+            fifo) mkfifo "${statsConfig}" ;;
+            link) ln -s "${confDir}" "${statsConfig}" ;;
+            dangling) ln -s "${root}/missing-stats" "${statsConfig}" ;;
+            esac
+            regressionExpectStatus 1 singBoxMergeConfig check
+            [[ ! -s "${mergeCalls}" && "$(<"${outputFile}")" == '{"merged":true}' ]]
+            if [[ "${kind}" == directory ]]; then
+                rmdir "${statsConfig}"
+            else
+                [[ -e "${statsConfig}" || -L "${statsConfig}" ]]
+                rm "${statsConfig}"
+            fi
+        done
+    )
 )
 
 runSingBoxUninstallFailurePropagationRegression() (
@@ -2577,7 +2637,6 @@ runSingBoxLogTransactionRegression() (
         }
         regressionExpectStatus 1 singBoxLog false >/dev/null 2>&1 || return 1
         [[ "$(<"${targetPath}")" == "${original}" && ! -s "${serviceLog}" ]] || return 1
-        ! compgen -G "${targetPath}.bak.*" >/dev/null || return 1
         ! compgen -G "$(dirname "${targetPath}")/.log.json.*" >/dev/null || return 1
     ) || return 1
 
@@ -2591,7 +2650,6 @@ runSingBoxLogTransactionRegression() (
     grep -qx 'apply:fail' "${serviceLog}" || return 1
     grep -q 'sing-box 日志配置重载失败' "${errorLog}" || return 1
     ! compgen -G "$(dirname "${targetPath}")/.log.json.*" >/dev/null || return 1
-    ! compgen -G "${targetPath}.bak.*" >/dev/null || return 1
 
     rm -f "${targetPath}" || return 1
     : >"${serviceLog}" || return 1
@@ -2603,7 +2661,6 @@ runSingBoxLogTransactionRegression() (
     grep -qx 'apply:fail' "${serviceLog}" || return 1
     grep -q 'sing-box 日志配置重载失败' "${errorLog}" || return 1
     ! compgen -G "$(dirname "${targetPath}")/.log.json.*" >/dev/null || return 1
-    ! compgen -G "${targetPath}.bak.*" >/dev/null || return 1
 
     printf '{"log":{"disabled":true,"level":"warning"}}\n' >"${targetPath}" || return 1
     : >"${serviceLog}" || return 1
@@ -2631,8 +2688,19 @@ runSingBoxLogTransactionRegression() (
             }
             errorCard() { printf "%s\n" "$*" >>"${errorLog}"; }
             restoreManagedFileFromBackup() { return 1; }
+            date() { printf "1700000000\n"; }
             singBoxLog false >/dev/null 2>&1
             printf "%s\n" "$?" >"${rcFile}"
+            # 同秒重试成功也不能覆盖或清除上一次恢复失败后保留的备份。
+            shopt -s nullglob
+            backups=("${PADM_SINGBOX_LOG_CONFIG_FILE%/*}/.log.json.bak."*)
+            [[ "${#backups[@]}" == 1 ]] || exit 1
+            keptBackup=${backups[0]}
+            printf "%s\n" "${keptBackup}" >"${rcFile}.backup"
+            serviceQueueApply() { return 0; }
+            singBoxLog false >/dev/null 2>&1 || exit 1
+            [[ -f "${keptBackup}" ]] || exit 1
+            jq -e ".log.disabled == true and .log.level == \"warning\"" "${keptBackup}" >/dev/null || exit 1
         ' _ "${PROJECT_ROOT}" "${serviceLog}" "${errorLog}" "${root}/sing-box-log-restore-fail.rc" || return 1
     rc=$(<"${root}/sing-box-log-restore-fail.rc") || return 1
     [[ "${rc}" == "1" ]] || return 1
@@ -2640,7 +2708,7 @@ runSingBoxLogTransactionRegression() (
     grep -qx 'restart:sing-box' "${serviceLog}" || return 1
     grep -qx 'apply:fail' "${serviceLog}" || return 1
     grep -q '旧配置恢复失败' "${errorLog}" || return 1
-    keptBackup=$(compgen -G "${targetPath}.bak.*" | head -n 1) || true
+    keptBackup=$(<"${root}/sing-box-log-restore-fail.rc.backup") || return 1
     [[ -n "${keptBackup}" && -f "${keptBackup}" ]] || return 1
     jq -e '.log.disabled == true and .log.level == "warning"' "${keptBackup}" >/dev/null || return 1
     rm -f "${keptBackup}" || return 1
@@ -2655,7 +2723,6 @@ runSingBoxLogTransactionRegression() (
     grep -qx 'apply:success' "${serviceLog}" || return 1
     [[ ! -s "${errorLog}" ]] || return 1
     ! compgen -G "$(dirname "${targetPath}")/.log.json.*" >/dev/null || return 1
-    ! compgen -G "${targetPath}.bak.*" >/dev/null || return 1
     (
         # 使用真实分派器验证运行态恢复，不以队列成功代替服务成功。
         local running=true starts=0

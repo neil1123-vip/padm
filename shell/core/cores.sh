@@ -3022,13 +3022,17 @@ singBoxLog() {
         '{log:{disabled:$disabled,level:"debug",output:$output,timestamp:true}}' >"${tmpPath}" ||
         { padmRemoveCleanupPath "${tmpPath}"; return 1; }
     if [[ -f "${targetPath}" ]]; then
-        backupPath="${targetPath}.bak.$(date +%s)"
-        backupManagedFileToPath "${targetPath}" "${backupPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
+        padmCreateTempFileForTarget backupPath "${targetPath}" bak || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
+        backupManagedFileToPath "${targetPath}" "${backupPath}" 644 || {
+            padmRemoveCleanupPath "${backupPath}" || true
+            padmRemoveCleanupPath "${tmpPath}"
+            return 1
+        }
         hadBackup=true
     fi
     if ! commitGeneratedJsonFile "${tmpPath}" "${targetPath}"; then
         if [[ -n "${backupPath}" ]]; then
-            removeManagedFilesIfPresentIgnoreFailure "${backupPath}"
+            padmRemoveCleanupPath "${backupPath}" || true
         fi
         padmRemoveCleanupPath "${tmpPath}"
         errorCard "sing-box 日志配置写入失败"
@@ -3040,17 +3044,18 @@ singBoxLog() {
         serviceQueueApply
     }; then
         if [[ -n "${backupPath}" ]]; then
-            removeManagedFilesIfPresentIgnoreFailure "${backupPath}"
+            padmRemoveCleanupPath "${backupPath}" || true
         fi
         return 0
     fi
     if [[ "${hadBackup}" == "true" ]]; then
         if ! restoreManagedFileFromBackup "${backupPath}" "${targetPath}" 644; then
+            padmForgetCleanupPath "${backupPath}"
             coreSetSingleRestoreResultMessage restoreMessage "sing-box 日志配置重载失败" false "已恢复旧配置" "旧配置" " ${targetPath}，备份文件：${backupPath}" || true
             errorCard "${restoreMessage}"
             return 1
         fi
-        removeManagedFilesIfPresentIgnoreFailure "${backupPath}"
+        padmRemoveCleanupPath "${backupPath}" || true
     else
         if ! removeManagedPathIfPresent "${targetPath}"; then
             coreSetNewConfigCleanupFailureMessage restoreMessage "sing-box 日志配置重载失败" "${targetPath}"

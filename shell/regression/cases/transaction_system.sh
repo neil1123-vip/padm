@@ -113,10 +113,34 @@ SH
         [[ "$1" == "/proc/12345/exe" && "$(cat "${PADM_FAKE_NGINX_STATE_FILE}" 2>/dev/null)" == "true" ]] || return 1
         printf '/usr/sbin/nginx\n'
     }
-    padmReadProcCmdline() {
-        [[ "$1" == "/proc/12345/cmdline" && "$(cat "${PADM_FAKE_NGINX_STATE_FILE}" 2>/dev/null)" == "true" ]] || return 1
-        printf 'nginx: master process nginx\n'
+    padmReadProcArgs() {
+        local -n argsRef=$1
+        [[ "$2" == "/proc/12345/cmdline" && "$(cat "${PADM_FAKE_NGINX_STATE_FILE}" 2>/dev/null)" == "true" ]] || return 1
+        argsRef=('nginx: master process nginx')
     }
+    (
+        # 配置检查和信号命令不是运行态，选项参数中的字母不能当成开关。
+        local -a nginxArgs=()
+        local mode
+        pgrep() { printf '12345\n'; }
+        padmReadProcExe() { printf '/usr/sbin/nginx\n'; }
+        padmReadProcArgs() {
+            local -n argsRef=$1
+            argsRef=("${nginxArgs[@]}")
+        }
+        for mode in -h -v -V -t -T -qt -Tq -s; do
+            nginxArgs=(/usr/sbin/nginx "${mode}" reload -c /tmp/nginx.conf)
+            regressionExpectStatus 1 nginxRunning
+            handleNginx() { printf 'start\n'; }
+            [[ "$(runServiceAction nginx start)" == start ]]
+        done
+        nginxArgs=(/usr/sbin/nginx -qc/tmp/test.conf -g 'daemon off; master_process off;')
+        nginxRunning
+        nginxArgs=('nginx: master process nginx -t -s reload')
+        nginxRunning
+        nginxArgs=('nginx: worker process')
+        nginxRunning
+    )
     release=centos
     selectCustomInstallType=",21,"
     btDomain=

@@ -692,22 +692,34 @@ singBoxMergeConfigForValidation() {
 # 合并 sing-box 配置
 singBoxMergeConfig() {
     local binary="${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}"
-    local outputFile tmpFile statsConfig
+    local outputFile tmpFile= statsConfig statsBackupDir=
 
     outputFile=$(singBoxMergedConfigFile)
     if declare -F singBoxV2rayApiSupported >/dev/null 2>&1 &&
         ! singBoxV2rayApiSupported "${binary}"; then
         statsConfig="$(singBoxConfigShardDir)14_stats_api.json"
-        if [[ -e "${statsConfig}" ]]; then
-            removeManagedFileIfPresent "${statsConfig}" || return 1
+        if [[ -e "${statsConfig}" || -L "${statsConfig}" ]]; then
+            [[ -f "${statsConfig}" && ! -L "${statsConfig}" ]] || return 1
+            checkLogBackupCreate statsBackupDir "${statsConfig}" || return 1
         fi
     fi
-    singBoxMergeConfigToTemp tmpFile "${binary}" /dev/null || return 1
-    if [[ "${1:-}" == check ]] && ! "${binary}" check -c "${tmpFile}" >"$(padmTmpFilePath padm-sing-box-start-test.log)" 2>&1; then
-        padmRemoveCleanupPath "${tmpFile}"
-        return 1
+    if { [[ -z "${statsBackupDir}" ]] || removeManagedFileIfPresent "${statsConfig}"; } &&
+        singBoxMergeConfigToTemp tmpFile "${binary}" /dev/null &&
+        { [[ "${1:-}" != check ]] || "${binary}" check -c "${tmpFile}" >"$(padmTmpFilePath padm-sing-box-start-test.log)" 2>&1; } &&
+        commitGeneratedFile "${tmpFile}" "${outputFile}" 644; then
+        [[ -z "${statsBackupDir}" ]] || padmRemoveCleanupPath "${statsBackupDir}" || true
+        return 0
     fi
-    commitGeneratedFile "${tmpFile}" "${outputFile}" 644 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+    [[ -z "${tmpFile}" ]] || padmRemoveCleanupPath "${tmpFile}"
+    if [[ -n "${statsBackupDir}" ]]; then
+        if checkLogBackupRestore "${statsBackupDir}"; then
+            padmRemoveCleanupPath "${statsBackupDir}"
+        else
+            padmForgetCleanupPath "${statsBackupDir}"
+            errorCard "sing-box 统计配置恢复失败" "请手动检查备份目录: ${statsBackupDir}"
+        fi
+    fi
+    return 1
 }
 
 

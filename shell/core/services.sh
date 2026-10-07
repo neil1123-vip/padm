@@ -62,12 +62,6 @@ padmReadProcExe() {
     readlink -f "${path}" 2>/dev/null || true
 }
 
-padmReadProcCmdline() {
-    local path=$1
-    [[ -r "${path}" ]] || return 0
-    tr '\0' ' ' <"${path}" 2>/dev/null || true
-}
-
 padmReadProcArgs() {
     local -n resultRef=$1
     local path=$2
@@ -208,14 +202,22 @@ serviceQueueApply() {
 }
 
 nginxRunning() {
-    local pid
-    local exe
-    local cmdline
+    local pid exe option auxiliary OPTIND OPTARG
+    local -a procArgs=()
     while IFS= read -r pid; do
         [[ -n "${pid}" ]] || continue
         exe=$(padmReadProcExe "/proc/${pid}/exe")
-        cmdline=$(padmReadProcCmdline "/proc/${pid}/cmdline")
-        [[ "${exe}" == *"/nginx" || "${cmdline}" == *"nginx: master process"* ]] || continue
+        padmReadProcArgs procArgs "/proc/${pid}/cmdline" || continue
+        [[ "${exe}" == *"/nginx" || "${procArgs[0]:-}" == "nginx: master process"* ]] || continue
+        # getopts 保留参数边界，避免把 -c/-g 等参数中的字符当成辅助命令。
+        auxiliary=false
+        OPTIND=1
+        while getopts ':hvVtTqs:p:c:e:g:' option "${procArgs[@]:1}"; do
+            case "${option}" in
+            h | v | V | t | T | s) auxiliary=true; break ;;
+            esac
+        done
+        [[ "${auxiliary}" == false ]] || continue
         return 0
     done < <(pgrep -x nginx 2>/dev/null)
     return 1
