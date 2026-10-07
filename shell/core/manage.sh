@@ -1969,16 +1969,17 @@ clearCDNEntryAddress() {
 }
 
 manageCDN() {
-    local selectCDNType=
+    local selectCDNType= currentAddress
     progressCard "$1" "CDN 入口管理" "1"
     while true; do
         readInstallType
         readInstallProtocolType
+        currentAddress=$(cdnCurrentAddress) || { errorCard "读取 CDN 入口地址失败"; return 1; }
 
         echoContent title "\n┌─ CDN 入口管理 ─────────────────────────────────────"
         menuLine "这里只覆盖订阅里的客户端连接地址，不修改 Reality target/SNI 或 XHTTP 参数"
         menuLine "多个 CDN CNAME、优选 IP 或入口域名可用英文逗号分隔，订阅会生成多条节点"
-        menuLine "当前入口地址：$(cdnCurrentAddress)"
+        menuLine "当前入口地址：${currentAddress}"
         if currentProtocolHas 2; then
             menuLine "当前已安装 Reality XHTTP，可直接调整入口地址"
         elif currentProtocolHasAny 21 22 23 24 25; then
@@ -3171,7 +3172,6 @@ configTransactionCommit() {
         if restoreManagedFileFromBackup "${backupFile}" "${configFile}" 644; then
             removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
             padmRemoveCleanupPath "${stagedFile}"
-            "${validateFn}" >/dev/null 2>&1 || true
             echoContent title "\n┌─ ${failureTitle} ────────────────────────────────"
             menuLine "${rollbackMessage}"
             menuClose

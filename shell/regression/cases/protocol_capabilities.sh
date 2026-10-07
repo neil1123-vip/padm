@@ -841,7 +841,7 @@ runProtocolEntryConfigUpdateRegression() (
         regressionExpectStatus 1 clearCDNEntryAddress
         [[ "$(<"${root}/cdn")" == old.example.com && ! -e "${statusLog}" ]]
         (
-            local coreInstallType= configPath= singBoxConfigPath= frontingType=
+            local coreInstallType= configPath= singBoxConfigPath= frontingType= currentInstallProtocolType=
             readConfigHostPathUUID
             [[ "${currentCDNAddress}" == old.example.com ]]
             head() { return 1; }
@@ -849,6 +849,15 @@ runProtocolEntryConfigUpdateRegression() (
             regressionExpectStatus 1 setCDNEntryAddress <<<new.example.com
             regressionExpectStatus 1 clearCDNEntryAddress
             regressionExpectStatus 1 readConfigHostPathUUID
+            local inputFd unread errorLog="${root}/cdn-read-error.log"
+            readInstallProtocolType() { :; }
+            errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+            exec {inputFd}<<<sentinel
+            regressionExpectStatus 1 manageCDN 1 <&"${inputFd}"
+            read -r unread <&"${inputFd}"
+            exec {inputFd}<&-
+            [[ "${unread}" == sentinel ]]
+            grep -qx '读取 CDN 入口地址失败' "${errorLog}"
             [[ "$(<"${root}/cdn")" == old.example.com && ! -e "${statusLog}" ]]
         )
         subscribe() { return 0; }

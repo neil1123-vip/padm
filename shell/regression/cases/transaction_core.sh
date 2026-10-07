@@ -3526,6 +3526,7 @@ runConfigTransactionRegression() (
     local originalContent updatedContent
     local reloadCountFile="${tmpRoot}/transaction-reload-count"
     local refreshCountFile="${tmpRoot}/transaction-refresh-count"
+    local validationLog="${tmpRoot}/transaction-validation.json" validateCount=0
     local validateMode=success
     local reloadMode=success
     local refreshMode=success
@@ -3554,6 +3555,8 @@ runConfigTransactionRegression() (
     }
 
     transactionValidateMock() {
+        validateCount=$((validateCount + 1))
+        printf '%s\n' "$(<"${targetFile}")" >"${validationLog}"
         [[ "${validateMode}" == "success" ]]
     }
 
@@ -3585,6 +3588,9 @@ JSON
     [[ ! -e "${backupFile}" ]]
     [[ ! -e "${reloadCountFile}" ]]
     [[ ! -e "${refreshCountFile}" ]]
+    # 回滚后不能再次校验旧文件，避免覆盖首次失败配置的诊断证据。
+    [[ "${validateCount}" == 1 ]]
+    jq -e '.mode == "new"' "${validationLog}" >/dev/null
 
     printf '{"mode":"old","port":443}\n' >"${targetFile}"
     originalContent=$(<"${targetFile}")
