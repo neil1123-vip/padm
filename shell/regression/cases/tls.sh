@@ -739,6 +739,60 @@ runTlsFailureReturnRegression() (
             tlsCertificatePairUsable "${PADM_TLS_DIR}" "${certDomain}"
         )
 
+        (
+            # 订阅丢失本机文件时直接同步有效 ACME 源，不询问签发、不检查 DNS/80。
+            # shellcheck source=/dev/null
+            source "${PROJECT_ROOT}/shell/core/state.sh"
+            local sourceDir acmeDomain mode nextInput inputFd
+            local callsFile="${certificateRoot}/subscribe-source.calls"
+            local AUTO_TLS_CA= AUTO_DNS_API= AUTO_DNS_API_TYPE= AUTO_DNS_API_WILDCARD= AUTO_DOMAIN=
+            local AUTO_INSTALL= cronName= syncFails=false
+            autoRead() { printf 'prompt\n' >>"${callsFile}"; return 1; }
+            switchDNSAPI() { printf 'dns\n' >>"${callsFile}"; return 1; }
+            subscriptionInstallTLSHttp01() { printf 'http01\n' >>"${callsFile}"; return 1; }
+            installAcmeTool() { printf 'acme\n' >>"${callsFile}"; }
+            installCronTLS() { printf 'cron\n' >>"${callsFile}"; }
+            installTLSFromAcme() {
+                printf 'sync\n' >>"${callsFile}"
+                [[ "${syncFails}" != true ]] || return 1
+                cp "${sourceDir}/${acmeDomain}.cer" "${PADM_TLS_DIR}/${tlsDomain}.crt"
+                cp "${sourceDir}/${acmeDomain}.key" "${PADM_TLS_DIR}/${tlsDomain}.key"
+                printf "Le_RealFullChainPath='%s'\nLe_RealKeyPath='%s'\n" \
+                    "${PADM_TLS_DIR}/${tlsDomain}.crt" "${PADM_TLS_DIR}/${tlsDomain}.key" >"${sourceDir}/${acmeDomain}.conf"
+            }
+            for acmeDomain in custom.example.com '*.custom.example.com'; do
+                certDomain=custom.example.com
+                [[ "${acmeDomain}" != '*.custom.example.com' ]] || certDomain=api.custom.example.com
+                sourceDir="${HOME}/.acme.sh/${acmeDomain}_ecc"
+                mkdir -p "${sourceDir}"
+                cp "${certificateRoot}/valid.crt" "${sourceDir}/${acmeDomain}.cer"
+                cp "${certificateRoot}/valid.key" "${sourceDir}/${acmeDomain}.key"
+                for mode in interactive automatic cron; do
+                    AUTO_INSTALL= cronName=
+                    [[ "${mode}" != automatic ]] || AUTO_INSTALL=true
+                    [[ "${mode}" != cron ]] || cronName=InstallSubscription
+                    rm -f "${PADM_TLS_DIR}/${certDomain}.crt" "${PADM_TLS_DIR}/${certDomain}.key"
+                    : >"${callsFile}"
+                    exec {inputFd}< <(printf 'next-parent-action\n')
+                    prepareSubscribeTLSCertificate "${certDomain}" <&"${inputFd}"
+                    read -r -u "${inputFd}" nextInput
+                    exec {inputFd}<&-
+                    [[ "${nextInput}" == next-parent-action && "$(<"${callsFile}")" == $'acme\nsync\ncron' ]]
+                    tlsCertificatePairUsable "${PADM_TLS_DIR}" "${certDomain}"
+                    tlsCertificateManagedByAcme "${certDomain}"
+                done
+            done
+            rm -f "${PADM_TLS_DIR}/${certDomain}.crt" "${PADM_TLS_DIR}/${certDomain}.key"
+            syncFails=true
+            : >"${callsFile}"
+            regressionExpectStatus 1 prepareSubscribeTLSCertificate "${certDomain}"
+            [[ "$(<"${callsFile}")" == $'acme\nsync' ]]
+            syncFails=false AUTO_TLS_CA=letsencrypt
+            : >"${callsFile}"
+            regressionExpectStatus 1 prepareSubscribeTLSCertificate "${certDomain}"
+            [[ ! -s "${callsFile}" ]]
+        )
+
         # 自签证书可正常复用；错域名、错私钥和损坏 PEM 均不能冒充安装成功。
         cp "${certificateRoot}/valid.crt" "${PADM_TLS_DIR}/${certDomain}.crt"
         cp "${certificateRoot}/valid.key" "${PADM_TLS_DIR}/${certDomain}.key"

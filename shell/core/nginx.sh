@@ -1008,6 +1008,14 @@ removeNginx302FromFile() {
     commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; aloneNginxConfigWriteManualCheckError "Nginx 302 配置提交失败" " ${targetPath}"; return 1; }
 }
 
+# 按完整版本比较，避免新主版本被误判为旧版本。
+nginxVersionAtLeast() {
+    local output
+    output=$(nginx -v 2>&1) || return 1
+    [[ "${output}" =~ nginx/([0-9]+\.[0-9]+\.[0-9]+) ]] || return 1
+    [[ "$(printf '%s\n%s\n' "$1" "${BASH_REMATCH[1]}" | sort -V | head -n 1)" == "$1" ]]
+}
+
 # 修改 Nginx 重定向配置
 updateRedirectNginxConf() {
     local redirectDomain=
@@ -1023,9 +1031,7 @@ updateRedirectNginxConf() {
 
     local nginxH2Conf=
     nginxH2Conf="listen 127.0.0.1:31302 http2 so_keepalive=on proxy_protocol;"
-    nginxVersion=$(nginx -v 2>&1)
-
-    if echo "${nginxVersion}" | grep -q "1.25" && [[ $(echo "${nginxVersion}" | awk -F "[.]" '{print $3}') -gt 0 ]] || [[ $(echo "${nginxVersion}" | awk -F "[.]" '{print $2}') -gt 25 ]]; then
+    if nginxVersionAtLeast 1.25.1; then
         nginxH2Conf="listen 127.0.0.1:31302 so_keepalive=on proxy_protocol;http2 on;"
     fi
 

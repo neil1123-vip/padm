@@ -904,7 +904,9 @@ readLastInstallationConfig() {
     lastInstallationConfig=
     PADM_INSTALL_RESET_HISTORY=false
     [[ -n "${configPath:-}" ]] || return 0
-    showLastInstallationConfig || return 1
+    if [[ -z "${AUTO_INSTALL:-}" ]]; then
+        showLastInstallationConfig || return 1
+    fi
     while true; do
         if [[ -n "${AUTO_INSTALL:-}" ]]; then
             lastInstallationConfigStatus=${AUTO_REUSE_LAST:-}
@@ -913,6 +915,7 @@ readLastInstallationConfig() {
         fi
         case "${lastInstallationConfigStatus}" in
         "" | y | Y | yes | YES | Yes | true | TRUE | True | 1)
+            [[ -z "${AUTO_INSTALL:-}" ]] || showLastInstallationConfig || return 1
             lastInstallationConfig=true
             return 0
             ;;

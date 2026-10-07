@@ -390,6 +390,28 @@ runInstallWorkflowRegression() (
     unset AUTO_INSTALL AUTO_REUSE_LAST
 
     (
+        # 历史读取失败不阻断显式重填；复用和交互仍失败且不消费上级输入。
+        showLastInstallationConfig() { shown=$((shown + 1)); return 1; }
+        for AUTO_INSTALL in true 1 false; do
+            for AUTO_REUSE_LAST in n N no NO false False 0; do
+                shown=0 currentHost=old.example.com currentUUID=old-user customPort=8443
+                readLastInstallationConfig </dev/null
+                [[ "${shown}" == 0 && "${cleaned}" == 0 && "${PADM_INSTALL_RESET_HISTORY}" == true &&
+                    -z "${lastInstallationConfig}${currentHost}${currentUUID}${customPort}" ]]
+            done
+            AUTO_REUSE_LAST=yes
+            regressionExpectStatus 1 readLastInstallationConfig </dev/null
+            [[ -z "${lastInstallationConfig}" && "${PADM_INSTALL_RESET_HISTORY}" == false ]]
+        done
+        unset AUTO_INSTALL AUTO_REUSE_LAST
+        exec {inputFd}< <(printf 'n\nnext-parent-action\n')
+        regressionExpectStatus 1 readLastInstallationConfig <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        [[ "${nextInput}" == n ]]
+        exec {inputFd}<&-
+    )
+
+    (
         # 重新填写后取消两核安装，证书、订阅、服务和 ACME 文件必须原样保留。
         local root="${TMP_DIR}/install-reset-inputs" file before core protocols events=
         local PADM_INSTALL_RESET_HISTORY=false
@@ -677,7 +699,7 @@ runInstallWorkflowRegression() (
             exec {inputFd}< <(printf 'next-parent-action\n')
             regressionExpectStatus 17 "${install}" 1 domain <&"${inputFd}"
             read -r -u "${inputFd}" nextInput
-            [[ "${events}" == $'transaction:true\n' && "${historyReads}" == 1 ]]
+            [[ "${events}" == $'transaction:true\n' && "${historyReads}" == 0 ]]
             [[ "${nextInput}" == next-parent-action && "${PADM_INSTALL_RESET_HISTORY}" == parent-value ]]
             if [[ "${selectCustomInstallType}" == ,1, ]]; then
                 [[ "${realityEntryHost}" == new.example.com ]]
@@ -2475,8 +2497,9 @@ runInstallWorkflowRegression() (
     (
         local events= answer output inputFd nextInput
         local nginxTestVersion=1.13.12 nginxAvailable=true
-        local release=debian packageManager=apt upgrade=update removeType=remove rhelLike=false
-        local selectCustomInstallType=",24,"
+        local release=debian packageManager=apt upgrade=update rhelLike=false
+        local removeType='DEBIAN_FRONTEND=noninteractive apt-get -y autoremove'
+        local selectCustomInstallType=",24," selectCoreType=1
         padmAssertNativeInstallAllowed() { :; }
         progressCard() { :; }
         nginx() { printf 'nginx version: nginx/%s\n' "${nginxTestVersion}" >&2; }
@@ -2524,7 +2547,7 @@ runInstallWorkflowRegression() (
         for answer in y Y yes YES true 1; do
             events=
             installTools 1 <<<"${answer}"
-            [[ "${events}" == $'begin\ntimeout:120 dpkg --configure -a\nupdate\nbase\ntimeout:300 remove nginx\nnginx-install\nacme\nend\n' ]]
+            [[ "${events}" == $'begin\ntimeout:120 dpkg --configure -a\nupdate\nbase\ntimeout:300 DEBIAN_FRONTEND=noninteractive apt-get -y -o APT::Get::AutomaticRemove=false remove nginx\nnginx-install\nacme\nend\n' ]]
         done
         events=
         selectCustomInstallType=",1,"
@@ -2539,6 +2562,44 @@ runInstallWorkflowRegression() (
         nginxAvailable=false
         installTools 1 </dev/null
         [[ "${events}" == $'begin\ntimeout:120 dpkg --configure -a\nupdate\nbase\nnginx-install\nacme\nend\n' ]]
+
+        (
+            # 非 gRPC 安装复用旧 Nginx，不消费上级输入；跨主版本不会误判为过旧。
+            local selection nextInput
+            nginxAvailable=true
+            nginxTestVersion=1.13.12
+            for selection in ,21, ,23, ,27, ,29,; do
+                events= selectCustomInstallType=${selection}
+                exec {inputFd}< <(printf 'next-parent-action\n')
+                installTools 1 <&"${inputFd}"
+                IFS= read -r nextInput <&"${inputFd}"
+                exec {inputFd}<&-
+                [[ "${nextInput}" == next-parent-action &&
+                    "${events}" == $'begin\ntimeout:120 dpkg --configure -a\nupdate\nbase\nacme\nend\n' ]]
+            done
+            events= selectCustomInstallType= selectCoreType=2
+            installTools 1 </dev/null
+            [[ "${events}" == $'begin\ntimeout:120 dpkg --configure -a\nupdate\nbase\nacme\nend\n' ]]
+            selectCoreType=1 selectCustomInstallType=,24,
+            for nginxTestVersion in 1.14.0 1.26.2 2.0.0 1.26.2-ubuntu; do
+                events=
+                installTools 1 </dev/null
+                [[ "${events}" == $'begin\ntimeout:120 dpkg --configure -a\nupdate\nbase\nacme\nend\n' ]]
+            done
+            for selection in '' ,24, ,25, ,21,24,; do
+                events= selectCustomInstallType=${selection} nginxTestVersion=1.13.12
+                regressionExpectStatus 1 installTools 1 <<<n
+                [[ -z "${events}" ]]
+            done
+        )
+
+        (
+            # yum 重装同样保留旧自动依赖，不借用包回滚状态卸载已有 Nginx。
+            local packageManager=yum release=centos removeType='yum -y remove'
+            events= selectCustomInstallType=,24, nginxTestVersion=1.13.12 nginxAvailable=true
+            installTools 1 <<<y
+            [[ "${events}" == $'begin\nupdate\nbase\ntimeout:300 yum -y remove --setopt=clean_requirements_on_remove=False nginx\nnginx-install\nacme\nend\n' ]]
+        )
 
         (
             # apt 的 release 信息变更只在刷新失败时重试，不能吞掉其它源错误。
@@ -2648,8 +2709,80 @@ runInstallWorkflowRegression() (
     )
 
     (
+        # 两核实际配置生成器共享 HTTP/2 版本边界，补丁后缀和新主版本均正确。
+        local nginxTestVersion outputFile="${TMP_DIR}/install-nginx-h2.conf" writer modern
+        local domain=example.com port=443 currentPath=padm nginxStaticPath=/tmp/static
+        local selectCustomInstallType=,24,
+        nginx() { printf 'nginx version: nginx/%s\n' "${nginxTestVersion}" >&2; }
+        writeAloneNginxConfig() { cat >"${outputFile}"; }
+        writeSingBoxVMessHTTPUpgradeNginxConfig() { cat >"${outputFile}"; }
+        for nginxTestVersion in 1.24.0 1.25.0 1.25.1 1.26.2 1.26.2-ubuntu 2.0.0 invalid; do
+            modern=false
+            case "${nginxTestVersion}" in 1.25.1 | 1.26.* | 2.0.0) modern=true ;; esac
+            for writer in xray sing-box; do
+                if [[ "${writer}" == xray ]]; then
+                    selectCustomInstallType=,24,
+                    updateRedirectNginxConf
+                else
+                    selectCustomInstallType=,23,
+                    singBoxNginxConfig 23 443
+                fi
+                if [[ "${modern}" == true ]]; then
+                    grep -q 'http2 on;' "${outputFile}"
+                    ! grep -q 'listen .* http2 ' "${outputFile}"
+                else
+                    grep -q 'listen .* http2 ' "${outputFile}"
+                    ! grep -q 'http2 on;' "${outputFile}"
+                fi
+            done
+        done
+    )
+
+    (
+        # 两个 apt 发行版共用源准备，探测失败回退系统源，提交失败不继续安装。
+        local release packageManager=apt repoAvailable=true commitFails=false calls= output
+        local repoRoot="${TMP_DIR}/install-nginx-apt" repoFile pinFile
+        mkdir -p "${repoRoot}"
+        beginPackageInstallTransaction() { calls+=$'begin\n'; PADM_PACKAGE_TRANSACTION_STARTED=true; }
+        endPackageInstallTransaction() { calls+="end:$1"$'\n'; }
+        installPackageTracked() { calls+="package:$*"$'\n'; }
+        lsb_release() { printf 'fixture-code\n'; }
+        curl() { calls+="probe:${*: -1}"$'\n'; [[ "${repoAvailable}" == true ]]; }
+        adapterNginxAptKeyringFile() { printf '%s/key' "${repoRoot}"; }
+        adapterNginxAptRepoFile() { printf '%s/repo' "${repoRoot}"; }
+        adapterNginxAptPinFile() { printf '%s/pin' "${repoRoot}"; }
+        adapterNginxRepoTemplate() { printf '%s/repo.XXXXXX' "${repoRoot}"; }
+        adapterNginxPinTemplate() { printf '%s/pin.XXXXXX' "${repoRoot}"; }
+        adapterCreateManagedRollbackBackup() { printf -v "$1" '%s' "${repoRoot}/backup"; calls+="backup:${*:2}"$'\n'; }
+        adapterRegisterPackageManagedRollback() { calls+="register:$1"$'\n'; }
+        installAptKeyringFromUrl() { calls+="key:$*"$'\n'; }
+        commitRepoFile() { [[ "${commitFails}" != true ]] || return 1; cp "$1" "$2"; padmRemoveCleanupPath "$1"; }
+        refreshAptAfterRepoChange() { calls+=$'refresh\n'; }
+        nginxServiceInstalled() { return 0; }
+        bootStartup() { calls+="boot:$1"$'\n'; }
+        failPackageInstallTransaction() { printf 'failed:%s\n%s' "$1" "${calls}"; exit 1; }
+        for release in debian ubuntu; do
+            calls=
+            installNginxTools
+            grep -qxF "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] https://nginx.org/packages/mainline/${release} fixture-code nginx" "${repoRoot}/repo"
+            grep -qxF 'Pin-Priority: 900' "${repoRoot}/pin"
+            [[ "${calls}" == $'begin\npackage:Nginx依赖 gnupg2 ca-certificates lsb-release\n'"probe:https://nginx.org/packages/mainline/${release}/dists/fixture-code/Release"$'\n'"backup:${repoRoot}/key ${repoRoot}/repo ${repoRoot}/pin"$'\n'"register:${repoRoot}/backup"$'\n'"key:${PADM_NGINX_SIGNING_KEY_URL} ${repoRoot}/key Nginx ${PADM_NGINX_SIGNING_KEY_SHA256}"$'\nrefresh\npackage:nginx nginx\nboot:nginx\nend:true\n' ]]
+            repoAvailable=false calls=
+            installNginxTools
+            [[ "${calls}" == $'begin\npackage:Nginx依赖 gnupg2 ca-certificates lsb-release\n'"probe:https://nginx.org/packages/mainline/${release}/dists/fixture-code/Release"$'\npackage:nginx nginx\nboot:nginx\nend:true\n' ]]
+            repoAvailable=true commitFails=true calls=
+            output=$(
+                (installNginxTools; printf 'unexpected-continue\n') || printf 'result:1\n'
+            )
+            [[ "${output}" == failed:Nginx\ apt\ 源提交失败* && "${output}" == *result:1 &&
+                "${output}" != *package:nginx* && "${output}" != *unexpected-continue* ]]
+            commitFails=false
+        done
+    )
+
+    (
         # 已齐全的依赖不调用包管理器，缺包时保留完整安装命令和新增包记录。
-        local packageManager missingPackage= packageCompleted=false
+        local packageManager missingPackage= packageCompleted=false install
         local installType=install-fixture installCalls=0 recordedTimeout= packageCommand=
         local PADM_INSTALLED_PACKAGES= PADM_PACKAGE_TRANSACTION_ACTIVE=true
         local TMPDIR="${TMP_DIR}/install-package-reuse"
@@ -2665,6 +2798,7 @@ runInstallWorkflowRegression() (
         }
 
         for packageManager in apt yum apk; do
+            installOptionalPackageTracked "fixture" existing missing
             installPackageTracked "fixture" existing missing
             [[ "${installCalls}" == 0 && -z "${PADM_INSTALLED_PACKAGES}" ]] || {
                 printf 'installed package reuse mismatch: %s calls=%s tracked=%s\n' \
@@ -2676,16 +2810,18 @@ runInstallWorkflowRegression() (
 
         missingPackage=missing
         for packageManager in apt yum apk; do
-            packageCompleted=false installCalls=0 PADM_INSTALLED_PACKAGES=
-            installPackageTracked "fixture" existing missing
-            [[ "${installCalls}" == 1 && "${packageCommand}" == "install-fixture existing missing" ]]
-            [[ "${PADM_INSTALLED_PACKAGES}" == " missing" ]]
-            if [[ "${packageManager}" == apt ]]; then
-                [[ "${recordedTimeout}" == 900 ]]
-            else
-                [[ "${recordedTimeout}" == 300 ]]
-            fi
-            ! regressionFindHasMatches "${TMPDIR}" -mindepth 1 -maxdepth 1 -name 'padm-packages.*'
+            for install in installPackageTracked installOptionalPackageTracked; do
+                packageCompleted=false installCalls=0 PADM_INSTALLED_PACKAGES=
+                "${install}" "fixture" existing missing
+                [[ "${installCalls}" == 1 && "${packageCommand}" == "install-fixture existing missing" ]]
+                [[ "${PADM_INSTALLED_PACKAGES}" == " missing" ]]
+                if [[ "${packageManager}" == apt ]]; then
+                    [[ "${recordedTimeout}" == 900 ]]
+                else
+                    [[ "${recordedTimeout}" == 300 ]]
+                fi
+                ! regressionFindHasMatches "${TMPDIR}" -mindepth 1 -maxdepth 1 -name 'padm-packages.*'
+            done
         done
 
         runPackageCommandWithProgress() { return 1; }
@@ -2823,7 +2959,7 @@ runInstallWorkflowRegression() (
         local packageManager=apt installType=install-fixture
         local dpkgRoot="${TMP_DIR}/install-package-status" originalStatus
         local TMPDIR="${dpkgRoot}/tmp" PADM_INSTALLED_PACKAGES=
-        local installCalls=0 configureCalls=0 configureCompletes=true
+        local installCalls=0 configureCalls=0 configureCompletes=true install
         mkdir -p "${dpkgRoot}/updates" "${TMPDIR}"
         dpkg() { command /usr/bin/dpkg --admindir="${dpkgRoot}" "$@"; }
         dpkg-query() { command /usr/bin/dpkg-query --admindir="${dpkgRoot}" "$@"; }
@@ -2845,19 +2981,21 @@ runInstallWorkflowRegression() (
 
         for originalStatus in 'install ok installed' 'hold ok installed' \
             'deinstall ok config-files' 'install ok half-configured' 'install reinstreq installed'; do
-            setFixturePackageStatus "${originalStatus}"
-            installCalls=0 PADM_INSTALLED_PACKAGES=
-            packageInstalled fixture
-            installPackageTracked "fixture" fixture
-            if [[ "${originalStatus}" == *' ok installed' ]]; then
-                [[ "${installCalls}" == 0 ]]
-            else
-                [[ "${installCalls}" == 1 ]] || {
-                    printf 'dpkg record readiness mismatch: %s calls=%s\n' "${originalStatus}" "${installCalls}" >&2
-                    return 1
-                }
-            fi
-            [[ -z "${PADM_INSTALLED_PACKAGES}" ]]
+            for install in installPackageTracked installOptionalPackageTracked; do
+                setFixturePackageStatus "${originalStatus}"
+                installCalls=0 PADM_INSTALLED_PACKAGES=
+                packageInstalled fixture
+                "${install}" "fixture" fixture
+                if [[ "${originalStatus}" == *' ok installed' ]]; then
+                    [[ "${installCalls}" == 0 ]]
+                else
+                    [[ "${installCalls}" == 1 ]] || {
+                        printf 'dpkg record readiness mismatch: %s calls=%s\n' "${originalStatus}" "${installCalls}" >&2
+                        return 1
+                    }
+                fi
+                [[ -z "${PADM_INSTALLED_PACKAGES}" ]]
+            done
         done
 
         : >"${dpkgRoot}/status"

@@ -396,6 +396,15 @@ endPackageInstallTransaction() {
     fi
 }
 
+# 定向卸载不能顺带清理原有自动依赖。
+packageRemoveCommand() {
+    case "${packageManager:-}" in
+    apt) printf '%s' 'DEBIAN_FRONTEND=noninteractive apt-get -y -o APT::Get::AutomaticRemove=false remove' ;;
+    yum) printf '%s' "${removeType} --setopt=clean_requirements_on_remove=False" ;;
+    *) printf '%s' "${removeType:-}" ;;
+    esac
+}
+
 rollbackPackageInstallTransaction() {
     local packageName
     local rollbackRemoveType="${removeType:-}"
@@ -407,11 +416,7 @@ rollbackPackageInstallTransaction() {
         return 0
     fi
 
-    # 回滚只卸载本次新增包，不顺带清理原有自动依赖。
-    case "${packageManager:-}" in
-    apt) rollbackRemoveType='DEBIAN_FRONTEND=noninteractive apt-get -y -o APT::Get::AutomaticRemove=false remove' ;;
-    yum) rollbackRemoveType="${removeType} --setopt=clean_requirements_on_remove=False" ;;
-    esac
+    rollbackRemoveType=$(packageRemoveCommand) || return 1
     for packageName in ${PADM_INSTALLED_PACKAGES}; do
         if ! runWithTimeout 300 "${rollbackRemoveType} ${packageName}" >/dev/null 2>&1; then
             failedPackages+=("${packageName}")
@@ -504,10 +509,8 @@ initInstallProgress() {
                 countInstallStep
             fi
             countInstallStep
-        else
-            local nginxMinorVersion
-            nginxMinorVersion=$(nginx -v 2>&1 | awk -F "[n][g][i][n][x][/]" '{print $2}' | awk -F "[.]" '{print $2}')
-            [[ ${nginxMinorVersion:-0} -lt 14 ]] && countInstallStep
+        elif [[ "${1:-false}" == true ]]; then
+            countInstallStep
         fi
     fi
     return 0
@@ -685,6 +688,10 @@ installOptionalPackageTracked() {
     padmEnsureSafeDirectory "$(dirname -- "${installLog}")" || return 1
     padmCreateTempPath missingPackagesFile "$(adapterTmpPath padm-packages.XXXXXX)" || return 1
     writeMissingPackages "${missingPackagesFile}" "${packages[@]}" || { padmRemoveCleanupPath "${missingPackagesFile}"; return 1; }
+    if [[ ! -s "${missingPackagesFile}" ]] && allPackagesConfigured "${packages[@]}"; then
+        padmRemoveCleanupPath "${missingPackagesFile}"
+        return 0
+    fi
     [[ "${packageManager}" == "apt" && -s "${missingPackagesFile}" ]] && packageTimeout=900
 
     if ! runPackageCommandWithProgress "安装${displayName}" "${packageTimeout}" "${installType} ${packages[*]}" "${installLog}"; then
@@ -828,17 +835,19 @@ installAcmeTool() {
 # 安装工具包
 installTools() {
     padmAssertNativeInstallAllowed || return 1
-    if protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}" && ! acmeInstallTargetIsSafe; then
+    local needsLocalCertificate=false
+    if [[ -z "${selectCustomInstallType}" ]] || protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
+        needsLocalCertificate=true
+    fi
+    if [[ "${needsLocalCertificate}" == true ]] && ! acmeInstallTargetIsSafe; then
         errorCard "acme.sh 安装目标路径、所有者或权限异常"
         return 1
     fi
     progressCard "$1" "安装工具"
     local reinstallNginx=false nginxReinstallChoice=
-    if ! protocolSelectionSkipsNginx "${selectCustomInstallType}" && command -v nginx >/dev/null 2>&1; then
-        local nginxVersion
-        nginxVersion=$(nginx -v 2>&1)
-        nginxVersion=$(echo "${nginxVersion}" | awk -F "[n][g][i][n][x][/]" '{print $2}' | awk -F "[.]" '{print $2}')
-        if [[ ${nginxVersion} -lt 14 ]]; then
+    if { [[ -z "${selectCustomInstallType}" && "${selectCoreType:-1}" == 1 ]] ||
+        protocolSelectionHasAny "${selectCustomInstallType}" 24 25; } && command -v nginx >/dev/null 2>&1; then
+        if ! nginxVersionAtLeast 1.14.0; then
             menuReadChoice nginx_grpc_reinstall "当前 Nginx 不支持 gRPC，是否重装？[y/N]:" nginxReinstallChoice true || return 1
             if [[ "$(normalizeYesNo "${nginxReinstallChoice}")" != "y" ]]; then
                 coreCancelledStatusCard "未重装 Nginx，本次安装未继续"
@@ -860,7 +869,7 @@ installTools() {
         }
     fi
 
-    initInstallProgress
+    initInstallProgress "${reinstallNginx}"
     successCard "检查、安装工具依赖【新机器会很慢，请根据工具依赖进度判断是否仍在执行】"
 
     local installLog
@@ -905,7 +914,7 @@ installTools() {
         successCard "检测到无需依赖Nginx的服务，跳过安装"
     else
         if [[ "${reinstallNginx}" == "true" ]]; then
-            runWithTimeout 300 "${removeType} nginx" >/dev/null 2>&1 || failPackageInstallTransaction "旧版Nginx卸载失败"
+            runWithTimeout 300 "$(packageRemoveCommand) nginx" >/dev/null 2>&1 || failPackageInstallTransaction "旧版Nginx卸载失败"
             statusCard "Nginx 状态" "nginx 卸载完成"
         fi
         if [[ "${reinstallNginx}" == "true" ]] || ! command -v nginx >/dev/null 2>&1; then
@@ -914,7 +923,7 @@ installTools() {
         fi
     fi
 
-    if ! protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
+    if [[ "${needsLocalCertificate}" != true ]]; then
         successCard "检测到无需依赖本机 TLS 证书的服务，跳过安装 acme.sh"
     else
         installAcmeTool || failPackageInstallTransaction "acme.sh 工具准备失败"
@@ -938,12 +947,12 @@ installNginxTools() {
     beginPackageInstallTransaction
     local packageTransactionOwner=${PADM_PACKAGE_TRANSACTION_STARTED}
 
-    if [[ "${release}" == "debian" ]]; then
+    if [[ "${release}" == "debian" || "${release}" == "ubuntu" ]]; then
         installPackageTracked "Nginx依赖" gnupg2 ca-certificates lsb-release
         local nginxRepoCodename
         local nginxKeyringFile nginxRepoTarget nginxPinTarget repoBackupDir
         nginxRepoCodename=$(lsb_release -cs)
-        if curl -fsSL --connect-timeout 10 --max-time 30 --max-filesize 1048576 "https://nginx.org/packages/mainline/debian/dists/${nginxRepoCodename}/Release" >/dev/null 2>&1; then
+        if curl -fsSL --connect-timeout 10 --max-time 30 --max-filesize 1048576 "https://nginx.org/packages/mainline/${release}/dists/${nginxRepoCodename}/Release" >/dev/null 2>&1; then
             nginxKeyringFile=$(adapterNginxAptKeyringFile)
             nginxRepoTarget=$(adapterNginxAptRepoFile)
             nginxPinTarget=$(adapterNginxAptPinFile)
@@ -952,30 +961,7 @@ installNginxTools() {
             installAptKeyringFromUrl "${PADM_NGINX_SIGNING_KEY_URL}" "${nginxKeyringFile}" Nginx "${PADM_NGINX_SIGNING_KEY_SHA256}"
             local repoFile
             padmCreateTempPath repoFile "$(adapterNginxRepoTemplate)" || failPackageInstallTransaction "Nginx apt 源临时文件创建失败"
-            printf 'deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] https://nginx.org/packages/mainline/debian %s nginx\n' "${nginxRepoCodename}" >"${repoFile}"
-            commitRepoFile "${repoFile}" "${nginxRepoTarget}" || failPackageInstallTransaction "Nginx apt 源提交失败"
-            local pinFile
-            padmCreateTempPath pinFile "$(adapterNginxPinTemplate)" || failPackageInstallTransaction "Nginx apt pin 临时文件创建失败"
-            printf 'Package: *\nPin: origin nginx.org\nPin: release o=nginx\nPin-Priority: 900\n\n' >"${pinFile}"
-            commitRepoFile "${pinFile}" "${nginxPinTarget}" || failPackageInstallTransaction "Nginx apt pin 配置提交失败"
-            refreshAptAfterRepoChange || failPackageInstallTransaction "Nginx apt 源刷新失败"
-        fi
-
-    elif [[ "${release}" == "ubuntu" ]]; then
-        installPackageTracked "Nginx依赖" gnupg2 ca-certificates lsb-release
-        local nginxRepoCodename
-        local nginxKeyringFile nginxRepoTarget nginxPinTarget repoBackupDir
-        nginxRepoCodename=$(lsb_release -cs)
-        if curl -fsSL --connect-timeout 10 --max-time 30 --max-filesize 1048576 "https://nginx.org/packages/mainline/ubuntu/dists/${nginxRepoCodename}/Release" >/dev/null 2>&1; then
-            nginxKeyringFile=$(adapterNginxAptKeyringFile)
-            nginxRepoTarget=$(adapterNginxAptRepoFile)
-            nginxPinTarget=$(adapterNginxAptPinFile)
-            adapterCreateManagedRollbackBackup repoBackupDir "${nginxKeyringFile}" "${nginxRepoTarget}" "${nginxPinTarget}" || failPackageInstallTransaction "Nginx apt 源备份失败"
-            adapterRegisterPackageManagedRollback "${repoBackupDir}"
-            installAptKeyringFromUrl "${PADM_NGINX_SIGNING_KEY_URL}" "${nginxKeyringFile}" Nginx "${PADM_NGINX_SIGNING_KEY_SHA256}"
-            local repoFile
-            padmCreateTempPath repoFile "$(adapterNginxRepoTemplate)" || failPackageInstallTransaction "Nginx apt 源临时文件创建失败"
-            printf 'deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] https://nginx.org/packages/mainline/ubuntu %s nginx\n' "${nginxRepoCodename}" >"${repoFile}"
+            printf 'deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] https://nginx.org/packages/mainline/%s %s nginx\n' "${release}" "${nginxRepoCodename}" >"${repoFile}"
             commitRepoFile "${repoFile}" "${nginxRepoTarget}" || failPackageInstallTransaction "Nginx apt 源提交失败"
             local pinFile
             padmCreateTempPath pinFile "$(adapterNginxPinTemplate)" || failPackageInstallTransaction "Nginx apt pin 临时文件创建失败"

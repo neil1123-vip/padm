@@ -330,7 +330,7 @@ subscriptionInstallTLSHttp01() {
 
 prepareSubscribeTLSCertificate() {
     local certDomain=$1
-    local tlsDir confirm=
+    local tlsDir confirm= reuseSource=false
     tlsDir=$(tlsManagedDir) || return 1
     if tlsCertificatePairUsable "${tlsDir}" "${certDomain}"; then
         if tlsCertificateManagedByAcme "${certDomain}"; then
@@ -341,7 +341,9 @@ prepareSubscribeTLSCertificate() {
         fi
         return 0
     fi
-    if [[ "${cronName:-}" == "InstallSubscription" || "${AUTO_INSTALL:-}" == "true" ]]; then
+    if (readAcmeTLS "${certDomain}" && tlsAcmeSourceCertificateReusable "${certDomain}"); then
+        reuseSource=true
+    elif [[ "${cronName:-}" == "InstallSubscription" || "${AUTO_INSTALL:-}" == "true" ]]; then
         if [[ -z "${AUTO_DOMAIN:-}" ]]; then
             errorCard "订阅证书缺失或不可用" "自动修复必须显式提供 --domain"
             return 1
@@ -354,7 +356,7 @@ prepareSubscribeTLSCertificate() {
             return 1
         fi
     fi
-    if [[ ( "${cronName:-}" == "InstallSubscription" || "${AUTO_INSTALL:-}" == "true" ) &&
+    if [[ "${reuseSource}" != true && ( "${cronName:-}" == "InstallSubscription" || "${AUTO_INSTALL:-}" == "true" ) &&
         "$(normalizeYesNo "${AUTO_DNS_API:-}")" == "y" ]]; then
         case "${AUTO_DNS_API_TYPE:-}" in
         aliyun | Aliyun | alibaba | 2)
@@ -379,12 +381,17 @@ prepareSubscribeTLSCertificate() {
         PADM_REQUIRE_USABLE_TLS_CERTIFICATE=true
         unset dnsAPIStatus dnsAPIType installedDNSAPIStatus sslType selectSSLType
         readAcmeTLS || exit 1
-        switchDNSAPI || exit 1
-        installAcmeTool || exit 1
-        if [[ -n "${dnsAPIType:-}" ]]; then
+        if [[ "${reuseSource}" == true ]]; then
+            installAcmeTool || exit 1
             installTLS 1 || exit 1
         else
-            subscriptionInstallTLSHttp01 "${certDomain}" || exit 1
+            switchDNSAPI || exit 1
+            installAcmeTool || exit 1
+            if [[ -n "${dnsAPIType:-}" ]]; then
+                installTLS 1 || exit 1
+            else
+                subscriptionInstallTLSHttp01 "${certDomain}" || exit 1
+            fi
         fi
     ) || return 1
     tlsCertificatePairUsable "${tlsDir}" "${certDomain}" || {

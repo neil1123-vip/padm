@@ -143,12 +143,11 @@ singBoxNginxConfig() {
 
     local nginxH2Conf=
     nginxH2Conf="listen ${port} http2 so_keepalive=on ssl;"
-    nginxVersion=$(nginx -v 2>&1)
 
     local singBoxNginxSSL=
     singBoxNginxSSL="ssl_certificate /etc/padm/tls/${domain}.crt;ssl_certificate_key /etc/padm/tls/${domain}.key;"
 
-    if echo "${nginxVersion}" | grep -q "1.25" && [[ $(echo "${nginxVersion}" | awk -F "[.]" '{print $3}') -gt 0 ]] || [[ $(echo "${nginxVersion}" | awk -F "[.]" '{print $2}') -gt 25 ]]; then
+    if nginxVersionAtLeast 1.25.1; then
         nginxH2Conf="listen ${port} so_keepalive=on ssl;http2 on;"
     fi
 

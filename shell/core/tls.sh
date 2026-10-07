@@ -100,6 +100,16 @@ tlsCertificateFilesUsable() {
     [[ -n "${certDigest}" && "${certDigest}" == "${keyDigest}" ]]
 }
 
+# 源证书可直接同步时不重走签发；显式签发参数仍按用户选择处理。
+tlsAcmeSourceCertificateReusable() {
+    local certDomain=$1 acmeDomain=$1 sourceDir
+    [[ -z "${AUTO_TLS_CA:-}${AUTO_DNS_API:-}${AUTO_DNS_API_TYPE:-}${AUTO_DNS_API_WILDCARD:-}" ]] || return 1
+    [[ "${installedDNSAPIStatus:-}" != true ]] || acmeDomain="*.${dnsTLSDomain}"
+    sourceDir="$(acmeHomeDir)/${acmeDomain}_ecc"
+    tlsCertificateFilesUsable "${sourceDir}/${acmeDomain}.cer" "${sourceDir}/${acmeDomain}.key" "${certDomain}" || return 1
+    openssl x509 -in "${sourceDir}/${acmeDomain}.cer" -checkend 86400 -noout >/dev/null 2>&1
+}
+
 tlsAcmeConfigValue() {
     local configFile=$1
     local key=$2
@@ -444,7 +454,7 @@ installTLS() {
     progressCard "$1" "申请 TLS 证书"
     readAcmeTLS || return 1
     local tlsDomain=${domain}
-    local tlsDir sourceAcmeDomain sourceCertificateDir
+    local tlsDir
     local reInstallStatus=n
     tlsDomainNameIsSafe "${tlsDomain}" || { errorCard "TLS 域名不合法"; return 1; }
     tlsDir=$(tlsManagedDir) || return 1
@@ -469,13 +479,7 @@ installTLS() {
         -s "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
         successCard "检测到证书"
         if [[ "${PADM_REQUIRE_USABLE_TLS_CERTIFICATE:-}" == "true" ]]; then
-            sourceAcmeDomain=${tlsDomain}
-            [[ "${installedDNSAPIStatus:-}" != true ]] || sourceAcmeDomain="*.${dnsTLSDomain}"
-            sourceCertificateDir="$HOME/.acme.sh/${sourceAcmeDomain}_ecc"
-            # 源证书足够有效且未显式改签发参数时，只同步，不重复请求 CA。
-            if [[ -n "${AUTO_TLS_CA:-}${AUTO_DNS_API:-}${AUTO_DNS_API_TYPE:-}${AUTO_DNS_API_WILDCARD:-}" ]] ||
-                ! tlsCertificateFilesUsable "${sourceCertificateDir}/${sourceAcmeDomain}.cer" "${sourceCertificateDir}/${sourceAcmeDomain}.key" "${tlsDomain}" ||
-                ! openssl x509 -in "${sourceCertificateDir}/${sourceAcmeDomain}.cer" -checkend 86400 -noout >/dev/null 2>&1; then
+            if ! tlsAcmeSourceCertificateReusable "${tlsDomain}"; then
                 switchSSLType || return 1
                 customSSLEmail || return 1
                 selectAcmeInstallSSL || return 1
