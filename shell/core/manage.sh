@@ -3119,7 +3119,7 @@ xhttpSettingsSummary() {
         return 0
     fi
     local mode maxConcurrency hMaxRequestTimes hMaxReusableSecs host path port sni xPaddingBytes noGRPCHeader noSSEHeader downloadAddress
-    values=$(jq -r '
+    values=$(jq -er '
         def rangeValue: . // 0 | if type == "object" then "\(.from)-\(.to)" else tostring end;
         .inbounds[0] as $in | $in.streamSettings.xhttpSettings as $settings |
         [($settings.mode // "auto"), ($settings.host // ""), ($settings.path // ""), ($in.port // ""),
@@ -3251,7 +3251,7 @@ applyManagedJsonConfigUpdate() {
     local stagedFile
     shift 6
     padmCreateTempFileForTarget stagedFile "${configFile}" "${stageTag}" || { errorCard "${errorMessage}"; return 1; }
-    if ! jq "$@" "${jqFilter}" "${configFile}" >"${stagedFile}"; then
+    if ! jq -e "$@" "${jqFilter}" "${configFile}" >"${stagedFile}"; then
         errorCard "${errorMessage}"
         padmRemoveCleanupPath "${stagedFile}"
         return 1
@@ -3343,7 +3343,7 @@ setXHTTPCustomXmux() {
 setXHTTPPathHost() {
     local configFile currentPath currentHost newPath newHost values
     configFile=$(manageXHTTPConfigFile) || return 1
-    values=$(jq -r '.inbounds[0].streamSettings.xhttpSettings |
+    values=$(jq -er '.inbounds[0].streamSettings.xhttpSettings |
         [(.path // ""), (.host // "")] | join("\u001f")
     ' "${configFile}" 2>/dev/null) || { errorCard "读取 XHTTP 配置失败"; return 1; }
     IFS=$'\037' read -r currentPath currentHost <<<"${values}"
@@ -3390,7 +3390,7 @@ setXHTTPAdvancedParams() {
 setXHTTPDownloadSettings() {
     local configFile address port security serverName host path alpn mode publicKey shortId currentServerName currentPath values
     configFile=$(manageXHTTPConfigFile) || return 1
-    values=$(jq -r '.inbounds[0].streamSettings |
+    values=$(jq -er '.inbounds[0].streamSettings |
         [(.realitySettings.serverNames[0] // ""), (.xhttpSettings.path // ""),
          (.realitySettings.publicKey // ""), (.realitySettings.shortIds[1] // .realitySettings.shortIds[0] // "")] | join("\u001f")
     ' "${configFile}" 2>/dev/null) || { errorCard "读取 XHTTP 配置失败"; return 1; }
@@ -3590,7 +3590,7 @@ manageXHTTP() {
         echoContent title "\n┌─ XHTTP 管理 ───────────────────────────────────────"
         menuLine "这里只调整 XHTTP 协议参数；CDN 连接地址在 协议与入口 -> CDN 入口管理"
         menuLine "普通设置优先；高级和实验功能适合明确知道客户端与线路能力时使用"
-        xhttpSettingsSummary
+        xhttpSettingsSummary || return 1
         menuItem 1 "普通设置" "状态、场景预设、mode 与使用说明"
         menuItem 2 "高级设置" "XMUX、path/host、header/packet/stream 参数"
         menuDangerItem 3 "实验功能" "上下行分离等高风险能力"
@@ -3615,7 +3615,7 @@ manageXHTTP() {
 hysteria2SettingsSummary() {
     local configFile=$1 port bandwidth obfs userCount values
     [[ -f "${configFile}" ]] || return 0
-    values=$(jq -r '.inbounds[0] |
+    values=$(jq -er '.inbounds[0] |
         [(.listen_port // ""),
          (if .ignore_client_bandwidth == true then "BBR（自适应）"
           else "Brutal（下行 \(.up_mbps // "") Mbps，上行 \(.down_mbps // "") Mbps）" end),
@@ -3700,7 +3700,7 @@ setHysteria2BandwidthMode() {
         applyHysteria2ConfigUpdate 'del(.inbounds[0].up_mbps, .inbounds[0].down_mbps) | .inbounds[0].ignore_client_bandwidth = true' "Hysteria2 已切换为 BBR 自适应"
         ;;
     brutal)
-        values=$(jq -r '.inbounds[0] | [.up_mbps // 100, .down_mbps // 50] | @tsv' "$(hysteria2ConfigFile)") || return 1
+        values=$(jq -er '.inbounds[0] | [.up_mbps // 100, .down_mbps // 50] | @tsv' "$(hysteria2ConfigFile)") || return 1
         IFS=$'\t' read -r download upload <<<"${values}"
         readHysteria2Bandwidth "客户端下行带宽（服务端→客户端）" "${download}" download || return 1
         readHysteria2Bandwidth "客户端上行带宽（客户端→服务端）" "${upload}" upload || return 1
@@ -3745,7 +3745,7 @@ manageHysteria() {
         menuLine "依赖 sing-box；已有 Xray 时可作为辅助核心增量安装，适合 UDP、移动网络场景"
         configFile=$(hysteria2ConfigFile 2>/dev/null || true)
         if [[ -n "${singBoxConfigPath}" && -f "${configFile}" ]]; then
-            hysteria2SettingsSummary "${configFile}"
+            hysteria2SettingsSummary "${configFile}" || return 1
             menuItem 1 "重新安装" "重建 Hysteria2 入站配置"
             menuItem 2 "卸载" "移除 Hysteria2 入站配置"
             menuItem 3 "端口跳跃管理" "配置 UDP 端口跳跃转发"
@@ -3789,7 +3789,7 @@ tuicSettingsSummary() {
         menuLine "当前状态：未检测到 Tuic 配置"
         return 0
     fi
-    values=$(jq -r '.inbounds[0] |
+    values=$(jq -er '.inbounds[0] |
         [(.listen_port // ""), (.congestion_control // "cubic"), (.auth_timeout // "3s"),
          (.heartbeat // "10s"), (.zero_rtt_handshake // false), (.users | length)] |
         map(tostring) | join("\u001f")
@@ -3935,7 +3935,7 @@ manageTuic() {
         menuLine "不作为新人默认推荐"
         configFile=$(tuicConfigFile 2>/dev/null || true)
         if [[ -n "${singBoxConfigPath}" && -f "${configFile}" ]]; then
-            tuicSettingsSummary
+            tuicSettingsSummary || return 1
             menuItem 1 "重新安装" "重建 Tuic 入站配置"
             menuItem 2 "卸载" "移除 Tuic 入站配置"
             menuItem 3 "端口跳跃管理" "配置 UDP 端口跳跃转发"

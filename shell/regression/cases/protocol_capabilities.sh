@@ -678,17 +678,34 @@ runProtocolEntryConfigUpdateRegression() (
     regressionExpectStatus 1 applyXHTTPConfigUpdate '.enabled = $enabled' fixture --argjson enabled invalid 2>/dev/null
     [[ "${commits}" == 6 && "$(<"${fixtureConfig}")" == "${before}" ]]
     [[ -z "$(find "${root}" -name '.config.json.xhttp.*' -print -quit)" ]]
+    (
+        # 无 JSON 输出不能进入协议提交，也不能留下空暂存文件。
+        commitHysteria2ConfigUpdate() { commitXHTTPConfigUpdate "$@"; }
+        for value in '' '   ' '{'; do
+            printf '%s' "${value}" >"${fixtureConfig}"
+            for command in applyXHTTPConfigUpdate applyHysteria2ConfigUpdate applyTuicConfigUpdate; do
+                regressionExpectStatus 1 "${command}" '.enabled = false' fixture 2>/dev/null
+                [[ "${commits}" == 6 && "$(<"${fixtureConfig}")" == "${value}" ]]
+                [[ -z "$(find "${root}" -name '.config.json.*' -print -quit)" ]]
+            done
+        done
+        printf '%s\n' "${before}" >"${fixtureConfig}"
+        regressionExpectStatus 1 applyXHTTPConfigUpdate empty fixture
+        [[ "${commits}" == 6 && "$(<"${fixtureConfig}")" == "${before}" ]]
+        [[ -z "$(find "${root}" -name '.config.json.*' -print -quit)" ]]
+    )
+    printf '%s\n' "${before}" >"${fixtureConfig}"
 
     (
         # 默认字段只读一次并保留空值；坏配置或缺文件不能消费下一条菜单输入。
         local reads="${root}/xhttp-reads.log" inputFd unread
         jq() { printf '%s\n' "$*" >>"${reads}"; command jq "$@"; }
         setXHTTPPathHost <<< $'\n\n'
-        [[ "$(grep -c '^-r ' "${reads}")" == 1 ]]
+        [[ "$(grep -c '^-er ' "${reads}")" == 1 ]]
         jq -e '.inbounds[0].streamSettings.xhttpSettings | .path == "/new/path" and .host == "front.example.com"' "${fixtureConfig}" >/dev/null
         : >"${reads}"
         setXHTTPDownloadSettings <<< $'down.example.com\n\nreality\n\n\n\n\n\n'
-        [[ "$(grep -c '^-r ' "${reads}")" == 1 ]]
+        [[ "$(grep -c '^-er ' "${reads}")" == 1 ]]
         jq -e '.inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings |
             .port == 443 and .realitySettings.serverName == "reality.example.com" and
             .realitySettings.publicKey == "fixture-key" and .realitySettings.shortId == "fixture-id" and
@@ -700,12 +717,18 @@ runProtocolEntryConfigUpdateRegression() (
         jq -e '.inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings |
             .realitySettings.publicKey == "fixture-key" and .realitySettings.shortId == "fallback-id" and
             .xhttpSettings.path == "/explicit"' "${fixtureConfig}" >/dev/null
-        for value in malformed missing; do
+        for value in malformed empty whitespace missing; do
             printf '{' >"${fixtureConfig}"
+            [[ "${value}" != empty ]] || : >"${fixtureConfig}"
+            [[ "${value}" != whitespace ]] || printf '   \n' >"${fixtureConfig}"
             [[ "${value}" != missing ]] || rm "${fixtureConfig}"
-            for command in setXHTTPPathHost setXHTTPDownloadSettings; do
+            for command in setXHTTPPathHost setXHTTPDownloadSettings setHysteria2BandwidthMode; do
                 exec {inputFd}<<<sentinel
-                regressionExpectStatus 1 "${command}" <&"${inputFd}"
+                if [[ "${command}" == setHysteria2BandwidthMode ]]; then
+                    regressionExpectStatus 1 "${command}" brutal <&"${inputFd}"
+                else
+                    regressionExpectStatus 1 "${command}" <&"${inputFd}"
+                fi
                 read -r unread <&"${inputFd}"
                 exec {inputFd}<&-
                 [[ "${unread}" == sentinel && "${commits}" == 9 ]]
@@ -884,11 +907,29 @@ runProtocolEntryConfigUpdateRegression() (
         grep -qx '拥塞控制：Brutal（下行  Mbps，上行  Mbps）' "${summaryLog}"
         grep -qx '连接参数：auth_timeout=3s；heartbeat=10s' "${summaryLog}"
         before=$(<"${summaryLog}")
-        printf '{' >"${fixtureConfig}"
-        regressionExpectStatus 1 xhttpSettingsSummary
-        regressionExpectStatus 1 hysteria2SettingsSummary "${fixtureConfig}"
-        regressionExpectStatus 1 tuicSettingsSummary
-        [[ "$(<"${summaryLog}")" == "${before}" ]]
+        for value in '' '   ' '{'; do
+            printf '%s' "${value}" >"${fixtureConfig}"
+            regressionExpectStatus 1 xhttpSettingsSummary
+            regressionExpectStatus 1 hysteria2SettingsSummary "${fixtureConfig}"
+            regressionExpectStatus 1 tuicSettingsSummary
+            [[ "$(<"${summaryLog}")" == "${before}" ]]
+        done
+        (
+            # 摘要失败必须在菜单读取前返回，不消费上级菜单后续输入。
+            local inputFd unread coreInstallType=1 currentInstallProtocolType=,2, singBoxConfigPath="${root}/"
+            readInstallType() { :; }
+            readInstallProtocolType() { :; }
+            for value in '' '   ' '{'; do
+                printf '%s' "${value}" >"${fixtureConfig}"
+                for command in manageXHTTP manageHysteria manageTuic; do
+                    exec {inputFd}<<<sentinel
+                    regressionExpectStatus 1 "${command}" <&"${inputFd}"
+                    read -r unread <&"${inputFd}"
+                    exec {inputFd}<&-
+                    [[ "${unread}" == sentinel ]]
+                done
+            done
+        )
     )
 )
 

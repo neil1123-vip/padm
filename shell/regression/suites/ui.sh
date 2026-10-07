@@ -280,6 +280,8 @@ runRegressionUiSmokeSuiteRoot() {
     installTools() { recordMenuAction installTools; }
     readLastInstallationConfig() { recordMenuAction readLastInstallationConfig; }
     collectEntryProfile() { realityEntryHost=smoke.example.com; recordMenuAction collectEntryProfile; }
+    # 安装输入由专门回归覆盖，菜单 smoke 不读取真实凭据和端口。
+    prepareCoreInstallInputs() { recordMenuAction "prepareCoreInstallInputs:$*"; collectEntryProfile; }
     persistRealityEntryProfile() { recordMenuAction persistRealityEntryProfile; }
     unInstallSubscribe() { recordMenuAction unInstallSubscribe; }
     handleNginx() { recordMenuAction "handleNginx:$*"; }
@@ -290,6 +292,7 @@ runRegressionUiSmokeSuiteRoot() {
     installXrayReality
     ! grep -q '^handleNginx:' <<<"${actions}"
     ! assertMenuAction refreshSubscriptionWireGuardNginxControl
+    assertMenuAction prepareCoreInstallInputs:xray
     assertMenuAction serviceQueueApply
     assertMenuAction persistRealityEntryProfile
     [[ "${actions}" == *$'serviceQueueApply\npersistRealityEntryProfile\ncheckGFWStatue\ncleanUp\nshowAccounts\n'* ]]
