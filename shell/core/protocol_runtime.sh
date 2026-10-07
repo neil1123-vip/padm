@@ -505,14 +505,23 @@ readPortHopping() {
         portHoppingEnd=${stateEnd}
     elif [[ "${rhelLike:-}" == "true" ]] && systemctl is-active --quiet firewalld; then
         local forwardPorts
-        forwardPorts=$(sudo firewall-cmd --zone=public --list-forward-ports | awk -F: -v targetPort="${targetPort}" '
-            $3 == "toport=" targetPort {
-                split($1, port, "=")
-                print port[2]
-            }
-        ')
-        portHoppingStart=$(head -1 <<<"${forwardPorts}")
-        portHoppingEnd=$(tail -n 1 <<<"${forwardPorts}")
+        if forwardPorts=$(sudo firewall-cmd --zone=public --list-forward-ports); then
+            portHopping=$(awk -v targetPort="${targetPort}" '
+                {
+                    for (i = 1; i <= NF; i++) {
+                        split($i, rule, ":")
+                        if (rule[1] !~ /^port=[0-9]+$/ || rule[2] != "proto=udp" || rule[3] != "toport=" targetPort) continue
+                        port = substr(rule[1], 6) + 0
+                        if (port < 1 || port > 65535) continue
+                        if (!start || port < start) start = port
+                        if (!end || port > end) end = port
+                    }
+                }
+                END { if (start) print start ":" end }
+            ' <<<"${forwardPorts}")
+            portHoppingStart=${portHopping%%:*}
+            portHoppingEnd=${portHopping#*:}
+        fi
     else
         local iptablesRules
         if iptablesRules=$(iptables-save); then

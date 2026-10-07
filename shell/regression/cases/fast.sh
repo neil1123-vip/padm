@@ -1681,6 +1681,45 @@ EOF
     )
 
     (
+        # 未记录的旧规则可按空格或换行输出；只取目标 UDP 规则的数值边界。
+        local rhelLike=true forwardFixture separator queryStatus=0
+        local readLog="${TMP_DIR}/port-hopping-read-firewalld.log"
+        local -a rules=(
+            port=33002:proto=udp:toport=16295
+            port=33000:proto=udp:toport=16295
+            port=33001:proto=udp:toport=16295
+            port=32000:proto=tcp:toport=16295
+            port=31000:proto=udp:toport=26451
+            port=99999:proto=udp:toport=16295
+        )
+        padmFirewalldForwardStateKeyForTarget() { return 1; }
+        padmIptablesForwardStateKeyForTarget() { return 1; }
+        systemctl() { return 0; }
+        sudo() {
+            [[ "$*" == 'firewall-cmd --zone=public --list-forward-ports' ]]
+            printf 'query\n' >>"${readLog}"
+            [[ "${queryStatus}" == 0 ]] || return 1
+            printf '%s\n' "${forwardFixture}"
+        }
+        for separator in ' ' $'\n'; do
+            forwardFixture=$(IFS="${separator}"; printf '%s' "${rules[*]}")
+            : >"${readLog}"
+            readPortHopping hysteria2 16295
+            [[ "${hysteria2PortHopping}" == 33000-33002 && "$(wc -l <"${readLog}")" == 1 ]]
+        done
+        forwardFixture=port=34001:proto=udp:toport=26451
+        readPortHopping tuic 26451
+        [[ "${tuicPortHopping}" == 34001-34001 ]]
+        for forwardFixture in '' port=32000:proto=tcp:toport=16295; do
+            readPortHopping hysteria2 16295
+            [[ -z "${hysteria2PortHopping}" ]]
+        done
+        queryStatus=1
+        readPortHopping tuic 26451
+        [[ -z "${tuicPortHopping}" ]]
+    )
+
+    (
         local firewalldLog="${TMP_DIR}/port-hopping-firewalld.log"
         local masquerade=false
         local firewalldActive=true

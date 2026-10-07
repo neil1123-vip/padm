@@ -921,6 +921,31 @@ runProtocolEntryPortRegression() (
     jq -e '.inbounds[0].port == 2053 and .inbounds[0].settings.port == 8443' "${defaultFile}" >/dev/null
     before=$(<"${defaultFile}")
     (
+        # 默认入口不存在是空结果；枚举失败不能输出部分列表、回退端口或修改配置。
+        local partial command output="${root}/lookup-result" status=1 fixtureDefault=${defaultFile}
+        local -a args
+        corePortManagedFilesByPattern() {
+            [[ -z "${partial}" ]] || printf '%s\n' "${fixtureDefault}"
+            return "${status}"
+        }
+        for partial in '' true; do
+            for command in corePortListExtra corePortResolveByIndex corePortDefaultFile corePortForwardTarget corePortSubscriptionPort corePortWriteAddFiles; do
+                args=()
+                case "${command}" in
+                corePortResolveByIndex) args=(1) ;;
+                corePortSubscriptionPort) args=(8443) ;;
+                corePortWriteAddFiles) args=(2443 2443 8443) ;;
+                esac
+                regressionExpectStatus 1 "${command}" "${args[@]}" >"${output}"
+                [[ ! -s "${output}" && "$(<"${defaultFile}")" == "${before}" && ! -e "${configPath}02_dokodemodoor_inbounds_2443_default.json" ]]
+            done
+        done
+        partial=
+        status=0
+        corePortDefaultFile >"${output}"
+        [[ ! -s "${output}" && "$(corePortForwardTarget)" == 8443 && "$(corePortSubscriptionPort 8443)" == 8443 ]]
+    )
+    (
         # 枚举失败不能先处理部分输出，也不能在无备份时删除入口或重载核心。
         local partial= calls="${root}/enumeration-actions.log" backupDir="${root}/enumeration-backup"
         mkdir -p "${backupDir}"
@@ -986,7 +1011,8 @@ runProtocolEntryPortRegression() (
     corePortApplyReloadTransaction corePortWriteAddFiles 2443 '' 8443
     [[ "$(corePortSubscriptionPort 8443)" == 2443 ]]
     corePortApplyReloadTransaction corePortWriteAddFiles 2777 8443 8443
-    [[ -z "$(corePortDefaultFile || true)" && -f "${configPath}02_dokodemodoor_inbounds_2443.json" ]]
+    defaultFile=$(corePortDefaultFile)
+    [[ -z "${defaultFile}" && -f "${configPath}02_dokodemodoor_inbounds_2443.json" ]]
     [[ "$(corePortSubscriptionPort 8443)" == 8443 ]]
     printf '%s\n' '{"inbounds":[{"port":9443,"settings":{"clients":[{"id":"test-id","email":"main-XHTTP"}]}}]}' >"${configPath}12_VLESS_XHTTP_inbounds.json"
     regressionExpectStatus 1 corePortForwardTarget
@@ -1073,9 +1099,18 @@ runProtocolEntryMenuSyncRegression() (
     PADM_CONTROL_SERVER=1 addCorePort <<< $'3\n1\n4'
     [[ "$(<"${log}")" == $'apply:corePortRemove\ndeny:2053:tcp\ndeny:2053:udp\nrefresh' ]]
     : >"${log}"
-    corePortResolveByIndex() { return 1; }
+    corePortResolveByIndex() { :; }
     addCorePort <<< $'3\nbad\n4'
     [[ ! -s "${log}" ]]
+    corePortResolveByIndex() { return 1; }
+    regressionExpectStatus 1 addCorePort <<< $'3\n1'
+    [[ "$(<"${log}")" == 'error:入口端口列表读取失败' ]]
+    corePortListExtra() { return 1; }
+    for choice in 1 3; do
+        : >"${log}"
+        regressionExpectStatus 1 addCorePort <<<"${choice}"
+        [[ "$(<"${log}")" == 'error:入口端口列表读取失败' ]]
+    done
 )
 
 runProtocolCapabilitiesRegression() {

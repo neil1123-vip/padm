@@ -1115,7 +1115,8 @@ corePortManagedFilePath() {
 }
 
 corePortListExtra() {
-    local file base port defaultMark count=0
+    local file base port defaultMark files count=0
+    files=$(corePortManagedFilesByPattern '02_dokodemodoor_inbounds_*.json') || return 1
     while IFS= read -r file; do
         base=${file##*/}
         if [[ "${base}" =~ ^02_dokodemodoor_inbounds_([0-9]+)(_default)?\.json$ ]]; then
@@ -1125,26 +1126,24 @@ corePortListExtra() {
             count=$((count + 1))
             printf '%s:%s%s\n' "${count}" "${port}" "${defaultMark}"
         fi
-    done < <(corePortManagedFilesByPattern '02_dokodemodoor_inbounds_*.json')
+    done <<<"${files}"
 }
 
 corePortResolveByIndex() {
-    local index=$1
-    corePortListExtra | while IFS=: read -r currentIndex value; do
+    local index=$1 entries currentIndex value
+    entries=$(corePortListExtra) || return 1
+    while IFS=: read -r currentIndex value; do
         if [[ "${currentIndex}" == "${index}" ]]; then
             printf '%s\n' "${value%% *}"
             return 0
         fi
-    done
+    done <<<"${entries}"
 }
 
 corePortDefaultFile() {
-    local file
-    while IFS= read -r file; do
-        printf '%s\n' "${file}"
-        return 0
-    done < <(corePortManagedFilesByPattern '02_dokodemodoor_inbounds_*_default.json')
-    return 1
+    local files
+    files=$(corePortManagedFilesByPattern '02_dokodemodoor_inbounds_*_default.json') || return 1
+    [[ -z "${files}" ]] || printf '%s\n' "${files%%$'\n'*}"
 }
 
 corePortForwardTarget() {
@@ -1158,7 +1157,7 @@ corePortForwardTarget() {
         port=$((10#${port}))
         [[ "${ports}" == *",${port},"* ]] || ports+="${port},"
     done
-    defaultFile=$(corePortDefaultFile || true)
+    defaultFile=$(corePortDefaultFile) || return 1
     if [[ -n "${defaultFile}" ]]; then
         defaultTarget=$(jq -r '.inbounds[0].settings.port // empty' "${defaultFile}") || return 1
         validPortNumber "${defaultTarget}" || return 1
@@ -1189,7 +1188,7 @@ corePortValidateAddition() {
 
 corePortSubscriptionPort() {
     local targetPort=$1 fallbackPort=${2:-$1} defaultFile forwardedPort entryPort values
-    defaultFile=$(corePortDefaultFile || true)
+    defaultFile=$(corePortDefaultFile) || return 1
     if [[ -n "${defaultFile}" ]]; then
         values=$(jq -r '.inbounds[0] | [(.settings.port // ""), (.port // "")] | map(tostring) | @tsv' "${defaultFile}" 2>/dev/null) || return 1
         IFS=$'\t' read -r forwardedPort entryPort <<<"${values}"
@@ -1278,7 +1277,7 @@ corePortWriteAddFiles() {
     local port fileName hysteriaFileName defaultFile previousEntryFile
     corePortValidateAddition "${ports}" "${defaultPort}" "${settingsPort}" || return 1
     configDir=$(corePortSafeConfigDir) || return 1
-    defaultFile=$(corePortDefaultFile || true)
+    defaultFile=$(corePortDefaultFile) || return 1
     if [[ -n "${defaultPort}" ]]; then
         defaultPort=$((10#${defaultPort}))
         if [[ -n "${defaultFile}" ]]; then
@@ -1411,7 +1410,7 @@ addCorePort() {
         menuReadChoice core_port_menu "请选择:" selectNewPortType || return 0
         case "${selectNewPortType}" in
         1)
-            corePortListExtra || true
+            corePortListExtra || { errorCard "入口端口列表读取失败"; return 1; }
             ;;
         2)
             newPort=
@@ -1449,10 +1448,10 @@ addCorePort() {
             portChanged=true
             ;;
         3)
-            corePortListExtra || true
+            corePortListExtra || { errorCard "入口端口列表读取失败"; return 1; }
             portIndex=
             autoRead extra_core_delete_port "请输入要删除的端口编号:" portIndex || return 0
-            port=$(corePortResolveByIndex "${portIndex}") || true
+            port=$(corePortResolveByIndex "${portIndex}") || { errorCard "入口端口列表读取失败"; return 1; }
             if [[ -n "${port}" ]]; then
                 if ! corePortApplyReloadTransaction corePortRemove "${port}"; then
                     errorCard "入口端口删除或重载失败，已尝试恢复旧配置；如上方提示回滚失败，请检查备份目录"
