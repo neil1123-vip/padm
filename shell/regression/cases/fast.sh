@@ -6057,7 +6057,7 @@ JSON
 
         (
             local preflightRoot="${root}/prerelease-migration"
-            local preflightConfigDir="${preflightRoot}/conf/shards/"
+            local preflightConfigDir="${preflightRoot}/conf/shards[1]*/"
             local preflightFile="${preflightConfigDir}01_rules.json"
             local preflightLog="${preflightRoot}/prerelease.log"
             local preflightMerged="${preflightRoot}/conf/config.json" preflightMergedBefore
@@ -6098,7 +6098,7 @@ JSON
 
             checkSingBoxPrereleaseCompatibility v1.16.0 "${preflightLog}"
             [[ "$(<"${validationCallsFile}")" == "1" ]]
-            [[ "$(<"${validationConfigDirFile}")" != "${preflightConfigDir}" && "$(<"${validationConfigDirFile}")" == */conf/shards/ ]]
+            [[ "$(<"${validationConfigDirFile}")" != "${preflightConfigDir}" && "$(<"${validationConfigDirFile}")" == *"/conf/shards[1]*/" ]]
             [[ "$(<"${preflightFile}")" == "${preflightBefore}" && "$(<"${preflightMerged}")" == "${preflightMergedBefore}" ]]
             grep -q '已迁移' "${preflightLog}"
 

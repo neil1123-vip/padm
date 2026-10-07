@@ -544,22 +544,6 @@ singBoxInstalled() {
     coreExecutableFile "$(coreSingBoxBinaryPath)"
 }
 
-coreXrayBinaryPath() {
-    printf '%s\n' "${PADM_XRAY_BINARY:-/etc/padm/xray/xray}"
-}
-
-coreXrayConfigDir() {
-    if [[ -n "${PADM_XRAY_CONF_DIR:-}" ]]; then
-        printf '%s\n' "${PADM_XRAY_CONF_DIR%/}"
-        return
-    fi
-    printf '%s\n' "${PADM_XRAY_DIR:-/etc/padm/xray}/conf"
-}
-
-coreSingBoxBinaryPath() {
-    printf '%s\n' "${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}"
-}
-
 coreXrayInstallDir() {
     dirname -- "$(coreXrayBinaryPath)"
 }
@@ -706,10 +690,14 @@ coreTmpFilePath() {
 }
 
 singBoxConfigInstalled() {
-    local mergedFile shardDir
+    local mergedFile shardDir file
     mergedFile=$(singBoxMergedConfigFile)
     shardDir=$(singBoxConfigShardDir)
-    [[ -s "${mergedFile}" ]] || compgen -G "${shardDir}*.json" >/dev/null
+    [[ -s "${mergedFile}" ]] && return 0
+    for file in "${shardDir}"*.json; do
+        [[ -f "${file}" ]] && return 0
+    done
+    return 1
 }
 
 validateSingBoxConfigWithBinary() {
@@ -1339,7 +1327,7 @@ validateSingBoxPrereleaseConfigWithMigration() {
     local binary=$1
     local version=$2
     local logFile=$3
-    local originalConfDir originalShardDir shardName stagingRoot stagingConfDir migrationLog
+    local originalConfDir originalShardDir shardName stagingRoot stagingConfDir migrationLog file
     local migrationBackup= validationRc=0
 
     if ! singBoxVersionAtLeast "${version}" 1.14.0; then
@@ -1358,9 +1346,11 @@ validateSingBoxPrereleaseConfigWithMigration() {
     migrationLog="${logFile}.migration"
     (
         singBoxConfigPath="${stagingConfDir}/${shardName}/"
-        if compgen -G "${singBoxConfigPath}*.json" >/dev/null; then
+        for file in "${singBoxConfigPath}"*.json; do
+            [[ -f "${file}" ]] || continue
             removeManagedFileIfPresent "${stagingConfDir}/config.json" || exit 1
-        fi
+            break
+        done
         if ! migrateSingBox116DeprecatedConfig migrationBackup "${migrationLog}"; then
             [[ -n "${migrationBackup}" ]] && padmRemoveCleanupPath "${migrationBackup}"
             exit 1

@@ -330,6 +330,34 @@ runSingBoxCustomPathsRegression() (
     singBoxConfigPath=
 
     (
+        # 单独加载 runtime 与完整核心的路径解析保持一致。
+        local PADM_XRAY_CONF_DIR="${root}/xray/conf/"
+        source "${PROJECT_ROOT}/shell/core/runtime.sh"
+        [[ "$(coreXrayConfigDir)" == "${PADM_XRAY_CONF_DIR%/}" ]]
+        source "${PROJECT_ROOT}/shell/core/cores.sh"
+        [[ "$(coreXrayConfigDir)" == "${PADM_XRAY_CONF_DIR%/}" ]]
+        [[ "$(coreXrayBinaryPath)" == "${PADM_XRAY_BINARY}" ]]
+        [[ "$(coreSingBoxBinaryPath)" == "${PADM_SINGBOX_BINARY}" ]]
+    )
+
+    (
+        # 目录中的 glob 字符必须按字面处理，真实分片仍需进入升级校验。
+        local singBoxConfigPath= configName
+        local PADM_SINGBOX_CONFIG_DIR="${root}/config[1]*"
+        mkdir -p "${PADM_SINGBOX_CONFIG_DIR}"
+        regressionExpectStatus 1 singBoxConfigInstalled
+        for configName in inbound.json 'inbound[1]*.json'; do
+            printf '{}\n' >"${PADM_SINGBOX_CONFIG_DIR}/${configName}"
+            singBoxConfigInstalled
+            singBoxMergeConfigForValidation() { return 23; }
+            regressionExpectStatus 1 validateSingBoxConfigWithBinary /usr/bin/true "${root}/literal-path-check.log"
+            rm -f -- "${PADM_SINGBOX_CONFIG_DIR}/${configName}"
+        done
+        printf '{}\n' >"$(singBoxMergedConfigFile)"
+        singBoxConfigInstalled
+    )
+
+    (
         # 仅设置目录覆盖时，DNS 检查和初始化不能读取或写入默认目录。
         local dnsConfigDir="${root}/dns-only/config"
         local PADM_SINGBOX_CONFIG_DIR="${dnsConfigDir}" singBoxConfigPath=

@@ -5,7 +5,11 @@ coreXrayBinaryPath() {
 }
 
 coreXrayConfigDir() {
-    printf '%s\n' "${PADM_XRAY_CONF_DIR:-${PADM_XRAY_DIR:-/etc/padm/xray}/conf}"
+    if [[ -n "${PADM_XRAY_CONF_DIR:-}" ]]; then
+        printf '%s\n' "${PADM_XRAY_CONF_DIR%/}"
+        return
+    fi
+    printf '%s\n' "${PADM_XRAY_DIR:-/etc/padm/xray}/conf"
 }
 
 coreSingBoxBinaryPath() {
