@@ -1343,9 +1343,9 @@ EOF
     if [[ "${subscriptionEnabled}" == "true" ]]; then
         cat >>"${target}" <<EOF
 
-    location = /subscriptions/${token} {
+    location ~ ^/subscriptions/(?<padm_subscription_token>[A-Za-z0-9_-]{16,128})\$ {
         access_log off;
-        proxy_pass http://subscription:${PADM_DOCKER_SUBSCRIPTION_PORT}/${token};
+        proxy_pass http://subscription:${PADM_DOCKER_SUBSCRIPTION_PORT}/\$padm_subscription_token;
         proxy_pass_request_headers off;
     }
 EOF
@@ -1439,7 +1439,8 @@ dockerGenerateSubscription() {
       def authority: if contains(":") then "[\(.)]" else . end;
       . as $request |
       .core.protocols[] | . as $entry |
-      (., (if $request.accounts != null then
+      ((if ($request.subscription.include_base != false) then . else empty end),
+       (if $request.accounts != null then
         $request.accounts[] | select(.enabled and (.listeners | index($entry.listener_id) != null)) |
         . as $account | $entry + {
           uuid: (if ($entry.id == 3 or $entry.id == 4 or $entry.id == 28 or $entry.id == 25 or $entry.id == 29)
