@@ -583,6 +583,21 @@ allPackagesInstalled() {
     return 0
 }
 
+allPackagesConfigured() {
+    local packageName packageStatus
+
+    # 已有包记录用于回滚归属，跳过安装或恢复成功还需确认包已配置完成。
+    for packageName in "$@"; do
+        if [[ "${packageManager}" == "apt" ]]; then
+            packageStatus=$(dpkg-query -W -f='${Status}' "${packageName}" 2>/dev/null) || return 1
+            [[ "${packageStatus}" == *" ok installed" ]] || return 1
+        else
+            packageInstalled "${packageName}" || return 1
+        fi
+    done
+    return 0
+}
+
 recoverAptInstallAfterTimeout() {
     local displayName=$1
     local recoverLog
@@ -601,6 +616,7 @@ recoverAptInstallAfterTimeout() {
         statusCard "${displayName}安装收尾" "dpkg 收尾失败，日志：${recoverLog}"
         return 1
     }
+    allPackagesConfigured "$@" || return 1
     statusCard "${displayName}安装收尾" "dpkg 收尾完成，继续后续流程"
     return 0
 }
@@ -632,6 +648,10 @@ installPackageTracked() {
     padmEnsureSafeDirectory "$(dirname -- "${installLog}")" || failPackageInstallTransaction "${displayName}安装日志目录创建失败"
     padmCreateTempPath missingPackagesFile "$(adapterTmpPath padm-packages.XXXXXX)" || failPackageInstallTransaction "${displayName}安装状态记录失败"
     writeMissingPackages "${missingPackagesFile}" "${packages[@]}" || { padmRemoveCleanupPath "${missingPackagesFile}"; failPackageInstallTransaction "${displayName}安装状态记录失败"; }
+    if [[ ! -s "${missingPackagesFile}" ]] && allPackagesConfigured "${packages[@]}"; then
+        padmRemoveCleanupPath "${missingPackagesFile}"
+        return 0
+    fi
     [[ "${packageManager}" == "apt" && -s "${missingPackagesFile}" ]] && packageTimeout=900
 
     runPackageCommandWithProgress "安装${displayName}" "${packageTimeout}" "${installType} ${packages[*]}" "${installLog}" || {
@@ -820,12 +840,15 @@ installTools() {
 
     beginPackageInstallTransaction
     local packageTransactionOwner=${PADM_PACKAGE_TRANSACTION_STARTED}
+    waitAptProcess || failPackageInstallTransaction "等待 apt/dpkg 锁释放失败"
+
     # 修复 apt/dpkg 中断状态
     if [[ "${release}" == "ubuntu" || "${release}" == "debian" ]]; then
-        runWithTimeout 120 "dpkg --configure -a"
+        runWithTimeout 120 "dpkg --configure -a" || {
+            diagnosePackageInstallFailure
+            failPackageInstallTransaction "dpkg 状态修复失败"
+        }
     fi
-
-    waitAptProcess || failPackageInstallTransaction "等待 apt/dpkg 锁释放失败"
 
     initInstallProgress
     successCard "检查、安装工具依赖【新机器会很慢，请根据工具依赖进度判断是否仍在执行】"
@@ -838,15 +861,16 @@ installTools() {
         statusCard "系统更新" "RHEL-like/Fedora 基础安装跳过全量系统更新，仅安装所需依赖"
     else
         runPackageCommandWithProgress "检查、安装更新" 600 "${upgrade}" "${installLog}" || {
-            diagnosePackageInstallFailure
-            failPackageInstallTransaction "系统软件源刷新失败"
-        }
-    fi
-
-    if grep <"${installLog}" -q "changed"; then
-        runWithTimeout 300 "${updateReleaseInfoChange} >/dev/null 2>&1" || {
-            diagnosePackageInstallFailure
-            failPackageInstallTransaction "系统软件源 release 信息刷新失败"
+            if [[ "${packageManager}" == "apt" ]] &&
+                grep -qE "^E: Repository .+ changed its '.+' value from " "${installLog}"; then
+                runWithTimeout 300 "${updateReleaseInfoChange} >/dev/null 2>&1" || {
+                    diagnosePackageInstallFailure
+                    failPackageInstallTransaction "系统软件源 release 信息刷新失败"
+                }
+            else
+                diagnosePackageInstallFailure
+                failPackageInstallTransaction "系统软件源刷新失败"
+            fi
         }
     fi
 

@@ -2482,6 +2482,103 @@ runInstallWorkflowRegression() (
         nginxAvailable=false
         installTools 1 </dev/null
         [[ "${events}" == $'begin\ntimeout:120 dpkg --configure -a\nupdate\nbase\nnginx-install\nacme\nend\n' ]]
+
+        (
+            # apt 的 release 信息变更只在刷新失败时重试，不能吞掉其它源错误。
+            local refreshStatus=100 recoveryStatus=0
+            local updateReleaseInfoChange=update-release-info
+            local refreshMessage="E: Repository 'https://example.com/debian InRelease' changed its 'Suite' value from 'stable' to 'oldstable'"
+            selectCustomInstallType=",1,"
+            runPackageCommandWithProgress() {
+                events+=$'update\n'
+                printf '%s\n' "${refreshMessage}" >"$4"
+                return "${refreshStatus}"
+            }
+            runWithTimeout() {
+                events+="timeout:$*"$'\n'
+                [[ "$2" != "${updateReleaseInfoChange} >/dev/null 2>&1" ]] || return "${recoveryStatus}"
+                return 0
+            }
+            diagnosePackageInstallFailure() { events+=$'diagnose\n'; }
+            failPackageInstallTransaction() { printf 'failed:%s\n%s' "$1" "${events}"; exit 1; }
+
+            events=
+            output=$(
+                (installTools 1 </dev/null; printf 'result:0\n%s' "${events}") || printf 'result:1\n'
+            )
+            [[ "${output}" == $'result:0\nbegin\ntimeout:120 dpkg --configure -a\nupdate\ntimeout:300 update-release-info >/dev/null 2>&1\nbase\nend' ]] || {
+                printf 'release-info recovery mismatch: %s\n' "${output}" >&2
+                return 1
+            }
+            refreshStatus=0
+            events=
+            installTools 1 </dev/null
+            [[ "${events}" == $'begin\ntimeout:120 dpkg --configure -a\nupdate\nbase\nend\n' ]]
+
+            refreshStatus=100
+            refreshMessage='E: Failed to fetch https://example.com/debian Connection timed out'
+            events=
+            output=$(
+                (installTools 1 </dev/null; printf 'unexpected-continue\n') || printf 'result:1\n'
+            )
+            [[ "${output}" == $'failed:系统软件源刷新失败\nbegin\ntimeout:120 dpkg --configure -a\nupdate\ndiagnose\nresult:1' ]]
+
+            refreshMessage="E: Repository 'https://example.com/debian InRelease' changed its 'Suite' value from 'stable' to 'oldstable'"
+            recoveryStatus=1
+            events=
+            output=$(
+                (installTools 1 </dev/null; printf 'unexpected-continue\n') || printf 'result:1\n'
+            )
+            [[ "${output}" == $'failed:系统软件源 release 信息刷新失败\nbegin\ntimeout:120 dpkg --configure -a\nupdate\ntimeout:300 update-release-info >/dev/null 2>&1\ndiagnose\nresult:1' ]]
+
+            release=alpine packageManager=apk recoveryStatus=0
+            events=
+            output=$(
+                (installTools 1 </dev/null; printf 'unexpected-continue\n') || printf 'result:1\n'
+            )
+            [[ "${output}" == $'failed:系统软件源刷新失败\nbegin\nupdate\ndiagnose\nresult:1' ]]
+        )
+
+        (
+            # 修复 dpkg 前先等锁，任何准备失败都不能进入后续安装。
+            local waitStatus=0 dpkgStatus=0
+            selectCustomInstallType=",1,"
+            waitAptProcess() { events+=$'wait\n'; return "${waitStatus}"; }
+            runWithTimeout() {
+                events+="timeout:$*"$'\n'
+                [[ "$2" != "dpkg --configure -a" ]] || return "${dpkgStatus}"
+                return 0
+            }
+            diagnosePackageInstallFailure() { events+=$'diagnose\n'; }
+            failPackageInstallTransaction() { printf 'failed:%s\n%s' "$1" "${events}"; exit 1; }
+
+            events=
+            installTools 1 </dev/null
+            [[ "${events}" == $'begin\nwait\ntimeout:120 dpkg --configure -a\nupdate\nbase\nend\n' ]] || {
+                printf 'dpkg preparation order mismatch: %s\n' "${events}" >&2
+                return 1
+            }
+            waitStatus=1
+            events=
+            output=$(
+                (installTools 1 </dev/null; printf 'unexpected-continue\n') || printf 'result:1\n'
+            )
+            [[ "${output}" == $'failed:等待 apt/dpkg 锁释放失败\nbegin\nwait\nresult:1' ]]
+
+            waitStatus=0
+            dpkgStatus=1
+            events=
+            output=$(
+                (installTools 1 </dev/null; printf 'unexpected-continue\n') || printf 'result:1\n'
+            )
+            [[ "${output}" == $'failed:dpkg 状态修复失败\nbegin\nwait\ntimeout:120 dpkg --configure -a\ndiagnose\nresult:1' ]]
+
+            release=alpine packageManager=apk
+            events=
+            installTools 1 </dev/null
+            [[ "${events}" == $'begin\nwait\nupdate\nbase\nend\n' ]]
+        )
+
         installNginxTools() { return 1; }
         failPackageInstallTransaction() { printf 'failed:%s\n' "$1"; exit 1; }
         for nginxAvailable in true false; do
@@ -2491,6 +2588,123 @@ runInstallWorkflowRegression() (
             )
             [[ "${output}" == $'failed:Nginx安装失败\nresult:1' ]]
         done
+    )
+
+    (
+        # 已齐全的依赖不调用包管理器，缺包时保留完整安装命令和新增包记录。
+        local packageManager missingPackage= packageCompleted=false
+        local installType=install-fixture installCalls=0 recordedTimeout= packageCommand=
+        local PADM_INSTALLED_PACKAGES= PADM_PACKAGE_TRANSACTION_ACTIVE=true
+        local TMPDIR="${TMP_DIR}/install-package-reuse"
+        mkdir -p "${TMPDIR}"
+        adapterInstallLogPath() { printf '%s' "${TMPDIR}/install.log"; }
+        packageInstalled() { [[ "$1" != "${missingPackage}" || "${packageCompleted}" == true ]]; }
+        dpkg-query() { packageInstalled "${@: -1}" && printf 'install ok installed'; }
+        runPackageCommandWithProgress() {
+            installCalls=$((installCalls + 1))
+            recordedTimeout=$2
+            packageCommand=$3
+            packageCompleted=true
+        }
+
+        for packageManager in apt yum apk; do
+            installPackageTracked "fixture" existing missing
+            [[ "${installCalls}" == 0 && -z "${PADM_INSTALLED_PACKAGES}" ]] || {
+                printf 'installed package reuse mismatch: %s calls=%s tracked=%s\n' \
+                    "${packageManager}" "${installCalls}" "${PADM_INSTALLED_PACKAGES}" >&2
+                return 1
+            }
+            ! regressionFindHasMatches "${TMPDIR}" -mindepth 1 -maxdepth 1 -name 'padm-packages.*'
+        done
+
+        missingPackage=missing
+        for packageManager in apt yum apk; do
+            packageCompleted=false installCalls=0 PADM_INSTALLED_PACKAGES=
+            installPackageTracked "fixture" existing missing
+            [[ "${installCalls}" == 1 && "${packageCommand}" == "install-fixture existing missing" ]]
+            [[ "${PADM_INSTALLED_PACKAGES}" == " missing" ]]
+            if [[ "${packageManager}" == apt ]]; then
+                [[ "${recordedTimeout}" == 900 ]]
+            else
+                [[ "${recordedTimeout}" == 300 ]]
+            fi
+            ! regressionFindHasMatches "${TMPDIR}" -mindepth 1 -maxdepth 1 -name 'padm-packages.*'
+        done
+
+        runPackageCommandWithProgress() { return 1; }
+        recoverAptInstallAfterTimeout() { return 1; }
+        diagnosePackageInstallFailure() { :; }
+        failPackageInstallTransaction() { printf 'failed:%s\n' "$1"; exit 1; }
+        packageCompleted=false
+        output=$(
+            (installPackageTracked "fixture" existing missing; printf 'unexpected-continue\n') || printf 'result:1\n'
+        )
+        [[ "${output}" == $'failed:fixture安装失败\nresult:1' ]]
+        ! regressionFindHasMatches "${TMPDIR}" -mindepth 1 -maxdepth 1 -name 'padm-packages.*'
+    )
+
+    (
+        # dpkg 记录决定回滚所有权，只有配置完成的包才能跳过安装。
+        local packageManager=apt installType=install-fixture
+        local dpkgRoot="${TMP_DIR}/install-package-status" originalStatus
+        local TMPDIR="${dpkgRoot}/tmp" PADM_INSTALLED_PACKAGES=
+        local installCalls=0 configureCalls=0 configureCompletes=true
+        mkdir -p "${dpkgRoot}/updates" "${TMPDIR}"
+        dpkg() { command /usr/bin/dpkg --admindir="${dpkgRoot}" "$@"; }
+        dpkg-query() { command /usr/bin/dpkg-query --admindir="${dpkgRoot}" "$@"; }
+        setFixturePackageStatus() {
+            printf 'Package: fixture\nStatus: %s\nMaintainer: Fixture <fixture@example.com>\nArchitecture: all\nVersion: 1\nDescription: fixture\n' "$1" >"${dpkgRoot}/status"
+        }
+        adapterInstallLogPath() { printf '%s' "${TMPDIR}/install.log"; }
+        adapterInstallLogRecoverPath() { printf '%s' "${TMPDIR}/recover.log"; }
+        runPackageCommandWithProgress() {
+            installCalls=$((installCalls + 1))
+            setFixturePackageStatus 'install ok installed'
+        }
+        runWithTimeout() {
+            configureCalls=$((configureCalls + 1))
+            [[ "${configureCompletes}" != true ]] || setFixturePackageStatus 'install ok installed'
+            return 0
+        }
+        pkill() { :; }
+
+        for originalStatus in 'install ok installed' 'hold ok installed' \
+            'deinstall ok config-files' 'install ok half-configured' 'install reinstreq installed'; do
+            setFixturePackageStatus "${originalStatus}"
+            installCalls=0 PADM_INSTALLED_PACKAGES=
+            packageInstalled fixture
+            installPackageTracked "fixture" fixture
+            if [[ "${originalStatus}" == *' ok installed' ]]; then
+                [[ "${installCalls}" == 0 ]]
+            else
+                [[ "${installCalls}" == 1 ]] || {
+                    printf 'dpkg record readiness mismatch: %s calls=%s\n' "${originalStatus}" "${installCalls}" >&2
+                    return 1
+                }
+            fi
+            [[ -z "${PADM_INSTALLED_PACKAGES}" ]]
+        done
+
+        : >"${dpkgRoot}/status"
+        regressionExpectStatus 1 packageInstalled fixture
+        installCalls=0 PADM_INSTALLED_PACKAGES=
+        installPackageTracked "fixture" fixture
+        [[ "${installCalls}" == 1 && "${PADM_INSTALLED_PACKAGES}" == ' fixture' ]]
+
+        setFixturePackageStatus 'install ok half-configured'
+        configureCalls=0
+        recoverAptInstallAfterTimeout "fixture" fixture
+        [[ "${configureCalls}" == 1 && "$(dpkg-query -W -f='${Status}' fixture)" == 'install ok installed' ]]
+
+        setFixturePackageStatus 'install ok half-configured'
+        configureCompletes=false configureCalls=0
+        regressionExpectStatus 1 recoverAptInstallAfterTimeout "fixture" fixture
+        [[ "${configureCalls}" == 1 ]]
+
+        : >"${dpkgRoot}/status"
+        configureCalls=0
+        regressionExpectStatus 1 recoverAptInstallAfterTimeout "fixture" fixture
+        [[ "${configureCalls}" == 0 ]]
     )
 
     (

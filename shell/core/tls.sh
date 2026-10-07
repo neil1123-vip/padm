@@ -289,11 +289,23 @@ switchSSLType() {
 
 # 选择 acme.sh 证书签发方式
 selectAcmeInstallSSL() {
+    local acmeLogFile acmeLogLines=0
     if [[ "${ipType:-}" == "6" ]]; then
         sslIPv6="--listen-v6"
     fi
 
-    acmeInstallSSL || return 1
+    acmeLogFile=$(tlsAcmeLogFile) || return 1
+    if [[ -f "${acmeLogFile}" ]]; then
+        acmeLogLines=$(wc -l <"${acmeLogFile}") || return 1
+    fi
+    if ! acmeInstallSSL; then
+        # 仅处理本次签发的邮箱错误，纠正后重新签发一次。
+        tail -n "+$((acmeLogLines + 1))" "${acmeLogFile}" 2>/dev/null |
+            grep -F "Could not validate email address as valid" >/dev/null || return 1
+        errorCard "邮箱无法通过SSL厂商验证，请重新输入"
+        customSSLEmail "validate email" || return 1
+        acmeInstallSSL || return 1
+    fi
     readAcmeTLS || return 1
     installedDNSAPIStatus=
     if [[ -n "${dnsAPIType:-}" && "${dnsAPIStatus:-}" == y ]]; then
@@ -392,13 +404,6 @@ installTLSFromAcme() {
             return 1
         fi
         [[ "${attempt}" != 2 ]] || break
-        if tail -n 10 "${acmeLogFile}" 2>/dev/null | grep -q "Could not validate email address as valid"; then
-            errorCard "邮箱无法通过SSL厂商验证，请重新输入"
-            customSSLEmail "validate email" || {
-                padmRemoveCleanupPath "${backupDir}"
-                return 1
-            }
-        fi
     done
     padmRemoveCleanupPath "${backupDir}"
     errorCard "TLS安装失败，请检查acme日志"
@@ -433,7 +438,8 @@ installTLS() {
         { [[ "${PADM_REQUIRE_USABLE_TLS_CERTIFICATE:-}" != "true" ]] && tlsCertificatePairExists "${tlsDir}" "${tlsDomain}"; }; then
         successCard "检测到证书"
         if [[ "${PADM_CORE_SWITCH_TRANSACTION_ACTIVE:-}" != true && -z "${lastInstallationConfig:-}" ]] &&
-            { [[ -d "$HOME/.acme.sh/${tlsDomain}_ecc" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.key" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; }; then
+            { [[ -s "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.key" &&
+                -s "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; }; then
             tlsCertificateCard "回车保留现有证书；重新安装仅同步当前域名证书"
             menuReadChoice tls_reinstall "是否重新安装当前域名证书？[y/N]:" reInstallStatus true || return 1
         fi
@@ -444,7 +450,8 @@ installTLS() {
             renewalTLS "" "${tlsDomain}" || return 1
         fi
 
-    elif [[ -d "$HOME/.acme.sh/${tlsDomain}_ecc" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.key" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
+    elif [[ -s "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.key" &&
+        -s "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
         successCard "检测到证书"
         if [[ "${PADM_REQUIRE_USABLE_TLS_CERTIFICATE:-}" == "true" ]]; then
             switchSSLType || return 1
@@ -452,7 +459,8 @@ installTLS() {
             selectAcmeInstallSSL || return 1
         fi
         installTLSFromAcme || return 1
-    elif [[ -d "$HOME/.acme.sh" ]] && [[ ! -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" || ! -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.key" ]]; then
+    elif [[ -d "$HOME/.acme.sh" ]] && [[ ! -s "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" ||
+        ! -s "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.key" ]]; then
         [[ -n "${dnsAPIStatus+x}" ]] || switchDNSAPI || return 1
         if [[ -z "${dnsAPIType:-}" ]]; then
             statusCard "TLS 证书申请方式" "不采用 API 申请证书"
@@ -579,7 +587,8 @@ tlsCertificateStatusJson() {
     fi
 
     if tlsCertificatePairExists "${tlsDir}" "${domain}"; then
-        if [[ -n "${acmeDir}" ]] && { [[ -d "${acmeDir}/${domain}_ecc" && -f "${acmeDir}/${domain}_ecc/${domain}.key" && -f "${acmeDir}/${domain}_ecc/${domain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; }; then
+        if [[ -n "${acmeDir}" ]] && { [[ -s "${acmeDir}/${domain}_ecc/${domain}.key" &&
+            -s "${acmeDir}/${domain}_ecc/${domain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; }; then
             local modifyTime currentTime stampDiff days remainingDays sourceType
             if [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
                 modifyTime=$(stat --format=%z "${acmeDir}/*.${dnsTLSDomain}_ecc/*.${dnsTLSDomain}.cer")
@@ -913,6 +922,7 @@ renewalTLS() {
     local acmeDir
     local acmeBin
     local renewStatus
+    local renewalDays=90
     tlsDir=$(tlsManagedDir) || return 1
     acmeDir=$(acmeSafeHomeDir 2>/dev/null || true)
     if [[ -n "${domain}" ]] && ! tlsDomainNameIsSafe "${domain}"; then
@@ -924,16 +934,15 @@ renewalTLS() {
     readAcmeTLS "${domain}" || return 1
 
     sslTypeFile=$(tlsSslTypeFile) || return 1
-    if [[ -f "${sslTypeFile}" ]]; then
-        if [[ -f "${sslTypeFile}" ]] && grep -q "buypass" <"${sslTypeFile}"; then
-            sslRenewalDays=180
-        fi
+    if [[ -f "${sslTypeFile}" ]] && grep -q "buypass" <"${sslTypeFile}"; then
+        renewalDays=180
     fi
     if [[ "${installedDNSAPIStatus:-}" == "true" && -z "${acmeDir}" ]]; then
         errorCard "acme.sh HOME 路径异常"
         return 1
     fi
-    if [[ -n "${acmeDir}" ]] && { [[ -d "${acmeDir}/${domain}_ecc" && -f "${acmeDir}/${domain}_ecc/${domain}.key" && -f "${acmeDir}/${domain}_ecc/${domain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; }; then
+    if [[ -n "${acmeDir}" ]] && { [[ -s "${acmeDir}/${domain}_ecc/${domain}.key" &&
+        -s "${acmeDir}/${domain}_ecc/${domain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; }; then
         acmeBin=$(acmeExecutable) || { errorCard "acme.sh 路径、所有者或权限异常"; return 1; }
         chmod 600 -- "${tlsDir}/${domain}.key" || { errorCard "TLS 私钥权限收紧失败"; return 1; }
         modifyTime=
@@ -948,7 +957,7 @@ renewalTLS() {
         currentTime=$(date +%s)
         ((stampDiff = currentTime - modifyTime))
         ((days = stampDiff / 86400))
-        ((remainingDays = sslRenewalDays - days))
+        ((remainingDays = renewalDays - days))
 
         tlsStatus=${remainingDays}
         if [[ ${remainingDays} -le 0 ]]; then

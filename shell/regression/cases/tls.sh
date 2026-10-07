@@ -474,6 +474,53 @@ runTlsFailureReturnRegression() (
     )
 
     (
+        # 邮箱纠错必须重新签发一次，其他错误和用户取消不能重试或读取半份证书。
+        local PADM_TLS_DIR="${root}/issue-retry" tlsDomain=retry.example.com sslType=zerossl
+        local ipType=4 dnsAPIType= dnsAPIStatus=n installedDNSAPIStatus=saved
+        local issueLog="${root}/issue-retry.calls" issueMode attempts corrections reads
+        mkdir -p "${PADM_TLS_DIR}"
+        acmeExecutable() { printf '/bin/false\n'; }
+        allowPort() { return 0; }
+        handleNginx() { return 0; }
+        sudo() {
+            [[ "$2" == --issue ]] || return 1
+            printf 'issue\n' >>"${issueLog}"
+            if [[ "${issueMode}" == other ]]; then
+                printf 'unrelated issuance error\n'
+            elif [[ "${issueMode}" != success || "$(wc -l <"${issueLog}")" == 1 ]]; then
+                printf 'Could not validate email address as valid\n'
+            else
+                return 0
+            fi
+            return 1
+        }
+        customSSLEmail() {
+            [[ "$1" == "validate email" ]] || return 1
+            corrections=$((corrections + 1))
+            [[ "${issueMode}" != cancel ]]
+        }
+        readAcmeTLS() { reads=$((reads + 1)); }
+        for issueMode in success repeated cancel other; do
+            : >"${issueLog}"
+            printf 'Could not validate email address as valid\n' >"$(tlsAcmeLogFile)"
+            corrections=0 reads=0 installedDNSAPIStatus=saved
+            if [[ "${issueMode}" == success ]]; then
+                selectAcmeInstallSSL
+                [[ "${reads}" == 1 && -z "${installedDNSAPIStatus}" ]]
+            else
+                regressionExpectStatus 1 selectAcmeInstallSSL
+                [[ "${reads}" == 0 && "${installedDNSAPIStatus}" == saved ]]
+            fi
+            attempts=$(wc -l <"${issueLog}")
+            case "${issueMode}" in
+            success | repeated) [[ "${attempts}" == 2 && "${corrections}" == 1 ]] ;;
+            cancel) [[ "${attempts}" == 1 && "${corrections}" == 1 ]] ;;
+            other) [[ "${attempts}" == 1 && "${corrections}" == 0 ]] ;;
+            esac
+        done
+    )
+
+    (
         readAcmeTLS() { return 1; }
         captureFailureReturn "${root}/install-read-acme.rc" installTLS 1
         captureFailureReturn "${root}/status-read-acme.rc" tlsCertificateStatusJson
@@ -537,6 +584,52 @@ runTlsFailureReturnRegression() (
         tlsCertificatePairUsable() { return 0; }
         installTLS 1 >/dev/null 2>&1
         [[ "${acmeInstallFromHomeCalled}" == "true" ]]
+    )
+
+    (
+        # 源证书为空或缺失时重新签发，完整源只同步，不能反复安装半份文件。
+        local HOME="${root}/incomplete-source/home" PADM_TLS_DIR="${root}/incomplete-source/tls"
+        local domain=incomplete.example.com currentHost=incomplete.example.com tlsDomain=incomplete.example.com
+        local sourceDir="${HOME}/.acme.sh/${domain}_ecc" state issues syncs snapshot
+        local installedDNSAPIStatus= dnsAPIType= dnsAPIStatus=n sslType=letsencrypt
+        unset PADM_REQUIRE_USABLE_TLS_CERTIFICATE
+        mkdir -p "${sourceDir}" "${PADM_TLS_DIR}"
+        switchSSLType() { return 0; }
+        customSSLEmail() { return 0; }
+        selectAcmeInstallSSL() { issues=$((issues + 1)); }
+        installTLSFromAcme() { syncs=$((syncs + 1)); }
+        tlsCertificatePairUsable() { return 0; }
+        crontab() { return 1; }
+        sudo() { return 99; }
+        for state in complete empty-cert empty-key cert-only key-only; do
+            rm -f -- "${PADM_TLS_DIR}/${domain}.crt" "${PADM_TLS_DIR}/${domain}.key"
+            rm -f -- "${sourceDir}/${domain}.cer" "${sourceDir}/${domain}.key"
+            case "${state}" in
+            complete | empty-key | cert-only) printf 'cert\n' >"${sourceDir}/${domain}.cer" ;;
+            empty-cert) : >"${sourceDir}/${domain}.cer" ;;
+            esac
+            case "${state}" in
+            complete | empty-cert | key-only) printf 'key\n' >"${sourceDir}/${domain}.key" ;;
+            empty-key) : >"${sourceDir}/${domain}.key" ;;
+            esac
+            issues=0 syncs=0
+            installTLS 1 >/dev/null 2>&1
+            [[ "${syncs}" == 1 ]]
+            if [[ "${state}" == complete ]]; then
+                [[ "${issues}" == 0 ]]
+            else
+                [[ "${issues}" == 1 ]]
+            fi
+            printf 'local-cert\n' >"${PADM_TLS_DIR}/${domain}.crt"
+            printf 'local-key\n' >"${PADM_TLS_DIR}/${domain}.key"
+            snapshot=$(tlsCertificateStatusJson)
+            if [[ "${state}" == complete ]]; then
+                jq -e '.source == "acme-standalone"' <<<"${snapshot}" >/dev/null
+            else
+                jq -e '.source == "custom"' <<<"${snapshot}" >/dev/null
+                regressionExpectStatus 0 renewalTLS >/dev/null 2>&1
+            fi
+        done
     )
 
     (
@@ -815,6 +908,26 @@ runTlsRenewalFailurePropagationRegression() (
         rc=$?
         set -e
     }
+
+    (
+        # 同会话切换 CA 必须重新计算有效期，不能继承上一次的 180 天。
+        local sslRenewalDays=90 mode=ca-switch
+        prepareRenewalFixture
+        stat() {
+            if [[ "$1" == --format=%z ]]; then
+                date -d '100 days ago' '+%F %T.000000000 %z'
+            else
+                command stat "$@"
+            fi
+        }
+        printf 'buypass\n' >"$(tlsSslTypeFile)"
+        renewalTLS >/dev/null 2>&1
+        [[ ! -s "${commandLog}" && "${sslRenewalDays}" == 90 ]]
+        printf 'letsencrypt\n' >"$(tlsSslTypeFile)"
+        renewalTLS >/dev/null 2>&1
+        grep -q '^sudo:.*--cron --home ' "${commandLog}"
+        [[ "${sslRenewalDays}" == 90 ]]
+    )
 
     rm -rf "${tlsDir}" "${homeDir}/.acme.sh"
     mkdir -p "${tlsDir}" "${homeDir}"
