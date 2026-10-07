@@ -733,6 +733,23 @@ runCoreUpgradePendingStartRollbackRegression() (
             fi
         done
     done
+    (
+        # 启动命令失败但实际运行且版本正确时，仍完成升级并清理备份。
+        local caseRoot="${root}/xray-success"
+        local PADM_XRAY_BINARY="${caseRoot}/installed/xray"
+        local candidateDir="${caseRoot}/candidate" serviceLog="${caseRoot}/service.log"
+        local REGRESSION_SUCCESS_CARD_LOG="${caseRoot}/success.log" stopCalls=0 stopRc=0
+        mkdir -p "${caseRoot}/installed" "${candidateDir}"
+        printf 'old-binary\n' >"${PADM_XRAY_BINARY}"
+        printf '#!/usr/bin/env bash\nprintf "Xray 1.2.3\\n"\n' >"${candidateDir}/xray"
+        chmod 755 "${PADM_XRAY_BINARY}" "${candidateDir}/xray"
+        xrayRunning() { return 0; }
+        installDownloadedXrayBinary "${version}" "${candidateDir}"
+        [[ "$(coreXrayCurrentVersion)" == "${version}" && ! -e "${candidateDir}" ]]
+        [[ "$(<"${serviceLog}")" == $'stop\nstart' ]]
+        grep -q 'Xray-core更新成功' "${REGRESSION_SUCCESS_CARD_LOG}"
+        ! compgen -G "${PADM_XRAY_BINARY}.bak.*" >/dev/null
+    )
 )
 
 runCoreInstallRejectsUnsafeBinaryPathRegression() (

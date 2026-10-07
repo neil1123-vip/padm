@@ -1859,7 +1859,6 @@ installDownloadedXrayBinary() {
     local version=$1
     local tmpDir=${2:-}
     local oldBinary backupBinary newBinary logFile installedVersion actualVersion
-    local newServiceRunning=false
     local reusedPreparedDir=false
     local rc
     logFile=$(coreTmpFilePath padm-core-xray-upgrade-test.log)
@@ -1929,10 +1928,7 @@ installDownloadedXrayBinary() {
     fi
     runCoreServiceActionAllowFailure handleXray start || true
     installedVersion=$(coreXrayCurrentVersion)
-    if xrayRunning; then
-        newServiceRunning=true
-    fi
-    if xrayInstalled && [[ "${newServiceRunning}" == "true" && "${installedVersion}" == "${version}" ]]; then
+    if xrayInstalled && xrayRunning && [[ "${installedVersion}" == "${version}" ]]; then
         successCard "Xray-core更新成功" "当前版本: ${installedVersion}"
         padmRemoveCleanupPath "${tmpDir}"
         [[ -f "${backupBinary}" ]] && removeManagedFilesIfPresentIgnoreFailure "${backupBinary}"
