@@ -2225,11 +2225,6 @@ EOF
         return 1
     fi
 
-    if ! grep -q '^#!/sbin/openrc-run$' "${tmpFile}" || ! grep -q '^command=' "${tmpFile}"; then
-        padmRemoveCleanupPath "${tmpFile}"
-        return 1
-    fi
-
     local serviceFile="/etc/init.d/${serviceName}"
     if [[ "${serviceName}" == "sing-box" ]]; then
         serviceFile=${PADM_SINGBOX_OPENRC_SERVICE_FILE:-${serviceFile}}
@@ -2349,11 +2344,6 @@ LimitNOFILE=infinity
 [Install]
 WantedBy=multi-user.target
 EOF
-        if ! grep -q '^\[Service\]$' "${tmpFile}" || ! grep -Fxq "ExecStart=${execStart}" "${tmpFile}"; then
-            padmRemoveCleanupPath "${tmpFile}"
-            errorCard "sing-box systemd 模板生成失败"
-            return 1
-        fi
         coreStartupServiceEnabled sing-box && serviceWasEnabled=true
         checkLogBackupCreate serviceBackupDir "${serviceFile}" || { padmRemoveCleanupPath "${tmpFile}"; errorCard "sing-box systemd 模板备份失败"; return 1; }
         if ! commitGeneratedFile "${tmpFile}" "${serviceFile}" 644; then
@@ -2416,11 +2406,6 @@ LimitNOFILE=infinity
 [Install]
 WantedBy=multi-user.target
 EOF
-        if ! grep -q '^\[Service\]$' "${tmpFile}" || ! grep -Fxq "ExecStart=${execStart}" "${tmpFile}"; then
-            padmRemoveCleanupPath "${tmpFile}"
-            errorCard "Xray systemd 模板生成失败"
-            return 1
-        fi
         coreStartupServiceEnabled xray && serviceWasEnabled=true
         checkLogBackupCreate serviceBackupDir "${serviceFile}" || { padmRemoveCleanupPath "${tmpFile}"; errorCard "Xray systemd 模板备份失败"; return 1; }
         if ! commitGeneratedFile "${tmpFile}" "${serviceFile}" 644; then
