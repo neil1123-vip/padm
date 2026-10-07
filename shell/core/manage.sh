@@ -1098,13 +1098,14 @@ corePortSafeConfigDir() {
     printf '%s\n' "${configPath%/}/"
 }
 
-corePortManagedFilesByPattern() {
+corePortManagedFilesByPattern() (
     local pattern=$1
     local configDir
     configDir=$(corePortSafeConfigDir) || return 1
     [[ -d "${configDir}" ]] || return 0
+    set -o pipefail
     find "${configDir}" -maxdepth 1 -type f -name "${pattern}" -print | LC_ALL=C sort
-}
+)
 
 corePortManagedFilePath() {
     local fileName=$1
@@ -1216,24 +1217,27 @@ corePortRemove() {
 
 corePortBackupFiles() {
     local backupDir=$1
-    local file base
-    corePortSafeConfigDir >/dev/null || return 1
+    local file base files
+    files=$(corePortManagedFilesByPattern '02_dokodemodoor_inbounds_*.json') || return 1
     padmEnsureSafeDirectory "${backupDir}" || return 1
     while IFS= read -r file; do
+        [[ -n "${file}" ]] || continue
         base=${file##*/}
         backupManagedFileToPath "${file}" "${backupDir}/${base}" 644 || return 1
-    done < <(corePortManagedFilesByPattern '02_dokodemodoor_inbounds_*.json')
+    done <<<"${files}"
 }
 
 corePortRollbackFiles() {
     local backupDir=$1
     local configDir
-    local file status=0
+    local file files status=0
     configDir=$(corePortSafeConfigDir) || return 1
     [[ -d "${backupDir}" ]] || return 1
+    files=$(corePortManagedFilesByPattern '02_dokodemodoor_inbounds_*.json') || return 1
     while IFS= read -r file; do
+        [[ -n "${file}" ]] || continue
         removeManagedFileIfPresent "${file}" || status=1
-    done < <(corePortManagedFilesByPattern '02_dokodemodoor_inbounds_*.json')
+    done <<<"${files}"
     for file in "${backupDir}"/*.json; do
         local targetFile
         [[ -f "${file}" ]] || continue
@@ -1258,10 +1262,12 @@ corePortReportRollbackFailure() {
 }
 
 corePortValidateFiles() {
-    local file
+    local file files
+    files=$(corePortManagedFilesByPattern '02_dokodemodoor_inbounds_*.json') || return 1
     while IFS= read -r file; do
+        [[ -n "${file}" ]] || continue
         jq empty "${file}" >/dev/null || return 1
-    done < <(corePortManagedFilesByPattern '02_dokodemodoor_inbounds_*.json')
+    done <<<"${files}"
 }
 
 corePortWriteAddFiles() {
@@ -3152,8 +3158,11 @@ configTransactionCommit() {
     local refreshFn=$8
     local reloadFn=$9
 
-    configFile=$(padmRequireSafeAbsolutePath "${configFile}") || return 1
-    backupManagedFileToPath "${configFile}" "${backupFile}" 644 || return 1
+    if ! configFile=$(padmRequireSafeAbsolutePath "${configFile}") ||
+        ! backupManagedFileToPath "${configFile}" "${backupFile}" 644; then
+        padmRemoveCleanupPath "${stagedFile}"
+        return 1
+    fi
     if ! commitGeneratedJsonFile "${stagedFile}" "${configFile}"; then
         removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
         padmRemoveCleanupPath "${stagedFile}"
@@ -3369,8 +3378,8 @@ setXHTTPAdvancedParams() {
     autoRead xhttp_max_buffered_posts "请输入 packet-up 服务端最多缓存 POST 数[回车默认 30]:" maxBuffered || return 1
     maxBuffered=${maxBuffered:-30}
     readXHTTPRange "请输入 stream-up 服务端保活秒数范围" 20 80 sf st || return 1
-    autoRead xhttp_disable_grpc_header "是否关闭 gRPC header 伪装？[y/n，默认 n]:" noGrpc || return 1
-    autoRead xhttp_disable_sse_header "是否关闭 SSE response header？[y/n，默认 n]:" noSse || return 1
+    autoConfirm xhttp_disable_grpc_header "是否关闭 gRPC header 伪装？" n noGrpc || return 1
+    autoConfirm xhttp_disable_sse_header "是否关闭 SSE response header？" n noSse || return 1
     [[ "${maxPost}" =~ ^[0-9]+$ && "${minInterval}" =~ ^[0-9]+$ && "${maxBuffered}" =~ ^[0-9]+$ ]] || {
         errorCard "数值参数必须是非负整数"
         return 1

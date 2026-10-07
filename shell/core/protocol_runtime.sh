@@ -513,8 +513,10 @@ readPortHopping() {
         ')
         portHoppingStart=$(head -1 <<<"${forwardPorts}")
         portHoppingEnd=$(tail -n 1 <<<"${forwardPorts}")
-    elif iptables-save | grep -q "neil1123-vip_${type}_portHopping"; then
-        portHopping=$(iptables-save | awk -v marker="neil1123-vip_${type}_portHopping" '
+    else
+        local iptablesRules
+        if iptablesRules=$(iptables-save); then
+            portHopping=$(awk -v marker="neil1123-vip_${type}_portHopping" '
             $0 ~ marker {
                 for (i = 1; i <= NF; i++) {
                     if ($i == "--dport" && (i + 1) <= NF) {
@@ -523,10 +525,10 @@ readPortHopping() {
                     }
                 }
             }
-        ')
-
-        portHoppingStart=$(echo "${portHopping}" | cut -d ":" -f 1)
-        portHoppingEnd=$(echo "${portHopping}" | cut -d ":" -f 2)
+            ' <<<"${iptablesRules}")
+            portHoppingStart=${portHopping%%:*}
+            portHoppingEnd=${portHopping#*:}
+        fi
     fi
     if [[ -n "${portHoppingStart}" && -n "${portHoppingEnd}" ]]; then
         portHopping="${portHoppingStart}-${portHoppingEnd}"

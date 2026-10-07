@@ -1658,6 +1658,29 @@ EOF
     [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
 
     (
+        local saveLog="${TMP_DIR}/port-hopping-read-save.log"
+        local savedRules='-A PREROUTING -p udp --dport 33000:33002 -m comment --comment neil1123-vip_hysteria2_portHopping -j DNAT --to-destination :16295
+-A PREROUTING -p udp --dport 34001 -m comment --comment neil1123-vip_tuic_portHopping -j DNAT --to-destination :26451'
+        iptables-save() {
+            printf 'save\n' >>"${saveLog}"
+            [[ "${iptablesSaveShouldFail}" != true ]] || return 1
+            printf '%s\n' "${savedRules}"
+        }
+        : >"${saveLog}"
+        readPortHopping hysteria2 16295
+        [[ "${hysteria2PortHopping}" == "33000-33002" ]]
+        [[ "$(wc -l <"${saveLog}")" == 1 ]]
+        readPortHopping tuic 26451
+        [[ "${tuicPortHopping}" == "34001-34001" ]]
+        savedRules=
+        readPortHopping tuic 26451
+        [[ -z "${tuicPortHopping}" ]]
+        iptablesSaveShouldFail=true
+        readPortHopping hysteria2 16295
+        [[ -z "${hysteria2PortHopping}" ]]
+    )
+
+    (
         local firewalldLog="${TMP_DIR}/port-hopping-firewalld.log"
         local masquerade=false
         local firewalldActive=true

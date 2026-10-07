@@ -646,6 +646,14 @@ runProtocolEntryConfigUpdateRegression() (
     [[ "${commits}" == 6 ]]
     before=$(<"${fixtureConfig}")
     (
+        # 开关复用统一确认规则，大小写和完整 yes 都不能被静默当成关闭。
+        setXHTTPAdvancedParams <<< $'\n\n\n\n\nY\nyes'
+        jq -e '.inbounds[0].streamSettings.xhttpSettings | .noGRPCHeader and .noSSEHeader' "${fixtureConfig}" >/dev/null
+        setXHTTPAdvancedParams <<< $'\n\n\n\n\n\nn'
+        jq -e '.inbounds[0].streamSettings.xhttpSettings | .noGRPCHeader == false and .noSSEHeader == false' "${fixtureConfig}" >/dev/null
+        printf '%s\n' "${before}" >"${fixtureConfig}"
+    )
+    (
         # 数据用输出变量返回，非法时间的错误提示不能被命令替换吞掉。
         local errorLog="${root}/tuic-input-error.log"
         errorCard() { printf '%s\n' "$*"; }
@@ -912,6 +920,32 @@ runProtocolEntryPortRegression() (
     corePortApplyReloadTransaction corePortWriteAddFiles 2053 02053 "$(corePortForwardTarget)"
     jq -e '.inbounds[0].port == 2053 and .inbounds[0].settings.port == 8443' "${defaultFile}" >/dev/null
     before=$(<"${defaultFile}")
+    (
+        # 枚举失败不能先处理部分输出，也不能在无备份时删除入口或重载核心。
+        local partial= calls="${root}/enumeration-actions.log" backupDir="${root}/enumeration-backup"
+        mkdir -p "${backupDir}"
+        backupManagedFileToPath() { printf 'backup\n' >>"${calls}"; }
+        restoreManagedFileFromBackup() { printf 'restore\n' >>"${calls}"; }
+        removeManagedFileIfPresent() { printf 'remove\n' >>"${calls}"; }
+        runServiceAction() { printf 'reload\n' >>"${calls}"; }
+        jq() { printf 'validate\n' >>"${calls}"; }
+        corePortManagedFilesByPattern() {
+            [[ -z "${partial}" ]] || printf '%s\n' "${defaultFile}"
+            return 1
+        }
+        for partial in '' true; do
+            regressionExpectStatus 1 corePortApplyReloadTransaction corePortRemove 2053
+            regressionExpectStatus 1 corePortRollbackFiles "${backupDir}"
+            regressionExpectStatus 1 corePortValidateFiles
+            [[ "$(<"${defaultFile}")" == "${before}" && ! -e "${calls}" ]]
+        done
+    )
+    (
+        # find 的失败必须穿过排序管道，不依赖调用方是否开启 pipefail。
+        set +o pipefail
+        find() { printf '%s\n' "${defaultFile}"; return 1; }
+        regressionExpectStatus 1 corePortManagedFilesByPattern '02_dokodemodoor_inbounds_*.json' >/dev/null
+    )
     regressionExpectStatus 1 corePortApplyReloadTransaction corePortWriteAddFiles 2443 9999 8443
     regressionExpectStatus 1 corePortApplyReloadTransaction corePortWriteAddFiles 8443 8443 8443
     [[ "$(<"${defaultFile}")" == "${before}" && ! -e "${configPath}02_dokodemodoor_inbounds_2443.json" ]]

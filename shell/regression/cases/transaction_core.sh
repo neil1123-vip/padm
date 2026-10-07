@@ -3488,6 +3488,19 @@ runConfigTransactionRegression() (
 {"mode":"old","port":443}
 JSON
     originalContent=$(<"${targetFile}")
+    (
+        # 路径拒绝和备份失败都要立即清理暂存，不能进入校验、重载或订阅刷新。
+        local requestedFile validateCalls="${tmpRoot}/transaction-early-validate"
+        backupManagedFileToPath() { return 1; }
+        transactionValidateMock() { printf 'validate\n' >>"${validateCalls}"; }
+        for requestedFile in relative/config.json "${targetFile}"; do
+            padmCreateTempFileForTarget stagedFile "${targetFile}" transaction || return 1
+            jq '.mode = "new"' "${targetFile}" >"${stagedFile}"
+            regressionExpectStatus 1 configTransactionCommit "${requestedFile}" "${stagedFile}" "${backupFile}" transactionValidateMock "事务校验失败" "已回滚事务" "事务成功" transactionRefreshMock transactionReloadMock
+            [[ "$(<"${targetFile}")" == "${originalContent}" && ! -e "${stagedFile}" && ! -e "${backupFile}" ]]
+            [[ ! -e "${validateCalls}" && ! -e "${reloadCountFile}" && ! -e "${refreshCountFile}" ]]
+        done
+    )
     padmCreateTempFileForTarget stagedFile "${targetFile}" transaction || return 1
     jq '.mode = "new"' "${targetFile}" >"${stagedFile}"
     validateMode=fail
