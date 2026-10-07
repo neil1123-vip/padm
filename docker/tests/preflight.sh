@@ -11,6 +11,7 @@ cp "${project_root}/versions.lock" "${test_root}/project/versions.lock"
 cp "${project_root}/shell/core/version.sh" "${test_root}/project/shell/core/version.sh"
 cp "${test_root}/project/versions.lock" "${test_root}/lock.before"
 cp "${test_root}/project/shell/core/version.sh" "${test_root}/version.before"
+real_tar=$(command -v tar)
     # shellcheck source=/dev/null
 . "${test_root}/project/versions.lock"
 
@@ -35,6 +36,15 @@ fi
 cp "${FIXTURE_ROOT}/${repo}-${arch}.tar.gz" "${output}"
 EOF
 chmod +x "${test_root}/bin/curl"
+cat >"${test_root}/bin/tar" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ " $* " == *" -xOzf "* ]]; then
+    printf '1\n' >>"${FIXTURE_ROOT}/tar-calls"
+fi
+exec "${REAL_TAR}" "$@"
+EOF
+chmod +x "${test_root}/bin/tar"
 
 for scenario in available missing-amd64 missing-arm64 wrong-version corrupt invalid-index network; do
     fixture_root=${test_root}/${scenario}
@@ -70,12 +80,15 @@ for scenario in available missing-amd64 missing-arm64 wrong-version corrupt inva
     [[ "${scenario}" != corrupt ]] || printf 'invalid tar archive\n' >"${fixture_root}/community-aarch64.tar.gz"
     actual=success
     PATH="${test_root}/bin:${PATH}" FIXTURE_ROOT="${fixture_root}" SCENARIO="${scenario}" \
+        REAL_TAR="${real_tar}" \
         ALPINE_MINOR="${PADM_LOCK_ALPINE_VERSION%.*}" \
         bash "${test_root}/project/docker/release.sh" preflight >"${fixture_root}/output" 2>&1 || actual=failure
     if [[ "${scenario}" == available ]]; then
         [[ "${actual}" == success ]] || { cat "${fixture_root}/output"; fail 'available locked APKs rejected'; }
         grep -Fxq 'release-preflight-ok' "${fixture_root}/output" || fail 'success not reported'
         [[ "$(wc -l <"${fixture_root}/calls")" -eq 4 ]] || fail 'both architectures and repositories were not checked'
+        [[ "$(wc -l <"${fixture_root}/tar-calls")" -eq 4 ]] ||
+            fail 'each APK index should be extracted exactly once'
     else
         [[ "${actual}" == failure ]] || fail "${scenario} passed"
         grep -Fq 'Refresh Upstream Versions' "${fixture_root}/output" || fail "${scenario}: missing recovery hint"

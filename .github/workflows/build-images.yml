@@ -23,6 +23,10 @@ on:
         description: Validate contracts without building or publishing images
         default: false
         type: boolean
+      base_ref:
+        description: PR base commit for changed-image validation (empty builds all)
+        default: ''
+        type: string
     outputs:
       artifact_name:
         description: Release assets artifact produced after image publication
@@ -57,26 +61,14 @@ jobs:
           bash docker/release.sh validate-lock
           bash -n install-docker.sh docker/release.sh docker/tests/image-smoke.sh
           jq empty docker/contracts/*.json
-          bash docker/tests/phase1.sh
-          bash docker/tests/menu.sh
-          bash docker/tests/release.sh
-          bash docker/tests/setup.sh
-          sudo bash docker/tests/permissions.sh
-          sudo bash docker/tests/traditional-tls.sh
-          sudo bash docker/tests/reality-parameters.sh
-          bash docker/tests/phase2.sh
-          bash docker/tests/phase3.sh
-          bash docker/tests/phase4.sh
-          bash docker/tests/phase5.sh
-          bash docker/tests/phase6.sh
-          bash docker/tests/traffic.sh
+          sudo env PADM_REGRESSION_PARALLEL_JOBS=2 bash shell/subscription_groups_regression.sh docker-contracts
 
       - name: Preflight pinned Alpine dependencies
         shell: bash
         run: bash docker/release.sh preflight
 
       - name: Install Cosign
-        if: ${{ !inputs.contracts_only }}
+        if: ${{ !inputs.contracts_only && inputs.push }}
         uses: sigstore/cosign-installer@v4.1.2
 
       - name: Resolve changed image inputs
@@ -86,29 +78,44 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PADM_REGISTRY: ${{ inputs.registry }}
+          PADM_BASE_REF: ${{ inputs.base_ref }}
+          PADM_PUSH: ${{ inputs.push }}
           PADM_COSIGN_IDENTITY_REGEX: https://github.com/${{ github.repository }}/.github/workflows/.*@refs/heads/main
         run: |
           set -euo pipefail
           previous="${RUNNER_TEMP}/previous-release"
           mkdir -p "${previous}"
           baseline=
+          if [[ "${PADM_PUSH}" != true && "${PADM_BASE_REF}" =~ ^[0-9a-f]{40}$ ]] &&
+            git merge-base --is-ancestor "${PADM_BASE_REF}" HEAD; then
+            baseline=${PADM_BASE_REF}
+          fi
           # 只有验签且可追溯到当前提交的发布记录才能作为复用基线。
-          if gh release download --repo "${GITHUB_REPOSITORY}" --dir "${previous}" \
+          if [[ "${PADM_PUSH}" == true ]]; then
+            if gh release download --repo "${GITHUB_REPOSITORY}" --dir "${previous}" \
               --pattern release-manifest.json --pattern release-manifest.sigstore.json &&
-            cosign verify-blob --bundle "${previous}/release-manifest.sigstore.json" \
+              cosign verify-blob --bundle "${previous}/release-manifest.sigstore.json" \
               --certificate-identity-regexp "${PADM_COSIGN_IDENTITY_REGEX}" \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com \
               "${previous}/release-manifest.json" &&
-            bash docker/release.sh validate-manifest "${previous}/release-manifest.json"; then
-            baseline=$(jq -r '.release.commit' "${previous}/release-manifest.json")
-          else
-            echo '::notice::No verified release baseline; all images will be rebuilt.'
+              bash docker/release.sh validate-manifest "${previous}/release-manifest.json"; then
+              baseline=$(jq -r '.release.commit' "${previous}/release-manifest.json")
+            else
+              echo '::notice::No verified release baseline; all images will be rebuilt.'
+            fi
           fi
           images='[]'
           build_images='[]'
           for name in xray sing-box nginx ops net; do
             reference=
-            if [[ -n "${baseline}" ]] &&
+            # PR 只过滤未改动的构建输入；冒烟脚本变化仍重新验证所有镜像。
+            if [[ "${PADM_PUSH}" != true && -n "${baseline}" ]] &&
+              bash docker/release.sh image-inputs-unchanged "${baseline}" HEAD "${name}" &&
+              git diff --quiet "${baseline}" HEAD -- docker/tests/image-smoke.sh; then
+              printf '%s: unchanged PR inputs\n' "${name}" >>"${GITHUB_STEP_SUMMARY}"
+              continue
+            fi
+            if [[ "${PADM_PUSH}" == true && -n "${baseline}" ]] &&
               bash docker/release.sh image-inputs-unchanged "${baseline}" HEAD "${name}"; then
               reference=$(jq -r --arg name "${name}" '.images[$name].reference' "${previous}/release-manifest.json")
               if [[ "${reference}" != "${PADM_REGISTRY}/padm-${name}:"* ]]; then
@@ -398,7 +405,8 @@ jobs:
           assets="${RUNNER_TEMP}/release-assets"
           mkdir -p "${assets}"
           tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -cf - \
-            install-docker.sh docker shell/core/deployment_mode.sh shell/core/stats_grpc.sh versions.lock docker-bake.hcl \
+            install-docker.sh docker shell/core/deployment_mode.sh shell/core/stats_grpc.sh \
+            shell/core/runtime.sh shell/core/reality_targets.sh versions.lock docker-bake.hcl \
             documents/docker*.md | gzip -n >"${assets}/padm-docker-bundle.tar.gz"
           bundle_sha256=$(sha256sum "${assets}/padm-docker-bundle.tar.gz" | cut -d ' ' -f 1)
           bundle_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${PADM_RELEASE_VERSION}/padm-docker-bundle.tar.gz"

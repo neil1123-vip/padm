@@ -225,6 +225,7 @@ runFrameworkParallelSelectorListWithJobsContract() (
             "$*" >>"${callLog}"
     }
 
+    unset PADM_REGRESSION_PARALLEL_JOBS
     : >"${callLog}"
     PADM_REGRESSION_PARALLEL_JOBS=9 \
         runFrameworkParallelRegressionSelectorListWithJobs \
@@ -243,6 +244,38 @@ runFrameworkParallelSelectorListWithJobsContract() (
     grep -qx 'mode=pairs jobs=4 .* alpha alpha beta beta' "${callLog}"
     grep -qx 'mode=pairs jobs= .* alpha alpha beta beta' "${callLog}"
     [[ "$(wc -l <"${callLog}")" -eq 3 ]]
+)
+
+runRegressionDockerContractsAggregateContract() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/docker-contracts-aggregate.log"
+    local expectedLog="${TMP_DIR}/docker-contracts-aggregate.expected.log"
+    local status=0 selector
+    local -a expectedSelectors=(
+        docker-phase1 docker-menu docker-release docker-setup docker-permissions
+        docker-traditional-tls docker-reality-parameters docker-reality-targets docker-reality-target-library
+        docker-phase2 docker-phase3 docker-phase4 docker-phase5 docker-phase6 docker-traffic
+    )
+
+    runFrameworkParallelRegressionSelectors() {
+        [[ "${PADM_REGRESSION_PARALLEL_SELECTOR_MODE:-}" == pairs &&
+            "${PADM_REGRESSION_PARALLEL_JOBS:-}" == 2 ]] || return 8
+        shift
+        printf '%s\n' "$@" >"${callLog}"
+        return 7
+    }
+
+    : >"${expectedLog}"
+    for selector in "${expectedSelectors[@]}"; do
+        printf '%s\n%s\n' "${selector}" "${selector}" >>"${expectedLog}"
+    done
+    unset PADM_REGRESSION_PARALLEL_JOBS
+    set +e
+    (PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-contracts) >/dev/null 2>&1
+    status=$?
+    set -e
+    [[ "${status}" -eq 7 ]]
+    cmp -s "${expectedLog}" "${callLog}"
 )
 
 runRegressionTargetedBatchHelpers() (
@@ -317,6 +350,7 @@ runRegressionDispatcherContracts() {
     runRegressionStep parallel-collects-exited-child runParallelSelectorCollectsExitedChildWithoutRcContract
     runRegressionStep transaction-system-dispatches-children-once runTransactionSystemAggregateDispatchesChildrenExactlyOnceContract
     runRegressionStep parallel-selector-list-with-jobs runFrameworkParallelSelectorListWithJobsContract
+    runRegressionStep docker-contracts-aggregate runRegressionDockerContractsAggregateContract
 }
 
 registerRegressionFunctionLeaf regression-dispatcher-contract runRegressionDispatcherContracts

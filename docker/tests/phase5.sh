@@ -59,6 +59,44 @@ input_commit() {
     git -C "${INPUT_ROOT}" -c commit.gpgsign=false -c core.hooksPath=/dev/null commit -qm fixture
     git -C "${INPUT_ROOT}" rev-parse HEAD
 }
+IMAGE_PLAN_SCRIPT=${TEST_ROOT}/image-plan.sh
+awk '
+    /^      - name: Resolve changed image inputs$/ {step = 1; next}
+    step && /^        run: \|$/ {code = 1; next}
+    code {
+        if ($0 !~ /^          / && $0 !~ /^[[:space:]]*$/) exit
+        sub(/^          /, ""); print
+    }
+' "${BUILD_WORKFLOW}" >"${IMAGE_PLAN_SCRIPT}"
+grep -q '^baseline=' "${IMAGE_PLAN_SCRIPT}" || fail 'image input plan is missing'
+assert_pr_image_plan() (
+    local base=$1 affected=$2 names expected required
+    local planRoot=${TEST_ROOT}/image-plan
+    mkdir -p "${planRoot}"
+    : >"${planRoot}/output"
+    : >"${planRoot}/summary"
+    : >"${planRoot}/remote-calls"
+    # PR 筛选不能下载发布清单或调用验签工具。
+    gh() { printf 'gh\n' >>"${planRoot}/remote-calls"; return 99; }
+    cosign() { printf 'cosign\n' >>"${planRoot}/remote-calls"; return 99; }
+    export -f gh cosign
+    export planRoot
+    cd "${INPUT_ROOT}"
+    PADM_PUSH=false PADM_BASE_REF="${base}" PADM_REGISTRY=ghcr.io/example \
+        RUNNER_TEMP="${planRoot}" GITHUB_OUTPUT="${planRoot}/output" \
+        GITHUB_STEP_SUMMARY="${planRoot}/summary" bash "${IMAGE_PLAN_SCRIPT}"
+    names=$(sed -n 's/^build_images=//p' "${planRoot}/output" | jq -c 'map(.name) | sort')
+    case "${affected}" in
+    all) expected='["net","nginx","ops","sing-box","xray"]' ;;
+    none) expected='[]' ;;
+    *) expected=$(jq -nc --arg name "${affected}" '[$name]') ;;
+    esac
+    [[ "${names}" == "${expected}" ]] || fail "PR image plan ${affected}: ${names}"
+    required=true
+    [[ "${affected}" != none ]] || required=false
+    grep -qx "build_required=${required}" "${planRoot}/output" || fail 'wrong PR image build gate'
+    [[ ! -s "${planRoot}/remote-calls" ]] || fail 'PR image plan accessed release signatures'
+)
 assert_image_impact() {
     local base=$1 head=$2 affected=$3 image actual expected
     for image in xray sing-box nginx ops net; do
@@ -71,6 +109,7 @@ assert_image_impact() {
         fi
         [[ "${actual}" == "${expected}" ]] || fail "${affected} input reported ${image} as ${actual}"
     done
+    assert_pr_image_plan "${base}" "${4:-${affected}}"
 }
 inputBase=$(input_commit)
 sed 's/^PADM_LOCK_VERSION=.*/PADM_LOCK_VERSION=99.0.0/' "${INPUT_ROOT}/versions.lock" >"${INPUT_ROOT}/lock.next"
@@ -81,7 +120,7 @@ assert_image_impact "${inputBase}" "${inputHead}" none
 inputBase=${inputHead}
 printf '\n# 补充运行验证\n' >>"${INPUT_ROOT}/docker/tests/image-smoke.sh"
 inputHead=$(input_commit)
-assert_image_impact "${inputBase}" "${inputHead}" none
+assert_image_impact "${inputBase}" "${inputHead}" none all
 
 # 按实际 Bake 参数覆盖每个镜像的独立依赖，避免把上游升级放大为全量构建。
 for dependency in xray:PADM_LOCK_UNZIP_VERSION sing-box:PADM_LOCK_GCOMPAT_VERSION \
@@ -120,6 +159,12 @@ if bash "${INPUT_ROOT}/docker/release.sh" image-inputs-unchanged missing-ref "${
     bash "${INPUT_ROOT}/docker/release.sh" image-inputs-unchanged "${inputHead}" "${inputBase}" xray; then
     fail 'image reuse accepted an unknown or non-ancestor baseline'
 fi
+assert_pr_image_plan '' all
+assert_pr_image_plan missing-ref all
+assert_pr_image_plan "${inputHead}" none
+git -C "${INPUT_ROOT}" checkout -q "${inputBase}"
+assert_pr_image_plan "${inputHead}" all
+git -C "${INPUT_ROOT}" checkout -q "${inputHead}"
 
 UPDATER_ROOT=${TEST_ROOT}/updater
 MOCK_BIN=${TEST_ROOT}/mock-bin
@@ -752,96 +797,11 @@ for scenario in success push-race dispatch-failed; do
     esac
 done
 
-# 执行实际 CI 等待逻辑；待审批的 PR 可以派发，真实失败不能绕过。
-CI_WAIT_SCRIPT=${TEST_ROOT}/wait-upstream-ci.sh
-cat >"${CI_WAIT_SCRIPT}" <<'EOF'
-set -euo pipefail
-sleep() { :; }
-assert_pr_head() { :; }
-gh() {
-    printf '%s\n' "$*" >>"${CI_TEST_ROOT}/calls"
-    case "$1 $2" in
-    'run list')
-        [[ "$*" == *" --branch ${branch} --commit ${commit_sha} "* ]]
-        local runs conclusion
-        if [[ -f "${CI_TEST_ROOT}/dispatched" ]]; then
-            conclusion=success
-            [[ "${SCENARIO}" != dispatch-blocked ]] || conclusion=action_required
-            runs=$(jq -nc --arg conclusion "${conclusion}" \
-                '[{databaseId: 2, event: "workflow_dispatch", conclusion: $conclusion}]')
-        elif [[ "${SCENARIO}" == missing || "${SCENARIO}" == dispatch-blocked ]]; then
-            runs='[]'
-        elif [[ "${SCENARIO}" == cancelled* && -f "${CI_TEST_ROOT}/watched" ]]; then
-            local polls=0
-            [[ ! -f "${CI_TEST_ROOT}/polls" ]] || polls=$(cat "${CI_TEST_ROOT}/polls")
-            printf '%s\n' "$((polls + 1))" >"${CI_TEST_ROOT}/polls"
-            runs='[{"databaseId":1,"event":"pull_request","conclusion":"cancelled"}]'
-            if [[ "${SCENARIO}" == cancelled || ( "${SCENARIO}" == cancelled-delayed && "${polls}" -ge 2 ) ]]; then
-                runs='[{"databaseId":2,"event":"pull_request","conclusion":"success"}]'
-            fi
-        else
-            case "${SCENARIO}" in
-            success) conclusion=success ;;
-            blocked) conclusion=action_required ;;
-            queued)
-                conclusion=
-                [[ ! -f "${CI_TEST_ROOT}/watched" ]] || conclusion=action_required ;;
-            failed) conclusion=failure ;;
-            cancelled*) conclusion=cancelled ;;
-            esac
-            runs=$(jq -nc --arg conclusion "${conclusion}" \
-                '[{databaseId: 1, event: "pull_request", conclusion: $conclusion}]')
-        fi
-        jq -r "${!#}" <<<"${runs}" ;;
-    'workflow run')
-        [[ "$*" == "workflow run docker-ci.yml --repo ${GITHUB_REPOSITORY} --ref ${branch}" ]]
-        touch "${CI_TEST_ROOT}/dispatched" ;;
-    'run watch')
-        touch "${CI_TEST_ROOT}/watched"
-        [[ "${SCENARIO}" == success || ( "$3" == 2 && "${SCENARIO}" != dispatch-blocked ) ]] ;;
-    'run view')
-        case "${SCENARIO}" in
-        blocked|queued) printf 'action_required:pull_request\n' ;;
-        dispatch-blocked) printf 'action_required:workflow_dispatch\n' ;;
-        failed) printf 'failure:pull_request\n' ;;
-        cancelled*) printf 'cancelled:pull_request\n' ;;
-        *) return 99 ;;
-        esac ;;
-    *) return 99 ;;
-    esac
-}
-EOF
-awk '
-    /^          find_ci_run\(\) \{$/ {code = 1}
-    code {
-        if ($0 !~ /^          / && $0 !~ /^[[:space:]]*$/) exit
-        sub(/^          /, ""); print
-    }
-' "${UPSTREAM_WORKFLOW}" >>"${CI_WAIT_SCRIPT}"
-grep -q '^find_ci_run()' "${CI_WAIT_SCRIPT}" || fail 'upstream CI wait script is missing'
-for scenario in success blocked queued missing failed dispatch-blocked cancelled cancelled-delayed cancelled-missing; do
-    ciRoot=${TEST_ROOT}/ci-${scenario}
-    mkdir -p "${ciRoot}"
-    actual=success
-    SCENARIO="${scenario}" CI_TEST_ROOT="${ciRoot}" branch=codex/upstream-versions-test \
-        commit_sha="${COMMIT}" GITHUB_REPOSITORY=example/padm \
-        GITHUB_STEP_SUMMARY="${ciRoot}/summary" pr_url=https://example.invalid/pull/1 \
-        bash "${CI_WAIT_SCRIPT}" >"${ciRoot}/output" 2>&1 || actual=failure
-    expected=success
-    case "${scenario}" in failed|dispatch-blocked|cancelled-missing) expected=failure ;; esac
-    [[ "${actual}" == "${expected}" ]] || { cat "${ciRoot}/output"; fail "upstream CI ${scenario}: ${actual}"; }
-    dispatches=0
-    case "${scenario}" in blocked|queued|missing|dispatch-blocked) dispatches=1 ;; esac
-    [[ "$(grep -c '^workflow run ' "${ciRoot}/calls" || true)" == "${dispatches}" ]] ||
-        fail "upstream CI ${scenario} dispatched the wrong number of runs"
-    if [[ "${expected}" == success ]]; then
-        grep -Fq 'passed.' "${ciRoot}/summary" || fail "upstream CI ${scenario} did not confirm success"
-    else
-        [[ ! -s "${ciRoot}/summary" ]] || fail "upstream CI ${scenario} reported false success"
-    fi
-done
-
 grep -Fq 'workflow_call:' "${BUILD_WORKFLOW}" || fail 'build workflow is not reusable'
+grep -Fq 'sudo env PADM_REGRESSION_PARALLEL_JOBS=2 bash shell/subscription_groups_regression.sh docker-contracts' "${BUILD_WORKFLOW}" ||
+    fail 'image workflow does not use the bounded parallel contract suite'
+grep -Fq "base_ref: \${{ github.event.pull_request.base.sha || '' }}" "${PR_WORKFLOW}" ||
+    fail 'PR workflow does not pass its base commit to image validation'
 smokeRunner=$(awk '
     /^  smoke:$/ { inSmoke = 1; next }
     inSmoke && /^    steps:$/ { exit }
@@ -1004,12 +964,18 @@ grep -Fq "    if: \${{ !cancelled() && (needs.sing_box.result == 'success' || ne
     fail 'upstream refresh cannot recover published dependency locks after a failed candidate build'
 grep -Fq 'docker/release.sh refresh-upstreams' "${UPSTREAM_WORKFLOW}" ||
     fail 'upstream workflow does not refresh the lock'
-grep -Fq 'pull-requests: write' "${UPSTREAM_WORKFLOW}" || fail 'upstream workflow cannot create PRs'
+if grep -Eq 'pull-requests:|gh pr |action_required|assert_pr_head' "${UPSTREAM_WORKFLOW}"; then
+    fail 'upstream refresh still depends on PR approval'
+fi
 grep -Fq 'actions: write' "${UPSTREAM_WORKFLOW}" || fail 'upstream workflow cannot dispatch Docker CI'
-grep -Fq 'checks: read' "${UPSTREAM_WORKFLOW}" || fail 'upstream workflow cannot read Docker CI status'
+grep -Fq 'contents: write' "${UPSTREAM_WORKFLOW}" || fail 'upstream workflow cannot promote the validated lock'
 grep -Fq 'gh workflow run docker-ci.yml' "${UPSTREAM_WORKFLOW}" ||
     fail 'upstream workflow does not dispatch Docker CI'
 grep -Fq 'gh run watch' "${UPSTREAM_WORKFLOW}" || fail 'upstream workflow does not wait for Docker CI'
+grep -Fq 'git push origin "${COMMIT_SHA}:refs/heads/main"' "${UPSTREAM_WORKFLOW}" ||
+    fail 'upstream workflow does not promote the validated commit'
+grep -Fq 'gh workflow run create_release.yml --repo "${GITHUB_REPOSITORY}" --ref main -F force_release=false' "${UPSTREAM_WORKFLOW}" ||
+    fail 'upstream workflow does not hand off to the gated release'
 grep -Fq 'permissions: {}' "${UPSTREAM_WORKFLOW}" || fail 'upstream workflow keeps broad top-level write permissions'
 grep -Fq 'timeout-minutes: 30' "${UPSTREAM_WORKFLOW}" || fail 'upstream refresh has no timeout'
 grep -Fq 'Preflight refreshed Alpine dependencies' "${UPSTREAM_WORKFLOW}" ||

@@ -53,6 +53,29 @@ listRegressionDockerTlsFocusedChildSelectors() {
         docker-renewal
 }
 
+listRegressionDockerContractsChildSelectors() {
+    printf '%s\n' \
+        docker-phase1 \
+        docker-menu \
+        docker-release \
+        docker-setup \
+        docker-permissions \
+        docker-traditional-tls \
+        docker-reality-parameters \
+        docker-reality-targets \
+        docker-reality-target-library \
+        docker-phase2 \
+        docker-phase3 \
+        docker-phase4 \
+        docker-phase5 \
+        docker-phase6 \
+        docker-traffic
+}
+
+runDockerTrafficRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/traffic.sh"
+}
+
 registerRegressionFunctionLeaf install-module-manifest runInstallModuleManifestCompleteRegression
 registerRegressionFunctionLeaf fast-only-safety runRegressionFastOnlySafety
 registerRegressionFunctionLeaf fast-only-output-auto-install runRegressionFastOnlyOutputAutoInstall
@@ -86,9 +109,12 @@ registerRegressionFunctionLeaf docker-phase3 runDockerPhase3Regression
 registerRegressionFunctionLeaf docker-phase4 runDockerPhase4Regression
 registerRegressionFunctionLeaf docker-phase5 runDockerPhase5Regression
 registerRegressionFunctionLeaf docker-phase6 runDockerPhase6Regression
+registerRegressionFunctionLeaf docker-traffic runDockerTrafficRegression
 
 registerRegressionParallelSelectorList docker-tls-focused runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/docker-tls-focused-parallel-${BASHPID:-$$}" listRegressionDockerTlsFocusedChildSelectors
+registerRegressionParallelSelectorList docker-contracts runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-contracts-parallel-${BASHPID:-$$}" listRegressionDockerContractsChildSelectors 2
 registerRegressionParallelSelectorList fast-only-output runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/fast-only-output-parallel-${BASHPID:-$$}" listRegressionFastOnlyOutputChildSelectors
 registerRegressionParallelSelectorList fast-only runFrameworkParallelRegressionSelectorList \

@@ -47,9 +47,7 @@ jobs:
     timeout-minutes: 30
     permissions:
       actions: write
-      checks: read
       contents: write
-      pull-requests: write
     steps:
       - name: Checkout main
         uses: actions/checkout@v7
@@ -60,41 +58,14 @@ jobs:
       - name: Prepare update branch
         id: pending
         shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          main_sha=$(git rev-parse HEAD)
+          base_sha=$(git rev-parse HEAD)
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          prs=$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/pulls?state=open&base=main&per_page=100" |
-            jq --arg repo "${GITHUB_REPOSITORY}" '[.[][] |
-              select(.head.repo.full_name == $repo and (.head.ref | startswith("codex/upstream-versions-")))]')
-          count=$(jq length <<<"${prs}")
-          [[ "${count}" -le 1 ]] || { echo 'Multiple upstream update PRs require manual resolution.' >&2; exit 1; }
           branch="codex/upstream-versions-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          pr_url=
-          original_sha=${main_sha}
-          if [[ "${count}" == 1 ]]; then
-            # 只续跑同仓分支；不能将 fork 的脚本带入具有写权限的刷新任务。
-            jq -e --arg repo "${GITHUB_REPOSITORY}" '.[0].head.repo.full_name == $repo' <<<"${prs}" >/dev/null || {
-              echo 'Refusing to execute an upstream update from another repository.' >&2; exit 1;
-            }
-            branch=$(jq -r '.[0].head.ref' <<<"${prs}")
-            pr_url=$(jq -r '.[0].html_url' <<<"${prs}")
-            original_sha=$(jq -r '.[0].head.sha' <<<"${prs}")
-            git check-ref-format --branch "${branch}" >/dev/null
-            git fetch origin "refs/heads/${branch}:refs/remotes/origin/${branch}"
-            [[ "$(git rev-parse "refs/remotes/origin/${branch}")" == "${original_sha}" ]] || {
-              echo 'The upstream PR changed while preparing it; retry after the branch settles.' >&2; exit 1;
-            }
-            git switch --create "${branch}" --track "origin/${branch}"
-            # 普通合并保留人工修复；有冲突时停止，不覆盖分支或强制推送。
-            git merge --no-edit "${main_sha}"
-          else
-            git switch --create "${branch}"
-          fi
-          printf 'branch=%s\npr_url=%s\noriginal_sha=%s\n' "${branch}" "${pr_url}" "${original_sha}" >>"${GITHUB_OUTPUT}"
+          git switch --create "${branch}"
+          printf 'branch=%s\nbase_sha=%s\n' "${branch}" "${base_sha}" >>"${GITHUB_OUTPUT}"
 
       - name: Refresh stable upstream releases
         id: update
@@ -117,127 +88,104 @@ jobs:
           fi
 
       - name: Validate the refreshed lock
-        if: steps.update.outputs.changed == 'true' || steps.pending.outputs.pr_url != ''
+        if: steps.update.outputs.changed == 'true'
         shell: bash
         run: |
           set -euo pipefail
           bash -n docker/release.sh
           git diff --check
           bash docker/release.sh validate-lock
-          # 完整 Docker contract 由同一提交的 PR Docker CI 统一执行，避免刷新任务重复等待 phase5。
+          # 完整 Docker contract 由更新分支的 Docker CI 统一执行。
 
       - name: Preflight refreshed Alpine dependencies
         if: steps.update.outputs.changed == 'true'
         shell: bash
         run: bash docker/release.sh preflight
 
-      - name: Save update PR
+      - name: Save update branch
         id: save
-        if: steps.update.outputs.changed == 'true' || steps.pending.outputs.pr_url != ''
+        if: steps.update.outputs.changed == 'true'
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BRANCH: ${{ steps.pending.outputs.branch }}
-          PR_URL: ${{ steps.pending.outputs.pr_url }}
-          ORIGINAL_SHA: ${{ steps.pending.outputs.original_sha }}
         run: |
           set -euo pipefail
-          set -a
-          . ./versions.lock
-          set +a
           branch=${BRANCH}
-          pr_url=${PR_URL}
-          title='chore(deps): refresh upstream versions'
-          if ! git diff --quiet -- versions.lock; then
-            git add versions.lock
-            git commit -m "${title}"
-          fi
+          git add versions.lock
+          git commit -m 'chore(deps): refresh upstream versions'
           commit_sha=$(git rev-parse HEAD)
-          if [[ "${commit_sha}" != "${ORIGINAL_SHA}" ]]; then
-            git push --set-upstream origin "${branch}"
-          fi
-          if [[ -z "${pr_url}" ]]; then
-            body_file="${RUNNER_TEMP}/upstream-pr-body.md"
-            printf '%s\n\n%s\n%s\n%s\n\n%s\n' \
-              'Refresh the pinned stable upstream releases and their downloaded SHA-256 values.' \
-              "- Xray: ${PADM_LOCK_XRAY_VERSION}" \
-              "- sing-box: ${PADM_LOCK_SING_BOX_VERSION}" \
-              "- acme.sh: ${PADM_LOCK_ACME_SH_VERSION}" \
-              'Docker CI validates this commit; the refresh task reuses its PR run or dispatches a fallback.' >"${body_file}"
-            pr_url=$(gh pr create --repo "${GITHUB_REPOSITORY}" --base main --head "${branch}" \
-              --title "${title}" --body-file "${body_file}")
-          fi
-          printf 'branch=%s\npr_url=%s\ncommit_sha=%s\n' "${branch}" "${pr_url}" "${commit_sha}" >>"${GITHUB_OUTPUT}"
+          git push --set-upstream origin "${branch}"
+          printf 'branch=%s\ncommit_sha=%s\n' "${branch}" "${commit_sha}" >>"${GITHUB_OUTPUT}"
 
       - name: Ensure Docker CI
-        if: steps.save.outputs.pr_url != ''
+        if: steps.update.outputs.changed == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BRANCH: ${{ steps.save.outputs.branch }}
-          PR_URL: ${{ steps.save.outputs.pr_url }}
           COMMIT_SHA: ${{ steps.save.outputs.commit_sha }}
         run: |
           set -euo pipefail
           branch=${BRANCH}
-          pr_url=${PR_URL}
           commit_sha=${COMMIT_SHA}
-          assert_pr_head() {
-            gh pr view "${pr_url}" --repo "${GITHUB_REPOSITORY}" \
-              --json state,isCrossRepository,headRefName,headRefOid |
-              jq -e --arg branch "${branch}" --arg sha "${commit_sha}" \
-                '.state == "OPEN" and .isCrossRepository == false and .headRefName == $branch and .headRefOid == $sha' >/dev/null || {
-                  echo 'The upstream PR state or head changed during validation; rerun against its current head.' >&2; return 1;
-                }
+          assert_update_head() {
+            [[ "$(git ls-remote origin "refs/heads/${branch}" | cut -f1)" == "${commit_sha}" ]] || {
+              echo 'The update branch changed during validation; retry from current main.' >&2; return 1;
+            }
           }
-          assert_pr_head
+          assert_update_head
           find_ci_run() {
             gh run list --repo "${GITHUB_REPOSITORY}" --workflow docker-ci.yml \
-              --branch "${branch}" --commit "${commit_sha}" --limit 100 \
-              --json databaseId,event,conclusion --jq '[.[] | select(.event == "workflow_dispatch" or (.event == "pull_request" and .conclusion != "action_required"))] | .[0].databaseId // empty'
+              --event workflow_dispatch --branch "${branch}" --commit "${commit_sha}" --limit 100 \
+              --json databaseId --jq '.[0].databaseId // empty'
           }
-          ci_run_id=$(find_ci_run)
-          passed=false
-          for _ in {1..3}; do
-            for _ in {1..3}; do
-              [[ -n "${ci_run_id}" ]] && break
-              sleep 2
-              ci_run_id=$(find_ci_run)
-            done
-            if [[ -z "${ci_run_id}" ]]; then
-              # 机器人 PR 可能缺少运行或等待人工批准，使用显式派发验证本次生成的分支。
-              gh workflow run docker-ci.yml --repo "${GITHUB_REPOSITORY}" --ref "${branch}"
-            fi
-            for _ in {1..30}; do
-              [[ "${ci_run_id}" =~ ^[0-9]+$ ]] && break
-              sleep 2
-              ci_run_id=$(find_ci_run)
-            done
-            [[ "${ci_run_id}" =~ ^[0-9]+$ ]] || {
-              echo "Docker CI did not expose a run for ${commit_sha}" >&2
-              exit 1
-            }
-            if gh run watch "${ci_run_id}" --repo "${GITHUB_REPOSITORY}" --exit-status; then
-              passed=true
-              break
-            fi
-            result=$(gh run view "${ci_run_id}" --repo "${GITHUB_REPOSITORY}" --json conclusion,event --jq '.conclusion + ":" + .event')
-            if [[ "${result}" == action_required:pull_request ]]; then
-              # 排队后才转入审批的 PR 也由下一轮查找触发显式派发。
-              ci_run_id=$(find_ci_run)
-              continue
-            fi
-            [[ "${result}" == cancelled:* ]] || exit 1
-            # 两种事件同时到达时，等待同一提交取代被取消运行的验证。
-            replacement=
-            for _ in {1..30}; do
-              replacement=$(find_ci_run)
-              [[ "${replacement}" =~ ^[0-9]+$ && "${replacement}" -gt "${ci_run_id}" ]] && break
-              sleep 2
-            done
-            [[ "${replacement}" =~ ^[0-9]+$ && "${replacement}" -gt "${ci_run_id}" ]] || exit 1
-            ci_run_id=${replacement}
+          gh workflow run docker-ci.yml --repo "${GITHUB_REPOSITORY}" --ref "${branch}"
+          ci_run_id=
+          for _ in {1..30}; do
+            ci_run_id=$(find_ci_run)
+            [[ "${ci_run_id}" =~ ^[0-9]+$ ]] && break
+            sleep 2
           done
-          [[ "${passed}" == true ]] || { echo 'Docker CI did not complete successfully' >&2; exit 1; }
-          assert_pr_head
-          printf 'Updated %s and Docker CI run %s passed.\n' "${pr_url}" "${ci_run_id}" >>"${GITHUB_STEP_SUMMARY}"
+          [[ "${ci_run_id}" =~ ^[0-9]+$ ]] || {
+            echo "Docker CI did not expose a run for ${commit_sha}" >&2; exit 1;
+          }
+          gh run watch "${ci_run_id}" --repo "${GITHUB_REPOSITORY}" --exit-status
+          assert_update_head
+          printf 'Update %s passed Docker CI run %s.\n' "${commit_sha}" "${ci_run_id}" >>"${GITHUB_STEP_SUMMARY}"
+
+      - name: Promote validated update
+        if: steps.update.outputs.changed == 'true'
+        shell: bash
+        env:
+          BASE_SHA: ${{ steps.pending.outputs.base_sha }}
+          COMMIT_SHA: ${{ steps.save.outputs.commit_sha }}
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          # main 已前进时重新生成、验证更新，不合入未经验证的合并提交。
+          [[ "$(git rev-parse FETCH_HEAD)" == "${BASE_SHA}" ]] || {
+            echo 'main changed during validation; retry the upstream refresh.' >&2; exit 1;
+          }
+          [[ "$(git diff --name-only "${BASE_SHA}" "${COMMIT_SHA}")" == versions.lock ]] || {
+            echo 'The validated update changes files outside versions.lock.' >&2; exit 1;
+          }
+          git push origin "${COMMIT_SHA}:refs/heads/main"
+          printf 'Promoted validated update %s to main.\n' "${COMMIT_SHA}" >>"${GITHUB_STEP_SUMMARY}"
+
+      - name: Ensure Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LOCK_CHANGED: ${{ steps.update.outputs.changed }}
+        run: |
+          set -euo pipefail
+          # 派发失败后可能已有文档提交，按最近锁变更识别待接续更新。
+          if [[ "${LOCK_CHANGED}" != true ]]; then
+            lock_commit=$(git log -1 --format=%H -- versions.lock)
+            [[ -n "${lock_commit}" ]] || exit 0
+            [[ "$(git log -1 --format=%s "${lock_commit}")" == 'chore(deps): refresh upstream versions' ]] || exit 0
+            [[ "$(git diff-tree --no-commit-id --name-only -r "${lock_commit}")" == versions.lock ]] || exit 0
+          fi
+          # GITHUB_TOKEN 推送不会触发 push workflow，显式派发既有发布流程。
+          gh workflow run create_release.yml --repo "${GITHUB_REPOSITORY}" --ref main -F force_release=false
+          printf 'Release dispatched for the upstream update.\n' >>"${GITHUB_STEP_SUMMARY}"

@@ -18,12 +18,22 @@
   和签名校验；无法确认可信基线时完整重建。
   分镜像/架构使用 Actions 构建缓存，复用基线须来自已验签且可追溯的旧 manifest。
 - `.github/workflows/docker-ci.yml` 为 Pull Request 复用同一 workflow，禁止推送。
+  PR 按 base commit 筛选实际变化的镜像；冒烟脚本变化或无法确认祖先基线时全量验证，
+  手动验证仍检查所有镜像。PR 不下载发布清单或安装 Cosign，发布复用仍须验签。
+- Docker 契约统一使用 `docker-contracts` selector，保留全部 15 项检查，默认 2 个 worker；
+  每项独立夹具与日志，任一失败都会阻断构建。Alpine 预检每份索引只解压、解析一次，
+  仍检查两架构、两个仓库中的所有锁定包版本。
 - `.github/workflows/create_release.yml` 只对运行内容变化自动发布，串行处理最新 `main`，
   Docker 测试、发布脚本和 CI 变更也触发检查；没有待发布运行变化时只跑契约测试。
   失败发布后的测试或 CI 修复可续发；只有镜像 workflow 成功、manifest 验签和资产摘要检查通过后才公开草稿。
 - Release 只附带 `release-manifest.json`、Cosign 签发的 Sigstore bundle v0.3 和控制 bundle，
   不把 manifest 回提交到 `main`。镜像证明保存在 OCI 仓库，诊断 JSON 在 Actions 保留 7 天。
-- PR 和手动验证共用去重并发组，过时验证取消；上游刷新优先等待已有的同提交 CI，缺失才补发。
+- PR 和手动验证共用去重并发组，过时验证取消。
+- 上游刷新不创建 PR：独立更新分支仅提交 `versions.lock`，显式派发同一提交的 Docker CI；
+  通过后确认 `main` 未变化，普通快进推送并派发 Release，保留既有发布门禁。
+  CI 失败、更新分支变化或 `main` 前进均停止，不强推、不覆盖旧 PR 的人工修复。
+  若主分支已接收更新但 Release 派发失败，重跑会按最近锁变更补发，
+  不要求再次修改锁文件，也不受后续文档提交影响。
 
 ## 本地验证
 
@@ -33,11 +43,11 @@
 | JSON schema/manifest 生成与未知字段拒绝 | 通过 |
 | `docker-phase5` | 通过 |
 | workflow YAML 解析 | 通过 |
-| `git diff --check` | 待提交前复核 |
+| `git diff --check` | 通过 |
 
 ## CI 边界
 
-本机 Docker daemon 未运行，未在 Windows 上伪造镜像 build/run 结果。真实的
+本机使用 Docker Desktop Linux 容器验证回归，未在 Windows 上伪造镜像 build/run 结果。真实的
 Buildx 双架构构建、原生双架构 smoke、GHCR push、Cosign keyless 身份、SBOM/provenance
 attestation 和 GitHub Release API 必须在 CI runner 上完成；镜像 smoke 在匹配架构的原生
 runner 上执行，避免 QEMU 运行时差异；任一门禁失败都不会进入

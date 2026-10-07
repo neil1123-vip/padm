@@ -254,12 +254,13 @@ alpine_tag_metadata() {
 }
 
 apk_index_package_versions() {
-    local index=$1 package=$2
+    local index=$1 package=${2:-}
     tar -xOzf "${index}" APKINDEX | awk -v package="${package}" '
         function emit() {
             if (!record) return
             if (name == "" || version == "") exit 1
-            if (name == package) print version
+            if (package == "") print name "\t" version
+            else if (name == package) print version
             entries++
             name = version = ""
             record = 0
@@ -287,7 +288,7 @@ download_apk_indexes() {
 }
 
 preflight() (
-    local tool tmpRoot minor arch repo package key expected candidates found
+    local tool tmpRoot minor arch repo package key expected candidates versions
     validate_lock
     for tool in curl tar awk grep; do
         command -v "${tool}" >/dev/null 2>&1 || die "missing preflight tool: ${tool}"
@@ -297,16 +298,17 @@ preflight() (
     minor=${PADM_LOCK_ALPINE_VERSION%.*}
     download_apk_indexes "${minor}" "${tmpRoot}"
     for arch in x86_64 aarch64; do
+        candidates=
+        # 每个索引只解压、校验一次，保留全部可用版本。
+        for repo in main community; do
+            versions=$(apk_index_package_versions "${tmpRoot}/apkindex-${repo}-${arch}.tar.gz") ||
+                die "invalid Alpine ${minor} ${repo}/${arch} APK index; retry or run Refresh Upstream Versions"
+            candidates+="${versions}"$'\n'
+        done
         for package in "${APK_PACKAGES[@]}"; do
             key=${APK_LOCK_KEYS[${package}]}
             expected=${!key}
-            found=false
-            for repo in main community; do
-                candidates=$(apk_index_package_versions "${tmpRoot}/apkindex-${repo}-${arch}.tar.gz" "${package}") ||
-                    die "invalid Alpine ${minor} ${repo}/${arch} APK index while checking ${package}=${expected}; retry or run Refresh Upstream Versions"
-                if grep -Fxq -- "${expected}" <<<"${candidates}"; then found=true; fi
-            done
-            [[ "${found}" == true ]] ||
+            grep -Fxq -- "${package}"$'\t'"${expected}" <<<"${candidates}" ||
                 die "Alpine ${minor} ${arch} locked APK ${package}=${expected} is unavailable; run Refresh Upstream Versions and merge its versions.lock update before publishing"
         done
     done
