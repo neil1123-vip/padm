@@ -58,6 +58,7 @@ dockerMenuRun() {
     # 独立进程组便于中断整个动作，包括 CLI 正在等待的 Docker 命令。
     [[ $- != *m* ]] || monitorEnabled=1
     if [[ "${1:-}" == setup || "${1:-}" == edit ||
+        ( "${1:-}" == account && "${2:-}" != list ) ||
         ( "${1:-}" == tls && "${2:-}" == manage ) ||
         ( "${1:-}" == protocol && ( "${2:-}" == select-target ||
           "${2:-}" == scan-targets || "${2:-}" == scan-targets-asn ) ) ]]; then
@@ -275,6 +276,90 @@ dockerMenuRealityTargetActions() {
     esac
 }
 
+dockerMenuAccounts() {
+    local choice accountId name listeners enabled answer
+    local -a action=()
+    while :; do
+        DOCKER_MENU_SIGNAL=0
+        printf '\nDocker 账号管理\n'
+        printf '%s\n' \
+            '1. 查看账号' \
+            '2. 新建账号' \
+            '3. 编辑账号' \
+            '4. 复制账号' \
+            '5. 启用账号' \
+            '6. 停用账号' \
+            '7. 删除账号' \
+            '8. 轮换凭据' \
+            '0. 返回'
+        printf '请选择: '
+        if ! IFS= read -r choice; then
+            [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
+            return 0
+        fi
+        case "${choice}" in
+        0) return 0 ;;
+        1) dockerMenuRun account list || true ;;
+        2)
+            action=(account create)
+            dockerSetupRead name '账号名称（空输入自动生成，0 返回）: ' || continue
+            [[ -z "${name}" ]] || action+=(--name "${name}")
+            dockerSetupRead listeners '入口 ID（逗号分隔，空输入使用全部入口，0 返回）: ' || continue
+            [[ -z "${listeners}" ]] || action+=(--listeners "${listeners}")
+            dockerSetupRead enabled '是否启用账号 [Y/n]: ' y || continue
+            case "${enabled}" in
+            y|Y|yes|YES) ;;
+            n|N|no|NO) action+=(--disabled) ;;
+            *) printf '请输入 y 或 n。\n'; continue ;;
+            esac
+            dockerMenuRun "${action[@]}" || true
+            ;;
+        3)
+            dockerSetupRead accountId '账号 ID（0 返回）: ' || continue
+            action=(account edit "${accountId}")
+            dockerSetupRead name '新名称（空输入保持不变，0 返回）: ' || continue
+            [[ -z "${name}" ]] || action+=(--name "${name}")
+            dockerSetupRead listeners '新入口 ID（空输入保持不变，0 返回）: ' || continue
+            [[ -z "${listeners}" ]] || action+=(--listeners "${listeners}")
+            [[ "${#action[@]}" -gt 3 ]] ||
+                { printf '至少修改名称或入口。\n'; continue; }
+            dockerMenuRun "${action[@]}" || true
+            ;;
+        4)
+            dockerSetupRead accountId '账号 ID（0 返回）: ' || continue
+            action=(account copy "${accountId}")
+            dockerSetupRead name '新名称（空输入自动生成，0 返回）: ' || continue
+            [[ -z "${name}" ]] || action+=(--name "${name}")
+            dockerMenuRun "${action[@]}" || true
+            ;;
+        5|6)
+            dockerSetupRead accountId '账号 ID（0 返回）: ' || continue
+            if [[ "${choice}" == 5 ]]; then
+                dockerMenuRun account enable "${accountId}" || true
+            else
+                dockerMenuRun account disable "${accountId}" || true
+            fi
+            ;;
+        7|8)
+            dockerSetupRead accountId '账号 ID（0 返回）: ' || continue
+            dockerSetupRead answer '确认操作？[y/N]: ' n || continue
+            case "${answer}" in
+            y|Y|yes|YES)
+                if [[ "${choice}" == 7 ]]; then
+                    dockerMenuRun account delete "${accountId}" --yes || true
+                else
+                    dockerMenuRun account rotate "${accountId}" --yes || true
+                fi
+                ;;
+            n|N|no|NO) ;;
+            *) printf '请输入 y 或 n。\n' ;;
+            esac
+            ;;
+        *) printf '无效选项，请重新选择。\n' ;;
+        esac
+    done
+}
+
 dockerMenu() {
     local choice
     if [[ "$#" -ne 0 || ! -t 0 || ! -t 1 ]]; then
@@ -298,6 +383,7 @@ dockerMenu() {
             '7. 编辑配置/导入原始规格' \
             '8. 证书管理' \
             '9. 协议与入口' \
+            '10. 账号管理' \
             '0. 退出'
         printf '请选择: '
         if ! IFS= read -r choice; then
@@ -317,6 +403,7 @@ dockerMenu() {
         7) dockerMenuRun edit || true ;;
         8) dockerMenuRun tls manage || true ;;
         9) dockerMenuProtocols ;;
+        10) dockerMenuAccounts ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

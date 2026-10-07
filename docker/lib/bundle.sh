@@ -60,6 +60,7 @@ dockerBundleSourceIsComplete() {
         docker/lib/traffic.sh \
         docker/lib/lifecycle.sh \
         docker/lib/setup.sh \
+        docker/lib/accounts.sh \
         docker/lib/menu.sh \
         docker/contracts/configure.schema.json \
         docker/contracts/deployment.schema.json \

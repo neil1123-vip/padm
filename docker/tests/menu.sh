@@ -294,6 +294,43 @@ runPty() {
             printf '0\n' >&3
         elif [[ "${driver}" == targets ]]; then
             runTargetsDriver "${input}"
+        elif [[ "${driver}" == accounts ]]; then
+            local accountMenuCount=1
+            printf '10\n' >&3
+            waitForText 'Docker 账号管理' "${CONTROL_LOG}" "${accountMenuCount}" || exit 26
+            printf '1\n' >&3
+            accountMenuCount=$((accountMenuCount + 1))
+            waitForText 'Docker 账号管理' "${CONTROL_LOG}" "${accountMenuCount}" || exit 28
+            printf '2\nBob\nentry-reality\nn\n' >&3
+            accountMenuCount=$((accountMenuCount + 1))
+            waitForText 'Docker 账号管理' "${CONTROL_LOG}" "${accountMenuCount}" || exit 28
+            printf '3\n' >&3
+            waitForText '账号 ID（0 返回）' "${CONTROL_LOG}" || exit 27
+            printf 'alpha\nAlpha-Edited\nentry-reality\n' >&3
+            accountMenuCount=$((accountMenuCount + 1))
+            waitForText 'Docker 账号管理' "${CONTROL_LOG}" "${accountMenuCount}" || exit 28
+            printf '4\n' >&3
+            waitForText '账号 ID（0 返回）' "${CONTROL_LOG}" || exit 27
+            printf 'alpha\nAlpha-Copy\n' >&3
+            accountMenuCount=$((accountMenuCount + 1))
+            waitForText 'Docker 账号管理' "${CONTROL_LOG}" "${accountMenuCount}" || exit 28
+            for accountChoice in 5 6; do
+                printf '%s\n' "${accountChoice}" >&3
+                waitForText '账号 ID（0 返回）' "${CONTROL_LOG}" || exit 27
+                printf 'alpha\n' >&3
+                accountMenuCount=$((accountMenuCount + 1))
+                waitForText 'Docker 账号管理' "${CONTROL_LOG}" "${accountMenuCount}" || exit 28
+            done
+            for accountChoice in 7 8; do
+                printf '%s\n' "${accountChoice}" >&3
+                waitForText '账号 ID（0 返回）' "${CONTROL_LOG}" || exit 27
+                printf 'alpha\ny\n' >&3
+                accountMenuCount=$((accountMenuCount + 1))
+                waitForText 'Docker 账号管理' "${CONTROL_LOG}" "${accountMenuCount}" || exit 28
+            done
+            printf '0\n' >&3
+            waitForText 'Docker 管理菜单' "${CONTROL_LOG}" 2 || exit 29
+            printf '0\n' >&3
         elif [[ "${driver}" == logs || "${driver}" == term ]]; then
             printf '6\n' >&3
             waitForText 'mock-log-ready' "${CONTROL_LOG}" || exit 3
@@ -482,6 +519,7 @@ protocol)
     printf 'fixture-protocol-output\n'
     ;;
 edit) recordAction "$@" ;;
+account) recordAction "$@" ;;
 tls) [[ "${2:-}" == manage ]] || exit 2; dockerTlsManageCommand ;;
 menu)
     source "${PROJECT_ROOT}/docker/lib/menu.sh"
@@ -586,6 +624,11 @@ PADM_XRAY_IMAGE=ghcr.io/example/padm-xray:test@sha256:$(printf '1%.0s' {1..64})
 PADM_DOCKER_ROOT=${PADM_DOCKER_INSTALL_DIR}
 EOF
 printf '{"name":"padm-docker","services":{}}\n' >"${PADM_DOCKER_INSTALL_DIR}/compose.json"
+
+: >"${TLS_WIZARD_ACTIONS}"
+runPty accounts accounts '' "${TLS_WIZARD_CLI}" menu
+[[ "$(<"${TLS_WIZARD_ACTIONS}")" == $'account list\naccount create --name Bob --listeners entry-reality --disabled\naccount edit alpha --name Alpha-Edited --listeners entry-reality\naccount copy alpha --name Alpha-Copy\naccount enable alpha\naccount disable alpha\naccount delete alpha --yes\naccount rotate alpha --yes' ]] ||
+    fail 'account menu dispatched incorrect actions'
 
 : >"${COMPOSE_LOG}"
 runPty repeated-status-restart menu $'1\n1\n5\n1\n0\n' "${CLI}" menu

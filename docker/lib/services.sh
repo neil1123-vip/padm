@@ -19,6 +19,7 @@ DOCKER_CONFIG_BACKUP=
 DOCKER_CONFIG_SWITCHED=0
 DOCKER_CONFIG_STREAM_TRANSITION=0
 DOCKER_CONFIG_STREAM_HOST_TRANSITION=0
+DOCKER_CONFIG_RELEASE_INPUTS=
 DOCKER_TLS_CANDIDATE=
 DOCKER_TLS_BACKUP=
 DOCKER_TLS_SWITCHED=0
@@ -403,14 +404,54 @@ dockerConfigureSpecMigrate() {
 }
 
 dockerConfigureReleasePrepare() {
+    DOCKER_CONFIG_RELEASE_INPUTS=
     dockerManifestPrepare "${1:-}" "${2:-}" "${3:-}" || return "${PADM_DOCKER_RC_MANIFEST}"
     dockerStageReleaseBundle >&2 || return "${PADM_DOCKER_RC_BUNDLE}"
     dockerPullManifestImages >&2 || return "${PADM_DOCKER_RC_COMPOSE}"
 }
 
+dockerConfigureReleaseReuseInstalled() {
+    local root specFile bundlePath inputs
+    root=$(dockerInstallRoot) || return 1
+    dockerRequireInstalledBundle || return "${PADM_DOCKER_RC_STATE}"
+    specFile="${root}/config/spec.json"
+    [[ -f "${specFile}" && ! -L "${specFile}" && -O "${specFile}" ]] || {
+        dockerError '当前 Docker 服务尚未接入完整配置规格'
+        return "${PADM_DOCKER_RC_STATE}"
+    }
+    dockerPrivateFileIsRestricted "${specFile}" || return "${PADM_DOCKER_RC_STATE}"
+    dockerManagedSpecMatchesDeployment "${specFile}" \
+        "${root}/deployment.json" "${root}/images.env" || {
+        dockerError '当前 spec、deployment.json 或 images.env 不一致，拒绝复用发布输入'
+        return "${PADM_DOCKER_RC_STATE}"
+    }
+    bundlePath=$(dockerCurrentBundlePath) || return "${PADM_DOCKER_RC_BUNDLE}"
+    dockerBundleSupportsSpec "${bundlePath}" "${specFile}" || return "${PADM_DOCKER_RC_BUNDLE}"
+    inputs=$(jq -c '
+      {release: .release, images: .images}
+    ' "${specFile}") || return "${PADM_DOCKER_RC_STATE}"
+    jq -e '
+      (.release | type == "object" and
+        (.version | type == "string" and length > 0) and
+        (.manifest_sha256 | type == "string" and test("^[a-f0-9]{64}$")) and
+        (.signature_identity | type == "string" and length > 0)) and
+      (.images | type == "object" and
+        (keys | sort) == ["net", "nginx", "ops", "sing-box", "xray"] and
+        all(.[]; type == "string"))
+    ' <<<"${inputs}" >/dev/null 2>&1 || return "${PADM_DOCKER_RC_STATE}"
+    dockerCleanupStagedBundle || return "${PADM_DOCKER_RC_BUNDLE}"
+    DOCKER_STAGED_BUNDLE_PATH=${bundlePath}
+    DOCKER_CONFIG_RELEASE_INPUTS=${inputs}
+}
+
 dockerConfigureReleaseValidate() {
     local specFile=$1 inputs
-    inputs=$(dockerManifestConfigurationInputs) || {
+    if [[ -n "${DOCKER_CONFIG_RELEASE_INPUTS:-}" ]]; then
+        inputs=${DOCKER_CONFIG_RELEASE_INPUTS}
+    else
+        inputs=$(dockerManifestConfigurationInputs)
+    fi
+    [[ -n "${inputs}" ]] || {
         dockerError '可信发布输入缺失或已变更，拒绝配置'
         return 1
     }

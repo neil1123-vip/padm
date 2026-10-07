@@ -116,7 +116,7 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 | 原生菜单 | Docker 当前状态 | 已覆盖 | 尚未覆盖或边界 |
 | --- | --- | --- | --- |
 | 安装与重装 | 部分已交付，完整管理 `deferred` | `install`、可信发布输入 `release`、交互首配 `setup`、`edit`、`configure`、候选校验及恢复 | 支持 `1`、`2`、`3`、`4`、`5`、`21`、`22`、`23`、`24`、`25`、`26`、`27`、`28`、`29`、`30`、`31` 字段编辑、完整原始 spec 接入、多入口及主副核心；重装和真实发布连通未完成。 |
-| 订阅与用户 | `supported` + `host-integrated` + `deferred` | 有条件的订阅发布、流量采集/额度、v3 独立账号规格与双核心认证/统计底座、WireGuard 宿主集成 | 发布仅支持包含协议 `21` 和受管 TLS 的 Xray 配置，仍是部署级 token；账号 CRUD、分享组和多服务器工作流未迁移；WireGuard 需 `net-wireguard`。 |
+| 订阅与用户 | `supported` + `host-integrated` + `deferred` | 有条件的订阅发布、流量采集/额度、v3 独立账号规格与双核心认证/统计底座、账号 CLI/菜单事务、WireGuard 宿主集成 | 发布仅支持包含协议 `21` 和受管 TLS 的 Xray 配置，仍是部署级 token；分享组、独立发布授权和多服务器工作流未迁移；WireGuard 需 `net-wireguard`。 |
 | 协议与入口 | 部分 `supported`，管理工作流 `deferred` | `1` Reality Vision、`2` XHTTP、`3` Hysteria2、`4` AnyTLS、`5` NaiveProxy、`21` VLESS WS TLS、`22` VMess WS TLS、`23` VMess HTTPUpgrade TLS、`24` VLESS gRPC TLS、`25` Trojan gRPC TLS、`26` Reality gRPC、`27` TLS Vision fallback、`28` direct Trojan、`29` Trojan TLS fallback、`30` Shadowsocks、`31` TUIC 的配置运行、字段编辑、分享链接、多入口、Reality 传输派生、参数重生成和目标站管理 | XHTTP、VMess WS、gRPC TLS 和传统 TLS fallback 仅限 Xray，Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC 仅限 sing-box；HTTPUpgrade 支持两核心；完整协议管理、UDP 端口跳跃、Reality 443 共存、内部路由协议和 CDN 地址覆盖尚未开放；Fail2ban WS 增删及端口联动未交付。 |
 | 站点与证书 | 部分 `supported`，其余 `deferred` | TLS 文件安装、DNS-01 ACME、Nginx WebSocket/HTTPUpgrade/gRPC HTTP/2 入口及传统 TLS fallback 的最小静态后端 | webroot/standalone ACME、静态站点/302/ALPN 管理尚未迁移。 |
 | 路由与访问控制 | `host-integrated` + `deferred` | WireGuard、TUN/TProxy 宿主集成合同 | WARP、IPv6 调优、Socks/HTTP 中继、DNS/hosts、BT、访问控制和路由规则尚未迁移。 |
@@ -173,7 +173,7 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 | `acme-dns` | 站点与证书 -> 本机 TLS 证书 | `supported` | `acme` | bridge + 宿主 CLI 调度 | 菜单/CLI DNS-01 issue/renew 及自动续期启停/状态；root 私有输入、唯一 systemd/cron 任务、部署锁和候选账户/证书事务；未到期跳过，更新/回滚保留最新输入，卸载只撤销受管任务。 |
 | `subscription` | 订阅与用户 -> 订阅发布 | `supported` | `core-xray` / `nginx` / `subscription` | bridge | token 保护的发布；要求主核心或副核心中的 Xray 协议 `21` 和受管 TLS，可包含两核心 Reality/direct Trojan 和 sing-box Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC 链接；没有 Xray WS TLS 入口时不可发布。 |
 | `subscription-traffic` | 订阅与用户 -> 流量与额度 | `supported` | 核心 profile | 宿主 CLI | 定时采集以及 show/limit/reset；自用按原 UUID、独立账号按稳定 ID 共享跨核心累计与额度，凭据轮换和恢复不回退累计。 |
-| `subscription-users` | 订阅与用户 -> 用户和分享订阅 | `deferred` | 核心、订阅 | bridge | 4A.1 支持完整 v3 规格声明 1–256 个独立账号并追加到自用认证；CRUD 菜单、分享组与独立发布授权仍未迁移。 |
+| `subscription-users` | 订阅与用户 -> 用户和分享订阅 | `supported` | 核心、订阅 | bridge | 4A.1 完整 v3 账号底座与 4A.2 账号 CLI/菜单事务已交付；分享组、独立发布授权、纯内容复制和业务恢复仍未迁移。 |
 | `subscription-multiserver` | 订阅与用户 -> 主控/被控、多服务器同步 | `deferred` | 订阅、WireGuard | host | WireGuard 集成存在；角色管理、同步事务和恢复向导未迁移。 |
 | `acme-webroot` | 站点与证书 -> 传统 TLS fallback | `deferred` | `acme` / `nginx` | bridge | 需要 webroot、端口归属和原子 reload。 |
 | `acme-standalone` | 站点与证书 -> 本机 TLS 证书 | `deferred` | `acme` | host | 需要 80/443 宿主端口和停机回滚。 |

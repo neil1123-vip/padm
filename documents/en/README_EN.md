@@ -181,9 +181,14 @@ and output nodes; credential rotation and configuration restoration do not reset
 roll back accumulated traffic. Both cores' `config/*/users.base` retain disabled
 credentials and are root-owned `0600`, like the complete spec. Runtime configs strip
 private account metadata. Bundles without `x-padm-accounts` reject these specs during
-configuration, update, and restoration. Account CRUD menus, share groups, and per-account
-publishing authorization remain unavailable. Ordinary output includes self-use and enabled
-accounts under the deployment-wide token, not independent share subscriptions.
+configuration, update, and restoration. The menu and `padm-docker account` now support
+listing, creation, name/listener editing, copying, enable/disable, deletion, and credential
+rotation. Each change uses a private draft, candidate validation, backup, and health-check
+transaction; untouched accounts, totals, and quotas remain unchanged, while copies receive
+new stable identities and credentials. Ordinary output includes self-use and enabled
+accounts under the deployment-wide token, not independent share subscriptions. Share groups,
+per-account publishing authorization, pure-content copy, and business backup/restore remain
+unavailable.
 
 Use the menu's configuration editor or `padm-docker edit` to change public ports,
 server addresses, address families, node names, Reality targets/SNI, WS paths, or

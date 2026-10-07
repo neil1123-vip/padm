@@ -393,6 +393,7 @@ dockerEntryFetchBundle() {
             -f "${candidate}/docker/lib/manifest.sh" &&
             -f "${candidate}/docker/lib/lifecycle.sh" &&
             -f "${candidate}/docker/lib/setup.sh" &&
+            -f "${candidate}/docker/lib/accounts.sh" &&
             -f "${candidate}/docker/lib/menu.sh" &&
             -f "${candidate}/shell/core/deployment_mode.sh" ]] || continue
         DOCKER_ENTRY_SOURCE_DIR=${candidate}
@@ -450,6 +451,8 @@ source "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/services.sh"
 source "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/lifecycle.sh"
 # shellcheck source=/dev/null
 source "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/setup.sh"
+# shellcheck source=/dev/null
+source "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/accounts.sh"
 # shellcheck source=/dev/null
 source "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/menu.sh"
 
