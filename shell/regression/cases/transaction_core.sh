@@ -1780,6 +1780,202 @@ runCoreInstallSignalRollbackRegression() (
     runPackageCommandWithProgress normal-test 10 'printf normal; exit 7' "${fixture}/normal.log" || status=$?
     [[ "${status}" == 7 && "$(<"${fixture}/normal.log")" == normal ]]
     [[ ! -e "${fixture}/normal.log.progress" && -z "${PADM_EXIT_ROLLBACKS[*]}" ]]
+    runCancelableInstallCommandRegression
+)
+
+runCancelableInstallCommandRegression() (
+    set -euo pipefail
+    local root="${TMP_DIR}/cancelable-install" fixture mode signal pid status started
+    local release=alpine domain=cancel.example.com tlsDomain=cancel.example.com
+    local sslType=letsencrypt dnsAPIStatus=n dnsAPIType= installedDNSAPIStatus=
+    local commandString PADM_TLS_DIR TMPDIR captured cfAPIToken=fixture-token cfZoneID=fixture-zone
+    local aliKey=fixture-key aliSecret=fixture-secret
+    mkdir -p "${root}"
+    TMPDIR="${root}"
+    successCard() { :; }
+    errorCard() { printf '%s\n' "$@" >>"${fixture}/errors"; }
+    acmeExecutable() { printf '%s\n' "${fixture}/acme"; }
+    allowPort() { :; }
+    nginxRunning() { grep -qx true "${fixture}/nginx.running"; }
+    xrayRunning() { grep -qx true "${fixture}/xray.running"; }
+    singBoxRunning() { return 1; }
+    handleNginx() { printf '%s\n' "$([[ "$1" == start ]] && printf true || printf false)" >"${fixture}/nginx.running"; }
+    handleXray() { printf '%s\n' "$([[ "$1" == start ]] && printf true || printf false)" >"${fixture}/xray.running"; }
+    checkDNSIP() { :; }
+    subscriptionTcpPortHasListener() { nginxRunning; }
+    subscriptionTcpPortListenersAreNginx() { :; }
+    runSubscribeNginxAction() { handleNginx "$@"; }
+    customSSLEmail() { :; }
+    readAcmeTLS() { :; }
+    tlsAcmeManagedCertificateRecords() {
+        printf '%s\t%s\t%s\t%s\n' cancel.example.com "${fixture}/domain.conf" \
+            "${PADM_TLS_DIR}/cancel.example.com.crt" "${PADM_TLS_DIR}/cancel.example.com.key"
+    }
+    sudo() { "$@"; }
+    curl() { cancelableFixtureWorker; }
+    wget() { cancelableFixtureWorker; }
+    command() {
+        if [[ "$*" == '-v curl' && "${mode}" == wget ]] ||
+            [[ "$*" == '-v timeout' && "${mode}" == timeout-no-tool ]]; then
+            return 1
+        fi
+        builtin command "$@"
+    }
+    cancelableFixtureWorker() {
+        printf '%s\n' "${BASHPID}" >"${fixture}/worker"
+        : >"${fixture}/started"
+        sleep 4
+        : >"${fixture}/continued"
+    }
+    cancelableFixtureOperation() {
+        case "${mode}" in
+        timeout | timeout-no-tool)
+            printf -v commandString 'printf %%s "$BASHPID" >%q; touch %q; sleep 4; touch %q' \
+                "${fixture}/worker" "${fixture}/started" "${fixture}/continued"
+            runWithTimeout 10 "${commandString}"
+            ;;
+        curl | wget) downloadUrlToFileBounded fixture "${fixture}/download" 1024 10 ;;
+        capture) padmCaptureCancelableCommand captured resolveGitHubCommitRef fixture/repo main ;;
+        acme-install | acme-restore-failure)
+            acmeInstallIsComplete() { return 1; }
+            acmeInstallTargetIsSafe() { :; }
+            acmeSafeHomeDir() { printf '%s\n' "${fixture}/acme-home"; }
+            adapterManagedRollbackTemplate() { printf '%s\n' "${fixture}/backup.XXXXXX"; }
+            resolveGitHubCommitRef() {
+                printf 'new-account\n' >"${fixture}/acme-home/account"
+                : >"${fixture}/acme-home/added"
+                cancelableFixtureWorker
+            }
+            if [[ "${mode}" == acme-restore-failure ]]; then
+                adapterRestoreManagedRollbackBackup() { return 1; }
+            fi
+            installAcmeTool
+            ;;
+        issue) acmeInstallSSL ;;
+        issue-retry) selectAcmeInstallSSL ;;
+        cloudflare | aliyun) dnsAPIType=${mode}; acmeInstallSSL ;;
+        subscription)
+            installTLS() { acmeInstallSSL; }
+            subscriptionInstallTLSHttp01 "${domain}"
+            ;;
+        tls-flow)
+            local HOME="${fixture}/home" PADM_REQUIRE_USABLE_TLS_CERTIFICATE=true
+            mkdir -p "${HOME}/.acme.sh"
+            switchSSLType() { :; }
+            installTLS 1
+            ;;
+        sync | sync-missing) installTLSFromAcme ;;
+        renew) renewManagedTLSCertificates ;;
+        esac
+    }
+    for mode in timeout timeout-no-tool curl wget capture acme-install acme-restore-failure issue issue-retry cloudflare aliyun subscription tls-flow sync sync-missing renew; do
+        for signal in TERM INT; do
+            fixture="${root}/${mode}-${signal}"
+            PADM_TLS_DIR="${fixture}/tls"
+            mkdir -p "${PADM_TLS_DIR}"
+            printf 'old-cert\n' >"${PADM_TLS_DIR}/${domain}.crt"
+            printf 'old-key\n' >"${PADM_TLS_DIR}/${domain}.key"
+            [[ "${mode}" != sync-missing ]] || rm "${PADM_TLS_DIR}/${domain}.key"
+            mkdir -p "${fixture}/acme-home"
+            printf 'old-account\n' >"${fixture}/acme-home/account"
+            printf 'true\n' >"${fixture}/nginx.running"
+            printf 'true\n' >"${fixture}/xray.running"
+            dnsAPIType=
+            printf "Le_Domain='%s'\nLe_Webroot='no'\n" "${domain}" >"${fixture}/domain.conf"
+            cat >"${fixture}/acme" <<'EOF'
+#!/usr/bin/env bash
+fixture=$(dirname -- "$0")
+printf '%s\n' "$BASHPID" >"${fixture}/worker"
+if [[ "$1" == --issue && "$(basename -- "${fixture}")" == tls-flow-* ]]; then
+    touch "${fixture}/issued"
+    exit 0
+fi
+if [[ "$1" == --issue && "$(basename -- "${fixture}")" == issue-retry-* && ! -f "${fixture}/first-issue" ]]; then
+    touch "${fixture}/first-issue"
+    printf 'Could not validate email address as valid\n'
+    exit 1
+fi
+if [[ "$1" == --installcert || "$1" == --cron ]]; then
+    printf 'new-cert\n' >"${fixture}/tls/cancel.example.com.crt"
+    printf 'new-key\n' >"${fixture}/tls/cancel.example.com.key"
+fi
+touch "${fixture}/started"
+sleep 4
+touch "${fixture}/continued"
+EOF
+            chmod 755 "${fixture}/acme"
+            set -m
+            (
+                padmCreateTmpRootPath ownedTemp cancel-owned.XXXXXX -d
+                printf '%s\n' "${ownedTemp}" >"${fixture}/temp"
+                cancelableFixtureOperation
+                : >"${fixture}/returned"
+            ) >"${fixture}/output" 2>&1 &
+            pid=$!
+            set +m
+            for ((started=0; started < 300; started++)); do
+                [[ ! -e "${fixture}/started" ]] || break
+                sleep 0.01
+            done
+            if [[ ! -e "${fixture}/started" ]]; then
+                printf 'cancel fixture did not start: %s:%s\n' "${mode}" "${signal}" >&2
+                cat "${fixture}/output" >&2
+                kill -KILL -- "-${pid}" 2>/dev/null || true
+                wait "${pid}" || true
+                return 1
+            fi
+            started=$(date +%s%N)
+            kill -"${signal}" "${pid}"
+            status=0
+            wait "${pid}" || status=$?
+            [[ "${status}" == "$([[ "${signal}" == TERM ]] && printf 143 || printf 130)" ]]
+            [[ $(( ($(date +%s%N) - started) / 1000000 )) -lt 3500 ]]
+            [[ ! -e "${fixture}/continued" && ! -e "${fixture}/returned" && ! -e "$(<"${fixture}/temp")" ]]
+            if [[ "${mode}" == sync || "${mode}" == renew || "${mode}" == tls-flow ]]; then
+                [[ "$(<"${PADM_TLS_DIR}/${domain}.crt")" == old-cert &&
+                    "$(<"${PADM_TLS_DIR}/${domain}.key")" == old-key ]]
+                [[ "${mode}" != tls-flow || -e "${fixture}/issued" ]]
+            elif [[ "${mode}" == sync-missing ]]; then
+                [[ "$(<"${PADM_TLS_DIR}/${domain}.crt")" == old-cert && ! -e "${PADM_TLS_DIR}/${domain}.key" ]]
+            elif [[ "${mode}" == acme-install ]]; then
+                [[ "$(<"${fixture}/acme-home/account")" == old-account && ! -e "${fixture}/acme-home/added" ]]
+                [[ -z "$(find "${fixture}" -name 'backup.*' -type d)" ]]
+            elif [[ "${mode}" == acme-restore-failure ]]; then
+                captured=$(find "${fixture}" -name 'backup.*' -type d)
+                [[ -f "${captured}/manifest" && "$(<"${captured}/000000.dir/account")" == old-account ]]
+                grep -q 'acme.sh 安装中断，目录恢复失败' "${fixture}/errors"
+            fi
+            if [[ "${mode}" == issue || "${mode}" == issue-retry || "${mode}" == subscription || "${mode}" == renew || "${mode}" == tls-flow ]]; then
+                [[ "$(<"${fixture}/nginx.running")" == true ]]
+                [[ "$(<"${fixture}/xray.running")" == true ]]
+            fi
+            [[ "$(ps -o stat= -p "$(<"${fixture}/worker")" 2>/dev/null || true)" != *[RS]* ]]
+        done
+    done
+
+    local output status release=debian attempts="${root}/attempts"
+    waitAptProcess() { :; }
+    sleep() { :; }
+    mode=wget
+    wget() { head -c 32 /dev/zero; }
+    if downloadUrlToFileBounded fixture "${root}/oversized" 16 10; then
+        return 1
+    fi
+    [[ "$(wc -c <"${root}/oversized")" == 17 ]]
+    mode=fallback
+    curl() { return 1; }
+    wget() { printf fallback; }
+    downloadUrlToFileBounded fixture "${root}/fallback" 16 10
+    [[ "$(<"${root}/fallback")" == fallback ]]
+    # apt/dpkg 的重试、输出捕获和普通失败码不因托管改变。
+    printf -v commandString 'printf "apt-get\\n" >>%q; [[ $(wc -l <%q) == 2 ]]' "${attempts}" "${attempts}"
+    runWithTimeout 10 "${commandString}"
+    [[ "$(wc -l <"${attempts}")" == 2 ]]
+    padmCaptureCancelableCommand output printf 'quoted space\n\n'
+    [[ "${output}" == 'quoted space' ]]
+    status=0
+    runWithTimeout 10 'printf failure; exit 7' >"${root}/failure.log" || status=$?
+    [[ "${status}" == 7 && "$(<"${root}/failure.log")" == failure ]]
 )
 
 runCoreTemplateReturnFailureRegression() (
@@ -3772,7 +3968,12 @@ runGeoUpdateReloadFailureRegression() (
             [[ "${geoFetchStatus}" == 0 ]] || return 1
             [[ "$1" == */releases/latest ]] && printf '%s\n' "${latestGeoMetadata}" || printf '[]\n'
         }
-        padmCreateTempPath() { printf -v "$1" '%s' "${root}/lookup-stage"; mkdir -p "${root}/lookup-stage"; }
+        eval "$(declare -f padmCreateTempPath | sed '1s/padmCreateTempPath/originalGeoCreateTempPath/')"
+        padmCreateTempPath() {
+            [[ "$2" == -d ]] || { originalGeoCreateTempPath "$@"; return; }
+            printf -v "$1" '%s' "${root}/lookup-stage"
+            mkdir -p "${root}/lookup-stage"
+        }
         downloadXrayGeoFilesToStage() { [[ "$2" == geo-version ]] || return 1; printf 'download\n' >>"${callLog}"; }
         commitXrayGeoFilesFromStage() { [[ "$3" == geo-version ]] || return 1; printf 'commit\n' >>"${callLog}"; }
         latestGeoMetadata='{"tag_name":"geo-version"}'

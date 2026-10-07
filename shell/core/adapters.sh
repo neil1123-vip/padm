@@ -520,15 +520,8 @@ stopPackageCommandWithProgress() {
     [[ "${PADM_PACKAGE_COMMAND_CONTEXT[active]:-false}" == true ]] || return 0
     PADM_PACKAGE_COMMAND_CONTEXT[active]=false
     local padmPackagePid=${PADM_PACKAGE_COMMAND_CONTEXT[pid]:-${!:-}}
-    local padmPackageAttempt
     if [[ -n "${padmPackagePid}" && "${padmPackagePid}" != "${PADM_PACKAGE_COMMAND_CONTEXT[previousPid]}" ]]; then
-        kill -TERM -- "-${padmPackagePid}" 2>/dev/null || true
-        for ((padmPackageAttempt=0; padmPackageAttempt < 20; padmPackageAttempt++)); do
-            kill -0 -- "-${padmPackagePid}" 2>/dev/null || break
-            sleep 0.1
-        done
-        kill -KILL -- "-${padmPackagePid}" 2>/dev/null || true
-        wait "${padmPackagePid}" 2>/dev/null || true
+        padmStopCommandGroup "${padmPackagePid}"
     fi
     if [[ -f "${PADM_PACKAGE_COMMAND_CONTEXT[progressFile]}" ]]; then
         cat "${PADM_PACKAGE_COMMAND_CONTEXT[progressFile]}" >>"${PADM_PACKAGE_COMMAND_CONTEXT[logFile]}"
@@ -814,10 +807,14 @@ installAcmeTool() {
     acmeHomeDirPath=$(acmeSafeHomeDir) || failPackageInstallTransaction "acme目录路径异常"
     adapterCreateManagedRollbackBackup acmeBackupDir "${acmeHomeDirPath}" || failPackageInstallTransaction "acme目录备份失败"
     adapterRegisterPackageManagedRollback "${acmeBackupDir}"
+    local PADM_ACME_INSTALL_BACKUP=${acmeBackupDir}
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
+    padmRegisterExitRollback restoreAcmeInstallOnExit
     padmCreateTmpRootPath acmeTmpDir padm-tls.XXXXXX -d || failPackageInstallTransaction "acme安装脚本临时目录创建失败"
     acmeArchive="${acmeTmpDir}/acme.tar.gz"
     padmCreateTempPath acmeDownloadArchive "${acmeTmpDir}/acme.tar.gz.download.XXXXXX" || { padmRemoveCleanupPath "${acmeTmpDir}"; failPackageInstallTransaction "acme安装包临时文件创建失败"; }
-    acmeScriptRef=$(resolveGitHubCommitRef acmesh-official/acme.sh master) || { padmRemoveCleanupPath "${acmeTmpDir}"; failPackageInstallTransaction "acme安装脚本最新提交解析失败"; }
+    padmCaptureCancelableCommand acmeScriptRef resolveGitHubCommitRef acmesh-official/acme.sh master || { padmRemoveCleanupPath "${acmeTmpDir}"; failPackageInstallTransaction "acme安装脚本最新提交解析失败"; }
     acmeArchiveUrl="https://github.com/acmesh-official/acme.sh/archive/${acmeScriptRef}.tar.gz"
     if downloadUrlToFileBounded "${acmeArchiveUrl}" "${acmeDownloadArchive}" 5242880 120 &&
         [[ -s "${acmeDownloadArchive}" ]] && validateCoreTarArchive "${acmeDownloadArchive}"; then
@@ -858,6 +855,16 @@ installAcmeTool() {
     fi
     padmRemoveCleanupPath "${acmeTmpDir}"
     endPackageInstallTransaction "${packageTransactionOwner}"
+}
+
+restoreAcmeInstallOnExit() {
+    [[ -d "${PADM_ACME_INSTALL_BACKUP}" ]] || return 0
+    if adapterRestoreManagedRollbackBackup "${PADM_ACME_INSTALL_BACKUP}"; then
+        padmRemoveCleanupPath "${PADM_ACME_INSTALL_BACKUP}"
+    else
+        padmForgetCleanupPath "${PADM_ACME_INSTALL_BACKUP}"
+        errorCard "acme.sh 安装中断，目录恢复失败，请检查备份目录: ${PADM_ACME_INSTALL_BACKUP}"
+    fi
 }
 
 # 安装工具包

@@ -341,6 +341,23 @@ selectAcmeInstallSSL() {
 
 # 安装 TLS 证书
 acmeInstallSSL() {
+    padmRunPortAllowTransaction acmeInstallSSLApply
+}
+
+runAcmeIssueLogged() {
+    local acmeLogFile=$1
+    shift
+    local -a acmeStatuses=()
+    if "$@" 2>&1 | tee -a "${acmeLogFile}" >/dev/null; then
+        acmeStatuses=("${PIPESTATUS[@]}")
+    else
+        acmeStatuses=("${PIPESTATUS[@]}")
+    fi
+    [[ "${acmeStatuses[1]:-1}" == 0 ]] || return "${acmeStatuses[1]:-1}"
+    return "${acmeStatuses[0]:-1}"
+}
+
+acmeInstallSSLApply() {
     local dnsAPIDomain="${tlsDomain}"
     local dnsAPIExtraDomain=
     local acmeBin
@@ -356,22 +373,36 @@ acmeInstallSSL() {
     if [[ "${dnsAPIType:-}" == "cloudflare" ]]; then
         successCard "DNS API 生成证书中"
         if [[ -n "${cfZoneID:-}" ]]; then
-            CF_Token="${cfAPIToken}" CF_Zone_ID="${cfZoneID}" "${acmeBin}" --issue -d "${dnsAPIDomain}" ${dnsAPIExtraDomain} --dns dns_cf -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a "${acmeLogFile}" >/dev/null
+            CF_Token="${cfAPIToken}" CF_Zone_ID="${cfZoneID}" padmRunCancelableCommand runAcmeIssueLogged "${acmeLogFile}" "${acmeBin}" --issue -d "${dnsAPIDomain}" ${dnsAPIExtraDomain} --dns dns_cf -k ec-256 --server "${sslType}" ${sslIPv6:-}
         else
-            CF_Token="${cfAPIToken}" "${acmeBin}" --issue -d "${dnsAPIDomain}" ${dnsAPIExtraDomain} --dns dns_cf -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a "${acmeLogFile}" >/dev/null
+            CF_Token="${cfAPIToken}" padmRunCancelableCommand runAcmeIssueLogged "${acmeLogFile}" "${acmeBin}" --issue -d "${dnsAPIDomain}" ${dnsAPIExtraDomain} --dns dns_cf -k ec-256 --server "${sslType}" ${sslIPv6:-}
         fi
     elif [[ "${dnsAPIType:-}" == "aliyun" ]]; then
         successCard "DNS API 生成证书中"
-        Ali_Key="${aliKey}" Ali_Secret="${aliSecret}" "${acmeBin}" --issue -d "${dnsAPIDomain}" ${dnsAPIExtraDomain} --dns dns_ali -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a "${acmeLogFile}" >/dev/null
+        Ali_Key="${aliKey}" Ali_Secret="${aliSecret}" padmRunCancelableCommand runAcmeIssueLogged "${acmeLogFile}" "${acmeBin}" --issue -d "${dnsAPIDomain}" ${dnsAPIExtraDomain} --dns dns_ali -k ec-256 --server "${sslType}" ${sslIPv6:-}
     else
         allowPort 80 || return 1
+        local PADM_TLS_ISSUE_NGINX_WAS_RUNNING=false
+        nginxRunning && PADM_TLS_ISSUE_NGINX_WAS_RUNNING=true
+        local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+        local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
+        padmRegisterExitRollback restoreTLSIssueServiceOnExit
         if ! runCoreServiceActionAllowFailure handleNginx stop; then
+            padmRunRollback restoreTLSIssueServiceOnExit
             errorCard "Nginx 服务停止失败，已取消 TLS 签发"
             return 1
         fi
         successCard "生成证书中"
-        sudo "${acmeBin}" --issue -d "${tlsDomain}" --standalone -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a "${acmeLogFile}" >/dev/null
+        local issueStatus=0
+        padmRunCancelableCommand runAcmeIssueLogged "${acmeLogFile}" sudo "${acmeBin}" --issue -d "${tlsDomain}" --standalone -k ec-256 --server "${sslType}" ${sslIPv6:-} || issueStatus=$?
+        [[ "${issueStatus}" == 0 ]] || padmRunRollback restoreTLSIssueServiceOnExit
+        return "${issueStatus}"
     fi
+}
+
+restoreTLSIssueServiceOnExit() {
+    checkPortOpenRestoreCoreServiceState "${PADM_TLS_ISSUE_NGINX_WAS_RUNNING}" nginxRunning handleNginx restore ||
+        errorCard "TLS 签发中断，Nginx 服务恢复失败"
 }
 
 installTLSFromAcme() {
@@ -410,13 +441,21 @@ installTLSFromAcme() {
         return 1
     fi
 
+    local -A PADM_TLS_SYNC_ROLLBACK=(
+        [active]=true [backupDir]="${backupDir}" [backupCrt]="${backupCrt}" [backupKey]="${backupKey}"
+        [crtFile]="${crtFile}" [keyFile]="${keyFile}"
+    )
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
+    padmRegisterExitRollback rollbackTLSCertificateSyncOnExit
     acmeDomain=${tlsDomain}
     [[ "${installedDNSAPIStatus:-}" != "true" ]] || acmeDomain="*.${dnsTLSDomain}"
     for attempt in 1 2; do
         installStatus=0
-        sudo "${acmeBin}" --installcert -d "${acmeDomain}" --fullchainpath "${crtFile}" --keypath "${keyFile}" --ecc >/dev/null || installStatus=$?
+        padmRunCancelableCommand sudo "${acmeBin}" --installcert -d "${acmeDomain}" --fullchainpath "${crtFile}" --keypath "${keyFile}" --ecc >/dev/null || installStatus=$?
         if [[ "${installStatus}" == 0 ]] && tlsCertificatePairExists "${tlsDir}" "${tlsDomain}" &&
             chmod 600 -- "${keyFile}" && tlsCertificatePairUsable "${tlsDir}" "${tlsDomain}"; then
+            PADM_TLS_SYNC_ROLLBACK[active]=false
             padmRemoveCleanupPath "${backupDir}"
             successCard "TLS生成成功"
             return 0
@@ -430,9 +469,24 @@ installTLSFromAcme() {
         fi
         [[ "${attempt}" != 2 ]] || break
     done
+    PADM_TLS_SYNC_ROLLBACK[active]=false
     padmRemoveCleanupPath "${backupDir}"
     errorCard "TLS安装失败，请检查acme日志"
     return 1
+}
+
+rollbackTLSCertificateSyncOnExit() {
+    [[ "${PADM_TLS_SYNC_ROLLBACK[active]:-false}" == true ]] || return 0
+    PADM_TLS_SYNC_ROLLBACK[active]=false
+    local padmTlsRestoreStatus=0
+    restoreCoreOptionalFileBackup "${PADM_TLS_SYNC_ROLLBACK[backupCrt]}" "${PADM_TLS_SYNC_ROLLBACK[crtFile]}" 644 || padmTlsRestoreStatus=1
+    restoreCoreOptionalFileBackup "${PADM_TLS_SYNC_ROLLBACK[backupKey]}" "${PADM_TLS_SYNC_ROLLBACK[keyFile]}" 600 || padmTlsRestoreStatus=1
+    if [[ "${padmTlsRestoreStatus}" == 0 ]]; then
+        padmRemoveCleanupPath "${PADM_TLS_SYNC_ROLLBACK[backupDir]}"
+    else
+        padmForgetCleanupPath "${PADM_TLS_SYNC_ROLLBACK[backupDir]}"
+        errorCard "TLS 同步中断，证书恢复失败，请检查备份目录: ${PADM_TLS_SYNC_ROLLBACK[backupDir]}"
+    fi
 }
 
 restoreTLSReinstallBackup() {
@@ -458,6 +512,12 @@ installTLS() {
     local reInstallStatus=n
     tlsDomainNameIsSafe "${tlsDomain}" || { errorCard "TLS 域名不合法"; return 1; }
     tlsDir=$(tlsManagedDir) || return 1
+    local PADM_TLS_ISSUE_NGINX_WAS_RUNNING=false
+    nginxRunning && PADM_TLS_ISSUE_NGINX_WAS_RUNNING=true
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
+    # 签发成功到证书同步结束之间，也必须保留原服务的取消恢复状态。
+    padmRegisterExitRollback restoreTLSIssueServiceOnExit
 
     if { [[ "${PADM_REQUIRE_USABLE_TLS_CERTIFICATE:-}" == "true" ]] && tlsCertificatePairUsable "${tlsDir}" "${tlsDomain}"; } ||
         { [[ "${PADM_REQUIRE_USABLE_TLS_CERTIFICATE:-}" != "true" ]] && tlsCertificatePairExists "${tlsDir}" "${tlsDomain}"; }; then
@@ -836,9 +896,16 @@ renewManagedTLSCertificates() {
     nginxRunning && nginxWasRunning=true
     xrayRunning && xrayWasRunning=true
     singBoxRunning && singBoxWasRunning=true
+    local -A PADM_TLS_RENEW_ROLLBACK=(
+        [active]=true [backupDir]="${backupDir}" [tlsDir]="${tlsDir}"
+        [nginxWasRunning]="${nginxWasRunning}" [xrayWasRunning]="${xrayWasRunning}" [singBoxWasRunning]="${singBoxWasRunning}"
+    )
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
+    padmRegisterExitRollback rollbackTLSRenewalOnExit
     # 安装先同步当前域名的已有证书，足够有效时不重复请求 CA。
     if [[ -n "${requestedDomain}" ]] &&
-        sudo "${acmeBin}" --installcert -d "${acmeDomain}" --fullchainpath "${tlsDir}/${requestedDomain}.crt" \
+        padmRunCancelableCommand sudo "${acmeBin}" --installcert -d "${acmeDomain}" --fullchainpath "${tlsDir}/${requestedDomain}.crt" \
             --keypath "${tlsDir}/${requestedDomain}.key" --ecc &&
         tlsCertificatePairUsable "${tlsDir}" "${requestedDomain}" &&
         openssl x509 -in "${tlsDir}/${requestedDomain}.crt" -checkend 86400 -noout >/dev/null 2>&1; then
@@ -858,7 +925,7 @@ renewManagedTLSCertificates() {
         }
         servicesStopped=true
     fi
-    if [[ ${#renewArgs[@]} -gt 0 ]] && ! sudo "${acmeBin}" "${renewArgs[@]}"; then
+    if [[ ${#renewArgs[@]} -gt 0 ]] && ! padmRunCancelableCommand sudo "${acmeBin}" "${renewArgs[@]}"; then
         restoreTLSReinstallBackup "${backupDir}" "${tlsDir}" "TLS 证书续签失败" || true
         [[ "${servicesStopped}" != "true" ]] || restoreServicesAfterTLSRenewal "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}" || true
         return 1
@@ -867,7 +934,7 @@ renewManagedTLSCertificates() {
         configFile=${dueConfigs[${domain}]}
         acmeDomain=$(tlsAcmeConfigValue "${configFile}" Le_Domain) || acmeDomain=
         [[ -n "${acmeDomain}" ]] || acmeDomain=${domain}
-        if ! sudo "${acmeBin}" --installcert -d "${acmeDomain}" \
+        if ! padmRunCancelableCommand sudo "${acmeBin}" --installcert -d "${acmeDomain}" \
             --fullchainpath "${tlsDir}/${domain}.crt" --keypath "${tlsDir}/${domain}.key" --ecc; then
             restoreTLSReinstallBackup "${backupDir}" "${tlsDir}" "TLS 证书安装失败" || true
             [[ "${servicesStopped}" != "true" ]] || restoreServicesAfterTLSRenewal "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}" || true
@@ -938,8 +1005,18 @@ renewManagedTLSCertificates() {
             return 1
         fi
     fi
+    PADM_TLS_RENEW_ROLLBACK[active]=false
     padmRemoveCleanupPath "${backupDir}"
     successCard "acme.sh 管理证书续签检查完成"
+}
+
+rollbackTLSRenewalOnExit() {
+    [[ "${PADM_TLS_RENEW_ROLLBACK[active]:-false}" == true ]] || return 0
+    PADM_TLS_RENEW_ROLLBACK[active]=false
+    restoreTLSReinstallBackup "${PADM_TLS_RENEW_ROLLBACK[backupDir]}" "${PADM_TLS_RENEW_ROLLBACK[tlsDir]}" "TLS 续签中断" || true
+    restoreServicesAfterTLSRenewal "${PADM_TLS_RENEW_ROLLBACK[nginxWasRunning]}" \
+        "${PADM_TLS_RENEW_ROLLBACK[xrayWasRunning]}" "${PADM_TLS_RENEW_ROLLBACK[singBoxWasRunning]}" ||
+        errorCard "TLS 续签中断，旧服务恢复失败"
 }
 
 # 更新 TLS 证书
@@ -1047,7 +1124,14 @@ renewalTLS() {
                 failTlsRenewalBeforeInstall "TLS 旧证书备份失败" "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}"
                 return 1
             }
-            if sudo "${acmeBin}" --cron --home "${acmeDir}"; then
+            local -A PADM_TLS_RENEW_ROLLBACK=(
+                [active]=true [backupDir]="${backupDir}" [tlsDir]="${tlsDir}"
+                [nginxWasRunning]="${nginxWasRunning}" [xrayWasRunning]="${xrayWasRunning}" [singBoxWasRunning]="${singBoxWasRunning}"
+            )
+            local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+            local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
+            padmRegisterExitRollback rollbackTLSRenewalOnExit
+            if padmRunCancelableCommand sudo "${acmeBin}" --cron --home "${acmeDir}"; then
                 :
             else
                 renewStatus=$?
@@ -1064,7 +1148,7 @@ renewalTLS() {
                 return "${renewStatus}"
             fi
             local installStatus=0
-            sudo "${acmeBin}" --installcert -d "${installDomain}" --fullchainpath "${crtFile}" --keypath "${keyFile}" --ecc || installStatus=$?
+            padmRunCancelableCommand sudo "${acmeBin}" --installcert -d "${installDomain}" --fullchainpath "${crtFile}" --keypath "${keyFile}" --ecc || installStatus=$?
             if [[ "${installStatus}" -eq 0 ]]; then
                 chmod 600 -- "${keyFile}" || installStatus=$?
             fi
@@ -1081,11 +1165,13 @@ renewalTLS() {
                 restoreServicesAfterTLSRenewal "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}" || errorCard "TLS 证书安装失败，且服务恢复失败"
                 return "${installStatus}"
             fi
-            padmRemoveCleanupPath "${backupDir}"
             if ! restoreServicesAfterTLSRenewal "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}"; then
+                padmForgetCleanupPath "${backupDir}"
                 errorCard "TLS 证书已安装，但服务恢复失败"
                 return 1
             fi
+            PADM_TLS_RENEW_ROLLBACK[active]=false
+            padmRemoveCleanupPath "${backupDir}"
         else
             successCard "证书有效"
         fi

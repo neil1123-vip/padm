@@ -667,6 +667,66 @@ padmRunRollback() {
     return "${padmRollbackStatus}"
 }
 
+padmStopCommandGroup() {
+    local padmCommandPid=$1 padmCommandAttempt
+    kill -TERM -- "-${padmCommandPid}" 2>/dev/null || true
+    for ((padmCommandAttempt=0; padmCommandAttempt < 20; padmCommandAttempt++)); do
+        kill -0 -- "-${padmCommandPid}" 2>/dev/null || break
+        sleep 0.1
+    done
+    kill -KILL -- "-${padmCommandPid}" 2>/dev/null || true
+    wait "${padmCommandPid}" 2>/dev/null || true
+}
+
+padmStopCancelableCommand() {
+    [[ "${PADM_CANCELABLE_COMMAND[active]:-false}" == true ]] || return 0
+    PADM_CANCELABLE_COMMAND[active]=false
+    local padmCommandPid=${PADM_CANCELABLE_COMMAND[pid]:-${!:-}}
+    if [[ -n "${padmCommandPid}" && "${padmCommandPid}" != "${PADM_CANCELABLE_COMMAND[previousPid]}" ]]; then
+        padmStopCommandGroup "${padmCommandPid}"
+    fi
+}
+
+padmRunCancelableCommand() {
+    if [[ "${PADM_CANCELABLE_COMMAND_WORKER:-false}" == true ]]; then
+        "$@"
+        return
+    fi
+    local -A PADM_CANCELABLE_COMMAND=([active]=true [pid]= [previousPid]="${!:-}")
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
+    local padmCommandMonitor= padmCommandStatus=0 padmCommandPid
+    padmRegisterExitRollback padmStopCancelableCommand
+    [[ $- != *m* ]] || padmCommandMonitor=1
+    # wait 内建能及时处理信号；独立进程组同时收回下载管道和 ACME 子进程。
+    set -m
+    (
+        set +m
+        local PADM_CANCELABLE_COMMAND_WORKER=true
+        "$@"
+    ) </dev/null &
+    padmCommandPid=$!
+    PADM_CANCELABLE_COMMAND[pid]=${padmCommandPid}
+    [[ -n "${padmCommandMonitor}" ]] || set +m
+    wait "${padmCommandPid}" || padmCommandStatus=$?
+    PADM_CANCELABLE_COMMAND[active]=false
+    unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
+    return "${padmCommandStatus}"
+}
+
+padmCaptureCancelableCommand() {
+    local padmCaptureResult=$1 padmCaptureFile padmCaptureStatus=0
+    shift
+    printf -v "${padmCaptureResult}" '%s' ""
+    padmCreateTmpRootPath padmCaptureFile padm-command-output.XXXXXX || return 1
+    padmRunCancelableCommand "$@" >"${padmCaptureFile}" || padmCaptureStatus=$?
+    if [[ "${padmCaptureStatus}" == 0 ]]; then
+        printf -v "${padmCaptureResult}" '%s' "$(<"${padmCaptureFile}")"
+    fi
+    padmRemoveCleanupPath "${padmCaptureFile}"
+    return "${padmCaptureStatus}"
+}
+
 padmCleanupTempPaths() {
     local status=$?
     local signal=${1:-}
@@ -1322,6 +1382,10 @@ downloadFileOptionHasValue() {
 }
 
 downloadUrlToFileBounded() {
+    padmRunCancelableCommand downloadUrlToFileBoundedApply "$@"
+}
+
+downloadUrlToFileBoundedApply() {
     local url=$1
     local targetFile=$2
     local maxSize=$3
@@ -1340,8 +1404,11 @@ downloadUrlToFileBounded() {
 
     : >"${targetFile}" || return 1
     if command -v wget >/dev/null 2>&1; then
-        wget -T "$((maxTime < 30 ? maxTime : 30))" -t 2 -qO- "${url}" | head -c "$((maxSize + 1))" >"${targetFile}"
-        pipelineStatus=("${PIPESTATUS[@]}")
+        if wget -T "$((maxTime < 30 ? maxTime : 30))" -t 2 -qO- "${url}" | head -c "$((maxSize + 1))" >"${targetFile}"; then
+            pipelineStatus=("${PIPESTATUS[@]}")
+        else
+            pipelineStatus=("${PIPESTATUS[@]}")
+        fi
         if [[ "${pipelineStatus[0]:-1}" -eq 0 && "${pipelineStatus[1]:-1}" -eq 0 &&
             "$(wc -c <"${targetFile}")" -le "${maxSize}" ]]; then
             return 0
@@ -1526,7 +1593,7 @@ downloadGitHubReleaseAsset() {
         releaseMetadataUrl="https://api.github.com/repos/${repo}/releases/tags/${version}"
     fi
     local releaseMetadata
-    releaseMetadata=$(fetchUrlToStdout "${releaseMetadataUrl}" 3) || releaseMetadata=
+    padmCaptureCancelableCommand releaseMetadata fetchUrlToStdout "${releaseMetadataUrl}" 3 || releaseMetadata=
     if [[ -n "${releaseMetadata}" ]]; then
         metadata=$(jq -ce --arg name "${assetName}" 'first(.assets[]? | select(.name == $name) | {url:.browser_download_url, digest:(.digest // ""), size:(.size // 0)})' <<<"${releaseMetadata}" 2>/dev/null) || metadata=
     fi
@@ -1674,12 +1741,11 @@ runWithTimeout() {
             waitAptProcess
         fi
 
+        status=0
         if command -v timeout >/dev/null 2>&1; then
-            timeout "${timeoutSeconds}s" bash -lc "${commandString}"
-            status=$?
+            padmRunCancelableCommand timeout "${timeoutSeconds}s" bash -lc "${commandString}" || status=$?
         else
-            bash -lc "${commandString}"
-            status=$?
+            padmRunCancelableCommand bash -lc "${commandString}" || status=$?
         fi
 
         if [[ ${status} -eq 0 ]]; then

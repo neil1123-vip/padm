@@ -260,7 +260,7 @@ ensureXrayGeoFiles() {
     fi
 
     local geoVersion
-    if ! geoVersion=$(coreLatestReleaseTag Loyalsoldier/v2ray-rules-dat); then
+    if ! padmCaptureCancelableCommand geoVersion coreLatestReleaseTag Loyalsoldier/v2ray-rules-dat; then
         errorCard "获取 Geo 数据版本失败，请稍后重试"
         return 1
     fi
@@ -335,7 +335,7 @@ installSingBoxApply() {
     fi
     if ! singBoxInstalled || { [[ "${needsStatsBuild}" == true ]] && ! singBoxConfigInstalled; }; then
 
-        version=$(coreLatestReleaseTag SagerNet/sing-box "${prereleaseStatus}")
+        padmCaptureCancelableCommand version coreLatestReleaseTag SagerNet/sing-box "${prereleaseStatus}"
         checkVersionNotEmpty "${version}"
 
         successCard "最新版本:${version}"
@@ -396,7 +396,7 @@ installSingBoxApply() {
                 menuReadChoice singbox_reinstall "是否更新、升级？[y/N]:" reInstallSingBoxStatus true || exit 1
             fi
             if [[ "$(normalizeYesNo "${reInstallSingBoxStatus}")" == "y" ]]; then
-                version=$(coreLatestReleaseTag SagerNet/sing-box "${prereleaseStatus}") || exit 1
+                padmCaptureCancelableCommand version coreLatestReleaseTag SagerNet/sing-box "${prereleaseStatus}" || exit 1
                 checkVersionNotEmpty "${version}"
                 successCard "最新版本:${version}"
                 installDownloadedSingBoxBinary "${version}" || exit 1
@@ -427,7 +427,7 @@ installXrayApply() {
 
     if ! xrayInstalled; then
 
-        version=$(coreLatestReleaseTag XTLS/Xray-core "${prereleaseStatus}")
+        padmCaptureCancelableCommand version coreLatestReleaseTag XTLS/Xray-core "${prereleaseStatus}"
         checkVersionNotEmpty "${version}"
         successCard "Xray-core版本:${version}"
         padmCreateTempPath tmpDir -d /etc/padm/tmp.xray.install.XXXXXX || exit 1
@@ -466,7 +466,7 @@ installXrayApply() {
         fi
         ensureXrayGeoFiles "$(coreXrayInstallDir)" || exit 1
         if [[ "$(normalizeYesNo "${reInstallXrayStatus}")" == "y" ]]; then
-            version=$(coreLatestReleaseTag XTLS/Xray-core "${prereleaseStatus}")
+            padmCaptureCancelableCommand version coreLatestReleaseTag XTLS/Xray-core "${prereleaseStatus}"
             checkVersionNotEmpty "${version}"
             installDownloadedXrayBinary "${version}" || exit 1
         fi
@@ -1391,7 +1391,7 @@ checkSingBoxPrereleaseCompatibility() {
     if [[ -n "${version}" ]]; then
         resolvedVersion=${version}
     else
-        resolvedVersion=$(coreLatestReleaseTag SagerNet/sing-box true 2>/dev/null || true)
+        padmCaptureCancelableCommand resolvedVersion coreLatestReleaseTag SagerNet/sing-box true 2>/dev/null || resolvedVersion=
     fi
     if [[ -z "${resolvedVersion}" || "${resolvedVersion}" == "null" ]]; then
         printf '\n失败: 无法获取目标版本\n' >>"${logFile}"
@@ -1633,7 +1633,7 @@ checkXrayPrereleaseCompatibility() {
     if [[ -n "${version}" ]]; then
         resolvedVersion=${version}
     else
-        resolvedVersion=$(coreLatestReleaseTag XTLS/Xray-core true 2>/dev/null || true)
+        padmCaptureCancelableCommand resolvedVersion coreLatestReleaseTag XTLS/Xray-core true 2>/dev/null || resolvedVersion=
     fi
     if [[ -z "${resolvedVersion}" || "${resolvedVersion}" == "null" ]]; then
         printf '\n失败: 无法获取目标版本\n' >>"${logFile}"
@@ -2093,7 +2093,7 @@ upgradeCore() {
     local channel="稳定版"
     local preparedDir=
     [[ "${prerelease}" == "true" ]] && channel="预发布版"
-    [[ -n "${version}" ]] || version=$(coreLatestReleaseTag "${repo}" "${prerelease}" || true)
+    [[ -n "${version}" ]] || padmCaptureCancelableCommand version coreLatestReleaseTag "${repo}" "${prerelease}" || version=
     if [[ -z "${version}" || "${version}" == "null" ]]; then
         errorCard "无法获取 ${core} 目标版本"
         return 1

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 runTlsFailureReturnRegression() (
+    # 这些夹具验证同步和错误传播；真实子进程取消由信号回归覆盖。
+    padmRunCancelableCommand() { "$@"; }
     local root="${TMP_DIR}/tls-failure-return"
     local oldHome="${HOME}"
     local emailRcFile="${root}/email.rc"
@@ -924,6 +926,7 @@ runTlsFailureReturnRegression() (
 )
 
 runTlsRenewalFailurePropagationRegression() (
+    padmRunCancelableCommand() { "$@"; }
     local root="${TMP_DIR}/tls-renew-failure-propagation"
     local tlsDir="${root}/certs"
     local homeDir="${root}/home"
@@ -1514,6 +1517,7 @@ EOF
 )
 
 runTlsReinstallRollbackRegression() (
+    padmRunCancelableCommand() { "$@"; }
     local root="${TMP_DIR}/tls-reinstall-rollback"
     local tlsDir="${root}/tls"
     local homeDir="${root}/home"

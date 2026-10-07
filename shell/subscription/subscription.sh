@@ -286,6 +286,10 @@ subscriptionInstallTLSHttp01() {
     local firewallAdded=false
     local status=0
     local listenerStatus=0
+    local -A PADM_SUBSCRIPTION_HTTP01_ROLLBACK=([nginxWasRunning]=false [firewallAdded]=false)
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
+    padmRegisterExitRollback restoreSubscriptionHttp01OnExit
 
     checkDNSIP "${certDomain}" || {
         errorCard "订阅域名未解析到本机" "HTTP-01 未停止服务、开放 80 端口或调用 CA"
@@ -302,6 +306,7 @@ subscriptionInstallTLSHttp01() {
             return 1
         }
         nginxWasRunning=true
+        PADM_SUBSCRIPTION_HTTP01_ROLLBACK[nginxWasRunning]=true
         runSubscribeNginxAction stop || return 1
         if subscriptionTcpPortHasListener 80; then
             runSubscribeNginxAction start restore || true
@@ -314,6 +319,7 @@ subscriptionInstallTLSHttp01() {
     fi
     allowPort 80 || status=$?
     [[ "${PADM_LAST_ALLOW_PORT_ADDED:-false}" == "true" ]] && firewallAdded=true
+    PADM_SUBSCRIPTION_HTTP01_ROLLBACK[firewallAdded]=${firewallAdded}
     if [[ "${status}" == "0" ]]; then
         installTLS 1 || status=$?
     fi
@@ -326,6 +332,15 @@ subscriptionInstallTLSHttp01() {
         status=1
     fi
     return "${status}"
+}
+
+restoreSubscriptionHttp01OnExit() {
+    if [[ "${PADM_SUBSCRIPTION_HTTP01_ROLLBACK[firewallAdded]}" == true ]] && ! denyPort 80; then
+        errorCard "HTTP-01 中断，临时 80 端口防火墙规则恢复失败"
+    fi
+    if [[ "${PADM_SUBSCRIPTION_HTTP01_ROLLBACK[nginxWasRunning]}" == true ]] && ! runSubscribeNginxAction start restore; then
+        errorCard "HTTP-01 中断，Nginx 原运行状态恢复失败"
+    fi
 }
 
 prepareSubscribeTLSCertificate() {
