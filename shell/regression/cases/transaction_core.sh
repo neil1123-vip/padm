@@ -3521,20 +3521,23 @@ runGeoUpdateReloadFailureRegression() (
 )
 
 runRealityRegenerateTransactionRegression() (
-    local root="${TMP_DIR}/reality-regenerate-transaction" profileFile
+    local root="${TMP_DIR}/reality-regenerate-transaction" profileFile aliasFile invalidState
     local failure backupCalls=0 reloadCalls=0 subscribeCalls=0 restoredCore= regenerateBackupPath=
+    local templateCalls=0 configPath="${root}/"
+    local PADM_REALITY_STREAM_STATE_FILE="${root}/stream-state.json" PADM_REALITY_STREAM_CONF_FILE="${root}/stream.conf"
     local currentInstallProtocolType=,1, selectCustomInstallType=,20, coreInstallType
     mkdir -p "${root}"
     profileFile="${root}/profile.json"
+    aliasFile="${root}/02_dokodemodoor_inbounds_2053_default.json"
     coreTemplateConfigBackupCreate() {
         backupCalls=$((backupCalls + 1))
-        checkLogBackupCreate "$1" "${profileFile}"
+        checkLogBackupCreate "$1" "${profileFile}" "${aliasFile}"
         regenerateBackupPath=${!1}
     }
     xrayRunning() { return 0; }
     singBoxRunning() { return 0; }
     coreTemplateRestoreServiceState() { restoredCore="$*"; }
-    regenerateFixtureTemplate() { printf '{"key":"new","inbounds":[{"listen":"0.0.0.0","port":2443}]}\n' >"${profileFile}"; }
+    regenerateFixtureTemplate() { templateCalls=$((templateCalls + 1)); printf '{"key":"new","inbounds":[{"listen":"0.0.0.0","port":2443}]}\n' >"${profileFile}"; }
     initXrayConfig() { coreTemplateConfigTransaction xray regenerateFixtureTemplate; }
     initSingBoxConfig() { coreTemplateConfigTransaction sing-box regenerateFixtureTemplate; }
     reloadCore() { reloadCalls=$((reloadCalls + 1)); [[ "${failure}" != reload ]]; }
@@ -3568,21 +3571,41 @@ runRealityRegenerateTransactionRegression() (
     coreInstallType=1
     currentInstallProtocolType=,2,
     failure=success
-    realityStreamSplitEnabled() { return 0; }
-    realityStreamInternalPortForProtocol() { [[ "$1" != xhttp ]] || printf '2444\n'; }
+    printf '%s\n' '{"enabled":true,"default_protocol":"xhttp","protocols":{"xhttp":{"public_port":443,"restore_port":9443,"internal_port":2444}}}' >"${PADM_REALITY_STREAM_STATE_FILE}"
+    writeCoreDokodemoInbound "${aliasFile}" 2053 2443 tcp dokodemo-door-newPort-2053
     realityStreamXHTTPConfigFile() { printf '%s\n' "${profileFile}"; }
     reloadCore() {
         reloadCalls=$((reloadCalls + 1))
         jq -e '.inbounds[0].listen == "127.0.0.1" and .inbounds[0].port == 2444' "${profileFile}" >/dev/null
     }
     regenerateRealityProfile
+    jq -e '.inbounds[0].settings.port == 2444' "${aliasFile}" >/dev/null
+    (
+        # 状态读取失败不进入事务，不生成模板或恢复服务；旧配置和额外入口保持不变。
+        local originalProfile=$(<"${profileFile}") originalAlias=$(<"${aliasFile}")
+        for invalidState in '' '{' '{}' '{"enabled":true,"default_protocol":"xhttp","protocols":{}}' \
+            '{"enabled":true,"default_protocol":"xhttp","protocols":{"xhttp":{"internal_port":0,"public_port":443}}}'; do
+            printf '%s' "${invalidState}" >"${PADM_REALITY_STREAM_STATE_FILE}"
+            templateCalls=0 subscribeCalls=0 reloadCalls=0 backupCalls=0 restoredCore=
+            regressionExpectStatus 1 regenerateRealityProfile
+            [[ "${templateCalls}:${subscribeCalls}:${reloadCalls}:${backupCalls}" == 0:0:0:0 &&
+                -z "${restoredCore}" &&
+                "$(<"${profileFile}")" == "${originalProfile}" && "$(<"${aliasFile}")" == "${originalAlias}" ]]
+            local coexistPort=unchanged
+            regressionExpectStatus 2 resolveRealityInstallCoexistPort coexistPort xhttp fixture
+            [[ "${coexistPort}" == unchanged ]]
+        done
+    )
+    printf '%s\n' '{"enabled":true,"default_protocol":"xhttp","protocols":{"xhttp":{"public_port":443,"restore_port":9443,"internal_port":2444}}}' >"${PADM_REALITY_STREAM_STATE_FILE}"
     (
         realityStreamPatchXrayConfig() { return 1; }
-        local originalProfile
+        local originalProfile originalAlias
         originalProfile=$(<"${profileFile}")
+        originalAlias=$(<"${aliasFile}")
         subscribeCalls=0 reloadCalls=0
         regressionExpectStatus 1 regenerateRealityProfile
-        [[ "$(<"${profileFile}")" == "${originalProfile}" && "${subscribeCalls}" == 0 && "${reloadCalls}" == 0 ]]
+        [[ "$(<"${profileFile}")" == "${originalProfile}" && "$(<"${aliasFile}")" == "${originalAlias}" &&
+            "${subscribeCalls}" == 0 && "${reloadCalls}" == 0 ]]
     )
 )
 
@@ -3925,6 +3948,15 @@ JSON
         [[ ! -e "${stagedFile}" ]]
         [[ ! -e "${reloadCountFile}" ]]
         [[ ! -e "${refreshCountFile}" ]]
+        # 回滚失败留下的原始备份不能被下次参数修改覆盖。
+        local failedContent previousValidateCount=${validateCount}
+        failedContent=$(<"${targetFile}")
+        padmCreateTempFileForTarget stagedFile "${targetFile}" transaction || return 1
+        jq '.mode = "another"' "${targetFile}" >"${stagedFile}"
+        regressionExpectStatus 1 configTransactionCommit "${targetFile}" "${stagedFile}" "${backupFile}" transactionValidateMock "事务校验失败" "已回滚事务" "事务成功" transactionRefreshMock transactionReloadMock || return 1
+        [[ "$(<"${targetFile}")" == "${failedContent}" && "$(<"${backupFile}")" == "${originalContent}" &&
+            ! -e "${stagedFile}" && "${validateCount}" == "${previousValidateCount}" &&
+            ! -e "${reloadCountFile}" && ! -e "${refreshCountFile}" ]] || return 1
     ) || return 1
 
     printf '{"mode":"old","port":443}\n' >"${targetFile}"

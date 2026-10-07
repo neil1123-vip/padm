@@ -1043,6 +1043,9 @@ resolveRealityInstallCoexistPort() {
     local label=$3
     local internalPort publicPort
 
+    if declare -F realityStreamValidateState >/dev/null 2>&1; then
+        realityStreamValidateState || return 2
+    fi
     declare -F realityStreamSplitEnabled >/dev/null 2>&1 && realityStreamSplitEnabled || return 1
     internalPort=$(realityStreamInternalPortForProtocol "${protocol}")
     [[ -n "${internalPort}" ]] || return 1

@@ -199,6 +199,9 @@ realityStreamRollback() {
     restoreRealityStreamFile "$(realityStreamSplitConfFile)" "${tmpDir}/stream.conf" || status=1
     restoreRealityStreamFile "$(realityStreamSplitStateFile)" "${tmpDir}/state.json" || status=1
     restoreRealityStreamFile "$(realityStreamSplitNginxConf)" "${tmpDir}/nginx.conf" || status=1
+    if [[ -d "${tmpDir}/ports" ]]; then
+        corePortRollbackFiles "${tmpDir}/ports" || status=1
+    fi
     return "${status}"
 }
 
@@ -214,6 +217,7 @@ backupRealityStreamState() {
     backupRealityStreamFile "$(realityStreamSplitConfFile)" "${backupDir}/stream.conf" || return 1
     backupRealityStreamFile "$(realityStreamSplitStateFile)" "${backupDir}/state.json" || return 1
     backupRealityStreamFile "$(realityStreamSplitNginxConf)" "${backupDir}/nginx.conf" || return 1
+    corePortBackupFiles "${backupDir}/ports"
 }
 
 realityStreamRollbackAndFail() {
@@ -320,6 +324,34 @@ realityStreamSplitEnabled() {
     [[ -f "${stateFile}" ]] && jq -e '.enabled == true' "${stateFile}" >/dev/null 2>&1
 }
 
+# 修改入口前拒绝不完整状态，不能把读取失败当成关闭。
+realityStreamValidateState() {
+    local stateFile confFile hasConf=false
+    stateFile=$(realityStreamSplitStateFile) || return 1
+    confFile=$(realityStreamSplitConfFile) || return 1
+    [[ ! -e "${confFile}" && ! -L "${confFile}" ]] || hasConf=true
+    if [[ ! -e "${stateFile}" && ! -L "${stateFile}" && "${hasConf}" == false ]]; then
+        return 0
+    fi
+    if ! jq -se --argjson hasConf "${hasConf}" '
+        def port: type == "number" and . >= 1 and . <= 65535 and floor == .;
+        length == 1 and (.[0] |
+            type == "object" and (.enabled | type == "boolean") and
+            ((.enabled == false and $hasConf == false) or (.enabled == true and (
+                (.default_protocol == "vision" or .default_protocol == "xhttp") and
+                (.protocols | type == "object") and
+                (.protocols[.default_protocol].internal_port | port) and
+                (.protocols | keys - ["vision", "xhttp"] | length == 0) and
+                all(.protocols[]; (.internal_port | port) and (.public_port | port) and
+                    ((.restore_port // .public_port) | port))
+            )))
+        )
+    ' "${stateFile}" >/dev/null 2>&1; then
+        errorCard "Reality 443 共存状态损坏，已取消修改" "请先检查 ${stateFile}"
+        return 1
+    fi
+}
+
 realityStreamPublicPortForProtocol() {
     local protocol=$1
     local stateFile defaultProtocol
@@ -349,8 +381,10 @@ realityStreamInternalPortForProtocol() {
 realityStreamPatchXrayConfig() {
     local internalPort=$2
     local configFile=$3
-    local tmpFile
+    local tmpFile previousPort
     [[ -f "${configFile}" ]] || return 0
+    previousPort=$(jq -er '.inbounds[0].port' "${configFile}") || return 1
+    validPortNumber "${previousPort}" || return 1
     padmCreateTempFileForTarget tmpFile "${configFile}" reality || return 1
 
     local filter='.inbounds[0].listen = "127.0.0.1" | .inbounds[0].port = ($port | tonumber)'
@@ -359,14 +393,17 @@ realityStreamPatchXrayConfig() {
         return 1
     fi
     commitGeneratedJsonFile "${tmpFile}" "${configFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+    corePortRetargetFiles "${previousPort}" "${internalPort}"
 }
 
 realityStreamRestoreXrayConfig() {
     local protocol=$1
     local publicPort=$2
     local configFile=$3
-    local tmpFile
+    local tmpFile previousPort
     [[ -f "${configFile}" ]] || return 0
+    previousPort=$(jq -er '.inbounds[0].port' "${configFile}") || return 1
+    validPortNumber "${previousPort}" || return 1
     padmCreateTempFileForTarget tmpFile "${configFile}" reality || return 1
 
     local filter
@@ -380,6 +417,7 @@ realityStreamRestoreXrayConfig() {
         return 1
     fi
     commitGeneratedJsonFile "${tmpFile}" "${configFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+    corePortRetargetFiles "${previousPort}" "${publicPort}"
 }
 
 realityStreamRefreshSubscribeIfInstalled() {
@@ -485,6 +523,7 @@ configureRealityStreamSplitApply() {
     local websitePort visionInternalPort= xhttpInternalPort= currentVisionPort currentXHTTPPort
     local stateFile publicPort=443 defaultProtocol defaultInternalPort backupDir
     local selectDefaultRealityProtocol previousVisionPort= previousXHTTPPort= otherRealityPort firewallOwned=false
+    realityStreamValidateState || return 1
     if [[ "${coreInstallType}" != "1" ]]; then
         statusCard "Reality 443 共存不可用" "443 共存分流当前仅支持 Xray Reality Vision/XHTTP"
         return 1
@@ -697,6 +736,7 @@ disableRealityStreamSplit() {
     local stateFile confFile visionPublicPort xhttpPublicPort backupDir firewallOwned=false
     stateFile=$(realityStreamSplitStateFile)
     confFile=$(realityStreamSplitConfFile)
+    realityStreamValidateState || return 1
     if ! realityStreamSplitEnabled; then
         statusCard "Reality 443 共存" "分流未启用"
         return
@@ -705,6 +745,8 @@ disableRealityStreamSplit() {
         firewallOwned=true
     fi
 
+    visionPublicPort=$(realityStreamStoredPublicPortForProtocol vision) || return 1
+    xhttpPublicPort=$(realityStreamStoredPublicPortForProtocol xhttp) || return 1
     padmCreateTempPath backupDir -d "$(realityStreamDisableBackupTemplate)" || return 1
     if ! backupRealityStreamState "${backupDir}"; then
         removeRealityStreamBackup "${backupDir}"
@@ -712,8 +754,6 @@ disableRealityStreamSplit() {
         return 1
     fi
 
-    visionPublicPort=$(realityStreamStoredPublicPortForProtocol vision)
-    xhttpPublicPort=$(realityStreamStoredPublicPortForProtocol xhttp)
     if [[ -n "${visionPublicPort}" ]] && ! realityStreamRestoreXrayConfig vision "${visionPublicPort}" "$(realityStreamVisionConfigFile)"; then
         realityStreamRollbackAndFail "${backupDir}" "无法恢复 Reality Vision 公网端口配置"
         return 1

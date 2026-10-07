@@ -2743,6 +2743,7 @@ auto
 
 runRealityStreamSplitRegression() (
     local mode=${1:-all} root="${TMP_DIR}/reality-stream-split" failKey= defaultChoice=1
+    local configPath="${root}/ports/" aliasFile aliasXHTTPFile ignoredFile ignoredContent oldAlias oldXHTTPAlias
     local visionPort=2443 xhttpPort=2444 websitePortInput=8443
     local backupCalls=0 patchCalls=0 allowCalls=0 reloadCalls=0 installCalls=0 subscribeCalls=0
     local reloadShouldFail=false subscribeReadStatus=0 key oldVision oldXHTTP oldNginx oldState oldStream
@@ -2753,6 +2754,7 @@ runRealityStreamSplitRegression() (
         PADM_REALITY_STREAM_XHTTP_CONFIG_FILE="${root}/xhttp.json"
     export TMPDIR="${root}/tmp"
     mkdir -p "${TMPDIR}"
+    mkdir -p "${configPath}"
     rm -f "${PADM_REALITY_STREAM_STATE_FILE}" "${PADM_REALITY_STREAM_CONF_FILE}" "${root}/install-called"
     printf '%s\n' '{"inbounds":[{"port":443,"settings":{"marker":"vision"}},{"port":12345}]}' >"${PADM_REALITY_STREAM_VISION_CONFIG_FILE}"
     printf '%s\n' '{"inbounds":[{"listen":"0.0.0.0","port":9443,"settings":{"marker":"xhttp"}}]}' >"${PADM_REALITY_STREAM_XHTTP_CONFIG_FILE}"
@@ -2801,6 +2803,25 @@ runRealityStreamSplitRegression() (
     oldNginx=$(<"${PADM_REALITY_STREAM_NGINX_CONF}")
 
     if [[ "${mode}" != restore ]]; then
+        # 损坏状态和孤立 stream 配置不能按未启用处理，更不能继续安装或重载。
+        local invalidState operation
+        for invalidState in '' '{' '{}' '{"enabled":"true"}' '{"enabled":true,"default_protocol":"xhttp","protocols":{}}'; do
+            printf '%s' "${invalidState}" >"${PADM_REALITY_STREAM_STATE_FILE}"
+            for operation in configureRealityStreamSplit disableRealityStreamSplit; do
+                regressionExpectStatus 1 "${operation}"
+                [[ "$(<"${PADM_REALITY_STREAM_STATE_FILE}")" == "${invalidState}" ]]
+                [[ "$(<"${PADM_REALITY_STREAM_VISION_CONFIG_FILE}")" == "${oldVision}" &&
+                    "$(<"${PADM_REALITY_STREAM_XHTTP_CONFIG_FILE}")" == "${oldXHTTP}" &&
+                    "${backupCalls}:${patchCalls}:${allowCalls}:${reloadCalls}:${installCalls}" == 0:0:0:0:0 ]]
+            done
+        done
+        rm "${PADM_REALITY_STREAM_STATE_FILE}"
+        mkdir -p "${PADM_REALITY_STREAM_CONF_FILE%/*}"
+        printf 'orphan stream\n' >"${PADM_REALITY_STREAM_CONF_FILE}"
+        regressionExpectStatus 1 configureRealityStreamSplit
+        regressionExpectStatus 1 disableRealityStreamSplit
+        [[ "$(<"${PADM_REALITY_STREAM_CONF_FILE}")" == 'orphan stream' ]]
+        rm "${PADM_REALITY_STREAM_CONF_FILE}"
         # 每个输入失败都在备份、开放端口和配置写入之前停止。
         for key in enable domains default_protocol website_port vision_port xhttp_port install_nginx; do
             failKey="reality_stream_${key}"
@@ -2855,12 +2876,50 @@ runRealityStreamSplitRegression() (
     fi
     if [[ "${mode}" == input ]]; then return 0; fi
 
+    aliasFile="${configPath}02_dokodemodoor_inbounds_2053_default.json"
+    aliasXHTTPFile="${configPath}02_dokodemodoor_inbounds_2083.json"
+    ignoredFile="${configPath}02_dokodemodoor_inbounds_hysteria_2053.json"
+    writeCoreDokodemoInbound "${aliasFile}" 2053 443 tcp dokodemo-door-newPort-2053
+    writeCoreDokodemoInbound "${aliasXHTTPFile}" 2083 9443 tcp dokodemo-door-newPort-2083
+    writeCoreDokodemoInbound "${ignoredFile}" 2053 443 udp dokodemo-door-newPort-hysteria-2053
+    ignoredContent=$(<"${ignoredFile}")
+    (
+        # 迁移首个入口后，另一个入口写入失败必须恢复监听、全部入口和分流状态。
+        local secondAlias="${configPath}02_dokodemodoor_inbounds_2096.json"
+        local originalAlias=$(<"${aliasFile}") originalSecond
+        writeCoreDokodemoInbound "${secondAlias}" 2096 443 tcp dokodemo-door-newPort-2096
+        originalSecond=$(<"${secondAlias}")
+        eval "$(declare -f commitGeneratedJsonFile | sed '1s/^commitGeneratedJsonFile/streamOriginalCommitJson/')"
+        commitGeneratedJsonFile() { [[ "$2" != "${secondAlias}" ]] || return 1; streamOriginalCommitJson "$@"; }
+        regressionExpectStatus 1 configureRealityStreamSplit
+        [[ "$(<"${aliasFile}")" == "${originalAlias}" && "$(<"${secondAlias}")" == "${originalSecond}" &&
+            "$(<"${PADM_REALITY_STREAM_VISION_CONFIG_FILE}")" == "${oldVision}" &&
+            "$(<"${PADM_REALITY_STREAM_XHTTP_CONFIG_FILE}")" == "${oldXHTTP}" &&
+            "$(<"${PADM_REALITY_STREAM_NGINX_CONF}")" == "${oldNginx}" &&
+            ! -e "${PADM_REALITY_STREAM_STATE_FILE}" && ! -e "${PADM_REALITY_STREAM_CONF_FILE}" ]]
+    )
+    rm "${configPath}02_dokodemodoor_inbounds_2096.json"
     defaultChoice= visionPort= websitePortInput=
     configureRealityStreamSplit
     jq -e '.inbounds[0].listen == "127.0.0.1" and .inbounds[0].port == 2443 and .inbounds[0].settings.marker == "vision"' "${PADM_REALITY_STREAM_VISION_CONFIG_FILE}" >/dev/null
+    jq -e '.inbounds[0].port == 2053 and .inbounds[0].settings.port == 2443' "${aliasFile}" >/dev/null
     defaultChoice=1 visionPort=2445 websitePortInput=8443
     configureRealityStreamSplit
     jq -e '.protocols.vision.restore_port == 443 and .protocols.vision.internal_port == 2445' "${PADM_REALITY_STREAM_STATE_FILE}" >/dev/null
+    jq -e '.inbounds[0].settings.port == 2445' "${aliasFile}" >/dev/null
+    (
+        # 恢复端口读取失败必须在备份、配置写入和服务应用前退出。
+        local failProtocol effects="${backupCalls}:${patchCalls}:${allowCalls}:${reloadCalls}"
+        local stateBefore=$(<"${PADM_REALITY_STREAM_STATE_FILE}") aliasBefore=$(<"${aliasFile}")
+        eval "$(declare -f realityStreamStoredPublicPortForProtocol | sed '1s/^realityStreamStoredPublicPortForProtocol/streamOriginalStoredPort/')"
+        realityStreamStoredPublicPortForProtocol() { [[ "$1" != "${failProtocol}" ]] || return 1; streamOriginalStoredPort "$@"; }
+        for failProtocol in vision xhttp; do
+            regressionExpectStatus 1 disableRealityStreamSplit
+            [[ "${backupCalls}:${patchCalls}:${allowCalls}:${reloadCalls}" == "${effects}" &&
+                "$(<"${PADM_REALITY_STREAM_STATE_FILE}")" == "${stateBefore}" &&
+                "$(<"${aliasFile}")" == "${aliasBefore}" && -f "${PADM_REALITY_STREAM_CONF_FILE}" ]]
+        done
+    )
     # 原后端恢复到 443 会与 stream 冲突，切换必须在任何写入前拒绝。
     oldVision=$(<"${PADM_REALITY_STREAM_VISION_CONFIG_FILE}")
     oldXHTTP=$(<"${PADM_REALITY_STREAM_XHTTP_CONFIG_FILE}")
@@ -2878,11 +2937,13 @@ runRealityStreamSplitRegression() (
     [[ "$(<"${PADM_REALITY_STREAM_CONF_FILE}")" == "${oldStream}" ]]
     disableRealityStreamSplit
     jq -e '.inbounds[0].port == 443 and (.inbounds[0] | has("listen") | not)' "${PADM_REALITY_STREAM_VISION_CONFIG_FILE}" >/dev/null
+    jq -e '.inbounds[0].settings.port == 443' "${aliasFile}" >/dev/null
     [[ ! -e "${PADM_REALITY_STREAM_STATE_FILE}" && ! -e "${PADM_REALITY_STREAM_CONF_FILE}" ]]
 
     # 两协议切换时旧后端恢复公网监听，新后端关闭后也恢复自己的原端口。
     jq '.inbounds[0].port = 11443' "${PADM_REALITY_STREAM_VISION_CONFIG_FILE}" >"${root}/vision-reset.json"
     mv "${root}/vision-reset.json" "${PADM_REALITY_STREAM_VISION_CONFIG_FILE}"
+    writeCoreDokodemoInbound "${aliasFile}" 2053 11443 tcp dokodemo-door-newPort-2053
     defaultChoice=1 visionPort=2443
     configureRealityStreamSplit
     defaultChoice=2
@@ -2890,6 +2951,9 @@ runRealityStreamSplitRegression() (
     jq -e '.inbounds[0].port == 11443 and (.inbounds[0] | has("listen") | not)' "${PADM_REALITY_STREAM_VISION_CONFIG_FILE}" >/dev/null
     jq -e '.inbounds[0].listen == "127.0.0.1" and .inbounds[0].port == 2444' "${PADM_REALITY_STREAM_XHTTP_CONFIG_FILE}" >/dev/null
     jq -e '.default_protocol == "xhttp" and (.protocols | has("vision") | not) and .protocols.xhttp.restore_port == 9443' "${PADM_REALITY_STREAM_STATE_FILE}" >/dev/null
+    jq -e '.inbounds[0].settings.port == 11443' "${aliasFile}" >/dev/null
+    jq -e '.inbounds[0].settings.port == 2444' "${aliasXHTTPFile}" >/dev/null
+    oldAlias=$(<"${aliasFile}") oldXHTTPAlias=$(<"${aliasXHTTPFile}")
     oldVision=$(<"${PADM_REALITY_STREAM_VISION_CONFIG_FILE}")
     oldXHTTP=$(<"${PADM_REALITY_STREAM_XHTTP_CONFIG_FILE}")
     oldState=$(<"${PADM_REALITY_STREAM_STATE_FILE}")
@@ -2902,10 +2966,13 @@ runRealityStreamSplitRegression() (
     [[ "$(<"${PADM_REALITY_STREAM_STATE_FILE}")" == "${oldState}" ]]
     [[ "$(<"${PADM_REALITY_STREAM_NGINX_CONF}")" == "${oldNginx}" ]]
     [[ "$(<"${PADM_REALITY_STREAM_CONF_FILE}")" == "${oldStream}" ]]
+    [[ "$(<"${aliasFile}")" == "${oldAlias}" && "$(<"${aliasXHTTPFile}")" == "${oldXHTTPAlias}" ]]
     reloadShouldFail=false
     disableRealityStreamSplit
     jq -e '.inbounds[0].listen == "0.0.0.0" and .inbounds[0].port == 9443' "${PADM_REALITY_STREAM_XHTTP_CONFIG_FILE}" >/dev/null
     jq -e '.inbounds[0].port == 11443' "${PADM_REALITY_STREAM_VISION_CONFIG_FILE}" >/dev/null
+    jq -e '.inbounds[0].settings.port == 9443' "${aliasXHTTPFile}" >/dev/null
+    [[ "$(<"${ignoredFile}")" == "${ignoredContent}" ]]
     [[ "$(<"${PADM_REALITY_STREAM_NGINX_CONF}")" == $'events {}\nhttp {}' ]]
     [[ -z "$(find "${TMPDIR}" -mindepth 1 -print -quit)" ]]
     subscribeReadStatus=1

@@ -1212,6 +1212,31 @@ corePortRemove() {
     return "${status}"
 }
 
+# 分流改变后端端口时同步受管 TCP 别名，不改 UDP 跳跃和其它分片。
+corePortRetargetFiles() {
+    local oldPort=$1 newPort=$2 files file targetPort stagedFile
+    validPortNumber "${oldPort}" && validPortNumber "${newPort}" || return 1
+    ((10#${oldPort} != 10#${newPort})) || return 0
+    files=$(corePortManagedFilesByPattern '02_dokodemodoor_inbounds_[0-9]*.json') || return 1
+    while IFS= read -r file; do
+        [[ "${file##*/}" =~ ^02_dokodemodoor_inbounds_([0-9]+)(_default)?\.json$ ]] || continue
+        targetPort=$(jq -sr --arg tag "dokodemo-door-newPort-${BASH_REMATCH[1]}" '
+            if length != 1 then error("invalid alias") else .[0].inbounds[0] end |
+            if .protocol == "dokodemo-door" and .settings.network == "tcp" and
+                .settings.address == "127.0.0.1" and .tag == $tag then .settings.port else "" end
+        ' "${file}") || return 1
+        [[ -n "${targetPort}" ]] || continue
+        validPortNumber "${targetPort}" || return 1
+        ((10#${targetPort} == 10#${oldPort})) || continue
+        padmCreateTempFileForTarget stagedFile "${file}" retarget || return 1
+        if ! jq --argjson port "$((10#${newPort}))" '.inbounds[0].settings.port = $port' "${file}" >"${stagedFile}" ||
+            ! commitGeneratedJsonFile "${stagedFile}" "${file}"; then
+            padmRemoveCleanupPath "${stagedFile}"
+            return 1
+        fi
+    done <<<"${files}"
+}
+
 corePortBackupFiles() {
     local backupDir=$1
     local file base files
@@ -3075,7 +3100,10 @@ regenerateRealityProfileApply() {
 regenerateRealityProfile() {
     local core
     case "${coreInstallType}" in
-    1) core=xray ;;
+    1)
+        realityStreamValidateState || return 1
+        core=xray
+        ;;
     2) core=sing-box ;;
     *) return 1 ;;
     esac
@@ -3177,6 +3205,11 @@ configTransactionCommit() {
     local refreshFn=$8
     local reloadFn=$9
 
+    if [[ -e "${backupFile}" || -L "${backupFile}" ]]; then
+        padmRemoveCleanupPath "${stagedFile}"
+        errorCard "上次配置备份仍未处理，已取消修改" "请先检查 ${configFile} 和 ${backupFile}"
+        return 1
+    fi
     if ! configFile=$(padmRequireSafeAbsolutePath "${configFile}") ||
         ! backupManagedFileToPath "${configFile}" "${backupFile}" 644; then
         padmRemoveCleanupPath "${stagedFile}"
@@ -3391,14 +3424,13 @@ setXHTTPAdvancedParams() {
     readXHTTPRange "请输入 xPaddingBytes 范围" 100 1000 pf pt || return 1
     autoRead xhttp_max_post_bytes "请输入 packet-up 单个 POST 最大字节数[回车默认 1000000]:" maxPost || return 1
     maxPost=${maxPost:-1000000}
+    [[ "${maxPost}" =~ ^[0-9]+$ ]] || { errorCard "数值参数必须是非负整数"; return 1; }
     autoRead xhttp_min_posts_interval "请输入 packet-up 客户端 POST 最小间隔毫秒[回车默认 30]:" minInterval || return 1
     minInterval=${minInterval:-30}
+    [[ "${minInterval}" =~ ^[0-9]+$ ]] || { errorCard "数值参数必须是非负整数"; return 1; }
     autoRead xhttp_max_buffered_posts "请输入 packet-up 服务端最多缓存 POST 数[回车默认 30]:" maxBuffered || return 1
     maxBuffered=${maxBuffered:-30}
-    [[ "${maxPost}" =~ ^[0-9]+$ && "${minInterval}" =~ ^[0-9]+$ && "${maxBuffered}" =~ ^[0-9]+$ ]] || {
-        errorCard "数值参数必须是非负整数"
-        return 1
-    }
+    [[ "${maxBuffered}" =~ ^[0-9]+$ ]] || { errorCard "数值参数必须是非负整数"; return 1; }
     readXHTTPRange "请输入 stream-up 服务端保活秒数范围" 20 80 sf st || return 1
     autoConfirm xhttp_disable_grpc_header "是否关闭 gRPC header 伪装？" n noGrpc || return 1
     autoConfirm xhttp_disable_sse_header "是否关闭 SSE response header？" n noSse || return 1
@@ -3595,8 +3627,8 @@ showXHTTPUsageNotes() {
 manageXHTTP() {
     local selectXHTTPManageType=
     while true; do
-        readInstallType
-        readInstallProtocolType
+        readInstallType || return 1
+        readInstallProtocolType || return 1
         if [[ "${coreInstallType}" != "1" ]] || ! currentProtocolHas 2; then
             errorCard "请先安装 Xray 的 2.VLESS Reality XHTTP"
             return 1

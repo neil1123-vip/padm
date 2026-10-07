@@ -696,10 +696,12 @@ runProtocolEntryConfigUpdateRegression() (
     (
         # 无效字段尽早返回，后续输入、配置和提交计数均保持。
         local inputFd unread earlyInput
-        for value in xmux advanced serverName host; do
+        for value in xmux maxPost minInterval maxBuffered serverName host; do
             case "${value}" in
             xmux) command=setXHTTPCustomXmux; earlyInput=0 ;;
-            advanced) command=setXHTTPAdvancedParams; earlyInput=$'\nbad\n\n' ;;
+            maxPost) command=setXHTTPAdvancedParams; earlyInput=$'\nbad' ;;
+            minInterval) command=setXHTTPAdvancedParams; earlyInput=$'\n\nbad' ;;
+            maxBuffered) command=setXHTTPAdvancedParams; earlyInput=$'\n\n\nbad' ;;
             serverName) command=setXHTTPDownloadSettings; earlyInput=$'down.example.com\n\ntls\nbad:host' ;;
             host) command=setXHTTPDownloadSettings; earlyInput=$'down.example.com\n\ntls\n\nbad:host' ;;
             esac
@@ -708,6 +710,20 @@ runProtocolEntryConfigUpdateRegression() (
             read -r unread <&"${inputFd}"
             exec {inputFd}<&-
             [[ "${unread}" == sentinel && "${commits}" == 6 && "$(<"${fixtureConfig}")" == "${before}" ]]
+        done
+    )
+    (
+        # 状态读取失败不使用残留协议，也不消费下级菜单输入。
+        local step inputFd unread coreInstallType=1 currentInstallProtocolType=,2, summaryCalls=0
+        xhttpSettingsSummary() { summaryCalls=$((summaryCalls + 1)); }
+        for step in install protocols; do
+            readInstallType() { [[ "${step}" != install ]]; }
+            readInstallProtocolType() { [[ "${step}" != protocols ]]; }
+            exec {inputFd}<<<sentinel
+            regressionExpectStatus 1 manageXHTTP <&"${inputFd}"
+            read -r unread <&"${inputFd}"
+            exec {inputFd}<&-
+            [[ "${unread}" == sentinel && "${summaryCalls}" == 0 ]]
         done
     )
     regressionExpectStatus 1 applyXHTTPConfigUpdate '.enabled = $enabled' fixture --argjson enabled invalid 2>/dev/null
