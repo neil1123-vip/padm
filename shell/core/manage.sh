@@ -1407,7 +1407,6 @@ addCorePort() {
         menuItem 3 "删除端口" "移除已添加端口"
         menuReturnItem 4 "返回协议与入口" "回到上级菜单"
         menuClose
-        selectNewPortType=
         menuReadChoice core_port_menu "请选择:" selectNewPortType || return 0
         case "${selectNewPortType}" in
         1)
@@ -1993,7 +1992,6 @@ manageCDN() {
         menuItem 3 "CDN / H3 使用说明" "查看协议选择和排障提示"
         menuReturnItem 4 "返回协议与入口" "回到上级菜单"
         menuClose
-        selectCDNType=
         menuReadChoice cdn_menu "请选择:" selectCDNType || return 0
 
         case "${selectCDNType}" in
@@ -3337,7 +3335,7 @@ setXHTTPCustomXmux() {
         menuLine "hMaxReusableSecs 超过 3600 可能触发部分中间盒旧连接清理"
         menuClose
     fi
-    applyXHTTPConfigUpdate '.inbounds[0].streamSettings.xhttpSettings.xmux = {"maxConcurrency":$concurrency,"hMaxRequestTimes":$requestTimes,"hMaxReusableSecs":$reusableSecs}' \
+    applyXHTTPConfigUpdate '.inbounds[0].streamSettings.xhttpSettings.xmux |= ((. // {}) + {"maxConcurrency":$concurrency,"hMaxRequestTimes":$requestTimes,"hMaxReusableSecs":$reusableSecs})' \
         "XHTTP XMUX 自定义范围已应用" --arg concurrency "${concurrencyFrom}-${concurrencyTo}" --arg requestTimes "${requestFrom}-${requestTo}" --arg reusableSecs "${reusableFrom}-${reusableTo}"
 }
 
@@ -3447,7 +3445,6 @@ manageXHTTPPresets() {
         menuItem 4 "测速/单并发" "auto + maxConcurrency=1"
         menuReturnItem 5 "返回" "回到 XHTTP 管理"
         menuClose
-        selectXHTTPPreset=
         menuReadChoice xhttp_preset_menu "请选择:" selectXHTTPPreset || return 0
         case "${selectXHTTPPreset}" in
         1) setXHTTPPreset daily || true ;;
@@ -3469,7 +3466,6 @@ manageXHTTPMode() {
         menuItem 3 "stream-up" "流式上行，效率更高"
         menuReturnItem 4 "返回" "回到 XHTTP 管理"
         menuClose
-        selectXHTTPMode=
         menuReadChoice xhttp_mode_menu "请选择:" selectXHTTPMode || return 0
         case "${selectXHTTPMode}" in
         1) setXHTTPMode auto || true ;;
@@ -3490,7 +3486,6 @@ manageXHTTPXmux() {
         menuItem 3 "自定义范围" "自定义 maxConcurrency/request/time"
         menuReturnItem 4 "返回" "回到 XHTTP 管理"
         menuClose
-        selectXHTTPXmux=
         menuReadChoice xhttp_xmux_menu "请选择:" selectXHTTPXmux || return 0
         case "${selectXHTTPXmux}" in
         1) setXHTTPXmux '"16-32"' || true ;;
@@ -3513,7 +3508,6 @@ manageXHTTPNormal() {
         menuItem 4 "CDN / H3 使用说明" "查看 Cloudflare、H3 和兼容性提示"
         menuReturnItem 5 "返回 XHTTP 管理" "回到上级菜单"
         menuClose
-        selectXHTTPNormal=
         menuReadChoice xhttp_normal_menu "请选择:" selectXHTTPNormal || return 0
         case "${selectXHTTPNormal}" in
         1) xhttpSettingsSummary || true ;;
@@ -3537,7 +3531,6 @@ manageXHTTPAdvanced() {
         menuRecommendedItem 4 "恢复推荐默认值" "恢复 mode、XMUX 与高级推荐值"
         menuReturnItem 5 "返回 XHTTP 管理" "回到上级菜单"
         menuClose
-        selectXHTTPAdvanced=
         menuReadChoice xhttp_advanced_menu "请选择:" selectXHTTPAdvanced || return 0
         case "${selectXHTTPAdvanced}" in
         1) manageXHTTPXmux || true ;;
@@ -3559,7 +3552,6 @@ manageXHTTPExperiment() {
         menuItem 2 "关闭上下行分离" "删除 downloadSettings"
         menuReturnItem 3 "返回 XHTTP 管理" "回到上级菜单"
         menuClose
-        selectXHTTPExperiment=
         menuReadChoice xhttp_experiment_menu "请选择:" selectXHTTPExperiment || return 0
         case "${selectXHTTPExperiment}" in
         1) setXHTTPDownloadSettings || true ;;
@@ -3600,7 +3592,6 @@ manageXHTTP() {
         menuRecommendedItem 4 "恢复推荐默认值" "恢复 mode、XMUX 与高级推荐值"
         menuReturnItem 5 "返回协议与入口" "回到上级菜单"
         menuClose
-        selectXHTTPManageType=
         menuReadChoice xhttp_manage_menu "请选择:" selectXHTTPManageType || return 0
 
         case "${selectXHTTPManageType}" in
@@ -3728,7 +3719,6 @@ manageHysteria2Bandwidth() {
         menuRecommendedItem 2 "BBR" "自适应带宽；无需填写速率"
         menuReturnItem 3 "返回" "回到 Hysteria2 管理"
         menuClose
-        selectMode=
         menuReadChoice hysteria_bandwidth_manage_menu "请选择:" selectMode || return 0
         case "${selectMode}" in
         1) setHysteria2BandwidthMode brutal || true ;;
@@ -3761,7 +3751,6 @@ manageHysteria() {
         fi
 
         menuClose
-        installHysteria2Status=
         menuReadChoice hysteria_menu "请选择:" installHysteria2Status || return 0
         if [[ "${installHysteria2Status}" == "1" ]]; then
             singBoxHysteria2Install || true
@@ -3897,7 +3886,6 @@ manageTuicCongestionControl() {
         menuItem 3 "new_reno" "兼容保守"
         menuReturnItem 4 "返回" "回到 Tuic 管理"
         menuClose
-        selectTuicCongestion=
         menuReadChoice tuic_congestion_menu "请选择:" selectTuicCongestion || return 0
         case "${selectTuicCongestion}" in
         1) setTuicCongestionControl cubic || true ;;
@@ -3920,7 +3908,6 @@ manageTuicAdvanced() {
         menuRecommendedItem 4 "恢复推荐默认值" "cubic、3s、10s、0-RTT 关闭"
         menuReturnItem 5 "返回 Tuic 管理" "回到上级菜单"
         menuClose
-        selectTuicAdvanced=
         menuReadChoice tuic_advanced_menu "请选择:" selectTuicAdvanced || return 0
         case "${selectTuicAdvanced}" in
         1) setTuicConnectionParams || true ;;
@@ -3957,7 +3944,6 @@ manageTuic() {
         fi
 
         menuClose
-        installTuicStatus=
         menuReadChoice tuic_menu "请选择:" installTuicStatus || return 0
         if [[ "${installTuicStatus}" == "1" ]]; then
             singBoxTuicInstall || true

@@ -943,6 +943,9 @@ runProtocolEntryConfigUpdateRegression() (
         manageXHTTPXmux <<< $'2\n4'
         command jq -e '.inbounds[0].streamSettings.xhttpSettings | .mode == "packet-up" and
             .xmux == {"maxConcurrency":1,"hMaxRequestTimes":"42-84","hMaxReusableSecs":"90-120","cMaxReuseTimes":7}' "${fixtureConfig}" >/dev/null
+        setXHTTPCustomXmux <<< $'8-16\n50-100\n120-180'
+        command jq -e '.inbounds[0].streamSettings.xhttpSettings | .mode == "packet-up" and
+            .xmux == {"maxConcurrency":"8-16","hMaxRequestTimes":"50-100","hMaxReusableSecs":"120-180","cMaxReuseTimes":7}' "${fixtureConfig}" >/dev/null
         applyXHTTPConfigUpdate 'del(.inbounds[0].streamSettings.xhttpSettings.xmux)' fixture
         setXHTTPXmux 1
         command jq -e '.inbounds[0].streamSettings.xhttpSettings.xmux ==

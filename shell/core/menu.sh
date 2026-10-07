@@ -77,7 +77,6 @@ protocolEntryMenu() {
         menuItem 6 "CDN 入口管理" "订阅入口地址覆盖、CDN/H3 使用说明"
         menuReturnItem 7 "返回主菜单" "回到 padm 管理面板"
         menuClose
-        selectProtocolMenuType=
         menuReadChoice protocol_entry_menu "请选择:" selectProtocolMenuType || return 0
         case "${selectProtocolMenuType}" in
         1) manageReality 1 || true ;;
