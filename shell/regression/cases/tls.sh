@@ -66,14 +66,34 @@ runTlsFailureReturnRegression() (
         for input in '' new@example.com; do
             sslEmail=previous@example.com
             regressionExpectStatus 1 customSSLEmail < <(printf '%s' "${input}")
-            [[ "$(<"${accountFile}")" == "${before}" ]]
+            [[ "$(<"${accountFile}")" == "${before}" && "${sslEmail}" == previous@example.com ]]
         done
-        exec {inputFd}< <(printf 'y\nnew@example.com\nnext-parent-action\n')
+        # 邮箱原地纠错，确认大小写/yes 通用；取消或写入失败不缓存无效邮箱。
+        exec {inputFd}< <(printf 'YES\nbad-email\n\nnew@example.com\nnext-parent-action\n')
         customSSLEmail "validate email" <&"${inputFd}"
         grep -Fxq "ACCOUNT_EMAIL='new@example.com'" "${accountFile}"
         read -r -u "${inputFd}" remaining
-        [[ "${remaining}" == next-parent-action ]]
+        [[ "${remaining}" == next-parent-action && "${sslEmail}" == new@example.com ]]
         exec {inputFd}<&-
+        before=$(<"${accountFile}")
+        regressionExpectStatus 1 customSSLEmail "validate email" < <(printf 'y\nbad-email\n')
+        [[ "$(<"${accountFile}")" == "${before}" && "${sslEmail}" == new@example.com ]]
+        (
+            commitGeneratedFile() { return 1; }
+            regressionExpectStatus 1 customSSLEmail "validate email" < <(printf 'y\nanother@example.com\n')
+            [[ "$(<"${accountFile}")" == "${before}" && "${sslEmail}" == new@example.com ]]
+        )
+        (
+            local AUTO_INSTALL=true
+            autoRead() {
+                case "$1" in
+                tls_email_retry) printf -v "$3" '%s' y ;;
+                *) printf -v "$3" '%s' bad-email ;;
+                esac
+            }
+            regressionExpectStatus 1 customSSLEmail "validate email" </dev/null
+            [[ "$(<"${accountFile}")" == "${before}" && "${sslEmail}" == new@example.com ]]
+        )
     )
 
     dnsTLSDomain=example
@@ -301,7 +321,6 @@ runTlsFailureReturnRegression() (
     domain=missing.example.com
     currentHost=
     installedDNSAPIStatus=
-    installTLSCount=
     captureFailureReturn "${installRcFile}" installTLS 1
 
     local existingTlsRoot="${root}/existing-tls"
@@ -310,7 +329,6 @@ runTlsFailureReturnRegression() (
     domain=existing.example.com
     printf 'old-cert\n' >"${existingTlsRoot}/existing.example.com.crt"
     printf 'old-key\n' >"${existingTlsRoot}/existing.example.com.key"
-    installTLSCount=
     sudo() { return 1; }
     regressionExpectStatus 1 installTLSFromAcme >/dev/null 2>&1
     unset -f sudo
@@ -344,6 +362,50 @@ runTlsFailureReturnRegression() (
     cmp "${secureTlsRoot}/new.key" "${PADM_TLS_DIR}/secure.example.com.key"
     unset -f chmod
     unset -f sudo
+
+    (
+        # 同步失败恢复每个文件的原始存在状态，首次安装也不能留下半份证书。
+        local domain=partial.example.com state failure attempts
+        local crtFile="${PADM_TLS_DIR}/${domain}.crt" keyFile="${PADM_TLS_DIR}/${domain}.key"
+        local beforeCrt beforeKey
+        sudo() {
+            attempts=$((attempts + 1))
+            printf 'broken-cert\n' >"${crtFile}"
+            [[ "${failure}" != partial ]] || return 1
+            cp "${secureTlsRoot}/new.key" "${keyFile}"
+            [[ "${failure}" == invalid ]]
+        }
+        for state in missing cert key empty pair; do
+            for failure in partial command invalid; do
+                rm -f -- "${crtFile}" "${keyFile}"
+                case "${state}" in
+                cert | pair) printf 'saved-cert\n' >"${crtFile}" ;;
+                empty) : >"${crtFile}" ;;
+                esac
+                case "${state}" in
+                key | pair) printf 'saved-key\n' >"${keyFile}" ;;
+                empty) : >"${keyFile}" ;;
+                esac
+                beforeCrt=missing beforeKey=missing
+                [[ ! -f "${crtFile}" ]] || beforeCrt=$(sha256sum "${crtFile}")
+                [[ ! -f "${keyFile}" ]] || beforeKey=$(sha256sum "${keyFile}")
+                attempts=0
+                regressionExpectStatus 1 installTLSFromAcme >/dev/null 2>&1
+                [[ "${attempts}" == 2 ]]
+                if [[ "${beforeCrt}" == missing ]]; then
+                    [[ ! -e "${crtFile}" ]]
+                else
+                    [[ "$(sha256sum "${crtFile}")" == "${beforeCrt}" ]]
+                fi
+                if [[ "${beforeKey}" == missing ]]; then
+                    [[ ! -e "${keyFile}" ]]
+                else
+                    [[ "$(sha256sum "${keyFile}")" == "${beforeKey}" &&
+                        "$(stat -c %a "${keyFile}")" == 600 ]]
+                fi
+            done
+        done
+    )
 
     (
         acmeInstallSSL() { return 1; }
@@ -484,7 +546,6 @@ runTlsFailureReturnRegression() (
             cp "${certificateRoot}/valid.crt" "${PADM_TLS_DIR}/${certDomain}.crt"
             cp "${certificateRoot}/valid.key" "${PADM_TLS_DIR}/${certDomain}.key"
             oldPairHash=$(sha256sum "${PADM_TLS_DIR}/${certDomain}.crt" "${PADM_TLS_DIR}/${certDomain}.key")
-            installTLSCount=1
             regressionExpectStatus 1 installTLSFromAcme >/dev/null 2>&1
             [[ "$(sha256sum "${PADM_TLS_DIR}/${certDomain}.crt" "${PADM_TLS_DIR}/${certDomain}.key")" == "${oldPairHash}" ]]
             tlsCertificatePairUsable "${PADM_TLS_DIR}" "${certDomain}"
@@ -1156,7 +1217,6 @@ runTlsReinstallRollbackRegression() (
     local oldTlsDomain="${tlsDomain:-}"
     local oldInstalledDNSAPIStatus="${installedDNSAPIStatus:-}"
     local oldLastInstallationConfig="${lastInstallationConfig:-}"
-    local oldInstallTLSCount="${installTLSCount:-}"
     local oldSslType="${sslType:-}"
     local oldDnsAPIType="${dnsAPIType:-}"
     local oldDnsAPIStatus="${dnsAPIStatus:-}"
@@ -1185,7 +1245,6 @@ runTlsReinstallRollbackRegression() (
     tlsDomain=
     installedDNSAPIStatus=
     lastInstallationConfig=
-    installTLSCount=
     sslType=letsencrypt
     dnsAPIType=
     dnsAPIStatus=
@@ -1272,14 +1331,13 @@ runTlsReinstallRollbackRegression() (
     done
     (
         # 明确重装不先续签；单次重试状态不受历史失败影响，也不能重复报告成功。
-        installTLSCount=1
         acmeInstallTransient=true
         acmeInstallAttempts=0
         renewalTLS() { printf 'renew\n' >>"${cleanLog}"; return 37; }
         : >"${cleanLog}"
         : >"${statusLog}"
         installTLS 1 <<<y
-        [[ "${acmeInstallAttempts}" == 2 && "${installTLSCount}" == 1 ]]
+        [[ "${acmeInstallAttempts}" == 2 ]]
         ! grep -q '^renew$' "${cleanLog}"
         [[ "$(grep -c '^TLS生成成功$' "${statusLog}")" == 1 ]]
     )
@@ -1311,7 +1369,6 @@ runTlsReinstallRollbackRegression() (
     tlsDomain="${oldTlsDomain}"
     installedDNSAPIStatus="${oldInstalledDNSAPIStatus}"
     lastInstallationConfig="${oldLastInstallationConfig}"
-    installTLSCount="${oldInstallTLSCount}"
     sslType="${oldSslType}"
     dnsAPIType="${oldDnsAPIType}"
     dnsAPIStatus="${oldDnsAPIStatus}"

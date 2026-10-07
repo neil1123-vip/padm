@@ -132,11 +132,11 @@ tlsCertificateManagedByAcme() {
 
 # 自定义 Email
 customSSLEmail() {
-    local accountFile accountStage retryEmail=false
+    local accountFile accountStage retryEmail=false sslEmailStatus nextSSLEmail
     accountFile=$(acmeAccountFile)
     if [[ "${1:-}" == *"validate email"* ]]; then
         autoRead tls_email_retry "是否重新输入邮箱地址[y/n]:" sslEmailStatus || return 1
-        if [[ "${sslEmailStatus}" == "y" ]]; then
+        if [[ "$(normalizeYesNo "${sslEmailStatus}")" == "y" ]]; then
             retryEmail=true
         else
             return 1
@@ -145,19 +145,20 @@ customSSLEmail() {
 
     if [[ -d "$(acmeHomeDir)" && -f "${accountFile}" ]]; then
         if [[ "${retryEmail}" == "true" ]] || { ! grep -q "ACCOUNT_EMAIL" <"${accountFile}" && ! echo "${sslType}" | grep -q "letsencrypt"; }; then
-            autoRead tls_account_email "请输入邮箱地址:" sslEmail || return 1
-            if tlsEmailAddressIsSafe "${sslEmail}"; then
-                padmCreateTempFileForTarget accountStage "${accountFile}" account || return 1
-                if ! sed '/ACCOUNT_EMAIL/d' "${accountFile}" >"${accountStage}" || ! printf "ACCOUNT_EMAIL='%s'\n" "${sslEmail}" >>"${accountStage}"; then
-                    padmRemoveCleanupPath "${accountStage}"
-                    return 1
-                fi
-                commitGeneratedFile "${accountStage}" "${accountFile}" 600 || { padmRemoveCleanupPath "${accountStage}"; return 1; }
-                successCard "添加完毕"
-            else
+            while true; do
+                autoRead tls_account_email "请输入邮箱地址:" nextSSLEmail || return 1
+                tlsEmailAddressIsSafe "${nextSSLEmail}" && break
                 echoContent yellow "请重新输入正确的邮箱格式[例: username@example.com]"
+                [[ -z "${AUTO_INSTALL:-}" ]] || return 1
+            done
+            padmCreateTempFileForTarget accountStage "${accountFile}" account || return 1
+            if ! sed '/ACCOUNT_EMAIL/d' "${accountFile}" >"${accountStage}" || ! printf "ACCOUNT_EMAIL='%s'\n" "${nextSSLEmail}" >>"${accountStage}"; then
+                padmRemoveCleanupPath "${accountStage}"
                 return 1
             fi
+            commitGeneratedFile "${accountStage}" "${accountFile}" 600 || { padmRemoveCleanupPath "${accountStage}"; return 1; }
+            sslEmail=${nextSSLEmail}
+            successCard "添加完毕"
         fi
     fi
 
@@ -341,8 +342,8 @@ installTLSFromAcme() {
     local backupDir=
     local backupCrt=
     local backupKey=
-    local installStatus=0
-    local acmeBin
+    local installStatus attempt
+    local acmeBin acmeDomain
 
     tlsDomainNameIsSafe "${tlsDomain}" || { errorCard "TLS 域名不合法"; return 1; }
     tlsDir=$(tlsManagedDir) || return 1
@@ -356,61 +357,48 @@ installTLSFromAcme() {
         return 1
     fi
 
-    if [[ -s "${crtFile}" && -s "${keyFile}" ]]; then
-        padmCreateTmpRootPath backupDir padm-tls-install.XXXXXX -d || return 1
-        backupCrt="${backupDir}/$(basename -- "${crtFile}")"
-        backupKey="${backupDir}/$(basename -- "${keyFile}")"
-        cp -p "${crtFile}" "${backupCrt}" || { padmRemoveCleanupPath "${backupDir}"; return 1; }
-        cp -p "${keyFile}" "${backupKey}" || { padmRemoveCleanupPath "${backupDir}"; return 1; }
+    padmCreateTmpRootPath backupDir padm-tls-install.XXXXXX -d || return 1
+    backupCrt="${backupDir}/$(basename -- "${crtFile}")"
+    backupKey="${backupDir}/$(basename -- "${keyFile}")"
+    if [[ -f "${crtFile}" ]] && ! cp -p "${crtFile}" "${backupCrt}"; then
+        padmRemoveCleanupPath "${backupDir}"
+        return 1
+    fi
+    if [[ -f "${keyFile}" ]] && ! cp -p "${keyFile}" "${backupKey}"; then
+        padmRemoveCleanupPath "${backupDir}"
+        return 1
     fi
 
-    if [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
-        sudo "${acmeBin}" --installcert -d "*.${dnsTLSDomain}" --fullchainpath "${crtFile}" --keypath "${keyFile}" --ecc >/dev/null || installStatus=$?
-    else
-        sudo "${acmeBin}" --installcert -d "${tlsDomain}" --fullchainpath "${crtFile}" --keypath "${keyFile}" --ecc >/dev/null || installStatus=$?
-    fi
-
-    if [[ "${installStatus}" -ne 0 || ! -f "${crtFile}" || ! -f "${keyFile}" ]] ||
-        [[ -z $(cat "${keyFile}") || -z $(cat "${crtFile}") ]] ||
-        ! chmod 600 -- "${keyFile}" ||
-        ! tlsCertificatePairUsable "${tlsDir}" "${tlsDomain}"; then
-        tail -n 10 "${acmeLogFile}" 2>/dev/null || true
-        if [[ -n "${backupDir}" ]]; then
-            if ! restoreManagedFileFromBackup "${backupCrt}" "${crtFile}" 644; then
-                padmForgetCleanupPath "${backupDir}"
-                errorCard "TLS安装失败，旧证书恢复失败，请手动检查备份目录: ${backupDir}"
-                return 1
-            fi
-            if ! restoreManagedFileFromBackup "${backupKey}" "${keyFile}" 600; then
-                padmForgetCleanupPath "${backupDir}"
-                errorCard "TLS安装失败，旧私钥恢复失败，请手动检查备份目录: ${backupDir}"
-                return 1
-            fi
+    acmeDomain=${tlsDomain}
+    [[ "${installedDNSAPIStatus:-}" != "true" ]] || acmeDomain="*.${dnsTLSDomain}"
+    for attempt in 1 2; do
+        installStatus=0
+        sudo "${acmeBin}" --installcert -d "${acmeDomain}" --fullchainpath "${crtFile}" --keypath "${keyFile}" --ecc >/dev/null || installStatus=$?
+        if [[ "${installStatus}" == 0 ]] && tlsCertificatePairExists "${tlsDir}" "${tlsDomain}" &&
+            chmod 600 -- "${keyFile}" && tlsCertificatePairUsable "${tlsDir}" "${tlsDomain}"; then
+            padmRemoveCleanupPath "${backupDir}"
+            successCard "TLS生成成功"
+            return 0
         fi
-        if [[ ${installTLSCount:-} == "1" ]]; then
-            [[ -n "${backupDir}" ]] && padmRemoveCleanupPath "${backupDir}"
-            errorCard "TLS安装失败，请检查acme日志"
+        tail -n 10 "${acmeLogFile}" 2>/dev/null || true
+        if ! restoreCoreOptionalFileBackup "${backupCrt}" "${crtFile}" 644 ||
+            ! restoreCoreOptionalFileBackup "${backupKey}" "${keyFile}" 600; then
+            padmForgetCleanupPath "${backupDir}"
+            errorCard "TLS安装失败，证书或私钥恢复失败，请手动检查备份目录: ${backupDir}"
             return 1
         fi
-
-        installTLSCount=1
-        echo
-
-        if tail -n 10 "${acmeLogFile}" | grep -q "Could not validate email address as valid"; then
+        [[ "${attempt}" != 2 ]] || break
+        if tail -n 10 "${acmeLogFile}" 2>/dev/null | grep -q "Could not validate email address as valid"; then
             errorCard "邮箱无法通过SSL厂商验证，请重新输入"
-            echo
             customSSLEmail "validate email" || {
-                [[ -n "${backupDir}" ]] && padmRemoveCleanupPath "${backupDir}"
+                padmRemoveCleanupPath "${backupDir}"
                 return 1
             }
         fi
-        [[ -n "${backupDir}" ]] && padmRemoveCleanupPath "${backupDir}"
-        installTLSFromAcme
-        return $?
-    fi
-
-    [[ -n "${backupDir}" ]] && padmRemoveCleanupPath "${backupDir}"
-    successCard "TLS生成成功"
+    done
+    padmRemoveCleanupPath "${backupDir}"
+    errorCard "TLS安装失败，请检查acme日志"
+    return 1
 }
 
 restoreTLSReinstallBackup() {
@@ -434,7 +422,6 @@ installTLS() {
     local tlsDomain=${domain}
     local tlsDir
     local reInstallStatus=n
-    local installTLSCount=0
     tlsDomainNameIsSafe "${tlsDomain}" || { errorCard "TLS 域名不合法"; return 1; }
     tlsDir=$(tlsManagedDir) || return 1
 

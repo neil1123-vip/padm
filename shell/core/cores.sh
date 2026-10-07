@@ -2678,10 +2678,6 @@ prepareCoreInstallInputs() {
     fi
     coreTemplateCollectInitialClients "${core}" false true || return 1
     PADM_INSTALL_CLIENTS_PREPARED=true
-    if [[ "${core}" == sing-box && -z "${selectCustomInstallType:-}" && -n "${btDomain:-}" ]]; then
-        readInstallTLSPort || return 1
-        AUTO_PORT=${port}
-    fi
     if [[ "${core}" == xray ]]; then
         prepareXrayInstallInputs || return 1
     else
@@ -2972,7 +2968,6 @@ singBoxInstallApply() {
 
     if [[ -n "${btDomain}" ]]; then
         skipTlsCertificateStatusCard "检测到宝塔面板/1Panel"
-        customPortFunction || return 1
         coreInstallServiceAction "Xray 服务停止失败，已取消端口配置" handleXray stop || return 1
     else
         # 申请tls

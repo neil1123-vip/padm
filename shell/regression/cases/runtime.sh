@@ -894,9 +894,8 @@ runInstallWorkflowRegression() (
         checkDNSIP() { :; }
         removeNginxDefaultConf() { :; }
         checkPortOpen() { :; }
-        for install in customXrayInstall xrayCoreInstall singBoxInstall; do
+        for install in customXrayInstall xrayCoreInstall; do
             btDomain= selectCoreType=1
-            [[ "${install}" != singBoxInstall ]] || { btDomain=panel.example.com; selectCoreType=2; }
             for input in "" $'1+2\n'; do
                 events=
                 regressionExpectStatus 1 "${install}" 28 < <(printf '%s' "${input}")
@@ -917,6 +916,15 @@ runInstallWorkflowRegression() (
             [[ "${events}" == $'backup\ntools\nallow:8443\n'* ]]
             exec {inputFd}<&-
         done
+        # sing-box 全量只使用各协议端口，面板分支不再采集或开放无监听的公共端口。
+        btDomain=panel.example.com selectCoreType=2 events= port=previous
+        prepareSingBoxInstallInputs() { events+=$'inputs\n'; }
+        exec {inputFd}< <(printf 'next-parent-action\n')
+        regressionExpectStatus 1 singBoxInstall <&"${inputFd}"
+        read -r -u "${inputFd}" nextInput
+        [[ "${nextInput}" == next-parent-action && "${port}" == previous && -z "${AUTO_PORT}" ]]
+        [[ "${events}" == $'inputs\nbackup\ntools\nxray:stop\nnginx:stop\ndownload\n' ]]
+        exec {inputFd}<&-
     )
 
     (
@@ -1144,7 +1152,7 @@ runInstallWorkflowRegression() (
         installTools() { :; }
         handleXray() { serviceCalls=$((serviceCalls + 1)); }
         allowPort() { allowCalls=$((allowCalls + 1)); }
-        for apply in customXrayInstallApply xrayCoreInstallApply singBoxInstallApply; do
+        for apply in customXrayInstallApply xrayCoreInstallApply; do
             selectCustomInstallType=,21,
             unset AUTO_PORT
             regressionExpectStatus 1 "${apply}" 21 </dev/null
