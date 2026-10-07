@@ -51,8 +51,8 @@ waitForServiceState() {
                 return 0
             fi
         fi
-        sleep "${sleepSeconds}"
         attempt=$((attempt + 1))
+        (( attempt >= maxAttempts )) || sleep "${sleepSeconds}"
     done
     return 1
 }

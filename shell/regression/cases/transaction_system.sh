@@ -360,6 +360,21 @@ SH
         [[ "${actions}" == $'xray:stop\n' && "${SERVICE_QUEUE_ALLOW_FAILURE}" == previous ]]
     )
 
+    (
+        # 只在相邻检查间等待，最后一次失败检查后直接返回。
+        local checks=0 sleeps=0 expected=1
+        waitStateCheck() { checks=$((checks + 1)); return "${expected}"; }
+        sleep() { sleeps=$((sleeps + 1)); }
+        regressionExpectStatus 1 waitForServiceState waitStateCheck running 2 0.1 || return 1
+        [[ "${checks}" == 2 && "${sleeps}" == 1 ]] || return 1
+        checks=0 sleeps=0
+        regressionExpectStatus 1 waitForServiceState waitStateCheck running 1 0.1 || return 1
+        [[ "${checks}" == 1 && "${sleeps}" == 0 ]] || return 1
+        checks=0 expected=0
+        waitForServiceState waitStateCheck running 2 0.1 || return 1
+        [[ "${checks}" == 1 && "${sleeps}" == 0 ]] || return 1
+    ) || return 1
+
     local xrayWaitLog="${serviceTmp}/xray-wait.log"
     export PADM_XRAY_SYSTEMD_SERVICE_FILE="${serviceTmp}/xray.service"
     : >"${PADM_XRAY_SYSTEMD_SERVICE_FILE}"
