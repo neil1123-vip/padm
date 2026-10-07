@@ -1047,6 +1047,7 @@ runProtocolEntryPortRegression() (
 
 runProtocolEntryMenuSyncRegression() (
     local log="${TMP_DIR}/protocol-entry-sync.log" input expected choice refreshStatus=0 transactionStatus=0
+    local hysteriaPort= failNetwork= existingNetwork=
     local PADM_SKIP_CONTROLLER_REFRESH= PADM_CONTROL_SERVER=
     coreInstallType=1
     AUTO_INSTALL=
@@ -1058,33 +1059,66 @@ runProtocolEntryMenuSyncRegression() (
     corePortListExtra() { :; }
     corePortForwardTarget() { printf '443\n'; }
     corePortResolveByIndex() { printf '2053\n'; }
-    allowPort() { PADM_LAST_ALLOW_PORT_ADDED=true; printf 'allow:%s:%s\n' "$1" "${2:-tcp}" >>"${log}"; }
+    allowPort() {
+        PADM_LAST_ALLOW_PORT_ADDED=true
+        [[ "${existingNetwork}" != "${2:-tcp}" ]] || PADM_LAST_ALLOW_PORT_ADDED=false
+        printf 'allow:%s:%s\n' "$1" "${2:-tcp}" >>"${log}"
+        [[ "${failNetwork}" != "${2:-tcp}" ]]
+    }
     denyPort() { printf 'deny:%s:%s\n' "$1" "${2:-tcp}" >>"${log}"; return "${denyStatus:-0}"; }
     corePortApplyReloadTransaction() { printf 'apply:%s\n' "$1" >>"${log}"; return "${transactionStatus}"; }
     refreshProtocolSubscriptions() { printf 'refresh\n' >>"${log}"; return "${refreshStatus}"; }
     subscriptionNotifyControllerRefresh() { printf 'notify\n' >>"${log}"; return 1; }
-    for choice in 2 3; do
-        if [[ "${choice}" == 2 ]]; then
-            input=$'2\n2053\n2053\n4'
-            expected=$'allow:2053:tcp\nallow:2053:udp\napply:corePortWriteAddFiles\nrefresh\nnotify'
-        else
-            input=$'3\n1\n4'
-            expected=$'apply:corePortRemove\ndeny:2053:tcp\ndeny:2053:udp\nrefresh\nnotify'
-        fi
-        : >"${log}"
-        refreshStatus=0
-        addCorePort <<<"${input}"
-        [[ "$(<"${log}")" == "${expected}" ]]
-        : >"${log}"
-        refreshStatus=1
-        regressionExpectStatus 1 addCorePort <<<"${input}"
-        [[ "$(<"${log}")" == "${expected%$'\nnotify'}"$'\nerror:入口端口已生效，但订阅刷新失败，请手动刷新订阅' ]]
+    for hysteriaPort in '' 16295; do
+        for choice in 2 3; do
+            if [[ "${choice}" == 2 ]]; then
+                input=$'2\n2053\n2053\n4'
+                expected='allow:2053:tcp'
+                [[ -z "${hysteriaPort}" ]] || expected+=$'\nallow:2053:udp'
+                expected+=$'\napply:corePortWriteAddFiles\nrefresh\nnotify'
+            else
+                input=$'3\n1\n4'
+                expected=$'apply:corePortRemove\ndeny:2053:tcp\ndeny:2053:udp\nrefresh\nnotify'
+            fi
+            : >"${log}"
+            refreshStatus=0
+            addCorePort <<<"${input}"
+            [[ "$(<"${log}")" == "${expected}" ]]
+            : >"${log}"
+            refreshStatus=1
+            regressionExpectStatus 1 addCorePort <<<"${input}"
+            [[ "$(<"${log}")" == "${expected%$'\nnotify'}"$'\nerror:入口端口已生效，但订阅刷新失败，请手动刷新订阅' ]]
+        done
+        transactionStatus=1
+        for existingNetwork in '' tcp; do
+            : >"${log}"
+            regressionExpectStatus 1 addCorePort <<< $'2\n2053\n2053'
+            expected='allow:2053:tcp'
+            [[ -z "${hysteriaPort}" ]] || expected+=$'\nallow:2053:udp'
+            [[ -n "${existingNetwork}" ]] || expected+=$'\ndeny:2053:tcp'
+            [[ -z "${hysteriaPort}" ]] || expected+=$'\ndeny:2053:udp'
+            [[ "$(grep -E '^(allow|deny):' "${log}")" == "${expected}" ]]
+            ! grep -qx refresh "${log}"
+            ! grep -qx notify "${log}"
+        done
+        existingNetwork=
+        transactionStatus=0
     done
+    failNetwork=udp
+    for existingNetwork in '' tcp; do
+        : >"${log}"
+        regressionExpectStatus 1 addCorePort <<< $'2\n2061\n2061'
+        expected=$'allow:2061:tcp\nallow:2061:udp'
+        [[ -n "${existingNetwork}" ]] || expected+=$'\ndeny:2061:tcp'
+        [[ "$(<"${log}")" == "${expected}" ]]
+    done
+    hysteriaPort=
+    existingNetwork=
+    failNetwork=tcp
     : >"${log}"
-    transactionStatus=1
-    regressionExpectStatus 1 addCorePort <<< $'2\n2053\n2053'
-    if grep -qx refresh "${log}"; then return 1; fi
-    ! grep -qx notify "${log}"
+    regressionExpectStatus 1 addCorePort <<< $'2\n2061\n2061'
+    [[ "$(<"${log}")" == 'allow:2061:tcp' ]]
+    failNetwork=
     : >"${log}"
     transactionStatus=0
     refreshStatus=0

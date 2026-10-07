@@ -1295,6 +1295,7 @@ runCorePortFileTransactionRegression() {
         local firewallErrorLog="${TMP_DIR}/core-port-firewall-errors.log"
         local denyShouldFail=false
         local denyTcpShouldFail=false
+        local hysteriaPort=16295
         local mode=add-fail
         local deleteMenuReads=0
         local rc

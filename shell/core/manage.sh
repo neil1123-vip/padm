@@ -1390,8 +1390,8 @@ addCorePort() {
         return 1
     fi
 
-    local selectNewPortType newPort defaultPort portIndex port parsedPorts settingsPort firewallStatus portChanged
-    local -a openedFirewallRules=()
+    local selectNewPortType newPort defaultPort portIndex port parsedPorts settingsPort firewallStatus portChanged network
+    local -a openedFirewallRules=() portNetworks
     while true; do
         portChanged=false
         firewallStatus=0
@@ -1428,17 +1428,17 @@ addCorePort() {
                 errorCard "新增端口不能等于原入口；默认端口必须属于新增列表或等于原入口"
                 return 1
             }
+            portNetworks=(tcp)
+            [[ -n "${hysteriaPort:-}" ]] && portNetworks+=(udp)
             while read -r port; do
-                if ! allowPort "${port}"; then
-                    corePortRollbackFirewallRules "${openedFirewallRules[@]}" || true
-                    return 1
-                fi
-                [[ "${PADM_LAST_ALLOW_PORT_ADDED:-false}" == "true" ]] && openedFirewallRules+=("${port}|tcp")
-                if ! allowPort "${port}" "udp"; then
-                    corePortRollbackFirewallRules "${openedFirewallRules[@]}" || true
-                    return 1
-                fi
-                [[ "${PADM_LAST_ALLOW_PORT_ADDED:-false}" == "true" ]] && openedFirewallRules+=("${port}|udp")
+                for network in "${portNetworks[@]}"; do
+                    if ! allowPort "${port}" "${network}"; then
+                        corePortRollbackFirewallRules "${openedFirewallRules[@]}" || true
+                        return 1
+                    fi
+                    [[ "${PADM_LAST_ALLOW_PORT_ADDED:-false}" == "true" ]] &&
+                        openedFirewallRules+=("${port}|${network}")
+                done
             done <<<"${parsedPorts}"
             if ! corePortApplyReloadTransaction corePortWriteAddFiles "${parsedPorts}" "${defaultPort}" "${settingsPort}"; then
                 corePortRollbackFirewallRules "${openedFirewallRules[@]}" || true
