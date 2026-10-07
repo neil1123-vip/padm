@@ -533,7 +533,7 @@ singBoxProtocolInstallApply() {
 }
 
 singBoxProtocolInstall() {
-    local protocolId=$1 protocolName configFile reuseParameters=
+    local protocolId=$1 protocolName configFile reuseParameters= oldHysteriaPort=
     shift
     local selectCustomInstallType=",${protocolId},"
     local singBoxHysteria2CredentialMode=false PADM_INSTALL_CLIENTS_PREPARED=true
@@ -571,6 +571,7 @@ singBoxProtocolInstall() {
     # 每次重读磁盘，采集仅保存在本次作用域，取消或失败不污染后续重装。
     singBoxConfigPath="$(singBoxTemplateConfigDir)/" || return 1
     readSingBoxConfig || return 1
+    [[ "${protocolId}" != 3 ]] || oldHysteriaPort=${hysteriaPort}
     if [[ -f "${configFile}" ]]; then
         while true; do
             if [[ -n "${AUTO_INSTALL:-}" ]]; then
@@ -622,7 +623,12 @@ singBoxProtocolInstall() {
     singBoxEnsureTLSDependency "${protocolName}" true || return 1
     AUTO_PORT=${protocolPort[-1]}
     lastInstallationConfig=true
-    coreInstallConfigTransaction sing-box padmRunPortAllowTransaction singBoxProtocolInstallApply "${protocolName}" "$@"
+    coreInstallConfigTransaction sing-box padmRunPortAllowTransaction singBoxProtocolInstallApply "${protocolName}" "$@" || return 1
+    if [[ -n "${oldHysteriaPort}" ]] && ! corePortSyncHysteriaAliases "${oldHysteriaPort}" "${AUTO_PORT}"; then
+        errorCard "Hysteria2 已安装，但 UDP 入口同步失败，请检查入口配置"
+        return 1
+    fi
+    return 0
 }
 
 singBoxTuicInstall() {

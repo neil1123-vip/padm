@@ -1125,6 +1125,20 @@ grep -qx "    sni: 2001:db8::10" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-tuic-us
 jq -e '.[0].type == "tuic" and .[0].server == "2001:db8::10" and .[0].tls.server_name == "2001:db8::10"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-tuic-user" >/dev/null
 jq -e '.[0].uuid == "uuid-tuic" and .[0].password == "pass@:/?#[]" and .[0].congestion_control == "bbr" and .[0].udp_relay_mode == "native" and .[0].zero_rtt_handshake == false and .[0].tls.alpn[0] == "h3"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-tuic-user" >/dev/null
 
+(
+    # 标准订阅写入失败必须向上传播，不能继续生成 v2rayN 输出。
+    local protocol credential outputTitle appendReached v2rayNReached
+    appendStandardTLSSubscribeOutputs() { appendReached=true; return 1; }
+    subscribeOutputTitle() { [[ "$1" != "${outputTitle}" ]] || v2rayNReached=true; }
+    for protocol in hysteria tuic; do
+        appendReached=false v2rayNReached=false
+        credential="pass@:/?#[]" outputTitle="v2rayN：Hysteria2 TLS"
+        [[ "${protocol}" != tuic ]] || { credential="uuid-tuic_pass@:/?#[]"; outputTitle="v2rayN：Tuic TLS"; }
+        regressionExpectStatus 1 defaultBase64Code "${protocol}" 9443 "tls-${protocol}-failure-user" "${credential}" "" "" >/dev/null || return 1
+        [[ "${appendReached}" == true && "${v2rayNReached}" == false ]] || return 1
+    done
+) || return 1
+
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="2001:db8::10"
 defaultBase64Code naive 443 tls-naive@user "pass@:/?#[]" "" ""

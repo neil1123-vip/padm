@@ -1212,10 +1212,64 @@ runProtocolEntryPortRegression() (
     currentProtocolHas() { [[ "${installedIds}" == *",$1,"* ]]; }
     subscribeSectionTitle() { :; }
     subscribeAccountTitle() { :; }
-    realityStreamPublicPortForProtocol() { printf '443\n'; }
     realityEntryHost() { printf 'entry.example.com\n'; }
     xrayRealityXHTTPSetting() { printf '/xhttp\n'; }
     defaultBase64Code() { printf '%s:%s\n' "$1" "$2" >>"${root}/nodes"; }
+    (
+        # 使用真实分流状态读取；关闭残留字段不改端口，坏状态不能输出订阅节点。
+        local PADM_REALITY_STREAM_STATE_FILE="${root}/stream-state.json"
+        local PADM_REALITY_STREAM_CONF_FILE="${root}/stream.conf"
+        local output="${root}/stream-port" protocol enabled expectedPort state
+        local xrayVLESSRealityVisionPort=8443 xrayVLESSRealityXHTTPort=9443 currentCDNAddress= currentPath=xhttp
+        corePortDefaultFile() { :; }
+        regressionExpectStatus 0 realityStreamPublicPortForProtocol vision >"${output}" || return 1
+        [[ ! -s "${output}" ]] || return 1
+        for protocol in vision xhttp; do
+            for enabled in true false; do
+                printf '{"enabled":%s,"default_protocol":"%s","protocols":{"%s":{"public_port":443,"restore_port":9443,"internal_port":2443}}}\n' \
+                    "${enabled}" "${protocol}" "${protocol}" >"${PADM_REALITY_STREAM_STATE_FILE}" || return 1
+                regressionExpectStatus 0 realityStreamPublicPortForProtocol "${protocol}" >"${output}" || return 1
+                expectedPort=
+                [[ "${enabled}" != true ]] || expectedPort=443
+                [[ "$(<"${output}")" == "${expectedPort}" ]] || return 1
+                : >"${root}/nodes" || return 1
+                if [[ "${protocol}" == vision ]]; then
+                    installedIds=,1,
+                    showVlessRealityAccountsFromConfig 1 "${listenerFile}" 8443 >/dev/null || return 1
+                    grep -qx "vlessReality:${expectedPort:-8443}" "${root}/nodes" || return 1
+                else
+                    installedIds=,2,
+                    showVlessRealityXHTTPAccounts >/dev/null || return 1
+                    grep -qx "vlessXHTTP:${expectedPort:-9443}" "${root}/nodes" || return 1
+                fi
+            done
+        done
+        for state in '' '{' '{}' '{"enabled":true,"default_protocol":"vision","protocols":{}}' \
+            $'{"enabled":false}\n{"enabled":false}' orphan; do
+            rm -f "${PADM_REALITY_STREAM_CONF_FILE}" || return 1
+            if [[ "${state}" == orphan ]]; then
+                rm -f "${PADM_REALITY_STREAM_STATE_FILE}" || return 1
+                printf 'orphan stream\n' >"${PADM_REALITY_STREAM_CONF_FILE}" || return 1
+            else
+                printf '%s' "${state}" >"${PADM_REALITY_STREAM_STATE_FILE}" || return 1
+            fi
+            for protocol in vision xhttp; do
+                regressionExpectStatus 1 realityStreamPublicPortForProtocol "${protocol}" >"${output}" || return 1
+                [[ ! -s "${output}" ]] || return 1
+            done
+            : >"${root}/nodes" || return 1
+            installedIds=,1,
+            regressionExpectStatus 1 showVlessRealityAccountsFromConfig 1 "${listenerFile}" 8443 >/dev/null || return 1
+            [[ ! -s "${root}/nodes" ]] || return 1
+            regressionExpectStatus 1 showVlessRealityAccounts >"${output}" || return 1
+            [[ ! -s "${output}" && ! -s "${root}/nodes" ]] || return 1
+            installedIds=,2,
+            regressionExpectStatus 1 showVlessRealityXHTTPAccounts >/dev/null || return 1
+            [[ ! -s "${root}/nodes" ]] || return 1
+        done
+        rm -f "${PADM_REALITY_STREAM_STATE_FILE}" "${PADM_REALITY_STREAM_CONF_FILE}" || return 1
+    ) || return 1
+    realityStreamPublicPortForProtocol() { printf '443\n'; }
     showVlessRealityAccountsFromConfig 1 "${listenerFile}" 8443
     grep -qx 'vlessReality:2053' "${root}/nodes"
     installedIds=,2,
@@ -1277,7 +1331,7 @@ runProtocolEntryMenuSyncRegression() (
     (
         # 安装 wrapper 的局部变量返回后失效，新增入口必须采用实际磁盘状态。
         source "${PROJECT_ROOT}/shell/core/state.sh"
-        local root="${TMP_DIR}/entry-live-state" configPath singBoxConfigPath hysteriaPort= invalidFile
+        local root="${TMP_DIR}/entry-live-state" configPath singBoxConfigPath hysteriaPort= invalidFile invalidConfig
         export PADM_XRAY_BINARY=/bin/true PADM_XRAY_CONF_DIR="${root}/xray" \
             PADM_SINGBOX_BINARY=/bin/true PADM_SINGBOX_CONFIG_DIR="${root}/sing-box"
         mkdir -p "${PADM_XRAY_CONF_DIR}" "${PADM_SINGBOX_CONFIG_DIR}"
@@ -1295,13 +1349,19 @@ runProtocolEntryMenuSyncRegression() (
         ! grep -q ':udp$' "${log}" || return 1
         [[ -z "${hysteriaPort}" && ! -e "${configPath}02_dokodemodoor_inbounds_hysteria_2061.json" ]] || return 1
         for invalidFile in 06_hysteria2_inbounds.json 09_tuic_inbounds.json; do
-            printf '{' >"${PADM_SINGBOX_CONFIG_DIR}/${invalidFile}"
-            : >"${log}"
-            exec {inputFd}<<< sentinel
-            regressionExpectStatus 1 addCorePort <&"${inputFd}" || return 1
-            read -r unread <&"${inputFd}"
-            exec {inputFd}<&-
-            [[ "${unread}" == sentinel && ! -s "${log}" ]] || return 1
+            for invalidConfig in '' '{' '{}' '{"inbounds":[]}' '{"inbounds":[{"listen_port":null}]}' \
+                '{"inbounds":[{"listen_port":0}]}' '{"inbounds":[{"listen_port":65536}]}' \
+                '{"inbounds":[{"listen_port":1.5}]}' '{"inbounds":[{"listen_port":"16295"}]}' \
+                '{"inbounds":[{"listen_port":true}]}' \
+                $'{"inbounds":[{"listen_port":16295}]}\n{"inbounds":[{"listen_port":16296}]}'; do
+                printf '%s' "${invalidConfig}" >"${PADM_SINGBOX_CONFIG_DIR}/${invalidFile}"
+                : >"${log}"
+                exec {inputFd}<<< sentinel
+                regressionExpectStatus 1 addCorePort <&"${inputFd}" || return 1
+                read -r unread <&"${inputFd}"
+                exec {inputFd}<&-
+                [[ "${unread}" == sentinel && ! -s "${log}" ]] || return 1
+            done
             rm "${PADM_SINGBOX_CONFIG_DIR}/${invalidFile}"
         done
     ) || return 1

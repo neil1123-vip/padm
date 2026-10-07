@@ -2298,7 +2298,8 @@ SH
 
     (
         local actionLog="${TMP_DIR}/nginx-302-backup-failure.log"
-        autoRead() { printf -v "$3" '1'; }
+        menuReadChoice() { printf -v "$3" '%s' 1; }
+        autoRead() { printf -v "$3" '%s' https://new.example; }
         ensureTraditionalTlsFallbackNginxConfig() { return 0; }
         backupNginxConfig() { printf 'backup\n' >>"${actionLog}"; return 1; }
         removeNginx302() { printf 'remove\n' >>"${actionLog}"; return 0; }
@@ -2324,6 +2325,44 @@ SH
             regressionExpectStatus 1 manageTraditionalTlsRedirect >/dev/null || return 1
             [[ ! -e "${actionLog}" && "${redirectDomain}" == https://old.example ]] || return 1
         done
+    ) || return 1
+    (
+        # 已有配置不得先被重建；非法目标和服务失败都保留原始字节。
+        local original="${TMP_DIR}/nginx-302-original.conf" actionLog="${TMP_DIR}/nginx-302-preserve.log"
+        local redirectTarget menuChoice=1 applyCalls=0 menuCalls=0
+        local PADM_ALONE_NGINX_BACKUP_FILE="${TMP_DIR}/nginx-302-preserve-backup.conf"
+        printf 'server {\nadd_header X-Custom keep;\nlocation / {\nreturn 302 https://old.example;\n}\n}\n' >"${original}"
+        ensureTraditionalTlsFallbackNginxConfig() {
+            printf 'ensure\n' >>"${actionLog}"
+            printf 'rebuilt\n' >"${targetPath}"
+        }
+        menuReadChoice() {
+            menuCalls=$((menuCalls + 1))
+            printf -v "$3" '%s' "$((menuCalls == 1 ? menuChoice : 3))"
+        }
+        autoRead() { printf -v "$3" '%s' "${redirectTarget}"; }
+        serviceQueueRefresh() { :; }
+        serviceQueueApply() { applyCalls=$((applyCalls + 1)); ((applyCalls > 1)); }
+        pgrep() { printf '1\n'; }
+
+        cp "${original}" "${targetPath}"
+        redirectTarget="https://bad.example'; add_header X-Padm injected; #"
+        regressionExpectStatus 1 manageTraditionalTlsRedirect >/dev/null || return 1
+        cmp -s "${original}" "${targetPath}" || return 1
+        [[ ! -e "${actionLog}" && ! -e "${PADM_ALONE_NGINX_BACKUP_FILE}" && "${applyCalls}" == 0 ]] || return 1
+        for menuChoice in 1 2; do
+            cp "${original}" "${targetPath}"
+            redirectTarget=https://new.example menuCalls=0 applyCalls=0
+            regressionExpectStatus 1 manageTraditionalTlsRedirect >/dev/null || return 1
+            cmp -s "${original}" "${targetPath}" || return 1
+            [[ ! -e "${actionLog}" && "${applyCalls}" == 2 ]] || return 1
+        done
+        menuChoice=1 menuCalls=0 applyCalls=1
+        checkNginx302() { return 0; }
+        manageTraditionalTlsRedirect >/dev/null || return 1
+        grep -q "return 302 'https://new.example';" "${targetPath}" || return 1
+        grep -q 'add_header X-Custom keep;' "${targetPath}" || return 1
+        [[ ! -e "${actionLog}" ]] || return 1
     ) || return 1
     (
         local installs=0 successes=0 installStatus=1 menuCalls=0

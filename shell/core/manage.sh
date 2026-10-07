@@ -731,6 +731,11 @@ unInstallSingBox() {
     fi
     [[ "${cleanupStatus}" != "0" ]] || padmRemoveCleanupPath "${uninstallBackupDir}"
 
+    if [[ "${type}" == hysteria2 ]] && ! corePortSyncHysteriaAliases "${protocolPort}"; then
+        errorCard "Hysteria2 已卸载，但 UDP 入口清理失败，请检查入口配置和防火墙"
+        cleanupStatus=1
+    fi
+
     if [[ -n "${portHoppingStart}" && -n "${portHoppingEnd}" ]]; then
         deletePortHoppingRules "${type}" "${portHoppingStart}" "${portHoppingEnd}" "${protocolPort}" || firewallStatus=1
     fi
@@ -898,9 +903,11 @@ manageTraditionalTlsRedirect() {
         if [[ "${redirectStatus}" == "1" ]]; then
             redirectDomain=
             autoRead redirect_domain "请输入要重定向的域名,例如 https://www.baidu.com:" redirectDomain || return 1
-            if ! ensureTraditionalTlsFallbackNginxConfig; then
+            if ! padmIsSafeNginxRedirectTarget "${redirectDomain}"; then
+                errorCard "Nginx 302 重定向目标不合法，仅支持不含空白、引号、反斜杠或变量的 http/https URL"
                 return 1
             fi
+            [[ -f "${nginxConfigPath}alone.conf" ]] || ensureTraditionalTlsFallbackNginxConfig || return 1
             backupNginxConfig backup || return 1
             if ! removeNginx302 || ! addNginx302 "${redirectDomain}"; then
                 backupNginxConfig restoreBackup
@@ -923,9 +930,7 @@ manageTraditionalTlsRedirect() {
                 return 1
             fi
         elif [[ "${redirectStatus}" == "2" ]]; then
-            if ! ensureTraditionalTlsFallbackNginxConfig; then
-                return 1
-            fi
+            [[ -f "${nginxConfigPath}alone.conf" ]] || ensureTraditionalTlsFallbackNginxConfig || return 1
             backupNginxConfig backup || return 1
             removeNginx302 || return 1
             serviceQueueRefresh nginx
@@ -1212,6 +1217,57 @@ corePortRemove() {
     targetFile=$(corePortManagedFilePath "02_dokodemodoor_inbounds_hysteria_${port}.json") || return 1
     removeManagedFileIfPresent "${targetFile}" || status=1
     return "${status}"
+}
+
+# 只同步本工具生成且指向旧 Hy2 后端的 UDP 别名，保留同端口 TCP 入口。
+corePortSyncHysteriaAliases() {
+    local oldPort=$1 newPort=${2:-} files file aliasPort matches= matched status=0
+    [[ "${coreInstallType:-}" == 1 ]] || return 0
+    validPortNumber "${oldPort}" || return 1
+    if [[ -n "${newPort}" ]]; then
+        validPortNumber "${newPort}" || return 1
+        ((10#${oldPort} != 10#${newPort})) || return 0
+    fi
+    files=$(corePortManagedFilesByPattern '02_dokodemodoor_inbounds_hysteria_*.json') || return 1
+    while IFS= read -r file; do
+        [[ "${file##*/}" =~ ^02_dokodemodoor_inbounds_hysteria_([0-9]+)\.json$ ]] || continue
+        aliasPort=${BASH_REMATCH[1]}
+        validPortNumber "${aliasPort}" || return 1
+        matched=$(jq -sr --arg tag "dokodemo-door-newPort-hysteria-${aliasPort}" \
+            --argjson port "$((10#${aliasPort}))" --argjson target "$((10#${oldPort}))" '
+            if length != 1 then error("invalid alias") else .[0] end |
+            if (.inbounds | type == "array" and length == 1) then .inbounds[0] else {} end |
+            if .protocol == "dokodemo-door" and .settings.network == "udp" and
+                .settings.address == "127.0.0.1" and .tag == $tag and
+                .port == $port and .settings.port == $target then "true" else "" end
+        ' "${file}") || return 1
+        [[ "${matched}" == true ]] && matches+="${file}"$'\n'
+    done <<<"${files}"
+    [[ -n "${matches}" ]] || return 0
+    corePortApplyReloadTransaction corePortUpdateHysteriaAliasFiles "${matches}" "${newPort}" || return 1
+    [[ -z "${newPort}" ]] || return 0
+    while IFS= read -r file; do
+        [[ "${file##*/}" =~ ^02_dokodemodoor_inbounds_hysteria_([0-9]+)\.json$ ]] || continue
+        denyPort "${BASH_REMATCH[1]}" udp || status=1
+    done <<<"${matches}"
+    return "${status}"
+}
+
+corePortUpdateHysteriaAliasFiles() {
+    local files=$1 newPort=$2 file stagedFile
+    while IFS= read -r file; do
+        [[ -n "${file}" ]] || continue
+        if [[ -z "${newPort}" ]]; then
+            removeManagedFileIfPresent "${file}" || return 1
+            continue
+        fi
+        padmCreateTempFileForTarget stagedFile "${file}" retarget || return 1
+        if ! jq --argjson port "$((10#${newPort}))" '.inbounds[0].settings.port = $port' "${file}" >"${stagedFile}" ||
+            ! commitGeneratedJsonFile "${stagedFile}" "${file}"; then
+            padmRemoveCleanupPath "${stagedFile}"
+            return 1
+        fi
+    done <<<"${files}"
 }
 
 # 分流改变后端端口时同步受管 TCP 别名，不改 UDP 跳跃和其它分片。

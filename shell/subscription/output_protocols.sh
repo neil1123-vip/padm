@@ -352,7 +352,7 @@ EOF
         --arg password "${id}" --arg sni "${currentHost}" --arg obfs_type "${hysteria2ObfsType:-}" --arg obfs_password "${hysteria2ObfsPassword:-}") || return 1
 
     echoContent green "    ${defaultLink}\n"
-    appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"
+    appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}" || return 1
     subscribeOutputTitle "v2rayN：Hysteria2 TLS"
     jq -n \
         --arg server "$(formatUriAuthorityHost "${currentHost}"):${port}" \
@@ -506,7 +506,7 @@ EOF
 )
     singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"tuic",server:$server,server_port:$port,uuid:$uuid,password:$password,congestion_control:$congestion,udp_relay_mode:"native",zero_rtt_handshake:false,tls:{enabled:true,server_name:$sni,alpn:["h3"]}}' --arg tag "${email}" --arg server "${currentHost}" --argjson port "${singBoxServerPort}" --arg uuid "${tuicUUID}" --arg password "${tuicPassword}" --arg congestion "${tuicAlgorithm}" --arg sni "${currentHost}") || return 1
 
-    appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"
+    appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}" || return 1
     subscribeOutputTitle "v2rayN：Tuic TLS"
     jq -n \
         --arg server "$(formatUriAuthorityHost "${currentHost}"):${port}" \

@@ -2881,6 +2881,83 @@ runSingBoxUninstallFailurePropagationRegression() (
     done
     denyStatus=0 refreshStatus=0
 
+    (
+        # Hy2 卸载只移除自己的受管 UDP 别名，Xray 失败仍保留已卸载状态。
+        local aliasRoot="${root}/hy2-aliases" coreInstallType=1
+        local configPath="${aliasRoot}/xray/" singBoxConfigPath="${aliasRoot}/sing-box/"
+        local udpFile="${configPath}02_dokodemodoor_inbounds_hysteria_2053.json"
+        local secondFile="${configPath}02_dokodemodoor_inbounds_hysteria_2083.json"
+        local tcpFile="${configPath}02_dokodemodoor_inbounds_2053_default.json"
+        local otherFile="${configPath}02_dokodemodoor_inbounds_hysteria_2087.json"
+        local ignoredFile="${configPath}02_dokodemodoor_inbounds_hysteria_2096.json"
+        local multiFile="${configPath}02_dokodemodoor_inbounds_hysteria_2097.json"
+        local badFile="${configPath}02_dokodemodoor_inbounds_hysteria_2099.json"
+        local udpBefore secondBefore tcpBefore otherBefore ignoredBefore multiBefore reloadCalls mode
+        mkdir -p "${configPath}" "${singBoxConfigPath}" || return 1
+        writeCoreDokodemoInbound "${tcpFile}" 2053 443 tcp dokodemo-door-newPort-2053 || return 1
+        writeCoreDokodemoInbound "${otherFile}" 2087 17295 udp dokodemo-door-newPort-hysteria-2087 || return 1
+        writeCoreDokodemoInbound "${ignoredFile}" 2096 16295 udp unmanaged || return 1
+        jq -n '{inbounds:[{port:2097,protocol:"dokodemo-door",tag:"dokodemo-door-newPort-hysteria-2097",
+            settings:{port:16295,network:"udp",address:"127.0.0.1"}},{port:31337,protocol:"socks"}]}' >"${multiFile}" || return 1
+        tcpBefore=$(<"${tcpFile}") otherBefore=$(<"${otherFile}") ignoredBefore=$(<"${ignoredFile}")
+        multiBefore=$(<"${multiFile}")
+        readInstallType() { coreInstallType=1; }
+        readPortHopping() { hysteria2PortHoppingStart=; hysteria2PortHoppingEnd=; }
+        reloadXrayProtocolCore() {
+            reloadCalls=$((reloadCalls + 1))
+            [[ "${mode}" != reload || "${reloadCalls}" != 1 ]]
+        }
+        for mode in success reload noalias; do
+            printf '{"inbounds":[{"type":"hysteria2","listen_port":16295}]}\n' >"${singBoxConfigPath}06_hysteria2_inbounds.json"
+            printf '{"inbounds":[{"type":"hysteria2","listen_port":16295}]}\n' >"${aliasRoot}/config.json"
+            singBoxMergedConfigFile() { printf '%s/config.json\n' "${aliasRoot}"; }
+            rm -f "${udpFile}" "${secondFile}"
+            if [[ "${mode}" != noalias ]]; then
+                writeCoreDokodemoInbound "${udpFile}" 2053 16295 udp dokodemo-door-newPort-hysteria-2053 || return 1
+                writeCoreDokodemoInbound "${secondFile}" 2083 16295 udp dokodemo-door-newPort-hysteria-2083 || return 1
+                udpBefore=$(<"${udpFile}") secondBefore=$(<"${secondFile}")
+            fi
+            : >"${firewallLog}"
+            : >"${refreshLog}"
+            : >"${errorLog}"
+            reloadCalls=0
+            if [[ "${mode}" == reload ]]; then
+                regressionExpectStatus 1 unInstallSingBox hysteria2 || return 1
+                [[ "$(<"${udpFile}")" == "${udpBefore}" && "$(<"${secondFile}")" == "${secondBefore}" &&
+                    "${reloadCalls}" == 2 ]] || return 1
+                grep -q 'Hysteria2 已卸载，但 UDP 入口清理失败' "${errorLog}" || return 1
+                ! grep -Eq '^deny:(2053|2083):' "${firewallLog}" || return 1
+            else
+                unInstallSingBox hysteria2 || return 1
+                [[ ! -e "${udpFile}" && ! -e "${secondFile}" ]] || return 1
+                if [[ "${mode}" == success ]]; then
+                    [[ "${reloadCalls}" == 1 ]] || return 1
+                    grep -qx 'deny:2053:udp' "${firewallLog}" || return 1
+                    grep -qx 'deny:2083:udp' "${firewallLog}" || return 1
+                else
+                    [[ "${reloadCalls}" == 0 ]] || return 1
+                    ! grep -Eq '^deny:(2053|2083):' "${firewallLog}" || return 1
+                fi
+            fi
+            [[ ! -e "${singBoxConfigPath}06_hysteria2_inbounds.json" && ! -e "${aliasRoot}/config.json" &&
+                "$(<"${tcpFile}")" == "${tcpBefore}" && "$(<"${otherFile}")" == "${otherBefore}" &&
+                "$(<"${ignoredFile}")" == "${ignoredBefore}" && "$(<"${multiFile}")" == "${multiBefore}" ]] || return 1
+            ! grep -Eq '^deny:(2053|2083):tcp$|^deny:(2087|2096):' "${firewallLog}" || return 1
+            grep -qx 'deny:16295:tcp' "${firewallLog}" || return 1
+            grep -qx 'deny:16295:udp' "${firewallLog}" || return 1
+            [[ "$(<"${refreshLog}")" == $'refresh:sing-box hysteria2\nnotify' ]] || return 1
+        done
+        # 后面的多根 JSON 候选失败时，前面已识别的别名也不能提前被改动。
+        writeCoreDokodemoInbound "${udpFile}" 2053 16295 udp dokodemo-door-newPort-hysteria-2053 || return 1
+        udpBefore=$(<"${udpFile}")
+        printf '{}\n{}\n' >"${badFile}"
+        : >"${firewallLog}"
+        reloadCalls=0
+        regressionExpectStatus 1 corePortSyncHysteriaAliases 16295 || return 1
+        [[ "$(<"${udpFile}")" == "${udpBefore}" && "$(<"${badFile}")" == $'{}\n{}' &&
+            "${reloadCalls}" == 0 && ! -s "${firewallLog}" ]] || return 1
+    ) || return 1
+
     local alpineConfigDir="${root}/alpine/conf/config/"
     local alpineMergedConfig="${root}/alpine/conf/config.json"
     local openRcService="${root}/alpine/sing-box"
@@ -3392,7 +3469,7 @@ runSingBoxProtocolReloadFailureRegression() (
             ' <<<"${capturedUsers}" >/dev/null
             # TUIC 的密码可以独立于 UUID，重装不得将它替换成 UUID。
             [[ "${protocolId}" != 31 ]] || capturedUsers=$(jq '.[0].password = "tuic-independent-password"' <<<"${capturedUsers}")
-            jq -n --argjson users "${capturedUsers}" '{inbounds:[{users:$users}]}' >"${configFile}"
+            jq -n --argjson users "${capturedUsers}" '{inbounds:[{listen_port:18443,users:$users}]}' >"${configFile}"
             events=
             exec {inputFd}< <(printf '\nnext-parent-action\n')
             "${install}" <&"${inputFd}" >/dev/null 2>&1
@@ -3541,6 +3618,79 @@ runSingBoxProtocolReloadFailureRegression() (
         singBoxProtocolInstall 31 </dev/null >/dev/null 2>&1
         [[ "${tlsCalls}${transactions}${downloads}${allows}" == 2111 && "${AUTO_PORT}" == 24444 ]]
     )
+
+    (
+        # 重装完成后才迁移 UDP 别名，迁移失败不撤销已生效的新 Hy2 入站。
+        local aliasRoot="${root}/hy2-aliases" coreInstallType=1
+        local PADM_SINGBOX_CONFIG_DIR="${aliasRoot}/sing-box" configPath="${aliasRoot}/xray/"
+        local AUTO_INSTALL=true AUTO_REUSE_LAST=no AUTO_UUID=11111111-1111-4111-8111-111111111111 AUTO_USER=alias-user AUTO_PORT=
+        local udpFile="${configPath}02_dokodemodoor_inbounds_hysteria_2053.json"
+        local secondFile="${configPath}02_dokodemodoor_inbounds_hysteria_2083.json"
+        local tcpFile="${configPath}02_dokodemodoor_inbounds_2053_default.json"
+        local otherFile="${configPath}02_dokodemodoor_inbounds_hysteria_2087.json"
+        local ignoredFile="${configPath}02_dokodemodoor_inbounds_hysteria_2096.json"
+        local errorLog="${aliasRoot}/errors" denyLog="${aliasRoot}/deny"
+        local udpBefore secondBefore tcpBefore otherBefore ignoredBefore reloadCalls transactions mode
+        mkdir -p "${PADM_SINGBOX_CONFIG_DIR}" "${configPath}" || return 1
+        writeCoreDokodemoInbound "${tcpFile}" 2053 443 tcp dokodemo-door-newPort-2053 || return 1
+        writeCoreDokodemoInbound "${otherFile}" 2087 17295 udp dokodemo-door-newPort-hysteria-2087 || return 1
+        writeCoreDokodemoInbound "${ignoredFile}" 2096 16295 udp unmanaged || return 1
+        tcpBefore=$(<"${tcpFile}") otherBefore=$(<"${otherFile}") ignoredBefore=$(<"${ignoredFile}")
+        coreTemplateCollectInitialClients() { return 0; }
+        readSingBoxPortResult() { local -n ports=$1; ports=("${AUTO_PORT}"); }
+        singBoxEnsureTLSDependency() { return 0; }
+        initHysteria2Network() { return 0; }
+        coreInstallConfigTransaction() {
+            transactions=$((transactions + 1))
+            printf '{"inbounds":[{"type":"hysteria2","listen_port":%s,"users":[{"name":"disk-user","password":"disk-password"}]}]}\n' \
+                "${AUTO_PORT}" >"${PADM_SINGBOX_CONFIG_DIR}/06_hysteria2_inbounds.json"
+        }
+        errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+        denyPort() { printf '%s\n' "$*" >>"${denyLog}"; }
+        reloadXrayProtocolCore() {
+            reloadCalls=$((reloadCalls + 1))
+            [[ "${mode}" != reload || "${reloadCalls}" != 1 ]]
+        }
+        for mode in success reload noalias sameport; do
+            printf '{"inbounds":[{"type":"hysteria2","listen_port":16295,"users":[{"name":"disk-user","password":"disk-password"}]}]}\n' \
+                >"${PADM_SINGBOX_CONFIG_DIR}/06_hysteria2_inbounds.json"
+            rm -f "${udpFile}" "${secondFile}"
+            if [[ "${mode}" != noalias ]]; then
+                writeCoreDokodemoInbound "${udpFile}" 2053 16295 udp dokodemo-door-newPort-hysteria-2053 || return 1
+                writeCoreDokodemoInbound "${secondFile}" 2083 16295 udp dokodemo-door-newPort-hysteria-2083 || return 1
+                udpBefore=$(<"${udpFile}") secondBefore=$(<"${secondFile}")
+            fi
+            : >"${errorLog}"
+            : >"${denyLog}"
+            reloadCalls=0 transactions=0 AUTO_PORT=24444
+            [[ "${mode}" != sameport ]] || AUTO_PORT=16295
+            if [[ "${mode}" == reload ]]; then
+                regressionExpectStatus 1 singBoxHysteria2Install </dev/null || return 1
+                [[ "$(<"${udpFile}")" == "${udpBefore}" && "$(<"${secondFile}")" == "${secondBefore}" &&
+                    "${reloadCalls}" == 2 ]] || return 1
+                grep -q 'Hysteria2 已安装，但 UDP 入口同步失败' "${errorLog}" || return 1
+            else
+                singBoxHysteria2Install </dev/null || return 1
+                if [[ "${mode}" == success ]]; then
+                    [[ "${reloadCalls}" == 1 ]] || return 1
+                    jq -e '.inbounds[0].port == 2053 and .inbounds[0].settings.port == 24444' "${udpFile}" >/dev/null || return 1
+                    jq -e '.inbounds[0].settings.port == 24444' "${secondFile}" >/dev/null || return 1
+                else
+                    [[ "${reloadCalls}" == 0 ]] || return 1
+                    if [[ "${mode}" == sameport ]]; then
+                        [[ "$(<"${udpFile}")" == "${udpBefore}" && "$(<"${secondFile}")" == "${secondBefore}" ]] || return 1
+                    else
+                        [[ ! -e "${udpFile}" && ! -e "${secondFile}" ]] || return 1
+                    fi
+                fi
+            fi
+            jq -e --argjson port "${AUTO_PORT}" '.inbounds[0].listen_port == $port' \
+                "${PADM_SINGBOX_CONFIG_DIR}/06_hysteria2_inbounds.json" >/dev/null || return 1
+            [[ "${transactions}" == 1 && ! -s "${denyLog}" &&
+                "$(<"${tcpFile}")" == "${tcpBefore}" && "$(<"${otherFile}")" == "${otherBefore}" &&
+                "$(<"${ignoredFile}")" == "${ignoredBefore}" ]] || return 1
+        done
+    ) || return 1
 
     (
         local transactionRoot="${root}/transaction"

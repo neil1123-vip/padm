@@ -203,9 +203,9 @@ showVlessRealityAccounts() {
     # VLESS Reality Vision
     if currentProtocolHas 1; then
         subscribeSectionTitle "VLESS reality_vision" "推荐"
-        showVlessRealityAccountsFromConfig 1 "${configPath}07_VLESS_vision_reality_inbounds.json" "${xrayVLESSRealityVisionPort:-${xrayVLESSRealityPort}}"
+        showVlessRealityAccountsFromConfig 1 "${configPath}07_VLESS_vision_reality_inbounds.json" "${xrayVLESSRealityVisionPort:-${xrayVLESSRealityPort}}" || return 1
         if [[ "${coreInstallType}" == "1" && -f "${singBoxConfigPath}07_VLESS_vision_reality_inbounds.json" ]]; then
-            showVlessRealityAccountsFromConfig 2 "${singBoxConfigPath}07_VLESS_vision_reality_inbounds.json" "${singBoxVLESSRealityVisionPort}"
+            showVlessRealityAccountsFromConfig 2 "${singBoxConfigPath}07_VLESS_vision_reality_inbounds.json" "${singBoxVLESSRealityVisionPort}" || return 1
         fi
     fi
 }
@@ -220,7 +220,7 @@ showVlessRealityAccountsFromConfig() (
     local realityVisionPort=${port}
     if [[ "${core}" == "1" ]]; then
         local streamPublicPort entryPort
-        streamPublicPort=$(realityStreamPublicPortForProtocol vision)
+        streamPublicPort=$(realityStreamPublicPortForProtocol vision) || return 1
         [[ -z "${streamPublicPort}" ]] || realityVisionPort=${streamPublicPort}
         entryPort=$(jq -r '.inbounds[0].port' "${configFile}") || return 1
         realityVisionPort=$(corePortSubscriptionPort "${entryPort}" "${realityVisionPort}") || return 1
@@ -396,7 +396,7 @@ showVlessRealityXHTTPAccounts() {
         local path xhttpPort streamPublicPort xhttpEntryPort
         path=$(xrayRealityXHTTPSetting path "/${currentPath}xHTTP")
         xhttpPort=${xrayVLESSRealityXHTTPort}
-        streamPublicPort=$(realityStreamPublicPortForProtocol xhttp)
+        streamPublicPort=$(realityStreamPublicPortForProtocol xhttp) || return 1
         [[ -z "${streamPublicPort}" ]] || xhttpPort=${streamPublicPort}
         xhttpEntryPort=$(jq -r '.inbounds[0].port' "${configPath}12_VLESS_XHTTP_inbounds.json") || return 1
         xhttpPort=$(corePortSubscriptionPort "${xhttpEntryPort}" "${xhttpPort}") || return 1

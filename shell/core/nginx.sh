@@ -363,8 +363,9 @@ realityStreamValidateState() {
 realityStreamPublicPortForProtocol() {
     local protocol=$1
     local stateFile defaultProtocol
+    realityStreamValidateState || return 1
+    realityStreamSplitEnabled || return 0
     stateFile=$(realityStreamSplitStateFile)
-    [[ -f "${stateFile}" ]] || return 0
     defaultProtocol=$(jq -r '.default_protocol // empty' "${stateFile}" 2>/dev/null)
     [[ "${defaultProtocol}" == "${protocol}" ]] || return 0
     jq -r --arg protocol "${protocol}" '.protocols[$protocol].public_port // empty' "${stateFile}" 2>/dev/null
