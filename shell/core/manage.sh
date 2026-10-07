@@ -3174,15 +3174,13 @@ regenerateRealityProfile() {
 
 manageReality() {
     local selectRealityManageType=
+    readInstallProtocolType || return 1
+    readConfigHostPathUUID || return 1
+    if ! currentProtocolHasAny 1 2 26 || [[ -z "${coreInstallType:-}" ]]; then
+        errorCard "请先安装 Reality 协议。新人路径：主菜单 -> 安装与重装 -> 无域名 Reality，或 安装与重装 -> 自定义安装 中选择 Reality 编号"
+        return 1
+    fi
     while true; do
-        readInstallProtocolType
-        readConfigHostPathUUID || return 1
-
-        if ! currentProtocolHasAny 1 2 26 || [[ -z "${coreInstallType:-}" ]]; then
-            errorCard "请先安装 Reality 协议。新人路径：主菜单 -> 安装与重装 -> 无域名 Reality，或 安装与重装 -> 自定义安装 中选择 Reality 编号"
-            return 1
-        fi
-
         echoContent title "\n┌─ REALITY 管理 ─────────────────────────────────────"
         menuItem 1 "重新生成 Reality 参数" "更新 key、shortId 等 Reality 参数"
         menuItem 2 "目标站管理" "查看、检测或切换 Reality 伪装目标"

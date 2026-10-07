@@ -1465,10 +1465,38 @@ runProtocolEntryMenuSyncRegression() (
     done
 )
 
+runRealityManageMenuStateRegression() (
+    local protocolReads=0 configReads=0
+    coreInstallType=1
+    readInstallProtocolType() {
+        protocolReads=$((protocolReads + 1))
+        currentInstallProtocolType=,1,
+    }
+    readConfigHostPathUUID() {
+        configReads=$((configReads + 1))
+    }
+    currentProtocolHasAny() { return 0; }
+    echoContent() { :; }
+    menuItem() { :; }
+    menuLine() { :; }
+    menuReturnItem() { :; }
+    menuClose() { :; }
+    menuReadChoice() {
+        local choice
+        IFS= read -r choice || return 1
+        printf -v "$3" '%s' "${choice}"
+    }
+    showRealityStreamSplitStatus() { :; }
+
+    manageReality <<< $'4\n6'
+    [[ "${protocolReads}:${configReads}" == 1:1 ]]
+)
+
 runProtocolCapabilitiesRegression() {
     runRegressionStep protocol-entry-config-update runProtocolEntryConfigUpdateRegression
     runRegressionStep protocol-entry-port runProtocolEntryPortRegression
     runRegressionStep protocol-entry-menu-sync runProtocolEntryMenuSyncRegression
+    runRegressionStep reality-manage-menu-state runRealityManageMenuStateRegression
     runRegressionStep protocol-config-ownership runProtocolConfigOwnershipRegression
     runRegressionStep protocol-capability-registry runProtocolCapabilityRegistryRegression
     runRegressionStep protocol-capability-menu-core runProtocolCapabilityMenuAndCoreRegression
