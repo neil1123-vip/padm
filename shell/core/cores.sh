@@ -3048,16 +3048,16 @@ singBoxLog() {
     targetPath=$(padmResolveManagedAbsolutePath "${targetPath}") || { errorCard "sing-box 日志配置路径异常"; return 1; }
     padmEnsureSafeDirectory "$(dirname "${targetPath}")" || { errorCard "sing-box 日志目录创建失败"; return 1; }
     padmCreateTempFileForTarget tmpPath "${targetPath}" log || return 1
-    if [[ -f "${targetPath}" ]]; then
-        backupPath="${targetPath}.bak.$(date +%s)"
-        backupManagedFileToPath "${targetPath}" "${backupPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
-        hadBackup=true
-    fi
     local outputPath
     outputPath=$(singBoxLogOutputFile) || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
     jq -n --argjson disabled "$1" --arg output "${outputPath}" \
         '{log:{disabled:$disabled,level:"debug",output:$output,timestamp:true}}' >"${tmpPath}" ||
         { padmRemoveCleanupPath "${tmpPath}"; return 1; }
+    if [[ -f "${targetPath}" ]]; then
+        backupPath="${targetPath}.bak.$(date +%s)"
+        backupManagedFileToPath "${targetPath}" "${backupPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
+        hadBackup=true
+    fi
     if ! commitGeneratedJsonFile "${tmpPath}" "${targetPath}"; then
         if [[ -n "${backupPath}" ]]; then
             removeManagedFilesIfPresentIgnoreFailure "${backupPath}"
@@ -3084,20 +3084,15 @@ singBoxLog() {
         if ! restoreManagedFileFromBackup "${backupPath}" "${targetPath}" 644; then
             coreSetSingleRestoreResultMessage restoreMessage "sing-box 日志配置重载失败" false "已恢复旧配置" "旧配置" " ${targetPath}，备份文件：${backupPath}" || true
             errorCard "${restoreMessage}"
-            backupPath=
             return 1
         fi
         removeManagedFilesIfPresentIgnoreFailure "${backupPath}"
-        backupPath=
     else
         if ! removeManagedPathIfPresent "${targetPath}"; then
             coreSetNewConfigCleanupFailureMessage restoreMessage "sing-box 日志配置重载失败" "${targetPath}"
             errorCard "${restoreMessage}"
             return 1
         fi
-    fi
-    if [[ -n "${backupPath}" ]]; then
-        removeManagedFilesIfPresentIgnoreFailure "${backupPath}"
     fi
     serviceQueueRestart sing-box
     if serviceQueueApply; then

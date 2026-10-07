@@ -2330,6 +2330,22 @@ runSingBoxLogTransactionRegression() (
         return 0
     }
 
+    (
+        # 生成失败时旧配置未变，不应创建备份或请求服务动作。
+        local original='{"log":{"disabled":true,"level":"warning"}}'
+        printf '%s\n' "${original}" >"${targetPath}" || return 1
+        : >"${serviceLog}" || return 1
+        singBoxRunning() { return 0; }
+        jq() {
+            [[ "${1:-}" != -n ]] || return 1
+            command jq "$@"
+        }
+        regressionExpectStatus 1 singBoxLog false >/dev/null 2>&1 || return 1
+        [[ "$(<"${targetPath}")" == "${original}" && ! -s "${serviceLog}" ]] || return 1
+        ! compgen -G "${targetPath}.bak.*" >/dev/null || return 1
+        ! compgen -G "$(dirname "${targetPath}")/.log.json.*" >/dev/null || return 1
+    ) || return 1
+
     printf '{"log":{"disabled":true,"level":"warning"}}\n' >"${targetPath}" || return 1
     : >"${serviceLog}" || return 1
     : >"${errorLog}" || return 1
