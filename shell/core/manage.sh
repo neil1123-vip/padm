@@ -1983,7 +1983,7 @@ cdnWriteAddress() {
 
 cdnRefreshSubscriptionsOrRollback() {
     local previousAddress=$1
-    if subscribe false false; then
+    if refreshManagedProtocolSubscriptions "CDN 入口"; then
         return 0
     fi
     cdnWriteAddress "${previousAddress}" || {
@@ -3051,11 +3051,10 @@ manageRealityTarget() {
     local stateReady=${1:-false} refreshTargetState=true
     if [[ "${stateReady}" == true ]]; then
         refreshTargetState=false
-    else
-        readInstallProtocolType || return 1
     fi
     while true; do
         if [[ "${refreshTargetState}" == "true" ]]; then
+            readInstallProtocolType || return 1
             readConfigHostPathUUID || return 1
             refreshTargetState=false
         fi
@@ -3183,14 +3182,18 @@ regenerateRealityProfile() {
 }
 
 manageReality() {
-    local selectRealityManageType=
-    readInstallProtocolType || return 1
-    readConfigHostPathUUID || return 1
-    if ! currentProtocolHasAny 1 2 26 || [[ -z "${coreInstallType:-}" ]]; then
-        errorCard "请先安装 Reality 协议。新人路径：主菜单 -> 安装与重装 -> 无域名 Reality，或 安装与重装 -> 自定义安装 中选择 Reality 编号"
-        return 1
-    fi
+    local selectRealityManageType= refreshRealityState=true
+    readInstallType || return 1
     while true; do
+        if [[ "${refreshRealityState}" == true ]]; then
+            readInstallProtocolType || return 1
+            readConfigHostPathUUID || return 1
+            if ! currentProtocolHasAny 1 2 26 || [[ -z "${coreInstallType:-}" ]]; then
+                errorCard "请先安装 Reality 协议。新人路径：主菜单 -> 安装与重装 -> 无域名 Reality，或 安装与重装 -> 自定义安装 中选择 Reality 编号"
+                return 1
+            fi
+            refreshRealityState=false
+        fi
         echoContent title "\n┌─ REALITY 管理 ─────────────────────────────────────"
         menuItem 1 "重新生成 Reality 参数" "更新 key、shortId 等 Reality 参数"
         menuItem 2 "目标站管理" "查看、检测或切换 Reality 伪装目标"
@@ -3204,11 +3207,11 @@ manageReality() {
         menuReadChoice reality_manage_menu "请选择:" selectRealityManageType || return 0
 
         case "${selectRealityManageType}" in
-        1) regenerateRealityProfile || true ;;
-        2) manageRealityTarget true || true ;;
-        3) configureRealityStreamSplit || true ;;
+        1) regenerateRealityProfile || true; refreshRealityState=true ;;
+        2) manageRealityTarget true || refreshRealityState=true ;;
+        3) configureRealityStreamSplit || true; refreshRealityState=true ;;
         4) showRealityStreamSplitStatus || true ;;
-        5) disableRealityStreamSplit || true ;;
+        5) disableRealityStreamSplit || true; refreshRealityState=true ;;
         6) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
@@ -3562,7 +3565,7 @@ manageXHTTPPresets() {
         menuItem 2 "兼容优先" "packet-up，适合未知 CDN/反代"
         menuItem 3 "性能优先" "stream-up，适合 H2/gRPC 兼容链路"
         menuItem 4 "测速/单并发" "auto + maxConcurrency=1"
-        menuReturnItem 5 "返回" "回到 XHTTP 管理"
+        menuReturnItem 5 "返回" "回到 XHTTP 普通设置"
         menuClose
         menuReadChoice xhttp_preset_menu "请选择:" selectXHTTPPreset || return 0
         case "${selectXHTTPPreset}" in
@@ -3583,7 +3586,7 @@ manageXHTTPMode() {
         menuRecommendedItem 1 "auto" "推荐默认，由 Xray 自动选择"
         menuItem 2 "packet-up" "兼容性最强"
         menuItem 3 "stream-up" "流式上行，效率更高"
-        menuReturnItem 4 "返回" "回到 XHTTP 管理"
+        menuReturnItem 4 "返回" "回到 XHTTP 普通设置"
         menuClose
         menuReadChoice xhttp_mode_menu "请选择:" selectXHTTPMode || return 0
         case "${selectXHTTPMode}" in
@@ -3603,7 +3606,7 @@ manageXHTTPXmux() {
         menuItem 1 "日常随机复用" "maxConcurrency 16-32"
         menuItem 2 "单并发" "maxConcurrency 1，测速/排障"
         menuItem 3 "自定义范围" "自定义 maxConcurrency/request/time"
-        menuReturnItem 4 "返回" "回到 XHTTP 管理"
+        menuReturnItem 4 "返回" "回到 XHTTP 高级设置"
         menuClose
         menuReadChoice xhttp_xmux_menu "请选择:" selectXHTTPXmux || return 0
         case "${selectXHTTPXmux}" in

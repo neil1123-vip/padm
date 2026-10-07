@@ -881,7 +881,8 @@ runProtocolEntryConfigUpdateRegression() (
             [[ ! -e "${root}/cdn" && ! -e "${statusLog}" ]]
         )
         # 缺失或空文件必须按原始空值回滚，不能写回展示用的安装入口。
-        subscribe() { return 1; }
+        refreshProtocolSubscriptions() { return 1; }
+        subscriptionNotifyControllerRefresh() { :; }
         regressionExpectStatus 1 setCDNEntryAddress <<<new.example.com
         [[ ! -s "${root}/cdn" && -z "$(cdnStoredAddress)" && ! -e "${statusLog}" ]]
         currentHost=
@@ -915,7 +916,7 @@ runProtocolEntryConfigUpdateRegression() (
             grep -qx '读取 CDN 入口地址失败' "${errorLog}"
             [[ "$(<"${root}/cdn")" == old.example.com && ! -e "${statusLog}" ]]
         )
-        subscribe() { return 0; }
+        refreshProtocolSubscriptions() { return 0; }
         value=cdn.example.com,203.0.113.10,2001:db8::1
         setCDNEntryAddress <<<"${value}"
         [[ "$(<"${root}/cdn")" == "${value}" ]]
@@ -1465,12 +1466,62 @@ runProtocolEntryMenuSyncRegression() (
     done
 )
 
+runCDNEntryRefreshRegression() (
+    local root="${TMP_DIR}/cdn-entry-refresh" log publisher refreshStatus=0 value operation
+    local PADM_SKIP_CONTROLLER_REFRESH= PADM_CONTROL_SERVER= nginxConfigPath subscribePort=
+    mkdir -p "${root}" || return 1
+    log="${root}/refresh.log"
+    nginxConfigPath="${root}/"
+    currentHost=installed.example.com
+    cdnAddressFile() { printf '%s/cdn\n' "${root}"; }
+    subscribe() { printf 'install\n' >>"${log}"; return 1; }
+    readNginxSubscribe() {
+        subscribePort=
+        [[ "${publisher}" != public ]] || subscribePort=443
+        return 0
+    }
+    refreshPublishedSubscriptions() { printf 'public\n' >>"${log}"; return "${refreshStatus}"; }
+    refreshLocalSubscriptions() { printf 'local\n' >>"${log}"; return "${refreshStatus}"; }
+    subscriptionNotifyControllerRefresh() { printf 'notify\n' >>"${log}"; }
+    statusCard() { :; }
+    successCard() { :; }
+    errorCard() { :; }
+    for publisher in local public; do
+        for operation in set clear; do
+            printf 'old.example.com\n' >"${root}/cdn"
+            : >"${log}"
+            if [[ "${operation}" == set ]]; then
+                setCDNEntryAddress <<<new.example.com || return 1
+                value=new.example.com
+            else
+                clearCDNEntryAddress || return 1
+                value=
+            fi
+            [[ "$(<"${root}/cdn")" == "${value}" && "$(<"${log}")" == "${publisher}"$'\nnotify' ]] || return 1
+            printf 'old.example.com\n' >"${root}/cdn"
+            : >"${log}"
+            refreshStatus=1
+            if [[ "${operation}" == set ]]; then
+                regressionExpectStatus 1 setCDNEntryAddress <<<new.example.com || return 1
+            else
+                regressionExpectStatus 1 clearCDNEntryAddress || return 1
+            fi
+            [[ "$(<"${root}/cdn")" == old.example.com && "$(<"${log}")" == "${publisher}" ]] || return 1
+            refreshStatus=0
+        done
+    done
+)
+
 runRealityManageMenuStateRegression() (
-    local protocolReads=0 configReads=0
+    local protocolReads=0 configReads=0 storedTarget=installed.example.com targetSeen= mutationStatus=0 action
     coreInstallType=1
+    readInstallType() { coreInstallType=1; }
     readInstallProtocolType() {
         protocolReads=$((protocolReads + 1))
         currentInstallProtocolType=,1,
+        realityTargetHost=${storedTarget}
+        realityTargetPort=443
+        realitySNI=${storedTarget}
     }
     readConfigHostPathUUID() {
         configReads=$((configReads + 1))
@@ -1484,7 +1535,7 @@ runRealityManageMenuStateRegression() (
     formatRealityTarget() { printf '%s:%s\n' "$1" "$2"; }
     realityTargetCachedAsnSummary() { printf '未缓存\n'; }
     realityTargetCachedNetworkSummary() { printf '未缓存\n'; }
-    showRealityTargetPqcSummary() { :; }
+    showRealityTargetPqcSummary() { targetSeen=${realityTargetHost}; }
     menuReadChoice() {
         local choice
         IFS= read -r choice || return 1
@@ -1493,26 +1544,45 @@ runRealityManageMenuStateRegression() (
     showRealityStreamSplitStatus() { :; }
 
     manageReality <<< $'2\n8\n6'
-    [[ "${protocolReads}:${configReads}" == 1:1 ]]
+    [[ "${protocolReads}:${configReads}" == 1:1 && "${targetSeen}" == "${storedTarget}" ]] || return 1
+
+    regenerateRealityProfile() {
+        realityTargetHost=pending.example.com
+        [[ "${mutationStatus}" != 0 ]] || storedTarget=updated.example.com
+        return "${mutationStatus}"
+    }
+    configureRealityStreamSplit() { regenerateRealityProfile; }
+    disableRealityStreamSplit() { regenerateRealityProfile; }
+    for action in 1 3 5; do
+        for mutationStatus in 0 1; do
+            protocolReads=0 configReads=0 storedTarget=installed.example.com targetSeen=
+            manageReality <<<"${action}"$'\n2\n8\n6'
+            [[ "${protocolReads}:${configReads}" == 2:2 && "${targetSeen}" == "${storedTarget}" ]] || return 1
+        done
+    done
+    protocolReads=0 configReads=0 storedTarget=installed.example.com
+    manageRealityTarget() { realityTargetHost=pending.example.com; return 1; }
+    manageReality <<< $'2\n4\n6'
+    [[ "${protocolReads}:${configReads}" == 2:2 && "${realityTargetHost}" == "${storedTarget}" ]]
 )
 
 runRealityTargetMenuStateRegression() (
-    local protocolReads=0 configReads=0
+    local protocolReads=0 configReads=0 targetSeen=
     coreInstallType=1
     readInstallProtocolType() {
         protocolReads=$((protocolReads + 1))
         currentInstallProtocolType=,1,
-    }
-    readConfigHostPathUUID() {
-        configReads=$((configReads + 1))
         realityTargetHost=www.example.com
         realityTargetPort=443
         realitySNI=www.example.com
     }
+    readConfigHostPathUUID() {
+        configReads=$((configReads + 1))
+    }
     formatRealityTarget() { printf '%s:%s\n' "$1" "$2"; }
     realityTargetCachedAsnSummary() { printf '未缓存\n'; }
     realityTargetCachedNetworkSummary() { printf '未缓存\n'; }
-    showRealityTargetPqcSummary() { :; }
+    showRealityTargetPqcSummary() { targetSeen=${realityTargetHost}; }
     showRealityTargetBlockedCandidates() { :; }
     echoContent() { :; }
     menuItem() { :; }
@@ -1526,7 +1596,11 @@ runRealityTargetMenuStateRegression() (
     }
 
     manageRealityTarget <<< $'7\n8'
-    [[ "${protocolReads}:${configReads}" == 1:1 ]]
+    [[ "${protocolReads}:${configReads}" == 1:1 ]] || return 1
+    changeRealityTargetFromScanResults() { realityTargetHost=pending.example.com; return 1; }
+    protocolReads=0 configReads=0 targetSeen=
+    manageRealityTarget <<< $'5\n8'
+    [[ "${protocolReads}:${configReads}" == 2:2 && "${targetSeen}" == www.example.com ]]
 )
 
 runSingBoxProtocolMenuStateRegression() (
@@ -1598,6 +1672,7 @@ runProtocolCapabilitiesRegression() {
     runRegressionStep protocol-entry-config-update runProtocolEntryConfigUpdateRegression
     runRegressionStep protocol-entry-port runProtocolEntryPortRegression
     runRegressionStep protocol-entry-menu-sync runProtocolEntryMenuSyncRegression
+    runRegressionStep cdn-entry-refresh runCDNEntryRefreshRegression
     runRegressionStep reality-manage-menu-state runRealityManageMenuStateRegression
     runRegressionStep reality-target-menu-state runRealityTargetMenuStateRegression
     runRegressionStep singbox-protocol-menu-state runSingBoxProtocolMenuStateRegression
