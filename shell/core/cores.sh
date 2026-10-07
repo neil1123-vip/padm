@@ -164,6 +164,7 @@ backupXrayGeoFileIfPresent() {
     local targetFile=$1
     local backupFile=$2
     [[ -e "${targetFile}" || -L "${targetFile}" ]] || return 0
+    [[ -f "${targetFile}" ]] || return 1
     cp -p "${targetFile}" "${backupFile}"
 }
 

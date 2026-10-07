@@ -3109,6 +3109,24 @@ runGeoUpdateReloadFailureRegression() (
 
     mkdir -p "${root}"
     (
+        # 非普通 Geo 目标在读取备份前拒绝；普通文件与缺失目标保持原合同。
+        local fifoPath="${root}/geo-fifo" regularPath="${root}/geo-regular"
+        local backupPath="${root}/geo-backup" copyCalls=0
+        mkfifo "${fifoPath}" || return 1
+        cp() {
+            copyCalls=$((copyCalls + 1))
+            [[ -f "$2" ]] || return 7
+            command cp "$@"
+        }
+        regressionExpectStatus 1 backupXrayGeoFileIfPresent "${fifoPath}" "${backupPath}" || return 1
+        [[ "${copyCalls}" == 0 && -p "${fifoPath}" && ! -e "${backupPath}" ]] || return 1
+        backupXrayGeoFileIfPresent "${root}/missing-geo" "${backupPath}" || return 1
+        [[ "${copyCalls}" == 0 && ! -e "${backupPath}" ]] || return 1
+        printf 'old-geo\n' >"${regularPath}" || return 1
+        backupXrayGeoFileIfPresent "${regularPath}" "${backupPath}" || return 1
+        [[ "${copyCalls}" == 1 && "$(<"${backupPath}")" == old-geo ]] || return 1
+    ) || return 1
+    (
         # Geo 版本沿用核心发布解析；请求失败或坏响应不开始暂存和下载。
         local target="${root}/lookup-target" latestGeoMetadata geoFetchStatus=0
         mkdir -p "${target}"
