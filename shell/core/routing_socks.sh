@@ -251,12 +251,7 @@ showXrayRoutingRules() {
 }
 
 stopSocks5SingBox() {
-    local previousAllowFailure="${SERVICE_QUEUE_ALLOW_FAILURE:-}"
-    SERVICE_QUEUE_ALLOW_FAILURE=true
-    handleSingBox stop
-    local stopStatus=$?
-    SERVICE_QUEUE_ALLOW_FAILURE="${previousAllowFailure}"
-    return "${stopStatus}"
+    runCoreServiceActionAllowFailure handleSingBox stop
 }
 
 socks5RoutingBackupCreate() {

@@ -358,6 +358,12 @@ SH
         actions=
         regressionExpectStatus 7 runCoreServiceActionAllowFailure runServiceAction xray stop
         [[ "${actions}" == $'xray:stop\n' && "${SERVICE_QUEUE_ALLOW_FAILURE}" == previous ]]
+        handleSingBox() {
+            [[ "$1" == stop && "${SERVICE_QUEUE_ALLOW_FAILURE}" == true ]] || return 99
+            return 7
+        }
+        regressionExpectStatus 7 stopSocks5SingBox
+        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == previous ]]
     )
 
     (
