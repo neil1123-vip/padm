@@ -373,7 +373,7 @@ singBoxRunning() {
         [[ "${exe}" == "${binary}" || "${exe}" == "${binary} (deleted)" ||
             -n "${resolvedBinary}" && ( "${exe}" == "${resolvedBinary}" || "${exe}" == "${resolvedBinary} (deleted)" ) ]] || continue
         padmReadProcArgs procArgs "/proc/${pid}/cmdline" || continue
-        [[ -n "${mergedConfig}" && "${procArgs[0]:-}" == "${binary}" && "${procArgs[1]:-}" == run &&
+        [[ -n "${mergedConfig}" && "${procArgs[1]:-}" == run &&
             "${procArgs[2]:-}" == -c && "${procArgs[3]:-}" == "${mergedConfig}" ]] || continue
         return 0
     done < <(pgrep -x sing-box 2>/dev/null)

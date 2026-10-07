@@ -287,6 +287,31 @@ SH
         done
     )
 
+    (
+        # sing-box 通过符号链接启动时，argv[0] 可以不同于配置路径，但 /proc/exe 仍能确认目标进程。
+        source "${PROJECT_ROOT}/shell/core/services.sh"
+        local realBinary="${serviceTmp}/sing-box.real"
+        local linkedBinary="${serviceTmp}/sing-box"
+        local fixtureConfig="${serviceTmp}/merged.json"
+        local PADM_SINGBOX_BINARY="${linkedBinary}"
+        local PADM_SINGBOX_SYSTEMD_SERVICE_FILE="${serviceTmp}/missing-sing-box.service"
+        local PADM_SINGBOX_OPENRC_SERVICE_FILE="${serviceTmp}/missing-sing-box.init"
+        release=debian
+        : >"${realBinary}"
+        ln -s "${realBinary}" "${linkedBinary}"
+        : >"${fixtureConfig}"
+        coreSingBoxBinaryPath() { printf '%s\n' "${linkedBinary}"; }
+        pgrep() { [[ "$1" == -x && "$2" == sing-box ]] && printf '12345\n'; }
+        padmReadProcExe() { printf '%s\n' "${realBinary}"; }
+        padmReadProcArgs() {
+            local -n argsRef=$1
+            argsRef=("/usr/local/bin/sing-box" run -c "${fixtureConfig}")
+        }
+        singBoxMergedConfigFile() { printf '%s\n' "${fixtureConfig}"; }
+        padmCommandExists() { return 1; }
+        singBoxRunning
+    )
+
     mkdir -p "${serviceTmp}/nginx"
     nginxConfigPath="${serviceTmp}/nginx/"
     selectCustomInstallType=",1,"
