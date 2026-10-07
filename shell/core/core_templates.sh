@@ -336,7 +336,6 @@ coreTemplateConfigTransaction() {
     local newCoreStopped=true
     local manageNginx=false nginxWasRunning=false nginxStopped=true
     local statsBinaryBackupDir= statsBinary= statsCronet= binaryRestored=true
-    local restoreBackupDir=
     local title="Xray 配置初始化"
     [[ "${core}" == "sing-box" ]] && title="sing-box 配置初始化"
     [[ "${core}" == "xray" ]] && xrayRestartRunning=true
@@ -421,7 +420,6 @@ coreTemplateConfigTransaction() {
         padmRemoveCleanupPath "${backupDir}"
     else
         configRestored=false
-        restoreBackupDir=${backupDir}
         padmForgetCleanupPath "${backupDir}"
     fi
     if [[ -n "${PADM_CORE_INSTALL_SERVICE_BACKUP_DIR:-}" && -n "${PADM_CORE_INSTALL_SERVICE_NAME:-}" ]]; then
@@ -437,7 +435,6 @@ coreTemplateConfigTransaction() {
             padmRemoveCleanupPath "${PADM_CORE_SWITCH_CLEANUP_BACKUP_DIR}"
         else
             cleanupRestored=false
-            restoreBackupDir=${PADM_CORE_SWITCH_CLEANUP_BACKUP_DIR}
             padmForgetCleanupPath "${PADM_CORE_SWITCH_CLEANUP_BACKUP_DIR}"
         fi
     fi
@@ -469,7 +466,7 @@ coreTemplateConfigTransaction() {
     elif [[ "${configRestored}" != "true" ]]; then
         errorCard "${title}失败，且旧配置恢复失败，请手动检查备份目录: ${backupDir}"
     elif [[ "${cleanupRestored}" != "true" ]]; then
-        errorCard "${title}失败，旧核心配置恢复失败，请手动检查备份目录: ${restoreBackupDir}"
+        errorCard "${title}失败，旧核心配置恢复失败，请手动检查备份目录: ${PADM_CORE_SWITCH_CLEANUP_BACKUP_DIR}"
     elif [[ "${serviceRestored}" != "true" ]]; then
         errorCard "${title}失败，旧配置已恢复，但核心服务运行状态恢复失败"
     else

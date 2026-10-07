@@ -1070,10 +1070,21 @@ runCoreCleanupFailurePropagationRegression() (
             return 7
         }
 
-        regressionExpectStatus 7 coreSwitchConfigTransaction sing-box failingSwitch >/dev/null 2>&1
-        [[ "$(<"${oldCoreDir}/state")" == "old-core" ]]
-        [[ "$(<"${switchLog}")" == $'config-restore\nxray:start:restored' ]]
-    )
+        regressionExpectStatus 7 coreSwitchConfigTransaction sing-box failingSwitch >/dev/null 2>&1 || return 1
+        [[ "$(<"${oldCoreDir}/state")" == "old-core" ]] || return 1
+        [[ "$(<"${switchLog}")" == $'config-restore\nxray:start:restored' ]] || return 1
+
+        # 旧核心恢复失败时保持停服，提示实际备份路径并保留备份。
+        local retainedBackup=
+        adapterRestoreManagedRollbackBackup() { retainedBackup=$1; return 1; }
+        failingSwitch() { xrayServiceRunning=false; return 7; }
+        : >"${switchLog}"
+        : >"${errorLog}"
+        regressionExpectStatus 7 coreSwitchConfigTransaction sing-box failingSwitch >/dev/null 2>&1 || return 1
+        [[ "$(<"${switchLog}")" == config-restore && "${xrayServiceRunning}" == false ]] || return 1
+        [[ -n "${retainedBackup}" && -d "${retainedBackup}" ]] || return 1
+        grep -qF "${retainedBackup}" "${errorLog}" || return 1
+    ) || return 1
 )
 
 runCorePortFileTransactionRegression() {
