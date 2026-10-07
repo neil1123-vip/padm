@@ -2652,7 +2652,7 @@ runSingBoxProtocolReloadFailureRegression() (
         local events= capturedUsers= inputFd nextInput protocolId credential configFile sourceClients input invalid
         currentClients="[{\"id\":\"${mainUuid}\",\"email\":\"main\"}]"
         sourceClients=${currentClients}
-        unset AUTO_INSTALL AUTO_UUID AUTO_USER
+        unset AUTO_INSTALL AUTO_UUID AUTO_USER AUTO_REUSE_LAST
         mkdir -p "${PADM_SINGBOX_CONFIG_DIR}"
         singBoxEnsureTLSDependency() { events+=$'tls\n'; }
         coreInstallConfigTransaction() { events+=$'transaction\n'; shift; "$@"; }
@@ -2738,7 +2738,7 @@ runSingBoxProtocolReloadFailureRegression() (
         local hysteria2ObfsType=gecko hysteria2ObfsPassword=stale hysteria2Masquerade=https://stale.example.com
         local lastInstallationConfig=parent-history AUTO_PORT=
         local -a result=()
-        unset AUTO_INSTALL AUTO_UUID AUTO_USER
+        unset AUTO_INSTALL AUTO_UUID AUTO_USER AUTO_REUSE_LAST
         mkdir -p "${PADM_SINGBOX_CONFIG_DIR}"
         singBoxEnsureTLSDependency() {
             [[ "${2:-}" != true || -z "${lastInstallationConfig}" ]] || return 1
@@ -2768,20 +2768,20 @@ runSingBoxProtocolReloadFailureRegression() (
                     auth_timeout:"4s",heartbeat:"12s",zero_rtt_handshake:true}]
             }' >"${configFile}"
 
-            for input in $'\n24444' $'\n24444\n2'; do
+            for input in '' $'n\n\n24444' $'n\n\n24444\n2'; do
                 regressionExpectStatus 1 singBoxProtocolInstall "${protocolId}" < <(printf '%s' "${input}") >/dev/null 2>&1
                 [[ "${tlsCalls}${transactions}${downloads}${allows}" == 0000 ]]
             done
             if [[ "${protocolId}" == 3 ]]; then
-                regressionExpectStatus 1 singBoxProtocolInstall 3 < <(printf '\n24444\n2\ngecko\nnew-obfs\n') >/dev/null 2>&1
+                regressionExpectStatus 1 singBoxProtocolInstall 3 < <(printf 'n\n\n24444\n2\ngecko\nnew-obfs\n') >/dev/null 2>&1
                 [[ "${tlsCalls}${transactions}${downloads}${allows}" == 0000 ]]
             fi
             [[ "${hysteria2BandwidthMode}" == brutal && "${hysteria2ClientDownloadSpeed}" == 999 &&
                 "${hysteria2ObfsPassword}" == stale && "${tuicAlgorithm}" == cubic && -z "${AUTO_PORT}" ]]
 
             # 版本检查发生在升级后；应用阶段使用已采集输入，不能再读取下一层菜单。
-            input=$'\n24444\n3\n'
-            [[ "${protocolId}" != 3 ]] || input=$'\n24444\n2\ngecko\nnew-obfs\nhttps://new.example.com\n'
+            input=$'n\n\n24444\n3\n'
+            [[ "${protocolId}" != 3 ]] || input=$'n\n\n24444\n2\ngecko\nnew-obfs\nhttps://new.example.com\n'
             coreVersion=1.10.0
             applyMode=failure
             regressionExpectStatus 1 singBoxProtocolInstall "${protocolId}" < <(printf '%s' "${input}") >/dev/null 2>&1
@@ -2791,9 +2791,8 @@ runSingBoxProtocolReloadFailureRegression() (
                 "${tuicAlgorithm}" == cubic && "${tuicAuthTimeout}" == stale && -z "${AUTO_PORT}" &&
                 "${singBoxConfigPath}" == parent-path/ && "${lastInstallationConfig}" == parent-history ]]
 
-            # 回车重试重新使用磁盘的端口、带宽、混淆和高级参数，不沿用失败操作。
-            input=$'\n\n\n'
-            [[ "${protocolId}" != 3 ]] || input=$'\n\n\n\n\n\n\n\n'
+            # 一次回车复用磁盘的全部用户、端口和参数，不沿用失败操作或读取下一层菜单。
+            input=$'\n'
             applyMode=success
             exec {inputFd}< <(printf '%snext-parent-action\n' "${input}")
             singBoxProtocolInstall "${protocolId}" <&"${inputFd}" >/dev/null 2>&1
@@ -2809,6 +2808,30 @@ runSingBoxProtocolReloadFailureRegression() (
                     .heartbeat == "12s" and .zero_rtt_handshake == true' "${capturedConfig}" >/dev/null
             fi
             tlsCalls=0 transactions=0 downloads=0 allows=0
+            (
+                # 自动重装默认全部保留；显式 no 重填本协议，不继承旧用户和高级设置。
+                local AUTO_INSTALL=true AUTO_REUSE_LAST= AUTO_UUID= AUTO_USER= AUTO_PORT=
+                singBoxProtocolInstall "${protocolId}" </dev/null >/dev/null 2>&1
+                jq -e '.inbounds[0].listen_port == 18443 and .inbounds[0].users[0].password == "disk-password"' "${capturedConfig}" >/dev/null
+                AUTO_REUSE_LAST=invalid
+                regressionExpectStatus 1 singBoxProtocolInstall "${protocolId}" </dev/null >/dev/null 2>&1
+                [[ "${tlsCalls}${transactions}${downloads}${allows}" == 2111 ]]
+                AUTO_REUSE_LAST=no AUTO_UUID=${uuid} AUTO_USER=new-user AUTO_PORT=25444
+                singBoxProtocolInstall "${protocolId}" </dev/null >/dev/null 2>&1
+                jq -e --arg uuid "${uuid}" '.inbounds[0] | .listen_port == 25444 and
+                    (.users | length == 1) and .users[0].password == $uuid and
+                    (.users[0].name | startswith("new-user-"))' "${capturedConfig}" >/dev/null
+                if [[ "${protocolId}" == 3 ]]; then
+                    jq -e '.inbounds[0] | .up_mbps == 100 and .down_mbps == 50 and
+                        (has("obfs") | not) and .masquerade.status_code == 404' "${capturedConfig}" >/dev/null
+                else
+                    jq -e '.inbounds[0] | .congestion_control == "cubic" and .auth_timeout == "3s" and
+                        .heartbeat == "10s" and .zero_rtt_handshake == false' "${capturedConfig}" >/dev/null
+                fi
+                [[ "${tlsCalls}${transactions}${downloads}${allows}" == 4222 &&
+                    "${lastInstallationConfig}" == parent-history && "${tuicAuthTimeout}" == stale &&
+                    "${hysteria2ObfsPassword}" == stale && "${AUTO_PORT}" == 25444 ]]
+            )
             rm -f "${configFile}"
         done
 

@@ -533,7 +533,7 @@ singBoxProtocolInstallApply() {
 }
 
 singBoxProtocolInstall() {
-    local protocolId=$1 protocolName configFile
+    local protocolId=$1 protocolName configFile reuseParameters=
     shift
     local selectCustomInstallType=",${protocolId},"
     local singBoxHysteria2CredentialMode=false PADM_INSTALL_CLIENTS_PREPARED=true
@@ -568,7 +568,42 @@ singBoxProtocolInstall() {
     fi
     # 每次重读磁盘，采集仅保存在本次作用域，取消或失败不污染后续重装。
     singBoxConfigPath="$(singBoxTemplateConfigDir)/" || return 1
-    readSingBoxConfig
+    readSingBoxConfig || return 1
+    if [[ -f "${configFile}" ]]; then
+        while true; do
+            if [[ -n "${AUTO_INSTALL:-}" ]]; then
+                reuseParameters=${AUTO_REUSE_LAST:-yes}
+            else
+                menuReadChoice reuse_last "是否直接复用 ${protocolName} 的全部用户、端口和网络参数？[Y/n，回车保留；n 逐项调整]:" reuseParameters true || return 1
+            fi
+            case "${reuseParameters}" in
+            "" | y | Y | yes | YES | Yes | true | TRUE | True | 1)
+                lastInstallationConfig=true
+                break
+                ;;
+            n | N | no | NO | No | false | FALSE | False | 0)
+                if [[ -n "${AUTO_INSTALL:-}" ]]; then
+                    currentClients=
+                    currentUUID=
+                    case "${protocolId}" in
+                    3)
+                        hysteriaPort= hysteria2BandwidthMode= hysteria2ClientDownloadSpeed= hysteria2ClientUploadSpeed=
+                        hysteria2ObfsType= hysteria2ObfsPassword= hysteria2Masquerade=
+                        ;;
+                    31)
+                        tuicPort= tuicAlgorithm= tuicAuthTimeout= tuicHeartbeat= tuicZeroRttHandshake=
+                        ;;
+                    esac
+                fi
+                break
+                ;;
+            *)
+                errorCard "请输入 y 复用全部参数，或 n 逐项调整"
+                [[ -z "${AUTO_INSTALL:-}" ]] || return 1
+                ;;
+            esac
+        done
+    fi
     coreTemplateCollectInitialClients sing-box "${singBoxHysteria2CredentialMode}" true || return 1
     case "${protocolId}" in
     3)
@@ -580,6 +615,8 @@ singBoxProtocolInstall() {
         initTuicProtocol || return 1
         ;;
     esac
+    # 本协议参数复用不替代独立的证书、域名确认。
+    lastInstallationConfig=
     singBoxEnsureTLSDependency "${protocolName}" true || return 1
     AUTO_PORT=${protocolPort[-1]}
     lastInstallationConfig=true
