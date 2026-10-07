@@ -110,7 +110,9 @@ serviceInstalled() {
     local serviceName=$1
     case "${serviceName}" in
     xray)
-        [[ -f "$(xrayServiceBinaryPath)" && -x "$(xrayServiceBinaryPath)" ||
+        local binary
+        binary=$(xrayServiceBinaryPath)
+        [[ -f "${binary}" && -x "${binary}" ||
             -f "${PADM_XRAY_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/xray.service}" ||
             -f "${PADM_XRAY_OPENRC_SERVICE_FILE:-/etc/init.d/xray}" ]]
         ;;

@@ -329,6 +329,17 @@ runSingBoxCustomPathsRegression() (
     [[ "$(singBoxConfigShardDir)" == "${singBoxConfigPath}" ]]
     singBoxConfigPath=
 
+    (
+        local probeBinary="${root}/xray-path-probe" pathCalls="${root}/path-calls"
+        cp /usr/bin/true "${probeBinary}"
+        xrayServiceBinaryPath() {
+            printf 'x' >>"${pathCalls}"
+            printf '%s\n' "${probeBinary}"
+        }
+        serviceInstalled xray
+        [[ "$(<"${pathCalls}")" == x ]]
+    )
+
     padmCommandExists() { [[ "$1" == systemctl || "$1" == rc-service ]]; }
     bootStartup() { return 0; }
     coreStartupServiceEnabled() { return 1; }
