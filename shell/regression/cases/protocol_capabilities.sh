@@ -658,6 +658,12 @@ runProtocolEntryConfigUpdateRegression() (
     [[ "${commits}" == 6 ]]
     before=$(<"${fixtureConfig}")
     (
+        # 只修改一个连接参数时，另一个回车沿用现有值；恢复默认值由独立入口负责。
+        setTuicConnectionParams <<< $'500ms\n'
+        jq -e '.inbounds[0] | .auth_timeout == "500ms" and .heartbeat == "15s"' "${fixtureConfig}" >/dev/null
+        printf '%s\n' "${before}" >"${fixtureConfig}"
+    )
+    (
         # 开关复用统一确认规则，大小写和完整 yes 都不能被静默当成关闭。
         setXHTTPAdvancedParams <<< $'\n\n\n\n\nY\nyes'
         jq -e '.inbounds[0].streamSettings.xhttpSettings | .noGRPCHeader and .noSSEHeader' "${fixtureConfig}" >/dev/null
@@ -686,6 +692,23 @@ runProtocolEntryConfigUpdateRegression() (
         done
         readXHTTPRange fixture 16 32 fromValue toValue <<<7
         [[ "${fromValue}:${toValue}" == 7:7 ]]
+    )
+    (
+        # 无效字段尽早返回，后续输入、配置和提交计数均保持。
+        local inputFd unread earlyInput
+        for value in xmux advanced serverName host; do
+            case "${value}" in
+            xmux) command=setXHTTPCustomXmux; earlyInput=0 ;;
+            advanced) command=setXHTTPAdvancedParams; earlyInput=$'\nbad\n\n' ;;
+            serverName) command=setXHTTPDownloadSettings; earlyInput=$'down.example.com\n\ntls\nbad:host' ;;
+            host) command=setXHTTPDownloadSettings; earlyInput=$'down.example.com\n\ntls\n\nbad:host' ;;
+            esac
+            exec {inputFd}<<<"${earlyInput}"$'\nsentinel'
+            regressionExpectStatus 1 "${command}" <&"${inputFd}"
+            read -r unread <&"${inputFd}"
+            exec {inputFd}<&-
+            [[ "${unread}" == sentinel && "${commits}" == 6 && "$(<"${fixtureConfig}")" == "${before}" ]]
+        done
     )
     regressionExpectStatus 1 applyXHTTPConfigUpdate '.enabled = $enabled' fixture --argjson enabled invalid 2>/dev/null
     [[ "${commits}" == 6 && "$(<"${fixtureConfig}")" == "${before}" ]]
@@ -749,7 +772,7 @@ runProtocolEntryConfigUpdateRegression() (
             [[ "${value}" != empty ]] || : >"${fixtureConfig}"
             [[ "${value}" != whitespace ]] || printf '   \n' >"${fixtureConfig}"
             [[ "${value}" != missing ]] || rm "${fixtureConfig}"
-            for command in setXHTTPPathHost setXHTTPDownloadSettings setHysteria2BandwidthMode; do
+            for command in setXHTTPPathHost setXHTTPDownloadSettings setHysteria2BandwidthMode setTuicConnectionParams; do
                 exec {inputFd}<<<sentinel
                 if [[ "${command}" == setHysteria2BandwidthMode ]]; then
                     regressionExpectStatus 1 "${command}" brutal <&"${inputFd}"
@@ -1123,7 +1146,7 @@ runProtocolEntryPortRegression() (
 )
 
 runProtocolEntryMenuSyncRegression() (
-    local log="${TMP_DIR}/protocol-entry-sync.log" input expected choice refreshStatus=0 transactionStatus=0
+    local log="${TMP_DIR}/protocol-entry-sync.log" input expected choice inputFd unread refreshStatus=0 transactionStatus=0
     local hysteriaPort= failNetwork= existingNetwork=
     local PADM_SKIP_CONTROLLER_REFRESH= PADM_CONTROL_SERVER=
     coreInstallType=1
@@ -1146,6 +1169,12 @@ runProtocolEntryMenuSyncRegression() (
     corePortApplyReloadTransaction() { printf 'apply:%s\n' "$1" >>"${log}"; return "${transactionStatus}"; }
     refreshProtocolSubscriptions() { printf 'refresh\n' >>"${log}"; return "${refreshStatus}"; }
     subscriptionNotifyControllerRefresh() { printf 'notify\n' >>"${log}"; return 1; }
+    # 无效新增列表不能继续读取默认端口或修改防火墙、配置和订阅。
+    exec {inputFd}<<< $'2\ninvalid\nsentinel'
+    regressionExpectStatus 1 addCorePort <&"${inputFd}"
+    read -r unread <&"${inputFd}"
+    exec {inputFd}<&-
+    [[ "${unread}" == sentinel && "$(<"${log}")" == 'error:端口格式错误' ]]
     for hysteriaPort in '' 16295; do
         for choice in 2 3; do
             if [[ "${choice}" == 2 ]]; then

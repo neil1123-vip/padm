@@ -1417,12 +1417,12 @@ addCorePort() {
             defaultPort=
             autoRead extra_core_ports "请输入端口号[回车取消]:" newPort || return 0
             [[ -n "${newPort}" ]] || return 0
-            autoRead extra_core_default_port "请输入默认端口（新增列表或原入口），[回车]保留现有默认入口:" defaultPort || return 0
-            openedFirewallRules=()
             parsedPorts=$(corePortParseList "${newPort}") || {
                 errorCard "端口格式错误"
                 return 1
             }
+            autoRead extra_core_default_port "请输入默认端口（新增列表或原入口），[回车]保留现有默认入口:" defaultPort || return 0
+            openedFirewallRules=()
             settingsPort=$(corePortForwardTarget) || { errorCard "无法唯一确定 Xray TCP 入口，请检查已安装协议与默认入口"; return 1; }
             corePortValidateAddition "${parsedPorts}" "${defaultPort}" "${settingsPort}" || {
                 errorCard "新增端口不能等于原入口；默认端口必须属于新增列表或等于原入口"
@@ -3320,12 +3320,12 @@ readXHTTPRange() {
 setXHTTPCustomXmux() {
     local concurrencyFrom concurrencyTo requestFrom requestTo reusableFrom reusableTo
     readXHTTPRange "请输入 maxConcurrency 范围" 16 32 concurrencyFrom concurrencyTo || return 1
-    readXHTTPRange "请输入 hMaxRequestTimes 范围" 600 900 requestFrom requestTo || return 1
-    readXHTTPRange "请输入 hMaxReusableSecs 范围" 1800 3000 reusableFrom reusableTo || return 1
     if ((10#${concurrencyFrom} < 1)); then
         errorCard "maxConcurrency 必须大于 0"
         return 1
     fi
+    readXHTTPRange "请输入 hMaxRequestTimes 范围" 600 900 requestFrom requestTo || return 1
+    readXHTTPRange "请输入 hMaxReusableSecs 范围" 1800 3000 reusableFrom reusableTo || return 1
     if ((10#${requestTo} > 1000)); then
         echoContent title "\n┌─ XHTTP XMUX 提醒 ──────────────────────────────────"
         menuLine "hMaxRequestTimes 超过 1000 可能触发部分 Nginx/CDN 限制"
@@ -3376,13 +3376,13 @@ setXHTTPAdvancedParams() {
     minInterval=${minInterval:-30}
     autoRead xhttp_max_buffered_posts "请输入 packet-up 服务端最多缓存 POST 数[回车默认 30]:" maxBuffered || return 1
     maxBuffered=${maxBuffered:-30}
-    readXHTTPRange "请输入 stream-up 服务端保活秒数范围" 20 80 sf st || return 1
-    autoConfirm xhttp_disable_grpc_header "是否关闭 gRPC header 伪装？" n noGrpc || return 1
-    autoConfirm xhttp_disable_sse_header "是否关闭 SSE response header？" n noSse || return 1
     [[ "${maxPost}" =~ ^[0-9]+$ && "${minInterval}" =~ ^[0-9]+$ && "${maxBuffered}" =~ ^[0-9]+$ ]] || {
         errorCard "数值参数必须是非负整数"
         return 1
     }
+    readXHTTPRange "请输入 stream-up 服务端保活秒数范围" 20 80 sf st || return 1
+    autoConfirm xhttp_disable_grpc_header "是否关闭 gRPC header 伪装？" n noGrpc || return 1
+    autoConfirm xhttp_disable_sse_header "是否关闭 SSE response header？" n noSse || return 1
     applyXHTTPConfigUpdate '.inbounds[0].streamSettings.xhttpSettings.xPaddingBytes = $padding | .inbounds[0].streamSettings.xhttpSettings.scMaxEachPostBytes = $maxPost | .inbounds[0].streamSettings.xhttpSettings.scMinPostsIntervalMs = $minInterval | .inbounds[0].streamSettings.xhttpSettings.scMaxBufferedPosts = $maxBuffered | .inbounds[0].streamSettings.xhttpSettings.scStreamUpServerSecs = $streamSecs | .inbounds[0].streamSettings.xhttpSettings.noGRPCHeader = $noGrpc | .inbounds[0].streamSettings.xhttpSettings.noSSEHeader = $noSse' \
         "XHTTP 高级参数已更新" --arg padding "${pf}-${pt}" --argjson maxPost "${maxPost}" --argjson minInterval "${minInterval}" --argjson maxBuffered "${maxBuffered}" --arg streamSecs "${sf}-${st}" --argjson noGrpc "$([[ "${noGrpc}" == "y" ]] && echo true || echo false)" --argjson noSse "$([[ "${noSse}" == "y" ]] && echo true || echo false)"
 }
@@ -3413,12 +3413,12 @@ setXHTTPDownloadSettings() {
     fi
     autoRead xhttp_download_server_name "请输入下行 serverName/SNI[回车默认当前 Reality SNI]:" serverName || return 1
     serverName=${serverName:-${currentServerName}}
+    padmIsValidHostName "${serverName}" || { errorCard "serverName 不合法"; return 1; }
     autoRead xhttp_download_host "请输入下行 XHTTP host[回车默认 ${serverName}]:" host || return 1
     host=${host:-${serverName}}
+    padmIsValidHostName "${host}" || { errorCard "host 不合法"; return 1; }
     autoRead xhttp_download_path "请输入下行 XHTTP path[回车默认沿用当前 path]:" path || return 1
     path=${path:-${currentPath}}
-    padmIsValidHostName "${serverName}" || { errorCard "serverName 不合法"; return 1; }
-    padmIsValidHostName "${host}" || { errorCard "host 不合法"; return 1; }
     padmIsSafeRoutePath "${path}" || { errorCard "path 不合法"; return 1; }
     if [[ "${security}" == "tls" ]]; then
         autoRead xhttp_download_alpn "请输入下行 ALPN[h2/h3，回车默认 h3]:" alpn || return 1
@@ -3859,9 +3859,13 @@ readTuicDuration() {
 }
 
 setTuicConnectionParams() {
-    local authTimeout heartbeat
-    readTuicDuration "请输入认证超时时间 auth_timeout" "3s" authTimeout || return 1
-    readTuicDuration "请输入心跳间隔 heartbeat" "10s" heartbeat || return 1
+    local configFile authTimeout heartbeat values
+    configFile=$(tuicConfigFile) || return 1
+    values=$(jq -er '.inbounds[0] | [.auth_timeout // "3s", .heartbeat // "10s"] | join("\u001f")' \
+        "${configFile}" 2>/dev/null) || { errorCard "读取 Tuic 配置失败"; return 1; }
+    IFS=$'\037' read -r authTimeout heartbeat <<<"${values}"
+    readTuicDuration "请输入认证超时时间 auth_timeout" "${authTimeout}" authTimeout || return 1
+    readTuicDuration "请输入心跳间隔 heartbeat" "${heartbeat}" heartbeat || return 1
     applyTuicConfigUpdate '.inbounds[0].auth_timeout = $authTimeout | .inbounds[0].heartbeat = $heartbeat' \
         "Tuic 连接参数已更新" --arg authTimeout "${authTimeout}" --arg heartbeat "${heartbeat}"
 }
