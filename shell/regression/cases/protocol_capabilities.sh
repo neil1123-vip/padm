@@ -1244,6 +1244,8 @@ runProtocolEntryMenuSyncRegression() (
     menuLine() { :; }
     menuClose() { :; }
     statusCard() { :; }
+    readInstallType() { :; }
+    readSingBoxConfig() { :; }
     errorCard() { printf 'error:%s\n' "$1" >>"${log}"; }
     corePortListExtra() { :; }
     corePortForwardTarget() { printf '443\n'; }
@@ -1258,6 +1260,52 @@ runProtocolEntryMenuSyncRegression() (
     corePortApplyReloadTransaction() { printf 'apply:%s\n' "$1" >>"${log}"; return "${transactionStatus}"; }
     refreshProtocolSubscriptions() { printf 'refresh\n' >>"${log}"; return "${refreshStatus}"; }
     subscriptionNotifyControllerRefresh() { printf 'notify\n' >>"${log}"; return 1; }
+    (
+        # 读取失败不能消费菜单输入，更不能开放端口。
+        local step reader
+        for step in readInstallType readSingBoxConfig; do
+            for reader in readInstallType readSingBoxConfig; do
+                eval "${reader}() { [[ '${reader}' != '${step}' ]]; }"
+            done
+            exec {inputFd}<<< sentinel
+            regressionExpectStatus 1 addCorePort <&"${inputFd}" || return 1
+            read -r unread <&"${inputFd}"
+            exec {inputFd}<&-
+            [[ "${unread}" == sentinel && ! -e "${log}" ]] || return 1
+        done
+    ) || return 1
+    (
+        # 安装 wrapper 的局部变量返回后失效，新增入口必须采用实际磁盘状态。
+        source "${PROJECT_ROOT}/shell/core/state.sh"
+        local root="${TMP_DIR}/entry-live-state" configPath singBoxConfigPath hysteriaPort= invalidFile
+        export PADM_XRAY_BINARY=/bin/true PADM_XRAY_CONF_DIR="${root}/xray" \
+            PADM_SINGBOX_BINARY=/bin/true PADM_SINGBOX_CONFIG_DIR="${root}/sing-box"
+        mkdir -p "${PADM_XRAY_CONF_DIR}" "${PADM_SINGBOX_CONFIG_DIR}"
+        printf '%s\n' '{"inbounds":[{"port":443,"settings":{"clients":[{"id":"test"}]},"streamSettings":{"network":"xhttp","xhttpSettings":{"path":"/xhttp"}}}]}' \
+            >"${PADM_XRAY_CONF_DIR}/12_VLESS_XHTTP_inbounds.json"
+        printf '%s\n' '{"inbounds":[{"listen_port":16295}]}' >"${PADM_SINGBOX_CONFIG_DIR}/06_hysteria2_inbounds.json"
+        corePortApplyReloadTransaction() { "$@"; }
+        addCorePort <<< $'2\n2053\n2053\n4' || return 1
+        grep -qx 'allow:2053:udp' "${log}" || return 1
+        jq -e '.inbounds[0].settings.port == 16295' "${configPath}02_dokodemodoor_inbounds_hysteria_2053.json" >/dev/null || return 1
+        rm "${PADM_SINGBOX_CONFIG_DIR}/06_hysteria2_inbounds.json"
+        hysteriaPort=16295
+        : >"${log}"
+        addCorePort <<< $'2\n2061\n\n4' || return 1
+        ! grep -q ':udp$' "${log}" || return 1
+        [[ -z "${hysteriaPort}" && ! -e "${configPath}02_dokodemodoor_inbounds_hysteria_2061.json" ]] || return 1
+        for invalidFile in 06_hysteria2_inbounds.json 09_tuic_inbounds.json; do
+            printf '{' >"${PADM_SINGBOX_CONFIG_DIR}/${invalidFile}"
+            : >"${log}"
+            exec {inputFd}<<< sentinel
+            regressionExpectStatus 1 addCorePort <&"${inputFd}" || return 1
+            read -r unread <&"${inputFd}"
+            exec {inputFd}<&-
+            [[ "${unread}" == sentinel && ! -s "${log}" ]] || return 1
+            rm "${PADM_SINGBOX_CONFIG_DIR}/${invalidFile}"
+        done
+    ) || return 1
+    rm -f "${log}"
     # 无效新增列表不能继续读取默认端口或修改防火墙、配置和订阅。
     exec {inputFd}<<< $'2\ninvalid\nsentinel'
     regressionExpectStatus 1 addCorePort <&"${inputFd}"

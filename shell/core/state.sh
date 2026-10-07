@@ -526,14 +526,14 @@ readSingBoxConfig() {
     if [[ -n "${singBoxConfigPath}" ]]; then
 
         if [[ -f "${singBoxConfigPath}09_tuic_inbounds.json" ]]; then
-            tuicPort=$(jq -r '.inbounds[0].listen_port' "${singBoxConfigPath}09_tuic_inbounds.json")
+            tuicPort=$(jq -r '.inbounds[0].listen_port' "${singBoxConfigPath}09_tuic_inbounds.json") || return 1
             tuicAlgorithm=$(jq -r '.inbounds[0].congestion_control // "cubic"' "${singBoxConfigPath}09_tuic_inbounds.json")
             tuicAuthTimeout=$(jq -r '.inbounds[0].auth_timeout // "3s"' "${singBoxConfigPath}09_tuic_inbounds.json")
             tuicHeartbeat=$(jq -r '.inbounds[0].heartbeat // "10s"' "${singBoxConfigPath}09_tuic_inbounds.json")
             tuicZeroRttHandshake=$(jq -r '.inbounds[0].zero_rtt_handshake // false' "${singBoxConfigPath}09_tuic_inbounds.json")
         fi
         if [[ -f "${singBoxConfigPath}06_hysteria2_inbounds.json" ]]; then
-            hysteriaPort=$(jq -r '.inbounds[0].listen_port' "${singBoxConfigPath}06_hysteria2_inbounds.json")
+            hysteriaPort=$(jq -r '.inbounds[0].listen_port' "${singBoxConfigPath}06_hysteria2_inbounds.json") || return 1
             hysteria2BandwidthMode=brutal
             hysteria2ClientDownloadSpeed=$(jq -r '.inbounds[0].up_mbps // empty' "${singBoxConfigPath}06_hysteria2_inbounds.json")
             hysteria2ClientUploadSpeed=$(jq -r '.inbounds[0].down_mbps // empty' "${singBoxConfigPath}06_hysteria2_inbounds.json")

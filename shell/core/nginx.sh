@@ -235,12 +235,19 @@ realityStreamRollbackAndFail() {
     return 1
 }
 
+realityStreamPrepareCoreReload() {
+    # 关闭分流时先释放旧 stream 监听，再让核心恢复公网端口。
+    if ! realityStreamSplitEnabled && nginxRunning; then
+        runServiceAction nginx restart || return 1
+    fi
+}
+
 realityStreamApplyServicesOrRollback() {
     local backupDir=$1
     local reason=$2
     local rollbackMessage
     local restoreServiceStatus=0
-    if reloadCore; then
+    if realityStreamPrepareCoreReload && reloadCore; then
         serviceQueueRefresh nginx
         if serviceQueueApply; then
             removeRealityStreamBackup "${backupDir}"
@@ -253,11 +260,12 @@ realityStreamApplyServicesOrRollback() {
         errorCard "${rollbackMessage}"
         return 1
     fi
-    reloadCore || restoreServiceStatus=1
+    if ! realityStreamPrepareCoreReload || ! reloadCore; then
+        restoreServiceStatus=1
+    fi
     serviceQueueRefresh nginx
     serviceQueueApply || restoreServiceStatus=1
     removeRealityStreamBackup "${backupDir}"
-    local rollbackMessage
     if [[ "${restoreServiceStatus}" -eq 0 ]]; then
         coreSetRollbackResultMessage rollbackMessage "${reason}" "已回滚本次修改"
     else

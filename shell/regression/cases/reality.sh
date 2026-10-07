@@ -2777,6 +2777,7 @@ runRealityStreamSplitRegression() (
     installNginxTools() { installCalls=$((installCalls + 1)); : >"${root}/install-called"; return 0; }
     allowPort() { allowCalls=$((allowCalls + 1)); PADM_LAST_ALLOW_PORT_ADDED=false; }
     reloadCore() { reloadCalls=$((reloadCalls + 1)); [[ "${reloadShouldFail}" != true ]]; }
+    nginxRunning() { return 1; }
     serviceQueueRefresh() { :; }
     serviceQueueApply() { return 0; }
     readNginxSubscribe() { subscribePort=; return "${subscribeReadStatus}"; }
@@ -2935,6 +2936,77 @@ runRealityStreamSplitRegression() (
     [[ "$(<"${PADM_REALITY_STREAM_STATE_FILE}")" == "${oldState}" ]]
     [[ "$(<"${PADM_REALITY_STREAM_NGINX_CONF}")" == "${oldNginx}" ]]
     [[ "$(<"${PADM_REALITY_STREAM_CONF_FILE}")" == "${oldStream}" ]]
+    (
+        # 模拟旧 Nginx 占住 443，关闭与失败回滚都必须按磁盘目标状态交接。
+        local order='' socket443=nginx failCore=false failRestart=false nginxActive=true
+        local snapshot
+        padmCreateTempPath snapshot -d "$(realityStreamDisableBackupTemplate)" || return 1
+        backupRealityStreamState "${snapshot}" || return 1
+        nginxRunning() { [[ "${nginxActive}" == true ]]; }
+        runServiceAction() {
+            [[ "$1:$2" == nginx:restart ]] || return 1
+            order+=N
+            [[ "${failRestart}" == false ]] || return 1
+            socket443=
+        }
+        reloadCore() {
+            order+=C
+            if realityStreamSplitEnabled; then
+                [[ "${socket443}" != core ]] || socket443=
+            else
+                [[ "${socket443}" != nginx ]] || return 1
+                socket443=core
+            fi
+            if [[ "${failCore}" == true ]]; then failCore=false; return 1; fi
+        }
+        serviceQueueApply() {
+            order+=A
+            if realityStreamSplitEnabled; then
+                [[ "${socket443}" != core ]] || return 1
+                socket443=nginx
+            fi
+        }
+        (
+            disableRealityStreamSplit || return 1
+            [[ "${order}" == NCA && "${socket443}" == core ]] || return 1
+        ) || return 1
+        realityStreamRollback "${snapshot}" || return 1
+        (
+            nginxActive=false socket443=
+            disableRealityStreamSplit || return 1
+            [[ "${order}" == CA && "${socket443}" == core ]] || return 1
+        ) || return 1
+        realityStreamRollback "${snapshot}" || return 1
+        (
+            failCore=true
+            regressionExpectStatus 1 disableRealityStreamSplit || return 1
+            [[ "${order}" == NCCA && "${socket443}" == nginx ]] || return 1
+            [[ "$(<"${PADM_REALITY_STREAM_STATE_FILE}")" == "${oldState}" ]] || return 1
+        ) || return 1
+        realityStreamRollback "${snapshot}" || return 1
+        (
+            failRestart=true
+            regressionExpectStatus 1 disableRealityStreamSplit || return 1
+            [[ "${order}" == NCA && "${socket443}" == nginx ]] || return 1
+        ) || return 1
+        realityStreamRollback "${snapshot}" || return 1
+        (
+            disableRealityStreamSplit || return 1
+            order='' failCore=true defaultChoice=1
+            regressionExpectStatus 1 configureRealityStreamSplit || return 1
+            [[ "${order}" == CNCA && "${socket443}" == core ]] || return 1
+            [[ ! -e "${PADM_REALITY_STREAM_STATE_FILE}" ]] || return 1
+        ) || return 1
+        realityStreamRollback "${snapshot}" || return 1
+        (
+            disableRealityStreamSplit || return 1
+            order='' failCore=true failRestart=true defaultChoice=1
+            regressionExpectStatus 1 configureRealityStreamSplit || return 1
+            [[ "${order}" == CNA ]] || return 1
+        ) || return 1
+        realityStreamRollback "${snapshot}" || return 1
+        removeRealityStreamBackup "${snapshot}" || return 1
+    ) || return 1
     disableRealityStreamSplit
     jq -e '.inbounds[0].port == 443 and (.inbounds[0] | has("listen") | not)' "${PADM_REALITY_STREAM_VISION_CONFIG_FILE}" >/dev/null
     jq -e '.inbounds[0].settings.port == 443' "${aliasFile}" >/dev/null

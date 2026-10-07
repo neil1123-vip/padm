@@ -2309,6 +2309,33 @@ SH
         [[ "${rc}" == "1" ]]
         ! grep -q '^remove$' "${actionLog}"
     )
+    (
+        # 输入失败（包括写值后返回失败）不得准备或修改 Nginx 配置。
+        local actionLog="${TMP_DIR}/nginx-302-input-failure.log" failMode redirectDomain=https://old.example
+        menuReadChoice() { printf -v "$3" '%s' 1; }
+        autoRead() {
+            [[ "${failMode}" != partial ]] || printf -v "$3" '%s' https://new.example
+            return 1
+        }
+        ensureTraditionalTlsFallbackNginxConfig() { printf 'ensure\n' >>"${actionLog}"; }
+        backupNginxConfig() { printf 'backup\n' >>"${actionLog}"; }
+        removeNginx302() { printf 'remove\n' >>"${actionLog}"; }
+        for failMode in eof partial; do
+            regressionExpectStatus 1 manageTraditionalTlsRedirect >/dev/null || return 1
+            [[ ! -e "${actionLog}" && "${redirectDomain}" == https://old.example ]] || return 1
+        done
+    ) || return 1
+    (
+        local installs=0 successes=0 installStatus=1 menuCalls=0
+        menuReadChoice() { menuCalls=$((menuCalls + 1)); printf -v "$3" '%s' "$((menuCalls == 1 ? 1 : 21))"; }
+        installNginxStaticTemplate() { installs=$((installs + 1)); return "${installStatus}"; }
+        successCard() { successes=$((successes + 1)); }
+        manageTraditionalTlsStaticSite >/dev/null || return 1
+        [[ "${installs}:${successes}" == 1:0 ]] || return 1
+        installStatus=0 menuCalls=0
+        manageTraditionalTlsStaticSite >/dev/null || return 1
+        [[ "${installs}:${successes}" == 2:1 ]] || return 1
+    ) || return 1
     PATH="${oldPath}"
     unset PADM_FAKE_NGINX_VALIDATE_MODE
 }

@@ -871,8 +871,9 @@ manageTraditionalTlsStaticSite() {
         menuReadChoice nginx_blog_menu "请选择:" selectInstallNginxBlogType || return 0
 
         if [[ "${selectInstallNginxBlogType}" =~ ^([1-9]|1[0-9]|20)$ ]]; then
-            installNginxStaticTemplate "${selectInstallNginxBlogType}" || true
-            successCard "更换传统 TLS fallback 静态站点成功"
+            if installNginxStaticTemplate "${selectInstallNginxBlogType}"; then
+                successCard "更换传统 TLS fallback 静态站点成功"
+            fi
         elif [[ "${selectInstallNginxBlogType}" == "21" ]]; then
             return 0
         else
@@ -882,7 +883,7 @@ manageTraditionalTlsStaticSite() {
 }
 
 manageTraditionalTlsRedirect() {
-    local redirectStatus=
+    local redirectStatus='' redirectDomain=''
     while true; do
         echoContent title "\n┌─ 302 重定向管理 ───────────────────────────────────"
         menuLine "重定向优先级更高；配置后根路由静态站点将不起作用"
@@ -895,11 +896,12 @@ manageTraditionalTlsRedirect() {
         menuReadChoice nginx_redirect_menu "请选择:" redirectStatus || return 0
 
         if [[ "${redirectStatus}" == "1" ]]; then
+            redirectDomain=
+            autoRead redirect_domain "请输入要重定向的域名,例如 https://www.baidu.com:" redirectDomain || return 1
             if ! ensureTraditionalTlsFallbackNginxConfig; then
                 return 1
             fi
             backupNginxConfig backup || return 1
-            autoRead redirect_domain "请输入要重定向的域名,例如 https://www.baidu.com:" redirectDomain
             if ! removeNginx302 || ! addNginx302 "${redirectDomain}"; then
                 backupNginxConfig restoreBackup
                 return 1
@@ -1408,14 +1410,15 @@ corePortRollbackFirewallRules() {
 }
 
 addCorePort() {
-    if [[ "${coreInstallType:-}" == "2" ]]; then
-        errorCard "此功能仅支持Xray-core内核"
-        return 1
-    fi
-
     local selectNewPortType newPort defaultPort portIndex port parsedPorts settingsPort firewallStatus portChanged network
     local -a openedFirewallRules=() portNetworks
     while true; do
+        readInstallType || return 1
+        if [[ "${coreInstallType:-}" != "1" ]]; then
+            errorCard "此功能仅支持Xray-core内核"
+            return 1
+        fi
+        readSingBoxConfig || return 1
         portChanged=false
         firewallStatus=0
         echoContent title "\n┌─ 入口端口管理 ─────────────────────────────────────"
@@ -2988,8 +2991,6 @@ manageRealityTarget() {
     while true; do
     readInstallProtocolType
     readConfigHostPathUUID || return 1
-    readCustomPort
-    readSingBoxConfig
     if [[ -n "${realityTargetHost:-}" ]]; then
         currentTarget=$(formatRealityTarget "${realityTargetHost}" "${realityTargetPort:-443}")
         targetAsnSummary=$(realityTargetCachedAsnSummary "${currentTarget}")
@@ -3116,8 +3117,6 @@ manageReality() {
     while true; do
         readInstallProtocolType
         readConfigHostPathUUID || return 1
-        readCustomPort
-        readSingBoxConfig
 
         if ! currentProtocolHasAny 1 2 26 || [[ -z "${coreInstallType:-}" ]]; then
             errorCard "请先安装 Reality 协议。新人路径：主菜单 -> 安装与重装 -> 无域名 Reality，或 安装与重装 -> 自定义安装 中选择 Reality 编号"
