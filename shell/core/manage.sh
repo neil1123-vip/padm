@@ -2052,9 +2052,13 @@ clearCDNEntryAddress() {
 manageCDN() {
     local selectCDNType= currentAddress
     progressCard "$1" "CDN 入口管理" "1"
+    readInstallType || return 1
+    readInstallProtocolType || return 1
+    readConfigHostPathUUID || {
+        errorCard "读取 CDN 入口地址失败"
+        return 1
+    }
     while true; do
-        readInstallType
-        readInstallProtocolType
         currentAddress=$(cdnCurrentAddress) || { errorCard "读取 CDN 入口地址失败"; return 1; }
 
         echoContent title "\n┌─ CDN 入口管理 ─────────────────────────────────────"
@@ -3681,14 +3685,13 @@ showXHTTPUsageNotes() {
 
 manageXHTTP() {
     local selectXHTTPManageType=
+    readInstallType || return 1
+    readInstallProtocolType || return 1
+    if [[ "${coreInstallType}" != "1" ]] || ! currentProtocolHas 2; then
+        errorCard "请先安装 Xray 的 2.VLESS Reality XHTTP"
+        return 1
+    fi
     while true; do
-        readInstallType || return 1
-        readInstallProtocolType || return 1
-        if [[ "${coreInstallType}" != "1" ]] || ! currentProtocolHas 2; then
-            errorCard "请先安装 Xray 的 2.VLESS Reality XHTTP"
-            return 1
-        fi
-
         echoContent title "\n┌─ XHTTP 管理 ───────────────────────────────────────"
         menuLine "这里只调整 XHTTP 协议参数；CDN 连接地址在 协议与入口 -> CDN 入口管理"
         menuLine "普通设置优先；高级和实验功能适合明确知道客户端与线路能力时使用"

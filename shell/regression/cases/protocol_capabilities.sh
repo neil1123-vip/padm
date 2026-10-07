@@ -863,6 +863,7 @@ runProtocolEntryConfigUpdateRegression() (
     [[ -z "$(find "${root}" -name '.config.json.*' -print -quit)" ]]
     (
         local currentHost=installed.example.com realityEntryHost=reality.example.com
+        local coreInstallType=1 configPath= singBoxConfigPath= frontingType= frontingTypeReality=
         readInstallType() { :; }
         cdnAddressFile() { printf '%s/cdn\n' "${root}"; }
         [[ -z "$(cdnStoredAddress)" && "$(cdnCurrentAddress)" == installed.example.com ]]
@@ -923,6 +924,7 @@ runProtocolEntryConfigUpdateRegression() (
         (
             local currentInstallProtocolType=,22, menuLog="${root}/cdn-menu.log"
             readInstallProtocolType() { :; }
+            readConfigHostPathUUID() { :; }
             menuLine() { printf '%s\n' "$*" >>"${menuLog}"; }
             manageCDN 1 <<< $'1\ncdn.example.com\n4'
             [[ "$(<"${root}/cdn")" == cdn.example.com ]]
@@ -934,6 +936,19 @@ runProtocolEntryConfigUpdateRegression() (
             currentInstallProtocolType=,1,
             manageCDN 1 <<< $'1\n4'
             [[ "$(<"${root}/cdn")" == xhttp.example.com ]]
+        )
+        (
+            local currentInstallProtocolType=,1, coreInstallType=1 configPath= singBoxConfigPath=
+            local menuLog="${root}/cdn-reality-entry-menu.log"
+            readInstallType() { :; }
+            readInstallProtocolType() { currentInstallProtocolType=,1,; }
+            realityEntryHostFile() { printf '%s/reality-entry\n' "${root}"; }
+            cdnAddressFile() { printf '%s/cdn\n' "${root}"; }
+            menuLine() { printf '%s\n' "$*" >>"${menuLog}"; }
+            rm -f "${root}/cdn"
+            printf 'entry.example.com\n' >"${root}/reality-entry"
+            manageCDN 1 <<<4
+            grep -q '当前入口地址：entry.example.com' "${menuLog}"
         )
     )
     (
