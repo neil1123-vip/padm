@@ -3043,6 +3043,32 @@ runGeoUpdateReloadFailureRegression() (
 
     mkdir -p "${root}"
     (
+        # Geo 版本沿用核心发布解析；请求失败或坏响应不开始暂存和下载。
+        local target="${root}/lookup-target" latestGeoMetadata geoFetchStatus=0
+        mkdir -p "${target}"
+        printf 'old-geosite\n' >"${target}/geosite.dat"
+        printf 'old-geoip\n' >"${target}/geoip.dat"
+        fetchUrlToStdout() {
+            [[ "${geoFetchStatus}" == 0 ]] || return 1
+            [[ "$1" == */releases/latest ]] && printf '%s\n' "${latestGeoMetadata}" || printf '[]\n'
+        }
+        padmCreateTempPath() { printf -v "$1" '%s' "${root}/lookup-stage"; mkdir -p "${root}/lookup-stage"; }
+        downloadXrayGeoFilesToStage() { [[ "$2" == geo-version ]] || return 1; printf 'download\n' >>"${callLog}"; }
+        commitXrayGeoFilesFromStage() { [[ "$3" == geo-version ]] || return 1; printf 'commit\n' >>"${callLog}"; }
+        latestGeoMetadata='{"tag_name":"geo-version"}'
+        : >"${callLog}"
+        ensureXrayGeoFiles "${target}" force || return 1
+        [[ "$(<"${callLog}")" == $'download\ncommit' ]] || return 1
+        for latestGeoMetadata in '{}' '{"tag_name":null}' $'{"tag_name":"v1"}\n{"tag_name":"v2"}'; do
+            : >"${callLog}"
+            regressionExpectStatus 1 ensureXrayGeoFiles "${target}" force || return 1
+            [[ ! -e "${root}/lookup-stage" && ! -s "${callLog}" ]] || return 1
+        done
+        geoFetchStatus=1
+        regressionExpectStatus 1 ensureXrayGeoFiles "${target}" force || return 1
+        [[ "$(<"${target}/geosite.dat")" == old-geosite && "$(<"${target}/geoip.dat")" == old-geoip && ! -s "${callLog}" ]] || return 1
+    ) || return 1
+    (
         # 任一 Geo 文件提交失败都恢复整组旧数据，成功时一次替换整组。
         local stage="${root}/stage" target="${root}/target"
         local failAt commitCalls file

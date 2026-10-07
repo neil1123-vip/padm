@@ -259,8 +259,7 @@ ensureXrayGeoFiles() {
     fi
 
     local geoVersion
-    geoVersion=$(fetchUrlToStdout "https://api.github.com/repos/Loyalsoldier/v2ray-rules-dat/releases?per_page=1" 3 | jq -r '.[]|.tag_name')
-    if [[ -z "${geoVersion}" || "${geoVersion}" == null ]]; then
+    if ! geoVersion=$(coreLatestReleaseTag Loyalsoldier/v2ray-rules-dat); then
         errorCard "获取 Geo 数据版本失败，请稍后重试"
         return 1
     fi
