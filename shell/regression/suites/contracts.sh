@@ -252,9 +252,10 @@ runRegressionDockerContractsAggregateContract() (
     local expectedLog="${TMP_DIR}/docker-contracts-aggregate.expected.log"
     local status=0 selector
     local -a expectedSelectors=(
-        docker-phase1 docker-menu docker-release docker-setup docker-permissions
-        docker-traditional-tls docker-reality-parameters docker-reality-targets docker-reality-target-library
-        docker-phase2 docker-phase3 docker-phase4 docker-phase5 docker-phase6 docker-traffic
+        docker-phase1 docker-menu docker-release docker-permissions docker-phase2 docker-phase5 docker-traffic
+        docker-phase3 docker-phase4 docker-phase6
+        docker-reality-parameters docker-reality-targets docker-reality-target-library
+        docker-setup-core docker-setup-encrypted docker-setup-transports docker-setup-tls docker-traditional-tls
     )
 
     runFrameworkParallelRegressionSelectors() {
@@ -275,6 +276,40 @@ runRegressionDockerContractsAggregateContract() (
     status=$?
     set -e
     [[ "${status}" -eq 7 ]]
+    cmp -s "${expectedLog}" "${callLog}"
+
+    # 工作流分片与本机全量套件必须恰好覆盖同一组叶子，不能漏测或重复执行。
+    local workflow="${PROJECT_ROOT}/.github/workflows/docker-contracts.yml"
+    local actual="${TMP_DIR}/docker-contract-shards.actual"
+    local expected="${TMP_DIR}/docker-contract-shards.expected"
+    local kind children
+    : >"${actual}"
+    while IFS= read -r selector; do
+        kind=${PADM_REGRESSION_SELECTOR_KIND[${selector}]:-}
+        case "${kind}" in
+        function) printf '%s\n' "${selector}" >>"${actual}" ;;
+        aggregate-runner)
+            children=${PADM_REGRESSION_SELECTOR_CHILDREN[${selector}]:-}
+            [[ -n "${children}" ]] || return 1
+            printf '%s\n' "${children}" >>"${actual}"
+            ;;
+        *) return 1 ;;
+        esac
+    done < <(awk '
+        /^        selector:$/ {inside = 1; next}
+        inside && /^          - / {sub(/^          - /, ""); print; next}
+        inside {exit}
+    ' "${workflow}")
+    printf '%s\n' "${expectedSelectors[@]}" | sort >"${expected}"
+    sort -o "${actual}" "${actual}"
+    cmp -s "${expected}" "${actual}"
+
+    runDockerSetupRegression() { printf '%s\n' "$*" >>"${callLog}"; }
+    : >"${callLog}"
+    for selector in core encrypted transports tls; do
+        PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "docker-setup-${selector}"
+    done
+    printf '%s\n' core encrypted transports tls >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
 )
 

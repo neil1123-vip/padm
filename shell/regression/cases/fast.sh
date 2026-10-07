@@ -6160,7 +6160,7 @@ runDockerReleaseRegression() {
 }
 
 runDockerSetupRegression() {
-    bash "${PROJECT_ROOT}/docker/tests/setup.sh"
+    bash "${PROJECT_ROOT}/docker/tests/setup.sh" "$@"
 }
 
 runDockerProtocolRegression() {

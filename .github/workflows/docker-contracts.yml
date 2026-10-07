@@ -1,0 +1,42 @@
+name: Docker Contracts
+
+on:
+  workflow_call:
+    inputs:
+      source_ref:
+        description: Full source commit to validate
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    name: Docker contracts (${{ matrix.selector }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: true
+      max-parallel: 8
+      matrix:
+        selector:
+          - docker-setup-core
+          - docker-setup-encrypted
+          - docker-setup-transports
+          - docker-setup-tls
+          - docker-traditional-tls
+          - docker-contracts-reality
+          - docker-contracts-system
+          - docker-contracts-fast
+    steps:
+      - name: Checkout checked source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 1
+      - name: Run contract shard
+        shell: bash
+        env:
+          SELECTOR: ${{ matrix.selector }}
+        run: sudo env TMPDIR=/tmp PADM_REGRESSION_PARALLEL_JOBS=2 bash shell/subscription_groups_regression.sh "${SELECTOR}"

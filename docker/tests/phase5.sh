@@ -24,13 +24,14 @@ done
 RELEASE_SCRIPT=${PROJECT_ROOT}/docker/release.sh
 SCHEMA_FILE=${PROJECT_ROOT}/docker/contracts/release-manifest.schema.json
 BUILD_WORKFLOW=${PROJECT_ROOT}/.github/workflows/build-images.yml
+CONTRACT_WORKFLOW=${PROJECT_ROOT}/.github/workflows/docker-contracts.yml
 PR_WORKFLOW=${PROJECT_ROOT}/.github/workflows/docker-ci.yml
 RELEASE_WORKFLOW=${PROJECT_ROOT}/.github/workflows/create_release.yml
 UPSTREAM_WORKFLOW=${PROJECT_ROOT}/.github/workflows/refresh-upstreams.yml
 SING_BOX_WORKFLOW=${PROJECT_ROOT}/.github/workflows/build-sing-box.yml
 FAST_CASES=${PROJECT_ROOT}/shell/regression/cases/fast.sh
 FAST_SUITE=${PROJECT_ROOT}/shell/regression/suites/fast.sh
-for file in "${RELEASE_SCRIPT}" "${SCHEMA_FILE}" "${BUILD_WORKFLOW}" "${PR_WORKFLOW}" "${RELEASE_WORKFLOW}" \
+for file in "${RELEASE_SCRIPT}" "${SCHEMA_FILE}" "${BUILD_WORKFLOW}" "${CONTRACT_WORKFLOW}" "${PR_WORKFLOW}" "${RELEASE_WORKFLOW}" \
     "${UPSTREAM_WORKFLOW}" "${SING_BOX_WORKFLOW}" \
     "${PROJECT_ROOT}/docker/tests/image-smoke.sh"; do
     [[ -f "${file}" && ! -L "${file}" ]] || fail "required phase 5 file is missing: ${file}"
@@ -825,8 +826,11 @@ for scenario in success push-race push-race-dispatch-failed; do
 done
 
 grep -Fq 'workflow_call:' "${BUILD_WORKFLOW}" || fail 'build workflow is not reusable'
-grep -Fq 'sudo env TMPDIR=/tmp PADM_REGRESSION_PARALLEL_JOBS=2 bash shell/subscription_groups_regression.sh docker-contracts' "${BUILD_WORKFLOW}" ||
-    fail 'image workflow does not use a root-safe temp directory for the bounded parallel contract suite'
+grep -Fq 'sudo env TMPDIR=/tmp PADM_REGRESSION_PARALLEL_JOBS=2 bash shell/subscription_groups_regression.sh "${SELECTOR}"' "${CONTRACT_WORKFLOW}" ||
+    fail 'contract shards do not use root-safe temp directories and bounded workers'
+if grep -Fq 'subscription_groups_regression.sh docker-contracts' "${BUILD_WORKFLOW}"; then
+    fail 'image workflow repeats the contract suite'
+fi
 grep -Fq "base_ref: \${{ github.event.pull_request.base.sha || '' }}" "${PR_WORKFLOW}" ||
     fail 'PR workflow does not pass its base commit to image validation'
 smokeRunner=$(awk '
@@ -848,8 +852,10 @@ grep -Eq '^[[:space:]]+sbom:.*inputs[.]push' "${BUILD_WORKFLOW}" || fail 'SBOM a
 grep -Fq 'cosign sign' "${BUILD_WORKFLOW}" || fail 'image signing is not enabled'
 grep -Fq 'Preflight pinned Alpine dependencies' "${BUILD_WORKFLOW}" ||
     fail 'image workflow does not preflight pinned Alpine dependencies'
-grep -Fq 'max-parallel: 4' "${BUILD_WORKFLOW}" ||
-    fail 'image matrices do not cap runner burst concurrency'
+grep -Fq 'max-parallel: 10' "${BUILD_WORKFLOW}" ||
+    fail 'smoke matrix does not allow all ten native platform builds'
+grep -Fq 'max-parallel: 5' "${BUILD_WORKFLOW}" ||
+    fail 'publish matrix does not allow all five images'
 grep -Fq 'packages: write' "${RELEASE_WORKFLOW}" || fail 'Release caller lacks package write permission'
 grep -Fq 'id-token: write' "${RELEASE_WORKFLOW}" || fail 'Release caller lacks OIDC permission'
 grep -Fq 'release-manifest.json' "${BUILD_WORKFLOW}" || fail 'release manifest is not an artifact'
@@ -922,6 +928,24 @@ for job in native prepare; do
     grep -Fq 'ref: ${{ needs.static.outputs.source_sha }}' <<<"${jobDefinition}" ||
         fail "Release ${job} does not use the checked source commit"
 done
+for workflow in "${RELEASE_WORKFLOW}" "${PR_WORKFLOW}"; do
+    contractDefinition=$(awk '
+        /^  contracts:$/ {inside = 1; next}
+        inside && /^  [^ ]/ {exit}
+        inside {print}
+    ' "${workflow}")
+    grep -Fxq '    needs: static' <<<"${contractDefinition}" ||
+        fail "contracts cannot start alongside native regressions: ${workflow}"
+    grep -Fxq '    uses: ./.github/workflows/docker-contracts.yml' <<<"${contractDefinition}" ||
+        fail "contract shard workflow is not called: ${workflow}"
+    grep -Fq 'source_ref: ${{ needs.static.outputs.source_sha }}' <<<"${contractDefinition}" ||
+        fail "contracts do not validate the checked source commit: ${workflow}"
+done
+releaseImageNeeds=$(awk '/^  images:$/ {job = 1; next} job && /^    needs:/ {print; exit}' "${RELEASE_WORKFLOW}")
+[[ "${releaseImageNeeds}" == '    needs: [prepare, contracts]' ]] ||
+    fail 'Release images can bypass failed contract shards'
+grep -Fq '.github/workflows/docker-contracts.yml; then' "${RELEASE_WORKFLOW}" ||
+    fail 'latest workflow revision check omits the contract workflow'
 
 # PR 与 main 都必须覆盖原生源码、回归自身和所有工作流；纯测试变化仍由运行范围判断避免发布。
 for workflow in "${PR_WORKFLOW}" "${RELEASE_WORKFLOW}"; do
@@ -946,7 +970,8 @@ grep -Fq 'native_parallel_jobs:' "${PR_WORKFLOW}" || fail 'PR workflow lacks rep
 grep -Fq 'PADM_REGRESSION_CI_PARALLEL_JOBS' "${PR_WORKFLOW}" ||
     fail 'PR workflow does not pass native concurrency to the selector'
 prImageNeeds=$(awk '/^  images:$/ {job = 1; next} job && /^    needs:/ {print; exit}' "${PR_WORKFLOW}")
-[[ "${prImageNeeds}" == '    needs: [static, native]' ]] || fail 'PR images can run without native validation'
+[[ "${prImageNeeds}" == '    needs: [static, native, contracts]' ]] ||
+    fail 'PR images can run without native or contract validation'
 nativeLine=$(grep -n '^      - name: Check native regressions$' "${RELEASE_WORKFLOW}" | cut -d: -f1)
 preflightLine=$(grep -n '^      - name: Preflight pinned APK dependencies$' "${RELEASE_WORKFLOW}" | cut -d: -f1)
 bumpLine=$(grep -n '^      - name: Bump script and lock version$' "${RELEASE_WORKFLOW}" | cut -d: -f1)

@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SECTION=${1-all}
+[[ "$#" -le 1 ]] || { printf 'usage: %s [all|core|encrypted|transports|tls]\n' "${BASH_SOURCE[0]}" >&2; exit 2; }
+case "${SECTION}" in
+all|core|encrypted|transports|tls) ;;
+*) printf 'unknown setup section: %s\n' "${SECTION}" >&2; exit 2 ;;
+esac
+
 for tool in script timeout mkfifo find; do
     command -v "${tool}" >/dev/null 2>&1 || { printf 'missing tool: %s\n' "${tool}" >&2; exit 1; }
 done
@@ -413,6 +420,11 @@ runPty() {
 
 REALITY_INPUT=$'1\n1\nproxy.example.com\n1\n24443\n2\ntarget.example.com:443\ntarget.example.com\ny\n'
 SINGBOX_INPUT=$'2\n1\nproxy.example.com\n1\n24443\n2\ntarget.example.com:443\ntarget.example.com\ny\n'
+printf 'fake-cert\n' >"${TEST_ROOT}/cert.pem"
+printf 'fake-key\n' >"${TEST_ROOT}/key.pem"
+chmod 0600 "${TEST_ROOT}/key.pem"
+
+if [[ "${SECTION}" == all || "${SECTION}" == core ]]; then
 for cancellation in first eof partial final empty; do
     newState "cancel-${cancellation}"
     before=$(snapshot)
@@ -641,7 +653,9 @@ before=$(snapshot)
 runPty 11 dual-port-conflict "${DUAL_XRAY_INPUT/24445/24443}" setup "${ASSET_ARGS[@]}"
 [[ "$(snapshot)" == "${before}" && ! -s "${EVENTS}" && ! -s "${VERIFY_LOG}" ]] ||
     fail 'dual-core conflicting ports reached confirmation, signature verification or generation'
+fi
 
+if [[ "${SECTION}" == all || "${SECTION}" == encrypted ]]; then
 # Shadowsocks 首配不读取 TLS 或订阅参数，仅在确认后生成两份独立密码。
 SS_INPUT=$'2\n9\nproxy.example.com\n3\n24459\ny\n'
 DUAL_SS_INPUT=$'4\n9\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\n24459\ny\n'
@@ -772,9 +786,6 @@ before=$(snapshot)
 runPty 15 ss-delete-last-primary $'10\nentry-shadowsocks\n' edit "${ASSET_ARGS[@]}"
 [[ "$(snapshot)" == "${before}" ]] || fail 'deleting the final primary Shadowsocks entry changed deployment'
 
-printf 'fake-cert\n' >"${TEST_ROOT}/cert.pem"
-printf 'fake-key\n' >"${TEST_ROOT}/key.pem"
-chmod 0600 "${TEST_ROOT}/key.pem"
 printf -v HY2_INPUT '2\n6\nproxy.example.com\n1\nhy2.example.com\n24449\n\n\n\nn\n\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
 printf -v DUAL_HY2_INPUT '4\n6\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\nhy2.example.com\n24449\nbrutal\n120\n60\ny\nhttps://www.example.com/health\n2\n%s\n%s\ny\n' \
@@ -1127,7 +1138,9 @@ jq -e '.tls == null and (.subscription.enabled | not) and
   any(.core.protocols[]; .id == 30) and
   all(.core.protocols[]; .id != 3 and .id != 4 and .id != 5 and .id != 21)' "${SPEC}" >/dev/null ||
     fail 'deleting the last TLS protocol removed Shadowsocks or retained its TLS reference'
+fi
 
+if [[ "${SECTION}" == all || "${SECTION}" == transports ]]; then
 printf -v WS_INPUT '1\n2\nproxy.example.com\n1\nws.example.com\n24444\n2\n%s\n%s\ny\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
 for tlsCase in tls-fail ws-success; do
@@ -1237,7 +1250,9 @@ for naiveTlsCase in managed dns-success dns-fail; do
             fail 'NaiveProxy DNS-01 did not commit its ACME account'
     fi
 done
+fi
 
+if [[ "${SECTION}" == all || "${SECTION}" == core ]]; then
 # 安装新传输只派生已有 Reality 凭据，原入口和内部身份不得被替换。
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-xray-success"
 export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-xray-success"
@@ -1288,7 +1303,9 @@ for rejectedEdit in existing-id new-credential invalid-transport; do
         fail "${rejectedEdit}: rejected edit changed state or bypassed identity/transport validation"
     assertClean
 done
+fi
 
+if [[ "${SECTION}" == all || "${SECTION}" == encrypted ]]; then
 # TUIC 复用首配与编辑事务；取消、凭据冻结和 TLS 消费者删除均检查受管状态。
 printf -v TUIC_INPUT '2\n10\nproxy.example.com\n3\ntuic.example.com\n24465\n\n\n\nn\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
@@ -1420,7 +1437,9 @@ for tuicFailure in tls-fail health-fail; do
     assertUnconfigured
 done
 export FAKE_SETUP_MODE=ok
+fi
 
+if [[ "${SECTION}" == all || "${SECTION}" == transports ]]; then
 # Trojan direct 在两核心共用 UUID/password，复制和删除沿用受管编辑事务。
 printf -v TROJAN_INPUT '1\n11\nproxy.example.com\n3\ntrojan.example.com\n24476\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
@@ -1789,7 +1808,9 @@ for httpupgradeFailure in tls-fail health-fail; do
     assertUnconfigured
 done
 export FAKE_SETUP_MODE=ok
+fi
 
+if [[ "${SECTION}" == all || "${SECTION}" == tls ]]; then
 # 两类 Xray gRPC TLS 复用首配事务，不生成无用 Reality 凭据。
 for grpcProtocol in 24 25; do
     grpcChoice=14; backend=31301; scheme=vless; listener=entry-vless-grpc-tls
@@ -2005,4 +2026,5 @@ for fallbackProtocol in 27 29; do
     done
     export FAKE_SETUP_MODE=ok
 done
+fi
 printf 'docker-setup-regression-ok\n'

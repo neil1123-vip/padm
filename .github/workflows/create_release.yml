@@ -76,6 +76,14 @@ jobs:
         shell: bash
         run: sudo env TMPDIR=/tmp bash shell/subscription_groups_regression.sh docker-tls-focused
 
+  contracts:
+    name: Release Docker contracts
+    needs: static
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/docker-contracts.yml
+    with:
+      source_ref: ${{ needs.static.outputs.source_sha }}
+
   prepare:
     name: Resolve release
     needs: [static, native]
@@ -108,7 +116,8 @@ jobs:
         run: |
           set -euo pipefail
           if git diff --quiet "${WORKFLOW_SHA}" HEAD -- \
-            .github/workflows/create_release.yml .github/workflows/build-images.yml; then
+            .github/workflows/create_release.yml .github/workflows/build-images.yml \
+            .github/workflows/docker-contracts.yml; then
             echo 'deferred=false' >>"${GITHUB_OUTPUT}"
           else
             gh workflow run create_release.yml --repo "${GITHUB_REPOSITORY}" --ref main \
@@ -291,7 +300,7 @@ jobs:
 
   images:
     name: Validate or publish images
-    needs: prepare
+    needs: [prepare, contracts]
     if: ${{ needs.prepare.outputs.deferred == 'false' }}
     uses: ./.github/workflows/build-images.yml
     permissions:

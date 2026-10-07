@@ -37,7 +37,7 @@ on:
 
 jobs:
   contract:
-    name: Docker contracts
+    name: Image input checks
     timeout-minutes: 15
     runs-on: ubuntu-latest
     permissions:
@@ -54,14 +54,13 @@ jobs:
           ref: ${{ inputs.source_ref }}
           fetch-depth: 0
 
-      - name: Validate lock, schemas and contracts
+      - name: Validate lock and schemas
         shell: bash
         run: |
           set -euo pipefail
           bash docker/release.sh validate-lock
           bash -n install-docker.sh docker/release.sh docker/tests/image-smoke.sh
           jq empty docker/contracts/*.json
-          sudo env TMPDIR=/tmp PADM_REGRESSION_PARALLEL_JOBS=2 bash shell/subscription_groups_regression.sh docker-contracts
 
       - name: Preflight pinned Alpine dependencies
         shell: bash
@@ -146,7 +145,7 @@ jobs:
     if: ${{ !inputs.contracts_only && needs.contract.outputs.build_required == 'true' }}
     strategy:
       fail-fast: true
-      max-parallel: 4
+      max-parallel: 10
       matrix:
         image: ${{ fromJSON(needs.contract.outputs.build_images) }}
         platform:
@@ -256,7 +255,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
-      max-parallel: 4
+      max-parallel: 5
       matrix:
         image: ${{ fromJSON(needs.contract.outputs.images) }}
     steps:

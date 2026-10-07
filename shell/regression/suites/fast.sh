@@ -54,22 +54,34 @@ listRegressionDockerTlsFocusedChildSelectors() {
 }
 
 listRegressionDockerContractsChildSelectors() {
+    listRegressionDockerContractsFastChildSelectors
+    listRegressionDockerContractsSystemChildSelectors
+    listRegressionDockerContractsRealityChildSelectors
+    printf '%s\n' \
+        docker-setup-core \
+        docker-setup-encrypted \
+        docker-setup-transports \
+        docker-setup-tls \
+        docker-traditional-tls
+}
+
+listRegressionDockerContractsFastChildSelectors() {
     printf '%s\n' \
         docker-phase1 \
         docker-menu \
         docker-release \
-        docker-setup \
         docker-permissions \
-        docker-traditional-tls \
-        docker-reality-parameters \
-        docker-reality-targets \
-        docker-reality-target-library \
         docker-phase2 \
-        docker-phase3 \
-        docker-phase4 \
         docker-phase5 \
-        docker-phase6 \
         docker-traffic
+}
+
+listRegressionDockerContractsSystemChildSelectors() {
+    printf '%s\n' docker-phase3 docker-phase4 docker-phase6
+}
+
+listRegressionDockerContractsRealityChildSelectors() {
+    printf '%s\n' docker-reality-parameters docker-reality-targets docker-reality-target-library
 }
 
 runDockerTrafficRegression() {
@@ -86,6 +98,10 @@ registerRegressionFunctionLeaf docker-phase1 runDockerPhase1Regression
 registerRegressionFunctionLeaf docker-menu runDockerMenuRegression
 registerRegressionFunctionLeaf docker-release runDockerReleaseRegression
 registerRegressionFunctionLeaf docker-setup runDockerSetupRegression
+registerRegressionFunctionLeaf docker-setup-core runDockerSetupRegression core
+registerRegressionFunctionLeaf docker-setup-encrypted runDockerSetupRegression encrypted
+registerRegressionFunctionLeaf docker-setup-transports runDockerSetupRegression transports
+registerRegressionFunctionLeaf docker-setup-tls runDockerSetupRegression tls
 registerRegressionFunctionLeaf docker-protocol runDockerProtocolRegression
 registerRegressionFunctionLeaf docker-reality runDockerRealityRegression
 registerRegressionFunctionLeaf docker-reality-parameters runDockerRealityParametersRegression
@@ -115,6 +131,12 @@ registerRegressionParallelSelectorList docker-tls-focused runFrameworkParallelRe
     "${TMP_DIR}/docker-tls-focused-parallel-${BASHPID:-$$}" listRegressionDockerTlsFocusedChildSelectors
 registerRegressionParallelSelectorList docker-contracts runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-contracts-parallel-${BASHPID:-$$}" listRegressionDockerContractsChildSelectors 2
+registerRegressionParallelSelectorList docker-contracts-fast runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-contracts-fast-parallel-${BASHPID:-$$}" listRegressionDockerContractsFastChildSelectors 2
+registerRegressionParallelSelectorList docker-contracts-system runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-contracts-system-parallel-${BASHPID:-$$}" listRegressionDockerContractsSystemChildSelectors 2
+registerRegressionParallelSelectorList docker-contracts-reality runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-contracts-reality-parallel-${BASHPID:-$$}" listRegressionDockerContractsRealityChildSelectors 2
 registerRegressionParallelSelectorList fast-only-output runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/fast-only-output-parallel-${BASHPID:-$$}" listRegressionFastOnlyOutputChildSelectors
 registerRegressionParallelSelectorList fast-only runFrameworkParallelRegressionSelectorList \
