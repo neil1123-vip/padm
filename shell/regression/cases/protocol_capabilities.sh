@@ -710,25 +710,40 @@ runProtocolEntryConfigUpdateRegression() (
 
     (
         # 默认字段只读一次并保留空值；坏配置或缺文件不能消费下一条菜单输入。
-        local reads="${root}/xhttp-reads.log" inputFd unread
+        local reads="${root}/xhttp-reads.log" inputFd unread missingKeyConfig
         jq() { printf '%s\n' "$*" >>"${reads}"; command jq "$@"; }
         setXHTTPPathHost <<< $'\n\n'
         [[ "$(grep -c '^-er ' "${reads}")" == 1 ]]
         jq -e '.inbounds[0].streamSettings.xhttpSettings | .path == "/new/path" and .host == "front.example.com"' "${fixtureConfig}" >/dev/null
         : >"${reads}"
-        setXHTTPDownloadSettings <<< $'down.example.com\n\nreality\n\n\n\n\n\n'
+        # Reality 不读取无效的 ALPN，mode 之后的菜单输入必须保留。
+        exec {inputFd}<<< $'down.example.com\n\nreality\n\n\n\npacket-up\nsentinel'
+        setXHTTPDownloadSettings <&"${inputFd}"
+        read -r unread <&"${inputFd}"
+        exec {inputFd}<&-
+        [[ "${unread}" == sentinel ]]
         [[ "$(grep -c '^-er ' "${reads}")" == 1 ]]
         jq -e '.inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings |
             .port == 443 and .realitySettings.serverName == "reality.example.com" and
             .realitySettings.publicKey == "fixture-key" and .realitySettings.shortId == "fixture-id" and
-            .xhttpSettings.host == "reality.example.com" and .xhttpSettings.path == "/new/path"' "${fixtureConfig}" >/dev/null
+            .xhttpSettings.host == "reality.example.com" and .xhttpSettings.path == "/new/path" and
+            .xhttpSettings.mode == "packet-up" and (has("tlsSettings") | not)' "${fixtureConfig}" >/dev/null
         command jq '.inbounds[0].streamSettings.realitySettings.shortIds = ["fallback-id"] |
             .inbounds[0].streamSettings.xhttpSettings.path = ""' "${fixtureConfig}" >"${root}/empty-path.json"
         mv "${root}/empty-path.json" "${fixtureConfig}"
-        setXHTTPDownloadSettings <<< $'down.example.com\n\nreality\n\n\n/explicit\n\n\n'
+        setXHTTPDownloadSettings <<< $'down.example.com\n\nreality\n\n\n/explicit\n'
         jq -e '.inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings |
             .realitySettings.publicKey == "fixture-key" and .realitySettings.shortId == "fallback-id" and
-            .xhttpSettings.path == "/explicit"' "${fixtureConfig}" >/dev/null
+            .xhttpSettings.path == "/explicit" and .xhttpSettings.mode == "auto"' "${fixtureConfig}" >/dev/null
+        # 缺少公钥时在选择 Reality 后退出，不继续提问或提交。
+        command jq 'del(.inbounds[0].streamSettings.realitySettings.publicKey)' "${fixtureConfig}" >"${root}/missing-key.json"
+        mv "${root}/missing-key.json" "${fixtureConfig}"
+        missingKeyConfig=$(<"${fixtureConfig}")
+        exec {inputFd}<<< $'down.example.com\n\nreality\nsentinel'
+        regressionExpectStatus 1 setXHTTPDownloadSettings <&"${inputFd}"
+        read -r unread <&"${inputFd}"
+        exec {inputFd}<&-
+        [[ "${unread}" == sentinel && "${commits}" == 9 && "$(<"${fixtureConfig}")" == "${missingKeyConfig}" ]]
         for value in malformed empty whitespace missing; do
             printf '{' >"${fixtureConfig}"
             [[ "${value}" != empty ]] || : >"${fixtureConfig}"

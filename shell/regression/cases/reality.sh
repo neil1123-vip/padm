@@ -2686,6 +2686,7 @@ runXHTTPDownloadSettingsRegression() (
     local oldAutoInstall="${AUTO_INSTALL:-}"
     local oldAutoInstallType="${AUTO_INSTALL_TYPE:-}"
     refreshXHTTPSubscriptions() { return 0; }
+    reloadXrayProtocolCore() { return 0; }
     AUTO_INSTALL=
     AUTO_INSTALL_TYPE=
     cat >"${xhttpConfigFile}" <<'JSON'
@@ -2699,7 +2700,6 @@ reality
 reality-down.example.com
 front-down.example.com
 /down
-h3
 packet-up
 "
     jq -e '.inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.security == "reality" and (.inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.tlsSettings | not) and .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.serverName == "reality-down.example.com" and .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.publicKey == "pubkey-down" and .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.shortId == "sid-down" and .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.fingerprint == "chrome" and .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.xhttpSettings.host == "front-down.example.com" and .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.xhttpSettings.path == "/down" and .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.xhttpSettings.mode == "packet-up"' "${xhttpConfigFile}" >/dev/null

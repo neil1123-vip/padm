@@ -3388,7 +3388,7 @@ setXHTTPAdvancedParams() {
 }
 
 setXHTTPDownloadSettings() {
-    local configFile address port security serverName host path alpn mode publicKey shortId currentServerName currentPath values
+    local configFile address port security serverName host path alpn= mode publicKey shortId currentServerName currentPath values
     configFile=$(manageXHTTPConfigFile) || return 1
     values=$(jq -er '.inbounds[0].streamSettings |
         [(.realitySettings.serverNames[0] // ""), (.xhttpSettings.path // ""),
@@ -3407,6 +3407,10 @@ setXHTTPDownloadSettings() {
     autoRead xhttp_download_security "请输入下行 security[tls/reality，回车默认 tls]:" security || return 1
     security=${security:-tls}
     [[ "${security}" == "tls" || "${security}" == "reality" ]] || { errorCard "security 仅支持 tls 或 reality"; return 1; }
+    if [[ "${security}" == "reality" && -z "${publicKey}" ]]; then
+        errorCard "下行 Reality 需要 publicKey；当前配置未找到，请先确认 Reality 密钥"
+        return 1
+    fi
     autoRead xhttp_download_server_name "请输入下行 serverName/SNI[回车默认当前 Reality SNI]:" serverName || return 1
     serverName=${serverName:-${currentServerName}}
     autoRead xhttp_download_host "请输入下行 XHTTP host[回车默认 ${serverName}]:" host || return 1
@@ -3416,16 +3420,14 @@ setXHTTPDownloadSettings() {
     padmIsValidHostName "${serverName}" || { errorCard "serverName 不合法"; return 1; }
     padmIsValidHostName "${host}" || { errorCard "host 不合法"; return 1; }
     padmIsSafeRoutePath "${path}" || { errorCard "path 不合法"; return 1; }
-    autoRead xhttp_download_alpn "请输入下行 ALPN[h2/h3，回车默认 h3]:" alpn || return 1
-    alpn=${alpn:-h3}
-    [[ "${alpn}" == "h2" || "${alpn}" == "h3" ]] || { errorCard "ALPN 仅支持 h2 或 h3"; return 1; }
+    if [[ "${security}" == "tls" ]]; then
+        autoRead xhttp_download_alpn "请输入下行 ALPN[h2/h3，回车默认 h3]:" alpn || return 1
+        alpn=${alpn:-h3}
+        [[ "${alpn}" == "h2" || "${alpn}" == "h3" ]] || { errorCard "ALPN 仅支持 h2 或 h3"; return 1; }
+    fi
     autoRead xhttp_download_mode "请输入下行 mode[auto/stream-one/packet-up/stream-up，回车默认 auto]:" mode || return 1
     mode=${mode:-auto}
     [[ "${mode}" == "auto" || "${mode}" == "stream-one" || "${mode}" == "packet-up" || "${mode}" == "stream-up" ]] || { errorCard "mode 不合法"; return 1; }
-    if [[ "${security}" == "reality" && -z "${publicKey}" ]]; then
-        errorCard "下行 Reality 需要 publicKey；当前配置未找到，请先确认 Reality 密钥"
-        return 1
-    fi
     applyXHTTPConfigUpdate '.inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings = {"address":$address,"port":$port,"network":"xhttp","security":$security,"xhttpSettings":{"host":$host,"path":$path,"mode":$mode}} | if $security == "reality" then .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings = {"serverName":$serverName,"fingerprint":"chrome","show":false,"publicKey":$publicKey,"shortId":$shortId,"spiderX":"/"} else .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.tlsSettings = {"serverName":$serverName,"alpn":[$alpn],"fingerprint":"chrome"} end' \
         "XHTTP 上下行分离配置已启用" --arg address "${address}" --argjson port "${port}" --arg security "${security}" --arg serverName "${serverName}" --arg host "${host}" --arg path "${path}" --arg alpn "${alpn}" --arg mode "${mode}" --arg publicKey "${publicKey}" --arg shortId "${shortId}"
 }
