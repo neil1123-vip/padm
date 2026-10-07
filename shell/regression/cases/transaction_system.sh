@@ -61,6 +61,13 @@ if [[ "$1" == "-s" && "$2" == "stop" ]]; then
 fi
 exit 0
 SH
+    cat >"${fakeBin}/xray" <<'SH'
+#!/usr/bin/env bash
+exit "${PADM_FAKE_XRAY_TEST_RC:-0}"
+SH
+    chmod +x "${fakeBin}/xray"
+    local PADM_XRAY_BINARY="${fakeBin}/xray" PADM_XRAY_CONF_DIR="${serviceTmp}/xray-conf"
+    mkdir -p "${PADM_XRAY_CONF_DIR}"
     chmod +x "${fakeBin}/systemctl" "${fakeBin}/pgrep" "${fakeBin}/kill" "${fakeBin}/sleep" "${fakeBin}/nginx"
 
     PATH="${fakeBin}:${PATH}"
@@ -417,6 +424,31 @@ SH
         grep -qx 'reset-failed sing-box.service' "${xrayStartLimitLog}" || return 1
         [[ "$(grep -c '^start sing-box.service$' "${xrayStartLimitLog}")" == 2 ]] || return 1
         [[ "$(<"${xrayRunningState}")" == true ]] || return 1
+    ) || return 1
+
+    (
+        # 缺少二进制或配置时不得请求启动，也不得等待或报告成功。
+        local scenario managerLog="${serviceTmp}/invalid-xray-start.log"
+        local REGRESSION_SUCCESS_CARD_LOG="${serviceTmp}/invalid-xray-success.log"
+        local -x PADM_FAKE_XRAY_TEST_RC=0
+        xrayRunning() { return 1; }
+        systemctl() { printf 'systemd:%s\n' "$*" >>"${managerLog}"; }
+        waitForServiceState() { printf 'wait\n' >>"${managerLog}"; }
+        for scenario in missing-binary missing-config invalid-config; do
+            PADM_XRAY_BINARY="${fakeBin}/xray"
+            PADM_XRAY_CONF_DIR="${serviceTmp}/xray-conf"
+            PADM_FAKE_XRAY_TEST_RC=0
+            : >"${managerLog}"
+            : >"${REGRESSION_SUCCESS_CARD_LOG}"
+            case "${scenario}" in
+            missing-binary) PADM_XRAY_BINARY="${serviceTmp}/missing-xray" ;;
+            missing-config) PADM_XRAY_CONF_DIR="${serviceTmp}/missing-conf" ;;
+            invalid-config) PADM_FAKE_XRAY_TEST_RC=1 ;;
+            esac
+            regressionExpectStatus 1 handleXray start >/dev/null 2>&1 || return 1
+            [[ ! -s "${managerLog}" && ! -s "${REGRESSION_SUCCESS_CARD_LOG}" ]] || return 1
+            [[ -s "$(xrayStartTestLog)" ]] || return 1
+        done
     ) || return 1
 
     local xrayNoExitMarker="${serviceTmp}/xray-no-exit"

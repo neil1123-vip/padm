@@ -498,7 +498,7 @@ handleXray() {
     if [[ -n "${serviceManager}" ]]; then
         if ! xrayRunning && [[ "$1" == "start" ]]; then
             logFile=$(xrayStartTestLog)
-            if [[ -f "${xrayBinary}" && -x "${xrayBinary}" && -d "${xrayConfigDir}" ]] && ! "${xrayBinary}" -test -confdir "${xrayConfigDir}" >"${logFile}" 2>&1; then
+            if ! validateXrayConfigWithBinary "${xrayBinary}" "${logFile}"; then
                 xrayConfigValidationFailureCard "已取消启动" "排查日志: ${logFile}"
                 return 1
             fi

@@ -278,6 +278,7 @@ runSingBoxCustomPathsRegression() (
         pgrep() { return 1; }
         sleep() { return 0; }
         singBoxMergeConfig() { return 0; }
+        validateXrayConfigWithBinary() { return 0; }
         padmCommandExists() { [[ "$1" == systemctl || "$1" == rc-service ]]; }
         systemctl() {
             printf 'systemd:%s\n' "$*" >>"${managerLog}"
