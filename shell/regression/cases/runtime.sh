@@ -720,6 +720,60 @@ runInstallWorkflowRegression() (
     )
 
     (
+        # 历史用户缺字段在事务前拒绝，已有订阅用户名和协议后缀仍可复用。
+        local core field nameField failure events= errors= oldClients= currentClients= currentUUID=
+        local savedUuid=11111111-1111-4111-8111-111111111111
+        local configPath=/regression/installed/ btDomain= currentPath= lastInstallationConfig= selectCustomInstallType=
+        local AUTO_INSTALL=true AUTO_REUSE_LAST= AUTO_UUID= AUTO_USER= PADM_INSTALL_CLIENTS_PREPARED=parent-value
+        showLastInstallationConfig() { currentClients=${oldClients}; currentUUID=${savedUuid}; }
+        collectEntryProfile() { :; }
+        readInstallTLSDomain() { domain=tls.example.com; }
+        prepareXrayInstallInputs() { events+=$'ports\n'; }
+        prepareSingBoxInstallInputs() { events+=$'ports\n'; }
+        installTools() { events+=$'tools\n'; }
+        errorCard() { errors+="$*"$'\n'; }
+        padmRunPortAllowTransaction() { "$@"; }
+        coreSwitchConfigTransaction() {
+            [[ "${PADM_INSTALL_CLIENTS_PREPARED}" == true ]] || return 1
+            events+=$'transaction\n'
+            shift
+            "$@"
+        }
+        for core in xray sing-box; do
+            field=id nameField=email
+            [[ "${core}" != sing-box ]] || { field=uuid; nameField=name; }
+            for failure in name credential tuic-password; do
+                selectCustomInstallType=,1,
+                printf -v oldClients '[{"%s":"%s"}]' "${field}" "${savedUuid}"
+                if [[ "${failure}" == credential ]]; then
+                    selectCustomInstallType=,28,
+                    oldClients='[{"password":"","name":"alice"}]'
+                elif [[ "${failure}" == tuic-password ]]; then
+                    [[ "${core}" == sing-box ]] || continue
+                    selectCustomInstallType=,31,
+                    oldClients='[{"uuid":"11111111-1111-4111-8111-111111111111","password":"","name":"alice"}]'
+                fi
+                events= errors=
+                regressionExpectStatus 1 runCoreInstall "${core}" installTools </dev/null
+                [[ -z "${events}" && "${errors}" == *"--reuse-last no"* ]]
+                [[ "${currentClients}" == "${oldClients}" && "${currentUUID}" == "${savedUuid}" &&
+                    "${PADM_INSTALL_CLIENTS_PREPARED}" == parent-value ]]
+            done
+            selectCustomInstallType=,1, events= errors=
+            printf -v oldClients '[{"%s":"%s","%s":"sub_reserved-VLESS_WS"}]' "${field}" "${savedUuid}" "${nameField}"
+            runCoreInstall "${core}" installTools </dev/null
+            [[ "${events}" == $'ports\ntransaction\ntools\n' && -z "${errors}" ]]
+            [[ "${currentClients}" == "${oldClients}" && "${currentUUID}" == "${savedUuid}" &&
+                "${PADM_INSTALL_CLIENTS_PREPARED}" == parent-value ]]
+            if [[ "${core}" == sing-box ]]; then
+                selectCustomInstallType=,31, events= errors=
+                runCoreInstall "${core}" installTools </dev/null
+                [[ "${events}" == $'ports\ntransaction\ntools\n' && -z "${errors}" ]]
+            fi
+        done
+    )
+
+    (
         # 显式初始用户必须匹配同一历史用户，不能静默忽略或覆盖已有多用户。
         local core selection inputFd nextInput result= events= errors=
         local configPath=/regression/installed/ btDomain= currentUUID= currentClients= lastInstallationConfig=

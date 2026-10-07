@@ -295,6 +295,10 @@ selectAcmeInstallSSL() {
 
     acmeInstallSSL || return 1
     readAcmeTLS || return 1
+    installedDNSAPIStatus=
+    if [[ -n "${dnsAPIType:-}" && "${dnsAPIStatus:-}" == y ]]; then
+        installedDNSAPIStatus=true
+    fi
 }
 
 
@@ -554,14 +558,10 @@ tlsRenewCronState() {
 }
 
 tlsCertificateStatusJson() {
-    readAcmeTLS || return 1
-    local domain=${currentHost}
+    local domain=${currentHost:-${tlsDomain:-}}
     local sslTypeFile
     local tlsDir
     local acmeDir
-    if [[ -z "${domain}" && -n "${tlsDomain}" ]]; then
-        domain=${tlsDomain}
-    fi
     tlsDir=$(tlsManagedDir) || return 1
     acmeDir=$(acmeSafeHomeDir 2>/dev/null || true)
     if [[ -n "${domain}" ]] && ! tlsDomainNameIsSafe "${domain}"; then
@@ -570,6 +570,7 @@ tlsCertificateStatusJson() {
     if ! tlsCertificatePairExists "${tlsDir}" "${domain}"; then
         domain=$(resolveInstalledTLSDomain)
     fi
+    readAcmeTLS "${domain}" || return 1
 
     local sslDays=90
     sslTypeFile=$(tlsSslTypeFile) || return 1
@@ -906,16 +907,12 @@ renewalTLS() {
     elif [[ "${managedRenewStatus}" != "2" ]]; then
         return "${managedRenewStatus}"
     fi
-    readAcmeTLS || return 1
-    local domain=${currentHost}
+    local domain=${currentHost:-${tlsDomain:-}}
     local sslTypeFile
     local tlsDir
     local acmeDir
     local acmeBin
     local renewStatus
-    if [[ -z "${domain}" && -n "${tlsDomain}" ]]; then
-        domain=${tlsDomain}
-    fi
     tlsDir=$(tlsManagedDir) || return 1
     acmeDir=$(acmeSafeHomeDir 2>/dev/null || true)
     if [[ -n "${domain}" ]] && ! tlsDomainNameIsSafe "${domain}"; then
@@ -924,6 +921,7 @@ renewalTLS() {
     if ! tlsCertificatePairExists "${tlsDir}" "${domain}"; then
         domain=$(resolveInstalledTLSDomain)
     fi
+    readAcmeTLS "${domain}" || return 1
 
     sslTypeFile=$(tlsSslTypeFile) || return 1
     if [[ -f "${sslTypeFile}" ]]; then

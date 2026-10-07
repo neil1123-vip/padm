@@ -28,18 +28,16 @@ acmeSafeHomeDir() {
 
 # 读取 TLS 证书详情
 readAcmeTLS() {
-    local readAcmeDomain=
+    local readAcmeDomain=${1:-${domain:-${currentHost:-}}}
     installedDNSAPIStatus=
-    if [[ -n "${currentHost}" ]]; then
-        readAcmeDomain="${currentHost}"
+    dnsTLSDomain=${readAcmeDomain#*.}
+    [[ "${readAcmeDomain}" == *.* ]] || dnsTLSDomain=
+    # 当前域名的完整证书优先，不能被同父域的历史通配符证书遮蔽。
+    if [[ -s "$HOME/.acme.sh/${readAcmeDomain}_ecc/${readAcmeDomain}.key" &&
+        -s "$HOME/.acme.sh/${readAcmeDomain}_ecc/${readAcmeDomain}.cer" ]]; then
+        return 0
     fi
-
-    if [[ -n "${domain}" ]]; then
-        readAcmeDomain="${domain}"
-    fi
-
-    dnsTLSDomain=$(echo "${readAcmeDomain}" | awk -F "." '{$1="";print $0}' | sed 's/^[[:space:]]*//' | sed 's/ /./g')
-    if [[ -d "$HOME/.acme.sh/*.${dnsTLSDomain}_ecc" && -f "$HOME/.acme.sh/*.${dnsTLSDomain}_ecc/*.${dnsTLSDomain}.key" && -f "$HOME/.acme.sh/*.${dnsTLSDomain}_ecc/*.${dnsTLSDomain}.cer" ]]; then
+    if [[ -s "$HOME/.acme.sh/*.${dnsTLSDomain}_ecc/*.${dnsTLSDomain}.key" && -s "$HOME/.acme.sh/*.${dnsTLSDomain}_ecc/*.${dnsTLSDomain}.cer" ]]; then
         installedDNSAPIStatus=true
     fi
 }

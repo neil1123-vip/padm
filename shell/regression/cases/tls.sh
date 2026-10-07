@@ -364,6 +364,66 @@ runTlsFailureReturnRegression() (
     unset -f sudo
 
     (
+        # 同父域源共存时同步当前域名证书；显式签发通配符仍使用本次签发方式。
+        local HOME="${root}/source-selection/home" PADM_TLS_DIR="${root}/source-selection/tls"
+        local domain=secure.example.com currentHost=stale.example.net sourceDomain= snapshot
+        local exactDir="${HOME}/.acme.sh/${domain}_ecc" wildcardDir="${HOME}/.acme.sh/*.example.com_ecc"
+        local staleWildcardDir="${HOME}/.acme.sh/*.example.net_ecc"
+        mkdir -p "${exactDir}" "${wildcardDir}" "${staleWildcardDir}" "${PADM_TLS_DIR}"
+        cp "${secureTlsRoot}/new.crt" "${exactDir}/${domain}.cer"
+        cp "${secureTlsRoot}/new.key" "${exactDir}/${domain}.key"
+        printf 'invalid-old-cert\n' >"${wildcardDir}/*.example.com.cer"
+        printf 'invalid-old-key\n' >"${wildcardDir}/*.example.com.key"
+        printf 'stale-wildcard-cert\n' >"${staleWildcardDir}/*.example.net.cer"
+        printf 'stale-wildcard-key\n' >"${staleWildcardDir}/*.example.net.key"
+        acmeExecutable() { printf '/bin/true\n'; }
+        sudo() {
+            [[ "$2" == --installcert ]] || return 0
+            sourceDomain=$4
+            cp "${exactDir}/${domain}.cer" "${PADM_TLS_DIR}/${domain}.crt"
+            cp "${exactDir}/${domain}.key" "${PADM_TLS_DIR}/${domain}.key"
+        }
+        readAcmeTLS
+        [[ -z "${installedDNSAPIStatus}" && "${dnsTLSDomain}" == example.com ]]
+        installTLSFromAcme >/dev/null 2>&1
+        [[ "${sourceDomain}" == "${domain}" ]]
+        acmeInstallSSL() { return 0; }
+        local ipType=4 dnsAPIType=cloudflare dnsAPIStatus=y
+        selectAcmeInstallSSL
+        [[ "${installedDNSAPIStatus}" == true ]]
+        dnsAPIStatus=n
+        selectAcmeInstallSSL
+        [[ -z "${installedDNSAPIStatus}" ]]
+        # 状态域名回退后重新查源，不得沿用全局旧域名的通配符状态。
+        currentHost=missing.example.net domain=missing.example.net
+        crontab() { return 1; }
+        snapshot=$(tlsCertificateStatusJson)
+        jq -e '.domain == "secure.example.com" and .source == "acme-standalone"' <<<"${snapshot}" >/dev/null
+        (
+            local sslRenewalDays=90
+            stat() {
+                if [[ "$1" == --format=%z ]]; then
+                    date -d '89 days ago' '+%F %T.000000000 %z'
+                else
+                    command stat "$@"
+                fi
+            }
+            nginxRunning() { return 1; }
+            xrayRunning() { return 1; }
+            singBoxRunning() { return 1; }
+            sourceDomain=
+            renewalTLS >/dev/null 2>&1
+            [[ "${sourceDomain}" == secure.example.com && -z "${installedDNSAPIStatus}" ]]
+        )
+        rm -f "${exactDir}/secure.example.com.cer"
+        readAcmeTLS secure.example.com
+        [[ "${installedDNSAPIStatus}" == true && "${dnsTLSDomain}" == example.com ]]
+        : >"${wildcardDir}/*.example.com.cer"
+        readAcmeTLS secure.example.com
+        [[ -z "${installedDNSAPIStatus}" ]]
+    )
+
+    (
         # 同步失败恢复每个文件的原始存在状态，首次安装也不能留下半份证书。
         local domain=partial.example.com state failure attempts
         local crtFile="${PADM_TLS_DIR}/${domain}.crt" keyFile="${PADM_TLS_DIR}/${domain}.key"

@@ -56,7 +56,10 @@ coreTemplateCollectInitialClients() {
     local core=$1 passwordMode=${2:-false} inputsOnly=${3:-false}
     local hasExistingClients=false historyChoice= storedCredentials= storedCredential=
     local credential= username= clients label=UUID suffix=VLESS_TCP/TLS_Vision
-    local requiresUuid=true
+    local requiresUuid=true requiresTuicPassword=false
+    if [[ "${core}" == sing-box ]] && protocolSelectionIncludes "${selectCustomInstallType:-}" 31; then
+        requiresTuicPassword=true
+    fi
     if [[ "${passwordMode}" == true ]] ||
         ! protocolSelectionRequiresUuid "${selectCustomInstallType:-}"; then
         requiresUuid=false
@@ -83,6 +86,19 @@ coreTemplateCollectInitialClients() {
             esac
         done
         if [[ "${hasExistingClients}" == "true" ]]; then
+            if ! jq -e --arg core "${core}" --argjson tuic "${requiresTuicPassword}" '
+                type == "array" and length > 0 and all(.[];
+                    type == "object" and
+                    ((if $core == "xray" then .id // .uuid // .password else .uuid // .id // .password end) |
+                        type == "string" and length > 0) and
+                    ((if $core == "xray" then .email // .name // .username else .name // .email // .username end) |
+                        type == "string" and length > 0) and
+                    ($tuic == false or ((.password // .uuid // .id) | type == "string" and length > 0))
+                )
+            ' <<<"${currentClients:-[]}" >/dev/null 2>&1; then
+                errorCard "现有用户配置不完整；请保留原配置，选择新建用户或指定 --reuse-last no"
+                return 1
+            fi
             if [[ -n "${AUTO_UUID:-}${AUTO_USER:-}" ]] &&
                 ! jq -e --arg uuid "${AUTO_UUID:-}" --arg user "$(stripClientNameSuffix "${AUTO_USER:-}")" \
                     --arg suffixes "$(clientNameSuffixRegex)" '

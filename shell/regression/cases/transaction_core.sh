@@ -2650,6 +2650,8 @@ runSingBoxProtocolReloadFailureRegression() (
         local xrayLog="${dependencyRoot}/xray.log"
         local certificateAvailable=false confirmValue=y rc
         local AUTO_DOMAIN=install.example.com
+        local domain=parent.example.com tlsEnabled=false tlsCertDomain=parent.example.com
+        local tlsSNI=parent-sni tlsCertFile=parent.crt tlsKeyFile=parent.key
 
         mkdir -p "${dependencyRoot}"
         : >"${certificateLog}"
@@ -2672,6 +2674,7 @@ runSingBoxProtocolReloadFailureRegression() (
         installTLS() {
             printf 'tls\n' >>"${certificateLog}"
             certificateAvailable=true
+            collectTLSProfile
         }
         installCronTLS() { printf 'cron\n' >>"${certificateLog}"; }
         restoreServicesAfterTLSRenewal() { printf 'restore:%s\n' "$*" >>"${certificateLog}"; }
@@ -2693,6 +2696,17 @@ runSingBoxProtocolReloadFailureRegression() (
         [[ "$(tr '\n' ',' <"${certificateLog}")" == 'acme,init,tls,cron,restore:true true false,' ]]
         [[ ! -s "${xrayLog}" ]]
         [[ "${selectCoreType}" == "1" && "${currentInstallProtocolType}" == ',1,' ]]
+        [[ "${domain}" == parent.example.com && "${tlsEnabled}" == false && "${tlsCertDomain}" == parent.example.com &&
+            "${tlsSNI}" == parent-sni && "${tlsCertFile}" == parent.crt && "${tlsKeyFile}" == parent.key ]]
+
+        # 域名输入后依赖安装失败也不能改写父菜单的 TLS 状态。
+        : >"${certificateLog}"
+        : >"${transactionLog}"
+        certificateAvailable=false
+        installAcmeTool() { return 1; }
+        regressionExpectStatus 1 singBoxHysteria2Install >/dev/null 2>&1
+        [[ "${domain}" == parent.example.com && "${tlsCertDomain}" == parent.example.com &&
+            ! -s "${transactionLog}" ]]
 
         : >"${certificateLog}"
         : >"${transactionLog}"

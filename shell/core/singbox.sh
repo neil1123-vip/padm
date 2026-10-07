@@ -539,6 +539,8 @@ singBoxProtocolInstall() {
     local singBoxHysteria2CredentialMode=false PADM_INSTALL_CLIENTS_PREPARED=true
     local AUTO_UUID="${AUTO_UUID:-}" AUTO_USER="${AUTO_USER:-}" AUTO_PORT="${AUTO_PORT:-}"
     local currentClients="${currentClients:-}" currentUUID="${currentUUID:-}" lastInstallationConfig=
+    local domain="${domain:-}" tlsEnabled="${tlsEnabled:-}" tlsCertDomain="${tlsCertDomain:-}"
+    local tlsSNI="${tlsSNI:-}" tlsCertFile="${tlsCertFile:-}" tlsKeyFile="${tlsKeyFile:-}"
     local singBoxConfigPath hysteriaPort tuicPort tuicAlgorithm tuicAuthTimeout tuicHeartbeat tuicZeroRttHandshake
     local hysteria2BandwidthMode hysteria2ClientDownloadSpeed hysteria2ClientUploadSpeed
     local hysteria2ObfsType hysteria2ObfsPassword hysteria2Masquerade
