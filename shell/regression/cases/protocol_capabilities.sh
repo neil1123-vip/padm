@@ -1492,11 +1492,38 @@ runRealityManageMenuStateRegression() (
     [[ "${protocolReads}:${configReads}" == 1:1 ]]
 )
 
+runCorePortMenuStateRegression() (
+    local installReads=0 singBoxReads=0
+    coreInstallType=1
+    readInstallType() {
+        installReads=$((installReads + 1))
+    }
+    readSingBoxConfig() {
+        singBoxReads=$((singBoxReads + 1))
+        hysteriaPort=
+    }
+    echoContent() { :; }
+    menuLine() { :; }
+    menuItem() { :; }
+    menuReturnItem() { :; }
+    menuClose() { :; }
+    menuReadChoice() {
+        local choice
+        IFS= read -r choice || return 1
+        printf -v "$3" '%s' "${choice}"
+    }
+    corePortListExtra() { :; }
+
+    addCorePort <<< $'1\n4'
+    [[ "${installReads}:${singBoxReads}" == 1:1 ]]
+)
+
 runProtocolCapabilitiesRegression() {
     runRegressionStep protocol-entry-config-update runProtocolEntryConfigUpdateRegression
     runRegressionStep protocol-entry-port runProtocolEntryPortRegression
     runRegressionStep protocol-entry-menu-sync runProtocolEntryMenuSyncRegression
     runRegressionStep reality-manage-menu-state runRealityManageMenuStateRegression
+    runRegressionStep core-port-menu-state runCorePortMenuStateRegression
     runRegressionStep protocol-config-ownership runProtocolConfigOwnershipRegression
     runRegressionStep protocol-capability-registry runProtocolCapabilityRegistryRegression
     runRegressionStep protocol-capability-menu-core runProtocolCapabilityMenuAndCoreRegression

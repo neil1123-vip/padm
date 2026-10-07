@@ -1468,13 +1468,13 @@ corePortRollbackFirewallRules() {
 addCorePort() {
     local selectNewPortType newPort defaultPort portIndex port parsedPorts settingsPort firewallStatus portChanged network
     local -a openedFirewallRules=() portNetworks
+    readInstallType || return 1
+    if [[ "${coreInstallType:-}" != "1" ]]; then
+        errorCard "此功能仅支持Xray-core内核"
+        return 1
+    fi
+    readSingBoxConfig || return 1
     while true; do
-        readInstallType || return 1
-        if [[ "${coreInstallType:-}" != "1" ]]; then
-            errorCard "此功能仅支持Xray-core内核"
-            return 1
-        fi
-        readSingBoxConfig || return 1
         portChanged=false
         firewallStatus=0
         echoContent title "\n┌─ 入口端口管理 ─────────────────────────────────────"
