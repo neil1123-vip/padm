@@ -215,6 +215,9 @@ V: 6.0-r17
 P: nginx
 V: 1.30.5-r0
 
+P: nginx-mod-stream
+V: 1.30.5-r0
+
 P: python3
 V: 3.14.7-r2
 
@@ -262,6 +265,9 @@ V: 6.0-r18
 P: nginx
 V: 1.30.6-r0
 
+P: nginx-mod-stream
+V: 1.30.6-r0
+
 P: python3
 V: 3.14.7-r3
 
@@ -299,6 +305,16 @@ for mode in normal mismatch next invalid; do
         for arch in x86_64 aarch64; do
             create_apk_fixture "${mode}" "${repo}" "${arch}"
         done
+    done
+done
+for repo in main community; do
+    for arch in x86_64 aarch64; do
+        root="${TEST_ROOT}/apk-build/stream-mismatch-${repo}-${arch}"
+        mkdir -p "${root}"
+        awk '/^P: nginx-mod-stream$/ {module = 1}
+             module && /^V:/ {$0 = "V: 1.30.4-r1"; module = 0}
+             {print}' "${TEST_ROOT}/apk-build/normal-${repo}-${arch}/APKINDEX" >"${root}/APKINDEX"
+        tar -czf "${APK_FIXTURE_ROOT}/stream-mismatch-${repo}-${arch}.tar.gz" -C "${root}" APKINDEX
     done
 done
 cat >"${MOCK_BIN}/gh" <<'EOF'
@@ -366,6 +382,7 @@ https://hub.docker.com/v2/repositories/library/alpine/tags*)
     mode=${PADM_TEST_APK_MODE:-normal}
     [[ "${PADM_TEST_STATS_FAILURE:-}" != apk-parse ]] || mode=invalid
     [[ "${PADM_TEST_STATS_FAILURE:-}" != arch-mismatch ]] || mode=mismatch
+    [[ "${PADM_TEST_STATS_FAILURE:-}" != stream-mismatch ]] || mode=stream-mismatch
     repo=$(case "${url}" in */main/*) printf main ;; *) printf community ;; esac)
     arch=$(case "${url}" in */x86_64/*) printf x86_64 ;; *) printf aarch64 ;; esac)
     cp "${PADM_TEST_APK_FIXTURES}/${mode}-${repo}-${arch}.tar.gz" "${output}"
@@ -521,7 +538,7 @@ cmp -s "${UPDATER_ROOT}/versions.lock.newer" "${UPDATER_ROOT}/versions.lock" ||
 
 # 发布不完整或下载失败时，任何核心的锁值都必须保持原样。
 for failure in no-stable missing-asset missing-digest duplicate-asset download checksum \
-    alpine-api apk-download apk-parse arch-mismatch; do
+    alpine-api apk-download apk-parse arch-mismatch stream-mismatch; do
     cp "${UPDATER_ROOT}/versions.lock.original" "${UPDATER_ROOT}/versions.lock"
     if PATH="${MOCK_BIN}:${PATH}" PADM_TEST_ALPINE_TAGS="${TEST_ROOT}/alpine-tags.json" \
         PADM_TEST_APK_FIXTURES="${APK_FIXTURE_ROOT}" PADM_TEST_APK_MODE=normal \
@@ -531,6 +548,10 @@ for failure in no-stable missing-asset missing-digest duplicate-asset download c
     fi
     cmp -s "${UPDATER_ROOT}/versions.lock.original" "${UPDATER_ROOT}/versions.lock" ||
         fail "upstream refresh changed the lock after ${failure}"
+    if [[ "${failure}" == stream-mismatch ]]; then
+        grep -Fq 'nginx-mod-stream version does not match nginx' "${TEST_ROOT}/refresh-failure.log" ||
+            fail 'upstream refresh did not reach the stream ABI guard'
+    fi
 done
 
 for name in xray sing-box nginx ops net; do

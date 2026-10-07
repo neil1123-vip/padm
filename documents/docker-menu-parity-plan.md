@@ -1075,6 +1075,34 @@ Docker/签名/网络边界仍使用桩，不能代替部署网络、真实公网
 均 exit `0`、`cache_hit=false`，证据 `.tmp-regression-docker-71a69b4d34554bbfa9c07743e75bdd05`、
 `.tmp-regression-docker-b5732a28a32540bd9b0bae28ba613c3d`。
 
+#### 3D.3 Reality 443 共存
+
+按当前原生功能分步实施，只支持 Xray Reality Vision/XHTTP 的一个默认后端；
+不能用目标站检测或镜像支持 stream 宣称共存菜单已经可用。
+
+| 检查点 | 状态与交付 |
+| --- | --- |
+| 3D.3a 镜像前置 | 已通过本地验收；Nginx 安装同版本锁的 `nginx-mod-stream`，加载模块并提供独立 `stream.d`。发布预检覆盖两种架构的模块缺失，刷新上游拒绝主程序/模块 ABI 版本不一致。 |
+| 3D.3b 受管拓扑 | 待实施；沿用 v3 可选共存绑定，保留原入口端口作为关闭后的映射，不重建账号或密钥。共存生成、规格/部署匹配、端口预检及链接必须使用同一有效公网端口。 |
+| 3D.3c 菜单与事务 | 待实施；配置、状态、关闭与更换默认入口走现有编辑事务。明确停止旧 443 拥有者再交接，失败恢复旧映射；真实验证两类流量及端口交接。 |
+| 3D.3d 同机真实网站 | 待实施；区分容器内受管 TLS 后端与宿主网站。宿主 loopback 不可用 bridge 内 `127.0.0.1` 冒充，按可路由地址或显式宿主网络分别验收；站点内容维护仍归 5A。 |
+
+受管首段复用现有 TLS 入口域名和内部端口，Nginx stream 将网站 SNI 送到本容器
+TLS 后端，其余送到选中的 Xray 容器监听；不默认打开 PROXY protocol。
+Reality SNI 与网站域名冲突、第三入口占用 443、内部监听冲突、地址族不一致均拒绝。
+启用期间保护绑定入口身份、归属和原端口，关闭恢复原映射，未选入口和流量保持。
+共存规格须由控制包的明确能力门禁保护，同属 v3 的旧 bundle 不能仅因版本号匹配而接收；
+旧无共存字段的规格保持兼容。来源地址不可见的 Fail2ban 组合在完成相应合同前拒绝，
+不能把 loopback 来源用于宿主封禁。
+
+3D.3a 本地 Linux amd64：`docker-phase2` `1.165` 秒、`docker-phase5` `8.876` 秒，
+集中 `ci -Jobs 3` `36.333` 秒均 exit `0`；Bash 和 ShellCheck error/warning 通过。
+本地 Nginx 镜像 `sha256:2bda4256003d12821792263e0f6acfb08d675e38d616031c60a3b9efa2af330e`
+在只读、无 capability、非 root 条件下通过默认与 `stream`/`ssl_preread` 配置检查，
+旧镜像被 stream 缺失断言拒绝；不是客户端连接或可信发布验收。
+证据 `.tmp-reality-stream-prerequisite-evidence.md`；`reality-coexistence` 和协议完整
+`management_status` 仍为 `deferred`，本检查点不开放菜单。
+
 ## 第四步：用户、订阅与服务维护
 
 ### 4A. 本机用户、分享订阅与业务备份

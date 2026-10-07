@@ -6,13 +6,14 @@ LOCK_FILE=${PROJECT_ROOT}/versions.lock
 VERSION_FILE=${PROJECT_ROOT}/shell/core/version.sh
 MANIFEST_SCHEMA=${PROJECT_ROOT}/docker/contracts/release-manifest.schema.json
 IMAGE_NAMES=(xray sing-box nginx ops net)
-APK_PACKAGES=(ca-certificates gcompat libgcc unzip nginx python3 openssl socat bash iproute2 iptables nftables wireguard-tools fail2ban)
+APK_PACKAGES=(ca-certificates gcompat libgcc unzip nginx nginx-mod-stream python3 openssl socat bash iproute2 iptables nftables wireguard-tools fail2ban)
 declare -A APK_LOCK_KEYS=(
     [ca-certificates]=PADM_LOCK_CA_CERTIFICATES_VERSION
     [gcompat]=PADM_LOCK_GCOMPAT_VERSION
     [libgcc]=PADM_LOCK_LIBGCC_VERSION
     [unzip]=PADM_LOCK_UNZIP_VERSION
     [nginx]=PADM_LOCK_NGINX_PACKAGE_VERSION
+    [nginx-mod-stream]=PADM_LOCK_NGINX_PACKAGE_VERSION
     [python3]=PADM_LOCK_PYTHON3_VERSION
     [openssl]=PADM_LOCK_OPENSSL_VERSION
     [socat]=PADM_LOCK_SOCAT_VERSION
@@ -419,6 +420,9 @@ refresh_upstreams() {
         fi
     done <<<"${apkUpdates}"
     nginxPackageVersion=${apkVersions[nginx]}
+    # 动态模块复用 Nginx 包版本锁，不能安装与主程序 ABI 不一致的版本。
+    [[ "${apkVersions[nginx-mod-stream]}" == "${nginxPackageVersion}" ]] ||
+        die 'Alpine nginx-mod-stream version does not match nginx'
     nginxVersion=${nginxPackageVersion%%-r*}
     is_semver "${nginxVersion}" || die "invalid Alpine nginx version: ${nginxPackageVersion}"
     if [[ "${updateAlpine}" == true ]]; then

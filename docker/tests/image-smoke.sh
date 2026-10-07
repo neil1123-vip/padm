@@ -84,6 +84,16 @@ sing-box)
     [[ "$(docker inspect --format '{{.State.Running}}' "${container_id}")" == true ]]
     ;;
 nginx)
+    project_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
+    # 经 stdin 传入夹具，嵌套 Docker 与 Windows 宿主均不依赖路径挂载。
+    docker run --rm --pull=never --read-only --cap-drop=ALL \
+        --security-opt=no-new-privileges --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m \
+        --interactive --entrypoint /bin/sh "${image}" -ec '
+          cat >/tmp/padm-stream.conf
+          cat /etc/nginx/nginx.conf >/tmp/padm-nginx.conf
+          printf "\ninclude /tmp/padm-stream.conf;\n" >>/tmp/padm-nginx.conf
+          exec /usr/sbin/nginx -e /dev/stderr -c /tmp/padm-nginx.conf -t
+        ' <"${project_root}/docker/tests/fixtures/nginx-stream.conf"
     if ! nginx_output=$(docker run --rm --pull=never --read-only --cap-drop=ALL \
         --security-opt=no-new-privileges --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m \
         "${image}" -t 2>&1); then

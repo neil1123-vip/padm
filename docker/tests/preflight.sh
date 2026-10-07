@@ -46,7 +46,7 @@ exec "${REAL_TAR}" "$@"
 EOF
 chmod +x "${test_root}/bin/tar"
 
-for scenario in available missing-amd64 missing-arm64 wrong-version corrupt invalid-index network; do
+for scenario in available missing-amd64 missing-arm64 missing-stream wrong-version corrupt invalid-index network; do
     fixture_root=${test_root}/${scenario}
     mkdir -p "${fixture_root}"
     for arch in x86_64 aarch64; do
@@ -54,14 +54,15 @@ for scenario in available missing-amd64 missing-arm64 wrong-version corrupt inva
             mkdir -p "${fixture_root}/${repo}-${arch}"
             index=${fixture_root}/${repo}-${arch}/APKINDEX
             : >"${index}"
-            for package in ca-certificates gcompat libgcc unzip nginx python3 openssl socat bash iproute2 iptables nftables wireguard-tools fail2ban; do
+            for package in ca-certificates gcompat libgcc unzip nginx nginx-mod-stream python3 openssl socat bash iproute2 iptables nftables wireguard-tools fail2ban; do
                 # community 独有包与可用的旧版本均须接受，不能只检查 main 或最新版本。
                 [[ ( "${package}" == fail2ban && "${repo}" == community ) ||
                     ( "${package}" != fail2ban && "${repo}" == main ) ]] || continue
                 key=${package^^}
                 key=PADM_LOCK_${key//-/_}_VERSION
-                [[ "${package}" != nginx ]] || key=PADM_LOCK_NGINX_PACKAGE_VERSION
+                [[ "${package}" != nginx && "${package}" != nginx-mod-stream ]] || key=PADM_LOCK_NGINX_PACKAGE_VERSION
                 expected=${!key}
+                [[ "${package}:${scenario}:${arch}" != nginx-mod-stream:missing-stream:aarch64 ]] || continue
                 if [[ "${package}" == ca-certificates &&
                     ( "${scenario}:${arch}" == missing-amd64:x86_64 || "${scenario}:${arch}" == missing-arm64:aarch64 ) ]]; then
                     continue
@@ -95,6 +96,7 @@ for scenario in available missing-amd64 missing-arm64 wrong-version corrupt inva
         case "${scenario}" in
         missing-amd64) grep -Fq "x86_64 locked APK ca-certificates=${PADM_LOCK_CA_CERTIFICATES_VERSION} is unavailable" "${fixture_root}/output" ;;
         missing-arm64|wrong-version) grep -Fq "aarch64 locked APK ca-certificates=${PADM_LOCK_CA_CERTIFICATES_VERSION} is unavailable" "${fixture_root}/output" ;;
+        missing-stream) grep -Fq "aarch64 locked APK nginx-mod-stream=${PADM_LOCK_NGINX_PACKAGE_VERSION} is unavailable" "${fixture_root}/output" ;;
         corrupt|invalid-index) grep -Fq 'community/aarch64 APK index' "${fixture_root}/output" ;;
         network) grep -Fq 'failed to download Alpine' "${fixture_root}/output" && grep -Fq 'simulated network failure' "${fixture_root}/output" ;;
         esac || { cat "${fixture_root}/output"; fail "${scenario}: wrong failure"; }

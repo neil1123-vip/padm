@@ -82,6 +82,12 @@ done
 
 grep -Fxq 'ENTRYPOINT ["/usr/sbin/nginx", "-e", "/dev/stderr"]' \
     "${PROJECT_ROOT}/docker/images/nginx/Dockerfile" || fail 'Nginx 初始错误日志未接入 stderr'
+grep -Fq '"nginx-mod-stream=${NGINX_PACKAGE_VERSION}"' \
+    "${PROJECT_ROOT}/docker/images/nginx/Dockerfile" || fail 'Nginx stream 模块未锁定相同包版本'
+grep -Fxq 'load_module /usr/lib/nginx/modules/ngx_stream_module.so;' \
+    "${PROJECT_ROOT}/docker/images/nginx/nginx.conf" || fail 'Nginx 未加载 stream 模块'
+grep -Fxq 'include /etc/nginx/stream.d/*.conf;' \
+    "${PROJECT_ROOT}/docker/images/nginx/nginx.conf" || fail 'Nginx 缺少独立 stream 配置入口'
 
 if grep -ERni 'fail2ban|wireguard|iptables|nftables|python3|acme[.]sh' \
     "${PROJECT_ROOT}/docker/images/xray" "${PROJECT_ROOT}/docker/images/sing-box" >/dev/null; then

@@ -11,11 +11,12 @@ ARG CA_CERTIFICATES_VERSION
 RUN set -eux; \
     apk add --no-cache \
         "ca-certificates=${CA_CERTIFICATES_VERSION}" \
-        "nginx=${NGINX_PACKAGE_VERSION}"; \
+        "nginx=${NGINX_PACKAGE_VERSION}" \
+        "nginx-mod-stream=${NGINX_PACKAGE_VERSION}"; \
     addgroup -S -g 10001 padm; \
     adduser -S -D -H -u 10001 -G padm padm; \
-    mkdir -p /etc/nginx/http.d /srv/padm; \
-    chown -R 10001:10001 /etc/nginx/http.d /srv/padm
+    mkdir -p /etc/nginx/http.d /etc/nginx/stream.d /srv/padm; \
+    chown -R 10001:10001 /etc/nginx/http.d /etc/nginx/stream.d /srv/padm
 
 COPY --chown=10001:10001 --chmod=0644 nginx.conf /etc/nginx/nginx.conf
 COPY --chown=10001:10001 --chmod=0644 default.conf /etc/nginx/http.d/default.conf
