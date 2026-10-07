@@ -612,6 +612,18 @@ runProtocolEntryConfigUpdateRegression() (
     manageXHTTPConfigFile() { printf '%s\n' "${fixtureConfig}"; }
     tuicConfigFile() { printf '%s\n' "${fixtureConfig}"; }
     hysteria2ConfigFile() { printf '%s\n' "${fixtureConfig}"; }
+    (
+        # Hysteria2/Tuic 参数修改必须执行 sing-box check，不能只 merge。
+        local validationArgs= fixtureBinary="${root}/sing-box"
+        coreSingBoxBinaryPath() { printf '%s\n' "${fixtureBinary}"; }
+        coreExecutableFile() { return 0; }
+        singBoxMergeConfigForValidation() { validationArgs="$*"; }
+        validateHysteria2ConfigUpdate
+        [[ "${validationArgs}" == "${fixtureBinary} "*' check' ]]
+        validationArgs=
+        validateTuicConfigUpdate
+        [[ "${validationArgs}" == "${fixtureBinary} "*' check' ]]
+    )
     commitXHTTPConfigUpdate() {
         commits=$((commits + 1))
         commitGeneratedJsonFile "$1" "${fixtureConfig}"

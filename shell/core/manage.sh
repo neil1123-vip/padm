@@ -3652,7 +3652,7 @@ validateHysteria2ConfigUpdate() {
     local binary
     binary=$(coreSingBoxBinaryPath) || return 1
     coreExecutableFile "${binary}" || return 0
-    singBoxMergeConfigForValidation "${binary}" "$(hysteria2ConfigTestLog)"
+    singBoxMergeConfigForValidation "${binary}" "$(hysteria2ConfigTestLog)" check
 }
 
 reloadSingBoxProtocolCore() {
@@ -3810,7 +3810,7 @@ validateTuicConfigUpdate() {
     local binary
     binary=$(coreSingBoxBinaryPath) || return 1
     coreExecutableFile "${binary}" || return 0
-    singBoxMergeConfigForValidation "${binary}" "$(tuicConfigTestLog)"
+    singBoxMergeConfigForValidation "${binary}" "$(tuicConfigTestLog)" check
 }
 
 tuicConfigTestLog() {
