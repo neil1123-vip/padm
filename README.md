@@ -818,7 +818,7 @@ net.ipv4.tcp_congestion_control = bbr
 | `--reality-domain` | `yes`、`no`、`y`、`n` | `no` | 严格域名模式，仅支持单选 Reality Vision `1`；优先用 `--entry-host`，其次 `--domain`。 |
 | `--subscribe-port` | 端口号 | 无固定默认 | 订阅发布服务端口。 |
 | `--install-nginx` | `yes`、`no`、`y`、`n` | `no` | 订阅或反代需要 Nginx 时是否自动安装。 |
-| `--uuid` | UUID | 新建时随机生成；复用时保留已有用户 | 初始用户 UUID；复用历史时，显式值须匹配已有用户，否则在安装前失败。 |
+| `--uuid` | UUID 或密码 | 新建时随机生成；复用时保留已有用户 | 纯密码的自定义协议可用普通密码；含 VLESS、VMess 或 TUIC 时必须是 UUID。复用历史时，显式值须匹配已有用户，否则在安装前失败。 |
 | `--user` | 用户名 | 新建时随机生成；复用时保留已有用户 | 初始用户名；与 `--uuid` 同传时须匹配同一已有用户。需要新建用户时指定 `--reuse-last no`。 |
 
 完整参数以 `bash install.sh --help` 为准。

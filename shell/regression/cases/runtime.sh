@@ -747,6 +747,48 @@ runInstallWorkflowRegression() (
     )
 
     (
+        # 自动与交互共用凭据规则，普通密码跨两阶段采集保持原值。
+        local core selection installType inputFd nextInput currentClients= currentUUID= lastInstallationConfig=
+        local selectCustomInstallType= AUTO_UUID= AUTO_USER= add=
+        local secret='ordinary password+test'
+        for core in xray sing-box; do
+            for selection in 3 4 5 25 28 29 30 '3，4，5，28，30'; do
+                [[ -z "$(protocolCoreUnsupportedReason "${core}" "${selection}" 2>/dev/null || true)" ]] || continue
+                for installType in '' custom any 任意组合 2; do
+                    parseInstallArgs --core "${core}" --protocols "${selection}" --uuid "${secret}" --user password-user
+                    AUTO_INSTALL_TYPE=${installType}
+                    autoInstallValidateRequiredInputs
+                    exec {inputFd}< <(printf 'next-parent-action\n')
+                    selectCoreInstallProtocols "${core}" <&"${inputFd}"
+                    currentClients= currentUUID=
+                    coreTemplateCollectInitialClients "${core}" false true <&"${inputFd}"
+                    [[ "${AUTO_UUID}" == "${secret}" && "${AUTO_USER}" == password-user && -z "${currentClients}" ]]
+                    coreTemplateCollectInitialClients "${core}" false <&"${inputFd}"
+                    jq -e --arg secret "${secret}" 'length == 1 and (.[0].id // .[0].uuid) == $secret' <<<"${currentClients}" >/dev/null
+                    read -r -u "${inputFd}" nextInput
+                    exec {inputFd}<&-
+                    [[ "${nextInput}" == next-parent-action ]]
+                done
+            done
+        done
+        # 中英文逗号混选仍校验 UUID；传统和固定 Reality 不采用传入的密码协议。
+        for selection in '' 1 2 21 22 23 24 26 27 31 '3,31' '3，31' '28，1'; do
+            parseInstallArgs --protocols "${selection}" --uuid "${secret}"
+            regressionExpectStatus 1 autoInstallValidateRequiredInputs
+            selectCustomInstallType=${selection}
+            currentClients= currentUUID=
+            regressionExpectStatus 1 coreTemplateCollectInitialClients sing-box false true </dev/null
+            [[ -z "${currentClients}${currentUUID}" && "${AUTO_UUID}" == "${secret}" ]]
+        done
+        for installType in install full traditional 1 reality reality-only no-domain-reality 3; do
+            parseInstallArgs --install-type "${installType}" --protocols 28 --uuid "${secret}"
+            regressionExpectStatus 1 autoInstallValidateRequiredInputs
+        done
+        AUTO_UUID=11111111-1111-4111-8111-111111111111
+        autoInstallValidateRequiredInputs
+    )
+
+    (
         # 账号在六个入口的事务前确认；取消不动服务，模板阶段不再读取同一份输入。
         local install input inputFd nextInput events= currentUUID= currentClients= lastInstallationConfig=
         local configPath= btDomain= PADM_INSTALL_CLIENTS_PREPARED=parent-value

@@ -58,8 +58,7 @@ coreTemplateCollectInitialClients() {
     local credential= username= clients label=UUID suffix=VLESS_TCP/TLS_Vision
     local requiresUuid=true
     if [[ "${passwordMode}" == true ]] ||
-        { [[ -n "${selectCustomInstallType:-}" ]] &&
-            ! protocolSelectionHasAny "${selectCustomInstallType}" 1 2 21 22 23 24 26 27 31; }; then
+        ! protocolSelectionRequiresUuid "${selectCustomInstallType:-}"; then
         requiresUuid=false
         label="用户密码"
     fi

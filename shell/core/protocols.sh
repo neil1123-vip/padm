@@ -261,6 +261,13 @@ protocolSelectionHasAny() {
     return 1
 }
 
+protocolSelectionRequiresUuid() {
+    local selection
+    selection=$(protocolSelectionNormalizeCsv "$1") || return 0
+    [[ -z "${selection//,/}" ]] ||
+        protocolSelectionHasAny "${selection}" 1 2 21 22 23 24 26 27 31
+}
+
 protocolSelectionIsExactly() {
     [[ "$(protocolSelectionNormalizeCsv "$1")" == ",$2," ]]
 }

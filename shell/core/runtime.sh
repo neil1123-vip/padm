@@ -855,7 +855,12 @@ autoInstallValidateRequiredInputs() {
         ;;
     esac
 
-    if [[ -n "${AUTO_UUID:-}" ]] && ! validUuidValue "${AUTO_UUID}"; then
+    local credentialSelection=
+    case "${AUTO_INSTALL_TYPE:-}" in
+    '' | custom | any | 任意组合 | 2) credentialSelection=${AUTO_PROTOCOLS:-} ;;
+    esac
+    if [[ -n "${AUTO_UUID:-}" ]] && protocolSelectionRequiresUuid "${credentialSelection}" &&
+        ! validUuidValue "${AUTO_UUID}"; then
         errorCard "--uuid 格式不合法"
         return 1
     fi
@@ -940,7 +945,7 @@ showInstallArgsHelp() {
 │ --entry-host <host>                     Reality entry；优先于 --domain、历史 entry、currentHost 和公网 IP
 │ --subscribe-port <port>                 订阅服务端口
 │ --install-nginx <yes|no|y|n>            订阅需要 nginx 时是否自动安装
-│ --uuid <uuid>                           新建用户 UUID，默认随机；复用时须匹配已有用户
+│ --uuid <uuid/密码>                      初始凭据，默认随机；纯密码协议可用普通密码
 │ --user <name>                           新建用户名，默认随机；与 UUID 同传须匹配同一已有用户
 └──────────────────────────────────────────────────
 EOF
