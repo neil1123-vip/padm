@@ -287,7 +287,7 @@
       "profiles": ["core-xray", "core-sing-box"],
       "network_mode": "host-cli",
       "host_capabilities": [],
-      "reason": "宿主定时采集和 padm-docker traffic 支持单核及双核全量采样；同 UUID 共享累计与额度，两核心全部复验后才写状态，额度失败或中断恢复全部配置。"
+      "reason": "宿主定时采集和 padm-docker traffic 支持单核及双核全量采样；自用按原 UUID、独立账号按稳定 ID 共享累计与额度，凭据轮换和配置恢复不回退最新累计；两核心全部复验后才写状态，额度失败或中断恢复全部配置。"
     },
     "subscription-users": {
       "status": "deferred",
@@ -296,7 +296,7 @@
       "profiles": ["core-xray", "core-sing-box", "subscription"],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "Docker 当前可配置账号和发布订阅，但尚无交互式用户 CRUD 工作流。"
+      "reason": "4A.1 支持完整 v3 规格声明 1–256 个独立账号，分离稳定身份与认证凭据并关联现有入口，追加到自用账号；users.base 和 spec 为 root 私有，运行配置按启停和额度过滤；CRUD 菜单、分享组和独立发布授权仍未迁移。"
     },
     "subscription-multiserver": {
       "status": "deferred",

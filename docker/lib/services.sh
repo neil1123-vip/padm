@@ -98,8 +98,36 @@ dockerConfigureSpecValidate() {
       ($matrix[0]) as $features |
       ([.. | strings] | all(.[]; explode | all(. >= 32 and . != 127))) and
       exact(["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"] +
-        if has("reality_stream") then ["reality_stream"] else [] end) and
+        (if has("reality_stream") then ["reality_stream"] else [] end) +
+        (if has("accounts") then ["accounts"] else [] end)) and
       (.schema_version == 1 or .schema_version == 2 or .schema_version == 3) and
+      (if has("accounts") then
+        .schema_version == 3 and
+        (.accounts | type == "array" and length >= 1 and length <= 256 and
+          ([.[].id] | unique | length) == length and
+          ([.[].uuid] | unique | length) == length and
+          ([.[].password] | unique | length) == length and
+          ([.[].shadowsocks_password | select(. != null)] |
+            length == (unique | length))) and
+        all(.accounts[];
+          . as $account |
+          exact(["id", "name", "enabled", "uuid", "password", "shadowsocks_password", "listeners"]) and
+          (.id | uuid) and (.uuid | uuid) and
+          (.name | type == "string" and length >= 1 and length <= 64) and
+          (.enabled | type == "boolean") and
+          (.password | type == "string" and test("^[A-Za-z0-9._~@+=:-]{16,128}$")) and
+          all($request.core.protocols[];
+            .uuid != $account.id and .uuid != $account.uuid and .uuid != $account.password and
+            (.id != 30 or (.shadowsocks.user_password != $account.shadowsocks_password and
+              .shadowsocks.server_password != $account.shadowsocks_password))) and
+          (.listeners | type == "array" and length >= 1 and length <= 16 and
+            length == (unique | length) and
+            all(.[]; . as $id | any($request.core.protocols[]; .listener_id == $id))) and
+          (if any($request.core.protocols[]; .id == 30 and
+            (.listener_id as $id | $account.listeners | index($id)) != null) then
+            (.shadowsocks_password | ss_key)
+           else .shadowsocks_password == null end))
+       else true end) and
       (if has("reality_stream") then .schema_version == 3 else true end) and
       (if .reality_stream != null then
         [.core.protocols[] | select(.listener_id == $request.reality_stream.listener_id)] as $realities |
@@ -953,7 +981,20 @@ dockerGenerateXrayConfig() {
           {protocol: "freedom", tag: "direct"},
           {protocol: "blackhole", tag: "blocked"}
         ]
-      }
+      } |
+      if $r.accounts != null then
+        # 独立账号按入口关联；统计身份不随认证凭据轮换。
+        .inbounds |= map(. as $inbound |
+          [$r.core.protocols[] | select(.listener_id == $inbound.tag)] as $entries |
+          if ($entries | length) == 1 and .settings.clients != null then
+            .settings.clients += [
+              $r.accounts[] | select(.listeners | index($inbound.tag) != null) | . as $account |
+              $inbound.settings.clients[0] +
+                {padm_account:$account.id, padm_enabled:$account.enabled, padm_name:$account.name, email:$account.name} |
+              if has("password") then .password = $account.password else .id = $account.uuid end
+            ]
+          else . end)
+      else . end
     ' >"${target}"
 }
 
@@ -1098,7 +1139,22 @@ dockerGenerateSingBoxConfig() {
         ]),
         outbounds: [{type: "direct", tag: "direct"}],
         route: {final: "direct", auto_detect_interface: true}
-      }
+      } |
+      if $r.accounts != null then
+        .inbounds |= map(. as $inbound |
+          if .users != null then
+            .users += [
+              $r.accounts[] | select(.listeners | index($inbound.tag) != null) | . as $account |
+              $inbound.users[0] +
+                {padm_account:$account.id, padm_enabled:$account.enabled, padm_name:$account.name} |
+              (if has("username") then .username = $account.id else .name = $account.name end) |
+              (if has("uuid") then .uuid = $account.uuid else . end) |
+              if has("password") then
+                .password = (if $inbound.type == "shadowsocks" then $account.shadowsocks_password else $account.password end)
+              else . end
+            ]
+          else . end)
+      else . end
     ' >"${target}"
 }
 
@@ -1341,7 +1397,16 @@ dockerGenerateSubscription() {
     jq -r '
       def authority: if contains(":") then "[\(.)]" else . end;
       . as $request |
-      .core.protocols[] |
+      .core.protocols[] | . as $entry |
+      (., (if $request.accounts != null then
+        $request.accounts[] | select(.enabled and (.listeners | index($entry.listener_id) != null)) |
+        . as $account | $entry + {
+          uuid: (if ($entry.id == 3 or $entry.id == 4 or $entry.id == 28 or $entry.id == 25 or $entry.id == 29)
+            then $account.password else $account.uuid end),
+          account_id:$account.id, account_password:$account.password,
+          name: ($entry.name + "-" + $account.name)} |
+        if .id == 30 then .shadowsocks.user_password = $account.shadowsocks_password else . end
+       else empty end)) |
       if $request.reality_stream != null and
         (.listener_id == $request.reality_stream.listener_id or .listener_id == $request.reality_stream.website_listener_id)
       then .public_port = 443 else . end |
@@ -1366,12 +1431,12 @@ dockerGenerateSubscription() {
       elif .id == 4 then
         "anytls://\(.uuid | @uri)@\(.server | authority):\(.public_port)?security=tls&sni=\(.anytls.domain | @uri)#\(.name | @uri)"
       elif .id == 5 then
-        "naive+https://\(.uuid | @uri):\(.uuid | @uri)@\(.server | authority):\(.public_port)?padding=true#\(.name | @uri)"
+        "naive+https://\((.account_id // .uuid) | @uri):\((.account_password // .uuid) | @uri)@\(.server | authority):\(.public_port)?padding=true#\(.name | @uri)"
       elif .id == 30 then
         # SIP002 的 AEAD-2022 凭据必须分别百分号编码，不整段 Base64。
         "ss://\(.shadowsocks.method | @uri):\((.shadowsocks.server_password + ":" + .shadowsocks.user_password) | @uri)@\(.server | authority):\(.public_port)#\(.name | @uri)"
       elif .id == 31 then
-        "tuic://\(.uuid | @uri):\(.uuid | @uri)@\(.server | authority):\(.public_port)?congestion_control=\(.tuic.congestion_control | @uri)&alpn=h3&sni=\(.tuic.domain | @uri)&udp_relay_mode=native&allow_insecure=0#\(.name | @uri)"
+        "tuic://\(.uuid | @uri):\((.account_password // .uuid) | @uri)@\(.server | authority):\(.public_port)?congestion_control=\(.tuic.congestion_control | @uri)&alpn=h3&sni=\(.tuic.domain | @uri)&udp_relay_mode=native&allow_insecure=0#\(.name | @uri)"
       elif .id == 21 then
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&security=tls&sni=\(.websocket.domain | @uri)&type=ws&host=\(.websocket.domain | @uri)&path=\("/" + .websocket.path + "ws" | @uri)#\(.name | @uri)"
       elif .id == 24 then
@@ -1811,14 +1876,14 @@ dockerTlsRuntimePermissions() {
 }
 
 dockerPrepareCandidatePermissions() {
-    local candidate=$1 directory
+    local candidate=$1 directory privateFile
     if [[ -e "${candidate}/config/spec.json" || -L "${candidate}/config/spec.json" ]]; then
         [[ -f "${candidate}/config/spec.json" && ! -L "${candidate}/config/spec.json" ]] || return 1
         chmod 0600 "${candidate}/config/spec.json" || return 1
     fi
     find "${candidate}/config" "${candidate}/data" "${candidate}/logs" -type d -exec chmod 0750 {} + || return 1
     find "${candidate}/config" "${candidate}/data" "${candidate}/logs" -type f \
-        ! -path "${candidate}/config/spec.json" -exec chmod 0640 {} + || return 1
+        ! -path "${candidate}/config/spec.json" ! -name users.base -exec chmod 0640 {} + || return 1
     find "${candidate}/secrets" -type d -exec chmod 0750 {} + || return 1
     find "${candidate}/secrets" -type f -exec chmod 0640 {} + || return 1
     chmod 0640 "${candidate}/deployment.json" "${candidate}/compose.json" \
@@ -1827,7 +1892,7 @@ dockerPrepareCandidatePermissions() {
         chmod 0600 "${candidate}/secrets/net/wireguard/wg-padm.conf" || return 1
     fi
     if [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" != "1" ]]; then
-        find "${candidate}/config" ! -path "${candidate}/config/spec.json" \
+        find "${candidate}/config" ! -path "${candidate}/config/spec.json" ! -name users.base \
             -exec chown "0:${PADM_DOCKER_CONTAINER_GID}" {} + || return 1
         chown -R "0:${PADM_DOCKER_CONTAINER_GID}" "${candidate}/data/subscription" \
             "${candidate}/logs" "${candidate}/secrets" || return 1
@@ -1837,13 +1902,14 @@ dockerPrepareCandidatePermissions() {
             chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" "${directory}" || return 1
         done
     fi
-    # 完整规格包含所有协议秘密，只允许宿主 root 读取，不交给容器组。
-    if [[ -e "${candidate}/config/spec.json" || -L "${candidate}/config/spec.json" ]]; then
-        [[ -f "${candidate}/config/spec.json" && ! -L "${candidate}/config/spec.json" ]] || return 1
-        chmod 0600 "${candidate}/config/spec.json" || return 1
+    # 完整输入含停用账号凭据，只允许宿主 root 读取，不交给容器组。
+    for privateFile in config/spec.json config/xray/users.base config/sing-box/users.base; do
+        [[ -e "${candidate}/${privateFile}" || -L "${candidate}/${privateFile}" ]] || continue
+        [[ -f "${candidate}/${privateFile}" && ! -L "${candidate}/${privateFile}" ]] || return 1
+        chmod 0600 "${candidate}/${privateFile}" || return 1
         [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == "1" ]] ||
-            chown 0:0 "${candidate}/config/spec.json" || return 1
-    fi
+            chown 0:0 "${candidate}/${privateFile}" || return 1
+    done
     dockerTlsRuntimePermissions "${candidate}/secrets/tls"
 }
 
@@ -2294,7 +2360,7 @@ dockerInstallCandidate() {
 }
 
 dockerEnsureRuntimeDataPermissions() {
-    local root directory
+    local root directory privateFile
     root=$(dockerInstallRoot) || return 1
     for directory in \
         data/xray data/sing-box data/static data/acme \
@@ -2311,13 +2377,13 @@ dockerEnsureRuntimeDataPermissions() {
         [[ -d "${root}/${directory}" && ! -L "${root}/${directory}" ]] || return 1
         [[ -z "$(find "${root}/${directory}" -type l -print -quit)" ]] || return 1
         find "${root}/${directory}" -type d -exec chmod 0750 {} + || return 1
-        find "${root}/${directory}" -type f ! -path "${root}/config/spec.json" \
+        find "${root}/${directory}" -type f ! -path "${root}/config/spec.json" ! -name users.base \
             -exec chmod 0640 {} + || return 1
     done
     if [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" != "1" ]]; then
         chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" \
             "${root}/data/xray" "${root}/data/sing-box" "${root}/data/acme" || return 1
-        find "${root}/config" ! -path "${root}/config/spec.json" \
+        find "${root}/config" ! -path "${root}/config/spec.json" ! -name users.base \
             -exec chown "0:${PADM_DOCKER_CONTAINER_GID}" {} + || return 1
         chown -R "0:${PADM_DOCKER_CONTAINER_GID}" "${root}/data/static" \
             "${root}/logs/subscription" "${root}/logs/acme" \
@@ -2326,12 +2392,13 @@ dockerEnsureRuntimeDataPermissions() {
             "${root}/logs/nginx" || return 1
         chown -R 0:0 "${root}/data/net" || return 1
     fi
-    if [[ -e "${root}/config/spec.json" || -L "${root}/config/spec.json" ]]; then
-        [[ -f "${root}/config/spec.json" && ! -L "${root}/config/spec.json" ]] || return 1
-        chmod 0600 "${root}/config/spec.json" || return 1
+    for privateFile in config/spec.json config/xray/users.base config/sing-box/users.base; do
+        [[ -e "${root}/${privateFile}" || -L "${root}/${privateFile}" ]] || continue
+        [[ -f "${root}/${privateFile}" && ! -L "${root}/${privateFile}" ]] || return 1
+        chmod 0600 "${root}/${privateFile}" || return 1
         [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == "1" ]] ||
-            chown 0:0 "${root}/config/spec.json" || return 1
-    fi
+            chown 0:0 "${root}/${privateFile}" || return 1
+    done
     dockerTlsRuntimePermissions "${root}/secrets/tls"
 }
 

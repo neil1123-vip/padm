@@ -167,6 +167,24 @@ UUID is the user ID, password, and traffic identity. Congestion control supports
 timeout, heartbeat, and 0-RTT. Defaults are `cubic`, `3s`, `10s`, and disabled 0-RTT.
 `tuic://` uses `h3`, native UDP relay, and strict TLS verification. Port hopping remains unavailable.
 
+Complete v3 `configure` specs may include `accounts` to append 1-256 independent
+accounts without replacing the original self-use credentials. Each account requires
+`id`, `name`, `enabled`, `uuid`, `password`, `shadowsocks_password`, and `listeners`.
+The lowercase UUID `id` is the stable traffic identity; authentication UUID/password
+are independent, and `listeners` references existing listener IDs. An SS2022 user key
+is required only when associated with Shadowsocks; otherwise it must be `null`.
+Identities and credentials of the same kind must be unique and must not reuse self-use
+credentials or an SS server key. Naive uses the stable ID as username; TUIC uses the
+authentication UUID and independent password. Traffic and quota aggregate by stable
+ID across cores. Disabling retains identity and totals but removes runtime authentication
+and output nodes; credential rotation and configuration restoration do not reset or
+roll back accumulated traffic. Both cores' `config/*/users.base` retain disabled
+credentials and are root-owned `0600`, like the complete spec. Runtime configs strip
+private account metadata. Bundles without `x-padm-accounts` reject these specs during
+configuration, update, and restoration. Account CRUD menus, share groups, and per-account
+publishing authorization remain unavailable. Ordinary output includes self-use and enabled
+accounts under the deployment-wide token, not independent share subscriptions.
+
 Use the menu's configuration editor or `padm-docker edit` to change public ports,
 server addresses, address families, node names, Reality targets/SNI, WS paths, or
 subscription enablement. It uses a private draft, a value-redacted diff, and candidate

@@ -75,7 +75,8 @@ listRegressionDockerContractsFastChildSelectors() {
         docker-permissions \
         docker-phase2 \
         docker-phase5 \
-        docker-traffic
+        docker-traffic \
+        docker-accounts
 }
 
 listRegressionDockerContractsSystemChildSelectors() {
@@ -88,6 +89,10 @@ listRegressionDockerContractsRealityChildSelectors() {
 
 runDockerTrafficRegression() {
     bash "${PROJECT_ROOT}/docker/tests/traffic.sh"
+}
+
+runDockerAccountsRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/accounts.sh"
 }
 
 registerRegressionFunctionLeaf install-module-manifest runInstallModuleManifestCompleteRegression
@@ -128,6 +133,7 @@ registerRegressionFunctionLeaf docker-phase4 runDockerPhase4Regression
 registerRegressionFunctionLeaf docker-phase5 runDockerPhase5Regression
 registerRegressionFunctionLeaf docker-phase6 runDockerPhase6Regression
 registerRegressionFunctionLeaf docker-traffic runDockerTrafficRegression
+registerRegressionFunctionLeaf docker-accounts runDockerAccountsRegression
 
 registerRegressionParallelSelectorList docker-tls-focused runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/docker-tls-focused-parallel-${BASHPID:-$$}" listRegressionDockerTlsFocusedChildSelectors

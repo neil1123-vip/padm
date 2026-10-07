@@ -183,6 +183,18 @@ Xray 直接终止 TLS，未命中协议的 HTTP/1.1 和 HTTP/2 请求通过 PROX
 完整规格保存于 `/etc/padm-docker/config/spec.json`，由 root 持有、权限 `0600`；
 取消不提交，配置失败恢复旧规格、证书及 ACME 状态。该文件含秘密，不应打印或公开。
 
+完整 v3 `configure` 规格可选 `accounts`，用于追加 1–256 个独立账号，不替换原自用账号。
+每项必须包含 `id`、`name`、`enabled`、`uuid`、`password`、`shadowsocks_password` 和
+`listeners`；`id` 是稳定的小写 UUID，认证 `uuid` 和密码独立，`listeners` 引用现有入口 ID。
+关联 Shadowsocks 时需要独立的 SS2022 用户密钥，未关联时该字段为 `null`；
+身份与同类凭据必须唯一，不得复用自用身份/凭据或 SS 服务器密钥。
+Naive 的用户名使用稳定 ID，TUIC 使用认证 UUID 和独立密码；跨核心累计与额度按稳定 ID 归集。
+停用保留身份及累计，仅移除运行认证和输出节点；轮换认证或配置恢复不会清零、回退累计。
+两核心 `config/*/users.base` 保留停用凭据，与 spec 一样为 `0600 root:root`，
+运行配置不含账号私有映射。旧控制包缺少 `x-padm-accounts` 能力时拒绝配置、更新或恢复该规格。
+目前只提供完整规格底座；账号 CRUD 菜单、分享组与单账号发布授权仍待实现。
+普通链接/订阅输出包含自用和启用账号，仍共用部署级 token，不是独立分享链接。
+
 已有受管规格可从菜单的“编辑配置/导入原始规格”或 `padm-docker edit` 修改入口端口、
 服务器地址、地址族、节点名称、Reality 目标/SNI、XHTTP 路径/Host/模式、
 gRPC service name、WS/HTTPUpgrade 路径、Hysteria2 拥塞/带宽/混淆/伪装和订阅开关。

@@ -5,7 +5,7 @@ source "${DOCKER_BUNDLE_SOURCE_ROOT}/shell/core/stats_grpc.sh"
 
 DOCKER_TRAFFIC_USERS_JQ='
   def traffic_id:
-    (.uuid // .id // .name // .email // .username // "") |
+    (.padm_account // .uuid // .id // .name // .email // .username // "") |
     if type != "string" or (test("^[A-Za-z0-9_.@+-]{1,128}$") | not) then
       error("用户缺少有效的稳定统计标识")
     elif test("^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$") then ascii_downcase
@@ -14,7 +14,7 @@ DOCKER_TRAFFIC_USERS_JQ='
     if $core == "xray" then .inbounds[]?.settings.clients[]?
     else .inbounds[]?.users[]? end;
   def traffic_accounts($core):
-    [traffic_users($core) | {account: traffic_id, name: (.name // .email // traffic_id)}] |
+    [traffic_users($core) | {account: traffic_id, name: (.padm_name // .name // .email // traffic_id)}] |
     unique_by(.account);
 '
 
@@ -103,8 +103,10 @@ dockerTrafficRender() {
     jq -e --arg core "${core}" --argjson state "${state}" "${DOCKER_TRAFFIC_USERS_JQ}"'
       def enabled:
         traffic_id as $id | ($state.accounts[$id] // {}) as $account |
-        ($account.limit_bytes // 0) == 0 or
-        (($account.upload // 0) + ($account.download // 0)) < $account.limit_bytes;
+        .padm_enabled != false and
+        (($account.limit_bytes // 0) == 0 or
+          (($account.upload // 0) + ($account.download // 0)) < $account.limit_bytes);
+      def runtime: del(.padm_account, .padm_enabled, .padm_name);
       if type != "object" or (.inbounds | type) != "array" then error("核心配置格式无效") else . end |
       traffic_accounts($core) as $accounts |
       if $core == "xray" then
@@ -116,18 +118,20 @@ dockerTrafficRender() {
           .policy.levels[$level].statsUserUplink = true |
           .policy.levels[$level].statsUserDownlink = true) |
         .inbounds = ([.inbounds[] | select(.tag != $api) |
-          if .settings.clients? != null then .settings.clients |= map(select(enabled) | .email = traffic_id) else . end] +
+          if .settings.clients? != null then
+            .settings.clients |= map(select(enabled) | .email = traffic_id | runtime)
+          else . end] +
           [{tag:$api, listen:"127.0.0.1", port:10085, protocol:"dokodemo-door", settings:{address:"127.0.0.1"}}]) |
         .routing.rules = ([{type:"field", inboundTag:[$api], outboundTag:$api}] +
           [(.routing.rules // [])[] | select(((.inboundTag // []) | index($api)) == null)])
       else
         # Naive 以 username 认证及统计，不接受其它协议的 name 字段。
         .inbounds |= map(if .users? != null then
-          if .type == "naive" then .users |= map(select(enabled))
-          else .users |= map(select(enabled) | .name = traffic_id) end
+          if .type == "naive" then .users |= map(select(enabled) | runtime)
+          else .users |= map(select(enabled) | .name = traffic_id | runtime) end
           else . end |
-          # 空用户列表会让 SS2022 退化成服务器密钥单用户认证，超额直接撤销入站。
-          select(.type != "shadowsocks" or (.users | length) > 0)) |
+          # 空用户会让 SS2022 退化认证、Naive 拒绝启动，超额直接撤销入站。
+          select((.type != "shadowsocks" and .type != "naive") or (.users | length) > 0)) |
         .experimental.v2ray_api.listen = "127.0.0.1:10087" |
         .experimental.v2ray_api.stats.enabled = true |
         .experimental.v2ray_api.stats.users = [$accounts[].account]

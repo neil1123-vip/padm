@@ -6,11 +6,50 @@
   "x-padm-reality-stream-deployment": true,
   "x-padm-reality-stream-host-website": true,
   "x-padm-reality-stream-host-network": true,
+  "x-padm-accounts": true,
   "additionalProperties": false,
   "required": ["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"],
   "properties": {
     "schema_version": {
       "enum": [1, 2, 3]
+    },
+    "accounts": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "enabled", "uuid", "password", "shadowsocks_password", "listeners"],
+        "properties": {
+          "id": {"$ref": "#/$defs/uuid"},
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+(?![\\s\\S])"
+          },
+          "enabled": {"type": "boolean"},
+          "uuid": {"$ref": "#/$defs/uuid"},
+          "password": {"type": "string", "pattern": "^[A-Za-z0-9._~@+=:-]{16,128}(?![\\s\\S])"},
+          "shadowsocks_password": {
+            "oneOf": [
+              {"type": "null"},
+              {"type": "string", "pattern": "^[A-Za-z0-9+/]{21}[AQgw]==(?![\\s\\S])"}
+            ]
+          },
+          "listeners": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^(?:entry-[a-z0-9][a-z0-9-]{0,47}|vless-reality|vless-ws)(?![\\s\\S])"
+            }
+          }
+        }
+      }
     },
     "reality_stream": {
       "oneOf": [
@@ -228,6 +267,10 @@
     }
   },
   "allOf": [
+    {
+      "if": {"required": ["accounts"]},
+      "then": {"properties": {"schema_version": {"const": 3}}}
+    },
     {
       "if": {
         "properties": {"schema_version": {"const": 1}}

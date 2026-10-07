@@ -252,7 +252,7 @@ runRegressionDockerContractsAggregateContract() (
     local expectedLog="${TMP_DIR}/docker-contracts-aggregate.expected.log"
     local status=0 selector
     local -a expectedSelectors=(
-        docker-phase1 docker-menu docker-release docker-permissions docker-phase2 docker-phase5 docker-traffic
+        docker-phase1 docker-menu docker-release docker-permissions docker-phase2 docker-phase5 docker-traffic docker-accounts
         docker-phase3 docker-phase4 docker-phase6
         docker-reality-parameters docker-reality-targets docker-reality-target-library
         docker-setup-core docker-setup-encrypted docker-setup-transports docker-setup-tls docker-traditional-tls

@@ -660,12 +660,12 @@ grep -q 'vless://11111111-1111-4111-8111-111111111111@proxy.example.com:25443' \
     "${DOCKER_ROOT}/data/subscription/0123456789abcdef" || fail 'edit did not update the Reality subscription port'
 if [[ "${FAKE_PHASE3_HOST_SYSTEM}" == Linux ]]; then
     [[ "$("${FAKE_PHASE3_HOST_STAT}" -c %a "${DOCKER_ROOT}/config/spec.json")" == 600 &&
-        "$("${FAKE_PHASE3_HOST_STAT}" -c %a "${DOCKER_ROOT}/config/xray/users.base")" == 640 &&
+        "$("${FAKE_PHASE3_HOST_STAT}" -c %a "${DOCKER_ROOT}/config/xray/users.base")" == 600 &&
         "$("${FAKE_PHASE3_HOST_STAT}" -c %a "${DOCKER_ROOT}/config/nginx/default.conf")" == 640 ]] ||
         fail 'edit did not retain private spec and runtime configuration permissions'
     if [[ "${TEST_SKIP_CHOWN}" == 0 ]]; then
         [[ "$("${FAKE_PHASE3_HOST_STAT}" -c %u:%g "${DOCKER_ROOT}/config/spec.json")" == 0:0 &&
-            "$("${FAKE_PHASE3_HOST_STAT}" -c %u:%g "${DOCKER_ROOT}/config/xray/users.base")" == 0:10001 &&
+            "$("${FAKE_PHASE3_HOST_STAT}" -c %u:%g "${DOCKER_ROOT}/config/xray/users.base")" == 0:0 &&
             "$("${FAKE_PHASE3_HOST_STAT}" -c %u:%g "${DOCKER_ROOT}/config/nginx/default.conf")" == 0:10001 ]] ||
             fail 'edit did not retain root-only spec and runtime container-group ownership'
     fi
