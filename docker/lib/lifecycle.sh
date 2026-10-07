@@ -19,6 +19,7 @@ dockerUsage() {
   padm-docker protocol stream-status
   padm-docker edit --reality-stream <Reality 入口 ID> <网站 TLS 入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --reality-stream-host <Reality 入口 ID> <网站域名,域名> <宿主可达地址> <TLS 端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --reality-stream-loopback <Reality 入口 ID> <网站域名,域名> <127.0.0.1|::1> <TLS 端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --reality-stream off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker configure --spec <JSON 文件> [--manifest <URL|文件> --bundle <URL|文件> [--control-bundle <URL|文件>]]
   padm-docker tls install --domain <域名> --cert <文件> --key <文件> [--ops-image <tag@digest>]
@@ -768,6 +769,7 @@ dockerUpdateCommand() {
     fi
     DOCKER_CONFIG_SWITCHED=0
     DOCKER_CONFIG_STREAM_TRANSITION=0
+    DOCKER_CONFIG_STREAM_HOST_TRANSITION=0
     dockerCleanupConfigurationCandidate || return "${PADM_DOCKER_RC_STATE}"
     printf 'Docker 镜像和控制脚本更新已提交，回滚快照: %s\n' "${backup}"
 }

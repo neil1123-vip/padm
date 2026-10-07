@@ -13,7 +13,7 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "支持单核心或 Xray/sing-box 主副核心首配、完整规格导入、入口编辑、跨核心复制、逐入口 Reality 参数重生成及目标检测/目标库/扫描/PQC 管理；Xray Vision 可与受管 TLS 入口或桥接可达宿主网站进行 443 共存，宿主回环的显式 host 网络和完整协议管理尚未迁移。"
+      "reason": "支持单核心或 Xray/sing-box 主副核心首配、完整规格导入、入口编辑、跨核心复制、逐入口 Reality 参数重生成及目标检测/目标库/扫描/PQC 管理；Xray Vision 可与受管 TLS 入口、桥接可达宿主网站或显式 host 网络回环网站进行 443 共存，宿主网站证书与内容仍由 5A 维护，完整协议管理尚未迁移。"
     },
     {
       "id": 2,
@@ -27,7 +27,7 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 Xray XHTTP Reality 首配、完整规格导入、概览和分享链接、入口及基础 XHTTP 参数编辑与复制、逐入口 Reality 参数重生成及目标检测/目标库/扫描/PQC 管理和受管 TLS 入口或桥接可达宿主网站的 443 共存；高级 XHTTP 参数、宿主回环的显式 host 网络和完整管理尚未迁移。"
+      "reason": "v3 支持 Xray XHTTP Reality 首配、完整规格导入、概览和分享链接、入口及基础 XHTTP 参数编辑与复制、逐入口 Reality 参数重生成及目标检测/目标库/扫描/PQC 管理和受管 TLS 入口、桥接可达宿主网站或显式 host 网络回环网站的 443 共存；高级 XHTTP 参数和完整管理尚未迁移。"
     },
     {
       "id": 3,
@@ -365,10 +365,10 @@
       "status": "deferred",
       "native_menu": "协议与入口 / REALITY 管理",
       "native_action": "443 共存分流开启与关闭",
-      "profiles": ["core-xray", "nginx"],
+      "profiles": ["core-xray", "nginx", "nginx-stream"],
       "network_mode": "host-cli",
       "host_capabilities": [],
-      "reason": "已支持容器内受管 TLS 入口或桥接可达宿主网站与一个 Xray Vision/XHTTP 后端的 443 共存，菜单提供状态、开启、更换和关闭，沿用配置事务及失败恢复；宿主网站支持多个 SNI、host-gateway 别名或可路由 IP，不管理网站证书和内容；宿主回环的显式 host 网络与原生宿主验收仍待 3D.3d2，完整原生范围仍为 deferred。"
+      "reason": "已支持容器内受管 TLS 入口、桥接可达宿主网站或独立 host 网络分流入口与一个 Xray Vision/XHTTP 后端的 443 共存，菜单提供状态、开启、更换和关闭，沿用配置事务及失败恢复；宿主网站支持多个 SNI、host-gateway、可路由 IP 或 127.0.0.1/::1 回环，证书和内容仍由网站维护方负责；原生宿主、完整协议管理和公网验收仍为 deferred。"
     },
     "cdn-entry-management": {
       "status": "deferred",

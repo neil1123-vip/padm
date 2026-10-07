@@ -582,6 +582,7 @@ jq -e --arg version "${CURRENT_VERSION}" '
   .schema_version == 1 and .release.version == $version and
   (.images | keys | sort) == ["net", "nginx", "ops", "sing-box", "xray"] and
   .compatibility.architectures == ["amd64", "arm64"] and
+  (.compatibility.profiles | index("nginx-stream") != null) and
   .migrations == []
 ' "${MANIFEST}" >/dev/null || fail 'generated manifest fields are wrong'
 

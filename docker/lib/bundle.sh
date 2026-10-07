@@ -289,6 +289,9 @@ dockerBundleSupportsSpec() {
           (if $spec[0].reality_stream.host_website != null then
             $schema[0]["x-padm-reality-stream-host-website"] == true
            else true end) and
+          (if $spec[0].reality_stream.host_website.network_mode == "host" then
+            $schema[0]["x-padm-reality-stream-host-network"] == true
+          else true end) and
           ($features | length) == 1 and ($features[0].protocols | type == "array") and
           all($spec[0].core.protocols[];
             . as $entry |

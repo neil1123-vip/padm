@@ -1060,7 +1060,7 @@ validateFeatureMatrix() {
         all(.[]; . as $name | ($allowed | index($name)) != null);
       def metadata:
         (.status | state) and (.native_menu | text) and (.native_action | text) and (.reason | text) and
-        (.profiles | names(["core-xray", "core-sing-box", "nginx", "acme", "subscription",
+        (.profiles | names(["core-xray", "core-sing-box", "nginx", "nginx-stream", "acme", "subscription",
           "net-wireguard", "net-fail2ban", "net-transparent"])) and
         (.network_mode == "bridge" or .network_mode == "host" or .network_mode == "host-cli") and
         (.host_capabilities | names(["NET_ADMIN", "/dev/net/tun"])) and

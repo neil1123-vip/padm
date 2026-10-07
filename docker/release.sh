@@ -716,7 +716,7 @@ manifest_generate() {
           compatibility: {
             host: ["linux", "rootful-docker", "compose-v2"],
             architectures: ["amd64", "arm64"],
-            profiles: ["core-xray", "core-sing-box", "nginx", "subscription", "acme",
+            profiles: ["core-xray", "core-sing-box", "nginx", "nginx-stream", "subscription", "acme",
               "net-wireguard", "net-fail2ban", "net-transparent"],
             features_version: 1
           },

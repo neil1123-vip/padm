@@ -28,6 +28,10 @@ dockerRealityStreamContractChecks() {
         printf '%s' "${input}" | dockerMenuProtocols
     )
     streamContainerBoundary() {
+        if [[ "$*" == 'info --format {{.ServerVersion}}' ]]; then
+            printf '29.0.0\n'
+            return 0
+        fi
         printf '%s\n' "$*" >>"${calls}"
         case "$*" in
         "ps --filter label=io.padm.project=${PADM_DOCKER_PROJECT} --format {{.ID}}")
@@ -36,15 +40,19 @@ dockerRealityStreamContractChecks() {
             printf 'aaaaaaaaaaaa\n' ;;
         "ps -q --filter label=com.docker.compose.project=${PADM_DOCKER_PROJECT} --filter label=com.docker.compose.service=xray")
             printf 'bbbbbbbbbbbb\n' ;;
-        'stop aaaaaaaaaaaa'|'stop bbbbbbbbbbbb'|'stop aaaaaaaaaaaa bbbbbbbbbbbb') ;;
+        "ps -q --filter label=com.docker.compose.project=${PADM_DOCKER_PROJECT} --filter label=com.docker.compose.service=nginx-stream")
+            printf 'cccccccccccc\n' ;;
+        'stop aaaaaaaaaaaa'|'stop bbbbbbbbbbbb'|'stop cccccccccccc'|\
+        'stop aaaaaaaaaaaa bbbbbbbbbbbb'|'stop aaaaaaaaaaaa bbbbbbbbbbbb cccccccccccc') ;;
         *) return 1 ;;
         esac
     }
     streamRestoreContract() (
         local label=$1 original=$2 current=$3 transition=$4
         local calls="${TEST_ROOT}/stream-restore-${label}.calls" backup before expected actual=0
+        local hostStop=0 action=${label#loopback-}
         newState "stream-restore-${label}" "${original}"
-        if [[ "${label}" == rollback ]]; then
+        if [[ "${action}" == rollback ]]; then
             dockerBackupConfiguration update || fail '共存回滚夹具备份失败'
         else
             dockerBackupConfiguration || fail "${label}: 共存恢复夹具备份失败"
@@ -60,6 +68,11 @@ dockerRealityStreamContractChecks() {
         corrupt) printf 'not-json\n' >"${PADM_DOCKER_INSTALL_DIR}/config/spec.json" ;;
         *) cp "${current}" "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" ;;
         esac
+        if jq -e '.reality_stream.host_website.network_mode == "host"' "${original}" >/dev/null ||
+            { [[ "${current}" != corrupt ]] &&
+                jq -e '.reality_stream.host_website.network_mode == "host"' "${current}" >/dev/null; }; then
+            hostStop=1
+        fi
         if [[ "${label}" == bad-backup ]]; then
             printf 'not-json\n' >"${backup}/config/spec.json"
             before=$(snapshot)
@@ -70,7 +83,7 @@ dockerRealityStreamContractChecks() {
                 fail '损坏共存备份在拒绝前停服或写入'
             exit 0
         fi
-        if [[ "${label}" == rollback ]]; then
+        if [[ "${action}" == rollback ]]; then
             dockerCreateConfigurationCandidate &&
                 dockerGenerateCandidate "${current}" "${DOCKER_CONFIG_CANDIDATE}" &&
                 dockerInstallCandidate "${DOCKER_CONFIG_CANDIDATE}" "${backup}" &&
@@ -85,7 +98,7 @@ dockerRealityStreamContractChecks() {
             dockerTrafficScheduleInstall() { return 0; }
             dockerRollbackCommand >"${STDOUT}" || fail '合法共存 update 备份无法通过命令回滚'
             dockerReleaseDeploymentLock
-        elif [[ "${label}" == interrupted ]]; then
+        elif [[ "${action}" == interrupted ]]; then
             (
                 trap 'printf "%s %s\n" "${DOCKER_CONFIG_SWITCHED}" "${DOCKER_CONFIG_STREAM_TRANSITION}" >"${calls}.flags"' EXIT
                 trap 'dockerCommandInterrupted 143' TERM
@@ -96,8 +109,9 @@ dockerRealityStreamContractChecks() {
         else
             dockerRestoreConfiguration || fail "${label}: 合法共存备份无法恢复"
         fi
-        if [[ "${label}" != interrupted ]]; then
-            [[ "${DOCKER_CONFIG_SWITCHED}" == 0 && "${DOCKER_CONFIG_STREAM_TRANSITION}" == 0 ]] ||
+        if [[ "${action}" != interrupted ]]; then
+            [[ "${DOCKER_CONFIG_SWITCHED}" == 0 && "${DOCKER_CONFIG_STREAM_TRANSITION}" == 0 &&
+                "${DOCKER_CONFIG_STREAM_HOST_TRANSITION:-0}" == 0 ]] ||
                 fail "${label}: 共存恢复未清除事务标记"
         fi
         cmp -s "${original}" "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" &&
@@ -106,7 +120,10 @@ dockerRealityStreamContractChecks() {
             [[ "$(stat -c '%a %u' "${PADM_DOCKER_INSTALL_DIR}/config/spec.json")" == '600 0' ]] ||
             fail "${label}: 恢复未还原原规格、映射、权限或事务标记"
         expected="ps -q --filter label=com.docker.compose.project=${PADM_DOCKER_PROJECT} --filter label=com.docker.compose.service=nginx"$'\n'"ps -q --filter label=com.docker.compose.project=${PADM_DOCKER_PROJECT} --filter label=com.docker.compose.service=xray"$'\nstop aaaaaaaaaaaa bbbbbbbbbbbb\n'"compose up -d --force-recreate --wait --wait-timeout ${PADM_DOCKER_HEALTH_TIMEOUT:-60}"$'\nrenewal'
-        if [[ "${label}" == rollback ]]; then
+        if [[ "${hostStop}" == 1 ]]; then
+            expected="ps -q --filter label=com.docker.compose.project=${PADM_DOCKER_PROJECT} --filter label=com.docker.compose.service=nginx"$'\n'"ps -q --filter label=com.docker.compose.project=${PADM_DOCKER_PROJECT} --filter label=com.docker.compose.service=xray"$'\n'"ps -q --filter label=com.docker.compose.project=${PADM_DOCKER_PROJECT} --filter label=com.docker.compose.service=nginx-stream"$'\nstop aaaaaaaaaaaa bbbbbbbbbbbb cccccccccccc\n'"compose up -d --force-recreate --wait --wait-timeout ${PADM_DOCKER_HEALTH_TIMEOUT:-60}"$'\nrenewal'
+        fi
+        if [[ "${action}" == rollback ]]; then
             expected="ps --filter label=io.padm.project=${PADM_DOCKER_PROJECT} --format {{.ID}}"$'\n'"ps --filter label=io.padm.project=${PADM_DOCKER_PROJECT} --format {{.ID}}"$'\n'"${expected}"
         fi
         if [[ "$(<"${calls}")" != "${expected}" ]]; then
@@ -721,5 +738,283 @@ dockerRealityStreamContractChecks() {
     [[ "$(<"${TEST_ROOT}/stream-menu.calls")" == \
         $'protocol list\nprotocol list\nedit --reality-stream-host vless-reality site.example.com,www.site.example.com host.docker.internal 8443' ]] ||
         fail '宿主网站菜单未传递完整专项参数'
+
+    # host 网络只用于专用 stream 入口，核心及网站管理链保持 bridge。
+    local loopback="${TEST_ROOT}/stream-loopback.json" loopPure="${TEST_ROOT}/stream-loopback-pure.json"
+    local loopV6="${TEST_ROOT}/stream-loopback-v6.json" loop443="${TEST_ROOT}/stream-loopback-443.json"
+    local loopXhttp="${TEST_ROOT}/stream-loopback-xhttp.json"
+    local loopOldBundle="${TEST_ROOT}/stream-loopback-old-bundle" loopMain
+    jq '.reality_stream.host_website += {address:"127.0.0.1",network_mode:"host"}' \
+        "${hostSpec}" >"${loopback}" || fail '回环网站混合规格生成失败'
+    jq '.core.protocols |= map(select(.listener_id == "vless-reality")) |
+      .core.protocols[0].address_families = ["ipv4"] |
+      .tls = null | .subscription.enabled = false' "${loopback}" >"${loopPure}" ||
+        fail '回环网站纯 Reality 规格生成失败'
+    jq '.reality_stream.host_website.address = "::1" |
+      .core.protocols[0].address_families = ["ipv6"]' "${loopPure}" >"${loopV6}" ||
+        fail 'IPv6 回环网站规格生成失败'
+    jq '.core.protocols[0].public_port = 443' "${loopPure}" >"${loop443}" ||
+        fail '默认 443 回环网站规格生成失败'
+    jq '.reality_stream.host_website += {address:"127.0.0.1",network_mode:"host"}' \
+        "${hostXhttp}" >"${loopXhttp}" || fail 'XHTTP 回环网站规格生成失败'
+    for mutation in "${loopback}" "${loopPure}" "${loopV6}" "${loop443}" "${loopXhttp}"; do
+        dockerConfigureSpecValidate "${mutation}" || fail "合法回环网站规格被拒绝: ${mutation}"
+    done
+    for mutation in \
+        '.reality_stream.host_website.network_mode = "bridge"' \
+        '.reality_stream.host_website.network_mode = "HOST"' \
+        '.reality_stream.host_website.network_mode = null' \
+        '.reality_stream.host_website.address = "host.docker.internal"' \
+        '.reality_stream.host_website.address = "localhost"' \
+        '.reality_stream.host_website.address = "127.1.2.3"' \
+        '.reality_stream.host_website.address = "::ffff:127.0.0.1"' \
+        '.reality_stream.host_website.address = "[::1]"' \
+        '.reality_stream.host_website.address = "192.168.10.20"' \
+        '.reality_stream.host_website.port = 443' \
+        '.reality_stream.host_website.port = 15443' \
+        '.reality_stream.host_website.port = 24443' \
+        '.core.protocols[2].public_port = 15443'; do
+        jq "${mutation}" "${loopback}" >"${invalid}" || fail '非法回环网站规格生成失败'
+        if dockerConfigureSpecValidate "${invalid}" >/dev/null 2>"${STDERR}"; then
+            fail "非法回环网站规格被接受: ${mutation}"
+        fi
+    done
+    jq 'del(.reality_stream.host_website.network_mode)' "${loopPure}" >"${invalid}"
+    if dockerConfigureSpecValidate "${invalid}" >/dev/null 2>"${STDERR}"; then
+        fail '无显式 host 模式的旧规格接受回环网站地址'
+    fi
+    mkdir -p "${loopOldBundle}/docker"
+    cp -R "${SOURCE_ROOT}/docker/contracts" "${loopOldBundle}/docker/contracts"
+    jq 'del(.["x-padm-reality-stream-host-network"])' \
+        "${loopOldBundle}/docker/contracts/configure.schema.json" >"${loopOldBundle}/schema.next"
+    mv "${loopOldBundle}/schema.next" "${loopOldBundle}/docker/contracts/configure.schema.json"
+    dockerBundleSupportsSpec "${loopOldBundle}" "${hostPure}" &&
+        dockerBundleSupportsSpec "${loopOldBundle}" "${enabled}" ||
+        fail '旧 d1 控制包不再支持可路由宿主网站或受管网站'
+    if dockerBundleSupportsSpec "${loopOldBundle}" "${loopPure}" >/dev/null 2>"${STDERR}"; then
+        fail '旧 d1 控制包缺少 host-network 能力仍接受回环绑定'
+    fi
+    dockerRealityStreamDeploymentCheck "${loopback}" "${loopPure}" "${loopV6}" ||
+        fail '当前控制包拒绝回环网站部署规格'
+    newState stream-loopback "${loopPure}"
+    streamFile="${PADM_DOCKER_INSTALL_DIR}/config/nginx/stream/reality.conf"
+    loopMain="${PADM_DOCKER_INSTALL_DIR}/config/nginx/stream/host-main"
+    grep -Eq 'server[[:space:]]+127[.]0[.]0[.]1:8443;' "${streamFile}" &&
+        grep -Eq 'server[[:space:]]+127[.]0[.]0[.]1:15443;' "${streamFile}" &&
+        grep -Eq 'listen[[:space:]]+0[.]0[.]0[.]0:443;' "${streamFile}" &&
+        ! grep -Eq 'listen[[:space:]]+\[::\]:443;' "${streamFile}" &&
+        ! grep -Eq 'server[[:space:]]+xray:' "${streamFile}" ||
+        fail 'IPv4 回环网站或固定 Reality 中转生成错误'
+    [[ -s "${loopMain}" ]] &&
+        grep -Fq 'include /etc/nginx/stream.d/reality.conf;' "${loopMain}" &&
+        grep -Eq '^user[[:space:]]+padm[[:space:]]+padm;' "${loopMain}" &&
+        ! grep -Eq '(^|[[:space:]])http[[:space:]]*\{|listen[[:space:]]+.*8080' "${loopMain}" ||
+        fail 'host stream 主配置缺失、引用错误或带入 HTTP 健康监听'
+    jq -e '.services["nginx-stream"] as $stream |
+      .services.xray.ports == ["127.0.0.1:15443:24443/tcp"] and
+      .services.xray.network_mode == null and
+      (.services | has("nginx") | not) and
+      $stream.network_mode == "host" and $stream.profiles == ["nginx-stream"] and
+      $stream.ports == null and $stream.user == "0:0" and
+      $stream.cap_drop == ["ALL"] and
+      ($stream.cap_add | sort) == ["KILL","NET_BIND_SERVICE","SETGID","SETUID"] and
+      $stream.command == ["-c","/etc/nginx/stream.d/host-main","-g","daemon off;"] and
+      $stream.healthcheck.test == ["CMD","/usr/sbin/nginx","-t","-c","/etc/nginx/stream.d/host-main"] and
+      $stream.depends_on.xray.condition == "service_healthy" and
+      $stream.labels["io.padm.component"] == "nginx-stream" and
+      ($stream.volumes | length) == 1 and
+      $stream.volumes[0].target == "/etc/nginx/stream.d" and
+      $stream.volumes[0].read_only == true and
+      ($stream.volumes[0].source | endswith("/config/nginx/stream")) and
+      (.services | has("subscription") | not)' \
+        "${PADM_DOCKER_INSTALL_DIR}/compose.json" >/dev/null ||
+        fail '回环 stream 权限、隔离、健康或固定中转 Compose 合同错误'
+    jq -e '(.compose.profiles | sort) == ["core-xray","nginx-stream"] and
+      (.listeners | length) == 1 and .listeners[0].service == "nginx-stream" and
+      .listeners[0].public_port == 443 and .listeners[0].container_port == 443 and
+      .listeners[0].address_families == ["ipv4"]' \
+        "${PADM_DOCKER_INSTALL_DIR}/deployment.json" >/dev/null ||
+        fail '回环入口部署记录仍使用 bridge Nginx 或旧容器端口'
+    runRead 0 stream-loopback-links dockerProtocolCommand links vless-reality
+    [[ "$(<"${STDOUT}")" == "${streamRealityUri}" ]] || fail '回环网站 Reality 链接未投影 443'
+    runRead 0 stream-loopback-status dockerProtocolCommand stream-status
+    grep -Fxq '网站网络: host（回环）' "${STDOUT}" &&
+        grep -Fq '127.0.0.1:8443' "${STDOUT}" || fail '回环网站状态未显示显式 host 网络及实际后端'
+    runRead 0 stream-loopback-no-tls dockerTlsConsumers site.example.com
+    [[ "$(<"${STDOUT}")" == '[]' ]] || fail '回环宿主网站被误识别为容器 TLS 消费者'
+    cp "${PADM_DOCKER_INSTALL_DIR}/compose.json" "${TEST_ROOT}/stream-loop-compose.saved"
+    for mutation in \
+        '.services["nginx-stream"].network_mode = "bridge"' \
+        '.services["nginx-stream"].volumes += [{
+          type:"bind",source:"/tmp/unmanaged",target:"/etc/nginx/nginx.conf",read_only:true}]' \
+        '.services["nginx-stream"].cap_add = ["NET_ADMIN"]' \
+        '.services.xray.ports = ["0.0.0.0:15443:24443/tcp"]'; do
+        jq "${mutation}" "${TEST_ROOT}/stream-loop-compose.saved" \
+            >"${PADM_DOCKER_INSTALL_DIR}/compose.json"
+        runRead 15 stream-loop-compose-drift dockerProtocolCommand links
+    done
+    cp "${TEST_ROOT}/stream-loop-compose.saved" "${PADM_DOCKER_INSTALL_DIR}/compose.json"
+    cp "${loopMain}" "${TEST_ROOT}/stream-loop-main.saved"
+    printf '\nhttp { server { listen 8080; } }\n' >>"${loopMain}"
+    runRead 15 stream-loop-main-drift dockerProtocolCommand links
+    cp "${TEST_ROOT}/stream-loop-main.saved" "${loopMain}"
+    newState stream-loopback-v6 "${loopV6}"
+    grep -Fq '[::1]:8443' "${PADM_DOCKER_INSTALL_DIR}/config/nginx/stream/reality.conf" &&
+        grep -Eq 'listen[[:space:]]+\[::\]:443' "${PADM_DOCKER_INSTALL_DIR}/config/nginx/stream/reality.conf" &&
+        ! grep -Eq 'listen[[:space:]]+(0[.]0[.]0[.]0:)?443;' "${PADM_DOCKER_INSTALL_DIR}/config/nginx/stream/reality.conf" &&
+        jq -e '.services.xray.ports == ["127.0.0.1:15443:24443/tcp"]' \
+            "${PADM_DOCKER_INSTALL_DIR}/compose.json" >/dev/null ||
+        fail 'IPv6-only 入口没有限定地址族、网站回环或固定 IPv4 内部中转'
+    newState stream-loopback-443 "${loop443}"
+    jq -e '.services.xray.ports == ["127.0.0.1:15443:443/tcp"]' \
+        "${PADM_DOCKER_INSTALL_DIR}/compose.json" >/dev/null ||
+        fail 'Reality 原端口 443 与 host stream 公网 443 发生错误映射'
+    newState stream-loopback-xhttp "${loopXhttp}"
+    runRead 0 stream-loopback-xhttp-links dockerProtocolCommand links entry-xhttp
+    grep -Fq 'proxy.example.com:443?' "${STDOUT}" &&
+        grep -Fq '&type=xhttp&host=www.example.com&path=%2Fstream-xhttp&mode=auto' "${STDOUT}" ||
+        fail '回环网站 XHTTP 链接或参数错误'
+    newState stream-loopback-mixed "${loopback}"
+    jq -e '.services.nginx.network_mode == null and
+      .services.nginx.ports == ["[::]:24444:8443/tcp","0.0.0.0:24444:8443/tcp"] and
+      all(.services.nginx.volumes[]; .target != "/etc/nginx/stream.d") and
+      .services.nginx.depends_on.subscription.condition == "service_healthy" and
+      .services.subscription.network_mode == null and .services.subscription.ports == null and
+      .services.xray.ports == ["0.0.0.0:24445:24445/tcp","[::]:24445:24445/tcp",
+        "127.0.0.1:15443:24443/tcp"]' "${PADM_DOCKER_INSTALL_DIR}/compose.json" >/dev/null ||
+        fail '回环 stream 改写了其它协议、受管 Nginx 或订阅 bridge 网络'
+    runRead 0 stream-loopback-managed-tls dockerTlsConsumers ws.example.com
+    [[ "$(<"${STDOUT}")" == '["nginx"]' ]] || fail '回环混合部署误改受管网站 TLS 消费者'
+    cp "${PADM_DOCKER_INSTALL_DIR}/config/nginx/stream/host-main" "${TEST_ROOT}/stream-loop-main.saved"
+    printf '\nhttp { server { listen 8080; } }\n' >>"${PADM_DOCKER_INSTALL_DIR}/config/nginx/stream/host-main"
+    runRead 1 stream-loopback-tls-main-drift dockerTlsConsumers ws.example.com
+    cp "${TEST_ROOT}/stream-loop-main.saved" "${PADM_DOCKER_INSTALL_DIR}/config/nginx/stream/host-main"
+    if ! (
+        calls="${TEST_ROOT}/stream-loop-candidate.calls"
+        : >"${calls}"
+        dockerCandidateCompose() { shift; printf '%s\n' "$*" >>"${calls}"; }
+        dockerRealityStreamHostProbe() { printf 'host-probe %s\n' "$2" >>"${calls}"; }
+        dockerTlsValidateCandidate() { return 0; }
+        dockerValidateHostIntegrations() { return 0; }
+        dockerCreateConfigurationCandidate &&
+            dockerGenerateCandidate "${loopback}" "${DOCKER_CONFIG_CANDIDATE}" &&
+            dockerValidateCandidate "${loopback}" "${DOCKER_CONFIG_CANDIDATE}" &&
+            grep -Fxq 'run --rm --no-deps nginx-stream -t -c /etc/nginx/stream.d/host-main' "${calls}" &&
+            [[ "$(tail -n 1 "${calls}")" == 'host-probe backend' ]] &&
+            dockerCleanupConfigurationCandidate
+    ); then
+        fail 'host stream 候选未校验专用 Nginx 主配置及回环网站 TLS'
+    fi
+    if ! (
+        local probeReject=0 calls="${TEST_ROOT}/stream-loop-probe.calls"
+        docker() { [[ "$*" == 'info --format {{.ServerVersion}}' ]] && printf '29.0.0\n'; }
+        dockerRealityProbeRun() {
+            [[ "$#" == 17 && "$1" == 45 && "$2" == --network && "$3" == host &&
+                "$4" == --user && "$5" == 0:0 && "$6" == --cap-add &&
+                "$7" == NET_BIND_SERVICE && "$8" == --entrypoint && "$9" == python3 &&
+                "${10}" == "$(jq -r '.images.ops' "${loopback}")" && "${11}" == -c &&
+                "${14}" == 127.0.0.1 && "${15}" == 8443 &&
+                "${16}" == '["site.example.com","www.site.example.com"]' &&
+                "${17}" == '["ipv4","ipv6"]' ]] || return 1
+            printf '%s\n' "${13}" >>"${calls}"
+            printf '%s\n' "${12}" >"${TEST_ROOT}/stream-loop-probe.py"
+            [[ "${probeReject}" == 0 ]]
+        }
+        : >"${calls}"
+        dockerRealityStreamHostProbe "${loopback}" backend &&
+            dockerRealityStreamHostProbe "${loopback}" ports &&
+            [[ "$(<"${calls}")" == $'backend\nports' ]] &&
+            grep -Fq 'ssl.create_default_context()' "${TEST_ROOT}/stream-loop-probe.py" &&
+            grep -Fq 'server_hostname=domain' "${TEST_ROOT}/stream-loop-probe.py" &&
+            grep -Fq 'socket.IPV6_V6ONLY, 1' "${TEST_ROOT}/stream-loop-probe.py" &&
+            grep -Fq 'connection.bind(("127.0.0.1", 15443))' "${TEST_ROOT}/stream-loop-probe.py" || exit 1
+        probeReject=1
+        if dockerRealityStreamHostProbe "${loopback}" backend >"${STDOUT}" 2>"${STDERR}"; then exit 1; fi
+        [[ ! -s "${STDOUT}" ]] &&
+            grep -Fq '宿主回环网站 TLS 或 host 网络端口检查失败: backend' "${STDERR}" || exit 1
+        : >"${calls}"
+        dockerRealityStreamHostProbe "${hostPure}" backend && [[ ! -s "${calls}" ]]
+    ); then
+        fail 'host 网络探测缺少专用权限、TLS SNI、IPv6/中转绑定或没有保留失败'
+    fi
+    if ! (
+        local engineVersion=27.5.1
+        docker() { [[ "$*" == 'info --format {{.ServerVersion}}' ]] && printf '%s\n' "${engineVersion}"; }
+        if dockerRealityStreamHostRuntimeCheck >"${STDOUT}" 2>"${STDERR}"; then exit 1; fi
+        grep -Fq 'Docker Engine 28' "${STDERR}" || exit 1
+        for engineVersion in 28.0.0 29.8.2 30.0.0; do dockerRealityStreamHostRuntimeCheck || exit 1; done
+        for engineVersion in '' unknown 27.99.99; do
+            if dockerRealityStreamHostRuntimeCheck >/dev/null 2>"${STDERR}"; then exit 1; fi
+        done
+    ); then
+        fail '宿主回环入口接受无法保证 loopback 隔离的旧 Engine'
+    fi
+    runRead 15 stream-loopback-old-update streamUpdateContractRead "${loopOldBundle}" capability
+    [[ ! -s "${TEST_ROOT}/stream-update.calls" ]] || fail '旧 d1 控制包更新回环部署仍进入候选校验'
+    if ! (
+        calls="${TEST_ROOT}/stream-loop-transition.calls"
+        : >"${calls}"
+        docker() { streamContainerBoundary "$@"; }
+        dockerRealityStreamTransitionPrepare "${hostPure}" &&
+            [[ "$(<"${calls}")" == \
+                "ps -q --filter label=com.docker.compose.project=${PADM_DOCKER_PROJECT} --filter label=com.docker.compose.service=nginx"$'\n'"ps -q --filter label=com.docker.compose.project=${PADM_DOCKER_PROJECT} --filter label=com.docker.compose.service=xray"$'\n'"ps -q --filter label=com.docker.compose.project=${PADM_DOCKER_PROJECT} --filter label=com.docker.compose.service=nginx-stream"$'\nstop aaaaaaaaaaaa bbbbbbbbbbbb cccccccccccc' ]]
+    ); then
+        fail 'host stream 关闭交接没有精确释放 443 拥有者'
+    fi
+    streamRestoreContract loopback-enable-failed "${base}" "${loopback}" 1
+    streamRestoreContract loopback-disable-failed "${loopback}" "${base}" 0
+    streamRestoreContract loopback-corrupt-current "${loopback}" corrupt 1
+    streamRestoreContract loopback-interrupted "${loopback}" corrupt 1
+    streamRestoreContract loopback-rollback "${loopback}" "${base}" 0
+    newState stream-loopback-edit "${base}"
+    runRead 0 stream-loopback-edit streamEditContractRead "${capture}" \
+        --reality-stream-loopback vless-reality site.example.com,www.site.example.com 127.0.0.1 8443 --preview
+    jq -en --slurpfile expected "${loopback}" --slurpfile actual "${capture}" \
+        '$expected[0] == $actual[0]' >/dev/null || fail '回环网站 CLI 改写了专项绑定以外字段'
+    runRead 0 stream-loopback-normalized streamEditContractRead "${capture}" \
+        --reality-stream-loopback vless-reality ' SITE.Example.COM , ,WWW.SITE.Example.COM, ' 127.0.0.1 8443 --preview
+    jq -en --slurpfile expected "${loopback}" --slurpfile actual "${capture}" \
+        '$expected[0] == $actual[0]' >/dev/null || fail '回环网站 CLI 域名未按既有规则归一'
+    runRead 2 stream-loopback-edit-combined streamEditContractRead "${capture}" \
+        --reality-stream-loopback vless-reality site.example.com 127.0.0.1 8443 --reality-stream off --preview
+    runRead 2 stream-loopback-edit-import streamEditContractRead "${capture}" \
+        --reality-stream-loopback vless-reality site.example.com 127.0.0.1 8443 --spec "${base}" --preview
+    for mutation in 0 443 15443 invalid; do
+        runRead 2 stream-loopback-edit-port streamEditContractRead "${capture}" \
+            --reality-stream-loopback vless-reality site.example.com 127.0.0.1 "${mutation}" --preview
+    done
+    newState stream-loopback-edit-frozen "${loopback}"
+    for mutation in \
+        '.core.protocols[0].public_port = 24447' \
+        '.core.protocols[0].address_families = ["ipv4"]' \
+        '.reality_stream.host_website.network_mode = "bridge"' \
+        '.reality_stream.host_website.address = "::1"'; do
+        jq "${mutation}" "${loopback}" >"${invalid}"
+        rm -f "${capture}"
+        runRead 15 stream-loopback-import-frozen streamEditContractRead "${capture}" --spec "${invalid}" --preview
+        [[ ! -e "${capture}" ]] || fail '回环网站普通导入绕过入口或绑定冻结'
+    done
+    runRead 0 stream-loopback-to-routed streamEditContractRead "${capture}" \
+        --reality-stream-host vless-reality site.example.com,www.site.example.com host.docker.internal 8443 --preview
+    jq -en --slurpfile expected "${hostSpec}" --slurpfile actual "${capture}" \
+        '$expected[0] == $actual[0]' >/dev/null || fail '回环转 bridge 网站仍残留 host 网络字段'
+    for mutation in \
+        $'6\n5\n0\n0\n0\n' \
+        $'6\n5\nvless-reality\n0\n0\n0\n' \
+        $'6\n5\nvless-reality\nsite.example.com\n0\n0\n0\n' \
+        $'6\n5\nvless-reality\nsite.example.com\n127.0.0.1\n0\n0\n0\n' \
+        $'6\n5\n' \
+        $'6\n5\nvless-reality\n' \
+        $'6\n5\nvless-reality\nsite.example.com\n' \
+        $'6\n5\nvless-reality\nsite.example.com\n127.0.0.1\n'; do
+        runRead 0 stream-loopback-menu-cancel streamMenuContractRead "${mutation}"
+        [[ "$(<"${TEST_ROOT}/stream-menu.calls")" == $'protocol list\nprotocol list' ]] ||
+            fail '回环网站菜单取消或 EOF 仍发起专项编辑'
+    done
+    runRead 0 stream-loopback-menu-enable streamMenuContractRead \
+        $'6\n5\nvless-reality\nsite.example.com,www.site.example.com\n127.0.0.1\n8443\n0\n0\n'
+    [[ "$(<"${TEST_ROOT}/stream-menu.calls")" == \
+        $'protocol list\nprotocol list\nedit --reality-stream-loopback vless-reality site.example.com,www.site.example.com 127.0.0.1 8443' ]] ||
+        fail '回环网站菜单未传递完整专项参数'
     printf 'docker-reality-stream-contract-ok\n'
 }

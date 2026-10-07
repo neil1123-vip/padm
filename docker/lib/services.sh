@@ -18,6 +18,7 @@ DOCKER_CONFIG_CANDIDATE=
 DOCKER_CONFIG_BACKUP=
 DOCKER_CONFIG_SWITCHED=0
 DOCKER_CONFIG_STREAM_TRANSITION=0
+DOCKER_CONFIG_STREAM_HOST_TRANSITION=0
 DOCKER_TLS_CANDIDATE=
 DOCKER_TLS_BACKUP=
 DOCKER_TLS_SWITCHED=0
@@ -109,14 +110,21 @@ dockerConfigureSpecValidate() {
         $reality.core == "xray" and ($reality.id == 1 or $reality.id == 2) and
           (if .reality_stream | has("host_website") then
             (.reality_stream | exact(["listener_id", "host_website"]) and
-              (.host_website | exact(["domains", "address", "port"]) and
-                (.address | host_address) and (.port | port) and .port != 443 and .port != 15443 and
+              (.host_website | exact(["domains", "address", "port"] +
+                  if has("network_mode") then ["network_mode"] else [] end) and
+                (if has("network_mode") then
+                  .network_mode == "host" and (.address == "127.0.0.1" or .address == "::1")
+                 else (.address | host_address) end) and
+                (.port | port) and .port != 443 and .port != 15443 and
                 (.domains | type == "array" and length >= 1 and length <= 16 and
                   (unique | length) == length and
                   all(.[]; hostname and . == ascii_downcase)))) and
             all(.reality_stream.host_website.domains[];
               . != ($reality.reality.server_name | ascii_downcase)) and
             all(.core.protocols[]; .public_port != $request.reality_stream.host_website.port) and
+            (if .reality_stream.host_website.network_mode == "host" then
+              all(.core.protocols[]; .public_port != 15443 or .listener_id == $reality.listener_id)
+             else true end) and
             # 同一 SNI 不得同时指向宿主站点和受管 TLS，避免悄悄绕过协议/订阅入口。
             all(.core.protocols[] | select(.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25);
               ((.websocket // .httpupgrade // .grpc_tls).domain | ascii_downcase) as $domain |
@@ -404,7 +412,9 @@ dockerManagedSpecMatchesDeployment() {
         ($d.core | has("secondary_type")) and .core.secondary_type == $d.core.secondary_type
        else ($d.core | has("secondary_type") | not) end) and
       (([.core.type, .core.secondary_type] | map(select(. != null) | "core-\(.)")) +
-        [if .reality_stream != null or any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29) then "nginx" else empty end] +
+        [if (.reality_stream != null and .reality_stream.host_website.network_mode != "host") or
+          any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29) then "nginx" else empty end] +
+        [if .reality_stream.host_website.network_mode == "host" then "nginx-stream" else empty end] +
         [if .subscription.enabled then "subscription" else empty end] +
         [.host_integrations[].profile] | sort) == ($d.compose.profiles | sort) and
       (.host_integrations | sort_by(.type)) == ($d.host_integrations | sort_by(.type)) and
@@ -414,7 +424,8 @@ dockerManagedSpecMatchesDeployment() {
           (if .id == 30 then "tcp", "udp" elif .id == 3 or .id == 31 then "udp" else "tcp" end) as $transport |
           (if $request.reality_stream != null and
             (.listener_id == $request.reality_stream.listener_id or .listener_id == $request.reality_stream.website_listener_id)
-           then {listener_id, service:"nginx", public_port:443, container_port:15443}
+           then {listener_id, service:(if $request.reality_stream.host_website.network_mode == "host" then "nginx-stream" else "nginx" end),
+             public_port:443, container_port:(if $request.reality_stream.host_website.network_mode == "host" then 443 else 15443 end)}
            else {listener_id, service: (if .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 then "nginx" else (.core // $d.core.type) end),
             public_port, container_port: (if .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 then (.websocket // .httpupgrade // .grpc_tls).tls_port else .public_port end)} end) +
           {
@@ -475,6 +486,7 @@ dockerEditBaselineValidate() {
     done < <(jq -r '[.core.type, .core.secondary_type] | .[] | select(. != null)' "${specFile}")
     dockerGenerateNginxConfig "${specFile}" "${baseline}/config/nginx/default.conf" &&
         dockerGenerateRealityStreamConfig "${specFile}" "${baseline}/config/nginx/stream/reality.conf" &&
+        dockerGenerateRealityStreamMain "${specFile}" "${baseline}/config/nginx/stream/host-main" &&
         dockerGenerateFail2banConfig "${specFile}" "${baseline}" || return 1
     if jq -e '.subscription.enabled' "${specFile}" >/dev/null; then
         token=$(jq -r '.subscription.token' "${specFile}") || return 1
@@ -635,9 +647,14 @@ dockerCurrentOwnsPort() {
     root=$(dockerInstallRoot) || return 1
     port=$1
     [[ -f "${root}/deployment.json" && ! -L "${root}/deployment.json" ]] || return 1
-    jq -e --argjson port "${port}" --arg transport "${transport}" \
+    if jq -e --argjson port "${port}" --arg transport "${transport}" \
         'any(.listeners[]?; .public_port == $port and .transport == $transport)' \
-        "${root}/deployment.json" >/dev/null 2>&1
+        "${root}/deployment.json" >/dev/null 2>&1; then
+        return 0
+    fi
+    [[ "${port}" == 15443 && "${transport}" == tcp ]] &&
+        jq -e '.reality_stream.host_website.network_mode == "host"' \
+            "${root}/config/spec.json" >/dev/null 2>&1
 }
 
 dockerTcpPortIsListening() {
@@ -681,7 +698,8 @@ dockerConfigurePortsAvailable() {
               then .public_port = 443 else . end |
               "\(.public_port)|\($transport)"] +
           [.host_integrations[] | select(.type == "tproxy") |
-            "\(.settings.port)|tcp", "\(.settings.port)|udp"]) | unique[]
+            "\(.settings.port)|tcp", "\(.settings.port)|udp"] +
+          [if .reality_stream.host_website.network_mode == "host" then "15443|tcp" else empty end]) | unique[]
         ' "${specFile}"
         if jq -e 'any(.host_integrations[]; .type == "wireguard")' "${specFile}" >/dev/null; then
             wireguardPort=$(dockerWireGuardListenPort) || exit 1
@@ -1245,7 +1263,7 @@ EOF
 }
 
 dockerGenerateRealityStreamConfig() {
-    local specFile=$1 target=$2 domains address tlsPort realityPort domain
+    local specFile=$1 target=$2 domains address tlsPort realityPort domain backend=xray listenPort=15443 families
     jq -e '.reality_stream != null' "${specFile}" >/dev/null || return 0
     IFS=$'\t' read -r domains address tlsPort realityPort < <(jq -er '
       .reality_stream as $split |
@@ -1257,6 +1275,9 @@ dockerGenerateRealityStreamConfig() {
        ($split.host_website.port // $tls.tls_port), $reality.public_port] | @tsv
     ' "${specFile}") || return 1
     [[ "${address}" != *:* ]] || address="[${address}]"
+    if jq -e '.reality_stream.host_website.network_mode == "host"' "${specFile}" >/dev/null; then
+        backend=127.0.0.1 realityPort=15443 listenPort=443
+    fi
     mkdir -p -- "$(dirname -- "${target}")" || return 1
     cat >"${target}" <<EOF
 stream {
@@ -1264,7 +1285,7 @@ stream {
         server ${address}:${tlsPort};
     }
     upstream padm_reality {
-        server xray:${realityPort};
+        server ${backend}:${realityPort};
     }
     map \$ssl_preread_server_name \$padm_backend {
 EOF
@@ -1275,14 +1296,42 @@ EOF
         default padm_reality;
     }
     server {
-        listen 15443;
-        listen [::]:15443;
+EOF
+    if [[ "${listenPort}" == 443 ]]; then
+        families=$(jq -c '.reality_stream.listener_id as $id |
+          .core.protocols[] | select(.listener_id == $id) | .address_families' "${specFile}") || return 1
+        if jq -e 'index("ipv4") != null' <<<"${families}" >/dev/null; then
+            printf '        listen 0.0.0.0:443;\n' >>"${target}" || return 1
+        fi
+        if jq -e 'index("ipv6") != null' <<<"${families}" >/dev/null; then
+            printf '        listen [::]:443 ipv6only=on;\n' >>"${target}" || return 1
+        fi
+    else
+        printf '        listen 15443;\n        listen [::]:15443;\n' >>"${target}" || return 1
+    fi
+    cat >>"${target}" <<'EOF'
         ssl_preread on;
         proxy_connect_timeout 10s;
         proxy_timeout 5d;
         proxy_pass $padm_backend;
     }
 }
+EOF
+}
+
+dockerGenerateRealityStreamMain() {
+    local specFile=$1 target=$2
+    jq -e '.reality_stream.host_website.network_mode == "host"' "${specFile}" >/dev/null || return 0
+    mkdir -p -- "$(dirname -- "${target}")" || return 1
+    # 专用宿主入口不加载 HTTP 配置，不占宿主 8080 或扩大其它监听。
+    cat >"${target}" <<'EOF'
+load_module /usr/lib/nginx/modules/ngx_stream_module.so;
+user padm padm;
+worker_processes auto;
+error_log /dev/stderr notice;
+pid /tmp/nginx.pid;
+events { worker_connections 1024; }
+include /etc/nginx/stream.d/reality.conf;
 EOF
 }
 
@@ -1412,6 +1461,7 @@ dockerGenerateCompose() {
       ($r.host_integrations | map(select(.type == "fail2ban"))) as $fail2ban |
       ($r.host_integrations | map(select(.type == "tun"))) as $tun |
       ($r.host_integrations | map(select(.type == "tproxy"))) as $tproxy |
+        ($r.reality_stream.host_website.network_mode == "host") as $hostStream |
       (($tun | length) + ($tproxy | length) == 1) as $transparent |
       ({
         name: "padm-docker",
@@ -1434,7 +1484,9 @@ dockerGenerateCompose() {
                   mounts("secrets/tls"; "/etc/padm/secrets/tls"; true) else [] end),
             ports: [$direct[] | select((.core // $r.core.type) == "xray" and
               ($r.reality_stream == null or .listener_id != $r.reality_stream.listener_id)) |
-              . as $protocol | ports($protocol; $protocol.public_port)[]],
+                . as $protocol | ports($protocol; $protocol.public_port)[]] +
+                [if $hostStream then $r.core.protocols[] | select(.listener_id == $r.reality_stream.listener_id) |
+                  "127.0.0.1:15443:\(.public_port)/tcp" else empty end],
             tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=16m"],
             healthcheck: {
               test: ["CMD", "/usr/local/bin/xray", "-test", "-confdir", "/etc/padm/xray"],
@@ -1472,16 +1524,16 @@ dockerGenerateCompose() {
               }]
             else . end
         else . end
-      | if (($websocket | length) + ($fallback | length)) > 0 or $r.reality_stream != null then
+      | if (($websocket | length) + ($fallback | length)) > 0 or ($r.reality_stream != null and ($hostStream | not)) then
           .services.nginx = (defaults + {
             image: "${PADM_NGINX_IMAGE:?PADM_NGINX_IMAGE is required}",
             profiles: ["nginx"],
             labels: labels("nginx"),
             depends_on: (reduce ($websocket[] | (.core // $r.core.type)) as $core
               ({}; .[$core] = {condition: "service_healthy"}) +
-              if $r.reality_stream != null then {xray:{condition:"service_healthy"}} else {} end),
+                if $r.reality_stream != null and ($hostStream | not) then {xray:{condition:"service_healthy"}} else {} end),
             volumes: (mounts("config/nginx"; "/etc/nginx/http.d"; true) +
-              (if $r.reality_stream != null then
+              (if $r.reality_stream != null and ($hostStream | not) then
                 mounts("config/nginx/stream"; "/etc/nginx/stream.d"; true) else [] end) +
               mounts("data/static"; "/srv/padm"; true) +
               (if ($websocket | length) > 0 then mounts("secrets/tls"; "/etc/padm/secrets/tls"; true) else [] end) +
@@ -1489,12 +1541,30 @@ dockerGenerateCompose() {
             ports: ([$websocket[] | select($r.reality_stream == null or
                 .listener_id != $r.reality_stream.website_listener_id) | . as $protocol |
                 ports($protocol; (($protocol.websocket // $protocol.httpupgrade // $protocol.grpc_tls).tls_port // 8443))[]] +
-              [if $r.reality_stream != null then
+              [if $r.reality_stream != null and ($hostStream | not) then
                 $r.core.protocols[] | select(.listener_id == $r.reality_stream.listener_id) |
                 .public_port = 443 | ports(.; 15443)[] else empty end]),
             tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=32m"]
           } + if $r.reality_stream.host_website.address == "host.docker.internal" then
             {extra_hosts: ["host.docker.internal:host-gateway"]} else {} end)
+        else . end
+      | if $hostStream then
+          .services["nginx-stream"] = (defaults + {
+            image: "${PADM_NGINX_IMAGE:?PADM_NGINX_IMAGE is required}",
+            profiles: ["nginx-stream"],
+            labels: labels("nginx-stream"),
+            network_mode: "host",
+            user: "0:0",
+            cap_add: ["NET_BIND_SERVICE", "SETGID", "SETUID", "KILL"],
+            depends_on: {xray:{condition:"service_healthy"}},
+            volumes: mounts("config/nginx/stream"; "/etc/nginx/stream.d"; true),
+            command: ["-c", "/etc/nginx/stream.d/host-main", "-g", "daemon off;"],
+            tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=16m"],
+            healthcheck: {
+              test: ["CMD", "/usr/sbin/nginx", "-t", "-c", "/etc/nginx/stream.d/host-main"],
+              interval: "30s", timeout: "5s", start_period: "5s", retries: 3
+            }
+          })
         else . end
       | if $r.subscription.enabled then
           .services.subscription = (defaults + {
@@ -1613,7 +1683,9 @@ dockerGenerateDeployment() {
       def digest: capture("@(?<value>sha256:[a-f0-9]{64})$").value;
       def profiles:
         ([[$r.core.type, $r.core.secondary_type][] | select(. != null) | "core-\(.)"] +
-        [if $r.reality_stream != null or any($r.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29) then "nginx" else empty end] +
+        [if ($r.reality_stream != null and $r.reality_stream.host_website.network_mode != "host") or
+          any($r.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29) then "nginx" else empty end] +
+        [if $r.reality_stream.host_website.network_mode == "host" then "nginx-stream" else empty end] +
         [if $r.subscription.enabled then "subscription" else empty end] +
         [$r.host_integrations[].profile]);
       {
@@ -1634,7 +1706,8 @@ dockerGenerateDeployment() {
           (if .id == 30 then "tcp", "udp" elif .id == 3 or .id == 31 then "udp" else "tcp" end) as $transport |
           ((if $r.reality_stream != null and
             (.listener_id == $r.reality_stream.listener_id or .listener_id == $r.reality_stream.website_listener_id)
-           then {service:"nginx", public_port:443, container_port:15443}
+           then {service:(if $r.reality_stream.host_website.network_mode == "host" then "nginx-stream" else "nginx" end),
+             public_port:443, container_port:(if $r.reality_stream.host_website.network_mode == "host" then 443 else 15443 end)}
            else {
             service: (if .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 then "nginx" else (.core // $r.core.type) end),
             public_port: .public_port,
@@ -1799,6 +1872,7 @@ dockerGenerateCandidate() {
     chmod 0600 "${candidate}/config/spec.json" || return 1
     dockerGenerateNginxConfig "${specFile}" "${candidate}/config/nginx/default.conf" || return 1
     dockerGenerateRealityStreamConfig "${specFile}" "${candidate}/config/nginx/stream/reality.conf" || return 1
+    dockerGenerateRealityStreamMain "${specFile}" "${candidate}/config/nginx/stream/host-main" || return 1
     if jq -e '.subscription.enabled == true' "${specFile}" >/dev/null; then
         token=$(jq -r '.subscription.token' "${specFile}") || return 1
         dockerGenerateSubscription "${specFile}" "${candidate}/data/subscription/${token}" || return 1
@@ -1941,6 +2015,76 @@ dockerValidateCandidate() {
             dockerError '订阅控制服务候选配置校验失败'
             return 1
         }
+    fi
+    if jq -e '.services | has("nginx-stream")' "${candidate}/compose.json" >/dev/null; then
+        dockerCandidateCompose "${candidate}" run --rm --no-deps nginx-stream \
+            -t -c /etc/nginx/stream.d/host-main >/dev/null || {
+            dockerError '宿主分流入口候选配置校验失败'
+            return 1
+        }
+        dockerRealityStreamHostProbe "${specFile}" backend || return 1
+    fi
+}
+
+dockerRealityStreamHostProbe() {
+    local specFile=$1 mode=$2 image address port domains families
+    jq -e '.reality_stream.host_website.network_mode == "host"' "${specFile}" >/dev/null || return 0
+    dockerRealityStreamHostRuntimeCheck || return 1
+    case "${mode}" in backend|ports) ;; *) return 1 ;; esac
+    image=$(jq -er '.images.ops' "${specFile}") &&
+        address=$(jq -er '.reality_stream.host_website.address' "${specFile}") &&
+        port=$(jq -er '.reality_stream.host_website.port' "${specFile}") &&
+        domains=$(jq -c '.reality_stream.host_website.domains' "${specFile}") &&
+        families=$(jq -c '.reality_stream.listener_id as $id |
+          .core.protocols[] | select(.listener_id == $id) | .address_families' "${specFile}") || return 1
+    # 同一宿主网络实测回环 TLS；释放旧拥有者之后才检测新入口的真实绑定。
+    dockerRealityProbeRun 45 --network host --user 0:0 --cap-add NET_BIND_SERVICE \
+        --entrypoint python3 "${image}" -c '
+import json
+import socket
+import ssl
+import sys
+
+mode, address, port, domains, families = sys.argv[1:]
+if mode == "backend":
+    context = ssl.create_default_context()
+    for domain in json.loads(domains):
+        with socket.create_connection((address, int(port)), timeout=5) as connection:
+            with context.wrap_socket(connection, server_hostname=domain):
+                pass
+else:
+    sockets = []
+    try:
+        for family in json.loads(families):
+            ip_family = socket.AF_INET if family == "ipv4" else socket.AF_INET6
+            connection = socket.socket(ip_family, socket.SOCK_STREAM)
+            sockets.append(connection)
+            connection.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if ip_family == socket.AF_INET6:
+                connection.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            connection.bind(("0.0.0.0" if family == "ipv4" else "::", 443))
+            connection.listen(1)
+        connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sockets.append(connection)
+        connection.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        connection.bind(("127.0.0.1", 15443))
+        connection.listen(1)
+    finally:
+        for connection in sockets:
+            connection.close()
+' "${mode}" "${address}" "${port}" "${domains}" "${families}" || {
+        dockerError "宿主回环网站 TLS 或 host 网络端口检查失败: ${mode}"
+        return 1
+    }
+}
+
+dockerRealityStreamHostRuntimeCheck() {
+    local version
+    version=$(docker info --format '{{.ServerVersion}}') || return 1
+    # 仅宿主回环拓扑要求新版 Engine，避免旧版本的 loopback 发布隔离缺口。
+    if [[ ! "${version}" =~ ^([0-9]+)[.] || "${BASH_REMATCH[1]}" -lt 28 ]]; then
+        dockerError '宿主回环网站要求 Docker Engine 28 或更新版本'
+        return 1
     fi
 }
 
@@ -2214,7 +2358,13 @@ dockerRestoreConfiguration() {
         { [[ -f "${root}/config/spec.json" ]] &&
             jq -e '.reality_stream != null' "${root}/config/spec.json" >/dev/null; }; }; then
         # 仅释放交接相关服务；部分安装失败时用受管标签找到已有容器。
-        dockerRealityStreamStopServices nginx xray || return 1
+        if [[ "${DOCKER_CONFIG_STREAM_HOST_TRANSITION:-0}" == 1 ]] ||
+            jq -e '.reality_stream.host_website.network_mode == "host"' "${backup}/config/spec.json" >/dev/null 2>&1 ||
+            jq -e '.reality_stream.host_website.network_mode == "host"' "${root}/config/spec.json" >/dev/null 2>&1; then
+            dockerRealityStreamStopServices nginx xray nginx-stream || return 1
+        else
+            dockerRealityStreamStopServices nginx xray || return 1
+        fi
     else
         dockerComposeRun down >/dev/null 2>&1 || true
     fi
@@ -2245,6 +2395,7 @@ dockerRestoreConfiguration() {
     dockerRenewalScheduleInstall || return 1
     DOCKER_CONFIG_SWITCHED=0
     DOCKER_CONFIG_STREAM_TRANSITION=0
+    DOCKER_CONFIG_STREAM_HOST_TRANSITION=0
 }
 
 dockerCleanupConfigurationCandidate() {
@@ -2282,6 +2433,11 @@ dockerRealityStreamDeploymentCheck() {
                 jq -e '.["x-padm-reality-stream-host-website"] == true' \
                     "$(dockerConfigureSchemaFile)" >/dev/null || return 1
             fi
+            if jq -e '.reality_stream.host_website.network_mode == "host"' "${specFile}" >/dev/null; then
+                jq -e '.["x-padm-reality-stream-host-network"] == true' \
+                    "$(dockerConfigureSchemaFile)" >/dev/null || return 1
+                dockerRealityStreamHostRuntimeCheck || return 1
+            fi
         fi
     done
 }
@@ -2291,7 +2447,7 @@ dockerRealityStreamStopServices() {
     local -a containers=()
     # 使用项目和服务双标签限定已有容器，不依赖可能安装到一半的 Compose 文件。
     for service in "$@"; do
-        case "${service}" in xray|nginx) ;; *) return 1 ;; esac
+        case "${service}" in xray|nginx|nginx-stream) ;; *) return 1 ;; esac
         ids=$(docker ps -q --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
             --filter "label=com.docker.compose.service=${service}") || return 1
         while IFS= read -r id; do
@@ -2313,19 +2469,29 @@ dockerRealityStreamTransitionPrepare() {
         return 0
     fi
     DOCKER_CONFIG_STREAM_TRANSITION=1
-    [[ -f "${root}/deployment.json" ]] || return 0
-    services=$(jq -er '[.listeners[] | select(.public_port == 443 and .transport == "tcp") | .service] |
-      unique | .[]' "${root}/deployment.json") || {
-        # 原部署没有 443 拥有者时无需停止服务。
-        jq -e '.listeners | type == "array" and all(.[]; .public_port != 443 or .transport != "tcp")' \
-            "${root}/deployment.json" >/dev/null
+    if jq -e '.reality_stream.host_website.network_mode == "host"' "${sourceSpec}" >/dev/null 2>&1 ||
+        jq -e '.reality_stream.host_website.network_mode == "host"' "${currentSpec}" >/dev/null 2>&1; then
+        DOCKER_CONFIG_STREAM_HOST_TRANSITION=1
+    fi
+    if [[ ! -f "${root}/deployment.json" ]]; then
+        dockerRealityStreamHostProbe "${sourceSpec}" ports
         return $?
+    fi
+    services=$(jq -r '[.listeners[] | select(.public_port == 443 and .transport == "tcp") | .service] |
+      unique | .[]' "${root}/deployment.json") || {
+        return 1
     }
     while IFS= read -r service; do
-        case "${service}" in xray|nginx) owners+=("${service}") ;; *) return 1 ;; esac
+        [[ -n "${service}" ]] || continue
+        case "${service}" in xray|nginx|nginx-stream) owners+=("${service}") ;; *) return 1 ;; esac
     done <<<"${services}"
-    [[ "${#owners[@]}" -gt 0 ]] || return 0
-    dockerRealityStreamStopServices "${owners[@]}"
+    if [[ "${DOCKER_CONFIG_STREAM_HOST_TRANSITION}" == 1 ]]; then
+        # 中继端口也由 Xray 发布，网络切换不能只停止公开 443 拥有者。
+        dockerRealityStreamStopServices nginx xray nginx-stream || return 1
+    elif [[ "${#owners[@]}" -gt 0 ]]; then
+        dockerRealityStreamStopServices "${owners[@]}" || return 1
+    fi
+    dockerRealityStreamHostProbe "${sourceSpec}" ports
 }
 
 dockerConfigureApply() {
@@ -2415,6 +2581,7 @@ dockerConfigureApply() {
     fi
     DOCKER_CONFIG_SWITCHED=0
     DOCKER_CONFIG_STREAM_TRANSITION=0
+    DOCKER_CONFIG_STREAM_HOST_TRANSITION=0
     dockerCleanupConfigurationCandidate || return "${PADM_DOCKER_RC_STATE}"
     printf 'Docker 配置已提交，回滚快照: %s\n' "${backup}"
 }
@@ -2654,6 +2821,27 @@ dockerTlsConsumers() {
         ' "${root}/compose.json" >/dev/null || return 1
         consumers=$(jq -c --arg core "${core}" '. + [$core]' <<<"${consumers}") || return 1
     done <<<"${cores}"
+    specFile="${root}/config/spec.json"
+    if [[ -f "${specFile}" ]] &&
+        jq -e '.reality_stream.host_website.network_mode == "host"' "${specFile}" >/dev/null; then
+        dockerTrafficSafePath "${root}" "${specFile}" &&
+            dockerConfigureSpecValidate "${specFile}" &&
+            dockerManagedSpecMatchesDeployment "${specFile}" "${root}/deployment.json" "${root}/images.env" &&
+            dockerTrafficSafePath "${root}" "${root}/config/nginx/stream/host-main" &&
+            [[ -z "$(find "${root}/config/nginx" ! -type f ! -type d -print -quit)" ]] &&
+            cmp -s -- "${root}/config/nginx/stream/host-main" \
+                <(dockerGenerateRealityStreamMain "${specFile}" /dev/stdout) &&
+            cmp -s -- "${root}/config/nginx/stream/reality.conf" \
+                <(dockerGenerateRealityStreamConfig "${specFile}" /dev/stdout) &&
+            jq -e --slurpfile expected <(dockerGenerateCompose "${specFile}" /dev/stdout) '
+              def stream: .services["nginx-stream"] | .labels |= del(."io.padm.release");
+              stream == ($expected[0] | stream) and
+              .services.xray.ports == $expected[0].services.xray.ports and
+              .services.xray.network_mode == $expected[0].services.xray.network_mode
+            ' "${root}/compose.json" >/dev/null || return 1
+    elif jq -e '.services | has("nginx-stream")' "${root}/compose.json" >/dev/null; then
+        return 1
+    fi
     if jq -e '.compose.profiles | index("nginx") != null' "${root}/deployment.json" >/dev/null; then
         jq -e '[.services.nginx.volumes[]? |
           select(.target == "/etc/nginx/http.d" or (.target | startswith("/etc/nginx/http.d/")))] |

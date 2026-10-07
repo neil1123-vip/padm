@@ -808,6 +808,7 @@ dockerProtocolCommand() (
             (if $stream.host_website != null then
               $stream.host_website as $website |
               "网站类型: 宿主网站",
+              "网站网络: \(if $website.network_mode == "host" then "host（回环）" else "bridge（容器可达）" end)",
               "网站域名: \($website.domains | join(","))",
               "网站 TLS 后端: \(if $website.address | contains(":") then "[\($website.address)]" else $website.address end):\($website.port)"
              else
@@ -1228,6 +1229,14 @@ dockerEditCommand() {
             realityStream=host streamListener=$2 streamDomains=$3 streamAddress=$4 streamPort=$5
             shift 5
             ;;
+        --reality-stream-loopback)
+            [[ "$#" -ge 5 && -n "$2" && "$2" != --* && -n "$3" && "$3" != --* &&
+                ( "$4" == 127.0.0.1 || "$4" == ::1 ) &&
+                "$5" =~ ^[1-9][0-9]{0,4}$ && "$5" -le 65535 && "$5" != 443 && "$5" != 15443 &&
+                -z "${realityStream}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            realityStream=loopback streamListener=$2 streamDomains=$3 streamAddress=$4 streamPort=$5
+            shift 5
+            ;;
         --preview)
             [[ "${mode}" == interactive ]] || return "${PADM_DOCKER_RC_USAGE}"
             mode=preview
@@ -1325,10 +1334,11 @@ dockerEditCommand() {
           if $action == "off" then del(.reality_stream) else
             [.core.protocols[] | select(.listener_id == $listener and .core == "xray" and (.id == 1 or .id == 2))] as $realities |
             if ($realities | length) != 1 then error("共存需要唯一 Xray Reality Vision/XHTTP 入口")
-            elif $action == "host" then
+            elif $action == "host" or $action == "loopback" then
               .reality_stream = {listener_id:$listener, host_website:{
                 domains:($domains | split(",") | map(gsub("^\\s+|\\s+$"; "") | ascii_downcase) | map(select(. != ""))),
-                address:$address, port:$port}}
+                address:$address, port:$port}} |
+              if $action == "loopback" then .reality_stream.host_website.network_mode = "host" else . end
             else
               [.core.protocols[] | select(.listener_id == $website and
                 (.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25))] as $websites |

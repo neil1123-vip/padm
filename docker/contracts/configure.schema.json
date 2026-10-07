@@ -5,6 +5,7 @@
   "type": "object",
   "x-padm-reality-stream-deployment": true,
   "x-padm-reality-stream-host-website": true,
+  "x-padm-reality-stream-host-network": true,
   "additionalProperties": false,
   "required": ["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"],
   "properties": {
@@ -50,7 +51,8 @@
                 },
                 "address": {
                   "type": "string",
-                  "oneOf": [
+                  "anyOf": [
+                    {"enum": ["127.0.0.1", "::1"]},
                     {"const": "host.docker.internal"},
                     {
                       "format": "ipv4",
@@ -67,8 +69,12 @@
                     {"$ref": "#/$defs/port"},
                     {"not": {"enum": [443, 15443]}}
                   ]
-                }
-              }
+                },
+                "network_mode": {"const": "host"}
+              },
+              "if": {"required": ["network_mode"]},
+              "then": {"properties": {"address": {"enum": ["127.0.0.1", "::1"]}}},
+              "else": {"properties": {"address": {"not": {"enum": ["127.0.0.1", "::1"]}}}}
             }
           }
         }
