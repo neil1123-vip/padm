@@ -659,7 +659,7 @@ runTlsFailureReturnRegression() (
         readAcmeTLS() { return 0; }
         collectTLSProfile() { tlsCertDomain=${certDomain}; }
         openssl req -new -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 2 \
-            -subj "/CN=${certDomain}" -addext "subjectAltName=DNS:${certDomain}" \
+            -subj "/CN=${certDomain}" -addext "subjectAltName=DNS:${certDomain},DNS:*.custom.example.com" \
             -keyout "${certificateRoot}/valid.key" -out "${certificateRoot}/valid.crt" >/dev/null 2>&1
         openssl req -new -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 \
             -subj "/CN=${certDomain}" -addext "subjectAltName=DNS:${certDomain}" \
@@ -667,6 +667,77 @@ runTlsFailureReturnRegression() (
         openssl req -new -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 \
             -subj "/CN=wrong.example.com" -addext "subjectAltName=DNS:wrong.example.com" \
             -keyout "${certificateRoot}/wrong.key" -out "${certificateRoot}/wrong.crt" >/dev/null 2>&1
+
+        (
+            # 严格修复仅复用足够有效的源；显式签发参数和坏源仍走原申请流程。
+            local PADM_REQUIRE_USABLE_TLS_CERTIFICATE=true
+            local AUTO_TLS_CA= AUTO_DNS_API= AUTO_DNS_API_TYPE= AUTO_DNS_API_WILDCARD=
+            local sourceDir="${HOME}/.acme.sh/${certDomain}_ecc"
+            local state issues syncs
+            mkdir -p "${sourceDir}"
+            switchSSLType() { [[ "${state}" != cancel ]]; }
+            customSSLEmail() { return 0; }
+            selectAcmeInstallSSL() {
+                issues=$((issues + 1))
+                cp "${certificateRoot}/valid.crt" "${sourceDir}/${certDomain}.cer"
+                cp "${certificateRoot}/valid.key" "${sourceDir}/${certDomain}.key"
+            }
+            installTLSFromAcme() {
+                syncs=$((syncs + 1))
+                [[ "${state}" != sync-fail ]] || return 1
+                cp "${sourceDir}/${certDomain}.cer" "${PADM_TLS_DIR}/${certDomain}.crt"
+                cp "${sourceDir}/${certDomain}.key" "${PADM_TLS_DIR}/${certDomain}.key"
+            }
+            for state in valid expiring wrong-domain wrong-key invalid-pem ca dns provider wildcard sync-fail cancel; do
+                rm -f "${PADM_TLS_DIR}/${certDomain}.crt" "${PADM_TLS_DIR}/${certDomain}.key"
+                cp "${certificateRoot}/valid.crt" "${sourceDir}/${certDomain}.cer"
+                cp "${certificateRoot}/valid.key" "${sourceDir}/${certDomain}.key"
+                AUTO_TLS_CA= AUTO_DNS_API= AUTO_DNS_API_TYPE= AUTO_DNS_API_WILDCARD=
+                issues=0 syncs=0
+                case "${state}" in
+                expiring) cp "${certificateRoot}/expiring.crt" "${sourceDir}/${certDomain}.cer" ;;
+                wrong-domain) cp "${certificateRoot}/wrong.crt" "${sourceDir}/${certDomain}.cer" ;;
+                wrong-key) cp "${certificateRoot}/wrong.key" "${sourceDir}/${certDomain}.key" ;;
+                invalid-pem) printf 'invalid-pem\n' >"${sourceDir}/${certDomain}.cer" ;;
+                ca) AUTO_TLS_CA=letsencrypt ;;
+                dns) AUTO_DNS_API=n ;;
+                provider) AUTO_DNS_API_TYPE=cloudflare ;;
+                wildcard) AUTO_DNS_API_WILDCARD=n ;;
+                cancel) printf 'invalid-pem\n' >"${sourceDir}/${certDomain}.cer" ;;
+                esac
+                if [[ "${state}" == cancel ]]; then
+                    regressionExpectStatus 1 installTLS 1 >/dev/null 2>&1
+                    [[ "${issues}" == 0 && "${syncs}" == 0 ]]
+                elif [[ "${state}" == sync-fail ]]; then
+                    regressionExpectStatus 1 installTLS 1 >/dev/null 2>&1
+                    [[ "${issues}" == 0 && "${syncs}" == 1 ]]
+                else
+                    installTLS 1 >/dev/null 2>&1
+                    [[ "${syncs}" == 1 ]]
+                    if [[ "${state}" == valid ]]; then
+                        [[ "${issues}" == 0 ]]
+                    else
+                        [[ "${issues}" == 1 ]]
+                    fi
+                    tlsCertificatePairUsable "${PADM_TLS_DIR}" "${certDomain}"
+                fi
+            done
+            local certDomain=api.custom.example.com domain=api.custom.example.com
+            local installedDNSAPIStatus=true dnsTLSDomain=custom.example.com
+            sourceDir="${HOME}/.acme.sh/*.custom.example.com_ecc"
+            mkdir -p "${sourceDir}"
+            cp "${certificateRoot}/valid.crt" "${sourceDir}/*.custom.example.com.cer"
+            cp "${certificateRoot}/valid.key" "${sourceDir}/*.custom.example.com.key"
+            installTLSFromAcme() {
+                syncs=$((syncs + 1))
+                cp "${sourceDir}/*.custom.example.com.cer" "${PADM_TLS_DIR}/${certDomain}.crt"
+                cp "${sourceDir}/*.custom.example.com.key" "${PADM_TLS_DIR}/${certDomain}.key"
+            }
+            state=wildcard-source issues=0 syncs=0
+            installTLS 1 >/dev/null 2>&1
+            [[ "${issues}" == 0 && "${syncs}" == 1 ]]
+            tlsCertificatePairUsable "${PADM_TLS_DIR}" "${certDomain}"
+        )
 
         # 自签证书可正常复用；错域名、错私钥和损坏 PEM 均不能冒充安装成功。
         cp "${certificateRoot}/valid.crt" "${PADM_TLS_DIR}/${certDomain}.crt"

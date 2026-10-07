@@ -334,7 +334,7 @@ prepareSubscribeTLSCertificate() {
     tlsDir=$(tlsManagedDir) || return 1
     if tlsCertificatePairUsable "${tlsDir}" "${certDomain}"; then
         if tlsCertificateManagedByAcme "${certDomain}"; then
-            crontab -l 2>/dev/null | grep -q '/etc/padm/install.sh RenewTLS' || installCronTLS 1 || return 1
+            installCronTLS 1 || return 1
             statusCard "订阅 TLS 证书" "已复用 acme.sh 管理的可用证书：${certDomain}"
         else
             statusCard "订阅 TLS 证书" "已复用自定义证书：${certDomain}" "自定义证书需自行续期"
@@ -395,7 +395,7 @@ prepareSubscribeTLSCertificate() {
         errorCard "订阅证书缺少 acme.sh 安装目标" "无法保证自动续期更新受管 .crt/.key"
         return 1
     }
-    crontab -l 2>/dev/null | grep -q '/etc/padm/install.sh RenewTLS' || installCronTLS 1 || return 1
+    installCronTLS 1 || return 1
 }
 
 runSubscribeNginxAction() {

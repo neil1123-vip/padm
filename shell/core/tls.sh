@@ -79,11 +79,15 @@ tlsCertificatePairExists() {
 tlsCertificatePairUsable() {
     local tlsDir=$1
     local certDomain=$2
-    local certFile keyFile certDigest keyDigest
-    tlsCertificatePairExists "${tlsDir}" "${certDomain}" || return 1
+    tlsCertificateFilesUsable "${tlsDir}/${certDomain}.crt" "${tlsDir}/${certDomain}.key" "${certDomain}"
+}
+
+tlsCertificateFilesUsable() {
+    local certFile=$1 keyFile=$2 certDomain=$3
+    local certDigest keyDigest
+    tlsDomainNameIsSafe "${certDomain}" || return 1
+    [[ -s "${certFile}" && -s "${keyFile}" ]] || return 1
     command -v openssl >/dev/null 2>&1 || return 1
-    certFile="${tlsDir}/${certDomain}.crt"
-    keyFile="${tlsDir}/${certDomain}.key"
     openssl x509 -in "${certFile}" -noout >/dev/null 2>&1 &&
         openssl x509 -in "${certFile}" -checkend 0 -noout >/dev/null 2>&1 &&
         openssl x509 -in "${certFile}" -checkhost "${certDomain}" -noout >/dev/null 2>&1 &&
@@ -440,7 +444,7 @@ installTLS() {
     progressCard "$1" "申请 TLS 证书"
     readAcmeTLS || return 1
     local tlsDomain=${domain}
-    local tlsDir
+    local tlsDir sourceAcmeDomain sourceCertificateDir
     local reInstallStatus=n
     tlsDomainNameIsSafe "${tlsDomain}" || { errorCard "TLS 域名不合法"; return 1; }
     tlsDir=$(tlsManagedDir) || return 1
@@ -465,9 +469,17 @@ installTLS() {
         -s "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
         successCard "检测到证书"
         if [[ "${PADM_REQUIRE_USABLE_TLS_CERTIFICATE:-}" == "true" ]]; then
-            switchSSLType || return 1
-            customSSLEmail || return 1
-            selectAcmeInstallSSL || return 1
+            sourceAcmeDomain=${tlsDomain}
+            [[ "${installedDNSAPIStatus:-}" != true ]] || sourceAcmeDomain="*.${dnsTLSDomain}"
+            sourceCertificateDir="$HOME/.acme.sh/${sourceAcmeDomain}_ecc"
+            # 源证书足够有效且未显式改签发参数时，只同步，不重复请求 CA。
+            if [[ -n "${AUTO_TLS_CA:-}${AUTO_DNS_API:-}${AUTO_DNS_API_TYPE:-}${AUTO_DNS_API_WILDCARD:-}" ]] ||
+                ! tlsCertificateFilesUsable "${sourceCertificateDir}/${sourceAcmeDomain}.cer" "${sourceCertificateDir}/${sourceAcmeDomain}.key" "${tlsDomain}" ||
+                ! openssl x509 -in "${sourceCertificateDir}/${sourceAcmeDomain}.cer" -checkend 86400 -noout >/dev/null 2>&1; then
+                switchSSLType || return 1
+                customSSLEmail || return 1
+                selectAcmeInstallSSL || return 1
+            fi
         fi
         installTLSFromAcme || return 1
     elif [[ -d "$HOME/.acme.sh" ]] && [[ ! -s "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" ||
@@ -508,6 +520,22 @@ installCronTLS() {
             errorCard "读取现有定时任务失败，已取消添加证书维护任务"
             return 1
         }
+        if awk '
+          $1 !~ /^#/ {
+            command = ($1 ~ /^@/) ? 2 : 6
+            if ($command == "/bin/bash") command++
+            if ($command == "/etc/padm/install.sh" && $(command + 1) == "RenewTLS") {
+              count++
+              nextArg = $(command + 2)
+              if (($1 !~ /^@/ || $1 ~ /^@(annually|yearly|monthly|weekly|daily|midnight|hourly)$/) &&
+                  (nextArg == "" || nextArg ~ /^(>|2>|#)/)) valid++
+            }
+          }
+          END { exit !(count == 1 && valid == 1) }
+        ' <<<"${historyCrontab}"; then
+            statusCard "TLS 自动续签" "已设置" "保留现有定时任务"
+            return 0
+        fi
         historyCrontab=$(sed '\|/etc/padm/install.sh RenewTLS|d' <<<"${historyCrontab}") || {
             errorCard "整理现有定时任务失败，已取消添加证书维护任务"
             return 1

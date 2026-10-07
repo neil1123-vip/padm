@@ -445,6 +445,7 @@ runSubscriptionGroupStateStructureSyncCronRegression() {
         local crontabLog="${TMP_DIR}/subscription-sync-crontab.txt"
         local crontabReadMode=default
         local crontabInstallShouldFail=false
+        local crontabWrites=0
         local syncCalls=0
         subscriptionGroupSyncCronFile() { printf '%s\n' "${TMP_DIR}/subscription-sync-cron.log"; }
         crontab() {
@@ -470,6 +471,16 @@ runSubscriptionGroupStateStructureSyncCronRegression() {
                     printf '0 0 * * * /root/.acme.sh/acme.sh --cron\n'
                     printf '5 5 * * * /usr/local/bin/keep\n'
                     ;;
+                tls-current) cat "${crontabLog}" ;;
+                tls-comment)
+                    printf '# 5 0 * * * /bin/bash /etc/padm/install.sh RenewTLS\n'
+                    printf '5 5 * * * /usr/local/bin/keep\n'
+                    ;;
+                tls-custom)
+                    printf '45 2 * * * /bin/bash /etc/padm/install.sh RenewTLS >> /custom/renew.log 2>&1\n'
+                    printf '5 5 * * * /usr/local/bin/keep\n'
+                    ;;
+                tls-reboot) printf '@reboot /bin/bash /etc/padm/install.sh RenewTLS\n' ;;
                 *)
                     printf '5 0 * * * /bin/bash /etc/padm/install.sh RenewTLS\n'
                     printf '10 0 * * * /bin/bash /etc/padm/install.sh SyncSubscriptionGroups old\n'
@@ -478,6 +489,7 @@ runSubscriptionGroupStateStructureSyncCronRegression() {
                 ;;
             *)
                 [[ "${crontabInstallShouldFail}" != "true" ]] || return 1
+                crontabWrites=$((crontabWrites + 1))
                 cat "$1" >"${crontabLog}"
                 ;;
             esac
@@ -525,6 +537,27 @@ runSubscriptionGroupStateStructureSyncCronRegression() {
         grep -qx '5 5 \* \* \* /usr/local/bin/keep' "${crontabLog}"
         [[ "$(grep -c '/etc/padm/install.sh RenewTLS' "${crontabLog}")" == "1" ]]
         ! grep -q 'RenewTLS old' "${crontabLog}"
+
+        # 重装保留有效任务和用户时间；注释不能代替实际续签任务。
+        local previousWrites=${crontabWrites}
+        crontabReadMode=tls-current
+        installCronTLS 1 >/dev/null
+        [[ "${crontabWrites}" == "${previousWrites}" ]]
+        crontabReadMode=tls-custom
+        crontabInstallShouldFail=true
+        installCronTLS 1 >/dev/null
+        [[ "${crontabWrites}" == "${previousWrites}" ]]
+        crontabInstallShouldFail=false
+        crontabReadMode=tls-comment
+        installCronTLS 1 >/dev/null
+        [[ "${crontabWrites}" == "$((previousWrites + 1))" ]]
+        grep -qx '30 1 \* \* \* /bin/bash /etc/padm/install.sh RenewTLS >> /etc/padm/crontab_tls.log 2>&1' "${crontabLog}"
+        grep -qx '5 5 \* \* \* /usr/local/bin/keep' "${crontabLog}"
+        crontabReadMode=tls-reboot
+        installCronTLS 1 >/dev/null
+        [[ "${crontabWrites}" == "$((previousWrites + 2))" ]]
+        ! grep -q '^@reboot' "${crontabLog}"
+        grep -q '^30 1 ' "${crontabLog}"
     )
 }
 
