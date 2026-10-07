@@ -3047,81 +3047,86 @@ initRandomSalt() {
 }
 
 manageRealityTarget() {
-    local currentTarget selectTargetMenu targetInput sniInput targetAsnSummary networkMatchSummary refreshChoice
+    local currentTarget selectTargetMenu targetInput sniInput targetAsnSummary networkMatchSummary refreshChoice refreshTargetState=true
+    readInstallProtocolType || return 1
     while true; do
-    readInstallProtocolType
-    readConfigHostPathUUID || return 1
-    if [[ -n "${realityTargetHost:-}" ]]; then
-        currentTarget=$(formatRealityTarget "${realityTargetHost}" "${realityTargetPort:-443}")
-        targetAsnSummary=$(realityTargetCachedAsnSummary "${currentTarget}")
-        networkMatchSummary=$(realityTargetCachedNetworkSummary "${currentTarget}")
-    else
-        currentTarget="未读取到"
-        targetAsnSummary="未读取到目标站"
-        networkMatchSummary="未读取到目标站"
-    fi
-
-    echoContent title "\n┌─ REALITY 目标站管理 ───────────────────────────────"
-    menuLine "当前目标：${currentTarget}"
-    menuLine "当前 SNI：${realitySNI:-未知}"
-    menuLine "目标 ASN（缓存）：${targetAsnSummary}"
-    menuLine "网络关系（缓存）：${networkMatchSummary}"
-    showRealityTargetPqcSummary || true
-    menuItem 1 "检测当前目标" "复测 TLS/PQC、ASN 与网络关系，并查看证书链"
-    menuItem 2 "刷新目标库" "按范围复测目标库或候选清单并更新质量结果"
-    menuItem 3 "扫描指定网段" "运行 RealiTLScanner，发现目标并加入目标库"
-    menuItem 4 "同 ASN 抽样扫描" "从本机 ASN 公告前缀随机抽样，发现目标并加入目标库"
-    menuItem 5 "查看/切换 A 级目标" "分页查看目标库中的 A 级目标并切换"
-    menuItem 6 "手动设置目标站" "输入 host[:port] 和可选 SNI"
-    menuItem 7 "查看目标站黑名单" "显示不会参与目标库刷新或扫描导入的目标"
-    menuReturnItem 8 "返回" "回到 REALITY 管理"
-    menuClose
-    menuReadChoice reality_target_manage_menu "请选择：" selectTargetMenu || return 0
-    case "${selectTargetMenu}" in
-    1)
-        if [[ "${currentTarget}" != "未读取到" ]]; then
-            showRealityTargetCachedQuality "${currentTarget}" || true
+        if [[ "${refreshTargetState}" == "true" ]]; then
+            readConfigHostPathUUID || return 1
+            refreshTargetState=false
         fi
-        ;;
-    2)
-        echoContent title "\n┌─ REALITY 刷新范围 ───────────────────────────────"
-        menuItem 1 "目标库 + 推荐候选" "复测目标库中的 A 级目标，并补测推荐候选"
-        menuItem 2 "推荐候选" "仅复测推荐候选，不额外合并目标库"
-        menuReturnItem 3 "返回" "回到目标站管理"
+        if [[ -n "${realityTargetHost:-}" ]]; then
+            currentTarget=$(formatRealityTarget "${realityTargetHost}" "${realityTargetPort:-443}")
+            targetAsnSummary=$(realityTargetCachedAsnSummary "${currentTarget}")
+            networkMatchSummary=$(realityTargetCachedNetworkSummary "${currentTarget}")
+        else
+            currentTarget="未读取到"
+            targetAsnSummary="未读取到目标站"
+            networkMatchSummary="未读取到目标站"
+        fi
+
+        echoContent title "\n┌─ REALITY 目标站管理 ───────────────────────────────"
+        menuLine "当前目标：${currentTarget}"
+        menuLine "当前 SNI：${realitySNI:-未知}"
+        menuLine "目标 ASN（缓存）：${targetAsnSummary}"
+        menuLine "网络关系（缓存）：${networkMatchSummary}"
+        showRealityTargetPqcSummary || true
+        menuItem 1 "检测当前目标" "复测 TLS/PQC、ASN 与网络关系，并查看证书链"
+        menuItem 2 "刷新目标库" "按范围复测目标库或候选清单并更新质量结果"
+        menuItem 3 "扫描指定网段" "运行 RealiTLScanner，发现目标并加入目标库"
+        menuItem 4 "同 ASN 抽样扫描" "从本机 ASN 公告前缀随机抽样，发现目标并加入目标库"
+        menuItem 5 "查看/切换 A 级目标" "分页查看目标库中的 A 级目标并切换"
+        menuItem 6 "手动设置目标站" "输入 host[:port] 和可选 SNI"
+        menuItem 7 "查看目标站黑名单" "显示不会参与目标库刷新或扫描导入的目标"
+        menuReturnItem 8 "返回" "回到 REALITY 管理"
         menuClose
-        menuReadChoice reality_target_refresh_scope "请选择刷新范围[默认1]：" refreshChoice true || return 0
-        case "${refreshChoice:-1}" in
-        1) scanLocalAsnRealityTargets || true ;;
-        2) scanLocalAsnRealityTargets recommended_only || true ;;
-        3|r|R) ;;
-        *) coreSelectionErrorCard "选择错误" ;;
+        menuReadChoice reality_target_manage_menu "请选择：" selectTargetMenu || return 0
+        case "${selectTargetMenu}" in
+        1)
+            if [[ "${currentTarget}" != "未读取到" ]]; then
+                showRealityTargetCachedQuality "${currentTarget}" || true
+            fi
+            ;;
+        2)
+            echoContent title "\n┌─ REALITY 刷新范围 ───────────────────────────────"
+            menuItem 1 "目标库 + 推荐候选" "复测目标库中的 A 级目标，并补测推荐候选"
+            menuItem 2 "推荐候选" "仅复测推荐候选，不额外合并目标库"
+            menuReturnItem 3 "返回" "回到目标站管理"
+            menuClose
+            menuReadChoice reality_target_refresh_scope "请选择刷新范围[默认1]：" refreshChoice true || return 0
+            case "${refreshChoice:-1}" in
+            1) scanLocalAsnRealityTargets || true ;;
+            2) scanLocalAsnRealityTargets recommended_only || true ;;
+            3|r|R) ;;
+            *) coreSelectionErrorCard "选择错误" ;;
+            esac
+            ;;
+        3)
+            runRealityScannerAdvanced || true
+            ;;
+        4)
+            runRealityScannerSameAsnPrefixes || true
+            ;;
+        5)
+            changeRealityTargetFromScanResults || true
+            refreshTargetState=true
+            ;;
+        6)
+            autoRead reality_target "请输入 REALITY 伪装目标 host[:port]：" targetInput || return 1
+            [[ -n "${targetInput}" ]] || continue
+            autoRead reality_server_name "请输入 SNI[回车默认等于目标 host]：" sniInput || return 1
+            changeInstalledRealityTarget "${targetInput}" "${sniInput}"
+            refreshTargetState=true
+            ;;
+        7)
+            showRealityTargetBlockedCandidates
+            ;;
+        8|9|10)
+            return 0
+            ;;
+        *)
+            coreSelectionErrorCard "选择错误"
+            ;;
         esac
-        ;;
-    3)
-        runRealityScannerAdvanced || true
-        ;;
-    4)
-        runRealityScannerSameAsnPrefixes || true
-        ;;
-    5)
-        changeRealityTargetFromScanResults || true
-        ;;
-    6)
-        autoRead reality_target "请输入 REALITY 伪装目标 host[:port]：" targetInput || return 1
-        [[ -n "${targetInput}" ]] || continue
-        autoRead reality_server_name "请输入 SNI[回车默认等于目标 host]：" sniInput || return 1
-        changeInstalledRealityTarget "${targetInput}" "${sniInput}"
-        ;;
-    7)
-        showRealityTargetBlockedCandidates
-        ;;
-    8|9|10)
-        return 0
-        ;;
-    *)
-        coreSelectionErrorCard "选择错误"
-        ;;
-    esac
     done
 }
 
@@ -3839,9 +3844,12 @@ manageHysteria2Bandwidth() {
 
 # hysteria管理
 manageHysteria() {
-    local hysteria2Status installHysteria2Status configFile
+    local hysteria2Status installHysteria2Status configFile refreshInstallState=true
     while true; do
-        readInstallType || return 1
+        if [[ "${refreshInstallState}" == "true" ]]; then
+            readInstallType || return 1
+            refreshInstallState=false
+        fi
         hysteria2Status=
         echoContent title "\n┌─ Hysteria2 管理 ───────────────────────────────────"
         menuLine "依赖 sing-box；已有 Xray 时可作为辅助核心增量安装，适合 UDP、移动网络场景"
@@ -3863,8 +3871,10 @@ manageHysteria() {
         menuReadChoice hysteria_menu "请选择:" installHysteria2Status || return 0
         if [[ "${installHysteria2Status}" == "1" ]]; then
             singBoxHysteria2Install || true
+            refreshInstallState=true
         elif [[ "${installHysteria2Status}" == "2" && "${hysteria2Status}" == "true" ]]; then
             unInstallSingBox hysteria2 || true
+            refreshInstallState=true
         elif [[ "${installHysteria2Status}" == "3" && "${hysteria2Status}" == "true" ]]; then
             portHoppingMenu hysteria2 || true
         elif [[ "${installHysteria2Status}" == "4" && "${hysteria2Status}" == "true" ]]; then
@@ -4030,9 +4040,12 @@ manageTuicAdvanced() {
 }
 
 manageTuic() {
-    local tuicStatus installTuicStatus configFile
+    local tuicStatus installTuicStatus configFile refreshInstallState=true
     while true; do
-        readInstallType || return 1
+        if [[ "${refreshInstallState}" == "true" ]]; then
+            readInstallType || return 1
+            refreshInstallState=false
+        fi
         tuicStatus=
         echoContent title "\n┌─ Tuic 管理 ────────────────────────────────────────"
         menuLine "依赖 sing-box；已有 Xray 时可作为辅助核心增量安装，适合 UDP、移动网络或 QUIC/HTTP3 客户端场景"
@@ -4057,8 +4070,10 @@ manageTuic() {
         menuReadChoice tuic_menu "请选择:" installTuicStatus || return 0
         if [[ "${installTuicStatus}" == "1" ]]; then
             singBoxTuicInstall || true
+            refreshInstallState=true
         elif [[ "${installTuicStatus}" == "2" && "${tuicStatus}" == "true" ]]; then
             unInstallSingBox tuic || true
+            refreshInstallState=true
         elif [[ "${installTuicStatus}" == "3" && "${tuicStatus}" == "true" ]]; then
             portHoppingMenu tuic || true
         elif [[ "${installTuicStatus}" == "4" && "${tuicStatus}" == "true" ]]; then

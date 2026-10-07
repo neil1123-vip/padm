@@ -1492,6 +1492,78 @@ runRealityManageMenuStateRegression() (
     [[ "${protocolReads}:${configReads}" == 1:1 ]]
 )
 
+runRealityTargetMenuStateRegression() (
+    local protocolReads=0 configReads=0
+    coreInstallType=1
+    readInstallProtocolType() {
+        protocolReads=$((protocolReads + 1))
+        currentInstallProtocolType=,1,
+    }
+    readConfigHostPathUUID() {
+        configReads=$((configReads + 1))
+        realityTargetHost=www.example.com
+        realityTargetPort=443
+        realitySNI=www.example.com
+    }
+    formatRealityTarget() { printf '%s:%s\n' "$1" "$2"; }
+    realityTargetCachedAsnSummary() { printf '未缓存\n'; }
+    realityTargetCachedNetworkSummary() { printf '未缓存\n'; }
+    showRealityTargetPqcSummary() { :; }
+    showRealityTargetBlockedCandidates() { :; }
+    echoContent() { :; }
+    menuItem() { :; }
+    menuLine() { :; }
+    menuReturnItem() { :; }
+    menuClose() { :; }
+    menuReadChoice() {
+        local choice
+        IFS= read -r choice || return 1
+        printf -v "$3" '%s' "${choice}"
+    }
+
+    manageRealityTarget <<< $'7\n8'
+    [[ "${protocolReads}:${configReads}" == 1:1 ]]
+)
+
+runSingBoxProtocolMenuStateRegression() (
+    local installReads=0 configFile="${TMP_DIR}/sing-box-entry.json"
+    coreInstallType=1
+    mkdir -p "${TMP_DIR}" || return 1
+    printf '{}\n' >"${configFile}"
+    readInstallType() {
+        installReads=$((installReads + 1))
+        singBoxConfigPath="${TMP_DIR}/"
+    }
+    hysteria2ConfigFile() { printf '%s\n' "${configFile}"; }
+    tuicConfigFile() { printf '%s\n' "${configFile}"; }
+    hysteria2SettingsSummary() { :; }
+    tuicSettingsSummary() { :; }
+    portHoppingMenu() { :; }
+    echoContent() { :; }
+    menuLine() { :; }
+    menuItem() { :; }
+    menuRecommendedItem() { :; }
+    menuReturnItem() { :; }
+    menuClose() { :; }
+    menuReadChoice() {
+        local choice
+        IFS= read -r choice || return 1
+        printf -v "$3" '%s' "${choice}"
+    }
+
+    set +e
+    manageHysteria <<< $'3\n5'
+    local hysteriaRc=$?
+    set -e
+    [[ "${hysteriaRc}" == 0 && "${installReads}" == 1 ]] || return 1
+    installReads=0
+    set +e
+    manageTuic <<< $'3\n7'
+    local tuicRc=$?
+    set -e
+    [[ "${tuicRc}" == 0 && "${installReads}" == 1 ]]
+)
+
 runCorePortMenuStateRegression() (
     local installReads=0 singBoxReads=0
     coreInstallType=1
@@ -1523,6 +1595,8 @@ runProtocolCapabilitiesRegression() {
     runRegressionStep protocol-entry-port runProtocolEntryPortRegression
     runRegressionStep protocol-entry-menu-sync runProtocolEntryMenuSyncRegression
     runRegressionStep reality-manage-menu-state runRealityManageMenuStateRegression
+    runRegressionStep reality-target-menu-state runRealityTargetMenuStateRegression
+    runRegressionStep singbox-protocol-menu-state runSingBoxProtocolMenuStateRegression
     runRegressionStep core-port-menu-state runCorePortMenuStateRegression
     runRegressionStep protocol-config-ownership runProtocolConfigOwnershipRegression
     runRegressionStep protocol-capability-registry runProtocolCapabilityRegistryRegression
