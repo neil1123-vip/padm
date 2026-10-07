@@ -1925,7 +1925,7 @@ dockerPrepareCandidatePermissions() {
     fi
     find "${candidate}/config" "${candidate}/data" "${candidate}/logs" -type d -exec chmod 0750 {} + || return 1
     find "${candidate}/config" "${candidate}/data" "${candidate}/logs" -type f \
-        ! -path "${candidate}/config/spec.json" ! -name users.base -exec chmod 0640 {} + || return 1
+        ! -path "${candidate}/config/spec.json" ! -name share-groups.json ! -name users.base -exec chmod 0640 {} + || return 1
     find "${candidate}/secrets" -type d -exec chmod 0750 {} + || return 1
     find "${candidate}/secrets" -type f -exec chmod 0640 {} + || return 1
     chmod 0640 "${candidate}/deployment.json" "${candidate}/compose.json" \
@@ -1934,7 +1934,7 @@ dockerPrepareCandidatePermissions() {
         chmod 0600 "${candidate}/secrets/net/wireguard/wg-padm.conf" || return 1
     fi
     if [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" != "1" ]]; then
-        find "${candidate}/config" ! -path "${candidate}/config/spec.json" ! -name users.base \
+        find "${candidate}/config" ! -path "${candidate}/config/spec.json" ! -name share-groups.json ! -name users.base \
             -exec chown "0:${PADM_DOCKER_CONTAINER_GID}" {} + || return 1
         chown -R "0:${PADM_DOCKER_CONTAINER_GID}" "${candidate}/data/subscription" \
             "${candidate}/logs" "${candidate}/secrets" || return 1
@@ -1945,7 +1945,7 @@ dockerPrepareCandidatePermissions() {
         done
     fi
     # 完整输入含停用账号凭据，只允许宿主 root 读取，不交给容器组。
-    for privateFile in config/spec.json config/xray/users.base config/sing-box/users.base; do
+    for privateFile in config/spec.json config/share-groups.json config/xray/users.base config/sing-box/users.base; do
         [[ -e "${candidate}/${privateFile}" || -L "${candidate}/${privateFile}" ]] || continue
         [[ -f "${candidate}/${privateFile}" && ! -L "${candidate}/${privateFile}" ]] || return 1
         chmod 0600 "${candidate}/${privateFile}" || return 1
@@ -1956,7 +1956,7 @@ dockerPrepareCandidatePermissions() {
 }
 
 dockerGenerateCandidate() {
-    local specFile=$1 candidate=$2 tlsSource=${3:-} acmeSource=${4:-} root core token
+    local specFile=$1 candidate=$2 tlsSource=${3:-} acmeSource=${4:-} businessSource=${5:-} root core token sharesSource=''
     root=$(dockerInstallRoot) || return 1
     while IFS= read -r core; do
         case "${core}" in
@@ -1985,13 +1985,23 @@ dockerGenerateCandidate() {
         token=$(jq -r '.subscription.token' "${specFile}") || return 1
         dockerGenerateSubscription "${specFile}" "${candidate}/data/subscription/${token}" || return 1
     fi
+    if [[ -n "${businessSource}" ]]; then
+        sharesSource="${candidate}/business-shares.json"
+        jq '.shares' "${businessSource}" >"${sharesSource}" &&
+            chmod 0600 "${sharesSource}" || return 1
+    fi
+    dockerSubscriptionPrepareCandidate "${specFile}" "${candidate}" "${sharesSource}" || return 1
     : >"${candidate}/images.env"
     : >"${candidate}/images.runtime.env"
     dockerGenerateImagesEnv "${specFile}" "${candidate}/images.env" "${candidate}" || return 1
     dockerGenerateImagesEnv "${specFile}" "${candidate}/images.runtime.env" "${root}" || return 1
     dockerGenerateCompose "${specFile}" "${candidate}/compose.json" || return 1
     dockerGenerateDeployment "${specFile}" "${candidate}/deployment.json" || return 1
-    dockerTrafficPrepareCandidate "${candidate}" || return 1
+    if [[ -n "${businessSource}" ]]; then
+        dockerBusinessPrepareCandidate "${businessSource}" "${candidate}" || return 1
+    else
+        dockerTrafficPrepareCandidate "${candidate}" || return 1
+    fi
     dockerPrepareCandidatePermissions "${candidate}"
 }
 
@@ -2224,10 +2234,16 @@ config/sing-box
 config/nginx
 config/net
 config/spec.json
+config/share-groups.json
 data/subscription
 secrets/tls
 data/acme
 EOF
+    if [[ "${prefix}" == business ]]; then
+        mkdir -p -- "${backup}/data/traffic" || return 1
+        dockerTrafficReadState >"${backup}/data/traffic/state.json" || return 1
+        printf '%s\n' data/traffic/state.json >>"${backup}/present" || return 1
+    fi
     chmod -R go-rwx "${backup}" || return 1
     # 备份是宿主 root 的私有快照，运行时属主在恢复后按目录用途重建。
     [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == "1" ]] || chown -R 0:0 "${backup}" || return 1
@@ -2329,6 +2345,10 @@ dockerCreateUpdateCandidate() {
         dockerConfigureSpecValidate "${candidate}/config/spec.json" &&
             dockerConfigureReleaseValidate "${candidate}/config/spec.json" || return 1
     fi
+    if [[ -e "${root}/config/share-groups.json" || -L "${root}/config/share-groups.json" ]]; then
+        dockerSubscriptionReadState >"${candidate}/config/share-groups.json" || return 1
+        chmod 0600 "${candidate}/config/share-groups.json" || return 1
+    fi
     dockerTrafficPrepareCandidate "${candidate}" || return 1
     dockerPrepareCandidatePermissions "${candidate}" || return 1
     DOCKER_CONFIG_CANDIDATE=${candidate}
@@ -2369,6 +2389,7 @@ config/sing-box
 config/nginx
 config/net
 config/spec.json
+config/share-groups.json
 data/subscription
 secrets/tls
 data/acme
@@ -2380,6 +2401,9 @@ dockerInstallCandidate() {
     root=$(dockerInstallRoot) || return 1
     dockerRealityStreamDeploymentCheck "${candidate}/config/spec.json" "${root}/config/spec.json" || return 1
     DOCKER_CONFIG_SWITCHED=1
+    if [[ -f "${candidate}/business-traffic.json" ]]; then
+        dockerTrafficWriteState <"${candidate}/business-traffic.json" || return 1
+    fi
     dockerRealityStreamTransitionPrepare "${candidate}/config/spec.json" || return 1
     dockerRemoveConfigurationTargets || return 1
     if grep -qxF deployment.json "${backup}/present"; then
@@ -2394,6 +2418,9 @@ dockerInstallCandidate() {
     done
     if [[ -f "${candidate}/config/spec.json" && ! -L "${candidate}/config/spec.json" ]]; then
         mv -- "${candidate}/config/spec.json" "${root}/config/spec.json" || return 1
+    fi
+    if [[ -f "${candidate}/config/share-groups.json" && ! -L "${candidate}/config/share-groups.json" ]]; then
+        mv -- "${candidate}/config/share-groups.json" "${root}/config/share-groups.json" || return 1
     fi
     mv -- "${candidate}/compose.json" "${root}/compose.json" || return 1
     mv -- "${candidate}/images.runtime.env" "${root}/images.env" || return 1
@@ -2419,13 +2446,13 @@ dockerEnsureRuntimeDataPermissions() {
         [[ -d "${root}/${directory}" && ! -L "${root}/${directory}" ]] || return 1
         [[ -z "$(find "${root}/${directory}" -type l -print -quit)" ]] || return 1
         find "${root}/${directory}" -type d -exec chmod 0750 {} + || return 1
-        find "${root}/${directory}" -type f ! -path "${root}/config/spec.json" ! -name users.base \
+        find "${root}/${directory}" -type f ! -path "${root}/config/spec.json" ! -name share-groups.json ! -name users.base \
             -exec chmod 0640 {} + || return 1
     done
     if [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" != "1" ]]; then
         chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" \
             "${root}/data/xray" "${root}/data/sing-box" "${root}/data/acme" || return 1
-        find "${root}/config" ! -path "${root}/config/spec.json" ! -name users.base \
+        find "${root}/config" ! -path "${root}/config/spec.json" ! -name share-groups.json ! -name users.base \
             -exec chown "0:${PADM_DOCKER_CONTAINER_GID}" {} + || return 1
         chown -R "0:${PADM_DOCKER_CONTAINER_GID}" "${root}/data/static" \
             "${root}/logs/subscription" "${root}/logs/acme" \
@@ -2434,7 +2461,7 @@ dockerEnsureRuntimeDataPermissions() {
             "${root}/logs/nginx" || return 1
         chown -R 0:0 "${root}/data/net" || return 1
     fi
-    for privateFile in config/spec.json config/xray/users.base config/sing-box/users.base; do
+    for privateFile in config/spec.json config/share-groups.json config/xray/users.base config/sing-box/users.base; do
         [[ -e "${root}/${privateFile}" || -L "${root}/${privateFile}" ]] || continue
         [[ -f "${root}/${privateFile}" && ! -L "${root}/${privateFile}" ]] || return 1
         chmod 0600 "${root}/${privateFile}" || return 1
@@ -2445,7 +2472,7 @@ dockerEnsureRuntimeDataPermissions() {
 }
 
 dockerRestoreConfiguration() {
-    local root backup=${DOCKER_CONFIG_BACKUP:-} relative core bundleTarget=
+    local root backup=${DOCKER_CONFIG_BACKUP:-} relative core bundleTarget= savedTraffic currentTraffic restoredTraffic
     [[ "${DOCKER_CONFIG_SWITCHED:-0}" == "1" && -n "${backup}" ]] || return 0
     root=$(dockerInstallRoot) || return 1
     if [[ -e "${backup}/bundle.target" || -L "${backup}/bundle.target" ]]; then
@@ -2460,6 +2487,13 @@ dockerRestoreConfiguration() {
     fi
     # 当前配置可能只安装了一部分，恢复授权只取自已验证的备份。
     dockerRealityStreamDeploymentCheck "${backup}/config/spec.json" || return 1
+    if grep -qxF data/traffic/state.json "${backup}/present"; then
+        dockerTrafficBeforeChange
+        savedTraffic=$(jq -c . "${backup}/data/traffic/state.json") &&
+            currentTraffic=$(dockerTrafficReadState) &&
+            restoredTraffic=$(dockerBusinessMergeTraffic "${savedTraffic}" "${currentTraffic}") &&
+            dockerTrafficWriteState <<<"${restoredTraffic}" || return 1
+    fi
     if [[ -f "${backup}/deployment.json" ]] &&
         { [[ "${DOCKER_CONFIG_STREAM_TRANSITION:-0}" == 1 ]] ||
         { [[ -f "${backup}/config/spec.json" ]] &&
@@ -2479,6 +2513,8 @@ dockerRestoreConfiguration() {
     fi
     dockerRemoveConfigurationTargets || return 1
     while IFS= read -r relative; do
+        # 业务恢复点已恢复额度并合并最新累计，不能再用旧文件覆盖账目。
+        [[ "${relative}" != data/traffic/state.json ]] || continue
         [[ -e "${backup}/${relative}" ]] || return 1
         mkdir -p -- "${root}/$(dirname -- "${relative}")" || return 1
         cp -a -- "${backup}/${relative}" "${root}/${relative}" || return 1
@@ -2604,7 +2640,9 @@ dockerRealityStreamTransitionPrepare() {
 }
 
 dockerConfigureApply() {
-    local sourceSpec=$1 tlsSource=${2:-} acmeSource=${3:-} mode=${4:-configure} specFile candidate backup answer root
+    local sourceSpec=$1 tlsSource=${2:-} acmeSource=${3:-} mode=${4:-configure} businessSource=${5:-}
+    local specFile candidate backup answer root backupPrefix=configure
+    [[ -z "${businessSource}" ]] || backupPrefix=business
     case "${mode}" in configure|preview|interactive|confirmed) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
     dockerConfigureSpecValidate "${sourceSpec}" || return "${PADM_DOCKER_RC_STATE}"
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
@@ -2640,7 +2678,7 @@ dockerConfigureApply() {
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_CONFLICT}"
     }
-    if ! dockerGenerateCandidate "${specFile}" "${candidate}" "${tlsSource}" "${acmeSource}" ||
+    if ! dockerGenerateCandidate "${specFile}" "${candidate}" "${tlsSource}" "${acmeSource}" "${businessSource}" ||
         ! dockerValidateCandidate "${specFile}" "${candidate}"; then
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_STATE}"
@@ -2664,14 +2702,18 @@ dockerConfigureApply() {
     if [[ "${mode}" != configure ]]; then
         # 确认后才采集旧核心，并以最新额度状态重渲染候选账号。
         dockerTrafficBeforeChange
-        dockerTrafficPrepareCandidate "${candidate}" &&
+        if [[ -n "${businessSource}" ]]; then
+            dockerBusinessPrepareCandidate "${businessSource}" "${candidate}"
+        else
+            dockerTrafficPrepareCandidate "${candidate}"
+        fi &&
             dockerPrepareCandidatePermissions "${candidate}" &&
             dockerValidateCandidate "${specFile}" "${candidate}" || {
             dockerCleanupConfigurationCandidate || true
             return "${PADM_DOCKER_RC_STATE}"
         }
     fi
-    dockerBackupConfiguration || {
+    dockerBackupConfiguration "${backupPrefix}" || {
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_STATE}"
     }

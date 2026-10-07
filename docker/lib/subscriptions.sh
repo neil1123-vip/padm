@@ -5,6 +5,44 @@ if [[ "${PADM_DOCKER_SUBSCRIPTIONS_LOADED:-}" == "1" ]]; then
 fi
 PADM_DOCKER_SUBSCRIPTIONS_LOADED=1
 
+dockerSubscriptionStateValidate() {
+    jq -es '
+      length == 1 and (.[0] |
+      type == "object" and keys == ["groups","schema_version"] and .schema_version == 1 and
+      (.groups | type == "array" and length <= 256 and
+       ([.[].id] | length == (unique | length)) and
+       ([.[].token] | length == (unique | length)) and
+       all(.[]; type == "object" and
+         (keys_unsorted | sort) ==
+           ["account_ids","enabled","id","listener_ids","name","token"] and
+         (.id | type == "string" and test("^share-[a-f0-9]{16}$")) and
+         (.name | type == "string" and length >= 1 and length <= 64 and
+           (explode | all(. >= 32 and . != 127))) and
+         (.enabled | type == "boolean") and
+         (.token | type == "string" and test("^[A-Za-z0-9_-]{16,128}$")) and
+         (.account_ids | type == "array" and length >= 1 and unique == . and
+          all(.[]; type == "string" and test("^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$"))) and
+         (.listener_ids | type == "array" and length >= 1 and unique == . and
+          all(.[]; type == "string" and test("^(entry-[a-z0-9][a-z0-9-]{0,47}|vless-reality|vless-ws)$")))
+       )))
+    ' "$1" >/dev/null 2>&1
+}
+
+dockerSubscriptionReadState() {
+    local root path
+    root=$(dockerInstallRoot) || return 1
+    path="${root}/config/share-groups.json"
+    dockerTrafficSafePath "${root}" "${path}" || return 1
+    if [[ ! -e "${path}" ]]; then
+        printf '%s\n' '{"schema_version":1,"groups":[]}'
+        return 0
+    fi
+    [[ -f "${path}" && -O "${path}" ]] &&
+        dockerPrivateFileIsRestricted "${path}" &&
+        dockerSubscriptionStateValidate "${path}" || return 1
+    jq -c . "${path}"
+}
+
 dockerSubscriptionStatePath() {
     local root=$1 config path
     config="${root}/config"
@@ -24,26 +62,39 @@ dockerSubscriptionStatePath() {
         chmod 0600 "${path}" || return 1
         [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == "1" ]] || chown 0:0 "${path}" || return 1
     fi
-    jq -e '
-      type == "object" and .schema_version == 1 and
-      (.groups | type == "array" and
-       all(.[]; type == "object" and
-         (keys_unsorted | sort) ==
-           ["account_ids","enabled","id","listener_ids","name","token"] and
-         (.id | type == "string" and test("^share-[a-f0-9]{16}$")) and
-         (.name | type == "string" and length >= 1 and length <= 64) and
-         (.enabled | type == "boolean") and
-         (.token | type == "string" and test("^[A-Za-z0-9_-]{16,128}$")) and
-         (.account_ids | type == "array" and length >= 1 and unique == . and
-          all(.[]; type == "string" and test("^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$"))) and
-         (.listener_ids | type == "array" and length >= 1 and unique == . and
-          all(.[]; type == "string" and test("^(entry-[a-z0-9][a-z0-9-]{0,47}|vless-reality|vless-ws)$")))
-       ))
-    ' "${path}" >/dev/null 2>&1 || {
+    dockerSubscriptionStateValidate "${path}" || {
         dockerError '分享组状态文件格式或权限不安全'
         return "${PADM_DOCKER_RC_STATE}"
     }
     printf '%s\n' "${path}"
+}
+
+dockerSubscriptionPrepareCandidate() {
+    local specFile=$1 candidate=$2 source=${3:-} state group token
+    if [[ -n "${source}" ]]; then
+        dockerSubscriptionStateValidate "${source}" || return 1
+        state=$(jq -c . "${source}") || return 1
+    else
+        state=$(dockerSubscriptionReadState) || return 1
+    fi
+    dockerSubscriptionStateWrite "${candidate}/config/share-groups.json" "${state}" || return 1
+    # 账号停用或删除后撤销对应发布；组身份保留，重新启用时可重建内容。
+    while IFS= read -r group; do
+        jq -e --argjson group "${group}" '
+          . as $spec |
+          any(.core.protocols[]; .listener_id as $listener |
+            ($group.listener_ids | index($listener)) != null and
+            any($spec.accounts[]?;
+              .enabled and (.id as $id | ($group.account_ids | index($id)) != null) and
+              (.listeners | index($listener)) != null))
+        ' "${specFile}" >/dev/null || continue
+        token=$(jq -er '.token' <<<"${group}") || return 1
+        [[ "${token}" != "$(jq -r '.subscription.token' "${specFile}")" ]] || {
+            dockerError '分享 token 与主订阅冲突'
+            return 1
+        }
+        dockerSubscriptionRender "${specFile}" "${group}" "${candidate}/data/subscription/${token}" || return 1
+    done < <(jq -c '.groups[] | select(.enabled)' <<<"${state}")
 }
 
 dockerSubscriptionSpecFile() {

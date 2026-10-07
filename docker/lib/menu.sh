@@ -453,6 +453,39 @@ dockerMenuSubscriptions() {
     done
 }
 
+dockerMenuBusiness() {
+    local choice file strategy answer
+    while :; do
+        DOCKER_MENU_SIGNAL=0
+        printf '\nDocker 业务备份恢复\n'
+        printf '%s\n' '1. 创建业务备份' '2. 预览业务恢复' '3. 恢复业务备份' '0. 返回'
+        printf '请选择: '
+        if ! IFS= read -r choice; then
+            [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
+            return 0
+        fi
+        case "${choice}" in
+        0) return 0 ;;
+        1)
+            dockerSetupRead file '备份保存绝对路径（0 返回）: ' || continue
+            dockerMenuRun business backup "${file}" || true
+            ;;
+        2|3)
+            dockerSetupRead file '备份 JSON 绝对路径（0 返回）: ' || continue
+            dockerSetupRead strategy '恢复策略 [merge 保留新增 / replace 删除新增]（0 返回）: ' || continue
+            case "${strategy}" in merge|replace) ;; *) printf '请输入 merge 或 replace。\n'; continue ;; esac
+            dockerMenuRun business preview "${file}" --strategy "${strategy}" || continue
+            [[ "${choice}" == 3 ]] || continue
+            dockerSetupRead answer '确认按上述策略恢复业务？[y/N]: ' n || continue
+            case "${answer}" in
+            y|Y|yes|YES) dockerMenuRun business restore "${file}" --strategy "${strategy}" --yes || true ;;
+            esac
+            ;;
+        *) printf '无效选项，请重新选择。\n' ;;
+        esac
+    done
+}
+
 dockerMenu() {
     local choice
     if [[ "$#" -ne 0 || ! -t 0 || ! -t 1 ]]; then
@@ -478,6 +511,7 @@ dockerMenu() {
             '9. 协议与入口' \
             '10. 账号管理' \
             '11. 分享订阅管理' \
+            '12. 业务备份恢复' \
             '0. 退出'
         printf '请选择: '
         if ! IFS= read -r choice; then
@@ -499,6 +533,7 @@ dockerMenu() {
         9) dockerMenuProtocols ;;
         10) dockerMenuAccounts ;;
         11) dockerMenuSubscriptions ;;
+        12) dockerMenuBusiness ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

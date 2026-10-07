@@ -35,6 +35,9 @@ dockerUsage() {
    padm-docker subscription content <分享组 ID>
    padm-docker subscription links <分享组 ID>
    padm-docker share <同上 subscription 命令>
+  padm-docker business backup <绝对 JSON 路径>
+  padm-docker business preview <备份 JSON 路径> --strategy <merge|replace>
+  padm-docker business restore <备份 JSON 路径> --strategy <merge|replace> --yes
   padm-docker edit --reality-stream <Reality 入口 ID> <网站 TLS 入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --reality-stream-host <Reality 入口 ID> <网站域名,域名> <宿主可达地址> <TLS 端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --reality-stream-loopback <Reality 入口 ID> <网站域名,域名> <127.0.0.1|::1> <TLS 端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
@@ -794,7 +797,7 @@ dockerUpdateCommand() {
 
 dockerConfigurationBackupAllowed() {
     case "$1" in
-    deployment.json|deployment.previous.json|images.env|compose.json|config/xray|config/sing-box|config/nginx|config/net|config/spec.json|data/subscription|secrets/tls|data/acme) return 0 ;;
+    deployment.json|deployment.previous.json|images.env|compose.json|config/xray|config/sing-box|config/nginx|config/net|config/spec.json|config/share-groups.json|data/traffic/state.json|data/subscription|secrets/tls|data/acme) return 0 ;;
     *) return 1 ;;
     esac
 }
@@ -831,6 +834,15 @@ dockerValidateConfigurationBackup() {
     grep -qxF compose.json "${backup}/present" || return 1
     grep -qxF images.env "${backup}/present" || return 1
     dockerDeploymentFileValidate "${backup}/deployment.json" || return 1
+    if [[ -e "${backup}/config/share-groups.json" ]]; then
+        grep -qxF config/share-groups.json "${backup}/present" &&
+            dockerSubscriptionStateValidate "${backup}/config/share-groups.json" || return 1
+    fi
+    if [[ -e "${backup}/data/traffic/state.json" ]]; then
+        [[ "${backup##*/}" == business.* ]] &&
+            grep -qxF data/traffic/state.json "${backup}/present" &&
+            jq -e "${DOCKER_TRAFFIC_STATE_JQ}" "${backup}/data/traffic/state.json" >/dev/null || return 1
+    fi
     if [[ -e "${backup}/config/spec.json" || -L "${backup}/config/spec.json" ]]; then
         grep -qxF config/spec.json "${backup}/present" || return 1
         dockerManagedSpecMatchesDeployment "${backup}/config/spec.json" \
@@ -1051,6 +1063,7 @@ dockerMain() {
     protocol) dockerProtocolCommand "$@" ;;
     account) dockerAccountCommand "$@" ;;
     subscription | share) dockerSubscriptionCommand "$@" ;;
+    business) dockerBusinessCommand "$@" ;;
     configure) dockerConfigureCommand "$@" ;;
     tls)
         case "${1:-}" in

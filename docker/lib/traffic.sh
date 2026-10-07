@@ -140,12 +140,13 @@ dockerTrafficRender() {
 }
 
 dockerTrafficPrepareCandidate() (
-    local candidate=$1 root stage state core directory source failed=false keep=false
+    local candidate=$1 state=${2:-} root stage core directory source failed=false keep=false
     local -a prepared=() moved=()
     root=$(dockerInstallRoot) || return 1
     dockerTrafficSafePath "${root}" "${candidate}" || return 1
     [[ -d "${candidate}" && -O "${candidate}" ]] || return 1
-    state=$(dockerTrafficReadState) || return 1
+    [[ -n "${state}" ]] || state=$(dockerTrafficReadState) || return 1
+    jq -e "${DOCKER_TRAFFIC_STATE_JQ}" <<<"${state}" >/dev/null || return 1
     stage=$(mktemp -d "${candidate}/.traffic.XXXXXX") || return 1
     trap '[[ "${keep}" == true ]] || dockerRemoveManagedTree "${candidate}" "${stage}"' EXIT
     for core in xray sing-box; do
