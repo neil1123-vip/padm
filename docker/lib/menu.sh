@@ -59,6 +59,8 @@ dockerMenuRun() {
     [[ $- != *m* ]] || monitorEnabled=1
     if [[ "${1:-}" == setup || "${1:-}" == edit ||
         ( "${1:-}" == account && "${2:-}" != list ) ||
+        ( ( "${1:-}" == subscription || "${1:-}" == share ) &&
+          "${2:-}" != list && "${2:-}" != content && "${2:-}" != links ) ||
         ( "${1:-}" == tls && "${2:-}" == manage ) ||
         ( "${1:-}" == protocol && ( "${2:-}" == select-target ||
           "${2:-}" == scan-targets || "${2:-}" == scan-targets-asn ) ) ]]; then
@@ -102,7 +104,7 @@ dockerMenuProtocols() {
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 协议与入口\n'
-        printf '%s\n' '1. 查看入口' '2. 查看分享链接' '3. 编辑参数/复制或删除入口' '4. 重生成 Reality 参数' '5. Reality 目标站管理' '6. Reality 443 共存' '0. 返回'
+        printf '%s\n' '1. 查看入口' '2. 查看分享链接' '3. 编辑参数/复制或删除入口' '4. 重生成 Reality 参数' '5. Reality 目标站管理' '6. Reality 443 共存' '7. 分享订阅管理' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -136,6 +138,7 @@ dockerMenuProtocols() {
             ;;
         5) dockerMenuRealityTargets ;;
         6) dockerMenuRealityStream ;;
+        7) dockerMenuSubscriptions ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done
@@ -360,6 +363,96 @@ dockerMenuAccounts() {
     done
 }
 
+dockerMenuSubscriptions() {
+    local choice groupId name accounts listeners enabled answer
+    local -a action=()
+    while :; do
+        DOCKER_MENU_SIGNAL=0
+        printf '\nDocker 分享订阅管理\n'
+        printf '%s\n' \
+            '1. 查看分享组' \
+            '2. 新建分享组' \
+            '3. 编辑分享组' \
+            '4. 启用分享组' \
+            '5. 停用分享组' \
+            '6. 删除分享组' \
+            '7. 轮换分享 token' \
+            '8. 输出纯订阅内容' \
+            '9. 输出 HTTPS 链接' \
+            '0. 返回'
+        printf '请选择: '
+        if ! IFS= read -r choice; then
+            [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
+            return 0
+        fi
+        case "${choice}" in
+        0) return 0 ;;
+        1) dockerMenuRun subscription list || true ;;
+        2)
+            action=(subscription create)
+            dockerSetupRead name '分享组名称（空输入自动生成，0 返回）: ' || continue
+            [[ -z "${name}" ]] || action+=(--name "${name}")
+            dockerSetupRead accounts '账号 ID（逗号分隔，空输入使用全部账号，0 返回）: ' || continue
+            [[ -z "${accounts}" ]] || action+=(--accounts "${accounts}")
+            dockerSetupRead listeners '入口 ID（逗号分隔，空输入使用全部入口，0 返回）: ' || continue
+            [[ -z "${listeners}" ]] || action+=(--listeners "${listeners}")
+            dockerSetupRead enabled '是否启用分享组 [Y/n]: ' y || continue
+            case "${enabled}" in
+            y|Y|yes|YES) ;;
+            n|N|no|NO) action+=(--disabled) ;;
+            *) printf '请输入 y 或 n。\n'; continue ;;
+            esac
+            dockerMenuRun "${action[@]}" || true
+            ;;
+        3)
+            dockerSetupRead groupId '分享组 ID（0 返回）: ' || continue
+            action=(subscription edit "${groupId}")
+            dockerSetupRead name '新名称（空输入保持不变，0 返回）: ' || continue
+            [[ -z "${name}" ]] || action+=(--name "${name}")
+            dockerSetupRead accounts '新账号 ID（空输入保持不变，0 返回）: ' || continue
+            [[ -z "${accounts}" ]] || action+=(--accounts "${accounts}")
+            dockerSetupRead listeners '新入口 ID（空输入保持不变，0 返回）: ' || continue
+            [[ -z "${listeners}" ]] || action+=(--listeners "${listeners}")
+            [[ "${#action[@]}" -gt 3 ]] ||
+                { printf '至少修改名称、账号或入口。\n'; continue; }
+            dockerMenuRun "${action[@]}" || true
+            ;;
+        4|5)
+            dockerSetupRead groupId '分享组 ID（0 返回）: ' || continue
+            if [[ "${choice}" == 4 ]]; then
+                dockerMenuRun subscription enable "${groupId}" || true
+            else
+                dockerMenuRun subscription disable "${groupId}" || true
+            fi
+            ;;
+        6|7)
+            dockerSetupRead groupId '分享组 ID（0 返回）: ' || continue
+            dockerSetupRead answer '确认操作？[y/N]: ' n || continue
+            case "${answer}" in
+            y|Y|yes|YES)
+                if [[ "${choice}" == 6 ]]; then
+                    dockerMenuRun subscription delete "${groupId}" --yes || true
+                else
+                    dockerMenuRun subscription rotate "${groupId}" --yes || true
+                fi
+                ;;
+            n|N|no|NO) ;;
+            *) printf '请输入 y 或 n。\n' ;;
+            esac
+            ;;
+        8|9)
+            dockerSetupRead groupId '分享组 ID（0 返回）: ' || continue
+            if [[ "${choice}" == 8 ]]; then
+                dockerMenuRun subscription content "${groupId}" || true
+            else
+                dockerMenuRun subscription links "${groupId}" || true
+            fi
+            ;;
+        *) printf '无效选项，请重新选择。\n' ;;
+        esac
+    done
+}
+
 dockerMenu() {
     local choice
     if [[ "$#" -ne 0 || ! -t 0 || ! -t 1 ]]; then
@@ -384,6 +477,7 @@ dockerMenu() {
             '8. 证书管理' \
             '9. 协议与入口' \
             '10. 账号管理' \
+            '11. 分享订阅管理' \
             '0. 退出'
         printf '请选择: '
         if ! IFS= read -r choice; then
@@ -404,6 +498,7 @@ dockerMenu() {
         8) dockerMenuRun tls manage || true ;;
         9) dockerMenuProtocols ;;
         10) dockerMenuAccounts ;;
+        11) dockerMenuSubscriptions ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

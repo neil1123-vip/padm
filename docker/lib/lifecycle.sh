@@ -25,6 +25,16 @@ dockerUsage() {
   padm-docker account disable <账号 ID>
   padm-docker account delete <账号 ID> [--yes]
   padm-docker account rotate <账号 ID> [--yes]
+   padm-docker subscription list [--json]
+   padm-docker subscription create [--name <名称>] [--accounts <账号 ID,...>] [--listeners <入口 ID,...>] [--disabled]
+   padm-docker subscription edit <分享组 ID> [--name <名称>] [--accounts <账号 ID,...>] [--listeners <入口 ID,...>]
+   padm-docker subscription enable <分享组 ID>
+   padm-docker subscription disable <分享组 ID>
+   padm-docker subscription delete <分享组 ID> [--yes]
+   padm-docker subscription rotate <分享组 ID> [--yes]
+   padm-docker subscription content <分享组 ID>
+   padm-docker subscription links <分享组 ID>
+   padm-docker share <同上 subscription 命令>
   padm-docker edit --reality-stream <Reality 入口 ID> <网站 TLS 入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --reality-stream-host <Reality 入口 ID> <网站域名,域名> <宿主可达地址> <TLS 端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --reality-stream-loopback <Reality 入口 ID> <网站域名,域名> <127.0.0.1|::1> <TLS 端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
@@ -1040,6 +1050,7 @@ dockerMain() {
     edit) dockerEditCommand "$@" ;;
     protocol) dockerProtocolCommand "$@" ;;
     account) dockerAccountCommand "$@" ;;
+    subscription | share) dockerSubscriptionCommand "$@" ;;
     configure) dockerConfigureCommand "$@" ;;
     tls)
         case "${1:-}" in
