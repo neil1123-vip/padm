@@ -1362,7 +1362,7 @@ downloadFile() {
         padmRemoveCleanupPath "${tmpFile}"
         return 1
     fi
-    if ! mv -f -- "${tmpFile}" "${outputFile}"; then
+    if [[ -d "${outputFile}" ]] || ! mv -f -- "${tmpFile}" "${outputFile}"; then
         padmRemoveCleanupPath "${tmpFile}"
         return 1
     fi

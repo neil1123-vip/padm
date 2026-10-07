@@ -313,6 +313,23 @@ runDownloadArgumentMissingValueRegression() {
         downloadFile -O https://example.invalid/file.tar.gz
         grep -qx -- '-T 30 -t 2 -qO- https://example.invalid/file.tar.gz' "${calls}"
         [[ "$(<"${root}/file.tar.gz")" == "payload" ]]
+        downloadFile -O relative-output https://example.invalid/file.tar.gz
+        [[ "$(<relative-output)" == payload ]]
+        printf 'old-payload\n' >file.tar.gz
+        downloadFile -P . https://example.invalid/file.tar.gz
+        [[ "$(<file.tar.gz)" == payload ]]
+        # 目录目标不能让 mv 把临时文件移入目录并误报成功。
+        local mode
+        mkdir -p directory-target.tar.gz
+        for mode in explicit prefix default; do
+            case "${mode}" in
+            explicit) regressionExpectStatus 1 downloadFile -O directory-target.tar.gz https://example.invalid/file.tar.gz || return 1 ;;
+            prefix) regressionExpectStatus 1 downloadFile -P "${root}" https://example.invalid/directory-target.tar.gz || return 1 ;;
+            default) regressionExpectStatus 1 downloadFile https://example.invalid/directory-target.tar.gz || return 1 ;;
+            esac
+            [[ -d directory-target.tar.gz && -z "$(find directory-target.tar.gz -mindepth 1 -print -quit)" ]] || return 1
+            ! compgen -G "${root}/.*.download.*" >/dev/null || return 1
+        done
     )
 }
 

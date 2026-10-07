@@ -661,7 +661,7 @@ unInstallSingBox() {
         return 1
     }
     validPortNumber "${protocolPort}" || { errorCard "sing-box ${type} 端口异常，已取消卸载"; return 1; }
-    mergedFile=$(padmManagedFilePath "${singBoxConfigPath}" config.json) || return 1
+    mergedFile=$(singBoxMergedConfigFile) || return 1
     if [[ "${release:-}" == "alpine" ]]; then
         serviceFile=${PADM_SINGBOX_OPENRC_SERVICE_FILE:-/etc/init.d/sing-box}
     else

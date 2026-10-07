@@ -1122,7 +1122,7 @@ checkLog() {
     menuClose
 
     menuReadChoice log_menu "请选择:" selectAccessLogType || return 0
-    local configPathLog=${configPath//conf\//}
+    local configPathLog=${configPath%conf/}
 
     case ${selectAccessLogType} in
     1)

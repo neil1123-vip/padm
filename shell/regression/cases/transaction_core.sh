@@ -2494,6 +2494,7 @@ SH
 runSingBoxUninstallFailurePropagationRegression() (
     local root="${TMP_DIR}/sing-box-uninstall-failure"
     local configDir="${root}/conf/config/"
+    local mergedConfig="${root}/conf/config.json"
     local serviceLog="${root}/service.log"
     local firewallLog="${root}/firewall.log"
     local errorLog="${root}/error.log"
@@ -2504,7 +2505,7 @@ runSingBoxUninstallFailurePropagationRegression() (
     mkdir -p "${configDir}"
     printf '{"inbounds":[{"type":"tuic","listen_port":26451}]}\n' >"${configDir}09_tuic_inbounds.json"
     printf '{"inbounds":[{"type":"vless","listen_port":2443}]}\n' >"${configDir}02_other_inbounds.json"
-    printf '{"inbounds":[{"type":"tuic","listen_port":26451}]}\n' >"${configDir}config.json"
+    printf '{"inbounds":[{"type":"tuic","listen_port":26451}]}\n' >"${mergedConfig}"
     oldConfig=$(<"${configDir}09_tuic_inbounds.json")
     : >"${serviceLog}"
     : >"${firewallLog}"
@@ -2513,6 +2514,36 @@ runSingBoxUninstallFailurePropagationRegression() (
     REGRESSION_ERROR_CARD_LOG="${errorLog}"
     PADM_SINGBOX_BINARY="${root}/missing-sing-box"
     PADM_SINGBOX_SYSTEMD_SERVICE_FILE="${root}/sing-box.service"
+
+    (
+        # 合并配置位于分片目录的父目录，最后协议删除后必须清理核心注册。
+        source "${PROJECT_ROOT}/shell/core/state.sh"
+        local lastRoot="${root}/last-protocol"
+        local PADM_XRAY_BINARY="${lastRoot}/missing-xray"
+        local PADM_SINGBOX_BINARY="${lastRoot}/sing-box"
+        local PADM_SINGBOX_CONFIG_DIR="${lastRoot}/conf/config"
+        local PADM_SKIP_CONTROLLER_REFRESH=1 actions=
+        mkdir -p "${PADM_SINGBOX_CONFIG_DIR}"
+        printf '#!/bin/sh\nexit 0\n' >"${PADM_SINGBOX_BINARY}"
+        chmod +x "${PADM_SINGBOX_BINARY}"
+        printf '{"inbounds":[{"type":"tuic","listen_port":26451}]}\n' \
+            >"${PADM_SINGBOX_CONFIG_DIR}/09_tuic_inbounds.json"
+        cp "${PADM_SINGBOX_CONFIG_DIR}/09_tuic_inbounds.json" "${lastRoot}/conf/config.json"
+        singBoxRunning() { return 1; }
+        coreStartupServiceEnabled() { return 1; }
+        readPortHopping() { tuicPortHoppingStart=; tuicPortHoppingEnd=; }
+        singBoxMergeConfigForValidation() { return 0; }
+        singBoxRemoveServiceRegistration() { actions+=$'registration\n'; }
+        cleanCoreInstallDirectory() { actions+=$'cleanup\n'; }
+        denyPort() { return 0; }
+        refreshProtocolSubscriptions() { return 0; }
+        readInstallType
+        [[ "${coreInstallType}" == 2 ]]
+        unInstallSingBox tuic
+        [[ ! -e "${lastRoot}/conf/config.json" ]]
+        [[ -z "${coreInstallType}" && -z "${singBoxConfigPath}" ]]
+        [[ "${actions}" == $'registration\ncleanup\n' ]]
+    )
 
     singBoxConfigPath="${configDir}"
     readInstallType() { singBoxConfigPath="${configDir}"; }
@@ -2543,7 +2574,7 @@ runSingBoxUninstallFailurePropagationRegression() (
     fi
     [[ "${rc}" == "1" ]]
     [[ "$(<"${configDir}09_tuic_inbounds.json")" == "${oldConfig}" ]]
-    [[ -f "${configDir}config.json" ]]
+    [[ -f "${mergedConfig}" ]]
     [[ "${startCalls}" == "2" ]]
     [[ ! -s "${firewallLog}" ]]
     [[ ! -s "${refreshLog}" ]]
@@ -2561,6 +2592,7 @@ runSingBoxUninstallFailurePropagationRegression() (
     # 删除已生效时都同步订阅；后续失败不恢复已移除的协议。
     for mode in success firewall refresh; do
         printf '{"inbounds":[{"type":"tuic","listen_port":26451}]}\n' >"${configDir}09_tuic_inbounds.json"
+        printf '{"inbounds":[{"type":"tuic","listen_port":26451}]}\n' >"${mergedConfig}"
         : >"${serviceLog}"
         : >"${firewallLog}"
         : >"${errorLog}"
@@ -2573,7 +2605,7 @@ runSingBoxUninstallFailurePropagationRegression() (
         else
             regressionExpectStatus 1 unInstallSingBox tuic
         fi
-        [[ ! -e "${configDir}09_tuic_inbounds.json" && ! -e "${configDir}config.json" ]]
+        [[ ! -e "${configDir}09_tuic_inbounds.json" && ! -e "${mergedConfig}" ]]
         grep -qx 'hopping:tuic:33000:33005:26451' "${firewallLog}"
         grep -qx 'deny:26451:tcp' "${firewallLog}"
         grep -qx 'deny:26451:udp' "${firewallLog}"
@@ -2590,6 +2622,7 @@ runSingBoxUninstallFailurePropagationRegression() (
     denyStatus=0 refreshStatus=0
 
     local alpineConfigDir="${root}/alpine/conf/config/"
+    local alpineMergedConfig="${root}/alpine/conf/config.json"
     local openRcService="${root}/alpine/sing-box"
     local rcUpdateLog="${root}/alpine/rc-update.log"
     local cleanupMode keptBackup=
@@ -2609,7 +2642,7 @@ runSingBoxUninstallFailurePropagationRegression() (
     padmForgetCleanupPath() { keptBackup=$1; }
     for cleanupMode in success failure; do
         printf '{"inbounds":[{"type":"hysteria2","listen_port":16295}]}\n' >"${alpineConfigDir}06_hysteria2_inbounds.json"
-        printf '{"inbounds":[{"type":"hysteria2","listen_port":16295}]}\n' >"${alpineConfigDir}config.json"
+        printf '{"inbounds":[{"type":"hysteria2","listen_port":16295}]}\n' >"${alpineMergedConfig}"
         printf '#!/sbin/openrc-run\n' >"${openRcService}"
         : >"${rcUpdateLog}"
         : >"${firewallLog}"
@@ -2624,7 +2657,7 @@ runSingBoxUninstallFailurePropagationRegression() (
             grep -q 'sing-box 核心清理失败' "${errorLog}"
         fi
         grep -qx 'del sing-box default' "${rcUpdateLog}"
-        [[ ! -e "${openRcService}" && ! -e "${alpineConfigDir}06_hysteria2_inbounds.json" ]]
+        [[ ! -e "${openRcService}" && ! -e "${alpineConfigDir}06_hysteria2_inbounds.json" && ! -e "${alpineMergedConfig}" ]]
         grep -qx 'deny:16295:tcp' "${firewallLog}"
         grep -qx 'deny:16295:udp' "${firewallLog}"
         [[ "$(<"${refreshLog}")" == $'refresh:sing-box hysteria2\nnotify' ]]
@@ -4216,15 +4249,17 @@ SH
         realityStatus=7
         xrayRunning() { return 1; }
         autoRead() { printf -v "$3" '1'; }
-        for logCasePath in "${TMP_DIR}/entry-helper-access/conf/" "${TMP_DIR}/entry-helper space/conf/"; do
+        for logCasePath in "${TMP_DIR}/entry-helper-access/conf/" "${TMP_DIR}/entry-helper space/conf/" \
+            "${TMP_DIR}/parent-conf/xray/conf/"; do
             configPath="${logCasePath}"
             mkdir -p "${configPath}"
-            writeXrayLogConfig "${configPath}00_log.json" "${configPath//conf\//}" false
+            writeXrayLogConfig "${configPath}00_log.json" "${configPath%conf/}" false
             cat >"${configPath}07_VLESS_vision_reality_inbounds.json" <<'JSON'
 {"inbounds":[{"streamSettings":{"realitySettings":{"show":false}}}]}
 JSON
             checkLog >/dev/null 2>&1 || return 1
             jq -e '.log.access != null and .log.loglevel == "debug"' "${configPath}00_log.json" >/dev/null || return 1
+            [[ "$(jq -r '.log.error' "${configPath}00_log.json")" == "${configPath%conf/}error.log" ]] || return 1
             jq -e '.inbounds[0].streamSettings.realitySettings.show == true' "${configPath}07_VLESS_vision_reality_inbounds.json" >/dev/null || return 1
             checkLog >/dev/null 2>&1 || return 1
             jq -e '(.log.access | not) and .log.loglevel == "warning"' "${configPath}00_log.json" >/dev/null || return 1
