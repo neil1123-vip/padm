@@ -76,7 +76,7 @@ jobs:
           bash shell/subscription_groups_regression.sh "${selector}"
       - name: Check Docker TLS transactions and renewal
         shell: bash
-        run: sudo bash shell/subscription_groups_regression.sh docker-tls-focused
+        run: sudo env TMPDIR=/tmp bash shell/subscription_groups_regression.sh docker-tls-focused
 
   images:
     needs: [static, native]

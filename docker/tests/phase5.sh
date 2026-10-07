@@ -715,7 +715,7 @@ for scenario in new draft untagged stale-untagged duplicate published conflictin
     [[ "${scenario}" == new || ! -f "${publishRoot}/created" ]] || fail "publish ${scenario} created a duplicate release"
 done
 
-# 执行版本 bump 的实际 Bash 块，确认推送后只交给新的 Release run，竞争时不覆盖主分支。
+# 执行版本 bump 的实际 Bash 块，确认正常推送后继续本次发布，竞争时不覆盖主分支。
 BUMP_SCRIPT=${TEST_ROOT}/bump.sh
 awk '
     /^      - name: Bump script and lock version$/ {step = 1; next}
@@ -734,7 +734,7 @@ cat >"${BUMP_BIN}/gh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >>"${BUMP_LOG}"
-[[ "${BUMP_SCENARIO}" != dispatch-failed ]] || exit 22
+[[ "${BUMP_SCENARIO}" != push-race-dispatch-failed ]] || exit 22
 [[ "$*" == "workflow run create_release.yml --repo example/padm --ref main -F force_release=true" ]]
 EOF
 chmod +x "${BUMP_BIN}/gh"
@@ -757,10 +757,10 @@ make_bump_fixture() {
     git -C "${root}/work" remote add origin "${root}/remote.git"
     git -C "${root}/work" push origin HEAD:main >/dev/null
 }
-for scenario in success push-race dispatch-failed; do
+for scenario in success push-race push-race-dispatch-failed; do
     bumpRoot=${TEST_ROOT}/bump-${scenario}
     make_bump_fixture "${bumpRoot}"
-    if [[ "${scenario}" == push-race ]]; then
+    if [[ "${scenario}" == push-race* ]]; then
         git clone --branch main "${bumpRoot}/remote.git" "${bumpRoot}/race" >/dev/null
         git -C "${bumpRoot}/race" config user.name 'concurrent change'
         git -C "${bumpRoot}/race" config user.email concurrent@example.invalid
@@ -780,26 +780,32 @@ for scenario in success push-race dispatch-failed; do
         bash "${BUMP_SCRIPT}") >"${outputFile}" 2>&1 || actual=failure
     case "${scenario}" in
     success)
-        [[ "${actual}" == success ]] || { cat "${outputFile}"; fail 'release bump handoff failed'; }
-        grep -Fxq 'handoff=true' "${bumpRoot}/output.env" || fail 'release bump did not set handoff'
-        grep -q '^workflow run create_release.yml ' "${bumpRoot}/calls" || fail 'release bump did not dispatch successor'
+        [[ "${actual}" == success ]] || { cat "${outputFile}"; fail 'release bump failed'; }
+        [[ ! -s "${bumpRoot}/calls" ]] || fail 'release bump dispatched a duplicate release run'
+        if grep -q '^handoff=' "${bumpRoot}/output.env"; then
+            fail 'release bump still stops the current release run'
+        fi
+        pushedSha=$(git --git-dir="${bumpRoot}/remote.git" rev-parse main)
+        grep -Fxq "release_sha=${pushedSha}" "${bumpRoot}/output.env" ||
+            fail 'release bump did not expose the pushed build commit'
+        [[ "$(git --git-dir="${bumpRoot}/remote.git" diff-tree --no-commit-id --name-only -r main)" == \
+            $'shell/core/version.sh\nversions.lock' ]] || fail 'release bump changed more than version metadata'
+        git --git-dir="${bumpRoot}/remote.git" show main:shell/core/version.sh | grep -Fxq 'SCRIPT_VERSION="3.8.1"' ||
+            fail 'release bump did not push the script version'
         git --git-dir="${bumpRoot}/remote.git" show main:versions.lock | grep -Fxq 'PADM_LOCK_VERSION=3.8.1' ||
             fail 'release bump did not push the version commit' ;;
-    push-race)
+    push-race | push-race-dispatch-failed)
         [[ "${actual}" == failure ]] || fail 'release bump overwrote a concurrent main update'
         grep -q '^workflow run create_release.yml ' "${bumpRoot}/calls" || fail 'race recovery did not dispatch successor'
         [[ "$(git --git-dir="${bumpRoot}/remote.git" rev-parse main)" == "${raceSha}" ]] ||
-            fail 'race recovery changed the concurrent main head' ;;
-    dispatch-failed)
-        [[ "${actual}" == failure ]] || fail 'dispatch failure was hidden'
-        git --git-dir="${bumpRoot}/remote.git" show main:versions.lock | grep -Fxq 'PADM_LOCK_VERSION=3.8.1' ||
-            fail 'dispatch failure did not preserve the pushed version commit' ;;
+            fail 'race recovery changed the concurrent main head'
+        [[ ! -s "${bumpRoot}/output.env" ]] || fail 'race recovery exposed an unpushed build commit' ;;
     esac
 done
 
 grep -Fq 'workflow_call:' "${BUILD_WORKFLOW}" || fail 'build workflow is not reusable'
-grep -Fq 'sudo env PADM_REGRESSION_PARALLEL_JOBS=2 bash shell/subscription_groups_regression.sh docker-contracts' "${BUILD_WORKFLOW}" ||
-    fail 'image workflow does not use the bounded parallel contract suite'
+grep -Fq 'sudo env TMPDIR=/tmp PADM_REGRESSION_PARALLEL_JOBS=2 bash shell/subscription_groups_regression.sh docker-contracts' "${BUILD_WORKFLOW}" ||
+    fail 'image workflow does not use a root-safe temp directory for the bounded parallel contract suite'
 grep -Fq "base_ref: \${{ github.event.pull_request.base.sha || '' }}" "${PR_WORKFLOW}" ||
     fail 'PR workflow does not pass its base commit to image validation'
 smokeRunner=$(awk '
@@ -870,17 +876,13 @@ grep -Fq -- "-F force_release=\"\${FORCE_RELEASE}\"" "${RELEASE_WORKFLOW}" ||
     fail 'automatic workflow handoff loses release intent'
 grep -Fq 'is_release_commit' "${RELEASE_WORKFLOW}" || fail 'Release workflow lacks release commit guard'
 grep -Fq 'docker/release.sh set-version' "${RELEASE_WORKFLOW}" || fail 'lock/version bump is not unified'
-bumpStep=$(awk '
-    /^      - name: Bump script and lock version$/ {step = 1; next}
-    step && /^      - name:/ {exit}
-    step {print}
-' "${RELEASE_WORKFLOW}")
-grep -Fq 'gh workflow run create_release.yml' <<<"${bumpStep}" ||
-    fail 'version bump does not hand off to a new Release run'
-grep -Fq "echo 'handoff=true'" <<<"${bumpStep}" ||
-    fail 'version bump does not stop the current Release run'
-grep -Fq 'steps.bump.outputs.handoff' "${RELEASE_WORKFLOW}" ||
-    fail 'Release outputs do not propagate the handoff state'
+if grep -Fq 'steps.bump.outputs.handoff' "${RELEASE_WORKFLOW}"; then
+    fail 'Release outputs still defer publication after a version bump'
+fi
+grep -Fq 'release_sha="${{ steps.bump.outputs.release_sha }}"' "${RELEASE_WORKFLOW}" ||
+    fail 'Release build target does not use the version commit'
+grep -Fq 'source_ref: ${{ needs.prepare.outputs.release_sha }}' "${RELEASE_WORKFLOW}" ||
+    fail 'Release images do not use the resolved build commit'
 grep -Eq '^  static:' "${RELEASE_WORKFLOW}" || fail 'Release static gate is not a separate job'
 grep -Eq '^  native:' "${RELEASE_WORKFLOW}" || fail 'Release native gate is not a separate job'
 grep -Fq 'needs: [static, native]' "${RELEASE_WORKFLOW}" ||
@@ -902,8 +904,8 @@ done
 
 # PR 与 main 都必须覆盖原生源码、回归自身和所有工作流；纯测试变化仍由运行范围判断避免发布。
 for workflow in "${PR_WORKFLOW}" "${RELEASE_WORKFLOW}"; do
-    grep -Fxq '        run: sudo bash shell/subscription_groups_regression.sh docker-tls-focused' "${workflow}" ||
-        fail "Docker TLS and renewal parallel gate is missing: ${workflow}"
+    grep -Fxq '        run: sudo env TMPDIR=/tmp bash shell/subscription_groups_regression.sh docker-tls-focused' "${workflow}" ||
+        fail "Docker TLS and renewal gate does not use a root-safe temp directory: ${workflow}"
     triggerPaths=$(awk '/^jobs:/ {exit} {print}' "${workflow}")
     for path in '.github/workflows/**' 'install.sh' 'shell/**' 'assets/**'; do
         grep -Fxq "      - '${path}'" <<<"${triggerPaths}" || fail "CI trigger misses ${path}: ${workflow}"

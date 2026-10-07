@@ -23,9 +23,13 @@
 - Docker 契约统一使用 `docker-contracts` selector，保留全部 15 项检查，默认 2 个 worker；
   每项独立夹具与日志，任一失败都会阻断构建。Alpine 预检每份索引只解压、解析一次，
   仍检查两架构、两个仓库中的所有锁定包版本。
+  CI 中以 root 执行的 Docker 契约及 TLS 回归显式使用 `TMPDIR=/tmp`，
+  不把受保护的规格快照放进 runner 用户拥有的工作区；路径安全检查保持不变。
 - `.github/workflows/create_release.yml` 只对运行内容变化自动发布，串行处理最新 `main`，
   Docker 测试、发布脚本和 CI 变更也触发检查；没有待发布运行变化时只跑契约测试。
   失败发布后的测试或 CI 修复可续发；只有镜像 workflow 成功、manifest 验签和资产摘要检查通过后才公开草稿。
+  版本提交成功后由当前 run 使用新提交继续构建和发布，不重复派发 Release 或原生回归；
+  仅工作流版本变化或 `main` 推进造成的推送竞争会重新调度。
 - Release 只附带 `release-manifest.json`、Cosign 签发的 Sigstore bundle v0.3 和控制 bundle，
   不把 manifest 回提交到 `main`。镜像证明保存在 OCI 仓库，诊断 JSON 在 Actions 保留 7 天。
 - PR 和手动验证共用去重并发组，过时验证取消。

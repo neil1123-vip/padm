@@ -61,7 +61,7 @@ jobs:
           bash docker/release.sh validate-lock
           bash -n install-docker.sh docker/release.sh docker/tests/image-smoke.sh
           jq empty docker/contracts/*.json
-          sudo env PADM_REGRESSION_PARALLEL_JOBS=2 bash shell/subscription_groups_regression.sh docker-contracts
+          sudo env TMPDIR=/tmp PADM_REGRESSION_PARALLEL_JOBS=2 bash shell/subscription_groups_regression.sh docker-contracts
 
       - name: Preflight pinned Alpine dependencies
         shell: bash
