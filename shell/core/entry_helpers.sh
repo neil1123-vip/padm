@@ -75,7 +75,6 @@ initTLSNginxConfig() {
         return 1
     fi
     statusCard "TLS 域名" "${domain}"
-    dnsTLSDomain=$(echo "${domain}" | awk -F "." '{$1="";print $0}' | sed 's/^[[:space:]]*//' | sed 's/ /./g')
     if [[ "${selectCoreType:-}" == "1" ]]; then
         customPortFunction || return 1
     fi
@@ -238,7 +237,8 @@ customPortFunction() {
     local historyPort=${currentPort:-${customPort:-}}
     statusCard "TLS 入口端口" "${port}"
     if [[ "${port}" == "${historyPort}" && "${domain:-}" == "${currentHost:-}" ]]; then
-        return 0
+        allowPort "${port}"
+        return $?
     fi
     if [[ -z "${btDomain:-}" && "${port}" == "${xrayVLESSRealityPort:-}" ]]; then
         if ! runCoreServiceActionAllowFailure handleXray stop; then

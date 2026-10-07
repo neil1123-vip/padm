@@ -658,7 +658,7 @@ installPackageTracked() {
         if recoverAptInstallAfterTimeout "${displayName}" "${packages[@]}"; then
             :
         else
-            padmRemoveCleanupPath "${missingPackagesFile}"
+            trackInstalledPackagesFromFile "${missingPackagesFile}"
             diagnosePackageInstallFailure
             failPackageInstallTransaction "${displayName}安装失败"
         fi
@@ -683,7 +683,7 @@ installOptionalPackageTracked() {
 
     if ! runPackageCommandWithProgress "安装${displayName}" "${packageTimeout}" "${installType} ${packages[*]}" "${installLog}"; then
         recoverAptInstallAfterTimeout "${displayName}" "${packages[@]}" || {
-            padmRemoveCleanupPath "${missingPackagesFile}"
+            trackInstalledPackagesFromFile "${missingPackagesFile}"
             diagnosePackageInstallFailure
             return 1
         }
@@ -751,13 +751,13 @@ installBasePackages() {
 acmeInstallIsComplete() {
     local acmeDir
     acmeDir=$(acmeSafeHomeDir) || return 1
-    [[ -f "${acmeDir}/acme.sh" &&
-        -f "${acmeDir}/dnsapi/dns_cf.sh" &&
-        -f "${acmeDir}/dnsapi/dns_ali.sh" ]]
+    acmeExecutable >/dev/null || return 1
+    [[ -s "${acmeDir}/dnsapi/dns_cf.sh" && -s "${acmeDir}/dnsapi/dns_ali.sh" ]]
 }
 
 installAcmeTool() {
     acmeInstallIsComplete && return 0
+    acmeInstallTargetIsSafe || { errorCard "acme.sh 安装目标路径、所有者或权限异常"; return 1; }
     beginPackageInstallTransaction
     local packageTransactionOwner=${PADM_PACKAGE_TRANSACTION_STARTED}
     local acmeArchive

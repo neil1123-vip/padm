@@ -97,7 +97,10 @@ runTlsFailureReturnRegression() (
     )
 
     dnsTLSDomain=example
-    captureFailureReturn "${dnsRcFile}" initDNSAPIConfig cloudflare
+    (
+        local AUTO_INSTALL=true
+        captureFailureReturn "${dnsRcFile}" initDNSAPIConfig cloudflare
+    )
 
     dnsAPIType=cloudflare
     sslType=
@@ -151,6 +154,15 @@ runTlsFailureReturnRegression() (
         regressionExpectStatus 1 switchDNSAPI < <(printf 'y\n\ntoken\n\ny\n')
         [[ -z "${dnsAPIStatus+x}" && -z "${dnsAPIType+x}" &&
             -z "${cfAPIToken+x}" && -z "${cfZoneID+x}" ]]
+        # 通配符选择原地纠错，不重读凭据；取消仍不提交半份配置。
+        unset dnsAPIStatus dnsAPIType cfAPIToken cfZoneID
+        exec {inputFd}< <(printf 'y\n\ntoken\n\ny\nn\nnext-action\n')
+        switchDNSAPI <&"${inputFd}"
+        [[ "${dnsAPIType}" == cloudflare && "${dnsAPIStatus}" == n &&
+            "${cfAPIToken}" == token && -z "${cfZoneID}" ]]
+        read -r -u "${inputFd}" remaining
+        [[ "${remaining}" == next-action ]]
+        exec {inputFd}<&-
         dnsTLSDomain=example.com
 
         (

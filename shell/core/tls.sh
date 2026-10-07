@@ -4,26 +4,36 @@ acmeAccountFile() {
     printf '%s\n' "$(acmeHomeDir)/account.conf"
 }
 
-acmeExecutable() {
-    local acmeDir
-    local homeDir
-    local executable
-    local expectedOwner
-    local path
-    local owner
-    local mode
+acmeInstallTargetIsSafe() {
+    local acmeDir homeDir expectedOwner path owner mode
     acmeDir=$(acmeSafeHomeDir) || return 1
     homeDir=$(dirname -- "${acmeDir}")
-    executable="${acmeDir}/acme.sh"
     expectedOwner=$(id -u) || return 1
-    [[ -d "${homeDir}" && -d "${acmeDir}" && -f "${executable}" && -x "${executable}" ]] || return 1
-    [[ ! -L "${homeDir}" && ! -L "${acmeDir}" && ! -L "${executable}" ]] || return 1
-    for path in "${homeDir}" "${acmeDir}" "${executable}"; do
+    [[ -d "${homeDir}" ]] || return 1
+    for path in "${homeDir}" "${acmeDir}" "${acmeDir}/dnsapi"; do
+        [[ ! -L "${path}" && ( ! -e "${path}" || -d "${path}" ) ]] || return 1
+    done
+    for path in "${acmeDir}/acme.sh" "${acmeDir}/account.conf" \
+        "${acmeDir}/dnsapi/dns_cf.sh" "${acmeDir}/dnsapi/dns_ali.sh"; do
+        [[ ! -L "${path}" && ( ! -e "${path}" || -f "${path}" ) ]] || return 1
+    done
+    for path in "${homeDir}" "${acmeDir}" "${acmeDir}/dnsapi" \
+        "${acmeDir}/acme.sh" "${acmeDir}/account.conf" \
+        "${acmeDir}/dnsapi/dns_cf.sh" "${acmeDir}/dnsapi/dns_ali.sh"; do
+        [[ -e "${path}" ]] || continue
         owner=$(stat --format=%u -- "${path}") || return 1
         mode=$(stat --format=%a -- "${path}") || return 1
         [[ "${owner}" == "${expectedOwner}" && "${mode}" =~ ^[0-7]{3,4}$ ]] || return 1
         (( (8#${mode} & 8#22) == 0 )) || return 1
     done
+}
+
+acmeExecutable() {
+    local acmeDir executable
+    acmeInstallTargetIsSafe || return 1
+    acmeDir=$(acmeSafeHomeDir) || return 1
+    executable="${acmeDir}/acme.sh"
+    [[ -s "${executable}" && -x "${executable}" ]] || return 1
     printf '%s\n' "${executable}"
 }
 
@@ -223,12 +233,13 @@ initDNSAPIConfig() {
         return 1
     fi
     echo
-    autoRead dns_api_wildcard "是否使用*.${dnsTLSDomain}进行API申请通配符证书？[y/n]:" wildcardStatus || return 1
-    wildcardStatus=$(normalizeYesNo "${wildcardStatus}")
-    if [[ "${wildcardStatus}" == "y" && ( "${dnsTLSDomain}" != *.* || -z "${dnsTLSDomain%%.*}" ) ]]; then
-        successCard "不支持此域名申请通配符证书，建议使用此格式[xx.xx.xx]"
-        return 1
-    fi
+    while true; do
+        autoRead dns_api_wildcard "是否使用*.${dnsTLSDomain}进行API申请通配符证书？[y/n]:" wildcardStatus || return 1
+        wildcardStatus=$(normalizeYesNo "${wildcardStatus}")
+        [[ "${wildcardStatus}" != y || ( "${dnsTLSDomain}" == *.* && -n "${dnsTLSDomain%%.*}" ) ]] && break
+        errorCard "当前域名不支持此通配符，请选择 n 申请单域名证书"
+        [[ -z "${AUTO_INSTALL:-}" ]] || return 1
+    done
     if [[ "$1" == "cloudflare" ]]; then
         cfAPIToken=${apiToken}
         cfZoneID=${apiZone}

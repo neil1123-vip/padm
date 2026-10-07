@@ -1030,7 +1030,7 @@ runInstallWorkflowRegression() (
         currentPort=443
         exec {inputFd}< <(printf '\n\nnext-parent-action\n')
         initTLSNginxConfig 1 <&"${inputFd}"
-        [[ "${domain}" == old.example.com && "${port}" == 443 && -z "${events}" ]]
+        [[ "${domain}" == old.example.com && "${port}" == 443 && "${events}" == $'allow:443\n' ]]
         read -r -u "${inputFd}" nextInput
         [[ "${nextInput}" == next-parent-action ]]
         exec {inputFd}<&-
@@ -1039,7 +1039,7 @@ runInstallWorkflowRegression() (
         initTLSNginxConfig 1 <&"${inputFd}"
         read -r -u "${inputFd}" nextInput
         [[ "${domain}" == old.example.com && "${port}" == 443 &&
-            "${nextInput}" == next-parent-action && -z "${events}" ]]
+            "${nextInput}" == next-parent-action && "${events}" == $'allow:443\n' ]]
         exec {inputFd}<&-
         events=
         currentHost=invalid/domain
@@ -1054,7 +1054,7 @@ runInstallWorkflowRegression() (
         currentHost=old.example.com
         lastInstallationConfig=true
         initTLSNginxConfig 1 </dev/null
-        [[ "${domain}" == old.example.com && "${port}" == 443 && -z "${events}" ]]
+        [[ "${domain}" == old.example.com && "${port}" == 443 && "${events}" == $'allow:443\n' ]]
         events=
         currentPort=1+2
         regressionExpectStatus 1 initTLSNginxConfig 1 </dev/null
@@ -1121,7 +1121,14 @@ runInstallWorkflowRegression() (
         customPort=8443
         lastInstallationConfig=true
         customPortFunction </dev/null
-        [[ "${port}" == 8443 && -z "${events}" ]]
+        [[ "${port}" == 8443 && "${events}" == $'allow:8443\n' ]]
+        (
+            # 同参重装也补开防火墙；失败必须回传，但不重做 DNS 和服务操作。
+            events=
+            allowPort() { events+="allow:$1"$'\n'; return 1; }
+            regressionExpectStatus 1 customPortFunction </dev/null
+            [[ "${events}" == $'allow:8443\n' ]]
+        )
     )
 
     (
@@ -2641,6 +2648,71 @@ runInstallWorkflowRegression() (
         )
         [[ "${output}" == $'failed:fixture安装失败\nresult:1' ]]
         ! regressionFindHasMatches "${TMPDIR}" -mindepth 1 -maxdepth 1 -name 'padm-packages.*'
+
+        # 包命令部分成功后失败，也只记录本次新增包，供事务回滚使用。
+        packageInstalled() {
+            [[ "$1" == existing || ( "$1" == partial && "${packageCompleted}" == true ) ]]
+        }
+        runPackageCommandWithProgress() { packageCompleted=true; return 1; }
+        failPackageInstallTransaction() { printf 'tracked:%s\n' "${PADM_INSTALLED_PACKAGES}"; exit 1; }
+        packageCompleted=false PADM_INSTALLED_PACKAGES=
+        output=$(
+            (installPackageTracked "fixture" existing partial missing; printf 'unexpected-continue\n') || printf 'result:1\n'
+        )
+        [[ "${output}" == $'tracked: partial\nresult:1' ]]
+        ! regressionFindHasMatches "${TMPDIR}" -mindepth 1 -maxdepth 1 -name 'padm-packages.*'
+        regressionExpectStatus 1 installOptionalPackageTracked "fixture" existing partial missing
+        [[ "${PADM_INSTALLED_PACKAGES}" == ' partial' ]]
+        ! regressionFindHasMatches "${TMPDIR}" -mindepth 1 -maxdepth 1 -name 'padm-packages.*'
+    )
+
+    (
+        # 工具就绪与安装目标安全分开；坏文件可重装，不安全路径不能开始写入。
+        local HOME="${TMP_DIR}/install-acme-ready" component status=0
+        local acmeDir="${HOME}/.acme.sh" events=
+        mkdir -p "${acmeDir}/dnsapi"
+        printf '#!/bin/sh\nexit 0\n' >"${acmeDir}/acme.sh"
+        chmod 755 "${acmeDir}/acme.sh"
+        printf 'provider\n' >"${acmeDir}/dnsapi/dns_cf.sh"
+        printf 'provider\n' >"${acmeDir}/dnsapi/dns_ali.sh"
+        beginPackageInstallTransaction() { printf 'install-started\n'; exit 73; }
+        acmeInstallIsComplete
+        installAcmeTool
+        [[ -z "${events}" ]]
+        chmod 644 "${acmeDir}/acme.sh"
+        acmeInstallTargetIsSafe
+        regressionExpectStatus 1 acmeInstallIsComplete
+        output=$(installAcmeTool) || status=$?
+        [[ "${status}" == 73 && "${output}" == install-started ]]
+        chmod 755 "${acmeDir}/acme.sh"
+        for component in acme.sh dnsapi/dns_cf.sh dnsapi/dns_ali.sh; do
+            cp -p "${acmeDir}/${component}" "${acmeDir}/saved"
+            : >"${acmeDir}/${component}"
+            acmeInstallTargetIsSafe
+            regressionExpectStatus 1 acmeInstallIsComplete
+            mv "${acmeDir}/saved" "${acmeDir}/${component}"
+        done
+        chmod 777 "${acmeDir}/acme.sh"
+        regressionExpectStatus 1 installAcmeTool
+        [[ -z "${events}" ]]
+        chmod 755 "${acmeDir}/acme.sh"
+        printf "ACCOUNT_EMAIL='fixture@example.com'\n" >"${acmeDir}/saved-account"
+        ln -s "${acmeDir}/saved-account" "${acmeDir}/account.conf"
+        chmod 644 "${acmeDir}/acme.sh"
+        regressionExpectStatus 1 installAcmeTool
+        [[ -z "${events}" ]]
+        chmod 755 "${acmeDir}/acme.sh"
+        rm "${acmeDir}/account.conf"
+        mv "${acmeDir}/dnsapi/dns_cf.sh" "${acmeDir}/saved"
+        ln -s "${acmeDir}/saved" "${acmeDir}/dnsapi/dns_cf.sh"
+        regressionExpectStatus 1 installAcmeTool
+        [[ -z "${events}" ]]
+        rm "${acmeDir}/dnsapi/dns_cf.sh"
+        mv "${acmeDir}/saved" "${acmeDir}/dnsapi/dns_cf.sh"
+        mv "${acmeDir}" "${HOME}/saved"
+        ln -s "${HOME}/saved" "${acmeDir}"
+        regressionExpectStatus 1 installAcmeTool
+        [[ -z "${events}" ]]
     )
 
     (
