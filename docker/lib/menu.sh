@@ -101,7 +101,7 @@ dockerMenuProtocols() {
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 协议与入口\n'
-        printf '%s\n' '1. 查看入口' '2. 查看分享链接' '3. 编辑参数/复制或删除入口' '4. 重生成 Reality 参数' '5. Reality 目标站管理' '0. 返回'
+        printf '%s\n' '1. 查看入口' '2. 查看分享链接' '3. 编辑参数/复制或删除入口' '4. 重生成 Reality 参数' '5. Reality 目标站管理' '6. Reality 443 共存' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -134,6 +134,35 @@ dockerMenuProtocols() {
             dockerMenuRun edit --regenerate-reality "${listener}" || true
             ;;
         5) dockerMenuRealityTargets ;;
+        6) dockerMenuRealityStream ;;
+        *) printf '无效选项，请重新选择。\n' ;;
+        esac
+    done
+}
+
+dockerMenuRealityStream() {
+    local choice listener website
+    while :; do
+        DOCKER_MENU_SIGNAL=0
+        printf '\nDocker Reality 443 共存\n'
+        printf '%s\n' '1. 查看状态' '2. 开启或更换默认 Reality' '3. 关闭共存' '0. 返回'
+        printf '请选择: '
+        if ! IFS= read -r choice; then
+            [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
+            return 0
+        fi
+        case "${choice}" in
+        0) return 0 ;;
+        1) dockerMenuRun protocol stream-status || true ;;
+        2)
+            dockerMenuRun protocol list || continue
+            dockerSetupRead listener '默认 Xray Reality Vision/XHTTP 入口 ID（0 返回）: ' &&
+                [[ -n "${listener}" ]] &&
+                dockerSetupRead website '网站 TLS 入口 ID（0 返回）: ' &&
+                [[ -n "${website}" ]] || continue
+            dockerMenuRun edit --reality-stream "${listener}" "${website}" || true
+            ;;
+        3) dockerMenuRun edit --reality-stream off || true ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

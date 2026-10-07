@@ -283,6 +283,9 @@ dockerBundleSupportsSpec() {
           (if $spec[0] | has("reality_stream") then
             ($schema[0].properties | has("reality_stream"))
            else true end) and
+          (if $spec[0].reality_stream != null then
+            $schema[0]["x-padm-reality-stream-deployment"] == true
+           else true end) and
           ($features | length) == 1 and ($features[0].protocols | type == "array") and
           all($spec[0].core.protocols[];
             . as $entry |

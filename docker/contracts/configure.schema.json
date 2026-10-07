@@ -3,6 +3,7 @@
   "$id": "urn:padm:docker-configure:3",
   "title": "padm Docker configuration request",
   "type": "object",
+  "x-padm-reality-stream-deployment": true,
   "additionalProperties": false,
   "required": ["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"],
   "properties": {

@@ -17,6 +17,7 @@ readonly PADM_DOCKER_SUBSCRIPTION_PORT=8081
 DOCKER_CONFIG_CANDIDATE=
 DOCKER_CONFIG_BACKUP=
 DOCKER_CONFIG_SWITCHED=0
+DOCKER_CONFIG_STREAM_TRANSITION=0
 DOCKER_TLS_CANDIDATE=
 DOCKER_TLS_BACKUP=
 DOCKER_TLS_SWITCHED=0
@@ -677,6 +678,7 @@ dockerCreateConfigurationCandidate() {
     chmod 0750 "${candidate}" || return 1
     DOCKER_CONFIG_BACKUP=
     DOCKER_CONFIG_SWITCHED=0
+    DOCKER_CONFIG_STREAM_TRANSITION=0
     DOCKER_CONFIG_CANDIDATE=${candidate}
 }
 
@@ -2036,6 +2038,12 @@ dockerCreateUpdateCandidate() {
 dockerValidateUpdateCandidate() {
     local candidate=$1
     dockerDeploymentFileValidate "${candidate}/deployment.json" || return 1
+    if [[ -f "${candidate}/config/spec.json" ]] &&
+        jq -e '.reality_stream != null' "${candidate}/config/spec.json" >/dev/null; then
+        dockerBundleSupportsSpec "${DOCKER_STAGED_BUNDLE_PATH}" "${candidate}/config/spec.json" &&
+            dockerValidateCandidate "${candidate}/config/spec.json" "${candidate}"
+        return $?
+    fi
     dockerCandidateCompose "${candidate}" config --format json >/dev/null 2>&1 || return 1
 }
 
@@ -2073,6 +2081,7 @@ dockerInstallCandidate() {
     root=$(dockerInstallRoot) || return 1
     dockerRealityStreamDeploymentCheck "${candidate}/config/spec.json" "${root}/config/spec.json" || return 1
     DOCKER_CONFIG_SWITCHED=1
+    dockerRealityStreamTransitionPrepare "${candidate}/config/spec.json" || return 1
     dockerRemoveConfigurationTargets || return 1
     if grep -qxF deployment.json "${backup}/present"; then
         cp -- "${backup}/deployment.json" "${root}/deployment.previous.json" || return 1
@@ -2149,8 +2158,19 @@ dockerRestoreConfiguration() {
         grep -qxF deployment.json "${backup}/present"; then
         dockerValidateConfigurationBackup "${backup}" || return 1
     fi
-    dockerRealityStreamDeploymentCheck "${backup}/config/spec.json" "${root}/config/spec.json" || return 1
-    dockerComposeRun down >/dev/null 2>&1 || true
+    # 当前配置可能只安装了一部分，恢复授权只取自已验证的备份。
+    dockerRealityStreamDeploymentCheck "${backup}/config/spec.json" || return 1
+    if [[ -f "${backup}/deployment.json" ]] &&
+        { [[ "${DOCKER_CONFIG_STREAM_TRANSITION:-0}" == 1 ]] ||
+        { [[ -f "${backup}/config/spec.json" ]] &&
+            jq -e '.reality_stream != null' "${backup}/config/spec.json" >/dev/null; } ||
+        { [[ -f "${root}/config/spec.json" ]] &&
+            jq -e '.reality_stream != null' "${root}/config/spec.json" >/dev/null; }; }; then
+        # 仅释放交接相关服务；部分安装失败时用受管标签找到已有容器。
+        dockerRealityStreamStopServices nginx xray || return 1
+    else
+        dockerComposeRun down >/dev/null 2>&1 || true
+    fi
     dockerRemoveConfigurationTargets || return 1
     while IFS= read -r relative; do
         [[ -e "${backup}/${relative}" ]] || return 1
@@ -2177,6 +2197,7 @@ dockerRestoreConfiguration() {
     fi
     dockerRenewalScheduleInstall || return 1
     DOCKER_CONFIG_SWITCHED=0
+    DOCKER_CONFIG_STREAM_TRANSITION=0
 }
 
 dockerCleanupConfigurationCandidate() {
@@ -2198,16 +2219,62 @@ dockerConfigurationInterrupted() {
 
 dockerRealityStreamDeploymentCheck() {
     local specFile
-    # 生成合同已就绪；端口交接和恢复验收前，不允许进入部署事务。
     for specFile in "$@"; do
         [[ -e "${specFile}" || -L "${specFile}" ]] || continue
         if ! [[ -f "${specFile}" && ! -L "${specFile}" ]] ||
-            ! jq -es 'length == 1 and (.[0] | type == "object" and .reality_stream == null)' \
+            ! jq -es 'length == 1 and (.[0] | type == "object")' \
                 "${specFile}" >/dev/null 2>&1; then
-            dockerError 'Reality 443 共存部署事务尚未交付，当前仅支持规格及生成合同'
+            dockerError '受管配置规格损坏或不安全，拒绝部署'
             return 1
         fi
+        if jq -e '.reality_stream != null' "${specFile}" >/dev/null; then
+            dockerConfigureSpecValidate "${specFile}" || return 1
+            jq -e '.["x-padm-reality-stream-deployment"] == true' \
+                "$(dockerConfigureSchemaFile)" >/dev/null || return 1
+        fi
     done
+}
+
+dockerRealityStreamStopServices() {
+    local service ids id
+    local -a containers=()
+    # 使用项目和服务双标签限定已有容器，不依赖可能安装到一半的 Compose 文件。
+    for service in "$@"; do
+        case "${service}" in xray|nginx) ;; *) return 1 ;; esac
+        ids=$(docker ps -q --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
+            --filter "label=com.docker.compose.service=${service}") || return 1
+        while IFS= read -r id; do
+            [[ -n "${id}" ]] || continue
+            [[ "${id}" =~ ^[a-f0-9]{12,64}$ ]] || return 1
+            containers+=("${id}")
+        done <<<"${ids}"
+    done
+    [[ "${#containers[@]}" -eq 0 ]] || docker stop "${containers[@]}" >/dev/null
+}
+
+dockerRealityStreamTransitionPrepare() {
+    local sourceSpec=$1 root currentSpec services service
+    local -a owners=()
+    root=$(dockerInstallRoot) || return 1
+    currentSpec="${root}/config/spec.json"
+    if ! jq -e '.reality_stream != null' "${sourceSpec}" >/dev/null 2>&1 &&
+        ! { [[ -f "${currentSpec}" ]] && jq -e '.reality_stream != null' "${currentSpec}" >/dev/null; }; then
+        return 0
+    fi
+    DOCKER_CONFIG_STREAM_TRANSITION=1
+    [[ -f "${root}/deployment.json" ]] || return 0
+    services=$(jq -er '[.listeners[] | select(.public_port == 443 and .transport == "tcp") | .service] |
+      unique | .[]' "${root}/deployment.json") || {
+        # 原部署没有 443 拥有者时无需停止服务。
+        jq -e '.listeners | type == "array" and all(.[]; .public_port != 443 or .transport != "tcp")' \
+            "${root}/deployment.json" >/dev/null
+        return $?
+    }
+    while IFS= read -r service; do
+        case "${service}" in xray|nginx) owners+=("${service}") ;; *) return 1 ;; esac
+    done <<<"${services}"
+    [[ "${#owners[@]}" -gt 0 ]] || return 0
+    dockerRealityStreamStopServices "${owners[@]}"
 }
 
 dockerConfigureApply() {
@@ -2296,6 +2363,7 @@ dockerConfigureApply() {
         return "${PADM_DOCKER_RC_COMPOSE}"
     fi
     DOCKER_CONFIG_SWITCHED=0
+    DOCKER_CONFIG_STREAM_TRANSITION=0
     dockerCleanupConfigurationCandidate || return "${PADM_DOCKER_RC_STATE}"
     printf 'Docker 配置已提交，回滚快照: %s\n' "${backup}"
 }
@@ -2543,14 +2611,27 @@ dockerTlsConsumers() {
         ' "${root}/compose.json" >/dev/null || return 1
         dockerTrafficSafePath "${root}" "${root}/config/nginx/default.conf" || return 1
         [[ -f "${root}/config/nginx/default.conf" && ! -L "${root}/config/nginx/default.conf" ]] || return 1
-        [[ -z "$(find "${root}/config/nginx" ! -type f ! -type d -print -quit)" &&
-            -z "$(find "${root}/config/nginx" -name '*.conf' ! -name default.conf -print -quit)" ]] || return 1
+        [[ -z "$(find "${root}/config/nginx" ! -type f ! -type d -print -quit)" ]] || return 1
         specFile="${root}/config/spec.json"
         if [[ -e "${specFile}" || -L "${specFile}" ]]; then
             dockerTrafficSafePath "${root}" "${specFile}" &&
                 dockerConfigureSpecValidate "${specFile}" || return 1
             nginxTlsExpected=$(jq -r 'any(.core.protocols[];
               .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25)' "${specFile}") || return 1
+        fi
+        if [[ -f "${specFile}" ]] && jq -e '.reality_stream != null' "${specFile}" >/dev/null; then
+            [[ -z "$(find "${root}/config/nginx" -name '*.conf' ! -name default.conf \
+                ! -path "${root}/config/nginx/stream/reality.conf" -print -quit)" ]] &&
+                cmp -s -- "${root}/config/nginx/stream/reality.conf" \
+                    <(dockerGenerateRealityStreamConfig "${specFile}" /dev/stdout) &&
+                cmp -s -- "${root}/config/nginx/default.conf" \
+                    <(dockerGenerateNginxConfig "${specFile}" /dev/stdout) &&
+                jq -e --slurpfile expected <(dockerGenerateCompose "${specFile}" /dev/stdout) '
+                  (.services.nginx.volumes | sort_by(.target)) ==
+                    ($expected[0].services.nginx.volumes | sort_by(.target))' \
+                    "${root}/compose.json" >/dev/null || return 1
+        else
+            [[ -z "$(find "${root}/config/nginx" -name '*.conf' ! -name default.conf -print -quit)" ]] || return 1
         fi
         if [[ "${nginxTlsExpected}" == true ]]; then
         nginxDomain=$(awk '

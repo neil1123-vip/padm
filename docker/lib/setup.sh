@@ -710,7 +710,7 @@ dockerProtocolCommand() (
     local -a targetArgs=()
     [[ "$#" -gt 0 ]] && shift
     case "${action}" in
-    list) [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
+    list|stream-status) [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
     links|targets|check-target|target-status|select-target|block-current-target)
         [[ "$#" -le 1 && "${1:-}" != --* ]] || return "${PADM_DOCKER_RC_USAGE}"
         listener=${1:-}
@@ -795,6 +795,25 @@ dockerProtocolCommand() (
             elif .id == 29 then "Trojan TCP TLS fallback"
             else "WS TLS" end)  \(.server | authority):\(.public_port)  [\(.address_families | join(","))]  \(.name)"' \
             "${normalized}"
+        return $?
+    fi
+    if [[ "${action}" == stream-status ]]; then
+        jq -r '
+          if .reality_stream == null then
+            "Reality 443 共存: 未启用"
+          else
+            .reality_stream as $stream |
+            (.core.protocols[] | select(.listener_id == $stream.listener_id)) as $reality |
+            (.core.protocols[] | select(.listener_id == $stream.website_listener_id)) as $website |
+            ($website.websocket // $website.httpupgrade // $website.grpc_tls) as $tls |
+            "Reality 443 共存: 已启用",
+            "网站入口: \($website.listener_id)，域名 \($tls.domain)",
+            "网站 TLS 后端: nginx:\($tls.tls_port)",
+            "默认 Reality: \($reality.listener_id)，\(if $reality.id == 1 then "Vision" else "XHTTP" end)",
+            "Reality 原后端: xray:\($reality.public_port)",
+            "公网入口: \(if $reality.server | contains(":") then "[\($reality.server)]" else $reality.server end):443 [\($reality.address_families | join(","))]"
+          end
+        ' "${normalized}"
         return $?
     fi
     selected="${workspace}/selected.json"
@@ -887,6 +906,13 @@ dockerEditFields() {
               if length == 1 then .[0].listener_id else error("入口选择不唯一") end
             ' "${draft}" 2>/dev/null) || return 1
             protocol=$(jq -r --arg key "${listener}" '.core.protocols[] | select(.listener_id == $key) | .id' "${draft}") || return 1
+            if [[ "${choice}" == 1 || "${choice}" == 3 || "${choice}" == 10 ]] &&
+                jq -e --arg key "${listener}" '.reality_stream != null and
+                  (.reality_stream.listener_id == $key or .reality_stream.website_listener_id == $key)' \
+                    "${draft}" >/dev/null; then
+                dockerError 'Reality 443 共存绑定入口不能改原端口、地址族或删除；请先关闭共存'
+                return 1
+            fi
             if [[ ( "${protocol}" == 21 || "${protocol}" == 22 || "${protocol}" == 23 || "${protocol}" == 24 || "${protocol}" == 25 ) && ( "${choice}" == 1 || "${choice}" == 9 || "${choice}" == 10 ) ]] &&
                 jq -e 'any(.host_integrations[]; .type == "fail2ban")' "${draft}" >/dev/null; then
                 dockerError '带 Fail2ban 的 WS 入口需联动封禁规则，本阶段未开放端口或入口数量修改'
@@ -1146,6 +1172,7 @@ dockerEditCommand() {
     local specFile= manifest= bundle= controlBundle= mode=interactive root workspace original draft imported=0 status=0
     local privateKey publicKey derivedKey opsImage version normalized regenerateReality=
     local realityTarget= targetHost= targetPort= targetSni=
+    local realityStream= streamListener= streamWebsite=
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
         --spec|--manifest|--bundle|--control-bundle)
@@ -1173,6 +1200,18 @@ dockerEditCommand() {
                 return "${PADM_DOCKER_RC_USAGE}"
             shift 5
             ;;
+        --reality-stream)
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${realityStream}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            if [[ "$2" == off ]]; then
+                realityStream=off
+                shift 2
+            else
+                [[ "$#" -ge 3 && -n "$3" && "$3" != --* ]] || return "${PADM_DOCKER_RC_USAGE}"
+                realityStream=on streamListener=$2 streamWebsite=$3
+                shift 3
+            fi
+            ;;
         --preview)
             [[ "${mode}" == interactive ]] || return "${PADM_DOCKER_RC_USAGE}"
             mode=preview
@@ -1187,8 +1226,9 @@ dockerEditCommand() {
         *) return "${PADM_DOCKER_RC_USAGE}" ;;
         esac
     done
-    [[ ( -z "${regenerateReality}" && -z "${realityTarget}" ) || -z "${specFile}" ]] &&
-        [[ -z "${regenerateReality}" || -z "${realityTarget}" ]] || {
+    [[ ( -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" ) || -z "${specFile}" ]] &&
+        [[ -z "${regenerateReality}" || ( -z "${realityTarget}" && -z "${realityStream}" ) ]] &&
+        [[ -z "${realityTarget}" || -z "${realityStream}" ]] || {
         dockerError 'Reality 专项编辑不能与规格导入或另一专项动作组合'
         return "${PADM_DOCKER_RC_USAGE}"
     }
@@ -1201,7 +1241,7 @@ dockerEditCommand() {
     dockerComposeFile >/dev/null || return "${PADM_DOCKER_RC_STATE}"
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     dockerTrafficSafePath "${root}" "${root}/config/spec.json" || return "${PADM_DOCKER_RC_STATE}"
-    [[ ( -z "${regenerateReality}" && -z "${realityTarget}" ) || -f "${root}/config/spec.json" ]] ||
+    [[ ( -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" ) || -f "${root}/config/spec.json" ]] ||
         return "${PADM_DOCKER_RC_STATE}"
     if [[ ! -e "${root}/config/spec.json" && ! -L "${root}/config/spec.json" && -z "${specFile}" ]]; then
         if [[ "${mode}" == interactive ]]; then
@@ -1251,7 +1291,7 @@ dockerEditCommand() {
         mv -f -- "${draft}.v3" "${draft}" || return "${PADM_DOCKER_RC_STATE}"
     # 旧规格先接入，不能同时把未经证明的字段改动当作无损导入。
     if [[ "${mode}" == interactive && -z "${specFile}" && "${imported}" -eq 0 &&
-        -z "${regenerateReality}" && -z "${realityTarget}" ]]; then
+        -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" ]]; then
         dockerEditFields "${draft}" || status=$?
         if [[ "${status}" -eq 3 ]]; then
             printf '已取消配置编辑。\n'
@@ -1263,6 +1303,22 @@ dockerEditCommand() {
     fi
     jq -es 'length == 1 and (.[0] | type == "object")' "${draft}" >/dev/null 2>&1 ||
         return "${PADM_DOCKER_RC_STATE}"
+    if [[ -n "${realityStream}" ]]; then
+        jq --arg action "${realityStream}" --arg listener "${streamListener}" --arg website "${streamWebsite}" '
+          if $action == "off" then del(.reality_stream) else
+            [.core.protocols[] | select(.listener_id == $listener and .core == "xray" and (.id == 1 or .id == 2))] as $realities |
+            [.core.protocols[] | select(.listener_id == $website and
+              (.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25))] as $websites |
+            if ($realities | length) != 1 or ($websites | length) != 1 then
+              error("共存需要唯一 Xray Reality Vision/XHTTP 与 TLS 入口")
+            else .reality_stream = {listener_id:$listener, website_listener_id:$website} end
+          end
+        ' "${draft}" >"${draft}.next" 2>/dev/null &&
+            chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" || {
+            dockerError '共存需要指定已有 Xray Reality Vision/XHTTP 入口与网站 TLS 入口 ID'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+    fi
     if [[ -n "${realityTarget}" ]]; then
         jq --arg listener "${realityTarget}" --arg host "${targetHost}" --argjson port "${targetPort}" \
             --arg sni "${targetSni}" '
@@ -1306,7 +1362,7 @@ dockerEditCommand() {
     fi
     dockerEditPreview "${original}" "${draft}" || return "${PADM_DOCKER_RC_STATE}"
     [[ "${imported}" -eq 0 ]] || printf '完整原始规格已匹配，确认后接入受管输入。\n'
-    jq -en --arg regenerate "${regenerateReality}" --arg target "${realityTarget}" \
+    jq -en --arg regenerate "${regenerateReality}" --arg target "${realityTarget}" --arg stream "${realityStream}" \
         --slurpfile before "${normalized}" --slurpfile after "${draft}" '
       def fixed: del(.server, .public_port, .address_families, .name,
         .reality.target_host, .reality.target_port, .reality.server_name, .websocket.path, .httpupgrade.path,
@@ -1326,6 +1382,16 @@ dockerEditCommand() {
       $before[0] as $old | $after[0] as $new |
       [$old.core.protocols[].listener_id] as $oldIds |
       [$new.core.protocols[].listener_id] as $newIds |
+      # 保留共存绑定的原端口与地址族，关闭时恢复直连不能依赖已被改写的输入。
+      ($old.reality_stream == null or
+        all($old.core.protocols[] |
+          select(.listener_id == $old.reality_stream.listener_id or .listener_id == $old.reality_stream.website_listener_id);
+          . as $bound | any($new.core.protocols[];
+            .listener_id == $bound.listener_id and .core == $bound.core and
+            .public_port == $bound.public_port and .address_families == $bound.address_families))) and
+      (if $stream != "" then
+        ($old | del(.reality_stream)) == ($new | del(.reality_stream))
+       else
       (if $regenerate != "" or $target != "" then
         ($old | special) == ($new | special)
        else true end) and
@@ -1358,6 +1424,7 @@ dockerEditCommand() {
                 .httpupgrade.backend_port, .httpupgrade.tls_port, .grpc_tls.backend_port, .grpc_tls.tls_port))
             end))
         end)
+       end)
     ' >/dev/null 2>&1 || {
         dockerError '仅支持现有入口编辑、复制、Reality 传输派生和删除；账号、密钥、已有入口身份、内部端口与核心、主核心、证书和发布不能改写'
         return "${PADM_DOCKER_RC_STATE}"

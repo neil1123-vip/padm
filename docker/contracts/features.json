@@ -13,7 +13,7 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "支持单核心或 Xray/sing-box 主副核心首配、完整规格导入、入口编辑、跨核心复制、逐入口 Reality 参数重生成及目标检测/目标库/扫描/PQC 管理；443 共存和完整协议管理尚未迁移。"
+      "reason": "支持单核心或 Xray/sing-box 主副核心首配、完整规格导入、入口编辑、跨核心复制、逐入口 Reality 参数重生成及目标检测/目标库/扫描/PQC 管理；Xray Vision 可与受管 TLS 入口进行 443 共存，宿主网站共存和完整协议管理尚未迁移。"
     },
     {
       "id": 2,
@@ -27,7 +27,7 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 Xray XHTTP Reality 首配、完整规格导入、概览和分享链接、入口及基础 XHTTP 参数编辑与复制、逐入口 Reality 参数重生成及目标检测/目标库/扫描/PQC 管理；高级 XHTTP 参数、443 共存和完整管理尚未迁移。"
+      "reason": "v3 支持 Xray XHTTP Reality 首配、完整规格导入、概览和分享链接、入口及基础 XHTTP 参数编辑与复制、逐入口 Reality 参数重生成及目标检测/目标库/扫描/PQC 管理和受管 TLS 入口的 443 共存；高级 XHTTP 参数、宿主网站共存和完整管理尚未迁移。"
     },
     {
       "id": 3,
@@ -368,7 +368,7 @@
       "profiles": ["core-xray", "nginx"],
       "network_mode": "host-cli",
       "host_capabilities": [],
-      "reason": "Docker 尚未覆盖原生 Reality 443 共存分流拓扑和开启/关闭事务。"
+      "reason": "已支持容器内受管 TLS 入口与一个 Xray Vision/XHTTP 后端的 443 共存，菜单提供状态、开启、更换和关闭，沿用配置事务及失败恢复；宿主真实网站尚待 3D.3d 验收，完整原生范围仍为 deferred。"
     },
     "cdn-entry-management": {
       "status": "deferred",

@@ -16,6 +16,9 @@ dockerUsage() {
   padm-docker edit [--spec <完整 JSON 文件>] [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker protocol list
   padm-docker protocol links [入口 ID]
+  padm-docker protocol stream-status
+  padm-docker edit --reality-stream <Reality 入口 ID> <网站 TLS 入口 ID> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --reality-stream off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker configure --spec <JSON 文件> [--manifest <URL|文件> --bundle <URL|文件> [--control-bundle <URL|文件>]]
   padm-docker tls install --domain <域名> --cert <文件> --key <文件> [--ops-image <tag@digest>]
   padm-docker tls validate --domain <域名>
@@ -763,6 +766,7 @@ dockerUpdateCommand() {
         return "${PADM_DOCKER_RC_COMPOSE}"
     fi
     DOCKER_CONFIG_SWITCHED=0
+    DOCKER_CONFIG_STREAM_TRANSITION=0
     dockerCleanupConfigurationCandidate || return "${PADM_DOCKER_RC_STATE}"
     printf 'Docker 镜像和控制脚本更新已提交，回滚快照: %s\n' "${backup}"
 }
