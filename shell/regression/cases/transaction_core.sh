@@ -828,6 +828,7 @@ runCoreUpgradePendingStartRollbackRegression() (
             else
                 regressionExpectStatus 1 installDownloadedSingBoxBinary "${version}" "${candidateDir}"
             fi
+            [[ "$(stat -c %a "${originalBinary}")" == 755 ]]
             if [[ "${stopRc}" == 0 ]]; then
                 [[ "$(<"${serviceLog}")" == $'stop\nstart\nstop\nstart' ]]
                 [[ "$(<"${originalBinary}")" == old-binary ]]
@@ -852,6 +853,7 @@ runCoreUpgradePendingStartRollbackRegression() (
         chmod 755 "${PADM_XRAY_BINARY}" "${candidateDir}/xray"
         xrayRunning() { return 0; }
         installDownloadedXrayBinary "${version}" "${candidateDir}"
+        [[ "$(stat -c %a "${PADM_XRAY_BINARY}")" == 755 ]]
         [[ "$(coreXrayCurrentVersion)" == "${version}" && ! -e "${candidateDir}" ]]
         [[ "$(<"${serviceLog}")" == $'stop\nstart' ]]
         grep -q 'Xray-core更新成功' "${REGRESSION_SUCCESS_CARD_LOG}"

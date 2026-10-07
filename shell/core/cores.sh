@@ -371,7 +371,7 @@ installSingBoxApply() {
             errorCard "sing-box cronet依赖安装失败"
             exit 1
         fi
-        if ! commitStagedCoreInstallFile "${extractedDir}/sing-box" "${targetBinary}" 655; then
+        if ! commitStagedCoreInstallFile "${extractedDir}/sing-box" "${targetBinary}" 755; then
             if ! restoreCoreOptionalFileBackup "${cronetBackup}" "${targetCronet}" 644; then
                 padmForgetCleanupPath "${tmpDir}"
                 errorCard "sing-box安装失败，cronet依赖回滚失败，请手动检查临时备份: ${tmpDir}"
@@ -446,7 +446,7 @@ installXrayApply() {
         targetDir=$(coreXrayInstallDir)
         targetBinary=$(coreXrayBinaryPath)
         validateCoreInstallTargetPath "${targetBinary}" "Xray-core" || { padmRemoveCleanupPath "${tmpDir}"; exit 1; }
-        if ! commitStagedCoreInstallFile "${tmpDir}/xray" "${targetBinary}" 655; then
+        if ! commitStagedCoreInstallFile "${tmpDir}/xray" "${targetBinary}" 755; then
             padmRemoveCleanupPath "${tmpDir}"
             errorCard "Xray-core安装失败"
             exit 1
@@ -1760,7 +1760,7 @@ restoreCoreBinaryBackup() {
     local backupBinary=$1
     local targetBinary=$2
     [[ -f "${backupBinary}" ]] || return 0
-    restoreManagedFileFromBackup "${backupBinary}" "${targetBinary}" 655
+    restoreManagedFileFromBackup "${backupBinary}" "${targetBinary}" 755
 }
 
 finalizeFailedCoreBinaryInstall() {
@@ -1901,7 +1901,7 @@ installDownloadedXrayBinary() {
         errorCard "Xray-core 安装目录创建失败"
         return 1
     fi
-    if [[ -f "${oldBinary}" ]] && ! backupManagedFileToPath "${oldBinary}" "${backupBinary}" 655; then
+    if [[ -f "${oldBinary}" ]] && ! backupManagedFileToPath "${oldBinary}" "${backupBinary}" 755; then
         padmRemoveCleanupPath "${tmpDir}"
         errorCard "Xray-core 旧二进制备份失败"
         return 1
@@ -1912,7 +1912,7 @@ installDownloadedXrayBinary() {
         statusCard "Xray-core 更新失败" "Xray 服务停止失败，已取消替换" "排查日志: ${logFile}"
         return 1
     fi
-    if ! commitStagedCoreInstallFile "${newBinary}" "${oldBinary}" 655; then
+    if ! commitStagedCoreInstallFile "${newBinary}" "${oldBinary}" 755; then
         padmRemoveCleanupPath "${tmpDir}"
         finalizeFailedCoreBinaryInstall "Xray-core" "${backupBinary}" "${oldBinary}" handleXray "${logFile}"
         return 1
@@ -2010,7 +2010,7 @@ installDownloadedSingBoxBinary() {
         errorCard "sing-box 安装目录创建失败"
         return 1
     fi
-    if [[ -f "${oldBinary}" ]] && ! backupManagedFileToPath "${oldBinary}" "${backupBinary}" 655; then
+    if [[ -f "${oldBinary}" ]] && ! backupManagedFileToPath "${oldBinary}" "${backupBinary}" 755; then
         padmRemoveCleanupPath "${tmpDir}"
         singBoxUpgradeMigrationRollback "${migrationBackupDir}" || true
         errorCard "sing-box 旧二进制备份失败"
@@ -2031,7 +2031,7 @@ installDownloadedSingBoxBinary() {
         statusCard "sing-box 更新失败" "sing-box 服务停止失败，已取消替换" "排查日志: ${logFile}"
         return 1
     fi
-    if ! commitStagedCoreInstallFile "${newBinary}" "${oldBinary}" 655 ||
+    if ! commitStagedCoreInstallFile "${newBinary}" "${oldBinary}" 755 ||
         ! commitStagedCoreInstallFile "${extractedDir}/libcronet.so" "${cronetPath}" 644; then
         padmRemoveCleanupPath "${tmpDir}"
         finalizeFailedSingBoxBinaryInstall "${backupBinary}" "${oldBinary}" "${cronetBackup}" "${cronetPath}" "${logFile}" "${migrationBackupDir}"

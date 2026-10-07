@@ -354,7 +354,7 @@ coreTemplateConfigTransaction() {
         validateCoreInstallTargetPath "${statsBinary}" "sing-box" || return 1
         validateCoreInstallTargetPath "${statsCronet}" "sing-box cronet依赖" || return 1
         if ! padmCreateTmpRootPath statsBinaryBackupDir padm-core-install-binary.XXXXXX -d ||
-            ! backupManagedFileToPath "${statsBinary}" "${statsBinaryBackupDir}/sing-box" 655 ||
+            ! backupManagedFileToPath "${statsBinary}" "${statsBinaryBackupDir}/sing-box" 755 ||
             { [[ -f "${statsCronet}" ]] && ! backupManagedFileToPath "${statsCronet}" "${statsBinaryBackupDir}/libcronet.so" 644; }; then
             [[ -z "${statsBinaryBackupDir}" ]] || padmRemoveCleanupPath "${statsBinaryBackupDir}"
             errorCard "${title}二进制备份失败，已取消修改"
@@ -407,7 +407,7 @@ coreTemplateConfigTransaction() {
     fi
     if [[ -n "${statsBinaryBackupDir}" ]]; then
         if [[ "${nginxStopped}" == true && "${newCoreStopped}" == true ]] &&
-            restoreManagedFileFromBackup "${statsBinaryBackupDir}/sing-box" "${statsBinary}" 655 &&
+            restoreManagedFileFromBackup "${statsBinaryBackupDir}/sing-box" "${statsBinary}" 755 &&
             restoreCoreOptionalFileBackup "${statsBinaryBackupDir}/libcronet.so" "${statsCronet}" 644; then
             padmRemoveCleanupPath "${statsBinaryBackupDir}"
         else
