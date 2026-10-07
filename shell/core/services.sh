@@ -360,15 +360,18 @@ singBoxRunning() {
     local systemdServiceFile
     local openRcServiceFile
     local binary
+    local resolvedBinary
     binary=$(coreSingBoxBinaryPath 2>/dev/null || true)
     [[ -n "${binary}" ]] || return 1
+    resolvedBinary=$(readlink -f "${binary}" 2>/dev/null || true)
     mergedConfig=$(singBoxMergedConfigFile 2>/dev/null || true)
     systemdServiceFile=${PADM_SINGBOX_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/sing-box.service}
     openRcServiceFile=${PADM_SINGBOX_OPENRC_SERVICE_FILE:-/etc/init.d/sing-box}
     while IFS= read -r pid; do
         [[ -n "${pid}" ]] || continue
         exe=$(padmReadProcExe "/proc/${pid}/exe")
-        [[ "${exe}" == "${binary}" || "${exe}" == "${binary} (deleted)" ]] || continue
+        [[ "${exe}" == "${binary}" || "${exe}" == "${binary} (deleted)" ||
+            -n "${resolvedBinary}" && ( "${exe}" == "${resolvedBinary}" || "${exe}" == "${resolvedBinary} (deleted)" ) ]] || continue
         padmReadProcArgs procArgs "/proc/${pid}/cmdline" || continue
         [[ -n "${mergedConfig}" && "${procArgs[0]:-}" == "${binary}" && "${procArgs[1]:-}" == run &&
             "${procArgs[2]:-}" == -c && "${procArgs[3]:-}" == "${mergedConfig}" ]] || continue
@@ -460,10 +463,13 @@ xrayRunning() {
     local openRcServiceFile=${PADM_XRAY_OPENRC_SERVICE_FILE:-/etc/init.d/xray}
     xrayBinary=$(xrayServiceBinaryPath)
     xrayConfigDir=$(xrayServiceConfigDir)
+    local resolvedBinary
+    resolvedBinary=$(readlink -f "${xrayBinary}" 2>/dev/null || true)
     while IFS= read -r pid; do
         [[ -n "${pid}" ]] || continue
         exe=$(padmReadProcExe "/proc/${pid}/exe")
-        [[ "${exe}" == "${xrayBinary}" || "${exe}" == "${xrayBinary} (deleted)" ]] || continue
+        [[ "${exe}" == "${xrayBinary}" || "${exe}" == "${xrayBinary} (deleted)" ||
+            -n "${resolvedBinary}" && ( "${exe}" == "${resolvedBinary}" || "${exe}" == "${resolvedBinary} (deleted)" ) ]] || continue
         padmReadProcArgs procArgs "/proc/${pid}/cmdline" || continue
         configMatched=false
         testMode=false

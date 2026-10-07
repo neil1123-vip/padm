@@ -2147,6 +2147,10 @@ updateGeoSite() {
     targetDir=$(coreXrayInstallDir)
     reloadPending=$(padmManagedFilePath "${targetDir}" geo.reload.pending) || return 1
     if ! ensureXrayGeoFiles "${targetDir}" force; then
+        if [[ -f "${reloadPending}" ]] && runServiceAction xray restart; then
+            removeManagedFileIfPresent "${reloadPending}" || return 1
+            statusCard "Geo 数据" "更新失败，已恢复上次更新后的 Xray 服务"
+        fi
         return 1
     fi
 

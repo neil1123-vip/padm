@@ -508,6 +508,37 @@ runSingBoxCustomPathsRegression() (
     xrayRunning
     procArgsFixture=("${PADM_XRAY_BINARY}" -confdir "${PADM_XRAY_CONF_DIR}")
     xrayRunning
+    (
+        # 符号链接启动仍按原 argv 校验，/proc 的真实可执行路径不能误判为停服。
+        local service realBinary linkBinary PADM_XRAY_CONF_DIR="${root}/xray/conf"
+        local PADM_XRAY_BINARY PADM_SINGBOX_BINARY
+        mkdir -p "${root}/real" "${root}/links"
+        handleXray() { return 99; }
+        handleSingBox() { return 99; }
+        for service in xray sing-box; do
+            realBinary="${root}/real/${service}"
+            linkBinary="${root}/links/${service}"
+            cp /usr/bin/true "${realBinary}"
+            ln -s "${realBinary}" "${linkBinary}"
+            if [[ "${service}" == xray ]]; then
+                PADM_XRAY_BINARY="${linkBinary}"
+                procArgsFixture=("${linkBinary}" run -confdir "${PADM_XRAY_CONF_DIR}")
+            else
+                PADM_SINGBOX_BINARY="${linkBinary}"
+                procArgsFixture=("${linkBinary}" run -c "${root}/conf/config.json")
+            fi
+            processBinary="${realBinary}"
+            serviceRunning "${service}" || return 1
+            runServiceAction "${service}" start || return 1
+            processBinary="${realBinary} (deleted)"
+            serviceRunning "${service}" || return 1
+            processBinary="${root}/foreign/${service}"
+            regressionExpectStatus 1 serviceRunning "${service}" || return 1
+            processBinary="${realBinary}"
+            procArgsFixture[3]+=.old
+            regressionExpectStatus 1 serviceRunning "${service}" || return 1
+        done
+    ) || return 1
     PADM_SINGBOX_BINARY="${root}/unsafe%path"
     regressionExpectStatus 1 installSingBoxService test >/dev/null
 )
@@ -3414,7 +3445,7 @@ runGeoUpdateReloadFailureRegression() (
     printf 'old-version\n' >"${geoVersionFile}"
     ensureXrayGeoFiles() {
         printf 'geo:%s\n' "$*" >>"${callLog}"
-        [[ "${mode}" == "ensure-fail" ]] && return 1
+        [[ "${mode}" == ensure-fail* ]] && return 1
         printf 'new-version\n' >"${geoVersionFile}"
         return 0
     }
@@ -3429,7 +3460,7 @@ runGeoUpdateReloadFailureRegression() (
     runServiceAction() {
         [[ "$*" == 'xray restart' ]] || return 99
         printf 'reload\n' >>"${callLog}"
-        [[ "${mode}" == reload-success ]]
+        [[ "${mode}" == reload-success || "${mode}" == ensure-fail-reload-success ]]
     }
     statusCard() {
         printf '%s\n' "$*" >>"${statusLog}"
@@ -3439,6 +3470,23 @@ runGeoUpdateReloadFailureRegression() (
     regressionExpectStatus 1 updateGeoSite >/dev/null 2>&1
     grep -qx "geo:${root} force" "${callLog}"
     ! grep -q '^reload$' "${callLog}"
+
+    # 下载失败仍重试已落盘数据的 pending 恢复，失败保留标记，成功不伪报更新成功。
+    printf '' >"${root}/geo.reload.pending"
+    mode=ensure-fail-reload-fail
+    : >"${callLog}"
+    regressionExpectStatus 1 updateGeoSite >/dev/null 2>&1 || return 1
+    [[ "$(<"${callLog}")" == $'geo:'"${root}"$' force\nreload' &&
+        "$(<"${geoVersionFile}")" == old-version && -f "${root}/geo.reload.pending" ]] || return 1
+    mode=ensure-fail-reload-success
+    : >"${callLog}"
+    : >"${statusLog}"
+    regressionExpectStatus 1 updateGeoSite >/dev/null 2>&1 || return 1
+    [[ "$(<"${callLog}")" == $'geo:'"${root}"$' force\nreload' &&
+        "$(<"${geoVersionFile}")" == old-version && ! -e "${root}/geo.reload.pending" ]] || return 1
+    grep -q '已恢复上次更新后的 Xray 服务' "${statusLog}" || return 1
+    ! grep -q '更新完毕' "${statusLog}" || return 1
+    : >"${statusLog}"
 
     mode=reload-fail
     : >"${callLog}"
