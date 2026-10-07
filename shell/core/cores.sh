@@ -1346,7 +1346,7 @@ validateSingBoxPrereleaseConfigWithMigration() {
     shardName=$(basename -- "${originalShardDir%/}") || return 1
     padmCreateTmpRootPath stagingRoot padm-sing-box-prerelease-config.XXXXXX -d || return 1
     stagingConfDir="${stagingRoot}/conf"
-    if ! padmEnsureSafeDirectory "${stagingConfDir}" || ! cp -a "${originalConfDir}/." "${stagingConfDir}/"; then
+    if ! padmEnsureSafeDirectory "${stagingConfDir}" || ! cp -aL "${originalConfDir}/." "${stagingConfDir}/"; then
         padmRemoveCleanupPath "${stagingRoot}"
         return 1
     fi
@@ -1593,7 +1593,7 @@ showXrayConfigHealthCheck() {
     fi
 
     validateXrayConfigStrictWithBinary "${binary}" "${strictLog}" || strictRc=$?
-    if [[ "${strictRc}" -eq 1 ]]; then
+    if [[ "${strictRc}" -ne 0 && "${strictRc}" -ne 2 ]]; then
         appendXrayCompatibilityHints "${strictLog}"
         xrayConfigValidationCard "需关注" "运行检查: 通过" "严格检查未通过，日志: ${strictLog}"
         return 0
@@ -3040,14 +3040,10 @@ singBoxLog() {
         return 1
     fi
 
-    if [[ "${serviceWasRunning}" == false ]]; then
-        if [[ -n "${backupPath}" ]]; then
-            removeManagedFilesIfPresentIgnoreFailure "${backupPath}"
-        fi
-        return 0
-    fi
-    serviceQueueRestart sing-box
-    if serviceQueueApply; then
+    if [[ "${serviceWasRunning}" == false ]] || {
+        serviceQueueRestart sing-box
+        serviceQueueApply
+    }; then
         if [[ -n "${backupPath}" ]]; then
             removeManagedFilesIfPresentIgnoreFailure "${backupPath}"
         fi

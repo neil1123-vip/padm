@@ -2517,6 +2517,22 @@ runRuntimeAndRealityRegression() {
     local realityGrpcClients
     local visionClients
 
+    (
+        # 严格校验返回任意失败码时，不能把运行校验成功显示为严格校验通过。
+        local root="${TMP_DIR}/xray-health-strict-status"
+        local PADM_XRAY_BINARY="${root}/xray"
+        local PADM_XRAY_CONF_DIR="${root}/conf"
+        local TMPDIR="${root}"
+        local REGRESSION_STATUS_CARD_LOG="${root}/cards.log"
+        mkdir -p "${PADM_XRAY_CONF_DIR}"
+        printf '{}\n' >"${PADM_XRAY_CONF_DIR}/config.json"
+        printf '#!/usr/bin/env bash\n[[ "${XRAY_JSON_STRICT:-}" != true ]] || exit 23\nexit 0\n' >"${PADM_XRAY_BINARY}"
+        chmod 755 "${PADM_XRAY_BINARY}"
+        showXrayConfigHealthCheck
+        grep -q '需关注.*严格检查未通过' "${REGRESSION_STATUS_CARD_LOG}"
+        ! grep -q '严格检查: 通过' "${REGRESSION_STATUS_CARD_LOG}"
+    )
+
     visionLink=$(serializeVlessRealityVisionLink "uuid-a" "node.example.com" "443" "www.microsoft.com" "pubkey" "pqv" "user-a")
     [[ "${visionLink}" == "vless://uuid-a@node.example.com:443?encryption=none&security=reality&pqv=pqv&type=tcp&sni=www.microsoft.com&fp=chrome&pbk=pubkey&sid=6ba85179e30d4fc2&flow=xtls-rprx-vision#user-a" ]]
     visionEncLink=$(serializeVlessRealityVisionLink "uuid-a" "node.example.com" "443" "www.microsoft.com" "pubkey" "pqv" "user-a" "mlkem768x25519plus.native.0rtt.test")

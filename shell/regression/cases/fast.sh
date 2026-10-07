@@ -6091,10 +6091,19 @@ JSON
             [[ "$(<"${validationConfigDirFile}")" != "${preflightConfigDir}" && "$(<"${validationConfigDirFile}")" == */conf/shards/ ]]
             [[ "$(<"${preflightFile}")" == "${preflightBefore}" && "$(<"${preflightMerged}")" == "${preflightMergedBefore}" ]]
             grep -q '已迁移' "${preflightLog}"
+
+            # 分片目录是链接时，预发布迁移仍只能修改独立副本。
+            local preflightLinkedDir="${preflightRoot}/linked-shards"
+            mv "${preflightConfigDir%/}" "${preflightLinkedDir}"
+            ln -s "${preflightLinkedDir}" "${preflightConfigDir%/}"
+            checkSingBoxPrereleaseCompatibility v1.16.0 "${preflightLog}"
+            [[ "$(<"${validationCallsFile}")" == 2 ]]
+            [[ "$(<"${preflightFile}")" == "${preflightBefore}" && "$(<"${preflightMerged}")" == "${preflightMergedBefore}" ]]
+
             printf '%s\n' '{"outbounds":[{"type":"direct","domain_strategy":"prefer_ipv4","domain_resolver":"dns-conflict"}]}' >"${preflightFile}"
             preflightBefore=$(<"${preflightFile}")
             regressionExpectStatus 1 checkSingBoxPrereleaseCompatibility v1.16.0 "${preflightLog}"
-            [[ "$(<"${preflightFile}")" == "${preflightBefore}" && "$(<"${preflightMerged}")" == "${preflightMergedBefore}" && "$(<"${validationCallsFile}")" == 1 ]]
+            [[ "$(<"${preflightFile}")" == "${preflightBefore}" && "$(<"${preflightMerged}")" == "${preflightMergedBefore}" && "$(<"${validationCallsFile}")" == 2 ]]
         )
 
         jq -e '
