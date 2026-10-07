@@ -1353,8 +1353,6 @@ validateSingBoxPrereleaseConfigWithMigration() {
     fi
     migrationLog="${logFile}.migration"
     (
-        migrationBackup=
-        validationRc=0
         singBoxConfigPath="${stagingConfDir}/${shardName}/"
         if compgen -G "${singBoxConfigPath}*.json" >/dev/null; then
             removeManagedFileIfPresent "${stagingConfDir}/config.json" || exit 1
