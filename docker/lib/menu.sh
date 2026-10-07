@@ -58,7 +58,9 @@ dockerMenuRun() {
     # 独立进程组便于中断整个动作，包括 CLI 正在等待的 Docker 命令。
     [[ $- != *m* ]] || monitorEnabled=1
     if [[ "${1:-}" == setup || "${1:-}" == edit ||
-        ( "${1:-}" == tls && "${2:-}" == manage ) ]]; then
+        ( "${1:-}" == tls && "${2:-}" == manage ) ||
+        ( "${1:-}" == protocol && ( "${2:-}" == select-target ||
+          "${2:-}" == scan-targets || "${2:-}" == scan-targets-asn ) ) ]]; then
         # 交互配置必须与菜单共用前台进程组，否则后台 read 会收到 SIGTTIN。
         setupMode=1
         set +m
@@ -99,7 +101,7 @@ dockerMenuProtocols() {
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 协议与入口\n'
-        printf '%s\n' '1. 查看入口' '2. 查看分享链接' '3. 编辑参数/复制或删除入口' '4. 重生成 Reality 参数' '0. 返回'
+        printf '%s\n' '1. 查看入口' '2. 查看分享链接' '3. 编辑参数/复制或删除入口' '4. 重生成 Reality 参数' '5. Reality 目标站管理' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -131,9 +133,96 @@ dockerMenuProtocols() {
             [[ -n "${listener}" && "${listener}" != 0 ]] || continue
             dockerMenuRun edit --regenerate-reality "${listener}" || true
             ;;
+        5) dockerMenuRealityTargets ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done
+}
+
+dockerMenuRealityTargets() {
+    local choice listener host port sni scope
+    while :; do
+        DOCKER_MENU_SIGNAL=0
+        printf '\nDocker Reality 目标站\n'
+        dockerMenuRun protocol target-status || true
+        printf '%s\n' '1. 检测当前目标' '2. 刷新目标库' '3. 扫描指定网段' \
+            '4. 同 ASN 抽样扫描' '5. 查看/切换 A 级目标' '6. 手动设置目标站' \
+            '7. 查看目标站黑名单' '8. 返回'
+        printf '请选择: '
+        if ! IFS= read -r choice; then
+            [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
+            return 0
+        fi
+        case "${choice}" in
+        0|8|9|10) return 0 ;;
+        1)
+            dockerSetupRead listener 'Reality 入口 ID（空输入检测全部，0 返回）: ' || continue
+            if [[ -n "${listener}" ]]; then
+                dockerMenuRun protocol check-target "${listener}" || true
+            else
+                dockerMenuRun protocol check-target || true
+            fi
+            [[ "${DOCKER_MENU_SIGNAL}" -eq 0 ]] || continue
+            dockerMenuRealityTargetActions "${listener}"
+            ;;
+        2)
+            printf '\nReality 刷新范围\n'
+            printf '%s\n' '1. 目标库 + 推荐候选' '2. 推荐候选' '3. 返回'
+            dockerSetupRead scope '请选择刷新范围 [1]: ' 1 || continue
+            case "${scope}" in
+            1) dockerMenuRun protocol refresh-targets recommended || true ;;
+            2) dockerMenuRun protocol refresh-targets recommended_only || true ;;
+            3|r|R) ;;
+            *) printf '无效选项，请重新选择。\n' ;;
+            esac
+            ;;
+        3) dockerMenuRun protocol scan-targets || true ;;
+        4) dockerMenuRun protocol scan-targets-asn || true ;;
+        5) dockerMenuRealityTargetSelect ;;
+        6)
+            dockerSetupRead listener 'Reality 入口 ID（0 返回）: ' &&
+                [[ -n "${listener}" ]] &&
+                dockerSetupRead host 'Reality 目标 host[:port]（0 返回）: ' || continue
+            port=443
+            if [[ "${host}" == *:* ]]; then
+                port=${host##*:}
+                host=${host%:*}
+            fi
+            dockerSetupRead sni "Reality SNI [${host}]: " "${host}" || continue
+            dockerMenuRun edit --reality-target "${listener}" "${host}" "${port}" "${sni}" || true
+            ;;
+        7) dockerMenuRun protocol blocked-targets || true ;;
+        *) printf '无效选项，请重新选择。\n' ;;
+        esac
+    done
+}
+
+dockerMenuRealityTargetSelect() {
+    local listener
+    dockerSetupRead listener '切换目标的 Reality 入口 ID（0 返回）: ' "${1:-}" &&
+        [[ -n "${listener}" ]] || return 0
+    dockerMenuRun protocol select-target "${listener}" || true
+}
+
+dockerMenuRealityTargetActions() {
+    local choice listener=${1:-} answer
+    printf '\nReality 目标站后续操作\n'
+    printf '%s\n' '1. 查看/切换 A 级目标' '2. 加入目标站黑名单' '3. 返回'
+    dockerSetupRead choice '请选择 [3]: ' 3 || return 0
+    case "${choice}" in
+    1) dockerMenuRealityTargetSelect "${listener}" ;;
+    2)
+        dockerSetupRead listener '加入黑名单的 Reality 入口 ID（0 返回）: ' "${listener}" &&
+            [[ -n "${listener}" ]] || return 0
+        dockerMenuRun protocol targets "${listener}" || return 0
+        dockerSetupRead answer '确认将该入口当前目标加入黑名单？[y/N]: ' n || return 0
+        case "${answer}" in
+        y|Y|yes|YES) dockerMenuRun protocol block-current-target "${listener}" || true ;;
+        esac
+        ;;
+    3|r|R) ;;
+    *) printf '无效选项，请重新选择。\n' ;;
+    esac
 }
 
 dockerMenu() {

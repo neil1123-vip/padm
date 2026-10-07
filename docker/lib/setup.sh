@@ -662,18 +662,49 @@ dockerEditPreview() {
 }
 
 dockerProtocolCommand() (
-    local action=${1:-} listener= root workspace original normalized selected status
+    local action=${1:-} listener= root workspace original normalized selected status targetAction=
+    local selectedHost selectedPort selectedSni
+    local -a targetArgs=()
     [[ "$#" -gt 0 ]] && shift
     case "${action}" in
     list) [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
-    links)
+    links|targets|check-target|target-status|select-target|block-current-target)
         [[ "$#" -le 1 && "${1:-}" != --* ]] || return "${PADM_DOCKER_RC_USAGE}"
         listener=${1:-}
+        if [[ "${action}" == select-target ]]; then
+            [[ -n "${listener}" && -t 0 && -t 1 ]] || return "${PADM_DOCKER_RC_USAGE}"
+        fi
+        [[ "${action}" != block-current-target || -n "${listener}" ]] ||
+            return "${PADM_DOCKER_RC_USAGE}"
+        ;;
+    refresh-targets)
+        [[ "$#" -le 1 ]] || return "${PADM_DOCKER_RC_USAGE}"
+        case "${1:-recommended}" in recommended|recommended_only|all) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+        targetAction=refresh targetArgs=("${1:-recommended}")
+        ;;
+    target-library)
+        [[ "$#" -le 2 ]] || return "${PADM_DOCKER_RC_USAGE}"
+        case "${1:-all}" in all|same_asn|same_provider|local_network|scanner) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+        [[ "${2:-1}" =~ ^[1-9][0-9]{0,8}$ ]] || return "${PADM_DOCKER_RC_USAGE}"
+        targetAction=library targetArgs=("${1:-all}" "${2:-1}")
+        ;;
+    blocked-targets)
+        [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
+        targetAction=blocked
+        ;;
+    block-target)
+        [[ "$#" -eq 1 ]] && dockerDomainIsValid "$1" || return "${PADM_DOCKER_RC_USAGE}"
+        targetAction=block targetArgs=("$1")
+        ;;
+    scan-targets|scan-targets-asn)
+        [[ "$#" -le 1 && "${1:-}" != -* && -t 0 && -t 1 ]] || return "${PADM_DOCKER_RC_USAGE}"
+        if [[ "${action}" == scan-targets ]]; then targetAction=scan-range; else targetAction=scan-asn; fi
+        [[ "$#" -eq 0 ]] || targetArgs=("$1")
         ;;
     *) return "${PADM_DOCKER_RC_USAGE}" ;;
     esac
     DOCKER_SETUP_CANDIDATE=
-    # 读取只持有短期锁，独立清理工作目录，不把锁带回菜单等待输入。
+    # 只在读取部署快照时持锁，独立清理目录，不把锁带回菜单等待输入。
     trap 'status=$?; dockerSetupCleanup || { [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_STATE}; }; dockerReleaseDeploymentLock || { [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_LOCK}; }; exit "${status}"' EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM
@@ -730,6 +761,62 @@ dockerProtocolCommand() (
         return "${PADM_DOCKER_RC_STATE}"
     }
     chmod 0600 "${selected}" || return "${PADM_DOCKER_RC_STATE}"
+    if [[ -n "${targetAction}" ]]; then
+        # 公共目标库不依赖所选入口；只操作 Docker 的目标状态，不改部署规格。
+        source "${DOCKER_BUNDLE_SOURCE_ROOT}/docker/lib/reality-targets.sh" || return "${PADM_DOCKER_RC_STATE}"
+        dockerReleaseDeploymentLock || return "${PADM_DOCKER_RC_LOCK}"
+        dockerRealityTargetAction "${selected}" "${targetAction}" "${targetArgs[@]}"
+        return $?
+    fi
+    if [[ "${action}" == targets || "${action}" == check-target || "${action}" == target-status ||
+        "${action}" == select-target || "${action}" == block-current-target ]]; then
+        jq '.core.protocols |= map(select(.id == 1 or .id == 2 or .id == 26))' \
+            "${selected}" >"${selected}.next" &&
+            chmod 0600 "${selected}.next" && mv -f -- "${selected}.next" "${selected}" ||
+            return "${PADM_DOCKER_RC_STATE}"
+        jq -e '.core.protocols | length > 0' "${selected}" >/dev/null || {
+            dockerError '没有匹配的 Reality 入口'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        if [[ "${action}" == targets ]]; then
+            jq -r '.core.protocols[] |
+              "\(.listener_id)  \(.core)  \(.reality.target_host):\(.reality.target_port)  SNI=\(.reality.server_name)"' \
+                "${selected}"
+            return $?
+        fi
+        source "${DOCKER_BUNDLE_SOURCE_ROOT}/docker/lib/reality-targets.sh" || return "${PADM_DOCKER_RC_STATE}"
+        # 在线检测和分页选择只使用私密快照；等待期间不占用部署锁。
+        dockerReleaseDeploymentLock || return "${PADM_DOCKER_RC_LOCK}"
+        case "${action}" in
+        target-status) dockerRealityTargetAction "${selected}" status; return $? ;;
+        check-target)
+            status=0
+            dockerRealityTargetAction "${selected}" check || status=$?
+            case "${status}" in
+            0|130|143) return "${status}" ;;
+            *) return "${PADM_DOCKER_RC_STATE}" ;;
+            esac
+            ;;
+        block-current-target)
+            selectedHost=$(jq -er 'if (.core.protocols | length) == 1 then
+              .core.protocols[0].reality.target_host else error("需要唯一入口") end' "${selected}") ||
+                return "${PADM_DOCKER_RC_STATE}"
+            dockerRealityTargetAction "${selected}" block "${selectedHost}"
+            return $?
+            ;;
+        esac
+        status=0
+        dockerRealityTargetAction "${selected}" select "${workspace}/selection.json" || status=$?
+        [[ "${status}" -eq 2 ]] || return "${status}"
+        selectedHost=$(jq -er '.host' "${workspace}/selection.json") &&
+            selectedPort=$(jq -er '.port' "${workspace}/selection.json") &&
+            selectedSni=$(jq -er '.sni' "${workspace}/selection.json") || return "${PADM_DOCKER_RC_STATE}"
+        dockerSetupCleanup || return "${PADM_DOCKER_RC_STATE}"
+        # 独立 CLI 执行完整中断恢复并重新在线复测，不把缓存 A 级当作切换授权。
+        bash "${root}/bundle/install-docker.sh" edit \
+            --reality-target "${listener}" "${selectedHost}" "${selectedPort}" "${selectedSni}"
+        return $?
+    fi
     # 命令标准输出只含 URI，便于直接导入或复制，不混入菜单说明。
     dockerGenerateSubscription "${selected}" /dev/stdout
 )
@@ -1011,6 +1098,7 @@ dockerEditFields() {
 dockerEditCommand() {
     local specFile= manifest= bundle= controlBundle= mode=interactive root workspace original draft imported=0 status=0
     local privateKey publicKey derivedKey opsImage version normalized regenerateReality=
+    local realityTarget= targetHost= targetPort= targetSni=
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
         --spec|--manifest|--bundle|--control-bundle)
@@ -1029,6 +1117,15 @@ dockerEditCommand() {
             regenerateReality=$2
             shift 2
             ;;
+        --reality-target)
+            [[ "$#" -ge 5 && -n "$2" && "$2" != --* && -z "${realityTarget}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            realityTarget=$2 targetHost=$3 targetPort=$4 targetSni=$5
+            dockerDomainIsValid "${targetHost}" && dockerDomainIsValid "${targetSni}" &&
+                [[ "${targetPort}" =~ ^[1-9][0-9]{0,4}$ && "${targetPort}" -le 65535 ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            shift 5
+            ;;
         --preview)
             [[ "${mode}" == interactive ]] || return "${PADM_DOCKER_RC_USAGE}"
             mode=preview
@@ -1043,8 +1140,9 @@ dockerEditCommand() {
         *) return "${PADM_DOCKER_RC_USAGE}" ;;
         esac
     done
-    [[ -z "${regenerateReality}" || -z "${specFile}" ]] || {
-        dockerError 'Reality 参数重生成不能与原始规格导入组合'
+    [[ ( -z "${regenerateReality}" && -z "${realityTarget}" ) || -z "${specFile}" ]] &&
+        [[ -z "${regenerateReality}" || -z "${realityTarget}" ]] || {
+        dockerError 'Reality 专项编辑不能与规格导入或另一专项动作组合'
         return "${PADM_DOCKER_RC_USAGE}"
     }
     [[ "${mode}" != interactive || ( -t 0 && -t 1 ) ]] || {
@@ -1056,7 +1154,7 @@ dockerEditCommand() {
     dockerComposeFile >/dev/null || return "${PADM_DOCKER_RC_STATE}"
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     dockerTrafficSafePath "${root}" "${root}/config/spec.json" || return "${PADM_DOCKER_RC_STATE}"
-    [[ -z "${regenerateReality}" || -f "${root}/config/spec.json" ]] ||
+    [[ ( -z "${regenerateReality}" && -z "${realityTarget}" ) || -f "${root}/config/spec.json" ]] ||
         return "${PADM_DOCKER_RC_STATE}"
     if [[ ! -e "${root}/config/spec.json" && ! -L "${root}/config/spec.json" && -z "${specFile}" ]]; then
         if [[ "${mode}" == interactive ]]; then
@@ -1105,7 +1203,8 @@ dockerEditCommand() {
     dockerConfigureSpecMigrate "${draft}" "${draft}.v3" &&
         mv -f -- "${draft}.v3" "${draft}" || return "${PADM_DOCKER_RC_STATE}"
     # 旧规格先接入，不能同时把未经证明的字段改动当作无损导入。
-    if [[ "${mode}" == interactive && -z "${specFile}" && "${imported}" -eq 0 && -z "${regenerateReality}" ]]; then
+    if [[ "${mode}" == interactive && -z "${specFile}" && "${imported}" -eq 0 &&
+        -z "${regenerateReality}" && -z "${realityTarget}" ]]; then
         dockerEditFields "${draft}" || status=$?
         if [[ "${status}" -eq 3 ]]; then
             printf '已取消配置编辑。\n'
@@ -1117,6 +1216,21 @@ dockerEditCommand() {
     fi
     jq -es 'length == 1 and (.[0] | type == "object")' "${draft}" >/dev/null 2>&1 ||
         return "${PADM_DOCKER_RC_STATE}"
+    if [[ -n "${realityTarget}" ]]; then
+        jq --arg listener "${realityTarget}" --arg host "${targetHost}" --argjson port "${targetPort}" \
+            --arg sni "${targetSni}" '
+          [.core.protocols[] | select(.listener_id == $listener and (.id == 1 or .id == 2 or .id == 26))] as $selected |
+          if ($selected | length) != 1 then error("不是唯一 Reality 入口") else
+            .core.protocols |= map(if .listener_id == $listener then
+              .reality.target_host = $host | .reality.target_port = $port | .reality.server_name = $sni
+            else . end)
+          end
+        ' "${draft}" >"${draft}.next" 2>/dev/null &&
+            chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" || {
+            dockerError '目标站设置需要指定一个已有 Reality 入口 ID'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+    fi
     dockerConfigureSpecValidate "${draft}" || return "${PADM_DOCKER_RC_STATE}"
     if [[ -n "${regenerateReality}" ]]; then
         regenerateReality=$(jq -er --arg listener "${regenerateReality}" '
@@ -1145,7 +1259,8 @@ dockerEditCommand() {
     fi
     dockerEditPreview "${original}" "${draft}" || return "${PADM_DOCKER_RC_STATE}"
     [[ "${imported}" -eq 0 ]] || printf '完整原始规格已匹配，确认后接入受管输入。\n'
-    jq -en --arg regenerate "${regenerateReality}" --slurpfile before "${normalized}" --slurpfile after "${draft}" '
+    jq -en --arg regenerate "${regenerateReality}" --arg target "${realityTarget}" \
+        --slurpfile before "${normalized}" --slurpfile after "${draft}" '
       def fixed: del(.server, .public_port, .address_families, .name,
         .reality.target_host, .reality.target_port, .reality.server_name, .websocket.path, .httpupgrade.path,
         .xhttp.path, .xhttp.host, .xhttp.mode, .grpc.service_name, .grpc_tls.service_name,
@@ -1155,14 +1270,17 @@ dockerEditCommand() {
       def reality: .id == 1 or .id == 2 or .id == 26;
       def shared: fixed | del(.listener_id, .core, .id, .xhttp, .grpc);
       def root: del(.core.protocols, .core.secondary_type, .tls, .subscription.enabled);
+      def special: .core.protocols |= map(
+        if $regenerate != "" and .listener_id == $regenerate then
+          del(.reality.private_key, .reality.public_key, .reality.short_id)
+        elif $target != "" and .listener_id == $target then
+          del(.reality.target_host, .reality.target_port, .reality.server_name)
+        else . end);
       $before[0] as $old | $after[0] as $new |
       [$old.core.protocols[].listener_id] as $oldIds |
       [$new.core.protocols[].listener_id] as $newIds |
-      (if $regenerate != "" then
-        ($old | .core.protocols |= map(if .listener_id == $regenerate then
-          del(.reality.private_key, .reality.public_key, .reality.short_id) else . end)) ==
-        ($new | .core.protocols |= map(if .listener_id == $regenerate then
-          del(.reality.private_key, .reality.public_key, .reality.short_id) else . end))
+      (if $regenerate != "" or $target != "" then
+        ($old | special) == ($new | special)
        else true end) and
       # 分次提交新增与删除，防止借同凭据入口绕过已有身份和内部端口冻结。
       ((($oldIds - $newIds) | length) == 0 or (($newIds - $oldIds) | length) == 0) and

@@ -471,32 +471,23 @@ dockerEditBaselineValidate() {
     }
 }
 
-dockerRealityTlsPingState() {
-    local output=$1
-    printf '%s\n' "${output}" | awk '
-      /Pinging with SNI/ {inSni = 1; next}
-      inSni && /Handshake succeeded/ {success = 1}
-      inSni && /Handshake failure/ {rejected = 1}
-      END {
-        if (success) print "success"
-        else if (rejected) print "rejected"
-        else print "unknown"
-      }
-    '
-}
-
-dockerRealityTlsPingHasTls13() {
-    local output=$1
-    printf '%s\n' "${output}" | awk '
-      /Pinging with SNI/ {inSni = 1; next}
-      inSni && /TLS Version:[[:space:]]*TLS 1\.3/ {found = 1}
-      END {exit found ? 0 : 1}
-    '
-}
+dockerRealityProbeRun() (
+    local seconds=$1 directory cidFile status=0 cid=
+    shift
+    directory=$(mktemp -d "${TMPDIR:-/tmp}/padm-reality-probe.XXXXXX") || return 1
+    cidFile="${directory}/cid"
+    trap 'status=$?; if [[ -f "${cidFile}" && ! -L "${cidFile}" ]]; then cid=$(<"${cidFile}"); fi; if [[ "${cid}" =~ ^[a-f0-9]{64}$ ]]; then docker rm -f "${cid}" >/dev/null 2>&1 || true; fi; rm -f -- "${cidFile}"; rmdir -- "${directory}"; exit "${status}"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    # 保留终端信号组；私有 cidfile 仅用于退出时清理本次容器。
+    timeout --foreground -k 2 "${seconds}" docker run --rm --cidfile "${cidFile}" --read-only \
+        --cap-drop ALL --security-opt no-new-privileges "$@" || status=$?
+    return "${status}"
+)
 
 dockerRealityTargetNetworkRecords() {
     local opsImage=$1 host=$2
-    docker run --rm --entrypoint python3 "${opsImage}" -c '
+    dockerRealityProbeRun 60 --entrypoint python3 "${opsImage}" -c '
 import json
 import socket
 import sys
@@ -553,6 +544,8 @@ for ip in addresses:
                 org = fields[1] if len(fields) > 1 else ""
         except Exception:
             pass
+    org = " ".join(org.split())
+    org = "".join(char for char in org if ord(char) >= 32 and ord(char) != 127)[:256]
     print(ip, asn or "unknown", org or "unknown", sep="\t")
 ' "${host}"
 }
@@ -561,65 +554,15 @@ dockerRealityTargetTlsPing() {
     local xrayImage=$1 ip=$2 sni=$3 port=$4
     local timeoutSeconds=${PADM_DOCKER_REALITY_TLS_TIMEOUT:-20}
     [[ "${timeoutSeconds}" =~ ^[0-9]+$ && "${timeoutSeconds}" -gt 0 ]] || timeoutSeconds=20
-    timeout -k 2 "${timeoutSeconds}" docker run --rm "${xrayImage}" tls ping -ip "${ip}" "${sni}:${port}" 2>&1 || true
+    dockerRealityProbeRun "${timeoutSeconds}" "${xrayImage}" tls ping -ip "${ip}" "${sni}:${port}" 2>&1 || true
 }
 
 dockerRealityTargetsValidate() {
-    local specFile=$1 xrayImage opsImage host port sni records ip asn _org
-    local targetResult targetState cfResult cfState incomplete=false
+    local specFile=$1
     jq -e 'any(.core.protocols[]; .id == 1 or .id == 2 or .id == 26)' "${specFile}" >/dev/null || return 0
-    command -v timeout >/dev/null 2>&1 || {
-        dockerError '缺少 timeout，无法限制 REALITY 目标站探测时长'
-        return 1
-    }
-    xrayImage=$(jq -r '.images.xray' "${specFile}") || return 1
-    opsImage=$(jq -r '.images.ops' "${specFile}") || return 1
-    while IFS=$'\t' read -r host port sni; do
-        incomplete=false
-        case "${host,,}" in
-        java.com | *.java.com | riotcdn.net | *.riotcdn.net)
-            dockerError "REALITY 目标命中已知 CDN 中继风险域名: ${host}"
-            return 1
-            ;;
-        esac
-        records=$(dockerRealityTargetNetworkRecords "${opsImage}" "${host}" 2>/dev/null) || {
-            dockerError "REALITY 目标地址解析失败: ${host}"
-            return 1
-        }
-        [[ -n "${records}" ]] || {
-            dockerError "REALITY 目标没有 A/AAAA 记录: ${host}"
-            return 1
-        }
-        while IFS=$'\t' read -r ip asn _org; do
-            [[ -n "${ip}" ]] || continue
-            if [[ "${asn}" == "AS13335" ]]; then
-                dockerError "REALITY 目标命中 Cloudflare AS13335: ${host} -> ${ip}"
-                return 1
-            fi
-            [[ "${asn}" != "unknown" ]] || incomplete=true
-            targetResult=$(dockerRealityTargetTlsPing "${xrayImage}" "${ip}" "${sni}" "${port}")
-            targetState=$(dockerRealityTlsPingState "${targetResult}")
-            if [[ "${targetState}" != "success" ]] || ! dockerRealityTlsPingHasTls13 "${targetResult}"; then
-                incomplete=true
-                continue
-            fi
-            cfResult=$(dockerRealityTargetTlsPing "${xrayImage}" "${ip}" cloudflare.com "${port}")
-            cfState=$(dockerRealityTlsPingState "${cfResult}")
-            case "${cfState}" in
-            success)
-                dockerError "REALITY 目标可响应 cloudflare.com SNI，存在中继风险: ${host} -> ${ip}"
-                return 1
-                ;;
-            rejected) ;;
-            *) incomplete=true ;;
-            esac
-        done <<<"${records}"
-        if [[ "${incomplete}" == "true" ]]; then
-            dockerError "REALITY 目标风险检测不完整，已拒绝部署: ${host}:${port}"
-            return 1
-        fi
-    done < <(jq -r '[.core.protocols[] | select(.id == 1 or .id == 2 or .id == 26) |
-      [.reality.target_host, (.reality.target_port | tostring), .reality.server_name]] | unique[] | @tsv' "${specFile}")
+    # 安全门与菜单复用当前原生评分和风险算法，只读验证不更新目标库。
+    source "${DOCKER_BUNDLE_SOURCE_ROOT}/docker/lib/reality-targets.sh" || return 1
+    dockerRealityTargetAction "${specFile}" validate
 }
 
 dockerCurrentOwnsPort() {

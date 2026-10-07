@@ -66,6 +66,9 @@ run)
         [[ "${FAKE_DOCKER_MODE:-ok}" != tls-validity-fail ]]
         exit $?
     fi
+    if [[ " ${*} " == *'DNS CNAME probe requires nslookup'* ]]; then
+        exit 0
+    fi
     if [[ " ${*} " == *' --entrypoint python3 '* ]]; then
         printf '192.0.2.1\tAS64500\tExampleNet\n'
     elif [[ " ${*} " == *' tls ping '* ]]; then

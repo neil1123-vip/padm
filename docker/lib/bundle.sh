@@ -33,6 +33,12 @@ dockerBundlePayloadPaths() {
     done < <(find "${sourceRoot}/docker" -type f -print | LC_ALL=C sort)
     printf 'shell/core/deployment_mode.sh\n'
     printf 'shell/core/stats_grpc.sh\n'
+    if [[ -f "${sourceRoot}/docker/lib/reality-targets.sh" ]]; then
+        for path in shell/core/runtime.sh shell/core/reality_targets.sh; do
+            [[ -f "${sourceRoot}/${path}" && ! -L "${sourceRoot}/${path}" ]] || return 1
+            printf '%s\n' "${path}"
+        done
+    fi
     if [[ -d "${sourceRoot}/documents" && ! -L "${sourceRoot}/documents" ]]; then
         while IFS= read -r path; do
             path=${path#"${sourceRoot}/"}
@@ -64,6 +70,11 @@ dockerBundleSourceIsComplete() {
     done
     if grep -qF '/renewal.sh"' "${sourceRoot}/docker/lib/services.sh"; then
         [[ -f "${sourceRoot}/docker/lib/renewal.sh" && ! -L "${sourceRoot}/docker/lib/renewal.sh" ]] || return 1
+    fi
+    if grep -qF '/reality-targets.sh"' "${sourceRoot}/docker/lib/services.sh"; then
+        for required in docker/lib/reality-targets.sh shell/core/runtime.sh shell/core/reality_targets.sh; do
+            [[ -f "${sourceRoot}/${required}" && ! -L "${sourceRoot}/${required}" ]] || return 1
+        done
     fi
     dockerBundlePayloadPaths "${sourceRoot}" >/dev/null
 }

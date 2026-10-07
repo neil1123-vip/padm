@@ -101,6 +101,9 @@ run)
         [[ "${mode}" != "tls-validity-fail" ]]
         exit $?
     fi
+    if [[ " ${*} " == *'DNS CNAME probe requires nslookup'* ]]; then
+        exit 0
+    fi
     if [[ " ${*} " == *' --entrypoint python3 '* && " ${*} " != *'/opt/acme/acme.sh'* ]]; then
         if [[ " ${*} " == *'302e020100300506032b656e04220420'* ]]; then
             previous=
@@ -346,11 +349,11 @@ grep -qF 'Reality 公私钥不匹配' "${CONTROL_LOG}" ||
 cp -- "${TEST_ROOT}/edit-original-xray.json" "${DOCKER_ROOT}/config/spec.json"
 
 runControl 15 reject-reality-static-relay configure --spec "${REALITY_RELAY_SPEC}"
-grep -qF '命中已知 CDN 中继风险域名' "${CONTROL_LOG}" || fail 'known relay Reality target was not rejected'
+grep -qF '命中已知 CDN 风险名单' "${CONTROL_LOG}" || fail 'known relay Reality target was not rejected'
 FAKE_DOCKER_MODE=reality-asn-risk runControl 15 reject-reality-as13335 configure --spec "${REALITY_XRAY_SPEC}"
-grep -qF '命中 Cloudflare AS13335' "${CONTROL_LOG}" || fail 'AS13335 Reality target was not rejected'
+grep -qF '(cloudflare_relay)' "${CONTROL_LOG}" || fail 'AS13335 Reality target was not rejected'
 FAKE_DOCKER_MODE=reality-sni-risk runControl 15 reject-reality-cloudflare-sni configure --spec "${REALITY_XRAY_SPEC}"
-grep -qF '可响应 cloudflare.com SNI' "${CONTROL_LOG}" || fail 'Cloudflare SNI relay was not rejected'
+grep -qF '(cloudflare_relay)' "${CONTROL_LOG}" || fail 'Cloudflare SNI relay was not rejected'
 FAKE_DOCKER_MODE=reality-unknown-risk runControl 15 reject-reality-unknown configure --spec "${REALITY_XRAY_SPEC}"
 grep -qF '风险检测不完整' "${CONTROL_LOG}" || fail 'unknown Reality target risk was not rejected'
 FAKE_DOCKER_MODE=reality-dns-failure runControl 15 reject-reality-dns-failure configure --spec "${REALITY_XRAY_SPEC}"
@@ -1127,8 +1130,9 @@ validateFeatureMatrix() {
         . as $entry |
         ($matrix.feature_matrix[$entry.key] | {status, profiles, network_mode, host_capabilities}) ==
           ($matrix.feature_matrix[$entry.value] | {status, profiles, network_mode, host_capabilities})) and
-      all(["interactive-menu", "reality-target-management", "reality-coexistence",
+      all(["interactive-menu", "reality-coexistence",
         "core-upgrade-assessment"][]; $matrix.feature_matrix[.].status == "deferred") and
+      $matrix.feature_matrix["reality-target-management"].status == "supported" and
       $matrix.feature_matrix["reality-parameter-management"].status == "supported" and
       ([.protocols[] | select(.status == "supported") | .id] | sort) == [1, 2, 3, 4, 5, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31] and
       .feature_matrix.subscription.requires == {core: "xray", protocol_ids: [21], tls: true} and
@@ -1165,6 +1169,7 @@ del(.feature_matrix["reality-target-management"])
 .feature_matrix.subscription.requires.tls = false
 .feature_matrix["core-upgrade-assessment"].status = "supported"
 .feature_matrix["reality-parameter-management"].status = "deferred"
+.feature_matrix["reality-target-management"].status = "deferred"
 EOF
 
 printf 'docker-phase3-regression-ok\n'

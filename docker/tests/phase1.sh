@@ -170,6 +170,7 @@ copyBundleFixture() {
     cp -R "${PROJECT_ROOT}/docker" "${target}/docker"
     cp "${PROJECT_ROOT}/shell/core/deployment_mode.sh" "${target}/shell/core/deployment_mode.sh"
     cp "${PROJECT_ROOT}/shell/core/stats_grpc.sh" "${target}/shell/core/stats_grpc.sh"
+    cp "${PROJECT_ROOT}/shell/core/"{runtime.sh,reality_targets.sh} "${target}/shell/core/"
     find "${PROJECT_ROOT}/documents" -maxdepth 1 -type f -name 'docker*.md' -exec cp {} "${target}/documents/" \;
 }
 
@@ -188,6 +189,8 @@ for directory in bundle config data secrets logs backups locks; do
 done
 [[ -L "${DOCKER_ROOT}/bundle" ]] || fail 'bundle pointer is not a symbolic link'
 [[ -f "${DOCKER_ROOT}/bundle/shell/core/stats_grpc.sh" ]] || fail 'bundle lacks the shared stats decoder'
+[[ -f "${DOCKER_ROOT}/bundle/shell/core/reality_targets.sh" &&
+    -f "${DOCKER_ROOT}/bundle/shell/core/runtime.sh" ]] || fail 'bundle lacks the shared Reality target module'
 [[ -L "${CLI_DIR}/padm-docker" ]] || fail 'padm-docker command link is missing'
 [[ "$(readlink "${CLI_DIR}/padm-docker")" == "${DOCKER_ROOT}/bundle/install-docker.sh" ]] ||
     fail 'padm-docker command link has an unexpected target'
@@ -321,6 +324,16 @@ rm -f -- "${BROKEN_SOURCE}/docker/lib/lifecycle.sh"
 runControl 13 broken-bundle "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" install --source "${BROKEN_SOURCE}"
 [[ "$(readlink "${DOCKER_ROOT}/bundle")" == "${bundleBefore}" ]] || fail 'failed bundle refresh changed the active bundle'
 [[ "$(<"${DOCKER_ROOT}/data/sentinel")" == "keep" ]] || fail 'failed bundle refresh changed persistent data'
+
+for missing in docker/lib/reality-targets.sh shell/core/runtime.sh shell/core/reality_targets.sh; do
+    incompleteSource="${TEST_ROOT}/incomplete-${missing//\//-}"
+    copyBundleFixture "${incompleteSource}"
+    rm -f -- "${incompleteSource}/${missing}"
+    runControl 13 incomplete-target-module "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" \
+        install --source "${incompleteSource}"
+    [[ "$(readlink "${DOCKER_ROOT}/bundle")" == "${bundleBefore}" ]] ||
+        fail 'incomplete target module changed the active bundle'
+done
 
 COMPOSE_SOURCE="${TEST_ROOT}/compose-source"
 copyBundleFixture "${COMPOSE_SOURCE}"

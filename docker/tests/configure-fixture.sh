@@ -11,7 +11,7 @@ dockerConfigureTestFixture() {
     cp "${PROJECT_ROOT}/install-docker.sh" "${source}/install-docker.sh"
     cp -R "${PROJECT_ROOT}/docker/lib" "${source}/docker/lib"
     cp -R "${PROJECT_ROOT}/docker/contracts" "${source}/docker/contracts"
-    for relative in deployment_mode.sh stats_grpc.sh; do
+    for relative in deployment_mode.sh stats_grpc.sh runtime.sh reality_targets.sh; do
         cp "${PROJECT_ROOT}/shell/core/${relative}" "${source}/shell/core/${relative}"
     done
     tar -czf "${CONFIGURE_CONTROL}" -C "${source}" install-docker.sh docker shell

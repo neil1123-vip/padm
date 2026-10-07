@@ -6175,6 +6175,14 @@ runDockerRealityParametersRegression() {
     bash "${PROJECT_ROOT}/docker/tests/reality-parameters.sh"
 }
 
+runDockerRealityTargetsRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/reality-targets.sh"
+}
+
+runDockerRealityTargetLibraryRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/reality-target-library.sh"
+}
+
 runDockerHysteria2Regression() {
     bash "${PROJECT_ROOT}/docker/tests/hysteria2.sh"
 }

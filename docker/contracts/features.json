@@ -13,7 +13,7 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "支持单核心或 Xray/sing-box 主副核心首配、完整规格导入、入口编辑、跨核心复制及逐入口 Reality 参数重生成，配置时进行目标风险检测；目标库、扫描、PQC 及 443 共存管理尚未迁移。"
+      "reason": "支持单核心或 Xray/sing-box 主副核心首配、完整规格导入、入口编辑、跨核心复制、逐入口 Reality 参数重生成及目标检测/目标库/扫描/PQC 管理；443 共存和完整协议管理尚未迁移。"
     },
     {
       "id": 2,
@@ -27,7 +27,7 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 Xray XHTTP Reality 首配、完整规格导入、概览和分享链接、入口及基础 XHTTP 参数编辑与复制和逐入口 Reality 参数重生成；高级 XHTTP 参数、目标库、扫描、PQC 及 443 共存管理尚未迁移。"
+      "reason": "v3 支持 Xray XHTTP Reality 首配、完整规格导入、概览和分享链接、入口及基础 XHTTP 参数编辑与复制、逐入口 Reality 参数重生成及目标检测/目标库/扫描/PQC 管理；高级 XHTTP 参数、443 共存和完整管理尚未迁移。"
     },
     {
       "id": 3,
@@ -153,7 +153,7 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 Xray/sing-box Reality gRPC 首配、完整规格导入、概览和分享链接、入口及 serviceName 编辑、跨核心复制和逐入口 Reality 参数重生成；目标库、扫描、PQC 及 443 共存管理尚未迁移。"
+      "reason": "v3 支持 Xray/sing-box Reality gRPC 首配、完整规格导入、概览和分享链接、入口及 serviceName 编辑、跨核心复制、逐入口 Reality 参数重生成及目标检测/目标库/扫描/PQC 管理；443 共存和完整管理尚未迁移。"
     },
     {
       "id": 27,
@@ -344,13 +344,13 @@
       "reason": "v2/v3 已支持最多 16 个入口、同协议复制/删除及端口事务，v3 明确核心归属；既有身份和内部端口冻结，Fail2ban 联动及 443 共存等完整管理仍未交付。"
     },
     "reality-target-management": {
-      "status": "deferred",
+      "status": "supported",
       "native_menu": "协议与入口 / REALITY 管理",
       "native_action": "目标扫描、候选库、黑名单和 PQC",
       "profiles": ["core-xray", "core-sing-box"],
       "network_mode": "host-cli",
       "host_capabilities": [],
-      "reason": "Docker 配置及 edit 目标字段变更均进行风险检测，尚无目标扫描、目标库管理及 PQC 工作流。"
+      "reason": "对齐当前原生 8 项菜单，复用原生候选、全部 A/AAAA 最差评分和 CDN 风险算法；支持 TLS/PQC/ASN/证书链检测、目标库刷新、RealiTLScanner 网段/同 ASN 抽样扫描、A 级分页筛选切换、独立 SNI 和黑名单。库与扫描状态仅保存于 Docker 私密目录；切换按入口重新验签复测，复用候选确认、备份、健康检查及中断恢复，保留其它入口和额度。实际候选可用性及公网扫描须在部署网络复验，443 共存另列。"
     },
     "reality-parameter-management": {
       "status": "supported",

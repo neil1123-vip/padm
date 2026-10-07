@@ -119,6 +119,107 @@ assertNoLock() {
         fail 'menu retained the deployment lock'
 }
 
+targetReply() {
+    local prompt=$1 input=$2 count
+    count=$((${targetPrompts["${prompt}"]:-0} + 1))
+    targetPrompts["${prompt}"]=${count}
+    waitForText "${prompt}" "${CONTROL_LOG}" "${count}" || exit 31
+    assertNoLock
+    [[ ! -e "${TLS_WIZARD_ROOT}/locks/deployment.lock" ]] || exit 32
+    printf '%s' "${input}" >&3
+}
+
+runTargetsDriver() {
+    local scenario=$1
+    local -A targetPrompts=()
+    targetReply 'Docker 管理菜单' $'9\n'
+    targetReply 'Docker 协议与入口' $'5\n'
+    case "${scenario}" in
+    flow)
+        targetReply 'Docker Reality 目标站' $'1\n'
+        targetReply 'Reality 入口 ID（空输入检测全部，0 返回）' $'entry-fixture\n'
+        targetReply 'Reality 目标站后续操作' $'1\n'
+        targetReply '切换目标的 Reality 入口 ID（0 返回）' $'\n'
+        targetReply 'fixture-target-input: select-target' $'selected\n'
+        targetReply 'Docker Reality 目标站' $'2\n'
+        targetReply '请选择刷新范围 [1]' $'\n'
+        targetReply 'Docker Reality 目标站' $'2\n'
+        targetReply '请选择刷新范围 [1]' $'2\n'
+        targetReply 'Docker Reality 目标站' $'2\n'
+        targetReply '请选择刷新范围 [1]' $'3\n'
+        targetReply 'Docker Reality 目标站' $'3\n'
+        targetReply 'fixture-target-input: scan-targets' $'scan\n'
+        targetReply 'Docker Reality 目标站' $'4\n'
+        targetReply 'fixture-target-input: scan-targets-asn' $'scan-asn\n'
+        targetReply 'Docker Reality 目标站' $'5\n'
+        targetReply '切换目标的 Reality 入口 ID（0 返回）' $'entry-secondary\n'
+        targetReply 'fixture-target-input: select-target' $'selected-secondary\n'
+        targetReply 'Docker Reality 目标站' $'6\n'
+        targetReply 'Reality 入口 ID（0 返回）' $'entry-fixture\n'
+        targetReply 'Reality 目标 host[:port]（0 返回）' $'target.example.com\n'
+        targetReply 'Reality SNI [target.example.com]' $'\n'
+        targetReply 'Docker Reality 目标站' $'6\n'
+        targetReply 'Reality 入口 ID（0 返回）' $'entry-secondary\n'
+        targetReply 'Reality 目标 host[:port]（0 返回）' $'alt.example.com:8443\n'
+        targetReply 'Reality SNI [alt.example.com]' $'edge.example.net\n'
+        targetReply 'Docker Reality 目标站' $'7\n'
+        targetReply 'Docker Reality 目标站' $'1\n'
+        targetReply 'Reality 入口 ID（空输入检测全部，0 返回）' $'\n'
+        targetReply 'Reality 目标站后续操作' $'2\n'
+        targetReply '加入黑名单的 Reality 入口 ID（0 返回）' $'entry-secondary\n'
+        targetReply '确认将该入口当前目标加入黑名单？[y/N]' $'n\n'
+        targetReply 'Docker Reality 目标站' $'1\n'
+        targetReply 'Reality 入口 ID（空输入检测全部，0 返回）' $'entry-secondary\n'
+        targetReply 'Reality 目标站后续操作' $'2\n'
+        targetReply '加入黑名单的 Reality 入口 ID（0 返回）' $'\n'
+        targetReply '确认将该入口当前目标加入黑名单？[y/N]' $'y\n'
+        ;;
+    cancel)
+        targetReply 'Docker Reality 目标站' $'1\n'
+        targetReply 'Reality 入口 ID（空输入检测全部，0 返回）' $'0\n'
+        targetReply 'Docker Reality 目标站' $'5\n'
+        targetReply '切换目标的 Reality 入口 ID（0 返回）' $'0\n'
+        targetReply 'Docker Reality 目标站' $'6\n'
+        targetReply 'Reality 入口 ID（0 返回）' $'0\n'
+        targetReply 'Docker Reality 目标站' $'6\n'
+        targetReply 'Reality 入口 ID（0 返回）' $'entry-fixture\n'
+        targetReply 'Reality 目标 host[:port]（0 返回）' $'0\n'
+        targetReply 'Docker Reality 目标站' $'6\n'
+        targetReply 'Reality 入口 ID（0 返回）' $'entry-fixture\n'
+        targetReply 'Reality 目标 host[:port]（0 返回）' $'target.example.com\n'
+        targetReply 'Reality SNI [target.example.com]' $'0\n'
+        targetReply 'Docker Reality 目标站' $'2\n'
+        targetReply '请选择刷新范围 [1]' $'0\n'
+        ;;
+    eof)
+        targetReply 'Docker Reality 目标站' $'6\n'
+        targetReply 'Reality 入口 ID（0 返回）' $'entry-fixture\n'
+        targetReply 'Reality 目标 host[:port]（0 返回）' $'target.example.com\n'
+        targetReply 'Reality SNI [target.example.com]' $'\004'
+        ;;
+    failed)
+        targetReply 'Docker Reality 目标站' $'1\n'
+        targetReply 'Reality 入口 ID（空输入检测全部，0 返回）' $'entry-fixture\n'
+        targetReply 'Reality 目标站后续操作' $'3\n'
+        ;;
+    int|term)
+        targetReply 'Docker Reality 目标站' $'1\n'
+        targetReply 'Reality 入口 ID（空输入检测全部，0 返回）' $'entry-fixture\n'
+        waitForText 'fixture-target-check-ready' "${CONTROL_LOG}" || exit 33
+        assertNoLock
+        if [[ "${scenario}" == term ]]; then
+            kill -TERM "$(<"${TEST_ROOT}/menu.pid")" || exit 34
+            return 0
+        fi
+        printf '\003' >&3
+        ;;
+    esac
+    targetReply 'Docker Reality 目标站' $'8\n'
+    targetReply 'Docker 协议与入口' $'0\n'
+    targetReply 'Docker 管理菜单' $'1\n'
+    targetReply 'Docker 管理菜单' $'0\n'
+}
+
 runPty() {
     local name=$1 driver=$2 input=$3 entry=$4 actual=0 feederStatus=0 command pipe feeder
     local expected=0
@@ -127,7 +228,7 @@ runPty() {
     pipe="${TEST_ROOT}/${name}.input"
     mkfifo "${pipe}"
     printf -v command '%q ' bash -u "${entry}" "$@"
-    if [[ "${driver}" == term ]]; then
+    if [[ "${driver}" == term || ( "${driver}" == targets && "${input}" == term ) ]]; then
         printf -v command 'printf "%%s\\n" "$$" >%q; exec %s' "${TEST_ROOT}/menu.pid" "${command}"
         expected=143
     fi
@@ -191,6 +292,8 @@ runPty() {
             printf '1\n' >&3
             waitForText 'Docker 管理菜单' "${CONTROL_LOG}" 3 || exit 25
             printf '0\n' >&3
+        elif [[ "${driver}" == targets ]]; then
+            runTargetsDriver "${input}"
         elif [[ "${driver}" == logs || "${driver}" == term ]]; then
             printf '6\n' >&3
             waitForText 'mock-log-ready' "${CONTROL_LOG}" || exit 3
@@ -267,6 +370,7 @@ cp -R "${PROJECT_ROOT}/docker/lib" "${SOURCE_ROOT}/docker/lib"
 cp -R "${PROJECT_ROOT}/docker/contracts" "${SOURCE_ROOT}/docker/contracts"
 cp "${PROJECT_ROOT}/shell/core/deployment_mode.sh" "${SOURCE_ROOT}/shell/core/deployment_mode.sh"
 cp "${PROJECT_ROOT}/shell/core/stats_grpc.sh" "${SOURCE_ROOT}/shell/core/stats_grpc.sh"
+cp "${PROJECT_ROOT}/shell/core/"{runtime.sh,reality_targets.sh} "${SOURCE_ROOT}/shell/core/"
 TEST_REF=1111111111111111111111111111111111111111
 
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/non-tty-state"
@@ -356,7 +460,27 @@ PADM_DOCKER_RC_STATE=15
 PADM_DOCKER_RC_USAGE=2
 case "${1:-}" in
 status) exit 0 ;;
-protocol) recordAction "$@"; printf 'fixture-protocol-output\n' ;;
+protocol)
+    recordAction "$@"
+    case "${2:-}" in
+    select-target|scan-targets|scan-targets-asn)
+        printf 'fixture-target-input: %s: ' "$2"
+        IFS= read -r targetInput || exit 19
+        recordAction target-input "$2" "${targetInput}"
+        ;;
+    check-target)
+        if [[ "${TARGET_CHECK_WAIT:-0}" == 1 ]]; then
+            trap 'exit 130' INT
+            trap 'exit 143' TERM
+            printf '%s\n' "${BASHPID}" >"${TARGET_CHECK_PID:?}"
+            printf 'fixture-target-check-ready\n'
+            while :; do sleep 1; done
+        fi
+        exit "${TARGET_CHECK_STATUS:-0}"
+        ;;
+    esac
+    printf 'fixture-protocol-output\n'
+    ;;
 edit) recordAction "$@" ;;
 tls) [[ "${2:-}" == manage ]] || exit 2; dockerTlsManageCommand ;;
 menu)
@@ -412,6 +536,40 @@ runPty protocols-dispatch protocols read "${TLS_WIZARD_CLI}" menu
 runPty protocols-links-cancel protocols cancel "${TLS_WIZARD_CLI}" menu
 [[ "$(<"${TLS_WIZARD_ACTIONS}")" == 'protocol list' ]] ||
     fail 'cancelled protocol link selection dispatched a business command'
+
+# 按新版八项菜单现场握手，扫描和选择必须真实读取前台终端。
+: >"${TLS_WIZARD_ACTIONS}"
+runPty targets-dispatch targets flow "${TLS_WIZARD_CLI}" menu
+for targetLabel in '1. 检测当前目标' '2. 刷新目标库' '3. 扫描指定网段' \
+    '4. 同 ASN 抽样扫描' '5. 查看/切换 A 级目标' '6. 手动设置目标站' \
+    '7. 查看目标站黑名单' '8. 返回'; do
+    grep -Fq "${targetLabel}" "${CONTROL_LOG}" || fail "missing target menu item: ${targetLabel}"
+done
+expectedTargets=$'protocol list\nprotocol check-target entry-fixture\nprotocol select-target entry-fixture\ntarget-input select-target selected\nprotocol refresh-targets recommended\nprotocol refresh-targets recommended_only\nprotocol scan-targets\ntarget-input scan-targets scan\nprotocol scan-targets-asn\ntarget-input scan-targets-asn scan-asn\nprotocol select-target entry-secondary\ntarget-input select-target selected-secondary\nedit --reality-target entry-fixture target.example.com 443 target.example.com\nedit --reality-target entry-secondary alt.example.com 8443 edge.example.net\nprotocol blocked-targets\nprotocol check-target\nprotocol targets entry-secondary\nprotocol check-target entry-secondary\nprotocol targets entry-secondary\nprotocol block-current-target entry-secondary'
+[[ "$(grep -v '^protocol target-status$' "${TLS_WIZARD_ACTIONS}")" == "${expectedTargets}" ]] ||
+    fail 'target menu dispatched incorrect actions, listener, refresh scope or host/SNI'
+for targetCase in cancel eof failed int term; do
+    : >"${TLS_WIZARD_ACTIONS}"
+    export TARGET_CHECK_STATUS=0 TARGET_CHECK_WAIT=0 TARGET_CHECK_PID="${TEST_ROOT}/target-check.pid"
+    [[ "${targetCase}" != failed ]] || TARGET_CHECK_STATUS=17
+    [[ "${targetCase}" != int && "${targetCase}" != term ]] || TARGET_CHECK_WAIT=1
+    runPty "targets-${targetCase}" targets "${targetCase}" "${TLS_WIZARD_CLI}" menu
+    expectedTargets='protocol list'
+    case "${targetCase}" in
+    failed|int|term) expectedTargets+=$'\nprotocol check-target entry-fixture' ;;
+    esac
+    [[ "$(grep -v '^protocol target-status$' "${TLS_WIZARD_ACTIONS}")" == "${expectedTargets}" ]] ||
+        fail "target ${targetCase} dispatched an action after cancellation or interruption"
+    if [[ "${targetCase}" == int || "${targetCase}" == term ]]; then
+        ! grep -Fq 'Reality 目标站后续操作' "${CONTROL_LOG}" ||
+            fail "target ${targetCase} entered post-check actions"
+        ! kill -0 "$(<"${TARGET_CHECK_PID}")" 2>/dev/null ||
+            fail "target ${targetCase} left the checker alive"
+    elif [[ "${targetCase}" == failed ]]; then
+        grep -Fq '操作失败，退出码: 17' "${CONTROL_LOG}" || fail 'failed target check was not reported'
+    fi
+done
+unset TARGET_CHECK_STATUS TARGET_CHECK_WAIT TARGET_CHECK_PID
 
 # 最小已配置夹具只覆盖调度和命令分发，不宣称真实容器可用。
 cat >"${PADM_DOCKER_INSTALL_DIR}/deployment.json" <<'EOF'
