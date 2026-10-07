@@ -280,6 +280,9 @@ dockerBundleSupportsSpec() {
           ($spec[0].schema_version as $version |
             $schema[0].properties.schema_version |
             (.const == $version) or ((.enum // []) | index($version)) != null) and
+          (if $spec[0] | has("reality_stream") then
+            ($schema[0].properties | has("reality_stream"))
+           else true end) and
           ($features | length) == 1 and ($features[0].protocols | type == "array") and
           all($spec[0].core.protocols[];
             . as $entry |
@@ -288,7 +291,7 @@ dockerBundleSupportsSpec() {
             ($matches | length) == 1 and $matches[0].status == "supported" and
             ($matches[0].cores | index($core)) != null)
         ' >/dev/null 2>&1 || {
-        dockerError '目标控制 bundle 不支持该规格版本或协议/核心组合，拒绝切换配置或回滚'
+        dockerError '目标控制 bundle 不支持该规格版本、共存拓扑或协议/核心组合，拒绝切换配置或回滚'
         return 1
     }
 }

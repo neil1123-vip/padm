@@ -578,12 +578,11 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
     ' || fail 'phase 6 transaction contract failed'
 
 (
-    source "${PROJECT_ROOT}/docker/lib/lifecycle.sh"
+    source "${PROJECT_ROOT}/install-docker.sh"
     composeRoot="${TEST_ROOT}/compose-stdin"
     mkdir -p "${composeRoot}"
     : >"${composeRoot}/images.env"
     printf '%s\n' '{"compose":{"profiles":["core-xray","core-sing-box"]}}' >"${composeRoot}/deployment.json"
-    PADM_DOCKER_PROJECT=padm-docker
     dockerInstallRoot() { printf '%s\n' "${composeRoot}"; }
     dockerComposeFile() { printf '%s/compose.json\n' "${composeRoot}"; }
     # 模拟 Compose 默认交互读取 stdin，不能吞掉双核心循环的下一项。

@@ -777,7 +777,11 @@ dockerProtocolCommand() (
         chmod 0600 "${normalized}" || return "${PADM_DOCKER_RC_STATE}"
     if [[ "${action}" == list ]]; then
         jq -r 'def authority: if contains(":") then "[\(.)]" else . end;
+          . as $request |
           .core.protocols[] |
+          if $request.reality_stream != null and
+            (.listener_id == $request.reality_stream.listener_id or .listener_id == $request.reality_stream.website_listener_id)
+          then .public_port = 443 else . end |
           "\(.listener_id)  \(.core)  \(if .id == 1 then "Reality Vision"
             elif .id == 2 then "Reality XHTTP" elif .id == 26 then "Reality gRPC"
             elif .id == 3 then "Hysteria2" elif .id == 4 then "AnyTLS"

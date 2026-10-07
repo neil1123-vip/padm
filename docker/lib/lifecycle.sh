@@ -549,6 +549,12 @@ dockerComposeRun() {
         return "${PADM_DOCKER_RC_COMPOSE}"
     }
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    case "${1:-}" in
+    up|restart|run|exec)
+        dockerRealityStreamDeploymentCheck "${root}/config/spec.json" ||
+            return "${PADM_DOCKER_RC_STATE}"
+        ;;
+    esac
     [[ -f "${root}/images.env" && ! -L "${root}/images.env" ]] || {
         dockerError 'images.env 缺失或不安全'
         return "${PADM_DOCKER_RC_STATE}"
@@ -611,7 +617,7 @@ dockerStatusCommand() {
 }
 
 dockerLifecycleCommand() {
-    local operation=$1
+    local operation=$1 root
     shift
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
     dockerLockInstalledDeployment || return $?
@@ -619,6 +625,13 @@ dockerLifecycleCommand() {
         dockerError 'Docker 服务尚未配置，请先执行 configure'
         return "${PADM_DOCKER_RC_COMPOSE}"
     }
+    case "${operation}" in
+    up|restart)
+        root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+        dockerRealityStreamDeploymentCheck "${root}/config/spec.json" ||
+            return "${PADM_DOCKER_RC_STATE}"
+        ;;
+    esac
     case "${operation}" in
     up)
         [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
@@ -679,7 +692,7 @@ dockerReleaseCommand() {
 }
 
 dockerUpdateCommand() {
-    local manifest= bundle= controlBundle= candidate backup
+    local manifest= bundle= controlBundle= candidate backup root
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
         --manifest)
@@ -709,6 +722,9 @@ dockerUpdateCommand() {
         dockerError 'Docker 服务尚未配置，请先执行 configure'
         return "${PADM_DOCKER_RC_COMPOSE}"
     }
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    dockerRealityStreamDeploymentCheck "${root}/config/spec.json" ||
+        return "${PADM_DOCKER_RC_STATE}"
     dockerManifestPrepare "${manifest}" "${bundle}" "${controlBundle}" ||
         return "${PADM_DOCKER_RC_MANIFEST}"
     dockerStageReleaseBundle || {
@@ -847,6 +863,8 @@ dockerRollbackCommand() {
         return "${PADM_DOCKER_RC_STATE}"
     }
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    dockerRealityStreamDeploymentCheck "${backup}/config/spec.json" "${root}/config/spec.json" ||
+        return "${PADM_DOCKER_RC_STATE}"
     dockerTrafficSafePath "${root}" "${root}/secrets/renewal" &&
         dockerRenewalRegistryValidate "${root}/secrets/renewal" || return "${PADM_DOCKER_RC_STATE}"
     if dockerRenewalEnabled "${root}/secrets/renewal"; then

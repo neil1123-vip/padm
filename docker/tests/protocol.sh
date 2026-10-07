@@ -236,4 +236,8 @@ runRead 0 selected-ws dockerProtocolCommand links vless-ws
 [[ "$(<"${STDOUT}")" == "${WS_URI}" ]] || fail '关闭 HTTPS 订阅后无法单独读取 WS 链接'
 runRead 15 dual-unknown dockerProtocolCommand links entry-missing
 
+# shellcheck source=/dev/null
+source "${PROJECT_ROOT}/docker/tests/reality-stream-contract.sh"
+dockerRealityStreamContractChecks
+
 printf 'docker-protocol-regression-ok\n'
