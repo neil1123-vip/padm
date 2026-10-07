@@ -1481,6 +1481,10 @@ runRealityManageMenuStateRegression() (
     menuLine() { :; }
     menuReturnItem() { :; }
     menuClose() { :; }
+    formatRealityTarget() { printf '%s:%s\n' "$1" "$2"; }
+    realityTargetCachedAsnSummary() { printf '未缓存\n'; }
+    realityTargetCachedNetworkSummary() { printf '未缓存\n'; }
+    showRealityTargetPqcSummary() { :; }
     menuReadChoice() {
         local choice
         IFS= read -r choice || return 1
@@ -1488,7 +1492,7 @@ runRealityManageMenuStateRegression() (
     }
     showRealityStreamSplitStatus() { :; }
 
-    manageReality <<< $'4\n6'
+    manageReality <<< $'2\n8\n6'
     [[ "${protocolReads}:${configReads}" == 1:1 ]]
 )
 

@@ -3047,8 +3047,13 @@ initRandomSalt() {
 }
 
 manageRealityTarget() {
-    local currentTarget selectTargetMenu targetInput sniInput targetAsnSummary networkMatchSummary refreshChoice refreshTargetState=true
-    readInstallProtocolType || return 1
+    local currentTarget selectTargetMenu targetInput sniInput targetAsnSummary networkMatchSummary refreshChoice
+    local stateReady=${1:-false} refreshTargetState=true
+    if [[ "${stateReady}" == true ]]; then
+        refreshTargetState=false
+    else
+        readInstallProtocolType || return 1
+    fi
     while true; do
         if [[ "${refreshTargetState}" == "true" ]]; then
             readConfigHostPathUUID || return 1
@@ -3200,7 +3205,7 @@ manageReality() {
 
         case "${selectRealityManageType}" in
         1) regenerateRealityProfile || true ;;
-        2) manageRealityTarget || true ;;
+        2) manageRealityTarget true || true ;;
         3) configureRealityStreamSplit || true ;;
         4) showRealityStreamSplitStatus || true ;;
         5) disableRealityStreamSplit || true ;;
