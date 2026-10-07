@@ -81,11 +81,14 @@ runTlsFailureReturnRegression() (
 
     dnsAPIType=cloudflare
     sslType=
-    captureFailureReturn "${caRcFile}" switchSSLType
+    (
+        local AUTO_INSTALL=true AUTO_TLS_CA=buypass
+        captureFailureReturn "${caRcFile}" switchSSLType
+    )
 
     (
         eval "${autoReadDefinition}"
-        local dnsTLSDomain=example.com input inputFd remaining
+        local dnsTLSDomain=example.com input inputFd remaining affirmative
         local AUTO_INSTALL= AUTO_DNS_API AUTO_DNS_API_TYPE AUTO_DNS_API_WILDCARD=n
         local AUTO_CLOUDFLARE_API_TOKEN= PADM_CLOUDFLARE_API_TOKEN=
         local AUTO_ALIYUN_API_KEY= PADM_ALIYUN_API_KEY=
@@ -109,6 +112,15 @@ runTlsFailureReturnRegression() (
         read -r -u "${inputFd}" remaining
         [[ "${remaining}" == next-action ]]
         exec {inputFd}<&-
+        for affirmative in Y yes; do
+            unset dnsAPIStatus dnsAPIType cfAPIToken cfZoneID
+            exec {inputFd}< <(printf '%s\n1\ntoken\n\nyes\nnext-action\n' "${affirmative}")
+            switchDNSAPI <&"${inputFd}"
+            [[ "${dnsAPIType}" == cloudflare && "${dnsAPIStatus}" == y && "${cfAPIToken}" == token ]]
+            read -r -u "${inputFd}" remaining
+            [[ "${remaining}" == next-action ]]
+            exec {inputFd}<&-
+        done
 
         # 单域名 DNS 申请不受通配符父域限制；选择通配符才校验父域。
         dnsTLSDomain=com
@@ -198,6 +210,34 @@ runTlsFailureReturnRegression() (
         AUTO_TLS_CA=letsencrypt
         switchSSLType </dev/null
         [[ "${sslType}" == letsencrypt && "$(<"${PADM_TLS_DIR}/ssl_type")" == letsencrypt ]]
+
+        (
+            # CA 非法选择和 DNS 冲突原地纠错；取消及自动坏参数不能替换旧 CA。
+            local AUTO_INSTALL= AUTO_TLS_CA= sslType= invalid inputFd remaining
+            for invalid in 9 abc; do
+                sslType=
+                exec {inputFd}< <(printf '%s\n2\nnext-parent-action\n' "${invalid}")
+                switchSSLType <&"${inputFd}"
+                read -r -u "${inputFd}" remaining
+                [[ "${sslType}" == zerossl && "$(<"${PADM_TLS_DIR}/ssl_type")" == zerossl &&
+                    "${remaining}" == next-parent-action ]]
+                exec {inputFd}<&-
+            done
+            sslType=
+            exec {inputFd}< <(printf '3\n\nnext-parent-action\n')
+            switchSSLType <&"${inputFd}"
+            read -r -u "${inputFd}" remaining
+            [[ "${sslType}" == letsencrypt && "$(<"${PADM_TLS_DIR}/ssl_type")" == letsencrypt &&
+                "${remaining}" == next-parent-action ]]
+            exec {inputFd}<&-
+            sslType=
+            regressionExpectStatus 1 switchSSLType < <(printf '9\n')
+            [[ -z "${sslType}" && "$(<"${PADM_TLS_DIR}/ssl_type")" == letsencrypt ]]
+            AUTO_INSTALL=true
+            AUTO_TLS_CA=unknown
+            regressionExpectStatus 1 switchSSLType </dev/null
+            [[ -z "${sslType}" && "$(<"${PADM_TLS_DIR}/ssl_type")" == letsencrypt ]]
+        )
     )
 
     (

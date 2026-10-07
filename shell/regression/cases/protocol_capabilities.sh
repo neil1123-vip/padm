@@ -246,10 +246,68 @@ runProtocolCapabilityTemplateRegression() {
         printf 'assert-fail:sing-box Shadowsocks 2022 user key should decode to 16 bytes\n' >&2
         return 1
     fi
-    if ! grep -Fq '"password": "$(shadowsocks2022KeyFromSeed "server:${currentClients}")",' "${coreTemplate}"; then
-        printf 'assert-fail:sing-box Shadowsocks 2022 inbound should include server password\n' >&2
-        return 1
-    fi
+    (
+        # 从磁盘连续重装，保留独立密钥和全部用户，而非再次派生。
+        local PADM_SINGBOX_CONFIG_DIR="${TMP_DIR}/shadowsocks-reinstall" coreInstallType=2
+        local configPath="${PADM_SINGBOX_CONFIG_DIR}/"
+        local singBoxConfigPath="${configPath}"
+        local frontingType=30_shadowsocks_inbounds currentInstallProtocolType=,30, selectCustomInstallType=,30,
+        local AUTO_INSTALL=true AUTO_UUID= AUTO_USER= AUTO_REUSE_LAST= lastInstallationConfig=true
+        local PADM_INSTALL_CLIENTS_PREPARED= currentUUID= tlsCertDomain= singBoxShadowsocksPort=23433 singBoxTrojanPort=23434
+        local target="${configPath}30_shadowsocks_inbounds.json" expected password users round invalid before writes=0
+        local result=()
+        mkdir -p "${PADM_SINGBOX_CONFIG_DIR}"
+        collectTLSProfile() { tlsCertDomain=; }
+        readSingBoxProtocolPort() { local -n ports=$1; ports=("${singBoxShadowsocksPort}"); }
+        progressCard() { :; }
+        echoContent() { :; }
+        menuLine() { :; }
+        menuClose() { :; }
+        statusCard() { :; }
+        successCard() { :; }
+        errorCard() { :; }
+        setSniffRouting() { :; }
+        cdnStoredAddress() { :; }
+        showLastInstallationConfig() { :; }
+        writeGeneratedJsonFile() {
+            jq . >"${PADM_SINGBOX_CONFIG_DIR}/${1##*/}" || return 1
+            writes=$((writes + 1))
+        }
+        currentClients='[{"uuid":"11111111-1111-4111-8111-111111111111","name":"alice"},{"uuid":"22222222-2222-4222-8222-222222222222","name":"bob"}]'
+        password=$(shadowsocks2022KeyFromSeed "server:${currentClients}")
+        users=$(initSingBoxClients 30)
+        expected=$(jq -nc --arg password "${password}" --argjson users "${users}" '{password:$password,users:$users}')
+        jq -n --argjson credentials "${expected}" '{inbounds:[($credentials + {type:"shadowsocks",method:"2022-blake3-aes-128-gcm",listen_port:23432,tag:"old-tag"})]}' >"${target}"
+        AUTO_ENTRY_HOST=45.221.113.40
+        for round in 1 2; do
+            readConfigHostPathUUID
+            initSingBoxConfigApply custom 1 true >/dev/null
+            assertEquals "${expected}" "$(jq -c '.inbounds[0] | {password,users}' "${target}")" "shadowsocks-reuse:${round}"
+            jq -e '.inbounds[0] | .listen_port == 23433 and .tag == "singbox-shadowsocks-in"' "${target}" >/dev/null
+        done
+        # 模板持有其它协议的主用户时，仍须保留 Shadowsocks 的独立凭据。
+        selectCustomInstallType=,28,30,
+        currentClients='[{"uuid":"33333333-3333-4333-8333-333333333333","name":"primary"}]'
+        initSingBoxConfigApply custom 1 true >/dev/null
+        assertEquals "${expected}" "$(jq -c '.inbounds[0] | {password,users}' "${target}")" shadowsocks-independent-credentials
+        AUTO_REUSE_LAST=no AUTO_UUID=44444444-4444-4444-8444-444444444444 AUTO_USER=new-user
+        readLastInstallationConfig
+        selectCustomInstallType=,30, singBoxShadowsocksPort=23433
+        initSingBoxConfigApply custom 1 true >/dev/null
+        jq -e --arg password "${password}" --argjson users "${users}" '.inbounds[0] | .password != $password and .users != $users and .users[0].name == "new-user-shadowsocks"' "${target}" >/dev/null
+        rm -- "${target}"
+        lastInstallationConfig=true AUTO_UUID= AUTO_USER=
+        initSingBoxConfigApply custom 1 true >/dev/null
+        jq -e '.inbounds[0] | (.password | type == "string" and length > 0) and (.users | length == 1)' "${target}" >/dev/null
+        for invalid in '{"password":"","users":[]}' '{"password":"server-key","users":[{"name":"alice","password":false}]}'; do
+            jq -n --argjson invalid "${invalid}" '{inbounds:[($invalid + {type:"shadowsocks",method:"2022-blake3-aes-128-gcm"})]}' >"${target}"
+            before=$(cat "${target}")
+            writes=0
+            regressionExpectStatus 1 initSingBoxConfigApply custom 1 true >/dev/null
+            [[ "${writes}" == 0 ]]
+            assertEquals "${before}" "$(cat "${target}")" shadowsocks-invalid-credentials-preserved
+        done
+    )
 }
 
 runHysteria2CapabilityRegression() {

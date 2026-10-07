@@ -167,6 +167,7 @@ customSSLEmail() {
 switchDNSAPI() {
     local nextDNSAPIStatus selectDNSAPIType nextDNSAPIType
     autoRead dns_api "是否使用DNS API申请证书[支持NAT]？[y/n]:" nextDNSAPIStatus || return 1
+    nextDNSAPIStatus=$(normalizeYesNo "${nextDNSAPIStatus}")
     if [[ "${nextDNSAPIStatus}" == "y" ]]; then
         echoContent title "\n┌─ DNS API ──────────────────────────────────────────"
         menuRecommendedItem 1 "cloudflare" "默认 DNS API"
@@ -222,6 +223,7 @@ initDNSAPIConfig() {
     fi
     echo
     autoRead dns_api_wildcard "是否使用*.${dnsTLSDomain}进行API申请通配符证书？[y/n]:" wildcardStatus || return 1
+    wildcardStatus=$(normalizeYesNo "${wildcardStatus}")
     if [[ "${wildcardStatus}" == "y" && ( "${dnsTLSDomain}" != *.* || -z "${dnsTLSDomain%%.*}" ) ]]; then
         successCard "不支持此域名申请通配符证书，建议使用此格式[xx.xx.xx]"
         return 1
@@ -239,6 +241,12 @@ initDNSAPIConfig() {
 # 选择ssl安装类型
 switchSSLType() {
     local nextSSLType="${sslType:-}" selectSSLType sslTypeFile sslTypeStage
+    if [[ -n "${AUTO_INSTALL:-}" ]]; then
+        case "${AUTO_TLS_CA:-}" in
+        "" | letsencrypt | 1 | zerossl | ZeroSSL | 2 | buypass | Buypass | 3) ;;
+        *) errorCard "证书 CA 参数不合法" "${AUTO_TLS_CA}"; return 1 ;;
+        esac
+    fi
     if [[ -z "${nextSSLType}" ||
         -n "${AUTO_TLS_CA:-}" ||
         ( -n "${dnsAPIType:-}" && "${nextSSLType}" == "buypass" ) ]]; then
@@ -247,22 +255,25 @@ switchSSLType() {
         menuItem 2 "zerossl" "ZeroSSL CA"
         menuItem 3 "buypass" "不支持 DNS 申请"
         menuClose
-        autoRead tls_ca "请选择[回车]使用默认:" selectSSLType || return 1
-        case ${selectSSLType} in
-        2)
-            nextSSLType="zerossl"
-            ;;
-        3)
-            nextSSLType="buypass"
-            ;;
-        *)
-            nextSSLType="letsencrypt"
-            ;;
-        esac
-    fi
-    if [[ -n "${dnsAPIType:-}" && "${nextSSLType}" == "buypass" ]]; then
-        errorCard "buypass不支持API申请证书"
-        return 1
+        while true; do
+            autoRead tls_ca "请选择[回车]使用默认:" selectSSLType || return 1
+            case ${selectSSLType} in
+            "" | 1) nextSSLType="letsencrypt" ;;
+            2) nextSSLType="zerossl" ;;
+            3) nextSSLType="buypass" ;;
+            *)
+                errorCard "请选择 1、2 或 3"
+                [[ -z "${AUTO_INSTALL:-}" ]] || return 1
+                continue
+                ;;
+            esac
+            if [[ -n "${dnsAPIType:-}" && "${nextSSLType}" == "buypass" ]]; then
+                errorCard "buypass不支持API申请证书"
+                [[ -z "${AUTO_INSTALL:-}" ]] || return 1
+                continue
+            fi
+            break
+        done
     fi
     if [[ "${nextSSLType}" != "${sslType:-}" ]]; then
         sslTypeFile=$(tlsSslTypeFile) || return 1

@@ -217,6 +217,60 @@ runSingBoxStatsBuildRegression() (
         jq -e '.experimental.v2ray_api.stats.users == ["sub_team_hy2"]' "${expectedStats}" >/dev/null
         [[ "$(<"${root}/stats-service")" == 'sing-box restart' && -z "${singBoxConfigPath}" ]]
     )
+    (
+        local lastInstallationConfig=reused statsRollbackDir=
+        local legacyFile="${singBoxConfigPath}stats-migration.json"
+        printf '%s\n' "${originalBinary}" >"${PADM_SINGBOX_BINARY}"
+        chmod 755 "${PADM_SINGBOX_BINARY}"
+        printf 'old-cronet\n' >"${root}/installed/libcronet.so"
+        printf '{"phase":"legacy"}\n' >"${legacyFile}"
+        readInstallType() { return 0; }
+        xrayRunning() { return 1; }
+        coreLatestReleaseTag() { printf 'v1.14.0\n'; }
+        eval "$(declare -f padmCreateTempPath | sed '1s/padmCreateTempPath/statsFixtureCreateTempPath/')"
+        padmCreateTempPath() {
+            if [[ "${2:-}" == -d && "${3:-}" == /etc/padm/* ]]; then
+                statsFixtureCreateTempPath "$1" -d "${PADM_TMP_DIR}/install.XXXXXX"
+            else
+                statsFixtureCreateTempPath "$@"
+            fi
+        }
+        coreTemplateConfigBackupCreate() { checkLogBackupCreate "$1" "${legacyFile}"; }
+        migrateSingBox116DeprecatedConfig() {
+            local savedMigration
+            checkLogBackupCreate savedMigration "${legacyFile}" || return 1
+            printf '{"phase":"migrated"}\n' >"${legacyFile}" || return 1
+            printf -v "$1" '%s' "${savedMigration}"
+        }
+        runCoreServiceActionAllowFailure() {
+            [[ "$1" != handleXray ]] || { [[ "$2" == stop ]]; return $?; }
+            [[ "$1" == handleSingBox ]] || return 1
+            case "$2" in
+            stop) serviceRunning=false ;;
+            start)
+                local expectedPhase=legacy
+                [[ "$(singBoxV2rayApiCapability)" != supported ]] || expectedPhase=migrated
+                [[ -x "${PADM_SINGBOX_BINARY}" && "$(jq -r .phase "${legacyFile}")" == "${expectedPhase}" ]] || return 1
+                serviceRunning=true
+                ;;
+            *) return 1 ;;
+            esac
+        }
+        failAfterStatsUpgrade() {
+            statsRollbackDir=${statsBinaryBackupDir}
+            installSingBox 1 || return 1
+            [[ "$(singBoxV2rayApiCapability)" == supported &&
+                "$(<"${root}/installed/libcronet.so")" == new-cronet &&
+                "$(jq -r .phase "${legacyFile}")" == migrated ]] || return 1
+            return 7
+        }
+        # 升级自身成功后，下游安装失败仍须成套恢复旧核心、依赖、配置和运行态。
+        regressionExpectStatus 7 coreInstallConfigTransaction sing-box failAfterStatsUpgrade
+        [[ "$(<"${PADM_SINGBOX_BINARY}")" == "${originalBinary}" && -x "${PADM_SINGBOX_BINARY}" &&
+            "$(<"${root}/installed/libcronet.so")" == old-cronet &&
+            "$(jq -r .phase "${legacyFile}")" == legacy && "${serviceRunning}" == true &&
+            -n "${statsRollbackDir}" && ! -e "${statsRollbackDir}" ]]
+    )
 )
 
 runSingBoxCustomPathsRegression() (

@@ -588,6 +588,35 @@ runInstallWorkflowRegression() (
         [[ "${events}" == "${coreEvents}"$'nginx:start\n'"${finishEvents}" ]]
     )
 
+    (
+        # 旧协议路径先检查；无需路径的协议不受影响，重新填写仍可清除坏历史值。
+        local core selection events= currentPath= lastInstallationConfig=
+        local selectCustomInstallType= configPath=/regression/installed/ btDomain= AUTO_INSTALL=true AUTO_REUSE_LAST=
+        showLastInstallationConfig() { currentPath='../unsafe'; }
+        collectEntryProfile() { events+=$'entry\n'; }
+        readInstallTLSDomain() { events+=$'domain\n'; }
+        coreTemplateCollectInitialClients() { events+=$'users\n'; }
+        prepareXrayInstallInputs() { events+=$'ports\n'; }
+        prepareSingBoxInstallInputs() { events+=$'ports\n'; }
+        coreSwitchConfigTransaction() { events+=$'transaction\n'; }
+        for core in xray sing-box; do
+            for selection in '' ,21, ,22, ,23,; do
+                selectCustomInstallType=${selection}
+                events=
+                regressionExpectStatus 1 runCoreInstall "${core}" true </dev/null
+                [[ -z "${events}" && "${currentPath}" == '../unsafe' ]]
+            done
+            selectCustomInstallType=,1,
+            events=
+            runCoreInstall "${core}" true </dev/null
+            [[ "${events}" == $'entry\nusers\nports\ntransaction\n' ]]
+            AUTO_REUSE_LAST=no selectCustomInstallType=,23, events=
+            runCoreInstall "${core}" true </dev/null
+            [[ -z "${currentPath}" && "${events}" == $'domain\nusers\nports\ntransaction\n' ]]
+            AUTO_REUSE_LAST=
+        done
+    )
+
     # 六个入口先确认历史和连接地址；取消不进入事务，重填标记只在本次安装可见。
     (
         local install input events= historyReads=0 inputFd nextInput

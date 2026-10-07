@@ -2676,6 +2676,12 @@ configureRealityDomainMode() {
 prepareCoreInstallInputs() {
     local core=$1
     readLastInstallationConfig || return 1
+    if [[ -z "${selectCustomInstallType:-}" ]] || protocolSelectionNeedsPath "${selectCustomInstallType}"; then
+        if [[ -n "${currentPath:-}" ]] && ! padmIsSafeRoutePathSegment "${currentPath}"; then
+            errorCard "path 不合法" "${currentPath}"
+            return 1
+        fi
+    fi
     if [[ -z "${selectCustomInstallType:-}" ]]; then
         [[ -n "${btDomain:-}" ]] || readInstallTLSDomain domain || return 1
     else

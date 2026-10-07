@@ -335,6 +335,7 @@ coreTemplateConfigTransaction() {
     local serviceRestored=true
     local newCoreStopped=true
     local manageNginx=false nginxWasRunning=false nginxStopped=true
+    local statsBinaryBackupDir= statsBinary= statsCronet= binaryRestored=true
     local restoreBackupDir=
     local title="Xray 配置初始化"
     [[ "${core}" == "sing-box" ]] && title="sing-box 配置初始化"
@@ -346,13 +347,30 @@ coreTemplateConfigTransaction() {
         nginxRunning && nginxWasRunning=true
     fi
 
+    # 统计版自动替换发生在子 shell，外层须保存旧文件供后续安装失败时恢复。
+    if [[ "${core}" == "sing-box" && "${PADM_CORE_INSTALL_TRANSACTION_ACTIVE:-}" == true ]] &&
+        singBoxInstalled && [[ "$(singBoxV2rayApiCapability)" != supported ]]; then
+        statsBinary=$(coreSingBoxBinaryPath)
+        statsCronet=$(coreSingBoxCronetPath)
+        validateCoreInstallTargetPath "${statsBinary}" "sing-box" || return 1
+        validateCoreInstallTargetPath "${statsCronet}" "sing-box cronet依赖" || return 1
+        if ! padmCreateTmpRootPath statsBinaryBackupDir padm-core-install-binary.XXXXXX -d ||
+            ! backupManagedFileToPath "${statsBinary}" "${statsBinaryBackupDir}/sing-box" 655 ||
+            { [[ -f "${statsCronet}" ]] && ! backupManagedFileToPath "${statsCronet}" "${statsBinaryBackupDir}/libcronet.so" 644; }; then
+            [[ -z "${statsBinaryBackupDir}" ]] || padmRemoveCleanupPath "${statsBinaryBackupDir}"
+            errorCard "${title}二进制备份失败，已取消修改"
+            return 1
+        fi
+    fi
     coreTemplateConfigBackupCreate backupDir "${core}" || {
+        [[ -z "${statsBinaryBackupDir}" ]] || padmRemoveCleanupPath "${statsBinaryBackupDir}"
         errorCard "${title}备份失败，已取消修改"
         return 1
     }
     if [[ "${PADM_CORE_SWITCH_TRANSACTION_ACTIVE:-}" == "true" ]] &&
         ! coreSwitchCleanupBackupCreate PADM_CORE_SWITCH_CLEANUP_BACKUP_DIR "${core}"; then
         padmRemoveCleanupPath "${backupDir}"
+        [[ -z "${statsBinaryBackupDir}" ]] || padmRemoveCleanupPath "${statsBinaryBackupDir}"
         errorCard "旧核心备份失败，已取消核心切换"
         return 1
     fi
@@ -372,6 +390,7 @@ coreTemplateConfigTransaction() {
         if [[ -n "${PADM_CORE_SWITCH_CLEANUP_BACKUP_DIR:-}" ]]; then
             padmRemoveCleanupPath "${PADM_CORE_SWITCH_CLEANUP_BACKUP_DIR}"
         fi
+        [[ -z "${statsBinaryBackupDir}" ]] || padmRemoveCleanupPath "${statsBinaryBackupDir}"
         padmRemoveCleanupPath "${backupDir}"
         return 0
     fi
@@ -386,6 +405,16 @@ coreTemplateConfigTransaction() {
         ! coreTemplateRestoreServiceState "${core}" false; then
         serviceRestored=false
         newCoreStopped=false
+    fi
+    if [[ -n "${statsBinaryBackupDir}" ]]; then
+        if [[ "${nginxStopped}" == true && "${newCoreStopped}" == true ]] &&
+            restoreManagedFileFromBackup "${statsBinaryBackupDir}/sing-box" "${statsBinary}" 655 &&
+            restoreCoreOptionalFileBackup "${statsBinaryBackupDir}/libcronet.so" "${statsCronet}" 644; then
+            padmRemoveCleanupPath "${statsBinaryBackupDir}"
+        else
+            binaryRestored=false
+            padmForgetCleanupPath "${statsBinaryBackupDir}"
+        fi
     fi
     if [[ "${nginxStopped}" == true && "${newCoreStopped}" == true ]] &&
         checkLogBackupRestore "${backupDir}"; then
@@ -413,7 +442,7 @@ coreTemplateConfigTransaction() {
         fi
     fi
     if [[ "${configRestored}" == "true" && "${cleanupRestored}" == "true" &&
-        "${newCoreStopped}" == "true" && "${serviceRestored}" == "true" ]]; then
+        "${newCoreStopped}" == "true" && "${serviceRestored}" == "true" && "${binaryRestored}" == true ]]; then
         if [[ "${core}" == "xray" || "${PADM_CORE_INSTALL_TRANSACTION_ACTIVE:-}" == "true" ]] &&
             ! coreTemplateRestoreServiceState xray "${xrayWasRunning}" "${xrayRestartRunning}"; then
             serviceRestored=false
@@ -429,10 +458,14 @@ coreTemplateConfigTransaction() {
     fi
 
     if [[ "${nginxStopped}" != true ]]; then
-        errorCard "${title}失败，Nginx 停止失败，未覆盖当前配置；备份保留在: ${backupDir}"
+        errorCard "${title}失败，Nginx 停止失败，未覆盖当前配置；备份保留在: ${backupDir}" \
+            "二进制备份: ${statsBinaryBackupDir:-未生成}"
     elif [[ "${newCoreStopped}" != true ]]; then
         errorCard "${title}失败，新核心停止失败，未覆盖当前配置；备份保留在: ${backupDir}" \
-            "服务模板备份: ${PADM_CORE_INSTALL_SERVICE_BACKUP_DIR:-未生成}"
+            "服务模板备份: ${PADM_CORE_INSTALL_SERVICE_BACKUP_DIR:-未生成}" \
+            "二进制备份: ${statsBinaryBackupDir:-未生成}"
+    elif [[ "${binaryRestored}" != true ]]; then
+        errorCard "${title}失败，旧核心或 Cronet 恢复失败，已跳过旧服务启动；备份保留在: ${statsBinaryBackupDir}"
     elif [[ "${configRestored}" != "true" ]]; then
         errorCard "${title}失败，且旧配置恢复失败，请手动检查备份目录: ${backupDir}"
     elif [[ "${cleanupRestored}" != "true" ]]; then
@@ -1336,6 +1369,29 @@ EOF
         echo
         readSingBoxProtocolPort result 30 "${singBoxShadowsocksPort}" || return 1
         statusCard "Shadowsocks端口" "${result[-1]}"
+        local shadowsocksConfigFile shadowsocksCredentials shadowsocksPassword shadowsocksUsers
+        shadowsocksConfigFile=$(singBoxTemplateConfigFile 30_shadowsocks_inbounds.json) || return 1
+        if [[ -n "${lastInstallationConfig:-}" && -f "${shadowsocksConfigFile}" ]]; then
+            # 保留已派生的独立密钥，不能把旧密钥再次作为种子。
+            shadowsocksCredentials=$(jq -ce '
+                .inbounds[0] |
+                select(.type == "shadowsocks" and .method == "2022-blake3-aes-128-gcm") |
+                {password,users} |
+                select((.password | type == "string" and length > 0) and
+                    (.users | type == "array" and length > 0 and all(.[];
+                        type == "object" and (.password | type == "string" and length > 0) and
+                        (.name | type == "string" and length > 0))))
+            ' "${shadowsocksConfigFile}") || {
+                errorCard "现有 Shadowsocks 用户配置无效，已取消重装"
+                return 1
+            }
+            shadowsocksPassword=$(jq -c '.password' <<<"${shadowsocksCredentials}") || return 1
+            shadowsocksUsers=$(jq -c '.users' <<<"${shadowsocksCredentials}") || return 1
+        else
+            shadowsocksPassword=$(shadowsocks2022KeyFromSeed "server:${currentClients}") || return 1
+            shadowsocksPassword=$(jq -nc --arg password "${shadowsocksPassword}" '$password') || return 1
+            shadowsocksUsers=$(initSingBoxClients 30) || return 1
+        fi
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/30_shadowsocks_inbounds.json padm-sing-box-shadowsocks <<EOF || { errorCard "sing-box Shadowsocks 入站模板提交失败"; return 1; }
 {
     "inbounds": [
@@ -1345,8 +1401,8 @@ EOF
             "tag": "singbox-shadowsocks-in",
             "listen_port": ${result[-1]},
             "method": "2022-blake3-aes-128-gcm",
-            "password": "$(shadowsocks2022KeyFromSeed "server:${currentClients}")",
-            "users": $(initSingBoxClients 30)
+            "password": ${shadowsocksPassword},
+            "users": ${shadowsocksUsers}
         }
     ]
 }
