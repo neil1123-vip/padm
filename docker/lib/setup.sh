@@ -825,6 +825,13 @@ dockerProtocolCommand() (
         ' "${normalized}"
         return $?
     fi
+    if [[ -n "${targetAction}" ]]; then
+        # 公共目标库不依赖所选入口；只操作 Docker 的目标状态，不改部署规格。
+        source "${DOCKER_BUNDLE_SOURCE_ROOT}/docker/lib/reality-targets.sh" || return "${PADM_DOCKER_RC_STATE}"
+        dockerReleaseDeploymentLock || return "${PADM_DOCKER_RC_LOCK}"
+        dockerRealityTargetAction "${normalized}" "${targetAction}" "${targetArgs[@]}"
+        return $?
+    fi
     selected="${workspace}/selected.json"
     # 分享链接是本地只读输出，不受 HTTPS 订阅发布开关影响；只改私密副本。
     jq --arg listener "${listener}" '
@@ -836,13 +843,6 @@ dockerProtocolCommand() (
         return "${PADM_DOCKER_RC_STATE}"
     }
     chmod 0600 "${selected}" || return "${PADM_DOCKER_RC_STATE}"
-    if [[ -n "${targetAction}" ]]; then
-        # 公共目标库不依赖所选入口；只操作 Docker 的目标状态，不改部署规格。
-        source "${DOCKER_BUNDLE_SOURCE_ROOT}/docker/lib/reality-targets.sh" || return "${PADM_DOCKER_RC_STATE}"
-        dockerReleaseDeploymentLock || return "${PADM_DOCKER_RC_LOCK}"
-        dockerRealityTargetAction "${selected}" "${targetAction}" "${targetArgs[@]}"
-        return $?
-    fi
     if [[ "${action}" == targets || "${action}" == check-target || "${action}" == target-status ||
         "${action}" == select-target || "${action}" == block-current-target ]]; then
         jq '.core.protocols |= map(select(.id == 1 or .id == 2 or .id == 26))' \
