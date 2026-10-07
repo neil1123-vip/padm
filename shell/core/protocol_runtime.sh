@@ -628,7 +628,7 @@ portHoppingMenu() {
         portHoppingEnd=${tuicPortHoppingEnd}
     fi
 
-    local selectPortHoppingStatus=
+    local selectPortHoppingStatus= actionStatus=0 rangeChanged=
     while true; do
         echoContent title "\n┌─ 端口跳跃 ─────────────────────────────────────────"
         menuItem 1 "添加端口跳跃" "配置 UDP 端口范围转发到当前服务端口"
@@ -639,16 +639,17 @@ portHoppingMenu() {
         menuReadChoice port_hopping_menu "请选择:" selectPortHoppingStatus || return 0
         case "${selectPortHoppingStatus}" in
         1)
-            addPortHopping "${type}" "${targetPort}" || return 1
-            return 0
+            addPortHopping "${type}" "${targetPort}" || actionStatus=$?
+            break
             ;;
         2)
             if deletePortHoppingRules "${type}" "${portHoppingStart}" "${portHoppingEnd}" "${targetPort}"; then
                 protocolPortHoppingStatusCard "删除成功"
-                return 0
+            else
+                actionStatus=$?
+                protocolPortHoppingStatusCard "删除失败，请检查防火墙规则"
             fi
-            protocolPortHoppingStatusCard "删除失败，请检查防火墙规则"
-            return 1
+            break
             ;;
         3)
             if [[ -n "${portHoppingStart}" && -n "${portHoppingEnd}" ]]; then
@@ -661,6 +662,18 @@ portHoppingMenu() {
         *) coreSelectionErrorCard "选择错误" ;;
         esac
     done
+    # 取消、重复添加或完整回滚不刷新；规则已变化时，即使后续清理失败也同步订阅。
+    readPortHopping "${type}" "${targetPort}" || return 1
+    if [[ "${type}" == "hysteria2" ]]; then
+        [[ "${portHoppingStart}:${portHoppingEnd}" == "${hysteria2PortHoppingStart}:${hysteria2PortHoppingEnd}" ]] || rangeChanged=true
+    elif [[ "${type}" == "tuic" ]]; then
+        [[ "${portHoppingStart}:${portHoppingEnd}" == "${tuicPortHoppingStart}:${tuicPortHoppingEnd}" ]] || rangeChanged=true
+    fi
+    if [[ "${rangeChanged}" == "true" ]] && ! refreshManagedProtocolSubscriptions "${type} 端口跳跃"; then
+        protocolPortHoppingStatusCard "端口跳跃规则已变化，但订阅刷新失败，请手动刷新订阅"
+        return 1
+    fi
+    return "${actionStatus}"
 }
 
 

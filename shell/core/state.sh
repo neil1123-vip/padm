@@ -920,6 +920,18 @@ readLastInstallationConfig() {
     done
 }
 
+cdnAddressFile() {
+    printf '%s' "/etc/padm/cdn"
+}
+
+cdnStoredAddress() {
+    local addressFile
+    addressFile=$(cdnAddressFile) || return 1
+    if [[ -f "${addressFile}" ]]; then
+        head -1 -- "${addressFile}"
+    fi
+}
+
 # 检查文件目录以及path路径
 readConfigHostPathUUID() {
     local realityEntryHostPath
@@ -954,17 +966,7 @@ readConfigHostPathUUID() {
 
             currentPort=$(jq .inbounds[0].port ${configPath}${frontingType}.json)
 
-            local defaultPortFile=
-            defaultPortFile=$(corePortDefaultFile)
-
-            if [[ -n "${defaultPortFile}" ]]; then
-                currentDefaultPort=$(basename "${defaultPortFile}" | awk -F [_] '{print $4}')
-            else
-                currentDefaultPort=$(jq -r .inbounds[0].port ${configPath}${frontingType}.json)
-            fi
-            if [[ -z "${currentDefaultPort}" || "${currentDefaultPort}" == "null" ]]; then
-                currentDefaultPort=${currentPort}
-            fi
+            currentDefaultPort=$(corePortSubscriptionPort "${currentPort}") || return 1
             currentUUID=$(jq -r '.inbounds[0].settings.clients[0] | .id // .password // empty' "${configPath}${frontingType}.json")
             currentClients=$(jq -r .inbounds[0].settings.clients ${configPath}${frontingType}.json)
         fi
@@ -1088,11 +1090,8 @@ readConfigHostPathUUID() {
     if [[ -f "${realityEntryHostPath}" ]]; then
         realityEntryHost=$(head -1 "${realityEntryHostPath}")
     fi
-    if [[ -f "/etc/padm/cdn" ]] && [[ -n "$(head -1 /etc/padm/cdn)" ]]; then
-        currentCDNAddress=$(head -1 /etc/padm/cdn)
-    else
-        currentCDNAddress="${currentHost}"
-    fi
+    currentCDNAddress=$(cdnStoredAddress) || return 1
+    currentCDNAddress=${currentCDNAddress:-${currentHost}}
     if [[ -n "${currentClients}" ]]; then
         jq -e 'type == "array"' <<<"${currentClients}" >/dev/null 2>&1 || return 1
     fi

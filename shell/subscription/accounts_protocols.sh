@@ -217,6 +217,14 @@ showVlessRealityAccountsFromConfig() (
     coreInstallType=${core}
     configPath="$(dirname -- "${configFile}")/"
     local usersFilter='(.inbounds[1].settings.clients // .inbounds[0].users)[]'
+    local realityVisionPort=${port}
+    if [[ "${core}" == "1" ]]; then
+        local streamPublicPort entryPort
+        streamPublicPort=$(realityStreamPublicPortForProtocol vision)
+        [[ -z "${streamPublicPort}" ]] || realityVisionPort=${streamPublicPort}
+        entryPort=$(jq -r '.inbounds[0].port' "${configFile}") || return 1
+        realityVisionPort=$(corePortSubscriptionPort "${entryPort}" "${realityVisionPort}") || return 1
+    fi
     [[ "${core}" == "2" ]] && usersFilter='.inbounds[0].users[]'
     jq -c "${usersFilter}" "${configFile}" | while read -r user; do
             local email accountId
@@ -224,12 +232,6 @@ showVlessRealityAccountsFromConfig() (
 
             subscribeAccountTitle "${email}"
             echo
-            local realityVisionPort=${port}
-            local streamPublicPort
-            streamPublicPort=$(realityStreamPublicPortForProtocol vision)
-            if [[ "${core}" == "1" && -n "${streamPublicPort}" ]]; then
-                realityVisionPort=${streamPublicPort}
-            fi
             defaultBase64Code vlessReality "${realityVisionPort}" "${email}" "${accountId}" || return 1
         done
 )
@@ -256,6 +258,9 @@ showVlessRealityGrpcAccountsFromConfig() {
     local realityGRPCPublicKey=$4
     local realityGRPCMldsa65Verify=$5
     [[ -f "${configFile}" ]] || return 0
+    if jq -e '.inbounds[0].port' "${configFile}" >/dev/null 2>&1; then
+        realityGRPCPort=$(corePortSubscriptionPort "$(jq -r '.inbounds[0].port' "${configFile}")" "${realityGRPCPort}") || return 1
+    fi
     jq -c '(.inbounds[0].settings.clients // .inbounds[0].users)[]' "${configFile}" | while read -r user; do
             local email accountId
             IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
@@ -388,12 +393,17 @@ showVlessRealityXHTTPAccounts() {
     if currentProtocolHas 2; then
         subscribeSectionTitle "VLESS Reality XHTTP" "CDN推荐"
 
+        local path xhttpPort streamPublicPort xhttpEntryPort
+        path=$(xrayRealityXHTTPSetting path "/${currentPath}xHTTP")
+        xhttpPort=${xrayVLESSRealityXHTTPort}
+        streamPublicPort=$(realityStreamPublicPortForProtocol xhttp)
+        [[ -z "${streamPublicPort}" ]] || xhttpPort=${streamPublicPort}
+        xhttpEntryPort=$(jq -r '.inbounds[0].port' "${configPath}12_VLESS_XHTTP_inbounds.json") || return 1
+        xhttpPort=$(corePortSubscriptionPort "${xhttpEntryPort}" "${xhttpPort}") || return 1
         jq -c '(.inbounds[0].settings.clients // .inbounds[0].users)[]' ${configPath}12_VLESS_XHTTP_inbounds.json | while read -r user; do
             local email accountId
             IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
             echo
-            local path
-            path=$(xrayRealityXHTTPSetting path "/${currentPath}xHTTP")
 
             local count=
             while read -r line; do
@@ -402,12 +412,6 @@ showVlessRealityXHTTPAccounts() {
                     line=$(realityEntryHost)
                 fi
                 if [[ -n "${line}" ]]; then
-                    local xhttpPort="${xrayVLESSRealityXHTTPort}"
-                    local streamPublicPort
-                    streamPublicPort=$(realityStreamPublicPortForProtocol xhttp)
-                    if [[ -n "${streamPublicPort}" ]]; then
-                        xhttpPort=${streamPublicPort}
-                    fi
                     defaultBase64Code vlessXHTTP "${xhttpPort}" "${email}${count}" "${accountId}" "${line}" "${path}" || return 1
                     count=$((count + 1))
                     echo

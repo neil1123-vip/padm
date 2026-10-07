@@ -1866,6 +1866,62 @@ runPortHoppingMenuUsesCommandLookupRegression() (
     portHoppingMenu hysteria2
     [[ "${menuReadCount}" == "2" ]]
     grep -q '当前端口跳跃范围为: 33000-33005' "${actionLog}"
+
+    (
+        # 范围实际变化才刷新；后置清理或刷新失败仍保留已生效的范围及失败状态。
+        local fixtureStart= fixtureEnd= fixtureChoice=1 fixtureFailure=0 fixtureRefreshFailure=0
+        local protocol
+        readPortHopping() {
+            hysteria2PortHoppingStart=${fixtureStart} hysteria2PortHoppingEnd=${fixtureEnd}
+            tuicPortHoppingStart=${fixtureStart} tuicPortHoppingEnd=${fixtureEnd}
+        }
+        autoRead() { printf -v "$3" '%s' "${fixtureChoice}"; [[ "${fixtureChoice}" != eof ]]; }
+        addPortHopping() {
+            [[ "${fixtureFailure}" == 0 ]] || return "${fixtureFailure}"
+            fixtureStart=33000 fixtureEnd=33005
+        }
+        deletePortHoppingRules() {
+            fixtureStart= fixtureEnd=
+            return "${fixtureFailure}"
+        }
+        refreshManagedProtocolSubscriptions() {
+            printf 'refresh:%s\n' "$1" >>"${actionLog}"
+            return "${fixtureRefreshFailure}"
+        }
+        singBoxTuicPort=26451
+        for protocol in hysteria2 tuic; do
+            : >"${actionLog}"
+            fixtureStart= fixtureEnd= fixtureChoice=1 fixtureFailure=0
+            portHoppingMenu "${protocol}"
+            grep -qx "refresh:${protocol} 端口跳跃" "${actionLog}"
+            : >"${actionLog}"
+            portHoppingMenu "${protocol}"
+            ! grep -q '^refresh:' "${actionLog}"
+            fixtureChoice=3
+            portHoppingMenu "${protocol}"
+            fixtureChoice=eof
+            portHoppingMenu "${protocol}"
+            ! grep -q '^refresh:' "${actionLog}"
+            fixtureChoice=2
+            portHoppingMenu "${protocol}"
+            [[ -z "${fixtureStart}${fixtureEnd}" ]]
+            [[ "$(grep -c '^refresh:' "${actionLog}")" == 1 ]]
+            : >"${actionLog}"
+            fixtureChoice=1 fixtureFailure=1
+            regressionExpectStatus 1 portHoppingMenu "${protocol}"
+            ! grep -q '^refresh:' "${actionLog}"
+            fixtureStart=33000 fixtureEnd=33005 fixtureChoice=2
+            regressionExpectStatus 1 portHoppingMenu "${protocol}"
+            [[ -z "${fixtureStart}${fixtureEnd}" ]]
+            [[ "$(grep -c '^refresh:' "${actionLog}")" == 1 ]]
+            : >"${actionLog}"
+            fixtureChoice=1 fixtureFailure=0 fixtureRefreshFailure=1
+            regressionExpectStatus 1 portHoppingMenu "${protocol}"
+            [[ "${fixtureStart}:${fixtureEnd}" == 33000:33005 ]]
+            grep -q '订阅刷新失败' "${actionLog}"
+            fixtureRefreshFailure=0
+        done
+    )
 )
 
 runXrayTrafficStatsJqCompatibilityRegression() (

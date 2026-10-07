@@ -1000,6 +1000,8 @@ runCoreCleanupFailurePropagationRegression() (
 )
 
 runCorePortFileTransactionRegression() {
+    reloadCore() { return 99; }
+    runServiceAction() { [[ "$*" == "xray restart" ]]; }
     local oldTmpDir="${TMPDIR:-}"
     local configRoot
     local portTmpRoot="${TMP_DIR}/core-port-tmp"
@@ -1014,7 +1016,7 @@ runCorePortFileTransactionRegression() {
     local original2053 original2083 keptBackup
     original2053=$(<"${configPath}02_dokodemodoor_inbounds_2053.json")
     original2083=$(<"${configPath}02_dokodemodoor_inbounds_2083_default.json")
-    if corePortApplyFileTransaction corePortWriteAddFiles $'2053\n2083' 2053 'bad-port' 2>/dev/null; then
+    if corePortApplyReloadTransaction corePortWriteAddFiles $'2053\n2083' 2053 'bad-port' 2>/dev/null; then
         return 1
     fi
     [[ "$(<"${configPath}02_dokodemodoor_inbounds_2053.json")" == "${original2053}" ]]
@@ -1022,19 +1024,19 @@ runCorePortFileTransactionRegression() {
     [[ ! -e "${configPath}02_dokodemodoor_inbounds_2053_default.json" ]]
     [[ ! -e "${configPath}02_dokodemodoor_inbounds_2083.json" ]]
 
-    corePortApplyFileTransaction corePortWriteAddFiles $'2053\n2083' 2053 443
+    corePortApplyReloadTransaction corePortWriteAddFiles $'2053\n2083' 2053 443
     [[ -e "${configPath}02_dokodemodoor_inbounds_2053_default.json" ]]
     [[ -e "${configPath}02_dokodemodoor_inbounds_2083.json" ]]
     [[ ! -e "${configPath}02_dokodemodoor_inbounds_2083_default.json" ]]
     jq -e '.inbounds[0].port == 2053 and .inbounds[0].settings.port == 443' "${configPath}02_dokodemodoor_inbounds_2053_default.json" >/dev/null
 
-    if corePortApplyFileTransaction corePortWriteAddFiles 2443 2443 'bad-port' 2>/dev/null; then
+    if corePortApplyReloadTransaction corePortWriteAddFiles 2443 2443 'bad-port' 2>/dev/null; then
         return 1
     fi
     [[ -e "${configPath}02_dokodemodoor_inbounds_2053_default.json" ]]
     [[ ! -e "${configPath}02_dokodemodoor_inbounds_2443_default.json" ]]
 
-    corePortApplyFileTransaction corePortRemove 2083
+    corePortApplyReloadTransaction corePortRemove 2083
     [[ ! -e "${configPath}02_dokodemodoor_inbounds_2083.json" ]]
     [[ -e "${configPath}02_dokodemodoor_inbounds_2053_default.json" ]]
 
@@ -1067,7 +1069,7 @@ runCorePortFileTransactionRegression() {
             fi
             command cp "$@"
         }
-        if corePortApplyFileTransaction corePortWriteAddFiles 2443 2443 443 2>/dev/null; then
+        if corePortApplyReloadTransaction corePortWriteAddFiles 2443 2443 443 2>/dev/null; then
             return 1
         fi
         [[ "$(<"${configPath}02_dokodemodoor_inbounds_2053_default.json")" == "${original2053}" ]]
@@ -1103,7 +1105,7 @@ runCorePortFileTransactionRegression() {
             fi
             command cp "$@"
         }
-        if corePortApplyFileTransaction corePortWriteAddFiles 2443 2443 'bad-port' 2>/dev/null; then
+        if corePortApplyReloadTransaction corePortWriteAddFiles 2443 2443 'bad-port' 2>/dev/null; then
             return 1
         fi
     ) || return 1
@@ -1116,7 +1118,8 @@ runCorePortFileTransactionRegression() {
     printf '%s\n' "${original2053}" >"${configPath}02_dokodemodoor_inbounds_2053_default.json"
     rm -f "${configPath}02_dokodemodoor_inbounds_2443_default.json"
 
-    reloadCore() {
+    runServiceAction() {
+        [[ "$*" == "xray restart" ]] || return 99
         reloadCalls=$((reloadCalls + 1))
         [[ "${reloadCalls}" != "1" ]]
     }
@@ -1130,7 +1133,8 @@ runCorePortFileTransactionRegression() {
     [[ ! -e "${configPath}02_dokodemodoor_inbounds_2443_default.json" ]]
 
     reloadCalls=0
-    reloadCore() {
+    runServiceAction() {
+        [[ "$*" == "xray restart" ]] || return 99
         reloadCalls=$((reloadCalls + 1))
         [[ "${reloadCalls}" != "1" ]]
     }
@@ -1145,7 +1149,8 @@ runCorePortFileTransactionRegression() {
     reloadCalls=0
     : >"${reloadLog}"
     : >"${errorLog}"
-    reloadCore() {
+    runServiceAction() {
+        [[ "$*" == "xray restart" ]] || return 99
         printf 'reload\n' >>"${reloadLog}"
         reloadCalls=$((reloadCalls + 1))
         [[ "${reloadCalls}" != "1" ]]
@@ -1172,7 +1177,8 @@ runCorePortFileTransactionRegression() {
     rm -f "${configPath}02_dokodemodoor_inbounds_2443_default.json"
 
     reloadCalls=0
-    reloadCore() {
+    runServiceAction() {
+        [[ "$*" == "xray restart" ]] || return 99
         reloadCalls=$((reloadCalls + 1))
         return 0
     }
@@ -1221,7 +1227,9 @@ runCorePortFileTransactionRegression() {
         errorCard() { printf '%s\n' "$1" >>"${firewallErrorLog}"; }
         corePortListExtra() { return 0; }
         corePortResolveByIndex() { printf '2555\n'; }
+        corePortForwardTarget() { printf '443\n'; }
         corePortApplyReloadTransaction() { [[ "${mode}" == "delete" ]]; }
+        refreshProtocolSubscriptions() { return 0; }
         coreInstallType=1
         customPort=
 
@@ -2174,8 +2182,9 @@ runSingBoxUninstallFailurePropagationRegression() (
     local serviceLog="${root}/service.log"
     local firewallLog="${root}/firewall.log"
     local errorLog="${root}/error.log"
+    local refreshLog="${root}/refresh.log"
     local startCalls=0
-    local rc oldConfig
+    local rc oldConfig mode refreshStatus=0 denyStatus=0
 
     mkdir -p "${configDir}"
     printf '{"inbounds":[{"type":"tuic","listen_port":26451}]}\n' >"${configDir}09_tuic_inbounds.json"
@@ -2185,6 +2194,7 @@ runSingBoxUninstallFailurePropagationRegression() (
     : >"${serviceLog}"
     : >"${firewallLog}"
     : >"${errorLog}"
+    : >"${refreshLog}"
     REGRESSION_ERROR_CARD_LOG="${errorLog}"
     PADM_SINGBOX_BINARY="${root}/missing-sing-box"
     PADM_SINGBOX_SYSTEMD_SERVICE_FILE="${root}/sing-box.service"
@@ -2206,7 +2216,10 @@ runSingBoxUninstallFailurePropagationRegression() (
     }
     denyPort() {
         printf 'deny:%s:%s\n' "$1" "${2:-tcp}" >>"${firewallLog}"
+        return "${denyStatus}"
     }
+    refreshProtocolSubscriptions() { printf 'refresh:%s\n' "$1" >>"${refreshLog}"; return "${refreshStatus}"; }
+    subscriptionNotifyControllerRefresh() { printf 'notify\n' >>"${refreshLog}"; }
 
     if unInstallSingBox tuic; then
         rc=0
@@ -2218,13 +2231,9 @@ runSingBoxUninstallFailurePropagationRegression() (
     [[ -f "${configDir}config.json" ]]
     [[ "${startCalls}" == "2" ]]
     [[ ! -s "${firewallLog}" ]]
+    [[ ! -s "${refreshLog}" ]]
     grep -q 'sing-box 服务重启失败，已恢复旧配置和服务状态' "${errorLog}"
 
-    printf '{"inbounds":[{"type":"tuic","listen_port":26451}]}\n' >"${configDir}09_tuic_inbounds.json"
-    rm -f "${configDir}config.json"
-    : >"${serviceLog}"
-    : >"${firewallLog}"
-    : >"${errorLog}"
     singBoxRunning() { return 1; }
     runCoreServiceActionAllowFailure() { return 0; }
     readPortHopping() {
@@ -2234,23 +2243,42 @@ runSingBoxUninstallFailurePropagationRegression() (
     deletePortHoppingRules() {
         printf 'hopping:%s:%s:%s:%s\n' "$1" "$2" "$3" "$4" >>"${firewallLog}"
     }
-    unInstallSingBox tuic
-    [[ ! -e "${configDir}09_tuic_inbounds.json" ]]
-    [[ ! -e "${configDir}config.json" ]]
-    grep -qx 'hopping:tuic:33000:33005:26451' "${firewallLog}"
-    grep -qx 'deny:26451:tcp' "${firewallLog}"
-    grep -qx 'deny:26451:udp' "${firewallLog}"
+    # 删除已生效时都同步订阅；后续失败不恢复已移除的协议。
+    for mode in success firewall refresh; do
+        printf '{"inbounds":[{"type":"tuic","listen_port":26451}]}\n' >"${configDir}09_tuic_inbounds.json"
+        : >"${serviceLog}"
+        : >"${firewallLog}"
+        : >"${errorLog}"
+        : >"${refreshLog}"
+        denyStatus=0 refreshStatus=0
+        [[ "${mode}" != firewall ]] || denyStatus=1
+        [[ "${mode}" != refresh ]] || refreshStatus=1
+        if [[ "${mode}" == success ]]; then
+            unInstallSingBox tuic
+        else
+            regressionExpectStatus 1 unInstallSingBox tuic
+        fi
+        [[ ! -e "${configDir}09_tuic_inbounds.json" && ! -e "${configDir}config.json" ]]
+        grep -qx 'hopping:tuic:33000:33005:26451' "${firewallLog}"
+        grep -qx 'deny:26451:tcp' "${firewallLog}"
+        grep -qx 'deny:26451:udp' "${firewallLog}"
+        grep -qx 'refresh:sing-box tuic' "${refreshLog}"
+        if [[ "${mode}" == refresh ]]; then
+            [[ "$(wc -l <"${refreshLog}")" == 1 ]]
+            grep -q '已卸载，但订阅刷新失败' "${errorLog}"
+        else
+            [[ "$(wc -l <"${refreshLog}")" == 2 ]]
+            grep -qx notify "${refreshLog}"
+        fi
+        [[ "${mode}" != firewall ]] || grep -q '已卸载，但防火墙规则回收失败' "${errorLog}"
+    done
+    denyStatus=0 refreshStatus=0
 
     local alpineConfigDir="${root}/alpine/conf/config/"
     local openRcService="${root}/alpine/sing-box"
     local rcUpdateLog="${root}/alpine/rc-update.log"
+    local cleanupMode keptBackup=
     mkdir -p "${alpineConfigDir}"
-    printf '{"inbounds":[{"type":"hysteria2","listen_port":16295}]}\n' >"${alpineConfigDir}06_hysteria2_inbounds.json"
-    printf '{"inbounds":[{"type":"hysteria2","listen_port":16295}]}\n' >"${alpineConfigDir}config.json"
-    printf '#!/sbin/openrc-run\n' >"${openRcService}"
-    : >"${rcUpdateLog}"
-    : >"${firewallLog}"
-    singBoxConfigPath="${alpineConfigDir}"
     PADM_SINGBOX_OPENRC_SERVICE_FILE="${openRcService}"
     release=alpine
     readInstallType() { singBoxConfigPath=; }
@@ -2262,17 +2290,36 @@ runSingBoxUninstallFailurePropagationRegression() (
     rc-update() {
         printf '%s\n' "$*" >>"${rcUpdateLog}"
     }
-    cleanCoreInstallDirectory() { return 0; }
-    unInstallSingBox hysteria2
-    grep -qx 'del sing-box default' "${rcUpdateLog}"
-    [[ ! -e "${openRcService}" ]]
-    grep -qx 'deny:16295:tcp' "${firewallLog}"
-    grep -qx 'deny:16295:udp' "${firewallLog}"
+    cleanCoreInstallDirectory() { [[ "${cleanupMode}" == success ]]; }
+    padmForgetCleanupPath() { keptBackup=$1; }
+    for cleanupMode in success failure; do
+        printf '{"inbounds":[{"type":"hysteria2","listen_port":16295}]}\n' >"${alpineConfigDir}06_hysteria2_inbounds.json"
+        printf '{"inbounds":[{"type":"hysteria2","listen_port":16295}]}\n' >"${alpineConfigDir}config.json"
+        printf '#!/sbin/openrc-run\n' >"${openRcService}"
+        : >"${rcUpdateLog}"
+        : >"${firewallLog}"
+        : >"${refreshLog}"
+        : >"${errorLog}"
+        singBoxConfigPath="${alpineConfigDir}"
+        if [[ "${cleanupMode}" == success ]]; then
+            unInstallSingBox hysteria2
+        else
+            regressionExpectStatus 1 unInstallSingBox hysteria2
+            [[ -d "${keptBackup}" && -f "${keptBackup}/000000.json" ]]
+            grep -q 'sing-box 核心清理失败' "${errorLog}"
+        fi
+        grep -qx 'del sing-box default' "${rcUpdateLog}"
+        [[ ! -e "${openRcService}" && ! -e "${alpineConfigDir}06_hysteria2_inbounds.json" ]]
+        grep -qx 'deny:16295:tcp' "${firewallLog}"
+        grep -qx 'deny:16295:udp' "${firewallLog}"
+        [[ "$(<"${refreshLog}")" == $'refresh:sing-box hysteria2\nnotify' ]]
+    done
 
     singBoxConfigPath=
     release=debian
     : >"${serviceLog}"
     : >"${errorLog}"
+    : >"${refreshLog}"
     handleSingBox() {
         printf 'handle:%s\n' "$1" >>"${serviceLog}"
         return 1
@@ -2285,6 +2332,7 @@ runSingBoxUninstallFailurePropagationRegression() (
         rc=$?
     fi
     [[ "${rc}" == "1" ]]
+    [[ ! -s "${refreshLog}" ]]
     grep -qx 'handle:stop' "${serviceLog}"
     grep -q 'sing-box 服务停止失败，已取消卸载' "${errorLog}"
 )
@@ -3447,6 +3495,65 @@ JSON
     [[ "$(wc -l <"${reloadCountFile}" | tr -d ' ')" == "1" ]]
     [[ "$(wc -l <"${refreshCountFile}" | tr -d ' ')" == "1" ]]
     refreshMode=success
+
+    (
+        # 协议只重载对应核心；失败时回滚自身配置，订阅刷新成功后才通知。
+        local protocolFile="${tmpRoot}/protocol-parameter.json" calls="${tmpRoot}/protocol-parameter.log"
+        local type operation protocolCore serviceStatus=0 protocolRefreshStatus=0 coreInstallType=1 singBoxConfigPath="${tmpRoot}/auxiliary/"
+        local PADM_XHTTP_CONFIG_FILE="${protocolFile}" PADM_SKIP_CONTROLLER_REFRESH= PADM_CONTROL_SERVER=
+        local -a args
+        tuicConfigFile() { printf '%s\n' "${protocolFile}"; }
+        hysteria2ConfigFile() { printf '%s\n' "${protocolFile}"; }
+        coreSingBoxBinaryPath() { printf '%s\n' "${tmpRoot}/missing-sing-box"; }
+        coreXrayBinaryPath() { printf '%s\n' "${tmpRoot}/missing-xray"; }
+        reloadCore() { printf 'unexpected-reload\n' >>"${calls}"; return 99; }
+        runServiceAction() { printf 'service:%s:%s\n' "$1" "$2" >>"${calls}"; return "${serviceStatus}"; }
+        refreshProtocolSubscriptions() { printf 'refresh:%s\n' "$1" >>"${calls}"; return "${protocolRefreshStatus}"; }
+        subscriptionNotifyControllerRefresh() { printf 'notify\n' >>"${calls}"; return 1; }
+        for type in XHTTP Tuic Hysteria2; do
+            protocolCore=sing-box
+            case "${type}" in
+            XHTTP) operation=setXHTTPMode; args=(stream-up); protocolCore=xray ;;
+            Tuic) operation=setTuicRecommendedDefaults; args=() ;;
+            Hysteria2) operation=setHysteria2BandwidthMode; args=(bbr) ;;
+            esac
+            originalContent='{"inbounds":[{"congestion_control":"bbr","up_mbps":100,"down_mbps":50,"streamSettings":{"xhttpSettings":{"mode":"auto"}}}]}'
+            printf '%s\n' "${originalContent}" >"${protocolFile}"
+            : >"${calls}"
+            serviceStatus=0
+            "${operation}" "${args[@]}"
+            [[ "$(<"${calls}")" == "service:${protocolCore}:restart"$'\n'"refresh:${type}"$'\n'notify ]]
+            [[ "$(<"${protocolFile}")" != "${originalContent}" ]]
+            printf '%s\n' "${originalContent}" >"${protocolFile}"
+            : >"${calls}"
+            serviceStatus=1
+            regressionExpectStatus 1 "${operation}" "${args[@]}" >/dev/null 2>&1
+            [[ "$(<"${protocolFile}")" == "${originalContent}" ]]
+            [[ "$(<"${calls}")" == "service:${protocolCore}:restart"$'\n'"service:${protocolCore}:restart" ]]
+            : >"${calls}"
+            serviceStatus=0
+            protocolRefreshStatus=1
+            regressionExpectStatus 1 "${operation}" "${args[@]}" >/dev/null 2>&1
+            [[ "$(<"${protocolFile}")" != "${originalContent}" ]]
+            [[ "$(<"${calls}")" == "service:${protocolCore}:restart"$'\n'"refresh:${type}" ]]
+            protocolRefreshStatus=0
+        done
+        serviceStatus=0
+        printf '{"inbounds":[{"up_mbps":72,"down_mbps":38}]}\n' >"${protocolFile}"
+        setHysteria2BandwidthMode brutal <<< $'\n\n'
+        jq -e '.inbounds[0] | .up_mbps == 72 and .down_mbps == 38' "${protocolFile}" >/dev/null
+        : >"${calls}"
+        PADM_SKIP_CONTROLLER_REFRESH=1 refreshTuicSubscriptions
+        PADM_CONTROL_SERVER=1 refreshHysteria2Subscriptions
+        PADM_SKIP_CONTROLLER_REFRESH=1 refreshXHTTPSubscriptions
+        PADM_CONTROL_SERVER=1 refreshXHTTPSubscriptions
+        [[ "$(<"${calls}")" == $'refresh:Tuic\nrefresh:Hysteria2\nrefresh:XHTTP\nrefresh:XHTTP' ]]
+        printf '{' >"${protocolFile}"
+        : >"${calls}"
+        autoRead() { printf 'unexpected-input\n' >>"${calls}"; printf -v "$3" '%s' 100; }
+        regressionExpectStatus 1 setHysteria2BandwidthMode brutal >/dev/null 2>&1
+        [[ "$(<"${protocolFile}")" == '{' && ! -s "${calls}" ]]
+    )
 
     local refreshFailureLog="${tmpRoot}/transaction-refresh-failure.log"
     local localSubscribeBase

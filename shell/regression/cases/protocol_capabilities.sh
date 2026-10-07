@@ -474,7 +474,7 @@ JSON
         cat "${errorFile}" >&2
         return 1
     fi
-    assertEquals '' "${currentUUID}" "xray-direct-tls-current-uuid"
+    assertEquals secret "${currentUUID}" "xray-direct-tls-current-uuid"
 
     coreInstallType="${oldCoreInstallType}"
     configPath="${oldConfigPath}"
@@ -531,7 +531,426 @@ runProtocolConfigOwnershipRegression() (
     [[ ! -s "${root}/host-errors" ]]
 )
 
+runProtocolEntryConfigUpdateRegression() (
+    local root="${TMP_DIR}/protocol-entry-config" fixtureConfig before commits=0 field command value statusLog
+    mkdir -p "${root}"
+    root=$(cd -- "${root}" && pwd -P) || return 1
+    fixtureConfig="${root}/config.json"
+    statusLog="${root}/status.log"
+    AUTO_INSTALL=
+    (
+        local PADM_XHTTP_CONFIG_FILE= PADM_XRAY_CONF_DIR="${root}/separate/conf/" PADM_XRAY_DIR="${root}/custom"
+        assertEquals "${root}/separate/conf/12_VLESS_XHTTP_inbounds.json" "$(manageXHTTPConfigFile)" xhttp-custom-conf-dir
+        PADM_XRAY_CONF_DIR=
+        assertEquals "${root}/custom/conf/12_VLESS_XHTTP_inbounds.json" "$(manageXHTTPConfigFile)" xhttp-custom-root
+        PADM_XHTTP_CONFIG_FILE="${fixtureConfig}"
+        assertEquals "${fixtureConfig}" "$(manageXHTTPConfigFile)" xhttp-explicit-config
+        PADM_XHTTP_CONFIG_FILE=relative/xhttp.json
+        assertEquals relative/xhttp.json "$(manageXHTTPConfigFile)" xhttp-relative-config
+        PADM_XHTTP_CONFIG_FILE=
+        manageXrayConfigDir() { return 1; }
+        regressionExpectStatus 1 manageXHTTPConfigFile
+    )
+    manageXHTTPConfigFile() { printf '%s\n' "${fixtureConfig}"; }
+    tuicConfigFile() { printf '%s\n' "${fixtureConfig}"; }
+    hysteria2ConfigFile() { printf '%s\n' "${fixtureConfig}"; }
+    commitXHTTPConfigUpdate() {
+        commits=$((commits + 1))
+        commitGeneratedJsonFile "$1" "${fixtureConfig}"
+    }
+    commitTuicConfigUpdate() { commitXHTTPConfigUpdate "$@"; }
+    echoContent() { :; }
+    menuLine() { :; }
+    menuClose() { :; }
+    errorCard() { :; }
+    statusCard() { printf '%s\n' "$*" >>"${statusLog}"; }
+    warnCard() { :; }
+    printf '%s\n' '{"inbounds":[{"up_mbps":100,"down_mbps":50,"streamSettings":{"realitySettings":{"serverNames":["reality.example.com"],"publicKey":"fixture-key","shortIds":["","fixture-id"]},"xhttpSettings":{"path":"/old","host":"old.example.com"}}}]}' >"${fixtureConfig}"
+
+    # 同一入口接受无参数、字符串和带类型参数，保持原有提交路径。
+    setXHTTPMode packet-up
+    setXHTTPCustomXmux <<< $'\n\n\n'
+    setXHTTPPathHost <<< $'/new/path\nfront.example.com'
+    setXHTTPAdvancedParams <<< $'100-200\n2000000\n40\n50\n10-90\ny\nn'
+    setTuicConnectionParams <<< $'300ms\n15s'
+    jq -e '.inbounds[0] | .auth_timeout == "300ms" and .heartbeat == "15s" and
+        (.streamSettings.xhttpSettings | .mode == "packet-up" and .path == "/new/path" and
+        .host == "front.example.com" and .xmux.maxConcurrency == "16-32" and
+        .xPaddingBytes == "100-200" and .scMaxEachPostBytes == 2000000 and
+        .scMinPostsIntervalMs == 40 and .scMaxBufferedPosts == 50 and
+        .scStreamUpServerSecs == "10-90" and .noGRPCHeader == true and .noSSEHeader == false)' \
+        "${fixtureConfig}" >/dev/null
+    value=$'quote " slash \\ line\nbreak'
+    applyXHTTPConfigUpdate '.payload = $text | .port = $port | .enabled = $enabled' fixture \
+        --arg text "${value}" --argjson port 8443 --argjson enabled true
+    jq -e --arg text "${value}" '.payload == $text and .port == 8443 and .enabled == true' \
+        "${fixtureConfig}" >/dev/null
+    [[ "${commits}" == 6 ]]
+    before=$(<"${fixtureConfig}")
+    regressionExpectStatus 1 applyXHTTPConfigUpdate '.enabled = $enabled' fixture --argjson enabled invalid 2>/dev/null
+    [[ "${commits}" == 6 && "$(<"${fixtureConfig}")" == "${before}" ]]
+    [[ -z "$(find "${root}" -name '.config.json.xhttp.*' -print -quit)" ]]
+
+    (
+        # 默认字段只读一次并保留空值；坏配置或缺文件不能消费下一条菜单输入。
+        local reads="${root}/xhttp-reads.log" inputFd unread
+        jq() { printf '%s\n' "$*" >>"${reads}"; command jq "$@"; }
+        setXHTTPPathHost <<< $'\n\n'
+        [[ "$(grep -c '^-r ' "${reads}")" == 1 ]]
+        jq -e '.inbounds[0].streamSettings.xhttpSettings | .path == "/new/path" and .host == "front.example.com"' "${fixtureConfig}" >/dev/null
+        : >"${reads}"
+        setXHTTPDownloadSettings <<< $'down.example.com\n\nreality\n\n\n\n\n\n'
+        [[ "$(grep -c '^-r ' "${reads}")" == 1 ]]
+        jq -e '.inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings |
+            .port == 443 and .realitySettings.serverName == "reality.example.com" and
+            .realitySettings.publicKey == "fixture-key" and .realitySettings.shortId == "fixture-id" and
+            .xhttpSettings.host == "reality.example.com" and .xhttpSettings.path == "/new/path"' "${fixtureConfig}" >/dev/null
+        command jq '.inbounds[0].streamSettings.realitySettings.shortIds = ["fallback-id"] |
+            .inbounds[0].streamSettings.xhttpSettings.path = ""' "${fixtureConfig}" >"${root}/empty-path.json"
+        mv "${root}/empty-path.json" "${fixtureConfig}"
+        setXHTTPDownloadSettings <<< $'down.example.com\n\nreality\n\n\n/explicit\n\n\n'
+        jq -e '.inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings |
+            .realitySettings.publicKey == "fixture-key" and .realitySettings.shortId == "fallback-id" and
+            .xhttpSettings.path == "/explicit"' "${fixtureConfig}" >/dev/null
+        for value in malformed missing; do
+            printf '{' >"${fixtureConfig}"
+            [[ "${value}" != missing ]] || rm "${fixtureConfig}"
+            for command in setXHTTPPathHost setXHTTPDownloadSettings; do
+                exec {inputFd}<<<sentinel
+                regressionExpectStatus 1 "${command}" <&"${inputFd}"
+                read -r unread <&"${inputFd}"
+                exec {inputFd}<&-
+                [[ "${unread}" == sentinel && "${commits}" == 9 ]]
+                [[ -z "$(find "${root}" -name '.config.json.xhttp.*' -print -quit)" ]]
+            done
+        done
+    )
+    printf '%s\n' "${before}" >"${fixtureConfig}"
+
+    (
+        # 模式按落盘结果展示；配置不可读时不能消费后续菜单输入。
+        local modeLog="${root}/hysteria-mode.log" inputFd unread
+        commitHysteria2ConfigUpdate() { commitXHTTPConfigUpdate "$@"; }
+        menuLine() { printf '%s\n' "$*" >>"${modeLog}"; }
+        manageHysteria2Bandwidth <<< $'2\n3'
+        grep -qx '当前模式：brutal' "${modeLog}"
+        grep -qx '当前模式：bbr' "${modeLog}"
+        [[ "${commits}" == 7 ]]
+        for value in malformed empty missing; do
+            printf '{' >"${fixtureConfig}"
+            [[ "${value}" != empty ]] || : >"${fixtureConfig}"
+            [[ "${value}" != missing ]] || rm "${fixtureConfig}"
+            : >"${modeLog}"
+            exec {inputFd}<<<sentinel
+            regressionExpectStatus 1 manageHysteria2Bandwidth <&"${inputFd}"
+            read -r unread <&"${inputFd}"
+            exec {inputFd}<&-
+            [[ "${unread}" == sentinel && ! -s "${modeLog}" && "${commits}" == 7 ]]
+        done
+    )
+    printf '%s\n' "${before}" >"${fixtureConfig}"
+
+    # 未换行输入与 EOF 均不能被当成回车默认值，也不能创建暂存文件或提交。
+    for command in setXHTTPCustomXmux setXHTTPPathHost setXHTTPAdvancedParams setXHTTPDownloadSettings setTuicConnectionParams; do
+        regressionExpectStatus 1 "${command}" </dev/null
+    done
+    regressionExpectStatus 1 setTuicZeroRtt true < <(printf y)
+    value=unchanged
+    regressionExpectStatus 1 readHysteria2Bandwidth fixture bad value </dev/null
+    [[ "${value}" == unchanged ]]
+    (
+        local failedKey
+        autoRead() {
+            case "$1" in
+            xhttp_path) printf -v "$3" '%s' /new ;;
+            xhttp_host|xhttp_download_address) printf -v "$3" '%s' front.example.com ;;
+            *) printf -v "$3" '%s' '' ;;
+            esac
+            [[ "$1" != "${failedKey}" ]]
+        }
+        for field in xhttp_path xhttp_host; do
+            failedKey=${field}
+            regressionExpectStatus 1 setXHTTPPathHost
+        done
+        for field in xhttp_range xhttp_max_post_bytes xhttp_min_posts_interval xhttp_max_buffered_posts xhttp_disable_grpc_header xhttp_disable_sse_header; do
+            failedKey=${field}
+            regressionExpectStatus 1 setXHTTPAdvancedParams
+        done
+        for field in xhttp_download_address xhttp_download_port xhttp_download_security xhttp_download_server_name xhttp_download_host xhttp_download_path xhttp_download_alpn xhttp_download_mode; do
+            failedKey=${field}
+            regressionExpectStatus 1 setXHTTPDownloadSettings
+        done
+        [[ "${commits}" == 6 && "$(<"${fixtureConfig}")" == "${before}" ]]
+    )
+    [[ "${commits}" == 6 && "$(<"${fixtureConfig}")" == "${before}" ]]
+    [[ -z "$(find "${root}" -name '.config.json.*' -print -quit)" ]]
+    (
+        local currentHost=installed.example.com realityEntryHost=reality.example.com
+        readInstallType() { :; }
+        cdnAddressFile() { printf '%s/cdn\n' "${root}"; }
+        [[ -z "$(cdnStoredAddress)" && "$(cdnCurrentAddress)" == installed.example.com ]]
+        regressionExpectStatus 1 setCDNEntryAddress < <(printf partial.example.com)
+        [[ ! -e "${root}/cdn" && ! -e "${statusLog}" ]]
+        for value in ,cdn.example.com cdn.example.com, cdn.example.com,,203.0.113.10 \
+            'cdn.example.com, 203.0.113.10' https://cdn.example.com cdn.example.com:443 \
+            999.0.0.1 2001:::1; do
+            regressionExpectStatus 1 setCDNEntryAddress <<<"${value}"
+            [[ ! -e "${root}/cdn" && ! -e "${statusLog}" ]]
+        done
+        (
+            autoRead() { printf -v "$3" '%s' $'cdn.example.com\n203.0.113.10'; }
+            regressionExpectStatus 1 setCDNEntryAddress
+            [[ ! -e "${root}/cdn" && ! -e "${statusLog}" ]]
+        )
+        # 缺失或空文件必须按原始空值回滚，不能写回展示用的安装入口。
+        subscribe() { return 1; }
+        regressionExpectStatus 1 setCDNEntryAddress <<<new.example.com
+        [[ ! -s "${root}/cdn" && -z "$(cdnStoredAddress)" && ! -e "${statusLog}" ]]
+        currentHost=
+        [[ "$(cdnCurrentAddress)" == reality.example.com ]]
+        realityEntryHost=
+        [[ "$(cdnCurrentAddress)" == 未设置 ]]
+        currentHost=installed.example.com
+        printf 'old.example.com\n' >"${root}/cdn"
+        [[ "$(cdnStoredAddress)" == old.example.com && "$(cdnCurrentAddress)" == old.example.com ]]
+        regressionExpectStatus 1 setCDNEntryAddress <<<new.example.com
+        [[ "$(<"${root}/cdn")" == old.example.com && ! -e "${statusLog}" ]]
+        regressionExpectStatus 1 clearCDNEntryAddress
+        [[ "$(<"${root}/cdn")" == old.example.com && ! -e "${statusLog}" ]]
+        (
+            local coreInstallType= configPath= singBoxConfigPath= frontingType=
+            readConfigHostPathUUID
+            [[ "${currentCDNAddress}" == old.example.com ]]
+            head() { return 1; }
+            regressionExpectStatus 1 cdnStoredAddress
+            regressionExpectStatus 1 setCDNEntryAddress <<<new.example.com
+            regressionExpectStatus 1 clearCDNEntryAddress
+            regressionExpectStatus 1 readConfigHostPathUUID
+            [[ "$(<"${root}/cdn")" == old.example.com && ! -e "${statusLog}" ]]
+        )
+        subscribe() { return 0; }
+        value=cdn.example.com,203.0.113.10,2001:db8::1
+        setCDNEntryAddress <<<"${value}"
+        [[ "$(<"${root}/cdn")" == "${value}" ]]
+        clearCDNEntryAddress
+        [[ ! -s "${root}/cdn" && "$(wc -l <"${statusLog}")" == 2 ]]
+        (
+            local currentInstallProtocolType=,22, menuLog="${root}/cdn-menu.log"
+            readInstallProtocolType() { :; }
+            menuLine() { printf '%s\n' "$*" >>"${menuLog}"; }
+            manageCDN 1 <<< $'1\ncdn.example.com\n4'
+            [[ "$(<"${root}/cdn")" == cdn.example.com ]]
+            grep -q '当前是传统 TLS/CDN 协议' "${menuLog}"
+        )
+    )
+    (
+        # 场景预设仍一次更新 mode 与 XMUX；XMUX 子菜单不能顺带重置 mode。
+        for value in daily compatible stream single; do
+            setXHTTPPreset "${value}"
+            command jq -e --arg preset "${value}" '
+                .inbounds[0].streamSettings.xhttpSettings |
+                .mode == (if $preset == "compatible" then "packet-up" elif $preset == "stream" then "stream-up" else "auto" end) and
+                .xmux.maxConcurrency == (if $preset == "single" then 1 else "16-32" end)
+            ' "${fixtureConfig}" >/dev/null
+        done
+        before=$(<"${fixtureConfig}")
+        regressionExpectStatus 1 setXHTTPPreset invalid
+        [[ "$(<"${fixtureConfig}")" == "${before}" ]]
+        setXHTTPMode packet-up
+        manageXHTTPXmux <<< $'1\n4'
+        command jq -e '.inbounds[0].streamSettings.xhttpSettings | .mode == "packet-up" and .xmux.maxConcurrency == "16-32"' "${fixtureConfig}" >/dev/null
+        manageXHTTPXmux <<< $'2\n4'
+        command jq -e '.inbounds[0].streamSettings.xhttpSettings | .mode == "packet-up" and .xmux.maxConcurrency == 1' "${fixtureConfig}" >/dev/null
+
+        # 空可选字段、对象/数字/字符串范围与布尔值仍正确展示，每个摘要只解析一次。
+        printf '%s\n' '{"inbounds":[{"port":8443,"listen_port":9443,"ignore_client_bandwidth":true,"users":[{},{}],"congestion_control":"bbr","auth_timeout":"300ms","heartbeat":"15s","zero_rtt_handshake":true,"streamSettings":{"realitySettings":{"serverNames":["sni.example.com"]},"xhttpSettings":{"mode":"packet-up","host":"","path":"","xmux":{"maxConcurrency":{"from":16,"to":32},"hMaxRequestTimes":800,"hMaxReusableSecs":"1800-3000"},"noGRPCHeader":true,"noSSEHeader":false}}}]}' >"${fixtureConfig}"
+        local summaryLog="${root}/summary.log" jqCalls="${root}/summary-jq.log"
+        jq() { printf 'jq\n' >>"${jqCalls}"; command jq "$@"; }
+        menuLine() { printf '%s\n' "$*" >>"${summaryLog}"; }
+        xhttpSettingsSummary
+        hysteria2SettingsSummary "${fixtureConfig}"
+        tuicSettingsSummary
+        [[ "$(wc -l <"${jqCalls}")" == 3 ]]
+        grep -qx '当前配置：端口=8443；mode=packet-up；Reality SNI=sni.example.com' "${summaryLog}"
+        grep -qx 'XHTTP：host=；path=' "${summaryLog}"
+        grep -qx 'XMUX：maxConcurrency=16-32；hMaxRequestTimes=800；hMaxReusableSecs=1800-3000' "${summaryLog}"
+        grep -qx '高级：xPaddingBytes=0；noGRPCHeader=true；noSSEHeader=false' "${summaryLog}"
+        grep -qx '上下行分离：未启用' "${summaryLog}"
+        grep -qx '拥塞控制：BBR（自适应）' "${summaryLog}"
+        grep -qx '连接参数：auth_timeout=300ms；heartbeat=15s' "${summaryLog}"
+        grep -qx '0-RTT：true（默认关闭，开启会增加重放风险）' "${summaryLog}"
+        [[ "$(grep -cx '用户数量：2' "${summaryLog}")" == 2 ]]
+        : >"${summaryLog}"
+        printf '%s\n' '{"inbounds":[{}]}' >"${fixtureConfig}"
+        xhttpSettingsSummary
+        hysteria2SettingsSummary "${fixtureConfig}"
+        tuicSettingsSummary
+        grep -qx '当前配置：端口=；mode=auto；Reality SNI=' "${summaryLog}"
+        grep -qx '拥塞控制：Brutal（下行  Mbps，上行  Mbps）' "${summaryLog}"
+        grep -qx '连接参数：auth_timeout=3s；heartbeat=10s' "${summaryLog}"
+        before=$(<"${summaryLog}")
+        printf '{' >"${fixtureConfig}"
+        regressionExpectStatus 1 xhttpSettingsSummary
+        regressionExpectStatus 1 hysteria2SettingsSummary "${fixtureConfig}"
+        regressionExpectStatus 1 tuicSettingsSummary
+        [[ "$(<"${summaryLog}")" == "${before}" ]]
+    )
+)
+
+runProtocolEntryPortRegression() (
+    local root="${TMP_DIR}/protocol-entry-port" configPath coreInstallType=1 singBoxConfigPath= hysteriaPort=
+    local listenerFile defaultFile before installedIds=,1,
+    reloadCore() { return 99; }
+    runServiceAction() { [[ "$*" == "xray restart" ]]; }
+    mkdir -p "${root}"
+    root=$(cd -- "${root}" && pwd -P) || return 1
+    configPath="${root}/"
+    listenerFile="${configPath}07_VLESS_vision_reality_inbounds.json"
+    defaultFile="${configPath}02_dokodemodoor_inbounds_2053_default.json"
+    [[ "$(corePortParseList '02053,2053, 2083,,')" == $'2053\n2083' ]]
+    regressionExpectStatus 1 corePortParseList ', ,'
+    regressionExpectStatus 1 corePortParseList '2053,bad'
+    printf '%s\n' '{"inbounds":[{"port":8443},{"settings":{"clients":[{"id":"test-id","email":"main-Reality"}]}}]}' >"${listenerFile}"
+    [[ "$(corePortForwardTarget)" == 8443 ]]
+    corePortApplyReloadTransaction corePortWriteAddFiles 2053 02053 "$(corePortForwardTarget)"
+    jq -e '.inbounds[0].port == 2053 and .inbounds[0].settings.port == 8443' "${defaultFile}" >/dev/null
+    before=$(<"${defaultFile}")
+    regressionExpectStatus 1 corePortApplyReloadTransaction corePortWriteAddFiles 2443 9999 8443
+    regressionExpectStatus 1 corePortApplyReloadTransaction corePortWriteAddFiles 8443 8443 8443
+    [[ "$(<"${defaultFile}")" == "${before}" && ! -e "${configPath}02_dokodemodoor_inbounds_2443.json" ]]
+    printf '%s\n' '{"inbounds":[{"port":2053,"settings":{"port":9443}}]}' >"${configPath}02_dokodemodoor_inbounds_2053.json"
+    regressionExpectStatus 1 corePortApplyReloadTransaction corePortWriteAddFiles 2443 2443 8443
+    [[ "$(<"${defaultFile}")" == "${before}" ]]
+    jq -e '.inbounds[0].settings.port == 9443' "${configPath}02_dokodemodoor_inbounds_2053.json" >/dev/null
+    rm "${configPath}02_dokodemodoor_inbounds_2053.json"
+    corePortApplyReloadTransaction corePortWriteAddFiles 2443 2443 8443
+    [[ -f "${configPath}02_dokodemodoor_inbounds_2053.json" && ! -e "${defaultFile}" ]]
+    [[ "$(corePortSubscriptionPort 8443)" == 2443 && "$(corePortSubscriptionPort 443)" == 443 ]]
+    (
+        # 订阅端口一次读取；空值、非法字段和解析失败仍不替换回退端口。
+        local defaultFile content reads="${root}/subscription-port-reads.log" value
+        defaultFile=$(corePortDefaultFile)
+        content=$(<"${defaultFile}")
+        jq() { printf 'jq\n' >>"${reads}"; command jq "$@"; }
+        [[ "$(corePortSubscriptionPort 8443)" == 2443 && "$(wc -l <"${reads}")" == 1 ]]
+        printf '%s\n' '{"inbounds":[{"port":"2443","settings":{"port":"8443"}}]}' >"${defaultFile}"
+        [[ "$(corePortSubscriptionPort 8443)" == 2443 ]]
+        for value in '{"inbounds":[{"port":2443}]}' \
+            '{"inbounds":[{"settings":{"port":8443}}]}' \
+            '{"inbounds":[{"port":2443,"settings":{"port":{}}}]}' \
+            '{"inbounds":[{"port":2443,"settings":{"port":"8443\t2053\n"}}]}'; do
+            printf '%s\n' "${value}" >"${defaultFile}"
+            [[ "$(corePortSubscriptionPort 8443 443)" == 443 ]]
+        done
+        printf '%s\n%s\n' \
+            '{"inbounds":[{"port":2443,"settings":{"port":8443}}]}' \
+            '{"inbounds":[{"port":2999,"settings":{"port":8443}}]}' >"${defaultFile}"
+        [[ "$(corePortSubscriptionPort 8443 443)" == 443 ]]
+        printf '{' >"${defaultFile}"
+        regressionExpectStatus 1 corePortSubscriptionPort 8443 443
+        printf '%s\n' "${content}" >"${defaultFile}"
+    )
+    corePortApplyReloadTransaction corePortWriteAddFiles 2666 '' 8443
+    [[ "$(corePortSubscriptionPort 8443)" == 2443 ]]
+    corePortApplyReloadTransaction corePortWriteAddFiles 2443 '' 8443
+    [[ "$(corePortSubscriptionPort 8443)" == 2443 ]]
+    corePortApplyReloadTransaction corePortWriteAddFiles 2777 8443 8443
+    [[ -z "$(corePortDefaultFile || true)" && -f "${configPath}02_dokodemodoor_inbounds_2443.json" ]]
+    [[ "$(corePortSubscriptionPort 8443)" == 8443 ]]
+    printf '%s\n' '{"inbounds":[{"port":9443,"settings":{"clients":[{"id":"test-id","email":"main-XHTTP"}]}}]}' >"${configPath}12_VLESS_XHTTP_inbounds.json"
+    regressionExpectStatus 1 corePortForwardTarget
+    corePortApplyReloadTransaction corePortWriteAddFiles 2053 2053 8443
+    [[ "$(corePortForwardTarget)" == 8443 ]]
+
+    # 默认别名只覆盖它转发的协议，不能误改其它协议或 443 共存的回落。
+    currentProtocolHas() { [[ "${installedIds}" == *",$1,"* ]]; }
+    subscribeSectionTitle() { :; }
+    subscribeAccountTitle() { :; }
+    realityStreamPublicPortForProtocol() { printf '443\n'; }
+    realityEntryHost() { printf 'entry.example.com\n'; }
+    xrayRealityXHTTPSetting() { printf '/xhttp\n'; }
+    defaultBase64Code() { printf '%s:%s\n' "$1" "$2" >>"${root}/nodes"; }
+    showVlessRealityAccountsFromConfig 1 "${listenerFile}" 8443
+    grep -qx 'vlessReality:2053' "${root}/nodes"
+    installedIds=,2,
+    local xrayVLESSRealityXHTTPort=9443 currentCDNAddress= currentPath=xhttp
+    corePortApplyReloadTransaction corePortWriteAddFiles 2443 2443 9443
+    showVlessRealityXHTTPAccounts
+    grep -qx 'vlessXHTTP:2443' "${root}/nodes"
+    printf '%s\n' '{"inbounds":[{"port":10443,"settings":{"clients":[{"id":"test-id","email":"main-gRPC"}]}}]}' >"${configPath}08_VLESS_vision_gRPC_inbounds.json"
+    corePortApplyReloadTransaction corePortWriteAddFiles 2666 2666 10443
+    showVlessRealityGrpcAccountsFromConfig "${configPath}08_VLESS_vision_gRPC_inbounds.json" 10443 sni.example.com key ''
+    grep -qx 'vlessRealityGRPC:2666' "${root}/nodes"
+    [[ "$(corePortSubscriptionPort 8443 443)" == 443 ]]
+    : >"${root}/nodes"
+    corePortApplyReloadTransaction corePortWriteAddFiles 2777 10443 10443
+    showVlessRealityGrpcAccountsFromConfig "${configPath}08_VLESS_vision_gRPC_inbounds.json" 10443 sni.example.com key ''
+    grep -qx 'vlessRealityGRPC:10443' "${root}/nodes"
+)
+
+runProtocolEntryMenuSyncRegression() (
+    local log="${TMP_DIR}/protocol-entry-sync.log" input expected choice refreshStatus=0 transactionStatus=0
+    local PADM_SKIP_CONTROLLER_REFRESH= PADM_CONTROL_SERVER=
+    coreInstallType=1
+    AUTO_INSTALL=
+    echoContent() { :; }
+    menuLine() { :; }
+    menuClose() { :; }
+    statusCard() { :; }
+    errorCard() { printf 'error:%s\n' "$1" >>"${log}"; }
+    corePortListExtra() { :; }
+    corePortForwardTarget() { printf '443\n'; }
+    corePortResolveByIndex() { printf '2053\n'; }
+    allowPort() { PADM_LAST_ALLOW_PORT_ADDED=true; printf 'allow:%s:%s\n' "$1" "${2:-tcp}" >>"${log}"; }
+    denyPort() { printf 'deny:%s:%s\n' "$1" "${2:-tcp}" >>"${log}"; return "${denyStatus:-0}"; }
+    corePortApplyReloadTransaction() { printf 'apply:%s\n' "$1" >>"${log}"; return "${transactionStatus}"; }
+    refreshProtocolSubscriptions() { printf 'refresh\n' >>"${log}"; return "${refreshStatus}"; }
+    subscriptionNotifyControllerRefresh() { printf 'notify\n' >>"${log}"; return 1; }
+    for choice in 2 3; do
+        if [[ "${choice}" == 2 ]]; then
+            input=$'2\n2053\n2053\n4'
+            expected=$'allow:2053:tcp\nallow:2053:udp\napply:corePortWriteAddFiles\nrefresh\nnotify'
+        else
+            input=$'3\n1\n4'
+            expected=$'apply:corePortRemove\ndeny:2053:tcp\ndeny:2053:udp\nrefresh\nnotify'
+        fi
+        : >"${log}"
+        refreshStatus=0
+        addCorePort <<<"${input}"
+        [[ "$(<"${log}")" == "${expected}" ]]
+        : >"${log}"
+        refreshStatus=1
+        regressionExpectStatus 1 addCorePort <<<"${input}"
+        [[ "$(<"${log}")" == "${expected%$'\nnotify'}"$'\nerror:入口端口已生效，但订阅刷新失败，请手动刷新订阅' ]]
+    done
+    : >"${log}"
+    transactionStatus=1
+    regressionExpectStatus 1 addCorePort <<< $'2\n2053\n2053'
+    if grep -qx refresh "${log}"; then return 1; fi
+    ! grep -qx notify "${log}"
+    : >"${log}"
+    transactionStatus=0
+    refreshStatus=0
+    local denyStatus=1
+    regressionExpectStatus 1 addCorePort <<< $'3\n1\n4'
+    [[ "$(<"${log}")" == $'apply:corePortRemove\ndeny:2053:tcp\ndeny:2053:udp\nerror:入口端口配置已删除，但防火墙规则回收失败，请检查防火墙状态\nrefresh\nnotify' ]]
+    denyStatus=0
+    : >"${log}"
+    PADM_SKIP_CONTROLLER_REFRESH=1 addCorePort <<< $'3\n1\n4'
+    [[ "$(<"${log}")" == $'apply:corePortRemove\ndeny:2053:tcp\ndeny:2053:udp\nrefresh' ]]
+    : >"${log}"
+    PADM_CONTROL_SERVER=1 addCorePort <<< $'3\n1\n4'
+    [[ "$(<"${log}")" == $'apply:corePortRemove\ndeny:2053:tcp\ndeny:2053:udp\nrefresh' ]]
+    : >"${log}"
+    corePortResolveByIndex() { return 1; }
+    addCorePort <<< $'3\nbad\n4'
+    [[ ! -s "${log}" ]]
+)
+
 runProtocolCapabilitiesRegression() {
+    runRegressionStep protocol-entry-config-update runProtocolEntryConfigUpdateRegression
+    runRegressionStep protocol-entry-port runProtocolEntryPortRegression
+    runRegressionStep protocol-entry-menu-sync runProtocolEntryMenuSyncRegression
     runRegressionStep protocol-config-ownership runProtocolConfigOwnershipRegression
     runRegressionStep protocol-capability-registry runProtocolCapabilityRegistryRegression
     runRegressionStep protocol-capability-menu-core runProtocolCapabilityMenuAndCoreRegression

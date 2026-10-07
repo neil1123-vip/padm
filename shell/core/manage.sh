@@ -631,7 +631,7 @@ unInstallSingBox() {
     local serviceWasRunning=false
     local serviceWasEnabled=false
     local portHoppingStart= portHoppingEnd=
-    local firewallStatus=0
+    local firewallStatus=0 cleanupStatus=0
     local validationLog
 
     if [[ -z "${singBoxConfigPath}" ]]; then
@@ -729,10 +729,10 @@ unInstallSingBox() {
         if ! cleanCoreInstallDirectory /etc/padm/sing-box "sing-box"; then
             padmForgetCleanupPath "${uninstallBackupDir}"
             errorCard "sing-box 核心清理失败，请检查备份目录: ${uninstallBackupDir}"
-            return 1
+            cleanupStatus=1
         fi
     fi
-    padmRemoveCleanupPath "${uninstallBackupDir}"
+    [[ "${cleanupStatus}" != "0" ]] || padmRemoveCleanupPath "${uninstallBackupDir}"
 
     if [[ -n "${portHoppingStart}" && -n "${portHoppingEnd}" ]]; then
         deletePortHoppingRules "${type}" "${portHoppingStart}" "${portHoppingEnd}" "${protocolPort}" || firewallStatus=1
@@ -741,8 +741,12 @@ unInstallSingBox() {
     denyPort "${protocolPort}" udp || firewallStatus=1
     if [[ "${firewallStatus}" != "0" ]]; then
         errorCard "sing-box ${type} 已卸载，但防火墙规则回收失败，请检查防火墙状态"
+    fi
+    if ! refreshManagedProtocolSubscriptions "sing-box ${type}"; then
+        errorCard "sing-box ${type} 已卸载，但订阅刷新失败，请手动刷新订阅"
         return 1
     fi
+    [[ "${firewallStatus}" == "0" && "${cleanupStatus}" == "0" ]] || return 1
     successCard "删除sing-box ${type}配置成功"
 }
 
@@ -1071,26 +1075,21 @@ setTraditionalTlsAlpnManual() {
 
 
 # 入口端口管理
-corePortIsValid() {
-    local port=$1
-    validPortNumber "${port}"
-}
-
 corePortParseList() {
-    local input=$1
-    local item
-    local seen=,
-    printf '%s\n' "${input}" | tr ',' '\n' | while read -r item; do
+    local input=$1 item seen=,
+    local -a items=()
+    IFS=',' read -r -a items <<<"${input}"
+    for item in "${items[@]}"; do
         item=${item//[[:space:]]/}
         [[ -z "${item}" ]] && continue
-        if ! corePortIsValid "${item}"; then
-            return 1
-        fi
+        validPortNumber "${item}" || return 1
+        item=$((10#${item}))
         if [[ "${seen}" != *",${item},"* ]]; then
             seen="${seen}${item},"
             printf '%s\n' "${item}"
         fi
     done
+    [[ "${seen}" != , ]]
 }
 
 corePortSafeConfigDir() {
@@ -1146,6 +1145,61 @@ corePortDefaultFile() {
         return 0
     done < <(corePortManagedFilesByPattern '02_dokodemodoor_inbounds_*_default.json')
     return 1
+}
+
+corePortForwardTarget() {
+    local protocolId file port defaultFile defaultTarget= ports=,
+    # 传统 TLS 取前端监听，不能取 WS/gRPC/Trojan fallback 的内部端口。
+    for protocolId in 27 28 1 26 2; do
+        file=$(corePortManagedFilePath "$(protocolCapabilityMeta "${protocolId}" config_file)") || return 1
+        [[ -f "${file}" ]] || continue
+        port=$(jq -r '.inbounds[0].port // empty' "${file}") || return 1
+        validPortNumber "${port}" || return 1
+        port=$((10#${port}))
+        [[ "${ports}" == *",${port},"* ]] || ports+="${port},"
+    done
+    defaultFile=$(corePortDefaultFile || true)
+    if [[ -n "${defaultFile}" ]]; then
+        defaultTarget=$(jq -r '.inbounds[0].settings.port // empty' "${defaultFile}") || return 1
+        validPortNumber "${defaultTarget}" || return 1
+        defaultTarget=$((10#${defaultTarget}))
+        [[ "${ports}" == *",${defaultTarget},"* ]] || return 1
+        printf '%s\n' "${defaultTarget}"
+    else
+        ports=${ports#,}
+        ports=${ports%,}
+        validPortNumber "${ports}" || return 1
+        printf '%s\n' "${ports}"
+    fi
+}
+
+corePortValidateAddition() {
+    local ports=$1 defaultPort=$2 targetPort=$3 port
+    validPortNumber "${targetPort}" || return 1
+    [[ -n "${ports}" ]] || return 1
+    while IFS= read -r port; do
+        validPortNumber "${port}" || return 1
+        ((10#${port} != 10#${targetPort})) || return 1
+    done <<<"${ports}"
+    [[ -n "${defaultPort}" ]] || return 0
+    validPortNumber "${defaultPort}" || return 1
+    defaultPort=$((10#${defaultPort}))
+    ((defaultPort == 10#${targetPort})) || [[ $'\n'${ports}$'\n' == *$'\n'${defaultPort}$'\n'* ]]
+}
+
+corePortSubscriptionPort() {
+    local targetPort=$1 fallbackPort=${2:-$1} defaultFile forwardedPort entryPort values
+    defaultFile=$(corePortDefaultFile || true)
+    if [[ -n "${defaultFile}" ]]; then
+        values=$(jq -r '.inbounds[0] | [(.settings.port // ""), (.port // "")] | map(tostring) | @tsv' "${defaultFile}" 2>/dev/null) || return 1
+        IFS=$'\t' read -r forwardedPort entryPort <<<"${values}"
+        if [[ "${values}" != *$'\n'* ]] &&
+            validPortNumber "${forwardedPort}" && validPortNumber "${entryPort}" &&
+            [[ "${forwardedPort}" == "${targetPort}" ]]; then
+            fallbackPort=${entryPort}
+        fi
+    fi
+    printf '%s\n' "${fallbackPort}"
 }
 
 corePortRemove() {
@@ -1216,11 +1270,20 @@ corePortWriteAddFiles() {
     local defaultPort=$2
     local settingsPort=$3
     local configDir
-    local port fileName hysteriaFileName defaultFile
+    local port fileName hysteriaFileName defaultFile previousEntryFile
+    corePortValidateAddition "${ports}" "${defaultPort}" "${settingsPort}" || return 1
     configDir=$(corePortSafeConfigDir) || return 1
+    defaultFile=$(corePortDefaultFile || true)
     if [[ -n "${defaultPort}" ]]; then
-        defaultFile=$(corePortDefaultFile || true)
-        [[ -z "${defaultFile}" ]] || removeManagedFileIfPresent "${defaultFile}" || return 1
+        defaultPort=$((10#${defaultPort}))
+        if [[ -n "${defaultFile}" ]]; then
+            previousEntryFile="${defaultFile%_default.json}.json"
+            [[ ! -e "${previousEntryFile}" && ! -L "${previousEntryFile}" ]] || return 1
+            commitGeneratedFile "${defaultFile}" "${previousEntryFile}" 644 || return 1
+        fi
+    elif [[ -n "${defaultFile}" ]]; then
+        defaultPort=$(jq -r '.inbounds[0].port // empty' "${defaultFile}") || return 1
+        validPortNumber "${defaultPort}" || return 1
     fi
     while read -r port; do
         corePortRemove "${port}" || return 1
@@ -1235,26 +1298,6 @@ corePortWriteAddFiles() {
         fi
         writeCoreDokodemoInbound "${fileName}" "${port}" "${settingsPort}" tcp "dokodemo-door-newPort-${port}" || return 1
     done <<<"${ports}"
-}
-
-corePortApplyFileTransaction() {
-    local action=$1
-    local backupDir
-    padmCreateTmpRootPath backupDir padm-core-port.XXXXXX -d || return 1
-    if ! corePortBackupFiles "${backupDir}"; then
-        corePortReportBackupFailure "${backupDir}"
-        return 1
-    fi
-    shift
-    if ! "${action}" "$@" || ! corePortValidateFiles; then
-        if corePortRollbackFiles "${backupDir}"; then
-            padmRemoveCleanupPath "${backupDir}"
-        else
-            corePortReportRollbackFailure "${backupDir}"
-        fi
-        return 1
-    fi
-    padmRemoveCleanupPath "${backupDir}"
 }
 
 corePortApplyReloadTransaction() {
@@ -1275,7 +1318,7 @@ corePortApplyReloadTransaction() {
         fi
         return 1
     fi
-    if reloadCore; then
+    if reloadXrayProtocolCore; then
         padmRemoveCleanupPath "${backupDir}"
         return 0
     fi
@@ -1287,7 +1330,7 @@ corePortApplyReloadTransaction() {
         return 1
     fi
     local rollbackMessage
-    coreSetRollbackResultMessage rollbackMessage "入口端口核心重载失败" "已恢复旧配置" reloadCore "恢复后核心重载仍失败，请检查核心服务日志"
+    coreSetRollbackResultMessage rollbackMessage "入口端口核心重载失败" "已恢复旧配置" reloadXrayProtocolCore "恢复后核心重载仍失败，请检查核心服务日志"
     errorCard "${rollbackMessage}"
     padmRemoveCleanupPath "${backupDir}"
     return 1
@@ -1343,12 +1386,15 @@ addCorePort() {
         return 1
     fi
 
-    local selectNewPortType newPort defaultPort portIndex port parsedPorts settingsPort firewallStatus
+    local selectNewPortType newPort defaultPort portIndex port parsedPorts settingsPort firewallStatus portChanged
     local -a openedFirewallRules=()
     while true; do
+        portChanged=false
+        firewallStatus=0
         echoContent title "\n┌─ 入口端口管理 ─────────────────────────────────────"
-        menuLine "支持批量添加；不影响默认端口使用"
+        menuLine "支持批量添加；保留原监听端口"
         menuLine "查看账号时只展示默认端口账号；端口列表用英文逗号分隔"
+        menuLine "入口变更后自动同步订阅"
         menuLine "如已安装 Hysteria2，会同时安装 Hysteria2 新端口"
         menuLine "示例：2053,2083,2087"
         menuItem 1 "查看已添加端口" "列出当前额外端口"
@@ -1367,17 +1413,17 @@ addCorePort() {
             defaultPort=
             autoRead extra_core_ports "请输入端口号[回车取消]:" newPort || return 0
             [[ -n "${newPort}" ]] || return 0
-            autoRead extra_core_default_port "请输入默认的端口号，同时会更改订阅端口以及节点端口，[回车]默认443:" defaultPort || return 0
-
-            settingsPort=443
+            autoRead extra_core_default_port "请输入默认端口（新增列表或原入口），[回车]保留现有默认入口:" defaultPort || return 0
             openedFirewallRules=()
             parsedPorts=$(corePortParseList "${newPort}") || {
                 errorCard "端口格式错误"
                 return 1
             }
-            if [[ -n "${customPort:-}" ]]; then
-                settingsPort=${customPort}
-            fi
+            settingsPort=$(corePortForwardTarget) || { errorCard "无法唯一确定 Xray TCP 入口，请检查已安装协议与默认入口"; return 1; }
+            corePortValidateAddition "${parsedPorts}" "${defaultPort}" "${settingsPort}" || {
+                errorCard "新增端口不能等于原入口；默认端口必须属于新增列表或等于原入口"
+                return 1
+            }
             while read -r port; do
                 if ! allowPort "${port}"; then
                     corePortRollbackFirewallRules "${openedFirewallRules[@]}" || true
@@ -1395,7 +1441,7 @@ addCorePort() {
                 errorCard "入口端口配置写入或重载失败，已尝试恢复旧配置；如上方提示回滚失败，请检查备份目录"
                 return 1
             fi
-            successCard "添加完毕"
+            portChanged=true
             ;;
         3)
             corePortListExtra || true
@@ -1412,8 +1458,8 @@ addCorePort() {
                 denyPort "${port}" udp || firewallStatus=1
                 if [[ "${firewallStatus}" != "0" ]]; then
                     errorCard "入口端口配置已删除，但防火墙规则回收失败，请检查防火墙状态"
-                    return 1
                 fi
+                portChanged=true
             else
                 statusCard "输入错误" "编号输入错误，请重新选择"
             fi
@@ -1425,6 +1471,13 @@ addCorePort() {
             coreSelectionErrorCard "选择错误"
             ;;
         esac
+        if [[ "${portChanged}" == "true" ]]; then
+            if ! refreshManagedProtocolSubscriptions "入口端口" "入口端口已更新，公网订阅已同步" "入口端口已更新，本地订阅已同步"; then
+                errorCard "入口端口已生效，但订阅刷新失败，请手动刷新订阅"
+                return 1
+            fi
+        fi
+        [[ "${firewallStatus}" == "0" ]] || return 1
     done
 }
 
@@ -1817,14 +1870,11 @@ unInstallApply() {
 
 
 # CDN 入口管理
-cdnAddressFile() {
-    printf '%s' "/etc/padm/cdn"
-}
-
 cdnCurrentAddress() {
-    readInstallType
-    if [[ -f "$(cdnAddressFile)" ]] && [[ -n "$(head -1 "$(cdnAddressFile)")" ]]; then
-        head -1 "$(cdnAddressFile)"
+    local address
+    address=$(cdnStoredAddress) || return 1
+    if [[ -n "${address}" ]]; then
+        printf '%s\n' "${address}"
     elif [[ -n "${currentHost:-}" ]]; then
         printf '%s\n' "${currentHost}"
     elif [[ -n "${realityEntryHost:-}" ]]; then
@@ -1836,34 +1886,14 @@ cdnCurrentAddress() {
 
 cdnWriteAddress() {
     local address=$1
-    local targetFile targetParent stagedPath
+    local targetFile stagedPath
 
     targetFile=$(padmResolveManagedAbsolutePath "$(cdnAddressFile)") || return 1
-    targetParent=$(dirname -- "${targetFile}")
-    padmEnsureSafeDirectory "${targetParent}" || return 1
     padmCreateTempFileForTarget stagedPath "${targetFile}" cdn || return 1
-    printf '%s\n' "${address}" >"${stagedPath}" || { padmRemoveCleanupPath "${stagedPath}"; return 1; }
-    commitGeneratedFile "${stagedPath}" "${targetFile}" 644 || { padmRemoveCleanupPath "${stagedPath}"; return 1; }
-}
-
-cdnClearAddress() {
-    local targetFile targetParent stagedPath
-
-    targetFile=$(padmResolveManagedAbsolutePath "$(cdnAddressFile)") || return 1
-    targetParent=$(dirname -- "${targetFile}")
-    padmEnsureSafeDirectory "${targetParent}" || return 1
-    padmCreateTempFileForTarget stagedPath "${targetFile}" cdn || return 1
-    : >"${stagedPath}" || { padmRemoveCleanupPath "${stagedPath}"; return 1; }
-    commitGeneratedFile "${stagedPath}" "${targetFile}" 644 || { padmRemoveCleanupPath "${stagedPath}"; return 1; }
-}
-
-cdnRestoreAddressValue() {
-    local previousAddress=$1
-    if [[ -n "${previousAddress}" ]]; then
-        cdnWriteAddress "${previousAddress}"
-    else
-        cdnClearAddress
+    if [[ -n "${address}" ]]; then
+        printf '%s\n' "${address}" >"${stagedPath}" || { padmRemoveCleanupPath "${stagedPath}"; return 1; }
     fi
+    commitGeneratedFile "${stagedPath}" "${targetFile}" 644 || { padmRemoveCleanupPath "${stagedPath}"; return 1; }
 }
 
 cdnRefreshSubscriptionsOrRollback() {
@@ -1871,7 +1901,7 @@ cdnRefreshSubscriptionsOrRollback() {
     if subscribe false false; then
         return 0
     fi
-    cdnRestoreAddressValue "${previousAddress}" || {
+    cdnWriteAddress "${previousAddress}" || {
         errorCard "订阅刷新失败，且 CDN 入口地址恢复失败，请手动检查 $(cdnAddressFile)"
         return 1
     }
@@ -1890,41 +1920,48 @@ showCDNUsageNotes() {
 }
 
 setCDNEntryAddress() {
-    local currentAddress input previousAddress
-    currentAddress=$(cdnCurrentAddress)
-    previousAddress=
-    if [[ -f "$(cdnAddressFile)" ]]; then
-        previousAddress=$(head -1 "$(cdnAddressFile)")
-    fi
+    local currentAddress input previousAddress address
+    local -a addresses
+    currentAddress=$(cdnCurrentAddress) || return 1
+    previousAddress=$(cdnStoredAddress) || return 1
     echoContent title "\n┌─ 设置 CDN 入口地址 ─────────────────────────────────"
     menuLine "当前入口地址：${currentAddress}"
     menuLine "可输入多个地址，用英文逗号分隔；订阅会为每个地址生成一条节点"
     menuLine "示例：cdn.example.com,203.0.113.10"
     menuClose
-    autoRead custom_cdn_domain "请输入 CDN 入口 IP 或域名[回车取消]:" input
+    autoRead custom_cdn_domain "请输入 CDN 入口 IP 或域名[回车取消]:" input || return 1
     if [[ -z "${input}" ]]; then
         coreCancelledStatusCard "未修改 CDN 入口地址"
         return 0
     fi
+    if [[ "${input}" == *[[:space:]]* || "${input}" == *, ]]; then
+        errorCard "CDN 入口地址不能包含空白或空项"
+        return 1
+    fi
+    IFS=, read -r -a addresses <<<"${input}"
+    for address in "${addresses[@]}"; do
+        if ! padmIsValidConnectAddress "${address}"; then
+            errorCard "CDN 入口地址不合法：${address}，请只填写 IP 或域名"
+            return 1
+        fi
+    done
     if ! cdnWriteAddress "${input}"; then
         errorCard "CDN 入口地址写入失败，未刷新订阅"
         return 1
     fi
+    cdnRefreshSubscriptionsOrRollback "${previousAddress}" || return 1
     statusCard "CDN 入口" "已更新为 ${input}"
-    cdnRefreshSubscriptionsOrRollback "${previousAddress}"
 }
 
 clearCDNEntryAddress() {
-    local previousAddress=
-    if [[ -f "$(cdnAddressFile)" ]]; then
-        previousAddress=$(head -1 "$(cdnAddressFile)")
-    fi
-    if ! cdnClearAddress; then
+    local previousAddress
+    previousAddress=$(cdnStoredAddress) || return 1
+    if ! cdnWriteAddress ''; then
         errorCard "CDN 入口地址清空失败，未刷新订阅"
         return 1
     fi
+    cdnRefreshSubscriptionsOrRollback "${previousAddress}" || return 1
     statusCard "CDN 入口" "已清空，订阅将使用安装入口地址"
-    cdnRefreshSubscriptionsOrRollback "${previousAddress}"
 }
 
 manageCDN() {
@@ -1940,7 +1977,7 @@ manageCDN() {
         menuLine "当前入口地址：$(cdnCurrentAddress)"
         if currentProtocolHas 2; then
             menuLine "当前已安装 Reality XHTTP，可直接调整入口地址"
-        elif currentProtocolHasAny 21 23 24 25; then
+        elif currentProtocolHasAny 21 22 23 24 25; then
             menuLine "当前是传统 TLS/CDN 协议，仅建议用于旧客户端兼容"
         else
             menuLine "未检测到 XHTTP 能力；新建 XHTTP 节点建议安装协议 2：$(xrayProtocolName 2)"
@@ -1955,7 +1992,7 @@ manageCDN() {
 
         case "${selectCDNType}" in
         1)
-            if currentProtocolHas 2 || currentProtocolHasAny 21 23 24 25; then
+            if currentProtocolHas 2 || currentProtocolHasAny 21 22 23 24 25; then
                 setCDNEntryAddress || true
             else
                 statusCard "不可用" "请先安装 Reality XHTTP 或传统 TLS/CDN 协议"
@@ -3061,36 +3098,35 @@ manageReality() {
 
 
 manageXHTTPConfigFile() {
-    echo "${PADM_XHTTP_CONFIG_FILE:-/etc/padm/xray/conf/12_VLESS_XHTTP_inbounds.json}"
-}
-
-xhttpRangeValue() {
-    local jqPath=$1
-    local configFile
-    configFile=$(manageXHTTPConfigFile)
-    jq -r "${jqPath} // 0 | if type == \"object\" then ((.from | tostring) + \"-\" + (.to | tostring)) else tostring end" "${configFile}" 2>/dev/null
+    if [[ -n "${PADM_XHTTP_CONFIG_FILE:-}" ]]; then
+        printf '%s\n' "${PADM_XHTTP_CONFIG_FILE}"
+        return
+    fi
+    local configDir
+    configDir=$(manageXrayConfigDir) || return 1
+    printf '%s\n' "${configDir%/}/12_VLESS_XHTTP_inbounds.json"
 }
 
 xhttpSettingsSummary() {
-    local configFile
-    configFile=$(manageXHTTPConfigFile)
+    local configFile values
+    configFile=$(manageXHTTPConfigFile) || return 1
     if [[ ! -f "${configFile}" ]]; then
         menuLine "当前状态：未检测到 VLESS Reality XHTTP 配置"
         return 0
     fi
     local mode maxConcurrency hMaxRequestTimes hMaxReusableSecs host path port sni xPaddingBytes noGRPCHeader noSSEHeader downloadAddress
-    mode=$(jq -r '.inbounds[0].streamSettings.xhttpSettings.mode // "auto"' "${configFile}" 2>/dev/null)
-    host=$(jq -r '.inbounds[0].streamSettings.xhttpSettings.host // ""' "${configFile}" 2>/dev/null)
-    path=$(jq -r '.inbounds[0].streamSettings.xhttpSettings.path // ""' "${configFile}" 2>/dev/null)
-    port=$(jq -r '.inbounds[0].port // ""' "${configFile}" 2>/dev/null)
-    sni=$(jq -r '.inbounds[0].streamSettings.realitySettings.serverNames[0] // ""' "${configFile}" 2>/dev/null)
-    maxConcurrency=$(xhttpRangeValue '.inbounds[0].streamSettings.xhttpSettings.xmux.maxConcurrency')
-    hMaxRequestTimes=$(xhttpRangeValue '.inbounds[0].streamSettings.xhttpSettings.xmux.hMaxRequestTimes')
-    hMaxReusableSecs=$(xhttpRangeValue '.inbounds[0].streamSettings.xhttpSettings.xmux.hMaxReusableSecs')
-    xPaddingBytes=$(xhttpRangeValue '.inbounds[0].streamSettings.xhttpSettings.xPaddingBytes')
-    noGRPCHeader=$(jq -r '.inbounds[0].streamSettings.xhttpSettings.noGRPCHeader // false' "${configFile}" 2>/dev/null)
-    noSSEHeader=$(jq -r '.inbounds[0].streamSettings.xhttpSettings.noSSEHeader // false' "${configFile}" 2>/dev/null)
-    downloadAddress=$(jq -r '.inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.address // empty' "${configFile}" 2>/dev/null)
+    values=$(jq -r '
+        def rangeValue: . // 0 | if type == "object" then "\(.from)-\(.to)" else tostring end;
+        .inbounds[0] as $in | $in.streamSettings.xhttpSettings as $settings |
+        [($settings.mode // "auto"), ($settings.host // ""), ($settings.path // ""), ($in.port // ""),
+         ($in.streamSettings.realitySettings.serverNames[0] // ""),
+         ($settings.xmux.maxConcurrency | rangeValue), ($settings.xmux.hMaxRequestTimes | rangeValue),
+         ($settings.xmux.hMaxReusableSecs | rangeValue), ($settings.xPaddingBytes | rangeValue),
+         ($settings.noGRPCHeader // false), ($settings.noSSEHeader // false),
+         ($settings.extra.downloadSettings.address // "")] | map(tostring) | join("\u001f")
+    ' "${configFile}" 2>/dev/null) || { errorCard "读取 XHTTP 配置失败"; return 1; }
+    # 非空白分隔符保留空 host/path，避免后续字段错位。
+    IFS=$'\037' read -r mode host path port sni maxConcurrency hMaxRequestTimes hMaxReusableSecs xPaddingBytes noGRPCHeader noSSEHeader downloadAddress <<<"${values}"
     menuLine "当前配置：端口=${port}；mode=${mode}；Reality SNI=${sni}"
     menuLine "XHTTP：host=${host}；path=${path}"
     menuLine "XMUX：maxConcurrency=${maxConcurrency}；hMaxRequestTimes=${hMaxRequestTimes}；hMaxReusableSecs=${hMaxReusableSecs}"
@@ -3103,7 +3139,7 @@ xhttpSettingsSummary() {
 }
 
 refreshXHTTPSubscriptions() {
-    refreshProtocolSubscriptions XHTTP "已刷新公网订阅" "已刷新本地订阅"
+    refreshManagedProtocolSubscriptions XHTTP
 }
 
 configTransactionCommit() {
@@ -3115,7 +3151,7 @@ configTransactionCommit() {
     local rollbackMessage=$6
     local successMessage=$7
     local refreshFn=$8
-    local reloadFn=${9:-reloadCore}
+    local reloadFn=$9
 
     configFile=$(padmRequireSafeAbsolutePath "${configFile}") || return 1
     backupManagedFileToPath "${configFile}" "${backupFile}" 644 || return 1
@@ -3184,6 +3220,10 @@ xhttpConfigTestLog() {
     padmTmpFilePath padm-xhttp-test.log
 }
 
+reloadXrayProtocolCore() {
+    runServiceAction xray restart
+}
+
 commitXHTTPConfigUpdate() {
     local stagedFile=$1
     local successMessage=$2
@@ -3196,14 +3236,15 @@ commitXHTTPConfigUpdate() {
         return 1
     fi
     backupFile="${configFile}.xhttp.bak"
-    configTransactionCommit "${configFile}" "${stagedFile}" "${backupFile}" validateXHTTPConfigUpdate "XHTTP 配置校验失败" "已回滚本次 XHTTP 修改；排查日志：$(xhttpConfigTestLog)" "${successMessage}" refreshXHTTPSubscriptions
+    configTransactionCommit "${configFile}" "${stagedFile}" "${backupFile}" validateXHTTPConfigUpdate "XHTTP 配置校验失败" "已回滚本次 XHTTP 修改；排查日志：$(xhttpConfigTestLog)" "${successMessage}" refreshXHTTPSubscriptions reloadXrayProtocolCore
 }
 
 applyManagedJsonConfigUpdate() {
     local configFile=$1 stageTag=$2 errorMessage=$3 commitFn=$4 jqFilter=$5 successMessage=$6
     local stagedFile
+    shift 6
     padmCreateTempFileForTarget stagedFile "${configFile}" "${stageTag}" || { errorCard "${errorMessage}"; return 1; }
-    if ! jq "${jqFilter}" "${configFile}" >"${stagedFile}"; then
+    if ! jq "$@" "${jqFilter}" "${configFile}" >"${stagedFile}"; then
         errorCard "${errorMessage}"
         padmRemoveCleanupPath "${stagedFile}"
         return 1
@@ -3223,21 +3264,21 @@ setXHTTPMode() {
 }
 
 setXHTTPPreset() {
-    local preset=$1
+    local preset=$1 mode=auto maxConcurrency='"16-32"' successMessage
     case "${preset}" in
-    daily)
-        applyXHTTPConfigUpdate '.inbounds[0].streamSettings.xhttpSettings.mode = "auto" | .inbounds[0].streamSettings.xhttpSettings.xmux = {"maxConcurrency":"16-32","hMaxRequestTimes":"600-900","hMaxReusableSecs":"1800-3000"}' "已应用 XHTTP 日常/CDN 推荐预设"
-        ;;
-    compatible)
-        applyXHTTPConfigUpdate '.inbounds[0].streamSettings.xhttpSettings.mode = "packet-up" | .inbounds[0].streamSettings.xhttpSettings.xmux = {"maxConcurrency":"16-32","hMaxRequestTimes":"600-900","hMaxReusableSecs":"1800-3000"}' "已应用 XHTTP 兼容优先预设"
-        ;;
-    stream)
-        applyXHTTPConfigUpdate '.inbounds[0].streamSettings.xhttpSettings.mode = "stream-up" | .inbounds[0].streamSettings.xhttpSettings.xmux = {"maxConcurrency":"16-32","hMaxRequestTimes":"600-900","hMaxReusableSecs":"1800-3000"}' "已应用 XHTTP stream-up 性能预设"
-        ;;
-    single)
-        applyXHTTPConfigUpdate '.inbounds[0].streamSettings.xhttpSettings.mode = "auto" | .inbounds[0].streamSettings.xhttpSettings.xmux = {"maxConcurrency":1,"hMaxRequestTimes":"600-900","hMaxReusableSecs":"1800-3000"}' "已应用 XHTTP 测速/单并发预设"
-        ;;
+    daily) successMessage="已应用 XHTTP 日常/CDN 推荐预设" ;;
+    compatible) mode=packet-up; successMessage="已应用 XHTTP 兼容优先预设" ;;
+    stream) mode=stream-up; successMessage="已应用 XHTTP stream-up 性能预设" ;;
+    single) maxConcurrency=1; successMessage="已应用 XHTTP 测速/单并发预设" ;;
+    *) return 1 ;;
     esac
+    applyXHTTPConfigUpdate '.inbounds[0].streamSettings.xhttpSettings.mode = $mode | .inbounds[0].streamSettings.xhttpSettings.xmux = {"maxConcurrency":$maxConcurrency,"hMaxRequestTimes":"600-900","hMaxReusableSecs":"1800-3000"}' \
+        "${successMessage}" --arg mode "${mode}" --argjson maxConcurrency "${maxConcurrency}"
+}
+
+setXHTTPXmux() {
+    applyXHTTPConfigUpdate '.inbounds[0].streamSettings.xhttpSettings.xmux = {"maxConcurrency":$maxConcurrency,"hMaxRequestTimes":"600-900","hMaxReusableSecs":"1800-3000"}' \
+        "XHTTP XMUX 已更新" --argjson maxConcurrency "$1"
 }
 
 setXHTTPRecommendedDefaults() {
@@ -3249,7 +3290,7 @@ readXHTTPRange() {
     local defaultFrom=$2
     local defaultTo=$3
     local input from to
-    autoRead xhttp_range "${prompt}[回车默认 ${defaultFrom}-${defaultTo}]:" input
+    autoRead xhttp_range "${prompt}[回车默认 ${defaultFrom}-${defaultTo}]:" input || return 1
     input=${input:-${defaultFrom}-${defaultTo}}
     if [[ "${input}" =~ ^[0-9]{1,10}$ ]]; then
         from=${input}
@@ -3269,7 +3310,7 @@ readXHTTPRange() {
 }
 
 setXHTTPCustomXmux() {
-    local concurrency requestTimes reusableSecs concurrencyFrom concurrencyTo requestFrom requestTo reusableFrom reusableTo configFile stagedFile
+    local concurrency requestTimes reusableSecs concurrencyFrom concurrencyTo requestFrom requestTo reusableFrom reusableTo
     concurrency=$(readXHTTPRange "请输入 maxConcurrency 范围" 16 32) || return 1
     requestTimes=$(readXHTTPRange "请输入 hMaxRequestTimes 范围" 600 900) || return 1
     reusableSecs=$(readXHTTPRange "请输入 hMaxReusableSecs 范围" 1800 3000) || return 1
@@ -3290,28 +3331,24 @@ setXHTTPCustomXmux() {
         menuLine "hMaxReusableSecs 超过 3600 可能触发部分中间盒旧连接清理"
         menuClose
     fi
-    configFile=$(manageXHTTPConfigFile)
-    padmCreateTempFileForTarget stagedFile "${configFile}" xhttp || { errorCard "写入 XHTTP XMUX 失败"; return 1; }
-    if ! jq --arg concurrency "${concurrencyFrom}-${concurrencyTo}" --arg requestTimes "${requestFrom}-${requestTo}" --arg reusableSecs "${reusableFrom}-${reusableTo}" '.inbounds[0].streamSettings.xhttpSettings.xmux = {"maxConcurrency":$concurrency,"hMaxRequestTimes":$requestTimes,"hMaxReusableSecs":$reusableSecs}' "${configFile}" >"${stagedFile}"; then
-        errorCard "写入 XHTTP XMUX 失败"
-        padmRemoveCleanupPath "${stagedFile}"
-        return 1
-    fi
-    commitXHTTPConfigUpdate "${stagedFile}" "XHTTP XMUX 自定义范围已应用"
+    applyXHTTPConfigUpdate '.inbounds[0].streamSettings.xhttpSettings.xmux = {"maxConcurrency":$concurrency,"hMaxRequestTimes":$requestTimes,"hMaxReusableSecs":$reusableSecs}' \
+        "XHTTP XMUX 自定义范围已应用" --arg concurrency "${concurrencyFrom}-${concurrencyTo}" --arg requestTimes "${requestFrom}-${requestTo}" --arg reusableSecs "${reusableFrom}-${reusableTo}"
 }
 
 setXHTTPPathHost() {
-    local configFile currentPath currentHost newPath newHost stagedFile
-    configFile=$(manageXHTTPConfigFile)
-    currentPath=$(jq -r '.inbounds[0].streamSettings.xhttpSettings.path // ""' "${configFile}" 2>/dev/null)
-    currentHost=$(jq -r '.inbounds[0].streamSettings.xhttpSettings.host // ""' "${configFile}" 2>/dev/null)
-    autoRead xhttp_path "请输入 XHTTP path，[回车保持 ${currentPath}]:" newPath
+    local configFile currentPath currentHost newPath newHost values
+    configFile=$(manageXHTTPConfigFile) || return 1
+    values=$(jq -r '.inbounds[0].streamSettings.xhttpSettings |
+        [(.path // ""), (.host // "")] | join("\u001f")
+    ' "${configFile}" 2>/dev/null) || { errorCard "读取 XHTTP 配置失败"; return 1; }
+    IFS=$'\037' read -r currentPath currentHost <<<"${values}"
+    autoRead xhttp_path "请输入 XHTTP path，[回车保持 ${currentPath}]:" newPath || return 1
     newPath=${newPath:-${currentPath}}
     if ! padmIsSafeRoutePath "${newPath}"; then
         errorCard "path 不合法"
         return 1
     fi
-    autoRead xhttp_host "请输入 XHTTP host，[回车保持 ${currentHost}]:" newHost
+    autoRead xhttp_host "请输入 XHTTP host，[回车保持 ${currentHost}]:" newHost || return 1
     newHost=${newHost:-${currentHost}}
     if ! padmIsValidHostName "${newHost}"; then
         errorCard "host 不合法"
@@ -3321,86 +3358,73 @@ setXHTTPPathHost() {
     menuLine "通常建议 host 与 Reality SNI 保持一致"
     menuLine "仅 CDN 域前置或特殊反代场景才需要改"
     menuClose
-    padmCreateTempFileForTarget stagedFile "${configFile}" xhttp || { errorCard "写入 XHTTP path/host 失败"; return 1; }
-    if ! jq --arg path "${newPath}" --arg host "${newHost}" '.inbounds[0].streamSettings.xhttpSettings.path = $path | .inbounds[0].streamSettings.xhttpSettings.host = $host' "${configFile}" >"${stagedFile}"; then
-        errorCard "写入 XHTTP path/host 失败"
-        padmRemoveCleanupPath "${stagedFile}"
-        return 1
-    fi
-    commitXHTTPConfigUpdate "${stagedFile}" "XHTTP path/host 已更新"
+    applyXHTTPConfigUpdate '.inbounds[0].streamSettings.xhttpSettings.path = $path | .inbounds[0].streamSettings.xhttpSettings.host = $host' \
+        "XHTTP path/host 已更新" --arg path "${newPath}" --arg host "${newHost}"
 }
 
 setXHTTPAdvancedParams() {
-    local configFile padding maxPost minInterval maxBuffered streamSecs noGrpc noSse pf pt sf st stagedFile
-    configFile=$(manageXHTTPConfigFile)
+    local padding maxPost minInterval maxBuffered streamSecs noGrpc noSse pf pt sf st
     padding=$(readXHTTPRange "请输入 xPaddingBytes 范围" 100 1000) || return 1
     read -r pf pt <<<"${padding}"
-    autoRead xhttp_max_post_bytes "请输入 packet-up 单个 POST 最大字节数[回车默认 1000000]:" maxPost
+    autoRead xhttp_max_post_bytes "请输入 packet-up 单个 POST 最大字节数[回车默认 1000000]:" maxPost || return 1
     maxPost=${maxPost:-1000000}
-    autoRead xhttp_min_posts_interval "请输入 packet-up 客户端 POST 最小间隔毫秒[回车默认 30]:" minInterval
+    autoRead xhttp_min_posts_interval "请输入 packet-up 客户端 POST 最小间隔毫秒[回车默认 30]:" minInterval || return 1
     minInterval=${minInterval:-30}
-    autoRead xhttp_max_buffered_posts "请输入 packet-up 服务端最多缓存 POST 数[回车默认 30]:" maxBuffered
+    autoRead xhttp_max_buffered_posts "请输入 packet-up 服务端最多缓存 POST 数[回车默认 30]:" maxBuffered || return 1
     maxBuffered=${maxBuffered:-30}
     streamSecs=$(readXHTTPRange "请输入 stream-up 服务端保活秒数范围" 20 80) || return 1
     read -r sf st <<<"${streamSecs}"
-    autoRead xhttp_disable_grpc_header "是否关闭 gRPC header 伪装？[y/n，默认 n]:" noGrpc
-    autoRead xhttp_disable_sse_header "是否关闭 SSE response header？[y/n，默认 n]:" noSse
+    autoRead xhttp_disable_grpc_header "是否关闭 gRPC header 伪装？[y/n，默认 n]:" noGrpc || return 1
+    autoRead xhttp_disable_sse_header "是否关闭 SSE response header？[y/n，默认 n]:" noSse || return 1
     [[ "${maxPost}" =~ ^[0-9]+$ && "${minInterval}" =~ ^[0-9]+$ && "${maxBuffered}" =~ ^[0-9]+$ ]] || {
         errorCard "数值参数必须是非负整数"
         return 1
     }
-    padmCreateTempFileForTarget stagedFile "${configFile}" xhttp || { errorCard "写入 XHTTP 高级参数失败"; return 1; }
-    if ! jq --arg padding "${pf}-${pt}" --argjson maxPost "${maxPost}" --argjson minInterval "${minInterval}" --argjson maxBuffered "${maxBuffered}" --arg streamSecs "${sf}-${st}" --argjson noGrpc "$([[ "${noGrpc}" == "y" ]] && echo true || echo false)" --argjson noSse "$([[ "${noSse}" == "y" ]] && echo true || echo false)" '.inbounds[0].streamSettings.xhttpSettings.xPaddingBytes = $padding | .inbounds[0].streamSettings.xhttpSettings.scMaxEachPostBytes = $maxPost | .inbounds[0].streamSettings.xhttpSettings.scMinPostsIntervalMs = $minInterval | .inbounds[0].streamSettings.xhttpSettings.scMaxBufferedPosts = $maxBuffered | .inbounds[0].streamSettings.xhttpSettings.scStreamUpServerSecs = $streamSecs | .inbounds[0].streamSettings.xhttpSettings.noGRPCHeader = $noGrpc | .inbounds[0].streamSettings.xhttpSettings.noSSEHeader = $noSse' "${configFile}" >"${stagedFile}"; then
-        errorCard "写入 XHTTP 高级参数失败"
-        padmRemoveCleanupPath "${stagedFile}"
-        return 1
-    fi
-    commitXHTTPConfigUpdate "${stagedFile}" "XHTTP 高级参数已更新"
+    applyXHTTPConfigUpdate '.inbounds[0].streamSettings.xhttpSettings.xPaddingBytes = $padding | .inbounds[0].streamSettings.xhttpSettings.scMaxEachPostBytes = $maxPost | .inbounds[0].streamSettings.xhttpSettings.scMinPostsIntervalMs = $minInterval | .inbounds[0].streamSettings.xhttpSettings.scMaxBufferedPosts = $maxBuffered | .inbounds[0].streamSettings.xhttpSettings.scStreamUpServerSecs = $streamSecs | .inbounds[0].streamSettings.xhttpSettings.noGRPCHeader = $noGrpc | .inbounds[0].streamSettings.xhttpSettings.noSSEHeader = $noSse' \
+        "XHTTP 高级参数已更新" --arg padding "${pf}-${pt}" --argjson maxPost "${maxPost}" --argjson minInterval "${minInterval}" --argjson maxBuffered "${maxBuffered}" --arg streamSecs "${sf}-${st}" --argjson noGrpc "$([[ "${noGrpc}" == "y" ]] && echo true || echo false)" --argjson noSse "$([[ "${noSse}" == "y" ]] && echo true || echo false)"
 }
 
 setXHTTPDownloadSettings() {
-    local configFile address port security serverName host path alpn mode publicKey shortId stagedFile
-    configFile=$(manageXHTTPConfigFile)
+    local configFile address port security serverName host path alpn mode publicKey shortId currentServerName currentPath values
+    configFile=$(manageXHTTPConfigFile) || return 1
+    values=$(jq -r '.inbounds[0].streamSettings |
+        [(.realitySettings.serverNames[0] // ""), (.xhttpSettings.path // ""),
+         (.realitySettings.publicKey // ""), (.realitySettings.shortIds[1] // .realitySettings.shortIds[0] // "")] | join("\u001f")
+    ' "${configFile}" 2>/dev/null) || { errorCard "读取 XHTTP 配置失败"; return 1; }
+    IFS=$'\037' read -r currentServerName currentPath publicKey shortId <<<"${values}"
     echoContent title "\n┌─ XHTTP 上下行分离风险 ─────────────────────────────"
     menuLine "上下行分离属于高级功能"
     menuLine "下行配置完全独立，填错会导致连接失败"
     menuClose
-    autoRead xhttp_download_address "请输入下行入口 address/IP/域名:" address
+    autoRead xhttp_download_address "请输入下行入口 address/IP/域名:" address || return 1
     padmIsValidConnectAddress "${address}" || { errorCard "address 不合法"; return 1; }
-    autoRead xhttp_download_port "请输入下行入口端口[回车默认 443]:" port
+    autoRead xhttp_download_port "请输入下行入口端口[回车默认 443]:" port || return 1
     port=${port:-443}
     validPortNumber "${port}" || { errorCard "端口不合法"; return 1; }
-    autoRead xhttp_download_security "请输入下行 security[tls/reality，回车默认 tls]:" security
+    autoRead xhttp_download_security "请输入下行 security[tls/reality，回车默认 tls]:" security || return 1
     security=${security:-tls}
     [[ "${security}" == "tls" || "${security}" == "reality" ]] || { errorCard "security 仅支持 tls 或 reality"; return 1; }
-    autoRead xhttp_download_server_name "请输入下行 serverName/SNI[回车默认当前 Reality SNI]:" serverName
-    serverName=${serverName:-$(jq -r '.inbounds[0].streamSettings.realitySettings.serverNames[0] // ""' "${configFile}" 2>/dev/null)}
-    autoRead xhttp_download_host "请输入下行 XHTTP host[回车默认 ${serverName}]:" host
+    autoRead xhttp_download_server_name "请输入下行 serverName/SNI[回车默认当前 Reality SNI]:" serverName || return 1
+    serverName=${serverName:-${currentServerName}}
+    autoRead xhttp_download_host "请输入下行 XHTTP host[回车默认 ${serverName}]:" host || return 1
     host=${host:-${serverName}}
-    autoRead xhttp_download_path "请输入下行 XHTTP path[回车默认沿用当前 path]:" path
-    path=${path:-$(jq -r '.inbounds[0].streamSettings.xhttpSettings.path // ""' "${configFile}" 2>/dev/null)}
+    autoRead xhttp_download_path "请输入下行 XHTTP path[回车默认沿用当前 path]:" path || return 1
+    path=${path:-${currentPath}}
     padmIsValidHostName "${serverName}" || { errorCard "serverName 不合法"; return 1; }
     padmIsValidHostName "${host}" || { errorCard "host 不合法"; return 1; }
     padmIsSafeRoutePath "${path}" || { errorCard "path 不合法"; return 1; }
-    autoRead xhttp_download_alpn "请输入下行 ALPN[h2/h3，回车默认 h3]:" alpn
+    autoRead xhttp_download_alpn "请输入下行 ALPN[h2/h3，回车默认 h3]:" alpn || return 1
     alpn=${alpn:-h3}
     [[ "${alpn}" == "h2" || "${alpn}" == "h3" ]] || { errorCard "ALPN 仅支持 h2 或 h3"; return 1; }
-    autoRead xhttp_download_mode "请输入下行 mode[auto/stream-one/packet-up/stream-up，回车默认 auto]:" mode
+    autoRead xhttp_download_mode "请输入下行 mode[auto/stream-one/packet-up/stream-up，回车默认 auto]:" mode || return 1
     mode=${mode:-auto}
     [[ "${mode}" == "auto" || "${mode}" == "stream-one" || "${mode}" == "packet-up" || "${mode}" == "stream-up" ]] || { errorCard "mode 不合法"; return 1; }
-    publicKey=$(jq -r '.inbounds[0].streamSettings.realitySettings.publicKey // ""' "${configFile}" 2>/dev/null)
-    shortId=$(jq -r '.inbounds[0].streamSettings.realitySettings.shortIds[1] // .inbounds[0].streamSettings.realitySettings.shortIds[0] // ""' "${configFile}" 2>/dev/null)
     if [[ "${security}" == "reality" && -z "${publicKey}" ]]; then
         errorCard "下行 Reality 需要 publicKey；当前配置未找到，请先确认 Reality 密钥"
         return 1
     fi
-    padmCreateTempFileForTarget stagedFile "${configFile}" xhttp || { errorCard "写入 XHTTP 上下行分离配置失败"; return 1; }
-    if ! jq --arg address "${address}" --argjson port "${port}" --arg security "${security}" --arg serverName "${serverName}" --arg host "${host}" --arg path "${path}" --arg alpn "${alpn}" --arg mode "${mode}" --arg publicKey "${publicKey}" --arg shortId "${shortId}" '.inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings = {"address":$address,"port":$port,"network":"xhttp","security":$security,"xhttpSettings":{"host":$host,"path":$path,"mode":$mode}} | if $security == "reality" then .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings = {"serverName":$serverName,"fingerprint":"chrome","show":false,"publicKey":$publicKey,"shortId":$shortId,"spiderX":"/"} else .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.tlsSettings = {"serverName":$serverName,"alpn":[$alpn],"fingerprint":"chrome"} end' "${configFile}" >"${stagedFile}"; then
-        errorCard "写入 XHTTP 上下行分离配置失败"
-        padmRemoveCleanupPath "${stagedFile}"
-        return 1
-    fi
-    commitXHTTPConfigUpdate "${stagedFile}" "XHTTP 上下行分离配置已启用"
+    applyXHTTPConfigUpdate '.inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings = {"address":$address,"port":$port,"network":"xhttp","security":$security,"xhttpSettings":{"host":$host,"path":$path,"mode":$mode}} | if $security == "reality" then .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings = {"serverName":$serverName,"fingerprint":"chrome","show":false,"publicKey":$publicKey,"shortId":$shortId,"spiderX":"/"} else .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.tlsSettings = {"serverName":$serverName,"alpn":[$alpn],"fingerprint":"chrome"} end' \
+        "XHTTP 上下行分离配置已启用" --arg address "${address}" --argjson port "${port}" --arg security "${security}" --arg serverName "${serverName}" --arg host "${host}" --arg path "${path}" --arg alpn "${alpn}" --arg mode "${mode}" --arg publicKey "${publicKey}" --arg shortId "${shortId}"
 }
 
 disableXHTTPDownloadSettings() {
@@ -3463,8 +3487,8 @@ manageXHTTPXmux() {
         selectXHTTPXmux=
         menuReadChoice xhttp_xmux_menu "请选择:" selectXHTTPXmux || return 0
         case "${selectXHTTPXmux}" in
-        1) setXHTTPPreset daily || true ;;
-        2) setXHTTPPreset single || true ;;
+        1) setXHTTPXmux '"16-32"' || true ;;
+        2) setXHTTPXmux 1 || true ;;
         3) setXHTTPCustomXmux || true ;;
         4) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
@@ -3586,16 +3610,15 @@ manageXHTTP() {
 
 
 hysteria2SettingsSummary() {
-    local configFile=$1 port bandwidth obfs userCount
+    local configFile=$1 port bandwidth obfs userCount values
     [[ -f "${configFile}" ]] || return 0
-    port=$(jq -r '.inbounds[0].listen_port // ""' "${configFile}" 2>/dev/null)
-    if jq -e '.inbounds[0].ignore_client_bandwidth == true' "${configFile}" >/dev/null 2>&1; then
-        bandwidth="BBR（自适应）"
-    else
-        bandwidth="Brutal（下行 $(jq -r '.inbounds[0].up_mbps // ""' "${configFile}" 2>/dev/null) Mbps，上行 $(jq -r '.inbounds[0].down_mbps // ""' "${configFile}" 2>/dev/null) Mbps）"
-    fi
-    obfs=$(jq -r '.inbounds[0].obfs.type // "关闭"' "${configFile}" 2>/dev/null)
-    userCount=$(jq -r '.inbounds[0].users | length' "${configFile}" 2>/dev/null)
+    values=$(jq -r '.inbounds[0] |
+        [(.listen_port // ""),
+         (if .ignore_client_bandwidth == true then "BBR（自适应）"
+          else "Brutal（下行 \(.up_mbps // "") Mbps，上行 \(.down_mbps // "") Mbps）" end),
+         (.obfs.type // "关闭"), (.users | length)] | map(tostring) | join("\u001f")
+    ' "${configFile}" 2>/dev/null) || { errorCard "读取 Hysteria2 配置失败"; return 1; }
+    IFS=$'\037' read -r port bandwidth obfs userCount <<<"${values}"
     menuLine "监听端口：${port}"
     menuLine "拥塞控制：${bandwidth}"
     menuLine "混淆：${obfs}"
@@ -3606,11 +3629,16 @@ hysteria2ConfigFile() {
     padmManagedFilePath "$(singBoxConfigShardDir)" 06_hysteria2_inbounds.json
 }
 
-refreshHysteria2Subscriptions() {
-    refreshProtocolSubscriptions Hysteria2 "已刷新公网订阅" "已刷新本地订阅" || return 1
-    if declare -F subscriptionNotifyControllerRefresh >/dev/null 2>&1; then
+refreshManagedProtocolSubscriptions() {
+    refreshProtocolSubscriptions "$1" "${2:-已刷新公网订阅}" "${3:-已刷新本地订阅}" || return 1
+    if [[ "${PADM_SKIP_CONTROLLER_REFRESH:-}" != "1" && "${PADM_CONTROL_SERVER:-}" != "1" ]] &&
+        declare -F subscriptionNotifyControllerRefresh >/dev/null 2>&1; then
         subscriptionNotifyControllerRefresh || true
     fi
+}
+
+refreshHysteria2Subscriptions() {
+    refreshManagedProtocolSubscriptions Hysteria2
 }
 
 hysteria2ConfigTestLog() {
@@ -3624,7 +3652,7 @@ validateHysteria2ConfigUpdate() {
     singBoxMergeConfigForValidation "${binary}" "$(hysteria2ConfigTestLog)"
 }
 
-reloadHysteria2Core() {
+reloadSingBoxProtocolCore() {
     runServiceAction sing-box restart
 }
 
@@ -3640,7 +3668,7 @@ commitHysteria2ConfigUpdate() {
         return 1
     }
     backupFile="${configFile}.hysteria2.bak"
-    configTransactionCommit "${configFile}" "${stagedFile}" "${backupFile}" validateHysteria2ConfigUpdate "Hysteria2 配置校验失败" "已回滚本次 Hysteria2 修改；排查日志：$(hysteria2ConfigTestLog)" "${successMessage}" refreshHysteria2Subscriptions reloadHysteria2Core
+    configTransactionCommit "${configFile}" "${stagedFile}" "${backupFile}" validateHysteria2ConfigUpdate "Hysteria2 配置校验失败" "已回滚本次 Hysteria2 修改；排查日志：$(hysteria2ConfigTestLog)" "${successMessage}" refreshHysteria2Subscriptions reloadSingBoxProtocolCore
 }
 
 applyHysteria2ConfigUpdate() {
@@ -3652,7 +3680,7 @@ applyHysteria2ConfigUpdate() {
 readHysteria2Bandwidth() {
     local prompt=$1 defaultValue=$2 resultVar=$3 input
     while true; do
-        autoRead hysteria_bandwidth_value "${prompt}[回车默认 ${defaultValue} Mbps]:" input
+        autoRead hysteria_bandwidth_value "${prompt}[回车默认 ${defaultValue} Mbps]:" input || return 1
         input=${input:-${defaultValue}}
         if [[ "${input}" =~ ^[0-9]{1,6}$ ]] && ((10#${input} > 0)); then
             printf -v "${resultVar}" '%s' "${input}"
@@ -3663,14 +3691,14 @@ readHysteria2Bandwidth() {
 }
 
 setHysteria2BandwidthMode() {
-    local mode=$1 download upload
+    local mode=$1 download upload values
     case "${mode}" in
     bbr)
         applyHysteria2ConfigUpdate 'del(.inbounds[0].up_mbps, .inbounds[0].down_mbps) | .inbounds[0].ignore_client_bandwidth = true' "Hysteria2 已切换为 BBR 自适应"
         ;;
     brutal)
-        download=$(jq -r '.inbounds[0].up_mbps // 100' "$(hysteria2ConfigFile)")
-        upload=$(jq -r '.inbounds[0].down_mbps // 50' "$(hysteria2ConfigFile)")
+        values=$(jq -r '.inbounds[0] | [.up_mbps // 100, .down_mbps // 50] | @tsv' "$(hysteria2ConfigFile)") || return 1
+        IFS=$'\t' read -r download upload <<<"${values}"
         readHysteria2Bandwidth "客户端下行带宽（服务端→客户端）" "${download}" download || return 1
         readHysteria2Bandwidth "客户端上行带宽（客户端→服务端）" "${upload}" upload || return 1
         applyHysteria2ConfigUpdate ".inbounds[0] |= (del(.ignore_client_bandwidth) | .up_mbps = ${download} | .down_mbps = ${upload})" "Hysteria2 已切换为 Brutal（下行 ${download} Mbps，上行 ${upload} Mbps）"
@@ -3683,10 +3711,10 @@ setHysteria2BandwidthMode() {
 
 manageHysteria2Bandwidth() {
     local configFile selectMode currentMode
-    configFile=$(hysteria2ConfigFile)
-    currentMode=brutal
-    jq -e '.inbounds[0].ignore_client_bandwidth == true' "${configFile}" >/dev/null 2>&1 && currentMode=bbr
+    configFile=$(hysteria2ConfigFile) || return 1
     while true; do
+        currentMode=$(jq -er 'if .inbounds[0].ignore_client_bandwidth == true then "bbr" else "brutal" end' "${configFile}" 2>/dev/null) ||
+            { errorCard "读取 Hysteria2 配置失败"; return 1; }
         echoContent title "\n┌─ Hysteria2 拥塞模式 ───────────────────────────────"
         menuLine "当前模式：${currentMode}"
         menuLine "Brutal 适合带宽稳定且可测速的线路；BBR 适合波动、移动网络或不确定线路"
@@ -3702,8 +3730,6 @@ manageHysteria2Bandwidth() {
         3) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac
-        currentMode=brutal
-        jq -e '.inbounds[0].ignore_client_bandwidth == true' "${configFile}" >/dev/null 2>&1 && currentMode=bbr
     done
 }
 
@@ -3754,18 +3780,18 @@ tuicConfigFile() {
 }
 
 tuicSettingsSummary() {
-    local configFile algorithm authTimeout heartbeat zeroRtt port userCount
-    configFile=$(tuicConfigFile)
+    local configFile algorithm authTimeout heartbeat zeroRtt port userCount values
+    configFile=$(tuicConfigFile) || return 1
     if [[ ! -f "${configFile}" ]]; then
         menuLine "当前状态：未检测到 Tuic 配置"
         return 0
     fi
-    port=$(jq -r '.inbounds[0].listen_port // ""' "${configFile}" 2>/dev/null)
-    algorithm=$(jq -r '.inbounds[0].congestion_control // "cubic"' "${configFile}" 2>/dev/null)
-    authTimeout=$(jq -r '.inbounds[0].auth_timeout // "3s"' "${configFile}" 2>/dev/null)
-    heartbeat=$(jq -r '.inbounds[0].heartbeat // "10s"' "${configFile}" 2>/dev/null)
-    zeroRtt=$(jq -r '.inbounds[0].zero_rtt_handshake // false' "${configFile}" 2>/dev/null)
-    userCount=$(jq -r '.inbounds[0].users | length' "${configFile}" 2>/dev/null)
+    values=$(jq -r '.inbounds[0] |
+        [(.listen_port // ""), (.congestion_control // "cubic"), (.auth_timeout // "3s"),
+         (.heartbeat // "10s"), (.zero_rtt_handshake // false), (.users | length)] |
+        map(tostring) | join("\u001f")
+    ' "${configFile}" 2>/dev/null) || { errorCard "读取 Tuic 配置失败"; return 1; }
+    IFS=$'\037' read -r port algorithm authTimeout heartbeat zeroRtt userCount <<<"${values}"
     menuLine "监听端口：${port}"
     menuLine "拥塞控制：${algorithm}"
     menuLine "连接参数：auth_timeout=${authTimeout}；heartbeat=${heartbeat}"
@@ -3774,7 +3800,7 @@ tuicSettingsSummary() {
 }
 
 refreshTuicSubscriptions() {
-    refreshProtocolSubscriptions Tuic "已刷新公网订阅" "已刷新本地订阅"
+    refreshManagedProtocolSubscriptions Tuic
 }
 
 validateTuicConfigUpdate() {
@@ -3800,7 +3826,7 @@ commitTuicConfigUpdate() {
         return 1
     fi
     backupFile="${configFile}.tuic.bak"
-    configTransactionCommit "${configFile}" "${stagedFile}" "${backupFile}" validateTuicConfigUpdate "Tuic 配置校验失败" "已回滚本次 Tuic 修改；排查日志：$(tuicConfigTestLog)" "${successMessage}" refreshTuicSubscriptions
+    configTransactionCommit "${configFile}" "${stagedFile}" "${backupFile}" validateTuicConfigUpdate "Tuic 配置校验失败" "已回滚本次 Tuic 修改；排查日志：$(tuicConfigTestLog)" "${successMessage}" refreshTuicSubscriptions reloadSingBoxProtocolCore
 }
 
 applyTuicConfigUpdate() {
@@ -3818,7 +3844,7 @@ readTuicDuration() {
     local prompt=$1
     local defaultValue=$2
     local input
-    autoRead tuic_duration "${prompt}[回车默认 ${defaultValue}]：" input
+    autoRead tuic_duration "${prompt}[回车默认 ${defaultValue}]：" input || return 1
     input=${input:-${defaultValue}}
     if [[ ! "${input}" =~ ^[0-9]+(ms|s|m|h)$ ]]; then
         errorCard "时间格式错误，应为 300ms、3s、10s、1m 这类格式"
@@ -3828,26 +3854,20 @@ readTuicDuration() {
 }
 
 setTuicConnectionParams() {
-    local authTimeout heartbeat configFile stagedFile
+    local authTimeout heartbeat
     authTimeout=$(readTuicDuration "请输入认证超时时间 auth_timeout" "3s") || return 1
     heartbeat=$(readTuicDuration "请输入心跳间隔 heartbeat" "10s") || return 1
-    configFile=$(tuicConfigFile)
-    padmCreateTempFileForTarget stagedFile "${configFile}" tuic || { errorCard "写入 Tuic 连接参数失败"; return 1; }
-    if ! jq --arg authTimeout "${authTimeout}" --arg heartbeat "${heartbeat}" '.inbounds[0].auth_timeout = $authTimeout | .inbounds[0].heartbeat = $heartbeat' "${configFile}" >"${stagedFile}"; then
-        errorCard "写入 Tuic 连接参数失败"
-        padmRemoveCleanupPath "${stagedFile}"
-        return 1
-    fi
-    commitTuicConfigUpdate "${stagedFile}" "Tuic 连接参数已更新"
+    applyTuicConfigUpdate '.inbounds[0].auth_timeout = $authTimeout | .inbounds[0].heartbeat = $heartbeat' \
+        "Tuic 连接参数已更新" --arg authTimeout "${authTimeout}" --arg heartbeat "${heartbeat}"
 }
 
 setTuicZeroRtt() {
-    local enabled=$1
+    local enabled=$1 confirmZeroRtt
     if [[ "${enabled}" == "true" ]]; then
         warnCard \
             "0-RTT 可以减少握手往返，但上游文档明确提示存在重放攻击风险" \
             "除非你清楚客户端兼容性和风险边界，否则建议保持关闭"
-        autoConfirm tuic_zero_rtt_confirm "确认启用 Tuic 0-RTT？" n confirmZeroRtt
+        autoConfirm tuic_zero_rtt_confirm "确认启用 Tuic 0-RTT？" n confirmZeroRtt || return 1
         [[ "${confirmZeroRtt}" == "y" ]] || return 0
     fi
     applyTuicConfigUpdate ".inbounds[0].zero_rtt_handshake = ${enabled}" "Tuic 0-RTT 已设置为 ${enabled}"
