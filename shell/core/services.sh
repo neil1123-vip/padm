@@ -456,7 +456,7 @@ xrayRunning() {
     local pid
     local exe
     local -a procArgs=()
-    local index configMatched testMode
+    local index argument value configMatched testMode dumpMode
     local xrayBinary
     local xrayConfigDir
     local systemdServiceFile=${PADM_XRAY_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/xray.service}
@@ -473,13 +473,54 @@ xrayRunning() {
         padmReadProcArgs procArgs "/proc/${pid}/cmdline" || continue
         configMatched=false
         testMode=false
-        for ((index = 1; index < ${#procArgs[@]}; index++)); do
-            case "${procArgs[index]}" in
-            -confdir) [[ "${procArgs[index + 1]:-}" != "${xrayConfigDir}" ]] || configMatched=true ;;
-            -test | -test=*) testMode=true ;;
+        dumpMode=false
+        index=1
+        [[ "${procArgs[1]:-}" != run ]] || index=2
+        # Go flag 按顺序覆盖单值选项，-- 和首个非选项终止解析，字符串值不再扫描。
+        for (( ; index < ${#procArgs[@]}; index++)); do
+            argument=${procArgs[index]}
+            [[ "${argument}" == -- || "${argument}" != -?* ]] && break
+            case "${argument}" in
+            -confdir | --confdir)
+                index=$((index + 1))
+                value=${procArgs[index]:-}
+                [[ "${value}" == "${xrayConfigDir}" ]] && configMatched=true || configMatched=false
+                ;;
+            -confdir=* | --confdir=*)
+                value=${argument#*=}
+                [[ "${value}" == "${xrayConfigDir}" ]] && configMatched=true || configMatched=false
+                ;;
+            -test | --test)
+                testMode=true
+                ;;
+            -test=* | --test=*)
+                value=${argument#*=}
+                case "${value}" in
+                0 | f | F | false | FALSE | False) testMode=false ;;
+                1 | t | T | true | TRUE | True) testMode=true ;;
+                *) configMatched=false; break ;;
+                esac
+                ;;
+            -dump | --dump)
+                dumpMode=true
+                ;;
+            -dump=* | --dump=*)
+                value=${argument#*=}
+                case "${value}" in
+                0 | f | F | false | FALSE | False) dumpMode=false ;;
+                1 | t | T | true | TRUE | True) dumpMode=true ;;
+                *) configMatched=false; break ;;
+                esac
+                ;;
+            -config | --config | -c | --c | -format | --format)
+                index=$((index + 1))
+                ;;
+            -config=* | --config=* | -c=* | --c=* | -format=* | --format=*)
+                ;;
+            *) configMatched=false; break ;;
             esac
         done
-        [[ "${configMatched}" == true && "${testMode}" == false ]] || continue
+        [[ "${configMatched}" == true && "${testMode}" == false && "${dumpMode}" == false ]] || continue
         return 0
     done < <(pgrep -x xray 2>/dev/null)
     if [[ "${release:-}" != "alpine" && -f "${systemdServiceFile}" ]] && padmCommandExists systemctl; then

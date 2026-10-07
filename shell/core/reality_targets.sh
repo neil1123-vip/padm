@@ -3133,11 +3133,11 @@ realityXrayXhttpConfigPath() {
 }
 
 realitySingBoxVisionConfigPath() {
-    printf '%s\n' "${PADM_REALITY_SINGBOX_VISION_CONFIG_FILE:-${singBoxConfigPath:-${PADM_SINGBOX_CONFIG_DIR:-/etc/padm/sing-box/conf/config/}}07_VLESS_vision_reality_inbounds.json}"
+    printf '%s\n' "${PADM_REALITY_SINGBOX_VISION_CONFIG_FILE:-$(singBoxConfigShardDir)07_VLESS_vision_reality_inbounds.json}"
 }
 
 realitySingBoxGrpcConfigPath() {
-    printf '%s\n' "${PADM_REALITY_SINGBOX_GRPC_CONFIG_FILE:-${singBoxConfigPath:-${PADM_SINGBOX_CONFIG_DIR:-/etc/padm/sing-box/conf/config/}}08_VLESS_vision_gRPC_inbounds.json}"
+    printf '%s\n' "${PADM_REALITY_SINGBOX_GRPC_CONFIG_FILE:-$(singBoxConfigShardDir)08_VLESS_vision_gRPC_inbounds.json}"
 }
 
 applyRealityTargetToInstalledConfigs() {

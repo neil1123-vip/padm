@@ -674,7 +674,7 @@ checkFirewalldAllowPort() {
 # 通过 DNS 检查域名 IP
 checkDNSIP() {
     local domain=$1
-    local dnsIP=
+    local dnsIP= dnsAddress
     local dnsResolver=dig
     if ! command -v dig >/dev/null 2>&1; then
         if command -v getent >/dev/null 2>&1; then
@@ -705,7 +705,11 @@ checkDNSIP() {
         echo
         statusCard "DNS 解析回退" "无法通过 DNS 获取域名 IPv4 地址" "尝试检查域名 IPv6 地址"
         if [[ "${dnsResolver}" == "dig" ]]; then
-            dnsIP=$(dig @2606:4700:4700::1111 +time=2 aaaa +short "${domain}")
+            dnsIP=$(dig @2606:4700:4700::1111 +time=2 aaaa +short "${domain}" | while IFS= read -r dnsAddress; do
+                if padmIsValidIPv6Address "${dnsAddress}"; then
+                    printf '%s\n' "${dnsAddress}"
+                fi
+            done)
         else
             dnsIP=$(getent ahostsv6 "${domain}" 2>/dev/null | awk '/STREAM/ {print $1; exit}')
         fi

@@ -509,6 +509,46 @@ runSingBoxCustomPathsRegression() (
     procArgsFixture=("${PADM_XRAY_BINARY}" -confdir "${PADM_XRAY_CONF_DIR}")
     xrayRunning
     (
+        # 运行目录和辅助开关按最后有效值判断，不能误跳过托管服务启动。
+        local flag boolValue actions=
+        handleXray() { actions+="$1"$'\n'; }
+        procArgsFixture=("${PADM_XRAY_BINARY}" run -confdir "${PADM_XRAY_CONF_DIR}" -confdir "${root}/foreign")
+        regressionExpectStatus 1 xrayRunning || return 1
+        runServiceAction xray start || return 1
+        [[ "${actions}" == $'start\n' ]] || return 1
+        for flag in -confdir --confdir; do
+            procArgsFixture=("${PADM_XRAY_BINARY}" run "${flag}=${root}/foreign" "${flag}=${PADM_XRAY_CONF_DIR}")
+            xrayRunning || return 1
+            actions=
+            runServiceAction xray start || return 1
+            [[ -z "${actions}" ]] || return 1
+            procArgsFixture=("${PADM_XRAY_BINARY}" run "${flag}" "${PADM_XRAY_CONF_DIR}" "${flag}" "${root}/foreign")
+            regressionExpectStatus 1 xrayRunning || return 1
+        done
+        for flag in -test --test -dump --dump; do
+            procArgsFixture=("${PADM_XRAY_BINARY}" run -confdir "${PADM_XRAY_CONF_DIR}" "${flag}")
+            regressionExpectStatus 1 xrayRunning || return 1
+            for boolValue in 0 f F false FALSE False; do
+                procArgsFixture=("${PADM_XRAY_BINARY}" run --confdir="${PADM_XRAY_CONF_DIR}" "${flag}" "${flag}=${boolValue}")
+                xrayRunning || return 1
+            done
+            procArgsFixture+=("${flag}=true")
+            regressionExpectStatus 1 xrayRunning || return 1
+        done
+        for flag in -- positional; do
+            procArgsFixture=("${PADM_XRAY_BINARY}" run -confdir "${PADM_XRAY_CONF_DIR}" "${flag}" -confdir "${root}/foreign" -test)
+            xrayRunning || return 1
+            procArgsFixture=("${PADM_XRAY_BINARY}" run "${flag}" -confdir "${PADM_XRAY_CONF_DIR}")
+            regressionExpectStatus 1 xrayRunning || return 1
+        done
+        for flag in -c --c -config --config -format --format; do
+            procArgsFixture=("${PADM_XRAY_BINARY}" run "${flag}" -test -confdir "${PADM_XRAY_CONF_DIR}")
+            xrayRunning || return 1
+            procArgsFixture=("${PADM_XRAY_BINARY}" run "${flag}" -confdir "${PADM_XRAY_CONF_DIR}")
+            regressionExpectStatus 1 xrayRunning || return 1
+        done
+    ) || return 1
+    (
         # 符号链接启动仍按原 argv 校验，/proc 的真实可执行路径不能误判为停服。
         local service realBinary linkBinary PADM_XRAY_CONF_DIR="${root}/xray/conf"
         local PADM_XRAY_BINARY PADM_SINGBOX_BINARY

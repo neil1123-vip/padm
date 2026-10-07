@@ -491,6 +491,34 @@ runPublicIPIPv4FallbackRegression() (
     [[ "$(getPublicIP)" == '203.0.113.10' ]]
     [[ -z "$(getPublicIP 4)" ]]
     [[ "$(getPublicIP 6)" == '2001:db8::10' ]]
+    (
+        # AAAA 别名行不参与地址比较；没有真实地址时仍拒绝安装。
+        source "${PROJECT_ROOT}/shell/core/network.sh"
+        local mode ipType= calls= dnsErrors=
+        command() {
+            [[ "$1" != -v || "$2" != dig ]] || return 0
+            builtin command "$@"
+        }
+        sleep() { :; }
+        statusCard() { :; }
+        successCard() { :; }
+        errorCard() { dnsErrors+="$*"$'\n'; }
+        getPublicIP() { printf '%s\n' 2001:db8::10; }
+        dig() {
+            [[ " $* " == *" aaaa "* ]] || return 0
+            printf 'canonical.example.com.\n'
+            [[ "${mode}" == alias-only ]] || printf '2001:db8::10\n'
+        }
+        mode=alias
+        checkDNSIP alias.example.com || return 1
+        [[ "${ipType}" == 6 && -z "${dnsErrors}" ]] || return 1
+        mode=alias-only
+        regressionExpectStatus 1 checkDNSIP alias.example.com || return 1
+        [[ "${dnsErrors}" == *无法通过DNS获取域名IPv6地址* ]] || return 1
+        mode=alias
+        getPublicIP() { printf '%s\n' 2001:db8::20; }
+        regressionExpectStatus 1 checkDNSIP alias.example.com || return 1
+    ) || return 1
 )
 
 runRealityTargetLocationRegression() (
@@ -2463,6 +2491,25 @@ JSON
     [[ ! -e "${realityPatchXrayXhttp}.tmp" ]]
     [[ ! -e "${realityPatchSingBoxVision}.tmp" ]]
     [[ ! -e "${realityPatchSingBoxGrpc}.tmp" ]]
+    (
+        # 自定义目录无尾斜杠时仍定位真实分片；显式文件覆盖优先级不变。
+        local singBoxConfigPath= PADM_SINGBOX_CONFIG_DIR="${realityPatchDir}/sing-box" suffix
+        unset PADM_REALITY_SINGBOX_VISION_CONFIG_FILE PADM_REALITY_SINGBOX_GRPC_CONFIG_FILE
+        for suffix in '' /; do
+            PADM_SINGBOX_CONFIG_DIR="${realityPatchDir}/sing-box${suffix}"
+            [[ "$(realitySingBoxVisionConfigPath)" == "${realityPatchSingBoxVision}" ]] || return 1
+            [[ "$(realitySingBoxGrpcConfigPath)" == "${realityPatchSingBoxGrpc}" ]] || return 1
+            applyRealityTargetToInstalledConfigs "directory.example.com:9443" "directory-sni.example.com" || return 1
+            jq -e '.inbounds[0].tls.server_name == "directory-sni.example.com" and
+                .inbounds[0].tls.reality.handshake.server == "directory.example.com"' \
+                "${realityPatchSingBoxVision}" "${realityPatchSingBoxGrpc}" >/dev/null || return 1
+        done
+        singBoxConfigPath="${realityPatchDir}/sing-box"
+        PADM_SINGBOX_CONFIG_DIR="${realityPatchDir}/ignored"
+        [[ "$(realitySingBoxVisionConfigPath)" == "${realityPatchSingBoxVision}" ]] || return 1
+        PADM_REALITY_SINGBOX_VISION_CONFIG_FILE="${realityPatchDir}/explicit.json"
+        [[ "$(realitySingBoxVisionConfigPath)" == "${PADM_REALITY_SINGBOX_VISION_CONFIG_FILE}" ]] || return 1
+    ) || return 1
     (
         local grpcRoot="${realityPatchDir}/grpc-only"
         local reloadCalls=0 refreshCalls=0
