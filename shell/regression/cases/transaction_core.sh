@@ -3400,7 +3400,74 @@ runGeoUpdateReloadFailureRegression() (
     grep -q '^geo更新日期:' "${geoCronLog}"
 )
 
+runRealityRegenerateTransactionRegression() (
+    local root="${TMP_DIR}/reality-regenerate-transaction" profileFile
+    local failure backupCalls=0 reloadCalls=0 subscribeCalls=0 restoredCore= regenerateBackupPath=
+    local currentInstallProtocolType=,1, selectCustomInstallType=,20, coreInstallType
+    mkdir -p "${root}"
+    profileFile="${root}/profile.json"
+    coreTemplateConfigBackupCreate() {
+        backupCalls=$((backupCalls + 1))
+        checkLogBackupCreate "$1" "${profileFile}"
+        regenerateBackupPath=${!1}
+    }
+    xrayRunning() { return 0; }
+    singBoxRunning() { return 0; }
+    coreTemplateRestoreServiceState() { restoredCore="$*"; }
+    regenerateFixtureTemplate() { printf '{"key":"new","inbounds":[{"listen":"0.0.0.0","port":2443}]}\n' >"${profileFile}"; }
+    initXrayConfig() { coreTemplateConfigTransaction xray regenerateFixtureTemplate; }
+    initSingBoxConfig() { coreTemplateConfigTransaction sing-box regenerateFixtureTemplate; }
+    reloadCore() { reloadCalls=$((reloadCalls + 1)); [[ "${failure}" != reload ]]; }
+    subscribe() { subscribeCalls=$((subscribeCalls + 1)); [[ "${failure}" != subscribe ]]; }
+    for coreInstallType in 1 2; do
+        for failure in reload subscribe success; do
+            printf '{"key":"old"}\n' >"${profileFile}"
+            backupCalls=0 reloadCalls=0 subscribeCalls=0 restoredCore= regenerateBackupPath=
+            if [[ "${failure}" == success ]]; then
+                regenerateRealityProfile
+            else
+                regressionExpectStatus 1 regenerateRealityProfile
+            fi
+            [[ "${backupCalls}" == 1 && "${reloadCalls}" == 1 && -n "${regenerateBackupPath}" && ! -e "${regenerateBackupPath}" ]]
+            [[ "${selectCustomInstallType}" == ,20, ]]
+            if [[ "${failure}" == reload ]]; then
+                jq -e '.key == "old"' "${profileFile}" >/dev/null
+                [[ "${subscribeCalls}" == 0 ]]
+                if [[ "${coreInstallType}" == 1 ]]; then
+                    [[ "${restoredCore}" == "xray true true" ]]
+                else
+                    [[ "${restoredCore}" == "sing-box true true" ]]
+                fi
+            else
+                jq -e '.key == "new"' "${profileFile}" >/dev/null
+                [[ "${subscribeCalls}" == 1 && -z "${restoredCore}" ]]
+            fi
+        done
+    done
+    # 重生成模板后恢复分流内部监听，不能把内部端口暴露到公网。
+    coreInstallType=1
+    currentInstallProtocolType=,2,
+    failure=success
+    realityStreamSplitEnabled() { return 0; }
+    realityStreamInternalPortForProtocol() { [[ "$1" != xhttp ]] || printf '2444\n'; }
+    realityStreamXHTTPConfigFile() { printf '%s\n' "${profileFile}"; }
+    reloadCore() {
+        reloadCalls=$((reloadCalls + 1))
+        jq -e '.inbounds[0].listen == "127.0.0.1" and .inbounds[0].port == 2444' "${profileFile}" >/dev/null
+    }
+    regenerateRealityProfile
+    (
+        realityStreamPatchXrayConfig() { return 1; }
+        local originalProfile
+        originalProfile=$(<"${profileFile}")
+        subscribeCalls=0 reloadCalls=0
+        regressionExpectStatus 1 regenerateRealityProfile
+        [[ "$(<"${profileFile}")" == "${originalProfile}" && "${subscribeCalls}" == 0 && "${reloadCalls}" == 0 ]]
+    )
+)
+
 runReloadCorePropagationRegression() (
+    runRegressionStep reality-regenerate-transaction runRealityRegenerateTransactionRegression
     local root="${TMP_DIR}/reload-core-propagation"
     local alpnConfig="${root}/alpn.json"
     local vlessConfig="${root}/vless.json"
@@ -3593,6 +3660,8 @@ JSON
     regressionExpectStatus 1 refreshVlessEncryptionSubscriptions >/dev/null 2>&1
 
     currentInstallProtocolType=,1,
+    # 真实事务已在独立夹具验证；下面只检查调用方的选择与失败传播。
+    coreTemplateConfigTransaction() { shift; "$@"; }
     initXrayConfig() { return 0; }
     reloadCore() { return 1; }
     subscribe() {

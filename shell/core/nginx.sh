@@ -484,7 +484,7 @@ configureRealityStreamSplitApply() {
     local installNginxStatus enableRealityStreamSplit websiteDomainsInput websiteDomains
     local websitePort visionInternalPort= xhttpInternalPort= currentVisionPort currentXHTTPPort
     local stateFile publicPort=443 defaultProtocol defaultInternalPort backupDir
-    local selectDefaultRealityProtocol previousVisionPort= previousXHTTPPort= firewallOwned=false
+    local selectDefaultRealityProtocol previousVisionPort= previousXHTTPPort= otherRealityPort firewallOwned=false
     if [[ "${coreInstallType}" != "1" ]]; then
         statusCard "Reality 443 共存不可用" "443 共存分流当前仅支持 Xray Reality Vision/XHTTP"
         return 1
@@ -557,6 +557,32 @@ configureRealityStreamSplitApply() {
         defaultInternalPort=${xhttpInternalPort}
     fi
 
+    if ((10#${websitePort} == publicPort || 10#${defaultInternalPort} == publicPort ||
+        10#${websitePort} == 10#${defaultInternalPort})); then
+        errorCard "网站、Reality 后端与公网 443 必须使用不同端口"
+        return 1
+    fi
+
+    stateFile=$(realityStreamSplitStateFile) || return 1
+    currentVisionPort=$(jq -r '.inbounds[0].port // empty' "$(realityStreamVisionConfigFile)" 2>/dev/null)
+    currentXHTTPPort=$(jq -r '.inbounds[0].port // empty' "$(realityStreamXHTTPConfigFile)" 2>/dev/null)
+    if realityStreamSplitEnabled; then
+        previousVisionPort=$(realityStreamStoredPublicPortForProtocol vision) || return 1
+        previousXHTTPPort=$(realityStreamStoredPublicPortForProtocol xhttp) || return 1
+        currentVisionPort=${previousVisionPort:-${currentVisionPort}}
+        currentXHTTPPort=${previousXHTTPPort:-${currentXHTTPPort}}
+    fi
+    if [[ "${defaultProtocol}" == vision ]]; then
+        otherRealityPort=${currentXHTTPPort}
+    else
+        otherRealityPort=${currentVisionPort}
+    fi
+    if validPortNumber "${otherRealityPort}" &&
+        ((10#${otherRealityPort} == publicPort || 10#${otherRealityPort} == 10#${defaultInternalPort} ||
+            10#${otherRealityPort} == 10#${websitePort})); then
+        errorCard "非默认 Reality 的原入口与分流端口冲突；请先关闭分流并调整该协议端口"
+        return 1
+    fi
     if ! command -v nginx >/dev/null 2>&1; then
         menuLine "$(uiStyle warn "未检测到 Nginx，443 共存分流需要 Nginx stream")"
         autoRead reality_stream_install_nginx "是否安装 Nginx？[y/n]:" installNginxStatus || return 1
@@ -571,21 +597,6 @@ configureRealityStreamSplitApply() {
     fi
     if ! realityStreamNginxSupportsStream; then
         statusCard "Nginx stream 模块缺失" "当前 Nginx 未检测到 stream 模块，无法配置 SNI 分流" "可选方案：改用 Reality 8443/高位端口" "或安装带 stream 模块的 Nginx"
-        return 1
-    fi
-
-    stateFile=$(realityStreamSplitStateFile) || return 1
-    currentVisionPort=$(jq -r '.inbounds[0].port // empty' "$(realityStreamVisionConfigFile)" 2>/dev/null)
-    currentXHTTPPort=$(jq -r '.inbounds[0].port // empty' "$(realityStreamXHTTPConfigFile)" 2>/dev/null)
-    if realityStreamSplitEnabled; then
-        previousVisionPort=$(realityStreamStoredPublicPortForProtocol vision) || return 1
-        previousXHTTPPort=$(realityStreamStoredPublicPortForProtocol xhttp) || return 1
-        currentVisionPort=${previousVisionPort:-${currentVisionPort}}
-        currentXHTTPPort=${previousXHTTPPort:-${currentXHTTPPort}}
-    fi
-    if [[ "${defaultProtocol}" != vision && "${previousVisionPort}" == "${publicPort}" ]] ||
-        [[ "${defaultProtocol}" != xhttp && "${previousXHTTPPort}" == "${publicPort}" ]]; then
-        errorCard "原 Reality 后端端口为 443，无法切换默认后端；请先关闭分流并调整该协议端口"
         return 1
     fi
     padmCreateTempPath backupDir -d "$(realityStreamEnableBackupTemplate)" || return 1

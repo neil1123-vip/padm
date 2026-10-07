@@ -207,7 +207,6 @@ setVlessRealityEncryption() {
     local stateFile
     local backupFile
     local stateBackupFile
-    local stateTmpFile
     local xrayBinary
     local xrayVersion
     local vlessEncOutput
@@ -430,7 +429,6 @@ manageVlessEncryptionExperiment() {
         menuItem 2 "关闭实验开关" "恢复 decryption=none 并删除实验订阅参数"
         menuReturnItem 3 "返回主菜单" "回到 padm 管理面板"
         echoContent title "└──────────────────────────────────────────────────"
-        selectVlessEncryptionMenu=
         menuReadChoice vless_encryption_menu "请选择:" selectVlessEncryptionMenu || return 0
         case "${selectVlessEncryptionMenu}" in
         1)
@@ -438,7 +436,6 @@ manageVlessEncryptionExperiment() {
                 "这是实验功能，可能只有部分客户端可用" \
                 "启用后 default VLESS 链接和 Mihomo 订阅会携带 encryption 参数" \
                 "需 Mihomo v1.19.13+；sing-box 订阅因上游不支持仍省略"
-            confirmVlessEncryption=
             autoConfirm vless_encryption_confirm "确认承担兼容性风险并启用 VLESS Encryption？" n confirmVlessEncryption
             if [[ "${confirmVlessEncryption}" == "y" ]]; then
                 setVlessRealityEncryption enable && successCard "VLESS Encryption 实验开关已启用" || true
@@ -3043,8 +3040,8 @@ manageRealityTarget() {
 }
 
 # reality管理
-regenerateRealityProfile() {
-    local selectCustomInstallType=, protocolId
+regenerateRealityProfileApply() {
+    local selectCustomInstallType=, protocolId streamProtocol internalPort configFile
     for protocolId in 1 2 26; do
         if currentProtocolHas "${protocolId}"; then
             selectCustomInstallType+="${protocolId},"
@@ -3053,13 +3050,36 @@ regenerateRealityProfile() {
     [[ "${selectCustomInstallType}" != , ]] || return 1
     if [[ "${coreInstallType}" == "1" ]]; then
         initXrayConfig custom 1 true || return 1
+        if realityStreamSplitEnabled; then
+            for streamProtocol in vision xhttp; do
+                internalPort=$(realityStreamInternalPortForProtocol "${streamProtocol}") || return 1
+                [[ -n "${internalPort}" ]] || continue
+                validPortNumber "${internalPort}" || return 1
+                if [[ "${streamProtocol}" == vision ]]; then
+                    configFile=$(realityStreamVisionConfigFile) || return 1
+                else
+                    configFile=$(realityStreamXHTTPConfigFile) || return 1
+                fi
+                realityStreamPatchXrayConfig "${streamProtocol}" "${internalPort}" "${configFile}" || return 1
+            done
+        fi
     elif [[ "${coreInstallType}" == "2" ]]; then
         initSingBoxConfig custom 1 true || return 1
     else
         return 1
     fi
 
-    reloadCore || return 1
+    reloadCore
+}
+
+regenerateRealityProfile() {
+    local core
+    case "${coreInstallType}" in
+    1) core=xray ;;
+    2) core=sing-box ;;
+    *) return 1 ;;
+    esac
+    coreTemplateConfigTransaction "${core}" regenerateRealityProfileApply || return 1
     subscribe false || return 1
 }
 

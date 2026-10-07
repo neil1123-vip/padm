@@ -2825,6 +2825,33 @@ runRealityStreamSplitRegression() (
         regressionExpectStatus 1 configureRealityStreamSplit
         [[ "${backupCalls}" == 0 && "${patchCalls}" == 0 && "${allowCalls}" == 0 ]]
         websitePortInput=8443
+        # 首次启用也不能把仍使用 443 的非默认协议留在公网监听。
+        defaultChoice=2
+        unset -f nginx
+        regressionExpectStatus 1 configureRealityStreamSplit
+        [[ "${backupCalls}" == 0 && "${patchCalls}" == 0 && "${allowCalls}" == 0 && "${reloadCalls}" == 0 ]]
+        [[ "${installCalls}" == 0 && ! -e "${root}/install-called" ]]
+        [[ ! -e "${PADM_REALITY_STREAM_STATE_FILE}" && ! -e "${PADM_REALITY_STREAM_CONF_FILE}" ]]
+        nginx() { return 0; }
+        local conflict
+        for conflict in website-public vision-public xhttp-public same-backend other-internal other-website; do
+            defaultChoice=1 visionPort=2443 xhttpPort=2444 websitePortInput=8443
+            case "${conflict}" in
+            website-public) websitePortInput=00443 ;;
+            vision-public) visionPort=443 ;;
+            xhttp-public) defaultChoice=2; xhttpPort=00443 ;;
+            same-backend) websitePortInput=02443 ;;
+            other-internal) visionPort=09443 ;;
+            other-website) websitePortInput=9443 ;;
+            esac
+            regressionExpectStatus 1 configureRealityStreamSplit
+            [[ "${backupCalls}" == 0 && "${patchCalls}" == 0 && "${allowCalls}" == 0 && "${reloadCalls}" == 0 ]]
+            [[ "$(<"${PADM_REALITY_STREAM_VISION_CONFIG_FILE}")" == "${oldVision}" ]]
+            [[ "$(<"${PADM_REALITY_STREAM_XHTTP_CONFIG_FILE}")" == "${oldXHTTP}" ]]
+            [[ "$(<"${PADM_REALITY_STREAM_NGINX_CONF}")" == "${oldNginx}" ]]
+            [[ ! -e "${PADM_REALITY_STREAM_STATE_FILE}" && ! -e "${PADM_REALITY_STREAM_CONF_FILE}" ]]
+        done
+        defaultChoice=1 visionPort=2443 xhttpPort=2444 websitePortInput=8443
     fi
     if [[ "${mode}" == input ]]; then return 0; fi
 
