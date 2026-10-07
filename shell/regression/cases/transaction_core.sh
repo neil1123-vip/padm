@@ -270,6 +270,17 @@ runSingBoxStatsBuildRegression() (
             "$(<"${root}/installed/libcronet.so")" == old-cronet &&
             "$(jq -r .phase "${legacyFile}")" == legacy && "${serviceRunning}" == true &&
             -n "${statsRollbackDir}" && ! -e "${statsRollbackDir}" ]]
+        rm -f -- "${root}/installed/libcronet.so"
+        printf '%s\n' "${originalBinary}" >"${PADM_SINGBOX_BINARY}"
+        chmod 755 "${PADM_SINGBOX_BINARY}"
+        printf '{"phase":"legacy"}\n' >"${legacyFile}"
+        serviceRunning=true
+        statsRollbackDir=
+        regressionExpectStatus 7 coreInstallConfigTransaction sing-box failAfterStatsUpgrade
+        [[ "$(<"${PADM_SINGBOX_BINARY}")" == "${originalBinary}" && -x "${PADM_SINGBOX_BINARY}" &&
+            ! -e "${root}/installed/libcronet.so" &&
+            "$(jq -r .phase "${legacyFile}")" == legacy && "${serviceRunning}" == true &&
+            -n "${statsRollbackDir}" && ! -e "${statsRollbackDir}" ]]
     )
 )
 
