@@ -57,6 +57,17 @@ runSingBoxStatsBuildRegression() (
         regressionExpectStatus 1 coreLatestReleaseTag XTLS/Xray-core/extra || return 1
         [[ ! -e "${root}/invalid-repo-fetch" ]] || return 1
     ) || return 1
+    (
+        # 列表与 latest 入口都只接受单个 JSON 文档，坏响应不输出版本。
+        local releaseMetadata releaseRepo
+        fetchUrlToStdout() { printf '%s\n' "${releaseMetadata}"; }
+        for releaseRepo in XTLS/Xray-core SagerNet/sing-box; do
+            for releaseMetadata in '' '{}' 'null' $'[]\n[{"tag_name":"sing-box-v1.14.0","prerelease":false}]'; do
+                regressionExpectStatus 1 coreReleaseTags "${releaseRepo}" false 1 >"${root}/invalid-release-tags" 2>/dev/null || return 1
+                [[ ! -s "${root}/invalid-release-tags" ]] || return 1
+            done
+        done
+    ) || return 1
     fetchUrlToStdout() { printf '[]\n'; }
     regressionExpectStatus 1 coreLatestReleaseTag SagerNet/sing-box
 

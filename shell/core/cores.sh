@@ -494,7 +494,7 @@ coreReleaseTags() {
     fi
     while ((tagCount < limit && page <= 20)); do
         metadata=$(fetchUrlToStdout "https://api.github.com/repos/${releaseRepo}/releases?per_page=${pageSize}&page=${page}" 3) || return 1
-        pageCount=$(jq -er 'if type == "array" then length else error("release metadata is not an array") end' <<<"${metadata}") || return 1
+        pageCount=$(jq -ser 'if length == 1 and (.[0] | type == "array") then .[0] | length else error("release metadata is not a single array") end' <<<"${metadata}") || return 1
         tag=$(jq -r --argjson prerelease "${prerelease}" --arg prefix "${tagPrefix}" '
           .[] | select(.draft != true and .prerelease == $prerelease) | .tag_name |
           select(type == "string" and length > 0 and startswith($prefix)) | ltrimstr($prefix) |
