@@ -439,10 +439,7 @@ installTLS() {
             installTLSFromAcme || return 1
         elif ! tlsCertificatePairUsable "${tlsDir}" "${tlsDomain}" ||
             ! openssl x509 -in "${tlsDir}/${tlsDomain}.crt" -checkend 86400 -noout >/dev/null 2>&1; then
-            renewalTLS || return 1
-            if ! tlsCertificatePairExists "${tlsDir}" "${tlsDomain}"; then
-                installTLSFromAcme || return 1
-            fi
+            renewalTLS "" "${tlsDomain}" || return 1
         fi
 
     elif [[ -d "$HOME/.acme.sh/${tlsDomain}_ecc" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.key" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
@@ -719,21 +716,38 @@ stopServicesForTLSRenewal() {
 }
 
 renewManagedTLSCertificates() {
-    local records
+    local records requestedDomain="${1:-}"
     local acmeDir acmeBin tlsDir backupDir
     local domain configFile certFile keyFile acmeDomain webroot
     local nginxWasRunning=false xrayWasRunning=false singBoxWasRunning=false
     local servicesStopped=false changed=false needsServiceStop=false
-    local beforeHash afterHash
+    local beforeHash afterHash reloadStatus=0
     local -a dueDomains=()
     local -A dueConfigs=()
     local -A beforeHashes=()
+    local -a renewArgs=()
 
+    [[ -z "${requestedDomain}" ]] || tlsDomainNameIsSafe "${requestedDomain}" || return 1
     records=$(tlsAcmeManagedCertificateRecords) || return 2
-    [[ -n "${records}" ]] || return 2
+    if [[ -n "${requestedDomain}" ]]; then
+        records=$(awk -F '\t' -v domain="${requestedDomain}" '$1 == domain' <<<"${records}")
+    else
+        [[ -n "${records}" ]] || return 2
+    fi
     acmeDir=$(acmeSafeHomeDir) || { errorCard "acme.sh HOME 路径异常"; return 1; }
     acmeBin=$(acmeExecutable) || { errorCard "acme.sh 路径、所有者或权限异常"; return 1; }
     tlsDir=$(tlsManagedDir) || return 1
+    if [[ -n "${requestedDomain}" && -z "${records}" ]]; then
+        acmeDomain=${requestedDomain}
+        [[ "${installedDNSAPIStatus:-}" != true ]] || acmeDomain="*.${dnsTLSDomain}"
+        configFile="${acmeDir}/${acmeDomain}_ecc/${acmeDomain}.conf"
+        [[ -f "${configFile}" ]] || {
+            errorCard "当前域名没有可用的 acme.sh 续签配置" "自定义证书需自行更新：${requestedDomain}"
+            return 1
+        }
+        printf -v records '%s\t%s\t%s\t%s' "${requestedDomain}" "${configFile}" \
+            "${tlsDir}/${requestedDomain}.crt" "${tlsDir}/${requestedDomain}.key"
+    fi
 
     while IFS=$'\t' read -r domain configFile certFile keyFile; do
         [[ -n "${domain}" && -s "${certFile}" && -s "${keyFile}" ]] || {
@@ -757,18 +771,43 @@ renewManagedTLSCertificates() {
         return 0
     fi
     padmCreateTmpRootPath backupDir padm-tls-renew-all.XXXXXX -d || return 1
-    cp -a "${tlsDir}/." "${backupDir}/" || { padmRemoveCleanupPath "${backupDir}"; return 1; }
+    if [[ -n "${requestedDomain}" ]]; then
+        cp -p -- "${tlsDir}/${requestedDomain}.crt" "${tlsDir}/${requestedDomain}.key" "${backupDir}/" ||
+            { padmRemoveCleanupPath "${backupDir}"; return 1; }
+        configFile=${dueConfigs[${requestedDomain}]}
+        acmeDomain=$(tlsAcmeConfigValue "${configFile}" Le_Domain) || acmeDomain=
+        [[ -n "${acmeDomain}" ]] || acmeDomain=${requestedDomain}
+        renewArgs=(--renew -d "${acmeDomain}" --ecc --force --home "${acmeDir}")
+    else
+        cp -a "${tlsDir}/." "${backupDir}/" || { padmRemoveCleanupPath "${backupDir}"; return 1; }
+        renewArgs=(--cron --home "${acmeDir}")
+    fi
     nginxRunning && nginxWasRunning=true
     xrayRunning && xrayWasRunning=true
     singBoxRunning && singBoxWasRunning=true
-    if [[ "${needsServiceStop}" == "true" ]]; then
+    # 安装先同步当前域名的已有证书，足够有效时不重复请求 CA。
+    if [[ -n "${requestedDomain}" ]] &&
+        sudo "${acmeBin}" --installcert -d "${acmeDomain}" --fullchainpath "${tlsDir}/${requestedDomain}.crt" \
+            --keypath "${tlsDir}/${requestedDomain}.key" --ecc &&
+        tlsCertificatePairUsable "${tlsDir}" "${requestedDomain}" &&
+        openssl x509 -in "${tlsDir}/${requestedDomain}.crt" -checkend 86400 -noout >/dev/null 2>&1; then
+        renewArgs=()
+        dueDomains=()
+    fi
+    if [[ "${needsServiceStop}" == "true" && ${#renewArgs[@]} -gt 0 ]]; then
         stopServicesForTLSRenewal "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}" || {
-            padmRemoveCleanupPath "${backupDir}"
+            if [[ -n "${requestedDomain}" ]]; then
+                restoreTLSReinstallBackup "${backupDir}" "${tlsDir}" "TLS 续签取消" || true
+                restoreServicesAfterTLSRenewal "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}" ||
+                    errorCard "TLS 续签取消后服务恢复失败"
+            else
+                padmRemoveCleanupPath "${backupDir}"
+            fi
             return 1
         }
         servicesStopped=true
     fi
-    if ! sudo "${acmeBin}" --cron --home "${acmeDir}"; then
+    if [[ ${#renewArgs[@]} -gt 0 ]] && ! sudo "${acmeBin}" "${renewArgs[@]}"; then
         restoreTLSReinstallBackup "${backupDir}" "${tlsDir}" "TLS 证书续签失败" || true
         [[ "${servicesStopped}" != "true" ]] || restoreServicesAfterTLSRenewal "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}" || true
         return 1
@@ -777,18 +816,21 @@ renewManagedTLSCertificates() {
         configFile=${dueConfigs[${domain}]}
         acmeDomain=$(tlsAcmeConfigValue "${configFile}" Le_Domain) || acmeDomain=
         [[ -n "${acmeDomain}" ]] || acmeDomain=${domain}
-        if ! sudo "${acmeBin}" --installcert -d "${acmeDomain}" --ecc; then
+        if ! sudo "${acmeBin}" --installcert -d "${acmeDomain}" \
+            --fullchainpath "${tlsDir}/${domain}.crt" --keypath "${tlsDir}/${domain}.key" --ecc; then
             restoreTLSReinstallBackup "${backupDir}" "${tlsDir}" "TLS 证书安装失败" || true
             [[ "${servicesStopped}" != "true" ]] || restoreServicesAfterTLSRenewal "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}" || true
             return 1
         fi
     done
     while IFS=$'\t' read -r domain configFile certFile keyFile; do
-        tlsCertificatePairUsable "${tlsDir}" "${domain}" || {
+        if ! tlsCertificatePairUsable "${tlsDir}" "${domain}" ||
+            { [[ -n "${requestedDomain}" ]] &&
+                ! openssl x509 -in "${certFile}" -checkend 86400 -noout >/dev/null 2>&1; }; then
             restoreTLSReinstallBackup "${backupDir}" "${tlsDir}" "TLS 证书续签后校验失败" || true
             [[ "${servicesStopped}" != "true" ]] || restoreServicesAfterTLSRenewal "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}" || true
             return 1
-        }
+        fi
         if ! chmod 600 -- "${keyFile}" ||
             ! afterHash=$(sha256sum "${certFile}" "${keyFile}" 2>/dev/null); then
             if restoreTLSReinstallBackup "${backupDir}" "${tlsDir}" "TLS 证书续签后文件校验失败"; then
@@ -810,7 +852,15 @@ renewManagedTLSCertificates() {
             return 1
         }
     elif [[ "${changed}" == "true" ]]; then
-        reloadCore || {
+        if [[ -n "${requestedDomain}" ]]; then
+            [[ "${xrayWasRunning}" != true ]] ||
+                runCoreServiceActionAllowFailure runServiceAction xray restart || reloadStatus=1
+            [[ "${singBoxWasRunning}" != true ]] ||
+                runCoreServiceActionAllowFailure runServiceAction sing-box restart || reloadStatus=1
+        else
+            reloadCore || reloadStatus=1
+        fi
+        [[ "${reloadStatus}" == 0 ]] || {
             padmForgetCleanupPath "${backupDir}"
             errorCard "TLS 证书已更新，但核心服务重载失败" "备份目录: ${backupDir}"
             return 1
@@ -824,11 +874,13 @@ renewManagedTLSCertificates() {
             fi
         fi
     fi
-    if [[ "${changed}" == "true" ]] && declare -F readNginxSubscribe >/dev/null 2>&1 && declare -F probeSubscribeTLS >/dev/null 2>&1; then
+    if [[ "${changed}" == "true" && ( -z "${requestedDomain}" || "${nginxWasRunning}" == true ) ]] &&
+        declare -F readNginxSubscribe >/dev/null 2>&1 && declare -F probeSubscribeTLS >/dev/null 2>&1; then
         subscribePort=
         subscribeDomain=
         subscribeConfigState=
         if readNginxSubscribe && [[ "${subscribeConfigState:-}" == "valid" ]] &&
+            [[ -z "${requestedDomain}" || "${subscribeDomain}" == "${requestedDomain}" ]] &&
             ! probeSubscribeTLS "${subscribeDomain}" "${subscribePort}"; then
             padmForgetCleanupPath "${backupDir}"
             errorCard "证书已更新，但订阅 HTTPS 本机 SNI/TLS 探测失败" "备份目录: ${backupDir}"
@@ -844,6 +896,10 @@ renewalTLS() {
 
     if [[ -n ${1:-} ]]; then
         progressCard "$1" "更新证书" "1"
+    fi
+    if [[ -n "${2:-}" ]]; then
+        renewManagedTLSCertificates "$2"
+        return $?
     fi
     local managedRenewStatus=0
     renewManagedTLSCertificates || managedRenewStatus=$?

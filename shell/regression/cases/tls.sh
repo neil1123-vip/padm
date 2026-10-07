@@ -891,6 +891,207 @@ EOF
         grep -q 'TLS 证书续签后文件校验失败' "${errorLog}"
     )
 
+    (
+        local scopedRoot="${root}/scoped-install"
+        local tlsDir="${scopedRoot}/tls" homeDir="${scopedRoot}/home"
+        local targetDomain=install.example.com unrelatedDomain=unrelated.example.com
+        local acmeDomain sourceDir oldPairHash webroot probeDomain=${unrelatedDomain}
+        local nginxHandlerDefinition
+        local PADM_REQUIRE_USABLE_TLS_CERTIFICATE= PADM_CORE_SWITCH_TRANSACTION_ACTIVE=
+        local lastInstallationConfig=true
+        mkdir -p "${scopedRoot}"
+        HOME="${homeDir}"
+        PADM_TLS_DIR="${tlsDir}"
+        command openssl req -new -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 2 \
+            -subj "/CN=install.example.com" -addext "subjectAltName=DNS:install.example.com,DNS:*.legacy.example.net" \
+            -keyout "${scopedRoot}/valid.key" -out "${scopedRoot}/valid.crt" >/dev/null 2>&1
+        command openssl req -new -x509 -key "${scopedRoot}/valid.key" -days 1 \
+            -subj "/CN=install.example.com" -addext "subjectAltName=DNS:install.example.com,DNS:*.legacy.example.net" \
+            -out "${scopedRoot}/expiring.crt" >/dev/null 2>&1
+
+        prepareScopedInstallFixture() {
+            local sourceAge=$1 webroot=$2 legacy=${3:-false}
+            targetDomain=install.example.com
+            acmeDomain=${targetDomain}
+            if [[ "${legacy}" == true ]]; then
+                targetDomain=api.legacy.example.net
+                acmeDomain='*.legacy.example.net'
+            fi
+            domain=${targetDomain}
+            currentHost=${targetDomain}
+            rm -rf "${tlsDir}" "${homeDir}/.acme.sh"
+            sourceDir="${homeDir}/.acme.sh/${acmeDomain}_ecc"
+            mkdir -p "${tlsDir}" "${sourceDir}" "${homeDir}/.acme.sh/${unrelatedDomain}_ecc"
+            command chmod 700 "${homeDir}" "${homeDir}/.acme.sh"
+            printf '#!/usr/bin/env sh\n' >"${homeDir}/.acme.sh/acme.sh"
+            command chmod 755 "${homeDir}/.acme.sh/acme.sh"
+            cp "${scopedRoot}/${sourceAge}.crt" "${sourceDir}/${acmeDomain}.cer"
+            cp "${scopedRoot}/valid.key" "${sourceDir}/${acmeDomain}.key"
+            cp "${scopedRoot}/expiring.crt" "${tlsDir}/${targetDomain}.crt"
+            printf 'old-invalid-key\n' >"${tlsDir}/${targetDomain}.key"
+            printf "Le_Domain='%s'\nLe_Webroot='%s'\n" "${acmeDomain}" "${webroot}" >"${sourceDir}/${acmeDomain}.conf"
+            if [[ "${legacy}" != true ]]; then
+                printf "Le_RealFullChainPath='%s/%s.crt'\nLe_RealKeyPath='%s/%s.key'\n" \
+                    "${tlsDir}" "${targetDomain}" "${tlsDir}" "${targetDomain}" >>"${sourceDir}/${acmeDomain}.conf"
+            fi
+            # 无关域名的受管记录故意缺证书，安装不能检查、续签或修复它。
+            printf 'unrelated-key\n' >"${tlsDir}/${unrelatedDomain}.key"
+            printf "Le_Domain='%s'\nLe_Webroot='dns_cf'\nLe_RealFullChainPath='%s/%s.crt'\nLe_RealKeyPath='%s/%s.key'\n" \
+                "${unrelatedDomain}" "${tlsDir}" "${unrelatedDomain}" "${tlsDir}" "${unrelatedDomain}" \
+                >"${homeDir}/.acme.sh/${unrelatedDomain}_ecc/${unrelatedDomain}.conf"
+            : >"${commandLog}"
+            : >"${serviceLog}"
+            : >"${errorLog}"
+            nginxState=true
+            xrayState=true
+            singBoxState=false
+            SERVICE_QUEUE_ALLOW_FAILURE=previous
+            oldPairHash=$(sha256sum "${tlsDir}/${targetDomain}.crt" "${tlsDir}/${targetDomain}.key")
+        }
+        sudo() {
+            local action= installDomain= crtTarget= keyTarget= acmeHome= force=false ecc=false
+            printf 'sudo:%s\n' "$*" >>"${commandLog}"
+            shift
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                --installcert|--renew) action=${1#--}; shift ;;
+                -d) installDomain=$2; shift 2 ;;
+                --fullchainpath) crtTarget=$2; shift 2 ;;
+                --keypath) keyTarget=$2; shift 2 ;;
+                --home) acmeHome=$2; shift 2 ;;
+                --force) force=true; shift ;;
+                --ecc) ecc=true; shift ;;
+                *) return 1 ;;
+                esac
+            done
+            [[ "${installDomain}" == "${acmeDomain}" && "${ecc}" == true ]] || return 1
+            case "${action}" in
+            installcert)
+                [[ "${crtTarget}" == "${tlsDir}/${targetDomain}.crt" &&
+                    "${keyTarget}" == "${tlsDir}/${targetDomain}.key" ]] || return 1
+                cp "${sourceDir}/${acmeDomain}.cer" "${crtTarget}" || return 1
+                cp "${sourceDir}/${acmeDomain}.key" "${keyTarget}"
+                ;;
+            renew)
+                [[ "${force}" == true && "${acmeHome}" == "${homeDir}/.acme.sh" ]] || return 1
+                [[ "${mode}" != scoped-renew-fail ]] || return 1
+                [[ "${mode}" != scoped-renew-short ]] || return 0
+                cp "${scopedRoot}/valid.crt" "${sourceDir}/${acmeDomain}.cer" || return 1
+                if [[ "${mode}" == scoped-renew-bad ]]; then
+                    printf 'invalid-new-key\n' >"${sourceDir}/${acmeDomain}.key"
+                fi
+                ;;
+            *) return 1 ;;
+            esac
+        }
+        nginxHandlerDefinition=$(declare -f handleNginx)
+        eval "${nginxHandlerDefinition/handleNginx/scopedOriginalHandleNginx}"
+        handleNginx() {
+            if [[ "${mode}" == xray-stop-fail && "$1" == start ]] &&
+                ! tlsCertificatePairUsable "${tlsDir}" "${targetDomain}"; then
+                printf 'nginx:start-invalid-pair\n' >>"${serviceLog}"
+                return 1
+            fi
+            scopedOriginalHandleNginx "$@"
+        }
+        runServiceAction() {
+            [[ "$2" == restart ]] || return 1
+            printf 'restart:%s\n' "$1" >>"${serviceLog}"
+            case "$1" in
+            xray) handleXray stop && handleXray start ;;
+            sing-box) handleSingBox stop && handleSingBox start ;;
+            *) return 1 ;;
+            esac
+        }
+        reloadCore() { printf 'reload\n' >>"${serviceLog}"; }
+        readNginxSubscribe() {
+            subscribeConfigState=valid
+            subscribeDomain=${probeDomain}
+            subscribePort=39778
+        }
+        probeSubscribeTLS() { printf 'probe:%s\n' "$1" >>"${serviceLog}"; return 1; }
+        assertScopedInstallIsolation() {
+            ! grep -q -- ' --cron ' "${commandLog}"
+            ! grep -Fq -- " -d ${unrelatedDomain} " "${commandLog}"
+            [[ ! -e "${tlsDir}/${unrelatedDomain}.crt" &&
+                "$(<"${tlsDir}/${unrelatedDomain}.key")" == unrelated-key ]]
+            ! grep -q '^probe:' "${serviceLog}"
+            [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == previous ]]
+        }
+
+        # 本域 ACME 源证书仍有效时只同步；临近过期才定向强制续签。
+        mode=scoped-sync
+        for webroot in dns_cf no; do
+            prepareScopedInstallFixture valid "${webroot}"
+            installTLS 1 >/dev/null 2>&1
+            [[ "$(grep -c -- ' --installcert ' "${commandLog}")" == 1 ]]
+            ! grep -q -- ' --renew ' "${commandLog}"
+            tlsCertificatePairUsable "${tlsDir}" "${targetDomain}"
+            [[ "${xrayState}" == true && "${singBoxState}" == false ]]
+            grep -qx 'restart:xray' "${serviceLog}"
+            ! grep -Eq '^(restart:sing-box|sing-box:|reload$)' "${serviceLog}"
+            assertScopedInstallIsolation
+        done
+
+        mode=scoped-renew
+        prepareScopedInstallFixture expiring no
+        installTLS 1 >/dev/null 2>&1
+        [[ "$(grep -c -- ' --renew ' "${commandLog}")" == 1 &&
+            "$(grep -c -- ' --installcert ' "${commandLog}")" == 2 ]]
+        command openssl x509 -in "${tlsDir}/${targetDomain}.crt" -checkend 86400 -noout >/dev/null
+        [[ "${nginxState}" == true && "${xrayState}" == true && "${singBoxState}" == false ]]
+        grep -qx 'xray:start:true' "${serviceLog}"
+        grep -qx 'nginx-mode:start restore' "${serviceLog}"
+        assertScopedInstallIsolation
+
+        for mode in scoped-renew-fail scoped-renew-bad scoped-renew-short; do
+            prepareScopedInstallFixture expiring no
+            regressionExpectStatus 1 installTLS 1 >/dev/null 2>&1
+            [[ "$(sha256sum "${tlsDir}/${targetDomain}.crt" "${tlsDir}/${targetDomain}.key")" == "${oldPairHash}" ]]
+            [[ "${nginxState}" == true && "${xrayState}" == true && "${singBoxState}" == false ]]
+            grep -qx 'xray:start:true' "${serviceLog}"
+            grep -qx 'nginx-mode:start restore' "${serviceLog}"
+            assertScopedInstallIsolation
+        done
+
+        # 部分停止失败时，先恢复旧证书再重试恢复先前运行的 Nginx。
+        mode=xray-stop-fail
+        prepareScopedInstallFixture expiring no
+        cp "${scopedRoot}/valid.key" "${tlsDir}/${targetDomain}.key"
+        printf 'invalid-source-key\n' >"${sourceDir}/${acmeDomain}.key"
+        oldPairHash=$(sha256sum "${tlsDir}/${targetDomain}.crt" "${tlsDir}/${targetDomain}.key")
+        regressionExpectStatus 1 installTLS 1 >/dev/null 2>&1
+        [[ "$(sha256sum "${tlsDir}/${targetDomain}.crt" "${tlsDir}/${targetDomain}.key")" == "${oldPairHash}" ]]
+        [[ "${nginxState}" == true && "${xrayState}" == true && "${singBoxState}" == false ]]
+        grep -qx 'nginx:start-invalid-pair' "${serviceLog}"
+        grep -qx 'nginx-mode:start restore' "${serviceLog}"
+        ! grep -q -- ' --renew ' "${commandLog}"
+        assertScopedInstallIsolation
+
+        # 旧通配符记录没有安装路径，也只更新当前主机名的证书文件。
+        mode=scoped-renew
+        prepareScopedInstallFixture expiring dns_cf true
+        installTLS 1 >/dev/null 2>&1
+        grep -Fq -- " --renew -d ${acmeDomain} " "${commandLog}"
+        tlsCertificatePairUsable "${tlsDir}" "${targetDomain}"
+        assertScopedInstallIsolation
+
+        prepareScopedInstallFixture valid dns_cf
+        nginxState=false
+        xrayState=false
+        probeDomain=${targetDomain}
+        installTLS 1 >/dev/null 2>&1
+        [[ "${nginxState}" == false && "${xrayState}" == false && "${singBoxState}" == false ]]
+        [[ ! -s "${serviceLog}" ]]
+        assertScopedInstallIsolation
+
+        prepareScopedInstallFixture valid dns_cf
+        rm -f "${sourceDir}/${acmeDomain}.conf"
+        regressionExpectStatus 1 installTLS 1 >/dev/null 2>&1
+        [[ ! -s "${commandLog}" && ! -s "${serviceLog}" ]]
+        [[ "$(sha256sum "${tlsDir}/${targetDomain}.crt" "${tlsDir}/${targetDomain}.key")" == "${oldPairHash}" ]]
+    )
+
     eval "$(awk '/^handleScriptCommand\(\)/,/^}/ { print }' "${PROJECT_ROOT}/install.sh")"
     renewalTLS() { return 37; }
     cronName=RenewTLS
