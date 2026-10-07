@@ -1370,15 +1370,15 @@ fetchUrlToStdout() {
     local maxAttempts=${2:-3}
     local maxTime=${3:-30}
     local attempt=1
-    local tmpFile
+    local tmpFile outputRc=0
 
     padmCreateTmpRootPath tmpFile padm-fetch-url.XXXXXX || return 1
 
     while [[ ${attempt} -le ${maxAttempts} ]]; do
         if downloadUrlToFileBounded "${url}" "${tmpFile}" 5242880 "${maxTime}"; then
-            cat "${tmpFile}"
+            cat "${tmpFile}" || outputRc=$?
             padmRemoveCleanupPath "${tmpFile}"
-            return 0
+            return "${outputRc}"
         fi
         if [[ ${attempt} -lt ${maxAttempts} ]]; then
             sleep 1

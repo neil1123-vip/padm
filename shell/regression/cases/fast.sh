@@ -332,6 +332,16 @@ runFetchUrlWgetHardLimitRegression() (
     [[ ! -s "${outputFile}" ]]
     grep -q -- '--max-time 5' "${curlArgsFile}"
     grep -qx -- '-T 5 -t 2 -qO- https://example.invalid/oversized' "${wgetArgsFile}"
+
+    # 下载成功后输出失败，仍须保留失败码并清理临时文件。
+    local fetchedTmpFile=
+    downloadUrlToFileBounded() {
+        fetchedTmpFile=$2
+        printf 'payload\n' >"${fetchedTmpFile}"
+    }
+    cat() { return 7; }
+    regressionExpectStatus 7 fetchUrlToStdout https://example.invalid/success 1 5 >"${outputFile}"
+    [[ -n "${fetchedTmpFile}" && ! -e "${fetchedTmpFile}" && ! -s "${outputFile}" ]]
 )
 
 runGitHubReleaseArgumentMissingValueRegression() {
