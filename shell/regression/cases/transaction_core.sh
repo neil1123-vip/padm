@@ -45,6 +45,18 @@ runSingBoxStatsBuildRegression() (
     [[ "$(coreReleaseTags SagerNet/sing-box false 20)" == $'v1.14.0\nv1.13.0' ]]
     [[ "$(coreLatestReleaseTag SagerNet/sing-box true)" == v1.16.0-alpha.1 ]]
     [[ "$(coreLatestReleaseTag XTLS/Xray-core)" == v26.3.27 ]]
+    (
+        local latestMetadata
+        fetchUrlToStdout() {
+            [[ "$1" == */releases/latest ]] && printf '%s\n' "${latestMetadata}" || printf '[]\n'
+        }
+        for latestMetadata in '{}' '{"tag_name":null}' $'{"tag_name":"v1"}\n{"tag_name":"v2"}'; do
+            regressionExpectStatus 1 coreLatestReleaseTag XTLS/Xray-core || return 1
+        done
+        fetchUrlToStdout() { : >"${root}/invalid-repo-fetch"; return 99; }
+        regressionExpectStatus 1 coreLatestReleaseTag XTLS/Xray-core/extra || return 1
+        [[ ! -e "${root}/invalid-repo-fetch" ]] || return 1
+    ) || return 1
     fetchUrlToStdout() { printf '[]\n'; }
     regressionExpectStatus 1 coreLatestReleaseTag SagerNet/sing-box
 

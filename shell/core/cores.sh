@@ -526,10 +526,11 @@ coreLatestReleaseTag() {
     local repo=$1
     local prerelease=${2:-false}
     local metadata
+    [[ "${repo}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || return 1
     if [[ "${prerelease}" == "false" && "${repo}" != "SagerNet/sing-box" ]]; then
         metadata=$(fetchUrlToStdout "https://api.github.com/repos/${repo}/releases/latest" 3) || metadata=
         if [[ -n "${metadata}" ]]; then
-            jq -er '.tag_name | select(type == "string" and length > 0)' <<<"${metadata}" && return 0
+            jq -ser 'select(length == 1) | .[0].tag_name | select(type == "string" and length > 0)' <<<"${metadata}" && return 0
         fi
     fi
     coreReleaseTags "${repo}" "${prerelease}" 1
