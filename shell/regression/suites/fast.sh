@@ -34,6 +34,7 @@ listRegressionCiChildSelectors() {
         subscription-output \
         subscription-state \
         core-safety-rollback \
+        core-install-signal-rollback \
         core-install-service-action-failure
 }
 
@@ -44,6 +45,7 @@ listRegressionCiPrChildSelectors() {
         platform-refresh \
         install-module-manifest \
         core-safety-rollback \
+        core-install-signal-rollback \
         core-install-service-action-failure
 }
 

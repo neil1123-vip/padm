@@ -348,12 +348,8 @@ coreTemplateConfigTransaction() {
     local singBoxWasRunning=false
     local xrayRestartRunning=false
     local singBoxRestartRunning=false
-    local configRestored=true
-    local cleanupRestored=true
-    local serviceRestored=true
-    local newCoreStopped=true
-    local manageNginx=false nginxWasRunning=false nginxStopped=true
-    local statsBinaryBackupDir= statsBinary= statsCronet= binaryRestored=true
+    local manageNginx=false nginxWasRunning=false
+    local statsBinaryBackupDir= statsBinary= statsCronet=
     local title="Xray 配置初始化"
     [[ "${core}" == "sing-box" ]] && title="sing-box 配置初始化"
     [[ "${core}" == "xray" ]] && xrayRestartRunning=true
@@ -399,8 +395,21 @@ coreTemplateConfigTransaction() {
     fi
 
     local PADM_CORE_TEMPLATE_TRANSACTION_ACTIVE=true
+    # 信号可能在多层函数内部触发，用独立快照避免同名局部变量遮蔽恢复目标。
+    local -A PADM_CORE_TEMPLATE_ROLLBACK=(
+        [active]=true [core]="${core}" [backupDir]="${backupDir}" [title]="${title}"
+        [xrayWasRunning]="${xrayWasRunning}" [singBoxWasRunning]="${singBoxWasRunning}"
+        [xrayRestartRunning]="${xrayRestartRunning}" [singBoxRestartRunning]="${singBoxRestartRunning}"
+        [manageNginx]="${manageNginx}" [nginxWasRunning]="${nginxWasRunning}"
+        [statsBinaryBackupDir]="${statsBinaryBackupDir}" [statsBinary]="${statsBinary}" [statsCronet]="${statsCronet}"
+    )
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
+    padmRegisterExitRollback coreTemplateConfigRollback
     "${operation}" "$@" || rc=$?
     if [[ "${rc}" == "0" ]]; then
+        PADM_CORE_TEMPLATE_ROLLBACK[active]=false
+        unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
         if [[ -n "${PADM_CORE_INSTALL_SERVICE_BACKUP_DIR:-}" ]]; then
             padmRemoveCleanupPath "${PADM_CORE_INSTALL_SERVICE_BACKUP_DIR}"
         fi
@@ -411,6 +420,24 @@ coreTemplateConfigTransaction() {
         padmRemoveCleanupPath "${backupDir}"
         return 0
     fi
+    padmRunRollback coreTemplateConfigRollback
+    unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
+    return "${rc}"
+}
+
+coreTemplateConfigRollback() {
+    [[ "${PADM_CORE_TEMPLATE_ROLLBACK[active]:-false}" == true ]] || return 0
+    PADM_CORE_TEMPLATE_ROLLBACK[active]=false
+    local core=${PADM_CORE_TEMPLATE_ROLLBACK[core]}
+    local backupDir=${PADM_CORE_TEMPLATE_ROLLBACK[backupDir]} title=${PADM_CORE_TEMPLATE_ROLLBACK[title]}
+    local xrayWasRunning=${PADM_CORE_TEMPLATE_ROLLBACK[xrayWasRunning]}
+    local singBoxWasRunning=${PADM_CORE_TEMPLATE_ROLLBACK[singBoxWasRunning]}
+    local xrayRestartRunning=${PADM_CORE_TEMPLATE_ROLLBACK[xrayRestartRunning]}
+    local singBoxRestartRunning=${PADM_CORE_TEMPLATE_ROLLBACK[singBoxRestartRunning]}
+    local manageNginx=${PADM_CORE_TEMPLATE_ROLLBACK[manageNginx]} nginxWasRunning=${PADM_CORE_TEMPLATE_ROLLBACK[nginxWasRunning]}
+    local statsBinaryBackupDir=${PADM_CORE_TEMPLATE_ROLLBACK[statsBinaryBackupDir]}
+    local statsBinary=${PADM_CORE_TEMPLATE_ROLLBACK[statsBinary]} statsCronet=${PADM_CORE_TEMPLATE_ROLLBACK[statsCronet]}
+    local configRestored=true cleanupRestored=true serviceRestored=true newCoreStopped=true nginxStopped=true binaryRestored=true
 
     # 新服务先释放端口，旧配置全部恢复成功后才重启原服务。
     if [[ "${manageNginx}" == true ]] &&
@@ -490,7 +517,7 @@ coreTemplateConfigTransaction() {
     else
         errorCard "${title}失败，已恢复旧配置"
     fi
-    return "${rc}"
+    return 0
 }
 
 # 初始化 Xray 配置文件

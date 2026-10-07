@@ -1516,6 +1516,8 @@ runCorePortFileTransactionRegression() {
         corePortForwardTarget() { printf '443\n'; }
         corePortApplyReloadTransaction() { [[ "${mode}" == "delete" ]]; }
         refreshProtocolSubscriptions() { return 0; }
+        # 此夹具只验证防火墙生命周期，安装状态由本层给定，不读取真实配置。
+        readSingBoxConfig() { hysteriaPort=16295; }
         coreInstallType=1
         customPort=
 
@@ -1552,6 +1554,193 @@ runCorePortFileTransactionRegression() {
     rm -rf "${configPath}"
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
+
+runCoreInstallSignalRollbackRegression() (
+    set -euo pipefail
+    local root="${TMP_DIR}/core-install-signal"
+    local fixture core signal mode status
+    mkdir -p "${root}"
+    local TMPDIR="${root}"
+
+    coreTemplateConfigBackupCreate() {
+        checkLogBackupCreate "$1" "${fixture}/xray.conf" "${fixture}/sing-box.conf" "${fixture}/nginx.conf"
+        printf '%s\n' "${!1}" >"${fixture}/config-backup"
+    }
+    coreSwitchCleanupBackupCreate() {
+        adapterCreateManagedRollbackBackup "$1" "${fixture}/old-core"
+    }
+    checkLogBackupRestore() {
+        [[ "${mode}" != restore-fail ]] || return 1
+        [[ "${mode}" != repeat-signal ]] || kill -TERM "${BASHPID}"
+        padmRestoreManagedFileBackupManifest "$1"
+    }
+    singBoxInstalled() { return 1; }
+    xrayRunning() { grep -qx true "${fixture}/xray.running"; }
+    singBoxRunning() { grep -qx true "${fixture}/sing-box.running"; }
+    nginxRunning() { grep -qx true "${fixture}/nginx.running"; }
+    handleXray() { signalServiceAction xray "$1"; }
+    handleSingBox() { signalServiceAction sing-box "$1"; }
+    handleNginx() { signalServiceAction nginx "$1"; }
+    signalServiceAction() {
+        printf '%s:%s\n' "$1" "$2" >>"${fixture}/service.log"
+        if [[ "${mode}" == stop-fail && "$1" == "${core}" && "$2" == stop ]]; then
+            return 1
+        fi
+        printf '%s\n' "$([[ "$2" == start ]] && printf true || printf false)" >"${fixture}/$1.running"
+    }
+    restoreCoreStartupServiceInstall() {
+        [[ "$2" == "${core}" && "$3" == true ]]
+        command cp "$1/service" "${fixture}/service"
+        padmRemoveCleanupPath "$1"
+    }
+    removeFirewallPortRule() { printf '%s:%s:%s\n' "$@" >>"${fixture}/ports.log"; }
+    padmFirewallStateRemove() { :; }
+    errorCard() { printf '%s\n' "$@" >>"${fixture}/errors.log"; }
+    childSignalOperation() {
+        padmCreateTmpRootPath childTemp signal-child.XXXXXX -d
+        printf '%s\n' "${childTemp}" >"${fixture}/child-temp"
+        kill -TERM "${BASHPID}"
+        printf 'continued\n' >"${fixture}/child-continued"
+    }
+    signalInstallOperation() {
+        # 内层同名变量不能遮蔽信号回滚所需的外层快照。
+        local backupDir="${fixture}/unrelated" title=unrelated
+        local xrayWasRunning=false singBoxWasRunning=false manageNginx=false
+        padmCreateTmpRootPath PADM_CORE_INSTALL_SERVICE_BACKUP_DIR signal-service.XXXXXX -d
+        PADM_CORE_INSTALL_SERVICE_NAME=${core}
+        PADM_CORE_INSTALL_SERVICE_WAS_ENABLED=true
+        command cp "${fixture}/service" "${PADM_CORE_INSTALL_SERVICE_BACKUP_DIR}/service"
+        printf 'new\n' >"${fixture}/service"
+        printf 'new\n' >"${fixture}/xray.conf"
+        printf 'new\n' >"${fixture}/sing-box.conf"
+        printf 'new\n' >"${fixture}/nginx.conf"
+        printf 'new\n' >"${fixture}/old-core/marker"
+        printf 'false\n' >"${fixture}/xray.running"
+        printf 'false\n' >"${fixture}/sing-box.running"
+        printf 'false\n' >"${fixture}/nginx.running"
+        PADM_PORT_ALLOW_TRANSACTION_KEYS=$'port:ufw:tcp:18443\nport:ufw:udp:18443'
+        if [[ "${signal}" == CHILD ]]; then
+            local childStatus=0
+            (
+                local PADM_PORT_ALLOW_TRANSACTION_ACTIVE=false
+                padmRunPortAllowTransaction childSignalOperation
+            ) || childStatus=$?
+            [[ "${childStatus}" == 143 && -d "$(<"${fixture}/config-backup")" ]]
+            [[ "$(<"${fixture}/xray.conf")" == new ]]
+            return 7
+        fi
+        [[ "${signal}" != RETURN ]] || return 7
+        [[ "${signal}" != SUCCESS ]] || return 0
+        kill -"${signal/REPEAT/TERM}" "${BASHPID}"
+        printf 'continued\n' >"${fixture}/continued"
+    }
+
+    for core in xray sing-box; do
+        for signal in TERM INT RETURN CHILD REPEAT; do
+            fixture="${root}/${core}-${signal}"
+            mode=normal
+            mkdir -p "${fixture}/old-core"
+            printf 'old\n' >"${fixture}/old-core/marker"
+            for mode in xray.conf sing-box.conf nginx.conf service; do
+                printf 'old\n' >"${fixture}/${mode}"
+            done
+            mode=normal
+            [[ "${signal}" != REPEAT && "${signal}" != RETURN ]] || mode=repeat-signal
+            printf 'true\n' >"${fixture}/xray.running"
+            printf 'false\n' >"${fixture}/sing-box.running"
+            printf 'true\n' >"${fixture}/nginx.running"
+            status=0
+            ( coreSwitchConfigTransaction "${core}" padmRunPortAllowTransaction signalInstallOperation ) || status=$?
+            case "${signal}" in
+            TERM | REPEAT) [[ "${status}" == 143 ]] ;;
+            INT) [[ "${status}" == 130 ]] ;;
+            *) [[ "${status}" == 7 ]] ;;
+            esac
+            [[ ! -e "${fixture}/continued" && ! -e "${fixture}/child-continued" ]]
+            for mode in xray.conf sing-box.conf nginx.conf service old-core/marker; do
+                [[ "$(<"${fixture}/${mode}")" == old ]]
+            done
+            mode=normal
+            [[ "$(<"${fixture}/xray.running")" == true ]]
+            [[ "$(<"${fixture}/sing-box.running")" == false ]]
+            [[ "$(<"${fixture}/nginx.running")" == true ]]
+            grep -qx 'ufw:18443:tcp' "${fixture}/ports.log"
+            grep -qx 'ufw:18443:udp' "${fixture}/ports.log"
+            [[ ! -e "$(<"${fixture}/config-backup")" ]]
+            [[ "${signal}" != CHILD || ! -e "$(<"${fixture}/child-temp")" ]]
+        done
+    done
+
+    core=xray signal=SUCCESS mode=normal
+    fixture="${root}/success"
+    mkdir -p "${fixture}/old-core"
+    for signal in xray.conf sing-box.conf nginx.conf service old-core/marker; do
+        printf 'old\n' >"${fixture}/${signal}"
+    done
+    signal=SUCCESS
+    printf 'true\n' >"${fixture}/xray.running"
+    printf 'false\n' >"${fixture}/sing-box.running"
+    printf 'true\n' >"${fixture}/nginx.running"
+    ( coreSwitchConfigTransaction "${core}" padmRunPortAllowTransaction signalInstallOperation )
+    [[ "$(<"${fixture}/xray.conf")" == new && "$(<"${fixture}/service")" == new ]]
+    [[ ! -e "${fixture}/ports.log" && ! -e "$(<"${fixture}/config-backup")" ]]
+
+    core=xray signal=TERM
+    for mode in stop-fail restore-fail; do
+        fixture="${root}/${mode}"
+        mkdir -p "${fixture}/old-core"
+        for signal in xray.conf sing-box.conf nginx.conf service old-core/marker; do
+            printf 'old\n' >"${fixture}/${signal}"
+        done
+        signal=TERM
+        printf 'true\n' >"${fixture}/xray.running"
+        printf 'false\n' >"${fixture}/sing-box.running"
+        printf 'true\n' >"${fixture}/nginx.running"
+        status=0
+        ( coreSwitchConfigTransaction "${core}" padmRunPortAllowTransaction signalInstallOperation ) || status=$?
+        [[ "${status}" == 143 && "$(<"${fixture}/xray.conf")" == new ]]
+        [[ -d "$(<"${fixture}/config-backup")" ]]
+        grep -q '停止失败\|旧配置恢复失败' "${fixture}/errors.log"
+    done
+
+    (
+        # 未登记新文件的子 shell 也不能清掉父 shell 的临时备份。
+        padmCreateTmpRootPath parentTemp signal-parent.XXXXXX -d
+        childStatus=0
+        ( kill -TERM "${BASHPID}" ) || childStatus=$?
+        [[ "${childStatus}" == 143 && -d "${parentTemp}" ]]
+        padmRemoveCleanupPath "${parentTemp}"
+    )
+    status=0
+    (
+        padmCreateTmpRootPath scannerTemp signal-scanner.XXXXXX -d
+        printf '%s\n' "${scannerTemp}" >"${root}/scanner-temp"
+        trap 'cleanupRealityTargetJobs "" ""' EXIT
+        exit 7
+    ) || status=$?
+    [[ "${status}" == 7 && ! -e "$(<"${root}/scanner-temp")" ]]
+
+    fixture="${root}/package"
+    mkdir -p "${fixture}"
+    local commandString
+    nextInstallProgressTitle() { PADM_INSTALL_PROGRESS_TITLE=$1; }
+    printInstallProgressLine() { :; }
+    status=0
+    (
+        printf -v commandString \
+            '(sleep 2; printf continued >%q) & (sleep 0.2; kill -TERM %s) & wait' \
+            "${fixture}/continued" "${BASHPID}"
+        runPackageCommandWithProgress signal-test 10 "${commandString}" "${fixture}/install.log"
+        printf 'returned\n' >"${fixture}/returned"
+    ) || status=$?
+    [[ "${status}" == 143 && ! -e "${fixture}/returned" ]]
+    sleep 2
+    [[ ! -e "${fixture}/continued" && ! -e "${fixture}/install.log.progress" ]]
+    status=0
+    runPackageCommandWithProgress normal-test 10 'printf normal; exit 7' "${fixture}/normal.log" || status=$?
+    [[ "${status}" == 7 && "$(<"${fixture}/normal.log")" == normal ]]
+    [[ ! -e "${fixture}/normal.log.progress" && -z "${PADM_EXIT_ROLLBACKS[*]}" ]]
+)
 
 runCoreTemplateReturnFailureRegression() (
     local root="${TMP_DIR}/core-template-return"

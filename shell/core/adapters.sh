@@ -516,6 +516,26 @@ initInstallProgress() {
     return 0
 }
 
+stopPackageCommandWithProgress() {
+    [[ "${PADM_PACKAGE_COMMAND_CONTEXT[active]:-false}" == true ]] || return 0
+    PADM_PACKAGE_COMMAND_CONTEXT[active]=false
+    local padmPackagePid=${PADM_PACKAGE_COMMAND_CONTEXT[pid]:-${!:-}}
+    local padmPackageAttempt
+    if [[ -n "${padmPackagePid}" && "${padmPackagePid}" != "${PADM_PACKAGE_COMMAND_CONTEXT[previousPid]}" ]]; then
+        kill -TERM -- "-${padmPackagePid}" 2>/dev/null || true
+        for ((padmPackageAttempt=0; padmPackageAttempt < 20; padmPackageAttempt++)); do
+            kill -0 -- "-${padmPackagePid}" 2>/dev/null || break
+            sleep 0.1
+        done
+        kill -KILL -- "-${padmPackagePid}" 2>/dev/null || true
+        wait "${padmPackagePid}" 2>/dev/null || true
+    fi
+    if [[ -f "${PADM_PACKAGE_COMMAND_CONTEXT[progressFile]}" ]]; then
+        cat "${PADM_PACKAGE_COMMAND_CONTEXT[progressFile]}" >>"${PADM_PACKAGE_COMMAND_CONTEXT[logFile]}"
+        rm -f "${PADM_PACKAGE_COMMAND_CONTEXT[progressFile]}"
+    fi
+}
+
 runPackageCommandWithProgress() {
     local title=$1
     local timeoutSeconds=$2
@@ -532,18 +552,24 @@ runPackageCommandWithProgress() {
     progressTitle=${PADM_INSTALL_PROGRESS_TITLE}
     printInstallProgressLine "${progressTitle} 正在执行；完整日志：${logFile}"
     rm -f "${progressFile}"
+    local -A PADM_PACKAGE_COMMAND_CONTEXT=(
+        [active]=true [pid]= [previousPid]="${!:-}" [progressFile]="${progressFile}" [logFile]="${logFile}"
+    )
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
+    padmRegisterExitRollback stopPackageCommandWithProgress
+    local packageMonitor=
+    [[ $- != *m* ]] || packageMonitor=1
+    # Bash 原生成组，超时工具缺失时也能终止安装命令及其子进程。
+    set -m
     if command -v timeout >/dev/null 2>&1; then
-        if command -v setsid >/dev/null 2>&1; then
-            timeout "${timeoutSeconds}s" setsid bash -lc "${commandString}" </dev/null >"${progressFile}" 2>&1 &
-        else
-            timeout "${timeoutSeconds}s" bash -lc "${commandString}" </dev/null >"${progressFile}" 2>&1 &
-        fi
-    elif command -v setsid >/dev/null 2>&1; then
-        setsid bash -lc "${commandString}" </dev/null >"${progressFile}" 2>&1 &
+        timeout "${timeoutSeconds}s" bash -lc "${commandString}" </dev/null >"${progressFile}" 2>&1 &
     else
         bash -lc "${commandString}" </dev/null >"${progressFile}" 2>&1 &
     fi
     local commandPid=$!
+    PADM_PACKAGE_COMMAND_CONTEXT[pid]=${commandPid}
+    [[ -n "${packageMonitor}" ]] || set +m
     local elapsed=0
     while kill -0 "${commandPid}" >/dev/null 2>&1; do
         sleep 1
@@ -571,6 +597,8 @@ runPackageCommandWithProgress() {
 
     wait "${commandPid}"
     status=$?
+    PADM_PACKAGE_COMMAND_CONTEXT[active]=false
+    unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
     cat "${progressFile}" >>"${logFile}"
     if [[ ${status} -eq 124 ]]; then
         if [[ -s "${progressFile}" ]]; then

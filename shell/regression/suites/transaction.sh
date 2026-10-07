@@ -12,6 +12,7 @@ listRegressionTransactionCoreSelectorEntries() {
         'light sing-box-stats-build' \
         'heavy core-install-service-action-failure' \
         'light core-template-return-failure' \
+        'medium core-install-signal-rollback' \
         'light reality-profile-failure' \
         'medium config-transaction' \
         'heavy core-port-file-transaction' \
@@ -40,7 +41,8 @@ listRegressionTransactionCoreSelectors() {
         ;;
     medium)
         printf '%s\n' config-transaction entry-helper-config reload-core-propagation \
-            sing-box-log-transaction sing-box-merge-config-transaction tls-renew-failure-propagation
+            sing-box-log-transaction sing-box-merge-config-transaction tls-renew-failure-propagation \
+            core-install-signal-rollback
         return
         ;;
     default | light) ;;
@@ -150,6 +152,7 @@ runRegressionCoreSafetyRollback() (
 registerRegressionFunctionLeaf core-safety-rollback runRegressionCoreSafetyRollback
 registerRegressionFunctionLeaf sing-box-reality-key-transaction runSingBoxRealityKeyTransactionRegression
 registerRegressionFunctionLeaf core-template-return-failure runCoreTemplateReturnFailureRegression
+registerRegressionFunctionLeaf core-install-signal-rollback runCoreInstallSignalRollbackRegression
 registerRegressionFunctionLeaf core-install-service-action-failure runCoreInstallServiceActionFailureRegression
 registerRegressionFunctionLeaf sing-box-uninstall-failure-propagation runSingBoxUninstallFailurePropagationRegression
 registerRegressionFunctionLeaf sing-box-protocol-reload-failure runSingBoxProtocolReloadFailureRegression

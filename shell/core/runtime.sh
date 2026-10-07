@@ -22,6 +22,8 @@ coreExecutableFile() {
 
 PADM_CLEANUP_PATHS=()
 PADM_CLEANUP_TRAP_INSTALLED=
+PADM_EXIT_ROLLBACKS=()
+PADM_EXIT_ROLLBACK_OWNER=
 
 padmResolveCleanupPath() {
     local path=$1
@@ -149,10 +151,12 @@ padmIsSafeRoutePathSegment() {
 }
 
 padmInstallCleanupTrap() {
-    if [[ -n "${PADM_CLEANUP_TRAP_INSTALLED}" ]]; then
+    if [[ "${PADM_CLEANUP_TRAP_INSTALLED}" == "${BASHPID}" ]]; then
         return 0
     fi
-    PADM_CLEANUP_TRAP_INSTALLED=1
+    # 子 shell 只清理自己登记的路径，不能删除父事务的备份。
+    PADM_CLEANUP_PATHS=()
+    PADM_CLEANUP_TRAP_INSTALLED=${BASHPID}
     trap 'padmCleanupTempPaths' EXIT
     trap 'padmCleanupTempPaths INT' INT
     trap 'padmCleanupTempPaths TERM' TERM
@@ -162,6 +166,7 @@ padmRegisterCleanupPath() {
     local path=$1
     local resolvedPath=
     [[ -n "${path}" ]] || return 0
+    padmInstallCleanupTrap
     resolvedPath=$(padmResolveCleanupPath "${path}" 2>/dev/null || true)
     PADM_CLEANUP_PATHS+=("${resolvedPath:-${path}}")
 }
@@ -181,7 +186,6 @@ padmCreateTempPath() {
     shift
     local path
     path=$(mktemp "$@") || return 1
-    padmInstallCleanupTrap
     padmRegisterCleanupPath "${path}"
     printf -v "${resultVar}" '%s' "${path}"
 }
@@ -641,15 +645,49 @@ writeGeneratedJsonFile() {
     commitGeneratedJsonFile "${tmpFile}" "${targetFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
 
+padmRegisterExitRollback() {
+    padmInstallCleanupTrap
+    if [[ "${PADM_EXIT_ROLLBACK_OWNER:-}" != "${BASHPID}" ]]; then
+        PADM_EXIT_ROLLBACKS=()
+        PADM_EXIT_ROLLBACK_OWNER=${BASHPID}
+    fi
+    PADM_EXIT_ROLLBACKS+=("$1")
+}
+
+padmRunRollback() {
+    local padmRollbackIntTrap padmRollbackTermTrap padmRollbackStatus=0
+    padmRollbackIntTrap=$(trap -p INT)
+    padmRollbackTermTrap=$(trap -p TERM)
+    # 回滚不能被第二次中断打断，否则旧服务和备份可能只恢复一半。
+    trap '' INT TERM
+    "$@" || padmRollbackStatus=$?
+    trap - INT TERM
+    eval "${padmRollbackIntTrap}"
+    eval "${padmRollbackTermTrap}"
+    return "${padmRollbackStatus}"
+}
+
 padmCleanupTempPaths() {
     local status=$?
     local signal=${1:-}
-    local index
-    trap - EXIT INT TERM
-    for ((index=${#PADM_CLEANUP_PATHS[@]} - 1; index >= 0; index--)); do
-        [[ -n "${PADM_CLEANUP_PATHS[index]}" ]] || continue
-        rm -rf -- "${PADM_CLEANUP_PATHS[index]}" >/dev/null 2>&1 || true
-    done
+    status=${2:-${status}}
+    local padmCleanupIndex
+    local -a padmCleanupRollbacks=()
+    trap - EXIT
+    trap '' INT TERM
+    if [[ "${PADM_EXIT_ROLLBACK_OWNER:-}" == "${BASHPID}" ]]; then
+        padmCleanupRollbacks=("${PADM_EXIT_ROLLBACKS[@]}")
+        PADM_EXIT_ROLLBACKS=()
+        for ((padmCleanupIndex=${#padmCleanupRollbacks[@]} - 1; padmCleanupIndex >= 0; padmCleanupIndex--)); do
+            "${padmCleanupRollbacks[padmCleanupIndex]}" || true
+        done
+    fi
+    if [[ "${PADM_CLEANUP_TRAP_INSTALLED}" == "${BASHPID}" ]]; then
+        for ((padmCleanupIndex=${#PADM_CLEANUP_PATHS[@]} - 1; padmCleanupIndex >= 0; padmCleanupIndex--)); do
+            [[ -n "${PADM_CLEANUP_PATHS[padmCleanupIndex]}" ]] || continue
+            rm -rf -- "${PADM_CLEANUP_PATHS[padmCleanupIndex]}" >/dev/null 2>&1 || true
+        done
+    fi
     if [[ -n "${signal}" ]]; then
         case "${signal}" in
         INT) exit 130 ;;

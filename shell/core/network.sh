@@ -288,15 +288,27 @@ padmRunPortAllowTransaction() {
 
     local PADM_PORT_ALLOW_TRANSACTION_ACTIVE=true
     local PADM_PORT_ALLOW_TRANSACTION_KEYS=
+    local PADM_PORT_ALLOW_ROLLBACK_PENDING=true
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
+    padmRegisterExitRollback padmRollbackPortAllowOnExit
     local rc=0
     "${operation}" "$@" || rc=$?
-    if [[ "${rc}" == "0" ]]; then
-        return 0
+    if [[ "${rc}" != "0" ]]; then
+        padmRunRollback padmRollbackPortAllowOnExit
     fi
+    PADM_PORT_ALLOW_ROLLBACK_PENDING=false
+    unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
+    return "${rc}"
+}
+
+padmRollbackPortAllowOnExit() {
+    [[ "${PADM_PORT_ALLOW_ROLLBACK_PENDING:-false}" == true ]] || return 0
+    PADM_PORT_ALLOW_ROLLBACK_PENDING=false
     if ! padmRollbackPortAllowTransaction; then
         errorCard "操作失败，且本次新增端口的防火墙规则回滚失败，请检查防火墙状态"
     fi
-    return "${rc}"
+    return 0
 }
 
 padmFirewalldForwardStateKey() {

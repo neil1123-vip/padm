@@ -502,8 +502,7 @@ cleanupRealityTargetJobs() {
         wait "${pid}" 2>/dev/null || true
     done
     if [[ -z "${signal}" ]]; then
-        (padmCleanupTempPaths) || true
-        exit "${status}"
+        padmCleanupTempPaths "" "${status}"
     fi
     padmCleanupTempPaths "${signal}"
 }
