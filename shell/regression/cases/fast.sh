@@ -6047,8 +6047,8 @@ JSON
                         [[ "${failureOrder}" == $'rollback\nstart\n' && "${serviceRunning}" == true && ! -e "${installBackupDir}" ]]
                     else
                         [[ "${failureOrder}" == $'rollback\n' && "${serviceRunning}" == false && -d "${installBackupDir}" ]]
-                        compgen -G "${currentBinary}.bak.*" >/dev/null
-                        compgen -G "${currentCronet}.bak.*" >/dev/null
+                        compgen -G "${currentBinary%/*}/.${currentBinary##*/}.bak.*" >/dev/null
+                        compgen -G "${currentCronet%/*}/.${currentCronet##*/}.bak.*" >/dev/null
                         grep -q '迁移配置恢复失败，已跳过旧服务启动' "${failureStatus}"
                     fi
                 done

@@ -1774,12 +1774,13 @@ finalizeFailedCoreBinaryInstall() {
             restoreMessage="已恢复旧二进制"
             restoredBinary=true
             if [[ "${startRestoredService}" == "true" ]]; then
-                removeManagedFilesIfPresentIgnoreFailure "${backupBinary}"
+                padmRemoveCleanupPath "${backupBinary}" || true
             fi
         else
             restoreMessage="旧二进制恢复失败"
         fi
     fi
+    [[ -z "${backupBinary}" ]] || padmForgetCleanupPath "${backupBinary}"
     if [[ "${restoredBinary}" == "true" && "${startRestoredService}" == "true" ]]; then
         if runCoreServiceActionAllowFailure "${startFunction}" start >/dev/null 2>&1; then
             serviceRestoreMessage="旧服务已尝试恢复启动"
@@ -1824,6 +1825,7 @@ finalizeFailedSingBoxBinaryInstall() {
         cronetRestored=false
         startRestoredService=false
     fi
+    [[ -z "${cronetBackup}" ]] || padmForgetCleanupPath "${cronetBackup}"
     finalizeFailedCoreBinaryInstall "sing-box" "${backupBinary}" "${targetBinary}" handleSingBox "${logFile}" \
         "${startRestoredService}" || true
     if [[ "${migrationRestored}" != "true" ]]; then
@@ -1837,14 +1839,14 @@ finalizeFailedSingBoxBinaryInstall() {
         statusCard "sing-box 更新失败" "${manualCheckMessage}" "排查日志: ${logFile}"
         return 1
     fi
-    [[ -e "${cronetBackup}" ]] && removeManagedFilesIfPresentIgnoreFailure "${cronetBackup}"
+    [[ -n "${cronetBackup}" ]] && padmRemoveCleanupPath "${cronetBackup}"
     return 1
 }
 
 installDownloadedXrayBinary() {
     local version=$1
     local tmpDir=${2:-}
-    local oldBinary backupBinary newBinary logFile installedVersion actualVersion
+    local oldBinary backupBinary= newBinary logFile installedVersion actualVersion
     local reusedPreparedDir=false
     local rc
     logFile=$(coreTmpFilePath padm-core-xray-upgrade-test.log)
@@ -1890,20 +1892,23 @@ installDownloadedXrayBinary() {
 
     oldBinary=$(coreXrayBinaryPath)
     validateCoreInstallTargetPath "${oldBinary}" "Xray-core" || { padmRemoveCleanupPath "${tmpDir}"; return 1; }
-    backupBinary="${oldBinary}.bak.$(date +%s)"
     if ! padmEnsureSafeDirectory "$(dirname "${oldBinary}")"; then
         padmRemoveCleanupPath "${tmpDir}"
         errorCard "Xray-core 安装目录创建失败"
         return 1
     fi
-    if [[ -f "${oldBinary}" ]] && ! backupManagedFileToPath "${oldBinary}" "${backupBinary}" 755; then
-        padmRemoveCleanupPath "${tmpDir}"
-        errorCard "Xray-core 旧二进制备份失败"
-        return 1
+    if [[ -f "${oldBinary}" ]]; then
+        if ! padmCreateTempFileForTarget backupBinary "${oldBinary}" bak ||
+            ! backupManagedFileToPath "${oldBinary}" "${backupBinary}" 755; then
+            [[ -z "${backupBinary}" ]] || padmRemoveCleanupPath "${backupBinary}" || true
+            padmRemoveCleanupPath "${tmpDir}"
+            errorCard "Xray-core 旧二进制备份失败"
+            return 1
+        fi
     fi
     if ! runCoreServiceActionAllowFailure handleXray stop; then
         padmRemoveCleanupPath "${tmpDir}"
-        [[ -f "${backupBinary}" ]] && removeManagedFilesIfPresentIgnoreFailure "${backupBinary}"
+        [[ -n "${backupBinary}" ]] && padmRemoveCleanupPath "${backupBinary}" || true
         statusCard "Xray-core 更新失败" "Xray 服务停止失败，已取消替换" "排查日志: ${logFile}"
         return 1
     fi
@@ -1917,13 +1922,14 @@ installDownloadedXrayBinary() {
     if xrayInstalled && xrayRunning && [[ "${installedVersion}" == "${version}" ]]; then
         successCard "Xray-core更新成功" "当前版本: ${installedVersion}"
         padmRemoveCleanupPath "${tmpDir}"
-        [[ -f "${backupBinary}" ]] && removeManagedFilesIfPresentIgnoreFailure "${backupBinary}"
+        [[ -n "${backupBinary}" ]] && padmRemoveCleanupPath "${backupBinary}" || true
         return 0
     fi
     if [[ "${installedVersion}" != "${version}" ]]; then
         printf '目标版本: %s\n实际版本: %s\n' "${version}" "${installedVersion}" >>"${logFile}"
     fi
     if ! runCoreServiceActionAllowFailure handleXray stop; then
+        [[ -z "${backupBinary}" ]] || padmForgetCleanupPath "${backupBinary}"
         padmRemoveCleanupPath "${tmpDir}"
         statusCard "Xray-core 更新失败" "新服务停止失败，已取消回滚" "目标版本: ${version}" "实际版本: ${installedVersion}" "请手动检查服务与备份: ${backupBinary}"
         return 1
@@ -1936,7 +1942,7 @@ installDownloadedSingBoxBinary() {
     local version=$1
     local tmpDir=${2:-}
     local singBoxConfigPath=${singBoxConfigPath:-$(singBoxConfigShardDir)}
-    local oldBinary backupBinary extractedDir newBinary logFile cronetPath cronetBackup actualVersion migrationBackupDir=
+    local oldBinary backupBinary= extractedDir newBinary logFile cronetPath cronetBackup= actualVersion migrationBackupDir=
     local rc
     logFile=$(coreTmpFilePath padm-core-sing-box-upgrade-test.log)
     if [[ -z "${tmpDir}" ]]; then
@@ -1991,37 +1997,43 @@ installDownloadedSingBoxBinary() {
         singBoxUpgradeMigrationRollback "${migrationBackupDir}" || true
         return 1
     }
-    backupBinary="${oldBinary}.bak.$(date +%s)"
     cronetPath=$(coreSingBoxCronetPath)
     validateCoreInstallTargetPath "${cronetPath}" "sing-box cronet依赖" || {
         padmRemoveCleanupPath "${tmpDir}"
         singBoxUpgradeMigrationRollback "${migrationBackupDir}" || true
         return 1
     }
-    cronetBackup="${cronetPath}.bak.$(date +%s)"
     if ! padmEnsureSafeDirectory "$(dirname "${oldBinary}")"; then
         padmRemoveCleanupPath "${tmpDir}"
         singBoxUpgradeMigrationRollback "${migrationBackupDir}" || true
         errorCard "sing-box 安装目录创建失败"
         return 1
     fi
-    if [[ -f "${oldBinary}" ]] && ! backupManagedFileToPath "${oldBinary}" "${backupBinary}" 755; then
-        padmRemoveCleanupPath "${tmpDir}"
-        singBoxUpgradeMigrationRollback "${migrationBackupDir}" || true
-        errorCard "sing-box 旧二进制备份失败"
-        return 1
+    if [[ -f "${oldBinary}" ]]; then
+        if ! padmCreateTempFileForTarget backupBinary "${oldBinary}" bak ||
+            ! backupManagedFileToPath "${oldBinary}" "${backupBinary}" 755; then
+            [[ -z "${backupBinary}" ]] || padmRemoveCleanupPath "${backupBinary}" || true
+            padmRemoveCleanupPath "${tmpDir}"
+            singBoxUpgradeMigrationRollback "${migrationBackupDir}" || true
+            errorCard "sing-box 旧二进制备份失败"
+            return 1
+        fi
     fi
-    if [[ -f "${cronetPath}" ]] && ! backupManagedFileToPath "${cronetPath}" "${cronetBackup}" 644; then
-        padmRemoveCleanupPath "${tmpDir}"
-        [[ -f "${backupBinary}" ]] && removeManagedFilesIfPresentIgnoreFailure "${backupBinary}"
-        singBoxUpgradeMigrationRollback "${migrationBackupDir}" || true
-        errorCard "sing-box 旧 cronet 依赖备份失败"
-        return 1
+    if [[ -f "${cronetPath}" ]]; then
+        if ! padmCreateTempFileForTarget cronetBackup "${cronetPath}" bak ||
+            ! backupManagedFileToPath "${cronetPath}" "${cronetBackup}" 644; then
+            [[ -z "${cronetBackup}" ]] || padmRemoveCleanupPath "${cronetBackup}" || true
+            padmRemoveCleanupPath "${tmpDir}"
+            [[ -n "${backupBinary}" ]] && padmRemoveCleanupPath "${backupBinary}" || true
+            singBoxUpgradeMigrationRollback "${migrationBackupDir}" || true
+            errorCard "sing-box 旧 cronet 依赖备份失败"
+            return 1
+        fi
     fi
     if ! runCoreServiceActionAllowFailure handleSingBox stop; then
         padmRemoveCleanupPath "${tmpDir}"
-        [[ -f "${backupBinary}" ]] && removeManagedFilesIfPresentIgnoreFailure "${backupBinary}"
-        [[ -f "${cronetBackup}" ]] && removeManagedFilesIfPresentIgnoreFailure "${cronetBackup}"
+        [[ -n "${backupBinary}" ]] && padmRemoveCleanupPath "${backupBinary}" || true
+        [[ -n "${cronetBackup}" ]] && padmRemoveCleanupPath "${cronetBackup}" || true
         singBoxUpgradeMigrationRollback "${migrationBackupDir}" || true
         statusCard "sing-box 更新失败" "sing-box 服务停止失败，已取消替换" "排查日志: ${logFile}"
         return 1
@@ -2041,13 +2053,15 @@ installDownloadedSingBoxBinary() {
         ); then
             successCard "sing-box更新成功"
             padmRemoveCleanupPath "${tmpDir}"
-            [[ -f "${backupBinary}" ]] && removeManagedFilesIfPresentIgnoreFailure "${backupBinary}"
-            [[ -f "${cronetBackup}" ]] && removeManagedFilesIfPresentIgnoreFailure "${cronetBackup}"
+            [[ -n "${backupBinary}" ]] && padmRemoveCleanupPath "${backupBinary}" || true
+            [[ -n "${cronetBackup}" ]] && padmRemoveCleanupPath "${cronetBackup}" || true
             [[ -n "${migrationBackupDir}" ]] && padmRemoveCleanupPath "${migrationBackupDir}"
             return 0
         fi
     fi
     if ! runCoreServiceActionAllowFailure handleSingBox stop; then
+        [[ -z "${backupBinary}" ]] || padmForgetCleanupPath "${backupBinary}"
+        [[ -z "${cronetBackup}" ]] || padmForgetCleanupPath "${cronetBackup}"
         [[ -n "${migrationBackupDir}" ]] && padmForgetCleanupPath "${migrationBackupDir}"
         padmRemoveCleanupPath "${tmpDir}"
         statusCard "sing-box 更新失败" "新服务停止失败，已取消回滚并保留备份供手动恢复" \

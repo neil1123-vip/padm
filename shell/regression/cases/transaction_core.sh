@@ -183,7 +183,7 @@ runSingBoxStatsBuildRegression() (
             [[ "${commitCalls}" == "${failAt}" && "${serviceStops}" == 1 && "${serviceRunning}" == true ]] || return 1
             [[ "$(<"${PADM_SINGBOX_BINARY}")" == "${originalBinary}" &&
                 "$(<"${root}/installed/libcronet.so")" == old-cronet && ! -e "${candidate}" && ! -s "${root}/stats-calls" ]] || return 1
-            ! compgen -G "${root}/installed/*.bak.*" >/dev/null || return 1
+            ! compgen -G "${root}/installed/.*.bak.*" >/dev/null || return 1
         ) || return 1
     done
 
@@ -902,7 +902,7 @@ runCoreUpgradePendingStartRollbackRegression() (
             else
                 [[ "$(<"${serviceLog}")" == $'stop\nstart\nstop' ]]
                 [[ "$(<"${originalBinary}")" != old-binary ]]
-                compgen -G "${originalBinary}.bak.*" >/dev/null
+                compgen -G "${originalBinary%/*}/.${originalBinary##*/}.bak.*" >/dev/null
                 [[ "${core}" != sing-box || "$(<"$(coreSingBoxCronetPath)")" == new-cronet ]]
             fi
         done
@@ -923,8 +923,95 @@ runCoreUpgradePendingStartRollbackRegression() (
         [[ "$(coreXrayCurrentVersion)" == "${version}" && ! -e "${candidateDir}" ]]
         [[ "$(<"${serviceLog}")" == $'stop\nstart' ]]
         grep -q 'Xray-core更新成功' "${REGRESSION_SUCCESS_CARD_LOG}"
-        ! compgen -G "${PADM_XRAY_BINARY}.bak.*" >/dev/null
+        ! compgen -G "${PADM_XRAY_BINARY%/*}/.${PADM_XRAY_BINARY##*/}.bak.*" >/dev/null
     )
+    for core in xray sing-box; do
+        local retryRoot="${root}/${core}-backup-retry"
+        (
+            # 同秒重试成功不能覆盖或清理前次恢复失败保留的原始备份。
+            local PADM_XRAY_BINARY="${retryRoot}/installed/xray"
+            local PADM_SINGBOX_BINARY="${retryRoot}/installed/sing-box"
+            local PADM_CLEANUP_TRAP_INSTALLED= PADM_CLEANUP_PATHS=()
+            local serviceRunning=false failStart=true failRestore=true
+            local candidateDir="${retryRoot}/candidate" originalBinary installFunction
+            local firstBinaryBackup firstCronetBackup= backup
+            local -a writtenBackups=()
+            mkdir -p "${retryRoot}/installed"
+            eval "$(declare -f backupManagedFileToPath | sed '1s/^backupManagedFileToPath/realRetryBackupManagedFileToPath/')"
+            eval "$(declare -f restoreManagedFileFromBackup | sed '1s/^restoreManagedFileFromBackup/realRetryRestoreManagedFileFromBackup/')"
+            backupManagedFileToPath() {
+                writtenBackups+=("$2")
+                realRetryBackupManagedFileToPath "$@"
+            }
+            restoreManagedFileFromBackup() {
+                [[ "${failRestore}" != true ]] || return 1
+                realRetryRestoreManagedFileFromBackup "$@"
+            }
+            date() {
+                [[ "$*" != +%s ]] || { printf '1700000000\n'; return 0; }
+                command date "$@"
+            }
+            xrayRunning() { [[ "${serviceRunning}" == true ]]; }
+            singBoxRunning() { [[ "${serviceRunning}" == true ]]; }
+            ensureSingBoxTrafficStatsConfig() { return 0; }
+            handleRetryService() {
+                serviceRunning=false
+                [[ "$1" != start ]] || {
+                    [[ "${failStart}" != true ]] || return 1
+                    serviceRunning=true
+                }
+                return 0
+            }
+            handleXray() { handleRetryService "$@"; }
+            handleSingBox() { handleRetryService "$@"; }
+            if [[ "${core}" == xray ]]; then
+                originalBinary=${PADM_XRAY_BINARY}
+                installFunction=installDownloadedXrayBinary
+            else
+                originalBinary=${PADM_SINGBOX_BINARY}
+                installFunction=installDownloadedSingBoxBinary
+                printf 'old-cronet\n' >"$(coreSingBoxCronetPath)"
+            fi
+            printf 'old-binary\n' >"${originalBinary}"
+            chmod 755 "${originalBinary}"
+            prepareRetryBinary() {
+                mkdir -p "${candidateDir}"
+                if [[ "${core}" == xray ]]; then
+                    printf '#!/usr/bin/env bash\nprintf "Xray 1.2.3\\n"\n' >"${candidateDir}/xray"
+                    chmod 755 "${candidateDir}/xray"
+                else
+                    local extractedDir="${candidateDir}/sing-box-${version#v}${singBoxCoreCPUVendor}"
+                    mkdir -p "${extractedDir}"
+                    printf '#!/usr/bin/env bash\nprintf "sing-box version 1.2.3\\nTags: with_v2ray_api\\n"\n' >"${extractedDir}/sing-box"
+                    chmod 755 "${extractedDir}/sing-box"
+                    printf 'new-cronet\n' >"${extractedDir}/libcronet.so"
+                fi
+            }
+            prepareRetryBinary
+            regressionExpectStatus 1 "${installFunction}" "${version}" "${candidateDir}" || return 1
+            firstBinaryBackup=${writtenBackups[0]}
+            [[ -f "${firstBinaryBackup}" && "$(<"${firstBinaryBackup}")" == old-binary ]] || return 1
+            if [[ "${core}" == sing-box ]]; then
+                firstCronetBackup=${writtenBackups[1]}
+                [[ -f "${firstCronetBackup}" && "$(<"${firstCronetBackup}")" == old-cronet ]] || return 1
+            fi
+            failStart=false failRestore=false
+            prepareRetryBinary
+            "${installFunction}" "${version}" "${candidateDir}" || return 1
+            [[ -f "${firstBinaryBackup}" && "$(<"${firstBinaryBackup}")" == old-binary ]] || {
+                printf '%s 同秒重试丢失原二进制备份\n' "${core}" >&2
+                return 1
+            }
+            [[ -z "${firstCronetBackup}" || ( -f "${firstCronetBackup}" && "$(<"${firstCronetBackup}")" == old-cronet ) ]] || return 1
+            for backup in "${writtenBackups[@]:${#writtenBackups[@]}/2}"; do
+                [[ ! -e "${backup}" ]] || return 1
+            done
+            printf '%s\n' "${firstBinaryBackup}" "${firstCronetBackup}" >"${retryRoot}/retained-backups"
+        ) || return 1
+        while IFS= read -r backup; do
+            [[ -z "${backup}" ]] || { [[ -f "${backup}" ]] && padmRemoveCleanupPath "${backup}"; } || return 1
+        done <"${retryRoot}/retained-backups"
+    done
 )
 
 runCoreInstallRejectsUnsafeBinaryPathRegression() (
@@ -4122,6 +4209,31 @@ SH
     jq -e '(.log.access | not)' "${entryConfigPath}00_log.json" >/dev/null
     [[ "$(jq -r '.log.error' "${entryConfigPath}00_log.json")" == "${entryLogBase}error.log" ]]
     [[ "$(jq -r '.log.loglevel' "${entryConfigPath}00_log.json")" == "warning" ]]
+
+    (
+        local logCasePath
+        coreInstallType=1
+        realityStatus=7
+        xrayRunning() { return 1; }
+        autoRead() { printf -v "$3" '1'; }
+        for logCasePath in "${TMP_DIR}/entry-helper-access/conf/" "${TMP_DIR}/entry-helper space/conf/"; do
+            configPath="${logCasePath}"
+            mkdir -p "${configPath}"
+            writeXrayLogConfig "${configPath}00_log.json" "${configPath//conf\//}" false
+            cat >"${configPath}07_VLESS_vision_reality_inbounds.json" <<'JSON'
+{"inbounds":[{"streamSettings":{"realitySettings":{"show":false}}}]}
+JSON
+            checkLog >/dev/null 2>&1 || return 1
+            jq -e '.log.access != null and .log.loglevel == "debug"' "${configPath}00_log.json" >/dev/null || return 1
+            jq -e '.inbounds[0].streamSettings.realitySettings.show == true' "${configPath}07_VLESS_vision_reality_inbounds.json" >/dev/null || return 1
+            checkLog >/dev/null 2>&1 || return 1
+            jq -e '(.log.access | not) and .log.loglevel == "warning"' "${configPath}00_log.json" >/dev/null || return 1
+            jq -e '.inbounds[0].streamSettings.realitySettings.show == false' "${configPath}07_VLESS_vision_reality_inbounds.json" >/dev/null || return 1
+            updateRoutingJsonConfig "${configPath}00_log.json" '.log.access = "none"'
+            checkLog >/dev/null 2>&1 || return 1
+            jq -e '.log.access != "none" and .log.loglevel == "debug"' "${configPath}00_log.json" >/dev/null || return 1
+        done
+    ) || return 1
 
     nginxConfigPath="${TMP_DIR}/entry-helper-nginx/"
     domain=example.com

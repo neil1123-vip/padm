@@ -543,6 +543,59 @@ SH
             [[ "${actions}" == $'check\nstop\nstart\n' ]]
         done
     )
+    (
+        # 卸载最后的辅助入站后按落盘状态重载，不让旧协议列表重新启动 sing-box。
+        source "${PROJECT_ROOT}/shell/core/services.sh"
+        source "${PROJECT_ROOT}/shell/core/state.sh"
+        local root="${serviceTmp}/socks5-reload" pathName keepOther actions=
+        local PADM_XRAY_CONF_DIR="${root}/xray/conf" PADM_SINGBOX_BINARY="${root}/sing-box"
+        local PADM_SINGBOX_CONFIG_DIR PADM_SKIP_CONTROLLER_REFRESH=1
+        local coreInstallType= configPath= singBoxConfigPath= currentInstallProtocolType=,1,20,
+        mkdir -p "${PADM_XRAY_CONF_DIR}"
+        cp "${PADM_XRAY_BINARY}" "${PADM_SINGBOX_BINARY}"
+        menuReadChoice() { IFS= read -r "$3"; }
+        handleSingBox() { actions+="sing-box:$1"$'\n'; }
+        runServiceAction() { actions+="$1:$2"$'\n'; }
+        denyPort() { return 0; }
+        for pathName in config 'config [1]* space'; do
+            PADM_SINGBOX_CONFIG_DIR="${root}/sing-box-conf/${pathName}"
+            mkdir -p "${PADM_SINGBOX_CONFIG_DIR}"
+            printf '{}\n' >"${PADM_XRAY_CONF_DIR}/07_VLESS_vision_reality_inbounds.json"
+            for keepOther in false true; do
+                printf '{"inbounds":[{"type":"socks","listen_port":24480}]}\n' \
+                    >"${PADM_SINGBOX_CONFIG_DIR}/20_socks5_inbounds.json"
+                if [[ "${keepOther}" == true ]]; then
+                    printf '{"inbounds":[{"type":"hysteria2","listen_port":24481}]}\n' \
+                        >"${PADM_SINGBOX_CONFIG_DIR}/06_hysteria2_inbounds.json"
+                fi
+                currentInstallProtocolType=,1,20,
+                readInstallType
+                assertEquals "${PADM_SINGBOX_CONFIG_DIR}/" "${singBoxConfigPath}" "socks5-detect-before:${pathName}"
+                [[ "${coreInstallType}" == 1 ]]
+                actions=
+                removeSocks5Routing <<< $'2\n4'
+                [[ ! -e "${PADM_SINGBOX_CONFIG_DIR}/20_socks5_inbounds.json" ]]
+                if [[ "${keepOther}" == true ]]; then
+                    assertEquals $'sing-box:stop\nxray:restart\nsing-box:restart\n' "${actions}" "socks5-reload-retains-other-inbound:${pathName}"
+                    [[ -n "${singBoxConfigPath}" ]]
+                else
+                    assertEquals $'sing-box:stop\nxray:restart\n' "${actions}" "socks5-reload-last-inbound:${pathName}"
+                    [[ -z "${singBoxConfigPath}" ]]
+                fi
+                [[ "${currentInstallProtocolType}" == ,1,20, ]]
+            done
+            # 单核分片无需合并文件，只有合并文件时也仍能检测安装。
+            rm "${PADM_XRAY_CONF_DIR}/07_VLESS_vision_reality_inbounds.json"
+            readInstallType
+            assertEquals 2 "${coreInstallType}" "sing-box-shard-only:${pathName}"
+            [[ "${singBoxConfigPath}" == "${PADM_SINGBOX_CONFIG_DIR}/" ]]
+            rm "${PADM_SINGBOX_CONFIG_DIR}/06_hysteria2_inbounds.json"
+            printf '{}\n' >"${root}/sing-box-conf/config.json"
+            readInstallType
+            [[ "${coreInstallType}" == 2 && "${singBoxConfigPath}" == "${PADM_SINGBOX_CONFIG_DIR}/" ]]
+            rm "${root}/sing-box-conf/config.json"
+        done
+    )
     rm -rf "${serviceTmp}"
 )
 

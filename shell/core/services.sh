@@ -549,7 +549,7 @@ reloadCore() {
     if [[ "${coreInstallType}" == "1" ]]; then
         serviceQueueRestart xray
     fi
-    if currentProtocolHas 20 || [[ "${coreInstallType}" == "2" || -n "${singBoxConfigPath}" ]]; then
+    if [[ "${coreInstallType}" == "2" || -n "${singBoxConfigPath}" ]]; then
         serviceQueueRestart sing-box
     fi
     serviceQueueApply || return 1

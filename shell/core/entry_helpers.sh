@@ -1100,7 +1100,8 @@ checkLog() {
     local logStatus=false
     local serviceWasRunning=false
     xrayRunning && serviceWasRunning=true
-    if grep -q "access" ${configPath}00_log.json; then
+    if jq -e '.log.access? | type == "string" and . != "none"' \
+        "${configPath}00_log.json" >/dev/null 2>&1; then
         logStatus=true
     fi
 
@@ -1135,16 +1136,12 @@ checkLog() {
         }
         if [[ "${logStatus}" == "false" ]]; then
             realityLogShow=true
-            if ! writeXrayLogConfig "${configPath}00_log.json" "${configPathLog}" true; then
-                checkLogRollbackOrReport "${logBackupDir}" "写入日志配置失败" "已回滚本次日志修改"
-                return 1
-            fi
-        elif [[ "${logStatus}" == "true" ]]; then
+        else
             realityLogShow=false
-            if ! writeXrayLogConfig "${configPath}00_log.json" "${configPathLog}" false; then
-                checkLogRollbackOrReport "${logBackupDir}" "写入日志配置失败" "已回滚本次日志修改"
-                return 1
-            fi
+        fi
+        if ! writeXrayLogConfig "${configPath}00_log.json" "${configPathLog}" "${realityLogShow}"; then
+            checkLogRollbackOrReport "${logBackupDir}" "写入日志配置失败" "已回滚本次日志修改"
+            return 1
         fi
 
         if [[ ${realityStatus} == "7" ]]; then
