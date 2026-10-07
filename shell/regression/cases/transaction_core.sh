@@ -145,6 +145,25 @@ runSingBoxStatsBuildRegression() (
     [[ "${serviceStops}" == 0 && "${migrationCalls}" == 0 && ! -s "${root}/stats-calls" ]]
     [[ "$(<"${PADM_SINGBOX_BINARY}")" == "${originalBinary}" ]]
 
+    # 两个提交位置失败都恢复旧文件；二进制失败时不再写入 Cronet。
+    local failAt
+    for failAt in 1 2; do
+        (
+            local commitCalls=0 candidate="${root}/commit-fail-${failAt}"
+            cp -a "${root}/good" "${candidate}"
+            commitStagedCoreInstallFile() {
+                commitCalls=$((commitCalls + 1))
+                [[ "${commitCalls}" != "${failAt}" ]] || return 1
+                command cp "$1" "$2"
+            }
+            regressionExpectStatus 1 installDownloadedSingBoxBinary "${version}" "${candidate}" || return 1
+            [[ "${commitCalls}" == "${failAt}" && "${serviceStops}" == 1 && "${serviceRunning}" == true ]] || return 1
+            [[ "$(<"${PADM_SINGBOX_BINARY}")" == "${originalBinary}" &&
+                "$(<"${root}/installed/libcronet.so")" == old-cronet && ! -e "${candidate}" && ! -s "${root}/stats-calls" ]] || return 1
+            ! compgen -G "${root}/installed/*.bak.*" >/dev/null || return 1
+        ) || return 1
+    done
+
     statsResult=1
     regressionExpectStatus 1 installDownloadedSingBoxBinary "${version}" "${root}/good"
     [[ "$(wc -l <"${root}/stats-calls")" == 1 && "${serviceStops}" == 2 && "${serviceRunning}" == true ]]

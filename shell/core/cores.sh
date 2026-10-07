@@ -2040,12 +2040,8 @@ installDownloadedSingBoxBinary() {
         statusCard "sing-box 更新失败" "sing-box 服务停止失败，已取消替换" "排查日志: ${logFile}"
         return 1
     fi
-    if ! commitStagedCoreInstallFile "${newBinary}" "${oldBinary}" 655; then
-        padmRemoveCleanupPath "${tmpDir}"
-        finalizeFailedSingBoxBinaryInstall "${backupBinary}" "${oldBinary}" "${cronetBackup}" "${cronetPath}" "${logFile}" "${migrationBackupDir}"
-        return 1
-    fi
-    if ! commitStagedCoreInstallFile "${extractedDir}/libcronet.so" "${cronetPath}" 644; then
+    if ! commitStagedCoreInstallFile "${newBinary}" "${oldBinary}" 655 ||
+        ! commitStagedCoreInstallFile "${extractedDir}/libcronet.so" "${cronetPath}" 644; then
         padmRemoveCleanupPath "${tmpDir}"
         finalizeFailedSingBoxBinaryInstall "${backupBinary}" "${oldBinary}" "${cronetBackup}" "${cronetPath}" "${logFile}" "${migrationBackupDir}"
         return 1
