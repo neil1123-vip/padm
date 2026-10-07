@@ -927,17 +927,26 @@ runProtocolEntryConfigUpdateRegression() (
             command jq -e --arg preset "${value}" '
                 .inbounds[0].streamSettings.xhttpSettings |
                 .mode == (if $preset == "compatible" then "packet-up" elif $preset == "stream" then "stream-up" else "auto" end) and
-                .xmux.maxConcurrency == (if $preset == "single" then 1 else "16-32" end)
+                .xmux.maxConcurrency == (if $preset == "single" then 1 else "16-32" end) and
+                .xmux.hMaxRequestTimes == "600-900" and .xmux.hMaxReusableSecs == "1800-3000"
             ' "${fixtureConfig}" >/dev/null
         done
         before=$(<"${fixtureConfig}")
         regressionExpectStatus 1 setXHTTPPreset invalid
         [[ "$(<"${fixtureConfig}")" == "${before}" ]]
         setXHTTPMode packet-up
+        applyXHTTPConfigUpdate '.inbounds[0].streamSettings.xhttpSettings.xmux |=
+            (.hMaxRequestTimes = "42-84" | .hMaxReusableSecs = "90-120" | .cMaxReuseTimes = 7)' fixture
         manageXHTTPXmux <<< $'1\n4'
-        command jq -e '.inbounds[0].streamSettings.xhttpSettings | .mode == "packet-up" and .xmux.maxConcurrency == "16-32"' "${fixtureConfig}" >/dev/null
+        command jq -e '.inbounds[0].streamSettings.xhttpSettings | .mode == "packet-up" and
+            .xmux == {"maxConcurrency":"16-32","hMaxRequestTimes":"42-84","hMaxReusableSecs":"90-120","cMaxReuseTimes":7}' "${fixtureConfig}" >/dev/null
         manageXHTTPXmux <<< $'2\n4'
-        command jq -e '.inbounds[0].streamSettings.xhttpSettings | .mode == "packet-up" and .xmux.maxConcurrency == 1' "${fixtureConfig}" >/dev/null
+        command jq -e '.inbounds[0].streamSettings.xhttpSettings | .mode == "packet-up" and
+            .xmux == {"maxConcurrency":1,"hMaxRequestTimes":"42-84","hMaxReusableSecs":"90-120","cMaxReuseTimes":7}' "${fixtureConfig}" >/dev/null
+        applyXHTTPConfigUpdate 'del(.inbounds[0].streamSettings.xhttpSettings.xmux)' fixture
+        setXHTTPXmux 1
+        command jq -e '.inbounds[0].streamSettings.xhttpSettings.xmux ==
+            {"maxConcurrency":1,"hMaxRequestTimes":"600-900","hMaxReusableSecs":"1800-3000"}' "${fixtureConfig}" >/dev/null
 
         # 空可选字段、对象/数字/字符串范围与布尔值仍正确展示，每个摘要只解析一次。
         printf '%s\n' '{"inbounds":[{"port":8443,"listen_port":9443,"ignore_client_bandwidth":true,"users":[{},{}],"congestion_control":"bbr","auth_timeout":"300ms","heartbeat":"15s","zero_rtt_handshake":true,"streamSettings":{"realitySettings":{"serverNames":["sni.example.com"]},"xhttpSettings":{"mode":"packet-up","host":"","path":"","xmux":{"maxConcurrency":{"from":16,"to":32},"hMaxRequestTimes":800,"hMaxReusableSecs":"1800-3000"},"noGRPCHeader":true,"noSSEHeader":false}}}]}' >"${fixtureConfig}"
@@ -1020,6 +1029,27 @@ runProtocolEntryPortRegression() (
     corePortApplyReloadTransaction corePortWriteAddFiles 2053 02053 "$(corePortForwardTarget)"
     jq -e '.inbounds[0].port == 2053 and .inbounds[0].settings.port == 8443' "${defaultFile}" >/dev/null
     before=$(<"${defaultFile}")
+    (
+        # 多个默认入口不能按排序猜选，也不能产生订阅端口或覆盖配置。
+        local duplicateFile="${configPath}02_dokodemodoor_inbounds_2083_default.json"
+        local duplicateContent='{"inbounds":[{"port":2083,"settings":{"port":9443}}]}'
+        local command output="${root}/ambiguous-default-result"
+        local -a args
+        printf '%s\n' "${duplicateContent}" >"${duplicateFile}"
+        for command in corePortDefaultFile corePortForwardTarget corePortSubscriptionPort corePortWriteAddFiles; do
+            args=()
+            case "${command}" in
+            corePortSubscriptionPort) args=(8443) ;;
+            corePortWriteAddFiles) args=(2443 2443 8443) ;;
+            esac
+            regressionExpectStatus 1 "${command}" "${args[@]}" >"${output}"
+            [[ ! -s "${output}" && "$(<"${defaultFile}")" == "${before}" &&
+                "$(<"${duplicateFile}")" == "${duplicateContent}" &&
+                ! -e "${configPath}02_dokodemodoor_inbounds_2443_default.json" &&
+                ! -e "${configPath}02_dokodemodoor_inbounds_2053.json" ]]
+        done
+        rm "${duplicateFile}"
+    )
     (
         # 默认入口不存在是空结果；枚举失败不能输出部分列表、回退端口或修改配置。
         local partial command output="${root}/lookup-result" status=1 fixtureDefault=${defaultFile}

@@ -1143,7 +1143,8 @@ corePortResolveByIndex() {
 corePortDefaultFile() {
     local files
     files=$(corePortManagedFilesByPattern '02_dokodemodoor_inbounds_*_default.json') || return 1
-    [[ -z "${files}" ]] || printf '%s\n' "${files%%$'\n'*}"
+    [[ "${files}" != *$'\n'* ]] || return 1
+    [[ -z "${files}" ]] || printf '%s\n' "${files}"
 }
 
 corePortForwardTarget() {
@@ -3284,7 +3285,7 @@ setXHTTPPreset() {
 }
 
 setXHTTPXmux() {
-    applyXHTTPConfigUpdate '.inbounds[0].streamSettings.xhttpSettings.xmux = {"maxConcurrency":$maxConcurrency,"hMaxRequestTimes":"600-900","hMaxReusableSecs":"1800-3000"}' \
+    applyXHTTPConfigUpdate '.inbounds[0].streamSettings.xhttpSettings.xmux |= ((. // {"hMaxRequestTimes":"600-900","hMaxReusableSecs":"1800-3000"}) + {"maxConcurrency":$maxConcurrency})' \
         "XHTTP XMUX 已更新" --argjson maxConcurrency "$1"
 }
 
