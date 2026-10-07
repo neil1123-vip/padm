@@ -901,9 +901,7 @@ migrateSingBox116DeprecatedConfig() {
     local mergedFile shardDir file facts backupDir tmpFile needsMigration
     local hasShard=false
     local carrierFile= defaultOutbound generatedHttpTag
-    local routeDefaults dnsFinals dnsServers
     local -a targets=() backupTargets=()
-    local -A seenTargets=()
 
     printf -v "${resultVar}" '%s' ''
     : >"${logFile}" || return 1
@@ -916,15 +914,11 @@ migrateSingBox116DeprecatedConfig() {
     shardDir=$(singBoxConfigShardDir)
     for file in "${shardDir}"*.json; do
         [[ -f "${file}" ]] || continue
-        if [[ -z "${seenTargets[${file}]+x}" ]]; then
-            targets+=("${file}")
-            seenTargets["${file}"]=1
-            hasShard=true
-        fi
+        targets+=("${file}")
+        hasShard=true
     done
     if [[ "${hasShard}" != "true" && -f "${mergedFile}" ]]; then
         targets+=("${mergedFile}")
-        seenTargets["${mergedFile}"]=1
     fi
     if [[ "${#targets[@]}" -eq 0 ]]; then
         printf '无法检查: 未找到 sing-box JSON 配置文件\n' >>"${logFile}"
@@ -1008,8 +1002,7 @@ migrateSingBox116DeprecatedConfig() {
     needsMigration=$(jq -r '.needs_migration' <<<"${facts}")
     [[ "${needsMigration}" == "true" ]] || return 0
 
-    if [[ "$(jq -r '.needs_http_default' <<<"${facts}")" == "true" &&
-        "$(jq -r '.route_defaults | length' <<<"${facts}")" -eq 0 ]]; then
+    if [[ "$(jq -r '.needs_http_default' <<<"${facts}")" == "true" ]]; then
         defaultOutbound=$(jq -r 'if .route_final != "" then .route_final else .first_outbound end' <<<"${facts}")
         if [[ -z "${defaultOutbound}" ]]; then
             printf '失败: 无法推导远程 rule-set 的默认 HTTP client，请配置 route.final 或 outbounds 后重试\n' >>"${logFile}"
