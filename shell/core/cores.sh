@@ -626,7 +626,9 @@ coreXrayCurrentVersion() {
 }
 
 xrayBinaryVersion() {
-    "${1}" --version 2>/dev/null | awk 'NR == 1 && $1 == "Xray" { print "v"$2; exit }'
+    local versionOutput
+    versionOutput=$("${1}" --version 2>/dev/null) || return 1
+    awk 'NR == 1 && $1 == "Xray" { print "v"$2; exit }' <<<"${versionOutput}"
 }
 
 getSingBoxCurrentVersion() {
@@ -638,7 +640,9 @@ getSingBoxCurrentVersion() {
 }
 
 singBoxBinaryVersion() {
-    "${1}" version 2>/dev/null | awk 'NR == 1 && $1 == "sing-box" && $2 == "version" { print "v"$3; exit }'
+    local versionOutput
+    versionOutput=$("${1}" version 2>/dev/null) || return 1
+    awk 'NR == 1 && $1 == "sing-box" && $2 == "version" { print "v"$3; exit }' <<<"${versionOutput}"
 }
 
 singBoxV2rayApiCapability() {

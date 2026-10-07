@@ -573,12 +573,12 @@ runCoreReleaseArchiveRejectsRegression() (
     [[ "${xrayRc}" -ne 0 ]]
     [[ "${singBoxRc}" -ne 0 ]]
     (
-        local candidateVersion=1.2.2
+        local candidateVersion=1.2.2 candidateExit=0
         local xrayPath="${tmpDir}/version-check/xray"
         mkdir -p "$(dirname -- "${xrayPath}")"
         validateCoreZipArchive() { return 0; }
         unzip() {
-            printf '#!/usr/bin/env bash\nprintf "Xray %s\\n"\n' "${candidateVersion}" >"${xrayPath}"
+            printf '#!/usr/bin/env bash\nprintf "Xray %s\\n"\nexit %s\n' "${candidateVersion}" "${candidateExit}" >"${xrayPath}"
             chmod 755 "${xrayPath}"
         }
         regressionExpectStatus 4 downloadXrayReleaseBinaryToTempDir v1.2.3 "$(dirname -- "${xrayPath}")"
@@ -586,6 +586,17 @@ runCoreReleaseArchiveRejectsRegression() (
         regressionExpectStatus 4 downloadXrayReleaseBinaryToTempDir v1.2.3 "$(dirname -- "${xrayPath}")"
         candidateVersion=1.2.3
         downloadXrayReleaseBinaryToTempDir v1.2.3 "$(dirname -- "${xrayPath}")"
+        # 关闭 pipefail 后，失败探针也不得输出可被后续校验接受的版本。
+        set +o pipefail
+        candidateExit=42
+        regressionExpectStatus 4 downloadXrayReleaseBinaryToTempDir v1.2.3 "$(dirname -- "${xrayPath}")"
+        regressionExpectStatus 1 xrayBinaryVersion "${xrayPath}" >"${xrayPath}.version"
+        [[ ! -s "${xrayPath}.version" ]]
+        local singBoxPath="$(dirname -- "${xrayPath}")/sing-box"
+        printf '#!/usr/bin/env bash\nprintf "sing-box version 1.2.3\\nTags: with_v2ray_api\\n"\nexit 42\n' >"${singBoxPath}"
+        chmod 755 "${singBoxPath}"
+        regressionExpectStatus 1 singBoxBinaryVersion "${singBoxPath}" >"${singBoxPath}.version"
+        [[ ! -s "${singBoxPath}.version" ]]
     )
 )
 
