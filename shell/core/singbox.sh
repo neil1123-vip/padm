@@ -71,7 +71,7 @@ initSingBoxLocalDNSConfig() {
     ensure|check) ;;
     *) return 2 ;;
     esac
-    configDir=$(coreSafeConfigDir "${singBoxConfigPath:-/etc/padm/sing-box/conf/config/}") || return 1
+    configDir=$(coreSafeConfigDir "$(singBoxConfigShardDir)") || return 1
     targetPath="${configDir}dns.json"
     for file in "${configDir}"*.json; do
         [[ -f "${file}" ]] && configFiles+=("${file}")

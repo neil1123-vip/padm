@@ -330,6 +330,22 @@ runSingBoxCustomPathsRegression() (
     singBoxConfigPath=
 
     (
+        # 仅设置目录覆盖时，DNS 检查和初始化不能读取或写入默认目录。
+        local dnsConfigDir="${root}/dns-only/config"
+        local PADM_SINGBOX_CONFIG_DIR="${dnsConfigDir}" singBoxConfigPath=
+        mkdir -p "${dnsConfigDir}"
+        coreSafeConfigDir() {
+            [[ "${1%/}" == "${dnsConfigDir}" ]] || return 1
+            printf '%s/\n' "${1%/}"
+        }
+        initSingBoxLocalDNSConfig check
+        [[ ! -e "${dnsConfigDir}/dns.json" ]]
+        initSingBoxLocalDNSConfig
+        jq -e '.dns.servers == [{tag: "padm-local", type: "local"}]' "${dnsConfigDir}/dns.json" >/dev/null
+        initSingBoxLocalDNSConfig check
+    )
+
+    (
         local probeBinary="${root}/xray-path-probe" pathCalls="${root}/path-calls"
         cp /usr/bin/true "${probeBinary}"
         xrayServiceBinaryPath() {
