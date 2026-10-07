@@ -4,6 +4,7 @@
   "title": "padm Docker configuration request",
   "type": "object",
   "x-padm-reality-stream-deployment": true,
+  "x-padm-reality-stream-host-website": true,
   "additionalProperties": false,
   "required": ["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"],
   "properties": {
@@ -16,7 +17,11 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["listener_id", "website_listener_id"],
+          "required": ["listener_id"],
+          "oneOf": [
+            {"required": ["website_listener_id"]},
+            {"required": ["host_website"]}
+          ],
           "properties": {
             "listener_id": {
               "type": "string",
@@ -25,6 +30,45 @@
             "website_listener_id": {
               "type": "string",
               "pattern": "^(?:entry-[a-z0-9][a-z0-9-]{0,47}|vless-ws)$"
+            },
+            "host_website": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["domains", "address", "port"],
+              "properties": {
+                "domains": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 16,
+                  "uniqueItems": true,
+                  "items": {
+                    "allOf": [
+                      {"$ref": "#/$defs/hostname"},
+                      {"pattern": "^[a-z0-9.-]+$"}
+                    ]
+                  }
+                },
+                "address": {
+                  "type": "string",
+                  "oneOf": [
+                    {"const": "host.docker.internal"},
+                    {
+                      "format": "ipv4",
+                      "pattern": "^(?!0\\.|127\\.|169\\.254\\.)(?:[1-9][0-9]?|1[0-9]{2}|2[01][0-9]|22[0-3])(?:\\.(?:0|[1-9][0-9]{0,2})){3}$"
+                    },
+                    {
+                      "format": "ipv6",
+                      "pattern": "^(?:[23][A-Fa-f0-9]{3}|[fF][cCdD][A-Fa-f0-9]{2}):[A-Fa-f0-9:]+$"
+                    }
+                  ]
+                },
+                "port": {
+                  "allOf": [
+                    {"$ref": "#/$defs/port"},
+                    {"not": {"enum": [443, 15443]}}
+                  ]
+                }
+              }
             }
           }
         }

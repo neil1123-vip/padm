@@ -804,11 +804,19 @@ dockerProtocolCommand() (
           else
             .reality_stream as $stream |
             (.core.protocols[] | select(.listener_id == $stream.listener_id)) as $reality |
-            (.core.protocols[] | select(.listener_id == $stream.website_listener_id)) as $website |
-            ($website.websocket // $website.httpupgrade // $website.grpc_tls) as $tls |
             "Reality 443 共存: 已启用",
-            "网站入口: \($website.listener_id)，域名 \($tls.domain)",
-            "网站 TLS 后端: nginx:\($tls.tls_port)",
+            (if $stream.host_website != null then
+              $stream.host_website as $website |
+              "网站类型: 宿主网站",
+              "网站域名: \($website.domains | join(","))",
+              "网站 TLS 后端: \(if $website.address | contains(":") then "[\($website.address)]" else $website.address end):\($website.port)"
+             else
+              (.core.protocols[] | select(.listener_id == $stream.website_listener_id)) as $website |
+              ($website.websocket // $website.httpupgrade // $website.grpc_tls) as $tls |
+              "网站类型: 受管 TLS",
+              "网站入口: \($website.listener_id)，域名 \($tls.domain)",
+              "网站 TLS 后端: nginx:\($tls.tls_port)"
+             end),
             "默认 Reality: \($reality.listener_id)，\(if $reality.id == 1 then "Vision" else "XHTTP" end)",
             "Reality 原后端: xray:\($reality.public_port)",
             "公网入口: \(if $reality.server | contains(":") then "[\($reality.server)]" else $reality.server end):443 [\($reality.address_families | join(","))]"
@@ -1173,6 +1181,7 @@ dockerEditCommand() {
     local privateKey publicKey derivedKey opsImage version normalized regenerateReality=
     local realityTarget= targetHost= targetPort= targetSni=
     local realityStream= streamListener= streamWebsite=
+    local streamDomains= streamAddress= streamPort=8443
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
         --spec|--manifest|--bundle|--control-bundle)
@@ -1211,6 +1220,13 @@ dockerEditCommand() {
                 realityStream=on streamListener=$2 streamWebsite=$3
                 shift 3
             fi
+            ;;
+        --reality-stream-host)
+            [[ "$#" -ge 5 && -n "$2" && "$2" != --* && -n "$3" && "$3" != --* &&
+                -n "$4" && "$4" != --* && "$5" =~ ^[1-9][0-9]{0,4}$ && "$5" -le 65535 &&
+                -z "${realityStream}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            realityStream=host streamListener=$2 streamDomains=$3 streamAddress=$4 streamPort=$5
+            shift 5
             ;;
         --preview)
             [[ "${mode}" == interactive ]] || return "${PADM_DOCKER_RC_USAGE}"
@@ -1304,18 +1320,25 @@ dockerEditCommand() {
     jq -es 'length == 1 and (.[0] | type == "object")' "${draft}" >/dev/null 2>&1 ||
         return "${PADM_DOCKER_RC_STATE}"
     if [[ -n "${realityStream}" ]]; then
-        jq --arg action "${realityStream}" --arg listener "${streamListener}" --arg website "${streamWebsite}" '
+        jq --arg action "${realityStream}" --arg listener "${streamListener}" --arg website "${streamWebsite}" \
+            --arg domains "${streamDomains}" --arg address "${streamAddress}" --argjson port "${streamPort}" '
           if $action == "off" then del(.reality_stream) else
             [.core.protocols[] | select(.listener_id == $listener and .core == "xray" and (.id == 1 or .id == 2))] as $realities |
-            [.core.protocols[] | select(.listener_id == $website and
-              (.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25))] as $websites |
-            if ($realities | length) != 1 or ($websites | length) != 1 then
-              error("共存需要唯一 Xray Reality Vision/XHTTP 与 TLS 入口")
-            else .reality_stream = {listener_id:$listener, website_listener_id:$website} end
+            if ($realities | length) != 1 then error("共存需要唯一 Xray Reality Vision/XHTTP 入口")
+            elif $action == "host" then
+              .reality_stream = {listener_id:$listener, host_website:{
+                domains:($domains | split(",") | map(gsub("^\\s+|\\s+$"; "") | ascii_downcase) | map(select(. != ""))),
+                address:$address, port:$port}}
+            else
+              [.core.protocols[] | select(.listener_id == $website and
+                (.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25))] as $websites |
+              if ($websites | length) != 1 then error("共存需要唯一 TLS 入口")
+              else .reality_stream = {listener_id:$listener, website_listener_id:$website} end
+            end
           end
         ' "${draft}" >"${draft}.next" 2>/dev/null &&
             chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" || {
-            dockerError '共存需要指定已有 Xray Reality Vision/XHTTP 入口与网站 TLS 入口 ID'
+            dockerError '共存需要指定已有 Xray Reality Vision/XHTTP 入口与有效网站输入'
             return "${PADM_DOCKER_RC_STATE}"
         }
     fi

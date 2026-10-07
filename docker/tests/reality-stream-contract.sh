@@ -530,5 +530,196 @@ dockerRealityStreamContractChecks() {
     ); then
         fail '候选 Nginx 校验未按共存核心与订阅服务注入临时 hosts'
     fi
+    local hostSpec="${TEST_ROOT}/stream-host.json" hostPure="${TEST_ROOT}/stream-host-pure.json"
+    local hostV4="${TEST_ROOT}/stream-host-v4.json" hostV6="${TEST_ROOT}/stream-host-v6.json"
+    local hostXhttp="${TEST_ROOT}/stream-host-xhttp.json" hostOldBundle="${TEST_ROOT}/stream-host-old-bundle"
+    jq '.reality_stream = {listener_id:"vless-reality",host_website:{
+      domains:["site.example.com","www.site.example.com"],address:"host.docker.internal",port:8443}}' \
+        "${base}" >"${hostSpec}" || fail '宿主网站规格生成失败'
+    jq '.core.protocols |= map(select(.listener_id == "vless-reality")) |
+      .tls = null | .subscription.enabled = false' "${hostSpec}" >"${hostPure}" ||
+        fail '纯 Reality 宿主网站规格生成失败'
+    jq '.reality_stream.host_website.address = "192.168.10.20"' "${hostPure}" >"${hostV4}"
+    jq '.reality_stream.host_website.address = "2001:db8::20"' "${hostPure}" >"${hostV6}"
+    jq '.core.protocols |= map(select(.id == 2)) | .tls = null | .subscription.enabled = false |
+      .reality_stream = {listener_id:"entry-xhttp",host_website:{
+        domains:["site.example.com","www.site.example.com"],address:"host.docker.internal",port:8443}}' \
+        "${xhttp}" >"${hostXhttp}" || fail 'XHTTP 宿主网站规格生成失败'
+    for mutation in "${hostSpec}" "${hostPure}" "${hostV4}" "${hostV6}" "${hostXhttp}"; do
+        dockerConfigureSpecValidate "${mutation}" || fail "合法宿主网站规格被拒绝: ${mutation}"
+    done
+    for mutation in \
+        '.reality_stream.website_listener_id = "vless-ws"' \
+        '.reality_stream.extra = true' \
+        '.reality_stream.host_website.extra = true' \
+        '.reality_stream.listener_id = "entry-missing"' \
+        '.reality_stream.host_website.domains = []' \
+        '.reality_stream.host_website.domains = ["site.example.com","site.example.com"]' \
+        '.reality_stream.host_website.domains = ["SITE.example.com"]' \
+        '.reality_stream.host_website.domains = ["www.example.com"]' \
+        '.reality_stream.host_website.domains = [range(17) | "site" + tostring + ".example.com"]' \
+        '.reality_stream.host_website.domains = ["bad_name.example.com"]' \
+        '.reality_stream.host_website.port = 443' \
+        '.reality_stream.host_website.port = 15443' \
+        '.reality_stream.host_website.port = "8443"' \
+        '.reality_stream.host_website.port = 0' \
+        '.reality_stream.host_website.port = 65536' \
+        '.reality_stream.host_website.port = 24443' \
+        '.host_integrations = [{type:"wireguard",profile:"net-wireguard",
+          firewall_rules:[],devices:["wg-padm"],schedules:[],
+          settings:{config_file:"wg-padm.conf",interface:"wg-padm"}}]'; do
+        jq "${mutation}" "${hostPure}" >"${invalid}" || fail '非法宿主网站规格生成失败'
+        if dockerConfigureSpecValidate "${invalid}" >/dev/null 2>"${STDERR}"; then
+            fail "非法宿主网站规格被接受: ${mutation}"
+        fi
+    done
+    for mutation in \
+        localhost website.example.com 127.0.0.1 127.1.2.3 0.0.0.0 224.0.0.1 \
+        169.254.1.1 192.168.001.2 256.1.2.3 :: ::1 ff02::1 fe80::1 \
+        ::ffff:127.0.0.1 2001:::20 '[2001:db8::20]'; do
+        jq --arg address "${mutation}" '.reality_stream.host_website.address = $address' \
+            "${hostPure}" >"${invalid}" || fail '非法宿主地址规格生成失败'
+        if dockerConfigureSpecValidate "${invalid}" >/dev/null 2>"${STDERR}"; then
+            fail "非法宿主网站地址被接受: ${mutation}"
+        fi
+    done
+    jq '.core.protocols += [(.core.protocols[0] |
+      .listener_id = "entry-other" | .public_port = 443)]' "${hostPure}" >"${invalid}"
+    if dockerConfigureSpecValidate "${invalid}" >/dev/null 2>"${STDERR}"; then
+        fail '宿主网站共存接受第三入口占用 443'
+    fi
+    jq '.reality_stream.host_website.domains = ["ws.example.com"]' "${hostSpec}" >"${invalid}"
+    if dockerConfigureSpecValidate "${invalid}" >/dev/null 2>"${STDERR}"; then
+        fail '宿主网站共存接受与受管 TLS 相同的 SNI'
+    fi
+    mkdir -p "${hostOldBundle}/docker"
+    cp -R "${SOURCE_ROOT}/docker/contracts" "${hostOldBundle}/docker/contracts"
+    jq 'del(.["x-padm-reality-stream-host-website"])' \
+        "${hostOldBundle}/docker/contracts/configure.schema.json" >"${hostOldBundle}/schema.next"
+    mv "${hostOldBundle}/schema.next" "${hostOldBundle}/docker/contracts/configure.schema.json"
+    dockerBundleSupportsSpec "${hostOldBundle}" "${enabled}" ||
+        fail '旧共存包不能再使用受管网站绑定'
+    if dockerBundleSupportsSpec "${hostOldBundle}" "${hostPure}" >/dev/null 2>"${STDERR}"; then
+        fail '旧共存包接受没有宿主网站能力的绑定'
+    fi
+    newState stream-host "${hostPure}"
+    streamFile="${PADM_DOCKER_INSTALL_DIR}/config/nginx/stream/reality.conf"
+    grep -Eq 'site[.]example[.]com[[:space:]]+padm_website;' "${streamFile}" &&
+        grep -Eq 'www[.]site[.]example[.]com[[:space:]]+padm_website;' "${streamFile}" &&
+        grep -Eq 'server[[:space:]]+host[.]docker[.]internal:8443;' "${streamFile}" ||
+        fail '宿主网站多域名或 host-gateway 后端生成错误'
+    grep -Eq 'listen[[:space:]]+8080;' "${PADM_DOCKER_INSTALL_DIR}/config/nginx/default.conf" &&
+        ! grep -Eq 'ssl_certificate(_key)?[[:space:]]' "${PADM_DOCKER_INSTALL_DIR}/config/nginx/default.conf" ||
+        fail '纯宿主网站缺少健康监听或生成了网站 TLS 终止'
+    jq -e '.services.xray.ports == [] and
+      .services.nginx.ports == ["0.0.0.0:443:15443/tcp","[::]:443:15443/tcp"] and
+      .services.nginx.extra_hosts == ["host.docker.internal:host-gateway"] and
+      .services.nginx.profiles == ["nginx"] and
+      .services.nginx.depends_on.xray.condition == "service_healthy" and
+      (.services | has("subscription") | not) and
+      all(.services.nginx.volumes[]; .target != "/etc/padm/secrets/tls") and
+      all(.services.xray.volumes[]; .target != "/etc/padm/secrets/tls")
+    ' "${PADM_DOCKER_INSTALL_DIR}/compose.json" >/dev/null ||
+        fail '纯 Reality 宿主网站缺少 Nginx/443/gateway 或错误挂载网站证书'
+    jq -e '.compose.profiles | index("nginx") != null' \
+        "${PADM_DOCKER_INSTALL_DIR}/deployment.json" >/dev/null &&
+        jq -e '.listeners | length == 1 and .[0].service == "nginx" and
+          .[0].public_port == 443 and .[0].container_port == 15443' \
+            "${PADM_DOCKER_INSTALL_DIR}/deployment.json" >/dev/null ||
+        fail '纯 Reality 宿主网站部署记录漏掉 Nginx 投影'
+    runRead 0 stream-host-links dockerProtocolCommand links vless-reality
+    [[ "$(<"${STDOUT}")" == "${streamRealityUri}" ]] || fail '宿主网站 Reality 链接未投影 443'
+    runRead 0 stream-host-status dockerProtocolCommand stream-status
+    grep -Fq 'site.example.com' "${STDOUT}" && grep -Fq 'www.site.example.com' "${STDOUT}" &&
+        grep -Fq 'host.docker.internal:8443' "${STDOUT}" && grep -Fq 'proxy.example.com:443' "${STDOUT}" ||
+        fail '宿主网站状态缺少域名、实际后端或公网端口'
+    for mutation in "${UUID}" "${PRIVATE_KEY}" "${PUBLIC_KEY}" "${TOKEN}"; do
+        ! grep -Fq "${mutation}" "${STDOUT}" || fail '宿主网站状态暴露秘密'
+    done
+    runRead 0 stream-host-no-tls-consumer dockerTlsConsumers site.example.com
+    [[ "$(<"${STDOUT}")" == '[]' ]] || fail '宿主网站被误识别为容器证书消费者'
+    cp "${PADM_DOCKER_INSTALL_DIR}/compose.json" "${TEST_ROOT}/stream-host-compose.saved"
+    for mutation in '.services.nginx.extra_hosts = []' '.services.nginx.network_mode = "host"'; do
+        jq "${mutation}" "${TEST_ROOT}/stream-host-compose.saved" \
+            >"${PADM_DOCKER_INSTALL_DIR}/compose.json"
+        runRead 1 stream-host-bridge-drift dockerTlsConsumers site.example.com
+    done
+    cp "${TEST_ROOT}/stream-host-compose.saved" "${PADM_DOCKER_INSTALL_DIR}/compose.json"
+    runRead 15 stream-host-old-update streamUpdateContractRead "${hostOldBundle}" capability
+    [[ ! -s "${TEST_ROOT}/stream-update.calls" ]] || fail '旧包宿主网站更新仍进入候选容器校验'
+    newState stream-host-v4 "${hostV4}"
+    grep -Eq 'server[[:space:]]+192[.]168[.]10[.]20:8443;' \
+        "${PADM_DOCKER_INSTALL_DIR}/config/nginx/stream/reality.conf" &&
+        jq -e '(.services.nginx.extra_hosts // []) == []' \
+            "${PADM_DOCKER_INSTALL_DIR}/compose.json" >/dev/null ||
+        fail 'IPv4 宿主网站后端错误或增加多余 gateway'
+    newState stream-host-v6 "${hostV6}"
+    grep -Fq '[2001:db8::20]:8443' "${PADM_DOCKER_INSTALL_DIR}/config/nginx/stream/reality.conf" &&
+        jq -e '(.services.nginx.extra_hosts // []) == []' \
+            "${PADM_DOCKER_INSTALL_DIR}/compose.json" >/dev/null ||
+        fail 'IPv6 宿主网站后端缺少方括号或增加多余 gateway'
+    newState stream-host-xhttp "${hostXhttp}"
+    runRead 0 stream-host-xhttp-links dockerProtocolCommand links entry-xhttp
+    grep -Fq 'proxy.example.com:443?' "${STDOUT}" &&
+        grep -Fq '&type=xhttp&host=www.example.com&path=%2Fstream-xhttp&mode=auto' "${STDOUT}" ||
+        fail '宿主网站 XHTTP 链接投影错误'
+    newState stream-host-edit "${base}"
+    runRead 0 stream-host-edit-enable streamEditContractRead "${capture}" \
+        --reality-stream-host vless-reality site.example.com,www.site.example.com host.docker.internal 8443 --preview
+    jq -en --slurpfile expected "${hostSpec}" --slurpfile actual "${capture}" \
+        '$expected[0] == $actual[0]' >/dev/null || fail '宿主网站专项编辑改写其它字段'
+    runRead 0 stream-host-edit-normalized-domains streamEditContractRead "${capture}" \
+        --reality-stream-host vless-reality ' SITE.Example.COM , ,WWW.SITE.Example.COM, ' host.docker.internal 8443 --preview
+    jq -en --slurpfile expected "${hostSpec}" --slurpfile actual "${capture}" \
+        '$expected[0] == $actual[0]' >/dev/null || fail '宿主网站 CLI 域名未归一大小写、空白和空项'
+    rm -f "${capture}"
+    runRead 15 stream-host-edit-duplicate-domains streamEditContractRead "${capture}" \
+        --reality-stream-host vless-reality site.example.com,SITE.EXAMPLE.COM host.docker.internal 8443 --preview
+    [[ ! -e "${capture}" ]] || fail '宿主网站 CLI 归一后的重复域名仍进入配置提交'
+    runRead 2 stream-host-edit-combined streamEditContractRead "${capture}" \
+        --reality-stream-host vless-reality site.example.com host.docker.internal 8443 \
+        --reality-stream off --preview
+    runRead 2 stream-host-edit-port streamEditContractRead "${capture}" \
+        --reality-stream-host vless-reality site.example.com host.docker.internal invalid --preview
+    newState stream-managed-to-host "${enabled}"
+    runRead 0 stream-managed-to-host streamEditContractRead "${capture}" \
+        --reality-stream-host vless-reality site.example.com,www.site.example.com host.docker.internal 8443 --preview
+    jq -en --slurpfile expected "${hostSpec}" --slurpfile actual "${capture}" \
+        '$expected[0] == $actual[0]' >/dev/null || fail '受管网站切换宿主网站改写了绑定以外字段'
+    newState stream-host-edit-off "${hostSpec}"
+    runRead 0 stream-host-to-managed streamEditContractRead "${capture}" \
+        --reality-stream vless-reality vless-ws --preview
+    jq -en --slurpfile expected "${enabled}" --slurpfile actual "${capture}" \
+        '$expected[0] == $actual[0]' >/dev/null || fail '宿主网站切换受管网站改写了绑定以外字段'
+    for mutation in \
+        '.core.protocols[0].public_port = 24447' \
+        '.core.protocols |= map(select(.listener_id != "vless-reality"))' \
+        '.reality_stream.host_website.port = 8450'; do
+        jq "${mutation}" "${hostSpec}" >"${invalid}" || fail '宿主网站编辑冻结反例生成失败'
+        rm -f "${capture}"
+        runRead 15 stream-host-edit-import-frozen streamEditContractRead "${capture}" --spec "${invalid}" --preview
+        [[ ! -e "${capture}" ]] || fail '宿主网站普通导入改写绑定、原端口或删除入口后仍提交'
+    done
+    runRead 0 stream-host-edit-disable streamEditContractRead "${capture}" --reality-stream off --preview
+    jq -en --slurpfile expected "${base}" --slurpfile actual "${capture}" \
+        '$expected[0] == $actual[0]' >/dev/null || fail '宿主网站关闭未精确撤销绑定'
+    for mutation in \
+        $'6\n4\n0\n0\n0\n' \
+        $'6\n4\nvless-reality\n0\n0\n0\n' \
+        $'6\n4\nvless-reality\nsite.example.com\n0\n0\n0\n' \
+        $'6\n4\nvless-reality\nsite.example.com\nhost.docker.internal\n0\n0\n0\n' \
+        $'6\n4\n' \
+        $'6\n4\nvless-reality\n' \
+        $'6\n4\nvless-reality\nsite.example.com\n' \
+        $'6\n4\nvless-reality\nsite.example.com\nhost.docker.internal\n'; do
+        runRead 0 stream-host-menu-cancel streamMenuContractRead "${mutation}"
+        [[ "$(<"${TEST_ROOT}/stream-menu.calls")" == $'protocol list\nprotocol list' ]] ||
+            fail '宿主网站菜单输入取消或 EOF 仍发起编辑'
+    done
+    runRead 0 stream-host-menu-enable streamMenuContractRead \
+        $'6\n4\nvless-reality\nsite.example.com,www.site.example.com\nhost.docker.internal\n8443\n0\n0\n'
+    [[ "$(<"${TEST_ROOT}/stream-menu.calls")" == \
+        $'protocol list\nprotocol list\nedit --reality-stream-host vless-reality site.example.com,www.site.example.com host.docker.internal 8443' ]] ||
+        fail '宿主网站菜单未传递完整专项参数'
     printf 'docker-reality-stream-contract-ok\n'
 }

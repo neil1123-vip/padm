@@ -141,11 +141,12 @@ dockerMenuProtocols() {
 }
 
 dockerMenuRealityStream() {
-    local choice listener website
+    local choice listener website domains address port
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker Reality 443 共存\n'
-        printf '%s\n' '1. 查看状态' '2. 开启或更换默认 Reality' '3. 关闭共存' '0. 返回'
+        printf '%s\n' '1. 查看状态' '2. 受管 TLS 网站开启或更换默认 Reality' '3. 关闭共存' \
+            '4. 宿主网站开启或更换默认 Reality' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -163,6 +164,16 @@ dockerMenuRealityStream() {
             dockerMenuRun edit --reality-stream "${listener}" "${website}" || true
             ;;
         3) dockerMenuRun edit --reality-stream off || true ;;
+        4)
+            dockerMenuRun protocol list || continue
+            dockerSetupRead listener '默认 Xray Reality Vision/XHTTP 入口 ID（0 返回）: ' &&
+                [[ -n "${listener}" ]] &&
+                dockerSetupRead domains '宿主网站域名（多个用逗号分隔，0 返回）: ' &&
+                [[ -n "${domains}" ]] &&
+                dockerSetupRead address '容器可达宿主地址（不支持 loopback）[host.docker.internal，0 返回]: ' host.docker.internal &&
+                dockerSetupRead port '宿主网站 TLS 端口 [8443，0 返回]: ' 8443 || continue
+            dockerMenuRun edit --reality-stream-host "${listener}" "${domains}" "${address}" "${port}" || true
+            ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

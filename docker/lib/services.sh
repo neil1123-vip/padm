@@ -53,6 +53,27 @@ dockerConfigureSpecValidate() {
       def ipv4: type == "string" and (split(".") as $parts |
         ($parts | length) == 4 and all($parts[]; test("^[0-9]{1,3}$") and (tonumber <= 255)));
       def ipv6: type == "string" and contains(":") and test("^[A-Fa-f0-9:]+$");
+      # 宿主后端只接受可路由字面地址或 Docker 宿主别名，不能把容器回环当宿主。
+      def host_address:
+        . == "host.docker.internal" or
+        (type == "string" and
+          (if contains(":") then
+            test("^(?:[23][A-Fa-f0-9]{3}|[fF][cCdD][A-Fa-f0-9]{2}):") and
+            (split("::") as $halves |
+              ($halves | length) <= 2 and
+              all($halves[]; . == "" or test("^(?:[A-Fa-f0-9]{1,4}:)*[A-Fa-f0-9]{1,4}$")) and
+              ([ $halves[] | split(":")[] | select(. != "") ] as $parts |
+                all($parts[]; test("^[A-Fa-f0-9]{1,4}$")) and
+                (if ($halves | length) == 2 then ($parts | length) < 8
+                 else ($parts | length) == 8 end))) and
+            (test(":::") | not)
+           else
+            split(".") as $parts |
+            ($parts | length) == 4 and
+            all($parts[]; test("^(0|[1-9][0-9]{0,2})$") and tonumber <= 255) and
+            ($parts[0] | tonumber) > 0 and ($parts[0] | tonumber) < 224 and
+            $parts[0] != "127" and ($parts[0:2] != ["169", "254"])
+           end));
       def server: hostname or ipv4 or ipv6;
       def uuid: type == "string" and length == 36 and test("^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$");
       def name: type == "string" and test("^[A-Za-z0-9._~@+=:-]{1,64}$");
@@ -83,15 +104,33 @@ dockerConfigureSpecValidate() {
         [.core.protocols[] | select(.listener_id == $request.reality_stream.listener_id)] as $realities |
         [.core.protocols[] | select(.listener_id == $request.reality_stream.website_listener_id)] as $websites |
         $realities[0] as $reality | $websites[0] as $website |
-        (.reality_stream | exact(["listener_id", "website_listener_id"]) and
-          (.listener_id | type == "string") and (.website_listener_id | type == "string")) and
-        ($realities | length) == 1 and ($websites | length) == 1 and
+          (.reality_stream | .listener_id | type == "string") and
+          ($realities | length) == 1 and
         $reality.core == "xray" and ($reality.id == 1 or $reality.id == 2) and
-        ($website.id == 21 or $website.id == 22 or $website.id == 23 or $website.id == 24 or $website.id == 25) and
-        ($reality.server | ascii_downcase) == ($website.server | ascii_downcase) and
-        ($reality.address_families | sort) == ($website.address_families | sort) and
-        ($reality.reality.server_name | ascii_downcase) !=
-          (($website.websocket // $website.httpupgrade // $website.grpc_tls).domain | ascii_downcase) and
+          (if .reality_stream | has("host_website") then
+            (.reality_stream | exact(["listener_id", "host_website"]) and
+              (.host_website | exact(["domains", "address", "port"]) and
+                (.address | host_address) and (.port | port) and .port != 443 and .port != 15443 and
+                (.domains | type == "array" and length >= 1 and length <= 16 and
+                  (unique | length) == length and
+                  all(.[]; hostname and . == ascii_downcase)))) and
+            all(.reality_stream.host_website.domains[];
+              . != ($reality.reality.server_name | ascii_downcase)) and
+            all(.core.protocols[]; .public_port != $request.reality_stream.host_website.port) and
+            # 同一 SNI 不得同时指向宿主站点和受管 TLS，避免悄悄绕过协议/订阅入口。
+            all(.core.protocols[] | select(.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25);
+              ((.websocket // .httpupgrade // .grpc_tls).domain | ascii_downcase) as $domain |
+              ($request.reality_stream.host_website.domains | index($domain)) == null)
+           else
+            (.reality_stream | exact(["listener_id", "website_listener_id"]) and
+              (.website_listener_id | type == "string")) and
+            ($websites | length) == 1 and
+            ($website.id == 21 or $website.id == 22 or $website.id == 23 or $website.id == 24 or $website.id == 25) and
+            ($reality.server | ascii_downcase) == ($website.server | ascii_downcase) and
+            ($reality.address_families | sort) == ($website.address_families | sort) and
+            ($reality.reality.server_name | ascii_downcase) !=
+              (($website.websocket // $website.httpupgrade // $website.grpc_tls).domain | ascii_downcase)
+           end) and
         .host_integrations == [] and
         all(.core.protocols[]; .public_port != 443 or
           .listener_id == $reality.listener_id or .listener_id == $website.listener_id)
@@ -365,7 +404,7 @@ dockerManagedSpecMatchesDeployment() {
         ($d.core | has("secondary_type")) and .core.secondary_type == $d.core.secondary_type
        else ($d.core | has("secondary_type") | not) end) and
       (([.core.type, .core.secondary_type] | map(select(. != null) | "core-\(.)")) +
-        [if any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29) then "nginx" else empty end] +
+        [if .reality_stream != null or any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29) then "nginx" else empty end] +
         [if .subscription.enabled then "subscription" else empty end] +
         [.host_integrations[].profile] | sort) == ($d.compose.profiles | sort) and
       (.host_integrations | sort_by(.type)) == ($d.host_integrations | sort_by(.type)) and
@@ -1070,7 +1109,7 @@ dockerStageTlsFiles() {
 dockerGenerateNginxConfig() {
     local specFile=$1 target=$2 domain path token subscriptionEnabled fail2banEnabled backendPort tlsPort backendCore protocolId hostHeader
     local httpPort http2Port
-    jq -e 'any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29)' "${specFile}" >/dev/null || return 0
+    jq -e '.reality_stream != null or any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29)' "${specFile}" >/dev/null || return 0
     domain=$(jq -r '.tls.domain' "${specFile}") || return 1
     token=$(jq -r '.subscription.token' "${specFile}") || return 1
     subscriptionEnabled=$(jq -r '.subscription.enabled' "${specFile}") || return 1
@@ -1206,26 +1245,33 @@ EOF
 }
 
 dockerGenerateRealityStreamConfig() {
-    local specFile=$1 target=$2 domain tlsPort realityPort
+    local specFile=$1 target=$2 domains address tlsPort realityPort domain
     jq -e '.reality_stream != null' "${specFile}" >/dev/null || return 0
-    IFS=$'\t' read -r domain tlsPort realityPort < <(jq -er '
+    IFS=$'\t' read -r domains address tlsPort realityPort < <(jq -er '
       .reality_stream as $split |
       [.core.protocols[] | select(.listener_id == $split.listener_id)][0] as $reality |
       [.core.protocols[] | select(.listener_id == $split.website_listener_id)][0] as $website |
       ($website.websocket // $website.httpupgrade // $website.grpc_tls) as $tls |
-      [$tls.domain, $tls.tls_port, $reality.public_port] | @tsv
+      [($split.host_website.domains // [$tls.domain] | join(",")),
+       ($split.host_website.address // "127.0.0.1"),
+       ($split.host_website.port // $tls.tls_port), $reality.public_port] | @tsv
     ' "${specFile}") || return 1
+    [[ "${address}" != *:* ]] || address="[${address}]"
     mkdir -p -- "$(dirname -- "${target}")" || return 1
     cat >"${target}" <<EOF
 stream {
     upstream padm_website {
-        server 127.0.0.1:${tlsPort};
+        server ${address}:${tlsPort};
     }
     upstream padm_reality {
         server xray:${realityPort};
     }
     map \$ssl_preread_server_name \$padm_backend {
-        ${domain} padm_website;
+EOF
+    while IFS= read -r domain; do
+        printf '        %s padm_website;\n' "${domain}" >>"${target}" || return 1
+    done < <(printf '%s\n' "${domains}" | tr ',' '\n')
+    cat >>"${target}" <<'EOF'
         default padm_reality;
     }
     server {
@@ -1234,7 +1280,7 @@ stream {
         ssl_preread on;
         proxy_connect_timeout 10s;
         proxy_timeout 5d;
-        proxy_pass \$padm_backend;
+        proxy_pass $padm_backend;
     }
 }
 EOF
@@ -1426,7 +1472,7 @@ dockerGenerateCompose() {
               }]
             else . end
         else . end
-      | if (($websocket | length) + ($fallback | length)) > 0 then
+      | if (($websocket | length) + ($fallback | length)) > 0 or $r.reality_stream != null then
           .services.nginx = (defaults + {
             image: "${PADM_NGINX_IMAGE:?PADM_NGINX_IMAGE is required}",
             profiles: ["nginx"],
@@ -1447,7 +1493,8 @@ dockerGenerateCompose() {
                 $r.core.protocols[] | select(.listener_id == $r.reality_stream.listener_id) |
                 .public_port = 443 | ports(.; 15443)[] else empty end]),
             tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=32m"]
-          })
+          } + if $r.reality_stream.host_website.address == "host.docker.internal" then
+            {extra_hosts: ["host.docker.internal:host-gateway"]} else {} end)
         else . end
       | if $r.subscription.enabled then
           .services.subscription = (defaults + {
@@ -1566,7 +1613,7 @@ dockerGenerateDeployment() {
       def digest: capture("@(?<value>sha256:[a-f0-9]{64})$").value;
       def profiles:
         ([[$r.core.type, $r.core.secondary_type][] | select(. != null) | "core-\(.)"] +
-        [if any($r.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29) then "nginx" else empty end] +
+        [if $r.reality_stream != null or any($r.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29) then "nginx" else empty end] +
         [if $r.subscription.enabled then "subscription" else empty end] +
         [$r.host_integrations[].profile]);
       {
@@ -2231,6 +2278,10 @@ dockerRealityStreamDeploymentCheck() {
             dockerConfigureSpecValidate "${specFile}" || return 1
             jq -e '.["x-padm-reality-stream-deployment"] == true' \
                 "$(dockerConfigureSchemaFile)" >/dev/null || return 1
+            if jq -e '.reality_stream.host_website != null' "${specFile}" >/dev/null; then
+                jq -e '.["x-padm-reality-stream-host-website"] == true' \
+                    "$(dockerConfigureSchemaFile)" >/dev/null || return 1
+            fi
         fi
     done
 }
@@ -2628,7 +2679,9 @@ dockerTlsConsumers() {
                     <(dockerGenerateNginxConfig "${specFile}" /dev/stdout) &&
                 jq -e --slurpfile expected <(dockerGenerateCompose "${specFile}" /dev/stdout) '
                   (.services.nginx.volumes | sort_by(.target)) ==
-                    ($expected[0].services.nginx.volumes | sort_by(.target))' \
+                    ($expected[0].services.nginx.volumes | sort_by(.target)) and
+                  .services.nginx.extra_hosts == $expected[0].services.nginx.extra_hosts and
+                  .services.nginx.network_mode == null' \
                     "${root}/compose.json" >/dev/null || return 1
         else
             [[ -z "$(find "${root}/config/nginx" -name '*.conf' ! -name default.conf -print -quit)" ]] || return 1
@@ -2660,7 +2713,7 @@ dockerTlsConsumers() {
             ' "${root}/compose.json" >/dev/null || return 1
             consumers=$(jq -c '. + ["nginx"]' <<<"${consumers}") || return 1
         fi
-        else
+        elif ! jq -e '.reality_stream != null' "${specFile}" >/dev/null; then
             # 明文 fallback 只接受受管生成结果和固定挂载，拒绝配置漂移及主配置覆盖。
             cmp -s -- "${root}/config/nginx/default.conf" \
                 <(dockerGenerateNginxConfig "${specFile}" /dev/stdout) &&
