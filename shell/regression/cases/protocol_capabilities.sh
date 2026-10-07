@@ -645,6 +645,28 @@ runProtocolEntryConfigUpdateRegression() (
         "${fixtureConfig}" >/dev/null
     [[ "${commits}" == 6 ]]
     before=$(<"${fixtureConfig}")
+    (
+        # 数据用输出变量返回，非法时间的错误提示不能被命令替换吞掉。
+        local errorLog="${root}/tuic-input-error.log"
+        errorCard() { printf '%s\n' "$*"; }
+        regressionExpectStatus 1 setTuicConnectionParams <<<bad >"${errorLog}"
+        grep -q '时间格式错误' "${errorLog}"
+        [[ "${commits}" == 6 && "$(<"${fixtureConfig}")" == "${before}" ]]
+    )
+    (
+        # 范围读取不捕获错误卡；格式和顺序失败都保留配置与输出变量。
+        local errorLog="${root}/xhttp-input-error.log" fromValue=unchanged toValue=unchanged
+        errorCard() { printf '%s\n' "$*"; }
+        for value in bad 9-2; do
+            regressionExpectStatus 1 setXHTTPCustomXmux <<<"${value}" >"${errorLog}"
+            grep -q '范围' "${errorLog}"
+            [[ "${commits}" == 6 && "$(<"${fixtureConfig}")" == "${before}" ]]
+            regressionExpectStatus 1 readXHTTPRange fixture 16 32 fromValue toValue <<<"${value}" >"${errorLog}"
+            [[ "${fromValue}" == unchanged && "${toValue}" == unchanged ]]
+        done
+        readXHTTPRange fixture 16 32 fromValue toValue <<<7
+        [[ "${fromValue}:${toValue}" == 7:7 ]]
+    )
     regressionExpectStatus 1 applyXHTTPConfigUpdate '.enabled = $enabled' fixture --argjson enabled invalid 2>/dev/null
     [[ "${commits}" == 6 && "$(<"${fixtureConfig}")" == "${before}" ]]
     [[ -z "$(find "${root}" -name '.config.json.xhttp.*' -print -quit)" ]]
@@ -799,6 +821,13 @@ runProtocolEntryConfigUpdateRegression() (
             manageCDN 1 <<< $'1\ncdn.example.com\n4'
             [[ "$(<"${root}/cdn")" == cdn.example.com ]]
             grep -q '当前是传统 TLS/CDN 协议' "${menuLog}"
+            currentInstallProtocolType=,2,
+            manageCDN 1 <<< $'1\nxhttp.example.com\n4'
+            [[ "$(<"${root}/cdn")" == xhttp.example.com ]]
+            grep -q '当前已安装 Reality XHTTP' "${menuLog}"
+            currentInstallProtocolType=,1,
+            manageCDN 1 <<< $'1\n4'
+            [[ "$(<"${root}/cdn")" == xhttp.example.com ]]
         )
     )
     (
@@ -863,6 +892,16 @@ runProtocolEntryPortRegression() (
     mkdir -p "${root}"
     root=$(cd -- "${root}" && pwd -P) || return 1
     configPath="${root}/"
+    (
+        # 文件名匹配已排除 UDP 转发和其它分片，列表编号只计算 TCP 入口。
+        local configPath="${root}/listing/"
+        mkdir -p "${configPath}"
+        for value in 2053 2083_default hysteria_2083 legacy; do
+            printf '{}\n' >"${configPath}02_dokodemodoor_inbounds_${value}.json"
+        done
+        [[ "$(corePortListExtra)" == $'1:2053\n2:2083 默认' ]]
+        [[ "$(corePortResolveByIndex 2)" == 2083 ]]
+    )
     listenerFile="${configPath}07_VLESS_vision_reality_inbounds.json"
     defaultFile="${configPath}02_dokodemodoor_inbounds_2053_default.json"
     [[ "$(corePortParseList '02053,2053, 2083,,')" == $'2053\n2083' ]]

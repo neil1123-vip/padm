@@ -80,12 +80,12 @@ protocolEntryMenu() {
         selectProtocolMenuType=
         menuReadChoice protocol_entry_menu "请选择:" selectProtocolMenuType || return 0
         case "${selectProtocolMenuType}" in
-        1) manageReality 1 || true; continue ;;
-        2) manageXHTTP || true; continue ;;
-        3) manageHysteria || true; continue ;;
-        4) manageTuic || true; continue ;;
-        5) addCorePort 1 || true; continue ;;
-        6) manageCDN 1 || true; continue ;;
+        1) manageReality 1 || true ;;
+        2) manageXHTTP || true ;;
+        3) manageHysteria || true ;;
+        4) manageTuic || true ;;
+        5) addCorePort 1 || true ;;
+        6) manageCDN 1 || true ;;
         7) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac

@@ -1117,7 +1117,6 @@ corePortListExtra() {
     local file base port defaultMark count=0
     while IFS= read -r file; do
         base=${file##*/}
-        [[ "${base}" == *hysteria* ]] && continue
         if [[ "${base}" =~ ^02_dokodemodoor_inbounds_([0-9]+)(_default)?\.json$ ]]; then
             port=${BASH_REMATCH[1]}
             defaultMark=
@@ -1992,7 +1991,7 @@ manageCDN() {
 
         case "${selectCDNType}" in
         1)
-            if currentProtocolHas 2 || currentProtocolHasAny 21 22 23 24 25; then
+            if currentProtocolHasAny 2 21 22 23 24 25; then
                 setCDNEntryAddress || true
             else
                 statusCard "不可用" "请先安装 Reality XHTTP 或传统 TLS/CDN 协议"
@@ -3306,17 +3305,15 @@ readXHTTPRange() {
         errorCard "范围不合法"
         return 1
     fi
-    printf '%s %s' "${from}" "${to}"
+    printf -v "$4" '%s' "${from}"
+    printf -v "$5" '%s' "${to}"
 }
 
 setXHTTPCustomXmux() {
-    local concurrency requestTimes reusableSecs concurrencyFrom concurrencyTo requestFrom requestTo reusableFrom reusableTo
-    concurrency=$(readXHTTPRange "请输入 maxConcurrency 范围" 16 32) || return 1
-    requestTimes=$(readXHTTPRange "请输入 hMaxRequestTimes 范围" 600 900) || return 1
-    reusableSecs=$(readXHTTPRange "请输入 hMaxReusableSecs 范围" 1800 3000) || return 1
-    read -r concurrencyFrom concurrencyTo <<<"${concurrency}"
-    read -r requestFrom requestTo <<<"${requestTimes}"
-    read -r reusableFrom reusableTo <<<"${reusableSecs}"
+    local concurrencyFrom concurrencyTo requestFrom requestTo reusableFrom reusableTo
+    readXHTTPRange "请输入 maxConcurrency 范围" 16 32 concurrencyFrom concurrencyTo || return 1
+    readXHTTPRange "请输入 hMaxRequestTimes 范围" 600 900 requestFrom requestTo || return 1
+    readXHTTPRange "请输入 hMaxReusableSecs 范围" 1800 3000 reusableFrom reusableTo || return 1
     if ((10#${concurrencyFrom} < 1)); then
         errorCard "maxConcurrency 必须大于 0"
         return 1
@@ -3363,17 +3360,15 @@ setXHTTPPathHost() {
 }
 
 setXHTTPAdvancedParams() {
-    local padding maxPost minInterval maxBuffered streamSecs noGrpc noSse pf pt sf st
-    padding=$(readXHTTPRange "请输入 xPaddingBytes 范围" 100 1000) || return 1
-    read -r pf pt <<<"${padding}"
+    local maxPost minInterval maxBuffered noGrpc noSse pf pt sf st
+    readXHTTPRange "请输入 xPaddingBytes 范围" 100 1000 pf pt || return 1
     autoRead xhttp_max_post_bytes "请输入 packet-up 单个 POST 最大字节数[回车默认 1000000]:" maxPost || return 1
     maxPost=${maxPost:-1000000}
     autoRead xhttp_min_posts_interval "请输入 packet-up 客户端 POST 最小间隔毫秒[回车默认 30]:" minInterval || return 1
     minInterval=${minInterval:-30}
     autoRead xhttp_max_buffered_posts "请输入 packet-up 服务端最多缓存 POST 数[回车默认 30]:" maxBuffered || return 1
     maxBuffered=${maxBuffered:-30}
-    streamSecs=$(readXHTTPRange "请输入 stream-up 服务端保活秒数范围" 20 80) || return 1
-    read -r sf st <<<"${streamSecs}"
+    readXHTTPRange "请输入 stream-up 服务端保活秒数范围" 20 80 sf st || return 1
     autoRead xhttp_disable_grpc_header "是否关闭 gRPC header 伪装？[y/n，默认 n]:" noGrpc || return 1
     autoRead xhttp_disable_sse_header "是否关闭 SSE response header？[y/n，默认 n]:" noSse || return 1
     [[ "${maxPost}" =~ ^[0-9]+$ && "${minInterval}" =~ ^[0-9]+$ && "${maxBuffered}" =~ ^[0-9]+$ ]] || {
@@ -3843,20 +3838,20 @@ setTuicCongestionControl() {
 readTuicDuration() {
     local prompt=$1
     local defaultValue=$2
-    local input
+    local resultVar=$3 input
     autoRead tuic_duration "${prompt}[回车默认 ${defaultValue}]：" input || return 1
     input=${input:-${defaultValue}}
     if [[ ! "${input}" =~ ^[0-9]+(ms|s|m|h)$ ]]; then
         errorCard "时间格式错误，应为 300ms、3s、10s、1m 这类格式"
         return 1
     fi
-    printf '%s' "${input}"
+    printf -v "${resultVar}" '%s' "${input}"
 }
 
 setTuicConnectionParams() {
     local authTimeout heartbeat
-    authTimeout=$(readTuicDuration "请输入认证超时时间 auth_timeout" "3s") || return 1
-    heartbeat=$(readTuicDuration "请输入心跳间隔 heartbeat" "10s") || return 1
+    readTuicDuration "请输入认证超时时间 auth_timeout" "3s" authTimeout || return 1
+    readTuicDuration "请输入心跳间隔 heartbeat" "10s" heartbeat || return 1
     applyTuicConfigUpdate '.inbounds[0].auth_timeout = $authTimeout | .inbounds[0].heartbeat = $heartbeat' \
         "Tuic 连接参数已更新" --arg authTimeout "${authTimeout}" --arg heartbeat "${heartbeat}"
 }
