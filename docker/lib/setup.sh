@@ -410,7 +410,8 @@ dockerSetupCommand() {
     local realityPort=443 target= targetPort=443 sni= domain= wsPort=443 tlsMode= cert= key=
     local hy2Mode=bbr hy2Up=100 hy2Down=50 hy2Obfs=false hy2Masquerade=
     local tuicCongestion=cubic tuicAuthTimeout=3s tuicHeartbeat=10s tuicZeroRtt=false
-    local email= provider= credentials= subscription=false answer= root candidate status=0
+    local email= provider= credentials= subscription=false answer= root candidate= status=0
+    local targetMode probeInputs releasePrepared=0
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
         --manifest|--bundle|--control-bundle)
@@ -461,9 +462,49 @@ dockerSetupCommand() {
         if [[ "${protocols}" != 2 && "${protocols}" != 6 && "${protocols}" != 7 && "${protocols}" != 8 && "${protocols}" != 9 && "${protocols}" != 10 && "${protocols}" != 11 && "${protocols}" != 12 && "${protocols}" != 13 && "${protocols}" != 14 && "${protocols}" != 15 && "${protocols}" != 16 && "${protocols}" != 17 ]]; then
             dockerSetupRead realityPort '主核心 Reality 入口端口 [443]: ' 443 || return 0
         fi
-        dockerSetupRead target 'Reality 目标域名（0 取消）: ' || return 0
-        dockerSetupRead targetPort 'Reality 目标端口 [443]: ' 443 || return 0
-        dockerSetupRead sni "Reality SNI [${target}]: " "${target}" || return 0
+        printf '\nREALITY 目标站选择\n'
+        printf '%s\n' '1. 检测候选后选择' '2. 手动输入'
+        while :; do
+            dockerSetupRead targetMode '请选择 [1]（0 取消）: ' 1 || return 0
+            case "${targetMode}" in
+            1)
+                # 探测镜像必须来自已验签的发布，交互期间不持有部署锁。
+                dockerConfigureReleasePrepare "${manifest}" "${bundle}" "${controlBundle}" || return $?
+                releasePrepared=1
+                root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+                candidate=$(mktemp -d "${root}/.setup.XXXXXX") || return "${PADM_DOCKER_RC_STATE}"
+                DOCKER_SETUP_CANDIDATE=${candidate}
+                chmod 0700 "${candidate}" || return "${PADM_DOCKER_RC_STATE}"
+                probeInputs=$(dockerManifestConfigurationInputs) || return "${PADM_DOCKER_RC_MANIFEST}"
+                jq '{images:.images,core:{protocols:[]}}' <<<"${probeInputs}" \
+                    >"${candidate}/target-probe.json" &&
+                    chmod 0600 "${candidate}/target-probe.json" || return "${PADM_DOCKER_RC_STATE}"
+                source "${DOCKER_BUNDLE_SOURCE_ROOT}/docker/lib/reality-targets.sh" || return "${PADM_DOCKER_RC_STATE}"
+                dockerRealityTargetAction "${candidate}/target-probe.json" candidates "${candidate}/target.json" || status=$?
+                case "${status}" in
+                2) ;;
+                0|130|143) return "${status}" ;;
+                *) return "${PADM_DOCKER_RC_STATE}" ;;
+                esac
+                status=0
+                target=$(jq -er '.host' "${candidate}/target.json") &&
+                    targetPort=$(jq -er '.port' "${candidate}/target.json") &&
+                    sni=$(jq -er '.sni' "${candidate}/target.json") || return "${PADM_DOCKER_RC_STATE}"
+                ;;
+            2)
+                dockerSetupRead target 'Reality 目标 host[:port]（回车或 0 取消）: ' || return 0
+                [[ -n "${target}" ]] || return 0
+                if [[ "${target}" == *:* ]]; then
+                    targetPort=${target##*:}
+                    target=${target%:*}
+                fi
+                sni=${target}
+                ;;
+            *) printf '无效选项，请重新选择。\n'; continue ;;
+            esac
+            break
+        done
+        dockerSetupRead sni "Reality SNI [${sni}]: " "${sni}" || return 0
         dockerDomainIsValid "${target}" && dockerDomainIsValid "${sni}" ||
             return "${PADM_DOCKER_RC_USAGE}"
     fi
@@ -622,9 +663,11 @@ dockerSetupCommand() {
     case "${answer}" in y|Y|yes|YES) ;; *) printf '已取消首次配置。\n'; return 0 ;; esac
     dockerLockInstalledDeployment || return $?
     dockerSetupUnconfigured || return "${PADM_DOCKER_RC_CONFLICT}"
-    dockerConfigureReleasePrepare "${manifest}" "${bundle}" "${controlBundle}" || return $?
+    if [[ "${releasePrepared}" -eq 0 ]]; then
+        dockerConfigureReleasePrepare "${manifest}" "${bundle}" "${controlBundle}" || return $?
+    fi
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
-    candidate=$(mktemp -d "${root}/.setup.XXXXXX") || return "${PADM_DOCKER_RC_STATE}"
+    [[ -n "${candidate}" ]] || candidate=$(mktemp -d "${root}/.setup.XXXXXX") || return "${PADM_DOCKER_RC_STATE}"
     DOCKER_SETUP_CANDIDATE=${candidate}
     chmod 0700 "${candidate}" || return "${PADM_DOCKER_RC_STATE}"
     dockerSetupGenerateSpec "${core}" "${protocols}" "${server}" "${families}" "${realityPort}" \

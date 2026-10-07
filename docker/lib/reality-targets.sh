@@ -116,7 +116,7 @@ dockerRealityTargetAction() (
             [[ ! -e "${state}/${commitFile}" || -f "${state}/${commitFile}" ]] || return 1
     done
     case "${action}" in
-    status | blocked | library | select | validate) ;;
+    status | blocked | library | select | candidates | validate) ;;
     check | refresh | block | scan-range | scan-asn) mutation=1 ;;
     *) dockerError "未知 REALITY 目标库动作: ${action}"; return 2 ;;
     esac
@@ -171,6 +171,7 @@ dockerRealityTargetAction() (
     menuReturnItem() { menuItem "$@"; }
     menuClose() { printf '\n'; }
     errorCard() { dockerError "$*"; }
+    statusCard() { realityTargetStatusBlock green "$@"; }
     uiStyle() { printf '%s' "$2"; }
     menuReadChoice() { IFS= read -r -p "$2" "$3"; }
     autoRead() { IFS= read -r -p "$2" "$3"; }
@@ -319,51 +320,6 @@ dockerRealityTargetAction() (
         padmRemoveCleanupPath "${scanWork}"
         return "${status}"
     }
-    dockerTargetScanImport() {
-        local mode=$1 input=$2 currentAsn=${3:-} currentOrg=${4:-} seenDomainsFile=${5:-}
-        local scannerDir scannerBin outputFile scannerStatus=0 networkMode=lookup
-        scannerDir="${work}/RealiTLScanner"
-        scannerBin="${scannerDir}/RealiTLScanner"
-        ensureRealityScannerBinary "${scannerDir}" "${scannerBin}" || return 1
-        padmCreateTempPath outputFile "${work}/scanner-result.XXXXXX" || return 1
-        runRealityScannerQuietly "${outputFile}" "${scannerBin}" "${mode}" "${input}" -thread 20 -timeout 3 -out "${outputFile}" || scannerStatus=$?
-        if (( scannerStatus != 0 )); then
-            dockerError "RealiTLScanner 执行失败: ${scannerStatus}"
-            [[ ! -f "${outputFile}.log" ]] || cat -- "${outputFile}.log" >&2
-            return "${scannerStatus}"
-        fi
-        [[ -s "${outputFile}" ]] || { dockerError 'RealiTLScanner 未生成有效 CSV'; return 1; }
-        [[ -z "${currentAsn}" || -z "${currentOrg}" ]] || networkMode=same_asn
-        importRealityScannerResults "${outputFile}" "${currentAsn}" "${currentOrg}" "" "${networkMode}" "${seenDomainsFile}"
-    }
-    runRealityScannerRange() { dockerTargetScanImport -addr "$1"; }
-    runRealityScannerTargetFile() {
-        local targetFile=$1 currentAsn=${2:-} currentOrg=${3:-}
-        local seenDomainsFile batchFile total batchSize processed=0 batchCount
-        padmCreateTempPath seenDomainsFile || return 1
-        total=$(wc -l <"${targetFile}") || return 1
-        batchSize=${total}
-        (( total < 1000 )) || batchSize=1000
-        (( total < 5000 )) || batchSize=2000
-        while (( processed < total )); do
-            padmCreateTempPath batchFile || return 1
-            sed -n "$((processed + 1)),$((processed + batchSize))p" "${targetFile}" >"${batchFile}" || return 1
-            batchCount=$(wc -l <"${batchFile}") || return 1
-            (( batchCount > 0 )) || break
-            dockerTargetScanImport -in "${batchFile}" "${currentAsn}" "${currentOrg}" "${seenDomainsFile}" || return 1
-            processed=$((processed + batchCount))
-            realityTargetProgressLine "RealiTLScanner 抽样扫描进度: ${processed}/${total}"
-            padmRemoveCleanupPath "${batchFile}"
-        done
-    }
-    runRealityScannerPrefixFile() {
-        local prefixFile=$1 currentAsn=${2:-} currentOrg=${3:-} prefix seenDomainsFile
-        padmCreateTempPath seenDomainsFile || return 1
-        while IFS= read -r prefix; do
-            [[ -n "${prefix}" ]] || continue
-            dockerTargetScanImport -addr "${prefix}" "${currentAsn}" "${currentOrg}" "${seenDomainsFile}" || return 1
-        done <"${prefixFile}"
-    }
     # 扫描参数作为单独 argv 传递；保留扫描器支持的域名、IP、CIDR 和地址范围。
     dockerTargetRangeIsValid() {
         local range=$1
@@ -396,14 +352,22 @@ dockerRealityTargetAction() (
     status) [[ -z "${records}" ]] || dockerTargetStatus; return 0 ;;
     blocked) showRealityTargetBlockedCandidates; return 0 ;;
     library) showRealityTargetScanResults "${1:-all}" once "${2:-1}"; return $? ;;
-    select)
+    select | candidates)
         selectedFile=${1:-}
         dockerRealityTargetPathIsSafe "${selectedFile}" &&
             [[ -d "$(dirname -- "${selectedFile}")" &&
                 "$(stat -c %a -- "$(dirname -- "${selectedFile}")")" == 700 &&
                 ! -e "${selectedFile}" && ! -L "${selectedFile}" ]] || return 1
-        showRealityTargetScanResults all interactive || status=$?
-        [[ "${status}" == 2 ]] || return "${status}"
+        if [[ "${action}" == candidates ]]; then
+            # 首配检测只写本次临时库，取消不会留下持久状态或占用部署锁。
+            PADM_REALITY_TARGET_RESULTS_FILE="${work}/candidates.tsv"
+            scanLocalAsnRealityTargets all || return 1
+            PADM_REALITY_TARGET_SELECTION_REQUIRE_SCAN=1
+            selectRealityTargetCandidateInteractive all || return 0
+        else
+            showRealityTargetScanResults all interactive || status=$?
+            [[ "${status}" == 2 ]] || return "${status}"
+        fi
         jq -n --arg host "${realityTargetHost}" --argjson port "${realityTargetPort}" --arg sni "${realitySNI}" \
             '{host:$host,port:$port,sni:$sni}' >"${selectedFile}" || return 1
         chmod 600 -- "${selectedFile}" || return 1
@@ -430,10 +394,14 @@ dockerRealityTargetAction() (
                     return 1
                 }
                 IFS=$'\t' read -r row _ip _asn _org _score _pqc _cert _tls _note <<<"${result}"
-                [[ "${row}" == no && "${_tls}" == yes && "${_score}" != FAIL ]] || {
+                [[ "${row}" == no && "${_tls}" == yes && "${_score}" =~ ^[ABC]$ ]] || {
                     dockerError "REALITY 目标风险检测不完整或不安全，已拒绝部署: ${target} (${row})"
                     return 1
                 }
+                if [[ "${_score}" == B || "${_score}" == C ]]; then
+                    realityTargetStatusBlock yellow 'REALITY 目标站' \
+                        "手工目标已通过 CDN 风险校验，但质量为 ${_score} 级" "${_note}" >&2
+                fi
             else
                 realityTargetHost=${host}
                 realityTargetPort=${port}
@@ -464,15 +432,16 @@ dockerRealityTargetAction() (
         ;;
     scan-range)
         local scanRange=${1:-} confirm currentIp
+        realityTargetStatusBlock yellow 'RealiTLScanner 风险提示' '会扫描目标网段 TLS 证书' \
+            '作者建议本地运行；云端扫描可能导致 VPS 被标记'
+        autoRead reality_scanner_confirm '确认在本机运行高级扫描？[y/n]:' confirm || return 0
+        [[ "${confirm}" == y ]] || return 0
         if [[ -z "${scanRange}" ]]; then
             currentIp=$(realityTargetPublicIPv4 2>/dev/null || true)
             selectRealityScannerRange "${currentIp}" || return 0
             scanRange=${selectedRealityScannerRange}
         fi
         dockerTargetRangeIsValid "${scanRange}" || { dockerError '扫描范围不能为空、包含控制符或以选项字符开头'; return 2; }
-        realityTargetStatusBlock yellow 'RealiTLScanner 风险提示' "将扫描 ${scanRange}；云端扫描可能导致 VPS 被标记"
-        autoConfirm reality_scanner_confirm '确认开始扫描？' n confirm || return 0
-        [[ "${confirm}" == y ]] || return 0
         runRealityScannerRange "${scanRange}" || return 1
         commitFile=results.tsv
         ;;

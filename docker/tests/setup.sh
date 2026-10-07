@@ -176,6 +176,9 @@ run)
             printf 'Pinging with SNI\nHandshake failure: certificate does not match SNI\n'
         else
             printf 'Pinging with SNI\nHandshake succeeded\nTLS Version:\tTLS 1.3\n'
+            if [[ "${mode}" == candidates ]]; then
+                printf 'TLS Post-Quantum key exchange: X25519MLKEM768\nCertificate chain has length: 4400\n'
+            fi
         fi
     elif [[ " $* " == *' tls-check '* ]]; then
         [[ "${mode}" != tls-fail ]] || exit 1
@@ -272,6 +275,10 @@ for relative in \
     mkdir -p "${SOURCE_ROOT}/$(dirname -- "${relative}")"
     cp "${PROJECT_ROOT}/${relative}" "${SOURCE_ROOT}/${relative}"
 done
+cat >>"${SOURCE_ROOT}/shell/core/reality_targets.sh" <<'EOF'
+lookupRealityTargetLocation() { printf 'Fixture Location\n'; }
+currentRealityNetworkProfile() { printf '192.0.2.10\tAS64500\tExampleNet\n'; }
+EOF
 tar -czf "${CONTROL}" -C "${SOURCE_ROOT}" install-docker.sh docker shell
 jq -n --arg sha "$(sha256sum "${CONTROL}" | cut -d ' ' -f 1)" '
     def image($name): {
@@ -404,8 +411,8 @@ runPty() {
     fi
 }
 
-REALITY_INPUT=$'1\n1\nproxy.example.com\n1\n24443\ntarget.example.com\n443\ntarget.example.com\ny\n'
-SINGBOX_INPUT=$'2\n1\nproxy.example.com\n1\n24443\ntarget.example.com\n443\ntarget.example.com\ny\n'
+REALITY_INPUT=$'1\n1\nproxy.example.com\n1\n24443\n2\ntarget.example.com:443\ntarget.example.com\ny\n'
+SINGBOX_INPUT=$'2\n1\nproxy.example.com\n1\n24443\n2\ntarget.example.com:443\ntarget.example.com\ny\n'
 for cancellation in first eof partial final empty; do
     newState "cancel-${cancellation}"
     before=$(snapshot)
@@ -427,6 +434,43 @@ for signal in int term; do
     if [[ "${signal}" == int ]]; then expected=130; else expected=143; fi
     runPty "${expected}" "interrupt-${signal}" "${REALITY_INPUT}" setup "${ASSET_ARGS[@]}"
     assertUnconfigured
+    unset FAKE_SETUP_MODE
+done
+
+for candidateCase in success return eof final-no no-a signature-fail; do
+    newState "candidates-${candidateCase}"
+    export FAKE_SETUP_MODE=candidates
+    input=$'1\n1\nproxy.example.com\n1\n24443\n\n'
+    expected=0
+    case "${candidateCase}" in
+    success) input+=$'1\n\ny\n' ;;
+    return) input+=$'r\n' ;;
+    eof) input+=$'\004' ;;
+    final-no) input+=$'1\n\nn\n' ;;
+    no-a) FAKE_SETUP_MODE=ok; input+=$'r\n' ;;
+    signature-fail) FAKE_SETUP_MODE=signature-fail; expected=16 ;;
+    esac
+    runPty "${expected}" "candidates-${candidateCase}" "${input}" setup "${ASSET_ARGS[@]}"
+    if [[ "${candidateCase}" == success ]]; then
+        jq -e '.core.protocols[0].reality |
+          .target_host != "" and .target_port == 443 and .server_name == .target_host' \
+            "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" >/dev/null ||
+            fail '候选首配未使用所选目标和默认 SNI'
+        [[ "$(grep -c '^pull ' "${EVENTS}")" == 5 ]] || fail '候选首配重复准备发布镜像'
+    else
+        assertUnconfigured
+        ! grep -Eq '^compose | uuid | x25519 | rand -hex ' "${EVENTS}" ||
+            fail '候选取消或失败提前生成账号、写入或启动部署'
+    fi
+    [[ ! -e "${PADM_DOCKER_INSTALL_DIR}/data/reality-targets" ]] ||
+        fail '首配候选选择发布了临时目标库'
+    [[ ! -e "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]] ||
+        fail '首配候选交互占用了部署锁'
+    if [[ "${candidateCase}" == signature-fail ]]; then
+        [[ ! -s "${EVENTS}" ]] || fail '候选探测绕过发布验签'
+    elif [[ "${candidateCase}" == no-a ]]; then
+        grep -Fq '总数：0' "${CONTROL_LOG}" || fail '候选菜单包含未实测 A 级目标'
+    fi
     unset FAKE_SETUP_MODE
 done
 
@@ -548,8 +592,8 @@ for transportCase in xray-xhttp xray-grpc singbox-grpc; do
 done
 
 # 双核心共用账号与 Reality 密钥，但入口身份和公开端口必须独立。
-DUAL_XRAY_INPUT=$'3\n1\nproxy.example.com\n1\n24443\ntarget.example.com\n443\ntarget.example.com\n24445\ny\n'
-DUAL_SINGBOX_INPUT=$'4\n1\nproxy.example.com\n1\n24443\ntarget.example.com\n443\ntarget.example.com\n24445\ny\n'
+DUAL_XRAY_INPUT=$'3\n1\nproxy.example.com\n1\n24443\n2\ntarget.example.com:443\ntarget.example.com\n24445\ny\n'
+DUAL_SINGBOX_INPUT=$'4\n1\nproxy.example.com\n1\n24443\n2\ntarget.example.com:443\ntarget.example.com\n24445\ny\n'
 for dualCase in dual-xray dual-singbox dual-xray-xhttp dual-xray-grpc dual-singbox-grpc; do
     newState "${dualCase}"
     protocol=1; listener=vless-reality
@@ -600,7 +644,7 @@ runPty 11 dual-port-conflict "${DUAL_XRAY_INPUT/24445/24443}" setup "${ASSET_ARG
 
 # Shadowsocks 首配不读取 TLS 或订阅参数，仅在确认后生成两份独立密码。
 SS_INPUT=$'2\n9\nproxy.example.com\n3\n24459\ny\n'
-DUAL_SS_INPUT=$'4\n9\nproxy.example.com\n3\ntarget.example.com\n443\ntarget.example.com\n24445\n24459\ny\n'
+DUAL_SS_INPUT=$'4\n9\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\n24459\ny\n'
 for ssCase in ss-default dual-ss; do
     newState "${ssCase}"
     if [[ "${ssCase}" == ss-default ]]; then input=${SS_INPUT}; single=true; else input=${DUAL_SS_INPUT}; single=false; fi
@@ -733,15 +777,15 @@ printf 'fake-key\n' >"${TEST_ROOT}/key.pem"
 chmod 0600 "${TEST_ROOT}/key.pem"
 printf -v HY2_INPUT '2\n6\nproxy.example.com\n1\nhy2.example.com\n24449\n\n\n\nn\n\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
-printf -v DUAL_HY2_INPUT '4\n6\nproxy.example.com\n3\ntarget.example.com\n443\ntarget.example.com\n24445\nhy2.example.com\n24449\nbrutal\n120\n60\ny\nhttps://www.example.com/health\n2\n%s\n%s\ny\n' \
+printf -v DUAL_HY2_INPUT '4\n6\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\nhy2.example.com\n24449\nbrutal\n120\n60\ny\nhttps://www.example.com/health\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
 printf -v ANYTLS_INPUT '2\n7\nproxy.example.com\n3\nanytls.example.com\n24451\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
-printf -v DUAL_ANYTLS_INPUT '4\n7\nproxy.example.com\n3\ntarget.example.com\n443\ntarget.example.com\n24445\nanytls.example.com\n24451\n2\n%s\n%s\ny\n' \
+printf -v DUAL_ANYTLS_INPUT '4\n7\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\nanytls.example.com\n24451\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
 printf -v NAIVE_INPUT '2\n8\nnaive.example.com\n3\n\n24455\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
-printf -v DUAL_NAIVE_INPUT '4\n8\nnaive.example.com\n3\ntarget.example.com\n443\ntarget.example.com\n24445\nnaive.example.com\n24455\n2\n%s\n%s\ny\n' \
+printf -v DUAL_NAIVE_INPUT '4\n8\nnaive.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\nnaive.example.com\n24455\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
 for tlsProtocolCase in anytls-default dual-anytls naive-default dual-naive; do
     newState "${tlsProtocolCase}"
@@ -1105,7 +1149,7 @@ for tlsCase in tls-fail ws-success; do
 done
 
 newState dual-ws-reality
-printf -v DUAL_WS_INPUT '3\n2\nproxy.example.com\n1\ntarget.example.com\n443\ntarget.example.com\n24445\nws.example.com\n24444\n2\n%s\n%s\ny\ny\n' \
+printf -v DUAL_WS_INPUT '3\n2\nproxy.example.com\n1\n2\ntarget.example.com:443\ntarget.example.com\n24445\nws.example.com\n24444\n2\n%s\n%s\ny\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
 runPty 0 dual-ws-reality "${DUAL_WS_INPUT}" setup "${ASSET_ARGS[@]}"
 jq -e '.schema_version == 3 and .core.type == "xray" and .core.secondary_type == "sing-box" and
@@ -1127,7 +1171,7 @@ printf 'existing-acme-account\n' >"${PADM_DOCKER_INSTALL_DIR}/data/acme/existing
 chmod 0600 "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/"*.key
 existingMaterials=$(find "${PADM_DOCKER_INSTALL_DIR}/secrets/tls" "${PADM_DOCKER_INSTALL_DIR}/data/acme" \
     -type f -exec sha256sum {} + | LC_ALL=C sort)
-BOTH_INPUT=$'1\n3\nproxy.example.com\n3\n24443\ntarget.example.com\n443\ntarget.example.com\nws.example.com\n24444\n1\ny\ny\n'
+BOTH_INPUT=$'1\n3\nproxy.example.com\n3\n24443\n2\ntarget.example.com:443\ntarget.example.com\nws.example.com\n24444\n1\ny\ny\n'
 runPty 0 both-managed "${BOTH_INPUT}" setup "${ASSET_ARGS[@]}"
 jq -e '.core.type == "xray" and ([.core.protocols[].id] | sort) == [1,21] and
     all(.core.protocols[]; .address_families == ["ipv4","ipv6"]) and
@@ -1248,7 +1292,7 @@ done
 # TUIC 复用首配与编辑事务；取消、凭据冻结和 TLS 消费者删除均检查受管状态。
 printf -v TUIC_INPUT '2\n10\nproxy.example.com\n3\ntuic.example.com\n24465\n\n\n\nn\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
-printf -v DUAL_TUIC_INPUT '4\n10\nproxy.example.com\n3\ntarget.example.com\n443\ntarget.example.com\n24445\ntuic.example.com\n24465\nbbr\n8s\n20s\ny\n2\n%s\n%s\ny\n' \
+printf -v DUAL_TUIC_INPUT '4\n10\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\ntuic.example.com\n24465\nbbr\n8s\n20s\ny\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
 for tuicCase in tuic-default dual-tuic; do
     newState "${tuicCase}"
@@ -1382,9 +1426,9 @@ printf -v TROJAN_INPUT '1\n11\nproxy.example.com\n3\ntrojan.example.com\n24476\n
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
 printf -v SING_TROJAN_INPUT '2\n11\nproxy.example.com\n3\ntrojan.example.com\n24476\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
-printf -v DUAL_TROJAN_INPUT '3\n11\nproxy.example.com\n3\ntarget.example.com\n443\ntarget.example.com\n24445\ntrojan.example.com\n24476\n2\n%s\n%s\ny\n' \
+printf -v DUAL_TROJAN_INPUT '3\n11\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\ntrojan.example.com\n24476\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
-printf -v DUAL_SING_TROJAN_INPUT '4\n11\nproxy.example.com\n3\ntarget.example.com\n443\ntarget.example.com\n24445\ntrojan.example.com\n24476\n2\n%s\n%s\ny\n' \
+printf -v DUAL_SING_TROJAN_INPUT '4\n11\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\ntrojan.example.com\n24476\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
 for trojanCase in trojan-xray trojan-sing dual-trojan-xray dual-trojan-sing; do
     newState "${trojanCase}"
@@ -1522,7 +1566,7 @@ export FAKE_SETUP_MODE=ok
 # VMess WS TLS 复用现有 WS 事务，aid 固定为零，单入口不开放 HTTPS 发布。
 printf -v VMESS_INPUT '1\n12\nproxy.example.com\n3\nvmess.example.com\n24481\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
-printf -v DUAL_VMESS_INPUT '3\n12\nproxy.example.com\n3\ntarget.example.com\n443\ntarget.example.com\n24445\nvmess.example.com\n24481\n2\n%s\n%s\ny\n' \
+printf -v DUAL_VMESS_INPUT '3\n12\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\nvmess.example.com\n24481\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
 for vmessCase in vmess-single vmess-dual; do
     newState "${vmessCase}"
@@ -1635,7 +1679,7 @@ for httpupgradeCase in httpupgrade-xray httpupgrade-sing dual-httpupgrade-xray d
         printf -v input '%s\n13\nproxy.example.com\n3\nhttpupgrade.example.com\n24485\n2\n%s\n%s\ny\n' \
             "${coreChoice}" "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
     else
-        printf -v input '%s\n13\nproxy.example.com\n3\ntarget.example.com\n443\ntarget.example.com\n24445\nhttpupgrade.example.com\n24485\n2\n%s\n%s\ny\n' \
+        printf -v input '%s\n13\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\nhttpupgrade.example.com\n24485\n2\n%s\n%s\ny\n' \
             "${coreChoice}" "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
     fi
     newState "${httpupgradeCase}"
@@ -1757,7 +1801,7 @@ for grpcProtocol in 24 25; do
         input=${grpcInput}; single=true
         if [[ "${grpcTopology}" == dual ]]; then
             single=false
-            printf -v input '3\n%s\nproxy.example.com\n3\ntarget.example.com\n443\ntarget.example.com\n24445\ngrpc.example.com\n24491\n2\n%s\n%s\ny\n' \
+            printf -v input '3\n%s\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\ngrpc.example.com\n24491\n2\n%s\n%s\ny\n' \
                 "${grpcChoice}" "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
         fi
         before=$(snapshot)
@@ -1876,7 +1920,7 @@ for fallbackProtocol in 27 29; do
         input=${fallbackInput}; single=true
         if [[ "${fallbackTopology}" == dual ]]; then
             single=false
-            printf -v input '3\n%s\nproxy.example.com\n3\ntarget.example.com\n443\ntarget.example.com\n24445\nfallback.example.com\n24501\n2\n%s\n%s\ny\n' \
+            printf -v input '3\n%s\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\nfallback.example.com\n24501\n2\n%s\n%s\ny\n' \
                 "${fallbackChoice}" "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
         fi
         before=$(snapshot)
