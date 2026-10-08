@@ -383,8 +383,17 @@ fail2banResolveNginxScanPorts() {
     nginxConfig=$(nginx -T 2>&1) || return 1
     awk -v target="${logFile}" '
         $1 == "access_log" {
-            path=$2
-            sub(/;$/, "", path)
+            path=$0
+            sub(/^[[:space:]]*access_log[[:space:]]+/, "", path)
+            quote=substr(path, 1, 1)
+            if (quote == "\"" || quote == sprintf("%c", 39)) {
+                path=substr(path, 2)
+                closing=index(path, quote)
+                if (!closing) next
+                path=substr(path, 1, closing - 1)
+            } else {
+                sub(/[[:space:];].*$/, "", path)
+            }
             if (path == target) found=1
         }
         END { exit found ? 0 : 1 }
@@ -393,6 +402,7 @@ fail2banResolveNginxScanPorts() {
         $1 == "listen" {
             endpoint=$2
             sub(/;$/, "", endpoint)
+            gsub(/^["\047]|["\047]$/, "", endpoint)
             if (endpoint ~ /^unix:/) next
             if (endpoint ~ /^\[[^]]+\]:[0-9]+$/) {
                 sub(/^.*\]:/, "", endpoint)

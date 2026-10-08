@@ -689,7 +689,7 @@ checkDNSIP() {
                 dnsIP=$(dig @8.8.8.8 +time=2 +short "${domain}" | grep -E "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$")
             fi
         else
-            dnsIP=$(getent ahostsv4 "${domain}" 2>/dev/null | awk '/STREAM/ {print $1; exit}')
+            dnsIP=$(getent ahostsv4 "${domain}" 2>/dev/null | awk '/STREAM/ {print $1}')
         fi
         dnsRetryCount=$((dnsRetryCount + 1))
         if [[ -z "${dnsIP}" && ${dnsRetryCount} -lt 3 ]]; then
@@ -707,7 +707,7 @@ checkDNSIP() {
                 fi
             done)
         else
-            dnsIP=$(getent ahostsv6 "${domain}" 2>/dev/null | awk '/STREAM/ {print $1; exit}')
+            dnsIP=$(getent ahostsv6 "${domain}" 2>/dev/null | awk '/STREAM/ {print $1}')
         fi
         ipType=6
         if [[ "${dnsIP}" == *"network unreachable"* || -z "${dnsIP}" ]]; then
@@ -722,7 +722,21 @@ checkDNSIP() {
         errorCard "无法获取当前 VPS 公网 IPv${ipType} 地址" "请确认 curl 已安装，并检查 https://www.cloudflare.com/cdn-cgi/trace 是否可访问"
         return 1
     fi
-    if [[ "${publicIP}" != "${dnsIP}" ]]; then
+    local normalizedPublicIP=${publicIP}
+    local addressMatched=false
+    if [[ "${ipType}" == 6 ]]; then
+        normalizedPublicIP=$(padmNormalizeIPv6Address "${publicIP}") || return 1
+    fi
+    while IFS= read -r dnsAddress; do
+        if [[ "${ipType}" == 6 ]]; then
+            dnsAddress=$(padmNormalizeIPv6Address "${dnsAddress}") || continue
+        fi
+        if [[ "${normalizedPublicIP}" == "${dnsAddress}" ]]; then
+            addressMatched=true
+            break
+        fi
+    done <<<"${dnsIP}"
+    if [[ "${addressMatched}" != true ]]; then
         statusCard "域名 IP 不一致" "当前 VPS IP：${publicIP}" "DNS 解析 IP：${dnsIP}" "请检查域名解析是否生效且正确"
         return 1
     else

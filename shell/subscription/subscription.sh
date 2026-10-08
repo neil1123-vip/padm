@@ -51,11 +51,20 @@ resolveSubscribeNginxAccessLogFile() {
     if [[ -f "${subscribeConfig}" ]]; then
         logPath=$(awk '
             /^[[:space:]]*access_log[[:space:]]+/ {
-                if ($2 !~ /^(off|syslog:)/) {
-                    gsub(/;$/, "", $2)
-                    print $2
-                    exit
+                path=$0
+                sub(/^[[:space:]]*access_log[[:space:]]+/, "", path)
+                quote=substr(path, 1, 1)
+                if (quote == "\"" || quote == sprintf("%c", 39)) {
+                    path=substr(path, 2)
+                    closing=index(path, quote)
+                    if (!closing) next
+                    path=substr(path, 1, closing - 1)
+                } else {
+                    sub(/[[:space:];].*$/, "", path)
                 }
+                if (path == "off" || path ~ /^syslog:/) next
+                print path
+                exit
             }
         ' "${subscribeConfig}" 2>/dev/null || true)
     fi

@@ -1363,6 +1363,8 @@ runFail2banApplyTransactionRegression() (
     local errorLog="${TMP_DIR}/fail2ban-apply-transaction-errors.log"
     local jailBefore
     local nginxLogConnected=true
+    local nginxLogQuote=
+    local nginxAccessLog
     local rc
     local jailCommitFailures=0
 
@@ -1377,6 +1379,7 @@ runFail2banApplyTransactionRegression() (
     export PADM_FAIL2BAN_CONTROL_LOG_FILE="${root}/fail2ban/log/padm-control-access.log"
     export PADM_FAIL2BAN_NGINX_ACCESS_LOG_FILE="${root}/nginx/access.log"
     export PADM_FAIL2BAN_VALIDATE_LOG="${root}/fail2ban/validate.log"
+    nginxAccessLog=${PADM_FAIL2BAN_NGINX_ACCESS_LOG_FILE}
     : >"${errorLog}"
 
     mkdir -p "$(dirname "${PADM_FAIL2BAN_CONTROL_LOG_FILE}")" "$(dirname "${PADM_FAIL2BAN_NGINX_ACCESS_LOG_FILE}")"
@@ -1393,7 +1396,7 @@ runFail2banApplyTransactionRegression() (
     nginx() {
         [[ "${1:-}" == "-T" ]] || return 1
         if [[ "${nginxLogConnected}" == "true" ]]; then
-            printf 'access_log %s;\n' "${PADM_FAIL2BAN_NGINX_ACCESS_LOG_FILE}"
+            printf 'access_log %s%s%s main;\n' "${nginxLogQuote}" "${nginxAccessLog}" "${nginxLogQuote}"
         else
             printf 'access_log %s;\n' "${root}/nginx/other.log"
         fi
@@ -1401,7 +1404,7 @@ runFail2banApplyTransactionRegression() (
             'listen 80;' \
             'listen [::]:443 ssl;' \
             'listen 443 ssl;' \
-            'listen 127.0.0.1:8443;' \
+            'listen "127.0.0.1:8443";' \
             'listen unix:/run/nginx.sock;'
     }
 
@@ -1486,6 +1489,23 @@ PY
         inScan && $0 == "port = 80,443,8443" { found=1 }
         END { exit found ? 0 : 1 }
     ' "${PADM_FAIL2BAN_JAIL_FILE}"
+    local quotedLog quote
+    quotedLog="${root}/nginx/access log.log"
+    : >"${quotedLog}"
+    for quote in '"' "'"; do
+        (
+            nginxAccessLog="${quotedLog}"
+            nginxLogQuote="${quote}"
+            local nginxConfigPath="${root}/nginx/"
+            printf 'access_log off;\naccess_log syslog:server=unix:/run/nginx.sock;\naccess_log %s%s%s main;\n' \
+                "${quote}" "${quotedLog}" "${quote}" >"${nginxConfigPath}subscribe.conf"
+            unset PADM_FAIL2BAN_NGINX_ACCESS_LOG_FILE
+            [[ "$(fail2banNginxAccessLogFile)" == "${quotedLog}" ]]
+            [[ "$(fail2banResolveNginxScanPorts)" == 80,443,8443 ]]
+            fail2banApplyProfile sshd true >/dev/null
+            grep -Fxq "logpath = ${quotedLog}" "${PADM_FAIL2BAN_JAIL_FILE}"
+        )
+    done
     jailBefore=$(<"${PADM_FAIL2BAN_JAIL_FILE}")
     nginxLogConnected=false
     regressionExpectStatus 1 fail2banApplyProfile sshd true >/dev/null 2>&1

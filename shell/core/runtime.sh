@@ -96,7 +96,7 @@ padmIsValidHostName() {
         local IFS=.
         read -r -a octets <<<"${host}"
         for octet in "${octets[@]}"; do
-            [[ "${octet}" =~ ^[0-9]+$ ]] && ((10#${octet} <= 255)) || return 1
+            [[ "${octet}" =~ ^[0-9]{1,3}$ ]] && ((10#${octet} <= 255)) || return 1
         done
         return 0
     fi
@@ -111,7 +111,7 @@ padmIsValidHostName() {
 
 padmIsValidIPv6Address() {
     local address=$1
-    local part
+    local part count=0
     local -a parts
     [[ -n "${address}" && ${#address} -le 45 ]] || return 1
     [[ "${address}" == *:*:* && "${address}" =~ ^[0-9A-Fa-f:]+$ ]] || return 1
@@ -121,14 +121,41 @@ padmIsValidIPv6Address() {
 
     local IFS=:
     read -r -a parts <<<"${address}"
-    if [[ "${address}" != *::* ]]; then
-        ((${#parts[@]} == 8)) || return 1
+    for part in "${parts[@]}"; do
+        [[ -n "${part}" ]] || continue
+        [[ "${part}" =~ ^[0-9A-Fa-f]{1,4}$ ]] || return 1
+        count=$((count + 1))
+    done
+    if [[ "${address}" == *::* ]]; then
+        ((count < 8))
     else
-        ((${#parts[@]} <= 8)) || return 1
+        ((count == 8))
+    fi
+}
+
+padmNormalizeIPv6Address() {
+    local address=$1 part missing separator=
+    local -a parts=() left=() right=()
+    padmIsValidIPv6Address "${address}" || return 1
+    if [[ "${address}" == *::* ]]; then
+        IFS=: read -r -a left <<<"${address%%::*}"
+        IFS=: read -r -a right <<<"${address#*::}"
+        missing=$((8 - ${#left[@]} - ${#right[@]}))
+        parts=("${left[@]}")
+        # 补齐压缩段后统一宽度和大小写，用于地址值比较。
+        while ((missing > 0)); do
+            parts+=(0)
+            missing=$((missing - 1))
+        done
+        parts+=("${right[@]}")
+    else
+        IFS=: read -r -a parts <<<"${address}"
     fi
     for part in "${parts[@]}"; do
-        [[ -z "${part}" || "${part}" =~ ^[0-9A-Fa-f]{1,4}$ ]] || return 1
+        printf '%s%04x' "${separator}" "$((16#${part}))"
+        separator=:
     done
+    printf '\n'
 }
 
 padmIsValidConnectAddress() {

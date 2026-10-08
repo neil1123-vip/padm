@@ -476,6 +476,22 @@ runPublicIPIPv4FallbackRegression() (
     set -euo pipefail
     unset currentHost singBoxVLESSRealityVisionSNI singBoxVLESSRealityGRPCSNI xrayVLESSRealitySNI
 
+    local address
+    for address in 0.0.0.0 192.0.2.10 255.255.255.255; do
+        padmIsValidHostName "${address}"
+    done
+    for address in 256.1.2.3 18446744073709551617.2.3.4; do
+        regressionExpectStatus 1 padmIsValidHostName "${address}"
+    done
+    for address in :: ::1 ::1:2:3:4:5:6:7 1:2:3:4:5:6:7:: 2001:db8::10 1:2:3:4:5:6:7:8; do
+        padmIsValidIPv6Address "${address}"
+    done
+    for address in 1:2:3:4:5:6:7 1::2::3 :::1 ::1:2:3:4:5:6:7:8 1:2:3:4:5:6:7:8::; do
+        regressionExpectStatus 1 padmIsValidIPv6Address "${address}"
+    done
+    [[ "$(padmNormalizeIPv6Address ::)" == 0000:0000:0000:0000:0000:0000:0000:0000 ]]
+    [[ "$(padmNormalizeIPv6Address 1:2:3:4:5:6:7::)" == 0001:0002:0003:0004:0005:0006:0007:0000 ]]
+
     fetchPublicIP() {
         case "$1" in
         4) return 1 ;;
@@ -505,9 +521,17 @@ runPublicIPIPv4FallbackRegression() (
         errorCard() { dnsErrors+="$*"$'\n'; }
         getPublicIP() { printf '%s\n' 2001:db8::10; }
         dig() {
-            [[ " $* " == *" aaaa "* ]] || return 0
+            if [[ " $* " != *" aaaa "* ]]; then
+                [[ "${mode}" != multi-v4 ]] || printf '203.0.113.20\n203.0.113.10\n'
+                return 0
+            fi
             printf 'canonical.example.com.\n'
-            [[ "${mode}" == alias-only ]] || printf '2001:db8::10\n'
+            case "${mode}" in
+            alias-only) ;;
+            expanded) printf '2001:0DB8:0000:0000:0000:0000:0000:0010\n' ;;
+            multi-v6) printf '2001:db8::20\n2001:0DB8:0:0:0:0:0:10\n' ;;
+            *) printf '2001:db8::10\n' ;;
+            esac
         }
         mode=alias
         checkDNSIP alias.example.com || return 1
@@ -518,6 +542,26 @@ runPublicIPIPv4FallbackRegression() (
         mode=alias
         getPublicIP() { printf '%s\n' 2001:db8::20; }
         regressionExpectStatus 1 checkDNSIP alias.example.com || return 1
+        getPublicIP() { printf '%s\n' 2001:db8::10; }
+        mode=expanded
+        checkDNSIP alias.example.com || return 1
+        mode=multi-v6
+        checkDNSIP alias.example.com || return 1
+        mode=multi-v4
+        getPublicIP() { printf '%s\n' 203.0.113.10; }
+        checkDNSIP alias.example.com || return 1
+        [[ "${ipType}" == 4 ]] || return 1
+        getPublicIP() { printf '%s\n' 203.0.113.30; }
+        regressionExpectStatus 1 checkDNSIP alias.example.com || return 1
+        (
+            command() {
+                [[ "$1" != -v || "$2" != dig ]] || return 1
+                builtin command "$@"
+            }
+            getent() { printf '203.0.113.20 STREAM\n203.0.113.10 STREAM\n'; }
+            getPublicIP() { printf '%s\n' 203.0.113.10; }
+            checkDNSIP alias.example.com || return 1
+        ) || return 1
     ) || return 1
 )
 
