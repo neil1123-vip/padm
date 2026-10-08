@@ -1099,6 +1099,8 @@ runProtocolEntryPortRegression() (
     [[ "$(corePortParseList '02053,2053, 2083,,')" == $'2053\n2083' ]]
     regressionExpectStatus 1 corePortParseList ', ,'
     regressionExpectStatus 1 corePortParseList '2053,bad'
+    regressionExpectStatus 1 corePortParseList '4 43'
+    regressionExpectStatus 1 corePortParseList $'4\t43'
     printf '%s\n' '{"inbounds":[{"port":8443},{"settings":{"clients":[{"id":"test-id","email":"main-Reality"}]}}]}' >"${listenerFile}"
     [[ "$(corePortForwardTarget)" == 8443 ]]
     corePortApplyReloadTransaction corePortWriteAddFiles 2053 02053 "$(corePortForwardTarget)"

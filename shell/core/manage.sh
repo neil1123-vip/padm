@@ -1084,7 +1084,8 @@ corePortParseList() {
     local -a items=()
     IFS=',' read -r -a items <<<"${input}"
     for item in "${items[@]}"; do
-        item=${item//[[:space:]]/}
+        item="${item#"${item%%[![:space:]]*}"}"
+        item="${item%"${item##*[![:space:]]}"}"
         [[ -z "${item}" ]] && continue
         validPortNumber "${item}" || return 1
         item=$((10#${item}))

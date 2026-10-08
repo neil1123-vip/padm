@@ -2825,6 +2825,7 @@ runRealityStreamSplitRegression() (
     allowPort() { allowCalls=$((allowCalls + 1)); PADM_LAST_ALLOW_PORT_ADDED=false; }
     reloadCore() { reloadCalls=$((reloadCalls + 1)); [[ "${reloadShouldFail}" != true ]]; }
     nginxRunning() { return 1; }
+    menuLine() { printf '%s\n' "$*" >>"${root}/status.log"; }
     serviceQueueRefresh() { :; }
     serviceQueueApply() { return 0; }
     readNginxSubscribe() { subscribePort=; return "${subscribeReadStatus}"; }
@@ -2852,11 +2853,12 @@ runRealityStreamSplitRegression() (
 
     if [[ "${mode}" != restore ]]; then
         # 损坏状态和孤立 stream 配置不能按未启用处理，更不能继续安装或重载。
-        local invalidState operation
+        local invalidState operation statusLog="${root}/status.log"
         for invalidState in '' '{' '{}' '{"enabled":"true"}' '{"enabled":true,"default_protocol":"xhttp","protocols":{}}'; do
             printf '%s' "${invalidState}" >"${PADM_REALITY_STREAM_STATE_FILE}"
-            for operation in configureRealityStreamSplit disableRealityStreamSplit; do
-                regressionExpectStatus 1 "${operation}"
+            for operation in configureRealityStreamSplit disableRealityStreamSplit showRealityStreamSplitStatus; do
+                regressionExpectStatus 1 "${operation}" >"${statusLog}"
+                ! grep -Eq '当前未启用|当前已启用' "${statusLog}"
                 [[ "$(<"${PADM_REALITY_STREAM_STATE_FILE}")" == "${invalidState}" ]]
                 [[ "$(<"${PADM_REALITY_STREAM_VISION_CONFIG_FILE}")" == "${oldVision}" &&
                     "$(<"${PADM_REALITY_STREAM_XHTTP_CONFIG_FILE}")" == "${oldXHTTP}" &&
@@ -2868,8 +2870,16 @@ runRealityStreamSplitRegression() (
         printf 'orphan stream\n' >"${PADM_REALITY_STREAM_CONF_FILE}"
         regressionExpectStatus 1 configureRealityStreamSplit
         regressionExpectStatus 1 disableRealityStreamSplit
+        regressionExpectStatus 1 showRealityStreamSplitStatus >"${statusLog}"
+        ! grep -Eq '当前未启用|当前已启用' "${statusLog}"
         [[ "$(<"${PADM_REALITY_STREAM_CONF_FILE}")" == 'orphan stream' ]]
         rm "${PADM_REALITY_STREAM_CONF_FILE}"
+        showRealityStreamSplitStatus >"${statusLog}"
+        grep -q '当前未启用' "${statusLog}"
+        printf '{"enabled":false}\n' >"${PADM_REALITY_STREAM_STATE_FILE}"
+        showRealityStreamSplitStatus >"${statusLog}"
+        grep -q '当前未启用' "${statusLog}"
+        rm "${PADM_REALITY_STREAM_STATE_FILE}"
         # 每个输入失败都在备份、开放端口和配置写入之前停止。
         for key in enable domains default_protocol website_port vision_port xhttp_port install_nginx; do
             failKey="reality_stream_${key}"
@@ -2955,6 +2965,10 @@ runRealityStreamSplitRegression() (
     configureRealityStreamSplit
     jq -e '.protocols.vision.restore_port == 443 and .protocols.vision.internal_port == 2445' "${PADM_REALITY_STREAM_STATE_FILE}" >/dev/null
     jq -e '.inbounds[0].settings.port == 2445' "${aliasFile}" >/dev/null
+    showRealityStreamSplitStatus >"${root}/status.log"
+    grep -q '当前已启用' "${root}/status.log"
+    grep -qx '默认 Reality 后端监听正常: 127.0.0.1:2445' "${root}/status.log"
+    grep -qx '订阅应输出公网端口: 443' "${root}/status.log"
     (
         # 恢复端口读取失败必须在备份、配置写入和服务应用前退出。
         local failProtocol effects="${backupCalls}:${patchCalls}:${allowCalls}:${reloadCalls}"
@@ -3072,6 +3086,9 @@ runRealityStreamSplitRegression() (
     jq -e '.default_protocol == "xhttp" and (.protocols | has("vision") | not) and .protocols.xhttp.restore_port == 9443' "${PADM_REALITY_STREAM_STATE_FILE}" >/dev/null
     jq -e '.inbounds[0].settings.port == 11443' "${aliasFile}" >/dev/null
     jq -e '.inbounds[0].settings.port == 2444' "${aliasXHTTPFile}" >/dev/null
+    showRealityStreamSplitStatus >"${root}/status.log"
+    grep -qx '默认 Reality 后端监听正常: 127.0.0.1:2444' "${root}/status.log"
+    grep -qx '订阅应输出公网端口: 443' "${root}/status.log"
     oldAlias=$(<"${aliasFile}") oldXHTTPAlias=$(<"${aliasXHTTPFile}")
     oldVision=$(<"${PADM_REALITY_STREAM_VISION_CONFIG_FILE}")
     oldXHTTP=$(<"${PADM_REALITY_STREAM_XHTTP_CONFIG_FILE}")

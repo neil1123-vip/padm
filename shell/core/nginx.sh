@@ -332,7 +332,7 @@ realityStreamSplitEnabled() {
     [[ -f "${stateFile}" ]] && jq -e '.enabled == true' "${stateFile}" >/dev/null 2>&1
 }
 
-# 修改入口前拒绝不完整状态，不能把读取失败当成关闭。
+# 读取或修改入口前拒绝不完整状态，不能把读取失败当成关闭。
 realityStreamValidateState() {
     local stateFile confFile hasConf=false
     stateFile=$(realityStreamSplitStateFile) || return 1
@@ -355,7 +355,7 @@ realityStreamValidateState() {
             )))
         )
     ' "${stateFile}" >/dev/null 2>&1; then
-        errorCard "Reality 443 共存状态损坏，已取消修改" "请先检查 ${stateFile}"
+        errorCard "Reality 443 共存状态损坏" "请先检查 ${stateFile}"
         return 1
     fi
 }
@@ -474,10 +474,11 @@ renderRealityStreamSplitNginxConf() {
 }
 
 showRealityStreamSplitStatus() {
-    local stateFile confFile nginxMainConf defaultProtocol internalPort publicPort configFile listenValue portValue
+    local stateFile confFile nginxMainConf defaultProtocol internalPort publicPort configFile listenValue portValue values
     stateFile=$(realityStreamSplitStateFile)
     confFile=$(realityStreamSplitConfFile)
     nginxMainConf=$(realityStreamSplitNginxConf)
+    realityStreamValidateState || return 1
     echoContent title "\n┌─ Reality 443 共存分流状态 ─────────────────────────"
     if ! realityStreamSplitEnabled; then
         menuLine "$(uiStyle warn "当前未启用 Reality 443 共存分流")"
@@ -504,9 +505,10 @@ showRealityStreamSplitStatus() {
         menuLine "$(uiStyle danger "Nginx主配置缺少 padm stream include")"
     fi
 
-    defaultProtocol=$(jq -r '.default_protocol // empty' "${stateFile}" 2>/dev/null)
-    internalPort=$(realityStreamInternalPortForProtocol "${defaultProtocol}")
-    publicPort=$(realityStreamPublicPortForProtocol "${defaultProtocol}")
+    values=$(jq -r '.default_protocol as $protocol |
+        [$protocol, .protocols[$protocol].internal_port, .protocols[$protocol].public_port] | @tsv
+    ' "${stateFile}" 2>/dev/null) || return 1
+    IFS=$'\t' read -r defaultProtocol internalPort publicPort <<<"${values}"
     if [[ "${defaultProtocol}" == "xhttp" ]]; then
         configFile=$(realityStreamXHTTPConfigFile)
     else
