@@ -167,6 +167,50 @@ if [[ "${PADM_DOCKER_TEST_FIXTURE_ONLY:-0}" == 1 ]]; then
 fi
 
 newState v1 "${SPEC}"
+(
+    envFixture="${TEST_ROOT}/images-env-contract"
+    expectedEnv="${TEST_ROOT}/images-env-expected"
+    printf 'existing=keep\n' >"${expectedEnv}"
+    cat "${PADM_DOCKER_INSTALL_DIR}/images.env" >>"${expectedEnv}"
+    printf 'existing=keep\n' >"${envFixture}"
+    dockerGenerateImagesEnv "${SPEC}" "${envFixture}" "${PADM_DOCKER_INSTALL_DIR}"
+    cmp -s "${expectedEnv}" "${envFixture}" || fail '镜像环境生成顺序或追加行为改变'
+    printf '{' >"${TEST_ROOT}/invalid-images-spec.json"
+    if dockerGenerateImagesEnv "${TEST_ROOT}/invalid-images-spec.json" "${envFixture}" ignored 2>/dev/null; then
+        fail '镜像环境生成错误被后续 root 输出掩盖'
+    fi
+    cmp -s "${expectedEnv}" "${envFixture}" || fail '镜像环境生成失败后仍追加 root'
+    # 原始行必须精确匹配；允许无关字段与末行无换行，不解释 dotenv 内容。
+    for mutation in unchanged extra no-newline missing duplicate wrong-duplicate wrong cr space nul; do
+        jq -Rrjs --arg mode "${mutation}" '
+          if $mode == "extra" then . + "# comment\nUNRELATED=keep\n"
+          elif $mode == "no-newline" then
+            split("\n") | map(select(startswith("PADM_DOCKER_ROOT=") or startswith("PADM_NET_ROOT=") | not)) |
+            join("\n") | rtrimstr("\n")
+          elif $mode == "missing" then split("\n") | map(select(startswith("PADM_XRAY_IMAGE=") | not)) | join("\n")
+          elif $mode == "duplicate" then . + (split("\n")[1]) + "\n"
+          elif $mode == "wrong-duplicate" then . + "PADM_XRAY_IMAGE=wrong\n"
+          elif $mode == "wrong" then sub("PADM_XRAY_IMAGE="; "PADM_XRAY_IMAGE=wrong")
+          elif $mode == "cr" then gsub("\n"; "\r\n")
+          elif $mode == "space" then
+            split("\n") | map(if startswith("PADM_XRAY_IMAGE=") then . + " " else . end) | join("\n")
+          elif $mode == "nul" then sub("PADM_XRAY_IMAGE="; "PADM_XRAY_IMAGE=\u0000")
+          else . end
+        ' "${expectedEnv}" >"${envFixture}"
+        status=0
+        dockerManagedSpecMatchesDeployment "${SPEC}" "${PADM_DOCKER_INSTALL_DIR}/deployment.json" \
+            "${envFixture}" || status=$?
+        case "${mutation}" in
+        unchanged|extra|no-newline) [[ "${status}" == 0 ]] || fail "镜像环境拒绝 ${mutation}" ;;
+        *) [[ "${status}" != 0 ]] || fail "镜像环境错误接受 ${mutation}" ;;
+        esac
+    done
+    rm -- "${envFixture}"
+    ln -s "${expectedEnv}" "${envFixture}"
+    if dockerManagedSpecMatchesDeployment "${SPEC}" "${PADM_DOCKER_INSTALL_DIR}/deployment.json" "${envFixture}"; then
+        fail '镜像环境错误接受符号链接'
+    fi
+) || fail '镜像环境批量校验失败'
 runRead 0 v1-list dockerProtocolCommand list
 [[ "$(<"${STDOUT}")" == $'vless-reality  xray  Reality Vision  [2001:db8::1]:24443  [ipv4,ipv6]  Primary-Reality\nvless-ws  xray  WS TLS  proxy.example.com:24444  [ipv4]  Main:WS' ]] ||
     fail 'v1 列表未保留稳定入口 ID、核心或概要'

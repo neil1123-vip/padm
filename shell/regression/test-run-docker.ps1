@@ -64,6 +64,16 @@ esac
 [IO.File]::WriteAllBytes((Join-Path $fixture 'probe.bin'), [byte[]]@(0, 13, 10, 255))
 [IO.File]::WriteAllText((Join-Path $fixture 'ignored.txt'), 'must-not-copy', $utf8)
 $runner = Join-Path $runnerDir 'run-docker.ps1'
+# 高并发只给完整 Docker 合同，必须在创建快照或接触 daemon 前拒绝其它 selector。
+$rejected = $false
+try { & $runner -Selector fast -Jobs 5 }
+catch {
+    if ($_.Exception.Message -notmatch '^Only docker-contracts supports more than 4 jobs') { throw }
+    $rejected = $true
+}
+if (-not $rejected -or (Get-ChildItem -Directory -LiteralPath $fixture -Filter '.tmp-regression-docker-*')) {
+    throw 'High concurrency was not rejected before creating a snapshot.'
+}
 foreach ($case in @(
     @{ selector = 'fast'; expected = 0 },
     @{ selector = 'fail'; expected = 7 },
@@ -165,7 +175,7 @@ try {
     Wait-RunnerExit $heavy
     Wait-RunnerExit $queued
     $heavyResult = Get-RunnerResult $heavy
-    if ($heavyResult.jobs -ne 4 -or $heavyResult.queue_slots -ne 2 -or $heavyResult.cache_hit) {
+    if ($heavyResult.jobs -ne 6 -or $heavyResult.queue_slots -ne 2 -or $heavyResult.cache_hit) {
         throw 'Wrong Docker contracts defaults.'
     }
     $contractReuse = Start-RunnerCheck docker-contracts cache-contracts

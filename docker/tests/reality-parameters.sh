@@ -52,15 +52,21 @@ EOF
 cat >"${MOCK_BIN}/jq" <<'EOF'
 #!/usr/bin/env bash
 if [[ "${FAKE_REGEN_SECURITY_CHECK:-0}" == 1 ]]; then
-    rawfile=0
+    rawfile=0 rawfileName=
     for argument in "$@"; do
         [[ "${argument}" != *"${FAKE_REGEN_PRIVATE:?}"* &&
             "${argument}" != *"${FAKE_REGEN_OLD_PRIVATE:?}"* ]] || exit 1
         if [[ "${rawfile}" == 2 ]]; then
-            [[ "$(stat -c '%a' "${argument}")" == 600 ]] || exit 1
-            printf 'rawfile-private-0600\n' >>"${FAKE_PROTOCOL_EVENTS:?}"
+            # images.env 只含镜像引用；其它 rawfile 仍按秘密文件检查权限。
+            if [[ "${rawfileName}" == imagesEnv ]]; then
+                [[ "${argument}" == "${PADM_DOCKER_INSTALL_DIR:?}/images.env" ||
+                    "${argument}" == "${PADM_DOCKER_INSTALL_DIR:?}/"*/images.env ]] || exit 1
+            else
+                [[ "$(stat -c '%a' "${argument}")" == 600 ]] || exit 1
+                printf 'rawfile-private-0600\n' >>"${FAKE_PROTOCOL_EVENTS:?}"
+            fi
             rawfile=0
-        elif [[ "${rawfile}" == 1 ]]; then rawfile=2
+        elif [[ "${rawfile}" == 1 ]]; then rawfileName=${argument}; rawfile=2
         elif [[ "${argument}" == --rawfile ]]; then rawfile=1; fi
     done
 fi

@@ -766,11 +766,11 @@ dockerConfigureReleaseValidate() {
 }
 
 dockerManagedSpecMatchesDeployment() {
-    local specFile=$1 deployment=$2 imagesEnv=$3 key value expected count name
+    local specFile=$1 deployment=$2 imagesEnv=$3
     dockerConfigureSpecValidate "${specFile}" || return 1
     [[ -f "${deployment}" && ! -L "${deployment}" &&
         -f "${imagesEnv}" && ! -L "${imagesEnv}" ]] || return 1
-    jq -e --slurpfile deployment "${deployment}" '
+    jq -e --slurpfile deployment "${deployment}" --rawfile imagesEnv "${imagesEnv}" '
       $deployment[0] as $d |
       . as $request |
       .release.version == $d.padm_version and
@@ -815,21 +815,14 @@ dockerManagedSpecMatchesDeployment() {
           transport: "tcp", address_families: ["ipv4", "ipv6"]
         } else empty end]) and
       all(.images | to_entries[];
-        (.value | split("@") | last) == $d.images[.key].index_digest)
+        (.value | split("@") | last) == $d.images[.key].index_digest) and
+      all([
+        ["PADM_XRAY_IMAGE", "xray"], ["PADM_SINGBOX_IMAGE", "sing-box"],
+        ["PADM_NGINX_IMAGE", "nginx"], ["PADM_OPS_IMAGE", "ops"], ["PADM_NET_IMAGE", "net"]
+      ][]; . as [$key, $name] |
+        [$imagesEnv | split("\n")[] | select(startswith($key + "="))] ==
+          [$key + "=" + $request.images[$name]])
     ' "${specFile}" >/dev/null 2>&1 || return 1
-    while IFS='|' read -r key name; do
-        count=$(grep -c "^${key}=" "${imagesEnv}" 2>/dev/null || true)
-        [[ "${count}" == 1 ]] || return 1
-        value=$(sed -n "s/^${key}=//p" "${imagesEnv}") || return 1
-        expected=$(jq -er --arg name "${name}" '.images[$name]' "${specFile}") || return 1
-        [[ "${value}" == "${expected}" ]] || return 1
-    done <<'EOF'
-PADM_XRAY_IMAGE|xray
-PADM_SINGBOX_IMAGE|sing-box
-PADM_NGINX_IMAGE|nginx
-PADM_OPS_IMAGE|ops
-PADM_NET_IMAGE|net
-EOF
 }
 
 dockerEditBaselineValidate() {
@@ -2038,17 +2031,11 @@ dockerGenerateSubscription() {
 }
 
 dockerGenerateImagesEnv() {
-    local specFile=$1 target=$2 rootValue=$3 netRootValue=${4:-$3} key jsonKey value
-    while IFS='|' read -r key jsonKey; do
-        value=$(jq -r --arg key "${jsonKey}" '.images[$key]' "${specFile}") || return 1
-        printf '%s=%s\n' "${key}" "${value}" >>"${target}" || return 1
-    done <<'EOF'
-PADM_XRAY_IMAGE|xray
-PADM_SINGBOX_IMAGE|sing-box
-PADM_NGINX_IMAGE|nginx
-PADM_OPS_IMAGE|ops
-PADM_NET_IMAGE|net
-EOF
+    local specFile=$1 target=$2 rootValue=$3 netRootValue=${4:-$3}
+    jq -r '.images |
+      "PADM_XRAY_IMAGE=\(.xray)", "PADM_SINGBOX_IMAGE=\(."sing-box")",
+      "PADM_NGINX_IMAGE=\(.nginx)", "PADM_OPS_IMAGE=\(.ops)", "PADM_NET_IMAGE=\(.net)"
+    ' "${specFile}" >>"${target}" || return 1
     printf 'PADM_DOCKER_ROOT=%s\n' "${rootValue}" >>"${target}"
     printf 'PADM_NET_ROOT=%s\n' "${netRootValue}" >>"${target}"
 }

@@ -3,7 +3,7 @@
 param(
     [ValidatePattern('^[a-z0-9][a-z0-9-]*$')]
     [string]$Selector = 'fast',
-    [ValidateRange(1, 4)]
+    [ValidateRange(1, 8)]
     [int]$Jobs,
     [switch]$Rebuild,
     [switch]$ForceRun
@@ -12,7 +12,10 @@ param(
 $ErrorActionPreference = 'Stop'
 $fullRegression = $Selector -in @('all', 'ci', 'ci-pr', 'docker-contracts')
 if (-not $PSBoundParameters.ContainsKey('Jobs')) {
-    $Jobs = if ($Selector -eq 'docker-contracts') { 4 } elseif ($fullRegression) { 3 } else { 2 }
+    $Jobs = if ($Selector -eq 'docker-contracts') { 6 } elseif ($fullRegression) { 3 } else { 2 }
+}
+if ($Jobs -gt 4 -and $Selector -ne 'docker-contracts') {
+    throw 'Only docker-contracts supports more than 4 jobs.'
 }
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $git = 'C:\Program Files\Git\cmd\git.exe'
