@@ -594,15 +594,11 @@ allowPort() {
 }
 
 allowPortTcpAndUdp() {
-    local requestedPort=$1
-    local tcpAdded=false
-    allowPort "${requestedPort}" || return 1
-    [[ "${PADM_LAST_ALLOW_PORT_ADDED:-false}" == "true" ]] && tcpAdded=true
-    allowPort "${requestedPort}" udp && return 0
-    if [[ "${tcpAdded}" == "true" ]] && ! denyPort "${requestedPort}"; then
-        errorCard "${requestedPort}端口 TCP 防火墙规则回滚失败，请检查防火墙状态"
-    fi
-    return 1
+    padmRunPortAllowTransaction allowPortTcpAndUdpApply "$@"
+}
+
+allowPortTcpAndUdpApply() {
+    allowPort "$1" && allowPort "$1" udp
 }
 
 validPortNumber() {

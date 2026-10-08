@@ -511,7 +511,7 @@ runXrayDirectTlsInboundWithoutFallbackRegression() {
     local oldNginxConfigPath="${nginxConfigPath:-}"
     local oldFrontingType="${frontingType:-}"
     local oldCurrentInstallProtocolType="${currentInstallProtocolType:-}"
-    local configDir="${TMP_DIR}/xray-direct-tls/"
+    local configDir="${TMP_DIR}/xray direct tls/"
     local errorFile="${TMP_DIR}/xray-direct-tls.err"
 
     mkdir -p "${configDir}"
@@ -533,6 +533,8 @@ JSON
         return 1
     fi
     assertEquals secret "${currentUUID}" "xray-direct-tls-current-uuid"
+    assertEquals example.com "${currentHost}" "xray-direct-tls-current-host"
+    assertEquals 443 "${currentPort}" "xray-direct-tls-current-port"
 
     coreInstallType="${oldCoreInstallType}"
     configPath="${oldConfigPath}"

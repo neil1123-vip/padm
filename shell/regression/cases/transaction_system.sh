@@ -1516,6 +1516,30 @@ PY
             return 1
         fi
     )
+
+    local writer
+    for writer in fail2banWriteManagedFilter fail2banWriteNginxScanFilter fail2banWriteManagedJail; do
+        (
+            nginxLogConnected=true
+            : >"${errorLog}"
+            eval "${writer}() { return 1; }"
+            fail2banRestoreManagedFiles() { return 1; }
+            regressionExpectStatus 1 fail2banApplyProfile sshd false >/dev/null 2>&1
+            grep -q '恢复失败' "${errorLog}"
+            local retainedBackup
+            retainedBackup=$(find "${root}" -maxdepth 1 -type d -name 'padm-check-log-backup.*' -print -quit)
+            [[ -n "${retainedBackup}" ]]
+            grep -Fq "${retainedBackup}" "${errorLog}"
+            padmRemoveCleanupPath "${retainedBackup}"
+        )
+    done
+    local port
+    for port in 1 00001 65535; do
+        fail2banIsValidPortValue "${port}"
+    done
+    for port in 0 65536 18446744073709551617 999999999999999999999999999999999999; do
+        regressionExpectStatus 1 fail2banIsValidPortValue "${port}"
+    done
 )
 
 runUninstallServiceStopFailureRegression() (

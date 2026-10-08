@@ -420,7 +420,7 @@ readInstallProtocolType() {
         if [[ "${row}" == *VMess_HTTPUpgrade_inbounds* ]]; then
             if [[ "${coreInstallType}" == "2" ]]; then
                 frontingType=11_VMess_HTTPUpgrade_inbounds
-                singBoxVMessHTTPUpgradePort=$(grep 'listen' <${nginxConfigPath}sing_box_VMess_HTTPUpgrade.conf | awk '{print $2}')
+                singBoxVMessHTTPUpgradePort=$(grep 'listen' <"${nginxConfigPath}sing_box_VMess_HTTPUpgrade.conf" | awk '{print $2}')
             fi
         fi
         if [[ "${row}" == *socks5_inbounds* ]]; then
@@ -976,24 +976,24 @@ readConfigHostPathUUID() {
 
         # 安装
         if [[ -n "${frontingType}" ]]; then
-            currentHost=$(jq -r .inbounds[0].streamSettings.tlsSettings.certificates[0].certificateFile ${configPath}${frontingType}.json | awk -F '[t][l][s][/]' '{print $2}' | awk -F '[.][c][r][t]' '{print $1}')
+            currentHost=$(jq -r .inbounds[0].streamSettings.tlsSettings.certificates[0].certificateFile "${configPath}${frontingType}.json" | awk -F '[t][l][s][/]' '{print $2}' | awk -F '[.][c][r][t]' '{print $1}')
             if [[ -z "${currentHost}" || "${currentHost}" == "null" ]]; then
                 currentHost=$(resolveInstalledTLSDomain 2>/dev/null || true)
             fi
 
-            currentPort=$(jq .inbounds[0].port ${configPath}${frontingType}.json)
+            currentPort=$(jq .inbounds[0].port "${configPath}${frontingType}.json")
 
             currentDefaultPort=$(corePortSubscriptionPort "${currentPort}") || return 1
             currentUUID=$(jq -r '.inbounds[0].settings.clients[0] | .id // .password // empty' "${configPath}${frontingType}.json")
-            currentClients=$(jq -r .inbounds[0].settings.clients ${configPath}${frontingType}.json)
+            currentClients=$(jq -r .inbounds[0].settings.clients "${configPath}${frontingType}.json")
         fi
 
         # reality
         if currentProtocolHas 1 && [[ -f "${configPath}07_VLESS_vision_reality_inbounds.json" ]]; then
 
-            currentClients=$(jq -r .inbounds[1].settings.clients ${configPath}07_VLESS_vision_reality_inbounds.json)
-            currentUUID=$(jq -r .inbounds[1].settings.clients[0].id ${configPath}07_VLESS_vision_reality_inbounds.json)
-            xrayVLESSRealityVisionPort=$(jq -r .inbounds[0].port ${configPath}07_VLESS_vision_reality_inbounds.json)
+            currentClients=$(jq -r .inbounds[1].settings.clients "${configPath}07_VLESS_vision_reality_inbounds.json")
+            currentUUID=$(jq -r .inbounds[1].settings.clients[0].id "${configPath}07_VLESS_vision_reality_inbounds.json")
+            xrayVLESSRealityVisionPort=$(jq -r .inbounds[0].port "${configPath}07_VLESS_vision_reality_inbounds.json")
             if [[ "${currentPort}" == "${xrayVLESSRealityVisionPort}" ]]; then
                 xrayVLESSRealityVisionPort="${currentDefaultPort}"
             fi
@@ -1001,13 +1001,13 @@ readConfigHostPathUUID() {
         # reality xhttp
         if currentProtocolHas 2; then
 
-            currentClients=$(jq -r .inbounds[0].settings.clients ${configPath}12_VLESS_XHTTP_inbounds.json)
-            currentUUID=$(jq -r .inbounds[0].settings.clients[0].id ${configPath}12_VLESS_XHTTP_inbounds.json)
-            xrayVLESSRealityXHTTPort=$(jq -r .inbounds[0].port ${configPath}12_VLESS_XHTTP_inbounds.json)
+            currentClients=$(jq -r .inbounds[0].settings.clients "${configPath}12_VLESS_XHTTP_inbounds.json")
+            currentUUID=$(jq -r .inbounds[0].settings.clients[0].id "${configPath}12_VLESS_XHTTP_inbounds.json")
+            xrayVLESSRealityXHTTPort=$(jq -r .inbounds[0].port "${configPath}12_VLESS_XHTTP_inbounds.json")
             if [[ "${currentPort}" == "${xrayVLESSRealityXHTTPort}" ]]; then
                 xrayVLESSRealityXHTTPort="${currentDefaultPort}"
             fi
-            currentPath=$(jq -r .inbounds[0].streamSettings.xhttpSettings.path ${configPath}12_VLESS_XHTTP_inbounds.json | awk -F "[/]" '{print $2}' | awk -F "[x][H][T][T][P]" '{print $1}')
+            currentPath=$(jq -r .inbounds[0].streamSettings.xhttpSettings.path "${configPath}12_VLESS_XHTTP_inbounds.json" | awk -F "[/]" '{print $2}' | awk -F "[x][H][T][T][P]" '{print $1}')
         fi
         # 回落前端没有用户时，从实际启用的协议读取，保留重装凭据。
         if ! jq -e 'type == "array" and length > 0' <<<"${currentClients:-[]}" >/dev/null 2>&1; then
@@ -1024,9 +1024,9 @@ readConfigHostPathUUID() {
         fi
     elif [[ "${coreInstallType}" == "2" ]]; then
         if [[ -n "${frontingType}" ]]; then
-            currentHost=$(jq -r .inbounds[0].tls.server_name ${configPath}${frontingType}.json)
+            currentHost=$(jq -r .inbounds[0].tls.server_name "${configPath}${frontingType}.json")
             if currentProtocolHas 23 && [[ "${currentHost}" == "null" ]]; then
-                currentHost=$(grep 'server_name' <${nginxConfigPath}sing_box_VMess_HTTPUpgrade.conf | awk '{print $2}')
+                currentHost=$(grep 'server_name' <"${nginxConfigPath}sing_box_VMess_HTTPUpgrade.conf" | awk '{print $2}')
                 currentHost=${currentHost//;/}
             fi
             if [[ -z "${currentHost}" || "${currentHost}" == "null" ]]; then
@@ -1038,11 +1038,11 @@ readConfigHostPathUUID() {
                     currentHost=$(getPublicIP)
                 fi
             fi
-            currentUUID=$(jq -r .inbounds[0].users[0].uuid ${configPath}${frontingType}.json)
-            currentClients=$(jq -r .inbounds[0].users ${configPath}${frontingType}.json)
+            currentUUID=$(jq -r .inbounds[0].users[0].uuid "${configPath}${frontingType}.json")
+            currentClients=$(jq -r .inbounds[0].users "${configPath}${frontingType}.json")
         else
-            currentUUID=$(jq -r .inbounds[0].users[0].uuid ${configPath}${frontingTypeReality}.json)
-            currentClients=$(jq -r .inbounds[0].users ${configPath}${frontingTypeReality}.json)
+            currentUUID=$(jq -r .inbounds[0].users[0].uuid "${configPath}${frontingTypeReality}.json")
+            currentClients=$(jq -r .inbounds[0].users "${configPath}${frontingTypeReality}.json")
         fi
     fi
 
@@ -1052,7 +1052,7 @@ readConfigHostPathUUID() {
     if [[ -n "${configPath}" && -n "${frontingType}" ]]; then
         if [[ "${coreInstallType}" == "1" ]]; then
             local fallback
-            fallback=$(jq -r -c '.inbounds[0].settings.fallbacks[]?|select(.path)' ${configPath}${frontingType}.json | head -1)
+            fallback=$(jq -r -c '.inbounds[0].settings.fallbacks[]?|select(.path)' "${configPath}${frontingType}.json" | head -1)
 
             local path
             path=$(echo "${fallback}" | jq -r .path | awk -F "[/]" '{print $2}')
@@ -1067,15 +1067,15 @@ readConfigHostPathUUID() {
 
             # 尝试读取alpn h2 Path
             if [[ -z "${currentPath}" ]]; then
-                dest=$(jq -r -c '.inbounds[0].settings.fallbacks[]?|select(.alpn)|.dest' ${configPath}${frontingType}.json | head -1)
+                dest=$(jq -r -c '.inbounds[0].settings.fallbacks[]?|select(.alpn)|.dest' "${configPath}${frontingType}.json" | head -1)
                 if [[ "${dest}" == "31302" || "${dest}" == "31304" ]]; then
                     # checkBTPanel
                     # check1Panel
                     if [[ -f "${nginxConfigPath}alone.conf" ]]; then
-                        if grep -q "trojangrpc {" <${nginxConfigPath}alone.conf; then
-                            currentPath=$(grep "trojangrpc {" <${nginxConfigPath}alone.conf | awk -F "[/]" '{print $2}' | awk -F "[t][r][o][j][a][n]" '{print $1}')
-                        elif grep -q "grpc {" <${nginxConfigPath}alone.conf; then
-                            currentPath=$(grep "grpc {" <${nginxConfigPath}alone.conf | head -1 | awk -F "[/]" '{print $2}' | awk -F "[g][r][p][c]" '{print $1}')
+                        if grep -q "trojangrpc {" <"${nginxConfigPath}alone.conf"; then
+                            currentPath=$(grep "trojangrpc {" <"${nginxConfigPath}alone.conf" | awk -F "[/]" '{print $2}' | awk -F "[t][r][o][j][a][n]" '{print $1}')
+                        elif grep -q "grpc {" <"${nginxConfigPath}alone.conf"; then
+                            currentPath=$(grep "grpc {" <"${nginxConfigPath}alone.conf" | head -1 | awk -F "[/]" '{print $2}' | awk -F "[g][r][p][c]" '{print $1}')
                         fi
                     fi
                 fi

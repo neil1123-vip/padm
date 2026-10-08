@@ -4718,14 +4718,14 @@ JSON
             [[ -z "${singBoxVLESSWSPort}${singBoxVMessHTTPUpgradePort}" ]]
         )
 
-        mkdir -p "${root}/xray/conf"
-        cat >"${root}/xray/conf/12_VLESS_XHTTP_inbounds.json" <<'JSON'
-{"inbounds":[{"port":12606,"streamSettings":{"network":"xhttp","security":"reality","realitySettings":{"target":"xhttp-target.example:443","serverNames":["xhttp-sni.example"],"privateKey":"private-key","publicKey":"public-key"}}}]}
+        mkdir -p "${root}/xray conf"
+        cat >"${root}/xray conf/12_VLESS_XHTTP_inbounds.json" <<'JSON'
+{"inbounds":[{"port":12606,"settings":{"clients":[{"id":"xhttp-user"}]},"streamSettings":{"network":"xhttp","security":"reality","xhttpSettings":{"path":"/savedxHTTP"},"realitySettings":{"target":"xhttp-target.example:443","serverNames":["xhttp-sni.example"],"privateKey":"private-key","publicKey":"public-key"}}}]}
 JSON
         (
-            cd -- "${root}/xray/conf"
+            cd -- "${root}/xray conf"
             coreInstallType=1
-            configPath="${root}/xray/conf/"
+            configPath="${root}/xray conf/"
             singBoxConfigPath=
             readInstallProtocolType
             [[ "${realityTargetHost}" == "xhttp-target.example" ]]
@@ -4734,6 +4734,32 @@ JSON
             [[ "${xrayVLESSRealityXHTTPSNI}" == "xhttp-sni.example" ]]
             [[ "${currentRealityPublicKey}" == "public-key" ]]
             [[ "${currentRealityPrivateKey}" == "private-key" ]]
+            readConfigHostPathUUID
+            [[ "${currentUUID}" == xhttp-user && "${currentPath}" == saved ]]
+            [[ "${xrayVLESSRealityXHTTPort}" == 12606 ]]
+            jq -e '.[0].id == "xhttp-user"' <<<"${currentClients}" >/dev/null
+            printf '%s\n' '{"inbounds":[{"port":12443},{"settings":{"clients":[{"id":"vision-user"}]}}]}' >"${configPath}07_VLESS_vision_reality_inbounds.json"
+            currentInstallProtocolType=",1,"
+            readConfigHostPathUUID
+            [[ "${currentUUID}" == vision-user && "${xrayVLESSRealityVisionPort}" == 12443 ]]
+            jq -e '.[0].id == "vision-user"' <<<"${currentClients}" >/dev/null
+        )
+
+        mkdir -p "${root}/sing-box conf" "${root}/nginx conf"
+        printf '%s\n' '{"inbounds":[{"listen_port":31306,"users":[{"uuid":"upgrade-user"}],"transport":{"type":"httpupgrade","path":"/padmhttp"}}]}' >"${root}/sing-box conf/11_VMess_HTTPUpgrade_inbounds.json"
+        printf '%s\n' 'server {' 'listen 24443 so_keepalive=on ssl;http2 on;' 'server_name upgrade.example.com;' '}' >"${root}/nginx conf/sing_box_VMess_HTTPUpgrade.conf"
+        (
+            coreInstallType=2
+            configPath="${root}/sing-box conf/"
+            singBoxConfigPath="${configPath}"
+            nginxConfigPath="${root}/nginx conf/"
+            getPublicIP() { printf '192.0.2.1\n'; }
+            readInstallProtocolType
+            [[ "${singBoxVMessHTTPUpgradePort}" == 24443 ]]
+            readConfigHostPathUUID
+            [[ "${currentHost}" == upgrade.example.com && "${currentUUID}" == upgrade-user ]]
+            [[ "${singBoxVMessHTTPUpgradePath}" == /padmhttp ]]
+            jq -e '.[0].uuid == "upgrade-user"' <<<"${currentClients}" >/dev/null
         )
     )
 }
@@ -5555,6 +5581,49 @@ runAllowPortOptionalProtocolRegression() {
         # shellcheck source=/dev/null
         source "${PROJECT_ROOT}/shell/core/network.sh"
         allowPort 24443
+
+        local tcpAdds=true udpFails=true removed=
+        padmFirewallStateAdd "port:firewalld:tcp:24443"
+        lsof() { return 0; }
+        allowPort() {
+            PADM_LAST_ALLOW_PORT_ADDED=false
+            if [[ "${2:-tcp}" == udp ]]; then
+                [[ "${udpFails}" != true ]]
+                return $?
+            fi
+            [[ "${tcpAdds}" == true ]] || return 0
+            padmFirewallStateAdd "port:ufw:tcp:$1"
+            padmTrackPortAllowTransactionKey "port:ufw:tcp:$1"
+            PADM_LAST_ALLOW_PORT_ADDED=true
+        }
+        removeFirewallPortRule() { removed+="$1:$2:$3"$'\n'; }
+        regressionExpectStatus 1 allowPortTcpAndUdp 24443
+        ! padmFirewallStateHas "port:ufw:tcp:24443"
+        padmFirewallStateHas "port:firewalld:tcp:24443"
+        [[ "${removed}" == $'ufw:24443:tcp\n' ]]
+
+        tcpAdds=false
+        removed=
+        regressionExpectStatus 1 allowPortTcpAndUdp 24443
+        [[ -z "${removed}" ]]
+        padmFirewallStateHas "port:firewalld:tcp:24443"
+
+        tcpAdds=true
+        udpFails=false
+        allowPortTcpAndUdp 24443
+        padmFirewallStateHas "port:ufw:tcp:24443"
+        [[ -z "${removed}" ]]
+
+        udpFails=true
+        nestedPortAllow() {
+            allowPort 24444 || return 1
+            allowPortTcpAndUdp 24445
+        }
+        regressionExpectStatus 1 padmRunPortAllowTransaction nestedPortAllow
+        ! padmFirewallStateHas "port:ufw:tcp:24444"
+        ! padmFirewallStateHas "port:ufw:tcp:24445"
+        padmFirewallStateHas "port:ufw:tcp:24443"
+        padmFirewallStateHas "port:firewalld:tcp:24443"
     )
 }
 

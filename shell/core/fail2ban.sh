@@ -161,8 +161,7 @@ fail2banIsSingleLineValue() {
 }
 
 fail2banIsValidPortValue() {
-    local port=$1
-    [[ "${port}" =~ ^[0-9]+$ ]] && ((10#${port} >= 1 && 10#${port} <= 65535))
+    validPortNumber "$1"
 }
 
 fail2banIsSafeLogPathValue() {
@@ -734,30 +733,15 @@ fail2banApplyProfile() {
     }
 
     fail2banWriteManagedFilter || {
-        if fail2banRestoreManagedFiles "${managedBackupDir}" "${serviceWasActive}" "${serviceWasEnabled}"; then
-            padmRemoveCleanupPath "${managedBackupDir}"
-        else
-            padmForgetCleanupPath "${managedBackupDir}"
-        fi
-        errorCard "Fail2ban 过滤器写入失败"
+        fail2banRestoreOrReport "${managedBackupDir}" "Fail2ban 过滤器写入失败"
         return 1
     }
     fail2banWriteNginxScanFilter || {
-        if fail2banRestoreManagedFiles "${managedBackupDir}" "${serviceWasActive}" "${serviceWasEnabled}"; then
-            padmRemoveCleanupPath "${managedBackupDir}"
-        else
-            padmForgetCleanupPath "${managedBackupDir}"
-        fi
-        errorCard "Fail2ban 站点扫描过滤器写入失败"
+        fail2banRestoreOrReport "${managedBackupDir}" "Fail2ban 站点扫描过滤器写入失败"
         return 1
     }
     fail2banWriteManagedJail "${profile}" "${nginxScanEnabled}" "${nginxScanPorts}" || {
-        if fail2banRestoreManagedFiles "${managedBackupDir}" "${serviceWasActive}" "${serviceWasEnabled}"; then
-            padmRemoveCleanupPath "${managedBackupDir}"
-        else
-            padmForgetCleanupPath "${managedBackupDir}"
-        fi
-        errorCard "Fail2ban jail 写入失败"
+        fail2banRestoreOrReport "${managedBackupDir}" "Fail2ban jail 写入失败"
         return 1
     }
     if ! fail2banValidateManagedConfig; then
