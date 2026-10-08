@@ -1456,19 +1456,23 @@ EOF
     commitGeneratedJsonFile "${tmpFile}" "${fileName}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
 
-corePortRollbackFirewallRules() {
-    local rule
-    local status=0
-    for rule in "$@"; do
-        denyPort "${rule%%|*}" "${rule##*|}" || status=1
-    done
-    [[ "${status}" == "0" ]] || errorCard "入口端口防火墙规则回滚失败，请检查防火墙状态"
-    return "${status}"
+corePortApplyAddition() {
+    local ports=$1 port network
+    local -a portNetworks=(tcp)
+    [[ -z "${hysteriaPort:-}" ]] || portNetworks+=(udp)
+    while IFS= read -r port; do
+        for network in "${portNetworks[@]}"; do
+            allowPort "${port}" "${network}" || return 1
+        done
+    done <<<"${ports}"
+    if ! corePortApplyReloadTransaction corePortWriteAddFiles "$@"; then
+        errorCard "入口端口配置写入或重载失败，已尝试恢复旧配置；如上方提示回滚失败，请检查备份目录"
+        return 1
+    fi
 }
 
 addCorePort() {
-    local selectNewPortType newPort defaultPort portIndex port parsedPorts settingsPort firewallStatus portChanged network
-    local -a openedFirewallRules=() portNetworks
+    local selectNewPortType newPort defaultPort portIndex port parsedPorts settingsPort firewallStatus portChanged
     readInstallType || return 1
     if [[ "${coreInstallType:-}" != "1" ]]; then
         errorCard "此功能仅支持Xray-core内核"
@@ -1504,29 +1508,12 @@ addCorePort() {
                 return 1
             }
             autoRead extra_core_default_port "请输入默认端口（新增列表或原入口），[回车]保留现有默认入口:" defaultPort || return 0
-            openedFirewallRules=()
             settingsPort=$(corePortForwardTarget) || { errorCard "无法唯一确定 Xray TCP 入口，请检查已安装协议与默认入口"; return 1; }
             corePortValidateAddition "${parsedPorts}" "${defaultPort}" "${settingsPort}" || {
                 errorCard "新增端口不能等于原入口；默认端口必须属于新增列表或等于原入口"
                 return 1
             }
-            portNetworks=(tcp)
-            [[ -n "${hysteriaPort:-}" ]] && portNetworks+=(udp)
-            while read -r port; do
-                for network in "${portNetworks[@]}"; do
-                    if ! allowPort "${port}" "${network}"; then
-                        corePortRollbackFirewallRules "${openedFirewallRules[@]}" || true
-                        return 1
-                    fi
-                    [[ "${PADM_LAST_ALLOW_PORT_ADDED:-false}" == "true" ]] &&
-                        openedFirewallRules+=("${port}|${network}")
-                done
-            done <<<"${parsedPorts}"
-            if ! corePortApplyReloadTransaction corePortWriteAddFiles "${parsedPorts}" "${defaultPort}" "${settingsPort}"; then
-                corePortRollbackFirewallRules "${openedFirewallRules[@]}" || true
-                errorCard "入口端口配置写入或重载失败，已尝试恢复旧配置；如上方提示回滚失败，请检查备份目录"
-                return 1
-            fi
+            padmRunPortAllowTransaction corePortApplyAddition "${parsedPorts}" "${defaultPort}" "${settingsPort}" || return 1
             portChanged=true
             ;;
         3)
@@ -3862,7 +3849,7 @@ manageHysteria() {
         hysteria2Status=
         echoContent title "\n┌─ Hysteria2 管理 ───────────────────────────────────"
         menuLine "依赖 sing-box；已有 Xray 时可作为辅助核心增量安装，适合 UDP、移动网络场景"
-        configFile=$(hysteria2ConfigFile 2>/dev/null || true)
+        configFile=$(hysteria2ConfigFile) || return 1
         if [[ -n "${singBoxConfigPath}" && -f "${configFile}" ]]; then
             hysteria2SettingsSummary "${configFile}" || return 1
             menuItem 1 "重新安装" "重建 Hysteria2 入站配置"
@@ -4059,7 +4046,7 @@ manageTuic() {
         echoContent title "\n┌─ Tuic 管理 ────────────────────────────────────────"
         menuLine "依赖 sing-box；已有 Xray 时可作为辅助核心增量安装，适合 UDP、移动网络或 QUIC/HTTP3 客户端场景"
         menuLine "不作为新人默认推荐"
-        configFile=$(tuicConfigFile 2>/dev/null || true)
+        configFile=$(tuicConfigFile) || return 1
         if [[ -n "${singBoxConfigPath}" && -f "${configFile}" ]]; then
             tuicSettingsSummary || return 1
             menuItem 1 "重新安装" "重建 Tuic 入站配置"

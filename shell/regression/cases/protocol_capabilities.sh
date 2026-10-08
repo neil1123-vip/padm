@@ -1075,6 +1075,20 @@ runProtocolEntryConfigUpdateRegression() (
             exec {inputFd}<&-
             [[ "${unread}" == sentinel ]]
         done
+        (
+            # 配置路径读取失败不等于未安装，也不能消费后续输入或启动安装。
+            readInstallType() { :; }
+            hysteria2ConfigFile() { return 1; }
+            tuicConfigFile() { return 1; }
+            installs=0
+            for command in manageHysteria manageTuic; do
+                exec {inputFd}<<< $'1\nsentinel'
+                regressionExpectStatus 1 "${command}" <&"${inputFd}" || return 1
+                read -r unread <&"${inputFd}" || return 1
+                exec {inputFd}<&-
+                [[ "${unread}" == 1 && "${installs}" == 0 ]] || return 1
+            done
+        ) || return 1
     )
 )
 
@@ -1328,12 +1342,58 @@ runProtocolEntryMenuSyncRegression() (
         PADM_LAST_ALLOW_PORT_ADDED=true
         [[ "${existingNetwork}" != "${2:-tcp}" ]] || PADM_LAST_ALLOW_PORT_ADDED=false
         printf 'allow:%s:%s\n' "$1" "${2:-tcp}" >>"${log}"
-        [[ "${failNetwork}" != "${2:-tcp}" ]]
+        [[ "${failNetwork}" != "${2:-tcp}" ]] || return 1
+        [[ "${PADM_LAST_ALLOW_PORT_ADDED}" != true ]] ||
+            padmTrackPortAllowTransactionKey "port:iptables:${2:-tcp}:$1"
+        return 0
     }
     denyPort() { printf 'deny:%s:%s\n' "$1" "${2:-tcp}" >>"${log}"; return "${denyStatus:-0}"; }
+    removeFirewallPortRule() { denyPort "$2" "$3"; }
+    padmFirewallStateRemove() { :; }
     corePortApplyReloadTransaction() { printf 'apply:%s\n' "$1" >>"${log}"; return "${transactionStatus}"; }
     refreshProtocolSubscriptions() { printf 'refresh\n' >>"${log}"; return "${refreshStatus}"; }
     subscriptionNotifyControllerRefresh() { printf 'notify\n' >>"${log}"; return 1; }
+    (
+        # 原有监听不能挡住失败操作回收新增规则；订阅失败则保留已生效入口。
+        source "${PROJECT_ROOT}/shell/core/network.sh"
+        local -A ownedRules=()
+        local scenario key
+        local hysteriaPort=16295 failNetwork= failPort= transactionStatus=0 refreshStatus=0
+        lsof() { return 0; }
+        padmFirewallStateRemove() { :; }
+        removeFirewallPortRule() {
+            unset "ownedRules[port:$1:$3:$2]"
+        }
+        allowPort() {
+            key="port:iptables:${2:-tcp}:$1"
+            PADM_LAST_ALLOW_PORT_ADDED=false
+            [[ "$1:${2:-tcp}" != "${failPort}:${failNetwork}" ]] || return 1
+            [[ -z "${ownedRules[${key}]:-}" ]] || return 0
+            ownedRules[${key}]=new
+            PADM_LAST_ALLOW_PORT_ADDED=true
+            padmTrackPortAllowTransactionKey "${key}"
+        }
+        for scenario in reload udp refresh; do
+            ownedRules=([port:iptables:tcp:2053]=old)
+            failNetwork= failPort= transactionStatus=0 refreshStatus=0
+            case "${scenario}" in
+            reload) transactionStatus=1 ;;
+            udp) failNetwork=udp; failPort=2061 ;;
+            refresh) refreshStatus=1 ;;
+            esac
+            : >"${log}"
+            regressionExpectStatus 1 addCorePort <<< $'2\n2053,2061\n2053' || return 1
+            [[ "${ownedRules[port:iptables:tcp:2053]}" == old ]] || return 1
+            if [[ "${scenario}" == refresh ]]; then
+                [[ "${#ownedRules[@]}" == 4 ]] || return 1
+                grep -qx refresh "${log}" || return 1
+            else
+                [[ "${#ownedRules[@]}" == 1 ]] || return 1
+                ! grep -qx refresh "${log}" || return 1
+            fi
+        done
+        rm -f "${log}" || return 1
+    ) || return 1
     (
         # 读取失败不能消费菜单输入，更不能开放端口。
         local step reader
@@ -1608,16 +1668,16 @@ runRealityTargetMenuStateRegression() (
 )
 
 runSingBoxProtocolMenuStateRegression() (
-    local installReads=0 configFile="${TMP_DIR}/sing-box-entry.json"
+    local installReads=0 fixtureConfig="${TMP_DIR}/sing-box-entry.json"
     coreInstallType=1
     mkdir -p "${TMP_DIR}" || return 1
-    printf '{}\n' >"${configFile}"
+    printf '{}\n' >"${fixtureConfig}"
     readInstallType() {
         installReads=$((installReads + 1))
         singBoxConfigPath="${TMP_DIR}/"
     }
-    hysteria2ConfigFile() { printf '%s\n' "${configFile}"; }
-    tuicConfigFile() { printf '%s\n' "${configFile}"; }
+    hysteria2ConfigFile() { printf '%s\n' "${fixtureConfig}"; }
+    tuicConfigFile() { printf '%s\n' "${fixtureConfig}"; }
     hysteria2SettingsSummary() { :; }
     tuicSettingsSummary() { :; }
     portHoppingMenu() { :; }
