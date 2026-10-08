@@ -515,6 +515,9 @@ dockerRealityStreamContractChecks() {
             local candidate=$1
             shift
             printf '%s\n' "$*" >>"${calls}"
+            if [[ "$*" == *' nginx -t' && "$*" == --file* ]]; then
+                cp -- "$2" "${calls}.hosts"
+            fi
         }
         dockerTlsValidateCandidate() { return 0; }
         dockerValidateHostIntegrations() { return 0; }
@@ -527,18 +530,25 @@ dockerRealityStreamContractChecks() {
             line=$(grep 'nginx -t$' "${calls}" | tail -n 1) || return 1
             case "${label}" in
             enabled)
-                [[ "${line}" == *'--add-host xray:127.0.0.1'* &&
-                    "${line}" == *'--add-host subscription:127.0.0.1'* ]] || return 1
+                [[ "${line}" == --file* && "${line}" != *'--add-host'* ]] &&
+                    jq -e '.services.nginx.extra_hosts |
+                      index("xray:127.0.0.1") != null and
+                      index("subscription:127.0.0.1") != null' \
+                      "${calls}.hosts" >/dev/null || return 1
                 ;;
             upgrade)
-                [[ "${line}" == *'--add-host xray:127.0.0.1'* &&
-                    "${line}" == *'--add-host sing-box:127.0.0.1'* &&
-                    "${line}" != *'subscription'* ]] || return 1
+                [[ "${line}" == --file* && "${line}" != *'--add-host'* ]] &&
+                    jq -e '.services.nginx.extra_hosts |
+                      index("xray:127.0.0.1") != null and
+                      index("sing-box:127.0.0.1") != null and
+                      index("subscription:127.0.0.1") == null' \
+                      "${calls}.hosts" >/dev/null || return 1
                 ;;
             disabled)
-                [[ "${line}" != *'--add-host'* ]] || return 1
+                [[ "${line}" != *'--file'* && "${line}" != *'--add-host'* ]] || return 1
                 ;;
             esac
+            [[ ! -e "${candidate}/compose.nginx-check.json" ]] || return 1
             dockerCleanupConfigurationCandidate
         }
         validateStreamCandidate "${enabled}" enabled &&

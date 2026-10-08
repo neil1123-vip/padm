@@ -512,6 +512,7 @@ dockerMenu() {
             '10. 账号管理' \
             '11. 分享订阅管理' \
             '12. 业务备份恢复' \
+            '13. 核心升级评估' \
             '0. 退出'
         printf '请选择: '
         if ! IFS= read -r choice; then
@@ -534,6 +535,7 @@ dockerMenu() {
         10) dockerMenuAccounts ;;
         11) dockerMenuSubscriptions ;;
         12) dockerMenuBusiness ;;
+        13) dockerMenuRun assess || true ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

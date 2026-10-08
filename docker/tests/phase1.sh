@@ -170,7 +170,7 @@ copyBundleFixture() {
     cp -R "${PROJECT_ROOT}/docker" "${target}/docker"
     cp "${PROJECT_ROOT}/shell/core/deployment_mode.sh" "${target}/shell/core/deployment_mode.sh"
     cp "${PROJECT_ROOT}/shell/core/stats_grpc.sh" "${target}/shell/core/stats_grpc.sh"
-    cp "${PROJECT_ROOT}/shell/core/"{runtime.sh,reality_targets.sh} "${target}/shell/core/"
+    cp "${PROJECT_ROOT}/shell/core/"{runtime.sh,reality_targets.sh,cores.sh} "${target}/shell/core/"
     find "${PROJECT_ROOT}/documents" -maxdepth 1 -type f -name 'docker*.md' -exec cp {} "${target}/documents/" \;
 }
 
@@ -325,7 +325,7 @@ runControl 13 broken-bundle "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" insta
 [[ "$(readlink "${DOCKER_ROOT}/bundle")" == "${bundleBefore}" ]] || fail 'failed bundle refresh changed the active bundle'
 [[ "$(<"${DOCKER_ROOT}/data/sentinel")" == "keep" ]] || fail 'failed bundle refresh changed persistent data'
 
-for missing in docker/lib/reality-targets.sh shell/core/runtime.sh shell/core/reality_targets.sh; do
+for missing in docker/lib/reality-targets.sh shell/core/runtime.sh shell/core/reality_targets.sh shell/core/cores.sh; do
     incompleteSource="${TEST_ROOT}/incomplete-${missing//\//-}"
     copyBundleFixture "${incompleteSource}"
     rm -f -- "${incompleteSource}/${missing}"

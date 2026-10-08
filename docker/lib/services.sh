@@ -1343,7 +1343,7 @@ EOF
     if [[ "${subscriptionEnabled}" == "true" ]]; then
         cat >>"${target}" <<EOF
 
-    location ~ ^/subscriptions/(?<padm_subscription_token>[A-Za-z0-9_-]{16,128})\$ {
+    location ~ "^/subscriptions/(?<padm_subscription_token>[A-Za-z0-9_-]{16,128})\$" {
         access_log off;
         proxy_pass http://subscription:${PADM_DOCKER_SUBSCRIPTION_PORT}/\$padm_subscription_token;
         proxy_pass_request_headers off;
@@ -1919,6 +1919,11 @@ dockerTlsRuntimePermissions() {
 
 dockerPrepareCandidatePermissions() {
     local candidate=$1 directory privateFile
+    [[ -d "${candidate}" && ! -L "${candidate}" &&
+        -z "$(find "${candidate}" -type l -print -quit)" ]] || {
+        dockerError '候选权限准备拒绝符号链接'
+        return 1
+    }
     if [[ -e "${candidate}/config/spec.json" || -L "${candidate}/config/spec.json" ]]; then
         [[ -f "${candidate}/config/spec.json" && ! -L "${candidate}/config/spec.json" ]] || return 1
         chmod 0600 "${candidate}/config/spec.json" || return 1
@@ -2005,13 +2010,16 @@ dockerGenerateCandidate() {
     dockerPrepareCandidatePermissions "${candidate}"
 }
 
-dockerCandidateCompose() {
+dockerCandidateCompose() (
     local candidate=$1
     shift
-    docker compose --project-name "${PADM_DOCKER_PROJECT}" \
+    # 候选只使用已验证的 env-file，宿主导出变量不能覆盖镜像和挂载根。
+    unset PADM_DOCKER_ROOT PADM_NET_ROOT PADM_XRAY_IMAGE PADM_SINGBOX_IMAGE \
+        PADM_NGINX_IMAGE PADM_OPS_IMAGE PADM_NET_IMAGE
+    docker compose --project-name "${DOCKER_ASSESS_PROJECT:-${PADM_DOCKER_PROJECT}}" \
         --project-directory "${candidate}" --env-file "${candidate}/images.env" \
-        --file "${candidate}/compose.json" --profile '*' "$@"
-}
+        --file "${candidate}/compose.json" --profile '*' "$@" </dev/null
+)
 
 dockerCurrentOwnsHostIntegration() {
     local type=$1 root
@@ -2062,6 +2070,7 @@ dockerValidateHostIntegrations() {
 
 dockerValidateCandidate() {
     local specFile=$1 candidate=$2 core domain jsonFile image tlsDomains='[]' domains
+    local nginxCheckFile="${2}/compose.nginx-check.json" nginxStatus=0
     local -a nginxCheckArgs=()
     while IFS= read -r jsonFile; do
         [[ -s "${jsonFile}" ]] && jq empty "${jsonFile}" >/dev/null 2>&1 || {
@@ -2117,12 +2126,18 @@ dockerValidateCandidate() {
     done < <(jq -r '.[]' <<<"${tlsDomains}")
     if jq -e '.services | has("nginx")' "${candidate}/compose.json" >/dev/null; then
         # 仅解析候选配置，不启动候选核心；实际后端仍由项目网络解析。
-        if jq -e '.reality_stream != null' "${specFile}" >/dev/null; then
-            while IFS= read -r core; do
-                nginxCheckArgs+=(--add-host "${core}:127.0.0.1")
-            done < <(jq -r '.services.nginx.depends_on | keys[]' "${candidate}/compose.json")
+        if [[ -n "${DOCKER_ASSESS_PROJECT:-}" ]] ||
+            jq -e '.reality_stream != null' "${specFile}" >/dev/null; then
+            jq '{services:{nginx:{extra_hosts:
+              ((.services.nginx.extra_hosts // []) +
+                [.services.nginx.depends_on | keys[] | . + ":127.0.0.1"])}}}' \
+                "${candidate}/compose.json" >"${nginxCheckFile}" || return 1
+            nginxCheckArgs=(--file "${nginxCheckFile}")
         fi
-        dockerCandidateCompose "${candidate}" run --rm --no-deps "${nginxCheckArgs[@]}" nginx -t >/dev/null || {
+        dockerCandidateCompose "${candidate}" "${nginxCheckArgs[@]}" run --rm --no-deps nginx -t \
+            >/dev/null || nginxStatus=$?
+        rm -f -- "${nginxCheckFile}" || return 1
+        [[ "${nginxStatus}" == 0 ]] || {
             dockerError 'Nginx 候选配置校验失败'
             return 1
         }
@@ -2856,8 +2871,9 @@ dockerCleanupTlsCandidate() {
 
 dockerTlsValidateCandidate() {
     local image=$1 candidate=$2 domain=$3
-    docker run --rm --read-only --cap-drop ALL \
-        --security-opt no-new-privileges --tmpfs /tmp:rw,noexec,nosuid,nodev,size=8m \
+    local -a runner=(docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges)
+    [[ -z "${DOCKER_ASSESS_PROJECT:-}" ]] || runner=(dockerRealityProbeRun 30)
+    "${runner[@]}" --tmpfs /tmp:rw,noexec,nosuid,nodev,size=8m \
         --label io.padm.mode=docker --label io.padm.project="${PADM_DOCKER_PROJECT}" \
         --volume "${candidate}:/candidate:ro" --entrypoint python3 "${image}" -c '
 import ssl
@@ -2881,8 +2897,7 @@ if not (values["notBefore"] <= now < values["notAfter"]):
         dockerError '候选证书尚未生效或已过期'
         return 1
     }
-    docker run --rm --read-only --cap-drop ALL \
-        --security-opt no-new-privileges --tmpfs /tmp:rw,noexec,nosuid,nodev,size=8m \
+    "${runner[@]}" --tmpfs /tmp:rw,noexec,nosuid,nodev,size=8m \
         --label io.padm.mode=docker --label io.padm.project="${PADM_DOCKER_PROJECT}" \
         --volume "${candidate}:/candidate:ro" "${image}" tls-check \
         "/candidate/${domain}.crt" "/candidate/${domain}.key" "${domain}" >/dev/null || {

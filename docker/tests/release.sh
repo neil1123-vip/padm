@@ -118,9 +118,9 @@ copyControl() {
     local target=$1 relative
     for relative in \
         install-docker.sh docker/lib/bootstrap.sh docker/lib/bundle.sh docker/lib/manifest.sh \
-        docker/lib/services.sh docker/lib/traffic.sh docker/lib/renewal.sh docker/lib/lifecycle.sh docker/lib/setup.sh docker/lib/accounts.sh docker/lib/menu.sh docker/lib/reality-targets.sh \
+        docker/lib/services.sh docker/lib/traffic.sh docker/lib/renewal.sh docker/lib/lifecycle.sh docker/lib/setup.sh docker/lib/accounts.sh docker/lib/subscriptions.sh docker/lib/business.sh docker/lib/menu.sh docker/lib/reality-targets.sh \
         docker/contracts/configure.schema.json docker/contracts/deployment.schema.json \
-        docker/contracts/features.json shell/core/deployment_mode.sh shell/core/stats_grpc.sh shell/core/runtime.sh shell/core/reality_targets.sh; do
+        docker/contracts/features.json shell/core/deployment_mode.sh shell/core/stats_grpc.sh shell/core/runtime.sh shell/core/reality_targets.sh shell/core/cores.sh; do
         mkdir -p "${target}/$(dirname -- "${relative}")"
         cp "${PROJECT_ROOT}/${relative}" "${target}/${relative}"
     done

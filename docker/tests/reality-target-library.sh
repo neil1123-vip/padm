@@ -120,7 +120,7 @@ EOF
 # 保留可信原生算法，下载函数只给出不会执行的扫描器占位文件。
 FIXTURE="${TEST_ROOT}/source"
 mkdir -p "${FIXTURE}/shell/core"
-cp "${ROOT}/shell/core/runtime.sh" "${ROOT}/shell/core/reality_targets.sh" "${FIXTURE}/shell/core/"
+cp "${ROOT}/shell/core/runtime.sh" "${ROOT}/shell/core/reality_targets.sh" "${ROOT}/shell/core/cores.sh" "${FIXTURE}/shell/core/"
 cat >>"${FIXTURE}/shell/core/reality_targets.sh" <<'EOF'
 lookupRealityTargetLocation() { printf 'Fixture Location\n'; }
 currentRealityNetworkProfile() { printf '192.0.2.10\tAS64500\tFixture Network\n'; }

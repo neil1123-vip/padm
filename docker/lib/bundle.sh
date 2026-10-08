@@ -33,6 +33,10 @@ dockerBundlePayloadPaths() {
     done < <(find "${sourceRoot}/docker" -type f -print | LC_ALL=C sort)
     printf 'shell/core/deployment_mode.sh\n'
     printf 'shell/core/stats_grpc.sh\n'
+    if [[ "$(<"${sourceRoot}/docker/lib/lifecycle.sh")" == *'/shell/core/cores.sh"'* ]]; then
+        [[ -f "${sourceRoot}/shell/core/cores.sh" && ! -L "${sourceRoot}/shell/core/cores.sh" ]] || return 1
+        printf 'shell/core/cores.sh\n'
+    fi
     if [[ -f "${sourceRoot}/docker/lib/reality-targets.sh" ]]; then
         for path in shell/core/runtime.sh shell/core/reality_targets.sh; do
             [[ -f "${sourceRoot}/${path}" && ! -L "${sourceRoot}/${path}" ]] || return 1

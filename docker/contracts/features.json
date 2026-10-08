@@ -503,16 +503,16 @@
       "profiles": ["core-xray", "core-sing-box"],
       "network_mode": "host-cli",
       "host_capabilities": [],
-      "reason": "仅 up/down/restart/logs/update/rollback/status/validate 已由宿主命令提供；预发布试跑和升级风险扫描另列为 deferred。"
+      "reason": "up/down/restart/logs/update/rollback/status/validate 已由宿主命令提供；可信候选核心试跑和升级风险扫描由 assess 独立执行，不切换现有部署。"
     },
     "core-upgrade-assessment": {
-      "status": "deferred",
+      "status": "supported",
       "native_menu": "核心与服务 / 核心生命周期",
       "native_action": "预发布试跑与升级风险扫描",
       "profiles": ["core-xray", "core-sing-box"],
       "network_mode": "host-cli",
       "host_capabilities": [],
-      "reason": "Docker 受管更新和候选配置校验不等同于原生预发布试跑、升级风险扫描；这些管理工作流尚未迁移。"
+      "reason": "菜单和 assess 命令在部署锁内验签、准备可信候选镜像和独立配置副本，复用原生只读升级风险扫描，执行实际核心版本检查、配置试跑、Xray 严格模式及未知字段能力探针、已启用的 TLS/订阅/宿主前置检查；不支持严格解析时明确警告，不宣称严格校验通过。成功、失败或取消均不切换生产配置、bundle、服务和账目。要求受管 spec；预发布须提供匹配的可信发布资产，不现场构建核心；公网客户端连通另行验收。"
     },
     "geo-data": {
       "status": "deferred",

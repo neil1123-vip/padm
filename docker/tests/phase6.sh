@@ -35,8 +35,40 @@ printf '%s\n' "$*" >>"${FAKE_DOCKER_LOG:?}"
 case "${1:-}" in
 compose)
     [[ "${2:-}" == version ]] && { printf 'v2.29.1\n'; exit 0; }
+    # 模拟 Compose 默认读取 stdin，防止核心循环漏掉第二个核心。
+    if [[ " ${*} " == *' run '* ]]; then
+        [[ " ${*} " != *' --add-host '* ]] || exit 1
+        cat >/dev/null
+    fi
     [[ " ${*} " != *' run --rm --no-deps sing-box version '* ]] ||
         printf 'sing-box version 1.14.0\nTags: with_quic,with_v2ray_api\n'
+    [[ " ${*} " != *' run --rm --no-deps xray version '* ]] ||
+        printf 'Xray 26.8.29 (Xray, Penetrates Everything.)\n'
+    if [[ " ${*} " == *' --project-name padm-docker-assess-'* ]]; then
+        [[ -z "${PADM_DOCKER_ROOT:-}${PADM_NET_ROOT:-}${PADM_XRAY_IMAGE:-}${PADM_SINGBOX_IMAGE:-}${PADM_NGINX_IMAGE:-}${PADM_OPS_IMAGE:-}${PADM_NET_IMAGE:-}" ]] ||
+            exit 1
+        previous=
+        for arg in "$@"; do
+            if [[ "${previous}" == --file ]]; then
+                if [[ "${arg}" == */compose.nginx-check.json ]]; then
+                    jq -e '.services.nginx.extra_hosts | index("xray:127.0.0.1") != null' \
+                        "${arg}" >/dev/null || exit 1
+                else
+                    jq -e '.name == .networks.default.name and (.name | startswith("padm-docker-assess-"))' \
+                        "${arg}" >/dev/null || exit 1
+                fi
+            fi
+            previous=${arg}
+        done
+    fi
+    if [[ -n "${FAKE_DOCKER_FAIL_CHECK:-}" && " ${*} " == *" ${FAKE_DOCKER_FAIL_CHECK} "* ]]; then
+        exit 1
+    fi
+    if [[ " ${*} " == *' XRAY_JSON_STRICT=true xray -test -config /etc/padm/xray/.assessment-strict-probe.json '* &&
+        "${FAKE_DOCKER_STRICT_UNSUPPORTED:-0}" != 1 ]]; then
+        printf 'json: unknown field "padm_assessment_unknown_field"\n' >&2
+        exit 1
+    fi
     if [[ " ${*} " == *' up -d '* && "${FAKE_DOCKER_FAIL_UP:-0}" == 1 &&
         ! -e "${FAKE_DOCKER_FAIL_MARK:?}" ]]; then
         : >"${FAKE_DOCKER_FAIL_MARK}"
@@ -62,9 +94,9 @@ copyControlFixture() {
     local target=$1 marker=$2 relative
     for relative in \
         docker/lib/bootstrap.sh docker/lib/bundle.sh docker/lib/manifest.sh \
-        docker/lib/services.sh docker/lib/traffic.sh docker/lib/renewal.sh docker/lib/lifecycle.sh docker/lib/setup.sh docker/lib/accounts.sh docker/lib/menu.sh docker/lib/reality-targets.sh \
+        docker/lib/services.sh docker/lib/traffic.sh docker/lib/renewal.sh docker/lib/lifecycle.sh docker/lib/setup.sh docker/lib/accounts.sh docker/lib/subscriptions.sh docker/lib/business.sh docker/lib/menu.sh docker/lib/reality-targets.sh \
         docker/contracts/configure.schema.json docker/contracts/deployment.schema.json \
-        docker/contracts/features.json shell/core/deployment_mode.sh shell/core/stats_grpc.sh shell/core/runtime.sh shell/core/reality_targets.sh; do
+        docker/contracts/features.json shell/core/deployment_mode.sh shell/core/stats_grpc.sh shell/core/runtime.sh shell/core/reality_targets.sh shell/core/cores.sh; do
         mkdir -p "${target}/$(dirname -- "${relative}")"
         cp "${PROJECT_ROOT}/${relative}" "${target}/${relative}"
     done
@@ -294,6 +326,88 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
         " "$oldSpec" >"$newSpec"
         chmod 0600 "$newSpec"
         control=$PHASE6_CONTROL_BUNDLE
+        # 评估使用真实候选和验证器；成功、拒绝与失败均不得改变现有配置和账目。
+        (
+            cp "$root/compose.json" "$root/.assess-compose-original"
+            dockerGenerateCompose "$oldSpec" "$root/compose.json"
+            dockerTrafficBeforeChange() { touch "$root/.assess-mutated"; return 1; }
+            dockerBackupConfiguration() { touch "$root/.assess-mutated"; return 1; }
+            dockerInstallCandidate() { touch "$root/.assess-mutated"; return 1; }
+            dockerActivateStagedBundle() { touch "$root/.assess-mutated"; return 1; }
+            before=$(sha256sum "$root/deployment.json" "$root/compose.json" "$root/images.env" \
+                "$root/config/spec.json" "$root/config/xray/config.json")
+            backupBefore=$(find "$root/backups" -type f -print | sort)
+            bundleBefore=$(readlink "$root/bundle")
+            export PADM_DOCKER_ROOT=/production PADM_NET_ROOT=/production \
+                PADM_XRAY_IMAGE=untrusted PADM_SINGBOX_IMAGE=untrusted PADM_NGINX_IMAGE=untrusted \
+                PADM_OPS_IMAGE=untrusted PADM_NET_IMAGE=untrusted
+            for outcome in success strict-unsupported risk compose core strict unsafe-mount; do
+                logBefore=$(wc -l <"$FAKE_DOCKER_LOG")
+                case "$outcome" in
+                strict-unsupported) export FAKE_DOCKER_STRICT_UNSUPPORTED=1 ;;
+                risk)
+                    cp "$root/config/xray/config.json" "$root/.assess-config-original"
+                    jq ".reverse = {}" "$root/.assess-config-original" >"$root/config/xray/config.json"
+                    ;;
+                compose) export FAKE_DOCKER_FAIL_CHECK="config --format json" ;;
+                core) export FAKE_DOCKER_FAIL_CHECK="xray -test" ;;
+                strict) export FAKE_DOCKER_FAIL_CHECK="XRAY_JSON_STRICT=true" ;;
+                unsafe-mount)
+                    cp "$root/compose.json" "$root/.assess-compose-managed"
+                    jq --arg root "$root" ".services.xray.volumes[0].source = \$root" \
+                        "$root/.assess-compose-managed" >"$root/compose.json"
+                    ;;
+                esac
+                if [[ "$outcome" == success || "$outcome" == strict-unsupported ]]; then
+                    dockerMain assess --manifest "$source" >"$root/.assess-result"
+                    grep -q "候选发布: 3.2.0" "$root/.assess-result"
+                    grep -q "核心 xray: Xray" "$root/.assess-result"
+                    if [[ "$outcome" == success ]]; then
+                        grep -q "Xray 严格校验: 通过" "$root/.assess-result"
+                    else
+                        grep -q "Xray 严格校验: 未启用" "$root/.assess-result"
+                    fi
+                    grep -q "TLS 校验: 未启用" "$root/.assess-result"
+                else
+                    rc=0
+                    dockerMain assess --manifest "$source" >"$root/.assess-result" 2>&1 || rc=$?
+                    [[ "$rc" == "$PADM_DOCKER_RC_STATE" ]]
+                fi
+                if [[ "$outcome" == risk ]]; then
+                    grep -q "legacy reverse" "$root/.assess-result"
+                    mv "$root/.assess-config-original" "$root/config/xray/config.json"
+                fi
+                if [[ "$outcome" == unsafe-mount ]]; then
+                    grep -q "现有编排与受管规格不一致" "$root/.assess-result"
+                    mv "$root/.assess-compose-managed" "$root/compose.json"
+                fi
+                unset FAKE_DOCKER_FAIL_CHECK FAKE_DOCKER_STRICT_UNSUPPORTED
+                [[ "$before" == "$(sha256sum "$root/deployment.json" "$root/compose.json" "$root/images.env" \
+                    "$root/config/spec.json" "$root/config/xray/config.json")" ]]
+                [[ "$bundleBefore" == "$(readlink "$root/bundle")" ]]
+                [[ "$backupBefore" == "$(find "$root/backups" -type f -print | sort)" ]]
+                [[ ! -e "$root/.assess-mutated" && -z "${DOCKER_CONFIG_CANDIDATE:-}" ]]
+                [[ -z "${DOCKER_ASSESS_PROJECT:-}" && -z "${DOCKER_ASSESS_CANDIDATE:-}" ]]
+                [[ -z "$(find "$root" -maxdepth 1 -type d \( -name ".update.*" -o -name ".bundle-stage.*" \) -print)" ]]
+                ! tail -n "+$((logBefore + 1))" "$FAKE_DOCKER_LOG" | grep -Eq " (up|down|restart|stop|exec) "
+            done
+            ! dockerAssessCommand --manifest --bundle
+            mv "$root/config/spec.json" "$root/.assess-spec-original"
+            ! dockerAssessCommand --manifest "$source"
+            mv "$root/.assess-spec-original" "$root/config/spec.json"
+            mv "$root/.assess-compose-original" "$root/compose.json"
+            # 取消沿用 CLI 清理，不安装候选或恢复生产服务。
+            (
+                dockerAssessCandidate() { kill -TERM "${BASHPID}"; }
+                dockerMain assess --manifest "$source"
+            ) &
+            cancelPid=$!
+            cancelRc=0
+            wait "$cancelPid" || cancelRc=$?
+            [[ "$cancelRc" == 143 ]]
+            [[ "$bundleBefore" == "$(readlink "$root/bundle")" ]]
+            [[ -z "$(find "$root" -maxdepth 1 -type d -name ".update.*" -print)" ]]
+        )
         dockerUpdateCommand --manifest "$source"
         newBundle=$(readlink "$root/bundle")
         assertCurrent "$newBundle" "$newCommit" new-control "$(printf 2%.0s {1..64})"
@@ -662,6 +776,112 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
     ! dockerLifecycleCommand up
     ! dockerLifecycleCommand restart
     [[ ! -e "${rollbackRoot}/changed" ]]
+)
+
+(
+    source "${PROJECT_ROOT}/install-docker.sh" help
+    assessmentRoot="${TEST_ROOT}/assessment-dual"
+    export PADM_DOCKER_INSTALL_DIR="${assessmentRoot}"
+    candidate="${assessmentRoot}/candidate"
+    mkdir -p "${candidate}/config/"{xray,sing-box,nginx} "${candidate}/secrets/tls"
+    dockerConfigureSpecMigrate "${PROJECT_ROOT}/docker/configure-nginx.example.json" \
+        "${candidate}/base.json"
+    jq --slurpfile reality "${PROJECT_ROOT}/docker/configure.example.json" '
+      .core.secondary_type = "sing-box" |
+      .core.protocols += [($reality[0].core.protocols[0] |
+        .core = "sing-box" | .listener_id = "entry-sing-box" | .public_port = 25443)]
+    ' "${candidate}/base.json" >"${candidate}/config/spec.json"
+    dockerConfigureSpecValidate "${candidate}/config/spec.json"
+    dockerGenerateXrayConfig "${candidate}/config/spec.json" "${candidate}/config/xray/config.json"
+    dockerGenerateSingBoxConfig "${candidate}/config/spec.json" "${candidate}/config/sing-box/config.json"
+    dockerGenerateCompose "${candidate}/config/spec.json" "${candidate}/compose.json"
+    mkdir -p "${assessmentRoot}/bundle"
+    dockerCurrentBundlePath() { printf '%s\n' "${assessmentRoot}/bundle"; }
+    printf '%040d\n' 0 >"${assessmentRoot}/bundle/${PADM_DOCKER_BUNDLE_REF}"
+    dockerGenerateDeployment "${candidate}/config/spec.json" "${candidate}/deployment.json"
+    DOCKER_STAGED_BUNDLE_PATH=${PROJECT_ROOT}
+    DOCKER_ASSESS_PROJECT=padm-docker-assess-abc123
+    DOCKER_ASSESS_CANDIDATE=${candidate}
+    calls="${assessmentRoot}/calls"
+    # 外部 Compose 读走 stdin 时，候选循环仍必须遍历双核心。
+    while IFS= read -r core; do
+        DOCKER_ASSESS_PROJECT= PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${calls}" \
+            dockerCandidateCompose "${candidate}" run --rm --no-deps "${core}" version >/dev/null
+        printf 'visited %s\n' "${core}" >>"${calls}"
+    done < <(printf 'xray\nsing-box\n')
+    grep -q '^visited xray$' "${calls}"
+    grep -q '^visited sing-box$' "${calls}"
+    (
+        dockerRealityProbeRun() {
+            [[ "$1" == 30 ]] || return 1
+            printf 'tls-probe %s\n' "$*" >>"${calls}"
+        }
+        dockerTlsValidateCandidate fixture "${candidate}/secrets/tls" example.com
+        [[ "$(grep -c '^tls-probe ' "${calls}")" == 2 ]]
+    )
+    dockerCandidateCompose() {
+        printf '%s\n' "$*" >>"${calls}"
+        if [[ "$*" == *' nginx -t' ]]; then
+            [[ "$*" != *'--add-host'* && "$*" == *'--file '* ]] || return 1
+            jq -e '.services.nginx.extra_hosts | index("xray:127.0.0.1") != null' \
+                "${candidate}/compose.nginx-check.json" >/dev/null || return 1
+        fi
+        if [[ "$*" == *'XRAY_JSON_STRICT=true xray -test -config /etc/padm/xray/.assessment-strict-probe.json'* ]]; then
+            printf 'json: unknown field "padm_assessment_unknown_field"\n' >&2
+            return 1
+        fi
+        if [[ "$*" == *' sing-box version' ]]; then
+            printf 'sing-box version 1.14.0\nTags: %s\n' "${assessmentTags}"
+        elif [[ "$*" == *' xray version' ]]; then
+            printf 'Xray 26.8.29\n'
+        fi
+        [[ -z "${assessmentFailure:-}" || "$*" != *"${assessmentFailure}"* ]]
+    }
+    dockerTlsValidateCandidate() { printf 'tls %s\n' "$*" >>"${calls}"; [[ "${tlsFailure:-0}" == 0 ]]; }
+    assessmentTags=with_quic,with_v2ray_api
+    dockerAssessCandidate "${candidate}" >"${assessmentRoot}/result"
+    grep -q '核心 sing-box: sing-box version' "${assessmentRoot}/result"
+    grep -q 'TLS 校验: 通过' "${assessmentRoot}/result"
+    grep -q '订阅校验: 通过' "${assessmentRoot}/result"
+    grep -q 'sing-box check' "${calls}"
+    grep -q 'subscription --check' "${calls}"
+    grep -q 'nginx -t' "${calls}"
+    [[ ! -e "${candidate}/compose.nginx-check.json" ]]
+    for assessmentFailure in 'sing-box check' 'nginx -t' 'subscription --check'; do
+        ! dockerAssessCandidate "${candidate}"
+    done
+    assessmentFailure=
+    tlsFailure=1
+    ! dockerAssessCandidate "${candidate}"
+    tlsFailure=0
+    assessmentTags=with_quic
+    ! dockerAssessCandidate "${candidate}"
+    assessmentTags=with_quic,with_v2ray_api
+    jq '.core.secondary_type = null |
+      .core.protocols |= map(select(.core == "xray")) |
+      .host_integrations = [{type:"fail2ban",profile:"net-fail2ban",
+        firewall_rules:["DOCKER-USER"],devices:[],schedules:[],
+        settings:{ports:[443],chain:"DOCKER-USER"}}]' \
+        "${candidate}/config/spec.json" >"${candidate}/host-spec.json"
+    cp "${candidate}/config/spec.json" "${candidate}/dual-spec.json"
+    cp "${candidate}/host-spec.json" "${candidate}/config/spec.json"
+    dockerGenerateCompose "${candidate}/config/spec.json" "${candidate}/compose.json"
+    dockerGenerateDeployment "${candidate}/config/spec.json" "${candidate}/deployment.json"
+    dockerAssessCandidate "${candidate}" >"${assessmentRoot}/host-result"
+    grep -q '宿主集成校验: 通过' "${assessmentRoot}/host-result"
+    grep -q 'preflight fail2ban 443' "${calls}"
+    assessmentFailure='preflight fail2ban'
+    ! dockerAssessCandidate "${candidate}"
+    assessmentFailure=
+    cp "${candidate}/dual-spec.json" "${candidate}/config/spec.json"
+    dockerGenerateCompose "${candidate}/config/spec.json" "${candidate}/compose.json"
+    dockerGenerateDeployment "${candidate}/config/spec.json" "${candidate}/deployment.json"
+    cp -- "${candidate}/config/sing-box/config.json" "${assessmentRoot}/original.json"
+    jq '.outbounds += [{type:"block",tag:"legacy-block"}]' "${assessmentRoot}/original.json" \
+        >"${candidate}/config/sing-box/config.json"
+    ! dockerAssessCandidate "${candidate}"
+    ln -s "${assessmentRoot}/original.json" "${candidate}/config/xray/unsafe.json"
+    ! dockerAssessCandidate "${candidate}"
 )
 
 printf 'docker-phase6-regression-ok\n'

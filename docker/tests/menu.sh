@@ -407,7 +407,7 @@ cp -R "${PROJECT_ROOT}/docker/lib" "${SOURCE_ROOT}/docker/lib"
 cp -R "${PROJECT_ROOT}/docker/contracts" "${SOURCE_ROOT}/docker/contracts"
 cp "${PROJECT_ROOT}/shell/core/deployment_mode.sh" "${SOURCE_ROOT}/shell/core/deployment_mode.sh"
 cp "${PROJECT_ROOT}/shell/core/stats_grpc.sh" "${SOURCE_ROOT}/shell/core/stats_grpc.sh"
-cp "${PROJECT_ROOT}/shell/core/"{runtime.sh,reality_targets.sh} "${SOURCE_ROOT}/shell/core/"
+cp "${PROJECT_ROOT}/shell/core/"{runtime.sh,reality_targets.sh,cores.sh} "${SOURCE_ROOT}/shell/core/"
 TEST_REF=1111111111111111111111111111111111111111
 
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/non-tty-state"
@@ -520,6 +520,7 @@ protocol)
     ;;
 edit) recordAction "$@" ;;
 account) recordAction "$@" ;;
+assess) recordAction "$@" ;;
 tls) [[ "${2:-}" == manage ]] || exit 2; dockerTlsManageCommand ;;
 menu)
     source "${PROJECT_ROOT}/docker/lib/menu.sh"
@@ -534,6 +535,10 @@ runPty tls-no-domain menu $'8\n0\n' "${TLS_WIZARD_CLI}" menu
 grep -Fq '当前部署没有 TLS 域名' "${CONTROL_LOG}" || fail 'TLS menu accepted a deployment without a TLS domain'
 [[ ! -s "${TLS_WIZARD_ACTIONS}" ]] || fail 'missing TLS domain reached a business command'
 printf '{"tls":{"domain":"ws.example.com"}}\n' >"${TLS_WIZARD_ROOT}/config/spec.json"
+: >"${TLS_WIZARD_ACTIONS}"
+runPty core-assessment menu $'13\n0\n' "${TLS_WIZARD_CLI}" menu
+[[ "$(<"${TLS_WIZARD_ACTIONS}")" == assess ]] || fail 'core assessment menu dispatched incorrect arguments'
+
 for tlsCase in cancel final-no eof validate install issue renew \
     renewal-status renewal-enable renewal-disable renewal-final-no renewal-eof; do
     : >"${TLS_WIZARD_ACTIONS}"

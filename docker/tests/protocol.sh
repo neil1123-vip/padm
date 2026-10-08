@@ -69,7 +69,7 @@ source "${PROJECT_ROOT}/install-docker.sh"
 cp "${PROJECT_ROOT}/install-docker.sh" "${SOURCE_ROOT}/install-docker.sh"
 cp -R "${PROJECT_ROOT}/docker/lib" "${SOURCE_ROOT}/docker/lib"
 cp -R "${PROJECT_ROOT}/docker/contracts" "${SOURCE_ROOT}/docker/contracts"
-cp "${PROJECT_ROOT}/shell/core/"{deployment_mode.sh,stats_grpc.sh,runtime.sh,reality_targets.sh} "${SOURCE_ROOT}/shell/core/"
+cp "${PROJECT_ROOT}/shell/core/"{deployment_mode.sh,stats_grpc.sh,runtime.sh,reality_targets.sh,cores.sh} "${SOURCE_ROOT}/shell/core/"
 
 UUID=11111111-1111-4111-8111-111111111111
 PUBLIC_KEY=hSDwCYkwp1R0i33ctD73Wg2_Og0mOBr066SpjqqbTmo

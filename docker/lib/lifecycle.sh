@@ -5,6 +5,9 @@ if [[ "${PADM_DOCKER_LIFECYCLE_LOADED:-}" == "1" ]]; then
 fi
 PADM_DOCKER_LIFECYCLE_LOADED=1
 
+DOCKER_ASSESS_PROJECT=
+DOCKER_ASSESS_CANDIDATE=
+
 dockerUsage() {
     cat >&2 <<'EOF'
 用法:
@@ -58,6 +61,7 @@ dockerUsage() {
   padm-docker down
   padm-docker restart
   padm-docker logs [Compose logs 参数]
+  padm-docker assess [--manifest <URL|文件> --bundle <URL|文件> [--control-bundle <URL|文件>]]
   padm-docker update [--manifest <URL|文件> --bundle <URL|文件> [--control-bundle <URL|文件>]]
   padm-docker rollback
   padm-docker uninstall [--remove-images] [--purge --confirm PADM-DOCKER-PURGE]
@@ -717,6 +721,196 @@ dockerReleaseCommand() {
     dockerManifestConfigurationInputs || return "${PADM_DOCKER_RC_MANIFEST}"
 }
 
+dockerAssessCleanup() {
+    local project=${DOCKER_ASSESS_PROJECT:-} candidate=${DOCKER_ASSESS_CANDIDATE:-} ids id failed=0
+    [[ -n "${project}" ]] || return 0
+    [[ "${project}" =~ ^padm-docker-assess-[a-z0-9]{6}$ && -n "${candidate}" ]] || return 1
+    # 只移除本次随机评估项目的 oneoff，不按生产 project 清理。
+    ids=$(docker ps -aq --filter "label=com.docker.compose.project=${project}" \
+        --filter "label=com.docker.compose.project.working_dir=${candidate}" \
+        --filter label=com.docker.compose.oneoff=True) || return 1
+    while IFS= read -r id; do
+        [[ -n "${id}" ]] || continue
+        [[ "${id}" =~ ^[a-f0-9]{12,64}$ ]] || return 1
+        docker rm -f "${id}" >/dev/null || failed=1
+    done <<<"${ids}"
+    ids=$(docker network ls -q --filter "label=com.docker.compose.project=${project}") || return 1
+    while IFS= read -r id; do
+        [[ -n "${id}" ]] || continue
+        [[ "${id}" =~ ^[a-f0-9]{12,64}$ ]] || return 1
+        docker network rm "${id}" >/dev/null || failed=1
+    done <<<"${ids}"
+    [[ "${failed}" == 0 ]] || { dockerError "评估资源清理失败: ${project}"; return 1; }
+    DOCKER_ASSESS_PROJECT=
+    DOCKER_ASSESS_CANDIDATE=
+}
+
+dockerAssessCandidate() (
+    local candidate=$1 core file version status="${1}/assessment.status"
+    local log="${1}/assessment.log" warnings="${1}/assessment.warnings" found defaultHttp=false
+    local probe="${1}/config/xray/.assessment-strict-probe.json"
+    local strictLog="${1}/assessment.strict.log" strictStatus=0
+    [[ -z "$(find "${candidate}" -type l -print -quit)" ]] || {
+        dockerError '评估候选不能包含符号链接'
+        return 1
+    }
+    # 编排必须由受管规格无损重建，防止自定义挂载将试跑写入生产目录。
+    dockerGenerateCompose "${candidate}/config/spec.json" "${candidate}/compose.assessment.json" &&
+        jq -en --arg project "${DOCKER_ASSESS_PROJECT}" \
+            --slurpfile expected "${candidate}/compose.assessment.json" \
+            --slurpfile actual "${candidate}/compose.json" '
+          def comparable:
+            if .name == $project then .name = "padm-docker" else . end |
+            if .networks.default.name == $project then
+              .networks.default.name = "padm-docker" |
+              .networks.default.labels["io.padm.project"] = "padm-docker"
+            else . end |
+            .services |= with_entries(.value.labels |= del(."io.padm.release"));
+          ($actual | length) == 1 and ($expected[0] | comparable) == ($actual[0] | comparable)
+        ' >/dev/null || {
+        dockerError '现有编排与受管规格不一致，拒绝运行升级评估'
+        return 1
+    }
+    jq --arg project "${DOCKER_ASSESS_PROJECT}" '
+      .name = $project | .networks.default.name = $project |
+      .networks.default.labels["io.padm.project"] = $project
+    ' "${candidate}/compose.json" >"${candidate}/compose.assessment-isolated.json" &&
+        mv -- "${candidate}/compose.assessment-isolated.json" "${candidate}/compose.json" || return 1
+    # 只加载菜单版扫描函数，不调用原生下载、安装、迁移或服务操作。
+    # shellcheck source=/dev/null
+    source "${DOCKER_BUNDLE_SOURCE_ROOT}/shell/core/cores.sh" || return 1
+    : >"${status}" && : >"${log}" && : >"${warnings}" || return 1
+    printf '候选发布: %s\n' "$(jq -er '.padm_version' "${candidate}/deployment.json")"
+    while IFS= read -r core; do
+        case "${core}" in
+        xray)
+            version=$(dockerCandidateCompose "${candidate}" run --rm --no-deps xray version) || return 1
+            [[ "${version}" == Xray\ * ]] || { dockerError '无法读取候选 Xray 版本'; return 1; }
+            ;;
+        sing-box)
+            version=$(dockerCandidateCompose "${candidate}" run --rm --no-deps sing-box version) || return 1
+            [[ "${version}" == sing-box\ version\ * ]] || { dockerError '无法读取候选 sing-box 版本'; return 1; }
+            defaultHttp=$(jq -s 'any(.[]; (.route.default_http_client? // "") != "")' \
+                "${candidate}/config/sing-box/"*.json) || return 1
+            grep -Eq '(^|[^[:alnum:]_])with_v2ray_api([^[:alnum:]_]|$)' <<<"${version}" || {
+                dockerError '候选 sing-box 缺少流量统计所需的 v2ray API 能力'
+                return 1
+            }
+            ;;
+        *) return 1 ;;
+        esac
+        printf '核心 %s: %s\n' "${core}" "${version%%$'\n'*}"
+        found=0
+        for file in "${candidate}/config/${core}/"*.json; do
+            [[ -f "${file}" && ! -L "${file}" ]] || continue
+            found=1
+            case "${core}" in
+            xray) xrayCompatibilityAuditScanJsonFile "${file}" "${status}" "${log}" "${warnings}" || return 1 ;;
+            sing-box) singBoxCompatibilityAuditScanJsonFile "${file}" "${status}" "${log}" "${warnings}" "${defaultHttp}" || return 1 ;;
+            esac
+        done
+        [[ "${found}" == 1 ]] || { dockerError "候选 ${core} JSON 配置缺失"; return 1; }
+    done < <(jq -r '[.core.type, .core.secondary_type] | .[] | select(. != null)' "${candidate}/config/spec.json")
+    cat -- "${log}" || return 1
+    if coreCompatibilityAuditHasFailures "${status}"; then
+        dockerError '升级风险扫描失败，现有部署未修改'
+        return 1
+    fi
+    if [[ -s "${warnings}" ]]; then
+        printf '升级风险扫描: 需关注上述警告\n'
+    else
+        printf '升级风险扫描: 未发现已知风险\n'
+    fi
+    dockerBundleSupportsSpec "${DOCKER_STAGED_BUNDLE_PATH}" "${candidate}/config/spec.json" &&
+        dockerValidateCandidate "${candidate}/config/spec.json" "${candidate}" || return 1
+    printf 'Compose 校验: 通过\n核心配置试跑: 通过\n'
+    if jq -e '[.core.type, .core.secondary_type] | index("xray") != null' \
+        "${candidate}/config/spec.json" >/dev/null; then
+        dockerCandidateCompose "${candidate}" run --rm --no-deps -e XRAY_JSON_STRICT=true \
+            xray -test -confdir /etc/padm/xray >/dev/null || {
+            dockerError 'Xray 候选严格校验失败'
+            return 1
+        }
+        # 普通模式能读取、严格模式明确拒绝未知字段，才证明核心启用了严格解析。
+        jq '.padm_assessment_unknown_field = true' "${candidate}/config/xray/config.json" \
+            >"${probe}" && chmod 0640 "${probe}" || return 1
+        [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == 1 ]] ||
+            chown "0:${PADM_DOCKER_CONTAINER_GID}" "${probe}" || return 1
+        if ! dockerCandidateCompose "${candidate}" run --rm --no-deps xray \
+            -test -config /etc/padm/xray/.assessment-strict-probe.json >"${strictLog}" 2>&1; then
+            dockerError 'Xray 严格解析能力探针的普通模式失败'
+            return 1
+        fi
+        dockerCandidateCompose "${candidate}" run --rm --no-deps -e XRAY_JSON_STRICT=true \
+            xray -test -config /etc/padm/xray/.assessment-strict-probe.json \
+            >"${strictLog}" 2>&1 || strictStatus=$?
+        rm -f -- "${probe}" || return 1
+        if [[ "${strictStatus}" == 0 ]]; then
+            printf 'Xray 严格校验: 未启用；候选核心未拒绝未知字段，仅普通配置试跑通过。\n'
+        elif grep -Fq 'unknown field "padm_assessment_unknown_field"' "${strictLog}"; then
+            printf 'Xray 严格校验: 通过\n'
+        else
+            dockerError 'Xray 严格解析能力探针失败，不能确认严格校验'
+            return 1
+        fi
+    fi
+    printf 'TLS 校验: %s\n订阅校验: %s\n宿主集成校验: %s\n' \
+        "$(jq -r 'if .tls != null then "通过" else "未启用" end' "${candidate}/config/spec.json")" \
+        "$(jq -r 'if .subscription.enabled == true then "通过" else "未启用" end' "${candidate}/config/spec.json")" \
+        "$(jq -r 'if (.host_integrations | length) > 0 or .reality_stream.host_website != null then "通过" else "未启用" end' "${candidate}/config/spec.json")"
+)
+
+dockerAssessCommand() {
+    local manifest= bundle= controlBundle= root status=0
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+        --manifest|--bundle|--control-bundle)
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* ]] || return "${PADM_DOCKER_RC_USAGE}"
+            case "$1" in
+            --manifest) manifest=$2 ;;
+            --bundle) bundle=$2 ;;
+            --control-bundle) controlBundle=$2 ;;
+            esac
+            shift 2
+            ;;
+        *) dockerUsage; return "${PADM_DOCKER_RC_USAGE}" ;;
+        esac
+    done
+    dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+    dockerLockInstalledDeployment || return $?
+    dockerComposeFile >/dev/null || {
+        dockerError 'Docker 服务尚未配置，请先执行 configure'
+        return "${PADM_DOCKER_RC_COMPOSE}"
+    }
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    [[ -f "${root}/config/spec.json" && ! -L "${root}/config/spec.json" ]] || {
+        dockerError '完整升级评估需要受管规格，请先通过 edit --spec 导入原始规格'
+        return "${PADM_DOCKER_RC_STATE}"
+    }
+    dockerRealityStreamDeploymentCheck "${root}/config/spec.json" || return "${PADM_DOCKER_RC_STATE}"
+    dockerManifestPrepare "${manifest}" "${bundle}" "${controlBundle}" || return "${PADM_DOCKER_RC_MANIFEST}"
+    dockerStageReleaseBundle && dockerRenewalBundleCheck "${DOCKER_STAGED_BUNDLE_PATH}" ||
+        return "${PADM_DOCKER_RC_BUNDLE}"
+    dockerPullManifestImages || return "${PADM_DOCKER_RC_COMPOSE}"
+    dockerTrafficRuntimeCheck || return "${PADM_DOCKER_RC_HOST}"
+    # 评估只操作私有副本，不采集流量、不备份、不切换、不启停生产服务。
+    if dockerCreateUpdateCandidate; then
+        DOCKER_ASSESS_CANDIDATE=${DOCKER_CONFIG_CANDIDATE}
+        DOCKER_ASSESS_PROJECT=${DOCKER_CONFIG_CANDIDATE##*.}
+        DOCKER_ASSESS_PROJECT="padm-docker-assess-${DOCKER_ASSESS_PROJECT,,}"
+        dockerAssessCandidate "${DOCKER_CONFIG_CANDIDATE}" || status=${PADM_DOCKER_RC_STATE}
+    else
+        status=${PADM_DOCKER_RC_STATE}
+    fi
+    if [[ "${status}" -ne 0 ]]; then
+        dockerError '核心升级评估未通过，现有部署未修改'
+    fi
+    dockerAssessCleanup || status=${PADM_DOCKER_RC_STATE}
+    dockerCleanupConfigurationCandidate || status=${PADM_DOCKER_RC_STATE}
+    [[ "${status}" -ne 0 ]] || printf '核心升级评估完成，现有部署未修改；客户端连通仍需独立验收。\n'
+    return "${status}"
+}
+
 dockerUpdateCommand() {
     local manifest= bundle= controlBundle= candidate backup root
     while [[ "$#" -gt 0 ]]; do
@@ -1030,6 +1224,7 @@ dockerUninstallCommand() {
 
 dockerCommandInterrupted() {
     local status=$1
+    dockerAssessCleanup || true
     dockerRenewalScheduleInterrupted || true
     if declare -F dockerRenewalInterrupted >/dev/null 2>&1; then
         dockerRenewalInterrupted || true
@@ -1084,6 +1279,7 @@ dockerMain() {
     status) dockerStatusCommand "$@" ;;
     traffic) dockerTrafficCommand "$@" ;;
     up | down | restart | logs) dockerLifecycleCommand "${command}" "$@" ;;
+    assess) dockerAssessCommand "$@" ;;
     update) dockerUpdateCommand "$@" ;;
     rollback) dockerRollbackCommand "$@" ;;
     uninstall) dockerUninstallCommand "$@" ;;

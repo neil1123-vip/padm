@@ -1120,7 +1120,8 @@ validateFeatureMatrix() {
         nginx: ["nginx"], "tls-files": ["nginx", "acme"], "acme-dns": ["acme"],
         subscription: ["core-xray", "nginx", "subscription"],
         "subscription-traffic": ["core-xray", "core-sing-box"],
-        "core-lifecycle": ["core-xray", "core-sing-box"], "script-update": [], uninstall: []
+        "core-lifecycle": ["core-xray", "core-sing-box"],
+        "core-upgrade-assessment": ["core-xray", "core-sing-box"], "script-update": [], uninstall: []
       } | to_entries[];
         . as $entry | ($matrix.feature_matrix[$entry.key].profiles | sort) == ($entry.value | sort)) and
       all({
@@ -1130,8 +1131,8 @@ validateFeatureMatrix() {
         . as $entry |
         ($matrix.feature_matrix[$entry.key] | {status, profiles, network_mode, host_capabilities}) ==
           ($matrix.feature_matrix[$entry.value] | {status, profiles, network_mode, host_capabilities})) and
-      all(["interactive-menu", "reality-coexistence",
-        "core-upgrade-assessment"][]; $matrix.feature_matrix[.].status == "deferred") and
+      all(["interactive-menu", "reality-coexistence"][]; $matrix.feature_matrix[.].status == "deferred") and
+      $matrix.feature_matrix["core-upgrade-assessment"].status == "supported" and
       $matrix.feature_matrix["reality-target-management"].status == "supported" and
       $matrix.feature_matrix["reality-parameter-management"].status == "supported" and
       ([.protocols[] | select(.status == "supported") | .id] | sort) == [1, 2, 3, 4, 5, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31] and
@@ -1167,7 +1168,8 @@ del(.feature_matrix["reality-target-management"])
 .feature_matrix.subscription.requires.core = "sing-box"
 .feature_matrix.subscription.requires.protocol_ids = [1]
 .feature_matrix.subscription.requires.tls = false
-.feature_matrix["core-upgrade-assessment"].status = "supported"
+.feature_matrix["core-upgrade-assessment"].status = "deferred"
+.feature_matrix["core-upgrade-assessment"].profiles = []
 .feature_matrix["reality-parameter-management"].status = "deferred"
 .feature_matrix["reality-target-management"].status = "deferred"
 EOF

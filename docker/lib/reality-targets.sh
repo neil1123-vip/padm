@@ -141,11 +141,7 @@ dockerRealityTargetAction() (
     # shellcheck source=/dev/null
     source "${DOCKER_BUNDLE_SOURCE_ROOT}/shell/core/reality_targets.sh" || return 1
     export TMPDIR="${work}"
-    PADM_CLEANUP_PATHS=("${work}")
-    PADM_CLEANUP_TRAP_INSTALLED=1
-    trap 'padmCleanupTempPaths' EXIT
-    trap 'padmCleanupTempPaths INT' INT
-    trap 'padmCleanupTempPaths TERM' TERM
+    padmRegisterCleanupPath "${work}"
     unset PADM_REALITY_TARGET_CANDIDATES_FILE PADM_REALITY_TARGET_SELECTION_SCAN PADM_REALITY_TARGET_SELECTION_REQUIRE_SCAN
     unset AUTO_REALITY_SERVER_NAME AUTO_REALITY_TARGET_SELECT
     PADM_REALITY_TARGET_RESULTS_FILE="${state}/results.tsv"

@@ -175,7 +175,7 @@ rm -f -- "${PADM_DOCKER_INSTALL_DIR}/data/subscription/${GROUP_TOKEN}"
 
 NGINX="${TEST_ROOT}/nginx.conf"
 dockerGenerateNginxConfig "${SPEC}" "${NGINX}"
-grep -qF 'location ~ ^/subscriptions/(?<padm_subscription_token>[A-Za-z0-9_-]{16,128})$ {' "${NGINX}" ||
+grep -qF 'location ~ "^/subscriptions/(?<padm_subscription_token>[A-Za-z0-9_-]{16,128})$" {' "${NGINX}" ||
     fail 'Nginx 未生成受限 token 路由'
 grep -qF 'proxy_pass http://subscription:8081/$padm_subscription_token;' "${NGINX}" ||
     fail 'Nginx token 代理路径错误'

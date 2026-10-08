@@ -123,4 +123,13 @@ dockerRestoreConfiguration || fail 'unconfigured backup restore failed'
 [[ ! -e "${PADM_DOCKER_INSTALL_DIR}/deployment.json" ]] || fail 'unconfigured restore created a deployment'
 assertRuntimeSecrets
 grep -qxF removed "${TEST_ROOT}/schedule.log" || fail 'unconfigured restore did not remove the runtime scheduler'
+# 权限准备必须在 chmod/chown 前拒绝指向候选之外的链接。
+unsafeCandidate="${TEST_ROOT}/unsafe-candidate"
+mkdir -p "${unsafeCandidate}/config/xray"
+printf 'external\n' >"${TEST_ROOT}/external"
+chmod 0600 "${TEST_ROOT}/external"
+chown 12345:12345 "${TEST_ROOT}/external"
+ln -s "${TEST_ROOT}/external" "${unsafeCandidate}/config/xray/unsafe"
+! dockerPrepareCandidatePermissions "${unsafeCandidate}" || fail 'candidate symlink was accepted'
+assertMetadata "${TEST_ROOT}/external" '600 12345 12345'
 printf 'docker-permissions-regression-ok\n'

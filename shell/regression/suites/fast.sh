@@ -86,6 +86,10 @@ listRegressionDockerContractsSystemChildSelectors() {
     printf '%s\n' docker-phase3 docker-phase4 docker-phase6
 }
 
+listRegressionDockerCoreAssessmentChildSelectors() {
+    printf '%s\n' docker-phase1 docker-release docker-menu docker-phase3 docker-phase6
+}
+
 listRegressionDockerContractsRealityChildSelectors() {
     printf '%s\n' docker-reality-parameters docker-reality-targets docker-reality-target-library
 }
@@ -155,6 +159,8 @@ registerRegressionFunctionLeaf docker-business runDockerBusinessRegression
 
 registerRegressionParallelSelectorList docker-tls-focused runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/docker-tls-focused-parallel-${BASHPID:-$$}" listRegressionDockerTlsFocusedChildSelectors
+registerRegressionParallelSelectorList docker-core-assessment runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-core-assessment-parallel-${BASHPID:-$$}" listRegressionDockerCoreAssessmentChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-contracts-parallel-${BASHPID:-$$}" listRegressionDockerContractsChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts-fast runFrameworkParallelRegressionSelectorListWithJobs \
