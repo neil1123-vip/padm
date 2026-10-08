@@ -32,6 +32,7 @@ RUN set -eux; \
 
 COPY --chown=10001:10001 --chmod=0755 entrypoint.sh /usr/local/bin/padm-entrypoint
 COPY --chown=10001:10001 --chmod=0755 control_server.py /opt/padm/subscription/control_server.py
+COPY --chown=10001:10001 --chmod=0755 control_api.py /opt/padm/control_api.py
 
 ARG PADM_VERSION
 ARG SOURCE_URL

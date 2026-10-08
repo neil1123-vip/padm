@@ -361,6 +361,12 @@ padm-docker geo auto-update
 不覆盖或删除其它部署的调度。`geo auto-update` 是受管任务入口，不进入交互菜单。
 本地回归与真实发布、公网、原生 arm64 和整机重启验收分别记录，不由模拟通过推断完成。
 
+多服务器控制当前只有独立私网只读 API 基座：授权绑定被控源地址，token 过期、
+轮换与撤销立即生效，公开订阅服务不变。该入口尚未接入 Compose、CLI 或菜单；
+角色邀请、WireGuard 连接验收、被控同步事务和恢复仍待实施，多服务器保持 `deferred`，
+不能手工启动 API 后就视为完成同步。阶段边界见
+[4C 实施计划](documents/docker-menu-parity-plan.md#4c-多服务器控制后端)。
+
 证书和 ACME 任务也由同一个宿主控制命令分发到 `ops` 镜像：
 
 ```bash

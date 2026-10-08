@@ -305,7 +305,7 @@
       "profiles": ["subscription", "net-wireguard"],
       "network_mode": "host",
       "host_capabilities": ["NET_ADMIN"],
-      "reason": "WireGuard 宿主集成已存在，多服务器角色、同步事务和恢复向导尚未迁移。"
+      "reason": "4C.1 已建立独立私网只读控制 API 和认证/撤销合同；WireGuard 宿主集成已存在，角色管理、同步事务、连接验收和恢复向导尚未接入。"
     },
     "acme-webroot": {
       "status": "deferred",

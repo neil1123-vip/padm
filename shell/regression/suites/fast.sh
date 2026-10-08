@@ -81,7 +81,8 @@ listRegressionDockerContractsFastChildSelectors() {
         docker-accounts-cli \
         docker-subscriptions \
         docker-business \
-        docker-geo-data
+        docker-geo-data \
+        docker-control-api
 }
 
 listRegressionDockerContractsSystemChildSelectors() {
@@ -122,6 +123,10 @@ runDockerBusinessRegression() {
 
 runDockerGeoRegression() {
     bash "${PROJECT_ROOT}/docker/tests/geo.sh"
+}
+
+runDockerControlApiRegression() {
+    PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control.py"
 }
 
 registerRegressionFunctionLeaf install-module-manifest runInstallModuleManifestCompleteRegression
@@ -167,6 +172,7 @@ registerRegressionFunctionLeaf docker-accounts-cli runDockerAccountsCliRegressio
 registerRegressionFunctionLeaf docker-subscriptions runDockerSubscriptionsRegression
 registerRegressionFunctionLeaf docker-business runDockerBusinessRegression
 registerRegressionFunctionLeaf docker-geo-data runDockerGeoRegression
+registerRegressionFunctionLeaf docker-control-api runDockerControlApiRegression
 
 registerRegressionParallelSelectorList docker-tls-focused runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/docker-tls-focused-parallel-${BASHPID:-$$}" listRegressionDockerTlsFocusedChildSelectors

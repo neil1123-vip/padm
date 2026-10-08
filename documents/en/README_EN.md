@@ -316,6 +316,13 @@ padm-docker logs
 padm-docker validate
 ```
 
+Multi-server control currently has only a separate private read-only API foundation.
+Authorization is bound to the controlled source address; expiration, rotation and revocation
+take effect on the next request. The public subscription server is unchanged.
+Compose, CLI/menu roles, invitations, validated WireGuard connectivity, transactional sync and
+recovery are not connected yet; multi-server support remains `deferred`.
+See the [4C implementation checkpoints](../docker-menu-parity-plan.md#4c-多服务器控制后端).
+
 Certificate and ACME tasks are dispatched to the `ops` image by the same host command:
 
 ```bash

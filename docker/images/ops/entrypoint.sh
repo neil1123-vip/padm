@@ -10,6 +10,7 @@ health)
     openssl version >/dev/null
     test -x /opt/acme/acme.sh
     python3 /opt/padm/subscription/control_server.py --check
+    python3 /opt/padm/control_api.py --version >/dev/null
     ;;
 acme)
     shift
@@ -27,6 +28,10 @@ subscription)
 subscription-health)
     exec python3 /opt/padm/subscription/control_server.py --health \
         "${PADM_SUBSCRIPTION_HEALTH_URL:-http://127.0.0.1:8081/healthz}"
+    ;;
+control)
+    shift
+    exec python3 /opt/padm/control_api.py "$@"
     ;;
 tls-check)
     shift

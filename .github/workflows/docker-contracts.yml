@@ -35,6 +35,12 @@ jobs:
         with:
           ref: ${{ inputs.source_ref }}
           fetch-depth: 1
+      - name: Prepare control contract validator
+        if: matrix.selector == 'docker-contracts-fast'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-jsonschema
       - name: Run contract shard
         shell: bash
         env:
