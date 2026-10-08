@@ -27,27 +27,28 @@ listRegressionFastFullChildSelectors() {
 
 listRegressionCiChildSelectors() {
     # platform-refresh 已覆盖 fast 中三项安装检查，完整性检查单独补齐，避免重复夹具并发。
+    # 先启动耗时最长的独立任务，避免服务失败回归排到队尾。
     printf '%s\n' \
+        core-install-service-action-failure \
+        core-install-signal-rollback \
+        subscription-state \
         fast-smoke \
         platform-refresh \
         install-module-manifest \
         subscription-output \
-        subscription-state \
         docker-geo-data \
-        core-safety-rollback \
-        core-install-signal-rollback \
-        core-install-service-action-failure
+        core-safety-rollback
 }
 
 listRegressionCiPrChildSelectors() {
     # PR 默认只跑不依赖大型状态夹具的安全门；订阅和 harness 变更由工作流按范围升级到 ci。
     printf '%s\n' \
+        core-install-service-action-failure \
+        core-install-signal-rollback \
         fast-smoke \
         platform-refresh \
         install-module-manifest \
-        core-safety-rollback \
-        core-install-signal-rollback \
-        core-install-service-action-failure
+        core-safety-rollback
 }
 
 listRegressionDockerTlsFocusedChildSelectors() {
