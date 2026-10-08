@@ -89,26 +89,47 @@ dockerBundleSourceIsComplete() {
     dockerBundlePayloadPaths "${sourceRoot}" >/dev/null
 }
 
+dockerBundleHashPaths() {
+    local root=$1 pathList=$2 output=$3 relativePath
+    local -a files=()
+    while IFS= read -r relativePath; do
+        dockerBundleRelativePathIsSafe "${relativePath}" || return 1
+        # manifest 不接受 sha256sum 的文件名转义格式。
+        [[ "${relativePath}" != *'\'* ]] || return 1
+        [[ -f "${root}/${relativePath}" && ! -L "${root}/${relativePath}" ]] || return 1
+        files+=("${relativePath}")
+    done <"${pathList}"
+    ((${#files[@]} > 0)) || return 1
+    if ! (cd -- "${root}" && sha256sum -- "${files[@]}") >"${output}"; then
+        rm -f -- "${output}"
+        return 1
+    fi
+}
+
 dockerBundleRefIsValid() {
     [[ "$1" =~ ^[0-9a-f]{40}$ || "$1" =~ ^sha256:[0-9a-f]{64}$ ]]
 }
 
 dockerBundleSourceDigest() {
-    local sourceRoot=$1 pathList relativePath digest
+    local sourceRoot=$1 pathList hashList digest
     pathList=$(mktemp "${TMPDIR:-/tmp}/padm-docker-source.XXXXXX") || return 1
-    : >"${pathList}"
-    while IFS= read -r relativePath; do
-        sha256sum "${sourceRoot}/${relativePath}" |
-            awk -v path="${relativePath}" '{ print $1 "  " path }' >>"${pathList}" || {
-            rm -f -- "${pathList}"
-            return 1
-        }
-    done < <(dockerBundlePayloadPaths "${sourceRoot}")
-    digest=$(sha256sum "${pathList}" | cut -d ' ' -f 1) || {
+    dockerBundlePayloadPaths "${sourceRoot}" >"${pathList}" || {
         rm -f -- "${pathList}"
         return 1
     }
-    rm -f -- "${pathList}"
+    hashList=$(mktemp "${TMPDIR:-/tmp}/padm-docker-source-hashes.XXXXXX") || {
+        rm -f -- "${pathList}"
+        return 1
+    }
+    dockerBundleHashPaths "${sourceRoot}" "${pathList}" "${hashList}" || {
+        rm -f -- "${pathList}" "${hashList}"
+        return 1
+    }
+    digest=$(sha256sum -- "${hashList}" | cut -d ' ' -f 1) || {
+        rm -f -- "${pathList}" "${hashList}"
+        return 1
+    }
+    rm -f -- "${pathList}" "${hashList}"
     [[ "${digest}" =~ ^[0-9a-f]{64}$ ]] || return 1
     printf 'sha256:%s\n' "${digest}"
 }
@@ -144,29 +165,26 @@ dockerResolveBundleRef() {
 }
 
 dockerWriteBundleManifest() {
-    local bundleRoot=$1 manifest tempList relativePath
+    local bundleRoot=$1 manifest tempList
     manifest="${bundleRoot}/${PADM_DOCKER_BUNDLE_MANIFEST}"
     tempList=$(mktemp "${TMPDIR:-/tmp}/padm-docker-paths.XXXXXX") || return 1
-    if ! { dockerBundlePayloadPaths "${bundleRoot}"; printf '%s\n' "${PADM_DOCKER_BUNDLE_REF}"; } |
-        LC_ALL=C sort -u >"${tempList}"; then
-        rm -f -- "${tempList}"
-        return 1
-    fi
-    : >"${manifest}" || {
+    dockerBundlePayloadPaths "${bundleRoot}" >"${tempList}" || {
         rm -f -- "${tempList}"
         return 1
     }
-    while IFS= read -r relativePath; do
-        [[ -f "${bundleRoot}/${relativePath}" && ! -L "${bundleRoot}/${relativePath}" ]] || {
-            rm -f -- "${tempList}" "${manifest}"
-            return 1
-        }
-        sha256sum "${bundleRoot}/${relativePath}" |
-            awk -v path="${relativePath}" '{ print $1 "  " path }' >>"${manifest}" || {
-            rm -f -- "${tempList}" "${manifest}"
-            return 1
-        }
-    done <"${tempList}"
+    printf '%s\n' "${PADM_DOCKER_BUNDLE_REF}" >>"${tempList}" || {
+        rm -f -- "${tempList}"
+        return 1
+    }
+    if ! LC_ALL=C sort -u "${tempList}" -o "${tempList}"; then
+        rm -f -- "${tempList}"
+        return 1
+    fi
+    dockerBundleHashPaths "${bundleRoot}" "${tempList}" "${manifest}" || {
+        rm -f -- "${tempList}"
+        rm -f -- "${manifest}"
+        return 1
+    }
     rm -f -- "${tempList}"
     chmod 0640 "${manifest}"
 }

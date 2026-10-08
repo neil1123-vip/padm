@@ -206,8 +206,40 @@ done
     mkdir -- "${validationRoot}"
     cp -R "${DOCKER_ROOT}/bundle/." "${validationRoot}/"
     manifest="${validationRoot}/${PADM_DOCKER_BUNDLE_MANIFEST}"
+    printf 'hash fixture\n' >"${validationRoot}/docker/-hash-fixture"
+    dockerWriteBundleManifest "${validationRoot}" || fail 'batch manifest generation failed'
+    referenceManifest="${TEST_ROOT}/bundle-manifest-reference"
+    : >"${referenceManifest}"
+    while IFS= read -r relativePath; do
+        sha256sum "${validationRoot}/${relativePath}" |
+            awk -v path="${relativePath}" '{print $1 "  " path}' >>"${referenceManifest}"
+    done < <({ dockerBundlePayloadPaths "${validationRoot}"; printf '%s\n' "${PADM_DOCKER_BUNDLE_REF}"; } | LC_ALL=C sort -u)
+    cmp -s "${referenceManifest}" "${manifest}" || fail 'batch manifest differs from per-file hashes'
+    : >"${referenceManifest}"
+    while IFS= read -r relativePath; do
+        sha256sum "${validationRoot}/${relativePath}" |
+            awk -v path="${relativePath}" '{print $1 "  " path}' >>"${referenceManifest}"
+    done < <(dockerBundlePayloadPaths "${validationRoot}")
+    expectedDigest="sha256:$(sha256sum "${referenceManifest}" | cut -d ' ' -f 1)"
+    [[ "$(dockerBundleSourceDigest "${validationRoot}")" == "${expectedDigest}" ]] ||
+        fail 'batch source digest differs from per-file hashes'
     cp -- "${manifest}" "${TEST_ROOT}/bundle-manifest"
     dockerValidateBundle "${validationRoot}" || fail 'valid bundle was rejected'
+    (
+        export TMPDIR="${TEST_ROOT}/bundle-hash-tmp"
+        mkdir -- "${TMPDIR}"
+        sha256sum() { printf 'partial hash output\n'; return 17; }
+        if dockerWriteBundleManifest "${validationRoot}"; then
+            fail 'partial hash failure was accepted'
+        fi
+        [[ ! -e "${manifest}" ]] || fail 'partial manifest was retained'
+        if dockerBundleSourceDigest "${validationRoot}"; then
+            fail 'partial source hash failure was accepted'
+        fi
+        [[ -z "$(find "${TMPDIR}" -mindepth 1 -print -quit)" ]] ||
+            fail 'hash failure leaked temporary files'
+    ) || fail 'batch hash failure cleanup failed'
+    cp -- "${TEST_ROOT}/bundle-manifest" "${manifest}"
     manifestText=$(<"${manifest}")
     printf '%s' "${manifestText//  /$'\t\t'}" >"${manifest}"
     dockerValidateBundle "${validationRoot}" ||

@@ -6272,11 +6272,13 @@ runDockerRealityRegression() {
 }
 
 runDockerRealityParametersRegression() {
-    bash "${PROJECT_ROOT}/docker/tests/reality-parameters.sh"
+    PADM_DOCKER_TEST_FIXTURE_ONLY="${PADM_DOCKER_CONTRACTS_SHARED_CHECKS:-0}" \
+        bash "${PROJECT_ROOT}/docker/tests/reality-parameters.sh"
 }
 
 runDockerRealityTargetsRegression() {
-    bash "${PROJECT_ROOT}/docker/tests/reality-targets.sh"
+    PADM_DOCKER_TEST_FIXTURE_ONLY="${PADM_DOCKER_CONTRACTS_SHARED_CHECKS:-0}" \
+        bash "${PROJECT_ROOT}/docker/tests/reality-targets.sh"
 }
 
 runDockerRealityTargetLibraryRegression() {

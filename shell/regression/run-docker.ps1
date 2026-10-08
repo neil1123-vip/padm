@@ -10,9 +10,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$fullRegression = $Selector -in @('all', 'ci', 'ci-pr')
+$fullRegression = $Selector -in @('all', 'ci', 'ci-pr', 'docker-contracts')
 if (-not $PSBoundParameters.ContainsKey('Jobs')) {
-    $Jobs = if ($fullRegression) { 3 } else { 2 }
+    $Jobs = if ($Selector -eq 'docker-contracts') { 4 } elseif ($fullRegression) { 3 } else { 2 }
 }
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $git = 'C:\Program Files\Git\cmd\git.exe'

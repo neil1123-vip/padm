@@ -53,7 +53,7 @@ PY
 printf 'current-worktree-snapshot-ok\n'
 case "$1" in
     hold) sleep 12 ;;
-    ci) sleep 8 ;;
+    ci|docker-contracts) sleep 8 ;;
     ci-pr) sleep 60 ;;
 esac
 [[ "$1" != fail ]] || exit 7
@@ -149,10 +149,10 @@ try {
     Wait-RunnerExit $third
     [IO.File]::WriteAllText((Join-Path $fixture 'new file.txt'), 'untracked-current', $utf8)
 
-    # 完整 CI 等待时，后来的普通任务不能使用空闲槽位插入。
+    # 完整合同等待时，后来的普通任务不能使用空闲槽位插入。
     $holder = Start-RunnerCheck hold queue-before-heavy
     Wait-RunnerOutput $holder current-worktree-snapshot-ok
-    $heavy = Start-RunnerCheck ci queue-heavy
+    $heavy = Start-RunnerCheck docker-contracts queue-heavy
     Wait-RunnerOutput $heavy 'Regression queue: waiting'
     $queued = Start-RunnerCheck fast queue-after-heavy
     Wait-RunnerOutput $queued 'Regression queue: waiting'
@@ -160,11 +160,19 @@ try {
     Wait-RunnerExit $holder
     Wait-RunnerOutput $heavy current-worktree-snapshot-ok
     if (Select-String -Quiet -LiteralPath $queued.Output -SimpleMatch current-worktree-snapshot-ok) {
-        throw 'Ordinary regression bypassed a waiting CI regression.'
+        throw 'Ordinary regression bypassed a waiting full regression.'
     }
     Wait-RunnerExit $heavy
     Wait-RunnerExit $queued
-    if ((Get-RunnerResult $heavy).jobs -ne 3) { throw 'Wrong full regression default jobs.' }
+    $heavyResult = Get-RunnerResult $heavy
+    if ($heavyResult.jobs -ne 4 -or $heavyResult.queue_slots -ne 2 -or $heavyResult.cache_hit) {
+        throw 'Wrong Docker contracts defaults.'
+    }
+    $contractReuse = Start-RunnerCheck docker-contracts cache-contracts
+    Wait-RunnerExit $contractReuse
+    if (-not (Get-RunnerResult $contractReuse).cache_hit) {
+        throw 'Identical Docker contracts were not reused.'
+    }
 
     # 强制结束持有者后，接管槽位必须先移除它留下的容器。
     $orphan = Start-RunnerCheck ci-pr queue-orphan
@@ -180,6 +188,9 @@ try {
 
     # 内容不变、时间戳变化仍复用；参数、内容或工具变化必须重跑。
     $baseline = Get-RunnerResult $recovery
+    if ($baseline.jobs -ne 3 -or $baseline.queue_slots -ne 2) {
+        throw 'Wrong full regression defaults.'
+    }
     (Get-Item -LiteralPath (Join-Path $fixture 'probe.lock')).LastWriteTime = (Get-Date).AddMinutes(1)
     $reused = Start-RunnerCheck all cache-same-content
     Wait-RunnerExit $reused

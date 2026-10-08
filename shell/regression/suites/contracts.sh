@@ -258,15 +258,18 @@ runRegressionDockerContractsAggregateContract() (
     local expectedLog="${TMP_DIR}/docker-contracts-aggregate.expected.log"
     local status=0 selector
     local -a expectedSelectors=(
-        docker-phase1 docker-menu docker-release docker-permissions docker-phase2 docker-phase5 docker-traffic docker-accounts
-        docker-phase3 docker-phase4 docker-phase6
-        docker-reality-parameters docker-reality-targets docker-reality-target-library
-        docker-setup-core docker-setup-encrypted docker-setup-transports docker-setup-tls docker-traditional-tls
+        docker-traditional-tls docker-phase3 docker-setup-encrypted docker-setup-transports docker-reality-targets
+        docker-setup-tls docker-reality-parameters docker-setup-core docker-sites docker-phase6
+        docker-menu docker-reality-target-library docker-control-state docker-phase4 docker-control-client
+        docker-phase1 docker-phase5 docker-control-cli docker-control-sync docker-release docker-geo-data docker-traffic
+        docker-accounts docker-permissions docker-wireguard-runtime docker-control-api docker-subscriptions
+        docker-accounts-cli docker-business docker-phase2
     )
 
     runFrameworkParallelRegressionSelectors() {
         [[ "${PADM_REGRESSION_PARALLEL_SELECTOR_MODE:-}" == pairs &&
-            "${PADM_REGRESSION_PARALLEL_JOBS:-}" == 2 ]] || return 8
+            "${PADM_REGRESSION_PARALLEL_JOBS:-}" == 2 &&
+            "${PADM_DOCKER_CONTRACTS_SHARED_CHECKS:-0}" == 1 ]] || return 8
         shift
         printf '%s\n' "$@" >"${callLog}"
         return 7
@@ -317,6 +320,25 @@ runRegressionDockerContractsAggregateContract() (
     done
     printf '%s\n' core encrypted transports tls >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
+
+    # 独立 selector 和 Reality 分片仍执行祖先合同，完整聚合才允许只初始化夹具。
+    runFrameworkParallelRegressionSelectors() {
+        [[ "${PADM_DOCKER_CONTRACTS_SHARED_CHECKS:-0}" == 0 ]]
+    }
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-contracts-reality
+    bash() {
+        printf '%s:%s\n' "${PADM_DOCKER_TEST_FIXTURE_ONLY:-0}" "${1##*/}" >>"${callLog}"
+    }
+    : >"${callLog}"
+    unset PADM_DOCKER_CONTRACTS_SHARED_CHECKS
+    runDockerRealityParametersRegression
+    runDockerRealityTargetsRegression
+    PADM_DOCKER_CONTRACTS_SHARED_CHECKS=1 runDockerRealityParametersRegression
+    PADM_DOCKER_CONTRACTS_SHARED_CHECKS=1 runDockerRealityTargetsRegression
+    printf '%s\n' 0:reality-parameters.sh 0:reality-targets.sh \
+        1:reality-parameters.sh 1:reality-targets.sh >"${expectedLog}"
+    cmp -s "${expectedLog}" "${callLog}"
+    [[ -z "${PADM_DOCKER_CONTRACTS_SHARED_CHECKS:-}" ]]
 )
 
 runRegressionTargetedBatchHelpers() (

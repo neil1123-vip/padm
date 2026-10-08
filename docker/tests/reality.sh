@@ -28,6 +28,7 @@ jq --arg manifest "${CONFIGURE_MANIFEST_SHA}" --arg identity "${CONFIGURE_IDENTI
       .name = "Reality-gRPC-sing" | .public_port = 25445 |
       .grpc = {service_name:"padm-grpc_2"})]
 ' "${TEST_ROOT}/v3.json" >"${REALITY_SPEC}"
+if [[ "${PADM_DOCKER_TEST_FIXTURE_ONLY:-0}" != 1 ]]; then
 dockerConfigureSpecValidate "${REALITY_SPEC}" || fail '新 Reality 合同不接受有效双核心夹具'
 COMPAT_BUNDLE="${TEST_ROOT}/compat-bundle"
 mkdir -p "${COMPAT_BUNDLE}/docker/contracts"
@@ -149,6 +150,7 @@ jq '.listeners[1].container_port += 1' "${TEST_ROOT}/reality-deployment.json" \
     >"${PADM_DOCKER_INSTALL_DIR}/deployment.json"
 runRead 15 new-deployment-drift dockerProtocolCommand links
 cp "${TEST_ROOT}/reality-deployment.json" "${PADM_DOCKER_INSTALL_DIR}/deployment.json"
+fi
 
 # 只模拟 Docker 和宿主服务；候选、可信发布校验、提交及回滚执行生产事务。
 cat >"${MOCK_BIN}/docker" <<'EOF'
@@ -205,6 +207,13 @@ liveSnapshot() {
         "${PADM_DOCKER_INSTALL_DIR}/secrets" -type f -exec sha256sum {} + | LC_ALL=C sort
     sha256sum "${PADM_DOCKER_INSTALL_DIR}/"{deployment.json,compose.json,images.env}
 }
+# 派生测试依赖最终可信清单，但自行创建部署，不复用共同合同的事务状态。
+if [[ "${PADM_DOCKER_TEST_FIXTURE_ONLY:-0}" == 1 ]]; then
+    IMAGE_DIGEST=$(printf '2%.0s' {1..64})
+    export OPS_IMAGE="ghcr.io/example/padm-ops:test@sha256:${IMAGE_DIGEST}"
+    dockerConfigureTestFixture
+    return 0
+fi
 before=$(liveSnapshot)
 jq '(.core.protocols[] | select(.id == 2) | .public_port) = 26443' \
     "${REALITY_SPEC}" >"${TEST_ROOT}/changed-reality.json"

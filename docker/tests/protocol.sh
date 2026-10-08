@@ -160,6 +160,12 @@ protocolSignalRead() (
     dockerProtocolCommand "$@"
 )
 
+# 完整聚合已由传统 TLS 覆盖共同断言；派生测试仍独立创建真实部署夹具。
+if [[ "${PADM_DOCKER_TEST_FIXTURE_ONLY:-0}" == 1 ]]; then
+    dockerConfigureSpecMigrate "${SPEC}" "${TEST_ROOT}/v3.json"
+    return 0
+fi
+
 newState v1 "${SPEC}"
 runRead 0 v1-list dockerProtocolCommand list
 [[ "$(<"${STDOUT}")" == $'vless-reality  xray  Reality Vision  [2001:db8::1]:24443  [ipv4,ipv6]  Primary-Reality\nvless-ws  xray  WS TLS  proxy.example.com:24444  [ipv4]  Main:WS' ]] ||
