@@ -23,6 +23,7 @@ $platform = & $docker version --format '{{.Server.Os}}/{{.Server.Arch}}'
 if ($LASTEXITCODE -ne 0) { throw 'Docker Linux engine is unavailable.' }
 if ($platform -notmatch '^linux/(amd64|arm64)$') { throw "Unsupported Docker platform: $platform" }
 if ($Selector -in @('ci', 'ci-pr') -and $Jobs -lt 2) { throw 'CI selectors require 2 to 4 jobs.' }
+$containerDirectory = Join-Path $PSScriptRoot 'container'
 
 $runId = [guid]::NewGuid().ToString('N')
 $runDir = Join-Path $root ".tmp-regression-docker-$runId"
@@ -30,9 +31,6 @@ New-Item -ItemType Directory -Path $runDir | Out-Null
 $manifest = Join-Path $runDir 'files.list'
 $snapshot = Join-Path $runDir 'source.tar'
 $log = Join-Path $runDir 'regression.log'
-
-$buildArgs = @('build', '--load', '--platform', $platform, '--tag', $image)
-if ($Rebuild) { $buildArgs += '--no-cache' }
 
 # Git 只列路径；归档读取当前文件，保留未提交改动和未忽略的新文件。
 $listed = & $git -C $root ls-files --cached --others --exclude-standard -z
@@ -192,6 +190,17 @@ function Enter-RegressionSlots {
     }
 }
 
+$containerContext = Get-ChildItem -LiteralPath $containerDirectory -File -Recurse -Force |
+    Sort-Object FullName | ForEach-Object {
+    "$([IO.Path]::GetRelativePath($containerDirectory, $_.FullName))`n$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash)"
+}
+$containerContextHash = Get-TextHash ($containerContext -join "`n")
+$buildArgs = @(
+    'build', '--load', '--platform', $platform, '--tag', $image,
+    '--label', "padm.regression.tools-context-sha256=$containerContextHash"
+)
+if ($Rebuild) { $buildArgs += '--no-cache' }
+
 $container = $null
 $exitCode = 1
 $watch = [Diagnostics.Stopwatch]::new()
@@ -202,11 +211,26 @@ try {
     Wait-NamedMutex $buildGuard
     $buildHeld = $true
     try {
-        & $docker @buildArgs (Join-Path $PSScriptRoot 'container')
-        if ($LASTEXITCODE -ne 0) { throw 'Regression image build failed.' }
-        $imageInfo = & $docker image inspect $image
-        if ($LASTEXITCODE -ne 0) { throw 'Cannot read regression image ID.' }
-        $imageInfo = $imageInfo | ConvertFrom-Json | Select-Object -First 1
+        $imageInfo = $null
+        if (-not $Rebuild) {
+            $candidate = & $docker image inspect $image 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                $candidate = $candidate | ConvertFrom-Json | Select-Object -First 1
+                $labels = $candidate.Config.Labels
+                if ($candidate.Os -eq 'linux' -and $candidate.Architecture -eq ($platform -replace '^linux/', '') -and
+                    $labels.'padm.regression.tools-context-sha256' -eq $containerContextHash) {
+                    $imageInfo = $candidate
+                    Write-Host "Regression image: reusing $image ($containerContextHash)"
+                }
+            }
+        }
+        if (-not $imageInfo) {
+            & $docker @buildArgs $containerDirectory
+            if ($LASTEXITCODE -ne 0) { throw 'Regression image build failed.' }
+            $imageInfo = & $docker image inspect $image
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot read regression image ID.' }
+            $imageInfo = $imageInfo | ConvertFrom-Json | Select-Object -First 1
+        }
         $imageId = $imageInfo.Id
         $toolHash = Get-TextHash (@($imageInfo.RootFS, $imageInfo.Config) | ConvertTo-Json -Depth 20 -Compress)
     }
