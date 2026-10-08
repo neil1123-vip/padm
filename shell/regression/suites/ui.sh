@@ -102,6 +102,7 @@ runRegressionUiSmokeSuiteRoot() {
         echoContent() { printf '%s\n' "$*" >>"${menuRenderLog}"; }
         readInstallType() { :; }
         readInstallProtocolType() { :; }
+        readConfigHostPathUUID() { :; }
         currentProtocolHas() { return 1; }
         currentProtocolHasAny() { return 1; }
         xrayProtocolName() { printf '2.VLESS Reality XHTTP'; }
@@ -200,6 +201,7 @@ runRegressionUiSmokeSuiteRoot() {
         readInstallType() { :; }
         readInstallProtocolType() { :; }
         currentProtocolHas() { return 0; }
+        traditionalTlsFallbackAvailable() { return 0; }
         vlessEncryptionStateSummary() { :; }
         coreInstallType=1
         nginxStaticPath=/tmp

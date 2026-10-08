@@ -2339,11 +2339,95 @@ SH
     currentHost=example.com
     currentPort=443
     currentPath=padm
+    local configPath="${nginxRoot}/xray-conf/"
+    mkdir -p "${configPath}"
+    printf '%s\n' '{"inbounds":[{"protocol":"vless","tag":"TLSFallback","streamSettings":{"security":"tls"},"settings":{"fallbacks":[{"dest":31296},{"alpn":"h2","dest":31302}]}}]}' \
+        >"${configPath}02_VLESS_TCP_inbounds.json"
     rm -f "${targetPath}"
     ensureTraditionalTlsFallbackNginxConfig >/dev/null 2>&1
     grep -q 'server_name example.com;' "${targetPath}"
     grep -q 'location /padmgrpc {' "${targetPath}"
     grep -q 'listen 127.0.0.1:31302 http2 so_keepalive=on proxy_protocol;' "${targetPath}"
+    (
+        local protocolId
+        menuReadChoice() { printf -v "$3" '%s' 7; }
+        for protocolId in 21 22 23 24 25 29; do
+            currentInstallProtocolType=",${protocolId},"
+            coreInstallType=1
+            manageTraditionalTlsFallback 1 >/dev/null 2>&1 || return 1
+            ensureTraditionalTlsFallbackNginxConfig >/dev/null 2>&1 || return 1
+            grep -q 'server_name example.com;' "${targetPath}" || return 1
+            grep -q '127.0.0.1:31302' "${targetPath}" || return 1
+        done
+        # 不把任意协议或损坏文件当作可维护的传统 TLS 前端。
+        local original invalid
+        original=$(<"${targetPath}")
+        for invalid in '{}' '{"inbounds":[{"protocol":"vless","streamSettings":{"security":"reality"},"settings":{"fallbacks":[{"dest":31300}]}}]}'; do
+            printf '%s\n' "${invalid}" >"${configPath}02_VLESS_TCP_inbounds.json"
+            regressionExpectStatus 1 manageTraditionalTlsFallback 1 >/dev/null 2>&1 || return 1
+            regressionExpectStatus 1 ensureTraditionalTlsFallbackNginxConfig >/dev/null 2>&1 || return 1
+            [[ "$(<"${targetPath}")" == "${original}" ]] || return 1
+        done
+    ) || return 1
+    (
+        printf '%s\n' '{"inbounds":[{"protocol":"vless","streamSettings":{"security":"tls"},"settings":{"fallbacks":[{"dest":31300}]}}]}' \
+            >"${configPath}02_VLESS_TCP_inbounds.json"
+        local original
+        original=$(<"${targetPath}")
+        command() {
+            [[ "$*" != '-v nginx' ]] || return 1
+            builtin command "$@"
+        }
+        regressionExpectStatus 1 ensureTraditionalTlsFallbackNginxConfig >/dev/null 2>&1 || return 1
+        [[ "$(<"${targetPath}")" == "${original}" && ! -e "${targetPath}.bak" ]] || return 1
+    ) || return 1
+
+    (
+        local original calls=0 failAgain=false serviceLog="${TMP_DIR}/nginx-rebuild-service.log"
+        local errorLog="${TMP_DIR}/nginx-rebuild-error.log"
+        original=$(<"${targetPath}")
+        errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+        handleNginx() {
+            calls=$((calls + 1))
+            printf '%s\n' "$*" >>"${serviceLog}"
+            [[ "${failAgain}" != true && "${calls}" -gt 1 ]]
+        }
+        SERVICE_QUEUE_ALLOW_FAILURE=previous
+        regressionExpectStatus 1 ensureTraditionalTlsFallbackNginxConfig >/dev/null 2>&1 || return 1
+        [[ "$(<"${targetPath}")" == "${original}" && "${calls}" == 2 &&
+            "${SERVICE_QUEUE_ALLOW_FAILURE}" == previous ]] || return 1
+        [[ "$(<"${serviceLog}")" == $'start\nstart restore' ]] || return 1
+        [[ -z "$(find "${nginxRoot}" -maxdepth 1 -name '.alone.conf.nginx-rebuild.*' -print -quit)" ]] || return 1
+
+        calls=0 failAgain=true
+        : >"${errorLog}"
+        regressionExpectStatus 1 ensureTraditionalTlsFallbackNginxConfig >/dev/null 2>&1 || return 1
+        [[ "$(<"${targetPath}")" == "${original}" && "${calls}" == 2 ]] || return 1
+        grep -q '旧 Nginx 配置已恢复，但服务重新启动失败' "${errorLog}" || return 1
+
+        rm -f -- "${targetPath}"
+        calls=0
+        regressionExpectStatus 1 ensureTraditionalTlsFallbackNginxConfig >/dev/null 2>&1 || return 1
+        [[ ! -e "${targetPath}" && "${calls}" == 1 ]] || return 1
+        printf '%s' "${original}" >"${targetPath}"
+        handleNginx() { return 0; }
+        ensureTraditionalTlsFallbackNginxConfig >/dev/null 2>&1 || return 1
+        [[ -z "$(find "${nginxRoot}" -maxdepth 1 -name '.alone.conf.nginx-rebuild.*' -print -quit)" ]] || return 1
+    ) || return 1
+    (
+        local original recoveryFile errorLog="${TMP_DIR}/nginx-rebuild-restore-error.log"
+        original=$(<"${targetPath}")
+        errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+        handleNginx() { return 1; }
+        restoreManagedFileFromBackup() { return 1; }
+        regressionExpectStatus 1 ensureTraditionalTlsFallbackNginxConfig >/dev/null 2>&1 || return 1
+        recoveryFile=$(find "${nginxRoot}" -maxdepth 1 -name '.alone.conf.nginx-rebuild.*' -print -quit)
+        [[ -n "${recoveryFile}" && "$(stat -c %a "${recoveryFile}")" == 600 &&
+            "$(<"${recoveryFile}")" == "${original}" ]] || return 1
+        grep -q "旧配置恢复失败.*${recoveryFile}" "${errorLog}" || return 1
+        removeManagedFileIfPresent "${recoveryFile}" || return 1
+        printf '%s' "${original}" >"${targetPath}"
+    ) || return 1
 
     (
         local serviceLog="${TMP_DIR}/nginx-alone-service.log"

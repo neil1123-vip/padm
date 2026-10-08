@@ -4707,6 +4707,20 @@ JSON
     }
 
     originalContent=$(<"${alpnConfig}")
+    (
+        local unavailable
+        printf '#!/usr/bin/env bash\nexit 0\n' >"${root}/xray-not-executable"
+        chmod 0644 "${root}/xray-not-executable"
+        for unavailable in "${root}/xray-missing" "${root}/xray-not-executable"; do
+            PADM_XRAY_BINARY="${unavailable}"
+            regressionExpectStatus 1 applyTraditionalTlsAlpn '["h2","http/1.1"]' >/dev/null 2>&1
+            [[ "$(<"${alpnConfig}")" == "${originalContent}" ]]
+            [[ ! -e "${alpnConfig}.alpn.bak" && ! -e "${alpnConfig}.tmp" && ! -e "${reloadLog}" ]]
+        done
+    ) || return 1
+    printf '#!/usr/bin/env bash\nexit 0\n' >"${fakeXray}"
+    chmod 0755 "${fakeXray}"
+    local PADM_XRAY_BINARY="${fakeXray}" PADM_XRAY_CONF_DIR="${root}"
     regressionExpectStatus 1 applyTraditionalTlsAlpn '["h2","http/1.1"]' >/dev/null 2>&1
     [[ "$(<"${alpnConfig}")" == "${originalContent}" ]]
     [[ "$(wc -l <"${reloadLog}" | tr -d ' ')" == "2" ]]

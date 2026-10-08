@@ -958,8 +958,11 @@ traditionalTlsFallbackSelection() {
 }
 
 ensureTraditionalTlsFallbackNginxConfig() {
-    local targetPath="${nginxConfigPath}alone.conf"
-    local rebuildSelection=
+    local targetPath rebuildSelection= recoveryFile= rebuildStatus=0
+    targetPath=$(nginxConfigFilePath alone.conf) || {
+        errorCard "传统 TLS fallback 配置路径异常"
+        return 1
+    }
     if [[ -z "${coreInstallType:-}" ]]; then
         readInstallType
     fi
@@ -972,8 +975,12 @@ ensureTraditionalTlsFallbackNginxConfig() {
     if [[ -z "${currentPort:-}" ]]; then
         readCustomPort
     fi
-    if ! currentProtocolHas 27; then
+    if ! traditionalTlsFallbackAvailable; then
         errorCard "未检测到传统 TLS fallback 入站配置"
+        return 1
+    fi
+    if ! command -v nginx >/dev/null 2>&1; then
+        errorCard "Nginx 工具缺失，无法验证和重建传统 TLS fallback 配置"
         return 1
     fi
     rebuildSelection=$(traditionalTlsFallbackSelection)
@@ -1000,15 +1007,49 @@ ensureTraditionalTlsFallbackNginxConfig() {
         errorCard "未检测到传统 TLS fallback 站点目录，无法重建 alone.conf"
         return 1
     fi
+    # 公共写入函数会清理 .bak，服务启动前另存唯一恢复文件。
+    if [[ -e "${targetPath}" || -L "${targetPath}" ]]; then
+        padmCreateTempFileForTarget recoveryFile "${targetPath}" nginx-rebuild &&
+            backupManagedFileToPath "${targetPath}" "${recoveryFile}" 600 || {
+            [[ -z "${recoveryFile}" ]] || padmRemoveCleanupPath "${recoveryFile}"
+            errorCard "传统 TLS fallback 重建前配置备份失败"
+            return 1
+        }
+        padmForgetCleanupPath "${recoveryFile}"
+    fi
     local previousSelection="${selectCustomInstallType:-}"
     selectCustomInstallType="${rebuildSelection}"
-    if ! updateRedirectNginxConf; then
-        selectCustomInstallType="${previousSelection}"
+    updateRedirectNginxConf || rebuildStatus=1
+    selectCustomInstallType="${previousSelection}"
+    if [[ "${rebuildStatus}" == 0 ]] && ! runCoreServiceActionAllowFailure handleNginx start; then
+        rebuildStatus=2
+    fi
+    if [[ "${rebuildStatus}" != 0 ]]; then
+        if [[ -n "${recoveryFile}" ]]; then
+            if ! restoreManagedFileFromBackup "${recoveryFile}" "${targetPath}" 644; then
+                errorCard "Nginx 重建失败，且旧配置恢复失败；请检查 ${targetPath} 和 ${recoveryFile}"
+                return 1
+            fi
+            removeManagedFileIfPresent "${recoveryFile}" || {
+                errorCard "旧 Nginx 配置已恢复，但恢复文件清理失败；请检查 ${recoveryFile}"
+                return 1
+            }
+            if [[ "${rebuildStatus}" == 2 ]] && ! runCoreServiceActionAllowFailure handleNginx start restore; then
+                errorCard "旧 Nginx 配置已恢复，但服务重新启动失败，请检查服务日志"
+                return 1
+            fi
+            errorCard "Nginx 重建失败，已恢复旧 alone.conf"
+        else
+            removeManagedFileIfPresent "${targetPath}" || {
+                errorCard "Nginx 重建失败，且本次新配置清理失败；请检查 ${targetPath}"
+                return 1
+            }
+            errorCard "Nginx 重建失败，已删除本次新 alone.conf"
+        fi
         return 1
     fi
-    selectCustomInstallType="${previousSelection}"
-    if ! runCoreServiceActionAllowFailure handleNginx start; then
-        errorCard "Nginx 启动失败，traditional TLS fallback 配置已写入但未生效"
+    if [[ -n "${recoveryFile}" ]] && ! removeManagedFileIfPresent "${recoveryFile}"; then
+        errorCard "Nginx 配置已重建，但恢复文件清理失败；请检查 ${recoveryFile}"
         return 1
     fi
     successCard "传统 TLS fallback 配置已重建"

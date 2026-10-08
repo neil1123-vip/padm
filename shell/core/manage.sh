@@ -774,8 +774,8 @@ manageTraditionalTlsFallback() {
 
     progressCard "$1" "传统 TLS fallback 维护"
 
-    if ! currentProtocolHas 27 || [[ -z "${coreInstallType}" ]]; then
-        errorCard "请先安装 Xray-core 的 27.VLESS TCP TLS Vision"
+    if [[ -z "${coreInstallType}" ]] || ! traditionalTlsFallbackAvailable; then
+        errorCard "请先安装有效的 Xray-core 传统 TLS fallback 入口"
         return 1
     fi
 
@@ -810,6 +810,18 @@ manageTraditionalTlsFallback() {
 
 traditionalTlsFallbackConfigFile() {
     echo "${configPath:-/etc/padm/xray/conf/}02_VLESS_TCP_inbounds.json"
+}
+
+traditionalTlsFallbackAvailable() {
+    local configFile
+    configFile=$(traditionalTlsFallbackConfigFile)
+    configFile=$(padmRequireSafeAbsolutePath "${configFile}") || return 1
+    [[ -f "${configFile}" && ! -L "${configFile}" ]] &&
+        jq -e '.inbounds[0] |
+          (.protocol == "vless" or .protocol == "trojan") and
+          .streamSettings.security == "tls" and
+          (.settings.fallbacks | type == "array" and length > 0)
+        ' "${configFile}" >/dev/null 2>&1
 }
 
 traditionalTlsHasH2Fallback() {
@@ -994,12 +1006,18 @@ diagnoseTraditionalTlsAlpn() {
 
 applyTraditionalTlsAlpn() {
     local alpnJson=$1
-    local configFile backupFile tmpFile
+    local configFile backupFile tmpFile xrayBinary xrayConfigDir
     configFile=$(traditionalTlsFallbackConfigFile)
     configFile=$(padmRequireSafeAbsolutePath "${configFile}") || { errorCard "传统 TLS fallback 配置路径异常"; return 1; }
     backupFile="${configFile}.alpn.bak"
     if [[ ! -f "${configFile}" ]]; then
         errorCard "未检测到传统 TLS fallback 入站配置"
+        return 1
+    fi
+    xrayBinary=$(manageXrayBinaryPath)
+    xrayConfigDir=$(manageXrayConfigDir)
+    if ! coreExecutableFile "${xrayBinary}"; then
+        errorCard "Xray 核心工具缺失或不可执行，无法验证 ALPN 配置"
         return 1
     fi
     backupManagedFileToPath "${configFile}" "${backupFile}" 644 || return 1
@@ -1019,11 +1037,7 @@ applyTraditionalTlsAlpn() {
         errorCard "写入 ALPN 配置失败"
         return 1
     fi
-    local xrayBinary
-    local xrayConfigDir
-    xrayBinary=$(manageXrayBinaryPath)
-    xrayConfigDir=$(manageXrayConfigDir)
-    if coreExecutableFile "${xrayBinary}" && ! "${xrayBinary}" -test -confdir "${xrayConfigDir}" >"$(traditionalTlsAlpnTestLog)" 2>&1; then
+    if ! "${xrayBinary}" -test -confdir "${xrayConfigDir}" >"$(traditionalTlsAlpnTestLog)" 2>&1; then
         if ! restoreTraditionalTlsAlpnBackup "${backupFile}" "${configFile}" "$(xrayConfigValidationFailureTitle)"; then
             return 1
         fi
