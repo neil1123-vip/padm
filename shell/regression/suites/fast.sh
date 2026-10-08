@@ -70,24 +70,25 @@ listRegressionDockerContractsChildSelectors() {
 }
 
 listRegressionDockerContractsFastChildSelectors() {
+    # 长测试先入队，避免最后只剩单个主控事务占用一个槽位。
     printf '%s\n' \
-        docker-phase1 \
         docker-menu \
-        docker-release \
-        docker-permissions \
-        docker-phase2 \
+        docker-control-state \
+        docker-phase1 \
         docker-phase5 \
+        docker-control-sync \
+        docker-release \
+        docker-geo-data \
         docker-traffic \
         docker-accounts \
+        docker-control-cli \
+        docker-wireguard-runtime \
+        docker-control-api \
+        docker-permissions \
         docker-accounts-cli \
         docker-subscriptions \
         docker-business \
-        docker-geo-data \
-        docker-control-api \
-        docker-control-sync \
-        docker-control-state \
-        docker-control-cli \
-        docker-wireguard-runtime
+        docker-phase2
 }
 
 listRegressionDockerContractsSystemChildSelectors() {
