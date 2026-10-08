@@ -33,6 +33,7 @@ listRegressionCiChildSelectors() {
         install-module-manifest \
         subscription-output \
         subscription-state \
+        docker-geo-data \
         core-safety-rollback \
         core-install-signal-rollback \
         core-install-service-action-failure
@@ -79,7 +80,8 @@ listRegressionDockerContractsFastChildSelectors() {
         docker-accounts \
         docker-accounts-cli \
         docker-subscriptions \
-        docker-business
+        docker-business \
+        docker-geo-data
 }
 
 listRegressionDockerContractsSystemChildSelectors() {
@@ -88,6 +90,10 @@ listRegressionDockerContractsSystemChildSelectors() {
 
 listRegressionDockerCoreAssessmentChildSelectors() {
     printf '%s\n' docker-phase1 docker-release docker-menu docker-phase3 docker-phase6
+}
+
+listRegressionDockerGeoChildSelectors() {
+    printf '%s\n' docker-geo-data docker-menu docker-phase3 docker-phase6 docker-renewal
 }
 
 listRegressionDockerContractsRealityChildSelectors() {
@@ -112,6 +118,10 @@ runDockerSubscriptionsRegression() {
 
 runDockerBusinessRegression() {
     bash "${PROJECT_ROOT}/docker/tests/business.sh"
+}
+
+runDockerGeoRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/geo.sh"
 }
 
 registerRegressionFunctionLeaf install-module-manifest runInstallModuleManifestCompleteRegression
@@ -156,11 +166,14 @@ registerRegressionFunctionLeaf docker-accounts runDockerAccountsRegression
 registerRegressionFunctionLeaf docker-accounts-cli runDockerAccountsCliRegression
 registerRegressionFunctionLeaf docker-subscriptions runDockerSubscriptionsRegression
 registerRegressionFunctionLeaf docker-business runDockerBusinessRegression
+registerRegressionFunctionLeaf docker-geo-data runDockerGeoRegression
 
 registerRegressionParallelSelectorList docker-tls-focused runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/docker-tls-focused-parallel-${BASHPID:-$$}" listRegressionDockerTlsFocusedChildSelectors
 registerRegressionParallelSelectorList docker-core-assessment runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-core-assessment-parallel-${BASHPID:-$$}" listRegressionDockerCoreAssessmentChildSelectors 2
+registerRegressionParallelSelectorList docker-geo runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-geo-parallel-${BASHPID:-$$}" listRegressionDockerGeoChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-contracts-parallel-${BASHPID:-$$}" listRegressionDockerContractsChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts-fast runFrameworkParallelRegressionSelectorListWithJobs \

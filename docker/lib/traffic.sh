@@ -225,9 +225,14 @@ dockerTrafficQuery() (
 )
 
 dockerTrafficSnapshot() {
-    local cores core after state counters next generation
+    local cores=${1:-} core after state counters next generation
     local -A accounts=() before=() stats=()
-    cores=$(dockerTrafficCore) || return 1
+    [[ "$#" -le 1 ]] || return 1
+    if [[ -n "${cores}" ]]; then
+        case "${cores}" in xray|sing-box) ;; *) return 1 ;; esac
+    else
+        cores=$(dockerTrafficCore) || return 1
+    fi
     state=$(dockerTrafficReadState) || return 1
     # 两核心共享累计，所有查询和容器复验完成后才提交一次状态。
     while IFS= read -r core; do

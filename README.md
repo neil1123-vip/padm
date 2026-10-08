@@ -335,6 +335,32 @@ padm-docker assess
 Xray 严格解析另用未知字段探针确认；不识别严格模式的候选核心会明确显示“未启用”，
 不能将普通配置试跑通过视为严格解析通过。
 
+Xray Geo 数据可在主菜单第 14 项管理，单 Xray 和包含 Xray 的双核心部署均可用：
+
+```bash
+padm-docker geo status
+padm-docker geo update
+padm-docker geo update --version 202610070140
+padm-docker geo schedule enable
+padm-docker geo schedule status
+padm-docker geo schedule disable
+padm-docker geo auto-update
+```
+
+更新使用与原生版相同的 `Loyalsoldier/v2ray-rules-dat` 发布数据；未指定版本时先解析
+最新发布的固定 tag，下载 `geosite.dat`、`geoip.dat` 及各自 SHA256 校验文件。
+两文件摘要、Xray Geo 解析和当前配置校验全部通过后，才保存至
+`/etc/padm-docker/config/xray/geo`，并通过只读配置挂载和
+`XRAY_LOCATION_ASSET=/etc/padm/xray/geo` 切换实际读取路径。
+未更新的旧部署继续使用镜像内置 Geo，不会因空目录覆盖丢失数据。
+更新不轮换账号、订阅或镜像；仅在 Xray 原本运行时定向重建 Xray，
+下载、校验、重建失败或取消时恢复旧数据、Compose 和原运行状态。
+菜单的更新与开启自动更新需要先确认，等待输入时不持部署锁。
+每日任务在宿主本地时间 01:35 执行，优先 systemd timer，否则使用 cron；
+任务按部署 root 管理所有权，使用部署锁并记录结果，重复启用不创建重复任务，
+不覆盖或删除其它部署的调度。`geo auto-update` 是受管任务入口，不进入交互菜单。
+本地回归与真实发布、公网、原生 arm64 和整机重启验收分别记录，不由模拟通过推断完成。
+
 证书和 ACME 任务也由同一个宿主控制命令分发到 `ops` 镜像：
 
 ```bash

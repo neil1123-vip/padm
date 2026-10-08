@@ -325,7 +325,8 @@ runControl 13 broken-bundle "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" insta
 [[ "$(readlink "${DOCKER_ROOT}/bundle")" == "${bundleBefore}" ]] || fail 'failed bundle refresh changed the active bundle'
 [[ "$(<"${DOCKER_ROOT}/data/sentinel")" == "keep" ]] || fail 'failed bundle refresh changed persistent data'
 
-for missing in docker/lib/reality-targets.sh shell/core/runtime.sh shell/core/reality_targets.sh shell/core/cores.sh; do
+for missing in docker/lib/reality-targets.sh shell/core/runtime.sh shell/core/reality_targets.sh shell/core/cores.sh \
+    docker/lib/schedule.sh docker/lib/geo.sh; do
     incompleteSource="${TEST_ROOT}/incomplete-${missing//\//-}"
     copyBundleFixture "${incompleteSource}"
     rm -f -- "${incompleteSource}/${missing}"

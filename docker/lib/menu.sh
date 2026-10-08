@@ -486,6 +486,45 @@ dockerMenuBusiness() {
     done
 }
 
+dockerMenuGeo() {
+    local choice version answer
+    local -a action=()
+    dockerMenuRun geo status || return 0
+    while :; do
+        DOCKER_MENU_SIGNAL=0
+        printf '\nDocker Xray Geo 数据\n'
+        printf '%s\n' '1. 查看状态' '2. 立即更新' '3. 启用每日更新' \
+            '4. 停用每日更新' '5. 查看调度状态' '0. 返回'
+        printf '请选择: '
+        if ! IFS= read -r choice; then
+            [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
+            return 0
+        fi
+        case "${choice}" in
+        0) return 0 ;;
+        1) dockerMenuRun geo status || true ;;
+        2)
+            dockerSetupRead version 'Geo 发布固定 tag（空输入使用最新发布，0 返回）: ' || continue
+            action=(geo update)
+            [[ -z "${version}" ]] || action+=(--version "${version}")
+            dockerSetupRead answer '确认更新 Geo 数据并在运行时重建 Xray？[y/N]: ' n || continue
+            case "${answer}" in
+            y|Y|yes|YES) dockerMenuRun "${action[@]}" || true ;;
+            esac
+            ;;
+        3)
+            dockerSetupRead answer '确认启用每日 01:35 的 Xray Geo 更新？[y/N]: ' n || continue
+            case "${answer}" in
+            y|Y|yes|YES) dockerMenuRun geo schedule enable || true ;;
+            esac
+            ;;
+        4) dockerMenuRun geo schedule disable || true ;;
+        5) dockerMenuRun geo schedule status || true ;;
+        *) printf '无效选项，请重新选择。\n' ;;
+        esac
+    done
+}
+
 dockerMenu() {
     local choice
     if [[ "$#" -ne 0 || ! -t 0 || ! -t 1 ]]; then
@@ -513,6 +552,7 @@ dockerMenu() {
             '11. 分享订阅管理' \
             '12. 业务备份恢复' \
             '13. 核心升级评估' \
+            '14. Xray Geo 数据' \
             '0. 退出'
         printf '请选择: '
         if ! IFS= read -r choice; then
@@ -536,6 +576,7 @@ dockerMenu() {
         11) dockerMenuSubscriptions ;;
         12) dockerMenuBusiness ;;
         13) dockerMenuRun assess || true ;;
+        14) dockerMenuGeo ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

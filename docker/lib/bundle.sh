@@ -75,9 +75,12 @@ dockerBundleSourceIsComplete() {
         shell/core/stats_grpc.sh; do
         [[ -f "${sourceRoot}/${required}" && ! -L "${sourceRoot}/${required}" ]] || return 1
     done
-    if grep -qF '/renewal.sh"' "${sourceRoot}/docker/lib/services.sh"; then
-        [[ -f "${sourceRoot}/docker/lib/renewal.sh" && ! -L "${sourceRoot}/docker/lib/renewal.sh" ]] || return 1
-    fi
+    for required in renewal schedule geo; do
+        if grep -qF "/${required}.sh\"" "${sourceRoot}/docker/lib/services.sh"; then
+            [[ -f "${sourceRoot}/docker/lib/${required}.sh" &&
+                ! -L "${sourceRoot}/docker/lib/${required}.sh" ]] || return 1
+        fi
+    done
     if grep -qF '/reality-targets.sh"' "${sourceRoot}/docker/lib/services.sh"; then
         for required in docker/lib/reality-targets.sh shell/core/runtime.sh shell/core/reality_targets.sh; do
             [[ -f "${sourceRoot}/${required}" && ! -L "${sourceRoot}/${required}" ]] || return 1
@@ -411,6 +414,7 @@ dockerInstallBundle() {
             dockerBundleSupportsSpec "${DOCKER_STAGED_BUNDLE_PATH}" "${root}/config/spec.json" || return 1
     fi
     dockerRenewalBundleCheck "${DOCKER_STAGED_BUNDLE_PATH}" || return 1
+    dockerGeoBundleCheck "${DOCKER_STAGED_BUNDLE_PATH}" || return 1
     dockerActivateStagedBundle
 }
 

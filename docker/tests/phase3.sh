@@ -643,7 +643,22 @@ FAKE_DOCKER_MODE=core-validate-fail runControl 15 edit-reject-invalid-candidate 
 [[ "$(editLiveHash)" == "${EDIT_LIVE_HASH}" ]] || fail 'rejected edit changed live configuration'
 assertEditCleanup
 
+# 已受管的 Geo 是独立维护输入，编辑协议不能丢失文件或切回镜像路径。
+mkdir -p "${DOCKER_ROOT}/config/xray/geo"
+printf 'geoip-fixture\n' >"${DOCKER_ROOT}/config/xray/geo/geoip.dat"
+printf 'geosite-fixture\n' >"${DOCKER_ROOT}/config/xray/geo/geosite.dat"
+jq -n --arg geoip "$(sha256sum "${DOCKER_ROOT}/config/xray/geo/geoip.dat" | cut -d ' ' -f1)" \
+    --arg geosite "$(sha256sum "${DOCKER_ROOT}/config/xray/geo/geosite.dat" | cut -d ' ' -f1)" \
+    '{schema_version:1,version:"202610070140",enabled:false,
+      sha256:{"geoip.dat":$geoip,"geosite.dat":$geosite}}' >"${DOCKER_ROOT}/config/xray/geo/state.json"
+GEO_HASH=$(sha256sum "${DOCKER_ROOT}/config/xray/geo/"*)
+jq '.services.xray.environment.XRAY_LOCATION_ASSET = "/etc/padm/xray/geo"' \
+    "${DOCKER_ROOT}/compose.json" >"${TEST_ROOT}/geo-compose.json"
+cp -- "${TEST_ROOT}/geo-compose.json" "${DOCKER_ROOT}/compose.json"
 runControl 0 edit-confirm-port edit --spec "${EDIT_SPEC}" --confirm PADM-DOCKER-EDIT
+[[ "$(sha256sum "${DOCKER_ROOT}/config/xray/geo/"*)" == "${GEO_HASH}" ]] || fail 'edit lost managed Geo data'
+jq -e '.services.xray.environment.XRAY_LOCATION_ASSET == "/etc/padm/xray/geo"' \
+    "${DOCKER_ROOT}/compose.json" >/dev/null || fail 'edit changed managed Geo asset path'
 jq -e --slurpfile original "${EDIT_SPEC}" '
   . == ($original[0] | .schema_version = 3 | .core.secondary_type = null |
     .core.protocols |= map(.core = "xray"))' \
@@ -1076,7 +1091,7 @@ validateFeatureMatrix() {
       ["nginx", "tls-files", "acme-dns", "subscription", "acme-webroot", "acme-standalone",
         "fail2ban", "wireguard", "tun", "tproxy"] as $legacy |
       ["subscription-traffic", "interactive-menu", "routing-tools", "core-lifecycle",
-        "core-upgrade-assessment", "script-update", "uninstall", "reality-target-management",
+        "core-upgrade-assessment", "geo-data", "script-update", "uninstall", "reality-target-management",
         "reality-parameter-management", "reality-coexistence"] as $host_cli |
       ["subscription-multiserver", "acme-standalone", "fail2ban", "wireguard", "tun", "tproxy",
         "internal-203-wireguard", "internal-204-tun", "internal-205-redirect-tproxy",
@@ -1121,7 +1136,8 @@ validateFeatureMatrix() {
         subscription: ["core-xray", "nginx", "subscription"],
         "subscription-traffic": ["core-xray", "core-sing-box"],
         "core-lifecycle": ["core-xray", "core-sing-box"],
-        "core-upgrade-assessment": ["core-xray", "core-sing-box"], "script-update": [], uninstall: []
+        "core-upgrade-assessment": ["core-xray", "core-sing-box"], "geo-data": ["core-xray"],
+        "script-update": [], uninstall: []
       } | to_entries[];
         . as $entry | ($matrix.feature_matrix[$entry.key].profiles | sort) == ($entry.value | sort)) and
       all({
@@ -1133,6 +1149,7 @@ validateFeatureMatrix() {
           ($matrix.feature_matrix[$entry.value] | {status, profiles, network_mode, host_capabilities})) and
       all(["interactive-menu", "reality-coexistence"][]; $matrix.feature_matrix[.].status == "deferred") and
       $matrix.feature_matrix["core-upgrade-assessment"].status == "supported" and
+      $matrix.feature_matrix["geo-data"].status == "supported" and
       $matrix.feature_matrix["reality-target-management"].status == "supported" and
       $matrix.feature_matrix["reality-parameter-management"].status == "supported" and
       ([.protocols[] | select(.status == "supported") | .id] | sort) == [1, 2, 3, 4, 5, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31] and
@@ -1170,6 +1187,8 @@ del(.feature_matrix["reality-target-management"])
 .feature_matrix.subscription.requires.tls = false
 .feature_matrix["core-upgrade-assessment"].status = "deferred"
 .feature_matrix["core-upgrade-assessment"].profiles = []
+.feature_matrix["geo-data"].status = "deferred"
+.feature_matrix["geo-data"].profiles = []
 .feature_matrix["reality-parameter-management"].status = "deferred"
 .feature_matrix["reality-target-management"].status = "deferred"
 EOF

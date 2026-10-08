@@ -4,6 +4,10 @@
 source "$(dirname -- "${BASH_SOURCE[0]}")/traffic.sh" || return 1
 # shellcheck source=/dev/null
 source "$(dirname -- "${BASH_SOURCE[0]}")/renewal.sh" || return 1
+# shellcheck source=/dev/null
+source "$(dirname -- "${BASH_SOURCE[0]}")/schedule.sh" || return 1
+# shellcheck source=/dev/null
+source "$(dirname -- "${BASH_SOURCE[0]}")/geo.sh" || return 1
 
 if [[ "${PADM_DOCKER_SERVICES_LOADED:-}" == "1" ]]; then
     return 0 2>/dev/null || exit 0
@@ -557,6 +561,7 @@ dockerEditBaselineValidate() {
         dockerGenerateRealityStreamConfig "${specFile}" "${baseline}/config/nginx/stream/reality.conf" &&
         dockerGenerateRealityStreamMain "${specFile}" "${baseline}/config/nginx/stream/host-main" &&
         dockerGenerateFail2banConfig "${specFile}" "${baseline}" || return 1
+    dockerGeoPrepareCandidate "${root}" "${baseline}" || return 1
     if jq -e '.subscription.enabled' "${specFile}" >/dev/null; then
         token=$(jq -r '.subscription.token' "${specFile}") || return 1
         dockerGenerateSubscription "${specFile}" "${baseline}/data/subscription/${token}" || return 1
@@ -569,7 +574,12 @@ dockerEditBaselineValidate() {
         if [[ -f "${baseline}/${directory}/config.json" ]]; then
             while IFS= read -r token; do
                 [[ "${token}" == "${root}/${directory}/config.json" ||
-                    "${token}" == "${root}/${directory}/users.base" ]] || {
+                    "${token}" == "${root}/${directory}/users.base" ||
+                    ( "${directory}" == config/xray &&
+                        ( "${token}" == "${root}/config/xray/geo" ||
+                        "${token}" == "${root}/config/xray/geo/geoip.dat" ||
+                        "${token}" == "${root}/config/xray/geo/geosite.dat" ||
+                        "${token}" == "${root}/config/xray/geo/state.json" ) ) ]] || {
                     dockerError '核心含未纳入完整规格的文件，不能无损接入编辑'
                     return 1
                 }
@@ -1524,7 +1534,12 @@ dockerGenerateCompose() {
             tlsCores=$(jq -c --arg core "${core}" '. + [$core]' <<<"${tlsCores}") || return 1
         fi
     done < <(jq -r '[.core.type, .core.secondary_type] | .[] | select(. != null)' "${specFile}")
-    jq -n --slurpfile request "${specFile}" --argjson tlsCores "${tlsCores}" '
+    local managedGeo=false
+    if [[ -e "${directory}/config/xray/geo" || -L "${directory}/config/xray/geo" ]]; then
+        dockerGeoStateValidate "${directory}/config/xray/geo" || return 1
+        managedGeo=true
+    fi
+    jq -n --slurpfile request "${specFile}" --argjson tlsCores "${tlsCores}" --argjson managedGeo "${managedGeo}" '
       $request[0] as $r |
       def defaults: {
         init: true,
@@ -1599,7 +1614,7 @@ dockerGenerateCompose() {
               test: ["CMD", "/usr/local/bin/xray", "-test", "-confdir", "/etc/padm/xray"],
               interval: "30s", timeout: "5s", start_period: "5s", retries: 3
             }
-          })
+          } + if $managedGeo then {environment:{XRAY_LOCATION_ASSET:"/etc/padm/xray/geo"}} else {} end)
         else . end
       | if ($cores | index("sing-box")) != null then
           .services["sing-box"] = (defaults + {
@@ -1996,6 +2011,7 @@ dockerGenerateCandidate() {
             chmod 0600 "${sharesSource}" || return 1
     fi
     dockerSubscriptionPrepareCandidate "${specFile}" "${candidate}" "${sharesSource}" || return 1
+    dockerGeoPrepareCandidate "${root}" "${candidate}" || return 1
     : >"${candidate}/images.env"
     : >"${candidate}/images.runtime.env"
     dockerGenerateImagesEnv "${specFile}" "${candidate}/images.env" "${candidate}" || return 1
@@ -2552,7 +2568,7 @@ dockerRestoreConfiguration() {
         fi
         dockerTrafficScheduleRemove || return 1
     fi
-    dockerRenewalScheduleInstall || return 1
+    dockerRenewalScheduleInstall && dockerGeoScheduleInstall || return 1
     DOCKER_CONFIG_SWITCHED=0
     DOCKER_CONFIG_STREAM_TRANSITION=0
     DOCKER_CONFIG_STREAM_HOST_TRANSITION=0
@@ -2737,7 +2753,8 @@ dockerConfigureApply() {
         ! dockerEnsureRuntimeDataPermissions ||
         ! dockerComposeRun up -d --force-recreate --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" ||
         ! dockerTrafficScheduleInstall ||
-        ! dockerRenewalScheduleInstall; then
+        ! dockerRenewalScheduleInstall ||
+        ! dockerGeoScheduleInstall; then
         dockerError '候选部署启动或健康检查失败，正在恢复旧配置'
         if ! dockerRestoreConfiguration; then
             dockerError "旧配置恢复失败，请检查备份: ${backup}"
@@ -2966,7 +2983,11 @@ dockerTlsConsumers() {
         ' "${root}/compose.json" >/dev/null || return 1
         dockerTrafficSafePath "${root}" "${config}" &&
             [[ -z "$(find "${root}/config/${core}" ! -type f ! -type d -print -quit)" ]] || return 1
-        [[ -z "$(find "${root}/config/${core}" -name '*.json' ! -name config.json -print -quit)" ]] || return 1
+        if [[ "${core}" == xray && -d "${root}/config/xray/geo" ]]; then
+            dockerGeoStateValidate "${root}/config/xray/geo" || return 1
+        fi
+        [[ -z "$(find "${root}/config/${core}" -name '*.json' ! -name config.json \
+            ! -path "${root}/config/xray/geo/state.json" -print -quit)" ]] || return 1
         domains=$(dockerCoreTlsDomains "${core}" "${config}") || return 1
         jq -e --arg domain "${domain}" 'index($domain) != null' <<<"${domains}" >/dev/null || continue
         jq -e --arg core "${core}" '.compose.profiles | index("core-" + $core) != null' \

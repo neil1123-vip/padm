@@ -306,6 +306,12 @@ rm -f -- "${TEST_ROOT}/changed-during-primary" "${TEST_ROOT}/changed-during-seco
 QUERY_MODE=ok
 HTTP2=0
 assertSnapshotRejected
+# Geo 只重建 Xray，副核心统计不可用不能阻止 Xray 的最后一次采集。
+beforeXrayOnly=$(jq -Sc '.accounts | map_values({upload,download,baseline})' "${STATE}")
+dockerTrafficSnapshot xray || fail '定向 Xray 采集错误依赖 sing-box HTTP/2'
+[[ "$(jq -Sc '.accounts | map_values({upload,download,baseline})' "${STATE}")" == "${beforeXrayOnly}" ]] ||
+    fail '定向采集重复累计已有计数'
+reject dockerTrafficSnapshot unknown
 dockerTrafficScheduleCheck() { :; }
 reject dockerTrafficRuntimeCheck
 reject dockerTrafficRuntimeCheck $'xray\nsing-box'

@@ -220,6 +220,70 @@ runTargetsDriver() {
     targetReply 'Docker 管理菜单' $'0\n'
 }
 
+runGeoDriver() {
+    local scenario=$1
+    local -A targetPrompts=()
+    targetReply 'Docker 管理菜单' $'14\n'
+    if [[ "${scenario}" == unsupported ]]; then
+        targetReply 'Docker 管理菜单' $'0\n'
+        return 0
+    fi
+    case "${scenario}" in
+    flow)
+        targetReply 'Docker Xray Geo 数据' $'1\n'
+        targetReply 'Docker Xray Geo 数据' $'2\n'
+        targetReply 'Geo 发布固定 tag' $'202610070140\n'
+        targetReply '确认更新 Geo 数据并在运行时重建 Xray' $'y\n'
+        targetReply 'Docker Xray Geo 数据' $'2\n'
+        targetReply 'Geo 发布固定 tag' $'\n'
+        targetReply '确认更新 Geo 数据并在运行时重建 Xray' $'y\n'
+        targetReply 'Docker Xray Geo 数据' $'3\n'
+        targetReply '确认启用每日 01:35 的 Xray Geo 更新' $'y\n'
+        targetReply 'Docker Xray Geo 数据' $'4\n'
+        targetReply 'Docker Xray Geo 数据' $'5\n'
+        ;;
+    cancel)
+        targetReply 'Docker Xray Geo 数据' $'2\n'
+        targetReply 'Geo 发布固定 tag' $'0\n'
+        targetReply 'Docker Xray Geo 数据' $'2\n'
+        targetReply 'Geo 发布固定 tag' $'\n'
+        targetReply '确认更新 Geo 数据并在运行时重建 Xray' $'n\n'
+        targetReply 'Docker Xray Geo 数据' $'3\n'
+        targetReply '确认启用每日 01:35 的 Xray Geo 更新' $'0\n'
+        targetReply 'Docker Xray Geo 数据' $'3\n'
+        targetReply '确认启用每日 01:35 的 Xray Geo 更新' $'n\n'
+        ;;
+    version-eof)
+        targetReply 'Docker Xray Geo 数据' $'2\n'
+        targetReply 'Geo 发布固定 tag' $'\004'
+        ;;
+    update-eof|failed|int|term)
+        targetReply 'Docker Xray Geo 数据' $'2\n'
+        targetReply 'Geo 发布固定 tag' $'\n'
+        if [[ "${scenario}" == update-eof ]]; then
+            targetReply '确认更新 Geo 数据并在运行时重建 Xray' $'\004'
+        else
+            targetReply '确认更新 Geo 数据并在运行时重建 Xray' $'y\n'
+            if [[ "${scenario}" == int || "${scenario}" == term ]]; then
+                waitForText 'fixture-geo-update-ready' "${CONTROL_LOG}" || exit 35
+                assertNoLock
+                if [[ "${scenario}" == term ]]; then
+                    kill -TERM "$(<"${TEST_ROOT}/menu.pid")" || exit 36
+                    return 0
+                fi
+                printf '\003' >&3
+            fi
+        fi
+        ;;
+    enable-eof)
+        targetReply 'Docker Xray Geo 数据' $'3\n'
+        targetReply '确认启用每日 01:35 的 Xray Geo 更新' $'\004'
+        ;;
+    esac
+    targetReply 'Docker Xray Geo 数据' $'0\n'
+    targetReply 'Docker 管理菜单' $'0\n'
+}
+
 runPty() {
     local name=$1 driver=$2 input=$3 entry=$4 actual=0 feederStatus=0 command pipe feeder
     local expected=0
@@ -228,7 +292,8 @@ runPty() {
     pipe="${TEST_ROOT}/${name}.input"
     mkfifo "${pipe}"
     printf -v command '%q ' bash -u "${entry}" "$@"
-    if [[ "${driver}" == term || ( "${driver}" == targets && "${input}" == term ) ]]; then
+    if [[ "${driver}" == term ||
+        ( ( "${driver}" == targets || "${driver}" == geo ) && "${input}" == term ) ]]; then
         printf -v command 'printf "%%s\\n" "$$" >%q; exec %s' "${TEST_ROOT}/menu.pid" "${command}"
         expected=143
     fi
@@ -294,6 +359,8 @@ runPty() {
             printf '0\n' >&3
         elif [[ "${driver}" == targets ]]; then
             runTargetsDriver "${input}"
+        elif [[ "${driver}" == geo ]]; then
+            runGeoDriver "${input}"
         elif [[ "${driver}" == accounts ]]; then
             local accountMenuCount=1
             printf '10\n' >&3
@@ -521,6 +588,24 @@ protocol)
 edit) recordAction "$@" ;;
 account) recordAction "$@" ;;
 assess) recordAction "$@" ;;
+geo)
+    recordAction "$@"
+    if [[ "${2:-}" == status ]]; then
+        [[ "${GEO_STATUS:-0}" == 0 ]] || {
+            printf '当前部署不包含 Xray，不能管理 Geo 数据。\n' >&2
+            exit "${GEO_STATUS}"
+        }
+    elif [[ "${2:-}" == update ]]; then
+        if [[ "${GEO_UPDATE_WAIT:-0}" == 1 ]]; then
+            trap 'exit 130' INT
+            trap 'exit 143' TERM
+            printf '%s\n' "${BASHPID}" >"${GEO_UPDATE_PID:?}"
+            printf 'fixture-geo-update-ready\n'
+            while :; do sleep 1; done
+        fi
+        exit "${GEO_UPDATE_STATUS:-0}"
+    fi
+    ;;
 tls) [[ "${2:-}" == manage ]] || exit 2; dockerTlsManageCommand ;;
 menu)
     source "${PROJECT_ROOT}/docker/lib/menu.sh"
@@ -538,6 +623,33 @@ printf '{"tls":{"domain":"ws.example.com"}}\n' >"${TLS_WIZARD_ROOT}/config/spec.
 : >"${TLS_WIZARD_ACTIONS}"
 runPty core-assessment menu $'13\n0\n' "${TLS_WIZARD_CLI}" menu
 [[ "$(<"${TLS_WIZARD_ACTIONS}")" == assess ]] || fail 'core assessment menu dispatched incorrect arguments'
+
+: >"${TLS_WIZARD_ACTIONS}"
+runPty geo-dispatch geo flow "${TLS_WIZARD_CLI}" menu
+[[ "$(<"${TLS_WIZARD_ACTIONS}")" == $'geo status\ngeo status\ngeo update --version 202610070140\ngeo update\ngeo schedule enable\ngeo schedule disable\ngeo schedule status' ]] ||
+    fail 'Geo menu dispatched incorrect actions or version'
+for geoCase in cancel version-eof update-eof enable-eof unsupported failed int term; do
+    : >"${TLS_WIZARD_ACTIONS}"
+    export GEO_STATUS=0 GEO_UPDATE_STATUS=0 GEO_UPDATE_WAIT=0 GEO_UPDATE_PID="${TEST_ROOT}/geo-update.pid"
+    [[ "${geoCase}" != unsupported ]] || GEO_STATUS=15
+    [[ "${geoCase}" != failed ]] || GEO_UPDATE_STATUS=17
+    [[ "${geoCase}" != int && "${geoCase}" != term ]] || GEO_UPDATE_WAIT=1
+    runPty "geo-${geoCase}" geo "${geoCase}" "${TLS_WIZARD_CLI}" menu
+    expectedGeo='geo status'
+    case "${geoCase}" in
+    failed|int|term) expectedGeo+=$'\ngeo update' ;;
+    esac
+    [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedGeo}" ]] ||
+        fail "Geo ${geoCase} bypassed confirmation or dispatched an action after cancellation"
+    if [[ "${geoCase}" == unsupported ]]; then
+        ! grep -Fq 'Docker Xray Geo 数据' "${CONTROL_LOG}" || fail 'Geo menu opened without an Xray deployment'
+    elif [[ "${geoCase}" == failed ]]; then
+        grep -Fq '操作失败，退出码: 17' "${CONTROL_LOG}" || fail 'failed Geo update was not reported'
+    elif [[ "${geoCase}" == int || "${geoCase}" == term ]]; then
+        ! kill -0 "$(<"${GEO_UPDATE_PID}")" 2>/dev/null || fail "Geo ${geoCase} left the updater alive"
+    fi
+done
+unset GEO_STATUS GEO_UPDATE_STATUS GEO_UPDATE_WAIT GEO_UPDATE_PID
 
 for tlsCase in cancel final-no eof validate install issue renew \
     renewal-status renewal-enable renewal-disable renewal-final-no renewal-eof; do

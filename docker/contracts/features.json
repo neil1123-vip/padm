@@ -290,7 +290,7 @@
       "reason": "宿主定时采集和 padm-docker traffic 支持单核及双核全量采样；自用按原 UUID、独立账号按稳定 ID 共享累计与额度，凭据轮换和配置恢复不回退最新累计；两核心全部复验后才写状态，额度失败或中断恢复全部配置。"
     },
     "subscription-users": {
-      "status": "deferred",
+      "status": "supported",
       "native_menu": "订阅与用户",
       "native_action": "创建、编辑、移除用户和分享订阅",
       "profiles": ["core-xray", "core-sing-box", "subscription"],
@@ -515,13 +515,13 @@
       "reason": "菜单和 assess 命令在部署锁内验签、准备可信候选镜像和独立配置副本，复用原生只读升级风险扫描，执行实际核心版本检查、配置试跑、Xray 严格模式及未知字段能力探针、已启用的 TLS/订阅/宿主前置检查；不支持严格解析时明确警告，不宣称严格校验通过。成功、失败或取消均不切换生产配置、bundle、服务和账目。要求受管 spec；预发布须提供匹配的可信发布资产，不现场构建核心；公网客户端连通另行验收。"
     },
     "geo-data": {
-      "status": "deferred",
+      "status": "supported",
       "native_menu": "核心与服务",
       "native_action": "Xray Geo 数据",
       "profiles": ["core-xray"],
-      "network_mode": "bridge",
+      "network_mode": "host-cli",
       "host_capabilities": [],
-      "reason": "Docker 尚未提供 Geo 文件更新和定时任务合同。"
+      "reason": "菜单和 geo status/update/schedule/auto-update 支持含 Xray 的部署；固定 tag、双摘要及 Xray 解析校验后保存 config/xray/geo，重建前采集 Xray 流量，仅重建原本运行的 Xray，失败恢复数据、Compose 和原运行状态。每日 01:35 systemd/cron 任务复用部署锁与所有权，编辑、更新和回滚保留数据并同步登记，旧控制 bundle 在切换前拒绝。本地定向、完整 CI 与真实 amd64 解析/权限通过；真实上游、生产重建、宿主调度、arm64 和整机重启另验。"
     },
     "script-update": {
       "status": "supported",
