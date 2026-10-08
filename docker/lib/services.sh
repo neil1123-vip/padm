@@ -511,7 +511,31 @@ dockerControlStateCheck() (
         cp -- "${directory}/config/control/state.json" "${input}/state.json" &&
         chmod 0600 "${input}/spec.json" "${input}/state.json" || return 1
     image=$(jq -er '.images.ops' "${input}/spec.json") || return 1
-    dockerControlPlan "${input}" "${image}" --check-state /input/state.json
+    if [[ "${2:-}" == revoke ]]; then
+        dockerRealityProbeRun 30 --user 0:0 --network none \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=8m \
+            --label io.padm.mode=docker --label io.padm.project="${PADM_DOCKER_PROJECT}" \
+            --mount "type=bind,src=${input},dst=/input,readonly" \
+            --entrypoint python3 "${image}" -c '
+import sys
+sys.path.insert(0, "/opt/padm")
+from control_state import published_state
+from control_api import MAX_STATE_BYTES, validate_state
+from control_sync import read_input
+try:
+    expected = published_state(read_input(sys.argv[1], 16 * MAX_STATE_BYTES))
+    actual = validate_state(read_input(sys.argv[2], MAX_STATE_BYTES))
+    # 撤销中断只补齐开关与有效期；严格解析后的身份、摘要及账号仍须一致。
+    if not actual["peer"]["enabled"] and actual["peer"]["expires_at"] == 1:
+        expected["peer"].update(enabled=False, expires_at=1)
+    if actual != expected:
+        raise ValueError("state mismatch")
+except (OSError, ValueError, KeyError, TypeError, AttributeError, RecursionError):
+    sys.exit("主控状态、账号摘要或发布版本不一致")
+' /input/spec.json /input/state.json
+    else
+        dockerControlPlan "${input}" "${image}" --check-state /input/state.json
+    fi
 )
 
 dockerControlRecoveryCheck() {
@@ -585,7 +609,8 @@ dockerControlRestorePrepare() {
         input=$(mktemp -d "${candidate}/.control-restore-input.XXXXXX") || return 1
         trap 'dockerRemoveManagedTree "$candidate" "$input"' EXIT
         chmod 0700 "${input}" &&
-            cp -- "${backup}/config/spec.json" "${input}/spec.json" &&
+            jq '.control.peer.enabled = false | .control.peer.expires_at = 1' \
+                "${backup}/config/spec.json" >"${input}/spec.json" &&
             chmod 0600 "${input}/spec.json" || return 1
         source="${root}/config/spec.json"
         if [[ -e "${source}" || -L "${source}" ]]; then
@@ -2867,12 +2892,18 @@ dockerRestoreConfiguration() {
     while IFS= read -r relative; do
         # 业务恢复点已恢复额度并合并最新累计，不能再用旧文件覆盖账目。
         [[ "${relative}" != data/traffic/state.json ]] || continue
+        # 旧授权不能先复制再覆盖，存活的控制进程可能在窗口内接受已撤销凭据。
+        if [[ -n "${DOCKER_CONTROL_RESTORE_PLAN:-}" &&
+            ( "${relative}" == config/spec.json || "${relative}" == config/control ) ]]; then
+            continue
+        fi
         [[ -e "${backup}/${relative}" ]] || return 1
         mkdir -p -- "${root}/$(dirname -- "${relative}")" || return 1
         cp -a -- "${backup}/${relative}" "${root}/${relative}" || return 1
     done <"${backup}/present"
     if [[ -n "${DOCKER_CONTROL_RESTORE_PLAN:-}" ]]; then
-        cp -- "${DOCKER_CONTROL_RESTORE_PLAN}/config/spec.json" "${root}/config/spec.json" &&
+        mkdir -p -- "${root}/config/control" &&
+            cp -- "${DOCKER_CONTROL_RESTORE_PLAN}/config/spec.json" "${root}/config/spec.json" &&
             cp -- "${DOCKER_CONTROL_RESTORE_PLAN}/config/control/state.json" \
                 "${root}/config/control/state.json" || return 1
     fi
@@ -2898,6 +2929,8 @@ dockerRestoreConfiguration() {
     DOCKER_CONFIG_SWITCHED=0
     DOCKER_CONFIG_STREAM_TRANSITION=0
     DOCKER_CONFIG_STREAM_HOST_TRANSITION=0
+    [[ -z "${DOCKER_CONTROL_RESTORE_PLAN:-}" ]] ||
+        printf '主控恢复完成，Peer 授权已禁用，请重新生成邀请。\n' >&2
     DOCKER_CONTROL_RESTORE_PLAN=
 }
 

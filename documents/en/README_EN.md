@@ -339,7 +339,7 @@ and restoring old content publishes a newer revision rather than moving backward
 The separate Compose `control` service uses host networking, UID `10001`, no capabilities or
 published ports, and a read-only `config/control` mount; it depends on WireGuard health.
 Ordinary configuration cannot change controller identity, listener or authorization.
-No external sync CLI/menu, invitations or WireGuard connection wizard is connected yet.
+No controlled-node join, external sync CLI/menu or WireGuard connection wizard is connected yet.
 Focused fixtures cover candidate generation, installation, recovery and
 permissions; core/host actions are stubbed, not real two-node acceptance.
 `padm-docker control status [--json]` and the Control connection menu expose redacted role state.
@@ -352,7 +352,26 @@ padm-docker control init --address 10.77.0.1 --port 18443 --peer-address 10.77.0
 The addresses must match the live interface and the unique peer's `/32` AllowedIPs.
 Initialization creates no keys, interfaces or routes, refuses an existing role, and leaves authorization disabled.
 Controller health checks the installed service; status exposes no tokens, accounts or digests.
-Next are invitations and the remaining 4C.3 connectivity steps, followed by 4C.4 two-node acceptance.
+Invitation and credential rotation use the same command; rotation immediately invalidates the previous token:
+
+```bash
+padm-docker control invite --output /root/padm-control-invite.json --expires-in 86400 --yes
+padm-docker control revoke --yes
+```
+
+The `0600 root:root` invitation contains private addresses, both identities, expiry and the sole raw token.
+The lifetime range is `60–604800` seconds, with `86400` seconds as the default.
+Its absolute output path must be outside the managed deployment; every parent must be root-owned,
+not group/other-writable and not a symlink. Existing files, directories and links are never overwritten;
+choose a new filename for rotation. Output, logs and process arguments omit the token; the spec stores only its hash.
+Revocation works even when the network is down and repeated revocation does not rebuild services.
+It atomically disables API authorization before updating the spec; repeat `revoke` after an interruption
+to finish the spec update without restoring the old authorization.
+Redacted status includes the authorization switch and expiry.
+Recovery, failed-transaction rollback and explicit version rollback disable authorization to prevent old tokens
+from becoming valid again; generate a new invitation afterwards. An atomically delivered invitation remains
+even if configuration fails, but is not proof of active authorization; check `control status`.
+Next are controlled-node join and private sync in 4C.3, followed by 4C.4 two-node acceptance.
 Multi-server support remains `deferred`.
 See the [4C implementation checkpoints](../docker-menu-parity-plan.md#4c-多服务器控制后端).
 

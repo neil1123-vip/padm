@@ -174,7 +174,7 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 | `subscription` | 订阅与用户 -> 订阅发布 | `supported` | `core-xray` / `nginx` / `subscription` | bridge | 既有部署级 token 发布继续要求 Xray 协议 `21` 和受管 TLS；分享组另有独立 token，可按账号/入口生成纯订阅内容并查看 HTTPS 链接；CDN/H3 仍未迁移。 |
 | `subscription-traffic` | 订阅与用户 -> 流量与额度 | `supported` | 核心 profile | 宿主 CLI | 定时采集以及 show/limit/reset；自用按原 UUID、独立账号按稳定 ID 共享跨核心累计与额度，凭据轮换和恢复不回退累计。 |
 | `subscription-users` | 订阅与用户 -> 用户和分享订阅 | `supported` | 核心、订阅 | bridge | 4A.1 账号底座、4A.2 账号 CLI/菜单事务和 4A.3 分享组已交付：支持独立 token、账号/入口筛选、启停/轮换、纯内容及 HTTPS 链接；CDN/H3、业务备份恢复和完整多服务器工作流仍未迁移。 |
-| `subscription-multiserver` | 订阅与用户 -> 主控/被控、多服务器同步 | `deferred` | 订阅、WireGuard | host | 4C.1–4C.3c API、同步/主控恢复与 WireGuard 归属底座已实现；4C.3d1 增加脱敏角色状态和已有受管单 Peer WireGuard 主控初始化 CLI/菜单，实际地址与唯一 `/32` Peer 校验，不建接口/密钥/路由，默认授权关闭。失败/回滚版本不倒退，独立只读服务、零能力、无公网端口映射。邀请、接入及外部同步待 4C.3，真实双节点待 4C.4。 |
+| `subscription-multiserver` | 订阅与用户 -> 主控/被控、多服务器同步 | `deferred` | 订阅、WireGuard | host | 4C.1–4C.3c API、同步/主控恢复与 WireGuard 归属底座已实现；4C.3d1–d2 增加脱敏角色状态、已有受管单 Peer WireGuard 主控初始化和邀请/轮换/撤销 CLI/菜单。实际地址与唯一 `/32` Peer 校验，不建接口/密钥/路由；原始 token 仅写外部 root 私有邀请文件，规格只存摘要，恢复禁用授权。失败/回滚版本不倒退，独立只读服务、零能力、无公网端口映射。接入及外部同步待 4C.3，真实双节点待 4C.4。 |
 | `acme-webroot` | 站点与证书 -> 传统 TLS fallback | `deferred` | `acme` / `nginx` | bridge | 需要 webroot、端口归属和原子 reload。 |
 | `acme-standalone` | 站点与证书 -> 本机 TLS 证书 | `deferred` | `acme` | host | 需要 80/443 宿主端口和停机回滚。 |
 | `site-static-redirect-alpn` | 站点与证书 -> fallback 站点、302、ALPN | `deferred` | `nginx` | bridge | 尚无站点管理、ALPN 诊断和修复事务。 |

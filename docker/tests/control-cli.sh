@@ -216,8 +216,9 @@ jq -e '.control | .role == "main" and .node_id != .peer.id and
 reject dockerControlCommand init "${args[@]}"
 json=$(dockerControlCommand status --json)
 text=$(dockerControlCommand status)
-jq -e 'keys == ["controller_id","healthy","listen","node_id","peer_address","revision","role"] and
-  .role == "main" and .healthy == true and .revision == 0' <<<"${json}" >/dev/null
+jq -e 'keys == ["authorization","controller_id","healthy","listen","node_id","peer_address","revision","role"] and
+  .role == "main" and .healthy == true and .revision == 0 and
+  .authorization == {enabled:false, expires_at:1}' <<<"${json}" >/dev/null
 cp -- "${spec}" "${TEST_ROOT}/main.json"
 rm -- "${spec}"
 reject dockerControlCommand status --json
@@ -248,7 +249,8 @@ jq '.control_sync = {
 }' "${TEST_ROOT}/standalone.json" >"${spec}"
 chmod 0600 "${spec}"
 json=$(dockerControlCommand status --json)
-jq -e '.role == "controlled" and .controller_id != null and .healthy == null and .revision == null' \
+jq -e '.role == "controlled" and .controller_id != null and .healthy == null and .revision == null and
+  .authorization == null' \
     <<<"${json}" >/dev/null
 reject dockerControlCommand init "${args[@]}"
 [[ -z "$(find "${root}" -maxdepth 1 -name '.control-init.*' -print -quit)" ]]

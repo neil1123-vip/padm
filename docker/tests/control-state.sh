@@ -274,6 +274,8 @@ chmod 0600 "${root}/failed.json"
 touch "${TEST_ROOT}/fail-up"
 if apply "${root}/failed.json"; then exit 1; fi
 jq -e '.control.revision == 3 and .accounts[0].name == "新账号名"' "${spec}" >/dev/null
+jq -e '.control.peer.enabled == false and .control.peer.expires_at == 1' "${spec}" >/dev/null
+jq -e '.peer.enabled == false and .peer.expires_at == 1' "${root}/config/control/state.json" >/dev/null
 for signal in INT TERM; do
     jq '.accounts[0].name = "信号失败账号"' "${spec}" >"${root}/failed.json"
     revision=$(jq '.control.revision' "${spec}")
@@ -304,7 +306,7 @@ jq -e --argjson revision "$((revision + 2))" \
 [[ "$(sha256sum "${backup}/config/spec.json" "${backup}/config/control/state.json")" == "${backupDigest}" ]]
 dockerCleanupConfigurationCandidate
 
-# 旧规格先复制成功后中断，重试仍以此前候选与恢复计划为版本下限。
+# 禁用授权的规格复制失败后，重试仍以此前候选与恢复计划为版本下限。
 dockerBackupConfiguration update
 backup=${DOCKER_CONFIG_BACKUP}
 revision=$(jq '.control.revision' "${spec}")
@@ -326,15 +328,16 @@ cp() {
 }
 touch "${TEST_ROOT}/fail-restored-spec-copy"
 if dockerRestoreConfiguration; then exit 1; fi
-[[ "$(jq '.control.revision' "${spec}")" == "${revision}" ]]
+[[ ! -e "${spec}" && ! -e "${root}/config/control/state.json" ]]
 [[ "$(jq '.spec.control.revision' "${candidate}/control-restore/control-plan.json")" == "$((revision + 2))" ]]
+jq -e '.state.peer.enabled == false and .spec.control.peer.enabled == false' \
+    "${candidate}/control-restore/control-plan.json" >/dev/null
 dockerConfigurationInterrupted
 [[ "${DOCKER_CONFIG_CANDIDATE}" == "${candidate}" &&
     "${DOCKER_CONFIG_SWITCHED}" == 1 &&
     -f "${candidate}/control-plan.json" &&
     -f "${candidate}/control-restore/control-plan.json" ]]
 [[ "$(jq '.spec.control.revision' "${candidate}/control-restore/control-plan.json")" == "$((revision + 2))" ]]
-before=$(sha256sum "${spec}")
 backupsBefore=$(find "${root}/backups" -mindepth 1 -maxdepth 1 -type d | sort)
 if dockerConfigureApply "${root}/window.json"; then exit 1; fi
 if dockerCreateUpdateCandidate; then exit 1; fi
@@ -357,7 +360,7 @@ if dockerBackupConfiguration rollback; then exit 1; fi
     done
     [[ -z "${DOCKER_CONFIG_CANDIDATE}" && -z "${DOCKER_CONFIG_BACKUP}" ]]
 )
-[[ "$(sha256sum "${spec}")" == "${before}" &&
+[[ ! -e "${spec}" &&
     "$(find "${root}/backups" -mindepth 1 -maxdepth 1 -type d | sort)" == "${backupsBefore}" ]]
 dockerControlRecoveryCheck current
 rm -- "${TEST_ROOT}/fail-restored-spec-copy"
@@ -417,18 +420,36 @@ dockerRestoreConfiguration
 [[ "$(jq '.control.revision' "${spec}")" == "${revision}" ]]
 dockerCleanupConfigurationCandidate
 
+# 即使旧备份授权仍启用，轮换或撤销后的回滚也不能复活它。
+jq '.control.peer.enabled = true | .control.peer.expires_at = 2000000000' \
+    "${spec}" >"${root}/reinvite.json"
+chmod 0600 "${root}/reinvite.json"
+DOCKER_CONTROL_TRANSACTION=1 apply "${root}/reinvite.json"
 dockerBackupConfiguration update
 rollbackBackup=${DOCKER_CONFIG_BACKUP}
-jq '.accounts[0].name = "回滚前账号"' "${spec}" >"${root}/rollback-next.json"
+jq -e '.control.peer.enabled == true' "${rollbackBackup}/config/spec.json" >/dev/null
+jq '.accounts[0].name = "回滚前账号" | .control.peer.enabled = false |
+    .control.peer.token_sha256 = ("b" * 64)' "${spec}" >"${root}/rollback-next.json"
 chmod 0600 "${root}/rollback-next.json"
-apply "${root}/rollback-next.json"
+DOCKER_CONTROL_TRANSACTION=1 apply "${root}/rollback-next.json"
 revision=$(jq '.control.revision' "${spec}")
 dockerLatestUpdateBackup() { printf '%s\n' "${rollbackBackup}"; }
 dockerRenewalRegistryValidate() { :; }
 dockerRenewalEnabled() { return 1; }
+cp() {
+    # 模拟控制服务未成功停下；任何旧授权文件进入在线路径都会立即使断言失败。
+    if [[ "${@: -1}" == "${root}/config/control" || "${@: -1}" == "${spec}" ]]; then
+        [[ "${@: -2:1}" != "${rollbackBackup}/config/control" &&
+            "${@: -2:1}" != "${rollbackBackup}/config/spec.json" ]] || return 1
+    fi
+    command cp "$@"
+}
 dockerRollbackCommand
+unset -f cp
 jq -e --argjson revision "$((revision + 1))" \
-    '.control.revision == $revision and .accounts[0].name == "新账号名"' "${spec}" >/dev/null
+    '.control.revision == $revision and .accounts[0].name == "新账号名" and
+     .control.peer.enabled == false and .control.peer.expires_at == 1' "${spec}" >/dev/null
+jq -e '.peer.enabled == false and .peer.expires_at == 1' "${root}/config/control/state.json" >/dev/null
 dockerControlStateCheck "${root}"
 [[ -z "$(find "${root}" -maxdepth 1 \( -name '.candidate.*' -o -name '.control-*' \) -print -quit)" ]]
 # 悬空计划链接仍是恢复证据，不能在同进程失败清理时丢弃。

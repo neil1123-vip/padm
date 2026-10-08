@@ -289,6 +289,34 @@ runControlDriver() {
     local -A targetPrompts=()
     targetReply 'Docker 管理菜单' $'15\n'
     case "${scenario}" in
+    invite|invite-cancel|invite-eof|revoke|revoke-cancel)
+        if [[ "${scenario}" == invite* ]]; then
+            if [[ "${scenario}" == invite-cancel ]]; then
+                targetReply 'Docker 控制连接' $'3\n'
+                targetReply '邀请文件绝对路径（受管目录外，0 返回）' $'0\n'
+                targetReply 'Docker 控制连接' $'3\n'
+                targetReply '邀请文件绝对路径（受管目录外，0 返回）' $'/root/padm-invite.json\n'
+                targetReply '授权有效秒数 [86400，0 返回]' $'0\n'
+            fi
+            targetReply 'Docker 控制连接' $'3\n'
+            targetReply '邀请文件绝对路径（受管目录外，0 返回）' $'/root/padm-invite.json\n'
+            if [[ "${scenario}" == invite ]]; then
+                targetReply '授权有效秒数 [86400，0 返回]' $'3600\n'
+            else
+                targetReply '授权有效秒数 [86400，0 返回]' $'\n'
+            fi
+        else
+            targetReply 'Docker 控制连接' $'4\n'
+        fi
+        case "${scenario}" in
+        *-cancel) targetReply 'fixture-control-confirm [y/N]' $'n\n' ;;
+        *-eof) targetReply 'fixture-control-confirm [y/N]' $'\004' ;;
+        *) targetReply 'fixture-control-confirm [y/N]' $'y\n' ;;
+        esac
+        targetReply 'Docker 控制连接' $'0\n'
+        targetReply 'Docker 管理菜单' $'0\n'
+        return 0
+        ;;
     flow)
         targetReply 'Docker 控制连接' $'1\n'
         ;;
@@ -638,7 +666,7 @@ control)
     recordAction "$@"
     case "${2:-}" in
     status) printf 'fixture-control-status\n' ;;
-    init)
+    init|invite|revoke)
         printf 'fixture-control-confirm [y/N]: '
         if ! IFS= read -r confirmation; then
             recordAction control-confirm eof
@@ -690,7 +718,7 @@ runPty core-assessment menu $'13\n0\n' "${TLS_WIZARD_CLI}" menu
 
 : >"${TLS_WIZARD_ACTIONS}"
 runPty control-dispatch control flow "${TLS_WIZARD_CLI}" menu
-for controlLabel in '15. 控制连接' '1. 查看角色状态' '2. 初始化主控' '0. 返回'; do
+for controlLabel in '15. 控制连接' '1. 查看角色状态' '2. 初始化主控' '3. 邀请或轮换凭据' '4. 撤销授权' '0. 返回'; do
     grep -Fq "${controlLabel}" "${CONTROL_LOG}" || fail "missing control menu item: ${controlLabel}"
 done
 [[ "$(<"${TLS_WIZARD_ACTIONS}")" == $'control status\ncontrol init --address 10.77.0.1 --port 19443 --peer-address 10.77.0.2\ncontrol-confirm y\ncontrol-commit' ]] ||
@@ -719,6 +747,27 @@ for controlCase in cancel input-eof confirm-eof failed; do
         grep -Fq '操作失败，退出码: 17' "${CONTROL_LOG}" || fail 'failed control initialization was not reported'
 done
 unset CONTROL_INIT_STATUS
+for controlCase in invite invite-cancel invite-eof revoke revoke-cancel; do
+    : >"${TLS_WIZARD_ACTIONS}"
+    runPty "control-${controlCase}" control "${controlCase}" "${TLS_WIZARD_CLI}" menu
+    case "${controlCase}" in
+    invite*) expectedControl='control invite --output /root/padm-invite.json --expires-in ' ;;
+    revoke*) expectedControl='control revoke' ;;
+    esac
+    case "${controlCase}" in
+    invite) expectedControl+='3600' ;;
+    invite-*) expectedControl+='86400' ;;
+    esac
+    case "${controlCase}" in
+    *-cancel) expectedControl+=$'\ncontrol-confirm n' ;;
+    *-eof) expectedControl+=$'\ncontrol-confirm eof' ;;
+    *) expectedControl+=$'\ncontrol-confirm y\ncontrol-commit' ;;
+    esac
+    [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedControl}" ]] ||
+        fail "control ${controlCase} dispatched incorrect arguments or bypassed confirmation"
+    [[ "$(grep -Fc 'fixture-control-confirm [y/N]' "${CONTROL_LOG}")" -eq 1 ]] ||
+        fail "control ${controlCase} did not confirm exactly once"
+done
 
 : >"${TLS_WIZARD_ACTIONS}"
 runPty geo-dispatch geo flow "${TLS_WIZARD_CLI}" menu

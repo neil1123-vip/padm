@@ -144,7 +144,8 @@ runDockerControlStateRegression() {
 }
 
 runDockerControlCliRegression() {
-    bash "${PROJECT_ROOT}/docker/tests/control-cli.sh"
+    bash "${PROJECT_ROOT}/docker/tests/control-cli.sh" &&
+        bash "${PROJECT_ROOT}/docker/tests/control-invite.sh"
 }
 
 runDockerWireGuardRuntimeRegression() {

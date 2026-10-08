@@ -62,7 +62,7 @@ dockerMenuRun() {
         ( ( "${1:-}" == subscription || "${1:-}" == share ) &&
           "${2:-}" != list && "${2:-}" != content && "${2:-}" != links ) ||
         ( "${1:-}" == tls && "${2:-}" == manage ) ||
-        ( "${1:-}" == control && "${2:-}" == init ) ||
+        ( "${1:-}" == control && "${2:-}" != status ) ||
         ( "${1:-}" == protocol && ( "${2:-}" == select-target ||
           "${2:-}" == scan-targets || "${2:-}" == scan-targets-asn ) ) ]]; then
         # 交互配置必须与菜单共用前台进程组，否则后台 read 会收到 SIGTTIN。
@@ -527,11 +527,11 @@ dockerMenuGeo() {
 }
 
 dockerMenuControl() {
-    local choice address port peer
+    local choice address port peer output expiry
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 控制连接\n'
-        printf '%s\n' '1. 查看角色状态' '2. 初始化主控' '0. 返回'
+        printf '%s\n' '1. 查看角色状态' '2. 初始化主控' '3. 邀请或轮换凭据' '4. 撤销授权' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -548,6 +548,13 @@ dockerMenuControl() {
                 [[ -n "${peer}" ]] || continue
             dockerMenuRun control init --address "${address}" --port "${port}" --peer-address "${peer}" || true
             ;;
+        3)
+            dockerSetupRead output '邀请文件绝对路径（受管目录外，0 返回）: ' &&
+                [[ -n "${output}" ]] &&
+                dockerSetupRead expiry '授权有效秒数 [86400，0 返回]: ' 86400 || continue
+            dockerMenuRun control invite --output "${output}" --expires-in "${expiry}" || true
+            ;;
+        4) dockerMenuRun control revoke || true ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done
