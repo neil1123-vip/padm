@@ -140,6 +140,48 @@ SH
         nginxRunning
         nginxArgs=('nginx: worker process')
         nginxRunning
+        padmReadProcExe() { printf '/usr/sbin/nginx (deleted)\n'; }
+        nginxRunning
+        nginxArgs=(/usr/sbin/nginx -g 'daemon off; master_process off;')
+        nginxRunning
+        for mode in -t -s; do
+            nginxArgs=(/usr/sbin/nginx "${mode}" reload)
+            regressionExpectStatus 1 nginxRunning
+        done
+    )
+    (
+        # 临时 Nginx 释放检测端口后才恢复核心，恢复落盘配置本身不会释放监听。
+        source "${PROJECT_ROOT}/shell/core/network.sh"
+        local nginxState=true coreState=false wasRunning actions= cleanup= stopFails=false
+        padmRestoreManagedFileBackupManifest() { actions+="restore"$'\n'; }
+        padmRemoveCleanupPath() { cleanup=removed; }
+        padmForgetCleanupPath() { cleanup=retained; }
+        errorCard() { actions+="$*"$'\n'; }
+        nginxRunning() { [[ "${nginxState}" == true ]]; }
+        singBoxRunning() { [[ "${coreState}" == true ]]; }
+        xrayRunning() { return 1; }
+        handleSingBox() {
+            actions+="sing-box:$1"$'\n'
+            [[ "${nginxState}" == false ]] || return 1
+            coreState=true
+        }
+        handleNginx() {
+            actions+="nginx:$1"$'\n'
+            [[ "$1" != stop || "${stopFails}" == false ]] || return 1
+            [[ "$1" != start ]] || [[ "${coreState}" == true ]] || return 1
+            [[ "$1" == start ]] && nginxState=true || nginxState=false
+        }
+        for wasRunning in true false; do
+            nginxState=true coreState=false actions= cleanup=
+            regressionExpectStatus 1 checkPortOpenAbort fixture true false "${wasRunning}" true 检测失败
+            [[ "${coreState}" == true && "${nginxState}" == "${wasRunning}" && "${cleanup}" == removed ]]
+            [[ "${actions}" == $'nginx:stop\nrestore\nsing-box:start\n'* ]]
+            [[ "${actions}" == *'检测失败，已恢复原配置和服务状态'* ]]
+        done
+        nginxState=true coreState=false actions= cleanup= stopFails=true
+        regressionExpectStatus 1 checkPortOpenAbort fixture true false false true 检测失败
+        [[ "${nginxState}" == true && "${coreState}" == false && "${cleanup}" == retained ]]
+        [[ "${actions}" == *'检测失败，恢复失败'* ]]
     )
     release=centos
     selectCustomInstallType=",21,"

@@ -208,7 +208,8 @@ nginxRunning() {
         [[ -n "${pid}" ]] || continue
         exe=$(padmReadProcExe "/proc/${pid}/exe")
         padmReadProcArgs procArgs "/proc/${pid}/cmdline" || continue
-        [[ "${exe}" == *"/nginx" || "${procArgs[0]:-}" == "nginx: master process"* ]] || continue
+        [[ "${exe}" == *"/nginx" || "${exe}" == *"/nginx (deleted)" ||
+            "${procArgs[0]:-}" == "nginx: master process"* ]] || continue
         # getopts 保留参数边界，避免把 -c/-g 等参数中的字符当成辅助命令。
         auxiliary=false
         OPTIND=1

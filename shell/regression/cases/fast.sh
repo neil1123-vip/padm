@@ -4711,8 +4711,11 @@ JSON
             singBoxConfigPath=
             currentInstallProtocolType=",9,"
             frontingType=09_tuic_inbounds
+            singBoxVLESSWSPort=8443
+            singBoxVMessHTTPUpgradePort=9443
             readInstallProtocolType
             [[ "${currentInstallProtocolType}" == "," && -z "${frontingType}" ]]
+            [[ -z "${singBoxVLESSWSPort}${singBoxVMessHTTPUpgradePort}" ]]
         )
 
         mkdir -p "${root}/xray/conf"
@@ -4772,6 +4775,17 @@ runReadInstallTypeKeepsSingBoxShardsRegression() {
         readInstallType
         [[ "${coreInstallType}" == "2" ]]
         [[ "${singBoxConfigPath}" == "${singBoxConfigDir}/" ]]
+
+        PADM_XRAY_DIR="${root}/custom-xray"
+        PADM_XRAY_CONF_DIR=
+        mkdir -p "${PADM_XRAY_DIR}/conf"
+        printf '{"inbounds":[]}\n' >"${PADM_XRAY_DIR}/conf/12_VLESS_XHTTP_inbounds.json"
+        readInstallType
+        [[ "${coreInstallType}" == 1 && "${configPath}" == "${PADM_XRAY_DIR}/conf/" ]]
+        PADM_XRAY_CONF_DIR="${xrayConfigDir}"
+        printf '{"inbounds":[]}\n' >"${xrayConfigDir}/12_VLESS_XHTTP_inbounds.json"
+        readInstallType
+        [[ "${configPath}" == "${xrayConfigDir}/" ]]
     )
 }
 

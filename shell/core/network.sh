@@ -874,13 +874,13 @@ checkPortOpenAbort() {
     local reason=$6
     local status=0
 
+    if [[ "${nginxConfigChanged}" == "true" ]] && nginxRunning; then
+        runCoreServiceActionAllowFailure handleNginx stop || status=1
+    fi
     padmRestoreManagedFileBackupManifest "${backupDir}" || status=1
     checkPortOpenRestoreCoreServiceState "${singBoxWasRunning}" singBoxRunning handleSingBox || status=1
     checkPortOpenRestoreCoreServiceState "${xrayWasRunning}" xrayRunning handleXray || status=1
     if [[ "${nginxConfigChanged}" == "true" ]]; then
-        if nginxRunning; then
-            runCoreServiceActionAllowFailure handleNginx stop || status=1
-        fi
         if [[ "${nginxWasRunning}" == "true" ]] && ! nginxRunning; then
             runCoreServiceActionAllowFailure handleNginx start restore || status=1
         fi

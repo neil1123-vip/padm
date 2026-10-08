@@ -151,7 +151,8 @@ readInstallType() {
     singBoxConfigPath=
     local configFile
     local xrayBinary="${PADM_XRAY_BINARY:-/etc/padm/xray/xray}"
-    local xrayConfigDir="${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}"
+    local xrayConfigDir
+    xrayConfigDir=$(coreXrayConfigDir) || return 1
     local singBoxBinary="${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}"
     local singBoxConfigDir="${PADM_SINGBOX_CONFIG_DIR:-/etc/padm/sing-box/conf/config}"
     local singBoxMergedFile="$(dirname -- "${singBoxConfigDir%/}")/config.json"
@@ -230,6 +231,7 @@ readInstallProtocolType() {
     realityEntryHost=
 
     singBoxVLESSVisionPort=
+    singBoxVLESSWSPort=
     singBoxHysteria2Port=
     singBoxTrojanPort=
     singBoxShadowsocksPort=
@@ -244,6 +246,7 @@ readInstallProtocolType() {
     singBoxTuicPort=
     singBoxNaivePort=
     singBoxVMessWSPort=
+    singBoxVMessHTTPUpgradePort=
     singBoxSocks5Port=
 
     local xrayBinary="${PADM_XRAY_BINARY:-/etc/padm/xray/xray}"
