@@ -180,7 +180,7 @@ spec together; old snapshots without static content retain the current directory
 Deleting the last Nginx listener clears the site mode but retains static files and other TLS listeners.
 `status` reports only `site_mode`, not the redirect URL. Old specs remain compatible;
 v3 `.site` requires the bundle capability `x-padm-site-content`.
-Managed webroot ACME remains deferred. Standalone HTTP-01 is available through certificate management.
+Managed webroot and standalone HTTP-01 are available through certificate management.
 
 The same menu offers ALPN diagnostics, recommended repair, and three manual orders
 for fallback listeners `27`/`29`:
@@ -473,13 +473,17 @@ padm-docker acme <issue|renew> --domain example.com --email admin@example.com --
 padm-docker acme schedule enable --domain example.com --email admin@example.com --dns <dns_provider> --credentials /path/credentials
 padm-docker acme <issue|renew> --domain example.com --email admin@example.com --standalone
 padm-docker acme schedule enable --domain example.com --email admin@example.com --standalone
+padm-docker edit --http01 enable --preview
+padm-docker edit --http01 enable --confirm PADM-DOCKER-EDIT
+padm-docker acme <issue|renew> --domain example.com --email admin@example.com --webroot
+padm-docker acme schedule enable --domain example.com --email admin@example.com --webroot
 padm-docker acme schedule status
 padm-docker acme schedule disable --domain example.com
 padm-docker acme auto-renew
 ```
 
-Main menu item 8 validates certificates, imports replacements, or runs DNS-01/HTTP-01 standalone issue/renew.
-It also shows, enables, or disables automatic renewal.
+Main menu item 8 validates certificates, imports replacements, or runs DNS-01/HTTP-01 standalone/webroot issue/renew.
+It also explicitly enables/disables the HTTP-01 listener and manages automatic renewal.
 No deployment lock is held before final confirmation. Configured deployments use their recorded
 ops image; `--ops-image` cannot substitute a different image.
 After checking validity dates, hostname and key match, rotation runs `nginx -t`, reloads and
@@ -489,7 +493,7 @@ without changing listeners or the spec. Core-side TLS only handles same-domain m
 pairs referenced by the configuration, through a read-only `/etc/padm/secrets/tls` mount.
 All consumers are validated first, then affected cores are recreated or Nginx is reloaded with
 per-service health checks. Recovery attempts every consumer without reverting cumulative traffic.
-HTTP-01 uses port `8080` in the non-root ops container and temporarily publishes dual-stack host
+Standalone HTTP-01 uses port `8080` in the non-root ops container and temporarily publishes dual-stack host
 TCP `80`. The domain must resolve to this host and public port `80` must be reachable.
 It does not change firewall rules or provide TLS-ALPN-01. Actual container labels, image,
 mounts, deployment and published ports must agree before stopping anything.
@@ -499,14 +503,28 @@ Success, failure and signals restore the original containers. Originally stopped
 remain stopped. acme.sh decides whether renewal is due, including ARI, before ports are published
 or services paused. Failed restoration retains container IDs in the private candidate's
 `challenge.json` and prevents starting another domain.
+Webroot requires an existing managed Nginx listener `21`-`25`/`27`/`29` and explicit v3
+`.tls.http01=true`; old specs do not automatically expose port `80`.
+A dedicated dual-stack `80:8088` HTTP vhost serves only standard challenge token paths
+for the current TLS domain, independently of site, redirect, proxy and subscription rules.
+Nginx mounts the stable `data/acme-webroot` read-only. Ops writes only this run's exclusive
+`active/` directory, removed on completion or interruption without replacing the mount root,
+pausing Nginx or publishing temporary ports. The root is `0750 10001:10001`; links, special
+files, externally writable parents and unfinished challenges are rejected.
+Failed cleanup retains the candidate and challenge and prevents processing another domain.
+Issuing a certificate never implicitly enables the listener.
+Use `edit --http01 disable --confirm PADM-DOCKER-EDIT` to disable it.
+Enabled webroot renewal blocks disabling, domain changes, deleting the last Nginx listener
+or rolling back to a snapshot without HTTP-01; disable that domain's renewal first.
+Renewal that is not due creates no challenge directory and changes no services.
 Automatic renewal requires an existing managed ACME account for the domain and matching
 challenge method; imported certificates alone are insufficient. DNS renewal stores `NAME=value`
 credentials and renewal inputs in host-only `secrets/renewal/<domain>/`, with root-owned
 `0700` directories and `0600` files. Credentials reach the tool through standard input, not
 schedules, arguments, or Docker environment metadata.
-HTTP registration stores only a schema `2` request, without a fabricated credentials file.
-DNS retains schema `1`. Enabled HTTP renewal rejects old bundles; disabling it transactionally
-removes that domain's registration so compatible older DNS bundles can be used again.
+Standalone registration stores schema `2` and webroot schema `3`, both without credentials.
+DNS retains schema `1`. Bundles must support the highest enabled registration schema;
+disabling renewal transactionally removes the domain's registration so compatible older bundles can be used again.
 All domains share one daily 03:17 task: a systemd timer with up to five minutes of random delay,
 or a running cron daemon. The backends are mutually exclusive, repeated enablement creates
 no extra job, and certificates that are not due are skipped normally.

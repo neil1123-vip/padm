@@ -314,7 +314,7 @@
       "profiles": ["acme", "nginx"],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "需要 webroot 挑战、80/443 归属检查和 Nginx 原子 reload。"
+      "reason": "5A.3b 已提供受管 Nginx HTTP-01 webroot 菜单/CLI 与自动续期：v3 显式开启双栈 80:8088，只读稳定挑战根，ops 仅写独占 active；归属、端口、挂载与 token 树校验，不暂停 Nginx，失败和信号恢复，启用续期时保护关闭与回滚。公网 CA、真实宿主生命周期及原生双架构未验，完整状态仍 deferred。"
     },
     "acme-standalone": {
       "status": "deferred",

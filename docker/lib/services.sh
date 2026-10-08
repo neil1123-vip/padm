@@ -36,6 +36,8 @@ DOCKER_ACME_CONTAINER=
 DOCKER_ACME_PORT_PUBLISH=0
 DOCKER_ACME_RECOVERY=
 DOCKER_ACME_RUNNING=null
+DOCKER_ACME_WEBROOT=
+DOCKER_ACME_WEBROOT_INODE=
 
 dockerConfigureSchemaFile() {
     printf '%s\n' "${DOCKER_BUNDLE_SOURCE_ROOT}/docker/contracts/configure.schema.json"
@@ -330,7 +332,15 @@ dockerConfigureSpecValidate() {
         any($features.protocols[];
           .id == $protocol.id and .status == "supported" and
           (.cores | index($protocol.core // $request.core.type)) != null)) and
-      (.tls == null or (.tls | exact(["domain"]) and (.domain | hostname))) and
+      (.tls == null or (.tls | exact(["domain"] +
+          if has("http01") then ["http01"] else [] end) and (.domain | hostname) and
+        (if has("http01") then .http01 == true else true end))) and
+      (if .tls.http01 == true then
+        .schema_version == 3 and
+        any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29) and
+        all(.core.protocols[]; .public_port != 80 or .id == 3 or .id == 31) and
+        all(.host_integrations[] | select(.type == "tproxy"); .settings.port != 80)
+       else true end) and
       (.subscription | exact(["enabled", "token"]) and (.enabled | type == "boolean") and
         (.token | test("^[A-Za-z0-9_-]{16,128}$"))) and
       (.images | exact(["xray", "sing-box", "nginx", "ops", "net"]) and
@@ -408,7 +418,8 @@ dockerConfigureSpecValidate() {
           ((.websocket // .httpupgrade // .grpc_tls).tls_port // 8443)] +
         ([.core.protocols[] | select(.id == 27 or .id == 29) |
           [.fallback_tls.http_port, .fallback_tls.http2_port]] | unique | flatten) +
-        [8080] + [if .reality_stream != null then 15443 else empty end]) as $tlsPorts |
+        [8080] + [if .tls.http01 == true then 8088 else empty end] +
+        [if .reality_stream != null then 15443 else empty end]) as $tlsPorts |
       ($tlsPorts | unique | length) == ($tlsPorts | length)))
     ' "${specFile}" >/dev/null 2>&1 || {
         dockerError '配置规格不满足阶段 4 schema、支持矩阵或拓扑约束'
@@ -797,6 +808,12 @@ dockerManagedSpecMatchesDeployment() {
           public_port: .control.listen.port, container_port: .control.listen.port,
           transport: "tcp", address_families: ["ipv4"]
         } else empty end]) and
+      ([$d.listeners[] | select(.listener_id == "host-acme-http")] ==
+        [if .tls.http01 == true then {
+          listener_id: "host-acme-http", service: "nginx",
+          public_port: 80, container_port: 8088,
+          transport: "tcp", address_families: ["ipv4", "ipv6"]
+        } else empty end]) and
       all(.images | to_entries[];
         (.value | split("@") | last) == $d.images[.key].index_digest)
     ' "${specFile}" >/dev/null 2>&1 || return 1
@@ -834,6 +851,9 @@ dockerEditBaselineValidate() {
         dockerError '完整原始规格与部署记录不一致，不能接入编辑'
         return 1
     }
+    if jq -e '.tls.http01 == true' "${specFile}" >/dev/null; then
+        dockerAcmeWebrootTreeValidate "${root}" "${root}/data/acme-webroot" || return 1
+    fi
     baseline="${workspace}/baseline"
     mkdir -p -- "${baseline}/config/"{xray,sing-box,nginx,control,net/fail2ban,net/transparent} \
         "${baseline}/data/subscription" "${baseline}/logs/nginx" || return 1
@@ -1151,6 +1171,7 @@ dockerConfigurePortsAvailable() {
               "\(.public_port)|\($transport)"] +
           [.host_integrations[] | select(.type == "tproxy") |
             "\(.settings.port)|tcp", "\(.settings.port)|udp"] +
+          [if .tls.http01 == true then "80|tcp" else empty end] +
           [if .reality_stream.host_website.network_mode == "host" then "15443|tcp" else empty end]) | unique[]
         ' "${specFile}"
         if jq -e 'any(.host_integrations[]; .type == "wireguard")' "${specFile}" >/dev/null; then
@@ -1760,6 +1781,29 @@ server {
     }
 }
 EOF
+    if jq -e '.tls.http01 == true' "${specFile}" >/dev/null; then
+        cat >>"${target}" <<EOF
+
+server {
+    listen 8088;
+    listen [::]:8088;
+    server_name ${domain};
+    root /srv/padm-acme/active;
+    disable_symlinks on;
+    autoindex off;
+    default_type text/plain;
+
+    if (\$host != ${domain,,}) { return 404; }
+    if (\$request_uri !~ "^/\\.well-known/acme-challenge/[A-Za-z0-9_-]{1,128}\$") { return 404; }
+
+    location ~ "^/\\.well-known/acme-challenge/[A-Za-z0-9_-]{1,128}\$" {
+        try_files \$uri =404;
+    }
+
+    location / { return 404; }
+}
+EOF
+    fi
     if jq -e 'any(.core.protocols[]; .id == 27 or .id == 29)' "${specFile}" >/dev/null; then
         cat >>"${target}" <<'EOF'
 
@@ -2010,8 +2054,8 @@ EOF
 }
 
 dockerGenerateCompose() {
-    local specFile=$1 target=$2 core domains directory tlsCores='[]'
-    directory=$(dirname -- "${target}")
+    local specFile=$1 target=$2 core domains directory=${3:-} tlsCores='[]'
+    [[ -n "${directory}" ]] || directory=$(dirname -- "${target}")
     while IFS= read -r core; do
         [[ -e "${directory}/config/${core}/config.json" ]] || continue
         domains=$(dockerCoreTlsDomains "${core}" "${directory}/config/${core}/config.json") || return 1
@@ -2143,6 +2187,7 @@ dockerGenerateCompose() {
               (if $r.reality_stream != null and ($hostStream | not) then
                 mounts("config/nginx/stream"; "/etc/nginx/stream.d"; true) else [] end) +
               mounts("data/static"; "/srv/padm"; true) +
+              (if $r.tls.http01 == true then mounts("data/acme-webroot"; "/srv/padm-acme"; true) else [] end) +
               (if ($websocket | length) > 0 then mounts("secrets/tls"; "/etc/padm/secrets/tls"; true) else [] end) +
               mounts("logs/nginx"; "/var/log/nginx"; false)),
             ports: ([$websocket[] | select($r.reality_stream == null or
@@ -2150,7 +2195,8 @@ dockerGenerateCompose() {
                 ports($protocol; (($protocol.websocket // $protocol.httpupgrade // $protocol.grpc_tls).tls_port // 8443))[]] +
               [if $r.reality_stream != null and ($hostStream | not) then
                 $r.core.protocols[] | select(.listener_id == $r.reality_stream.listener_id) |
-                .public_port = 443 | ports(.; 15443)[] else empty end]),
+                .public_port = 443 | ports(.; 15443)[] else empty end] +
+              [if $r.tls.http01 == true then "0.0.0.0:80:8088/tcp", "[::]:80:8088/tcp" else empty end]),
             tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=32m"]
           } + if $r.reality_stream.host_website.address == "host.docker.internal" then
             {extra_hosts: ["host.docker.internal:host-gateway"]} else {} end)
@@ -2362,6 +2408,10 @@ dockerGenerateDeployment() {
             listener_id: "host-control", service: "control",
             public_port: $r.control.listen.port, container_port: $r.control.listen.port,
             transport: "tcp", address_families: ["ipv4"]
+          } else empty end] + [if $r.tls.http01 == true then {
+            listener_id: "host-acme-http", service: "nginx",
+            public_port: 80, container_port: 8088,
+            transport: "tcp", address_families: ["ipv4", "ipv6"]
           } else empty end]
         ),
         images: {
@@ -2401,8 +2451,11 @@ dockerDeploymentFileValidate() {
         (if any(.[]; has("listener_id")) then
           ([.[] | [.listener_id, .transport]] | unique | length) == length and
           all(.[]; .listener_id | type == "string" and
-            test("^(entry-[a-z0-9][a-z0-9-]{0,47}|vless-reality|vless-ws|host-wireguard|host-tproxy-tcp|host-tproxy-udp|host-control)$"))
+            test("^(entry-[a-z0-9][a-z0-9-]{0,47}|vless-reality|vless-ws|host-wireguard|host-tproxy-tcp|host-tproxy-udp|host-control|host-acme-http)$"))
          else true end)) and
+      all(.listeners[] | select(.listener_id == "host-acme-http");
+        .service == "nginx" and .public_port == 80 and .container_port == 8088 and
+        .transport == "tcp" and .address_families == ["ipv4", "ipv6"]) and
       (.images | keys | sort) == (["xray", "sing-box", "nginx", "ops", "net"] | sort) and
       all(.images[]; .index_digest | test("^sha256:[a-f0-9]{64}$")) and
       (.host_integrations | type == "array" and length <= 3 and
@@ -2448,6 +2501,13 @@ dockerPrepareCandidatePermissions() {
         return 1
     }
     dockerSiteTreeValidate "${candidate}/data/static" || return 1
+    if jq -e '.tls.http01 == true' "${candidate}/config/spec.json" >/dev/null 2>&1; then
+        [[ -d "${candidate}/data/acme-webroot" && ! -L "${candidate}/data/acme-webroot" ]] || return 1
+        chmod 0750 "${candidate}/data/acme-webroot" || return 1
+        [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == "1" ]] ||
+            chown "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" "${candidate}/data/acme-webroot" || return 1
+        dockerAcmeWebrootTreeValidate "${candidate}" "${candidate}/data/acme-webroot" true || return 1
+    fi
     if [[ -e "${candidate}/config/spec.json" || -L "${candidate}/config/spec.json" ]]; then
         [[ -f "${candidate}/config/spec.json" && ! -L "${candidate}/config/spec.json" ]] || return 1
         chmod 0600 "${candidate}/config/spec.json" || return 1
@@ -2495,6 +2555,9 @@ dockerGenerateCandidate() {
     fi
     dockerControlPrepareCandidate "${specFile}" "${candidate}" "${previous}" || return 1
     specFile="${candidate}/config/spec.json"
+    if jq -e '.tls.http01 == true' "${specFile}" >/dev/null; then
+        mkdir -p -- "${candidate}/data/acme-webroot" || return 1
+    fi
     while IFS= read -r core; do
         case "${core}" in
         xray) dockerGenerateXrayConfig "${specFile}" "${candidate}/config/xray/config.json" || return 1 ;;
@@ -2613,6 +2676,12 @@ dockerValidateCandidate() {
     local specFile=$1 candidate=$2 core domain jsonFile image tlsDomains='[]' domains
     local nginxCheckFile="${2}/compose.nginx-check.json" nginxStatus=0
     local -a nginxCheckArgs=()
+    if jq -e '.tls.http01 == true' "${specFile}" >/dev/null; then
+        dockerAcmeWebrootTreeValidate "${candidate}" "${candidate}/data/acme-webroot" true || {
+            dockerError '候选 ACME webroot 目录不安全或非空'
+            return 1
+        }
+    fi
     if [[ -e "${candidate}/data/static" || -L "${candidate}/data/static" ]] ||
         jq -e 'has("site")' "${specFile}" >/dev/null; then
         dockerSiteStateValidate "${specFile}" "${candidate}" || {
@@ -2785,6 +2854,9 @@ dockerBackupConfiguration() {
     if [[ -e "${root}/data/static" || -L "${root}/data/static" ]]; then
         dockerSiteTreeValidate "${root}/data/static" || return 1
     fi
+    if [[ -e "${root}/data/acme-webroot" || -L "${root}/data/acme-webroot" ]]; then
+        dockerAcmeWebrootTreeValidate "${root}" "${root}/data/acme-webroot" || return 1
+    fi
     if [[ -e "${root}/config/spec.json" || -L "${root}/config/spec.json" ]]; then
         dockerTrafficSafePath "${root}" "${root}/config/spec.json" || return 1
         if jq -e 'has("control")' "${root}/config/spec.json" >/dev/null; then
@@ -2933,6 +3005,10 @@ dockerCreateUpdateCandidate() {
             dockerControlStateCheck "${candidate}" || return 1
         dockerControlPrepareCandidate "${candidate}/config/spec.json" "${candidate}" \
             "${root}/config/spec.json" || return 1
+        if jq -e '.tls.http01 == true' "${candidate}/config/spec.json" >/dev/null; then
+            dockerAcmeWebrootTreeValidate "${root}" "${root}/data/acme-webroot" &&
+                mkdir -p -- "${candidate}/data/acme-webroot" || return 1
+        fi
     fi
     if [[ -e "${root}/config/share-groups.json" || -L "${root}/config/share-groups.json" ]]; then
         dockerSubscriptionReadState >"${candidate}/config/share-groups.json" || return 1
@@ -2951,7 +3027,7 @@ dockerValidateUpdateCandidate() {
             dockerControlStateCheck "${candidate}" || return 1
     fi
     if [[ -f "${candidate}/config/spec.json" ]] &&
-        jq -e '.reality_stream != null' "${candidate}/config/spec.json" >/dev/null; then
+        jq -e '.reality_stream != null or .tls.http01 == true' "${candidate}/config/spec.json" >/dev/null; then
         dockerBundleSupportsSpec "${DOCKER_STAGED_BUNDLE_PATH}" "${candidate}/config/spec.json" &&
             dockerValidateCandidate "${candidate}/config/spec.json" "${candidate}"
         return $?
@@ -2996,6 +3072,11 @@ dockerInstallCandidate() {
     local candidate=$1 backup=$2 root relative source target
     root=$(dockerInstallRoot) || return 1
     dockerRealityStreamDeploymentCheck "${candidate}/config/spec.json" "${root}/config/spec.json" || return 1
+    if [[ -f "${candidate}/config/spec.json" ]] &&
+        jq -e '.tls.http01 == true' "${candidate}/config/spec.json" >/dev/null; then
+        # 挑战根独立于配置事务，不能移动候选空目录或替换在线 inode。
+        dockerAcmeWebrootEnsure "${root}" || return 1
+    fi
     DOCKER_CONFIG_SWITCHED=1
     if [[ -f "${candidate}/business-traffic.json" ]]; then
         dockerTrafficWriteState <"${candidate}/business-traffic.json" || return 1
@@ -3027,6 +3108,9 @@ dockerInstallCandidate() {
 dockerEnsureRuntimeDataPermissions() {
     local root directory privateFile
     root=$(dockerInstallRoot) || return 1
+    if jq -e '.tls.http01 == true' "${root}/config/spec.json" >/dev/null 2>&1; then
+        dockerAcmeWebrootEnsure "${root}" || return 1
+    fi
     for directory in \
         data/xray data/sing-box data/static data/acme \
         data/net/wireguard data/net/fail2ban data/net/transparent \
@@ -3084,6 +3168,9 @@ dockerRestoreConfiguration() {
     if [[ -e "${backup}/deployment.json" || -L "${backup}/deployment.json" ]] ||
         grep -qxF deployment.json "${backup}/present"; then
         dockerValidateConfigurationBackup "${backup}" || return 1
+    fi
+    if jq -e '.tls.http01 == true' "${backup}/config/spec.json" >/dev/null 2>&1; then
+        dockerAcmeWebrootEnsure "${root}" || return 1
     fi
     dockerControlRestorePrepare "${backup}" || return 1
     # 当前配置可能只安装了一部分，恢复授权只取自已验证的备份。
@@ -3288,6 +3375,7 @@ dockerConfigureApply() {
     case "${mode}" in configure|preview|interactive|confirmed) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
     dockerControlRecoveryCheck || return "${PADM_DOCKER_RC_STATE}"
     dockerConfigureSpecValidate "${sourceSpec}" || return "${PADM_DOCKER_RC_STATE}"
+    dockerAcmeWebrootTransitionValidate "${sourceSpec}" || return "${PADM_DOCKER_RC_CONFLICT}"
     dockerControlSyncTransitionValidate "${sourceSpec}" || return "${PADM_DOCKER_RC_CONFLICT}"
     dockerControlTransitionValidate "${sourceSpec}" || return "${PADM_DOCKER_RC_CONFLICT}"
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
@@ -3417,6 +3505,7 @@ dockerConfigureCommand() {
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
     dockerLockInstalledDeployment || return $?
     dockerConfigureSpecValidate "${specFile}" || return "${PADM_DOCKER_RC_STATE}"
+    dockerAcmeWebrootTransitionValidate "${specFile}" || return "${PADM_DOCKER_RC_CONFLICT}"
     dockerConfigureReleasePrepare "${manifest}" "${bundle}" "${controlBundle}" || return $?
     dockerConfigureReleaseValidate "${specFile}" || return "${PADM_DOCKER_RC_MANIFEST}"
     dockerConfigureApply "${specFile}"
@@ -3498,7 +3587,8 @@ dockerCreateTlsCandidate() {
 
 dockerCleanupTlsCandidate() {
     local root candidate=${DOCKER_TLS_CANDIDATE:-}
-    [[ "${#DOCKER_ACME_STOPPED[@]}" == 0 && -z "${DOCKER_ACME_CONTAINER:-}" ]] || {
+    [[ "${#DOCKER_ACME_STOPPED[@]}" == 0 && -z "${DOCKER_ACME_CONTAINER:-}" &&
+        -z "${DOCKER_ACME_WEBROOT:-}" ]] || {
         dockerError 'ACME 服务尚未恢复，保留候选账户以便重试'
         return 1
     }
@@ -3643,7 +3733,7 @@ dockerTlsConsumers() {
                 <(dockerGenerateRealityStreamMain "${specFile}" /dev/stdout) &&
             cmp -s -- "${root}/config/nginx/stream/reality.conf" \
                 <(dockerGenerateRealityStreamConfig "${specFile}" /dev/stdout) &&
-            jq -e --slurpfile expected <(dockerGenerateCompose "${specFile}" /dev/stdout) '
+            jq -e --slurpfile expected <(dockerGenerateCompose "${specFile}" /dev/stdout "${root}") '
               def stream: .services["nginx-stream"] | .labels |= del(."io.padm.release");
               stream == ($expected[0] | stream) and
               .services.xray.ports == $expected[0].services.xray.ports and
@@ -3675,7 +3765,7 @@ dockerTlsConsumers() {
                     <(dockerGenerateRealityStreamConfig "${specFile}" /dev/stdout) &&
                 cmp -s -- "${root}/config/nginx/default.conf" \
                     <(dockerGenerateNginxConfig "${specFile}" /dev/stdout) &&
-                jq -e --slurpfile expected <(dockerGenerateCompose "${specFile}" /dev/stdout) '
+                jq -e --slurpfile expected <(dockerGenerateCompose "${specFile}" /dev/stdout "${root}") '
                   (.services.nginx.volumes | sort_by(.target)) ==
                     ($expected[0].services.nginx.volumes | sort_by(.target)) and
                   .services.nginx.extra_hosts == $expected[0].services.nginx.extra_hosts and
@@ -3715,11 +3805,9 @@ dockerTlsConsumers() {
             # 明文 fallback 只接受受管生成结果和固定挂载，拒绝配置漂移及主配置覆盖。
             cmp -s -- "${root}/config/nginx/default.conf" \
                 <(dockerGenerateNginxConfig "${specFile}" /dev/stdout) &&
-                jq -e '(.services.nginx.volumes | sort_by(.target)) == ([
-                  {type:"bind",source:"${PADM_DOCKER_ROOT}/config/nginx",target:"/etc/nginx/http.d",read_only:true},
-                  {type:"bind",source:"${PADM_DOCKER_ROOT}/data/static",target:"/srv/padm",read_only:true},
-                  {type:"bind",source:"${PADM_DOCKER_ROOT}/logs/nginx",target:"/var/log/nginx",read_only:false}
-                ] | sort_by(.target))' \
+                jq -e --slurpfile expected <(dockerGenerateCompose "${specFile}" /dev/stdout "${root}") '
+                  (.services.nginx.volumes | sort_by(.target)) ==
+                    ($expected[0].services.nginx.volumes | sort_by(.target))' \
                     "${root}/compose.json" >/dev/null || return 1
         fi
     fi
@@ -4016,6 +4104,93 @@ dockerTlsInstallCommand() {
     dockerCleanupTlsCandidate || return "${PADM_DOCKER_RC_STATE}"
 }
 
+dockerAcmeWebrootParentValidate() {
+    local root=$1 directory=$2 cursor mode
+    [[ "${directory}" == "${root}/data/acme-webroot" ]] &&
+        dockerTrafficSafePath "${root}" "${directory}" || return 1
+    cursor=${directory%/*}
+    while [[ -n "${cursor}" ]]; do
+        [[ -d "${cursor}" && ! -L "${cursor}" ]] || return 1
+        [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == 1 || "$(stat -c %u -- "${cursor}")" == 0 ]] || return 1
+        mode=$(stat -c %a -- "${cursor}") || return 1
+        # root 所有的 sticky 临时目录保护下级归属，部署目录仍禁止外部写入。
+        (( (8#${mode} & 022) == 0 || (8#${mode} & 01000) != 0 )) || return 1
+        [[ "${cursor}" != / ]] || break
+        cursor=${cursor%/*}
+        [[ -n "${cursor}" ]] || cursor=/
+    done
+}
+
+dockerAcmeWebrootTreeValidate() {
+    local root=$1 directory=$2 empty=${3:-false} entry relative owner mode value
+    dockerAcmeWebrootParentValidate "${root}" "${directory}" &&
+        [[ -d "${directory}" ]] || return 1
+    [[ -z "$(find "${directory}" ! -type d ! -type f -print -quit)" ]] || return 1
+    if [[ "${empty}" == true ]]; then
+        [[ -z "$(find "${directory}" -mindepth 1 -print -quit)" ]] || return 1
+    fi
+    while IFS= read -r -d '' entry; do
+        relative=${entry#"${directory}"}
+        owner=$(stat -c %u:%g -- "${entry}") &&
+            mode=$(stat -c %a -- "${entry}") || return 1
+        [[ "${owner}" == "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" ||
+            "${PADM_DOCKER_SKIP_CHOWN:-0}" == 1 ]] || return 1
+        (( (8#${mode} & 022) == 0 )) || return 1
+        if [[ -d "${entry}" ]]; then
+            case "${relative}" in ''|/active|/active/.well-known|/active/.well-known/acme-challenge) ;; *) return 1 ;; esac
+        else
+            [[ "${relative}" =~ ^/active/\.well-known/acme-challenge/[A-Za-z0-9_-]{1,128}$ &&
+                "$(stat -c %h -- "${entry}")" == 1 &&
+                "$(stat -c %s -- "${entry}")" -le 512 ]] || return 1
+            value=$(<"${entry}")
+            [[ "${value}" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]] || return 1
+            # 原始字节只允许 key authorization 和最多一个换行，不能接受 Bash 丢弃的 NUL。
+            { cmp -s -- "${entry}" <(printf '%s' "${value}") ||
+                cmp -s -- "${entry}" <(printf '%s\n' "${value}"); } || return 1
+        fi
+    done < <(find "${directory}" -print0)
+}
+
+dockerAcmeWebrootEnsure() {
+    local root=$1 directory="${1}/data/acme-webroot" intTrap termTrap pending=0 status=1
+    dockerAcmeWebrootParentValidate "${root}" "${directory}" || return 1
+    if [[ ! -e "${directory}" && ! -L "${directory}" ]]; then
+        # 首次根目录也须完成权限初始化后才处理信号，不能遗留不可接管的半成品。
+        intTrap=$(trap -p INT)
+        termTrap=$(trap -p TERM)
+        trap 'pending=130' INT
+        trap 'pending=143' TERM
+        if mkdir -- "${directory}" && chmod 0750 "${directory}" &&
+            { [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == 1 ]] ||
+                chown "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" "${directory}"; }; then
+            status=0
+        fi
+        if [[ -n "${intTrap}" ]]; then eval "${intTrap}"; else trap - INT; fi
+        if [[ -n "${termTrap}" ]]; then eval "${termTrap}"; else trap - TERM; fi
+        if [[ "${pending}" != 0 ]]; then
+            if [[ "${pending}" == 130 ]]; then kill -INT "${BASHPID}"; else kill -TERM "${BASHPID}"; fi
+            return 1
+        fi
+        [[ "${status}" == 0 ]] || return 1
+    fi
+    dockerAcmeWebrootTreeValidate "${root}" "${directory}"
+}
+
+dockerAcmeWebrootCleanup() {
+    local root directory=${DOCKER_ACME_WEBROOT:-}
+    [[ -n "${directory}" ]] || return 0
+    root=$(dockerInstallRoot) || return 1
+    [[ "${directory}" == "${root}/data/acme-webroot/active" &&
+        "$(stat -c %d:%i -- "${directory}")" == "${DOCKER_ACME_WEBROOT_INODE}" ]] &&
+        dockerAcmeWebrootTreeValidate "${root}" "${root}/data/acme-webroot" &&
+        dockerRemoveManagedTree "${root}" "${directory}" || {
+        dockerError '本次 ACME webroot 清理失败，保留候选与挑战目录'
+        return 1
+    }
+    DOCKER_ACME_WEBROOT=
+    DOCKER_ACME_WEBROOT_INODE=
+}
+
 dockerAcmeChallengeRestore() {
     local id ids failed=0
     local -a pending=()
@@ -4034,6 +4209,7 @@ dockerAcmeChallengeRestore() {
     fi
     # 挑战容器仍占端口时不能启动原服务，也不能丢弃恢复记录。
     [[ "${failed}" == 0 ]] || return 1
+    dockerAcmeWebrootCleanup || return 1
     for id in "${DOCKER_ACME_STOPPED[@]}"; do
         if ! docker start "${id}" >/dev/null ||
             ! docker container inspect "${id}" | jq -e '
@@ -4123,26 +4299,22 @@ dockerAcmeHostPortOwned() {
     done <<<"${listeners}"
 }
 
-dockerAcmeChallengePrepare() {
-    local provider=$1 candidate=$2 root owners container service image
-    [[ "${provider}" == standalone ]] || return 0
-    [[ "${#DOCKER_ACME_STOPPED[@]}" == 0 && "${DOCKER_ACME_PORT_PUBLISH}" == 0 ]] || return 1
+dockerAcmeOwnersValidate() {
+    local owners=$1 root container service image
     root=$(dockerInstallRoot) || return 1
-    dockerTrafficSafePath "${root}" "${candidate}" &&
-        [[ -d "${candidate}" && ! -L "${candidate}" ]] || return 1
-    owners=$(dockerAcmePortOwners) || return 1
+    dockerTrafficSafePath "${root}" "${root}/config/spec.json" &&
+        dockerTrafficSafePath "${root}" "${root}/compose.json" &&
+        dockerTrafficSafePath "${root}" "${root}/deployment.json" &&
+        dockerConfigureSpecValidate "${root}/config/spec.json" &&
+        dockerManagedSpecMatchesDeployment "${root}/config/spec.json" \
+            "${root}/deployment.json" "${root}/images.env" &&
+        cmp -s -- "${root}/compose.json" \
+            <(dockerGenerateCompose "${root}/config/spec.json" /dev/stdout "${root}") || return 1
     while IFS= read -r container; do
         [[ -n "${container}" ]] || continue
         container="[${container}]"
-        jq -e 'length == 1 and .[0].State.Running == true' <<<"${container}" >/dev/null || return 1
-        dockerTrafficSafePath "${root}" "${root}/config/spec.json" &&
-            dockerTrafficSafePath "${root}" "${root}/compose.json" &&
-            dockerTrafficSafePath "${root}" "${root}/deployment.json" &&
-            dockerConfigureSpecValidate "${root}/config/spec.json" &&
-            dockerManagedSpecMatchesDeployment "${root}/config/spec.json" \
-                "${root}/deployment.json" "${root}/images.env" &&
-            cmp -s -- "${root}/compose.json" \
-                <(dockerGenerateCompose "${root}/config/spec.json" /dev/stdout) || return 1
+        jq -e 'length == 1 and .[0].State.Running == true and .[0].State.Restarting != true' \
+            <<<"${container}" >/dev/null || return 1
         service=$(jq -er '.[0].Config.Labels["com.docker.compose.service"]' <<<"${container}") || return 1
         case "${service}" in xray|sing-box|nginx) ;; *) return 1 ;; esac
         image=$(jq -er --arg service "${service}" '.images[$service]' "${root}/config/spec.json") || return 1
@@ -4155,12 +4327,15 @@ dockerAcmeChallengePrepare() {
           $labels["io.padm.mode"] == "docker" and $labels["io.padm.project"] == "padm-docker" and
           $labels["io.padm.component"] == $service and $c.Config.Image == $image and
           $c.HostConfig.NetworkMode != "host" and
+          all($c.Mounts[]; .Type == "bind") and
+          (($c.HostConfig.Tmpfs // {}) | keys | sort) ==
+            ([$compose[0].services[$service].tmpfs[]? | split(":")[0]] | sort) and
           any($deployment[0].listeners[]; .service == $service and .public_port == 80 and .transport == "tcp") and
-          all($c.HostConfig.PortBindings | to_entries[]; . as $binding |
-            all($binding.value[]; . as $host |
-              any($compose[0].services[$service].ports[];
-                . == ((if ($host.HostIp | contains(":")) then "[" + $host.HostIp + "]"
-                  else ($host.HostIp // "0.0.0.0") end) + ":80:" + $binding.key)) or $host.HostPort != "80")) and
+          ([$c.HostConfig.PortBindings | to_entries[] | . as $binding | .value[] |
+            ((if (.HostIp | contains(":")) then "[" + .HostIp + "]"
+              else (if .HostIp == "" then "0.0.0.0" else .HostIp // "0.0.0.0" end) end) +
+              ":" + .HostPort + ":" + $binding.key)] | sort) ==
+            ($compose[0].services[$service].ports | sort) and
           ($c.Mounts | map(select(.Type == "bind") | {source:.Source,target:.Destination,read_only:(.RW | not)}) |
             sort_by(.target)) ==
           ($compose[0].services[$service].volumes |
@@ -4174,6 +4349,87 @@ dockerAcmeChallengePrepare() {
         dockerError '宿主 80 端口存在外部或无法归属的监听，未停止任何服务'
         return 1
     }
+}
+
+dockerAcmeWebrootDeploymentCheck() {
+    local domain=$1 root owners
+    root=$(dockerInstallRoot) || return 1
+    dockerTrafficSafePath "${root}" "${root}/config/spec.json" &&
+        [[ -f "${root}/config/spec.json" ]] &&
+        jq -e --arg domain "${domain}" '.tls.http01 == true and .tls.domain == $domain' \
+            "${root}/config/spec.json" >/dev/null || {
+        dockerError 'webroot 需要先显式启用该域名的受管 HTTP 挑战入口'
+        return 1
+    }
+    dockerAcmeWebrootTreeValidate "${root}" "${root}/data/acme-webroot" &&
+        dockerTrafficSafePath "${root}" "${root}/config/nginx/default.conf" &&
+        [[ -f "${root}/config/nginx/default.conf" &&
+            -z "$(find "${root}/config/nginx" ! -type f ! -type d -print -quit)" ]] &&
+        cmp -s -- "${root}/config/nginx/default.conf" \
+            <(dockerGenerateNginxConfig "${root}/config/spec.json" /dev/stdout) || return 1
+    owners=$(dockerAcmePortOwners) || return 1
+    jq -e 'length == 1 and .[0].Config.Labels["com.docker.compose.service"] == "nginx"' \
+        <<<"${owners}" >/dev/null && dockerAcmeOwnersValidate "${owners}" || {
+        dockerError 'webroot 需要正在运行且归属、挂载和双栈端口均一致的受管 Nginx'
+        return 1
+    }
+}
+
+dockerAcmeWebrootPrepare() {
+    local domain=$1 candidate=$2 root directory intTrap termTrap pending=0 status=1
+    root=$(dockerInstallRoot) || return 1
+    directory="${root}/data/acme-webroot"
+    [[ -z "${DOCKER_ACME_WEBROOT}" && -z "${DOCKER_ACME_CONTAINER}" ]] &&
+        dockerTrafficSafePath "${root}" "${candidate}" && [[ -d "${candidate}" ]] &&
+        dockerAcmeWebrootDeploymentCheck "${domain}" &&
+        dockerAcmeWebrootTreeValidate "${root}" "${directory}" true || {
+        dockerError 'ACME webroot 未就绪或已有未完成挑战，本次未修改服务'
+        return 1
+    }
+    # 初始化完成后才处理信号，清理必须看到本次 inode 和可验证的归属。
+    intTrap=$(trap -p INT)
+    termTrap=$(trap -p TERM)
+    trap 'pending=130' INT
+    trap 'pending=143' TERM
+    if mkdir -- "${directory}/active"; then
+        DOCKER_ACME_WEBROOT="${directory}/active"
+        if DOCKER_ACME_WEBROOT_INODE=$(stat -c %d:%i -- "${DOCKER_ACME_WEBROOT}") &&
+            chmod 0750 "${DOCKER_ACME_WEBROOT}" &&
+            mkdir -p -- "${DOCKER_ACME_WEBROOT}/.well-known/acme-challenge" &&
+            find "${DOCKER_ACME_WEBROOT}" -type d -exec chmod 0750 {} + &&
+            { [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == 1 ]] ||
+                chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" "${DOCKER_ACME_WEBROOT}"; } &&
+            dockerAcmeWebrootTreeValidate "${root}" "${directory}"; then
+            status=0
+        fi
+    fi
+    if [[ -n "${intTrap}" ]]; then eval "${intTrap}"; else trap - INT; fi
+    if [[ -n "${termTrap}" ]]; then eval "${termTrap}"; else trap - TERM; fi
+    if [[ "${pending}" != 0 ]]; then
+        if [[ "${pending}" == 130 ]]; then kill -INT "${BASHPID}"; else kill -TERM "${BASHPID}"; fi
+        return 1
+    fi
+    return "${status}"
+}
+
+dockerAcmeChallengePrepare() {
+    local provider=$1 candidate=$2 root owners
+    if [[ "${provider}" == webroot ]]; then
+        dockerAcmeWebrootPrepare "${3}" "${candidate}"
+        return $?
+    fi
+    [[ "${provider}" == standalone ]] || return 0
+    [[ "${#DOCKER_ACME_STOPPED[@]}" == 0 && "${DOCKER_ACME_PORT_PUBLISH}" == 0 ]] || return 1
+    root=$(dockerInstallRoot) || return 1
+    dockerTrafficSafePath "${root}" "${candidate}" &&
+        [[ -d "${candidate}" && ! -L "${candidate}" ]] || return 1
+    owners=$(dockerAcmePortOwners) || return 1
+    # 首次 standalone 没有部署，只有发现拥有者时才要求受管配置证明。
+    if [[ "${owners}" != '[]' ]]; then
+        dockerAcmeOwnersValidate "${owners}" || return 1
+    else
+        dockerAcmeHostPortOwned "${owners}" || return 1
+    fi
     if [[ "$(jq 'length' <<<"${owners}")" != 0 ]]; then
         printf 'HTTP-01 临时暂停 80 端口服务: %s；同容器其它端口也会短暂停机。\n' \
             "$(jq -r 'map(.Config.Labels["com.docker.compose.service"]) | unique | join(",")' <<<"${owners}")"
@@ -4231,7 +4487,7 @@ dockerAcmeRenewProbe() {
 dockerAcmeRun() {
     local image=$1 credentials=$2 acmeData=$3 output=$4
     local status input=/dev/null
-    local -a ports=() containerArgs=()
+    local -a ports=() containerArgs=() webrootMount=()
     shift 4
     if [[ -n "${credentials}" ]]; then
         dockerRenewalCredentialsValidate "${credentials}" || return 1
@@ -4239,6 +4495,11 @@ dockerAcmeRun() {
     fi
     if [[ "${DOCKER_ACME_PORT_PUBLISH}" == 1 ]]; then
         ports=(--publish 0.0.0.0:80:8080/tcp --publish '[::]:80:8080/tcp')
+    fi
+    if [[ -n "${DOCKER_ACME_WEBROOT}" ]]; then
+        webrootMount=(--volume "${DOCKER_ACME_WEBROOT}:/var/lib/padm/acme-webroot")
+    fi
+    if [[ "${DOCKER_ACME_PORT_PUBLISH}" == 1 || -n "${DOCKER_ACME_WEBROOT}" ]]; then
         DOCKER_ACME_CONTAINER="padm-acme-${BASHPID:-$$}-${RANDOM}"
         containerArgs=(--name "${DOCKER_ACME_CONTAINER}" --label "io.padm.challenge=${DOCKER_ACME_CONTAINER}")
     fi
@@ -4247,6 +4508,7 @@ dockerAcmeRun() {
         --label io.padm.mode=docker --label io.padm.project="${PADM_DOCKER_PROJECT}" \
         --volume "${acmeData}:/var/lib/padm/acme" \
         --volume "${output}:/var/lib/padm/tls-output" \
+        "${webrootMount[@]}" \
         --entrypoint python3 "${image}" -c '
 import os
 import re
@@ -4283,6 +4545,7 @@ dockerAcmeCommand() {
         --email) [[ "$#" -ge 2 ]] || return "${PADM_DOCKER_RC_USAGE}"; email=$2; shift 2 ;;
         --dns) [[ "$#" -ge 2 && -z "${provider}" && "$2" =~ ^dns_[a-z0-9_]+$ ]] || return "${PADM_DOCKER_RC_USAGE}"; provider=$2; shift 2 ;;
         --standalone) [[ -z "${provider}" ]] || return "${PADM_DOCKER_RC_USAGE}"; provider=standalone; shift ;;
+        --webroot) [[ -z "${provider}" ]] || return "${PADM_DOCKER_RC_USAGE}"; provider=webroot; shift ;;
         --credentials) [[ "$#" -ge 2 ]] || return "${PADM_DOCKER_RC_USAGE}"; credentials=$2; shift 2 ;;
         --ops-image) [[ "$#" -ge 2 ]] || return "${PADM_DOCKER_RC_USAGE}"; requestedImage=$2; shift 2 ;;
         *) return "${PADM_DOCKER_RC_USAGE}" ;;
@@ -4290,11 +4553,11 @@ dockerAcmeCommand() {
     done
     dockerDomainIsValid "${domain}" && dockerEmailIsValid "${email}" &&
         { [[ "${provider}" =~ ^dns_[a-z0-9_]+$ && -n "${credentials}" ]] ||
-            [[ "${provider}" == standalone && -z "${credentials}" ]]; } || {
-        dockerError 'acme 需要合法 domain/email 与互斥的 --dns/--credentials 或 --standalone'
+            [[ ( "${provider}" == standalone || "${provider}" == webroot ) && -z "${credentials}" ]]; } || {
+        dockerError 'acme 需要合法 domain/email 与互斥的 --dns/--credentials、--standalone 或 --webroot'
         return "${PADM_DOCKER_RC_USAGE}"
     }
-    if [[ "${provider}" != standalone ]]; then
+    if [[ "${provider}" =~ ^dns_ ]]; then
         credentials=$(dockerResolveRegularFile "${credentials}") || return "${PADM_DOCKER_RC_USAGE}"
         dockerRenewalCredentialsValidate "${credentials}" || {
             dockerError 'DNS 凭据必须为仅持有者读取的 NAME=value 文件，不得改写工具运行环境'
@@ -4347,9 +4610,13 @@ dockerAcmeApply() {
         chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" "${candidate}/acme" ||
             return "${PADM_DOCKER_RC_STATE}"
     fi
-    if [[ "${provider}" == standalone ]]; then
+    if [[ "${provider}" == standalone || "${provider}" == webroot ]]; then
         dockerAcmeRuntimeSnapshot "${domain}" || return "${PADM_DOCKER_RC_STATE}"
-        challengeArgs=(--standalone --httpport 8080)
+        if [[ "${provider}" == standalone ]]; then
+            challengeArgs=(--standalone --httpport 8080)
+        else
+            challengeArgs=(--webroot /var/lib/padm/acme-webroot)
+        fi
         if [[ "${action}" == renew ]]; then
             dockerRenewalAccountCheck "${root}" "${domain}" "${provider}" || return "${PADM_DOCKER_RC_STATE}"
             if dockerAcmeRenewProbe "${image}" "${credentials}" "${candidate}/acme" "${candidate}" \
@@ -4362,7 +4629,7 @@ dockerAcmeApply() {
             fi
         fi
     fi
-    dockerAcmeChallengePrepare "${provider}" "${candidate}" || return "${PADM_DOCKER_RC_STATE}"
+    dockerAcmeChallengePrepare "${provider}" "${candidate}" "${domain}" || return "${PADM_DOCKER_RC_STATE}"
     if [[ "${action}" == "issue" ]]; then
         dockerAcmeRun "${image}" "${credentials}" "${candidate}/acme" "${candidate}" \
             --issue "${challengeArgs[@]}" "${issueKeyArgs[@]}" -d "${domain}" --accountemail "${email}" >/dev/null 2>&1 || {

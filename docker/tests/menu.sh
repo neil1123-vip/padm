@@ -767,6 +767,12 @@ dockerTlsValidateCommand() { recordAction validate "$@"; }
 dockerTlsInstallCommand() { recordAction install "$@"; }
 dockerAcmeCommand() { recordAction acme "$@"; }
 dockerRenewalCommand() { recordAction schedule "$@"; }
+dockerEditCommand() {
+    printf 'fixture-http01-confirm [y/N]: '
+    IFS= read -r confirmation || return 0
+    [[ "${confirmation}" == y ]] || return 0
+    recordAction edit "$@"
+}
 PADM_DOCKER_RC_STATE=15
 PADM_DOCKER_RC_USAGE=2
 case "${1:-}" in
@@ -1003,8 +1009,11 @@ unset GEO_STATUS GEO_UPDATE_STATUS GEO_UPDATE_WAIT GEO_UPDATE_PID
 for tlsCase in cancel final-no eof validate install issue renew \
     renewal-status renewal-enable renewal-disable renewal-final-no renewal-eof \
     standalone-issue standalone-renew standalone-enable standalone-final-no \
-    standalone-renew-final-no standalone-enable-final-no standalone-eof method-cancel method-eof; do
+    standalone-renew-final-no standalone-enable-final-no standalone-eof method-cancel method-eof \
+    webroot-issue webroot-renew webroot-enable webroot-final-no webroot-disabled webroot-other-domain \
+    http01-enable http01-disable http01-enable-cancel http01-disable-cancel; do
     : >"${TLS_WIZARD_ACTIONS}"
+    printf '{"tls":{"domain":"ws.example.com","http01":true}}\n' >"${TLS_WIZARD_ROOT}/config/spec.json"
     expectedAction=
     case "${tlsCase}" in
     cancel) input=$'0\n' ;;
@@ -1049,6 +1058,34 @@ for tlsCase in cancel final-no eof validate install issue renew \
     standalone-eof) input=standalone-eof ;;
     method-cancel) input=$'3\n\nadmin@example.com\n0\n' ;;
     method-eof) input=method-eof ;;
+    webroot-issue|webroot-renew|webroot-enable|webroot-final-no)
+        choice=3 action=issue answer=y
+        case "${tlsCase}" in
+        webroot-renew) choice=4 action=renew ;;
+        webroot-enable) choice=6 action=enable ;;
+        webroot-final-no) answer=n ;;
+        esac
+        printf -v input '%s\n\nadmin@example.com\n3\n%s\n' "${choice}" "${answer}"
+        if [[ "${answer}" == y ]]; then
+            if [[ "${choice}" == 6 ]]; then
+                expectedAction='schedule enable --domain ws.example.com --email admin@example.com --webroot'
+            else
+                expectedAction="acme ${action} --domain ws.example.com --email admin@example.com --webroot"
+            fi
+        fi
+        ;;
+    webroot-disabled)
+        printf '{"tls":{"domain":"ws.example.com"}}\n' >"${TLS_WIZARD_ROOT}/config/spec.json"
+        input=$'3\n\nadmin@example.com\n3\n'
+        ;;
+    webroot-other-domain) input=$'3\nother.example.com\nadmin@example.com\n3\n' ;;
+    http01-enable|http01-disable|http01-enable-cancel|http01-disable-cancel)
+        choice=8 action=enable answer=y
+        [[ "${tlsCase}" != http01-disable* ]] || { choice=9; action=disable; }
+        [[ "${tlsCase}" != *cancel ]] || answer=n
+        printf -v input '%s\n%s\n' "${choice}" "${answer}"
+        [[ "${answer}" != y ]] || expectedAction="edit --http01 ${action}"
+        ;;
     esac
     runPty "tls-${tlsCase}" tls "${input}" "${TLS_WIZARD_CLI}" menu
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedAction}" ]] ||
@@ -1060,6 +1097,16 @@ for tlsCase in cancel final-no eof validate install issue renew \
             fail 'standalone 操作没有恰好确认一次'
         ! grep -Eq 'DNS provider|DNS 凭据文件' "${CONTROL_LOG}" ||
             fail 'standalone 仍要求 DNS 凭据'
+    fi
+    if [[ "${tlsCase}" == webroot-* ]]; then
+        ! grep -Eq 'DNS provider|DNS 凭据文件' "${CONTROL_LOG}" || fail 'webroot 仍要求 DNS 凭据'
+        if [[ "${tlsCase}" == webroot-disabled || "${tlsCase}" == webroot-other-domain ]]; then
+            grep -Fq '请先显式启用 Nginx HTTP-01 入口' "${CONTROL_LOG}" ||
+                fail 'webroot 未拒绝未启用入口或其它 TLS 域名'
+        else
+            grep -Fq '不暂停 Nginx 或其它 TLS 消费者' "${CONTROL_LOG}" ||
+                fail 'webroot 确认前没有说明不停服'
+        fi
     fi
 done
 

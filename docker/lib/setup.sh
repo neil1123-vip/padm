@@ -375,9 +375,16 @@ dockerTlsManageCommand() {
     }
     printf '\nDocker 证书管理\n当前 TLS 域名: %s\n' "${currentDomain}"
     printf '%s\n' '1. 查看/校验受管证书' '2. 导入证书轮换' '3. ACME 申请' '4. ACME 续期' \
-        '5. 自动续期状态' '6. 启用自动续期' '7. 停用自动续期' '0. 返回'
+        '5. 自动续期状态' '6. 启用自动续期' '7. 停用自动续期' \
+        '8. 启用 Nginx HTTP-01 入口' '9. 关闭 Nginx HTTP-01 入口' '0. 返回'
     dockerSetupRead choice '证书操作: ' || return 0
-    [[ "${choice}" =~ ^[1-7]$ ]] || return "${PADM_DOCKER_RC_USAGE}"
+    [[ "${choice}" =~ ^[1-9]$ ]] || return "${PADM_DOCKER_RC_USAGE}"
+    if [[ "${choice}" == 8 || "${choice}" == 9 ]]; then
+        if [[ "${choice}" == 8 ]]; then action=enable; else action=disable; fi
+        printf 'HTTP-01 入口只服务当前 TLS 域名 %s 的 ACME 验证；启用后持久监听公网 80，关闭后不再提供 webroot 验证。\n' "${currentDomain}"
+        dockerEditCommand --http01 "${action}"
+        return $?
+    fi
     dockerSetupRead domain "证书域名 [${currentDomain}]（0 取消）: " "${currentDomain}" || return 0
     dockerDomainIsValid "${domain}" || return "${PADM_DOCKER_RC_USAGE}"
     case "${choice}" in
@@ -396,7 +403,7 @@ dockerTlsManageCommand() {
         esac
         dockerSetupRead email 'ACME 邮箱（0 取消）: ' || return 0
         dockerEmailIsValid "${email}" || return "${PADM_DOCKER_RC_USAGE}"
-        dockerSetupRead method '验证方式 [1=DNS-01, 2=HTTP-01 standalone，默认 1，0 取消]: ' 1 || return 0
+        dockerSetupRead method '验证方式 [1=DNS-01, 2=HTTP-01 standalone, 3=HTTP-01 webroot，默认 1，0 取消]: ' 1 || return 0
         case "${method}" in
         1)
             dockerSetupRead provider 'DNS provider（dns_*，0 取消）: ' || return 0
@@ -409,6 +416,16 @@ dockerTlsManageCommand() {
             provider=standalone
             challengeArgs=(--standalone)
             printf 'HTTP-01 需要公网 80 可达；验证期间可能暂停本部署的 80 端口服务，并影响该容器内 HTTPS；不会停止无关 443 服务。\n'
+            ;;
+        3)
+            [[ "${domain}" == "${currentDomain}" ]] &&
+                jq -e '.tls.http01 == true' "${root}/config/spec.json" >/dev/null || {
+                dockerError 'webroot 只支持当前 TLS 域名；请先显式启用 Nginx HTTP-01 入口'
+                return "${PADM_DOCKER_RC_STATE}"
+            }
+            provider=webroot
+            challengeArgs=(--webroot)
+            printf 'HTTP-01 webroot 使用已启用的公网 80 入口，不暂停 Nginx 或其它 TLS 消费者。\n'
             ;;
         *) return "${PADM_DOCKER_RC_USAGE}" ;;
         esac
@@ -986,7 +1003,7 @@ dockerEditFields() {
                   else .tls = null | .subscription.enabled = false end |
                   .core.secondary_type = ([.core.protocols[] | select(.core != $primary) | .core] | first // null) |
                   if any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29)
-                  then . else del(.site) end
+                  then . else del(.site, .tls.http01) end
                 ' "${draft}" >"${temporary}" 2>/dev/null || {
                     dockerError '主核心至少保留一个入口；删除副核心的最后入口会关闭副核心'
                     return 1
@@ -1236,6 +1253,7 @@ dockerEditCommand() {
     local streamDomains= streamAddress= streamPort=8443
     local siteMode= siteSource= siteUrl=
     local alpnListener= alpnOrder=
+    local http01=
     local DOCKER_CONFIG_RESTORE_ALPN_LISTENER=
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
@@ -1263,6 +1281,11 @@ dockerEditCommand() {
             [[ -z "${siteMode}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             siteMode=default
             shift
+            ;;
+        --http01)
+            [[ "$#" -ge 2 && -z "${http01}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            case "$2" in enable|disable) http01=$2 ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+            shift 2
             ;;
         --alpn)
             [[ "$#" -ge 3 && -n "$2" && "$2" != --* && -z "${alpnListener}" ]] ||
@@ -1343,6 +1366,11 @@ dockerEditCommand() {
         dockerError 'ALPN 专项编辑不能与规格导入、站点或 Reality 专项动作组合'
         return "${PADM_DOCKER_RC_USAGE}"
     }
+    [[ -z "${http01}" || ( -z "${specFile}" && -z "${regenerateReality}" &&
+        -z "${realityTarget}" && -z "${realityStream}" && -z "${siteMode}" && -z "${alpnListener}" ) ]] || {
+        dockerError 'HTTP-01 专项编辑不能与规格导入或其它专项动作组合'
+        return "${PADM_DOCKER_RC_USAGE}"
+    }
     [[ "${mode}" != interactive || ( -t 0 && -t 1 ) ]] || {
         dockerError '非交互编辑需要 --preview 或 --confirm PADM-DOCKER-EDIT'
         return "${PADM_DOCKER_RC_USAGE}"
@@ -1353,7 +1381,7 @@ dockerEditCommand() {
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     dockerTrafficSafePath "${root}" "${root}/config/spec.json" || return "${PADM_DOCKER_RC_STATE}"
     [[ ( -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" &&
-        -z "${siteMode}" && -z "${alpnListener}" ) || -f "${root}/config/spec.json" ]] ||
+        -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" ) || -f "${root}/config/spec.json" ]] ||
         return "${PADM_DOCKER_RC_STATE}"
     if [[ ! -e "${root}/config/spec.json" && ! -L "${root}/config/spec.json" && -z "${specFile}" ]]; then
         if [[ "${mode}" == interactive ]]; then
@@ -1405,7 +1433,7 @@ dockerEditCommand() {
     # 旧规格先接入，不能同时把未经证明的字段改动当作无损导入。
     if [[ "${mode}" == interactive && -z "${specFile}" && "${imported}" -eq 0 &&
         -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" &&
-        -z "${siteMode}" && -z "${alpnListener}" ]]; then
+        -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" ]]; then
         dockerEditFields "${draft}" || status=$?
         if [[ "${status}" -eq 3 ]]; then
             printf '已取消配置编辑。\n'
@@ -1417,6 +1445,19 @@ dockerEditCommand() {
     fi
     jq -es 'length == 1 and (.[0] | type == "object")' "${draft}" >/dev/null 2>&1 ||
         return "${PADM_DOCKER_RC_STATE}"
+    if [[ -n "${http01}" ]]; then
+        jq -e 'any(.core.protocols[];
+          .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29)' \
+            "${normalized}" >/dev/null || {
+            dockerError 'HTTP-01 入口管理需要已有受管 Nginx TLS 或 fallback 入口'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        jq --arg action "${http01}" '
+          if $action == "enable" then .tls.http01 = true else del(.tls.http01) end
+        ' "${draft}" >"${draft}.next" &&
+            chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
+            return "${PADM_DOCKER_RC_STATE}"
+    fi
     if [[ -n "${alpnListener}" ]]; then
         jq --arg listener "${alpnListener}" --arg order "${alpnOrder}" '
           .core.protocols |= map(if .listener_id == $listener then
@@ -1482,7 +1523,15 @@ dockerEditCommand() {
             return "${PADM_DOCKER_RC_STATE}"
         }
     fi
+    # 删除最后一个 Nginx 入口时只清理 HTTP-01 开关，不丢掉其它 TLS 入口的域名。
+    jq --slurpfile before "${normalized}" 'if $before[0].tls.http01 == true and
+      all(.core.protocols[];
+        .id != 21 and .id != 22 and .id != 23 and .id != 24 and .id != 25 and .id != 27 and .id != 29)
+      then del(.tls.http01) else . end' "${draft}" >"${draft}.next" &&
+        chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
+        return "${PADM_DOCKER_RC_STATE}"
     dockerConfigureSpecValidate "${draft}" || return "${PADM_DOCKER_RC_STATE}"
+    dockerAcmeWebrootTransitionValidate "${draft}" || return "${PADM_DOCKER_RC_STATE}"
     if [[ -n "${regenerateReality}" ]]; then
         regenerateReality=$(jq -er --arg listener "${regenerateReality}" '
           [.core.protocols[] | select(.listener_id == $listener and (.id == 1 or .id == 2 or .id == 26))] |
@@ -1514,7 +1563,7 @@ dockerEditCommand() {
     [[ -z "${siteSource}" ]] || printf '静态站点内容将使用已校验目录更新；源路径不会写入规格。\n'
     [[ "${imported}" -eq 0 ]] || printf '完整原始规格已匹配，确认后接入受管输入。\n'
     jq -en --arg regenerate "${regenerateReality}" --arg target "${realityTarget}" --arg stream "${realityStream}" \
-        --arg site "${siteMode}" --arg alpn "${alpnListener}" \
+        --arg site "${siteMode}" --arg alpn "${alpnListener}" --arg http01 "${http01}" \
         --slurpfile before "${normalized}" --slurpfile after "${draft}" '
       def fixed: del(.server, .public_port, .address_families, .name,
         .reality.target_host, .reality.target_port, .reality.server_name, .websocket.path, .httpupgrade.path,
@@ -1534,6 +1583,10 @@ dockerEditCommand() {
       $before[0] as $old | $after[0] as $new |
       [$old.core.protocols[].listener_id] as $oldIds |
       [$new.core.protocols[].listener_id] as $newIds |
+      ($old.tls.http01 == $new.tls.http01 or
+        all($new.core.protocols[];
+          .id != 21 and .id != 22 and .id != 23 and .id != 24 and .id != 25 and .id != 27 and .id != 29) or
+        ($old | del(.tls.http01)) == ($new | del(.tls.http01))) and
       # 保留共存绑定的原端口与地址族，关闭时恢复直连不能依赖已被改写的输入。
       ($old.reality_stream == null or
         all($old.core.protocols[] |
@@ -1541,7 +1594,9 @@ dockerEditCommand() {
           . as $bound | any($new.core.protocols[];
             .listener_id == $bound.listener_id and .core == $bound.core and
             .public_port == $bound.public_port and .address_families == $bound.address_families))) and
-      (if $site != "" then
+      (if $http01 != "" then
+        ($old | del(.tls.http01)) == ($new | del(.tls.http01))
+       elif $site != "" then
         ($old | del(.site)) == ($new | del(.site))
        elif $alpn != "" then
         def without_alpn: .core.protocols |= map(if .listener_id == $alpn then
@@ -1556,7 +1611,7 @@ dockerEditCommand() {
       # 分次提交新增与删除，防止借同凭据入口绕过已有身份和内部端口冻结。
       ((($oldIds - $newIds) | length) == 0 or (($newIds - $oldIds) | length) == 0) and
       ($old | root) == ($new | root) and
-      $new.tls == (if any($new.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29 or .id == 3 or .id == 4 or .id == 5 or .id == 28 or .id == 31) then $old.tls else null end) and
+      ($new.tls | del(.http01)) == (if any($new.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29 or .id == 3 or .id == 4 or .id == 5 or .id == 28 or .id == 31) then ($old.tls | del(.http01)) else null end) and
       all($new.core.protocols[];
         . as $entry | [$old.core.protocols[] | select(.listener_id == $entry.listener_id)] as $existing |
         if ($existing | length) == 1 then ($existing[0] | fixed) == ($entry | fixed)
@@ -1584,7 +1639,7 @@ dockerEditCommand() {
         end)
        end)
     ' >/dev/null 2>&1 || {
-        dockerError '仅支持站点管理与现有入口编辑、复制、Reality 传输派生和删除；账号、密钥、已有入口身份、内部端口与核心、主核心、证书和发布不能改写'
+        dockerError '仅支持 HTTP-01/站点管理与现有入口编辑、复制、Reality 传输派生和删除；账号、密钥、已有入口身份、内部端口与核心、主核心、证书和发布不能改写'
         return "${PADM_DOCKER_RC_STATE}"
     }
     opsImage=$(dockerManifestImageReference ops) || return "${PADM_DOCKER_RC_MANIFEST}"

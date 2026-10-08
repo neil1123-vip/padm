@@ -100,7 +100,7 @@
         "properties": {
           "listener_id": {
             "type": "string",
-            "pattern": "^(?:entry-[a-z0-9][a-z0-9-]{0,47}|vless-(?:reality|ws)|host-(?:control|wireguard|tproxy-(?:tcp|udp)))$"
+            "pattern": "^(?:entry-[a-z0-9][a-z0-9-]{0,47}|vless-(?:reality|ws)|host-(?:acme-http|control|wireguard|tproxy-(?:tcp|udp)))$"
           },
           "service": {
             "type": "string",
@@ -218,6 +218,24 @@
     }
   },
   "allOf": [
+    {
+      "properties": {
+        "listeners": {
+          "items": {
+            "if": {"required": ["listener_id"], "properties": {"listener_id": {"const": "host-acme-http"}}},
+            "then": {
+              "properties": {
+                "service": {"const": "nginx"},
+                "public_port": {"const": 80},
+                "container_port": {"const": 8088},
+                "transport": {"const": "tcp"},
+                "address_families": {"const": ["ipv4", "ipv6"]}
+              }
+            }
+          }
+        }
+      }
+    },
     {
       "if": {
         "properties": {

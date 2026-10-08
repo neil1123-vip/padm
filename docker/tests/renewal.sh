@@ -119,14 +119,31 @@ dockerTlsValidateCandidate() {
 # 端口占用与服务恢复由 TLS 专项覆盖，这里只核对续期调用与恢复顺序。
 dockerAcmeRenewProbe() { return 0; }
 dockerAcmeRuntimeSnapshot() { DOCKER_ACME_RUNNING='["xray"]'; }
+dockerAcmeWebrootDeploymentCheck() {
+    jq -e --arg domain "$1" '.tls.http01 == true and .tls.domain == $domain' \
+        "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" >/dev/null
+}
 dockerAcmeChallengePrepare() {
-    [[ "$1" == standalone ]] || return 0
+    [[ "$1" == standalone || "$1" == webroot ]] || return 0
     [[ "$2" == "${PADM_DOCKER_INSTALL_DIR}/.tls."* && -d "$2/acme" &&
         -d "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]] || fail 'HTTP 续期没有候选账户或部署锁'
+    if [[ "$1" == webroot ]]; then
+        DOCKER_ACME_WEBROOT="${PADM_DOCKER_INSTALL_DIR}/data/acme-webroot/active"
+        mkdir -p -- "${DOCKER_ACME_WEBROOT}"
+        printf 'webroot-prepare\n' >>"${TEST_ROOT}/challenge.log"
+        return 0
+    fi
     CHALLENGE_PENDING=1
     printf 'prepare\n' >>"${TEST_ROOT}/challenge.log"
 }
 dockerAcmeChallengeRestore() {
+    if [[ -n "${DOCKER_ACME_WEBROOT:-}" ]]; then
+        [[ "${MODE}" != webroot-restore-fail ]] || return 1
+        rmdir -- "${DOCKER_ACME_WEBROOT}" || return 1
+        DOCKER_ACME_WEBROOT=
+        printf 'webroot-restore\n' >>"${TEST_ROOT}/challenge.log"
+        return 0
+    fi
     [[ "${CHALLENGE_PENDING}" == 1 ]] || return 0
     CHALLENGE_PENDING=0
     printf 'restore\n' >>"${TEST_ROOT}/challenge.log"
@@ -137,8 +154,13 @@ dockerAcmeRun() {
     [[ "${image}" == "${OPS_IMAGE}" && ( -f "${credentials}" || -z "${credentials}" ) &&
         "${account}" == "${PADM_DOCKER_INSTALL_DIR}/.tls."*/acme ]] || fail '续期没有使用候选账户与私有凭据'
     if [[ -z "${credentials}" && "${action}" == --renew ]]; then
-        [[ "${CHALLENGE_PENDING}" == 1 && " ${*:5} " == *' --httpport 8080 '* ]] ||
-            fail 'HTTP 续期没有准备端口或使用非 root 验证端口'
+        if [[ -n "${DOCKER_ACME_WEBROOT:-}" ]]; then
+            [[ "${CHALLENGE_PENDING}" == 0 && " ${*:5} " != *' --httpport '* &&
+                " ${*:5} " != *' --standalone '* ]] || fail 'webroot 续期暂停了服务或混入 standalone 参数'
+        else
+            [[ "${CHALLENGE_PENDING}" == 1 && " ${*:5} " == *' --httpport 8080 '* ]] ||
+                fail 'HTTP 续期没有准备端口或使用非 root 验证端口'
+        fi
     fi
     [[ -d "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]] || fail '续期未持有部署锁'
     for argument in "${@:5}"; do
@@ -190,6 +212,7 @@ newState() {
     MODE=ok
     FRAGMENT_OVERRIDE=
     CHALLENGE_PENDING=0
+    DOCKER_ACME_WEBROOT=
 }
 
 registry() { printf '%s/secrets/renewal\n' "${PADM_DOCKER_INSTALL_DIR}"; }
@@ -207,6 +230,7 @@ registryAndJobs() (
 assertClean() {
     [[ ! -e "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]] || fail '续期结束后锁未释放'
     [[ -z "$(find "${PADM_DOCKER_INSTALL_DIR}" -maxdepth 1 -name '.tls.*' -print -quit)" ]] || fail '续期候选未清理'
+    [[ ! -e "${PADM_DOCKER_INSTALL_DIR}/data/acme-webroot/active" ]] || fail 'webroot 挑战未清理'
     [[ -z "$(find "${PADM_DOCKER_INSTALL_DIR}/locks" -maxdepth 1 \( -name 'renewal.*' -o -name 'renewal-schedule.*' \) -print -quit)" ]] ||
         fail '续期输入或调度事务未清理'
 }
@@ -376,6 +400,12 @@ done
 runControl 2 acme schedule enable --domain a.example.com --email admin@example.com --standalone --dns dns_test
 runControl 2 acme schedule enable --domain a.example.com --email admin@example.com --dns dns_test --standalone
 runControl 2 acme schedule enable --domain a.example.com --email admin@example.com --standalone --credentials "${CREDENTIALS}"
+for ARGS in '--webroot --standalone' '--standalone --webroot' '--webroot --dns dns_test' \
+    '--dns dns_test --webroot' "--webroot --credentials ${CREDENTIALS}" '--webroot /outside'; do
+    read -r -a ARGS <<<"${ARGS}"
+    runControl 2 acme schedule enable --domain a.example.com --email admin@example.com "${ARGS[@]}"
+done
+runControl 2 acme schedule disable --domain a.example.com --webroot
 runControl failure acme schedule enable --domain a.example.com --email admin@example.com --dns dns_other --credentials "${CREDENTIALS}"
 mv "${PADM_DOCKER_INSTALL_DIR}/data/acme/a.example.com" "${PADM_DOCKER_INSTALL_DIR}/data/acme/saved-domain"
 runControl failure acme schedule enable --domain a.example.com --email admin@example.com --dns dns_test --credentials "${CREDENTIALS}"
@@ -482,6 +512,10 @@ cp -- "${PROJECT_ROOT}/docker/lib/renewal.sh" "${TEST_ROOT}/new-bundle/docker/li
 dockerRenewalBundleCheck "${TEST_ROOT}/new-bundle"
 mkdir -p "${TEST_ROOT}/schema1-bundle/docker/lib"
 printf 'readonly PADM_DOCKER_RENEWAL_SCHEMA=1\n' >"${TEST_ROOT}/schema1-bundle/docker/lib/renewal.sh"
+mkdir -p "${TEST_ROOT}/schema2-bundle/docker/lib"
+printf 'readonly PADM_DOCKER_RENEWAL_SCHEMA=2\n' >"${TEST_ROOT}/schema2-bundle/docker/lib/renewal.sh"
+mkdir -p "${TEST_ROOT}/schema4-bundle/docker/lib"
+printf 'readonly PADM_DOCKER_RENEWAL_SCHEMA=4\n' >"${TEST_ROOT}/schema4-bundle/docker/lib/renewal.sh"
 dockerRenewalBundleCheck "${TEST_ROOT}/schema1-bundle"
 runControl 0 acme schedule disable --domain a.example.com
 dockerRenewalBundleCheck "${TEST_ROOT}/old-bundle"
@@ -496,6 +530,7 @@ jq -e '.schema_version == 2 and .provider == "standalone" and .enabled == true' 
     "$(registry)/a.example.com/request.json" >/dev/null || fail 'HTTP 续期登记格式不正确'
 dockerRenewalRegistryValidate "$(registry)"
 reject dockerRenewalBundleCheck "${TEST_ROOT}/schema1-bundle"
+dockerRenewalBundleCheck "${TEST_ROOT}/schema2-bundle"
 dockerRenewalBundleCheck "${TEST_ROOT}/new-bundle"
 before=$(registryAndJobs)
 MODE=schedule-fail
@@ -523,6 +558,86 @@ runControl failure acme auto-renew
 runControl 0 acme schedule disable --domain a.example.com
 dockerRenewalBundleCheck "${TEST_ROOT}/schema1-bundle"
 [[ ! -e "$(registry)/a.example.com" ]] || fail '停用 HTTP 续期仍留下旧 bundle 无法读取的登记'
+
+newState webroot-renewal
+mkdir -p -- "${PADM_DOCKER_INSTALL_DIR}/config"
+printf '{"schema_version":3,"tls":{"domain":"a.example.com","http01":true},"core":{"protocols":[{"id":21}]}}\n' \
+    >"${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+sed -i "s|Le_Webroot='dns_test'|Le_Webroot='/var/lib/padm/acme-webroot'|" \
+    "${PADM_DOCKER_INSTALL_DIR}/data/acme/a.example.com/a.example.com.conf"
+runControl 0 acme schedule enable --domain a.example.com --email admin@example.com --webroot
+[[ "$(find "$(registry)/a.example.com" -mindepth 1 -maxdepth 1 | wc -l)" == 1 &&
+    "$(stat -c '%a %u %g' "$(registry)/a.example.com/request.json")" == '600 0 0' ]] ||
+    fail 'webroot 登记多存了 DNS 凭据或放宽了权限'
+jq -e '.schema_version == 3 and .provider == "webroot" and .enabled == true' \
+    "$(registry)/a.example.com/request.json" >/dev/null || fail 'webroot 续期登记格式不正确'
+dockerRenewalRegistryValidate "$(registry)"
+reject dockerRenewalBundleCheck "${TEST_ROOT}/schema1-bundle"
+reject dockerRenewalBundleCheck "${TEST_ROOT}/schema2-bundle"
+dockerRenewalBundleCheck "${TEST_ROOT}/new-bundle"
+dockerRenewalBundleCheck "${TEST_ROOT}/schema4-bundle"
+runControl failure acme schedule enable --domain b.example.com --email admin@example.com --webroot
+cp -- "$(registry)/a.example.com/request.json" "${TEST_ROOT}/webroot-request.json"
+jq '.schema_version = 2' "${TEST_ROOT}/webroot-request.json" >"$(registry)/a.example.com/request.json"
+reject dockerRenewalRegistryValidate "$(registry)"
+cp -- "${TEST_ROOT}/webroot-request.json" "$(registry)/a.example.com/request.json"
+cp -- "${CREDENTIALS}" "$(registry)/a.example.com/credentials.env"
+reject dockerRenewalRegistryValidate "$(registry)"
+rm -- "$(registry)/a.example.com/credentials.env"
+cp -- "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" "${TEST_ROOT}/webroot-spec.json"
+jq 'del(.tls.http01)' "${TEST_ROOT}/webroot-spec.json" >"${TEST_ROOT}/webroot-disabled.json"
+reject dockerAcmeWebrootTransitionValidate "${TEST_ROOT}/webroot-disabled.json"
+reject dockerAcmeWebrootTransitionValidate "${TEST_ROOT}/legacy-no-spec.json"
+jq '.tls.domain = "b.example.com"' "${TEST_ROOT}/webroot-spec.json" >"${TEST_ROOT}/webroot-domain.json"
+reject dockerAcmeWebrootTransitionValidate "${TEST_ROOT}/webroot-domain.json"
+dockerAcmeWebrootTransitionValidate "${TEST_ROOT}/webroot-spec.json"
+before=$(registryAndJobs)
+MODE=schedule-fail
+runControl failure acme schedule disable --domain a.example.com
+[[ "$(registryAndJobs)" == "${before}" ]] || fail 'webroot 停用调度失败没有恢复登记和任务'
+MODE=ok
+rm -f -- "${TEST_ROOT}/schedule-failed"
+runControl 0 acme auto-renew
+[[ "$(<"${PADM_DOCKER_INSTALL_DIR}/secrets/tls/a.example.com.crt")" == new-cert-a.example.com &&
+    "$(<"${TEST_ROOT}/challenge.log")" == $'webroot-prepare\nwebroot-restore' ]] ||
+    fail 'webroot 自动续期没有提交证书或清理挑战，或暂停了 standalone 服务'
+for DRIFT in disabled domain account; do
+    cp -- "${TEST_ROOT}/webroot-spec.json" "${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+    sed -i "s|Le_Webroot='dns_test'|Le_Webroot='/var/lib/padm/acme-webroot'|" \
+        "${PADM_DOCKER_INSTALL_DIR}/data/acme/a.example.com/a.example.com.conf"
+    case "${DRIFT}" in
+    disabled) cp -- "${TEST_ROOT}/webroot-disabled.json" "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" ;;
+    domain) cp -- "${TEST_ROOT}/webroot-domain.json" "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" ;;
+    account) sed -i "s|Le_Webroot='/var/lib/padm/acme-webroot'|Le_Webroot='dns_test'|" \
+        "${PADM_DOCKER_INSTALL_DIR}/data/acme/a.example.com/a.example.com.conf" ;;
+    esac
+    : >"${TEST_ROOT}/acme.log"
+    before=$(materials)
+    runControl failure acme auto-renew
+    [[ ! -s "${TEST_ROOT}/acme.log" && "$(materials)" == "${before}" ]] ||
+        fail "webroot ${DRIFT} 漂移仍执行续期或改写材料"
+done
+cp -- "${TEST_ROOT}/webroot-spec.json" "${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+runControl 0 acme schedule disable --domain a.example.com
+[[ ! -e "$(registry)/a.example.com" ]] || fail '停用 webroot 仍留下旧 bundle 无法读取的登记'
+dockerAcmeWebrootTransitionValidate "${TEST_ROOT}/webroot-disabled.json"
+dockerAcmeWebrootTransitionValidate "${TEST_ROOT}/legacy-no-spec.json"
+dockerRenewalBundleCheck "${TEST_ROOT}/schema1-bundle"
+
+newState webroot-restore-failure
+mkdir -p -- "${PADM_DOCKER_INSTALL_DIR}/config"
+cp -- "${TEST_ROOT}/webroot-spec.json" "${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+sed -i "s|Le_Webroot='dns_test'|Le_Webroot='/var/lib/padm/acme-webroot'|" \
+    "${PADM_DOCKER_INSTALL_DIR}/data/acme/a.example.com/a.example.com.conf"
+runControl 0 acme schedule enable --domain a.example.com --email admin@example.com --webroot
+enableDomain b.example.com
+MODE=webroot-restore-fail
+if (dockerMain acme auto-renew) >"${TEST_ROOT}/control.log" 2>&1; then fail 'webroot 恢复失败仍返回成功'; fi
+grep -q '^a.example.com:--renew$' "${TEST_ROOT}/acme.log" || fail 'webroot 恢复失败未触发首域续期'
+! grep -q '^b.example.com:' "${TEST_ROOT}/acme.log" || fail 'webroot 恢复失败仍启动下一域名'
+[[ -d "${PADM_DOCKER_INSTALL_DIR}/data/acme-webroot/active" &&
+    -n "$(find "${PADM_DOCKER_INSTALL_DIR}" -maxdepth 1 -name '.tls.*' -print -quit)" ]] ||
+    fail 'webroot 恢复失败未保留本次挑战和候选账户'
 
 # 凭据必须通过 stdin 传入，不出现在 Docker 参数或宿主导出的环境中。
 newState stdin-credentials

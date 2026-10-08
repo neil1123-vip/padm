@@ -133,6 +133,9 @@ for protocol in (21, 22, 23, 24, 25, 27, 29):
         if mode == "redirect":
             spec["site"]["url"] = "https://example.com/path?a=1&b=2#part"
         case(f"valid-{protocol}-{mode}", spec, True)
+        value = copy.deepcopy(spec)
+        value["tls"]["http01"] = True
+        case(f"valid-http01-{protocol}-{mode}", value, True)
     if protocol in (27, 29):
         for index, alpn in enumerate((["h2", "http/1.1"], ["http/1.1", "h2"], ["http/1.1"])):
             value = copy.deepcopy(spec)
@@ -168,6 +171,29 @@ entry = direct["core"]["protocols"][0]
 entry.pop("websocket")
 entry.update(id=28, trojan=dict(domain="ws.example.com"))
 case("valid-direct", direct, True)
+for index, value in enumerate((False, None, "", "true", 1, [], {})):
+    spec = copy.deepcopy(base)
+    spec["tls"]["http01"] = value
+    case(f"invalid-http01-shape-{index}", spec, False)
+spec = copy.deepcopy(direct)
+spec["tls"]["http01"] = True
+case("invalid-http01-direct", spec, False)
+for index, (field, port) in enumerate((("public_port", 80), ("fallback_http_port", 8088))):
+    spec = copy.deepcopy(base)
+    spec["tls"]["http01"] = True
+    if field == "public_port":
+        spec["core"]["protocols"][0][field] = port
+    else:
+        fallback = copy.deepcopy(spec["core"]["protocols"][0])
+        fallback.pop("websocket")
+        fallback.update(id=27, listener_id="entry-fallback", public_port=24444,
+                       fallback_tls=dict(domain=base["tls"]["domain"], http_port=port, http2_port=31302))
+        spec["core"]["protocols"].append(fallback)
+    case(f"invalid-http01-port-{index}", spec, False)
+spec = copy.deepcopy(base)
+spec["tls"]["http01"] = True
+spec["core"]["protocols"][0]["websocket"]["backend_port"] = 8088
+case("valid-http01-core-backend-8088", spec, True)
 mixed = copy.deepcopy(base)
 direct_entry = copy.deepcopy(direct["core"]["protocols"][0])
 direct_entry.update(listener_id="entry-direct", public_port=25443)
@@ -196,6 +222,9 @@ for version in (1, 2):
         del spec["core"]["protocols"][0]["websocket"]["backend_port"]
         del spec["core"]["protocols"][0]["websocket"]["tls_port"]
     case(f"valid-legacy-v{version}", spec, True)
+    value = copy.deepcopy(spec)
+    value["tls"]["http01"] = True
+    case(f"invalid-http01-v{version}", value, False)
     spec["site"] = dict(mode="static")
     case(f"invalid-site-v{version}", spec, False)
 (root / "cases.tsv").write_text("".join(f"{name}\t{valid}\n" for name, valid in cases))
@@ -219,6 +248,18 @@ jq 'del(."x-padm-site-content")' \
 reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/valid-21-static.json"
 dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/base.json" ||
     fail '无 site 的旧规格被新能力 gate 误拒绝'
+mv -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+
+# HTTP-01 仅在显式开启时需要新版 bundle，旧部署不能被能力门禁误拒绝。
+cp -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json" \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved"
+jq 'del(."x-padm-acme-webroot")' \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
+    >"${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/valid-http01-21-default.json"
+dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/base.json" ||
+    fail '未开启 HTTP-01 的旧规格被新能力 gate 误拒绝'
 mv -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
     "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
 
@@ -310,6 +351,32 @@ for protocol in 21 22 23 24 25 27 29; do
             24|25) grep -Fq 'grpc_pass grpc://xray:31297;' "${output}" ;;
             esac || fail "${protocol}: ${mode} 丢失代理路由"
         fi
+        dockerGenerateCompose "${spec}" "${TEST_ROOT}/legacy-compose.json"
+        jq 'del(.tls.http01)' "${TEST_ROOT}/valid-http01-${protocol}-${mode}.json" \
+            >"${TEST_ROOT}/http01-disabled.json"
+        dockerGenerateNginxConfig "${TEST_ROOT}/http01-disabled.json" "${TEST_ROOT}/http01-disabled.conf"
+        dockerGenerateCompose "${TEST_ROOT}/http01-disabled.json" "${TEST_ROOT}/http01-disabled-compose.json"
+        cmp -s "${output}" "${TEST_ROOT}/http01-disabled.conf" &&
+            cmp -s "${TEST_ROOT}/legacy-compose.json" "${TEST_ROOT}/http01-disabled-compose.json" ||
+            fail "${protocol}: 删除 HTTP-01 字段改变旧版生成内容"
+        ! grep -Fq '8088' "${output}" || fail "${protocol}: 缺省部署开放 HTTP-01"
+        spec="${TEST_ROOT}/valid-http01-${protocol}-${mode}.json"
+        http01Output="${TEST_ROOT}/nginx-http01-${protocol}-${mode}.conf"
+        dockerGenerateNginxConfig "${spec}" "${http01Output}"
+        dockerGenerateCompose "${spec}" "${TEST_ROOT}/http01-compose.json"
+        for text in 'listen 8088;' 'listen [::]:8088;' 'root /srv/padm-acme/active;'; do
+            grep -Fq "${text}" "${http01Output}" || fail "${protocol}: HTTP-01 未渲染独立入口"
+        done
+        jq -e '
+          [.services.nginx.ports[] | select(endswith(":80:8088/tcp"))] |
+          sort == ["0.0.0.0:80:8088/tcp","[::]:80:8088/tcp"]
+        ' "${TEST_ROOT}/http01-compose.json" >/dev/null ||
+            fail "${protocol}: HTTP-01 未固定双栈宿主 80 到容器 8088"
+        jq -e 'any(.services.nginx.volumes[]; .type == "bind" and
+          .source == "${PADM_DOCKER_ROOT}/data/acme-webroot" and
+          .target == "/srv/padm-acme" and .read_only == true)' \
+            "${TEST_ROOT}/http01-compose.json" >/dev/null ||
+            fail "${protocol}: HTTP-01 缺少专属只读 Nginx 挂载"
     done
 done
 jq 'del(.site)' "${TEST_ROOT}/valid-27-static.json" >"${TEST_ROOT}/legacy-fallback.json"
@@ -406,6 +473,106 @@ runEdit() {
     dockerConfigureApply "${TEST_ROOT}/base.json" '' '' configure
 ) >"${LOG}" 2>&1 || fail '初始化站点夹具失败'
 assertClean
+before=$(snapshot)
+composeBefore=$(grep -c '^live:' "${COMPOSE_LOG}")
+runEdit 0 --http01 enable --preview
+runEdit 2 --http01 unknown --preview
+runEdit 2 --http01 enable --http01 disable --preview
+runEdit 2 --http01 enable --site-default --preview
+runEdit 2 --http01 enable --spec "${TEST_ROOT}/base.json" --preview
+runEdit 2 --http01 enable --alpn entry-site h2,http/1.1 --preview
+runEdit 2 --http01 enable --confirm invalid
+runEdit 2 --http01 enable
+[[ "$(snapshot)" == "${before}" && "$(grep -c '^live:' "${COMPOSE_LOG}")" == "${composeBefore}" &&
+    ! -e "${root}/data/acme-webroot" ]] || fail 'HTTP-01 预览或非法参数改变在线入口'
+(
+    trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+    dockerSetupRead() { printf -v "$1" '%s' n; }
+    dockerAcquireDeploymentLock
+    dockerConfigureApply "${TEST_ROOT}/valid-http01-21-default.json" '' '' interactive
+) >"${LOG}" 2>&1 || fail 'HTTP-01 确认取消失败'
+assertClean
+[[ "$(snapshot)" == "${before}" && ! -e "${root}/data/acme-webroot" ]] ||
+    fail 'HTTP-01 取消仍开放 80 或创建在线挑战根'
+runEdit 0 --http01 enable --confirm PADM-DOCKER-EDIT
+jq -e '.tls == {domain:"ws.example.com",http01:true}' "${root}/config/spec.json" >/dev/null ||
+    fail 'HTTP-01 专项改变域名或没有开启'
+jq -e '[.listeners[] | select(.listener_id == "host-acme-http")] ==
+  [{listener_id:"host-acme-http",service:"nginx",public_port:80,container_port:8088,
+    transport:"tcp",address_families:["ipv4","ipv6"]}]' "${root}/deployment.json" >/dev/null ||
+    fail 'HTTP-01 部署 listener 未固定双栈 80:8088'
+[[ "$(stat -c '%a %u %g' "${root}/data/acme-webroot")" == '750 10001 10001' ]] ||
+    fail 'HTTP-01 在线根不是 ops 可写的私有目录'
+webrootInode=$(stat -c '%d:%i' "${root}/data/acme-webroot")
+cp -- "${root}/config/spec.json" "${TEST_ROOT}/http01-enabled.json"
+for mutation in \
+    '.tls.domain="other.example.com" | .core.protocols[0].websocket.domain="other.example.com"' \
+    '.core.protocols[0].public_port=25443 | del(.tls.http01)'; do
+    jq "${mutation}" "${TEST_ROOT}/http01-enabled.json" >"${TEST_ROOT}/http01-mixed.json"
+    before=$(snapshot)
+    runEdit 15 --spec "${TEST_ROOT}/http01-mixed.json" --preview
+    [[ "$(snapshot)" == "${before}" ]] || fail 'HTTP-01 混合修改越过原编辑边界'
+done
+renewal=${root}/secrets/renewal/${DOMAIN}
+mkdir -p "${renewal}"
+chmod 0700 "${root}/secrets/renewal" "${renewal}"
+jq -n --arg domain "${DOMAIN}" '{schema_version:3,domain:$domain,
+  email:"admin@example.com",provider:"webroot",enabled:true}' >"${renewal}/request.json"
+chmod 0600 "${renewal}/request.json"
+before=$(snapshot)
+runEdit 15 --http01 disable --confirm PADM-DOCKER-EDIT
+[[ "$(snapshot)" == "${before}" ]] || fail '自动 webroot 续期仍启用时拆掉了 HTTP 入口'
+# 回滚走独立入口，关闭版快照合法也不能绕过仍启用的 webroot 自动续期。
+(
+    trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+    dockerAcquireDeploymentLock
+    dockerBackupConfiguration configure
+    backup="${root}/backups/update.http01-fixture"
+    mv -- "${DOCKER_CONFIG_BACKUP}" "${backup}"
+    DOCKER_CONFIG_BACKUP=${backup}
+    jq 'del(.tls.http01)' "${backup}/config/spec.json" >"${backup}/config/spec.json.next"
+    mv -- "${backup}/config/spec.json.next" "${backup}/config/spec.json"
+    chmod 0600 "${backup}/config/spec.json"
+    dockerGenerateDeployment "${backup}/config/spec.json" "${backup}/deployment.json"
+    dockerGenerateCompose "${backup}/config/spec.json" "${backup}/compose.json"
+    dockerGenerateNginxConfig "${backup}/config/spec.json" "${backup}/config/nginx/default.conf"
+    dockerValidateConfigurationBackup "${backup}"
+    [[ "$(dockerLatestUpdateBackup)" == "${backup}" ]] ||
+        fail 'HTTP-01 回滚夹具未经过真实快照发现和校验'
+) >"${LOG}" 2>&1 || fail '初始化 HTTP-01 回滚夹具失败'
+assertClean
+composeBefore=$(grep -c '^live:' "${COMPOSE_LOG}")
+actual=0
+(dockerMain rollback) >"${LOG}" 2>&1 || actual=$?
+[[ "${actual}" == 15 ]] || fail "HTTP-01 回滚拒绝预期 15，实际 ${actual}"
+assertClean
+grep -Fq '当前域名仍启用 webroot 自动续期' "${LOG}" ||
+    fail 'HTTP-01 回滚没有经过自动续期关闭保护'
+[[ "$(snapshot)" == "${before}" &&
+    "$(grep -c '^live:' "${COMPOSE_LOG}")" == "${composeBefore}" ]] ||
+    fail '自动 webroot 续期仍启用时回滚修改了部署或调用了服务'
+rm -- "${renewal}/request.json"
+rmdir -- "${renewal}" "${root}/secrets/renewal"
+before=$(snapshot)
+for failure in health-fail int term; do
+    MODE=${failure}
+    rm -f -- "${TEST_ROOT}/failed-once"
+    expected=14
+    [[ "${failure}" != int ]] || expected=130
+    [[ "${failure}" != term ]] || expected=143
+    runEdit "${expected}" --http01 disable --confirm PADM-DOCKER-EDIT
+    [[ "$(snapshot)" == "${before}" &&
+        "$(stat -c '%d:%i' "${root}/data/acme-webroot")" == "${webrootInode}" ]] ||
+        fail "${failure}: HTTP-01 事务未恢复原入口或替换了在线挂载根"
+done
+MODE=ok
+runEdit 0 --http01 disable --confirm PADM-DOCKER-EDIT
+jq -e '.tls == {domain:"ws.example.com"}' "${root}/config/spec.json" >/dev/null &&
+    jq -e 'all(.listeners[]; .listener_id != "host-acme-http")' "${root}/deployment.json" >/dev/null ||
+    fail '关闭 HTTP-01 没有删除 opt-in 字段和部署 listener'
+jq '.tls.http01=true' "${root}/config/spec.json" >"${TEST_ROOT}/http01-only.json"
+runEdit 0 --spec "${TEST_ROOT}/http01-only.json" --confirm PADM-DOCKER-EDIT
+runEdit 0 --http01 disable --confirm PADM-DOCKER-EDIT
 before=$(snapshot)
 runEdit 0 --site-static "${SOURCE}" --preview
 [[ "$(snapshot)" == "${before}" ]] || fail '站点预览修改在线内容或配置'
@@ -505,11 +672,13 @@ rm -- "${root}/data/static/hardlink"
     dockerConfigureApply "${TEST_ROOT}/valid-mixed-static.json" '' '' configure
 ) >"${LOG}" 2>&1 || fail '初始化混合站点夹具失败'
 assertClean
+runEdit 0 --http01 enable --confirm PADM-DOCKER-EDIT
 cp -- "${root}/config/spec.json" "${TEST_ROOT}/delete-site-draft.json"
 printf '10\nentry-site\n8\n' |
     dockerEditFields "${TEST_ROOT}/delete-site-draft.json" >"${LOG}" 2>&1 ||
     fail '站点配置阻止删除最后一个 Nginx 入口'
 jq -e 'has("site") == false and .subscription.enabled == false and .tls.domain == "ws.example.com" and
+    (.tls | has("http01") | not) and
     (.core.protocols | length == 1 and .[0].listener_id == "entry-direct")' \
     "${TEST_ROOT}/delete-site-draft.json" >/dev/null || fail '删除入口改变其它 TLS 入口或遗留站点模式'
 staticBefore=$(find "${root}/data/static" -type f -print0 | sort -z | xargs -0 sha256sum)

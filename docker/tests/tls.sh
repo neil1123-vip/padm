@@ -6,7 +6,7 @@ if [[ "$(uname -s)" != Linux ]]; then
     exit 0
 fi
 [[ "$(id -u)" == 0 ]] || { printf 'docker-tls-regression-fail: run as root\n' >&2; exit 1; }
-for tool in jq python3 openssl setpriv stat chown chmod; do
+for tool in jq python3 openssl setpriv stat chown chmod mkfifo; do
     command -v "${tool}" >/dev/null || { printf 'missing tool: %s\n' "${tool}" >&2; exit 1; }
 done
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
@@ -151,6 +151,7 @@ docker() {
 
 dockerAcmeRun() {
     local image=$1 credentials=$2 account=$3 output=$4 action=$5 configDir=${DOMAIN} webroot=dns_test
+    local http01=0 challenge
     [[ "${image}" == "${OPS_IMAGE}" && ( "${credentials}" == "${CREDENTIALS}" || -z "${credentials}" ) &&
         "${account}" == "${PADM_DOCKER_INSTALL_DIR}/.tls."*/acme &&
         "${output}" == "${account%/acme}" ]] || fail 'ACME 未隔离候选账户'
@@ -176,6 +177,10 @@ dockerAcmeRun() {
     fi
     if [[ -z "${credentials}" ]]; then
         webroot=no
+        if jq -e '.tls.http01 == true' "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" >/dev/null; then
+            http01=1
+            webroot=/var/lib/padm/acme-webroot
+        fi
         if [[ "${action}" == --renew &&
             "$(grep '^Le_PreHook=' "${account}/${configDir}/${DOMAIN}.conf")" == *renew.due* ]]; then
             [[ "${DOCKER_ACME_PORT_PUBLISH}" == 0 && "${#DOCKER_ACME_STOPPED[@]}" == 0 ]] ||
@@ -185,7 +190,26 @@ dockerAcmeRun() {
             printf due >"${output}/renew.due"
             return 1
         fi
-        if [[ "${action}" == --issue || "${action}" == --renew ]]; then
+        if [[ "${http01}" == 1 && ( "${action}" == --issue || "${action}" == --renew ) ]]; then
+            [[ "${DOCKER_ACME_PORT_PUBLISH}" == 0 && "${#DOCKER_ACME_STOPPED[@]}" == 0 &&
+                -z "${DOCKER_ACME_CONTAINER}" ]] || fail 'webroot 仍暂停服务或发布临时端口'
+            [[ "${action}" != --issue || " ${*:5} " == *' --webroot /var/lib/padm/acme-webroot '* ]] ||
+                fail 'webroot 申请未使用固定容器路径'
+            [[ "${action}" != --renew ||
+                "$(grep '^Le_Webroot=' "${account}/${configDir}/${DOMAIN}.conf")" == "Le_Webroot='/var/lib/padm/acme-webroot'" ]] ||
+                fail 'webroot 续期没有沿用固定账户路径'
+            [[ "${DOCKER_ACME_WEBROOT:-}" == "${PADM_DOCKER_INSTALL_DIR}/data/acme-webroot/active" ]] ||
+                fail 'webroot 未隔离本轮挑战子目录'
+            challenge=${DOCKER_ACME_WEBROOT}/.well-known/acme-challenge
+            [[ -d "${challenge}" && "$(stat -c '%u %g' "${challenge}")" == '10001 10001' ]] ||
+                fail '挑战 token 目录不能由 ops UID 写入'
+            (
+                cd "${challenge}"
+                setpriv --reuid 10001 --regid 10001 --clear-groups -- sh -c \
+                    'printf "Padm_token-123.thumbprint_456\n" >Padm_token-123'
+            ) || fail 'ops UID 不能写挑战 token'
+            [[ "${MODE}" != renew-skip || "${action}" != --renew ]] || return 2
+        elif [[ "${action}" == --issue || "${action}" == --renew ]]; then
             [[ "${DOCKER_ACME_PORT_PUBLISH}" == 1 && " ${*:5} " == *' --httpport 8080 '* ]] ||
                 fail 'HTTP 验证未准备宿主端口或未用容器 8080'
             [[ "${action}" != --issue || " ${*:5} " == *' --standalone '* ]] ||
@@ -199,6 +223,8 @@ dockerAcmeRun() {
         elif [[ "${action}" == --install-cert ]]; then
             [[ "${DOCKER_ACME_PORT_PUBLISH}" == 0 && ! -f "${TEST_ROOT}/challenge-container" ]] ||
                 fail '导出前没有清理挑战并恢复服务'
+            [[ "${http01}" == 0 || ! -e "${PADM_DOCKER_INSTALL_DIR}/data/acme-webroot/active" ]] ||
+                fail 'webroot 导出前没有清理本轮挑战'
         fi
     fi
     printf '%s\n' "${action}" >>"${TEST_ROOT}/acme.log"
@@ -327,6 +353,7 @@ newState() {
     DOCKER_ACME_PORT_PUBLISH=0
     DOCKER_ACME_RECOVERY=
     DOCKER_ACME_RUNNING=null
+    DOCKER_ACME_WEBROOT=
     : >"${TEST_ROOT}/compose.log"
     : >"${TEST_ROOT}/events.log"
     : >"${TEST_ROOT}/acme.log"
@@ -359,7 +386,8 @@ standaloneState() {
         "com.docker.compose.project.working_dir":$root,
         "com.docker.compose.project.config_files":($root+"/compose.json"),
         "io.padm.mode":"docker","io.padm.project":"padm-docker","io.padm.component":"nginx"}},
-       HostConfig:{NetworkMode:"padm-docker_default",PortBindings:{"8443/tcp":[{HostIp:"0.0.0.0",HostPort:"80"}]}},
+       HostConfig:{NetworkMode:"padm-docker_default",PortBindings:{"8443/tcp":[{HostIp:"0.0.0.0",HostPort:"80"}]},
+         Tmpfs:{"/tmp":"rw,noexec,nosuid,nodev,size=32m"}},
        Mounts:($compose[0].services.nginx.volumes|map(
          {Type:"bind",Source:(.source|sub("^\\$\\{PADM_DOCKER_ROOT\\}";$root)),Destination:.target,RW:(.read_only|not)})),
        NetworkSettings:{Networks:{default:{IPAddress:"172.28.0.2",GlobalIPv6Address:""}}}} as $container |
@@ -371,6 +399,78 @@ standaloneState() {
          .HostConfig.PortBindings={"80/tcp":[{HostIp:"0.0.0.0",HostPort:"8081"}]})]
     ' >"${TEST_ROOT}/containers.json"
     cp -- "${TEST_ROOT}/containers.json" "${TEST_ROOT}/containers.before"
+}
+
+webrootState() {
+    local name=$1 protocol=${2:-21}
+    newState "${name}"
+    jq --argjson protocol "${protocol}" '
+      .schema_version=3 | .core.secondary_type=null | .tls.http01=true |
+      .core.protocols[0] += {core:"xray",listener_id:"entry-webroot"} |
+      if $protocol == 21 then .core.protocols[0].websocket += {backend_port:31297,tls_port:8443}
+      else .core.protocols[0] |= (del(.websocket) + {id:$protocol,
+        fallback_tls:{domain:"example.com",http_port:31300,http2_port:31302}}) end
+    ' "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" >"${TEST_ROOT}/webroot-spec.json"
+    cp -- "${TEST_ROOT}/webroot-spec.json" "${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+    jq --argjson protocol "${protocol}" '
+      .core += {secondary_type:null,protocol_ids:[$protocol]} |
+      .listeners[0] += {listener_id:"entry-webroot",
+        service:(if $protocol == 21 then "nginx" else "xray" end),
+        container_port:(if $protocol == 21 then 8443 else 24443 end)} |
+      .listeners += [{listener_id:"host-acme-http",service:"nginx",public_port:80,
+        container_port:8088,transport:"tcp",address_families:["ipv4","ipv6"]}]
+    ' "${PADM_DOCKER_INSTALL_DIR}/deployment.json" >"${TEST_ROOT}/webroot-deployment.json"
+    cp -- "${TEST_ROOT}/webroot-deployment.json" "${PADM_DOCKER_INSTALL_DIR}/deployment.json"
+    dockerGenerateXrayConfig "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" \
+        "${PADM_DOCKER_INSTALL_DIR}/config/xray/config.json"
+    dockerGenerateNginxConfig "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" \
+        "${PADM_DOCKER_INSTALL_DIR}/config/nginx/default.conf"
+    dockerGenerateCompose "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" "${PADM_DOCKER_INSTALL_DIR}/compose.json"
+    dockerConfigureSpecValidate "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" &&
+        dockerManagedSpecMatchesDeployment "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" \
+            "${PADM_DOCKER_INSTALL_DIR}/deployment.json" "${PADM_DOCKER_INSTALL_DIR}/images.env" ||
+        fail 'webroot 夹具没有使用有效的真实部署合同'
+    mkdir -p "${PADM_DOCKER_INSTALL_DIR}/data/acme-webroot" "${PADM_DOCKER_INSTALL_DIR}/data/acme/${DOMAIN}"
+    chmod 0750 "${PADM_DOCKER_INSTALL_DIR}/data/acme-webroot"
+    chown 10001:10001 "${PADM_DOCKER_INSTALL_DIR}/data/acme-webroot"
+    WEBROOT_INODE=$(stat -c '%d:%i' "${PADM_DOCKER_INSTALL_DIR}/data/acme-webroot")
+    printf "Le_Domain='%s'\nLe_Webroot='/var/lib/padm/acme-webroot'\nLe_PreHook='printf original-hook'\n" \
+        "${DOMAIN}" >"${PADM_DOCKER_INSTALL_DIR}/data/acme/${DOMAIN}/${DOMAIN}.conf"
+    chown -R 10001:10001 "${PADM_DOCKER_INSTALL_DIR}/data/acme/${DOMAIN}"
+    chmod 0750 "${PADM_DOCKER_INSTALL_DIR}/data/acme/${DOMAIN}"
+    chmod 0600 "${PADM_DOCKER_INSTALL_DIR}/data/acme/${DOMAIN}/${DOMAIN}.conf"
+    jq -n --arg root "${PADM_DOCKER_INSTALL_DIR}" --arg running "${RUNNING_ID}" \
+        --arg stopped "${STOPPED_ID}" --arg https "${HTTPS_ID}" \
+        --slurpfile spec "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" \
+        --slurpfile compose "${PADM_DOCKER_INSTALL_DIR}/compose.json" '
+      def container($id; $service; $running; $ports):
+        {Id:$id,State:{Running:$running,Restarting:false},Config:{Image:$spec[0].images[$service],Labels:{
+          "com.docker.compose.project":"padm-docker","com.docker.compose.service":$service,
+          "com.docker.compose.project.working_dir":$root,
+          "com.docker.compose.project.config_files":($root+"/compose.json"),
+          "io.padm.mode":"docker","io.padm.project":"padm-docker","io.padm.component":$service}},
+         HostConfig:{NetworkMode:"padm-docker_default",PortBindings:$ports,
+           Tmpfs:{"/tmp":"rw,noexec,nosuid,nodev,size=32m"}},
+         Mounts:($compose[0].services[$service].volumes|map(
+           {Type:"bind",Source:(.source|sub("^\\$\\{PADM_DOCKER_ROOT\\}";$root)),
+            Destination:.target,RW:(.read_only|not)})),
+         NetworkSettings:{Networks:{default:{IPAddress:"172.28.0.2",GlobalIPv6Address:""}}}};
+      {"8088/tcp":[{HostIp:"0.0.0.0",HostPort:"80"},{HostIp:"::",HostPort:"80"}]} as $http |
+      [$http + (if $spec[0].core.protocols[0].id == 21 then
+          {"8443/tcp":[{HostIp:"0.0.0.0",HostPort:"24443"}]} else {} end) |
+        container($running;"nginx";true;.)] +
+      [container($stopped;"nginx";false;$http),
+       container($https;"xray";true;{"24443/tcp":[{HostIp:"0.0.0.0",HostPort:"24443"}]})]
+    ' >"${TEST_ROOT}/containers.json"
+    cp -- "${TEST_ROOT}/containers.json" "${TEST_ROOT}/containers.before"
+}
+
+assertWebrootRestored() {
+    assertChallengeRestored
+    [[ ! -s "${TEST_ROOT}/challenge.log" &&
+        ! -e "${PADM_DOCKER_INSTALL_DIR}/data/acme-webroot/active" &&
+        "$(stat -c '%d:%i' "${PADM_DOCKER_INSTALL_DIR}/data/acme-webroot")" == "${WEBROOT_INODE}" ]] ||
+        fail 'webroot 清理停启了服务、遗留挑战或替换了在线挂载根'
 }
 
 assertChallengeRestored() {
@@ -630,6 +730,340 @@ done
 [[ ! -s "${TEST_ROOT}/acme.log" && ! -s "${TEST_ROOT}/challenge.log" ]] ||
     fail '互斥验证方式仍执行了 ACME'
 
+# webroot 使用真实归属和目录校验，ACME 工具只模拟候选账户及标准 key authorization。
+for ACTION in issue renew; do
+    webrootState "webroot-${ACTION}"
+    runControl 0 acme "${ACTION}" --domain "${DOMAIN}" --email admin@example.com --webroot
+    cmp -s "${CERT_FILE}" "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/${DOMAIN}.crt" ||
+        fail 'webroot 没有提交新证书'
+    grep -Fq "Le_Webroot='/var/lib/padm/acme-webroot'" \
+        "${PADM_DOCKER_INSTALL_DIR}/data/acme/${DOMAIN}/${DOMAIN}.conf" ||
+        fail 'webroot 账户保存了宿主或本轮路径'
+    [[ "${ACTION}" != renew || "$(head -n 2 "${TEST_ROOT}/acme.log")" == $'probe\n--renew' ]] ||
+        fail 'webroot 续期未先判断到期'
+    assertWebrootRestored
+    assertPermissions
+done
+for ACTION in issue renew; do
+    webrootState "webroot-ecc-${ACTION}" 27
+    if [[ "${ACTION}" == issue ]]; then
+        rm -- "${PADM_DOCKER_INSTALL_DIR}/data/acme/${DOMAIN}/${DOMAIN}.conf"
+    else
+        mv -- "${PADM_DOCKER_INSTALL_DIR}/data/acme/${DOMAIN}" \
+            "${PADM_DOCKER_INSTALL_DIR}/data/acme/${DOMAIN}_ecc"
+    fi
+    runControl 0 acme "${ACTION}" --domain "${DOMAIN}" --email admin@example.com --webroot
+    [[ -f "${PADM_DOCKER_INSTALL_DIR}/data/acme/${DOMAIN}_ecc/${DOMAIN}.conf" ]] &&
+        grep -Eq '^--install-cert .* --ecc( |$)' "${TEST_ROOT}/acme.args" ||
+        fail 'webroot 新/ECC 账户申请、续期与导出不一致'
+    grep -q '^up -d --force-recreate --no-deps --wait --wait-timeout 1 xray$' "${TEST_ROOT}/compose.log" ||
+        fail 'webroot fallback TLS 消费者没有定向更新'
+    ! grep -Eq '^up .* nginx$' "${TEST_ROOT}/compose.log" ||
+        fail '只服务 webroot 的 Nginx 被当作 fallback TLS 消费者重建'
+    assertWebrootRestored
+    assertPermissions
+done
+webrootState webroot-renew-skip
+before=$(materials)
+MODE=renew-skip
+runControl 0 acme renew --domain "${DOMAIN}" --email admin@example.com --webroot
+[[ "$(materials)" == "${before}" && "$(<"${TEST_ROOT}/acme.log")" == probe &&
+    ! -s "${TEST_ROOT}/compose.log" && ! -s "${TEST_ROOT}/ops.log" ]] ||
+    fail 'webroot skip=2 改了账户、证书或服务'
+assertWebrootRestored
+
+for MODE_CASE in issue-fail renew-fail export-fail nginx-test-fail reload-fail health-fail int-issue term-issue; do
+    webrootState "webroot-${MODE_CASE}"
+    before=$(materials)
+    MODE=${MODE_CASE}
+    ACTION=issue
+    [[ "${MODE}" != renew-fail ]] || ACTION=renew
+    EXPECTED=15
+    [[ "${MODE}" != int-issue ]] || EXPECTED=130
+    [[ "${MODE}" != term-issue ]] || EXPECTED=143
+    runControl "${EXPECTED}" acme "${ACTION}" --domain "${DOMAIN}" --email admin@example.com --webroot
+    [[ "$(materials)" == "${before}" ]] || fail "${MODE}: webroot 失败未保留账户和材料"
+    assertWebrootRestored
+done
+
+# 准备阶段的信号须在归属初始化后重放，不能留下 root 所有的本轮挑战目录。
+for boundary in mkdir-int chmod-term; do
+    webrootState "webroot-prepare-${boundary}"
+    before=$(materials)
+    : >"${TEST_ROOT}/webroot-signal.log"
+    EXPECTED=130
+    [[ "${boundary}" != chmod-term ]] || EXPECTED=143
+    (
+        injected=0
+        mkdir() {
+            command mkdir "$@" || return $?
+            if [[ "${boundary}" == mkdir-int && "${injected}" == 0 &&
+                "$#" == 2 && "$1" == -- &&
+                "$2" == "${PADM_DOCKER_INSTALL_DIR}/data/acme-webroot/active" ]]; then
+                injected=1
+                printf 'mkdir:INT\n' >>"${TEST_ROOT}/webroot-signal.log"
+                kill -INT "${BASHPID}"
+            fi
+        }
+        chmod() {
+            command chmod "$@" || return $?
+            if [[ "${boundary}" == chmod-term && "${injected}" == 0 &&
+                "$#" == 2 && "$1" == 0750 &&
+                "$2" == "${PADM_DOCKER_INSTALL_DIR}/data/acme-webroot/active" ]]; then
+                injected=1
+                printf 'chmod:TERM\n' >>"${TEST_ROOT}/webroot-signal.log"
+                kill -TERM "${BASHPID}"
+            fi
+        }
+        runControl "${EXPECTED}" acme issue --domain "${DOMAIN}" --email admin@example.com --webroot
+    )
+    [[ "$(wc -l <"${TEST_ROOT}/webroot-signal.log")" == 1 &&
+        "$(materials)" == "${before}" && ! -s "${TEST_ROOT}/acme.log" &&
+        ! -s "${TEST_ROOT}/compose.log" ]] ||
+        fail "${boundary}: webroot 准备信号未注入一次或仍执行 ACME、修改材料和服务"
+    assertClean
+    assertWebrootRestored
+done
+
+for boundary in external-80 stopped-nginx ownership image port mount named-volume tmpfs compose nginx domain; do
+    webrootState "webroot-reject-${boundary}"
+    case "${boundary}" in
+    external-80) MODE=external-80 ;;
+    stopped-nginx)
+        jq '.[0].State.Running=false' "${TEST_ROOT}/containers.json" >"${TEST_ROOT}/containers.next"
+        ;;
+    ownership)
+        jq '.[0].Config.Labels["com.docker.compose.project.working_dir"]="/outside/deployment"' \
+            "${TEST_ROOT}/containers.json" >"${TEST_ROOT}/containers.next"
+        ;;
+    image)
+        jq '.[0].Config.Image="unrelated:fixture"' "${TEST_ROOT}/containers.json" >"${TEST_ROOT}/containers.next"
+        ;;
+    port)
+        jq '.[0].HostConfig.PortBindings["8088/tcp"][1].HostPort="8081"' \
+            "${TEST_ROOT}/containers.json" >"${TEST_ROOT}/containers.next"
+        ;;
+    mount)
+        jq '.[0].Mounts |= map(if .Destination == "/srv/padm-acme" then .RW=true else . end)' \
+            "${TEST_ROOT}/containers.json" >"${TEST_ROOT}/containers.next"
+        ;;
+    named-volume)
+        jq '.[0].Mounts += [{Type:"volume",Name:"foreign-challenge",Source:"/var/lib/docker/volumes/foreign/_data",
+          Destination:"/srv/padm-acme/active",RW:true}]' \
+            "${TEST_ROOT}/containers.json" >"${TEST_ROOT}/containers.next"
+        ;;
+    tmpfs)
+        jq '.[0].HostConfig.Tmpfs["/srv/padm-acme/active"]="rw"' \
+            "${TEST_ROOT}/containers.json" >"${TEST_ROOT}/containers.next"
+        ;;
+    compose)
+        jq '(.services.nginx.volumes[] | select(.target == "/srv/padm-acme") | .read_only)=false' \
+            "${PADM_DOCKER_INSTALL_DIR}/compose.json" >"${TEST_ROOT}/webroot-unsafe-compose.json"
+        cp -- "${TEST_ROOT}/webroot-unsafe-compose.json" "${PADM_DOCKER_INSTALL_DIR}/compose.json"
+        ;;
+    nginx) printf '\n# fixture drift\n' >>"${PADM_DOCKER_INSTALL_DIR}/config/nginx/default.conf" ;;
+    domain)
+        jq '.tls.domain="other.example.com"' "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" \
+            >"${TEST_ROOT}/webroot-unsafe-spec.json"
+        cp -- "${TEST_ROOT}/webroot-unsafe-spec.json" "${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+        ;;
+    esac
+    if [[ -f "${TEST_ROOT}/containers.next" ]]; then
+        mv -- "${TEST_ROOT}/containers.next" "${TEST_ROOT}/containers.json"
+        cp -- "${TEST_ROOT}/containers.json" "${TEST_ROOT}/containers.before"
+    fi
+    before=$(materials)
+    runControl 15 acme issue --domain "${DOMAIN}" --email admin@example.com --webroot
+    [[ "$(materials)" == "${before}" && ! -s "${TEST_ROOT}/acme.log" &&
+        ! -s "${TEST_ROOT}/compose.log" ]] || fail "${boundary}: webroot 拒绝前运行了工具或修改材料"
+    assertWebrootRestored
+done
+
+# 首次创建必须先拒绝危险父目录，不能留下再校验失败的半成品。
+for boundary in data-link writable-parent wrong-owner; do
+    newState "webroot-ensure-${boundary}"
+    data=${PADM_DOCKER_INSTALL_DIR}/data
+    webroot=${data}/acme-webroot
+    case "${boundary}" in
+    data-link)
+        mv -- "${data}" "${data}.real"
+        ln -s data.real "${data}"
+        ;;
+    writable-parent) chmod 0777 "${data}" ;;
+    wrong-owner) chown 10002:10002 "${data}" ;;
+    esac
+    parentBefore=$(stat -c '%a %u %g' "${data}")
+    reject dockerAcmeWebrootEnsure "${PADM_DOCKER_INSTALL_DIR}"
+    [[ ! -e "${webroot}" && ! -L "${webroot}" &&
+        "$(stat -c '%a %u %g' "${data}")" == "${parentBefore}" ]] ||
+        fail "${boundary}: webroot 首次创建前未拒绝或修改了危险父目录"
+    case "${boundary}" in
+    data-link)
+        rm -- "${data}"
+        mv -- "${data}.real" "${data}"
+        ;;
+    writable-parent) chmod 0700 "${data}" ;;
+    wrong-owner) chown 0:0 "${data}" ;;
+    esac
+    dockerAcmeWebrootEnsure "${PADM_DOCKER_INSTALL_DIR}" ||
+        fail "${boundary}: 修复父目录后仍不能创建 webroot"
+    [[ "$(stat -c '%a %u %g' "${webroot}")" == '750 10001 10001' &&
+        -z "$(find "${webroot}" -mindepth 1 -print -quit)" ]] ||
+        fail 'webroot 首次创建权限、属主或空目录合同不正确'
+done
+
+# 首次根目录初始化期间收到信号时，必须先完成最小权限，再重放信号。
+for boundary in mkdir-int chmod-term; do
+    newState "webroot-ensure-${boundary}-signal"
+    data=${PADM_DOCKER_INSTALL_DIR}/data
+    webroot=${data}/acme-webroot
+    expected=130
+    [[ "${boundary}" != chmod-term ]] || expected=143
+    actual=0
+    (
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
+        injected=0
+        mkdir() {
+            command mkdir "$@" || return $?
+            if [[ "${boundary}" == mkdir-int && "${injected}" == 0 &&
+                "$#" == 2 && "$1" == -- && "$2" == "${webroot}" ]]; then
+                injected=1
+                kill -INT "${BASHPID}"
+            fi
+        }
+        chmod() {
+            command chmod "$@" || return $?
+            if [[ "${boundary}" == chmod-term && "${injected}" == 0 &&
+                "$#" == 2 && "$1" == 0750 && "$2" == "${webroot}" ]]; then
+                injected=1
+                kill -TERM "${BASHPID}"
+            fi
+        }
+        dockerAcmeWebrootEnsure "${PADM_DOCKER_INSTALL_DIR}"
+    ) >"${TEST_ROOT}/ensure-signal.log" 2>&1 || actual=$?
+    [[ "${actual}" == "${expected}" ]] ||
+        fail "${boundary}: Ensure 信号退出码预期 ${expected}，实际 ${actual}"
+    [[ -d "${webroot}" && ! -L "${webroot}" &&
+        "$(stat -c '%a %u %g' "${webroot}")" == '750 10001 10001' &&
+        -z "$(find "${webroot}" -mindepth 1 -print -quit)" ]] ||
+        fail "${boundary}: Ensure 中断后未留下可接管的空私有根"
+    inode=$(stat -c '%d:%i' "${webroot}")
+    dockerAcmeWebrootEnsure "${PADM_DOCKER_INSTALL_DIR}" ||
+        fail "${boundary}: Ensure 中断后不能被后续调用接管"
+    [[ "$(stat -c '%d:%i' "${webroot}")" == "${inode}" ]] ||
+        fail "${boundary}: 后续 Ensure 替换了已初始化根目录"
+done
+
+for boundary in active-existing root-link parent-link fifo hardlink writable-parent wrong-owner; do
+    webrootState "webroot-tree-${boundary}"
+    webroot=${PADM_DOCKER_INSTALL_DIR}/data/acme-webroot
+    case "${boundary}" in
+    active-existing)
+        mkdir -p "${webroot}/active/.well-known/acme-challenge"
+        printf 'Existing_token.thumbprint\n' >"${webroot}/active/.well-known/acme-challenge/Existing_token"
+        chown -R 10001:10001 "${webroot}/active"
+        find "${webroot}/active" -type d -exec chmod 0750 {} +
+        chmod 0640 "${webroot}/active/.well-known/acme-challenge/Existing_token"
+        ;;
+    root-link)
+        mv -- "${webroot}" "${webroot}.real"
+        ln -s acme-webroot.real "${webroot}"
+        ;;
+    parent-link)
+        mv -- "${PADM_DOCKER_INSTALL_DIR}/data" "${PADM_DOCKER_INSTALL_DIR}/data.real"
+        ln -s data.real "${PADM_DOCKER_INSTALL_DIR}/data"
+        ;;
+    fifo) mkfifo "${webroot}/unsafe" ;;
+    hardlink)
+        printf 'Keep_token.thumbprint\n' >"${TEST_ROOT}/outside-token"
+        ln "${TEST_ROOT}/outside-token" "${webroot}/unsafe"
+        ;;
+    writable-parent) chmod 0777 "${PADM_DOCKER_INSTALL_DIR}/data" ;;
+    wrong-owner) chown 10002:10002 "${webroot}" ;;
+    esac
+    treeBefore=$(find "${webroot}/" -printf '%P %y %m %U %G %i\n' | sort)
+    before=$(materials)
+    runControl 15 acme issue --domain "${DOMAIN}" --email admin@example.com --webroot
+    [[ "$(materials)" == "${before}" && ! -s "${TEST_ROOT}/acme.log" &&
+        ! -s "${TEST_ROOT}/compose.log" &&
+        "$(find "${webroot}/" -printf '%P %y %m %U %G %i\n' | sort)" == "${treeBefore}" ]] ||
+        fail "${boundary}: webroot 拒绝改变了既有挑战树或材料"
+    [[ ! -s "${TEST_ROOT}/challenge.log" ]] || fail 'webroot 目录拒绝仍停启服务'
+    if [[ "${boundary}" == active-existing ]]; then
+        grep -qxF 'Existing_token.thumbprint' "${webroot}/active/.well-known/acme-challenge/Existing_token" ||
+            fail '准备拒绝删除了已有合法挑战 token'
+    elif [[ "${boundary}" == hardlink ]]; then
+        grep -qxF 'Keep_token.thumbprint' "${TEST_ROOT}/outside-token" ||
+            fail '准备拒绝删除或改写了外部硬链接文件'
+    fi
+done
+
+webrootState webroot-token-validation
+webroot=${PADM_DOCKER_INSTALL_DIR}/data/acme-webroot
+challenge=${webroot}/active/.well-known/acme-challenge
+mkdir -p "${challenge}"
+chown -R 10001:10001 "${webroot}/active"
+find "${webroot}/active" -type d -exec chmod 0750 {} +
+for boundary in symlink hardlink fifo invalid-name private-key empty bad-character multiline double-newline nul oversized writable wrong-owner; do
+    tokenFile=${challenge}/Padm_token-123
+    printf 'Padm_token-123.thumbprint_456\n' >"${tokenFile}"
+    chown 10001:10001 "${tokenFile}"
+    chmod 0640 "${tokenFile}"
+    dockerAcmeWebrootTreeValidate "${PADM_DOCKER_INSTALL_DIR}" "${webroot}" ||
+        fail 'webroot 目录拒绝合法 key authorization'
+    case "${boundary}" in
+    symlink)
+        rm -- "${tokenFile}"
+        ln -s "${CERT_FILE}" "${tokenFile}"
+        ;;
+    hardlink)
+        rm -- "${tokenFile}"
+        printf 'Padm_token-123.thumbprint_456\n' >"${TEST_ROOT}/outside-token"
+        chown 10001:10001 "${TEST_ROOT}/outside-token"
+        chmod 0640 "${TEST_ROOT}/outside-token"
+        ln "${TEST_ROOT}/outside-token" "${tokenFile}"
+        ;;
+    fifo)
+        rm -- "${tokenFile}"
+        mkfifo "${tokenFile}"
+        ;;
+    invalid-name)
+        mv -- "${tokenFile}" "${challenge}/.hidden"
+        tokenFile=${challenge}/.hidden
+        ;;
+    private-key) printf '%s\n' '-----BEGIN PRIVATE KEY-----' fixture >"${tokenFile}" ;;
+    empty) : >"${tokenFile}" ;;
+    bad-character) printf 'Padm_token-123.thumbprint/456\n' >"${tokenFile}" ;;
+    multiline) printf 'Padm_token-123.thumbprint_456\nSecond_token.thumbprint\n' >"${tokenFile}" ;;
+    double-newline) printf 'Padm_token-123.thumbprint_456\n\n' >"${tokenFile}" ;;
+    nul) printf 'Padm_token-123.\0thumbprint_456\n' >"${tokenFile}" ;;
+    oversized) printf '%s.thumbprint\n' "$(printf 'a%.0s' {1..512})" >"${tokenFile}" ;;
+    writable) chmod 0660 "${tokenFile}" ;;
+    wrong-owner) chown 10002:10002 "${tokenFile}" ;;
+    esac
+    reject dockerAcmeWebrootTreeValidate "${PADM_DOCKER_INSTALL_DIR}" "${webroot}"
+    [[ -e "${tokenFile}" || -L "${tokenFile}" ]] || fail 'webroot 目录校验删除了已有文件'
+    rm -- "${tokenFile}"
+done
+printf 'Padm_token-123.thumbprint_456' >"${tokenFile}"
+chown 10001:10001 "${tokenFile}"
+chmod 0640 "${tokenFile}"
+dockerAcmeWebrootTreeValidate "${PADM_DOCKER_INSTALL_DIR}" "${webroot}" ||
+    fail '无换行 key authorization 被错误拒绝'
+rm -- "${tokenFile}"
+
+newState webroot-cli-validation
+for ARGS in '--webroot /outside/root' '--webroot --standalone' '--standalone --webroot' \
+    '--webroot --dns dns_test' '--dns dns_test --webroot' \
+    "--webroot --credentials ${CREDENTIALS}" '--webroot --webroot'; do
+    read -r -a OPTIONS <<<"${ARGS}"
+    runControl 2 acme issue --domain "${DOMAIN}" --email admin@example.com "${OPTIONS[@]}"
+done
+runControl 15 acme issue --domain "${DOMAIN}" --email admin@example.com --webroot
+[[ ! -s "${TEST_ROOT}/acme.log" && ! -s "${TEST_ROOT}/challenge.log" ]] ||
+    fail 'webroot 参数无效或未开启仍执行 ACME'
+
 # 单次恢复真实运行器，检查空凭据和双栈映射，不重复完整事务矩阵。
 newState standalone-runner
 dockerCreateTlsCandidate
@@ -655,6 +1089,35 @@ DOCKER_ACME_PORT_PUBLISH=0
 eval "${ACME_RUN_TEST_IMPLEMENTATION}"
 dockerCleanupTlsCandidate
 assertClean
+
+# 真实运行器仅给 ops 本轮 active 读写挂载，Nginx 挂载根与宿主端口保持不变。
+webrootState webroot-runner
+dockerAcquireDeploymentLock
+dockerCreateTlsCandidate
+mkdir -- "${DOCKER_TLS_CANDIDATE}/acme"
+chown 10001:10001 "${DOCKER_TLS_CANDIDATE}/acme"
+dockerAcmeWebrootPrepare "${DOMAIN}" "${DOCKER_TLS_CANDIDATE}"
+eval "${ACME_RUN_IMPLEMENTATION}"
+RAW_ACME_RUN=1
+: >"${TEST_ROOT}/acme-docker.args"
+dockerAcmeRun "${OPS_IMAGE}" '' "${DOCKER_TLS_CANDIDATE}/acme" "${DOCKER_TLS_CANDIDATE}" \
+    --issue --webroot /var/lib/padm/acme-webroot -d "${DOMAIN}"
+grep -Fq -- "--volume ${PADM_DOCKER_INSTALL_DIR}/data/acme-webroot/active:/var/lib/padm/acme-webroot" \
+    "${TEST_ROOT}/acme-docker.args" || fail 'webroot 运行器未读写挂载专属 active'
+! grep -Fq -- '/var/lib/padm/acme-webroot:ro' "${TEST_ROOT}/acme-docker.args" ||
+    fail 'webroot ops 挂载不能写挑战 token'
+! grep -Eq -- '--publish|--network host|--cap-add' "${TEST_ROOT}/acme-docker.args" ||
+    fail 'webroot 运行器发布了宿主端口或扩大网络权限'
+grep -Fq -- '--label io.padm.challenge=padm-acme-' "${TEST_ROOT}/acme-docker.args" ||
+    fail 'webroot 工具容器未登记本轮清理 label'
+RAW_ACME_RUN=0
+DOCKER_ACME_CONTAINER=
+eval "${ACME_RUN_TEST_IMPLEMENTATION}"
+dockerAcmeChallengeRestore
+dockerCleanupTlsCandidate
+dockerReleaseDeploymentLock
+assertClean
+assertWebrootRestored
 
 newState import-success
 accountBefore=$(find "${PADM_DOCKER_INSTALL_DIR}/data/acme" -type f -print0 | sort -z | xargs -0 sha256sum)

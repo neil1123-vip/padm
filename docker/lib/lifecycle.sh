@@ -20,6 +20,7 @@ dockerUsage() {
   padm-docker edit --site-static <独立站点目录> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --site-redirect <HTTP/HTTPS URL> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --site-default [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --http01 <enable|disable> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --alpn <入口 ID> <h2,http/1.1|http/1.1,h2|http/1.1> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker protocol list
   padm-docker protocol links [入口 ID]
@@ -58,7 +59,7 @@ dockerUsage() {
   padm-docker tls install --domain <域名> --cert <文件> --key <文件> [--ops-image <tag@digest>]
   padm-docker tls validate --domain <域名>
   padm-docker tls manage
-  padm-docker acme <issue|renew> --domain <域名> --email <邮箱> <--dns <dns_*> --credentials <文件>|--standalone> [--ops-image <tag@digest>]
+  padm-docker acme <issue|renew> --domain <域名> --email <邮箱> <--dns <dns_*> --credentials <文件>|--standalone|--webroot> [--ops-image <tag@digest>]
   padm-docker acme schedule <enable|disable|status> [续期输入参数]
   padm-docker acme auto-renew
   padm-docker validate
@@ -847,6 +848,8 @@ dockerValidateConfigurationBackup() {
     dockerManagedPathIsSafe "${root}" "${backup}" || return 1
     [[ "${backup}" == "${root%/}/backups/"* && -d "${backup}" && ! -L "${backup}" && -O "${backup}" ]] || return 1
     [[ -f "${backup}/present" && ! -L "${backup}/present" && -O "${backup}/present" ]] || return 1
+    # 挑战根不属于配置快照，恢复不得发布旧 token 或替换在线目录。
+    [[ ! -e "${backup}/data/acme-webroot" && ! -L "${backup}/data/acme-webroot" ]] || return 1
     [[ -z "$(find "${backup}" -type l -print -quit 2>/dev/null)" ]] || return 1
     if [[ -e "${backup}/bundle.target" ]]; then
         [[ -f "${backup}/bundle.target" && -O "${backup}/bundle.target" ]] || return 1
@@ -954,6 +957,10 @@ dockerRollbackCommand() {
         return "${PADM_DOCKER_RC_STATE}"
     }
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    if [[ -f "${root}/config/spec.json" ]] &&
+        jq -e '.tls.http01 == true' "${root}/config/spec.json" >/dev/null; then
+        dockerAcmeWebrootTransitionValidate "${backup}/config/spec.json" || return "${PADM_DOCKER_RC_STATE}"
+    fi
     dockerControlSyncRollbackCheck "${backup}" || return "${PADM_DOCKER_RC_STATE}"
     dockerRealityStreamDeploymentCheck "${backup}/config/spec.json" "${root}/config/spec.json" ||
         return "${PADM_DOCKER_RC_STATE}"

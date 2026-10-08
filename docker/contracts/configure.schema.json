@@ -13,6 +13,7 @@
   "x-padm-control-state": true,
   "x-padm-site-content": true,
   "x-padm-fallback-alpn": true,
+  "x-padm-acme-webroot": true,
   "additionalProperties": false,
   "required": ["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"],
   "properties": {
@@ -312,7 +313,8 @@
           "properties": {
             "domain": {
               "$ref": "#/$defs/hostname"
-            }
+            },
+            "http01": {"const": true}
           }
         }
       ]
@@ -368,6 +370,44 @@
     }
   },
   "allOf": [
+    {
+      "if": {
+        "properties": {"tls": {"type": "object", "required": ["http01"]}}
+      },
+      "then": {
+        "properties": {
+          "schema_version": {"const": 3},
+          "core": {
+            "properties": {
+              "protocols": {
+                "contains": {"properties": {"id": {"enum": [21, 22, 23, 24, 25, 27, 29]}}},
+                "items": {
+                  "properties": {
+                    "websocket": {"properties": {"tls_port": {"not": {"const": 8088}}}},
+                    "httpupgrade": {"properties": {"tls_port": {"not": {"const": 8088}}}},
+                    "grpc_tls": {"properties": {"tls_port": {"not": {"const": 8088}}}},
+                    "fallback_tls": {
+                      "properties": {
+                        "http_port": {"not": {"const": 8088}},
+                        "http2_port": {"not": {"const": 8088}}
+                      }
+                    }
+                  },
+                  "if": {"properties": {"id": {"not": {"enum": [3, 31]}}}},
+                  "then": {"properties": {"public_port": {"not": {"const": 80}}}}
+                }
+              }
+            }
+          },
+          "host_integrations": {
+            "items": {
+              "if": {"properties": {"type": {"const": "tproxy"}}},
+              "then": {"properties": {"settings": {"properties": {"port": {"not": {"const": 80}}}}}}
+            }
+          }
+        }
+      }
+    },
     {
       "if": {"required": ["site"]},
       "then": {
