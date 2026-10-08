@@ -1503,6 +1503,13 @@ EOF
         [[ "${nginxState}" == "true" && "${xrayState}" == "true" && "${singBoxState}" == "false" ]]
         grep -q 'TLS 证书续签后文件校验失败' "${errorLog}"
 
+        sed -i "s|^Le_Webroot=.*$|Le_Webroot='alpn'|" "${homeDir}/.acme.sh/${certDomain}_ecc/${certDomain}.conf"
+        usableChecks=0 chmodChecks=0
+        : >"${serviceLog}"
+        regressionExpectStatus 1 renewManagedTLSCertificates >/dev/null 2>&1
+        grep -qx 'nginx:stop:true' "${serviceLog}"
+        grep -qx 'nginx:start:true' "${serviceLog}"
+
         # Webroot 续签失败也不能暂停原先运行的服务。
         sed -i "s|^Le_Webroot=.*$|Le_Webroot='/var/www/html'|" "${homeDir}/.acme.sh/${certDomain}_ecc/${certDomain}.conf"
         usableChecks=0 chmodChecks=0
