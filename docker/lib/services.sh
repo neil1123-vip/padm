@@ -1589,11 +1589,11 @@ dockerGenerateCompose() {
                 mounts("data/xray"; "/var/lib/padm/xray"; false) +
                 if ($tlsCores | index("xray")) != null then
                   mounts("secrets/tls"; "/etc/padm/secrets/tls"; true) else [] end),
-            ports: [$direct[] | select((.core // $r.core.type) == "xray" and
+            ports: ([$direct[] | select((.core // $r.core.type) == "xray" and
               ($r.reality_stream == null or .listener_id != $r.reality_stream.listener_id)) |
                 . as $protocol | ports($protocol; $protocol.public_port)[]] +
                 [if $hostStream then $r.core.protocols[] | select(.listener_id == $r.reality_stream.listener_id) |
-                  "127.0.0.1:15443:\(.public_port)/tcp" else empty end],
+                  "127.0.0.1:15443:\(.public_port)/tcp" else empty end]),
             tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=16m"],
             healthcheck: {
               test: ["CMD", "/usr/local/bin/xray", "-test", "-confdir", "/etc/padm/xray"],
