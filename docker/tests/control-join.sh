@@ -110,7 +110,7 @@ dockerRealityTargetsValidate() { :; }
 dockerConfigurePortsAvailable() { :; }
 dockerValidateHostIntegrations() { :; }
 dockerTrafficRuntimeCheck() { :; }
-dockerTrafficBeforeChange() { :; }
+dockerTrafficBeforeChange() { printf 'sample\n' >>"${TEST_ROOT}/traffic.log"; }
 dockerTrafficScheduleInstall() { :; }
 dockerRenewalScheduleInstall() { :; }
 dockerGeoScheduleInstall() { :; }
@@ -276,6 +276,8 @@ for file in "${spec}" "${TEST_ROOT}/join.log"; do
     ! grep -Fq "$(printf c%.0s {1..48})" "${file}" || fail '邀请 token 写入规格或日志'
 done
 before=$(sha256sum "${spec}")
+dockerBackupConfiguration update
+oldUpdate=${DOCKER_CONFIG_BACKUP}
 upBefore=$(up_count)
 reject dockerControlCommand join "${args[@]}"
 dockerControlCommand sync --invite "${invite}" >"${TEST_ROOT}/sync.log"
@@ -302,10 +304,13 @@ reject dockerControlSyncTransitionValidate "${TEST_ROOT}/edited.json"
 reject dockerConfigureApply "${TEST_ROOT}/edited.json"
 reject dockerAccountCommand disable 55555555-5555-4555-8555-555555555555
 mkdir -p "${TEST_ROOT}/old-bundle/docker/contracts"
-jq 'del(.["x-padm-control-client"])' "$(dockerConfigureSchemaFile)" \
-    >"${TEST_ROOT}/old-bundle/docker/contracts/configure.schema.json"
 cp -- "$(dockerFeatureMatrixFile)" "${TEST_ROOT}/old-bundle/docker/contracts/features.json"
-reject dockerBundleSupportsSpec "${TEST_ROOT}/old-bundle" "${spec}"
+for capability in x-padm-control-client x-padm-control-sync-rollback; do
+    jq --arg capability "${capability}" 'del(.[$capability])' "$(dockerConfigureSchemaFile)" \
+        >"${TEST_ROOT}/old-bundle/docker/contracts/configure.schema.json"
+    reject dockerBundleSupportsSpec "${TEST_ROOT}/old-bundle" "${spec}"
+done
+dockerBundleSupportsSpec "${TEST_ROOT}/old-bundle" "${TEST_ROOT}/standalone.json"
 
 jq '.revision = 8 | .accounts[0].name = "主控更新"' "${TEST_ROOT}/desired.json" >"${TEST_ROOT}/next-desired.json"
 mv -- "${TEST_ROOT}/next-desired.json" "${TEST_ROOT}/desired.json"
@@ -334,5 +339,77 @@ dockerControlCommand sync --invite "${invite}" >/dev/null
 jq -e '.control_sync.last_revision == 8 and .accounts[0].name == "本机账号" and
   .accounts[1].name == "主控更新"' "${spec}" >/dev/null
 [[ "$(sha256sum "${root}/data/traffic/state.json")" == "${traffic}" ]]
+check_clean
+
+# 显式回滚不能降低已提交同步版本；普通失败/信号恢复已在前面验证。
+before=$(sha256sum "${spec}")
+composeBefore=$(sha256sum "${TEST_ROOT}/compose.log")
+sampleBefore=$(sha256sum "${TEST_ROOT}/traffic.log")
+backupsBefore=$(find "${root}/backups" -mindepth 1 -maxdepth 1 -type d | sort)
+reject dockerRollbackCommand
+[[ "$(sha256sum "${spec}")" == "${before}" &&
+    "$(sha256sum "${root}/data/traffic/state.json")" == "${traffic}" &&
+    "$(sha256sum "${TEST_ROOT}/compose.log")" == "${composeBefore}" &&
+    "$(sha256sum "${TEST_ROOT}/traffic.log")" == "${sampleBefore}" &&
+    "$(find "${root}/backups" -mindepth 1 -maxdepth 1 -type d | sort)" == "${backupsBefore}" ]]
+
+checkBackup="${root}/backups/control-check"
+mkdir -p "${checkBackup}/config"
+cp -- "${spec}" "${TEST_ROOT}/current.json"
+for mutation in \
+    '.control_sync.last_revision = 7' \
+    '.control_sync.last_revision = null | .control_sync.last_digest = null |
+        .control_sync.managed_accounts = []' \
+    '.control_sync.last_digest = ("a"*64)' \
+    '.control_sync.managed_accounts[0].name = "历史账号" |
+        .accounts[1].name = "历史账号"' \
+    '.control_sync.node_id = "77777777-7777-4777-8777-777777777777"' \
+    '.control_sync.controller_id = "77777777-7777-4777-8777-777777777777"' \
+    '.control_sync.connection.listen.port = 19443' \
+    'del(.control_sync)'; do
+    jq "${mutation}" "${TEST_ROOT}/current.json" >"${checkBackup}/config/spec.json"
+    chmod 0600 "${checkBackup}/config/spec.json"
+    reject dockerControlSyncRollbackCheck "${checkBackup}"
+done
+cp -- "${spec}" "${checkBackup}/config/spec.json"
+dockerControlSyncRollbackCheck "${checkBackup}"
+jq '.control_sync.last_revision = 9' "${spec}" >"${checkBackup}/config/spec.json"
+dockerControlSyncRollbackCheck "${checkBackup}"
+cp -- "${spec}" "${checkBackup}/config/spec.json"
+chmod 0640 "${spec}"
+reject dockerControlSyncRollbackCheck "${checkBackup}"
+chmod 0600 "${spec}"
+mv -- "${spec}" "${TEST_ROOT}/live.json"
+reject dockerControlSyncRollbackCheck "${checkBackup}"
+ln -s "${TEST_ROOT}/live.json" "${spec}"
+reject dockerControlSyncRollbackCheck "${checkBackup}"
+rm -- "${spec}"
+printf '{\n' >"${spec}"
+chmod 0600 "${spec}"
+reject dockerControlSyncRollbackCheck "${checkBackup}"
+cp -- "${TEST_ROOT}/live.json" "${spec}"
+jq 'del(.control_sync)' "${spec}" >"${TEST_ROOT}/standalone-now.json"
+cp -- "${TEST_ROOT}/standalone-now.json" "${spec}"
+reject dockerControlSyncRollbackCheck "${checkBackup}"
+cp -- "${TEST_ROOT}/live.json" "${spec}"
+chmod 0600 "${spec}"
+jq 'del(.control_sync.connection)' "${spec}" >"${checkBackup}/config/spec.json"
+reject dockerControlSyncRollbackCheck "${checkBackup}"
+cp -- "${spec}" "${checkBackup}/config/spec.json"
+jq '.control_sync.listener_ids = ["entry-other"]' "${spec}" >"${checkBackup}/config/spec.json"
+reject dockerControlSyncRollbackCheck "${checkBackup}"
+cp -- "${spec}" "${checkBackup}/config/spec.json"
+
+# 同步状态未变的发行版快照可回滚；执行失败仍恢复当前完整状态。
+touch -d @1 "${oldUpdate}"
+dockerBackupConfiguration update
+upBefore=$(up_count)
+touch "${TEST_ROOT}/fail-up"
+reject dockerRollbackCommand
+[[ "$(up_count)" -eq $((upBefore + 2)) && "$(sha256sum "${spec}")" == "${before}" &&
+    "$(sha256sum "${root}/data/traffic/state.json")" == "${traffic}" ]]
+dockerRollbackCommand >"${TEST_ROOT}/rollback.log"
+[[ "$(sha256sum "${spec}")" == "${before}" &&
+    "$(sha256sum "${root}/data/traffic/state.json")" == "${traffic}" ]]
 check_clean
 printf 'docker-control-join-regression-ok\n'

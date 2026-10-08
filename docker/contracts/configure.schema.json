@@ -8,6 +8,7 @@
   "x-padm-reality-stream-host-network": true,
   "x-padm-accounts": true,
   "x-padm-control-sync": true,
+  "x-padm-control-sync-rollback": true,
   "x-padm-control-client": true,
   "x-padm-control-state": true,
   "additionalProperties": false,

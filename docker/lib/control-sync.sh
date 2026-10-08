@@ -64,6 +64,48 @@ dockerControlSyncTransitionValidate() {
     }
 }
 
+dockerControlSyncRollbackCheck() {
+    local backup=$1 root source current=false previous=false role
+    root=$(dockerInstallRoot) || return 1
+    for source in "${root}/config/spec.json" "${backup}/config/spec.json"; do
+        [[ -e "${source}" || -L "${source}" ]] || continue
+        dockerTrafficSafePath "${root}" "${source}" &&
+            [[ -f "${source}" && ! -L "${source}" && -O "${source}" ]] &&
+            dockerPrivateFileIsRestricted "${source}" &&
+            role=$(jq -er 'has("control_sync") | tostring' "${source}") || return 1
+        if [[ "${source}" == "${root}/config/spec.json" ]]; then
+            current=${role}
+        else
+            previous=${role}
+        fi
+    done
+    [[ "${current}:${previous}" != false:false ]] || return 0
+    [[ "${current}:${previous}" == true:true ]] || {
+        dockerError '回滚不能新增、删除或重绑定被控角色'
+        return 1
+    }
+    dockerConfigureSpecValidate "${backup}/config/spec.json" &&
+        dockerManagedSpecMatchesDeployment "${root}/config/spec.json" \
+            "${root}/deployment.json" "${root}/images.env" || return 1
+    # 只约束显式回滚；未提交同步失败仍恢复事务前备份，不伪造上游版本。
+    jq -en --slurpfile current "${root}/config/spec.json" --slurpfile previous "${backup}/config/spec.json" '
+      $current[0].control_sync as $current |
+      $previous[0].control_sync as $previous |
+      ($current | del(.last_revision, .last_digest, .managed_accounts)) ==
+        ($previous | del(.last_revision, .last_digest, .managed_accounts)) and
+      (if $current.last_revision == null then true
+       elif $previous.last_revision == null then false
+       elif $previous.last_revision > $current.last_revision then true
+       else $previous.last_revision == $current.last_revision and
+         $previous.last_digest == $current.last_digest and
+         $previous.managed_accounts == $current.managed_accounts
+       end)
+    ' >/dev/null 2>&1 || {
+        dockerError '回滚快照的被控身份、连接或同步版本/内容冲突，保留当前部署'
+        return 1
+    }
+}
+
 dockerControlSyncBuildDraft() {
     local directory=$1 image
     image=$(dockerAccountImage ops) || return 1

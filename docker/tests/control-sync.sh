@@ -230,10 +230,12 @@ if dockerAccountCommand edit 00000004-1111-4111-8111-000000000004 --name changed
 jq 'del(.control_sync)' "${spec}" >"${root}/without-sync.json"
 if dockerControlSyncTransitionValidate "${root}/without-sync.json"; then exit 1; fi
 mkdir -p "${TEST_ROOT}/old-bundle/docker/contracts"
-jq 'del(.["x-padm-control-sync"])' "$(dockerConfigureSchemaFile)" \
-    >"${TEST_ROOT}/old-bundle/docker/contracts/configure.schema.json"
 cp -- "$(dockerFeatureMatrixFile)" "${TEST_ROOT}/old-bundle/docker/contracts/features.json"
-if dockerBundleSupportsSpec "${TEST_ROOT}/old-bundle" "${spec}"; then exit 1; fi
+for capability in x-padm-control-sync x-padm-control-sync-rollback; do
+    jq --arg capability "${capability}" 'del(.[$capability])' "$(dockerConfigureSchemaFile)" \
+        >"${TEST_ROOT}/old-bundle/docker/contracts/configure.schema.json"
+    if dockerBundleSupportsSpec "${TEST_ROOT}/old-bundle" "${spec}"; then exit 1; fi
+done
 
 # 本机追加账号后数组顺序变了，同版本重试仍不能触发重建。
 dockerAccountMutate '.accounts += $extra' --slurpfile extra "${root}/extra-account.json"

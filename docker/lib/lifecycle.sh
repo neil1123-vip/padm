@@ -936,6 +936,7 @@ dockerRollbackCommand() {
         return "${PADM_DOCKER_RC_STATE}"
     }
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    dockerControlSyncRollbackCheck "${backup}" || return "${PADM_DOCKER_RC_STATE}"
     dockerRealityStreamDeploymentCheck "${backup}/config/spec.json" "${root}/config/spec.json" ||
         return "${PADM_DOCKER_RC_STATE}"
     dockerTrafficSafePath "${root}" "${root}/secrets/renewal" &&

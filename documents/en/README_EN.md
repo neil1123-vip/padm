@@ -390,8 +390,14 @@ The raw token is not stored in specs, backups, arguments, environment or ordinar
 client binds its private source address and connects directly, without proxies, redirects or public fallback.
 Status exposes connection metadata, not remote health. Legacy internal roles without connection metadata
 remain compatible but cannot use external sync; old bundles cannot restore the new connection spec.
-Automatic sync, role rebinding/recovery and a WireGuard connection wizard are not provided yet.
-Next is role recovery management in 4C.3, followed by 4C.4 two-node acceptance.
+Explicit `rollback` checks controlled identity, listener mapping and connection before sampling, creating a
+backup or stopping services. It rejects lower sync revisions and requires matching digest and managed accounts
+at the same revision. Compatible release snapshots with unchanged sync state can still be restored.
+Controlled specs require a bundle declaring sync rollback protection, so older unprotected scripts are rejected.
+Failed or interrupted join/sync transactions still restore their pre-transaction state without inventing
+upstream revisions locally. Automatic sync, role rebinding, arbitrary historical-account restoration and
+a WireGuard connection wizard are not provided.
+Next is 4C.4 two-node acceptance; full role migration and disaster recovery need a separate contract.
 Multi-server support remains `deferred`.
 See the [4C implementation checkpoints](../docker-menu-parity-plan.md#4c-多服务器控制后端).
 

@@ -306,7 +306,8 @@ dockerBundleSupportsSpec() {
             $schema[0]["x-padm-accounts"] == true
           else true end) and
           (if $spec[0] | has("control_sync") then
-            $schema[0]["x-padm-control-sync"] == true
+            $schema[0]["x-padm-control-sync"] == true and
+              $schema[0]["x-padm-control-sync-rollback"] == true
           else true end) and
           (if ($spec[0].control_sync // {}) | has("connection") then
             $schema[0]["x-padm-control-client"] == true
