@@ -890,7 +890,7 @@ Recommended multi-server flow:
 
 ## Routing and Access Control
 
-Docker menu `17. Routing and outbound` provides authenticated SOCKS5 TCP outbound.
+Docker menu `17. Routing and outbound` provides global or domain-selective authenticated SOCKS5 TCP outbound.
 Use a root-owned, mode `0600`, single-link JSON file in a root-owned directory with no
 group/other writable ancestors, for example
 `{"server":"192.0.2.10","port":1080,"username":"user","password":"secret"}`.
@@ -903,6 +903,9 @@ visible ASCII characters without spaces or controls.
 padm-docker edit --socks5 /root/padm-socks5.json --preview
 padm-docker edit --socks5 /root/padm-socks5.json --confirm PADM-DOCKER-EDIT
 padm-docker protocol routing-status
+padm-docker edit --socks5-domains 'example.net,full:exact.example.com,keyword:video,geosite:cn' --preview
+padm-docker edit --socks5-domains 'example.net,full:exact.example.com,keyword:video,geosite:cn' --confirm PADM-DOCKER-EDIT
+padm-docker edit --socks5-global --confirm PADM-DOCKER-EDIT
 padm-docker edit --socks5-off --confirm PADM-DOCKER-EDIT
 ```
 
@@ -910,12 +913,25 @@ Optional v3 `.routing.socks5` requires the bundle capability `x-padm-routing-soc
 old specs remain direct. Both cores send client TCP destination traffic through the
 authenticated upstream without direct fallback on failure. Client UDP destination traffic
 is explicitly blocked, independently of UDP-based Hysteria2/TUIC ingress carrying TCP.
+The private JSON may also include a canonical `domains` array, or rules can be replaced
+after enabling the upstream: `full:` matches an exact domain, `domain:` a domain and its
+subdomains, `keyword:` a safe ASCII substring, and `geosite:` an explicit category, up to
+256 rules. CSV input trims whitespace, lowercases and deduplicates in first-seen order;
+bare domains get `domain:`, but category names are never guessed.
+Matcher types use OR: matching TCP uses SOCKS5, matching UDP is blocked, and unmatched
+TCP/UDP is direct. IP traffic without a usable supplied or sniffed domain is also direct;
+this is not enforced global proxying. `--socks5-global` removes only the rules.
+Domain mode additionally requires `x-padm-routing-domains`. Xray uses managed or bundled
+Geo data; sing-box downloads selected categories directly from the fixed SagerNet source.
+Missing resources or failed downloads reject candidate startup and restore the old configuration.
+Status includes `mode` and `domain_rules` without credentials; sniffing selects the route
+without replacing the destination address.
 Reality handshakes, statistics APIs, control services, Nginx, ACME and host traffic are
 outside this scope. No new listener, host privilege or firewall rule is added; TUN/TProxy
 combinations are not enabled. Changes use the existing candidate/backup/recovery transaction.
 Status and previews omit credentials, but private specs, core configurations and backups
 retain them. SOCKS5 authentication is not encrypted; use a trusted upstream network.
-SOCKS ingress, domain routing, DNS/WARP and the remaining routing policies are still deferred.
+SOCKS ingress, DNS/WARP and the remaining routing policies are still deferred.
 
 `Routing & access control` manages server-side outbound behavior and access policies. It is not a client configuration tutorial.
 

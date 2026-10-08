@@ -634,7 +634,8 @@ dockerMenuRouting() {
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 路由与出站\n'
-        printf '%s\n' '1. 启用 SOCKS5 出站' '2. 关闭 SOCKS5 出站' '3. 查看路由状态' '0. 返回'
+        printf '%s\n' '1. 启用 SOCKS5 出站' '2. 关闭 SOCKS5 出站' '3. 查看路由状态' \
+            '4. 替换 SOCKS5 域名规则' '5. 切换 SOCKS5 全局出站' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -649,6 +650,12 @@ dockerMenuRouting() {
             ;;
         2) dockerMenuRun edit --socks5-off || true ;;
         3) dockerMenuRun protocol routing-status || true ;;
+        4)
+            dockerSetupRead input 'SOCKS5 域名规则（逗号分隔；domain:/full:/keyword:/geosite:）：' &&
+                [[ -n "${input}" ]] || continue
+            dockerMenuRun edit --socks5-domains "${input}" || true
+            ;;
+        5) dockerMenuRun edit --socks5-global || true ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

@@ -67,6 +67,12 @@ dockerConfigureSpecValidate() {
       def exact($keys): type == "object" and ((keys_unsorted | sort) == ($keys | sort));
       def port: type == "number" and floor == . and . >= 1 and . <= 65535;
       def hostname: type == "string" and test("^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z]{2,63}$");
+      def routing_selector:
+        type == "string" and . == ascii_downcase and
+        if startswith("full:") or startswith("domain:") then
+          (split(":") as $parts | ($parts | length) == 2 and ($parts[1] | hostname))
+        elif startswith("keyword:") then test("^keyword:[a-z0-9._-]{1,253}$")
+        else test("^geosite:[a-z0-9][a-z0-9_-]{0,63}$") end;
       def ipv4: type == "string" and (split(".") as $parts |
         ($parts | length) == 4 and all($parts[]; test("^[0-9]{1,3}$") and (tonumber <= 255)));
       def ipv6: type == "string" and contains(":") and test("^[A-Fa-f0-9:]+$");
@@ -124,13 +130,18 @@ dockerConfigureSpecValidate() {
       (if has("routing") then
         .schema_version == 3 and
         (.routing | exact(["socks5"]) and
-          (.socks5 | exact(["server", "port", "username", "password"]) and
+          (.socks5 | exact(["server", "port", "username", "password"] +
+              if has("domains") then ["domains"] else [] end) and
             (.server | host_address and . != "host.docker.internal") and
             (.port | port) and
             (.username | type == "string" and length >= 1 and length <= 255 and
               (explode | all(. >= 33 and . <= 126))) and
             (.password | type == "string" and length >= 1 and length <= 255 and
-              (explode | all(. >= 33 and . <= 126))))) and
+              (explode | all(. >= 33 and . <= 126))) and
+            (if has("domains") then
+              (.domains | type == "array" and length >= 1 and length <= 256 and
+                length == (unique | length) and all(.[]; routing_selector))
+             else true end))) and
         all(.host_integrations[]; .type != "tun" and .type != "tproxy")
        else true end) and
       (if has("site") then
@@ -1332,6 +1343,9 @@ dockerGenerateXrayConfig() {
     local specFile=$1 target=$2
     jq -n --slurpfile request "${specFile}" '
       $request[0] as $r |
+      (($r.routing.socks5 // {}) | has("domains")) as $selective |
+      (($r.routing.socks5.domains // []) | map(
+        if startswith("keyword:") then ltrimstr("keyword:") else . end)) as $domains |
       {
         log: {loglevel: "warning"},
         inbounds: ([
@@ -1430,6 +1444,7 @@ dockerGenerateXrayConfig() {
           }
         ]),
         outbounds: [
+          (if $selective then {protocol: "freedom", tag: "direct"} else empty end),
           (if $r.routing != null then {
             protocol: "socks", tag: "padm-socks5",
             settings: {servers: [{
@@ -1438,12 +1453,18 @@ dockerGenerateXrayConfig() {
               users: [{user: $r.routing.socks5.username, pass: $r.routing.socks5.password}]
             }]}
           } else empty end),
-          {protocol: "freedom", tag: "direct"},
+          (if $selective then empty else {protocol: "freedom", tag: "direct"} end),
           {protocol: "blackhole", tag: "blocked"}
         ]
       } + (if $r.routing != null then {
-        routing: {rules: [{type: "field", network: "udp", outboundTag: "blocked"}]}
+        routing: {rules: (if $selective then [
+          {type: "field", domain: $domains, network: "udp", outboundTag: "blocked"},
+          {type: "field", domain: $domains, network: "tcp", outboundTag: "padm-socks5"}
+        ] else [{type: "field", network: "udp", outboundTag: "blocked"}] end)}
       } else {} end) |
+      if $selective then
+        .inbounds |= map(.sniffing = {enabled: true, destOverride: ["http", "tls", "quic"], routeOnly: true})
+      else . end |
       if $r.accounts != null then
         # 独立账号按入口关联；统计身份不随认证凭据轮换。
         .inbounds |= map(. as $inbound |
@@ -1464,6 +1485,14 @@ dockerGenerateSingBoxConfig() {
     local specFile=$1 target=$2
     jq -n --slurpfile request "${specFile}" '
       $request[0] as $r |
+      (($r.routing.socks5 // {}) | has("domains")) as $selective |
+      ($r.routing.socks5.domains // []) as $domains |
+      ({
+        domain: [$domains[] | select(startswith("full:")) | ltrimstr("full:")],
+        domain_suffix: [$domains[] | select(startswith("domain:")) | ltrimstr("domain:")],
+        domain_keyword: [$domains[] | select(startswith("keyword:")) | ltrimstr("keyword:")],
+        rule_set: [$domains[] | select(startswith("geosite:")) | "padm-geosite-" + ltrimstr("geosite:")]
+      } | to_entries | map(select(.value | length > 0) | {(.key): .value})) as $matches |
       {
         log: {disabled: false, level: "warn", timestamp: true},
         inbounds: ([
@@ -1607,9 +1636,21 @@ dockerGenerateSingBoxConfig() {
           } else empty end),
           {type: "direct", tag: "direct"}
         ],
-        route: ({final: (if $r.routing != null then "padm-socks5" else "direct" end),
+        route: ({final: (if $r.routing != null and ($selective | not) then "padm-socks5" else "direct" end),
           auto_detect_interface: true} +
-          if $r.routing != null then {rules: [{network: "udp", action: "reject"}]} else {} end)
+          if $selective then
+            # 各类匹配分开成规则，域名与 rule-set 之间保持 OR，不改变实际目的地址。
+            {rules: ([{action: "sniff", timeout: "1s"}] +
+              [$matches[] | . + {network: "udp", action: "reject"}] +
+              [$matches[] | . + {network: "tcp", action: "route", outbound: "padm-socks5"}])} +
+            if ($matches | any(has("rule_set"))) then
+              {rule_set: [$domains[] | select(startswith("geosite:")) | ltrimstr("geosite:") |
+                {tag: ("padm-geosite-" + .), type: "remote", format: "binary",
+                  url: ("https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-" + . + ".srs"),
+                  http_client: {engine: "go"}}]}
+            else {} end
+          elif $r.routing != null then {rules: [{network: "udp", action: "reject"}]}
+          else {} end)
       } |
       if $r.accounts != null then
         .inbounds |= map(. as $inbound |

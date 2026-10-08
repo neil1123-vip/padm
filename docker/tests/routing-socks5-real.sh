@@ -3,7 +3,19 @@ set -Eeuo pipefail
 
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/padm-routing-real.XXXXXX")
-trap 'rm -rf -- "${TEST_ROOT}"' EXIT
+cleanup() {
+    local status=$? file
+    if [[ "${status}" -ne 0 ]]; then
+        for file in "${TEST_ROOT}"/*.log; do
+            [[ -f "${file}" ]] || continue
+            printf '\nrouting-fixture-log: %s\n' "${file##*/}" >&2
+            cat -- "${file}" >&2
+        done
+    fi
+    rm -rf -- "${TEST_ROOT}"
+    return "${status}"
+}
+trap cleanup EXIT
 [[ "$(id -u)" == 0 && "$(uname -s)" == Linux ]] || exit 1
 for tool in jq python3 setpriv; do command -v "${tool}" >/dev/null; done
 [[ -f /routing-cores/xray && -f /routing-cores/sing-box ]] || {
@@ -30,12 +42,21 @@ jq -n '
    host_integrations:[], routing:{socks5:{server:"192.0.2.1",port:1080,
      username:"fixture-user",password:"fixture-password"}}}
 ' >"${TEST_ROOT}/spec.json"
-dockerConfigureSpecValidate "${TEST_ROOT}/spec.json"
-dockerGenerateXrayConfig "${TEST_ROOT}/spec.json" "${TEST_ROOT}/xray.base"
-dockerGenerateSingBoxConfig "${TEST_ROOT}/spec.json" "${TEST_ROOT}/sing-box.base"
-for core in xray sing-box; do
-    dockerTrafficRender "${core}" "${TEST_ROOT}/${core}.base" \
-        '{"schema_version":1,"accounts":{}}' >"${TEST_ROOT}/${core}.json"
+jq '.routing.socks5.domains = [
+  "full:full-v4.padm.invalid", "full:full-v6.padm.invalid",
+  "domain:suffix-v4.padm.invalid", "domain:suffix-v6.padm.invalid",
+  "keyword:keyword-v4", "keyword:keyword-v6", "geosite:test"
+]' "${TEST_ROOT}/spec.json" >"${TEST_ROOT}/selective.spec.json"
+for mode in global selective; do
+    spec="${TEST_ROOT}/spec.json"
+    [[ "${mode}" != selective ]] || spec="${TEST_ROOT}/selective.spec.json"
+    dockerConfigureSpecValidate "${spec}"
+    dockerGenerateXrayConfig "${spec}" "${TEST_ROOT}/xray.${mode}.base"
+    dockerGenerateSingBoxConfig "${spec}" "${TEST_ROOT}/sing-box.${mode}.base"
+    for core in xray sing-box; do
+        dockerTrafficRender "${core}" "${TEST_ROOT}/${core}.${mode}.base" \
+            '{"schema_version":1,"accounts":{}}' >"${TEST_ROOT}/${core}.${mode}.json"
+    done
 done
 # 原生成器和流量渲染不改写；仅实流量夹具使用隔离回环上游与本地 SOCKS 测试入站。
 python3 "${PROJECT_ROOT}/docker/tests/routing-socks5-real.py" "${TEST_ROOT}"

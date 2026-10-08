@@ -128,7 +128,7 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 | 订阅与用户 | `supported` + `host-integrated` + `deferred` | 有条件的订阅发布、流量采集/额度、v3 独立账号规格与双核心认证/统计底座、账号 CLI/菜单事务、分享组与独立 token、账号/入口筛选、纯内容及 HTTPS 链接输出、主控管理与被控接入/手动同步 CLI/菜单、WireGuard 宿主集成 | HTTPS 链接仍要求受管 TLS；H3、业务备份恢复和完整多服务器工作流未迁移；真实双部署事务仍待验收，WireGuard 需 `net-wireguard`。 |
 | 协议与入口 | 部分 `supported`，管理工作流 `deferred` | `1` Reality Vision、`2` XHTTP、`3` Hysteria2、`4` AnyTLS、`5` NaiveProxy、`21` VLESS WS TLS、`22` VMess WS TLS、`23` VMess HTTPUpgrade TLS、`24` VLESS gRPC TLS、`25` Trojan gRPC TLS、`26` Reality gRPC、`27` TLS Vision fallback、`28` direct Trojan、`29` Trojan TLS fallback、`30` Shadowsocks、`31` TUIC 的配置运行、字段编辑、分享链接、多入口、Reality 传输派生、参数重生成和目标站管理 | XHTTP、VMess WS、gRPC TLS 和传统 TLS fallback 仅限 Xray，Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC 仅限 sing-box；HTTPUpgrade 支持两核心；完整协议管理、UDP 端口跳跃、Reality 443 共存、内部路由协议和 CDN 地址覆盖尚未开放；Fail2ban WS 增删及端口联动未交付。 |
 | 站点与证书 | 部分 `supported`，其余 `deferred` | TLS 文件安装、DNS-01 与 HTTP-01 standalone/受管 webroot 本地事务、Nginx WebSocket/HTTPUpgrade/gRPC HTTP/2 入口及传统 TLS fallback；默认页、静态目录、302 与逐入口 ALPN 事务管理 | 真实 Xray ALPN 协商、公网 CA、宿主生命周期及原生双架构验收待补。 |
-| 路由与访问控制 | `host-integrated` + `deferred` | WireGuard、TUN/TProxy 宿主集成合同；5B.1 两核心认证 SOCKS5 TCP 全局出站菜单/事务，UDP 目的流量显式阻断 | 完整 Socks/HTTP 入站、WARP、IPv6 调优、DNS/hosts、BT、访问控制和分流规则尚未迁移。 |
+| 路由与访问控制 | `host-integrated` + `deferred` | WireGuard、TUN/TProxy 宿主集成合同；5B.1–5B.2 两核心认证 SOCKS5 TCP 全局/域名出站菜单及事务，匹配 UDP 目的流量阻断 | 完整 Socks/HTTP 入站、WARP、IPv6 调优、DNS/hosts、BT、访问控制和其它分流策略尚未迁移。 |
 | 核心与服务 | `supported` + `deferred` | 基础状态、启动、停止、重启、日志、更新、回滚、配置校验、可信候选核心试跑与升级风险扫描、Xray Geo 状态/更新/每日任务 | 评估要求受管 spec；预发布须有匹配的可信发布资产，不现场构建；Geo 的本地合同及真实 amd64 解析/权限已验收，真实上游、生产重建、宿主调度和双架构生命周期另验；当前不是原生全部生命周期管理。 |
 | 系统与脚本 | `supported` + `host-integrated` + `unsupported` | `padm-docker update`、Fail2ban 宿主集成 | BBR/网络优化不由 Docker 修改宿主内核；Fail2ban 需 `net-fail2ban`。 |
 | 高级/危险操作 | `supported` + `unsupported` | 受管卸载、移除镜像、显式 purge | VLESS Encryption 实验尚未纳入 Docker 合同。 |
@@ -165,7 +165,7 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 
 | ID | 能力 | 原生入口 | Docker 状态 | Docker 边界 |
 | ---: | --- | --- | --- | --- |
-| 201 | Socks 中继 | 路由与访问控制 -> 分流工具 | `deferred` | 5B.1 已交付认证 TCP 出站；内部 Socks 入站和分流尚未迁移。 |
+| 201 | Socks 中继 | 路由与访问控制 -> 分流工具 | `deferred` | 5B.1–5B.2 已交付认证 TCP 全局/域名出站；内部 Socks 入站尚未迁移。 |
 | 202 | HTTP 中继 | 路由与访问控制 -> 分流工具 | `deferred` | 尚无内部 HTTP 入站合同。 |
 | 203 | WireGuard | 订阅与用户 / 路由与访问控制 | `host-integrated` | `net-wireguard`、host network、`NET_ADMIN`。 |
 | 204 | TUN | 路由与访问控制 | `host-integrated` | `net-transparent`、host network、`NET_ADMIN`、`/dev/net/tun`。 |
@@ -196,8 +196,8 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 | `wireguard` | 订阅与用户 / 路由与访问控制 | `host-integrated` | `net-wireguard` | host + `NET_ADMIN` | 接口和密钥由宿主内核拥有。 |
 | `tun` | 路由与访问控制 -> TUN | `host-integrated` | `net-transparent` | host + `NET_ADMIN` + `/dev/net/tun` | 显式启用透明代理设备。 |
 | `tproxy` | 路由与访问控制 -> Redirect/TProxy | `host-integrated` | `net-transparent` | host + `NET_ADMIN` | 依赖宿主路由和防火墙规则。 |
-| `routing-tools` | 路由与访问控制 -> WARP/IPv6/Socks5/DNS/BT/访问控制 | `deferred` | 核心 | bridge | 5B.1 已交付认证 SOCKS5 TCP 全局出站与失败恢复，UDP 显式阻断，不改宿主；其它策略待迁移。 |
-| `internal-201-socks-relay` | 路由与访问控制 -> Socks 中继 | `deferred` | 核心 | bridge | 5B.1 TCP 出站子能力已交付；SOCKS 入站和域名分流未交付，不作为公网节点。 |
+| `routing-tools` | 路由与访问控制 -> WARP/IPv6/Socks5/DNS/BT/访问控制 | `deferred` | 核心 | bridge | 5B.1–5B.2 已交付认证 SOCKS5 TCP 全局/域名出站与失败恢复，匹配 UDP 阻断、未匹配直连，不改宿主；其它策略待迁移。 |
+| `internal-201-socks-relay` | 路由与访问控制 -> Socks 中继 | `deferred` | 核心 | bridge | 5B.1–5B.2 TCP 出站子能力已交付；SOCKS 入站未交付，不作为公网节点；无域名可匹配的 IP 流量直连。 |
 | `internal-202-http-relay` | 路由与访问控制 -> HTTP 中继 | `deferred` | 无 | bridge | 内部能力 `202` 尚未迁移。 |
 | `internal-203-wireguard` | 订阅与用户 / 路由 -> WireGuard | `host-integrated` | `net-wireguard` | host + `NET_ADMIN` | 接口由宿主内核拥有；4C.3a 核验真实归属后预检/健康/撤销，活动旧式标记需先正常停止旧容器。 |
 | `internal-204-tun` | 路由与访问控制 -> TUN | `host-integrated` | `net-transparent` | host + `NET_ADMIN` + `/dev/net/tun` | 依赖宿主设备和转发规则。 |

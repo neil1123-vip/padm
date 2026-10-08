@@ -26,6 +26,8 @@ MODE=ok
 LOG=${TEST_ROOT}/command.log
 COMPOSE_LOG=${TEST_ROOT}/compose.log
 INPUT=${PRIVATE_ROOT}/socks5.json
+DOMAINS_INPUT=${PRIVATE_ROOT}/socks5-domains.json
+DOMAINS='["full:exact.example.com","full:other.example.com","domain:example.net","keyword:video","geosite:cn","geosite:category-ads-all"]'
 
 fail() {
     [[ ! -f "${LOG}" ]] || sed 's/^/  /' "${LOG}" >&2
@@ -101,6 +103,10 @@ jq -n --arg username "${USERNAME}" --arg password "${PASSWORD}" '
 chmod 0600 "${INPUT}"
 jq --slurpfile socks "${INPUT}" '.routing = {socks5:$socks[0]}' \
     "${TEST_ROOT}/base.json" >"${TEST_ROOT}/routed.json"
+jq --argjson domains "${DOMAINS}" '. + {domains:$domains}' "${INPUT}" >"${DOMAINS_INPUT}"
+chmod 0600 "${DOMAINS_INPUT}"
+jq --slurpfile socks "${DOMAINS_INPUT}" '.routing = {socks5:$socks[0]}' \
+    "${TEST_ROOT}/base.json" >"${TEST_ROOT}/domains.json"
 
 # 同批正反输入由两份校验合同独立判断，避免 Schema 与生产校验分歧。
 python3 - "${PROJECT_ROOT}" "${TEST_ROOT}" <<'PY'
@@ -113,6 +119,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 project, root = map(Path, sys.argv[1:])
 base = json.loads((root / "base.json").read_text())
 routed = json.loads((root / "routed.json").read_text())
+domains = json.loads((root / "domains.json").read_text())
 schema = json.loads((project / "docker/contracts/configure.schema.json").read_text())
 Draft202012Validator.check_schema(schema)
 validator = Draft202012Validator(schema, format_checker=FormatChecker())
@@ -125,6 +132,29 @@ def case(name, value, valid):
 
 case("legacy-v3", base, True)
 case("valid-dual", routed, True)
+case("valid-domains", domains, True)
+hostname = ".".join(("a" * 63, "b" * 63, "c" * 63, "d" * 61))
+for index, rules in enumerate((
+        ["full:" + hostname, "domain:" + hostname],
+        ["keyword:" + "a" * 253, "keyword:video_1.-"],
+        ["geosite:" + "a" * 64, "geosite:0_a-b"],
+        [f"full:host-{n}.example.com" for n in range(256)])):
+    value = copy.deepcopy(domains)
+    value["routing"]["socks5"]["domains"] = rules
+    case(f"valid-domains-boundary-{index}", value, True)
+for index, rules in enumerate((
+        None, "", {}, False, [], [1], [None], ["domain:example.com", "domain:example.com"],
+        ["DOMAIN:example.com"], ["full:Example.com"], ["geosite:CN"], ["example.com"],
+        ["full:"], ["domain:"], ["keyword:"], ["geosite:"], ["regexp:.*"], ["geoip:cn"],
+        ["full:-bad.example.com"], ["domain:bad-.example.com"], ["domain:a..example.com"],
+        ["full:example.com."], ["full:" + "a" * 64 + ".com"],
+        ["domain:" + hostname + "e"], ["keyword:" + "a" * 254],
+        ["keyword:a b"], ["keyword:a/b"], ["keyword:a:b"], ["keyword:a*"],
+        ["keyword:a\n"], ["keyword:\u00e9"], ["geosite:-cn"], ["geosite:a.b"],
+        ["geosite:" + "a" * 65], [f"full:host-{n}.example.com" for n in range(257)])):
+    value = copy.deepcopy(domains)
+    value["routing"]["socks5"]["domains"] = rules
+    case(f"invalid-domains-{index}", value, False)
 for core in ("xray", "sing-box"):
     value = copy.deepcopy(routed)
     value["core"] = dict(type=core, secondary_type=None,
@@ -236,15 +266,32 @@ done <"${TEST_ROOT}/cases.tsv"
 # 只有显式路由需要新版 bundle；无 routing 的旧规格保持兼容。
 dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/routed.json" ||
     fail '当前 bundle 拒绝 SOCKS5 路由能力'
+dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/domains.json" ||
+    fail '当前 bundle 拒绝 SOCKS5 域名路由能力'
 cp -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json" \
     "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved"
 jq 'del(."x-padm-routing-socks5")' \
     "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
     >"${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
 reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/routed.json"
+reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/domains.json"
 for version in 1 2 3; do
     dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/legacy-v${version}.json" ||
         fail "v${version}: 无 routing 规格被新版能力门禁误拒绝"
+done
+mv -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+cp -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json" \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved"
+jq 'del(."x-padm-routing-domains")' \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
+    >"${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/domains.json"
+dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/routed.json" ||
+    fail '旧 SOCKS5 bundle 被域名规则能力门禁误拒绝'
+for version in 1 2 3; do
+    dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/legacy-v${version}.json" ||
+        fail "v${version}: 无 routing 被域名规则能力门禁误拒绝"
 done
 mv -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
     "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
@@ -267,14 +314,16 @@ for version in 1 2; do
         "${TEST_ROOT}/legacy-sing-v${version}-core.json" >/dev/null ||
         fail "v${version}: 无 routing 改变旧 sing-box 默认出站"
 done
-for core in xray sing-box; do
-    if [[ "${core}" == xray ]]; then
-        dockerGenerateXrayConfig "${TEST_ROOT}/routed.json" "${TEST_ROOT}/routed-${core}.json"
-    else
-        dockerGenerateSingBoxConfig "${TEST_ROOT}/routed.json" "${TEST_ROOT}/routed-${core}.json"
-    fi
-    dockerTrafficRender "${core}" "${TEST_ROOT}/routed-${core}.json" \
-        '{"schema_version":1,"accounts":{}}' >"${TEST_ROOT}/runtime-${core}.json"
+for fixture in routed domains; do
+    for core in xray sing-box; do
+        if [[ "${core}" == xray ]]; then
+            dockerGenerateXrayConfig "${TEST_ROOT}/${fixture}.json" "${TEST_ROOT}/${fixture}-${core}.json"
+        else
+            dockerGenerateSingBoxConfig "${TEST_ROOT}/${fixture}.json" "${TEST_ROOT}/${fixture}-${core}.json"
+        fi
+        dockerTrafficRender "${core}" "${TEST_ROOT}/${fixture}-${core}.json" \
+            '{"schema_version":1,"accounts":{}}' >"${TEST_ROOT}/runtime-${fixture}-${core}.json"
+    done
 done
 jq -en --slurpfile old "${TEST_ROOT}/legacy-v3-xray.json" \
     --slurpfile new "${TEST_ROOT}/routed-xray.json" --slurpfile socks "${INPUT}" '
@@ -292,21 +341,103 @@ jq -en --slurpfile old "${TEST_ROOT}/legacy-sing-box.json" \
   $new[0].route.rules == [{network:"udp",action:"reject"}] and
   ($new[0] | .outbounds |= .[1:] | .route.final = "direct" | del(.route.rules)) == $old[0]
 ' >/dev/null || fail 'sing-box SOCKS5 默认出站或 UDP 拒绝合同改变其它配置'
-jq -en --slurpfile source "${TEST_ROOT}/routed-xray.json" \
-    --slurpfile runtime "${TEST_ROOT}/runtime-xray.json" '
-  $runtime[0].outbounds == $source[0].outbounds and
-  $runtime[0].routing.rules == [{type:"field",inboundTag:["padm-traffic-api"],
-    outboundTag:"padm-traffic-api"}] + $source[0].routing.rules
-' >/dev/null || fail '流量渲染没有保留 SOCKS5 路由或 API 规则不在首位'
-jq -en --slurpfile source "${TEST_ROOT}/routed-sing-box.json" \
-    --slurpfile runtime "${TEST_ROOT}/runtime-sing-box.json" '
-  $runtime[0].outbounds == $source[0].outbounds and $runtime[0].route == $source[0].route
-' >/dev/null || fail 'sing-box 流量渲染改变 SOCKS5 出站或 UDP 拒绝'
+jq -en --argjson domains "${DOMAINS}" --slurpfile old "${TEST_ROOT}/legacy-v3-xray.json" \
+    --slurpfile new "${TEST_ROOT}/domains-xray.json" --slurpfile global "${TEST_ROOT}/routed-xray.json" '
+  ($domains | map(if startswith("keyword:") then ltrimstr("keyword:") else . end)) as $xrayDomains |
+  $new[0].outbounds[0] == {protocol:"freedom",tag:"direct"} and
+  ($new[0].outbounds | map(select(.tag == "padm-socks5"))) == [$global[0].outbounds[0]] and
+  $new[0].routing.rules == [
+    {type:"field",domain:$xrayDomains,network:"udp",outboundTag:"blocked"},
+    {type:"field",domain:$xrayDomains,network:"tcp",outboundTag:"padm-socks5"}] and
+  all($new[0].inbounds[]; .sniffing.enabled == true and .sniffing.routeOnly == true and
+    (.sniffing.destOverride | index("http") != null and index("tls") != null)) and
+  ($new[0] | .outbounds |= map(select(.tag != "padm-socks5")) | del(.routing) |
+    .inbounds |= map(del(.sniffing))) == $old[0]
+' >/dev/null || fail 'Xray 选择性路由没有保留域名 OR、未匹配直连或路由专用嗅探'
+jq -en --slurpfile new "${TEST_ROOT}/domains-sing-box.json" \
+    --slurpfile global "${TEST_ROOT}/routed-sing-box.json" '
+  $new[0].route.final == "direct" and
+  ($new[0].outbounds | map(select(.tag == "padm-socks5"))) == [$global[0].outbounds[0]] and
+  $new[0].route.rules[0].action == "sniff" and
+  ($new[0].route.rule_set | map(.tag) | sort) ==
+    ["padm-geosite-category-ads-all","padm-geosite-cn"]
+' >/dev/null || fail 'sing-box 选择性路由没有保持认证出站、直连或规则集'
+# 用核心的匹配语义检查每类独立命中，防止不同 matcher 被错误组合成 AND。
+python3 - "${TEST_ROOT}/domains-sing-box.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+config = json.loads(Path(sys.argv[1]).read_text())
+keys = {"domain", "domain_suffix", "domain_keyword", "rule_set"}
+
+def matches(rule, domain, sets, network):
+    checks = []
+    if "network" in rule:
+        checks.append(network in ([rule["network"]] if isinstance(rule["network"], str)
+                                   else rule["network"]))
+    if rule.get("type") == "logical":
+        children = [matches(child, domain, sets, network) for child in rule["rules"]]
+        checks.append(any(children) if rule["mode"] == "or" else all(children))
+    for key in keys & rule.keys():
+        values = rule[key]
+        if key == "domain":
+            checks.append(domain in values)
+        elif key == "domain_suffix":
+            checks.append(any(domain == suffix or domain.endswith("." + suffix.lstrip("."))
+                              for suffix in values))
+        elif key == "domain_keyword":
+            checks.append(any(keyword in domain for keyword in values))
+        else:
+            checks.append(bool(sets & set(values)))
+    return bool(checks) and all(checks)
+
+def route(domain, sets, network):
+    for rule in config["route"]["rules"]:
+        if rule.get("action") == "sniff":
+            continue
+        if matches(rule, domain, sets, network):
+            return "blocked" if rule.get("action") == "reject" else rule.get("outbound")
+    return config["route"]["final"]
+
+requests = [
+    ("exact.example.com", set()), ("other.example.com", set()),
+    ("example.net", set()), ("sub.example.net", set()), ("myvideo.example.org", set()),
+    ("geo.example.org", {"padm-geosite-cn"}),
+    ("ads.example.org", {"padm-geosite-category-ads-all"}),
+]
+for domain, sets in requests:
+    assert route(domain, sets, "tcp") == "padm-socks5", (domain, "tcp")
+    assert route(domain, sets, "udp") == "blocked", (domain, "udp")
+for domain in ("sub.exact.example.com", "notexample.net", "unmatched.example.org"):
+    for network in ("tcp", "udp"):
+        assert route(domain, set(), network) == "direct", (domain, network)
+rule_sets = config["route"]["rule_set"]
+assert all(rule["type"] == "remote" and rule["format"] == "binary" and
+           rule["url"].startswith("https://raw.githubusercontent.com/SagerNet/sing-geosite/") and
+           rule["url"].endswith("/geosite-" + rule["tag"].removeprefix("padm-geosite-") + ".srs") and
+           rule["http_client"] == {"engine": "go"} and "download_detour" not in rule
+           for rule in rule_sets)
+PY
+for fixture in routed domains; do
+    jq -en --slurpfile source "${TEST_ROOT}/${fixture}-xray.json" \
+        --slurpfile runtime "${TEST_ROOT}/runtime-${fixture}-xray.json" '
+      $runtime[0].outbounds == $source[0].outbounds and
+      $runtime[0].routing.rules == [{type:"field",inboundTag:["padm-traffic-api"],
+        outboundTag:"padm-traffic-api"}] + $source[0].routing.rules
+    ' >/dev/null || fail "${fixture}: Xray API 规则没有优先于域名路由"
+    jq -en --slurpfile source "${TEST_ROOT}/${fixture}-sing-box.json" \
+        --slurpfile runtime "${TEST_ROOT}/runtime-${fixture}-sing-box.json" '
+      $runtime[0].outbounds == $source[0].outbounds and $runtime[0].route == $source[0].route
+    ' >/dev/null || fail "${fixture}: sing-box 流量渲染改变路由"
+done
 for generator in dockerGenerateCompose dockerGenerateDeployment; do
     "${generator}" "${TEST_ROOT}/base.json" "${TEST_ROOT}/legacy-generated.json"
-    "${generator}" "${TEST_ROOT}/routed.json" "${TEST_ROOT}/routed-generated.json"
-    cmp -s "${TEST_ROOT}/legacy-generated.json" "${TEST_ROOT}/routed-generated.json" ||
-        fail "${generator}: routing 意外改变容器能力或宿主端口"
+    for fixture in routed domains; do
+        "${generator}" "${TEST_ROOT}/${fixture}.json" "${TEST_ROOT}/routed-generated.json"
+        cmp -s "${TEST_ROOT}/legacy-generated.json" "${TEST_ROOT}/routed-generated.json" ||
+            fail "${generator}: ${fixture} 意外改变容器能力或宿主端口"
+    done
 done
 
 snapshot() (
@@ -352,10 +483,13 @@ jq -cn --arg uuid "${UUID}" '{schema_version:1,accounts:{($uuid):{
   name:"routing",upload:17,download:19,limit_bytes:0,baseline:{}}}}' | dockerTrafficWriteState
 before=$(snapshot)
 runStatus 0
-jq -e '. == {enabled:false,server:null,port:null,tcp:"direct",udp:"direct"}' "${LOG}" >/dev/null ||
+jq -e '. == {enabled:false,server:null,port:null,tcp:"direct",udp:"direct",mode:"direct",domain_rules:[]}' "${LOG}" >/dev/null ||
     fail '关闭路由诊断合同错误'
 runStatus 2 unexpected
 runEdit 0 --socks5 "${INPUT}" --preview
+runEdit 0 --socks5 "${DOMAINS_INPUT}" --preview
+runEdit 15 --socks5-domains 'example.net' --preview
+runEdit 15 --socks5-global --preview
 runEdit 2 --socks5 "${INPUT}" --socks5-off --preview
 runEdit 2 --socks5 "${INPUT}" --spec "${TEST_ROOT}/routed.json" --preview
 runEdit 2 --socks5 "${INPUT}" --http01 enable --preview
@@ -363,13 +497,32 @@ runEdit 2 --socks5 "${INPUT}" --socks5 "${INPUT}" --preview
 runEdit 2 --socks5-off --socks5-off --preview
 runEdit 2 --socks5 "${INPUT}" --confirm invalid
 runEdit 2 --socks5 "${INPUT}"
+runEdit 2 --socks5-domains
+runEdit 2 --socks5-domains 'example.net'
+runEdit 2 --socks5-domains 'example.net' --socks5-global --preview
+runEdit 2 --socks5-domains 'example.net' --socks5 "${INPUT}" --preview
+runEdit 2 --socks5-domains 'example.net' --socks5-off --preview
+runEdit 2 --socks5-domains 'example.net' --spec "${TEST_ROOT}/routed.json" --preview
+runEdit 2 --socks5-domains 'example.net' --http01 enable --preview
+runEdit 2 --socks5-domains 'example.net' --socks5-domains 'example.org' --preview
+runEdit 2 --socks5-global --socks5-global --preview
+runEdit 2 --socks5-global --socks5-off --preview
+runEdit 2 --socks5-global --socks5 "${INPUT}" --preview
+runEdit 2 --socks5-global --http01 enable --preview
+runEdit 2 --socks5-global --confirm invalid
+runEdit 2 --socks5-global
+for csv in '' ' ' ',example.net' 'example.net,' 'example.net,,cn' 'keyword:' \
+    'keyword:a b' 'keyword:a/b' 'full:-bad.example.com' 'geosite:a.b' 'unknown:example.net' \
+    'CN' 'category-ads-all'; do
+    runEdit 2 --socks5-domains "${csv}" --preview
+done
 runEdit 15 --spec "${TEST_ROOT}/routed.json" --confirm PADM-DOCKER-EDIT
 [[ "$(snapshot)" == "${before}" ]] || fail '路由预览、诊断或非法参数改变部署'
 (
     trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
     dockerSetupRead() { printf -v "$1" '%s' n; }
     dockerAcquireDeploymentLock
-    dockerConfigureApply "${TEST_ROOT}/routed.json" '' '' interactive
+    dockerConfigureApply "${TEST_ROOT}/domains.json" '' '' interactive
 ) >"${LOG}" 2>&1 || fail '路由确认取消失败'
 assertClean
 [[ "$(snapshot)" == "${before}" ]] || fail '路由取消改变规格、核心、凭据或流量'
@@ -445,23 +598,66 @@ jq '.routing.socks5.server = "203.0.113.10" | .routing.socks5.port = 1081' \
 runEdit 15 --spec "${TEST_ROOT}/routing-replacement.json" --confirm PADM-DOCKER-EDIT
 [[ "$(snapshot)" == "${before}" ]] || fail '普通 --spec 绕过路由专项冻结'
 runStatus 0
-jq -e '. == {enabled:true,server:"203.0.113.9",port:1080,tcp:"socks5",udp:"blocked"}' \
+jq -e '. == {enabled:true,server:"203.0.113.9",port:1080,tcp:"socks5",udp:"blocked",mode:"global",domain_rules:[]}' \
     "${LOG}" >/dev/null || fail '开启路由诊断合同错误'
+runEdit 0 --socks5 "${DOMAINS_INPUT}" --preview
+[[ "$(snapshot)" == "${before}" ]] || fail '选择性启用预览改变在线部署'
+runEdit 0 --socks5 "${DOMAINS_INPUT}" --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile expected "${TEST_ROOT}/domains.json" --slurpfile actual "${root}/config/spec.json" \
+    '$actual == $expected' >/dev/null || fail '私有文件选择性启用没有保留域名规则或其它规格'
+runStatus 0
+jq -e --argjson domains "${DOMAINS}" '
+  . == {enabled:true,server:"203.0.113.9",port:1080,tcp:"matched-socks5",
+        udp:"matched-blocked",mode:"domains",domain_rules:$domains}
+' "${LOG}" >/dev/null || fail '选择性路由诊断合同错误'
+before=$(snapshot)
+runEdit 15 --spec "${TEST_ROOT}/routed.json" --confirm PADM-DOCKER-EDIT
+replacementCsv=' Full:Exact.Example.Com , Example.NET , KEYWORD:Video , geosite:CN , geosite:category-ads-all , example.net '
+replacementDomains='["full:exact.example.com","domain:example.net","keyword:video","geosite:cn","geosite:category-ads-all"]'
+runEdit 0 --socks5-domains "${replacementCsv}" --preview
+runEdit 0 --socks5-global --preview
 runEdit 0 --socks5-off --preview
-[[ "$(snapshot)" == "${before}" ]] || fail '路由关闭预览或只读诊断改变在线部署'
+[[ "$(snapshot)" == "${before}" ]] || fail '规则替换、全局、关闭预览或只读诊断改变在线部署'
+runEdit 0 --socks5-domains "${replacementCsv}" --confirm PADM-DOCKER-EDIT
+jq -en --argjson domains "${replacementDomains}" --slurpfile old "${TEST_ROOT}/routed.json" \
+    --slurpfile new "${root}/config/spec.json" '
+  $new[0] == ($old[0] | .routing.socks5.domains = $domains)
+' >/dev/null || fail '规则替换没有 trim/lower/dedupe、裸域名归一化或改变凭据'
+[[ "$(stat -c '%a %u %h' "${root}/config/spec.json")" == '600 0 1' ]] ||
+    fail '替换域名规则改变私有规格权限'
+runStatus 0
+jq -e --argjson domains "${replacementDomains}" '
+  . == {enabled:true,server:"203.0.113.9",port:1080,tcp:"matched-socks5",
+        udp:"matched-blocked",mode:"domains",domain_rules:$domains}
+' "${LOG}" >/dev/null || fail '规则替换后状态没有返回规范化数组'
+before=$(snapshot)
 for failure in health-fail int term; do
     MODE=${failure}
     rm -f -- "${TEST_ROOT}/failed-once"
     expected=14
     [[ "${failure}" != int ]] || expected=130
     [[ "${failure}" != term ]] || expected=143
-    runEdit "${expected}" --socks5-off --confirm PADM-DOCKER-EDIT
+    case "${failure}" in
+    health-fail) runEdit "${expected}" --socks5-domains 'replacement.example.org' --confirm PADM-DOCKER-EDIT ;;
+    int) runEdit "${expected}" --socks5-global --confirm PADM-DOCKER-EDIT ;;
+    term) runEdit "${expected}" --socks5-off --confirm PADM-DOCKER-EDIT ;;
+    esac
     [[ "$(snapshot)" == "${before}" ]] || fail "${failure}: 路由事务未恢复完整部署及非空流量"
 done
 MODE=ok
+runEdit 0 --socks5-global --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile expected "${TEST_ROOT}/routed.json" --slurpfile actual "${root}/config/spec.json" \
+    '$actual == $expected' >/dev/null || fail '切换全局没有仅删除 domains 或改变凭据'
+runStatus 0
+jq -e '. == {enabled:true,server:"203.0.113.9",port:1080,tcp:"socks5",udp:"blocked",mode:"global",domain_rules:[]}' \
+    "${LOG}" >/dev/null || fail '切换全局后状态合同错误'
+runEdit 0 --socks5-domains 'example.net' --confirm PADM-DOCKER-EDIT
 runEdit 0 --socks5-off --confirm PADM-DOCKER-EDIT
 jq -e 'has("routing") | not' "${root}/config/spec.json" >/dev/null ||
     fail '关闭 SOCKS5 没有删除可选 routing 字段'
+runStatus 0
+jq -e '.mode == "direct" and .domain_rules == [] and .enabled == false' "${LOG}" >/dev/null ||
+    fail '关闭选择性路由后诊断没有恢复直连'
 for core in xray sing-box; do
     source="${TEST_ROOT}/legacy-sing-box.json"
     [[ "${core}" != xray ]] || source="${TEST_ROOT}/legacy-v3-xray.json"

@@ -220,7 +220,7 @@ padm-docker edit --alpn entry-fallback http/1.1 --confirm PADM-DOCKER-EDIT
 完整规格保存于 `/etc/padm-docker/config/spec.json`，由 root 持有、权限 `0600`；
 取消不提交，配置失败恢复旧规格、证书及 ACME 状态。该文件含秘密，不应打印或公开。
 
-Docker 菜单 `17. 路由与出站` 提供认证 SOCKS5 TCP 全局出站。先在 root 私有目录准备
+Docker 菜单 `17. 路由与出站` 提供认证 SOCKS5 TCP 全局或域名分流出站。先在 root 私有目录准备
 `0600` JSON 文件，内容为 `{"server":"192.0.2.10","port":1080,"username":"user","password":"secret"}`；
 这是格式示例，不是可用服务器。文件须单链接，所有祖先 root 所有且不可被组/其他用户写入，
 不接受 `/tmp`、符号链接或特殊文件，最大 64 KiB。地址先限可路由 IPv4/IPv6 字面量，
@@ -230,17 +230,29 @@ Docker 菜单 `17. 路由与出站` 提供认证 SOCKS5 TCP 全局出站。先�
 padm-docker edit --socks5 /root/padm-socks5.json --preview
 padm-docker edit --socks5 /root/padm-socks5.json --confirm PADM-DOCKER-EDIT
 padm-docker protocol routing-status
+padm-docker edit --socks5-domains 'example.net,full:exact.example.com,keyword:video,geosite:cn' --preview
+padm-docker edit --socks5-domains 'example.net,full:exact.example.com,keyword:video,geosite:cn' --confirm PADM-DOCKER-EDIT
+padm-docker edit --socks5-global --confirm PADM-DOCKER-EDIT
 padm-docker edit --socks5-off --confirm PADM-DOCKER-EDIT
 ```
 
 可选 v3 `.routing.socks5` 要求控制包声明 `x-padm-routing-socks5`；旧无路由规格保持直连。
 两核心的客户端 TCP 目的流量经认证上游，认证失败或上游断开不回退直连；
 客户端 UDP 目的流量显式阻断，不限制 Hysteria2/TUIC 承载 TCP 的 UDP 入口传输。
+私有 JSON 可额外包含 `domains` 数组，或启用后用菜单替换规则：`full:` 精确域名、
+`domain:` 域名及子域名、`keyword:` 安全 ASCII 关键字、`geosite:` 显式分类；最多 256 条。
+CSV 输入去除首尾空白、转小写并按首次出现去重，裸域名补 `domain:`，不猜分类标签；
+私有 JSON 中规则须已规范化。各类规则之间为 OR，匹配 TCP 经上游、匹配 UDP 阻断，
+未匹配 TCP/UDP 直连；无域名且无法嗅探的 IP 流量也直连，不是强制全局代理。
+`--socks5-global` 仅删除域名规则、保留上游及凭据，恢复全局出站。
+域名模式另要求 `x-padm-routing-domains`；Xray 使用受管或镜像 Geo 数据，
+sing-box 从固定 SagerNet 源直连下载所选分类，资源缺失或下载失败拒绝候选启动并恢复旧配置。
+状态返回 `mode` 和 `domain_rules`，不显示凭据；嗅探只选择路由，不改写实际目的地址。
 核心 Reality 握手、统计 API、控制服务、Nginx、证书及宿主自身流量不包含在此代理范围。
 不增加监听端口、宿主权限或防火墙规则，暂不与 TUN/TProxy 组合。
 启用、替换与关闭复用候选、确认、备份及失败/信号恢复，状态和预览不显示凭据；
 凭据保存在私有规格、受管核心配置及备份中。SOCKS5 认证链路本身不加密，须使用可信上游网络。
-完整 SOCKS 入站、域名分流、DNS/WARP 和其它路由策略仍待迁移。
+完整 SOCKS 入站、DNS/WARP 和其它路由策略仍待迁移。
 
 完整 v3 `configure` 规格可选 `accounts`，用于追加 1–256 个独立账号，不替换原自用账号。
 每项必须包含 `id`、`name`、`enabled`、`uuid`、`password`、`shadowsocks_password` 和

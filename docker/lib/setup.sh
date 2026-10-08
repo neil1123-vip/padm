@@ -787,8 +787,20 @@ dockerEditSocks5InputCopy() (
         chmod 0600 "${target}" &&
         [[ "$(stat -c '%s' -- "${target}")" -le 65536 ]] &&
         jq -es 'length == 1 and (.[0] | type == "object" and
-          keys == ["password", "port", "server", "username"])' "${target}" >/dev/null 2>&1
+          keys == (["password", "port", "server", "username"] +
+            if has("domains") then ["domains"] else [] end | sort))' "${target}" >/dev/null 2>&1
 )
+
+dockerSocks5DomainsNormalize() {
+    jq -ecn --arg input "$1" --slurpfile schema "$(dockerConfigureSchemaFile)" '
+      $schema[0].properties.routing.properties.socks5.properties.domains as $contract |
+      ($input | split(",") | map(gsub("^\\s+|\\s+$"; "") | ascii_downcase |
+        if contains(":") then . else "domain:" + . end)) |
+      reduce .[] as $rule ([]; if index($rule) == null then . + [$rule] else . end) |
+      select(length >= $contract.minItems and length <= $contract.maxItems and
+        all(.[]; . as $rule | any($contract.items.anyOf[]; .pattern as $pattern | $rule | test($pattern))))
+    ' 2>/dev/null
+}
 
 dockerProtocolCommand() (
     local action=${1:-} listener= root workspace original normalized selected status targetAction=
@@ -870,8 +882,13 @@ dockerProtocolCommand() (
     if [[ "${action}" == routing-status ]]; then
         jq '{enabled:(.routing != null), server:(.routing.socks5.server // null),
           port:(.routing.socks5.port // null),
-          tcp:(if .routing != null then "socks5" else "direct" end),
-          udp:(if .routing != null then "blocked" else "direct" end)}' "${normalized}"
+          mode:(if .routing == null then "direct"
+            elif .routing.socks5 | has("domains") then "domains" else "global" end),
+          domain_rules:(.routing.socks5.domains // []),
+          tcp:(if .routing == null then "direct"
+            elif .routing.socks5 | has("domains") then "matched-socks5" else "socks5" end),
+          udp:(if .routing == null then "direct"
+            elif .routing.socks5 | has("domains") then "matched-blocked" else "blocked" end)}' "${normalized}"
         return $?
     fi
     if [[ "${action}" == list ]]; then
@@ -1286,7 +1303,7 @@ dockerEditCommand() {
     local streamDomains= streamAddress= streamPort=8443
     local siteMode= siteSource= siteUrl=
     local alpnListener= alpnOrder=
-    local http01= socks5= socks5File=
+    local http01= socks5= socks5File= socks5Domains=
     local DOCKER_CONFIG_RESTORE_ALPN_LISTENER=
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
@@ -1329,6 +1346,18 @@ dockerEditCommand() {
         --socks5-off)
             [[ -z "${socks5}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             socks5=disable
+            shift
+            ;;
+        --socks5-domains)
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${socks5}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            socks5Domains=$(dockerSocks5DomainsNormalize "$2") || return "${PADM_DOCKER_RC_USAGE}"
+            socks5=domains
+            shift 2
+            ;;
+        --socks5-global)
+            [[ -z "${socks5}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            socks5=global
             shift
             ;;
         --alpn)
@@ -1508,6 +1537,17 @@ dockerEditCommand() {
             return "${PADM_DOCKER_RC_STATE}"
     elif [[ "${socks5}" == disable ]]; then
         jq 'del(.routing)' "${draft}" >"${draft}.next" &&
+            chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
+            return "${PADM_DOCKER_RC_STATE}"
+    elif [[ "${socks5}" == domains || "${socks5}" == global ]]; then
+        jq -e '.routing.socks5 != null' "${draft}" >/dev/null || {
+            dockerError '请先启用认证 SOCKS5 出站，再替换域名规则或恢复全局'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        jq --arg action "${socks5}" --argjson domains "${socks5Domains:-[]}" '
+          if $action == "global" then del(.routing.socks5.domains)
+          else .routing.socks5.domains = $domains end
+        ' "${draft}" >"${draft}.next" &&
             chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
             return "${PADM_DOCKER_RC_STATE}"
     fi
