@@ -694,10 +694,12 @@ dockerEditPreview() {
     printf '\n配置差异（不显示账号、密钥、路径或 token 的值）：\n'
     jq -rn --slurpfile before "${original}" --slurpfile after "${draft}" '
       $before[0] as $old | $after[0] as $new |
-      [($old | paths(scalars)), ($new | paths(scalars))] | unique |
-      .[] as $path |
-      select(($old | getpath($path)) != ($new | getpath($path))) |
-      ($path | map(tostring) | join(".")) | "  修改: \(.)"
+      ([($old | paths(scalars)), ($new | paths(scalars))] | unique |
+        .[] as $path |
+        select(($old | getpath($path)) != ($new | getpath($path))) |
+        ($path | map(tostring) | join(".")) | "  修改: \(.)"),
+      (select($old.site != $new.site) |
+        "  站点模式: \($old.site.mode // "legacy") -> \($new.site.mode // "legacy")")
     ' || return 1
     jq -r '.core.protocols[] |
       "  入口 \(.listener_id // (.id | tostring))，核心 \(.core // "未迁移")，协议 \(.id): \(.server):\(.public_port) [\(.address_families | join(","))]"' \
@@ -935,7 +937,9 @@ dockerEditFields() {
                   elif any(.core.protocols[]; .id == 21) then .
                   elif any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 28 or .id == 29 or .id == 31) then .subscription.enabled = false
                   else .tls = null | .subscription.enabled = false end |
-                  .core.secondary_type = ([.core.protocols[] | select(.core != $primary) | .core] | first // null)
+                  .core.secondary_type = ([.core.protocols[] | select(.core != $primary) | .core] | first // null) |
+                  if any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29)
+                  then . else del(.site) end
                 ' "${draft}" >"${temporary}" 2>/dev/null || {
                     dockerError '主核心至少保留一个入口；删除副核心的最后入口会关闭副核心'
                     return 1
@@ -1183,6 +1187,7 @@ dockerEditCommand() {
     local realityTarget= targetHost= targetPort= targetSni=
     local realityStream= streamListener= streamWebsite=
     local streamDomains= streamAddress= streamPort=8443
+    local siteMode= siteSource= siteUrl=
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
         --spec|--manifest|--bundle|--control-bundle)
@@ -1194,6 +1199,21 @@ dockerEditCommand() {
             --control-bundle) controlBundle=$2 ;;
             esac
             shift 2
+            ;;
+        --site-static|--site-redirect)
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${siteMode}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            if [[ "$1" == --site-static ]]; then
+                siteMode=static siteSource=$2
+            else
+                siteMode=redirect siteUrl=$2
+            fi
+            shift 2
+            ;;
+        --site-default)
+            [[ -z "${siteMode}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            siteMode=default
+            shift
             ;;
         --regenerate-reality)
             [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${regenerateReality}" ]] ||
@@ -1257,6 +1277,11 @@ dockerEditCommand() {
         dockerError 'Reality 专项编辑不能与规格导入或另一专项动作组合'
         return "${PADM_DOCKER_RC_USAGE}"
     }
+    [[ -z "${siteMode}" || ( -z "${specFile}" && -z "${regenerateReality}" &&
+        -z "${realityTarget}" && -z "${realityStream}" ) ]] || {
+        dockerError '站点专项编辑不能与规格导入或 Reality 专项动作组合'
+        return "${PADM_DOCKER_RC_USAGE}"
+    }
     [[ "${mode}" != interactive || ( -t 0 && -t 1 ) ]] || {
         dockerError '非交互编辑需要 --preview 或 --confirm PADM-DOCKER-EDIT'
         return "${PADM_DOCKER_RC_USAGE}"
@@ -1266,7 +1291,8 @@ dockerEditCommand() {
     dockerComposeFile >/dev/null || return "${PADM_DOCKER_RC_STATE}"
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     dockerTrafficSafePath "${root}" "${root}/config/spec.json" || return "${PADM_DOCKER_RC_STATE}"
-    [[ ( -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" ) || -f "${root}/config/spec.json" ]] ||
+    [[ ( -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" &&
+        -z "${siteMode}" ) || -f "${root}/config/spec.json" ]] ||
         return "${PADM_DOCKER_RC_STATE}"
     if [[ ! -e "${root}/config/spec.json" && ! -L "${root}/config/spec.json" && -z "${specFile}" ]]; then
         if [[ "${mode}" == interactive ]]; then
@@ -1316,7 +1342,8 @@ dockerEditCommand() {
         mv -f -- "${draft}.v3" "${draft}" || return "${PADM_DOCKER_RC_STATE}"
     # 旧规格先接入，不能同时把未经证明的字段改动当作无损导入。
     if [[ "${mode}" == interactive && -z "${specFile}" && "${imported}" -eq 0 &&
-        -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" ]]; then
+        -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" &&
+        -z "${siteMode}" ]]; then
         dockerEditFields "${draft}" || status=$?
         if [[ "${status}" -eq 3 ]]; then
             printf '已取消配置编辑。\n'
@@ -1328,6 +1355,24 @@ dockerEditCommand() {
     fi
     jq -es 'length == 1 and (.[0] | type == "object")' "${draft}" >/dev/null 2>&1 ||
         return "${PADM_DOCKER_RC_STATE}"
+    if [[ -n "${siteMode}" ]]; then
+        [[ -z "${siteSource}" ]] ||
+            siteSource=$(dockerSiteSourceValidate "${siteSource}") || return "${PADM_DOCKER_RC_STATE}"
+        jq --arg mode "${siteMode}" --arg url "${siteUrl}" '
+          .site = if $mode == "redirect" then {mode:$mode, url:$url} else {mode:$mode} end
+        ' "${draft}" >"${draft}.next" &&
+            chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
+            return "${PADM_DOCKER_RC_STATE}"
+    fi
+    jq -en --arg mode "${siteMode}" --slurpfile before "${normalized}" --slurpfile after "${draft}" '
+      if $mode != "" or $before[0].site != $after[0].site then
+        any($before[0].core.protocols[];
+          .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29)
+      else true end
+    ' >/dev/null 2>&1 || {
+        dockerError '站点管理需要已有 Nginx TLS 或 fallback 入口'
+        return "${PADM_DOCKER_RC_STATE}"
+    }
     if [[ -n "${realityStream}" ]]; then
         jq --arg action "${realityStream}" --arg listener "${streamListener}" --arg website "${streamWebsite}" \
             --arg domains "${streamDomains}" --arg address "${streamAddress}" --argjson port "${streamPort}" '
@@ -1394,9 +1439,10 @@ dockerEditCommand() {
         printf '仅重生成入口 %s 的 Reality 密钥及 short ID；提交后需重新导入该入口链接。\n' "${regenerateReality}"
     fi
     dockerEditPreview "${original}" "${draft}" || return "${PADM_DOCKER_RC_STATE}"
+    [[ -z "${siteSource}" ]] || printf '静态站点内容将使用已校验目录更新；源路径不会写入规格。\n'
     [[ "${imported}" -eq 0 ]] || printf '完整原始规格已匹配，确认后接入受管输入。\n'
     jq -en --arg regenerate "${regenerateReality}" --arg target "${realityTarget}" --arg stream "${realityStream}" \
-        --slurpfile before "${normalized}" --slurpfile after "${draft}" '
+        --arg site "${siteMode}" --slurpfile before "${normalized}" --slurpfile after "${draft}" '
       def fixed: del(.server, .public_port, .address_families, .name,
         .reality.target_host, .reality.target_port, .reality.server_name, .websocket.path, .httpupgrade.path,
         .xhttp.path, .xhttp.host, .xhttp.mode, .grpc.service_name, .grpc_tls.service_name,
@@ -1405,7 +1451,7 @@ dockerEditCommand() {
         if .listener_id == $regenerate then del(.reality.private_key, .reality.public_key, .reality.short_id) else . end;
       def reality: .id == 1 or .id == 2 or .id == 26;
       def shared: fixed | del(.listener_id, .core, .id, .xhttp, .grpc);
-      def root: del(.core.protocols, .core.secondary_type, .tls, .subscription.enabled);
+      def root: del(.core.protocols, .core.secondary_type, .tls, .subscription.enabled, .site);
       def special: .core.protocols |= map(
         if $regenerate != "" and .listener_id == $regenerate then
           del(.reality.private_key, .reality.public_key, .reality.short_id)
@@ -1422,7 +1468,9 @@ dockerEditCommand() {
           . as $bound | any($new.core.protocols[];
             .listener_id == $bound.listener_id and .core == $bound.core and
             .public_port == $bound.public_port and .address_families == $bound.address_families))) and
-      (if $stream != "" then
+      (if $site != "" then
+        ($old | del(.site)) == ($new | del(.site))
+       elif $stream != "" then
         ($old | del(.reality_stream)) == ($new | del(.reality_stream))
        else
       (if $regenerate != "" or $target != "" then
@@ -1459,7 +1507,7 @@ dockerEditCommand() {
         end)
        end)
     ' >/dev/null 2>&1 || {
-        dockerError '仅支持现有入口编辑、复制、Reality 传输派生和删除；账号、密钥、已有入口身份、内部端口与核心、主核心、证书和发布不能改写'
+        dockerError '仅支持站点管理与现有入口编辑、复制、Reality 传输派生和删除；账号、密钥、已有入口身份、内部端口与核心、主核心、证书和发布不能改写'
         return "${PADM_DOCKER_RC_STATE}"
     }
     opsImage=$(dockerManifestImageReference ops) || return "${PADM_DOCKER_RC_MANIFEST}"
@@ -1472,5 +1520,5 @@ dockerEditCommand() {
         }
     done < <(jq -r '.core.protocols[] | select(.id == 1 or .id == 2 or .id == 26) |
       [.reality.private_key, .reality.public_key] | @tsv' "${draft}")
-    dockerConfigureApply "${draft}" '' '' "${mode}"
+    dockerConfigureApply "${draft}" '' '' "${mode}" '' "${siteSource}"
 }

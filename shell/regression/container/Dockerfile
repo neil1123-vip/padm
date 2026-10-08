@@ -15,6 +15,9 @@ COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/ /usr/local/libexec/docker/cli-plugins/
 COPY --from=docker-daemon /usr/local/bin/dockerd /usr/local/bin/containerd /usr/local/bin/containerd-shim-runc-v2 /usr/local/bin/ctr /usr/local/bin/runc /usr/local/bin/docker-init /usr/local/bin/docker-proxy /usr/local/bin/
 COPY --from=jq /jq /usr/local/bin/jq
+RUN apt-get -o Acquire::Retries=3 update \
+    && apt-get -o Acquire::Retries=3 install -y --no-install-recommends nginx \
+    && rm -rf /var/lib/apt/lists/*
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/padm-regression
 
 WORKDIR /work

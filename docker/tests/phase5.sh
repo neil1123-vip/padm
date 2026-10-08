@@ -829,6 +829,15 @@ done
 grep -Fq 'workflow_call:' "${BUILD_WORKFLOW}" || fail 'build workflow is not reusable'
 grep -Fq 'sudo env TMPDIR=/tmp PADM_REGRESSION_PARALLEL_JOBS=2 bash shell/subscription_groups_regression.sh "${SELECTOR}"' "${CONTRACT_WORKFLOW}" ||
     fail 'contract shards do not use root-safe temp directories and bounded workers'
+for siteContract in \
+    'docker build --tag padm-regression:contracts shell/regression/container' \
+    'git ls-files -z | tar --null -T - -cf' \
+    'docker run --rm --network none --init' \
+    '--env PADM_REGRESSION_PARALLEL_JOBS=2' \
+    'padm-regression:contracts "${SELECTOR}"'; do
+    grep -Fq -- "${siteContract}" "${CONTRACT_WORKFLOW}" ||
+        fail '站点合同未复用隔离工具镜像、当前源码快照或有界并发'
+done
 if grep -Fq 'subscription_groups_regression.sh docker-contracts' "${BUILD_WORKFLOW}"; then
     fail 'image workflow repeats the contract suite'
 fi

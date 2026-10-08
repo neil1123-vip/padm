@@ -110,8 +110,19 @@ dockerConfigureSpecValidate() {
         (if has("reality_stream") then ["reality_stream"] else [] end) +
         (if has("accounts") then ["accounts"] else [] end) +
         (if has("control_sync") then ["control_sync"] else [] end) +
-        (if has("control") then ["control"] else [] end)) and
+        (if has("control") then ["control"] else [] end) +
+        (if has("site") then ["site"] else [] end)) and
       (.schema_version == 1 or .schema_version == 2 or .schema_version == 3) and
+      (if has("site") then
+        .schema_version == 3 and
+        any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29) and
+        (.site |
+          if .mode == "default" or .mode == "static" then exact(["mode"])
+          elif .mode == "redirect" then exact(["mode", "url"]) and
+            (.url | type == "string" and length <= 2048 and
+              test("^https?://(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?|\\[[A-Fa-f0-9:]+\\])(?::(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(?:[/?#][A-Za-z0-9._~:/?#@!&(),%+=-]*)?$"))
+          else false end)
+       else true end) and
       (if has("accounts") then
         .schema_version == 3 and
         (.accounts | type == "array" and length >= 1 and length <= 256 and
@@ -1508,6 +1519,140 @@ dockerStageTlsFiles() {
     done
 }
 
+dockerSiteTreeValidate() {
+    local directory=$1 unsafe
+    [[ -d "${directory}" && ! -L "${directory}" ]] &&
+        unsafe=$(find "${directory}" \( ! -type f ! -type d \) -print -quit) &&
+        [[ -z "${unsafe}" ]] &&
+        unsafe=$(find "${directory}" -type f -links +1 -print -quit) &&
+        [[ -z "${unsafe}" ]]
+}
+
+dockerSiteSourceValidate() {
+    local source=$1 root path mode relative file
+    while [[ "${source}" == */ ]]; do source=${source%/}; done
+    [[ -n "${source}" ]] || return 1
+    [[ "${source}" == /* ]] || source="${PWD}/${source}"
+    dockerPathIsSafeAbsolute "${source}" && [[ -d "${source}" ]] || return 1
+    path=${source}
+    while [[ "${path}" != / ]]; do
+        [[ -d "${path}" && ! -L "${path}" ]] &&
+            [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == 1 || -O "${path}" ]] || return 1
+        mode=$(stat -c %a -- "${path}") || return 1
+        # root 所有的 sticky 临时目录不能被其它用户重命名；下级仍须禁止外部写入。
+        (( (8#${mode} & 022) == 0 || (8#${mode} & 01000) != 0 )) || return 1
+        path=$(dirname -- "${path}")
+    done
+    source=$(cd -- "${source}" && pwd -P) || return 1
+    mode=$(stat -c %a -- "${source}") || return 1
+    (( (8#${mode} & 022) == 0 )) || return 1
+    root=$(dockerInstallRoot) || return 1
+    [[ "${source}" != "${root}" && "${source}" != "${root%/}/"* &&
+        "${root}" != "${source%/}/"* ]] || return 1
+    dockerSiteTreeValidate "${source}" &&
+        [[ -f "${source}/index.html" && -s "${source}/index.html" ]] || return 1
+    while IFS= read -r -d '' file; do
+        [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == 1 || -O "${file}" ]] || return 1
+        mode=$(stat -c %a -- "${file}") || return 1
+        (( (8#${mode} & 022) == 0 )) || return 1
+        relative=${file#"${source}/"}
+        [[ "${relative}" =~ ^[A-Za-z0-9_-][A-Za-z0-9._~@+=,-]*(/[A-Za-z0-9_-][A-Za-z0-9._~@+=,-]*)*$ ]] || return 1
+        case "/${relative,,}/" in
+        */secrets/*|*/acme/*|*/control/*|*/spec.json/*|*/state.json/*|*/deployment.json/*|*/accounts.json/*) return 1 ;;
+        esac
+        if [[ -f "${file}" ]]; then
+            case "${file##*.}" in
+            html|htm|css|js|mjs|json|txt|xml|svg|png|jpg|jpeg|gif|webp|avif|ico|woff|woff2|ttf|otf|eot|wasm|pdf|mp3|mp4|webm|map) ;;
+            *) return 1 ;;
+            esac
+            # 静态资源也不能包含可识别的 PEM 私钥，不能把公开扩展名当保密证明。
+            if grep -aqE -- '-----BEGIN ([A-Z0-9]+ )*PRIVATE KEY-----' "${file}"; then
+                return 1
+            elif [[ "$?" -ne 1 ]]; then
+                return 1
+            fi
+        fi
+    done < <(find "${source}" -mindepth 1 -print0)
+    printf '%s\n' "${source}"
+}
+
+dockerSiteStateValidate() {
+    local specFile=$1 directory=$2
+    dockerSiteTreeValidate "${directory}/data/static" || return 1
+    if jq -e '.site.mode == "static"' "${specFile}" >/dev/null; then
+        [[ -f "${directory}/data/static/index.html" && -s "${directory}/data/static/index.html" ]] || return 1
+    fi
+}
+
+dockerStageSiteFiles() {
+    local specFile=$1 candidate=$2 source=${3:-} root
+    root=$(dockerInstallRoot) || return 1
+    if [[ -n "${source}" ]]; then
+        jq -e '.site.mode == "static"' "${specFile}" >/dev/null &&
+            source=$(dockerSiteSourceValidate "${source}") || return 1
+    else
+        source="${root}/data/static"
+    fi
+    if [[ -e "${source}" || -L "${source}" ]]; then
+        dockerSiteTreeValidate "${source}" &&
+            cp -a -- "${source}/." "${candidate}/data/static/" || return 1
+    fi
+    dockerSiteStateValidate "${specFile}" "${candidate}"
+}
+
+dockerGenerateSiteLocations() {
+    local specFile=$1 target=$2 legacy=${3:-tls} mode url
+    mode=$(jq -r '.site.mode // "legacy"' "${specFile}") || return 1
+    [[ "${mode}" != legacy || "${legacy}" == fallback ]] || return 0
+    if [[ "${legacy}" == fallback ]]; then
+        [[ "${mode}" != legacy ]] || printf '    root /srv/padm;\n' >>"${target}" || return 1
+        printf '    access_log /var/log/nginx/access.log padm_fallback;\n' >>"${target}" || return 1
+    fi
+    if [[ "${mode}" == redirect ]]; then
+        url=$(jq -er '.site.url' "${specFile}") || return 1
+        printf '\n    location / {\n        return 302 "%s";\n    }\n' "${url}" >>"${target}"
+    elif [[ "${mode}" == default ]]; then
+        cat >>"${target}" <<'EOF'
+
+    location / {
+        default_type text/html;
+        return 200 '<!doctype html><title>Welcome</title><h1>Welcome</h1>';
+    }
+EOF
+    else
+        if [[ "${mode}" == static ]]; then
+            cat >>"${target}" <<'EOF'
+    root /srv/padm;
+
+    location ~ (^|/)\. {
+        return 404;
+    }
+EOF
+        fi
+        cat >>"${target}" <<'EOF'
+
+    location = / {
+        try_files /index.html @padm_fallback;
+    }
+
+    location / {
+        try_files $uri =404;
+    }
+EOF
+        if [[ "${mode}" == static ]]; then
+            printf '\n    location @padm_fallback {\n        return 404;\n    }\n' >>"${target}"
+        else
+            cat >>"${target}" <<'EOF'
+
+    location @padm_fallback {
+        default_type text/html;
+        return 200 '<!doctype html><title>Welcome</title><h1>Welcome</h1>';
+    }
+EOF
+        fi
+    fi
+}
+
 dockerGenerateNginxConfig() {
     local specFile=$1 target=$2 domain path token subscriptionEnabled fail2banEnabled backendPort tlsPort backendCore protocolId hostHeader
     local httpPort http2Port
@@ -1543,21 +1688,9 @@ server {
     listen ${httpPort} proxy_protocol;
     listen [::]:${httpPort} proxy_protocol;
     server_name ${domain};
-    root /srv/padm;
-    access_log /var/log/nginx/access.log padm_fallback;
-
-    location = / {
-        try_files /index.html @padm_fallback;
-    }
-
-    location / {
-        try_files \$uri =404;
-    }
-
-    location @padm_fallback {
-        default_type text/html;
-        return 200 '<!doctype html><title>Welcome</title><h1>Welcome</h1>';
-    }
+EOF
+        dockerGenerateSiteLocations "${specFile}" "${target}" fallback || return 1
+        cat >>"${target}" <<EOF
 }
 
 server {
@@ -1565,21 +1698,9 @@ server {
     listen [::]:${http2Port} proxy_protocol;
     http2 on;
     server_name ${domain};
-    root /srv/padm;
-    access_log /var/log/nginx/access.log padm_fallback;
-
-    location = / {
-        try_files /index.html @padm_fallback;
-    }
-
-    location / {
-        try_files \$uri =404;
-    }
-
-    location @padm_fallback {
-        default_type text/html;
-        return 200 '<!doctype html><title>Welcome</title><h1>Welcome</h1>';
-    }
+EOF
+        dockerGenerateSiteLocations "${specFile}" "${target}" fallback || return 1
+        cat >>"${target}" <<EOF
 }
 EOF
     done < <(jq -r '[.core.protocols[] | select(.id == 27 or .id == 29) |
@@ -1637,6 +1758,7 @@ EOF
     }
 EOF
     fi
+        dockerGenerateSiteLocations "${specFile}" "${target}" || return 1
         printf '}\n' >>"${target}" || return 1
     done < <(jq -r '.core.type as $core |
       .core.protocols[] | select(.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25) |
@@ -2239,6 +2361,7 @@ dockerPrepareCandidatePermissions() {
         dockerError '候选权限准备拒绝符号链接'
         return 1
     }
+    dockerSiteTreeValidate "${candidate}/data/static" || return 1
     if [[ -e "${candidate}/config/spec.json" || -L "${candidate}/config/spec.json" ]]; then
         [[ -f "${candidate}/config/spec.json" && ! -L "${candidate}/config/spec.json" ]] || return 1
         chmod 0600 "${candidate}/config/spec.json" || return 1
@@ -2256,7 +2379,7 @@ dockerPrepareCandidatePermissions() {
     if [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" != "1" ]]; then
         find "${candidate}/config" ! -path "${candidate}/config/spec.json" ! -name share-groups.json ! -name users.base \
             -exec chown "0:${PADM_DOCKER_CONTAINER_GID}" {} + || return 1
-        chown -R "0:${PADM_DOCKER_CONTAINER_GID}" "${candidate}/data/subscription" \
+        chown -R "0:${PADM_DOCKER_CONTAINER_GID}" "${candidate}/data/subscription" "${candidate}/data/static" \
             "${candidate}/logs" "${candidate}/secrets" || return 1
         chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" \
             "${candidate}/logs/nginx" || return 1
@@ -2276,7 +2399,7 @@ dockerPrepareCandidatePermissions() {
 }
 
 dockerGenerateCandidate() {
-    local specFile=$1 candidate=$2 tlsSource=${3:-} acmeSource=${4:-} businessSource=${5:-} root core token sharesSource=''
+    local specFile=$1 candidate=$2 tlsSource=${3:-} acmeSource=${4:-} businessSource=${5:-} siteSource=${6:-} root core token sharesSource=''
     root=$(dockerInstallRoot) || return 1
     local previous=
     if jq -e 'has("control")' "${specFile}" >/dev/null &&
@@ -2304,6 +2427,7 @@ dockerGenerateCandidate() {
             [[ -z "$(find "${acmeSource}" -type l -print -quit)" ]] || return 1
         cp -a -- "${acmeSource}/." "${candidate}/data/acme/" || return 1
     fi
+    dockerStageSiteFiles "${specFile}" "${candidate}" "${siteSource}" || return 1
     dockerGenerateNginxConfig "${specFile}" "${candidate}/config/nginx/default.conf" || return 1
     dockerGenerateRealityStreamConfig "${specFile}" "${candidate}/config/nginx/stream/reality.conf" || return 1
     dockerGenerateRealityStreamMain "${specFile}" "${candidate}/config/nginx/stream/host-main" || return 1
@@ -2403,6 +2527,13 @@ dockerValidateCandidate() {
     local specFile=$1 candidate=$2 core domain jsonFile image tlsDomains='[]' domains
     local nginxCheckFile="${2}/compose.nginx-check.json" nginxStatus=0
     local -a nginxCheckArgs=()
+    if [[ -e "${candidate}/data/static" || -L "${candidate}/data/static" ]] ||
+        jq -e 'has("site")' "${specFile}" >/dev/null; then
+        dockerSiteStateValidate "${specFile}" "${candidate}" || {
+            dockerError '候选站点目录或静态首页无效'
+            return 1
+        }
+    fi
     while IFS= read -r jsonFile; do
         [[ -s "${jsonFile}" ]] && jq empty "${jsonFile}" >/dev/null 2>&1 || {
             dockerError "候选 JSON 配置无效: ${jsonFile}"
@@ -2565,6 +2696,9 @@ dockerBackupConfiguration() {
     root=$(dockerInstallRoot) || return 1
     [[ "${prefix}" =~ ^[a-z][a-z0-9_-]*$ ]] || return 1
     dockerControlRecoveryCheck || return 1
+    if [[ -e "${root}/data/static" || -L "${root}/data/static" ]]; then
+        dockerSiteTreeValidate "${root}/data/static" || return 1
+    fi
     if [[ -e "${root}/config/spec.json" || -L "${root}/config/spec.json" ]]; then
         dockerTrafficSafePath "${root}" "${root}/config/spec.json" || return 1
         if jq -e 'has("control")' "${root}/config/spec.json" >/dev/null; then
@@ -2598,6 +2732,7 @@ config/control
 config/spec.json
 config/share-groups.json
 data/subscription
+data/static
 secrets/tls
 data/acme
 EOF
@@ -2739,9 +2874,10 @@ dockerValidateUpdateCandidate() {
 }
 
 dockerRemoveConfigurationTargets() {
-    local root relative target
+    local root relative target includeStatic=${1:-1}
     root=$(dockerInstallRoot) || return 1
     while IFS= read -r relative; do
+        [[ "${relative}" != data/static || "${includeStatic}" == 1 ]] || continue
         target="${root}/${relative}"
         [[ -e "${target}" || -L "${target}" ]] || continue
         [[ ! -L "${target}" ]] || return 1
@@ -2764,6 +2900,7 @@ config/control
 config/spec.json
 config/share-groups.json
 data/subscription
+data/static
 secrets/tls
 data/acme
 EOF
@@ -2783,7 +2920,7 @@ dockerInstallCandidate() {
         cp -- "${backup}/deployment.json" "${root}/deployment.previous.json" || return 1
         chmod 0640 "${root}/deployment.previous.json" || return 1
     fi
-    for relative in config/xray config/sing-box config/nginx config/net config/control data/subscription secrets/tls data/acme; do
+    for relative in config/xray config/sing-box config/nginx config/net config/control data/subscription data/static secrets/tls data/acme; do
         source="${candidate}/${relative}"
         target="${root}/${relative}"
         mkdir -p -- "$(dirname -- "${target}")" || return 1
@@ -2815,6 +2952,9 @@ dockerEnsureRuntimeDataPermissions() {
         fi
         chmod 0750 "${root}/${directory}" || return 1
     done
+    dockerSiteTreeValidate "${root}/data/static" &&
+        find "${root}/data/static" -type d -exec chmod 0750 {} + &&
+        find "${root}/data/static" -type f -exec chmod 0640 {} + || return 1
     for directory in config data/subscription; do
         [[ -d "${root}/${directory}" && ! -L "${root}/${directory}" ]] || return 1
         [[ -z "$(find "${root}/${directory}" -type l -print -quit)" ]] || return 1
@@ -2845,7 +2985,7 @@ dockerEnsureRuntimeDataPermissions() {
 }
 
 dockerRestoreConfiguration() {
-    local root backup=${DOCKER_CONFIG_BACKUP:-} relative core bundleTarget= savedTraffic currentTraffic restoredTraffic
+    local root backup=${DOCKER_CONFIG_BACKUP:-} relative core bundleTarget= savedTraffic currentTraffic restoredTraffic includeStatic=0
     [[ "${DOCKER_CONFIG_SWITCHED:-0}" == "1" && -n "${backup}" ]] || return 0
     root=$(dockerInstallRoot) || return 1
     if [[ -e "${backup}/bundle.target" || -L "${backup}/bundle.target" ]]; then
@@ -2885,7 +3025,9 @@ dockerRestoreConfiguration() {
     else
         dockerComposeRun down >/dev/null 2>&1 || true
     fi
-    dockerRemoveConfigurationTargets || return 1
+    # 旧快照未记录站点内容时保留现有目录，不能把它当作空站点删除。
+    grep -qxF data/static "${backup}/present" && includeStatic=1
+    dockerRemoveConfigurationTargets "${includeStatic}" || return 1
     while IFS= read -r relative; do
         # 业务恢复点已恢复额度并合并最新累计，不能再用旧文件覆盖账目。
         [[ "${relative}" != data/traffic/state.json ]] || continue
@@ -3036,7 +3178,7 @@ dockerRealityStreamTransitionPrepare() {
 }
 
 dockerConfigureApply() {
-    local sourceSpec=$1 tlsSource=${2:-} acmeSource=${3:-} mode=${4:-configure} businessSource=${5:-}
+    local sourceSpec=$1 tlsSource=${2:-} acmeSource=${3:-} mode=${4:-configure} businessSource=${5:-} siteSource=${6:-}
     local specFile candidate backup answer root backupPrefix=configure
     [[ -z "${businessSource}" ]] || backupPrefix=business
     case "${mode}" in configure|preview|interactive|confirmed) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
@@ -3077,7 +3219,7 @@ dockerConfigureApply() {
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_CONFLICT}"
     }
-    if ! dockerGenerateCandidate "${specFile}" "${candidate}" "${tlsSource}" "${acmeSource}" "${businessSource}"; then
+    if ! dockerGenerateCandidate "${specFile}" "${candidate}" "${tlsSource}" "${acmeSource}" "${businessSource}" "${siteSource}"; then
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_STATE}"
     fi

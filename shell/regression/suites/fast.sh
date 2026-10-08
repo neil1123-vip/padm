@@ -73,6 +73,7 @@ listRegressionDockerContractsFastChildSelectors() {
     printf '%s\n' \
         docker-menu \
         docker-control-state \
+        docker-sites \
         docker-phase1 \
         docker-phase5 \
         docker-control-sync \
@@ -125,6 +126,10 @@ runDockerSubscriptionsRegression() {
 
 runDockerBusinessRegression() {
     bash "${PROJECT_ROOT}/docker/tests/business.sh"
+}
+
+runDockerSitesRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/sites.sh"
 }
 
 runDockerGeoRegression() {
@@ -207,6 +212,7 @@ registerRegressionFunctionLeaf docker-accounts runDockerAccountsRegression
 registerRegressionFunctionLeaf docker-accounts-cli runDockerAccountsCliRegression
 registerRegressionFunctionLeaf docker-subscriptions runDockerSubscriptionsRegression
 registerRegressionFunctionLeaf docker-business runDockerBusinessRegression
+registerRegressionFunctionLeaf docker-sites runDockerSitesRegression
 registerRegressionFunctionLeaf docker-geo-data runDockerGeoRegression
 registerRegressionFunctionLeaf docker-control-api runDockerControlApiRegression
 registerRegressionFunctionLeaf docker-control-sync runDockerControlSyncRegression

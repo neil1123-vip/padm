@@ -35,14 +35,23 @@ jobs:
         with:
           ref: ${{ inputs.source_ref }}
           fetch-depth: 1
-      - name: Prepare control contract validator
+      - name: Prepare control and site contract tools
         if: matrix.selector == 'docker-contracts-fast'
         shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends python3-jsonschema
+          docker build --tag padm-regression:contracts shell/regression/container
       - name: Run contract shard
         shell: bash
         env:
           SELECTOR: ${{ matrix.selector }}
-        run: sudo env TMPDIR=/tmp PADM_REGRESSION_PARALLEL_JOBS=2 bash shell/subscription_groups_regression.sh "${SELECTOR}"
+        run: |
+          set -euo pipefail
+          if [[ "${SELECTOR}" == docker-contracts-fast ]]; then
+            git ls-files -z | tar --null -T - -cf "${RUNNER_TEMP}/padm-contracts-source.tar"
+            docker run --rm --network none --init \
+              --env PADM_REGRESSION_PARALLEL_JOBS=2 \
+              --mount "type=bind,src=${RUNNER_TEMP}/padm-contracts-source.tar,dst=/snapshot.tar,readonly" \
+              padm-regression:contracts "${SELECTOR}"
+          else
+            sudo env TMPDIR=/tmp PADM_REGRESSION_PARALLEL_JOBS=2 bash shell/subscription_groups_regression.sh "${SELECTOR}"
+          fi

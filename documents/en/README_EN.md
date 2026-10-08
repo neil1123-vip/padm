@@ -156,6 +156,32 @@ Subscription publishing still requires Xray, WS TLS, and managed TLS.
 The complete input is saved as root-owned `/etc/padm-docker/config/spec.json` with mode `0600`.
 Cancellation does not commit; failures restore the previous spec, certificates, and ACME state.
 The spec contains secrets and must not be printed or published.
+
+Menu item `16` manages sites on existing Nginx TLS listeners `21`-`25` or fallback
+listeners `27`/`29`. It supports a built-in default page, a static directory, and HTTP/HTTPS 302:
+
+```bash
+padm-docker edit --site-static /root/public-site --preview
+padm-docker edit --site-static /root/public-site --confirm PADM-DOCKER-EDIT
+padm-docker edit --site-redirect https://example.com/ --confirm PADM-DOCKER-EDIT
+padm-docker edit --site-default --confirm PADM-DOCKER-EDIT
+```
+
+The source must be a separate, root-owned directory with a nonempty `index.html`,
+not writable by other users. Only common public assets are accepted; managed paths
+and their ancestors, hidden/secret files, recognizable PEM private keys, links,
+hard links, and special files are rejected. This does not detect every embedded
+credential: the directory must contain public content only.
+Publication copies content rather than mounting the external source, whose path is
+not saved in the spec. Default-page/302 changes and edits without a new source retain
+existing static files. The mode applies to all these Nginx listeners without changing
+proxy/subscription routes, ports, TLS, or ALPN. Failure and INT/TERM restore content and
+spec together; old snapshots without static content retain the current directory.
+Deleting the last Nginx listener clears the site mode but retains static files and other TLS listeners.
+`status` reports only `site_mode`, not the redirect URL. Old specs remain compatible;
+v3 `.site` requires the bundle capability `x-padm-site-content`. ALPN diagnostics/repair
+and webroot/standalone ACME remain deferred.
+
 Select `9=Shadowsocks` after choosing sing-box for SS2022 multi-user AES-128.
 It publishes TCP and UDP on the same port for either address family and needs no TLS.
 Confirmation generates independent server/user keys; UUID is the shared traffic identity.

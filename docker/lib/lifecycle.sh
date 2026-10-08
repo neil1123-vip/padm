@@ -17,6 +17,9 @@ dockerUsage() {
   padm-docker release [--manifest <URL|文件> --bundle <URL|文件> [--control-bundle <URL|文件>]]
   padm-docker setup [--manifest <URL|文件> --bundle <URL|文件> [--control-bundle <URL|文件>]]
   padm-docker edit [--spec <完整 JSON 文件>] [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --site-static <独立站点目录> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --site-redirect <HTTP/HTTPS URL> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --site-default [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker protocol list
   padm-docker protocol links [入口 ID]
   padm-docker protocol stream-status
@@ -448,7 +451,7 @@ dockerLockInstalledDeployment() {
 }
 
 dockerStatusCommand() {
-    local state bundlePath ref root
+    local state bundlePath ref root siteMode=unknown
     [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
     state=$(dockerDeploymentState) || return "${PADM_DOCKER_RC_STATE}"
@@ -473,6 +476,11 @@ dockerStatusCommand() {
     printf 'configured=yes\nrelease=%s\nprofiles=%s\n' \
         "$(jq -r '.padm_version' "${root}/deployment.json")" \
         "$(jq -r '.compose.profiles | join(",")' "${root}/deployment.json")"
+    if dockerTrafficSafePath "${root}" "${root}/config/spec.json" &&
+        dockerConfigureSpecValidate "${root}/config/spec.json" >/dev/null 2>&1; then
+        siteMode=$(jq -r '.site.mode // "legacy"' "${root}/config/spec.json") || return "${PADM_DOCKER_RC_STATE}"
+    fi
+    printf 'site_mode=%s\n' "${siteMode}"
     dockerComposeRun ps
 }
 
@@ -826,7 +834,7 @@ dockerUpdateCommand() {
 
 dockerConfigurationBackupAllowed() {
     case "$1" in
-    deployment.json|deployment.previous.json|images.env|compose.json|config/xray|config/sing-box|config/nginx|config/net|config/control|config/spec.json|config/share-groups.json|data/traffic/state.json|data/subscription|secrets/tls|data/acme) return 0 ;;
+    deployment.json|deployment.previous.json|images.env|compose.json|config/xray|config/sing-box|config/nginx|config/net|config/control|config/spec.json|config/share-groups.json|data/traffic/state.json|data/subscription|data/static|secrets/tls|data/acme) return 0 ;;
     *) return 1 ;;
     esac
 }
@@ -884,11 +892,19 @@ dockerValidateConfigurationBackup() {
         dockerBundleSupportsSpec "${bundlePath}" "${backup}/config/spec.json" || return 1
         dockerGeoBundleCheck "${bundlePath}" "${backup}" || return 1
         dockerControlStateCheck "${backup}" || return 1
+        if jq -e 'has("site")' "${backup}/config/spec.json" >/dev/null; then
+            grep -qxF data/static "${backup}/present" &&
+                dockerSiteStateValidate "${backup}/config/spec.json" "${backup}" || return 1
+        fi
         if jq -e 'has("control")' "${backup}/config/spec.json" >/dev/null; then
             grep -qxF config/control "${backup}/present" || return 1
         fi
     elif [[ -e "${backup}/config/control/state.json" ]]; then
         return 1
+    fi
+    if [[ -e "${backup}/data/static" || -L "${backup}/data/static" ]]; then
+        grep -qxF data/static "${backup}/present" &&
+            dockerSiteTreeValidate "${backup}/data/static" || return 1
     fi
 }
 

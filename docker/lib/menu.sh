@@ -573,6 +573,36 @@ dockerMenuControl() {
     done
 }
 
+dockerMenuSites() {
+    local choice directory url
+    while :; do
+        DOCKER_MENU_SIGNAL=0
+        printf '\nDocker 站点管理\n'
+        printf '%s\n' '1. 默认页' '2. 发布静态目录' '3. 302 跳转' '4. 查看站点模式' '0. 返回'
+        printf '请选择: '
+        if ! IFS= read -r choice; then
+            [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
+            return 0
+        fi
+        case "${choice}" in
+        0) return 0 ;;
+        1) dockerMenuRun edit --site-default || true ;;
+        2)
+            dockerSetupRead directory '独立静态站点目录绝对路径（0 返回）: ' &&
+                [[ -n "${directory}" ]] || continue
+            dockerMenuRun edit --site-static "${directory}" || true
+            ;;
+        3)
+            dockerSetupRead url '302 HTTP/HTTPS 目标 URL（0 返回）: ' &&
+                [[ -n "${url}" ]] || continue
+            dockerMenuRun edit --site-redirect "${url}" || true
+            ;;
+        4) dockerMenuRun status || true ;;
+        *) printf '无效选项，请重新选择。\n' ;;
+        esac
+    done
+}
+
 dockerMenu() {
     local choice
     if [[ "$#" -ne 0 || ! -t 0 || ! -t 1 ]]; then
@@ -602,6 +632,7 @@ dockerMenu() {
             '13. 核心升级评估' \
             '14. Xray Geo 数据' \
             '15. 控制连接' \
+            '16. 站点管理' \
             '0. 退出'
         printf '请选择: '
         if ! IFS= read -r choice; then
@@ -627,6 +658,7 @@ dockerMenu() {
         13) dockerMenuRun assess || true ;;
         14) dockerMenuGeo ;;
         15) dockerMenuControl ;;
+        16) dockerMenuSites ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

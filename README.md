@@ -179,7 +179,26 @@ VLESS TCP TLS Vision、Trojan TCP TLS fallback 在 Xray 首配中分别选 `16`/
 Xray 直接终止 TLS，未命中协议的 HTTP/1.1 和 HTTP/2 请求通过 PROXY v1 回落到 Nginx；
 `fallback_tls` 固定域名及两个内部端口，默认 `31300`/`31302`，同核复制可共享后端。
 默认首页不写入站点目录，已有 `/etc/padm-docker/data/static/index.html` 优先；
-支持通用字段编辑、同核复制/删除与链接，站点/302/ALPN 管理、宿主集成及独立 HTTPS 发布尚未开放。
+支持通用字段编辑、同核复制/删除与链接；默认页、静态目录和 302 已支持事务管理，ALPN 管理、宿主集成及独立 HTTPS 发布尚未开放。
+
+Docker 菜单 `16. 站点管理` 管理已有 Nginx TLS 入口 `21–25` 或 fallback `27`/`29` 的站点：
+
+```bash
+padm-docker edit --site-static /root/public-site --preview
+padm-docker edit --site-static /root/public-site --confirm PADM-DOCKER-EDIT
+padm-docker edit --site-redirect https://example.com/ --confirm PADM-DOCKER-EDIT
+padm-docker edit --site-default --confirm PADM-DOCKER-EDIT
+```
+
+静态源必须是包含非空 `index.html` 的独立目录，生产路径须 root 所有且不可被其他用户写入；
+只接受常见公开资源，拒绝受管目录及祖先、隐藏/秘密文件、可识别 PEM 私钥、链接和特殊文件。
+该检查不能识别所有嵌入的凭据，发布前仍须确认目录仅含公开内容。源路径不保存到规格，
+发布时复制内容；切换默认页/302 或不提供新目录的编辑均保留原静态文件。
+站点模式适用于部署中所有上述 Nginx 入口，不改变代理、订阅、端口、TLS 或 ALPN；
+失败和 INT/TERM 同时恢复站点及规格，旧无站点快照保留当前静态目录。
+删除最后一个 Nginx 入口会清除站点模式，仍保留静态文件及其它 TLS 入口。
+`status` 只报告 `site_mode`，不输出目标 URL。已有旧规格保持兼容，带 `.site` 的 v3
+规格要求控制 bundle 声明 `x-padm-site-content`；ALPN、webroot/standalone ACME 继续待交付。
 完整规格保存于 `/etc/padm-docker/config/spec.json`，由 root 持有、权限 `0600`；
 取消不提交，配置失败恢复旧规格、证书及 ACME 状态。该文件含秘密，不应打印或公开。
 

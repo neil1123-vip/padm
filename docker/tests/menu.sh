@@ -388,6 +388,44 @@ runControlDriver() {
     targetReply 'Docker 管理菜单' $'0\n'
 }
 
+runSitesDriver() {
+    local scenario=$1
+    local -A targetPrompts=()
+    targetReply 'Docker 管理菜单' $'16\n'
+    : >"${TLS_WIZARD_ACTIONS}"
+    case "${scenario}" in
+    flow)
+        targetReply 'Docker 站点管理' $'1\n'
+        targetReply 'Docker 站点管理' $'2\n'
+        targetReply '独立静态站点目录绝对路径（0 返回）' $'/root/public-site\n'
+        targetReply 'Docker 站点管理' $'3\n'
+        targetReply '302 HTTP/HTTPS 目标 URL（0 返回）' $'https://example.com/path?a=1&b=2\n'
+        targetReply 'Docker 站点管理' $'4\n'
+        ;;
+    cancel)
+        targetReply 'Docker 站点管理' $'2\n'
+        targetReply '独立静态站点目录绝对路径（0 返回）' $'0\n'
+        targetReply 'Docker 站点管理' $'3\n'
+        targetReply '302 HTTP/HTTPS 目标 URL（0 返回）' $'0\n'
+        ;;
+    static-eof|redirect-eof)
+        if [[ "${scenario}" == static-eof ]]; then
+            targetReply 'Docker 站点管理' $'2\n'
+            targetReply '独立静态站点目录绝对路径（0 返回）' $'\004'
+        else
+            targetReply 'Docker 站点管理' $'3\n'
+            targetReply '302 HTTP/HTTPS 目标 URL（0 返回）' $'\004'
+        fi
+        ;;
+    failed)
+        targetReply 'Docker 站点管理' $'1\n'
+        targetReply 'Docker 站点管理' $'4\n'
+        ;;
+    esac
+    targetReply 'Docker 站点管理' $'0\n'
+    targetReply 'Docker 管理菜单' $'0\n'
+}
+
 runPty() {
     local name=$1 driver=$2 input=$3 entry=$4 actual=0 feederStatus=0 command pipe feeder
     local expected=0
@@ -467,6 +505,8 @@ runPty() {
             runGeoDriver "${input}"
         elif [[ "${driver}" == control ]]; then
             runControlDriver "${input}"
+        elif [[ "${driver}" == sites ]]; then
+            runSitesDriver "${input}"
         elif [[ "${driver}" == accounts ]]; then
             local accountMenuCount=1
             printf '10\n' >&3
@@ -669,7 +709,10 @@ dockerRenewalCommand() { recordAction schedule "$@"; }
 PADM_DOCKER_RC_STATE=15
 PADM_DOCKER_RC_USAGE=2
 case "${1:-}" in
-status) exit 0 ;;
+status)
+    [[ "${SITE_MENU_RECORD_STATUS:-0}" != 1 ]] || recordAction status
+    exit 0
+    ;;
 protocol)
     recordAction "$@"
     case "${2:-}" in
@@ -691,7 +734,7 @@ protocol)
     esac
     printf 'fixture-protocol-output\n'
     ;;
-edit) recordAction "$@" ;;
+edit) recordAction "$@"; exit "${SITE_EDIT_STATUS:-0}" ;;
 account) recordAction "$@" ;;
 assess) recordAction "$@" ;;
 control)
@@ -751,6 +794,31 @@ printf '{"tls":{"domain":"ws.example.com"}}\n' >"${TLS_WIZARD_ROOT}/config/spec.
 : >"${TLS_WIZARD_ACTIONS}"
 runPty core-assessment menu $'13\n0\n' "${TLS_WIZARD_CLI}" menu
 [[ "$(<"${TLS_WIZARD_ACTIONS}")" == assess ]] || fail 'core assessment menu dispatched incorrect arguments'
+
+export SITE_MENU_RECORD_STATUS=1
+for siteCase in flow cancel static-eof redirect-eof failed; do
+    : >"${TLS_WIZARD_ACTIONS}"
+    export SITE_EDIT_STATUS=0
+    [[ "${siteCase}" != failed ]] || SITE_EDIT_STATUS=15
+    runPty "sites-${siteCase}" sites "${siteCase}" "${TLS_WIZARD_CLI}" menu
+    expectedSite=
+    case "${siteCase}" in
+    flow)
+        expectedSite=$'edit --site-default\nedit --site-static /root/public-site\nedit --site-redirect https://example.com/path?a=1&b=2\nstatus'
+        for label in '16. 站点管理' '1. 默认页' '2. 发布静态目录' '3. 302 跳转' \
+            '4. 查看站点模式' '0. 返回'; do
+            grep -Fq "${label}" "${CONTROL_LOG}" || fail "站点菜单缺少: ${label}"
+        done
+        ;;
+    failed)
+        expectedSite=$'edit --site-default\nstatus'
+        grep -Fq '操作失败，退出码: 15' "${CONTROL_LOG}" || fail '站点提交失败未显示退出码'
+        ;;
+    esac
+    [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedSite}" ]] ||
+        fail "站点 ${siteCase} 参数分发错误或取消后仍执行编辑"
+done
+unset SITE_MENU_RECORD_STATUS SITE_EDIT_STATUS
 
 : >"${TLS_WIZARD_ACTIONS}"
 runPty control-dispatch control flow "${TLS_WIZARD_CLI}" menu

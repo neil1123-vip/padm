@@ -167,7 +167,7 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 Xray VLESS TCP TLS Vision 首配、完整规格导入、通用字段编辑、同核复制与删除及 vless 分享链接；Xray 终止受管 TLS，固定 PROXY v1 回落到 Nginx HTTP/1.1 和 HTTP/2 静态后端，UUID 共享流量额度；仅提供默认首页和已有静态目录，站点/ALPN 管理、宿主集成及完整管理尚未开放。"
+      "reason": "v3 支持 Xray VLESS TCP TLS Vision 首配、完整规格导入、通用字段编辑、同核复制与删除及 vless 分享链接；Xray 终止受管 TLS，固定 PROXY v1 回落到 Nginx HTTP/1.1 和 HTTP/2 后端，UUID 共享流量额度；默认页、静态目录和 302 共用配置事务，ALPN 管理、宿主集成及完整管理尚未开放。"
     },
     {
       "id": 28,
@@ -195,7 +195,7 @@
       "udp_support": "no",
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "v3 支持 Xray Trojan TCP TLS fallback 首配、完整规格导入、通用字段编辑、同核复制与删除及 trojan 分享链接；Trojan 入口直接终止受管 TLS，固定 PROXY v1 回落到 Nginx HTTP/1.1 和 HTTP/2 静态后端，无额外 VLESS 前端，UUID 共享流量额度；站点/ALPN 管理、宿主集成及完整管理尚未开放。"
+      "reason": "v3 支持 Xray Trojan TCP TLS fallback 首配、完整规格导入、通用字段编辑、同核复制与删除及 trojan 分享链接；Trojan 入口直接终止受管 TLS，固定 PROXY v1 回落到 Nginx HTTP/1.1 和 HTTP/2 后端，无额外 VLESS 前端，UUID 共享流量额度；默认页、静态目录和 302 共用配置事务，ALPN 管理、宿主集成及完整管理尚未开放。"
     },
     {
       "id": 30,
@@ -246,7 +246,7 @@
       "profiles": ["nginx"],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "Docker 已有独立 Nginx 容器，可承载 WebSocket、HTTPUpgrade、gRPC HTTP/2 反代和传统 TLS fallback 的 PROXY v1 HTTP/1.1、HTTP/2 静态后端；仅 fallback 时不挂载 TLS 私钥，站点内容及 ALPN 管理仍未开放。"
+      "reason": "Docker 已有独立 Nginx 容器，可承载 WebSocket、HTTPUpgrade、gRPC HTTP/2 反代和传统 TLS fallback 的 PROXY v1 HTTP/1.1、HTTP/2 后端；仅 fallback 时不挂载 TLS 私钥，默认页、静态目录和 302 可经菜单/CLI 事务管理，ALPN 管理仍未开放。"
     },
     "tls-files": {
       "status": "supported",
@@ -332,7 +332,7 @@
       "profiles": ["nginx"],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "Docker 当前没有站点内容管理及 ALPN 诊断/事务修复命令。"
+      "reason": "5A.1 已交付已有 Nginx TLS/fallback 入口的默认页、静态目录发布与 302 菜单/CLI；内容纳入候选、备份及失败/信号恢复，拒绝受管/秘密路径和链接。组合能力仍 deferred：ALPN 诊断/修复、webroot/standalone ACME 未交付，公网及原生双架构验收待补。"
     },
     "entry-port-management": {
       "status": "deferred",
