@@ -102,12 +102,20 @@ tlsCertificateFilesUsable() {
 
 # 源证书可直接同步时不重走签发；显式签发参数仍按用户选择处理。
 tlsAcmeSourceCertificateReusable() {
-    local certDomain=$1 acmeDomain=$1 sourceDir
+    local certDomain=$1 acmeDomain sourceDir
     [[ -z "${AUTO_TLS_CA:-}${AUTO_DNS_API:-}${AUTO_DNS_API_TYPE:-}${AUTO_DNS_API_WILDCARD:-}" ]] || return 1
-    [[ "${installedDNSAPIStatus:-}" != true ]] || acmeDomain="*.${dnsTLSDomain}"
-    sourceDir="$(acmeHomeDir)/${acmeDomain}_ecc"
-    tlsCertificateFilesUsable "${sourceDir}/${acmeDomain}.cer" "${sourceDir}/${acmeDomain}.key" "${certDomain}" || return 1
-    openssl x509 -in "${sourceDir}/${acmeDomain}.cer" -checkend 86400 -noout >/dev/null 2>&1
+    # 单域名源失效时再查通配符，并把同一源交给后续同步。
+    for acmeDomain in "${certDomain}" "*.${certDomain#*.}"; do
+        sourceDir="$(acmeHomeDir)/${acmeDomain}_ecc"
+        if tlsCertificateFilesUsable "${sourceDir}/${acmeDomain}.cer" "${sourceDir}/${acmeDomain}.key" "${certDomain}" &&
+            openssl x509 -in "${sourceDir}/${acmeDomain}.cer" -checkend 86400 -noout >/dev/null 2>&1; then
+            installedDNSAPIStatus=
+            dnsTLSDomain=${certDomain#*.}
+            [[ "${acmeDomain}" == "${certDomain}" ]] || installedDNSAPIStatus=true
+            return 0
+        fi
+    done
+    return 1
 }
 
 tlsAcmeConfigValue() {
@@ -529,25 +537,18 @@ installTLS() {
             menuReadChoice tls_reinstall "是否重新安装当前域名证书？[y/N]:" reInstallStatus true || return 1
         fi
         if [[ "$(normalizeYesNo "${reInstallStatus}")" == "y" ]]; then
+            # 显式同步优先选择仍可用的 ACME 源；不可复用时保留原同步与失败行为。
+            tlsAcmeSourceCertificateReusable "${tlsDomain}" || true
             installTLSFromAcme || return 1
         elif ! tlsCertificatePairUsable "${tlsDir}" "${tlsDomain}" ||
             ! openssl x509 -in "${tlsDir}/${tlsDomain}.crt" -checkend 86400 -noout >/dev/null 2>&1; then
             renewalTLS "" "${tlsDomain}" || return 1
         fi
 
-    elif [[ -s "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.key" &&
-        -s "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
+    elif tlsAcmeSourceCertificateReusable "${tlsDomain}"; then
         successCard "检测到证书"
-        if [[ "${PADM_REQUIRE_USABLE_TLS_CERTIFICATE:-}" == "true" ]]; then
-            if ! tlsAcmeSourceCertificateReusable "${tlsDomain}"; then
-                switchSSLType || return 1
-                customSSLEmail || return 1
-                selectAcmeInstallSSL || return 1
-            fi
-        fi
         installTLSFromAcme || return 1
-    elif [[ -d "$HOME/.acme.sh" ]] && [[ ! -s "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" ||
-        ! -s "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.key" ]]; then
+    elif [[ -d "$HOME/.acme.sh" ]]; then
         [[ -n "${dnsAPIStatus+x}" ]] || switchDNSAPI || return 1
         if [[ -z "${dnsAPIType:-}" ]]; then
             statusCard "TLS 证书申请方式" "不采用 API 申请证书"
@@ -888,6 +889,11 @@ renewManagedTLSCertificates() {
         configFile=${dueConfigs[${requestedDomain}]}
         acmeDomain=$(tlsAcmeConfigValue "${configFile}" Le_Domain) || acmeDomain=
         [[ -n "${acmeDomain}" ]] || acmeDomain=${requestedDomain}
+        # 原事务内选择有效源，保留同步后的服务重载与备份合同。
+        if tlsAcmeSourceCertificateReusable "${requestedDomain}"; then
+            acmeDomain=${requestedDomain}
+            [[ "${installedDNSAPIStatus:-}" != true ]] || acmeDomain="*.${dnsTLSDomain}"
+        fi
         renewArgs=(--renew -d "${acmeDomain}" --ecc --force --home "${acmeDir}")
     else
         cp -a "${tlsDir}/." "${backupDir}/" || { padmRemoveCleanupPath "${backupDir}"; return 1; }
