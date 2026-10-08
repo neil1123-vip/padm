@@ -2970,6 +2970,29 @@ runRealityStreamSplitRegression() (
     grep -qx '默认 Reality 后端监听正常: 127.0.0.1:2445' "${root}/status.log"
     grep -qx '订阅应输出公网端口: 443' "${root}/status.log"
     (
+        # 详情渲染失败不能输出部分状态或已启用提示，也不能修改当前配置。
+        local domains renderedState stateBefore=$(<"${PADM_REALITY_STREAM_STATE_FILE}")
+        local effects="${backupCalls}:${patchCalls}:${allowCalls}:${reloadCalls}"
+        local REGRESSION_ERROR_CARD_LOG="${root}/status-error.log"
+        for domains in '"broken"' '{}' false; do
+            jq --argjson domains "${domains}" '.website_domains = $domains' \
+                "${PADM_REALITY_STREAM_STATE_FILE}" >"${root}/status-state.json" || return 1
+            mv "${root}/status-state.json" "${PADM_REALITY_STREAM_STATE_FILE}" || return 1
+            renderedState=$(<"${PADM_REALITY_STREAM_STATE_FILE}")
+            : >"${REGRESSION_ERROR_CARD_LOG}"
+            regressionExpectStatus 1 showRealityStreamSplitStatus >"${root}/status.log" || return 1
+            grep -q '读取 Reality 443 共存状态失败' "${REGRESSION_ERROR_CARD_LOG}" || return 1
+            ! grep -Eq '当前已启用|公网入口端口:|后端监听正常' "${root}/status.log" || return 1
+            [[ "${backupCalls}:${patchCalls}:${allowCalls}:${reloadCalls}" == "${effects}" ]] || return 1
+            [[ "$(<"${PADM_REALITY_STREAM_STATE_FILE}")" == "${renderedState}" ]] || return 1
+        done
+        jq '.website_domains = null' "${PADM_REALITY_STREAM_STATE_FILE}" >"${root}/status-state.json" || return 1
+        mv "${root}/status-state.json" "${PADM_REALITY_STREAM_STATE_FILE}" || return 1
+        showRealityStreamSplitStatus >"${root}/status.log" || return 1
+        grep -q '当前已启用' "${root}/status.log" || return 1
+        printf '%s\n' "${stateBefore}" >"${PADM_REALITY_STREAM_STATE_FILE}"
+    ) || return 1
+    (
         # 恢复端口读取失败必须在备份、配置写入和服务应用前退出。
         local failProtocol effects="${backupCalls}:${patchCalls}:${allowCalls}:${reloadCalls}"
         local stateBefore=$(<"${PADM_REALITY_STREAM_STATE_FILE}") aliasBefore=$(<"${aliasFile}")

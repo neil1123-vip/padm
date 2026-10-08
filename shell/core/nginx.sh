@@ -474,7 +474,7 @@ renderRealityStreamSplitNginxConf() {
 }
 
 showRealityStreamSplitStatus() {
-    local stateFile confFile nginxMainConf defaultProtocol internalPort publicPort configFile listenValue portValue values
+    local stateFile confFile nginxMainConf defaultProtocol internalPort publicPort configFile listenValue portValue values line
     stateFile=$(realityStreamSplitStateFile)
     confFile=$(realityStreamSplitConfFile)
     nginxMainConf=$(realityStreamSplitNginxConf)
@@ -486,17 +486,19 @@ showRealityStreamSplitStatus() {
         [[ -f "${confFile}" ]] && menuLine "$(uiStyle warn "检测到 Nginx stream 配置残留:") $(uiStyle value "${confFile}")"
         return 0
     fi
-    menuLine "$(uiStyle ok "当前已启用 Reality 443 共存分流")"
-    jq -r '
+    values=$(jq -r '
         "公网入口端口: " + ((.public_port // 443) | tostring),
         "网站后端端口: " + ((.website_backend_port // "") | tostring),
-        "网站域名: " + ((.website_domains // []) | join(", ")),
+        "网站域名: " + (.website_domains |
+            if . == null then "" elif type == "array" then join(", ") else error("invalid website domains") end),
         "默认 Reality 后端: " + (.default_protocol // "vision"),
         "Reality Vision 后端端口: " + ((.protocols.vision.internal_port // "未启用") | tostring),
         "Reality XHTTP 后端端口: " + ((.protocols.xhttp.internal_port // "未启用") | tostring)
-    ' "${stateFile}" 2>/dev/null | while read -r line; do
+    ' "${stateFile}" 2>/dev/null) || { errorCard "读取 Reality 443 共存状态失败"; return 1; }
+    menuLine "$(uiStyle ok "当前已启用 Reality 443 共存分流")"
+    while IFS= read -r line; do
         menuLine "$(uiStyle value "${line}")"
-    done
+    done <<<"${values}"
 
     [[ -f "${confFile}" ]] && menuLine "$(uiStyle ok "Nginx stream配置存在:") $(uiStyle value "${confFile}")" || menuLine "$(uiStyle danger "Nginx stream配置缺失:") $(uiStyle value "${confFile}")"
     if [[ -n "${nginxMainConf}" ]] && grep -q "padm stream include start" "${nginxMainConf}"; then
