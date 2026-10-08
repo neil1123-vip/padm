@@ -732,6 +732,10 @@ runCoreFirstInstallCommitFailureRollbackRegression() (
     TMPDIR="${root}/tmp"
 
     readInstallType() { return 0; }
+    xrayRunning() { return 1; }
+    singBoxRunning() { return 1; }
+    handleXray() { return 0; }
+    handleSingBox() { return 0; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
     coreLatestReleaseTag() { printf 'v1.2.3\n'; }
     checkVersionNotEmpty() { [[ -n "$1" ]]; }
@@ -833,6 +837,22 @@ runCoreFirstInstallCommitFailureRollbackRegression() (
     [[ "${singBoxRc}" == "1" ]]
     [[ ! -e "${singBoxDir}/sing-box" ]]
     [[ ! -e "${singBoxDir}/libcronet.so" ]] || return 1
+    (
+        local core installFunction originalBinary
+        for core in xray sing-box; do
+            if [[ "${core}" == xray ]]; then
+                originalBinary=${PADM_XRAY_BINARY}
+                installFunction=installXray
+            else
+                originalBinary=${PADM_SINGBOX_BINARY}
+                installFunction=installSingBox
+            fi
+            printf 'old-broken-binary\n' >"${originalBinary}"
+            chmod 644 "${originalBinary}"
+            regressionExpectStatus 1 "${installFunction}" 1
+            [[ "$(<"${originalBinary}")" == old-broken-binary && "$(stat -c %a "${originalBinary}")" == 644 ]]
+        done
+    )
 )
 
 runCoreUpgradePendingStartRollbackRegression() (
@@ -934,6 +954,82 @@ runCoreUpgradePendingStartRollbackRegression() (
         done
     )
 
+    (
+        local wasRunning recovery caseRoot
+        local serviceRunning serviceLog originalBinary candidateDir
+        eval "$(declare -f restoreManagedFileFromBackup | sed '1s/^restoreManagedFileFromBackup/realPendingRestoreManagedFileFromBackup/')"
+        restoreManagedFileFromBackup() {
+            [[ "${recovery}" != file-fail ]] || return 1
+            realPendingRestoreManagedFileFromBackup "$@"
+        }
+        commitStagedCoreInstallFile() { return 1; }
+        xrayRunning() { [[ "${serviceRunning}" == true ]]; }
+        singBoxRunning() { [[ "${serviceRunning}" == true ]]; }
+        handlePendingService() {
+            printf '%s\n' "$1" >>"${serviceLog}"
+            if [[ "$1" == stop ]]; then
+                serviceRunning=false
+            else
+                [[ "${recovery}" != service-fail ]] || return 1
+                serviceRunning=true
+            fi
+        }
+        handleXray() { handlePendingService "$@"; }
+        handleSingBox() { handlePendingService "$@"; }
+        # 普通提交失败应恢复原运行状态，任何恢复失败都必须保留旧文件备份。
+        for core in xray sing-box; do
+            for wasRunning in false true; do
+                for recovery in success file-fail service-fail; do
+                    [[ "${wasRunning}" != false || "${recovery}" != service-fail ]] || continue
+                    caseRoot="${root}/${core}-${wasRunning}-${recovery}"
+                    PADM_XRAY_BINARY="${caseRoot}/installed/xray"
+                    PADM_SINGBOX_BINARY="${caseRoot}/installed/sing-box"
+                    candidateDir="${caseRoot}/candidate"
+                    serviceLog="${caseRoot}/service.log"
+                    serviceRunning=${wasRunning}
+                    mkdir -p "${caseRoot}/installed" "${candidateDir}"
+                    : >"${serviceLog}"
+                    if [[ "${core}" == xray ]]; then
+                        originalBinary=${PADM_XRAY_BINARY}
+                        printf '#!/usr/bin/env bash\nprintf "Xray 1.2.3\\n"\n' >"${candidateDir}/xray"
+                        chmod 755 "${candidateDir}/xray"
+                    else
+                        originalBinary=${PADM_SINGBOX_BINARY}
+                        local extractedDir="${candidateDir}/sing-box-${version#v}${singBoxCoreCPUVendor}"
+                        mkdir -p "${extractedDir}"
+                        printf '#!/usr/bin/env bash\nprintf "sing-box version 1.2.3\\nTags: with_v2ray_api\\n"\n' >"${extractedDir}/sing-box"
+                        printf 'new-cronet\n' >"${extractedDir}/libcronet.so"
+                        chmod 755 "${extractedDir}/sing-box"
+                    fi
+                    if [[ "${core}" == sing-box ]]; then
+                        printf 'old-cronet\n' >"$(coreSingBoxCronetPath)"
+                    fi
+                    printf 'old-binary\n' >"${originalBinary}"
+                    chmod 755 "${originalBinary}"
+                    if [[ "${core}" == xray ]]; then
+                        regressionExpectStatus 1 installDownloadedXrayBinary "${version}" "${candidateDir}"
+                    else
+                        regressionExpectStatus 1 installDownloadedSingBoxBinary "${version}" "${candidateDir}"
+                    fi
+                    [[ "$(<"${originalBinary}")" == old-binary ]]
+                    if [[ "${recovery}" == success ]]; then
+                        [[ "${serviceRunning}" == "${wasRunning}" ]] || {
+                            printf '%s 普通失败未恢复原运行状态: 原状态 %s，恢复后 %s\n' \
+                                "${core}" "${wasRunning}" "${serviceRunning}" >&2
+                            return 1
+                        }
+                        ! compgen -G "${originalBinary%/*}/.${originalBinary##*/}.bak.*" >/dev/null
+                    else
+                        [[ "${serviceRunning}" == false ]]
+                        compgen -G "${originalBinary%/*}/.${originalBinary##*/}.bak.*" >/dev/null
+                        [[ "${core}" != sing-box ]] ||
+                            compgen -G "$(coreSingBoxInstallDir)/.libcronet.so.bak.*" >/dev/null
+                    fi
+                done
+            done
+        done
+    )
+
     # 启动失败但无进程时也要取消待启动任务；取消失败不能覆盖新文件或启动旧核心。
     for core in xray sing-box; do
         for stopRc in 0 1; do
@@ -967,7 +1063,7 @@ runCoreUpgradePendingStartRollbackRegression() (
             fi
             [[ "$(stat -c %a "${originalBinary}")" == 755 ]]
             if [[ "${stopRc}" == 0 ]]; then
-                [[ "$(<"${serviceLog}")" == $'stop\nstart\nstop\nstart' ]]
+                [[ "$(<"${serviceLog}")" == $'stop\nstart\nstop' ]]
                 [[ "$(<"${originalBinary}")" == old-binary ]]
                 [[ "${core}" != sing-box || "$(<"$(coreSingBoxCronetPath)")" == old-cronet ]]
             else
@@ -1781,7 +1877,339 @@ runCoreInstallSignalRollbackRegression() (
     runPackageCommandWithProgress normal-test 10 'printf normal; exit 7' "${fixture}/normal.log" || status=$?
     [[ "${status}" == 7 && "$(<"${fixture}/normal.log")" == normal ]]
     [[ ! -e "${fixture}/normal.log.progress" && -z "${PADM_EXIT_ROLLBACKS[*]}" ]]
+    printf '核心信号回归: 前台取消\n'
     runCancelableInstallCommandRegression
+    printf '核心信号回归: 二进制回滚\n'
+    runCoreBinaryInstallSignalRollbackRegression
+    printf '核心信号回归: 文件整组恢复\n'
+    runCoreInstallFileSignalRollbackRegression
+)
+
+runCoreInstallFileSignalRollbackRegression() (
+    local root="${TMP_DIR}/core-install-file-signal"
+    local fixture phase signal failure status failed=false
+    local version=v1.14.0 singBoxCoreCPUVendor=-linux-amd64
+    local PADM_SINGBOX_BINARY PADM_SINGBOX_CONFIG_DIR PADM_TMP_DIR
+    local shard merged candidate cronet
+    mkdir -p "${root}"
+    eval "$(declare -f padmCreateTempPath | sed '1s/^padmCreateTempPath/fileSignalCreateTempPath/')"
+    eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/fileSignalCommitGeneratedFile/')"
+    eval "$(declare -f restoreManagedFileFromBackup | sed '1s/^restoreManagedFileFromBackup/fileSignalRestoreManagedFileFromBackup/')"
+    padmCreateTempPath() {
+        if [[ "${2:-}" == -d && "${3:-}" == /etc/padm/* ]]; then
+            fileSignalCreateTempPath "$1" -d "${PADM_TMP_DIR}/install.XXXXXX"
+        else
+            fileSignalCreateTempPath "$@"
+        fi
+        [[ ! -d "${!1}" ]] || printf '%s\n' "${!1}" >>"${fixture}/backups"
+    }
+    restoreManagedFileFromBackup() {
+        if [[ "${phase}" == *-restore && ! -e "${fixture}/restore-signaled" ]]; then
+            : >"${fixture}/restore-signaled"
+            kill -"${signal}" "${BASHPID}"
+        fi
+        [[ "${failure}" != restore-fail ]] || return 1
+        fileSignalRestoreManagedFileFromBackup "$@"
+    }
+    commitGeneratedFile() {
+        if [[ ! -e "${fixture}/commit-failed" &&
+            ( ( "${phase}" == first-restore && "$2" == "${PADM_SINGBOX_BINARY}" ) ||
+                ( "${phase}" == geo-restore && "${2##*/}" == geoip.dat ) ) ]]; then
+            : >"${fixture}/commit-failed"
+            return 1
+        fi
+        fileSignalCommitGeneratedFile "$@" || return 1
+        if [[ "${phase}" == migration-restore && "$2" == "${shard}" &&
+            ! -e "${fixture}/commit-failed" ]]; then
+            : >"${fixture}/commit-failed"
+            return 1
+        fi
+        if [[ ( "${phase}" == migration && "$2" == "${shard}" ) ||
+            ( "${phase}" == first-cronet && "$2" == "${cronet}" ) ||
+            ( "${phase}" == first-binary && "$2" == "${PADM_SINGBOX_BINARY}" ) ||
+            ( "${phase}" == geo-* && "${2##*/}" == "${phase#geo-}" ) ]]; then
+            kill -"${signal}" "${BASHPID}"
+        fi
+    }
+    validateSingBoxConfigWithBinary() {
+        [[ "${phase}" != validation ]] || kill -"${signal}" "${BASHPID}"
+        return 0
+    }
+    checkLogBackupRestore() { padmRestoreManagedFileBackupManifest "$1"; }
+    readInstallType() { :; }
+    coreLatestReleaseTag() { printf 'v1.14.0\n'; }
+    downloadSingBoxReleaseBinaryToTempDir() { cp -a "${candidate}/." "$2/"; }
+    singBoxRunning() { return 1; }
+    handleSingBox() { printf '%s\n' "$1" >>"${fixture}/services"; }
+    errorCard() { printf '%s\n' "$*" >>"${fixture}/errors"; }
+    successCard() { :; }
+
+    for phase in migration validation first-cronet first-binary geo-geosite.dat geo-geoip.dat geo-geo.version \
+        migration-restore first-restore geo-restore; do
+        for signal in TERM INT; do
+            for failure in normal restore-fail; do
+                fixture="${root}/${phase}-${signal}-${failure}"
+                PADM_TMP_DIR="${fixture}/tmp"
+                PADM_SINGBOX_BINARY="${fixture}/installed/sing-box"
+                PADM_SINGBOX_CONFIG_DIR="${fixture}/installed/conf/config"
+                shard="${PADM_SINGBOX_CONFIG_DIR}/01.json"
+                merged="${fixture}/installed/conf/config.json"
+                cronet="${fixture}/installed/libcronet.so"
+                candidate="${fixture}/candidate"
+                mkdir -p "${PADM_TMP_DIR}" "${PADM_SINGBOX_CONFIG_DIR}" "${candidate}/sing-box-${version#v}${singBoxCoreCPUVendor}"
+                printf '{"dns":{"independent_cache":true}}\n' >"${shard}"
+                printf '{"legacy":true}\n' >"${merged}"
+                printf 'old-cronet\n' >"${cronet}"
+                printf '#!/usr/bin/env bash\nprintf "sing-box version 1.14.0\\nTags: with_v2ray_api\\n"\n' \
+                    >"${candidate}/sing-box-${version#v}${singBoxCoreCPUVendor}/sing-box"
+                printf 'new-cronet\n' >"${candidate}/sing-box-${version#v}${singBoxCoreCPUVendor}/libcronet.so"
+                chmod 755 "${candidate}/sing-box-${version#v}${singBoxCoreCPUVendor}/sing-box"
+                if [[ "${phase}" != first-* ]]; then
+                    printf 'old-binary\n' >"${PADM_SINGBOX_BINARY}"
+                    chmod 755 "${PADM_SINGBOX_BINARY}"
+                fi
+                mkdir -p "${fixture}/geo-stage" "${fixture}/geo-target"
+                printf 'new-geosite\n' >"${fixture}/geo-stage/geosite.dat"
+                printf 'new-geoip\n' >"${fixture}/geo-stage/geoip.dat"
+                local geoFile
+                for geoFile in geosite.dat geoip.dat geo.version; do
+                    printf 'old-%s\n' "${geoFile}" >"${fixture}/geo-target/${geoFile}"
+                done
+                : >"${fixture}/backups"
+                status=0
+                (
+                    local singBoxConfigPath=
+                    local PADM_CLEANUP_TRAP_INSTALLED= PADM_CLEANUP_PATHS=()
+                    local PADM_EXIT_ROLLBACK_OWNER= PADM_EXIT_ROLLBACKS=()
+                    case "${phase}" in
+                    first-*) installSingBoxApply 1 ;;
+                    geo-*) commitXrayGeoFilesFromStage "${fixture}/geo-stage" "${fixture}/geo-target" new-version ;;
+                    *) installDownloadedSingBoxBinary "${version}" "${candidate}" ;;
+                    esac || exit $?
+                    printf 'continued\n' >"${fixture}/continued"
+                ) 2>"${fixture}/errors" || status=$?
+                if (
+                    if [[ "${phase}" == *-restore ]]; then
+                        [[ "${status}" == 1 && -e "${fixture}/restore-signaled" ]] || return 1
+                    else
+                        [[ "${status}" == "$([[ "${signal}" == TERM ]] && printf 143 || printf 130)" ]] || return 1
+                    fi
+                    [[ ! -e "${fixture}/continued" ]] || return 1
+                    if [[ "${failure}" == normal ]]; then
+                        case "${phase}" in
+                        migration* | validation)
+                            [[ "$(<"${shard}")" == '{"dns":{"independent_cache":true}}' &&
+                                "$(<"${merged}")" == '{"legacy":true}' &&
+                                "$(<"${PADM_SINGBOX_BINARY}")" == old-binary ]] || return 1
+                            ;;
+                        first-*) [[ ! -e "${PADM_SINGBOX_BINARY}" && "$(<"${cronet}")" == old-cronet ]] || return 1 ;;
+                        geo-*)
+                            for geoFile in geosite.dat geoip.dat geo.version; do
+                                [[ "$(<"${fixture}/geo-target/${geoFile}")" == "old-${geoFile}" ]] || return 1
+                            done
+                            ;;
+                        esac
+                        while IFS= read -r backup; do [[ ! -e "${backup}" ]] || return 1; done <"${fixture}/backups"
+                    else
+                        [[ -s "${fixture}/errors" ]] || return 1
+                        local backup kept=false
+                        while IFS= read -r backup; do [[ ! -d "${backup}" ]] || kept=true; done <"${fixture}/backups"
+                        [[ "${kept}" == true ]] || return 1
+                    fi
+                ); then
+                    printf '文件事务中断通过: %s %s %s\n' "${phase}" "${signal}" "${failure}"
+                else
+                    printf '文件事务中断失败: %s %s %s，退出 %s\n' "${phase}" "${signal}" "${failure}" "${status}" >&2
+                    cat "${fixture}/errors" >&2
+                    failed=true
+                fi
+            done
+        done
+    done
+    [[ "${failed}" == false ]]
+)
+
+runCoreBinaryInstallSignalRollbackRegression() (
+    set -euo pipefail
+    local root="${TMP_DIR}/core-binary-install-signal"
+    local fixture core signal phase wasRunning failure status backup originalBinary candidateDir installFunction
+    local version=v1.2.3 singBoxCoreCPUVendor=-linux-amd64
+    local PADM_XRAY_BINARY PADM_SINGBOX_BINARY PADM_TMP_DIR="${root}/tmp"
+    mkdir -p "${PADM_TMP_DIR}"
+    xrayConfigInstalled() { return 1; }
+    singBoxConfigInstalled() { return 1; }
+    xrayRunning() { grep -qx true "${fixture}/running"; }
+    singBoxRunning() { grep -qx true "${fixture}/running"; }
+    errorCard() { printf '%s\n' "$@" >>"${fixture}/errors.log"; }
+    ensureSingBoxTrafficStatsConfig() { return 0; }
+    eval "$(declare -f commitStagedCoreInstallFile | sed '1s/^commitStagedCoreInstallFile/signalRealCommitStagedCoreInstallFile/')"
+    eval "$(declare -f backupManagedFileToPath | sed '1s/^backupManagedFileToPath/signalRealBackupManagedFileToPath/')"
+    eval "$(declare -f restoreManagedFileFromBackup | sed '1s/^restoreManagedFileFromBackup/signalRealRestoreManagedFileFromBackup/')"
+    backupManagedFileToPath() {
+        signalRealBackupManagedFileToPath "$@" || return 1
+        printf '%s\n' "$2" >>"${fixture}/backups"
+    }
+    restoreManagedFileFromBackup() {
+        [[ "${failure}" != restore-fail || "$2" != "${originalBinary}" ]] || return 1
+        signalRealRestoreManagedFileFromBackup "$@"
+    }
+    signalBinaryInstall() {
+        [[ ! -e "${fixture}/signaled" ]] || return 0
+        printf '%s\n' "${phase}" >"${fixture}/signaled"
+        kill -"${signal}" "${BASHPID}"
+    }
+    commitStagedCoreInstallFile() {
+        signalRealCommitStagedCoreInstallFile "$@" || return 1
+        if [[ "${phase}" == binary && "$2" == "${originalBinary}" ]] ||
+            [[ "${phase}" == cronet && "$2" == "$(coreSingBoxCronetPath)" ]]; then
+            signalBinaryInstall
+        fi
+    }
+    handleSignalBinaryService() {
+        # 同名局部变量不能覆盖安装层保存的回滚快照。
+        local oldBinary=unrelated backupBinary=unrelated cronetBackup=unrelated
+        printf '%s\n' "$1" >>"${fixture}/service.log"
+        [[ "${failure}" != stop-fail || "$1" != stop || ! -e "${fixture}/signaled" ]] || return 1
+        printf '%s\n' "$([[ "$1" == start ]] && printf true || printf false)" >"${fixture}/running"
+        [[ "${phase}" != "$1" ]] || signalBinaryInstall
+    }
+    handleXray() { handleSignalBinaryService "$@"; }
+    handleSingBox() { handleSignalBinaryService "$@"; }
+
+    for core in xray sing-box; do
+        for signal in TERM INT; do
+            for phase in stop binary cronet start; do
+                [[ "${core}" != xray || "${phase}" != cronet ]] || continue
+                for wasRunning in true false; do
+                    for failure in normal stop-fail restore-fail; do
+                        [[ "${failure}" == normal || ( "${phase}" == start && "${wasRunning}" == true ) ]] || continue
+                        fixture="${root}/${core}-${signal}-${phase}-${wasRunning}-${failure}"
+                        printf '二进制中断检查: %s %s %s %s %s\n' "${core}" "${signal}" "${phase}" "${wasRunning}" "${failure}"
+                        candidateDir="${fixture}/candidate"
+                        PADM_XRAY_BINARY="${fixture}/installed/xray"
+                        PADM_SINGBOX_BINARY="${fixture}/installed/sing-box"
+                        mkdir -p "${fixture}/installed" "${candidateDir}"
+                        printf '%s\n' "${wasRunning}" >"${fixture}/running"
+                        if [[ "${core}" == xray ]]; then
+                            originalBinary=${PADM_XRAY_BINARY}
+                            installFunction=installDownloadedXrayBinary
+                            printf '#!/usr/bin/env bash\nprintf "Xray 1.2.3\\n"\n' >"${candidateDir}/xray"
+                            chmod 755 "${candidateDir}/xray"
+                        else
+                            originalBinary=${PADM_SINGBOX_BINARY}
+                            installFunction=installDownloadedSingBoxBinary
+                            local extractedDir="${candidateDir}/sing-box-${version#v}${singBoxCoreCPUVendor}"
+                            mkdir -p "${extractedDir}"
+                            printf '#!/usr/bin/env bash\nprintf "sing-box version 1.2.3\\nTags: with_v2ray_api\\n"\n' >"${extractedDir}/sing-box"
+                            chmod 755 "${extractedDir}/sing-box"
+                            printf 'new-cronet\n' >"${extractedDir}/libcronet.so"
+                            printf 'old-cronet\n' >"$(coreSingBoxCronetPath)"
+                        fi
+                        printf 'old-binary\n' >"${originalBinary}"
+                        chmod 755 "${originalBinary}"
+                        status=0
+                        (
+                            local PADM_CLEANUP_TRAP_INSTALLED= PADM_CLEANUP_PATHS=()
+                            local PADM_EXIT_ROLLBACK_OWNER= PADM_EXIT_ROLLBACKS=()
+                            padmRegisterCleanupPath "${candidateDir}"
+                            "${installFunction}" "${version}" "${candidateDir}"
+                            printf 'continued\n' >"${fixture}/continued"
+                        ) || status=$?
+                        [[ "${status}" == "$([[ "${signal}" == TERM ]] && printf 143 || printf 130)" ]]
+                        [[ ! -e "${fixture}/continued" && -e "${fixture}/signaled" ]]
+                        if [[ "${failure}" == normal ]]; then
+                            [[ "$(<"${originalBinary}")" == old-binary ]] || {
+                                printf '%s %s %s 未恢复旧二进制\n' "${core}" "${signal}" "${phase}" >&2
+                                return 1
+                            }
+                            [[ "$(<"${fixture}/running")" == "${wasRunning}" ]] || {
+                                printf '%s %s %s 未恢复原服务状态 %s\n' "${core}" "${signal}" "${phase}" "${wasRunning}" >&2
+                                return 1
+                            }
+                            [[ "${core}" != sing-box || "$(<"$(coreSingBoxCronetPath)")" == old-cronet ]]
+                        else
+                            [[ "$(<"${originalBinary}")" != old-binary ]]
+                            [[ "${failure}" != restore-fail || "$(<"${fixture}/running")" == false ]]
+                            [[ "${core}" != sing-box || "${failure}" != stop-fail || "$(<"$(coreSingBoxCronetPath)")" == new-cronet ]]
+                        fi
+                        while IFS= read -r backup; do
+                            if [[ "${failure}" == normal ]]; then
+                                [[ ! -e "${backup}" ]] || return 1
+                            else
+                                [[ -f "${backup}" ]] || {
+                                    printf '%s %s 回滚失败丢失备份 %s\n' "${core}" "${signal}" "${backup}" >&2
+                                    return 1
+                                }
+                            fi
+                        done <"${fixture}/backups"
+                    done
+                done
+            done
+        done
+    done
+    (
+        local oldState
+        eval "$(declare -f padmCreateTempPath | sed '1s/^padmCreateTempPath/firstXrayCreateTempPath/')"
+        padmCreateTempPath() {
+            if [[ "${2:-}" == -d && "${3:-}" == /etc/padm/* ]]; then
+                firstXrayCreateTempPath "$1" -d "${PADM_TMP_DIR}/first-xray.XXXXXX"
+            else
+                firstXrayCreateTempPath "$@"
+            fi
+            [[ ! -d "${!1}" ]] || printf '%s\n' "${!1}" >>"${fixture}/roots"
+        }
+        readInstallType() { :; }
+        coreLatestReleaseTag() { printf 'v1.2.3\n'; }
+        downloadXrayReleaseBinaryToTempDir() { cp -a "${candidateDir}/." "$2/"; }
+        ensureXrayGeoFiles() { [[ "${phase}" != geo ]] || signalBinaryInstall; }
+        # 首装替换无文件或不可执行残留后，核心提交与 Geo 准备都不能留下半安装状态。
+        for phase in binary geo; do
+            for signal in TERM INT; do
+                for oldState in absent broken; do
+                    for failure in normal restore-fail; do
+                        [[ "${failure}" != restore-fail || "${oldState}" == broken ]] || continue
+                        fixture="${root}/first-xray-${phase}-${signal}-${oldState}-${failure}"
+                        candidateDir="${fixture}/candidate"
+                        PADM_XRAY_BINARY="${fixture}/installed/xray"
+                        PADM_TMP_DIR="${fixture}/tmp"
+                        originalBinary=${PADM_XRAY_BINARY}
+                        mkdir -p "${fixture}/installed" "${candidateDir}" "${PADM_TMP_DIR}"
+                        printf 'false\n' >"${fixture}/running"
+                        printf '#!/usr/bin/env bash\nprintf "Xray 1.2.3\\n"\n' >"${candidateDir}/xray"
+                        chmod 755 "${candidateDir}/xray"
+                        if [[ "${oldState}" == broken ]]; then
+                            printf 'old-binary\n' >"${originalBinary}"
+                            chmod 644 "${originalBinary}"
+                        fi
+                        status=0
+                        (
+                            local PADM_CLEANUP_TRAP_INSTALLED= PADM_CLEANUP_PATHS=()
+                            local PADM_EXIT_ROLLBACK_OWNER= PADM_EXIT_ROLLBACKS=()
+                            installXrayApply 1
+                            printf 'continued\n' >"${fixture}/continued"
+                        ) || status=$?
+                        [[ "${status}" == "$([[ "${signal}" == TERM ]] && printf 143 || printf 130)" ]]
+                        [[ ! -e "${fixture}/continued" && -e "${fixture}/signaled" ]]
+                        [[ "$(<"${fixture}/running")" == false ]]
+                        if [[ "${failure}" == normal ]]; then
+                            if [[ "${oldState}" == broken ]]; then
+                                [[ "$(<"${originalBinary}")" == old-binary && "$(stat -c %a "${originalBinary}")" == 644 ]]
+                            else
+                                [[ ! -e "${originalBinary}" ]]
+                            fi
+                            while IFS= read -r backup; do [[ ! -e "${backup}" ]] || return 1; done <"${fixture}/roots"
+                        else
+                            [[ "$(<"${originalBinary}")" != old-binary && -s "${fixture}/errors.log" ]]
+                            while IFS= read -r backup; do
+                                [[ -d "${backup}" && "$(<"${backup}/xray.bak")" == old-binary ]] || return 1
+                            done <"${fixture}/roots"
+                        fi
+                        printf '首装 Xray 中断通过: %s %s %s %s\n' "${phase}" "${signal}" "${oldState}" "${failure}"
+                    done
+                done
+            done
+        done
+    )
 )
 
 runCancelableInstallCommandRegression() (
