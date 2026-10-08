@@ -529,7 +529,8 @@ dockerRealityStreamContractChecks() {
             dockerValidateCandidate "${spec}" "${candidate}" || return 1
             line=$(grep 'nginx -t$' "${calls}" | tail -n 1) || return 1
             case "${label}" in
-            enabled)
+            # 关闭共存后，普通 Nginx 首装仍需临时 hosts 做离线校验。
+            enabled|disabled)
                 [[ "${line}" == --file* && "${line}" != *'--add-host'* ]] &&
                     jq -e '.services.nginx.extra_hosts |
                       index("xray:127.0.0.1") != null and
@@ -543,9 +544,6 @@ dockerRealityStreamContractChecks() {
                       index("sing-box:127.0.0.1") != null and
                       index("subscription:127.0.0.1") == null' \
                       "${calls}.hosts" >/dev/null || return 1
-                ;;
-            disabled)
-                [[ "${line}" != *'--file'* && "${line}" != *'--add-host'* ]] || return 1
                 ;;
             esac
             [[ ! -e "${candidate}/compose.nginx-check.json" ]] || return 1
