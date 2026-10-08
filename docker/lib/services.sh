@@ -2054,12 +2054,21 @@ dockerCurrentOwnsHostIntegration() {
 }
 
 dockerValidateHostIntegrations() {
-    local specFile=$1 candidate=$2 ownership port mark ports
+    local specFile=$1 candidate=$2 ownership port mark ports root
     if jq -e 'any(.host_integrations[]; .type == "wireguard")' "${specFile}" >/dev/null; then
         ownership=unowned
-        dockerCurrentOwnsHostIntegration wireguard && ownership=owned
-        dockerCandidateCompose "${candidate}" run --rm --no-deps net-wireguard \
-            preflight wireguard /etc/wireguard/wg-padm.conf wg-padm "${ownership}" >/dev/null || {
+        local -a ownershipMount=()
+        if dockerCurrentOwnsHostIntegration wireguard; then
+            root=$(dockerInstallRoot) || return 1
+            dockerTrafficSafePath "${root}" "${root}/data/net/wireguard" || return 1
+            [[ -d "${root}/data/net/wireguard" ]] || return 1
+            ownership=owned
+            # 候选保持自己的配置，只读核对在线接口的当前归属。
+            ownershipMount=(--volume "${root}/data/net/wireguard:/run/padm-wireguard-owner:ro")
+        fi
+        dockerCandidateCompose "${candidate}" run --rm --no-deps "${ownershipMount[@]}" net-wireguard \
+            preflight wireguard /etc/wireguard/wg-padm.conf wg-padm "${ownership}" \
+            /run/padm-wireguard-owner >/dev/null || {
             dockerError 'WireGuard 内核、配置或接口前置检查失败'
             return 1
         }

@@ -83,7 +83,8 @@ listRegressionDockerContractsFastChildSelectors() {
         docker-business \
         docker-geo-data \
         docker-control-api \
-        docker-control-sync
+        docker-control-sync \
+        docker-wireguard-runtime
 }
 
 listRegressionDockerContractsSystemChildSelectors() {
@@ -134,6 +135,10 @@ runDockerControlSyncRegression() {
     bash "${PROJECT_ROOT}/docker/tests/control-sync.sh"
 }
 
+runDockerWireGuardRuntimeRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/wireguard-runtime.sh"
+}
+
 registerRegressionFunctionLeaf install-module-manifest runInstallModuleManifestCompleteRegression
 registerRegressionFunctionLeaf fast-only-safety runRegressionFastOnlySafety
 registerRegressionFunctionLeaf fast-only-output-auto-install runRegressionFastOnlyOutputAutoInstall
@@ -179,6 +184,13 @@ registerRegressionFunctionLeaf docker-business runDockerBusinessRegression
 registerRegressionFunctionLeaf docker-geo-data runDockerGeoRegression
 registerRegressionFunctionLeaf docker-control-api runDockerControlApiRegression
 registerRegressionFunctionLeaf docker-control-sync runDockerControlSyncRegression
+registerRegressionFunctionLeaf docker-wireguard-runtime runDockerWireGuardRuntimeRegression
+
+listRegressionDockerWireGuardChildSelectors() {
+    printf '%s\n' docker-wireguard-runtime docker-phase4
+}
+registerRegressionParallelSelectorList docker-wireguard-focused runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-wireguard-focused-${BASHPID:-$$}" listRegressionDockerWireGuardChildSelectors 2
 
 registerRegressionParallelSelectorList docker-tls-focused runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/docker-tls-focused-parallel-${BASHPID:-$$}" listRegressionDockerTlsFocusedChildSelectors

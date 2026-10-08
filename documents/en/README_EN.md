@@ -326,10 +326,14 @@ preserves local accounts. Identical revisions and content do not recreate servic
 version conflicts, credential collisions and ownership drift are rejected, and failed
 application restores the previous spec and configuration. Ordinary configuration cannot
 change sync ownership, and managed accounts must be changed on the controller.
+4C.3a hardens the existing WireGuard runtime: preflight, health and revocation verify the
+interface index, public key and random alias. Revocation uses a root-private startup snapshot.
+An external replacement or active legacy marker is never adopted or deleted automatically;
+stop the old container normally before upgrading. A matching name or public key is not ownership.
 No external sync CLI/menu, invitations, WireGuard connection or dedicated service health
 is connected yet. Focused fixtures cover candidate generation, installation, recovery and
 permissions; core/host actions are stubbed, not real two-node acceptance.
-Next is 4C.3 connectivity and management, followed by 4C.4 two-node acceptance.
+Next are the remaining 4C.3 connectivity and management steps, followed by 4C.4 two-node acceptance.
 Multi-server support remains `deferred`.
 See the [4C implementation checkpoints](../docker-menu-parity-plan.md#4c-多服务器控制后端).
 

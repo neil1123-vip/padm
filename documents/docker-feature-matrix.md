@@ -174,7 +174,7 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 | `subscription` | 订阅与用户 -> 订阅发布 | `supported` | `core-xray` / `nginx` / `subscription` | bridge | 既有部署级 token 发布继续要求 Xray 协议 `21` 和受管 TLS；分享组另有独立 token，可按账号/入口生成纯订阅内容并查看 HTTPS 链接；CDN/H3 仍未迁移。 |
 | `subscription-traffic` | 订阅与用户 -> 流量与额度 | `supported` | 核心 profile | 宿主 CLI | 定时采集以及 show/limit/reset；自用按原 UUID、独立账号按稳定 ID 共享跨核心累计与额度，凭据轮换和恢复不回退累计。 |
 | `subscription-users` | 订阅与用户 -> 用户和分享订阅 | `supported` | 核心、订阅 | bridge | 4A.1 账号底座、4A.2 账号 CLI/菜单事务和 4A.3 分享组已交付：支持独立 token、账号/入口筛选、启停/轮换、纯内容及 HTTPS 链接；CDN/H3、业务备份恢复和完整多服务器工作流仍未迁移。 |
-| `subscription-multiserver` | 订阅与用户 -> 主控/被控、多服务器同步 | `deferred` | 订阅、WireGuard | host | 4C.1 私网只读 API 与 4C.2 被控同步事务已实现：v3 私有规格保存身份、映射、版本/摘要和受管快照，保留本机账号，同版本无重建，冲突/漂移拒绝、失败恢复；定向夹具不代替真实双节点。外部同步 CLI/菜单、邀请、WireGuard 连接及专用健康待 4C.3，真实双节点待 4C.4。 |
+| `subscription-multiserver` | 订阅与用户 -> 主控/被控、多服务器同步 | `deferred` | 订阅、WireGuard | host | 4C.1 私网 API、4C.2 同步事务、4C.3a WireGuard 归属/撤销底座已实现；同步保留本机账号，同版本无重建，冲突/漂移拒绝、失败恢复；WireGuard 核验接口索引/公钥/随机标记，按启动快照撤销。外部同步 CLI/菜单、邀请、控制连接及专用健康待 4C.3，真实双节点待 4C.4。 |
 | `acme-webroot` | 站点与证书 -> 传统 TLS fallback | `deferred` | `acme` / `nginx` | bridge | 需要 webroot、端口归属和原子 reload。 |
 | `acme-standalone` | 站点与证书 -> 本机 TLS 证书 | `deferred` | `acme` | host | 需要 80/443 宿主端口和停机回滚。 |
 | `site-static-redirect-alpn` | 站点与证书 -> fallback 站点、302、ALPN | `deferred` | `nginx` | bridge | 尚无站点管理、ALPN 诊断和修复事务。 |
@@ -190,7 +190,7 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 | `routing-tools` | 路由与访问控制 -> WARP/IPv6/Socks5/DNS/BT/访问控制 | `deferred` | 视后续合同 | 可能需要 host | 原生路由策略尚未迁移。 |
 | `internal-201-socks-relay` | 路由与访问控制 -> Socks 中继 | `deferred` | 无 | bridge | 内部能力 `201` 尚未迁移。 |
 | `internal-202-http-relay` | 路由与访问控制 -> HTTP 中继 | `deferred` | 无 | bridge | 内部能力 `202` 尚未迁移。 |
-| `internal-203-wireguard` | 订阅与用户 / 路由 -> WireGuard | `host-integrated` | `net-wireguard` | host + `NET_ADMIN` | 接口由宿主内核拥有。 |
+| `internal-203-wireguard` | 订阅与用户 / 路由 -> WireGuard | `host-integrated` | `net-wireguard` | host + `NET_ADMIN` | 接口由宿主内核拥有；4C.3a 核验真实归属后预检/健康/撤销，活动旧式标记需先正常停止旧容器。 |
 | `internal-204-tun` | 路由与访问控制 -> TUN | `host-integrated` | `net-transparent` | host + `NET_ADMIN` + `/dev/net/tun` | 依赖宿主设备和转发规则。 |
 | `internal-205-redirect-tproxy` | 路由与访问控制 -> Redirect/TProxy | `host-integrated` | `net-transparent` | host + `NET_ADMIN` | 依赖宿主路由和防火墙。 |
 | `internal-206-routing-rules` | 路由与访问控制 -> DNS/Direct/Block | `deferred` | 无 | bridge | 规则编辑及核心适配尚未迁移。 |

@@ -395,7 +395,7 @@
       "profiles": ["net-wireguard"],
       "network_mode": "host",
       "host_capabilities": ["NET_ADMIN"],
-      "reason": "WireGuard 接口和密钥由宿主内核拥有，默认不启用。"
+      "reason": "WireGuard 接口由宿主内核拥有，默认不启用；预检/健康/撤销核对真实接口索引、公钥和随机标记，旧式活动标记拒绝自动接管。"
     },
     "tun": {
       "status": "host-integrated",

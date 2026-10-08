@@ -241,6 +241,11 @@ jq -e '
   ((.services.xray.cap_add // []) | length) == 0
 ' "${DOCKER_ROOT}/compose.json" >/dev/null || fail 'WireGuard privilege boundary is wrong'
 grep -q 'net-wireguard preflight wireguard' "${DOCKER_LOG}" || fail 'WireGuard preflight was not called'
+# 已部署时，候选配置与在线归属从不同只读输入核对。
+: >"${DOCKER_LOG}"
+runControl 0 wireguard-reconfigure configure --spec "${WIREGUARD_SPEC}"
+grep -Fq "${DOCKER_ROOT}/data/net/wireguard:/run/padm-wireguard-owner:ro net-wireguard preflight" \
+    "${DOCKER_LOG}" || fail 'WireGuard candidate did not mount live ownership read-only'
 
 CERT_FILE="${TEST_ROOT}/proxy.example.com.crt"
 KEY_FILE="${TEST_ROOT}/proxy.example.com.key"
