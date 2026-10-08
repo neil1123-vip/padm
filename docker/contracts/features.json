@@ -305,7 +305,7 @@
       "profiles": ["subscription", "net-wireguard"],
       "network_mode": "host",
       "host_capabilities": ["NET_ADMIN"],
-      "reason": "4C.1 私网只读 API、4C.2 被控同步事务、4C.3a WireGuard 归属/撤销及 4C.3b 无凭据专用服务健康已实现：保留本机账号，同版本无重建，冲突/漂移拒绝并复用候选/备份/恢复。健康核对状态、实际接口和限时私网服务响应，不依赖邀请授权。定向夹具不代替真实双节点验收；外部同步 CLI/菜单、角色邀请、WireGuard 连接及 Compose 服务待 4C.3，真实双节点待 4C.4。"
+      "reason": "4C.1 私网 API、4C.2 被控同步事务、4C.3a WireGuard 归属/撤销、4C.3b 无凭据健康及 4C.3c 主控期望值/独立 Compose 服务已实现：复用候选/备份/恢复，回滚账号内容也保持发布版本单调；服务只读挂载独立状态，无能力和公网端口映射。真实隔离接口健康通过，不代替加密双节点验收。外部同步 CLI/菜单、角色邀请及连接向导待 4C.3，真实双节点待 4C.4。"
     },
     "acme-webroot": {
       "status": "deferred",

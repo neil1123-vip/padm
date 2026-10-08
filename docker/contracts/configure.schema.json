@@ -8,11 +8,46 @@
   "x-padm-reality-stream-host-network": true,
   "x-padm-accounts": true,
   "x-padm-control-sync": true,
+  "x-padm-control-state": true,
   "additionalProperties": false,
   "required": ["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"],
   "properties": {
     "schema_version": {
       "enum": [1, 2, 3]
+    },
+    "control": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "role", "node_id", "listen", "peer", "revision", "last_digest"],
+      "properties": {
+        "schema_version": {"const": 1},
+        "role": {"const": "main"},
+        "node_id": {"$ref": "#/$defs/uuid"},
+        "listen": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["interface", "address", "port"],
+          "properties": {
+            "interface": {"const": "wg-padm"},
+            "address": {"type": "string", "format": "ipv4", "pattern": "^(10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.)"},
+            "port": {"type": "integer", "minimum": 1024, "maximum": 65535}
+          }
+        },
+        "peer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "address", "enabled", "expires_at", "token_sha256"],
+          "properties": {
+            "id": {"$ref": "#/$defs/uuid"},
+            "address": {"type": "string", "format": "ipv4", "pattern": "^(10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.)"},
+            "enabled": {"type": "boolean"},
+            "expires_at": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+            "token_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}(?![\\s\\S])"}
+          }
+        },
+        "revision": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "last_digest": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}(?![\\s\\S])"}
+      }
     },
     "control_sync": {
       "type": "object",
@@ -297,6 +332,20 @@
     }
   },
   "allOf": [
+    {
+      "if": {"required": ["control"]},
+      "then": {
+        "not": {"required": ["control_sync"]},
+        "properties": {
+          "schema_version": {"const": 3},
+          "host_integrations": {"contains": {"properties": {"type": {"const": "wireguard"}}, "required": ["type"]}},
+          "control": {
+            "if": {"properties": {"last_digest": {"type": "null"}}},
+            "then": {"properties": {"revision": {"const": 0}}}
+          }
+        }
+      }
+    },
     {
       "if": {"required": ["control_sync"]},
       "then": {"properties": {"schema_version": {"const": 3}}}

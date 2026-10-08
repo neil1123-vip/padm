@@ -9,6 +9,7 @@ import json
 import os
 import re
 import socket
+import socketserver
 import stat
 import struct
 import threading
@@ -248,6 +249,11 @@ class ControlHandler(BaseHTTPRequestHandler):
 class ControlServer(HTTPServer):
     # ponytail: 一主一被控串行读取；节点扩展后再按实测增加有界并发。
     request_timeout = 5
+
+    def server_bind(self):
+        # 私网字面地址无需反向 DNS，避免离线控制服务启动等待外部解析。
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
     def get_request(self):
         connection, address = super().get_request()

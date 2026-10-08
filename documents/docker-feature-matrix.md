@@ -174,7 +174,7 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 | `subscription` | 订阅与用户 -> 订阅发布 | `supported` | `core-xray` / `nginx` / `subscription` | bridge | 既有部署级 token 发布继续要求 Xray 协议 `21` 和受管 TLS；分享组另有独立 token，可按账号/入口生成纯订阅内容并查看 HTTPS 链接；CDN/H3 仍未迁移。 |
 | `subscription-traffic` | 订阅与用户 -> 流量与额度 | `supported` | 核心 profile | 宿主 CLI | 定时采集以及 show/limit/reset；自用按原 UUID、独立账号按稳定 ID 共享跨核心累计与额度，凭据轮换和恢复不回退累计。 |
 | `subscription-users` | 订阅与用户 -> 用户和分享订阅 | `supported` | 核心、订阅 | bridge | 4A.1 账号底座、4A.2 账号 CLI/菜单事务和 4A.3 分享组已交付：支持独立 token、账号/入口筛选、启停/轮换、纯内容及 HTTPS 链接；CDN/H3、业务备份恢复和完整多服务器工作流仍未迁移。 |
-| `subscription-multiserver` | 订阅与用户 -> 主控/被控、多服务器同步 | `deferred` | 订阅、WireGuard | host | 4C.1 私网 API、4C.2 同步事务、4C.3a WireGuard 归属/撤销、4C.3b 无凭据专用健康已实现；同步保留本机账号，同版本无重建，冲突/漂移拒绝、失败恢复。外部同步 CLI/菜单、邀请、控制连接及 Compose 服务待 4C.3，真实双节点待 4C.4。 |
+| `subscription-multiserver` | 订阅与用户 -> 主控/被控、多服务器同步 | `deferred` | 订阅、WireGuard | host | 4C.1 私网 API、4C.2 同步事务、4C.3a WireGuard 归属/撤销、4C.3b 无凭据健康、4C.3c 主控期望值及独立 Compose 服务已实现；失败/回滚恢复账号且发布版本不倒退，单独只读状态挂载，无公网端口或能力。外部同步 CLI/菜单、邀请和连接向导待 4C.3，真实双节点待 4C.4。 |
 | `acme-webroot` | 站点与证书 -> 传统 TLS fallback | `deferred` | `acme` / `nginx` | bridge | 需要 webroot、端口归属和原子 reload。 |
 | `acme-standalone` | 站点与证书 -> 本机 TLS 证书 | `deferred` | `acme` | host | 需要 80/443 宿主端口和停机回滚。 |
 | `site-static-redirect-alpn` | 站点与证书 -> fallback 站点、302、ALPN | `deferred` | `nginx` | bridge | 尚无站点管理、ALPN 诊断和修复事务。 |

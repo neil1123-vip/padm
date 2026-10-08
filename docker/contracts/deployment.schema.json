@@ -100,7 +100,7 @@
         "properties": {
           "listener_id": {
             "type": "string",
-            "pattern": "^(?:entry-[a-z0-9][a-z0-9-]{0,47}|vless-(?:reality|ws)|host-(?:wireguard|tproxy-(?:tcp|udp)))$"
+            "pattern": "^(?:entry-[a-z0-9][a-z0-9-]{0,47}|vless-(?:reality|ws)|host-(?:control|wireguard|tproxy-(?:tcp|udp)))$"
           },
           "service": {
             "type": "string",

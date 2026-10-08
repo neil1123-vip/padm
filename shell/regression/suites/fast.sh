@@ -85,6 +85,7 @@ listRegressionDockerContractsFastChildSelectors() {
         docker-geo-data \
         docker-control-api \
         docker-control-sync \
+        docker-control-state \
         docker-wireguard-runtime
 }
 
@@ -136,6 +137,10 @@ runDockerControlSyncRegression() {
     bash "${PROJECT_ROOT}/docker/tests/control-sync.sh"
 }
 
+runDockerControlStateRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/control-state.sh"
+}
+
 runDockerWireGuardRuntimeRegression() {
     bash "${PROJECT_ROOT}/docker/tests/wireguard-runtime.sh"
 }
@@ -185,6 +190,7 @@ registerRegressionFunctionLeaf docker-business runDockerBusinessRegression
 registerRegressionFunctionLeaf docker-geo-data runDockerGeoRegression
 registerRegressionFunctionLeaf docker-control-api runDockerControlApiRegression
 registerRegressionFunctionLeaf docker-control-sync runDockerControlSyncRegression
+registerRegressionFunctionLeaf docker-control-state runDockerControlStateRegression
 registerRegressionFunctionLeaf docker-wireguard-runtime runDockerWireGuardRuntimeRegression
 
 listRegressionDockerWireGuardChildSelectors() {

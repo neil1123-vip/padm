@@ -333,8 +333,14 @@ stop the old container normally before upgrading. A matching name or public key 
 4C.3b adds a dedicated `control-health --state PATH`: it safely reads state, checks the actual
 interface address and connects directly to the private service with bounded timeouts.
 It verifies the fixed unauthenticated rejection without sending a token or depending on invitation expiry.
-No external sync CLI/menu, invitations, WireGuard connection or Compose control service
-is connected yet. Focused fixtures cover candidate generation, installation, recovery and
+4C.3c adds controller desired-account state to candidate, backup, update and recovery transactions.
+Account order or local listener mappings do not increment the revision; content changes do,
+and restoring old content publishes a newer revision rather than moving backwards.
+The separate Compose `control` service uses host networking, UID `10001`, no capabilities or
+published ports, and a read-only `config/control` mount; it depends on WireGuard health.
+Ordinary configuration cannot change controller identity, listener or authorization.
+No external sync CLI/menu, invitations or WireGuard connection wizard is connected yet.
+Focused fixtures cover candidate generation, installation, recovery and
 permissions; core/host actions are stubbed, not real two-node acceptance.
 Next are the remaining 4C.3 connectivity and management steps, followed by 4C.4 two-node acceptance.
 Multi-server support remains `deferred`.

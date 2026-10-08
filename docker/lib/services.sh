@@ -107,7 +107,8 @@ dockerConfigureSpecValidate() {
       exact(["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"] +
         (if has("reality_stream") then ["reality_stream"] else [] end) +
         (if has("accounts") then ["accounts"] else [] end) +
-        (if has("control_sync") then ["control_sync"] else [] end)) and
+        (if has("control_sync") then ["control_sync"] else [] end) +
+        (if has("control") then ["control"] else [] end)) and
       (.schema_version == 1 or .schema_version == 2 or .schema_version == 3) and
       (if has("accounts") then
         .schema_version == 3 and
@@ -395,6 +396,235 @@ dockerConfigureSpecValidate() {
         dockerError '被控同步角色、归属或入口映射不合法'
         return 1
     }
+    dockerControlSpecValidate "${specFile}" || {
+        dockerError '主控角色、监听、授权或版本元数据不合法'
+        return 1
+    }
+}
+
+dockerControlSpecValidate() {
+    jq -e '
+      def exact($keys): type == "object" and ((keys_unsorted | sort) == ($keys | sort));
+      def uuid: type == "string" and
+        test("^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$");
+      def count: type == "number" and floor == . and . >= 0 and . <= 9007199254740991;
+      def private_address: type == "string" and
+        (split(".") as $parts | ($parts | length) == 4 and
+         all($parts[]; test("^(0|[1-9][0-9]{0,2})$") and tonumber <= 255)) and
+        test("^(10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.)");
+      . as $spec |
+      if has("control") then
+        .schema_version == 3 and (has("control_sync") | not) and
+        any(.host_integrations[]; .type == "wireguard") and
+        (.control |
+          exact(["schema_version","role","node_id","listen","peer","revision","last_digest"]) and
+          .schema_version == 1 and .role == "main" and (.node_id | uuid) and
+          (.listen | exact(["interface","address","port"]) and .interface == "wg-padm" and
+            (.address | private_address) and
+            (.port | count and . >= 1024 and . <= 65535)) and
+          (.peer | exact(["id","address","enabled","expires_at","token_sha256"]) and
+            (.id | uuid) and (.address | private_address) and (.enabled | type == "boolean") and
+            (.expires_at | count and . > 0) and
+            (.token_sha256 | type == "string" and test("^[a-f0-9]{64}$"))) and
+          .node_id != .peer.id and .listen.address != .peer.address and
+          (.revision | count) and
+          (if .last_digest == null then .revision == 0
+           else (.last_digest | type == "string" and test("^[a-f0-9]{64}$")) end)) and
+        all(.core.protocols[]; .public_port != $spec.control.listen.port) and
+        all(.host_integrations[] | select(.type == "tproxy"); .settings.port != $spec.control.listen.port)
+      else true end
+    ' "$1" >/dev/null 2>&1
+}
+
+dockerControlTransitionValidate() {
+    local source=$1 root
+    root=$(dockerInstallRoot) || return 1
+    dockerTrafficSafePath "${root}" "${root}/config/spec.json" || return 1
+    if [[ -f "${root}/config/spec.json" ]] &&
+        jq -e 'has("control")' "${root}/config/spec.json" >/dev/null; then
+        dockerManagedSpecMatchesDeployment "${root}/config/spec.json" \
+            "${root}/deployment.json" "${root}/images.env" || return 1
+    fi
+    [[ "${DOCKER_CONTROL_TRANSACTION:-0}" != 1 ]] || return 0
+    if [[ -f "${root}/config/spec.json" ]]; then
+        jq -en --slurpfile current "${root}/config/spec.json" --slurpfile next "${source}" \
+            '$current[0].control == $next[0].control' >/dev/null 2>&1 && return 0
+    else
+        jq -e 'has("control") | not' "${source}" >/dev/null 2>&1 && return 0
+    fi
+    dockerError '主控身份、监听、授权和发布元数据只能通过控制事务修改'
+    return 1
+}
+
+dockerControlPlan() {
+    local directory=$1 image=$2
+    shift 2
+    dockerRealityProbeRun 30 --user 0:0 --network none \
+        --tmpfs /tmp:rw,noexec,nosuid,nodev,size=8m \
+        --label io.padm.mode=docker --label io.padm.project="${PADM_DOCKER_PROJECT}" \
+        --mount "type=bind,src=${directory},dst=/input,readonly" \
+        --entrypoint python3 "${image}" /opt/padm/control_state.py --spec /input/spec.json "$@"
+}
+
+dockerControlStateCheck() (
+    local directory=$1 input image metadata mode hasControl parent
+    dockerTrafficSafePath "${directory}" "${directory}/config/spec.json" || return 1
+    hasControl=$(jq -er 'if type == "object" then has("control") | tostring
+        else error("invalid spec") end' "${directory}/config/spec.json") || return 1
+    if [[ -e "${directory}/config/control" || -L "${directory}/config/control" ]]; then
+        dockerTrafficSafePath "${directory}" "${directory}/config/control" &&
+            [[ -d "${directory}/config/control" ]] || return 1
+        metadata=$(stat -c '%u:%a' "${directory}/config/control") || return 1
+        [[ "${metadata}" == 0:* ]] || return 1
+        mode=${metadata#*:}
+        (( (8#${mode} & 8#022) == 0 )) || return 1
+    fi
+    if [[ "${hasControl}" == false ]]; then
+        [[ ! -d "${directory}/config/control" ||
+            -z "$(find "${directory}/config/control" -mindepth 1 -print -quit)" ]]
+        return $?
+    fi
+    # 复制到私有输入前检查受管根内的父目录，避免安全副本掩盖原目录可被替换。
+    for parent in "${directory}" "${directory}/config"; do
+        [[ -d "${parent}" ]] || return 1
+        metadata=$(stat -c '%u:%a' "${parent}") || return 1
+        [[ "${metadata}" == 0:* ]] || return 1
+        mode=${metadata#*:}
+        (( (8#${mode} & 8#022) == 0 )) || return 1
+    done
+    [[ -f "${directory}/config/spec.json" && -O "${directory}/config/spec.json" ]] &&
+        dockerPrivateFileIsRestricted "${directory}/config/spec.json" || return 1
+    dockerTrafficSafePath "${directory}" "${directory}/config/control/state.json" &&
+        [[ -f "${directory}/config/control/state.json" &&
+            -z "$(find "${directory}/config/control" -mindepth 1 \
+                ! -path "${directory}/config/control/state.json" -print -quit)" ]] || return 1
+    metadata=$(stat -c '%u:%a' "${directory}/config/control/state.json") || return 1
+    [[ "${metadata}" == 0:* ]] || return 1
+    mode=${metadata#*:}
+    (( (8#${mode} & ~8#640) == 0 )) || return 1
+    input=$(mktemp -d "${directory}/.control-check.XXXXXX") || return 1
+    trap 'dockerRemoveManagedTree "$directory" "$input"' EXIT
+    chmod 0700 "${input}" &&
+        cp -- "${directory}/config/spec.json" "${input}/spec.json" &&
+        cp -- "${directory}/config/control/state.json" "${input}/state.json" &&
+        chmod 0600 "${input}/spec.json" "${input}/state.json" || return 1
+    image=$(jq -er '.images.ops' "${input}/spec.json") || return 1
+    dockerControlPlan "${input}" "${image}" --check-state /input/state.json
+)
+
+dockerControlRecoveryCheck() {
+    local root directory plan mode=${1:-}
+    if [[ "${mode}" != current && "${DOCKER_CONFIG_SWITCHED:-0}" == 1 ]]; then
+        dockerError "配置恢复未完成，拒绝新发布: ${DOCKER_CONFIG_CANDIDATE:-当前事务}"
+        return 1
+    fi
+    root=$(dockerInstallRoot) || return 1
+    for directory in "${root}"/.candidate.* "${root}"/.update.*; do
+        [[ -e "${directory}" || -L "${directory}" ]] || continue
+        dockerTrafficSafePath "${root}" "${directory}" && [[ -d "${directory}" ]] || return 1
+        [[ "${directory}" != "${DOCKER_CONFIG_CANDIDATE:-}" ]] || continue
+        # 新进程没有事务变量，遗留版本计划不能被低版本在线规格掩盖。
+        for plan in "${directory}/control-plan.json" "${directory}/control-restore/control-plan.json"; do
+            dockerTrafficSafePath "${root}" "${plan}" || return 1
+            [[ -e "${plan}" || -L "${plan}" ]] || continue
+            dockerError "发现未完成的主控恢复计划，拒绝新发布，请先恢复并检查: ${directory}"
+            return 1
+        done
+    done
+}
+
+dockerControlPrepareCandidate() (
+    local source=$1 candidate=$2 previous=${3:-} input image
+    local -a previousArgs=()
+    [[ "${source}" == "${candidate}/config/spec.json" ]] ||
+        cp -- "${source}" "${candidate}/config/spec.json" || return 1
+    chmod 0600 "${candidate}/config/spec.json" || return 1
+    jq -e 'has("control")' "${source}" >/dev/null || return 0
+    input=$(mktemp -d "${candidate}/.control-input.XXXXXX") || return 1
+    trap 'dockerRemoveManagedTree "$candidate" "$input"' EXIT
+    chmod 0700 "${input}" &&
+        cp -- "${source}" "${input}/spec.json" &&
+        chmod 0600 "${input}/spec.json" || return 1
+    if [[ -n "${previous}" ]]; then
+        [[ -f "${previous}" && ! -L "${previous}" ]] &&
+            dockerConfigureSpecValidate "${previous}" &&
+            cp -- "${previous}" "${input}/previous.json" &&
+            chmod 0600 "${input}/previous.json" || return 1
+        previousArgs=(--previous /input/previous.json)
+    fi
+    image=$(jq -er '.images.ops' "${source}") || return 1
+    (umask 077; dockerControlPlan "${input}" "${image}" "${previousArgs[@]}" >"${candidate}/control-plan.json") &&
+        jq '.spec' "${candidate}/control-plan.json" >"${candidate}/config/spec.json" &&
+        mkdir -p "${candidate}/config/control" &&
+        jq '.state' "${candidate}/control-plan.json" >"${candidate}/config/control/state.json" &&
+        chmod 0600 "${candidate}/config/spec.json" "${candidate}/control-plan.json" &&
+        chmod 0640 "${candidate}/config/control/state.json" &&
+        dockerConfigureSpecValidate "${candidate}/config/spec.json" || return 1
+)
+
+dockerControlRestorePrepare() {
+    local backup=$1 root candidate directory
+    DOCKER_CONTROL_RESTORE_PLAN=
+    [[ -f "${backup}/config/spec.json" ]] &&
+        jq -e 'has("control")' "${backup}/config/spec.json" >/dev/null || return 0
+    root=$(dockerInstallRoot) || return 1
+    if [[ -z "${DOCKER_CONFIG_CANDIDATE:-}" ]]; then
+        DOCKER_CONFIG_CANDIDATE=$(mktemp -d "${root}/.candidate.XXXXXX") || return 1
+    fi
+    candidate=${DOCKER_CONFIG_CANDIDATE}
+    dockerTrafficSafePath "${root}" "${candidate}" &&
+        [[ -d "${candidate}" && ! -L "${candidate}" ]] || return 1
+    directory="${candidate}/control-restore"
+    mkdir -p -- "${directory}/config/control" &&
+        chmod 0700 "${directory}" || return 1
+    (
+        local input source image index=0
+        local -a floors=()
+        input=$(mktemp -d "${candidate}/.control-restore-input.XXXXXX") || return 1
+        trap 'dockerRemoveManagedTree "$candidate" "$input"' EXIT
+        chmod 0700 "${input}" &&
+            cp -- "${backup}/config/spec.json" "${input}/spec.json" &&
+            chmod 0600 "${input}/spec.json" || return 1
+        source="${root}/config/spec.json"
+        if [[ -e "${source}" || -L "${source}" ]]; then
+            dockerTrafficSafePath "${root}" "${source}" &&
+                [[ -f "${source}" && ! -L "${source}" && -O "${source}" ]] &&
+                dockerPrivateFileIsRestricted "${source}" &&
+                dockerConfigureSpecValidate "${source}" &&
+                jq -e 'has("control")' "${source}" >/dev/null &&
+                cp -- "${source}" "${input}/previous.json" &&
+                chmod 0600 "${input}/previous.json" || return 1
+            floors+=(--previous /input/previous.json)
+        fi
+        # 恢复可能先复制旧规格；重试仍须综合未完成候选与此前恢复计划的最高版本。
+        for source in "${candidate}/control-plan.json" "${directory}/control-plan.json"; do
+            [[ -e "${source}" || -L "${source}" ]] || continue
+            dockerTrafficSafePath "${candidate}" "${source}" &&
+                [[ -f "${source}" && ! -L "${source}" && -O "${source}" ]] &&
+                dockerPrivateFileIsRestricted "${source}" &&
+                cp -- "${source}" "${input}/plan${index}.json" &&
+                chmod 0600 "${input}/plan${index}.json" &&
+                jq '.spec' "${source}" >"${input}/floor-spec.json" &&
+                chmod 0600 "${input}/floor-spec.json" &&
+                dockerConfigureSpecValidate "${input}/floor-spec.json" &&
+                jq -e 'has("control")' "${input}/floor-spec.json" >/dev/null || return 1
+            floors+=(--plan-floor "/input/plan${index}.json")
+            index=$((index + 1))
+        done
+        [[ "${#floors[@]}" -gt 0 ]] || {
+            dockerError '在线主控版本与候选恢复版本均缺失，保留现场并拒绝降低版本'
+            return 1
+        }
+        image=$(jq -er '.images.ops' "${input}/spec.json") || return 1
+        (umask 077; dockerControlPlan "${input}" "${image}" "${floors[@]}" >"${directory}/control-plan.next.json") &&
+            jq '.spec' "${directory}/control-plan.next.json" >"${directory}/config/spec.json" &&
+            jq '.state' "${directory}/control-plan.next.json" >"${directory}/config/control/state.json" &&
+            chmod 0600 "${directory}/config/spec.json" &&
+            chmod 0640 "${directory}/config/control/state.json" &&
+            dockerConfigureSpecValidate "${directory}/config/spec.json" &&
+            mv -- "${directory}/control-plan.next.json" "${directory}/control-plan.json" || return 1
+    ) || return 1
+    DOCKER_CONTROL_RESTORE_PLAN=${directory}
 }
 
 dockerConfigureSpecMigrate() {
@@ -497,6 +727,7 @@ dockerManagedSpecMatchesDeployment() {
           any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29) then "nginx" else empty end] +
         [if .reality_stream.host_website.network_mode == "host" then "nginx-stream" else empty end] +
         [if .subscription.enabled then "subscription" else empty end] +
+        [if .control != null then "control" else empty end] +
         [.host_integrations[].profile] | sort) == ($d.compose.profiles | sort) and
       (.host_integrations | sort_by(.type)) == ($d.host_integrations | sort_by(.type)) and
       ([.core.protocols[].id] | unique) == ($d.core.protocol_ids | sort) and
@@ -513,6 +744,12 @@ dockerManagedSpecMatchesDeployment() {
           transport: $transport, address_families}] | sort_by(.listener_id, .transport) as $expected |
         $expected == ([$d.listeners[] | select(.listener_id | startswith("host-") | not)] | sort_by(.listener_id, .transport))
        else true end) and
+      ([$d.listeners[] | select(.listener_id == "host-control")] ==
+        [if .control != null then {
+          listener_id: "host-control", service: "control",
+          public_port: .control.listen.port, container_port: .control.listen.port,
+          transport: "tcp", address_families: ["ipv4"]
+        } else empty end]) and
       all(.images | to_entries[];
         (.value | split("@") | last) == $d.images[.key].index_digest)
     ' "${specFile}" >/dev/null 2>&1 || return 1
@@ -547,7 +784,7 @@ dockerEditBaselineValidate() {
         return 1
     }
     baseline="${workspace}/baseline"
-    mkdir -p -- "${baseline}/config/"{xray,sing-box,nginx,net/fail2ban,net/transparent} \
+    mkdir -p -- "${baseline}/config/"{xray,sing-box,nginx,control,net/fail2ban,net/transparent} \
         "${baseline}/data/subscription" "${baseline}/logs/nginx" || return 1
     state=$(dockerTrafficReadState) || return 1
     while IFS= read -r core; do
@@ -570,12 +807,16 @@ dockerEditBaselineValidate() {
         dockerGenerateRealityStreamMain "${specFile}" "${baseline}/config/nginx/stream/host-main" &&
         dockerGenerateFail2banConfig "${specFile}" "${baseline}" || return 1
     dockerGeoPrepareCandidate "${root}" "${baseline}" || return 1
+    dockerControlPrepareCandidate "${specFile}" "${baseline}" || return 1
     if jq -e '.subscription.enabled' "${specFile}" >/dev/null; then
         token=$(jq -r '.subscription.token' "${specFile}") || return 1
         dockerGenerateSubscription "${specFile}" "${baseline}/data/subscription/${token}" || return 1
     fi
     # 整目录替换前核对所有受影响的输入，不把额外账号、路由或手写配置默默丢弃。
-    for directory in config/xray config/sing-box config/nginx config/net data/subscription; do
+    for directory in config/xray config/sing-box config/nginx config/net config/control data/subscription; do
+        if [[ "${directory}" == config/control && ! -e "${root}/${directory}" ]]; then
+            [[ -z "$(find "${baseline}/${directory}" -mindepth 1 -print -quit)" ]] && continue
+        fi
         dockerTrafficSafePath "${root}" "${root}/${directory}" &&
             [[ -d "${root}/${directory}" &&
                 -z "$(find "${root}/${directory}" ! -type f ! -type d -print -quit)" ]] || return 1
@@ -792,6 +1033,7 @@ dockerConfigurePortsAvailable() {
             wireguardPort=$(dockerWireGuardListenPort) || exit 1
             printf '%s|udp\n' "${wireguardPort}"
         fi
+        jq -r 'if .control != null then "\(.control.listen.port)|tcp" else empty end' "${specFile}"
     )
 }
 
@@ -810,7 +1052,7 @@ dockerCreateConfigurationCandidate() {
     candidate=$(mktemp -d "${root}/.candidate.XXXXXX") || return 1
     dockerManagedPathIsSafe "${root}" "${candidate}" || return 1
     for directory in \
-        config/xray config/sing-box config/nginx config/net/fail2ban config/net/transparent \
+        config/xray config/sing-box config/nginx config/control config/net/fail2ban config/net/transparent \
         data/xray data/sing-box data/static data/subscription data/acme \
         data/net/wireguard data/net/fail2ban data/net/transparent \
         secrets/tls secrets/net/wireguard logs/nginx logs/subscription logs/acme; do
@@ -1738,6 +1980,24 @@ dockerGenerateCompose() {
             }
           })
         else . end
+      | if $r.control != null then
+          .services.control = (defaults + {
+            image: "${PADM_OPS_IMAGE:?PADM_OPS_IMAGE is required}",
+            profiles: ["control"],
+            user: "10001:10001",
+            network_mode: "host",
+            command: ["control", "--state", "/etc/padm/control/state.json"],
+            labels: labels("control"),
+            depends_on: {"net-wireguard": {condition: "service_healthy"}},
+            volumes: mounts("config/control"; "/etc/padm/control"; true),
+            tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=8m"],
+            healthcheck: {
+              test: ["CMD", "/usr/local/bin/padm-entrypoint", "control-health",
+                "--state", "/etc/padm/control/state.json"],
+              interval: "30s", timeout: "8s", start_period: "5s", retries: 3
+            }
+          })
+        else . end
       | if ($fail2ban | length) == 1 then
           .services["net-fail2ban"] = (defaults + {
             image: "${PADM_NET_IMAGE:?PADM_NET_IMAGE is required}",
@@ -1817,6 +2077,7 @@ dockerGenerateDeployment() {
           any($r.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29) then "nginx" else empty end] +
         [if $r.reality_stream.host_website.network_mode == "host" then "nginx-stream" else empty end] +
         [if $r.subscription.enabled then "subscription" else empty end] +
+        [if $r.control != null then "control" else empty end] +
         [$r.host_integrations[].profile]);
       {
         schema_version: 1,
@@ -1862,7 +2123,11 @@ dockerGenerateDeployment() {
               container_port: .settings.port, transport: "udp", address_families: ["ipv4"]} +
               if $r.schema_version >= 2 then {listener_id: "host-tproxy-udp"} else {} end)
           else empty end
-          ]
+          ] + [if $r.control != null then {
+            listener_id: "host-control", service: "control",
+            public_port: $r.control.listen.port, container_port: $r.control.listen.port,
+            transport: "tcp", address_families: ["ipv4"]
+          } else empty end]
         ),
         images: {
           xray: {index_digest: ($r.images.xray | digest)},
@@ -1901,7 +2166,7 @@ dockerDeploymentFileValidate() {
         (if any(.[]; has("listener_id")) then
           ([.[] | [.listener_id, .transport]] | unique | length) == length and
           all(.[]; .listener_id | type == "string" and
-            test("^(entry-[a-z0-9][a-z0-9-]{0,47}|vless-reality|vless-ws|host-wireguard|host-tproxy-tcp|host-tproxy-udp)$"))
+            test("^(entry-[a-z0-9][a-z0-9-]{0,47}|vless-reality|vless-ws|host-wireguard|host-tproxy-tcp|host-tproxy-udp|host-control)$"))
          else true end)) and
       (.images | keys | sort) == (["xray", "sing-box", "nginx", "ops", "net"] | sort) and
       all(.images[]; .index_digest | test("^sha256:[a-f0-9]{64}$")) and
@@ -1986,6 +2251,14 @@ dockerPrepareCandidatePermissions() {
 dockerGenerateCandidate() {
     local specFile=$1 candidate=$2 tlsSource=${3:-} acmeSource=${4:-} businessSource=${5:-} root core token sharesSource=''
     root=$(dockerInstallRoot) || return 1
+    local previous=
+    if jq -e 'has("control")' "${specFile}" >/dev/null &&
+        [[ -e "${root}/config/spec.json" || -L "${root}/config/spec.json" ]]; then
+        dockerControlStateCheck "${root}" || return 1
+        previous="${root}/config/spec.json"
+    fi
+    dockerControlPrepareCandidate "${specFile}" "${candidate}" "${previous}" || return 1
+    specFile="${candidate}/config/spec.json"
     while IFS= read -r core; do
         case "${core}" in
         xray) dockerGenerateXrayConfig "${specFile}" "${candidate}/config/xray/config.json" || return 1 ;;
@@ -2004,8 +2277,6 @@ dockerGenerateCandidate() {
             [[ -z "$(find "${acmeSource}" -type l -print -quit)" ]] || return 1
         cp -a -- "${acmeSource}/." "${candidate}/data/acme/" || return 1
     fi
-    cp -- "${specFile}" "${candidate}/config/spec.json" || return 1
-    chmod 0600 "${candidate}/config/spec.json" || return 1
     dockerGenerateNginxConfig "${specFile}" "${candidate}/config/nginx/default.conf" || return 1
     dockerGenerateRealityStreamConfig "${specFile}" "${candidate}/config/nginx/stream/reality.conf" || return 1
     dockerGenerateRealityStreamMain "${specFile}" "${candidate}/config/nginx/stream/host-main" || return 1
@@ -2120,6 +2391,10 @@ dockerValidateCandidate() {
         dockerError '候选 deployment.json 无效'
         return 1
     }
+    dockerControlStateCheck "${candidate}" || {
+        dockerError '候选主控状态、账号摘要或发布版本不一致'
+        return 1
+    }
     dockerCandidateCompose "${candidate}" config --format json >/dev/null || {
         dockerError '候选 Compose 配置校验失败'
         return 1
@@ -2179,6 +2454,13 @@ dockerValidateCandidate() {
         dockerCandidateCompose "${candidate}" run --rm --no-deps subscription \
             subscription --check >/dev/null || {
             dockerError '订阅控制服务候选配置校验失败'
+            return 1
+        }
+    fi
+    if jq -e 'has("control")' "${specFile}" >/dev/null; then
+        dockerCandidateCompose "${candidate}" run --rm --no-deps control \
+            control --state /etc/padm/control/state.json --check >/dev/null || {
+            dockerError '主控私网服务候选配置校验失败'
             return 1
         }
     fi
@@ -2258,6 +2540,13 @@ dockerBackupConfiguration() {
     local root backup relative source bundlePath prefix=${1:-configure}
     root=$(dockerInstallRoot) || return 1
     [[ "${prefix}" =~ ^[a-z][a-z0-9_-]*$ ]] || return 1
+    dockerControlRecoveryCheck || return 1
+    if [[ -e "${root}/config/spec.json" || -L "${root}/config/spec.json" ]]; then
+        dockerTrafficSafePath "${root}" "${root}/config/spec.json" || return 1
+        if jq -e 'has("control")' "${root}/config/spec.json" >/dev/null; then
+            dockerControlStateCheck "${root}" || return 1
+        fi
+    fi
     backup=$(mktemp -d "${root}/backups/${prefix}.XXXXXX") || return 1
     if [[ "${prefix}" == update || "${prefix}" == rollback ]]; then
         bundlePath=$(dockerCurrentBundlePath) || return 1
@@ -2281,6 +2570,7 @@ config/xray
 config/sing-box
 config/nginx
 config/net
+config/control
 config/spec.json
 config/share-groups.json
 data/subscription
@@ -2331,6 +2621,7 @@ dockerUpdateRenderImagesEnv() {
 dockerCreateUpdateCandidate() {
     local root candidate relative source target version manifestSha previous
     root=$(dockerInstallRoot) || return 1
+    dockerControlRecoveryCheck || return 1
     DOCKER_CONFIG_CANDIDATE=
     candidate=$(mktemp -d "${root}/.update.XXXXXX") || return 1
     dockerManagedPathIsSafe "${root}" "${candidate}" || {
@@ -2339,7 +2630,7 @@ dockerCreateUpdateCandidate() {
     }
     DOCKER_CONFIG_CANDIDATE=${candidate}
     for relative in \
-        config/xray config/sing-box config/nginx config/net data/subscription \
+        config/xray config/sing-box config/nginx config/net config/control data/subscription \
         data/xray data/sing-box data/static data/acme \
         data/net/wireguard data/net/fail2ban data/net/transparent \
         secrets/tls secrets/net/wireguard logs/nginx logs/subscription logs/acme; do
@@ -2390,8 +2681,13 @@ dockerCreateUpdateCandidate() {
         jq --argjson inputs "$(dockerManifestConfigurationInputs)" '
           .release = $inputs.release | .images = $inputs.images
         ' "${root}/config/spec.json" >"${candidate}/config/spec.json" || return 1
+        chmod 0600 "${candidate}/config/spec.json" || return 1
         dockerConfigureSpecValidate "${candidate}/config/spec.json" &&
-            dockerConfigureReleaseValidate "${candidate}/config/spec.json" || return 1
+            dockerConfigureReleaseValidate "${candidate}/config/spec.json" &&
+            dockerControlStateCheck "${root}" &&
+            dockerControlStateCheck "${candidate}" || return 1
+        dockerControlPrepareCandidate "${candidate}/config/spec.json" "${candidate}" \
+            "${root}/config/spec.json" || return 1
     fi
     if [[ -e "${root}/config/share-groups.json" || -L "${root}/config/share-groups.json" ]]; then
         dockerSubscriptionReadState >"${candidate}/config/share-groups.json" || return 1
@@ -2405,6 +2701,10 @@ dockerCreateUpdateCandidate() {
 dockerValidateUpdateCandidate() {
     local candidate=$1
     dockerDeploymentFileValidate "${candidate}/deployment.json" || return 1
+    if [[ -f "${candidate}/config/spec.json" ]]; then
+        dockerBundleSupportsSpec "${DOCKER_STAGED_BUNDLE_PATH}" "${candidate}/config/spec.json" &&
+            dockerControlStateCheck "${candidate}" || return 1
+    fi
     if [[ -f "${candidate}/config/spec.json" ]] &&
         jq -e '.reality_stream != null' "${candidate}/config/spec.json" >/dev/null; then
         dockerBundleSupportsSpec "${DOCKER_STAGED_BUNDLE_PATH}" "${candidate}/config/spec.json" &&
@@ -2436,6 +2736,7 @@ config/xray
 config/sing-box
 config/nginx
 config/net
+config/control
 config/spec.json
 config/share-groups.json
 data/subscription
@@ -2458,7 +2759,7 @@ dockerInstallCandidate() {
         cp -- "${backup}/deployment.json" "${root}/deployment.previous.json" || return 1
         chmod 0640 "${root}/deployment.previous.json" || return 1
     fi
-    for relative in config/xray config/sing-box config/nginx config/net data/subscription secrets/tls data/acme; do
+    for relative in config/xray config/sing-box config/nginx config/net config/control data/subscription secrets/tls data/acme; do
         source="${candidate}/${relative}"
         target="${root}/${relative}"
         mkdir -p -- "$(dirname -- "${target}")" || return 1
@@ -2533,6 +2834,7 @@ dockerRestoreConfiguration() {
         grep -qxF deployment.json "${backup}/present"; then
         dockerValidateConfigurationBackup "${backup}" || return 1
     fi
+    dockerControlRestorePrepare "${backup}" || return 1
     # 当前配置可能只安装了一部分，恢复授权只取自已验证的备份。
     dockerRealityStreamDeploymentCheck "${backup}/config/spec.json" || return 1
     if grep -qxF data/traffic/state.json "${backup}/present"; then
@@ -2567,6 +2869,11 @@ dockerRestoreConfiguration() {
         mkdir -p -- "${root}/$(dirname -- "${relative}")" || return 1
         cp -a -- "${backup}/${relative}" "${root}/${relative}" || return 1
     done <"${backup}/present"
+    if [[ -n "${DOCKER_CONTROL_RESTORE_PLAN:-}" ]]; then
+        cp -- "${DOCKER_CONTROL_RESTORE_PLAN}/config/spec.json" "${root}/config/spec.json" &&
+            cp -- "${DOCKER_CONTROL_RESTORE_PLAN}/config/control/state.json" \
+                "${root}/config/control/state.json" || return 1
+    fi
     [[ -z "${bundleTarget}" ]] || dockerActivateBundle "${bundleTarget}" || return 1
     if [[ -f "${root}/deployment.json" && -f "${root}/compose.json" && -f "${root}/images.env" ]]; then
         if [[ -f "${root}/config/xray/users.base" || -f "${root}/config/sing-box/users.base" ||
@@ -2589,11 +2896,20 @@ dockerRestoreConfiguration() {
     DOCKER_CONFIG_SWITCHED=0
     DOCKER_CONFIG_STREAM_TRANSITION=0
     DOCKER_CONFIG_STREAM_HOST_TRANSITION=0
+    DOCKER_CONTROL_RESTORE_PLAN=
 }
 
 dockerCleanupConfigurationCandidate() {
     local root candidate=${DOCKER_CONFIG_CANDIDATE:-}
     [[ -n "${candidate}" ]] || return 0
+    if [[ "${DOCKER_CONFIG_SWITCHED:-0}" == 1 &&
+        ( -e "${candidate}/control-plan.json" ||
+          -L "${candidate}/control-plan.json" ||
+          -e "${candidate}/control-restore/control-plan.json" ||
+          -L "${candidate}/control-restore/control-plan.json" ) ]]; then
+        dockerError "配置恢复未完成，保留候选和版本计划: ${candidate}"
+        return 1
+    fi
     root=$(dockerInstallRoot) || return 1
     if [[ -d "${candidate}" ]]; then
         dockerRemoveManagedTree "${root}" "${candidate}" || return 1
@@ -2692,8 +3008,10 @@ dockerConfigureApply() {
     local specFile candidate backup answer root backupPrefix=configure
     [[ -z "${businessSource}" ]] || backupPrefix=business
     case "${mode}" in configure|preview|interactive|confirmed) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+    dockerControlRecoveryCheck || return "${PADM_DOCKER_RC_STATE}"
     dockerConfigureSpecValidate "${sourceSpec}" || return "${PADM_DOCKER_RC_STATE}"
     dockerControlSyncTransitionValidate "${sourceSpec}" || return "${PADM_DOCKER_RC_CONFLICT}"
+    dockerControlTransitionValidate "${sourceSpec}" || return "${PADM_DOCKER_RC_CONFLICT}"
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     dockerRealityStreamDeploymentCheck "${sourceSpec}" "${root}/config/spec.json" ||
         return "${PADM_DOCKER_RC_STATE}"
@@ -2727,8 +3045,12 @@ dockerConfigureApply() {
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_CONFLICT}"
     }
-    if ! dockerGenerateCandidate "${specFile}" "${candidate}" "${tlsSource}" "${acmeSource}" "${businessSource}" ||
-        ! dockerValidateCandidate "${specFile}" "${candidate}"; then
+    if ! dockerGenerateCandidate "${specFile}" "${candidate}" "${tlsSource}" "${acmeSource}" "${businessSource}"; then
+        dockerCleanupConfigurationCandidate || true
+        return "${PADM_DOCKER_RC_STATE}"
+    fi
+    specFile="${candidate}/config/spec.json"
+    if ! dockerValidateCandidate "${specFile}" "${candidate}"; then
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_STATE}"
     fi

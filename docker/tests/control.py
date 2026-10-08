@@ -188,7 +188,8 @@ with tempfile.TemporaryDirectory(prefix=".tmp-control-", dir="/var/lib") as dire
                 self.wfile.write(self.health_body[offset:offset + (1 if self.health_delay else len(self.health_body))])
                 self.wfile.flush()
 
-    server = api.ControlServer(("127.0.0.1", 0), TestHandler)
+    with patch.object(api.socket, "getfqdn", side_effect=AssertionError("控制服务不应查询反向 DNS")):
+        server = api.ControlServer(("127.0.0.1", 0), TestHandler)
     server.state_path = state_path
     server.listen = STATE["listen"]
     thread = threading.Thread(target=server.serve_forever)

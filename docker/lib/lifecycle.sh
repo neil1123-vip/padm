@@ -395,6 +395,9 @@ dockerComposeRun() {
     }
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     case "${1:-}" in
+    up|restart) dockerControlRecoveryCheck current || return "${PADM_DOCKER_RC_STATE}" ;;
+    esac
+    case "${1:-}" in
     up|restart|run|exec)
         dockerRealityStreamDeploymentCheck "${root}/config/spec.json" ||
             return "${PADM_DOCKER_RC_STATE}"
@@ -811,7 +814,7 @@ dockerUpdateCommand() {
 
 dockerConfigurationBackupAllowed() {
     case "$1" in
-    deployment.json|deployment.previous.json|images.env|compose.json|config/xray|config/sing-box|config/nginx|config/net|config/spec.json|config/share-groups.json|data/traffic/state.json|data/subscription|secrets/tls|data/acme) return 0 ;;
+    deployment.json|deployment.previous.json|images.env|compose.json|config/xray|config/sing-box|config/nginx|config/net|config/control|config/spec.json|config/share-groups.json|data/traffic/state.json|data/subscription|secrets/tls|data/acme) return 0 ;;
     *) return 1 ;;
     esac
 }
@@ -868,6 +871,12 @@ dockerValidateConfigurationBackup() {
         fi
         dockerBundleSupportsSpec "${bundlePath}" "${backup}/config/spec.json" || return 1
         dockerGeoBundleCheck "${bundlePath}" "${backup}" || return 1
+        dockerControlStateCheck "${backup}" || return 1
+        if jq -e 'has("control")' "${backup}/config/spec.json" >/dev/null; then
+            grep -qxF config/control "${backup}/present" || return 1
+        fi
+    elif [[ -e "${backup}/config/control/state.json" ]]; then
+        return 1
     fi
 }
 
@@ -939,6 +948,7 @@ dockerRollbackCommand() {
     DOCKER_CONFIG_SWITCHED=1
     if dockerRestoreConfiguration && dockerTrafficScheduleInstall; then
         DOCKER_CONFIG_BACKUP=${currentBackup}
+        dockerCleanupConfigurationCandidate || return "${PADM_DOCKER_RC_STATE}"
         printf 'Docker 已回滚到: %s\n' "${backup}"
         return 0
     fi
@@ -947,6 +957,7 @@ dockerRollbackCommand() {
     DOCKER_CONFIG_SWITCHED=1
     dockerRestoreConfiguration && dockerTrafficScheduleInstall ||
         dockerError "当前版本或采集调度恢复失败，请检查备份: ${currentBackup}"
+    dockerCleanupConfigurationCandidate || true
     return "${PADM_DOCKER_RC_COMPOSE}"
 }
 
