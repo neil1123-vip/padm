@@ -306,7 +306,7 @@ subscriptionInstallTLSHttp01() {
     }
     subscriptionTcpPortHasListener 80 || listenerStatus=$?
     if [[ "${listenerStatus}" == "0" ]]; then
-        if ! subscriptionTcpPortListenersAreNginx; then
+        if ! subscriptionTcpPortListenersAreNginx 80; then
             errorCard "80 端口被非 Nginx 进程占用" "不会停止或杀死占用进程"
             return 1
         fi

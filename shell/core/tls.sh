@@ -874,7 +874,7 @@ renewManagedTLSCertificates() {
             dueDomains+=("${domain}")
             dueConfigs["${domain}"]=${configFile}
             webroot=$(tlsAcmeConfigValue "${configFile}" Le_Webroot) || return 1
-            [[ "${webroot}" == dns_* ]] || needsServiceStop=true
+            [[ "${webroot}" != "no" ]] || needsServiceStop=true
         fi
     done <<<"${records}"
 

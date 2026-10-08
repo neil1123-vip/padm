@@ -1466,7 +1466,7 @@ EOF
         printf 'old-key\n' >"${tlsDir}/${certDomain}.key"
         cat >"${homeDir}/.acme.sh/${certDomain}_ecc/${certDomain}.conf" <<EOF
 Le_Domain='${certDomain}'
-Le_Webroot='/var/www/html'
+Le_Webroot='no'
 Le_RealFullChainPath='${tlsDir}/${certDomain}.crt'
 Le_RealKeyPath='${tlsDir}/${certDomain}.key'
 EOF
@@ -1501,6 +1501,17 @@ EOF
         grep -qx 'xray:start:true' "${serviceLog}"
         grep -qx 'nginx:start:true' "${serviceLog}"
         [[ "${nginxState}" == "true" && "${xrayState}" == "true" && "${singBoxState}" == "false" ]]
+        grep -q 'TLS 证书续签后文件校验失败' "${errorLog}"
+
+        # Webroot 续签失败也不能暂停原先运行的服务。
+        sed -i "s|^Le_Webroot=.*$|Le_Webroot='/var/www/html'|" "${homeDir}/.acme.sh/${certDomain}_ecc/${certDomain}.conf"
+        usableChecks=0 chmodChecks=0
+        : >"${serviceLog}"
+        : >"${errorLog}"
+        regressionExpectStatus 1 renewManagedTLSCertificates >/dev/null 2>&1
+        [[ ! -s "${serviceLog}" ]]
+        [[ "$(<"${tlsDir}/${certDomain}.crt")" == old-cert && "$(<"${tlsDir}/${certDomain}.key")" == old-key ]]
+        [[ "${nginxState}" == true && "${xrayState}" == true && "${singBoxState}" == false ]]
         grep -q 'TLS 证书续签后文件校验失败' "${errorLog}"
     )
 

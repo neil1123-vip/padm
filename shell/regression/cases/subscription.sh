@@ -97,6 +97,27 @@ runSubscriptionServiceRuntimeRecoveryRegression() (
             fi
         done
     )
+    (
+        # HTTP-01 必须检查 80 端口的归属，再临时停止并恢复受管 Nginx。
+        listenerReady=true
+        : >"${actionLog}"
+        checkDNSIP() { return 0; }
+        subscriptionTcpPortHasListener() { [[ "${1:-}" == 80 && "${listenerReady}" == true ]]; }
+        subscriptionTcpPortListenersAreNginx() { [[ $# == 1 && "${1:-}" == 80 ]]; }
+        nginxRunning() { [[ "${listenerReady}" == true ]]; }
+        runSubscribeNginxAction() {
+            printf 'nginx:%s\n' "$1" >>"${actionLog}"
+            [[ "$1" == start ]] && listenerReady=true || listenerReady=false
+            return 0
+        }
+        allowPort() { PADM_LAST_ALLOW_PORT_ADDED=true; printf 'allow:%s\n' "$1" >>"${actionLog}"; }
+        denyPort() { printf 'deny:%s\n' "$1" >>"${actionLog}"; }
+        installTLS() { [[ "$1" == 1 && "${listenerReady}" == false ]] || return 1; printf 'install\n' >>"${actionLog}"; }
+
+        subscriptionInstallTLSHttp01 subscribe.example.com
+        [[ "$(<"${actionLog}")" == $'nginx:stop\nallow:80\ninstall\ndeny:80\nnginx:start' ]]
+        [[ "${listenerReady}" == true ]]
+    )
 )
 
 assertCapturedSubscribeOutputs() {
