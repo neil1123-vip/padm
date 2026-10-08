@@ -33,6 +33,14 @@ control)
     shift
     exec python3 /opt/padm/control_api.py "$@"
     ;;
+control-health)
+    shift
+    [ "$#" -eq 2 ] && [ "$1" = --state ] || {
+        echo 'usage: control-health --state PATH' >&2
+        exit 64
+    }
+    exec python3 /opt/padm/control_api.py --health "$@"
+    ;;
 tls-check)
     shift
     [ "$#" -eq 3 ] || {

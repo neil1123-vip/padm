@@ -3,6 +3,7 @@ import argparse
 import fcntl
 import hashlib
 import hmac
+import http.client
 import ipaddress
 import json
 import os
@@ -18,6 +19,8 @@ from pathlib import Path
 
 API_VERSION = 1
 MAX_STATE_BYTES = 1024 * 1024
+MAX_HEALTH_BYTES = 256
+HEALTH_TIMEOUT = 2
 PRIVATE_NETWORKS = tuple(ipaddress.ip_network(value) for value in (
     "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
 ))
@@ -148,6 +151,40 @@ def require_wireguard_address(state):
         raise ValueError("控制监听地址不属于 wg-padm")
 
 
+def health_check(state):
+    require_wireguard_address(state)
+    listen = state["listen"]
+    connection = http.client.HTTPConnection(listen["address"], listen["port"], timeout=HEALTH_TIMEOUT)
+    try:
+        connection.connect()
+        transport = connection.sock
+
+        def expire():
+            try:
+                transport.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+        # 无认证的固定拒绝响应证明服务在运行，不使健康依赖授权或泄露凭据。
+        deadline = threading.Timer(HEALTH_TIMEOUT, expire)
+        deadline.start()
+        try:
+            connection.request("GET", "/v1/health")
+            with connection.getresponse() as response:
+                if (response.status != 401
+                        or response.headers.get_all("Content-Type") != ["application/json"]
+                        or response.headers.get_all("Cache-Control") != ["no-store"]
+                        or response.headers.get_all("Content-Length") != ["35"]
+                        or response.headers.get_all("Transfer-Encoding") is not None
+                        or response.read(MAX_HEALTH_BYTES + 1) != b'{"ok":false,"error":"unauthorized"}'):
+                    raise ValueError("控制健康响应不匹配")
+        finally:
+            deadline.cancel()
+            deadline.join()
+    finally:
+        connection.close()
+
+
 class ControlHandler(BaseHTTPRequestHandler):
     server_version = "padm-control/1"
     sys_version = ""
@@ -240,11 +277,16 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--version", action="version", version="padm-control/1")
     parser.add_argument("--state", required=True)
-    parser.add_argument("--check", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true")
+    mode.add_argument("--health", action="store_true")
     args = parser.parse_args()
     try:
         state = read_state(args.state)
         if args.check:
+            return
+        if args.health:
+            health_check(state)
             return
         require_wireguard_address(state)
         server = ControlServer((state["listen"]["address"], state["listen"]["port"]), ControlHandler)
@@ -252,7 +294,9 @@ def main():
         server.listen = state["listen"]
         with server:
             server.serve_forever()
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, http.client.HTTPException) as error:
+        if args.health:
+            parser.exit(1, "控制服务健康检查失败\n")
         parser.exit(78, f"控制后端启动失败: {error}\n")
 
 

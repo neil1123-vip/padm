@@ -330,7 +330,10 @@ change sync ownership, and managed accounts must be changed on the controller.
 interface index, public key and random alias. Revocation uses a root-private startup snapshot.
 An external replacement or active legacy marker is never adopted or deleted automatically;
 stop the old container normally before upgrading. A matching name or public key is not ownership.
-No external sync CLI/menu, invitations, WireGuard connection or dedicated service health
+4C.3b adds a dedicated `control-health --state PATH`: it safely reads state, checks the actual
+interface address and connects directly to the private service with bounded timeouts.
+It verifies the fixed unauthenticated rejection without sending a token or depending on invitation expiry.
+No external sync CLI/menu, invitations, WireGuard connection or Compose control service
 is connected yet. Focused fixtures cover candidate generation, installation, recovery and
 permissions; core/host actions are stubbed, not real two-node acceptance.
 Next are the remaining 4C.3 connectivity and management steps, followed by 4C.4 two-node acceptance.
