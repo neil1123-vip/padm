@@ -481,28 +481,10 @@ initInstallProgress() {
     PADM_INSTALL_STEP_INDEX=0
     PADM_INSTALL_STEP_TOTAL=0
 
-    local missingBaseTools=false
-    [[ "${rhelLike:-}" != "true" ]] && countInstallStep
-    ! command -v sudo >/dev/null 2>&1 && missingBaseTools=true
-    ! command -v wget >/dev/null 2>&1 && missingBaseTools=true
-    ! command -v curl >/dev/null 2>&1 && missingBaseTools=true
-    ! command -v unzip >/dev/null 2>&1 && missingBaseTools=true
-    ! command -v socat >/dev/null 2>&1 && missingBaseTools=true
-    ! command -v tar >/dev/null 2>&1 && missingBaseTools=true
-    ! command -v crontab >/dev/null 2>&1 && missingBaseTools=true
-    ! command -v jq >/dev/null 2>&1 && missingBaseTools=true
-    ! command -v ld >/dev/null 2>&1 && missingBaseTools=true
-    ! command -v openssl >/dev/null 2>&1 && missingBaseTools=true
-    if ! command -v ping6 >/dev/null 2>&1 && ! command -v ping >/dev/null 2>&1; then
-        missingBaseTools=true
-    fi
-    if ! command -v lsb_release >/dev/null 2>&1 && [[ "${release}" != "centos" ]]; then
-        missingBaseTools=true
-    fi
-    ! command -v lsof >/dev/null 2>&1 && missingBaseTools=true
-    ! command -v dig >/dev/null 2>&1 && missingBaseTools=true
-    ! command -v iptables-save >/dev/null 2>&1 && missingBaseTools=true
-    [[ "${missingBaseTools}" == "true" ]] && countInstallStep
+    local missingBasePackages=()
+    [[ "${rhelLike:-}" != "true" && "${2:-true}" == true ]] && countInstallStep
+    collectMissingBasePackages missingBasePackages
+    [[ ${#missingBasePackages[@]} -gt 0 ]] && countInstallStep
     if ! protocolSelectionSkipsNginx "${selectCustomInstallType}"; then
         if ! command -v nginx >/dev/null 2>&1; then
             if [[ "${packageManager}" == "apt" || "${packageManager}" == "yum" ]]; then
@@ -725,9 +707,9 @@ installOptionalPackageTracked() {
     trackInstalledPackagesFromFile "${missingPackagesFile}"
 }
 
-installBasePackages() {
-    local packages=()
-    local displayName="基础工具"
+collectMissingBasePackages() {
+    local -n packages=$1
+    packages=()
 
     ! command -v sudo >/dev/null 2>&1 && packages+=(sudo)
     ! command -v wget >/dev/null 2>&1 && packages+=(wget)
@@ -778,8 +760,14 @@ installBasePackages() {
         fi
     fi
 
-    [[ ${#packages[@]} -eq 0 ]] && return 0
-    installPackageTracked "${displayName}" "${packages[@]}"
+    return 0
+}
+
+installBasePackages() {
+    local missingBasePackages=()
+    collectMissingBasePackages missingBasePackages
+    [[ ${#missingBasePackages[@]} -eq 0 ]] && return 0
+    installPackageTracked "基础工具" "${missingBasePackages[@]}"
 }
 
 acmeInstallIsComplete() {
@@ -892,40 +880,53 @@ installTools() {
         fi
     fi
 
-    beginPackageInstallTransaction
-    local packageTransactionOwner=${PADM_PACKAGE_TRANSACTION_STARTED}
-    waitAptProcess || failPackageInstallTransaction "等待 apt/dpkg 锁释放失败"
-
-    # 修复 apt/dpkg 中断状态
-    if [[ "${release}" == "ubuntu" || "${release}" == "debian" ]]; then
-        runWithTimeout 120 "dpkg --configure -a" || {
-            diagnosePackageInstallFailure
-            failPackageInstallTransaction "dpkg 状态修复失败"
-        }
+    local missingBasePackages=() needsPackagePreparation=false aptAudit=
+    collectMissingBasePackages missingBasePackages
+    if [[ ${#missingBasePackages[@]} -gt 0 || "${reinstallNginx}" == true ]] ||
+        { ! protocolSelectionSkipsNginx "${selectCustomInstallType}" && ! command -v nginx >/dev/null 2>&1; }; then
+        needsPackagePreparation=true
+    fi
+    # 依赖可复用时不等锁或刷新源；apt 半配置仍走原恢复流程。
+    if [[ "${needsPackagePreparation}" != true && "${packageManager}" == apt ]]; then
+        if ! padmCaptureCancelableCommand aptAudit dpkg --audit || [[ -n "${aptAudit}" ]]; then
+            needsPackagePreparation=true
+        fi
     fi
 
-    initInstallProgress "${reinstallNginx}"
+    beginPackageInstallTransaction
+    local packageTransactionOwner=${PADM_PACKAGE_TRANSACTION_STARTED}
+
+    initInstallProgress "${reinstallNginx}" "${needsPackagePreparation}"
     successCard "检查、安装工具依赖【新机器会很慢，请根据工具依赖进度判断是否仍在执行】"
 
     local installLog
     installLog=$(adapterInstallLogPath) || failPackageInstallTransaction "安装日志路径异常"
     padmEnsureSafeDirectory "$(dirname -- "${installLog}")" || failPackageInstallTransaction "安装日志目录创建失败"
     : >"${installLog}"
-    if [[ "${rhelLike:-}" == "true" ]]; then
-        statusCard "系统更新" "RHEL-like/Fedora 基础安装跳过全量系统更新，仅安装所需依赖"
-    else
-        runPackageCommandWithProgress "检查、安装更新" 600 "${upgrade}" "${installLog}" || {
-            if [[ "${packageManager}" == "apt" ]] &&
-                grep -qE "^E: Repository .+ changed its '.+' value from " "${installLog}"; then
-                runWithTimeout 300 "${updateReleaseInfoChange} >/dev/null 2>&1" || {
-                    diagnosePackageInstallFailure
-                    failPackageInstallTransaction "系统软件源 release 信息刷新失败"
-                }
-            else
+    if [[ "${needsPackagePreparation}" == true ]]; then
+        waitAptProcess || failPackageInstallTransaction "等待 apt/dpkg 锁释放失败"
+        if [[ "${release}" == "ubuntu" || "${release}" == "debian" ]]; then
+            runWithTimeout 120 "dpkg --configure -a" || {
                 diagnosePackageInstallFailure
-                failPackageInstallTransaction "系统软件源刷新失败"
-            fi
-        }
+                failPackageInstallTransaction "dpkg 状态修复失败"
+            }
+        fi
+        if [[ "${rhelLike:-}" == "true" ]]; then
+            statusCard "系统更新" "RHEL-like/Fedora 基础安装跳过全量系统更新，仅安装所需依赖"
+        else
+            runPackageCommandWithProgress "检查、安装更新" 600 "${upgrade}" "${installLog}" || {
+                if [[ "${packageManager}" == "apt" ]] &&
+                    grep -qE "^E: Repository .+ changed its '.+' value from " "${installLog}"; then
+                    runWithTimeout 300 "${updateReleaseInfoChange} >/dev/null 2>&1" || {
+                        diagnosePackageInstallFailure
+                        failPackageInstallTransaction "系统软件源 release 信息刷新失败"
+                    }
+                else
+                    diagnosePackageInstallFailure
+                    failPackageInstallTransaction "系统软件源刷新失败"
+                fi
+            }
+        fi
     fi
 
     if [[ "${rhelLike:-}" == "true" ]]; then

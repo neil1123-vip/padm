@@ -704,7 +704,7 @@ runInstallWorkflowRegression() (
             if [[ "${selectCustomInstallType}" == ,1, ]]; then
                 [[ "${realityEntryHost}" == new.example.com ]]
             else
-                [[ "${domain}" == new.example.com ]]
+                [[ -z "${domain}" ]]
             fi
             exec {inputFd}<&-
             unset AUTO_INSTALL AUTO_REUSE_LAST AUTO_ENTRY_HOST AUTO_DOMAIN
@@ -759,11 +759,53 @@ runInstallWorkflowRegression() (
             regressionExpectStatus 1 runCoreInstall "${core}" true <&"${inputFd}"
             read -r -u "${inputFd}" nextInput
             exec {inputFd}<&-
-            [[ "${nextInput}" == next-parent-action && -z "${events}${domain}" ]]
+            [[ "${nextInput}" == next-parent-action && -z "${events}" && "${domain}" == new.example.com ]]
         done
-        configPath= currentHost= currentPort= singBoxTrojanPort=
+        configPath= currentHost= currentPort= singBoxTrojanPort= domain=
         regressionExpectStatus 1 runCoreInstall xray true </dev/null
         [[ -z "${events}${domain}" ]]
+    )
+
+    (
+        # 取消或失败后的 TLS 域名不能覆盖下一次 Reality 安装的已存入口。
+        local core failure inputFd nextInput currentHost= currentPath= currentClients= currentUUID=
+        local domain= lastInstallationConfig= btDomain= configPath=/regression/installed/
+        local selectCustomInstallType= AUTO_INSTALL= AUTO_DOMAIN= AUTO_ENTRY_HOST=
+        local entryFile="${TMP_DIR}/install-retry-entry" transactions=0 clientStatus=0 transactionStatus=0
+        printf 'saved-entry.example.com\n' >"${entryFile}"
+        realityEntryHostFile() { printf '%s\n' "${entryFile}"; }
+        realityStrictDomainModeEnabled() { return 1; }
+        showLastInstallationConfig() { currentHost=; currentPath=; }
+        coreTemplateCollectInitialClients() { return "${clientStatus}"; }
+        prepareXrayInstallInputs() { :; }
+        prepareSingBoxInstallInputs() { :; }
+        coreSwitchConfigTransaction() { transactions=$((transactions + 1)); return "${transactionStatus}"; }
+        for core in xray sing-box; do
+            for failure in inputs transaction; do
+                domain= clientStatus=0 transactionStatus=0 transactions=0
+                selectCustomInstallType=,1,28,
+                [[ "${failure}" != inputs ]] || clientStatus=1
+                [[ "${failure}" != transaction ]] || transactionStatus=17
+                exec {inputFd}< <(printf '\ncancelled.example.com\nnext-parent-action\n')
+                regressionExpectStatus "$([[ "${failure}" == inputs ]] && printf 1 || printf 17)" \
+                    runCoreInstall "${core}" true <&"${inputFd}"
+                read -r -u "${inputFd}" nextInput
+                exec {inputFd}<&-
+                [[ -z "${domain}" && "${nextInput}" == next-parent-action ]] || {
+                    printf '安装域名失败恢复断言失败: %s/%s, domain=%s\n' "${core}" "${failure}" "${domain}" >&2
+                    return 1
+                }
+                selectCustomInstallType=,1, clientStatus=0 transactionStatus=0
+                runCoreInstall "${core}" true <<<""
+                [[ "${realityEntryHost}" == saved-entry.example.com ]] || return 1
+            done
+            domain=parent.example.com selectCustomInstallType=,28, clientStatus=1
+            regressionExpectStatus 1 runCoreInstall "${core}" true < <(printf '\nfailed.example.com\n')
+            [[ "${domain}" == parent.example.com ]] || return 1
+            clientStatus=0
+            runCoreInstall "${core}" true < <(printf '\nsuccess.example.com\n')
+            [[ "${domain}" == success.example.com ]] || return 1
+        done
     )
 
     (
@@ -1244,7 +1286,7 @@ runInstallWorkflowRegression() (
             fi
             regressionExpectStatus 1 "${apply}" 28 <&"${inputFd}"
             read -r -u "${inputFd}" nextInput
-            [[ "${domain}" == tls.example.com && "${nextInput}" == next-parent-action ]]
+            [[ -z "${domain}" && "${nextInput}" == next-parent-action ]]
             [[ "${events}" == $'backup\ntools:tls.example.com\n'* && "${events}" == *$'tls\n' && "${events}" != *nginx:stop* ]]
             exec {inputFd}<&-
         done
@@ -2495,6 +2537,92 @@ runInstallWorkflowRegression() (
     )
 
     (
+        # 依赖完整时绕过锁和源刷新；实际缺包或坏 dpkg 状态仍完整准备。
+        local events= preparation expectedPrepare=false prepareStatus=1
+        local nginxAvailable=true qrAvailable=true nginxTestVersion=1.24.0 acmeReady=true
+        local auditOutput= auditStatus=0 qrStatus=0
+        local -a fixtureMissingBasePackages=()
+        local release=debian packageManager=apt upgrade=update rhelLike=false
+        local removeType='DEBIAN_FRONTEND=noninteractive apt-get -y autoremove'
+        local selectCustomInstallType=,27, selectCoreType=1
+        padmAssertNativeInstallAllowed() { :; }
+        acmeInstallTargetIsSafe() { :; }
+        progressCard() { :; }
+        nginx() { printf 'nginx version: nginx/%s\n' "${nginxTestVersion}" >&2; }
+        command() {
+            case "$*" in
+            "-v nginx") [[ "${nginxAvailable}" == true ]] ;;
+            "-v qrencode") [[ "${qrAvailable}" == true ]] ;;
+            *) builtin command "$@" ;;
+            esac
+        }
+        collectMissingBasePackages() {
+            local -n result=$1
+            result=("${fixtureMissingBasePackages[@]}")
+        }
+        dpkg() { [[ "$*" == --audit ]]; printf '%s' "${auditOutput}"; return "${auditStatus}"; }
+        beginPackageInstallTransaction() { events+=$'begin\n'; PADM_PACKAGE_TRANSACTION_STARTED=true; }
+        endPackageInstallTransaction() { events+=$'end\n'; }
+        waitAptProcess() { events+=$'wait\n'; return "${prepareStatus}"; }
+        initInstallProgress() { [[ "${2:-true}" == "${expectedPrepare}" ]]; }
+        adapterInstallLogPath() { printf '%s' "${TMP_DIR}/install-tools-reuse.log"; }
+        runWithTimeout() { events+="timeout:$*"$'\n'; }
+        runPackageCommandWithProgress() { events+=$'update\n'; return "${prepareStatus}"; }
+        installBasePackages() { events+=$'base\n'; }
+        installOptionalPackageTracked() { events+=$'qr\n'; return "${qrStatus}"; }
+        installNginxTools() { events+=$'nginx-install\n'; }
+        installAcmeTool() { [[ "${acmeReady}" == true ]] || events+=$'acme\n'; }
+        failPackageInstallTransaction() { printf 'failed:%s\n%s' "$1" "${events}" >&2; exit 1; }
+
+        for selectCustomInstallType in ,1, ,27,; do
+            events=
+            installTools 1 </dev/null
+            [[ "${events}" == $'begin\nbase\nend\n' ]] || {
+                printf 'complete dependency reuse mismatch: %s\n' "${events}" >&2
+                return 1
+            }
+        done
+        events= acmeReady=false
+        installTools 1 </dev/null
+        [[ "${events}" == $'begin\nbase\nacme\nend\n' ]]
+        acmeReady=true prepareStatus=0 expectedPrepare=true
+
+        for preparation in base nginx audit-dirty audit-failure nginx-reinstall; do
+            local expected=$'begin\nwait\ntimeout:120 dpkg --configure -a\nupdate\nbase\n'
+            events= fixtureMissingBasePackages=() qrAvailable=true nginxAvailable=true
+            auditOutput= auditStatus=0 nginxTestVersion=1.24.0 selectCustomInstallType=,27,
+            case "${preparation}" in
+            base) fixtureMissingBasePackages=(socat) ;;
+            nginx) nginxAvailable=false; expected+=$'nginx-install\n' ;;
+            audit-dirty) auditOutput='fixture package is only half configured' ;;
+            audit-failure) auditStatus=1 ;;
+            nginx-reinstall)
+                selectCustomInstallType=,24, nginxTestVersion=1.13.12
+                expected+=$'timeout:300 DEBIAN_FRONTEND=noninteractive apt-get -y -o APT::Get::AutomaticRemove=false remove nginx\nnginx-install\n'
+                ;;
+            esac
+            installTools 1 <<<y
+            [[ "${events}" == "${expected}"$'end\n' ]] || {
+                printf 'dependency preparation mismatch: %s events=%s\n' "${preparation}" "${events}" >&2
+                return 1
+            }
+        done
+
+        # 可选二维码失败仍允许安装，也不触发无关的 apt 锁和源刷新。
+        events= auditStatus=0 nginxTestVersion=1.24.0 selectCustomInstallType=,27,
+        qrAvailable=false qrStatus=1 prepareStatus=1 expectedPrepare=false
+        installTools 1 </dev/null
+        [[ "${events}" == $'begin\nbase\nqr\nend\n' ]]
+        events= release=centos packageManager=yum rhelLike=true
+        prepareStatus=1 expectedPrepare=false
+        installTools 1 </dev/null
+        [[ "${events}" == $'begin\nbase\nend\n' ]]
+        events= release=alpine packageManager=apk qrAvailable=true auditStatus=1
+        installTools 1 </dev/null
+        [[ "${events}" == $'begin\nbase\nend\n' ]]
+    )
+
+    (
         local events= answer output inputFd nextInput
         local nginxTestVersion=1.13.12 nginxAvailable=true
         local release=debian packageManager=apt upgrade=update rhelLike=false
@@ -2506,10 +2634,14 @@ runInstallWorkflowRegression() (
         command() {
             if [[ "$*" == "-v nginx" ]]; then
                 [[ "${nginxAvailable}" == true ]]
+            elif [[ "$*" == "-v qrencode" ]]; then
+                return 0
             else
                 builtin command "$@"
             fi
         }
+        collectMissingBasePackages() { local -n result=$1; result=(socat); }
+        dpkg() { [[ "$*" == --audit ]]; }
         beginPackageInstallTransaction() { events+=$'begin\n'; PADM_PACKAGE_TRANSACTION_STARTED=true; }
         endPackageInstallTransaction() { events+=$'end\n'; }
         waitAptProcess() { :; }
@@ -2886,6 +3018,7 @@ runInstallWorkflowRegression() (
         acmeInstallTargetIsSafe() { [[ "${acmeSafe}" == true ]]; }
         beginPackageInstallTransaction() { events+=$'begin\n'; PADM_PACKAGE_TRANSACTION_ACTIVE=true; PADM_PACKAGE_TRANSACTION_STARTED=true; }
         command() { [[ "$*" != '-v nginx' ]] && builtin command "$@"; }
+        collectMissingBasePackages() { local -n result=$1; result=(socat); }
         waitAptProcess() { :; }
         runWithTimeout() { :; }
         initInstallProgress() { :; }
