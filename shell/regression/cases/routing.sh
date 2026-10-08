@@ -15,31 +15,42 @@ runRoutingRegression() {
     cat >"${singBoxConfigPath}dlc.dat_plain.yml" <<'YAML'
 - name: "openai"
 YAML
-    rulesJson=$(initSingBoxRules "openai,example.com,full:api.example.com" "regression")
+    rulesJson=$(initSingBoxRules "openai,example.com,full:api.example.com,keyword:video" "regression")
     jq -e '
       .ruleSet[0].tag == "geosite_openai_regression" and
       .ruleSet[0].http_client.detour == "01_direct_outbound" and
       (.ruleSet[0] | has("download_detour") | not) and
       .suffixRules == ["example.com"] and
-      .domainRules == ["api.example.com"]
-    ' <<<"${rulesJson}" >/dev/null
-    local splitDomainRules splitSuffixRules splitRuleSet splitRuleSetTag
-    if splitSingBoxRules '{bad-json' splitDomainRules splitSuffixRules splitRuleSet splitRuleSetTag 2>/dev/null; then
+      .domainRules == ["api.example.com"] and
+      .keywordRules == ["video"]
+    ' <<<"${rulesJson}" >/dev/null || { printf 'routing-keyword-fail:sing-box-init\n' >&2; return 1; }
+    local splitDomainRules splitSuffixRules splitRuleSet splitRuleSetTag splitKeywordRules
+    if splitSingBoxRules '{bad-json' splitDomainRules splitSuffixRules splitRuleSet splitRuleSetTag splitKeywordRules 2>/dev/null; then
         return 1
     fi
-    addSingBoxRouteRule "test_outbound" "openai,example.com,full:api.example.com" "test_route"
+    addSingBoxRouteRule "test_outbound" "openai,example.com,full:api.example.com,keyword:video" "test_route"
     jq -e '
       .route.rules[0].rule_set == ["geosite_openai_test_route"] and
       .route.rules[0].domain_suffix == ["example.com"] and
       .route.rules[0].domain == ["api.example.com"] and
+      .route.rules[0].domain_keyword == ["video"] and
       (.route.rules[0].domain_regex | not) and
       .route.rule_set[0].url == "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-openai.srs" and
       .route.rule_set[0].http_client.detour == "01_direct_outbound" and
       (.route.rule_set[0] | has("download_detour") | not)
-    ' "${singBoxConfigPath}test_route.json" >/dev/null
+    ' "${singBoxConfigPath}test_route.json" >/dev/null || { printf 'routing-keyword-fail:sing-box-route\n' >&2; return 1; }
+    (
+        autoRead() { printf -v "$3" 'y'; }
+        addSingBoxRouteRule "test_outbound" "keyword:video,keyword:stream" "test_route"
+        jq -e '.route.rules[0].domain_keyword == ["stream", "video"] and
+          (.route.rules[0].domain_suffix | index("video") | not)' \
+            "${singBoxConfigPath}test_route.json" >/dev/null || { printf 'routing-keyword-fail:sing-box-history\n' >&2; return 1; }
+    )
     [[ "$(getDLCMatchedRuleValue example.com "${singBoxConfigPath}")" == "domain:example.com" ]]
     [[ "$(getDLCMatchedRuleValue full:api.example.com "${singBoxConfigPath}")" == "full:api.example.com" ]]
     [[ "$(getDLCMatchedRuleValue openai "${singBoxConfigPath}")" == "geosite:openai" ]]
+    [[ "$(getDLCMatchedRuleValue ' KEYWORD:ViDeO ' "${singBoxConfigPath}")" == "video" ]] || { printf 'routing-keyword-fail:xray-explicit\n' >&2; return 1; }
+    [[ "$(getDLCMatchedRuleValue no-such-dlc-keyword "${singBoxConfigPath}")" == "no-such-dlc-keyword" ]] || { printf 'routing-keyword-fail:xray-fallback\n' >&2; return 1; }
     ! grep -q 'regexp:' < <(getDLCMatchedRuleValue example.com "${singBoxConfigPath}")
     (
         local dlcRoot="${routingRoot}/dlc-release"
@@ -343,6 +354,14 @@ JSON
     ' "${singBoxConfigPath}dns.json" >/dev/null
     jq -e '.inbounds[0].tls.reality.handshake.domain_resolver? | not' "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json" >/dev/null
     jq -e '.outbounds[0].domain_resolver? | not' "${singBoxConfigPath}socks5_outbound.json" >/dev/null
+    addSingBoxDNSConfig "1.1.1.1" "example.com,keyword:video"
+    jq -e '.dns.rules[0].domain_keyword == ["video"] and
+      .dns.rules[0].domain_suffix == ["example.com"] and
+      any(.route.rules[]; .domain_keyword == ["video"] and .action == "resolve")' \
+        "${singBoxConfigPath}dns.json" >/dev/null || { printf 'routing-keyword-fail:sing-box-dns\n' >&2; return 1; }
+    originalContent=$(<"${singBoxConfigPath}dns.json")
+    ! addSingBoxDNSConfig "203.0.113.10" "keyword:video" predefined >/dev/null 2>&1 || { printf 'routing-keyword-fail:sing-box-hosts-accepted\n' >&2; return 1; }
+    [[ "$(<"${singBoxConfigPath}dns.json")" == "${originalContent}" ]] || { printf 'routing-keyword-fail:sing-box-hosts-modified\n' >&2; return 1; }
     addSingBoxDNSConfig "203.0.113.10" "example.org" "predefined"
     jq -e '
       .dns.rules[0].domain_suffix == ["example.org"] and
@@ -446,8 +465,12 @@ JSON
 JSON
     addXrayRouting blackhole_out outboundTag "example.com"
     jq -e '.routing.rules[] | select(.outboundTag == "blackhole_out") | .domain == ["domain:example.com"]' "${configPath}09_routing.json" >/dev/null
-    addXrayRouting allow_domain_direct_outbound outboundTag "full:api.example.com" top
-    jq -e '.routing.rules[0].outboundTag == "allow_domain_direct_outbound" and (.routing.rules[0].domain | index("full:api.example.com"))' "${configPath}09_routing.json" >/dev/null
+    addXrayRouting allow_domain_direct_outbound outboundTag "full:api.example.com,keyword:video" top
+    jq -e '.routing.rules[0].outboundTag == "allow_domain_direct_outbound" and
+      (.routing.rules[0].domain | index("full:api.example.com")) and
+      (.routing.rules[0].domain | index("video")) and
+      (.routing.rules[0].domain | index("keyword:video") | not)' \
+        "${configPath}09_routing.json" >/dev/null || { printf 'routing-keyword-fail:xray-route\n' >&2; return 1; }
     addXrayIPRouting blackhole_ip_out outboundTag "cn,1.1.1.0/24"
     jq -e '.routing.rules[] | select(.outboundTag == "blackhole_ip_out") | .ip == ["geoip:cn", "1.1.1.0/24"]' "${configPath}09_routing.json" >/dev/null
     [[ "$(validateAccessIPList '1.1.1.1, 1.1.1.1,2001:db8::/32,cn')" == "1.1.1.1,2001:db8::/32,cn" ]]
@@ -460,7 +483,87 @@ JSON
         '2001:db8::/32/1' '2001:db8::/x' ':2001:db8::1' '2001:db8::1:' 'deadbeef' '::ffff:1.2.3.4'; do
         ! validateAccessIPList "${invalidIP}" >/dev/null || return 1
     done
+    runRoutingKeywordDNSRegression
 }
+
+runRoutingKeywordDNSRegression() (
+    local root="${TMP_DIR}/routing-keyword-dns"
+    local configPath="${root}/xray/" singBoxConfigPath= coreInstallType=1
+    local PADM_DNS_ROUTING_BACKUP_DIR="${root}/backup"
+    local writeMarker="${root}/write" reloadMarker="${root}/reload"
+    local originalConfig originalState originalRoute hostsRule invalidRule
+    mkdir -p "${configPath}"
+    printf '{"dns":{"servers":["custom"],"hosts":{"domain:custom.example":"192.0.2.1"}}}\n' >"${configPath}11_dns.json"
+    addXrayDNSConfig "203.0.113.53" "full:api.example.com,keyword:video"
+    jq -e '
+      any(.dns.servers[] | objects;
+        .address == "203.0.113.53" and .domains == ["full:api.example.com", "video"]) and
+      .dns.hosts["domain:custom.example"] == "192.0.2.1"
+    ' "${configPath}11_dns.json" >/dev/null || { printf 'routing-keyword-fail:xray-dns\n' >&2; return 1; }
+    originalConfig=$(<"${configPath}11_dns.json")
+    originalState=$(<"${configPath}dns_routing.state")
+    getDLCGeositeName() { :; }
+    printf '{"routing":{"rules":[{"outboundTag":"keyword_test","domain":["domain:keep.example"]}]}}\n' >"${configPath}09_routing.json"
+    originalRoute=$(<"${configPath}09_routing.json")
+    for invalidRule in keyword: keyword:full:example.com no-such:example.com; do
+        regressionExpectStatus 1 getDLCMatchedRuleValue "${invalidRule}" "${configPath}" >/dev/null ||
+            { printf 'routing-keyword-fail:xray-invalid-helper\n' >&2; return 1; }
+        regressionExpectStatus 1 addXrayDNSConfig "203.0.113.53" "${invalidRule}" ||
+            { printf 'routing-keyword-fail:xray-invalid-dns\n' >&2; return 1; }
+        regressionExpectStatus 1 addXrayRouting keyword_test outboundTag "${invalidRule}" ||
+            { printf 'routing-keyword-fail:xray-invalid-route\n' >&2; return 1; }
+        [[ "$(<"${configPath}11_dns.json")" == "${originalConfig}" &&
+            "$(<"${configPath}dns_routing.state")" == "${originalState}" &&
+            "$(<"${configPath}09_routing.json")" == "${originalRoute}" ]] ||
+            { printf 'routing-keyword-fail:xray-invalid-modified\n' >&2; return 1; }
+    done
+    (
+        local configPath="${root}/socks-empty/" singBoxConfigPath=
+        mkdir -p "${configPath}"
+        printf '{"routing":{"rules":[]}}\n' >"${configPath}09_routing.json"
+        autoRead() { printf -v "$3" 'keyword:video,,keyword:stream,'; }
+        regressionExpectStatus 0 setSocks5OutboundRouting >/dev/null 2>&1 ||
+            { printf 'routing-keyword-fail:xray-socks-empty-status\n' >&2; return 1; }
+        jq -e '.routing.rules[0].outboundTag == "socks5_outbound" and
+          .routing.rules[0].domain == ["video","stream"]' "${configPath}09_routing.json" >/dev/null ||
+            { printf 'routing-keyword-fail:xray-socks-empty-domains\n' >&2; return 1; }
+    )
+    (
+        local configPath="${root}/missing/"
+        mkdir -p "${configPath}"
+        regressionExpectStatus 1 addXrayRouting keyword_test outboundTag "keyword:full:example.com"
+        [[ ! -e "${configPath}09_routing.json" ]] ||
+            { printf 'routing-keyword-fail:xray-invalid-created\n' >&2; return 1; }
+    )
+    (
+        local singBoxConfigPath="${root}/sing-box/"
+        mkdir -p "${singBoxConfigPath}"
+        autoRead() { printf -v "$3" 'keyword:full:example.com'; }
+        addSingBoxOutbound() { touch "${writeMarker}"; return 99; }
+        addSingBoxRouteRule() { touch "${writeMarker}"; return 99; }
+        unInstallRouting() { touch "${writeMarker}"; return 99; }
+        regressionExpectStatus 1 setSocks5OutboundRouting >/dev/null 2>&1
+        [[ ! -e "${writeMarker}" && "$(<"${configPath}09_routing.json")" == "${originalRoute}" ]] ||
+            { printf 'routing-keyword-fail:xray-invalid-socks-write\n' >&2; return 1; }
+    )
+    updateXrayDNSRoutingConfig() { touch "${writeMarker}"; return 99; }
+    reloadCore() { touch "${reloadMarker}"; return 0; }
+    autoRead() {
+        case "$3" in
+        setSNIP) printf -v "$3" '203.0.113.10' ;;
+        xrayDomainList) printf -v "$3" '%s' "${hostsRule}" ;;
+        *) return 1 ;;
+        esac
+    }
+    for hostsRule in ' KEYWORD:ViDeO ' no-such-dlc-keyword keyword:full:example.com; do
+        regressionExpectStatus 1 setUnlockSNI >/dev/null 2>&1 || { printf 'routing-keyword-fail:xray-hosts-accepted\n' >&2; return 1; }
+        [[ "$(<"${configPath}11_dns.json")" == "${originalConfig}" &&
+            "$(<"${configPath}dns_routing.state")" == "${originalState}" &&
+            ! -e "${writeMarker}" && ! -e "${reloadMarker}" &&
+            ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" && -z "${DNS_ROUTING_ACTIVE_BACKUP_DIR:-}" ]] ||
+            { printf 'routing-keyword-fail:xray-hosts-boundary\n' >&2; return 1; }
+    done
+)
 
 runXrayDNSCustomConfigRegression() (
     local root="${TMP_DIR}/xray-dns-custom-config"

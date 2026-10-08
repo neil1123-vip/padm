@@ -604,6 +604,15 @@ setSocks5OutboundRouting() {
         coreDomainRequiredErrorCard
         return 1
     fi
+    local domainRules=[]
+    if [[ "${coreInstallType}" == "1" ]]; then
+        while read -r line; do
+            [[ -n "${line}" ]] || continue
+            local matchedRuleValue
+            matchedRuleValue=$(getDLCMatchedRuleValue "${line}" "/etc/padm/xray") || return 1
+            domainRules=$(echo "${domainRules}" | jq -r --arg rule "${matchedRuleValue}" '. += [$rule]') || return 1
+        done < <(echo "${socks5RoutingOutboundDomain}" | tr ',' '\n')
+    fi
     if [[ -n "${singBoxConfigPath}" ]]; then
         addSingBoxOutbound "01_direct_outbound" || return 1
         addSingBoxRouteRule "socks5_outbound" "${socks5RoutingOutboundDomain}" "socks5_01_outbound_route" || return 1
@@ -612,17 +621,6 @@ setSocks5OutboundRouting() {
     if [[ "${coreInstallType}" == "1" ]]; then
 
         unInstallRouting "socks5_outbound" "outboundTag" || return 1
-        local domainRules=[]
-        local routingRule=
-        while read -r line; do
-            if echo "${routingRule}" | grep -q "${line}"; then
-                coreRuleExistsStatusCard "${line} 已存在，跳过"
-            else
-                local matchedRuleValue
-                matchedRuleValue=$(getDLCMatchedRuleValue "${line}" "/etc/padm/xray")
-                domainRules=$(echo "${domainRules}" | jq -r --arg rule "${matchedRuleValue}" '. += [$rule]')
-            fi
-        done < <(echo "${socks5RoutingOutboundDomain}" | tr ',' '\n')
         if [[ ! -f "${configPath}09_routing.json" ]]; then
             writeRoutingJsonConfig "${configPath}09_routing.json" <<EOF || return 1
 {

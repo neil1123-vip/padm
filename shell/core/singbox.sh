@@ -12,20 +12,23 @@ addSingBoxRouteRule() {
     if [[ -f "${singBoxConfigPath}${routingName}.json" ]]; then
         autoRead singbox_route_history "读取到上次的配置，是否保留？[y/n]:" historyRouteStatus
         if [[ "${historyRouteStatus}" == "y" ]]; then
-            local historyRuleSetLines historyRuleSets historyDomainLines historyDomains
+            local historyRuleSetLines historyRuleSets historyDomainLines historyDomains historyKeywordLines historyKeywords
             historyRuleSetLines=$(jq -rc '.route.rules[0].rule_set[]?' "${singBoxConfigPath}${routingName}.json") || return 1
             historyRuleSets=$(printf '%s\n' "${historyRuleSetLines}" | awk -F "[_]" '{print $2}' | paste -sd ',')
             historyDomainLines=$(jq -rc '.route.rules[0].domain[]?,.route.rules[0].domain_suffix[]?' "${singBoxConfigPath}${routingName}.json") || return 1
             historyDomains=$(printf '%s\n' "${historyDomainLines}" | paste -sd ',')
+            historyKeywordLines=$(jq -rc '.route.rules[0].domain_keyword[]? | "keyword:" + .' "${singBoxConfigPath}${routingName}.json") || return 1
+            historyKeywords=$(printf '%s\n' "${historyKeywordLines}" | paste -sd ',')
             domainList="${domainList},${historyRuleSets}"
             domainList="${domainList},${historyDomains}"
+            domainList="${domainList},${historyKeywords}"
         fi
 
     fi
     local rules=
     rules=$(initSingBoxRules "${domainList}" "${routingName}") || return 1
-    local domainRules suffixRules ruleSet ruleSetTag
-    splitSingBoxRules "${rules}" domainRules suffixRules ruleSet ruleSetTag || return 1
+    local domainRules suffixRules ruleSet ruleSetTag keywordRules
+    splitSingBoxRules "${rules}" domainRules suffixRules ruleSet ruleSetTag keywordRules || return 1
     if [[ -n "${singBoxConfigPath}" ]]; then
         local routeAction='"outbound": "'"${outboundTag}"'"'
         if [[ "${outboundTag}" == *block* ]]; then
@@ -39,6 +42,7 @@ addSingBoxRouteRule() {
         "rule_set":${ruleSetTag},
         "domain":${domainRules},
         "domain_suffix":${suffixRules},
+        "domain_keyword":${keywordRules},
         ${routeAction}
       }
     ],

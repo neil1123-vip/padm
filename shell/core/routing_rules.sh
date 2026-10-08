@@ -99,9 +99,12 @@ getDLCMatchedRuleValue() {
         return
     fi
     if [[ "${normalizedInput}" == keyword:* ]]; then
-        echo "keyword:${normalizedInput#keyword:}"
+        local keywordValue=${normalizedInput#keyword:}
+        [[ -n "${keywordValue}" && "${keywordValue}" != *:* ]] || return 1
+        echo "${keywordValue}"
         return
     fi
+    [[ "${normalizedInput}" != *:* ]] || return 1
     if isDomainFormat "${normalizedInput}"; then
         echo "domain:${normalizedInput}"
         return
@@ -112,7 +115,7 @@ getDLCMatchedRuleValue() {
     if [[ -n "${matchedRuleName}" ]]; then
         echo "geosite:${matchedRuleName}"
     else
-        echo "keyword:${normalizedInput}"
+        echo "${normalizedInput}"
     fi
 }
 
@@ -130,37 +133,21 @@ addXrayRouting() {
     fi
 
     local routingRule=
-    if [[ ! -f "${configPath}09_routing.json" ]]; then
-        writeRoutingJsonConfig "${configPath}09_routing.json" <<EOF || return 1
-{
-    "routing":{
-        "type": "field",
-        "rules": [
-            {
-                "type": "field",
-                "domain": [
-                ],
-            "outboundTag": "${tag}"
-          }
-        ]
-  }
-}
-EOF
+    if [[ -f "${configPath}09_routing.json" ]]; then
+        routingRule=$(jq -r ".routing.rules[]|select(.outboundTag==\"${tag}\" and (.protocol == null))" "${configPath}09_routing.json") || return 1
     fi
-    local routingRule=
-    routingRule=$(jq -r ".routing.rules[]|select(.outboundTag==\"${tag}\" and (.protocol == null))" "${configPath}09_routing.json") || return 1
-
     if [[ -z "${routingRule}" ]]; then
         routingRule="{\"type\": \"field\",\"domain\": [],\"outboundTag\": \"${tag}\"}"
     fi
 
     local newRules=()
     while read -r line; do
+        [[ -n "${line}" ]] || continue
+        local matchedRuleValue
+        matchedRuleValue=$(getDLCMatchedRuleValue "${line}" "/etc/padm/xray") || return 1
         if echo "${routingRule}" | grep -q "${line}"; then
             coreRuleExistsStatusCard "${line} 已存在，跳过"
         else
-            local matchedRuleValue
-            matchedRuleValue=$(getDLCMatchedRuleValue "${line}" "/etc/padm/xray")
             newRules+=("${matchedRuleValue}")
         fi
     done < <(echo "${domain}" | tr ',' '\n')
@@ -170,6 +157,16 @@ EOF
         routingRule=$(jq -r --argjson rules "${rulesJson}" '.domain += $rules' <<<"${routingRule}") || return 1
     fi
 
+    if [[ ! -f "${configPath}09_routing.json" ]]; then
+        writeRoutingJsonConfig "${configPath}09_routing.json" <<EOF || return 1
+{
+    "routing":{
+        "type": "field",
+        "rules": []
+  }
+}
+EOF
+    fi
     unInstallRouting "${tag}" "${type}" || return 1
     if ! grep -q "gstatic.com" "${configPath}09_routing.json" && [[ "${tag}" == "blackhole_out" ]]; then
         updateRoutingJsonConfig "${configPath}09_routing.json" '.routing.rules += [{"type": "field","domain": ["domain:gstatic.com"],"outboundTag": "allow_domain_direct_outbound"}]' || return 1
@@ -445,6 +442,7 @@ initSingBoxRules() {
     local domainRuleLines=
     local ruleSetLines=
     local suffixRuleLines=
+    local keywordRuleLines=
     local singBoxRulePath="${singBoxConfigPath:-/etc/padm/sing-box/conf/config/}"
     local line normalizedLine matchedRuleName tag url
     while read -r line; do
@@ -470,7 +468,7 @@ initSingBoxRules() {
             continue
         fi
         if [[ "${normalizedLine}" == keyword:* ]]; then
-            suffixRuleLines+="${normalizedLine#keyword:}"$'\n'
+            keywordRuleLines+="${normalizedLine#keyword:}"$'\n'
             continue
         fi
 
@@ -492,11 +490,13 @@ initSingBoxRules() {
     jq -n \
         --arg domainRules "${domainRuleLines}" \
         --arg suffixRules "${suffixRuleLines}" \
+        --arg keywordRules "${keywordRuleLines}" \
         --arg ruleSet "${ruleSetLines}" '
         def lines($value): $value | split("\n") | map(select(length > 0));
         {
           domainRules: lines($domainRules),
           suffixRules: lines($suffixRules),
+          keywordRules: (lines($keywordRules) | unique),
           ruleSet: ($ruleSet | split("\n") | map(select(length > 0) | split("\t") | {
             tag: .[0],
             type: "remote",
@@ -513,15 +513,17 @@ splitSingBoxRules() {
     local -n suffixRulesRef=$3
     local -n ruleSetRef=$4
     local -n ruleSetTagRef=$5
+    local -n keywordRulesRef=$6
     local parsedOutput
-    parsedOutput=$(jq -c '.domainRules, .suffixRules, .ruleSet, (.ruleSet | map(.tag))' <<<"${rules}") || return 1
+    parsedOutput=$(jq -c '.domainRules, .suffixRules, .ruleSet, (.ruleSet | map(.tag)), .keywordRules' <<<"${rules}") || return 1
     local -a parsedRules
     mapfile -t parsedRules <<<"${parsedOutput}"
-    [[ ${#parsedRules[@]} -eq 4 ]] || return 1
+    [[ ${#parsedRules[@]} -eq 5 ]] || return 1
     domainRulesRef=${parsedRules[0]:-[]}
     suffixRulesRef=${parsedRules[1]:-[]}
     ruleSetRef=${parsedRules[2]:-[]}
     ruleSetTagRef=${parsedRules[3]:-[]}
+    keywordRulesRef=${parsedRules[4]:-[]}
 }
 
 

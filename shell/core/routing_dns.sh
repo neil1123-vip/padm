@@ -283,7 +283,16 @@ setUnlockSNI() {
             local hosts={}
             while read -r domain; do
                 local matchedRuleValue
-                matchedRuleValue=$(getDLCMatchedRuleValue "${domain}" "/etc/padm/xray")
+                matchedRuleValue=$(getDLCMatchedRuleValue "${domain}" "/etc/padm/xray") ||
+                    { dnsRoutingAbortChange "DNS/hosts 关键字输入无效"; return 1; }
+                domain=$(echo "${domain}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+                if [[ "${domain}" == keyword:* ||
+                    ( "${matchedRuleValue}" != geosite:* && "${matchedRuleValue}" != domain:* &&
+                      "${matchedRuleValue}" != full:* ) ]]; then
+                    errorCard "DNS/hosts 覆盖不支持关键字匹配，已保留旧配置"
+                    dnsRoutingAbortChange "DNS/hosts 关键字输入无效"
+                    return 1
+                fi
                 hosts=$(echo "${hosts}" | jq -r --arg key "${matchedRuleValue}" --arg value "${setSNIP}" '. + {($key):$value}')
             done < <(echo "${xrayDomainList}" | tr ',' '\n')
             local xrayPatch
@@ -323,7 +332,7 @@ addXrayDNSConfig() {
     local domains=[]
     while read -r line; do
         local matchedRuleValue
-        matchedRuleValue=$(getDLCMatchedRuleValue "${line}" "/etc/padm/xray")
+        matchedRuleValue=$(getDLCMatchedRuleValue "${line}" "/etc/padm/xray") || return 1
         domains=$(echo "${domains}" | jq -r --arg rule "${matchedRuleValue}" '. += [$rule]')
     done < <(echo "${domainList}" | tr ',' '\n')
 
@@ -422,15 +431,20 @@ addSingBoxDNSConfig() {
 
     local rules=
     rules=$(initSingBoxRules "${domainList}" "dns") || { errorCard "sing-box DNS 规则生成失败，已保留旧配置"; return 1; }
-    local domainRules suffixRules ruleSet ruleSetTag
-    splitSingBoxRules "${rules}" domainRules suffixRules ruleSet ruleSetTag || { errorCard "sing-box DNS 规则拆分失败，已保留旧配置"; return 1; }
+    local domainRules suffixRules ruleSet ruleSetTag keywordRules
+    splitSingBoxRules "${rules}" domainRules suffixRules ruleSet ruleSetTag keywordRules || { errorCard "sing-box DNS 规则拆分失败，已保留旧配置"; return 1; }
+    if [[ "${actionType}" == "predefined" && "${keywordRules}" != "[]" ]]; then
+        errorCard "DNS/hosts 覆盖不支持关键字匹配，已保留旧配置"
+        return 1
+    fi
     if [[ -n "${singBoxConfigPath}" ]]; then
         local patch
         patch=$(jq -n --arg ip "${ip}" --arg action "${actionType}" \
             --argjson domains "${domainRules}" --argjson suffixes "${suffixRules}" \
+            --argjson keywords "${keywordRules}" \
             --argjson ruleSets "${ruleSet}" --argjson ruleTags "${ruleSetTag}" '
             (if $action == "predefined" then "padm-hosts" else "padm-dnsRouting" end) as $tag |
-            ({domain:$domains, domain_suffix:$suffixes, rule_set:$ruleTags} |
+            ({domain:$domains, domain_suffix:$suffixes, domain_keyword:$keywords, rule_set:$ruleTags} |
                 with_entries(select(.value | length > 0))) as $match |
             {
                 dns: {
