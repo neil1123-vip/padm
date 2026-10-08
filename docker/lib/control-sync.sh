@@ -10,14 +10,28 @@ dockerControlSyncSpecValidate() {
       def exact($keys): type == "object" and ((keys_unsorted | sort) == ($keys | sort));
       def uuid: type == "string" and
         test("^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$");
+      def private_address: type == "string" and
+        (split(".") as $parts | ($parts | length) == 4 and
+         all($parts[]; test("^(0|[1-9][0-9]{0,2})$") and tonumber <= 255)) and
+        test("^(10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.)");
       . as $spec |
       if has("control_sync") then
         .schema_version == 3 and
         (.control_sync |
           exact(["schema_version","role","node_id","controller_id","listener_ids",
-            "last_revision","last_digest","managed_accounts"]) and
+            "last_revision","last_digest","managed_accounts"] +
+            (if has("connection") then ["connection"] else [] end)) and
           .schema_version == 1 and .role == "controlled" and
           (.node_id | uuid) and (.controller_id | uuid) and .node_id != .controller_id and
+          (if has("connection") then
+            any($spec.host_integrations[]; .type == "wireguard") and
+            (.connection |
+              exact(["listen","peer_address"]) and (.peer_address | private_address) and
+              (.listen | exact(["interface","address","port"]) and .interface == "wg-padm" and
+                (.address | private_address) and
+                (.port | type == "number" and floor == . and . >= 1024 and . <= 65535)) and
+              .listen.address != .peer_address)
+           else true end) and
           (.listener_ids | type == "array" and length >= 1 and length <= 16 and
             length == (unique | length) and all(.[]; . as $id |
               any($spec.core.protocols[]; .listener_id == $id))) and

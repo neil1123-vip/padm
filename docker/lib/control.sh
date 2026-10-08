@@ -369,6 +369,168 @@ dockerControlRevoke() (
     printf 'Peer 授权已撤销。\n'
 )
 
+dockerControlInviteInputCheck() {
+    local input=$1 root=$2 resolved cursor metadata mode
+    root=$(realpath -m -s -- "${root}") || return 1
+    dockerPathIsSafeAbsolute "${input}" &&
+        resolved=$(realpath -m -s -- "${input}") && [[ "${resolved}" == "${input}" ]] &&
+        [[ "${input}" != "${root}" && "${input}" != "${root%/}/"* ]] &&
+        dockerBusinessFileSafe "${input}" &&
+        [[ "$(stat -c '%u:%s' "${input}")" == 0:* && "$(stat -c '%s' "${input}")" -le 1048576 ]] ||
+        return 1
+    mode=$(stat -c '%a' "${input}") || return 1
+    (( (8#${mode} & ~8#600) == 0 )) || return 1
+    cursor=$(dirname -- "${input}") || return 1
+    while true; do
+        [[ -d "${cursor}" && ! -L "${cursor}" ]] || return 1
+        metadata=$(stat -c '%u:%a' "${cursor}") || return 1
+        [[ "${metadata}" == 0:* ]] || return 1
+        mode=${metadata#*:}
+        (( (8#${mode} & 8#022) == 0 )) || return 1
+        [[ "${cursor}" != / ]] || break
+        cursor=$(dirname -- "${cursor}") || return 1
+    done
+}
+
+dockerControlClientRuntimeCheck() {
+    local invitation=$1 address peerAddress
+    # 字段仅用于只读网络预检；完整邀请与重复 JSON 字段由客户端严格校验。
+    address=$(jq -er '.listen.address' "${invitation}") &&
+        peerAddress=$(jq -er '.peer_address' "${invitation}") &&
+        dockerControlPrivateAddressIsValid "${address}" &&
+        dockerControlPrivateAddressIsValid "${peerAddress}" &&
+        [[ "${address}" != "${peerAddress}" ]] &&
+        dockerCurrentOwnsHostIntegration wireguard &&
+        DOCKER_COMPOSE_TIMEOUT=10 dockerComposeRun exec -T net-wireguard \
+            /usr/local/bin/padm-entrypoint wireguard-health wg-padm >/dev/null 2>&1 &&
+        dockerControlPeerCheck "${address}" || return "${PADM_DOCKER_RC_HOST}"
+    DOCKER_COMPOSE_TIMEOUT=10 dockerComposeRun exec -T net-wireguard bash -euo pipefail -c '
+ip -4 route get "$1" from "$2" | awk -v source="$2" '"'"'
+    NR == 1 {
+        for (i=1; i<=NF; i++) {
+            if ($i == "dev") { count++; device=$(i+1) }
+            if ($i == "from" || $i == "src") origin=$(i+1)
+        }
+    }
+    END { if (count != 1 || device != "wg-padm" || origin != source) exit 1 }
+'"'"'
+' padm-control-route "${address}" "${peerAddress}" >/dev/null 2>&1 || {
+        dockerError '到主控的指定源地址路由不属于 wg-padm，拒绝同步'
+        return "${PADM_DOCKER_RC_HOST}"
+    }
+}
+
+dockerControlClientBuildDraft() {
+    local directory=$1 image
+    shift
+    image=$(dockerAccountImage ops) || return 1
+    # token 只从私有只读快照读取，不进入参数、环境或 Docker 日志。
+    dockerRealityProbeRun 30 --user 0:0 --network host --log-driver none \
+        --tmpfs /tmp:rw,noexec,nosuid,nodev,size=8m \
+        --label io.padm.mode=docker --label io.padm.project="${PADM_DOCKER_PROJECT}" \
+        --mount "type=bind,src=${directory},dst=/input,readonly" \
+        --entrypoint python3 "${image}" /opt/padm/control_client.py \
+        --spec /input/spec.json --invite /input/invite.json "$@"
+}
+
+dockerControlClientApply() (
+    local action=$1 invitation= yes=0 answer root spec draft= parent metadata mode status=0
+    local -a listeners=()
+    shift
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+        --invite)
+            [[ -z "${invitation}" && "$#" -ge 2 && -n "$2" && "$2" != --* ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            invitation=$2; shift 2
+            ;;
+        --listener)
+            [[ "${action}" == join && "$#" -ge 2 &&
+                "$2" =~ ^(entry-[a-z0-9][a-z0-9-]{0,47}|vless-reality|vless-ws)$ ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            listeners+=(--listener "$2"); shift 2
+            ;;
+        --yes)
+            [[ "${action}" == join && "${yes}" == 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
+            yes=1; shift
+            ;;
+        *) return "${PADM_DOCKER_RC_USAGE}" ;;
+        esac
+    done
+    [[ -n "${invitation}" && ( "${action}" == sync || "${#listeners[@]}" -gt 0 ) ]] ||
+        return "${PADM_DOCKER_RC_USAGE}"
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    dockerControlInviteInputCheck "${invitation}" "${root}" || {
+        dockerError '邀请须为受管目录外的 root 私有普通文件，祖先目录不得可写或含链接'
+        return "${PADM_DOCKER_RC_STATE}"
+    }
+    if [[ "${action}" == join && "${yes}" != 1 ]]; then
+        [[ -t 0 && -t 1 ]] || {
+            dockerError '接入被控角色需要 --yes 确认'
+            return "${PADM_DOCKER_RC_USAGE}"
+        }
+        dockerSetupRead answer '确认接入主控并同步到选定入口？[y/N]: ' n ||
+            return "${PADM_DOCKER_RC_USAGE}"
+        case "${answer}" in y|Y|yes|YES) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+    fi
+    dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+    for parent in "${root}" "${root}/config"; do
+        dockerTrafficSafePath "${root}" "${parent}" && [[ -d "${parent}" ]] ||
+            return "${PADM_DOCKER_RC_STATE}"
+        metadata=$(stat -c '%u:%a' "${parent}") || return "${PADM_DOCKER_RC_STATE}"
+        [[ "${metadata}" == 0:* ]] || return "${PADM_DOCKER_RC_STATE}"
+        mode=${metadata#*:}
+        (( (8#${mode} & 8#022) == 0 )) || return "${PADM_DOCKER_RC_STATE}"
+    done
+    dockerLockInstalledDeployment || return "${PADM_DOCKER_RC_LOCK}"
+    trap 'dockerConfigurationInterrupted; [[ -z "${draft}" ]] || dockerRemoveManagedTree "${root}" "${draft}" || true; dockerReleaseDeploymentLock' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    spec=$(dockerAccountSpecFile) || return $?
+    dockerControlRecoveryCheck &&
+        dockerManagedSpecMatchesDeployment "${spec}" "${root}/deployment.json" "${root}/images.env" ||
+        return "${PADM_DOCKER_RC_STATE}"
+    if [[ "${action}" == join ]]; then
+        if jq -e 'has("control") or has("control_sync")' "${spec}" >/dev/null; then
+            dockerError '当前部署已有控制角色，拒绝重新接入'
+            return "${PADM_DOCKER_RC_CONFLICT}"
+        fi
+    else
+        jq -e '.control_sync.role == "controlled" and .control_sync.connection != null' \
+            "${spec}" >/dev/null || {
+            dockerError '当前被控角色缺少已接入的私网连接，拒绝外部同步'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+    fi
+    draft=$(mktemp -d "${root}/.control-client.XXXXXX") || return "${PADM_DOCKER_RC_STATE}"
+    chmod 0700 "${draft}" &&
+        dockerControlInviteInputCheck "${invitation}" "${root}" &&
+        cp -- "${invitation}" "${draft}/invite.json" &&
+        chmod 0600 "${draft}/invite.json" &&
+        (umask 077; dockerConfigureSpecMigrate "${spec}" "${draft}/spec.json") ||
+        return "${PADM_DOCKER_RC_STATE}"
+    dockerControlClientRuntimeCheck "${draft}/invite.json" || return $?
+    (umask 077; dockerControlClientBuildDraft "${draft}" "${listeners[@]}" >"${draft}/next.json") &&
+        dockerConfigureSpecValidate "${draft}/next.json" || {
+        status=$?
+        [[ "${status}" != 130 && "${status}" != 143 ]] || return "${status}"
+        dockerError '私网认证或同步规划失败，保留当前角色、账号和配置'
+        return "${PADM_DOCKER_RC_CONFLICT}"
+    }
+    if jq -en --slurpfile current "${spec}" --slurpfile next "${draft}/next.json" \
+        '$current == $next' >/dev/null; then
+        printf '同步版本和内容未变，无需重新部署。\n'
+        return 0
+    fi
+    DOCKER_CONTROL_SYNC_TRANSACTION=1
+    dockerAccountApplyDraft "${draft}/next.json" || status=$?
+    [[ "${status}" -ne 0 ]] || printf '被控角色和账号同步已提交。\n'
+    return "${status}"
+)
+
+dockerControlJoin() { dockerControlClientApply join "$@"; }
+dockerControlSync() { dockerControlClientApply sync "$@"; }
+
 dockerControlStatus() (
     local json=${1:-0} spec root role healthy=null result
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
@@ -398,7 +560,9 @@ dockerControlStatus() (
         authorization: {enabled: .control.peer.enabled, expires_at: .control.peer.expires_at}
       } elif $role == "controlled" then {
         role: $role, node_id: .control_sync.node_id, controller_id: .control_sync.controller_id,
-        listen: null, peer_address: null, revision: .control_sync.last_revision, healthy: null,
+        listen: (.control_sync.connection.listen // null),
+        peer_address: (.control_sync.connection.peer_address // null),
+        revision: .control_sync.last_revision, healthy: null,
         authorization: null
       } else {
         role: $role, node_id: null, controller_id: null, listen: null,
@@ -425,8 +589,10 @@ dockerControlCommand() {
     init) dockerControlInit "$@" ;;
     invite) dockerControlInvite "$@" ;;
     revoke) dockerControlRevoke "$@" ;;
+    join) dockerControlJoin "$@" ;;
+    sync) dockerControlSync "$@" ;;
     *)
-        dockerError '用法: control status [--json] | init --address <IPv4> --port <端口> --peer-address <IPv4> [--yes] | invite --output <绝对路径> [--expires-in <秒>] [--yes] | revoke [--yes]'
+        dockerError '用法: control status [--json] | init --address <IPv4> --port <端口> --peer-address <IPv4> [--yes] | invite --output <绝对路径> [--expires-in <秒>] [--yes] | revoke [--yes] | join --invite <私有文件> --listener <入口 ID>... [--yes] | sync --invite <私有文件>'
         return "${PADM_DOCKER_RC_USAGE}"
         ;;
     esac

@@ -308,6 +308,9 @@ dockerBundleSupportsSpec() {
           (if $spec[0] | has("control_sync") then
             $schema[0]["x-padm-control-sync"] == true
           else true end) and
+          (if ($spec[0].control_sync // {}) | has("connection") then
+            $schema[0]["x-padm-control-client"] == true
+          else true end) and
           (if $spec[0] | has("control") then
             $schema[0]["x-padm-control-state"] == true
           else true end) and

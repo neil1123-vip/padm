@@ -339,7 +339,6 @@ and restoring old content publishes a newer revision rather than moving backward
 The separate Compose `control` service uses host networking, UID `10001`, no capabilities or
 published ports, and a read-only `config/control` mount; it depends on WireGuard health.
 Ordinary configuration cannot change controller identity, listener or authorization.
-No controlled-node join, external sync CLI/menu or WireGuard connection wizard is connected yet.
 Focused fixtures cover candidate generation, installation, recovery and
 permissions; core/host actions are stubbed, not real two-node acceptance.
 `padm-docker control status [--json]` and the Control connection menu expose redacted role state.
@@ -371,7 +370,28 @@ Redacted status includes the authorization switch and expiry.
 Recovery, failed-transaction rollback and explicit version rollback disable authorization to prevent old tokens
 from becoming valid again; generate a new invitation afterwards. An atomically delivered invitation remains
 even if configuration fails, but is not proof of active authorization; check `control status`.
-Next are controlled-node join and private sync in 4C.3, followed by 4C.4 two-node acceptance.
+On the controlled node, first start a healthy managed single-peer WireGuard deployment and securely
+transfer the invitation into a root-private directory. The controller must be the peer's unique `/32`
+AllowedIPs, the local interface address must match `peer_address`, and the route from that source to
+the controller must use `wg-padm`. The Control connection menu also exposes join and manual sync:
+
+```bash
+padm-docker control join --invite /root/padm-control-invite.json --listener entry-reality --yes
+padm-docker control sync --invite /root/padm-control-invite.json
+```
+
+Repeat `--listener` to map multiple existing entries. Join confirms once and initializes identity,
+mapping and the initial account sync in one transaction. Failure preserves the original role, accounts
+and traffic; retrying the same revision/content does not rebuild services. Identity, connection addresses
+and mapping are then fixed; a different invitation cannot reclaim them. After rotation, securely transfer
+the new invitation and sync again. Every sync explicitly reads a root-private invitation outside the managed
+directory, with the same parent-directory restrictions; expired or revoked credentials fail.
+The raw token is not stored in specs, backups, arguments, environment or ordinary logs. The capability-free
+client binds its private source address and connects directly, without proxies, redirects or public fallback.
+Status exposes connection metadata, not remote health. Legacy internal roles without connection metadata
+remain compatible but cannot use external sync; old bundles cannot restore the new connection spec.
+Automatic sync, role rebinding/recovery and a WireGuard connection wizard are not provided yet.
+Next is role recovery management in 4C.3, followed by 4C.4 two-node acceptance.
 Multi-server support remains `deferred`.
 See the [4C implementation checkpoints](../docker-menu-parity-plan.md#4c-多服务器控制后端).
 

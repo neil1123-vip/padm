@@ -289,6 +289,38 @@ runControlDriver() {
     local -A targetPrompts=()
     targetReply 'Docker 管理菜单' $'15\n'
     case "${scenario}" in
+    join|join-cancel|join-eof|sync|sync-cancel|sync-eof|sync-failed)
+        if [[ "${scenario}" == join* ]]; then
+            if [[ "${scenario}" == join-cancel ]]; then
+                targetReply 'Docker 控制连接' $'5\n'
+                targetReply '私有邀请文件绝对路径（0 返回）' $'0\n'
+                targetReply 'Docker 控制连接' $'5\n'
+                targetReply '私有邀请文件绝对路径（0 返回）' $'/root/padm-invite.json\n'
+                targetReply '映射入口 ID（0 返回）' $'0\n'
+            fi
+            targetReply 'Docker 控制连接' $'5\n'
+            targetReply '私有邀请文件绝对路径（0 返回）' $'/root/padm-invite.json\n'
+            targetReply '映射入口 ID（0 返回）' $'entry-reality\n'
+            case "${scenario}" in
+            join-cancel) targetReply 'fixture-control-confirm [y/N]' $'n\n' ;;
+            join-eof) targetReply 'fixture-control-confirm [y/N]' $'\004' ;;
+            *) targetReply 'fixture-control-confirm [y/N]' $'y\n' ;;
+            esac
+        else
+            targetReply 'Docker 控制连接' $'6\n'
+            case "${scenario}" in
+            sync-cancel) targetReply '私有邀请文件绝对路径（0 返回）' $'0\n' ;;
+            sync-eof) targetReply '私有邀请文件绝对路径（0 返回）' $'\004' ;;
+            *) targetReply '私有邀请文件绝对路径（0 返回）' $'/root/padm-invite.json\n' ;;
+            esac
+        fi
+        if [[ "${scenario}" == sync-failed ]]; then
+            targetReply 'Docker 控制连接' $'1\n'
+        fi
+        targetReply 'Docker 控制连接' $'0\n'
+        targetReply 'Docker 管理菜单' $'0\n'
+        return 0
+        ;;
     invite|invite-cancel|invite-eof|revoke|revoke-cancel)
         if [[ "${scenario}" == invite* ]]; then
             if [[ "${scenario}" == invite-cancel ]]; then
@@ -666,7 +698,7 @@ control)
     recordAction "$@"
     case "${2:-}" in
     status) printf 'fixture-control-status\n' ;;
-    init|invite|revoke)
+    init|invite|revoke|join)
         printf 'fixture-control-confirm [y/N]: '
         if ! IFS= read -r confirmation; then
             recordAction control-confirm eof
@@ -674,6 +706,10 @@ control)
         fi
         recordAction control-confirm "${confirmation}"
         [[ "${confirmation}" == y ]] || exit 2
+        [[ "${CONTROL_INIT_STATUS:-0}" -eq 0 ]] || exit "${CONTROL_INIT_STATUS}"
+        recordAction control-commit
+        ;;
+    sync)
         [[ "${CONTROL_INIT_STATUS:-0}" -eq 0 ]] || exit "${CONTROL_INIT_STATUS}"
         recordAction control-commit
         ;;
@@ -718,7 +754,8 @@ runPty core-assessment menu $'13\n0\n' "${TLS_WIZARD_CLI}" menu
 
 : >"${TLS_WIZARD_ACTIONS}"
 runPty control-dispatch control flow "${TLS_WIZARD_CLI}" menu
-for controlLabel in '15. 控制连接' '1. 查看角色状态' '2. 初始化主控' '3. 邀请或轮换凭据' '4. 撤销授权' '0. 返回'; do
+for controlLabel in '15. 控制连接' '1. 查看角色状态' '2. 初始化主控' '3. 邀请或轮换凭据' \
+    '4. 撤销授权' '5. 接入被控角色' '6. 同步受管账号' '0. 返回'; do
     grep -Fq "${controlLabel}" "${CONTROL_LOG}" || fail "missing control menu item: ${controlLabel}"
 done
 [[ "$(<"${TLS_WIZARD_ACTIONS}")" == $'control status\ncontrol init --address 10.77.0.1 --port 19443 --peer-address 10.77.0.2\ncontrol-confirm y\ncontrol-commit' ]] ||
@@ -768,6 +805,38 @@ for controlCase in invite invite-cancel invite-eof revoke revoke-cancel; do
     [[ "$(grep -Fc 'fixture-control-confirm [y/N]' "${CONTROL_LOG}")" -eq 1 ]] ||
         fail "control ${controlCase} did not confirm exactly once"
 done
+
+for controlCase in join join-cancel join-eof sync sync-cancel sync-eof sync-failed; do
+    : >"${TLS_WIZARD_ACTIONS}"
+    export CONTROL_INIT_STATUS=0
+    [[ "${controlCase}" != sync-failed ]] || CONTROL_INIT_STATUS=17
+    runPty "control-${controlCase}" control "${controlCase}" "${TLS_WIZARD_CLI}" menu
+    expectedControl=
+    case "${controlCase}" in
+    join*)
+        expectedControl='control join --invite /root/padm-invite.json --listener entry-reality'
+        case "${controlCase}" in
+        join-cancel) expectedControl+=$'\ncontrol-confirm n' ;;
+        join-eof) expectedControl+=$'\ncontrol-confirm eof' ;;
+        *) expectedControl+=$'\ncontrol-confirm y\ncontrol-commit' ;;
+        esac
+        [[ "$(grep -Fc 'fixture-control-confirm [y/N]' "${CONTROL_LOG}")" -eq 1 ]] ||
+            fail "control ${controlCase} did not confirm exactly once"
+        ;;
+    sync) expectedControl=$'control sync --invite /root/padm-invite.json\ncontrol-commit' ;;
+    sync-failed)
+        expectedControl=$'control sync --invite /root/padm-invite.json\ncontrol status'
+        grep -Fq '操作失败，退出码: 17' "${CONTROL_LOG}" || fail 'failed control sync was not reported'
+        ;;
+    esac
+    [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedControl}" ]] ||
+        fail "control ${controlCase} dispatched incorrect arguments or committed after cancellation"
+    if [[ "${controlCase}" == sync* ]]; then
+        ! grep -Fq 'fixture-control-confirm [y/N]' "${CONTROL_LOG}" ||
+            fail "control ${controlCase} added an unnecessary confirmation"
+    fi
+done
+unset CONTROL_INIT_STATUS
 
 : >"${TLS_WIZARD_ACTIONS}"
 runPty geo-dispatch geo flow "${TLS_WIZARD_CLI}" menu

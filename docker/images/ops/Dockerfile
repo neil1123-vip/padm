@@ -34,6 +34,7 @@ COPY --chown=10001:10001 --chmod=0755 entrypoint.sh /usr/local/bin/padm-entrypoi
 COPY --chown=10001:10001 --chmod=0755 control_server.py /opt/padm/subscription/control_server.py
 COPY --chown=10001:10001 --chmod=0755 control_api.py /opt/padm/control_api.py
 COPY --chown=10001:10001 --chmod=0755 control_sync.py /opt/padm/control_sync.py
+COPY --chown=10001:10001 --chmod=0755 control_client.py /opt/padm/control_client.py
 COPY --chown=10001:10001 --chmod=0755 control_state.py /opt/padm/control_state.py
 
 ARG PADM_VERSION

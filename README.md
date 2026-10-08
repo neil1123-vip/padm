@@ -399,9 +399,25 @@ padm-docker control revoke --yes
 撤销先原子禁用 API，再更新 spec；两步之间中断时重复执行 `revoke` 补齐，不恢复旧授权。
 恢复、失败回滚或显式版本回滚均禁用授权，避免复活旧 token，之后需重新邀请。
 邀请文件原子交付后即使配置失败也保留，但不保证授权有效，以 `control status` 为准。
-当前仍不开放被控接入、外部同步 CLI/菜单或 WireGuard 连接向导；
+被控端先配置并启动归属一致的单 Peer WireGuard，再将邀请安全送至其 root 私有目录。
+主控地址须是唯一 Peer 的 `/32` AllowedIPs，本机接口地址须与邀请的 `peer_address` 一致，
+到主控的指定源地址路由必须走 `wg-padm`。接入和手动同步也可从“控制连接”菜单执行：
+
+```bash
+padm-docker control join --invite /root/padm-control-invite.json --listener entry-reality --yes
+padm-docker control sync --invite /root/padm-control-invite.json
+```
+
+`--listener` 可重复指定现有入口；接入一次确认，在同一事务中初始化被控身份、固定映射并完成首轮同步。
+失败保留原角色、账号和流量；重复同步同版本同内容不重建。
+双方身份、连接地址和映射随后冻结，不能用另一邀请重新认领。轮换后安全传递新的邀请文件，再同步。
+每次同步显式读取受管目录外的 root 私有邀请，祖先目录权限与输出要求一致；过期或撤销时拒绝。
+原始 token 不写入 spec、备份、参数、环境或普通日志。客户端无能力、固定本机私网源地址直连，
+不使用代理、重定向或公网回退；状态只展示连接元数据，不据此宣称远端健康。
+旧无连接元数据的内部被控规格继续兼容，但不能直接使用外部同步；旧 bundle 不得恢复新连接规格。
+尚未提供自动同步、角色重绑定/恢复或 WireGuard 连接向导。
 定向夹具覆盖候选、安装、恢复和权限，核心/宿主动作是桩，不代替真实双节点验收。
-下一步为 4C.3 被控接入与私网同步，再做 4C.4 双节点验收，多服务器保持 `deferred`。阶段边界见
+下一步为 4C.3 角色恢复管理，再做 4C.4 双节点验收，多服务器保持 `deferred`。阶段边界见
 [4C 实施计划](documents/docker-menu-parity-plan.md#4c-多服务器控制后端)。
 
 证书和 ACME 任务也由同一个宿主控制命令分发到 `ops` 镜像：

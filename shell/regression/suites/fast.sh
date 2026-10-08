@@ -77,6 +77,7 @@ listRegressionDockerContractsFastChildSelectors() {
         docker-phase1 \
         docker-phase5 \
         docker-control-sync \
+        docker-control-client \
         docker-release \
         docker-geo-data \
         docker-traffic \
@@ -139,6 +140,11 @@ runDockerControlSyncRegression() {
     bash "${PROJECT_ROOT}/docker/tests/control-sync.sh"
 }
 
+runDockerControlClientRegression() {
+    PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-client.py" &&
+        bash "${PROJECT_ROOT}/docker/tests/control-join.sh"
+}
+
 runDockerControlStateRegression() {
     bash "${PROJECT_ROOT}/docker/tests/control-state.sh"
 }
@@ -199,6 +205,7 @@ registerRegressionFunctionLeaf docker-control-api runDockerControlApiRegression
 registerRegressionFunctionLeaf docker-control-sync runDockerControlSyncRegression
 registerRegressionFunctionLeaf docker-control-state runDockerControlStateRegression
 registerRegressionFunctionLeaf docker-control-cli runDockerControlCliRegression
+registerRegressionFunctionLeaf docker-control-client runDockerControlClientRegression
 registerRegressionFunctionLeaf docker-wireguard-runtime runDockerWireGuardRuntimeRegression
 
 listRegressionDockerWireGuardChildSelectors() {

@@ -8,6 +8,7 @@
   "x-padm-reality-stream-host-network": true,
   "x-padm-accounts": true,
   "x-padm-control-sync": true,
+  "x-padm-control-client": true,
   "x-padm-control-state": true,
   "additionalProperties": false,
   "required": ["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"],
@@ -58,6 +59,15 @@
         "role": {"const": "controlled"},
         "node_id": {"$ref": "#/$defs/uuid"},
         "controller_id": {"$ref": "#/$defs/uuid"},
+        "connection": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["listen", "peer_address"],
+          "properties": {
+            "listen": {"$ref": "#/properties/control/properties/listen"},
+            "peer_address": {"type": "string", "format": "ipv4", "pattern": "^(10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.)"}
+          }
+        },
         "listener_ids": {"$ref": "#/properties/accounts/items/properties/listeners"},
         "last_revision": {
           "oneOf": [
@@ -349,6 +359,19 @@
     {
       "if": {"required": ["control_sync"]},
       "then": {"properties": {"schema_version": {"const": 3}}}
+    },
+    {
+      "if": {
+        "required": ["control_sync"],
+        "properties": {"control_sync": {"required": ["connection"]}}
+      },
+      "then": {
+        "properties": {
+          "host_integrations": {
+            "contains": {"properties": {"type": {"const": "wireguard"}}, "required": ["type"]}
+          }
+        }
+      }
     },
     {
       "if": {"required": ["accounts"]},

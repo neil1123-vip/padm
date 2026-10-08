@@ -527,11 +527,12 @@ dockerMenuGeo() {
 }
 
 dockerMenuControl() {
-    local choice address port peer output expiry
+    local choice address port peer output expiry invitation listener
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 控制连接\n'
-        printf '%s\n' '1. 查看角色状态' '2. 初始化主控' '3. 邀请或轮换凭据' '4. 撤销授权' '0. 返回'
+        printf '%s\n' '1. 查看角色状态' '2. 初始化主控' '3. 邀请或轮换凭据' '4. 撤销授权' \
+            '5. 接入被控角色' '6. 同步受管账号' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -555,6 +556,18 @@ dockerMenuControl() {
             dockerMenuRun control invite --output "${output}" --expires-in "${expiry}" || true
             ;;
         4) dockerMenuRun control revoke || true ;;
+        5)
+            dockerSetupRead invitation '私有邀请文件绝对路径（0 返回）: ' &&
+                [[ -n "${invitation}" ]] &&
+                dockerSetupRead listener '映射入口 ID（0 返回）: ' &&
+                [[ -n "${listener}" ]] || continue
+            dockerMenuRun control join --invite "${invitation}" --listener "${listener}" || true
+            ;;
+        6)
+            dockerSetupRead invitation '私有邀请文件绝对路径（0 返回）: ' &&
+                [[ -n "${invitation}" ]] || continue
+            dockerMenuRun control sync --invite "${invitation}" || true
+            ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done
