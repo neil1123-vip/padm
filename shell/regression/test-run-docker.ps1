@@ -26,6 +26,15 @@ set -euo pipefail
 [[ "$(cat 'new file.txt')" == untracked-current ]]
 [[ "$(cat probe.lock)" == linux-text ]]
 python3 -c 'from pathlib import Path; assert Path("probe.bin").read_bytes() == b"\0\r\n\xff"'
+# 只有精确的双节点 selector 获得额外网络能力，普通和近似名称均不能获得。
+python3 - "$1" <<'PY'
+import sys
+from pathlib import Path
+status = dict(line.split(":", 1) for line in Path("/proc/self/status").read_text().splitlines())
+mask = (1 << 12) | (1 << 21)
+expected = mask if sys.argv[1] == "docker-control-two-node-real" else 0
+assert int(status["CapEff"].strip(), 16) & mask == expected
+PY
 [[ ! -e ignored.txt && ! -e .git ]]
 [[ "$HOME" == /tmp/padm-regression-home && "$TMPDIR" == /tmp/padm-regression-tmp ]]
 printf 'current-worktree-snapshot-ok\n'
@@ -42,7 +51,12 @@ esac
 [IO.File]::WriteAllBytes((Join-Path $fixture 'probe.bin'), [byte[]]@(0, 13, 10, 255))
 [IO.File]::WriteAllText((Join-Path $fixture 'ignored.txt'), 'must-not-copy', $utf8)
 $runner = Join-Path $runnerDir 'run-docker.ps1'
-foreach ($case in @(@{ selector = 'fast'; expected = 0 }, @{ selector = 'fail'; expected = 7 })) {
+foreach ($case in @(
+    @{ selector = 'fast'; expected = 0 },
+    @{ selector = 'fail'; expected = 7 },
+    @{ selector = 'docker-control-two-node-real'; expected = 0 },
+    @{ selector = 'docker-control-two-node-real-other'; expected = 0 }
+)) {
     & $runner -Selector $case.selector
     if ($LASTEXITCODE -ne $case.expected) { throw "Wrong exit code for $($case.selector): $LASTEXITCODE" }
     $artifacts = Get-ChildItem -Directory -LiteralPath $fixture -Filter '.tmp-regression-docker-*' |

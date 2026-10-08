@@ -305,7 +305,7 @@
       "profiles": ["subscription", "net-wireguard"],
       "network_mode": "host",
       "host_capabilities": ["NET_ADMIN"],
-      "reason": "4C.1 私网 API、4C.2 被控同步事务及 4C.3a–4C.3c 归属/健康/主控恢复已实现；4C.3d1–d2 提供脱敏角色状态、已有受管单 Peer WireGuard 主控初始化、邀请/轮换/撤销 CLI/菜单。校验归属、实际地址与唯一 /32 Peer，不创建接口/密钥/路由；原始 token 仅写外部 root 私有邀请文件，规格只存摘要，恢复禁用授权。版本单调、独立只读服务、零能力、无公网端口映射。被控接入及外部同步待 4C.3，真实双节点待 4C.4。"
+      "reason": "4C.1–4C.3d4 已提供私网 API、主控初始化与邀请/轮换/撤销、被控接入和手动同步 CLI/菜单及事务/回滚保护；核验已有受管单 Peer WireGuard 的归属、地址和唯一 /32 Peer，不创建接口/密钥/路由。token 仅写外部 root 私有邀请，不进入规格/备份/普通日志；独立只读服务与客户端零能力，无公网端口映射。4C.4a 已通过真实双网络空间加密链路及 API/客户端规划验收；真实双部署 Compose 应用/恢复待 4C.4b，自动同步、多 Peer、角色重绑定与完整灾备未交付。"
     },
     "acme-webroot": {
       "status": "deferred",

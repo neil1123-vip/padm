@@ -421,7 +421,12 @@ padm-docker control sync --invite /root/padm-control-invite.json
 普通接入/同步失败或中断仍恢复事务前状态，不在本机伪造上游版本。
 尚未提供自动同步、角色重绑定、任意历史账号恢复或 WireGuard 连接向导。
 定向夹具覆盖候选、安装、恢复和权限，核心/宿主动作是桩，不代替真实双节点验收。
-下一步为 4C.4 双节点验收，完整角色迁移/灾备另行定义，多服务器保持 `deferred`。阶段边界见
+4C.4a 已在隔离 Linux 容器的两个独立网络空间实测 WireGuard 握手和加密传输，
+通过生产 API/零能力客户端验证接入规划、幂等、凭据轮换、过期/撤销、版本冲突及断网恢复。
+专用回归 `docker-control-two-node-real` 仅在隔离测试容器增加 `NET_ADMIN`/`SYS_ADMIN`，
+仍使用 `network none`，不发布端口、不使用宿主网络；生产服务权限不变。
+本项不调用 Compose 应用/恢复，下一步 4C.4b 验收真实双部署事务；
+完整角色迁移/灾备另行定义，多服务器保持 `deferred`。阶段边界见
 [4C 实施计划](documents/docker-menu-parity-plan.md#4c-多服务器控制后端)。
 
 证书和 ACME 任务也由同一个宿主控制命令分发到 `ops` 镜像：

@@ -397,7 +397,13 @@ Controlled specs require a bundle declaring sync rollback protection, so older u
 Failed or interrupted join/sync transactions still restore their pre-transaction state without inventing
 upstream revisions locally. Automatic sync, role rebinding, arbitrary historical-account restoration and
 a WireGuard connection wizard are not provided.
-Next is 4C.4 two-node acceptance; full role migration and disaster recovery need a separate contract.
+4C.4a verifies real WireGuard handshakes and encrypted traffic between two independent network
+namespaces in an isolated Linux container. The production API and capability-free client cover join
+planning, idempotency, credential rotation, expiration/revocation, revision conflicts and network recovery.
+The dedicated `docker-control-two-node-real` regression adds `NET_ADMIN`/`SYS_ADMIN` only to its
+isolated test container, still with `network none`, no published ports and no host networking.
+Production permissions are unchanged. This test does not execute Compose apply/restore;
+4C.4b still needs real two-deployment transactions. Full role migration and disaster recovery need a separate contract.
 Multi-server support remains `deferred`.
 See the [4C implementation checkpoints](../docker-menu-parity-plan.md#4c-多服务器控制后端).
 

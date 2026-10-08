@@ -116,7 +116,7 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 | 原生菜单 | Docker 当前状态 | 已覆盖 | 尚未覆盖或边界 |
 | --- | --- | --- | --- |
 | 安装与重装 | 部分已交付，完整管理 `deferred` | `install`、可信发布输入 `release`、交互首配 `setup`、`edit`、`configure`、候选校验及恢复 | 支持 `1`、`2`、`3`、`4`、`5`、`21`、`22`、`23`、`24`、`25`、`26`、`27`、`28`、`29`、`30`、`31` 字段编辑、完整原始 spec 接入、多入口及主副核心；重装和真实发布连通未完成。 |
-| 订阅与用户 | `supported` + `host-integrated` + `deferred` | 有条件的订阅发布、流量采集/额度、v3 独立账号规格与双核心认证/统计底座、账号 CLI/菜单事务、分享组与独立 token、账号/入口筛选、纯内容及 HTTPS 链接输出、私网只读 API 与被控同步事务基座、WireGuard 宿主集成 | HTTPS 链接仍要求受管 TLS；CDN/入口地址覆盖、H3、业务备份恢复和完整多服务器工作流未迁移；同步无外部 CLI/菜单，WireGuard 需 `net-wireguard`。 |
+| 订阅与用户 | `supported` + `host-integrated` + `deferred` | 有条件的订阅发布、流量采集/额度、v3 独立账号规格与双核心认证/统计底座、账号 CLI/菜单事务、分享组与独立 token、账号/入口筛选、纯内容及 HTTPS 链接输出、主控管理与被控接入/手动同步 CLI/菜单、WireGuard 宿主集成 | HTTPS 链接仍要求受管 TLS；H3、业务备份恢复和完整多服务器工作流未迁移；真实双部署事务仍待验收，WireGuard 需 `net-wireguard`。 |
 | 协议与入口 | 部分 `supported`，管理工作流 `deferred` | `1` Reality Vision、`2` XHTTP、`3` Hysteria2、`4` AnyTLS、`5` NaiveProxy、`21` VLESS WS TLS、`22` VMess WS TLS、`23` VMess HTTPUpgrade TLS、`24` VLESS gRPC TLS、`25` Trojan gRPC TLS、`26` Reality gRPC、`27` TLS Vision fallback、`28` direct Trojan、`29` Trojan TLS fallback、`30` Shadowsocks、`31` TUIC 的配置运行、字段编辑、分享链接、多入口、Reality 传输派生、参数重生成和目标站管理 | XHTTP、VMess WS、gRPC TLS 和传统 TLS fallback 仅限 Xray，Hysteria2/AnyTLS/NaiveProxy/Shadowsocks/TUIC 仅限 sing-box；HTTPUpgrade 支持两核心；完整协议管理、UDP 端口跳跃、Reality 443 共存、内部路由协议和 CDN 地址覆盖尚未开放；Fail2ban WS 增删及端口联动未交付。 |
 | 站点与证书 | 部分 `supported`，其余 `deferred` | TLS 文件安装、DNS-01 ACME、Nginx WebSocket/HTTPUpgrade/gRPC HTTP/2 入口及传统 TLS fallback 的最小静态后端 | webroot/standalone ACME、静态站点/302/ALPN 管理尚未迁移。 |
 | 路由与访问控制 | `host-integrated` + `deferred` | WireGuard、TUN/TProxy 宿主集成合同 | WARP、IPv6 调优、Socks/HTTP 中继、DNS/hosts、BT、访问控制和路由规则尚未迁移。 |
@@ -174,7 +174,7 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 | `subscription` | 订阅与用户 -> 订阅发布 | `supported` | `core-xray` / `nginx` / `subscription` | bridge | 既有部署级 token 发布继续要求 Xray 协议 `21` 和受管 TLS；分享组另有独立 token，可按账号/入口生成纯订阅内容并查看 HTTPS 链接；CDN/H3 仍未迁移。 |
 | `subscription-traffic` | 订阅与用户 -> 流量与额度 | `supported` | 核心 profile | 宿主 CLI | 定时采集以及 show/limit/reset；自用按原 UUID、独立账号按稳定 ID 共享跨核心累计与额度，凭据轮换和恢复不回退累计。 |
 | `subscription-users` | 订阅与用户 -> 用户和分享订阅 | `supported` | 核心、订阅 | bridge | 4A.1 账号底座、4A.2 账号 CLI/菜单事务和 4A.3 分享组已交付：支持独立 token、账号/入口筛选、启停/轮换、纯内容及 HTTPS 链接；CDN/H3、业务备份恢复和完整多服务器工作流仍未迁移。 |
-| `subscription-multiserver` | 订阅与用户 -> 主控/被控、多服务器同步 | `deferred` | 订阅、WireGuard | host | 4C.1–4C.3c API、同步/主控恢复与 WireGuard 归属底座已实现；4C.3d1–d2 增加脱敏角色状态、已有受管单 Peer WireGuard 主控初始化和邀请/轮换/撤销 CLI/菜单。实际地址与唯一 `/32` Peer 校验，不建接口/密钥/路由；原始 token 仅写外部 root 私有邀请文件，规格只存摘要，恢复禁用授权。失败/回滚版本不倒退，独立只读服务、零能力、无公网端口映射。接入及外部同步待 4C.3，真实双节点待 4C.4。 |
+| `subscription-multiserver` | 订阅与用户 -> 主控/被控、多服务器同步 | `deferred` | 订阅、WireGuard | host | 4C.1–4C.3d4 已提供私网 API、主控管理、被控接入/手动同步 CLI/菜单及事务/回滚保护。校验已有单 Peer 的归属、实际地址与唯一 `/32`，不建接口/密钥/路由；token 仅写外部 root 私有邀请，不进入规格/备份/普通日志，独立服务与客户端零能力，无公网端口映射。4C.4a 真实双网络空间加密链路和 API/客户端规划通过；Compose 双部署应用/恢复待 4C.4b，自动同步、多 Peer、角色重绑定与完整灾备未交付。 |
 | `acme-webroot` | 站点与证书 -> 传统 TLS fallback | `deferred` | `acme` / `nginx` | bridge | 需要 webroot、端口归属和原子 reload。 |
 | `acme-standalone` | 站点与证书 -> 本机 TLS 证书 | `deferred` | `acme` | host | 需要 80/443 宿主端口和停机回滚。 |
 | `site-static-redirect-alpn` | 站点与证书 -> fallback 站点、302、ALPN | `deferred` | `nginx` | bridge | 尚无站点管理、ALPN 诊断和修复事务。 |

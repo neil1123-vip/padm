@@ -288,7 +288,11 @@ try {
         if (Test-Path -LiteralPath $cachePath) { Remove-Item -LiteralPath $cachePath }
     }
 
-    $container = & $docker create --name "padm-regression-$runId" --platform $platform @slotLabels `
+    # 双节点实测仅在容器的隔离网络空间创建 Peer，不使用宿主网络或发布端口。
+    $networkCapabilities = if ($Selector -eq 'docker-control-two-node-real') {
+        @('--cap-add', 'NET_ADMIN', '--cap-add', 'SYS_ADMIN')
+    } else { @() }
+    $container = & $docker create --name "padm-regression-$runId" --platform $platform @slotLabels @networkCapabilities `
         --network none --init `
         --env "PADM_REGRESSION_PARALLEL_JOBS=$Jobs" `
         --env "PADM_REGRESSION_ALL_PARALLEL_JOBS=$Jobs" `
