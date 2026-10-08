@@ -1747,7 +1747,8 @@ runCoreInstallSignalRollbackRegression() (
         # 未登记新文件的子 shell 也不能清掉父 shell 的临时备份。
         padmCreateTmpRootPath parentTemp signal-parent.XXXXXX -d
         childStatus=0
-        ( kill -TERM "${BASHPID}" ) || childStatus=$?
+        # Bash 5.2.21 需要后续命令处理待决 TERM，不能让 kill 成为最后一条命令。
+        ( kill -TERM "${BASHPID}"; : ) || childStatus=$?
         [[ "${childStatus}" == 143 && -d "${parentTemp}" ]]
         padmRemoveCleanupPath "${parentTemp}"
     )
