@@ -307,6 +307,37 @@ try {
     if ($LASTEXITCODE -ne 0) { $container = $null; throw 'Regression container creation failed.' }
     & $docker cp $snapshot "${container}:/snapshot.tar"
     if ($LASTEXITCODE -ne 0) { throw 'Source snapshot copy failed.' }
+    if ($Selector -eq 'docker-routing-socks5-real') {
+        # 仅复制已有本机镜像的程序到隔离回归容器，不安装宿主工具或挂载 Docker Socket。
+        $cores = Join-Path $runDir 'routing-cores'
+        New-Item -ItemType Directory -Path $cores | Out-Null
+        $coreInputs = [ordered]@{}
+        foreach ($entry in @(
+            @{ name = 'xray'; reference = 'padm-local/padm-xray:control-4c4b' },
+            @{ name = 'sing-box'; reference = 'padm-local/padm-sing-box:tls-3b4' }
+        )) {
+            $info = & $docker image inspect $entry.reference
+            if ($LASTEXITCODE -ne 0) { throw "Required routing image is missing: $($entry.reference)" }
+            $info = $info | ConvertFrom-Json | Select-Object -First 1
+            if ("$($info.Os)/$($info.Architecture)" -ne $platform) {
+                throw "Routing image architecture does not match host: $($entry.reference)"
+            }
+            $coreInputs[$entry.name] = [ordered]@{ reference = $entry.reference; image_id = $info.Id }
+            $extractor = & $docker create --network none $info.Id
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot create routing binary extraction container.' }
+            try {
+                & $docker cp "${extractor}:/usr/local/bin/$($entry.name)" (Join-Path $cores $entry.name)
+                if ($LASTEXITCODE -ne 0) { throw "Cannot extract routing binary: $($entry.name)" }
+            }
+            finally {
+                & $docker rm --volumes $extractor
+                if ($LASTEXITCODE -ne 0) { throw 'Routing extraction container cleanup failed.' }
+            }
+        }
+        & $docker cp $cores "${container}:/routing-cores"
+        if ($LASTEXITCODE -ne 0) { throw 'Routing binary copy failed.' }
+        $result.routing_images = $coreInputs
+    }
     if ($Selector -eq 'docker-control-two-deployment-real') {
         # 离线传入实际业务镜像；节点不得借用宿主 daemon 或旧源码。
         $references = [ordered]@{

@@ -14,6 +14,7 @@
   "x-padm-site-content": true,
   "x-padm-fallback-alpn": true,
   "x-padm-acme-webroot": true,
+  "x-padm-routing-socks5": true,
   "additionalProperties": false,
   "required": ["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"],
   "properties": {
@@ -278,6 +279,36 @@
         }
       }
     },
+    "routing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["socks5"],
+      "properties": {
+        "socks5": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["server", "port", "username", "password"],
+          "properties": {
+            "server": {
+              "type": "string",
+              "anyOf": [
+                {
+                  "format": "ipv4",
+                  "pattern": "^(?!0\\.|127\\.|169\\.254\\.)(?:[1-9][0-9]?|1[0-9]{2}|2[01][0-9]|22[0-3])(?:\\.(?:0|[1-9][0-9]{0,2})){3}$"
+                },
+                {
+                  "format": "ipv6",
+                  "pattern": "^(?:[23][A-Fa-f0-9]{3}|[fF][cCdD][A-Fa-f0-9]{2}):[A-Fa-f0-9:]+$"
+                }
+              ]
+            },
+            "port": {"$ref": "#/$defs/port"},
+            "username": {"type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[!-~]{1,255}(?![\\s\\S])"},
+            "password": {"type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[!-~]{1,255}(?![\\s\\S])"}
+          }
+        }
+      }
+    },
     "site": {
       "oneOf": [
         {
@@ -370,6 +401,17 @@
     }
   },
   "allOf": [
+    {
+      "if": {"required": ["routing"]},
+      "then": {
+        "properties": {
+          "schema_version": {"const": 3},
+          "host_integrations": {
+            "items": {"properties": {"type": {"not": {"enum": ["tun", "tproxy"]}}}}
+          }
+        }
+      }
+    },
     {
       "if": {
         "properties": {"tls": {"type": "object", "required": ["http01"]}}

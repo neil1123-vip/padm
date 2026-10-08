@@ -479,6 +479,34 @@ runSitesDriver() {
     targetReply 'Docker 管理菜单' $'0\n'
 }
 
+runRoutingDriver() {
+    local scenario=$1
+    local -A targetPrompts=()
+    targetReply 'Docker 管理菜单' $'17\n'
+    : >"${TLS_WIZARD_ACTIONS}"
+    case "${scenario}" in
+    flow|failed)
+        targetReply 'Docker 路由与出站' $'invalid\n'
+        targetReply 'Docker 路由与出站' $'1\n'
+        targetReply 'root 私有 SOCKS5 JSON 文件绝对路径（0 返回）' $'/root/padm-socks5.json\n'
+        targetReply 'Docker 路由与出站' $'2\n'
+        targetReply 'Docker 路由与出站' $'3\n'
+        ;;
+    cancel)
+        targetReply 'Docker 路由与出站' $'1\n'
+        targetReply 'root 私有 SOCKS5 JSON 文件绝对路径（0 返回）' $'0\n'
+        targetReply 'Docker 路由与出站' $'1\n'
+        targetReply 'root 私有 SOCKS5 JSON 文件绝对路径（0 返回）' $'\n'
+        ;;
+    file-eof)
+        targetReply 'Docker 路由与出站' $'1\n'
+        targetReply 'root 私有 SOCKS5 JSON 文件绝对路径（0 返回）' $'\004'
+        ;;
+    esac
+    targetReply 'Docker 路由与出站' $'0\n'
+    targetReply 'Docker 管理菜单' $'0\n'
+}
+
 runPty() {
     local name=$1 driver=$2 input=$3 entry=$4 actual=0 feederStatus=0 command pipe feeder
     local expected=0
@@ -568,6 +596,8 @@ runPty() {
             runControlDriver "${input}"
         elif [[ "${driver}" == sites ]]; then
             runSitesDriver "${input}"
+        elif [[ "${driver}" == routing ]]; then
+            runRoutingDriver "${input}"
         elif [[ "${driver}" == accounts ]]; then
             local accountMenuCount=1
             printf '10\n' >&3
@@ -799,6 +829,7 @@ protocol)
         exit "${TARGET_CHECK_STATUS:-0}"
         ;;
     alpn-status) exit "${SITE_ALPN_STATUS:-0}" ;;
+    routing-status) exit "${ROUTING_STATUS:-0}" ;;
     esac
     printf 'fixture-protocol-output\n'
     ;;
@@ -892,6 +923,32 @@ for siteCase in flow cancel static-eof redirect-eof alpn-diagnose-eof alpn-recom
         fail "站点 ${siteCase} 参数分发错误或取消后仍执行编辑"
 done
 unset SITE_MENU_RECORD_STATUS SITE_EDIT_STATUS SITE_ALPN_STATUS
+
+for routingCase in flow cancel file-eof failed return; do
+    : >"${TLS_WIZARD_ACTIONS}"
+    export SITE_EDIT_STATUS=0 ROUTING_STATUS=0
+    [[ "${routingCase}" != failed ]] || { SITE_EDIT_STATUS=15; ROUTING_STATUS=17; }
+    runPty "routing-${routingCase}" routing "${routingCase}" "${TLS_WIZARD_CLI}" menu
+    expectedRouting=
+    case "${routingCase}" in
+    flow|failed)
+        expectedRouting=$'edit --socks5 /root/padm-socks5.json\nedit --socks5-off\nprotocol routing-status'
+        grep -Fq '无效选项' "${CONTROL_LOG}" || fail '路由菜单没有保留无效输入后的操作'
+        ;;
+    esac
+    [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedRouting}" ]] ||
+        fail "路由 ${routingCase} 参数分发错误或取消后执行操作"
+    if [[ "${routingCase}" == flow ]]; then
+        for label in '17. 路由与出站' '1. 启用 SOCKS5 出站' '2. 关闭 SOCKS5 出站' \
+            '3. 查看路由状态' '0. 返回'; do
+            grep -Fq "${label}" "${CONTROL_LOG}" || fail "路由菜单缺少: ${label}"
+        done
+    elif [[ "${routingCase}" == failed ]]; then
+        grep -Fq '操作失败，退出码: 15' "${CONTROL_LOG}" || fail '路由提交失败未显示退出码'
+        grep -Fq '操作失败，退出码: 17' "${CONTROL_LOG}" || fail '路由诊断失败后没有继续菜单'
+    fi
+done
+unset SITE_EDIT_STATUS ROUTING_STATUS
 
 : >"${TLS_WIZARD_ACTIONS}"
 runPty control-dispatch control flow "${TLS_WIZARD_CLI}" menu

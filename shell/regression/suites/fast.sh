@@ -81,6 +81,7 @@ listRegressionDockerContractsChildSelectors() {
         docker-release \
         docker-geo-data \
         docker-traffic \
+        docker-routing-socks5 \
         docker-accounts \
         docker-permissions \
         docker-wireguard-runtime \
@@ -110,6 +111,7 @@ listRegressionDockerContractsFastChildSelectors() {
         docker-release \
         docker-geo-data \
         docker-traffic \
+        docker-routing-socks5 \
         docker-accounts \
         docker-control-cli \
         docker-wireguard-runtime \
@@ -139,6 +141,14 @@ listRegressionDockerContractsRealityChildSelectors() {
 
 runDockerTrafficRegression() {
     bash "${PROJECT_ROOT}/docker/tests/traffic.sh"
+}
+
+runDockerRoutingSocks5Regression() {
+    bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
+}
+
+runDockerRoutingSocks5RealRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/routing-socks5-real.sh"
 }
 
 runDockerAccountsRegression() {
@@ -237,6 +247,8 @@ registerRegressionFunctionLeaf docker-phase4 runDockerPhase4Regression
 registerRegressionFunctionLeaf docker-phase5 runDockerPhase5Regression
 registerRegressionFunctionLeaf docker-phase6 runDockerPhase6Regression
 registerRegressionFunctionLeaf docker-traffic runDockerTrafficRegression
+registerRegressionFunctionLeaf docker-routing-socks5 runDockerRoutingSocks5Regression
+registerRegressionFunctionLeaf docker-routing-socks5-real runDockerRoutingSocks5RealRegression
 registerRegressionFunctionLeaf docker-accounts runDockerAccountsRegression
 registerRegressionFunctionLeaf docker-accounts-cli runDockerAccountsCliRegression
 registerRegressionFunctionLeaf docker-subscriptions runDockerSubscriptionsRegression

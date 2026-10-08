@@ -890,6 +890,33 @@ Recommended multi-server flow:
 
 ## Routing and Access Control
 
+Docker menu `17. Routing and outbound` provides authenticated SOCKS5 TCP outbound.
+Use a root-owned, mode `0600`, single-link JSON file in a root-owned directory with no
+group/other writable ancestors, for example
+`{"server":"192.0.2.10","port":1080,"username":"user","password":"secret"}`.
+This address is a format example, not a working server. Symlinks, special files and
+`/tmp` ancestors are rejected; the maximum size is 64 KiB.
+The upstream must be a routable IPv4/IPv6 literal; credentials must contain 1–255
+visible ASCII characters without spaces or controls.
+
+```bash
+padm-docker edit --socks5 /root/padm-socks5.json --preview
+padm-docker edit --socks5 /root/padm-socks5.json --confirm PADM-DOCKER-EDIT
+padm-docker protocol routing-status
+padm-docker edit --socks5-off --confirm PADM-DOCKER-EDIT
+```
+
+Optional v3 `.routing.socks5` requires the bundle capability `x-padm-routing-socks5`;
+old specs remain direct. Both cores send client TCP destination traffic through the
+authenticated upstream without direct fallback on failure. Client UDP destination traffic
+is explicitly blocked, independently of UDP-based Hysteria2/TUIC ingress carrying TCP.
+Reality handshakes, statistics APIs, control services, Nginx, ACME and host traffic are
+outside this scope. No new listener, host privilege or firewall rule is added; TUN/TProxy
+combinations are not enabled. Changes use the existing candidate/backup/recovery transaction.
+Status and previews omit credentials, but private specs, core configurations and backups
+retain them. SOCKS5 authentication is not encrypted; use a trusted upstream network.
+SOCKS ingress, domain routing, DNS/WARP and the remaining routing policies are still deferred.
+
 `Routing & access control` manages server-side outbound behavior and access policies. It is not a client configuration tutorial.
 
 | Feature | Notes |

@@ -431,7 +431,7 @@
       "profiles": [],
       "network_mode": "host-cli",
       "host_capabilities": [],
-      "reason": "Docker 当前只有 TUN/TProxy 宿主集成合同，尚未迁移原生路由策略菜单。"
+      "reason": "5B.1 提供两核心认证 SOCKS5 TCP 全局出站的菜单、私有文件导入和关闭事务；客户端 UDP 目的流量显式阻断，上游失败不回退直连，不改变宿主网络。WARP、IPv6、DNS/hosts、BT 和完整分流仍待迁移。"
     },
     "internal-201-socks-relay": {
       "status": "deferred",
@@ -440,7 +440,7 @@
       "profiles": [],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "原生内部能力 201 尚未纳入 Docker 路由配置合同。"
+      "reason": "5B.1 已交付认证 SOCKS5 TCP 出站子能力；公网 SOCKS 入站、按域名分流和完整中继管理尚未交付，201 不作为公开节点协议。"
     },
     "internal-202-http-relay": {
       "status": "deferred",

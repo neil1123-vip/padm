@@ -629,6 +629,31 @@ dockerMenuSites() {
     done
 }
 
+dockerMenuRouting() {
+    local choice input
+    while :; do
+        DOCKER_MENU_SIGNAL=0
+        printf '\nDocker 路由与出站\n'
+        printf '%s\n' '1. 启用 SOCKS5 出站' '2. 关闭 SOCKS5 出站' '3. 查看路由状态' '0. 返回'
+        printf '请选择: '
+        if ! IFS= read -r choice; then
+            [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
+            return 0
+        fi
+        case "${choice}" in
+        0) return 0 ;;
+        1)
+            dockerSetupRead input 'root 私有 SOCKS5 JSON 文件绝对路径（0 返回）: ' &&
+                [[ -n "${input}" ]] || continue
+            dockerMenuRun edit --socks5 "${input}" || true
+            ;;
+        2) dockerMenuRun edit --socks5-off || true ;;
+        3) dockerMenuRun protocol routing-status || true ;;
+        *) printf '无效选项，请重新选择。\n' ;;
+        esac
+    done
+}
+
 dockerMenu() {
     local choice
     if [[ "$#" -ne 0 || ! -t 0 || ! -t 1 ]]; then
@@ -659,6 +684,7 @@ dockerMenu() {
             '14. Xray Geo 数据' \
             '15. 控制连接' \
             '16. 站点管理' \
+            '17. 路由与出站' \
             '0. 退出'
         printf '请选择: '
         if ! IFS= read -r choice; then
@@ -685,6 +711,7 @@ dockerMenu() {
         14) dockerMenuGeo ;;
         15) dockerMenuControl ;;
         16) dockerMenuSites ;;
+        17) dockerMenuRouting ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

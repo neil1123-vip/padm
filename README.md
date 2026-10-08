@@ -220,6 +220,28 @@ padm-docker edit --alpn entry-fallback http/1.1 --confirm PADM-DOCKER-EDIT
 完整规格保存于 `/etc/padm-docker/config/spec.json`，由 root 持有、权限 `0600`；
 取消不提交，配置失败恢复旧规格、证书及 ACME 状态。该文件含秘密，不应打印或公开。
 
+Docker 菜单 `17. 路由与出站` 提供认证 SOCKS5 TCP 全局出站。先在 root 私有目录准备
+`0600` JSON 文件，内容为 `{"server":"192.0.2.10","port":1080,"username":"user","password":"secret"}`；
+这是格式示例，不是可用服务器。文件须单链接，所有祖先 root 所有且不可被组/其他用户写入，
+不接受 `/tmp`、符号链接或特殊文件，最大 64 KiB。地址先限可路由 IPv4/IPv6 字面量，
+凭据为 1–255 个可见 ASCII 字符，不含空格或控制字符。
+
+```bash
+padm-docker edit --socks5 /root/padm-socks5.json --preview
+padm-docker edit --socks5 /root/padm-socks5.json --confirm PADM-DOCKER-EDIT
+padm-docker protocol routing-status
+padm-docker edit --socks5-off --confirm PADM-DOCKER-EDIT
+```
+
+可选 v3 `.routing.socks5` 要求控制包声明 `x-padm-routing-socks5`；旧无路由规格保持直连。
+两核心的客户端 TCP 目的流量经认证上游，认证失败或上游断开不回退直连；
+客户端 UDP 目的流量显式阻断，不限制 Hysteria2/TUIC 承载 TCP 的 UDP 入口传输。
+核心 Reality 握手、统计 API、控制服务、Nginx、证书及宿主自身流量不包含在此代理范围。
+不增加监听端口、宿主权限或防火墙规则，暂不与 TUN/TProxy 组合。
+启用、替换与关闭复用候选、确认、备份及失败/信号恢复，状态和预览不显示凭据；
+凭据保存在私有规格、受管核心配置及备份中。SOCKS5 认证链路本身不加密，须使用可信上游网络。
+完整 SOCKS 入站、域名分流、DNS/WARP 和其它路由策略仍待迁移。
+
 完整 v3 `configure` 规格可选 `accounts`，用于追加 1–256 个独立账号，不替换原自用账号。
 每项必须包含 `id`、`name`、`enabled`、`uuid`、`password`、`shadowsocks_password` 和
 `listeners`；`id` 是稳定的小写 UUID，认证 `uuid` 和密码独立，`listeners` 引用现有入口 ID。

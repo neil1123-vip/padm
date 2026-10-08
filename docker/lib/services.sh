@@ -118,8 +118,21 @@ dockerConfigureSpecValidate() {
         (if has("accounts") then ["accounts"] else [] end) +
         (if has("control_sync") then ["control_sync"] else [] end) +
         (if has("control") then ["control"] else [] end) +
+        (if has("routing") then ["routing"] else [] end) +
         (if has("site") then ["site"] else [] end)) and
       (.schema_version == 1 or .schema_version == 2 or .schema_version == 3) and
+      (if has("routing") then
+        .schema_version == 3 and
+        (.routing | exact(["socks5"]) and
+          (.socks5 | exact(["server", "port", "username", "password"]) and
+            (.server | host_address and . != "host.docker.internal") and
+            (.port | port) and
+            (.username | type == "string" and length >= 1 and length <= 255 and
+              (explode | all(. >= 33 and . <= 126))) and
+            (.password | type == "string" and length >= 1 and length <= 255 and
+              (explode | all(. >= 33 and . <= 126))))) and
+        all(.host_integrations[]; .type != "tun" and .type != "tproxy")
+       else true end) and
       (if has("site") then
         .schema_version == 3 and
         any(.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29) and
@@ -1417,10 +1430,20 @@ dockerGenerateXrayConfig() {
           }
         ]),
         outbounds: [
+          (if $r.routing != null then {
+            protocol: "socks", tag: "padm-socks5",
+            settings: {servers: [{
+              address: $r.routing.socks5.server,
+              port: $r.routing.socks5.port,
+              users: [{user: $r.routing.socks5.username, pass: $r.routing.socks5.password}]
+            }]}
+          } else empty end),
           {protocol: "freedom", tag: "direct"},
           {protocol: "blackhole", tag: "blocked"}
         ]
-      } |
+      } + (if $r.routing != null then {
+        routing: {rules: [{type: "field", network: "udp", outboundTag: "blocked"}]}
+      } else {} end) |
       if $r.accounts != null then
         # 独立账号按入口关联；统计身份不随认证凭据轮换。
         .inbounds |= map(. as $inbound |
@@ -1576,8 +1599,17 @@ dockerGenerateSingBoxConfig() {
             listen_port: .settings.port
           } else empty end
         ]),
-        outbounds: [{type: "direct", tag: "direct"}],
-        route: {final: "direct", auto_detect_interface: true}
+        outbounds: [
+          (if $r.routing != null then {
+            type: "socks", tag: "padm-socks5",
+            server: $r.routing.socks5.server, server_port: $r.routing.socks5.port,
+            version: "5", username: $r.routing.socks5.username, password: $r.routing.socks5.password
+          } else empty end),
+          {type: "direct", tag: "direct"}
+        ],
+        route: ({final: (if $r.routing != null then "padm-socks5" else "direct" end),
+          auto_detect_interface: true} +
+          if $r.routing != null then {rules: [{network: "udp", action: "reject"}]} else {} end)
       } |
       if $r.accounts != null then
         .inbounds |= map(. as $inbound |

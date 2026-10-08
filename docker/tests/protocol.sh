@@ -234,6 +234,7 @@ runRead 2 cli-no-action bash -u "${CLI}" protocol
 cp "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" "${TEST_ROOT}/saved-spec.json"
 chmod 0640 "${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
 runRead 15 permissions dockerProtocolCommand links
+runRead 15 routing-permissions dockerProtocolCommand routing-status
 chmod 0600 "${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
 chown 10001:10001 "${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
 runRead 15 owner dockerProtocolCommand list
@@ -248,6 +249,7 @@ chmod 0600 "${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
 cp "${PADM_DOCKER_INSTALL_DIR}/config/xray/config.json" "${TEST_ROOT}/saved-core.json"
 jq '.inbounds[0].port += 1' "${TEST_ROOT}/saved-core.json" >"${PADM_DOCKER_INSTALL_DIR}/config/xray/config.json"
 runRead 15 core-drift dockerProtocolCommand links
+runRead 15 routing-core-drift dockerProtocolCommand routing-status
 cp "${TEST_ROOT}/saved-core.json" "${PADM_DOCKER_INSTALL_DIR}/config/xray/config.json"
 printf 'unexpected-node\n' >>"${PADM_DOCKER_INSTALL_DIR}/data/subscription/${TOKEN}"
 runRead 15 subscription-drift dockerProtocolCommand list
@@ -260,6 +262,8 @@ runRead 0 restored-baseline dockerProtocolCommand links vless-reality
 [[ "$(<"${STDOUT}")" == "${REALITY_URI}" ]] || fail '恢复夹具后无法查看原有 Reality 链接'
 runRead 130 int-cleanup protocolSignalRead INT links
 runRead 143 term-cleanup protocolSignalRead TERM list
+runRead 130 routing-int-cleanup protocolSignalRead INT routing-status
+runRead 143 routing-term-cleanup protocolSignalRead TERM routing-status
 
 # HTTPS 发布开关不应控制只读节点导出，且读取旧版本不能悄悄落盘迁移。
 jq '.core.protocols |= map(select(.id == 1)) | .tls = null | .subscription.enabled = false' \

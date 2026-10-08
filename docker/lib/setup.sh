@@ -764,13 +764,39 @@ dockerEditPreview() {
         "${draft}"
 }
 
+dockerEditSocks5InputCopy() (
+    local input=$1 target=$2 cursor metadata mode resolved
+    umask 077
+    dockerPathIsSafeAbsolute "${input}" &&
+        resolved=$(realpath -m -s -- "${input}" 2>/dev/null) &&
+        [[ "${resolved}" == "${input}" && -f "${input}" && ! -L "${input}" ]] ||
+        return 1
+    metadata=$(stat -c '%u:%a:%h:%s' -- "${input}" 2>/dev/null) || return 1
+    [[ "${metadata}" == 0:600:1:* && "${metadata##*:}" -le 65536 ]] || return 1
+    cursor=$(dirname -- "${input}") || return 1
+    while :; do
+        [[ -d "${cursor}" && ! -L "${cursor}" ]] || return 1
+        metadata=$(stat -c '%u:%a' -- "${cursor}" 2>/dev/null) || return 1
+        [[ "${metadata}" == 0:* ]] || return 1
+        mode=${metadata#*:}
+        (( (8#${mode} & 022) == 0 )) || return 1
+        [[ "${cursor}" != / ]] || break
+        cursor=$(dirname -- "${cursor}") || return 1
+    done
+    cp -- "${input}" "${target}" 2>/dev/null &&
+        chmod 0600 "${target}" &&
+        [[ "$(stat -c '%s' -- "${target}")" -le 65536 ]] &&
+        jq -es 'length == 1 and (.[0] | type == "object" and
+          keys == ["password", "port", "server", "username"])' "${target}" >/dev/null 2>&1
+)
+
 dockerProtocolCommand() (
     local action=${1:-} listener= root workspace original normalized selected status targetAction=
     local selectedHost selectedPort selectedSni
     local -a targetArgs=()
     [[ "$#" -gt 0 ]] && shift
     case "${action}" in
-    list|stream-status) [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
+    list|stream-status|routing-status) [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
     links|alpn-status|targets|check-target|target-status|select-target|block-current-target)
         [[ "$#" -le 1 && "${1:-}" != --* ]] || return "${PADM_DOCKER_RC_USAGE}"
         listener=${1:-}
@@ -841,6 +867,13 @@ dockerProtocolCommand() (
     dockerEditBaselineValidate "${original}" "${workspace}" &&
         dockerConfigureSpecMigrate "${original}" "${normalized}" &&
         chmod 0600 "${normalized}" || return "${PADM_DOCKER_RC_STATE}"
+    if [[ "${action}" == routing-status ]]; then
+        jq '{enabled:(.routing != null), server:(.routing.socks5.server // null),
+          port:(.routing.socks5.port // null),
+          tcp:(if .routing != null then "socks5" else "direct" end),
+          udp:(if .routing != null then "blocked" else "direct" end)}' "${normalized}"
+        return $?
+    fi
     if [[ "${action}" == list ]]; then
         jq -r 'def authority: if contains(":") then "[\(.)]" else . end;
           . as $request |
@@ -1253,7 +1286,7 @@ dockerEditCommand() {
     local streamDomains= streamAddress= streamPort=8443
     local siteMode= siteSource= siteUrl=
     local alpnListener= alpnOrder=
-    local http01=
+    local http01= socks5= socks5File=
     local DOCKER_CONFIG_RESTORE_ALPN_LISTENER=
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
@@ -1286,6 +1319,17 @@ dockerEditCommand() {
             [[ "$#" -ge 2 && -z "${http01}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             case "$2" in enable|disable) http01=$2 ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
             shift 2
+            ;;
+        --socks5)
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${socks5}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            socks5=enable socks5File=$2
+            shift 2
+            ;;
+        --socks5-off)
+            [[ -z "${socks5}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            socks5=disable
+            shift
             ;;
         --alpn)
             [[ "$#" -ge 3 && -n "$2" && "$2" != --* && -z "${alpnListener}" ]] ||
@@ -1371,6 +1415,12 @@ dockerEditCommand() {
         dockerError 'HTTP-01 专项编辑不能与规格导入或其它专项动作组合'
         return "${PADM_DOCKER_RC_USAGE}"
     }
+    [[ -z "${socks5}" || ( -z "${specFile}" && -z "${regenerateReality}" &&
+        -z "${realityTarget}" && -z "${realityStream}" && -z "${siteMode}" &&
+        -z "${alpnListener}" && -z "${http01}" ) ]] || {
+        dockerError '路由专项编辑不能与规格导入或其它专项动作组合'
+        return "${PADM_DOCKER_RC_USAGE}"
+    }
     [[ "${mode}" != interactive || ( -t 0 && -t 1 ) ]] || {
         dockerError '非交互编辑需要 --preview 或 --confirm PADM-DOCKER-EDIT'
         return "${PADM_DOCKER_RC_USAGE}"
@@ -1381,7 +1431,8 @@ dockerEditCommand() {
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     dockerTrafficSafePath "${root}" "${root}/config/spec.json" || return "${PADM_DOCKER_RC_STATE}"
     [[ ( -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" &&
-        -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" ) || -f "${root}/config/spec.json" ]] ||
+        -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" ) ||
+        -f "${root}/config/spec.json" ]] ||
         return "${PADM_DOCKER_RC_STATE}"
     if [[ ! -e "${root}/config/spec.json" && ! -L "${root}/config/spec.json" && -z "${specFile}" ]]; then
         if [[ "${mode}" == interactive ]]; then
@@ -1433,7 +1484,7 @@ dockerEditCommand() {
     # 旧规格先接入，不能同时把未经证明的字段改动当作无损导入。
     if [[ "${mode}" == interactive && -z "${specFile}" && "${imported}" -eq 0 &&
         -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" &&
-        -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" ]]; then
+        -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" ]]; then
         dockerEditFields "${draft}" || status=$?
         if [[ "${status}" -eq 3 ]]; then
             printf '已取消配置编辑。\n'
@@ -1445,6 +1496,21 @@ dockerEditCommand() {
     fi
     jq -es 'length == 1 and (.[0] | type == "object")' "${draft}" >/dev/null 2>&1 ||
         return "${PADM_DOCKER_RC_STATE}"
+    if [[ "${socks5}" == enable ]]; then
+        dockerEditSocks5InputCopy "${socks5File}" "${workspace}/socks5.json" || {
+            dockerError 'SOCKS5 输入须为 root 所有的 0600 单链接普通 JSON 文件，最多 64 KiB，祖先目录不得可写或含链接'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        # 凭据仅从私有快照导入，不进入参数或配置预览。
+        jq --slurpfile socks5 "${workspace}/socks5.json" '.routing = {socks5:$socks5[0]}' \
+            "${draft}" >"${draft}.next" 2>/dev/null &&
+            chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
+            return "${PADM_DOCKER_RC_STATE}"
+    elif [[ "${socks5}" == disable ]]; then
+        jq 'del(.routing)' "${draft}" >"${draft}.next" &&
+            chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
+            return "${PADM_DOCKER_RC_STATE}"
+    fi
     if [[ -n "${http01}" ]]; then
         jq -e 'any(.core.protocols[];
           .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29)' \
@@ -1564,6 +1630,7 @@ dockerEditCommand() {
     [[ "${imported}" -eq 0 ]] || printf '完整原始规格已匹配，确认后接入受管输入。\n'
     jq -en --arg regenerate "${regenerateReality}" --arg target "${realityTarget}" --arg stream "${realityStream}" \
         --arg site "${siteMode}" --arg alpn "${alpnListener}" --arg http01 "${http01}" \
+        --arg socks5 "${socks5}" \
         --slurpfile before "${normalized}" --slurpfile after "${draft}" '
       def fixed: del(.server, .public_port, .address_families, .name,
         .reality.target_host, .reality.target_port, .reality.server_name, .websocket.path, .httpupgrade.path,
@@ -1594,7 +1661,9 @@ dockerEditCommand() {
           . as $bound | any($new.core.protocols[];
             .listener_id == $bound.listener_id and .core == $bound.core and
             .public_port == $bound.public_port and .address_families == $bound.address_families))) and
-      (if $http01 != "" then
+      (if $socks5 != "" then
+        ($old | del(.routing)) == ($new | del(.routing))
+       elif $http01 != "" then
         ($old | del(.tls.http01)) == ($new | del(.tls.http01))
        elif $site != "" then
         ($old | del(.site)) == ($new | del(.site))
@@ -1639,7 +1708,7 @@ dockerEditCommand() {
         end)
        end)
     ' >/dev/null 2>&1 || {
-        dockerError '仅支持 HTTP-01/站点管理与现有入口编辑、复制、Reality 传输派生和删除；账号、密钥、已有入口身份、内部端口与核心、主核心、证书和发布不能改写'
+        dockerError '仅支持路由/HTTP-01/站点专项管理与现有入口编辑、复制、Reality 传输派生和删除；账号、密钥、已有入口身份、内部端口与核心、主核心、证书和发布不能改写'
         return "${PADM_DOCKER_RC_STATE}"
     }
     opsImage=$(dockerManifestImageReference ops) || return "${PADM_DOCKER_RC_MANIFEST}"
