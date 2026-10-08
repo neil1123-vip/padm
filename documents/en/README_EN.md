@@ -316,11 +316,21 @@ padm-docker logs
 padm-docker validate
 ```
 
-Multi-server control currently has only a separate private read-only API foundation.
+Multi-server control now has a separate private read-only API and a controlled-node sync
+transaction foundation.
 Authorization is bound to the controlled source address; expiration, rotation and revocation
 take effect on the next request. The public subscription server is unchanged.
-Compose, CLI/menu roles, invitations, validated WireGuard connectivity, transactional sync and
-recovery are not connected yet; multi-server support remains `deferred`.
+The v3 managed spec records source identities, listener mappings, revision/content digest,
+and the complete managed-account snapshot. Sync replaces only controller-owned accounts and
+preserves local accounts. Identical revisions and content do not recreate services;
+version conflicts, credential collisions and ownership drift are rejected, and failed
+application restores the previous spec and configuration. Ordinary configuration cannot
+change sync ownership, and managed accounts must be changed on the controller.
+No external sync CLI/menu, invitations, WireGuard connection or dedicated service health
+is connected yet. Focused fixtures cover candidate generation, installation, recovery and
+permissions; core/host actions are stubbed, not real two-node acceptance.
+Next is 4C.3 connectivity and management, followed by 4C.4 two-node acceptance.
+Multi-server support remains `deferred`.
 See the [4C implementation checkpoints](../docker-menu-parity-plan.md#4c-多服务器控制后端).
 
 Certificate and ACME tasks are dispatched to the `ops` image by the same host command:

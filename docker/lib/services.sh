@@ -8,6 +8,8 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/renewal.sh" || return 1
 source "$(dirname -- "${BASH_SOURCE[0]}")/schedule.sh" || return 1
 # shellcheck source=/dev/null
 source "$(dirname -- "${BASH_SOURCE[0]}")/geo.sh" || return 1
+# shellcheck source=/dev/null
+source "$(dirname -- "${BASH_SOURCE[0]}")/control-sync.sh" || return 1
 
 if [[ "${PADM_DOCKER_SERVICES_LOADED:-}" == "1" ]]; then
     return 0 2>/dev/null || exit 0
@@ -104,7 +106,8 @@ dockerConfigureSpecValidate() {
       ([.. | strings] | all(.[]; explode | all(. >= 32 and . != 127))) and
       exact(["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"] +
         (if has("reality_stream") then ["reality_stream"] else [] end) +
-        (if has("accounts") then ["accounts"] else [] end)) and
+        (if has("accounts") then ["accounts"] else [] end) +
+        (if has("control_sync") then ["control_sync"] else [] end)) and
       (.schema_version == 1 or .schema_version == 2 or .schema_version == 3) and
       (if has("accounts") then
         .schema_version == 3 and
@@ -118,6 +121,7 @@ dockerConfigureSpecValidate() {
           . as $account |
           exact(["id", "name", "enabled", "uuid", "password", "shadowsocks_password", "listeners"]) and
           (.id | uuid) and (.uuid | uuid) and
+          all($request.accounts[]; .id == $account.id or .id != $account.uuid) and
           (.name | type == "string" and length >= 1 and length <= 64) and
           (.enabled | type == "boolean") and
           (.password | type == "string" and test("^[A-Za-z0-9._~@+=:-]{16,128}$")) and
@@ -385,6 +389,10 @@ dockerConfigureSpecValidate() {
       ($tlsPorts | unique | length) == ($tlsPorts | length)))
     ' "${specFile}" >/dev/null 2>&1 || {
         dockerError '配置规格不满足阶段 4 schema、支持矩阵或拓扑约束'
+        return 1
+    }
+    dockerControlSyncSpecValidate "${specFile}" || {
+        dockerError '被控同步角色、归属或入口映射不合法'
         return 1
     }
 }
@@ -2676,6 +2684,7 @@ dockerConfigureApply() {
     [[ -z "${businessSource}" ]] || backupPrefix=business
     case "${mode}" in configure|preview|interactive|confirmed) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
     dockerConfigureSpecValidate "${sourceSpec}" || return "${PADM_DOCKER_RC_STATE}"
+    dockerControlSyncTransitionValidate "${sourceSpec}" || return "${PADM_DOCKER_RC_CONFLICT}"
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     dockerRealityStreamDeploymentCheck "${sourceSpec}" "${root}/config/spec.json" ||
         return "${PADM_DOCKER_RC_STATE}"

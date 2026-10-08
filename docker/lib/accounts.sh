@@ -141,6 +141,15 @@ dockerAccountFind() {
         "${specFile}" >/dev/null 2>&1
 }
 
+dockerAccountRequireLocal() {
+    jq -e --arg id "$2" '
+      any(.control_sync.managed_accounts[]?; .id == $id) | not
+    ' "$1" >/dev/null 2>&1 || {
+        dockerError '该账号归主控管理，请在主控修改后同步'
+        return "${PADM_DOCKER_RC_CONFLICT}"
+    }
+}
+
 dockerAccountConfirm() {
     local action=$1 accountId=$2 confirmed=${3:-0} answer
     if [[ "${confirmed}" == 1 || "${DOCKER_ACCOUNT_CONFIRM:-0}" == 1 ]]; then
@@ -291,6 +300,7 @@ dockerAccountCommand() {
             return "${PADM_DOCKER_RC_USAGE}"
         }
         if [[ "${action}" == edit ]]; then
+            dockerAccountRequireLocal "${specFile}" "${sourceId}" || return $?
             [[ "${seenName}" -eq 1 || "${seenListeners}" -eq 1 ]] || return "${PADM_DOCKER_RC_USAGE}"
             [[ "${seenName}" -eq 0 ]] || dockerAccountNameIsValid "${name}" ||
                 return "${PADM_DOCKER_RC_USAGE}"
@@ -359,6 +369,7 @@ dockerAccountCommand() {
         dockerLockInstalledDeployment || return "${PADM_DOCKER_RC_LOCK}"
         specFile=$(dockerAccountSpecFile) || return $?
         dockerAccountFind "${specFile}" "${accountId}" || return "${PADM_DOCKER_RC_USAGE}"
+        dockerAccountRequireLocal "${specFile}" "${accountId}" || return $?
         enabled=true
         [[ "${action}" == enable ]] || enabled=false
         dockerAccountMutate \
@@ -376,6 +387,7 @@ dockerAccountCommand() {
         dockerLockInstalledDeployment || return "${PADM_DOCKER_RC_LOCK}"
         specFile=$(dockerAccountSpecFile) || return $?
         dockerAccountFind "${specFile}" "${accountId}" || return "${PADM_DOCKER_RC_USAGE}"
+        dockerAccountRequireLocal "${specFile}" "${accountId}" || return $?
         if [[ "${action}" == delete ]]; then
             dockerAccountMutate \
                 'if (.accounts | length) == 1 then del(.accounts) else .accounts |= map(select(.id != $id)) end' \

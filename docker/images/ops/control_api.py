@@ -72,7 +72,11 @@ def validate_state(state):
         raise ValueError("控制 token 摘要不合法")
     if type(state["revision"]) is not int or not 0 <= state["revision"] <= 9007199254740991:
         raise ValueError("控制版本序号不合法")
-    accounts = state["accounts"]
+    validate_accounts(state["accounts"])
+    return state
+
+
+def validate_accounts(accounts):
     if not isinstance(accounts, list) or len(accounts) > 256:
         raise ValueError("控制账号集合超出边界")
     ids, credentials, passwords, ss_keys = set(), set(), set(), set()
@@ -102,7 +106,11 @@ def validate_state(state):
             if ss in ss_keys:
                 raise ValueError("控制 Shadowsocks 凭据重复")
             ss_keys.add(ss)
-    return state
+    # 同账号可沿用旧 ID/UUID；不同账号不能占用彼此的身份。
+    for account in accounts:
+        if account["uuid"] in ids and account["uuid"] != account["id"]:
+            raise ValueError("控制账号身份与其他认证 UUID 冲突")
+    return accounts
 
 
 def read_state(path):

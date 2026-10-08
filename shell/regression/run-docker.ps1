@@ -39,7 +39,7 @@ $files = @(
     ([string]::Join("`n", @($listed)) -split "`0") |
         Where-Object {
             $_ -and $_ -notmatch '(^|/)\.tmp-[^/]*(/|$)' -and
-            (Test-Path -LiteralPath (Join-Path $root $_) -PathType Leaf)
+            [IO.File]::Exists([IO.Path]::Combine($root, $_))
         } | Sort-Object -Unique
 )
 if ($files.Count -eq 0) { throw 'The source snapshot is empty.' }

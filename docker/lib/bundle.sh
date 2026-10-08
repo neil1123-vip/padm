@@ -75,7 +75,7 @@ dockerBundleSourceIsComplete() {
         shell/core/stats_grpc.sh; do
         [[ -f "${sourceRoot}/${required}" && ! -L "${sourceRoot}/${required}" ]] || return 1
     done
-    for required in renewal schedule geo; do
+    for required in renewal schedule geo control-sync; do
         if grep -qF "/${required}.sh\"" "${sourceRoot}/docker/lib/services.sh"; then
             [[ -f "${sourceRoot}/docker/lib/${required}.sh" &&
                 ! -L "${sourceRoot}/docker/lib/${required}.sh" ]] || return 1
@@ -304,6 +304,9 @@ dockerBundleSupportsSpec() {
           else true end) and
           (if $spec[0] | has("accounts") then
             $schema[0]["x-padm-accounts"] == true
+          else true end) and
+          (if $spec[0] | has("control_sync") then
+            $schema[0]["x-padm-control-sync"] == true
           else true end) and
           ($features | length) == 1 and ($features[0].protocols | type == "array") and
           all($spec[0].core.protocols[];

@@ -7,11 +7,41 @@
   "x-padm-reality-stream-host-website": true,
   "x-padm-reality-stream-host-network": true,
   "x-padm-accounts": true,
+  "x-padm-control-sync": true,
   "additionalProperties": false,
   "required": ["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"],
   "properties": {
     "schema_version": {
       "enum": [1, 2, 3]
+    },
+    "control_sync": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "role", "node_id", "controller_id", "listener_ids", "last_revision", "last_digest", "managed_accounts"],
+      "properties": {
+        "schema_version": {"const": 1},
+        "role": {"const": "controlled"},
+        "node_id": {"$ref": "#/$defs/uuid"},
+        "controller_id": {"$ref": "#/$defs/uuid"},
+        "listener_ids": {"$ref": "#/properties/accounts/items/properties/listeners"},
+        "last_revision": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "integer", "minimum": 0, "maximum": 9007199254740991}
+          ]
+        },
+        "last_digest": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "string", "pattern": "^[a-f0-9]{64}(?![\\s\\S])"}
+          ]
+        },
+        "managed_accounts": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {"$ref": "#/properties/accounts/items"}
+        }
+      }
     },
     "accounts": {
       "type": "array",
@@ -267,6 +297,10 @@
     }
   },
   "allOf": [
+    {
+      "if": {"required": ["control_sync"]},
+      "then": {"properties": {"schema_version": {"const": 3}}}
+    },
     {
       "if": {"required": ["accounts"]},
       "then": {"properties": {"schema_version": {"const": 3}}}

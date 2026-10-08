@@ -59,6 +59,12 @@ state = copy.deepcopy(STATE)
 state["accounts"] *= 2
 rejected(api.validate_state, state)
 state = copy.deepcopy(STATE)
+other = copy.deepcopy(state["accounts"][0])
+other.update(id=state["accounts"][0]["uuid"], uuid="66666666-6666-4666-8666-666666666666",
+             password="c" * 48)
+state["accounts"].append(other)
+rejected(api.validate_state, state)
+state = copy.deepcopy(STATE)
 state["accounts"][0]["password"] = "Compatible.-~@+=:Password"
 state["accounts"][0]["uuid"] = state["accounts"][0]["id"]
 validator.validate(state)
