@@ -340,8 +340,15 @@ validateAccessIPList() {
     while read -r item; do
         item=$(echo "${item}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
         [[ -z "${item}" ]] && continue
-        if [[ "${item}" != "cn" && ! "${item}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}(/[0-9]{1,2})?$ && ! "${item}" =~ ^[0-9a-f:]+(/[0-9]{1,3})?$ ]]; then
-            return 1
+        if [[ "${item}" != "cn" ]]; then
+            if [[ "${item}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}(/[0-9]{1,2})?$ ]]; then
+                padmIsValidHostName "${item%%/*}" || return 1
+                [[ "${item}" != */* ]] || ((10#${item##*/} <= 32)) || return 1
+            else
+                [[ "${item}" =~ ^[0-9a-f:]+(/[0-9]{1,3})?$ ]] &&
+                    padmIsValidIPv6Address "${item%%/*}" || return 1
+                [[ "${item}" != */* ]] || ((10#${item##*/} <= 128)) || return 1
+            fi
         fi
         if [[ "${seen}" != *",${item},"* ]]; then
             seen="${seen}${item},"

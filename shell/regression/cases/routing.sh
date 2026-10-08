@@ -451,7 +451,15 @@ JSON
     addXrayIPRouting blackhole_ip_out outboundTag "cn,1.1.1.0/24"
     jq -e '.routing.rules[] | select(.outboundTag == "blackhole_ip_out") | .ip == ["geoip:cn", "1.1.1.0/24"]' "${configPath}09_routing.json" >/dev/null
     [[ "$(validateAccessIPList '1.1.1.1, 1.1.1.1,2001:db8::/32,cn')" == "1.1.1.1,2001:db8::/32,cn" ]]
-    ! validateAccessIPList 'bad-ip' >/dev/null
+    [[ "$(validateAccessIPList '0.0.0.0/0,255.255.255.255/32,::/0,::1,2001:DB8::/128,1:2:3:4:5:6:7:8/128,CN,cn')" == \
+        '0.0.0.0/0,255.255.255.255/32,::/0,::1,2001:db8::/128,1:2:3:4:5:6:7:8/128,cn' ]]
+    local invalidIP
+    for invalidIP in 'bad-ip' '999.256.1.1/99,2001:::bad/999' '256.0.0.1' '1.2.3.4/33' \
+        '1.2.3.4/-1' '1.2.3.4/24/1' '1.2.3' '1.2.3.4.5' '2001:::bad' '2001::db8::1' \
+        '2001:db8:1:2:3:4:5' '2001:db8:1:2:3:4:5:6:7' '2001:12345::1' '2001:db8::/129' \
+        '2001:db8::/32/1' '2001:db8::/x' ':2001:db8::1' '2001:db8::1:' 'deadbeef' '::ffff:1.2.3.4'; do
+        ! validateAccessIPList "${invalidIP}" >/dev/null || return 1
+    done
 }
 
 runXrayDNSCustomConfigRegression() (
