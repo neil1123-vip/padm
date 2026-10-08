@@ -62,6 +62,7 @@ dockerMenuRun() {
         ( ( "${1:-}" == subscription || "${1:-}" == share ) &&
           "${2:-}" != list && "${2:-}" != content && "${2:-}" != links ) ||
         ( "${1:-}" == tls && "${2:-}" == manage ) ||
+        ( "${1:-}" == control && "${2:-}" == init ) ||
         ( "${1:-}" == protocol && ( "${2:-}" == select-target ||
           "${2:-}" == scan-targets || "${2:-}" == scan-targets-asn ) ) ]]; then
         # 交互配置必须与菜单共用前台进程组，否则后台 read 会收到 SIGTTIN。
@@ -525,6 +526,33 @@ dockerMenuGeo() {
     done
 }
 
+dockerMenuControl() {
+    local choice address port peer
+    while :; do
+        DOCKER_MENU_SIGNAL=0
+        printf '\nDocker 控制连接\n'
+        printf '%s\n' '1. 查看角色状态' '2. 初始化主控' '0. 返回'
+        printf '请选择: '
+        if ! IFS= read -r choice; then
+            [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
+            return 0
+        fi
+        case "${choice}" in
+        0) return 0 ;;
+        1) dockerMenuRun control status || true ;;
+        2)
+            dockerSetupRead address '主控 WireGuard IPv4（0 返回）: ' &&
+                [[ -n "${address}" ]] &&
+                dockerSetupRead port '控制监听端口 [18443，0 返回]: ' 18443 &&
+                dockerSetupRead peer '对端 WireGuard IPv4（0 返回）: ' &&
+                [[ -n "${peer}" ]] || continue
+            dockerMenuRun control init --address "${address}" --port "${port}" --peer-address "${peer}" || true
+            ;;
+        *) printf '无效选项，请重新选择。\n' ;;
+        esac
+    done
+}
+
 dockerMenu() {
     local choice
     if [[ "$#" -ne 0 || ! -t 0 || ! -t 1 ]]; then
@@ -553,6 +581,7 @@ dockerMenu() {
             '12. 业务备份恢复' \
             '13. 核心升级评估' \
             '14. Xray Geo 数据' \
+            '15. 控制连接' \
             '0. 退出'
         printf '请选择: '
         if ! IFS= read -r choice; then
@@ -577,6 +606,7 @@ dockerMenu() {
         12) dockerMenuBusiness ;;
         13) dockerMenuRun assess || true ;;
         14) dockerMenuGeo ;;
+        15) dockerMenuControl ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

@@ -38,6 +38,8 @@ dockerUsage() {
    padm-docker subscription content <分享组 ID>
    padm-docker subscription links <分享组 ID>
    padm-docker share <同上 subscription 命令>
+  padm-docker control status [--json]
+  padm-docker control init --address <WireGuard IPv4> --port <端口> --peer-address <对端 IPv4> [--yes]
   padm-docker business backup <绝对 JSON 路径>
   padm-docker business preview <备份 JSON 路径> --strategy <merge|replace>
   padm-docker business restore <备份 JSON 路径> --strategy <merge|replace> --yes
@@ -423,6 +425,14 @@ dockerComposeRun() {
         ;;
     esac
     # 管理动作不接收交互输入，避免 Compose 吞掉调用方循环中的下一项。
+    if [[ -n "${DOCKER_COMPOSE_TIMEOUT:-}" ]]; then
+        [[ "${DOCKER_COMPOSE_TIMEOUT}" =~ ^[1-9][0-9]?$ &&
+            "${DOCKER_COMPOSE_TIMEOUT}" -le 30 ]] || {
+            dockerError 'Docker Compose 操作超时参数无效'
+            return "${PADM_DOCKER_RC_USAGE}"
+        }
+        commandArgs=(timeout --foreground -k 2 "${DOCKER_COMPOSE_TIMEOUT}" "${commandArgs[@]}")
+    fi
     "${commandArgs[@]}" "$@" "${extraArgs[@]}" </dev/null || {
         dockerError 'Docker Compose 操作失败'
         return "${PADM_DOCKER_RC_COMPOSE}"
@@ -1094,6 +1104,7 @@ dockerMain() {
     account) dockerAccountCommand "$@" ;;
     subscription | share) dockerSubscriptionCommand "$@" ;;
     business) dockerBusinessCommand "$@" ;;
+    control) dockerControlCommand "$@" ;;
     configure) dockerConfigureCommand "$@" ;;
     tls)
         case "${1:-}" in

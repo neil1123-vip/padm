@@ -342,7 +342,17 @@ Ordinary configuration cannot change controller identity, listener or authorizat
 No external sync CLI/menu, invitations or WireGuard connection wizard is connected yet.
 Focused fixtures cover candidate generation, installation, recovery and
 permissions; core/host actions are stubbed, not real two-node acceptance.
-Next are the remaining 4C.3 connectivity and management steps, followed by 4C.4 two-node acceptance.
+`padm-docker control status [--json]` and the Control connection menu expose redacted role state.
+Initialize a controller only on an already healthy managed single-peer WireGuard deployment:
+
+```bash
+padm-docker control init --address 10.77.0.1 --port 18443 --peer-address 10.77.0.2 --yes
+```
+
+The addresses must match the live interface and the unique peer's `/32` AllowedIPs.
+Initialization creates no keys, interfaces or routes, refuses an existing role, and leaves authorization disabled.
+Controller health checks the installed service; status exposes no tokens, accounts or digests.
+Next are invitations and the remaining 4C.3 connectivity steps, followed by 4C.4 two-node acceptance.
 Multi-server support remains `deferred`.
 See the [4C implementation checkpoints](../docker-menu-parity-plan.md#4c-多服务器控制后端).
 

@@ -10,6 +10,8 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/schedule.sh" || return 1
 source "$(dirname -- "${BASH_SOURCE[0]}")/geo.sh" || return 1
 # shellcheck source=/dev/null
 source "$(dirname -- "${BASH_SOURCE[0]}")/control-sync.sh" || return 1
+# shellcheck source=/dev/null
+source "$(dirname -- "${BASH_SOURCE[0]}")/control.sh" || return 1
 
 if [[ "${PADM_DOCKER_SERVICES_LOADED:-}" == "1" ]]; then
     return 0 2>/dev/null || exit 0

@@ -284,6 +284,50 @@ runGeoDriver() {
     targetReply 'Docker 管理菜单' $'0\n'
 }
 
+runControlDriver() {
+    local scenario=$1
+    local -A targetPrompts=()
+    targetReply 'Docker 管理菜单' $'15\n'
+    case "${scenario}" in
+    flow)
+        targetReply 'Docker 控制连接' $'1\n'
+        ;;
+    cancel)
+        targetReply 'Docker 控制连接' $'2\n'
+        targetReply '主控 WireGuard IPv4（0 返回）' $'0\n'
+        targetReply 'Docker 控制连接' $'2\n'
+        targetReply '主控 WireGuard IPv4（0 返回）' $'10.77.0.1\n'
+        targetReply '控制监听端口 [18443，0 返回]' $'0\n'
+        targetReply 'Docker 控制连接' $'2\n'
+        targetReply '主控 WireGuard IPv4（0 返回）' $'10.77.0.1\n'
+        targetReply '控制监听端口 [18443，0 返回]' $'\n'
+        targetReply '对端 WireGuard IPv4（0 返回）' $'0\n'
+        ;;
+    esac
+    targetReply 'Docker 控制连接' $'2\n'
+    targetReply '主控 WireGuard IPv4（0 返回）' $'10.77.0.1\n'
+    if [[ "${scenario}" == flow ]]; then
+        targetReply '控制监听端口 [18443，0 返回]' $'19443\n'
+    else
+        targetReply '控制监听端口 [18443，0 返回]' $'\n'
+    fi
+    if [[ "${scenario}" == input-eof ]]; then
+        targetReply '对端 WireGuard IPv4（0 返回）' $'\004'
+    else
+        targetReply '对端 WireGuard IPv4（0 返回）' $'10.77.0.2\n'
+        case "${scenario}" in
+        cancel) targetReply 'fixture-control-confirm [y/N]' $'n\n' ;;
+        confirm-eof) targetReply 'fixture-control-confirm [y/N]' $'\004' ;;
+        *) targetReply 'fixture-control-confirm [y/N]' $'y\n' ;;
+        esac
+    fi
+    if [[ "${scenario}" == failed ]]; then
+        targetReply 'Docker 控制连接' $'1\n'
+    fi
+    targetReply 'Docker 控制连接' $'0\n'
+    targetReply 'Docker 管理菜单' $'0\n'
+}
+
 runPty() {
     local name=$1 driver=$2 input=$3 entry=$4 actual=0 feederStatus=0 command pipe feeder
     local expected=0
@@ -361,6 +405,8 @@ runPty() {
             runTargetsDriver "${input}"
         elif [[ "${driver}" == geo ]]; then
             runGeoDriver "${input}"
+        elif [[ "${driver}" == control ]]; then
+            runControlDriver "${input}"
         elif [[ "${driver}" == accounts ]]; then
             local accountMenuCount=1
             printf '10\n' >&3
@@ -530,7 +576,7 @@ runPty protocols-unconfigured protocols cancel "${CLI}" menu
 grep -Fq 'Docker 协议与入口' "${CONTROL_LOG}" || fail 'protocol submenu was not reachable'
 [[ ! -e "${PADM_DOCKER_INSTALL_DIR}/deployment.json" ]] || fail 'unconfigured protocol menu wrote a deployment'
 
-# 隔离业务命令，只用真实 PTY 检查生产证书向导的确认门禁与参数分发。
+# 隔离业务命令，只用真实 PTY 检查生产菜单的确认门禁与参数分发。
 TLS_WIZARD_ROOT="${TEST_ROOT}/tls-wizard"
 TLS_WIZARD_CLI="${TEST_ROOT}/tls-wizard-cli.sh"
 TLS_WIZARD_ACTIONS="${TEST_ROOT}/tls-wizard.actions"
@@ -588,6 +634,24 @@ protocol)
 edit) recordAction "$@" ;;
 account) recordAction "$@" ;;
 assess) recordAction "$@" ;;
+control)
+    recordAction "$@"
+    case "${2:-}" in
+    status) printf 'fixture-control-status\n' ;;
+    init)
+        printf 'fixture-control-confirm [y/N]: '
+        if ! IFS= read -r confirmation; then
+            recordAction control-confirm eof
+            exit 2
+        fi
+        recordAction control-confirm "${confirmation}"
+        [[ "${confirmation}" == y ]] || exit 2
+        [[ "${CONTROL_INIT_STATUS:-0}" -eq 0 ]] || exit "${CONTROL_INIT_STATUS}"
+        recordAction control-commit
+        ;;
+    *) exit 2 ;;
+    esac
+    ;;
 geo)
     recordAction "$@"
     if [[ "${2:-}" == status ]]; then
@@ -623,6 +687,38 @@ printf '{"tls":{"domain":"ws.example.com"}}\n' >"${TLS_WIZARD_ROOT}/config/spec.
 : >"${TLS_WIZARD_ACTIONS}"
 runPty core-assessment menu $'13\n0\n' "${TLS_WIZARD_CLI}" menu
 [[ "$(<"${TLS_WIZARD_ACTIONS}")" == assess ]] || fail 'core assessment menu dispatched incorrect arguments'
+
+: >"${TLS_WIZARD_ACTIONS}"
+runPty control-dispatch control flow "${TLS_WIZARD_CLI}" menu
+for controlLabel in '15. 控制连接' '1. 查看角色状态' '2. 初始化主控' '0. 返回'; do
+    grep -Fq "${controlLabel}" "${CONTROL_LOG}" || fail "missing control menu item: ${controlLabel}"
+done
+[[ "$(<"${TLS_WIZARD_ACTIONS}")" == $'control status\ncontrol init --address 10.77.0.1 --port 19443 --peer-address 10.77.0.2\ncontrol-confirm y\ncontrol-commit' ]] ||
+    fail 'control menu dispatched incorrect arguments or bypassed the CLI confirmation'
+[[ "$(grep -Fc 'fixture-control-confirm [y/N]' "${CONTROL_LOG}")" -eq 1 ]] ||
+    fail 'control initialization did not confirm exactly once'
+for controlCase in cancel input-eof confirm-eof failed; do
+    : >"${TLS_WIZARD_ACTIONS}"
+    export CONTROL_INIT_STATUS=0
+    [[ "${controlCase}" != failed ]] || CONTROL_INIT_STATUS=17
+    runPty "control-${controlCase}" control "${controlCase}" "${TLS_WIZARD_CLI}" menu
+    expectedControl=
+    case "${controlCase}" in
+    cancel|confirm-eof|failed)
+        expectedControl='control init --address 10.77.0.1 --port 18443 --peer-address 10.77.0.2'
+        case "${controlCase}" in
+        cancel) expectedControl+=$'\ncontrol-confirm n' ;;
+        confirm-eof) expectedControl+=$'\ncontrol-confirm eof' ;;
+        failed) expectedControl+=$'\ncontrol-confirm y\ncontrol status' ;;
+        esac
+        ;;
+    esac
+    [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedControl}" ]] ||
+        fail "control ${controlCase} committed after cancellation or dispatched incorrect arguments"
+    [[ "${controlCase}" != failed ]] ||
+        grep -Fq '操作失败，退出码: 17' "${CONTROL_LOG}" || fail 'failed control initialization was not reported'
+done
+unset CONTROL_INIT_STATUS
 
 : >"${TLS_WIZARD_ACTIONS}"
 runPty geo-dispatch geo flow "${TLS_WIZARD_CLI}" menu

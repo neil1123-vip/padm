@@ -60,6 +60,7 @@ compose)
         exit 0
     fi
     printf '%s\n' "$*" >>"${FAKE_DOCKER_LOG:?}"
+    [[ "${mode}" != "compose-slow" ]] || exec sleep 30
     [[ "${mode}" != "compose-fail" ]]
     ;;
 ps)
@@ -326,7 +327,7 @@ runControl 13 broken-bundle "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" insta
 [[ "$(<"${DOCKER_ROOT}/data/sentinel")" == "keep" ]] || fail 'failed bundle refresh changed persistent data'
 
 for missing in docker/lib/reality-targets.sh shell/core/runtime.sh shell/core/reality_targets.sh shell/core/cores.sh \
-    docker/lib/schedule.sh docker/lib/geo.sh docker/lib/control-sync.sh; do
+    docker/lib/schedule.sh docker/lib/geo.sh docker/lib/control-sync.sh docker/lib/control.sh; do
     incompleteSource="${TEST_ROOT}/incomplete-${missing//\//-}"
     copyBundleFixture "${incompleteSource}"
     rm -f -- "${incompleteSource}/${missing}"
@@ -365,6 +366,17 @@ grep -q ' up -d --remove-orphans$' "${DOCKER_CALL_LOG}" || fail 'up did not remo
 grep -q ' down --remove-orphans$' "${DOCKER_CALL_LOG}" || fail 'down did not remove Compose orphans'
 grep -q ' restart$' "${DOCKER_CALL_LOG}" || fail 'restart did not call Compose restart'
 grep -q ' logs --tail 5$' "${DOCKER_CALL_LOG}" || fail 'logs arguments were not forwarded'
+
+# 使用生产 Compose 入口核验有界执行，不只断言调用方设置了超时变量。
+DOCKER_COMPOSE_TIMEOUT=10 runControl 0 compose-bounded "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" status
+for invalidTimeout in 0 31 invalid; do
+    DOCKER_COMPOSE_TIMEOUT=${invalidTimeout} runControl 2 compose-invalid-timeout \
+        "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" status
+done
+started=${SECONDS}
+FAKE_DOCKER_MODE=compose-slow DOCKER_COMPOSE_TIMEOUT=1 \
+    runControl 14 compose-timeout "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" status
+((SECONDS - started < 6)) || fail 'bounded Compose command did not terminate promptly'
 
 runControl 0 uninstall "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" uninstall
 [[ ! -e "${CLI_DIR}/padm-docker" && ! -L "${CLI_DIR}/padm-docker" ]] || fail 'uninstall kept the CLI link'

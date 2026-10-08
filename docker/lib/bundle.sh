@@ -75,7 +75,7 @@ dockerBundleSourceIsComplete() {
         shell/core/stats_grpc.sh; do
         [[ -f "${sourceRoot}/${required}" && ! -L "${sourceRoot}/${required}" ]] || return 1
     done
-    for required in renewal schedule geo control-sync; do
+    for required in renewal schedule geo control-sync control; do
         if grep -qF "/${required}.sh\"" "${sourceRoot}/docker/lib/services.sh"; then
             [[ -f "${sourceRoot}/docker/lib/${required}.sh" &&
                 ! -L "${sourceRoot}/docker/lib/${required}.sh" ]] || return 1

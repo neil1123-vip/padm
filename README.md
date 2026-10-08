@@ -375,7 +375,16 @@ token 过期、轮换与撤销立即生效，公开订阅服务不变。v3 受�
 不增加发布版本，账号内容变化才递增，回滚旧内容也发布为更高版本，不倒退同步序号。
 独立 Compose `control` 服务使用 host 网络、UID `10001`、零能力，无公开端口映射，
 只读挂载 `config/control` 并依赖 WireGuard 健康。普通配置不能更改主控身份、监听或授权。
-当前仍不开放外部同步 CLI/菜单，未接角色邀请或 WireGuard 连接向导；
+`padm-docker control status [--json]` 和菜单“控制连接”可查看脱敏角色状态。
+已有受管单 Peer WireGuard 运行健康时，可初始化主控：
+
+```bash
+padm-docker control init --address 10.77.0.1 --port 18443 --peer-address 10.77.0.2 --yes
+```
+
+地址必须与实际接口及唯一 Peer 的 `/32` AllowedIPs 一致；初始化不创建密钥、接口或路由，
+拒绝覆盖既有角色，默认授权关闭。主控健康反映已安装服务，不输出 token、账号或摘要。
+当前仍不开放外部同步 CLI/菜单，未接邀请或 WireGuard 连接向导；
 定向夹具覆盖候选、安装、恢复和权限，核心/宿主动作是桩，不代替真实双节点验收。
 下一步为 4C.3 剩余连接与管理入口，再做 4C.4 双节点验收，多服务器保持 `deferred`。阶段边界见
 [4C 实施计划](documents/docker-menu-parity-plan.md#4c-多服务器控制后端)。
