@@ -2461,14 +2461,11 @@ dockerValidateCandidate() {
     done < <(jq -r '.[]' <<<"${tlsDomains}")
     if jq -e '.services | has("nginx")' "${candidate}/compose.json" >/dev/null; then
         # 仅解析候选配置，不启动候选核心；实际后端仍由项目网络解析。
-        if [[ -n "${DOCKER_ASSESS_PROJECT:-}" ]] ||
-            jq -e '.reality_stream != null' "${specFile}" >/dev/null; then
-            jq '{services:{nginx:{extra_hosts:
-              ((.services.nginx.extra_hosts // []) +
-                [.services.nginx.depends_on | keys[] | . + ":127.0.0.1"])}}}' \
-                "${candidate}/compose.json" >"${nginxCheckFile}" || return 1
-            nginxCheckArgs=(--file "${nginxCheckFile}")
-        fi
+        jq '{services:{nginx:{extra_hosts:
+          ((.services.nginx.extra_hosts // []) +
+            [.services.nginx.depends_on | keys[] | . + ":127.0.0.1"])}}}' \
+            "${candidate}/compose.json" >"${nginxCheckFile}" || return 1
+        nginxCheckArgs=(--file "${nginxCheckFile}")
         dockerCandidateCompose "${candidate}" "${nginxCheckArgs[@]}" run --rm --no-deps nginx -t \
             >/dev/null || nginxStatus=$?
         rm -f -- "${nginxCheckFile}" || return 1

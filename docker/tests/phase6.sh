@@ -839,6 +839,15 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
     }
     dockerTlsValidateCandidate() { printf 'tls %s\n' "$*" >>"${calls}"; [[ "${tlsFailure:-0}" == 0 ]]; }
     assessmentTags=with_quic,with_v2ray_api
+    (
+        DOCKER_ASSESS_PROJECT=
+        # 普通初装同样不启动后端，校验 overlay 成功和失败都必须清理。
+        dockerValidateCandidate "${candidate}/config/spec.json" "${candidate}"
+        [[ ! -e "${candidate}/compose.nginx-check.json" ]]
+        assessmentFailure='nginx -t'
+        ! dockerValidateCandidate "${candidate}/config/spec.json" "${candidate}"
+        [[ ! -e "${candidate}/compose.nginx-check.json" ]]
+    )
     dockerAssessCandidate "${candidate}" >"${assessmentRoot}/result"
     grep -q '核心 sing-box: sing-box version' "${assessmentRoot}/result"
     grep -q 'TLS 校验: 通过' "${assessmentRoot}/result"
