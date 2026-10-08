@@ -514,8 +514,16 @@ runPty() {
                 waitForText '私钥文件' "${CONTROL_LOG}" || exit 15
                 printf '\004' >&3
             elif [[ "${input}" == renewal-eof ]]; then
-                printf '6\n\nadmin@example.com\ndns_cf\n' >&3
+                printf '6\n\nadmin@example.com\n1\ndns_cf\n' >&3
                 waitForText 'DNS 凭据文件' "${CONTROL_LOG}" || exit 17
+                printf '\004' >&3
+            elif [[ "${input}" == standalone-eof ]]; then
+                printf '3\n\nadmin@example.com\n2\n' >&3
+                waitForText '确认执行证书操作？[y/N]' "${CONTROL_LOG}" || exit 17
+                printf '\004' >&3
+            elif [[ "${input}" == method-eof ]]; then
+                printf '3\n\nadmin@example.com\n' >&3
+                waitForText '验证方式 [1=DNS-01' "${CONTROL_LOG}" || exit 17
                 printf '\004' >&3
             else
                 printf '%s' "${input}" >&3
@@ -993,12 +1001,14 @@ done
 unset GEO_STATUS GEO_UPDATE_STATUS GEO_UPDATE_WAIT GEO_UPDATE_PID
 
 for tlsCase in cancel final-no eof validate install issue renew \
-    renewal-status renewal-enable renewal-disable renewal-final-no renewal-eof; do
+    renewal-status renewal-enable renewal-disable renewal-final-no renewal-eof \
+    standalone-issue standalone-renew standalone-enable standalone-final-no \
+    standalone-renew-final-no standalone-enable-final-no standalone-eof method-cancel method-eof; do
     : >"${TLS_WIZARD_ACTIONS}"
     expectedAction=
     case "${tlsCase}" in
     cancel) input=$'0\n' ;;
-    final-no) input=$'3\n\nadmin@example.com\ndns_cf\ncredentials.env\nn\n' ;;
+    final-no) input=$'3\n\nadmin@example.com\n1\ndns_cf\ncredentials.env\nn\n' ;;
     eof) input=eof ;;
     validate) input=$'1\n\ny\n'; expectedAction='validate --domain ws.example.com' ;;
     install)
@@ -1007,21 +1017,50 @@ for tlsCase in cancel final-no eof validate install issue renew \
         ;;
     issue|renew)
         if [[ "${tlsCase}" == issue ]]; then choice=3; else choice=4; fi
-        printf -v input '%s\n\nadmin@example.com\ndns_cf\ncredentials.env\ny\n' "${choice}"
+        printf -v input '%s\n\nadmin@example.com\n1\ndns_cf\ncredentials.env\ny\n' "${choice}"
         expectedAction="acme ${tlsCase} --domain ws.example.com --email admin@example.com --dns dns_cf --credentials credentials.env"
         ;;
     renewal-status) input=$'5\n\ny\n'; expectedAction='schedule status' ;;
     renewal-enable)
-        input=$'6\n\nadmin@example.com\ndns_cf\ncredentials.env\ny\n'
+        input=$'6\n\nadmin@example.com\n1\ndns_cf\ncredentials.env\ny\n'
         expectedAction='schedule enable --domain ws.example.com --email admin@example.com --dns dns_cf --credentials credentials.env'
         ;;
     renewal-disable) input=$'7\n\ny\n'; expectedAction='schedule disable --domain ws.example.com' ;;
-    renewal-final-no) input=$'6\n\nadmin@example.com\ndns_cf\ncredentials.env\nn\n' ;;
+    renewal-final-no) input=$'6\n\nadmin@example.com\n1\ndns_cf\ncredentials.env\nn\n' ;;
     renewal-eof) input=renewal-eof ;;
+    standalone-issue|standalone-renew|standalone-enable|standalone-final-no|standalone-renew-final-no|standalone-enable-final-no)
+        choice=3
+        action=issue
+        case "${tlsCase}" in
+        standalone-renew*) choice=4; action=renew ;;
+        standalone-enable*) choice=6; action=enable ;;
+        esac
+        answer=y
+        [[ "${tlsCase}" != *final-no ]] || answer=n
+        printf -v input '%s\n\nadmin@example.com\n2\n%s\n' "${choice}" "${answer}"
+        if [[ "${answer}" == y ]]; then
+            if [[ "${choice}" == 6 ]]; then
+                expectedAction='schedule enable --domain ws.example.com --email admin@example.com --standalone'
+            else
+                expectedAction="acme ${action} --domain ws.example.com --email admin@example.com --standalone"
+            fi
+        fi
+        ;;
+    standalone-eof) input=standalone-eof ;;
+    method-cancel) input=$'3\n\nadmin@example.com\n0\n' ;;
+    method-eof) input=method-eof ;;
     esac
     runPty "tls-${tlsCase}" tls "${input}" "${TLS_WIZARD_CLI}" menu
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedAction}" ]] ||
         fail "TLS ${tlsCase} bypassed confirmation or dispatched incorrect arguments"
+    if [[ "${tlsCase}" == standalone-* ]]; then
+        grep -Fq 'HTTP-01 需要公网 80 可达' "${CONTROL_LOG}" ||
+            fail 'standalone 确认前没有说明公网 80 与短暂停机影响'
+        [[ "$(grep -Fc '确认执行证书操作？[y/N]' "${CONTROL_LOG}")" == 1 ]] ||
+            fail 'standalone 操作没有恰好确认一次'
+        ! grep -Eq 'DNS provider|DNS 凭据文件' "${CONTROL_LOG}" ||
+            fail 'standalone 仍要求 DNS 凭据'
+    fi
 done
 
 : >"${TLS_WIZARD_ACTIONS}"

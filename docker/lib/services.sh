@@ -31,6 +31,11 @@ DOCKER_CONFIG_RELEASE_INPUTS=
 DOCKER_TLS_CANDIDATE=
 DOCKER_TLS_BACKUP=
 DOCKER_TLS_SWITCHED=0
+DOCKER_ACME_STOPPED=()
+DOCKER_ACME_CONTAINER=
+DOCKER_ACME_PORT_PUBLISH=0
+DOCKER_ACME_RECOVERY=
+DOCKER_ACME_RUNNING=null
 
 dockerConfigureSchemaFile() {
     printf '%s\n' "${DOCKER_BUNDLE_SOURCE_ROOT}/docker/contracts/configure.schema.json"
@@ -3493,10 +3498,15 @@ dockerCreateTlsCandidate() {
 
 dockerCleanupTlsCandidate() {
     local root candidate=${DOCKER_TLS_CANDIDATE:-}
+    [[ "${#DOCKER_ACME_STOPPED[@]}" == 0 && -z "${DOCKER_ACME_CONTAINER:-}" ]] || {
+        dockerError 'ACME 服务尚未恢复，保留候选账户以便重试'
+        return 1
+    }
     [[ -n "${candidate}" ]] || return 0
     root=$(dockerInstallRoot) || return 1
     [[ ! -d "${candidate}" ]] || dockerRemoveManagedTree "${root}" "${candidate}" || return 1
     DOCKER_TLS_CANDIDATE=
+    DOCKER_ACME_RUNNING=null
 }
 
 dockerTlsValidateCandidate() {
@@ -3760,6 +3770,10 @@ dockerBackupTlsFiles() {
     local domain=$1 candidate=${2:-} root backup extension source consumers
     root=$(dockerInstallRoot) || return 1
     consumers=$(dockerTlsConsumers "${domain}") || return 1
+    if [[ "${DOCKER_ACME_RUNNING}" != null ]]; then
+        consumers=$(jq -c --argjson running "${DOCKER_ACME_RUNNING}" \
+            '[.[] | select(. as $service | $running | index($service) != null)]' <<<"${consumers}") || return 1
+    fi
     dockerTrafficSafePath "${root}" "${root}/secrets/tls" &&
         dockerTrafficSafePath "${root}" "${root}/backups" || return 1
     backup=$(mktemp -d "${root}/backups/tls.XXXXXX") || return 1
@@ -4002,11 +4016,233 @@ dockerTlsInstallCommand() {
     dockerCleanupTlsCandidate || return "${PADM_DOCKER_RC_STATE}"
 }
 
+dockerAcmeChallengeRestore() {
+    local id ids failed=0
+    local -a pending=()
+    if [[ -n "${DOCKER_ACME_CONTAINER:-}" ]]; then
+        ids=$(docker ps -aq --filter "label=io.padm.challenge=${DOCKER_ACME_CONTAINER}" \
+            --filter "label=io.padm.project=${PADM_DOCKER_PROJECT}") || return 1
+        while IFS= read -r id; do
+            [[ -n "${id}" ]] || continue
+            [[ "${id}" =~ ^[a-f0-9]{12,64}$ ]] &&
+                docker rm -f "${id}" >/dev/null || failed=1
+        done <<<"${ids}"
+        if [[ "${failed}" != 0 ]]; then
+            dockerError "ACME 挑战容器清理失败，恢复记录: ${DOCKER_ACME_RECOVERY:-}"
+        fi
+        [[ "${failed}" != 0 ]] || DOCKER_ACME_CONTAINER=
+    fi
+    # 挑战容器仍占端口时不能启动原服务，也不能丢弃恢复记录。
+    [[ "${failed}" == 0 ]] || return 1
+    for id in "${DOCKER_ACME_STOPPED[@]}"; do
+        if ! docker start "${id}" >/dev/null ||
+            ! docker container inspect "${id}" | jq -e '
+              length == 1 and .[0].State.Running == true and .[0].State.Restarting != true
+            ' >/dev/null; then
+            pending+=("${id}")
+            failed=1
+        fi
+    done
+    DOCKER_ACME_STOPPED=("${pending[@]}")
+    if [[ "${failed}" == 0 ]]; then
+        [[ -z "${DOCKER_ACME_RECOVERY}" ]] || rm -f -- "${DOCKER_ACME_RECOVERY}" || return 1
+        DOCKER_ACME_RECOVERY=
+        DOCKER_ACME_STOPPED=()
+        DOCKER_ACME_PORT_PUBLISH=0
+    else
+        dockerError "ACME 挑战服务恢复失败，已保留容器恢复记录: ${DOCKER_ACME_RECOVERY:-}"
+    fi
+    return "${failed}"
+}
+
+dockerAcmeRuntimeSnapshot() {
+    local root ids containers consumers
+    local -a runningIds=()
+    root=$(dockerInstallRoot) || return 1
+    consumers=$(dockerTlsConsumers "${1}") || return 1
+    ids=$(docker ps -q) || return 1
+    while IFS= read -r id; do
+        [[ -n "${id}" ]] || continue
+        [[ "${id}" =~ ^[a-f0-9]{12,64}$ ]] || return 1
+        runningIds+=("${id}")
+    done <<<"${ids}"
+    DOCKER_ACME_RUNNING='[]'
+    [[ "${#runningIds[@]}" -gt 0 ]] || return 0
+    containers=$(docker container inspect "${runningIds[@]}") || return 1
+    DOCKER_ACME_RUNNING=$(jq -ce --arg root "${root}" --argjson consumers "${consumers}" '
+      map(select(.Config.Labels["com.docker.compose.project"] == "padm-docker" and
+        .Config.Labels["com.docker.compose.project.working_dir"] == $root)) |
+      if all(.[]; .State.Running == true and
+        .Config.Labels["io.padm.mode"] == "docker" and
+        .Config.Labels["io.padm.project"] == "padm-docker")
+      then [.[] | .Config.Labels["com.docker.compose.service"] |
+        select(. as $service | $consumers | index($service) != null)] | unique
+      else error("运行容器归属漂移") end
+    ' <<<"${containers}") || return 1
+}
+
+dockerAcmePortOwners() {
+    local ids id containers
+    local -a runningIds=()
+    ids=$(docker ps -q) || return 1
+    while IFS= read -r id; do
+        [[ -n "${id}" ]] || continue
+        [[ "${id}" =~ ^[a-f0-9]{12,64}$ ]] || return 1
+        runningIds+=("${id}")
+    done <<<"${ids}"
+    [[ "${#runningIds[@]}" -gt 0 ]] || { printf '[]\n'; return 0; }
+    containers=$(docker container inspect "${runningIds[@]}") || return 1
+    # Docker 的 publish 过滤不是宿主端口证明，必须读取实际 HostPort。
+    jq -ce 'map(select(.State.Running == true and
+      any(.HostConfig.PortBindings // {} | to_entries[];
+        (.key | endswith("/tcp")) and any(.value[]?; .HostPort == "80"))))' <<<"${containers}"
+}
+
+dockerAcmeHostPortOwned() {
+    local owners=$1 listeners line pid arguments ip port
+    dockerTcpPortIsListening 80 || return 0
+    command -v ss >/dev/null || {
+        dockerError '缺少 ss，不能确认宿主 80 端口进程归属'
+        return 1
+    }
+    listeners=$(ss -H -ltnp 'sport = :80') || return 1
+    [[ -n "${listeners}" ]] || return 1
+    while IFS= read -r line; do
+        [[ "${line}" =~ users:\(\(\"docker-proxy\",pid=([0-9]+),fd=[0-9]+\)\)$ ]] || return 1
+        pid=${BASH_REMATCH[1]}
+        [[ -f "/proc/${pid}/cmdline" ]] || return 1
+        arguments=$(tr '\0' '\n' <"/proc/${pid}/cmdline") || return 1
+        [[ "$(sed -n '/^-proto$/{n;p;}' <<<"${arguments}")" == tcp &&
+            "$(sed -n '/^-host-port$/{n;p;}' <<<"${arguments}")" == 80 ]] || return 1
+        ip=$(sed -n '/^-container-ip$/{n;p;}' <<<"${arguments}") || return 1
+        port=$(sed -n '/^-container-port$/{n;p;}' <<<"${arguments}") || return 1
+        jq -e --arg ip "${ip}" --arg port "${port}/tcp" '
+          any(.[]; any(.NetworkSettings.Networks[]; .IPAddress == $ip or .GlobalIPv6Address == $ip) and
+            any(.HostConfig.PortBindings[$port][]?; .HostPort == "80"))
+        ' <<<"${owners}" >/dev/null || return 1
+    done <<<"${listeners}"
+}
+
+dockerAcmeChallengePrepare() {
+    local provider=$1 candidate=$2 root owners container service image
+    [[ "${provider}" == standalone ]] || return 0
+    [[ "${#DOCKER_ACME_STOPPED[@]}" == 0 && "${DOCKER_ACME_PORT_PUBLISH}" == 0 ]] || return 1
+    root=$(dockerInstallRoot) || return 1
+    dockerTrafficSafePath "${root}" "${candidate}" &&
+        [[ -d "${candidate}" && ! -L "${candidate}" ]] || return 1
+    owners=$(dockerAcmePortOwners) || return 1
+    while IFS= read -r container; do
+        [[ -n "${container}" ]] || continue
+        container="[${container}]"
+        jq -e 'length == 1 and .[0].State.Running == true' <<<"${container}" >/dev/null || return 1
+        dockerTrafficSafePath "${root}" "${root}/config/spec.json" &&
+            dockerTrafficSafePath "${root}" "${root}/compose.json" &&
+            dockerTrafficSafePath "${root}" "${root}/deployment.json" &&
+            dockerConfigureSpecValidate "${root}/config/spec.json" &&
+            dockerManagedSpecMatchesDeployment "${root}/config/spec.json" \
+                "${root}/deployment.json" "${root}/images.env" &&
+            cmp -s -- "${root}/compose.json" \
+                <(dockerGenerateCompose "${root}/config/spec.json" /dev/stdout) || return 1
+        service=$(jq -er '.[0].Config.Labels["com.docker.compose.service"]' <<<"${container}") || return 1
+        case "${service}" in xray|sing-box|nginx) ;; *) return 1 ;; esac
+        image=$(jq -er --arg service "${service}" '.images[$service]' "${root}/config/spec.json") || return 1
+        jq -e --arg root "${root}" --arg service "${service}" --arg image "${image}" \
+            --slurpfile deployment "${root}/deployment.json" --slurpfile compose "${root}/compose.json" '
+          .[0] as $c | $c.Config.Labels as $labels |
+          $labels["com.docker.compose.project"] == "padm-docker" and
+          $labels["com.docker.compose.project.working_dir"] == $root and
+          $labels["com.docker.compose.project.config_files"] == ($root + "/compose.json") and
+          $labels["io.padm.mode"] == "docker" and $labels["io.padm.project"] == "padm-docker" and
+          $labels["io.padm.component"] == $service and $c.Config.Image == $image and
+          $c.HostConfig.NetworkMode != "host" and
+          any($deployment[0].listeners[]; .service == $service and .public_port == 80 and .transport == "tcp") and
+          all($c.HostConfig.PortBindings | to_entries[]; . as $binding |
+            all($binding.value[]; . as $host |
+              any($compose[0].services[$service].ports[];
+                . == ((if ($host.HostIp | contains(":")) then "[" + $host.HostIp + "]"
+                  else ($host.HostIp // "0.0.0.0") end) + ":80:" + $binding.key)) or $host.HostPort != "80")) and
+          ($c.Mounts | map(select(.Type == "bind") | {source:.Source,target:.Destination,read_only:(.RW | not)}) |
+            sort_by(.target)) ==
+          ($compose[0].services[$service].volumes |
+            map({source:(.source | sub("^\\$\\{PADM_DOCKER_ROOT\\}"; $root)),target,read_only}) | sort_by(.target))
+        ' <<<"${container}" >/dev/null || {
+            dockerError '80 端口容器不属于当前受管部署，未停止任何服务'
+            return 1
+        }
+    done < <(jq -c '.[]' <<<"${owners}")
+    dockerAcmeHostPortOwned "${owners}" || {
+        dockerError '宿主 80 端口存在外部或无法归属的监听，未停止任何服务'
+        return 1
+    }
+    if [[ "$(jq 'length' <<<"${owners}")" != 0 ]]; then
+        printf 'HTTP-01 临时暂停 80 端口服务: %s；同容器其它端口也会短暂停机。\n' \
+            "$(jq -r 'map(.Config.Labels["com.docker.compose.service"]) | unique | join(",")' <<<"${owners}")"
+        # 停止前登记，部分停止失败或信号到达时仍恢复全部原运行容器。
+        DOCKER_ACME_RECOVERY="${candidate}/challenge.json"
+        jq '[.[] | {id:.Id,service:.Config.Labels["com.docker.compose.service"]}]' \
+            <<<"${owners}" >"${DOCKER_ACME_RECOVERY}" &&
+            chmod 0600 "${DOCKER_ACME_RECOVERY}" || return 1
+        mapfile -t DOCKER_ACME_STOPPED < <(jq -r '.[].Id' <<<"${owners}")
+        docker stop "${DOCKER_ACME_STOPPED[@]}" >/dev/null || {
+            dockerAcmeChallengeRestore || true
+            return 1
+        }
+    fi
+    owners=$(dockerAcmePortOwners) || {
+        dockerAcmeChallengeRestore || true
+        return 1
+    }
+    if dockerTcpPortIsListening 80 || [[ "${owners}" != '[]' ]]; then
+        dockerError '挑战前 80 端口未完全释放，正在恢复原运行容器'
+        dockerAcmeChallengeRestore || true
+        return 1
+    fi
+    DOCKER_ACME_PORT_PUBLISH=1
+}
+
+dockerAcmeRenewProbe() {
+    local image=$1 credentials=$2 account=$3 output=$4 domain=$5 config hook status=0
+    shift 5
+    config="${account}/${domain}/${domain}.conf"
+    [[ -f "${config}" ]] || config="${account}/${domain}_ecc/${domain}.conf"
+    [[ -f "${config}" && ! -L "${config}" &&
+        "$(grep -c '^Le_PreHook=' "${config}")" -le 1 ]] || return 1
+    hook=$(grep '^Le_PreHook=' "${config}" || true)
+    # 用工具自己的到期及 ARI 判断，只在真正进入挑战时留下无秘密标记。
+    sed '/^Le_PreHook=/d' "${config}" >"${output}/renew-probe.conf" || return 1
+    printf "Le_PreHook='printf due > /var/lib/padm/tls-output/renew.due; exit 1'\n" \
+        >>"${output}/renew-probe.conf" || return 1
+    cp -- "${output}/renew-probe.conf" "${config}" || return 1
+    if dockerAcmeRun "${image}" "${credentials}" "${account}" "${output}" \
+        --renew -d "${domain}" "$@" >/dev/null 2>&1; then status=0; else status=$?; fi
+    sed '/^Le_PreHook=/d' "${config}" >"${output}/renew-probe.conf" || return 1
+    [[ -z "${hook}" ]] || printf '%s\n' "${hook}" >>"${output}/renew-probe.conf" || return 1
+    cp -- "${output}/renew-probe.conf" "${config}" &&
+        rm -f -- "${output}/renew-probe.conf" || return 1
+    if [[ -f "${output}/renew.due" && ! -L "${output}/renew.due" &&
+        "$(<"${output}/renew.due")" == due && "${status}" != 0 ]]; then
+        rm -f -- "${output}/renew.due" || return 1
+        return 0
+    fi
+    [[ "${status}" != 2 ]] || return 2
+    return 1
+}
+
 dockerAcmeRun() {
     local image=$1 credentials=$2 acmeData=$3 output=$4
+    local status input=/dev/null
+    local -a ports=() containerArgs=()
     shift 4
-    dockerRenewalCredentialsValidate "${credentials}" || return 1
-    docker run --rm -i --read-only --cap-drop ALL \
+    if [[ -n "${credentials}" ]]; then
+        dockerRenewalCredentialsValidate "${credentials}" || return 1
+        input=${credentials}
+    fi
+    if [[ "${DOCKER_ACME_PORT_PUBLISH}" == 1 ]]; then
+        ports=(--publish 0.0.0.0:80:8080/tcp --publish '[::]:80:8080/tcp')
+        DOCKER_ACME_CONTAINER="padm-acme-${BASHPID:-$$}-${RANDOM}"
+        containerArgs=(--name "${DOCKER_ACME_CONTAINER}" --label "io.padm.challenge=${DOCKER_ACME_CONTAINER}")
+    fi
+    if docker run --rm -i --read-only --cap-drop ALL "${ports[@]}" "${containerArgs[@]}" \
         --security-opt no-new-privileges --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m \
         --label io.padm.mode=docker --label io.padm.project="${PADM_DOCKER_PROJECT}" \
         --volume "${acmeData}:/var/lib/padm/acme" \
@@ -4032,7 +4268,8 @@ for line in sys.stdin.read().splitlines():
     env[name] = value
 os.execvpe("/opt/acme/acme.sh",
     ["acme.sh", "--home", "/var/lib/padm/acme", *sys.argv[1:]], env)
-' "$@" <"${credentials}"
+' "$@" <"${input}"; then status=0; else status=$?; fi
+    return "${status}"
 }
 
 dockerAcmeCommand() {
@@ -4044,22 +4281,26 @@ dockerAcmeCommand() {
         case "$1" in
         --domain) [[ "$#" -ge 2 ]] || return "${PADM_DOCKER_RC_USAGE}"; domain=$2; shift 2 ;;
         --email) [[ "$#" -ge 2 ]] || return "${PADM_DOCKER_RC_USAGE}"; email=$2; shift 2 ;;
-        --dns) [[ "$#" -ge 2 ]] || return "${PADM_DOCKER_RC_USAGE}"; provider=$2; shift 2 ;;
+        --dns) [[ "$#" -ge 2 && -z "${provider}" && "$2" =~ ^dns_[a-z0-9_]+$ ]] || return "${PADM_DOCKER_RC_USAGE}"; provider=$2; shift 2 ;;
+        --standalone) [[ -z "${provider}" ]] || return "${PADM_DOCKER_RC_USAGE}"; provider=standalone; shift ;;
         --credentials) [[ "$#" -ge 2 ]] || return "${PADM_DOCKER_RC_USAGE}"; credentials=$2; shift 2 ;;
         --ops-image) [[ "$#" -ge 2 ]] || return "${PADM_DOCKER_RC_USAGE}"; requestedImage=$2; shift 2 ;;
         *) return "${PADM_DOCKER_RC_USAGE}" ;;
         esac
     done
     dockerDomainIsValid "${domain}" && dockerEmailIsValid "${email}" &&
-        [[ "${provider}" =~ ^dns_[a-z0-9_]+$ ]] && [[ -n "${credentials}" ]] || {
-        dockerError 'acme 仅支持合法 domain/email 的 DNS-01，provider 必须为 dns_*'
+        { [[ "${provider}" =~ ^dns_[a-z0-9_]+$ && -n "${credentials}" ]] ||
+            [[ "${provider}" == standalone && -z "${credentials}" ]]; } || {
+        dockerError 'acme 需要合法 domain/email 与互斥的 --dns/--credentials 或 --standalone'
         return "${PADM_DOCKER_RC_USAGE}"
     }
-    credentials=$(dockerResolveRegularFile "${credentials}") || return "${PADM_DOCKER_RC_USAGE}"
-    dockerRenewalCredentialsValidate "${credentials}" || {
-        dockerError 'DNS 凭据必须为仅持有者读取的 NAME=value 文件，不得改写工具运行环境'
-        return "${PADM_DOCKER_RC_STATE}"
-    }
+    if [[ "${provider}" != standalone ]]; then
+        credentials=$(dockerResolveRegularFile "${credentials}") || return "${PADM_DOCKER_RC_USAGE}"
+        dockerRenewalCredentialsValidate "${credentials}" || {
+            dockerError 'DNS 凭据必须为仅持有者读取的 NAME=value 文件，不得改写工具运行环境'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+    fi
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
     dockerLockInstalledDeployment || return $?
     image=$(dockerResolveOpsImage "${requestedImage}") || {
@@ -4078,12 +4319,16 @@ dockerAcmeCommand() {
 dockerAcmeApply() {
     local action=$1 domain=$2 email=$3 provider=$4 credentials=$5 image=$6
     local root candidate status
-    local -a keyArgs=()
+    local -a keyArgs=() issueKeyArgs=(--keylength 2048) challengeArgs=(--dns "${provider}")
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     if [[ "${action}" == renew &&
         -f "${root}/data/acme/${domain}_ecc/${domain}.conf" &&
         ! -f "${root}/data/acme/${domain}/${domain}.conf" ]]; then
         keyArgs=(--ecc)
+    fi
+    if [[ "${action}" == issue && ! -f "${root}/data/acme/${domain}/${domain}.conf" ]]; then
+        keyArgs=(--ecc)
+        issueKeyArgs=(--keylength ec-256)
     fi
     dockerCreateTlsCandidate || return "${PADM_DOCKER_RC_STATE}"
     candidate=${DOCKER_TLS_CANDIDATE}
@@ -4102,27 +4347,48 @@ dockerAcmeApply() {
         chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" "${candidate}/acme" ||
             return "${PADM_DOCKER_RC_STATE}"
     fi
+    if [[ "${provider}" == standalone ]]; then
+        dockerAcmeRuntimeSnapshot "${domain}" || return "${PADM_DOCKER_RC_STATE}"
+        challengeArgs=(--standalone --httpport 8080)
+        if [[ "${action}" == renew ]]; then
+            dockerRenewalAccountCheck "${root}" "${domain}" "${provider}" || return "${PADM_DOCKER_RC_STATE}"
+            if dockerAcmeRenewProbe "${image}" "${credentials}" "${candidate}/acme" "${candidate}" \
+                "${domain}" "${keyArgs[@]}"; then status=0; else status=$?; fi
+            if [[ "${status}" != 0 ]]; then
+                dockerCleanupTlsCandidate || return "${PADM_DOCKER_RC_STATE}"
+                [[ "${status}" != 2 ]] || return 2
+                dockerError '候选 ACME 续期预检失败，服务未暂停'
+                return "${PADM_DOCKER_RC_STATE}"
+            fi
+        fi
+    fi
+    dockerAcmeChallengePrepare "${provider}" "${candidate}" || return "${PADM_DOCKER_RC_STATE}"
     if [[ "${action}" == "issue" ]]; then
         dockerAcmeRun "${image}" "${credentials}" "${candidate}/acme" "${candidate}" \
-            --issue --dns "${provider}" -d "${domain}" --accountemail "${email}" >/dev/null 2>&1 || {
-            dockerError '候选 DNS-01 申请失败，现有证书和 ACME 账户未修改'
+            --issue "${challengeArgs[@]}" "${issueKeyArgs[@]}" -d "${domain}" --accountemail "${email}" >/dev/null 2>&1 || {
+            dockerError '候选 ACME 申请失败，现有证书和 ACME 账户未修改'
+            dockerAcmeChallengeRestore || return "${PADM_DOCKER_RC_STATE}"
             dockerCleanupTlsCandidate || true
             return "${PADM_DOCKER_RC_STATE}"
         }
     else
+        challengeArgs=()
+        [[ "${provider}" != standalone ]] || challengeArgs=(--httpport 8080)
         if dockerAcmeRun "${image}" "${credentials}" "${candidate}/acme" "${candidate}" \
-            --renew -d "${domain}" "${keyArgs[@]}" >/dev/null 2>&1; then
+            --renew -d "${domain}" "${keyArgs[@]}" "${challengeArgs[@]}" >/dev/null 2>&1; then
             status=0
         else
             status=$?
         fi
         if [[ "${status}" != 0 ]]; then
+            dockerAcmeChallengeRestore || return "${PADM_DOCKER_RC_STATE}"
             dockerCleanupTlsCandidate || return "${PADM_DOCKER_RC_STATE}"
             [[ "${status}" != 2 ]] || return 2
-            dockerError '候选 DNS-01 续期失败，现有证书和 ACME 账户未修改'
+            dockerError '候选 ACME 续期失败，现有证书和 ACME 账户未修改'
             return "${PADM_DOCKER_RC_STATE}"
         fi
     fi
+    dockerAcmeChallengeRestore || return "${PADM_DOCKER_RC_STATE}"
     dockerAcmeRun "${image}" "${credentials}" "${candidate}/acme" "${candidate}" \
         --install-cert -d "${domain}" "${keyArgs[@]}" \
         --fullchain-file "/var/lib/padm/tls-output/${domain}.crt" \

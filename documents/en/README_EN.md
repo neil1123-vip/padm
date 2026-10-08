@@ -151,7 +151,7 @@ Only the final confirmation permits release verification, UUID/Reality/token gen
 and candidate configuration or certificate preparation. Missing `cosign` stops the operation;
 the wizard neither installs an untrusted verifier nor allows verification to be skipped.
 WS TLS, Hysteria2, AnyTLS, NaiveProxy, and TUIC can use managed certificates, an imported full certificate chain and private key,
-or DNS-01. Private keys and DNS credentials must be regular files readable only by their owner.
+or DNS-01/HTTP-01 standalone. Private keys and DNS credentials must be regular files readable only by their owner.
 Subscription publishing still requires Xray, WS TLS, and managed TLS.
 The complete input is saved as root-owned `/etc/padm-docker/config/spec.json` with mode `0600`.
 Cancellation does not commit; failures restore the previous spec, certificates, and ACME state.
@@ -180,7 +180,7 @@ spec together; old snapshots without static content retain the current directory
 Deleting the last Nginx listener clears the site mode but retains static files and other TLS listeners.
 `status` reports only `site_mode`, not the redirect URL. Old specs remain compatible;
 v3 `.site` requires the bundle capability `x-padm-site-content`.
-Webroot/standalone ACME remains deferred.
+Managed webroot ACME remains deferred. Standalone HTTP-01 is available through certificate management.
 
 The same menu offers ALPN diagnostics, recommended repair, and three manual orders
 for fallback listeners `27`/`29`:
@@ -471,12 +471,14 @@ padm-docker tls validate --domain example.com
 padm-docker tls install --domain example.com --cert /path/fullchain.pem --key /path/privkey.pem
 padm-docker acme <issue|renew> --domain example.com --email admin@example.com --dns <dns_provider> --credentials /path/credentials
 padm-docker acme schedule enable --domain example.com --email admin@example.com --dns <dns_provider> --credentials /path/credentials
+padm-docker acme <issue|renew> --domain example.com --email admin@example.com --standalone
+padm-docker acme schedule enable --domain example.com --email admin@example.com --standalone
 padm-docker acme schedule status
 padm-docker acme schedule disable --domain example.com
 padm-docker acme auto-renew
 ```
 
-Main menu item 8 validates certificates, imports replacements, or runs DNS-01 issue/renew.
+Main menu item 8 validates certificates, imports replacements, or runs DNS-01/HTTP-01 standalone issue/renew.
 It also shows, enables, or disables automatic renewal.
 No deployment lock is held before final confirmation. Configured deployments use their recorded
 ops image; `--ops-image` cannot substitute a different image.
@@ -487,11 +489,24 @@ without changing listeners or the spec. Core-side TLS only handles same-domain m
 pairs referenced by the configuration, through a read-only `/etc/padm/secrets/tls` mount.
 All consumers are validated first, then affected cores are recreated or Nginx is reloaded with
 per-service health checks. Recovery attempts every consumer without reverting cumulative traffic.
-Automatic renewal requires an existing managed ACME account for the domain and matching DNS
-provider; imported certificates alone are insufficient. Enabling it stores `NAME=value`
+HTTP-01 uses port `8080` in the non-root ops container and temporarily publishes dual-stack host
+TCP `80`. The domain must resolve to this host and public port `80` must be reachable.
+It does not change firewall rules or provide TLS-ALPN-01. Actual container labels, image,
+mounts, deployment and published ports must agree before stopping anything.
+Only this deployment's originally running port `80` owners are paused. HTTPS in the same
+container is briefly interrupted; unrelated `443` services are not stopped.
+Success, failure and signals restore the original containers. Originally stopped TLS consumers
+remain stopped. acme.sh decides whether renewal is due, including ARI, before ports are published
+or services paused. Failed restoration retains container IDs in the private candidate's
+`challenge.json` and prevents starting another domain.
+Automatic renewal requires an existing managed ACME account for the domain and matching
+challenge method; imported certificates alone are insufficient. DNS renewal stores `NAME=value`
 credentials and renewal inputs in host-only `secrets/renewal/<domain>/`, with root-owned
 `0700` directories and `0600` files. Credentials reach the tool through standard input, not
 schedules, arguments, or Docker environment metadata.
+HTTP registration stores only a schema `2` request, without a fabricated credentials file.
+DNS retains schema `1`. Enabled HTTP renewal rejects old bundles; disabling it transactionally
+removes that domain's registration so compatible older DNS bundles can be used again.
 All domains share one daily 03:17 task: a systemd timer with up to five minutes of random delay,
 or a running cron daemon. The backends are mutually exclusive, repeated enablement creates
 no extra job, and certificates that are not due are skipped normally.

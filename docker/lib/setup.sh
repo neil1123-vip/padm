@@ -255,7 +255,8 @@ dockerSetupGenerateSpec() {
 
 dockerSetupStageCertificate() {
     local candidate=$1 mode=$2 domain=$3 cert=$4 key=$5 email=$6 provider=$7 credentials=$8
-    local root opsImage extension
+    local root opsImage extension status=0
+    local -a challengeArgs=() keyArgs=() issueKeyArgs=(--keylength 2048)
     root=$(dockerInstallRoot) || return 1
     opsImage=$(dockerManifestImageReference ops) || return 1
     for directory in tls acme; do
@@ -277,7 +278,7 @@ dockerSetupStageCertificate() {
     1)
         [[ -f "${candidate}/tls/${domain}.crt" && ! -L "${candidate}/tls/${domain}.crt" &&
             -f "${candidate}/tls/${domain}.key" && ! -L "${candidate}/tls/${domain}.key" ]] || {
-            dockerError '所选域名没有完整受管证书，请选择导入或 DNS-01'
+            dockerError '所选域名没有完整受管证书，请选择导入或 ACME 申请'
             return 1
         }
         ;;
@@ -291,25 +292,45 @@ dockerSetupStageCertificate() {
         cp -- "${cert}" "${candidate}/tls/${domain}.crt" &&
             cp -- "${key}" "${candidate}/tls/${domain}.key" || return 1
         ;;
-    3)
-        credentials=$(dockerResolveRegularFile "${credentials}") &&
-            dockerPrivateFileIsRestricted "${credentials}" || {
-            dockerError 'DNS 凭据必须为仅允许持有者读取的普通文件'
-            return 1
-        }
+    3|4)
+        if [[ "${mode}" == 3 ]]; then
+            credentials=$(dockerResolveRegularFile "${credentials}") &&
+                dockerPrivateFileIsRestricted "${credentials}" || {
+                dockerError 'DNS 凭据必须为仅允许持有者读取的普通文件'
+                return 1
+            }
+            challengeArgs=(--dns "${provider}")
+        else
+            [[ "${provider}" == standalone && -z "${credentials}" ]] || return 1
+            challengeArgs=(--standalone --httpport 8080)
+        fi
         chmod 0750 "${candidate}" "${candidate}/tls" "${candidate}/acme" || return 1
         if [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" != 1 ]]; then
             chown -R "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" \
                 "${candidate}/tls" "${candidate}/acme" || return 1
             chown "0:${PADM_DOCKER_CONTAINER_GID}" "${candidate}" || return 1
         fi
+        dockerAcmeChallengePrepare "${provider}" "${candidate}" || return 1
+        if [[ ! -f "${candidate}/acme/${domain}/${domain}.conf" ]]; then
+            keyArgs=(--ecc)
+            issueKeyArgs=(--keylength ec-256)
+        fi
+        if dockerAcmeRun "${opsImage}" "${credentials}" "${candidate}/acme" "${candidate}/tls" \
+            --issue "${challengeArgs[@]}" "${issueKeyArgs[@]}" -d "${domain}" --accountemail "${email}" >/dev/null 2>&1; then
+            status=0
+        else
+            status=$?
+        fi
+        dockerAcmeChallengeRestore || return 1
+        if [[ "${status}" != 0 ]]; then
+            dockerError '候选 ACME 申请失败，现有证书和配置未修改'
+            return 1
+        fi
         dockerAcmeRun "${opsImage}" "${credentials}" "${candidate}/acme" "${candidate}/tls" \
-            --issue --dns "${provider}" -d "${domain}" --accountemail "${email}" >/dev/null 2>&1 &&
-            dockerAcmeRun "${opsImage}" "${credentials}" "${candidate}/acme" "${candidate}/tls" \
-                --install-cert -d "${domain}" \
-                --fullchain-file "/var/lib/padm/tls-output/${domain}.crt" \
-                --key-file "/var/lib/padm/tls-output/${domain}.key" >/dev/null 2>&1 || {
-            dockerError '候选 DNS-01 申请或证书导出失败，现有证书和配置未修改'
+                --install-cert -d "${domain}" "${keyArgs[@]}" \
+            --fullchain-file "/var/lib/padm/tls-output/${domain}.crt" \
+            --key-file "/var/lib/padm/tls-output/${domain}.key" >/dev/null 2>&1 || {
+            dockerError '候选证书导出失败，现有证书和配置未修改'
             return 1
         }
         ;;
@@ -327,7 +348,8 @@ dockerSetupStageCertificate() {
 }
 
 dockerTlsManageCommand() {
-    local root currentDomain domain choice answer cert= key= email= provider= credentials= action
+    local root currentDomain domain choice method answer cert= key= email= provider= credentials= action
+    local -a challengeArgs=()
     [[ "$#" -eq 0 && -t 0 && -t 1 ]] || {
         dockerError '证书管理需要交互终端，非交互操作请使用 tls 或 acme 命令'
         return "${PADM_DOCKER_RC_USAGE}"
@@ -352,7 +374,7 @@ dockerTlsManageCommand() {
         return "${PADM_DOCKER_RC_STATE}"
     }
     printf '\nDocker 证书管理\n当前 TLS 域名: %s\n' "${currentDomain}"
-    printf '%s\n' '1. 查看/校验受管证书' '2. 导入证书轮换' '3. DNS-01 申请' '4. DNS-01 续期' \
+    printf '%s\n' '1. 查看/校验受管证书' '2. 导入证书轮换' '3. ACME 申请' '4. ACME 续期' \
         '5. 自动续期状态' '6. 启用自动续期' '7. 停用自动续期' '0. 返回'
     dockerSetupRead choice '证书操作: ' || return 0
     [[ "${choice}" =~ ^[1-7]$ ]] || return "${PADM_DOCKER_RC_USAGE}"
@@ -368,15 +390,28 @@ dockerTlsManageCommand() {
         ;;
     3|4|6)
         case "${choice}" in
-        3) action=DNS-01申请 ;;
-        4) action=DNS-01续期 ;;
+        3) action=ACME申请 ;;
+        4) action=ACME续期 ;;
         6) action=启用自动续期 ;;
         esac
         dockerSetupRead email 'ACME 邮箱（0 取消）: ' || return 0
-        dockerSetupRead provider 'DNS provider（dns_*，0 取消）: ' || return 0
-        dockerSetupRead credentials 'DNS 凭据文件（0 取消）: ' || return 0
-        dockerEmailIsValid "${email}" && [[ "${provider}" =~ ^dns_[a-z0-9_]+$ ]] &&
-            [[ -n "${credentials}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+        dockerEmailIsValid "${email}" || return "${PADM_DOCKER_RC_USAGE}"
+        dockerSetupRead method '验证方式 [1=DNS-01, 2=HTTP-01 standalone，默认 1，0 取消]: ' 1 || return 0
+        case "${method}" in
+        1)
+            dockerSetupRead provider 'DNS provider（dns_*，0 取消）: ' || return 0
+            dockerSetupRead credentials 'DNS 凭据文件（0 取消）: ' || return 0
+            [[ "${provider}" =~ ^dns_[a-z0-9_]+$ && -n "${credentials}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            challengeArgs=(--dns "${provider}" --credentials "${credentials}")
+            ;;
+        2)
+            provider=standalone
+            challengeArgs=(--standalone)
+            printf 'HTTP-01 需要公网 80 可达；验证期间可能暂停本部署的 80 端口服务，并影响该容器内 HTTPS；不会停止无关 443 服务。\n'
+            ;;
+        *) return "${PADM_DOCKER_RC_USAGE}" ;;
+        esac
         ;;
     5) action=自动续期状态 ;;
     7) action=停用自动续期 ;;
@@ -393,12 +428,12 @@ dockerTlsManageCommand() {
     3|4)
         if [[ "${choice}" == 3 ]]; then action=issue; else action=renew; fi
         dockerAcmeCommand "${action}" --domain "${domain}" --email "${email}" \
-            --dns "${provider}" --credentials "${credentials}"
+            "${challengeArgs[@]}"
         ;;
     5) dockerRenewalCommand status ;;
     6)
         dockerRenewalCommand enable --domain "${domain}" --email "${email}" \
-            --dns "${provider}" --credentials "${credentials}"
+            "${challengeArgs[@]}"
         ;;
     7) dockerRenewalCommand disable --domain "${domain}" ;;
     esac
@@ -588,7 +623,7 @@ dockerSetupCommand() {
         else
             dockerSetupRead wsPort "WS TLS 入口端口 [${wsPort}]: " "${wsPort}" || return 0
         fi
-        dockerSetupRead tlsMode '证书 [1=已有受管, 2=导入, 3=DNS-01, 0=取消]: ' 1 || return 0
+        dockerSetupRead tlsMode '证书 [1=已有受管, 2=导入, 3=DNS-01, 4=HTTP-01 standalone, 0=取消]: ' 1 || return 0
         case "${tlsMode}" in
         1) ;;
         2)
@@ -601,6 +636,12 @@ dockerSetupCommand() {
             dockerSetupRead credentials 'DNS 凭据文件（0 取消）: ' || return 0
             dockerEmailIsValid "${email}" && [[ "${provider}" =~ ^dns_[a-z0-9_]+$ ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
+            ;;
+        4)
+            provider=standalone
+            dockerSetupRead email 'ACME 邮箱（0 取消）: ' || return 0
+            dockerEmailIsValid "${email}" || return "${PADM_DOCKER_RC_USAGE}"
+            printf 'HTTP-01 需要域名解析到本机且公网 80 可达；确认后临时使用宿主 80，冲突时不停止无关服务。\n'
             ;;
         *) return "${PADM_DOCKER_RC_USAGE}" ;;
         esac

@@ -26,8 +26,15 @@ source "${PROJECT_ROOT}/docker/lib/traffic.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/docker/lib/lifecycle.sh"
 
+ACME_RUN_IMPLEMENTATION=$(declare -f dockerAcmeRun)
 DOMAIN=example.com
 MODE=ok
+RAW_ACME_RUN=0
+RUNNING_ID=$(printf 'a%.0s' {1..64})
+STOPPED_ID=$(printf 'b%.0s' {1..64})
+HTTPS_ID=$(printf 'c%.0s' {1..64})
+CHALLENGE_ID=$(printf 'd%.0s' {1..64})
+UNRELATED_ID=$(printf 'e%.0s' {1..64})
 OPS_IMAGE="ghcr.io/example/padm-ops:3.2.0@sha256:$(printf 'a%.0s' {1..64})"
 CERT_FILE=${TEST_ROOT}/new.crt
 KEY_FILE=${TEST_ROOT}/new.key
@@ -49,6 +56,12 @@ dockerHostPreflight() { :; }
 dockerRequireInstalledBundle() { [[ "$(<"${PADM_DOCKER_INSTALL_DIR}/mode")" == docker ]]; }
 dockerSetupCleanup() { :; }
 dockerEntryCleanup() { :; }
+dockerTcpPortIsListening() {
+    [[ "$1" == 80 ]] || fail '挑战检查了非 80 端口'
+    [[ "${MODE}" == external-80 ||
+        ( "${MODE}" == port-release-fail && -f "${TEST_ROOT}/stopped-once" ) ]]
+}
+ss() { printf 'LISTEN 0 128 0.0.0.0:80 0.0.0.0:* users:(("external",pid=1,fd=3))\n'; }
 cp() {
     command cp "$@" || return $?
     if [[ "${MODE}" == term-copy &&
@@ -59,8 +72,59 @@ cp() {
 
 # 保留实际候选校验，Docker 只映射 bind 路径到本测试目录。
 docker() {
-    local candidate='' script='' previous='' argument last=''
+    local candidate='' script='' previous='' argument last='' state
+    case "$1" in
+    ps)
+        case "$*" in
+        'ps -q')
+            jq -r '.[] | select(.State.Running) | .Id' "${TEST_ROOT}/containers.json"
+            ;;
+        'ps -aq --filter label=io.padm.challenge=fixture-challenge --filter label=io.padm.project=padm-docker')
+            [[ ! -f "${TEST_ROOT}/challenge-container" ]] || printf '%s\n' "${CHALLENGE_ID}"
+            ;;
+        *) fail '运行容器发现依赖 Docker 端口过滤或挑战清理缺少 label' ;;
+        esac
+        return 0
+        ;;
+    container)
+        [[ "${2:-}" == inspect ]] || fail '意外的容器命令'
+        state=$(jq -c --argjson ids "$(printf '%s\n' "${@:3}" | jq -Rsc 'split("\n")|map(select(length>0))')" \
+            '[.[] | select(.Id as $id | $ids | index($id) != null)]' "${TEST_ROOT}/containers.json")
+        [[ "$(jq 'length' <<<"${state}")" == $(("$#" - 2)) ]] || return 1
+        printf '%s\n' "${state}"
+        return 0
+        ;;
+    stop|start)
+        printf '%s\n' "$*" >>"${TEST_ROOT}/challenge.log"
+        [[ -d "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" ]] || fail '暂停或恢复服务未持有部署锁'
+        [[ "$#" == 2 && "$2" == "${RUNNING_ID}" ]] || fail '挑战修改了原停容器或无关 443 容器'
+        [[ -f "${DOCKER_ACME_RECOVERY}" && "$(stat -c '%a' "${DOCKER_ACME_RECOVERY}")" == 600 ]] ||
+            fail '暂停或恢复服务没有保留私有恢复记录'
+        if [[ "$1" == start && "${MODE}" == restore-fail && ! -f "${TEST_ROOT}/restore-failed" ]]; then
+            : >"${TEST_ROOT}/restore-failed"
+            # start 成功不代表容器已运行，恢复必须检查实际状态。
+            return 0
+        fi
+        state=false
+        if [[ "$1" == start ]]; then state=true; else : >"${TEST_ROOT}/stopped-once"; fi
+        jq --arg id "$2" --argjson running "${state}" 'map(if .Id == $id then .State.Running=$running else . end)' \
+            "${TEST_ROOT}/containers.json" >"${TEST_ROOT}/containers.next"
+        mv -- "${TEST_ROOT}/containers.next" "${TEST_ROOT}/containers.json"
+        return 0
+        ;;
+    rm)
+        printf '%s\n' "$*" >>"${TEST_ROOT}/challenge.log"
+        [[ "$*" == "rm -f ${CHALLENGE_ID}" ]] || fail '恢复删除了非本轮挑战容器'
+        rm -f -- "${TEST_ROOT}/challenge-container"
+        return 0
+        ;;
+    esac
     [[ "$1" == run ]] || fail '意外的 Docker 命令'
+    if [[ "${RAW_ACME_RUN}" == 1 ]]; then
+        printf '%s\n' "$*" >>"${TEST_ROOT}/acme-docker.args"
+        [[ -z "$(cat)" ]] || fail 'HTTP 验证向工具注入了 DNS 凭据'
+        return 0
+    fi
     printf 'validate\n' >>"${TEST_ROOT}/ops.log"
     for argument in "$@"; do
         if [[ "${previous}" == --volume && "${argument}" == *:/candidate:ro ]]; then
@@ -86,12 +150,57 @@ docker() {
 }
 
 dockerAcmeRun() {
-    local image=$1 credentials=$2 account=$3 output=$4 action=$5
-    [[ "${image}" == "${OPS_IMAGE}" && "${credentials}" == "${CREDENTIALS}" &&
+    local image=$1 credentials=$2 account=$3 output=$4 action=$5 configDir=${DOMAIN} webroot=dns_test
+    [[ "${image}" == "${OPS_IMAGE}" && ( "${credentials}" == "${CREDENTIALS}" || -z "${credentials}" ) &&
         "${account}" == "${PADM_DOCKER_INSTALL_DIR}/.tls."*/acme &&
         "${output}" == "${account%/acme}" ]] || fail 'ACME 未隔离候选账户'
     [[ "$(stat -c '%u %g' "${account}")" == '10001 10001' ]] || fail '候选账户不能由容器读取'
     [[ "$(<"${PADM_DOCKER_INSTALL_DIR}/data/traffic/state.json")" == history ]] || fail 'ACME 修改了累计流量'
+    printf '%s\n' "${*:5}" >>"${TEST_ROOT}/acme.args"
+    if [[ "${action}" == --issue ]]; then
+        if [[ -f "${PADM_DOCKER_INSTALL_DIR}/data/acme/${DOMAIN}/${DOMAIN}.conf" ]]; then
+            [[ " ${*:5} " == *' --keylength 2048 '* && " ${*:5} " != *' --keylength ec-256 '* ]] ||
+                fail '已有 RSA 申请没有明确保持 2048 位密钥'
+        else
+            [[ " ${*:5} " == *' --keylength ec-256 '* && " ${*:5} " != *' --keylength 2048 '* ]] ||
+                fail '新 ACME 申请没有明确使用默认 ECC 密钥'
+            configDir=${DOMAIN}_ecc
+        fi
+    elif [[ "${action}" == --renew || "${action}" == --install-cert ]]; then
+        if [[ -f "${account}/${DOMAIN}/${DOMAIN}.conf" ]]; then
+            [[ " ${*:5} " != *' --ecc '* ]] || fail '已有 RSA 账户被误用 ECC 续期或导出'
+        elif [[ -f "${account}/${DOMAIN}_ecc/${DOMAIN}.conf" ]]; then
+            [[ " ${*:5} " == *' --ecc '* ]] || fail 'ECC 账户续期或导出缺少 --ecc'
+            configDir=${DOMAIN}_ecc
+        fi
+    fi
+    if [[ -z "${credentials}" ]]; then
+        webroot=no
+        if [[ "${action}" == --renew &&
+            "$(grep '^Le_PreHook=' "${account}/${configDir}/${DOMAIN}.conf")" == *renew.due* ]]; then
+            [[ "${DOCKER_ACME_PORT_PUBLISH}" == 0 && "${#DOCKER_ACME_STOPPED[@]}" == 0 ]] ||
+                fail '续期预检暂停了服务或发布了端口'
+            printf 'probe\n' >>"${TEST_ROOT}/acme.log"
+            [[ "${MODE}" != renew-skip ]] || return 2
+            printf due >"${output}/renew.due"
+            return 1
+        fi
+        if [[ "${action}" == --issue || "${action}" == --renew ]]; then
+            [[ "${DOCKER_ACME_PORT_PUBLISH}" == 1 && " ${*:5} " == *' --httpport 8080 '* ]] ||
+                fail 'HTTP 验证未准备宿主端口或未用容器 8080'
+            [[ "${action}" != --issue || " ${*:5} " == *' --standalone '* ]] ||
+                fail 'HTTP 申请仍使用 DNS 验证'
+            [[ "$(dockerAcmePortOwners)" == '[]' ]] || fail 'HTTP 工具运行时旧宿主 80 端口仍占用'
+            [[ "${action}" != --renew ||
+                "$(grep '^Le_PreHook=' "${account}/${configDir}/${DOMAIN}.conf")" == "Le_PreHook='printf original-hook'" ]] ||
+                fail '真正续期没有恢复原 ACME prehook'
+            DOCKER_ACME_CONTAINER=fixture-challenge
+            : >"${TEST_ROOT}/challenge-container"
+        elif [[ "${action}" == --install-cert ]]; then
+            [[ "${DOCKER_ACME_PORT_PUBLISH}" == 0 && ! -f "${TEST_ROOT}/challenge-container" ]] ||
+                fail '导出前没有清理挑战并恢复服务'
+        fi
+    fi
     printf '%s\n' "${action}" >>"${TEST_ROOT}/acme.log"
     (
         cd "${account}"
@@ -99,12 +208,16 @@ dockerAcmeRun() {
             printf "new-account-%s\n" "$1" >account.conf
             mkdir -p "$2"
             printf "new-domain-state\n" >"$2/domain.conf"
-        ' _ "${action}" "${DOMAIN}"
+            if [ "$1" = --issue ] && [ ! -f "$2/$3.conf" ]; then
+                printf "Le_Domain='\''%s'\''\nLe_Webroot='\''%s'\''\nLe_HTTPPort='\''8080'\''\n" "$3" "$4" >"$2/$3.conf"
+            fi
+        ' _ "${action}" "${configDir}" "${DOMAIN}" "${webroot}"
     ) || fail '容器 UID 不能更新候选账户'
     if [[ ( "${MODE}" == issue-fail && "${action}" == --issue ) ||
         ( "${MODE}" == renew-fail && "${action}" == --renew ) ||
         ( "${MODE}" == export-fail && "${action}" == --install-cert ) ]]; then return 1; fi
     if [[ "${MODE}" == term-issue && "${action}" == --issue ]]; then kill -TERM "${BASHPID}"; fi
+    if [[ "${MODE}" == int-issue && "${action}" == --issue ]]; then kill -INT "${BASHPID}"; fi
     if [[ "${action}" == --install-cert ]]; then
         cp -- "${CERT_FILE}" "${output}/${DOMAIN}.crt"
         cp -- "${KEY_FILE}" "${output}/${DOMAIN}.key"
@@ -113,6 +226,7 @@ dockerAcmeRun() {
 
 dockerComposeRun() {
     local generation=old
+    case "$1" in stop|down|restart) fail 'TLS 事务扩大为 Compose 全项目停启' ;; esac
     cmp -s "${CERT_FILE}" "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/${DOMAIN}.crt" && generation=new
     printf '%s\n' "$*" >>"${TEST_ROOT}/compose.log"
     printf '%s:%s\n' "${generation}" "$*" >>"${TEST_ROOT}/events.log"
@@ -205,11 +319,68 @@ newState() {
     dockerGenerateCompose "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" \
         "${PADM_DOCKER_INSTALL_DIR}/compose.json"
     MODE=ok
-    rm -f -- "${TEST_ROOT}/failed-once"
+    rm -f -- "${TEST_ROOT}/failed-once" "${TEST_ROOT}/stopped-once" "${TEST_ROOT}/restore-failed" \
+        "${TEST_ROOT}/challenge-container"
+    printf '[]\n' >"${TEST_ROOT}/containers.json"
+    DOCKER_ACME_STOPPED=()
+    DOCKER_ACME_CONTAINER=
+    DOCKER_ACME_PORT_PUBLISH=0
+    DOCKER_ACME_RECOVERY=
+    DOCKER_ACME_RUNNING=null
     : >"${TEST_ROOT}/compose.log"
     : >"${TEST_ROOT}/events.log"
     : >"${TEST_ROOT}/acme.log"
+    : >"${TEST_ROOT}/acme.args"
+    : >"${TEST_ROOT}/challenge.log"
     : >"${TEST_ROOT}/ops.log"
+}
+
+standaloneState() {
+    newState "$1"
+    jq '.core.protocols[0].public_port=80' "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" \
+        >"${TEST_ROOT}/standalone-spec.json"
+    cp -- "${TEST_ROOT}/standalone-spec.json" "${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+    jq '.listeners[0].public_port=80' "${PADM_DOCKER_INSTALL_DIR}/deployment.json" \
+        >"${TEST_ROOT}/standalone-deployment.json"
+    cp -- "${TEST_ROOT}/standalone-deployment.json" "${PADM_DOCKER_INSTALL_DIR}/deployment.json"
+    dockerGenerateCompose "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" "${PADM_DOCKER_INSTALL_DIR}/compose.json"
+    mkdir -- "${PADM_DOCKER_INSTALL_DIR}/data/acme/${DOMAIN}"
+    printf "Le_Domain='%s'\nLe_Webroot='no'\nLe_HTTPPort='8080'\nLe_PreHook='printf original-hook'\n" "${DOMAIN}" \
+        >"${PADM_DOCKER_INSTALL_DIR}/data/acme/${DOMAIN}/${DOMAIN}.conf"
+    chown -R 10001:10001 "${PADM_DOCKER_INSTALL_DIR}/data/acme/${DOMAIN}"
+    chmod 0750 "${PADM_DOCKER_INSTALL_DIR}/data/acme/${DOMAIN}"
+    chmod 0600 "${PADM_DOCKER_INSTALL_DIR}/data/acme/${DOMAIN}/${DOMAIN}.conf"
+    jq -n --arg root "${PADM_DOCKER_INSTALL_DIR}" --arg running "${RUNNING_ID}" \
+        --arg stopped "${STOPPED_ID}" --arg https "${HTTPS_ID}" --arg unrelated "${UNRELATED_ID}" \
+        --slurpfile spec "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" \
+        --slurpfile compose "${PADM_DOCKER_INSTALL_DIR}/compose.json" '
+      {Id:$running,State:{Running:true,Restarting:false},Config:{Image:$spec[0].images.nginx,Labels:{
+        "com.docker.compose.project":"padm-docker","com.docker.compose.service":"nginx",
+        "com.docker.compose.project.working_dir":$root,
+        "com.docker.compose.project.config_files":($root+"/compose.json"),
+        "io.padm.mode":"docker","io.padm.project":"padm-docker","io.padm.component":"nginx"}},
+       HostConfig:{NetworkMode:"padm-docker_default",PortBindings:{"8443/tcp":[{HostIp:"0.0.0.0",HostPort:"80"}]}},
+       Mounts:($compose[0].services.nginx.volumes|map(
+         {Type:"bind",Source:(.source|sub("^\\$\\{PADM_DOCKER_ROOT\\}";$root)),Destination:.target,RW:(.read_only|not)})),
+       NetworkSettings:{Networks:{default:{IPAddress:"172.28.0.2",GlobalIPv6Address:""}}}} as $container |
+      [$container,($container|.Id=$stopped|.State.Running=false),
+       ($container|.Id=$https|.Config.Image=$spec[0].images.xray|
+         .Config.Labels["com.docker.compose.service"]="xray"|.Config.Labels["io.padm.component"]="xray"|
+         .HostConfig.PortBindings={"443/tcp":[{HostIp:"0.0.0.0",HostPort:"443"}]}),
+       ($container|.Id=$unrelated|.Config.Labels={}|.Config.Image="unrelated:fixture"|
+         .HostConfig.PortBindings={"80/tcp":[{HostIp:"0.0.0.0",HostPort:"8081"}]})]
+    ' >"${TEST_ROOT}/containers.json"
+    cp -- "${TEST_ROOT}/containers.json" "${TEST_ROOT}/containers.before"
+}
+
+assertChallengeRestored() {
+    cmp -s "${TEST_ROOT}/containers.json" "${TEST_ROOT}/containers.before" ||
+        fail '挑战没有恢复原运行状态或启动了原停/无关服务'
+    [[ ! -e "${TEST_ROOT}/challenge-container" ]] || fail '本轮挑战容器未清理'
+    [[ "$(<"${PADM_DOCKER_INSTALL_DIR}/secrets/tls/other.example.com.crt")" == other-certificate &&
+        "$(<"${PADM_DOCKER_INSTALL_DIR}/secrets/tls/other.example.com.key")" == other-key &&
+        "$(<"${PADM_DOCKER_INSTALL_DIR}/data/acme/other.example.com/domain.conf")" == other-domain ]] ||
+        fail 'HTTP 验证修改了其它域名材料'
 }
 
 coreTlsState() {
@@ -358,6 +529,132 @@ for MODE_CASE in issue-fail renew-fail export-fail validity-fail match-fail ngin
     [[ "$(materials)" == "${before}" ]] || fail "${MODE}: 失败或中断未恢复证书与账户"
     assertPermissions
 done
+
+# HTTP 专项只覆盖新增停启合同；材料提交和失败回滚继续复用上面的 TLS 断言。
+for ACTION in issue renew; do
+    standaloneState "standalone-${ACTION}"
+    dockerAcmePortOwners | jq -e --arg id "${RUNNING_ID}" '
+      length == 1 and .[0].Id == $id and .[0].HostConfig.PortBindings["8443/tcp"][0].HostPort == "80"
+    ' >/dev/null || fail '未检出宿主 80 到 8443，或误选宿主 8081 到容器 80'
+    runControl 0 acme "${ACTION}" --domain "${DOMAIN}" --email admin@example.com --standalone
+    cmp -s "${CERT_FILE}" "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/${DOMAIN}.crt" || fail 'HTTP 验证未提交新证书'
+    [[ "$(<"${TEST_ROOT}/challenge.log")" == "stop ${RUNNING_ID}"$'\n'"rm -f ${CHALLENGE_ID}"$'\n'"start ${RUNNING_ID}" ]] ||
+        fail 'HTTP 验证没有按本轮 ID 暂停、清理和恢复'
+    if [[ "${ACTION}" == renew ]]; then
+        [[ "$(head -n 2 "${TEST_ROOT}/acme.log")" == $'probe\n--renew' ]] ||
+            fail 'HTTP 续期未先使用工具预检到期'
+    else
+        grep -Eq '^--issue .* --keylength 2048( |$)' "${TEST_ROOT}/acme.args" ||
+            fail 'RSA 申请没有显式密钥参数'
+        ! grep -Eq '^--install-cert .* --ecc( |$)' "${TEST_ROOT}/acme.args" ||
+            fail 'RSA 证书导出错误使用 ECC 账户'
+    fi
+    assertChallengeRestored
+    assertPermissions
+done
+
+for MODE_CASE in external-80 ownership-drift port-release-fail issue-fail restore-fail int-issue term-issue; do
+    standaloneState "standalone-${MODE_CASE}"
+    before=$(materials)
+    MODE=${MODE_CASE}
+    EXPECTED=15
+    case "${MODE}" in
+    ownership-drift)
+        jq '.[0].Config.Labels["com.docker.compose.project.working_dir"]="/outside/deployment"' \
+            "${TEST_ROOT}/containers.json" >"${TEST_ROOT}/containers.next"
+        mv -- "${TEST_ROOT}/containers.next" "${TEST_ROOT}/containers.json"
+        cp -- "${TEST_ROOT}/containers.json" "${TEST_ROOT}/containers.before"
+        ;;
+    int-issue) EXPECTED=130 ;;
+    term-issue) EXPECTED=143 ;;
+    esac
+    runControl "${EXPECTED}" acme issue --domain "${DOMAIN}" --email admin@example.com --standalone
+    [[ "$(materials)" == "${before}" ]] || fail "${MODE}: HTTP 失败没有保留证书与账户"
+    assertChallengeRestored
+    assertPermissions
+    case "${MODE}" in
+    external-80|ownership-drift)
+        [[ ! -s "${TEST_ROOT}/challenge.log" && ! -s "${TEST_ROOT}/acme.log" &&
+            ! -s "${TEST_ROOT}/compose.log" ]] || fail '外部占用或归属漂移仍暂停或执行挑战'
+        ;;
+    port-release-fail)
+        [[ "$(<"${TEST_ROOT}/challenge.log")" == "stop ${RUNNING_ID}"$'\n'"start ${RUNNING_ID}" &&
+            ! -s "${TEST_ROOT}/acme.log" ]] || fail '端口未释放仍执行挑战或没有恢复'
+        ;;
+    restore-fail)
+        [[ "$(grep -c "^start ${RUNNING_ID}$" "${TEST_ROOT}/challenge.log")" == 2 &&
+            "$(<"${TEST_ROOT}/acme.log")" == --issue ]] ||
+            fail '恢复首次失败没有再次恢复或仍提交了证书'
+        grep -Fq '挑战服务恢复失败' "${TEST_ROOT}/control.log" || fail '恢复失败没有明确错误'
+        ;;
+    *)
+        [[ "$(grep -c "^stop ${RUNNING_ID}$" "${TEST_ROOT}/challenge.log")" == 1 &&
+            "$(grep -c "^start ${RUNNING_ID}$" "${TEST_ROOT}/challenge.log")" == 1 ]] ||
+            fail '挑战失败或中断未恢复本轮暂停服务'
+        ;;
+    esac
+done
+
+standaloneState standalone-originally-stopped
+jq '.[0].State.Running=false' "${TEST_ROOT}/containers.json" >"${TEST_ROOT}/containers.next"
+mv -- "${TEST_ROOT}/containers.next" "${TEST_ROOT}/containers.json"
+cp -- "${TEST_ROOT}/containers.json" "${TEST_ROOT}/containers.before"
+rm -- "${PADM_DOCKER_INSTALL_DIR}/data/acme/${DOMAIN}/${DOMAIN}.conf"
+runControl 0 acme issue --domain "${DOMAIN}" --email admin@example.com --standalone
+cmp -s "${CERT_FILE}" "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/${DOMAIN}.crt" ||
+    fail '原停部署的 HTTP 申请没有提交材料'
+[[ "$(<"${TEST_ROOT}/challenge.log")" == "rm -f ${CHALLENGE_ID}" && ! -s "${TEST_ROOT}/compose.log" ]] ||
+    fail '成功挑战启动或重载了原本已停止的消费者'
+[[ -f "${PADM_DOCKER_INSTALL_DIR}/data/acme/${DOMAIN}_ecc/${DOMAIN}.conf" ]] &&
+    grep -Eq '^--issue .* --keylength ec-256( |$)' "${TEST_ROOT}/acme.args" &&
+    grep -Eq '^--install-cert .* --ecc( |$)' "${TEST_ROOT}/acme.args" ||
+    fail '新域名没有保存 ECC 账户或申请/导出密钥参数不一致'
+assertChallengeRestored
+
+standaloneState standalone-renew-skip
+before=$(materials)
+MODE=renew-skip
+runControl 0 acme renew --domain "${DOMAIN}" --email admin@example.com --standalone
+[[ "$(materials)" == "${before}" && "$(<"${TEST_ROOT}/acme.log")" == probe &&
+    ! -s "${TEST_ROOT}/challenge.log" && ! -s "${TEST_ROOT}/compose.log" && ! -s "${TEST_ROOT}/ops.log" ]] ||
+    fail '未到期 HTTP 续期修改材料、暂停或重载了服务'
+grep -Fq '证书未到续期时间' "${TEST_ROOT}/control.log" || fail '工具 skip=2 未保持 CLI 跳过语义'
+assertChallengeRestored
+
+newState standalone-cli-validation
+for ARGS in '--standalone --dns dns_test' '--dns dns_test --standalone' \
+    "--standalone --credentials ${CREDENTIALS}"; do
+    read -r -a OPTIONS <<<"${ARGS}"
+    runControl 2 acme issue --domain "${DOMAIN}" --email admin@example.com "${OPTIONS[@]}"
+done
+[[ ! -s "${TEST_ROOT}/acme.log" && ! -s "${TEST_ROOT}/challenge.log" ]] ||
+    fail '互斥验证方式仍执行了 ACME'
+
+# 单次恢复真实运行器，检查空凭据和双栈映射，不重复完整事务矩阵。
+newState standalone-runner
+dockerCreateTlsCandidate
+mkdir -- "${DOCKER_TLS_CANDIDATE}/acme"
+ACME_RUN_TEST_IMPLEMENTATION=$(declare -f dockerAcmeRun)
+eval "${ACME_RUN_IMPLEMENTATION}"
+RAW_ACME_RUN=1
+: >"${TEST_ROOT}/acme-docker.args"
+dockerAcmeRun "${OPS_IMAGE}" '' "${DOCKER_TLS_CANDIDATE}/acme" "${DOCKER_TLS_CANDIDATE}" --renew -d "${DOMAIN}"
+! grep -Fq -- '--publish' "${TEST_ROOT}/acme-docker.args" || fail '未准备挑战时运行器发布了宿主端口'
+: >"${TEST_ROOT}/acme-docker.args"
+DOCKER_ACME_PORT_PUBLISH=1
+dockerAcmeRun "${OPS_IMAGE}" '' "${DOCKER_TLS_CANDIDATE}/acme" "${DOCKER_TLS_CANDIDATE}" \
+    --issue --standalone --httpport 8080 -d "${DOMAIN}"
+grep -Fq -- '--publish 0.0.0.0:80:8080/tcp --publish [::]:80:8080/tcp' "${TEST_ROOT}/acme-docker.args" ||
+    fail 'HTTP 运行器未将双栈宿主 80 映射到容器 8080'
+grep -Fq -- '--name padm-acme-' "${TEST_ROOT}/acme-docker.args" || fail '挑战容器未登记唯一名称'
+grep -Fq -- '--label io.padm.challenge=padm-acme-' "${TEST_ROOT}/acme-docker.args" ||
+    fail '挑战容器未登记本轮清理 label'
+RAW_ACME_RUN=0
+DOCKER_ACME_CONTAINER=
+DOCKER_ACME_PORT_PUBLISH=0
+eval "${ACME_RUN_TEST_IMPLEMENTATION}"
+dockerCleanupTlsCandidate
+assertClean
 
 newState import-success
 accountBefore=$(find "${PADM_DOCKER_INSTALL_DIR}/data/acme" -type f -print0 | sort -z | xargs -0 sha256sum)

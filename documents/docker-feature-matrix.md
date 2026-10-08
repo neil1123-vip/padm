@@ -184,7 +184,7 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 | `subscription-users` | 订阅与用户 -> 用户和分享订阅 | `supported` | 核心、订阅 | bridge | 4A.1 账号底座、4A.2 账号 CLI/菜单事务和 4A.3 分享组已交付：支持独立 token、账号/入口筛选、启停/轮换、纯内容及 HTTPS 链接；CDN/H3、业务备份恢复和完整多服务器工作流仍未迁移。 |
 | `subscription-multiserver` | 订阅与用户 -> 主控/被控、多服务器同步 | `deferred` | 订阅、WireGuard | host | 4C.1–4C.3d4 已提供私网 API、主控管理、被控接入/手动同步 CLI/菜单及事务/回滚保护。校验已有单 Peer 的归属、实际地址与唯一 `/32`，不建接口/密钥/路由；token 仅写外部 root 私有邀请，不进入规格/备份/普通日志，独立服务与客户端零能力，无公网端口映射。4C.4a 真实双网络空间加密链路和 API/客户端规划通过；Compose 双部署应用/恢复待 4C.4b，自动同步、多 Peer、角色重绑定与完整灾备未交付。 |
 | `acme-webroot` | 站点与证书 -> 传统 TLS fallback | `deferred` | `acme` / `nginx` | bridge | 需要 webroot、端口归属和原子 reload。 |
-| `acme-standalone` | 站点与证书 -> 本机 TLS 证书 | `deferred` | `acme` | host | 需要 80/443 宿主端口和停机回滚。 |
+| `acme-standalone` | 站点与证书 -> 本机 TLS 证书 | `deferred` | `acme` | 宿主预检 + bridge | 5A.3a 已提供 HTTP-01 首配、菜单/CLI 和自动续期；非 root ops 临时双栈 `80:8080`，实际归属校验，只暂停原运行拥有者并恢复；未到期不暂停。公网 CA、原生 Linux/双架构和 TLS-ALPN-01 未验，完整状态不升级。 |
 | `site-static-redirect-alpn` | 站点与证书 -> fallback 站点、302、ALPN | `deferred` | `nginx` | bridge | 5A.1 站点与 5A.2 逐入口 ALPN 诊断/三种顺序事务已提供；真实 Nginx PROXY HTTP/2 已验，真实 Xray ALPN 协商、公网及原生双架构待验。 |
 | `reality-target-management` | 协议与入口 -> REALITY 管理 -> 目标站管理 | `supported` | 核心 profile | 宿主 CLI | 对齐原生 8 项管理及首配候选检测/手动输入；检测 TLS/PQC/ASN/证书链、刷新库、网段/同 ASN 抽样扫描、A 级筛选分页与逐入口切换、host[:port]/独立 SNI、黑名单；扫描进度和部分结果处理共用原生，B/C 手动告警，全部地址按最差评分及 CDN 风险判定，缓存切换重新复测，Docker 私密状态与事务恢复独立于原生。 |
 | `reality-parameter-management` | 协议与入口 -> REALITY 管理 -> 重新生成参数 | `supported` | 核心 profile | 宿主 CLI | 菜单/CLI 按入口重生成密钥对和 short ID，派生校验、候选确认和失败恢复；账号、目标、其它入口及额度保持，链接和已启用发布同步更新。 |

@@ -190,6 +190,14 @@ run)
     elif [[ " $* " == *' tls-check '* ]]; then
         [[ "${mode}" != tls-fail ]] || exit 1
     elif [[ " $* " == *'/opt/acme/acme.sh'* ]]; then
+        if [[ " $* " == *' --standalone '* ]]; then
+            [[ " $* " == *' --httpport 8080 '* &&
+                " $* " == *' 0.0.0.0:80:8080/tcp '* &&
+                " $* " == *' [::]:80:8080/tcp '* &&
+                " $* " != *' --dns '* && " $* " != *' --env-file '* ]] || exit 1
+            [[ -z "$(cat)" ]] || exit 1
+            printf 'standalone-private-input-empty\n' >>"${FAKE_SETUP_EVENTS}"
+        fi
         [[ "${mode}" != acme-fail ]] || exit 1
         output= account= domain= previous=
         for argument in "$@"; do
@@ -1214,6 +1222,36 @@ for dnsCase in acme-fail dns-success; do
             -f "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/ws.example.com.crt" ]] ||
             fail 'DNS-01 setup did not commit certificate and ACME account together'
     fi
+done
+
+STANDALONE_INPUT=$'1\n2\nproxy.example.com\n1\nws.example.com\n24444\n4\nadmin@example.com\ny\ny\n'
+for standaloneCase in cancel acme-fail success; do
+    newState "standalone-${standaloneCase}"
+    case "${standaloneCase}" in
+    cancel)
+        before=$(snapshot)
+        runPty 0 standalone-cancel "${STANDALONE_INPUT%$'y\n'}"$'n\n' setup "${ASSET_ARGS[@]}"
+        [[ "$(snapshot)" == "${before}" && ! -s "${EVENTS}" && ! -s "${VERIFY_LOG}" ]] ||
+            fail 'standalone cancellation changed state or started privileged work'
+        ;;
+    acme-fail)
+        export FAKE_SETUP_MODE=acme-fail
+        runPty 15 standalone-acme-fail "${STANDALONE_INPUT}" setup "${ASSET_ARGS[@]}"
+        assertUnconfigured
+        [[ ! -f "${PADM_DOCKER_INSTALL_DIR}/data/acme/account.conf" ]] ||
+            fail 'failed standalone retained candidate ACME account'
+        unset FAKE_SETUP_MODE
+        ;;
+    success)
+        runPty 0 standalone-success "${STANDALONE_INPUT}" setup "${ASSET_ARGS[@]}"
+        [[ -f "${PADM_DOCKER_INSTALL_DIR}/data/acme/account.conf" &&
+            -f "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/ws.example.com.crt" &&
+            -f "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/ws.example.com.key" ]] ||
+            fail 'standalone did not commit its certificate and ACME account together'
+        grep -qF 'standalone-private-input-empty' "${EVENTS}" ||
+            fail 'standalone did not publish both families or invented DNS credentials'
+        ;;
+    esac
 done
 
 # NaiveProxy 的已有受管证书与 DNS-01 仍使用首配的候选事务。

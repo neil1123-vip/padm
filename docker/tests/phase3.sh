@@ -1049,8 +1049,8 @@ chmod 0600 "${CREDENTIALS}"
 : >"${DOCKER_LOG}"
 runControl 0 acme-issue acme issue --domain proxy.example.com --email admin@example.com \
     --dns dns_cf --credentials "${CREDENTIALS}"
-grep -q -- '--issue --dns dns_cf -d proxy.example.com' "${DOCKER_LOG}" || fail 'ACME issue was not run'
-grep -q -- '--install-cert -d proxy.example.com' "${DOCKER_LOG}" || fail 'ACME install-cert was not run'
+grep -q -- '--issue --dns dns_cf --keylength ec-256 -d proxy.example.com' "${DOCKER_LOG}" || fail 'ECC ACME issue was not run'
+grep -q -- '--install-cert -d proxy.example.com --ecc' "${DOCKER_LOG}" || fail 'ECC ACME install-cert was not run'
 grep -qxF 'fake-acme-certificate' "${DOCKER_ROOT}/secrets/tls/proxy.example.com.crt" ||
     fail 'ACME certificate was not committed'
 
@@ -1093,7 +1093,7 @@ validateFeatureMatrix() {
       ["subscription-traffic", "interactive-menu", "routing-tools", "core-lifecycle",
         "core-upgrade-assessment", "geo-data", "script-update", "uninstall", "reality-target-management",
         "reality-parameter-management", "reality-coexistence"] as $host_cli |
-      ["subscription-multiserver", "acme-standalone", "fail2ban", "wireguard", "tun", "tproxy",
+      ["subscription-multiserver", "fail2ban", "wireguard", "tun", "tproxy",
         "internal-203-wireguard", "internal-204-tun", "internal-205-redirect-tproxy",
         "network-optimization"] as $host |
       ($legacy + $host_cli + $host + ["subscription-users", "site-static-redirect-alpn",
@@ -1174,6 +1174,7 @@ del(.feature_matrix["reality-target-management"])
 .feature_matrix.nginx.profiles = ["core-sing-box"]
 .feature_matrix["subscription-traffic"].profiles = []
 .feature_matrix.nginx.network_mode = "host"
+.feature_matrix["acme-standalone"].network_mode = "host"
 .feature_matrix.wireguard.host_capabilities = ["SYS_ADMIN"]
 .host_integrations.wireguard.capabilities = ["SYS_ADMIN"]
 .feature_matrix["internal-203-wireguard"].profiles = ["net-fail2ban"]

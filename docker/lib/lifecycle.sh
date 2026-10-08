@@ -58,7 +58,7 @@ dockerUsage() {
   padm-docker tls install --domain <域名> --cert <文件> --key <文件> [--ops-image <tag@digest>]
   padm-docker tls validate --domain <域名>
   padm-docker tls manage
-  padm-docker acme <issue|renew> --domain <域名> --email <邮箱> --dns <dns_*> --credentials <文件> [--ops-image <tag@digest>]
+  padm-docker acme <issue|renew> --domain <域名> --email <邮箱> <--dns <dns_*> --credentials <文件>|--standalone> [--ops-image <tag@digest>]
   padm-docker acme schedule <enable|disable|status> [续期输入参数]
   padm-docker acme auto-renew
   padm-docker validate
@@ -1088,6 +1088,7 @@ dockerUninstallCommand() {
 
 dockerCommandInterrupted() {
     local status=$1
+    dockerAcmeChallengeRestore || true
     dockerAssessCleanup || true
     dockerGeoScheduleInterrupted || true
     dockerGeoInterrupted || true
@@ -1161,6 +1162,7 @@ dockerMain() {
         ;;
     esac
     status=${status:-$?}
+    dockerAcmeChallengeRestore || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_STATE}
     dockerGeoScheduleInterrupted || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_STATE}
     dockerGeoInterrupted || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_STATE}
     dockerRenewalScheduleInterrupted || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_STATE}

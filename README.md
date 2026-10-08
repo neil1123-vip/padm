@@ -147,7 +147,7 @@ padm-docker status
 
 向导最终确认后才验签发布、生成 UUID/Reality 参数/订阅 token，并准备候选配置与证书。
 没有 `cosign` 时停止，不自动从未验证来源安装验证器，也不能跳过验签。
-WS/HTTPUpgrade/gRPC TLS、传统 TLS fallback、Hysteria2、AnyTLS、NaiveProxy、TUIC 和 direct Trojan 可选择已有受管证书、导入完整证书链与私钥，或使用 DNS-01；
+WS/HTTPUpgrade/gRPC TLS、传统 TLS fallback、Hysteria2、AnyTLS、NaiveProxy、TUIC 和 direct Trojan 可选择已有受管证书、导入完整证书链与私钥，或使用 DNS-01/HTTP-01 standalone；
 私钥和 DNS 凭据必须是仅持有者可读的普通文件。订阅发布仍要求 Xray、协议 21 VLESS WS TLS 和受管证书。
 Hysteria2 使用单 UDP 入口，支持 BBR/Brutal、Salamander 混淆和 HTTPS 伪装；
 带宽按服务端方向输入，分享链接自动转换为客户端方向。端口跳跃及 Gecko 尚未开放。
@@ -198,7 +198,7 @@ padm-docker edit --site-default --confirm PADM-DOCKER-EDIT
 失败和 INT/TERM 同时恢复站点及规格，旧无站点快照保留当前静态目录。
 删除最后一个 Nginx 入口会清除站点模式，仍保留静态文件及其它 TLS 入口。
 `status` 只报告 `site_mode`，不输出目标 URL。已有旧规格保持兼容，带 `.site` 的 v3
-规格要求控制 bundle 声明 `x-padm-site-content`；webroot/standalone ACME 继续待交付。
+规格要求控制 bundle 声明 `x-padm-site-content`；受管 webroot ACME 继续待交付，standalone HTTP-01 见证书管理。
 
 同一菜单提供 `27`/`29` 的 ALPN 诊断、推荐修复和三种手动顺序：
 
@@ -480,12 +480,14 @@ padm-docker tls validate --domain example.com
 padm-docker tls install --domain example.com --cert /path/fullchain.pem --key /path/privkey.pem
 padm-docker acme <issue|renew> --domain example.com --email admin@example.com --dns <dns_provider> --credentials /path/credentials
 padm-docker acme schedule enable --domain example.com --email admin@example.com --dns <dns_provider> --credentials /path/credentials
+padm-docker acme <issue|renew> --domain example.com --email admin@example.com --standalone
+padm-docker acme schedule enable --domain example.com --email admin@example.com --standalone
 padm-docker acme schedule status
 padm-docker acme schedule disable --domain example.com
 padm-docker acme auto-renew
 ```
 
-主菜单第 8 项可查看/校验证书、导入轮换、DNS-01 申请或续期，并查看、启用或停用自动续期；最终确认前不持有部署锁。
+主菜单第 8 项可查看/校验证书、导入轮换、DNS-01/HTTP-01 standalone 申请或续期，并查看、启用或停用自动续期；最终确认前不持有部署锁。
 已配置部署必须使用部署记录的 ops 镜像，不能用 `--ops-image` 换成其他镜像。
 候选证书检查有效期、域名和私钥匹配后，先执行 `nginx -t` 再重载并检查健康；
 失败或中断恢复旧证书和 ACME 账户，保留其他域名及累计流量。
@@ -493,10 +495,19 @@ padm-docker acme auto-renew
 核心端 TLS 只处理配置中引用的同域名受管 `.crt/.key` 对，使用只读
 `/etc/padm/secrets/tls` 挂载；全部消费者先校验，再定向重建核心或 reload Nginx，
 逐服务检查健康，失败时尝试恢复全部消费者且累计流量不回退。
-自动续期需要该域名已有与 DNS provider 匹配的受管 ACME 账户，不能为仅导入的外部证书
-直接开启。启用后将 `NAME=value` DNS 凭据和续期输入保存在宿主
+HTTP-01 使用非 root ops 容器的 `8080`，临时发布宿主双栈 TCP `80`；
+域名必须解析到本机且公网 `80` 可达，不修改防火墙，也不提供 TLS-ALPN-01。
+挑战前核对实际容器标签、镜像、挂载、部署与端口归属；外部或无法确认的监听拒绝。
+只暂停本部署原本运行的 `80` 拥有者，同容器的 HTTPS 会短暂停机，不停止无关 `443` 服务。
+成功、失败或信号后恢复原容器；原本停止的 TLS 消费者不启动。
+续期先让 acme.sh 完成到期/ARI 判断，未到期不发布端口、不暂停服务；
+恢复失败保留私有候选内的 `challenge.json` 容器 ID 记录，不继续下一域名。
+自动续期需要该域名已有与验证方式匹配的受管 ACME 账户，不能为仅导入的外部证书
+直接开启。DNS 将 `NAME=value` 凭据和续期输入保存在宿主
 `secrets/renewal/<域名>/`，目录为 `0700 root:root`、文件为 `0600 root:root`；
 凭据经标准输入进入工具，不放在调度、参数或 Docker 环境变量元数据中。
+HTTP 登记只保存 schema `2` 请求，不生成凭据文件；DNS 保持 schema `1`。
+已启用 HTTP 续期时拒绝旧 bundle；停用时事务删除该域名登记，允许重新使用兼容的旧 DNS bundle。
 多个域名共用一个每日 03:17 的任务，优先 systemd timer（最多随机延迟 5 分钟），
 否则使用正在运行的 cron；两个后端互斥，重复启用不增加任务，未到期正常跳过。
 `down` 和卸载移除任务但保留私有输入，`up` 恢复；更新/回滚保留最新输入，

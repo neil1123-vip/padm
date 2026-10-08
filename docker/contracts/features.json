@@ -321,9 +321,9 @@
       "native_menu": "站点与证书",
       "native_action": "本机 TLS 证书管理",
       "profiles": ["acme"],
-      "network_mode": "host",
+      "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "需要 standalone 挑战的宿主端口归属和停机回滚流程。"
+      "reason": "5A.3a 已提供 HTTP-01 standalone 首配、菜单/CLI 与自动续期：非 root ops 临时双栈 80:8080，实际归属检查，只暂停原运行拥有者，失败与信号恢复。公网 CA、原生 Linux/双架构及 TLS-ALPN-01 未验，完整状态仍 deferred。"
     },
     "site-static-redirect-alpn": {
       "status": "deferred",
