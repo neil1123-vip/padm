@@ -243,7 +243,13 @@ runFrameworkParallelSelectorListWithJobsContract() (
     grep -qx 'mode=pairs jobs=9 .* alpha alpha beta beta' "${callLog}"
     grep -qx 'mode=pairs jobs=4 .* alpha alpha beta beta' "${callLog}"
     grep -qx 'mode=pairs jobs= .* alpha alpha beta beta' "${callLog}"
-    [[ "$(wc -l <"${callLog}")" -eq 3 ]]
+    [[ "$(wc -l <"${callLog}")" -eq 3 ]] || return 1
+
+    # Geo 需要 root，仅由 Docker 合同覆盖，不能进入普通用户运行的原生 CI。
+    ! listRegressionCiChildSelectors | grep -qx docker-geo-data || return 1
+    ! listRegressionCiPrChildSelectors | grep -qx docker-geo-data || return 1
+    listRegressionDockerContractsFastChildSelectors | grep -qx docker-geo-data || return 1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND[docker-geo-data]}" == function ]]
 )
 
 runRegressionDockerContractsAggregateContract() (

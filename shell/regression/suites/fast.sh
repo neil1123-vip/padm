@@ -36,7 +36,6 @@ listRegressionCiChildSelectors() {
         platform-refresh \
         install-module-manifest \
         subscription-output \
-        docker-geo-data \
         core-safety-rollback
 }
 
