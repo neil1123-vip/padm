@@ -589,13 +589,20 @@ fail2banRestoreManagedFiles() {
     local backupDir=$1
     local serviceWasActive=${2:-false}
     local serviceWasEnabled=${3:-false}
+    local nginxWasRunning=${4:-}
     local rollbackFailed=false
 
     fail2banMarkRollbackFailure() {
         "$@" >/dev/null 2>&1 || rollbackFailed=true
     }
 
-    fail2banMarkRollbackFailure checkLogBackupRestore "${backupDir}"
+    if ! checkLogBackupRestore "${backupDir}" >/dev/null 2>&1; then
+        # 文件可能只恢复了一部分，禁止按混合配置重新启动服务。
+        if [[ "${nginxWasRunning}" == "false" ]] && nginxRunning; then
+            fail2banMarkRollbackFailure runCoreServiceActionAllowFailure handleNginx stop
+        fi
+        return 1
+    fi
     if command -v systemctl >/dev/null 2>&1 && fail2banSystemdServiceInstalled; then
         if [[ "${serviceWasActive}" == "true" ]]; then
             fail2banMarkRollbackFailure systemctl restart fail2ban.service
@@ -621,10 +628,24 @@ fail2banRestoreManagedFiles() {
             fi
         fi
     fi
+    if [[ -n "${nginxWasRunning}" ]]; then
+        fail2banMarkRollbackFailure subscriptionWireGuardNginxSystemdDaemonReload
+        if [[ "${nginxWasRunning}" == "true" ]]; then
+            if nginxRunning; then
+                fail2banMarkRollbackFailure runCoreServiceActionAllowFailure handleNginx stop
+            fi
+            if ! nginxRunning; then
+                fail2banMarkRollbackFailure runCoreServiceActionAllowFailure handleNginx start restore
+            fi
+        elif nginxRunning; then
+            fail2banMarkRollbackFailure runCoreServiceActionAllowFailure handleNginx stop
+        fi
+    fi
     [[ "${rollbackFailed}" != "true" ]]
 }
 
 fail2banEnsurePadmControlNginxLogging() {
+    local SERVICE_ACTIONS=
     if ! fail2banControlSurfaceEnabled; then
         return 0
     fi
@@ -644,7 +665,10 @@ fail2banApplyProfile() {
     local managedBackupDir=
     local serviceWasActive=false
     local serviceWasEnabled=false
+    local controlNginxWasRunning=
     local validateLog
+    local controlNginxConfig controlNginxDropIn
+    local -a managedPaths=()
 
     case "${profile}" in
     sshd | sshd+control | disabled) ;;
@@ -681,7 +705,7 @@ fail2banApplyProfile() {
         local detail=${3:-}
         local restoreMessage
 
-        if fail2banRestoreManagedFiles "${backupDir}" "${serviceWasActive}" "${serviceWasEnabled}"; then
+        if fail2banRestoreManagedFiles "${backupDir}" "${serviceWasActive}" "${serviceWasEnabled}" "${controlNginxWasRunning}"; then
             padmRemoveCleanupPath "${backupDir}"
             coreSetSingleRestoreResultMessage restoreMessage "${reason}" true "已恢复旧配置" "旧配置" "${backupDir}"
         else
@@ -720,27 +744,46 @@ fail2banApplyProfile() {
         return 1
     fi
 
+    managedPaths=("$(fail2banManagedJailFile)" "$(fail2banManagedFilterFile)" "$(fail2banManagedNginxScanFilterFile)")
     if [[ "${profile}" == "sshd+control" ]]; then
         if ! fail2banControlSurfaceEnabled; then
             errorCard "当前未检测到可保护的 /s/control/ 控制面" "请先完成主控/被控控制面初始化，或改用 只启用 SSH 防护"
             return 1
         fi
+        managedPaths+=("$(fail2banPadmControlLogFile)")
+        if declare -F refreshSubscriptionWireGuardNginxControl >/dev/null 2>&1; then
+            if ! controlNginxConfig=$(subscriptionWireGuardNginxConfigFile) ||
+                ! controlNginxDropIn=$(subscriptionWireGuardNginxSystemdDropInFile); then
+                errorCard "控制面 Nginx 备份路径无效"
+                return 1
+            fi
+            managedPaths+=("${controlNginxConfig}" "${controlNginxDropIn}")
+            controlNginxWasRunning=false
+            nginxRunning && controlNginxWasRunning=true
+        fi
+    fi
+    checkLogBackupCreate managedBackupDir "${managedPaths[@]}" || {
+        errorCard "Fail2ban 配置备份失败"
+        return 1
+    }
+
+    if [[ "${profile}" == "sshd+control" ]]; then
         if ! fail2banEnsurePadmControlNginxLogging; then
-            errorCard "控制面日志接入失败" "未能为 /s/control/ 配置专用 Nginx 访问日志"
+            fail2banRestoreOrReport "${managedBackupDir}" "控制面日志接入失败" "未能为 /s/control/ 配置专用 Nginx 访问日志"
             return 1
         fi
     fi
     if [[ "${nginxScanEnabled}" == "true" ]]; then
         if ! nginxScanPorts=$(fail2banResolveNginxScanPorts); then
-            errorCard "站点扫描扩展日志未接通" "请确认 Nginx 正在运行、活动配置引用该日志且日志文件可读：$(fail2banNginxAccessLogFile)"
+            if [[ "${profile}" == "sshd+control" ]]; then
+                fail2banRestoreOrReport "${managedBackupDir}" "站点扫描扩展日志未接通" "请确认 Nginx 正在运行、活动配置引用该日志且日志文件可读：$(fail2banNginxAccessLogFile)"
+            else
+                padmRemoveCleanupPath "${managedBackupDir}"
+                errorCard "站点扫描扩展日志未接通" "请确认 Nginx 正在运行、活动配置引用该日志且日志文件可读：$(fail2banNginxAccessLogFile)"
+            fi
             return 1
         fi
     fi
-
-    checkLogBackupCreate managedBackupDir "$(fail2banManagedJailFile)" "$(fail2banManagedFilterFile)" "$(fail2banManagedNginxScanFilterFile)" || {
-        errorCard "Fail2ban 配置备份失败"
-        return 1
-    }
 
     fail2banWriteManagedFilter || {
         fail2banRestoreOrReport "${managedBackupDir}" "Fail2ban 过滤器写入失败"

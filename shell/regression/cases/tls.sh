@@ -1183,6 +1183,7 @@ runTlsRenewalFailurePropagationRegression() (
         local legacyDomain=legacy.example.com
         local subscribeTlsDomain=subscribe.example.com
         local usableChecks=0
+        local initialNginx initialXray initialSingBox coreStates restartFails=false
         mode=multi-cert
         rm -rf "${tlsDir}" "${homeDir}/.acme.sh"
         mkdir -p "${tlsDir}" \
@@ -1230,28 +1231,92 @@ EOF
                 ;;
             esac
         }
-        reloadCore() { printf 'reload\n' >>"${serviceLog}"; }
-        handleNginx() { printf 'nginx:%s\n' "$1" >>"${serviceLog}"; }
+        reloadCore() {
+            printf 'reload\n' >>"${serviceLog}"
+            xrayState=true
+            singBoxState=true
+        }
+        runServiceAction() {
+            [[ "$2" == restart && "${SERVICE_QUEUE_ALLOW_FAILURE}" == true ]] || return 1
+            printf 'restart:%s\n' "$1" >>"${serviceLog}"
+            [[ "${restartFails}" != true || "$1" != xray ]] || return 1
+            case "$1" in
+            xray) handleXray stop && handleXray start ;;
+            sing-box) handleSingBox stop && handleSingBox start ;;
+            *) return 1 ;;
+            esac
+        }
+        handleNginx() {
+            printf 'nginx:%s\n' "$1" >>"${serviceLog}"
+            [[ "$1" == start ]] && nginxState=true || nginxState=false
+        }
         readNginxSubscribe() {
             subscribeConfigState=valid
             subscribeDomain=${subscribeTlsDomain}
             subscribePort=39778
         }
-        probeSubscribeTLS() { printf 'probe:%s:%s\n' "$1" "$2" >>"${serviceLog}"; }
+        probeSubscribeTLS() {
+            printf 'probe:%s:%s\n' "$1" "$2" >>"${serviceLog}"
+            [[ "${nginxState}" == true ]]
+        }
 
-        renewManagedTLSCertificates
-        [[ "$(grep -c -- ' --cron ' "${commandLog}")" == "1" ]]
-        [[ "$(grep -c -- ' --installcert ' "${commandLog}")" == "2" ]]
-        grep -q -- " --installcert -d ${legacyDomain} " "${commandLog}"
-        grep -q -- " --installcert -d ${subscribeTlsDomain} " "${commandLog}"
-        [[ "$(<"${tlsDir}/${legacyDomain}.crt")" == "legacy-new-cert" ]]
-        [[ "$(<"${tlsDir}/${subscribeTlsDomain}.crt")" == "subscribe-new-cert" ]]
-        [[ "$(grep -c '^reload$' "${serviceLog}")" == "1" ]]
-        [[ "$(grep -c '^nginx:stop$' "${serviceLog}")" == "1" ]]
-        [[ "$(grep -c '^nginx:start$' "${serviceLog}")" == "1" ]]
-        ! grep -q '^nginx:restart$' "${serviceLog}"
-        grep -qx "probe:${subscribeTlsDomain}:39778" "${serviceLog}"
-        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+        # DNS 续签无需停服，只更新原来运行的服务；停着的 Nginx 不做 HTTPS 探测。
+        for initialNginx in true false; do
+            for coreStates in false:false true:false false:true true:true; do
+                IFS=: read -r initialXray initialSingBox <<<"${coreStates}"
+                nginxState=${initialNginx}
+                xrayState=${initialXray}
+                singBoxState=${initialSingBox}
+                usableChecks=0
+                printf 'legacy-old-cert\n' >"${tlsDir}/${legacyDomain}.crt"
+                printf 'legacy-old-key\n' >"${tlsDir}/${legacyDomain}.key"
+                printf 'subscribe-old-cert\n' >"${tlsDir}/${subscribeTlsDomain}.crt"
+                printf 'subscribe-old-key\n' >"${tlsDir}/${subscribeTlsDomain}.key"
+                : >"${commandLog}"
+                : >"${serviceLog}"
+                regressionExpectStatus 0 renewManagedTLSCertificates
+                [[ "$(grep -c -- ' --cron ' "${commandLog}")" == "1" ]]
+                [[ "$(grep -c -- ' --installcert ' "${commandLog}")" == "2" ]]
+                grep -q -- " --installcert -d ${legacyDomain} " "${commandLog}"
+                grep -q -- " --installcert -d ${subscribeTlsDomain} " "${commandLog}"
+                [[ "$(<"${tlsDir}/${legacyDomain}.crt")" == "legacy-new-cert" ]]
+                [[ "$(<"${tlsDir}/${subscribeTlsDomain}.crt")" == "subscribe-new-cert" ]]
+                ! grep -qx reload "${serviceLog}"
+                [[ "${nginxState}:${xrayState}:${singBoxState}" == "${initialNginx}:${initialXray}:${initialSingBox}" ]]
+                if [[ "${initialXray}" == true ]]; then
+                    grep -qx restart:xray "${serviceLog}"
+                else
+                    ! grep -q '^xray:\|^restart:xray$' "${serviceLog}"
+                fi
+                if [[ "${initialSingBox}" == true ]]; then
+                    grep -qx restart:sing-box "${serviceLog}"
+                else
+                    ! grep -q '^sing-box:\|^restart:sing-box$' "${serviceLog}"
+                fi
+                if [[ "${initialNginx}" == true ]]; then
+                    [[ "$(grep -c '^nginx:stop$' "${serviceLog}")" == "1" ]]
+                    [[ "$(grep -c '^nginx:start$' "${serviceLog}")" == "1" ]]
+                    grep -qx "probe:${subscribeTlsDomain}:39778" "${serviceLog}"
+                else
+                    ! grep -Eq '^(nginx:|probe:)' "${serviceLog}"
+                fi
+                ! grep -q '^nginx:restart$' "${serviceLog}"
+                [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+            done
+        done
+        # 核心重启失败必须上报并保留备份，不能继续重启 Nginx 或探测 HTTPS。
+        nginxState=true xrayState=true singBoxState=true
+        usableChecks=0 restartFails=true
+        printf 'legacy-old-cert\n' >"${tlsDir}/${legacyDomain}.crt"
+        : >"${serviceLog}"
+        : >"${errorLog}"
+        regressionExpectStatus 1 renewManagedTLSCertificates
+        grep -qx restart:xray "${serviceLog}"
+        grep -qx restart:sing-box "${serviceLog}"
+        ! grep -Eq '^(nginx:|probe:)' "${serviceLog}"
+        grep -q '核心服务重载失败' "${errorLog}"
+        grep -q '备份目录:' "${errorLog}"
+        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == previous ]]
     )
 
     (

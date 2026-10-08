@@ -1513,6 +1513,101 @@ PY
     grep -q '站点扫描扩展日志未接通' "${errorLog}"
 
     (
+        source "${PROJECT_ROOT}/shell/core/services.sh"
+        local controlConfig="${root}/nginx/padm-control-wg.conf"
+        local controlDropIn="${root}/systemd/nginx.service.d/10-padm-wg.conf"
+        local controlLog="${PADM_FAIL2BAN_CONTROL_LOG_FILE}"
+        local serviceLog="${root}/nginx/control-service.log"
+        local nginxState nginxBefore
+        mkdir -p "$(dirname "${controlConfig}")" "$(dirname "${controlDropIn}")"
+
+        fail2banControlSurfaceEnabled() { return 0; }
+        subscriptionWireGuardNginxConfigFile() { printf '%s\n' "${controlConfig}"; }
+        subscriptionWireGuardNginxSystemdDropInFile() { printf '%s\n' "${controlDropIn}"; }
+        subscriptionWireGuardNginxSystemdDaemonReload() { return 0; }
+        nginxRunning() { [[ "${nginxState}" == "true" ]]; }
+        handleNginx() {
+            printf '%s\n' "${1:-}" >>"${serviceLog}"
+            case "${1:-}" in
+            start)
+                [[ "$(<"${controlConfig}")" == "legacy control config" ]] || return 1
+                [[ ! -e "${controlDropIn}" && ! -e "${controlLog}" ]] || return 1
+                nginxState=true
+                ;;
+            stop) nginxState=false ;;
+            refresh) nginxState=true ;;
+            *) return 1 ;;
+            esac
+            return 0
+        }
+        handleXray() { return 1; }
+        refreshSubscriptionWireGuardNginxControl() {
+            printf 'changed control config\n' >"${controlConfig}"
+            printf 'changed nginx drop-in\n' >"${controlDropIn}"
+            serviceQueueRefresh nginx
+        }
+        fail2banWriteManagedFilter() { return 1; }
+
+        for nginxBefore in false true; do
+            nginxState="${nginxBefore}"
+            SERVICE_ACTIONS=xray:stop
+            printf 'legacy control config\n' >"${controlConfig}"
+            rm -f "${controlDropIn}" "${controlLog}"
+            : >"${serviceLog}"
+            : >"${errorLog}"
+
+            regressionExpectStatus 1 fail2banApplyProfile sshd+control false >/dev/null 2>&1
+            grep -q 'Fail2ban 过滤器写入失败' "${errorLog}"
+            [[ "$(<"${controlConfig}")" == "legacy control config" ]]
+            [[ ! -e "${controlDropIn}" && ! -e "${controlLog}" ]]
+            [[ "${nginxState}" == "${nginxBefore}" ]]
+            [[ "${SERVICE_ACTIONS}" == "xray:stop" ]]
+            if [[ "${nginxBefore}" == "true" ]]; then
+                [[ "$(<"${serviceLog}")" == $'refresh\nstop\nstart' ]]
+            else
+                [[ "$(<"${serviceLog}")" == $'refresh\nstop' ]]
+            fi
+            if regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-check-log-backup.*'; then
+                return 1
+            fi
+        done
+        (
+            local retainedBackup
+            fail2banServiceActive() { return 0; }
+            fail2banServiceEnabled() { return 0; }
+            fail2banSystemdServiceInstalled() { return 0; }
+            systemctl() { printf 'fail2ban:%s\n' "$*" >>"${serviceLog}"; }
+            subscriptionWireGuardNginxSystemdDaemonReload() { printf 'daemon-reload\n' >>"${serviceLog}"; }
+            checkLogBackupRestore() {
+                printf 'legacy control config\n' >"${controlConfig}"
+                return 1
+            }
+            for nginxBefore in false true; do
+                nginxState="${nginxBefore}"
+                printf 'legacy control config\n' >"${controlConfig}"
+                rm -f "${controlDropIn}" "${controlLog}"
+                : >"${serviceLog}"
+                : >"${errorLog}"
+
+                regressionExpectStatus 1 fail2banApplyProfile sshd+control false >/dev/null 2>&1
+                grep -q '恢复失败' "${errorLog}"
+                [[ "$(<"${controlConfig}")" == "legacy control config" ]]
+                [[ "$(<"${controlDropIn}")" == "changed nginx drop-in" ]]
+                [[ "${nginxState}" == "${nginxBefore}" ]]
+                if [[ "${nginxBefore}" == "true" ]]; then
+                    [[ "$(<"${serviceLog}")" == "refresh" ]]
+                else
+                    [[ "$(<"${serviceLog}")" == $'refresh\nstop' ]]
+                fi
+                retainedBackup=$(find "${root}" -maxdepth 1 -type d -name 'padm-check-log-backup.*' -print -quit)
+                [[ -n "${retainedBackup}" ]]
+                grep -Fq "${retainedBackup}" "${errorLog}"
+                padmRemoveCleanupPath "${retainedBackup}"
+            done
+        )
+    )
+
+    (
         fail2banSystemdServiceInstalled() { return 1; }
         fail2banOpenRcServiceInstalled() { return 0; }
         fail2banServiceActive() { return 1; }

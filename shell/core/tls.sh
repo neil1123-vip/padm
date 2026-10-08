@@ -970,14 +970,10 @@ renewManagedTLSCertificates() {
             return 1
         }
     elif [[ "${changed}" == "true" ]]; then
-        if [[ -n "${requestedDomain}" ]]; then
-            [[ "${xrayWasRunning}" != true ]] ||
-                runCoreServiceActionAllowFailure runServiceAction xray restart || reloadStatus=1
-            [[ "${singBoxWasRunning}" != true ]] ||
-                runCoreServiceActionAllowFailure runServiceAction sing-box restart || reloadStatus=1
-        else
-            reloadCore || reloadStatus=1
-        fi
+        [[ "${xrayWasRunning}" != true ]] ||
+            runCoreServiceActionAllowFailure runServiceAction xray restart || reloadStatus=1
+        [[ "${singBoxWasRunning}" != true ]] ||
+            runCoreServiceActionAllowFailure runServiceAction sing-box restart || reloadStatus=1
         [[ "${reloadStatus}" == 0 ]] || {
             padmForgetCleanupPath "${backupDir}"
             errorCard "TLS 证书已更新，但核心服务重载失败" "备份目录: ${backupDir}"
@@ -992,7 +988,7 @@ renewManagedTLSCertificates() {
             fi
         fi
     fi
-    if [[ "${changed}" == "true" && ( -z "${requestedDomain}" || "${nginxWasRunning}" == true ) ]] &&
+    if [[ "${changed}" == "true" && "${nginxWasRunning}" == true ]] &&
         declare -F readNginxSubscribe >/dev/null 2>&1 && declare -F probeSubscribeTLS >/dev/null 2>&1; then
         subscribePort=
         subscribeDomain=
