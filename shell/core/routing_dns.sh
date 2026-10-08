@@ -122,13 +122,18 @@ dnsRoutingBackupCleanup() {
     DNS_ROUTING_ACTIVE_BACKUP_DIR=
 }
 
+# 返回恢复与清理结果，调用方保留原操作的失败状态。
 dnsRoutingAbortChange() {
     local reason=$1
     local backupDir
     local restoreMessage
     backupDir=$(dnsRoutingSafeBackupDir) || return 1
     if dnsRoutingBackupRestore; then
-        dnsRoutingBackupCleanup || errorCard "${reason}，旧配置已恢复，但备份目录清理失败: ${backupDir}"
+        if ! dnsRoutingBackupCleanup; then
+            errorCard "${reason}，旧配置已恢复，但备份目录清理失败: ${backupDir}"
+            return 1
+        fi
+        return 0
     else
         padmForgetCleanupPath "${backupDir}"
         DNS_ROUTING_ACTIVE_BACKUP_DIR=
@@ -279,7 +284,8 @@ setUnlockSNI() {
 
         dnsRoutingBackupCreate || { errorCard "DNS/hosts 覆盖配置备份失败，已取消修改"; return 1; }
         if [[ "${coreInstallType}" == 1 ]]; then
-            autoRead sni_xray_domains "请按照上面示例录入域名:" xrayDomainList || return 0
+            autoRead sni_xray_domains "请按照上面示例录入域名:" xrayDomainList ||
+                { dnsRoutingAbortChange "DNS/hosts 覆盖已取消" || return 1; return 0; }
             local hosts={}
             while read -r domain; do
                 local matchedRuleValue
@@ -305,7 +311,8 @@ setUnlockSNI() {
         fi
         if [[ -n "${singBoxConfigPath}" ]]; then
             echoContent yellow "录入示例:www.netflix.com,www.google.com"
-            autoRead sni_singbox_domains "请按照上面示例录入域名:" singboxDomainList || return 0
+            autoRead sni_singbox_domains "请按照上面示例录入域名:" singboxDomainList ||
+                { dnsRoutingAbortChange "DNS/hosts 覆盖已取消" || return 1; return 0; }
             addSingBoxDNSConfig "${setSNIP}" "${singboxDomainList}" "predefined" || { dnsRoutingAbortChange "DNS/hosts 覆盖配置写入失败"; return 1; }
         fi
         dnsRoutingReloadOrRollback "DNS/hosts 覆盖" || return 1
@@ -401,9 +408,10 @@ updateSingBoxDNSRoutingConfig() {
             .route.rule_set |= map(select(.tag as $tag |
                 (($oldRuleTags | index($tag)) and ($usedRuleTags | index($tag) | not) and
                  ($tag | startswith("geosite_") and endswith("_dns")) and
-                 . == {tag:$tag, type:"remote", format:"binary", http_client:{detour:"01_direct_outbound"},
+                 (.http_client == {detour:"01_direct_outbound"} or .http_client == {engine:"go"}) and
+                 (del(.http_client) == {tag:$tag, type:"remote", format:"binary",
                        url:("https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-" +
-                            ($tag | ltrimstr("geosite_") | rtrimstr("_dns")) + ".srs")}) | not
+                            ($tag | ltrimstr("geosite_") | rtrimstr("_dns")) + ".srs")})) | not
             )) |
             if .route.rule_set == [] then del(.route.rule_set) else . end
         else . end |

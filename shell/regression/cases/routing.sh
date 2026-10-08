@@ -18,7 +18,7 @@ YAML
     rulesJson=$(initSingBoxRules "openai,example.com,full:api.example.com,keyword:video" "regression")
     jq -e '
       .ruleSet[0].tag == "geosite_openai_regression" and
-      .ruleSet[0].http_client.detour == "01_direct_outbound" and
+      .ruleSet[0].http_client == {engine:"go"} and
       (.ruleSet[0] | has("download_detour") | not) and
       .suffixRules == ["example.com"] and
       .domainRules == ["api.example.com"] and
@@ -36,7 +36,7 @@ YAML
       .route.rules[0].domain_keyword == ["video"] and
       (.route.rules[0].domain_regex | not) and
       .route.rule_set[0].url == "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-openai.srs" and
-      .route.rule_set[0].http_client.detour == "01_direct_outbound" and
+      .route.rule_set[0].http_client == {engine:"go"} and
       (.route.rule_set[0] | has("download_detour") | not)
     ' "${singBoxConfigPath}test_route.json" >/dev/null || { printf 'routing-keyword-fail:sing-box-route\n' >&2; return 1; }
     (
@@ -159,7 +159,7 @@ JSON
       .route.rules[0].rule_set == ["geoip_cn_cn_block_ip_route"] and
       .route.rules[0].action == "reject" and
       .route.rule_set[0].format == "binary" and
-      .route.rule_set[0].http_client.detour == "01_direct_outbound" and
+      .route.rule_set[0].http_client == {engine:"go"} and
       (.route.rule_set[0] | has("download_detour") | not)
     ' "${singBoxConfigPath}cn_block_ip_route.json" >/dev/null
     addSingBoxOutbound "01_direct_outbound"
@@ -349,7 +349,7 @@ JSON
       (.route.rules[]? | select(.action == "resolve" and .server == "padm-dnsRouting")) and
       (.dns.rules[0].domain_regex | not) and
       .route.rule_set[0].format == "binary" and
-      .route.rule_set[0].http_client.detour == "01_direct_outbound" and
+      .route.rule_set[0].http_client == {engine:"go"} and
       (.route.rule_set[0] | has("download_detour") | not)
     ' "${singBoxConfigPath}dns.json" >/dev/null
     jq -e '.inbounds[0].tls.reality.handshake.domain_resolver? | not' "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json" >/dev/null
@@ -484,6 +484,7 @@ JSON
         ! validateAccessIPList "${invalidIP}" >/dev/null || return 1
     done
     runRoutingKeywordDNSRegression
+    runSNIRoutingCancelRegression
 }
 
 runRoutingKeywordDNSRegression() (
@@ -652,6 +653,13 @@ JSON
         afterAdd=$(jq -Sc . "${singBoxConfigPath}dns.json")
         addSingBoxDNSConfig "1.1.1.1" "geosite:shared,geosite:exclusive,example.com"
         [[ "$(jq -Sc . "${singBoxConfigPath}dns.json")" == "${afterAdd}" ]]
+        removeUnlockDNS
+        [[ "$(jq -Sc . "${singBoxConfigPath}dns.json")" == "${before}" ]]
+
+        addSingBoxDNSConfig "1.1.1.1" "geosite:exclusive,example.com"
+        updateRoutingJsonConfig "${singBoxConfigPath}dns.json" '
+            (.route.rule_set[] | select(.tag == "geosite_exclusive_dns")).http_client = {detour:"01_direct_outbound"}
+        '
         removeUnlockDNS
         [[ "$(jq -Sc . "${singBoxConfigPath}dns.json")" == "${before}" ]]
 
@@ -1150,6 +1158,83 @@ YAML
       (.route.rules[0].network? | not) and
       (.route.rules[0].domain? | not)
     ' "${singBoxConfigPath}socks5_02_inbound_route.json" >/dev/null
+)
+
+runSNIRoutingCancelRegression() (
+    local rootRel="${TMP_DIR}/sni-routing-cancel"
+    local root
+    local reloadMarker
+    local errorLog
+    mkdir -p "${rootRel}"
+    root=$(cd -- "${rootRel}" && pwd -P)
+    reloadMarker="${root}/reload"
+    errorLog="${root}/error.log"
+    PADM_DNS_ROUTING_BACKUP_DIR="${root}/backup"
+    errorCard() {
+        printf '%s\n' "$*" >>"${errorLog}"
+        return 0
+    }
+    getDLCMatchedRuleValue() { printf 'domain:%s\n' "$1"; }
+    reloadCore() {
+        printf 'reload\n' >>"${reloadMarker}"
+        return 1
+    }
+
+    local cancelStage
+    for cancelStage in xray sing-box restore-fail; do
+        (
+            local cancelRoot="${root}/sni-cancel-${cancelStage}"
+            local configPath="${cancelRoot}/xray/" singBoxConfigPath="${cancelRoot}/sing-box/"
+            local PADM_DNS_ROUTING_BACKUP_DIR="${cancelRoot}/backup"
+            local coreInstallType=1 originalXray originalState originalSingBox originalDirect xrayChanged=false expectedStatus=0
+            mkdir -p "${configPath}" "${singBoxConfigPath}"
+            printf '{"dns":{"servers":["custom"],"hosts":{"domain:custom.example":"192.0.2.1"}}}\n' >"${configPath}11_dns.json"
+            printf '{"version":1,"dns":{"servers":[],"hosts":{}},"sni":{"servers":[],"hosts":{}}}\n' >"${configPath}dns_routing.state"
+            printf '{"dns":{"servers":[{"tag":"custom","type":"udp","server":"9.9.9.9"}]}}\n' >"${singBoxConfigPath}dns.json"
+            printf '{"outbounds":[{"tag":"01_direct_outbound","type":"direct"}]}\n' >"${singBoxConfigPath}01_direct_outbound.json"
+            originalXray=$(<"${configPath}11_dns.json")
+            originalState=$(<"${configPath}dns_routing.state")
+            originalSingBox=$(<"${singBoxConfigPath}dns.json")
+            originalDirect=$(<"${singBoxConfigPath}01_direct_outbound.json")
+            autoRead() {
+                case "$3" in
+                setSNIP) printf -v "$3" '203.0.113.10' ;;
+                xrayDomainList)
+                    [[ "${cancelStage}" != xray ]] || return 1
+                    printf -v "$3" 'example.com'
+                    ;;
+                singboxDomainList)
+                    jq -e '.dns.hosts["domain:example.com"] == "203.0.113.10"' "${configPath}11_dns.json" >/dev/null &&
+                        xrayChanged=true
+                    return 1
+                    ;;
+                *) return 1 ;;
+                esac
+            }
+            if [[ "${cancelStage}" == restore-fail ]]; then
+                dnsRoutingBackupRestore() { return 1; }
+                expectedStatus=1
+            fi
+            rm -f "${reloadMarker}" "${errorLog}"
+            regressionExpectStatus "${expectedStatus}" setUnlockSNI >/dev/null 2>&1 ||
+                { printf 'routing-sni-cancel-fail:status:%s\n' "${cancelStage}" >&2; return 1; }
+            [[ ! -e "${reloadMarker}" && "$(<"${singBoxConfigPath}dns.json")" == "${originalSingBox}" &&
+                "$(<"${singBoxConfigPath}01_direct_outbound.json")" == "${originalDirect}" &&
+                -z "${DNS_ROUTING_ACTIVE_BACKUP_DIR:-}" ]] ||
+                { printf 'routing-sni-cancel-fail:boundary:%s\n' "${cancelStage}" >&2; return 1; }
+            [[ "${cancelStage}" == xray || "${xrayChanged}" == true ]] ||
+                { printf 'routing-sni-cancel-fail:coexist-not-written\n' >&2; return 1; }
+            if [[ "${cancelStage}" == restore-fail ]]; then
+                [[ -d "${PADM_DNS_ROUTING_BACKUP_DIR}" ]] || return 1
+                grep -q 'DNS/hosts 覆盖已取消，且旧配置恢复失败' "${errorLog}"
+            else
+                [[ "$(<"${configPath}11_dns.json")" == "${originalXray}" &&
+                    "$(<"${configPath}dns_routing.state")" == "${originalState}" &&
+                    ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]] ||
+                    { printf 'routing-sni-cancel-fail:restore:%s\n' "${cancelStage}" >&2; return 1; }
+            fi
+        )
+    done
 )
 
 runDNSRoutingFailureReturnRegression() (

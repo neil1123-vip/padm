@@ -306,7 +306,7 @@ addSingBoxGeoIPRouteRule() {
         "format": "binary",
         "url": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-${geoipCode}.srs",
         "http_client": {
-          "detour": "01_direct_outbound"
+          "engine": "go"
         }
       }
     ]
@@ -502,7 +502,7 @@ initSingBoxRules() {
             type: "remote",
             format: "binary",
             url: .[1],
-            http_client: {detour: "01_direct_outbound"}
+            http_client: {engine: "go"}
           }))
         }'
 }
