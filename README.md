@@ -425,7 +425,13 @@ padm-docker control sync --invite /root/padm-control-invite.json
 通过生产 API/零能力客户端验证接入规划、幂等、凭据轮换、过期/撤销、版本冲突及断网恢复。
 专用回归 `docker-control-two-node-real` 仅在隔离测试容器增加 `NET_ADMIN`/`SYS_ADMIN`，
 仍使用 `network none`，不发布端口、不使用宿主网络；生产服务权限不变。
-本项不调用 Compose 应用/恢复，下一步 4C.4b 验收真实双部署事务；
+4C.4a 不调用 Compose 应用/恢复；4C.4b 的 `docker-control-two-deployment-real`
+使用两个独立 Docker Engine、PID/mount/net namespace 和真实 cron，
+执行生产 CLI 接入/同步、真实 WS/TLS 客户端流量、账号与累计流量保持、
+断网/版本冲突、轮换撤销及健康失败/INT/TERM 恢复。
+专用测试容器需要 privileged 和独立 Linux 数据卷，但不挂宿主 Socket、
+不发布端口、不修改生产 Compose；普通和近似 selector 不获得该权限。
+节点从 `local-test-only-not-release-verified` 已安装夹具开始，不证明可信发布首次配置。
 完整角色迁移/灾备另行定义，多服务器保持 `deferred`。阶段边界见
 [4C 实施计划](documents/docker-menu-parity-plan.md#4c-多服务器控制后端)。
 

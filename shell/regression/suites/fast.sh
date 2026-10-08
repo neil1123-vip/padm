@@ -148,6 +148,10 @@ runDockerControlTwoNodeRealRegression() {
     PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-two-node-real.py"
 }
 
+runDockerControlTwoDeploymentRealRegression() {
+    PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-two-deployment-real.py"
+}
+
 runDockerControlStateRegression() {
     bash "${PROJECT_ROOT}/docker/tests/control-state.sh"
 }
@@ -210,6 +214,7 @@ registerRegressionFunctionLeaf docker-control-state runDockerControlStateRegress
 registerRegressionFunctionLeaf docker-control-cli runDockerControlCliRegression
 registerRegressionFunctionLeaf docker-control-client runDockerControlClientRegression
 registerRegressionFunctionLeaf docker-control-two-node-real runDockerControlTwoNodeRealRegression
+registerRegressionFunctionLeaf docker-control-two-deployment-real runDockerControlTwoDeploymentRealRegression
 registerRegressionFunctionLeaf docker-wireguard-runtime runDockerWireGuardRuntimeRegression
 
 listRegressionDockerWireGuardChildSelectors() {

@@ -402,8 +402,15 @@ namespaces in an isolated Linux container. The production API and capability-fre
 planning, idempotency, credential rotation, expiration/revocation, revision conflicts and network recovery.
 The dedicated `docker-control-two-node-real` regression adds `NET_ADMIN`/`SYS_ADMIN` only to its
 isolated test container, still with `network none`, no published ports and no host networking.
-Production permissions are unchanged. This test does not execute Compose apply/restore;
-4C.4b still needs real two-deployment transactions. Full role migration and disaster recovery need a separate contract.
+Production permissions are unchanged. 4C.4a does not execute Compose apply/restore.
+The 4C.4b `docker-control-two-deployment-real` regression uses two independent Docker Engines,
+PID/mount/network namespaces and real cron. It exercises production join/sync CLI transactions,
+real WS/TLS client traffic, account and cumulative-traffic preservation, network/revision conflicts,
+rotation/revocation, and health-failure/INT/TERM recovery.
+Only this exact selector runs a privileged isolated test container with a dedicated Linux data volume;
+there is no host Socket, published port or production Compose override.
+Nodes start from a `local-test-only-not-release-verified` installed fixture, not trusted first configuration.
+Full role migration and disaster recovery need a separate contract.
 Multi-server support remains `deferred`.
 See the [4C implementation checkpoints](../docker-menu-parity-plan.md#4c-多服务器控制后端).
 

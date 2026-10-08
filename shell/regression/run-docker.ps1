@@ -164,7 +164,7 @@ function Enter-RegressionSlots {
                     if ($LASTEXITCODE -ne 0) { throw 'Cannot check abandoned regression containers.' }
                     if ($orphans.Count) {
                         Write-Host "Regression queue: cleaning abandoned container(s): $($orphans -join ', ')"
-                        & $docker rm --force @orphans
+                        & $docker rm --force --volumes @orphans
                         if ($LASTEXITCODE -ne 0) { throw 'Abandoned regression container cleanup failed.' }
                     }
                 }
@@ -289,8 +289,11 @@ try {
     }
 
     # 双节点实测仅在容器的隔离网络空间创建 Peer，不使用宿主网络或发布端口。
-    $networkCapabilities = if ($Selector -eq 'docker-control-two-node-real') {
+    [string[]]$networkCapabilities = if ($Selector -eq 'docker-control-two-node-real') {
         @('--cap-add', 'NET_ADMIN', '--cap-add', 'SYS_ADMIN')
+    } elseif ($Selector -eq 'docker-control-two-deployment-real') {
+        # 嵌套 daemon 只操作测试容器的隔离空间，不挂宿主 Socket。
+        @('--privileged', '--mount', 'type=volume,dst=/n')
     } else { @() }
     $container = & $docker create --name "padm-regression-$runId" --platform $platform @slotLabels @networkCapabilities `
         --network none --init `
@@ -301,6 +304,50 @@ try {
     if ($LASTEXITCODE -ne 0) { $container = $null; throw 'Regression container creation failed.' }
     & $docker cp $snapshot "${container}:/snapshot.tar"
     if ($LASTEXITCODE -ne 0) { throw 'Source snapshot copy failed.' }
+    if ($Selector -eq 'docker-control-two-deployment-real') {
+        # 离线传入实际业务镜像；节点不得借用宿主 daemon 或旧源码。
+        $references = [ordered]@{
+            xray = 'padm-local/padm-xray:control-4c4b'
+            'sing-box' = 'padm-local/padm-sing-box:tls-3b4'
+            nginx = 'padm-local/padm-nginx:control-4c4b'
+            ops = 'padm-local/padm-ops:control-4c4b'
+            net = 'padm-local/padm-net:control-4c4b'
+        }
+        $nodeInputs = [ordered]@{}
+        foreach ($name in $references.Keys) {
+            $info = & $docker image inspect $references[$name]
+            if ($LASTEXITCODE -ne 0) { throw "Required node image is missing: $($references[$name])" }
+            $info = $info | ConvertFrom-Json | Select-Object -First 1
+            if ($info.Descriptor.digest -notmatch '^sha256:[a-f0-9]{64}$') {
+                throw "Node image has no real manifest digest: $name"
+            }
+            $reference = "$($references[$name])@$($info.Descriptor.digest)"
+            $nodeInputs[$name] = [ordered]@{ reference = $reference; image_id = $info.Id }
+        }
+        $nodeManifest = Join-Path $runDir 'node-images.json'
+        $nodeInputs | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $nodeManifest -Encoding utf8
+        $nodeKey = Get-TextHash ($nodeInputs | ConvertTo-Json -Depth 4 -Compress)
+        $nodeImages = Join-Path $sharedDirectory "node-images-$nodeKey.tar"
+        Wait-NamedMutex $buildGuard
+        $buildHeld = $true
+        try {
+            if (-not (Test-Path -LiteralPath $nodeImages)) {
+                $temporary = "$nodeImages.$runId.tmp"
+                & $docker image save --output $temporary @($references.Values)
+                if ($LASTEXITCODE -ne 0) { throw 'Nested daemon image export failed.' }
+                [IO.File]::Move($temporary, $nodeImages)
+            }
+        }
+        finally {
+            $buildGuard.ReleaseMutex() | Out-Null
+            $buildHeld = $false
+        }
+        & $docker cp $nodeImages "${container}:/node-images.tar"
+        if ($LASTEXITCODE -ne 0) { throw 'Nested daemon image copy failed.' }
+        & $docker cp $nodeManifest "${container}:/node-images.json"
+        if ($LASTEXITCODE -ne 0) { throw 'Nested daemon image manifest copy failed.' }
+        $result.node_images_sha256 = (Get-FileHash -LiteralPath $nodeImages -Algorithm SHA256).Hash
+    }
 
     Write-Host "Regression: $Selector, $Jobs jobs, $platform"
     Write-Host "Artifacts: $runDir"
@@ -317,7 +364,7 @@ try {
     $result.elapsed_ms = $watch.ElapsedMilliseconds
     $result.exit_code = $exitCode
     $result | ConvertTo-Json | Set-Content -LiteralPath $resultPath -Encoding utf8
-    & $docker rm --force $container
+    & $docker rm --force --volumes $container
     if ($LASTEXITCODE -ne 0) { throw "Container cleanup failed: $container" }
     $container = $null
     if ($cachePath -and $exitCode -eq 0) {
@@ -334,7 +381,7 @@ try {
 finally {
     try {
         if ($container) {
-            & $docker rm --force $container
+            & $docker rm --force --volumes $container
             if ($LASTEXITCODE -ne 0) { throw "Container cleanup failed: $container" }
         }
     }
