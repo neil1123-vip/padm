@@ -179,7 +179,7 @@ VLESS TCP TLS Vision、Trojan TCP TLS fallback 在 Xray 首配中分别选 `16`/
 Xray 直接终止 TLS，未命中协议的 HTTP/1.1 和 HTTP/2 请求通过 PROXY v1 回落到 Nginx；
 `fallback_tls` 固定域名及两个内部端口，默认 `31300`/`31302`，同核复制可共享后端。
 默认首页不写入站点目录，已有 `/etc/padm-docker/data/static/index.html` 优先；
-支持通用字段编辑、同核复制/删除与链接；默认页、静态目录和 302 已支持事务管理，ALPN 管理、宿主集成及独立 HTTPS 发布尚未开放。
+支持通用字段编辑、同核复制/删除与链接；默认页、静态目录、302 和 ALPN 已支持事务管理，宿主集成及独立 HTTPS 发布尚未开放。
 
 Docker 菜单 `16. 站点管理` 管理已有 Nginx TLS 入口 `21–25` 或 fallback `27`/`29` 的站点：
 
@@ -198,7 +198,25 @@ padm-docker edit --site-default --confirm PADM-DOCKER-EDIT
 失败和 INT/TERM 同时恢复站点及规格，旧无站点快照保留当前静态目录。
 删除最后一个 Nginx 入口会清除站点模式，仍保留静态文件及其它 TLS 入口。
 `status` 只报告 `site_mode`，不输出目标 URL。已有旧规格保持兼容，带 `.site` 的 v3
-规格要求控制 bundle 声明 `x-padm-site-content`；ALPN、webroot/standalone ACME 继续待交付。
+规格要求控制 bundle 声明 `x-padm-site-content`；webroot/standalone ACME 继续待交付。
+
+同一菜单提供 `27`/`29` 的 ALPN 诊断、推荐修复和三种手动顺序：
+
+```bash
+padm-docker protocol alpn-status
+padm-docker protocol alpn-status entry-fallback
+padm-docker edit --alpn entry-fallback h2,http/1.1 --preview
+padm-docker edit --alpn entry-fallback http/1.1,h2 --confirm PADM-DOCKER-EDIT
+padm-docker edit --alpn entry-fallback http/1.1 --confirm PADM-DOCKER-EDIT
+```
+
+推荐顺序为 `h2,http/1.1`，手动选择持久化到可选 `fallback_tls.alpn`，核心配置和分享链接同步；
+显式字段要求 bundle 声明 `x-padm-fallback-alpn`，旧无字段规格保持兼容。
+诊断输出配置与实际 ALPN、fallback/Nginx 一致性和 `repairable`，只验证配置，不代表真实 TLS 协商；
+符合手动规格的非推荐顺序不是配置损坏。修复只放行所选入站的 ALPN 字段差异，
+完整账号输入和运行配置都核对，其它入口、账号、路由、fallback、Nginx 或编排漂移继续拒绝。
+预览和取消不写生产文件，健康失败及 INT/TERM 恢复原状态，包括修复前的 ALPN 漂移。
+
 完整规格保存于 `/etc/padm-docker/config/spec.json`，由 root 持有、权限 `0600`；
 取消不提交，配置失败恢复旧规格、证书及 ACME 状态。该文件含秘密，不应打印或公开。
 

@@ -20,9 +20,11 @@ dockerUsage() {
   padm-docker edit --site-static <独立站点目录> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --site-redirect <HTTP/HTTPS URL> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --site-default [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --alpn <入口 ID> <h2,http/1.1|http/1.1,h2|http/1.1> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker protocol list
   padm-docker protocol links [入口 ID]
   padm-docker protocol stream-status
+  padm-docker protocol alpn-status [入口 ID]
   padm-docker account list [--json]
   padm-docker account create [--name <名称>] [--listeners <入口 ID,...>] [--disabled]
   padm-docker account edit <账号 ID> [--name <名称>] [--listeners <入口 ID,...>]

@@ -713,7 +713,7 @@ dockerProtocolCommand() (
     [[ "$#" -gt 0 ]] && shift
     case "${action}" in
     list|stream-status) [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
-    links|targets|check-target|target-status|select-target|block-current-target)
+    links|alpn-status|targets|check-target|target-status|select-target|block-current-target)
         [[ "$#" -le 1 && "${1:-}" != --* ]] || return "${PADM_DOCKER_RC_USAGE}"
         listener=${1:-}
         if [[ "${action}" == select-target ]]; then
@@ -773,8 +773,14 @@ dockerProtocolCommand() (
     original="${workspace}/original.json"
     normalized="${workspace}/normalized.json"
     cp -- "${root}/config/spec.json" "${original}" &&
-        chmod 0600 "${original}" &&
-        dockerEditBaselineValidate "${original}" "${workspace}" &&
+        chmod 0600 "${original}" || return "${PADM_DOCKER_RC_STATE}"
+    if [[ "${action}" == alpn-status ]]; then
+        dockerManagedSpecMatchesDeployment "${original}" "${root}/deployment.json" "${root}/images.env" &&
+            dockerFallbackAlpnStatus "${original}" "${workspace}" "${listener}" ||
+            return "${PADM_DOCKER_RC_STATE}"
+        return 0
+    fi
+    dockerEditBaselineValidate "${original}" "${workspace}" &&
         dockerConfigureSpecMigrate "${original}" "${normalized}" &&
         chmod 0600 "${normalized}" || return "${PADM_DOCKER_RC_STATE}"
     if [[ "${action}" == list ]]; then
@@ -1188,6 +1194,8 @@ dockerEditCommand() {
     local realityStream= streamListener= streamWebsite=
     local streamDomains= streamAddress= streamPort=8443
     local siteMode= siteSource= siteUrl=
+    local alpnListener= alpnOrder=
+    local DOCKER_CONFIG_RESTORE_ALPN_LISTENER=
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
         --spec|--manifest|--bundle|--control-bundle)
@@ -1214,6 +1222,13 @@ dockerEditCommand() {
             [[ -z "${siteMode}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             siteMode=default
             shift
+            ;;
+        --alpn)
+            [[ "$#" -ge 3 && -n "$2" && "$2" != --* && -z "${alpnListener}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            alpnListener=$2 alpnOrder=$3
+            case "${alpnOrder}" in h2,http/1.1|http/1.1,h2|http/1.1) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+            shift 3
             ;;
         --regenerate-reality)
             [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${regenerateReality}" ]] ||
@@ -1282,6 +1297,11 @@ dockerEditCommand() {
         dockerError '站点专项编辑不能与规格导入或 Reality 专项动作组合'
         return "${PADM_DOCKER_RC_USAGE}"
     }
+    [[ -z "${alpnListener}" || ( -z "${specFile}" && -z "${regenerateReality}" &&
+        -z "${realityTarget}" && -z "${realityStream}" && -z "${siteMode}" ) ]] || {
+        dockerError 'ALPN 专项编辑不能与规格导入、站点或 Reality 专项动作组合'
+        return "${PADM_DOCKER_RC_USAGE}"
+    }
     [[ "${mode}" != interactive || ( -t 0 && -t 1 ) ]] || {
         dockerError '非交互编辑需要 --preview 或 --confirm PADM-DOCKER-EDIT'
         return "${PADM_DOCKER_RC_USAGE}"
@@ -1292,7 +1312,7 @@ dockerEditCommand() {
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     dockerTrafficSafePath "${root}" "${root}/config/spec.json" || return "${PADM_DOCKER_RC_STATE}"
     [[ ( -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" &&
-        -z "${siteMode}" ) || -f "${root}/config/spec.json" ]] ||
+        -z "${siteMode}" && -z "${alpnListener}" ) || -f "${root}/config/spec.json" ]] ||
         return "${PADM_DOCKER_RC_STATE}"
     if [[ ! -e "${root}/config/spec.json" && ! -L "${root}/config/spec.json" && -z "${specFile}" ]]; then
         if [[ "${mode}" == interactive ]]; then
@@ -1318,7 +1338,8 @@ dockerEditCommand() {
         imported=1
     fi
     chmod 0600 "${original}" || return "${PADM_DOCKER_RC_STATE}"
-    dockerEditBaselineValidate "${original}" "${workspace}" || return "${PADM_DOCKER_RC_STATE}"
+    dockerEditBaselineValidate "${original}" "${workspace}" "${alpnListener}" ||
+        return "${PADM_DOCKER_RC_STATE}"
     normalized="${workspace}/normalized.json"
     dockerConfigureSpecMigrate "${original}" "${normalized}" || return "${PADM_DOCKER_RC_STATE}"
     if [[ -n "${specFile}" && "${imported}" -eq 0 ]]; then
@@ -1343,7 +1364,7 @@ dockerEditCommand() {
     # 旧规格先接入，不能同时把未经证明的字段改动当作无损导入。
     if [[ "${mode}" == interactive && -z "${specFile}" && "${imported}" -eq 0 &&
         -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" &&
-        -z "${siteMode}" ]]; then
+        -z "${siteMode}" && -z "${alpnListener}" ]]; then
         dockerEditFields "${draft}" || status=$?
         if [[ "${status}" -eq 3 ]]; then
             printf '已取消配置编辑。\n'
@@ -1355,6 +1376,14 @@ dockerEditCommand() {
     fi
     jq -es 'length == 1 and (.[0] | type == "object")' "${draft}" >/dev/null 2>&1 ||
         return "${PADM_DOCKER_RC_STATE}"
+    if [[ -n "${alpnListener}" ]]; then
+        jq --arg listener "${alpnListener}" --arg order "${alpnOrder}" '
+          .core.protocols |= map(if .listener_id == $listener then
+            .fallback_tls.alpn = ($order | split(",")) else . end)
+        ' "${draft}" >"${draft}.next" &&
+            chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
+            return "${PADM_DOCKER_RC_STATE}"
+    fi
     if [[ -n "${siteMode}" ]]; then
         [[ -z "${siteSource}" ]] ||
             siteSource=$(dockerSiteSourceValidate "${siteSource}") || return "${PADM_DOCKER_RC_STATE}"
@@ -1439,10 +1468,13 @@ dockerEditCommand() {
         printf '仅重生成入口 %s 的 Reality 密钥及 short ID；提交后需重新导入该入口链接。\n' "${regenerateReality}"
     fi
     dockerEditPreview "${original}" "${draft}" || return "${PADM_DOCKER_RC_STATE}"
+    [[ -z "${alpnListener}" ]] ||
+        printf '入口 %s 的 TLS ALPN 将设为 %s；仅允许该 ALPN 字段漂移，其它配置须与规格一致。\n' "${alpnListener}" "${alpnOrder}"
     [[ -z "${siteSource}" ]] || printf '静态站点内容将使用已校验目录更新；源路径不会写入规格。\n'
     [[ "${imported}" -eq 0 ]] || printf '完整原始规格已匹配，确认后接入受管输入。\n'
     jq -en --arg regenerate "${regenerateReality}" --arg target "${realityTarget}" --arg stream "${realityStream}" \
-        --arg site "${siteMode}" --slurpfile before "${normalized}" --slurpfile after "${draft}" '
+        --arg site "${siteMode}" --arg alpn "${alpnListener}" \
+        --slurpfile before "${normalized}" --slurpfile after "${draft}" '
       def fixed: del(.server, .public_port, .address_families, .name,
         .reality.target_host, .reality.target_port, .reality.server_name, .websocket.path, .httpupgrade.path,
         .xhttp.path, .xhttp.host, .xhttp.mode, .grpc.service_name, .grpc_tls.service_name,
@@ -1470,6 +1502,10 @@ dockerEditCommand() {
             .public_port == $bound.public_port and .address_families == $bound.address_families))) and
       (if $site != "" then
         ($old | del(.site)) == ($new | del(.site))
+       elif $alpn != "" then
+        def without_alpn: .core.protocols |= map(if .listener_id == $alpn then
+          del(.fallback_tls.alpn) else . end);
+        ($old | without_alpn) == ($new | without_alpn)
        elif $stream != "" then
         ($old | del(.reality_stream)) == ($new | del(.reality_stream))
        else
@@ -1520,5 +1556,6 @@ dockerEditCommand() {
         }
     done < <(jq -r '.core.protocols[] | select(.id == 1 or .id == 2 or .id == 26) |
       [.reality.private_key, .reality.public_key] | @tsv' "${draft}")
+    DOCKER_CONFIG_RESTORE_ALPN_LISTENER=${alpnListener}
     dockerConfigureApply "${draft}" '' '' "${mode}" '' "${siteSource}"
 }

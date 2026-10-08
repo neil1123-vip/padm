@@ -574,11 +574,12 @@ dockerMenuControl() {
 }
 
 dockerMenuSites() {
-    local choice directory url
+    local choice directory url listener alpnChoice
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 站点管理\n'
-        printf '%s\n' '1. 默认页' '2. 发布静态目录' '3. 302 跳转' '4. 查看站点模式' '0. 返回'
+        printf '%s\n' '1. 默认页' '2. 发布静态目录' '3. 302 跳转' '4. 查看站点模式' \
+            '5. ALPN 诊断' '6. 修复为推荐 ALPN' '7. 手动设置 ALPN' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -598,6 +599,31 @@ dockerMenuSites() {
             dockerMenuRun edit --site-redirect "${url}" || true
             ;;
         4) dockerMenuRun status || true ;;
+        5)
+            dockerSetupRead listener 'TLS fallback 入口 ID（空输入诊断全部，0 返回）: ' || continue
+            if [[ -n "${listener}" ]]; then
+                dockerMenuRun protocol alpn-status "${listener}" || true
+            else
+                dockerMenuRun protocol alpn-status || true
+            fi
+            ;;
+        6|7)
+            dockerSetupRead listener 'TLS fallback 入口 ID（0 返回）: ' &&
+                [[ -n "${listener}" ]] || continue
+            if [[ "${choice}" == 6 ]]; then
+                dockerMenuRun edit --alpn "${listener}" h2,http/1.1 || true
+                continue
+            fi
+            printf '\nDocker 手动设置 ALPN\n'
+            printf '%s\n' '1. h2,http/1.1' '2. http/1.1,h2' '3. http/1.1' '0. 返回'
+            dockerSetupRead alpnChoice '请选择 ALPN 顺序（0 返回）: ' || continue
+            case "${alpnChoice}" in
+            1) dockerMenuRun edit --alpn "${listener}" h2,http/1.1 || true ;;
+            2) dockerMenuRun edit --alpn "${listener}" http/1.1,h2 || true ;;
+            3) dockerMenuRun edit --alpn "${listener}" http/1.1 || true ;;
+            *) printf '无效选项，请重新选择。\n' ;;
+            esac
+            ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

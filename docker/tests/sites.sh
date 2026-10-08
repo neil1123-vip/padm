@@ -9,7 +9,7 @@ trap 'printf "docker-sites-regression-fail: line %s, rc=%s\n" "${LINENO}" "$?" >
     printf 'docker-sites-regression-fail: Linux root is required\n' >&2
     exit 1
 }
-for tool in jq python3 nginx openssl stat chmod chown readlink find sort sha256sum; do
+for tool in jq python3 nginx openssl curl stat chmod chown readlink find sort sha256sum mkfifo timeout; do
     command -v "${tool}" >/dev/null || exit 1
 done
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state" PADM_DOCKER_SKIP_CHOWN=0
@@ -133,6 +133,19 @@ for protocol in (21, 22, 23, 24, 25, 27, 29):
         if mode == "redirect":
             spec["site"]["url"] = "https://example.com/path?a=1&b=2#part"
         case(f"valid-{protocol}-{mode}", spec, True)
+    if protocol in (27, 29):
+        for index, alpn in enumerate((["h2", "http/1.1"], ["http/1.1", "h2"], ["http/1.1"])):
+            value = copy.deepcopy(spec)
+            value["site"] = dict(mode="static")
+            value["core"]["protocols"][0]["fallback_tls"]["alpn"] = alpn
+            case(f"valid-alpn-{protocol}-{index}", value, True)
+        for index, alpn in enumerate((None, [], {}, "h2,http/1.1", ["h2"], ["h3"],
+                                     ["h2", "h2"], ["http/1.1", "http/1.1"],
+                                     ["h2", "http/1.1", "h3"], ["http/1.1", 1],
+                                     ["H2", "http/1.1"], ["http/1.1\n"])):
+            value = copy.deepcopy(spec)
+            value["core"]["protocols"][0]["fallback_tls"]["alpn"] = alpn
+            case(f"invalid-alpn-{protocol}-{index}", value, False)
 
 for index, site in enumerate((None, {}, [], {"mode": "unknown"}, {"mode": "default", "url": "https://example.com"},
                               {"mode": "static", "source": "/root/site"}, {"mode": "redirect"},
@@ -161,6 +174,12 @@ direct_entry.update(listener_id="entry-direct", public_port=25443)
 mixed["core"]["protocols"].append(direct_entry)
 mixed["site"] = dict(mode="static")
 case("valid-mixed-static", mixed, True)
+mixed_alpn = json.loads((root / "valid-27-static.json").read_text())
+second_fallback = json.loads((root / "valid-29-static.json").read_text())["core"]["protocols"][0]
+mixed_alpn["core"]["protocols"][0]["listener_id"] = "entry-fallback-27"
+second_fallback.update(listener_id="entry-fallback-29", public_port=24444)
+mixed_alpn["core"]["protocols"].append(second_fallback)
+case("valid-mixed-alpn", mixed_alpn, True)
 for mode in ("default", "static", "redirect"):
     spec = copy.deepcopy(direct)
     spec["site"] = dict(mode=mode)
@@ -202,6 +221,56 @@ dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/base.json" ||
     fail '无 site 的旧规格被新能力 gate 误拒绝'
 mv -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
     "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+
+# 显式 ALPN 需要新版能力；旧规格的默认值不增加兼容门槛。
+cp -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json" \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved"
+jq 'del(."x-padm-fallback-alpn")' \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
+    >"${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+for protocol in 27 29; do
+    dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/valid-${protocol}-static.json" ||
+        fail "${protocol}: 旧默认 ALPN 被能力门禁误拒绝"
+    for index in 0 1 2; do
+        reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/valid-alpn-${protocol}-${index}.json"
+    done
+done
+mv -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+
+for protocol in 27 29; do
+    for index in 0 1 2; do
+        spec="${TEST_ROOT}/valid-alpn-${protocol}-${index}.json"
+        output="${TEST_ROOT}/alpn-core-${protocol}-${index}.json"
+        dockerGenerateXrayConfig "${spec}" "${output}"
+        alpn=$(jq -c '.core.protocols[0].fallback_tls.alpn' "${spec}")
+        jq -e --argjson alpn "${alpn}" --arg uuid "${UUID}" --argjson protocol "${protocol}" '
+          any(.inbounds[]; .tag == "entry-site" and
+            .streamSettings.tlsSettings.alpn == $alpn and
+            .settings.fallbacks == [{dest:"nginx:31300",xver:1},
+              {alpn:"h2",dest:"nginx:31302",xver:1}] and
+            (if $protocol == 27 then
+              .settings.clients == [{id:$uuid,email:"site",flow:"xtls-rprx-vision"}]
+             else .settings.clients == [{password:$uuid,email:$uuid}] end))
+        ' "${output}" >/dev/null || fail "${protocol}: ALPN 输出改变认证或 fallback"
+        # 只为分享 URI 启用私密副本，不改变原 TLS 规格的订阅合同。
+        jq '.subscription.enabled = true' "${spec}" >"${TEST_ROOT}/alpn-share.json"
+        dockerGenerateSubscription "${TEST_ROOT}/alpn-share.json" "${TEST_ROOT}/alpn-link-${protocol}-${index}.txt"
+        encoded=$(jq -rn --argjson alpn "${alpn}" '$alpn | join(",") | @uri')
+        if [[ "${protocol}" == 27 ]]; then
+            expected="vless://${UUID}@proxy.example.com:24443?encryption=none&flow=xtls-rprx-vision&security=tls&sni=${DOMAIN}&fp=chrome&alpn=${encoded}&type=tcp#site"
+        else
+            expected="trojan://${UUID}@proxy.example.com:24443?peer=${DOMAIN}&security=tls&fp=chrome&sni=${DOMAIN}&alpn=${encoded}&type=tcp#site"
+        fi
+        [[ "$(<"${TEST_ROOT}/alpn-link-${protocol}-${index}.txt")" == "${expected}" ]] ||
+            fail "${protocol}: 分享 URI 未保留 ALPN 顺序"
+    done
+    jq 'del(.core.protocols[0].fallback_tls.alpn)' "${TEST_ROOT}/valid-alpn-${protocol}-0.json" \
+        >"${TEST_ROOT}/legacy-alpn-${protocol}.json"
+    dockerGenerateXrayConfig "${TEST_ROOT}/legacy-alpn-${protocol}.json" "${TEST_ROOT}/legacy-alpn-${protocol}-core.json"
+    cmp -s "${TEST_ROOT}/legacy-alpn-${protocol}-core.json" "${TEST_ROOT}/alpn-core-${protocol}-0.json" ||
+        fail "${protocol}: 缺省 ALPN 改变旧核心输出"
+done
 
 for protocol in 21 22 23 24 25 27 29; do
     for mode in default static redirect; do
@@ -321,7 +390,7 @@ snapshot() (
 )
 assertClean() {
     [[ ! -e "${root}/locks/deployment.lock" ]] || fail '站点事务遗留部署锁'
-    [[ -z "$(find "${root}" -maxdepth 1 \( -name '.candidate.*' -o -name '.edit.*' \) -print -quit)" ]] ||
+    [[ -z "$(find "${root}" -maxdepth 1 \( -name '.candidate.*' -o -name '.edit.*' -o -name '.protocol.*' \) -print -quit)" ]] ||
         fail '站点事务遗留候选'
 }
 runEdit() {
@@ -447,4 +516,176 @@ staticBefore=$(find "${root}/data/static" -type f -print0 | sort -z | xargs -0 s
 runEdit 0 --spec "${TEST_ROOT}/delete-site-draft.json" --confirm PADM-DOCKER-EDIT
 [[ "$(find "${root}/data/static" -type f -print0 | sort -z | xargs -0 sha256sum)" == "${staticBefore}" ]] ||
     fail '删除最后一个 Nginx 入口丢失静态内容'
+
+runAlpnStatus() {
+    local expected=$1 actual=0
+    shift
+    (dockerMain protocol alpn-status "$@") >"${LOG}" 2>"${TEST_ROOT}/alpn-status.stderr" || actual=$?
+    [[ "${actual}" == "${expected}" ]] || fail "ALPN 诊断预期 ${expected}，实际 ${actual}"
+    assertClean
+}
+runAlpnStatus 15
+runEdit 15 --alpn entry-direct h2,http/1.1 --preview
+
+# 混合入口复用已有站点与非空流量记录，专项不能改动未选择的入口。
+(
+    trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+    dockerAcquireDeploymentLock
+    dockerConfigureApply "${TEST_ROOT}/valid-mixed-alpn.json" '' '' configure
+) >"${LOG}" 2>&1 || fail '初始化 ALPN 混合夹具失败'
+jq -cn --arg uuid "${UUID}" '{schema_version:1,accounts:{($uuid):{
+  name:"site",upload:17,download:19,limit_bytes:0,baseline:{}}}}' | dockerTrafficWriteState
+before=$(snapshot)
+runAlpnStatus 0
+jq -e 'type == "array" and length == 2 and all(.[];
+  (keys | sort) == (["listener_id","protocol","configured_alpn","running_alpn","recommended_alpn",
+    "runtime_matches_spec","recommended","h2_fallback","nginx_matches_spec","repairable"] | sort) and
+  (.protocol == 27 or .protocol == 29) and .configured_alpn == ["h2","http/1.1"] and
+  .running_alpn == .configured_alpn and .recommended_alpn == ["h2","http/1.1"] and
+  .runtime_matches_spec and .recommended and .h2_fallback and .nginx_matches_spec and .repairable)' \
+    "${LOG}" >/dev/null || fail 'ALPN 诊断缺少默认合同或输出了多余字段'
+[[ "$(snapshot)" == "${before}" ]] || fail 'ALPN 只读诊断改变部署、站点或流量'
+runAlpnStatus 15 absent
+runEdit 2 --alpn entry-fallback-27 h2 --preview
+runEdit 2 --alpn entry-fallback-27 h2,h2 --preview
+runEdit 2 --alpn entry-fallback-27 'http/1.1,' --preview
+runEdit 2 --alpn entry-fallback-27 h2,http/1.1 --site-default --preview
+runEdit 2 --alpn entry-fallback-27 h2,http/1.1 --spec "${TEST_ROOT}/valid-mixed-alpn.json" --preview
+runEdit 2 --alpn entry-fallback-27 h2,http/1.1 --regenerate-reality entry-fallback-27 --preview
+runEdit 2 --alpn entry-fallback-27 h2,http/1.1 --reality-target entry-fallback-27 example.com 443 example.com --preview
+runEdit 2 --alpn entry-fallback-27 h2,http/1.1 --alpn entry-fallback-29 http/1.1 --preview
+runEdit 0 --alpn entry-fallback-27 http/1.1,h2 --preview
+[[ "$(snapshot)" == "${before}" ]] || fail 'ALPN 非法参数或预览改变完整部署'
+cp -- "${root}/config/spec.json" "${TEST_ROOT}/alpn-original.json"
+jq '(.core.protocols[] | select(.listener_id == "entry-fallback-27") | .fallback_tls.alpn) = ["http/1.1","h2"]' \
+    "${root}/config/spec.json" >"${TEST_ROOT}/alpn-cancel.json"
+(
+    trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+    dockerSetupRead() { printf -v "$1" '%s' n; }
+    dockerAcquireDeploymentLock
+    dockerConfigureApply "${TEST_ROOT}/alpn-cancel.json" '' '' interactive
+) >"${LOG}" 2>&1 || fail 'ALPN 确认取消失败'
+assertClean
+[[ "$(snapshot)" == "${before}" ]] || fail 'ALPN 取消改变规格、运行文件、静态内容或流量'
+runEdit 0 --alpn entry-fallback-27 http/1.1,h2 --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile old "${TEST_ROOT}/alpn-original.json" --slurpfile new "${root}/config/spec.json" '
+  $new[0] == ($old[0] |
+    (.core.protocols[] | select(.listener_id == "entry-fallback-27") | .fallback_tls.alpn) = ["http/1.1","h2"])
+' >/dev/null || fail 'ALPN 专项改变选中字段之外的规格'
+runAlpnStatus 0 entry-fallback-27
+jq -e 'length == 1 and .[0].listener_id == "entry-fallback-27" and
+  .[0].configured_alpn == ["http/1.1","h2"] and .[0].running_alpn == .[0].configured_alpn and
+  .[0].runtime_matches_spec and (.[0].recommended | not) and .[0].repairable' \
+    "${LOG}" >/dev/null || fail '非推荐但符合规格的 ALPN 被误算为损坏'
+! grep -Fq "${UUID}" "${LOG}" || fail 'ALPN 诊断泄露账号'
+
+cp -a -- "${root}/config/xray/config.json" "${TEST_ROOT}/alpn-valid-config.json"
+cp -a -- "${root}/config/xray/users.base" "${TEST_ROOT}/alpn-valid-users.base"
+cp -a -- "${root}/config/nginx/default.conf" "${TEST_ROOT}/alpn-valid-nginx.conf"
+stable=$(snapshot)
+# 运行配置中的非数组 ALPN 可能含敏感字符串，诊断必须脱敏且不把 marker 写入任何输出。
+secret_alpn=fixture-secret-alpn
+jq --arg marker "${secret_alpn}" \
+    '(.inbounds[] | select(.tag == "entry-fallback-27") | .streamSettings.tlsSettings.alpn) = $marker' \
+    "${TEST_ROOT}/alpn-valid-config.json" >"${root}/config/xray/config.json"
+runAlpnStatus 0 entry-fallback-27
+jq -e '.[0].running_alpn == null and .[0].repairable' "${LOG}" >/dev/null ||
+    fail '非数组 ALPN 未脱敏或未保持可修复'
+! grep -Fq "${secret_alpn}" "${LOG}" ||
+    fail '非数组 ALPN marker 泄露到诊断标准输出'
+! grep -Fq "${secret_alpn}" "${TEST_ROOT}/alpn-status.stderr" ||
+    fail '非数组 ALPN marker 泄露到诊断错误输出'
+cp -a -- "${TEST_ROOT}/alpn-valid-config.json" "${root}/config/xray/config.json"
+
+for drift in runtime base both; do
+    for file in config.json users.base; do
+        [[ "${drift}" == both || ( "${drift}" == runtime && "${file}" == config.json ) ||
+            ( "${drift}" == base && "${file}" == users.base ) ]] || continue
+        jq '(.inbounds[] | select(.tag == "entry-fallback-27") | .streamSettings.tlsSettings.alpn) = ["h3"]' \
+            "${root}/config/xray/${file}" >"${TEST_ROOT}/drift-core.json"
+        cp -- "${TEST_ROOT}/drift-core.json" "${root}/config/xray/${file}"
+    done
+    before=$(snapshot)
+    runAlpnStatus 0 entry-fallback-27
+    jq -e '.[0].repairable and .[0].h2_fallback and .[0].nginx_matches_spec' "${LOG}" >/dev/null ||
+        fail "${drift}: 选中入口的单独 ALPN 漂移未标为可修复"
+    if [[ "${drift}" != base ]]; then
+        jq -e '(.[0].runtime_matches_spec | not) and .[0].running_alpn == null' "${LOG}" >/dev/null ||
+            fail "${drift}: 运行 ALPN 漂移未被诊断"
+    fi
+    runEdit 0 --alpn entry-fallback-27 http/1.1,h2 --preview
+    [[ "$(snapshot)" == "${before}" ]] || fail "${drift}: 漂移修复预览提交了配置"
+    runEdit 0 --alpn entry-fallback-27 http/1.1,h2 --confirm PADM-DOCKER-EDIT
+    [[ "$(snapshot)" == "${stable}" ]] || fail "${drift}: 未精确恢复 ALPN 或改变其它文件"
+done
+
+# 所选字段之外的漂移不能借 ALPN 修复接管，失败后原文件必须原样保留。
+for mutation in \
+    '(.inbounds[] | select(.tag == "entry-fallback-27") | .settings.fallbacks[1].xver) = 0' \
+    '(.inbounds[] | select(.tag == "entry-fallback-27") | .streamSettings.tlsSettings.serverName) = "other.example.com"' \
+    '(.inbounds[] | select(.tag == "entry-fallback-27") | .settings.clients[0].id) = "22222222-2222-4222-8222-222222222222"' \
+    '.routing.rules += [{type:"field",domain:["example.com"],outboundTag:"direct"}]' \
+    '(.inbounds[] | select(.tag == "entry-fallback-29") | .streamSettings.tlsSettings.alpn) = ["h3"]'; do
+    jq "${mutation}" "${TEST_ROOT}/alpn-valid-config.json" >"${root}/config/xray/config.json"
+    before=$(snapshot)
+    runAlpnStatus 0 entry-fallback-27
+    jq -e '.[0].repairable == false' "${LOG}" >/dev/null || fail 'ALPN 诊断接受其它漂移'
+    runEdit 15 --alpn entry-fallback-27 h2,http/1.1 --preview
+    [[ "$(snapshot)" == "${before}" ]] || fail 'ALPN 拒绝其它漂移后改变部署'
+    cp -a -- "${TEST_ROOT}/alpn-valid-config.json" "${root}/config/xray/config.json"
+done
+printf '\n# fixture-nginx-drift\n' >>"${root}/config/nginx/default.conf"
+before=$(snapshot)
+runAlpnStatus 0 entry-fallback-27
+jq -e '.[0].nginx_matches_spec == false and .[0].repairable == false' "${LOG}" >/dev/null ||
+    fail 'ALPN 诊断未拒绝 Nginx 漂移'
+runEdit 15 --alpn entry-fallback-27 h2,http/1.1 --preview
+[[ "$(snapshot)" == "${before}" ]] || fail 'Nginx 漂移拒绝改变文件'
+cp -a -- "${TEST_ROOT}/alpn-valid-nginx.conf" "${root}/config/nginx/default.conf"
+printf '{\n' >"${root}/config/xray/config.json"
+before=$(snapshot)
+runAlpnStatus 15 entry-fallback-27
+runEdit 15 --alpn entry-fallback-27 h2,http/1.1 --preview
+[[ "$(snapshot)" == "${before}" ]] || fail 'ALPN 损坏 JSON 拒绝后改变文件'
+cp -a -- "${TEST_ROOT}/alpn-valid-config.json" "${root}/config/xray/config.json"
+
+# 专项诊断在读取或比较前拒绝 FIFO，超时护栏避免边界回退拖住整套回归。
+for fifo in "${root}/config/xray/config.json" "${root}/config/nginx/fixture-fifo"; do
+    [[ "${fifo}" != "${root}/config/xray/config.json" ]] || rm -- "${fifo}"
+    mkfifo -- "${fifo}"
+    actual=0
+    timeout -k 1 5 bash -c '
+      source "$1"
+      dockerHostPreflight() { :; }
+      dockerLockInstalledDeployment() { dockerAcquireDeploymentLock; }
+      dockerMain protocol alpn-status entry-fallback-27
+    ' _ "${PROJECT_ROOT}/install-docker.sh" >"${LOG}" 2>"${TEST_ROOT}/alpn-status.stderr" || actual=$?
+    [[ "${actual}" == 15 ]] || fail "ALPN 特殊文件诊断应返回 15 而非阻塞: ${actual}"
+    assertClean
+    rm -- "${fifo}"
+    [[ "${fifo}" != "${root}/config/xray/config.json" ]] ||
+        cp -a -- "${TEST_ROOT}/alpn-valid-config.json" "${fifo}"
+done
+
+runEdit 0 --alpn entry-fallback-29 http/1.1 --confirm PADM-DOCKER-EDIT
+runAlpnStatus 0 entry-fallback-29
+jq -e 'length == 1 and .[0].configured_alpn == ["http/1.1"] and
+  .[0].running_alpn == ["http/1.1"] and .[0].h2_fallback and .[0].runtime_matches_spec and
+  .[0].nginx_matches_spec and .[0].repairable and (.[0].recommended | not)' "${LOG}" >/dev/null ||
+    fail 'Trojan 单 HTTP/1.1 ALPN 合同错误'
+# 仅运行配置漂移，users.base 保持规范顺序；事务失败恢复必须保留该运行时差异。
+jq '(.inbounds[] | select(.tag == "entry-fallback-29") | .streamSettings.tlsSettings.alpn) = ["h3"]' \
+    "${root}/config/xray/config.json" >"${TEST_ROOT}/alpn-29-runtime-drift.json"
+cp -- "${TEST_ROOT}/alpn-29-runtime-drift.json" "${root}/config/xray/config.json"
+before=$(snapshot)
+for failure in health-fail int term; do
+    MODE=${failure}
+    rm -f -- "${TEST_ROOT}/failed-once"
+    expected=14
+    [[ "${failure}" != int ]] || expected=130
+    [[ "${failure}" != term ]] || expected=143
+    runEdit "${expected}" --alpn entry-fallback-29 h2,http/1.1 --confirm PADM-DOCKER-EDIT
+    [[ "$(snapshot)" == "${before}" ]] || fail "${failure}: ALPN 事务未恢复规格、文件、站点和非空流量"
+done
+MODE=ok
 printf 'docker-sites-regression-ok\n'

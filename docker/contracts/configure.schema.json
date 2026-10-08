@@ -12,6 +12,7 @@
   "x-padm-control-client": true,
   "x-padm-control-state": true,
   "x-padm-site-content": true,
+  "x-padm-fallback-alpn": true,
   "additionalProperties": false,
   "required": ["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"],
   "properties": {
@@ -1295,6 +1296,10 @@
                 "http2_port": {
                   "$ref": "#/$defs/port",
                   "not": {"const": 8080}
+                },
+                "alpn": {
+                  "type": "array",
+                  "enum": [["h2", "http/1.1"], ["http/1.1", "h2"], ["http/1.1"]]
                 }
               }
             }

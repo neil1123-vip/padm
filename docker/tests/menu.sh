@@ -389,7 +389,7 @@ runControlDriver() {
 }
 
 runSitesDriver() {
-    local scenario=$1
+    local scenario=$1 alpnOrder alpnAction
     local -A targetPrompts=()
     targetReply 'Docker 管理菜单' $'16\n'
     : >"${TLS_WIZARD_ACTIONS}"
@@ -401,12 +401,37 @@ runSitesDriver() {
         targetReply 'Docker 站点管理' $'3\n'
         targetReply '302 HTTP/HTTPS 目标 URL（0 返回）' $'https://example.com/path?a=1&b=2\n'
         targetReply 'Docker 站点管理' $'4\n'
+        targetReply 'Docker 站点管理' $'5\n'
+        targetReply 'TLS fallback 入口 ID（空输入诊断全部，0 返回）' $'\n'
+        targetReply 'Docker 站点管理' $'5\n'
+        targetReply 'TLS fallback 入口 ID（空输入诊断全部，0 返回）' $'entry-tls\n'
+        targetReply 'Docker 站点管理' $'6\n'
+        targetReply 'TLS fallback 入口 ID（0 返回）' $'entry-tls\n'
+        for alpnOrder in 1 2 3; do
+            targetReply 'Docker 站点管理' $'7\n'
+            targetReply 'TLS fallback 入口 ID（0 返回）' $'entry-tls\n'
+            targetReply '请选择 ALPN 顺序（0 返回）' "${alpnOrder}"$'\n'
+        done
         ;;
     cancel)
         targetReply 'Docker 站点管理' $'2\n'
         targetReply '独立静态站点目录绝对路径（0 返回）' $'0\n'
         targetReply 'Docker 站点管理' $'3\n'
         targetReply '302 HTTP/HTTPS 目标 URL（0 返回）' $'0\n'
+        targetReply 'Docker 站点管理' $'5\n'
+        targetReply 'TLS fallback 入口 ID（空输入诊断全部，0 返回）' $'0\n'
+        for alpnAction in 6 7; do
+            targetReply 'Docker 站点管理' "${alpnAction}"$'\n'
+            targetReply 'TLS fallback 入口 ID（0 返回）' $'0\n'
+            targetReply 'Docker 站点管理' "${alpnAction}"$'\n'
+            targetReply 'TLS fallback 入口 ID（0 返回）' $'\n'
+        done
+        targetReply 'Docker 站点管理' $'7\n'
+        targetReply 'TLS fallback 入口 ID（0 返回）' $'entry-tls\n'
+        targetReply '请选择 ALPN 顺序（0 返回）' $'0\n'
+        targetReply 'Docker 站点管理' $'7\n'
+        targetReply 'TLS fallback 入口 ID（0 返回）' $'entry-tls\n'
+        targetReply '请选择 ALPN 顺序（0 返回）' $'invalid\n'
         ;;
     static-eof|redirect-eof)
         if [[ "${scenario}" == static-eof ]]; then
@@ -417,8 +442,36 @@ runSitesDriver() {
             targetReply '302 HTTP/HTTPS 目标 URL（0 返回）' $'\004'
         fi
         ;;
+    alpn-diagnose-eof|alpn-recommended-eof|alpn-manual-id-eof|alpn-manual-order-eof)
+        case "${scenario}" in
+        alpn-diagnose-eof)
+            targetReply 'Docker 站点管理' $'5\n'
+            targetReply 'TLS fallback 入口 ID（空输入诊断全部，0 返回）' $'\004'
+            ;;
+        alpn-recommended-eof)
+            targetReply 'Docker 站点管理' $'6\n'
+            targetReply 'TLS fallback 入口 ID（0 返回）' $'\004'
+            ;;
+        *)
+            targetReply 'Docker 站点管理' $'7\n'
+            if [[ "${scenario}" == alpn-manual-id-eof ]]; then
+                targetReply 'TLS fallback 入口 ID（0 返回）' $'\004'
+            else
+                targetReply 'TLS fallback 入口 ID（0 返回）' $'entry-tls\n'
+                targetReply '请选择 ALPN 顺序（0 返回）' $'\004'
+            fi
+            ;;
+        esac
+        ;;
     failed)
         targetReply 'Docker 站点管理' $'1\n'
+        targetReply 'Docker 站点管理' $'5\n'
+        targetReply 'TLS fallback 入口 ID（空输入诊断全部，0 返回）' $'entry-tls\n'
+        targetReply 'Docker 站点管理' $'6\n'
+        targetReply 'TLS fallback 入口 ID（0 返回）' $'entry-tls\n'
+        targetReply 'Docker 站点管理' $'7\n'
+        targetReply 'TLS fallback 入口 ID（0 返回）' $'entry-tls\n'
+        targetReply '请选择 ALPN 顺序（0 返回）' $'2\n'
         targetReply 'Docker 站点管理' $'4\n'
         ;;
     esac
@@ -731,6 +784,7 @@ protocol)
         fi
         exit "${TARGET_CHECK_STATUS:-0}"
         ;;
+    alpn-status) exit "${SITE_ALPN_STATUS:-0}" ;;
     esac
     printf 'fixture-protocol-output\n'
     ;;
@@ -796,29 +850,34 @@ runPty core-assessment menu $'13\n0\n' "${TLS_WIZARD_CLI}" menu
 [[ "$(<"${TLS_WIZARD_ACTIONS}")" == assess ]] || fail 'core assessment menu dispatched incorrect arguments'
 
 export SITE_MENU_RECORD_STATUS=1
-for siteCase in flow cancel static-eof redirect-eof failed; do
+for siteCase in flow cancel static-eof redirect-eof alpn-diagnose-eof alpn-recommended-eof \
+    alpn-manual-id-eof alpn-manual-order-eof failed; do
     : >"${TLS_WIZARD_ACTIONS}"
-    export SITE_EDIT_STATUS=0
-    [[ "${siteCase}" != failed ]] || SITE_EDIT_STATUS=15
+    export SITE_EDIT_STATUS=0 SITE_ALPN_STATUS=0
+    [[ "${siteCase}" != failed ]] || { SITE_EDIT_STATUS=15; SITE_ALPN_STATUS=17; }
     runPty "sites-${siteCase}" sites "${siteCase}" "${TLS_WIZARD_CLI}" menu
     expectedSite=
     case "${siteCase}" in
     flow)
         expectedSite=$'edit --site-default\nedit --site-static /root/public-site\nedit --site-redirect https://example.com/path?a=1&b=2\nstatus'
+        expectedSite+=$'\nprotocol alpn-status\nprotocol alpn-status entry-tls\nedit --alpn entry-tls h2,http/1.1'
+        expectedSite+=$'\nedit --alpn entry-tls h2,http/1.1\nedit --alpn entry-tls http/1.1,h2\nedit --alpn entry-tls http/1.1'
         for label in '16. 站点管理' '1. 默认页' '2. 发布静态目录' '3. 302 跳转' \
-            '4. 查看站点模式' '0. 返回'; do
+            '4. 查看站点模式' '5. ALPN 诊断' '6. 修复为推荐 ALPN' '7. 手动设置 ALPN' \
+            '1. h2,http/1.1' '2. http/1.1,h2' '3. http/1.1' '0. 返回'; do
             grep -Fq "${label}" "${CONTROL_LOG}" || fail "站点菜单缺少: ${label}"
         done
         ;;
     failed)
-        expectedSite=$'edit --site-default\nstatus'
+        expectedSite=$'edit --site-default\nprotocol alpn-status entry-tls\nedit --alpn entry-tls h2,http/1.1\nedit --alpn entry-tls http/1.1,h2\nstatus'
         grep -Fq '操作失败，退出码: 15' "${CONTROL_LOG}" || fail '站点提交失败未显示退出码'
+        grep -Fq '操作失败，退出码: 17' "${CONTROL_LOG}" || fail 'ALPN 诊断失败未显示退出码'
         ;;
     esac
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedSite}" ]] ||
         fail "站点 ${siteCase} 参数分发错误或取消后仍执行编辑"
 done
-unset SITE_MENU_RECORD_STATUS SITE_EDIT_STATUS
+unset SITE_MENU_RECORD_STATUS SITE_EDIT_STATUS SITE_ALPN_STATUS
 
 : >"${TLS_WIZARD_ACTIONS}"
 runPty control-dispatch control flow "${TLS_WIZARD_CLI}" menu

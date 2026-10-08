@@ -256,9 +256,13 @@ dockerConfigureSpecValidate() {
         elif .id == 27 or .id == 29 then
           $request.schema_version == 3 and .core == "xray" and
           exact(["id", "core", "listener_id", "server", "public_port", "address_families", "name", "uuid", "fallback_tls"]) and
-          (.fallback_tls | exact(["domain", "http_port", "http2_port"]) and
+          (.fallback_tls | exact(["domain", "http_port", "http2_port"] +
+              if has("alpn") then ["alpn"] else [] end) and
             (.domain | hostname) and (.http_port | port) and (.http2_port | port) and
-            .http_port != .http2_port)
+            .http_port != .http2_port and
+            (if has("alpn") then
+              .alpn == ["h2", "http/1.1"] or .alpn == ["http/1.1", "h2"] or .alpn == ["http/1.1"]
+             else true end))
         elif .id == 3 then
           $request.schema_version == 3 and .core == "sing-box" and
           exact(["id", "core", "listener_id", "server", "public_port", "address_families", "name", "uuid", "hy2"]) and
@@ -807,8 +811,12 @@ EOF
 }
 
 dockerEditBaselineValidate() {
-    local specFile=$1 workspace=$2 root baseline core directory state token
+    local specFile=$1 workspace=$2 alpnListener=${3:-} root baseline core directory state token
     root=$(dockerInstallRoot) || return 1
+    [[ -z "${alpnListener}" ]] || jq -e --arg listener "${alpnListener}" '
+      [.core.protocols[] | select(.listener_id == $listener and .core == "xray" and
+        (.id == 27 or .id == 29))] | length == 1
+    ' "${specFile}" >/dev/null 2>&1 || return 1
     for token in config data/subscription data/xray data/sing-box data/static data/acme data/net \
         secrets/tls secrets/net/wireguard logs/nginx logs/subscription logs/acme \
         compose.json deployment.json images.env; do
@@ -874,9 +882,18 @@ dockerEditBaselineValidate() {
             for token in config.json users.base; do
                 [[ -e "${baseline}/${directory}/${token}" ]] || continue
                 [[ -f "${root}/${directory}/${token}" ]] &&
-                    jq -e -n --slurpfile expected "${baseline}/${directory}/${token}" \
+                    jq -e -n --arg alpn "${alpnListener}" --arg directory "${directory}" \
+                        --slurpfile expected "${baseline}/${directory}/${token}" \
                         --slurpfile actual "${root}/${directory}/${token}" \
-                        '$expected == $actual' >/dev/null 2>&1 || {
+                        '
+                          # ALPN 专项仅忽略选中入站字段，完整账号输入与运行配置都要核对。
+                          def comparable:
+                            if $alpn != "" and $directory == "config/xray" then
+                              .inbounds |= map(if .tag == $alpn then
+                                del(.streamSettings.tlsSettings.alpn) else . end)
+                            else . end;
+                          ($expected | map(comparable)) == ($actual | map(comparable))
+                        ' >/dev/null 2>&1 || {
                     dockerError '核心账号或参数与完整规格不一致，不能无损接入编辑'
                     return 1
                 }
@@ -912,6 +929,70 @@ dockerEditBaselineValidate() {
         dockerError '监听器、编排或宿主集成不能从完整规格无损重建，已拒绝编辑'
         return 1
     }
+}
+
+dockerFallbackAlpnStatus() {
+    local specFile=$1 workspace=$2 listener=${3:-} root selected key repairable nginxMatches=false token
+    root=$(dockerInstallRoot) || return 1
+    for token in config/xray/config.json config/nginx; do
+        dockerTrafficSafePath "${root}" "${root}/${token}" || return 1
+    done
+    [[ -f "${root}/config/xray/config.json" && -d "${root}/config/nginx" &&
+        -z "$(find "${root}/config/nginx" ! -type f ! -type d -print -quit)" ]] || return 1
+    jq -es 'length == 1 and (.[0] | type == "object" and (.inbounds | type == "array"))' \
+        "${root}/config/xray/config.json" >/dev/null 2>&1 || {
+        dockerError '实际 Xray 配置缺失或损坏，不能读取 ALPN'
+        return 1
+    }
+    selected="${workspace}/alpn-selected.json"
+    jq --arg listener "${listener}" '
+      [.core.protocols[] | select((.id == 27 or .id == 29) and
+        ($listener == "" or .listener_id == $listener))] |
+      if length > 0 then . else error("没有匹配的传统 TLS fallback 入口") end
+    ' "${specFile}" >"${selected}" 2>/dev/null || {
+        dockerError '没有匹配的传统 TLS fallback 入口'
+        return 1
+    }
+    mkdir -p -- "${workspace}/alpn-nginx" || return 1
+    dockerGenerateNginxConfig "${specFile}" "${workspace}/alpn-nginx/default.conf" &&
+        dockerGenerateRealityStreamConfig "${specFile}" "${workspace}/alpn-nginx/stream/reality.conf" &&
+        dockerGenerateRealityStreamMain "${specFile}" "${workspace}/alpn-nginx/stream/host-main" || return 1
+    diff -qr -- "${workspace}/alpn-nginx" "${root}/config/nginx" >/dev/null 2>&1 &&
+        nginxMatches=true
+    : >"${workspace}/alpn-status.jsonl"
+    while IFS= read -r key; do
+        repairable=false
+        dockerEditBaselineValidate "${specFile}" "${workspace}" "${key}" >/dev/null 2>&1 &&
+            repairable=true
+        jq -en --arg listener "${key}" --argjson repairable "${repairable}" \
+            --argjson nginx "${nginxMatches}" --slurpfile entries "${selected}" \
+            --slurpfile actual "${root}/config/xray/config.json" '
+          ($entries[0][] | select(.listener_id == $listener)) as $entry |
+          [$actual[0].inbounds[] | select(.tag == $listener)] as $inbounds |
+          if ($inbounds | length) != 1 then error("入站缺失或重复") else
+            $inbounds[0] as $inbound |
+            ($entry.fallback_tls.alpn // ["h2","http/1.1"]) as $configured |
+            $inbound.streamSettings.tlsSettings.alpn as $running |
+            {listener_id:$listener, protocol:$entry.id,
+             configured_alpn:$configured,
+             running_alpn:(if ($running | type) == "array" then
+               if ($running | length <= 3 and all(.[]; . == "h2" or . == "http/1.1"))
+               then $running else null end
+               else null end),
+             recommended_alpn:["h2","http/1.1"],
+             runtime_matches_spec:($running == $configured),
+             recommended:($running == ["h2","http/1.1"]),
+             h2_fallback:($inbound.settings.fallbacks == [
+               {dest:("nginx:" + ($entry.fallback_tls.http_port | tostring)),xver:1},
+               {alpn:"h2",dest:("nginx:" + ($entry.fallback_tls.http2_port | tostring)),xver:1}]),
+             nginx_matches_spec:$nginx, repairable:$repairable}
+          end
+        ' >>"${workspace}/alpn-status.jsonl" 2>/dev/null || {
+            dockerError '实际 Xray 入站缺失、重复或损坏，无法诊断 ALPN'
+            return 1
+        }
+    done < <(jq -r '.[].listener_id' "${selected}")
+    jq -s '.' "${workspace}/alpn-status.jsonl"
 }
 
 dockerRealityProbeRun() (
@@ -1266,7 +1347,7 @@ dockerGenerateXrayConfig() {
               security: "tls",
               tlsSettings: {
                 serverName: (.fallback_tls // .trojan).domain,
-                alpn: (if .id == 28 then ["http/1.1"] else ["h2", "http/1.1"] end),
+                alpn: (if .id == 28 then ["http/1.1"] else .fallback_tls.alpn // ["h2", "http/1.1"] end),
                 rejectUnknownSni: true,
                 minVersion: "1.2",
                 certificates: [{
@@ -1870,9 +1951,9 @@ dockerGenerateSubscription() {
       elif .id == 28 then
         "trojan://\(.uuid | @uri)@\(.server | authority):\(.public_port)?peer=\(.trojan.domain | @uri)&fp=chrome&sni=\(.trojan.domain | @uri)&alpn=\("http/1.1" | @uri)#\(.name | @uri)"
       elif .id == 27 then
-        "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&flow=xtls-rprx-vision&security=tls&sni=\(.fallback_tls.domain | @uri)&fp=chrome&alpn=\("h2,http/1.1" | @uri)&type=tcp#\(.name | @uri)"
+        "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&flow=xtls-rprx-vision&security=tls&sni=\(.fallback_tls.domain | @uri)&fp=chrome&alpn=\((.fallback_tls.alpn // ["h2", "http/1.1"]) | join(",") | @uri)&type=tcp#\(.name | @uri)"
       elif .id == 29 then
-        "trojan://\(.uuid | @uri)@\(.server | authority):\(.public_port)?peer=\(.fallback_tls.domain | @uri)&security=tls&fp=chrome&sni=\(.fallback_tls.domain | @uri)&alpn=\("h2,http/1.1" | @uri)&type=tcp#\(.name | @uri)"
+        "trojan://\(.uuid | @uri)@\(.server | authority):\(.public_port)?peer=\(.fallback_tls.domain | @uri)&security=tls&fp=chrome&sni=\(.fallback_tls.domain | @uri)&alpn=\((.fallback_tls.alpn // ["h2", "http/1.1"]) | join(",") | @uri)&type=tcp#\(.name | @uri)"
       elif .id == 3 then
         # 服务端上行对应客户端下行，分享链接需要交换带宽方向。
         "hysteria2://\(.uuid | @uri)@\(.server | authority):\(.public_port)?peer=\(.hy2.domain | @uri)&insecure=0&sni=\(.hy2.domain | @uri)&alpn=h3" +
@@ -2986,6 +3067,7 @@ dockerEnsureRuntimeDataPermissions() {
 
 dockerRestoreConfiguration() {
     local root backup=${DOCKER_CONFIG_BACKUP:-} relative core bundleTarget= savedTraffic currentTraffic restoredTraffic includeStatic=0
+    local alpnListener=${DOCKER_CONFIG_RESTORE_ALPN_LISTENER:-} alpnTemporary=
     [[ "${DOCKER_CONFIG_SWITCHED:-0}" == "1" && -n "${backup}" ]] || return 0
     root=$(dockerInstallRoot) || return 1
     if [[ -e "${backup}/bundle.target" || -L "${backup}/bundle.target" ]]; then
@@ -3051,6 +3133,23 @@ dockerRestoreConfiguration() {
         if [[ -f "${root}/config/xray/users.base" || -f "${root}/config/sing-box/users.base" ||
             -f "${root}/data/traffic/state.json" ]]; then
             dockerTrafficPrepareCandidate "${root}" || return 1
+        fi
+        if [[ -n "${alpnListener}" ]]; then
+            # 额度重渲染会覆盖运行配置，专项恢复要保留原先仅运行文件里的 ALPN 漂移。
+            alpnTemporary=$(mktemp "${root}/config/xray/.alpn-restore.XXXXXX") || return 1
+            jq -e --arg listener "${alpnListener}" \
+                --slurpfile saved "${backup}/config/xray/config.json" '
+              ($saved[0].inbounds[] | select(.tag == $listener) |
+                .streamSettings.tlsSettings) as $tls |
+              .inbounds |= map(if .tag == $listener then
+                if $tls | has("alpn") then .streamSettings.tlsSettings.alpn = $tls.alpn
+                else del(.streamSettings.tlsSettings.alpn) end
+              else . end)
+            ' "${root}/config/xray/config.json" >"${alpnTemporary}" &&
+                mv -f -- "${alpnTemporary}" "${root}/config/xray/config.json" || {
+                rm -f -- "${alpnTemporary}"
+                return 1
+            }
         fi
         dockerEnsureRuntimeDataPermissions || return 1
         dockerComposeRun up -d --force-recreate --wait --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" >/dev/null 2>&1 || return 1

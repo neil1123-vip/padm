@@ -61,7 +61,27 @@ def request(destination, path, tls=None, proxy=False):
         connection.close()
 
 
+def h2_request(destination, path, fixture):
+    body, headers = fixture / "h2-body", fixture / "h2-headers"
+    response = subprocess.run(
+        ["curl", "--silent", "--show-error", "--noproxy", "*", "--connect-timeout", "1",
+         "--max-time", "3", "--http2-prior-knowledge", "--haproxy-protocol",
+         "--header", f"Host: {DOMAIN}", "--output", str(body), "--dump-header", str(headers),
+         "--write-out", "%{http_version}\t%{http_code}", f"http://127.0.0.1:{destination}{path}"],
+        check=True, capture_output=True, text=True, timeout=5,
+    )
+    version, status = response.stdout.split("\t")
+    assert version == "2", (destination, path, response.stdout)
+    location = next(
+        (line.split(":", 1)[1].strip() for line in headers.read_text().splitlines()
+         if line.lower().startswith("location:")), None,
+    )
+    return int(status), location, body.read_bytes()
+
+
 def main(test_root):
+    version = subprocess.run(["curl", "--version"], capture_output=True, text=True, check=True)
+    assert re.search(r"^Features:.*\bHTTP2\b", version.stdout, re.MULTILINE), "curl 缺少 HTTP2"
     backend = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Backend)
     backend.daemon_threads = True
     thread = threading.Thread(target=backend.serve_forever, daemon=True)
@@ -155,6 +175,11 @@ def main(test_root):
                         assert INDEX not in response[2], output.name
                     else:
                         assert response[:2] == (302, REDIRECT), (output.name, response)
+                    if protocol in ("27", "29"):
+                        # HTTP/2 与 PROXY v1 使用已安装 curl，不手写协议解析或隐藏回落。
+                        assert h2_request(ports["31302"], "/", fixture) == response, output.name
+                        if mode == "static":
+                            assert h2_request(ports["31302"], "/assets/site.css", fixture) == (200, None, CSS)
                     if protocol == "21":
                         for path, body in (
                             ("/abcdefghws", b"proxy:/abcdefghws"),

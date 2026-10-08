@@ -318,6 +318,9 @@ dockerBundleSupportsSpec() {
           (if $spec[0] | has("site") then
             $schema[0]["x-padm-site-content"] == true
           else true end) and
+          (if any($spec[0].core.protocols[]; (.fallback_tls // {}) | has("alpn")) then
+            $schema[0]["x-padm-fallback-alpn"] == true
+          else true end) and
           ($features | length) == 1 and ($features[0].protocols | type == "array") and
           all($spec[0].core.protocols[];
             . as $entry |

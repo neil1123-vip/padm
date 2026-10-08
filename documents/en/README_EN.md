@@ -179,8 +179,31 @@ proxy/subscription routes, ports, TLS, or ALPN. Failure and INT/TERM restore con
 spec together; old snapshots without static content retain the current directory.
 Deleting the last Nginx listener clears the site mode but retains static files and other TLS listeners.
 `status` reports only `site_mode`, not the redirect URL. Old specs remain compatible;
-v3 `.site` requires the bundle capability `x-padm-site-content`. ALPN diagnostics/repair
-and webroot/standalone ACME remain deferred.
+v3 `.site` requires the bundle capability `x-padm-site-content`.
+Webroot/standalone ACME remains deferred.
+
+The same menu offers ALPN diagnostics, recommended repair, and three manual orders
+for fallback listeners `27`/`29`:
+
+```bash
+padm-docker protocol alpn-status
+padm-docker protocol alpn-status entry-fallback
+padm-docker edit --alpn entry-fallback h2,http/1.1 --preview
+padm-docker edit --alpn entry-fallback http/1.1,h2 --confirm PADM-DOCKER-EDIT
+padm-docker edit --alpn entry-fallback http/1.1 --confirm PADM-DOCKER-EDIT
+```
+
+The recommended order is `h2,http/1.1`. Manual choices persist in optional
+`fallback_tls.alpn`, keeping the core configuration and share links in sync.
+Explicit values require bundle capability `x-padm-fallback-alpn`; old specs keep
+their default behavior. Diagnostics report configured/runtime ALPN, fallback/Nginx
+consistency, and `repairable`, not a live TLS negotiation result. A nonrecommended
+order matching the manual spec is not corruption.
+Repair tolerates only the selected inbound's ALPN field drift, checking both full
+account input and runtime configuration. Other listeners, accounts, routes,
+fallbacks, Nginx, or orchestration drift remain rejected. Preview/cancellation does
+not write live files; health failure and INT/TERM restore the original state,
+including any pre-repair ALPN drift.
 
 Select `9=Shadowsocks` after choosing sing-box for SS2022 multi-user AES-128.
 It publishes TCP and UDP on the same port for either address family and needs no TLS.
