@@ -1296,4 +1296,11 @@ backupNginxConfig() {
         fi
         return 0
     fi
+    if [[ "$1" == "restoreBackup" ]]; then
+        coreSetPairedFileManualCheckMessage manualCheckMessage "nginx配置恢复备份不存在或不是普通文件" "${targetFile}" "${backupFile}"
+        errorCard "${manualCheckMessage}"
+        return 1
+    fi
+    errorCard "不支持的 Nginx 配置备份动作: $1"
+    return 1
 }

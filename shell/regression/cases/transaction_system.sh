@@ -2424,6 +2424,21 @@ SH
         checkNginx302
         [[ "$(<"${targetPath}")" == "changed config" ]]
     )
+    (
+        local actionLog="${TMP_DIR}/nginx-302-missing-backup.log"
+        PADM_ALONE_NGINX_BACKUP_FILE="${TMP_DIR}/missing-alone-backup.conf"
+        printf 'changed config\n' >"${targetPath}"
+        rm -rf -- "${PADM_ALONE_NGINX_BACKUP_FILE}"
+        errorCard() { printf '%s\n' "$*" >>"${actionLog}"; }
+        regressionExpectStatus 1 backupNginxConfig restoreBackup >/dev/null 2>&1
+        [[ "$(<"${targetPath}")" == "changed config" ]]
+        grep -q '备份不存在或不是普通文件' "${actionLog}"
+        mkdir -p "${PADM_ALONE_NGINX_BACKUP_FILE}"
+        : >"${actionLog}"
+        regressionExpectStatus 1 backupNginxConfig restoreBackup >/dev/null 2>&1
+        [[ "$(<"${targetPath}")" == "changed config" ]]
+        grep -q '备份不存在或不是普通文件' "${actionLog}"
+    )
 
     (
         local actionLog="${TMP_DIR}/nginx-302-backup-failure.log"
