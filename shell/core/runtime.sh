@@ -628,13 +628,13 @@ padmRestoreManagedFileBackupManifest() {
     backupDir=$(padmRequireSafeAbsolutePath "${backupDir}") || return 1
     manifest="${backupDir}/manifest"
     [[ -f "${manifest}" ]] || return 1
-    while IFS=$'\t' read -r backupPath targetPath state; do
+    while IFS=$'\t' read -r backupPath targetPath state || [[ -n "${backupPath}${targetPath}${state}" ]]; do
         if [[ -z "${state}" && "${targetPath}" == "missing" && -n "${backupPath}" ]]; then
             targetPath="${backupPath}"
             state=missing
             backupPath=
         fi
-        [[ -n "${targetPath}" ]] || continue
+        [[ -n "${targetPath}" ]] || { status=1; continue; }
         targetPath=$(padmRequireSafeAbsolutePath "${targetPath}") || return 1
         if [[ -n "${validateTargetFn}" ]]; then
             declare -F "${validateTargetFn}" >/dev/null 2>&1 || return 1
