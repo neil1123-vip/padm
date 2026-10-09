@@ -195,15 +195,51 @@ realityStreamRollbackAndFail() {
     local backupDir=$1
     local reason=$2
     local rollbackMessage
-    if realityStreamRollback "${backupDir}"; then
+    if padmRunRollback realityStreamRollback "${backupDir}"; then
+        realityStreamClearRollback "${backupDir}"
         removeRealityStreamBackup "${backupDir}"
         errorCard "${reason}，已自动恢复本次修改"
     else
+        realityStreamClearRollback "${backupDir}"
         padmForgetCleanupPath "${backupDir}"
         coreSetRollbackFailureMessage rollbackMessage "${reason}" "${backupDir}"
         errorCard "${rollbackMessage}"
     fi
     return 1
+}
+
+realityStreamRollbackOnExit() {
+    [[ "${PADM_REALITY_STREAM_ROLLBACK[active]:-false}" == true ]] || return 0
+    PADM_REALITY_STREAM_ROLLBACK[active]=false
+
+    local backupDir=${PADM_REALITY_STREAM_ROLLBACK[backup]:-}
+    local status=0 rollbackMessage
+    [[ -n "${backupDir}" ]] || return 0
+    realityStreamRollback "${backupDir}" || status=1
+    if [[ "${status}" == 0 && "${PADM_REALITY_STREAM_ROLLBACK[servicesAttempted]:-false}" == true ]]; then
+        if ! realityStreamPrepareCoreReload || ! reloadCore; then
+            status=1
+        fi
+        serviceQueueRefresh nginx
+        serviceQueueApply || status=1
+    fi
+    if [[ "${status}" == 0 ]]; then
+        removeRealityStreamBackup "${backupDir}"
+    else
+        padmForgetCleanupPath "${backupDir}"
+        coreSetRollbackFailureMessage rollbackMessage "Reality 443 共存分流中断后回滚失败" "${backupDir}"
+        errorCard "${rollbackMessage}"
+    fi
+    return "${status}"
+}
+
+realityStreamClearRollback() {
+    local backupDir=$1
+    if [[ "${PADM_REALITY_STREAM_ROLLBACK[active]:-false}" == true &&
+        "${PADM_REALITY_STREAM_ROLLBACK[backup]:-}" == "${backupDir}" ]]; then
+        PADM_REALITY_STREAM_ROLLBACK[active]=false
+        unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
+    fi
 }
 
 realityStreamPrepareCoreReload() {
@@ -218,14 +254,17 @@ realityStreamApplyServicesOrRollback() {
     local reason=$2
     local rollbackMessage
     local restoreServiceStatus=0
+    PADM_REALITY_STREAM_ROLLBACK[servicesAttempted]=true
     if realityStreamPrepareCoreReload && reloadCore; then
         serviceQueueRefresh nginx
         if serviceQueueApply; then
+            realityStreamClearRollback "${backupDir}"
             removeRealityStreamBackup "${backupDir}"
             return 0
         fi
     fi
-    if ! realityStreamRollback "${backupDir}"; then
+    if ! padmRunRollback realityStreamRollback "${backupDir}"; then
+        realityStreamClearRollback "${backupDir}"
         padmForgetCleanupPath "${backupDir}"
         coreSetRollbackFailureMessage rollbackMessage "${reason}" "${backupDir}"
         errorCard "${rollbackMessage}"
@@ -236,6 +275,7 @@ realityStreamApplyServicesOrRollback() {
     fi
     serviceQueueRefresh nginx
     serviceQueueApply || restoreServiceStatus=1
+    realityStreamClearRollback "${backupDir}"
     removeRealityStreamBackup "${backupDir}"
     if [[ "${restoreServiceStatus}" -eq 0 ]]; then
         coreSetRollbackResultMessage rollbackMessage "${reason}" "已回滚本次修改"
@@ -628,10 +668,15 @@ configureRealityStreamSplitApply() {
         errorCard "无法创建 Reality 443 共存分流配置备份"
         return 1
     fi
+    local -A PADM_REALITY_STREAM_ROLLBACK=([active]=true [backup]="${backupDir}" [servicesAttempted]=false)
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
+    padmRegisterExitRollback realityStreamRollbackOnExit
     if jq -e '.firewall_owned == true' "${stateFile}" >/dev/null 2>&1; then
         firewallOwned=true
     fi
     if ! allowPort "${publicPort}"; then
+        realityStreamClearRollback "${backupDir}"
         removeRealityStreamBackup "${backupDir}"
         errorCard "无法开放 Reality 443 共存分流端口"
         return 1
@@ -737,6 +782,10 @@ disableRealityStreamSplit() {
         errorCard "无法创建 Reality 443 共存分流配置备份"
         return 1
     fi
+    local -A PADM_REALITY_STREAM_ROLLBACK=([active]=true [backup]="${backupDir}" [servicesAttempted]=false)
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
+    padmRegisterExitRollback realityStreamRollbackOnExit
 
     if [[ -n "${visionPublicPort}" ]] && ! realityStreamRestoreXrayConfig vision "${visionPublicPort}" "$(realityStreamVisionConfigFile)"; then
         realityStreamRollbackAndFail "${backupDir}" "无法恢复 Reality Vision 公网端口配置"

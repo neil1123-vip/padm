@@ -3187,6 +3187,86 @@ runRealityStreamSplitRegression() (
     configureRealityStreamSplit
     jq -e '.inbounds[0].listen == "127.0.0.1" and .inbounds[0].port == 2443 and .inbounds[0].settings.marker == "vision"' "${PADM_REALITY_STREAM_VISION_CONFIG_FILE}" >/dev/null
     jq -e '.inbounds[0].port == 2053 and .inbounds[0].settings.port == 2443' "${aliasFile}" >/dev/null
+    (
+        # 启用和停用在写入、服务应用期间中断都必须恢复配置和全部端口入口。
+        local operation signal phase rc expected before after signalPending
+        local serviceCallsFile="${root}/signal-service-calls"
+        local -a files=("${PADM_REALITY_STREAM_VISION_CONFIG_FILE}" "${PADM_REALITY_STREAM_XHTTP_CONFIG_FILE}"
+            "${PADM_REALITY_STREAM_STATE_FILE}" "${PADM_REALITY_STREAM_NGINX_CONF}" "${PADM_REALITY_STREAM_CONF_FILE}"
+            "${aliasFile}" "${aliasXHTTPFile}" "${ignoredFile}")
+        before=$(sha256sum "${files[@]}")
+        eval "$(declare -f realityStreamPatchXrayConfig | sed '1s/^realityStreamPatchXrayConfig/streamOriginalPatchForSignal/')"
+        eval "$(declare -f realityStreamRestoreXrayConfig | sed '1s/^realityStreamRestoreXrayConfig/streamOriginalRestoreForSignal/')"
+        streamInterruptIfNeeded() {
+            if [[ "${phase}" == "$1" && "${signalPending}" == true ]]; then
+                signalPending=false
+                kill -"${signal}" "${BASHPID}"
+                :
+            fi
+        }
+        realityStreamPatchXrayConfig() {
+            streamOriginalPatchForSignal "$@" || return 1
+            streamInterruptIfNeeded config
+        }
+        realityStreamRestoreXrayConfig() {
+            streamOriginalRestoreForSignal "$@" || return 1
+            streamInterruptIfNeeded config
+        }
+        reloadCore() {
+            printf 'reload\n' >>"${serviceCallsFile}"
+            streamInterruptIfNeeded service
+        }
+        defaultChoice=1 visionPort=2446 websitePortInput=8443
+        for operation in configureRealityStreamSplit disableRealityStreamSplit; do
+            for signal in INT TERM; do
+                expected=130
+                [[ "${signal}" != TERM ]] || expected=143
+                for phase in config service; do
+                    : >"${serviceCallsFile}"
+                    rc=0
+                    ( signalPending=true; "${operation}" ) || rc=$?
+                    [[ "${rc}" == "${expected}" ]] || return 1
+                    after=$(sha256sum "${files[@]}")
+                    [[ "${after}" == "${before}" ]] || return 1
+                    if [[ "${phase}" == service ]]; then
+                        [[ "$(wc -l <"${serviceCallsFile}")" == 2 ]] || return 1
+                    else
+                        [[ ! -s "${serviceCallsFile}" ]] || return 1
+                    fi
+                    [[ -z "$(find "${TMPDIR}" -mindepth 1 -print -quit)" ]] || return 1
+                done
+            done
+        done
+    ) || return 1
+    (
+        # 中断回滚释放旧 stream 失败时，不应继续重载核心，并必须保留备份。
+        local rollbackPrepareFail=false serviceCallsFile="${root}/signal-prepare-fail"
+        local prepareCallsFile="${root}/signal-prepare-calls" retainedBackup rc=0 signalPending=true
+        eval "$(declare -f realityStreamPrepareCoreReload | sed '1s/^realityStreamPrepareCoreReload/streamOriginalPrepareForSignal/')"
+        realityStreamPrepareCoreReload() {
+            printf 'prepare\n' >>"${prepareCallsFile}"
+            [[ "${rollbackPrepareFail}" != true ]] || return 1
+            streamOriginalPrepareForSignal "$@"
+        }
+        reloadCore() {
+            printf 'reload\n' >>"${serviceCallsFile}"
+            if [[ "${signalPending}" == true ]]; then
+                rollbackPrepareFail=true
+                signalPending=false
+                kill -TERM "${BASHPID}"
+                :
+            fi
+        }
+        : >"${serviceCallsFile}"
+        : >"${prepareCallsFile}"
+        ( configureRealityStreamSplit ) || rc=$?
+        [[ "${rc}" == 143 && "$(wc -l <"${prepareCallsFile}")" == 2 &&
+            "$(wc -l <"${serviceCallsFile}")" == 1 ]] || return 1
+        retainedBackup=$(find "${TMPDIR}" -mindepth 1 -maxdepth 1 -type d -print -quit)
+        [[ -n "${retainedBackup}" && -d "${retainedBackup}" ]] || return 1
+        rm -rf -- "${retainedBackup}"
+        [[ -z "$(find "${TMPDIR}" -mindepth 1 -print -quit)" ]]
+    ) || return 1
     defaultChoice=1 visionPort=2445 websitePortInput=8443
     configureRealityStreamSplit
     jq -e '.protocols.vision.restore_port == 443 and .protocols.vision.internal_port == 2445' "${PADM_REALITY_STREAM_STATE_FILE}" >/dev/null
