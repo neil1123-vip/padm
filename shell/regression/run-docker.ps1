@@ -363,6 +363,9 @@ try {
             $info = & $docker image inspect $references[$name]
             if ($LASTEXITCODE -ne 0) { throw "Required node image is missing: $($references[$name])" }
             $info = $info | ConvertFrom-Json | Select-Object -First 1
+            if ("$($info.Os)/$($info.Architecture)" -ne $platform) {
+                throw "Node image architecture does not match host: $($references[$name])"
+            }
             if ($info.Descriptor.digest -notmatch '^sha256:[a-f0-9]{64}$') {
                 throw "Node image has no real manifest digest: $name"
             }
