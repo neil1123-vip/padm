@@ -136,14 +136,16 @@ showTrojanAccounts() {
 
 showTrojanAccountsFromConfig() (
     set -o pipefail
-    local trojanConfigFile=$1 port=$2
+    local trojanConfigFile=$1 port=$2 protocolHost
     [[ -f "${trojanConfigFile}" ]] || return 0
+    protocolHost=$(jq -r '.inbounds[0].tls.server_name | if . == null then empty elif type == "string" then . else error("invalid server_name") end' "${trojanConfigFile}") || return 1
+    protocolHost=${protocolHost:-${currentHost:-}}
     jq -c '(.inbounds[0].settings.clients // .inbounds[0].users) | if type == "array" then .[] else error("invalid clients") end' "${trojanConfigFile}" | while read -r user; do
             local email password
             IFS=$'\037' read -r email _ password _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
             subscribeAccountTitle "${email}"
 
-            defaultBase64Code trojan "${port}" "${email}" "${password}" || return 1
+            defaultBase64Code trojan "${port}" "${email}" "${password}" "${protocolHost}" || return 1
         done
 )
 
@@ -331,7 +333,8 @@ showNaiveAccounts() (
     fi
 )
 
-showShadowsocksAccounts() {
+showShadowsocksAccounts() (
+    set -o pipefail
     # Shadowsocks
     if currentProtocolHas 30; then
         subscribeSectionTitle "Shadowsocks" "高级兼容协议"
@@ -340,17 +343,19 @@ showShadowsocksAccounts() {
             path="${singBoxConfigPath}"
         fi
         local serverPassword
-        serverPassword=$(jq -r '.inbounds[0].password // empty' "${path}30_shadowsocks_inbounds.json")
-        jq -r -c '.inbounds[]|.users[]' "${path}30_shadowsocks_inbounds.json" | while read -r user; do
+        serverPassword=$(jq -er '.inbounds[0].password | select(type == "string" and length > 0)' "${path}30_shadowsocks_inbounds.json") || return 1
+        local protocolHost=${currentHost:-}
+        [[ -n "${protocolHost}" ]] || protocolHost=$(realityEntryHost) || return 1
+        jq -c '.inbounds[] | .users | if type == "array" then .[] else error("invalid users") end' "${path}30_shadowsocks_inbounds.json" | while read -r user; do
             local name password
             IFS=$'\037' read -r _ _ password _ name _ <<<"$(subscriptionAccountProfile "${user}")"
             subscribeAccountTitle "${name}"
             echo
-            defaultBase64Code shadowsocks "${singBoxShadowsocksPort}" "${name}" "${serverPassword}:${password}" || return 1
-        done
+            defaultBase64Code shadowsocks "${singBoxShadowsocksPort}" "${name}" "${serverPassword}:${password}" "${protocolHost}" || return 1
+        done || return 1
 
     fi
-}
+)
 
 showVmessHTTPUpgradeAccounts() {
     # VMess HTTPUpgrade

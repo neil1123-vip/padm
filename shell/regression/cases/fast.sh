@@ -5445,6 +5445,96 @@ EOF
             [[ -z "${currentHost}" ]]
         )
         (
+            # Reality 主核没有 TLS 域名时，Trojan 使用自己的域名，SS 使用连接入口。
+            cat >"${singBoxRoot}/28_trojan_TCP_direct_inbounds.json" <<'JSON'
+{"inbounds":[{"type":"trojan","listen_port":30443,"users":[{"name":"sub_trojan","password":"trojan-pass"}],"tls":{"server_name":"trojan.example.com"}}]}
+JSON
+            cat >"${singBoxRoot}/30_shadowsocks_inbounds.json" <<'JSON'
+{"inbounds":[{"type":"shadowsocks","listen_port":38443,"method":"2022-blake3-aes-128-gcm","password":"c2VydmVy","users":[{"name":"sub_ss","password":"Y2xpZW50"}]}]}
+JSON
+            source "${PROJECT_ROOT}/shell/core/state.sh"
+            readInstallType() {
+                coreInstallType=1 configPath="${xrayRoot}/" singBoxConfigPath="${singBoxRoot}/"
+                ctlPath="${fakeXray}" nginxConfigPath="${nginxRoot}/"
+            }
+            readInstallType
+            readInstallProtocolType
+            readConfigHostPathUUID
+            [[ -z "${currentHost}" ]]
+            : >"${captureLog}"
+            showTrojanAccounts >/dev/null
+            showShadowsocksAccounts >/dev/null
+            local addressFailures=0
+            grep -q 'default:sub_trojan:.*@trojan.example.com:30443.*sni=trojan.example.com' "${captureLog}" ||
+                { printf 'Trojan 辅助入口未使用自身 TLS 域名\n' >&2; addressFailures=$((addressFailures + 1)); }
+            grep -q 'default:sub_ss:.*@entry.example.com:38443' "${captureLog}" ||
+                { printf 'Shadowsocks 辅助入口没有有效连接地址\n' >&2; addressFailures=$((addressFailures + 1)); }
+            [[ "${addressFailures}" == 0 ]]
+            grep -q 'singbox:sub_trojan:.*"server":"trojan.example.com".*"server_name":"trojan.example.com"' "${captureLog}"
+            grep -q 'singbox:sub_ss:.*"server":"entry.example.com"' "${captureLog}"
+            [[ -z "${currentHost}" ]]
+            local savedTrojanConfig variant
+            savedTrojanConfig=$(<"${singBoxRoot}/28_trojan_TCP_direct_inbounds.json")
+            jq 'del(.inbounds[0].tls.server_name)' <<<"${savedTrojanConfig}" >"${singBoxRoot}/28_trojan_TCP_direct_inbounds.json"
+            currentHost=legacy.example.com
+            : >"${captureLog}"
+            showTrojanAccounts >/dev/null
+            grep -q 'default:sub_trojan:.*@legacy.example.com:30443.*sni=legacy.example.com' "${captureLog}"
+            currentHost=
+            : >"${captureLog}"
+            regressionExpectStatus 1 showTrojanAccounts >/dev/null 2>&1
+            [[ ! -s "${captureLog}" ]]
+            currentHost=legacy.example.com
+            for variant in true 123 '{}'; do
+                jq --argjson host "${variant}" '.inbounds[0].tls.server_name = $host' <<<"${savedTrojanConfig}" >"${singBoxRoot}/28_trojan_TCP_direct_inbounds.json"
+                : >"${captureLog}"
+                regressionExpectStatus 1 showTrojanAccounts >/dev/null 2>&1
+                [[ ! -s "${captureLog}" ]]
+            done
+            printf '%s\n' "${savedTrojanConfig}" >"${singBoxRoot}/28_trojan_TCP_direct_inbounds.json"
+            (
+                currentHost=
+                realityEntryHost() { return 1; }
+                : >"${captureLog}"
+                regressionExpectStatus 1 showShadowsocksAccounts >/dev/null 2>&1
+                [[ ! -s "${captureLog}" ]]
+            )
+            : >"${captureLog}"
+            showShadowsocksAccounts >/dev/null
+            grep -q 'default:sub_ss:.*@legacy.example.com:38443' "${captureLog}"
+            (
+                set +o pipefail
+                local ssConfig="${singBoxRoot}/30_shadowsocks_inbounds.json"
+                local savedSSConfig
+                savedSSConfig=$(<"${ssConfig}")
+                for variant in null '{}'; do
+                    jq --argjson users "${variant}" '.inbounds[0].users = $users' <<<"${savedSSConfig}" >"${ssConfig}"
+                    : >"${captureLog}"
+                    regressionExpectStatus 1 showShadowsocksAccounts >/dev/null 2>&1
+                    [[ ! -s "${captureLog}" ]]
+                done
+                jq 'del(.inbounds[0].users)' <<<"${savedSSConfig}" >"${ssConfig}"
+                : >"${captureLog}"
+                regressionExpectStatus 1 showShadowsocksAccounts >/dev/null 2>&1
+                [[ ! -s "${captureLog}" ]]
+                jq '.inbounds[0].users = []' <<<"${savedSSConfig}" >"${ssConfig}"
+                showShadowsocksAccounts >/dev/null
+                [[ ! -s "${captureLog}" ]]
+                for variant in null '""' 123 '{}'; do
+                    jq --argjson password "${variant}" '.inbounds[0].password = $password' <<<"${savedSSConfig}" >"${ssConfig}"
+                    regressionExpectStatus 1 showShadowsocksAccounts >/dev/null 2>&1
+                    [[ ! -s "${captureLog}" ]]
+                done
+                printf '{invalid\n' >"${ssConfig}"
+                regressionExpectStatus 1 showShadowsocksAccounts >/dev/null 2>&1
+                [[ ! -s "${captureLog}" ]]
+                printf '%s\n' "${savedSSConfig}" >"${ssConfig}"
+                appendDefaultSubscribeLine() { printf 'failed-write\n' >>"${captureLog}"; return 1; }
+                regressionExpectStatus 1 showShadowsocksAccounts >/dev/null 2>&1
+                [[ "$(<"${captureLog}")" == failed-write ]]
+            )
+        )
+        (
             # 无独立 TLS 域名的旧配置仍使用已有入口。
             local savedAnyTlsConfig
             savedAnyTlsConfig=$(<"${singBoxRoot}/13_anytls_inbounds.json")

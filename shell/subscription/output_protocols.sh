@@ -235,26 +235,28 @@ EOF
 }
 
 emitTrojanSubscribeOutput() {
-    local port=$1 email=$2 id=$3 user=$6
+    local port=$1 email=$2 id=$3 add=$4 user=$6
+    local host=${add:-${currentHost}}
+    subscribeOutputSafeHostValue "${host}" || return 1
     local encodedId yamlPassword defaultLink clashMetaBlock singBoxFilter
     encodedId=$(encodeUriUserInfoComponent "${id}") || return 1
     yamlPassword=$(serializeYamlString "${id}") || return 1
-    defaultLink="trojan://${encodedId}@$(formatUriAuthorityHost "${currentHost}"):${port}?peer=${currentHost}&fp=chrome&sni=${currentHost}&alpn=http/1.1#${email}_Trojan"
+    defaultLink="trojan://${encodedId}@$(formatUriAuthorityHost "${host}"):${port}?peer=${host}&fp=chrome&sni=${host}&alpn=http/1.1#${email}_Trojan"
     subscribeOutputTitle "通用链接：Trojan TLS"
     echoContent green "    ${defaultLink}\n"
 
     clashMetaBlock=$(cat <<EOF
   - name: "${email}"
     type: trojan
-    server: ${currentHost}
+    server: ${host}
     port: ${port}
     password: ${yamlPassword}
     client-fingerprint: chrome
     udp: true
-    sni: ${currentHost}
+    sni: ${host}
 EOF
 )
-    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"trojan",server:$server,server_port:$port,password:$password,tls:{alpn:["http/1.1"],enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"}}}' --arg tag "${email}" --arg server "${currentHost}" --argjson port "${port}" --arg password "${id}" --arg sni "${currentHost}") || return 1
+    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"trojan",server:$server,server_port:$port,password:$password,tls:{alpn:["http/1.1"],enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"}}}' --arg tag "${email}" --arg server "${host}" --argjson port "${port}" --arg password "${id}" --arg sni "${host}") || return 1
     appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"
 
 }
@@ -524,29 +526,31 @@ EOF
 }
 
 emitShadowsocksSubscribeOutput() {
-    local port=$1 email=$2 id=$3 user=$6
+    local port=$1 email=$2 id=$3 add=$4 user=$6
+    local host=${add:-${currentHost}}
+    subscribeOutputSafeHostValue "${host}" || return 1
     local method="2022-blake3-aes-128-gcm"
     local defaultUserInfo defaultLink clashMetaBlock singBoxFilter yamlPassword
 
     defaultUserInfo=$(printf '%s' "${method}:${id}" | base64 -w 0)
-    defaultLink="ss://${defaultUserInfo}@$(formatUriAuthorityHost "${currentHost}"):${port}#${email}"
+    defaultLink="ss://${defaultUserInfo}@$(formatUriAuthorityHost "${host}"):${port}#${email}"
     yamlPassword=$(serializeYamlString "${id}") || return 1
     clashMetaBlock=$(cat <<EOF
   - name: "${email}"
     type: ss
-    server: ${currentHost}
+    server: ${host}
     port: ${port}
     cipher: ${method}
     password: ${yamlPassword}
 EOF
 )
-    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"shadowsocks",server:$server,server_port:$port,method:$method,password:$password}' --arg tag "${email}" --arg server "${currentHost}" --argjson port "${port}" --arg method "${method}" --arg password "${id}") || return 1
+    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"shadowsocks",server:$server,server_port:$port,method:$method,password:$password}' --arg tag "${email}" --arg server "${host}" --argjson port "${port}" --arg method "${method}" --arg password "${id}") || return 1
 
     subscribeOutputTitle "通用链接：Shadowsocks"
     echoContent green "    ${defaultLink}\n"
 
     subscribeOutputTitle "格式化明文：Shadowsocks"
-    echoContent green "协议类型:Shadowsocks，地址:${currentHost}，端口:${port}，method:${method}，账户名:${email}\n"
+    echoContent green "协议类型:Shadowsocks，地址:${host}，端口:${port}，method:${method}，账户名:${email}\n"
 
     appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"
 }
