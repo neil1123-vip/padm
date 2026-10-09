@@ -169,7 +169,8 @@ showVlessGrpcAccounts() {
     fi
 }
 
-showHysteriaAccounts() {
+showHysteriaAccounts() (
+    set -o pipefail
     # hysteria2
     if currentProtocolHas 3 || [[ -n "${hysteriaPort:-}" ]]; then
         readPortHopping "hysteria2" "${singBoxHysteria2Port}" || return 1
@@ -188,17 +189,17 @@ showHysteriaAccounts() {
             hysteria2DefaultPort=${singBoxHysteria2Port}
         fi
 
-        jq -r -c '.inbounds[]|.users[]' "${configFile}" | while read -r user; do
+        jq -c '.inbounds[] | .users | if type == "array" then .[] else error("invalid users") end' "${configFile}" | while read -r user; do
             local name password
             IFS=$'\037' read -r _ _ password _ name _ <<<"$(subscriptionAccountProfile "${user}")"
             subscribeAccountTitle "${name}"
             echo
             defaultBase64Code hysteria "${hysteria2DefaultPort}" "${name}" "${password}" || return 1
-        done
+        done || return 1
 
     fi
 
-}
+)
 
 showVlessRealityAccounts() {
     # VLESS Reality Vision
@@ -280,7 +281,8 @@ showVlessRealityGrpcAccountsFromConfig() (
         done
 )
 
-showTuicAccounts() {
+showTuicAccounts() (
+    set -o pipefail
     # TUIC
     if currentProtocolHas 31 || [[ -n "${tuicPort:-}" ]]; then
         readPortHopping "tuic" "${singBoxTuicPort}" || return 1
@@ -296,16 +298,16 @@ showTuicAccounts() {
         if [[ -n "${tuicPortHoppingStart:-}" && -n "${tuicPortHoppingEnd:-}" ]]; then
             tuicDefaultPort="${tuicPortHopping}"
         fi
-        jq -r -c '.inbounds[].users[]' "${configFile}" | while read -r user; do
+        jq -c '.inbounds[] | .users | if type == "array" then .[] else error("invalid users") end' "${configFile}" | while read -r user; do
             local name uuid password
             IFS=$'\037' read -r _ _ password _ name uuid <<<"$(subscriptionAccountProfile "${user}")"
             subscribeAccountTitle "${name}"
             echo
             defaultBase64Code tuic "${tuicDefaultPort}" "${name}" "${uuid}_${password}" || return 1
-        done
+        done || return 1
 
     fi
-}
+)
 
 showNaiveAccounts() (
     set -o pipefail

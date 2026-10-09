@@ -1112,6 +1112,40 @@ JSON
         ' <<<"${subscriptions}" >/dev/null
         printf 'regression-ok:auxiliary-udp-output:%s\n' "${mode}"
     done
+    (
+        # 调用方未开启 pipefail 时，坏 users 和输出写入失败仍必须返回失败。
+        set +o pipefail
+        local functionName configFile userJson variant
+        local capture="${root}/failed-output.log"
+        currentInstallProtocolType=,3,31,
+        singBoxHysteria2Port=8443
+        singBoxTuicPort=9443
+        for functionName in showHysteriaAccounts showTuicAccounts; do
+            if [[ "${functionName}" == showHysteriaAccounts ]]; then
+                configFile="${singBoxConfigPath}06_hysteria2_inbounds.json"
+                userJson='{"name":"sub_hy","password":"pass"}'
+            else
+                configFile="${singBoxConfigPath}09_tuic_inbounds.json"
+                userJson='{"name":"sub_tuic","uuid":"uuid","password":"pass"}'
+            fi
+            defaultBase64Code() { printf '%s\n' output >>"${capture}"; }
+            for variant in null '{}'; do
+                jq -n --argjson users "${variant}" \
+                    '{inbounds:[{tls:{server_name:"udp.example.com"},users:$users}]}' >"${configFile}"
+                : >"${capture}"
+                regressionExpectStatus 1 "${functionName}" >/dev/null 2>&1 || return 1
+                [[ ! -s "${capture}" ]] || return 1
+            done
+            jq -n '{inbounds:[{tls:{server_name:"udp.example.com"},users:[]}]}' >"${configFile}"
+            "${functionName}" >/dev/null || return 1
+            [[ ! -s "${capture}" ]] || return 1
+            jq -n --argjson user "${userJson}" \
+                '{inbounds:[{tls:{server_name:"udp.example.com"},users:[$user]}]}' >"${configFile}"
+            defaultBase64Code() { printf '%s\n' failed-write >>"${capture}"; return 1; }
+            regressionExpectStatus 1 "${functionName}" >/dev/null 2>&1 || return 1
+            [[ "$(<"${capture}")" == failed-write ]] || return 1
+        done
+    ) || return 1
 )
 
 runSubscriptionOutputTlsAnyHysteriaTuicNaiveRegression() {
