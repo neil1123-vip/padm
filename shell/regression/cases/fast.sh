@@ -1,55 +1,9 @@
 #!/usr/bin/env bash
 
-regressionModuleManifestReady() {
-    [[ "${PADM_FAKE_MODULE_MANIFEST_READY:-0}" == "1" ]]
-}
-
-regressionScriptModulesReady() {
-    local expectedRef localRef
-    [[ -f "${SCRIPT_DIR}/shell/core/bootstrap.sh" ]] || return 1
-    regressionModuleManifestReady || return 1
-    [[ -f "${SCRIPT_EXPECTED_REF_FILE}" ]] || return 0
-    [[ -f "${SCRIPT_REF_FILE}" ]] || return 1
-    expectedRef=$(<"${SCRIPT_EXPECTED_REF_FILE}")
-    localRef=$(<"${SCRIPT_REF_FILE}")
-    regressionScriptRefIsValid "${expectedRef}" || return 1
-    regressionScriptRefIsValid "${localRef}" || return 1
-    [[ "${expectedRef}" == "${localRef}" ]]
-}
-
-regressionScriptRefIsValid() {
-    [[ "$1" =~ ^[0-9a-f]{40}$ ]]
-}
-
-regressionEnsureScriptModules() {
-    local remoteRef= expectedRef=
-    if [[ "${PADM_FORCE_SCRIPT_MODULE_REFRESH:-}" == "1" ]]; then
-        remoteRef="${PADM_SCRIPT_MODULE_REF:-}"
-        [[ -n "${remoteRef}" ]] || remoteRef=$(fetchRemoteRef) || return 1
-        regressionScriptRefIsValid "${remoteRef}" || return 1
-        refreshScriptModules "${remoteRef}" || return 1
-        return 0
-    fi
-    if regressionScriptModulesReady; then
-        return 0
-    fi
-    if [[ -f "${SCRIPT_EXPECTED_REF_FILE}" ]]; then
-        expectedRef=$(<"${SCRIPT_EXPECTED_REF_FILE}")
-    fi
-    if [[ "${PADM_SKIP_REMOTE_REF_CHECK:-}" == "1" ]]; then
-        return 1
-    fi
-
-    remoteRef="${expectedRef}"
-    [[ -n "${remoteRef}" ]] || remoteRef=$(fetchRemoteRef) || return 1
-    regressionScriptRefIsValid "${remoteRef}" || return 1
-    refreshScriptModules "${remoteRef}" || return 1
-}
-
 regressionLoadInstallFunctions() {
     eval "$(awk '
         /^scriptTmpPath\(\)/ { capture = 1 }
-        /^ensureScriptModules\(\)/ { capture = 0 }
+        /^loadScriptModules\(\)/ { capture = 0 }
         capture { print }
     ' "${PROJECT_ROOT}/install.sh")"
 }
@@ -3562,43 +3516,33 @@ runInstallRefreshDownloadBoundsRegression() (
 
 )
 
-runInstallEnsureModulesRegression() {
-    local fixtureDir marker
+runInstallEnsureModulesRegression() (
+    local fixtureDir marker beforeManifest shellRc
     local latestRef=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     local expectedRef=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
     fixtureDir="${TMP_DIR}/install-entry"
     marker="${fixtureDir}/refresh-called"
-    mkdir -p "${fixtureDir}/shell/core"
-    touch "${fixtureDir}/shell/core/bootstrap.sh"
+    regressionLoadInstallFunctions
+    regressionCreateInstallModuleFixture "${fixtureDir}"
+    regressionConfigureInstallRefreshFixture "${fixtureDir}"
     printf 'old-ref\n' >"${fixtureDir}/.padm-ref"
 
-    local savedScriptDir="${SCRIPT_DIR:-}"
-    local savedScriptRefFile="${SCRIPT_REF_FILE:-}"
-    local savedScriptExpectedRefFile="${SCRIPT_EXPECTED_REF_FILE:-}"
-    local savedRepoRefUrl="${REPO_REF_URL:-}"
-    local savedRepoZipUrl="${REPO_ZIP_URL:-}"
-    local savedRepoArchiveDir="${REPO_ARCHIVE_DIR:-}"
-    local savedPadmSkipRemoteRefCheck="${PADM_SKIP_REMOTE_REF_CHECK:-}"
-
-    SCRIPT_DIR="${fixtureDir}"
-    SCRIPT_REF_FILE="${fixtureDir}/.padm-ref"
-    SCRIPT_EXPECTED_REF_FILE="${fixtureDir}/.padm-entry-ref"
-    unset PADM_SKIP_REMOTE_REF_CHECK
+    unset PADM_SKIP_REMOTE_REF_CHECK PADM_FORCE_SCRIPT_MODULE_REFRESH PADM_SCRIPT_MODULE_REF
     refreshScriptModules() {
         printf '%s\n' "$1" >"${marker}"
         printf '%s\n' "$1" >"${SCRIPT_REF_FILE}"
         printf '%s\n' "$1" >"${SCRIPT_EXPECTED_REF_FILE}"
-        mkdir -p "${SCRIPT_DIR}/shell/core"
-        touch "${SCRIPT_DIR}/shell/core/bootstrap.sh"
+        regressionCreateInstallModuleFixture "${SCRIPT_DIR}"
+        writeModuleManifest "${SCRIPT_MANIFEST_FILE}"
     }
     fetchRemoteRef() { return 1; }
-    if regressionEnsureScriptModules; then
+    if ensureScriptModules; then
         return 1
     fi
     [[ ! -e "${marker}" ]] || return 1
 
     rm -f "${fixtureDir}/shell/core/bootstrap.sh"
-    if regressionEnsureScriptModules; then
+    if ensureScriptModules; then
         return 1
     fi
     [[ ! -e "${marker}" ]] || return 1
@@ -3607,58 +3551,70 @@ runInstallEnsureModulesRegression() {
     mkdir -p "${fixtureDir}/shell/core"
     touch "${fixtureDir}/shell/core/bootstrap.sh"
     fetchRemoteRef() { printf 'new-ref\n'; }
-    if regressionEnsureScriptModules; then
+    if ensureScriptModules; then
         return 1
     fi
     [[ ! -e "${marker}" ]] || return 1
 
     fetchRemoteRef() { printf '%s\n' "${latestRef}"; }
-    regressionEnsureScriptModules || return 1
+    ensureScriptModules || return 1
     [[ -f "${marker}" && "$(<"${marker}")" == "${latestRef}" ]] || return 1
     [[ -f "${SCRIPT_EXPECTED_REF_FILE}" && "$(<"${SCRIPT_EXPECTED_REF_FILE}")" == "${latestRef}" ]] || return 1
 
-    printf 'manifest-ok\n' >"${fixtureDir}/.padm-module-manifest"
-    PADM_FAKE_MODULE_MANIFEST_READY=1
     rm -f "${marker}"
-    regressionEnsureScriptModules || return 1
+    ensureScriptModules || return 1
     [[ ! -e "${marker}" ]] || return 1
 
     printf '%s\n' "${expectedRef}" >"${fixtureDir}/.padm-entry-ref"
     printf '%s\n' "${latestRef}" >"${fixtureDir}/.padm-ref"
     rm -f "${marker}"
-    regressionEnsureScriptModules || return 1
+    ensureScriptModules || return 1
     [[ -f "${marker}" && "$(<"${marker}")" == "${expectedRef}" ]] || return 1
 
     printf '%s\n' "${expectedRef}" >"${fixtureDir}/.padm-entry-ref"
     printf '%s\n' "${expectedRef}" >"${fixtureDir}/.padm-ref"
     rm -f "${marker}"
     PADM_SKIP_REMOTE_REF_CHECK=1
-    if PADM_FAKE_MODULE_MANIFEST_READY=0 regressionEnsureScriptModules; then
+    rm -f "${SCRIPT_MANIFEST_FILE}"
+    if ensureScriptModules; then
         return 1
     fi
     [[ ! -e "${marker}" ]] || return 1
 
-    unset PADM_FAKE_MODULE_MANIFEST_READY
     unset PADM_SKIP_REMOTE_REF_CHECK
-    rm -f "${fixtureDir}/.padm-module-manifest"
 
     rm -f "${marker}" "${fixtureDir}/.padm-entry-ref"
     rm -f "${fixtureDir}/shell/core/bootstrap.sh"
-    regressionEnsureScriptModules || return 1
+    ensureScriptModules || return 1
     [[ -f "${marker}" && "$(<"${marker}")" == "${latestRef}" ]] || return 1
 
-    SCRIPT_DIR="${savedScriptDir}"
-    SCRIPT_REF_FILE="${savedScriptRefFile}"
-    SCRIPT_EXPECTED_REF_FILE="${savedScriptExpectedRefFile}"
-    REPO_REF_URL="${savedRepoRefUrl}"
-    REPO_ZIP_URL="${savedRepoZipUrl}"
-    REPO_ARCHIVE_DIR="${savedRepoArchiveDir}"
-    if [[ -n "${savedPadmSkipRemoteRefCheck}" ]]; then
-        PADM_SKIP_REMOTE_REF_CHECK="${savedPadmSkipRemoteRefCheck}"
-    else
-        unset PADM_SKIP_REMOTE_REF_CHECK
+    # 强制刷新也验证目标提交与回归保护，不复用已就绪模块跳过用户要求。
+    rm -f "${marker}"
+    if PADM_FORCE_SCRIPT_MODULE_REFRESH=1 PADM_SCRIPT_MODULE_REF=invalid ensureScriptModules; then
+        return 1
     fi
-}
+    [[ ! -e "${marker}" ]] || return 1
+    if PADM_FORCE_SCRIPT_MODULE_REFRESH=1 PADM_SCRIPT_MODULE_REF="${latestRef}" \
+        PADM_REGRESSION_PROTECT_WORKTREE=1 PADM_REGRESSION_WORKTREE_ROOT="${fixtureDir}" ensureScriptModules; then
+        return 1
+    fi
+    [[ ! -e "${marker}" ]] || return 1
+    PADM_FORCE_SCRIPT_MODULE_REFRESH=1 PADM_SCRIPT_MODULE_REF="${latestRef}" ensureScriptModules || return 1
+    [[ -f "${marker}" && "$(<"${marker}")" == "${latestRef}" ]] || return 1
+
+    # 真实刷新在下载失败时退出；原清单和提交标记不得改变。
+    beforeManifest=$(<"${SCRIPT_MANIFEST_FILE}")
+    shellRc=0
+    (
+        regressionLoadInstallFunctions
+        downloadRepoArchive() { return 1; }
+        PADM_FORCE_SCRIPT_MODULE_REFRESH=1 PADM_SCRIPT_MODULE_REF="${expectedRef}" ensureScriptModules
+    ) >"${fixtureDir}/failed-refresh.log" 2>&1 || shellRc=$?
+    [[ "${shellRc}" == 1 && "$(<"${SCRIPT_MANIFEST_FILE}")" == "${beforeManifest}" &&
+        "$(<"${SCRIPT_REF_FILE}")" == "${latestRef}" && "$(<"${SCRIPT_EXPECTED_REF_FILE}")" == "${latestRef}" &&
+        ! -e "${fixtureDir}/.padm-update-backup" ]] || return 1
+    scriptModulesReady
+)
 
 runAliasInstallSameTargetRegression() (
     local fixtureDir outputLog cpLog
