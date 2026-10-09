@@ -400,7 +400,7 @@ for bad in schema token chain port mark table pref route-proto rule-proto realm 
 done
 
 # 同名对象、额外引用和任一运行态字段漂移都不能被宽泛删除。
-for drift in chain-token chain-order chain-extra chain-reference hook-token hook-duplicate \
+for drift in chain-token chain-order chain-extra chain-reference chain-goto hook-token hook-duplicate \
     rule-mark rule-mask rule-table rule-pref rule-proto route-proto route-realm route-dev route-type route-extra; do
     reset
     seed_owned
@@ -412,9 +412,11 @@ for drift in chain-token chain-order chain-extra chain-reference hook-token hook
         mv -- "${TEST_ROOT}/changed-rules" "${FAKE_TP_ROOT}/${CHAIN}.rules"
         ;;
     chain-extra) printf '%s\n' '-m comment --comment outside-owner -j RETURN' >>"${FAKE_TP_ROOT}/${CHAIN}.rules" ;;
-    chain-reference)
+    chain-reference|chain-goto)
         printf 'outside-chain\n' >>"${FAKE_TP_ROOT}/chains"
-        printf -- '-j %s\n' "${CHAIN}" >"${FAKE_TP_ROOT}/outside-chain.rules"
+        option=-j
+        [[ "${drift}" != chain-goto ]] || option=-g
+        printf -- '%s %s\n' "${option}" "${CHAIN}" >"${FAKE_TP_ROOT}/outside-chain.rules"
         ;;
     hook-token) sed -i "s/${TOKEN}/00000000000000000000000000000000/g" "${FAKE_TP_ROOT}/PREROUTING.rules" ;;
     hook-duplicate)

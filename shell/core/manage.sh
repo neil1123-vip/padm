@@ -1362,32 +1362,62 @@ corePortRetargetFiles() {
 corePortBackupFiles() {
     local backupDir=$1
     local file base files
+    local -a manifestArgs=()
     files=$(corePortManagedFilesByPattern '02_dokodemodoor_inbounds_*.json') || return 1
-    padmEnsureSafeDirectory "${backupDir}" || return 1
     while IFS= read -r file; do
         [[ -n "${file}" ]] || continue
         base=${file##*/}
-        backupManagedFileToPath "${file}" "${backupDir}/${base}" 644 || return 1
+        manifestArgs+=("${base}" "${file}")
     done <<<"${files}"
+    padmWriteManagedFileBackupManifest "${backupDir}" "${manifestArgs[@]}"
 }
 
 corePortRollbackFiles() {
     local backupDir=$1
-    local configDir
-    local file files status=0
+    local configDir manifest backupPath targetPath state base file files status=0
+    local -A seenTargets=()
     configDir=$(corePortSafeConfigDir) || return 1
-    [[ -d "${backupDir}" ]] || return 1
+    backupDir=$(padmRequireSafeAbsolutePath "${backupDir}") || return 1
+    backupDir=${backupDir%/}
+    [[ -d "${backupDir}" && ! -L "${backupDir}" ]] || return 1
+    manifest="${backupDir}/manifest"
+    [[ -f "${manifest}" && ! -L "${manifest}" ]] || return 1
+
+    # 完整校验备份后才恢复，缺失备份不能被当成原本不存在的配置。
+    while IFS=$'\t' read -r backupPath targetPath state ||
+        [[ -n "${backupPath}${targetPath}${state}" ]]; do
+        [[ -n "${targetPath}" && ( "${state}" == file || "${state}" == missing ) ]] || return 1
+        targetPath=$(padmRequireSafeAbsolutePath "${targetPath}") || return 1
+        base=${targetPath##*/}
+        [[ "${targetPath}" == "${configDir}${base}" &&
+            "${base}" == 02_dokodemodoor_inbounds_*.json ]] || return 1
+        padmCommitTargetIsFileLike "${targetPath}" || return 1
+        [[ -z "${seenTargets[${base}]+x}" ]] || return 1
+        seenTargets["${base}"]=${state}
+        if [[ "${state}" == file ]]; then
+            [[ -n "${backupPath}" ]] || return 1
+            backupPath=$(padmResolvePathWithinRoot "${backupDir}" "${backupPath}") || return 1
+            [[ "${backupPath}" == "${backupDir}/${base}" &&
+                -f "${backupPath}" && ! -L "${backupPath}" ]] || return 1
+        else
+            [[ "${backupPath}" == "-" ]] || return 1
+        fi
+    done <"${manifest}"
+
+    for file in "${backupDir}"/*.json; do
+        [[ -e "${file}" || -L "${file}" ]] || continue
+        [[ -f "${file}" && ! -L "${file}" ]] || return 1
+        base=${file##*/}
+        [[ "${seenTargets[${base}]:-}" == file ]] || return 1
+    done
+
+    padmRestoreManagedFileBackupManifest "${backupDir}" || return 1
     files=$(corePortManagedFilesByPattern '02_dokodemodoor_inbounds_*.json') || return 1
     while IFS= read -r file; do
         [[ -n "${file}" ]] || continue
-        removeManagedFileIfPresent "${file}" || status=1
+        base=${file##*/}
+        [[ -n "${seenTargets[${base}]+x}" ]] || removeManagedFileIfPresent "${file}" || status=1
     done <<<"${files}"
-    for file in "${backupDir}"/*.json; do
-        local targetFile
-        [[ -f "${file}" ]] || continue
-        targetFile=$(padmManagedFilePath "${configDir}" "${file##*/}") || return 1
-        restoreManagedFileFromBackup "${file}" "${targetFile}" 644 || status=1
-    done
     return "${status}"
 }
 

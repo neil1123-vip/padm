@@ -409,7 +409,8 @@ for line in dump.splitlines():
     if not args or args[0] != "-A":
         continue
     own_chain = args[1] == chain
-    own_target = "-j" in args and args[args.index("-j") + 1] == chain
+    own_target = any(option in args and args[args.index(option) + 1] == chain
+                     for option in ("-j", "-g"))
     own_comment = "--comment" in args and args[args.index("--comment") + 1] == comment
     if not (own_chain or own_target or own_comment):
         continue
