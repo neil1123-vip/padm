@@ -5290,7 +5290,7 @@ JSON
 {"inbounds":[{"type":"vmess","listen_port":31306,"users":[{"uuid":"33333333-3333-3333-3333-333333333333","name":"sub_httpupgrade-VMess_HTTPUpgrade","alterId":0}],"transport":{"type":"httpupgrade","path":"/padmhttp"}}]}
 JSON
         cat >"${singBoxRoot}/13_anytls_inbounds.json" <<'JSON'
-{"inbounds":[{"type":"anytls","listen_port":40251,"users":[{"name":"sub_anytls-anytls","password":"anytls-pass"}]}]}
+{"inbounds":[{"type":"anytls","listen_port":40251,"users":[{"name":"sub_anytls-anytls","password":"anytls-pass"}],"tls":{"server_name":"anytls.example.com"}}]}
 JSON
         local fakeXray="${root}/etc/padm/xray/xray"
         mkdir -p "$(dirname "${fakeXray}")"
@@ -5350,6 +5350,8 @@ EOF
         grep -q 'default:sub_naive:' "${captureLog}"
         grep -q 'default:sub_httpupgrade:' "${captureLog}"
         grep -q 'default:sub_anytls:' "${captureLog}"
+        grep -q 'default:sub_anytls:.*@anytls.example.com:40251' "${captureLog}"
+        grep -q 'default:sub_anytls:.*sni=anytls.example.com' "${captureLog}"
         grep -q 'default:sub_xray_grpc:.*@entry.example.com:17694' "${captureLog}"
         grep -q 'default:sub_xray_grpc:.*sni=www.cloudflare.com' "${captureLog}"
         grep -q 'default:sub_trojan_grpc:trojan://trojan-grpc-pass@cdn.example.com:443' "${captureLog}"
@@ -5384,6 +5386,25 @@ EOF
             httpupgradeLink=$(grep '^default:sub_httpupgrade:vmess://' "${captureLog}" | head -n 1)
             httpupgradeJson=$(printf '%s' "${httpupgradeLink#default:sub_httpupgrade:vmess://}" | base64 -d)
             jq -e '.add == "upgrade.example.com" and .sni == "upgrade.example.com"' <<<"${httpupgradeJson}" >/dev/null
+            : >"${captureLog}"
+            showAnyTlsAccounts >/dev/null
+            grep -q 'default:sub_anytls:.*@anytls.example.com:40251' "${captureLog}"
+            grep -q 'singbox:sub_anytls:.*"server_name":"anytls.example.com"' "${captureLog}"
+            [[ -z "${currentHost}" ]]
+        )
+        (
+            # 无独立 TLS 域名的旧配置仍使用已有入口。
+            local savedAnyTlsConfig
+            savedAnyTlsConfig=$(<"${singBoxRoot}/13_anytls_inbounds.json")
+            currentHost=legacy.example.com
+            jq 'del(.inbounds[0].tls.server_name)' "${singBoxRoot}/13_anytls_inbounds.json" >"${root}/legacy-anytls.json"
+            mv "${root}/legacy-anytls.json" "${singBoxRoot}/13_anytls_inbounds.json"
+            : >"${captureLog}"
+            showAnyTlsAccounts >/dev/null
+            grep -q 'default:sub_anytls:.*@legacy.example.com:40251' "${captureLog}"
+            printf '{invalid\n' >"${singBoxRoot}/13_anytls_inbounds.json"
+            regressionExpectStatus 1 showAnyTlsAccounts >/dev/null 2>&1
+            printf '%s\n' "${savedAnyTlsConfig}" >"${singBoxRoot}/13_anytls_inbounds.json"
         )
         (
             # 主配置读取或输出失败不能被合法辅助配置覆盖，且不依赖调用方 pipefail。

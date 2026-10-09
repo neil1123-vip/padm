@@ -598,32 +598,33 @@ EOF
 }
 
 emitAnyTlsSubscribeOutput() {
-    local email=$2 id=$3 user=$6
+    local email=$2 id=$3 add=$4 user=$6
+    local host=${add:-${currentHost}}
     local encodedId yamlPassword defaultLink clashMetaBlock singBoxFilter
     encodedId=$(encodeUriUserInfoComponent "${id}") || return 1
     yamlPassword=$(serializeYamlString "${id}") || return 1
-    defaultLink="anytls://${encodedId}@$(formatUriAuthorityHost "${currentHost}"):${singBoxAnyTLSPort}?peer=${currentHost}&insecure=0&sni=${currentHost}#${email}"
+    defaultLink="anytls://${encodedId}@$(formatUriAuthorityHost "${host}"):${singBoxAnyTLSPort}?peer=${host}&insecure=0&sni=${host}#${email}"
     subscribeOutputTitle "通用链接：AnyTLS"
     echoContent green "    ${defaultLink}\n"
 
     subscribeOutputTitle "格式化明文：AnyTLS"
-    echoContent green "协议类型:anytls，地址:${currentHost}，端口:${singBoxAnyTLSPort}，用户ID:${id}，传输方式:tcp，账户名:${email}\n"
+    echoContent green "协议类型:anytls，地址:${host}，端口:${singBoxAnyTLSPort}，用户ID:${id}，传输方式:tcp，账户名:${email}\n"
 
     clashMetaBlock=$(cat <<EOF
   - name: "${email}"
     type: anytls
     port: ${singBoxAnyTLSPort}
-    server: ${currentHost}
+    server: ${host}
     password: ${yamlPassword}
     client-fingerprint: chrome
     udp: true
-    sni: ${currentHost}
+    sni: ${host}
     alpn:
       - h2
       - http/1.1
 EOF
 )
-    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"anytls",server:$server,server_port:$port,password:$password,tls:{enabled:true,server_name:$sni}}' --arg tag "${email}" --arg server "${currentHost}" --argjson port "${singBoxAnyTLSPort}" --arg password "${id}" --arg sni "${currentHost}") || return 1
+    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"anytls",server:$server,server_port:$port,password:$password,tls:{enabled:true,server_name:$sni}}' --arg tag "${email}" --arg server "${host}" --argjson port "${singBoxAnyTLSPort}" --arg password "${id}" --arg sni "${host}") || return 1
 
     appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"
 

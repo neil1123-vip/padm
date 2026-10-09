@@ -431,16 +431,18 @@ showAnyTlsAccounts() {
     # AnyTLS
     if currentProtocolHas 4; then
         subscribeSectionTitle "AnyTLS" "TLS 兼容协议"
-        local path="${configPath}"
+        local path="${configPath}" protocolHost
         if [[ "${coreInstallType}" == "1" && -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}13_anytls_inbounds.json" ]]; then
             path="${singBoxConfigPath}"
         fi
+        protocolHost=$(jq -r '.inbounds[0].tls.server_name // empty' "${path}13_anytls_inbounds.json") || return 1
+        protocolHost=${protocolHost:-${currentHost:-}}
         jq -r -c '.inbounds[]|.users[]' "${path}13_anytls_inbounds.json" | while read -r user; do
             local name password
             IFS=$'\037' read -r _ _ password _ name _ <<<"$(subscriptionAccountProfile "${user}")"
             subscribeAccountTitle "${name}"
             echo
-            defaultBase64Code anytls "${singBoxAnyTLSPort}" "${name}" "${password}" || return 1
+            defaultBase64Code anytls "${singBoxAnyTLSPort}" "${name}" "${password}" "${protocolHost}" || return 1
         done
 
     fi
