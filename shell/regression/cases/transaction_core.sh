@@ -1691,6 +1691,44 @@ runCorePortFileTransactionRegression() {
     original2053=$(<"${configPath}02_dokodemodoor_inbounds_2053.json")
     original2083=$(<"${configPath}02_dokodemodoor_inbounds_2083_default.json")
     (
+        # 必需备份异常时不碰当前配置，也不清理保留下来的备份目录。
+        local integrityBackup="${portTmpRoot}/core-port-integrity" broken
+        local integrityConfig="${TMP_DIR}/core-port-integrity-conf/"
+        local configPath="${integrityConfig}"
+        local currentFile="${configPath}02_dokodemodoor_inbounds_2053.json"
+        local newFile="${configPath}02_dokodemodoor_inbounds_2443_default.json"
+        mkdir -p "${configPath}" || return 1
+        for broken in file-missing file-directory manifest-missing manifest-directory unexpected-file wrong-target; do
+            rm -rf "${integrityBackup}"
+            printf '%s\n' "${original2053}" >"${currentFile}"
+            rm -f "${newFile}"
+            corePortBackupFiles "${integrityBackup}" || return 1
+            printf 'changed\n' >"${currentFile}"
+            printf 'new\n' >"${newFile}"
+            case "${broken}" in
+            file-missing) rm "${integrityBackup}/${currentFile##*/}" ;;
+            file-directory) rm "${integrityBackup}/${currentFile##*/}"; mkdir "${integrityBackup}/${currentFile##*/}" ;;
+            manifest-missing) rm "${integrityBackup}/manifest" ;;
+            manifest-directory) rm "${integrityBackup}/manifest"; mkdir "${integrityBackup}/manifest" ;;
+            unexpected-file) printf '{}\n' >"${integrityBackup}/unexpected.json" ;;
+            wrong-target) printf '%s\t%s\tfile\n' "${integrityBackup}/${currentFile##*/}" \
+                "${configPath}unmanaged.json" >"${integrityBackup}/manifest" ;;
+            esac
+            regressionExpectStatus 1 corePortRollbackFiles "${integrityBackup}" || return 1
+            [[ "$(<"${currentFile}")" == changed && "$(<"${newFile}")" == new &&
+                -d "${integrityBackup}" ]] || return 1
+        done
+        rm -rf "${integrityBackup}"
+        printf '%s\n' "${original2053}" >"${currentFile}"
+        rm "${newFile}"
+        corePortBackupFiles "${integrityBackup}" || return 1
+        printf 'changed\n' >"${currentFile}"
+        printf 'new\n' >"${newFile}"
+        corePortRollbackFiles "${integrityBackup}" || return 1
+        [[ "$(<"${currentFile}")" == "${original2053}" && ! -e "${newFile}" ]] || return 1
+        rm -rf "${integrityBackup}"
+    ) || return 1
+    (
         local configPath="${TMP_DIR}/core-port-invalid-default/"
         local defaultFile="${configPath}02_dokodemodoor_inbounds_2053_default.json"
         local owned fixture patch lookup output="${TMP_DIR}/core-port-invalid-default-result"
@@ -1883,6 +1921,7 @@ runCorePortFileTransactionRegression() {
     [[ -n "${keptBackup}" && -d "${keptBackup}" ]]
     rm -rf "${keptBackup}"
     printf '%s\n' "${original2053}" >"${configPath}02_dokodemodoor_inbounds_2053_default.json"
+    rm -f "${configPath}02_dokodemodoor_inbounds_2053.json"
     rm -f "${configPath}02_dokodemodoor_inbounds_2443_default.json"
 
     reloadCalls=0
