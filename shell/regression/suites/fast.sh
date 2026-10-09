@@ -147,6 +147,10 @@ runDockerRoutingSocks5Regression() {
     bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
 }
 
+runDockerRoutingBlockBtRegression() {
+    PADM_DOCKER_ROUTING_SCOPE=bt bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
+}
+
 runDockerRoutingSocks5RealRegression() {
     bash "${PROJECT_ROOT}/docker/tests/routing-socks5-real.sh"
 }
@@ -157,6 +161,10 @@ runDockerRoutingDnsHostsRealRegression() {
 
 runDockerRoutingBlockIpsRealRegression() {
     PADM_ROUTING_REAL_SCOPE=ips bash "${PROJECT_ROOT}/docker/tests/routing-dns-hosts-real.sh"
+}
+
+runDockerRoutingBlockBtRealRegression() {
+    PADM_ROUTING_REAL_SCOPE=bt bash "${PROJECT_ROOT}/docker/tests/routing-dns-hosts-real.sh"
 }
 
 runDockerAccountsRegression() {
@@ -263,6 +271,8 @@ registerRegressionFunctionLeaf docker-routing-direct-block runDockerRoutingSocks
 registerRegressionFunctionLeaf docker-routing-direct-block-real runDockerRoutingDnsHostsRealRegression
 registerRegressionFunctionLeaf docker-routing-block-ips runDockerRoutingSocks5Regression
 registerRegressionFunctionLeaf docker-routing-block-ips-real runDockerRoutingBlockIpsRealRegression
+registerRegressionFunctionLeaf docker-routing-block-bt runDockerRoutingBlockBtRegression
+registerRegressionFunctionLeaf docker-routing-block-bt-real runDockerRoutingBlockBtRealRegression
 registerRegressionFunctionLeaf docker-accounts runDockerAccountsRegression
 registerRegressionFunctionLeaf docker-accounts-cli runDockerAccountsCliRegression
 registerRegressionFunctionLeaf docker-subscriptions runDockerSubscriptionsRegression

@@ -137,6 +137,9 @@ jq --argjson block_ips "${BLOCK_IPS}" '.routing = {block_ips:$block_ips}' \
     "${TEST_ROOT}/base.json" >"${TEST_ROOT}/block-ips-only.json"
 jq --argjson block_ips "${BLOCK_IPS}" '.routing.block_ips = $block_ips' \
     "${TEST_ROOT}/routing-policy.json" >"${TEST_ROOT}/routing-ip-policy.json"
+jq '.routing = {block_bt:true}' "${TEST_ROOT}/base.json" >"${TEST_ROOT}/block-bt-only.json"
+jq '.routing.block_bt = true' "${TEST_ROOT}/routing-ip-policy.json" \
+    >"${TEST_ROOT}/routing-bt-policy.json"
 
 # 同批正反输入由两份校验合同独立判断，避免 Schema 与生产校验分歧。
 python3 - "${PROJECT_ROOT}" "${TEST_ROOT}" <<'PY'
@@ -173,6 +176,13 @@ case("routing-policy", json.loads((root / "routing-policy.json").read_text()), T
 ip_block = json.loads((root / "block-ips-only.json").read_text())
 case("block-ips-only", ip_block, True)
 case("routing-ip-policy", json.loads((root / "routing-ip-policy.json").read_text()), True)
+bt_block = json.loads((root / "block-bt-only.json").read_text())
+case("block-bt-only", bt_block, True)
+case("routing-bt-policy", json.loads((root / "routing-bt-policy.json").read_text()), True)
+for index, bad in enumerate((False, None, 0, 1, "true", "false", [], {})):
+    value = copy.deepcopy(bt_block)
+    value["routing"]["block_bt"] = bad
+    case(f"invalid-block-bt-{index}", value, False)
 for index, rules in enumerate((
         ["0.0.0.0", "127.0.0.1", "255.255.255.255", "::", "::1", "FFFF:FFFF::1"],
         ["0.0.0.0/0", "127.0.0.1/32", "::/0", "::1/128", "192.0.2.10/24", "2001:db8::10/64"],
@@ -214,7 +224,7 @@ for kind in ("direct", "block"):
 for name, template in (("dns", dns), ("hosts", hosts),
                        ("direct", json.loads((root / "direct-only.json").read_text())),
                        ("block", json.loads((root / "block-only.json").read_text())),
-                       ("block-ips", ip_block)):
+                       ("block-ips", ip_block), ("block-bt", bt_block)):
     for version in (1, 2):
         value = copy.deepcopy(template)
         value["schema_version"] = version
@@ -421,6 +431,29 @@ done
 mv -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
     "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
 
+for fixture in block-bt-only routing-bt-policy; do
+    dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/${fixture}.json" ||
+        fail "${fixture}: 当前 bundle 拒绝 BT 阻断"
+done
+cp -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json" \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved"
+jq 'del(."x-padm-routing-block-bt")' \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
+    >"${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+for fixture in block-bt-only routing-bt-policy; do
+    reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/${fixture}.json"
+done
+dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/routing-ip-policy.json" ||
+    fail 'BT marker 缺失误拒绝旧路由'
+jq 'del(."x-padm-routing-socks5", ."x-padm-routing-domains", ."x-padm-routing-dns-hosts",
+  ."x-padm-routing-direct-block", ."x-padm-routing-block-ips")' \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
+    >"${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/block-bt-only.json" ||
+    fail 'BT-only 规格错误依赖其它路由 marker'
+mv -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+
 for fixture in block-ips-only routing-ip-policy; do
     dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/${fixture}.json" ||
         fail "${fixture}: 当前 bundle 拒绝 IP/CIDR/GeoIP 阻断"
@@ -512,7 +545,7 @@ for version in 1 2; do
         "${TEST_ROOT}/legacy-sing-v${version}-core.json" >/dev/null ||
         fail "v${version}: 无 routing 改变旧 sing-box 默认出站"
 done
-for fixture in routed domains dns-only hosts-only routing-all routing-all-global direct-only block-only routing-policy block-ips-only routing-ip-policy; do
+for fixture in routed domains dns-only hosts-only routing-all routing-all-global direct-only block-only routing-policy block-ips-only routing-ip-policy block-bt-only routing-bt-policy; do
     for core in xray sing-box; do
         if [[ "${core}" == xray ]]; then
             dockerGenerateXrayConfig "${TEST_ROOT}/${fixture}.json" "${TEST_ROOT}/${fixture}-${core}.json"
@@ -647,6 +680,31 @@ jq -en --argjson input "${BLOCK_IPS}" --slurpfile only "${TEST_ROOT}/block-ips-o
   ($policy[0].route.rule_set | map(.tag) | sort) ==
     ["padm-geoip-cn","padm-geosite-category-ads-all","padm-geosite-cn"]
 ' >/dev/null || fail 'sing-box IP/CIDR/GeoIP OR、Direct 例外或远程资源合同错误'
+jq -en --slurpfile only "${TEST_ROOT}/block-bt-only-xray.json" \
+    --slurpfile policy "${TEST_ROOT}/routing-bt-policy-xray.json" '
+  $only[0].routing.rules == [{type:"field",protocol:["bittorrent"],outboundTag:"blocked"}] and
+  all($only[0].inbounds[]; .sniffing.enabled == true and .sniffing.routeOnly == true and
+    .sniffing.destOverride == ["http","tls","quic"]) and
+  $policy[0].routing.rules[0].inboundTag == ["padm-dns"] and
+  $policy[0].routing.rules[1].outboundTag == "direct" and
+  $policy[0].routing.rules[4] == {type:"field",protocol:["bittorrent"],outboundTag:"blocked"} and
+  $policy[0].routing.rules[5] == {type:"field",network:"udp",outboundTag:"blocked"}
+' >/dev/null || fail 'Xray BT 嗅探或 Direct/BT/SOCKS 优先级错误'
+jq -en --slurpfile only "${TEST_ROOT}/block-bt-only-sing-box.json" \
+    --slurpfile policy "${TEST_ROOT}/routing-bt-policy-sing-box.json" '
+  ($policy[0].route.rules | map(select(.rules[0].protocol? == ["bittorrent"]))) as $bt |
+  $only[0].route.rules == [
+    {action:"sniff",timeout:"1s"},{protocol:["bittorrent"],action:"reject"}] and
+  ($bt | length) == 1 and
+  $bt[0] == {type:"logical",mode:"and",rules:[
+    {protocol:["bittorrent"]},
+    {type:"logical",mode:"or",invert:true,rules:[
+      {domain:["exact.example.com","other.example.com"]},{domain_suffix:["example.net"]},
+      {domain_keyword:["video"]},{rule_set:["padm-geosite-cn","padm-geosite-category-ads-all"]}]}],
+    action:"reject"} and
+  ($policy[0].route.rules | index($bt[0])) <
+    ($policy[0].route.rules | map(.action) | index("resolve"))
+' >/dev/null || fail 'sing-box BT 协议匹配、Direct 例外或解析前拒绝错误'
 # 用核心的匹配语义检查每类独立命中，防止不同 matcher 被错误组合成 AND。
 python3 - "${TEST_ROOT}/domains-sing-box.json" <<'PY'
 import json
@@ -704,7 +762,7 @@ assert all(rule["type"] == "remote" and rule["format"] == "binary" and
            rule["http_client"] == {"engine": "go"} and "download_detour" not in rule
            for rule in rule_sets)
 PY
-for fixture in routed domains routing-all-global direct-only block-only routing-policy block-ips-only routing-ip-policy; do
+for fixture in routed domains routing-all-global direct-only block-only routing-policy block-ips-only routing-ip-policy block-bt-only routing-bt-policy; do
     jq -en --slurpfile source "${TEST_ROOT}/${fixture}-xray.json" \
         --slurpfile runtime "${TEST_ROOT}/runtime-${fixture}-xray.json" '
       $runtime[0].outbounds == $source[0].outbounds and
@@ -718,7 +776,7 @@ for fixture in routed domains routing-all-global direct-only block-only routing-
 done
 for generator in dockerGenerateCompose dockerGenerateDeployment; do
     "${generator}" "${TEST_ROOT}/base.json" "${TEST_ROOT}/legacy-generated.json"
-    for fixture in routed domains dns-only hosts-only routing-all routing-all-global direct-only block-only routing-policy block-ips-only routing-ip-policy; do
+    for fixture in routed domains dns-only hosts-only routing-all routing-all-global direct-only block-only routing-policy block-ips-only routing-ip-policy block-bt-only routing-bt-policy; do
         "${generator}" "${TEST_ROOT}/${fixture}.json" "${TEST_ROOT}/routed-generated.json"
         cmp -s "${TEST_ROOT}/legacy-generated.json" "${TEST_ROOT}/routed-generated.json" ||
             fail "${generator}: ${fixture} 意外改变容器能力或宿主端口"
@@ -766,6 +824,96 @@ runStatus() {
 assertClean
 jq -cn --arg uuid "${UUID}" '{schema_version:1,accounts:{($uuid):{
   name:"routing",upload:17,download:19,limit_bytes:0,baseline:{}}}}' | dockerTrafficWriteState
+before=$(snapshot)
+runEdit 0 --block-bt --preview
+runEdit 0 --block-bt-off --preview
+for args in on-on off-off on-off; do
+    case "${args}" in
+    on-on) runEdit 2 --block-bt --block-bt --preview ;;
+    off-off) runEdit 2 --block-bt-off --block-bt-off --preview ;;
+    on-off) runEdit 2 --block-bt --block-bt-off --preview ;;
+    esac
+done
+runEdit 2 --block-bt
+runEdit 2 --block-bt --confirm invalid
+runEdit 2 --block-bt unexpected --preview
+runEdit 2 --block-bt --socks5-off --preview
+runEdit 2 --block-bt --dns "${DNS_INPUT}" --preview
+runEdit 2 --block-bt --block-ips-off --preview
+runEdit 2 --block-bt-off --direct-off --preview
+runEdit 2 --block-bt --spec "${TEST_ROOT}/base.json" --preview
+runEdit 2 --block-bt --http01 enable --preview
+runEdit 15 --spec "${TEST_ROOT}/block-bt-only.json" --confirm PADM-DOCKER-EDIT
+(
+    trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+    dockerSetupRead() { printf -v "$1" '%s' n; }
+    dockerAcquireDeploymentLock
+    dockerConfigureApply "${TEST_ROOT}/block-bt-only.json" '' '' interactive
+) >"${LOG}" 2>&1 || fail 'BT 开启确认取消失败'
+assertClean
+[[ "$(snapshot)" == "${before}" ]] || fail 'BT 预览、无效参数或取消改变完整部署'
+runEdit 0 --block-bt --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile expected "${TEST_ROOT}/block-bt-only.json" --slurpfile actual "${root}/config/spec.json" \
+    '$actual == $expected' >/dev/null || fail 'BT 独立开启改变其它规格'
+[[ "$(stat -c '%a %u %h' "${root}/config/spec.json")" == '600 0 1' ]] ||
+    fail 'BT 规格未保持私有权限'
+runStatus 0
+jq -e '.enabled == true and .block_bt == true and .tcp == "direct" and .udp == "direct"' \
+    "${LOG}" >/dev/null || fail 'BT 启用状态没有显式投影'
+before=$(snapshot)
+runEdit 15 --spec "${TEST_ROOT}/base.json" --confirm PADM-DOCKER-EDIT
+[[ "$(snapshot)" == "${before}" ]] || fail '普通 --spec 绕过 BT 专项冻结'
+runEdit 0 --block-bt-off --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile expected "${TEST_ROOT}/base.json" --slurpfile actual "${root}/config/spec.json" \
+    '$actual == $expected' >/dev/null || fail 'BT 最后一项关闭未删除空 routing'
+(
+    trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+    dockerAcquireDeploymentLock
+    dockerConfigureApply "${TEST_ROOT}/routing-ip-policy.json" '' '' configure
+) >"${LOG}" 2>&1 || fail '初始化 BT 组合夹具失败'
+assertClean
+before=$(snapshot)
+runEdit 0 --block-bt --preview
+[[ "$(snapshot)" == "${before}" ]] || fail 'BT 组合预览改变旧路由'
+runEdit 0 --block-bt --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile expected "${TEST_ROOT}/routing-bt-policy.json" --slurpfile actual "${root}/config/spec.json" \
+    '$actual == $expected' >/dev/null || fail 'BT 开启覆盖旧路由字段'
+before=$(snapshot)
+for failure in health-fail int term; do
+    MODE=${failure}
+    rm -f -- "${TEST_ROOT}/failed-once"
+    case "${failure}" in
+    health-fail) runEdit 14 --block-bt-off --confirm PADM-DOCKER-EDIT ;;
+    int) runEdit 130 --block-bt-off --confirm PADM-DOCKER-EDIT ;;
+    term) runEdit 143 --block-bt-off --confirm PADM-DOCKER-EDIT ;;
+    esac
+    [[ "$(snapshot)" == "${before}" ]] || fail "${failure}: BT 未恢复全部路由和流量"
+done
+MODE=ok
+runEdit 0 --block-bt-off --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile expected "${TEST_ROOT}/routing-ip-policy.json" --slurpfile actual "${root}/config/spec.json" \
+    '$actual == $expected' >/dev/null || fail 'BT 关闭改变旧路由字段'
+runStatus 0
+jq -e 'has("block_bt") | not' "${LOG}" >/dev/null || fail 'BT 关闭仍显示有效策略'
+jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload == 17 and .accounts[$uuid].download == 19' \
+    "${root}/data/traffic/state.json" >/dev/null || fail 'BT 事务清空累计流量'
+(
+    trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+    dockerAcquireDeploymentLock
+    dockerConfigureApply "${TEST_ROOT}/base.json" '' '' configure
+) >"${LOG}" 2>&1 || fail '恢复 BT 前基线失败'
+assertClean
+(
+    dockerMenuRun() { printf '%s\n' "$*" >>"${TEST_ROOT}/bt-menu.log"; }
+    dockerMenuRouting < <(printf '16\n17\n0\n')
+) >"${LOG}" 2>&1
+printf 'edit --block-bt\nedit --block-bt-off\n' >"${TEST_ROOT}/bt-menu.expected"
+cmp -s "${TEST_ROOT}/bt-menu.log" "${TEST_ROOT}/bt-menu.expected" ||
+    fail 'BT 菜单没有映射到专项 CLI 事务'
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == bt ]]; then
+    printf 'docker-routing-block-bt-regression-ok\n'
+    exit 0
+fi
 before=$(snapshot)
 runStatus 0
 jq -e '. == {enabled:false,server:null,port:null,tcp:"direct",udp:"direct",mode:"direct",domain_rules:[]}' "${LOG}" >/dev/null ||

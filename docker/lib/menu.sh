@@ -640,7 +640,8 @@ dockerMenuRouting() {
             '9. 关闭 DNS/hosts 覆盖' '10. 设置 Direct 直连例外' \
             '11. 关闭 Direct 直连例外' '12. 设置 Block 域名阻断' \
             '13. 关闭 Block 域名阻断' '14. 设置 IP/CIDR 阻断' \
-            '15. 关闭 IP/CIDR 阻断' '0. 返回'
+            '15. 关闭 IP/CIDR 阻断' '16. 启用 BT 协议阻断' \
+            '17. 关闭 BT 协议阻断' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -690,6 +691,8 @@ dockerMenuRouting() {
             dockerMenuRun edit --block-ips "${input}" || true
             ;;
         15) dockerMenuRun edit --block-ips-off || true ;;
+        16) dockerMenuRun edit --block-bt || true ;;
+        17) dockerMenuRun edit --block-bt-off || true ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

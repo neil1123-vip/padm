@@ -19,6 +19,7 @@
   "x-padm-routing-dns-hosts": true,
   "x-padm-routing-direct-block": true,
   "x-padm-routing-block-ips": true,
+  "x-padm-routing-block-bt": true,
   "additionalProperties": false,
   "required": ["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"],
   "properties": {
@@ -361,6 +362,7 @@
             "domains": {"$ref": "#/properties/routing/properties/socks5/properties/domains"}
           }
         },
+        "block_bt": {"const": true},
         "block_ips": {
           "type": "object",
           "additionalProperties": false,

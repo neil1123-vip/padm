@@ -902,7 +902,8 @@ dockerProtocolCommand() (
           (if .routing.hosts != null then {hosts:.routing.hosts} else {} end) +
           (if .routing.direct != null then {direct:{domain_rules:.routing.direct.domains}} else {} end) +
           (if .routing.block != null then {block:{domain_rules:.routing.block.domains}} else {} end) +
-          (if .routing.block_ips != null then {block_ips:{ip_rules:.routing.block_ips.ips}} else {} end)' "${normalized}"
+          (if .routing.block_ips != null then {block_ips:{ip_rules:.routing.block_ips.ips}} else {} end) +
+          (if .routing.block_bt == true then {block_bt:true} else {} end)' "${normalized}"
         return $?
     fi
     if [[ "${action}" == list ]]; then
@@ -1381,7 +1382,12 @@ dockerEditCommand() {
             routingKind=${routingKind//-/_}
             shift 2
             ;;
-        --dns-off|--hosts-off|--direct-off|--block-off|--block-ips-off)
+        --block-bt)
+            [[ -z "${routingKind}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            routingKind=block_bt routingAction=enable
+            shift
+            ;;
+        --dns-off|--hosts-off|--direct-off|--block-off|--block-ips-off|--block-bt-off)
             [[ -z "${routingKind}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             routingKind=${1#--} routingKind=${routingKind%-off} routingAction=disable
             routingKind=${routingKind//-/_}
@@ -1587,7 +1593,9 @@ dockerEditCommand() {
             return "${PADM_DOCKER_RC_STATE}"
     fi
     if [[ -n "${routingKind}" ]]; then
-        if [[ "${routingAction}" == enable ]]; then
+        if [[ "${routingKind}" == block_bt && "${routingAction}" == enable ]]; then
+            jq '.routing.block_bt = true' "${draft}" >"${draft}.next"
+        elif [[ "${routingAction}" == enable ]]; then
             dockerEditPrivateInputCopy "${routingFile}" "${workspace}/${routingKind}.json" "${routingKind}" || {
                 dockerError '路由输入须为 root 所有的 0600 单链接普通 JSON 文件，最多 64 KiB，祖先目录不得可写或含链接'
                 return "${PADM_DOCKER_RC_STATE}"

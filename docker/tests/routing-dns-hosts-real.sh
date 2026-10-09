@@ -61,6 +61,9 @@ for family in ipv4 ipv6; do
     done
     if [[ "${PADM_ROUTING_REAL_SCOPE:-}" == ips ]]; then
         modes=(ip-control ip-literal ip-cidr ip-geoip)
+    elif [[ "${PADM_ROUTING_REAL_SCOPE:-}" == bt ]]; then
+        modes=(bt-control bt)
+        [[ "${family}" != ipv4 ]] || modes+=(bt-global)
     else
         modes=(policy-control policy)
         [[ "${family}" != ipv4 ]] || modes+=(global resolve policy-global)
@@ -81,6 +84,16 @@ for family in ipv4 ipv6; do
                 if $mode == "ip-literal" then $address
                 elif $mode == "ip-cidr" then $network
                 else "geoip:cn" end]} end
+            ' "${TEST_ROOT}/${family}.spec.json"
+        elif [[ "${mode}" == bt* ]]; then
+            jq --arg suffix "${suffix}" --arg mode "${mode}" '
+              ("full:allowbt-"+$suffix+".padm.invalid") as $allow |
+              .routing.direct = {domains:[$allow]} |
+              .routing.dns.domains += [$allow] |
+              .routing.socks5.domains += [$allow] |
+              if $mode == "bt-control" then .
+              else .routing.block_bt = true end |
+              if $mode == "bt-global" then del(.routing.socks5.domains) else . end
             ' "${TEST_ROOT}/${family}.spec.json"
         else
             jq --arg suffix "${suffix}" --arg mode "${mode}" '

@@ -431,7 +431,7 @@
       "profiles": [],
       "network_mode": "host-cli",
       "host_capabilities": [],
-      "reason": "5B.1–5B.3c 提供两核心认证 SOCKS5 TCP 全局/域名出站、DNS 分流、精确 hosts、域名 Direct/Block 和字面目的 IP/CIDR/geoip:cn 阻断的菜单、私有输入及可恢复事务；直连例外优先阻断和代理，阻断不解析，代理或匹配 DNS 失败不回退，不改变宿主网络。WARP、IPv6、BT、完整区域策略和分流仍待迁移。"
+      "reason": "5B.1–5B.3d 提供两核心认证 SOCKS5 TCP 全局/域名出站、DNS 分流、精确 hosts、域名 Direct/Block、字面目的 IP/CIDR/geoip:cn 和可识别明文 BT 阻断的菜单、私有输入及可恢复事务；直连例外优先阻断和代理，阻断不解析，代理或匹配 DNS 失败不回退，不改变宿主网络。BT 不保证覆盖加密、混淆或部分 uTP；WARP、IPv6、完整区域策略和分流仍待迁移。"
     },
     "internal-201-socks-relay": {
       "status": "deferred",
@@ -485,7 +485,7 @@
       "profiles": [],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "5B.3a–5B.3c 已交付两核心 DNS 分流、精确 hosts、域名 Direct/Block 和独立字面目的 IP/CIDR/geoip:cn 阻断的配置及编辑事务；Direct 优先 Block/SOCKS，Block 在解析前拒绝 TCP/UDP。域名解析后的 IP 不归本阶段阻断，完整区域策略、规则编辑和冲突检测尚未迁移，206 不作为公开节点协议。"
+      "reason": "5B.3a–5B.3d 已交付两核心 DNS 分流、精确 hosts、域名 Direct/Block、独立字面目的 IP/CIDR/geoip:cn 和可识别明文 BT 阻断的配置及编辑事务；Direct 优先 Block/SOCKS，Block 在解析前拒绝 TCP/UDP。BT 不保证覆盖加密、混淆或部分 uTP，域名解析后的 IP 不归本阶段阻断；完整区域策略、规则编辑和冲突检测尚未迁移，206 不作为公开节点协议。"
     },
     "internal-207-access-control": {
       "status": "deferred",

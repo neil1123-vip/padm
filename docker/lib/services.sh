@@ -155,7 +155,8 @@ dockerConfigureSpecValidate() {
             (if has("hosts") then ["hosts"] else [] end) +
             (if has("direct") then ["direct"] else [] end) +
             (if has("block") then ["block"] else [] end) +
-            (if has("block_ips") then ["block_ips"] else [] end)) and
+            (if has("block_ips") then ["block_ips"] else [] end) +
+            (if has("block_bt") then ["block_bt"] else [] end)) and
           (if has("socks5") then
           (.socks5 | exact(["server", "port", "username", "password"] +
               if has("domains") then ["domains"] else [] end) and
@@ -191,7 +192,8 @@ dockerConfigureSpecValidate() {
             (.block_ips | exact(["ips"]) and
               (.ips | type == "array" and length >= 1 and length <= 256 and
                 length == (unique | length) and all(.[]; routing_ip_selector)))
-           else true end)) and
+           else true end) and
+          (if has("block_bt") then .block_bt == true else true end)) and
         all(.host_integrations[]; .type != "tun" and .type != "tproxy")
        else true end) and
       (if has("site") then
@@ -1404,7 +1406,8 @@ dockerGenerateXrayConfig() {
       (($r.routing.block.domains // []) | map(
         if startswith("keyword:") then ltrimstr("keyword:") else . end)) as $block_domains |
       ($r.routing.block_ips.ips // []) as $block_ips |
-      ($r.routing.direct != null or $r.routing.block != null or $r.routing.block_ips != null) as $actions |
+      ($r.routing.block_bt == true) as $block_bt |
+      ($r.routing.direct != null or $r.routing.block != null or $r.routing.block_ips != null or $block_bt) as $actions |
       ({protocol: "freedom", tag: "direct"} +
         if $resolve then {settings: {domainStrategy: "ForceIP"}} else {} end) as $direct |
       {
@@ -1537,6 +1540,9 @@ dockerGenerateXrayConfig() {
         ] else [] end) +
         (if ($block_ips | length) > 0 then [
           {type: "field", ip: $block_ips, outboundTag: "blocked"}
+        ] else [] end) +
+        (if $block_bt then [
+          {type: "field", protocol: ["bittorrent"], outboundTag: "blocked"}
         ] else [] end) + (if $selective then [
           {type: "field", domain: $domains, network: "udp", outboundTag: "blocked"},
           {type: "field", domain: $domains, network: "tcp", outboundTag: "padm-socks5"}
@@ -1591,7 +1597,8 @@ dockerGenerateSingBoxConfig() {
       ($block_ips | index("geoip:cn") != null) as $geoip_cn |
       ([({ip_cidr: [$block_ips[] | select(. != "geoip:cn")]} | select(.ip_cidr | length > 0)),
         (if $geoip_cn then {rule_set: ["padm-geoip-cn"]} else empty end)]) as $ip_matches |
-      ($r.routing.direct != null or $r.routing.block != null or $r.routing.block_ips != null) as $actions |
+      ($r.routing.block_bt == true) as $block_bt |
+      ($r.routing.direct != null or $r.routing.block != null or $r.routing.block_ips != null or $block_bt) as $actions |
       (($r.routing.hosts // {}) | keys) as $host_domains |
       ($r.routing.dns != null or $r.routing.hosts != null) as $resolve |
       (($domains + ($r.routing.dns.domains // []) +
@@ -1748,6 +1755,9 @@ dockerGenerateSingBoxConfig() {
                 else [] end) +
               [$block_matches[] | exclude_direct(.; $direct_matches) + {action: "reject"}] +
               [$ip_matches[] | exclude_direct(.; $direct_matches) + {action: "reject"}] +
+              (if $block_bt then [
+                exclude_direct({protocol: ["bittorrent"]}; $direct_matches) + {action: "reject"}
+              ] else [] end) +
               (if $selective then
               [$matches[] | exclude_direct(. + {network: "udp"}; $direct_matches) + {action: "reject"}] +
               [$matches[] | exclude_direct(. + {network: "tcp"}; $direct_matches) +

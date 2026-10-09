@@ -18,6 +18,29 @@ Server, Destination, Socks = (helpers[name] for name in ("Server", "Destination"
 port, running, write_config = (helpers[name] for name in ("port", "running", "write_config"))
 exact, socks_address = (helpers[name] for name in ("exact", "socks_address"))
 fixture_assets = helpers["fixture_assets"]
+BT_HANDSHAKE = (b"\x13BitTorrent protocol" + b"\x00" * 8 +
+                b"01234567890123456789" + b"-PD0001-012345678901")
+assert len(BT_HANDSHAKE) == 68
+
+
+class BtDestination(socketserver.BaseRequestHandler):
+    def handle(self):
+        self.server.accepted += 1
+        self.request.settimeout(2)
+        data = exact(self.request, 1)
+        if data == BT_HANDSHAKE[:1]:
+            data += exact(self.request, len(BT_HANDSHAKE) - 1)
+            assert data == BT_HANDSHAKE, "目的端未收到标准 BT 握手"
+            self.server.received.append(data)
+            self.request.sendall(BT_HANDSHAKE)
+        else:
+            while b"\r\n\r\n" not in data:
+                data += exact(self.request, 1)
+            assert data.startswith(b"GET /routing-check ")
+            self.server.received.append(data)
+            body = b"routing-destination-ok"
+            self.request.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: " +
+                                 str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n" + body)
 
 
 class RuleResource(BaseHTTPRequestHandler):
@@ -114,11 +137,11 @@ class Dns(socketserver.BaseRequestHandler):
         channel.sendto(header + request[12:end] + answer, self.client_address)
 
 
-def request(host, local, destination, target, http_host=None, timeout=3, pipelined=False):
+def request(host, local, destination, target, http_host=None, timeout=3, pipelined=False, payload=None):
     with socket.create_connection((host, local), timeout=timeout) as conn:
         conn.sendall(b"\x05\x01\x00")
         assert exact(conn, 2) == b"\x05\x00"
-        body = (b"GET /routing-check HTTP/1.1\r\nHost: " +
+        body = payload if payload is not None else (b"GET /routing-check HTTP/1.1\r\nHost: " +
                 (http_host or target).encode("ascii") + b"\r\nConnection: close\r\n\r\n")
         conn.sendall(b"\x05\x01\x00" + socks_address(target) + struct.pack("!H", destination) +
                      (body if pipelined else b""))
@@ -131,7 +154,7 @@ def request(host, local, destination, target, http_host=None, timeout=3, pipelin
         data = b""
         while part := conn.recv(4096):
             data += part
-        return data.endswith(b"routing-destination-ok")
+        return data == payload if payload is not None else data.endswith(b"routing-destination-ok")
 
 
 @contextlib.contextmanager
@@ -140,7 +163,7 @@ def system_hosts(family, host):
     names = [f"{prefix}-{suffix}.padm.invalid" for prefix in ("unmatched", "proxy", "error", "timeout")]
     path = Path("/etc/hosts")
     address_names = names + helpers["domain_names"](family) + block_names(family) + [
-        f"hosts-{suffix}.padm.invalid"]
+        f"hosts-{suffix}.padm.invalid", f"allowbt-{suffix}.padm.invalid"]
     line = f"{host} {' '.join(address_names)} # padm-dns-{os.getpid()}-{family}\n"
     # 只给隔离容器增加可解析诱饵，负测若误回退系统解析就会抵达 HTTP 目的。
     with path.open("a") as target:
@@ -160,7 +183,8 @@ def runtime(root, core, family, host, local, dns, upstream, resource, mode="sele
     config = json.loads((root / f"{core}.{family}{variant}.json").read_text())
     suffix = "v6" if family == "ipv6" else "v4"
     mapped = f"hosts-{suffix}.padm.invalid"
-    mapped_address = host if mode.startswith("ip-") else ("127.0.0.1" if family == "ipv6" else "::1")
+    mapped_address = host if mode.startswith(("ip-", "bt")) else (
+        "127.0.0.1" if family == "ipv6" else "::1")
     if core == "xray":
         config["dns"]["hosts"]["full:" + mapped] = mapped_address
         if mode.startswith("ip-"):
@@ -176,7 +200,7 @@ def runtime(root, core, family, host, local, dns, upstream, resource, mode="sele
             outbound["settings"]["servers"][0].update(address=host, port=upstream.server_address[1])
         inbound = dict(listen=host, port=local, tag="fixture-in", protocol="socks",
                        settings=dict(auth="noauth", udp=True))
-        if mode in ("selective", "policy", "policy-global") or mode.startswith("ip-"):
+        if mode in ("selective", "policy", "policy-global") or mode.startswith(("ip-", "bt")):
             sniff = copy.deepcopy(next(item["sniffing"] for item in config["inbounds"]
                                        if item["tag"] != "padm-traffic-api"))
             assert sniff["routeOnly"], "DNS/hosts 不得将 sniff-only Host 改成实际连接目的"
@@ -202,6 +226,102 @@ def runtime(root, core, family, host, local, dns, upstream, resource, mode="sele
                      "block" if item["tag"] == "padm-geosite-block" else "test")
             item["url"] = f"http://127.0.0.1:{resource.server_address[1]}/{asset}.srs"
     return config
+
+
+def check_bt(root, core, family, host):
+    suffix = "v6" if family == "ipv6" else "v4"
+    allowed = f"allowbt-{suffix}.padm.invalid"
+    resource_context = (Server(("127.0.0.1", 0), RuleResource) if core == "sing-box"
+                        else contextlib.nullcontext(None))
+    with (Server((host, 0), BtDestination) as destination, DnsServer((host, 0)) as dns,
+          Server((host, 0), Socks) as upstream, resource_context as resource,
+          system_hosts(family, host) as fallback,
+          socket.socket(socket.AF_INET6 if family == "ipv6" else socket.AF_INET,
+                        socket.SOCK_DGRAM) as datagram):
+        destination.received = []
+        destination.accepted = 0
+        dns.answer_kind = 28 if family == "ipv6" else 1
+        upstream.destination_hosts = [fallback[1], host, allowed]
+        upstream.destination = destination.server_address[1]
+        upstream.auth = upstream.connects = 0
+        upstream.reject = False
+        datagram.bind((host, 0))
+        datagram.settimeout(1)
+        servers = [destination, dns, upstream]
+        if resource is not None:
+            resource.requests = resource.successes = 0
+            resource.resources = {"/test.srs": (root / "test.srs").read_bytes()}
+            servers.append(resource)
+        threads = [threading.Thread(target=server.serve_forever, kwargs=dict(poll_interval=0.05),
+                                    daemon=True) for server in servers]
+        for thread in threads:
+            thread.start()
+        try:
+            local = port(host)
+            binary = f"/routing-cores/{core}"
+            command = [binary, "run", "-c"]
+            validate = [binary, "run", "-test", "-c"] if core == "xray" else [binary, "check", "-c"]
+            least = ["setpriv", "--reuid=10001", "--regid=10001", "--clear-groups",
+                     "--bounding-set=-all", "--no-new-privs"]
+            pipelined = core == "xray"
+            modes = ["bt-control", "bt"] + (["bt-global"] if family == "ipv4" else [])
+            targets = [host, helpers["domain_names"](family)[1], fallback[1]]
+            for mode in modes:
+                config = runtime(root, core, family, host, local, dns, upstream, resource, mode)
+                path = root / f"{core}.{family}.{mode}.runtime.json"
+                write_config(path, config)
+                subprocess.run(least + validate + [str(path)], check=True,
+                               stdout=subprocess.DEVNULL,
+                               env=dict(os.environ, XRAY_LOCATION_ASSET=str(root)))
+                with running(command, path, host, local, root / f"{core}.{family}.{mode}.log") as process:
+                    if mode == "bt-control":
+                        for target in targets:
+                            assert request(host, local, upstream.destination, target,
+                                           pipelined=pipelined, payload=BT_HANDSHAKE), (
+                                f"同目的标准 BT 握手正对照不可达: {target}")
+                        assert BT_HANDSHAKE in destination.received
+                        continue
+                    for target in targets:
+                        before = (destination.accepted, len(dns.requests),
+                                  upstream.auth, upstream.connects)
+                        try:
+                            assert not request(host, local, upstream.destination, target,
+                                               pipelined=pipelined, payload=BT_HANDSHAKE), (
+                                f"{mode}: BT 未拒绝: {target}")
+                        except (EOFError, ConnectionResetError):
+                            pass
+                        except socket.timeout:
+                            raise AssertionError(f"{mode}: BT 仅客户端超时，未实际拒绝: {target}")
+                        assert before == (destination.accepted, len(dns.requests),
+                                          upstream.auth, upstream.connects), (
+                            f"{mode}: BT 拒绝前发生目的、DNS 或 SOCKS5 泄漏: {target}")
+                        assert process.poll() is None, "BT 阻断导致核心退出"
+                    before = (destination.accepted, len(dns.requests),
+                              upstream.auth, upstream.connects)
+                    # BT 无 HTTP Host；Direct 例外由 ATYP3 域名元数据参与真实握手决策。
+                    assert request(host, local, upstream.destination, allowed,
+                                   pipelined=pipelined, payload=BT_HANDSHAKE), (
+                        f"{mode}: Direct 域名例外被 BT 阻断")
+                    assert destination.accepted == before[0] + 1
+                    assert allowed in dns.requests[before[1]:], "Direct 未保留指定 DNS"
+                    assert before[2:] == (upstream.auth, upstream.connects), (
+                        "Direct BT 例外仍连接 SOCKS5")
+                    auth = upstream.auth
+                    assert request(host, local, upstream.destination, host, pipelined=pipelined), (
+                        f"{mode}: BT 阻断影响普通 HTTP")
+                    assert upstream.auth == auth + int(mode == "bt-global")
+                    helpers["udp"](host, local, datagram.getsockname()[1],
+                                   allowed if mode == "bt-global" else host)
+                    assert datagram.recv(4096) == b"udp-leak", (
+                        f"{mode}: BT 阻断影响普通 Direct UDP")
+                    assert process.poll() is None
+                print(f"routing-block-bt-real-{core}-{family}-{mode}: "
+                      "standard-handshake/reject/no-leak/Direct/HTTP/UDP checks passed", flush=True)
+        finally:
+            for server in servers:
+                server.shutdown()
+            for thread in threads:
+                thread.join(timeout=2)
 
 
 def check_ips(root, core, family, host):
@@ -557,9 +677,11 @@ if __name__ == "__main__":
     root = Path(sys.argv[1])
     root.chmod(0o755)
     fixture_assets(root)
-    policy_assets(root)
-    ip_assets(root)
+    scope = os.environ.get("PADM_ROUTING_REAL_SCOPE")
+    if scope != "bt":
+        policy_assets(root)
+        ip_assets(root)
     for family, host in (("ipv4", "127.0.0.1"), ("ipv6", "::1")):
         for core in ("xray", "sing-box"):
-            (check_ips if os.environ.get("PADM_ROUTING_REAL_SCOPE") == "ips" else check)(
+            (check_bt if scope == "bt" else check_ips if scope == "ips" else check)(
                 root, core, family, host)

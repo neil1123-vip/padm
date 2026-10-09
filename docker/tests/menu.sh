@@ -510,6 +510,8 @@ runRoutingDriver() {
         targetReply 'Docker 路由与出站' $'14\n'
         targetReply 'root 私有 IP/CIDR 规则 JSON 文件绝对路径（0 返回）' $'/root/padm-block-ips.json\n'
         targetReply 'Docker 路由与出站' $'15\n'
+        targetReply 'Docker 路由与出站' $'16\n'
+        targetReply 'Docker 路由与出站' $'17\n'
         ;;
     cancel)
         targetReply 'Docker 路由与出站' $'1\n'
@@ -997,7 +999,7 @@ for routingCase in flow cancel file-eof domains-eof dns-file-eof hosts-file-eof 
     expectedRouting=
     case "${routingCase}" in
     flow|failed)
-        expectedRouting=$'edit --socks5 /root/padm-socks5.json\nedit --socks5-off\nprotocol routing-status\nedit --socks5-domains Example.NET, full:Exact.Example.Com, geosite:cn\nedit --socks5-global\nprotocol routing-status\nedit --dns /root/padm-dns.json\nedit --dns-off\nedit --hosts /root/padm-hosts.json\nedit --hosts-off\nedit --direct /root/padm-direct.json\nedit --direct-off\nedit --block /root/padm-block.json\nedit --block-off\nedit --block-ips /root/padm-block-ips.json\nedit --block-ips-off'
+        expectedRouting=$'edit --socks5 /root/padm-socks5.json\nedit --socks5-off\nprotocol routing-status\nedit --socks5-domains Example.NET, full:Exact.Example.Com, geosite:cn\nedit --socks5-global\nprotocol routing-status\nedit --dns /root/padm-dns.json\nedit --dns-off\nedit --hosts /root/padm-hosts.json\nedit --hosts-off\nedit --direct /root/padm-direct.json\nedit --direct-off\nedit --block /root/padm-block.json\nedit --block-off\nedit --block-ips /root/padm-block-ips.json\nedit --block-ips-off\nedit --block-bt\nedit --block-bt-off'
         grep -Fq '无效选项' "${CONTROL_LOG}" || fail '路由菜单没有保留无效输入后的操作'
         ;;
     esac
@@ -1009,7 +1011,7 @@ for routingCase in flow cancel file-eof domains-eof dns-file-eof hosts-file-eof 
             '6. 设置 DNS 分流' '7. 关闭 DNS 分流' '8. 设置 DNS/hosts 覆盖' \
             '9. 关闭 DNS/hosts 覆盖' '10. 设置 Direct 直连例外' '11. 关闭 Direct 直连例外' \
             '12. 设置 Block 域名阻断' '13. 关闭 Block 域名阻断' '14. 设置 IP/CIDR 阻断' \
-            '15. 关闭 IP/CIDR 阻断' '0. 返回'; do
+            '15. 关闭 IP/CIDR 阻断' '16. 启用 BT 协议阻断' '17. 关闭 BT 协议阻断' '0. 返回'; do
             grep -Fq "${label}" "${CONTROL_LOG}" || fail "路由菜单缺少: ${label}"
         done
     elif [[ "${routingCase}" == failed ]]; then
