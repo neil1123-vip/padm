@@ -495,7 +495,7 @@ mkdir -p "${configPath}"
 xrayVLESSRealityXHTTPSNI="www.microsoft.com"
 currentRealityXHTTPPublicKey="pubkey"
 cat >"${configPath}12_VLESS_XHTTP_inbounds.json" <<'EOF'
-{"inbounds":[{"settings":{"decryption":"active-decryption"},"streamSettings":{"realitySettings":{"serverNames":["www.microsoft.com"],"publicKey":"pubkey","privateKey":"priv","target":"www.microsoft.com:443","mldsa65Seed":"seed-xhttp","mldsa65Verify":"pqv-xhttp"},"xhttpSettings":{"host":"front.example.com","path":"/custom-xhttp","mode":"packet-up"}}}]}
+{"inbounds":[{"port":443,"settings":{"decryption":"active-decryption"},"streamSettings":{"realitySettings":{"serverNames":["www.microsoft.com"],"publicKey":"pubkey","privateKey":"priv","target":"www.microsoft.com:443","mldsa65Seed":"seed-xhttp","mldsa65Verify":"pqv-xhttp"},"xhttpSettings":{"host":"front.example.com","path":"/custom-xhttp","mode":"packet-up"}}}]}
 EOF
 ! defaultBase64Code vlessXHTTP 443 user-a-xhttp-missing-state uuid-a "cdn.example.com" "/ignored"
 [[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-missing-state" ]]
