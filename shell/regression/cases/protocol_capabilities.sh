@@ -732,9 +732,9 @@ runProtocolEntryConfigUpdateRegression() (
     [[ "${commits}" == 6 && "$(<"${fixtureConfig}")" == "${before}" ]]
     [[ -z "$(find "${root}" -name '.config.json.xhttp.*' -print -quit)" ]]
     (
-        # 无 JSON 输出不能进入协议提交，也不能留下空暂存文件。
+        # 空值、非对象或多个 JSON 文档不能进入协议提交，也不能留下暂存文件。
         commitHysteria2ConfigUpdate() { commitXHTTPConfigUpdate "$@"; }
-        for value in '' '   ' '{'; do
+        for value in '' '   ' '{' null '[]' '"config"' $'{}\n{}'; do
             printf '%s' "${value}" >"${fixtureConfig}"
             for command in applyXHTTPConfigUpdate applyHysteria2ConfigUpdate applyTuicConfigUpdate; do
                 regressionExpectStatus 1 "${command}" '.enabled = false' fixture 2>/dev/null

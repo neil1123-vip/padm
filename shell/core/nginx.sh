@@ -1021,7 +1021,7 @@ ensureTraditionalTlsFallbackNginxConfig() {
     selectCustomInstallType="${rebuildSelection}"
     updateRedirectNginxConf || rebuildStatus=1
     selectCustomInstallType="${previousSelection}"
-    if [[ "${rebuildStatus}" == 0 ]] && ! runCoreServiceActionAllowFailure handleNginx start; then
+    if [[ "${rebuildStatus}" == 0 ]] && ! runCoreServiceActionAllowFailure handleNginx refresh; then
         rebuildStatus=2
     fi
     if [[ "${rebuildStatus}" != 0 ]]; then
@@ -1034,9 +1034,13 @@ ensureTraditionalTlsFallbackNginxConfig() {
                 errorCard "旧 Nginx 配置已恢复，但恢复文件清理失败；请检查 ${recoveryFile}"
                 return 1
             }
-            if [[ "${rebuildStatus}" == 2 ]] && ! runCoreServiceActionAllowFailure handleNginx start restore; then
-                errorCard "旧 Nginx 配置已恢复，但服务重新启动失败，请检查服务日志"
-                return 1
+            if [[ "${rebuildStatus}" == 2 ]]; then
+                local -a restoreArgs=(refresh)
+                nginxRunning || restoreArgs=(start restore)
+                if ! runCoreServiceActionAllowFailure handleNginx "${restoreArgs[@]}"; then
+                    errorCard "旧 Nginx 配置已恢复，但服务重新加载失败，请检查服务日志"
+                    return 1
+                fi
             fi
             errorCard "Nginx 重建失败，已恢复旧 alone.conf"
         else

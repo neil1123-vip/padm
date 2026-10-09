@@ -2453,14 +2453,14 @@ SH
         regressionExpectStatus 1 ensureTraditionalTlsFallbackNginxConfig >/dev/null 2>&1 || return 1
         [[ "$(<"${targetPath}")" == "${original}" && "${calls}" == 2 &&
             "${SERVICE_QUEUE_ALLOW_FAILURE}" == previous ]] || return 1
-        [[ "$(<"${serviceLog}")" == $'start\nstart restore' ]] || return 1
+        [[ "$(<"${serviceLog}")" == $'refresh\nstart restore' ]] || return 1
         [[ -z "$(find "${nginxRoot}" -maxdepth 1 -name '.alone.conf.nginx-rebuild.*' -print -quit)" ]] || return 1
 
         calls=0 failAgain=true
         : >"${errorLog}"
         regressionExpectStatus 1 ensureTraditionalTlsFallbackNginxConfig >/dev/null 2>&1 || return 1
         [[ "$(<"${targetPath}")" == "${original}" && "${calls}" == 2 ]] || return 1
-        grep -q '旧 Nginx 配置已恢复，但服务重新启动失败' "${errorLog}" || return 1
+        grep -q '旧 Nginx 配置已恢复，但服务重新加载失败' "${errorLog}" || return 1
 
         rm -f -- "${targetPath}"
         calls=0
@@ -2484,6 +2484,18 @@ SH
         grep -q "旧配置恢复失败.*${recoveryFile}" "${errorLog}" || return 1
         removeManagedFileIfPresent "${recoveryFile}" || return 1
         printf '%s' "${original}" >"${targetPath}"
+    ) || return 1
+    (
+        local calls=0 serviceLog="${TMP_DIR}/nginx-rebuild-running.log"
+        : >"${serviceLog}"
+        nginxRunning() { return 0; }
+        handleNginx() {
+            calls=$((calls + 1))
+            printf '%s\n' "$*" >>"${serviceLog}"
+            [[ "$1" == refresh && "$calls" == 1 ]]
+        }
+        ensureTraditionalTlsFallbackNginxConfig >/dev/null 2>&1 || return 1
+        [[ "$(<"${serviceLog}")" == refresh ]] || return 1
     ) || return 1
 
     (

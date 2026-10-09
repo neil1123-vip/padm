@@ -3376,7 +3376,8 @@ applyManagedJsonConfigUpdate() {
     local stagedFile
     shift 6
     padmCreateTempFileForTarget stagedFile "${configFile}" "${stageTag}" || { errorCard "${errorMessage}"; return 1; }
-    if ! jq -e "$@" "${jqFilter}" "${configFile}" >"${stagedFile}"; then
+    if ! jq -se "$@" 'if length == 1 and (.[0] | type == "object") then .[0]
+        else error("expected one configuration object") end | '"${jqFilter}" "${configFile}" >"${stagedFile}"; then
         errorCard "${errorMessage}"
         padmRemoveCleanupPath "${stagedFile}"
         return 1
