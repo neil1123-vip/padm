@@ -618,6 +618,21 @@ runCoreReleaseArchiveRejectsRegression() (
 
     rm -rf "${root}"
     mkdir -p "${tmpDir}"
+    if [[ "${mode}" == unsafe-path ]]; then
+        # 正常 Unix 权限条目必须兼容旧版 awk，链接条目仍拒绝。
+        python3 - "${tmpDir}/regular.zip" "${tmpDir}/linked.zip" <<'PY'
+import sys
+import zipfile
+for path, mode in zip(sys.argv[1:], [0o100755, 0o120777]):
+    with zipfile.ZipFile(path, "w") as archive:
+        entry = zipfile.ZipInfo("xray")
+        entry.create_system = 3
+        entry.external_attr = mode << 16
+        archive.writestr(entry, "payload")
+PY
+        validateCoreZipArchive "${tmpDir}/regular.zip" || return 1
+        regressionExpectStatus 1 validateCoreZipArchive "${tmpDir}/linked.zip" || return 1
+    fi
     xrayCoreCPUVendor=Xray-linux-64
     singBoxCoreCPUVendor=-linux-amd64
     if [[ "${mode}" == "symlink-payload" ]]; then

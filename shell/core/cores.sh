@@ -52,7 +52,7 @@ validateCoreZipArchive() {
         return 1
     fi
     entryCount=$(wc -l <"${entryList}" | tr -d '[:space:]') || { padmRemoveCleanupPath "${entryList}"; padmRemoveCleanupPath "${detailList}"; return 1; }
-    detailCount=$(awk '$1 ~ /^[-d][rwxStTs-]{9}$/ { count++ } END { print count + 0 }' "${detailList}") || { padmRemoveCleanupPath "${entryList}"; padmRemoveCleanupPath "${detailList}"; return 1; }
+    detailCount=$(awk 'length($1) == 10 && $1 ~ /^[-d][rwxStTs-]+$/ { count++ } END { print count + 0 }' "${detailList}") || { padmRemoveCleanupPath "${entryList}"; padmRemoveCleanupPath "${detailList}"; return 1; }
     [[ "${detailCount}" == "${entryCount}" ]] || { padmRemoveCleanupPath "${entryList}"; padmRemoveCleanupPath "${detailList}"; return 1; }
     if ! coreArchiveExpandedSizeIsSafe zip "${archiveFile}" "${entryList}"; then
         padmRemoveCleanupPath "${entryList}"
