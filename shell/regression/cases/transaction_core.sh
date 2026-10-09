@@ -2238,9 +2238,10 @@ runCoreInstallFileSignalRollbackRegression() (
         fileSignalRestoreManagedFileFromBackup "$@"
     }
     commitGeneratedFile() {
+        # 只在实际目标上注入故障，不能匹配回滚登记前的同名备份。
         if [[ ! -e "${fixture}/commit-failed" &&
             ( ( "${phase}" == first-restore && "$2" == "${PADM_SINGBOX_BINARY}" ) ||
-                ( "${phase}" == geo-restore && "${2##*/}" == geoip.dat ) ) ]]; then
+                ( "${phase}" == geo-restore && "$2" == "${fixture}/geo-target/geoip.dat" ) ) ]]; then
             : >"${fixture}/commit-failed"
             return 1
         fi
@@ -2253,7 +2254,7 @@ runCoreInstallFileSignalRollbackRegression() (
         if [[ ( "${phase}" == migration && "$2" == "${shard}" ) ||
             ( "${phase}" == first-cronet && "$2" == "${cronet}" ) ||
             ( "${phase}" == first-binary && "$2" == "${PADM_SINGBOX_BINARY}" ) ||
-            ( "${phase}" == geo-* && "${2##*/}" == "${phase#geo-}" ) ]]; then
+            ( "${phase}" == geo-* && "$2" == "${fixture}/geo-target/${phase#geo-}" ) ]]; then
             kill -"${signal}" "${BASHPID}"
         fi
     }
@@ -3981,6 +3982,32 @@ runSingBoxUninstallFailurePropagationRegression() (
     REGRESSION_ERROR_CARD_LOG="${errorLog}"
     PADM_SINGBOX_BINARY="${root}/missing-sing-box"
     PADM_SINGBOX_SYSTEMD_SERVICE_FILE="${root}/sing-box.service"
+
+    (
+        local mode caseRoot backupDir calls
+        readInstallType() { [[ "${mode}" != read-fail ]]; }
+        systemctl() { [[ "${mode}" != registration-fail ]]; }
+        handleSingBox() { printf '%s\n' "$1" >>"${calls}"; }
+        for mode in restore-fail read-fail registration-fail success; do
+            caseRoot="${root}/rollback-${mode}"
+            calls="${caseRoot}/calls"
+            mkdir -p "${caseRoot}"
+            : >"${calls}"
+            printf 'old\n' >"${caseRoot}/config"
+            checkLogBackupCreate backupDir "${caseRoot}/config" || return 1
+            printf 'new\n' >"${caseRoot}/config"
+            [[ "${mode}" != restore-fail ]] || command rm -- "${backupDir}/000000.json"
+            regressionExpectStatus 1 singBoxProtocolUninstallRollback \
+                "${backupDir}" true false true test || return 1
+            if [[ "${mode}" == success ]]; then
+                [[ "$(<"${calls}")" == start && ! -e "${backupDir}" ]] || return 1
+            else
+                [[ ! -s "${calls}" && -d "${backupDir}" ]] || return 1
+                [[ "${mode}" == restore-fail || "$(<"${caseRoot}/config")" == old ]] || return 1
+                padmRemoveCleanupPath "${backupDir}" || return 1
+            fi
+        done
+    ) || return 1
 
     (
         # 合并配置位于分片目录的父目录，最后协议删除后必须清理核心注册。

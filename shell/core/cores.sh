@@ -2288,7 +2288,7 @@ EOF
 
 coreStartupServiceEnabled() {
     local serviceName=$1
-    if [[ "${release}" == "alpine" ]]; then
+    if [[ "${release:-}" == "alpine" ]]; then
         command -v rc-update >/dev/null 2>&1 || return 1
         rc-update show default 2>/dev/null | awk '{print $1}' | grep -qx "${serviceName}"
     else
@@ -2299,7 +2299,7 @@ coreStartupServiceEnabled() {
 
 coreSetStartupServiceEnabled() {
     local serviceName=$1 serviceEnabled=$2
-    if [[ "${release}" == "alpine" ]]; then
+    if [[ "${release:-}" == "alpine" ]]; then
         if command -v rc-update >/dev/null 2>&1; then
             if [[ "${serviceEnabled}" == true ]]; then
                 rc-update add "${serviceName}" default >/dev/null 2>&1
@@ -2326,7 +2326,7 @@ restoreCoreStartupServiceInstall() {
         padmForgetCleanupPath "${backupDir}"
         return 1
     fi
-    if [[ "${release}" != "alpine" ]]; then
+    if [[ "${release:-}" != "alpine" ]]; then
         systemctl daemon-reload >/dev/null 2>&1 || rollbackFailed=true
     fi
     coreSetStartupServiceEnabled "${serviceName}" "${serviceWasEnabled}" || rollbackFailed=true
