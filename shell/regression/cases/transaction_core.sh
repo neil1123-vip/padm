@@ -4567,20 +4567,15 @@ runGeoUpdateReloadFailureRegression() (
     (
         # 非普通 Geo 目标在读取备份前拒绝；普通文件与缺失目标保持原合同。
         local fifoPath="${root}/geo-fifo" regularPath="${root}/geo-regular"
-        local backupPath="${root}/geo-backup" copyCalls=0
+        local backupPath="${root}/geo-backup"
         mkfifo "${fifoPath}" || return 1
-        cp() {
-            copyCalls=$((copyCalls + 1))
-            [[ -f "$2" ]] || return 7
-            command cp "$@"
-        }
-        regressionExpectStatus 1 backupXrayGeoFileIfPresent "${fifoPath}" "${backupPath}" || return 1
-        [[ "${copyCalls}" == 0 && -p "${fifoPath}" && ! -e "${backupPath}" ]] || return 1
-        backupXrayGeoFileIfPresent "${root}/missing-geo" "${backupPath}" || return 1
-        [[ "${copyCalls}" == 0 && ! -e "${backupPath}" ]] || return 1
+        regressionExpectStatus 1 padmWriteManagedFileBackupManifest "${backupPath}" geo "${fifoPath}" || return 1
+        [[ -p "${fifoPath}" && ! -e "${backupPath}/geo" ]] || return 1
+        padmWriteManagedFileBackupManifest "${backupPath}" geo "${root}/missing-geo" || return 1
+        [[ ! -e "${backupPath}/geo" ]] || return 1
         printf 'old-geo\n' >"${regularPath}" || return 1
-        backupXrayGeoFileIfPresent "${regularPath}" "${backupPath}" || return 1
-        [[ "${copyCalls}" == 1 && "$(<"${backupPath}")" == old-geo ]] || return 1
+        padmWriteManagedFileBackupManifest "${backupPath}" geo "${regularPath}" || return 1
+        [[ "$(<"${backupPath}/geo")" == old-geo ]] || return 1
     ) || return 1
     (
         # Geo 版本沿用核心发布解析；请求失败或坏响应不开始暂存和下载。
@@ -4643,6 +4638,32 @@ runGeoUpdateReloadFailureRegression() (
             fi
             [[ "$(find "${target}" -type f | wc -l)" == 3 ]] || return 1
         done
+    ) || return 1
+    (
+        local file mode target backup
+        for file in geosite.dat geoip.dat geo.version; do
+            for mode in missing directory; do
+                target="${root}/lost-${file}-${mode}"
+                backup="${target}/backup"
+                mkdir -p "${target}"
+                printf 'old\n' >"${target}/${file}"
+                padmWriteManagedFileBackupManifest "${backup}" "${file}" "${target}/${file}" || return 1
+                command rm -f -- "${backup}/${file}"
+                [[ "${mode}" != directory ]] || mkdir "${backup}/${file}"
+                printf 'new\n' >"${target}/${file}"
+                local -A PADM_XRAY_GEO_COMMIT=([active]=true [backup]="${backup}")
+                # 必需备份丢失不能删除当前数据，恢复失败也不能清理备份目录。
+                regressionExpectStatus 1 rollbackXrayGeoCommitOnExit || return 1
+                [[ "$(<"${target}/${file}")" == new && -d "${backup}" ]] || return 1
+            done
+        done
+        target="${root}/originally-missing"
+        backup="${target}/backup"
+        padmWriteManagedFileBackupManifest "${backup}" geosite.dat "${target}/geosite.dat" || return 1
+        printf 'new\n' >"${target}/geosite.dat"
+        PADM_XRAY_GEO_COMMIT=([active]=true [backup]="${backup}")
+        rollbackXrayGeoCommitOnExit || return 1
+        [[ ! -e "${target}/geosite.dat" && ! -e "${backup}" ]]
     ) || return 1
     : >"${callLog}"
     : >"${statusLog}"

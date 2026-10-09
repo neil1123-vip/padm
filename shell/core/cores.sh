@@ -160,32 +160,10 @@ downloadXrayGeoFilesToStage() {
     [[ -s "${stageDir}/geosite.dat" && -s "${stageDir}/geoip.dat" ]]
 }
 
-backupXrayGeoFileIfPresent() {
-    local targetFile=$1
-    local backupFile=$2
-    [[ -e "${targetFile}" || -L "${targetFile}" ]] || return 0
-    [[ -f "${targetFile}" ]] || return 1
-    cp -p "${targetFile}" "${backupFile}"
-}
-
-restoreXrayGeoCommitBackup() {
-    local backupDir=$1
-    local geositeTarget=$2
-    local geoipTarget=$3
-    local versionTarget=$4
-    local status=0
-
-    restoreCoreOptionalFileBackup "${backupDir}/geosite.dat" "${geositeTarget}" 644 || status=1
-    restoreCoreOptionalFileBackup "${backupDir}/geoip.dat" "${geoipTarget}" 644 || status=1
-    restoreCoreOptionalFileBackup "${backupDir}/geo.version" "${versionTarget}" 644 || status=1
-    return "${status}"
-}
-
 rollbackXrayGeoCommitOnExit() {
     [[ "${PADM_XRAY_GEO_COMMIT[active]:-false}" == true ]] || return 0
     PADM_XRAY_GEO_COMMIT[active]=false
-    if restoreXrayGeoCommitBackup "${PADM_XRAY_GEO_COMMIT[backup]}" \
-        "${PADM_XRAY_GEO_COMMIT[geosite]}" "${PADM_XRAY_GEO_COMMIT[geoip]}" "${PADM_XRAY_GEO_COMMIT[version]}"; then
+    if padmRestoreManagedFileBackupManifest "${PADM_XRAY_GEO_COMMIT[backup]}"; then
         padmRemoveCleanupPath "${PADM_XRAY_GEO_COMMIT[backup]}"
     else
         padmForgetCleanupPath "${PADM_XRAY_GEO_COMMIT[backup]}"
@@ -238,9 +216,8 @@ commitXrayGeoFilesFromStage() {
         padmRemoveCleanupPath "${versionStage}"
         return 1
     }
-    if ! backupXrayGeoFileIfPresent "${geositeTarget}" "${backupDir}/geosite.dat" ||
-        ! backupXrayGeoFileIfPresent "${geoipTarget}" "${backupDir}/geoip.dat" ||
-        ! backupXrayGeoFileIfPresent "${versionTarget}" "${backupDir}/geo.version"; then
+    if ! padmWriteManagedFileBackupManifest "${backupDir}" \
+        geosite.dat "${geositeTarget}" geoip.dat "${geoipTarget}" geo.version "${versionTarget}"; then
         padmRemoveCleanupPath "${backupDir}"
         padmRemoveCleanupPath "${geositeStage}"
         padmRemoveCleanupPath "${geoipStage}"
@@ -248,7 +225,7 @@ commitXrayGeoFilesFromStage() {
         return 1
     fi
     local -A PADM_XRAY_GEO_COMMIT=(
-        [active]=true [backup]="${backupDir}" [geosite]="${geositeTarget}" [geoip]="${geoipTarget}" [version]="${versionTarget}"
+        [active]=true [backup]="${backupDir}"
     )
     local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
     local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
