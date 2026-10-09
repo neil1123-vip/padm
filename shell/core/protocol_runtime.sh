@@ -314,8 +314,8 @@ addFirewalldPortHopping() {
 
 portHoppingPersistIptablesRules() {
     if command -v netfilter-persistent >/dev/null 2>&1; then
-        sudo netfilter-persistent save >/dev/null 2>&1
-        return $?
+        sudo netfilter-persistent save >/dev/null 2>&1 || return 1
+        return 0
     fi
     return 2
 }

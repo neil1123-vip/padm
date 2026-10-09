@@ -1685,6 +1685,36 @@ EOF
     [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
 
     (
+        local persistExitStatus=0
+        local initialAllowCalls=${allowCalls}
+        command() {
+            if [[ "${1:-}" == "-v" && "${2:-}" == netfilter-persistent ]]; then
+                return 0
+            fi
+            builtin command "$@"
+        }
+        netfilter-persistent() {
+            [[ "$*" == save ]] || return 99
+            return "${persistExitStatus}"
+        }
+        portHoppingPersistIptablesRules
+        for persistExitStatus in 2 3; do
+            regressionExpectStatus 1 portHoppingPersistIptablesRules
+            inputCount=1
+            : >"${warnLog}"
+            : >"${natStateFile}"
+            regressionExpectStatus 1 addPortHopping hysteria2 16295 >/dev/null 2>&1
+            grep -q '端口跳跃添加失败' "${warnLog}"
+            ! grep -Eq '添加成功|未检测到 netfilter-persistent' "${warnLog}"
+            ! grep -q 'neil1123-vip_hysteria2_portHopping' "${natStateFile}"
+            grep -q 'keep-other-rule' "${natStateFile}"
+            ! padmFirewallStateHas 'forward:iptables:hysteria2:33000:33002:16295'
+            [[ "${allowCalls}" == "${initialAllowCalls}" ]]
+            regressionExpectStatus 1 rollbackPortHoppingIptablesRule hysteria2 33000 33002 16295
+        done
+    )
+
+    (
         local saveLog="${TMP_DIR}/port-hopping-read-save.log"
         local savedRules='-A PREROUTING -p udp --dport 33000:33002 -m comment --comment neil1123-vip_hysteria2_portHopping -j DNAT --to-destination :16295
 -A PREROUTING -p udp --dport 34001 -m comment --comment neil1123-vip_tuic_portHopping -j DNAT --to-destination :26451'
