@@ -2816,6 +2816,34 @@ IPv6 值规范化，族和 listener 地址族必须一致。
 不改变真实来源；错端口与错来源使用独立新挑战并验证失败。
 既有自动日志封禁、DNAT DROP counter、第二客户端隔离、解封和 TERM 清理继续验证。
 
+本地验收（2026-10-10，Docker Desktop Linux amd64，复用工具镜像）：
+
+| 检查 | 结果 / 秒 | 证据目录 |
+| --- | --- | --- |
+| 菜单 PTY，含取消/EOF/失败/信号 | 通过，入口 40.670 | `.tmp-regression-docker-12f0a634ae0a4d31af1f330e7ef27693` |
+| dispatcher 注册/集合合同 | 通过，入口 1.354 | `.tmp-regression-docker-e4ed068e861c46fa9f61a7dab7e3111a` |
+| 补验前完整 Docker 合同，Jobs 6 | 37/38，站点夹具失败，入口 241.108 | `.tmp-regression-docker-3fd6eba9f80a42b4a72673c9d0432f20` |
+| 站点真实 Nginx 降权夹具（含独占 stdout 日志目标） | 通过，入口 49.530 | `.tmp-regression-docker-f3276c732abc405994c489694d5c7592` |
+| 来源合同、NetworkID 漂移拒绝 | 通过，入口 2.734 | `.tmp-regression-docker-9924116745424532aa91a21f68bee5ac` |
+| 真实来源双端口双栈、错误端口/来源拒绝 | 通过，入口 37.354 | `.tmp-regression-docker-64f385b36cb645938777e5a97055ba61` |
+
+各项均使用工具镜像 `sha256:3a790074c74a19bd40e6c5fdeeebcdba5ae230548f057ca4ca1d40f49435ce55`；
+真实来源使用独立 daemon、离线业务镜像和双客户端 netns，未挂宿主 Docker Socket。
+来源合同另外覆盖同地址下 NetworkID 改变必须拒绝；生产 Shell、合同 Shell 及真实来源
+Python AST 补验通过。此前完整合同唯一失败项是站点夹具把降权 Nginx 的 stdout
+接到 root 管道，已用独占 UID 10001 日志目标修复并完成定向补验；未重复稳定的完整合同。
+完整回归之后仅变动来源快照/合同/真实来源边界和站点 stdout 夹具，均有对应补验；
+不把这些组合证据声称为最终快照的单次 38/38 完整回归。
+最终 10 个代码/测试文件与来源合同及真实来源归档逐文件一致，此后只更新验收文档与状态。
+最终归档 SHA256 `C512B43002C4BCD10EBDC718474C68AF18D00DBE8D3E69C9BFF354FF9E6D1FE5`；
+静态补验及逐文件摘要分别保留在 `.tmp-source-final-static.log`、`.tmp-source-final-snapshot.log`。
+限定复审发现的 NetworkID 一致性缺口已修复并复核，无未决确定 P1/P2。
+清理 26 个本轮源码归档/清单，共 108,031,990 字节，并删除两个空测试目录；
+日志、失败证据、result、镜像记录和共享缓存保留，不动用户既有 8 个临时文件。
+实现提交为 `9c39f063 feat(docker): verify live WS client sources before protection`，
+本地 SSH 签名 `G`。本阶段仍不宣称已接入新启用事务，SSH/控制面、真实宿主、
+arm64、重启卸载及完整 Fail2ban 管理继续未决。
+
 下一步仍须把逐端口/地址族现场见证接入同一次启用事务：
 先运行候选 Nginx 而不启动 jail，全部证明齐备才允许封禁；
 configure/update 与直接 restore/rollback 均需覆盖，旧来源日志不能解锁新镜像。
