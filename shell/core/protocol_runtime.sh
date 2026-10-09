@@ -909,7 +909,10 @@ initRealityMldsa65() {
     local tlsPingResult= length= historyMldsa65Status= realityMldsa65=
     local nextSeed="${realityMldsa65Seed:-}" nextVerify="${realityMldsa65Verify:-}"
     local target="${realityTargetHost}:${realityTargetPort}"
-    tlsPingResult=$("$(coreXrayBinaryPath)" tls ping "${target}" 2>/dev/null)
+    tlsPingResult=$("$(coreXrayBinaryPath)" tls ping "${target}" 2>/dev/null) || {
+        errorCard "Reality ML-DSA-65 目标检测失败"
+        return 1
+    }
     if echo "${tlsPingResult}" | awk '/Pinging with SNI/{inSni=1; next} inSni && /TLS Post-Quantum key exchange:.*X25519MLKEM768/{found=1} END{exit found ? 0 : 1}'; then
         length=$(echo "${tlsPingResult}" | awk '/Pinging with SNI/{inSni=1; next} inSni && /Certificate chain/{print $5; exit}')
 

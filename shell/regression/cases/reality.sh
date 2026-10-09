@@ -12,6 +12,7 @@ runRealityMldsa65FailureRegression() (
     coreXrayBinaryPath() { printf '%s\n' regressionMldsa65Xray; }
     regressionMldsa65Xray() {
         if [[ "$1" == tls ]]; then
+            [[ "${mode}" != ping-failure ]] || return 1
             [[ "${mode}" != disabled ]] || { printf 'Pinging with SNI\nTLS version: TLS 1.3\n'; return 0; }
             printf 'Pinging with SNI\nTLS Post-Quantum key exchange: X25519MLKEM768\nCertificate chain total length: 4096\n'
         else
@@ -35,7 +36,7 @@ runRealityMldsa65FailureRegression() (
     validateRealityTargetConfigAfterChange() { :; }
     reloadCore() { reloads=$((reloads + 1)); }
     currentProtocolHas() { [[ "$1" == 2 ]]; }
-    for mode in read-failure generate-failure seed-only verify-only; do
+    for mode in ping-failure read-failure generate-failure seed-only verify-only; do
         realityMldsa65Seed= realityMldsa65Verify=
         regressionExpectStatus 1 initRealityMldsa65 || return 1
         [[ -z "${realityMldsa65Seed}${realityMldsa65Verify}" ]] || return 1
@@ -2627,26 +2628,38 @@ JSON
                 .inbounds[0].streamSettings.xhttpSettings.host == $host' "${realityPatchXrayXhttp}" >/dev/null || return 1
     done
     (
-        # 同身份下行跟随 SNI，独立公钥或独立 SNI 不随主入站切换。
-        local identity downloadKey downloadSNI expectedSNI
-        for identity in shared independent-key independent-sni; do
-            downloadKey=shared-public downloadSNI=old.example.com expectedSNI=download-sni.example.com
+        # 同身份下行跟随 SNI；仅跟随主 SNI 的 host 同步，独立身份保持原值。
+        local identity downloadKey downloadSNI downloadHost expectedSNI expectedHost absentHost
+        for identity in shared independent-key independent-sni independent-host absent-host; do
+            downloadKey=shared-public downloadSNI=old.example.com downloadHost=old.example.com
+            expectedSNI=download-sni.example.com expectedHost=${downloadHost} absentHost=false
             case "${identity}" in
+            shared) expectedHost=download-sni.example.com ;;
             independent-key) downloadKey=independent-public; expectedSNI=${downloadSNI} ;;
             independent-sni) downloadSNI=independent.example.com; expectedSNI=${downloadSNI} ;;
+            independent-host) downloadHost=independent-host.example.com; expectedHost=${downloadHost} ;;
+            absent-host) absentHost=true ;;
             esac
             updateRoutingJsonConfig "${realityPatchXrayXhttp}" '
                 .inbounds[0].streamSettings.realitySettings.publicKey = "shared-public" |
                 .inbounds[0].streamSettings.realitySettings.serverNames = ["old.example.com"] |
+                .inbounds[0].streamSettings.xhttpSettings.host = "old.example.com" |
                 .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings =
-                    {address:"download.example.com",realitySettings:{publicKey:$key,serverName:$sni}}' \
-                --arg key "${downloadKey}" --arg sni "${downloadSNI}" || return 1
+                    {address:"download.example.com",realitySettings:{publicKey:$key,serverName:$sni},
+                     xhttpSettings:(if $absentHost then {} else {host:$host} end)}' \
+                --arg key "${downloadKey}" --arg sni "${downloadSNI}" --arg host "${downloadHost}" \
+                --argjson absentHost "${absentHost}" || return 1
             applyRealityTargetToInstalledConfigs "download-target.example.com:443" "download-sni.example.com" || return 1
-            jq -e --arg key "${downloadKey}" --arg sni "${expectedSNI}" '
+            jq -e --arg key "${downloadKey}" --arg sni "${expectedSNI}" --arg host "${expectedHost}" \
+                --argjson absentHost "${absentHost}" '
                 .inbounds[0].streamSettings.realitySettings.serverNames == ["download-sni.example.com"] and
+                .inbounds[0].streamSettings.xhttpSettings.host == "download-sni.example.com" and
                 .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.address == "download.example.com" and
                 .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.publicKey == $key and
-                .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.serverName == $sni' \
+                .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.serverName == $sni and
+                (if $absentHost
+                 then (.inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.xhttpSettings | has("host") | not)
+                 else .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.xhttpSettings.host == $host end)' \
                 "${realityPatchXrayXhttp}" >/dev/null || return 1
         done
     ) || return 1
