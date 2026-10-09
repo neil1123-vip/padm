@@ -2047,6 +2047,43 @@ Docker 的独立所有权不等同于完全复制原生历史编辑语义。
 完整区域管理与 `206` 仍 `deferred`，公网分类源、真实 CN 数据、arm64、
 可信发布、真实宿主及最终目的过滤待适用验收。
 
+#### 5B.3f Direct/Block CSV 管理入口
+
+功能签名提交 `93fce518`。补齐菜单直接输入规则的便利性，CLI `--direct-domains <CSV>` 与
+`--block-domains <CSV>` 复用 `dockerSocks5DomainsNormalize` 和现有专项事务，
+只创建或替换 `.routing.direct/block.domains`，不改 Schema、marker 或核心生成器。
+去首尾空白、转小写、按首次出现去重，裸域名补 `domain:`；
+四类 matcher、1–256 条唯一规则和写前校验沿用已有合同，不联网推断分类。
+输入空项、非法 matcher 或去重后超过上限返回 `2`，不进入 preflight 或部署锁。
+
+菜单 `17` 的 `10/12` 明确为整组替换，接受 CSV、`0` 返回，
+取消、EOF 与空输入不派发编辑，非法输入失败后留在菜单。
+原 `--direct/--block <root 私有 JSON>` 和关闭动作保留；
+CSV、JSON、关闭、其它专项互斥，普通 `--spec` 仍冻结 routing。
+Docker 不累加原生历史规则，不把这一便利性项宣称为完整逐条编辑或冲突检测。
+
+Linux amd64 定向路由合同 `163.872` 秒、入口 `164.826` 秒通过，证据
+`.tmp-regression-docker-11215270948e42db9bf8a9bdc4457674/`；
+菜单真实 PTY `35.816` 秒、入口 `36.714` 秒通过，证据
+`.tmp-regression-docker-752d7e8633834556a2126635e508e019/`。
+同一最终源码快照完整 Docker 合同 `33/33`、`233.843` 秒通过
+（入口 `234.689` 秒、Jobs `6`、排队 `384 ms`），证据
+`.tmp-regression-docker-e5279434d10d4a9dad3f5631a5035800/`；
+ci `36.505` 秒、入口 `37.412` 秒、Jobs `3`、排队 `210391 ms` 通过，证据
+`.tmp-regression-docker-8f80f8afe25a4c3ea70ef42629ef9056/`，均实际执行、未命中缓存。
+复用同一工具镜像与长任务优先调度，三槽预算未扩大；此次 case 时长有正常波动，
+不将相对前轮 `243.989` 秒的差异另宣称为代码优化收益。
+
+合同覆盖四类 matcher、大小写/空白/首次出现顺序、去重后的 `256/257` 边界，
+非法组合、普通 import 冻结、整组替换与其它子项保护、健康失败和 INT/TERM 完整恢复。
+独立生产只读复审无 P1/P2，嵌入 Python AST、JSON、PowerShell AST、
+diff 及原有 Shell 门槛通过。之后仅更新验收文字，不重复已通过完整回归。
+核心流量、优先级和四类 matcher 不变，不重复已覆盖的双核心真实路由全矩阵。
+合同使用非空本地 links 对照，
+其已发布订阅目录为空，不宣称新增非空 token 验收。
+完成目录源码副本清理，日志/result 和共享索引保留；其它任务临时文件不动。
+完整 `206`、区域策略、公网分类资源、arm64 和真实宿主仍待验。
+
 #### 5B.4a IPv6 域名出站与受管网络
 
 独立 v3 `.routing.ipv6` 保存 `{mode:"selective|global",domains:[...]}`，
