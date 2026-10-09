@@ -2522,6 +2522,8 @@ Fail2ban 1.1.0），只读挂载当前生成配置及入口，未重建或发布
 未配置、停机、归属或配置漂移返回 `15`，底层执行失败保留非零返回码。
 IPv4、IPv6 及 IPv4 嵌入 IPv6 保留输入原文；拒绝前导零 IPv4、CIDR、zone 和选项。
 取消、EOF、后端失败及信号沿用现有菜单清理。
+入口不读取 Fail2ban 进程已加载的运行时 action；管理员在容器内通过
+`fail2ban-client set` 改写后的状态不在本项保证范围，后续宿主完整管理仍需补充。
 
 新增 `docker-fail2ban-real` 定向入口复用原隔离 action 夹具与当前源码快照，
 只离线传入已有 net 镜像，不重建镜像或挂载宿主 Socket；
@@ -2529,6 +2531,44 @@ IPv4、IPv6 及 IPv4 嵌入 IPv6 保留输入原文；拒绝前导零 IPv4、CID
 它不进入普通合同清单，真实内核动作必须显式执行。
 本项不解决旧状态资源归属、真实客户端来源及新启用流程，
 不把维护子集作为完整 5C 或宿主重启/卸载验收。
+
+本地验收（2026-10-10，Linux amd64）：
+
+| 检查 | 结果 / 秒 | 证据目录 |
+| --- | --- | --- |
+| `docker-menu`，Jobs 2 | 39.271 / 入口 40.248 | `.tmp-regression-docker-9fba0d8a91c9430090c114da50e5173d` |
+| `docker-phase4`，Jobs 2 | 30.118 / 入口 31.124 | `.tmp-regression-docker-ae0ec3d9ea4b46a6905d98e87ebc0a48` |
+| `docker-fail2ban-real`，Jobs 2 | 43.274 / 入口 44.177 | `.tmp-regression-docker-b7ba712951aa452bbebacd26a2130cf5` |
+| 架构保护后的隔离实测，Jobs 2 | 45.052 / 入口 45.971 | `.tmp-regression-docker-3fa3d5f5fc084eb1a598a1e219ee7ad1` |
+| `docker-contracts`，Jobs 6 | 33/33，264.100 / 入口 265.000 | `.tmp-regression-docker-76d0002baab04aa6b8c78381070fc51c` |
+| 原生 `core-safety-rollback`，Jobs 2 | 7.855 / 入口 8.731 | `.tmp-regression-docker-5930cc0812f349ea8dd29df5f1dad7df` |
+| 原生 `core-install-signal-rollback`，Jobs 2 | 26.419 / 入口 27.406 | `.tmp-regression-docker-09ddb6383a104a9aa346b7ffe1487acc` |
+| 修复后的 `ci`，Jobs 3 | 44.653 / 入口 45.573 | `.tmp-regression-docker-fb30399ca65a40ac9873c5702681a632` |
+
+复用工具镜像 `sha256:3a790074c74a19bd40e6c5fdeeebcdba5ae230548f057ca4ca1d40f49435ce55`；
+net 实测镜像 `padm-local/padm-net:control-4c4b`，
+ID/digest `sha256:69103244783b8f89bca22cdd2f65bb06d3dec15858b2d218ed8ced0029e9a9e8`，
+已核对为 `linux/amd64`。完整合同源码内容摘要
+`4EBD8379D62D55CAA8B345C33B6A61B602371E9F0D016F66930F00141BA045B9`，
+之后只补架构 guard 和并行原生修复，最终 CI 内容摘要
+`A33AB195D4A39380F35CC4ADCF3F6F31633C0D044604A087C3919E5D7B8EA02A`；
+不把不同源码快照宣称为相同输入，全部未命中缓存。
+
+初次 phase4 夹具缺新增安全字段、实测 wrapper 换行语法错误均已修正并重跑，
+失败证据分别保留在 `.tmp-regression-docker-5cd24be89770491393dba6427878cc13`
+和 `.tmp-regression-docker-87085d1bdb79469e912c2e34942ba586`。
+集中 CI 首次在并行原生新调用路径遇到未初始化 `release`，
+Geo 故障夹具又误匹配备份阶段；证据
+`.tmp-regression-docker-a30abcacf8ad43199dbe32a23a473529` 保留。
+顺手修复共享启动注册 get/set/restore 的空值访问，并把 Geo 注入限制在真实目标，
+保留正常恢复、恢复失败和信号断言；未回退其它任务已提交的改动。
+8 个 Docker Shell 加 2 个原生 Shell 的 Linux Bash/ShellCheck error、
+PowerShell AST、实际 AST guard 的 6/6 平台判断及 diff 检查通过。
+独立复审的 P2 镜像架构缺口已补拒绝保护，不放宽原生架构约定。
+本次未增加并发预算；完成回归的源码归档/清单和检查脚本已清理，
+日志/result/共享镜像缓存保留，不动其它任务临时文件。
+功能 `c66875c1`、架构保护 `05af2d4a`、原生顺手修复 `3257d230`
+均为本地 SSH 签名提交，签名 `G`，未推送。
 
 ## 第六步：发布与完整验收
 
