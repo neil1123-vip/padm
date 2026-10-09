@@ -20,6 +20,7 @@ docs/
 
 # Local test and runtime artifacts
 .tmp-*/
+/.tmp-*.md
 *.tmp
 *.log
 
