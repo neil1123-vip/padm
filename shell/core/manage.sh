@@ -3512,7 +3512,7 @@ setXHTTPPathHost() {
     fi
     autoRead xhttp_host "请输入 XHTTP host，[回车保持 ${currentHost}]:" newHost || return 1
     newHost=${newHost:-${currentHost}}
-    if ! padmIsValidHostName "${newHost}"; then
+    if [[ -n "${newHost}" ]] && ! padmIsValidHostName "${newHost}"; then
         errorCard "host 不合法"
         return 1
     fi

@@ -673,6 +673,20 @@ runProtocolEntryConfigUpdateRegression() (
     [[ "${commits}" == 6 ]]
     before=$(<"${fixtureConfig}")
     (
+        # 空 host 是有效默认值，只改 path 时仍允许保留空值。
+        local hostVariant
+        for hostVariant in empty missing; do
+            jq --arg variant "${hostVariant}" '.inbounds[0].streamSettings.xhttpSettings |=
+                (if $variant == "empty" then .host = "" else del(.host) end)' "${fixtureConfig}" >"${root}/empty-host.json"
+            mv "${root}/empty-host.json" "${fixtureConfig}"
+            setXHTTPPathHost <<< $'/empty-host\n'
+            jq -e '.inbounds[0].streamSettings.xhttpSettings | .path == "/empty-host" and .host == ""' "${fixtureConfig}" >/dev/null
+        done
+        printf '%s\n' "${before}" >"${fixtureConfig}"
+        regressionExpectStatus 1 setXHTTPPathHost <<< $'/bad-host\nbad:host'
+        [[ "$(<"${fixtureConfig}")" == "${before}" ]]
+    )
+    (
         # 只修改一个连接参数时，另一个回车沿用现有值；恢复默认值由独立入口负责。
         setTuicConnectionParams <<< $'500ms\n'
         jq -e '.inbounds[0] | .auth_timeout == "500ms" and .heartbeat == "15s"' "${fixtureConfig}" >/dev/null
