@@ -1352,22 +1352,6 @@ runPortHoppingWithoutPersistentRegression() (
     }
     autoRead() {
         case "$1" in
-        hysteria_port)
-            inputCount=$((inputCount + 1))
-            if [[ "${inputCount}" == "1" ]]; then
-                printf -v "$3" '%s' '12abc'
-            else
-                printf -v "$3" '%s' '16295'
-            fi
-            ;;
-        tuic_port)
-            inputCount=$((inputCount + 1))
-            if [[ "${inputCount}" == "1" ]]; then
-                printf -v "$3" '%s' '12abc'
-            else
-                printf -v "$3" '%s' '26451'
-            fi
-            ;;
         port_hopping_range)
             inputCount=$((inputCount + 1))
             if [[ "${rangeMode}" == "single" && "${inputCount}" == "1" ]]; then
@@ -1377,6 +1361,9 @@ runPortHoppingWithoutPersistentRegression() (
             else
                 printf -v "$3" '%s' '33000-33002'
             fi
+            ;;
+        port_hopping_menu)
+            printf -v "$3" '%s' "${hoppingMenuChoice:-2}"
             ;;
         hysteria_download_speed)
             downloadCount=$((downloadCount + 1))
@@ -1504,21 +1491,6 @@ EOF
     [[ "${hysteria2ObfsType}" == salamander && "${hysteria2ObfsPassword}" == existing-secret ]]
 
     inputCount=0
-    initHysteriaPort
-    grep -q '端口不合法' "${warnLog}"
-    ! grep -q 'allow:12abc' "${warnLog}"
-    grep -q 'allow:16295:tcp' "${warnLog}"
-    grep -q 'allow:16295:udp' "${warnLog}"
-
-    inputCount=0
-    : >"${warnLog}"
-    initTuicPort
-    grep -q '端口不合法' "${warnLog}"
-    ! grep -q 'allow:12abc' "${warnLog}"
-    grep -q 'allow:26451:tcp' "${warnLog}"
-    grep -q 'allow:26451:udp' "${warnLog}"
-
-    inputCount=0
     : >"${warnLog}"
     portHoppingStart=
     portHoppingEnd=
@@ -1526,7 +1498,7 @@ EOF
     [[ -s "${natStateFile}" ]]
     padmFirewallStateHas 'forward:iptables:hysteria2:33000:33002:16295'
     grep -q '范围不合法' "${warnLog}"
-    [[ "${allowCalls}" == "5" ]]
+    [[ "${allowCalls}" == "1" ]]
     grep -Eq '端口跳跃持久化|未检测到 netfilter-persistent' "${warnLog}"
 
     rangeMode=single
@@ -1953,9 +1925,10 @@ EOF
         local firewalldActive=true
         local removeFailurePort=
         local removeMasqueradeFailure=false
+        local hoppingMenuChoice=2 singBoxHysteria2Port=16295
         local rc
         local port spec
-        local -A forwardPorts=()
+        local -A fixtureForwardPorts=()
         PADM_FIREWALL_STATE_FILE="${TMP_DIR}/port-hopping-firewall.state"
         rm -f "${PADM_FIREWALL_STATE_FILE}"
         : >"${firewalldLog}"
@@ -1968,6 +1941,13 @@ EOF
                 printf 'Active: active (running)\n'
             fi
             [[ "${firewalldActive}" == "true" ]]
+        }
+        command() {
+            [[ "$*" != "-v iptables" && "$*" != "-v netfilter-persistent" ]] || return 1
+            builtin command "$@"
+        }
+        refreshManagedProtocolSubscriptions() {
+            printf 'refresh:%s\n' "$1" >>"${firewalldLog}"
         }
         sudo() { "$@"; }
         firewall-cmd() {
@@ -1987,11 +1967,11 @@ EOF
             --query-forward-port=*)
                 spec=${1#--query-forward-port=port=}
                 port=${spec%%:*}
-                [[ -n "${forwardPorts[${port}]:-}" ]]
+                [[ -n "${fixtureForwardPorts[${port}]:-}" ]]
                 ;;
             --reload) return 0 ;;
             --list-forward-ports)
-                for port in "${!forwardPorts[@]}"; do
+                for port in "${!fixtureForwardPorts[@]}"; do
                     printf 'port=%s:proto=udp:toport=16295\n' "${port}"
                 done
                 ;;
@@ -2007,14 +1987,14 @@ EOF
             --add-forward-port=*)
                 spec=${1#--add-forward-port=port=}
                 port=${spec%%:*}
-                forwardPorts[${port}]=1
+                fixtureForwardPorts[${port}]=1
                 ;;
             --remove-forward-port=*)
                 spec=${1#--remove-forward-port=port=}
                 port=${spec%%:*}
                 [[ "${port}" != "${removeFailurePort}" ]] || { removeFailurePort=; return 1; }
-                [[ -n "${forwardPorts[${port}]:-}" ]] || return 1
-                unset 'forwardPorts['"${port}"']'
+                [[ -n "${fixtureForwardPorts[${port}]:-}" ]] || return 1
+                unset 'fixtureForwardPorts['"${port}"']'
                 ;;
             esac
         }
@@ -2043,33 +2023,36 @@ EOF
         addPortHopping hysteria2 16295
         removeMasqueradeFailure=true
         regressionExpectStatus 1 deletePortHoppingRules hysteria2 33000 33002 16295
-        [[ "${#forwardPorts[@]}" == 0 && "${masquerade}" == true ]]
+        [[ "${#fixtureForwardPorts[@]}" == 0 && "${masquerade}" == true ]]
         padmFirewallStateHas 'forward:firewalld:udp:33000:33002:16295:owned=33000,33001,33002'
         padmFirewallStateHas masquerade:firewalld
         removeMasqueradeFailure=false
         deletePortHoppingRules hysteria2 "" "" 16295
         [[ "${masquerade}" == false && ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
 
-        forwardPorts[33002]=1
+        fixtureForwardPorts[33002]=1
         masquerade=true
         inputCount=1
         addPortHopping hysteria2 16295
         padmFirewallStateHas 'forward:firewalld:udp:33000:33002:16295:owned=33000,33001'
         deletePortHoppingRules hysteria2 33000 33002 16295
-        [[ -n "${forwardPorts[33002]:-}" ]]
-        [[ "${#forwardPorts[@]}" == "1" ]]
+        [[ -n "${fixtureForwardPorts[33002]:-}" ]]
+        [[ "${#fixtureForwardPorts[@]}" == "1" ]]
         [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
-        unset 'forwardPorts[33002]'
+        unset 'fixtureForwardPorts[33002]'
         masquerade=false
 
         inputCount=1
         addPortHopping hysteria2 16295
         firewalldActive=false
-        deletePortHoppingRules hysteria2 33000 33002 16295
-        [[ "${#forwardPorts[@]}" == "0" ]]
+        iptablesSaveShouldFail=true
+        portHoppingMenu hysteria2
+        [[ "${#fixtureForwardPorts[@]}" == "0" ]]
         [[ "${masquerade}" == false ]]
         grep -q '^offline:' "${firewalldLog}"
+        grep -qx 'refresh:hysteria2 端口跳跃' "${firewalldLog}"
         [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
+        iptablesSaveShouldFail=false
         firewalldActive=true
 
         inputCount=1
@@ -2077,8 +2060,15 @@ EOF
         removeFailurePort=33001
         regressionExpectStatus 1 deletePortHoppingRules hysteria2 33000 33002 16295 >/dev/null 2>&1
         padmFirewallStateHas 'forward:firewalld:udp:33000:33002:16295:owned=33000,33001,33002'
-        deletePortHoppingRules hysteria2 33001 33001 16295
-        [[ "${#forwardPorts[@]}" == "0" ]]
+        hoppingMenuChoice=1
+        regressionExpectStatus 1 portHoppingMenu hysteria2 >/dev/null 2>&1
+        hoppingMenuChoice=3
+        regressionExpectStatus 1 portHoppingMenu hysteria2 >/dev/null 2>&1
+        [[ "${#fixtureForwardPorts[@]}" == 1 && -n "${fixtureForwardPorts[33001]:-}" ]]
+        hoppingMenuChoice=2
+        portHoppingMenu hysteria2
+        [[ "${#fixtureForwardPorts[@]}" == "0" ]]
+        [[ "$(grep -c '^refresh:hysteria2 端口跳跃$' "${firewalldLog}")" == 2 ]]
         grep -qx 'deny:33000:33002:udp' "${firewalldLog}"
         [[ "${masquerade}" == "false" ]]
         [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
@@ -2086,9 +2076,23 @@ EOF
         inputCount=1
         addPortHopping hysteria2 16295
         cleanupPadmFirewallRules
-        [[ "${#forwardPorts[@]}" == "0" ]]
+        [[ "${#fixtureForwardPorts[@]}" == "0" ]]
         [[ "${masquerade}" == "false" ]]
         [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
+
+        # 持久归属完整但运行态只有部分规则时，删除后的清理失败仍需刷新订阅。
+        fixtureForwardPorts[33001]=1
+        padmFirewallStateAdd 'forward:firewalld:udp:33000:33002:16295:owned=33000,33001,33002'
+        denyPort() {
+            printf 'deny-failure:%s:%s\n' "$1" "${2:-tcp}" >>"${firewalldLog}"
+            return 1
+        }
+        : >"${firewalldLog}"
+        hoppingMenuChoice=2
+        regressionExpectStatus 1 portHoppingMenu hysteria2 >/dev/null 2>&1
+        [[ "${#fixtureForwardPorts[@]}" == "0" ]]
+        grep -qx 'refresh:hysteria2 端口跳跃' "${firewalldLog}"
+        padmFirewallStateHas 'forward:firewalld:udp:33000:33002:16295:owned=33000,33001,33002'
     )
 )
 
@@ -5298,13 +5302,13 @@ JSON
 {"inbounds":[{"type":"vless","listen_port":20888,"users":[{"uuid":"22222222-2222-2222-2222-222222222222","name":"sub_grpc-VLESS_Reality_gPRC"}],"tls":{"server_name":"nodejs.org","reality":{"private_key":"grpc-private-key","handshake":{"server":"nodejs.org","server_port":443}}},"transport":{"type":"grpc","service_name":"grpc"}}]}
 JSON
         cat >"${singBoxRoot}/10_naive_inbounds.json" <<'JSON'
-{"inbounds":[{"type":"naive","listen_port":33577,"users":[{"username":"sub_naive-singbox_naive","password":"naive-pass"}]}]}
+{"inbounds":[{"type":"naive","listen_port":33577,"users":[{"username":"sub_naive-singbox_naive","password":"naive-pass"}],"tls":{"server_name":"naive.example.com"}}]}
 JSON
         cat >"${singBoxRoot}/11_VMess_HTTPUpgrade_inbounds.json" <<'JSON'
 {"inbounds":[{"type":"vmess","listen_port":31306,"users":[{"uuid":"33333333-3333-3333-3333-333333333333","name":"sub_httpupgrade-VMess_HTTPUpgrade","alterId":0}],"transport":{"type":"httpupgrade","path":"/padmhttp"}}]}
 JSON
         cat >"${singBoxRoot}/13_anytls_inbounds.json" <<'JSON'
-{"inbounds":[{"type":"anytls","listen_port":40251,"users":[{"name":"sub_anytls-anytls","password":"anytls-pass"}]}]}
+{"inbounds":[{"type":"anytls","listen_port":40251,"users":[{"name":"sub_anytls-anytls","password":"anytls-pass"}],"tls":{"server_name":"anytls.example.com"}}]}
 JSON
         local fakeXray="${root}/etc/padm/xray/xray"
         mkdir -p "$(dirname "${fakeXray}")"
@@ -5362,8 +5366,11 @@ EOF
 
         grep -q 'default:sub_grpc:' "${captureLog}"
         grep -q 'default:sub_naive:' "${captureLog}"
+        grep -q 'default:sub_naive:.*@naive.example.com:33577' "${captureLog}"
         grep -q 'default:sub_httpupgrade:' "${captureLog}"
         grep -q 'default:sub_anytls:' "${captureLog}"
+        grep -q 'default:sub_anytls:.*@anytls.example.com:40251' "${captureLog}"
+        grep -q 'default:sub_anytls:.*sni=anytls.example.com' "${captureLog}"
         grep -q 'default:sub_xray_grpc:.*@entry.example.com:17694' "${captureLog}"
         grep -q 'default:sub_xray_grpc:.*sni=www.cloudflare.com' "${captureLog}"
         grep -q 'default:sub_trojan_grpc:trojan://trojan-grpc-pass@cdn.example.com:443' "${captureLog}"
@@ -5398,6 +5405,101 @@ EOF
             httpupgradeLink=$(grep '^default:sub_httpupgrade:vmess://' "${captureLog}" | head -n 1)
             httpupgradeJson=$(printf '%s' "${httpupgradeLink#default:sub_httpupgrade:vmess://}" | base64 -d)
             jq -e '.add == "upgrade.example.com" and .sni == "upgrade.example.com"' <<<"${httpupgradeJson}" >/dev/null
+            : >"${captureLog}"
+            showAnyTlsAccounts >/dev/null
+            grep -q 'default:sub_anytls:.*@anytls.example.com:40251' "${captureLog}"
+            grep -q 'singbox:sub_anytls:.*"server_name":"anytls.example.com"' "${captureLog}"
+            : >"${captureLog}"
+            showNaiveAccounts >/dev/null
+            grep -q 'default:sub_naive:.*@naive.example.com:33577' "${captureLog}"
+            [[ -z "${currentHost}" ]]
+        )
+        (
+            # 无独立 TLS 域名的旧配置仍使用已有入口。
+            local savedAnyTlsConfig
+            savedAnyTlsConfig=$(<"${singBoxRoot}/13_anytls_inbounds.json")
+            currentHost=legacy.example.com
+            jq 'del(.inbounds[0].tls.server_name)' "${singBoxRoot}/13_anytls_inbounds.json" >"${root}/legacy-anytls.json"
+            mv "${root}/legacy-anytls.json" "${singBoxRoot}/13_anytls_inbounds.json"
+            : >"${captureLog}"
+            showAnyTlsAccounts >/dev/null
+            grep -q 'default:sub_anytls:.*@legacy.example.com:40251' "${captureLog}"
+            printf '{invalid\n' >"${singBoxRoot}/13_anytls_inbounds.json"
+            regressionExpectStatus 1 showAnyTlsAccounts >/dev/null 2>&1
+            printf '%s\n' "${savedAnyTlsConfig}" >"${singBoxRoot}/13_anytls_inbounds.json"
+        )
+        (
+            # 无独立 TLS 域名的 Naive 旧配置仍使用已有入口。
+            local savedNaiveConfig
+            savedNaiveConfig=$(<"${singBoxRoot}/10_naive_inbounds.json")
+            currentHost=legacy.example.com
+            jq 'del(.inbounds[0].tls.server_name)' "${singBoxRoot}/10_naive_inbounds.json" >"${root}/legacy-naive.json"
+            mv "${root}/legacy-naive.json" "${singBoxRoot}/10_naive_inbounds.json"
+            : >"${captureLog}"
+            showNaiveAccounts >/dev/null
+            grep -q 'default:sub_naive:.*@legacy.example.com:33577' "${captureLog}"
+            printf '{invalid\n' >"${singBoxRoot}/10_naive_inbounds.json"
+            regressionExpectStatus 1 showNaiveAccounts >/dev/null 2>&1
+            printf '%s\n' "${savedNaiveConfig}" >"${singBoxRoot}/10_naive_inbounds.json"
+        )
+        (
+            # Naive/AnyTLS 的 users 读取和逐账号输出失败必须穿过内部管道返回。
+            set +o pipefail
+            local functionName configName protocolHost userJson variant
+            currentInstallProtocolType=",5,4,"
+            coreInstallType=1
+            singBoxConfigPath="${singBoxRoot}/"
+            singBoxNaivePort=33577
+            singBoxAnyTLSPort=40251
+            for functionName in showNaiveAccounts showAnyTlsAccounts; do
+                if [[ "${functionName}" == showNaiveAccounts ]]; then
+                    configName=10_naive_inbounds.json
+                    protocolHost=naive.example.com
+                    userJson='{"username":"sub_naive","password":"naive-pass"}'
+                else
+                    configName=13_anytls_inbounds.json
+                    protocolHost=anytls.example.com
+                    userJson='{"name":"sub-anytls","password":"anytls-pass"}'
+                fi
+                # TLS 域名只接受字符串，缺失值和空串保留旧入口回退。
+                currentHost=legacy.example.com
+                for variant in true false 123 '[]' '{}'; do
+                    jq -n --argjson host "${variant}" --argjson user "${userJson}" \
+                        '{inbounds:[{tls:{server_name:$host},users:[$user]}]}' >"${singBoxRoot}/${configName}"
+                    : >"${captureLog}"
+                    regressionExpectStatus 1 "${functionName}" >/dev/null 2>&1
+                    [[ ! -s "${captureLog}" ]]
+                done
+                for variant in null '""'; do
+                    jq -n --argjson host "${variant}" --argjson user "${userJson}" \
+                        '{inbounds:[{tls:{server_name:$host},users:[$user]}]}' >"${singBoxRoot}/${configName}"
+                    : >"${captureLog}"
+                    "${functionName}" >/dev/null
+                    grep -q 'default:.*@legacy.example.com:' "${captureLog}"
+                done
+                for variant in missing null object; do
+                    case "${variant}" in
+                    missing) jq -n --arg host "${protocolHost}" '{inbounds:[{tls:{server_name:$host}}]}' ;;
+                    null) jq -n --arg host "${protocolHost}" '{inbounds:[{tls:{server_name:$host},users:null}]}' ;;
+                    object) jq -n --arg host "${protocolHost}" '{inbounds:[{tls:{server_name:$host},users:{}}]}' ;;
+                    esac >"${singBoxRoot}/${configName}"
+                    : >"${captureLog}"
+                    regressionExpectStatus 1 "${functionName}" >/dev/null 2>&1
+                    [[ ! -s "${captureLog}" ]]
+                done
+                jq -n --arg host "${protocolHost}" '{inbounds:[{tls:{server_name:$host},users:[]}]}' >"${singBoxRoot}/${configName}"
+                : >"${captureLog}"
+                "${functionName}" >/dev/null
+                [[ ! -s "${captureLog}" ]]
+
+                jq -n --arg host "${protocolHost}" --argjson user "${userJson}" \
+                    '{inbounds:[{tls:{server_name:$host},users:[$user]}]}' >"${singBoxRoot}/${configName}"
+                appendDefaultSubscribeLine() { printf '%s\n' failed-write >>"${captureLog}"; return 1; }
+                : >"${captureLog}"
+                regressionExpectStatus 1 "${functionName}" >/dev/null 2>&1
+                [[ "$(<"${captureLog}")" == failed-write ]]
+                appendDefaultSubscribeLine() { printf 'default:%s:%s\n' "$1" "$2" >>"${captureLog}"; }
+            done
         )
         (
             # 主配置读取或输出失败不能被合法辅助配置覆盖，且不依赖调用方 pipefail。
@@ -5588,9 +5690,6 @@ runTrojanFallbackSubscribeUsesTlsEntryRegression() {
 JSON
         cat >"${xrayRoot}/02_VLESS_TCP_inbounds.json" <<'JSON'
 {"inbounds":[{"port":443,"protocol":"vless","settings":{"clients":[{"id":"11111111-1111-4111-8111-111111111111","email":"fronting"}],"fallbacks":[{"dest":31296,"xver":1}]},"streamSettings":{"network":"tcp","security":"tls","tlsSettings":{"certificates":[{"certificateFile":"/etc/padm/tls/tls.example.com.crt","keyFile":"/etc/padm/tls/tls.example.com.key"}]}}}]}
-JSON
-        cat >"${xrayRoot}/02_dokodemodoor_inbounds_443_default.json" <<'JSON'
-{"inbounds":[{"port":443,"settings":{"port":443}}]}
 JSON
         printf 'crt\n' >"${tlsRoot}/tls.example.com.crt"
         printf 'key\n' >"${tlsRoot}/tls.example.com.key"

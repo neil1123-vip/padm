@@ -122,12 +122,32 @@ serializeVlessRealityGrpcLink() {
 xrayRealityXHTTPSetting() {
     local key=$1
     local fallback=$2
-    local configFile value
-    configFile="${configPath:-/etc/padm/xray/conf/}12_VLESS_XHTTP_inbounds.json"
-    if [[ -f "${configFile}" ]]; then
-        value=$(jq -r ".inbounds[0].streamSettings.xhttpSettings.${key} // empty" "${configFile}" 2>/dev/null)
+    local xrayConfigDir configFile value
+    xrayConfigDir="${configPath:-${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}}"
+    configFile="${PADM_VLESS_XHTTP_CONFIG_FILE:-${xrayConfigDir%/}/12_VLESS_XHTTP_inbounds.json}"
+    if [[ ! -e "${configFile}" && ! -L "${configFile}" ]]; then
+        printf '%s' "${fallback}"
+        return 0
     fi
-    printf '%s' "${value:-${fallback}}"
+    [[ -f "${configFile}" && -r "${configFile}" ]] || return 1
+    value=$(jq -sr --arg key "${key}" --arg fallback "${fallback}" '
+        if length != 1 or (.[0] | type) != "object" then error("invalid configuration") else .[0] end |
+        .inbounds[0].streamSettings.xhttpSettings as $settings |
+        if $settings == null then
+            $fallback
+        elif ($settings | type) != "object" then
+            error("invalid xhttpSettings")
+        elif (($settings | has($key)) | not) then
+            $fallback
+        elif ($settings[$key] | type) != "string" then
+            error("invalid xhttp setting")
+        elif any($settings[$key] | explode[]; . < 32 or . == 127) then
+            error("invalid xhttp setting")
+        else
+            $settings[$key]
+        end
+    ' "${configFile}" 2>/dev/null) || return 1
+    printf '%s' "${value}"
 }
 
 serializeVlessRealityXHTTPLink() {
@@ -139,7 +159,7 @@ serializeVlessRealityXHTTPLink() {
     local publicKey=$6
     local email=$7
     local encryption=${8:-none}
-    local host=${9:-${sni}}
+    local host=${9-${sni}}
     local mode=${10:-}
     local pqv=${11:-}
     local modeParam=

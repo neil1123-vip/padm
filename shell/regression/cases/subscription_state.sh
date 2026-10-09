@@ -114,7 +114,8 @@ runReadInstallProtocolTypeScanFailureRegression() (
     for pipefailMode in off on; do
         set +o pipefail
         [[ "${pipefailMode}" != on ]] || set -o pipefail
-        for failure in find sort; do
+        for failure in find sort json; do
+            [[ "${failure}" != json ]] || printf '{invalid\n' >"${configPath}02_VLESS_TCP_inbounds.json"
             PADM_INSTALL_STATUS_READY=1
             currentInstallProtocolType=,27,23,
             regressionExpectStatus 1 readInstallProtocolType || return 1
@@ -134,10 +135,25 @@ runReadInstallProtocolTypeScanFailureRegression() (
             regressionExpectStatus 1 refreshPublishedSubscriptions '[]' || return 1
             [[ ! -e "${actions}" && "${PADM_INSTALL_STATUS_READY}" == 0 ]] || return 1
         done
+        printf '%s\n' '{"inbounds":[{"port":443}]}' >"${configPath}02_VLESS_TCP_inbounds.json"
         failure=
         readInstallProtocolType || return 1
         [[ "${PADM_INSTALL_STATUS_READY}" == 1 ]] || return 1
         currentProtocolHas 27 && currentProtocolHas 23 || return 1
+        (
+            local configPath="${root}/empty/" singBoxConfigPath="${root}/auxiliary/" value
+            unset -f find
+            mkdir -p "${configPath}" "${singBoxConfigPath}" || return 1
+            printf '%s\n' '{"inbounds":[{"listen_port":8443}]}' >"${singBoxConfigPath}13_anytls_inbounds.json"
+            readInstallProtocolType || return 1
+            [[ "${PADM_INSTALL_STATUS_READY}" == 1 ]] && currentProtocolHas 4 || return 1
+            for value in '' '{}' '[]' '{"inbounds":{}}' '{"inbounds":[]} {"inbounds":[]}'; do
+                printf '%s\n' "${value}" >"${singBoxConfigPath}13_anytls_inbounds.json"
+                PADM_INSTALL_STATUS_READY=1
+                regressionExpectStatus 1 readInstallProtocolType || return 1
+                [[ "${PADM_INSTALL_STATUS_READY}" == 0 ]] || return 1
+            done
+        ) || return 1
     done
 )
 

@@ -263,6 +263,7 @@ readInstallProtocolType() {
     fi
     while IFS= read -r row; do
         [[ -n "${row}" ]] || continue
+        jq -se 'length == 1 and (.[0] | type == "object" and (.inbounds | type == "array"))' "${row}" >/dev/null 2>&1 || return 1
         row=${row%.json}
         local protocolId=
         protocolId=$(protocolCapabilityIdByConfigFile "${row##*/}.json" 2>/dev/null || true)
@@ -441,6 +442,7 @@ readInstallProtocolType() {
             [[ -n "${protocolId}" ]] || continue
             configFile=$(protocolCapabilityMeta "${protocolId}" config_file 2>/dev/null || true)
             [[ -n "${configFile}" && -f "${singBoxConfigPath}${configFile}" ]] || continue
+            jq -se 'length == 1 and (.[0] | type == "object" and (.inbounds | type == "array"))' "${singBoxConfigPath}${configFile}" >/dev/null 2>&1 || return 1
             protocolStateAdd "${protocolId}"
         done < <(protocolCapabilityIdsByProjectCore sing-box | tr ',' '\n')
         if [[ -f "${singBoxConfigPath}06_hysteria2_inbounds.json" ]]; then

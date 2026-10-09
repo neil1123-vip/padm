@@ -575,6 +575,68 @@ grep -qx "      mode: packet-up" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhtt
 ! grep -q 'flow: xtls-rprx-vision' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp"
 ! grep -q '&flow=xtls-rprx-vision' "${SUBSCRIBE_CAPTURE_DIR}/screen.log"
 
+(
+    local configPath="${TMP_DIR}/xhttp-subscription-no-slash"
+    local PADM_XRAY_CONF_DIR="${configPath}" PADM_VLESS_XHTTP_CONFIG_FILE=
+    local xhttpOverrideFile="${TMP_DIR}/xhttp-subscription-override.json"
+    mkdir -p "${configPath}"
+    cat >"${configPath}/12_VLESS_XHTTP_inbounds.json" <<'EOF'
+{"inbounds":[{"streamSettings":{"xhttpSettings":{"host":"noslash.example.com","path":"/noslash","mode":"stream-up"}}}]}
+EOF
+    local variant
+    for variant in no-slash directory-override; do
+        [[ "${variant}" != directory-override ]] || configPath=
+        defaultBase64Code vlessXHTTP 443 "user-a-xhttp-${variant}" uuid-a "cdn.example.com" "/ignored"
+        grep -qF 'host=noslash.example.com' "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-${variant}"
+        grep -qF '&path=/noslash&mode=stream-up' "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-${variant}"
+    done
+
+    cat >"${xhttpOverrideFile}" <<'EOF'
+{"inbounds":[{"streamSettings":{"xhttpSettings":{"host":"override.example.com","path":"/override","mode":"packet-up"}}}]}
+EOF
+    cat >"${PADM_XRAY_CONF_DIR}/12_VLESS_XHTTP_inbounds.json" <<'EOF'
+{"inbounds":[{"streamSettings":{"xhttpSettings":{"host":"wrong.example.com","path":"/wrong","mode":"auto"}}}]}
+EOF
+    PADM_VLESS_XHTTP_CONFIG_FILE="${xhttpOverrideFile}"
+    defaultBase64Code vlessXHTTP 443 user-a-xhttp-override uuid-a "cdn.example.com" "/ignored"
+    grep -qF 'host=override.example.com' "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-override"
+    grep -qF '&path=/override&mode=packet-up' "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-override"
+)
+
+(
+    local configPath="${TMP_DIR}/xhttp-subscription-empty-host/"
+    local configFile="${configPath}12_VLESS_XHTTP_inbounds.json" key value caseIndex=0 account
+    mkdir -p "${configPath}"
+    printf '%s\n' '{"inbounds":[{"streamSettings":{"xhttpSettings":{"host":"","path":"/empty-host","mode":"auto"}}}]}' >"${configFile}"
+    defaultBase64Code vlessXHTTP 443 user-a-xhttp-empty-host uuid-a "cdn.example.com" "/ignored"
+    grep -qF '&host=&fp=chrome' "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-empty-host"
+    grep -qx '      host: ""' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp-empty-host"
+    [[ "$(xrayRealityXHTTPSetting host fallback.example.com)" == "" ]]
+    printf '%s\n' '{"inbounds":[{"streamSettings":{"xhttpSettings":{"path":"/fallback"}}}]}' >"${configFile}"
+    defaultBase64Code vlessXHTTP 443 user-a-xhttp-missing-host uuid-a "cdn.example.com" "/ignored"
+    grep -qF '&host=www.microsoft.com&' "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-missing-host"
+    [[ "$(xrayRealityXHTTPSetting mode auto)" == auto ]]
+    for key in host path mode; do
+        for value in null 123 false '[]' '{}'; do
+            caseIndex=$((caseIndex + 1))
+            account="user-a-xhttp-invalid-${key}-${caseIndex}"
+            jq -n --arg key "${key}" --argjson value "${value}" '{inbounds:[{streamSettings:{xhttpSettings:
+                ({host:"front.example.com",path:"/typed",mode:"auto"} | .[$key] = $value)}}]}' >"${configFile}"
+            regressionExpectStatus 1 xrayRealityXHTTPSetting "${key}" fallback
+            regressionExpectStatus 1 defaultBase64Code vlessXHTTP 443 "${account}" uuid-a "cdn.example.com" "/ignored"
+            [[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/default/${account}" ]]
+        done
+    done
+    printf '%s\n' '{"inbounds":[{"streamSettings":{"xhttpSettings":{"host":"front.example.com\ninvalid","path":"/typed","mode":"auto"}}}]}' >"${configFile}"
+    regressionExpectStatus 1 xrayRealityXHTTPSetting host fallback
+    printf '%s\n' '{"inbounds":[{"streamSettings":{"xhttpSettings":false}}]}' >"${configFile}"
+    regressionExpectStatus 1 xrayRealityXHTTPSetting host fallback
+    printf '%s\n' '{}' '{}' >"${configFile}"
+    regressionExpectStatus 1 xrayRealityXHTTPSetting host fallback
+    printf '{invalid-json\n' >"${configFile}"
+    regressionExpectStatus 1 xrayRealityXHTTPSetting host fallback
+)
+
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 cat >"${configPath}12_VLESS_XHTTP_inbounds.json" <<'EOF'
 {"inbounds":[{"streamSettings":{"xhttpSettings":{"host":"front.example.com","path":"/bad path","mode":"auto"}}}]}

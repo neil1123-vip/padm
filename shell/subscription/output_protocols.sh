@@ -146,17 +146,22 @@ emitVlessXHTTPSubscribeOutput() {
     if [[ -f "${xhttpConfigFile}" ]]; then
         realityMldsa65Verify=$(jq -r '.inbounds[0].streamSettings.realitySettings.mldsa65Verify // empty' "${xhttpConfigFile}") || return 1
     fi
-    path=$(xrayRealityXHTTPSetting path "${path}")
-    xhttpHost=$(xrayRealityXHTTPSetting host "${xrayVLESSRealityXHTTPSNI}")
-    xhttpMode=$(xrayRealityXHTTPSetting mode auto)
+    if ! path=$(xrayRealityXHTTPSetting path "${path}") ||
+        ! xhttpHost=$(xrayRealityXHTTPSetting host "${xrayVLESSRealityXHTTPSNI}") ||
+        ! xhttpMode=$(xrayRealityXHTTPSetting mode auto); then
+        errorCard "订阅输出生成失败" "XHTTP 配置读取失败"
+        return 1
+    fi
     if ! subscribeOutputSafeRouteValue "${path}"; then
         errorCard "订阅输出生成失败" "XHTTP path 格式不合法"
         return 1
     fi
-    if ! subscribeOutputSafeHostValue "${xhttpHost}"; then
+    if [[ -n "${xhttpHost}" ]] && ! subscribeOutputSafeHostValue "${xhttpHost}"; then
         errorCard "订阅输出生成失败" "XHTTP host 格式不合法"
         return 1
     fi
+    local xhttpHostYaml="${xhttpHost}"
+    [[ -n "${xhttpHostYaml}" ]] || xhttpHostYaml='""'
     case "${xhttpMode}" in
     auto | stream-one | packet-up | stream-up) ;;
     *)
@@ -189,7 +194,7 @@ ${mihomoEncryption:+    encryption: ${mihomoEncryption}
     servername: ${xrayVLESSRealityXHTTPSNI}
     xhttp-opts:
       path: ${path}
-      host: ${xhttpHost}
+      host: ${xhttpHostYaml}
       mode: ${xhttpMode}
     reality-opts:
       public-key: ${currentRealityXHTTPPublicKey}
@@ -547,14 +552,15 @@ EOF
 }
 
 emitNaiveSubscribeOutput() {
-    local port=$1 email=$2 id=$3 user=$6
+    local port=$1 email=$2 id=$3 add=$4 user=$6
+    local host=${add:-${currentHost}}
     subscribeOutputTitle "通用链接：Naive TLS"
     echoContent green "    NaiveProxy 适合需要 TLS 指纹抗性的场景；需要真实域名和可信证书，不是无域名 Reality 替代。\n"
 
     local encodedEmail encodedId defaultLink
     encodedEmail=$(encodeUriUserInfoComponent "${email}") || return 1
     encodedId=$(encodeUriUserInfoComponent "${id}") || return 1
-    defaultLink="naive+https://${encodedEmail}:${encodedId}@$(formatUriAuthorityHost "${currentHost}"):${port}?padding=true#${email}"
+    defaultLink="naive+https://${encodedEmail}:${encodedId}@$(formatUriAuthorityHost "${host}"):${port}?padding=true#${email}"
 
     echoContent green "    ${defaultLink}\n"
     appendDefaultSubscribeLine "${user}" "${defaultLink}"
@@ -598,32 +604,33 @@ EOF
 }
 
 emitAnyTlsSubscribeOutput() {
-    local email=$2 id=$3 user=$6
+    local email=$2 id=$3 add=$4 user=$6
+    local host=${add:-${currentHost}}
     local encodedId yamlPassword defaultLink clashMetaBlock singBoxFilter
     encodedId=$(encodeUriUserInfoComponent "${id}") || return 1
     yamlPassword=$(serializeYamlString "${id}") || return 1
-    defaultLink="anytls://${encodedId}@$(formatUriAuthorityHost "${currentHost}"):${singBoxAnyTLSPort}?peer=${currentHost}&insecure=0&sni=${currentHost}#${email}"
+    defaultLink="anytls://${encodedId}@$(formatUriAuthorityHost "${host}"):${singBoxAnyTLSPort}?peer=${host}&insecure=0&sni=${host}#${email}"
     subscribeOutputTitle "通用链接：AnyTLS"
     echoContent green "    ${defaultLink}\n"
 
     subscribeOutputTitle "格式化明文：AnyTLS"
-    echoContent green "协议类型:anytls，地址:${currentHost}，端口:${singBoxAnyTLSPort}，用户ID:${id}，传输方式:tcp，账户名:${email}\n"
+    echoContent green "协议类型:anytls，地址:${host}，端口:${singBoxAnyTLSPort}，用户ID:${id}，传输方式:tcp，账户名:${email}\n"
 
     clashMetaBlock=$(cat <<EOF
   - name: "${email}"
     type: anytls
     port: ${singBoxAnyTLSPort}
-    server: ${currentHost}
+    server: ${host}
     password: ${yamlPassword}
     client-fingerprint: chrome
     udp: true
-    sni: ${currentHost}
+    sni: ${host}
     alpn:
       - h2
       - http/1.1
 EOF
 )
-    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"anytls",server:$server,server_port:$port,password:$password,tls:{enabled:true,server_name:$sni}}' --arg tag "${email}" --arg server "${currentHost}" --argjson port "${singBoxAnyTLSPort}" --arg password "${id}" --arg sni "${currentHost}") || return 1
+    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"anytls",server:$server,server_port:$port,password:$password,tls:{enabled:true,server_name:$sni}}' --arg tag "${email}" --arg server "${host}" --argjson port "${singBoxAnyTLSPort}" --arg password "${id}" --arg sni "${host}") || return 1
 
     appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"
 

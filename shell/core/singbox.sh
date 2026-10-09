@@ -790,7 +790,34 @@ readSingBoxProtocolPort() {
             errorCard "${protocolName} 旧端口跳跃规则读取失败，已取消更换监听端口"
             return 1
         }
-        if [[ -n "${hysteria2PortHoppingStart}${tuicPortHoppingStart}" ]]; then
+        local firewallStateFile
+        firewallStateFile=$(padmFirewallStateFile) || {
+            errorCard "${protocolName} 防火墙状态读取失败，已取消更换监听端口"
+            return 1
+        }
+        if [[ -e "${firewallStateFile}" || -L "${firewallStateFile}" ]]; then
+            [[ -f "${firewallStateFile}" && -r "${firewallStateFile}" ]] || {
+                errorCard "${protocolName} 防火墙状态文件不可读，已取消更换监听端口"
+                return 1
+            }
+            awk -F: '
+                $1 == "forward" {
+                    if (!(($2 == "firewalld" && $3 == "udp") ||
+                          ($2 == "iptables" && ($3 == "hysteria2" || $3 == "tuic"))) ||
+                        $4 !~ /^[0-9]+$/ || $5 !~ /^[0-9]+$/ || $6 !~ /^[0-9]+$/ ||
+                        $4 + 0 < 1 || $4 + 0 > 65535 || $5 + 0 < 1 || $5 + 0 > 65535 ||
+                        $6 + 0 < 1 || $6 + 0 > 65535 || $4 + 0 > $5 + 0 ||
+                        ($2 == "firewalld" && NF != 6 && !(NF == 7 && $7 ~ /^owned=/)) ||
+                        ($2 == "iptables" && NF != 6)) exit 1
+                }
+            ' "${firewallStateFile}" || {
+                errorCard "${protocolName} 防火墙状态异常，已取消更换监听端口"
+                return 1
+            }
+        fi
+        if [[ -n "${hysteria2PortHoppingStart}${tuicPortHoppingStart}" ]] ||
+            padmFirewalldForwardStateKeyForTarget "${oldProtocolPort}" >/dev/null 2>&1 ||
+            padmIptablesForwardStateKeyForTarget "${portHoppingType}" "${oldProtocolPort}" >/dev/null 2>&1; then
             errorCard "${protocolName} 旧监听端口仍有端口跳跃规则，请先到端口跳跃管理删除后再更换监听端口"
             return 1
         fi
