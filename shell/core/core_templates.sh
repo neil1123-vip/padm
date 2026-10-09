@@ -922,7 +922,7 @@ EOF
 {
   "inbounds": [
     {
-      "tag": "dokodemo-in-VLESSReality",
+      "tag": "dokodemo-in",
       "port": ${realityPort},
       "protocol": "dokodemo-door",
       "settings": {

@@ -470,6 +470,32 @@ runRealityProfileFailureRegression() (
     [[ "${portReads}" == "0" ]]
     [[ ! -e "${entryHostFile}" ]]
     [[ ! -e "${singBoxRoot}07_VLESS_vision_reality_inbounds.json" ]]
+
+    (
+        local PADM_INSTALL_CLIENTS_PREPARED=true
+        local selectCustomInstallType=",1," currentClients='[]'
+        local realityMldsa65Seed= realityMldsa65Verify=
+        xrayTemplateConfigDir() { printf '%s\n' "${xrayRoot}"; }
+        initRealityProfile() {
+            realityTargetHost=target.example.com
+            realityTargetPort=443
+            realitySNI=sni.example.com
+        }
+        initXrayRealityPort() { realityPort=10888; }
+        initXrayConfigApply custom 1 true
+        # 嗅探前端的 SNI 放行与兜底阻断规则必须匹配真实入站 tag。
+        jq -e --arg sni "${realitySNI}" '
+            .inbounds[0].tag as $tag |
+            $tag == "dokodemo-in" and
+            .inbounds[0].protocol == "dokodemo-door" and
+            .inbounds[0].sniffing.routeOnly == true and
+            (.routing.rules | length) == 2 and
+            all(.routing.rules[]; .inboundTag == [$tag]) and
+            .routing.rules[0].domain == [$sni] and
+            .routing.rules[0].outboundTag == "z_direct_outbound" and
+            .routing.rules[1].outboundTag == "blackhole_out"
+        ' "${xrayRoot}07_VLESS_vision_reality_inbounds.json" >/dev/null
+    )
 )
 
 runPublicIPIPv4FallbackRegression() (
