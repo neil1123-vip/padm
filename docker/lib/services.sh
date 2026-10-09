@@ -3305,9 +3305,17 @@ dockerValidateHostIntegrations() {
         port=$(jq -r '.host_integrations[] | select(.type == "tproxy") | .settings.port' "${specFile}") || return 1
         mark=$(jq -r '.host_integrations[] | select(.type == "tproxy") | .settings.mark' "${specFile}") || return 1
         ownership=unowned
-        dockerCurrentOwnsHostIntegration tproxy && ownership=owned
-        dockerCandidateCompose "${candidate}" run --rm --no-deps net-transparent \
-            preflight tproxy "${port}" "${mark}" "${ownership}" >/dev/null || {
+        local -a ownershipMount=() ownershipArgs=("${ownership}")
+        if dockerCurrentOwnsHostIntegration tproxy; then
+            root=$(dockerInstallRoot) || return 1
+            dockerTrafficSafePath "${root}" "${root}/data/net/transparent" || return 1
+            [[ -d "${root}/data/net/transparent" ]] || return 1
+            ownership=owned
+            ownershipMount=(--volume "${root}/data/net/transparent:/run/padm-tproxy-owner:ro")
+            ownershipArgs=("${ownership}" /run/padm-tproxy-owner)
+        fi
+        dockerCandidateCompose "${candidate}" run --rm --no-deps "${ownershipMount[@]}" net-transparent \
+            preflight tproxy "${port}" "${mark}" "${ownershipArgs[@]}" >/dev/null || {
             dockerError 'TProxy 转发、路由或防火墙前置检查失败'
             return 1
         }

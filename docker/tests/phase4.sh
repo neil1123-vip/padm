@@ -529,7 +529,19 @@ jq -e '
   ([.listeners[] | select(.public_port == 31298) | .transport] | sort) == ["tcp", "udp"] and
   .host_integrations[0].firewall_rules == ["padm-tproxy"]
 ' "${DOCKER_ROOT}/deployment.json" >/dev/null || fail 'TProxy ownership state is wrong'
-grep -q 'net-transparent preflight tproxy 31298 129' "${DOCKER_LOG}" || fail 'TProxy preflight was not called'
+grep -q 'net-transparent preflight tproxy 31298 129 unowned$' "${DOCKER_LOG}" ||
+    fail 'first TProxy configuration borrowed ownership'
+! grep -q '/run/padm-tproxy-owner:ro' "${DOCKER_LOG}" ||
+    fail 'first TProxy configuration mounted an owner'
+
+: >"${DOCKER_LOG}"
+runControl 0 tproxy-reconfigure configure --spec "${TPROXY_SPEC}"
+grep -q -- "--volume ${DOCKER_ROOT}/data/net/transparent:/run/padm-tproxy-owner:ro net-transparent preflight tproxy 31298 129 owned /run/padm-tproxy-owner$" "${DOCKER_LOG}" ||
+    fail 'TProxy reconfiguration did not read the current owner'
+: >"${DOCKER_LOG}"
+runControl 0 tproxy-validate validate
+grep -q 'net-transparent preflight tproxy 31298 129 owned$' "${DOCKER_LOG}" ||
+    fail 'TProxy validation did not check the live owner'
 
 LIVE_HASH=$(sha256sum "${DOCKER_ROOT}/deployment.json" | cut -d ' ' -f 1)
 runControl 15 reject-nginx-tproxy configure --spec "${INVALID_SPEC}"
