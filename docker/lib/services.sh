@@ -3142,6 +3142,110 @@ dockerCurrentOwnsHostIntegration() {
         "${root}/deployment.json" >/dev/null 2>&1
 }
 
+dockerFail2banRuntimeAudit() {
+    local container=$1
+    [[ "${container}" =~ ^[a-f0-9]{12,64}$ ]] || return 1
+    # 只通过 Fail2ban 原生只读协议核验已加载动作，不调用任何动作方法。
+    docker exec -i "${container}" python3 - <<'PY'
+import re
+
+from fail2ban.client.configurator import Configurator
+from fail2ban.client.csocket import CSocket
+from fail2ban.server.action import CommandAction
+from fail2ban.server.server import Server
+
+JAIL = "padm-nginx"
+ACTION = "padm-docker-user"
+
+
+def fail():
+    raise SystemExit(1)
+
+
+try:
+    config = Configurator()
+    config.setBaseDir("/etc/fail2ban")
+    config.readAll()
+    if not config.getOptions(JAIL, ignoreWrong=False):
+        fail()
+    config.convertToProtocol(allow_no_files=False)
+    stream = config.getConfigStream()
+
+    configured_actions = []
+    expected_action = CommandAction(None, ACTION)
+    for command in stream:
+        if len(command) == 3 and command[:2] == ["set", "allowipv6"]:
+            Server.setIPv6IsAllowed(command[2])
+        if len(command) >= 4 and command[:3] == ["set", JAIL, "addaction"]:
+            if command != ["set", JAIL, "addaction", ACTION]:
+                fail()
+            configured_actions.append(command[3])
+        if len(command) == 6 and command[:4] == ["set", JAIL, "action", ACTION]:
+            setattr(expected_action, command[4], command[5])
+        if len(command) == 5 and command[:3] == ["multi-set", JAIL, "action"] and command[3] == ACTION:
+            for item in command[4]:
+                if not isinstance(item, (list, tuple)) or len(item) != 2:
+                    fail()
+                setattr(expected_action, item[0], item[1])
+    if configured_actions != [ACTION]:
+        fail()
+    expected = dict(expected_action._properties)
+    expected_action._hasCondSection
+    expected_action._families
+    expected_action._startOnDemand
+    derived = {
+        "__hasCondSection": expected_action._properties["__hasCondSection"],
+        "__families": expected_action._properties["__families"],
+        "actionstart_on_demand": expected_action._properties["actionstart_on_demand"],
+    }
+
+    socket = CSocket("/run/fail2ban/fail2ban.sock", timeout=5)
+
+    def get(command):
+        response = socket.send(command)
+        if not isinstance(response, (list, tuple)) or len(response) != 2 or response[0] != 0:
+            fail()
+        return response[1]
+
+    loaded_actions = get(["get", JAIL, "actions"])
+    if loaded_actions != [ACTION]:
+        fail()
+    loaded_class = get(["get", JAIL, "action", ACTION, "__class__"])
+    if loaded_class is not CommandAction:
+        fail()
+    properties = get(["get", JAIL, "actionproperties", ACTION])
+    if not isinstance(properties, list) or set(properties) != set(expected):
+        fail()
+    loaded_values = get(["get", JAIL, "action", ACTION, "_properties"])
+    if not isinstance(loaded_values, dict) or set(loaded_values) - set(expected) - set(derived):
+        fail()
+    for name, value in derived.items():
+        if name in loaded_values and loaded_values[name] != value:
+            fail()
+    for name, value in expected.items():
+        # banEpoch 仅记录动作重建轮次，不参与命令正文或参数插值。
+        if name == "banEpoch":
+            continue
+        if name not in loaded_values:
+            fail()
+        cached = loaded_values[name]
+        if isinstance(value, re.Pattern):
+            if not isinstance(cached, re.Pattern) or (cached.pattern, cached.flags) != (value.pattern, value.flags):
+                fail()
+        elif cached != value:
+            fail()
+        actual = get(["get", JAIL, "action", ACTION, name])
+        if isinstance(value, re.Pattern):
+            if not isinstance(actual, re.Pattern) or (actual.pattern, actual.flags) != (value.pattern, value.flags):
+                fail()
+        elif actual != value:
+            fail()
+    socket.close()
+except Exception:
+    raise SystemExit(1)
+PY
+}
+
 dockerFail2banAddressIsValid() (
     local address=$1 ipv4=$1 converted
     local -a octets=()
@@ -3235,6 +3339,10 @@ dockerFail2banContainer() (
             target,read_only}) | sort_by(.target)))
     ' <<<"${container}" >/dev/null || {
         dockerError 'Fail2ban 容器已停止或归属漂移，未执行维护操作'
+        return 1
+    }
+    dockerFail2banRuntimeAudit "${ids}" || {
+        dockerError 'Fail2ban 已加载动作漂移或运行时审计失败，未执行维护操作'
         return 1
     }
     printf '%s\n' "${ids}"

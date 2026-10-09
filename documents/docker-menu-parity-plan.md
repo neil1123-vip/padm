@@ -2522,8 +2522,8 @@ Fail2ban 1.1.0），只读挂载当前生成配置及入口，未重建或发布
 未配置、停机、归属或配置漂移返回 `15`，底层执行失败保留非零返回码。
 IPv4、IPv6 及 IPv4 嵌入 IPv6 保留输入原文；拒绝前导零 IPv4、CIDR、zone 和选项。
 取消、EOF、后端失败及信号沿用现有菜单清理。
-入口不读取 Fail2ban 进程已加载的运行时 action；管理员在容器内通过
-`fail2ban-client set` 改写后的状态不在本项保证范围，后续宿主完整管理仍需补充。
+初版入口不读取 Fail2ban 进程已加载的运行时 action；后续 5C.3 已补命令、
+公开参数与有效属性缓存审计，任意特权篡改和完整宿主管理仍不在保证范围。
 
 新增 `docker-fail2ban-real` 定向入口复用原隔离 action 夹具与当前源码快照，
 只离线传入已有 net 镜像，不重建镜像或挂载宿主 Socket；
@@ -2626,6 +2626,45 @@ dispatcher 初次暴露既有长任务调度顺序与预期夹具不一致，已
 正常/失败回归的源码归档和清单清理，日志/result/共享缓存保留。
 候选 `d4087c20`、运行时 `1fea324c`、goto 防护 `5d73f28e` 均为本地 SSH 签名
 阶段提交，签名 `G`；未推送、发布或构建新业务镜像。
+
+#### 5C.3 Fail2ban 已加载动作维护门禁
+
+在既有磁盘配置/容器身份核验之后、输出唯一容器 ID 之前，复用 net 镜像内
+Fail2ban `Configurator`、`CommandAction` 和 `CSocket` 做只读 runtime 审计。
+不新增 helper、镜像层或宿主依赖，维护 client 的固定 jail/字面地址 argv 不变。
+仅允许一个 `padm-docker-user` 标准 `CommandAction`；公开属性集合、
+动作命令、iptables/端口/地址族参数和有效 `_properties` 缓存逐项匹配规范配置。
+额外缓存键拒绝；三个原生派生缓存键按当前 IPv6 设置重算，`banEpoch` 不作固定值比较。
+动作、额外 action 或缓存漂移，以及查询/解析失败，都返回既有状态码 `15`，
+不执行维护 client、不启动容器、不改部署文件或防火墙规则。
+
+审计与维护不是特权并发修改的原子事务；Fail2ban 的原生反射/pickle 协议
+不作为抵御恶意 Python getter、程序修改或任意私有执行缓存篡改的安全边界。
+本项不改变固定链/旧 state 的规则归属，也不代替真实客户端来源和宿主重启/卸载验收。
+Fail2ban 完整管理与 5C 仍未完成。
+
+本地验收（2026-10-10，Linux amd64）：
+
+| 检查 | 结果 / 秒 | 证据目录 |
+| --- | --- | --- |
+| `docker-phase4`，Jobs 2 | 32.060 / 入口 32.943 | `.tmp-regression-docker-e07ddf3cdf0f4d09bd2bec7ae728871f` |
+| 最终 `docker-fail2ban-real`，Jobs 2 | 45.241 / 入口 46.151 | `.tmp-regression-docker-11b9b79416474b72adf9fba8125f7fb2` |
+| `docker-contracts`，Jobs 6 | 36/36，236.539 / 入口 237.424 | `.tmp-regression-docker-fb6e84217a1541baa886489fb245a7fe` |
+
+真实夹具提取同一生产脚本，不复制审计算法；验证标准启动/封禁/恢复后审计通过，
+公开动作与双栈参数、额外 action、私有命令/family/派生缓存污染均拒绝，
+规则正文与封禁列表不变，污染命令标记未执行；恢复后原有 IPv4/IPv6 解封和 TERM 通过。
+phase4 验证审计严格先于维护、失败返回码及不启动服务；最后类型门禁更严格的改动
+由真实测试及完整合同覆盖，不把较早定向快照视作同一输入。
+最终真实与完整合同的源码归档摘要均为
+`C6B54778CBEF0C2363E52B0D1D9DF75D7701F07D4950B9AB36B40209F7FA7919`；
+完整内容摘要 `7D005CC2C7275F17DA2B10BF3B7B6FD1F45ED55CBF74A67B06A8D9CB2D6FF704`。
+三个生产/测试文件与两个归档逐文件一致；之后仅补本节证据和状态快照。
+工具及 net 镜像复用 5C.1 的 digest，未重建，未命中缓存；完整排队 386 ms，
+真实排队 215 ms，保留三槽预算。三个 Shell 的 Linux 语法/ShellCheck error、
+生产 inline Python 编译、PowerShell AST 与 diff 检查通过，独立复审无未决 P1/P2。
+早期夹具的 shell 换行、原参数恢复、动态时间戳、空缓存与 lazy 派生期望误判已修复；
+失败日志保留，源码归档/清单清理，不动其它任务临时文件，不推送或发布。
 
 ## 第六步：发布与完整验收
 

@@ -413,6 +413,13 @@ IPv4/IPv6 address, not a hostname, CIDR, zone, arbitrary jail or bulk unban;
 the menu requires confirmation. Missing, stopped or mismatched deployments are
 rejected, and backend failures return nonzero. Enabling new protection, real client
 source visibility, host rule ownership and restart recovery still require 5C acceptance.
+Before maintenance, Fail2ban's native read-only protocol checks loaded actions,
+public parameters and effective property caches inside the verified container.
+Action, address-family parameter or property-cache drift, extra actions and audit
+failures are rejected with status `15`. This is not atomic against concurrent
+privileged changes and does not defend against malicious Python actions, private
+execution-cache tampering or modified Fail2ban code. Stop the service and inspect
+such changes manually.
 
 The existing TProxy profile records its random chain, rule token, mark, route table
 and routing identity in private `data/net/transparent/tproxy.state`. Preflight checks

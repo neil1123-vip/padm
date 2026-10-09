@@ -17,6 +17,9 @@ trap cleanup EXIT
 export DOCKER_BUNDLE_SOURCE_ROOT=${PROJECT_ROOT}
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/docker/lib/services.sh"
+docker() { cat >"${TEST_ROOT}/fail2ban-audit.py"; }
+dockerFail2banRuntimeAudit aaaaaaaaaaaa
+unset -f docker
 mkdir -p "${TEST_ROOT}/config/net/fail2ban" "${TEST_ROOT}/logs/nginx"
 jq -n '{
   core: {protocols: [
@@ -86,6 +89,7 @@ start_server() {
     sh /test/entrypoint.sh fail2ban 24444,24445 >/tmp/fail2ban.log 2>&1 &
     server=$!
     wait_ready
+    python3 /test/fail2ban-audit.py || fail "canonical loaded actions were rejected"
 }
 stop_server() {
     kill -TERM "$server"
@@ -143,6 +147,7 @@ case " $* " in
 esac
 exec "$(cat /var/lib/padm/net/iptables-command)" "$@"
 SH
+original_iptables=$(fail2ban-client get padm-nginx action padm-docker-user iptables)
 fail2ban-client set padm-nginx action padm-docker-user iptables 'sh /var/lib/padm/net/bin/iptables -w'
 touch /var/lib/padm/net/reject-second-port
 fail2ban-client set padm-nginx banip 192.0.2.9
@@ -160,7 +165,7 @@ if [ "$rolled_back" -ne 1 ]; then
     iptables -w -S >&2
     fail "partial actionstart was not rolled back"
 fi
-fail2ban-client set padm-nginx action padm-docker-user iptables 'iptables -w'
+fail2ban-client set padm-nginx action padm-docker-user iptables "$original_iptables"
 fail2ban-client set padm-nginx banip 192.0.2.7
 wait_rule iptables 192.0.2.7
 assert_hooks iptables
@@ -169,6 +174,75 @@ if [ "$PADM_TEST_FAMILY" = dual ]; then
     wait_rule ip6tables 2001:db8::7
     assert_hooks ip6tables
 fi
+python3 /test/fail2ban-audit.py || fail "active loaded actions were rejected"
+# 改写已加载动作但不执行它，审计须拒绝且保留当前封禁。
+python3 - <<'PY'
+import os
+import subprocess
+from fail2ban.client.csocket import CSocket
+
+def query(*args):
+    with_socket = CSocket("/run/fail2ban/fail2ban.sock")
+    try:
+        response = with_socket.send(list(args))
+    finally:
+        with_socket.close()
+    if response[0] != 0:
+        raise RuntimeError("Fail2ban test query failed")
+    return response[1]
+
+def snapshot():
+    rules = tuple(tuple(line for line in subprocess.check_output(
+        [tool], text=True).splitlines() if not line.startswith("#"))
+        for tool in ("iptables-save", "ip6tables-save"))
+    return rules + (tuple(sorted(query("get", "padm-nginx", "banip"))),)
+
+def rejected():
+    before = snapshot()
+    result = subprocess.run(["python3", "/test/fail2ban-audit.py"],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    assert result.returncode != 0, "loaded action drift was accepted"
+    after = snapshot()
+    assert after == before, ("read-only audit changed bans or firewall rules", before, after)
+    assert not os.path.exists("/tmp/fail2ban-audit-executed"), \
+        "audit executed a changed action"
+
+action = "padm-docker-user"
+properties = query("get", "padm-nginx", "actionproperties", action)
+for name in properties:
+    if name.startswith("action") or name in ("iptables", "iptables?family=inet6",
+                                            "protocol", "port"):
+        original = query("get", "padm-nginx", "action", action, name)
+        if not isinstance(original, str):
+            continue
+        query("set", "padm-nginx", "action", action, name,
+              "touch /tmp/fail2ban-audit-executed")
+        try:
+            rejected()
+        finally:
+            query("set", "padm-nginx", "action", action, name, original)
+query("set", "padm-nginx", "addaction", "foreign")
+try:
+    rejected()
+finally:
+    query("set", "padm-nginx", "delaction", "foreign")
+original_cache = query("get", "padm-nginx", "action", action, "_properties")
+for name, value in (
+        ("actionunban", "touch /tmp/fail2ban-audit-executed"),
+        ("actionunban?family=inet6", "touch /tmp/fail2ban-audit-executed"),
+        ("__families", ["foreign"])):
+    poisoned_cache = dict(original_cache)
+    poisoned_cache[name] = value
+    query("set", "padm-nginx", "action", action, "_CommandAction__properties",
+          poisoned_cache)
+    try:
+        rejected()
+    finally:
+        query("set", "padm-nginx", "action", action, "_CommandAction__properties",
+              original_cache)
+assert subprocess.run(["python3", "/test/fail2ban-audit.py"]).returncode == 0, \
+    "restored loaded actions were rejected"
+PY
 fail2ban-client set padm-nginx unbanip 192.0.2.7
 wait_unban iptables 192.0.2.7
 fail2ban-client set padm-nginx banip 192.0.2.7

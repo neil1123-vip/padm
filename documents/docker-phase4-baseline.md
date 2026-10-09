@@ -20,7 +20,8 @@ capability。阶段 4 改动未单独提交，等待用户确认提交点。
   `--ctorigdstport` 匹配 DNAT 前的公网端口，数据库和日志分别落到持久目录
   与 stdout。启动前检查 `DOCKER-USER`、日志和 Fail2ban 配置。已有受管运行
   容器另支持固定 `padm-nginx` jail 状态查看及单个字面 IP 解封，操作前核对
-  规格、生成配置正文、容器归属和安全边界，不自动启动服务。
+  规格、生成配置正文、容器归属及已加载动作/有效属性缓存，不自动启动服务。
+  运行时漂移或审计失败拒绝维护；不保证特权并发修改或恶意 Python 模块安全。
 - TUN 只由 sing-box 核心服务创建：`host network`、`NET_ADMIN`、root 运行
   覆盖和 `/dev/net/tun`；`net-tun-check` 只在候选校验时运行。入口检查设备、
   临时 TUN 创建能力和 nftables。

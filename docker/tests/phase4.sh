@@ -76,6 +76,21 @@ container)
     jq "${FAKE_DOCKER_INSPECT_FILTER:-.}" "${FAKE_DOCKER_FAIL2BAN_INSPECT:?}"
     ;;
 exec)
+    if [[ "$#" -eq 5 && "${2:-}" == "-i" && "${3:-}" == "${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}" &&
+        "${4:-}" == python3 && "${5:-}" == - ]]; then
+        cat >/dev/null
+        case "${FAKE_DOCKER_MODE:-ok}" in
+        fail2ban-audit-drift)
+            printf 'simulated loaded action drift\n' >&2
+            exit 1
+            ;;
+        fail2ban-audit-query-fail)
+            printf 'simulated fail2ban query failure\n' >&2
+            exit 1
+            ;;
+        esac
+        exit 0
+    fi
     [[ "${2:-}" == "${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}" &&
         "${3:-}" == fail2ban-client ]] || exit 1
     if [[ "$#" -eq 5 && "${4:-}" == status && "${5:-}" == padm-nginx ]]; then
@@ -374,10 +389,15 @@ runControl 0 fail2ban-status fail2ban status
 grep -qx 'Currently banned: 1' "${CONTROL_LOG}" || fail 'Fail2ban status hid the client output'
 grep -qxF "exec ${FAIL2BAN_CONTAINER} fail2ban-client status padm-nginx" "${DOCKER_LOG}" ||
     fail 'Fail2ban status did not target the managed container and jail'
+[[ "$(grep '^exec ' "${DOCKER_LOG}")" == "exec -i ${FAIL2BAN_CONTAINER} python3 -"$'\n'"exec ${FAIL2BAN_CONTAINER} fail2ban-client status padm-nginx" ]] ||
+    fail 'Fail2ban status did not audit loaded actions before the maintenance client'
 for ip in 192.0.2.7 2001:db8::1 ::ffff:192.0.2.7; do
+    : >"${DOCKER_LOG}"
     runControl 0 fail2ban-unban fail2ban unban "${ip}"
     grep -qxF "exec ${FAIL2BAN_CONTAINER} fail2ban-client set padm-nginx unbanip ${ip}" "${DOCKER_LOG}" ||
         fail 'Fail2ban unban changed the literal IP, container or jail'
+    [[ "$(grep '^exec ' "${DOCKER_LOG}")" == "exec -i ${FAIL2BAN_CONTAINER} python3 -"$'\n'"exec ${FAIL2BAN_CONTAINER} fail2ban-client set padm-nginx unbanip ${ip}" ]] ||
+        fail 'Fail2ban unban did not audit loaded actions before the maintenance client'
 done
 FAKE_DOCKER_MODE=fail2ban-client-fail runControl 37 fail2ban-status-client-error fail2ban status
 grep -qx 'simulated fail2ban-client failure' "${CONTROL_LOG}" ||
@@ -385,6 +405,25 @@ grep -qx 'simulated fail2ban-client failure' "${CONTROL_LOG}" ||
 FAKE_DOCKER_MODE=fail2ban-client-fail runControl 37 fail2ban-unban-client-error fail2ban unban 192.0.2.7
 ! grep -Eq '^(run|start|restart) |^compose .* (run|up|start|restart)( |$)' "${DOCKER_LOG}" ||
     fail 'Fail2ban maintenance automatically started a container'
+
+for auditMode in fail2ban-audit-drift fail2ban-audit-query-fail; do
+    : >"${DOCKER_LOG}"
+    FAKE_DOCKER_MODE="${auditMode}" runControl 15 "${auditMode}-status" fail2ban status
+    grep -qxF "exec -i ${FAIL2BAN_CONTAINER} python3 -" "${DOCKER_LOG}" ||
+        fail "${auditMode}: status skipped the loaded-action audit"
+    ! grep -qF "fail2ban-client" "${DOCKER_LOG}" ||
+        fail "${auditMode}: status executed the maintenance client after audit failure"
+    ! grep -Eq '^(run|start|restart) |^compose .* (run|up|start|restart)( |$)' "${DOCKER_LOG}" ||
+        fail "${auditMode}: status started a container after audit failure"
+    : >"${DOCKER_LOG}"
+    FAKE_DOCKER_MODE="${auditMode}" runControl 15 "${auditMode}-unban" fail2ban unban 192.0.2.7
+    grep -qxF "exec -i ${FAIL2BAN_CONTAINER} python3 -" "${DOCKER_LOG}" ||
+        fail "${auditMode}: unban skipped the loaded-action audit"
+    ! grep -qF "fail2ban-client" "${DOCKER_LOG}" ||
+        fail "${auditMode}: unban executed the maintenance client after audit failure"
+    ! grep -Eq '^(run|start|restart) |^compose .* (run|up|start|restart)( |$)' "${DOCKER_LOG}" ||
+        fail "${auditMode}: unban started a container after audit failure"
+done
 
 rejectFail2ban 2 fail2ban-missing-command fail2ban
 rejectFail2ban 2 fail2ban-arbitrary-jail fail2ban status sshd
