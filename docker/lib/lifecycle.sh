@@ -13,6 +13,7 @@ DOCKER_INSTALL_BUNDLE_TARGET=
 DOCKER_INSTALL_CLI_PATH=
 DOCKER_INSTALL_CLI_EXISTED=1
 DOCKER_INSTALL_CLI_INODE=
+DOCKER_INSTALL_CLI_TEMP_PATH=
 
 dockerUsage() {
     cat >&2 <<'EOF'
@@ -401,8 +402,10 @@ dockerInstallCommand() {
 
 dockerRestoreInstallTransaction() {
     local root currentTarget expectedTarget previousTarget cliTarget
+    local status=0
     [[ "${DOCKER_INSTALL_TRANSACTION_ACTIVE:-0}" == 1 ]] || return 0
     root=$(dockerInstallRoot) || return 1
+    dockerCleanupInstallCliTemp || status=1
     previousTarget=${DOCKER_INSTALL_PREVIOUS_BUNDLE_TARGET:-}
     expectedTarget=${DOCKER_INSTALL_BUNDLE_TARGET:-}
     currentTarget=$(readlink "${root}/bundle" 2>/dev/null || true)
@@ -442,6 +445,8 @@ dockerRestoreInstallTransaction() {
     DOCKER_INSTALL_BUNDLE_TARGET=
     DOCKER_INSTALL_CLI_PATH=
     DOCKER_INSTALL_CLI_INODE=
+    DOCKER_INSTALL_CLI_TEMP_PATH=
+    return "${status}"
 }
 
 dockerDeploymentState() {

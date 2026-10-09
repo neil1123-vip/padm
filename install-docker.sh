@@ -345,6 +345,10 @@ dockerEntryParseInstallArgs() {
         dockerEntryError '--ref 必须是 40 位小写 commit SHA 或 latest'
         return 2
     fi
+    if [[ "${requestedRef}" == sha256:* && -z "${sourceRoot}" ]]; then
+        dockerEntryError 'sha256 ref 必须与本地 --source 同时使用'
+        return 2
+    fi
     if [[ -n "${sourceRoot}" ]]; then
         sourceRoot=$(cd -- "${sourceRoot}" 2>/dev/null && pwd -P) || return 13
         dockerEntryPathIsSafe "${sourceRoot}" && dockerEntryBundleModulesPresent "${sourceRoot}" || {

@@ -167,6 +167,8 @@ runEngineArgumentCase() {
 }
 runEngineArgumentCase 10 engine-args-valid --no-menu --source "${PROJECT_ROOT}"
 runEngineArgumentCase 10 engine-args-valid-ref --ref ffffffffffffffffffffffffffffffffffffffff
+runEngineArgumentCase 10 engine-args-local-digest --source "${PROJECT_ROOT}" --ref "sha256:$(printf 'a%.0s' {1..64})"
+runEngineArgumentCase 2 engine-args-remote-digest --ref "sha256:$(printf 'a%.0s' {1..64})"
 runEngineArgumentCase 2 engine-args-invalid-ref --ref typo
 runEngineArgumentCase 2 engine-args-missing-ref --ref
 runEngineArgumentCase 2 engine-args-missing-source --source
@@ -428,6 +430,40 @@ for signal in INT TERM; do
                 fail "install-${signal}: first installation kept an active bundle"
         fi
     done
+done
+
+# CLI 临时链接创建后中断或读取 inode 失败，不保留本次临时命令。
+for failure in INT TERM stat; do
+    TRANSACTION_ROOT="${TEST_ROOT}/install-cli-temp-${failure}"
+    TRANSACTION_BIN="${TEST_ROOT}/install-cli-temp-${failure}-bin"
+    expectedStatus=130
+    case "${failure}" in
+    TERM) expectedStatus=143 ;;
+    stat) expectedStatus=15 ;;
+    esac
+    (
+        ln() {
+            command ln "$@" || return $?
+            if [[ "${PHASE1_CLI_TEMP_FAILURE}" != stat &&
+                "${*: -1}" == "${PADM_DOCKER_BIN_DIR}/.padm-docker."* ]]; then
+                kill -"${PHASE1_CLI_TEMP_FAILURE}" "${BASHPID:-$$}"
+            fi
+        }
+        stat() {
+            [[ "${PHASE1_CLI_TEMP_FAILURE}" != stat ||
+                "${*: -1}" != "${PADM_DOCKER_BIN_DIR}/.padm-docker."* ]] || return 1
+            command stat "$@"
+        }
+        export -f ln stat
+        export PHASE1_CLI_TEMP_FAILURE=${failure}
+        runControl "${expectedStatus}" "install-cli-temp-${failure}" "${TRANSACTION_ROOT}" \
+            "${NATIVE_ROOT}" "${TRANSACTION_BIN}" install --source "${NO_COMPOSE_SOURCE}"
+    )
+    [[ ! -e "${TRANSACTION_ROOT}/bundle" && ! -L "${TRANSACTION_ROOT}/bundle" &&
+        ! -e "${TRANSACTION_BIN}/padm-docker" &&
+        ! -e "${TRANSACTION_ROOT}/locks/deployment.lock" &&
+        -z "$(find "${TRANSACTION_BIN}" -maxdepth 1 -name '.padm-docker.*' -print)" ]] ||
+        fail "install-cli-temp-${failure}: temporary command or installed pointer leaked"
 done
 
 # 激活指针已移动但安装尚未返回时，仍使用提前登记的精确目标恢复。

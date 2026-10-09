@@ -359,15 +359,43 @@ dockerInstallCli() {
         }
     fi
     tempLink="${binDir}/.padm-docker.${BASHPID:-$$}"
-    rm -f -- "${tempLink}" 2>/dev/null || true
-    ln -s "${expectedTarget}" "${tempLink}" || return 1
-    if [[ "${DOCKER_INSTALL_TRANSACTION_ACTIVE:-0}" == 1 && "${DOCKER_INSTALL_CLI_EXISTED:-1}" == 0 ]]; then
-        DOCKER_INSTALL_CLI_INODE=$(stat --format=%d:%i -- "${tempLink}") || return 1
-    fi
-    mv -Tf -- "${tempLink}" "${target}" || {
-        rm -f -- "${tempLink}" 2>/dev/null || true
+    [[ ! -e "${tempLink}" && ! -L "${tempLink}" ]] || {
+        dockerError "CLI 临时路径已存在，已保留: ${tempLink}"
         return 1
     }
+    DOCKER_INSTALL_CLI_TEMP_PATH=${tempLink}
+    ln -s "${expectedTarget}" "${tempLink}" || {
+        dockerCleanupInstallCliTemp || true
+        return 1
+    }
+    if [[ "${DOCKER_INSTALL_TRANSACTION_ACTIVE:-0}" == 1 && "${DOCKER_INSTALL_CLI_EXISTED:-1}" == 0 ]]; then
+        DOCKER_INSTALL_CLI_INODE=$(stat --format=%d:%i -- "${tempLink}") || {
+            dockerCleanupInstallCliTemp || true
+            return 1
+        }
+    fi
+    mv -Tf -- "${tempLink}" "${target}" || {
+        dockerCleanupInstallCliTemp || true
+        return 1
+    }
+    DOCKER_INSTALL_CLI_TEMP_PATH=
+}
+
+dockerCleanupInstallCliTemp() {
+    local root binDir temp=${DOCKER_INSTALL_CLI_TEMP_PATH:-} expectedTarget
+    [[ -n "${temp}" ]] || return 0
+    root=$(dockerInstallRoot) || return 1
+    binDir=${PADM_DOCKER_BIN_DIR:-/usr/local/bin}
+    dockerPathIsSafeAbsolute "${binDir}" &&
+        [[ "${temp}" == "${binDir}/.padm-docker.${BASHPID:-$$}" ]] || return 1
+    expectedTarget="${root}/bundle/install-docker.sh"
+    if [[ -L "${temp}" ]]; then
+        [[ -O "${temp}" && "$(readlink "${temp}" 2>/dev/null || true)" == "${expectedTarget}" ]] || return 1
+        rm -f -- "${temp}" || return 1
+    elif [[ -e "${temp}" ]]; then
+        return 1
+    fi
+    DOCKER_INSTALL_CLI_TEMP_PATH=
 }
 
 dockerRemoveCli() {
