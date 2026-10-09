@@ -1729,6 +1729,26 @@ EOF
         [[ "$(wc -l <"${saveLog}")" == 1 ]]
         readPortHopping tuic 26451
         [[ "${tuicPortHopping}" == "34001-34001" ]]
+        readPortHopping hysteria2 16296
+        [[ -z "${hysteria2PortHopping}" && -z "${hysteria2PortHoppingStart}" && -z "${hysteria2PortHoppingEnd}" ]]
+        readPortHopping tuic 16295
+        [[ -z "${tuicPortHopping}" ]]
+        savedRules='-A PREROUTING -p udp --dport 32000:32002 -m comment --comment neil1123-vip_hysteria2_portHopping -j DNAT --to-destination :16294
+-A PREROUTING -p udp --dport 33000:33002 -m comment --comment "neil1123-vip_hysteria2_portHopping" -j DNAT --to-destination :16295'
+        readPortHopping hysteria2 16295
+        [[ "${hysteria2PortHopping}" == "33000-33002" ]]
+        local invalidPorts
+        for invalidPorts in 0 65536 33002:33000 33000:65536 33000:33002x 33000:33002:33003; do
+            savedRules="-A PREROUTING -p udp --dport ${invalidPorts} -m comment --comment neil1123-vip_hysteria2_portHopping -j DNAT --to-destination :16295"
+            readPortHopping hysteria2 16295
+            [[ -z "${hysteria2PortHopping}" && -z "${hysteria2PortHoppingStart}" && -z "${hysteria2PortHoppingEnd}" ]]
+        done
+        savedRules='-A PREROUTING -p udp --dport 33000:33002 -m comment --comment neil1123-vip_hysteria2_portHopping-other -j DNAT --to-destination :16295'
+        readPortHopping hysteria2 16295
+        [[ -z "${hysteria2PortHopping}" ]]
+        savedRules='-A PREROUTING -p tcp --dport 33000:33002 -m comment --comment neil1123-vip_hysteria2_portHopping -j DNAT --to-destination :16295'
+        readPortHopping hysteria2 16295
+        [[ -z "${hysteria2PortHopping}" ]]
         savedRules=
         readPortHopping tuic 26451
         [[ -z "${tuicPortHopping}" ]]

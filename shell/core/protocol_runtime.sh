@@ -525,14 +525,23 @@ readPortHopping() {
     else
         local iptablesRules
         if iptablesRules=$(iptables-save); then
-            portHopping=$(awk -v marker="neil1123-vip_${type}_portHopping" '
-            $0 ~ marker {
+            portHopping=$(awk -v marker="neil1123-vip_${type}_portHopping" -v targetPort="${targetPort}" '
+            {
+                comment = destination = ports = protocol = ""
                 for (i = 1; i <= NF; i++) {
-                    if ($i == "--dport" && (i + 1) <= NF) {
-                        print $(i + 1)
-                        exit
-                    }
+                    if ($i == "--comment") comment = $(i + 1)
+                    else if ($i == "--to-destination") destination = $(i + 1)
+                    else if ($i == "--dport") ports = $(i + 1)
+                    else if ($i == "-p") protocol = $(i + 1)
                 }
+                if ((comment != marker && comment != "\"" marker "\"") || destination != ":" targetPort || protocol != "udp") next
+                if (ports !~ /^[0-9]+(:[0-9]+)?$/) next
+                count = split(ports, range, ":")
+                start = range[1] + 0
+                end = range[count] + 0
+                if (start < 1 || end > 65535 || start > end) next
+                print start ":" end
+                exit
             }
             ' <<<"${iptablesRules}")
             portHoppingStart=${portHopping%%:*}
