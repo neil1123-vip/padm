@@ -999,6 +999,62 @@ runInstallNginxStaticPreservesLiveSiteOnUnzipFailureRegression() {
         [[ -f "${missingStaticDir}/index.html" ]] || return 1
         [[ "$(<"${missingStaticDir}/index.html")" == "keep" ]]
     )
+
+    (
+        set -euo pipefail
+        local root scriptDir staticDir rendererFailure sedCalls
+        local release=debian
+        unzip() {
+            [[ "$1" == -o && "$3" == -d ]] || return 1
+            printf '__SITE_TITLE__\n' >"$4/index.html"
+            printf '__SITE_ACCENT__\n' >"$4/site.css"
+        }
+        sed() {
+            sedCalls=$((sedCalls + 1))
+            if [[ "${rendererFailure}" == sed && "${sedCalls}" == 1 ]]; then
+                return 1
+            fi
+            command sed "$@"
+        }
+        find() {
+            if [[ "${rendererFailure}" == find ]]; then
+                printf 'partial\n' >"${root}/find.log"
+                printf '%s\n' "${nginxStaticPath}/index.html"
+                return 1
+            fi
+            command find "$@"
+        }
+
+        for rendererFailure in sed find; do
+            root="${TMP_DIR}/install-nginx-static-render-${rendererFailure}-failure"
+            scriptDir="${root}/script"
+            staticDir="${root}/static"
+            sedCalls=0
+            mkdir -p "${scriptDir}/assets/static-sites/templates" "${staticDir}"
+            printf 'zip\n' >"${scriptDir}/assets/static-sites/templates/html1.zip"
+            printf 'keep\n' >"${staticDir}/index.html"
+            printf 'marker\n' >"${staticDir}/check"
+            SCRIPT_DIR="${scriptDir}"
+            nginxStaticPath="${staticDir}"
+
+            if installNginxStaticTemplate 1; then
+                return 1
+            fi
+            [[ "${nginxStaticPath}" == "${staticDir}" ]] || return 1
+            [[ "$(<"${staticDir}/index.html")" == "keep" ]] || return 1
+            [[ "$(<"${staticDir}/check")" == "marker" ]] || return 1
+            [[ ! -e "${staticDir}/site.css" ]] || return 1
+            if compgen -G "${root}/.static.*" >/dev/null; then
+                return 1
+            fi
+            if [[ "${rendererFailure}" == sed ]]; then
+                [[ "${sedCalls}" == 1 ]] || return 1
+            else
+                [[ "${sedCalls}" == 0 ]] || return 1
+                [[ -s "${root}/find.log" ]] || return 1
+            fi
+        done
+    )
 }
 
 runCleanLastInstallationRejectsUnsafeStaticPathRegression() {
@@ -3281,6 +3337,7 @@ runUninstallPadmRootScopeRegression() {
             printf 'systemctl:%s\n' "$*" >>"${serviceLog}"
             return 0
         }
+        cleanupPadmFirewallRules() { return 0; }
         cleanupSubscriptionWireGuardControlOnUninstall() { return 0; }
         cleanupFail2banManagedFilesOnUninstall() { return 0; }
         removePadmNginxConfigFragments() { return 0; }
