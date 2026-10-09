@@ -351,6 +351,19 @@ mkdir -p "${LOCK_ROOT}/locks/deployment.lock"
 printf '%s\n' "$$" >"${LOCK_ROOT}/locks/deployment.lock/pid"
 PADM_DOCKER_LOCK_TIMEOUT=0 runControl 12 deployment-lock "${LOCK_ROOT}" "${NATIVE_ROOT}" "${TEST_ROOT}/lock-bin" install --source "${PROJECT_ROOT}"
 
+# 无 PID 的过期锁含残留文件时，清理失败也必须遵守超时。
+ORPHAN_LOCK_ROOT="${TEST_ROOT}/orphan-lock"
+mkdir -p "${ORPHAN_LOCK_ROOT}/locks/deployment.lock"
+printf 'keep\n' >"${ORPHAN_LOCK_ROOT}/locks/deployment.lock/residual"
+touch -d '10 seconds ago' "${ORPHAN_LOCK_ROOT}/locks/deployment.lock"
+lockStatus=0
+PADM_DOCKER_INSTALL_DIR="${ORPHAN_LOCK_ROOT}" PADM_DOCKER_LOCK_TIMEOUT=0 \
+    timeout 3 bash -c 'source "$1/docker/lib/bootstrap.sh"; dockerAcquireDeploymentLock' \
+    bash "${PROJECT_ROOT}" >"${CONTROL_LOG}" 2>&1 || lockStatus=$?
+[[ "${lockStatus}" == 1 ]] || fail "orphan-lock: expected timeout failure, got ${lockStatus}"
+grep -q '等待 Docker 部署锁超时' "${CONTROL_LOG}" || fail 'orphan-lock: timeout diagnostic missing'
+[[ "$(<"${ORPHAN_LOCK_ROOT}/locks/deployment.lock/residual")" == keep ]] || fail 'orphan-lock: removed unknown file'
+
 BROKEN_SOURCE="${TEST_ROOT}/broken-source"
 copyBundleFixture "${BROKEN_SOURCE}"
 rm -f -- "${BROKEN_SOURCE}/docker/lib/lifecycle.sh"
