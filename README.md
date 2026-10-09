@@ -284,7 +284,7 @@ SOCKS5 匹配目标仍交上游解析，DNS/hosts 不改变上游域名或实际
 规则接受 1–256 条唯一小写 `full/domain/keyword/geosite`，四类保持 OR；
 文件安全要求与 SOCKS5 输入相同。Direct 明确优先于 Block 和全局/域名 SOCKS5，
 直连仍使用 hosts 与 DNS 分流；Block 对匹配 TCP/UDP 拒绝且不发起本地解析。
-无法识别域名的 IP 流量不等同于按 IP 阻断；本步未开放 IP/CIDR、区域或 BT 策略。
+无法识别域名的 IP 流量不等同于域名策略命中；IP/CIDR 由独立子项管理。
 
 ```bash
 padm-docker edit --direct /root/padm-direct.json --preview
@@ -297,6 +297,28 @@ padm-docker edit --block-off --confirm PADM-DOCKER-EDIT
 v3 `.routing.direct`、`.routing.block` 要求控制包声明 `x-padm-routing-direct-block`。
 各子项独立关闭，最后一项关闭才删除 routing；普通 `--spec` 不能更改路由。
 `routing-status` 追加 Direct/Block 域名规则，不改变现有 SOCKS5 状态字段含义。
+
+菜单 `17` 的 IP/CIDR 阻断使用独立 v3 `.routing.block_ips`，私有 JSON 为
+`{"ips":["192.0.2.8","198.51.100.0/24","2001:db8::/32","geoip:cn"]}`。
+接受 1–256 条唯一 IPv4/纯 IPv6 字面地址或 CIDR，以及固定 `geoip:cn`；
+不接受主机名、地址范围、IPv6 scope、点分嵌入 IPv4 或其它 GeoIP 分类。
+地址可包含回环/私网；这是目的匹配规则，不是代理或 DNS 上游地址。
+文件安全要求与其它路由私有 JSON 相同，控制包须声明 `x-padm-routing-block-ips`。
+
+```bash
+padm-docker edit --block-ips /root/padm-block-ips.json --preview
+padm-docker edit --block-ips /root/padm-block-ips.json --confirm PADM-DOCKER-EDIT
+padm-docker edit --block-ips-off --confirm PADM-DOCKER-EDIT
+```
+
+IP 规则只匹配客户端提供的字面目的 IP，TCP/UDP 拒绝发生在 SOCKS/DNS/hosts 前。
+Direct 域名例外（包括识别出的 HTTP Host/TLS SNI）优先且不改目的地址。
+客户端以域名提交的目标不会为了 IP 匹配而提前解析；DNS/hosts 解析后的地址
+不重新匹配本阶段 IP 规则，因此它不是最终拨号 IP 或宿主防火墙过滤。
+Xray 复用受管/镜像 GeoIP；sing-box 从固定官方地址经直连下载 `geoip-cn`，
+缺资产或下载失败拒绝候选启动并恢复原部署，词法合法不等于分类资源可用。
+关闭仅删除 IP 子项，保留域名 Block、Direct、SOCKS、DNS/hosts。
+状态追加 `block_ips.ip_rules`，完整区域策略向导、BT 与最终目的过滤仍待迁移。
 
 完整 v3 `configure` 规格可选 `accounts`，用于追加 1–256 个独立账号，不替换原自用账号。
 每项必须包含 `id`、`name`、`enabled`、`uuid`、`password`、`shadowsocks_password` 和
