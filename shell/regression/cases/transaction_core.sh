@@ -4578,6 +4578,10 @@ runSingBoxLogTransactionRegression() (
     grep -qx 'restart:sing-box' "${serviceLog}" || return 1
     grep -qx 'apply:fail' "${serviceLog}" || return 1
     grep -q 'sing-box 日志配置重载失败' "${errorLog}" || return 1
+    keptBackup=$(find "$(dirname "${targetPath}")" -maxdepth 1 -name '.log.json.bak.*' -print -quit)
+    [[ -n "${keptBackup}" && "$(<"${keptBackup}")" == '{"log":{"disabled":true,"level":"warning"}}' ]] || return 1
+    grep -q '已恢复旧配置，但 sing-box 重载仍失败' "${errorLog}" || return 1
+    rm -f "${keptBackup}" || return 1
     ! compgen -G "$(dirname "${targetPath}")/.log.json.*" >/dev/null || return 1
 
     rm -f "${targetPath}" || return 1
@@ -4680,6 +4684,100 @@ runSingBoxLogTransactionRegression() (
         singBoxLog false >/dev/null 2>&1 || return 1
         [[ "${running}" == false && ! -s "${serviceLog}" ]] || return 1
         regressionExpectStatus 1 singBoxLog invalid >/dev/null 2>&1 || return 1
+    ) || return 1
+    (
+        # 写入中断恢复文件，重载中断还恢复运行态；恢复失败不能继续重载或删除备份。
+        local signalName signalPhase signalOriginal signalRecovery expectedRc resultRc
+        local caseRoot signalTarget signalCalls signalErrors signalBackups
+        eval "$(declare -f commitGeneratedJsonFile | sed '1s/^commitGeneratedJsonFile/originalLogSignalCommit/')"
+        eval "$(declare -f restoreManagedFileFromBackup | sed '1s/^restoreManagedFileFromBackup/originalLogSignalRestore/')"
+        eval "$(declare -f removeManagedPathIfPresent | sed '1s/^removeManagedPathIfPresent/originalLogSignalRemove/')"
+        commitGeneratedJsonFile() {
+            originalLogSignalCommit "$@" || return 1
+            if [[ "$2" == "${signalTarget}" && "${signalPhase}" == commit ]] &&
+                jq -e '.log.disabled == false' "${signalTarget}" >/dev/null; then
+                kill "-${signalName}" "${BASHPID}"
+            fi
+        }
+        restoreManagedFileFromBackup() {
+            [[ "${signalRecovery}" != file-fail ]] || return 1
+            originalLogSignalRestore "$@"
+        }
+        removeManagedPathIfPresent() {
+            [[ "${signalRecovery}" != file-fail ]] || return 1
+            originalLogSignalRemove "$@"
+        }
+        singBoxRunning() { return 0; }
+        serviceQueueRestart() { return 0; }
+        serviceQueueApply() {
+            local mode=old
+            if [[ -e "${signalTarget}" ]] && jq -e '.log.disabled == false' "${signalTarget}" >/dev/null; then
+                mode=new
+            fi
+            printf '%s\n' "${mode}" >>"${signalCalls}"
+            if [[ "${mode}" == new && "${signalPhase}" == reload ]]; then
+                kill "-${signalName}" "${BASHPID}"
+            fi
+            [[ "${mode}" != old || "${signalRecovery}" != reload-fail ]]
+        }
+        errorCard() { printf '%s\n' "$*" >>"${signalErrors}"; }
+        for signalName in INT TERM; do
+            expectedRc=130
+            [[ "${signalName}" != TERM ]] || expectedRc=143
+            for signalPhase in commit reload; do
+                for signalOriginal in present missing; do
+                    for signalRecovery in success file-fail reload-fail; do
+                        [[ "${signalRecovery}" != reload-fail ||
+                            ( "${signalPhase}" == reload && "${signalOriginal}" == present ) ]] || continue
+                        caseRoot="${root}/signal-${signalName}-${signalPhase}-${signalOriginal}-${signalRecovery}"
+                        mkdir -p "${caseRoot}/config" || return 1
+                        signalTarget="${caseRoot}/config/log.json"
+                        signalCalls="${caseRoot}/calls.log" signalErrors="${caseRoot}/errors.log"
+                        : >"${signalCalls}"
+                        : >"${signalErrors}"
+                        if [[ "${signalOriginal}" == present ]]; then
+                            printf '{"log":{"disabled":true,"level":"warning"}}\n' >"${signalTarget}"
+                        fi
+                        (
+                            PADM_SINGBOX_LOG_CONFIG_FILE=${signalTarget}
+                            PADM_SINGBOX_CONFIG_DIR=${caseRoot}/config
+                            singBoxLog false
+                        ) >/dev/null 2>&1 && resultRc=0 || resultRc=$?
+                        [[ "${resultRc}" == "${expectedRc}" ]] || return 1
+                        signalBackups=$(find "${caseRoot}/config" -maxdepth 1 -name '.log.json.bak.*' -print)
+                        if [[ "${signalRecovery}" == file-fail ]]; then
+                            jq -e '.log.disabled == false' "${signalTarget}" >/dev/null || return 1
+                            [[ "${signalPhase}" != reload || "$(<"${signalCalls}")" == new ]] || return 1
+                            [[ "${signalPhase}" == reload || ! -s "${signalCalls}" ]] || return 1
+                            if [[ "${signalOriginal}" == present ]]; then
+                                [[ -n "${signalBackups}" && "${signalBackups}" != *$'\n'* ]] || return 1
+                                jq -e '.log.disabled == true and .log.level == "warning"' "${signalBackups}" >/dev/null || return 1
+                                grep -q '旧配置恢复失败' "${signalErrors}" || return 1
+                            else
+                                [[ -z "${signalBackups}" ]] || return 1
+                                grep -q '新配置清理失败' "${signalErrors}" || return 1
+                            fi
+                        else
+                            if [[ "${signalOriginal}" == present ]]; then
+                                jq -e '.log.disabled == true and .log.level == "warning"' "${signalTarget}" >/dev/null || return 1
+                            else
+                                [[ ! -e "${signalTarget}" ]] || return 1
+                            fi
+                            [[ "${signalPhase}" != reload || "$(<"${signalCalls}")" == $'new\nold' ]] || return 1
+                            [[ "${signalPhase}" == reload || ! -s "${signalCalls}" ]] || return 1
+                            if [[ "${signalRecovery}" == reload-fail ]]; then
+                                [[ -n "${signalBackups}" && "${signalBackups}" != *$'\n'* ]] || return 1
+                                jq -e '.log.disabled == true and .log.level == "warning"' "${signalBackups}" >/dev/null || return 1
+                                grep -q '已恢复旧配置，但 sing-box 重载仍失败' "${signalErrors}" || return 1
+                            else
+                                [[ -z "${signalBackups}" && ! -s "${signalErrors}" ]] || return 1
+                            fi
+                        fi
+                        ! find "${caseRoot}/config" -maxdepth 1 \( -name '.log.json.log.*' -o -name '.log.json.restore.*' \) | grep -q . || return 1
+                    done
+                done
+            done
+        done
     ) || return 1
     return 0
 )
