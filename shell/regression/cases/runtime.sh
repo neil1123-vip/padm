@@ -85,6 +85,12 @@ runRuntimeTempDirRegression() (
     [[ "$(realityTargetTmpPath padm-reality-target-sing-box-test.log)" == "${tmpRoot}/padm-reality-target-sing-box-test.log" ]]
     [[ "$(realityTargetTmpPath padm-reality-target.XXXXXX)" == "${tmpRoot}/padm-reality-target.XXXXXX" ]]
 
+    mv() {
+        local sourceFile=${@: -2:1} targetFile=${@: -1}
+        # 配置提交必须同目录重命名，不能依赖跨文件系统复制。
+        [[ "${sourceFile%/*}" == "${targetFile%/*}" ]] || return 1
+        command mv "$@"
+    }
     printf '{"ok":true}\n' | writeGeneratedJsonFile "${jsonFile}" padm-runtime-json
     jq -e '.ok == true' "${jsonFile}" >/dev/null
     if regressionFindHasMatches "${tmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-runtime-json.*'; then
@@ -92,6 +98,8 @@ runRuntimeTempDirRegression() (
     fi
     printf '{"nested":true}\n' | writeGeneratedJsonFile "${nestedJsonFile}" padm-runtime-json
     jq -e '.nested == true' "${nestedJsonFile}" >/dev/null
+    unset -f mv
+    ! regressionFindHasMatches "${targetRoot}" -name '*.padm-runtime-json.*'
 
     crontab() {
         printf '%s\n' "$1" >"${crontabPathMarker}"
