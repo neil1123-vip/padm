@@ -18,7 +18,7 @@
 | 2. 菜单与可信首次配置 | 2A–2C 已实现；本地 PTY、事务和 Linux 权限通过，真实发布/连通待验 | 安装后进入菜单、独立命令生命周期、无需手填镜像的首次配置 |
 | 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2–3C.12 基础入口已通过本地与 amd64 传输验收，3D.1 参数重生成、3D.2 当前目标站菜单已接入，3D.3c 受管共存、3D.3d1 桥接可达宿主网站和 3D.3d2 宿主回环已通过本地/真实 Desktop 验收 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
 | 4. 用户、订阅与服务维护 | 4A.1–4A.4、4B.1–4B.2 已交付；4C.1–4C.2 已实现，4C.3a–4C.3c 归属、健康与主控事务底座已补，连接与管理入口继续推进 | 稳定分享身份与双核心认证/统计、本机用户业务、多服务器后端、分范围备份恢复、核心运维 |
-| 5. 站点、路由与宿主集成 | 5A.1–5A.3b、5B.1–5B.3e 本地合同及双核心双栈出站/解析/域名、IP、明文 BT 与 CN 预设验收已通过；继续 5B 其余路由与 5C 宿主集成 | 站点管理、内部能力、规则所有权及可撤销宿主操作 |
+| 5. 站点、路由与宿主集成 | 5A.1–5A.3b、5B.1–5B.4a 本地合同及双核心双栈出站/解析/域名、IP、明文 BT、CN 预设与 IPv6 bridge 验收已通过；继续 WARP、5B 其余路由与 5C 宿主集成 | 站点管理、内部能力、规则所有权及可撤销宿主操作 |
 | 6. 发布与完整验收 | 未开始 | 迁移文档、真实 Linux 与双架构证据、受门禁保护的 Release |
 
 当前机器可读支持状态以
@@ -2037,6 +2037,48 @@ Docker 的独立所有权不等同于完全复制原生历史编辑语义。
 证据 `.tmp-docker-routing-5b3e-evidence.md`；单模式/off 真实验收仅 IPv4，
 完整区域管理与 `206` 仍 `deferred`，公网分类源、真实 CN 数据、arm64、
 可信发布、真实宿主及最终目的过滤待适用验收。
+
+#### 5B.4a IPv6 域名出站与受管网络
+
+独立 v3 `.routing.ipv6` 保存 `{mode:"selective|global",domains:[...]}`，
+能力门禁 `x-padm-routing-ipv6`；selective 为 1–256 条唯一规范四类域名规则，
+global 必须为空列表；关闭删除子项而非保存 `off`。
+菜单 `17` 的 `19` 和 CLI `--ipv6 <selective|global> [--ipv6-domains <CSV>]`、
+`--ipv6-off` 复用现有编辑事务，非法组合在 preflight 和加锁前拒绝。
+Direct、域名/IP/BT Block 优先于选择性 IPv6，选择性 IPv6 优先于 SOCKS；
+global 仅定义剩余默认出口，显式 SOCKS 规则保持，全局 SOCKS 与 global IPv6 互斥。
+Xray 使用 `ForceIPv6`，sing-box 使用 `ipv6_only`，仍沿用原 hosts/DNS 分流来源；
+只使用 AAAA 地址、不回退使用 A，系统 local resolver 可以查询 A。
+IPv4-only hosts 实际拒绝，IPv6 hosts 成功；字面 IPv4 不转换，也不将此能力视为 IPv4 防火墙。
+IP Block 沿用 AsIs，不提前解析或在解析后复查；普通导入仍冻结整个 routing。
+功能签名提交 `22a541f3 feat(docker): add owned IPv6 domain egress routing`。
+
+保留原 default 网络，启用时仅核心附着额外 `padm-docker-ipv6` bridge，
+启用 IPv6、自动 IPAM、精确项目/组件/Compose 标签，无固定 subnet 或新增 cap/device/端口。
+已有异属网络拒绝使用，清理仅删除归属完整匹配且空闲的网络，不强制断开任何容器。
+候选、取消、切换、失败恢复、回滚、down 和评估隔离均保留正确网络归属；
+普通非 IPv6 操作不增加网络查询。TUN/TProxy host-network 仍拒绝 routing。
+
+Linux amd64 合同定向 `24.725` 秒、菜单 PTY `30.487` 秒通过；
+完整 Docker `31/31`、`295.183` 秒、Jobs `6`，ci `39.780` 秒、Jobs `3`，
+相同源码内容实际执行、未命中缓存，排队 `358` / `262546 ms` 单列。
+随后 Reality 部分服务恢复关闭网络补丁经 IPv6 合同 `28.514` 秒、
+phase6 `27.841` 秒补验通过，不把先前完整快照计作该补丁的完整回归。
+隔离 nested daemon 真实回归双核心 × control/selective/global/off，共 8 次核心启动；
+实际 IPv6 默认路由、非回环核心出站、双 A/AAAA TCP/UDP、A-only 零 IPv4/代理连接、
+hosts、字面 IPv4、Direct/Block/IP/BT/SOCKS 优先级、关闭恢复与网络归属清理通过。
+外层测试权限仅精确 selector 获取，不挂宿主 Socket、不开 host network 或宿主端口；
+核心/夹具 cap_drop ALL、只读、UID 10001，无设备映射。
+最后真实回归 `36.963` 秒，SIGTERM 正常退出消除固定 10 秒强杀等待；
+相比先前成功轮 `50.248` 秒约降 `26.4%`，断言未减，不将全部差异归因于该优化。
+复用工具镜像和离线业务镜像归档；缺失 nftables 已从 Debian 官方源补入工具层。
+入口自检、11 Shell Bash/ShellCheck error、Python AST、Schema/features JSON、
+PowerShell AST、diff 检查及独立只读复审通过。
+原生 IPv6 离线查看/卸载、警告续行与 EOF 修复独立签名提交 `71396daf`，
+`ui-full-core` `501 ms` 通过。
+证据 `.tmp-docker-routing-5b4a-evidence.md`；重复源码和核心副本清理，日志与结果保留。
+公网 IPv6、真实宿主、arm64、可信发布与 WARP 未验收，
+完整 routing-tools/internal-206 保持 `deferred`。
 
 ### 5C. 宿主集成与端口跳跃
 
