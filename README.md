@@ -1254,11 +1254,14 @@ Windows 本机使用 PowerShell 7.3 或更新版本运行专用 Docker Linux 回
 ```powershell
 .\shell\regression\run-docker.ps1 -Selector fast
 .\shell\regression\run-docker.ps1 -Selector ui-subscription-workflow-focused
+.\shell\regression\run-docker.ps1 -Selector docker-routing-domains-workflow
 .\shell\regression\run-docker.ps1 -Selector ci -Jobs 3
 ```
 
 普通定向 selector 默认 `-Jobs 2`，完整 `ci`、`ci-pr`、`all` 默认 `-Jobs 3`，
 完整 `docker-contracts` 默认 `-Jobs 6`（支持 1–8）。
+Direct/Block CSV 或菜单派发改动优先使用 `docker-routing-domains-workflow` 和 `docker-menu`；
+工作流定向复用原事务断言，不替代 Schema、生成器、其它路由矩阵和真实流量验收。
 各任务先运行匹配改动的定向回归，集成完成后集中执行完整回归。
 入口归档当前工作区的已跟踪文件和未忽略的新文件，包含未提交修改，不包含 `.git`
 和 `.tmp-*`；源码、`TMPDIR`、`HOME` 在容器内部，不挂载 Windows 工作目录。

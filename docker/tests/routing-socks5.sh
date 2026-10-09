@@ -191,6 +191,8 @@ jq '.routing.warp.family = "ipv6"' "${TEST_ROOT}/warp-owner.json" \
 jq --slurpfile warp "${WARP_INPUT}" '.routing.warp = ($warp[0] | .mode="global" | .domains=[])' \
     "${TEST_ROOT}/domains.json" >"${TEST_ROOT}/warp-global-owner.json"
 
+# 域名工作流定向复用夹具，完整入口仍执行全部独立矩阵。
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-workflow ]]; then
 # 同批正反输入由两份校验合同独立判断，避免 Schema 与生产校验分歧。
 python3 - "${PROJECT_ROOT}" "${TEST_ROOT}" <<'PY'
 import copy
@@ -1192,6 +1194,7 @@ done
         done
     done
 )
+fi
 
 snapshot() (
     cd "${root}"
@@ -1236,6 +1239,8 @@ runStatus() {
 assertClean
 jq -cn --arg uuid "${UUID}" '{schema_version:1,accounts:{($uuid):{
   name:"routing",upload:17,download:19,limit_bytes:0,baseline:{}}}}' | dockerTrafficWriteState
+# 域名工作流保留非空流量和原事务断言，只跳过其它能力的生命周期。
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-workflow ]]; then
 # 中继交接恢复只 stop 部分服务，没有 Compose down，仍须清理 IPv6→off 的空辅助网络。
 (
     trap 'dockerReleaseDeploymentLock' EXIT
@@ -1853,6 +1858,7 @@ for core in xray sing-box; do
 done
 jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload == 17 and .accounts[$uuid].download == 19' \
     "${root}/data/traffic/state.json" >/dev/null || fail '路由编辑清空流量累计'
+fi
 
 # 路由子项共用私有文件与候选事务，每次编辑只替换自己的字段。
 before=$(snapshot)

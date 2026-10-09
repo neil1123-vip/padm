@@ -1237,6 +1237,11 @@ bash shell/validate_install.sh --online example.com
 
 All regressions use the selector dispatcher and fall into three levels:
 
+For Direct/Block CSV or Docker menu dispatch changes on Windows, run
+`.\shell\regression\run-docker.ps1 -Selector docker-routing-domains-workflow`
+and `docker-menu` first. The focused selector reuses the transaction assertions;
+it does not replace Schema, generator, other routing matrices, or real traffic checks.
+
 | Level | Command | Purpose |
 | --- | --- | --- |
 | Fast feedback | `bash shell/subscription_groups_regression.sh fast` | Representative checks after small changes; use `fast-full` for the complete fast set. |
