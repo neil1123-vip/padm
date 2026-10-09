@@ -28,6 +28,7 @@ COMPOSE_LOG=${TEST_ROOT}/compose.log
 INPUT=${PRIVATE_ROOT}/socks5.json
 DOMAINS_INPUT=${PRIVATE_ROOT}/socks5-domains.json
 DOMAINS='["full:exact.example.com","full:other.example.com","domain:example.net","keyword:video","geosite:cn","geosite:category-ads-all"]'
+DOMAINS_CSV=' Full:Exact.Example.Com , FULL:Other.Example.Com , Example.NET , KEYWORD:Video , geosite:CN , geosite:category-ads-all , example.net , Full:Exact.Example.Com '
 DNS_INPUT=${PRIVATE_ROOT}/dns.json
 HOSTS_INPUT=${PRIVATE_ROOT}/hosts.json
 DNS='{"server":"203.0.113.53","port":5353,"domains":["full:dns.example.com","domain:dns.example.net","keyword:dns-video","geosite:cn"]}'
@@ -1875,6 +1876,39 @@ for kind in dns hosts direct block block-ips; do
     printf '{}\n' >"${PRIVATE_ROOT}/bad.json"
     runEdit 15 "--${kind}" "${PRIVATE_ROOT}/bad.json" --preview
 done
+boundaryCsv=$(jq -nr '[range(0;256) | "boundary-\(.).example.com"] | join(",")')
+overlimitCsv="${boundaryCsv},boundary-256.example.com"
+duplicateBoundaryCsv="${boundaryCsv},BOUNDARY-0.EXAMPLE.COM"
+for kind in direct block; do
+    option="--${kind}-domains"
+    runEdit 0 "${option}" "${DOMAINS_CSV}" --preview
+    runEdit 0 "${option}" "${boundaryCsv}" --preview
+    runEdit 0 "${option}" "${duplicateBoundaryCsv}" --preview
+    runEdit 2 "${option}"
+    runEdit 2 "${option}" 'example.net'
+    runEdit 2 "${option}" --preview
+    runEdit 2 "${option}" "${DOMAINS_CSV}" --confirm invalid
+    for csv in '' ' ' ',' ',example.net' 'example.net,' 'example.net,,other.example.net' \
+        'CN' 'keyword:' 'keyword:a b' 'keyword:a/b' 'keyword:a:b' 'regexp:.*' 'geoip:cn' \
+        'full:-bad.example.com' 'domain:a..example.com' 'full:example.com.' 'geosite:a.b' \
+        "${overlimitCsv}"; do
+        runEdit 2 "${option}" "${csv}" --preview
+    done
+    for other in '--direct-domains' '--block-domains'; do
+        runEdit 2 "${option}" "${DOMAINS_CSV}" "${other}" 'other.example.net' --preview
+    done
+    runEdit 2 "${option}" "${DOMAINS_CSV}" "--${kind}" "${PRIVATE_ROOT}/${kind}.json" --preview
+    runEdit 2 "--${kind}" "${PRIVATE_ROOT}/${kind}.json" "${option}" "${DOMAINS_CSV}" --preview
+    runEdit 2 "${option}" "${DOMAINS_CSV}" "--${kind}-off" --preview
+    runEdit 2 "--${kind}-off" "${option}" "${DOMAINS_CSV}" --preview
+    runEdit 2 "${option}" "${DOMAINS_CSV}" --dns "${DNS_INPUT}" --preview
+    runEdit 2 "${option}" "${DOMAINS_CSV}" --socks5-off --preview
+    runEdit 2 --socks5-off "${option}" "${DOMAINS_CSV}" --preview
+    runEdit 2 "${option}" "${DOMAINS_CSV}" --spec "${TEST_ROOT}/base.json" --preview
+    runEdit 2 "${option}" "${DOMAINS_CSV}" --http01 enable --preview
+    runEdit 2 "${option}" "${DOMAINS_CSV}" --http-relay-off --preview
+    runEdit 2 "${option}" "${DOMAINS_CSV}" --port-alias-default entry-xray base --preview
+done
 runEdit 2 --dns "${DNS_INPUT}" --hosts "${HOSTS_INPUT}" --preview
 runEdit 2 --dns-off --hosts-off --preview
 runEdit 2 --direct "${DIRECT_INPUT}" --block "${BLOCK_INPUT}" --preview
@@ -1955,9 +1989,9 @@ jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload == 17 and .accounts[$uuid].d
     "${root}/data/traffic/state.json" >/dev/null || fail 'DNS/hosts 事务清空流量'
 
 # Direct/Block 沿用相同事务，同时验证同域规则允许共存并保留其它路由子项。
-runEdit 0 --direct "${DIRECT_INPUT}" --confirm PADM-DOCKER-EDIT
+runEdit 0 --direct-domains "${DOMAINS_CSV}" --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile expected "${TEST_ROOT}/direct-only.json" --slurpfile actual "${root}/config/spec.json" \
-    '$actual == $expected' >/dev/null || fail '独立 Direct 开启改变其它规格'
+    '$actual == $expected' >/dev/null || fail 'Direct CSV 新建未规范化四类 matcher 或改变其它规格'
 runStatus 0
 jq -e --argjson domains "${DOMAINS}" '.enabled == true and .direct == {domain_rules:$domains} and
   (has("block") | not)' "${LOG}" >/dev/null || fail 'Direct 状态投影错误'
@@ -1965,7 +1999,7 @@ before=$(snapshot)
 runEdit 15 --spec "${TEST_ROOT}/base.json" --confirm PADM-DOCKER-EDIT
 runEdit 15 --spec "${TEST_ROOT}/block-only.json" --confirm PADM-DOCKER-EDIT
 [[ "$(snapshot)" == "${before}" ]] || fail '普通 --spec 绕过 Direct/Block 冻结'
-runEdit 0 --block "${BLOCK_INPUT}" --confirm PADM-DOCKER-EDIT
+runEdit 0 --block-domains "${DOMAINS_CSV}" --confirm PADM-DOCKER-EDIT
 runStatus 0
 jq -e --argjson domains "${DOMAINS}" '.direct == {domain_rules:$domains} and
   .block == {domain_rules:$domains}' "${LOG}" >/dev/null || fail 'Direct/Block 同域状态未保留两项'
@@ -1993,6 +2027,66 @@ jq -en --slurpfile expected "${TEST_ROOT}/routing-ip-policy.json" --slurpfile ac
     '$actual == $expected' >/dev/null || fail '开启 IP 阻断改变已有子项'
 [[ "$(stat -c '%a %u %h' "${root}/config/spec.json")" == '600 0 1' ]] ||
     fail 'IP 阻断规格未保留私有权限'
+# CSV 是整组替换；其它子项、核心身份、分享内容与累计流量保持原样。
+csvReplacement=' geosite:CN , KEYWORD:Next_Video , Full:New.Example.ORG , New.Example.NET , full:new.example.org '
+csvReplacementDomains='["geosite:cn","keyword:next_video","full:new.example.org","domain:new.example.net"]'
+for kind in direct block; do
+    option="--${kind}-domains"
+    before=$(snapshot)
+    runEdit 0 "${option}" "${csvReplacement}" --preview
+    jq --arg kind "${kind}" --argjson domains "${csvReplacementDomains}" \
+        '.routing[$kind].domains=$domains' "${root}/config/spec.json" >"${TEST_ROOT}/csv-import.json"
+    runEdit 15 --spec "${TEST_ROOT}/csv-import.json" --confirm PADM-DOCKER-EDIT
+    [[ "$(snapshot)" == "${before}" ]] || fail "${kind}: CSV 预览或普通 spec 导入改变部署"
+    cp -- "${root}/config/spec.json" "${TEST_ROOT}/csv-before.json"
+    for core in xray sing-box; do
+        cp -- "${root}/config/${core}/config.json" "${TEST_ROOT}/csv-${core}.before"
+    done
+    (dockerMain protocol links) >"${TEST_ROOT}/csv-links.before"
+    sha256sum "${root}/data/traffic/state.json" >"${TEST_ROOT}/csv-traffic.before"
+    find "${root}/data/subscription" -type f -print0 | sort -z | xargs -0 -r sha256sum \
+        >"${TEST_ROOT}/csv-subscription.before"
+    runEdit 0 "${option}" "${csvReplacement}" --confirm PADM-DOCKER-EDIT
+    jq -en --arg kind "${kind}" --argjson domains "${csvReplacementDomains}" \
+        --slurpfile old "${TEST_ROOT}/csv-before.json" --slurpfile new "${root}/config/spec.json" '
+      $new[0] == ($old[0] | .routing[$kind].domains=$domains)
+    ' >/dev/null || fail "${kind}: CSV 没有整组替换或改写其它路由、核心及订阅规格"
+    runStatus 0
+    jq -e --arg kind "${kind}" --argjson domains "${csvReplacementDomains}" \
+        '.[$kind].domain_rules==$domains' "${LOG}" >/dev/null ||
+        fail "${kind}: CSV 状态不是规范化后的有序数组"
+    for core in xray sing-box; do
+        jq -en --arg core "${core}" --slurpfile old "${TEST_ROOT}/csv-${core}.before" \
+            --slurpfile new "${root}/config/${core}/config.json" '
+          if $core == "xray" then ($old[0]|del(.routing)) == ($new[0]|del(.routing))
+          else ($old[0]|del(.route)) == ($new[0]|del(.route)) end
+        ' >/dev/null || fail "${kind}: ${core} CSV 替换改变核心认证、监听或其它模板字段"
+    done
+    (dockerMain protocol links) >"${TEST_ROOT}/csv-links.after"
+    cmp -s "${TEST_ROOT}/csv-links.before" "${TEST_ROOT}/csv-links.after" ||
+        fail "${kind}: CSV 替换改变分享 URI"
+    sha256sum -c "${TEST_ROOT}/csv-traffic.before" >/dev/null ||
+        fail "${kind}: CSV 替换改变流量累计"
+    find "${root}/data/subscription" -type f -print0 | sort -z | xargs -0 -r sha256sum \
+        >"${TEST_ROOT}/csv-subscription.after"
+    cmp -s "${TEST_ROOT}/csv-subscription.before" "${TEST_ROOT}/csv-subscription.after" ||
+        fail "${kind}: CSV 替换改变已发布订阅"
+    before=$(snapshot)
+    for failure in health-fail int term; do
+        MODE=${failure}
+        rm -f -- "${TEST_ROOT}/failed-once"
+        expected=14
+        [[ "${failure}" != int ]] || expected=130
+        [[ "${failure}" != term ]] || expected=143
+        runEdit "${expected}" "${option}" 'replacement.example.org' --confirm PADM-DOCKER-EDIT
+        [[ "$(snapshot)" == "${before}" ]] ||
+            fail "${kind}/${failure}: CSV 替换未恢复路由、核心、订阅和流量快照"
+    done
+    MODE=ok
+    runEdit 0 "--${kind}" "${PRIVATE_ROOT}/${kind}.json" --confirm PADM-DOCKER-EDIT
+done
+jq -en --slurpfile expected "${TEST_ROOT}/routing-ip-policy.json" --slurpfile actual "${root}/config/spec.json" \
+    '$actual == $expected' >/dev/null || fail 'CSV 替换后原 JSON 管理接口未恢复规则集合'
 before=$(snapshot)
 runEdit 15 --spec "${TEST_ROOT}/routing-policy.json" --confirm PADM-DOCKER-EDIT
 for failure in health-fail int term; do

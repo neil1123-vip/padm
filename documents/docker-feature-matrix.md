@@ -170,7 +170,7 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 | 203 | WireGuard | 订阅与用户 / 路由与访问控制 | `host-integrated` | `net-wireguard`、host network、`NET_ADMIN`。 |
 | 204 | TUN | 路由与访问控制 | `host-integrated` | `net-transparent`、host network、`NET_ADMIN`、`/dev/net/tun`。 |
 | 205 | Redirect/TProxy | 路由与访问控制 | `host-integrated` | `net-transparent`、host network、`NET_ADMIN`。 |
-| 206 | DNS/Direct/Block | 路由与访问控制 -> DNS/hosts | `deferred` | 5B.3–5B.4 已交付 DNS/hosts、域名 Direct/Block、目的 IP、明文 BT、CN 预设、IPv6 与 WARP 子合同和事务；完整区域策略、规则编辑与冲突检测待补。 |
+| 206 | DNS/Direct/Block | 路由与访问控制 -> DNS/hosts | `deferred` | 5B.3–5B.4 已交付 DNS/hosts、域名 Direct/Block（私有 JSON 或 CSV 整组替换）、目的 IP、明文 BT、CN 预设、IPv6 与 WARP 子合同和事务；完整区域策略、逐条规则编辑与冲突检测待补。 |
 | 207 | Tunnel/dokodemo-door | 路由与访问控制 -> 访问控制 | `deferred` | 5B.5c–5B.5d 提供已有受管入口的额外 Compose 发布端口及逐入口默认分享选择，复用认证/统计及 TLS/SNI 前端；宿主集成和公网/双架构验收未交付，不做任意目的转发。 |
 
 ## 功能和宿主边界
@@ -202,7 +202,7 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 | `internal-203-wireguard` | 订阅与用户 / 路由 -> WireGuard | `host-integrated` | `net-wireguard` | host + `NET_ADMIN` | 接口由宿主内核拥有；4C.3a 核验真实归属后预检/健康/撤销，活动旧式标记需先正常停止旧容器。 |
 | `internal-204-tun` | 路由与访问控制 -> TUN | `host-integrated` | `net-transparent` | host + `NET_ADMIN` + `/dev/net/tun` | 依赖宿主设备和转发规则。 |
 | `internal-205-redirect-tproxy` | 路由与访问控制 -> Redirect/TProxy | `host-integrated` | `net-transparent` | host + `NET_ADMIN` | 依赖宿主路由和防火墙。 |
-| `internal-206-routing-rules` | 路由与访问控制 -> DNS/Direct/Block | `deferred` | 核心 | bridge | 5B.3–5B.4 已交付 DNS/hosts、域名 Direct/Block、目的 IP、明文 BT、CN 预设、IPv6 和 WARP 子合同、双核心适配及专项事务；完整区域策略、规则编辑、冲突检测和适用公网验收待补。 |
+| `internal-206-routing-rules` | 路由与访问控制 -> DNS/Direct/Block | `deferred` | 核心 | bridge | 5B.3–5B.4 已交付 DNS/hosts、域名 Direct/Block（私有 JSON 或 CSV 整组替换）、目的 IP、明文 BT、CN 预设、IPv6 和 WARP 子合同、双核心适配及专项事务；完整区域策略、逐条规则编辑、冲突检测和适用公网验收待补。 |
 | `internal-207-access-control` | 协议与入口 -> 额外入口端口 | `deferred` | 原业务核心/Nginx | bridge | 5B.5c–5B.5d 独立 `port_aliases`、菜单/CLI 增删/状态/默认分享与候选回滚；同入口认证/统计，TLS/SNI 前端不旁路，URI/主订阅/分享组逐入口选择已有别名，恢复或删除后回退 base，不增加节点。宿主集成及适用公网/IPv6/arm64 验收待补，拒绝 Fail2ban/TUN/TProxy/host-network。 |
 | `interactive-menu` | 全部主菜单 | `deferred` | 无 | 宿主 CLI | 已有菜单、状态、启停日志、可信首配、规格编辑/完整旧输入接入、多入口及主副核心共存；完整协议/用户/维护管理、真实发布和双架构连通待验。 |
 | `core-lifecycle` | 核心与服务 | `supported` | 核心 profile | 宿主 CLI | 基础 `status/up/down/restart/logs/update/rollback/validate` 已可用，不代表原生全部升级管理。 |

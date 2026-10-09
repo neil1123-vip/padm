@@ -744,8 +744,8 @@ dockerMenuRouting() {
         printf '%s\n' '1. 启用 SOCKS5 出站' '2. 关闭 SOCKS5 出站' '3. 查看路由状态' \
             '4. 替换 SOCKS5 域名规则' '5. 切换 SOCKS5 全局出站' \
             '6. 设置 DNS 分流' '7. 关闭 DNS 分流' '8. 设置 DNS/hosts 覆盖' \
-            '9. 关闭 DNS/hosts 覆盖' '10. 设置 Direct 直连例外' \
-            '11. 关闭 Direct 直连例外' '12. 设置 Block 域名阻断' \
+            '9. 关闭 DNS/hosts 覆盖' '10. 替换 Direct 直连例外' \
+            '11. 关闭 Direct 直连例外' '12. 替换 Block 域名阻断' \
             '13. 关闭 Block 域名阻断' '14. 设置 IP/CIDR 阻断' \
             '15. 关闭 IP/CIDR 阻断' '16. 启用 BT 协议阻断' \
             '17. 关闭 BT 协议阻断' '18. 区域阻断策略' '19. IPv6 域名出站' '20. WARP 出站' \
@@ -765,7 +765,7 @@ dockerMenuRouting() {
         2) dockerMenuRun edit --socks5-off || true ;;
         3) dockerMenuRun protocol routing-status || true ;;
         4)
-            dockerSetupRead input 'SOCKS5 域名规则（逗号分隔；domain:/full:/keyword:/geosite:）：' &&
+            dockerSetupRead input 'SOCKS5 域名规则（逗号分隔；domain:/full:/keyword:/geosite:，0 返回）: ' &&
                 [[ -n "${input}" ]] || continue
             dockerMenuRun edit --socks5-domains "${input}" || true
             ;;
@@ -783,12 +783,12 @@ dockerMenuRouting() {
             ;;
         9) dockerMenuRun edit --hosts-off || true ;;
         10|12)
-            dockerSetupRead input 'root 私有域名规则 JSON 文件绝对路径（0 返回）: ' &&
+            dockerSetupRead input '替换域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
                 [[ -n "${input}" ]] || continue
             if [[ "${choice}" == 10 ]]; then
-                dockerMenuRun edit --direct "${input}" || true
+                dockerMenuRun edit --direct-domains "${input}" || true
             else
-                dockerMenuRun edit --block "${input}" || true
+                dockerMenuRun edit --block-domains "${input}" || true
             fi
             ;;
         11) dockerMenuRun edit --direct-off || true ;;

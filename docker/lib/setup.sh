@@ -1345,6 +1345,7 @@ dockerEditCommand() {
     local siteMode= siteSource= siteUrl=
     local alpnListener= alpnOrder=
     local http01= socks5= socks5File= socks5Domains= routingKind= routingFile= routingAction=
+    local routingDomains='[]'
     local httpRelay= httpRelayFile=
     local portAlias= portAliasListener= portAliasPort=
     local regionMode= regionAllow='[]' regionAllowSet=0
@@ -1404,6 +1405,16 @@ dockerEditCommand() {
             [[ -z "${socks5}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             socks5=global
             shift
+            ;;
+        --direct-domains|--block-domains)
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${routingKind}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            routingKind=${1#--}
+            routingKind=${routingKind%-domains}
+            routingDomains=$(dockerSocks5DomainsNormalize "$2") ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            routingAction=domains
+            shift 2
             ;;
         --http-relay)
             [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${httpRelay}" ]] ||
@@ -1750,6 +1761,9 @@ dockerEditCommand() {
         elif [[ "${routingKind}" == ipv6 && "${routingAction}" == enable ]]; then
             jq --arg mode "${ipv6Mode}" --argjson domains "${ipv6Domains}" \
                 '.routing.ipv6 = {mode:$mode,domains:$domains}' "${draft}" >"${draft}.next"
+        elif [[ "${routingAction}" == domains ]]; then
+            jq --arg kind "${routingKind}" --argjson domains "${routingDomains}" \
+                '.routing[$kind].domains = $domains' "${draft}" >"${draft}.next"
         elif [[ "${routingAction}" == enable ]]; then
             dockerEditPrivateInputCopy "${routingFile}" "${workspace}/${routingKind}.json" "${routingKind}" || {
                 dockerError '路由输入须为 root 所有的 0600 单链接普通 JSON 文件，最多 64 KiB，祖先目录不得可写或含链接'

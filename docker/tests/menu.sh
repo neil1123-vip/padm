@@ -607,7 +607,7 @@ runRoutingDriver() {
         targetReply 'Docker 路由与出站' $'2\n'
         targetReply 'Docker 路由与出站' $'3\n'
         targetReply 'Docker 路由与出站' $'4\n'
-        targetReply 'SOCKS5 域名规则（逗号分隔；domain:/full:/keyword:/geosite:）' $'Example.NET, full:Exact.Example.Com, geosite:cn\n'
+        targetReply 'SOCKS5 域名规则（逗号分隔；domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET, full:Exact.Example.Com, geosite:cn\n'
         targetReply 'Docker 路由与出站' $'5\n'
         targetReply 'Docker 路由与出站' $'3\n'
         targetReply 'Docker 路由与出站' $'6\n'
@@ -617,10 +617,10 @@ runRoutingDriver() {
         targetReply 'root 私有 hosts JSON 文件绝对路径（0 返回）' $'/root/padm-hosts.json\n'
         targetReply 'Docker 路由与出站' $'9\n'
         targetReply 'Docker 路由与出站' $'10\n'
-        targetReply 'root 私有域名规则 JSON 文件绝对路径（0 返回）' $'/root/padm-direct.json\n'
+        targetReply '替换域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\n'
         targetReply 'Docker 路由与出站' $'11\n'
         targetReply 'Docker 路由与出站' $'12\n'
-        targetReply 'root 私有域名规则 JSON 文件绝对路径（0 返回）' $'/root/padm-block.json\n'
+        targetReply '替换域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\n'
         targetReply 'Docker 路由与出站' $'13\n'
         targetReply 'Docker 路由与出站' $'14\n'
         targetReply 'root 私有 IP/CIDR 规则 JSON 文件绝对路径（0 返回）' $'/root/padm-block-ips.json\n'
@@ -666,9 +666,9 @@ runRoutingDriver() {
         targetReply 'Docker 路由与出站' $'1\n'
         targetReply 'root 私有 SOCKS5 JSON 文件绝对路径（0 返回）' $'\n'
         targetReply 'Docker 路由与出站' $'4\n'
-        targetReply 'SOCKS5 域名规则（逗号分隔；domain:/full:/keyword:/geosite:）' $'0\n'
+        targetReply 'SOCKS5 域名规则（逗号分隔；domain:/full:/keyword:/geosite:，0 返回）' $'0\n'
         targetReply 'Docker 路由与出站' $'4\n'
-        targetReply 'SOCKS5 域名规则（逗号分隔；domain:/full:/keyword:/geosite:）' $'\n'
+        targetReply 'SOCKS5 域名规则（逗号分隔；domain:/full:/keyword:/geosite:，0 返回）' $'\n'
         targetReply 'Docker 路由与出站' $'6\n'
         targetReply 'root 私有 DNS JSON 文件绝对路径（0 返回）' $'0\n'
         targetReply 'Docker 路由与出站' $'6\n'
@@ -679,9 +679,9 @@ runRoutingDriver() {
         targetReply 'root 私有 hosts JSON 文件绝对路径（0 返回）' $'\n'
         for choice in 10 12; do
             targetReply 'Docker 路由与出站' "${choice}"$'\n'
-            targetReply 'root 私有域名规则 JSON 文件绝对路径（0 返回）' $'0\n'
+            targetReply '替换域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'0\n'
             targetReply 'Docker 路由与出站' "${choice}"$'\n'
-            targetReply 'root 私有域名规则 JSON 文件绝对路径（0 返回）' $'\n'
+            targetReply '替换域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'\n'
         done
         targetReply 'Docker 路由与出站' $'14\n'
         targetReply 'root 私有 IP/CIDR 规则 JSON 文件绝对路径（0 返回）' $'0\n'
@@ -716,7 +716,7 @@ runRoutingDriver() {
         ;;
     domains-eof)
         targetReply 'Docker 路由与出站' $'4\n'
-        targetReply 'SOCKS5 域名规则（逗号分隔；domain:/full:/keyword:/geosite:）' $'\004'
+        targetReply 'SOCKS5 域名规则（逗号分隔；domain:/full:/keyword:/geosite:，0 返回）' $'\004'
         ;;
     dns-file-eof)
         targetReply 'Docker 路由与出站' $'6\n'
@@ -726,13 +726,19 @@ runRoutingDriver() {
         targetReply 'Docker 路由与出站' $'8\n'
         targetReply 'root 私有 hosts JSON 文件绝对路径（0 返回）' $'\004'
         ;;
-    direct-file-eof|block-file-eof)
-        if [[ "${scenario}" == direct-file-eof ]]; then
+    direct-domains-eof|block-domains-eof)
+        if [[ "${scenario}" == direct-domains-eof ]]; then
             targetReply 'Docker 路由与出站' $'10\n'
         else
             targetReply 'Docker 路由与出站' $'12\n'
         fi
-        targetReply 'root 私有域名规则 JSON 文件绝对路径（0 返回）' $'\004'
+        targetReply '替换域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'\004'
+        ;;
+    direct-block-invalid)
+        for choice in 10 12; do
+            targetReply 'Docker 路由与出站' "${choice}"$'\n'
+            targetReply '替换域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'regexp:bad\n'
+        done
         ;;
     block-ips-file-eof)
         targetReply 'Docker 路由与出站' $'14\n'
@@ -1049,6 +1055,7 @@ dockerInstallRoot() { printf '%s\n' "${TLS_WIZARD_ROOT}"; }
 dockerDomainIsValid() { [[ "$1" == ws.example.com || "$1" == other.example.com ]]; }
 dockerEmailIsValid() { [[ "$1" == admin@example.com ]]; }
 dockerConfigureSpecValidate() { return 0; }
+dockerConfigureSchemaFile() { printf '%s\n' "${PROJECT_ROOT}/docker/contracts/configure.schema.json"; }
 dockerManagedSpecMatchesDeployment() { return 0; }
 dockerResolveOpsImage() { printf 'fixture\n'; }
 recordAction() {
@@ -1103,6 +1110,8 @@ edit)
         "${2:-}" == --port-alias-default ]]; then
         [[ "${2:-}" == --port-alias-default && "${4:-}" == base ]] ||
             [[ "${4:-}" =~ ^[0-9]{1,5}$ ]] || exit 2
+    elif [[ "${2:-}" == --direct-domains || "${2:-}" == --block-domains ]]; then
+        dockerSocks5DomainsNormalize "${3:-}" >/dev/null || exit 2
     fi
     exit "${SITE_EDIT_STATUS:-0}"
     ;;
@@ -1235,7 +1244,7 @@ for siteCase in flow cancel static-eof redirect-eof alpn-diagnose-eof alpn-recom
 done
 unset SITE_MENU_RECORD_STATUS SITE_EDIT_STATUS SITE_ALPN_STATUS
 
-for routingCase in flow cancel file-eof domains-eof dns-file-eof hosts-file-eof direct-file-eof block-file-eof block-ips-file-eof region-eof ipv6-eof warp-eof http-relay-eof failed return; do
+for routingCase in flow cancel file-eof domains-eof dns-file-eof hosts-file-eof direct-domains-eof block-domains-eof direct-block-invalid block-ips-file-eof region-eof ipv6-eof warp-eof http-relay-eof failed return; do
     : >"${TLS_WIZARD_ACTIONS}"
     export SITE_EDIT_STATUS=0 ROUTING_STATUS=0
     [[ "${routingCase}" != failed ]] || { SITE_EDIT_STATUS=15; ROUTING_STATUS=17; }
@@ -1243,12 +1252,17 @@ for routingCase in flow cancel file-eof domains-eof dns-file-eof hosts-file-eof 
     expectedRouting=
     case "${routingCase}" in
     flow|failed)
-        expectedRouting=$'edit --socks5 /root/padm-socks5.json\nedit --socks5-off\nprotocol routing-status\nedit --socks5-domains Example.NET, full:Exact.Example.Com, geosite:cn\nedit --socks5-global\nprotocol routing-status\nedit --dns /root/padm-dns.json\nedit --dns-off\nedit --hosts /root/padm-hosts.json\nedit --hosts-off\nedit --direct /root/padm-direct.json\nedit --direct-off\nedit --block /root/padm-block.json\nedit --block-off\nedit --block-ips /root/padm-block-ips.json\nedit --block-ips-off\nedit --block-bt\nedit --block-bt-off'
+        expectedRouting=$'edit --socks5 /root/padm-socks5.json\nedit --socks5-off\nprotocol routing-status\nedit --socks5-domains Example.NET, full:Exact.Example.Com, geosite:cn\nedit --socks5-global\nprotocol routing-status\nedit --dns /root/padm-dns.json\nedit --dns-off\nedit --hosts /root/padm-hosts.json\nedit --hosts-off\nedit --direct-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --direct-off\nedit --block-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --block-off\nedit --block-ips /root/padm-block-ips.json\nedit --block-ips-off\nedit --block-bt\nedit --block-bt-off'
         expectedRouting+=$'\nedit --region both --region-allow Example.NET, full:Exact.Example.Com\nedit --region domain\nedit --region ip\nedit --region-off'
         expectedRouting+=$'\nedit --ipv6 selective --ipv6-domains Example.NET, full:Exact.Example.Com\nedit --ipv6 global\nedit --ipv6-off\nprotocol routing-status'
         expectedRouting+=$'\nedit --warp /root/padm-warp.json\nedit --warp-off\nprotocol routing-status'
         expectedRouting+=$'\nedit --http-relay /root/padm-http-relay.json\nedit --http-relay-off\nprotocol routing-status'
         grep -Fq '无效选项' "${CONTROL_LOG}" || fail '路由菜单没有保留无效输入后的操作'
+        ;;
+    direct-block-invalid)
+        expectedRouting=$'edit --direct-domains regexp:bad\nedit --block-domains regexp:bad'
+        [[ "$(grep -Fc '操作失败，退出码: 2' "${CONTROL_LOG}")" -eq 2 ]] ||
+            fail 'Direct/Block 非法 CSV 未显示用法错误并保留菜单'
         ;;
     esac
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedRouting}" ]] ||
@@ -1257,8 +1271,8 @@ for routingCase in flow cancel file-eof domains-eof dns-file-eof hosts-file-eof 
         for label in '17. 路由与出站' '1. 启用 SOCKS5 出站' '2. 关闭 SOCKS5 出站' \
             '3. 查看路由状态' '4. 替换 SOCKS5 域名规则' '5. 切换 SOCKS5 全局出站' \
             '6. 设置 DNS 分流' '7. 关闭 DNS 分流' '8. 设置 DNS/hosts 覆盖' \
-            '9. 关闭 DNS/hosts 覆盖' '10. 设置 Direct 直连例外' '11. 关闭 Direct 直连例外' \
-            '12. 设置 Block 域名阻断' '13. 关闭 Block 域名阻断' '14. 设置 IP/CIDR 阻断' \
+            '9. 关闭 DNS/hosts 覆盖' '10. 替换 Direct 直连例外' '11. 关闭 Direct 直连例外' \
+            '12. 替换 Block 域名阻断' '13. 关闭 Block 域名阻断' '14. 设置 IP/CIDR 阻断' \
             '15. 关闭 IP/CIDR 阻断' '16. 启用 BT 协议阻断' '17. 关闭 BT 协议阻断' \
             '18. 区域阻断策略' '1. 屏蔽 geosite:cn + geoip:cn' '2. 仅屏蔽 geosite:cn' \
             '3. 仅屏蔽 geoip:cn' '4. 关闭区域策略' '19. IPv6 域名出站' \

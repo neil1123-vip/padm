@@ -969,6 +969,19 @@ not resolve domain targets just to match an IP or recheck addresses after DNS/ho
 These changes retain the same private-input and deployment transaction boundaries.
 SOCKS ingress, WARP and complete routing management remain deferred.
 
+Menu `17`, options `10/12`, replaces Direct or Block domain rules using comma-separated
+input. `--direct-domains <CSV>` and `--block-domains <CSV>` use the same normalization:
+trim whitespace, lowercase, preserve first-occurrence order while deduplicating, and
+prefix bare domains with `domain:`. They replace the whole group rather than append
+to historical rules. Empty/invalid items or more than 256 unique rules are rejected;
+use the corresponding off command to clear the group. Private JSON imports through
+`--direct/--block` remain available, and ordinary `--spec` editing still freezes routing.
+
+```bash
+padm-docker edit --direct-domains 'example.org,full:exact.example.net' --preview
+padm-docker edit --block-domains 'keyword:example,geosite:cn' --confirm PADM-DOCKER-EDIT
+```
+
 Menu `17`, options `16–17`, enables or disables detected BitTorrent blocking.
 Optional v3 `.routing.block_bt:true` requires `x-padm-routing-block-bt`; disabling
 removes the field, while `false` and other values are rejected.

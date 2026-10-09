@@ -279,7 +279,11 @@ SOCKS5 匹配目标仍交上游解析，DNS/hosts 不改变上游域名或实际
 普通 `--spec` 编辑不能绕过路由冻结。启用、替换与关闭复用原候选确认、备份和失败/信号恢复。
 `routing-status` 额外返回 DNS 服务器、域名规则和 hosts 映射，不显示 SOCKS5 凭据。
 
-菜单 `17` 提供 Direct 直连例外和 Block 域名阻断，私有 JSON 格式均为
+菜单 `17` 的 `10/12` 分别替换 Direct 直连例外和 Block 域名阻断，可直接输入
+逗号分隔规则；CLI `--direct-domains/--block-domains` 使用相同输入。
+CSV 去首尾空白、转小写、按首次出现去重，裸域名补 `domain:`，
+整组替换而非累加，空项/非法或超过 256 条拒绝；清空请使用对应关闭命令。
+仍保留 root 私有 JSON 导入，格式均为
 `{"domains":["full:exact.example.net","domain:example.org","keyword:example","geosite:cn"]}`。
 规则接受 1–256 条唯一小写 `full/domain/keyword/geosite`，四类保持 OR；
 文件安全要求与 SOCKS5 输入相同。Direct 明确优先于 Block 和全局/域名 SOCKS5，
@@ -290,6 +294,8 @@ SOCKS5 匹配目标仍交上游解析，DNS/hosts 不改变上游域名或实际
 padm-docker edit --direct /root/padm-direct.json --preview
 padm-docker edit --direct /root/padm-direct.json --confirm PADM-DOCKER-EDIT
 padm-docker edit --block /root/padm-block.json --confirm PADM-DOCKER-EDIT
+padm-docker edit --direct-domains 'example.org,full:exact.example.net' --preview
+padm-docker edit --block-domains 'keyword:example,geosite:cn' --confirm PADM-DOCKER-EDIT
 padm-docker edit --direct-off --confirm PADM-DOCKER-EDIT
 padm-docker edit --block-off --confirm PADM-DOCKER-EDIT
 ```
