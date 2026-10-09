@@ -71,3 +71,5 @@ CONNECT 的目标 TLS 不会加密客户端到代理的 Basic 认证头。
 `internal-202` 的完整矩阵继续为 `deferred`。SOCKS `201` 仍未交付：
 sing-box UDP ASSOCIATE 返回容器私网地址和动态端口，仅发布固定 TCP/UDP 同端口
 不能保证回包可达，不能删掉 UDP 语义或伪装为完成。
+5B.5b 实测 Xray 26.3.27 固定 UDP 发布可以连通，但来源 IP 一次认证后在当前进程内保留，
+全部控制连接关闭后新 UDP socket 仍能无认证转发，不能作为完整 SOCKS 会话实现。

@@ -2208,6 +2208,34 @@ SOCKS UDP 探针确认私网动态 `BND.ADDR/BND.PORT` 不能靠固定同端口�
 同 bridge 原始 BND 正对照成功；下一步先解决发布可达与真实来源，
 不能降为 TCP-only 或将 `internal-201` 标为完成。
 
+#### 5B.5b SOCKS UDP 发布与会话鉴权前置验证
+
+未修改生产合同或开放 `201` 菜单。sing-box `v1.14.2` 的动态私网 BND 发布阻塞之外，
+继续验证已有 Xray `26.3.27 d2758a0`，固定源码 commit
+`d2758a023cd7f4174a5a5fa4ff66e487d4342ba0`。
+Agent Reach GitHub CLI 只读核对 `infra/conf/socks.go`、
+`proxy/socks/protocol.go`、`server.go` 和 `udpfilter.go`；
+`settings.ip` 可指定 UDP 回应地址，BND 端口固定为入站端口，但 UDPFilter
+只保留已认证 TCP 来源 IP，不绑定 UDP 端口，也不随控制连接关闭清除。
+此许可保留于该固定版本当前核心进程，不是跨重启持久化状态。
+
+Linux amd64 容器探针使用已有镜像、UID `10001`、只读根和零 capabilities，
+独立服务/客户端 bridge，经 Docker Desktop 宿主同端口 TCP/UDP 发布。
+显式回应地址与固定端口的 TCP CONNECT、三次 UDP ASSOCIATE/echo 均成功。
+安全负例同时证实：首次无认证 UDP 被核心明确拒绝；认证后关闭所有 TCP，
+同客户端新进程/新 UDP socket 不建立控制或认证，仍触达 origin 并收到真实回包。
+第二独立未认证客户端也回包，但此处 hairpin 将来源折叠为同一网关，
+只说明共享 NAT 场景，不外推公网不同 IP 绕过或来源保留。
+
+固定发布连通不等于会话鉴权成立；现有 Xray 不能直接替代 sing-box 交付完整 `201`。
+不降为 TCP-only、不用永久来源许可伪装 UDP 会话认证，不加自编辅助中继。
+后续受管或显式宿主方案都须具备会话绑定和控制关闭后撤销；
+宿主网络仅改善可达/来源，不能修复 Xray 的进程内来源许可。
+证据 `.tmp-socks-xray-probe-fixed/result.md` 与 `.tmp-relay-udp-nat/result.md`；
+探针所属容器/网络按 label 清理，程序/config 副本删除，日志和环境证据保留。
+本阶段仅文档，不重复完整回归；公网、IPv6、原生宿主和 arm64 未验，
+`internal-201` 仍 `deferred`，此前 HTTP `5B.5a` 交付不受影响。
+
 ### 5C. 宿主集成与端口跳跃
 
 - 完善 WireGuard、TUN/TProxy、Fail2ban 的管理流程及内部 `203`、`204`、`205`；
