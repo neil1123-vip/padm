@@ -3142,6 +3142,130 @@ dockerCurrentOwnsHostIntegration() {
         "${root}/deployment.json" >/dev/null 2>&1
 }
 
+dockerFail2banAddressIsValid() (
+    local address=$1 ipv4=$1 converted
+    local -a octets=()
+    # 隔离原生运行时的初始化变量，仅复用已有地址校验。
+    # shellcheck source=/dev/null
+    source "${DOCKER_BUNDLE_SOURCE_ROOT}/shell/core/runtime.sh" || return 1
+    if [[ "${address}" == *.* ]]; then
+        ipv4=${address##*:}
+        [[ "${ipv4}" =~ ^(0|[1-9][0-9]{0,2})(\.(0|[1-9][0-9]{0,2})){3}$ ]] &&
+            padmIsValidHostName "${ipv4}" || return 1
+        [[ "${address}" == *:* ]] || return 0
+        IFS=. read -r -a octets <<<"${ipv4}"
+        printf -v converted '%x:%x' \
+            "$((10#${octets[0]} * 256 + 10#${octets[1]}))" \
+            "$((10#${octets[2]} * 256 + 10#${octets[3]}))"
+        address="${address%:*}:${converted}"
+    fi
+    padmIsValidIPv6Address "${address}"
+)
+
+dockerFail2banContainer() (
+    local root ids container image sourcePath candidate status
+    root=$(dockerInstallRoot) || return 1
+    for sourcePath in config/spec.json deployment.json images.env compose.json; do
+        dockerTrafficSafePath "${root}" "${root}/${sourcePath}" || return 1
+    done
+    dockerComposeFile >/dev/null &&
+        dockerManagedSpecMatchesDeployment "${root}/config/spec.json" \
+            "${root}/deployment.json" "${root}/images.env" &&
+        cmp -s -- "${root}/compose.json" \
+            <(dockerGenerateCompose "${root}/config/spec.json" /dev/stdout "${root}") &&
+        jq -e 'any(.host_integrations[]; .type == "fail2ban")' \
+            "${root}/config/spec.json" >/dev/null || {
+        dockerError '当前部署未配置 Fail2ban 或受管配置不一致'
+        return 1
+    }
+    umask 077
+    candidate=$(mktemp -d "${root}/.fail2ban-check.XXXXXX") || return 1
+    trap 'status=$?; dockerRemoveManagedTree "${root}" "${candidate}" || status=1; exit "${status}"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    mkdir -p -- "${candidate}/config/net/fail2ban" "${candidate}/logs/nginx" &&
+        dockerGenerateFail2banConfig "${root}/config/spec.json" "${candidate}" || return 1
+    # 固定 jail 的配置正文也须受管，不能通过挂载漂移改写解封动作。
+    for sourcePath in padm.local fail2ban.local padm-nginx.conf padm-docker-user.conf; do
+        dockerTrafficSafePath "${root}" "${root}/config/net/fail2ban/${sourcePath}" &&
+            [[ -f "${root}/config/net/fail2ban/${sourcePath}" ]] &&
+            cmp -s -- "${root}/config/net/fail2ban/${sourcePath}" \
+                "${candidate}/config/net/fail2ban/${sourcePath}" || {
+            dockerError 'Fail2ban 配置正文漂移，未执行维护操作'
+            return 1
+        }
+    done
+    while IFS= read -r sourcePath; do
+        sourcePath=${sourcePath/'${PADM_NET_ROOT}'/${root}}
+        dockerTrafficSafePath "${root}" "${sourcePath}" || return 1
+    done < <(jq -r '.services["net-fail2ban"].volumes[].source' "${root}/compose.json")
+    ids=$(docker ps -aq --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
+        --filter label=com.docker.compose.service=net-fail2ban \
+        --filter label=com.docker.compose.oneoff=False) || return 1
+    [[ "${ids}" =~ ^[a-f0-9]{12,64}$ ]] || {
+        dockerError '未找到唯一受管 Fail2ban 容器，请先启动已配置的服务'
+        return 1
+    }
+    container=$(docker container inspect "${ids}") || return 1
+    image=$(jq -er '.images.net' "${root}/config/spec.json") || return 1
+    jq -e --arg root "${root}" --arg image "${image}" \
+        --slurpfile spec "${root}/config/spec.json" --slurpfile compose "${root}/compose.json" '
+      length == 1 and
+      (.[0] as $c | $c.Config.Labels as $labels | $compose[0].services["net-fail2ban"] as $service |
+        $c.State.Running == true and $c.State.Restarting != true and
+        $labels["com.docker.compose.project"] == "padm-docker" and
+        $labels["com.docker.compose.project.working_dir"] == $root and
+        $labels["com.docker.compose.project.config_files"] == ($root + "/compose.json") and
+        $labels["com.docker.compose.service"] == "net-fail2ban" and
+        $labels["com.docker.compose.oneoff"] == "False" and
+        $labels["io.padm.mode"] == "docker" and $labels["io.padm.project"] == "padm-docker" and
+        $labels["io.padm.component"] == "net-fail2ban" and
+        $labels["io.padm.release"] == $spec[0].release.version and
+        $c.Config.Image == $image and $c.Config.Cmd == $service.command and
+        $c.Config.Entrypoint == ["/usr/local/bin/padm-entrypoint"] and $c.Config.User == "0:0" and
+        $c.HostConfig.NetworkMode == "host" and
+        $c.HostConfig.ReadonlyRootfs == $service.read_only and $c.HostConfig.Privileged == false and
+        ($c.HostConfig.CapAdd | sort) == ($service.cap_add | sort) and
+        ($c.HostConfig.CapDrop | sort) == ($service.cap_drop | sort) and
+        all($c.Mounts[]; .Type == "bind") and
+        (($c.HostConfig.Tmpfs // {}) | keys | sort) ==
+          ([$service.tmpfs[] | split(":")[0]] | sort) and
+        ($c.Mounts | map({source:.Source,target:.Destination,read_only:(.RW | not)}) | sort_by(.target)) ==
+          ($service.volumes | map({source:(.source | sub("^\\$\\{PADM_NET_ROOT\\}"; $root)),
+            target,read_only}) | sort_by(.target)))
+    ' <<<"${container}" >/dev/null || {
+        dockerError 'Fail2ban 容器已停止或归属漂移，未执行维护操作'
+        return 1
+    }
+    printf '%s\n' "${ids}"
+)
+
+dockerFail2banCommand() {
+    local action=${1:-} address='' container
+    [[ "$#" -gt 0 ]] && shift
+    case "${action}" in
+    status) [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
+    unban)
+        [[ "$#" -eq 1 ]] || return "${PADM_DOCKER_RC_USAGE}"
+        address=$1
+        dockerFail2banAddressIsValid "${address}" || {
+            dockerError '解封只接受单个 IPv4/IPv6 字面地址，不接受 CIDR、zone 或选项'
+            return "${PADM_DOCKER_RC_USAGE}"
+        }
+        ;;
+    *) return "${PADM_DOCKER_RC_USAGE}" ;;
+    esac
+    dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+    dockerLockInstalledDeployment || return $?
+    container=$(dockerFail2banContainer) || return "${PADM_DOCKER_RC_STATE}"
+    # 只操作刚核验的运行容器和固定 jail，不能临时创建服务或触碰宿主全局规则。
+    if [[ "${action}" == status ]]; then
+        docker exec "${container}" fail2ban-client status padm-nginx </dev/null
+    else
+        docker exec "${container}" fail2ban-client set padm-nginx unbanip "${address}" </dev/null
+    fi
+}
+
 dockerValidateHostIntegrations() {
     local specFile=$1 candidate=$2 ownership port mark ports root
     if jq -e 'any(.host_integrations[]; .type == "wireguard")' "${specFile}" >/dev/null; then

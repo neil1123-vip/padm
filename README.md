@@ -586,6 +586,20 @@ padm-docker validate
 padm-docker assess
 ```
 
+服务维护菜单第 5 项提供已有受管 Fail2ban 的状态与单 IP 解封：
+
+```bash
+padm-docker fail2ban status
+padm-docker fail2ban unban 192.0.2.7
+padm-docker fail2ban unban 2001:db8::7
+```
+
+只操作当前运行且规格、镜像、标签及挂载一致的 `net-fail2ban` 容器和固定
+`padm-nginx` jail；不自动启动服务，不修改配置或新增封禁。解封接受单个
+IPv4/IPv6 字面地址，不接受域名、CIDR、zone、任意 jail 或全部解封；
+菜单执行前需要确认。未配置、停机或归属不一致时拒绝操作，底层失败返回非零。
+这不代表新启用或完整管理已验收；真实客户端来源、宿主规则归属与重启恢复仍按 5C 门槛验证。
+
 主菜单第 13 项“核心升级评估”或 `assess` 会验签并预拉取候选镜像，使用私有配置副本
 执行菜单版升级风险扫描、实际核心配置试跑和 Xray 严格校验，以及已启用的 TLS、
 订阅和宿主集成检查。输出候选发布与实际核心版本；不备份、不采集流量、不切换

@@ -191,6 +191,10 @@ runDockerRoutingIPv6RealRegression() {
     bash "${PROJECT_ROOT}/docker/tests/routing-ipv6-real.sh"
 }
 
+runDockerFail2banRealRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/fail2ban-isolated-real.sh"
+}
+
 runDockerRoutingWarpRegression() {
     PADM_DOCKER_ROUTING_SCOPE=warp bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
 }
@@ -312,6 +316,7 @@ registerRegressionFunctionLeaf docker-renewal runDockerRenewalRegression
 registerRegressionFunctionLeaf docker-phase2 runDockerPhase2Regression
 registerRegressionFunctionLeaf docker-phase3 runDockerPhase3Regression
 registerRegressionFunctionLeaf docker-phase4 runDockerPhase4Regression
+registerRegressionFunctionLeaf docker-fail2ban-real runDockerFail2banRealRegression
 registerRegressionFunctionLeaf docker-phase5 runDockerPhase5Regression
 registerRegressionFunctionLeaf docker-phase6 runDockerPhase6Regression
 registerRegressionFunctionLeaf docker-traffic runDockerTrafficRegression

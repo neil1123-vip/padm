@@ -67,6 +67,15 @@ wait_rule() {
     done
     fail "missing $1 ban for $2"
 }
+wait_unban() {
+    for attempt in $(seq 1 100); do
+        if ! "$1" -w -C padm-f2b -s "$2" -j DROP >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 0.1
+    done
+    fail "$1 unban left its rule for $2"
+}
 assert_hooks() {
     for port in 24444 24445; do
         "$1" -w -C DOCKER-USER -p tcp -m conntrack --ctstate NEW \
@@ -161,9 +170,7 @@ if [ "$PADM_TEST_FAMILY" = dual ]; then
     assert_hooks ip6tables
 fi
 fail2ban-client set padm-nginx unbanip 192.0.2.7
-if iptables -w -C padm-f2b -s 192.0.2.7 -j DROP >/dev/null 2>&1; then
-    fail "IPv4 unban left its rule"
-fi
+wait_unban iptables 192.0.2.7
 fail2ban-client set padm-nginx banip 192.0.2.7
 wait_rule iptables 192.0.2.7
 stop_server
@@ -173,6 +180,16 @@ assert_hooks iptables
 if [ "$PADM_TEST_FAMILY" = dual ]; then
     wait_rule ip6tables 2001:db8::7
     assert_hooks ip6tables
+    fail2ban-client status padm-nginx >/tmp/jail-status
+    grep -Fq '192.0.2.7' /tmp/jail-status || fail "status omitted the IPv4 ban"
+    grep -Fq '2001:db8::7' /tmp/jail-status || fail "status omitted the IPv6 ban"
+    fail2ban-client set padm-nginx unbanip 2001:db8::7
+    wait_unban ip6tables 2001:db8::7
+    fail2ban-client status padm-nginx >/tmp/jail-status
+    grep -Fq '192.0.2.7' /tmp/jail-status || fail "IPv6 unban changed the IPv4 ban"
+    if grep -Fq '2001:db8::7' /tmp/jail-status; then
+        fail "status retained the unbanned IPv6 address"
+    fi
 fi
 stop_server
 printf 'fail2ban-real-%s-ok\n' "$PADM_TEST_FAMILY"

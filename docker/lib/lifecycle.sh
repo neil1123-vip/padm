@@ -107,6 +107,8 @@ dockerUsage() {
   padm-docker traffic <show|collect>
   padm-docker traffic limit <账号 ID> <额度 GiB，0 不限额>
   padm-docker traffic reset <账号 ID>
+  padm-docker fail2ban status
+  padm-docker fail2ban unban <单个 IPv4/IPv6>
   padm-docker up
   padm-docker down
   padm-docker restart
@@ -1293,6 +1295,7 @@ dockerMain() {
     validate) dockerValidateInstalledCommand "$@" ;;
     status) dockerStatusCommand "$@" ;;
     traffic) dockerTrafficCommand "$@" ;;
+    fail2ban) dockerFail2banCommand "$@" ;;
     up | down | restart | logs) dockerLifecycleCommand "${command}" "$@" ;;
     assess) dockerAssessCommand "$@" ;;
     geo) dockerGeoCommand "$@" ;;

@@ -7,6 +7,8 @@ MOCK_BIN="${TEST_ROOT}/bin"
 DOCKER_LOG="${TEST_ROOT}/docker.log"
 CONTROL_LOG="${TEST_ROOT}/control.log"
 DOCKER_ROOT="${TEST_ROOT}/state"
+FAIL2BAN_INSPECT="${TEST_ROOT}/fail2ban-inspect.json"
+FAIL2BAN_CONTAINER=abcdef123456
 NATIVE_ROOT="${TEST_ROOT}/native"
 CLI_DIR="${TEST_ROOT}/bin-installed"
 IMAGE_DIGEST=$(printf '1%.0s' {1..64})
@@ -60,7 +62,36 @@ compose)
         exit 1
     fi
     ;;
-ps) ;;
+ps)
+    [[ "$*" == 'ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=net-fail2ban --filter label=com.docker.compose.oneoff=False' ]] || exit 0
+    case "${FAKE_DOCKER_MODE:-ok}" in
+    fail2ban-absent) ;;
+    fail2ban-duplicate) printf '%s\nfedcba654321\n' "${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}" ;;
+    fail2ban-invalid-id) printf 'padm-net-fail2ban-1\n' ;;
+    *) printf '%s\n' "${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}" ;;
+    esac
+    ;;
+container)
+    [[ "$*" == "container inspect ${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}" ]] || exit 1
+    jq "${FAKE_DOCKER_INSPECT_FILTER:-.}" "${FAKE_DOCKER_FAIL2BAN_INSPECT:?}"
+    ;;
+exec)
+    [[ "${2:-}" == "${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}" &&
+        "${3:-}" == fail2ban-client ]] || exit 1
+    if [[ "$#" -eq 5 && "${4:-}" == status && "${5:-}" == padm-nginx ]]; then
+        output=$'Status for the jail: padm-nginx\nCurrently banned: 1\nBanned IP list: 192.0.2.7'
+    elif [[ "$#" -eq 7 && "${4:-}" == set && "${5:-}" == padm-nginx &&
+        "${6:-}" == unbanip ]]; then
+        output=1
+    else
+        exit 1
+    fi
+    if [[ "${FAKE_DOCKER_MODE:-ok}" == fail2ban-client-fail ]]; then
+        printf 'simulated fail2ban-client failure\n' >&2
+        exit 37
+    fi
+    printf '%s\n' "${output}"
+    ;;
 run)
     if [[ " ${*} " == *'ssl.cert_time_to_seconds'* ]]; then
         [[ "${FAKE_DOCKER_MODE:-ok}" != tls-validity-fail ]]
@@ -117,12 +148,31 @@ runControl() {
         PADM_DOCKER_SYSTEMD_DIR="${TEST_ROOT}/systemd" \
         PADM_DOCKER_HEALTH_TIMEOUT=1 PADM_DOCKER_SKIP_CHOWN=1 \
         FAKE_DOCKER_LOG="${DOCKER_LOG}" FAKE_DOCKER_MODE="${FAKE_DOCKER_MODE:-ok}" \
+        FAKE_DOCKER_FAIL2BAN_CONTAINER="${FAIL2BAN_CONTAINER}" \
+        FAKE_DOCKER_FAIL2BAN_INSPECT="${FAIL2BAN_INSPECT}" \
+        FAKE_DOCKER_INSPECT_FILTER="${FAKE_DOCKER_INSPECT_FILTER:-.}" \
         FAKE_DOCKER_FAIL_ONCE="${TEST_ROOT}/fail-once" \
         "${command[@]}" "$@" >"${CONTROL_LOG}" 2>&1 || actual=$?
     if [[ "${actual}" -ne "${expected}" ]]; then
         sed 's/^/  /' "${CONTROL_LOG}" >&2
         fail "${name}: expected rc=${expected}, got rc=${actual}"
     fi
+    if [[ "${1:-}" == fail2ban ]]; then
+        [[ -z "$(find "${DOCKER_ROOT}" -maxdepth 1 -name '.fail2ban-check.*' -print -quit)" ]] ||
+            fail "${name}: Fail2ban maintenance leaked its validation candidate"
+    fi
+}
+
+rejectFail2ban() {
+    : >"${DOCKER_LOG}"
+    runControl "$@"
+    ! grep -Eq '^(exec|run|start|restart) |^compose .* (run|up|start|restart)( |$)' "${DOCKER_LOG}" ||
+        fail 'rejected Fail2ban maintenance executed or started a container'
+}
+
+fail2banManagedSnapshot() {
+    tar --sort=name --numeric-owner -cf - -C "${DOCKER_ROOT}" \
+        compose.json deployment.json images.env config secrets data logs | sha256sum
 }
 
 imageReference() { printf 'ghcr.io/example/padm-%s:test@sha256:%s' "$1" "${IMAGE_DIGEST}"; }
@@ -246,6 +296,8 @@ grep -q 'net-wireguard preflight wireguard' "${DOCKER_LOG}" || fail 'WireGuard p
 runControl 0 wireguard-reconfigure configure --spec "${WIREGUARD_SPEC}"
 grep -Fq "${DOCKER_ROOT}/data/net/wireguard:/run/padm-wireguard-owner:ro net-wireguard preflight" \
     "${DOCKER_LOG}" || fail 'WireGuard candidate did not mount live ownership read-only'
+rejectFail2ban 15 fail2ban-not-configured-status fail2ban status
+rejectFail2ban 15 fail2ban-not-configured-unban fail2ban unban 192.0.2.7
 
 CERT_FILE="${TEST_ROOT}/proxy.example.com.crt"
 KEY_FILE="${TEST_ROOT}/proxy.example.com.key"
@@ -283,6 +335,129 @@ jq -e '
   ((.services.nginx.cap_add // []) | length) == 0
 ' "${DOCKER_ROOT}/compose.json" >/dev/null || fail 'Fail2ban privilege boundary is wrong'
 grep -q 'net-fail2ban preflight fail2ban 24444,24445' "${DOCKER_LOG}" || fail 'Fail2ban preflight was not called for all ports'
+
+# 维护命令只使用当前容器和固定 jail，不能借机启动服务或改写受管文件。
+jq -n --arg root "${DOCKER_ROOT}" --arg id "${FAIL2BAN_CONTAINER}" \
+    --slurpfile spec "${DOCKER_ROOT}/config/spec.json" \
+    --slurpfile compose "${DOCKER_ROOT}/compose.json" '
+  $compose[0].services["net-fail2ban"] as $service |
+  [{
+    Id: $id, State: {Running: true, Restarting: false},
+    Config: {
+      Image: $spec[0].images.net, Cmd: $service.command,
+      Entrypoint: ["/usr/local/bin/padm-entrypoint"], User: "0:0",
+      Labels: ($service.labels + {
+        "com.docker.compose.project": "padm-docker",
+        "com.docker.compose.project.working_dir": $root,
+        "com.docker.compose.project.config_files": ($root + "/compose.json"),
+        "com.docker.compose.service": "net-fail2ban",
+        "com.docker.compose.oneoff": "False"
+      })
+    },
+    HostConfig: {
+      NetworkMode: $service.network_mode,
+      ReadonlyRootfs: $service.read_only, Privileged: false,
+      CapAdd: $service.cap_add, CapDrop: $service.cap_drop,
+      Tmpfs: ($service.tmpfs | map({key: split(":")[0], value: "rw"}) | from_entries)
+    },
+    Mounts: ($service.volumes | map({
+      Type: .type,
+      Source: (.source | sub("^\\$\\{PADM_NET_ROOT\\}"; $root)),
+      Destination: .target, RW: (.read_only | not)
+    }))
+  }]
+' >"${FAIL2BAN_INSPECT}"
+printf 'existing-nginx-access-log\n' >>"${DOCKER_ROOT}/logs/nginx/access.log"
+FAIL2BAN_MAINTENANCE_BEFORE=$(fail2banManagedSnapshot)
+: >"${DOCKER_LOG}"
+runControl 0 fail2ban-status fail2ban status
+grep -qx 'Currently banned: 1' "${CONTROL_LOG}" || fail 'Fail2ban status hid the client output'
+grep -qxF "exec ${FAIL2BAN_CONTAINER} fail2ban-client status padm-nginx" "${DOCKER_LOG}" ||
+    fail 'Fail2ban status did not target the managed container and jail'
+for ip in 192.0.2.7 2001:db8::1 ::ffff:192.0.2.7; do
+    runControl 0 fail2ban-unban fail2ban unban "${ip}"
+    grep -qxF "exec ${FAIL2BAN_CONTAINER} fail2ban-client set padm-nginx unbanip ${ip}" "${DOCKER_LOG}" ||
+        fail 'Fail2ban unban changed the literal IP, container or jail'
+done
+FAKE_DOCKER_MODE=fail2ban-client-fail runControl 37 fail2ban-status-client-error fail2ban status
+grep -qx 'simulated fail2ban-client failure' "${CONTROL_LOG}" ||
+    fail 'Fail2ban status hid the client error'
+FAKE_DOCKER_MODE=fail2ban-client-fail runControl 37 fail2ban-unban-client-error fail2ban unban 192.0.2.7
+! grep -Eq '^(run|start|restart) |^compose .* (run|up|start|restart)( |$)' "${DOCKER_LOG}" ||
+    fail 'Fail2ban maintenance automatically started a container'
+
+rejectFail2ban 2 fail2ban-missing-command fail2ban
+rejectFail2ban 2 fail2ban-arbitrary-jail fail2ban status sshd
+rejectFail2ban 2 fail2ban-status-option fail2ban status --all
+rejectFail2ban 2 fail2ban-missing-ip fail2ban unban
+rejectFail2ban 2 fail2ban-extra-ip fail2ban unban 192.0.2.7 192.0.2.8
+rejectFail2ban 2 fail2ban-unban-jail fail2ban unban padm-nginx 192.0.2.7
+rejectFail2ban 2 fail2ban-arbitrary-command fail2ban restart
+for ip in '' --all -192.0.2.7 192.0.2.7/32 2001:db8::1/128 fe80::1%eth0 \
+    '[2001:db8::1]' '192.0.2.7;id' '192.0.2.7 192.0.2.8' 192.0.2.999 \
+    192.000.2.7 2001:db8:::1 ::ffff:192.000.2.7 ' 192.0.2.7' '192.0.2.7 '; do
+    rejectFail2ban 2 fail2ban-invalid-ip fail2ban unban "${ip}"
+done
+for mode in fail2ban-absent fail2ban-duplicate fail2ban-invalid-id; do
+    FAKE_DOCKER_MODE="${mode}" rejectFail2ban 15 "${mode}" fail2ban status
+done
+while read -r name filter; do
+    FAKE_DOCKER_INSPECT_FILTER="${filter}" rejectFail2ban 15 "fail2ban-${name}" fail2ban status
+done <<'EOF'
+stopped .[0].State.Running = false
+restarting .[0].State.Restarting = true
+compose-project .[0].Config.Labels["com.docker.compose.project"] = "foreign"
+compose-root .[0].Config.Labels["com.docker.compose.project.working_dir"] = "/foreign"
+compose-file .[0].Config.Labels["com.docker.compose.project.config_files"] = "/foreign/compose.json"
+compose-service .[0].Config.Labels["com.docker.compose.service"] = "foreign"
+compose-oneoff .[0].Config.Labels["com.docker.compose.oneoff"] = "True"
+padm-mode .[0].Config.Labels["io.padm.mode"] = "native"
+padm-project .[0].Config.Labels["io.padm.project"] = "foreign"
+padm-component .[0].Config.Labels["io.padm.component"] = "foreign"
+padm-release .[0].Config.Labels["io.padm.release"] = "0.0.0"
+image .[0].Config.Image = "foreign:latest"
+command .[0].Config.Cmd = ["fail2ban", "1"]
+entrypoint .[0].Config.Entrypoint = ["/bin/sh"]
+user .[0].Config.User = "65534:65534"
+network .[0].HostConfig.NetworkMode = "bridge"
+readonly-root .[0].HostConfig.ReadonlyRootfs = false
+privileged .[0].HostConfig.Privileged = true
+cap-add .[0].HostConfig.CapAdd += ["SYS_ADMIN"]
+cap-drop .[0].HostConfig.CapDrop = []
+tmpfs .[0].HostConfig.Tmpfs["/foreign"] = "rw"
+mount-type .[0].Mounts[0].Type = "volume"
+mount-source .[0].Mounts[0].Source = "/foreign/config"
+mount-target .[0].Mounts[0].Destination = "/foreign/config"
+mount-write .[0].Mounts[0].RW = true
+extra-mount .[0].Mounts += [{Type:"bind",Source:"/foreign",Destination:"/foreign",RW:true}]
+inspect-empty []
+inspect-multiple . + .
+EOF
+FAKE_DOCKER_INSPECT_FILTER='.[0].State.Running = false' \
+    rejectFail2ban 15 fail2ban-stopped-unban fail2ban unban 192.0.2.7
+FAKE_DOCKER_INSPECT_FILTER='.[0].Mounts[0].Source = "/foreign/config"' \
+    rejectFail2ban 15 fail2ban-foreign-unban fail2ban unban 192.0.2.7
+for config in padm-docker-user.conf padm.local; do
+    configFile="${DOCKER_ROOT}/config/net/fail2ban/${config}"
+    cp -p -- "${configFile}" "${TEST_ROOT}/${config}.backup"
+    if [[ "${config}" == padm-docker-user.conf ]]; then
+        sed 's/^actionunban = .*/actionunban = <iptables> -F DOCKER-USER/' "${configFile}" \
+            >"${TEST_ROOT}/fail2ban-drift.conf"
+    else
+        sed 's/^enabled = true$/enabled = false/' "${configFile}" >"${TEST_ROOT}/fail2ban-drift.conf"
+    fi
+    cp -- "${TEST_ROOT}/fail2ban-drift.conf" "${configFile}"
+    ! cmp -s -- "${TEST_ROOT}/${config}.backup" "${configFile}" ||
+        fail 'Fail2ban configuration drift fixture did not change its input'
+    FAIL2BAN_DRIFT_BEFORE=$(fail2banManagedSnapshot)
+    rejectFail2ban 15 "fail2ban-drift-status-${config}" fail2ban status
+    rejectFail2ban 15 "fail2ban-drift-unban-${config}" fail2ban unban 192.0.2.7
+    [[ "$(fail2banManagedSnapshot)" == "${FAIL2BAN_DRIFT_BEFORE}" ]] ||
+        fail 'rejected Fail2ban configuration drift modified managed files'
+    cp -p -- "${TEST_ROOT}/${config}.backup" "${configFile}"
+done
+[[ "$(fail2banManagedSnapshot)" == "${FAIL2BAN_MAINTENANCE_BEFORE}" ]] ||
+    fail 'Fail2ban status or unban modified managed files'
 
 jq '.core.protocols[0].public_port = 25444' "${FAIL2BAN_SPEC}" >"${TEST_ROOT}/fail2ban-edit.json"
 runControl 15 reject-fail2ban-port-edit edit --spec "${TEST_ROOT}/fail2ban-edit.json" --preview

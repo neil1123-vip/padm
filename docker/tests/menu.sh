@@ -350,7 +350,7 @@ runPortAliasDriver() {
 }
 
 runMaintenanceDriver() {
-    local scenario=$1 choice answer=n
+    local scenario=$1 choice address answer=n
     local -A targetPrompts=()
     targetReply 'Docker 管理菜单' $'18\n'
     case "${scenario}" in
@@ -393,6 +393,55 @@ runMaintenanceDriver() {
             return 0
         fi
         targetReply '确认停止服务并卸载控制命令（保留状态、配置和数据）？[y/N]' $'\004'
+        ;;
+    fail2ban-*)
+        targetReply 'Docker 服务维护' $'5\n'
+        case "${scenario}" in
+        fail2ban-flow)
+            targetReply 'Docker Fail2ban 维护' $'1\n'
+            for address in 203.0.113.9 2001:db8::9; do
+                targetReply 'Docker Fail2ban 维护' $'2\n'
+                targetReply '待解封 IPv4/IPv6（0 返回）: ' "${address}"$'\n'
+                targetReply "确认从 padm-nginx 解封 ${address}？[y/N]: " $'y\n'
+            done
+            targetReply 'Docker Fail2ban 维护' $'99\n'
+            ;;
+        fail2ban-cancel)
+            for answer in $'0\n' $'\n' $'\004'; do
+                targetReply 'Docker Fail2ban 维护' $'2\n'
+                targetReply '待解封 IPv4/IPv6（0 返回）: ' "${answer}"
+            done
+            for answer in $'n\n' $'\n' $'0\n' $'\004'; do
+                targetReply 'Docker Fail2ban 维护' $'2\n'
+                targetReply '待解封 IPv4/IPv6（0 返回）: ' $'203.0.113.9\n'
+                targetReply '确认从 padm-nginx 解封 203.0.113.9？[y/N]: ' "${answer}"
+            done
+            ;;
+        fail2ban-menu-eof) ;;
+        *)
+            [[ "${scenario}" != fail2ban-failed ]] ||
+                targetReply 'Docker Fail2ban 维护' $'1\n'
+            targetReply 'Docker Fail2ban 维护' $'2\n'
+            address=203.0.113.9
+            [[ "${scenario}" != fail2ban-invalid ]] || address=not-an-ip
+            targetReply '待解封 IPv4/IPv6（0 返回）: ' "${address}"$'\n'
+            targetReply "确认从 padm-nginx 解封 ${address}？[y/N]: " $'y\n'
+            if [[ "${scenario}" == fail2ban-int || "${scenario}" == fail2ban-term ]]; then
+                waitForText 'fixture-fail2ban-ready' "${CONTROL_LOG}" || exit 35
+                assertNoLock
+                if [[ "${scenario}" == fail2ban-term ]]; then
+                    kill -TERM "$(<"${TEST_ROOT}/menu.pid")" || exit 36
+                    return 0
+                fi
+                printf '\003' >&3
+            fi
+            ;;
+        esac
+        if [[ "${scenario}" == fail2ban-menu-eof ]]; then
+            targetReply 'Docker Fail2ban 维护' $'\004'
+        else
+            targetReply 'Docker Fail2ban 维护' $'0\n'
+        fi
         ;;
     esac
     targetReply 'Docker 服务维护' $'0\n'
@@ -845,7 +894,8 @@ runPty() {
     mkfifo "${pipe}"
     printf -v command '%q ' bash -u "${entry}" "$@"
     if [[ "${driver}" == term ||
-        ( ( "${driver}" == targets || "${driver}" == geo ) && "${input}" == term ) ]]; then
+        ( ( "${driver}" == targets || "${driver}" == geo ) && "${input}" == term ) ||
+        ( "${driver}" == maintenance && "${input}" == fail2ban-term ) ]]; then
         printf -v command 'printf "%%s\\n" "$$" >%q; exec %s' "${TEST_ROOT}/menu.pid" "${command}"
         expected=143
     fi
@@ -1191,6 +1241,25 @@ validate|update|rollback|uninstall)
     [[ "$1" != validate ]] || exit "${MAINTENANCE_VALIDATE_STATUS:-0}"
     exit "${MAINTENANCE_STATUS:-0}"
     ;;
+fail2ban)
+    recordAction "$@"
+    case "${2:-}" in
+    status) printf 'fixture-fail2ban-status\n'; exit "${FAIL2BAN_STATUS:-0}" ;;
+    unban)
+        # 字面 IP 语法矩阵由服务合同覆盖，此处只验证错误返回后仍留在菜单。
+        [[ "${3:-}" != not-an-ip ]] || exit 2
+        if [[ "${FAIL2BAN_WAIT:-0}" == 1 ]]; then
+            trap 'exit 130' INT
+            trap 'exit 143' TERM
+            printf '%s\n' "${BASHPID}" >"${FAIL2BAN_PID:?}"
+            printf 'fixture-fail2ban-ready\n'
+            while :; do sleep 1; done
+        fi
+        exit "${FAIL2BAN_UNBAN_STATUS:-0}"
+        ;;
+    *) exit 2 ;;
+    esac
+    ;;
 control)
     recordAction "$@"
     case "${2:-}" in
@@ -1277,11 +1346,48 @@ for maintenanceCase in flow cancel update-eof uninstall-eof failed update rollba
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedMaintenance}" ]] ||
         fail "维护 ${maintenanceCase} 参数分发错误或取消后仍执行操作"
     for maintenanceLabel in '18. 服务维护' 'Docker 服务维护' '1. 校验部署配置' \
-        '2. 更新镜像与控制脚本' '3. 回滚最近更新' '4. 卸载服务与控制命令（保留数据）'; do
+        '2. 更新镜像与控制脚本' '3. 回滚最近更新' '4. 卸载服务与控制命令（保留数据）' '5. Fail2ban 维护'; do
         grep -Fq "${maintenanceLabel}" "${CONTROL_LOG}" || fail "维护菜单缺少: ${maintenanceLabel}"
     done
 done
 unset MAINTENANCE_STATUS MAINTENANCE_VALIDATE_STATUS
+
+for fail2banCase in flow cancel menu-eof invalid failed int term; do
+    : >"${TLS_WIZARD_ACTIONS}"
+    export FAIL2BAN_STATUS=0 FAIL2BAN_UNBAN_STATUS=0 FAIL2BAN_WAIT=0 \
+        FAIL2BAN_PID="${TEST_ROOT}/fail2ban.pid"
+    [[ "${fail2banCase}" != failed ]] || { FAIL2BAN_STATUS=17; FAIL2BAN_UNBAN_STATUS=17; }
+    [[ "${fail2banCase}" != int && "${fail2banCase}" != term ]] || FAIL2BAN_WAIT=1
+    runPty "fail2ban-${fail2banCase}" maintenance "fail2ban-${fail2banCase}" "${TLS_WIZARD_CLI}" menu
+    expectedFail2ban=
+    case "${fail2banCase}" in
+    flow)
+        expectedFail2ban=$'fail2ban status\nfail2ban unban 203.0.113.9\nfail2ban unban 2001:db8::9'
+        grep -Fq 'fixture-fail2ban-status' "${CONTROL_LOG}" || fail 'Fail2ban 状态未显示后端输出'
+        grep -Fq '无效选项' "${CONTROL_LOG}" || fail 'Fail2ban 无效选项后没有留在菜单'
+        ;;
+    invalid)
+        expectedFail2ban='fail2ban unban not-an-ip'
+        grep -Fq '操作失败，退出码: 2' "${CONTROL_LOG}" || fail 'Fail2ban 非法 IP 未显示用法错误'
+        ;;
+    failed)
+        expectedFail2ban=$'fail2ban status\nfail2ban unban 203.0.113.9'
+        [[ "$(grep -Fc '操作失败，退出码: 17' "${CONTROL_LOG}")" -eq 2 ]] ||
+            fail 'Fail2ban 后端失败未保留退出码或留在子菜单'
+        ;;
+    int|term)
+        expectedFail2ban='fail2ban unban 203.0.113.9'
+        ! kill -0 "$(<"${FAIL2BAN_PID}")" 2>/dev/null ||
+            fail "Fail2ban ${fail2banCase} 后 CLI 进程仍存活"
+        ;;
+    esac
+    [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedFail2ban}" ]] ||
+        fail "Fail2ban ${fail2banCase} 参数分发错误或取消后仍执行操作"
+    for fail2banLabel in '5. Fail2ban 维护' 'Docker Fail2ban 维护' '1. 查看状态' '2. 解封单个 IP'; do
+        grep -Fq "${fail2banLabel}" "${CONTROL_LOG}" || fail "Fail2ban 菜单缺少: ${fail2banLabel}"
+    done
+done
+unset FAIL2BAN_STATUS FAIL2BAN_UNBAN_STATUS FAIL2BAN_WAIT FAIL2BAN_PID
 
 export SITE_MENU_RECORD_STATUS=1
 for siteCase in flow cancel static-eof redirect-eof alpn-diagnose-eof alpn-recommended-eof \

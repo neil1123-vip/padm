@@ -874,12 +874,38 @@ dockerMenuWarp() {
     done
 }
 
+dockerMenuFail2ban() {
+    local choice address answer
+    while :; do
+        DOCKER_MENU_SIGNAL=0
+        printf '\nDocker Fail2ban 维护\n'
+        printf '%s\n' '1. 查看状态' '2. 解封单个 IP' '0. 返回'
+        printf '请选择: '
+        if ! IFS= read -r choice; then
+            [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
+            return 0
+        fi
+        case "${choice}" in
+        0) return 0 ;;
+        1) dockerMenuRun fail2ban status || true ;;
+        2)
+            dockerSetupRead address '待解封 IPv4/IPv6（0 返回）: ' &&
+                [[ -n "${address}" ]] || continue
+            dockerSetupRead answer "确认从 padm-nginx 解封 ${address}？[y/N]: " n || continue
+            case "${answer}" in y|Y|yes|YES) ;; *) continue ;; esac
+            dockerMenuRun fail2ban unban "${address}" || true
+            ;;
+        *) printf '无效选项，请重新选择。\n' ;;
+        esac
+    done
+}
+
 dockerMenuMaintenance() {
     local choice answer action
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 服务维护\n'
-        printf '%s\n' '1. 校验部署配置' '2. 更新镜像与控制脚本' '3. 回滚最近更新' '4. 卸载服务与控制命令（保留数据）' '0. 返回'
+        printf '%s\n' '1. 校验部署配置' '2. 更新镜像与控制脚本' '3. 回滚最近更新' '4. 卸载服务与控制命令（保留数据）' '5. Fail2ban 维护' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -899,6 +925,7 @@ dockerMenuMaintenance() {
             case "${answer}" in y|Y|yes|YES) ;; *) continue ;; esac
             action=uninstall
             ;;
+        5) dockerMenuFail2ban; continue ;;
         *) printf '无效选项，请重新选择。\n'; continue ;;
         esac
         if dockerMenuRun "${action}"; then
