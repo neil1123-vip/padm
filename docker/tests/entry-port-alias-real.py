@@ -16,6 +16,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.parse
 
 
 SCRIPT = Path(__file__).resolve()
@@ -124,7 +125,7 @@ def socks(port, transport, timeout):
 
 def probe_one(item, phase):
     local_port, core, alias, auth, transport = item
-    expected = auth == "valid" and (phase == "on" or not alias)
+    expected = auth == "valid" and (phase != "off" or not alias)
     accepted = False
     timeout = 2 if expected else 1
     started = time.monotonic()
@@ -169,43 +170,60 @@ def probes(root, phase):
     print(f"entry-port-alias-probes-{phase}-ok: fresh TCP/UDP/auth sockets", flush=True)
 
 
-def client_config(root):
-    spec = json.loads((root / "on.spec.json").read_text())
+def client_config(root, phase):
+    spec = json.loads((root / f"{phase}.spec.json").read_text())
+    links = [urllib.parse.urlsplit(line) for line in
+             (root / f"{phase}.links").read_text().splitlines()]
+    assert len(links) == len(spec["core"]["protocols"]) == 2
+    links = {urllib.parse.unquote(link.fragment): link for link in links}
     config = dict(log=dict(level="warn"), inbounds=[], outbounds=[], route=dict(rules=[]))
     xray = dict(log=dict(loglevel="warning"), inbounds=[], outbounds=[], routing=dict(rules=[]))
     items = []
     local_port = 2081
     for entry in spec["core"]["protocols"]:
         core = entry["core"]
-        for alias, port in zip((False, True), PORTS[core]):
+        link = links[entry["name"]]
+        base, alias_port = PORTS[core]
+        assert link.hostname == entry["server"] and link.port == (
+            alias_port if phase == "selected" else base)
+        print(f"entry-port-alias-share-port-{phase}: {core}={link.port}", flush=True)
+        ports = [link.port, alias_port if link.port == base else base]
+        for port in ports:
+            alias = port == alias_port
             for auth in ("valid", "wrong"):
                 tag = f"{core}-{port}-{auth}"
                 if core == "xray":
                     reality = entry["reality"]
+                    query = {key: value[0] for key, value in
+                             urllib.parse.parse_qs(link.query).items()}
+                    assert link.scheme == "vless" and link.username == entry["uuid"]
+                    assert query["pbk"] == reality["public_key"] and query["sid"] == reality["short_id"]
                     xray["inbounds"].append(dict(
                         tag=tag, listen="127.0.0.1", port=local_port, protocol="socks",
                         settings=dict(auth="noauth", udp=False)))
                     xray["outbounds"].append(dict(
                         tag=tag, protocol="vless", settings=dict(vnext=[dict(
                             address=HOST, port=port, users=[dict(
-                                id=entry["uuid"] if auth == "valid" else
+                                id=link.username if auth == "valid" else
                                 "99999999-9999-4999-8999-999999999999",
-                                encryption="none", flow="xtls-rprx-vision")])]),
-                        streamSettings=dict(network="tcp", security="reality",
+                                encryption=query["encryption"], flow=query["flow"])])]),
+                        streamSettings=dict(network=query["type"], security=query["security"],
                                             realitySettings=dict(
-                                                serverName=reality["server_name"], fingerprint="chrome",
-                                                publicKey=reality["public_key"],
-                                                shortId=reality["short_id"]))))
+                                                serverName=query["sni"], fingerprint=query["fp"],
+                                                publicKey=query["pbk"], shortId=query["sid"]))))
                     xray["routing"]["rules"].append(dict(type="field", inboundTag=[tag],
                                                         outboundTag=tag))
                 else:
                     ss = entry["shadowsocks"]
-                    user_key = ss["user_password"] if auth == "valid" else "AAAAAAAAAAAAAAAAAAAAAA=="
+                    assert link.scheme == "ss" and urllib.parse.unquote(link.username) == ss["method"]
+                    server_key, user_key = urllib.parse.unquote(link.password).split(":")
+                    assert (server_key, user_key) == (ss["server_password"], ss["user_password"])
+                    user_key = user_key if auth == "valid" else "AAAAAAAAAAAAAAAAAAAAAA=="
                     config["inbounds"].append(dict(type="socks", tag=tag, listen="127.0.0.1",
                                                    listen_port=local_port))
                     config["outbounds"].append(dict(
                         tag=tag, server=HOST, server_port=port, type="shadowsocks",
-                        method=ss["method"], password=ss["server_password"] + ":" + user_key))
+                        method=urllib.parse.unquote(link.username), password=server_key + ":" + user_key))
                     config["route"]["rules"].append(dict(inbound=[tag], action="route", outbound=tag))
                 for transport in (("tcp",) if core == "xray" else ("tcp", "udp")):
                     items.append((local_port, core, alias, auth, transport))
@@ -230,7 +248,7 @@ def inspect(docker, identity, core, phase):
     base, alias = PORTS[core]
     for transport in (("tcp",) if core == "xray" else ("tcp", "udp")):
         expected = [dict(HostIp="0.0.0.0", HostPort=str(base))]
-        if phase == "on":
+        if phase != "off":
             expected.append(dict(HostIp="0.0.0.0", HostPort=str(alias)))
         assert sorted(host["PortBindings"][f"{base}/{transport}"], key=lambda row: row["HostPort"]) == expected
     return value["NetworkSettings"]["Networks"]["padm-docker"]["IPAddress"]
@@ -288,7 +306,6 @@ def run(root):
                 command(docker + ["cp", identity + f":/usr/local/bin/{core}", str(root / core)])
                 command(docker + ["rm", identity])
                 (root / core).chmod(0o755)
-            client_config(root)
             for core in PORTS:
                 config = json.loads((root / f"on.{core}.json").read_text())
                 if core == "xray":
@@ -303,7 +320,8 @@ def run(root):
                 path.write_text(json.dumps(config))
                 path.chmod(0o644)
             enter = ["nsenter", "--target", str(clients[0].pid), "--net", "--"]
-            for phase in ("on", "off"):
+            for phase in ("on", "selected", "off"):
+                client_config(root, phase)
                 current = json.loads((root / f"{phase}.compose.json").read_text())
                 current["services"] = {core: current["services"][core] for core in PORTS}
                 for core, service in current["services"].items():
@@ -325,7 +343,7 @@ def run(root):
                     identity = command(compose + ["ps", "-q", core]).decode().strip()
                     addresses.add(inspect(docker, identity, core, phase))
                 published = [port for ports in PORTS.values()
-                             for port in (ports if phase == "on" else ports[:1])]
+                             for port in (ports if phase != "off" else ports[:1])]
                 wait_ready(lambda: subprocess.run(
                     enter + ["python3", "-c",
                              "import socket; " + "; ".join(
@@ -354,7 +372,7 @@ def run(root):
                 assert {row["source"] for row in events} <= addresses
                 assert {transport: sum(row["transport"] == transport for row in events)
                         for transport in ("tcp", "udp")} == (
-                            dict(tcp=4, udp=2) if phase == "on" else dict(tcp=2, udp=1)), events
+                            dict(tcp=4, udp=2) if phase != "off" else dict(tcp=2, udp=1)), events
                 assert all(client.poll() is None for client in phase_clients) and origin.poll() is None
                 for client in phase_clients:
                     stop(client)

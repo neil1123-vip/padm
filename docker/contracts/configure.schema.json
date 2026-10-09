@@ -25,6 +25,7 @@
   "x-padm-routing-warp": true,
   "x-padm-relay-http": true,
   "x-padm-port-aliases": true,
+  "x-padm-port-alias-default": true,
   "additionalProperties": false,
   "required": ["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"],
   "properties": {
@@ -45,7 +46,8 @@
             "type": "string",
             "pattern": "^(?:entry-[a-z0-9][a-z0-9-]{0,47}|vless-(?:reality|ws))$"
           },
-          "public_port": {"$ref": "#/$defs/port"}
+          "public_port": {"$ref": "#/$defs/port"},
+          "share_default": {"const": true}
         }
       }
     },

@@ -157,7 +157,10 @@ dockerConfigureSpecValidate() {
         .schema_version == 3 and
         (.port_aliases | type == "array" and length >= 1 and length <= 16 and
           length == (unique | length) and
-          all(.[]; exact(["listener_id", "public_port"]) and (.public_port | port) and
+          ([.[] | select(.share_default == true) | .listener_id] | length == (unique | length)) and
+          all(.[]; exact(["listener_id", "public_port"] +
+              (if has("share_default") then ["share_default"] else [] end)) and
+            (if has("share_default") then .share_default == true else true end) and (.public_port | port) and
             (.listener_id as $id | [$request.core.protocols[] | select(.listener_id == $id)] | length == 1))) and
         all(.host_integrations[]; .type == "wireguard") and
         .reality_stream.host_website.network_mode != "host" and
@@ -1062,6 +1065,7 @@ dockerEditBaselineValidate() {
         token=$(jq -r '.subscription.token' "${specFile}") || return 1
         dockerGenerateSubscription "${specFile}" "${baseline}/data/subscription/${token}" || return 1
     fi
+    dockerSubscriptionPrepareCandidate "${specFile}" "${baseline}" || return 1
     # 整目录替换前核对所有受影响的输入，不把额外账号、路由或手写配置默默丢弃。
     for directory in config/xray config/sing-box config/nginx config/net config/control data/subscription; do
         if [[ "${directory}" == config/control && ! -e "${root}/${directory}" ]]; then
@@ -2444,6 +2448,9 @@ dockerGenerateSubscription() {
       if $request.reality_stream != null and
         (.listener_id == $request.reality_stream.listener_id or .listener_id == $request.reality_stream.website_listener_id)
       then .public_port = 443 else . end |
+      .listener_id as $listener |
+      .public_port = ([$request.port_aliases[]? |
+        select(.listener_id == $listener and .share_default == true) | .public_port][0] // .public_port) |
       if .id == 1 then
         "vless://\(.uuid)@\(.server | authority):\(.public_port)?encryption=none&flow=xtls-rprx-vision&security=reality&sni=\(.reality.server_name | @uri)&fp=chrome&pbk=\(.reality.public_key | @uri)&sid=\(.reality.short_id)&type=tcp#\(.name | @uri)"
       elif .id == 2 then

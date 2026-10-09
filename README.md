@@ -452,14 +452,21 @@ TLS 入口继续经 Nginx TLS 前端；bridge 的 Reality 443 共存别名继承
 padm-docker protocol port-alias-status
 padm-docker edit --port-alias entry-reality 8444 --preview
 padm-docker edit --port-alias entry-reality 8444 --confirm PADM-DOCKER-EDIT
+padm-docker edit --port-alias-default entry-reality 8444 --confirm PADM-DOCKER-EDIT
+padm-docker edit --port-alias-default entry-reality base --confirm PADM-DOCKER-EDIT
 padm-docker edit --port-alias-remove entry-reality 8444 --confirm PADM-DOCKER-EDIT
 ```
 
-默认分享链接仍使用原公开端口，不自动生成别名节点；默认分享端口切换后续单独交付。
+默认分享链接使用原公开端口，不自动生成别名节点。
+可将已有别名选为该入口的默认分享端口：对应项保存 `share_default: true`，
+每个入口最多一项；本地 URI、主订阅和分享组一致切换，账号、凭据和节点数量不变。
+`base` 恢复原入口，删除被选别名也自动回退；443 共存恢复到公开 SNI 前端，
+不改容器后端。选择只影响指定入口，不联动同数字的 TCP/UDP 其它入口。
 重复 TCP 或 UDP 发布端口会拒绝，同一数字的 TCP/UDP 可分别使用；
 Fail2ban、TUN/TProxy 与 host-network 共存暂不接受别名。
 普通 `edit --spec` 不能新增或改写别名；删除入口同步清理其别名，复制不继承。
 旧控制 bundle 缺少 `x-padm-port-aliases` 时拒绝配置、更新或恢复带别名的规格。
+带默认分享标记的规格还要求 `x-padm-port-alias-default`，不能回滚到忽略该标记的旧 bundle。
 公网、IPv6 发布、原生宿主及 arm64 仍需独立验收，完整 `207` 保持 `deferred`。
 
 菜单新增“协议与入口”，可查看稳定入口 ID、核心、协议、地址/端口及地址族，

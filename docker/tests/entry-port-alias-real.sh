@@ -52,10 +52,12 @@ jq -n '
 jq '.port_aliases=[{listener_id:"entry-xray",public_port:36441},
   {listener_id:"entry-sing-box",public_port:36442}]' \
     "${TEST_ROOT}/off.spec.json" >"${TEST_ROOT}/on.spec.json"
+jq '.port_aliases |= map(.share_default=true)' "${TEST_ROOT}/on.spec.json" \
+    >"${TEST_ROOT}/selected.spec.json"
 mkdir -p "${TEST_ROOT}/bundle"
 printf '%040d\n' 0 >"${TEST_ROOT}/bundle/${PADM_DOCKER_BUNDLE_REF}"
 dockerCurrentBundlePath() { printf '%s\n' "${TEST_ROOT}/bundle"; }
-for phase in off on; do
+for phase in off on selected; do
     spec="${TEST_ROOT}/${phase}.spec.json"
     dockerConfigureSpecValidate "${spec}"
     dockerGenerateCompose "${spec}" "${TEST_ROOT}/${phase}.compose.json"
@@ -78,7 +80,11 @@ cmp "${TEST_ROOT}/on.links" "${TEST_ROOT}/off.links"
 for core in xray sing-box; do
     cmp "${TEST_ROOT}/on.${core}.base" "${TEST_ROOT}/off.${core}.base"
     cmp "${TEST_ROOT}/on.${core}.json" "${TEST_ROOT}/off.${core}.json"
+    cmp "${TEST_ROOT}/on.${core}.base" "${TEST_ROOT}/selected.${core}.base"
+    cmp "${TEST_ROOT}/on.${core}.json" "${TEST_ROOT}/selected.${core}.json"
 done
+cmp "${TEST_ROOT}/on.compose.json" "${TEST_ROOT}/selected.compose.json"
+cmp "${TEST_ROOT}/on.deployment.json" "${TEST_ROOT}/selected.deployment.json"
 jq -e '
   [.listeners[] | select(.listener_id | startswith("alias-"))] |
   length == 3 and

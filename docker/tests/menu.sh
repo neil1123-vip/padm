@@ -295,6 +295,11 @@ runPortAliasDriver() {
         targetReply 'Docker 额外入口端口' $'2\n'
         targetReply '入口 ID（0 返回）' $'entry-fixture\n'
         targetReply '额外端口（0 返回）' $'2053\n'
+        targetReply 'Docker 额外入口端口' $'4\n'
+        targetReply '入口 ID（0 返回）' $'entry-fixture\n'
+        targetReply '默认分享端口（已有额外端口，0 返回）' $'2053\n'
+        targetReply 'Docker 额外入口端口' $'5\n'
+        targetReply '入口 ID（0 返回）' $'entry-fixture\n'
         targetReply 'Docker 额外入口端口' $'3\n'
         targetReply '入口 ID（0 返回）' $'entry-fixture\n'
         targetReply '额外端口（0 返回）' $'2053\n'
@@ -315,6 +320,28 @@ runPortAliasDriver() {
         invalid) targetReply '额外端口（0 返回）' $'invalid\n' ;;
         failed) targetReply '额外端口（0 返回）' $'2053\n' ;;
         esac
+        ;;
+    default-cancel)
+        targetReply 'Docker 额外入口端口' $'4\n'
+        targetReply '入口 ID（0 返回）' $'0\n'
+        targetReply 'Docker 额外入口端口' $'4\n'
+        targetReply '入口 ID（0 返回）' $'entry-fixture\n'
+        targetReply '默认分享端口（已有额外端口，0 返回）' $'0\n'
+        targetReply 'Docker 额外入口端口' $'5\n'
+        targetReply '入口 ID（0 返回）' $'0\n'
+        ;;
+    default-eof|default-invalid|default-failed)
+        targetReply 'Docker 额外入口端口' $'4\n'
+        targetReply '入口 ID（0 返回）' $'entry-fixture\n'
+        case "${scenario}" in
+        default-eof) targetReply '默认分享端口（已有额外端口，0 返回）' $'\004' ;;
+        default-invalid) targetReply '默认分享端口（已有额外端口，0 返回）' $'invalid\n' ;;
+        default-failed) targetReply '默认分享端口（已有额外端口，0 返回）' $'2053\n' ;;
+        esac
+        ;;
+    base-eof)
+        targetReply 'Docker 额外入口端口' $'5\n'
+        targetReply '入口 ID（0 返回）' $'\004'
         ;;
     esac
     targetReply 'Docker 额外入口端口' $'0\n'
@@ -1072,8 +1099,10 @@ protocol)
     ;;
 edit)
     recordAction "$@"
-    if [[ "${2:-}" == --port-alias || "${2:-}" == --port-alias-remove ]]; then
-        [[ "${4:-}" =~ ^[0-9]{1,5}$ ]] || exit 2
+    if [[ "${2:-}" == --port-alias || "${2:-}" == --port-alias-remove ||
+        "${2:-}" == --port-alias-default ]]; then
+        [[ "${2:-}" == --port-alias-default && "${4:-}" == base ]] ||
+            [[ "${4:-}" =~ ^[0-9]{1,5}$ ]] || exit 2
     fi
     exit "${SITE_EDIT_STATUS:-0}"
     ;;
@@ -1470,16 +1499,20 @@ runPty protocols-links-cancel protocols cancel "${TLS_WIZARD_CLI}" menu
     fail 'cancelled protocol link selection dispatched a business command'
 
 # 额外入口菜单使用真实 PTY，取消与 EOF 不向 CLI 提交端口变更。
-for aliasCase in flow cancel eof invalid failed; do
+for aliasCase in flow cancel eof invalid failed default-cancel default-eof base-eof default-invalid default-failed; do
     : >"${TLS_WIZARD_ACTIONS}"
     export SITE_EDIT_STATUS=0
-    [[ "${aliasCase}" != failed ]] || SITE_EDIT_STATUS=15
+    [[ "${aliasCase}" != failed && "${aliasCase}" != default-failed ]] || SITE_EDIT_STATUS=15
     runPty "port-alias-${aliasCase}" port-alias "${aliasCase}" "${TLS_WIZARD_CLI}" menu
     expectedAliases='protocol list'
     case "${aliasCase}" in
     flow)
-        expectedAliases+=$'\nprotocol port-alias-status\nprotocol list\nedit --port-alias entry-fixture 2053\nprotocol list\nedit --port-alias-remove entry-fixture 2053'
+        expectedAliases+=$'\nprotocol port-alias-status\nprotocol list\nedit --port-alias entry-fixture 2053'
+        expectedAliases+=$'\nprotocol port-alias-status\nprotocol list\nedit --port-alias-default entry-fixture 2053'
+        expectedAliases+=$'\nprotocol list\nedit --port-alias-default entry-fixture base\nprotocol list\nedit --port-alias-remove entry-fixture 2053'
         grep -Fq '8. 额外入口端口' "${CONTROL_LOG}" || fail '额外入口菜单未接入协议菜单'
+        grep -Fq '4. 选择默认分享端口' "${CONTROL_LOG}" || fail '默认分享端口菜单未接入'
+        grep -Fq '5. 恢复原入口' "${CONTROL_LOG}" || fail '原入口恢复菜单未接入'
         ;;
     cancel) expectedAliases+=$'\nprotocol list\nprotocol list' ;;
     eof) expectedAliases+=$'\nprotocol list' ;;
@@ -1490,6 +1523,19 @@ for aliasCase in flow cancel eof invalid failed; do
     failed)
         expectedAliases+=$'\nprotocol list\nedit --port-alias entry-fixture 2053'
         grep -Fq '操作失败，退出码: 15' "${CONTROL_LOG}" || fail '别名 CLI 失败未保留菜单'
+        ;;
+    default-cancel)
+        expectedAliases+=$'\nprotocol port-alias-status\nprotocol list\nprotocol port-alias-status\nprotocol list\nprotocol list'
+        ;;
+    default-eof) expectedAliases+=$'\nprotocol port-alias-status\nprotocol list' ;;
+    base-eof) expectedAliases+=$'\nprotocol list' ;;
+    default-invalid)
+        expectedAliases+=$'\nprotocol port-alias-status\nprotocol list\nedit --port-alias-default entry-fixture invalid'
+        grep -Fq '操作失败，退出码: 2' "${CONTROL_LOG}" || fail '非法默认分享端口未保留菜单'
+        ;;
+    default-failed)
+        expectedAliases+=$'\nprotocol port-alias-status\nprotocol list\nedit --port-alias-default entry-fixture 2053'
+        grep -Fq '操作失败，退出码: 15' "${CONTROL_LOG}" || fail '默认分享端口 CLI 失败未保留菜单'
         ;;
     esac
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedAliases}" ]] ||

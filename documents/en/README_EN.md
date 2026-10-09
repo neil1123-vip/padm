@@ -288,16 +288,25 @@ No extra core, certificate, host privilege or arbitrary destination forwarding i
 padm-docker protocol port-alias-status
 padm-docker edit --port-alias entry-reality 8444 --preview
 padm-docker edit --port-alias entry-reality 8444 --confirm PADM-DOCKER-EDIT
+padm-docker edit --port-alias-default entry-reality 8444 --confirm PADM-DOCKER-EDIT
+padm-docker edit --port-alias-default entry-reality base --confirm PADM-DOCKER-EDIT
 padm-docker edit --port-alias-remove entry-reality 8444 --confirm PADM-DOCKER-EDIT
 ```
 
-Share links retain the original public port; selecting an alias as the default share port
-is not yet implemented. Conflicting published TCP or UDP ports are rejected; separate
+Share links retain the original public port unless an existing alias is selected.
+The selected alias stores `share_default: true`, at most once per listener. Local URIs,
+the main subscription and share groups use the same selected port without adding nodes
+or changing accounts or credentials. `base` or deleting the selected alias restores the
+original public entry, including the SNI frontend on port 443 during Reality coexistence,
+not the private backend. Other listeners, including TCP/UDP uses of the same number,
+remain unchanged. Conflicting published TCP or UDP ports are rejected; separate
 TCP and UDP uses of the same number are allowed. Fail2ban, TUN/TProxy and host-network
 coexistence reject aliases for now. Ordinary spec editing cannot add or replace aliases;
 deleting a listener removes its aliases, while copying does not inherit them.
 Older control bundles without `x-padm-port-aliases` reject alias-bearing configuration,
-updates and restoration. Public/IPv6 publishing, native hosts and arm64 remain unverified;
+updates and restoration. Default-share markers also require `x-padm-port-alias-default`;
+rollback to an older bundle that ignores the selection is rejected.
+Public/IPv6 publishing, native hosts and arm64 remain unverified;
 the complete internal capability `207` stays `deferred`.
 
 `--preview` does not commit, collect traffic, or start/stop application services.

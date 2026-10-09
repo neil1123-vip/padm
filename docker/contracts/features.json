@@ -494,7 +494,7 @@
       "profiles": [],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "5B.5c 提供已有受管入口的额外 Compose 发布端口：独立 v3 port_aliases、菜单/CLI 添加/删除/状态、候选验证和失败恢复，复用原入口认证、账号/统计以及 TLS/完整 SNI 前端，不加核心或任意目的转发。默认分享端口保持不变，切换功能和宿主集成后续交付；拒绝 Fail2ban、TUN/TProxy 和 host-network 组合。公网、IPv6 发布、原生宿主和 arm64 尚未验收，207 完整状态保持 deferred。"
+      "reason": "5B.5c–5B.5d 提供已有受管入口的额外 Compose 发布端口：独立 v3 port_aliases、菜单/CLI 添加/删除/状态与默认分享选择、候选验证和失败恢复，复用原入口认证、账号/统计以及 TLS/完整 SNI 前端，不加核心或任意目的转发。share_default 只切换该入口的 URI、主订阅和分享组；恢复 base 或删除默认别名回退原公开入口。拒绝 Fail2ban、TUN/TProxy 和 host-network 组合。宿主集成、公网、IPv6 发布、原生宿主和 arm64 尚未验收，207 完整状态保持 deferred。"
     },
     "core-lifecycle": {
       "status": "supported",

@@ -895,7 +895,7 @@ dockerProtocolCommand() (
         jq '. as $request | {enabled:has("port_aliases"), aliases:[
           .port_aliases[]? | . as $alias |
           $request.core.protocols[] | select(.listener_id == $alias.listener_id) |
-          {listener_id,core,public_port:$alias.public_port,
+          {listener_id,core,public_port:$alias.public_port,share_default:($alias.share_default // false),
            transport:(if .id == 30 then ["tcp","udp"] elif .id == 3 or .id == 31 then ["udp"] else ["tcp"] end),
            address_families}]}' "${normalized}"
         return $?
@@ -1416,12 +1416,18 @@ dockerEditCommand() {
             httpRelay=disable
             shift
             ;;
-        --port-alias|--port-alias-remove)
-            [[ "$#" -ge 3 && -n "$2" && "$2" != --* && "$3" =~ ^[0-9]{1,5}$ &&
+        --port-alias|--port-alias-remove|--port-alias-default)
+            [[ "$#" -ge 3 && -n "$2" && "$2" != --* &&
                 -z "${portAlias}" ]] || return "${PADM_DOCKER_RC_USAGE}"
-            [[ "$((10#$3))" -ge 1 && "$((10#$3))" -le 65535 ]] ||
-                return "${PADM_DOCKER_RC_USAGE}"
-            portAlias=${1#--} portAliasListener=$2 portAliasPort=$((10#$3))
+            portAlias=${1#--} portAliasListener=$2
+            if [[ "${portAlias}" == port-alias-default && "$3" == base ]]; then
+                portAliasPort=base
+            else
+                [[ "$3" =~ ^[0-9]{1,5}$ ]] || return "${PADM_DOCKER_RC_USAGE}"
+                [[ "$((10#$3))" -ge 1 && "$((10#$3))" -le 65535 ]] ||
+                    return "${PADM_DOCKER_RC_USAGE}"
+                portAliasPort=$((10#$3))
+            fi
             shift 3
             ;;
         --dns|--hosts|--direct|--block|--block-ips|--warp)
@@ -1666,17 +1672,27 @@ dockerEditCommand() {
     jq -es 'length == 1 and (.[0] | type == "object")' "${draft}" >/dev/null 2>&1 ||
         return "${PADM_DOCKER_RC_STATE}"
     if [[ -n "${portAlias}" ]]; then
-        jq --arg listener "${portAliasListener}" --argjson port "${portAliasPort}" --arg action "${portAlias}" '
+        jq --arg listener "${portAliasListener}" --arg port "${portAliasPort}" --arg action "${portAlias}" '
+          ($port | if . == "base" then null else tonumber end) as $port |
           if any(.core.protocols[]; .listener_id == $listener) then .
           else error("入口 ID 不存在") end |
           if $action == "port-alias" then
             if any(.port_aliases[]?; .listener_id == $listener and .public_port == $port) then .
             else .port_aliases = ((.port_aliases // []) + [{listener_id:$listener,public_port:$port}]) end
-          else
+          elif $action == "port-alias-remove" then
             if any(.port_aliases[]?; .listener_id == $listener and .public_port == $port) then
               .port_aliases |= map(select(.listener_id != $listener or .public_port != $port)) |
               if .port_aliases == [] then del(.port_aliases) else . end
             else error("额外端口不存在") end
+          else
+            if $port == null or any(.port_aliases[]?; .listener_id == $listener and .public_port == $port) then
+              if has("port_aliases") then
+                .port_aliases |= map(if .listener_id == $listener then
+                  del(.share_default) |
+                  if .public_port == $port then .share_default = true else . end
+                else . end)
+              else . end
+            else error("默认分享端口必须是该入口已有的额外端口") end
           end
         ' "${draft}" >"${draft}.next" 2>/dev/null &&
             chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" || {
