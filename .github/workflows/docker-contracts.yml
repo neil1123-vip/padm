@@ -16,19 +16,23 @@ jobs:
     name: Docker contracts (${{ matrix.selector }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      PADM_DOCKER_CONTRACTS_SHARED_CHECKS: '1'
     strategy:
       fail-fast: true
-      max-parallel: 8
+      max-parallel: 10
       matrix:
         selector:
           - docker-setup-core
           - docker-setup-encrypted
           - docker-setup-transports
           - docker-setup-tls
-          - docker-traditional-tls
+          - docker-contracts-protocol
           - docker-contracts-reality
           - docker-contracts-system
           - docker-contracts-fast
+          - docker-routing-core-workflow
+          - docker-routing-domains-workflow
     steps:
       - name: Checkout checked source
         uses: actions/checkout@v7
@@ -36,7 +40,7 @@ jobs:
           ref: ${{ inputs.source_ref }}
           fetch-depth: 1
       - name: Prepare control and site contract tools
-        if: matrix.selector == 'docker-contracts-fast'
+        if: matrix.selector == 'docker-contracts-fast' || startsWith(matrix.selector, 'docker-routing-')
         shell: bash
         run: |
           docker build --tag padm-regression:contracts shell/regression/container
@@ -46,12 +50,13 @@ jobs:
           SELECTOR: ${{ matrix.selector }}
         run: |
           set -euo pipefail
-          if [[ "${SELECTOR}" == docker-contracts-fast ]]; then
+          if [[ "${SELECTOR}" == docker-contracts-fast || "${SELECTOR}" == docker-routing-* ]]; then
             git ls-files -z | tar --null -T - -cf "${RUNNER_TEMP}/padm-contracts-source.tar"
             docker run --rm --network none --init \
-              --env PADM_REGRESSION_PARALLEL_JOBS=2 \
+              --env PADM_REGRESSION_PARALLEL_JOBS=4 \
+              --env PADM_DOCKER_CONTRACTS_SHARED_CHECKS \
               --mount "type=bind,src=${RUNNER_TEMP}/padm-contracts-source.tar,dst=/snapshot.tar,readonly" \
               padm-regression:contracts "${SELECTOR}"
           else
-            sudo env TMPDIR=/tmp PADM_REGRESSION_PARALLEL_JOBS=2 bash shell/subscription_groups_regression.sh "${SELECTOR}"
+            sudo env TMPDIR=/tmp PADM_REGRESSION_PARALLEL_JOBS=2 PADM_DOCKER_CONTRACTS_SHARED_CHECKS="${PADM_DOCKER_CONTRACTS_SHARED_CHECKS}" bash shell/subscription_groups_regression.sh "${SELECTOR}"
           fi
