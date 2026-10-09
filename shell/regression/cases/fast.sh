@@ -2597,6 +2597,7 @@ runManagedFileBackupManifestRegression() (
     local rootRel="${TMP_DIR}/managed-file-backup-manifest"
     local root
     local backupDir
+    local restoreFn manifestContent
 
     mkdir -p "${rootRel}/targets"
     root=$(cd -- "${rootRel}" && pwd -P) || return 1
@@ -2615,6 +2616,19 @@ runManagedFileBackupManifestRegression() (
     padmRestoreManagedFileBackupManifest "${backupDir}"
     [[ "$(<"${root}/targets/one.json")" == "old-one" ]]
     [[ ! -e "${root}/targets/two.json" ]]
+
+    manifestContent=$(<"${backupDir}/manifest")
+    for restoreFn in padmRestoreManagedFileBackupManifest adapterRestoreManagedRollbackBackup; do
+        printf '%s' "${manifestContent}" >"${backupDir}/manifest"
+        printf 'new-one\n' >"${root}/targets/one.json"
+        printf 'new-two\n' >"${root}/targets/two.json"
+        "${restoreFn}" "${backupDir}"
+        [[ "$(<"${root}/targets/one.json")" == "old-one" ]]
+        [[ ! -e "${root}/targets/two.json" ]]
+
+        printf 'invalid-record' >"${backupDir}/manifest"
+        regressionExpectFailure "${restoreFn}" "${backupDir}"
+    done
 )
 
 runManagedFileBackupManifestValidatorRegression() (
@@ -6646,7 +6660,8 @@ runDockerGrpcTlsRegression() {
 }
 
 runDockerTraditionalTlsRegression() {
-    bash "${PROJECT_ROOT}/docker/tests/traditional-tls.sh"
+    PADM_DOCKER_TEST_FIXTURE_ONLY="${PADM_DOCKER_CONTRACTS_SHARED_CHECKS:-0}" \
+        bash "${PROJECT_ROOT}/docker/tests/traditional-tls.sh"
 }
 
 runDockerPermissionsRegression() {

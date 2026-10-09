@@ -414,6 +414,18 @@ the menu requires confirmation. Missing, stopped or mismatched deployments are
 rejected, and backend failures return nonzero. Enabling new protection, real client
 source visibility, host rule ownership and restart recovery still require 5C acceptance.
 
+The existing TProxy profile records its random chain, rule token, mark, route table
+and routing identity in private `data/net/transparent/tproxy.state`. Preflight checks
+the current owner and candidate conflicts without changing resources. Startup failure
+and normal shutdown delete exact resources, never flush a whole chain or route table.
+Legacy two-field state, the fixed `padm-tproxy` chain, unknown random chains and
+foreign resource drift are rejected with recovery evidence retained. The routing table
+and policy preference are exclusive, not shared. Do not delete the state to force a retry:
+stop the previous owner and inspect its actual resources on native Linux first.
+A SIGKILL that leaves an empty chain without token rules requires manual ownership
+verification. This ownership foundation does not establish transparent-proxy client
+traffic, host reboot recovery or complete 5C acceptance.
+
 Multi-server control now has a separate private read-only API and a controlled-node sync
 transaction foundation.
 Authorization is bound to the controlled source address; expiration, rotation and revocation

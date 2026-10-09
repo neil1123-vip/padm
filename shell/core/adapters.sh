@@ -269,8 +269,8 @@ adapterRestoreManagedRollbackBackup() {
 
     manifest="${backupDir}/manifest"
     [[ -f "${manifest}" ]] || return 1
-    while IFS=$'\t' read -r backupFile targetPath state; do
-        [[ -n "${targetPath}" ]] || continue
+    while IFS=$'\t' read -r backupFile targetPath state || [[ -n "${backupFile}${targetPath}${state}" ]]; do
+        [[ -n "${targetPath}" ]] || { status=1; continue; }
         case "${state}" in
         file)
             restoreManagedFileFromBackup "${backupFile}" "${targetPath}" 644 || status=1

@@ -28,12 +28,12 @@ jq --arg manifest "${CONFIGURE_MANIFEST_SHA}" --arg identity "${CONFIGURE_IDENTI
       .name = "Reality-gRPC-sing" | .public_port = 25445 |
       .grpc = {service_name:"padm-grpc_2"})]
 ' "${TEST_ROOT}/v3.json" >"${REALITY_SPEC}"
-if [[ "${PADM_DOCKER_TEST_FIXTURE_ONLY:-0}" != 1 ]]; then
-dockerConfigureSpecValidate "${REALITY_SPEC}" || fail '新 Reality 合同不接受有效双核心夹具'
 COMPAT_BUNDLE="${TEST_ROOT}/compat-bundle"
 mkdir -p "${COMPAT_BUNDLE}/docker/contracts"
 cp "${PROJECT_ROOT}/docker/contracts/"{configure.schema.json,features.json} \
     "${COMPAT_BUNDLE}/docker/contracts/"
+if [[ "${PADM_DOCKER_TEST_FIXTURE_ONLY:-0}" != 1 ]]; then
+dockerConfigureSpecValidate "${REALITY_SPEC}" || fail '新 Reality 合同不接受有效双核心夹具'
 dockerBundleSupportsSpec "${COMPAT_BUNDLE}" "${REALITY_SPEC}" || fail '当前 bundle 拒绝新增协议'
 for unsupported in deferred missing core; do
     case "${unsupported}" in

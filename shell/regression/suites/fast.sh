@@ -59,8 +59,10 @@ listRegressionDockerTlsFocusedChildSelectors() {
 listRegressionDockerContractsChildSelectors() {
     # 完整合同按历史耗时全局长任务优先，减少尾部空等。
     printf '%s\n' \
+        docker-reality \
         docker-traditional-tls \
-        docker-routing-socks5 \
+        docker-routing-core-workflow \
+        docker-routing-domains-workflow \
         docker-phase3 \
         docker-setup-encrypted \
         docker-setup-transports \
@@ -87,6 +89,7 @@ listRegressionDockerContractsChildSelectors() {
         docker-accounts \
         docker-permissions \
         docker-wireguard-runtime \
+        docker-tproxy-ownership \
         docker-control-api \
         docker-subscriptions \
         docker-accounts-cli \
@@ -95,7 +98,7 @@ listRegressionDockerContractsChildSelectors() {
 }
 
 runRegressionDockerContracts() {
-    # 仅此聚合包含传统 TLS 的完整祖先合同，参数和目标测试不必重复执行。
+    # 完整集合与协议分片都独立覆盖共同祖先合同，派生测试只初始化夹具。
     PADM_DOCKER_CONTRACTS_SHARED_CHECKS=1 \
         runFrameworkParallelRegressionSelectorListWithJobs "$@"
 }
@@ -113,12 +116,12 @@ listRegressionDockerContractsFastChildSelectors() {
         docker-release \
         docker-geo-data \
         docker-traffic \
-        docker-routing-socks5 \
         docker-http-relay \
         docker-entry-port-alias \
         docker-accounts \
         docker-control-cli \
         docker-wireguard-runtime \
+        docker-tproxy-ownership \
         docker-control-api \
         docker-permissions \
         docker-accounts-cli \
@@ -129,6 +132,14 @@ listRegressionDockerContractsFastChildSelectors() {
 
 listRegressionDockerContractsSystemChildSelectors() {
     printf '%s\n' docker-phase3 docker-phase4 docker-phase6
+}
+
+listRegressionDockerContractsRoutingChildSelectors() {
+    printf '%s\n' docker-routing-core-workflow docker-routing-domains-workflow
+}
+
+listRegressionDockerContractsProtocolChildSelectors() {
+    printf '%s\n' docker-traditional-tls docker-reality
 }
 
 listRegressionDockerCoreAssessmentChildSelectors() {
@@ -181,6 +192,10 @@ runDockerRoutingRegionRegression() {
 
 runDockerRoutingDomainsWorkflowRegression() {
     PADM_DOCKER_ROUTING_SCOPE=domains-workflow bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
+}
+
+runDockerRoutingCoreWorkflowRegression() {
+    PADM_DOCKER_ROUTING_SCOPE=core-workflow bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
 }
 
 runDockerRoutingIPv6Regression() {
@@ -281,6 +296,14 @@ runDockerWireGuardRuntimeRegression() {
     bash "${PROJECT_ROOT}/docker/tests/wireguard-runtime.sh"
 }
 
+runDockerTProxyOwnershipRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/tproxy-ownership.sh"
+}
+
+runDockerTProxyRealRegression() {
+    PADM_NET_REAL_CASE=tproxy bash "${PROJECT_ROOT}/docker/tests/fail2ban-isolated-real.sh"
+}
+
 registerRegressionFunctionLeaf install-module-manifest runInstallModuleManifestCompleteRegression
 registerRegressionFunctionLeaf fast-only-safety runRegressionFastOnlySafety
 registerRegressionFunctionLeaf fast-only-output-auto-install runRegressionFastOnlyOutputAutoInstall
@@ -338,6 +361,7 @@ registerRegressionFunctionLeaf docker-routing-block-bt-real runDockerRoutingBloc
 registerRegressionFunctionLeaf docker-routing-region runDockerRoutingRegionRegression
 registerRegressionFunctionLeaf docker-routing-region-real runDockerRoutingRegionRealRegression
 registerRegressionFunctionLeaf docker-routing-domains-workflow runDockerRoutingDomainsWorkflowRegression
+registerRegressionFunctionLeaf docker-routing-core-workflow runDockerRoutingCoreWorkflowRegression
 registerRegressionFunctionLeaf docker-routing-ipv6 runDockerRoutingIPv6Regression
 registerRegressionFunctionLeaf docker-routing-ipv6-real runDockerRoutingIPv6RealRegression
 registerRegressionFunctionLeaf docker-routing-warp runDockerRoutingWarpRegression
@@ -356,6 +380,14 @@ registerRegressionFunctionLeaf docker-control-client runDockerControlClientRegre
 registerRegressionFunctionLeaf docker-control-two-node-real runDockerControlTwoNodeRealRegression
 registerRegressionFunctionLeaf docker-control-two-deployment-real runDockerControlTwoDeploymentRealRegression
 registerRegressionFunctionLeaf docker-wireguard-runtime runDockerWireGuardRuntimeRegression
+registerRegressionFunctionLeaf docker-tproxy-ownership runDockerTProxyOwnershipRegression
+registerRegressionFunctionLeaf docker-tproxy-real runDockerTProxyRealRegression
+
+listRegressionDockerTProxyChildSelectors() {
+    printf '%s\n' docker-tproxy-ownership docker-phase4
+}
+registerRegressionParallelSelectorList docker-tproxy-focused runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-tproxy-focused-${BASHPID:-$$}" listRegressionDockerTProxyChildSelectors 2
 
 listRegressionDockerWireGuardChildSelectors() {
     printf '%s\n' docker-wireguard-runtime docker-phase4
@@ -372,7 +404,11 @@ registerRegressionParallelSelectorList docker-geo runFrameworkParallelRegression
 registerRegressionParallelSelectorList docker-contracts runRegressionDockerContracts \
     "${TMP_DIR}/docker-contracts-parallel-${BASHPID:-$$}" listRegressionDockerContractsChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts-fast runFrameworkParallelRegressionSelectorListWithJobs \
-    "${TMP_DIR}/docker-contracts-fast-parallel-${BASHPID:-$$}" listRegressionDockerContractsFastChildSelectors 2
+    "${TMP_DIR}/docker-contracts-fast-parallel-${BASHPID:-$$}" listRegressionDockerContractsFastChildSelectors 4
+registerRegressionParallelSelectorList docker-contracts-routing runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-contracts-routing-parallel-${BASHPID:-$$}" listRegressionDockerContractsRoutingChildSelectors 2
+registerRegressionParallelSelectorList docker-contracts-protocol runRegressionDockerContracts \
+    "${TMP_DIR}/docker-contracts-protocol-parallel-${BASHPID:-$$}" listRegressionDockerContractsProtocolChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts-system runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-contracts-system-parallel-${BASHPID:-$$}" listRegressionDockerContractsSystemChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts-reality runFrameworkParallelRegressionSelectorListWithJobs \

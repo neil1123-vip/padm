@@ -166,42 +166,12 @@ realityStreamWarnWebsiteBackend() {
     fi
 }
 
-backupRealityStreamFile() {
-    local file=$1
-    local backup=$2
-    file=$(padmResolveManagedAbsolutePath "${file}") || return 1
-    backup=$(padmResolveManagedAbsolutePath "${backup}") || return 1
-    if [[ -f "${file}" ]]; then
-        backupManagedFileToPath "${file}" "${backup}" 644 || return 1
-    else
-        removeManagedFileIfPresent "${backup}" || return 1
-    fi
-}
-
-restoreRealityStreamFile() {
-    local file=$1
-    local backup=$2
-    file=$(padmResolveManagedAbsolutePath "${file}") || return 1
-    backup=$(padmResolveManagedAbsolutePath "${backup}") || return 1
-    if [[ -f "${backup}" ]]; then
-        restoreManagedFileFromBackup "${backup}" "${file}" 644 || return 1
-    else
-        removeManagedFileIfPresent "${file}" || return 1
-    fi
-}
-
 realityStreamRollback() {
     local tmpDir=$1
     local status=0
-    [[ -n "${tmpDir}" && -d "${tmpDir}" ]] || return 0
-    restoreRealityStreamFile "$(realityStreamVisionConfigFile)" "${tmpDir}/vision.json" || status=1
-    restoreRealityStreamFile "$(realityStreamXHTTPConfigFile)" "${tmpDir}/xhttp.json" || status=1
-    restoreRealityStreamFile "$(realityStreamSplitConfFile)" "${tmpDir}/stream.conf" || status=1
-    restoreRealityStreamFile "$(realityStreamSplitStateFile)" "${tmpDir}/state.json" || status=1
-    restoreRealityStreamFile "$(realityStreamSplitNginxConf)" "${tmpDir}/nginx.conf" || status=1
-    if [[ -d "${tmpDir}/ports" ]]; then
-        corePortRollbackFiles "${tmpDir}/ports" || status=1
-    fi
+    [[ -n "${tmpDir}" && -d "${tmpDir}" ]] || return 1
+    padmRestoreManagedFileBackupManifest "${tmpDir}" || status=1
+    corePortRollbackFiles "${tmpDir}/ports" || status=1
     return "${status}"
 }
 
@@ -212,11 +182,12 @@ removeRealityStreamBackup() {
 
 backupRealityStreamState() {
     local backupDir=$1
-    backupRealityStreamFile "$(realityStreamVisionConfigFile)" "${backupDir}/vision.json" || return 1
-    backupRealityStreamFile "$(realityStreamXHTTPConfigFile)" "${backupDir}/xhttp.json" || return 1
-    backupRealityStreamFile "$(realityStreamSplitConfFile)" "${backupDir}/stream.conf" || return 1
-    backupRealityStreamFile "$(realityStreamSplitStateFile)" "${backupDir}/state.json" || return 1
-    backupRealityStreamFile "$(realityStreamSplitNginxConf)" "${backupDir}/nginx.conf" || return 1
+    padmWriteManagedFileBackupManifest "${backupDir}" \
+        vision.json "$(realityStreamVisionConfigFile)" \
+        xhttp.json "$(realityStreamXHTTPConfigFile)" \
+        stream.conf "$(realityStreamSplitConfFile)" \
+        state.json "$(realityStreamSplitStateFile)" \
+        nginx.conf "$(realityStreamSplitNginxConf)" || return 1
     corePortBackupFiles "${backupDir}/ports"
 }
 
@@ -958,7 +929,7 @@ traditionalTlsFallbackSelection() {
 }
 
 ensureTraditionalTlsFallbackNginxConfig() {
-    local targetPath rebuildSelection= recoveryFile= rebuildStatus=0
+    local targetPath rebuildSelection= recoveryFile= rebuildStatus=0 wasRunning=false
     targetPath=$(nginxConfigFilePath alone.conf) || {
         errorCard "传统 TLS fallback 配置路径异常"
         return 1
@@ -1017,6 +988,7 @@ ensureTraditionalTlsFallbackNginxConfig() {
         }
         padmForgetCleanupPath "${recoveryFile}"
     fi
+    nginxRunning && wasRunning=true
     local previousSelection="${selectCustomInstallType:-}"
     selectCustomInstallType="${rebuildSelection}"
     updateRedirectNginxConf || rebuildStatus=1
@@ -1035,11 +1007,18 @@ ensureTraditionalTlsFallbackNginxConfig() {
                 return 1
             }
             if [[ "${rebuildStatus}" == 2 ]]; then
-                local -a restoreArgs=(refresh)
-                nginxRunning || restoreArgs=(start restore)
-                if ! runCoreServiceActionAllowFailure handleNginx "${restoreArgs[@]}"; then
-                    errorCard "旧 Nginx 配置已恢复，但服务重新加载失败，请检查服务日志"
-                    return 1
+                if [[ "${wasRunning}" == true ]]; then
+                    local -a restoreArgs=(refresh)
+                    nginxRunning || restoreArgs=(start restore)
+                    if ! runCoreServiceActionAllowFailure handleNginx "${restoreArgs[@]}"; then
+                        errorCard "旧 Nginx 配置已恢复，但服务重新加载失败，请检查服务日志"
+                        return 1
+                    fi
+                elif nginxRunning; then
+                    if ! runCoreServiceActionAllowFailure handleNginx stop; then
+                        errorCard "旧 Nginx 配置已恢复，但服务停止失败，请检查服务日志"
+                        return 1
+                    fi
                 fi
             fi
             errorCard "Nginx 重建失败，已恢复旧 alone.conf"
@@ -1288,5 +1267,11 @@ backupNginxConfig() {
         fi
         return 0
     fi
-
+    if [[ "$1" == "restoreBackup" ]]; then
+        coreSetPairedFileManualCheckMessage manualCheckMessage "nginx配置恢复备份不存在或不是普通文件" "${targetFile}" "${backupFile}"
+        errorCard "${manualCheckMessage}"
+        return 1
+    fi
+    errorCard "不支持的 Nginx 配置备份动作: $1"
+    return 1
 }

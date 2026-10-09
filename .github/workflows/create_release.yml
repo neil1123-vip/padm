@@ -72,6 +72,18 @@ jobs:
         run: |
           set -euo pipefail
           bash shell/subscription_groups_regression.sh ci
+
+  tls:
+    name: Release TLS transactions and renewal
+    needs: static
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout checked source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.static.outputs.source_sha }}
       - name: Check Docker TLS transactions and renewal
         shell: bash
         run: sudo env TMPDIR=/tmp bash shell/subscription_groups_regression.sh docker-tls-focused
@@ -86,7 +98,7 @@ jobs:
 
   prepare:
     name: Resolve release
-    needs: [static, native]
+    needs: [static, native, tls]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 25

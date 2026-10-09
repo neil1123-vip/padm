@@ -3148,12 +3148,57 @@ singBoxLogOutputFile() {
     fi
 }
 
+singBoxLogRollbackOnExit() {
+    [[ "${PADM_SINGBOX_LOG_ROLLBACK[active]:-false}" == true ]] || return 0
+    PADM_SINGBOX_LOG_ROLLBACK[active]=false
+
+    local reason=${1:-sing-box 日志配置中断} status=0
+    local backupPath=${PADM_SINGBOX_LOG_ROLLBACK[backup]:-}
+    local targetPath=${PADM_SINGBOX_LOG_ROLLBACK[target]}
+    local hadBackup=${PADM_SINGBOX_LOG_ROLLBACK[hadBackup]:-false}
+    local serviceWasRunning=${PADM_SINGBOX_LOG_ROLLBACK[serviceWasRunning]:-false}
+    local reloadAttempted=${PADM_SINGBOX_LOG_ROLLBACK[reloadAttempted]:-false}
+    local restoreMessage
+
+    if [[ "${hadBackup}" == true ]]; then
+        restoreManagedFileFromBackup "${backupPath}" "${targetPath}" 644 || status=1
+    else
+        removeManagedPathIfPresent "${targetPath}" || status=1
+    fi
+    if [[ "${status}" != 0 ]]; then
+        [[ -z "${backupPath}" ]] || padmForgetCleanupPath "${backupPath}"
+        if [[ "${hadBackup}" == true ]]; then
+            coreSetSingleRestoreResultMessage restoreMessage "${reason}" false \
+                "已恢复旧配置" "旧配置" " ${targetPath}，备份文件：${backupPath}" || true
+        else
+            coreSetNewConfigCleanupFailureMessage restoreMessage "${reason}" "${targetPath}"
+        fi
+        errorCard "${restoreMessage}"
+        return 1
+    fi
+    if [[ "${status}" == 0 && "${serviceWasRunning}" == true && "${reloadAttempted}" == true ]]; then
+        serviceQueueRestart sing-box
+        serviceQueueApply || status=1
+    fi
+    if [[ "${status}" == 0 ]]; then
+        [[ -z "${backupPath}" ]] || padmRemoveCleanupPath "${backupPath}"
+    elif [[ -n "${backupPath}" ]]; then
+        padmForgetCleanupPath "${backupPath}"
+    fi
+    if [[ "${status}" != 0 ]]; then
+        coreSetRollbackResultMessage restoreMessage "${reason}" \
+            "已恢复旧配置，但 sing-box 重载仍失败，备份文件：${backupPath}"
+        errorCard "${restoreMessage}"
+    fi
+    return "${status}"
+}
+
 # sing-box 日志
 singBoxLog() {
     local SERVICE_ACTIONS=
     local targetPath
-    local tmpPath backupPath hadBackup=false
-    local restoreMessage rollbackMessage serviceWasRunning=false
+    local tmpPath backupPath= hadBackup=false
+    local rollbackMessage serviceWasRunning=false
     case "${1:-}" in
     true | false) ;;
     *) errorCard "sing-box 日志开关无效"; return 1 ;;
@@ -3177,7 +3222,16 @@ singBoxLog() {
         }
         hadBackup=true
     fi
+    local -A PADM_SINGBOX_LOG_ROLLBACK=(
+        [active]=true [target]="${targetPath}" [backup]="${backupPath}" [hadBackup]="${hadBackup}"
+        [serviceWasRunning]="${serviceWasRunning}" [reloadAttempted]=false
+    )
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
+    padmRegisterExitRollback singBoxLogRollbackOnExit
     if ! commitGeneratedJsonFile "${tmpPath}" "${targetPath}"; then
+        PADM_SINGBOX_LOG_ROLLBACK[active]=false
+        unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
         if [[ -n "${backupPath}" ]]; then
             padmRemoveCleanupPath "${backupPath}" || true
         fi
@@ -3186,36 +3240,28 @@ singBoxLog() {
         return 1
     fi
 
-    if [[ "${serviceWasRunning}" == false ]] || {
-        serviceQueueRestart sing-box
-        serviceQueueApply
-    }; then
+    if [[ "${serviceWasRunning}" == false ]]; then
+        PADM_SINGBOX_LOG_ROLLBACK[active]=false
+        unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
         if [[ -n "${backupPath}" ]]; then
             padmRemoveCleanupPath "${backupPath}" || true
         fi
         return 0
     fi
-    if [[ "${hadBackup}" == "true" ]]; then
-        if ! restoreManagedFileFromBackup "${backupPath}" "${targetPath}" 644; then
-            padmForgetCleanupPath "${backupPath}"
-            coreSetSingleRestoreResultMessage restoreMessage "sing-box 日志配置重载失败" false "已恢复旧配置" "旧配置" " ${targetPath}，备份文件：${backupPath}" || true
-            errorCard "${restoreMessage}"
-            return 1
-        fi
-        padmRemoveCleanupPath "${backupPath}" || true
-    else
-        if ! removeManagedPathIfPresent "${targetPath}"; then
-            coreSetNewConfigCleanupFailureMessage restoreMessage "sing-box 日志配置重载失败" "${targetPath}"
-            errorCard "${restoreMessage}"
-            return 1
-        fi
+    PADM_SINGBOX_LOG_ROLLBACK[reloadAttempted]=true
+    if {
+        serviceQueueRestart sing-box
+        serviceQueueApply
+    }; then
+        PADM_SINGBOX_LOG_ROLLBACK[active]=false
+        unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
+        [[ -n "${backupPath}" ]] && padmRemoveCleanupPath "${backupPath}" || true
+        return 0
     fi
-    serviceQueueRestart sing-box
-    if serviceQueueApply; then
+    if padmRunRollback singBoxLogRollbackOnExit "sing-box 日志配置重载失败"; then
         coreSetRollbackResultMessage rollbackMessage "sing-box 日志配置重载失败" "已回滚日志配置"
-    else
-        coreSetRollbackResultMessage rollbackMessage "sing-box 日志配置重载失败" "已恢复旧配置，但 sing-box 重载仍失败"
+        errorCard "${rollbackMessage}"
     fi
-    errorCard "${rollbackMessage}"
+    unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
     return 1
 }
