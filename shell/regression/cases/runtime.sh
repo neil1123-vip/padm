@@ -450,10 +450,12 @@ runInstallWorkflowRegression() (
             currentClients='[{"id":"previous-user"}]' currentPath=previous-path customPort=7443
             realityPort=10011 realityGrpcPort=10012 xHTTPort=10013
             singBoxVLESSRealityVisionSNI=previous-target.example.com lastInstallationConfig=previous
+            unset tuicHeartbeat
             inputBefore=$(declare -p domain currentHost currentUUID currentClients currentPath customPort \
                 realityPort realityGrpcPort xHTTPort singBoxVLESSRealityVisionSNI lastInstallationConfig)
             regressionExpectStatus 1 "${apply}" "${protocols}" < <(printf 'n\n\n')
             [[ -z "${events}" ]]
+            [[ ! -v tuicHeartbeat ]]
             [[ "$(declare -p domain currentHost currentUUID currentClients currentPath customPort \
                 realityPort realityGrpcPort xHTTPort singBoxVLESSRealityVisionSNI lastInstallationConfig)" == "${inputBefore}" ]]
             [[ "${PADM_INSTALL_RESET_HISTORY}" == false && "${configPath}" == "${root}/conf/" ]]
