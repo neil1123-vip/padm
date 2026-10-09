@@ -593,7 +593,8 @@ singBoxProtocolUninstallRollback() {
         fi
     fi
     readInstallType || rollbackFailed=true
-    if [[ "${serviceWasRunning}" == "true" ]] && ! runCoreServiceActionAllowFailure handleSingBox start; then
+    if [[ "${rollbackFailed}" == false && "${serviceWasRunning}" == "true" ]] &&
+        ! runCoreServiceActionAllowFailure handleSingBox start; then
         rollbackFailed=true
     fi
     if [[ "${rollbackFailed}" == "true" ]]; then
