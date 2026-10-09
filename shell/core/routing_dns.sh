@@ -4,7 +4,7 @@ DNS_ROUTING_ACTIVE_BACKUP_DIR=
 
 # DNS/hosts 路由与覆盖
 dnsRouting() {
-    if [[ -z "${configPath}" ]]; then
+    if [[ -z "${configPath:-}" && -z "${singBoxConfigPath:-}" ]]; then
         coreNotInstalledErrorCard
         return 1
     fi
@@ -31,7 +31,7 @@ dnsRouting() {
 
 # DNS/hosts 覆盖
 sniRouting() {
-    if [[ -z "${configPath}" ]]; then
+    if [[ -z "${configPath:-}" && -z "${singBoxConfigPath:-}" ]]; then
         coreNotInstalledErrorCard
         return 1
     fi
@@ -39,7 +39,7 @@ sniRouting() {
     while true; do
         echoContent title "\n┌─ DNS/hosts 覆盖 ───────────────────────────────────"
         menuLine "把指定域名在核心内解析到指定 IP；这不是 Nginx/TCP 反向代理"
-        menuLine "Xray 支持 geosite/domain 规则；sing-box 使用 remote rule_set 与 domain_suffix"
+        menuLine "Xray 支持 geosite/domain 规则；sing-box 仅支持具体域名的精确映射"
         menuItem 1 "添加" "添加 DNS/hosts 覆盖规则"
         menuDangerItem 2 "卸载" "移除 DNS/hosts 覆盖配置"
         menuReturnItem 3 "返回分流工具" "回到上一级分流菜单"
@@ -277,21 +277,25 @@ updateXrayDNSRoutingConfig() {
 setUnlockSNI() {
     autoRead sni_routing_ip "请输入要覆盖到的 IP:" setSNIP || return 0
     if [[ -n ${setSNIP} ]]; then
+        dnsRoutingValidateHostIP "${setSNIP}" || return 1
         echoContent title "\n┌─ DNS/hosts 覆盖规则 ───────────────────────────────"
         menuLine "Xray 录入示例：netflix,disney,hulu"
-        menuLine "sing-box 支持 geosite 名称和具体域名，具体域名按 domain_suffix 写入"
+        menuLine "sing-box 仅支持具体域名或 full: 域名，精确匹配，不包含子域名"
         menuClose
 
         dnsRoutingBackupCreate || { errorCard "DNS/hosts 覆盖配置备份失败，已取消修改"; return 1; }
         if [[ "${coreInstallType}" == 1 ]]; then
             autoRead sni_xray_domains "请按照上面示例录入域名:" xrayDomainList ||
                 { dnsRoutingAbortChange "DNS/hosts 覆盖已取消" || return 1; return 0; }
+            dnsRoutingValidateDomainList "${xrayDomainList}" ||
+                { dnsRoutingAbortChange "DNS/hosts 域名规则为空"; return 1; }
             local hosts={}
             while read -r domain; do
+                domain=$(echo "${domain}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+                [[ -n "${domain}" ]] || continue
                 local matchedRuleValue
                 matchedRuleValue=$(getDLCMatchedRuleValue "${domain}" "/etc/padm/xray") ||
                     { dnsRoutingAbortChange "DNS/hosts 关键字输入无效"; return 1; }
-                domain=$(echo "${domain}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
                 if [[ "${domain}" == keyword:* ||
                     ( "${matchedRuleValue}" != geosite:* && "${matchedRuleValue}" != domain:* &&
                       "${matchedRuleValue}" != full:* ) ]]; then
@@ -324,6 +328,16 @@ setUnlockSNI() {
 }
 
 # 添加 Xray DNS 配置
+dnsRoutingValidateHostIP() {
+    local ip=${1:-}
+    if [[ "${ip}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] && padmIsValidHostName "${ip}" ||
+        padmIsValidIPv6Address "${ip}"; then
+        return 0
+    fi
+    errorCard "DNS/hosts 覆盖必须使用有效的 IPv4 或 IPv6 地址，已保留旧配置"
+    return 1
+}
+
 dnsRoutingValidateDomainList() {
     local domainList=${1:-}
     if [[ ! "${domainList}" =~ [^[:space:],] ]]; then
@@ -338,6 +352,7 @@ addXrayDNSConfig() {
     dnsRoutingValidateDomainList "${domainList}" || return 1
     local domains=[]
     while read -r line; do
+        [[ "${line}" =~ [^[:space:]] ]] || continue
         local matchedRuleValue
         matchedRuleValue=$(getDLCMatchedRuleValue "${line}" "/etc/padm/xray") || return 1
         domains=$(echo "${domains}" | jq -r --arg rule "${matchedRuleValue}" '. += [$rule]')
@@ -356,6 +371,7 @@ addXrayDNSConfig() {
 # 仅替换受管 DNS 内容，保留自定义配置与跨分片引用。
 updateSingBoxDNSRoutingConfig() {
     local patch=${1:-'{}'}
+    local managedTag=${2:-}
     local configDir targetPath file currentFile=/dev/null merged
     local -a otherFiles=()
     configDir=$(dnsRoutingSafeSingBoxConfigDir) || return 1
@@ -366,8 +382,9 @@ updateSingBoxDNSRoutingConfig() {
     for file in "${configDir}"*.json; do
         [[ -f "${file}" && "${file}" != "${targetPath}" ]] && otherFiles+=("${file}")
     done
-    merged=$(jq -s --slurpfile current "${currentFile}" --argjson patch "${patch}" '
-        def managed_tag: . == "padm-hosts" or . == "padm-dnsRouting";
+    merged=$(jq -s --slurpfile current "${currentFile}" --argjson patch "${patch}" --arg managedTag "${managedTag}" '
+        def padm_tag: . == "padm-hosts" or . == "padm-dnsRouting";
+        def managed_tag: padm_tag and ($managedTag == "" or . == $managedTag);
         def managed_rule: type == "object" and (.server? | managed_tag);
         def rule_refs:
             .. | objects | .rule_set? |
@@ -376,7 +393,12 @@ updateSingBoxDNSRoutingConfig() {
             .. | objects |
             (.server?, .final?, .default_domain_resolver?,
              (.domain_resolver? | if type == "object" then .server? else . end)) |
-            select(managed_tag);
+            select(padm_tag);
+        def dns_resolve_base:
+            if .type == "logical" and .mode == "and" and (.rules | length) == 2 and
+               (.rules[1] | keys) == ["domain", "invert"] and .rules[1].invert == true then
+                .rules[0] + {action:.action, server:.server}
+            else . end;
         . as $shards |
         if ($current | length) > 1 then error("sing-box DNS config must contain one object")
         elif $current == [] then {} else $current[0] end |
@@ -425,6 +447,23 @@ updateSingBoxDNSRoutingConfig() {
             if all(($shards + [.])[]; .route.default_domain_resolver == null) then
                 .route.default_domain_resolver = "padm-local"
             else . end
+        else . end |
+        if .dns.rules != null then
+            .dns.rules = ([.dns.rules[] | select(.server? | padm_tag | not)] +
+                [.dns.rules[] | select(.server? == "padm-hosts")] +
+                [.dns.rules[] | select(.server? == "padm-dnsRouting")])
+        else . end |
+        [.dns.servers[]? | select(.tag? == "padm-hosts") | (.predefined // {}) | keys[]] as $hostDomains |
+        if .route.rules != null then
+            .route.rules |= map(
+                if .server? == "padm-dnsRouting" then
+                    dns_resolve_base |
+                    if $hostDomains == [] then . else
+                        {type:"logical", mode:"and",
+                         rules:[del(.action, .server), {domain:$hostDomains, invert:true}],
+                         action:.action, server:.server}
+                    end
+                else . end)
         else . end
     ' "${otherFiles[@]}" </dev/null) || return 1
     writeRoutingJsonConfig "${targetPath}" <<<"${merged}"
@@ -438,13 +477,30 @@ addSingBoxDNSConfig() {
     dnsRoutingValidateDomainList "${domainList}" || return 1
 
     local rules=
-    rules=$(initSingBoxRules "${domainList}" "dns") || { errorCard "sing-box DNS 规则生成失败，已保留旧配置"; return 1; }
+    if [[ "${actionType}" == "predefined" ]]; then
+        dnsRoutingValidateHostIP "${ip}" || return 1
+        local domain
+        local -a hostDomains=()
+        while read -r domain; do
+            domain=$(echo "${domain}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            [[ -n "${domain}" ]] || continue
+            domain=${domain#full:}
+            if ! isDomainFormat "${domain}" || ! padmIsValidHostName "${domain}" ||
+                [[ "${domain}" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then
+                errorCard "sing-box DNS/hosts 仅支持具体域名或 full: 域名，已保留旧配置"
+                return 1
+            fi
+            hostDomains+=("${domain}")
+        done < <(echo "${domainList}" | tr ',' '\n')
+        rules=$(printf '%s\n' "${hostDomains[@]}" | jq -R -s '
+            {domainRules:(split("\n") | map(select(length > 0)) | unique),
+             suffixRules:[], keywordRules:[], ruleSet:[]}
+        ') || return 1
+    else
+        rules=$(initSingBoxRules "${domainList}" "dns") || { errorCard "sing-box DNS 规则生成失败，已保留旧配置"; return 1; }
+    fi
     local domainRules suffixRules ruleSet ruleSetTag keywordRules
     splitSingBoxRules "${rules}" domainRules suffixRules ruleSet ruleSetTag keywordRules || { errorCard "sing-box DNS 规则拆分失败，已保留旧配置"; return 1; }
-    if [[ "${actionType}" == "predefined" && "${keywordRules}" != "[]" ]]; then
-        errorCard "DNS/hosts 覆盖不支持关键字匹配，已保留旧配置"
-        return 1
-    fi
     if [[ -n "${singBoxConfigPath}" ]]; then
         local patch
         patch=$(jq -n --arg ip "${ip}" --arg action "${actionType}" \
@@ -452,20 +508,27 @@ addSingBoxDNSConfig() {
             --argjson keywords "${keywordRules}" \
             --argjson ruleSets "${ruleSet}" --argjson ruleTags "${ruleSetTag}" '
             (if $action == "predefined" then "padm-hosts" else "padm-dnsRouting" end) as $tag |
-            ({domain:$domains, domain_suffix:$suffixes, domain_keyword:$keywords, rule_set:$ruleTags} |
-                with_entries(select(.value | length > 0))) as $match |
+            ({domain:$domains, domain_suffix:$suffixes, domain_keyword:$keywords} |
+                with_entries(select(.value | length > 0))) as $domainsMatch |
+            ([($domainsMatch | select(length > 0)),
+              ({rule_set:$ruleTags} | select(.rule_set | length > 0))]) as $matches |
+            (if ($matches | length) == 1 then $matches[0]
+             else {type:"logical", mode:"or", rules:$matches} end) as $match |
             {
                 dns: {
                     servers: [(if $action == "predefined" then
                         {tag:$tag, type:"hosts", predefined:(($domains + $suffixes) | unique | map({key:., value:$ip}) | from_entries)}
                     else {tag:$tag, type:"udp", server:$ip} end)],
-                    rules: [($match + {action:"route", server:$tag} | if $action == "predefined" then del(.rule_set) else . end)]
+                    rules: [($match + {action:"route", server:$tag})]
                 },
                 route: {rules: [($match + {action:"resolve", server:$tag})], rule_set:$ruleSets}
             }
         ') || return 1
         initSingBoxLocalDNSConfig || return 1
-        if ! updateSingBoxDNSRoutingConfig "${patch}"; then
+        local managedTag=padm-dnsRouting
+        [[ "${actionType}" == "predefined" ]] && managedTag=padm-hosts
+        # hosts 精确映射与 DNS 分流独立维护，避免互相覆盖。
+        if ! updateSingBoxDNSRoutingConfig "${patch}" "${managedTag}"; then
             errorCard "sing-box DNS/hosts 配置写入失败，已保留旧配置"
             return 1
         fi
@@ -523,7 +586,9 @@ removeUnlockRoutingConfig() {
     fi
 
     if [[ -n "${singBoxConfigPath:-}" && -f "${singBoxConfigPath}dns.json" ]]; then
-        if ! updateSingBoxDNSRoutingConfig ||
+        local managedTag=padm-hosts
+        [[ -n "${checkXrayFile}" ]] && managedTag=padm-dnsRouting
+        if ! updateSingBoxDNSRoutingConfig '{}' "${managedTag}" ||
             ! initSingBoxLocalDNSConfig; then
             errorCard "sing-box ${title}配置移除失败，已保留旧配置"
             dnsRoutingAbortChange "${title}配置移除失败"

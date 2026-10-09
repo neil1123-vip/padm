@@ -1744,8 +1744,8 @@ EOF
             : >"${routingToolsRenderLog}"
             resetMenuActions
             routingToolsMenu <<< $'5\n6'
-            assertMenuAction 'errorCard:此功能不支持Hysteria2、Tuic'
-            ! assertMenuAction sniRouting
+            assertMenuAction sniRouting
+            ! assertMenuAction 'errorCard:此功能不支持Hysteria2、Tuic'
             [[ "$(wc -l <"${routingToolsRenderLog}")" == "2" ]]
         )
 
@@ -1790,6 +1790,19 @@ EOF
             assertMenuAction 'errorCard:选择错误'
             ! assertMenuAction routingToolsMenu
             [[ "$(wc -l <"${routingMenuRenderLog}")" == "2" ]]
+            (
+                configPath=
+                singBoxConfigPath=/tmp/menu-smoke-sing-box/
+                coreNotInstalledErrorCard() { recordMenuAction coreNotInstalledErrorCard; }
+                resetMenuActions
+                dnsRouting <<< $'1\n3'
+                assertMenuAction setUnlockDNS
+                ! assertMenuAction coreNotInstalledErrorCard
+                resetMenuActions
+                sniRouting <<< $'1\n3'
+                assertMenuAction setUnlockSNI
+                ! assertMenuAction coreNotInstalledErrorCard
+            )
             : >"${routingMenuRenderLog}"
             resetMenuActions
             sniRouting <<< $'bad\n3'

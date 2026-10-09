@@ -23,14 +23,7 @@ routingToolsMenu() {
         2) ipv6Routing 1 || true; continue ;;
         3) socks5Routing || true; continue ;;
         4) dnsRouting 1 || true; continue ;;
-        5)
-            if [[ -n "${singBoxConfigPath}" ]]; then
-                errorCard "此功能不支持Hysteria2、Tuic"
-                continue
-            fi
-            sniRouting 1 || true
-            continue
-            ;;
+        5) sniRouting 1 || true; continue ;;
         6) return 0 ;;
         *) coreSelectionErrorCard "选择错误" ;;
         esac

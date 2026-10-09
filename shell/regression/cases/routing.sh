@@ -340,8 +340,8 @@ JSON
 JSON
     addSingBoxDNSConfig "1.1.1.1" "openai,example.com"
     jq -e '
-      .dns.rules[0].rule_set == ["geosite_openai_dns"] and
-      .dns.rules[0].domain_suffix == ["example.com"] and
+      .dns.rules[0].type == "logical" and .dns.rules[0].mode == "or" and
+      .dns.rules[0].rules == [{domain_suffix:["example.com"]},{rule_set:["geosite_openai_dns"]}] and
       .dns.rules[0].action == "route" and
       (.dns.servers[] | select(.tag == "padm-local" and .type == "local")) and
       (.dns.servers[] | select(.tag == "padm-dnsRouting" and .type == "udp" and .server == "1.1.1.1")) and
@@ -364,16 +364,28 @@ JSON
     [[ "$(<"${singBoxConfigPath}dns.json")" == "${originalContent}" ]] || { printf 'routing-keyword-fail:sing-box-hosts-modified\n' >&2; return 1; }
     addSingBoxDNSConfig "203.0.113.10" "example.org" "predefined"
     jq -e '
-      .dns.rules[0].domain_suffix == ["example.org"] and
+      .dns.rules[0].domain == ["example.org"] and
+      (.dns.rules[0].domain_suffix | not) and
       .route.default_domain_resolver == "padm-local" and
       (.route.rules[]? | select(.action == "resolve" and .server == "padm-hosts")) and
       (.dns.rules[0].domain_regex | not) and
-      (.dns.servers[] | select(.tag == "padm-hosts") | .predefined["example.org"] == "203.0.113.10")
+      (.dns.servers[] | select(.tag == "padm-hosts") | .predefined["example.org"] == "203.0.113.10") and
+      any(.dns.servers[]; .tag == "padm-dnsRouting") and
+      any(.route.rules[]; .server == "padm-dnsRouting" and .type == "logical" and
+          .mode == "and" and .rules[1] == {domain:["example.org"],invert:true})
     ' "${singBoxConfigPath}dns.json" >/dev/null
-    addSingBoxDNSConfig "203.0.113.11" 'domain:bad"key.example' "predefined"
-    jq -e '
-      (.dns.servers[] | select(.tag == "padm-hosts") | .predefined["bad\"key.example"] == "203.0.113.11")
-    ' "${singBoxConfigPath}dns.json" >/dev/null
+    originalContent=$(<"${singBoxConfigPath}dns.json")
+    local invalidHostRule
+    for invalidHostRule in 'domain:example.org' 'geosite:openai' 'keyword:video' 'domain:bad"key.example' '127.0.0.10'; do
+        regressionExpectStatus 1 addSingBoxDNSConfig "203.0.113.11" "${invalidHostRule}" predefined >/dev/null 2>&1
+        [[ "$(<"${singBoxConfigPath}dns.json")" == "${originalContent}" ]] || return 1
+    done
+    regressionExpectStatus 1 addSingBoxDNSConfig '999.0.0.1' full:example.org predefined >/dev/null 2>&1
+    [[ "$(<"${singBoxConfigPath}dns.json")" == "${originalContent}" ]] || return 1
+    addSingBoxDNSConfig "2001:db8::10" ' FULL:API.Example.Org , api.example.org ' predefined
+    jq -e '.dns.rules[0].domain == ["api.example.org"] and
+      any(.dns.servers[]; .tag == "padm-hosts" and .predefined == {"api.example.org":"2001:db8::10"})' \
+      "${singBoxConfigPath}dns.json" >/dev/null
     printf '{"dns":{"servers":["old-xray"]}}\n' >"${configPath}11_dns.json"
     if writeRoutingJsonConfig "${configPath}11_dns.json" <<'JSON' 2>/dev/null
 {"dns":{"servers":[}
@@ -609,7 +621,7 @@ JSON
 runDNSRoutingCustomConfigRegression() (
     local coreInstallType=2 configPath=''
     local singBoxConfigPath="${TMP_DIR}/dns-custom-config/"
-    local resolverPlacement before afterAdd externalBefore
+    local resolverPlacement before afterAdd beforeHosts externalBefore
     mkdir -p "${singBoxConfigPath}"
     for resolverPlacement in local external; do
         cat >"${singBoxConfigPath}dns.json" <<'JSON'
@@ -664,19 +676,37 @@ JSON
         [[ "$(jq -Sc . "${singBoxConfigPath}dns.json")" == "${before}" ]]
 
         addSingBoxDNSConfig "1.1.1.1" "geosite:exclusive,example.com"
+        beforeHosts=$(jq -Sc . "${singBoxConfigPath}dns.json")
         addSingBoxDNSConfig "203.0.113.10" "full:api.example.com,example.org" predefined
         jq -e '
             any(.dns.servers[]; .tag == "padm-hosts" and .predefined["api.example.com"] == "203.0.113.10") and
-            all(.dns.servers[]; .tag != "padm-dnsRouting") and
-            all(.route.rule_set[]; .tag != "geosite_exclusive_dns")
+            any(.dns.servers[]; .tag == "padm-dnsRouting") and
+            any(.route.rule_set[]; .tag == "geosite_exclusive_dns") and
+            [.dns.rules[] | select(.server | startswith("padm-")) | .server] == ["padm-hosts","padm-dnsRouting"] and
+            any(.route.rules[]; .server == "padm-dnsRouting" and .mode == "and" and
+                .rules[1] == {domain:["api.example.com","example.org"],invert:true})
         ' "${singBoxConfigPath}dns.json" >/dev/null
+        addSingBoxDNSConfig "1.1.1.1" "geosite:exclusive,example.com"
+        jq -e 'any(.dns.servers[]; .tag == "padm-hosts") and
+            any(.route.rules[]; .server == "padm-dnsRouting" and .mode == "and" and
+                .rules[1] == {domain:["api.example.com","example.org"],invert:true})' \
+            "${singBoxConfigPath}dns.json" >/dev/null
         afterAdd=$(<"${singBoxConfigPath}dns.json")
         (
             reloadCore() { return 1; }
             regressionExpectStatus 1 removeUnlockSNI
             [[ "$(<"${singBoxConfigPath}dns.json")" == "${afterAdd}" ]]
         )
+        removeUnlockDNS
+        jq -e 'any(.dns.servers[]; .tag == "padm-hosts") and
+            all(.dns.servers[]; .tag != "padm-dnsRouting") and
+            all(.route.rule_set[]; .tag != "geosite_exclusive_dns") and
+            any(.route.rules[]; .server == "padm-hosts")' \
+            "${singBoxConfigPath}dns.json" >/dev/null
+        addSingBoxDNSConfig "1.1.1.1" "geosite:exclusive,example.com"
         removeUnlockSNI
+        [[ "$(jq -Sc . "${singBoxConfigPath}dns.json")" == "${beforeHosts}" ]]
+        removeUnlockDNS
         [[ "$(jq -Sc . "${singBoxConfigPath}dns.json")" == "${before}" ]]
         [[ "$(<"${singBoxConfigPath}custom.json")" == "${externalBefore}" ]]
         initSingBoxLocalDNSConfig check
@@ -1181,7 +1211,7 @@ runSNIRoutingCancelRegression() (
     }
 
     local cancelStage
-    for cancelStage in xray sing-box restore-fail; do
+    for cancelStage in xray sing-box restore-fail invalid-ip empty-domains; do
         (
             local cancelRoot="${root}/sni-cancel-${cancelStage}"
             local configPath="${cancelRoot}/xray/" singBoxConfigPath="${cancelRoot}/sing-box/"
@@ -1198,10 +1228,20 @@ runSNIRoutingCancelRegression() (
             originalDirect=$(<"${singBoxConfigPath}01_direct_outbound.json")
             autoRead() {
                 case "$3" in
-                setSNIP) printf -v "$3" '203.0.113.10' ;;
+                setSNIP)
+                    if [[ "${cancelStage}" == invalid-ip ]]; then
+                        printf -v "$3" '999.0.0.1'
+                    else
+                        printf -v "$3" '203.0.113.10'
+                    fi
+                    ;;
                 xrayDomainList)
                     [[ "${cancelStage}" != xray ]] || return 1
-                    printf -v "$3" 'example.com'
+                    if [[ "${cancelStage}" == empty-domains ]]; then
+                        printf -v "$3" ' ,  '
+                    else
+                        printf -v "$3" 'example.com'
+                    fi
                     ;;
                 singboxDomainList)
                     jq -e '.dns.hosts["domain:example.com"] == "203.0.113.10"' "${configPath}11_dns.json" >/dev/null &&
@@ -1214,6 +1254,8 @@ runSNIRoutingCancelRegression() (
             if [[ "${cancelStage}" == restore-fail ]]; then
                 dnsRoutingBackupRestore() { return 1; }
                 expectedStatus=1
+            elif [[ "${cancelStage}" == invalid-ip || "${cancelStage}" == empty-domains ]]; then
+                expectedStatus=1
             fi
             rm -f "${reloadMarker}" "${errorLog}"
             regressionExpectStatus "${expectedStatus}" setUnlockSNI >/dev/null 2>&1 ||
@@ -1222,7 +1264,8 @@ runSNIRoutingCancelRegression() (
                 "$(<"${singBoxConfigPath}01_direct_outbound.json")" == "${originalDirect}" &&
                 -z "${DNS_ROUTING_ACTIVE_BACKUP_DIR:-}" ]] ||
                 { printf 'routing-sni-cancel-fail:boundary:%s\n' "${cancelStage}" >&2; return 1; }
-            [[ "${cancelStage}" == xray || "${xrayChanged}" == true ]] ||
+            [[ "${cancelStage}" == xray || "${cancelStage}" == invalid-ip ||
+                "${cancelStage}" == empty-domains || "${xrayChanged}" == true ]] ||
                 { printf 'routing-sni-cancel-fail:coexist-not-written\n' >&2; return 1; }
             if [[ "${cancelStage}" == restore-fail ]]; then
                 [[ -d "${PADM_DNS_ROUTING_BACKUP_DIR}" ]] || return 1
