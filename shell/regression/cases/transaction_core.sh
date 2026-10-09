@@ -2203,9 +2203,10 @@ runCoreInstallFileSignalRollbackRegression() (
         fileSignalRestoreManagedFileFromBackup "$@"
     }
     commitGeneratedFile() {
+        # 只在实际目标上注入故障，不能匹配回滚登记前的同名备份。
         if [[ ! -e "${fixture}/commit-failed" &&
             ( ( "${phase}" == first-restore && "$2" == "${PADM_SINGBOX_BINARY}" ) ||
-                ( "${phase}" == geo-restore && "${2##*/}" == geoip.dat ) ) ]]; then
+                ( "${phase}" == geo-restore && "$2" == "${fixture}/geo-target/geoip.dat" ) ) ]]; then
             : >"${fixture}/commit-failed"
             return 1
         fi
@@ -2218,7 +2219,7 @@ runCoreInstallFileSignalRollbackRegression() (
         if [[ ( "${phase}" == migration && "$2" == "${shard}" ) ||
             ( "${phase}" == first-cronet && "$2" == "${cronet}" ) ||
             ( "${phase}" == first-binary && "$2" == "${PADM_SINGBOX_BINARY}" ) ||
-            ( "${phase}" == geo-* && "${2##*/}" == "${phase#geo-}" ) ]]; then
+            ( "${phase}" == geo-* && "$2" == "${fixture}/geo-target/${phase#geo-}" ) ]]; then
             kill -"${signal}" "${BASHPID}"
         fi
     }
