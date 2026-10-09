@@ -1729,6 +1729,72 @@ runCorePortFileTransactionRegression() {
         rm -rf "${integrityBackup}"
     ) || return 1
     (
+        local signalName signalPhase signalRecovery expectedRc resultRc signalRoot signalCalls
+        local configPath signalTarget signalNew signalErrors signalBackup
+        eval "$(declare -f corePortRollbackFiles | sed '1s/^corePortRollbackFiles/originalPortSignalRollback/')"
+        corePortRollbackFiles() {
+            [[ "${signalRecovery}" != file-fail ]] || return 1
+            originalPortSignalRollback "$@"
+        }
+        portSignalWrite() {
+            corePortWriteAddFiles 2443 2443 443 || return 1
+            [[ "${signalPhase}" != write ]] || kill "-${signalName}" "${BASHPID}"
+        }
+        runServiceAction() {
+            [[ "$*" == "xray restart" ]] || return 99
+            local mode=old
+            [[ ! -e "${signalNew}" ]] || mode=new
+            printf '%s\n' "${mode}" >>"${signalCalls}"
+            if [[ "${mode}" == new && "${signalPhase}" == reload ]]; then
+                kill "-${signalName}" "${BASHPID}"
+            fi
+            [[ "${mode}" != old || "${signalRecovery}" != reload-fail ]]
+        }
+        errorCard() { printf '%s\n' "$*" >>"${signalErrors}"; }
+        for signalName in INT TERM; do
+            expectedRc=130
+            [[ "${signalName}" != TERM ]] || expectedRc=143
+            for signalPhase in write reload; do
+                for signalRecovery in success file-fail reload-fail; do
+                    [[ "${signalRecovery}" != reload-fail || "${signalPhase}" == reload ]] || continue
+                    signalRoot="${portTmpRoot}/signal-${signalName}-${signalPhase}-${signalRecovery}"
+                    configPath="${signalRoot}/config/"
+                    mkdir -p "${configPath}" "${signalRoot}/tmp" || return 1
+                    signalTarget="${configPath}02_dokodemodoor_inbounds_2053_default.json"
+                    signalNew="${configPath}02_dokodemodoor_inbounds_2443_default.json"
+                    signalCalls="${signalRoot}/calls.log" signalErrors="${signalRoot}/errors.log"
+                    : >"${signalCalls}"
+                    : >"${signalErrors}"
+                    printf '%s\n' "${original2053}" >"${signalTarget}"
+                    (
+                        local TMPDIR="${signalRoot}/tmp"
+                        corePortApplyReloadTransaction portSignalWrite
+                    ) >/dev/null 2>&1 && resultRc=0 || resultRc=$?
+                    [[ "${resultRc}" == "${expectedRc}" ]] || return 1
+                    signalBackup=$(find "${signalRoot}/tmp" -mindepth 1 -maxdepth 1 -name 'padm-core-port.*' -print)
+                    if [[ "${signalRecovery}" == file-fail ]]; then
+                        [[ ! -e "${signalTarget}" && -e "${signalNew}" ]] || return 1
+                        [[ -n "${signalBackup}" && "${signalBackup}" != *$'\n'* ]] || return 1
+                        [[ "$(<"${signalBackup}/${signalTarget##*/}")" == "${original2053}" ]] || return 1
+                        grep -q '回滚失败\|旧配置恢复失败' "${signalErrors}" || return 1
+                        [[ "${signalPhase}" != reload || "$(<"${signalCalls}")" == new ]] || return 1
+                    else
+                        [[ "$(<"${signalTarget}")" == "${original2053}" &&
+                            ! -e "${signalNew}" && ! -e "${configPath}02_dokodemodoor_inbounds_2053.json" ]] || return 1
+                        [[ "${signalPhase}" != reload || "$(<"${signalCalls}")" == $'new\nold' ]] || return 1
+                        if [[ "${signalRecovery}" == reload-fail ]]; then
+                            [[ -n "${signalBackup}" ]] || return 1
+                            grep -q '恢复后核心重载仍失败' "${signalErrors}" || return 1
+                        else
+                            [[ -z "${signalBackup}" && ! -s "${signalErrors}" ]] || return 1
+                        fi
+                    fi
+                    [[ "${signalPhase}" != write || ! -s "${signalCalls}" ]] || return 1
+                done
+            done
+        done
+    ) || return 1
+    (
         local configPath="${TMP_DIR}/core-port-invalid-default/"
         local defaultFile="${configPath}02_dokodemodoor_inbounds_2053_default.json"
         local owned fixture patch lookup output="${TMP_DIR}/core-port-invalid-default-result"

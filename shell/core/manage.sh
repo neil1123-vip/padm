@@ -1479,39 +1479,60 @@ corePortWriteAddFiles() {
     done <<<"${ports}"
 }
 
-corePortApplyReloadTransaction() {
-    local action=$1
-    local backupDir
-    local restoreMessage
-    padmCreateTmpRootPath backupDir padm-core-port.XXXXXX -d || return 1
-    if ! corePortBackupFiles "${backupDir}"; then
-        corePortReportBackupFailure "${backupDir}"
-        return 1
-    fi
-    shift
-    if ! "${action}" "$@" || ! corePortValidateFiles; then
-        if corePortRollbackFiles "${backupDir}"; then
-            padmRemoveCleanupPath "${backupDir}"
+corePortRollbackOnExit() {
+    [[ "${PADM_CORE_PORT_ROLLBACK[active]:-false}" == true ]] || return 0
+    PADM_CORE_PORT_ROLLBACK[active]=false
+    local backupDir=${PADM_CORE_PORT_ROLLBACK[backup]}
+    local reloadAttempted=${PADM_CORE_PORT_ROLLBACK[reloadAttempted]:-false}
+    local reason=${1:-入口端口配置中断} restoreMessage status=0
+    if ! corePortRollbackFiles "${backupDir}"; then
+        padmForgetCleanupPath "${backupDir}"
+        if [[ "${reloadAttempted}" == true ]]; then
+            coreSetSingleRestoreResultMessage restoreMessage "${reason}" false "已恢复旧配置" "旧配置" "备份目录: ${backupDir}" || true
+            errorCard "${restoreMessage}"
         else
             corePortReportRollbackFailure "${backupDir}"
         fi
         return 1
     fi
+    if [[ "${reloadAttempted}" == true ]] && ! reloadXrayProtocolCore; then
+        status=1
+        padmForgetCleanupPath "${backupDir}"
+        coreSetRollbackResultMessage restoreMessage "${reason}" \
+            "已恢复旧配置；恢复后核心重载仍失败，请检查核心服务日志；备份目录: ${backupDir}"
+    else
+        padmRemoveCleanupPath "${backupDir}"
+        coreSetRollbackResultMessage restoreMessage "${reason}" "已恢复旧配置"
+    fi
+    if [[ "${status}" != 0 || -n "${1:-}" ]]; then
+        errorCard "${restoreMessage}"
+    fi
+    return "${status}"
+}
+
+corePortApplyReloadTransaction() {
+    local action=$1 backupDir
+    padmCreateTmpRootPath backupDir padm-core-port.XXXXXX -d || return 1
+    if ! corePortBackupFiles "${backupDir}"; then
+        corePortReportBackupFailure "${backupDir}"
+        return 1
+    fi
+    local -A PADM_CORE_PORT_ROLLBACK=([active]=true [backup]="${backupDir}" [reloadAttempted]=false)
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
+    padmRegisterExitRollback corePortRollbackOnExit
+    shift
+    if ! "${action}" "$@" || ! corePortValidateFiles; then
+        padmRunRollback corePortRollbackOnExit || true
+        return 1
+    fi
+    PADM_CORE_PORT_ROLLBACK[reloadAttempted]=true
     if reloadXrayProtocolCore; then
+        PADM_CORE_PORT_ROLLBACK[active]=false
         padmRemoveCleanupPath "${backupDir}"
         return 0
     fi
-
-    if ! corePortRollbackFiles "${backupDir}"; then
-        padmForgetCleanupPath "${backupDir}"
-        coreSetSingleRestoreResultMessage restoreMessage "入口端口核心重载失败" false "已恢复旧配置" "旧配置" "备份目录: ${backupDir}" || true
-        errorCard "${restoreMessage}"
-        return 1
-    fi
-    local rollbackMessage
-    coreSetRollbackResultMessage rollbackMessage "入口端口核心重载失败" "已恢复旧配置" reloadXrayProtocolCore "恢复后核心重载仍失败，请检查核心服务日志"
-    errorCard "${rollbackMessage}"
-    padmRemoveCleanupPath "${backupDir}"
+    padmRunRollback corePortRollbackOnExit "入口端口核心重载失败" || true
     return 1
 }
 
