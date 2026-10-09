@@ -314,8 +314,8 @@ addFirewalldPortHopping() {
 
 portHoppingPersistIptablesRules() {
     if command -v netfilter-persistent >/dev/null 2>&1; then
-        sudo netfilter-persistent save >/dev/null 2>&1
-        return $?
+        sudo netfilter-persistent save >/dev/null 2>&1 || return 1
+        return 0
     fi
     return 2
 }
@@ -398,6 +398,28 @@ addPortHopping() {
     done
     protocolPortHoppingRangeStatusCard "${portHoppingRange}"
     if [[ "${rhelLike:-}" == "true" ]] && systemctl is-active --quiet firewalld; then
+                local existingForwardPorts
+                if ! existingForwardPorts=$(sudo firewall-cmd --zone=public --permanent --list-forward-ports); then
+                    protocolPortHoppingStatusCard "防火墙转发规则读取失败，已取消添加端口跳跃"
+                    return 1
+                fi
+                if ! awk -v candidateStart="${portStart}" -v candidateEnd="${portEnd}" -v targetPort="${targetPort}" '
+                    {
+                        for (i = 1; i <= NF; i++) {
+                            split($i, rule, ":")
+                            if (rule[1] !~ /^port=[0-9]+(-[0-9]+)?$/ || rule[2] != "proto=udp") continue
+                            if (rule[3] == "toport=" targetPort && $i !~ /:toaddr=.+/) continue
+                            count = split(substr(rule[1], 6), range, "-")
+                            start = range[1] + 0
+                            end = range[count] + 0
+                            if (start < 1 || end > 65535 || start > end) continue
+                            if (start <= candidateEnd && end >= candidateStart) exit 1
+                        }
+                    }
+                ' <<<"${existingForwardPorts}"; then
+                    protocolPortHoppingStatusCard "范围与现有 UDP 转发规则重叠，已取消添加端口跳跃"
+                    return 1
+                fi
                 local addedMasquerade=
                 local addedForwardPorts=
                 local forwardStateKey
@@ -443,6 +465,33 @@ addPortHopping() {
                     return 1
                 fi
             else
+                local existingRules
+                if ! existingRules=$(iptables-save -t nat); then
+                    protocolPortHoppingStatusCard "防火墙转发规则读取失败，已取消添加端口跳跃"
+                    return 1
+                fi
+                if ! awk -v candidateStart="${portStart}" -v candidateEnd="${portEnd}" '
+                    $1 == "-A" && $2 == "PREROUTING" {
+                        comment = ports = protocol = target = ""
+                        for (i = 1; i <= NF; i++) {
+                            if ($i == "--comment") comment = $(i + 1)
+                            else if ($i == "--dport") ports = $(i + 1)
+                            else if ($i == "-p") protocol = $(i + 1)
+                            else if ($i == "-j") target = $(i + 1)
+                        }
+                        if (comment ~ /^".*"$/) comment = substr(comment, 2, length(comment) - 2)
+                        if ((comment != "neil1123-vip_hysteria2_portHopping" && comment != "neil1123-vip_tuic_portHopping") || protocol != "udp" || target != "DNAT") next
+                        if (ports !~ /^[0-9]+(:[0-9]+)?$/) next
+                        count = split(ports, range, ":")
+                        start = range[1] + 0
+                        end = range[count] + 0
+                        if (start < 1 || end > 65535 || start > end) next
+                        if (start <= candidateEnd && end >= candidateStart) exit 1
+                    }
+                ' <<<"${existingRules}"; then
+                    protocolPortHoppingStatusCard "范围与现有端口跳跃规则重叠，已取消添加端口跳跃"
+                    return 1
+                fi
                 if ! iptables -t nat -A PREROUTING -p udp --dport "${portStart}:${portEnd}" -m comment --comment "neil1123-vip_${type}_portHopping" -j DNAT --to-destination ":${targetPort}"; then
                     rollbackPortHoppingIptablesRule "${type}" "${portStart}" "${portEnd}" "${targetPort}" || true
                     protocolPortHoppingStatusCard "端口跳跃添加失败，已尝试回滚本次 iptables 规则"
@@ -493,6 +542,11 @@ readPortHopping() {
     local portHoppingStart=
     local portHoppingEnd=
     local portHopping=
+    case "${type}" in
+    hysteria2) hysteria2PortHoppingStart=; hysteria2PortHoppingEnd=; hysteria2PortHopping= ;;
+    tuic) tuicPortHoppingStart=; tuicPortHoppingEnd=; tuicPortHopping= ;;
+    *) return 1 ;;
+    esac
 
     local forwardStateKey stateKind stateBackend stateType stateStart stateEnd stateTarget ownership extra
     if forwardStateKey=$(padmFirewalldForwardStateKeyForTarget "${targetPort}"); then
@@ -521,22 +575,35 @@ readPortHopping() {
             ' <<<"${forwardPorts}")
             portHoppingStart=${portHopping%%:*}
             portHoppingEnd=${portHopping#*:}
+        else
+            return 1
         fi
     else
         local iptablesRules
         if iptablesRules=$(iptables-save); then
-            portHopping=$(awk -v marker="neil1123-vip_${type}_portHopping" '
-            $0 ~ marker {
+            portHopping=$(awk -v marker="neil1123-vip_${type}_portHopping" -v targetPort="${targetPort}" '
+            {
+                comment = destination = ports = protocol = ""
                 for (i = 1; i <= NF; i++) {
-                    if ($i == "--dport" && (i + 1) <= NF) {
-                        print $(i + 1)
-                        exit
-                    }
+                    if ($i == "--comment") comment = $(i + 1)
+                    else if ($i == "--to-destination") destination = $(i + 1)
+                    else if ($i == "--dport") ports = $(i + 1)
+                    else if ($i == "-p") protocol = $(i + 1)
                 }
+                if ((comment != marker && comment != "\"" marker "\"") || destination != ":" targetPort || protocol != "udp") next
+                if (ports !~ /^[0-9]+(:[0-9]+)?$/) next
+                count = split(ports, range, ":")
+                start = range[1] + 0
+                end = range[count] + 0
+                if (start < 1 || end > 65535 || start > end) next
+                print start ":" end
+                exit
             }
             ' <<<"${iptablesRules}")
             portHoppingStart=${portHopping%%:*}
             portHoppingEnd=${portHopping#*:}
+        else
+            return 1
         fi
     fi
     if [[ -n "${portHoppingStart}" && -n "${portHoppingEnd}" ]]; then
@@ -628,12 +695,12 @@ portHoppingMenu() {
     local portHoppingEnd=
 
     if [[ "${type}" == "hysteria2" ]]; then
-        readPortHopping "${type}" "${singBoxHysteria2Port}"
+        readPortHopping "${type}" "${singBoxHysteria2Port}" || return 1
         targetPort=${singBoxHysteria2Port}
         portHoppingStart=${hysteria2PortHoppingStart}
         portHoppingEnd=${hysteria2PortHoppingEnd}
     elif [[ "${type}" == "tuic" ]]; then
-        readPortHopping "${type}" "${singBoxTuicPort}"
+        readPortHopping "${type}" "${singBoxTuicPort}" || return 1
         targetPort=${singBoxTuicPort}
         portHoppingStart=${tuicPortHoppingStart}
         portHoppingEnd=${tuicPortHoppingEnd}

@@ -2525,7 +2525,7 @@ runRealityConfigApplyRegression() {
     local realityPatchXrayXhttp="${realityPatchDir}/xray/12_VLESS_XHTTP_inbounds.json"
     local realityPatchSingBoxVision="${realityPatchDir}/sing-box/07_VLESS_vision_reality_inbounds.json"
     local realityPatchSingBoxGrpc="${realityPatchDir}/sing-box/08_VLESS_vision_gRPC_inbounds.json"
-    local realityPatchOriginal
+    local realityPatchOriginal realityPatchXhttpHost
     mkdir -p "${realityPatchDir}/xray" "${realityPatchDir}/sing-box"
     cat >"${realityPatchXrayVision}" <<'JSON'
 {"inbounds":[{}, {"streamSettings":{"realitySettings":{"target":"old.example.com:443","serverNames":["old.example.com"]}}}]}
@@ -2552,6 +2552,15 @@ JSON
     jq -e '.inbounds[0].streamSettings.realitySettings.target == "new.example.com:8443" and .inbounds[0].streamSettings.xhttpSettings.host == "sni.example.com"' "${realityPatchXrayXhttp}" >/dev/null
     jq -e '.inbounds[0].tls.server_name == "sni.example.com" and .inbounds[0].tls.reality.handshake.server == "new.example.com" and .inbounds[0].tls.reality.handshake.server_port == 8443' "${realityPatchSingBoxVision}" >/dev/null
     jq -e '.inbounds[0].tls.server_name == "sni.example.com" and .inbounds[0].tls.reality.handshake.server == "new.example.com" and .inbounds[0].tls.reality.handshake.server_port == 8443' "${realityPatchSingBoxGrpc}" >/dev/null
+    for realityPatchXhttpHost in custom.example.com ''; do
+        updateRoutingJsonConfig "${realityPatchXrayXhttp}" \
+            '.inbounds[0].streamSettings.xhttpSettings.host = $host' --arg host "${realityPatchXhttpHost}" || return 1
+        applyRealityTargetToInstalledConfigs "host.example.com:9443" "host-sni.example.com" || return 1
+        jq -e --arg host "${realityPatchXhttpHost}" \
+            '.inbounds[0].streamSettings.realitySettings.target == "host.example.com:9443" and
+                .inbounds[0].streamSettings.realitySettings.serverNames == ["host-sni.example.com"] and
+                .inbounds[0].streamSettings.xhttpSettings.host == $host' "${realityPatchXrayXhttp}" >/dev/null || return 1
+    done
     realityPatchOriginal=$(<"${realityPatchSingBoxVision}")
     if applyRealityTargetToInstalledConfigs "new.example.com:not-a-port" "sni.example.com" 2>/dev/null; then
         return 1

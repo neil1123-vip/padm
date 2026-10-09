@@ -3174,10 +3174,13 @@ applyRealityTargetToInstalledConfigs() {
         [[ -f "${configFile}" ]] || continue
         case "${configIndex}" in
         0|1|2)
-            # Xray Vision 使用第 2 个入站，其余使用第 1 个；XHTTP 同步 host。
+            # Xray Vision 使用第 2 个入站；XHTTP 仅同步原本跟随 SNI 的 host。
             filter='.inbounds[$index].streamSettings.realitySettings.target = $target |
                 .inbounds[$index].streamSettings.realitySettings.serverNames = [$sni]'
-            [[ "${configIndex}" != 2 ]] || filter+=' | .inbounds[0].streamSettings.xhttpSettings.host = $sni'
+            [[ "${configIndex}" != 2 ]] || filter='
+                if (.inbounds[0].streamSettings.xhttpSettings.host // "") != "" and
+                    .inbounds[0].streamSettings.xhttpSettings.host == .inbounds[0].streamSettings.realitySettings.serverNames[0]
+                then .inbounds[0].streamSettings.xhttpSettings.host = $sni else . end | '"${filter}"
             ;;
         3|4)
             filter='.inbounds[0].tls.server_name = $sni |
@@ -3235,7 +3238,7 @@ validateRealityTargetConfigAfterChange() {
     if [[ -f "$(realitySingBoxVisionConfigPath)" || -f "$(realitySingBoxGrpcConfigPath)" ]]; then
         if [[ -f "$(coreSingBoxBinaryPath)" && -x "$(coreSingBoxBinaryPath)" ]]; then
             logFile=$(realityTargetTmpPath padm-reality-target-sing-box-test.log)
-            singBoxMergeConfigForValidation "$(coreSingBoxBinaryPath)" "${logFile}" || return 1
+            singBoxMergeConfigForValidation "$(coreSingBoxBinaryPath)" "${logFile}" check || return 1
         fi
     fi
 }

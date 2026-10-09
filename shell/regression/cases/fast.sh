@@ -942,6 +942,62 @@ runInstallNginxStaticPreservesLiveSiteOnUnzipFailureRegression() {
         [[ -f "${missingStaticDir}/index.html" ]] || return 1
         [[ "$(<"${missingStaticDir}/index.html")" == "keep" ]]
     )
+
+    (
+        set -euo pipefail
+        local root scriptDir staticDir rendererFailure sedCalls
+        local release=debian
+        unzip() {
+            [[ "$1" == -o && "$3" == -d ]] || return 1
+            printf '__SITE_TITLE__\n' >"$4/index.html"
+            printf '__SITE_ACCENT__\n' >"$4/site.css"
+        }
+        sed() {
+            sedCalls=$((sedCalls + 1))
+            if [[ "${rendererFailure}" == sed && "${sedCalls}" == 1 ]]; then
+                return 1
+            fi
+            command sed "$@"
+        }
+        find() {
+            if [[ "${rendererFailure}" == find ]]; then
+                printf 'partial\n' >"${root}/find.log"
+                printf '%s\n' "${nginxStaticPath}/index.html"
+                return 1
+            fi
+            command find "$@"
+        }
+
+        for rendererFailure in sed find; do
+            root="${TMP_DIR}/install-nginx-static-render-${rendererFailure}-failure"
+            scriptDir="${root}/script"
+            staticDir="${root}/static"
+            sedCalls=0
+            mkdir -p "${scriptDir}/assets/static-sites/templates" "${staticDir}"
+            printf 'zip\n' >"${scriptDir}/assets/static-sites/templates/html1.zip"
+            printf 'keep\n' >"${staticDir}/index.html"
+            printf 'marker\n' >"${staticDir}/check"
+            SCRIPT_DIR="${scriptDir}"
+            nginxStaticPath="${staticDir}"
+
+            if installNginxStaticTemplate 1; then
+                return 1
+            fi
+            [[ "${nginxStaticPath}" == "${staticDir}" ]] || return 1
+            [[ "$(<"${staticDir}/index.html")" == "keep" ]] || return 1
+            [[ "$(<"${staticDir}/check")" == "marker" ]] || return 1
+            [[ ! -e "${staticDir}/site.css" ]] || return 1
+            if compgen -G "${root}/.static.*" >/dev/null; then
+                return 1
+            fi
+            if [[ "${rendererFailure}" == sed ]]; then
+                [[ "${sedCalls}" == 1 ]] || return 1
+            else
+                [[ "${sedCalls}" == 0 ]] || return 1
+                [[ -s "${root}/find.log" ]] || return 1
+            fi
+        done
+    )
 }
 
 runAutoInstallGeneratedIdentityRegression() {
@@ -1327,6 +1383,7 @@ runPortHoppingWithoutPersistentRegression() (
     local downloadCount=0
     local inputCount=0
     local rangeMode=invalid-hyphen
+    local iptablesWriteCalls=0
     local iptablesDeleteShouldFail=false
     local iptablesSaveShouldFail=false
     local rc
@@ -1413,6 +1470,9 @@ runPortHoppingWithoutPersistentRegression() (
     }
     sudo() { "$@"; }
     iptables() {
+        if [[ "$*" == *"-A PREROUTING"* || "$*" == *"-D PREROUTING"* ]]; then
+            iptablesWriteCalls=$((iptablesWriteCalls + 1))
+        fi
         if [[ "$*" == *"-A PREROUTING"* ]]; then
             if [[ "$*" == *"neil1123-vip_tuic_portHopping"* ]]; then
                 cat >"${natStateFile}" <<'EOF'
@@ -1560,6 +1620,77 @@ EOF
     [[ "${rc}" == "1" ]]
     ! grep -q 'neil1123-vip_hysteria2_portHopping' "${natStateFile}"
 
+    (
+        local natStateFile="${TMP_DIR}/port-hopping-guard-nat.state"
+        local PADM_FIREWALL_STATE_FILE="${TMP_DIR}/port-hopping-guard-firewall.state"
+        local writeCallsBefore=${iptablesWriteCalls}
+        local allowCallsBefore=${allowCalls}
+        local saveStatus=1
+        singBoxTuicPort=26451
+        rm -f "${PADM_FIREWALL_STATE_FILE}"
+        cat >"${natStateFile}" <<'EOF'
+-A PREROUTING -p udp --dport 34000:34002 -m comment --comment neil1123-vip_tuic_portHopping -j DNAT --to-destination :26450
+EOF
+        iptables-save() {
+            cat "${natStateFile}"
+            return "${saveStatus}"
+        }
+        inputCount=1
+        hysteria2PortHoppingStart=
+        hysteria2PortHoppingEnd=
+        regressionExpectStatus 1 addPortHopping hysteria2 16295 >/dev/null 2>&1
+        grep -q '防火墙转发规则读取失败' "${warnLog}"
+        [[ "${iptablesWriteCalls}" == "${writeCallsBefore}" ]]
+        [[ "${allowCalls}" == "${allowCallsBefore}" ]]
+        [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
+        saveStatus=0
+        cat >"${natStateFile}" <<'EOF'
+-A PREROUTING -p udp --dport 32000:33000 -m comment --comment "neil1123-vip_tuic_portHopping" -j DNAT --to-destination :26450
+EOF
+        inputCount=1
+        regressionExpectStatus 1 addPortHopping hysteria2 16295 >/dev/null 2>&1
+        grep -q '范围与现有端口跳跃规则重叠' "${warnLog}"
+        [[ "${iptablesWriteCalls}" == "${writeCallsBefore}" ]]
+        [[ "${allowCalls}" == "${allowCallsBefore}" ]]
+        [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
+        grep -q 'neil1123-vip_tuic_portHopping' "${natStateFile}"
+        ! grep -q 'neil1123-vip_hysteria2_portHopping' "${natStateFile}"
+        cat >"${natStateFile}" <<'EOF'
+-A PREROUTING -p udp --dport 34000:34002 -m comment --comment neil1123-vip_tuic_portHopping -j DNAT --to-destination :26450
+-A PREROUTING -p udp --dport 33000:33002 -m comment --comment neil1123-vip_tuic_portHopping-other -j DNAT --to-destination :26450
+-A PREROUTING -p tcp --dport 33000:33002 -m comment --comment neil1123-vip_tuic_portHopping -j DNAT --to-destination :26450
+EOF
+        inputCount=1
+        regressionExpectStatus 0 addPortHopping hysteria2 16295 >/dev/null 2>&1
+        [[ "${iptablesWriteCalls}" == "$((writeCallsBefore + 1))" ]]
+        grep -q 'neil1123-vip_hysteria2_portHopping' "${natStateFile}"
+    )
+
+    (
+        local rhelLike=true forwardFixture
+        local queryStatus=0 firewallCalls=0
+        hysteria2PortHoppingStart=
+        hysteria2PortHoppingEnd=
+        systemctl() { return 0; }
+        sudo() {
+            if [[ "$*" == 'firewall-cmd --zone=public --permanent --list-forward-ports' ]]; then
+                printf '%s\n' "${forwardFixture}"
+                return "${queryStatus}"
+            fi
+            firewallCalls=$((firewallCalls + 1))
+        }
+        for forwardFixture in port=32000-33000:proto=udp:toport=26450 port=33001:proto=udp:toport=16295:toaddr=192.0.2.1 port=33001:proto=udp:toport=16295:toaddr=::1; do
+            inputCount=1
+            regressionExpectStatus 1 addPortHopping hysteria2 16295 >/dev/null 2>&1
+            [[ "${firewallCalls}" == 0 ]]
+        done
+        forwardFixture=port=34000:proto=udp:toport=26450
+        queryStatus=1
+        inputCount=1
+        regressionExpectStatus 1 addPortHopping hysteria2 16295 >/dev/null 2>&1
+        [[ "${firewallCalls}" == 0 ]]
+    )
+
     inputCount=1
     allowPortShouldFail=true
     set +e
@@ -1587,6 +1718,36 @@ EOF
     [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
 
     (
+        local persistExitStatus=0
+        local initialAllowCalls=${allowCalls}
+        command() {
+            if [[ "${1:-}" == "-v" && "${2:-}" == netfilter-persistent ]]; then
+                return 0
+            fi
+            builtin command "$@"
+        }
+        netfilter-persistent() {
+            [[ "$*" == save ]] || return 99
+            return "${persistExitStatus}"
+        }
+        portHoppingPersistIptablesRules
+        for persistExitStatus in 2 3; do
+            regressionExpectStatus 1 portHoppingPersistIptablesRules
+            inputCount=1
+            : >"${warnLog}"
+            : >"${natStateFile}"
+            regressionExpectStatus 1 addPortHopping hysteria2 16295 >/dev/null 2>&1
+            grep -q '端口跳跃添加失败' "${warnLog}"
+            ! grep -Eq '添加成功|未检测到 netfilter-persistent' "${warnLog}"
+            ! grep -q 'neil1123-vip_hysteria2_portHopping' "${natStateFile}"
+            grep -q 'keep-other-rule' "${natStateFile}"
+            ! padmFirewallStateHas 'forward:iptables:hysteria2:33000:33002:16295'
+            [[ "${allowCalls}" == "${initialAllowCalls}" ]]
+            regressionExpectStatus 1 rollbackPortHoppingIptablesRule hysteria2 33000 33002 16295
+        done
+    )
+
+    (
         local saveLog="${TMP_DIR}/port-hopping-read-save.log"
         local savedRules='-A PREROUTING -p udp --dport 33000:33002 -m comment --comment neil1123-vip_hysteria2_portHopping -j DNAT --to-destination :16295
 -A PREROUTING -p udp --dport 34001 -m comment --comment neil1123-vip_tuic_portHopping -j DNAT --to-destination :26451'
@@ -1601,12 +1762,36 @@ EOF
         [[ "$(wc -l <"${saveLog}")" == 1 ]]
         readPortHopping tuic 26451
         [[ "${tuicPortHopping}" == "34001-34001" ]]
+        readPortHopping hysteria2 16296
+        [[ -z "${hysteria2PortHopping}" && -z "${hysteria2PortHoppingStart}" && -z "${hysteria2PortHoppingEnd}" ]]
+        readPortHopping tuic 16295
+        [[ -z "${tuicPortHopping}" ]]
+        savedRules='-A PREROUTING -p udp --dport 32000:32002 -m comment --comment neil1123-vip_hysteria2_portHopping -j DNAT --to-destination :16294
+-A PREROUTING -p udp --dport 33000:33002 -m comment --comment "neil1123-vip_hysteria2_portHopping" -j DNAT --to-destination :16295'
+        readPortHopping hysteria2 16295
+        [[ "${hysteria2PortHopping}" == "33000-33002" ]]
+        local invalidPorts
+        for invalidPorts in 0 65536 33002:33000 33000:65536 33000:33002x 33000:33002:33003; do
+            savedRules="-A PREROUTING -p udp --dport ${invalidPorts} -m comment --comment neil1123-vip_hysteria2_portHopping -j DNAT --to-destination :16295"
+            readPortHopping hysteria2 16295
+            [[ -z "${hysteria2PortHopping}" && -z "${hysteria2PortHoppingStart}" && -z "${hysteria2PortHoppingEnd}" ]]
+        done
+        savedRules='-A PREROUTING -p udp --dport 33000:33002 -m comment --comment neil1123-vip_hysteria2_portHopping-other -j DNAT --to-destination :16295'
+        readPortHopping hysteria2 16295
+        [[ -z "${hysteria2PortHopping}" ]]
+        savedRules='-A PREROUTING -p tcp --dport 33000:33002 -m comment --comment neil1123-vip_hysteria2_portHopping -j DNAT --to-destination :16295'
+        readPortHopping hysteria2 16295
+        [[ -z "${hysteria2PortHopping}" ]]
         savedRules=
         readPortHopping tuic 26451
         [[ -z "${tuicPortHopping}" ]]
-        iptablesSaveShouldFail=true
-        readPortHopping hysteria2 16295
-        [[ -z "${hysteria2PortHopping}" ]]
+        savedRules='-A PREROUTING -p udp --dport 33000:33002 -m comment --comment neil1123-vip_hysteria2_portHopping -j DNAT --to-destination :16295'
+        iptables-save() { printf '%s\n' "${savedRules}"; return 1; }
+        hysteria2PortHopping=stale-range
+        hysteria2PortHoppingStart=33000
+        hysteria2PortHoppingEnd=33002
+        regressionExpectStatus 1 readPortHopping hysteria2 16295
+        [[ -z "${hysteria2PortHopping}${hysteria2PortHoppingStart}${hysteria2PortHoppingEnd}" ]] || return 1
     )
 
     (
@@ -1644,8 +1829,11 @@ EOF
             [[ -z "${hysteria2PortHopping}" ]]
         done
         queryStatus=1
-        readPortHopping tuic 26451
-        [[ -z "${tuicPortHopping}" ]]
+        tuicPortHopping=stale-range
+        tuicPortHoppingStart=34001
+        tuicPortHoppingEnd=34001
+        regressionExpectStatus 1 readPortHopping tuic 26451
+        [[ -z "${tuicPortHopping}${tuicPortHoppingStart}${tuicPortHoppingEnd}" ]] || return 1
     )
 
     (
@@ -1857,6 +2045,16 @@ runPortHoppingMenuUsesCommandLookupRegression() (
     portHoppingMenu hysteria2
     [[ "${menuReadCount}" == "2" ]]
     grep -q '当前端口跳跃范围为: 33000-33005' "${actionLog}"
+
+    (
+        local protocol singBoxTuicPort=26451
+        menuReadCount=0
+        readPortHopping() { return 1; }
+        for protocol in hysteria2 tuic; do
+            regressionExpectStatus 1 portHoppingMenu "${protocol}"
+        done
+        [[ "${menuReadCount}" == 0 ]]
+    )
 
     (
         # 范围实际变化才刷新；后置清理或刷新失败仍保留已生效的范围及失败状态。
@@ -4652,6 +4850,16 @@ JSON
             [[ "${xrayVLESSRealityXHTTPSNI}" == "xhttp-sni.example" ]]
             [[ "${currentRealityPublicKey}" == "public-key" ]]
             [[ "${currentRealityPrivateKey}" == "private-key" ]]
+            local auxiliaryConfigPath="${root}/auxiliary sing-box conf/"
+            mkdir -p "${auxiliaryConfigPath}"
+            cat >"${auxiliaryConfigPath}08_VLESS_vision_gRPC_inbounds.json" <<'JSON'
+{"inbounds":[{"listen_port":24443,"users":[{"uuid":"grpc-user-b"}],"tls":{"server_name":"grpc-b.example","reality":{"private_key":"private-key-b","handshake":{"server":"grpc-target-b.example","server_port":443}}}}]}
+JSON
+            printf 'publicKey:public-key-b\n' >"${auxiliaryConfigPath}reality_key"
+            singBoxConfigPath="${auxiliaryConfigPath}"
+            readInstallProtocolType
+            [[ "${singBoxVLESSRealityGRPCPort}" == 24443 && "${singBoxVLESSRealityPublicKey}" == public-key-b ]] || return 1
+            [[ "${currentRealityPrivateKey}" == private-key && "${currentRealityPublicKey}" == public-key ]] || return 1
             readConfigHostPathUUID
             [[ "${currentUUID}" == xhttp-user && "${currentPath}" == saved ]]
             [[ "${xrayVLESSRealityXHTTPort}" == 12606 ]]
@@ -4666,6 +4874,18 @@ JSON
         mkdir -p "${root}/sing-box conf" "${root}/nginx conf"
         printf '%s\n' '{"inbounds":[{"listen_port":31306,"users":[{"uuid":"upgrade-user"}],"transport":{"type":"httpupgrade","path":"/padmhttp"}}]}' >"${root}/sing-box conf/11_VMess_HTTPUpgrade_inbounds.json"
         printf '%s\n' 'server {' 'listen 24443 so_keepalive=on ssl;http2 on;' 'server_name upgrade.example.com;' '}' >"${root}/nginx conf/sing_box_VMess_HTTPUpgrade.conf"
+        (
+            coreInstallType=1
+            configPath="${root}/xray conf/"
+            singBoxConfigPath="${root}/sing-box conf/"
+            nginxConfigPath="${root}/nginx conf/"
+            getPublicIP() { printf '192.0.2.1\n'; }
+            readInstallProtocolType
+            [[ -z "${frontingType}" && "${singBoxVMessHTTPUpgradePort}" == 24443 ]]
+            singBoxVMessHTTPUpgradePath=/stale
+            readConfigHostPathUUID
+            [[ "${singBoxVMessHTTPUpgradePath}" == /padmhttp ]]
+        )
         (
             coreInstallType=2
             configPath="${root}/sing-box conf/"
@@ -5050,17 +5270,35 @@ JSON
         readConfigHostPathUUID
         [[ "${currentPath}" == "padm" ]]
 
+        currentDefaultPort=443
         currentCDNAddress=cdn.example.com
         subscribeSectionTitle() { return 0; }
         subscribeAccountTitle() { return 0; }
         defaultBase64Code() {
-            printf '%s|%s\n' "$1" "$6" >>"${captureLog}"
+            printf '%s|%s|%s\n' "$1" "$2" "$6" >>"${captureLog}"
         }
         showVmessHTTPUpgradeAccounts >/dev/null
         showVmessWsAccounts >/dev/null
 
-        grep -qx 'vmessHTTPUpgrade|/padm' "${captureLog}"
-        grep -qx 'vmessws|/padmvws' "${captureLog}"
+        grep -qx 'vmessHTTPUpgrade|443|/padm' "${captureLog}"
+        grep -qx 'vmessws|443|/padmvws' "${captureLog}"
+
+        singBoxConfigPath="${root}/sing-box/"
+        mkdir -p "${singBoxConfigPath}"
+        printf '%s\n' '{"inbounds":[{"users":[{"uuid":"44444444-4444-4444-4444-444444444444","name":"sing-box-httpupgrade-user"}]}]}' >"${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json"
+        singBoxVMessHTTPUpgradePort=24443
+        singBoxVMessHTTPUpgradePath=/sing-box-upgrade
+        : >"${captureLog}"
+        showVmessHTTPUpgradeAccounts >/dev/null
+        grep -qx 'vmessHTTPUpgrade|443|/padm' "${captureLog}"
+        grep -qx 'vmessHTTPUpgrade|24443|/sing-box-upgrade' "${captureLog}"
+
+        coreInstallType=2
+        configPath="${singBoxConfigPath}"
+        currentDefaultPort=
+        : >"${captureLog}"
+        showVmessHTTPUpgradeAccounts >/dev/null
+        grep -qx 'vmessHTTPUpgrade|24443|/sing-box-upgrade' "${captureLog}"
     )
 }
 

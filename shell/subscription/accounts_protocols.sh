@@ -347,7 +347,7 @@ showVmessHTTPUpgradeAccounts() {
     # VMess HTTPUpgrade
     if currentProtocolHas 23; then
         subscribeSectionTitle "VMess HTTPUpgrade TLS" "兼容旧客户端，不作为新手推荐"
-        local path="${currentPath}vws"
+        local path="${currentPath}vws" vmessHTTPUpgradePort="${currentDefaultPort}"
         if [[ ${coreInstallType} == "1" ]]; then
             path="/${currentPath}"
             if [[ -f "${configPath}11_VMess_HTTPUpgrade_inbounds.json" ]]; then
@@ -356,8 +356,9 @@ showVmessHTTPUpgradeAccounts() {
             fi
         elif [[ "${coreInstallType}" == "2" ]]; then
             path="${singBoxVMessHTTPUpgradePath}"
+            vmessHTTPUpgradePort="${singBoxVMessHTTPUpgradePort}"
         fi
-        showVmessHTTPUpgradeAccountsFromConfig "${configPath}11_VMess_HTTPUpgrade_inbounds.json" "${currentDefaultPort}" "${path}"
+        showVmessHTTPUpgradeAccountsFromConfig "${configPath}11_VMess_HTTPUpgrade_inbounds.json" "${vmessHTTPUpgradePort}" "${path}"
         if [[ "${coreInstallType}" == "1" && -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json" ]]; then
             showVmessHTTPUpgradeAccountsFromConfig "${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json" "${singBoxVMessHTTPUpgradePort}" "${singBoxVMessHTTPUpgradePath}"
         fi
@@ -370,11 +371,6 @@ showVmessHTTPUpgradeAccountsFromConfig() {
     jq -c '(.inbounds[0].settings.clients // .inbounds[0].users)[]' "${configFile}" | while read -r user; do
             local email accountId
             IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
-
-            local vmessHTTPUpgradePort=${currentDefaultPort}
-            if [[ -n "${singBoxVMessHTTPUpgradePort:-}" ]]; then
-                vmessHTTPUpgradePort="${singBoxVMessHTTPUpgradePort}"
-            fi
 
             local count=
             while read -r line; do

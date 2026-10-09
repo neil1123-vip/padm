@@ -4005,6 +4005,10 @@ runSingBoxProtocolReloadFailureRegression() (
     readSingBoxPortResult() { local -n ports=$1; ports=(18443); }
     initHysteria2Network() { return 0; }
     initTuicProtocol() { return 0; }
+    readPortHopping() {
+        hysteria2PortHoppingStart= hysteria2PortHoppingEnd=
+        tuicPortHoppingStart= tuicPortHoppingEnd=
+    }
 
     (
         local dependencyRoot="${root}/reality-tls"
@@ -4393,6 +4397,81 @@ runSingBoxProtocolReloadFailureRegression() (
     )
 
     (
+        # 更换监听端口前拒绝遗留跳跃范围；同端口、无范围和首次安装不受影响。
+        local PADM_SINGBOX_CONFIG_DIR="${root}/reinstall-hopping"
+        local AUTO_INSTALL=true AUTO_REUSE_LAST=no AUTO_UUID=11111111-1111-4111-8111-111111111111 AUTO_USER=hopping-user AUTO_PORT=
+        local protocolId configFile configBefore hoppingMode readCalls tlsCalls transactions networkCalls errorMessage
+        local readType readTarget
+        local selectCustomInstallType singBoxHysteria2Port= singBoxTuicPort=
+        local -A PADM_INSTALL_SINGBOX_PORTS=()
+        mkdir -p "${PADM_SINGBOX_CONFIG_DIR}" || return 1
+        coreTemplateCollectInitialClients() { return 0; }
+        readSingBoxPortResult() { local -n fixturePorts=$1; fixturePorts=("${AUTO_PORT}"); }
+        initHysteria2Network() { networkCalls=$((networkCalls + 1)); }
+        initTuicProtocol() { networkCalls=$((networkCalls + 1)); }
+        singBoxEnsureTLSDependency() { tlsCalls=$((tlsCalls + 1)); }
+        coreInstallConfigTransaction() { transactions=$((transactions + 1)); }
+        corePortSyncHysteriaAliases() { return 0; }
+        errorCard() { errorMessage=$*; }
+        readPortHopping() {
+            readCalls=$((readCalls + 1))
+            readType=$1 readTarget=$2
+            [[ "${hoppingMode}" != readfail ]] || return 1
+            if [[ "${hoppingMode}" == range ]]; then
+                case "$1" in
+                hysteria2) hysteria2PortHoppingStart=20000; hysteria2PortHoppingEnd=20100 ;;
+                tuic) tuicPortHoppingStart=20000; tuicPortHoppingEnd=20100 ;;
+                esac
+            fi
+        }
+        for protocolId in 3 31; do
+            configFile=$(singBoxTemplateConfigFile "$(protocolCapabilityMeta "${protocolId}" config_file)") || return 1
+            jq -n --arg uuid "${AUTO_UUID}" --arg id "${protocolId}" '{
+                inbounds:[{listen_port:18443,users:[{name:"disk-user",password:"disk-password"} +
+                    (if $id == "31" then {uuid:$uuid} else {} end)]}]
+            }' >"${configFile}" || return 1
+            configBefore=$(<"${configFile}")
+            for hoppingMode in range readfail empty sameport; do
+                readCalls=0 tlsCalls=0 transactions=0 networkCalls=0 errorMessage= readType= readTarget=
+                AUTO_PORT=24444
+                [[ "${hoppingMode}" != sameport ]] || AUTO_PORT=18443
+                if [[ "${hoppingMode}" == range || "${hoppingMode}" == readfail ]]; then
+                    regressionExpectStatus 1 singBoxProtocolInstall "${protocolId}" </dev/null || return 1
+                    [[ "${readCalls}${tlsCalls}${transactions}${networkCalls}" == 1000 &&
+                        "$(<"${configFile}")" == "${configBefore}" ]] || return 1
+                    if [[ "${hoppingMode}" == range ]]; then
+                        [[ "${errorMessage}" == *请先到端口跳跃管理删除* ]] || return 1
+                    else
+                        [[ "${errorMessage}" == *旧端口跳跃规则读取失败* ]] || return 1
+                    fi
+                    readCalls=0 errorMessage=
+                    selectCustomInstallType=",${protocolId},"
+                    regressionExpectStatus 1 prepareSingBoxInstallInputs </dev/null || return 1
+                    [[ "${readCalls}${networkCalls}" == 10 &&
+                        "$(<"${configFile}")" == "${configBefore}" &&
+                        -z "${PADM_INSTALL_SINGBOX_PORTS[${protocolId}]:-}" ]] || return 1
+                else
+                    singBoxProtocolInstall "${protocolId}" </dev/null || return 1
+                    [[ "${tlsCalls}${transactions}${networkCalls}" == 111 && -z "${errorMessage}" ]] || return 1
+                    if [[ "${hoppingMode}" == sameport ]]; then
+                        [[ "${readCalls}" == 0 ]] || return 1
+                    else
+                        [[ "${readCalls}" == 1 ]] || return 1
+                    fi
+                fi
+                if [[ "${readCalls}" == 1 ]]; then
+                    [[ "${readTarget}" == 18443 ]] || return 1
+                    [[ "${protocolId}:${readType}" == 3:hysteria2 || "${protocolId}:${readType}" == 31:tuic ]] || return 1
+                fi
+            done
+            rm -f "${configFile}"
+            hoppingMode=readfail AUTO_PORT=24444 readCalls=0 tlsCalls=0 transactions=0 networkCalls=0
+            singBoxProtocolInstall "${protocolId}" </dev/null || return 1
+            [[ "${readCalls}${tlsCalls}${transactions}${networkCalls}" == 0111 ]] || return 1
+        done
+    ) || return 1
+
+    (
         # 重装完成后才迁移 UDP 别名，迁移失败不撤销已生效的新 Hy2 入站。
         local aliasRoot="${root}/hy2-aliases" coreInstallType=1
         local PADM_SINGBOX_CONFIG_DIR="${aliasRoot}/sing-box" configPath="${aliasRoot}/xray/"
@@ -4728,11 +4807,12 @@ runGeoUpdateReloadFailureRegression() (
 runRealityRegenerateTransactionRegression() (
     local root="${TMP_DIR}/reality-regenerate-transaction" profileFile aliasFile invalidState
     local failure backupCalls=0 reloadCalls=0 subscribeCalls=0 restoredCore= regenerateBackupPath=
-    local templateCalls=0 configPath="${root}/"
+    local templateCalls=0 configPath="${root}/" originalProfile validationSource
+    validationSource=$(declare -f validateRealityTargetConfigAfterChange)
     local PADM_REALITY_STREAM_STATE_FILE="${root}/stream-state.json" PADM_REALITY_STREAM_CONF_FILE="${root}/stream.conf"
     local currentInstallProtocolType=,1, selectCustomInstallType=,20, coreInstallType
     mkdir -p "${root}"
-    profileFile="${root}/profile.json"
+    profileFile="${root}/07_VLESS_vision_reality_inbounds.json"
     aliasFile="${root}/02_dokodemodoor_inbounds_2053_default.json"
     coreTemplateConfigBackupCreate() {
         backupCalls=$((backupCalls + 1))
@@ -4742,24 +4822,34 @@ runRealityRegenerateTransactionRegression() (
     xrayRunning() { return 0; }
     singBoxRunning() { return 0; }
     coreTemplateRestoreServiceState() { restoredCore="$*"; }
-    regenerateFixtureTemplate() { templateCalls=$((templateCalls + 1)); printf '{"key":"new","inbounds":[{"listen":"0.0.0.0","port":2443}]}\n' >"${profileFile}"; }
-    initXrayConfig() { coreTemplateConfigTransaction xray regenerateFixtureTemplate; }
-    initSingBoxConfig() { coreTemplateConfigTransaction sing-box regenerateFixtureTemplate; }
+    xrayTemplateConfigDir() { printf '%s\n' "${root}"; }
+    singBoxTemplateConfigDir() { printf '%s\n' "${root}"; }
+    initRealityProfile() { realityTargetHost=target.example.com; realityTargetPort=443; realitySNI=sni.example.com; }
+    initRealityKey() {
+        [[ -z "${realityPrivateKey}" && -z "${realityPublicKey}" ]] || return 1
+        templateCalls=$((templateCalls + 1))
+        realityPrivateKey=new-private
+        realityPublicKey=new-public
+    }
+    initRealityMldsa65() { realityMldsa65Seed=new-seed; realityMldsa65Verify=new-verify; }
+    validateRealityTargetConfigAfterChange() { [[ "${failure}" != validate ]]; }
     reloadCore() { reloadCalls=$((reloadCalls + 1)); [[ "${failure}" != reload ]]; }
     subscribe() { subscribeCalls=$((subscribeCalls + 1)); [[ "${failure}" != subscribe ]]; }
     for coreInstallType in 1 2; do
-        for failure in reload subscribe success; do
-            printf '{"key":"old"}\n' >"${profileFile}"
+        for failure in validate reload subscribe success; do
+            printf '%s\n' '{"inbounds":[{"port":2443,"tls":{"reality":{"private_key":"old-private"}}},{"streamSettings":{"realitySettings":{"privateKey":"old-private"}}}],"routing":{"marker":"keep"}}' >"${profileFile}"
+            originalProfile=$(<"${profileFile}")
             backupCalls=0 reloadCalls=0 subscribeCalls=0 restoredCore= regenerateBackupPath=
             if [[ "${failure}" == success ]]; then
                 regenerateRealityProfile
             else
                 regressionExpectStatus 1 regenerateRealityProfile
             fi
-            [[ "${backupCalls}" == 1 && "${reloadCalls}" == 1 && -n "${regenerateBackupPath}" && ! -e "${regenerateBackupPath}" ]]
+            [[ "${backupCalls}" == 1 && -n "${regenerateBackupPath}" && ! -e "${regenerateBackupPath}" ]]
+            [[ "${reloadCalls}" == "$([[ "${failure}" == validate ]] && echo 0 || echo 1)" ]]
             [[ "${selectCustomInstallType}" == ,20, ]]
-            if [[ "${failure}" == reload ]]; then
-                jq -e '.key == "old"' "${profileFile}" >/dev/null
+            if [[ "${failure}" == reload || "${failure}" == validate ]]; then
+                [[ "$(<"${profileFile}")" == "${originalProfile}" ]]
                 [[ "${subscribeCalls}" == 0 ]]
                 if [[ "${coreInstallType}" == 1 ]]; then
                     [[ "${restoredCore}" == "xray true true" ]]
@@ -4767,24 +4857,71 @@ runRealityRegenerateTransactionRegression() (
                     [[ "${restoredCore}" == "sing-box true true" ]]
                 fi
             else
-                jq -e '.key == "new"' "${profileFile}" >/dev/null
+                if [[ "${coreInstallType}" == 1 ]]; then
+                    jq -e '.inbounds[1].streamSettings.realitySettings.privateKey == "new-private"' "${profileFile}" >/dev/null
+                else
+                    jq -e '.inbounds[0].tls.reality.private_key == "new-private"' "${profileFile}" >/dev/null
+                fi
+                jq -e '.routing.marker == "keep" and .inbounds[0].port == 2443' "${profileFile}" >/dev/null
                 [[ "${subscribeCalls}" == 1 && -z "${restoredCore}" ]]
             fi
         done
     done
-    # 重生成模板后恢复分流内部监听，不能把内部端口暴露到公网。
+    # 再生身份保留分流监听、客户和传输参数；只有共用旧公钥的下行同步身份。
     coreInstallType=1
     currentInstallProtocolType=,2,
     failure=success
+    rm "${profileFile}"
+    profileFile="${root}/12_VLESS_XHTTP_inbounds.json"
+    mkdir -p "${root}/auxiliary"
+    printf '{"inbounds":[{"tls":{"reality":{"private_key":"auxiliary"}}}]}\n' >"${root}/auxiliary/07_VLESS_vision_reality_inbounds.json"
+    local singBoxConfigPath="${root}/auxiliary/" auxiliaryBefore
+    auxiliaryBefore=$(<"${singBoxConfigPath}07_VLESS_vision_reality_inbounds.json")
+    currentInstallProtocolType=,1,2,
     printf '%s\n' '{"enabled":true,"default_protocol":"xhttp","protocols":{"xhttp":{"public_port":443,"restore_port":9443,"internal_port":2444}}}' >"${PADM_REALITY_STREAM_STATE_FILE}"
-    writeCoreDokodemoInbound "${aliasFile}" 2053 2443 tcp dokodemo-door-newPort-2053
+    writeCoreDokodemoInbound "${aliasFile}" 2053 2444 tcp dokodemo-door-newPort-2053
+    printf '%s\n' '{"inbounds":[{"listen":"127.0.0.1","port":2444,"settings":{"clients":[{"id":"keep-id"}],"decryption":"keep-encryption"},"streamSettings":{"realitySettings":{"publicKey":"old-public","serverNames":["old.example.com"],"shortIds":["keep-id"]},"xhttpSettings":{"host":"front.example.com","path":"/custom","mode":"packet-up","xmux":{"maxConcurrency":3},"extra":{"downloadSettings":{"realitySettings":{"publicKey":"old-public","serverName":"old.example.com"}}}}}}],"routing":{"rules":[{"outboundTag":"keep-route"}]}}' >"${profileFile}"
+    local previousTransport
+    previousTransport=$(jq -c '.inbounds[0].streamSettings.xhttpSettings | del(.extra.downloadSettings.realitySettings.publicKey, .extra.downloadSettings.realitySettings.serverName)' "${profileFile}")
     realityStreamXHTTPConfigFile() { printf '%s\n' "${profileFile}"; }
     reloadCore() {
         reloadCalls=$((reloadCalls + 1))
         jq -e '.inbounds[0].listen == "127.0.0.1" and .inbounds[0].port == 2444' "${profileFile}" >/dev/null
     }
     regenerateRealityProfile
+    [[ "$(<"${singBoxConfigPath}07_VLESS_vision_reality_inbounds.json")" == "${auxiliaryBefore}" ]]
     jq -e '.inbounds[0].settings.port == 2444' "${aliasFile}" >/dev/null
+    [[ "$(jq -c '.inbounds[0].streamSettings.xhttpSettings | del(.extra.downloadSettings.realitySettings.publicKey, .extra.downloadSettings.realitySettings.serverName)' "${profileFile}")" == "${previousTransport}" ]]
+    jq -e '.inbounds[0] | .settings.clients[0].id == "keep-id" and .settings.decryption == "keep-encryption" and
+        .streamSettings.realitySettings.shortIds == ["keep-id"] and
+        .streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.publicKey == "new-public" and
+        .streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.serverName == "sni.example.com"' "${profileFile}" >/dev/null
+    updateRoutingJsonConfig "${profileFile}" '.inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.publicKey = "external-public"'
+    regenerateRealityProfile
+    jq -e '.inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.publicKey == "external-public" and .routing.rules[0].outboundTag == "keep-route"' "${profileFile}" >/dev/null
+    updateRoutingJsonConfig "${profileFile}" '.inbounds[0].streamSettings.realitySettings.publicKey = "shared-public" |
+        .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.publicKey = "shared-public" |
+        .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.serverName = "independent.example.com"'
+    regenerateRealityProfile
+    jq -e '.inbounds[0].streamSettings.realitySettings.publicKey == "new-public" and
+        .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.publicKey == "shared-public" and
+        .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.serverName == "independent.example.com"' "${profileFile}" >/dev/null
+    (
+        # 真实校验入口必须执行语义 check，merge 成功不能代替校验。
+        eval "${validationSource}"
+        local args= fixtureBinary="${root}/binary"
+        printf '#!/bin/sh\nexit 0\n' >"${fixtureBinary}"
+        chmod +x "${fixtureBinary}"
+        realityXrayVisionConfigPath() { printf '%s/missing-vision\n' "${root}"; }
+        realityXrayGrpcConfigPath() { printf '%s/missing-grpc\n' "${root}"; }
+        realityXrayXhttpConfigPath() { printf '%s/missing-xhttp\n' "${root}"; }
+        realitySingBoxVisionConfigPath() { printf '%s\n' "${profileFile}"; }
+        realitySingBoxGrpcConfigPath() { printf '%s/missing-sb-grpc\n' "${root}"; }
+        coreSingBoxBinaryPath() { printf '%s\n' "${fixtureBinary}"; }
+        singBoxMergeConfigForValidation() { args="$*"; [[ "$3" != check ]]; }
+        regressionExpectStatus 1 validateRealityTargetConfigAfterChange
+        [[ "${args}" == "${fixtureBinary} "*' check' ]]
+    )
     (
         # 状态读取失败不进入事务，不生成模板或恢复服务；旧配置和额外入口保持不变。
         local originalProfile=$(<"${profileFile}") originalAlias=$(<"${aliasFile}")
@@ -4803,7 +4940,7 @@ runRealityRegenerateTransactionRegression() (
     )
     printf '%s\n' '{"enabled":true,"default_protocol":"xhttp","protocols":{"xhttp":{"public_port":443,"restore_port":9443,"internal_port":2444}}}' >"${PADM_REALITY_STREAM_STATE_FILE}"
     (
-        realityStreamPatchXrayConfig() { return 1; }
+        updateRoutingJsonConfig() { return 1; }
         local originalProfile originalAlias
         originalProfile=$(<"${profileFile}")
         originalAlias=$(<"${aliasFile}")
@@ -5024,7 +5161,14 @@ JSON
     currentInstallProtocolType=,1,
     # 真实事务已在独立夹具验证；下面只检查调用方的选择与失败传播。
     coreTemplateConfigTransaction() { shift; "$@"; }
-    initXrayConfig() { return 0; }
+    initRealityProfile() { realityTargetHost=fixture.example.com; realityTargetPort=443; realitySNI=fixture.example.com; }
+    initRealityKey() { realityPrivateKey=fixture-private; realityPublicKey=fixture-public; }
+    initRealityMldsa65() { :; }
+    xrayTemplateConfigDir() { printf '%s\n' "${root}"; }
+    singBoxTemplateConfigDir() { printf '%s\n' "${root}"; }
+    cp "${vlessConfig}" "${root}/07_VLESS_vision_reality_inbounds.json"
+    updateRoutingJsonConfig() { :; }
+    validateRealityTargetConfigAfterChange() { :; }
     reloadCore() { return 1; }
     subscribe() {
         printf 'subscribe\n' >"${subscribeMarker}"
@@ -5045,21 +5189,23 @@ JSON
     (
         # 重新生成只选择当前 Reality 协议，不沿用或改写上次安装选择。
         local selectCustomInstallType=,20, currentInstallProtocolType selectedProtocol
-        initXrayConfig() { selectedProtocol=${selectCustomInstallType}; }
-        initSingBoxConfig() { selectedProtocol=${selectCustomInstallType}; }
+        updateRoutingJsonConfig() { selectedProtocol+="$(protocolCapabilityIdByConfigFile "${1##*/}"),"; }
+        printf '{}\n' >"${root}/08_VLESS_vision_gRPC_inbounds.json"
+        printf '{}\n' >"${root}/12_VLESS_XHTTP_inbounds.json"
         reloadCore() { :; }
         subscribe() { :; }
         for currentInstallProtocolType in ,1, ,26, ,1,26,; do
             coreInstallType=2
+            selectedProtocol=
             regenerateRealityProfile
             [[ "${selectCustomInstallType}" == ,20, ]]
-            assertEquals "$(protocolSelectionNormalizeCsv "${currentInstallProtocolType}")" \
-                "$(protocolSelectionNormalizeCsv "${selectedProtocol}")" reality-regenerate-selection
+            assertEquals "${currentInstallProtocolType#,}" "${selectedProtocol}" reality-regenerate-selection
         done
         for currentInstallProtocolType in ,1, ,2, ,26, ,1,2,26,; do
             coreInstallType=1
+            selectedProtocol=
             regenerateRealityProfile
-            [[ "${selectCustomInstallType}" == ,20, && "${selectedProtocol}" == "${currentInstallProtocolType}" ]]
+            [[ "${selectCustomInstallType}" == ,20, && "${selectedProtocol}" == "${currentInstallProtocolType#,}" ]]
         done
         currentInstallProtocolType=,3,
         selectedProtocol=
@@ -5542,6 +5688,25 @@ JSON
     [[ ! -e "${nginxTarget}.tmp" ]]
     [[ ! -e "${nginxTarget}.bak" ]]
     ! compgen -G "${TMP_DIR}/entry-helper-nginx/.sing_box_VMess_HTTPUpgrade.conf.*" >/dev/null
+
+    (
+        local staleRoot="${TMP_DIR}/entry-helper-nginx-stale"
+        local staleTarget="${staleRoot}/sing_box_VMess_HTTPUpgrade.conf"
+        mkdir -p "${staleRoot}"
+        printf 'stale backup\n' >"${staleTarget}.bak"
+        nginxConfigPath="${staleRoot}/"
+        export PADM_FAKE_NGINX_VALIDATE_MODE=fail
+        if writeSingBoxVMessHTTPUpgradeNginxConfig <<'EOF' >/dev/null 2>&1
+server {}
+EOF
+        then
+            return 1
+        fi
+        [[ ! -e "${staleTarget}" ]]
+        [[ "$(<"${staleTarget}.bak")" == "stale backup" ]]
+        [[ ! -e "${staleTarget}.tmp" ]]
+        ! compgen -G "${staleRoot}/.sing_box_VMess_HTTPUpgrade.conf.*" >/dev/null
+    )
 
     (
         local unsafeRoot="${TMP_DIR}/entry-helper-nginx-unsafe"
