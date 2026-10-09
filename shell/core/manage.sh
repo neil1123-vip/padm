@@ -1861,19 +1861,23 @@ unInstallApply() {
         fi
         if [[ "${coreInstallType}" == "1" || -e /etc/init.d/xray || -L /etc/init.d/xray ]]; then
             if ! rc-update del xray default; then
-                uninstallFailed=true
                 errorCard "Xray开机自启删除失败"
+                return 1
+            elif ! removeInstallPath /etc/init.d/xray "Xray OpenRC服务"; then
+                return 1
+            else
+                successCard "删除Xray开机自启完成"
             fi
-            removeInstallPath /etc/init.d/xray "Xray OpenRC服务" || uninstallFailed=true
-            successCard "删除Xray开机自启完成"
         fi
         if [[ "${coreInstallType}" == "2" || -n "${singBoxConfigPath}" || -e /etc/init.d/sing-box || -L /etc/init.d/sing-box ]]; then
             if ! rc-update del sing-box default; then
-                uninstallFailed=true
                 errorCard "sing-box开机自启删除失败"
+                return 1
+            elif ! removeInstallPath /etc/init.d/sing-box "sing-box OpenRC服务"; then
+                return 1
+            else
+                successCard "删除sing-box开机自启完成"
             fi
-            removeInstallPath /etc/init.d/sing-box "sing-box OpenRC服务" || uninstallFailed=true
-            successCard "删除sing-box开机自启完成"
         fi
     else
         if ! uninstallReloadSystemdUnits; then

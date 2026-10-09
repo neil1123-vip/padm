@@ -1719,6 +1719,7 @@ runUninstallServiceStopFailureRegression() (
     local serviceLog="${root}/service.log"
     local actionLog="${root}/actions.log"
     local errorLog="${root}/errors.log"
+    local successLog="${root}/success.log"
     local rcFile="${root}/uninstall.rc"
     local mode shellRc
     local nginxState=false
@@ -1737,6 +1738,7 @@ runUninstallServiceStopFailureRegression() (
     ) || return 1
     autoRead() { printf -v "$3" 'y'; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+    successCard() { printf '%s\n' "$*" >>"${successLog}"; }
     menu() { return 0; }
     pgrep() { return 1; }
     nginxRunning() { [[ "${nginxState}" == "true" ]]; }
@@ -1748,6 +1750,9 @@ runUninstallServiceStopFailureRegression() (
     }
     removeInstallPath() {
         printf 'remove:%s:%s\n' "$1" "$2" >>"${actionLog}"
+        case "${mode}:$1" in
+        xray-remove-fail:/etc/init.d/xray | sing-box-remove-fail:/etc/init.d/sing-box) return 1 ;;
+        esac
         return 0
     }
     cleanupSubscriptionWireGuardControlOnUninstall() {
@@ -1775,6 +1780,10 @@ runUninstallServiceStopFailureRegression() (
     systemctl() {
         printf 'systemctl:%s\n' "$*" >>"${serviceLog}"
         return 0
+    }
+    rc-update() {
+        printf 'rc-update:%s\n' "$*" >>"${serviceLog}"
+        [[ "${mode}" != "$2-disable-fail" ]]
     }
     handleNginx() {
         printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
@@ -1810,8 +1819,9 @@ runUninstallServiceStopFailureRegression() (
         : >"${serviceLog}"
         : >"${actionLog}"
         : >"${errorLog}"
+        : >"${successLog}"
         rm -f "${rcFile}"
-        release=centos
+        release=${6:-centos}
         coreInstallType=1
         currentInstallProtocolType=$2
         singBoxConfigPath=$3
@@ -1899,6 +1909,44 @@ runUninstallServiceStopFailureRegression() (
         grep -qx 'nginx-mode:start restore' "${serviceLog}" || return 1
         [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     }
+
+    runUninstallOpenRcFailureCase() {
+        local core=$1 failure=$2 label=Xray
+        [[ "${core}" != sing-box ]] || label=sing-box
+        runUninstallCase "${core}-${failure}-fail" ",1," "${root}/sing-box-conf/" "${root}/nginx/" 1 alpine
+        grep -qx "rc-update:del ${core} default" "${serviceLog}"
+        if [[ "${failure}" == disable ]]; then
+            ! grep -q "^remove:/etc/init.d/${core}:" "${actionLog}"
+            grep -q "${label}开机自启删除失败" "${errorLog}"
+        else
+            grep -q "^remove:/etc/init.d/${core}:" "${actionLog}"
+        fi
+        if [[ "${core}" == xray ]]; then
+            ! grep -q '^rc-update:del sing-box ' "${serviceLog}"
+            ! grep -q '^remove:/etc/init.d/sing-box:' "${actionLog}"
+        fi
+        ! grep -q "${label}开机自启完成" "${successLog}"
+        ! grep -qxF padm-root-cleanup "${actionLog}"
+        ! grep -qxF unsubscribe-cleanup "${actionLog}"
+        ! grep -q '^remove:/usr/' "${actionLog}"
+        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == previous ]]
+    }
+
+    local core failure
+    for core in xray sing-box; do
+        for failure in disable remove; do
+            runUninstallOpenRcFailureCase "${core}" "${failure}"
+        done
+    done
+    runUninstallCase success ",1," "${root}/sing-box-conf/" "${root}/nginx/" 0 alpine
+    for core in xray sing-box; do
+        grep -qx "rc-update:del ${core} default" "${serviceLog}"
+        grep -q "^remove:/etc/init.d/${core}:" "${actionLog}"
+    done
+    grep -qx '删除Xray开机自启完成' "${successLog}"
+    grep -qx '删除sing-box开机自启完成' "${successLog}"
+    grep -qxF padm-root-cleanup "${actionLog}"
+    [[ ! -s "${errorLog}" ]]
 
     for mode in nginx-stop-fail xray-stop-fail sing-box-stop-fail; do
         runUninstallStopFailureCase "${mode}"
