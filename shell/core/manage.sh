@@ -674,7 +674,10 @@ unInstallSingBox() {
         serviceWasEnabled=true
     fi
     if declare -F readPortHopping >/dev/null 2>&1; then
-        readPortHopping "${type}" "${protocolPort}" >/dev/null 2>&1 || true
+        readPortHopping "${type}" "${protocolPort}" >/dev/null 2>&1 || {
+            errorCard "sing-box ${type} 端口跳跃读取失败，已取消卸载"
+            return 1
+        }
         if [[ "${type}" == "hysteria2" ]]; then
             portHoppingStart=${hysteria2PortHoppingStart:-}
             portHoppingEnd=${hysteria2PortHoppingEnd:-}

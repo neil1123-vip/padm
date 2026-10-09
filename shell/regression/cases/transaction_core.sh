@@ -3600,6 +3600,16 @@ runSingBoxUninstallFailurePropagationRegression() (
     refreshProtocolSubscriptions() { printf 'refresh:%s\n' "$1" >>"${refreshLog}"; return "${refreshStatus}"; }
     subscriptionNotifyControllerRefresh() { printf 'notify\n' >>"${refreshLog}"; }
 
+    (
+        # 跳跃规则读取失败时，不能删除配置、停止服务或刷新订阅。
+        readPortHopping() { return 1; }
+        regressionExpectStatus 1 unInstallSingBox tuic
+        [[ "$(<"${configDir}09_tuic_inbounds.json")" == "${oldConfig}" && -f "${mergedConfig}" ]]
+        [[ ! -s "${serviceLog}" && ! -s "${firewallLog}" && ! -s "${refreshLog}" ]]
+        grep -q '端口跳跃读取失败，已取消卸载' "${errorLog}"
+    )
+    : >"${errorLog}"
+
     if unInstallSingBox tuic; then
         rc=0
     else
