@@ -1327,6 +1327,42 @@ runTlsRenewalFailurePropagationRegression() (
     [[ "${nginxState}" == "true" && "${xrayState}" == "true" && "${singBoxState}" == "true" ]]
 
     (
+        local phase signal status
+        eval "$(declare -f handleNginx | sed '1s/handleNginx/legacySignalHandleNginx/')"
+        handleNginx() {
+            legacySignalHandleNginx "$@" || return 1
+            if [[ "${phase}" == stop && "$1" == stop ]]; then
+                kill "-${signal}" "${BASHPID}"
+                :
+            fi
+        }
+        cp() {
+            command cp "$@" || return 1
+            if [[ "${phase}" == backup && "$*" == *"/padm-tls-renew."* ]]; then
+                kill "-${signal}" "${BASHPID}"
+                :
+            fi
+        }
+        for phase in backup stop; do
+            for signal in INT TERM; do
+                mode=legacy-signal
+                prepareRenewalFixture
+                status=0
+                ( renewalTLS ) >/dev/null 2>&1 || status=$?
+                [[ "${status}" == "$([[ "${signal}" == INT ]] && printf 130 || printf 143)" ]] || return 1
+                if [[ "${phase}" == backup ]]; then
+                    [[ ! -s "${serviceLog}" ]] || return 1
+                else
+                    grep -qx 'nginx:stop' "${serviceLog}" &&
+                        grep -qx 'nginx:start' "${serviceLog}" || return 1
+                    ! grep -qx 'xray:stop' "${serviceLog}" || return 1
+                fi
+                [[ ! -s "${commandLog}" ]] || return 1
+            done
+        done
+    )
+
+    (
         local legacyDomain=legacy.example.com
         local subscribeTlsDomain=subscribe.example.com
         local usableChecks=0

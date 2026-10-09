@@ -797,15 +797,6 @@ restoreServicesAfterTLSRenewal() {
     return "${status}"
 }
 
-failTlsRenewalBeforeInstall() {
-    local reason=$1
-    shift
-
-    errorCard "${reason}，正在尝试恢复服务"
-    restoreServicesAfterTLSRenewal "$@" || errorCard "${reason}，且服务恢复失败"
-    return 1
-}
-
 stopServicesForTLSRenewal() {
     local nginxWasRunning=$1
     local xrayWasRunning=$2
@@ -1106,26 +1097,24 @@ renewalTLS() {
             nginxRunning && nginxWasRunning=true
             xrayRunning && xrayWasRunning=true
             singBoxRunning && singBoxWasRunning=true
-            stopServicesForTLSRenewal "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}" || return 1
-
             if [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
                 installDomain="*.${dnsTLSDomain}"
             fi
             local backupDir backupCrt backupKey restoreStatus=0
             padmCreateTmpRootPath backupDir padm-tls-renew.XXXXXX -d || {
-                failTlsRenewalBeforeInstall "TLS 旧证书备份目录创建失败" "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}"
+                errorCard "TLS 旧证书备份目录创建失败，已取消 TLS 续期"
                 return 1
             }
             backupCrt="${backupDir}/$(basename -- "${crtFile}")"
             backupKey="${backupDir}/$(basename -- "${keyFile}")"
             cp -p "${crtFile}" "${backupCrt}" || {
                 padmRemoveCleanupPath "${backupDir}"
-                failTlsRenewalBeforeInstall "TLS 旧证书备份失败" "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}"
+                errorCard "TLS 旧证书备份失败，已取消 TLS 续期"
                 return 1
             }
             cp -p "${keyFile}" "${backupKey}" || {
                 padmRemoveCleanupPath "${backupDir}"
-                failTlsRenewalBeforeInstall "TLS 旧证书备份失败" "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}"
+                errorCard "TLS 旧证书备份失败，已取消 TLS 续期"
                 return 1
             }
             local -A PADM_TLS_RENEW_ROLLBACK=(
@@ -1135,6 +1124,10 @@ renewalTLS() {
             local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
             local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
             padmRegisterExitRollback rollbackTLSRenewalOnExit
+            stopServicesForTLSRenewal "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}" || {
+                padmRunRollback rollbackTLSRenewalOnExit || true
+                return 1
+            }
             if padmRunCancelableCommand sudo "${acmeBin}" --cron --home "${acmeDir}"; then
                 :
             else
