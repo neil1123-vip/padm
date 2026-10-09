@@ -18,7 +18,7 @@
 | 2. 菜单与可信首次配置 | 2A–2C 已实现；本地 PTY、事务和 Linux 权限通过，真实发布/连通待验 | 安装后进入菜单、独立命令生命周期、无需手填镜像的首次配置 |
 | 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2–3C.12 基础入口已通过本地与 amd64 传输验收，3D.1 参数重生成、3D.2 当前目标站菜单已接入，3D.3c 受管共存、3D.3d1 桥接可达宿主网站和 3D.3d2 宿主回环已通过本地/真实 Desktop 验收 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
 | 4. 用户、订阅与服务维护 | 4A.1–4A.4、4B.1–4B.2 已交付；4C.1–4C.2 已实现，4C.3a–4C.3c 归属、健康与主控事务底座已补，连接与管理入口继续推进 | 稳定分享身份与双核心认证/统计、本机用户业务、多服务器后端、分范围备份恢复、核心运维 |
-| 5. 站点、路由与宿主集成 | 5A.1–5A.3b、5B.1–5B.4b 本地合同及双核心双栈出站/解析/域名、IP、明文 BT、CN 预设、IPv6 bridge 与用户态 WARP 本地 Peer 验收已通过；继续 SOCKS/HTTP 入站、5B 其余路由与 5C 宿主集成 | 站点管理、内部能力、规则所有权及可撤销宿主操作 |
+| 5. 站点、路由与宿主集成 | 5A.1–5A.3b、5B.1–5B.4b 本地合同及双核心双栈出站/解析/域名、IP、明文 BT、CN 预设、IPv6 bridge 与用户态 WARP 本地 Peer 验收已通过；5B.5a 已有 Xray 的 HTTP 中继合同、真实流量及 Linux 发布专项通过；继续 SOCKS UDP 发布、5B 其余路由与 5C 宿主集成 | 站点管理、内部能力、规则所有权及可撤销宿主操作 |
 | 6. 发布与完整验收 | 未开始 | 迁移文档、真实 Linux 与双架构证据、受门禁保护的 Release |
 
 当前机器可读支持状态以
@@ -2161,6 +2161,52 @@ Docker 入站需独立受管合同、私有认证输入、来源前置拒绝、�
 端口与部署一致性、统计身份边界和真实流量验收。SOCKS UDP 尤须验证
 `BND.ADDR/BND.PORT` 在 Docker 发布/NAT 下可达，不能仅用容器内回环通过代替。
 本前置修复不等于 Docker 入站交付，`internal-201`、`internal-202` 仍 `deferred`。
+
+#### 5B.5a 已有 Xray 的 HTTP 中继入站
+
+功能签名提交 `922fef7d`。v3 独立 `.relay.http` 保存
+`core`、`port`、`address_families`、`username`、`password`、`source_ips` 六键；
+只接受部署中已有的受管 Xray，不加装辅助核心，不生成公开节点/订阅链接。
+sing-box `v1.14.2` 实测用伪造 `X-Forwarded-For` 覆盖路由来源并触达 origin，
+固定版本源码也无禁用选项，因此校验和生成器明确拒绝，不删除攻击断言。
+
+导入复用 root 私有 `0600` 单链接 JSON、安全祖先和 `64 KiB` 上限。
+可见 ASCII 凭据为 `1–255` 字符，用户名不含 `:`，密码允许；
+来源要求 `1–256` 条唯一字面 IP/CIDR，拒绝域名、GeoIP、zone 及额外键。
+菜单 `17 → 21` 和 CLI `--http-relay`、`--http-relay-off` 走现有候选/确认/回滚；
+普通 `--spec` 冻结中继，专项互斥，关闭保留其它配置。
+预览仅字段路径，`routing-status` 固定追加脱敏 `http_relay`，关闭为 `{enabled:false}`；
+同步旧 SOCKS5 六处精确状态断言，原有字段检查不放宽。
+
+来源 allow 到专属 `padm-relay-http-direct`，随后 catch-all blocked，
+先于 DNS、全局 Direct/Block、SOCKS、IPv6、WARP；系统解析不继承全局 hosts/DNS，
+不改变原首出站或默认出站。只发布独立 TCP，端口冲突、deployment `relay-http`
+和 `x-padm-relay-http` 旧 bundle 门禁同步，不与 TUN/TProxy 宿主网络共存。
+Xray 专属 `userLevel:1` 关闭用户计数；真实同名业务 level 0 产生 counter 后，
+relay 不创建或增加该 counter，不参与业务账号/订阅额度，`traffic.sh` 无改动。
+
+Linux amd64 定向合同 `10.106` 秒、真实 Xray `296 ms`、发布专项 `6.312` 秒通过。
+真实矩阵包含 HTTP/CONNECT、双栈来源、认证、独立解析、同名统计正对照；
+发布专项使用隔离 Linux daemon、生产 Compose ports、外部 veth 客户端，
+验证实际 DNAT 来源/CIDR、伪造 XFF/Forwarded、无/错认证和 origin 零接入，
+维持 UID `10001`、只读根及零 capabilities，不使用宿主 Docker Socket。
+最终 SOCKS5 定向 `136.439` 秒、完整 Docker 合同 `303.860` 秒、
+ci `38.508` 秒通过；Bash/ShellCheck error、Python/PowerShell AST、
+JSON、diff 检查与独立只读复审通过。
+CI 快照早于 SOCKS5 六处测试断言修正；之后仅改测试/文档，
+最终完整 Docker 合同使用新快照补验，不将二者视为同源码 CI。
+relay 与 IPv6/WARP 隔离核对生产前置规则，未做组合真实流量对照。
+完整合同 Jobs 6、ci Jobs 3，未扩大三槽预算；ci 排队 `218372 ms`，
+不计作执行耗时。HTTP 真实入口只复制 Xray，复用工具/核心镜像，不重复全套。
+
+证据 `.tmp-docker-http-relay-5b5a-evidence.md`，最终完整合同目录
+`.tmp-regression-docker-856e589c6b244f6497a6029a93a14b93/`；
+日志/result/失败证据保留，本轮归档、核心副本与临时脚本清理。
+HTTP Basic 不加密；原生宿主、公网/IPv6 发布、arm64 与可信发布仍未验，
+`internal-202` 和完整 routing-tools/206 保持 `deferred`。
+SOCKS UDP 探针确认私网动态 `BND.ADDR/BND.PORT` 不能靠固定同端口发布解决，
+同 bridge 原始 BND 正对照成功；下一步先解决发布可达与真实来源，
+不能降为 TCP-only 或将 `internal-201` 标为完成。
 
 ### 5C. 宿主集成与端口跳跃
 
