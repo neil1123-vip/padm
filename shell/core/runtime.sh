@@ -1003,10 +1003,13 @@ autoInstallValidateRequiredInputs() {
     fi
 
     if [[ "$(normalizeYesNo "${AUTO_REALITY_DOMAIN:-}")" == "y" ]]; then
-        local strictSelection=${AUTO_PROTOCOLS:-}
+        local strictSelection=
         case "${AUTO_INSTALL_TYPE:-}" in
+        '' | custom | any | 任意组合 | 2)
+            strictSelection=${AUTO_PROTOCOLS:-}
+            ;;
         reality | reality-only | no-domain-reality | 3)
-            [[ -n "${strictSelection}" ]] || strictSelection=1
+            strictSelection=1
             ;;
         esac
         if ! protocolSelectionSupportsStrictRealityDomain "${strictSelection}"; then

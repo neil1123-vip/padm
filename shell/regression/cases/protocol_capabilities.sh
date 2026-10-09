@@ -122,6 +122,19 @@ runProtocolCapabilityMenuAndCoreRegression() {
         printf 'assert-fail:sing-box core ids must not include XHTTP id 2\n' >&2
         return 1
     fi
+
+    (
+        # 严格域名校验按实际入口选协议，不能让被忽略的参数改变判定。
+        local installType
+        for installType in reality reality-only no-domain-reality 3; do
+            parseInstallArgs --install-type "${installType}" --protocols 28 --reality-domain yes
+            autoInstallValidateRequiredInputs || return 1
+        done
+        for installType in install full traditional 1; do
+            parseInstallArgs --install-type "${installType}" --protocols 1 --reality-domain yes
+            regressionExpectStatus 1 autoInstallValidateRequiredInputs || return 1
+        done
+    )
 }
 
 runProtocolCapabilityNginxTopologyRegression() {
