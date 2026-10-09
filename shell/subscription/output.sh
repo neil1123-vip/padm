@@ -122,8 +122,9 @@ serializeVlessRealityGrpcLink() {
 xrayRealityXHTTPSetting() {
     local key=$1
     local fallback=$2
-    local configFile value
-    configFile="${configPath:-/etc/padm/xray/conf/}12_VLESS_XHTTP_inbounds.json"
+    local xrayConfigDir configFile value
+    xrayConfigDir="${configPath:-${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}}"
+    configFile="${PADM_VLESS_XHTTP_CONFIG_FILE:-${xrayConfigDir%/}/12_VLESS_XHTTP_inbounds.json}"
     if [[ -f "${configFile}" ]]; then
         value=$(jq -r ".inbounds[0].streamSettings.xhttpSettings.${key} // empty" "${configFile}" 2>/dev/null)
     fi
