@@ -307,24 +307,27 @@ showTuicAccounts() {
     fi
 }
 
-showNaiveAccounts() {
+showNaiveAccounts() (
+    set -o pipefail
     # Naive
     if currentProtocolHas 5 || [[ -n "${singBoxNaivePort:-}" ]]; then
         subscribeSectionTitle "naive TLS" "推荐，不支持ClashMeta"
-        local path="${configPath}"
+        local path="${configPath}" protocolHost
         if [[ "${coreInstallType}" == "1" && -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}10_naive_inbounds.json" ]]; then
             path="${singBoxConfigPath}"
         fi
-        jq -r -c '.inbounds[]|.users[]' "${path}10_naive_inbounds.json" | while read -r user; do
+        protocolHost=$(jq -r '.inbounds[0].tls.server_name // empty' "${path}10_naive_inbounds.json") || return 1
+        protocolHost=${protocolHost:-${currentHost:-}}
+        jq -r -c '.inbounds[] | .users | if type == "array" then .[] else error("invalid users") end' "${path}10_naive_inbounds.json" | while read -r user; do
             local username password
             IFS=$'\037' read -r _ _ password username _ _ <<<"$(subscriptionAccountProfile "${user}")"
             subscribeAccountTitle "${username}"
             echo
-            defaultBase64Code naive "${singBoxNaivePort}" "${username}" "${password}" || return 1
-        done
+            defaultBase64Code naive "${singBoxNaivePort}" "${username}" "${password}" "${protocolHost}" || return 1
+        done || return 1
 
     fi
-}
+)
 
 showShadowsocksAccounts() {
     # Shadowsocks
@@ -427,7 +430,8 @@ showVlessRealityXHTTPAccounts() {
     fi
 }
 
-showAnyTlsAccounts() {
+showAnyTlsAccounts() (
+    set -o pipefail
     # AnyTLS
     if currentProtocolHas 4; then
         subscribeSectionTitle "AnyTLS" "TLS 兼容协议"
@@ -437,13 +441,13 @@ showAnyTlsAccounts() {
         fi
         protocolHost=$(jq -r '.inbounds[0].tls.server_name // empty' "${path}13_anytls_inbounds.json") || return 1
         protocolHost=${protocolHost:-${currentHost:-}}
-        jq -r -c '.inbounds[]|.users[]' "${path}13_anytls_inbounds.json" | while read -r user; do
+        jq -r -c '.inbounds[] | .users | if type == "array" then .[] else error("invalid users") end' "${path}13_anytls_inbounds.json" | while read -r user; do
             local name password
             IFS=$'\037' read -r _ _ password _ name _ <<<"$(subscriptionAccountProfile "${user}")"
             subscribeAccountTitle "${name}"
             echo
             defaultBase64Code anytls "${singBoxAnyTLSPort}" "${name}" "${password}" "${protocolHost}" || return 1
-        done
+        done || return 1
 
     fi
-}
+)

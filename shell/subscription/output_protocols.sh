@@ -552,14 +552,15 @@ EOF
 }
 
 emitNaiveSubscribeOutput() {
-    local port=$1 email=$2 id=$3 user=$6
+    local port=$1 email=$2 id=$3 add=$4 user=$6
+    local host=${add:-${currentHost}}
     subscribeOutputTitle "通用链接：Naive TLS"
     echoContent green "    NaiveProxy 适合需要 TLS 指纹抗性的场景；需要真实域名和可信证书，不是无域名 Reality 替代。\n"
 
     local encodedEmail encodedId defaultLink
     encodedEmail=$(encodeUriUserInfoComponent "${email}") || return 1
     encodedId=$(encodeUriUserInfoComponent "${id}") || return 1
-    defaultLink="naive+https://${encodedEmail}:${encodedId}@$(formatUriAuthorityHost "${currentHost}"):${port}?padding=true#${email}"
+    defaultLink="naive+https://${encodedEmail}:${encodedId}@$(formatUriAuthorityHost "${host}"):${port}?padding=true#${email}"
 
     echoContent green "    ${defaultLink}\n"
     appendDefaultSubscribeLine "${user}" "${defaultLink}"

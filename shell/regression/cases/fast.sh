@@ -5274,7 +5274,7 @@ JSON
 {"inbounds":[{"type":"vless","listen_port":20888,"users":[{"uuid":"22222222-2222-2222-2222-222222222222","name":"sub_grpc-VLESS_Reality_gPRC"}],"tls":{"server_name":"nodejs.org","reality":{"private_key":"grpc-private-key","handshake":{"server":"nodejs.org","server_port":443}}},"transport":{"type":"grpc","service_name":"grpc"}}]}
 JSON
         cat >"${singBoxRoot}/10_naive_inbounds.json" <<'JSON'
-{"inbounds":[{"type":"naive","listen_port":33577,"users":[{"username":"sub_naive-singbox_naive","password":"naive-pass"}]}]}
+{"inbounds":[{"type":"naive","listen_port":33577,"users":[{"username":"sub_naive-singbox_naive","password":"naive-pass"}],"tls":{"server_name":"naive.example.com"}}]}
 JSON
         cat >"${singBoxRoot}/11_VMess_HTTPUpgrade_inbounds.json" <<'JSON'
 {"inbounds":[{"type":"vmess","listen_port":31306,"users":[{"uuid":"33333333-3333-3333-3333-333333333333","name":"sub_httpupgrade-VMess_HTTPUpgrade","alterId":0}],"transport":{"type":"httpupgrade","path":"/padmhttp"}}]}
@@ -5338,6 +5338,7 @@ EOF
 
         grep -q 'default:sub_grpc:' "${captureLog}"
         grep -q 'default:sub_naive:' "${captureLog}"
+        grep -q 'default:sub_naive:.*@naive.example.com:33577' "${captureLog}"
         grep -q 'default:sub_httpupgrade:' "${captureLog}"
         grep -q 'default:sub_anytls:' "${captureLog}"
         grep -q 'default:sub_anytls:.*@anytls.example.com:40251' "${captureLog}"
@@ -5380,6 +5381,9 @@ EOF
             showAnyTlsAccounts >/dev/null
             grep -q 'default:sub_anytls:.*@anytls.example.com:40251' "${captureLog}"
             grep -q 'singbox:sub_anytls:.*"server_name":"anytls.example.com"' "${captureLog}"
+            : >"${captureLog}"
+            showNaiveAccounts >/dev/null
+            grep -q 'default:sub_naive:.*@naive.example.com:33577' "${captureLog}"
             [[ -z "${currentHost}" ]]
         )
         (
@@ -5395,6 +5399,63 @@ EOF
             printf '{invalid\n' >"${singBoxRoot}/13_anytls_inbounds.json"
             regressionExpectStatus 1 showAnyTlsAccounts >/dev/null 2>&1
             printf '%s\n' "${savedAnyTlsConfig}" >"${singBoxRoot}/13_anytls_inbounds.json"
+        )
+        (
+            # 无独立 TLS 域名的 Naive 旧配置仍使用已有入口。
+            local savedNaiveConfig
+            savedNaiveConfig=$(<"${singBoxRoot}/10_naive_inbounds.json")
+            currentHost=legacy.example.com
+            jq 'del(.inbounds[0].tls.server_name)' "${singBoxRoot}/10_naive_inbounds.json" >"${root}/legacy-naive.json"
+            mv "${root}/legacy-naive.json" "${singBoxRoot}/10_naive_inbounds.json"
+            : >"${captureLog}"
+            showNaiveAccounts >/dev/null
+            grep -q 'default:sub_naive:.*@legacy.example.com:33577' "${captureLog}"
+            printf '{invalid\n' >"${singBoxRoot}/10_naive_inbounds.json"
+            regressionExpectStatus 1 showNaiveAccounts >/dev/null 2>&1
+            printf '%s\n' "${savedNaiveConfig}" >"${singBoxRoot}/10_naive_inbounds.json"
+        )
+        (
+            # Naive/AnyTLS 的 users 读取和逐账号输出失败必须穿过内部管道返回。
+            set +o pipefail
+            local functionName configName protocolHost userJson variant
+            currentInstallProtocolType=",5,4,"
+            coreInstallType=1
+            singBoxConfigPath="${singBoxRoot}/"
+            singBoxNaivePort=33577
+            singBoxAnyTLSPort=40251
+            for functionName in showNaiveAccounts showAnyTlsAccounts; do
+                if [[ "${functionName}" == showNaiveAccounts ]]; then
+                    configName=10_naive_inbounds.json
+                    protocolHost=naive.example.com
+                    userJson='{"username":"sub_naive","password":"naive-pass"}'
+                else
+                    configName=13_anytls_inbounds.json
+                    protocolHost=anytls.example.com
+                    userJson='{"name":"sub-anytls","password":"anytls-pass"}'
+                fi
+                for variant in missing null object; do
+                    case "${variant}" in
+                    missing) jq -n --arg host "${protocolHost}" '{inbounds:[{tls:{server_name:$host}}]}' ;;
+                    null) jq -n --arg host "${protocolHost}" '{inbounds:[{tls:{server_name:$host},users:null}]}' ;;
+                    object) jq -n --arg host "${protocolHost}" '{inbounds:[{tls:{server_name:$host},users:{}}]}' ;;
+                    esac >"${singBoxRoot}/${configName}"
+                    : >"${captureLog}"
+                    regressionExpectStatus 1 "${functionName}" >/dev/null 2>&1
+                    [[ ! -s "${captureLog}" ]]
+                done
+                jq -n --arg host "${protocolHost}" '{inbounds:[{tls:{server_name:$host},users:[]}]}' >"${singBoxRoot}/${configName}"
+                : >"${captureLog}"
+                "${functionName}" >/dev/null
+                [[ ! -s "${captureLog}" ]]
+
+                jq -n --arg host "${protocolHost}" --argjson user "${userJson}" \
+                    '{inbounds:[{tls:{server_name:$host},users:[$user]}]}' >"${singBoxRoot}/${configName}"
+                appendDefaultSubscribeLine() { printf '%s\n' failed-write >>"${captureLog}"; return 1; }
+                : >"${captureLog}"
+                regressionExpectStatus 1 "${functionName}" >/dev/null 2>&1
+                [[ "$(<"${captureLog}")" == failed-write ]]
+                appendDefaultSubscribeLine() { printf 'default:%s:%s\n' "$1" "$2" >>"${captureLog}"; }
+            done
         )
         (
             # 主配置读取或输出失败不能被合法辅助配置覆盖，且不依赖调用方 pipefail。
@@ -5585,9 +5646,6 @@ runTrojanFallbackSubscribeUsesTlsEntryRegression() {
 JSON
         cat >"${xrayRoot}/02_VLESS_TCP_inbounds.json" <<'JSON'
 {"inbounds":[{"port":443,"protocol":"vless","settings":{"clients":[{"id":"11111111-1111-4111-8111-111111111111","email":"fronting"}],"fallbacks":[{"dest":31296,"xver":1}]},"streamSettings":{"network":"tcp","security":"tls","tlsSettings":{"certificates":[{"certificateFile":"/etc/padm/tls/tls.example.com.crt","keyFile":"/etc/padm/tls/tls.example.com.key"}]}}}]}
-JSON
-        cat >"${xrayRoot}/02_dokodemodoor_inbounds_443_default.json" <<'JSON'
-{"inbounds":[{"port":443,"settings":{"port":443}}]}
 JSON
         printf 'crt\n' >"${tlsRoot}/tls.example.com.crt"
         printf 'key\n' >"${tlsRoot}/tls.example.com.key"
