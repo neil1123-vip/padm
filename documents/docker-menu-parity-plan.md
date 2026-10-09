@@ -2570,6 +2570,57 @@ PowerShell AST、实际 AST guard 的 6/6 平台判断及 diff 检查通过。
 功能 `c66875c1`、架构保护 `05af2d4a`、原生顺手修复 `3257d230`
 均为本地 SSH 签名提交，签名 `G`，未推送。
 
+#### 5C.2 TProxy 运行时所有权前置
+
+运行时 state 升为 schema 2，固定 11 字段，root/0600/单硬链接/非符号链接，
+逐字核验格式，不 source 或 eval。随机 `padm-tproxy-<12 hex>` 链的全部规则和
+PREROUTING hook 带完整 32 hex token；路由表等于 mark，策略优先级 `30000`，
+rule/route protocol `186`，local route 另绑定 token 派生 realm。
+旧两字段 state、固定链、孤立随机链、同表外来路由、同优先级、mask 重叠或
+反向 fwmark 规则拒绝接管，保留资源及原 state。
+
+新增 JSON 内核审计，复用 net 镜像已有 Python 3，不新增宿主工具。
+启动逐条失败短路，hook 最后挂入；INT/TERM 由 EXIT 统一精确回滚。
+撤销前核对全部现存资源，只接受可证明归属的子集，逐条 `iptables -D/-X`、
+精确 `ip rule del` 和 `ip route del`，不使用 chain/table flush。
+清理失败保留 state；路由或规则删除失败可重试。
+`-N` 到首个 marker、最后 `-D` 到 `-X` 的 SIGKILL 空链窗口无法跨进程证明归属，
+会保守拒绝自动清理，必须在原生主机上人工核对，不能仅删 state 强制重试。
+
+候选预检只读挂载当前 `data/net/transparent` 到独立 owner 路径，核对旧资源
+后检查新参数冲突，不把旧 state 复制到候选。未配置 TProxy 不挂 owner；
+部署校验使用当前 state。spec/deployment 的 `firewall_rules=["padm-tproxy"]`
+保持逻辑合同兼容，随机内核资源只存 runtime state。
+
+新增 `docker-tproxy-ownership`，并入普通完整合同；`docker-tproxy-focused`
+并行运行 ownership 和 phase4。新增显式 `docker-tproxy-real` 复用离线 net 镜像
+及隔离 daemon，实际入口只读挂载本次源码快照，摘要核验一致，不执行镜像旧源码，
+不挂宿主 Socket。覆盖真实启动/健康/重配预检/TERM、外来资源保留、
+同表漂移拒绝、旧 state 拒绝及缺 TCP 规则的健康失败与精确撤销。
+
+本项仅为资源安全前置，不增加 TProxy 菜单或升级功能状态。
+真实客户端透明流量、宿主 systemd/重启/卸载、原生 arm64 和生产防火墙矩阵
+尚未验收，5C 与总目标继续 active。
+
+本地验收（2026-10-10，Linux amd64）：
+
+| 检查 | 结果 / 秒 | 证据目录 |
+| --- | --- | --- |
+| `docker-tproxy-ownership`，Jobs 2 | 18.060 / 入口 18.965 | `.tmp-regression-docker-f31d7b6534f643e79e6f9a0c432b733b` |
+| `docker-tproxy-real`，Jobs 2 | 8.594 / 入口 9.518 | `.tmp-regression-docker-75dc87c8c91c453a8ce7153539f75fa1` |
+| `docker-tproxy-focused`，Jobs 2 | 2/2，33.615 / 入口 34.604 | `.tmp-regression-docker-0459cf67c97a41f5a9995c16d9aa08af` |
+| `docker-contracts`，Jobs 6 | 34/34，263.263 / 入口 264.122 | `.tmp-regression-docker-0463ad7eeaca40b48b06bfa471e4b0a2` |
+| `regression-dispatcher-contract`，Jobs 2 | 0.455 / 入口 1.443 | `.tmp-regression-docker-7f0d0d8737cb40efb9b69942e1aa17c8` |
+
+复用既有原生架构工具及 net 镜像，不扩大三槽预算，不重建依赖镜像。
+完整合同快照先于最后 5 行规则顺序约束及对应测试，之后只对这个新分支补验
+ownership 与真实内核；不把不同输入摘要声称相同，也不重复执行已通过的其它模块。
+最终 6 个 Shell 的 Linux sh/Bash 语法、ShellCheck error、PowerShell AST 与
+diff 检查通过。独立复审的掩码、反向规则及顺序问题均已补最小拒绝断言。
+dispatcher 初次暴露既有长任务调度顺序与预期夹具不一致，已修预期并复验。
+失败的 mock 输出及错误 PID 注入、真实夹具 cp/tmpfs 的日志保留；
+正常/失败回归的源码归档和清单清理，日志/result/共享缓存保留。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

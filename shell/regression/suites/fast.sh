@@ -89,6 +89,7 @@ listRegressionDockerContractsChildSelectors() {
         docker-accounts \
         docker-permissions \
         docker-wireguard-runtime \
+        docker-tproxy-ownership \
         docker-control-api \
         docker-subscriptions \
         docker-accounts-cli \
@@ -120,6 +121,7 @@ listRegressionDockerContractsFastChildSelectors() {
         docker-accounts \
         docker-control-cli \
         docker-wireguard-runtime \
+        docker-tproxy-ownership \
         docker-control-api \
         docker-permissions \
         docker-accounts-cli \
@@ -294,6 +296,14 @@ runDockerWireGuardRuntimeRegression() {
     bash "${PROJECT_ROOT}/docker/tests/wireguard-runtime.sh"
 }
 
+runDockerTProxyOwnershipRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/tproxy-ownership.sh"
+}
+
+runDockerTProxyRealRegression() {
+    PADM_NET_REAL_CASE=tproxy bash "${PROJECT_ROOT}/docker/tests/fail2ban-isolated-real.sh"
+}
+
 registerRegressionFunctionLeaf install-module-manifest runInstallModuleManifestCompleteRegression
 registerRegressionFunctionLeaf fast-only-safety runRegressionFastOnlySafety
 registerRegressionFunctionLeaf fast-only-output-auto-install runRegressionFastOnlyOutputAutoInstall
@@ -370,6 +380,14 @@ registerRegressionFunctionLeaf docker-control-client runDockerControlClientRegre
 registerRegressionFunctionLeaf docker-control-two-node-real runDockerControlTwoNodeRealRegression
 registerRegressionFunctionLeaf docker-control-two-deployment-real runDockerControlTwoDeploymentRealRegression
 registerRegressionFunctionLeaf docker-wireguard-runtime runDockerWireGuardRuntimeRegression
+registerRegressionFunctionLeaf docker-tproxy-ownership runDockerTProxyOwnershipRegression
+registerRegressionFunctionLeaf docker-tproxy-real runDockerTProxyRealRegression
+
+listRegressionDockerTProxyChildSelectors() {
+    printf '%s\n' docker-tproxy-ownership docker-phase4
+}
+registerRegressionParallelSelectorList docker-tproxy-focused runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-tproxy-focused-${BASHPID:-$$}" listRegressionDockerTProxyChildSelectors 2
 
 listRegressionDockerWireGuardChildSelectors() {
     printf '%s\n' docker-wireguard-runtime docker-phase4

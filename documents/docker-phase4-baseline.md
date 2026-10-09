@@ -25,9 +25,11 @@ capability。阶段 4 改动未单独提交，等待用户确认提交点。
   覆盖和 `/dev/net/tun`；`net-tun-check` 只在候选校验时运行。入口检查设备、
   临时 TUN 创建能力和 nftables。
 - TProxy 由 host-network 核心 inbound 加 `net-transparent` 防火墙 helper
-  组成；规则只属于 `padm-tproxy`，使用固定 mark、路由表和 IPv4 PREROUTING
-  链，退出或启动失败会撤销 rule/route/chain。前置检查转发、TPROXY target、
-  mark 冲突和链所有权。
+  组成；运行态使用 schema 2 私密 state、随机 `padm-tproxy-*` 链及完整 token
+  注释。mark 对应独占路由表，策略规则与路由记录 protocol，路由另记录 realm；
+  逐条核对身份后精确撤销，不 flush。候选只读挂载当前 owner，验证旧资源
+  及新参数冲突；旧两字段 state、固定链、未知随机链和外来漂移拒绝接管。
+  空链崩溃窗口需人工核对归属，不能凭 state 或同名链自动删除。
 - 配置候选、`config/net`、deployment、Compose、端口预检、宿主输入和启动
   失败均沿用现有备份/恢复事务；deployment 记录 integration settings 和
   WireGuard/TProxy listener（TCP/UDP）。

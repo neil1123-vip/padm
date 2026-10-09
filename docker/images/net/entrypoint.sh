@@ -235,11 +235,6 @@ fail2ban_preflight() {
     fail2ban-client -t >/dev/null 2>&1 || die "Fail2ban configuration is invalid"
 }
 
-mark_rule_present() {
-    mark_hex=$(printf '%x' "$1")
-    ip rule show | grep -Eq "fwmark[[:space:]]+(0x)?$mark_hex(/|[[:space:]])"
-}
-
 fail2ban_cleanup() {
     old_ifs=$IFS
     IFS=,
@@ -301,72 +296,273 @@ tun_preflight() {
     trap - INT TERM
 }
 
+tproxy_state_text() {
+    printf 'schema_version=2\ntoken=%s\nchain=%s\nport=%s\nmark=%s\ntable=%s\npref=30000\nroute_proto=186\nrule_proto=186\nrealm=%s\nphase=%s\n' \
+        "$tp_token" "$tp_chain" "$tp_port" "$tp_mark" "$tp_mark" "$tp_realm" "$tp_phase"
+}
+
+tproxy_state_read() {
+    tp_root=${1:-$STATE_ROOT}
+    wireguard_state_directory "$tp_root" &&
+        wireguard_private_file "$tp_root/tproxy.state" &&
+        [ "$(stat -c '%h' "$tp_root/tproxy.state")" -eq 1 ] &&
+        [ "$(stat -c '%s' "$tp_root/tproxy.state")" -le 512 ] || return 1
+    tp_token=$(sed -n 's/^token=//p' "$tp_root/tproxy.state")
+    tp_chain=$(sed -n 's/^chain=//p' "$tp_root/tproxy.state")
+    tp_port=$(sed -n 's/^port=//p' "$tp_root/tproxy.state")
+    tp_mark=$(sed -n 's/^mark=//p' "$tp_root/tproxy.state")
+    tp_realm=$(sed -n 's/^realm=//p' "$tp_root/tproxy.state")
+    tp_phase=$(sed -n 's/^phase=//p' "$tp_root/tproxy.state")
+    printf '%s\n' "$tp_token" | grep -Eq '^[a-f0-9]{32}$' || return 1
+    tp_expected_realm=$((0x$(printf '%s' "$tp_token" | cut -c29-32)))
+    [ "$tp_expected_realm" -ne 0 ] || tp_expected_realm=1
+    case "$tp_mark" in 0*|253|254|255) return 1 ;; esac
+    [ "$tp_chain" = "padm-tproxy-$(printf '%s' "$tp_token" | cut -c1-12)" ] &&
+        integer "$tp_port" && [ "$tp_port" -ge 1 ] && [ "$tp_port" -le 65535 ] &&
+        integer "$tp_mark" && [ "$tp_mark" -ge 1 ] && [ "$tp_mark" -le 2147483647 ] &&
+        integer "$tp_realm" && [ "$tp_realm" -ge 1 ] && [ "$tp_realm" -le 65535 ] &&
+        [ "$tp_realm" = "$tp_expected_realm" ] &&
+        { [ "$tp_phase" = intent ] || [ "$tp_phase" = active ]; } || return 1
+    # 原始字节与固定格式比较，拒绝重复字段、额外内容和 NUL，绝不执行 state。
+    tproxy_state_text | cmp -s - "$tp_root/tproxy.state"
+}
+
+tproxy_state_write() (
+    umask 077
+    tp_stage=$(mktemp "$STATE_ROOT/.tproxy-state.XXXXXX") || return 1
+    trap 'rm -f "$tp_stage"' EXIT
+    tproxy_state_text >"$tp_stage" && chmod 0600 "$tp_stage" &&
+        mv -f "$tp_stage" "$STATE_ROOT/tproxy.state"
+)
+
+tproxy_audit() {
+    python3 - "$tp_token" "$tp_chain" "$tp_port" "$tp_mark" "$tp_realm" \
+        "${1:-partial}" "${tp_created:-}" "${2:-$tp_mark}" <<'PY'
+import json
+import shlex
+import subprocess
+import sys
+
+token, chain, port, mark, realm, mode, created, target_mark = sys.argv[1:]
+port, mark, realm, target_mark = int(port), int(mark), int(realm), int(target_mark)
+comment = "padm-tproxy:" + token
+
+def command(args, empty_table=False):
+    result = subprocess.run(args, text=True, capture_output=True)
+    if result.returncode:
+        if not (empty_table and result.returncode == 2 and result.stdout.strip() == "[]"
+                and result.stderr == "Error: ipv4: FIB table does not exist.\nDump terminated\n"):
+            raise ValueError("cannot inspect kernel resources")
+    return result.stdout
+
+def number(value):
+    return int(value, 0) if isinstance(value, str) and value.startswith("0x") else int(value)
+
+rules = json.loads(command(["ip", "-j", "-N", "-4", "rule", "show"]))
+routes = json.loads(command(["ip", "-j", "-N", "-4", "route", "show", "table", str(mark)], True))
+if target_mark != mark:
+    if json.loads(command(["ip", "-j", "-N", "-4", "route", "show", "table", str(target_mark)], True)):
+        raise ValueError("requested route table is already in use")
+rule_present = False
+for rule in rules:
+    selected = number(rule.get("priority", -1)) == 30000 or number(rule.get("table", -1)) in {mark, target_mark}
+    if "fwmark" in rule:
+        mask = number(rule.get("fwmask", 0xffffffff))
+        selected |= (mark & mask) == (number(rule["fwmark"]) & mask)
+        selected |= (target_mark & mask) == (number(rule["fwmark"]) & mask)
+        selected |= "not" in rule
+    if not selected:
+        continue
+    expected = (set(rule) <= {"priority", "src", "fwmark", "fwmask", "table", "protocol"}
+                and number(rule.get("priority", -1)) == 30000 and rule.get("src") == "all"
+                and number(rule.get("fwmark", -1)) == mark
+                and number(rule.get("fwmask", 0xffffffff)) == 0xffffffff
+                and number(rule.get("table", -1)) == mark
+                and number(rule.get("protocol", -1)) == 186)
+    if mode == "empty" or rule_present or not expected:
+        raise ValueError("foreign policy rule")
+    rule_present = True
+route_present = False
+for route in routes:
+    expected = (set(route) <= {"type", "dst", "dev", "protocol", "scope", "flags", "flow"}
+                and number(route.get("type", -1)) == 2 and route.get("dst") == "default"
+                and route.get("dev") == "lo" and number(route.get("protocol", -1)) == 186
+                and number(route.get("scope", -1)) == 254 and route.get("flags", []) == []
+                and set(route.get("flow", {})) == {"to"} and number(route["flow"]["to"]) == realm)
+    if mode == "empty" or route_present or not expected:
+        raise ValueError("foreign route")
+    route_present = True
+
+dump = command(["iptables", "-w", "-t", "mangle", "-S"])
+present = [False] * 4
+chain_present = False
+chain_order = []
+for line in dump.splitlines():
+    args = shlex.split(line)
+    if len(args) == 2 and args[0] == "-N" and (
+            args[1] == "padm-tproxy" or
+            (args[1].startswith("padm-tproxy-") and args[1] != chain)):
+        raise ValueError("unverified TProxy chain")
+    if args == ["-N", chain]:
+        chain_present = True
+        continue
+    if not args or args[0] != "-A":
+        continue
+    own_chain = args[1] == chain
+    own_target = "-j" in args and args[args.index("-j") + 1] == chain
+    own_comment = "--comment" in args and args[args.index("--comment") + 1] == comment
+    if not (own_chain or own_target or own_comment):
+        continue
+    if mode == "empty" or not own_comment:
+        raise ValueError("foreign chain reference")
+    values, modules = {}, []
+    index = 2
+    while index < len(args):
+        key, value = args[index:index + 2]
+        if key == "-m":
+            modules.append(value)
+        elif key in values:
+            raise ValueError("duplicate rule option")
+        else:
+            values[key] = value
+        index += 2
+    base = {"--comment": comment}
+    which = None
+    if args[1] == "PREROUTING" and values == dict(base, **{"-j": chain}) and modules == ["comment"]:
+        which = 0
+    elif own_chain and values == dict(base, **{"--dst-type": "LOCAL", "-j": "RETURN"}) and sorted(modules) == ["addrtype", "comment"]:
+        which = 1
+    elif own_chain and values.get("-p") in {"tcp", "udp"} and sorted(modules) == ["comment"]:
+        protocol = values["-p"]
+        expected = dict(base, **{"-p": protocol, "-j": "TPROXY", "--on-port": str(port),
+                                "--on-ip": "0.0.0.0", "--tproxy-mark": f"0x{mark:x}/0xffffffff"})
+        if values == expected:
+            which = 2 if protocol == "tcp" else 3
+    if which is None or present[which]:
+        raise ValueError("changed or duplicate chain rule")
+    if own_chain:
+        chain_order.append(which)
+    present[which] = True
+if chain_order != sorted(chain_order):
+    raise ValueError("changed chain rule order")
+if mode == "empty":
+    if chain_present:
+        raise ValueError("chain already exists")
+elif chain_present and not any(present[1:]) and created != token:
+    raise ValueError("empty chain has no verifiable owner")
+elif not chain_present and any(present):
+    raise ValueError("missing referenced chain")
+if mode == "full" and not (chain_present and all(present) and route_present and rule_present):
+    raise ValueError("incomplete TProxy resources")
+print(" ".join(str(int(value)) for value in [*present, chain_present, rule_present, route_present]))
+PY
+}
+
 tproxy_preflight() {
-    port=$1
-    mark=$2
+    (
+    requested_port=$1
+    requested_mark=$2
     ownership=${3:-unowned}
-    integer "$port" && [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || die "invalid TProxy port"
-    integer "$mark" && [ "$mark" -ge 1 ] || die "invalid TProxy mark"
+    ownership_root=${4:-$STATE_ROOT}
+    integer "$requested_port" && [ "$requested_port" -ge 1 ] && [ "$requested_port" -le 65535 ] || die "invalid TProxy port"
+    integer "$requested_mark" && [ "$requested_mark" -ge 1 ] &&
+        [ "$requested_mark" -le 2147483647 ] || die "invalid TProxy mark"
+    case "$requested_mark" in 0*|253|254|255) die "reserved or noncanonical TProxy route table" ;; esac
     need ip
     need iptables
+    need python3
     [ "$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null || true)" = 1 ] || die "IPv4 forwarding is disabled"
     iptables -w -t mangle -n -L >/dev/null 2>&1 || die "mangle table is unavailable"
     iptables -w -j TPROXY -h >/dev/null 2>&1 || die "TPROXY target is unavailable"
-    if iptables -w -t mangle -n -L padm-tproxy >/dev/null 2>&1; then
-        [ "$ownership" = owned ] || die "padm-tproxy chain is already present"
+    if [ -e "$ownership_root/tproxy.state" ] || [ -L "$ownership_root/tproxy.state" ]; then
+        [ "$ownership" = owned ] && tproxy_state_read "$ownership_root" &&
+            tproxy_audit partial "$requested_mark" >/dev/null || die "TProxy ownership is unverified; refusing migration"
+        # 旧资源要先由运行入口撤销；候选预检不修改它们。
+    else
+        tp_token=00000000000000000000000000000000
+        tp_chain=padm-tproxy-000000000000
+        tp_port=$requested_port tp_mark=$requested_mark tp_realm=1
+        tproxy_audit empty >/dev/null || die "TProxy resources are already in use"
     fi
-    if mark_rule_present "$mark"; then
-        [ "$ownership" = owned ] || die "TProxy mark is already in use"
-    fi
+    )
 }
 
-tproxy_cleanup() {
-    mark=$2
-    while iptables -w -t mangle -C PREROUTING -j padm-tproxy >/dev/null 2>&1; do
-        iptables -w -t mangle -D PREROUTING -j padm-tproxy >/dev/null 2>&1 || break
-    done
-    iptables -w -t mangle -F padm-tproxy >/dev/null 2>&1 || true
-    iptables -w -t mangle -X padm-tproxy >/dev/null 2>&1 || true
-    ip rule del fwmark "$mark/0xffffffff" lookup "$mark" >/dev/null 2>&1 || true
-    ip route flush table "$mark" >/dev/null 2>&1 || true
-    rm -f "$STATE_ROOT/tproxy.state"
-}
+tproxy_cleanup() (
+    tp_expected_token=${1:-}
+    tproxy_state_read "$STATE_ROOT" || return 1
+    [ -z "$tp_expected_token" ] || [ "$tp_expected_token" = "$tp_token" ] || {
+        echo "padm-net: TProxy owner was replaced; keeping resources and recovery state" >&2
+        return 1
+    }
+    tp_presence=$(tproxy_audit partial) || {
+        echo "padm-net: TProxy ownership changed; keeping resources and recovery state" >&2
+        return 1
+    }
+    set -- $tp_presence
+    tp_comment=padm-tproxy:$tp_token
+    [ "$1" = 0 ] || iptables -w -t mangle -D PREROUTING -m comment --comment "$tp_comment" -j "$tp_chain" || return 1
+    [ "$2" = 0 ] || iptables -w -t mangle -D "$tp_chain" -m addrtype --dst-type LOCAL -m comment --comment "$tp_comment" -j RETURN || return 1
+    [ "$3" = 0 ] || iptables -w -t mangle -D "$tp_chain" -p tcp -m comment --comment "$tp_comment" -j TPROXY --on-port "$tp_port" --tproxy-mark "$tp_mark/0xffffffff" || return 1
+    [ "$4" = 0 ] || iptables -w -t mangle -D "$tp_chain" -p udp -m comment --comment "$tp_comment" -j TPROXY --on-port "$tp_port" --tproxy-mark "$tp_mark/0xffffffff" || return 1
+    [ "$5" = 0 ] || iptables -w -t mangle -X "$tp_chain" || return 1
+    [ "$6" = 0 ] || ip -4 rule del pref 30000 fwmark "$tp_mark/0xffffffff" lookup "$tp_mark" protocol 186 || return 1
+    [ "$7" = 0 ] || ip -4 route del local 0.0.0.0/0 dev lo table "$tp_mark" proto 186 realm "$tp_realm" || return 1
+    # 最后再次确认资源已不存在，失败时保留可重试的原始 state。
+    tproxy_audit empty >/dev/null && rm -f "$STATE_ROOT/tproxy.state"
+)
 
 tproxy_run() {
-    port=$1
-    mark=$2
+    requested_port=$1
+    requested_mark=$2
     ownership=unowned
-    [ -f "$STATE_ROOT/tproxy.state" ] && ownership=owned
-    tproxy_preflight "$port" "$mark" "$ownership"
-    if [ -f "$STATE_ROOT/tproxy.state" ]; then
-        old_port=$(sed -n 's/^port=//p' "$STATE_ROOT/tproxy.state")
-        old_mark=$(sed -n 's/^mark=//p' "$STATE_ROOT/tproxy.state")
-        [ -n "$old_port" ] && [ -n "$old_mark" ] && tproxy_cleanup "$old_port" "$old_mark"
+    [ ! -e "$STATE_ROOT/tproxy.state" ] && [ ! -L "$STATE_ROOT/tproxy.state" ] || ownership=owned
+    tproxy_preflight "$requested_port" "$requested_mark" "$ownership"
+    wireguard_state_directory "$STATE_ROOT" || die "TProxy state directory is unsafe"
+    if [ "$ownership" = owned ]; then
+        tproxy_cleanup || die "TProxy previous state could not be revoked"
     fi
-    printf 'port=%s\nmark=%s\n' "$port" "$mark" >"$STATE_ROOT/tproxy.state"
-    if ! {
-        ip route add local 0.0.0.0/0 dev lo table "$mark"
-        ip rule add fwmark "$mark/0xffffffff" lookup "$mark"
-        iptables -w -t mangle -N padm-tproxy
-        iptables -w -t mangle -A padm-tproxy -m addrtype --dst-type LOCAL -j RETURN
-        iptables -w -t mangle -A padm-tproxy -p tcp -j TPROXY --on-port "$port" --tproxy-mark "$mark/0xffffffff"
-        iptables -w -t mangle -A padm-tproxy -p udp -j TPROXY --on-port "$port" --tproxy-mark "$mark/0xffffffff"
-        iptables -w -t mangle -I PREROUTING 1 -j padm-tproxy
-    }; then
-        tproxy_cleanup "$port" "$mark"
-        die "TProxy firewall rules failed to start"
-    fi
-    trap 'tproxy_cleanup "$port" "$mark"' INT TERM EXIT
+    tp_port=$requested_port tp_mark=$requested_mark
+    tp_token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+    [ "${#tp_token}" -eq 32 ] || die "TProxy random source failed"
+    tp_chain=padm-tproxy-$(printf '%s' "$tp_token" | cut -c1-12)
+    tp_realm=$((0x$(printf '%s' "$tp_token" | cut -c29-32)))
+    [ "$tp_realm" -ne 0 ] || tp_realm=1
+    tp_phase=intent tp_created='' start_signal=0
+    tp_comment=padm-tproxy:$tp_token
+    tproxy_audit empty >/dev/null || die "TProxy resources changed before start"
+    trap 'tp_status=$?; trap - EXIT; if [ -e "$STATE_ROOT/tproxy.state" ] || [ -L "$STATE_ROOT/tproxy.state" ]; then tproxy_cleanup "${tp_token:-}" || tp_status=1; fi; exit "$tp_status"' EXIT
+    trap 'start_signal=130' INT
+    trap 'start_signal=143' TERM
+    tproxy_state_write || die "cannot persist TProxy ownership"
+    [ "$start_signal" -eq 0 ] || exit "$start_signal"
+    ip -4 route add local 0.0.0.0/0 dev lo table "$tp_mark" proto 186 realm "$tp_realm" || die "TProxy route failed to start"
+    [ "$start_signal" -eq 0 ] || exit "$start_signal"
+    ip -4 rule add pref 30000 fwmark "$tp_mark/0xffffffff" lookup "$tp_mark" protocol 186 || die "TProxy rule failed to start"
+    [ "$start_signal" -eq 0 ] || exit "$start_signal"
+    iptables -w -t mangle -N "$tp_chain" || die "TProxy chain failed to start"
+    tp_created=$tp_token
+    [ "$start_signal" -eq 0 ] || exit "$start_signal"
+    iptables -w -t mangle -A "$tp_chain" -m addrtype --dst-type LOCAL -m comment --comment "$tp_comment" -j RETURN || die "TProxy local rule failed to start"
+    [ "$start_signal" -eq 0 ] || exit "$start_signal"
+    iptables -w -t mangle -A "$tp_chain" -p tcp -m comment --comment "$tp_comment" -j TPROXY --on-port "$tp_port" --tproxy-mark "$tp_mark/0xffffffff" || die "TProxy TCP rule failed to start"
+    [ "$start_signal" -eq 0 ] || exit "$start_signal"
+    iptables -w -t mangle -A "$tp_chain" -p udp -m comment --comment "$tp_comment" -j TPROXY --on-port "$tp_port" --tproxy-mark "$tp_mark/0xffffffff" || die "TProxy UDP rule failed to start"
+    [ "$start_signal" -eq 0 ] || exit "$start_signal"
+    iptables -w -t mangle -I PREROUTING 1 -m comment --comment "$tp_comment" -j "$tp_chain" || die "TProxy hook failed to start"
+    tproxy_audit full >/dev/null || die "TProxy ownership failed after start"
+    tp_created=''
+    tp_phase=active
+    tproxy_state_write || die "cannot commit TProxy ownership"
+    [ "$start_signal" -eq 0 ] || exit "$start_signal"
     wait_forever
 }
 
-tproxy_health() {
-    port=$1
-    mark=$2
-    integer "$port" && integer "$mark" || exit 1
-    iptables -w -t mangle -n -L padm-tproxy >/dev/null 2>&1 || exit 1
-    mark_rule_present "$mark"
-}
+tproxy_health() (
+    requested_port=$1 requested_mark=$2
+    tproxy_state_read "$STATE_ROOT" &&
+        [ "$requested_port" = "$tp_port" ] && [ "$requested_mark" = "$tp_mark" ] &&
+        [ "$tp_phase" = active ] && tproxy_audit full >/dev/null
+)
 
 case "${1:-idle}" in
 idle)

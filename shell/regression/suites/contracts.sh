@@ -264,7 +264,7 @@ runRegressionDockerContractsAggregateContract() (
         docker-menu docker-reality-target-library docker-control-state docker-phase4 docker-control-client
         docker-phase1 docker-phase5 docker-control-cli docker-control-sync docker-release docker-geo-data docker-traffic
         docker-http-relay docker-entry-port-alias
-        docker-accounts docker-permissions docker-wireguard-runtime docker-control-api docker-subscriptions
+        docker-accounts docker-permissions docker-wireguard-runtime docker-tproxy-ownership docker-control-api docker-subscriptions
         docker-accounts-cli docker-business docker-phase2
     )
 
