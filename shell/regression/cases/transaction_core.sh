@@ -3977,6 +3977,196 @@ runSingBoxUninstallFailurePropagationRegression() (
         [[ "${actions}" == $'registration\ncleanup\n' ]]
     )
 
+    (
+        # 中断恢复先停止新服务；不可恢复的核心清理中断只保留备份。
+        local signalName signalCase signalPhase signalDelivered signalRoot expectedRc resultRc
+        local signalShard signalMerged signalUnit signalBinary signalCalls signalErrors signalBackup
+        local signalWasRunning signalRelease
+        eval "$(declare -f removeManagedFileIfPresent | sed '1s/^removeManagedFileIfPresent/originalUninstallSignalRemove/')"
+        eval "$(declare -f checkLogBackupCreate | sed '1s/^checkLogBackupCreate/originalUninstallSignalBackup/')"
+        eval "$(declare -f checkLogBackupRestore | sed '1s/^checkLogBackupRestore/originalUninstallSignalRestore/')"
+        uninstallSignalAt() {
+            if [[ "${signalPhase}" == "$1" && "${signalDelivered}" == false ]]; then
+                signalDelivered=true
+                kill "-${signalName}" "${BASHPID}"
+            fi
+            return 0
+        }
+        checkLogBackupCreate() {
+            originalUninstallSignalBackup "$@" || return 1
+            printf '%s\n' "${!1}" >"${signalRoot}/backup-path"
+        }
+        checkLogBackupRestore() {
+            printf 'restore\n' >>"${signalCalls}"
+            originalUninstallSignalRestore "$@" || return 1
+            uninstallSignalAt ordinary
+        }
+        removeManagedFileIfPresent() {
+            originalUninstallSignalRemove "$@" || return 1
+            case "$1" in
+            "${signalShard}") uninstallSignalAt shard ;;
+            "${signalMerged}") uninstallSignalAt merged ;;
+            "${signalUnit}") uninstallSignalAt registration ;;
+            esac
+            return 0
+        }
+        singBoxMergedConfigFile() { printf '%s\n' "${signalMerged}"; }
+        singBoxRunning() { [[ "$(<"${signalRoot}/running")" == true ]]; }
+        coreStartupServiceEnabled() { [[ "$(<"${signalRoot}/enabled")" == true ]]; }
+        readPortHopping() { tuicPortHoppingStart=; tuicPortHoppingEnd=; }
+        readInstallType() {
+            singBoxConfigPath=
+            if [[ -f "${signalShard}" || -f "${signalRoot}/conf/config/02_other_inbounds.json" ]]; then
+                singBoxConfigPath="${signalRoot}/conf/config/"
+            fi
+            uninstallSignalAt read
+        }
+        runCoreServiceActionAllowFailure() {
+            case "$2" in
+            stop)
+                printf 'stop\n' >>"${signalCalls}"
+                [[ "${signalCase}" != stop-fail || "${signalDelivered}" == false ]] || return 1
+                printf false >"${signalRoot}/running"
+                uninstallSignalAt stop
+                ;;
+            start)
+                if [[ -f "${signalShard}" ]]; then
+                    printf 'start:old\n' >>"${signalCalls}"
+                else
+                    printf 'start:new\n' >>"${signalCalls}"
+                fi
+                printf true >"${signalRoot}/running"
+                uninstallSignalAt start
+                ;;
+            esac
+            return 0
+        }
+        singBoxMergeConfigForValidation() {
+            printf '{"generation":"new"}\n' >"${signalMerged}"
+            uninstallSignalAt validate
+            [[ "${signalCase}" != ordinary ]]
+        }
+        systemctl() {
+            printf 'systemctl:%s\n' "$*" >>"${signalCalls}"
+            case "$1" in
+            disable) printf false >"${signalRoot}/enabled" ;;
+            enable) printf true >"${signalRoot}/enabled" ;;
+            esac
+            return 0
+        }
+        rc-update() {
+            printf 'rc-update:%s\n' "$*" >>"${signalCalls}"
+            case "$1" in
+            del) printf false >"${signalRoot}/enabled" ;;
+            add) printf true >"${signalRoot}/enabled" ;;
+            esac
+            return 0
+        }
+        cleanCoreInstallDirectory() {
+            rm -f "${signalBinary}" || return 1
+            uninstallSignalAt cleanup
+        }
+        denyPort() { return 0; }
+        refreshManagedProtocolSubscriptions() { uninstallSignalAt refresh; }
+        errorCard() { printf '%s\n' "$*" >>"${signalErrors}"; }
+        statusCard() { return 0; }
+        successCard() { return 0; }
+        for signalName in INT TERM; do
+            expectedRc=130
+            [[ "${signalName}" != TERM ]] || expectedRc=143
+            for signalCase in stop shard merged read validate start registration cleanup refresh stop-fail stopped alpine ordinary; do
+                case "${signalCase}" in
+                stop-fail|stopped|alpine|ordinary) [[ "${signalName}" == TERM ]] || continue ;;
+                esac
+                signalPhase=${signalCase} signalWasRunning=true signalRelease=debian
+                case "${signalCase}" in
+                stop-fail) signalPhase=start ;;
+                stopped) signalPhase=read; signalWasRunning=false ;;
+                alpine) signalPhase=registration; signalRelease=alpine ;;
+                esac
+                signalDelivered=false
+                signalRoot="${root}/signal-${signalName}-${signalCase}"
+                signalShard="${signalRoot}/conf/config/09_tuic_inbounds.json"
+                signalMerged="${signalRoot}/conf/config.json"
+                signalUnit="${signalRoot}/sing-box.service"
+                signalBinary="${signalRoot}/sing-box"
+                signalCalls="${signalRoot}/calls.log" signalErrors="${signalRoot}/errors.log"
+                mkdir -p "${signalRoot}/conf/config" "${signalRoot}/tmp" || return 1
+                printf '{"inbounds":[{"type":"tuic","listen_port":26451}]}\n' >"${signalShard}"
+                printf '{"generation":"old"}\n' >"${signalMerged}"
+                printf old-unit >"${signalUnit}"
+                printf '#!/bin/sh\nexit 0\n' >"${signalBinary}"
+                chmod +x "${signalBinary}" || return 1
+                printf '%s' "${signalWasRunning}" >"${signalRoot}/running"
+                printf true >"${signalRoot}/enabled"
+                : >"${signalCalls}"
+                : >"${signalErrors}"
+                case "${signalPhase}" in
+                registration|cleanup) ;;
+                *) printf '{"inbounds":[{"type":"vless","listen_port":2443}]}\n' >"${signalRoot}/conf/config/02_other_inbounds.json" ;;
+                esac
+                (
+                    local release=${signalRelease} PADM_TMP_DIR="${signalRoot}/tmp"
+                    local PADM_SINGBOX_BINARY="${signalBinary}"
+                    local PADM_SINGBOX_SYSTEMD_SERVICE_FILE="${signalUnit}"
+                    local PADM_SINGBOX_OPENRC_SERVICE_FILE="${signalUnit}"
+                    local singBoxConfigPath="${signalRoot}/conf/config/" normalStatus
+                    if unInstallSingBox tuic; then normalStatus=0; else normalStatus=$?; fi
+                    if [[ "${signalCase}" == ordinary ]]; then
+                        printf '%s\n' "${normalStatus}" >"${signalRoot}/normal-status"
+                        kill "-${signalName}" "${BASHPID}"
+                    fi
+                    exit "${normalStatus}"
+                ) >/dev/null 2>&1 && resultRc=0 || resultRc=$?
+                [[ "${resultRc}" == "${expectedRc}" ]] || return 1
+                signalBackup=$(<"${signalRoot}/backup-path")
+                if [[ "${signalPhase}" == cleanup ]]; then
+                    [[ ! -e "${signalShard}" && ! -e "${signalMerged}" && ! -e "${signalUnit}" &&
+                        ! -e "${signalBinary}" && -d "${signalBackup}" ]] || return 1
+                    [[ "$(<"${signalRoot}/running")" == false && "$(<"${signalRoot}/enabled")" == false ]] || return 1
+                    ! grep -Eq '^(restore|start:)' "${signalCalls}" || return 1
+                    jq -e '.inbounds[0].type == "tuic"' "${signalBackup}/000000.json" >/dev/null || return 1
+                elif [[ "${signalCase}" == stop-fail ]]; then
+                    [[ ! -e "${signalShard}" && -d "${signalBackup}" &&
+                        "$(<"${signalRoot}/running")" == true ]] || return 1
+                    jq -e '.generation == "new"' "${signalMerged}" >/dev/null || return 1
+                    ! grep -Eq '^(restore|start:old)$' "${signalCalls}" || return 1
+                    grep -q '中断后服务停止失败' "${signalErrors}" || return 1
+                    jq -e '.inbounds[0].type == "tuic"' "${signalBackup}/000000.json" >/dev/null || return 1
+                elif [[ "${signalPhase}" == refresh ]]; then
+                    [[ ! -e "${signalShard}" && ! -e "${signalBackup}" &&
+                        "$(<"${signalRoot}/running")" == true ]] || return 1
+                    jq -e '.generation == "new"' "${signalMerged}" >/dev/null || return 1
+                    [[ "$(<"${signalCalls}")" == $'stop\nstart:new' ]] || return 1
+                else
+                    jq -e '.inbounds[0].type == "tuic"' "${signalShard}" >/dev/null || return 1
+                    jq -e '.generation == "old"' "${signalMerged}" >/dev/null || return 1
+                    [[ "$(<"${signalUnit}")" == old-unit && ! -e "${signalBackup}" &&
+                        "$(<"${signalRoot}/running")" == "${signalWasRunning}" &&
+                        "$(<"${signalRoot}/enabled")" == true ]] || return 1
+                    [[ "$(grep -c '^restore$' "${signalCalls}")" == 1 ]] || return 1
+                    if [[ "${signalWasRunning}" == true ]]; then
+                        grep -qx start:old "${signalCalls}" || return 1
+                    else
+                        ! grep -q '^start:' "${signalCalls}" || return 1
+                    fi
+                    if [[ "${signalPhase}" == start ]]; then
+                        [[ "$(<"${signalCalls}")" == $'stop\nstart:new\nstop\nrestore\nstart:old' ]] || return 1
+                    elif [[ "${signalPhase}" == registration ]]; then
+                        if [[ "${signalRelease}" == alpine ]]; then
+                            grep -qx 'rc-update:add sing-box default' "${signalCalls}" || return 1
+                        else
+                            grep -qx 'systemctl:enable sing-box.service' "${signalCalls}" || return 1
+                        fi
+                    elif [[ "${signalCase}" == ordinary ]]; then
+                        [[ "$(<"${signalRoot}/normal-status")" == 1 &&
+                            "$(<"${signalCalls}")" == $'stop\nrestore\nstart:old' ]] || return 1
+                    fi
+                fi
+            done
+        done
+    ) || return 1
+
     singBoxConfigPath="${configDir}"
     readInstallType() { singBoxConfigPath="${configDir}"; }
     readPortHopping() {

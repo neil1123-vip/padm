@@ -567,6 +567,9 @@ cleanCoreInstallDirectory() {
 }
 
 singBoxProtocolUninstallRollback() {
+    if declare -p PADM_SINGBOX_UNINSTALL_ROLLBACK >/dev/null 2>&1; then
+        PADM_SINGBOX_UNINSTALL_ROLLBACK[active]=false
+    fi
     local backupDir=$1
     local serviceWasRunning=$2
     local serviceWasEnabled=$3
@@ -601,6 +604,19 @@ singBoxProtocolUninstallRollback() {
         errorCard "${reason}，已恢复旧配置和服务状态"
     fi
     return 1
+}
+
+singBoxProtocolUninstallRollbackOnExit() {
+    [[ "${PADM_SINGBOX_UNINSTALL_ROLLBACK[active]:-false}" == true ]] || return 0
+    PADM_SINGBOX_UNINSTALL_ROLLBACK[active]=false
+    if ! runCoreServiceActionAllowFailure handleSingBox stop; then
+        padmForgetCleanupPath "${PADM_SINGBOX_UNINSTALL_ROLLBACK[backup]}"
+        errorCard "sing-box 卸载中断后服务停止失败，请检查备份目录: ${PADM_SINGBOX_UNINSTALL_ROLLBACK[backup]}"
+        return 1
+    fi
+    singBoxProtocolUninstallRollback "${PADM_SINGBOX_UNINSTALL_ROLLBACK[backup]}" \
+        "${PADM_SINGBOX_UNINSTALL_ROLLBACK[wasRunning]}" "${PADM_SINGBOX_UNINSTALL_ROLLBACK[wasEnabled]}" \
+        "${PADM_SINGBOX_UNINSTALL_ROLLBACK[restoreRegistration]}" "sing-box 卸载中断"
 }
 
 singBoxRemoveServiceRegistration() {
@@ -687,44 +703,56 @@ unInstallSingBox() {
         errorCard "sing-box 卸载备份失败，已取消卸载"
         return 1
     }
+    local -A PADM_SINGBOX_UNINSTALL_ROLLBACK=(
+        [active]=true [backup]="${uninstallBackupDir}" [wasRunning]="${serviceWasRunning}"
+        [wasEnabled]="${serviceWasEnabled}" [restoreRegistration]=false
+    )
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
+    padmRegisterExitRollback singBoxProtocolUninstallRollbackOnExit
     if [[ "${serviceWasRunning}" == "true" ]] && ! runCoreServiceActionAllowFailure handleSingBox stop; then
+        PADM_SINGBOX_UNINSTALL_ROLLBACK[active]=false
         padmRemoveCleanupPath "${uninstallBackupDir}"
         errorCard "sing-box 服务停止失败，已取消卸载"
         return 1
     fi
     if ! removeManagedFileIfPresent "${protocolFile}"; then
-        singBoxProtocolUninstallRollback "${uninstallBackupDir}" "${serviceWasRunning}" "${serviceWasEnabled}" false "sing-box ${type} 配置删除失败"
+        padmRunRollback singBoxProtocolUninstallRollback "${uninstallBackupDir}" "${serviceWasRunning}" "${serviceWasEnabled}" false "sing-box ${type} 配置删除失败"
         return 1
     fi
     if ! removeManagedFileIfPresent "${mergedFile}"; then
-        singBoxProtocolUninstallRollback "${uninstallBackupDir}" "${serviceWasRunning}" "${serviceWasEnabled}" false "sing-box 主配置删除失败"
+        padmRunRollback singBoxProtocolUninstallRollback "${uninstallBackupDir}" "${serviceWasRunning}" "${serviceWasEnabled}" false "sing-box 主配置删除失败"
         return 1
     fi
 
     readInstallType || {
-        singBoxProtocolUninstallRollback "${uninstallBackupDir}" "${serviceWasRunning}" "${serviceWasEnabled}" false "sing-box 配置状态刷新失败"
+        padmRunRollback singBoxProtocolUninstallRollback "${uninstallBackupDir}" "${serviceWasRunning}" "${serviceWasEnabled}" false "sing-box 配置状态刷新失败"
         return 1
     }
     if [[ -n "${singBoxConfigPath}" ]]; then
         if coreExecutableFile "$(coreSingBoxBinaryPath)"; then
             validationLog=$(padmTmpFilePath padm-sing-box-uninstall.log)
             if ! singBoxMergeConfigForValidation "$(coreSingBoxBinaryPath)" "${validationLog}" check; then
-                singBoxProtocolUninstallRollback "${uninstallBackupDir}" "${serviceWasRunning}" "${serviceWasEnabled}" false "sing-box 配置校验失败"
+                padmRunRollback singBoxProtocolUninstallRollback "${uninstallBackupDir}" "${serviceWasRunning}" "${serviceWasEnabled}" false "sing-box 配置校验失败"
                 return 1
             fi
         fi
         if [[ "${serviceWasRunning}" == "true" ]] && ! runCoreServiceActionAllowFailure handleSingBox start; then
-            singBoxProtocolUninstallRollback "${uninstallBackupDir}" true "${serviceWasEnabled}" false "sing-box 服务重启失败"
+            padmRunRollback singBoxProtocolUninstallRollback "${uninstallBackupDir}" true "${serviceWasEnabled}" false "sing-box 服务重启失败"
             return 1
         fi
+        PADM_SINGBOX_UNINSTALL_ROLLBACK[active]=false
         statusCard "保留配置" "检测到有其他配置，保留 sing-box 核心"
     else
+        PADM_SINGBOX_UNINSTALL_ROLLBACK[restoreRegistration]=true
         if ! singBoxRemoveServiceRegistration; then
-            singBoxProtocolUninstallRollback "${uninstallBackupDir}" "${serviceWasRunning}" "${serviceWasEnabled}" true "sing-box 开机自启清理失败"
+            padmRunRollback singBoxProtocolUninstallRollback "${uninstallBackupDir}" "${serviceWasRunning}" "${serviceWasEnabled}" true "sing-box 开机自启清理失败"
             return 1
         fi
+        # 核心清理不可回滚，中断或失败时仍需留下备份供手动检查。
+        padmForgetCleanupPath "${uninstallBackupDir}"
+        PADM_SINGBOX_UNINSTALL_ROLLBACK[active]=false
         if ! cleanCoreInstallDirectory /etc/padm/sing-box "sing-box"; then
-            padmForgetCleanupPath "${uninstallBackupDir}"
             errorCard "sing-box 核心清理失败，请检查备份目录: ${uninstallBackupDir}"
             cleanupStatus=1
         fi
