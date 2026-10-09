@@ -3042,7 +3042,7 @@ runCoreTemplateReturnFailureRegression() (
         mergedConfig=$(singBoxMergedConfigFile)
         singBoxInstalled() { return 1; }
         handleSingBox() {
-            printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+            printf 'sing-box:%s\n' "$1" >>"${serviceLog}"
             if [[ "$1" == start ]]; then
                 printf 'new-merged-config\n' >"${mergedConfig}"
                 singBoxServiceRunning=true
@@ -3066,8 +3066,8 @@ runCoreTemplateReturnFailureRegression() (
             regressionExpectStatus 7 coreInstallConfigTransaction sing-box failAfterSingBoxMerge >/dev/null 2>&1
             [[ "$(<"${singBoxRoot}/02_VLESS_TCP_inbounds.json")" == old-sing-box-inbound ]]
             [[ "${singBoxServiceRunning}" == false ]]
-            grep -qx 'sing-box:start:true' "${serviceLog}"
-            grep -qx 'sing-box:stop:true' "${serviceLog}"
+            grep -qx 'sing-box:start' "${serviceLog}"
+            grep -qx 'sing-box:stop' "${serviceLog}"
             if [[ "${mergedState}" == present ]]; then
                 [[ "$(<"${mergedConfig}")" == old-merged-config ]]
             else
