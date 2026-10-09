@@ -417,8 +417,8 @@ showSubscriptionJsonWithSummary() {
 showSubscriptionLocalSyncPlan() {
     local plan
     local summary
-    readInstallType
-    readInstallProtocolType
+    readInstallType || return 1
+    readInstallProtocolType || return 1
     plan=$(subscriptionSyncPlan) || {
         errorCard "本机同步计划生成失败"
         return 1

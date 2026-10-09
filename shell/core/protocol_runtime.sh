@@ -397,6 +397,14 @@ addPortHopping() {
         break
     done
     protocolPortHoppingRangeStatusCard "${portHoppingRange}"
+    # 运行态为空时先回收旧归属和开放范围，避免旧状态遮住新规则。
+    while padmFirewalldForwardStateKeyForTarget "${targetPort}" >/dev/null 2>&1 ||
+        padmIptablesForwardStateKeyForTarget "${type}" "${targetPort}" >/dev/null 2>&1; do
+        if ! deletePortHoppingRules "${type}" "" "" "${targetPort}"; then
+            protocolPortHoppingStatusCard "旧端口跳跃规则清理失败，已取消添加端口跳跃"
+            return 1
+        fi
+    done
     if [[ "${rhelLike:-}" == "true" ]] && systemctl is-active --quiet firewalld; then
                 local existingForwardPorts
                 if ! existingForwardPorts=$(sudo firewall-cmd --zone=public --permanent --list-forward-ports); then
@@ -610,13 +618,16 @@ readPortHopping() {
                 start = range[1] + 0
                 end = range[count] + 0
                 if (start < 1 || end > 65535 || start > end) next
-                sawRule = 1
-                if (stateStart != "" && (start != stateStart || end != stateEnd)) next
+                if (stateStart != "" && (start != stateStart || end != stateEnd)) { bad = 1; next }
+                if (found && (start != firstStart || end != firstEnd)) { bad = 1; next }
                 found = 1
-                print start ":" end
-                exit
+                firstStart = start
+                firstEnd = end
             }
-            END { if (sawRule && !found) exit 1 }
+            END {
+                if (bad) exit 1
+                if (found) print firstStart ":" firstEnd
+            }
             ' <<<"${iptablesRules}") || return 1
             portHoppingStart=${portHopping%%:*}
             portHoppingEnd=${portHopping#*:}
@@ -667,15 +678,11 @@ deletePortHoppingRules() {
         selectedBackend=iptables
     fi
     if [[ "${selectedBackend}" == "firewalld" ]]; then
-        if removeFirewalldForwardPortRange "${start}" "${end}" "${targetPort}" "${ownership}"; then
-            padmFirewallStateRemove "${forwardStateKey}" || status=1
-        else
+        if ! removeFirewalldForwardPortRange "${start}" "${end}" "${targetPort}" "${ownership}"; then
             status=1
         fi
     else
         if ! removeIptablesPortHoppingRules "${type}" "${start}" "${end}" "${targetPort}"; then
-            status=1
-        elif ! padmFirewallStateRemove "${forwardStateKey}"; then
             status=1
         fi
     fi
@@ -684,7 +691,7 @@ deletePortHoppingRules() {
     fi
     if [[ "${status}" == "0" && "${rhelLike:-}" == "true" ]] && padmFirewallStateHas masquerade:firewalld; then
         local remainingForwardPorts
-        if ! remainingForwardPorts=$(sudo firewall-cmd --zone=public --permanent --list-forward-ports); then
+        if ! remainingForwardPorts=$(padmFirewalldPermanentCommand --list-forward-ports); then
             status=1
         elif [[ -z "${remainingForwardPorts//[[:space:]]/}" ]]; then
             if removeFirewalldMasqueradeRule; then
@@ -693,6 +700,9 @@ deletePortHoppingRules() {
                 status=1
             fi
         fi
+    fi
+    if [[ "${status}" == "0" ]] && ! padmFirewallStateRemove "${forwardStateKey}"; then
+        status=1
     fi
     return "${status}"
 }

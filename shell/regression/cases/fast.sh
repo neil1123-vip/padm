@@ -1704,6 +1704,7 @@ EOF
     cat >"${natStateFile}" <<'EOF'
 -A PREROUTING -p udp -m udp --dport 33000:33002 -m comment --comment neil1123-vip_hysteria2_portHopping -j DNAT --to-destination :16295
 EOF
+    local denyCallsBeforeDelete=${denyCalls}
     iptablesDeleteShouldFail=true
     set +e
     deletePortHoppingRules hysteria2 33000 33002 16295 >/dev/null 2>&1
@@ -1712,7 +1713,7 @@ EOF
     iptablesDeleteShouldFail=false
     [[ "${rc}" == "1" ]]
     grep -q 'neil1123-vip_hysteria2_portHopping' "${natStateFile}"
-    [[ "${denyCalls}" == "1" ]]
+    [[ "${denyCalls}" == "${denyCallsBeforeDelete}" ]]
     cleanupPadmFirewallRules
     ! grep -q 'neil1123-vip_hysteria2_portHopping' "${natStateFile}"
     [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
@@ -1856,6 +1857,16 @@ EOF
         stateBefore=$(<"${PADM_FIREWALL_STATE_FILE}")
         readPortHopping hysteria2 16295
         [[ "${hysteria2PortHopping}" == 33000-33002 ]]
+        savedRules+=$'\n'"${savedRules}"
+        readPortHopping hysteria2 16295
+        [[ "${hysteria2PortHopping}" == 33000-33002 ]]
+        savedRules+=$'\n''-A PREROUTING -p udp --dport 34000:34002 -m comment --comment neil1123-vip_hysteria2_portHopping -j DNAT --to-destination :16295'
+        regressionExpectStatus 1 readPortHopping hysteria2 16295
+        [[ -z "${hysteria2PortHopping}" && "$(<"${PADM_FIREWALL_STATE_FILE}")" == "${stateBefore}" ]]
+        rm -f "${PADM_FIREWALL_STATE_FILE}"
+        regressionExpectStatus 1 readPortHopping hysteria2 16295
+        [[ -z "${hysteria2PortHopping}" ]]
+        printf '%s\n' "${stateBefore}" >"${PADM_FIREWALL_STATE_FILE}"
         savedRules=
         readPortHopping hysteria2 16295
         [[ -z "${hysteria2PortHopping}" && "$(<"${PADM_FIREWALL_STATE_FILE}")" == "${stateBefore}" ]]
@@ -1892,6 +1903,49 @@ EOF
         firewalldActive=false
         readPortHopping hysteria2 16295
         [[ -z "${hysteria2PortHopping}" && "$(<"${PADM_FIREWALL_STATE_FILE}")" == "${stateBefore}" ]]
+    )
+
+    (
+        # 旧规则消失后，重新添加先回收所有旧范围；清理失败保留归属供重试。
+        local PADM_FIREWALL_STATE_FILE="${TMP_DIR}/port-hopping-readd-firewall.state"
+        local natStateFile="${TMP_DIR}/port-hopping-readd-nat.state"
+        local cleanupLog="${TMP_DIR}/port-hopping-readd-cleanup.log"
+        local denyStatus=1 addCalls=0
+        local oldKey='forward:iptables:hysteria2:33000:33002:16295'
+        local secondKey='forward:iptables:hysteria2:33500:33502:16295'
+        printf '%s\n' "${oldKey}" "${secondKey}" >"${PADM_FIREWALL_STATE_FILE}"
+        : >"${natStateFile}"
+        : >"${cleanupLog}"
+        iptables-save() { cat "${natStateFile}"; }
+        iptables() {
+            [[ "$1 $2 $3 $4" == '-t nat -A PREROUTING' ]] || return 99
+            addCalls=$((addCalls + 1))
+            printf -- '-A PREROUTING -p udp --dport %s -m comment --comment %s -j DNAT --to-destination %s\n' \
+                "${8}" "${12}" "${16}" >>"${natStateFile}"
+        }
+        autoRead() { printf -v "$3" '%s' '34000-34002'; }
+        allowPort() { return 0; }
+        denyPort() {
+            printf '%s:%s\n' "$1" "${2:-tcp}" >>"${cleanupLog}"
+            return "${denyStatus}"
+        }
+        readPortHopping hysteria2 16295
+        [[ -z "${hysteria2PortHopping}" ]]
+        regressionExpectStatus 1 addPortHopping hysteria2 16295
+        [[ "${addCalls}" == 0 && ! -s "${natStateFile}" ]]
+        padmFirewallStateHas "${oldKey}"
+        padmFirewallStateHas "${secondKey}"
+        grep -q '旧端口跳跃规则清理失败，已取消添加端口跳跃' "${warnLog}"
+        denyStatus=0
+        addPortHopping hysteria2 16295
+        [[ "${addCalls}" == 1 ]]
+        ! padmFirewallStateHas "${oldKey}"
+        ! padmFirewallStateHas "${secondKey}"
+        padmFirewallStateHas 'forward:iptables:hysteria2:34000:34002:16295'
+        grep -qx '33000:33002:udp' "${cleanupLog}"
+        grep -qx '33500:33502:udp' "${cleanupLog}"
+        readPortHopping hysteria2 16295
+        [[ "${hysteria2PortHopping}" == 34000-34002 ]]
     )
 
     (
@@ -1944,6 +1998,7 @@ EOF
         local masquerade=false
         local firewalldActive=true
         local removeFailurePort=
+        local removeMasqueradeFailure=false
         local rc
         local port spec
         local -A forwardPorts=()
@@ -1962,6 +2017,7 @@ EOF
         }
         sudo() { "$@"; }
         firewall-cmd() {
+            [[ "${firewalldActive}" == true ]] || return 1
             local originalArgs=" $* "
             local -a filteredArgs=()
             local arg
@@ -1990,6 +2046,7 @@ EOF
                 printf 'masquerade:add\n' >>"${firewalldLog}"
                 ;;
             --remove-masquerade)
+                [[ "${removeMasqueradeFailure}" != true ]] || return 1
                 masquerade=false
                 printf 'masquerade:remove\n' >>"${firewalldLog}"
                 ;;
@@ -2009,6 +2066,7 @@ EOF
         }
         firewall-offline-cmd() {
             printf 'offline:%s\n' "$*" >>"${firewalldLog}"
+            local firewalldActive=true
             firewall-cmd "$@"
         }
         allowPort() { padmFirewallStateAdd 'port:firewalld:udp:33000:33002'; }
@@ -2027,6 +2085,17 @@ EOF
         [[ "${masquerade}" == "false" ]]
         [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
 
+        inputCount=1
+        addPortHopping hysteria2 16295
+        removeMasqueradeFailure=true
+        regressionExpectStatus 1 deletePortHoppingRules hysteria2 33000 33002 16295
+        [[ "${#forwardPorts[@]}" == 0 && "${masquerade}" == true ]]
+        padmFirewallStateHas 'forward:firewalld:udp:33000:33002:16295:owned=33000,33001,33002'
+        padmFirewallStateHas masquerade:firewalld
+        removeMasqueradeFailure=false
+        deletePortHoppingRules hysteria2 "" "" 16295
+        [[ "${masquerade}" == false && ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
+
         forwardPorts[33002]=1
         masquerade=true
         inputCount=1
@@ -2044,6 +2113,7 @@ EOF
         firewalldActive=false
         deletePortHoppingRules hysteria2 33000 33002 16295
         [[ "${#forwardPorts[@]}" == "0" ]]
+        [[ "${masquerade}" == false ]]
         grep -q '^offline:' "${firewalldLog}"
         [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
         firewalldActive=true

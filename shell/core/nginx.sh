@@ -964,10 +964,10 @@ ensureTraditionalTlsFallbackNginxConfig() {
         return 1
     }
     if [[ -z "${coreInstallType:-}" ]]; then
-        readInstallType
+        readInstallType || return 1
     fi
     if [[ -z "${currentInstallProtocolType:-}" ]]; then
-        readInstallProtocolType
+        readInstallProtocolType || return 1
     fi
     if [[ -z "${currentHost:-}" || -z "${currentPath:-}" ]]; then
         readConfigHostPathUUID || return 1

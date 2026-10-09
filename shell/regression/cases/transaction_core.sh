@@ -3700,6 +3700,28 @@ runSingBoxUninstallFailurePropagationRegression() (
     denyStatus=0 refreshStatus=0
 
     (
+        # firewalld 停用时运行态为空，协议卸载仍逐条回收永久规则归属。
+        local PADM_FIREWALL_STATE_FILE="${root}/inactive-firewalld.state"
+        printf '%s\n' 'forward:firewalld:udp:33000:33005:26451:owned=33000,33001,33002,33003,33004,33005' \
+            'forward:firewalld:udp:34000:34002:26451:owned=34000,34001,34002' \
+            >"${PADM_FIREWALL_STATE_FILE}"
+        printf '{"inbounds":[{"type":"tuic","listen_port":26451}]}\n' >"${configDir}09_tuic_inbounds.json"
+        printf '{"inbounds":[{"type":"tuic","listen_port":26451}]}\n' >"${mergedConfig}"
+        : >"${firewallLog}"
+        readPortHopping() { tuicPortHoppingStart=; tuicPortHoppingEnd=; }
+        deletePortHoppingRules() {
+            local key
+            key=$(padmFirewalldForwardStateKeyForTarget "$4") || return 1
+            printf 'hopping:%s:%s:%s:%s\n' "$1" "$2" "$3" "$4" >>"${firewallLog}"
+            padmFirewallStateRemove "${key}"
+        }
+        unInstallSingBox tuic
+        [[ "$(grep -cx 'hopping:tuic:::26451' "${firewallLog}")" == 2 ]]
+        [[ ! -e "${configDir}09_tuic_inbounds.json" ]]
+        [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
+    )
+
+    (
         # Hy2 卸载只移除自己的受管 UDP 别名，Xray 失败仍保留已卸载状态。
         local aliasRoot="${root}/hy2-aliases" coreInstallType=1
         local configPath="${aliasRoot}/xray/" singBoxConfigPath="${aliasRoot}/sing-box/"

@@ -1469,9 +1469,8 @@ subscriptionControlTrafficResponseUnlocked() {
         jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"流量请求体格式不正确"}}'
         return 1
     fi
-    readInstallType
-    readInstallProtocolType
-    if ! ensureSubscriptionGroupsState || ! ensureTrafficStatsConfig; then
+    if ! readInstallType || ! readInstallProtocolType ||
+        ! ensureSubscriptionGroupsState || ! ensureTrafficStatsConfig; then
         jq -n '{ok:false, error:"traffic_failed", error_detail:{type:"traffic_failed", message:"流量统计配置不可用"}}'
         return 1
     fi

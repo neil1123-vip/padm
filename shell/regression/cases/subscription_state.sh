@@ -82,7 +82,8 @@ runReadInstallProtocolTypeScanFailureRegression() (
     local root="${TMP_DIR}/protocol-state-scan-failure"
     local configPath="${root}/conf/" singBoxConfigPath= coreInstallType=1
     local pipefailMode failure outputStarted="${root}/output-started"
-    local actions="${root}/actions" syncFailureStatus syncFailureDetails
+    local actions="${root}/actions" response="${root}/control-response.json"
+    local syncFailureStatus syncFailureDetails
     mkdir -p "${configPath}" || return 1
     printf '%s\n' '{"inbounds":[{"port":443}]}' >"${configPath}02_VLESS_TCP_inbounds.json"
     printf '%s\n' '{"inbounds":[{"port":31306}]}' >"${configPath}11_VMess_HTTPUpgrade_inbounds.json"
@@ -104,6 +105,12 @@ runReadInstallProtocolTypeScanFailureRegression() (
     subscriptionSyncMarkResult() { syncFailureStatus=$1; syncFailureDetails=$2; }
     ensureTrafficStatsConfig() { printf 'stats-config\n' >>"${actions}"; return 1; }
     initSubscribeLocalConfig() { printf 'started\n' >"${outputStarted}"; }
+    installSubscribe() { printf 'install-subscribe\n' >>"${actions}"; return 1; }
+    generateSubscribeOutputsUnlocked() { printf 'generate-subscribe\n' >>"${actions}"; return 1; }
+    runSubscriptionGroupSync() { printf 'subscription-sync\n' >>"${actions}"; return 1; }
+    subscriptionGroupsWithLock() { "$@"; }
+    subscriptionRemoteScopeEnabled() { return 0; }
+    subscriptionHasEnabledRemoteSources() { return 0; }
     for pipefailMode in off on; do
         set +o pipefail
         [[ "${pipefailMode}" != on ]] || set -o pipefail
@@ -120,6 +127,12 @@ runReadInstallProtocolTypeScanFailureRegression() (
             regressionExpectStatus 1 collectSubscriptionTrafficUnlocked || return 1
             [[ ! -e "${actions}" && "${SUBSCRIPTION_TRAFFIC_LOCAL_COMMITTED}" == false &&
                 "${SUBSCRIPTION_TRAFFIC_COMPLETE}" == false ]] || return 1
+            regressionExpectStatus 1 subscriptionControlTrafficResponseUnlocked '{}' >"${response}" || return 1
+            jq -e '.ok == false and .error == "traffic_failed"' "${response}" >/dev/null || return 1
+            regressionExpectStatus 1 subscribeUnlocked false false || return 1
+            regressionExpectStatus 1 refreshPublishedSubscriptions || return 1
+            regressionExpectStatus 1 refreshPublishedSubscriptions '[]' || return 1
+            [[ ! -e "${actions}" && "${PADM_INSTALL_STATUS_READY}" == 0 ]] || return 1
         done
         failure=
         readInstallProtocolType || return 1

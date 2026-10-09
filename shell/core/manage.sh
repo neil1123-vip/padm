@@ -417,8 +417,8 @@ setVlessRealityEncryption() {
 manageVlessEncryptionExperiment() {
     local selectVlessEncryptionMenu confirmVlessEncryption
     while true; do
-        readInstallType
-        readInstallProtocolType
+        readInstallType || return 1
+        readInstallProtocolType || return 1
         echoContent title "\n┌─ VLESS Encryption 实验功能 ─────────────────────────"
         menuLine "最佳性能组合：Reality Vision 使用 VLESS Encryption + XTLS Vision"
         menuLine "CDN 场景：Reality XHTTP 使用 VLESS Encryption + XTLS Vision + XHTTP XMUX"
@@ -739,9 +739,15 @@ unInstallSingBox() {
         cleanupStatus=1
     fi
 
-    if [[ -n "${portHoppingStart}" && -n "${portHoppingEnd}" ]]; then
-        deletePortHoppingRules "${type}" "${portHoppingStart}" "${portHoppingEnd}" "${protocolPort}" || firewallStatus=1
-    fi
+    while [[ -n "${portHoppingStart}" && -n "${portHoppingEnd}" ]] ||
+        padmFirewalldForwardStateKeyForTarget "${protocolPort}" >/dev/null 2>&1 ||
+        padmIptablesForwardStateKeyForTarget "${type}" "${protocolPort}" >/dev/null 2>&1; do
+        if ! deletePortHoppingRules "${type}" "${portHoppingStart}" "${portHoppingEnd}" "${protocolPort}"; then
+            firewallStatus=1
+            break
+        fi
+        portHoppingStart= portHoppingEnd=
+    done
     denyPort "${protocolPort}" || firewallStatus=1
     denyPort "${protocolPort}" udp || firewallStatus=1
     if [[ "${firewallStatus}" != "0" ]]; then
@@ -3014,7 +3020,7 @@ generateSubscribeOutputsUnlocked() {
 }
 
 subscribeUnlocked() {
-    readInstallProtocolType
+    readInstallProtocolType || return 1
     installSubscribe || return 1
     generateSubscribeOutputsUnlocked "$@"
 }
@@ -3025,7 +3031,7 @@ subscribe() {
 
 refreshPublishedSubscriptions() {
     local remoteSnapshots=${1:-}
-    readInstallProtocolType
+    readInstallProtocolType || return 1
     if [[ ( -z "${remoteSnapshots}" || "${remoteSnapshots}" == "null" ) &&
         "${SUBSCRIPTION_GROUPS_LOCK_HELD:-}" != "1" ]] &&
         subscriptionRemoteScopeEnabled &&

@@ -558,7 +558,7 @@ readSingBoxConfig() {
 
 # 显示上次安装配置摘要
 showLastInstallationConfig() {
-    readInstallProtocolType
+    readInstallProtocolType || return 1
     readConfigHostPathUUID || return 1
     readCustomPort
     readNginxSubscribe
@@ -987,7 +987,7 @@ showInstallStatus() {
             fi
         fi
         # 直接调用默认刷新；菜单首帧可传 cached 复用启动阶段的状态快照。
-        [[ "${1:-refresh}" == "cached" ]] || readInstallProtocolType
+        [[ "${1:-refresh}" == "cached" ]] || readInstallProtocolType || return 1
 
         if [[ -n ${currentInstallProtocolType} ]]; then
             echoContent yellow "已安装协议: \c"
