@@ -46,6 +46,10 @@ runRegressionRoutingSuiteRoot() {
 }
 
 registerRegressionFunctionLeaf routing-socks5-udp-associate runSocks5UdpAssociateRegression
+runNativeSocks5SourceRealRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/native-socks5-source-real.sh"
+}
+registerRegressionFunctionLeaf routing-socks5-source-real runNativeSocks5SourceRealRegression
 registerRegressionFunctionLeaf routing-core runRoutingRegression
 registerRegressionFunctionLeaf routing-core-unsafe-config-dir runRoutingCoreRejectsUnsafeConfigDirRegression
 registerRegressionFunctionLeaf routing-access-control-config-transaction runAccessControlConfigTransactionRegression

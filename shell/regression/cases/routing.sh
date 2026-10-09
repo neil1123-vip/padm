@@ -603,6 +603,8 @@ runSocks5InboundMatcherRegression() (
     local configPath= singBoxConfigPath="${root}/" coreInstallType=2
     local domains="geosite:openai,domain:example.com,full:api.example.com,keyword:track"
     local allowAll=n history=n originalSources='["10.0.0.1","10.0.0.2"]'
+    local sourceGuard="${singBoxConfigPath}00_00_socks5_source_route.json"
+    local expectedGuard='{"route":{"rules":[{"type":"logical","mode":"and","rules":[{"inbound":["socks5_inbound"]},{"source_ip_cidr":["10.0.0.1","10.0.0.2"],"invert":true}],"action":"reject"}]}}'
     mkdir -p "${singBoxConfigPath}"
     autoRead() {
         case "$1" in
@@ -626,6 +628,7 @@ runSocks5InboundMatcherRegression() (
         .route.rules[0].rules[1].rules[1].rule_set == ["geosite_openai_socks5_02_inbound_route"] and
         all(.route.rules[0].rules[] | recurse(.rules[]?); has("action") or has("outbound") | not)
     ' "${singBoxConfigPath}socks5_02_inbound_route.json" >/dev/null || return 1
+    jq -e --argjson guard "${expectedGuard}" '. == $guard' "${sourceGuard}" >/dev/null || return 1
     domains=full:new.example.com history=y
     setSocks5InboundRouting addRules || return 1
     jq -e --argjson sources "${originalSources}" '
@@ -634,17 +637,62 @@ runSocks5InboundMatcherRegression() (
         .route.rules[0].rules[1].rules[1].rule_set == ["geosite_openai_socks5_02_inbound_route"] and
         all(.route.rules[0].rules[] | recurse(.rules[]?); has("action") or has("outbound") | not)
     ' "${singBoxConfigPath}socks5_02_inbound_route.json" >/dev/null || return 1
+    jq -e --argjson guard "${expectedGuard}" '. == $guard' "${sourceGuard}" >/dev/null || return 1
+    rm "${sourceGuard}"
     domains=domain:example.com history=n
     setSocks5InboundRouting addRules || return 1
     jq -e --argjson sources "${originalSources}" '
         .route.rules == [{domain_suffix:["example.com"], outbound:"01_direct_outbound",
                           inbound:["socks5_inbound"], source_ip_cidr:$sources}]
     ' "${singBoxConfigPath}socks5_02_inbound_route.json" >/dev/null || return 1
+    jq -e --argjson guard "${expectedGuard}" '. == $guard' "${sourceGuard}" >/dev/null || return 1
     allowAll=y
     setSocks5InboundRouting addRules || return 1
     jq -e --argjson sources "${originalSources}" '
         .route.rules == [{outbound:"01_direct_outbound", inbound:["socks5_inbound"], source_ip_cidr:$sources}]
     ' "${singBoxConfigPath}socks5_02_inbound_route.json" >/dev/null || return 1
+    jq -e --argjson guard "${expectedGuard}" '. == $guard' "${sourceGuard}" >/dev/null || return 1
+    (
+        addSingBoxRouteRule() { return 0; }
+        updateRoutingJsonConfig() { return 0; }
+        writeRoutingJsonConfig() { [[ "$1" != "${sourceGuard}" ]]; }
+        addSingBoxOutbound() { return 99; }
+        regressionExpectStatus 1 setSocks5InboundRouting addRules >/dev/null 2>&1 || return 1
+    ) || return 1
+    local backupDir=
+    socks5RoutingBackupCreate backupDir || return 1
+    updateRoutingJsonConfig "${sourceGuard}" '.route.rules = []' || return 1
+    regressionExpectStatus 1 socks5RoutingRollback "${backupDir}" regression false >/dev/null 2>&1 || return 1
+    jq -e --argjson guard "${expectedGuard}" '. == $guard' "${sourceGuard}" >/dev/null || return 1
+    rm "${sourceGuard}"
+    socks5RoutingBackupCreate backupDir || return 1
+    setSocks5InboundRouting addRules || return 1
+    regressionExpectStatus 1 socks5RoutingRollback "${backupDir}" regression false >/dev/null 2>&1 || return 1
+    [[ ! -e "${sourceGuard}" ]] || return 1
+    setSocks5InboundRouting addRules || return 1
+    (
+        menuReadChoice() { IFS= read -r "$3"; }
+        stopSocks5SingBox() { return 1; }
+        reloadCore() { return 0; }
+        regressionExpectStatus 1 removeSocks5Routing <<< $'2\n4' >/dev/null 2>&1 || return 1
+        jq -e --argjson guard "${expectedGuard}" '. == $guard' "${sourceGuard}" >/dev/null || return 1
+        [[ -f "${singBoxConfigPath}socks5_02_inbound_route.json" ]] || return 1
+    ) || return 1
+    (
+        local uninstallChoice
+        menuReadChoice() { IFS= read -r "$3"; }
+        stopSocks5SingBox() { return 0; }
+        reloadCore() { return 0; }
+        for uninstallChoice in 1 2 3; do
+            setSocks5InboundRouting || return 1
+            removeSocks5Routing <<<"${uninstallChoice}"$'\n4' >/dev/null || return 1
+            if [[ "${uninstallChoice}" == 1 ]]; then
+                jq -e --argjson guard "${expectedGuard}" '. == $guard' "${sourceGuard}" >/dev/null || return 1
+            else
+                [[ ! -e "${sourceGuard}" && ! -e "${singBoxConfigPath}socks5_02_inbound_route.json" ]] || return 1
+            fi
+        done
+    ) || return 1
 )
 
 runAccessControlMatcherRegression() (
@@ -1370,6 +1418,11 @@ YAML
 
     setSocks5InboundRouting
     jq -e '
+      .route.rules == [{type:"logical", mode:"and",
+        rules:[{inbound:["socks5_inbound"]},{source_ip_cidr:["10.0.0.1","10.0.0.2"], invert:true}],
+        action:"reject"}]
+    ' "${singBoxConfigPath}00_00_socks5_source_route.json" >/dev/null
+    jq -e '
       .route.rules[0].inbound == ["socks5_inbound"] and
       (.route.rules[0].source_ip_cidr | sort) == (["10.0.0.1", "10.0.0.2"] | sort) and
       .route.rules[0].outbound == "01_direct_outbound" and
@@ -1388,6 +1441,11 @@ YAML
 
     allowAllMode=false
     setSocks5InboundRouting addRules
+    jq -e '
+      .route.rules == [{type:"logical", mode:"and",
+        rules:[{inbound:["socks5_inbound"]},{source_ip_cidr:["10.0.0.1","10.0.0.2"], invert:true}],
+        action:"reject"}]
+    ' "${singBoxConfigPath}00_00_socks5_source_route.json" >/dev/null
     jq -e '
       .route.rules[0].type == "logical" and .route.rules[0].mode == "and" and
       .route.rules[0].rules[0].inbound == ["socks5_inbound"] and

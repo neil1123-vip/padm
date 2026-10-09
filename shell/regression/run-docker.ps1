@@ -309,7 +309,7 @@ try {
     if ($LASTEXITCODE -ne 0) { $container = $null; throw 'Regression container creation failed.' }
     & $docker cp $snapshot "${container}:/snapshot.tar"
     if ($LASTEXITCODE -ne 0) { throw 'Source snapshot copy failed.' }
-    if ($Selector -in @('docker-routing-socks5-real', 'docker-routing-dns-hosts-real',
+    if ($Selector -in @('routing-socks5-source-real', 'docker-routing-socks5-real', 'docker-routing-dns-hosts-real',
         'docker-routing-direct-block-real', 'docker-routing-block-ips-real', 'docker-routing-block-bt-real',
         'docker-routing-region-real', 'docker-routing-warp-real')) {
         # 仅复制已有本机镜像的程序到隔离回归容器，不安装宿主工具或挂载 Docker Socket。
@@ -320,6 +320,7 @@ try {
             @{ name = 'xray'; reference = 'padm-local/padm-xray:control-4c4b' },
             @{ name = 'sing-box'; reference = 'padm-local/padm-sing-box:tls-3b4' }
         )) {
+            if ($Selector -eq 'routing-socks5-source-real' -and $entry.name -eq 'xray') { continue }
             $info = & $docker image inspect $entry.reference
             if ($LASTEXITCODE -ne 0) { throw "Required routing image is missing: $($entry.reference)" }
             $info = $info | ConvertFrom-Json | Select-Object -First 1

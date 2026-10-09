@@ -266,7 +266,7 @@ socks5RoutingBackupCreate() {
     )
     local -a singBoxFiles=(
         socks5_outbound.json socks5_01_outbound_route.json 20_socks5_inbounds.json
-        socks5_02_inbound_route.json sniff_socks5_inbound.json
+        socks5_02_inbound_route.json 00_00_socks5_source_route.json sniff_socks5_inbound.json
         strategy_ipv4_only_socks5_inbound.json strategy_ipv6_only_socks5_inbound.json
         01_direct_outbound.json IPv4_out.json IPv6_out.json dns.json
         wireguard_endpoints_IPv4_route.json wireguard_endpoints_IPv6_route.json
@@ -375,6 +375,7 @@ removeSocks5Routing() {
             if [[ -n "${singBoxConfigPath}" ]]; then
                 removeSingBoxConfig 20_socks5_inbounds || { socks5RoutingRollback "${backupDir}" "Socks5 入站卸载失败" false; return 1; }
                 removeSingBoxConfig socks5_02_inbound_route || { socks5RoutingRollback "${backupDir}" "Socks5 入站卸载失败" false; return 1; }
+                removeSingBoxConfig 00_00_socks5_source_route || { socks5RoutingRollback "${backupDir}" "Socks5 入站卸载失败" false; return 1; }
                 removeSingBoxConfig sniff_socks5_inbound || { socks5RoutingRollback "${backupDir}" "Socks5 入站卸载失败" false; return 1; }
                 removeSingBoxConfig "strategy_ipv4_only_socks5_inbound" || { socks5RoutingRollback "${backupDir}" "Socks5 入站卸载失败" false; return 1; }
                 removeSingBoxConfig "strategy_ipv6_only_socks5_inbound" || { socks5RoutingRollback "${backupDir}" "Socks5 入站卸载失败" false; return 1; }
@@ -393,6 +394,7 @@ removeSocks5Routing() {
                 removeSingBoxConfig socks5_01_outbound_route || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
                 removeSingBoxConfig 20_socks5_inbounds || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
                 removeSingBoxConfig socks5_02_inbound_route || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
+                removeSingBoxConfig 00_00_socks5_source_route || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
                 removeSingBoxConfig sniff_socks5_inbound || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
                 removeSingBoxConfig "strategy_ipv4_only_socks5_inbound" || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
                 removeSingBoxConfig "strategy_ipv6_only_socks5_inbound" || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
@@ -539,6 +541,15 @@ setSocks5InboundRouting() {
             else . + $sourceMatch end
         )
     ' --argjson sourceIPs "${socks5InboundRoutingIPs}" || return 1
+    # 必须先于全局域名放行拒绝非白名单来源，且只反转来源条件以免影响其他入站。
+    local sourceGuardConfig
+    sourceGuardConfig=$(jq -n --argjson sourceIPs "${socks5InboundRoutingIPs}" '
+        {route:{rules:[{type:"logical", mode:"and", rules:[
+            {inbound:["socks5_inbound"]},
+            {source_ip_cidr:$sourceIPs, invert:true}
+        ], action:"reject"}]}}
+    ') || return 1
+    writeRoutingJsonConfig "${singBoxConfigPath}00_00_socks5_source_route.json" <<<"${sourceGuardConfig}" || return 1
     addSingBoxOutbound "01_direct_outbound" || return 1
 }
 
