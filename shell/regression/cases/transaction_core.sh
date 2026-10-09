@@ -5098,9 +5098,11 @@ runSingBoxProtocolReloadFailureRegression() (
     (
         # 更换监听端口前拒绝遗留跳跃范围；同端口、无范围和首次安装不受影响。
         local PADM_SINGBOX_CONFIG_DIR="${root}/reinstall-hopping"
+        local PADM_FIREWALL_STATE_FILE="${root}/reinstall-hopping.state"
         local AUTO_INSTALL=true AUTO_REUSE_LAST=no AUTO_UUID=11111111-1111-4111-8111-111111111111 AUTO_USER=hopping-user AUTO_PORT=
         local protocolId configFile configBefore hoppingMode readCalls tlsCalls transactions networkCalls errorMessage
         local readType readTarget
+        local otherHoppingType
         local selectCustomInstallType singBoxHysteria2Port= singBoxTuicPort=
         local -A PADM_INSTALL_SINGBOX_PORTS=()
         mkdir -p "${PADM_SINGBOX_CONFIG_DIR}" || return 1
@@ -5130,16 +5132,42 @@ runSingBoxProtocolReloadFailureRegression() (
                     (if $id == "31" then {uuid:$uuid} else {} end)]}]
             }' >"${configFile}" || return 1
             configBefore=$(<"${configFile}")
-            for hoppingMode in range readfail empty sameport; do
+            [[ "${protocolId}" == 3 ]] && otherHoppingType=tuic || otherHoppingType=hysteria2
+            for hoppingMode in range readfail state-firewalld state-iptables bad-state bad-port-state other-state empty sameport; do
                 readCalls=0 tlsCalls=0 transactions=0 networkCalls=0 errorMessage= readType= readTarget=
                 AUTO_PORT=24444
                 [[ "${hoppingMode}" != sameport ]] || AUTO_PORT=18443
-                if [[ "${hoppingMode}" == range || "${hoppingMode}" == readfail ]]; then
+                rm -f "${PADM_FIREWALL_STATE_FILE}"
+                case "${hoppingMode}" in
+                state-firewalld)
+                    printf '%s\n' 'forward:firewalld:udp:33000:33002:18443:owned=33000,33001,33002' >"${PADM_FIREWALL_STATE_FILE}"
+                    ;;
+                state-iptables)
+                    if [[ "${protocolId}" == 3 ]]; then
+                        printf '%s\n' 'forward:iptables:hysteria2:33000:33002:18443' >"${PADM_FIREWALL_STATE_FILE}"
+                    else
+                        printf '%s\n' 'forward:iptables:tuic:33000:33002:18443' >"${PADM_FIREWALL_STATE_FILE}"
+                    fi
+                    ;;
+                bad-state)
+                    printf '%s\n' 'forward:firewalld:udp:33000:33002:18443:owned=33000:invalid' >"${PADM_FIREWALL_STATE_FILE}"
+                    ;;
+                bad-port-state)
+                    printf '%s\n' 'forward:firewalld:udp:33000:33002:65536' >"${PADM_FIREWALL_STATE_FILE}"
+                    ;;
+                other-state)
+                    printf 'forward:iptables:%s:33000:33002:18443\n' "${otherHoppingType}" >"${PADM_FIREWALL_STATE_FILE}"
+                    ;;
+                esac
+                if [[ "${hoppingMode}" == range || "${hoppingMode}" == readfail ||
+                    "${hoppingMode}" == state-* || "${hoppingMode}" == bad-* ]]; then
                     regressionExpectStatus 1 singBoxProtocolInstall "${protocolId}" </dev/null || return 1
                     [[ "${readCalls}${tlsCalls}${transactions}${networkCalls}" == 1000 &&
                         "$(<"${configFile}")" == "${configBefore}" ]] || return 1
-                    if [[ "${hoppingMode}" == range ]]; then
+                    if [[ "${hoppingMode}" == range || "${hoppingMode}" == state-* ]]; then
                         [[ "${errorMessage}" == *请先到端口跳跃管理删除* ]] || return 1
+                    elif [[ "${hoppingMode}" == bad-* ]]; then
+                        [[ "${errorMessage}" == *防火墙状态异常* ]] || return 1
                     else
                         [[ "${errorMessage}" == *旧端口跳跃规则读取失败* ]] || return 1
                     fi
@@ -5163,6 +5191,7 @@ runSingBoxProtocolReloadFailureRegression() (
                     [[ "${protocolId}:${readType}" == 3:hysteria2 || "${protocolId}:${readType}" == 31:tuic ]] || return 1
                 fi
             done
+            rm -f "${PADM_FIREWALL_STATE_FILE}"
             rm -f "${configFile}"
             hoppingMode=readfail AUTO_PORT=24444 readCalls=0 tlsCalls=0 transactions=0 networkCalls=0
             singBoxProtocolInstall "${protocolId}" </dev/null || return 1
