@@ -840,6 +840,12 @@ runProtocolEntryConfigUpdateRegression() (
         grep -qx '当前模式：brutal' "${modeLog}"
         grep -qx '当前模式：bbr' "${modeLog}"
         [[ "${commits}" == 7 ]]
+        command jq '.inbounds[0] += {ignore_client_bandwidth:true,up_mbps:100,down_mbps:50}' "${fixtureConfig}" >"${root}/hysteria-bandwidth.json"
+        mv "${root}/hysteria-bandwidth.json" "${fixtureConfig}"
+        : >"${modeLog}"
+        manageHysteria2Bandwidth <<<3
+        grep -qx '当前模式：brutal' "${modeLog}"
+        [[ "$(grep -cx '当前模式：brutal' "${modeLog}")" == 1 && "${commits}" == 7 ]]
         for value in malformed empty missing; do
             printf '{' >"${fixtureConfig}"
             [[ "${value}" != empty ]] || : >"${fixtureConfig}"
@@ -1028,6 +1034,12 @@ runProtocolEntryConfigUpdateRegression() (
         grep -qx '连接参数：auth_timeout=300ms；heartbeat=15s' "${summaryLog}"
         grep -qx '0-RTT：true（默认关闭，开启会增加重放风险）' "${summaryLog}"
         [[ "$(grep -cx '用户数量：2' "${summaryLog}")" == 2 ]]
+        command jq '.inbounds[0] += {up_mbps:100,down_mbps:50}' "${fixtureConfig}" >"${root}/hysteria-bandwidth.json"
+        mv "${root}/hysteria-bandwidth.json" "${fixtureConfig}"
+        : >"${summaryLog}"
+        hysteria2SettingsSummary "${fixtureConfig}"
+        grep -qx '拥塞控制：Brutal（下行 100 Mbps，上行 50 Mbps）' "${summaryLog}"
+        [[ "$(wc -l <"${jqCalls}")" == 4 ]]
         : >"${summaryLog}"
         printf '%s\n' '{"inbounds":[{}]}' >"${fixtureConfig}"
         xhttpSettingsSummary

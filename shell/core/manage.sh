@@ -3918,7 +3918,7 @@ hysteria2SettingsSummary() {
     [[ -f "${configFile}" ]] || return 0
     values=$(jq -er '.inbounds[0] |
         [(.listen_port // ""),
-         (if .ignore_client_bandwidth == true then "BBR（自适应）"
+         (if .ignore_client_bandwidth == true and (.up_mbps // 0) == 0 and (.down_mbps // 0) == 0 then "BBR（自适应）"
           else "Brutal（下行 \(.up_mbps // "") Mbps，上行 \(.down_mbps // "") Mbps）" end),
          (.obfs.type // "关闭"), (.users | length)] | map(tostring) | join("\u001f")
     ' "${configFile}" 2>/dev/null) || { errorCard "读取 Hysteria2 配置失败"; return 1; }
@@ -4017,7 +4017,7 @@ manageHysteria2Bandwidth() {
     local configFile selectMode currentMode
     configFile=$(hysteria2ConfigFile) || return 1
     while true; do
-        currentMode=$(jq -er 'if .inbounds[0].ignore_client_bandwidth == true then "bbr" else "brutal" end' "${configFile}" 2>/dev/null) ||
+        currentMode=$(jq -er '.inbounds[0] | if .ignore_client_bandwidth == true and (.up_mbps // 0) == 0 and (.down_mbps // 0) == 0 then "bbr" else "brutal" end' "${configFile}" 2>/dev/null) ||
             { errorCard "读取 Hysteria2 配置失败"; return 1; }
         echoContent title "\n┌─ Hysteria2 拥塞模式 ───────────────────────────────"
         menuLine "当前模式：${currentMode}"
