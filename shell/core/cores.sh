@@ -1842,14 +1842,17 @@ rollbackDownloadedCoreBinaryInstallOnExit() {
     PADM_CORE_BINARY_INSTALL[active]=false
     local status=0 backup
 
-    # 迁移后校验仍未替换核心，只恢复配置，不触碰运行中的旧核心。
+    # 未替换核心时只恢复配置和原运行态，不触碰运行中的旧文件。
     if [[ "${PADM_CORE_BINARY_INSTALL[prepared]:-true}" != true ]]; then
-        [[ -d "${PADM_CORE_BINARY_INSTALL[migrationBackup]:-}" ]] || return 0
-        singBoxUpgradeMigrationRollback "${PADM_CORE_BINARY_INSTALL[migrationBackup]}"
-        return
-    fi
-    # 新服务含待启动任务必须先停止，之后才允许恢复旧文件。
-    if runCoreServiceActionAllowFailure "${PADM_CORE_BINARY_INSTALL[action]}" stop; then
+        if [[ -d "${PADM_CORE_BINARY_INSTALL[migrationBackup]:-}" ]]; then
+            singBoxUpgradeMigrationRollback "${PADM_CORE_BINARY_INSTALL[migrationBackup]}" || status=1
+        fi
+        if [[ "${status}" == 0 && -n "${PADM_CORE_BINARY_INSTALL[action]:-}" ]]; then
+            checkPortOpenRestoreCoreServiceState "${PADM_CORE_BINARY_INSTALL[wasRunning]}" \
+                "${PADM_CORE_BINARY_INSTALL[running]}" "${PADM_CORE_BINARY_INSTALL[action]}" || status=1
+        fi
+    elif runCoreServiceActionAllowFailure "${PADM_CORE_BINARY_INSTALL[action]}" stop; then
+        # 新服务含待启动任务必须先停止，之后才允许恢复旧文件。
         if [[ -n "${PADM_CORE_BINARY_INSTALL[migrationBackup]:-}" &&
             -d "${PADM_CORE_BINARY_INSTALL[migrationBackup]}" ]]; then
             if ! checkLogBackupRestore "${PADM_CORE_BINARY_INSTALL[migrationBackup]}"; then
@@ -1879,7 +1882,7 @@ rollbackDownloadedCoreBinaryInstallOnExit() {
     else
         status=1
     fi
-    for backup in "${PADM_CORE_BINARY_INSTALL[binaryBackup]}" \
+    for backup in "${PADM_CORE_BINARY_INSTALL[binaryBackup]:-}" \
         "${PADM_CORE_BINARY_INSTALL[cronetBackup]:-}" "${PADM_CORE_BINARY_INSTALL[migrationBackup]:-}" \
         "${PADM_CORE_BINARY_INSTALL[backupRoot]:-}"; do
         [[ -n "${backup}" ]] || continue
@@ -1889,7 +1892,7 @@ rollbackDownloadedCoreBinaryInstallOnExit() {
             padmForgetCleanupPath "${backup}"
         fi
     done
-    [[ "${status}" == 0 ]] || errorCard "${PADM_CORE_BINARY_INSTALL[name]} 安装失败或取消后恢复失败，请手动检查服务和备份: ${PADM_CORE_BINARY_INSTALL[binaryBackup]} ${PADM_CORE_BINARY_INSTALL[cronetBackup]:-} ${PADM_CORE_BINARY_INSTALL[migrationBackup]:-}"
+    [[ "${status}" == 0 ]] || errorCard "${PADM_CORE_BINARY_INSTALL[name]} 安装失败或取消后恢复失败，请手动检查服务和备份: ${PADM_CORE_BINARY_INSTALL[binaryBackup]:-} ${PADM_CORE_BINARY_INSTALL[cronetBackup]:-} ${PADM_CORE_BINARY_INSTALL[migrationBackup]:-}"
     return "${status}"
 }
 
@@ -1956,19 +1959,19 @@ installDownloadedXrayBinary() {
             return 1
         fi
     fi
-    local -A PADM_CORE_BINARY_INSTALL=([active]=true [name]=Xray-core [binary]="${oldBinary}" [binaryBackup]="${backupBinary}" \
+    local -A PADM_CORE_BINARY_INSTALL=([active]=true [prepared]=false [name]=Xray-core [binary]="${oldBinary}" [binaryBackup]="${backupBinary}" \
         [action]=handleXray [running]=xrayRunning [wasRunning]=false)
     local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
     local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
     if xrayRunning; then PADM_CORE_BINARY_INSTALL[wasRunning]=true; fi
     padmRegisterExitRollback rollbackDownloadedCoreBinaryInstallOnExit
     if ! runCoreServiceActionAllowFailure handleXray stop; then
-        PADM_CORE_BINARY_INSTALL[active]=false
+        padmRunRollback rollbackDownloadedCoreBinaryInstallOnExit || true
         padmRemoveCleanupPath "${tmpDir}"
-        [[ -n "${backupBinary}" ]] && padmRemoveCleanupPath "${backupBinary}" || true
         statusCard "Xray-core 更新失败" "Xray 服务停止失败，已取消替换" "排查日志: ${logFile}"
         return 1
     fi
+    PADM_CORE_BINARY_INSTALL[prepared]=true
     if ! commitStagedCoreInstallFile "${newBinary}" "${oldBinary}" 755; then
         padmRunRollback rollbackDownloadedCoreBinaryInstallOnExit || true
         padmRemoveCleanupPath "${tmpDir}"
@@ -2098,16 +2101,13 @@ installDownloadedSingBoxBinary() {
     PADM_CORE_BINARY_INSTALL[running]=singBoxRunning
     PADM_CORE_BINARY_INSTALL[wasRunning]=false
     if singBoxRunning; then PADM_CORE_BINARY_INSTALL[wasRunning]=true; fi
-    PADM_CORE_BINARY_INSTALL[prepared]=true
     if ! runCoreServiceActionAllowFailure handleSingBox stop; then
-        PADM_CORE_BINARY_INSTALL[prepared]=false
         padmRunRollback rollbackDownloadedCoreBinaryInstallOnExit || true
         padmRemoveCleanupPath "${tmpDir}"
-        [[ -n "${backupBinary}" ]] && padmRemoveCleanupPath "${backupBinary}" || true
-        [[ -n "${cronetBackup}" ]] && padmRemoveCleanupPath "${cronetBackup}" || true
         statusCard "sing-box 更新失败" "sing-box 服务停止失败，已取消替换" "排查日志: ${logFile}"
         return 1
     fi
+    PADM_CORE_BINARY_INSTALL[prepared]=true
     if ! commitStagedCoreInstallFile "${newBinary}" "${oldBinary}" 755 ||
         ! commitStagedCoreInstallFile "${extractedDir}/libcronet.so" "${cronetPath}" 644; then
         padmRunRollback rollbackDownloadedCoreBinaryInstallOnExit || true

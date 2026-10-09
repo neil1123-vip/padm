@@ -1120,7 +1120,7 @@ runCoreUpgradePendingStartRollbackRegression() (
     )
 
     (
-        local wasRunning recovery caseRoot
+        local wasRunning recovery caseRoot failure
         local serviceRunning serviceLog originalBinary candidateDir
         eval "$(declare -f restoreManagedFileFromBackup | sed '1s/^restoreManagedFileFromBackup/realPendingRestoreManagedFileFromBackup/')"
         restoreManagedFileFromBackup() {
@@ -1133,7 +1133,9 @@ runCoreUpgradePendingStartRollbackRegression() (
         handlePendingService() {
             printf '%s\n' "$1" >>"${serviceLog}"
             if [[ "$1" == stop ]]; then
+                [[ "${failure}" != stop-running ]] || return 1
                 serviceRunning=false
+                [[ "${failure}" != stop-stopped ]] || return 1
             else
                 [[ "${recovery}" != service-fail ]] || return 1
                 serviceRunning=true
@@ -1141,12 +1143,15 @@ runCoreUpgradePendingStartRollbackRegression() (
         }
         handleXray() { handlePendingService "$@"; }
         handleSingBox() { handlePendingService "$@"; }
-        # 普通提交失败应恢复原运行状态，任何恢复失败都必须保留旧文件备份。
+        # stop 部分失败和提交失败都应恢复原运行态，恢复失败必须保留备份。
         for core in xray sing-box; do
+            for failure in commit stop-running stop-stopped; do
             for wasRunning in false true; do
                 for recovery in success file-fail service-fail; do
                     [[ "${wasRunning}" != false || "${recovery}" != service-fail ]] || continue
-                    caseRoot="${root}/${core}-${wasRunning}-${recovery}"
+                    [[ "${failure}" == commit || "${recovery}" != file-fail ]] || continue
+                    [[ "${failure}" != stop-running || "${recovery}" != service-fail ]] || continue
+                    caseRoot="${root}/${core}-${failure}-${wasRunning}-${recovery}"
                     PADM_XRAY_BINARY="${caseRoot}/installed/xray"
                     PADM_SINGBOX_BINARY="${caseRoot}/installed/sing-box"
                     candidateDir="${caseRoot}/candidate"
@@ -1191,6 +1196,7 @@ runCoreUpgradePendingStartRollbackRegression() (
                             compgen -G "$(coreSingBoxInstallDir)/.libcronet.so.bak.*" >/dev/null
                     fi
                 done
+            done
             done
         done
     )
