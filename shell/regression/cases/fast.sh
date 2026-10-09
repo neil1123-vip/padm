@@ -5173,17 +5173,35 @@ JSON
         readConfigHostPathUUID
         [[ "${currentPath}" == "padm" ]]
 
+        currentDefaultPort=443
         currentCDNAddress=cdn.example.com
         subscribeSectionTitle() { return 0; }
         subscribeAccountTitle() { return 0; }
         defaultBase64Code() {
-            printf '%s|%s\n' "$1" "$6" >>"${captureLog}"
+            printf '%s|%s|%s\n' "$1" "$2" "$6" >>"${captureLog}"
         }
         showVmessHTTPUpgradeAccounts >/dev/null
         showVmessWsAccounts >/dev/null
 
-        grep -qx 'vmessHTTPUpgrade|/padm' "${captureLog}"
-        grep -qx 'vmessws|/padmvws' "${captureLog}"
+        grep -qx 'vmessHTTPUpgrade|443|/padm' "${captureLog}"
+        grep -qx 'vmessws|443|/padmvws' "${captureLog}"
+
+        singBoxConfigPath="${root}/sing-box/"
+        mkdir -p "${singBoxConfigPath}"
+        printf '%s\n' '{"inbounds":[{"users":[{"uuid":"44444444-4444-4444-4444-444444444444","name":"sing-box-httpupgrade-user"}]}]}' >"${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json"
+        singBoxVMessHTTPUpgradePort=24443
+        singBoxVMessHTTPUpgradePath=/sing-box-upgrade
+        : >"${captureLog}"
+        showVmessHTTPUpgradeAccounts >/dev/null
+        grep -qx 'vmessHTTPUpgrade|443|/padm' "${captureLog}"
+        grep -qx 'vmessHTTPUpgrade|24443|/sing-box-upgrade' "${captureLog}"
+
+        coreInstallType=2
+        configPath="${singBoxConfigPath}"
+        currentDefaultPort=
+        : >"${captureLog}"
+        showVmessHTTPUpgradeAccounts >/dev/null
+        grep -qx 'vmessHTTPUpgrade|24443|/sing-box-upgrade' "${captureLog}"
     )
 }
 
