@@ -1352,22 +1352,6 @@ runPortHoppingWithoutPersistentRegression() (
     }
     autoRead() {
         case "$1" in
-        hysteria_port)
-            inputCount=$((inputCount + 1))
-            if [[ "${inputCount}" == "1" ]]; then
-                printf -v "$3" '%s' '12abc'
-            else
-                printf -v "$3" '%s' '16295'
-            fi
-            ;;
-        tuic_port)
-            inputCount=$((inputCount + 1))
-            if [[ "${inputCount}" == "1" ]]; then
-                printf -v "$3" '%s' '12abc'
-            else
-                printf -v "$3" '%s' '26451'
-            fi
-            ;;
         port_hopping_range)
             inputCount=$((inputCount + 1))
             if [[ "${rangeMode}" == "single" && "${inputCount}" == "1" ]]; then
@@ -1377,6 +1361,9 @@ runPortHoppingWithoutPersistentRegression() (
             else
                 printf -v "$3" '%s' '33000-33002'
             fi
+            ;;
+        port_hopping_menu)
+            printf -v "$3" '%s' "${hoppingMenuChoice:-2}"
             ;;
         hysteria_download_speed)
             downloadCount=$((downloadCount + 1))
@@ -1504,21 +1491,6 @@ EOF
     [[ "${hysteria2ObfsType}" == salamander && "${hysteria2ObfsPassword}" == existing-secret ]]
 
     inputCount=0
-    initHysteriaPort
-    grep -q '端口不合法' "${warnLog}"
-    ! grep -q 'allow:12abc' "${warnLog}"
-    grep -q 'allow:16295:tcp' "${warnLog}"
-    grep -q 'allow:16295:udp' "${warnLog}"
-
-    inputCount=0
-    : >"${warnLog}"
-    initTuicPort
-    grep -q '端口不合法' "${warnLog}"
-    ! grep -q 'allow:12abc' "${warnLog}"
-    grep -q 'allow:26451:tcp' "${warnLog}"
-    grep -q 'allow:26451:udp' "${warnLog}"
-
-    inputCount=0
     : >"${warnLog}"
     portHoppingStart=
     portHoppingEnd=
@@ -1526,7 +1498,7 @@ EOF
     [[ -s "${natStateFile}" ]]
     padmFirewallStateHas 'forward:iptables:hysteria2:33000:33002:16295'
     grep -q '范围不合法' "${warnLog}"
-    [[ "${allowCalls}" == "5" ]]
+    [[ "${allowCalls}" == "1" ]]
     grep -Eq '端口跳跃持久化|未检测到 netfilter-persistent' "${warnLog}"
 
     rangeMode=single
@@ -1953,9 +1925,10 @@ EOF
         local firewalldActive=true
         local removeFailurePort=
         local removeMasqueradeFailure=false
+        local hoppingMenuChoice=2 singBoxHysteria2Port=16295
         local rc
         local port spec
-        local -A forwardPorts=()
+        local -A fixtureForwardPorts=()
         PADM_FIREWALL_STATE_FILE="${TMP_DIR}/port-hopping-firewall.state"
         rm -f "${PADM_FIREWALL_STATE_FILE}"
         : >"${firewalldLog}"
@@ -1968,6 +1941,13 @@ EOF
                 printf 'Active: active (running)\n'
             fi
             [[ "${firewalldActive}" == "true" ]]
+        }
+        command() {
+            [[ "$*" != "-v iptables" && "$*" != "-v netfilter-persistent" ]] || return 1
+            builtin command "$@"
+        }
+        refreshManagedProtocolSubscriptions() {
+            printf 'refresh:%s\n' "$1" >>"${firewalldLog}"
         }
         sudo() { "$@"; }
         firewall-cmd() {
@@ -1987,11 +1967,11 @@ EOF
             --query-forward-port=*)
                 spec=${1#--query-forward-port=port=}
                 port=${spec%%:*}
-                [[ -n "${forwardPorts[${port}]:-}" ]]
+                [[ -n "${fixtureForwardPorts[${port}]:-}" ]]
                 ;;
             --reload) return 0 ;;
             --list-forward-ports)
-                for port in "${!forwardPorts[@]}"; do
+                for port in "${!fixtureForwardPorts[@]}"; do
                     printf 'port=%s:proto=udp:toport=16295\n' "${port}"
                 done
                 ;;
@@ -2007,14 +1987,14 @@ EOF
             --add-forward-port=*)
                 spec=${1#--add-forward-port=port=}
                 port=${spec%%:*}
-                forwardPorts[${port}]=1
+                fixtureForwardPorts[${port}]=1
                 ;;
             --remove-forward-port=*)
                 spec=${1#--remove-forward-port=port=}
                 port=${spec%%:*}
                 [[ "${port}" != "${removeFailurePort}" ]] || { removeFailurePort=; return 1; }
-                [[ -n "${forwardPorts[${port}]:-}" ]] || return 1
-                unset 'forwardPorts['"${port}"']'
+                [[ -n "${fixtureForwardPorts[${port}]:-}" ]] || return 1
+                unset 'fixtureForwardPorts['"${port}"']'
                 ;;
             esac
         }
@@ -2043,33 +2023,36 @@ EOF
         addPortHopping hysteria2 16295
         removeMasqueradeFailure=true
         regressionExpectStatus 1 deletePortHoppingRules hysteria2 33000 33002 16295
-        [[ "${#forwardPorts[@]}" == 0 && "${masquerade}" == true ]]
+        [[ "${#fixtureForwardPorts[@]}" == 0 && "${masquerade}" == true ]]
         padmFirewallStateHas 'forward:firewalld:udp:33000:33002:16295:owned=33000,33001,33002'
         padmFirewallStateHas masquerade:firewalld
         removeMasqueradeFailure=false
         deletePortHoppingRules hysteria2 "" "" 16295
         [[ "${masquerade}" == false && ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
 
-        forwardPorts[33002]=1
+        fixtureForwardPorts[33002]=1
         masquerade=true
         inputCount=1
         addPortHopping hysteria2 16295
         padmFirewallStateHas 'forward:firewalld:udp:33000:33002:16295:owned=33000,33001'
         deletePortHoppingRules hysteria2 33000 33002 16295
-        [[ -n "${forwardPorts[33002]:-}" ]]
-        [[ "${#forwardPorts[@]}" == "1" ]]
+        [[ -n "${fixtureForwardPorts[33002]:-}" ]]
+        [[ "${#fixtureForwardPorts[@]}" == "1" ]]
         [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
-        unset 'forwardPorts[33002]'
+        unset 'fixtureForwardPorts[33002]'
         masquerade=false
 
         inputCount=1
         addPortHopping hysteria2 16295
         firewalldActive=false
-        deletePortHoppingRules hysteria2 33000 33002 16295
-        [[ "${#forwardPorts[@]}" == "0" ]]
+        iptablesSaveShouldFail=true
+        portHoppingMenu hysteria2
+        [[ "${#fixtureForwardPorts[@]}" == "0" ]]
         [[ "${masquerade}" == false ]]
         grep -q '^offline:' "${firewalldLog}"
+        grep -qx 'refresh:hysteria2 端口跳跃' "${firewalldLog}"
         [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
+        iptablesSaveShouldFail=false
         firewalldActive=true
 
         inputCount=1
@@ -2077,8 +2060,15 @@ EOF
         removeFailurePort=33001
         regressionExpectStatus 1 deletePortHoppingRules hysteria2 33000 33002 16295 >/dev/null 2>&1
         padmFirewallStateHas 'forward:firewalld:udp:33000:33002:16295:owned=33000,33001,33002'
-        deletePortHoppingRules hysteria2 33001 33001 16295
-        [[ "${#forwardPorts[@]}" == "0" ]]
+        hoppingMenuChoice=1
+        regressionExpectStatus 1 portHoppingMenu hysteria2 >/dev/null 2>&1
+        hoppingMenuChoice=3
+        regressionExpectStatus 1 portHoppingMenu hysteria2 >/dev/null 2>&1
+        [[ "${#fixtureForwardPorts[@]}" == 1 && -n "${fixtureForwardPorts[33001]:-}" ]]
+        hoppingMenuChoice=2
+        portHoppingMenu hysteria2
+        [[ "${#fixtureForwardPorts[@]}" == "0" ]]
+        [[ "$(grep -c '^refresh:hysteria2 端口跳跃$' "${firewalldLog}")" == 2 ]]
         grep -qx 'deny:33000:33002:udp' "${firewalldLog}"
         [[ "${masquerade}" == "false" ]]
         [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
@@ -2086,7 +2076,7 @@ EOF
         inputCount=1
         addPortHopping hysteria2 16295
         cleanupPadmFirewallRules
-        [[ "${#forwardPorts[@]}" == "0" ]]
+        [[ "${#fixtureForwardPorts[@]}" == "0" ]]
         [[ "${masquerade}" == "false" ]]
         [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
     )

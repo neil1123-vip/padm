@@ -262,9 +262,6 @@ JSON
             reservedWarpReg='[1,2,3]'
         fi
     }
-    initHysteriaPort() {
-        :
-    }
     initHysteria2Network() {
         hysteria2ClientDownloadSpeed=120
         hysteria2ClientUploadSpeed=60
@@ -285,7 +282,7 @@ JSON
     fi
     [[ "$(<"${singBoxConfigPath}wireguard_endpoints_IPv4.json")" == "${originalContent}" ]]
     [[ ! -e "${singBoxConfigPath}wireguard_endpoints_IPv4.json.tmp" ]]
-    unset -f readConfigWarpReg initHysteriaPort initHysteria2Network initXrayClients
+    unset -f readConfigWarpReg initHysteria2Network initXrayClients
     hysteriaPort=23456
     rm -f "${singBoxConfigPath}dns.json"
     setSniffRouting

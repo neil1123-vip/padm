@@ -90,38 +90,6 @@ hysteria2MasqueradeJson() {
     fi
     jq -n '{type:"string",status_code:404,headers:{"content-type":["text/plain; charset=utf-8"]},content:"Not Found"}'
 }
-# 初始化 Hysteria2 端口
-initHysteriaPort() {
-    readSingBoxConfig
-    if [[ -n "${hysteriaPort}" ]]; then
-        autoRead hysteria_history_port "读取到上次安装时的Hysteria端口 [${hysteriaPort}]，是否使用？[y/n]:" historyHysteriaPortStatus
-        if [[ "${historyHysteriaPortStatus}" == "y" ]]; then
-            statusCard "Hysteria2 端口" "${hysteriaPort}"
-        else
-            hysteriaPort=
-        fi
-    fi
-
-    if [[ -z "${hysteriaPort}" ]]; then
-        echoContent yellow "请输入Hysteria端口[回车随机10000-30000]，不可与其他服务重复"
-        autoRead hysteria_port "端口:" hysteriaPort
-        if [[ -z "${hysteriaPort}" ]]; then
-            hysteriaPort=$((RANDOM % 20001 + 10000))
-        fi
-    fi
-    if [[ -z "${hysteriaPort}" ]]; then
-        protocolPortInputStatusCard "端口不可为空"
-        initHysteriaPort "${2:-}"
-        return $?
-    elif ! validPortNumber "${hysteriaPort}"; then
-        protocolPortInputStatusCard "端口不合法"
-        initHysteriaPort "${2:-}"
-        return $?
-    fi
-    allowPortTcpAndUdp "${hysteriaPort}" || return 1
-}
-
-
 # 初始化 Hysteria2 网络信息
 initHysteria2Network() {
 
@@ -711,27 +679,47 @@ deletePortHoppingRules() {
 # 端口跳跃管理
 portHoppingMenu() {
     local type=$1
-    # 非 firewalld 后端需要 iptables
-    if { [[ "${rhelLike:-}" != "true" ]] || ! systemctl is-active --quiet firewalld 2>/dev/null; } &&
+    local targetPort=
+    local portHoppingStart=
+    local portHoppingEnd=
+    local forwardStateKey=
+    local stateBackend=
+    local stateRangeFallback=false
+    local hadForwardState=false
+
+    if [[ "${type}" == "hysteria2" ]]; then
+        targetPort=${singBoxHysteria2Port}
+    elif [[ "${type}" == "tuic" ]]; then
+        targetPort=${singBoxTuicPort}
+    else
+        return 1
+    fi
+
+    if forwardStateKey=$(padmFirewalldForwardStateKeyForTarget "${targetPort}"); then
+        stateBackend=firewalld
+    elif forwardStateKey=$(padmIptablesForwardStateKeyForTarget "${type}" "${targetPort}"); then
+        stateBackend=iptables
+    fi
+    [[ -n "${stateBackend}" ]] && hadForwardState=true
+    # 非 firewalld 后端需要 iptables；已有永久 firewalld 归属时允许离线进入删除流程。
+    if [[ "${stateBackend}" != firewalld ]] &&
+        { [[ "${rhelLike:-}" != "true" ]] || ! systemctl is-active --quiet firewalld 2>/dev/null; } &&
         ! command -v iptables >/dev/null 2>&1; then
         protocolPortHoppingStatusCard "无法识别 iptables 工具，无法使用端口跳跃，退出安装"
         return 1
     fi
 
-    local targetPort=
-    local portHoppingStart=
-    local portHoppingEnd=
-
-    if [[ "${type}" == "hysteria2" ]]; then
-        readPortHopping "${type}" "${singBoxHysteria2Port}" || return 1
-        targetPort=${singBoxHysteria2Port}
-        portHoppingStart=${hysteria2PortHoppingStart}
-        portHoppingEnd=${hysteria2PortHoppingEnd}
-    elif [[ "${type}" == "tuic" ]]; then
-        readPortHopping "${type}" "${singBoxTuicPort}" || return 1
-        targetPort=${singBoxTuicPort}
-        portHoppingStart=${tuicPortHoppingStart}
-        portHoppingEnd=${tuicPortHoppingEnd}
+    if ! readPortHopping "${type}" "${targetPort}"; then
+        [[ "${hadForwardState}" == true ]] || return 1
+        stateRangeFallback=true
+    else
+        if [[ "${type}" == "hysteria2" ]]; then
+            portHoppingStart=${hysteria2PortHoppingStart}
+            portHoppingEnd=${hysteria2PortHoppingEnd}
+        else
+            portHoppingStart=${tuicPortHoppingStart}
+            portHoppingEnd=${tuicPortHoppingEnd}
+        fi
     fi
 
     local selectPortHoppingStatus= actionStatus=0 rangeChanged=
@@ -745,6 +733,10 @@ portHoppingMenu() {
         menuReadChoice port_hopping_menu "请选择:" selectPortHoppingStatus || return 0
         case "${selectPortHoppingStatus}" in
         1)
+            [[ "${stateRangeFallback}" == false ]] || {
+                protocolPortHoppingStatusCard "端口跳跃运行态读取失败，无法添加，请先删除现有归属规则"
+                return 1
+            }
             addPortHopping "${type}" "${targetPort}" || actionStatus=$?
             break
             ;;
@@ -758,7 +750,10 @@ portHoppingMenu() {
             break
             ;;
         3)
-            if [[ -n "${portHoppingStart}" && -n "${portHoppingEnd}" ]]; then
+            if [[ "${stateRangeFallback}" == true ]]; then
+                protocolPortHoppingStatusCard "端口跳跃运行态读取失败，无法查看，请先删除现有归属规则"
+                return 1
+            elif [[ -n "${portHoppingStart}" && -n "${portHoppingEnd}" ]]; then
                 protocolPortHoppingStatusCard "当前端口跳跃范围为: ${portHoppingStart}-${portHoppingEnd}"
             else
                 protocolPortHoppingStatusCard "未设置端口跳跃"
@@ -769,50 +764,24 @@ portHoppingMenu() {
         esac
     done
     # 取消、重复添加或完整回滚不刷新；规则已变化时，即使后续清理失败也同步订阅。
-    readPortHopping "${type}" "${targetPort}" || return 1
-    if [[ "${type}" == "hysteria2" ]]; then
-        [[ "${portHoppingStart}:${portHoppingEnd}" == "${hysteria2PortHoppingStart}:${hysteria2PortHoppingEnd}" ]] || rangeChanged=true
-    elif [[ "${type}" == "tuic" ]]; then
-        [[ "${portHoppingStart}:${portHoppingEnd}" == "${tuicPortHoppingStart}:${tuicPortHoppingEnd}" ]] || rangeChanged=true
+    if [[ "${selectPortHoppingStatus}" == 2 && "${actionStatus}" == 0 && "${hadForwardState}" == true ]] &&
+        ! padmFirewalldForwardStateKeyForTarget "${targetPort}" >/dev/null 2>&1 &&
+        ! padmIptablesForwardStateKeyForTarget "${type}" "${targetPort}" >/dev/null 2>&1; then
+        rangeChanged=true
+    elif readPortHopping "${type}" "${targetPort}"; then
+        if [[ "${type}" == "hysteria2" ]]; then
+            [[ "${portHoppingStart}:${portHoppingEnd}" == "${hysteria2PortHoppingStart}:${hysteria2PortHoppingEnd}" ]] || rangeChanged=true
+        elif [[ "${type}" == "tuic" ]]; then
+            [[ "${portHoppingStart}:${portHoppingEnd}" == "${tuicPortHoppingStart}:${tuicPortHoppingEnd}" ]] || rangeChanged=true
+        fi
+    else
+        return 1
     fi
     if [[ "${rangeChanged}" == "true" ]] && ! refreshManagedProtocolSubscriptions "${type} 端口跳跃"; then
         protocolPortHoppingStatusCard "端口跳跃规则已变化，但订阅刷新失败，请手动刷新订阅"
         return 1
     fi
     return "${actionStatus}"
-}
-
-
-# 初始化 TUIC 端口
-initTuicPort() {
-    readSingBoxConfig
-    if [[ -n "${tuicPort}" ]]; then
-        autoRead tuic_history_port "读取到上次安装时的Tuic端口 [${tuicPort}]，是否使用？[y/n]:" historyTuicPortStatus
-        if [[ "${historyTuicPortStatus}" == "y" ]]; then
-            statusCard "Tuic 端口" "${tuicPort}"
-        else
-            tuicPort=
-        fi
-    fi
-
-    if [[ -z "${tuicPort}" ]]; then
-        echoContent yellow "请输入Tuic端口[回车随机10000-30000]，不可与其他服务重复"
-        autoRead tuic_port "端口:" tuicPort
-        if [[ -z "${tuicPort}" ]]; then
-            tuicPort=$((RANDOM % 20001 + 10000))
-        fi
-    fi
-    if [[ -z "${tuicPort}" ]]; then
-        protocolPortInputStatusCard "端口不可为空"
-        initTuicPort "${2:-}"
-        return $?
-    elif ! validPortNumber "${tuicPort}"; then
-        protocolPortInputStatusCard "端口不合法"
-        initTuicPort "${2:-}"
-        return $?
-    fi
-    statusCard "Tuic 端口" "${tuicPort}"
-    allowPortTcpAndUdp "${tuicPort}" || return 1
 }
 
 
