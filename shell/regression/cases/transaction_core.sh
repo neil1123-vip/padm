@@ -1567,6 +1567,41 @@ runCorePortFileTransactionRegression() {
     local original2053 original2083 keptBackup
     original2053=$(<"${configPath}02_dokodemodoor_inbounds_2053.json")
     original2083=$(<"${configPath}02_dokodemodoor_inbounds_2083_default.json")
+    (
+        local configPath="${TMP_DIR}/core-port-invalid-default/"
+        local defaultFile="${configPath}02_dokodemodoor_inbounds_2053_default.json"
+        local owned fixture patch lookup output="${TMP_DIR}/core-port-invalid-default-result"
+        mkdir -p "${configPath}" || return 1
+        printf '%s\n' '{"inbounds":[{"port":443}]}' >"${configPath}02_VLESS_TCP_inbounds.json"
+        writeCoreDokodemoInbound "${defaultFile}" 2053 443 tcp dokodemo-door-newPort-2053 || return 1
+        owned=$(<"${defaultFile}")
+        for patch in '.inbounds[0].protocol = "socks"' \
+            '.inbounds[0].settings.network = "udp"' \
+            '.inbounds[0].settings.address = "remote.example"' \
+            '.inbounds[0].tag = "unmanaged"' \
+            '.inbounds[0].port = 2083 | .inbounds[0].tag = "dokodemo-door-newPort-2083"' \
+            '.inbounds[0].settings.port = 0' \
+            '.inbounds[0].settings.port = 443.5' \
+            '.inbounds += [.inbounds[0]]' \
+            '., .'; do
+            fixture=$(jq -c "${patch}" <<<"${owned}") || return 1
+            printf '%s\n' "${fixture}" >"${defaultFile}"
+            for lookup in corePortDefaultFile corePortForwardTarget; do
+                regressionExpectStatus 1 "${lookup}" >"${output}" 2>/dev/null || return 1
+                [[ ! -s "${output}" ]] || return 1
+            done
+            regressionExpectStatus 1 corePortSubscriptionPort 443 >"${output}" 2>/dev/null || return 1
+            [[ ! -s "${output}" ]] || return 1
+            regressionExpectStatus 1 corePortWriteAddFiles 2443 2443 443 2>/dev/null || return 1
+            [[ "$(<"${defaultFile}")" == "${fixture}" &&
+                ! -e "${configPath}02_dokodemodoor_inbounds_2053.json" &&
+                ! -e "${configPath}02_dokodemodoor_inbounds_2443_default.json" ]] || return 1
+        done
+        printf '%s\n' "${owned}" >"${defaultFile}"
+        corePortWriteAddFiles 2443 2443 443 || return 1
+        [[ ! -e "${defaultFile}" && -f "${configPath}02_dokodemodoor_inbounds_2053.json" &&
+            "$(corePortSubscriptionPort 443)" == 2443 ]] || return 1
+    ) || return 1
     if corePortApplyReloadTransaction corePortWriteAddFiles $'2053\n2083' 2053 'bad-port' 2>/dev/null; then
         return 1
     fi

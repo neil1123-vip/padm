@@ -1163,10 +1163,21 @@ corePortResolveByIndex() {
 }
 
 corePortDefaultFile() {
-    local files
+    local files aliasPort
     files=$(corePortManagedFilesByPattern '02_dokodemodoor_inbounds_*_default.json') || return 1
     [[ "${files}" != *$'\n'* ]] || return 1
-    [[ -z "${files}" ]] || printf '%s\n' "${files}"
+    [[ -n "${files}" ]] || return 0
+    [[ "${files##*/}" =~ ^02_dokodemodoor_inbounds_([0-9]+)_default\.json$ ]] || return 1
+    aliasPort=${BASH_REMATCH[1]}
+    validPortNumber "${aliasPort}" || return 1
+    jq -se --arg tag "dokodemo-door-newPort-${aliasPort}" --argjson port "$((10#${aliasPort}))" '
+        if length != 1 then false else .[0] end |
+        select(.inbounds | type == "array" and length == 1) | .inbounds[0] |
+        .protocol == "dokodemo-door" and .settings.network == "tcp" and
+        .settings.address == "127.0.0.1" and .tag == $tag and .port == $port and
+        (.settings.port | type == "number" and . >= 1 and . <= 65535 and floor == .)
+    ' "${files}" >/dev/null || return 1
+    printf '%s\n' "${files}"
 }
 
 corePortForwardTarget() {

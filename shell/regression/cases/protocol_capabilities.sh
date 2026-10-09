@@ -531,8 +531,6 @@ runXrayDirectTlsInboundWithoutFallbackRegression() {
     cat >"${configDir}28_trojan_TCP_direct_inbounds.json" <<'JSON'
 {"inbounds":[{"port":443,"settings":{"clients":[{"password":"secret","email":"main-Trojan_TCP_direct"}]},"streamSettings":{"tlsSettings":{"certificates":[{"certificateFile":"/etc/padm/tls/example.com.crt"}]}}}]}
 JSON
-    printf '{}\n' >"${configDir}02_dokodemodoor_inbounds_443_default.json"
-
     coreInstallType=1
     configPath="${configDir}"
     singBoxConfigPath=
@@ -1233,25 +1231,25 @@ runProtocolEntryPortRegression() (
     [[ -f "${configPath}02_dokodemodoor_inbounds_2053.json" && ! -e "${defaultFile}" ]]
     [[ "$(corePortSubscriptionPort 8443)" == 2443 && "$(corePortSubscriptionPort 443)" == 443 ]]
     (
-        # 订阅端口一次读取；空值、非法字段和解析失败仍不替换回退端口。
+        # 默认入口先校验归属再读取端口；非法字段和解析失败不能回退后继续发布。
         local defaultFile content reads="${root}/subscription-port-reads.log" value
         defaultFile=$(corePortDefaultFile)
         content=$(<"${defaultFile}")
         jq() { printf 'jq\n' >>"${reads}"; command jq "$@"; }
-        [[ "$(corePortSubscriptionPort 8443)" == 2443 && "$(wc -l <"${reads}")" == 1 ]]
+        [[ "$(corePortSubscriptionPort 8443)" == 2443 && "$(wc -l <"${reads}")" == 2 ]]
         printf '%s\n' '{"inbounds":[{"port":"2443","settings":{"port":"8443"}}]}' >"${defaultFile}"
-        [[ "$(corePortSubscriptionPort 8443)" == 2443 ]]
+        regressionExpectStatus 1 corePortSubscriptionPort 8443
         for value in '{"inbounds":[{"port":2443}]}' \
             '{"inbounds":[{"settings":{"port":8443}}]}' \
             '{"inbounds":[{"port":2443,"settings":{"port":{}}}]}' \
             '{"inbounds":[{"port":2443,"settings":{"port":"8443\t2053\n"}}]}'; do
             printf '%s\n' "${value}" >"${defaultFile}"
-            [[ "$(corePortSubscriptionPort 8443 443)" == 443 ]]
+            regressionExpectStatus 1 corePortSubscriptionPort 8443 443
         done
         printf '%s\n%s\n' \
             '{"inbounds":[{"port":2443,"settings":{"port":8443}}]}' \
             '{"inbounds":[{"port":2999,"settings":{"port":8443}}]}' >"${defaultFile}"
-        [[ "$(corePortSubscriptionPort 8443 443)" == 443 ]]
+        regressionExpectStatus 1 corePortSubscriptionPort 8443 443
         printf '{' >"${defaultFile}"
         regressionExpectStatus 1 corePortSubscriptionPort 8443 443
         printf '%s\n' "${content}" >"${defaultFile}"
