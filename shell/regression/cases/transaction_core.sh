@@ -483,6 +483,51 @@ runSingBoxCustomPathsRegression() (
     procArgsFixture[3]="${root}/conf/config.json"
     padmReadProcExe() { printf '%s (deleted)\n' "${PADM_SINGBOX_BINARY}"; }
     singBoxRunning
+    (
+        local config="${root}/conf/config.json" flag value expected
+        # 对照真实 Cobra 参数：配置累加，帮助布尔取最后值，字符串值不当命令。
+        procArgsFixture=("${PADM_SINGBOX_BINARY}" -c "${config}" run)
+        singBoxRunning || return 1
+        for flag in -c --config; do
+            procArgsFixture=("${PADM_SINGBOX_BINARY}" run "${flag}=${config}" --disable-color)
+            singBoxRunning || return 1
+            procArgsFixture=("${PADM_SINGBOX_BINARY}" run "${flag}" "${root}/extra.json" "${flag}" "${config}")
+            singBoxRunning || return 1
+        done
+        procArgsFixture=("${PADM_SINGBOX_BINARY}" run "-c${config}" "-D${root}" "-C${root}/conf")
+        singBoxRunning || return 1
+        for flag in --help -h; do
+            for value in false False FALSE 0 f F true True TRUE 1 t T invalid; do
+                expected=1
+                [[ "${value}" != false && "${value}" != False && "${value}" != FALSE &&
+                    "${value}" != 0 && "${value}" != f && "${value}" != F ]] || expected=0
+                procArgsFixture=("${PADM_SINGBOX_BINARY}" run -c "${config}" "${flag}=${value}")
+                regressionExpectStatus "${expected}" singBoxRunning || return 1
+            done
+            procArgsFixture=("${PADM_SINGBOX_BINARY}" run -c "${config}" "${flag}" "${flag}=false")
+            singBoxRunning || return 1
+            procArgsFixture+=("${flag}=true")
+            regressionExpectStatus 1 singBoxRunning || return 1
+        done
+        procArgsFixture=("${PADM_SINGBOX_BINARY}" run -c "${config}" -hh=false)
+        singBoxRunning || return 1
+        procArgsFixture=("${PADM_SINGBOX_BINARY}" run run -c "${config}" -- check --help)
+        singBoxRunning || return 1
+        procArgsFixture=("${PADM_SINGBOX_BINARY}" -c "${config}" -- run)
+        regressionExpectStatus 1 singBoxRunning || return 1
+        procArgsFixture=("${PADM_SINGBOX_BINARY}" -D run -c "${config}")
+        regressionExpectStatus 1 singBoxRunning || return 1
+        for flag in --help -h -dh --help=invalid -f; do
+            procArgsFixture=("${PADM_SINGBOX_BINARY}" run -c "${config}" "${flag}")
+            regressionExpectStatus 1 singBoxRunning || return 1
+        done
+        procArgsFixture=("${PADM_SINGBOX_BINARY}" check -c "${config}")
+        regressionExpectStatus 1 singBoxRunning || return 1
+        procArgsFixture=("${PADM_SINGBOX_BINARY}" "" run -c "${config}")
+        regressionExpectStatus 1 singBoxRunning || return 1
+        procArgsFixture=("${PADM_SINGBOX_BINARY}" run -c "${config}" -D)
+        regressionExpectStatus 1 singBoxRunning || return 1
+    ) || return 1
 
     (
         local PADM_XRAY_BINARY="${root}/bin/custom-xray"

@@ -357,6 +357,7 @@ singBoxRunning() {
     local pid
     local exe
     local -a procArgs=()
+    local index argument flag value hasValue commandName configMatched helpMode argsValid boolValue
     local mergedConfig
     local systemdServiceFile
     local openRcServiceFile
@@ -374,8 +375,68 @@ singBoxRunning() {
         [[ "${exe}" == "${binary}" || "${exe}" == "${binary} (deleted)" ||
             -n "${resolvedBinary}" && ( "${exe}" == "${resolvedBinary}" || "${exe}" == "${resolvedBinary} (deleted)" ) ]] || continue
         padmReadProcArgs procArgs "/proc/${pid}/cmdline" || continue
-        [[ -n "${mergedConfig}" && "${procArgs[1]:-}" == run &&
-            "${procArgs[2]:-}" == -c && "${procArgs[3]:-}" == "${mergedConfig}" ]] || continue
+        commandName= configMatched=false helpMode=false argsValid=true
+        # Cobra 配置参数累加，布尔参数取最后值；短选项中的字符串值不再扫描。
+        for ((index = 1; index < ${#procArgs[@]}; index++)); do
+            argument=${procArgs[index]}
+            [[ "${argument}" != -- ]] || break
+            if [[ "${argument}" != -?* ]]; then
+                if [[ -z "${commandName}" ]]; then
+                    [[ "${argument}" == run ]] || { argsValid=false; break; }
+                    commandName=run
+                fi
+                continue
+            fi
+            while [[ -n "${argument}" ]]; do
+                value= hasValue=false
+                if [[ "${argument}" == --* ]]; then
+                    flag=${argument%%=*}
+                    if [[ "${argument}" == *=* ]]; then
+                        value=${argument#*=} hasValue=true
+                    fi
+                    argument=
+                else
+                    flag="-${argument:1:1}"
+                    argument=${argument:2}
+                    if [[ "${argument}" == =* ]]; then
+                        value=${argument#=} hasValue=true argument=
+                    fi
+                fi
+                case "${flag}" in
+                -c | --config | -C | --config-directory | -D | --directory)
+                    if [[ "${hasValue}" == false ]]; then
+                        if [[ -n "${argument}" ]]; then
+                            value=${argument} argument=
+                        else
+                            index=$((index + 1))
+                            if ((index >= ${#procArgs[@]})); then
+                                argsValid=false
+                                break 2
+                            fi
+                            value=${procArgs[index]}
+                        fi
+                    fi
+                    if [[ "${flag}" == -c || "${flag}" == --config ]] &&
+                        [[ -n "${mergedConfig}" && "${value}" == "${mergedConfig}" ]]; then
+                        configMatched=true
+                    fi
+                    ;;
+                -h | --help | --disable-color)
+                    [[ "${hasValue}" == true ]] || value=true
+                    case "${value}" in
+                    0 | f | F | false | FALSE | False) boolValue=false ;;
+                    1 | t | T | true | TRUE | True) boolValue=true ;;
+                    *) argsValid=false; break 2 ;;
+                    esac
+                    [[ "${flag}" == --disable-color ]] || helpMode=${boolValue}
+                    [[ -z "${argument}" ]] || argument="-${argument}"
+                    ;;
+                *) argsValid=false; break 2 ;;
+                esac
+            done
+        done
+        [[ "${argsValid}" == true && "${commandName}" == run &&
+            "${configMatched}" == true && "${helpMode}" == false ]] || continue
         return 0
     done < <(pgrep -f . 2>/dev/null)
     if [[ "${release:-}" != "alpine" && -e "${systemdServiceFile}" ]] && padmCommandExists systemctl; then
