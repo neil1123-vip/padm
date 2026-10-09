@@ -1259,14 +1259,12 @@ runSubscriptionGroupSyncUnlocked() {
     local rc=0
     export SUBSCRIPTION_SYNC_PUBLISHED=false
     ensureSubscriptionGroupsState || return 1
-    readInstallType
-    readInstallProtocolType
-    readConfigHostPathUUID || {
+    if ! readInstallType || ! readInstallProtocolType || ! readConfigHostPathUUID; then
         failureMessages+=("本机配置读取失败")
         failures=$(jq -cn --args '$ARGS.positional' -- "${failureMessages[@]}") || return 1
         subscriptionSyncMarkResult partial "${failures}" || true
         return 1
-    }
+    fi
 
     # Keep this preflight read-only so UUID initialization remains rollback-safe.
     if ! syncPlan=$(subscriptionSyncPlan) ||

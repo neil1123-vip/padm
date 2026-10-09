@@ -634,8 +634,8 @@ collectSubscriptionTrafficUnlocked() {
     SUBSCRIPTION_TRAFFIC_LOCAL_COMMITTED=false
     SUBSCRIPTION_TRAFFIC_COMPLETE=false
     ensureSubscriptionGroupsState || return 1
-    readInstallType
-    readInstallProtocolType
+    readInstallType || return 1
+    readInstallProtocolType || return 1
     if ! ensureTrafficStatsConfig; then
         return 1
     fi

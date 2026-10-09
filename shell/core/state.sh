@@ -204,7 +204,7 @@ readInstallType() {
 
 # 读取协议类型
 readInstallProtocolType() {
-    local configFile
+    local configFile configFiles=
     PADM_INSTALL_STATUS_READY=0
     currentInstallProtocolType=
     frontingType=
@@ -257,7 +257,12 @@ readInstallProtocolType() {
         "${xrayBinary}" x25519 -i "${privateKey}" 2>/dev/null | awk '/Password \(PublicKey\):/ { print $3; exit }'
     }
 
-    while read -r row; do
+    if [[ -n "${configPath}" && -d "${configPath}" ]]; then
+        configFiles=$(find "${configPath}" -name "*inbounds.json" -print) || return 1
+        configFiles=$(sort <<<"${configFiles}") || return 1
+    fi
+    while IFS= read -r row; do
+        [[ -n "${row}" ]] || continue
         row=${row%.json}
         local protocolId=
         protocolId=$(protocolCapabilityIdByConfigFile "${row##*/}.json" 2>/dev/null || true)
@@ -428,11 +433,7 @@ readInstallProtocolType() {
             singBoxSocks5Port=$(jq .inbounds[0].listen_port "${row}.json")
         fi
 
-    done < <(
-        if [[ -n "${configPath}" && -d "${configPath}" ]]; then
-            find "${configPath}" -name "*inbounds.json" -print | sort
-        fi
-    )
+    done <<<"${configFiles}"
 
     if [[ "${coreInstallType}" == "1" && -n "${singBoxConfigPath}" ]]; then
         local protocolId
