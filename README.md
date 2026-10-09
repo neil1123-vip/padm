@@ -335,6 +335,27 @@ padm-docker edit --block-bt-off --confirm PADM-DOCKER-EDIT
 开关复用现有候选校验、备份与恢复事务；独立关闭保留其它路由子项及流量累计，
 `routing-status` 启用时追加 `block_bt:true`。没有新增监听、宿主权限或防火墙规则。
 
+菜单 `17` 的 `18` 提供 CN 区域预设，分别按 `geosite:cn` 域名、`geoip:cn`
+字面目的 IP 或两者组合阻断。v3 `.routing.region` 保存 `mode` 和
+`allow_domains`，控制包须声明 `x-padm-routing-region`。
+固定直连例外为 `dl.google.com`、`apple.com`、`bing.com`、`microsoft.com`、
+`gstatic.com`、`xn--ngstr-lra8j.com`、`googleapis.com` 和 `googleapis.cn`，
+均匹配域名及其子域；可追加现有四类域名规则。
+所有例外按 Direct 语义优先于域名/IP/BT 阻断和 SOCKS5，而不只豁免区域预设。
+
+```bash
+padm-docker edit --region both --region-allow 'example.com,full:api.example.net' --preview
+padm-docker edit --region domain --confirm PADM-DOCKER-EDIT
+padm-docker edit --region ip --region-allow '' --confirm PADM-DOCKER-EDIT
+padm-docker edit --region-off --confirm PADM-DOCKER-EDIT
+```
+
+模式切换替换预设及追加例外，不累加旧模式；未指定追加例外时保存空列表。
+关闭仅删除区域预设，保留手工配置的相同 CN 规则、Direct 例外及其它路由能力。
+状态单独输出 `region.mode`、`allow_domains` 和 `default_allow_domains`。
+IP 模式不为域名目标提前解析或在解析后复查；CN 数据沿用现有资源与下载失败恢复门禁，
+不代表最终拨号 IP 过滤或完整区域策略管理。
+
 完整 v3 `configure` 规格可选 `accounts`，用于追加 1–256 个独立账号，不替换原自用账号。
 每项必须包含 `id`、`name`、`enabled`、`uuid`、`password`、`shadowsocks_password` 和
 `listeners`；`id` 是稳定的小写 UUID，认证 `uuid` 和密码独立，`listeners` 引用现有入口 ID。

@@ -956,6 +956,30 @@ Enabling adds `block_bt:true` to `routing-status`; disabling preserves all other
 routing policies and traffic totals. The existing candidate, backup and recovery
 transaction is reused, with no new listener, host privilege or firewall rule.
 
+Menu `17`, option `18`, provides a CN regional preset: `domain` matches `geosite:cn`,
+`ip` matches literal destination IPs against `geoip:cn`, and `both` combines them.
+Optional v3 `.routing.region` stores `mode` and `allow_domains`, with the separate
+`x-padm-routing-region` capability marker. Default Direct exceptions match each domain
+and its subdomains: `dl.google.com`, `apple.com`, `bing.com`, `microsoft.com`,
+`gstatic.com`, `xn--ngstr-lra8j.com`, `googleapis.com` and `googleapis.cn`.
+Custom exceptions use the existing four domain-rule types. All exceptions follow
+Direct precedence over domain/IP/BT blocking and SOCKS5, not just the regional preset.
+
+```bash
+padm-docker edit --region both --region-allow 'example.com,full:api.example.net' --preview
+padm-docker edit --region domain --confirm PADM-DOCKER-EDIT
+padm-docker edit --region ip --region-allow '' --confirm PADM-DOCKER-EDIT
+padm-docker edit --region-off --confirm PADM-DOCKER-EDIT
+```
+
+Each mode change replaces the preset and custom exceptions rather than accumulating
+old modes; omitted custom exceptions become an empty list. Disabling removes only
+the preset, preserving identical manually configured CN rules, Direct exceptions
+and other routing policies. Status reports `region.mode`, `allow_domains` and
+`default_allow_domains` separately. IP mode does not resolve domain targets early or
+recheck their resolved addresses. Existing CN resource and download-failure gates
+remain in force; this is not final destination-IP filtering or complete regional management.
+
 `Routing & access control` manages server-side outbound behavior and access policies. It is not a client configuration tutorial.
 
 | Feature | Notes |
