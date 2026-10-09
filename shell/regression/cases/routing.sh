@@ -1311,6 +1311,9 @@ runRoutingRejectsUnsafeDirRegression() (
 runSocks5UdpAssociateRegression() (
     local root="${TMP_DIR}/socks5-udp-associate"
     local allowAllMode=true
+    local partialKey= inputKey beforePartial
+    local socks5RoutingUUID=keep-uuid socks5InboundDomainStrategyStatus=keep-family
+    local socks5InboundRoutingDomainStatus=keep-mode socks5InboundRoutingDomain=keep-domains
 
     mkdir -p "${root}/xray" "${root}/sing-box"
     configPath="${root}/xray/"
@@ -1343,6 +1346,7 @@ YAML
         singbox_route_history) printf -v "$3" 'n' ;;
         *) printf -v "$3" '' ;;
         esac
+        [[ "$1" != "${partialKey}" ]]
     }
 
     setSocks5Inbound
@@ -1398,6 +1402,24 @@ YAML
       (.route.rules[0].network? | not) and
       (.route.rules[0].domain? | not)
     ' "${singBoxConfigPath}socks5_02_inbound_route.json" >/dev/null
+
+    # 模拟 read 已写入不完整末行却返回 EOF，所有阶段必须在写配置前退出。
+    beforePartial=$(sha256sum "${singBoxConfigPath}"*.json)
+    for inputKey in socks5_inbound_uuid socks5_inbound_ip_type socks5_inbound_source_ips \
+        socks5_inbound_allow_all socks5_inbound_domains; do
+        partialKey="${inputKey}"
+        case "${inputKey}" in
+        socks5_inbound_uuid | socks5_inbound_ip_type)
+            regressionExpectStatus 1 setSocks5Inbound >/dev/null 2>&1 || return 1
+            ;;
+        *)
+            regressionExpectStatus 1 setSocks5InboundRouting >/dev/null 2>&1 || return 1
+            ;;
+        esac
+        [[ "$(sha256sum "${singBoxConfigPath}"*.json)" == "${beforePartial}" ]] || return 1
+    done
+    [[ "${socks5RoutingUUID}" == keep-uuid && "${socks5InboundDomainStrategyStatus}" == keep-family &&
+       "${socks5InboundRoutingDomainStatus}" == keep-mode && "${socks5InboundRoutingDomain}" == keep-domains ]]
 )
 
 runSNIRoutingCancelRegression() (

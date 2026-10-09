@@ -434,7 +434,8 @@ writeSocks5InboundConfig() {
 
 # Socks5 入站配置
 setSocks5Inbound() {
-
+    local socks5RoutingUUID= socks5InboundDomainStrategyStatus=
+    local -a result=()
     echoContent title "\n┌─ 配置 Socks5 入站 ─────────────────────────────────"
     menuLine "解锁机、落地机入站配置"
     menuClose
@@ -444,7 +445,7 @@ setSocks5Inbound() {
     statusCard "入站 Socks5" "端口：${result[-1]}" "此端口需要配置到其他机器出站，请不要进行代理行为"
 
     echoContent yellow "\n请输入自定义UUID[需合法]，[回车]随机UUID"
-    autoRead socks5_inbound_uuid "UUID:" socks5RoutingUUID
+    autoRead socks5_inbound_uuid "UUID:" socks5RoutingUUID || return 1
     if [[ -z "${socks5RoutingUUID}" ]]; then
         if [[ "${coreInstallType}" == "1" ]]; then
             socks5RoutingUUID=$("$(coreXrayBinaryPath)" uuid)
@@ -466,7 +467,7 @@ setSocks5Inbound() {
     menuItem 2 "IPv6" "IPv6 解析策略"
     menuClose
 
-    autoRead socks5_inbound_ip_type "IP类型:" socks5InboundDomainStrategyStatus
+    autoRead socks5_inbound_ip_type "IP类型:" socks5InboundDomainStrategyStatus || return 1
     local domainStrategy=
     if [[ -z "${socks5InboundDomainStrategyStatus}" || "${socks5InboundDomainStrategyStatus}" == "1" ]]; then
         domainStrategy="ipv4_only"
@@ -486,7 +487,7 @@ setSocks5Inbound() {
 setSocks5InboundRouting() {
 
     singBoxConfigPath="${singBoxConfigPath:-${PADM_SINGBOX_CONFIG_DIR:-/etc/padm/sing-box/conf/config/}}"
-    local action="${1:-}"
+    local action="${1:-}" socks5InboundRoutingDomainStatus= socks5InboundRoutingDomain=
 
     if [[ "${action}" == "addRules" && ! -f "${singBoxConfigPath}socks5_02_inbound_route.json" && ! -f "${configPath}09_routing.json" ]]; then
         errorCard "请安装入站分流后再添加分流规则"
@@ -501,7 +502,7 @@ setSocks5InboundRouting() {
         menuLine "请输入允许访问的 IP 地址，多个 IP 用英文逗号分隔"
         menuLine "示例：1.1.1.1,2.2.2.2"
         menuClose
-        autoRead socks5_inbound_source_ips "IP:" socks5InboundRoutingIPs
+        autoRead socks5_inbound_source_ips "IP:" socks5InboundRoutingIPs || return 1
 
         if [[ -z "${socks5InboundRoutingIPs}" ]]; then
             coreIPRequiredErrorCard
@@ -516,12 +517,12 @@ setSocks5InboundRouting() {
     menuLine "非增量添加，会替换原有规则；无法匹配则使用 domain 精确匹配"
     menuClose
 
-    autoRead socks5_inbound_allow_all "是否允许所有网站？请选择[y/n]:" socks5InboundRoutingDomainStatus
+    autoRead socks5_inbound_allow_all "是否允许所有网站？请选择[y/n]:" socks5InboundRoutingDomainStatus || return 1
     if [[ "${socks5InboundRoutingDomainStatus}" == "y" ]]; then
         addSingBoxRouteRule "01_direct_outbound" "" "socks5_02_inbound_route" || return 1
     else
         echoContent yellow "录入示例:netflix,openai,example.com\n"
-        autoRead socks5_inbound_domains "域名:" socks5InboundRoutingDomain
+        autoRead socks5_inbound_domains "域名:" socks5InboundRoutingDomain || return 1
         if [[ -z "${socks5InboundRoutingDomain}" ]]; then
             coreDomainRequiredErrorCard
             return 1
