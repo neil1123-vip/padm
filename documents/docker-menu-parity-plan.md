@@ -18,7 +18,7 @@
 | 2. 菜单与可信首次配置 | 2A–2C 已实现；本地 PTY、事务和 Linux 权限通过，真实发布/连通待验 | 安装后进入菜单、独立命令生命周期、无需手填镜像的首次配置 |
 | 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2–3C.12 基础入口已通过本地与 amd64 传输验收，3D.1 参数重生成、3D.2 当前目标站菜单已接入，3D.3c 受管共存、3D.3d1 桥接可达宿主网站和 3D.3d2 宿主回环已通过本地/真实 Desktop 验收 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
 | 4. 用户、订阅与服务维护 | 4A.1–4A.4、4B.1–4B.2 已交付；4C.1–4C.2 已实现，4C.3a–4C.3c 归属、健康与主控事务底座已补，连接与管理入口继续推进 | 稳定分享身份与双核心认证/统计、本机用户业务、多服务器后端、分范围备份恢复、核心运维 |
-| 5. 站点、路由与宿主集成 | 5A.1–5A.3b、5B.1–5B.3a 本地合同及双核心双栈出站/解析验收已通过；继续 5B 其余路由与 5C 宿主集成 | 站点管理、内部能力、规则所有权及可撤销宿主操作 |
+| 5. 站点、路由与宿主集成 | 5A.1–5A.3b、5B.1–5B.3b 本地合同及双核心双栈出站/解析/域名策略验收已通过；继续 5B 其余路由与 5C 宿主集成 | 站点管理、内部能力、规则所有权及可撤销宿主操作 |
 | 6. 发布与完整验收 | 未开始 | 迁移文档、真实 Linux 与双架构证据、受门禁保护的 Release |
 
 当前机器可读支持状态以
@@ -1895,6 +1895,45 @@ DNS geosite 与域名保持 OR，DNS/hosts 分别管理并保留自定义和跨�
 开放并修复 sing-box 单核菜单，非法 hosts IP/规则在写入前拒绝。
 `routing-core`、DNS 失败返回和 UI 冒烟通过，实际 pinned sing-box 合并配置检查通过。
 未更改原生全局 `UseIP` 策略；公网规则源、原生 arm64、可信发布及真实宿主仍待验。
+
+#### 5B.3b Direct 直连例外与 Block 域名阻断
+
+v3 可选 `.routing.direct`、`.routing.block` 各保存 `{domains:[...]}`，
+复用 1–256 条唯一小写 `full/domain/keyword/geosite` 合同，四类匹配保持 OR。
+单独能力门禁为 `x-padm-routing-direct-block`；不继承隐式域名放行，
+不扩 IP/CIDR、区域、BT 或全局阻断策略。
+
+Direct 按原生菜单语义优先于 Block 和 SOCKS5；匹配直连仍使用 hosts/DNS。
+Block 拒绝匹配 TCP/UDP，不进行本地目标解析；未匹配保持旧出站选择。
+统计 API、内部 DNS 和规则下载不受客户端策略阻断，IP/sniff 不改实际目的地。
+sing-box 使用 Direct 的逻辑否定守卫排除 Block/SOCKS，解析后才终止 Direct 路由。
+仅域名策略启动路由嗅探，未提供可识别域名的 IP 流量不冒充 IP 策略命中。
+
+菜单 `17` 的 `10–13` 和 CLI `edit --direct/--block <root 私有 JSON>`、
+`--direct-off/--block-off` 复用原输入快照、确认、候选检查与失败/信号恢复事务。
+关闭仅删除对应子项，普通 `--spec` 仍冻结 routing，状态追加无凭据的策略规则。
+不增加宿主端口、挂载、网络权限或防火墙；完整路由工具和 `206` 保持 `deferred`。
+功能签名提交 `88806b82 feat(docker): add transactional Direct and Block domain routing`。
+本地 Linux amd64 定向合同 `60.586` 秒、双核心双栈真实流量 `75.128` 秒、
+菜单真实 PTY `28.496` 秒通过。四类 Direct/Block 独立命中，四个 Block 目的
+先由无策略生产模板证明可达，再要求实际拒绝且 DNS/目的/SOCKS 增量为零；
+核心继续存活且紧邻未匹配请求成功，客户端超时不视为 TCP 阻断通过。
+Direct 同域 Block/选择性 SOCKS 优先，仍使用匹配 DNS/hosts，IP/sniff 不改目的；
+IPv4 双核心另验全局 SOCKS 组合和 Direct DNS/hosts UDP 正对照。
+完整 Docker 合同 `31/31`、`208.134` 秒、Jobs `6`，ci `34.210` 秒、Jobs `3` 通过；
+14 Shell Bash/ShellCheck error、Python AST、Schema/features JSON、PowerShell AST 通过。
+工具镜像和双槽预算保持，alias 复用现有合同/夹具，全套不重复执行同一路由合同。
+证据 `.tmp-docker-routing-5b3b-evidence.md`；保留 result/log，临时源码与核心副本清理。
+
+原生相邻修复独立签名提交 `a9921985`：空域名/逗号输入写前拒绝，
+sing-box 域名与 geosite 保持 OR，历史精确前缀及带下划线分类保留；
+单 sing-box 访问控制开放，删除域名策略保留 BT 引用出站，cn 使用真实 GeoIP rule-set。
+独立复审发现共享 OR 后 SOCKS inbound 根附加 matcher 的兼容问题，
+已改外层来源 AND，二次编辑来源历史保留，普通/空域名格式不变。
+最终 routing-core `8.604` 秒、SOCKS UDP 关联 `1.032` 秒、
+访问控制事务 `1.205` 秒、失败返回 `0.873` 秒通过；
+实际 pinned sing-box 生产合并/check 覆盖 OR/AND、来源历史和 cn/CIDR。
+检查用本地编译资产，不将其等同于公网规则源验收；原生 arm64、可信发布和真实宿主待验。
 
 ### 5C. 宿主集成与端口跳跃
 
