@@ -1298,17 +1298,6 @@ defaultRandomUserNameFromUuid() {
     printf 'padm-%s\n' "${prefix}"
 }
 
-autoReadAllowsEmptyValue() {
-    case "$1" in
-    port | singbox_custom_port | reality_port | xhttp_port | hysteria_port | tuic_port | reality_target | reality_server_name | entry_host | subscribe_port | cloudflare_zone_id | reality_stream_website_port | reality_stream_vision_port | reality_stream_xhttp_port | hysteria_download_speed | hysteria_upload_speed)
-        return 0
-        ;;
-    *)
-        return 1
-        ;;
-    esac
-}
-
 autoInstallSummaryValue() {
     case "$1" in
     cloudflare_api_token | cloudflare_zone_id | aliyun_api_key | aliyun_api_secret)
@@ -1368,9 +1357,6 @@ autoRead() {
         if [[ -n "${autoValue}" ]]; then
             showAutoInstallSummary
             printf -v "${resultVar}" '%s' "${autoValue}"
-            return
-        elif autoReadAllowsEmptyValue "${key}"; then
-            printf -v "${resultVar}" '%s' ""
             return
         else
             printf -v "${resultVar}" '%s' ""
