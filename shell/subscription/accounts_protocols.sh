@@ -316,7 +316,7 @@ showNaiveAccounts() (
         if [[ "${coreInstallType}" == "1" && -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}10_naive_inbounds.json" ]]; then
             path="${singBoxConfigPath}"
         fi
-        protocolHost=$(jq -r '.inbounds[0].tls.server_name // empty' "${path}10_naive_inbounds.json") || return 1
+        protocolHost=$(jq -r '.inbounds[0].tls.server_name | if . == null then empty elif type == "string" then . else error("invalid server_name") end' "${path}10_naive_inbounds.json") || return 1
         protocolHost=${protocolHost:-${currentHost:-}}
         jq -r -c '.inbounds[] | .users | if type == "array" then .[] else error("invalid users") end' "${path}10_naive_inbounds.json" | while read -r user; do
             local username password
@@ -439,7 +439,7 @@ showAnyTlsAccounts() (
         if [[ "${coreInstallType}" == "1" && -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}13_anytls_inbounds.json" ]]; then
             path="${singBoxConfigPath}"
         fi
-        protocolHost=$(jq -r '.inbounds[0].tls.server_name // empty' "${path}13_anytls_inbounds.json") || return 1
+        protocolHost=$(jq -r '.inbounds[0].tls.server_name | if . == null then empty elif type == "string" then . else error("invalid server_name") end' "${path}13_anytls_inbounds.json") || return 1
         protocolHost=${protocolHost:-${currentHost:-}}
         jq -r -c '.inbounds[] | .users | if type == "array" then .[] else error("invalid users") end' "${path}13_anytls_inbounds.json" | while read -r user; do
             local name password

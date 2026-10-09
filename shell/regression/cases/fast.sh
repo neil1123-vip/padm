@@ -2079,6 +2079,20 @@ EOF
         [[ "${#fixtureForwardPorts[@]}" == "0" ]]
         [[ "${masquerade}" == "false" ]]
         [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
+
+        # 持久归属完整但运行态只有部分规则时，删除后的清理失败仍需刷新订阅。
+        fixtureForwardPorts[33001]=1
+        padmFirewallStateAdd 'forward:firewalld:udp:33000:33002:16295:owned=33000,33001,33002'
+        denyPort() {
+            printf 'deny-failure:%s:%s\n' "$1" "${2:-tcp}" >>"${firewalldLog}"
+            return 1
+        }
+        : >"${firewalldLog}"
+        hoppingMenuChoice=2
+        regressionExpectStatus 1 portHoppingMenu hysteria2 >/dev/null 2>&1
+        [[ "${#fixtureForwardPorts[@]}" == "0" ]]
+        grep -qx 'refresh:hysteria2 端口跳跃' "${firewalldLog}"
+        padmFirewallStateHas 'forward:firewalld:udp:33000:33002:16295:owned=33000,33001,33002'
     )
 )
 
@@ -5433,6 +5447,22 @@ EOF
                     protocolHost=anytls.example.com
                     userJson='{"name":"sub-anytls","password":"anytls-pass"}'
                 fi
+                # TLS 域名只接受字符串，缺失值和空串保留旧入口回退。
+                currentHost=legacy.example.com
+                for variant in true false 123 '[]' '{}'; do
+                    jq -n --argjson host "${variant}" --argjson user "${userJson}" \
+                        '{inbounds:[{tls:{server_name:$host},users:[$user]}]}' >"${singBoxRoot}/${configName}"
+                    : >"${captureLog}"
+                    regressionExpectStatus 1 "${functionName}" >/dev/null 2>&1
+                    [[ ! -s "${captureLog}" ]]
+                done
+                for variant in null '""'; do
+                    jq -n --argjson host "${variant}" --argjson user "${userJson}" \
+                        '{inbounds:[{tls:{server_name:$host},users:[$user]}]}' >"${singBoxRoot}/${configName}"
+                    : >"${captureLog}"
+                    "${functionName}" >/dev/null
+                    grep -q 'default:.*@legacy.example.com:' "${captureLog}"
+                done
                 for variant in missing null object; do
                     case "${variant}" in
                     missing) jq -n --arg host "${protocolHost}" '{inbounds:[{tls:{server_name:$host}}]}' ;;

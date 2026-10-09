@@ -764,7 +764,10 @@ portHoppingMenu() {
         esac
     done
     # 取消、重复添加或完整回滚不刷新；规则已变化时，即使后续清理失败也同步订阅。
-    if [[ "${selectPortHoppingStatus}" == 2 && "${actionStatus}" == 0 && "${hadForwardState}" == true ]] &&
+    if [[ "${selectPortHoppingStatus}" == 2 && "${hadForwardState}" == true &&
+        "${stateRangeFallback}" == true ]]; then
+        rangeChanged=true
+    elif [[ "${selectPortHoppingStatus}" == 2 && "${actionStatus}" == 0 && "${hadForwardState}" == true ]] &&
         ! padmFirewalldForwardStateKeyForTarget "${targetPort}" >/dev/null 2>&1 &&
         ! padmIptablesForwardStateKeyForTarget "${type}" "${targetPort}" >/dev/null 2>&1; then
         rangeChanged=true
