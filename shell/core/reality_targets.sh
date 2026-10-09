@@ -3178,6 +3178,12 @@ applyRealityTargetToInstalledConfigs() {
             filter='.inbounds[$index].streamSettings.realitySettings.target = $target |
                 .inbounds[$index].streamSettings.realitySettings.serverNames = [$sni]'
             [[ "${configIndex}" != 2 ]] || filter='
+                .inbounds[0].streamSettings.realitySettings as $oldReality |
+                if $oldReality.publicKey != null and
+                    .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.publicKey == $oldReality.publicKey and
+                    .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.serverName == $oldReality.serverNames[0]
+                then .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.serverName = $sni
+                else . end |
                 if (.inbounds[0].streamSettings.xhttpSettings.host // "") != "" and
                     .inbounds[0].streamSettings.xhttpSettings.host == .inbounds[0].streamSettings.realitySettings.serverNames[0]
                 then .inbounds[0].streamSettings.xhttpSettings.host = $sni else . end | '"${filter}"

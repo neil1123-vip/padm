@@ -2561,6 +2561,30 @@ JSON
                 .inbounds[0].streamSettings.realitySettings.serverNames == ["host-sni.example.com"] and
                 .inbounds[0].streamSettings.xhttpSettings.host == $host' "${realityPatchXrayXhttp}" >/dev/null || return 1
     done
+    (
+        # 同身份下行跟随 SNI，独立公钥或独立 SNI 不随主入站切换。
+        local identity downloadKey downloadSNI expectedSNI
+        for identity in shared independent-key independent-sni; do
+            downloadKey=shared-public downloadSNI=old.example.com expectedSNI=download-sni.example.com
+            case "${identity}" in
+            independent-key) downloadKey=independent-public; expectedSNI=${downloadSNI} ;;
+            independent-sni) downloadSNI=independent.example.com; expectedSNI=${downloadSNI} ;;
+            esac
+            updateRoutingJsonConfig "${realityPatchXrayXhttp}" '
+                .inbounds[0].streamSettings.realitySettings.publicKey = "shared-public" |
+                .inbounds[0].streamSettings.realitySettings.serverNames = ["old.example.com"] |
+                .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings =
+                    {address:"download.example.com",realitySettings:{publicKey:$key,serverName:$sni}}' \
+                --arg key "${downloadKey}" --arg sni "${downloadSNI}" || return 1
+            applyRealityTargetToInstalledConfigs "download-target.example.com:443" "download-sni.example.com" || return 1
+            jq -e --arg key "${downloadKey}" --arg sni "${expectedSNI}" '
+                .inbounds[0].streamSettings.realitySettings.serverNames == ["download-sni.example.com"] and
+                .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.address == "download.example.com" and
+                .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.publicKey == $key and
+                .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.serverName == $sni' \
+                "${realityPatchXrayXhttp}" >/dev/null || return 1
+        done
+    ) || return 1
     realityPatchOriginal=$(<"${realityPatchSingBoxVision}")
     if applyRealityTargetToInstalledConfigs "new.example.com:not-a-port" "sni.example.com" 2>/dev/null; then
         return 1
