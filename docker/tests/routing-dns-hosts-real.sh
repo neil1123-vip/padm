@@ -64,6 +64,9 @@ for family in ipv4 ipv6; do
     elif [[ "${PADM_ROUTING_REAL_SCOPE:-}" == bt ]]; then
         modes=(bt-control bt)
         [[ "${family}" != ipv4 ]] || modes+=(bt-global)
+    elif [[ "${PADM_ROUTING_REAL_SCOPE:-}" == region ]]; then
+        modes=(region-control region-both)
+        [[ "${family}" != ipv4 ]] || modes+=(region-domain region-ip region-off)
     else
         modes=(policy-control policy)
         [[ "${family}" != ipv4 ]] || modes+=(global resolve policy-global)
@@ -94,6 +97,16 @@ for family in ipv4 ipv6; do
               if $mode == "bt-control" then .
               else .routing.block_bt = true end |
               if $mode == "bt-global" then del(.routing.socks5.domains) else . end
+            ' "${TEST_ROOT}/${family}.spec.json"
+        elif [[ "${mode}" == region-* ]]; then
+            jq --arg mode "${mode}" '
+              ["cn-region.padm.invalid","allow-region.padm.invalid","dl.google.com"] as $names |
+              .routing.block = {domains:["full:persist-region.padm.invalid"]} |
+              .routing.dns.domains += ($names | map("full:"+.)) |
+              .routing.socks5.domains += (($names + ["persist-region.padm.invalid"]) | map("full:"+.)) |
+              if $mode == "region-control" or $mode == "region-off" then .
+              else .routing.region = {mode:($mode | ltrimstr("region-")),
+                allow_domains:["full:allow-region.padm.invalid"]} end
             ' "${TEST_ROOT}/${family}.spec.json"
         else
             jq --arg suffix "${suffix}" --arg mode "${mode}" '

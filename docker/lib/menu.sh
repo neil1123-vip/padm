@@ -629,6 +629,38 @@ dockerMenuSites() {
     done
 }
 
+dockerMenuRegion() {
+    local choice mode extra
+    while :; do
+        DOCKER_MENU_SIGNAL=0
+        printf '\nDocker 区域阻断策略\n'
+        printf '%s\n' '1. 屏蔽 geosite:cn + geoip:cn' '2. 仅屏蔽 geosite:cn' \
+            '3. 仅屏蔽 geoip:cn' '4. 关闭区域策略' '0. 返回'
+        printf '请选择: '
+        if ! IFS= read -r choice; then
+            [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
+            return 0
+        fi
+        case "${choice}" in
+        0) return 0 ;;
+        1|2|3)
+            case "${choice}" in 1) mode=both ;; 2) mode=domain ;; 3) mode=ip ;; esac
+            printf '默认直连例外: %s\n' "$(jq -r 'map(ltrimstr("domain:")) | join(",")' \
+                <<<"${PADM_DOCKER_REGION_DEFAULT_DOMAINS}")"
+            printf '区域阻断可能影响客户端连接；直连例外优先于其它阻断和 SOCKS5。\n'
+            dockerSetupRead extra '追加直连例外规则（逗号分隔，留空无追加，0 返回）: ' || continue
+            if [[ -n "${extra}" ]]; then
+                dockerMenuRun edit --region "${mode}" --region-allow "${extra}" || true
+            else
+                dockerMenuRun edit --region "${mode}" || true
+            fi
+            ;;
+        4) dockerMenuRun edit --region-off || true ;;
+        *) printf '无效选项，请重新选择。\n' ;;
+        esac
+    done
+}
+
 dockerMenuRouting() {
     local choice input
     while :; do
@@ -641,7 +673,7 @@ dockerMenuRouting() {
             '11. 关闭 Direct 直连例外' '12. 设置 Block 域名阻断' \
             '13. 关闭 Block 域名阻断' '14. 设置 IP/CIDR 阻断' \
             '15. 关闭 IP/CIDR 阻断' '16. 启用 BT 协议阻断' \
-            '17. 关闭 BT 协议阻断' '0. 返回'
+            '17. 关闭 BT 协议阻断' '18. 区域阻断策略' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -693,6 +725,7 @@ dockerMenuRouting() {
         15) dockerMenuRun edit --block-ips-off || true ;;
         16) dockerMenuRun edit --block-bt || true ;;
         17) dockerMenuRun edit --block-bt-off || true ;;
+        18) dockerMenuRegion ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

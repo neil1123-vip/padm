@@ -888,7 +888,8 @@ dockerProtocolCommand() (
         dockerConfigureSpecMigrate "${original}" "${normalized}" &&
         chmod 0600 "${normalized}" || return "${PADM_DOCKER_RC_STATE}"
     if [[ "${action}" == routing-status ]]; then
-        jq '{enabled:(.routing != null), server:(.routing.socks5.server // null),
+        jq --argjson region_defaults "${PADM_DOCKER_REGION_DEFAULT_DOMAINS}" '
+          {enabled:(.routing != null), server:(.routing.socks5.server // null),
           port:(.routing.socks5.port // null),
           mode:(if .routing.socks5 == null then "direct"
             elif .routing.socks5 | has("domains") then "domains" else "global" end),
@@ -903,7 +904,9 @@ dockerProtocolCommand() (
           (if .routing.direct != null then {direct:{domain_rules:.routing.direct.domains}} else {} end) +
           (if .routing.block != null then {block:{domain_rules:.routing.block.domains}} else {} end) +
           (if .routing.block_ips != null then {block_ips:{ip_rules:.routing.block_ips.ips}} else {} end) +
-          (if .routing.block_bt == true then {block_bt:true} else {} end)' "${normalized}"
+          (if .routing.block_bt == true then {block_bt:true} else {} end) +
+          (if .routing.region != null then {region:(.routing.region +
+            {default_allow_domains:$region_defaults})} else {} end)' "${normalized}"
         return $?
     fi
     if [[ "${action}" == list ]]; then
@@ -1319,6 +1322,7 @@ dockerEditCommand() {
     local siteMode= siteSource= siteUrl=
     local alpnListener= alpnOrder=
     local http01= socks5= socks5File= socks5Domains= routingKind= routingFile= routingAction=
+    local regionMode= regionAllow='[]' regionAllowSet=0
     local DOCKER_CONFIG_RESTORE_ALPN_LISTENER=
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
@@ -1387,7 +1391,21 @@ dockerEditCommand() {
             routingKind=block_bt routingAction=enable
             shift
             ;;
-        --dns-off|--hosts-off|--direct-off|--block-off|--block-ips-off|--block-bt-off)
+        --region)
+            [[ "$#" -ge 2 && -z "${routingKind}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            case "$2" in both|domain|ip) regionMode=$2 ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+            routingKind=region routingAction=enable
+            shift 2
+            ;;
+        --region-allow)
+            [[ "$#" -ge 2 && "${regionAllowSet}" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
+            if [[ -n "$2" ]]; then
+                regionAllow=$(dockerSocks5DomainsNormalize "$2") || return "${PADM_DOCKER_RC_USAGE}"
+            fi
+            regionAllowSet=1
+            shift 2
+            ;;
+        --dns-off|--hosts-off|--direct-off|--block-off|--block-ips-off|--block-bt-off|--region-off)
             [[ -z "${routingKind}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             routingKind=${1#--} routingKind=${routingKind%-off} routingAction=disable
             routingKind=${routingKind//-/_}
@@ -1456,6 +1474,8 @@ dockerEditCommand() {
         *) return "${PADM_DOCKER_RC_USAGE}" ;;
         esac
     done
+    [[ "${regionAllowSet}" -eq 0 || ( "${routingKind}" == region && "${routingAction}" == enable ) ]] ||
+        return "${PADM_DOCKER_RC_USAGE}"
     [[ ( -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" ) || -z "${specFile}" ]] &&
         [[ -z "${regenerateReality}" || ( -z "${realityTarget}" && -z "${realityStream}" ) ]] &&
         [[ -z "${realityTarget}" || -z "${realityStream}" ]] || {
@@ -1595,6 +1615,9 @@ dockerEditCommand() {
     if [[ -n "${routingKind}" ]]; then
         if [[ "${routingKind}" == block_bt && "${routingAction}" == enable ]]; then
             jq '.routing.block_bt = true' "${draft}" >"${draft}.next"
+        elif [[ "${routingKind}" == region && "${routingAction}" == enable ]]; then
+            jq --arg mode "${regionMode}" --argjson allow "${regionAllow}" \
+                '.routing.region = {mode:$mode,allow_domains:$allow}' "${draft}" >"${draft}.next"
         elif [[ "${routingAction}" == enable ]]; then
             dockerEditPrivateInputCopy "${routingFile}" "${workspace}/${routingKind}.json" "${routingKind}" || {
                 dockerError '路由输入须为 root 所有的 0600 单链接普通 JSON 文件，最多 64 KiB，祖先目录不得可写或含链接'

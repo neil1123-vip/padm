@@ -21,6 +21,7 @@ PADM_DOCKER_SERVICES_LOADED=1
 readonly PADM_DOCKER_CONTAINER_UID=10001
 readonly PADM_DOCKER_CONTAINER_GID=10001
 readonly PADM_DOCKER_SUBSCRIPTION_PORT=8081
+readonly PADM_DOCKER_REGION_DEFAULT_DOMAINS='["domain:dl.google.com","domain:apple.com","domain:bing.com","domain:microsoft.com","domain:gstatic.com","domain:xn--ngstr-lra8j.com","domain:googleapis.com","domain:googleapis.cn"]'
 
 DOCKER_CONFIG_CANDIDATE=
 DOCKER_CONFIG_BACKUP=
@@ -156,7 +157,8 @@ dockerConfigureSpecValidate() {
             (if has("direct") then ["direct"] else [] end) +
             (if has("block") then ["block"] else [] end) +
             (if has("block_ips") then ["block_ips"] else [] end) +
-            (if has("block_bt") then ["block_bt"] else [] end)) and
+            (if has("block_bt") then ["block_bt"] else [] end) +
+            (if has("region") then ["region"] else [] end)) and
           (if has("socks5") then
           (.socks5 | exact(["server", "port", "username", "password"] +
               if has("domains") then ["domains"] else [] end) and
@@ -193,7 +195,13 @@ dockerConfigureSpecValidate() {
               (.ips | type == "array" and length >= 1 and length <= 256 and
                 length == (unique | length) and all(.[]; routing_ip_selector)))
            else true end) and
-          (if has("block_bt") then .block_bt == true else true end)) and
+          (if has("block_bt") then .block_bt == true else true end) and
+          (if has("region") then
+            (.region | exact(["mode", "allow_domains"]) and
+              (.mode == "both" or .mode == "domain" or .mode == "ip") and
+              (.allow_domains | type == "array" and length <= 256 and
+                length == (unique | length) and all(.[]; routing_selector)))
+           else true end)) and
         all(.host_integrations[]; .type != "tun" and .type != "tproxy")
        else true end) and
       (if has("site") then
@@ -1393,8 +1401,19 @@ EOF
 
 dockerGenerateXrayConfig() {
     local specFile=$1 target=$2
-    jq -n --slurpfile request "${specFile}" '
-      $request[0] as $r |
+    jq -n --slurpfile request "${specFile}" --argjson region_defaults "${PADM_DOCKER_REGION_DEFAULT_DOMAINS}" '
+      # 区域预设只在生成时展开，关闭不会删除用户手工配置的相同规则。
+      ($request[0] | if .routing.region != null then
+        .routing.region as $region |
+        .routing.direct.domains = ((.routing.direct.domains // []) +
+          $region_defaults + $region.allow_domains | unique) |
+        if $region.mode == "both" or $region.mode == "domain" then
+          .routing.block.domains = ((.routing.block.domains // []) + ["geosite:cn"] | unique)
+        else . end |
+        if $region.mode == "both" or $region.mode == "ip" then
+          .routing.block_ips.ips = ((.routing.block_ips.ips // []) + ["geoip:cn"] | unique)
+        else . end
+      else . end) as $r |
       (($r.routing.socks5 // {}) | has("domains")) as $selective |
       (($r.routing.socks5.domains // []) | map(
         if startswith("keyword:") then ltrimstr("keyword:") else . end)) as $domains |
@@ -1573,7 +1592,7 @@ dockerGenerateXrayConfig() {
 
 dockerGenerateSingBoxConfig() {
     local specFile=$1 target=$2
-    jq -n --slurpfile request "${specFile}" '
+    jq -n --slurpfile request "${specFile}" --argjson region_defaults "${PADM_DOCKER_REGION_DEFAULT_DOMAINS}" '
       def domain_matches($rules):
         {
           domain: [$rules[] | select(startswith("full:")) | ltrimstr("full:")],
@@ -1586,7 +1605,18 @@ dockerGenerateSingBoxConfig() {
           {type: "logical", mode: "and", rules: [$match,
             {type: "logical", mode: "or", rules: $direct, invert: true}]}
         else $match end;
-      $request[0] as $r |
+      # 区域预设只在生成时展开，关闭不会删除用户手工配置的相同规则。
+      ($request[0] | if .routing.region != null then
+        .routing.region as $region |
+        .routing.direct.domains = ((.routing.direct.domains // []) +
+          $region_defaults + $region.allow_domains | unique) |
+        if $region.mode == "both" or $region.mode == "domain" then
+          .routing.block.domains = ((.routing.block.domains // []) + ["geosite:cn"] | unique)
+        else . end |
+        if $region.mode == "both" or $region.mode == "ip" then
+          .routing.block_ips.ips = ((.routing.block_ips.ips // []) + ["geoip:cn"] | unique)
+        else . end
+      else . end) as $r |
       (($r.routing.socks5 // {}) | has("domains")) as $selective |
       ($r.routing.socks5.domains // []) as $domains |
       (domain_matches($domains)) as $matches |

@@ -36,6 +36,8 @@ DIRECT_INPUT=${PRIVATE_ROOT}/direct.json
 BLOCK_INPUT=${PRIVATE_ROOT}/block.json
 BLOCK_IPS_INPUT=${PRIVATE_ROOT}/block-ips.json
 BLOCK_IPS='{"ips":["192.0.2.10","2001:db8::10","198.51.100.0/24","2001:db8::/64","geoip:cn"]}'
+REGION_ALLOW='["full:exact.example.com","domain:apple.com","full:custom-region.example.com"]'
+REGION_DEFAULTS='["domain:dl.google.com","domain:apple.com","domain:bing.com","domain:microsoft.com","domain:gstatic.com","domain:xn--ngstr-lra8j.com","domain:googleapis.com","domain:googleapis.cn"]'
 
 fail() {
     [[ ! -f "${LOG}" ]] || sed 's/^/  /' "${LOG}" >&2
@@ -140,6 +142,13 @@ jq --argjson block_ips "${BLOCK_IPS}" '.routing.block_ips = $block_ips' \
 jq '.routing = {block_bt:true}' "${TEST_ROOT}/base.json" >"${TEST_ROOT}/block-bt-only.json"
 jq '.routing.block_bt = true' "${TEST_ROOT}/routing-ip-policy.json" \
     >"${TEST_ROOT}/routing-bt-policy.json"
+for mode in both domain ip; do
+    jq --arg mode "${mode}" --argjson allow "${REGION_ALLOW}" \
+        '.routing = {region:{mode:$mode,allow_domains:$allow}}' "${TEST_ROOT}/base.json" \
+        >"${TEST_ROOT}/region-${mode}.json"
+done
+jq --argjson allow "${REGION_ALLOW}" '.routing.region = {mode:"both",allow_domains:$allow}' \
+    "${TEST_ROOT}/routing-bt-policy.json" >"${TEST_ROOT}/region-owner.json"
 
 # 同批正反输入由两份校验合同独立判断，避免 Schema 与生产校验分歧。
 python3 - "${PROJECT_ROOT}" "${TEST_ROOT}" <<'PY'
@@ -183,6 +192,27 @@ for index, bad in enumerate((False, None, 0, 1, "true", "false", [], {})):
     value = copy.deepcopy(bt_block)
     value["routing"]["block_bt"] = bad
     case(f"invalid-block-bt-{index}", value, False)
+region = json.loads((root / "region-both.json").read_text())
+for mode in ("both", "domain", "ip"):
+    case(f"region-{mode}", json.loads((root / f"region-{mode}.json").read_text()), True)
+case("region-owner", json.loads((root / "region-owner.json").read_text()), True)
+for count in (0, 256):
+    value = copy.deepcopy(region)
+    value["routing"]["region"]["allow_domains"] = [f"full:allow-{n}.example.com" for n in range(count)]
+    case(f"region-allow-{count}", value, True)
+for index, bad in enumerate((
+        None, [], {}, {"mode": "both"}, {"allow_domains": []},
+        {"mode": "all", "allow_domains": []}, {"mode": "Both", "allow_domains": []},
+        {"mode": True, "allow_domains": []}, {"mode": "both", "allow_domains": None},
+        {"mode": "both", "allow_domains": ["full:Example.com"]},
+        {"mode": "both", "allow_domains": ["regexp:.*"]},
+        {"mode": "both", "allow_domains": ["full:a.example.com"] * 2},
+        {"mode": "both", "allow_domains": [True]},
+        {"mode": "both", "allow_domains": [f"full:allow-{n}.example.com" for n in range(257)]},
+        {"mode": "both", "allow_domains": [], "extra": True})):
+    value = copy.deepcopy(region)
+    value["routing"]["region"] = bad
+    case(f"invalid-region-{index}", value, False)
 for index, rules in enumerate((
         ["0.0.0.0", "127.0.0.1", "255.255.255.255", "::", "::1", "FFFF:FFFF::1"],
         ["0.0.0.0/0", "127.0.0.1/32", "::/0", "::1/128", "192.0.2.10/24", "2001:db8::10/64"],
@@ -224,7 +254,7 @@ for kind in ("direct", "block"):
 for name, template in (("dns", dns), ("hosts", hosts),
                        ("direct", json.loads((root / "direct-only.json").read_text())),
                        ("block", json.loads((root / "block-only.json").read_text())),
-                       ("block-ips", ip_block), ("block-bt", bt_block)):
+                       ("block-ips", ip_block), ("block-bt", bt_block), ("region", region)):
     for version in (1, 2):
         value = copy.deepcopy(template)
         value["schema_version"] = version
@@ -431,6 +461,29 @@ done
 mv -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
     "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
 
+for fixture in region-both region-domain region-ip region-owner; do
+    dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/${fixture}.json" ||
+        fail "${fixture}: 当前 bundle 拒绝区域策略"
+done
+cp -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json" \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved"
+for marker in 'del(."x-padm-routing-region")' '."x-padm-routing-region" = false'; do
+    jq "${marker}" "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
+        >"${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+    reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/region-owner.json"
+    reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/region-both.json"
+    dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/routing-bt-policy.json" ||
+        fail '区域 marker 拒绝旧路由'
+done
+jq 'del(."x-padm-routing-socks5", ."x-padm-routing-domains", ."x-padm-routing-dns-hosts",
+  ."x-padm-routing-direct-block", ."x-padm-routing-block-ips", ."x-padm-routing-block-bt")' \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
+    >"${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/region-both.json" ||
+    fail '纯区域策略依赖其它路由 marker'
+mv -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+
 for fixture in block-bt-only routing-bt-policy; do
     dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/${fixture}.json" ||
         fail "${fixture}: 当前 bundle 拒绝 BT 阻断"
@@ -545,7 +598,7 @@ for version in 1 2; do
         "${TEST_ROOT}/legacy-sing-v${version}-core.json" >/dev/null ||
         fail "v${version}: 无 routing 改变旧 sing-box 默认出站"
 done
-for fixture in routed domains dns-only hosts-only routing-all routing-all-global direct-only block-only routing-policy block-ips-only routing-ip-policy block-bt-only routing-bt-policy; do
+for fixture in routed domains dns-only hosts-only routing-all routing-all-global direct-only block-only routing-policy block-ips-only routing-ip-policy block-bt-only routing-bt-policy region-both region-domain region-ip region-owner; do
     for core in xray sing-box; do
         if [[ "${core}" == xray ]]; then
             dockerGenerateXrayConfig "${TEST_ROOT}/${fixture}.json" "${TEST_ROOT}/${fixture}-${core}.json"
@@ -705,6 +758,59 @@ jq -en --slurpfile only "${TEST_ROOT}/block-bt-only-sing-box.json" \
   ($policy[0].route.rules | index($bt[0])) <
     ($policy[0].route.rules | map(.action) | index("resolve"))
 ' >/dev/null || fail 'sing-box BT 协议匹配、Direct 例外或解析前拒绝错误'
+[[ "${PADM_DOCKER_REGION_DEFAULT_DOMAINS}" == "${REGION_DEFAULTS}" ]] ||
+    fail '固定区域默认例外合同改变'
+for mode in both domain ip; do
+    jq -en --arg mode "${mode}" --argjson defaults "${REGION_DEFAULTS}" --argjson allow "${REGION_ALLOW}" \
+        --slurpfile config "${TEST_ROOT}/region-${mode}-xray.json" '
+      (($defaults + $allow) | unique) as $direct |
+      $config[0].routing.rules == (
+        [{type:"field",domain:$direct,outboundTag:"direct"}] +
+        (if $mode == "ip" then [] else [
+          {type:"field",domain:["geosite:cn"],outboundTag:"blocked"}] end) +
+        (if $mode == "domain" then [] else [
+          {type:"field",ip:["geoip:cn"],outboundTag:"blocked"}] end)) and
+      ($config[0].outbounds | map(.tag)) == ["direct","blocked"] and
+      all($config[0].inbounds[]; .sniffing.enabled == true and .sniffing.routeOnly == true)
+    ' >/dev/null || fail "${mode}: Xray 区域模式或默认/自定义例外错误"
+    jq -en --arg mode "${mode}" --argjson defaults "${REGION_DEFAULTS}" --argjson allow "${REGION_ALLOW}" \
+        --slurpfile config "${TEST_ROOT}/region-${mode}-sing-box.json" '
+      (($defaults + $allow) | unique) as $domains |
+      [{domain:[$domains[] | select(startswith("full:")) | ltrimstr("full:")]},
+       {domain_suffix:[$domains[] | select(startswith("domain:")) | ltrimstr("domain:")]}] as $direct |
+      $config[0].route.rules[0] == {action:"sniff",timeout:"1s"} and
+      ($config[0].route.rule_set | map(.tag) | sort) ==
+        (if $mode == "both" then ["padm-geoip-cn","padm-geosite-cn"]
+         elif $mode == "domain" then ["padm-geosite-cn"] else ["padm-geoip-cn"] end) and
+      all($config[0].route.rules[] | select(.action == "reject");
+        .type == "logical" and .mode == "and" and
+        .rules[1] == {type:"logical",mode:"or",invert:true,rules:$direct}) and
+      ($config[0].route.rules | map(select(.action == "reject")) | length) ==
+        (if $mode == "both" then 2 else 1 end) and
+      $config[0].route.rules[-2:] == ($direct | map(. + {action:"route",outbound:"direct"})) and
+      $config[0].route.final == "direct"
+    ' >/dev/null || fail "${mode}: sing-box 区域模式或 Direct 排除合同错误"
+done
+jq -en --argjson defaults "${REGION_DEFAULTS}" --argjson allow "${REGION_ALLOW}" \
+    --argjson domains "${DOMAINS}" --slurpfile old "${TEST_ROOT}/routing-bt-policy-xray.json" \
+    --slurpfile new "${TEST_ROOT}/region-owner-xray.json" '
+  def ordered_rules:
+    map(if has("domain") then .domain |= sort elif has("ip") then .ip |= sort else . end);
+  (($defaults + $allow + $domains) | unique |
+    map(if startswith("keyword:") then ltrimstr("keyword:") else . end)) as $direct |
+  $new[0].routing.rules[1] == {type:"field",domain:$direct,outboundTag:"direct"} and
+  ($new[0].routing.rules[2:] | ordered_rules) == ($old[0].routing.rules[2:] | ordered_rules) and
+  $new[0].outbounds == $old[0].outbounds
+' >/dev/null || fail 'Xray 区域合并重复 CN、改变 generic 或 BT/SOCKS 优先级'
+jq -en --slurpfile old "${TEST_ROOT}/routing-bt-policy-sing-box.json" \
+    --slurpfile new "${TEST_ROOT}/region-owner-sing-box.json" '
+  $new[0].route.rule_set == $old[0].route.rule_set and
+  ($new[0].route.rules | length) == ($old[0].route.rules | length) and
+  $new[0].outbounds == $old[0].outbounds and
+  all($new[0].route.rules[] | select(.action == "reject");
+    .rules[1].invert == true and
+    (.rules[1].rules | map(.domain_suffix // []) | add | index("apple.com")) != null)
+' >/dev/null || fail 'sing-box 区域重复分类、generic 或默认例外未合并'
 # 用核心的匹配语义检查每类独立命中，防止不同 matcher 被错误组合成 AND。
 python3 - "${TEST_ROOT}/domains-sing-box.json" <<'PY'
 import json
@@ -762,7 +868,7 @@ assert all(rule["type"] == "remote" and rule["format"] == "binary" and
            rule["http_client"] == {"engine": "go"} and "download_detour" not in rule
            for rule in rule_sets)
 PY
-for fixture in routed domains routing-all-global direct-only block-only routing-policy block-ips-only routing-ip-policy block-bt-only routing-bt-policy; do
+for fixture in routed domains routing-all-global direct-only block-only routing-policy block-ips-only routing-ip-policy block-bt-only routing-bt-policy region-both region-domain region-ip region-owner; do
     jq -en --slurpfile source "${TEST_ROOT}/${fixture}-xray.json" \
         --slurpfile runtime "${TEST_ROOT}/runtime-${fixture}-xray.json" '
       $runtime[0].outbounds == $source[0].outbounds and
@@ -776,7 +882,7 @@ for fixture in routed domains routing-all-global direct-only block-only routing-
 done
 for generator in dockerGenerateCompose dockerGenerateDeployment; do
     "${generator}" "${TEST_ROOT}/base.json" "${TEST_ROOT}/legacy-generated.json"
-    for fixture in routed domains dns-only hosts-only routing-all routing-all-global direct-only block-only routing-policy block-ips-only routing-ip-policy block-bt-only routing-bt-policy; do
+    for fixture in routed domains dns-only hosts-only routing-all routing-all-global direct-only block-only routing-policy block-ips-only routing-ip-policy block-bt-only routing-bt-policy region-both region-domain region-ip region-owner; do
         "${generator}" "${TEST_ROOT}/${fixture}.json" "${TEST_ROOT}/routed-generated.json"
         cmp -s "${TEST_ROOT}/legacy-generated.json" "${TEST_ROOT}/routed-generated.json" ||
             fail "${generator}: ${fixture} 意外改变容器能力或宿主端口"
@@ -824,6 +930,102 @@ runStatus() {
 assertClean
 jq -cn --arg uuid "${UUID}" '{schema_version:1,accounts:{($uuid):{
   name:"routing",upload:17,download:19,limit_bytes:0,baseline:{}}}}' | dockerTrafficWriteState
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != bt ]]; then
+    before=$(snapshot)
+    runEdit 0 --region both --preview
+    runEdit 0 --region ip --region-allow '' --preview
+    runEdit 0 --region-off --preview
+    runEdit 2 --region
+    runEdit 2 --region all --preview
+    runEdit 2 --region Both --preview
+    runEdit 2 --region both
+    runEdit 2 --region both --confirm invalid
+    runEdit 2 --region both --region ip --preview
+    runEdit 2 --region both --region-off --preview
+    runEdit 2 --region-off --region-off --preview
+    runEdit 2 --region-allow example.com --preview
+    runEdit 2 --region both --region-allow example.com --region-allow other.com --preview
+    runEdit 2 --region both --region-allow 'regexp:.*' --preview
+    runEdit 2 --region both --block-bt --preview
+    runEdit 2 --region-off --direct-off --preview
+    runEdit 2 --region both --spec "${TEST_ROOT}/base.json" --preview
+    runEdit 2 --region both --http01 enable --preview
+    runEdit 15 --spec "${TEST_ROOT}/region-both.json" --confirm PADM-DOCKER-EDIT
+    (
+        trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+        dockerSetupRead() { printf -v "$1" '%s' n; }
+        dockerAcquireDeploymentLock
+        dockerConfigureApply "${TEST_ROOT}/region-both.json" '' '' interactive
+    ) >"${LOG}" 2>&1 || fail '区域确认取消失败'
+    assertClean
+    [[ "$(snapshot)" == "${before}" ]] || fail '区域预览、非法输入或取消改变部署'
+    runEdit 0 --region both --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile old "${TEST_ROOT}/base.json" --slurpfile actual "${root}/config/spec.json" \
+        '$actual[0] == ($old[0] + {routing:{region:{mode:"both",allow_domains:[]}}})' >/dev/null ||
+        fail '区域无自定义例外时没有独立保留空列表'
+    before=$(snapshot)
+    runEdit 15 --spec "${TEST_ROOT}/base.json" --confirm PADM-DOCKER-EDIT
+    [[ "$(snapshot)" == "${before}" ]] || fail '普通 --spec 绕过区域专项冻结'
+    runEdit 0 --region domain --region-allow ' Full:Exact.Example.Com , APPLE.COM , full:custom-region.example.com , apple.com ' \
+        --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile expected "${TEST_ROOT}/region-domain.json" --slurpfile actual "${root}/config/spec.json" \
+        '$actual == $expected' >/dev/null || fail '区域模式替换或 CSV 归一化、去重错误'
+    runStatus 0
+    jq -e --argjson allow "${REGION_ALLOW}" --argjson defaults "${REGION_DEFAULTS}" '
+      .region == {mode:"domain",allow_domains:$allow,default_allow_domains:$defaults}
+    ' "${LOG}" >/dev/null || fail '区域状态混淆默认和自定义例外'
+    runEdit 0 --region ip --region-allow '' --confirm PADM-DOCKER-EDIT
+    jq -e '.routing == {region:{mode:"ip",allow_domains:[]}}' "${root}/config/spec.json" >/dev/null ||
+        fail '区域切换累加旧模式或空字符串未清空自定义例外'
+    [[ "$(stat -c '%a %u %h' "${root}/config/spec.json")" == '600 0 1' ]] ||
+        fail '区域规格未保持私有权限'
+    runEdit 0 --region-off --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile expected "${TEST_ROOT}/base.json" --slurpfile actual "${root}/config/spec.json" \
+        '$actual == $expected' >/dev/null || fail '区域最后项关闭没有删除空 routing'
+    (
+        trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+        dockerAcquireDeploymentLock
+        dockerConfigureApply "${TEST_ROOT}/routing-bt-policy.json" '' '' configure
+    ) >"${LOG}" 2>&1 || fail '初始化区域所有权夹具失败'
+    assertClean
+    runEdit 0 --region both --region-allow 'full:exact.example.com,domain:apple.com,full:custom-region.example.com' \
+        --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile expected "${TEST_ROOT}/region-owner.json" --slurpfile actual "${root}/config/spec.json" \
+        '$actual == $expected' >/dev/null || fail '区域展开写回或覆盖 generic 同规则'
+    before=$(snapshot)
+    for failure in health-fail int term; do
+        MODE=${failure}
+        rm -f -- "${TEST_ROOT}/failed-once"
+        case "${failure}" in
+        health-fail) runEdit 14 --region domain --confirm PADM-DOCKER-EDIT ;;
+        int) runEdit 130 --region-off --confirm PADM-DOCKER-EDIT ;;
+        term) runEdit 143 --region-off --confirm PADM-DOCKER-EDIT ;;
+        esac
+        [[ "$(snapshot)" == "${before}" ]] || fail "${failure}: 区域未恢复完整部署及流量"
+    done
+    MODE=ok
+    runEdit 0 --region-off --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile expected "${TEST_ROOT}/routing-bt-policy.json" --slurpfile actual "${root}/config/spec.json" \
+        '$actual == $expected' >/dev/null || fail '区域关闭删除 generic 同 CN 或其它子项'
+    for core in xray sing-box; do
+        cmp -s "${root}/config/${core}/config.json" "${TEST_ROOT}/runtime-routing-bt-policy-${core}.json" ||
+            fail "${core}: 区域关闭未精确恢复 generic 生成"
+    done
+    runStatus 0
+    jq -e 'has("region") | not' "${LOG}" >/dev/null || fail '区域关闭后仍显示有效预设'
+    jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload == 17 and .accounts[$uuid].download == 19' \
+        "${root}/data/traffic/state.json" >/dev/null || fail '区域事务清空累计流量'
+    (
+        trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+        dockerAcquireDeploymentLock
+        dockerConfigureApply "${TEST_ROOT}/base.json" '' '' configure
+    ) >"${LOG}" 2>&1 || fail '恢复区域前基线失败'
+    assertClean
+    if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == region ]]; then
+        printf 'docker-routing-region-regression-ok\n'
+        exit 0
+    fi
+fi
 before=$(snapshot)
 runEdit 0 --block-bt --preview
 runEdit 0 --block-bt-off --preview

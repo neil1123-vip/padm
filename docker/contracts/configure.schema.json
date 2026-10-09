@@ -20,6 +20,7 @@
   "x-padm-routing-direct-block": true,
   "x-padm-routing-block-ips": true,
   "x-padm-routing-block-bt": true,
+  "x-padm-routing-region": true,
   "additionalProperties": false,
   "required": ["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"],
   "properties": {
@@ -360,6 +361,21 @@
           "required": ["domains"],
           "properties": {
             "domains": {"$ref": "#/properties/routing/properties/socks5/properties/domains"}
+          }
+        },
+        "region": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "allow_domains"],
+          "properties": {
+            "mode": {"enum": ["both", "domain", "ip"]},
+            "allow_domains": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 256,
+              "uniqueItems": true,
+              "items": {"$ref": "#/properties/routing/properties/socks5/properties/domains/items"}
+            }
           }
         },
         "block_bt": {"const": true},

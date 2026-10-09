@@ -103,6 +103,25 @@ def ip_assets(root):
     (root / "geoip-cn.srs").chmod(0o644)
 
 
+def region_assets(root):
+    names = ["cn-region.padm.invalid", "allow-region.padm.invalid", "dl.google.com"]
+    entries = []
+    for name in names:
+        value = name.encode("ascii")
+        domain = b"\x08\x03\x12" + bytes([len(value)]) + value
+        entries.append(b"\x12" + bytes([len(domain)]) + domain)
+    # 例外也进入真实 CN 分类，使放行证据与区域阻断确实重叠。
+    site = b"\x0a\x02CN" + b"".join(entries)
+    assert len(site) < 128
+    path = root / "geosite.dat"
+    path.write_bytes(path.read_bytes() + b"\x0a" + bytes([len(site)]) + site)
+    source = root / "geosite-cn.json"
+    source.write_text(json.dumps(dict(version=3, rules=[dict(domain=names)])))
+    subprocess.run(["/routing-cores/sing-box", "rule-set", "compile", "--output",
+                    str(root / "geosite-cn.srs"), str(source)], check=True, stdout=subprocess.DEVNULL)
+    (root / "geosite-cn.srs").chmod(0o644)
+
+
 class DnsServer(socketserver.ThreadingUDPServer):
     daemon_threads = True
 
@@ -164,6 +183,9 @@ def system_hosts(family, host):
     path = Path("/etc/hosts")
     address_names = names + helpers["domain_names"](family) + block_names(family) + [
         f"hosts-{suffix}.padm.invalid", f"allowbt-{suffix}.padm.invalid"]
+    if os.environ.get("PADM_ROUTING_REAL_SCOPE") == "region":
+        address_names += ["cn-region.padm.invalid", "allow-region.padm.invalid", "dl.google.com",
+                          "persist-region.padm.invalid"]
     line = f"{host} {' '.join(address_names)} # padm-dns-{os.getpid()}-{family}\n"
     # 只给隔离容器增加可解析诱饵，负测若误回退系统解析就会抵达 HTTP 目的。
     with path.open("a") as target:
@@ -183,7 +205,7 @@ def runtime(root, core, family, host, local, dns, upstream, resource, mode="sele
     config = json.loads((root / f"{core}.{family}{variant}.json").read_text())
     suffix = "v6" if family == "ipv6" else "v4"
     mapped = f"hosts-{suffix}.padm.invalid"
-    mapped_address = host if mode.startswith(("ip-", "bt")) else (
+    mapped_address = host if mode.startswith(("ip-", "bt", "region-")) else (
         "127.0.0.1" if family == "ipv6" else "::1")
     if core == "xray":
         config["dns"]["hosts"]["full:" + mapped] = mapped_address
@@ -200,7 +222,7 @@ def runtime(root, core, family, host, local, dns, upstream, resource, mode="sele
             outbound["settings"]["servers"][0].update(address=host, port=upstream.server_address[1])
         inbound = dict(listen=host, port=local, tag="fixture-in", protocol="socks",
                        settings=dict(auth="noauth", udp=True))
-        if mode in ("selective", "policy", "policy-global") or mode.startswith(("ip-", "bt")):
+        if mode in ("selective", "policy", "policy-global") or mode.startswith(("ip-", "bt", "region-")):
             sniff = copy.deepcopy(next(item["sniffing"] for item in config["inbounds"]
                                        if item["tag"] != "padm-traffic-api"))
             assert sniff["routeOnly"], "DNS/hosts 不得将 sniff-only Host 改成实际连接目的"
@@ -223,9 +245,122 @@ def runtime(root, core, family, host, local, dns, upstream, resource, mode="sele
         for item in config["route"]["rule_set"]:
             assert item["http_client"] == {"engine": "go"}
             asset = ("geoip-cn" if item["tag"] == "padm-geoip-cn" else
+                     "geosite-cn" if item["tag"] == "padm-geosite-cn" else
                      "block" if item["tag"] == "padm-geosite-block" else "test")
             item["url"] = f"http://127.0.0.1:{resource.server_address[1]}/{asset}.srs"
     return config
+
+
+def check_region(root, core, family, host):
+    blocked = "cn-region.padm.invalid"
+    allowed = ["allow-region.padm.invalid", "dl.google.com"]
+    persist = "persist-region.padm.invalid"
+    resource_context = (Server(("127.0.0.1", 0), RuleResource) if core == "sing-box"
+                        else contextlib.nullcontext(None))
+    with (Server((host, 0), Destination) as destination, DnsServer((host, 0)) as dns,
+          Server((host, 0), Socks) as upstream, resource_context as resource,
+          system_hosts(family, host),
+          socket.socket(socket.AF_INET6 if family == "ipv6" else socket.AF_INET,
+                        socket.SOCK_DGRAM) as datagram):
+        destination.received = []
+        destination.accepted = 0
+        dns.answer_kind = 28 if family == "ipv6" else 1
+        upstream.destination_hosts = [blocked, *allowed, persist]
+        upstream.destination = destination.server_address[1]
+        upstream.auth = upstream.connects = 0
+        upstream.reject = False
+        datagram.bind((host, 0))
+        datagram.settimeout(1)
+        servers = [destination, dns, upstream]
+        if resource is not None:
+            resource.requests = resource.successes = 0
+            resource.requested_paths = []
+            resource.resources = {f"/{asset}.srs": (root / f"{asset}.srs").read_bytes()
+                                  for asset in ("test", "geosite-cn", "geoip-cn")}
+            servers.append(resource)
+        threads = [threading.Thread(target=server.serve_forever, kwargs=dict(poll_interval=0.05),
+                                    daemon=True) for server in servers]
+        for thread in threads:
+            thread.start()
+        try:
+            local = port(host)
+            binary = f"/routing-cores/{core}"
+            command = [binary, "run", "-c"]
+            validate = [binary, "run", "-test", "-c"] if core == "xray" else [binary, "check", "-c"]
+            least = ["setpriv", "--reuid=10001", "--regid=10001", "--clear-groups",
+                     "--bounding-set=-all", "--no-new-privs"]
+            pipelined = core == "xray"
+            modes = ["region-control", "region-both"]
+            if family == "ipv4":
+                modes += ["region-domain", "region-ip", "region-off"]
+            for mode in modes:
+                config = runtime(root, core, family, host, local, dns, upstream, resource, mode)
+                path = root / f"{core}.{family}.{mode}.runtime.json"
+                write_config(path, config)
+                subprocess.run(least + validate + [str(path)], check=True,
+                               stdout=subprocess.DEVNULL,
+                               env=dict(os.environ, XRAY_LOCATION_ASSET=str(root)))
+                with running(command, path, host, local, root / f"{core}.{family}.{mode}.log") as process:
+                    if mode in ("region-control", "region-off"):
+                        for target in (blocked, host):
+                            assert request(host, local, upstream.destination, target,
+                                           pipelined=pipelined), f"{mode}: 同目的区域对照不可达"
+                    else:
+                        targets = ([blocked] if mode == "region-domain" else
+                                   [host] if mode == "region-ip" else [blocked, host])
+                        for target in targets:
+                            before = (destination.accepted, len(dns.requests),
+                                      upstream.auth, upstream.connects)
+                            try:
+                                assert not request(host, local, upstream.destination, target,
+                                                   pipelined=pipelined), f"{mode}: 未拒绝 {target}"
+                            except (EOFError, ConnectionResetError):
+                                pass
+                            except socket.timeout:
+                                raise AssertionError(f"{mode}: 仅客户端超时，区域未实际拒绝")
+                            assert before == (destination.accepted, len(dns.requests),
+                                              upstream.auth, upstream.connects), (
+                                f"{mode}: 区域拒绝前泄漏")
+                        if mode == "region-both":
+                            for name in allowed:
+                                before = (destination.accepted, len(dns.requests), upstream.auth)
+                                assert request(host, local, upstream.destination, name,
+                                               pipelined=pipelined), "CN 域名例外没有放行"
+                                assert destination.accepted == before[0] + 1
+                                assert name in dns.requests[before[1]:] and upstream.auth == before[2]
+                                before = (destination.accepted, len(dns.requests), upstream.auth)
+                                assert request(host, local, upstream.destination, host, name,
+                                               pipelined=pipelined), "CN IP 嗅探例外没有放行"
+                                assert (destination.accepted, len(dns.requests), upstream.auth) == (
+                                    before[0] + 1, *before[1:]), "IP 例外改写目的或提前解析"
+                            helpers["udp"](host, local, datagram.getsockname()[1], allowed[0])
+                            assert datagram.recv(4096) == b"udp-leak", "区域 Direct 普通 UDP 未保留"
+                        else:
+                            # 独立反向正例防止切换模式时残留另一种区域阻断。
+                            target = host if mode == "region-domain" else blocked
+                            assert request(host, local, upstream.destination, target,
+                                           pipelined=pipelined), f"{mode}: 累加了旧模式阻断"
+                    before = (destination.accepted, len(dns.requests), upstream.auth, upstream.connects)
+                    try:
+                        assert not request(host, local, upstream.destination, persist,
+                                           pipelined=pipelined), "区域编辑移除了 generic Block"
+                    except (EOFError, ConnectionResetError):
+                        pass
+                    except socket.timeout:
+                        raise AssertionError("generic Block 未实际拒绝")
+                    assert before == (destination.accepted, len(dns.requests),
+                                      upstream.auth, upstream.connects)
+                    assert process.poll() is None, "区域拒绝导致核心退出"
+                print(f"routing-region-real-{core}-{family}-{mode}: "
+                      "domain/IP/Direct/ownership/no-leak checks passed", flush=True)
+            if resource is not None:
+                assert "/geosite-cn.srs" in resource.requested_paths
+                assert "/geoip-cn.srs" in resource.requested_paths
+        finally:
+            for server in servers:
+                server.shutdown()
+            for thread in threads:
+                thread.join(timeout=2)
 
 
 def check_bt(root, core, family, host):
@@ -678,10 +813,13 @@ if __name__ == "__main__":
     root.chmod(0o755)
     fixture_assets(root)
     scope = os.environ.get("PADM_ROUTING_REAL_SCOPE")
-    if scope != "bt":
+    if scope == "region":
+        region_assets(root)
+        ip_assets(root)
+    elif scope != "bt":
         policy_assets(root)
         ip_assets(root)
     for family, host in (("ipv4", "127.0.0.1"), ("ipv6", "::1")):
         for core in ("xray", "sing-box"):
-            (check_bt if scope == "bt" else check_ips if scope == "ips" else check)(
-                root, core, family, host)
+            (check_region if scope == "region" else check_bt if scope == "bt" else
+             check_ips if scope == "ips" else check)(root, core, family, host)

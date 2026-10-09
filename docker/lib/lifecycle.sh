@@ -37,6 +37,8 @@ dockerUsage() {
   padm-docker edit --block-ips-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --block-bt [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --block-bt-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --region <both|domain|ip> [--region-allow <域名规则 CSV>] [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --region-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --alpn <入口 ID> <h2,http/1.1|http/1.1,h2|http/1.1> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker protocol list
   padm-docker protocol links [入口 ID]
