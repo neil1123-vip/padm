@@ -1246,6 +1246,15 @@ Draft 2020-12/FormatChecker 及独立只读审计通过，13 个提交文件与 
 验收：菜单与 CLI 的结果及退出码一致；更新失败可退回匹配规格；
 Geo/试跑失败不修改生产配置；卸载不遗留本项目调度、不清理外部资源。
 
+本阶段菜单补齐提交 `b856ff61`：主菜单新增 `18. 服务维护`，复用既有
+`validate`、`update`、`rollback`、普通 `uninstall` CLI。更新和卸载在菜单内先做
+`y/N` 确认，不开放 `purge` 或 `--remove-images`；校验成功留在菜单，更新/回滚/
+卸载成功结束旧菜单会话，避免继续使用已切换或已移除的 bundle，失败保留原退出码
+并回到维护子菜单。8 组真实 PTY 覆盖成功、失败、取消、EOF 和维护动作分发。
+Docker Linux amd64 `docker-menu` Jobs 2 测试 `31.822` 秒、入口 `32.751` 秒、
+排队 `5740` ms 通过；容器内 Bash `-n`、ShellCheck error 级检查和 `git diff --check`
+通过。未重复 phase6/完整回归；生产宿主真实生命周期仍待验。
+
 #### 4B.1 核心升级评估
 
 菜单第 13 项和 `padm-docker assess` 接入独立评估流程；发布资产参数与 `update`
