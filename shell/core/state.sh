@@ -453,9 +453,10 @@ readInstallProtocolType() {
             fi
         fi
         if [[ -f "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json" ]]; then
+            local auxiliaryRealityPrivateKey
             singBoxVLESSRealityGRPCPort=$(jq -r '.inbounds[0].listen_port' "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json")
             singBoxVLESSRealityGRPCSNI=$(jq -r '.inbounds[0].tls.server_name // empty' "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json")
-            currentRealityPrivateKey=$(jq -r '.inbounds[0].tls.reality.private_key // empty' "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json")
+            auxiliaryRealityPrivateKey=$(jq -r '.inbounds[0].tls.reality.private_key // empty' "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json")
             if [[ -z "${realityTargetHost:-}" || "${realityTargetHost}" == "null" ]]; then
                 realityTargetHost=$(jq -r '.inbounds[0].tls.reality.handshake.server // empty' "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json")
             fi
@@ -465,11 +466,12 @@ readInstallProtocolType() {
             if [[ -z "${singBoxVLESSRealityPublicKey:-}" && -f "${singBoxConfigPath}reality_key" ]]; then
                 singBoxVLESSRealityPublicKey=$(grep "publicKey" <"${singBoxConfigPath}reality_key" | awk -F "[:]" '{print $2}')
             fi
-            if [[ -z "${singBoxVLESSRealityPublicKey:-}" && -n "${currentRealityPrivateKey:-}" ]]; then
-                singBoxVLESSRealityPublicKey=$(derivePublicKeyFromPrivateKey "${currentRealityPrivateKey}" || true)
+            if [[ -z "${singBoxVLESSRealityPublicKey:-}" && -n "${auxiliaryRealityPrivateKey:-}" ]]; then
+                singBoxVLESSRealityPublicKey=$(derivePublicKeyFromPrivateKey "${auxiliaryRealityPrivateKey}" || true)
             fi
             if [[ -z "${currentRealityPublicKey:-}" && -n "${singBoxVLESSRealityPublicKey:-}" ]]; then
                 currentRealityPublicKey=${singBoxVLESSRealityPublicKey}
+                currentRealityPrivateKey=${auxiliaryRealityPrivateKey}
             fi
         fi
         if [[ -f "${singBoxConfigPath}09_tuic_inbounds.json" ]]; then

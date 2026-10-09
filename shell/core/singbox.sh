@@ -761,17 +761,39 @@ readSingBoxProtocolPort() {
     local -n protocolPortsRef=$1
     local protocolId=$2 historyPort=${3:-} inputsOnly=${4:-false}
     local transport=tcp promptHistory=true promptKey=singbox_custom_port realityId= stream= type
+    local oldProtocolPort= portHoppingType= protocolName configFile
+    local hysteria2PortHoppingStart= hysteria2PortHoppingEnd= hysteria2PortHopping=
+    local tuicPortHoppingStart= tuicPortHoppingEnd= tuicPortHopping=
     case "${protocolId}" in
     1) realityId=1; stream=vision; promptKey=reality_subport ;;
     26) realityId=26; promptKey=reality_grpc_subport ;;
-    3 | 31) transport=udp ;;
+    3) transport=udp; portHoppingType=hysteria2 ;;
+    31) transport=udp; portHoppingType=tuic ;;
     5 | 30) transport=tcp+udp ;;
     esac
+    if [[ -n "${portHoppingType}" ]]; then
+        configFile=$(singBoxTemplateConfigFile "$(protocolCapabilityMeta "${protocolId}" config_file)") || return 1
+        if [[ -f "${configFile}" ]]; then
+            oldProtocolPort=$(jq -er '.inbounds[0].listen_port' "${configFile}") || return 1
+            validPortNumber "${oldProtocolPort}" || return 1
+        fi
+    fi
     if [[ "${inputsOnly}" != true && -n "${PADM_INSTALL_SINGBOX_PORTS[${protocolId}]:-}" ]]; then
         historyPort=${PADM_INSTALL_SINGBOX_PORTS[${protocolId}]}
         promptHistory=false
     fi
     readSingBoxPortResult "$1" "${historyPort}" "${promptHistory}" "${transport}" "${promptKey}" "${realityId}" "${stream}" "${inputsOnly}" || return 1
+    if [[ -n "${oldProtocolPort}" && "${oldProtocolPort}" != "${protocolPortsRef[-1]}" ]]; then
+        protocolName=$(protocolCapabilityMeta "${protocolId}" name) || return 1
+        readPortHopping "${portHoppingType}" "${oldProtocolPort}" || {
+            errorCard "${protocolName} 旧端口跳跃规则读取失败，已取消更换监听端口"
+            return 1
+        }
+        if [[ -n "${hysteria2PortHoppingStart}${tuicPortHoppingStart}" ]]; then
+            errorCard "${protocolName} 旧监听端口仍有端口跳跃规则，请先到端口跳跃管理删除后再更换监听端口"
+            return 1
+        fi
+    fi
     if declare -p singBoxInstallListeners >/dev/null 2>&1; then
         for type in tcp udp; do
             [[ "${transport}" == "${type}" || "${transport}" == tcp+udp ]] || continue

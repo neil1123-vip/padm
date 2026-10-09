@@ -3165,10 +3165,10 @@ regenerateRealityProfileApply() {
                 filter='.inbounds[0].streamSettings.realitySettings as $oldReality |
                     $oldReality.publicKey as $oldKey |
                     if $oldKey != null and
-                        .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.publicKey == $oldKey
+                        .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.publicKey == $oldKey and
+                        .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.serverName == $oldReality.serverNames[0]
                     then .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings |=
-                        (if .serverName == $oldReality.serverNames[0] then .serverName = $sni else . end |
-                            .publicKey = $publicKey)
+                        (.serverName = $sni | .publicKey = $publicKey)
                     else . end | '"${filter}"
             fi
         elif [[ "${coreInstallType}" == 2 ]]; then
@@ -3220,7 +3220,7 @@ manageReality() {
             refreshRealityState=false
         fi
         echoContent title "\n┌─ REALITY 管理 ─────────────────────────────────────"
-        menuItem 1 "重新生成 Reality 参数" "更新 key、shortId 等 Reality 参数"
+        menuItem 1 "重新生成 Reality 参数" "生成或复用密钥；保留账号、入口与传输设置"
         menuItem 2 "目标站管理" "查看、检测或切换 Reality 伪装目标"
         menuItem 3 "配置 443 共存分流" "同机真实网站与 Reality 共用公网 443"
         menuItem 4 "查看当前分流状态" "检查 state、Nginx stream 与后端监听"

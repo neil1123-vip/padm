@@ -3886,6 +3886,10 @@ runSingBoxProtocolReloadFailureRegression() (
     readSingBoxPortResult() { local -n ports=$1; ports=(18443); }
     initHysteria2Network() { return 0; }
     initTuicProtocol() { return 0; }
+    readPortHopping() {
+        hysteria2PortHoppingStart= hysteria2PortHoppingEnd=
+        tuicPortHoppingStart= tuicPortHoppingEnd=
+    }
 
     (
         local dependencyRoot="${root}/reality-tls"
@@ -4272,6 +4276,81 @@ runSingBoxProtocolReloadFailureRegression() (
         singBoxProtocolInstall 31 </dev/null >/dev/null 2>&1
         [[ "${tlsCalls}${transactions}${downloads}${allows}" == 2111 && "${AUTO_PORT}" == 24444 ]]
     )
+
+    (
+        # 更换监听端口前拒绝遗留跳跃范围；同端口、无范围和首次安装不受影响。
+        local PADM_SINGBOX_CONFIG_DIR="${root}/reinstall-hopping"
+        local AUTO_INSTALL=true AUTO_REUSE_LAST=no AUTO_UUID=11111111-1111-4111-8111-111111111111 AUTO_USER=hopping-user AUTO_PORT=
+        local protocolId configFile configBefore hoppingMode readCalls tlsCalls transactions networkCalls errorMessage
+        local readType readTarget
+        local selectCustomInstallType singBoxHysteria2Port= singBoxTuicPort=
+        local -A PADM_INSTALL_SINGBOX_PORTS=()
+        mkdir -p "${PADM_SINGBOX_CONFIG_DIR}" || return 1
+        coreTemplateCollectInitialClients() { return 0; }
+        readSingBoxPortResult() { local -n fixturePorts=$1; fixturePorts=("${AUTO_PORT}"); }
+        initHysteria2Network() { networkCalls=$((networkCalls + 1)); }
+        initTuicProtocol() { networkCalls=$((networkCalls + 1)); }
+        singBoxEnsureTLSDependency() { tlsCalls=$((tlsCalls + 1)); }
+        coreInstallConfigTransaction() { transactions=$((transactions + 1)); }
+        corePortSyncHysteriaAliases() { return 0; }
+        errorCard() { errorMessage=$*; }
+        readPortHopping() {
+            readCalls=$((readCalls + 1))
+            readType=$1 readTarget=$2
+            [[ "${hoppingMode}" != readfail ]] || return 1
+            if [[ "${hoppingMode}" == range ]]; then
+                case "$1" in
+                hysteria2) hysteria2PortHoppingStart=20000; hysteria2PortHoppingEnd=20100 ;;
+                tuic) tuicPortHoppingStart=20000; tuicPortHoppingEnd=20100 ;;
+                esac
+            fi
+        }
+        for protocolId in 3 31; do
+            configFile=$(singBoxTemplateConfigFile "$(protocolCapabilityMeta "${protocolId}" config_file)") || return 1
+            jq -n --arg uuid "${AUTO_UUID}" --arg id "${protocolId}" '{
+                inbounds:[{listen_port:18443,users:[{name:"disk-user",password:"disk-password"} +
+                    (if $id == "31" then {uuid:$uuid} else {} end)]}]
+            }' >"${configFile}" || return 1
+            configBefore=$(<"${configFile}")
+            for hoppingMode in range readfail empty sameport; do
+                readCalls=0 tlsCalls=0 transactions=0 networkCalls=0 errorMessage= readType= readTarget=
+                AUTO_PORT=24444
+                [[ "${hoppingMode}" != sameport ]] || AUTO_PORT=18443
+                if [[ "${hoppingMode}" == range || "${hoppingMode}" == readfail ]]; then
+                    regressionExpectStatus 1 singBoxProtocolInstall "${protocolId}" </dev/null || return 1
+                    [[ "${readCalls}${tlsCalls}${transactions}${networkCalls}" == 1000 &&
+                        "$(<"${configFile}")" == "${configBefore}" ]] || return 1
+                    if [[ "${hoppingMode}" == range ]]; then
+                        [[ "${errorMessage}" == *请先到端口跳跃管理删除* ]] || return 1
+                    else
+                        [[ "${errorMessage}" == *旧端口跳跃规则读取失败* ]] || return 1
+                    fi
+                    readCalls=0 errorMessage=
+                    selectCustomInstallType=",${protocolId},"
+                    regressionExpectStatus 1 prepareSingBoxInstallInputs </dev/null || return 1
+                    [[ "${readCalls}${networkCalls}" == 10 &&
+                        "$(<"${configFile}")" == "${configBefore}" &&
+                        -z "${PADM_INSTALL_SINGBOX_PORTS[${protocolId}]:-}" ]] || return 1
+                else
+                    singBoxProtocolInstall "${protocolId}" </dev/null || return 1
+                    [[ "${tlsCalls}${transactions}${networkCalls}" == 111 && -z "${errorMessage}" ]] || return 1
+                    if [[ "${hoppingMode}" == sameport ]]; then
+                        [[ "${readCalls}" == 0 ]] || return 1
+                    else
+                        [[ "${readCalls}" == 1 ]] || return 1
+                    fi
+                fi
+                if [[ "${readCalls}" == 1 ]]; then
+                    [[ "${readTarget}" == 18443 ]] || return 1
+                    [[ "${protocolId}:${readType}" == 3:hysteria2 || "${protocolId}:${readType}" == 31:tuic ]] || return 1
+                fi
+            done
+            rm -f "${configFile}"
+            hoppingMode=readfail AUTO_PORT=24444 readCalls=0 tlsCalls=0 transactions=0 networkCalls=0
+            singBoxProtocolInstall "${protocolId}" </dev/null || return 1
+            [[ "${readCalls}${tlsCalls}${transactions}${networkCalls}" == 0111 ]] || return 1
+        done
+    ) || return 1
 
     (
         # 重装完成后才迁移 UDP 别名，迁移失败不撤销已生效的新 Hy2 入站。
@@ -4701,6 +4780,13 @@ runRealityRegenerateTransactionRegression() (
     updateRoutingJsonConfig "${profileFile}" '.inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.publicKey = "external-public"'
     regenerateRealityProfile
     jq -e '.inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.publicKey == "external-public" and .routing.rules[0].outboundTag == "keep-route"' "${profileFile}" >/dev/null
+    updateRoutingJsonConfig "${profileFile}" '.inbounds[0].streamSettings.realitySettings.publicKey = "shared-public" |
+        .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.publicKey = "shared-public" |
+        .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.serverName = "independent.example.com"'
+    regenerateRealityProfile
+    jq -e '.inbounds[0].streamSettings.realitySettings.publicKey == "new-public" and
+        .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.publicKey == "shared-public" and
+        .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.serverName == "independent.example.com"' "${profileFile}" >/dev/null
     (
         # 真实校验入口必须执行语义 check，merge 成功不能代替校验。
         eval "${validationSource}"

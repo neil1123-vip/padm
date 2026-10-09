@@ -1481,6 +1481,7 @@ runPortHoppingWithoutPersistentRegression() (
     local downloadCount=0
     local inputCount=0
     local rangeMode=invalid-hyphen
+    local iptablesWriteCalls=0
     local iptablesDeleteShouldFail=false
     local iptablesSaveShouldFail=false
     local rc
@@ -1567,6 +1568,9 @@ runPortHoppingWithoutPersistentRegression() (
     }
     sudo() { "$@"; }
     iptables() {
+        if [[ "$*" == *"-A PREROUTING"* || "$*" == *"-D PREROUTING"* ]]; then
+            iptablesWriteCalls=$((iptablesWriteCalls + 1))
+        fi
         if [[ "$*" == *"-A PREROUTING"* ]]; then
             if [[ "$*" == *"neil1123-vip_tuic_portHopping"* ]]; then
                 cat >"${natStateFile}" <<'EOF'
@@ -1714,6 +1718,77 @@ EOF
     [[ "${rc}" == "1" ]]
     ! grep -q 'neil1123-vip_hysteria2_portHopping' "${natStateFile}"
 
+    (
+        local natStateFile="${TMP_DIR}/port-hopping-guard-nat.state"
+        local PADM_FIREWALL_STATE_FILE="${TMP_DIR}/port-hopping-guard-firewall.state"
+        local writeCallsBefore=${iptablesWriteCalls}
+        local allowCallsBefore=${allowCalls}
+        local saveStatus=1
+        singBoxTuicPort=26451
+        rm -f "${PADM_FIREWALL_STATE_FILE}"
+        cat >"${natStateFile}" <<'EOF'
+-A PREROUTING -p udp --dport 34000:34002 -m comment --comment neil1123-vip_tuic_portHopping -j DNAT --to-destination :26450
+EOF
+        iptables-save() {
+            cat "${natStateFile}"
+            return "${saveStatus}"
+        }
+        inputCount=1
+        hysteria2PortHoppingStart=
+        hysteria2PortHoppingEnd=
+        regressionExpectStatus 1 addPortHopping hysteria2 16295 >/dev/null 2>&1
+        grep -q '防火墙转发规则读取失败' "${warnLog}"
+        [[ "${iptablesWriteCalls}" == "${writeCallsBefore}" ]]
+        [[ "${allowCalls}" == "${allowCallsBefore}" ]]
+        [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
+        saveStatus=0
+        cat >"${natStateFile}" <<'EOF'
+-A PREROUTING -p udp --dport 32000:33000 -m comment --comment "neil1123-vip_tuic_portHopping" -j DNAT --to-destination :26450
+EOF
+        inputCount=1
+        regressionExpectStatus 1 addPortHopping hysteria2 16295 >/dev/null 2>&1
+        grep -q '范围与现有端口跳跃规则重叠' "${warnLog}"
+        [[ "${iptablesWriteCalls}" == "${writeCallsBefore}" ]]
+        [[ "${allowCalls}" == "${allowCallsBefore}" ]]
+        [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
+        grep -q 'neil1123-vip_tuic_portHopping' "${natStateFile}"
+        ! grep -q 'neil1123-vip_hysteria2_portHopping' "${natStateFile}"
+        cat >"${natStateFile}" <<'EOF'
+-A PREROUTING -p udp --dport 34000:34002 -m comment --comment neil1123-vip_tuic_portHopping -j DNAT --to-destination :26450
+-A PREROUTING -p udp --dport 33000:33002 -m comment --comment neil1123-vip_tuic_portHopping-other -j DNAT --to-destination :26450
+-A PREROUTING -p tcp --dport 33000:33002 -m comment --comment neil1123-vip_tuic_portHopping -j DNAT --to-destination :26450
+EOF
+        inputCount=1
+        regressionExpectStatus 0 addPortHopping hysteria2 16295 >/dev/null 2>&1
+        [[ "${iptablesWriteCalls}" == "$((writeCallsBefore + 1))" ]]
+        grep -q 'neil1123-vip_hysteria2_portHopping' "${natStateFile}"
+    )
+
+    (
+        local rhelLike=true forwardFixture
+        local queryStatus=0 firewallCalls=0
+        hysteria2PortHoppingStart=
+        hysteria2PortHoppingEnd=
+        systemctl() { return 0; }
+        sudo() {
+            if [[ "$*" == 'firewall-cmd --zone=public --permanent --list-forward-ports' ]]; then
+                printf '%s\n' "${forwardFixture}"
+                return "${queryStatus}"
+            fi
+            firewallCalls=$((firewallCalls + 1))
+        }
+        for forwardFixture in port=32000-33000:proto=udp:toport=26450 port=33001:proto=udp:toport=16295:toaddr=192.0.2.1 port=33001:proto=udp:toport=16295:toaddr=::1; do
+            inputCount=1
+            regressionExpectStatus 1 addPortHopping hysteria2 16295 >/dev/null 2>&1
+            [[ "${firewallCalls}" == 0 ]]
+        done
+        forwardFixture=port=34000:proto=udp:toport=26450
+        queryStatus=1
+        inputCount=1
+        regressionExpectStatus 1 addPortHopping hysteria2 16295 >/dev/null 2>&1
+        [[ "${firewallCalls}" == 0 ]]
+    )
+
     inputCount=1
     allowPortShouldFail=true
     set +e
@@ -1808,9 +1883,13 @@ EOF
         savedRules=
         readPortHopping tuic 26451
         [[ -z "${tuicPortHopping}" ]]
-        iptablesSaveShouldFail=true
-        readPortHopping hysteria2 16295
-        [[ -z "${hysteria2PortHopping}" ]]
+        savedRules='-A PREROUTING -p udp --dport 33000:33002 -m comment --comment neil1123-vip_hysteria2_portHopping -j DNAT --to-destination :16295'
+        iptables-save() { printf '%s\n' "${savedRules}"; return 1; }
+        hysteria2PortHopping=stale-range
+        hysteria2PortHoppingStart=33000
+        hysteria2PortHoppingEnd=33002
+        regressionExpectStatus 1 readPortHopping hysteria2 16295
+        [[ -z "${hysteria2PortHopping}${hysteria2PortHoppingStart}${hysteria2PortHoppingEnd}" ]] || return 1
     )
 
     (
@@ -1848,8 +1927,11 @@ EOF
             [[ -z "${hysteria2PortHopping}" ]]
         done
         queryStatus=1
-        readPortHopping tuic 26451
-        [[ -z "${tuicPortHopping}" ]]
+        tuicPortHopping=stale-range
+        tuicPortHoppingStart=34001
+        tuicPortHoppingEnd=34001
+        regressionExpectStatus 1 readPortHopping tuic 26451
+        [[ -z "${tuicPortHopping}${tuicPortHoppingStart}${tuicPortHoppingEnd}" ]] || return 1
     )
 
     (
@@ -2061,6 +2143,16 @@ runPortHoppingMenuUsesCommandLookupRegression() (
     portHoppingMenu hysteria2
     [[ "${menuReadCount}" == "2" ]]
     grep -q '当前端口跳跃范围为: 33000-33005' "${actionLog}"
+
+    (
+        local protocol singBoxTuicPort=26451
+        menuReadCount=0
+        readPortHopping() { return 1; }
+        for protocol in hysteria2 tuic; do
+            regressionExpectStatus 1 portHoppingMenu "${protocol}"
+        done
+        [[ "${menuReadCount}" == 0 ]]
+    )
 
     (
         # 范围实际变化才刷新；后置清理或刷新失败仍保留已生效的范围及失败状态。
@@ -4852,6 +4944,16 @@ JSON
             [[ "${xrayVLESSRealityXHTTPSNI}" == "xhttp-sni.example" ]]
             [[ "${currentRealityPublicKey}" == "public-key" ]]
             [[ "${currentRealityPrivateKey}" == "private-key" ]]
+            local auxiliaryConfigPath="${root}/auxiliary sing-box conf/"
+            mkdir -p "${auxiliaryConfigPath}"
+            cat >"${auxiliaryConfigPath}08_VLESS_vision_gRPC_inbounds.json" <<'JSON'
+{"inbounds":[{"listen_port":24443,"users":[{"uuid":"grpc-user-b"}],"tls":{"server_name":"grpc-b.example","reality":{"private_key":"private-key-b","handshake":{"server":"grpc-target-b.example","server_port":443}}}}]}
+JSON
+            printf 'publicKey:public-key-b\n' >"${auxiliaryConfigPath}reality_key"
+            singBoxConfigPath="${auxiliaryConfigPath}"
+            readInstallProtocolType
+            [[ "${singBoxVLESSRealityGRPCPort}" == 24443 && "${singBoxVLESSRealityPublicKey}" == public-key-b ]] || return 1
+            [[ "${currentRealityPrivateKey}" == private-key && "${currentRealityPublicKey}" == public-key ]] || return 1
             readConfigHostPathUUID
             [[ "${currentUUID}" == xhttp-user && "${currentPath}" == saved ]]
             [[ "${xrayVLESSRealityXHTTPort}" == 12606 ]]
