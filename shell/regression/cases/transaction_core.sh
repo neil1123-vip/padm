@@ -5571,6 +5571,42 @@ runRealityRegenerateTransactionRegression() (
             fi
         done
     done
+    (
+        # Vision 参数再生同时更新前端放行 SNI，其它身份、监听和分流规则保持原值。
+        local coreInstallType=1 currentInstallProtocolType=,1, failure=success visionUnchanged
+        cat >"${profileFile}" <<'JSON'
+{
+  "inbounds": [
+    {"tag":"dokodemo-in","protocol":"dokodemo-door","port":2443,
+     "settings":{"address":"127.0.0.1","port":45987,"network":"tcp"}},
+    {"listen":"127.0.0.1","port":45987,"settings":{"clients":[{"id":"keep-id"}],"decryption":"keep-encryption"},
+     "streamSettings":{"realitySettings":{"target":"old.example.com:443","serverNames":["old.example.com"],
+       "privateKey":"old-private","publicKey":"old-public","shortIds":["keep-short-id"]}}}
+  ],
+  "routing": {"marker":"keep","rules":[
+    {"inboundTag":["dokodemo-in"],"domain":["old.example.com","other.example.com"],"outboundTag":"z_direct_outbound","network":"tcp"},
+    {"inboundTag":["dokodemo-in"],"outboundTag":"blackhole_out"},
+    {"inboundTag":["other-in"],"domain":["old.example.com"],"outboundTag":"z_direct_outbound"},
+    {"inboundTag":["dokodemo-in"],"domain":["old.example.com"],"outboundTag":"custom-out"},
+    {"inboundTag":["dokodemo-in"],"domain":["full:old.example.com"],"outboundTag":"z_direct_outbound"}
+  ]}
+}
+JSON
+        visionUnchanged=$(jq -c 'del(.inbounds[1].streamSettings.realitySettings.target,
+            .inbounds[1].streamSettings.realitySettings.serverNames, .inbounds[1].streamSettings.realitySettings.privateKey,
+            .inbounds[1].streamSettings.realitySettings.publicKey, .inbounds[1].streamSettings.realitySettings.mldsa65Seed,
+            .inbounds[1].streamSettings.realitySettings.mldsa65Verify, .routing.rules[0].domain[0])' "${profileFile}") || return 1
+        regenerateRealityProfile || return 1
+        jq -e '.inbounds[1].streamSettings.realitySettings as $reality |
+            $reality.target == "target.example.com:443" and $reality.serverNames == ["sni.example.com"] and
+            $reality.privateKey == "new-private" and $reality.publicKey == "new-public" and
+            $reality.mldsa65Seed == "new-seed" and $reality.mldsa65Verify == "new-verify" and
+            .routing.rules[0].domain == ["sni.example.com","other.example.com"]' "${profileFile}" >/dev/null || return 1
+        [[ "$(jq -c 'del(.inbounds[1].streamSettings.realitySettings.target,
+            .inbounds[1].streamSettings.realitySettings.serverNames, .inbounds[1].streamSettings.realitySettings.privateKey,
+            .inbounds[1].streamSettings.realitySettings.publicKey, .inbounds[1].streamSettings.realitySettings.mldsa65Seed,
+            .inbounds[1].streamSettings.realitySettings.mldsa65Verify, .routing.rules[0].domain[0])' "${profileFile}")" == "${visionUnchanged}" ]] || return 1
+    ) || return 1
     # 再生身份保留分流监听、客户和传输参数；只有共用旧公钥的下行同步身份。
     coreInstallType=1
     currentInstallProtocolType=,2,

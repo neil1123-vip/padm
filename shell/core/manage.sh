@@ -3218,6 +3218,18 @@ regenerateRealityProfileApply() {
             filter='.inbounds[$index].streamSettings.realitySettings |=
                 (. + {target:$target, serverNames:[$sni], privateKey:$privateKey, publicKey:$publicKey,
                     mldsa65Seed:$seed, mldsa65Verify:$verify})'
+            if [[ "${protocolId}" == 1 ]]; then
+                # Vision 前端按 SNI 放行，随身份更新时保留其它路由条件。
+                filter='.inbounds[0] as $entry |
+                    .inbounds[1].streamSettings.realitySettings.serverNames[0] as $oldSNI |
+                    if $entry.protocol == "dokodemo-door" and ($entry.tag | type) == "string" and
+                        ($oldSNI | type) == "string" and (.routing.rules | type) == "array"
+                    then .routing.rules |= map(
+                        if .inboundTag == [$entry.tag] and .outboundTag == "z_direct_outbound" and (.domain | type) == "array"
+                        then .domain |= map(if . == $oldSNI then $sni else . end)
+                        else . end)
+                    else . end | '"${filter}"
+            fi
             if [[ "${protocolId}" == 2 ]]; then
                 # 下行沿用本入站身份时同步公钥，独立下行身份保持不变。
                 filter='.inbounds[0].streamSettings.realitySettings as $oldReality |

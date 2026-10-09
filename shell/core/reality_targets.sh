@@ -3177,6 +3177,18 @@ applyRealityTargetToInstalledConfigs() {
             # Xray Vision 使用第 2 个入站；XHTTP 仅同步原本跟随 SNI 的 host。
             filter='.inbounds[$index].streamSettings.realitySettings.target = $target |
                 .inbounds[$index].streamSettings.realitySettings.serverNames = [$sni]'
+            if [[ "${configIndex}" == 0 ]]; then
+                # Vision 前端按 SNI 放行，切换目标时同步受管规则的旧域名。
+                filter='.inbounds[0] as $entry |
+                    .inbounds[1].streamSettings.realitySettings.serverNames[0] as $oldSNI |
+                    if $entry.protocol == "dokodemo-door" and ($entry.tag | type) == "string" and
+                        ($oldSNI | type) == "string" and (.routing.rules | type) == "array"
+                    then .routing.rules |= map(
+                        if .inboundTag == [$entry.tag] and .outboundTag == "z_direct_outbound" and (.domain | type) == "array"
+                        then .domain |= map(if . == $oldSNI then $sni else . end)
+                        else . end)
+                    else . end | '"${filter}"
+            fi
             [[ "${configIndex}" != 2 ]] || filter='
                 .inbounds[0].streamSettings.realitySettings as $oldReality |
                 .inbounds[0].streamSettings.xhttpSettings.host as $oldHost |
