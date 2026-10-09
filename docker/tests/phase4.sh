@@ -56,6 +56,17 @@ context) printf 'unix:///var/run/docker.sock\n' ;;
 pull) ;;
 compose)
     if [[ "${2:-}" == version ]]; then printf 'v2.29.1\n'; exit 0; fi
+    if [[ " ${*} " == *' net-fail2ban preflight fail2ban 24444,24445 unowned '* &&
+        " ${*} " == *" --file ${FAKE_DOCKER_ROOT:?}/compose.json "* ]]; then
+        jq -e 'any(.host_integrations[]; .type == "fail2ban")' \
+            "${FAKE_DOCKER_ROOT:?}/config/spec.json" >/dev/null || exit 1
+        case "${FAKE_DOCKER_MODE:-ok}" in
+        fail2ban-cleanup-proof-fail) exit 1 ;;
+        fail2ban-cleanup-proof-term-fail) kill -TERM "${PPID}"; exit 1 ;;
+        fail2ban-cleanup-proof-term) kill -TERM "${PPID}" ;;
+        esac
+        [[ ! -e "${FAKE_DOCKER_ROOT}/data/net/fail2ban/fail2ban.state" ]] || exit 1
+    fi
     if [[ " ${*} " == *' up -d '* && "${FAKE_DOCKER_MODE:-ok}" == fail-next-up &&
         ! -e "${FAKE_DOCKER_FAIL_ONCE:?}" ]]; then
         : >"${FAKE_DOCKER_FAIL_ONCE}"
@@ -66,14 +77,38 @@ ps)
     [[ "$*" == 'ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=net-fail2ban --filter label=com.docker.compose.oneoff=False' ]] || exit 0
     case "${FAKE_DOCKER_MODE:-ok}" in
     fail2ban-absent) ;;
+    fail2ban-ps-fail) exit 1 ;;
+    fail2ban-orphan) printf '%s\n' "${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}" ;;
     fail2ban-duplicate) printf '%s\nfedcba654321\n' "${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}" ;;
     fail2ban-invalid-id) printf 'padm-net-fail2ban-1\n' ;;
-    *) printf '%s\n' "${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}" ;;
+    *)
+        if jq -e 'any(.host_integrations[]; .type == "fail2ban")' \
+            "${FAKE_DOCKER_ROOT:?}/config/spec.json" >/dev/null 2>&1; then
+            printf '%s\n' "${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}"
+        fi
+        ;;
     esac
     ;;
 container)
     [[ "$*" == "container inspect ${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}" ]] || exit 1
-    jq "${FAKE_DOCKER_INSPECT_FILTER:-.}" "${FAKE_DOCKER_FAIL2BAN_INSPECT:?}"
+    filter=${FAKE_DOCKER_INSPECT_FILTER:-.}
+    if [[ -e "${FAKE_DOCKER_FAIL2BAN_STOPPED:?}" ]]; then
+        filter+=' | .[0].State = {Status:"exited",Running:false,Restarting:false,Paused:false,Dead:false,OOMKilled:false,ExitCode:0,Error:""}'
+        case "${FAKE_DOCKER_MODE:-ok}" in
+        fail2ban-stop-137) filter+=' | .[0].State.ExitCode = 137' ;;
+        fail2ban-stop-owner-drift) filter+=' | .[0].Id = ("f" * 64)' ;;
+        esac
+    fi
+    jq "${filter}" "${FAKE_DOCKER_FAIL2BAN_INSPECT:?}"
+    ;;
+stop)
+    [[ "$*" == "stop ${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}" ]] || exit 1
+    [[ "${FAKE_DOCKER_MODE:-ok}" != fail2ban-stop-fail ]] || exit 42
+    : >"${FAKE_DOCKER_FAIL2BAN_STOPPED:?}"
+    case "${FAKE_DOCKER_MODE:-ok}" in
+    fail2ban-stop-137|fail2ban-cleanup-proof-fail|fail2ban-cleanup-proof-term-fail) ;;
+    *) rm -f -- "${FAKE_DOCKER_ROOT:?}/data/net/fail2ban/fail2ban.state" ;;
+    esac
     ;;
 exec)
     if [[ "$#" -eq 5 && "${2:-}" == "-i" && "${3:-}" == "${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}" &&
@@ -144,6 +179,30 @@ runControl() {
     if [[ "${1:-}" == configure ]]; then
         set -- "$@" --manifest "${CONFIGURE_MANIFEST}" --bundle "${CONFIGURE_BUNDLE}" \
             --control-bundle "${CONFIGURE_CONTROL}"
+    elif [[ "${1:-}" == edit ]]; then
+        set -- "$@" --manifest "${CONFIGURE_MANIFEST}" --bundle "${CONFIGURE_BUNDLE}" \
+            --control-bundle "${CONFIGURE_CONTROL}"
+    elif [[ "${1:-}" == disable-prepare ]]; then
+        shift
+        command=(bash -u -c '
+          source "$1"
+          dockerFail2banDisablePrepare "$2"
+        ' test "${PROJECT_ROOT}/install-docker.sh")
+    elif [[ "${1:-}" == apply-cancel ]]; then
+        shift
+        command=(bash -u -c '
+          source "$1"
+          dockerHostPreflight || exit 10
+          dockerLockInstalledDeployment || exit $?
+          dockerConfigureReleasePrepare "$2" "$3" "$4" || exit $?
+          dockerConfigureApply "$5" "" "" interactive <<<n
+          status=$?
+          dockerReleaseDeploymentLock
+          dockerCleanupStagedBundle
+          dockerManifestCleanup
+          exit "${status}"
+        ' test "${PROJECT_ROOT}/install-docker.sh"
+            "${CONFIGURE_MANIFEST}" "${CONFIGURE_BUNDLE}" "${CONFIGURE_CONTROL}")
     elif [[ "${1:-}" == apply-staged ]]; then
         shift
         command=(bash -u -c '
@@ -169,6 +228,8 @@ runControl() {
         FAKE_DOCKER_LOG="${DOCKER_LOG}" FAKE_DOCKER_MODE="${FAKE_DOCKER_MODE:-ok}" \
         FAKE_DOCKER_FAIL2BAN_CONTAINER="${FAIL2BAN_CONTAINER}" \
         FAKE_DOCKER_FAIL2BAN_INSPECT="${FAIL2BAN_INSPECT}" \
+        FAKE_DOCKER_ROOT="${DOCKER_ROOT}" \
+        FAKE_DOCKER_FAIL2BAN_STOPPED="${TEST_ROOT}/fail2ban-stopped" \
         FAKE_DOCKER_INSPECT_FILTER="${FAKE_DOCKER_INSPECT_FILTER:-.}" \
         FAKE_DOCKER_FAIL_ONCE="${TEST_ROOT}/fail-once" \
         "${command[@]}" "$@" >"${CONTROL_LOG}" 2>&1 || actual=$?
@@ -185,7 +246,7 @@ runControl() {
 rejectFail2ban() {
     : >"${DOCKER_LOG}"
     runControl "$@"
-    ! grep -Eq '^(exec|run|start|restart) |^compose .* (run|up|start|restart)( |$)' "${DOCKER_LOG}" ||
+    ! grep -Eq '^(exec|run|start|stop|restart) |^compose .* (run|up|start|stop|restart)( |$)' "${DOCKER_LOG}" ||
         fail 'rejected Fail2ban maintenance executed or started a container'
 }
 
@@ -365,7 +426,9 @@ jq -n --arg root "${DOCKER_ROOT}" --arg id "${FAIL2BAN_CONTAINER}" \
     --slurpfile compose "${DOCKER_ROOT}/compose.json" '
   $compose[0].services["net-fail2ban"] as $service |
   [{
-    Id: $id, State: {Running: true, Restarting: false},
+    Id: ($id + ("a" * (64 - ($id | length)))),
+    State: {Status: "running", Running: true, Restarting: false,
+      Paused: false, Dead: false, OOMKilled: false, ExitCode: 0, Error: ""},
     Config: {
       Image: $spec[0].images.net, Cmd: $service.command,
       Entrypoint: ["/usr/local/bin/padm-entrypoint"], User: "0:0",
@@ -507,6 +570,179 @@ for config in padm-docker-user.conf padm.local; do
 done
 [[ "$(fail2banManagedSnapshot)" == "${FAIL2BAN_MAINTENANCE_BEFORE}" ]] ||
     fail 'Fail2ban status or unban modified managed files'
+
+# 停用先验证旧 owner 和正常清理，候选预览、取消及失败不能借机重启或删库。
+FAIL2BAN_DISABLED_SPEC="${TEST_ROOT}/fail2ban-disabled.json"
+# 专项编辑沿用既有 schema 迁移，完整对照必须使用同一规范化基线。
+(
+    source "${PROJECT_ROOT}/install-docker.sh"
+    dockerConfigureSpecMigrate "${DOCKER_ROOT}/config/spec.json" "${TEST_ROOT}/fail2ban-normalized.json"
+)
+jq '.host_integrations |= map(select(.type != "fail2ban"))' \
+    "${TEST_ROOT}/fail2ban-normalized.json" >"${FAIL2BAN_DISABLED_SPEC}"
+printf 'persistent-fail2ban-sqlite-fixture\n' >"${DOCKER_ROOT}/data/net/fail2ban/fail2ban.sqlite3"
+FAIL2BAN_SQLITE_HASH=$(sha256sum "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.sqlite3")
+writeFail2banOwnerState() {
+    printf 'schema_version=2\ntoken=%s\nchain=padm-f2b-aaaaaaaaaaaa\nports=24444,24445\nipv6=no\n' \
+        "$(printf 'a%.0s' {1..32})" >"${DOCKER_ROOT}/data/net/fail2ban/fail2ban.state"
+    chmod 0600 "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.state"
+    rm -f -- "${TEST_ROOT}/fail2ban-stopped"
+}
+assertFail2banDisablePreserved() {
+    cmp -s "${FAIL2BAN_SPEC}" "${DOCKER_ROOT}/config/spec.json" ||
+        fail 'rejected Fail2ban disable changed the installed spec'
+    [[ "$(sha256sum "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.sqlite3")" == "${FAIL2BAN_SQLITE_HASH}" ]] ||
+        fail 'Fail2ban disable deleted or changed its persistent SQLite'
+    ! grep -Eq '^compose .* (up|down|restart|stop)( |$)|^(rm|start|restart) ' "${DOCKER_LOG}" ||
+        fail 'rejected Fail2ban disable restarted or removed a container'
+}
+writeFail2banOwnerState
+FAIL2BAN_DISABLE_BEFORE=$(fail2banManagedSnapshot)
+: >"${DOCKER_LOG}"
+runControl 0 fail2ban-disable-preview edit --fail2ban-off --preview
+! grep -q "^stop " "${DOCKER_LOG}" || fail 'Fail2ban disable preview stopped the owner'
+[[ "$(fail2banManagedSnapshot)" == "${FAIL2BAN_DISABLE_BEFORE}" ]] ||
+    fail 'Fail2ban disable preview changed managed files'
+: >"${DOCKER_LOG}"
+runControl 0 fail2ban-disable-cancel apply-cancel "${FAIL2BAN_DISABLED_SPEC}"
+! grep -q "^stop " "${DOCKER_LOG}" || fail 'Fail2ban disable cancellation stopped the owner'
+[[ "$(fail2banManagedSnapshot)" == "${FAIL2BAN_DISABLE_BEFORE}" ]] ||
+    fail 'Fail2ban disable cancellation changed managed files'
+rejectFail2ban 2 fail2ban-disable-missing-confirm fail2ban disable
+rejectFail2ban 2 fail2ban-disable-bad-confirm fail2ban disable --confirm wrong
+rejectFail2ban 2 fail2ban-disable-extra-arg fail2ban disable --preview extra
+rejectFail2ban 2 fail2ban-disable-other-edit fail2ban disable --site-default --preview
+rejectFail2ban 2 fail2ban-disable-import edit --fail2ban-off --spec "${FAIL2BAN_SPEC}" --preview
+cp -p "${DOCKER_ROOT}/config/spec.json" "${TEST_ROOT}/fail2ban-enabled.spec"
+cp "${FAIL2BAN_DISABLED_SPEC}" "${DOCKER_ROOT}/config/spec.json"
+rejectFail2ban 1 fail2ban-disable-spec-deployment-mismatch disable-prepare "${FAIL2BAN_DISABLED_SPEC}"
+cp -p "${DOCKER_ROOT}/deployment.json" "${TEST_ROOT}/fail2ban-enabled.deployment"
+jq '.host_integrations |= map(select(.type != "fail2ban"))' "${TEST_ROOT}/fail2ban-enabled.deployment" \
+    >"${DOCKER_ROOT}/deployment.json"
+rejectFail2ban 1 fail2ban-disable-spec-compose-mismatch disable-prepare "${FAIL2BAN_DISABLED_SPEC}"
+cp -p "${DOCKER_ROOT}/compose.json" "${TEST_ROOT}/fail2ban-enabled.compose"
+jq 'del(.services["net-fail2ban"])' "${TEST_ROOT}/fail2ban-enabled.compose" >"${DOCKER_ROOT}/compose.json"
+cp -p "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.state" "${TEST_ROOT}/fail2ban-owner.fixture"
+FAIL2BAN_RESIDUAL_BEFORE=$(fail2banManagedSnapshot)
+rejectFail2ban 1 fail2ban-disabled-residual-state disable-prepare "${FAIL2BAN_DISABLED_SPEC}"
+[[ "$(fail2banManagedSnapshot)" == "${FAIL2BAN_RESIDUAL_BEFORE}" ]] ||
+    fail 'Disabled Fail2ban residual-state refusal changed owner evidence'
+rm -f -- "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.state"
+ln -s missing-owner-state "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.state"
+FAIL2BAN_RESIDUAL_BEFORE=$(fail2banManagedSnapshot)
+rejectFail2ban 1 fail2ban-disabled-residual-state-symlink disable-prepare "${FAIL2BAN_DISABLED_SPEC}"
+[[ "$(fail2banManagedSnapshot)" == "${FAIL2BAN_RESIDUAL_BEFORE}" ]] ||
+    fail 'Disabled Fail2ban broken-symlink refusal changed owner evidence'
+rm -f -- "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.state"
+runControl 0 fail2ban-disabled-clean-noop disable-prepare "${FAIL2BAN_DISABLED_SPEC}"
+FAKE_DOCKER_MODE=fail2ban-orphan rejectFail2ban 1 fail2ban-disabled-runtime-orphan \
+    disable-prepare "${FAIL2BAN_DISABLED_SPEC}"
+FAKE_DOCKER_MODE=fail2ban-ps-fail rejectFail2ban 1 fail2ban-disabled-runtime-query-failed \
+    disable-prepare "${FAIL2BAN_DISABLED_SPEC}"
+cp -p "${TEST_ROOT}/fail2ban-enabled.compose" "${DOCKER_ROOT}/compose.json"
+cp -p "${TEST_ROOT}/fail2ban-enabled.deployment" "${DOCKER_ROOT}/deployment.json"
+cp -p "${TEST_ROOT}/fail2ban-enabled.spec" "${DOCKER_ROOT}/config/spec.json"
+cp -p "${TEST_ROOT}/fail2ban-owner.fixture" "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.state"
+FAIL2BAN_DISABLE_BEFORE=$(fail2banManagedSnapshot)
+for auditMode in fail2ban-absent fail2ban-audit-drift fail2ban-owner-drift; do
+    : >"${DOCKER_LOG}"
+    FAKE_DOCKER_MODE="${auditMode}" runControl 14 "${auditMode}-disable" \
+        edit --fail2ban-off --confirm PADM-DOCKER-EDIT
+    ! grep -q "^stop " "${DOCKER_LOG}" || fail "${auditMode}: disable stopped an unaudited owner"
+    assertFail2banDisablePreserved
+    [[ "$(fail2banManagedSnapshot)" == "${FAIL2BAN_DISABLE_BEFORE}" ]] ||
+        fail "${auditMode}: rejected disable changed managed files"
+done
+for filter in \
+    '.[0].Config.Labels["com.docker.compose.project"] = "foreign"' \
+    '.[0].Id = ("f" * 64)' \
+    '.[0].State = {Status:"exited",Running:false,Restarting:false,Paused:false,Dead:false,OOMKilled:false,ExitCode:137,Error:""}' \
+    '.[0].State = {Status:"exited",Running:false,Restarting:false,Paused:false,Dead:false,OOMKilled:true,ExitCode:0,Error:""}'; do
+    : >"${DOCKER_LOG}"
+    FAKE_DOCKER_INSPECT_FILTER="${filter}" runControl 14 fail2ban-disable-owner-state \
+        edit --fail2ban-off --confirm PADM-DOCKER-EDIT
+    ! grep -q "^stop " "${DOCKER_LOG}" || fail 'Fail2ban disable stopped a foreign or invalid exited owner'
+    assertFail2banDisablePreserved
+    [[ "$(fail2banManagedSnapshot)" == "${FAIL2BAN_DISABLE_BEFORE}" ]] ||
+        fail 'Fail2ban disable owner refusal changed managed files'
+done
+for mode in fail2ban-stop-fail fail2ban-stop-137 fail2ban-cleanup-proof-fail; do
+    writeFail2banOwnerState
+    FAIL2BAN_DISABLE_ATTEMPT_BEFORE=$(fail2banManagedSnapshot)
+    : >"${DOCKER_LOG}"
+    FAKE_DOCKER_MODE="${mode}" runControl 14 "${mode}" edit --fail2ban-off --confirm PADM-DOCKER-EDIT
+    grep -qxF "stop ${FAIL2BAN_CONTAINER}" "${DOCKER_LOG}" || fail "${mode}: stop was not attempted"
+    assertFail2banDisablePreserved
+    [[ "$(fail2banManagedSnapshot)" == "${FAIL2BAN_DISABLE_ATTEMPT_BEFORE}" ]] ||
+        fail "${mode}: stop refusal changed managed files or owner evidence"
+done
+writeFail2banOwnerState
+: >"${DOCKER_LOG}"
+FAKE_DOCKER_MODE=fail2ban-stop-owner-drift runControl 14 fail2ban-disable-cid-replaced \
+    edit --fail2ban-off --confirm PADM-DOCKER-EDIT
+assertFail2banDisablePreserved
+! grep -q 'net-fail2ban preflight fail2ban 24444,24445 unowned' "${DOCKER_LOG}" ||
+    fail 'Fail2ban disable accepted an owner CID replaced during stop'
+writeFail2banOwnerState
+FAIL2BAN_DISABLE_ATTEMPT_BEFORE=$(fail2banManagedSnapshot)
+: >"${DOCKER_LOG}"
+FAKE_DOCKER_MODE=fail2ban-cleanup-proof-term-fail runControl 143 fail2ban-disable-failed-proof-term \
+    edit --fail2ban-off --confirm PADM-DOCKER-EDIT
+assertFail2banDisablePreserved
+[[ "$(fail2banManagedSnapshot)" == "${FAIL2BAN_DISABLE_ATTEMPT_BEFORE}" ]] ||
+    fail 'TERM after failed cleanup proof changed files or removed owner evidence'
+writeFail2banOwnerState
+: >"${DOCKER_LOG}"
+FAKE_DOCKER_MODE=fail2ban-cleanup-proof-term runControl 143 fail2ban-disable-clean-proof-term \
+    edit --fail2ban-off --confirm PADM-DOCKER-EDIT
+cmp -s "${FAIL2BAN_SPEC}" "${DOCKER_ROOT}/config/spec.json" ||
+    fail 'TERM after successful cleanup proof did not restore the enabled spec'
+grep -Eq '^compose .* up -d .*--remove-orphans' "${DOCKER_LOG}" ||
+    fail 'TERM after successful cleanup proof did not restart the old deployment'
+[[ "$(sha256sum "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.sqlite3")" == "${FAIL2BAN_SQLITE_HASH}" ]] ||
+    fail 'TERM recovery changed the persistent SQLite'
+writeFail2banOwnerState
+rm -f -- "${TEST_ROOT}/fail-once"
+: >"${DOCKER_LOG}"
+FAKE_DOCKER_MODE=fail-next-up runControl 14 fail2ban-disable-start-failed \
+    edit --fail2ban-off --confirm PADM-DOCKER-EDIT
+cmp -s "${FAIL2BAN_SPEC}" "${DOCKER_ROOT}/config/spec.json" ||
+    fail 'Fail2ban disable startup failure did not restore the enabled spec'
+[[ "$(grep -Ec '^compose .* up -d ' "${DOCKER_LOG}")" == 2 ]] ||
+    fail 'Fail2ban disable startup failure did not retry the old deployment'
+[[ "$(sha256sum "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.sqlite3")" == "${FAIL2BAN_SQLITE_HASH}" ]] ||
+    fail 'Fail2ban disable rollback changed the persistent SQLite'
+rm -f -- "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.state" "${TEST_ROOT}/fail2ban-stopped"
+: >"${DOCKER_LOG}"
+FAKE_DOCKER_INSPECT_FILTER='.[0].State = {Status:"exited",Running:false,Restarting:false,Paused:false,Dead:false,OOMKilled:false,ExitCode:0,Error:""}' \
+    runControl 0 fail2ban-disable-exited-proof disable-prepare "${FAIL2BAN_DISABLED_SPEC}"
+! grep -Eq '^(exec|stop) ' "${DOCKER_LOG}" ||
+    fail 'Fail2ban disable executed or stopped an already cleanly exited owner'
+grep -q 'net-fail2ban preflight fail2ban 24444,24445 unowned' "${DOCKER_LOG}" ||
+    fail 'Fail2ban disable skipped cleanup proof for an exited owner'
+writeFail2banOwnerState
+: >"${DOCKER_LOG}"
+runControl 0 fail2ban-disable-success edit --fail2ban-off --confirm PADM-DOCKER-EDIT
+cmp -s "${FAIL2BAN_DISABLED_SPEC}" "${DOCKER_ROOT}/config/spec.json" ||
+    fail 'Fail2ban disable changed fields other than its managed integration'
+jq -e '.services["net-fail2ban"] == null' "${DOCKER_ROOT}/compose.json" >/dev/null ||
+    fail 'Fail2ban disable retained the installed Compose service'
+[[ "$(sha256sum "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.sqlite3")" == "${FAIL2BAN_SQLITE_HASH}" ]] ||
+    fail 'Successful Fail2ban disable deleted the persistent SQLite'
+python3 - "${DOCKER_LOG}" "${FAIL2BAN_CONTAINER}" <<'PY'
+import sys
+commands = open(sys.argv[1], encoding="utf-8").read().splitlines()
+cid = sys.argv[2]
+audit = commands.index(f"exec -i {cid} python3 -")
+health = commands.index(f"exec {cid} sh /usr/local/bin/padm-entrypoint fail2ban-health")
+stop = commands.index(f"stop {cid}")
+proof = next(i for i, command in enumerate(commands)
+             if "net-fail2ban preflight fail2ban 24444,24445 unowned" in command)
+up = next(i for i, command in enumerate(commands) if " up -d " in command)
+assert audit < health < stop < proof < up, "disable skipped its old-owner stop/cleanup gate"
+PY
+runControl 0 fail2ban-restore-for-other-contracts configure --spec "${FAIL2BAN_SPEC}"
+rm -f -- "${TEST_ROOT}/fail2ban-stopped"
 
 jq '.core.protocols[0].public_port = 25444' "${FAIL2BAN_SPEC}" >"${TEST_ROOT}/fail2ban-edit.json"
 runControl 15 reject-fail2ban-port-edit edit --spec "${TEST_ROOT}/fail2ban-edit.json" --preview

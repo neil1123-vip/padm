@@ -28,6 +28,9 @@ dockerRealityStreamContractChecks() {
         printf '%s' "${input}" | dockerMenuProtocols
     )
     streamContainerBoundary() {
+        if [[ "$*" == "ps -aq --filter label=com.docker.compose.project=${PADM_DOCKER_PROJECT} --filter label=com.docker.compose.service=net-fail2ban --filter label=com.docker.compose.oneoff=False" ]]; then
+            return 0
+        fi
         if [[ "$*" == 'info --format {{.ServerVersion}}' ]]; then
             printf '29.0.0\n'
             return 0

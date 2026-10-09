@@ -97,6 +97,7 @@ start_server() {
     python3 /test/fail2ban-audit.py || fail "canonical loaded actions were rejected"
 }
 stop_server() {
+    cp /var/lib/padm/net/fail2ban.state /tmp/stopped-owner.state
     kill -TERM "$server"
     wait "$server" || fail "entrypoint failed on TERM"
     for table in iptables ip6tables; do
@@ -111,6 +112,33 @@ stop_server() {
         done
     done
     [ ! -e /var/lib/padm/net/fail2ban.state ] || fail "ownership state survived TERM"
+    [ -s /var/lib/padm/net/fail2ban.sqlite3 ] || fail "TERM removed the persistent SQLite"
+    sqlite_before=$(sha256sum /var/lib/padm/net/fail2ban.sqlite3)
+    sh /test/entrypoint.sh preflight fail2ban 24444,24445 unowned ||
+        fail "stop cleanup proof rejected an empty owner"
+    [ "$(sha256sum /var/lib/padm/net/fail2ban.sqlite3)" = "$sqlite_before" ] ||
+        fail "stop cleanup proof changed the persistent SQLite"
+}
+reject_stop_proof() {
+    iptables-save | sed '/^#/d' >/tmp/proof-kernel.before
+    ip6tables-save | sed '/^#/d' >>/tmp/proof-kernel.before
+    sha256sum /var/lib/padm/net/fail2ban.sqlite3 >/tmp/proof-state.before
+    if [ -e /var/lib/padm/net/fail2ban.state ]; then
+        sha256sum /var/lib/padm/net/fail2ban.state >>/tmp/proof-state.before
+    fi
+    if sh /test/entrypoint.sh preflight fail2ban 24444,24445 unowned >/tmp/proof.log 2>&1; then
+        fail "stop cleanup proof accepted residual state or kernel resources"
+    fi
+    iptables-save | sed '/^#/d' >/tmp/proof-kernel.after
+    ip6tables-save | sed '/^#/d' >>/tmp/proof-kernel.after
+    sha256sum /var/lib/padm/net/fail2ban.sqlite3 >/tmp/proof-state.after
+    if [ -e /var/lib/padm/net/fail2ban.state ]; then
+        sha256sum /var/lib/padm/net/fail2ban.state >>/tmp/proof-state.after
+    fi
+    cmp /tmp/proof-kernel.before /tmp/proof-kernel.after ||
+        fail "rejected stop cleanup proof changed kernel resources"
+    cmp /tmp/proof-state.before /tmp/proof-state.after ||
+        fail "rejected stop cleanup proof removed owner evidence or SQLite"
 }
 
 iptables -w -N DOCKER-USER
@@ -129,11 +157,11 @@ iptables -w -N padm-f2b
 iptables -w -I DOCKER-USER -p tcp -m conntrack --ctstate NEW --ctorigdstport 23444 -j padm-f2b
 printf 'ports=23444\n' >/var/lib/padm/net/fail2ban.state
 chmod 0600 /var/lib/padm/net/fail2ban.state
-iptables-save > /tmp/legacy.before
+iptables-save | sed '/^#/d' > /tmp/legacy.before
 if sh /test/entrypoint.sh fail2ban 24444,24445 >/tmp/fail2ban.log 2>&1; then
     fail "legacy ownership state was accepted"
 fi
-iptables-save > /tmp/legacy.after
+iptables-save | sed '/^#/d' > /tmp/legacy.after
 cmp /tmp/legacy.before /tmp/legacy.after || fail "legacy refusal changed firewall rules"
 grep -qx 'ports=23444' /var/lib/padm/net/fail2ban.state
 iptables -w -D DOCKER-USER -p tcp -m conntrack --ctstate NEW --ctorigdstport 23444 -j padm-f2b
@@ -193,12 +221,12 @@ fi
 python3 /test/fail2ban-audit.py || fail "active loaded actions were rejected"
 # 内核规则漂移时只读门禁须拒绝，不触碰封禁票据或规则。
 iptables -w -I "$chain" 1 -s 192.0.2.99 -j DROP
-iptables-save > /tmp/owner.before
+iptables-save | sed '/^#/d' > /tmp/owner.before
 fail2ban-client get padm-nginx banip > /tmp/bans.before
 if sh /usr/local/bin/padm-entrypoint fail2ban-health; then
     fail "foreign kernel rule passed the maintenance ownership gate"
 fi
-iptables-save > /tmp/owner.after
+iptables-save | sed '/^#/d' > /tmp/owner.after
 fail2ban-client get padm-nginx banip > /tmp/bans.after
 cmp /tmp/owner.before /tmp/owner.after || fail "owner audit changed firewall rules"
 cmp /tmp/bans.before /tmp/bans.after || fail "owner audit changed ban tickets"
@@ -277,6 +305,17 @@ wait_unban iptables 192.0.2.7
 fail2ban-client set padm-nginx banip 192.0.2.7
 wait_rule iptables 192.0.2.7
 stop_server
+# 停止后的只读证明拒绝残留 state 或链，SQLite 中的真实封禁票据留给恢复启动。
+cp /tmp/stopped-owner.state /var/lib/padm/net/fail2ban.state
+chmod 0600 /var/lib/padm/net/fail2ban.state
+reject_stop_proof
+rm /var/lib/padm/net/fail2ban.state
+iptables -w -N "$chain"
+iptables -w -A "$chain" -m comment --comment "padm-f2b:$token" -j RETURN
+reject_stop_proof
+iptables -w -D "$chain" -m comment --comment "padm-f2b:$token" -j RETURN
+iptables -w -X "$chain"
+sh /test/entrypoint.sh preflight fail2ban 24444,24445 unowned
 start_server
 wait_rule iptables 192.0.2.7
 assert_hooks iptables

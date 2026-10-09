@@ -3267,7 +3267,9 @@ dockerFail2banAddressIsValid() (
 )
 
 dockerFail2banContainer() (
-    local root ids container image sourcePath candidate status
+    local root ids container image sourcePath candidate status mode=${1:-running}
+    [[ "$#" -le 1 ]] || return 1
+    case "${mode}" in running|exited) ;; *) return 1 ;; esac
     root=$(dockerInstallRoot) || return 1
     for sourcePath in config/spec.json deployment.json images.env compose.json; do
         dockerTrafficSafePath "${root}" "${root}/${sourcePath}" || return 1
@@ -3312,11 +3314,19 @@ dockerFail2banContainer() (
     }
     container=$(docker container inspect "${ids}") || return 1
     image=$(jq -er '.images.net' "${root}/config/spec.json") || return 1
-    jq -e --arg root "${root}" --arg image "${image}" \
+    jq -e --arg root "${root}" --arg image "${image}" --arg mode "${mode}" --arg id "${ids}" \
         --slurpfile spec "${root}/config/spec.json" --slurpfile compose "${root}/compose.json" '
       length == 1 and
       (.[0] as $c | $c.Config.Labels as $labels | $compose[0].services["net-fail2ban"] as $service |
-        $c.State.Running == true and $c.State.Restarting != true and
+        ($c.Id | type == "string" and test("^[a-f0-9]{64}$") and startswith($id)) and
+        (if $mode == "running" then
+          $c.State.Running == true and $c.State.Restarting != true
+        else
+          $c.State.Status == "exited" and $c.State.Running == false and
+          $c.State.Restarting == false and $c.State.Paused == false and
+          $c.State.Dead == false and $c.State.OOMKilled == false and
+          $c.State.ExitCode == 0 and $c.State.Error == ""
+        end) and
         $labels["com.docker.compose.project"] == "padm-docker" and
         $labels["com.docker.compose.project.working_dir"] == $root and
         $labels["com.docker.compose.project.config_files"] == ($root + "/compose.json") and
@@ -3338,25 +3348,142 @@ dockerFail2banContainer() (
           ($service.volumes | map({source:(.source | sub("^\\$\\{PADM_NET_ROOT\\}"; $root)),
             target,read_only}) | sort_by(.target)))
     ' <<<"${container}" >/dev/null || {
-        dockerError 'Fail2ban 容器已停止或归属漂移，未执行维护操作'
+        dockerError 'Fail2ban 容器状态或归属漂移，未执行操作'
         return 1
     }
-    dockerFail2banRuntimeAudit "${ids}" || {
-        dockerError 'Fail2ban 已加载动作漂移或运行时审计失败，未执行维护操作'
-        return 1
-    }
-    docker exec "${ids}" sh /usr/local/bin/padm-entrypoint fail2ban-health </dev/null || {
-        dockerError 'Fail2ban 状态或内核规则归属漂移，未执行维护操作'
-        return 1
-    }
+    if [[ "${mode}" == running ]]; then
+        dockerFail2banRuntimeAudit "${ids}" || {
+            dockerError 'Fail2ban 已加载动作漂移或运行时审计失败，未执行维护操作'
+            return 1
+        }
+        docker exec "${ids}" sh /usr/local/bin/padm-entrypoint fail2ban-health </dev/null || {
+            dockerError 'Fail2ban 状态或内核规则归属漂移，未执行维护操作'
+            return 1
+        }
+    fi
     printf '%s\n' "${ids}"
 )
+
+dockerFail2banDisablePrepare() {
+    local nextSpec=$1 root oldEnabled newEnabled deployedEnabled composeEnabled ids before mode audited ports
+    root=$(dockerInstallRoot) || return 1
+    newEnabled=$(jq -r 'any(.host_integrations[]; .type == "fail2ban")' "${nextSpec}") || return 1
+    if [[ "${newEnabled}" == false ]]; then
+        # 未启用也须排除受管遗留容器，避免后续 remove-orphans 绕过审计。
+        ids=$(docker ps -aq --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
+            --filter label=com.docker.compose.service=net-fail2ban \
+            --filter label=com.docker.compose.oneoff=False) || return 1
+    fi
+    if [[ ! -e "${root}/config/spec.json" && ! -L "${root}/config/spec.json" ]]; then
+        if [[ -e "${root}/deployment.json" || -L "${root}/deployment.json" ]]; then
+            dockerTrafficSafePath "${root}" "${root}/deployment.json" &&
+                [[ -f "${root}/deployment.json" && ! -L "${root}/deployment.json" ]] &&
+                oldEnabled=$(jq -r '
+                  if type == "object" and (.host_integrations | type == "array")
+                  then any(.host_integrations[]; .type == "fail2ban")
+                  else error("invalid host integration state") end
+                ' "${root}/deployment.json") && [[ "${oldEnabled}" == false ]] &&
+                dockerTrafficSafePath "${root}" "${root}/compose.json" &&
+                [[ -f "${root}/compose.json" && ! -L "${root}/compose.json" ]] &&
+                jq -e '(.services | type == "object") and
+                  (.services | has("net-fail2ban") | not)' \
+                    "${root}/compose.json" >/dev/null || return 1
+        fi
+        if [[ "${newEnabled}" == false ]]; then
+            [[ -z "${ids}" ]] || {
+                dockerError '存在未审计的受管 Fail2ban 遗留容器，未修改配置'
+                return 1
+            }
+            [[ ! -e "${root}/data/net/fail2ban/fail2ban.state" &&
+                ! -L "${root}/data/net/fail2ban/fail2ban.state" ]] || {
+                dockerError '存在未清理的 Fail2ban 状态，保留证据并拒绝修改配置'
+                return 1
+            }
+        fi
+        return 0
+    fi
+    dockerTrafficSafePath "${root}" "${root}/config/spec.json" &&
+        [[ -f "${root}/config/spec.json" && ! -L "${root}/config/spec.json" ]] || return 1
+    oldEnabled=$(jq -r '
+      if type == "object" and (.host_integrations | type == "array")
+      then any(.host_integrations[]; .type == "fail2ban")
+      else error("invalid host integration state") end
+    ' "${root}/config/spec.json") || return 1
+    [[ "${newEnabled}" == false ]] || return 0
+    if [[ -e "${root}/deployment.json" || -L "${root}/deployment.json" ]]; then
+        # 未启用的结论也须与旧部署和编排一致，不能借改写 spec 绕过停用审计。
+        dockerTrafficSafePath "${root}" "${root}/deployment.json" &&
+            [[ -f "${root}/deployment.json" && ! -L "${root}/deployment.json" ]] &&
+            deployedEnabled=$(jq -r '
+              if type == "object" and (.host_integrations | type == "array")
+              then any(.host_integrations[]; .type == "fail2ban")
+              else error("invalid host integration state") end
+            ' "${root}/deployment.json") && [[ "${deployedEnabled}" == "${oldEnabled}" ]] &&
+            dockerTrafficSafePath "${root}" "${root}/compose.json" &&
+            [[ -f "${root}/compose.json" && ! -L "${root}/compose.json" ]] &&
+            composeEnabled=$(jq -r '
+              if type == "object" and (.services | type == "object")
+              then .services | has("net-fail2ban") else error("invalid compose state") end
+            ' "${root}/compose.json") && [[ "${composeEnabled}" == "${oldEnabled}" ]] || {
+            dockerError '旧规格、部署或编排的 Fail2ban 状态不一致，未修改配置'
+            return 1
+        }
+    fi
+    if [[ "${oldEnabled}" == false ]]; then
+        [[ -z "${ids}" ]] || {
+            dockerError '存在未审计的受管 Fail2ban 遗留容器，未修改配置'
+            return 1
+        }
+        [[ ! -e "${root}/data/net/fail2ban/fail2ban.state" &&
+            ! -L "${root}/data/net/fail2ban/fail2ban.state" ]] || {
+            dockerError '存在未清理的 Fail2ban 状态，保留证据并拒绝修改配置'
+            return 1
+        }
+        return 0
+    fi
+    [[ "${ids}" =~ ^[a-f0-9]{12,64}$ ]] || {
+        dockerError '停用需要唯一的旧受管 Fail2ban 容器，未修改配置'
+        return 1
+    }
+    before=$(docker container inspect "${ids}") || return 1
+    mode=$(jq -er --arg id "${ids}" '
+      if length == 1 and (.[0].Id | type == "string" and startswith($id)) then
+        if .[0].State.Running == true then "running"
+        elif .[0].State.Running == false then "exited"
+        else error("unknown container state") end
+      else error("container identity changed") end
+    ' <<<"${before}") || return 1
+    audited=$(dockerFail2banContainer "${mode}") && [[ "${audited}" == "${ids}" ]] || return 1
+    if [[ "${mode}" == running ]]; then
+        # 先保留旧编排与配置，只停止刚审计的 CID；失败不能借恢复事务覆盖现场。
+        docker stop "${ids}" >/dev/null || return 1
+    fi
+    audited=$(dockerFail2banContainer exited) && [[ "${audited}" == "${ids}" ]] || {
+        dockerError 'Fail2ban 未正常退出或容器归属变化，保留旧配置与恢复状态'
+        return 1
+    }
+    ports=$(jq -r '.host_integrations[] | select(.type == "fail2ban") | .settings.ports | join(",")' \
+        "${root}/config/spec.json") || return 1
+    dockerComposeRun run --rm --no-deps net-fail2ban \
+        preflight fail2ban "${ports}" unowned >/dev/null || {
+        dockerError 'Fail2ban 停止后仍有状态或规则，保留旧配置与恢复证据'
+        return 1
+    }
+}
 
 dockerFail2banCommand() {
     local action=${1:-} address='' container
     [[ "$#" -gt 0 ]] && shift
     case "${action}" in
     status) [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
+    disable)
+        if ! [[ "$#" -eq 0 || ( "$#" -eq 1 && "$1" == --preview ) ||
+            ( "$#" -eq 2 && "$1" == --confirm && "$2" == PADM-DOCKER-EDIT ) ]]; then
+            return "${PADM_DOCKER_RC_USAGE}"
+        fi
+        dockerEditCommand --fail2ban-off "$@"
+        return $?
+        ;;
     unban)
         [[ "$#" -eq 1 ]] || return "${PADM_DOCKER_RC_USAGE}"
         address=$1
@@ -3843,6 +3970,7 @@ EOF
 
 dockerInstallCandidate() {
     local candidate=$1 backup=$2 root relative source target
+    local intTrap termTrap pending=0 prepareStatus=1 integrationInput
     root=$(dockerInstallRoot) || return 1
     dockerRealityStreamDeploymentCheck "${candidate}/config/spec.json" "${root}/config/spec.json" || return 1
     dockerManagedPathIsSafe "${root}" "${candidate}" &&
@@ -3856,12 +3984,49 @@ dockerInstallCandidate() {
             DOCKER_CONFIG_IPV6_TOUCHED=1
         fi
     done
+    integrationInput="${candidate}/config/spec.json"
+    dockerTrafficSafePath "${root}" "${integrationInput}" || return 1
+    if [[ -e "${integrationInput}" || -L "${integrationInput}" ]]; then
+        [[ -f "${integrationInput}" && ! -L "${integrationInput}" ]] || return 1
+    else
+        # 旧版更新可缺原始规格，但只能复用与编排一致且明确未启用 Fail2ban 的部署记录。
+        integrationInput="${candidate}/deployment.json"
+        dockerTrafficSafePath "${root}" "${integrationInput}" &&
+            [[ -f "${integrationInput}" && ! -L "${integrationInput}" ]] &&
+            dockerDeploymentFileValidate "${integrationInput}" &&
+            dockerTrafficSafePath "${root}" "${candidate}/compose.json" &&
+            jq -en --slurpfile deployment "${integrationInput}" \
+                --slurpfile compose "${candidate}/compose.json" '
+              ($deployment | length) == 1 and ($compose | length) == 1 and
+              ($deployment[0].host_integrations | any(.[]; .type == "fail2ban")) == false and
+              ($compose[0].services | type == "object") and
+              ($compose[0].services | has("net-fail2ban")) == false
+            ' >/dev/null || {
+            dockerError '缺少原始规格的候选不能启用 Fail2ban 或存在部署编排漂移'
+            return 1
+        }
+    fi
     if [[ -f "${candidate}/config/spec.json" ]] &&
         jq -e '.tls.http01 == true' "${candidate}/config/spec.json" >/dev/null; then
         # 挑战根独立于配置事务，不能移动候选空目录或替换在线 inode。
         dockerAcmeWebrootEnsure "${root}" || return 1
     fi
-    DOCKER_CONFIG_SWITCHED=1
+    # 停用证明完成后先登记可恢复事务，再处理暂存信号，不能留下旧规格配停服。
+    intTrap=$(trap -p INT)
+    termTrap=$(trap -p TERM)
+    trap 'pending=130' INT
+    trap 'pending=143' TERM
+    if dockerFail2banDisablePrepare "${integrationInput}"; then
+        DOCKER_CONFIG_SWITCHED=1
+        prepareStatus=0
+    fi
+    if [[ -n "${intTrap}" ]]; then eval "${intTrap}"; else trap - INT; fi
+    if [[ -n "${termTrap}" ]]; then eval "${termTrap}"; else trap - TERM; fi
+    if [[ "${pending}" != 0 ]]; then
+        if [[ "${pending}" == 130 ]]; then kill -INT "${BASHPID}"; else kill -TERM "${BASHPID}"; fi
+        return 1
+    fi
+    [[ "${prepareStatus}" == 0 ]] || return 1
     if [[ -f "${candidate}/business-traffic.json" ]]; then
         dockerTrafficWriteState <"${candidate}/business-traffic.json" || return 1
     fi
@@ -4263,9 +4428,13 @@ dockerConfigureApply() {
         ! dockerTrafficScheduleInstall ||
         ! dockerRenewalScheduleInstall ||
         ! dockerGeoScheduleInstall; then
-        dockerError '候选部署启动或健康检查失败，正在恢复旧配置'
-        if ! dockerRestoreConfiguration; then
-            dockerError "旧配置恢复失败，请检查备份: ${backup}"
+        if [[ "${DOCKER_CONFIG_SWITCHED:-0}" == 1 ]]; then
+            dockerError '候选部署启动或健康检查失败，正在恢复旧配置'
+            if ! dockerRestoreConfiguration; then
+                dockerError "旧配置恢复失败，请检查备份: ${backup}"
+            fi
+        else
+            dockerError '部署前检查失败，旧配置与恢复证据已保留'
         fi
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_COMPOSE}"

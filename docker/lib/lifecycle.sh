@@ -110,6 +110,7 @@ dockerUsage() {
   padm-docker traffic reset <账号 ID>
   padm-docker fail2ban status
   padm-docker fail2ban unban <单个 IPv4/IPv6>
+  padm-docker fail2ban disable [--preview | --confirm PADM-DOCKER-EDIT]
   padm-docker up
   padm-docker down
   padm-docker restart

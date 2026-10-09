@@ -52,6 +52,10 @@ dockerCurrentBundlePath() { printf '%s\n' "${TEST_ROOT}/bundle"; }
 dockerCandidateCompose() {
     [[ -d "$1" && -e "${root}/locks/deployment.lock" ]] || fail '候选未持有部署锁'
 }
+docker() {
+    [[ "$*" != "ps -aq --filter label=com.docker.compose.project=${PADM_DOCKER_PROJECT} --filter label=com.docker.compose.service=net-fail2ban --filter label=com.docker.compose.oneoff=False" ]] || return 0
+    command docker "$@"
+}
 dockerComposeRun() {
     [[ -e "${root}/locks/deployment.lock" ]] || fail '发布未持有部署锁'
     if [[ "${1:-}" == up && "${MODE}" == health-fail && ! -e "${TEST_ROOT}/failed-once" ]]; then

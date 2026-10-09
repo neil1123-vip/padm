@@ -879,7 +879,7 @@ dockerMenuFail2ban() {
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker Fail2ban 维护\n'
-        printf '%s\n' '1. 查看状态' '2. 解封单个 IP' '0. 返回'
+        printf '%s\n' '1. 查看状态' '2. 解封单个 IP' '3. 停用站点扫描防护' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -894,6 +894,11 @@ dockerMenuFail2ban() {
             dockerSetupRead answer "确认从 padm-nginx 解封 ${address}？[y/N]: " n || continue
             case "${answer}" in y|Y|yes|YES) ;; *) continue ;; esac
             dockerMenuRun fail2ban unban "${address}" || true
+            ;;
+        3)
+            dockerSetupRead answer '确认停用受管站点扫描防护？[y/N]: ' n || continue
+            case "${answer}" in y|Y|yes|YES) ;; *) continue ;; esac
+            dockerMenuRun fail2ban disable --confirm PADM-DOCKER-EDIT || true
             ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac

@@ -15,6 +15,10 @@ mkdir -p "${PADM_DOCKER_SYSTEMD_DIR}"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/install-docker.sh"
 
+docker() {
+    [[ "$*" != "ps -aq --filter label=com.docker.compose.project=${PADM_DOCKER_PROJECT} --filter label=com.docker.compose.service=net-fail2ban --filter label=com.docker.compose.oneoff=False" ]] || return 0
+    command docker "$@"
+}
 fail() { printf 'docker-accounts-regression-fail: %s\n' "$*" >&2; exit 1; }
 reject() {
     if "$@" >"${TEST_ROOT}/rejected.log" 2>&1; then fail "应拒绝: $*"; fi

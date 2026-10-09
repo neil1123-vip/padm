@@ -162,7 +162,7 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
            listeners: [{service: \"xray\", public_port: 24443, container_port: 24443, transport: \"tcp\", address_families: [\"ipv4\"]}],
            images: {xray: {index_digest: \$d}, \"sing-box\": {index_digest: \$d}, nginx: {index_digest: \$d}, ops: {index_digest: \$d}, net: {index_digest: \$d}},
            formats: {compose: 1, config: 1, data: 1}, previous_manifest_sha256: null, host_integrations: []}" >"$root/deployment.json"
-        printf "{}\n" >"$root/compose.json"
+        printf "{\"services\":{}}\n" >"$root/compose.json"
         for key in PADM_XRAY_IMAGE PADM_SINGBOX_IMAGE PADM_NGINX_IMAGE PADM_OPS_IMAGE PADM_NET_IMAGE; do
             printf "%s=%s\n" "$key" "ghcr.io/example/padm-test:3.1.9@sha256:$digest"
         done >"$root/images.env"
@@ -237,6 +237,23 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
         ! grep -q "secrets/renewal" "$successfulBackup/present"
         test -s "$root/renewal-schedule.log"
         dockerCleanupStagedBundle
+
+        # 缺原始规格不能将候选 Fail2ban 记录当作未启用；拒绝前不切换旧部署。
+        legacyCandidate=$(mktemp -d "$root/.legacy-fail2ban.XXXXXX")
+        mkdir -p "$legacyCandidate/config"
+        jq ".compose.profiles += [\"net-fail2ban\"] |
+          .host_integrations = [{type:\"fail2ban\",profile:\"net-fail2ban\",
+            firewall_rules:[\"DOCKER-USER\"],devices:[],schedules:[],settings:{ports:[24443]}}]" \
+            "$root/deployment.json" >"$legacyCandidate/deployment.json"
+        printf "{\"services\":{\"net-fail2ban\":{}}}\n" >"$legacyCandidate/compose.json"
+        dockerDeploymentFileValidate "$legacyCandidate/deployment.json"
+        before=$(sha256sum "$root/deployment.json" "$root/compose.json" "$root/images.env")
+        logBefore=$(wc -l <"$FAKE_DOCKER_LOG")
+        ! dockerInstallCandidate "$legacyCandidate" "$successfulBackup"
+        test "$DOCKER_CONFIG_SWITCHED" == 0
+        test "$before" == "$(sha256sum "$root/deployment.json" "$root/compose.json" "$root/images.env")"
+        test "$(wc -l <"$FAKE_DOCKER_LOG")" == "$logBefore"
+        dockerRemoveManagedTree "$root" "$legacyCandidate"
 
         jq --arg commit "$failedCommit" --arg digest "$(printf 3%.0s {1..64})" \
             ".release.commit = \$commit | .images |= with_entries(.value.index_digest = \"sha256:\" + \$digest |

@@ -32,6 +32,10 @@ reject() { if "$@" >"${LOG}" 2>&1; then fail "应拒绝: $*"; fi; }
 # 核心、宿主和发布只使用桩；生成、权限、锁与恢复走生产代码。
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/install-docker.sh"
+docker() {
+    [[ "$*" == 'ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=net-fail2ban --filter label=com.docker.compose.oneoff=False' ]] ||
+        fail "非预期 Docker 操作: $*"
+}
 dockerHostPreflight() { :; }
 dockerRequireInstalledBundle() { :; }
 dockerLockInstalledDeployment() { dockerAcquireDeploymentLock; }
