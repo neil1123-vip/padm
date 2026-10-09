@@ -18,7 +18,7 @@
 | 2. 菜单与可信首次配置 | 2A–2C 已实现；本地 PTY、事务和 Linux 权限通过，真实发布/连通待验 | 安装后进入菜单、独立命令生命周期、无需手填镜像的首次配置 |
 | 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2–3C.12 基础入口已通过本地与 amd64 传输验收，3D.1 参数重生成、3D.2 当前目标站菜单已接入，3D.3c 受管共存、3D.3d1 桥接可达宿主网站和 3D.3d2 宿主回环已通过本地/真实 Desktop 验收 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
 | 4. 用户、订阅与服务维护 | 4A.1–4A.4、4B.1–4B.2 已交付；4C.1–4C.2 已实现，4C.3a–4C.3c 归属、健康与主控事务底座已补，连接与管理入口继续推进 | 稳定分享身份与双核心认证/统计、本机用户业务、多服务器后端、分范围备份恢复、核心运维 |
-| 5. 站点、路由与宿主集成 | 5A.1–5A.3b、5B.1–5B.4b 本地合同及双核心双栈出站/解析/域名、IP、明文 BT、CN 预设、IPv6 bridge 与用户态 WARP 本地 Peer 验收已通过；5B.5a 已有 Xray 的 HTTP 中继合同、真实流量及 Linux 发布专项通过；继续 SOCKS UDP 发布、5B 其余路由与 5C 宿主集成 | 站点管理、内部能力、规则所有权及可撤销宿主操作 |
+| 5. 站点、路由与宿主集成 | 5A.1–5A.3b、5B.1–5B.4b 本地合同及双核心双栈出站/解析/域名、IP、明文 BT、CN 预设、IPv6 bridge 与用户态 WARP 本地 Peer 验收已通过；5B.5a 已有 Xray 的 HTTP 中继合同、真实流量及 Linux 发布专项通过；5B.5c 受管额外入口端口本地合同、菜单及真实发布通过，默认分享切换待 5B.5d；继续 SOCKS UDP 发布、5B 其余路由与 5C 宿主集成 | 站点管理、内部能力、规则所有权及可撤销宿主操作 |
 | 6. 发布与完整验收 | 未开始 | 迁移文档、真实 Linux 与双架构证据、受门禁保护的 Release |
 
 当前机器可读支持状态以
@@ -2244,6 +2244,66 @@ Linux amd64 容器探针使用已有镜像、UID `10001`、只读根和零 capab
 探针所属容器/网络按 label 清理，程序/config 副本删除，日志和环境证据保留。
 本阶段仅文档，不重复完整回归；公网、IPv6、原生宿主和 arm64 未验，
 `internal-201` 仍 `deferred`，此前 HTTP `5B.5a` 交付不受影响。
+
+#### 5B.5c 受管业务入口的额外公开端口
+
+功能签名提交 `dacc8417`。本地实现复用原生 `207` 工作流中的
+“额外端口到已有业务入口”语义，
+不是任意目的地址的 Tunnel/dokodemo-door，也不新增无认证转发入站。
+v3 可选顶层 `port_aliases` 保存 `1–16` 条 `{listener_id, public_port}`，
+缺省表示关闭，空数组拒绝；目标必须为已有受管业务入口。
+`x-padm-port-aliases` 是配置、更新和快照恢复的旧 bundle 兼容门禁，
+不靠升级支持矩阵绕过旧控制脚本。
+
+Compose 将别名映射到原入口的容器监听，继承核心归属、TCP/UDP 和地址族；
+Shadowsocks 同时发布 TCP/UDP，TCP 与 Hysteria2 的 UDP 可使用同一公开端口数字，
+同 transport 冲突保守按 `port|transport` 拒绝。
+WS/HTTPUpgrade/gRPC TLS 别名指向 Nginx `tls_port`；
+bridge Reality 共存别名指向同一 Nginx `15443` SNI 前端，
+不是绕过前端直连私有后端，也不按目标 ID 宣称来源或访问隔离。
+别名不占用容器内新监听，私有 backend 的相同数字不构成宿主发布冲突。
+Deployment 使用派生 `alias-<port>-<transport>` 资源和 `target_listener_id`，
+精确匹配规格；目标基础端口改变后，别名容器端口随之重生成。
+业务 listener ID、账号、凭据及统计身份保持原样，共享原业务流量额度。
+
+CLI `edit --port-alias <入口 ID> <公开端口>`、
+`--port-alias-remove`、独立 `protocol port-alias-status` 及协议菜单 `9 → 8`
+复用现有候选、预览、确认、部署锁和失败恢复事务。
+专项动作互斥，普通 `--spec` 冻结别名集合；
+删除目标入口时清理其别名，复制入口不继承别名。
+分享 URI 和主订阅仍使用原基础公开端口，不新增订阅身份；
+默认分享端口切换留给 `5B.5d`，本轮不以原生默认入口已对齐交付。
+Fail2ban、TUN/TProxy 与 host-network Reality stream 明确拒绝别名，
+避免封禁规则遗漏或已被 host network 删除的 Compose ports；已有 WireGuard 可共存。
+
+Linux amd64 最终定向合同、事务、Bash/ShellCheck error 和 Python AST
+`18.945` 秒通过，证据
+`.tmp-regression-docker-6e4fdf5804b540a999428a97aa3460b6/`；
+菜单真实 PTY `33.994` 秒通过，证据
+`.tmp-regression-docker-3a37c6e371474577b9e2d08400c8c281/`；
+ci `37.529` 秒、入口 `38.437` 秒通过，证据
+`.tmp-regression-docker-5039c4a8c55d44aabceee843d90d1259/`。
+完整 Docker 合同修正普通 listener 的 `target_listener_id` 负例后，
+`337.515` 秒通过（入口 `338.513` 秒，Jobs `6`，排队 `399 ms`），证据
+`.tmp-regression-docker-2e8e99ee43784f9f91eee7b7b2644e62/`。
+ci 快照早于最后 deployment validator 负例修正，最终完整合同包含该修补；
+之后仅改真实夹具和文档，按对应真实及合同 selector 补验，不重复全套。
+PowerShell AST、JSON、diff 检查与独立增量只读复审通过。
+
+真实专项最终 `10.470` 秒通过（入口 `11.356` 秒，Linux `amd64`）；
+Xray Reality TCP 和 sing-box Shadowsocks TCP/UDP 的原入口与别名入口均完成
+正确/错误认证、新 socket 及关闭 alias 拒绝，生产容器维持
+UID `10001`、零 capability、只读根，origin 事件按 transport 精确计数。
+证据 `.tmp-regression-docker-b08b75992b4c41bf863a8df6ab39fb04/`。
+生成的核心配置、统计渲染及分享 URI 在 alias 开关前后逐字相同，
+事务保留已有业务累计值；未另做真实 counter 累计采样。
+测试目标的 TLS 握手已改在线程内执行，避免裸 TCP 探测阻塞监听器；
+该修复只属于真实测试夹具，不改变生产服务。
+复用工具/核心镜像和三槽队列，不扩大并发预算；本轮源码归档副本清理，
+日志、result、失败证据与共享成功索引保留，不删除其它任务的临时文件。
+公网、IPv6 发布、原生宿主、arm64、可信发布及默认分享切换仍待验。
+本阶段只交付本地验收通过的局部能力，`internal-207-access-control` 仍 `deferred`，
+不等于完整 `207`、routing-tools/206 或 `5B` 完成。
 
 ### 5C. 宿主集成与端口跳跃
 
