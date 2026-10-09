@@ -171,7 +171,7 @@ showVlessGrpcAccounts() {
 showHysteriaAccounts() {
     # hysteria2
     if currentProtocolHas 3 || [[ -n "${hysteriaPort:-}" ]]; then
-        readPortHopping "hysteria2" "${singBoxHysteria2Port}"
+        readPortHopping "hysteria2" "${singBoxHysteria2Port}" || return 1
         subscribeSectionTitle "Hysteria2 TLS" "UDP/移动网络可选"
         local configFile currentHost
         configFile=$(protocolConfigFile 3) || return 1
@@ -279,7 +279,7 @@ showVlessRealityGrpcAccountsFromConfig() {
 showTuicAccounts() {
     # TUIC
     if currentProtocolHas 31 || [[ -n "${tuicPort:-}" ]]; then
-        readPortHopping "tuic" "${singBoxTuicPort}"
+        readPortHopping "tuic" "${singBoxTuicPort}" || return 1
         subscribeSectionTitle "Tuic TLS" "UDP/移动网络可选"
         local configFile currentHost
         configFile=$(protocolConfigFile 31) || return 1

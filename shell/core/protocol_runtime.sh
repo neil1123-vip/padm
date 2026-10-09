@@ -548,31 +548,44 @@ readPortHopping() {
     *) return 1 ;;
     esac
 
-    local forwardStateKey stateKind stateBackend stateType stateStart stateEnd stateTarget ownership extra
+    local forwardStateKey stateKind stateBackend= stateType stateStart= stateEnd= stateTarget ownership extra
     if forwardStateKey=$(padmFirewalldForwardStateKeyForTarget "${targetPort}"); then
         IFS=: read -r stateKind stateBackend stateType stateStart stateEnd stateTarget ownership extra <<<"${forwardStateKey}"
-        portHoppingStart=${stateStart}
-        portHoppingEnd=${stateEnd}
     elif forwardStateKey=$(padmIptablesForwardStateKeyForTarget "${type}" "${targetPort}"); then
         IFS=: read -r stateKind stateBackend stateType stateStart stateEnd stateTarget <<<"${forwardStateKey}"
-        portHoppingStart=${stateStart}
-        portHoppingEnd=${stateEnd}
-    elif [[ "${rhelLike:-}" == "true" ]] && systemctl is-active --quiet firewalld; then
+    fi
+    if [[ -n "${stateBackend}" ]]; then
+        validPortNumber "${stateStart}" && validPortNumber "${stateEnd}" &&
+            ((10#${stateStart} <= 10#${stateEnd})) || return 1
+    fi
+    if [[ "${stateBackend}" == firewalld ]]; then
+        systemctl is-active --quiet firewalld || return 0
+    fi
+    if [[ "${stateBackend}" == firewalld ]] ||
+        { [[ -z "${stateBackend}" && "${rhelLike:-}" == true ]] && systemctl is-active --quiet firewalld; }; then
         local forwardPorts
         if forwardPorts=$(sudo firewall-cmd --zone=public --list-forward-ports); then
-            portHopping=$(awk -v targetPort="${targetPort}" '
+            portHopping=$(awk -v targetPort="${targetPort}" -v stateStart="${stateStart}" -v stateEnd="${stateEnd}" '
                 {
                     for (i = 1; i <= NF; i++) {
                         split($i, rule, ":")
                         if (rule[1] !~ /^port=[0-9]+$/ || rule[2] != "proto=udp" || rule[3] != "toport=" targetPort) continue
+                        if ($i ~ /:toaddr=.+/) continue
                         port = substr(rule[1], 6) + 0
                         if (port < 1 || port > 65535) continue
+                        sawRule = 1
+                        if (stateStart != "" && (port < stateStart || port > stateEnd)) continue
+                        if (!(port in ports)) { ports[port] = 1; count++ }
                         if (!start || port < start) start = port
                         if (!end || port > end) end = port
                     }
                 }
-                END { if (start) print start ":" end }
-            ' <<<"${forwardPorts}")
+                END {
+                    if (!count) { if (sawRule) exit 1; exit }
+                    if (count != end - start + 1 || (stateStart != "" && (start != stateStart || end != stateEnd))) exit 1
+                    print start ":" end
+                }
+            ' <<<"${forwardPorts}") || return 1
             portHoppingStart=${portHopping%%:*}
             portHoppingEnd=${portHopping#*:}
         else
@@ -580,26 +593,31 @@ readPortHopping() {
         fi
     else
         local iptablesRules
-        if iptablesRules=$(iptables-save); then
-            portHopping=$(awk -v marker="neil1123-vip_${type}_portHopping" -v targetPort="${targetPort}" '
-            {
-                comment = destination = ports = protocol = ""
+        if iptablesRules=$(iptables-save -t nat); then
+            portHopping=$(awk -v marker="neil1123-vip_${type}_portHopping" -v targetPort="${targetPort}" -v stateStart="${stateStart}" -v stateEnd="${stateEnd}" '
+            $1 == "-A" && $2 == "PREROUTING" {
+                comment = destination = ports = protocol = target = ""
                 for (i = 1; i <= NF; i++) {
                     if ($i == "--comment") comment = $(i + 1)
                     else if ($i == "--to-destination") destination = $(i + 1)
                     else if ($i == "--dport") ports = $(i + 1)
                     else if ($i == "-p") protocol = $(i + 1)
+                    else if ($i == "-j") target = $(i + 1)
                 }
-                if ((comment != marker && comment != "\"" marker "\"") || destination != ":" targetPort || protocol != "udp") next
+                if ((comment != marker && comment != "\"" marker "\"") || destination != ":" targetPort || protocol != "udp" || target != "DNAT") next
                 if (ports !~ /^[0-9]+(:[0-9]+)?$/) next
                 count = split(ports, range, ":")
                 start = range[1] + 0
                 end = range[count] + 0
                 if (start < 1 || end > 65535 || start > end) next
+                sawRule = 1
+                if (stateStart != "" && (start != stateStart || end != stateEnd)) next
+                found = 1
                 print start ":" end
                 exit
             }
-            ' <<<"${iptablesRules}")
+            END { if (sawRule && !found) exit 1 }
+            ' <<<"${iptablesRules}") || return 1
             portHoppingStart=${portHopping%%:*}
             portHoppingEnd=${portHopping#*:}
         else

@@ -1827,6 +1827,10 @@ EOF
         savedRules='-A PREROUTING -p tcp --dport 33000:33002 -m comment --comment neil1123-vip_hysteria2_portHopping -j DNAT --to-destination :16295'
         readPortHopping hysteria2 16295
         [[ -z "${hysteria2PortHopping}" ]]
+        savedRules='-A OUTPUT -p udp --dport 33000:33002 -m comment --comment neil1123-vip_hysteria2_portHopping -j DNAT --to-destination :16295
+-A PREROUTING -p udp --dport 33000:33002 -m comment --comment neil1123-vip_hysteria2_portHopping -j SNAT --to-destination :16295'
+        readPortHopping hysteria2 16295
+        [[ -z "${hysteria2PortHopping}" ]]
         savedRules=
         readPortHopping tuic 26451
         [[ -z "${tuicPortHopping}" ]]
@@ -1837,6 +1841,57 @@ EOF
         hysteria2PortHoppingEnd=33002
         regressionExpectStatus 1 readPortHopping hysteria2 16295
         [[ -z "${hysteria2PortHopping}${hysteria2PortHoppingStart}${hysteria2PortHoppingEnd}" ]] || return 1
+    )
+
+    (
+        local PADM_FIREWALL_STATE_FILE="${TMP_DIR}/port-hopping-read-runtime.state"
+        local savedRules='-A PREROUTING -p udp --dport 33000:33002 -m comment --comment neil1123-vip_hysteria2_portHopping -j DNAT --to-destination :16295'
+        local queryStatus=0 firewalldActive=true forwardFixture stateBefore
+        iptables-save() {
+            [[ "$*" == '-t nat' ]] || return 99
+            printf '%s\n' "${savedRules}"
+            return "${queryStatus}"
+        }
+        printf '%s\n' 'forward:iptables:hysteria2:33000:33002:16295' >"${PADM_FIREWALL_STATE_FILE}"
+        stateBefore=$(<"${PADM_FIREWALL_STATE_FILE}")
+        readPortHopping hysteria2 16295
+        [[ "${hysteria2PortHopping}" == 33000-33002 ]]
+        savedRules=
+        readPortHopping hysteria2 16295
+        [[ -z "${hysteria2PortHopping}" && "$(<"${PADM_FIREWALL_STATE_FILE}")" == "${stateBefore}" ]]
+        savedRules='-A PREROUTING -p udp --dport 33000 -m comment --comment neil1123-vip_hysteria2_portHopping -j DNAT --to-destination :16295'
+        regressionExpectStatus 1 readPortHopping hysteria2 16295
+        [[ -z "${hysteria2PortHopping}" && "$(<"${PADM_FIREWALL_STATE_FILE}")" == "${stateBefore}" ]]
+        queryStatus=1
+        regressionExpectStatus 1 readPortHopping hysteria2 16295
+        [[ -z "${hysteria2PortHopping}" && "$(<"${PADM_FIREWALL_STATE_FILE}")" == "${stateBefore}" ]]
+        printf '%s\n' 'forward:firewalld:udp:33000:33002:16295:owned=33000,33001,33002' >"${PADM_FIREWALL_STATE_FILE}"
+        stateBefore=$(<"${PADM_FIREWALL_STATE_FILE}")
+        systemctl() { [[ "${firewalldActive}" == true ]]; }
+        sudo() {
+            [[ "$*" == 'firewall-cmd --zone=public --list-forward-ports' ]] || return 99
+            printf '%s\n' "${forwardFixture}"
+            return "${queryStatus}"
+        }
+        queryStatus=0
+        forwardFixture='port=33000:proto=udp:toport=16295 port=33001:proto=udp:toport=16295 port=33002:proto=udp:toport=16295'
+        readPortHopping hysteria2 16295
+        [[ "${hysteria2PortHopping}" == 33000-33002 ]]
+        for forwardFixture in port=33000:proto=udp:toport=16295 'port=33000:proto=udp:toport=16295 port=33002:proto=udp:toport=16295'; do
+            regressionExpectStatus 1 readPortHopping hysteria2 16295
+            [[ -z "${hysteria2PortHopping}" ]]
+        done
+        for forwardFixture in '' port=33000:proto=udp:toport=16295:toaddr=192.0.2.1 port=33000:proto=udp:toport=16295:toaddr=::1; do
+            readPortHopping hysteria2 16295
+            [[ -z "${hysteria2PortHopping}" ]]
+        done
+        queryStatus=1
+        forwardFixture=port=33000:proto=udp:toport=16295
+        regressionExpectStatus 1 readPortHopping hysteria2 16295
+        [[ -z "${hysteria2PortHopping}" ]]
+        firewalldActive=false
+        readPortHopping hysteria2 16295
+        [[ -z "${hysteria2PortHopping}" && "$(<"${PADM_FIREWALL_STATE_FILE}")" == "${stateBefore}" ]]
     )
 
     (
@@ -1873,6 +1928,9 @@ EOF
             readPortHopping hysteria2 16295
             [[ -z "${hysteria2PortHopping}" ]]
         done
+        forwardFixture='port=33000:proto=udp:toport=16295 port=33002:proto=udp:toport=16295'
+        regressionExpectStatus 1 readPortHopping hysteria2 16295
+        [[ -z "${hysteria2PortHopping}" ]]
         queryStatus=1
         tuicPortHopping=stale-range
         tuicPortHoppingStart=34001
