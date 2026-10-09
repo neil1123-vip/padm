@@ -273,6 +273,7 @@ runRegressionUiSmokeSuiteRoot() {
     )
 
     resetMenuActions
+    coreStartupServiceEnabled() { return 1; }
     installXray() { recordMenuAction installXray; }
     installXrayService() { recordMenuAction installXrayService; }
     initXrayConfig() { recordMenuAction initXrayConfig; }

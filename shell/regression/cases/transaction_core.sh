@@ -1121,6 +1121,7 @@ runCoreUpgradePendingStartRollbackRegression() (
     ) || return 1
     (
         local core failure events= configBackup= serviceBackup=
+        coreStartupServiceEnabled() { return 1; }
         coreTemplateConfigBackupCreate() {
             configBackup="${root}/config-backup"
             mkdir -p "${configBackup}"
@@ -1505,6 +1506,7 @@ runCoreInstallRejectsUnsafeBinaryPathRegression() (
 )
 
 runCoreCleanupFailurePropagationRegression() (
+    coreStartupServiceEnabled() { return 1; }
     (
         autoRead() { IFS= read -r "$3"; }
         regressionExpectStatus 1 confirmCoreUpgrade Xray v1 stable </dev/null || return 1
