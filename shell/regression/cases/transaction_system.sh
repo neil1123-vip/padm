@@ -343,7 +343,7 @@ SH
         ln -s "${realBinary}" "${linkedBinary}"
         : >"${fixtureConfig}"
         coreSingBoxBinaryPath() { printf '%s\n' "${linkedBinary}"; }
-        pgrep() { [[ "$1" == -x && "$2" == sing-box ]] && printf '12345\n'; }
+        pgrep() { [[ "$1" == -f && "$2" == . ]] && printf '12345\n'; }
         padmReadProcExe() { printf '%s\n' "${realBinary}"; }
         padmReadProcArgs() {
             local -n argsRef=$1

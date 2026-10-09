@@ -484,6 +484,32 @@ runSingBoxCustomPathsRegression() (
     padmReadProcExe() { printf '%s (deleted)\n' "${PADM_SINGBOX_BINARY}"; }
     singBoxRunning
 
+    (
+        local PADM_XRAY_BINARY="${root}/bin/custom-xray"
+        local PADM_SINGBOX_BINARY="${root}/bin/custom-sing-box"
+        local PADM_XRAY_CONF_DIR="${root}/custom-conf" service processBinary fixtureConfig
+        # 候选进程名可以自定义；仍须拒绝其它可执行文件或配置。
+        pgrep() { [[ "$1" == -f && "$2" == . ]] && printf '123\n'; }
+        for service in xray sing-box; do
+            if [[ "${service}" == xray ]]; then
+                processBinary=${PADM_XRAY_BINARY}
+                fixtureConfig=${PADM_XRAY_CONF_DIR}
+                procArgsFixture=("${processBinary}" run -confdir "${fixtureConfig}")
+            else
+                processBinary=${PADM_SINGBOX_BINARY}
+                fixtureConfig="${root}/conf/config.json"
+                procArgsFixture=("${processBinary}" run -c "${fixtureConfig}")
+            fi
+            padmReadProcExe() { printf '%s\n' "${processBinary}"; }
+            serviceRunning "${service}" || return 1
+            procArgsFixture[3]+=.wrong
+            regressionExpectStatus 1 serviceRunning "${service}" || return 1
+            procArgsFixture[3]=${fixtureConfig}
+            processBinary="${root}/other-core"
+            regressionExpectStatus 1 serviceRunning "${service}" || return 1
+        done
+    ) || return 1
+
     local PADM_XRAY_BINARY="${root}/bin/xray" PADM_XRAY_CONF_DIR="${root}/xray/conf"
     local processBinary="${PADM_XRAY_BINARY}"
     procArgsFixture=("${PADM_XRAY_BINARY}" run -confdir "${PADM_XRAY_CONF_DIR}")

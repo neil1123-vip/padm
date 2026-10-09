@@ -377,7 +377,7 @@ singBoxRunning() {
         [[ -n "${mergedConfig}" && "${procArgs[1]:-}" == run &&
             "${procArgs[2]:-}" == -c && "${procArgs[3]:-}" == "${mergedConfig}" ]] || continue
         return 0
-    done < <(pgrep -x sing-box 2>/dev/null)
+    done < <(pgrep -f . 2>/dev/null)
     if [[ "${release:-}" != "alpine" && -e "${systemdServiceFile}" ]] && padmCommandExists systemctl; then
         systemctl is-active --quiet sing-box.service && return 0
     elif [[ -n "${openRcServiceFile}" && -f "${openRcServiceFile}" ]] && padmCommandExists rc-service; then
@@ -523,7 +523,7 @@ xrayRunning() {
         done
         [[ "${configMatched}" == true && "${testMode}" == false && "${dumpMode}" == false ]] || continue
         return 0
-    done < <(pgrep -x xray 2>/dev/null)
+    done < <(pgrep -f . 2>/dev/null)
     if [[ "${release:-}" != "alpine" && -e "${systemdServiceFile}" ]] && padmCommandExists systemctl; then
         systemctl is-active --quiet xray.service && return 0
     elif [[ -n "${openRcServiceFile}" && -f "${openRcServiceFile}" ]] && padmCommandExists rc-service; then
