@@ -1005,6 +1005,41 @@ Docker daemon or host interfaces. The host still needs working IPv6 routing and
 egress. TUN/TProxy host-network mode, complete WARP and native-host acceptance
 remain outside this stage.
 
+Menu `17`, option `20`, imports, disables or displays WARP egress. Optional v3
+`.routing.warp` has its own `x-padm-routing-warp` gate. Input is a root-owned
+`0600` private JSON file, at most 64 KiB, with the same single-link and safe
+ancestor-directory requirements as other routing inputs. Keys never appear in
+command arguments, previews or routing status.
+The seven fields are `mode` (`selective` or `global`), `family` (`ipv4` or `ipv6`),
+`private_key`, `peer_public_key`, `ipv6_address`, `reserved` and `domains`.
+Keys are canonical 32-byte Base64; `reserved` contains three integers from
+`0` to `255`. Selective mode requires 1–256 unique rules using the four existing
+domain-rule types; global mode requires an empty `domains` array.
+
+```bash
+padm-docker edit --warp /root/warp.json --preview
+padm-docker edit --warp /root/warp.json --confirm PADM-DOCKER-EDIT
+padm-docker edit --warp-off --confirm PADM-DOCKER-EDIT
+```
+
+Supply parameters from an existing WARP account; no account registration or
+third-party registration-tool installation is performed. The Peer is fixed at
+`162.159.192.1:2408` and MTU at `1280`. `family` selects one local tunnel address
+and the address family used to resolve matched domains: `172.16.0.2/32` for IPv4
+or the imported `ipv6_address/128` for IPv6. Resolution does not fall back to the
+other family. This does not guarantee the public egress address family or convert
+literal destination IPs. Both cores explicitly use userspace
+WireGuard without host interfaces, additional privileges, devices or ports.
+Direct, domain/IP/BT Block and selective IPv6 precede WARP; selective WARP
+precedes SOCKS5. Global WARP preserves explicit IPv6/SOCKS5 rules but cannot
+coexist with another global default outbound. Existing hosts and split-DNS
+sources remain in use. Disabling removes only WARP and preserves other rules
+and traffic totals. Both cores passed isolated local encrypted-Peer TCP/UDP,
+DNS-source, no-direct-fallback and disable/restore checks. The fixture records
+nonzero reserved bytes before adapting the header for a standard kernel Peer;
+this is not Cloudflare service acceptance. Cloudflare account validity, public
+UDP and public egress still require separate acceptance.
+
 `Routing & access control` manages server-side outbound behavior and access policies. It is not a client configuration tutorial.
 
 | Feature | Notes |

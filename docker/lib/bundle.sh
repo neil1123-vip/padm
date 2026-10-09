@@ -366,6 +366,9 @@ dockerBundleSupportsSpec() {
           (if ($spec[0].routing // {}) | has("ipv6") then
             $schema[0]["x-padm-routing-ipv6"] == true
           else true end) and
+          (if ($spec[0].routing // {}) | has("warp") then
+            $schema[0]["x-padm-routing-warp"] == true
+          else true end) and
           ($features | length) == 1 and ($features[0].protocols | type == "array") and
           all($spec[0].core.protocols[];
             . as $entry |

@@ -39,6 +39,9 @@ BLOCK_IPS='{"ips":["192.0.2.10","2001:db8::10","198.51.100.0/24","2001:db8::/64"
 REGION_ALLOW='["full:exact.example.com","domain:apple.com","full:custom-region.example.com"]'
 REGION_DEFAULTS='["domain:dl.google.com","domain:apple.com","domain:bing.com","domain:microsoft.com","domain:gstatic.com","domain:xn--ngstr-lra8j.com","domain:googleapis.com","domain:googleapis.cn"]'
 IPV6_DOMAINS='["full:exact.example.com","domain:example.net","keyword:video","geosite:cn"]'
+WARP_INPUT=${PRIVATE_ROOT}/warp.json
+WARP_PRIVATE='AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA='
+WARP_PUBLIC='ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0A='
 
 fail() {
     [[ ! -f "${LOG}" ]] || sed 's/^/  /' "${LOG}" >&2
@@ -169,6 +172,23 @@ jq --argjson domains "${IPV6_DOMAINS}" \
 jq --argjson domains "${DOMAINS}" \
     '.routing.ipv6 = {mode:"global",domains:[]} | .routing.socks5.domains = $domains' \
     "${TEST_ROOT}/routing-bt-policy.json" >"${TEST_ROOT}/ipv6-global-owner.json"
+jq -n --arg private "${WARP_PRIVATE}" --arg peer "${WARP_PUBLIC}" --argjson domains "${IPV6_DOMAINS}" '
+  {mode:"selective",family:"ipv4",private_key:$private,peer_public_key:$peer,
+   ipv6_address:"2606:4700:110:8a10::2",reserved:[1,2,255],domains:$domains}
+' >"${WARP_INPUT}"
+chmod 0600 "${WARP_INPUT}"
+for mode in selective global; do
+    jq --slurpfile warp "${WARP_INPUT}" --arg mode "${mode}" '
+      .routing = {warp:($warp[0] | .mode=$mode |
+        if $mode == "global" then .domains=[] else . end)}
+    ' "${TEST_ROOT}/base.json" >"${TEST_ROOT}/warp-${mode}.json"
+done
+jq --slurpfile warp "${WARP_INPUT}" '.routing.warp = $warp[0]' \
+    "${TEST_ROOT}/ipv6-owner.json" >"${TEST_ROOT}/warp-owner.json"
+jq '.routing.warp.family = "ipv6"' "${TEST_ROOT}/warp-owner.json" \
+    >"${TEST_ROOT}/warp-owner6.json"
+jq --slurpfile warp "${WARP_INPUT}" '.routing.warp = ($warp[0] | .mode="global" | .domains=[])' \
+    "${TEST_ROOT}/domains.json" >"${TEST_ROOT}/warp-global-owner.json"
 
 # 同批正反输入由两份校验合同独立判断，避免 Schema 与生产校验分歧。
 python3 - "${PROJECT_ROOT}" "${TEST_ROOT}" <<'PY'
@@ -257,6 +277,49 @@ for index, bad in enumerate((
 value = copy.deepcopy(json.loads((root / "ipv6-global-owner.json").read_text()))
 del value["routing"]["socks5"]["domains"]
 case("invalid-ipv6-global-socks", value, False)
+warp = json.loads((root / "warp-selective.json").read_text())
+for name in ("warp-selective", "warp-global", "warp-owner", "warp-owner6", "warp-global-owner"):
+    case(name, json.loads((root / f"{name}.json").read_text()), True)
+for family in ("ipv4", "ipv6"):
+    value = copy.deepcopy(warp)
+    value["routing"]["warp"]["family"] = family
+    case(f"warp-{family}", value, True)
+for count in (1, 256):
+    value = copy.deepcopy(warp)
+    value["routing"]["warp"]["domains"] = [f"full:warp-{n}.example.com" for n in range(count)]
+    case(f"warp-domains-{count}", value, True)
+for field, invalid in (
+        ("mode", [None, True, "Selective", "all"]),
+        ("family", [None, True, "IPv4", "both", "ipv6_only"]),
+        ("private_key", ["", "a" * 44, "A" * 43 + "B",
+                         warp["routing"]["warp"]["private_key"] + "\n", None, []]),
+        ("peer_public_key", ["", "a" * 44, "A" * 43 + "B",
+                             warp["routing"]["warp"]["peer_public_key"] + "\n", None]),
+        ("ipv6_address", ["192.0.2.1", "::", "::1", "fe80::1", "ff02::1",
+                          "2001:db8::2/128", "[2001:db8::2]", "2001:db8::2%eth0", None]),
+        ("reserved", [[], [1, 2], [1, 2, 3, 4], [1, 2, 256], [-1, 2, 3],
+                      [True, 2, 3], [1.1, 2, 3], None]),
+        ("domains", [[], ["regexp:.*"], ["full:Example.com"], ["full:a.example.com"] * 2,
+                     [True], [f"full:warp-{n}.example.com" for n in range(257)]])):
+    for index, bad in enumerate(invalid):
+        value = copy.deepcopy(warp)
+        value["routing"]["warp"][field] = bad
+        case(f"invalid-warp-{field}-{index}", value, False)
+for field in warp["routing"]["warp"]:
+    value = copy.deepcopy(warp)
+    del value["routing"]["warp"][field]
+    case(f"invalid-warp-missing-{field}", value, False)
+value = copy.deepcopy(warp)
+value["routing"]["warp"]["extra"] = True
+case("invalid-warp-extra", value, False)
+value = copy.deepcopy(json.loads((root / "warp-global.json").read_text()))
+value["routing"]["warp"]["domains"] = ["full:a.example.com"]
+case("invalid-warp-global-domains", value, False)
+for other in ("socks5", "ipv6"):
+    value = copy.deepcopy(json.loads((root / "warp-global.json").read_text()))
+    value["routing"][other] = (routed["routing"]["socks5"] if other == "socks5"
+                               else dict(mode="global", domains=[]))
+    case(f"invalid-warp-global-{other}", value, False)
 for index, rules in enumerate((
         ["0.0.0.0", "127.0.0.1", "255.255.255.255", "::", "::1", "FFFF:FFFF::1"],
         ["0.0.0.0/0", "127.0.0.1/32", "::/0", "::1/128", "192.0.2.10/24", "2001:db8::10/64"],
@@ -299,7 +362,7 @@ for name, template in (("dns", dns), ("hosts", hosts),
                        ("direct", json.loads((root / "direct-only.json").read_text())),
                        ("block", json.loads((root / "block-only.json").read_text())),
                        ("block-ips", ip_block), ("block-bt", bt_block), ("region", region),
-                       ("ipv6", ipv6)):
+                       ("ipv6", ipv6), ("warp", warp)):
     for version in (1, 2):
         value = copy.deepcopy(template)
         value["schema_version"] = version
@@ -453,6 +516,8 @@ for integration in ("tun", "tproxy"):
     case(f"invalid-integration-{integration}", value, False)
     value["routing"] = ipv6["routing"]
     case(f"invalid-ipv6-integration-{integration}", value, False)
+    value["routing"] = warp["routing"]
+    case(f"invalid-warp-integration-{integration}", value, False)
     if integration == "tun":
         for version in (1, 2):
             value = copy.deepcopy(legacy)
@@ -512,6 +577,22 @@ for fixture in ipv6-selective ipv6-global ipv6-owner ipv6-global-owner; do
     dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/${fixture}.json" ||
         fail "${fixture}: 当前 bundle 拒绝 IPv6 路由"
 done
+for fixture in warp-selective warp-global warp-owner warp-owner6 warp-global-owner; do
+    dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/${fixture}.json" ||
+        fail "${fixture}: 当前 bundle 拒绝 WARP 路由"
+done
+cp -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json" \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved"
+jq 'del(."x-padm-routing-warp")' \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
+    >"${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+for fixture in warp-selective warp-global; do
+    reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/${fixture}.json"
+done
+dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/ipv6-global.json" ||
+    fail 'WARP marker 缺失误拒绝旧 IPv6 路由'
+mv -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
 cp -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json" \
     "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved"
 for marker in 'del(."x-padm-routing-ipv6")' '."x-padm-routing-ipv6" = false'; do
@@ -668,7 +749,7 @@ for version in 1 2; do
         "${TEST_ROOT}/legacy-sing-v${version}-core.json" >/dev/null ||
         fail "v${version}: 无 routing 改变旧 sing-box 默认出站"
 done
-for fixture in routed domains dns-only hosts-only routing-all routing-all-global direct-only block-only routing-policy block-ips-only routing-ip-policy block-bt-only routing-bt-policy region-both region-domain region-ip region-owner ipv6-selective ipv6-global ipv6-owner ipv6-global-owner; do
+for fixture in routed domains dns-only hosts-only routing-all routing-all-global direct-only block-only routing-policy block-ips-only routing-ip-policy block-bt-only routing-bt-policy region-both region-domain region-ip region-owner ipv6-selective ipv6-global ipv6-owner ipv6-global-owner warp-selective warp-global warp-ipv6 warp-owner warp-owner6 warp-global-owner; do
     for core in xray sing-box; do
         if [[ "${core}" == xray ]]; then
             dockerGenerateXrayConfig "${TEST_ROOT}/${fixture}.json" "${TEST_ROOT}/${fixture}-${core}.json"
@@ -927,6 +1008,66 @@ jq -en --slurpfile selective "${TEST_ROOT}/ipv6-selective-sing-box.json" \
   ($owner[0].route.rules | map(.action) | index("reject")) <
     ($owner[0].route.rules | map(.outbound) | index("padm-ipv6"))
 ' >/dev/null || fail 'sing-box IPv6 OR、Direct 例外、同源解析或 SOCKS 优先级错误'
+jq -en --slurpfile selective "${TEST_ROOT}/warp-selective-xray.json" \
+    --slurpfile global "${TEST_ROOT}/warp-global-xray.json" \
+    --slurpfile ipv6 "${TEST_ROOT}/warp-ipv6-xray.json" \
+    --slurpfile owner "${TEST_ROOT}/warp-owner-xray.json" \
+    --arg private "${WARP_PRIVATE}" --arg public "${WARP_PUBLIC}" '
+  ($selective[0].outbounds[] | select(.tag == "padm-warp")) as $warp |
+  $warp == {protocol:"wireguard",tag:"padm-warp",targetStrategy:"ForceIPv4",settings:{
+    secretKey:$private,address:["172.16.0.2/32"],mtu:1280,noKernelTun:true,reserved:[1,2,255],
+    peers:[{publicKey:$public,allowedIPs:["0.0.0.0/0","::/0"],endpoint:"162.159.192.1:2408"}]}} and
+  ($ipv6[0].outbounds[] | select(.tag == "padm-warp")) ==
+    ($warp | .targetStrategy = "ForceIPv6" | .settings.address = ["2606:4700:110:8a10::2/128"]) and
+  $selective[0].outbounds[0].tag == "direct" and $global[0].outbounds[0] == $warp and
+  $owner[0].routing.rules[4].protocol == ["bittorrent"] and
+  $owner[0].routing.rules[5].outboundTag == "padm-ipv6" and
+  $owner[0].routing.rules[6].outboundTag == "padm-warp" and
+  $owner[0].routing.rules[7].network == "udp"
+' >/dev/null || fail 'Xray WARP userspace、同族预解析、固定端点、地址或优先级错误'
+jq -en --slurpfile selective "${TEST_ROOT}/warp-selective-sing-box.json" \
+    --slurpfile global "${TEST_ROOT}/warp-global-sing-box.json" \
+    --slurpfile ipv6 "${TEST_ROOT}/warp-ipv6-sing-box.json" \
+    --slurpfile owner "${TEST_ROOT}/warp-owner-sing-box.json" \
+    --slurpfile owner6 "${TEST_ROOT}/warp-owner6-sing-box.json" \
+    --slurpfile global_owner "${TEST_ROOT}/warp-global-owner-sing-box.json" \
+    --arg private "${WARP_PRIVATE}" --arg public "${WARP_PUBLIC}" '
+  def warp_span($config):
+    ($config.route.rules | map(.outbound) | rindex("padm-ipv6")) as $first |
+    ($config.route.rules | map(.outbound) | index("padm-socks5")) as $last |
+    $config.route.rules[($first + 1):$last];
+  def warp_resolves($config): warp_span($config) | map(select(.action == "resolve"));
+  def resolve_routes_paired($config):
+    warp_span($config) as $rules |
+    all(range(0; $rules | length); . as $i |
+      if $rules[$i].action == "resolve" then $rules[$i + 1] ==
+        ($rules[$i] | del(.server,.strategy) | .action = "route" | .outbound = "padm-warp")
+      else true end);
+  $selective[0].endpoints == [{type:"wireguard",tag:"padm-warp",system:false,mtu:1280,
+    address:["172.16.0.2/32"],private_key:$private,peers:[{address:"162.159.192.1",port:2408,
+      public_key:$public,reserved:[1,2,255],allowed_ips:["0.0.0.0/0","::/0"]}]}] and
+  $ipv6[0].endpoints == ($selective[0].endpoints |
+    .[0].address = ["2606:4700:110:8a10::2/128"]) and
+  ($selective[0].route.rules[-2] | {action,server,strategy}) ==
+    {action:"resolve",server:"padm-local",strategy:"ipv4_only"} and
+  ($ipv6[0].route.rules[-2] | {action,server,strategy}) ==
+    {action:"resolve",server:"padm-local",strategy:"ipv6_only"} and
+  (warp_resolves($owner[0]) | map(.server) | unique) == ["padm-dns","padm-hosts","padm-local"] and
+  all(warp_resolves($owner[0])[]; .strategy == "ipv4_only") and
+  (warp_resolves($owner6[0]) | map(.server) | unique) == ["padm-dns","padm-hosts","padm-local"] and
+  all(warp_resolves($owner6[0])[]; .strategy == "ipv6_only") and
+  resolve_routes_paired($owner[0]) and resolve_routes_paired($owner6[0]) and
+  $selective[0].route.final == "direct" and $global[0].route.final == "padm-warp" and
+  ($owner[0].route.rules | map(.outbound) | index("padm-ipv6")) <
+    ($owner[0].route.rules | map(.outbound) | index("padm-warp")) and
+  ($owner[0].route.rules | map(.outbound) | index("padm-warp")) <
+    ($owner[0].route.rules | map(.outbound) | index("padm-socks5")) and
+  ($global_owner[0].route.rules | map(.outbound) | index("padm-socks5")) <
+    ($global_owner[0].route.rules | map(.outbound) | index("padm-warp")) and
+  all($owner[0].route.rules[] | select(.outbound == "padm-warp");
+    .type == "logical" and .rules[1].invert == true) and
+  $owner[0].dns.final == "padm-local"
+' >/dev/null || fail 'sing-box WARP endpoint、同源解析或 OR/Direct/default 优先级错误'
 # 用核心的匹配语义检查每类独立命中，防止不同 matcher 被错误组合成 AND。
 python3 - "${TEST_ROOT}/domains-sing-box.json" <<'PY'
 import json
@@ -984,7 +1125,7 @@ assert all(rule["type"] == "remote" and rule["format"] == "binary" and
            rule["http_client"] == {"engine": "go"} and "download_detour" not in rule
            for rule in rule_sets)
 PY
-for fixture in routed domains routing-all-global direct-only block-only routing-policy block-ips-only routing-ip-policy block-bt-only routing-bt-policy region-both region-domain region-ip region-owner ipv6-selective ipv6-global ipv6-owner ipv6-global-owner; do
+for fixture in routed domains routing-all-global direct-only block-only routing-policy block-ips-only routing-ip-policy block-bt-only routing-bt-policy region-both region-domain region-ip region-owner ipv6-selective ipv6-global ipv6-owner ipv6-global-owner warp-selective warp-global warp-ipv6 warp-owner warp-owner6 warp-global-owner; do
     jq -en --slurpfile source "${TEST_ROOT}/${fixture}-xray.json" \
         --slurpfile runtime "${TEST_ROOT}/runtime-${fixture}-xray.json" '
       $runtime[0].outbounds == $source[0].outbounds and
@@ -998,7 +1139,7 @@ for fixture in routed domains routing-all-global direct-only block-only routing-
 done
 for generator in dockerGenerateCompose dockerGenerateDeployment; do
     "${generator}" "${TEST_ROOT}/base.json" "${TEST_ROOT}/legacy-generated.json"
-    for fixture in routed domains dns-only hosts-only routing-all routing-all-global direct-only block-only routing-policy block-ips-only routing-ip-policy block-bt-only routing-bt-policy region-both region-domain region-ip region-owner; do
+    for fixture in routed domains dns-only hosts-only routing-all routing-all-global direct-only block-only routing-policy block-ips-only routing-ip-policy block-bt-only routing-bt-policy region-both region-domain region-ip region-owner warp-selective warp-global warp-global-owner; do
         "${generator}" "${TEST_ROOT}/${fixture}.json" "${TEST_ROOT}/routed-generated.json"
         cmp -s "${TEST_ROOT}/legacy-generated.json" "${TEST_ROOT}/routed-generated.json" ||
             fail "${generator}: ${fixture} 意外改变容器能力或宿主端口"
@@ -1072,6 +1213,7 @@ runEdit() {
     assertClean
     ! grep -Fq "${USERNAME}" "${LOG}" && ! grep -Fq "${PASSWORD}" "${LOG}" ||
         fail '路由编辑泄露 SOCKS5 凭据'
+    ! grep -Fq "${WARP_PRIVATE}" "${LOG}" || fail '路由编辑泄露 WARP 私钥'
 }
 runStatus() {
     local expected=$1 actual=0
@@ -1081,7 +1223,8 @@ runStatus() {
     assertClean
     for output in "${LOG}" "${TEST_ROOT}/status.stderr"; do
         ! grep -Fq "${USERNAME}" "${output}" && ! grep -Fq "${PASSWORD}" "${output}" &&
-            ! grep -Fq "${UUID}" "${output}" || fail '路由诊断泄露认证信息'
+            ! grep -Fq "${UUID}" "${output}" && ! grep -Fq "${WARP_PRIVATE}" "${output}" ||
+            fail '路由诊断泄露认证信息'
     done
 }
 (
@@ -1126,7 +1269,106 @@ jq -cn --arg uuid "${UUID}" '{schema_version:1,accounts:{($uuid):{
     done
 )
 assertClean
-if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != bt && "${PADM_DOCKER_ROUTING_SCOPE:-}" != region ]]; then
+if [[ -z "${PADM_DOCKER_ROUTING_SCOPE:-}" || "${PADM_DOCKER_ROUTING_SCOPE:-}" == warp ]]; then
+    before=$(snapshot)
+    runEdit 0 --warp "${WARP_INPUT}" --preview
+    runEdit 0 --warp-off --preview
+    runEdit 2 --warp
+    runEdit 2 --warp "${WARP_INPUT}"
+    runEdit 2 --warp "${WARP_INPUT}" --confirm invalid
+    runEdit 2 --warp "${WARP_INPUT}" --warp-off --preview
+    runEdit 2 --warp-off --warp-off --preview
+    runEdit 2 --warp "${WARP_INPUT}" --warp "${WARP_INPUT}" --preview
+    runEdit 2 --warp "${WARP_INPUT}" --socks5-off --preview
+    runEdit 2 --warp "${WARP_INPUT}" --spec "${TEST_ROOT}/base.json" --preview
+    runEdit 2 --warp "${WARP_INPUT}" --http01 enable --preview
+    runEdit 15 --spec "${TEST_ROOT}/warp-global.json" --confirm PADM-DOCKER-EDIT
+    cp -- "${WARP_INPUT}" "${PRIVATE_ROOT}/warp-bad.json"
+    chmod 0640 "${PRIVATE_ROOT}/warp-bad.json"
+    runEdit 15 --warp "${PRIVATE_ROOT}/warp-bad.json" --preview
+    chmod 0600 "${PRIVATE_ROOT}/warp-bad.json"
+    jq '.reserved = [1,2,256]' "${WARP_INPUT}" >"${PRIVATE_ROOT}/warp-bad.json"
+    runEdit 15 --warp "${PRIVATE_ROOT}/warp-bad.json" --preview
+    ln -s "${WARP_INPUT}" "${PRIVATE_ROOT}/warp-link.json"
+    runEdit 15 --warp "${PRIVATE_ROOT}/warp-link.json" --preview
+    (
+        trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+        dockerSetupRead() { printf -v "$1" '%s' n; }
+        dockerAcquireDeploymentLock
+        dockerConfigureApply "${TEST_ROOT}/warp-selective.json" '' '' interactive
+    ) >"${LOG}" 2>&1 || fail 'WARP 取消失败'
+    assertClean
+    [[ "$(snapshot)" == "${before}" ]] || fail 'WARP 预览、取消或非法输入改变完整部署'
+    runEdit 0 --warp "${WARP_INPUT}" --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile expected "${TEST_ROOT}/warp-selective.json" --slurpfile actual "${root}/config/spec.json" \
+        '$actual == $expected' >/dev/null || fail 'WARP 导入改变其它规格'
+    runStatus 0
+    jq -e --argjson domains "${IPV6_DOMAINS}" '
+      .warp == {mode:"selective",family:"ipv4",domains:$domains}
+    ' "${LOG}" >/dev/null || fail 'WARP 状态未按无秘密合同投影'
+    before=$(snapshot)
+    runEdit 15 --spec "${TEST_ROOT}/base.json" --confirm PADM-DOCKER-EDIT
+    runEdit 15 --spec "${TEST_ROOT}/warp-global.json" --confirm PADM-DOCKER-EDIT
+    [[ "$(snapshot)" == "${before}" ]] || fail '普通 --spec 绕过 WARP 冻结'
+    jq '.mode="global" | .domains=[] | .family="ipv6"' "${WARP_INPUT}" >"${PRIVATE_ROOT}/warp-global.json"
+    chmod 0600 "${PRIVATE_ROOT}/warp-global.json"
+    runEdit 0 --warp "${PRIVATE_ROOT}/warp-global.json" --confirm PADM-DOCKER-EDIT
+    jq -e '.routing.warp.mode == "global" and .routing.warp.family == "ipv6" and
+      .routing.warp.domains == []' "${root}/config/spec.json" >/dev/null ||
+        fail 'WARP 替换没有替换模式、地址族或列表'
+    runEdit 0 --warp-off --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile old "${TEST_ROOT}/base.json" --slurpfile new "${root}/config/spec.json" \
+        '$new == $old' >/dev/null || fail '关闭最后 WARP 没有恢复无 routing 规格'
+    (
+        trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+        dockerAcquireDeploymentLock
+        dockerConfigureApply "${TEST_ROOT}/ipv6-owner.json" '' '' configure
+    ) >"${LOG}" 2>&1 || fail '初始化 WARP 组合夹具失败'
+    assertClean
+    before=$(snapshot)
+    runEdit 15 --warp "${PRIVATE_ROOT}/warp-global.json" --confirm PADM-DOCKER-EDIT
+    [[ "$(snapshot)" == "${before}" ]] || fail '重复默认出站的 WARP 导入改变部署'
+    runEdit 0 --warp "${WARP_INPUT}" --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile expected "${TEST_ROOT}/warp-owner.json" --slurpfile actual "${root}/config/spec.json" \
+        '$actual == $expected' >/dev/null || fail '选择性 WARP 未保留 IPv6/generic 路由'
+    before=$(snapshot)
+    for failure in health-fail int term; do
+        MODE=${failure}
+        rm -f -- "${TEST_ROOT}/failed-once"
+        case "${failure}" in
+        health-fail) runEdit 14 --warp "${WARP_INPUT}" --confirm PADM-DOCKER-EDIT ;;
+        int) runEdit 130 --warp-off --confirm PADM-DOCKER-EDIT ;;
+        term) runEdit 143 --warp-off --confirm PADM-DOCKER-EDIT ;;
+        esac
+        [[ "$(snapshot)" == "${before}" ]] || fail "${failure}: WARP 未恢复全部规则、编排与流量"
+    done
+    MODE=ok
+    runEdit 0 --warp-off --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile expected "${TEST_ROOT}/ipv6-owner.json" --slurpfile actual "${root}/config/spec.json" \
+        '$actual == $expected' >/dev/null || fail 'WARP 关闭删除其它路由'
+    for core in xray sing-box; do
+        cmp -s "${root}/config/${core}/config.json" "${TEST_ROOT}/runtime-ipv6-owner-${core}.json" ||
+            fail "${core}: WARP 关闭没有恢复原运行配置"
+    done
+    runStatus 0
+    jq -e 'has("warp") | not' "${LOG}" >/dev/null || fail 'WARP 关闭仍显示有效配置'
+    jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload == 17 and .accounts[$uuid].download == 19' \
+        "${root}/data/traffic/state.json" >/dev/null || fail 'WARP 事务清空流量'
+    [[ "$(stat -c '%a %u %h' "${root}/config/spec.json")" == '600 0 1' ]] ||
+        fail 'WARP 改变私有规格权限'
+    (
+        trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+        dockerAcquireDeploymentLock
+        dockerConfigureApply "${TEST_ROOT}/base.json" '' '' configure
+    ) >"${LOG}" 2>&1 || fail '重置 WARP 夹具失败'
+    assertClean
+    if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == warp ]]; then
+        printf 'docker-routing-warp-regression-ok\n'
+        exit 0
+    fi
+fi
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != bt && "${PADM_DOCKER_ROUTING_SCOPE:-}" != region &&
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" != warp ]]; then
     before=$(snapshot)
     runEdit 0 --ipv6 selective --ipv6-domains 'example.net' --preview
     runEdit 0 --ipv6-domains 'example.net' --ipv6 selective --preview

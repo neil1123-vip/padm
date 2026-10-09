@@ -431,7 +431,7 @@
       "profiles": [],
       "network_mode": "host-cli",
       "host_capabilities": [],
-      "reason": "5B.1–5B.3e 提供两核心认证 SOCKS5 TCP 全局/域名出站、DNS 分流、精确 hosts、域名 Direct/Block、字面目的 IP/CIDR/geoip:cn、可识别明文 BT 阻断及 CN 区域域名/IP/组合预设；另提供独立 IPv6 域名 AAAA-only 选择性/默认出站，保留其它策略所有权，只附加受管 IPv6 bridge，不修改宿主网络或权限。区域例外与预设独立保存，关闭保留手工相同规则；直连例外优先阻断和代理，阻断不解析，代理或匹配 DNS 失败不回退。IPv6 不转换字面 IPv4，公网连通取决于容器路由；BT 不保证覆盖加密、混淆或部分 uTP。WARP、域名解析后 IP 阻断、完整区域策略和分流仍待迁移。"
+      "reason": "5B.1–5B.3e 提供两核心认证 SOCKS5 TCP 全局/域名出站、DNS 分流、精确 hosts、域名 Direct/Block、字面目的 IP/CIDR/geoip:cn、可识别明文 BT 阻断及 CN 区域域名/IP/组合预设；另提供独立 IPv6 域名 AAAA-only 选择性/默认出站及 WARP 私有账号参数合同和核心内 WireGuard 选择性/默认出站。WARP 固定端点、MTU 和用户态配置，family 同时选择隧道地址及目的域名解析族，但不转换字面 IP，也不保证公网出口地址族；双核心本地加密 Peer 的 TCP/UDP、DNS 来源、失联无直连与关闭恢复已验，Cloudflare 账号、公网 UDP 和实际公网出口仍待验。不注册账号，不使用宿主 WireGuard、TUN、额外权限或端口。保留其它策略所有权，IPv6 仅附加受管 bridge，不修改宿主网络或权限。直连例外优先阻断，再选择 IPv6、WARP、显式 SOCKS 与默认出站；关闭保留其它规则，代理或匹配 DNS 失败不回退。公网连通取决于容器路由；BT 不保证覆盖加密、混淆或部分 uTP。域名解析后 IP 阻断、完整区域策略和分流仍待迁移。"
     },
     "internal-201-socks-relay": {
       "status": "deferred",
@@ -485,7 +485,7 @@
       "profiles": [],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "5B.3a–5B.3e 已交付两核心 DNS 分流、精确 hosts、域名 Direct/Block、独立字面目的 IP/CIDR/geoip:cn、可识别明文 BT 阻断及独立所有权的 CN 区域预设；另提供独立 IPv6 域名 AAAA-only 选择性/默认出站，关闭保留 DNS/hosts、阻断、SOCKS 和区域策略。默认及自定义直连例外优先 Block/BT/IPv6/SOCKS；Block 在解析前拒绝 TCP/UDP，不阻断域名解析后的 IP。IPv6 不转换字面 IPv4，公网连通取决于容器路由；BT 不保证覆盖加密、混淆或部分 uTP。完整区域策略、规则编辑和冲突检测尚未迁移，206 不作为公开节点协议。"
+      "reason": "5B.3a–5B.3e 已交付两核心 DNS 分流、精确 hosts、域名 Direct/Block、独立字面目的 IP/CIDR/geoip:cn、可识别明文 BT 阻断及独立所有权的 CN 区域预设；另提供独立 IPv6 域名 AAAA-only 选择性/默认出站及 WARP 私有参数合同和核心内 WireGuard 出站。WARP 双核心本地加密 Peer 的 TCP/UDP、DNS 来源、失联无直连与关闭恢复已验，Cloudflare 账号、公网 UDP 和公网出口仍待验。关闭保留其它子策略；默认及自定义直连例外优先 Block/BT/IPv6/WARP/SOCKS，重复默认出站明确拒绝。WARP 保留 hosts/指定 DNS，family 同时选择隧道地址及目的域名解析族，不转换字面 IP；不注册账号、不授予宿主权限。Block 在解析前拒绝 TCP/UDP，不阻断域名解析后的 IP。公网连通取决于容器路由；BT 不保证覆盖加密、混淆或部分 uTP。完整区域策略、规则编辑和冲突检测尚未迁移，206 不作为公开节点协议。"
     },
     "internal-207-access-control": {
       "status": "deferred",

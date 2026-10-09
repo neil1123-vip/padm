@@ -163,6 +163,14 @@ runDockerRoutingIPv6RealRegression() {
     bash "${PROJECT_ROOT}/docker/tests/routing-ipv6-real.sh"
 }
 
+runDockerRoutingWarpRegression() {
+    PADM_DOCKER_ROUTING_SCOPE=warp bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
+}
+
+runDockerRoutingWarpRealRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/routing-warp-real.sh"
+}
+
 runDockerRoutingSocks5RealRegression() {
     bash "${PROJECT_ROOT}/docker/tests/routing-socks5-real.sh"
 }
@@ -293,6 +301,8 @@ registerRegressionFunctionLeaf docker-routing-region runDockerRoutingRegionRegre
 registerRegressionFunctionLeaf docker-routing-region-real runDockerRoutingRegionRealRegression
 registerRegressionFunctionLeaf docker-routing-ipv6 runDockerRoutingIPv6Regression
 registerRegressionFunctionLeaf docker-routing-ipv6-real runDockerRoutingIPv6RealRegression
+registerRegressionFunctionLeaf docker-routing-warp runDockerRoutingWarpRegression
+registerRegressionFunctionLeaf docker-routing-warp-real runDockerRoutingWarpRealRegression
 registerRegressionFunctionLeaf docker-accounts runDockerAccountsRegression
 registerRegressionFunctionLeaf docker-accounts-cli runDockerAccountsCliRegression
 registerRegressionFunctionLeaf docker-subscriptions runDockerSubscriptionsRegression

@@ -41,6 +41,8 @@ dockerUsage() {
   padm-docker edit --region-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --ipv6 <selective|global> [--ipv6-domains <域名规则 CSV>] [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --ipv6-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --warp <root 私有 JSON 文件> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --warp-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --alpn <入口 ID> <h2,http/1.1|http/1.1,h2|http/1.1> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker protocol list
   padm-docker protocol links [入口 ID]

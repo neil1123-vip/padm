@@ -122,6 +122,7 @@ dockerConfigureSpecValidate() {
       def server: hostname or ipv4 or ipv6;
       def uuid: type == "string" and length == 36 and test("^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$");
       def name: type == "string" and test("^[A-Za-z0-9._~@+=:-]{1,64}$");
+      def wireguard_key: type == "string" and length == 44 and test("^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$");
       def families: type == "array" and length >= 1 and length <= 2 and
         (unique | length) == length and all(.[]; . == "ipv4" or . == "ipv6");
       def image: type == "string" and test("^[a-z0-9][a-z0-9._/:@-]*:[A-Za-z0-9._-]+@sha256:[a-f0-9]{64}$");
@@ -160,6 +161,7 @@ dockerConfigureSpecValidate() {
             (if has("block_ips") then ["block_ips"] else [] end) +
             (if has("block_bt") then ["block_bt"] else [] end) +
             (if has("region") then ["region"] else [] end) +
+            (if has("warp") then ["warp"] else [] end) +
             (if has("ipv6") then ["ipv6"] else [] end)) and
           (if has("socks5") then
           (.socks5 | exact(["server", "port", "username", "password"] +
@@ -212,6 +214,22 @@ dockerConfigureSpecValidate() {
               (if .mode == "selective" then (.domains | length >= 1) else .domains == [] end)) and
             (if .ipv6.mode == "global" and .socks5 != null then
               (.socks5 | has("domains")) else true end)
+           else true end) and
+          (if has("warp") then
+            (.warp | exact(["mode", "family", "private_key", "peer_public_key", "ipv6_address", "reserved", "domains"]) and
+              (.mode == "selective" or .mode == "global") and
+              (.family == "ipv4" or .family == "ipv6") and
+              (.private_key | wireguard_key) and (.peer_public_key | wireguard_key) and
+              (.ipv6_address | type == "string" and contains(":") and host_address) and
+              (.reserved | type == "array" and length == 3 and
+                all(.[]; type == "number" and floor == . and . >= 0 and . <= 255)) and
+              (.domains | type == "array" and length <= 256 and
+                length == (unique | length) and all(.[]; routing_selector)) and
+              (if .mode == "selective" then (.domains | length >= 1) else .domains == [] end)) and
+            (if .warp.mode == "global" then
+              .ipv6.mode != "global" and
+              (if .socks5 != null then (.socks5 | has("domains")) else true end)
+             else true end)
            else true end)) and
         all(.host_integrations[]; .type != "tun" and .type != "tproxy")
        else true end) and
@@ -1434,7 +1452,11 @@ dockerGenerateXrayConfig() {
       ($r.routing.ipv6.mode == "global") as $ipv6_global |
       (($r.routing.ipv6.domains // []) | map(
         if startswith("keyword:") then ltrimstr("keyword:") else . end)) as $ipv6_domains |
-      ($resolve or $ipv6) as $dns_enabled |
+      ($r.routing.warp != null) as $warp |
+      ($r.routing.warp.mode == "global") as $warp_global |
+      (($r.routing.warp.domains // []) | map(
+        if startswith("keyword:") then ltrimstr("keyword:") else . end)) as $warp_domains |
+      ($resolve or $ipv6 or $warp) as $dns_enabled |
       (($r.routing.dns.domains // []) | map(
         if startswith("keyword:") then ltrimstr("keyword:") else . end)) as $dns_domains |
       (($r.routing.direct.domains // []) | map(
@@ -1443,10 +1465,21 @@ dockerGenerateXrayConfig() {
         if startswith("keyword:") then ltrimstr("keyword:") else . end)) as $block_domains |
       ($r.routing.block_ips.ips // []) as $block_ips |
       ($r.routing.block_bt == true) as $block_bt |
-      ($r.routing.direct != null or $r.routing.block != null or $r.routing.block_ips != null or $block_bt or $ipv6) as $actions |
+      ($r.routing.direct != null or $r.routing.block != null or $r.routing.block_ips != null or $block_bt or $ipv6 or $warp) as $actions |
       ({protocol: "freedom", tag: "direct"} +
         if $resolve then {settings: {domainStrategy: "ForceIP"}} else {} end) as $direct |
       {protocol: "freedom", tag: "padm-ipv6", settings: {domainStrategy: "ForceIPv6"}} as $ipv6_outbound |
+      # WireGuard 的域名 UDP 须在 dispatch 前解析成目的 IP，仍使用核心 hosts/DNS。
+      {protocol: "wireguard", tag: "padm-warp",
+        targetStrategy: (if $r.routing.warp.family == "ipv4" then "ForceIPv4" else "ForceIPv6" end),
+        settings: {
+        secretKey: $r.routing.warp.private_key,
+        address: [(if $r.routing.warp.family == "ipv4" then "172.16.0.2/32"
+          else $r.routing.warp.ipv6_address + "/128" end)],
+        peers: [{publicKey: $r.routing.warp.peer_public_key,
+          allowedIPs: ["0.0.0.0/0", "::/0"], endpoint: "162.159.192.1:2408"}],
+        reserved: $r.routing.warp.reserved, mtu: 1280, noKernelTun: true
+      }} as $warp_outbound |
       {
         log: {loglevel: "warning"},
         inbounds: ([
@@ -1546,6 +1579,7 @@ dockerGenerateXrayConfig() {
         ]),
         outbounds: [
           (if $ipv6_global then $ipv6_outbound else empty end),
+          (if $warp_global then $warp_outbound else empty end),
           (if $selective then $direct else empty end),
           (if $r.routing.socks5 != null then {
             protocol: "socks", tag: "padm-socks5",
@@ -1557,6 +1591,7 @@ dockerGenerateXrayConfig() {
           } else empty end),
           (if $selective then empty else $direct end),
           (if $ipv6 and ($ipv6_global | not) then $ipv6_outbound else empty end),
+          (if $warp and ($warp_global | not) then $warp_outbound else empty end),
           {protocol: "blackhole", tag: "blocked"}
         ]
       } + (if $dns_enabled then {
@@ -1585,6 +1620,9 @@ dockerGenerateXrayConfig() {
         ] else [] end) +
         (if ($ipv6_domains | length) > 0 then [
           {type: "field", domain: $ipv6_domains, outboundTag: "padm-ipv6"}
+        ] else [] end) +
+        (if ($warp_domains | length) > 0 then [
+          {type: "field", domain: $warp_domains, outboundTag: "padm-warp"}
         ] else [] end) + (if $selective then [
           {type: "field", domain: $domains, network: "udp", outboundTag: "blocked"},
           {type: "field", domain: $domains, network: "tcp", outboundTag: "padm-socks5"}
@@ -1628,19 +1666,29 @@ dockerGenerateSingBoxConfig() {
           {type: "logical", mode: "and", rules: [$match,
             {type: "logical", mode: "or", rules: $direct, invert: true}]}
         else $match end;
-      # IPv6 选中流量仍用原 hosts/DNS 来源，只收 AAAA，失败不换源。
-      def ipv6_routes($matches; $direct; $hosts; $dns):
+      # 出站选中流量仍用原 hosts/DNS 来源；WARP 只解析隧道地址族，失败不换源。
+      def resolved_routes($matches; $direct; $hosts; $dns; $outbound; $strategy; $fallback_local):
         if ($matches | length) == 0 then [] else
+          (if $strategy == null then {} else {strategy: $strategy} end) as $resolve_options |
           (if ($matches | length) == 1 then $matches[0]
            else {type: "logical", mode: "or", rules: $matches} end) as $match |
           (if ($hosts | length) > 0 then
             exclude_direct({type: "logical", mode: "and", rules: [$match, {domain: $hosts}]}; $direct) as $host_match |
-            [$host_match + {action: "resolve", server: "padm-hosts", strategy: "ipv6_only"},
-             $host_match + {action: "route", outbound: "padm-ipv6"}]
+            [$host_match + {action: "resolve", server: "padm-hosts"} + $resolve_options,
+             $host_match + {action: "route", outbound: $outbound}]
            else [] end) +
-          [$dns[] | exclude_direct({type: "logical", mode: "and", rules: [$match, .]}; $direct) +
-            {action: "resolve", server: "padm-dns", strategy: "ipv6_only"}] +
-          [exclude_direct($match; $direct) + {action: "route", outbound: "padm-ipv6"}]
+          # WARP 的指定 DNS 解析后立即选路，避免再次 resolve 覆盖来源和目的地址。
+          [$dns[] | exclude_direct({type: "logical", mode: "and", rules: [$match, .]}; $direct) as $dns_match |
+            ($dns_match + {action: "resolve", server: "padm-dns"} + $resolve_options),
+            (if $fallback_local then $dns_match + {action: "route", outbound: $outbound}
+             else empty end)] +
+          (if $fallback_local then
+            [exclude_direct($match; $direct) + {action: "resolve", server: "padm-local"} +
+              $resolve_options,
+             exclude_direct($match; $direct) + {action: "route", outbound: $outbound}]
+           else
+            [exclude_direct($match; $direct) + {action: "route", outbound: $outbound}]
+           end)
         end;
       # 区域预设只在生成时展开，关闭不会删除用户手工配置的相同规则。
       ($request[0] | if .routing.region != null then
@@ -1660,6 +1708,10 @@ dockerGenerateSingBoxConfig() {
       ($r.routing.ipv6 != null) as $ipv6 |
       ($r.routing.ipv6.mode == "global") as $ipv6_global |
       (domain_matches($r.routing.ipv6.domains // [])) as $ipv6_matches |
+      ($r.routing.warp != null) as $warp |
+      ($r.routing.warp.mode == "global") as $warp_global |
+      (domain_matches($r.routing.warp.domains // [])) as $warp_matches |
+      (if $r.routing.warp.family == "ipv4" then "ipv4_only" else "ipv6_only" end) as $warp_strategy |
       (domain_matches($r.routing.dns.domains // [])) as $dns_matches |
       (domain_matches($r.routing.direct.domains // [])) as $direct_matches |
       (domain_matches($r.routing.block.domains // [])) as $block_matches |
@@ -1668,13 +1720,13 @@ dockerGenerateSingBoxConfig() {
       ([({ip_cidr: [$block_ips[] | select(. != "geoip:cn")]} | select(.ip_cidr | length > 0)),
         (if $geoip_cn then {rule_set: ["padm-geoip-cn"]} else empty end)]) as $ip_matches |
       ($r.routing.block_bt == true) as $block_bt |
-      ($r.routing.direct != null or $r.routing.block != null or $r.routing.block_ips != null or $block_bt or $ipv6) as $actions |
+      ($r.routing.direct != null or $r.routing.block != null or $r.routing.block_ips != null or $block_bt or $ipv6 or $warp) as $actions |
       (($r.routing.hosts // {}) | keys) as $host_domains |
       ($r.routing.dns != null or $r.routing.hosts != null) as $resolve |
-      ($resolve or $ipv6) as $dns_enabled |
+      ($resolve or $ipv6 or $warp) as $dns_enabled |
       (($domains + ($r.routing.dns.domains // []) +
         ($r.routing.direct.domains // []) + ($r.routing.block.domains // []) +
-        ($r.routing.ipv6.domains // [])) |
+        ($r.routing.ipv6.domains // []) + ($r.routing.warp.domains // [])) |
         map(select(startswith("geosite:")) | ltrimstr("geosite:")) | unique) as $sets |
       {
         log: {disabled: false, level: "warn", timestamp: true},
@@ -1822,6 +1874,7 @@ dockerGenerateSingBoxConfig() {
           {type: "direct", tag: "direct"}
         ],
         route: ({final: (if $ipv6_global then "padm-ipv6"
+          elif $warp_global then "padm-warp"
           elif $r.routing.socks5 != null and ($selective | not) then "padm-socks5" else "direct" end),
           auto_detect_interface: true} +
           (if $r.routing.socks5 != null or $resolve or $actions then
@@ -1833,7 +1886,8 @@ dockerGenerateSingBoxConfig() {
               (if $block_bt then [
                 exclude_direct({protocol: ["bittorrent"]}; $direct_matches) + {action: "reject"}
               ] else [] end) +
-              ipv6_routes($ipv6_matches; $direct_matches; $host_domains; $dns_matches) +
+              resolved_routes($ipv6_matches; $direct_matches; $host_domains; $dns_matches; "padm-ipv6"; "ipv6_only"; false) +
+              resolved_routes($warp_matches; $direct_matches; $host_domains; $dns_matches; "padm-warp"; $warp_strategy; true) +
               (if $selective then
               [$matches[] | exclude_direct(. + {network: "udp"}; $direct_matches) + {action: "reject"}] +
               [$matches[] | exclude_direct(. + {network: "tcp"}; $direct_matches) +
@@ -1845,7 +1899,10 @@ dockerGenerateSingBoxConfig() {
                    {action: "route", outbound: "padm-socks5"}] else [] end
              else [] end) +
               (if $ipv6_global then
-                ipv6_routes([{network: ["tcp", "udp"]}]; $direct_matches; $host_domains; $dns_matches)
+                resolved_routes([{network: ["tcp", "udp"]}]; $direct_matches; $host_domains; $dns_matches; "padm-ipv6"; "ipv6_only"; false)
+               else [] end) +
+              (if $warp_global then
+                resolved_routes([{network: ["tcp", "udp"]}]; $direct_matches; $host_domains; $dns_matches; "padm-warp"; $warp_strategy; true)
                else [] end) +
               (if ($host_domains | length) > 0 then [
                 {domain: $host_domains, action: "resolve", server: "padm-hosts"},
@@ -1866,7 +1923,15 @@ dockerGenerateSingBoxConfig() {
                   http_client: {engine: "go"}
                 }] else [] end)}
           else {} end)
-      } + (if $dns_enabled then {
+      } + (if $warp then {
+        endpoints: [{type: "wireguard", tag: "padm-warp", system: false, mtu: 1280,
+          address: [(if $r.routing.warp.family == "ipv4" then "172.16.0.2/32"
+            else $r.routing.warp.ipv6_address + "/128" end)],
+          private_key: $r.routing.warp.private_key,
+          peers: [{address: "162.159.192.1", port: 2408,
+            public_key: $r.routing.warp.peer_public_key, reserved: $r.routing.warp.reserved,
+            allowed_ips: ["0.0.0.0/0", "::/0"]}]}]
+      } else {} end) + (if $dns_enabled then {
         dns: {servers: [{type: "local", tag: "padm-local"},
           (if $r.routing.hosts != null then
             {type: "hosts", tag: "padm-hosts", predefined: $r.routing.hosts} else empty end),

@@ -795,6 +795,8 @@ dockerEditPrivateInputCopy() (
            elif $kind == "hosts" then length >= 1 and length <= 256
            elif $kind == "direct" or $kind == "block" then keys == ["domains"]
            elif $kind == "block_ips" then keys == ["ips"]
+           elif $kind == "warp" then
+             keys == ["domains", "family", "ipv6_address", "mode", "peer_public_key", "private_key", "reserved"]
            else false end))
         ' "${target}" >/dev/null 2>&1
 )
@@ -907,7 +909,9 @@ dockerProtocolCommand() (
           (if .routing.block_bt == true then {block_bt:true} else {} end) +
           (if .routing.region != null then {region:(.routing.region +
             {default_allow_domains:$region_defaults})} else {} end) +
-          (if .routing.ipv6 != null then {ipv6:.routing.ipv6} else {} end)' "${normalized}"
+          (if .routing.ipv6 != null then {ipv6:.routing.ipv6} else {} end) +
+          (if .routing.warp != null then {warp:{mode:.routing.warp.mode,
+            family:.routing.warp.family,domains:.routing.warp.domains}} else {} end)' "${normalized}"
         return $?
     fi
     if [[ "${action}" == list ]]; then
@@ -1381,7 +1385,7 @@ dockerEditCommand() {
             socks5=global
             shift
             ;;
-        --dns|--hosts|--direct|--block|--block-ips)
+        --dns|--hosts|--direct|--block|--block-ips|--warp)
             [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${routingKind}" ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
             routingKind=${1#--} routingFile=$2 routingAction=enable
@@ -1421,7 +1425,7 @@ dockerEditCommand() {
             ipv6DomainsSet=1
             shift 2
             ;;
-        --dns-off|--hosts-off|--direct-off|--block-off|--block-ips-off|--block-bt-off|--region-off|--ipv6-off)
+        --dns-off|--hosts-off|--direct-off|--block-off|--block-ips-off|--block-bt-off|--region-off|--ipv6-off|--warp-off)
             [[ -z "${routingKind}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             routingKind=${1#--} routingKind=${routingKind%-off} routingAction=disable
             routingKind=${routingKind//-/_}

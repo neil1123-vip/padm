@@ -376,6 +376,32 @@ Direct 例外、域名/IP/BT 阻断优先于选择性 IPv6，选择性 IPv6 优�
 不修改原默认网络、Docker daemon 或宿主接口，宿主仍须具备 IPv6 路由与出口。
 TUN/TProxy 的宿主网络模式不属于本阶段支持范围，完整 WARP 和宿主验收继续待补。
 
+菜单 `17` 的 `20` 导入、关闭或查看 WARP 出站。独立 v3 `.routing.warp`
+通过 `x-padm-routing-warp` 门禁；输入为 root 所有、`0600`、最多 64 KiB 的私有 JSON，
+沿用路由输入的单链接及安全祖先目录限制，密钥不放在命令参数、预览或状态中。
+输入包含 `mode`（`selective` 或 `global`）、`family`（`ipv4` 或 `ipv6`）、
+`private_key`、`peer_public_key`、`ipv6_address`、`reserved` 和 `domains`。
+密钥为规范的 32 字节 Base64，`reserved` 为 3 个 `0–255` 整数；
+选择性模式要求 1–256 条唯一四类域名规则，全局模式必须使用空 `domains`。
+
+```bash
+padm-docker edit --warp /root/warp.json --preview
+padm-docker edit --warp /root/warp.json --confirm PADM-DOCKER-EDIT
+padm-docker edit --warp-off --confirm PADM-DOCKER-EDIT
+```
+
+账号参数由用户已有的 WARP 配置提供，不自动注册账号或安装第三方注册器。
+固定 Peer 为 `162.159.192.1:2408`、MTU 为 `1280`；`family` 选择单一本地隧道地址及
+匹配域名的解析地址族。IPv4 为 `172.16.0.2/32`，IPv6 为导入的 `ipv6_address/128`；
+只使用该族地址，不回退另一族，不保证公网出口地址族，字面目的 IP 不转换。
+Xray 和 sing-box 明确使用用户态 WireGuard，不创建宿主接口或新增权限、设备和端口。
+Direct、域名/IP/BT Block、选择性 IPv6 先于 WARP，选择性 WARP 先于 SOCKS；
+全局 WARP 保留显式 IPv6/SOCKS 规则，但不能与其它全局默认出口并存。
+仍使用原 hosts/DNS 分流来源，关闭只移除 WARP 子项，不改变其它规则与累计流量。
+双核心已在隔离环境验证本地加密 Peer 的 TCP/UDP、DNS 来源、失联无直连及关闭恢复；
+夹具为非零 reserved 记录后适配标准内核 Peer，不代表 Cloudflare 服务验收。
+Cloudflare 账号有效性、公网 UDP 和真实公网出口仍需独立验收。
+
 完整 v3 `configure` 规格可选 `accounts`，用于追加 1–256 个独立账号，不替换原自用账号。
 每项必须包含 `id`、`name`、`enabled`、`uuid`、`password`、`shadowsocks_password` 和
 `listeners`；`id` 是稳定的小写 UUID，认证 `uuid` 和密码独立，`listeners` 引用现有入口 ID。

@@ -293,8 +293,8 @@ try {
         if (Test-Path -LiteralPath $cachePath) { Remove-Item -LiteralPath $cachePath }
     }
 
-    # 双节点实测仅在容器的隔离网络空间创建 Peer，不使用宿主网络或发布端口。
-    [string[]]$networkCapabilities = if ($Selector -eq 'docker-control-two-node-real') {
+    # Peer 实测仅在容器的隔离网络空间创建接口，不使用宿主网络或发布端口。
+    [string[]]$networkCapabilities = if ($Selector -in @('docker-control-two-node-real', 'docker-routing-warp-real')) {
         @('--cap-add', 'NET_ADMIN', '--cap-add', 'SYS_ADMIN')
     } elseif ($Selector -in @('docker-control-two-deployment-real', 'docker-routing-ipv6-real')) {
         # 嵌套 daemon 只操作测试容器的隔离空间，不挂宿主 Socket。
@@ -311,7 +311,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Source snapshot copy failed.' }
     if ($Selector -in @('docker-routing-socks5-real', 'docker-routing-dns-hosts-real',
         'docker-routing-direct-block-real', 'docker-routing-block-ips-real', 'docker-routing-block-bt-real',
-        'docker-routing-region-real')) {
+        'docker-routing-region-real', 'docker-routing-warp-real')) {
         # 仅复制已有本机镜像的程序到隔离回归容器，不安装宿主工具或挂载 Docker Socket。
         $cores = Join-Path $runDir 'routing-cores'
         New-Item -ItemType Directory -Path $cores | Out-Null
