@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
 SERVICE_ACTIONS=
-SERVICE_QUEUE_ALLOW_FAILURE=
 
 xrayStartTestLog() {
     padmTmpFilePath padm-xray-start-test.log
@@ -190,7 +189,6 @@ runServiceAction() {
 serviceQueueApply() {
     local entry serviceName action
     local status=0
-    local SERVICE_QUEUE_ALLOW_FAILURE=true
     while read -r entry; do
         [[ -n "${entry}" ]] || continue
         serviceName=${entry%%:*}

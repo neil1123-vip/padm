@@ -186,7 +186,6 @@ SH
     release=centos
     selectCustomInstallType=",21,"
     btDomain=
-    SERVICE_QUEUE_ALLOW_FAILURE=true
     export PADM_FAKE_NGINX_STATE_FILE="${serviceTmp}/nginx-running"
     export PADM_NGINX_ERROR_LOG="${serviceTmp}/nginx-error.log"
     export PADM_FAKE_SYSTEMCTL_ACTIONS="${serviceTmp}/systemctl-actions"
@@ -198,14 +197,12 @@ SH
     printf 'false\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
     PADM_FAKE_SYSTEMCTL_START_RC=0 PADM_FAKE_SYSTEMCTL_START_STATE=false handleNginx start >/dev/null 2>&1 && return 1
     local noExitMarker="${serviceTmp}/nginx-no-exit"
-    SERVICE_QUEUE_ALLOW_FAILURE=
     (
         set +e
         PADM_FAKE_SYSTEMCTL_START_RC=0 PADM_FAKE_SYSTEMCTL_START_STATE=false handleNginx start >/dev/null 2>&1
         printf 'reached\n' >"${noExitMarker}"
     )
     [[ -e "${noExitMarker}" ]]
-    SERVICE_QUEUE_ALLOW_FAILURE=true
     printf 'true\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
     if PADM_FAKE_SYSTEMCTL_STOP_RC=0 PADM_FAKE_SYSTEMCTL_STOP_STATE=true handleNginx stop >/dev/null 2>&1; then
         return 1
@@ -432,9 +429,8 @@ SH
     fi
     [[ -z "${SERVICE_ACTIONS}" ]]
     (
-        local SERVICE_QUEUE_ALLOW_FAILURE=previous actions= handlerRc=7
+        local actions= handlerRc=7
         runServiceAction() {
-            [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == true ]] || return 99
             actions+="$1:$2"$'\n'
             [[ "$1" != xray ]] || return "${handlerRc}"
         }
@@ -445,16 +441,15 @@ SH
         [[ "${SERVICE_ACTIONS}" == $'\nnginx:start\nxray:stop\nnginx:restart' ]]
         regressionExpectStatus 1 serviceQueueApply
         [[ "${actions}" == $'nginx:start\nxray:stop\nnginx:restart\n' ]]
-        [[ -z "${SERVICE_ACTIONS}" && "${SERVICE_QUEUE_ALLOW_FAILURE}" == previous ]]
+        [[ -z "${SERVICE_ACTIONS}" ]]
         actions=
         regressionExpectStatus 7 runCoreServiceActionAllowFailure runServiceAction xray stop
-        [[ "${actions}" == $'xray:stop\n' && "${SERVICE_QUEUE_ALLOW_FAILURE}" == previous ]]
+        [[ "${actions}" == $'xray:stop\n' ]]
         handleSingBox() {
-            [[ "$1" == stop && "${SERVICE_QUEUE_ALLOW_FAILURE}" == true ]] || return 99
+            [[ "$1" == stop ]] || return 99
             return 7
         }
         regressionExpectStatus 7 stopSocks5SingBox
-        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == previous ]]
     )
 
     (
@@ -543,7 +538,6 @@ SH
         esac
         return 0
     }
-    SERVICE_QUEUE_ALLOW_FAILURE=true
     if ! handleXray start >/dev/null 2>&1; then
         cat "${xrayStartLimitLog}" >&2 || true
         cat "${xrayWaitLog}" >&2 || true
@@ -593,7 +587,6 @@ SH
     ) || return 1
 
     local xrayNoExitMarker="${serviceTmp}/xray-no-exit"
-    SERVICE_QUEUE_ALLOW_FAILURE=
     xrayRunning() { return 1; }
     coreSystemdStart() { return 1; }
     waitForServiceState() { return 1; }
@@ -909,7 +902,7 @@ runUninstallWireGuardCleanupRegression() (
     applySubscriptionWireGuardService() { actions+="wireguard-restored"$'\n'; return 0; }
     nginxRunning() { [[ "${nginxRuntimeState}" == "true" ]]; }
     handleNginx() {
-        actions+="nginx:$1:${SERVICE_QUEUE_ALLOW_FAILURE:-}"$'\n'
+        actions+="nginx:$1"$'\n'
         [[ -n "${2:-}" ]] && actions+="nginx-mode:$*"$'\n'
         [[ "$1" == "start" ]] && nginxRuntimeState=true
         [[ "$1" == "stop" ]] && nginxRuntimeState=false
@@ -921,8 +914,8 @@ runUninstallWireGuardCleanupRegression() (
         true
     grep -qxF 'old-nginx' "${nginxTarget}"
     [[ "${nginxRuntimeState}" == "true" ]]
-    grep -qx 'nginx:stop:true' <<<"${actions}"
-    grep -qx 'nginx:start:true' <<<"${actions}"
+    grep -qx 'nginx:stop' <<<"${actions}"
+    grep -qx 'nginx:start' <<<"${actions}"
     grep -qx 'nginx-mode:start restore' <<<"${actions}" || return 1
     [[ ! -e "${nginxBackupDir}" ]]
 
@@ -942,8 +935,8 @@ runUninstallWireGuardCleanupRegression() (
     grep -qxF 'old-nginx-after-state-failure' "${nginxTarget}"
     [[ "${nginxRuntimeState}" == "true" ]]
     grep -qx 'state-restore-failed' <<<"${actions}"
-    grep -qx 'nginx:stop:true' <<<"${actions}"
-    grep -qx 'nginx:start:true' <<<"${actions}"
+    grep -qx 'nginx:stop' <<<"${actions}"
+    grep -qx 'nginx:start' <<<"${actions}"
     [[ -d "${nginxBackupDir}" ]]
     padmRemoveCleanupPath "${nginxBackupDir}"
 
@@ -1815,29 +1808,26 @@ runUninstallServiceStopFailureRegression() (
         [[ "${mode}" != "$2-disable-fail" ]]
     }
     handleNginx() {
-        printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        printf 'nginx:%s\n' "$1" >>"${serviceLog}"
         [[ -n "${2:-}" ]] && printf 'nginx-mode:%s\n' "$*" >>"${serviceLog}"
         if [[ "${mode}" == "nginx-stop-fail" && "$1" == "stop" ]]; then
-            [[ "${SERVICE_QUEUE_ALLOW_FAILURE:-}" == "true" ]] && return 1
-            exit 0
+            return 1
         fi
         [[ "$1" == "stop" ]] && nginxState=false
         [[ "$1" == "start" ]] && nginxState=true
         return 0
     }
     handleXray() {
-        printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        printf 'xray:%s\n' "$1" >>"${serviceLog}"
         if [[ "${mode}" == "xray-stop-fail" && "$1" == "stop" ]]; then
-            [[ "${SERVICE_QUEUE_ALLOW_FAILURE:-}" == "true" ]] && return 1
-            exit 0
+            return 1
         fi
         return 0
     }
     handleSingBox() {
-        printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        printf 'sing-box:%s\n' "$1" >>"${serviceLog}"
         if [[ "${mode}" == "sing-box-stop-fail" && "$1" == "stop" ]]; then
-            [[ "${SERVICE_QUEUE_ALLOW_FAILURE:-}" == "true" ]] && return 1
-            exit 0
+            return 1
         fi
         return 0
     }
@@ -1856,7 +1846,6 @@ runUninstallServiceStopFailureRegression() (
         singBoxConfigPath=$3
         [[ "$4" == "unchanged" ]] || nginxConfigPath=$4
         nginxStaticPath="${root}/static"
-        SERVICE_QUEUE_ALLOW_FAILURE=previous
         set +e
         (
             set +e
@@ -1871,40 +1860,37 @@ runUninstallServiceStopFailureRegression() (
 
     runUninstallStopFailureCase() {
         runUninstallCase "$1" ",27," "${root}/sing-box-conf/" unchanged 1
-        grep -qx 'nginx:stop:true' "${serviceLog}"
-        grep -qx 'xray:stop:true' "${serviceLog}"
-        grep -qx 'sing-box:stop:true' "${serviceLog}"
+        grep -qx 'nginx:stop' "${serviceLog}"
+        grep -qx 'xray:stop' "${serviceLog}"
+        grep -qx 'sing-box:stop' "${serviceLog}"
         ! grep -qxF 'padm-root-cleanup' "${actionLog}"
         ! grep -qxF 'unsubscribe-cleanup' "${actionLog}"
         ! grep -q '^remove:/etc/systemd/system/xray.service:' "${actionLog}"
         ! grep -q '^remove:/etc/systemd/system/sing-box.service:' "${actionLog}"
         grep -q '卸载未完全完成' "${errorLog}"
-        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     }
 
     runUninstallStillRunningCase() {
         runUninstallCase "$1" ",1," "${root}/sing-box-conf/" "${root}/nginx/" 1
-        grep -qx 'xray:stop:true' "${serviceLog}"
-        grep -qx 'sing-box:stop:true' "${serviceLog}"
+        grep -qx 'xray:stop' "${serviceLog}"
+        grep -qx 'sing-box:stop' "${serviceLog}"
         ! grep -qxF 'padm-root-cleanup' "${actionLog}"
         ! grep -qxF 'unsubscribe-cleanup' "${actionLog}"
         grep -q '停止后仍在运行' "${errorLog}"
         grep -q '卸载未完全完成' "${errorLog}"
-        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     }
 
     runUninstallNoNginxProtocolCase() {
         runUninstallCase nginx-stop-fail ",1," "${root}/sing-box-conf/" "${root}/nginx/" 0
-        ! grep -qx 'nginx:stop:true' "${serviceLog}"
-        grep -qx 'xray:stop:true' "${serviceLog}"
-        grep -qx 'sing-box:stop:true' "${serviceLog}"
+        ! grep -qx 'nginx:stop' "${serviceLog}"
+        grep -qx 'xray:stop' "${serviceLog}"
+        grep -qx 'sing-box:stop' "${serviceLog}"
         grep -qxF 'padm-root-cleanup' "${actionLog}"
         grep -qxF 'unsubscribe-cleanup' "${actionLog}"
         grep -qx 'systemctl:disable xray.service' "${serviceLog}"
         grep -qx 'systemctl:disable sing-box.service' "${serviceLog}"
         [[ "$(grep -c '^daemon-reload$' "${serviceLog}")" == "2" ]]
         [[ ! -s "${errorLog}" ]]
-        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     }
 
     runUninstallWireGuardCleanupFailureCase() {
@@ -1916,7 +1902,6 @@ runUninstallServiceStopFailureRegression() (
         ! grep -qF 'remove:/usr/bin/padm:' "${actionLog}"
         ! grep -qF 'remove:/usr/sbin/padm:' "${actionLog}"
         grep -q 'WireGuard 控制面清理失败，已取消后续删除' "${errorLog}"
-        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     }
 
     runUninstallRestoresNginxCase() {
@@ -1930,13 +1915,11 @@ runUninstallServiceStopFailureRegression() (
         currentInstallProtocolType=",27,"
         singBoxConfigPath="${root}/sing-box-conf/"
         nginxStaticPath="${root}/static"
-        SERVICE_QUEUE_ALLOW_FAILURE=previous
         regressionExpectStatus 0 unInstall >/dev/null 2>&1
         [[ "${nginxState}" == "true" ]] || return 1
-        grep -qx 'nginx:stop:true' "${serviceLog}"
-        grep -qx 'nginx:start:true' "${serviceLog}" || return 1
+        grep -qx 'nginx:stop' "${serviceLog}"
+        grep -qx 'nginx:start' "${serviceLog}" || return 1
         grep -qx 'nginx-mode:start restore' "${serviceLog}" || return 1
-        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     }
 
     runUninstallOpenRcFailureCase() {
@@ -1958,7 +1941,6 @@ runUninstallServiceStopFailureRegression() (
         ! grep -qxF padm-root-cleanup "${actionLog}"
         ! grep -qxF unsubscribe-cleanup "${actionLog}"
         ! grep -q '^remove:/usr/' "${actionLog}"
-        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == previous ]]
     }
 
     local core failure
@@ -1988,7 +1970,7 @@ runUninstallServiceStopFailureRegression() (
         local PADM_REALITY_STREAM_CONF_FILE="${root}/stream-only.conf"
         printf 'managed stream\n' >"${PADM_REALITY_STREAM_CONF_FILE}"
         runUninstallCase nginx-stop-fail ",1," "" "${root}/nginx/" 1 || return 1
-        grep -qx 'nginx:stop:true' "${serviceLog}" || return 1
+        grep -qx 'nginx:stop' "${serviceLog}" || return 1
         ! grep -qxF padm-root-cleanup "${actionLog}" || return 1
         rm -f -- "${PADM_REALITY_STREAM_CONF_FILE}"
     ) || return 1
@@ -2010,17 +1992,15 @@ runXrayInstallStopFailureRegression() (
     installTools() { printf 'install-tools:%s\n' "$*" >>"${installLog}"; }
     customPortFunction() { return 0; }
     handleXray() {
-        printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        printf 'xray:%s\n' "$1" >>"${serviceLog}"
         return 1
     }
     randomPathFunction() { printf 'random-path:%s\n' "$*" >>"${installLog}"; return 1; }
 
     btDomain=panel.example.com
-    SERVICE_QUEUE_ALLOW_FAILURE=previous
     regressionExpectStatus 1 xrayCoreInstall >/dev/null 2>&1
-    grep -qx 'xray:stop:true' "${serviceLog}"
+    grep -qx 'xray:stop' "${serviceLog}"
     [[ "$(<"${installLog}")" == install-tools:2 ]]
-    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 )
 
 runAloneNginxConfigWriteTransactionRegression() {
@@ -2217,10 +2197,8 @@ SH
             printf '%s\n' "$*" >>"${serviceLog}"
             [[ "${failAgain}" != true && "${calls}" -gt 1 ]]
         }
-        SERVICE_QUEUE_ALLOW_FAILURE=previous
         regressionExpectStatus 1 ensureTraditionalTlsFallbackNginxConfig >/dev/null 2>&1 || return 1
-        [[ "$(<"${targetPath}")" == "${original}" && "${calls}" == 2 &&
-            "${SERVICE_QUEUE_ALLOW_FAILURE}" == previous ]] || return 1
+        [[ "$(<"${targetPath}")" == "${original}" && "${calls}" == 2 ]] || return 1
         [[ "$(<"${serviceLog}")" == $'refresh\nstart restore' ]] || return 1
         [[ -z "$(find "${nginxRoot}" -maxdepth 1 -name '.alone.conf.nginx-rebuild.*' -print -quit)" ]] || return 1
 
@@ -2273,14 +2251,12 @@ SH
         : >"${errorLog}"
         errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
         handleNginx() {
-            printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+            printf 'nginx:%s\n' "$1" >>"${serviceLog}"
             return 1
         }
-        SERVICE_QUEUE_ALLOW_FAILURE=previous
         updateRedirectNginxConf >/dev/null 2>&1
         [[ ! -s "${serviceLog}" ]]
         [[ ! -s "${errorLog}" ]]
-        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     )
 
     PATH="${oldPath}"

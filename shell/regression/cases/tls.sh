@@ -278,7 +278,7 @@ runTlsFailureReturnRegression() (
         # 签发参数读完才释放 HTTP 端口；DNS API 不需要停止 Nginx。
         eval "${autoReadDefinition}"
         local HOME="${root}/decision-home" AUTO_INSTALL= currentHost= domain=decision.example.com
-        local lastInstallationConfig= ipType=4 sslIPv6= SERVICE_QUEUE_ALLOW_FAILURE=previous
+        local lastInstallationConfig= ipType=4 sslIPv6=
         local PADM_REQUIRE_USABLE_TLS_CERTIFICATE= PADM_CORE_SWITCH_TRANSACTION_ACTIVE=
         local dnsAPIStatus dnsAPIType cfAPIToken cfZoneID aliKey aliSecret sslType sslEmail
         local input inputFd remaining provider accountFile before decisionLog="${root}/decision.log"
@@ -290,8 +290,7 @@ runTlsFailureReturnRegression() (
         tlsIssueTool() { printf 'issue:%s:%s\n' "${CF_Token:-${Ali_Key:-}}" "$*" >>"${decisionLog}"; }
         sudo() { "$@"; }
         handleNginx() {
-            [[ "$1" == stop && "${sslType}" == zerossl && "${sslEmail}" == new@example.com &&
-                "${SERVICE_QUEUE_ALLOW_FAILURE}" == true ]] || return 1
+            [[ "$1" == stop && "${sslType}" == zerossl && "${sslEmail}" == new@example.com ]] || return 1
             printf 'stop\n' >>"${decisionLog}"
         }
         allowPort() { printf 'allow:%s\n' "$1" >>"${decisionLog}"; }
@@ -305,7 +304,7 @@ runTlsFailureReturnRegression() (
             : >"${decisionLog}"
             regressionExpectStatus 1 installTLS 1 < <(printf '%s' "${input}")
             ! grep -Eq '^(allow|stop|issue|sync)' "${decisionLog}"
-            [[ "$(<"${accountFile}")" == "${before}" && "${SERVICE_QUEUE_ALLOW_FAILURE}" == previous ]]
+            [[ "$(<"${accountFile}")" == "${before}" ]]
         done
         for provider in cloudflare aliyun; do
             unset dnsAPIStatus dnsAPIType cfAPIToken cfZoneID aliKey aliSecret sslType sslEmail
@@ -326,7 +325,6 @@ runTlsFailureReturnRegression() (
         exec {inputFd}< <(printf 'n\n2\nnew@example.com\nnext-parent-action\n')
         installTLS 1 <&"${inputFd}"
         [[ "$(<"${decisionLog}")" == $'allow:80\nstop\n'issue:*--standalone*$'\n'sync ]]
-        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == previous ]]
         read -r -u "${inputFd}" remaining
         [[ "${remaining}" == next-parent-action ]]
         exec {inputFd}<&-
@@ -1106,7 +1104,6 @@ runTlsRenewalFailurePropagationRegression() (
     installedDNSAPIStatus=
     coreInstallType=1
     sslRenewalDays=90
-    SERVICE_QUEUE_ALLOW_FAILURE=previous
     export REGRESSION_STATUS_CARD_LOG="${statusLog}"
     export REGRESSION_ERROR_CARD_LOG="${errorLog}"
 
@@ -1119,7 +1116,7 @@ runTlsRenewalFailurePropagationRegression() (
         if [[ "$1" == "stop" && "${nginxState}" != "true" ]] || [[ "$1" == "start" && "${nginxState}" == "true" ]]; then
             return 0
         fi
-        printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        printf 'nginx:%s\n' "$1" >>"${serviceLog}"
         [[ -n "${2:-}" ]] && printf 'nginx-mode:%s\n' "$*" >>"${serviceLog}"
         [[ "${mode}" == "nginx-stop-fail" && "$1" == "stop" ]] && return 1
         [[ "${mode}" == "nginx-start-fail" && "$1" == "start" ]] && return 1
@@ -1130,7 +1127,7 @@ runTlsRenewalFailurePropagationRegression() (
         if [[ "$1" == "stop" && "${xrayState}" != "true" ]] || [[ "$1" == "start" && "${xrayState}" == "true" ]]; then
             return 0
         fi
-        printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        printf 'xray:%s\n' "$1" >>"${serviceLog}"
         [[ "${mode}" == "xray-stop-fail" && "$1" == "stop" ]] && return 1
         [[ "${mode}" == "xray-start-fail" && "$1" == "start" ]] && return 1
         [[ "$1" == "start" ]] && xrayState=true || xrayState=false
@@ -1140,7 +1137,7 @@ runTlsRenewalFailurePropagationRegression() (
         if [[ "$1" == "stop" && "${singBoxState}" != "true" ]] || [[ "$1" == "start" && "${singBoxState}" == "true" ]]; then
             return 0
         fi
-        printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        printf 'sing-box:%s\n' "$1" >>"${serviceLog}"
         [[ "$1" == "start" ]] && singBoxState=true || singBoxState=false
         return 0
     }
@@ -1186,7 +1183,6 @@ runTlsRenewalFailurePropagationRegression() (
         : >"${chmodLog}"
         : >"${statusLog}"
         : >"${errorLog}"
-        SERVICE_QUEUE_ALLOW_FAILURE=previous
         nginxState=true
         xrayState=true
         singBoxState=false
@@ -1269,55 +1265,49 @@ runTlsRenewalFailurePropagationRegression() (
 
     runRenewalCase nginx-stop-fail
     [[ "${rc}" == "1" ]]
-    grep -qx 'nginx:stop:true' "${serviceLog}"
+    grep -qx 'nginx:stop' "${serviceLog}"
     ! grep -q '^sudo:' "${commandLog}"
-    ! grep -q '^xray:stop:' "${serviceLog}"
-    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+    ! grep -qx 'xray:stop' "${serviceLog}"
 
     runRenewalCase xray-stop-fail
     [[ "${rc}" == "1" ]]
-    grep -qx 'nginx:stop:true' "${serviceLog}"
-    grep -qx 'xray:stop:true' "${serviceLog}"
-    grep -qx 'nginx:start:true' "${serviceLog}"
+    grep -qx 'nginx:stop' "${serviceLog}"
+    grep -qx 'xray:stop' "${serviceLog}"
+    grep -qx 'nginx:start' "${serviceLog}"
     ! grep -q '^sudo:' "${commandLog}"
-    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     runRenewalCase renew-fail
     [[ "${rc}" == "1" ]]
     grep -q '^sudo:.*--cron --home ' "${commandLog}"
     ! grep -q '^sudo:.*--installcert ' "${commandLog}"
-    grep -qx 'xray:start:true' "${serviceLog}"
-    grep -qx 'nginx:start:true' "${serviceLog}"
+    grep -qx 'xray:start' "${serviceLog}"
+    grep -qx 'nginx:start' "${serviceLog}"
     grep -qx 'nginx-mode:start restore' "${serviceLog}" || return 1
     ! grep -qx 'reload' "${serviceLog}"
-    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     runRenewalCase install-fail
     [[ "${rc}" == "1" ]]
-    grep -qx 'nginx:stop:true' "${serviceLog}"
-    grep -qx 'xray:stop:true' "${serviceLog}"
-    grep -qx 'xray:start:true' "${serviceLog}"
-    grep -qx 'nginx:start:true' "${serviceLog}"
+    grep -qx 'nginx:stop' "${serviceLog}"
+    grep -qx 'xray:stop' "${serviceLog}"
+    grep -qx 'xray:start' "${serviceLog}"
+    grep -qx 'nginx:start' "${serviceLog}"
     ! grep -qx 'reload' "${serviceLog}"
     grep -q '^sudo:.*--cron --home ' "${commandLog}"
     grep -q '^sudo:.*--installcert -d renew.example.com' "${commandLog}"
-    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     runRenewalCase xray-start-fail
     [[ "${rc}" == "1" ]]
-    grep -qx 'xray:start:true' "${serviceLog}"
-    grep -qx 'nginx:start:true' "${serviceLog}"
+    grep -qx 'xray:start' "${serviceLog}"
+    grep -qx 'nginx:start' "${serviceLog}"
     ! grep -qx 'reload' "${serviceLog}"
     grep -q '^sudo:.*--installcert -d renew.example.com' "${commandLog}"
-    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     runRenewalCase nginx-start-fail
     [[ "${rc}" == "1" ]]
-    grep -qx 'xray:start:true' "${serviceLog}"
-    grep -qx 'nginx:start:true' "${serviceLog}"
+    grep -qx 'xray:start' "${serviceLog}"
+    grep -qx 'nginx:start' "${serviceLog}"
     ! grep -qx 'reload' "${serviceLog}"
     grep -q '^sudo:.*--installcert -d renew.example.com' "${commandLog}"
-    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     runRenewalCase stopped-services
     [[ "${rc}" == "0" ]]
@@ -1327,12 +1317,12 @@ runTlsRenewalFailurePropagationRegression() (
 
     runRenewalCase dual-core-running
     [[ "${rc}" == "0" ]]
-    grep -qx 'nginx:stop:true' "${serviceLog}"
-    grep -qx 'xray:stop:true' "${serviceLog}"
-    grep -qx 'sing-box:stop:true' "${serviceLog}"
-    grep -qx 'xray:start:true' "${serviceLog}"
-    grep -qx 'sing-box:start:true' "${serviceLog}"
-    grep -qx 'nginx:start:true' "${serviceLog}"
+    grep -qx 'nginx:stop' "${serviceLog}"
+    grep -qx 'xray:stop' "${serviceLog}"
+    grep -qx 'sing-box:stop' "${serviceLog}"
+    grep -qx 'xray:start' "${serviceLog}"
+    grep -qx 'sing-box:start' "${serviceLog}"
+    grep -qx 'nginx:start' "${serviceLog}"
     ! grep -qx 'reload' "${serviceLog}"
     [[ "${nginxState}" == "true" && "${xrayState}" == "true" && "${singBoxState}" == "true" ]]
 
@@ -1370,7 +1360,6 @@ EOF
         nginxState=true
         xrayState=false
         singBoxState=false
-        SERVICE_QUEUE_ALLOW_FAILURE=previous
         tlsCertificatePairUsable() {
             usableChecks=$((usableChecks + 1))
             ((usableChecks > 2))
@@ -1394,7 +1383,7 @@ EOF
             singBoxState=true
         }
         runServiceAction() {
-            [[ "$2" == restart && "${SERVICE_QUEUE_ALLOW_FAILURE}" == true ]] || return 1
+            [[ "$2" == restart ]] || return 1
             printf 'restart:%s\n' "$1" >>"${serviceLog}"
             [[ "${restartFails}" != true || "$1" != xray ]] || return 1
             case "$1" in
@@ -1458,7 +1447,6 @@ EOF
                     ! grep -Eq '^(nginx:|probe:)' "${serviceLog}"
                 fi
                 ! grep -q '^nginx:restart$' "${serviceLog}"
-                [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
             done
         done
         # 核心重启失败必须上报并保留备份，不能继续重启 Nginx 或探测 HTTPS。
@@ -1473,7 +1461,6 @@ EOF
         ! grep -Eq '^(nginx:|probe:)' "${serviceLog}"
         grep -q '核心服务重载失败' "${errorLog}"
         grep -q '备份目录:' "${errorLog}"
-        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == previous ]]
     )
 
     (
@@ -1521,8 +1508,8 @@ EOF
         regressionExpectStatus 1 renewManagedTLSCertificates >/dev/null 2>&1
         [[ "$(<"${tlsDir}/${certDomain}.crt")" == "old-cert" ]]
         [[ "$(<"${tlsDir}/${certDomain}.key")" == "old-key" ]]
-        grep -qx 'xray:start:true' "${serviceLog}"
-        grep -qx 'nginx:start:true' "${serviceLog}"
+        grep -qx 'xray:start' "${serviceLog}"
+        grep -qx 'nginx:start' "${serviceLog}"
         [[ "${nginxState}" == "true" && "${xrayState}" == "true" && "${singBoxState}" == "false" ]]
         grep -q 'TLS 证书续签后文件校验失败' "${errorLog}"
 
@@ -1530,8 +1517,8 @@ EOF
         usableChecks=0 chmodChecks=0
         : >"${serviceLog}"
         regressionExpectStatus 1 renewManagedTLSCertificates >/dev/null 2>&1
-        grep -qx 'nginx:stop:true' "${serviceLog}"
-        grep -qx 'nginx:start:true' "${serviceLog}"
+        grep -qx 'nginx:stop' "${serviceLog}"
+        grep -qx 'nginx:start' "${serviceLog}"
 
         # Webroot 续签失败也不能暂停原先运行的服务。
         sed -i "s|^Le_Webroot=.*$|Le_Webroot='/var/www/html'|" "${homeDir}/.acme.sh/${certDomain}_ecc/${certDomain}.conf"
@@ -1600,7 +1587,6 @@ EOF
             nginxState=true
             xrayState=true
             singBoxState=false
-            SERVICE_QUEUE_ALLOW_FAILURE=previous
             oldPairHash=$(sha256sum "${tlsDir}/${targetDomain}.crt" "${tlsDir}/${targetDomain}.key")
         }
         sudo() {
@@ -1674,7 +1660,6 @@ EOF
             [[ ! -e "${tlsDir}/${unrelatedDomain}.crt" &&
                 "$(<"${tlsDir}/${unrelatedDomain}.key")" == unrelated-key ]]
             ! grep -q '^probe:' "${serviceLog}"
-            [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == previous ]]
         }
 
         # 本域 ACME 源证书仍有效时只同步；临近过期才定向强制续签。
@@ -1736,7 +1721,7 @@ EOF
             "$(grep -c -- ' --installcert ' "${commandLog}")" == 2 ]]
         command openssl x509 -in "${tlsDir}/${targetDomain}.crt" -checkend 86400 -noout >/dev/null
         [[ "${nginxState}" == true && "${xrayState}" == true && "${singBoxState}" == false ]]
-        grep -qx 'xray:start:true' "${serviceLog}"
+        grep -qx 'xray:start' "${serviceLog}"
         grep -qx 'nginx-mode:start restore' "${serviceLog}"
         assertScopedInstallIsolation
 
@@ -1745,7 +1730,7 @@ EOF
             regressionExpectStatus 1 installTLS 1 >/dev/null 2>&1
             [[ "$(sha256sum "${tlsDir}/${targetDomain}.crt" "${tlsDir}/${targetDomain}.key")" == "${oldPairHash}" ]]
             [[ "${nginxState}" == true && "${xrayState}" == true && "${singBoxState}" == false ]]
-            grep -qx 'xray:start:true' "${serviceLog}"
+            grep -qx 'xray:start' "${serviceLog}"
             grep -qx 'nginx-mode:start restore' "${serviceLog}"
             assertScopedInstallIsolation
         done

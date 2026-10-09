@@ -180,7 +180,7 @@ runSingBoxStatsBuildRegression() (
                 command cp "$1" "$2"
             }
             regressionExpectStatus 1 installDownloadedSingBoxBinary "${version}" "${candidate}" || return 1
-            [[ "${commitCalls}" == "${failAt}" && "${serviceStops}" == 1 && "${serviceRunning}" == true ]] || return 1
+            [[ "${commitCalls}" == "${failAt}" && "${serviceStops}" == 2 && "${serviceRunning}" == true ]] || return 1
             [[ "$(<"${PADM_SINGBOX_BINARY}")" == "${originalBinary}" &&
                 "$(<"${root}/installed/libcronet.so")" == old-cronet && ! -e "${candidate}" && ! -s "${root}/stats-calls" ]] || return 1
             ! compgen -G "${root}/installed/.*.bak.*" >/dev/null || return 1
@@ -964,6 +964,37 @@ runCoreUpgradePendingStartRollbackRegression() (
     handleSingBox() { handleUpgradeService "$@"; }
 
     (
+        local prepared kind caseRoot events
+        handleSingBox() { events+="$1"$'\n'; }
+        for prepared in false true; do
+            for kind in missing file empty-directory; do
+                caseRoot="${root}/lost-migration-${prepared}-${kind}"
+                mkdir -p "${caseRoot}"
+                printf 'candidate\n' >"${caseRoot}/binary"
+                printf 'old\n' >"${caseRoot}/binary.bak"
+                printf 'new-config\n' >"${caseRoot}/config"
+                [[ "${kind}" != file ]] || touch "${caseRoot}/migration"
+                [[ "${kind}" != empty-directory ]] || mkdir "${caseRoot}/migration"
+                local -A PADM_CORE_BINARY_INSTALL=(
+                    [active]=true [prepared]="${prepared}" [name]=sing-box
+                    [binary]="${caseRoot}/binary" [binaryBackup]="${caseRoot}/binary.bak"
+                    [migrationBackup]="${caseRoot}/migration" [backupRoot]="${caseRoot}"
+                    [action]=handleSingBox [running]=singBoxRunning [wasRunning]=true
+                )
+                events=
+                regressionExpectStatus 1 rollbackDownloadedCoreBinaryInstallOnExit || return 1
+                [[ -d "${caseRoot}" && -f "${caseRoot}/binary.bak" &&
+                    "$(<"${caseRoot}/config")" == new-config ]] || return 1
+                if [[ "${prepared}" == true ]]; then
+                    [[ "${events}" == $'stop\n' ]] || return 1
+                else
+                    [[ -z "${events}" ]] || return 1
+                fi
+            done
+        done
+    ) || return 1
+
+    (
         local missing mode caseRoot events
         handleXray() { events+="$1"$'\n'; }
         handleSingBox() { events+="$1"$'\n'; }
@@ -1536,21 +1567,19 @@ runCoreCleanupFailurePropagationRegression() (
         return 0
     }
     handleXray() {
-        printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        printf 'xray:%s\n' "$1" >>"${serviceLog}"
         printf 'cleanup\n' >>"${queueLog}"
         return 1
     }
     handleSingBox() {
-        printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        printf 'sing-box:%s\n' "$1" >>"${serviceLog}"
         return 0
     }
 
-    SERVICE_QUEUE_ALLOW_FAILURE=previous
     regressionExpectStatus 1 cleanUp xrayDel >/dev/null 2>&1
-    grep -qx 'xray:stop:true' "${serviceLog}"
+    grep -qx 'xray:stop' "${serviceLog}"
     grep -q 'Xray 服务停止失败，已取消清理旧核心' "${errorLog}"
     [[ ! -s "${rmLog}" ]]
-    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     : >"${serviceLog}"
     : >"${rmLog}"
@@ -1587,7 +1616,7 @@ runCoreCleanupFailurePropagationRegression() (
     }
 
     regressionExpectStatus 1 installSingBoxReality >/dev/null 2>&1
-    grep -qx 'xray:stop:true' "${serviceLog}"
+    grep -qx 'xray:stop' "${serviceLog}"
     ! grep -q '/etc/padm/xray' "${rmLog}"
     [[ "$(<"${queueLog}")" == $'cleanup\ncleanup' ]]
     [[ ! -e "${reachedFile}" ]]
@@ -2743,7 +2772,7 @@ runCoreTemplateReturnFailureRegression() (
     randomPathFunction() { currentPath=template-path; }
     xrayRunning() { [[ "${xrayServiceRunning}" == "true" ]]; }
     handleXray() {
-        printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        printf 'xray:%s\n' "$1" >>"${serviceLog}"
         if [[ "$1" == "stop" ]]; then
             xrayServiceRunning=false
         elif [[ "$1" == "start" ]]; then
@@ -2752,7 +2781,7 @@ runCoreTemplateReturnFailureRegression() (
     }
     singBoxRunning() { [[ "${singBoxServiceRunning}" == "true" ]]; }
     handleSingBox() {
-        printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        printf 'sing-box:%s\n' "$1" >>"${serviceLog}"
         if [[ "$1" == "stop" ]]; then
             [[ "${mode}" != "stop-fail" ]] || return 1
             singBoxServiceRunning=false
@@ -2808,13 +2837,11 @@ runCoreTemplateReturnFailureRegression() (
     selectCustomInstallType=",27,"
     writeCalls=0
     : >"${serviceLog}"
-    SERVICE_QUEUE_ALLOW_FAILURE=previous
     rm -f "${firewallState}"
     : >"${firewallLog}"
     regressionExpectFailure initSingBoxConfig custom 1 true 2>/dev/null
-    grep -qx 'sing-box:stop:true' "${serviceLog}"
+    grep -qx 'sing-box:stop' "${serviceLog}"
     [[ "${writeCalls}" == "0" ]]
-    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     grep -qx 'ufw:10890:tcp' "${firewallLog}"
     grep -qx 'ufw:10890:udp' "${firewallLog}"
     [[ ! -e "${firewallState}" ]]
@@ -2831,7 +2858,7 @@ runCoreTemplateReturnFailureRegression() (
     [[ "$(<"${singBoxRoot}/02_VLESS_TCP_inbounds.json")" == 'old-sing-box-inbound' ]]
     [[ ! -e "${singBoxRoot}/03_VLESS_WS_inbounds.json" ]]
     [[ "${singBoxServiceRunning}" == "true" ]]
-    grep -qx 'sing-box:start:true' "${serviceLog}"
+    grep -qx 'sing-box:start' "${serviceLog}"
     grep -qx 'ufw:10890:tcp' "${firewallLog}"
     grep -qx 'ufw:10890:udp' "${firewallLog}"
     [[ ! -e "${firewallState}" ]]
@@ -2879,9 +2906,9 @@ runCoreTemplateReturnFailureRegression() (
     [[ "$(<"${entryHostFile}")" == "old-entry.example.com" ]]
     [[ "${xrayServiceRunning}" == "true" ]]
     [[ "${singBoxServiceRunning}" == "true" ]]
-    grep -qx 'xray:start:true' "${serviceLog}"
-    grep -qx 'sing-box:stop:true' "${serviceLog}"
-    grep -qx 'sing-box:start:true' "${serviceLog}"
+    grep -qx 'xray:start' "${serviceLog}"
+    grep -qx 'sing-box:stop' "${serviceLog}"
+    grep -qx 'sing-box:start' "${serviceLog}"
 
     mode=state-drift
     padmFirewallStateAdd "port:ufw:tcp:10890"
@@ -3329,9 +3356,8 @@ $1:refresh"
     serviceQueueRestart() { serviceQueueAdd "$1" restart; }
     serviceQueueStart() { printf 'queueStart:%s\n' "$*" >>"${callLog}"; serviceQueueAdd "$1" start; }
     serviceQueueApply() {
-        local entry service action status=0 previousAllowFailure=${SERVICE_QUEUE_ALLOW_FAILURE:-}
+        local entry service action status=0
         printf 'queueApply\n' >>"${callLog}"
-        SERVICE_QUEUE_ALLOW_FAILURE=true
         while read -r entry; do
             [[ -n "${entry}" ]] || continue
             service=${entry%%:*}
@@ -3339,7 +3365,6 @@ $1:refresh"
             runServiceAction "${service}" "${action}" || status=1
         done <<<"${SERVICE_ACTIONS}"
         SERVICE_ACTIONS=
-        SERVICE_QUEUE_ALLOW_FAILURE=${previousAllowFailure}
         return "${status}"
     }
     checkGFWStatue() {
@@ -3349,7 +3374,7 @@ $1:refresh"
     }
     showAccounts() { printf 'reached\n' >"${reachedFile}"; return 0; }
     handleNginx() {
-        printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        printf 'nginx:%s\n' "$1" >>"${serviceLog}"
         [[ -n "${2:-}" ]] && printf 'nginx-mode:%s\n' "$*" >>"${serviceLog}"
         [[ "${mode}" == "nginx-stop-fail" && "$1" == "stop" ]] && return 1
         [[ "${mode}" == "nginx-start-fail" && "$1" == "start" && "${2:-}" != "restore" ]] && return 1
@@ -3361,7 +3386,7 @@ $1:refresh"
     xrayRunning() { [[ "${xrayRuntimeState}" == "true" ]]; }
     singBoxRunning() { [[ "${singBoxRuntimeState}" == "true" ]]; }
     handleXray() {
-        printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        printf 'xray:%s\n' "$1" >>"${serviceLog}"
         [[ "${mode}" == "xray-stop-fail" && "$1" == "stop" ]] && return 1
         [[ "${mode}" == "xray-start-fail" && "$1" == "start" ]] && return 1
         [[ "${failStopTarget}" == xray && "$1" == stop && "${xrayRuntimeState}" == true ]] && return 1
@@ -3371,7 +3396,7 @@ $1:refresh"
         return 0
     }
     handleSingBox() {
-        printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        printf 'sing-box:%s\n' "$1" >>"${serviceLog}"
         [[ "${failStopTarget}" == sing-box && "$1" == stop && "${singBoxRuntimeState}" == true ]] && return 1
         [[ "$1" != start || "${xrayRuntimeState}" != true ]] || return 1
         [[ "$1" == "stop" ]] && singBoxRuntimeState=false
@@ -3391,7 +3416,6 @@ $1:refresh"
         : >"${firewallLog}"
         rm -f "${reachedFile}"
         rm -f "${firewallState}"
-        SERVICE_QUEUE_ALLOW_FAILURE=previous
         btDomain=
         realityOnlyWithDomain=
         currentHost=install.example.com
@@ -3419,7 +3443,6 @@ $1:refresh"
     ! grep -q '^clean-nginx$' "${callLog}"
     [[ -e "${reachedFile}" ]]
     [[ "$(<"${entryHostFile}")" == "install.example.com" ]]
-    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     resetInstallServiceFixture singbox-reality-grpc
     regressionExpectStatus 0 customSingBoxInstall 26 >/dev/null 2>&1
@@ -3456,7 +3479,6 @@ $1:refresh"
     ! grep -q '^wg-refresh$' "${callLog}"
     grep -q '^installXray:' "${callLog}"
     [[ "${nginxRuntimeState}" == "true" ]]
-    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     resetInstallServiceFixture xray-config-fail
     SERVICE_ACTIONS="existing:start"
@@ -3468,7 +3490,6 @@ $1:refresh"
     ! grep -q '^cleanup:' "${callLog}"
     [[ "${nginxRuntimeState}" == "true" ]]
     [[ "${SERVICE_ACTIONS}" == "existing:start" ]]
-    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     for mode in xray-install-exit xray-service-fail; do
         resetInstallServiceFixture "${mode}"
@@ -3483,7 +3504,6 @@ $1:refresh"
             ! grep -q '^installXrayService:' "${callLog}"
         fi
         [[ "${nginxRuntimeState}" == "true" ]]
-        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     done
 
     resetInstallServiceFixture check-gfw-fail
@@ -3494,12 +3514,11 @@ $1:refresh"
 
     resetInstallServiceFixture nginx-start-fail
     regressionExpectStatus 1 customXrayInstall 21 >/dev/null 2>&1
-    grep -qx 'nginx:start:true' "${serviceLog}"
+    grep -qx 'nginx:start' "${serviceLog}"
     grep -qx 'nginx-mode:start restore' "${serviceLog}" || return 1
     [[ "${nginxRuntimeState}" == "true" ]] || return 1
     ! grep -q '^installXray:' "${callLog}"
     [[ ! -e "${reachedFile}" ]]
-    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     resetInstallServiceFixture xray-service-fail
     btDomain=panel.example.com
@@ -3511,10 +3530,9 @@ $1:refresh"
     resetInstallServiceFixture redirect-fail
     regressionExpectStatus 1 customXrayInstall 21 >/dev/null 2>&1
     grep -qx 'redirect' "${callLog}"
-    ! grep -q '^nginx:start:' "${serviceLog}"
+    ! grep -qx 'nginx:start' "${serviceLog}"
     ! grep -q '^installXray:' "${callLog}"
     [[ ! -e "${reachedFile}" ]]
-    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     resetInstallServiceFixture no-local-cert
     regressionExpectStatus 0 customXrayInstall 2 >/dev/null 2>&1
@@ -3526,32 +3544,28 @@ $1:refresh"
     ! grep -q '^nginx:' "${serviceLog}"
     grep -q '^installXray:' "${callLog}"
     [[ -e "${reachedFile}" ]]
-    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     resetInstallServiceFixture xray-start-fail
     regressionExpectStatus 1 xrayCoreInstall >/dev/null 2>&1
-    grep -qx 'xray:stop:true' "${serviceLog}"
-    grep -qx 'xray:start:true' "${serviceLog}"
-    grep -qx 'nginx:start:true' "${serviceLog}" || return 1
+    grep -qx 'xray:stop' "${serviceLog}"
+    grep -qx 'xray:start' "${serviceLog}"
+    grep -qx 'nginx:start' "${serviceLog}" || return 1
     grep -qx 'queueStart:nginx' "${callLog}"
     [[ "${nginxRuntimeState}" == "true" ]] || return 1
     grep -q '^installXray:' "${callLog}"
     [[ ! -e "${reachedFile}" ]]
-    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     resetInstallServiceFixture redirect-fail
     regressionExpectStatus 1 xrayCoreInstall >/dev/null 2>&1
     grep -qx 'redirect' "${callLog}"
-    ! grep -q '^xray:stop:' "${serviceLog}"
+    ! grep -qx 'xray:stop' "${serviceLog}"
     [[ ! -e "${reachedFile}" ]]
-    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     resetInstallServiceFixture nginx-stop-fail
     regressionExpectStatus 1 singBoxInstall >/dev/null 2>&1
-    grep -qx 'nginx:stop:true' "${serviceLog}"
+    grep -qx 'nginx:stop' "${serviceLog}"
     ! grep -q '^installSingBox:' "${callLog}"
     [[ ! -e "${reachedFile}" ]]
-    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     resetInstallServiceFixture blog-fail
     regressionExpectStatus 1 xrayCoreInstall >/dev/null 2>&1
@@ -3561,8 +3575,8 @@ $1:refresh"
     resetInstallServiceFixture cron-fail
     regressionExpectStatus 1 singBoxInstall >/dev/null 2>&1
     grep -qx 'cron:8' "${callLog}"
-    grep -qx 'nginx:stop:true' "${serviceLog}"
-    grep -qx 'nginx:start:true' "${serviceLog}" || return 1
+    grep -qx 'nginx:stop' "${serviceLog}"
+    grep -qx 'nginx:start' "${serviceLog}" || return 1
     grep -qx 'nginx-mode:start restore' "${serviceLog}" || return 1
     [[ "${nginxRuntimeState}" == "true" ]] || return 1
     ! grep -q '^queueApply$' "${callLog}"
@@ -3581,7 +3595,7 @@ $1:refresh"
         ! grep -q '^cleanup:' "${callLog}"
         serviceRunning "${oldCore}"
         ! serviceRunning "${target}"
-        grep -q "^${oldCore}:start:true$" "${serviceLog}"
+        grep -qx "${oldCore}:start" "${serviceLog}"
         resetInstallServiceFixture check-gfw-fail
         failStopTarget=${target}
         [[ "${oldCore}" != xray ]] || xrayRuntimeState=true
@@ -3589,20 +3603,20 @@ $1:refresh"
         regressionExpectStatus 1 "${install}" 1 domain </dev/null
         serviceRunning "${target}"
         ! serviceRunning "${oldCore}"
-        ! grep -q "^${oldCore}:start:" "${serviceLog}"
+        ! grep -qx "${oldCore}:start" "${serviceLog}"
         grep -q '新核心停止失败' "${errorLog}"
         resetInstallServiceFixture success
         [[ "${oldCore}" != xray ]] || xrayRuntimeState=true
         [[ "${oldCore}" != sing-box ]] || singBoxRuntimeState=true
         regressionExpectStatus 0 "${install}" 1 domain </dev/null
         grep -q "^health:[0-9]*:${target}$" "${callLog}"
-        grep -qx "${oldCore}:stop:true" "${serviceLog}"
+        grep -qx "${oldCore}:stop" "${serviceLog}"
         [[ "$(grep -E '^(health|cleanup):' "${callLog}")" == health:*"${target}"$'\n'cleanup:* ]]
         serviceRunning "${target}"
         ! serviceRunning "${oldCore}"
         resetInstallServiceFixture success
         regressionExpectStatus 0 "${install}" 1 domain </dev/null
-        grep -qx "${oldCore}:stop:true" "${serviceLog}"
+        grep -qx "${oldCore}:stop" "${serviceLog}"
         serviceRunning "${target}"
     done
 
@@ -3710,7 +3724,7 @@ $1:refresh"
                         if [[ "${failure}" == core-stop ]]; then
                             serviceRunning "${core}"
                             ! serviceRunning "${oldCore}"
-                            ! grep -q ':start:' "${serviceLog}"
+                            ! grep -q ':start$' "${serviceLog}"
                         fi
                         command rm -rf -- "${keptBackup}"
                     fi
@@ -6377,14 +6391,13 @@ JSON
         local rc allowFailure=false
         : >"${serviceLog}"
         : >"${errorLog}"
-        SERVICE_QUEUE_ALLOW_FAILURE=previous
         currentHost=tls-init.example.com
         lastInstallationConfig=true
         selectCoreType=2
         domain=
         handleNginx() {
             [[ "${sslType}" == letsencrypt && "${dnsAPIStatus}" == n && "${sslEmail}" == prepared@example.com ]] || return 1
-            printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+            printf 'nginx:%s\n' "$1" >>"${serviceLog}"
             return 1
         }
         errorCard() {
@@ -6402,14 +6415,13 @@ JSON
             [[ "${allowFailure}" != true ]]
         }
         regressionExpectStatus 1 acmeInstallSSL >/dev/null 2>&1
-        [[ "$(<"${serviceLog}")" == $'allow:80\nnginx:stop:true' ]]
+        [[ "$(<"${serviceLog}")" == $'allow:80\nnginx:stop' ]]
         ! grep -q '^issue$' "${serviceLog}"
         grep -q 'TLS 签发' "${errorLog}"
-        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
         : >"${serviceLog}"
         allowFailure=true
         regressionExpectStatus 1 acmeInstallSSL >/dev/null 2>&1
-        [[ "$(<"${serviceLog}")" == allow:80 && "${SERVICE_QUEUE_ALLOW_FAILURE}" == previous ]]
+        [[ "$(<"${serviceLog}")" == allow:80 ]]
     )
 
     (
@@ -6420,14 +6432,13 @@ JSON
         : >"${serviceLog}"
         : >"${errorLog}"
         rm -f "${allowMarker}"
-        SERVICE_QUEUE_ALLOW_FAILURE=previous
         btDomain=
         currentPort=
         customPort=
         xrayVLESSRealityPort=443
         domain=port.example.com
         handleXray() {
-            printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+            printf 'xray:%s\n' "$1" >>"${serviceLog}"
             return 1
         }
         autoRead() {
@@ -6440,10 +6451,9 @@ JSON
             printf '%s\n' "$*" >>"${errorLog}"
         }
         regressionExpectStatus 1 customPortFunction >/dev/null 2>&1
-        grep -qx 'xray:stop:true' "${serviceLog}"
+        grep -qx 'xray:stop' "${serviceLog}"
         grep -q '无法复用当前 Reality 端口' "${errorLog}"
         [[ ! -e "${allowMarker}" ]]
-        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     )
 
     (
@@ -6453,7 +6463,6 @@ JSON
         local rc
         : >"${errorLog}"
         : >"${allowLog}"
-        SERVICE_QUEUE_ALLOW_FAILURE=previous
         btDomain=
         currentPort=
         customPort=
@@ -6474,7 +6483,6 @@ JSON
         regressionExpectStatus 1 customPortFunction >/dev/null 2>&1
         grep -q '端口输入错误' "${errorLog}"
         [[ ! -s "${allowLog}" ]]
-        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     )
 
     (
@@ -6483,7 +6491,6 @@ JSON
         local rc
         : >"${errorLog}"
         rm -f "${checkPortMarker}"
-        SERVICE_QUEUE_ALLOW_FAILURE=previous
         btDomain=
         currentPort=
         customPort=
@@ -6504,7 +6511,6 @@ JSON
         }
         regressionExpectStatus 1 customPortFunction >/dev/null 2>&1
         [[ ! -e "${checkPortMarker}" ]]
-        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     )
 
     PATH="${oldPath}"
