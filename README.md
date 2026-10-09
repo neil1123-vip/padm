@@ -318,7 +318,22 @@ Direct 域名例外（包括识别出的 HTTP Host/TLS SNI）优先且不改目�
 Xray 复用受管/镜像 GeoIP；sing-box 从固定官方地址经直连下载 `geoip-cn`，
 缺资产或下载失败拒绝候选启动并恢复原部署，词法合法不等于分类资源可用。
 关闭仅删除 IP 子项，保留域名 Block、Direct、SOCKS、DNS/hosts。
-状态追加 `block_ips.ip_rules`，完整区域策略向导、BT 与最终目的过滤仍待迁移。
+状态追加 `block_ips.ip_rules`，完整区域策略向导与最终目的过滤仍待迁移。
+
+菜单 `17` 的 `16–17` 管理 BT 协议阻断，v3 `.routing.block_bt:true` 启用，
+关闭删除字段，不接受 `false` 或其它类型；控制包须声明 `x-padm-routing-block-bt`。
+只阻断核心嗅探识别出的明文 `bittorrent`，不保证加密、混淆、DHT 或部分 uTP；
+两核心 UDP 识别范围不同，不能把开关等同于所有 BT 流量或端口封禁。
+Direct 域名例外优先，BT 在 SOCKS/DNS/hosts 前拒绝；原目的地址保持不变。
+
+```bash
+padm-docker edit --block-bt --preview
+padm-docker edit --block-bt --confirm PADM-DOCKER-EDIT
+padm-docker edit --block-bt-off --confirm PADM-DOCKER-EDIT
+```
+
+开关复用现有候选校验、备份与恢复事务；独立关闭保留其它路由子项及流量累计，
+`routing-status` 启用时追加 `block_bt:true`。没有新增监听、宿主权限或防火墙规则。
 
 完整 v3 `configure` 规格可选 `accounts`，用于追加 1–256 个独立账号，不替换原自用账号。
 每项必须包含 `id`、`name`、`enabled`、`uuid`、`password`、`shadowsocks_password` 和

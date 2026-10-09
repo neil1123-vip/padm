@@ -931,7 +931,30 @@ outside this scope. No new listener, host privilege or firewall rule is added; T
 combinations are not enabled. Changes use the existing candidate/backup/recovery transaction.
 Status and previews omit credentials, but private specs, core configurations and backups
 retain them. SOCKS5 authentication is not encrypted; use a trusted upstream network.
-SOCKS ingress, DNS/WARP and the remaining routing policies are still deferred.
+Docker also provides independent DNS/hosts, domain Direct/Block and literal-destination
+IP/CIDR/`geoip:cn` policies. Direct domain exceptions have priority; IP policies do
+not resolve domain targets just to match an IP or recheck addresses after DNS/hosts.
+These changes retain the same private-input and deployment transaction boundaries.
+SOCKS ingress, WARP and complete routing management remain deferred.
+
+Menu `17`, options `16–17`, enables or disables detected BitTorrent blocking.
+Optional v3 `.routing.block_bt:true` requires `x-padm-routing-block-bt`; disabling
+removes the field, while `false` and other values are rejected.
+Only traffic the core identifies as plaintext `bittorrent` is blocked.
+Encrypted/obfuscated BT, DHT and some uTP are not guaranteed, and UDP recognition
+differs between cores. This is not blanket BT or port filtering.
+Direct domain exceptions still take priority; detected BT is rejected before
+SOCKS, DNS or hosts handling without replacing the destination.
+
+```bash
+padm-docker edit --block-bt --preview
+padm-docker edit --block-bt --confirm PADM-DOCKER-EDIT
+padm-docker edit --block-bt-off --confirm PADM-DOCKER-EDIT
+```
+
+Enabling adds `block_bt:true` to `routing-status`; disabling preserves all other
+routing policies and traffic totals. The existing candidate, backup and recovery
+transaction is reused, with no new listener, host privilege or firewall rule.
 
 `Routing & access control` manages server-side outbound behavior and access policies. It is not a client configuration tutorial.
 
