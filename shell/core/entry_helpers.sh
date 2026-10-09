@@ -86,6 +86,7 @@ writeSingBoxVMessHTTPUpgradeNginxConfig() {
     local tmpPath
     local backupPath
     local logFile
+    local targetWasPresent=false
     if ! targetPath=$(entryHelperNginxConfigFile "sing_box_VMess_HTTPUpgrade.conf"); then
         errorCard "sing-box HTTPUpgrade Nginx 配置路径异常"
         return 1
@@ -101,9 +102,12 @@ writeSingBoxVMessHTTPUpgradeNginxConfig() {
     fi
     backupPath="${targetPath}.bak"
     if command -v nginx >/dev/null 2>&1; then
-        if [[ -f "${targetPath}" ]] && ! backupManagedFileToPath "${targetPath}" "${backupPath}" 644; then
-            padmRemoveCleanupPath "${tmpPath}"
-            return 1
+        if [[ -f "${targetPath}" ]]; then
+            targetWasPresent=true
+            if ! backupManagedFileToPath "${targetPath}" "${backupPath}" 644; then
+                padmRemoveCleanupPath "${tmpPath}"
+                return 1
+            fi
         fi
         if ! commitGeneratedFile "${tmpPath}" "${targetPath}" 644; then
             padmRemoveCleanupPath "${tmpPath}"
@@ -112,7 +116,7 @@ writeSingBoxVMessHTTPUpgradeNginxConfig() {
         fi
         logFile=$(singBoxVMessHTTPUpgradeNginxTestLog)
         if ! nginx -t >"${logFile}" 2>&1; then
-            if [[ -f "${backupPath}" ]]; then
+            if [[ "${targetWasPresent}" == true ]]; then
                 restoreManagedFileFromBackup "${backupPath}" "${targetPath}" 644 || return 1
             else
                 removeManagedFileIfPresent "${targetPath}" || return 1

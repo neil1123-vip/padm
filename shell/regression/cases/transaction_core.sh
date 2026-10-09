@@ -5485,6 +5485,25 @@ JSON
     ! compgen -G "${TMP_DIR}/entry-helper-nginx/.sing_box_VMess_HTTPUpgrade.conf.*" >/dev/null
 
     (
+        local staleRoot="${TMP_DIR}/entry-helper-nginx-stale"
+        local staleTarget="${staleRoot}/sing_box_VMess_HTTPUpgrade.conf"
+        mkdir -p "${staleRoot}"
+        printf 'stale backup\n' >"${staleTarget}.bak"
+        nginxConfigPath="${staleRoot}/"
+        export PADM_FAKE_NGINX_VALIDATE_MODE=fail
+        if writeSingBoxVMessHTTPUpgradeNginxConfig <<'EOF' >/dev/null 2>&1
+server {}
+EOF
+        then
+            return 1
+        fi
+        [[ ! -e "${staleTarget}" ]]
+        [[ "$(<"${staleTarget}.bak")" == "stale backup" ]]
+        [[ ! -e "${staleTarget}.tmp" ]]
+        ! compgen -G "${staleRoot}/.sing_box_VMess_HTTPUpgrade.conf.*" >/dev/null
+    )
+
+    (
         local unsafeRoot="${TMP_DIR}/entry-helper-nginx-unsafe"
         local rc
         mkdir -p "${unsafeRoot}/relative-nginx"
