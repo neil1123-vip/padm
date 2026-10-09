@@ -326,7 +326,8 @@ addPortHopping() {
         protocolPortHoppingStatusCard "已添加不可重复添加，可删除后重新添加"
         return 0
     fi
-    if [[ "${rhelLike:-}" == "true" ]]; then
+    if [[ "${rhelLike:-}" == "true" ]] ||
+        padmFirewalldForwardStateKeyForTarget "${targetPort}" >/dev/null 2>&1; then
         if ! systemctl is-active --quiet firewalld 2>/dev/null; then
             protocolPortHoppingStatusCard "未启动 firewalld 防火墙，无法设置端口跳跃"
             return 1
@@ -399,7 +400,14 @@ addPortHopping() {
                 local addedMasquerade=
                 local addedForwardPorts=
                 local forwardStateKey
-                if ! sudo firewall-cmd --zone=public --permanent --query-masquerade >/dev/null 2>&1; then
+                if sudo firewall-cmd --zone=public --permanent --query-masquerade >/dev/null 2>&1; then
+                    addedMasquerade=
+                else
+                    local masqueradeQueryStatus=$?
+                    if [[ "${masqueradeQueryStatus}" != "1" ]]; then
+                        protocolPortHoppingStatusCard "防火墙 masquerade 状态读取失败，已取消添加端口跳跃"
+                        return 1
+                    fi
                     addedMasquerade=true
                 fi
                 if ! sudo firewall-cmd --zone=public --permanent --add-masquerade || ! sudo firewall-cmd --reload || ! addFirewalldPortHopping "${portStart}" "${portEnd}" "${targetPort}" addedForwardPorts || ! sudo firewall-cmd --zone=public --list-forward-ports | grep -q "toport=${targetPort}"; then

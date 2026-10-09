@@ -1963,7 +1963,10 @@ EOF
             done
             set -- "${filteredArgs[@]}"
             case "$1" in
-            --query-masquerade) [[ "${masquerade}" == "true" ]] ;;
+            --query-masquerade)
+                [[ -z "${masqueradeQueryStatus:-}" ]] || return "${masqueradeQueryStatus}"
+                [[ "${masquerade}" == "true" ]]
+                ;;
             --query-forward-port=*)
                 spec=${1#--query-forward-port=port=}
                 port=${spec%%:*}
@@ -2030,6 +2033,17 @@ EOF
         deletePortHoppingRules hysteria2 "" "" 16295
         [[ "${masquerade}" == false && ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
 
+        (
+            # masquerade 状态读取失败时不得删除原有全局规则或写入端口跳跃状态。
+            local masquerade=true masqueradeQueryStatus=2
+            allowPort() { return 1; }
+            : >"${firewalldLog}"
+            regressionExpectStatus 1 addPortHopping hysteria2 16295 >/dev/null 2>&1
+            grep -q '防火墙 masquerade 状态读取失败' "${warnLog}"
+            [[ "${masquerade}" == true && "${#fixtureForwardPorts[@]}" == 0 ]]
+            [[ ! -e "${PADM_FIREWALL_STATE_FILE}" && ! -s "${firewalldLog}" ]]
+        )
+
         fixtureForwardPorts[33002]=1
         masquerade=true
         inputCount=1
@@ -2045,6 +2059,22 @@ EOF
         inputCount=1
         addPortHopping hysteria2 16295
         firewalldActive=false
+        (
+            # 非 RHEL 的离线 firewalld 归属也不能在添加前删除或切换后端。
+            local rhelLike=false hoppingMenuChoice=1 singBoxTuicPort=16295 protocol
+            local hysteria2PortHoppingStart= hysteria2PortHoppingEnd=
+            local tuicPortHoppingStart= tuicPortHoppingEnd=
+            local stateBefore inputCountBefore=${inputCount}
+            stateBefore=$(<"${PADM_FIREWALL_STATE_FILE}")
+            : >"${firewalldLog}"
+            for protocol in hysteria2 tuic; do
+                regressionExpectStatus 1 addPortHopping "${protocol}" 16295 >/dev/null 2>&1
+                regressionExpectStatus 1 portHoppingMenu "${protocol}" >/dev/null 2>&1
+            done
+            [[ "$(<"${PADM_FIREWALL_STATE_FILE}")" == "${stateBefore}" ]]
+            [[ "${#fixtureForwardPorts[@]}" == 3 && "${masquerade}" == true ]]
+            [[ "${inputCount}" == "${inputCountBefore}" && ! -s "${firewalldLog}" ]]
+        )
         iptablesSaveShouldFail=true
         portHoppingMenu hysteria2
         [[ "${#fixtureForwardPorts[@]}" == "0" ]]
