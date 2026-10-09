@@ -269,6 +269,34 @@ for CORE in xray sing-box; do
     cmp -s "${BASE}" "${TEST_ROOT}/original-${CORE}.json" || fail '额度流程修改了原始凭据'
 done
 
+# 中断发生在旧目录移动后时，两核心都必须恢复，不能清理唯一备份。
+for interrupt in INT TERM; do
+    for movedCore in xray sing-box; do
+        signalRoot="${TEST_ROOT}/signal-${interrupt}-${movedCore}"
+        mkdir -p "${signalRoot}/config/xray" "${signalRoot}/config/sing-box"
+        for core in xray sing-box; do
+            cp "${TEST_ROOT}/original-${core}.json" "${signalRoot}/config/${core}/config.json"
+        done
+        signalStatus=0
+        (
+            PADM_DOCKER_INSTALL_DIR="${signalRoot}"
+            mv() {
+                command mv "$@" || return 1
+                [[ "${2:-}" != "${signalRoot}/config/${movedCore}" ]] ||
+                    kill "-${interrupt}" "${BASHPID}"
+            }
+            dockerTrafficPrepareCandidate "${signalRoot}"
+        ) || signalStatus=$?
+        expectedStatus=143
+        [[ "${interrupt}" != INT ]] || expectedStatus=130
+        [[ "${signalStatus}" == "${expectedStatus}" ]] || fail '候选切换未传播中断'
+        for core in xray sing-box; do
+            cmp -s "${TEST_ROOT}/original-${core}.json" "${signalRoot}/config/${core}/config.json" ||
+                fail '候选中断后原配置丢失'
+        done
+    done
+done
+
 # 两核心复用同 UUID，累计按核心基线求和，任一失败不能写入半份采样。
 DUAL=1
 PADM_DOCKER_INSTALL_DIR=${TEST_ROOT}/dual

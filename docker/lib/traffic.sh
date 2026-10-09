@@ -140,15 +140,32 @@ dockerTrafficRender() {
 }
 
 dockerTrafficPrepareCandidate() (
-    local candidate=$1 state=${2:-} root stage core directory source failed=false keep=false
-    local -a prepared=() moved=()
+    local candidate=$1 state=${2:-} root stage core directory source committed=false keep=false
+    local -a prepared=()
     root=$(dockerInstallRoot) || return 1
     dockerTrafficSafePath "${root}" "${candidate}" || return 1
     [[ -d "${candidate}" && -O "${candidate}" ]] || return 1
     [[ -n "${state}" ]] || state=$(dockerTrafficReadState) || return 1
     jq -e "${DOCKER_TRAFFIC_STATE_JQ}" <<<"${state}" >/dev/null || return 1
     stage=$(mktemp -d "${candidate}/.traffic.XXXXXX") || return 1
-    trap '[[ "${keep}" == true ]] || dockerRemoveManagedTree "${candidate}" "${stage}"' EXIT
+    trap '
+        status=$?
+        trap "" INT TERM
+        if [[ "${committed}" != true ]]; then
+            for core in "${prepared[@]}"; do
+                [[ -d "${stage}/old-${core}" ]] || continue
+                if [[ -e "${candidate}/config/${core}" ]]; then
+                    dockerRemoveManagedTree "${candidate}" "${candidate}/config/${core}" || { keep=true; continue; }
+                fi
+                mv -- "${stage}/old-${core}" "${candidate}/config/${core}" || keep=true
+            done
+            [[ "${keep}" == false ]] || dockerError "统计候选配置恢复失败，备份位于: ${stage}"
+        fi
+        [[ "${keep}" == true ]] || dockerRemoveManagedTree "${candidate}" "${stage}"
+        exit "${status}"
+    ' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
     for core in xray sing-box; do
         directory=${candidate}/config/${core}
         dockerTrafficSafePath "${candidate}" "${directory}/config.json" || return 1
@@ -167,20 +184,10 @@ dockerTrafficPrepareCandidate() (
         prepared+=("${core}")
     done
     for core in "${prepared[@]}"; do
-        mv -- "${candidate}/config/${core}" "${stage}/old-${core}" || { failed=true; break; }
-        moved+=("${core}")
-        mv -- "${stage}/${core}" "${candidate}/config/${core}" || { failed=true; break; }
+        mv -- "${candidate}/config/${core}" "${stage}/old-${core}" || return 1
+        mv -- "${stage}/${core}" "${candidate}/config/${core}" || return 1
     done
-    if [[ "${failed}" == true ]]; then
-        for core in "${moved[@]}"; do
-            if [[ -e "${candidate}/config/${core}" ]]; then
-                dockerRemoveManagedTree "${candidate}" "${candidate}/config/${core}" || { keep=true; continue; }
-            fi
-            mv -- "${stage}/old-${core}" "${candidate}/config/${core}" || keep=true
-        done
-        [[ "${keep}" == false ]] || dockerError "统计候选配置恢复失败，备份位于: ${stage}"
-        return 1
-    fi
+    committed=true
 )
 
 dockerTrafficContainerState() {
