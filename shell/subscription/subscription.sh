@@ -430,14 +430,7 @@ prepareSubscribeTLSCertificate() {
 }
 
 runSubscribeNginxAction() {
-    local action=$1
-    shift
-    local previousAllowFailure="${SERVICE_QUEUE_ALLOW_FAILURE:-}"
-    SERVICE_QUEUE_ALLOW_FAILURE=true
-    handleNginx "${action}" "$@"
-    local rc=$?
-    SERVICE_QUEUE_ALLOW_FAILURE="${previousAllowFailure}"
-    return "${rc}"
+    handleNginx "$@"
 }
 
 rollbackSubscribeNginxInstall() {

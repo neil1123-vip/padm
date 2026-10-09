@@ -1751,7 +1751,6 @@ appendSingBoxCompatibilityHints() {
 }
 
 runCoreServiceActionAllowFailure() {
-    local SERVICE_QUEUE_ALLOW_FAILURE=true
     "$@"
 }
 
@@ -1821,7 +1820,7 @@ rollbackDownloadedCoreBinaryInstallOnExit() {
 
     # 未替换核心时只恢复配置和原运行态，不触碰运行中的旧文件。
     if [[ "${PADM_CORE_BINARY_INSTALL[prepared]:-true}" != true ]]; then
-        if [[ -d "${PADM_CORE_BINARY_INSTALL[migrationBackup]:-}" ]]; then
+        if [[ -n "${PADM_CORE_BINARY_INSTALL[migrationBackup]:-}" ]]; then
             singBoxUpgradeMigrationRollback "${PADM_CORE_BINARY_INSTALL[migrationBackup]}" || status=1
         fi
         if [[ "${status}" == 0 && -n "${PADM_CORE_BINARY_INSTALL[action]:-}" ]]; then
@@ -1830,8 +1829,7 @@ rollbackDownloadedCoreBinaryInstallOnExit() {
         fi
     elif runCoreServiceActionAllowFailure "${PADM_CORE_BINARY_INSTALL[action]}" stop; then
         # 新服务含待启动任务必须先停止，之后才允许恢复旧文件。
-        if [[ -n "${PADM_CORE_BINARY_INSTALL[migrationBackup]:-}" &&
-            -d "${PADM_CORE_BINARY_INSTALL[migrationBackup]}" ]]; then
+        if [[ -n "${PADM_CORE_BINARY_INSTALL[migrationBackup]:-}" ]]; then
             if ! checkLogBackupRestore "${PADM_CORE_BINARY_INSTALL[migrationBackup]}"; then
                 status=1
                 statusCard "sing-box 更新失败" "迁移配置恢复失败，已跳过旧服务启动" \
