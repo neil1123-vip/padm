@@ -59,12 +59,30 @@ for family in ipv4 ipv6; do
         dockerTrafficRender "${core}" "${TEST_ROOT}/${core}.${family}.base" \
             '{"schema_version":1,"accounts":{}}' >"${TEST_ROOT}/${core}.${family}.json"
     done
-    [[ "${family}" == ipv4 ]] || continue
-    for mode in global resolve; do
+    modes=(policy-control policy)
+    [[ "${family}" != ipv4 ]] || modes+=(global resolve policy-global)
+    for mode in "${modes[@]}"; do
         if [[ "${mode}" == global ]]; then
             jq 'del(.routing.socks5.domains)' "${TEST_ROOT}/${family}.spec.json"
-        else
+        elif [[ "${mode}" == resolve ]]; then
             jq 'del(.routing.socks5)' "${TEST_ROOT}/${family}.spec.json"
+        else
+            jq --arg suffix "${suffix}" --arg mode "${mode}" '
+              .routing.direct = {domains:[
+                ("full:full-"+$suffix+".padm.invalid"),("domain:suffix-"+$suffix+".padm.invalid"),
+                ("keyword:only-keyword-"+$suffix),"geosite:test",
+                ("full:hosts-"+$suffix+".padm.invalid"),("full:proxy-"+$suffix+".padm.invalid")]} |
+              .routing.block = {domains:[
+                ("full:block-full-"+$suffix+".padm.invalid"),("domain:block-suffix-"+$suffix+".padm.invalid"),
+                ("keyword:block-keyword-"+$suffix),"geosite:block",
+                ("full:full-"+$suffix+".padm.invalid")]} |
+              .routing.dns.domains = ((.routing.dns.domains + .routing.block.domains) | unique) |
+              .routing.hosts[("block-full-"+$suffix+".padm.invalid")] = "203.0.113.82" |
+              .routing.socks5.domains = ["domain:padm.invalid"] |
+              if $mode == "policy-control" then del(.routing.socks5,.routing.direct,.routing.block)
+              elif $mode == "policy-global" then del(.routing.socks5.domains)
+              else . end
+            ' "${TEST_ROOT}/${family}.spec.json"
         fi >"${TEST_ROOT}/${family}.${mode}.spec.json"
         dockerConfigureSpecValidate "${TEST_ROOT}/${family}.${mode}.spec.json"
         dockerGenerateXrayConfig "${TEST_ROOT}/${family}.${mode}.spec.json" \

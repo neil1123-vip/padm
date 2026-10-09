@@ -637,7 +637,9 @@ dockerMenuRouting() {
         printf '%s\n' '1. 启用 SOCKS5 出站' '2. 关闭 SOCKS5 出站' '3. 查看路由状态' \
             '4. 替换 SOCKS5 域名规则' '5. 切换 SOCKS5 全局出站' \
             '6. 设置 DNS 分流' '7. 关闭 DNS 分流' '8. 设置 DNS/hosts 覆盖' \
-            '9. 关闭 DNS/hosts 覆盖' '0. 返回'
+            '9. 关闭 DNS/hosts 覆盖' '10. 设置 Direct 直连例外' \
+            '11. 关闭 Direct 直连例外' '12. 设置 Block 域名阻断' \
+            '13. 关闭 Block 域名阻断' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -670,6 +672,17 @@ dockerMenuRouting() {
             dockerMenuRun edit --hosts "${input}" || true
             ;;
         9) dockerMenuRun edit --hosts-off || true ;;
+        10|12)
+            dockerSetupRead input 'root 私有域名规则 JSON 文件绝对路径（0 返回）: ' &&
+                [[ -n "${input}" ]] || continue
+            if [[ "${choice}" == 10 ]]; then
+                dockerMenuRun edit --direct "${input}" || true
+            else
+                dockerMenuRun edit --block "${input}" || true
+            fi
+            ;;
+        11) dockerMenuRun edit --direct-off || true ;;
+        13) dockerMenuRun edit --block-off || true ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

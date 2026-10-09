@@ -32,6 +32,8 @@ DNS_INPUT=${PRIVATE_ROOT}/dns.json
 HOSTS_INPUT=${PRIVATE_ROOT}/hosts.json
 DNS='{"server":"203.0.113.53","port":5353,"domains":["full:dns.example.com","domain:dns.example.net","keyword:dns-video","geosite:cn"]}'
 HOSTS='{"exact.example.com":"203.0.113.10","ipv6.example.com":"2001:db8::10"}'
+DIRECT_INPUT=${PRIVATE_ROOT}/direct.json
+BLOCK_INPUT=${PRIVATE_ROOT}/block.json
 
 fail() {
     [[ ! -f "${LOG}" ]] || sed 's/^/  /' "${LOG}" >&2
@@ -119,6 +121,14 @@ jq --argjson hosts "${HOSTS}" '.routing = {hosts:$hosts}' "${TEST_ROOT}/base.jso
 jq --argjson dns "${DNS}" --argjson hosts "${HOSTS}" '.routing += {dns:$dns,hosts:$hosts}' \
     "${TEST_ROOT}/domains.json" >"${TEST_ROOT}/routing-all.json"
 jq 'del(.routing.socks5.domains)' "${TEST_ROOT}/routing-all.json" >"${TEST_ROOT}/routing-all-global.json"
+for kind in direct block; do
+    jq -n --argjson domains "${DOMAINS}" '{domains:$domains}' >"${PRIVATE_ROOT}/${kind}.json"
+    chmod 0600 "${PRIVATE_ROOT}/${kind}.json"
+    jq --arg kind "${kind}" --argjson domains "${DOMAINS}" '.routing = {($kind):{domains:$domains}}' \
+        "${TEST_ROOT}/base.json" >"${TEST_ROOT}/${kind}-only.json"
+done
+jq --argjson domains "${DOMAINS}" '.routing += {direct:{domains:$domains},block:{domains:$domains}}' \
+    "${TEST_ROOT}/routing-all-global.json" >"${TEST_ROOT}/routing-policy.json"
 
 # 同批正反输入由两份校验合同独立判断，避免 Schema 与生产校验分歧。
 python3 - "${PROJECT_ROOT}" "${TEST_ROOT}" <<'PY'
@@ -151,7 +161,26 @@ case("dns-only", dns, True)
 case("hosts-only", hosts, True)
 case("routing-all", json.loads((root / "routing-all.json").read_text()), True)
 case("routing-all-global", json.loads((root / "routing-all-global.json").read_text()), True)
-for name, template in (("dns", dns), ("hosts", hosts)):
+case("routing-policy", json.loads((root / "routing-policy.json").read_text()), True)
+for kind in ("direct", "block"):
+    template = json.loads((root / f"{kind}-only.json").read_text())
+    case(f"{kind}-only", template, True)
+    value = copy.deepcopy(template)
+    value["routing"][kind]["domains"] = [f"full:host-{n}.example.com" for n in range(256)]
+    case(f"valid-{kind}-boundary", value, True)
+    for index, bad in enumerate(({}, None, [], {"domains": []},
+                                {"domains": ["full:Example.com"]},
+                                {"domains": ["full:a.example.com"] * 2},
+                                {"domains": ["regexp:.*"]},
+                                {"domains": ["keyword:a:b"]},
+                                {"domains": [f"full:host-{n}.example.com" for n in range(257)]},
+                                {"domains": ["full:a.example.com"], "extra": True})):
+        value = copy.deepcopy(template)
+        value["routing"][kind] = bad
+        case(f"invalid-{kind}-{index}", value, False)
+for name, template in (("dns", dns), ("hosts", hosts),
+                       ("direct", json.loads((root / "direct-only.json").read_text())),
+                       ("block", json.loads((root / "block-only.json").read_text()))):
     for version in (1, 2):
         value = copy.deepcopy(template)
         value["schema_version"] = version
@@ -358,6 +387,32 @@ done
 mv -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
     "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
 
+for fixture in direct-only block-only routing-policy; do
+    dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/${fixture}.json" ||
+        fail "${fixture}: 当前 bundle 拒绝 Direct/Block"
+done
+cp -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json" \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved"
+jq 'del(."x-padm-routing-direct-block")' \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
+    >"${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+for fixture in direct-only block-only routing-policy; do
+    reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/${fixture}.json"
+done
+for fixture in routed domains dns-only hosts-only; do
+    dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/${fixture}.json" ||
+        fail "${fixture}: Direct/Block marker 拒绝旧路由"
+done
+jq 'del(."x-padm-routing-socks5", ."x-padm-routing-domains", ."x-padm-routing-dns-hosts")' \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
+    >"${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+for fixture in direct-only block-only; do
+    dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/${fixture}.json" ||
+        fail "${fixture}: Direct/Block-only 错误依赖旧路由 marker"
+done
+mv -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+
 for fixture in dns-only hosts-only routing-all; do
     dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/${fixture}.json" ||
         fail "${fixture}: 当前 bundle 拒绝 DNS/hosts 能力"
@@ -400,7 +455,7 @@ for version in 1 2; do
         "${TEST_ROOT}/legacy-sing-v${version}-core.json" >/dev/null ||
         fail "v${version}: 无 routing 改变旧 sing-box 默认出站"
 done
-for fixture in routed domains dns-only hosts-only routing-all routing-all-global; do
+for fixture in routed domains dns-only hosts-only routing-all routing-all-global direct-only block-only routing-policy; do
     for core in xray sing-box; do
         if [[ "${core}" == xray ]]; then
             dockerGenerateXrayConfig "${TEST_ROOT}/${fixture}.json" "${TEST_ROOT}/${fixture}-${core}.json"
@@ -484,6 +539,34 @@ jq -en --slurpfile xray "${TEST_ROOT}/routing-all-global-xray.json" \
     {network:"tcp",action:"route",outbound:"padm-socks5"}] and
   all($sing[0].route.rules[2:][]; .action == "resolve" or .outbound == "direct")
 ' >/dev/null || fail '全局 SOCKS5 没有优先于 DNS/hosts 解析或改变 UDP 阻断'
+jq -en --argjson domains "${DOMAINS}" --slurpfile direct "${TEST_ROOT}/direct-only-xray.json" \
+    --slurpfile block "${TEST_ROOT}/block-only-xray.json" \
+    --slurpfile policy "${TEST_ROOT}/routing-policy-xray.json" '
+  ($domains | map(if startswith("keyword:") then ltrimstr("keyword:") else . end)) as $match |
+  $direct[0].routing.rules == [{type:"field",domain:$match,outboundTag:"direct"}] and
+  $block[0].routing.rules == [{type:"field",domain:$match,outboundTag:"blocked"}] and
+  $policy[0].routing.rules == [
+    {type:"field",inboundTag:["padm-dns"],outboundTag:"direct"},
+    {type:"field",domain:$match,outboundTag:"direct"},
+    {type:"field",domain:$match,outboundTag:"blocked"},
+    {type:"field",network:"udp",outboundTag:"blocked"}] and
+  all($policy[0].inbounds[]; .sniffing.routeOnly == true)
+' >/dev/null || fail 'Xray Direct/Block 优先级、四类 OR 或路由专用嗅探错误'
+jq -en --slurpfile direct "${TEST_ROOT}/direct-only-sing-box.json" \
+    --slurpfile block "${TEST_ROOT}/block-only-sing-box.json" \
+    --slurpfile policy "${TEST_ROOT}/routing-policy-sing-box.json" '
+  $direct[0].route.rules[0].action == "sniff" and
+  ($direct[0].route.rules[1:] | length) == 4 and
+  all($direct[0].route.rules[1:][]; .action == "route" and .outbound == "direct") and
+  $block[0].route.rules[0].action == "sniff" and
+  ($block[0].route.rules[1:] | length) == 4 and
+  all($block[0].route.rules[1:][]; .action == "reject") and
+  ($policy[0].route.rules | map(select(.action == "reject")) |
+    all(.[]; .type == "logical" and .mode == "and" and
+      .rules[1].mode == "or" and .rules[1].invert == true and (.rules[1].rules | length) == 4)) and
+  ($policy[0].route.rule_set | map(.tag) | sort) ==
+    ["padm-geosite-category-ads-all","padm-geosite-cn"]
+' >/dev/null || fail 'sing-box Direct/Block OR、排除 Direct 或共享分类去重错误'
 # 用核心的匹配语义检查每类独立命中，防止不同 matcher 被错误组合成 AND。
 python3 - "${TEST_ROOT}/domains-sing-box.json" <<'PY'
 import json
@@ -541,7 +624,7 @@ assert all(rule["type"] == "remote" and rule["format"] == "binary" and
            rule["http_client"] == {"engine": "go"} and "download_detour" not in rule
            for rule in rule_sets)
 PY
-for fixture in routed domains routing-all-global; do
+for fixture in routed domains routing-all-global direct-only block-only routing-policy; do
     jq -en --slurpfile source "${TEST_ROOT}/${fixture}-xray.json" \
         --slurpfile runtime "${TEST_ROOT}/runtime-${fixture}-xray.json" '
       $runtime[0].outbounds == $source[0].outbounds and
@@ -555,7 +638,7 @@ for fixture in routed domains routing-all-global; do
 done
 for generator in dockerGenerateCompose dockerGenerateDeployment; do
     "${generator}" "${TEST_ROOT}/base.json" "${TEST_ROOT}/legacy-generated.json"
-    for fixture in routed domains dns-only hosts-only routing-all routing-all-global; do
+    for fixture in routed domains dns-only hosts-only routing-all routing-all-global direct-only block-only routing-policy; do
         "${generator}" "${TEST_ROOT}/${fixture}.json" "${TEST_ROOT}/routed-generated.json"
         cmp -s "${TEST_ROOT}/legacy-generated.json" "${TEST_ROOT}/routed-generated.json" ||
             fail "${generator}: ${fixture} 意外改变容器能力或宿主端口"
@@ -791,9 +874,9 @@ done
 jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload == 17 and .accounts[$uuid].download == 19' \
     "${root}/data/traffic/state.json" >/dev/null || fail '路由编辑清空流量累计'
 
-# DNS/hosts 共用私有文件与候选事务，每次编辑只替换自己的子字段。
+# 路由子项共用私有文件与候选事务，每次编辑只替换自己的字段。
 before=$(snapshot)
-for kind in dns hosts; do
+for kind in dns hosts direct block; do
     input="${PRIVATE_ROOT}/${kind}.json"
     runEdit 0 "--${kind}" "${input}" --preview
     runEdit 0 "--${kind}-off" --preview
@@ -815,16 +898,20 @@ for kind in dns hosts; do
 done
 runEdit 2 --dns "${DNS_INPUT}" --hosts "${HOSTS_INPUT}" --preview
 runEdit 2 --dns-off --hosts-off --preview
+runEdit 2 --direct "${DIRECT_INPUT}" --block "${BLOCK_INPUT}" --preview
+runEdit 2 --direct-off --block-off --preview
 runEdit 15 --spec "${TEST_ROOT}/dns-only.json" --confirm PADM-DOCKER-EDIT
 runEdit 15 --spec "${TEST_ROOT}/hosts-only.json" --confirm PADM-DOCKER-EDIT
+runEdit 15 --spec "${TEST_ROOT}/direct-only.json" --confirm PADM-DOCKER-EDIT
+runEdit 15 --spec "${TEST_ROOT}/block-only.json" --confirm PADM-DOCKER-EDIT
 (
     trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
     dockerSetupRead() { printf -v "$1" '%s' n; }
     dockerAcquireDeploymentLock
-    dockerConfigureApply "${TEST_ROOT}/routing-all.json" '' '' interactive
+    dockerConfigureApply "${TEST_ROOT}/routing-policy.json" '' '' interactive
 ) >"${LOG}" 2>&1 || fail 'DNS/hosts 确认取消失败'
 assertClean
-[[ "$(snapshot)" == "${before}" ]] || fail 'DNS/hosts 预览、无效输入或取消改变完整部署'
+[[ "$(snapshot)" == "${before}" ]] || fail '路由子项预览、无效输入或取消改变完整部署'
 
 runEdit 0 --dns "${DNS_INPUT}" --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile old "${TEST_ROOT}/base.json" --slurpfile new "${root}/config/spec.json" \
@@ -883,6 +970,55 @@ jq -en --slurpfile old "${TEST_ROOT}/base.json" --slurpfile new "${root}/config/
     '$new == $old' >/dev/null || fail '关闭最后一个路由字段未恢复无 routing 规格'
 jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload == 17 and .accounts[$uuid].download == 19' \
     "${root}/data/traffic/state.json" >/dev/null || fail 'DNS/hosts 事务清空流量'
+
+# Direct/Block 沿用相同事务，同时验证同域规则允许共存并保留其它路由子项。
+runEdit 0 --direct "${DIRECT_INPUT}" --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile expected "${TEST_ROOT}/direct-only.json" --slurpfile actual "${root}/config/spec.json" \
+    '$actual == $expected' >/dev/null || fail '独立 Direct 开启改变其它规格'
+runStatus 0
+jq -e --argjson domains "${DOMAINS}" '.enabled == true and .direct == {domain_rules:$domains} and
+  (has("block") | not)' "${LOG}" >/dev/null || fail 'Direct 状态投影错误'
+before=$(snapshot)
+runEdit 15 --spec "${TEST_ROOT}/base.json" --confirm PADM-DOCKER-EDIT
+runEdit 15 --spec "${TEST_ROOT}/block-only.json" --confirm PADM-DOCKER-EDIT
+[[ "$(snapshot)" == "${before}" ]] || fail '普通 --spec 绕过 Direct/Block 冻结'
+runEdit 0 --block "${BLOCK_INPUT}" --confirm PADM-DOCKER-EDIT
+runStatus 0
+jq -e --argjson domains "${DOMAINS}" '.direct == {domain_rules:$domains} and
+  .block == {domain_rules:$domains}' "${LOG}" >/dev/null || fail 'Direct/Block 同域状态未保留两项'
+[[ "$(stat -c '%a %u %h' "${root}/config/spec.json")" == '600 0 1' ]] ||
+    fail 'Direct/Block 规格未保留 root 私有权限'
+before=$(snapshot)
+for failure in health-fail int term; do
+    MODE=${failure}
+    rm -f -- "${TEST_ROOT}/failed-once"
+    case "${failure}" in
+    health-fail) runEdit 14 --direct-off --confirm PADM-DOCKER-EDIT ;;
+    int) runEdit 130 --block-off --confirm PADM-DOCKER-EDIT ;;
+    term) runEdit 143 --direct-off --confirm PADM-DOCKER-EDIT ;;
+    esac
+    [[ "$(snapshot)" == "${before}" ]] || fail "${failure}: Direct/Block 没有恢复完整部署和流量"
+done
+MODE=ok
+runEdit 0 --dns "${DNS_INPUT}" --confirm PADM-DOCKER-EDIT
+runEdit 0 --hosts "${HOSTS_INPUT}" --confirm PADM-DOCKER-EDIT
+runEdit 0 --socks5 "${INPUT}" --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile expected "${TEST_ROOT}/routing-policy.json" --slurpfile actual "${root}/config/spec.json" \
+    '$actual == $expected' >/dev/null || fail '开启旧子项丢弃 Direct/Block'
+runEdit 0 --direct-off --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile expected "${TEST_ROOT}/routing-policy.json" --slurpfile actual "${root}/config/spec.json" \
+    '$actual[0] == ($expected[0] | del(.routing.direct))' >/dev/null ||
+    fail '关闭 Direct 删除其它路由子项'
+runEdit 0 --socks5-off --confirm PADM-DOCKER-EDIT
+runEdit 0 --dns-off --confirm PADM-DOCKER-EDIT
+runEdit 0 --hosts-off --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile expected "${TEST_ROOT}/block-only.json" --slurpfile actual "${root}/config/spec.json" \
+    '$actual == $expected' >/dev/null || fail '关闭其它路由子项删除 Block'
+runEdit 0 --block-off --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile old "${TEST_ROOT}/base.json" --slurpfile new "${root}/config/spec.json" \
+    '$new == $old' >/dev/null || fail '关闭最后 Block 没有删除空 routing'
+jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload == 17 and .accounts[$uuid].download == 19' \
+    "${root}/data/traffic/state.json" >/dev/null || fail 'Direct/Block 事务清空流量'
 
 menuLog="${TEST_ROOT}/routing-menu.log"
 (

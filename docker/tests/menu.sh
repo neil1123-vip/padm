@@ -480,7 +480,7 @@ runSitesDriver() {
 }
 
 runRoutingDriver() {
-    local scenario=$1
+    local scenario=$1 choice
     local -A targetPrompts=()
     targetReply 'Docker 管理菜单' $'17\n'
     : >"${TLS_WIZARD_ACTIONS}"
@@ -501,6 +501,12 @@ runRoutingDriver() {
         targetReply 'Docker 路由与出站' $'8\n'
         targetReply 'root 私有 hosts JSON 文件绝对路径（0 返回）' $'/root/padm-hosts.json\n'
         targetReply 'Docker 路由与出站' $'9\n'
+        targetReply 'Docker 路由与出站' $'10\n'
+        targetReply 'root 私有域名规则 JSON 文件绝对路径（0 返回）' $'/root/padm-direct.json\n'
+        targetReply 'Docker 路由与出站' $'11\n'
+        targetReply 'Docker 路由与出站' $'12\n'
+        targetReply 'root 私有域名规则 JSON 文件绝对路径（0 返回）' $'/root/padm-block.json\n'
+        targetReply 'Docker 路由与出站' $'13\n'
         ;;
     cancel)
         targetReply 'Docker 路由与出站' $'1\n'
@@ -519,6 +525,12 @@ runRoutingDriver() {
         targetReply 'root 私有 hosts JSON 文件绝对路径（0 返回）' $'0\n'
         targetReply 'Docker 路由与出站' $'8\n'
         targetReply 'root 私有 hosts JSON 文件绝对路径（0 返回）' $'\n'
+        for choice in 10 12; do
+            targetReply 'Docker 路由与出站' "${choice}"$'\n'
+            targetReply 'root 私有域名规则 JSON 文件绝对路径（0 返回）' $'0\n'
+            targetReply 'Docker 路由与出站' "${choice}"$'\n'
+            targetReply 'root 私有域名规则 JSON 文件绝对路径（0 返回）' $'\n'
+        done
         ;;
     file-eof)
         targetReply 'Docker 路由与出站' $'1\n'
@@ -535,6 +547,14 @@ runRoutingDriver() {
     hosts-file-eof)
         targetReply 'Docker 路由与出站' $'8\n'
         targetReply 'root 私有 hosts JSON 文件绝对路径（0 返回）' $'\004'
+        ;;
+    direct-file-eof|block-file-eof)
+        if [[ "${scenario}" == direct-file-eof ]]; then
+            targetReply 'Docker 路由与出站' $'10\n'
+        else
+            targetReply 'Docker 路由与出站' $'12\n'
+        fi
+        targetReply 'root 私有域名规则 JSON 文件绝对路径（0 返回）' $'\004'
         ;;
     esac
     targetReply 'Docker 路由与出站' $'0\n'
@@ -958,7 +978,7 @@ for siteCase in flow cancel static-eof redirect-eof alpn-diagnose-eof alpn-recom
 done
 unset SITE_MENU_RECORD_STATUS SITE_EDIT_STATUS SITE_ALPN_STATUS
 
-for routingCase in flow cancel file-eof domains-eof dns-file-eof hosts-file-eof failed return; do
+for routingCase in flow cancel file-eof domains-eof dns-file-eof hosts-file-eof direct-file-eof block-file-eof failed return; do
     : >"${TLS_WIZARD_ACTIONS}"
     export SITE_EDIT_STATUS=0 ROUTING_STATUS=0
     [[ "${routingCase}" != failed ]] || { SITE_EDIT_STATUS=15; ROUTING_STATUS=17; }
@@ -966,7 +986,7 @@ for routingCase in flow cancel file-eof domains-eof dns-file-eof hosts-file-eof 
     expectedRouting=
     case "${routingCase}" in
     flow|failed)
-        expectedRouting=$'edit --socks5 /root/padm-socks5.json\nedit --socks5-off\nprotocol routing-status\nedit --socks5-domains Example.NET, full:Exact.Example.Com, geosite:cn\nedit --socks5-global\nprotocol routing-status\nedit --dns /root/padm-dns.json\nedit --dns-off\nedit --hosts /root/padm-hosts.json\nedit --hosts-off'
+        expectedRouting=$'edit --socks5 /root/padm-socks5.json\nedit --socks5-off\nprotocol routing-status\nedit --socks5-domains Example.NET, full:Exact.Example.Com, geosite:cn\nedit --socks5-global\nprotocol routing-status\nedit --dns /root/padm-dns.json\nedit --dns-off\nedit --hosts /root/padm-hosts.json\nedit --hosts-off\nedit --direct /root/padm-direct.json\nedit --direct-off\nedit --block /root/padm-block.json\nedit --block-off'
         grep -Fq '无效选项' "${CONTROL_LOG}" || fail '路由菜单没有保留无效输入后的操作'
         ;;
     esac
@@ -976,7 +996,8 @@ for routingCase in flow cancel file-eof domains-eof dns-file-eof hosts-file-eof 
         for label in '17. 路由与出站' '1. 启用 SOCKS5 出站' '2. 关闭 SOCKS5 出站' \
             '3. 查看路由状态' '4. 替换 SOCKS5 域名规则' '5. 切换 SOCKS5 全局出站' \
             '6. 设置 DNS 分流' '7. 关闭 DNS 分流' '8. 设置 DNS/hosts 覆盖' \
-            '9. 关闭 DNS/hosts 覆盖' '0. 返回'; do
+            '9. 关闭 DNS/hosts 覆盖' '10. 设置 Direct 直连例外' '11. 关闭 Direct 直连例外' \
+            '12. 设置 Block 域名阻断' '13. 关闭 Block 域名阻断' '0. 返回'; do
             grep -Fq "${label}" "${CONTROL_LOG}" || fail "路由菜单缺少: ${label}"
         done
     elif [[ "${routingCase}" == failed ]]; then

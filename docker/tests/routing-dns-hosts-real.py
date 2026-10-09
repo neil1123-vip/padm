@@ -1,5 +1,6 @@
 import contextlib
 import copy
+from http.server import BaseHTTPRequestHandler
 import json
 import os
 from pathlib import Path
@@ -16,7 +17,47 @@ helpers = runpy.run_path(str(Path(__file__).with_name("routing-socks5-real.py"))
 Server, Destination, Socks = (helpers[name] for name in ("Server", "Destination", "Socks"))
 port, running, write_config = (helpers[name] for name in ("port", "running", "write_config"))
 exact, socks_address = (helpers[name] for name in ("exact", "socks_address"))
-fixture_assets, RuleResource = (helpers[name] for name in ("fixture_assets", "RuleResource"))
+fixture_assets = helpers["fixture_assets"]
+
+
+class RuleResource(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.server.requests += 1
+        body = self.server.resources.get(self.path)
+        self.send_response(200 if body is not None else 404)
+        self.send_header("Content-Length", str(len(body or b"")))
+        self.end_headers()
+        if body is not None:
+            self.server.successes += 1
+            self.wfile.write(body)
+
+    def log_message(self, *_):
+        pass
+
+
+def block_names(family):
+    suffix = "v6" if family == "ipv6" else "v4"
+    return [f"only-block-keyword-{suffix}.padm.invalid", f"block-full-{suffix}.padm.invalid",
+            f"sub.block-suffix-{suffix}.padm.invalid", f"block-geo-{suffix}.padm.invalid"]
+
+
+def policy_assets(root):
+    names = [block_names(family)[3] for family in ("ipv4", "ipv6")]
+    entries = []
+    for name in names:
+        value = name.encode("ascii")
+        domain = b"\x08\x03\x12" + bytes([len(value)]) + value
+        entries.append(b"\x12" + bytes([len(domain)]) + domain)
+    # 第二个真实 protobuf 分类与 TEST 独立，保证 Block 不被 Direct 分类放行。
+    site = b"\x0a\x05BLOCK" + b"".join(entries)
+    assert len(site) < 128
+    path = root / "geosite.dat"
+    path.write_bytes(path.read_bytes() + b"\x0a" + bytes([len(site)]) + site)
+    source = root / "block-rule-set.json"
+    source.write_text(json.dumps(dict(version=3, rules=[dict(domain=names)])))
+    subprocess.run(["/routing-cores/sing-box", "rule-set", "compile", "--output",
+                    str(root / "block.srs"), str(source)], check=True, stdout=subprocess.DEVNULL)
+    (root / "block.srs").chmod(0o644)
 
 
 class DnsServer(socketserver.ThreadingUDPServer):
@@ -75,7 +116,9 @@ def system_hosts(family, host):
     suffix = "v6" if family == "ipv6" else "v4"
     names = [f"{prefix}-{suffix}.padm.invalid" for prefix in ("unmatched", "proxy", "error", "timeout")]
     path = Path("/etc/hosts")
-    line = f"{host} {' '.join(names)} # padm-dns-{os.getpid()}-{family}\n"
+    address_names = names + helpers["domain_names"](family) + block_names(family) + [
+        f"hosts-{suffix}.padm.invalid"]
+    line = f"{host} {' '.join(address_names)} # padm-dns-{os.getpid()}-{family}\n"
     # 只给隔离容器增加可解析诱饵，负测若误回退系统解析就会抵达 HTTP 目的。
     with path.open("a") as target:
         target.write(line)
@@ -97,6 +140,9 @@ def runtime(root, core, family, host, local, dns, upstream, resource, mode="sele
     mapped_address = "127.0.0.1" if family == "ipv6" else "::1"
     if core == "xray":
         config["dns"]["hosts"]["full:" + mapped] = mapped_address
+        if mode.startswith("policy"):
+            config["dns"]["hosts"]["full:" + f"proxy-{suffix}.padm.invalid"] = mapped_address
+            config["dns"]["hosts"]["full:" + f"block-full-{suffix}.padm.invalid"] = mapped_address
         server = config["dns"]["servers"][0]
         # 仅缩短夹具超时；仍由真实核心决定失败，生产超时保持原值。
         server.update(address=host, port=dns.server_address[1], timeoutMs=250)
@@ -105,7 +151,7 @@ def runtime(root, core, family, host, local, dns, upstream, resource, mode="sele
             outbound["settings"]["servers"][0].update(address=host, port=upstream.server_address[1])
         inbound = dict(listen=host, port=local, tag="fixture-in", protocol="socks",
                        settings=dict(auth="noauth", udp=True))
-        if mode == "selective":
+        if mode in ("selective", "policy", "policy-global"):
             sniff = copy.deepcopy(next(item["sniffing"] for item in config["inbounds"]
                                        if item["tag"] != "padm-traffic-api"))
             assert sniff["routeOnly"], "DNS/hosts 不得将 sniff-only Host 改成实际连接目的"
@@ -115,6 +161,9 @@ def runtime(root, core, family, host, local, dns, upstream, resource, mode="sele
         config["dns"]["timeout"] = "250ms"
         servers = {item["tag"]: item for item in config["dns"]["servers"]}
         servers["padm-hosts"]["predefined"][mapped] = mapped_address
+        if mode.startswith("policy"):
+            servers["padm-hosts"]["predefined"][f"proxy-{suffix}.padm.invalid"] = mapped_address
+            servers["padm-hosts"]["predefined"][f"block-full-{suffix}.padm.invalid"] = mapped_address
         servers["padm-dns"].update(server=host, server_port=dns.server_address[1])
         outbound = next((item for item in config["outbounds"] if item["tag"] == "padm-socks5"), None)
         if outbound is not None:
@@ -122,7 +171,8 @@ def runtime(root, core, family, host, local, dns, upstream, resource, mode="sele
         config["inbounds"].append(dict(type="socks", tag="fixture-in", listen=host, listen_port=local))
         for item in config["route"]["rule_set"]:
             assert item["http_client"] == {"engine": "go"}
-            item["url"] = f"http://127.0.0.1:{resource.server_address[1]}/test.srs"
+            asset = "block" if item["tag"] == "padm-geosite-block" else "test"
+            item["url"] = f"http://127.0.0.1:{resource.server_address[1]}/{asset}.srs"
     return config
 
 
@@ -142,14 +192,15 @@ def check(root, core, family, host):
         mapped_destination = Server((mapped_address, destination.server_address[1]), Destination)
         mapped_destination.received = []
         mapped_destination.accepted = 0
-        upstream.destination_hosts = fallback[1:3]
+        upstream.destination_hosts = fallback + names + block_names(family) + [mapped]
         upstream.destination = destination.server_address[1]
         upstream.auth = upstream.connects = 0
         upstream.reject = False
         servers = [destination, mapped_destination, dns, upstream]
         if resource is not None:
             resource.requests = resource.successes = 0
-            resource.body = (root / "test.srs").read_bytes()
+            resource.resources = {f"/{asset}.srs": (root / f"{asset}.srs").read_bytes()
+                                  for asset in ("test", "block")}
             servers.append(resource)
         threads = [threading.Thread(target=server.serve_forever, kwargs=dict(poll_interval=0.05),
                                     daemon=True) for server in servers]
@@ -255,6 +306,90 @@ def check(root, core, family, host):
                               "generated-priority/UDP checks passed", flush=True)
             print(f"routing-dns-hosts-real-{core}-{family}: DNS/hosts/SOCKS5/no-fallback checks passed",
                   flush=True)
+            with (socket.socket(socket.AF_INET6 if family == "ipv6" else socket.AF_INET,
+                                socket.SOCK_DGRAM) as datagram,
+                  socket.socket(socket.AF_INET if family == "ipv6" else socket.AF_INET6,
+                                socket.SOCK_DGRAM) as mapped_datagram):
+                datagram.bind((host, 0))
+                datagram.settimeout(0.3)
+                mapped_datagram.bind((mapped_address, datagram.getsockname()[1]))
+                mapped_datagram.settimeout(0.3)
+                blocked = block_names(family)
+                modes = ["policy-control", "policy"]
+                if family == "ipv4":
+                    modes.append("policy-global")
+                for mode in modes:
+                    config = runtime(root, core, family, host, local, dns, upstream, resource, mode)
+                    path = root / f"{core}.{family}.{mode}.runtime.json"
+                    write_config(path, config)
+                    subprocess.run(least + validate + [str(path)], check=True,
+                                   stdout=subprocess.DEVNULL,
+                                   env=dict(os.environ, XRAY_LOCATION_ASSET=str(root)))
+                    with running([binary, "run", "-c"], path, host, local,
+                                 root / f"{core}.{family}.{mode}.dns.log") as process:
+                        if mode == "policy-control":
+                            # 相同目的先以无策略模板证明 TCP/UDP 可达，之后才接受阻断证据。
+                            for name in blocked:
+                                assert request(host, local, destination.server_address[1], name), (
+                                    f"Block TCP 对照不可达: {name}")
+                            helpers["udp"](host, local, datagram.getsockname()[1], blocked[0])
+                            assert datagram.recv(4096) == b"udp-leak", "Block UDP 对照不可达"
+                            continue
+                        for name in names:
+                            before, auth, connects = len(dns.requests), upstream.auth, upstream.connects
+                            accepted = destination.accepted
+                            assert request(host, local, destination.server_address[1], name), name
+                            assert destination.accepted == accepted + 1, "Direct 没有到达直连目的"
+                            assert upstream.auth == auth and upstream.connects == connects, (
+                                "Direct 被 SOCKS5 规则覆盖")
+                            assert name in dns.requests[before:], "Direct 没有保留指定 DNS"
+                        for name in (mapped, fallback[1]):
+                            before, auth, connects = len(dns.requests), upstream.auth, upstream.connects
+                            accepted = mapped_destination.accepted
+                            assert request(host, local, destination.server_address[1], name), name
+                            assert mapped_destination.accepted == accepted + 1, "Direct 没有保留 hosts"
+                            assert len(dns.requests) == before and upstream.auth == auth and (
+                                upstream.connects == connects)
+                        auth = upstream.auth
+                        helpers["udp"](host, local, datagram.getsockname()[1], names[1])
+                        assert datagram.recv(4096) == b"udp-leak", (
+                            "Direct UDP 被重叠 Block/SOCKS5 阻断")
+                        assert upstream.auth == auth, "Direct UDP 连接了 SOCKS5 上游"
+                        if mode == "policy-global":
+                            before, auth, connects = len(dns.requests), upstream.auth, upstream.connects
+                            helpers["udp"](host, local, datagram.getsockname()[1], mapped)
+                            assert mapped_datagram.recv(4096) == b"udp-leak", (
+                                "Direct hosts UDP 被全局 SOCKS5 阻断或覆盖地址未生效")
+                            assert before == len(dns.requests) and auth == upstream.auth and (
+                                connects == upstream.connects), "Direct hosts UDP 解析或代理泄漏"
+                        accepted, covered = destination.accepted, mapped_destination.accepted
+                        assert request(host, local, destination.server_address[1], host, mapped)
+                        assert destination.accepted == accepted + 1 and mapped_destination.accepted == covered, (
+                            "Direct sniff-only 覆写 IP 目的")
+                        for name in blocked:
+                            before = (destination.accepted, mapped_destination.accepted,
+                                      len(dns.requests), upstream.auth, upstream.connects)
+                            try:
+                                assert not request(host, local, destination.server_address[1], name), (
+                                    f"Block 没有拒绝 TCP: {name}")
+                            except EOFError:
+                                pass
+                            except socket.timeout:
+                                raise AssertionError(f"Block TCP 未实际拒绝，仅客户端超时: {name}")
+                            assert before == (destination.accepted, mapped_destination.accepted,
+                                              len(dns.requests), upstream.auth, upstream.connects), (
+                                f"Block 在拒绝前解析、代理或直达目的: {name}")
+                            assert process.poll() is None, "Block 导致核心退出"
+                        before = (len(dns.requests), upstream.auth, upstream.connects)
+                        helpers["udp"](host, local, datagram.getsockname()[1], blocked[0])
+                        datagram.settimeout(1.25)
+                        with contextlib.suppress(socket.timeout):
+                            raise AssertionError(f"Block UDP 泄漏: {datagram.recv(4096)!r}")
+                        assert before == (len(dns.requests), upstream.auth, upstream.connects)
+                        assert request(host, local, destination.server_address[1], fallback[0]), (
+                            "Block 影响了未匹配正向请求")
+                    print(f"routing-direct-block-real-{core}-{family}-{mode}: "
+                          "four-matchers/priority/reject/no-leak checks passed", flush=True)
         finally:
             for server in servers:
                 server.shutdown()
@@ -267,6 +402,7 @@ if __name__ == "__main__":
     root = Path(sys.argv[1])
     root.chmod(0o755)
     fixture_assets(root)
+    policy_assets(root)
     for family, host in (("ipv4", "127.0.0.1"), ("ipv6", "::1")):
         for core in ("xray", "sing-box"):
             check(root, core, family, host)

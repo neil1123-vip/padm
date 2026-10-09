@@ -351,6 +351,9 @@ dockerBundleSupportsSpec() {
           (if $spec[0].routing.dns != null or $spec[0].routing.hosts != null then
             $schema[0]["x-padm-routing-dns-hosts"] == true
           else true end) and
+          (if $spec[0].routing.direct != null or $spec[0].routing.block != null then
+            $schema[0]["x-padm-routing-direct-block"] == true
+          else true end) and
           ($features | length) == 1 and ($features[0].protocols | type == "array") and
           all($spec[0].core.protocols[];
             . as $entry |

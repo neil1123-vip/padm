@@ -17,6 +17,7 @@
   "x-padm-routing-socks5": true,
   "x-padm-routing-domains": true,
   "x-padm-routing-dns-hosts": true,
+  "x-padm-routing-direct-block": true,
   "additionalProperties": false,
   "required": ["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"],
   "properties": {
@@ -342,6 +343,22 @@
             "pattern": "^(?=.{1,253}(?![\\s\\S]))(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}(?![\\s\\S])"
           },
           "additionalProperties": {"$ref": "#/properties/routing/properties/socks5/properties/server"}
+        },
+        "direct": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["domains"],
+          "properties": {
+            "domains": {"$ref": "#/properties/routing/properties/socks5/properties/domains"}
+          }
+        },
+        "block": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["domains"],
+          "properties": {
+            "domains": {"$ref": "#/properties/routing/properties/socks5/properties/domains"}
+          }
         }
       }
     },

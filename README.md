@@ -279,6 +279,25 @@ SOCKS5 匹配目标仍交上游解析，DNS/hosts 不改变上游域名或实际
 普通 `--spec` 编辑不能绕过路由冻结。启用、替换与关闭复用原候选确认、备份和失败/信号恢复。
 `routing-status` 额外返回 DNS 服务器、域名规则和 hosts 映射，不显示 SOCKS5 凭据。
 
+菜单 `17` 提供 Direct 直连例外和 Block 域名阻断，私有 JSON 格式均为
+`{"domains":["full:exact.example.net","domain:example.org","keyword:example","geosite:cn"]}`。
+规则接受 1–256 条唯一小写 `full/domain/keyword/geosite`，四类保持 OR；
+文件安全要求与 SOCKS5 输入相同。Direct 明确优先于 Block 和全局/域名 SOCKS5，
+直连仍使用 hosts 与 DNS 分流；Block 对匹配 TCP/UDP 拒绝且不发起本地解析。
+无法识别域名的 IP 流量不等同于按 IP 阻断；本步未开放 IP/CIDR、区域或 BT 策略。
+
+```bash
+padm-docker edit --direct /root/padm-direct.json --preview
+padm-docker edit --direct /root/padm-direct.json --confirm PADM-DOCKER-EDIT
+padm-docker edit --block /root/padm-block.json --confirm PADM-DOCKER-EDIT
+padm-docker edit --direct-off --confirm PADM-DOCKER-EDIT
+padm-docker edit --block-off --confirm PADM-DOCKER-EDIT
+```
+
+v3 `.routing.direct`、`.routing.block` 要求控制包声明 `x-padm-routing-direct-block`。
+各子项独立关闭，最后一项关闭才删除 routing；普通 `--spec` 不能更改路由。
+`routing-status` 追加 Direct/Block 域名规则，不改变现有 SOCKS5 状态字段含义。
+
 完整 v3 `configure` 规格可选 `accounts`，用于追加 1–256 个独立账号，不替换原自用账号。
 每项必须包含 `id`、`name`、`enabled`、`uuid`、`password`、`shadowsocks_password` 和
 `listeners`；`id` 是稳定的小写 UUID，认证 `uuid` 和密码独立，`listeners` 引用现有入口 ID。

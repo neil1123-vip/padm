@@ -132,7 +132,9 @@ dockerConfigureSpecValidate() {
         (.routing | type == "object" and length >= 1 and
           exact((if has("socks5") then ["socks5"] else [] end) +
             (if has("dns") then ["dns"] else [] end) +
-            (if has("hosts") then ["hosts"] else [] end)) and
+            (if has("hosts") then ["hosts"] else [] end) +
+            (if has("direct") then ["direct"] else [] end) +
+            (if has("block") then ["block"] else [] end)) and
           (if has("socks5") then
           (.socks5 | exact(["server", "port", "username", "password"] +
               if has("domains") then ["domains"] else [] end) and
@@ -157,7 +159,13 @@ dockerConfigureSpecValidate() {
             (.hosts | type == "object" and length >= 1 and length <= 256 and
               all(to_entries[]; (.key | hostname and . == ascii_downcase) and
                 (.value | host_address and . != "host.docker.internal")))
-           else true end)) and
+           else true end) and
+          (. as $routing |
+            all(["direct", "block"][]; . as $kind |
+              ($routing | has($kind) | not) or
+              ($routing[$kind] | exact(["domains"]) and
+                (.domains | type == "array" and length >= 1 and length <= 256 and
+                  length == (unique | length) and all(.[]; routing_selector)))))) and
         all(.host_integrations[]; .type != "tun" and .type != "tproxy")
        else true end) and
       (if has("site") then
@@ -1365,6 +1373,11 @@ dockerGenerateXrayConfig() {
       ($r.routing.dns != null or $r.routing.hosts != null) as $resolve |
       (($r.routing.dns.domains // []) | map(
         if startswith("keyword:") then ltrimstr("keyword:") else . end)) as $dns_domains |
+      (($r.routing.direct.domains // []) | map(
+        if startswith("keyword:") then ltrimstr("keyword:") else . end)) as $direct_domains |
+      (($r.routing.block.domains // []) | map(
+        if startswith("keyword:") then ltrimstr("keyword:") else . end)) as $block_domains |
+      ($r.routing.direct != null or $r.routing.block != null) as $actions |
       ({protocol: "freedom", tag: "direct"} +
         if $resolve then {settings: {domainStrategy: "ForceIP"}} else {} end) as $direct |
       {
@@ -1485,9 +1498,15 @@ dockerGenerateXrayConfig() {
             domains: $dns_domains, skipFallback: true, finalQuery: true
           } else empty end), "localhost"])}
       } else {} end) +
-      (if $r.routing.socks5 != null or $resolve then {
+      (if $r.routing.socks5 != null or $resolve or $actions then {
         routing: {rules: ((if $resolve then [
           {type: "field", inboundTag: ["padm-dns"], outboundTag: "direct"}
+        ] else [] end) +
+        (if ($direct_domains | length) > 0 then [
+          {type: "field", domain: $direct_domains, outboundTag: "direct"}
+        ] else [] end) +
+        (if ($block_domains | length) > 0 then [
+          {type: "field", domain: $block_domains, outboundTag: "blocked"}
         ] else [] end) + (if $selective then [
           {type: "field", domain: $domains, network: "udp", outboundTag: "blocked"},
           {type: "field", domain: $domains, network: "tcp", outboundTag: "padm-socks5"}
@@ -1495,7 +1514,7 @@ dockerGenerateXrayConfig() {
           {type: "field", network: "udp", outboundTag: "blocked"}
         ] else [] end))}
       } else {} end) |
-      if $selective then
+      if $selective or $actions then
         .inbounds |= map(.sniffing = {enabled: true, destOverride: ["http", "tls", "quic"], routeOnly: true})
       else . end |
       if $r.accounts != null then
@@ -1524,14 +1543,23 @@ dockerGenerateSingBoxConfig() {
           domain_keyword: [$rules[] | select(startswith("keyword:")) | ltrimstr("keyword:")],
           rule_set: [$rules[] | select(startswith("geosite:")) | "padm-geosite-" + ltrimstr("geosite:")]
         } | to_entries | map(select(.value | length > 0) | {(.key): .value});
+      def exclude_direct($match; $direct):
+        if ($direct | length) > 0 then
+          {type: "logical", mode: "and", rules: [$match,
+            {type: "logical", mode: "or", rules: $direct, invert: true}]}
+        else $match end;
       $request[0] as $r |
       (($r.routing.socks5 // {}) | has("domains")) as $selective |
       ($r.routing.socks5.domains // []) as $domains |
       (domain_matches($domains)) as $matches |
       (domain_matches($r.routing.dns.domains // [])) as $dns_matches |
+      (domain_matches($r.routing.direct.domains // [])) as $direct_matches |
+      (domain_matches($r.routing.block.domains // [])) as $block_matches |
+      ($r.routing.direct != null or $r.routing.block != null) as $actions |
       (($r.routing.hosts // {}) | keys) as $host_domains |
       ($r.routing.dns != null or $r.routing.hosts != null) as $resolve |
-      (($domains + ($r.routing.dns.domains // [])) |
+      (($domains + ($r.routing.dns.domains // []) +
+        ($r.routing.direct.domains // []) + ($r.routing.block.domains // [])) |
         map(select(startswith("geosite:")) | ltrimstr("geosite:")) | unique) as $sets |
       {
         log: {disabled: false, level: "warn", timestamp: true},
@@ -1678,19 +1706,27 @@ dockerGenerateSingBoxConfig() {
         ],
         route: ({final: (if $r.routing.socks5 != null and ($selective | not) then "padm-socks5" else "direct" end),
           auto_detect_interface: true} +
-          (if $r.routing.socks5 != null or $resolve then
-            # 出站先决策；直连解析保留各类规则的 OR，固定 hosts 解析后立即路由避免被 DNS 覆盖。
-            {rules: ((if $selective then [{action: "sniff", timeout: "1s"}] +
-              [$matches[] | . + {network: "udp", action: "reject"}] +
-              [$matches[] | . + {network: "tcp", action: "route", outbound: "padm-socks5"}]
-             elif $r.routing.socks5 != null then [{network: "udp", action: "reject"}] +
-               if $resolve then [{network: "tcp", action: "route", outbound: "padm-socks5"}] else [] end
+          (if $r.routing.socks5 != null or $resolve or $actions then
+            # 先排除直连例外再阻断或代理；例外在 hosts/DNS 解析后选路，避免跳过解析。
+            {rules: ((if $selective or $actions then [{action: "sniff", timeout: "1s"}]
+                else [] end) +
+              [$block_matches[] | exclude_direct(.; $direct_matches) + {action: "reject"}] +
+              (if $selective then
+              [$matches[] | exclude_direct(. + {network: "udp"}; $direct_matches) + {action: "reject"}] +
+              [$matches[] | exclude_direct(. + {network: "tcp"}; $direct_matches) +
+                {action: "route", outbound: "padm-socks5"}]
+             elif $r.routing.socks5 != null then
+               [exclude_direct({network: "udp"}; $direct_matches) + {action: "reject"}] +
+               if $resolve or ($direct_matches | length) > 0 then
+                 [exclude_direct({network: "tcp"}; $direct_matches) +
+                   {action: "route", outbound: "padm-socks5"}] else [] end
              else [] end) +
               (if ($host_domains | length) > 0 then [
                 {domain: $host_domains, action: "resolve", server: "padm-hosts"},
                 {domain: $host_domains, action: "route", outbound: "direct"}
               ] else [] end) +
-              [$dns_matches[] | . + {action: "resolve", server: "padm-dns"}])}
+              [$dns_matches[] | . + {action: "resolve", server: "padm-dns"}] +
+              [$direct_matches[] | . + {action: "route", outbound: "direct"}])}
            else {} end) +
           (if $resolve then {default_domain_resolver: "padm-local"} else {} end) +
           if ($sets | length) > 0 then

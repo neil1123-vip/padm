@@ -431,7 +431,7 @@
       "profiles": [],
       "network_mode": "host-cli",
       "host_capabilities": [],
-      "reason": "5B.1–5B.3a 提供两核心认证 SOCKS5 TCP 全局/域名出站、DNS 分流与精确 hosts 的菜单、私有输入和可恢复事务；代理失败不回退直连，匹配 DNS 失败不回退本地解析，不改变宿主网络。WARP、IPv6、BT、Direct/Block 和完整分流仍待迁移。"
+      "reason": "5B.1–5B.3b 提供两核心认证 SOCKS5 TCP 全局/域名出站、DNS 分流、精确 hosts 及域名 Direct/Block 的菜单、私有输入和可恢复事务；直连例外优先阻断和代理，阻断不解析，代理或匹配 DNS 失败不回退，不改变宿主网络。WARP、IPv6、BT、IP/区域阻断和完整分流仍待迁移。"
     },
     "internal-201-socks-relay": {
       "status": "deferred",
@@ -485,7 +485,7 @@
       "profiles": [],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "5B.3a 已交付两核心 DNS 分流和精确 hosts 的独立配置及编辑事务；Direct/Block、完整规则编辑和冲突检测尚未迁移，206 不作为公开节点协议。"
+      "reason": "5B.3a–5B.3b 已交付两核心 DNS 分流、精确 hosts 和域名 Direct/Block 的独立配置及编辑事务；Direct 优先 Block/SOCKS，Block 在解析前拒绝 TCP/UDP。IP/区域规则、完整规则编辑和冲突检测尚未迁移，206 不作为公开节点协议。"
     },
     "internal-207-access-control": {
       "status": "deferred",

@@ -793,6 +793,7 @@ dockerEditPrivateInputCopy() (
                if has("domains") then ["domains"] else [] end | sort)
            elif $kind == "dns" then keys == ["domains", "port", "server"]
            elif $kind == "hosts" then length >= 1 and length <= 256
+           elif $kind == "direct" or $kind == "block" then keys == ["domains"]
            else false end))
         ' "${target}" >/dev/null 2>&1
 )
@@ -897,7 +898,9 @@ dockerProtocolCommand() (
             elif .routing.socks5 | has("domains") then "matched-blocked" else "blocked" end)} +
           (if .routing.dns != null then {dns:{server:.routing.dns.server,
             port:.routing.dns.port,domain_rules:.routing.dns.domains}} else {} end) +
-          (if .routing.hosts != null then {hosts:.routing.hosts} else {} end)' "${normalized}"
+          (if .routing.hosts != null then {hosts:.routing.hosts} else {} end) +
+          (if .routing.direct != null then {direct:{domain_rules:.routing.direct.domains}} else {} end) +
+          (if .routing.block != null then {block:{domain_rules:.routing.block.domains}} else {} end)' "${normalized}"
         return $?
     fi
     if [[ "${action}" == list ]]; then
@@ -1312,7 +1315,7 @@ dockerEditCommand() {
     local streamDomains= streamAddress= streamPort=8443
     local siteMode= siteSource= siteUrl=
     local alpnListener= alpnOrder=
-    local http01= socks5= socks5File= socks5Domains= dnsHosts= dnsHostsFile= dnsHostsAction=
+    local http01= socks5= socks5File= socks5Domains= routingKind= routingFile= routingAction=
     local DOCKER_CONFIG_RESTORE_ALPN_LISTENER=
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
@@ -1369,15 +1372,15 @@ dockerEditCommand() {
             socks5=global
             shift
             ;;
-        --dns|--hosts)
-            [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${dnsHosts}" ]] ||
+        --dns|--hosts|--direct|--block)
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${routingKind}" ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
-            dnsHosts=${1#--} dnsHostsFile=$2 dnsHostsAction=enable
+            routingKind=${1#--} routingFile=$2 routingAction=enable
             shift 2
             ;;
-        --dns-off|--hosts-off)
-            [[ -z "${dnsHosts}" ]] || return "${PADM_DOCKER_RC_USAGE}"
-            dnsHosts=${1#--} dnsHosts=${dnsHosts%-off} dnsHostsAction=disable
+        --dns-off|--hosts-off|--direct-off|--block-off)
+            [[ -z "${routingKind}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            routingKind=${1#--} routingKind=${routingKind%-off} routingAction=disable
             shift
             ;;
         --alpn)
@@ -1466,11 +1469,11 @@ dockerEditCommand() {
     }
     [[ -z "${socks5}" || ( -z "${specFile}" && -z "${regenerateReality}" &&
         -z "${realityTarget}" && -z "${realityStream}" && -z "${siteMode}" &&
-        -z "${alpnListener}" && -z "${http01}" && -z "${dnsHosts}" ) ]] || {
+        -z "${alpnListener}" && -z "${http01}" && -z "${routingKind}" ) ]] || {
         dockerError '路由专项编辑不能与规格导入或其它专项动作组合'
         return "${PADM_DOCKER_RC_USAGE}"
     }
-    [[ -z "${dnsHosts}" || ( -z "${specFile}" && -z "${regenerateReality}" &&
+    [[ -z "${routingKind}" || ( -z "${specFile}" && -z "${regenerateReality}" &&
         -z "${realityTarget}" && -z "${realityStream}" && -z "${siteMode}" &&
         -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" ) ]] || {
         dockerError '路由专项编辑不能与规格导入或其它专项动作组合'
@@ -1487,7 +1490,7 @@ dockerEditCommand() {
     dockerTrafficSafePath "${root}" "${root}/config/spec.json" || return "${PADM_DOCKER_RC_STATE}"
     [[ ( -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" &&
         -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
-        -z "${dnsHosts}" ) ||
+        -z "${routingKind}" ) ||
         -f "${root}/config/spec.json" ]] ||
         return "${PADM_DOCKER_RC_STATE}"
     if [[ ! -e "${root}/config/spec.json" && ! -L "${root}/config/spec.json" && -z "${specFile}" ]]; then
@@ -1541,7 +1544,7 @@ dockerEditCommand() {
     if [[ "${mode}" == interactive && -z "${specFile}" && "${imported}" -eq 0 &&
         -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" &&
         -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
-        -z "${dnsHosts}" ]]; then
+        -z "${routingKind}" ]]; then
         dockerEditFields "${draft}" || status=$?
         if [[ "${status}" -eq 3 ]]; then
             printf '已取消配置编辑。\n'
@@ -1579,16 +1582,16 @@ dockerEditCommand() {
             chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
             return "${PADM_DOCKER_RC_STATE}"
     fi
-    if [[ -n "${dnsHosts}" ]]; then
-        if [[ "${dnsHostsAction}" == enable ]]; then
-            dockerEditPrivateInputCopy "${dnsHostsFile}" "${workspace}/${dnsHosts}.json" "${dnsHosts}" || {
-                dockerError 'DNS/hosts 输入须为 root 所有的 0600 单链接普通 JSON 文件，最多 64 KiB，祖先目录不得可写或含链接'
+    if [[ -n "${routingKind}" ]]; then
+        if [[ "${routingAction}" == enable ]]; then
+            dockerEditPrivateInputCopy "${routingFile}" "${workspace}/${routingKind}.json" "${routingKind}" || {
+                dockerError '路由输入须为 root 所有的 0600 单链接普通 JSON 文件，最多 64 KiB，祖先目录不得可写或含链接'
                 return "${PADM_DOCKER_RC_STATE}"
             }
-            jq --arg kind "${dnsHosts}" --slurpfile input "${workspace}/${dnsHosts}.json" \
+            jq --arg kind "${routingKind}" --slurpfile input "${workspace}/${routingKind}.json" \
                 '.routing[$kind] = $input[0]' "${draft}" >"${draft}.next" 2>/dev/null
         else
-            jq --arg kind "${dnsHosts}" 'del(.routing[$kind]) |
+            jq --arg kind "${routingKind}" 'del(.routing[$kind]) |
               if .routing == {} then del(.routing) else . end' "${draft}" >"${draft}.next"
         fi &&
             chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
@@ -1713,7 +1716,7 @@ dockerEditCommand() {
     [[ "${imported}" -eq 0 ]] || printf '完整原始规格已匹配，确认后接入受管输入。\n'
     jq -en --arg regenerate "${regenerateReality}" --arg target "${realityTarget}" --arg stream "${realityStream}" \
         --arg site "${siteMode}" --arg alpn "${alpnListener}" --arg http01 "${http01}" \
-        --arg socks5 "${socks5}" --arg dns_hosts "${dnsHosts}" \
+        --arg socks5 "${socks5}" --arg routing_kind "${routingKind}" \
         --slurpfile before "${normalized}" --slurpfile after "${draft}" '
       def fixed: del(.server, .public_port, .address_families, .name,
         .reality.target_host, .reality.target_port, .reality.server_name, .websocket.path, .httpupgrade.path,
@@ -1747,9 +1750,9 @@ dockerEditCommand() {
       (if $socks5 != "" then
         ($old | del(.routing.socks5) | if .routing == {} then del(.routing) else . end) ==
           ($new | del(.routing.socks5) | if .routing == {} then del(.routing) else . end)
-       elif $dns_hosts != "" then
-        ($old | del(.routing[$dns_hosts]) | if .routing == {} then del(.routing) else . end) ==
-          ($new | del(.routing[$dns_hosts]) | if .routing == {} then del(.routing) else . end)
+       elif $routing_kind != "" then
+        ($old | del(.routing[$routing_kind]) | if .routing == {} then del(.routing) else . end) ==
+          ($new | del(.routing[$routing_kind]) | if .routing == {} then del(.routing) else . end)
        elif $http01 != "" then
         ($old | del(.tls.http01)) == ($new | del(.tls.http01))
        elif $site != "" then
