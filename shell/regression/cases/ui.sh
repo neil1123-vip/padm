@@ -1836,6 +1836,53 @@ EOF
                 assertMenuAction 'errorCard:选择错误'
                 ! assertMenuAction routingAccessMenu
                 [[ "$(wc -l <"${routingMenuRenderLog}")" == "2" ]]
+
+                (
+                    local connectivityAvailable=false ipv6Choice domainList=keep.example
+                    hasIPv6Connectivity() {
+                        recordMenuAction hasIPv6Connectivity
+                        [[ "${connectivityAvailable}" == true ]]
+                    }
+                    showIPv6Routing() { recordMenuAction showIPv6Routing; }
+                    routingConfigApplyTransaction() { recordMenuAction "ipv6-transaction:$4:${5:-}"; }
+                    warnCard() { recordMenuAction "warnCard:$*"; }
+                    for ipv6Choice in 1 4 5; do
+                        resetMenuActions
+                        ipv6Routing <<<"${ipv6Choice}" || return 1
+                        ! assertMenuAction hasIPv6Connectivity || return 1
+                        case "${ipv6Choice}" in
+                        1) assertMenuAction showIPv6Routing || return 1 ;;
+                        4) assertMenuAction 'ipv6-transaction:removeIPv6RoutingConfig:' || return 1 ;;
+                        5) [[ -z "${actions}" ]] || return 1 ;;
+                        esac
+                    done
+                    resetMenuActions
+                    regressionExpectStatus 1 ipv6Routing <<<"2" || return 1
+                    assertMenuAction hasIPv6Connectivity || return 1
+                    ! grep -q '^ipv6-transaction:' <<<"${actions}" || return 1
+                    resetMenuActions
+                    regressionExpectStatus 1 ipv6Routing <<< $'3\ny' || return 1
+                    assertMenuAction hasIPv6Connectivity || return 1
+                    assertMenuAction 'warnCard:会删除所有设置的分流规则 会删除 IPv6 之外的所有出站规则' || return 1
+                    ! grep -q '^ipv6-transaction:' <<<"${actions}" || return 1
+                    resetMenuActions
+                    ipv6Routing <<< $'3\nn' || return 1
+                    ! assertMenuAction hasIPv6Connectivity || return 1
+                    ! grep -q '^ipv6-transaction:' <<<"${actions}" || return 1
+                    connectivityAvailable=true
+                    autoRead() { IFS= read -r "$3"; }
+                    resetMenuActions
+                    ipv6Routing < <(printf '2\nmust-not-write.example') || return 1
+                    ! grep -q '^ipv6-transaction:' <<<"${actions}" || return 1
+                    [[ "${domainList}" == keep.example ]] || return 1
+                    resetMenuActions
+                    ipv6Routing <<< $'2\nexample.com' || return 1
+                    assertMenuAction 'ipv6-transaction:addIPv6RoutingConfig:example.com' || return 1
+                    [[ "${domainList}" == keep.example ]] || return 1
+                    resetMenuActions
+                    ipv6Routing <<< $'3\ny' || return 1
+                    assertMenuAction 'ipv6-transaction:setIPv6GlobalRoutingConfig:' || return 1
+                ) || return 1
             )
         )
 

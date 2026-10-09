@@ -14,13 +14,9 @@ ipv6Routing() {
 
 
 
-    if ! hasIPv6Connectivity; then
-        errorCard "不支持ipv6"
-        return 1
-    fi
-
     local successMessage=
     local ipv6Status=
+    local domainList=
 
     progressCard "1" "IPv6 分流"
 
@@ -50,6 +46,11 @@ ipv6Routing() {
 
     elif [[ "${ipv6Status}" == "2" ]]; then
 
+        if ! hasIPv6Connectivity; then
+            errorCard "不支持ipv6"
+            return 1
+        fi
+
         echoContent title "\n┌─ IPv6 分流规则说明 ────────────────────────────────"
 
         menuLine "请按 README 中的分流说明配置域名或规则"
@@ -58,7 +59,7 @@ ipv6Routing() {
 
 
 
-        autoRead routing_domain_rules "请按照上面示例录入域名:" domainList
+        autoRead routing_domain_rules "请按照上面示例录入域名:" domainList || return 0
 
         if [[ -z "${domainList}" ]]; then
             coreDomainRequiredErrorCard
@@ -75,9 +76,7 @@ ipv6Routing() {
 
 
         warnCard \
-
             "会删除所有设置的分流规则" \
-
             "会删除 IPv6 之外的所有出站规则"
 
         autoConfirm ipv6_global_confirm "确认设置 IPv6 全局出站？" n IPv6OutStatus
@@ -85,6 +84,10 @@ ipv6Routing() {
 
 
         if [[ "${IPv6OutStatus}" == "y" ]]; then
+            if ! hasIPv6Connectivity; then
+                errorCard "不支持ipv6"
+                return 1
+            fi
             routingConfigApplyTransaction "设置 IPv6 全局出站失败" false false setIPv6GlobalRoutingConfig || return 1
             successMessage="IPv6全局出站设置完毕"
 
