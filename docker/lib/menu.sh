@@ -813,6 +813,42 @@ dockerMenuWarp() {
     done
 }
 
+dockerMenuMaintenance() {
+    local choice answer action
+    while :; do
+        DOCKER_MENU_SIGNAL=0
+        printf '\nDocker 服务维护\n'
+        printf '%s\n' '1. 校验部署配置' '2. 更新镜像与控制脚本' '3. 回滚最近更新' '4. 卸载服务与控制命令（保留数据）' '0. 返回'
+        printf '请选择: '
+        if ! IFS= read -r choice; then
+            [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
+            return 0
+        fi
+        case "${choice}" in
+        0) return 0 ;;
+        1) dockerMenuRun validate || true; continue ;;
+        2)
+            dockerSetupRead answer '确认更新镜像与控制脚本？[y/N]: ' n || continue
+            case "${answer}" in y|Y|yes|YES) ;; *) continue ;; esac
+            action=update
+            ;;
+        3) action=rollback ;;
+        4)
+            dockerSetupRead answer '确认停止服务并卸载控制命令（保留状态、配置和数据）？[y/N]: ' n || continue
+            case "${answer}" in y|Y|yes|YES) ;; *) continue ;; esac
+            action=uninstall
+            ;;
+        *) printf '无效选项，请重新选择。\n'; continue ;;
+        esac
+        if dockerMenuRun "${action}"; then
+            [[ "${action}" == uninstall ]] ||
+                printf '控制版本已切换，请重新打开 padm-docker 菜单。\n'
+            # 非零返回仅通知主菜单结束旧会话，不把动作失败当作退出。
+            return 1
+        fi
+    done
+}
+
 dockerMenu() {
     local choice
     if [[ "$#" -ne 0 || ! -t 0 || ! -t 1 ]]; then
@@ -844,6 +880,7 @@ dockerMenu() {
             '15. 控制连接' \
             '16. 站点管理' \
             '17. 路由与出站' \
+            '18. 服务维护' \
             '0. 退出'
         printf '请选择: '
         if ! IFS= read -r choice; then
@@ -871,6 +908,7 @@ dockerMenu() {
         15) dockerMenuControl ;;
         16) dockerMenuSites ;;
         17) dockerMenuRouting ;;
+        18) dockerMenuMaintenance || break ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

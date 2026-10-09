@@ -284,6 +284,56 @@ runGeoDriver() {
     targetReply 'Docker 管理菜单' $'0\n'
 }
 
+runMaintenanceDriver() {
+    local scenario=$1 choice answer=n
+    local -A targetPrompts=()
+    targetReply 'Docker 管理菜单' $'18\n'
+    case "${scenario}" in
+    flow|failed)
+        [[ "${scenario}" != failed ]] || answer=y
+        targetReply 'Docker 服务维护' $'1\n'
+        targetReply 'Docker 服务维护' $'99\n'
+        for choice in 2 3 4; do
+            targetReply 'Docker 服务维护' "${choice}"$'\n'
+            case "${choice}" in
+            2) targetReply '确认更新镜像与控制脚本？[y/N]' "${answer}"$'\n' ;;
+            4) targetReply '确认停止服务并卸载控制命令（保留状态、配置和数据）？[y/N]' "${answer}"$'\n' ;;
+            esac
+        done
+        ;;
+    cancel)
+        targetReply 'Docker 服务维护' $'2\n'
+        targetReply '确认更新镜像与控制脚本？[y/N]' $'0\n'
+        targetReply 'Docker 服务维护' $'2\n'
+        targetReply '确认更新镜像与控制脚本？[y/N]' $'\n'
+        targetReply 'Docker 服务维护' $'4\n'
+        targetReply '确认停止服务并卸载控制命令（保留状态、配置和数据）？[y/N]' $'n\n'
+        ;;
+    update|update-eof)
+        targetReply 'Docker 服务维护' $'2\n'
+        if [[ "${scenario}" == update ]]; then
+            targetReply '确认更新镜像与控制脚本？[y/N]' $'y\n'
+            return 0
+        fi
+        targetReply '确认更新镜像与控制脚本？[y/N]' $'\004'
+        ;;
+    rollback)
+        targetReply 'Docker 服务维护' $'3\n'
+        return 0
+        ;;
+    uninstall|uninstall-eof)
+        targetReply 'Docker 服务维护' $'4\n'
+        if [[ "${scenario}" == uninstall ]]; then
+            targetReply '确认停止服务并卸载控制命令（保留状态、配置和数据）？[y/N]' $'y\n'
+            return 0
+        fi
+        targetReply '确认停止服务并卸载控制命令（保留状态、配置和数据）？[y/N]' $'\004'
+        ;;
+    esac
+    targetReply 'Docker 服务维护' $'0\n'
+    targetReply 'Docker 管理菜单' $'0\n'
+}
+
 runControlDriver() {
     local scenario=$1
     local -A targetPrompts=()
@@ -737,6 +787,8 @@ runPty() {
             runTargetsDriver "${input}"
         elif [[ "${driver}" == geo ]]; then
             runGeoDriver "${input}"
+        elif [[ "${driver}" == maintenance ]]; then
+            runMaintenanceDriver "${input}"
         elif [[ "${driver}" == control ]]; then
             runControlDriver "${input}"
         elif [[ "${driver}" == sites ]]; then
@@ -981,6 +1033,11 @@ protocol)
 edit) recordAction "$@"; exit "${SITE_EDIT_STATUS:-0}" ;;
 account) recordAction "$@" ;;
 assess) recordAction "$@" ;;
+validate|update|rollback|uninstall)
+    recordAction "$@"
+    [[ "$1" != validate ]] || exit "${MAINTENANCE_VALIDATE_STATUS:-0}"
+    exit "${MAINTENANCE_STATUS:-0}"
+    ;;
 control)
     recordAction "$@"
     case "${2:-}" in
@@ -1038,6 +1095,40 @@ printf '{"tls":{"domain":"ws.example.com"}}\n' >"${TLS_WIZARD_ROOT}/config/spec.
 : >"${TLS_WIZARD_ACTIONS}"
 runPty core-assessment menu $'13\n0\n' "${TLS_WIZARD_CLI}" menu
 [[ "$(<"${TLS_WIZARD_ACTIONS}")" == assess ]] || fail 'core assessment menu dispatched incorrect arguments'
+
+for maintenanceCase in flow cancel update-eof uninstall-eof failed update rollback uninstall; do
+    : >"${TLS_WIZARD_ACTIONS}"
+    export MAINTENANCE_STATUS=0 MAINTENANCE_VALIDATE_STATUS=0
+    [[ "${maintenanceCase}" != flow && "${maintenanceCase}" != failed ]] || MAINTENANCE_STATUS=17
+    [[ "${maintenanceCase}" != failed ]] || MAINTENANCE_VALIDATE_STATUS=17
+    runPty "maintenance-${maintenanceCase}" maintenance "${maintenanceCase}" "${TLS_WIZARD_CLI}" menu
+    expectedMaintenance=
+    case "${maintenanceCase}" in
+    flow)
+        expectedMaintenance=$'validate\nrollback'
+        grep -Fq '无效选项' "${CONTROL_LOG}" || fail '维护菜单未保留无效输入后的操作'
+        ;;
+    failed)
+        expectedMaintenance=$'validate\nupdate\nrollback\nuninstall'
+        [[ "$(grep -Fc '操作失败，退出码: 17' "${CONTROL_LOG}")" -eq 4 ]] ||
+            fail '维护失败未保留退出码或未继续执行菜单'
+        ;;
+    update|rollback|uninstall)
+        expectedMaintenance=${maintenanceCase}
+        [[ "$(grep -Fc 'Docker 管理菜单' "${CONTROL_LOG}")" -eq 1 ]] ||
+            fail "维护 ${maintenanceCase} 成功后仍使用旧菜单"
+        [[ "$(grep -Fc 'Docker 服务维护' "${CONTROL_LOG}")" -eq 1 ]] ||
+            fail "维护 ${maintenanceCase} 成功后仍留在子菜单"
+        ;;
+    esac
+    [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedMaintenance}" ]] ||
+        fail "维护 ${maintenanceCase} 参数分发错误或取消后仍执行操作"
+    for maintenanceLabel in '18. 服务维护' 'Docker 服务维护' '1. 校验部署配置' \
+        '2. 更新镜像与控制脚本' '3. 回滚最近更新' '4. 卸载服务与控制命令（保留数据）'; do
+        grep -Fq "${maintenanceLabel}" "${CONTROL_LOG}" || fail "维护菜单缺少: ${maintenanceLabel}"
+    done
+done
+unset MAINTENANCE_STATUS MAINTENANCE_VALIDATE_STATUS
 
 export SITE_MENU_RECORD_STATUS=1
 for siteCase in flow cancel static-eof redirect-eof alpn-diagnose-eof alpn-recommended-eof \
