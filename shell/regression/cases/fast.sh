@@ -6660,7 +6660,8 @@ runDockerGrpcTlsRegression() {
 }
 
 runDockerTraditionalTlsRegression() {
-    bash "${PROJECT_ROOT}/docker/tests/traditional-tls.sh"
+    PADM_DOCKER_TEST_FIXTURE_ONLY="${PADM_DOCKER_CONTRACTS_SHARED_CHECKS:-0}" \
+        bash "${PROJECT_ROOT}/docker/tests/traditional-tls.sh"
 }
 
 runDockerPermissionsRegression() {

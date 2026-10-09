@@ -79,6 +79,16 @@ jobs:
           fi
           printf 'Native regression selector: %s\n' "${selector}" >>"${GITHUB_STEP_SUMMARY}"
           bash shell/subscription_groups_regression.sh "${selector}"
+
+  tls:
+    name: TLS transactions and renewal
+    needs: static
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.static.outputs.source_sha }}
       - name: Check Docker TLS transactions and renewal
         shell: bash
         run: sudo env TMPDIR=/tmp bash shell/subscription_groups_regression.sh docker-tls-focused
@@ -90,7 +100,7 @@ jobs:
       source_ref: ${{ needs.static.outputs.source_sha }}
 
   images:
-    needs: [static, native, contracts]
+    needs: [static, native, tls, contracts]
     uses: ./.github/workflows/build-images.yml
     concurrency:
       group: docker-ci-head-${{ github.event.pull_request.head.sha || github.sha }}

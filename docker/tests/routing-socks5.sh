@@ -1276,7 +1276,8 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-workflow ]]; then
     done
 )
 assertClean
-if [[ -z "${PADM_DOCKER_ROUTING_SCOPE:-}" || "${PADM_DOCKER_ROUTING_SCOPE:-}" == warp ]]; then
+if [[ -z "${PADM_DOCKER_ROUTING_SCOPE:-}" || "${PADM_DOCKER_ROUTING_SCOPE:-}" == warp ||
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-workflow ]]; then
     before=$(snapshot)
     runEdit 0 --warp "${WARP_INPUT}" --preview
     runEdit 0 --warp-off --preview
@@ -1859,6 +1860,12 @@ for core in xray sing-box; do
 done
 jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload == 17 and .accounts[$uuid].download == 19' \
     "${root}/data/traffic/state.json" >/dev/null || fail '路由编辑清空流量累计'
+fi
+
+# CI 分片保留前半全部合同，后半由独立域名事务夹具覆盖。
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-workflow ]]; then
+    printf 'docker-routing-core-workflow-regression-ok\n'
+    exit 0
 fi
 
 # 路由子项共用私有文件与候选事务，每次编辑只替换自己的字段。

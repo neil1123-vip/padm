@@ -827,17 +827,24 @@ for scenario in success push-race push-race-dispatch-failed; do
 done
 
 grep -Fq 'workflow_call:' "${BUILD_WORKFLOW}" || fail 'build workflow is not reusable'
-grep -Fq 'sudo env TMPDIR=/tmp PADM_REGRESSION_PARALLEL_JOBS=2 bash shell/subscription_groups_regression.sh "${SELECTOR}"' "${CONTRACT_WORKFLOW}" ||
+grep -Fq 'sudo env TMPDIR=/tmp PADM_REGRESSION_PARALLEL_JOBS=2 PADM_DOCKER_CONTRACTS_SHARED_CHECKS="${PADM_DOCKER_CONTRACTS_SHARED_CHECKS}" bash shell/subscription_groups_regression.sh "${SELECTOR}"' "${CONTRACT_WORKFLOW}" ||
     fail 'contract shards do not use root-safe temp directories and bounded workers'
 for siteContract in \
     'docker build --tag padm-regression:contracts shell/regression/container' \
     'git ls-files -z | tar --null -T - -cf' \
     'docker run --rm --network none --init' \
-    '--env PADM_REGRESSION_PARALLEL_JOBS=2' \
+    '--env PADM_REGRESSION_PARALLEL_JOBS=4' \
+    '--env PADM_DOCKER_CONTRACTS_SHARED_CHECKS' \
     'padm-regression:contracts "${SELECTOR}"'; do
     grep -Fq -- "${siteContract}" "${CONTRACT_WORKFLOW}" ||
         fail '站点合同未复用隔离工具镜像、当前源码快照或有界并发'
 done
+grep -Fq 'listRegressionDockerContractsFastChildSelectors 4' "${FAST_SUITE}" ||
+    fail 'docker-contracts-fast does not use four workers'
+grep -Fq "      PADM_DOCKER_CONTRACTS_SHARED_CHECKS: '1'" "${CONTRACT_WORKFLOW}" ||
+    fail 'CI 合同矩阵没有共享已独立覆盖的传统 TLS 祖先合同'
+grep -Fq 'max-parallel: 10' "${CONTRACT_WORKFLOW}" ||
+    fail 'CI 合同矩阵没有同时启动全部分片'
 if grep -Fq 'subscription_groups_regression.sh docker-contracts' "${BUILD_WORKFLOW}"; then
     fail 'image workflow repeats the contract suite'
 fi
@@ -922,14 +929,14 @@ grep -Fq 'source_ref: ${{ needs.prepare.outputs.release_sha }}' "${RELEASE_WORKF
     fail 'Release images do not use the resolved build commit'
 grep -Eq '^  static:' "${RELEASE_WORKFLOW}" || fail 'Release static gate is not a separate job'
 grep -Eq '^  native:' "${RELEASE_WORKFLOW}" || fail 'Release native gate is not a separate job'
-grep -Fq 'needs: [static, native]' "${RELEASE_WORKFLOW}" ||
-    fail 'Release resolution can bypass static or native gates'
+grep -Fq 'needs: [static, native, tls]' "${RELEASE_WORKFLOW}" ||
+    fail 'Release resolution can bypass static, native or TLS gates'
 # 拆分 job 后固定到静态门槛检出的提交，避免并发推送绕过原生回归。
 grep -Fq 'source_sha: ${{ steps.checked.outputs.source_sha }}' "${RELEASE_WORKFLOW}" ||
     fail 'Release static gate does not expose the checked source commit'
 grep -Fq "git rev-parse HEAD | sed 's/^/source_sha=/'" "${RELEASE_WORKFLOW}" ||
     fail 'Release static gate does not record its checkout commit'
-for job in native prepare; do
+for job in native tls prepare; do
     jobDefinition=$(awk -v job="${job}" '
         $0 == "  " job ":" {inside = 1; next}
         inside && /^  [^ ]/ {exit}
@@ -939,6 +946,17 @@ for job in native prepare; do
         fail "Release ${job} does not use the checked source commit"
 done
 for workflow in "${RELEASE_WORKFLOW}" "${PR_WORKFLOW}"; do
+    tlsDefinition=$(awk '
+        /^  tls:$/ {inside = 1; next}
+        inside && /^  [^ ]/ {exit}
+        inside {print}
+    ' "${workflow}")
+    grep -Fxq '    needs: static' <<<"${tlsDefinition}" ||
+        fail "TLS 回归不能与原生回归同时启动: ${workflow}"
+    grep -Fq 'ref: ${{ needs.static.outputs.source_sha }}' <<<"${tlsDefinition}" ||
+        fail "TLS 回归没有固定到已检查源码: ${workflow}"
+    grep -Fq 'shell/subscription_groups_regression.sh docker-tls-focused' <<<"${tlsDefinition}" ||
+        fail "TLS 门槛没有执行事务与续期回归: ${workflow}"
     contractDefinition=$(awk '
         /^  contracts:$/ {inside = 1; next}
         inside && /^  [^ ]/ {exit}
@@ -980,8 +998,8 @@ grep -Fq 'native_parallel_jobs:' "${PR_WORKFLOW}" || fail 'PR workflow lacks rep
 grep -Fq 'PADM_REGRESSION_CI_PARALLEL_JOBS' "${PR_WORKFLOW}" ||
     fail 'PR workflow does not pass native concurrency to the selector'
 prImageNeeds=$(awk '/^  images:$/ {job = 1; next} job && /^    needs:/ {print; exit}' "${PR_WORKFLOW}")
-[[ "${prImageNeeds}" == '    needs: [static, native, contracts]' ]] ||
-    fail 'PR images can run without native or contract validation'
+[[ "${prImageNeeds}" == '    needs: [static, native, tls, contracts]' ]] ||
+    fail 'PR images can run without native, TLS or contract validation'
 nativeLine=$(grep -n '^      - name: Check native regressions$' "${RELEASE_WORKFLOW}" | cut -d: -f1)
 preflightLine=$(grep -n '^      - name: Preflight pinned APK dependencies$' "${RELEASE_WORKFLOW}" | cut -d: -f1)
 bumpLine=$(grep -n '^      - name: Bump script and lock version$' "${RELEASE_WORKFLOW}" | cut -d: -f1)

@@ -258,11 +258,12 @@ runRegressionDockerContractsAggregateContract() (
     local expectedLog="${TMP_DIR}/docker-contracts-aggregate.expected.log"
     local status=0 selector
     local -a expectedSelectors=(
-        docker-traditional-tls docker-phase3 docker-setup-encrypted docker-setup-transports docker-reality-targets
+        docker-reality docker-traditional-tls docker-routing-core-workflow docker-routing-domains-workflow
+        docker-phase3 docker-setup-encrypted docker-setup-transports docker-reality-targets
         docker-setup-tls docker-reality-parameters docker-setup-core docker-sites docker-phase6
         docker-menu docker-reality-target-library docker-control-state docker-phase4 docker-control-client
         docker-phase1 docker-phase5 docker-control-cli docker-control-sync docker-release docker-geo-data docker-traffic
-        docker-routing-socks5 docker-http-relay docker-entry-port-alias
+        docker-http-relay docker-entry-port-alias
         docker-accounts docker-permissions docker-wireguard-runtime docker-control-api docker-subscriptions
         docker-accounts-cli docker-business docker-phase2
     )
@@ -322,7 +323,7 @@ runRegressionDockerContractsAggregateContract() (
     printf '%s\n' core encrypted transports tls >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
 
-    # 独立 selector 和 Reality 分片仍执行祖先合同，完整聚合才允许只初始化夹具。
+    # 独立 selector 仍执行祖先合同，只有完整集合或 CI 矩阵才共享它们。
     runFrameworkParallelRegressionSelectors() {
         [[ "${PADM_DOCKER_CONTRACTS_SHARED_CHECKS:-0}" == 0 ]]
     }
@@ -334,12 +335,27 @@ runRegressionDockerContractsAggregateContract() (
     unset PADM_DOCKER_CONTRACTS_SHARED_CHECKS
     runDockerRealityParametersRegression
     runDockerRealityTargetsRegression
+    runDockerTraditionalTlsRegression
+    runDockerRealityRegression
     PADM_DOCKER_CONTRACTS_SHARED_CHECKS=1 runDockerRealityParametersRegression
     PADM_DOCKER_CONTRACTS_SHARED_CHECKS=1 runDockerRealityTargetsRegression
-    printf '%s\n' 0:reality-parameters.sh 0:reality-targets.sh \
-        1:reality-parameters.sh 1:reality-targets.sh >"${expectedLog}"
+    PADM_DOCKER_CONTRACTS_SHARED_CHECKS=1 runDockerTraditionalTlsRegression
+    PADM_DOCKER_CONTRACTS_SHARED_CHECKS=1 runDockerRealityRegression
+    printf '%s\n' 0:reality-parameters.sh 0:reality-targets.sh 0:traditional-tls.sh 0:reality.sh \
+        1:reality-parameters.sh 1:reality-targets.sh 1:traditional-tls.sh 0:reality.sh >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
     [[ -z "${PADM_DOCKER_CONTRACTS_SHARED_CHECKS:-}" ]]
+
+    # 注册集合相同还不够，两个路由分片必须把正确 scope 传给原脚本。
+    bash() { printf '%s:%s\n' "${PADM_DOCKER_ROUTING_SCOPE:-full}" "${1##*/}" >>"${callLog}"; }
+    : >"${callLog}"
+    unset PADM_DOCKER_ROUTING_SCOPE
+    runDockerRoutingSocks5Regression
+    runDockerRoutingCoreWorkflowRegression
+    runDockerRoutingDomainsWorkflowRegression
+    printf '%s\n' full:routing-socks5.sh core-workflow:routing-socks5.sh \
+        domains-workflow:routing-socks5.sh >"${expectedLog}"
+    cmp -s "${expectedLog}" "${callLog}"
 )
 
 runRegressionTargetedBatchHelpers() (
