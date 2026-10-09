@@ -3276,6 +3276,33 @@ refreshXHTTPSubscriptions() {
     refreshManagedProtocolSubscriptions XHTTP
 }
 
+configTransactionRollbackOnExit() {
+    [[ "${PADM_CONFIG_TRANSACTION_ROLLBACK[active]:-false}" == true ]] || return 0
+    PADM_CONFIG_TRANSACTION_ROLLBACK[active]=false
+
+    local status=0
+    if restoreManagedFileFromBackup "${PADM_CONFIG_TRANSACTION_ROLLBACK[backup]}" \
+        "${PADM_CONFIG_TRANSACTION_ROLLBACK[config]}" 644; then
+        padmRemoveCleanupPath "${PADM_CONFIG_TRANSACTION_ROLLBACK[staged]}"
+        if [[ "${PADM_CONFIG_TRANSACTION_ROLLBACK[reloadAttempted]}" == true ]] &&
+            ! "${PADM_CONFIG_TRANSACTION_ROLLBACK[reload]}"; then
+            status=1
+        fi
+        if [[ "${status}" == 0 ]]; then
+            padmRemoveCleanupPath "${PADM_CONFIG_TRANSACTION_ROLLBACK[backup]}"
+        else
+            padmForgetCleanupPath "${PADM_CONFIG_TRANSACTION_ROLLBACK[backup]}"
+            errorCard "核心重载中断后恢复旧配置成功，但旧核心重载失败，请检查备份: ${PADM_CONFIG_TRANSACTION_ROLLBACK[backup]}"
+        fi
+    else
+        padmRemoveCleanupPath "${PADM_CONFIG_TRANSACTION_ROLLBACK[staged]}"
+        padmForgetCleanupPath "${PADM_CONFIG_TRANSACTION_ROLLBACK[backup]}"
+        errorCard "配置事务中断后回滚失败，请手动检查备份: ${PADM_CONFIG_TRANSACTION_ROLLBACK[backup]}"
+        return 1
+    fi
+    return "${status}"
+}
+
 configTransactionCommit() {
     local configFile=$1
     local stagedFile=$2
@@ -3286,6 +3313,11 @@ configTransactionCommit() {
     local successMessage=$7
     local refreshFn=$8
     local reloadFn=$9
+    local -A PADM_CONFIG_TRANSACTION_ROLLBACK=(
+        [active]=false [config]= [staged]= [backup]= [reload]= [reloadAttempted]=false
+    )
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
 
     if [[ -e "${backupFile}" || -L "${backupFile}" ]]; then
         padmRemoveCleanupPath "${stagedFile}"
@@ -3297,19 +3329,28 @@ configTransactionCommit() {
         padmRemoveCleanupPath "${stagedFile}"
         return 1
     fi
+    PADM_CONFIG_TRANSACTION_ROLLBACK[active]=true
+    PADM_CONFIG_TRANSACTION_ROLLBACK[config]=${configFile}
+    PADM_CONFIG_TRANSACTION_ROLLBACK[staged]=${stagedFile}
+    PADM_CONFIG_TRANSACTION_ROLLBACK[backup]=${backupFile}
+    PADM_CONFIG_TRANSACTION_ROLLBACK[reload]=${reloadFn}
+    padmRegisterExitRollback configTransactionRollbackOnExit
     if ! commitGeneratedJsonFile "${stagedFile}" "${configFile}"; then
+        PADM_CONFIG_TRANSACTION_ROLLBACK[active]=false
         removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
         padmRemoveCleanupPath "${stagedFile}"
         return 1
     fi
     if ! "${validateFn}"; then
-        if restoreManagedFileFromBackup "${backupFile}" "${configFile}" 644; then
+        if padmRunRollback restoreManagedFileFromBackup "${backupFile}" "${configFile}" 644; then
+            PADM_CONFIG_TRANSACTION_ROLLBACK[active]=false
             removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
             padmRemoveCleanupPath "${stagedFile}"
             echoContent title "\n┌─ ${failureTitle} ────────────────────────────────"
             menuLine "${rollbackMessage}"
             menuClose
         else
+            PADM_CONFIG_TRANSACTION_ROLLBACK[active]=false
             padmRemoveCleanupPath "${stagedFile}"
             echoContent title "\n┌─ ${failureTitle} ────────────────────────────────"
             local validateFailureMessage
@@ -3319,16 +3360,19 @@ configTransactionCommit() {
         fi
         return 1
     fi
+    PADM_CONFIG_TRANSACTION_ROLLBACK[reloadAttempted]=true
     if ! "${reloadFn}"; then
-        if restoreManagedFileFromBackup "${backupFile}" "${configFile}" 644; then
-            removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
-            padmRemoveCleanupPath "${stagedFile}"
+        if padmRunRollback restoreManagedFileFromBackup "${backupFile}" "${configFile}" 644; then
             echoContent title "\n┌─ 核心重载失败 ────────────────────────────────"
             local rollbackMessage
-            coreSetRollbackResultMessage rollbackMessage "核心重载失败" "已回滚本次修改" "${reloadFn}" "恢复旧配置后重载仍失败，请检查核心服务日志"
+            padmRunRollback coreSetRollbackResultMessage rollbackMessage "核心重载失败" "已回滚本次修改" "${reloadFn}" "恢复旧配置后重载仍失败，请检查核心服务日志"
+            PADM_CONFIG_TRANSACTION_ROLLBACK[active]=false
+            removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
+            padmRemoveCleanupPath "${stagedFile}"
             menuLine "${rollbackMessage#核心重载失败，}"
             menuClose
         else
+            PADM_CONFIG_TRANSACTION_ROLLBACK[active]=false
             padmRemoveCleanupPath "${stagedFile}"
             echoContent title "\n┌─ 核心重载失败 ────────────────────────────────"
             local reloadFailureMessage
@@ -3338,6 +3382,7 @@ configTransactionCommit() {
         fi
         return 1
     fi
+    PADM_CONFIG_TRANSACTION_ROLLBACK[active]=false
     removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
     if ! "${refreshFn}"; then
         echoContent title "\n┌─ 订阅刷新失败 ────────────────────────────────"

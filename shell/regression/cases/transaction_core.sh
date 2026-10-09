@@ -5387,6 +5387,88 @@ JSON
     refreshMode=success
 
     (
+        # 提交和校验中断只恢复文件，重载中断同时恢复旧核心；订阅中断保留已生效配置。
+        local signalPhase signalRecovery signalName expectedRc caseRoot calls errors resultRc
+        local targetFile backupFile stagedFile
+        eval "$(declare -f commitGeneratedJsonFile | sed '1s/^commitGeneratedJsonFile/originalConfigSignalCommit/')"
+        eval "$(declare -f restoreManagedFileFromBackup | sed '1s/^restoreManagedFileFromBackup/originalConfigSignalRestore/')"
+        commitGeneratedJsonFile() {
+            originalConfigSignalCommit "$@" || return 1
+            [[ "${signalPhase}" != commit ]] || kill "-${signalName}" "${BASHPID}"
+        }
+        restoreManagedFileFromBackup() {
+            [[ "${signalRecovery}" != file-fail ]] || return 1
+            originalConfigSignalRestore "$@"
+        }
+        configSignalValidate() {
+            [[ "${signalPhase}" != validate ]] || kill "-${signalName}" "${BASHPID}"
+            return 0
+        }
+        configSignalReload() {
+            local mode
+            mode=$(jq -r '.mode' "${targetFile}") || return 1
+            printf '%s\n' "${mode}" >>"${calls}"
+            if [[ "${mode}" == new && "${signalPhase}" == reload ]]; then
+                kill "-${signalName}" "${BASHPID}"
+            fi
+            [[ "${mode}" != old || "${signalRecovery}" != reload-fail ]]
+        }
+        configSignalRefresh() {
+            [[ "${signalPhase}" != refresh ]] || kill "-${signalName}" "${BASHPID}"
+            return 0
+        }
+        for signalName in INT TERM; do
+            expectedRc=130
+            [[ "${signalName}" != TERM ]] || expectedRc=143
+            for signalPhase in commit validate reload refresh; do
+                for signalRecovery in success file-fail reload-fail; do
+                    [[ "${signalPhase}" != refresh || "${signalRecovery}" == success ]] || continue
+                    [[ "${signalRecovery}" != reload-fail || "${signalPhase}" == reload ]] || continue
+                    caseRoot="${tmpRoot}/config-signal-${signalName}-${signalPhase}-${signalRecovery}"
+                    mkdir -p "${caseRoot}" || return 1
+                    targetFile="${caseRoot}/config.json"
+                    backupFile="${caseRoot}/config.bak"
+                    stagedFile="${caseRoot}/staged.json"
+                    calls="${caseRoot}/reload.log" errors="${caseRoot}/errors.log"
+                    printf '{"mode":"old"}\n' >"${targetFile}"
+                    printf '{"mode":"new"}\n' >"${stagedFile}"
+                    : >"${calls}" "${errors}"
+                    (
+                        errorCard() { printf '%s\n' "$*" >>"${errors}"; }
+                        configTransactionCommit "${targetFile}" "${stagedFile}" "${backupFile}" \
+                            configSignalValidate "事务校验失败" "已回滚事务" "事务成功" \
+                            configSignalRefresh configSignalReload
+                    ) >/dev/null 2>&1 && resultRc=0 || resultRc=$?
+                    [[ "${resultRc}" == "${expectedRc}" && ! -e "${stagedFile}" ]] || return 1
+                    if [[ "${signalPhase}" == refresh ]]; then
+                        jq -e '.mode == "new"' "${targetFile}" >/dev/null || return 1
+                        [[ ! -e "${backupFile}" && "$(<"${calls}")" == new ]] || return 1
+                    elif [[ "${signalRecovery}" == file-fail ]]; then
+                        jq -e '.mode == "new"' "${targetFile}" >/dev/null || return 1
+                        jq -e '.mode == "old"' "${backupFile}" >/dev/null || return 1
+                        [[ "${signalPhase}" != reload || "$(<"${calls}")" == new ]] || return 1
+                        [[ "${signalPhase}" == reload || ! -s "${calls}" ]] || return 1
+                        grep -q '中断后回滚失败' "${errors}" || return 1
+                    else
+                        jq -e '.mode == "old"' "${targetFile}" >/dev/null || return 1
+                        if [[ "${signalPhase}" == reload ]]; then
+                            [[ "$(<"${calls}")" == $'new\nold' ]] || return 1
+                        else
+                            [[ ! -s "${calls}" ]] || return 1
+                        fi
+                        if [[ "${signalRecovery}" == reload-fail ]]; then
+                            jq -e '.mode == "old"' "${backupFile}" >/dev/null || return 1
+                            grep -q '旧核心重载失败' "${errors}" || return 1
+                        else
+                            [[ ! -e "${backupFile}" ]] || return 1
+                        fi
+                    fi
+                done
+            done
+        done
+    ) || return 1
+
+    (
         # 协议只重载对应核心；失败时回滚自身配置，订阅刷新成功后才通知。
         local protocolFile="${tmpRoot}/protocol-parameter.json" calls="${tmpRoot}/protocol-parameter.log"
         local type operation protocolCore serviceStatus=0 protocolRefreshStatus=0 coreInstallType=1 singBoxConfigPath="${tmpRoot}/auxiliary/"
