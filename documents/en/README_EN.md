@@ -397,17 +397,19 @@ padm-docker logs
 padm-docker validate
 ```
 
-Service maintenance menu item 5 provides status and single-IP unban for an existing
-managed Fail2ban container:
+Service maintenance menu item 5 provides status, single-IP unban and site-scan
+disabling for an existing managed Fail2ban container:
 
 ```bash
 padm-docker fail2ban status
 padm-docker fail2ban unban 192.0.2.7
 padm-docker fail2ban unban 2001:db8::7
+padm-docker fail2ban disable --preview
+padm-docker fail2ban disable --confirm PADM-DOCKER-EDIT
 ```
 
 Only the fixed `padm-nginx` jail in a running `net-fail2ban` container whose spec,
-image, labels and mounts match the current deployment is accessed. These commands
+image, labels and mounts match the current deployment is accessed. Status and unban
 do not start services, change configuration or add bans. Unban accepts one literal
 IPv4/IPv6 address, not a hostname, CIDR, zone, arbitrary jail or bulk unban;
 the menu requires confirmation. Missing, stopped or mismatched deployments are
@@ -422,6 +424,18 @@ privileged changes and does not defend against malicious Python actions, private
 execution-cache tampering or modified Fail2ban code. Stop the service and inspect
 such changes manually.
 
+Disabling reuses configuration editing and its existing spec migration, removing only the Fail2ban
+integration; other integrations and business data remain unchanged. Preview and
+cancellation do not stop the container. After confirmation, the old owner is audited
+and only that container is stopped, without removing its exit evidence. New configuration
+is installed only after normal exit and proof that private state and both owned firewall
+families are empty. Timeout, abnormal exit, ownership drift or residual rules reject
+the commit and retain old configuration and recovery evidence. The service may already
+be stopped; inspect the original owner manually, never delete state to force progress.
+A later startup failure restores the existing configuration snapshot while preserving
+SQLite ban history; old kernel rules are not copied. `disable` accepts only preview or
+the fixed confirmation token, and rejects an integration that is not enabled.
+
 Fail2ban uses private schema 2 `data/net/fail2ban/fail2ban.state`, a random chain
 and full-token markers on hooks, bans and the final RETURN. Startup, every action
 and shutdown verify ownership and delete exact rules, never flush a fixed chain.
@@ -432,7 +446,8 @@ Dual-stack WS protection connects Nginx to the existing owned IPv6 network,
 avoiding source loss through an IPv4 bridge proxy. Update old dual-stack Compose
 through the normal configure/upgrade transaction; do not bypass body checks.
 Real dual-stack sources, automatic log bans, packet drops and unban recovery passed
-in isolated Linux amd64. New enabling, native hosts, arm64, reboot/uninstall and
+in isolated Linux amd64. On-site source witnessing before enabling, SSH/control
+protection, native hosts, arm64, reboot/uninstall and
 complete management still require 5C acceptance.
 
 The existing TProxy profile records its random chain, rule token, mark, route table

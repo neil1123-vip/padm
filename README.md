@@ -586,16 +586,18 @@ padm-docker validate
 padm-docker assess
 ```
 
-服务维护菜单第 5 项提供已有受管 Fail2ban 的状态与单 IP 解封：
+服务维护菜单第 5 项提供已有受管 Fail2ban 的状态、单 IP 解封与站点扫描停用：
 
 ```bash
 padm-docker fail2ban status
 padm-docker fail2ban unban 192.0.2.7
 padm-docker fail2ban unban 2001:db8::7
+padm-docker fail2ban disable --preview
+padm-docker fail2ban disable --confirm PADM-DOCKER-EDIT
 ```
 
 只操作当前运行且规格、镜像、标签及挂载一致的 `net-fail2ban` 容器和固定
-`padm-nginx` jail；不自动启动服务，不修改配置或新增封禁。解封接受单个
+`padm-nginx` jail；状态与解封不自动启动服务、不修改配置或新增封禁。解封接受单个
 IPv4/IPv6 字面地址，不接受域名、CIDR、zone、任意 jail 或全部解封；
 菜单执行前需要确认。未配置、停机或归属不一致时拒绝操作，底层失败返回非零。
 维护前通过容器内 Fail2ban 原生只读协议核对已加载动作、公开参数和有效属性缓存；
@@ -603,6 +605,13 @@ IPv4/IPv6 字面地址，不接受域名、CIDR、zone、任意 jail 或全部�
 随后只读核对私密 runtime state 和两族内核规则，归属漂移时不执行解封 client。
 审计不是与特权管理员并发操作的原子事务，也不抵御恶意 Python action、
 私有执行缓存或 Fail2ban 程序本身被篡改；此时应先停止服务并人工核对。
+停用复用配置编辑事务及既有规格迁移，只移除 Fail2ban 条目，其它宿主集成和业务数据保持不变。
+预览或取消不停止容器；确认后先审计旧拥有者，只停止该容器并保留退出证据，
+确认正常退出、私密 state 和两族受管规则均已清理，才安装新配置。
+停止超时、异常退出、归属漂移或残留规则会拒绝提交，保留旧配置及恢复证据；
+服务可能已停止，需人工核对原拥有者，不可删除 state 强制继续。
+提交后启动失败沿既有快照恢复旧配置，保留 SQLite 封禁历史，不复制旧内核规则。
+`disable` 只接受预览或固定确认参数；未启用时返回状态错误，不隐式启用或修改防护参数。
 Fail2ban 使用 schema 2 的私密 `data/net/fail2ban/fail2ban.state`、随机链和完整 token
 标记 hook、封禁规则及末尾 RETURN。启动、动作和停止先核对归属，逐条精确删除，
 不 flush 固定链；旧 `ports=` state、固定 `padm-f2b`、外来引用及 hook 遮蔽拒绝接管。
@@ -610,7 +619,7 @@ Fail2ban 使用 schema 2 的私密 `data/net/fail2ban/fail2ban.state`、随机�
 双栈 WS 防护让 Nginx 接入已有受管 IPv6 辅助网，避免 IPv4 bridge proxy 丢失来源；
 旧双栈 Compose 需通过标准配置/升级事务更新，不能直接绕过正文一致性检查。
 隔离 Linux amd64 已验证真实双栈来源、日志自动封禁、丢包及解封；
-新启用、真实宿主、arm64、重启/卸载与完整管理仍按 5C 门槛验收。
+新启用前现场来源见证、SSH/控制面防护、真实宿主、arm64、重启/卸载与完整管理仍按 5C 门槛验收。
 
 已有 TProxy profile 使用私密 `data/net/transparent/tproxy.state` 记录随机链、
 规则 token、mark、路由表和路由身份。预检只读核对当前归属与候选冲突；

@@ -2725,6 +2725,65 @@ IPv6 输入解析后规范化，保留映射 IPv6 支持并拒 zone/跨族输入
 尚未量测优化。真实宿主、systemd/重启/卸载、公网和原生 arm64 未验收，
 Fail2ban 完整管理、5C 及总目标继续 active。
 
+#### 5C.5 Fail2ban 受管站点扫描安全停用
+
+服务维护的 Fail2ban 子菜单新增停用，CLI 为
+`fail2ban disable [--preview | --confirm PADM-DOCKER-EDIT]`，
+内部复用 `edit --fail2ban-off` 的私有草稿、既有规格迁移、字段差异门禁和配置事务。
+只移除 Fail2ban integration，保留其它宿主集成、核心、账号和持久 SQLite。
+未启用返回状态错误；本项不新增启用或参数编辑入口。
+
+停用门禁放在共享候选安装路径，标准 configure/update 也不能通过新编排
+删除孤儿容器来绕过。旧规格、deployment 和 Compose 需保持集成一致，
+即使三者均未启用，也核对运行时无该项目的 Fail2ban 孤儿容器；查询失败
+或发现容器均拒绝；已知 owner state 或断链符号链接也须不存在，
+不猜测拥有者或自动清理。
+确认后核对唯一受管 CID、配置正文、已加载动作及 live owner。
+只停止刚审计的容器，不移除退出证据；正常退出后重新核对同一 CID，
+再用旧编排运行不启动 jail 的 `preflight fail2ban <oldports> unowned`，
+证明 state 与旧受保护地址族的规则均无残留，才登记配置切换并安装新文件。
+
+预览及取消不停止容器。外来规则、容器替换、异常退出、超时或清理证明失败
+拒绝提交，保留旧配置、state 和容器；服务可能已停止，需要人工核对原 owner，
+不能删除 state 强制继续。清理证明成功后的信号先登记可恢复事务再转交，
+后续安装/启动失败沿既有快照恢复旧部署，SQLite 保留以重载未过期 bans；
+不恢复旧 token/state 或复制内核规则。未完成清理证明时不强行执行通用恢复。
+旧版无原始 spec 的更新保留兼容路径：仅已校验的候选 deployment 与 Compose
+均明确未启用 Fail2ban 时采用 deployment 输入，之后仍核对旧状态、CID 与 state。
+候选 spec 存在但损坏不能回退；缺 spec 的 Fail2ban 候选直接拒绝。
+
+本项仅补站点扫描停用。新启用仍需逐受保护端口/地址族的当前部署来源见证，
+不能用一次隔离夹具或历史日志替代；SSH 的宿主日志/INPUT 合同、
+Docker 控制服务的来源日志和 jail 合同仍独立待办。
+本地验收（2026-10-10，Linux amd64，复用工具与 net 镜像）：
+
+| 检查 | 结果 / 秒 | 证据目录 |
+| --- | --- | --- |
+| 菜单 PTY，含停用确认/取消/EOF/信号 | 37.999 / 入口 38.976 | `.tmp-regression-docker-703a7544292e417c860b703672fecca0` |
+| 真实双栈清理、拒绝残留与 SQLite 恢复 | 49.041 / 入口 49.902 | `.tmp-regression-docker-21cafa4eba514a2fae2ddc61705c10c8` |
+| 最终停用事务 phase4 | 67.002 / 入口 67.963 | `.tmp-regression-docker-a320aa3ea2674bf19a799ea12d925e7d` |
+| 旧版更新与拒绝合同 phase6 | 27.057 / 入口 27.988 | `.tmp-regression-docker-d90a999812e84aab9d729f89f3569d3a` |
+| 路由域名工作流补验 | 88.697 / 入口 89.616 | `.tmp-regression-docker-6a19637428b54a6eb1372dd1dc4aa74a` |
+| Reality 共存补验 | 61.436 / 入口 62.343 | `.tmp-regression-docker-0e7eb621bb3d45139f95acc04d35fbf9` |
+| 最终完整 Docker 合同，Jobs 6 | 37/37，245.975 / 入口 246.858 | `.tmp-regression-docker-f98db2388a9040f8ae7f051e05005793` |
+
+上述实测对应各自快照；真实双栈项只证明 owner 清理与 SQLite 恢复，
+不冒充完整 CLI 的真实宿主停用验收。最终完整合同未命中缓存，排队 389 ms，
+复用工具镜像，不扩大三槽预算、不重建依赖镜像。
+最终 14 个代码/测试文件与完整归档逐文件一致，此后只更新文档和状态快照。
+完整源码归档 SHA256 `11467CC7A8BD13EEF24EB6BC49C27E7ADD6650A2DF1CE8CB09B4F72F192E4ABF`，
+内容摘要 `57B12574C163398112B57C568E34065DEC5032202DD4DACB905EA96EAC26A9F5`。
+已完成的 Bash 语法/ShellCheck error 检查按改动补验，不重复稳定文件，
+最后 8 个变动 Shell 的 16 项检查通过；独立限定复审无未决确定 P1/P2。
+初期夹具候选/旧编排区分、规则时间戳、重写 state 的 mtime 基准与规格迁移
+期望已修；共享安装路径新增只读查询的夹具同步补齐，生产门禁不放宽。
+失败日志保留，不把较早或失败快照声明为最终源码的完整证明。
+本轮清理 24 个源码归档/清单，共 99,172,392 字节；日志、result、镜像记录和共享缓存保留，
+不动用户既有 8 个临时文件。实现和验收说明分开本地签名提交，不推送或发布。
+实现 `60feabb7 fix(docker): verify Fail2ban cleanup before disabling protection`
+已本地 SSH 签名提交，签名 `G`。
+新启用、SSH/控制面、真实宿主/arm64/重启卸载未验收，5C 与总目标继续 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。
