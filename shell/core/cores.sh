@@ -1820,7 +1820,7 @@ restoreCoreBinaryBackup() {
     local backupBinary=$1
     local targetBinary=$2
     local mode
-    [[ -f "${backupBinary}" ]] || return 0
+    [[ -f "${backupBinary}" ]] || return 1
     mode=$(stat -c %a "${backupBinary}") || return 1
     restoreManagedFileFromBackup "${backupBinary}" "${targetBinary}" "${mode}"
 }
@@ -1859,10 +1859,11 @@ rollbackDownloadedCoreBinaryInstallOnExit() {
             fi
         fi
         if [[ -n "${PADM_CORE_BINARY_INSTALL[cronet]:-}" ]]; then
-            if [[ -z "${PADM_CORE_BINARY_INSTALL[cronetBackup]}" ||
-                -e "${PADM_CORE_BINARY_INSTALL[cronetBackup]}" ]]; then
-                restoreCoreOptionalFileBackup "${PADM_CORE_BINARY_INSTALL[cronetBackup]}" \
+            if [[ -n "${PADM_CORE_BINARY_INSTALL[cronetBackup]}" ]]; then
+                restoreManagedFileFromBackup "${PADM_CORE_BINARY_INSTALL[cronetBackup]}" \
                     "${PADM_CORE_BINARY_INSTALL[cronet]}" 644 || status=1
+            else
+                restoreCoreOptionalFileBackup "" "${PADM_CORE_BINARY_INSTALL[cronet]}" 644 || status=1
             fi
         fi
         if [[ -n "${PADM_CORE_BINARY_INSTALL[binaryBackup]}" ]]; then

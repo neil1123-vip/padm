@@ -878,6 +878,35 @@ runCoreUpgradePendingStartRollbackRegression() (
     handleSingBox() { handleUpgradeService "$@"; }
 
     (
+        local missing mode caseRoot events
+        handleXray() { events+="$1"$'\n'; }
+        handleSingBox() { events+="$1"$'\n'; }
+        for missing in binary cronet; do
+            for mode in missing directory; do
+                caseRoot="${root}/lost-${missing}-${mode}"
+                mkdir -p "${caseRoot}"
+                printf 'candidate\n' >"${caseRoot}/binary"
+                printf 'candidate-cronet\n' >"${caseRoot}/cronet"
+                printf 'old\n' >"${caseRoot}/binary.bak"
+                printf 'old-cronet\n' >"${caseRoot}/cronet.bak"
+                command rm -f -- "${caseRoot}/${missing}.bak"
+                [[ "${mode}" != directory ]] || mkdir "${caseRoot}/${missing}.bak"
+                local -A PADM_CORE_BINARY_INSTALL=(
+                    [active]=true [name]=sing-box [binary]="${caseRoot}/binary"
+                    [binaryBackup]="${caseRoot}/binary.bak" [cronet]="${caseRoot}/cronet"
+                    [cronetBackup]="${caseRoot}/cronet.bak" [backupRoot]="${caseRoot}"
+                    [action]=handleSingBox [running]=singBoxRunning [wasRunning]=true
+                )
+                events=
+                regressionExpectStatus 1 rollbackDownloadedCoreBinaryInstallOnExit || return 1
+                [[ "${events}" == $'stop\n' && -d "${caseRoot}" ]] || return 1
+                [[ "${missing}" != binary || -f "${caseRoot}/cronet.bak" ]] || return 1
+                [[ "${missing}" != cronet || -f "${caseRoot}/binary.bak" ]] || return 1
+            done
+        done
+    ) || return 1
+
+    (
         local core serviceLog="${root}/restore-stop.log"
         stopCalls=2
         for core in xray sing-box; do
