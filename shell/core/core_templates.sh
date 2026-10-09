@@ -232,6 +232,11 @@ coreTemplateConfigBackupCreate() {
         targets+=("${targetPath}")
     done
 
+    if [[ "${core}" == "sing-box" ]]; then
+        targetPath=$(singBoxMergedConfigFile) || return 1
+        targets+=("${targetPath}")
+    fi
+
     if [[ "${core}" == "sing-box" ]] && declare -F realityKeyFile >/dev/null 2>&1; then
         targetPath=$(realityKeyFile) || return 1
         targets+=("${targetPath}")
@@ -349,6 +354,7 @@ coreTemplateConfigTransaction() {
     local xrayRestartRunning=false
     local singBoxRestartRunning=false
     local manageNginx=false nginxWasRunning=false
+    local oldStartupService= oldStartupWasEnabled=false
     local statsBinaryBackupDir= statsBinary= statsCronet=
     local title="Xray 配置初始化"
     [[ "${core}" == "sing-box" ]] && title="sing-box 配置初始化"
@@ -393,6 +399,11 @@ coreTemplateConfigTransaction() {
     if [[ "${core}" == "sing-box" || "${PADM_CORE_INSTALL_TRANSACTION_ACTIVE:-}" == "true" ]] && singBoxRunning; then
         singBoxWasRunning=true
     fi
+    if [[ "${PADM_CORE_INSTALL_TRANSACTION_ACTIVE:-}" == true ]]; then
+        oldStartupService=sing-box
+        [[ "${core}" != sing-box ]] || oldStartupService=xray
+        coreStartupServiceEnabled "${oldStartupService}" && oldStartupWasEnabled=true
+    fi
 
     local PADM_CORE_TEMPLATE_TRANSACTION_ACTIVE=true
     # 信号可能在多层函数内部触发，用独立快照避免同名局部变量遮蔽恢复目标。
@@ -402,6 +413,8 @@ coreTemplateConfigTransaction() {
         [xrayRestartRunning]="${xrayRestartRunning}" [singBoxRestartRunning]="${singBoxRestartRunning}"
         [manageNginx]="${manageNginx}" [nginxWasRunning]="${nginxWasRunning}"
         [statsBinaryBackupDir]="${statsBinaryBackupDir}" [statsBinary]="${statsBinary}" [statsCronet]="${statsCronet}"
+        [subscribeLocalBase]= [subscribeOutputBackupDir]=
+        [oldStartupService]="${oldStartupService}" [oldStartupWasEnabled]="${oldStartupWasEnabled}" [oldStartupChanged]=false
     )
     local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
     local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
@@ -415,6 +428,9 @@ coreTemplateConfigTransaction() {
         fi
         if [[ -n "${PADM_CORE_SWITCH_CLEANUP_BACKUP_DIR:-}" ]]; then
             padmRemoveCleanupPath "${PADM_CORE_SWITCH_CLEANUP_BACKUP_DIR}"
+        fi
+        if [[ -n "${PADM_CORE_TEMPLATE_ROLLBACK[subscribeOutputBackupDir]}" ]]; then
+            padmRemoveCleanupPath "${PADM_CORE_TEMPLATE_ROLLBACK[subscribeOutputBackupDir]}"
         fi
         [[ -z "${statsBinaryBackupDir}" ]] || padmRemoveCleanupPath "${statsBinaryBackupDir}"
         padmRemoveCleanupPath "${backupDir}"
@@ -437,7 +453,13 @@ coreTemplateConfigRollback() {
     local manageNginx=${PADM_CORE_TEMPLATE_ROLLBACK[manageNginx]} nginxWasRunning=${PADM_CORE_TEMPLATE_ROLLBACK[nginxWasRunning]}
     local statsBinaryBackupDir=${PADM_CORE_TEMPLATE_ROLLBACK[statsBinaryBackupDir]}
     local statsBinary=${PADM_CORE_TEMPLATE_ROLLBACK[statsBinary]} statsCronet=${PADM_CORE_TEMPLATE_ROLLBACK[statsCronet]}
+    local subscribeLocalBase=${PADM_CORE_TEMPLATE_ROLLBACK[subscribeLocalBase]:-}
+    local subscribeOutputBackupDir=${PADM_CORE_TEMPLATE_ROLLBACK[subscribeOutputBackupDir]:-}
+    local oldStartupService=${PADM_CORE_TEMPLATE_ROLLBACK[oldStartupService]:-}
+    local oldStartupWasEnabled=${PADM_CORE_TEMPLATE_ROLLBACK[oldStartupWasEnabled]:-false}
+    local oldStartupChanged=${PADM_CORE_TEMPLATE_ROLLBACK[oldStartupChanged]:-false}
     local configRestored=true cleanupRestored=true serviceRestored=true newCoreStopped=true nginxStopped=true binaryRestored=true
+    local outputRestored=true startupRestored=true
 
     # 新服务先释放端口，旧配置全部恢复成功后才重启原服务。
     if [[ "${manageNginx}" == true ]] &&
@@ -483,6 +505,19 @@ coreTemplateConfigRollback() {
             padmForgetCleanupPath "${PADM_CORE_SWITCH_CLEANUP_BACKUP_DIR}"
         fi
     fi
+    if [[ -n "${subscribeOutputBackupDir}" ]]; then
+        if subscriptionSyncRestoreBackupPath "${subscribeLocalBase}" "${subscribeOutputBackupDir}" local; then
+            padmRemoveCleanupPath "${subscribeOutputBackupDir}"
+        else
+            outputRestored=false
+            padmForgetCleanupPath "${subscribeOutputBackupDir}"
+        fi
+    fi
+    if [[ "${oldStartupChanged}" == true && "${configRestored}" == true && "${cleanupRestored}" == true &&
+        "${newCoreStopped}" == true && "${binaryRestored}" == true ]] &&
+        ! coreSetStartupServiceEnabled "${oldStartupService}" "${oldStartupWasEnabled}"; then
+        startupRestored=false
+    fi
     if [[ "${configRestored}" == "true" && "${cleanupRestored}" == "true" &&
         "${newCoreStopped}" == "true" && "${serviceRestored}" == "true" && "${binaryRestored}" == true ]]; then
         if [[ "${core}" == "xray" || "${PADM_CORE_INSTALL_TRANSACTION_ACTIVE:-}" == "true" ]] &&
@@ -512,10 +547,15 @@ coreTemplateConfigRollback() {
         errorCard "${title}失败，且旧配置恢复失败，请手动检查备份目录: ${backupDir}"
     elif [[ "${cleanupRestored}" != "true" ]]; then
         errorCard "${title}失败，旧核心配置恢复失败，请手动检查备份目录: ${PADM_CORE_SWITCH_CLEANUP_BACKUP_DIR}"
+    elif [[ "${startupRestored}" != true ]]; then
+        errorCard "${title}失败，旧配置已恢复，但旧 ${oldStartupService} 开机自启恢复失败"
     elif [[ "${serviceRestored}" != "true" ]]; then
         errorCard "${title}失败，旧配置已恢复，但核心服务运行状态恢复失败"
     else
         errorCard "${title}失败，已恢复旧配置"
+    fi
+    if [[ "${outputRestored}" != true ]]; then
+        errorCard "${title}失败，旧本地订阅恢复失败，请手动检查备份目录: ${subscribeOutputBackupDir}"
     fi
     return 0
 }

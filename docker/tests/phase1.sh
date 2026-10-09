@@ -139,6 +139,43 @@ runEnginePromptCase prompt-no n 10 0
 runEnginePromptCase prompt-yes y 0 0
 runEnginePromptCase prompt-eof __EOF__ 10 0
 runEnginePromptCase prompt-install-fail y 10 1
+
+# 参数错误必须在引擎探测或安装确认前退出，合法参数仍进入原流程。
+runEngineArgumentCase() {
+    local expected=$1 name=$2 marker="${TEST_ROOT}/engine-args.log"
+    shift 2
+    : >"${marker}"
+    (
+        command() {
+            if [[ "$*" == '-v docker' ]]; then
+                printf 'probe\n' >>"${PHASE1_ENGINE_ARGS_LOG}"
+                return 1
+            fi
+            builtin command "$@"
+        }
+        export -f command
+        export PHASE1_ENGINE_ARGS_LOG="${marker}"
+        runControl "${expected}" "${name}" "${TEST_ROOT}/engine-args-state" \
+            "${TEST_ROOT}/engine-args-native" "${TEST_ROOT}/engine-args-bin" \
+            install "$@" </dev/null
+    )
+    if [[ "${expected}" -ne 10 ]]; then
+        [[ ! -s "${marker}" ]] || fail "${name}: invalid arguments reached Docker bootstrap"
+    else
+        [[ -s "${marker}" ]] || fail "${name}: valid arguments skipped Docker bootstrap"
+    fi
+}
+runEngineArgumentCase 10 engine-args-valid --no-menu --source "${PROJECT_ROOT}"
+runEngineArgumentCase 10 engine-args-valid-ref --ref ffffffffffffffffffffffffffffffffffffffff
+runEngineArgumentCase 2 engine-args-invalid-ref --ref typo
+runEngineArgumentCase 2 engine-args-missing-ref --ref
+runEngineArgumentCase 2 engine-args-missing-source --source
+runEngineArgumentCase 2 engine-args-unknown --unknown
+runEngineArgumentCase 2 engine-args-source-latest --source "${PROJECT_ROOT}" --ref latest
+runEngineArgumentCase 13 engine-args-missing-directory --source "${TEST_ROOT}/missing-source"
+mkdir -- "${TEST_ROOT}/empty-source"
+runEngineArgumentCase 13 engine-args-empty-directory --source "${TEST_ROOT}/empty-source"
+
 env \
     PHASE1_PROJECT_ROOT="${PROJECT_ROOT}" \
     bash -u -c '
@@ -349,6 +386,105 @@ runControl 0 repeat-install "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" insta
 [[ "$(readlink "${DOCKER_ROOT}/bundle")" == "${bundleBefore}" ]] || fail 'repeat install changed an identical bundle'
 [[ "$(<"${DOCKER_ROOT}/data/sentinel")" == "keep" ]] || fail 'repeat install changed persistent data'
 
+# CLI 完成前收到信号，首装撤销本次指针，重装恢复旧控制版本。
+for signal in INT TERM; do
+    signalStatus=130
+    [[ "${signal}" != TERM ]] || signalStatus=143
+    for installKind in first repeat; do
+        TRANSACTION_ROOT="${TEST_ROOT}/install-${signal}-${installKind}"
+        TRANSACTION_BIN="${TEST_ROOT}/install-${signal}-${installKind}-bin"
+        previousTarget=
+        if [[ "${installKind}" == repeat ]]; then
+            runControl 0 "install-${signal}-prepare" "${TRANSACTION_ROOT}" "${NATIVE_ROOT}" \
+                "${TRANSACTION_BIN}" install --source "${NO_COMPOSE_SOURCE}"
+            previousTarget=$(readlink "${TRANSACTION_ROOT}/bundle")
+            printf 'keep\n' >"${TRANSACTION_ROOT}/data/sentinel"
+        fi
+        (
+            mv() {
+                if [[ "${*: -1}" == "${PADM_DOCKER_BIN_DIR}/padm-docker" ]]; then
+                    command mv "$@"
+                    kill -"${PHASE1_INSTALL_SIGNAL}" "${BASHPID:-$$}"
+                    return
+                fi
+                command mv "$@"
+            }
+            export -f mv
+            export PHASE1_INSTALL_SIGNAL=${signal}
+            runControl "${signalStatus}" "install-${signal}-${installKind}" "${TRANSACTION_ROOT}" \
+                "${NATIVE_ROOT}" "${TRANSACTION_BIN}" install --source "${NO_COMPOSE_SOURCE}" \
+                --ref aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        )
+        [[ ! -e "${TRANSACTION_ROOT}/locks/deployment.lock" ]] ||
+            fail "install-${signal}-${installKind}: deployment lock leaked"
+        if [[ "${installKind}" == repeat ]]; then
+            [[ "$(readlink "${TRANSACTION_ROOT}/bundle")" == "${previousTarget}" &&
+                "$(<"${TRANSACTION_ROOT}/data/sentinel")" == keep &&
+                "$(readlink "${TRANSACTION_BIN}/padm-docker")" == "${TRANSACTION_ROOT}/bundle/install-docker.sh" ]] ||
+                fail "install-${signal}: old deployment was not restored"
+        else
+            [[ ! -e "${TRANSACTION_ROOT}/bundle" && ! -L "${TRANSACTION_ROOT}/bundle" &&
+                ! -e "${TRANSACTION_BIN}/padm-docker" ]] ||
+                fail "install-${signal}: first installation kept an active bundle"
+        fi
+    done
+done
+
+# 激活指针已移动但安装尚未返回时，仍使用提前登记的精确目标恢复。
+TRANSACTION_ROOT="${TEST_ROOT}/install-activation"
+TRANSACTION_BIN="${TEST_ROOT}/install-activation-bin"
+mkdir -p -- "${TRANSACTION_BIN}"
+ln -s "${TRANSACTION_ROOT}/bundle/install-docker.sh" "${TRANSACTION_BIN}/padm-docker"
+(
+    mv() {
+        if [[ "${*: -1}" == "${PADM_DOCKER_INSTALL_DIR}/bundle" ]]; then
+            command mv "$@"
+            kill -TERM "${BASHPID:-$$}"
+            return
+        fi
+        command mv "$@"
+    }
+    export -f mv
+    runControl 143 install-activation "${TRANSACTION_ROOT}" "${NATIVE_ROOT}" "${TRANSACTION_BIN}" \
+        install --source "${NO_COMPOSE_SOURCE}"
+)
+[[ ! -e "${TRANSACTION_ROOT}/bundle" && ! -L "${TRANSACTION_ROOT}/bundle" &&
+    -L "${TRANSACTION_BIN}/padm-docker" &&
+    "$(readlink "${TRANSACTION_BIN}/padm-docker")" == "${TRANSACTION_ROOT}/bundle/install-docker.sh" &&
+    ! -e "${TRANSACTION_ROOT}/locks/deployment.lock" ]] ||
+    fail 'install-activation: exact activation cleanup or old CLI preservation failed'
+
+# 中断前本次指针或命令被替换时，不删除用户的新状态。
+for installKind in first repeat; do
+    TRANSACTION_ROOT="${TEST_ROOT}/install-changed-${installKind}"
+    TRANSACTION_BIN="${TEST_ROOT}/install-changed-${installKind}-bin"
+    if [[ "${installKind}" == repeat ]]; then
+        runControl 0 install-changed-prepare "${TRANSACTION_ROOT}" "${NATIVE_ROOT}" \
+            "${TRANSACTION_BIN}" install --source "${NO_COMPOSE_SOURCE}"
+    fi
+    (
+        mv() {
+            if [[ "${*: -1}" == "${PADM_DOCKER_BIN_DIR}/padm-docker" ]]; then
+                command mv "$@"
+                rm -f -- "${PADM_DOCKER_INSTALL_DIR}/bundle" "${PADM_DOCKER_BIN_DIR}/padm-docker"
+                printf 'user-bundle\n' >"${PADM_DOCKER_INSTALL_DIR}/bundle"
+                printf 'user-command\n' >"${PADM_DOCKER_BIN_DIR}/padm-docker"
+                kill -TERM "${BASHPID:-$$}"
+                return
+            fi
+            command mv "$@"
+        }
+        export -f mv
+        runControl 143 "install-changed-${installKind}" "${TRANSACTION_ROOT}" "${NATIVE_ROOT}" \
+            "${TRANSACTION_BIN}" install --source "${NO_COMPOSE_SOURCE}" \
+            --ref aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    )
+    [[ "$(<"${TRANSACTION_ROOT}/bundle")" == user-bundle &&
+        "$(<"${TRANSACTION_BIN}/padm-docker")" == user-command &&
+        ! -e "${TRANSACTION_ROOT}/locks/deployment.lock" ]] ||
+        fail "install-changed-${installKind}: interrupted cleanup changed user state"
+done
+
 runControl 0 status-without-configuration "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" status
 grep -q '^configured=no$' "${CONTROL_LOG}" || fail 'status did not expose missing configuration state'
 for operation in up down restart logs; do
@@ -395,6 +531,34 @@ runControl 0 initialize-retry "${RETRY_ROOT}" "${NATIVE_ROOT}" "${RETRY_BIN}" \
     install --source "${NO_COMPOSE_SOURCE}"
 [[ -d "${RETRY_ROOT}/config" && -L "${RETRY_ROOT}/bundle" &&
     -L "${RETRY_BIN}/padm-docker" ]] || fail 'retry did not finish initialization'
+
+# 写入归属标记前中断，只清理本次临时文件，并允许同根重试。
+for signal in INT TERM; do
+    INTERRUPTED_ROOT="${TEST_ROOT}/initialize-${signal}"
+    INTERRUPTED_BIN="${TEST_ROOT}/initialize-${signal}-bin"
+    signalStatus=130
+    [[ "${signal}" != TERM ]] || signalStatus=143
+    (
+        chmod() {
+            if [[ "$1" == 0640 && "${2:-}" == "${PADM_DOCKER_INSTALL_DIR}/.mode."* ]]; then
+                kill -"${PHASE1_INITIALIZE_SIGNAL}" "${BASHPID:-$$}"
+            fi
+            command chmod "$@"
+        }
+        export -f chmod
+        export PHASE1_INITIALIZE_SIGNAL=${signal}
+        runControl "${signalStatus}" "initialize-${signal}" "${INTERRUPTED_ROOT}" \
+            "${NATIVE_ROOT}" "${INTERRUPTED_BIN}" install --source "${NO_COMPOSE_SOURCE}"
+    )
+    [[ ! -e "${INTERRUPTED_ROOT}/mode" &&
+        ! -e "${INTERRUPTED_ROOT}/locks/deployment.lock" &&
+        -z "$(find "${INTERRUPTED_ROOT}" -maxdepth 1 -name '.mode.*' -print)" ]] ||
+        fail "initialize-${signal}: interruption left bootstrap residue"
+    runControl 0 "initialize-${signal}-retry" "${INTERRUPTED_ROOT}" "${NATIVE_ROOT}" \
+        "${INTERRUPTED_BIN}" install --source "${NO_COMPOSE_SOURCE}"
+    [[ -L "${INTERRUPTED_ROOT}/bundle" && -L "${INTERRUPTED_BIN}/padm-docker" ]] ||
+        fail "initialize-${signal}: retry did not finish installation"
+done
 
 for failureMode in daemon-fail rootless; do
     export FAKE_DOCKER_MODE=${failureMode}

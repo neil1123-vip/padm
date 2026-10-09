@@ -297,7 +297,7 @@ try {
     [string[]]$networkCapabilities = if ($Selector -in @('docker-control-two-node-real', 'docker-routing-warp-real')) {
         @('--cap-add', 'NET_ADMIN', '--cap-add', 'SYS_ADMIN')
     } elseif ($Selector -in @('docker-control-two-deployment-real', 'docker-routing-ipv6-real',
-        'docker-http-relay-published-real', 'docker-entry-port-alias-real')) {
+        'docker-http-relay-published-real', 'docker-entry-port-alias-real', 'docker-fail2ban-real')) {
         # 嵌套 daemon 只操作测试容器的隔离空间，不挂宿主 Socket。
         @('--privileged', '--mount', 'type=volume,dst=/n')
     } else { @() }
@@ -346,7 +346,7 @@ try {
         $result.routing_images = $coreInputs
     }
     if ($Selector -in @('docker-control-two-deployment-real', 'docker-routing-ipv6-real',
-        'docker-http-relay-published-real', 'docker-entry-port-alias-real')) {
+        'docker-http-relay-published-real', 'docker-entry-port-alias-real', 'docker-fail2ban-real')) {
         # 离线传入实际业务镜像；节点不得借用宿主 daemon 或旧源码。
         $references = [ordered]@{
             xray = 'padm-local/padm-xray:control-4c4b'
@@ -355,11 +355,17 @@ try {
             ops = 'padm-local/padm-ops:control-4c4b'
             net = 'padm-local/padm-net:control-4c4b'
         }
+        if ($Selector -eq 'docker-fail2ban-real') {
+            $references = [ordered]@{ net = 'padm-local/padm-net:control-4c4b' }
+        }
         $nodeInputs = [ordered]@{}
         foreach ($name in $references.Keys) {
             $info = & $docker image inspect $references[$name]
             if ($LASTEXITCODE -ne 0) { throw "Required node image is missing: $($references[$name])" }
             $info = $info | ConvertFrom-Json | Select-Object -First 1
+            if ("$($info.Os)/$($info.Architecture)" -ne $platform) {
+                throw "Node image architecture does not match host: $($references[$name])"
+            }
             if ($info.Descriptor.digest -notmatch '^sha256:[a-f0-9]{64}$') {
                 throw "Node image has no real manifest digest: $name"
             }

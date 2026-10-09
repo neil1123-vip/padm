@@ -52,7 +52,7 @@ validateCoreZipArchive() {
         return 1
     fi
     entryCount=$(wc -l <"${entryList}" | tr -d '[:space:]') || { padmRemoveCleanupPath "${entryList}"; padmRemoveCleanupPath "${detailList}"; return 1; }
-    detailCount=$(awk '$1 ~ /^[-d][rwxStTs-]{9}$/ { count++ } END { print count + 0 }' "${detailList}") || { padmRemoveCleanupPath "${entryList}"; padmRemoveCleanupPath "${detailList}"; return 1; }
+    detailCount=$(awk 'length($1) == 10 && $1 ~ /^[-d][rwxStTs-]+$/ { count++ } END { print count + 0 }' "${detailList}") || { padmRemoveCleanupPath "${entryList}"; padmRemoveCleanupPath "${detailList}"; return 1; }
     [[ "${detailCount}" == "${entryCount}" ]] || { padmRemoveCleanupPath "${entryList}"; padmRemoveCleanupPath "${detailList}"; return 1; }
     if ! coreArchiveExpandedSizeIsSafe zip "${archiveFile}" "${entryList}"; then
         padmRemoveCleanupPath "${entryList}"
@@ -160,32 +160,10 @@ downloadXrayGeoFilesToStage() {
     [[ -s "${stageDir}/geosite.dat" && -s "${stageDir}/geoip.dat" ]]
 }
 
-backupXrayGeoFileIfPresent() {
-    local targetFile=$1
-    local backupFile=$2
-    [[ -e "${targetFile}" || -L "${targetFile}" ]] || return 0
-    [[ -f "${targetFile}" ]] || return 1
-    cp -p "${targetFile}" "${backupFile}"
-}
-
-restoreXrayGeoCommitBackup() {
-    local backupDir=$1
-    local geositeTarget=$2
-    local geoipTarget=$3
-    local versionTarget=$4
-    local status=0
-
-    restoreCoreOptionalFileBackup "${backupDir}/geosite.dat" "${geositeTarget}" 644 || status=1
-    restoreCoreOptionalFileBackup "${backupDir}/geoip.dat" "${geoipTarget}" 644 || status=1
-    restoreCoreOptionalFileBackup "${backupDir}/geo.version" "${versionTarget}" 644 || status=1
-    return "${status}"
-}
-
 rollbackXrayGeoCommitOnExit() {
     [[ "${PADM_XRAY_GEO_COMMIT[active]:-false}" == true ]] || return 0
     PADM_XRAY_GEO_COMMIT[active]=false
-    if restoreXrayGeoCommitBackup "${PADM_XRAY_GEO_COMMIT[backup]}" \
-        "${PADM_XRAY_GEO_COMMIT[geosite]}" "${PADM_XRAY_GEO_COMMIT[geoip]}" "${PADM_XRAY_GEO_COMMIT[version]}"; then
+    if padmRestoreManagedFileBackupManifest "${PADM_XRAY_GEO_COMMIT[backup]}"; then
         padmRemoveCleanupPath "${PADM_XRAY_GEO_COMMIT[backup]}"
     else
         padmForgetCleanupPath "${PADM_XRAY_GEO_COMMIT[backup]}"
@@ -238,9 +216,8 @@ commitXrayGeoFilesFromStage() {
         padmRemoveCleanupPath "${versionStage}"
         return 1
     }
-    if ! backupXrayGeoFileIfPresent "${geositeTarget}" "${backupDir}/geosite.dat" ||
-        ! backupXrayGeoFileIfPresent "${geoipTarget}" "${backupDir}/geoip.dat" ||
-        ! backupXrayGeoFileIfPresent "${versionTarget}" "${backupDir}/geo.version"; then
+    if ! padmWriteManagedFileBackupManifest "${backupDir}" \
+        geosite.dat "${geositeTarget}" geoip.dat "${geoipTarget}" geo.version "${versionTarget}"; then
         padmRemoveCleanupPath "${backupDir}"
         padmRemoveCleanupPath "${geositeStage}"
         padmRemoveCleanupPath "${geoipStage}"
@@ -248,7 +225,7 @@ commitXrayGeoFilesFromStage() {
         return 1
     fi
     local -A PADM_XRAY_GEO_COMMIT=(
-        [active]=true [backup]="${backupDir}" [geosite]="${geositeTarget}" [geoip]="${geoipTarget}" [version]="${versionTarget}"
+        [active]=true [backup]="${backupDir}"
     )
     local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
     local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
@@ -1842,14 +1819,17 @@ rollbackDownloadedCoreBinaryInstallOnExit() {
     PADM_CORE_BINARY_INSTALL[active]=false
     local status=0 backup
 
-    # 迁移后校验仍未替换核心，只恢复配置，不触碰运行中的旧核心。
+    # 未替换核心时只恢复配置和原运行态，不触碰运行中的旧文件。
     if [[ "${PADM_CORE_BINARY_INSTALL[prepared]:-true}" != true ]]; then
-        [[ -d "${PADM_CORE_BINARY_INSTALL[migrationBackup]:-}" ]] || return 0
-        singBoxUpgradeMigrationRollback "${PADM_CORE_BINARY_INSTALL[migrationBackup]}"
-        return
-    fi
-    # 新服务含待启动任务必须先停止，之后才允许恢复旧文件。
-    if runCoreServiceActionAllowFailure "${PADM_CORE_BINARY_INSTALL[action]}" stop; then
+        if [[ -d "${PADM_CORE_BINARY_INSTALL[migrationBackup]:-}" ]]; then
+            singBoxUpgradeMigrationRollback "${PADM_CORE_BINARY_INSTALL[migrationBackup]}" || status=1
+        fi
+        if [[ "${status}" == 0 && -n "${PADM_CORE_BINARY_INSTALL[action]:-}" ]]; then
+            checkPortOpenRestoreCoreServiceState "${PADM_CORE_BINARY_INSTALL[wasRunning]}" \
+                "${PADM_CORE_BINARY_INSTALL[running]}" "${PADM_CORE_BINARY_INSTALL[action]}" || status=1
+        fi
+    elif runCoreServiceActionAllowFailure "${PADM_CORE_BINARY_INSTALL[action]}" stop; then
+        # 新服务含待启动任务必须先停止，之后才允许恢复旧文件。
         if [[ -n "${PADM_CORE_BINARY_INSTALL[migrationBackup]:-}" &&
             -d "${PADM_CORE_BINARY_INSTALL[migrationBackup]}" ]]; then
             if ! checkLogBackupRestore "${PADM_CORE_BINARY_INSTALL[migrationBackup]}"; then
@@ -1879,7 +1859,7 @@ rollbackDownloadedCoreBinaryInstallOnExit() {
     else
         status=1
     fi
-    for backup in "${PADM_CORE_BINARY_INSTALL[binaryBackup]}" \
+    for backup in "${PADM_CORE_BINARY_INSTALL[binaryBackup]:-}" \
         "${PADM_CORE_BINARY_INSTALL[cronetBackup]:-}" "${PADM_CORE_BINARY_INSTALL[migrationBackup]:-}" \
         "${PADM_CORE_BINARY_INSTALL[backupRoot]:-}"; do
         [[ -n "${backup}" ]] || continue
@@ -1889,7 +1869,7 @@ rollbackDownloadedCoreBinaryInstallOnExit() {
             padmForgetCleanupPath "${backup}"
         fi
     done
-    [[ "${status}" == 0 ]] || errorCard "${PADM_CORE_BINARY_INSTALL[name]} 安装失败或取消后恢复失败，请手动检查服务和备份: ${PADM_CORE_BINARY_INSTALL[binaryBackup]} ${PADM_CORE_BINARY_INSTALL[cronetBackup]:-} ${PADM_CORE_BINARY_INSTALL[migrationBackup]:-}"
+    [[ "${status}" == 0 ]] || errorCard "${PADM_CORE_BINARY_INSTALL[name]} 安装失败或取消后恢复失败，请手动检查服务和备份: ${PADM_CORE_BINARY_INSTALL[binaryBackup]:-} ${PADM_CORE_BINARY_INSTALL[cronetBackup]:-} ${PADM_CORE_BINARY_INSTALL[migrationBackup]:-}"
     return "${status}"
 }
 
@@ -1956,19 +1936,19 @@ installDownloadedXrayBinary() {
             return 1
         fi
     fi
-    local -A PADM_CORE_BINARY_INSTALL=([active]=true [name]=Xray-core [binary]="${oldBinary}" [binaryBackup]="${backupBinary}" \
+    local -A PADM_CORE_BINARY_INSTALL=([active]=true [prepared]=false [name]=Xray-core [binary]="${oldBinary}" [binaryBackup]="${backupBinary}" \
         [action]=handleXray [running]=xrayRunning [wasRunning]=false)
     local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
     local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
     if xrayRunning; then PADM_CORE_BINARY_INSTALL[wasRunning]=true; fi
     padmRegisterExitRollback rollbackDownloadedCoreBinaryInstallOnExit
     if ! runCoreServiceActionAllowFailure handleXray stop; then
-        PADM_CORE_BINARY_INSTALL[active]=false
+        padmRunRollback rollbackDownloadedCoreBinaryInstallOnExit || true
         padmRemoveCleanupPath "${tmpDir}"
-        [[ -n "${backupBinary}" ]] && padmRemoveCleanupPath "${backupBinary}" || true
         statusCard "Xray-core 更新失败" "Xray 服务停止失败，已取消替换" "排查日志: ${logFile}"
         return 1
     fi
+    PADM_CORE_BINARY_INSTALL[prepared]=true
     if ! commitStagedCoreInstallFile "${newBinary}" "${oldBinary}" 755; then
         padmRunRollback rollbackDownloadedCoreBinaryInstallOnExit || true
         padmRemoveCleanupPath "${tmpDir}"
@@ -2098,16 +2078,13 @@ installDownloadedSingBoxBinary() {
     PADM_CORE_BINARY_INSTALL[running]=singBoxRunning
     PADM_CORE_BINARY_INSTALL[wasRunning]=false
     if singBoxRunning; then PADM_CORE_BINARY_INSTALL[wasRunning]=true; fi
-    PADM_CORE_BINARY_INSTALL[prepared]=true
     if ! runCoreServiceActionAllowFailure handleSingBox stop; then
-        PADM_CORE_BINARY_INSTALL[prepared]=false
         padmRunRollback rollbackDownloadedCoreBinaryInstallOnExit || true
         padmRemoveCleanupPath "${tmpDir}"
-        [[ -n "${backupBinary}" ]] && padmRemoveCleanupPath "${backupBinary}" || true
-        [[ -n "${cronetBackup}" ]] && padmRemoveCleanupPath "${cronetBackup}" || true
         statusCard "sing-box 更新失败" "sing-box 服务停止失败，已取消替换" "排查日志: ${logFile}"
         return 1
     fi
+    PADM_CORE_BINARY_INSTALL[prepared]=true
     if ! commitStagedCoreInstallFile "${newBinary}" "${oldBinary}" 755 ||
         ! commitStagedCoreInstallFile "${extractedDir}/libcronet.so" "${cronetPath}" 644; then
         padmRunRollback rollbackDownloadedCoreBinaryInstallOnExit || true
@@ -2320,6 +2297,25 @@ coreStartupServiceEnabled() {
     fi
 }
 
+coreSetStartupServiceEnabled() {
+    local serviceName=$1 serviceEnabled=$2
+    if [[ "${release}" == "alpine" ]]; then
+        if command -v rc-update >/dev/null 2>&1; then
+            if [[ "${serviceEnabled}" == true ]]; then
+                rc-update add "${serviceName}" default >/dev/null 2>&1
+            elif coreStartupServiceEnabled "${serviceName}"; then
+                rc-update del "${serviceName}" default >/dev/null 2>&1
+            fi
+        else
+            [[ "${serviceEnabled}" != true ]]
+        fi
+    elif [[ "${serviceEnabled}" == true ]]; then
+        systemctl enable "${serviceName}.service" >/dev/null 2>&1
+    elif coreStartupServiceEnabled "${serviceName}"; then
+        systemctl disable "${serviceName}.service" >/dev/null 2>&1
+    fi
+}
+
 restoreCoreStartupServiceInstall() {
     local backupDir=$1
     local serviceName=$2
@@ -2330,24 +2326,10 @@ restoreCoreStartupServiceInstall() {
         padmForgetCleanupPath "${backupDir}"
         return 1
     fi
-    if [[ "${release}" == "alpine" ]]; then
-        if command -v rc-update >/dev/null 2>&1; then
-            if [[ "${serviceWasEnabled}" == "true" ]]; then
-                rc-update add "${serviceName}" default >/dev/null 2>&1 || rollbackFailed=true
-            elif coreStartupServiceEnabled "${serviceName}"; then
-                rc-update del "${serviceName}" default >/dev/null 2>&1 || rollbackFailed=true
-            fi
-        elif [[ "${serviceWasEnabled}" == "true" ]]; then
-            rollbackFailed=true
-        fi
-    else
+    if [[ "${release}" != "alpine" ]]; then
         systemctl daemon-reload >/dev/null 2>&1 || rollbackFailed=true
-        if [[ "${serviceWasEnabled}" == "true" ]]; then
-            systemctl enable "${serviceName}.service" >/dev/null 2>&1 || rollbackFailed=true
-        elif systemctl is-enabled --quiet "${serviceName}.service" >/dev/null 2>&1; then
-            systemctl disable "${serviceName}.service" >/dev/null 2>&1 || rollbackFailed=true
-        fi
     fi
+    coreSetStartupServiceEnabled "${serviceName}" "${serviceWasEnabled}" || rollbackFailed=true
     if [[ "${rollbackFailed}" == "true" ]]; then
         padmForgetCleanupPath "${backupDir}"
         return 1
@@ -2829,7 +2811,27 @@ completeCoreInstall() {
         persistRealityEntryProfile || return 1
     fi
     checkGFWStatue "${checkStep}" "${core}" || return 1
+    if [[ "${PADM_CORE_INSTALL_TRANSACTION_ACTIVE:-}" == true &&
+        "${PADM_CORE_TEMPLATE_ROLLBACK[oldStartupWasEnabled]:-false}" == true ]]; then
+        PADM_CORE_TEMPLATE_ROLLBACK[oldStartupChanged]=true
+        coreSetStartupServiceEnabled "${oldCore}" false || {
+            errorCard "旧 ${oldCore} 开机自启关闭失败，已取消核心切换"
+            return 1
+        }
+    fi
     cleanUp "${cleanupType}" || return 1
+    if [[ "${PADM_CORE_INSTALL_TRANSACTION_ACTIVE:-}" == true ]]; then
+        local localBase outputBackupDir=
+        localBase=$(subscribeLocalBaseDir) || return 1
+        padmCreateTmpRootPath outputBackupDir padm-core-install-subscriptions.XXXXXX -d || return 1
+        if ! subscriptionSyncBackupPath "${localBase}" "${outputBackupDir}" local; then
+            padmRemoveCleanupPath "${outputBackupDir}"
+            errorCard "安装账号输出备份失败，已取消生成"
+            return 1
+        fi
+        PADM_CORE_TEMPLATE_ROLLBACK[subscribeLocalBase]=${localBase}
+        PADM_CORE_TEMPLATE_ROLLBACK[subscribeOutputBackupDir]=${outputBackupDir}
+    fi
     showAccounts "${accountStep}"
 }
 

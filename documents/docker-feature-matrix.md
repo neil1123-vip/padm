@@ -192,7 +192,7 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 | `reality-coexistence` | 协议与入口 -> REALITY 管理 -> 443 共存分流 | `deferred` | `core-xray` / `nginx` | 宿主 CLI | 共存开启、状态检查、关闭及端口恢复事务尚未迁移。 |
 | `entry-port-management` | 协议与入口 -> 入口端口管理 | `deferred` | 核心 | bridge | v2/v3 已有多入口端口映射及候选事务，v3 明确核心归属；既有内部端口冻结，Fail2ban 联动和 443 共存等完整管理未交付。 |
 | `cdn-entry-management` | 协议与入口 -> CDN 入口管理 | `deferred` | `subscription` | bridge | 尚无独立订阅入口地址覆盖管理。 |
-| `fail2ban` | 系统与脚本 -> Fail2ban 防护 | `host-integrated` | `net-fail2ban` | host + `NET_ADMIN` | 封禁规则属于宿主防火墙。 |
+| `fail2ban` | 系统与脚本 -> Fail2ban 防护 | `host-integrated` | `net-fail2ban` | host + `NET_ADMIN` | 封禁规则属于宿主防火墙；已有受管运行容器支持状态与固定 jail 单 IP 解封，真实来源及完整宿主管理仍待验收。 |
 | `wireguard` | 订阅与用户 / 路由与访问控制 | `host-integrated` | `net-wireguard` | host + `NET_ADMIN` | 接口和密钥由宿主内核拥有。 |
 | `tun` | 路由与访问控制 -> TUN | `host-integrated` | `net-transparent` | host + `NET_ADMIN` + `/dev/net/tun` | 显式启用透明代理设备。 |
 | `tproxy` | 路由与访问控制 -> Redirect/TProxy | `host-integrated` | `net-transparent` | host + `NET_ADMIN` | 依赖宿主路由和防火墙规则。 |

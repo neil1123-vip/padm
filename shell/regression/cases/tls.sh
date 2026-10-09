@@ -479,6 +479,29 @@ runTlsFailureReturnRegression() (
                 fi
             done
         done
+        (
+            # 证书目标损坏也必须恢复可写的私钥，并保留证书备份供手工恢复。
+            local TMPDIR="${root}/failed-cert-restore-tmp" savedBackupDir= attempts=0
+            local -a PADM_CLEANUP_PATHS=("${PADM_CLEANUP_PATHS[@]}")
+            mkdir -p -- "${TMPDIR}"
+            printf 'saved-cert\n' >"${crtFile}"
+            printf 'saved-key\n' >"${keyFile}"
+            sudo() {
+                attempts=$((attempts + 1))
+                rm -f -- "${crtFile}"
+                mkdir -- "${crtFile}"
+                printf 'broken-key\n' >"${keyFile}"
+                return 1
+            }
+            regressionExpectStatus 1 installTLSFromAcme >/dev/null 2>&1
+            [[ "${attempts}" == 1 && -d "${crtFile}" &&
+                "$(<"${keyFile}")" == saved-key && "$(stat -c %a "${keyFile}")" == 600 ]]
+            savedBackupDir=$(find "${TMPDIR}" -maxdepth 2 -type f -name "${domain}.crt" -printf '%h\n')
+            [[ -n "${savedBackupDir}" && "$(<"${savedBackupDir}/${domain}.crt")" == saved-cert &&
+                "$(<"${savedBackupDir}/${domain}.key")" == saved-key ]]
+            rmdir -- "${crtFile}"
+            padmRemoveCleanupPath "${savedBackupDir}"
+        )
     )
 
     (

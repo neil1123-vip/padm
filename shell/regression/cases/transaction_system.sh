@@ -343,7 +343,7 @@ SH
         ln -s "${realBinary}" "${linkedBinary}"
         : >"${fixtureConfig}"
         coreSingBoxBinaryPath() { printf '%s\n' "${linkedBinary}"; }
-        pgrep() { [[ "$1" == -x && "$2" == sing-box ]] && printf '12345\n'; }
+        pgrep() { [[ "$1" == -f && "$2" == . ]] && printf '12345\n'; }
         padmReadProcExe() { printf '%s\n' "${realBinary}"; }
         padmReadProcArgs() {
             local -n argsRef=$1
@@ -470,6 +470,35 @@ SH
         checks=0 expected=0
         waitForServiceState waitStateCheck running 2 0.1 || return 1
         [[ "${checks}" == 1 && "${sleeps}" == 0 ]] || return 1
+    ) || return 1
+
+    (
+        # mask 后的 unit 仍归 systemd 管理，不能跳过状态查询和停止命令。
+        local core action running=false actions= unit="${serviceTmp}/masked.service"
+        local PADM_XRAY_SYSTEMD_SERVICE_FILE="${unit}" PADM_SINGBOX_SYSTEMD_SERVICE_FILE="${unit}"
+        local PADM_XRAY_BINARY="${serviceTmp}/missing-xray" PADM_SINGBOX_BINARY="${serviceTmp}/missing-sing-box"
+        local PADM_XRAY_OPENRC_SERVICE_FILE="${serviceTmp}/missing-xray.init"
+        local PADM_SINGBOX_OPENRC_SERVICE_FILE="${serviceTmp}/missing-sing-box.init"
+        ln -s /dev/null "${unit}"
+        padmCommandExists() { [[ "$1" == systemctl ]]; }
+        pgrep() { return 1; }
+        sleep() { :; }
+        systemctl() {
+            actions+="$*"$'\n'
+            case "$1" in
+            is-active) [[ "${running}" == true ]] ;;
+            stop) running=false ;;
+            *) return 1 ;;
+            esac
+        }
+        for core in xray sing-box; do
+            serviceInstalled "${core}" || return 1
+            running=true
+            serviceRunning "${core}" || return 1
+            actions=
+            runServiceAction "${core}" stop >/dev/null || return 1
+            [[ "${running}" == false && "${actions}" == *"stop ${core}.service"* ]] || return 1
+        done
     ) || return 1
 
     local xrayWaitLog="${serviceTmp}/xray-wait.log"

@@ -107,7 +107,7 @@ serviceInstalled() {
         local binary
         binary=$(xrayServiceBinaryPath)
         [[ -f "${binary}" && -x "${binary}" ||
-            -f "${PADM_XRAY_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/xray.service}" ||
+            -e "${PADM_XRAY_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/xray.service}" ||
             -f "${PADM_XRAY_OPENRC_SERVICE_FILE:-/etc/init.d/xray}" ]]
         ;;
     sing-box)
@@ -116,7 +116,7 @@ serviceInstalled() {
             binary=$(coreSingBoxBinaryPath)
         fi
         [[ -f "${binary}" && -x "${binary}" ||
-            -f "${PADM_SINGBOX_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/sing-box.service}" ||
+            -e "${PADM_SINGBOX_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/sing-box.service}" ||
             -f "${PADM_SINGBOX_OPENRC_SERVICE_FILE:-/etc/init.d/sing-box}" ]]
         ;;
     nginx)
@@ -357,6 +357,7 @@ singBoxRunning() {
     local pid
     local exe
     local -a procArgs=()
+    local index argument flag value hasValue commandName configMatched helpMode argsValid boolValue
     local mergedConfig
     local systemdServiceFile
     local openRcServiceFile
@@ -374,11 +375,71 @@ singBoxRunning() {
         [[ "${exe}" == "${binary}" || "${exe}" == "${binary} (deleted)" ||
             -n "${resolvedBinary}" && ( "${exe}" == "${resolvedBinary}" || "${exe}" == "${resolvedBinary} (deleted)" ) ]] || continue
         padmReadProcArgs procArgs "/proc/${pid}/cmdline" || continue
-        [[ -n "${mergedConfig}" && "${procArgs[1]:-}" == run &&
-            "${procArgs[2]:-}" == -c && "${procArgs[3]:-}" == "${mergedConfig}" ]] || continue
+        commandName= configMatched=false helpMode=false argsValid=true
+        # Cobra 配置参数累加，布尔参数取最后值；短选项中的字符串值不再扫描。
+        for ((index = 1; index < ${#procArgs[@]}; index++)); do
+            argument=${procArgs[index]}
+            [[ "${argument}" != -- ]] || break
+            if [[ "${argument}" != -?* ]]; then
+                if [[ -z "${commandName}" ]]; then
+                    [[ "${argument}" == run ]] || { argsValid=false; break; }
+                    commandName=run
+                fi
+                continue
+            fi
+            while [[ -n "${argument}" ]]; do
+                value= hasValue=false
+                if [[ "${argument}" == --* ]]; then
+                    flag=${argument%%=*}
+                    if [[ "${argument}" == *=* ]]; then
+                        value=${argument#*=} hasValue=true
+                    fi
+                    argument=
+                else
+                    flag="-${argument:1:1}"
+                    argument=${argument:2}
+                    if [[ "${argument}" == =* ]]; then
+                        value=${argument#=} hasValue=true argument=
+                    fi
+                fi
+                case "${flag}" in
+                -c | --config | -C | --config-directory | -D | --directory)
+                    if [[ "${hasValue}" == false ]]; then
+                        if [[ -n "${argument}" ]]; then
+                            value=${argument} argument=
+                        else
+                            index=$((index + 1))
+                            if ((index >= ${#procArgs[@]})); then
+                                argsValid=false
+                                break 2
+                            fi
+                            value=${procArgs[index]}
+                        fi
+                    fi
+                    if [[ "${flag}" == -c || "${flag}" == --config ]] &&
+                        [[ -n "${mergedConfig}" && "${value}" == "${mergedConfig}" ]]; then
+                        configMatched=true
+                    fi
+                    ;;
+                -h | --help | --disable-color)
+                    [[ "${hasValue}" == true ]] || value=true
+                    case "${value}" in
+                    0 | f | F | false | FALSE | False) boolValue=false ;;
+                    1 | t | T | true | TRUE | True) boolValue=true ;;
+                    *) argsValid=false; break 2 ;;
+                    esac
+                    [[ "${flag}" == --disable-color ]] || helpMode=${boolValue}
+                    [[ -z "${argument}" ]] || argument="-${argument}"
+                    ;;
+                *) argsValid=false; break 2 ;;
+                esac
+            done
+        done
+        [[ "${argsValid}" == true && "${commandName}" == run &&
+            "${configMatched}" == true && "${helpMode}" == false ]] || continue
         return 0
-    done < <(pgrep -x sing-box 2>/dev/null)
-    if [[ "${release:-}" != "alpine" && -f "${systemdServiceFile}" ]] && padmCommandExists systemctl; then
+    done < <(pgrep -f . 2>/dev/null)
+    if [[ "${release:-}" != "alpine" && -e "${systemdServiceFile}" ]] && padmCommandExists systemctl; then
         systemctl is-active --quiet sing-box.service && return 0
     elif [[ -n "${openRcServiceFile}" && -f "${openRcServiceFile}" ]] && padmCommandExists rc-service; then
         rc-service sing-box status >/dev/null 2>&1 && return 0
@@ -401,7 +462,7 @@ handleSingBoxMergeFailure() {
 handleSingBox() {
     local serviceManager=
     if [[ "${release:-}" != "alpine" ]] &&
-        [[ -f "${PADM_SINGBOX_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/sing-box.service}" ]] &&
+        [[ -e "${PADM_SINGBOX_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/sing-box.service}" ]] &&
         padmCommandExists systemctl; then
         serviceManager=systemd
     elif [[ -f "${PADM_SINGBOX_OPENRC_SERVICE_FILE:-/etc/init.d/sing-box}" ]] &&
@@ -523,8 +584,8 @@ xrayRunning() {
         done
         [[ "${configMatched}" == true && "${testMode}" == false && "${dumpMode}" == false ]] || continue
         return 0
-    done < <(pgrep -x xray 2>/dev/null)
-    if [[ "${release:-}" != "alpine" && -f "${systemdServiceFile}" ]] && padmCommandExists systemctl; then
+    done < <(pgrep -f . 2>/dev/null)
+    if [[ "${release:-}" != "alpine" && -e "${systemdServiceFile}" ]] && padmCommandExists systemctl; then
         systemctl is-active --quiet xray.service && return 0
     elif [[ -n "${openRcServiceFile}" && -f "${openRcServiceFile}" ]] && padmCommandExists rc-service; then
         rc-service xray status >/dev/null 2>&1 && return 0
@@ -540,7 +601,7 @@ handleXray() {
     xrayBinary=$(xrayServiceBinaryPath)
     xrayConfigDir=$(xrayServiceConfigDir)
     if [[ "${release:-}" != "alpine" ]] &&
-        [[ -f "${PADM_XRAY_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/xray.service}" ]] &&
+        [[ -e "${PADM_XRAY_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/xray.service}" ]] &&
         padmCommandExists systemctl; then
         serviceManager=systemd
     elif [[ -f "${PADM_XRAY_OPENRC_SERVICE_FILE:-/etc/init.d/xray}" ]] &&

@@ -259,6 +259,9 @@ sing-box 从固定 SagerNet 源直连下载所选分类，资源缺失或下载�
 DNS 私有 JSON 示例为 `{"server":"192.0.2.53","port":53,"domains":["domain:example.net"]}`，
 仅接受字面 IPv4/IPv6 UDP 服务器，`domains` 必须包含 1–256 条已规范化的
 `full:`、`domain:`、`keyword:` 或 `geosite:` 规则，各类为 OR；本阶段不提供全局 DNS、DoH 或 DoT。
+菜单 `17` 的 `6` 可直接输入服务器 IP、端口（留空默认 `53`）和域名规则 CSV，
+或使用 `--dns-rules <IP> <端口> <CSV>`；CSV 规范化与 Direct/Block 相同。
+此操作创建或整组替换 DNS 分流，保留 `--dns` 私有 JSON CLI 和其它路由子项。
 hosts 私有 JSON 示例为 `{"exact.example.net":"192.0.2.10"}`，接受 1–256 个小写精确域名，
 每个域名对应一个可路由字面 IPv4/IPv6；不支持 hosts 后缀、关键字或分类匹配。
 地址示例不可直接用作服务器；文件安全要求与 SOCKS5 输入相同。
@@ -266,6 +269,7 @@ hosts 私有 JSON 示例为 `{"exact.example.net":"192.0.2.10"}`，接受 1–25
 ```bash
 padm-docker edit --dns /root/padm-dns.json --preview
 padm-docker edit --dns /root/padm-dns.json --confirm PADM-DOCKER-EDIT
+padm-docker edit --dns-rules 192.0.2.53 53 'example.net,full:exact.example.org' --preview
 padm-docker edit --hosts /root/padm-hosts.json --confirm PADM-DOCKER-EDIT
 padm-docker edit --dns-off --confirm PADM-DOCKER-EDIT
 padm-docker edit --hosts-off --confirm PADM-DOCKER-EDIT
@@ -581,6 +585,20 @@ padm-docker logs
 padm-docker validate
 padm-docker assess
 ```
+
+服务维护菜单第 5 项提供已有受管 Fail2ban 的状态与单 IP 解封：
+
+```bash
+padm-docker fail2ban status
+padm-docker fail2ban unban 192.0.2.7
+padm-docker fail2ban unban 2001:db8::7
+```
+
+只操作当前运行且规格、镜像、标签及挂载一致的 `net-fail2ban` 容器和固定
+`padm-nginx` jail；不自动启动服务，不修改配置或新增封禁。解封接受单个
+IPv4/IPv6 字面地址，不接受域名、CIDR、zone、任意 jail 或全部解封；
+菜单执行前需要确认。未配置、停机或归属不一致时拒绝操作，底层失败返回非零。
+这不代表新启用或完整管理已验收；真实客户端来源、宿主规则归属与重启恢复仍按 5C 门槛验证。
 
 主菜单第 13 项“核心升级评估”或 `assess` 会验签并预拉取候选镜像，使用私有配置副本
 执行菜单版升级风险扫描、实际核心配置试跑和 Xray 严格校验，以及已启用的 TLS、
@@ -1254,11 +1272,14 @@ Windows 本机使用 PowerShell 7.3 或更新版本运行专用 Docker Linux 回
 ```powershell
 .\shell\regression\run-docker.ps1 -Selector fast
 .\shell\regression\run-docker.ps1 -Selector ui-subscription-workflow-focused
+.\shell\regression\run-docker.ps1 -Selector docker-routing-domains-workflow
 .\shell\regression\run-docker.ps1 -Selector ci -Jobs 3
 ```
 
 普通定向 selector 默认 `-Jobs 2`，完整 `ci`、`ci-pr`、`all` 默认 `-Jobs 3`，
 完整 `docker-contracts` 默认 `-Jobs 6`（支持 1–8）。
+Direct/Block CSV 或菜单派发改动优先使用 `docker-routing-domains-workflow` 和 `docker-menu`；
+工作流定向复用原事务断言，不替代 Schema、生成器、其它路由矩阵和真实流量验收。
 各任务先运行匹配改动的定向回归，集成完成后集中执行完整回归。
 入口归档当前工作区的已跟踪文件和未忽略的新文件，包含未提交修改，不包含 `.git`
 和 `.tmp-*`；源码、`TMPDIR`、`HOME` 在容器内部，不挂载 Windows 工作目录。

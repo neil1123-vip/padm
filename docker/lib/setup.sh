@@ -1345,6 +1345,7 @@ dockerEditCommand() {
     local siteMode= siteSource= siteUrl=
     local alpnListener= alpnOrder=
     local http01= socks5= socks5File= socks5Domains= routingKind= routingFile= routingAction=
+    local routingServer= routingPort=
     local routingDomains='[]'
     local httpRelay= httpRelayFile=
     local portAlias= portAliasListener= portAliasPort=
@@ -1405,6 +1406,19 @@ dockerEditCommand() {
             [[ -z "${socks5}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             socks5=global
             shift
+            ;;
+        --dns-rules)
+            [[ "$#" -ge 4 && -n "$2" && "$2" != --* && -n "$3" && "$3" != --* &&
+                -n "$4" && "$4" != --* && -z "${routingKind}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            [[ "$3" =~ ^[0-9]{1,5}$ ]] || return "${PADM_DOCKER_RC_USAGE}"
+            [[ "$((10#$3))" -ge 1 && "$((10#$3))" -le 65535 ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            routingKind=dns routingAction=rules routingServer=$2
+            routingPort=$((10#$3))
+            routingDomains=$(dockerSocks5DomainsNormalize "$4") ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            shift 4
             ;;
         --direct-domains|--block-domains|--direct-domains-add|--block-domains-add)
             [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${routingKind}" ]] ||
@@ -1773,6 +1787,11 @@ dockerEditCommand() {
         elif [[ "${routingAction}" == domains ]]; then
             jq --arg kind "${routingKind}" --argjson domains "${routingDomains}" \
                 '.routing[$kind].domains = $domains' "${draft}" >"${draft}.next"
+        elif [[ "${routingAction}" == rules ]]; then
+            jq --arg server "${routingServer}" --argjson port "${routingPort}" \
+                --argjson domains "${routingDomains}" \
+                '.routing.dns = {server:$server,port:$port,domains:$domains}' \
+                "${draft}" >"${draft}.next"
         elif [[ "${routingAction}" == enable ]]; then
             dockerEditPrivateInputCopy "${routingFile}" "${workspace}/${routingKind}.json" "${routingKind}" || {
                 dockerError '路由输入须为 root 所有的 0600 单链接普通 JSON 文件，最多 64 KiB，祖先目录不得可写或含链接'

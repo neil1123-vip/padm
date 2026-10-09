@@ -179,12 +179,20 @@ runDockerRoutingRegionRegression() {
     PADM_DOCKER_ROUTING_SCOPE=region bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
 }
 
+runDockerRoutingDomainsWorkflowRegression() {
+    PADM_DOCKER_ROUTING_SCOPE=domains-workflow bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
+}
+
 runDockerRoutingIPv6Regression() {
     PADM_DOCKER_ROUTING_SCOPE=ipv6 bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
 }
 
 runDockerRoutingIPv6RealRegression() {
     bash "${PROJECT_ROOT}/docker/tests/routing-ipv6-real.sh"
+}
+
+runDockerFail2banRealRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/fail2ban-isolated-real.sh"
 }
 
 runDockerRoutingWarpRegression() {
@@ -308,6 +316,7 @@ registerRegressionFunctionLeaf docker-renewal runDockerRenewalRegression
 registerRegressionFunctionLeaf docker-phase2 runDockerPhase2Regression
 registerRegressionFunctionLeaf docker-phase3 runDockerPhase3Regression
 registerRegressionFunctionLeaf docker-phase4 runDockerPhase4Regression
+registerRegressionFunctionLeaf docker-fail2ban-real runDockerFail2banRealRegression
 registerRegressionFunctionLeaf docker-phase5 runDockerPhase5Regression
 registerRegressionFunctionLeaf docker-phase6 runDockerPhase6Regression
 registerRegressionFunctionLeaf docker-traffic runDockerTrafficRegression
@@ -328,6 +337,7 @@ registerRegressionFunctionLeaf docker-routing-block-bt runDockerRoutingBlockBtRe
 registerRegressionFunctionLeaf docker-routing-block-bt-real runDockerRoutingBlockBtRealRegression
 registerRegressionFunctionLeaf docker-routing-region runDockerRoutingRegionRegression
 registerRegressionFunctionLeaf docker-routing-region-real runDockerRoutingRegionRealRegression
+registerRegressionFunctionLeaf docker-routing-domains-workflow runDockerRoutingDomainsWorkflowRegression
 registerRegressionFunctionLeaf docker-routing-ipv6 runDockerRoutingIPv6Regression
 registerRegressionFunctionLeaf docker-routing-ipv6-real runDockerRoutingIPv6RealRegression
 registerRegressionFunctionLeaf docker-routing-warp runDockerRoutingWarpRegression

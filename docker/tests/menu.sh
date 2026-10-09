@@ -350,7 +350,7 @@ runPortAliasDriver() {
 }
 
 runMaintenanceDriver() {
-    local scenario=$1 choice answer=n
+    local scenario=$1 choice address answer=n
     local -A targetPrompts=()
     targetReply 'Docker 管理菜单' $'18\n'
     case "${scenario}" in
@@ -393,6 +393,55 @@ runMaintenanceDriver() {
             return 0
         fi
         targetReply '确认停止服务并卸载控制命令（保留状态、配置和数据）？[y/N]' $'\004'
+        ;;
+    fail2ban-*)
+        targetReply 'Docker 服务维护' $'5\n'
+        case "${scenario}" in
+        fail2ban-flow)
+            targetReply 'Docker Fail2ban 维护' $'1\n'
+            for address in 203.0.113.9 2001:db8::9; do
+                targetReply 'Docker Fail2ban 维护' $'2\n'
+                targetReply '待解封 IPv4/IPv6（0 返回）: ' "${address}"$'\n'
+                targetReply "确认从 padm-nginx 解封 ${address}？[y/N]: " $'y\n'
+            done
+            targetReply 'Docker Fail2ban 维护' $'99\n'
+            ;;
+        fail2ban-cancel)
+            for answer in $'0\n' $'\n' $'\004'; do
+                targetReply 'Docker Fail2ban 维护' $'2\n'
+                targetReply '待解封 IPv4/IPv6（0 返回）: ' "${answer}"
+            done
+            for answer in $'n\n' $'\n' $'0\n' $'\004'; do
+                targetReply 'Docker Fail2ban 维护' $'2\n'
+                targetReply '待解封 IPv4/IPv6（0 返回）: ' $'203.0.113.9\n'
+                targetReply '确认从 padm-nginx 解封 203.0.113.9？[y/N]: ' "${answer}"
+            done
+            ;;
+        fail2ban-menu-eof) ;;
+        *)
+            [[ "${scenario}" != fail2ban-failed ]] ||
+                targetReply 'Docker Fail2ban 维护' $'1\n'
+            targetReply 'Docker Fail2ban 维护' $'2\n'
+            address=203.0.113.9
+            [[ "${scenario}" != fail2ban-invalid ]] || address=not-an-ip
+            targetReply '待解封 IPv4/IPv6（0 返回）: ' "${address}"$'\n'
+            targetReply "确认从 padm-nginx 解封 ${address}？[y/N]: " $'y\n'
+            if [[ "${scenario}" == fail2ban-int || "${scenario}" == fail2ban-term ]]; then
+                waitForText 'fixture-fail2ban-ready' "${CONTROL_LOG}" || exit 35
+                assertNoLock
+                if [[ "${scenario}" == fail2ban-term ]]; then
+                    kill -TERM "$(<"${TEST_ROOT}/menu.pid")" || exit 36
+                    return 0
+                fi
+                printf '\003' >&3
+            fi
+            ;;
+        esac
+        if [[ "${scenario}" == fail2ban-menu-eof ]]; then
+            targetReply 'Docker Fail2ban 维护' $'\004'
+        else
+            targetReply 'Docker Fail2ban 维护' $'0\n'
+        fi
         ;;
     esac
     targetReply 'Docker 服务维护' $'0\n'
@@ -595,7 +644,7 @@ runSitesDriver() {
 }
 
 runRoutingDriver() {
-    local scenario=$1 choice
+    local scenario=$1 choice input
     local -A targetPrompts=()
     targetReply 'Docker 管理菜单' $'17\n'
     : >"${TLS_WIZARD_ACTIONS}"
@@ -611,7 +660,9 @@ runRoutingDriver() {
         targetReply 'Docker 路由与出站' $'5\n'
         targetReply 'Docker 路由与出站' $'3\n'
         targetReply 'Docker 路由与出站' $'6\n'
-        targetReply 'root 私有 DNS JSON 文件绝对路径（0 返回）' $'/root/padm-dns.json\n'
+        targetReply 'DNS 服务器 IPv4/IPv6（0 返回）' $'203.0.113.53\n'
+        targetReply 'DNS 端口 [53，0 返回]' $'\n'
+        targetReply 'DNS 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\n'
         targetReply 'Docker 路由与出站' $'7\n'
         targetReply 'Docker 路由与出站' $'8\n'
         targetReply 'root 私有 hosts JSON 文件绝对路径（0 返回）' $'/root/padm-hosts.json\n'
@@ -674,9 +725,18 @@ runRoutingDriver() {
         targetReply 'Docker 路由与出站' $'4\n'
         targetReply 'SOCKS5 域名规则（逗号分隔；domain:/full:/keyword:/geosite:，0 返回）' $'\n'
         targetReply 'Docker 路由与出站' $'6\n'
-        targetReply 'root 私有 DNS JSON 文件绝对路径（0 返回）' $'0\n'
+        targetReply 'DNS 服务器 IPv4/IPv6（0 返回）' $'0\n'
         targetReply 'Docker 路由与出站' $'6\n'
-        targetReply 'root 私有 DNS JSON 文件绝对路径（0 返回）' $'\n'
+        targetReply 'DNS 服务器 IPv4/IPv6（0 返回）' $'\n'
+        targetReply 'Docker 路由与出站' $'6\n'
+        targetReply 'DNS 服务器 IPv4/IPv6（0 返回）' $'203.0.113.53\n'
+        targetReply 'DNS 端口 [53，0 返回]' $'0\n'
+        for input in 0 ''; do
+            targetReply 'Docker 路由与出站' $'6\n'
+            targetReply 'DNS 服务器 IPv4/IPv6（0 返回）' $'203.0.113.53\n'
+            targetReply 'DNS 端口 [53，0 返回]' $'\n'
+            targetReply 'DNS 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' "${input}"$'\n'
+        done
         targetReply 'Docker 路由与出站' $'8\n'
         targetReply 'root 私有 hosts JSON 文件绝对路径（0 返回）' $'0\n'
         targetReply 'Docker 路由与出站' $'8\n'
@@ -728,9 +788,33 @@ runRoutingDriver() {
         targetReply 'Docker 路由与出站' $'4\n'
         targetReply 'SOCKS5 域名规则（逗号分隔；domain:/full:/keyword:/geosite:，0 返回）' $'\004'
         ;;
-    dns-file-eof)
+    dns-server-eof)
         targetReply 'Docker 路由与出站' $'6\n'
-        targetReply 'root 私有 DNS JSON 文件绝对路径（0 返回）' $'\004'
+        targetReply 'DNS 服务器 IPv4/IPv6（0 返回）' $'\004'
+        ;;
+    dns-port-eof|dns-domains-eof|dns-explicit-port|dns-invalid|dns-failed)
+        targetReply 'Docker 路由与出站' $'6\n'
+        targetReply 'DNS 服务器 IPv4/IPv6（0 返回）' $'203.0.113.53\n'
+        if [[ "${scenario}" == dns-port-eof ]]; then
+            targetReply 'DNS 端口 [53，0 返回]' $'\004'
+        else
+            case "${scenario}" in
+            dns-explicit-port) targetReply 'DNS 端口 [53，0 返回]' $'5353\n' ;;
+            dns-invalid) targetReply 'DNS 端口 [53，0 返回]' $'65536\n' ;;
+            *) targetReply 'DNS 端口 [53，0 返回]' $'\n' ;;
+            esac
+            if [[ "${scenario}" == dns-domains-eof ]]; then
+                targetReply 'DNS 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'\004'
+            else
+                targetReply 'DNS 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET\n'
+            fi
+            if [[ "${scenario}" == dns-invalid ]]; then
+                targetReply 'Docker 路由与出站' $'6\n'
+                targetReply 'DNS 服务器 IPv4/IPv6（0 返回）' $'203.0.113.53\n'
+                targetReply 'DNS 端口 [53，0 返回]' $'\n'
+                targetReply 'DNS 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'regexp:bad\n'
+            fi
+        fi
         ;;
     hosts-file-eof)
         targetReply 'Docker 路由与出站' $'8\n'
@@ -810,7 +894,8 @@ runPty() {
     mkfifo "${pipe}"
     printf -v command '%q ' bash -u "${entry}" "$@"
     if [[ "${driver}" == term ||
-        ( ( "${driver}" == targets || "${driver}" == geo ) && "${input}" == term ) ]]; then
+        ( ( "${driver}" == targets || "${driver}" == geo ) && "${input}" == term ) ||
+        ( "${driver}" == maintenance && "${input}" == fail2ban-term ) ]]; then
         printf -v command 'printf "%%s\\n" "$$" >%q; exec %s' "${TEST_ROOT}/menu.pid" "${command}"
         expected=143
     fi
@@ -1141,6 +1226,11 @@ edit)
     elif [[ "${2:-}" == --direct-domains || "${2:-}" == --block-domains ||
         "${2:-}" == --direct-domains-add || "${2:-}" == --block-domains-add ]]; then
         dockerSocks5DomainsNormalize "${3:-}" >/dev/null || exit 2
+    elif [[ "${2:-}" == --dns-rules ]]; then
+        [[ "$#" -eq 5 && -n "${3:-}" && "${3:-}" != --* &&
+            "${4:-}" =~ ^[0-9]{1,5}$ ]] || exit 2
+        [[ "$((10#$4))" -ge 1 && "$((10#$4))" -le 65535 ]] || exit 2
+        dockerSocks5DomainsNormalize "$5" >/dev/null || exit 2
     fi
     exit "${SITE_EDIT_STATUS:-0}"
     ;;
@@ -1150,6 +1240,25 @@ validate|update|rollback|uninstall)
     recordAction "$@"
     [[ "$1" != validate ]] || exit "${MAINTENANCE_VALIDATE_STATUS:-0}"
     exit "${MAINTENANCE_STATUS:-0}"
+    ;;
+fail2ban)
+    recordAction "$@"
+    case "${2:-}" in
+    status) printf 'fixture-fail2ban-status\n'; exit "${FAIL2BAN_STATUS:-0}" ;;
+    unban)
+        # 字面 IP 语法矩阵由服务合同覆盖，此处只验证错误返回后仍留在菜单。
+        [[ "${3:-}" != not-an-ip ]] || exit 2
+        if [[ "${FAIL2BAN_WAIT:-0}" == 1 ]]; then
+            trap 'exit 130' INT
+            trap 'exit 143' TERM
+            printf '%s\n' "${BASHPID}" >"${FAIL2BAN_PID:?}"
+            printf 'fixture-fail2ban-ready\n'
+            while :; do sleep 1; done
+        fi
+        exit "${FAIL2BAN_UNBAN_STATUS:-0}"
+        ;;
+    *) exit 2 ;;
+    esac
     ;;
 control)
     recordAction "$@"
@@ -1237,11 +1346,48 @@ for maintenanceCase in flow cancel update-eof uninstall-eof failed update rollba
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedMaintenance}" ]] ||
         fail "维护 ${maintenanceCase} 参数分发错误或取消后仍执行操作"
     for maintenanceLabel in '18. 服务维护' 'Docker 服务维护' '1. 校验部署配置' \
-        '2. 更新镜像与控制脚本' '3. 回滚最近更新' '4. 卸载服务与控制命令（保留数据）'; do
+        '2. 更新镜像与控制脚本' '3. 回滚最近更新' '4. 卸载服务与控制命令（保留数据）' '5. Fail2ban 维护'; do
         grep -Fq "${maintenanceLabel}" "${CONTROL_LOG}" || fail "维护菜单缺少: ${maintenanceLabel}"
     done
 done
 unset MAINTENANCE_STATUS MAINTENANCE_VALIDATE_STATUS
+
+for fail2banCase in flow cancel menu-eof invalid failed int term; do
+    : >"${TLS_WIZARD_ACTIONS}"
+    export FAIL2BAN_STATUS=0 FAIL2BAN_UNBAN_STATUS=0 FAIL2BAN_WAIT=0 \
+        FAIL2BAN_PID="${TEST_ROOT}/fail2ban.pid"
+    [[ "${fail2banCase}" != failed ]] || { FAIL2BAN_STATUS=17; FAIL2BAN_UNBAN_STATUS=17; }
+    [[ "${fail2banCase}" != int && "${fail2banCase}" != term ]] || FAIL2BAN_WAIT=1
+    runPty "fail2ban-${fail2banCase}" maintenance "fail2ban-${fail2banCase}" "${TLS_WIZARD_CLI}" menu
+    expectedFail2ban=
+    case "${fail2banCase}" in
+    flow)
+        expectedFail2ban=$'fail2ban status\nfail2ban unban 203.0.113.9\nfail2ban unban 2001:db8::9'
+        grep -Fq 'fixture-fail2ban-status' "${CONTROL_LOG}" || fail 'Fail2ban 状态未显示后端输出'
+        grep -Fq '无效选项' "${CONTROL_LOG}" || fail 'Fail2ban 无效选项后没有留在菜单'
+        ;;
+    invalid)
+        expectedFail2ban='fail2ban unban not-an-ip'
+        grep -Fq '操作失败，退出码: 2' "${CONTROL_LOG}" || fail 'Fail2ban 非法 IP 未显示用法错误'
+        ;;
+    failed)
+        expectedFail2ban=$'fail2ban status\nfail2ban unban 203.0.113.9'
+        [[ "$(grep -Fc '操作失败，退出码: 17' "${CONTROL_LOG}")" -eq 2 ]] ||
+            fail 'Fail2ban 后端失败未保留退出码或留在子菜单'
+        ;;
+    int|term)
+        expectedFail2ban='fail2ban unban 203.0.113.9'
+        ! kill -0 "$(<"${FAIL2BAN_PID}")" 2>/dev/null ||
+            fail "Fail2ban ${fail2banCase} 后 CLI 进程仍存活"
+        ;;
+    esac
+    [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedFail2ban}" ]] ||
+        fail "Fail2ban ${fail2banCase} 参数分发错误或取消后仍执行操作"
+    for fail2banLabel in '5. Fail2ban 维护' 'Docker Fail2ban 维护' '1. 查看状态' '2. 解封单个 IP'; do
+        grep -Fq "${fail2banLabel}" "${CONTROL_LOG}" || fail "Fail2ban 菜单缺少: ${fail2banLabel}"
+    done
+done
+unset FAIL2BAN_STATUS FAIL2BAN_UNBAN_STATUS FAIL2BAN_WAIT FAIL2BAN_PID
 
 export SITE_MENU_RECORD_STATUS=1
 for siteCase in flow cancel static-eof redirect-eof alpn-diagnose-eof alpn-recommended-eof \
@@ -1273,22 +1419,35 @@ for siteCase in flow cancel static-eof redirect-eof alpn-diagnose-eof alpn-recom
 done
 unset SITE_MENU_RECORD_STATUS SITE_EDIT_STATUS SITE_ALPN_STATUS
 
-for routingCase in flow cancel file-eof domains-eof dns-file-eof hosts-file-eof direct-domains-eof block-domains-eof direct-block-invalid direct-domains-add-eof block-domains-add-eof direct-block-add-invalid direct-block-add-failed block-ips-file-eof region-eof ipv6-eof warp-eof http-relay-eof failed return; do
+for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof dns-domains-eof dns-explicit-port dns-invalid dns-failed hosts-file-eof direct-domains-eof block-domains-eof direct-block-invalid direct-domains-add-eof block-domains-add-eof direct-block-add-invalid direct-block-add-failed block-ips-file-eof region-eof ipv6-eof warp-eof http-relay-eof failed return; do
     : >"${TLS_WIZARD_ACTIONS}"
     export SITE_EDIT_STATUS=0 ROUTING_STATUS=0
     [[ "${routingCase}" != failed ]] || { SITE_EDIT_STATUS=15; ROUTING_STATUS=17; }
-    [[ "${routingCase}" != direct-block-add-failed ]] || SITE_EDIT_STATUS=15
+    [[ "${routingCase}" != direct-block-add-failed && "${routingCase}" != dns-failed ]] || SITE_EDIT_STATUS=15
     runPty "routing-${routingCase}" routing "${routingCase}" "${TLS_WIZARD_CLI}" menu
     expectedRouting=
     case "${routingCase}" in
     flow|failed)
-        expectedRouting=$'edit --socks5 /root/padm-socks5.json\nedit --socks5-off\nprotocol routing-status\nedit --socks5-domains Example.NET, full:Exact.Example.Com, geosite:cn\nedit --socks5-global\nprotocol routing-status\nedit --dns /root/padm-dns.json\nedit --dns-off\nedit --hosts /root/padm-hosts.json\nedit --hosts-off\nedit --direct-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --direct-off\nedit --block-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --block-off\nedit --block-ips /root/padm-block-ips.json\nedit --block-ips-off\nedit --block-bt\nedit --block-bt-off'
+        expectedRouting=$'edit --socks5 /root/padm-socks5.json\nedit --socks5-off\nprotocol routing-status\nedit --socks5-domains Example.NET, full:Exact.Example.Com, geosite:cn\nedit --socks5-global\nprotocol routing-status\nedit --dns-rules 203.0.113.53 53 Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --dns-off\nedit --hosts /root/padm-hosts.json\nedit --hosts-off\nedit --direct-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --direct-off\nedit --block-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --block-off\nedit --block-ips /root/padm-block-ips.json\nedit --block-ips-off\nedit --block-bt\nedit --block-bt-off'
         expectedRouting+=$'\nedit --region both --region-allow Example.NET, full:Exact.Example.Com\nedit --region domain\nedit --region ip\nedit --region-off'
         expectedRouting+=$'\nedit --ipv6 selective --ipv6-domains Example.NET, full:Exact.Example.Com\nedit --ipv6 global\nedit --ipv6-off\nprotocol routing-status'
         expectedRouting+=$'\nedit --warp /root/padm-warp.json\nedit --warp-off\nprotocol routing-status'
         expectedRouting+=$'\nedit --http-relay /root/padm-http-relay.json\nedit --http-relay-off\nprotocol routing-status'
         expectedRouting+=$'\nedit --direct-domains-add Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --block-domains-add Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN'
         grep -Fq '无效选项' "${CONTROL_LOG}" || fail '路由菜单没有保留无效输入后的操作'
+        ;;
+    dns-explicit-port)
+        expectedRouting='edit --dns-rules 203.0.113.53 5353 Example.NET'
+        ;;
+    dns-invalid)
+        expectedRouting=$'edit --dns-rules 203.0.113.53 65536 Example.NET\nedit --dns-rules 203.0.113.53 53 regexp:bad'
+        [[ "$(grep -Fc '操作失败，退出码: 2' "${CONTROL_LOG}")" -eq 2 ]] ||
+            fail 'DNS 非法端口或 CSV 未显示用法错误并保留菜单'
+        ;;
+    dns-failed)
+        expectedRouting='edit --dns-rules 203.0.113.53 53 Example.NET'
+        grep -Fq '操作失败，退出码: 15' "${CONTROL_LOG}" ||
+            fail 'DNS 规则提交失败未显示状态错误并保留菜单'
         ;;
     direct-block-invalid)
         expectedRouting=$'edit --direct-domains regexp:bad\nedit --block-domains regexp:bad'

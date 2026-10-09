@@ -422,7 +422,7 @@ installTLSFromAcme() {
     local backupDir=
     local backupCrt=
     local backupKey=
-    local installStatus attempt
+    local installStatus attempt restoreStatus
     local acmeBin acmeDomain
 
     tlsDomainNameIsSafe "${tlsDomain}" || { errorCard "TLS 域名不合法"; return 1; }
@@ -469,8 +469,10 @@ installTLSFromAcme() {
             return 0
         fi
         tail -n 10 "${acmeLogFile}" 2>/dev/null || true
-        if ! restoreCoreOptionalFileBackup "${backupCrt}" "${crtFile}" 644 ||
-            ! restoreCoreOptionalFileBackup "${backupKey}" "${keyFile}" 600; then
+        restoreStatus=0
+        restoreCoreOptionalFileBackup "${backupCrt}" "${crtFile}" 644 || restoreStatus=1
+        restoreCoreOptionalFileBackup "${backupKey}" "${keyFile}" 600 || restoreStatus=1
+        if [[ "${restoreStatus}" != 0 ]]; then
             padmForgetCleanupPath "${backupDir}"
             errorCard "TLS安装失败，证书或私钥恢复失败，请手动检查备份目录: ${backupDir}"
             return 1

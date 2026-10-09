@@ -7,6 +7,12 @@ PADM_DOCKER_LIFECYCLE_LOADED=1
 
 DOCKER_ASSESS_PROJECT=
 DOCKER_ASSESS_CANDIDATE=
+DOCKER_INSTALL_TRANSACTION_ACTIVE=0
+DOCKER_INSTALL_PREVIOUS_BUNDLE_TARGET=
+DOCKER_INSTALL_BUNDLE_TARGET=
+DOCKER_INSTALL_CLI_PATH=
+DOCKER_INSTALL_CLI_EXISTED=1
+DOCKER_INSTALL_CLI_INODE=
 
 dockerUsage() {
     cat >&2 <<'EOF'
@@ -31,6 +37,7 @@ dockerUsage() {
   padm-docker edit --port-alias-remove <入口 ID> <公开端口> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --port-alias-default <入口 ID> <已有额外端口|base> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --dns <root 私有 JSON 文件> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --dns-rules <IPv4/IPv6> <DNS 端口> <域名规则 CSV> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --dns-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --hosts <root 私有 JSON 文件> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --hosts-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
@@ -100,6 +107,8 @@ dockerUsage() {
   padm-docker traffic <show|collect>
   padm-docker traffic limit <账号 ID> <额度 GiB，0 不限额>
   padm-docker traffic reset <账号 ID>
+  padm-docker fail2ban status
+  padm-docker fail2ban unban <单个 IPv4/IPv6>
   padm-docker up
   padm-docker down
   padm-docker restart
@@ -338,39 +347,11 @@ dockerPrepareInstallSource() {
 }
 
 dockerInstallCommand() {
-    local sourceRoot= requestedRef= root
+    local sourceRoot requestedRef root
     local previousBundleTarget= installedBundleTarget
-    while [[ "$#" -gt 0 ]]; do
-        case "$1" in
-        --no-menu)
-            DOCKER_MENU_AFTER_INSTALL=0
-            shift
-            ;;
-        --source)
-            [[ "$#" -ge 2 && -n "$2" ]] || return "${PADM_DOCKER_RC_USAGE}"
-            sourceRoot=$2
-            shift 2
-            ;;
-        --ref)
-            [[ "$#" -ge 2 && -n "$2" ]] || return "${PADM_DOCKER_RC_USAGE}"
-            requestedRef=$2
-            shift 2
-            ;;
-        *)
-            dockerUsage
-            return "${PADM_DOCKER_RC_USAGE}"
-            ;;
-        esac
-    done
-    if [[ -n "${sourceRoot}" && "${requestedRef}" == "latest" ]]; then
-        dockerError '--source 不能与 --ref latest 同时使用'
-        return "${PADM_DOCKER_RC_USAGE}"
-    fi
-    if [[ -n "${requestedRef}" && "${requestedRef}" != "latest" ]] &&
-        ! dockerBundleRefIsValid "${requestedRef}"; then
-        dockerError '--ref 必须是 40 位小写 commit SHA 或 latest'
-        return "${PADM_DOCKER_RC_USAGE}"
-    fi
+    dockerEntryParseInstallArgs "$@" || return $?
+    sourceRoot=${DOCKER_ENTRY_INSTALL_SOURCE}
+    requestedRef=${DOCKER_ENTRY_INSTALL_REF}
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
     dockerAssertInstallAllowed || return "${PADM_DOCKER_RC_CONFLICT}"
     dockerPrepareInstallSource "${sourceRoot}" "${requestedRef}" || {
@@ -391,25 +372,76 @@ dockerInstallCommand() {
                 return "${PADM_DOCKER_RC_BUNDLE}"
             }
     fi
+    DOCKER_INSTALL_TRANSACTION_ACTIVE=1
+    DOCKER_INSTALL_PREVIOUS_BUNDLE_TARGET=${previousBundleTarget}
+    DOCKER_INSTALL_BUNDLE_TARGET=
+    DOCKER_INSTALL_CLI_PATH="${PADM_DOCKER_BIN_DIR:-/usr/local/bin}/padm-docker"
+    DOCKER_INSTALL_CLI_EXISTED=0
+    DOCKER_INSTALL_CLI_INODE=
+    [[ ! -e "${DOCKER_INSTALL_CLI_PATH}" && ! -L "${DOCKER_INSTALL_CLI_PATH}" ]] ||
+        DOCKER_INSTALL_CLI_EXISTED=1
     dockerInstallBundle "${DOCKER_INSTALL_SOURCE_ROOT}" "${DOCKER_INSTALL_SOURCE_REF}" || {
         dockerError 'Docker 控制 bundle 校验或切换失败'
         return "${PADM_DOCKER_RC_BUNDLE}"
     }
     installedBundleTarget=$(readlink "${root}/bundle") || return "${PADM_DOCKER_RC_BUNDLE}"
+    DOCKER_INSTALL_BUNDLE_TARGET=${installedBundleTarget}
     dockerInstallCli || {
         dockerError 'padm-docker 命令安装失败'
-        if [[ -n "${previousBundleTarget}" ]]; then
-            dockerActivateBundle "${previousBundleTarget}" ||
-                dockerError "旧 Docker bundle 恢复失败，请检查: ${root}/bundle"
-        elif [[ -L "${root}/bundle" && "$(readlink "${root}/bundle")" == "${installedBundleTarget}" ]]; then
-            rm -f -- "${root}/bundle" ||
-                dockerError "本次 Docker bundle 指针清理失败，请检查: ${root}/bundle"
-        else
-            dockerError "本次 Docker bundle 指针已改变，未清理: ${root}/bundle"
-        fi
+        dockerRestoreInstallTransaction || true
         return "${PADM_DOCKER_RC_STATE}"
     }
+    DOCKER_INSTALL_TRANSACTION_ACTIVE=0
+    DOCKER_INSTALL_PREVIOUS_BUNDLE_TARGET=
+    DOCKER_INSTALL_BUNDLE_TARGET=
+    DOCKER_INSTALL_CLI_PATH=
+    DOCKER_INSTALL_CLI_INODE=
     printf 'Docker 控制骨架已安装: %s\n' "${root}"
+}
+
+dockerRestoreInstallTransaction() {
+    local root currentTarget expectedTarget previousTarget cliTarget
+    [[ "${DOCKER_INSTALL_TRANSACTION_ACTIVE:-0}" == 1 ]] || return 0
+    root=$(dockerInstallRoot) || return 1
+    previousTarget=${DOCKER_INSTALL_PREVIOUS_BUNDLE_TARGET:-}
+    expectedTarget=${DOCKER_INSTALL_BUNDLE_TARGET:-}
+    currentTarget=$(readlink "${root}/bundle" 2>/dev/null || true)
+    if [[ -e "${root}/bundle" || -L "${root}/bundle" ]] &&
+        { [[ ! -L "${root}/bundle" ]] ||
+            [[ "${currentTarget}" != "${previousTarget}" && "${currentTarget}" != "${expectedTarget}" ]]; }; then
+        dockerError "本次 Docker bundle 指针已改变，未清理: ${root}/bundle"
+        return 1
+    fi
+    if [[ -n "${previousTarget}" ]]; then
+        dockerActivateBundle "${previousTarget}" || {
+            dockerError "旧 Docker bundle 恢复失败，请检查: ${root}/bundle"
+            return 1
+        }
+    elif [[ -n "${expectedTarget}" && -L "${root}/bundle" ]]; then
+        [[ "${currentTarget}" == "${expectedTarget}" ]] || {
+            dockerError "本次 Docker bundle 指针已改变，未清理: ${root}/bundle"
+            return 1
+        }
+        rm -f -- "${root}/bundle" || {
+            dockerError "本次 Docker bundle 指针清理失败，请检查: ${root}/bundle"
+            return 1
+        }
+    elif [[ -e "${root}/bundle" || -L "${root}/bundle" ]]; then
+        dockerError "本次 Docker bundle 指针已改变，未清理: ${root}/bundle"
+        return 1
+    fi
+    cliTarget=${DOCKER_INSTALL_CLI_PATH:-}
+    if [[ "${DOCKER_INSTALL_CLI_EXISTED:-1}" == 0 && -n "${DOCKER_INSTALL_CLI_INODE:-}" &&
+        -L "${cliTarget}" &&
+        "$(readlink "${cliTarget}" 2>/dev/null || true)" == "${root}/bundle/install-docker.sh" &&
+        "$(stat --format=%d:%i -- "${cliTarget}" 2>/dev/null || true)" == "${DOCKER_INSTALL_CLI_INODE}" ]]; then
+        dockerPathIsSafeAbsolute "${cliTarget}" && rm -f -- "${cliTarget}" || return 1
+    fi
+    DOCKER_INSTALL_TRANSACTION_ACTIVE=0
+    DOCKER_INSTALL_PREVIOUS_BUNDLE_TARGET=
+    DOCKER_INSTALL_BUNDLE_TARGET=
+    DOCKER_INSTALL_CLI_PATH=
+    DOCKER_INSTALL_CLI_INODE=
 }
 
 dockerDeploymentState() {
@@ -1214,7 +1246,9 @@ dockerCommandInterrupted() {
     if declare -F dockerConfigurationInterrupted >/dev/null 2>&1; then
         dockerConfigurationInterrupted || true
     fi
+    dockerRestoreInstallTransaction || true
     dockerSetupCleanup || true
+    dockerCleanupStateInitialization || true
     dockerReleaseDeploymentLock || true
     dockerCleanupStagedBundle || true
     dockerManifestCleanup || true
@@ -1261,6 +1295,7 @@ dockerMain() {
     validate) dockerValidateInstalledCommand "$@" ;;
     status) dockerStatusCommand "$@" ;;
     traffic) dockerTrafficCommand "$@" ;;
+    fail2ban) dockerFail2banCommand "$@" ;;
     up | down | restart | logs) dockerLifecycleCommand "${command}" "$@" ;;
     assess) dockerAssessCommand "$@" ;;
     geo) dockerGeoCommand "$@" ;;
@@ -1290,6 +1325,10 @@ dockerMain() {
     fi
     dockerCleanupTlsCandidate || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_STATE}
     dockerSetupCleanup || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_STATE}
+    dockerCleanupStateInitialization || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_STATE}
+    if [[ "${command}" == install && "${status}" -ne 0 ]]; then
+        dockerRestoreInstallTransaction || true
+    fi
     dockerReleaseDeploymentLock || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_LOCK}
     dockerCleanupStagedBundle || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_BUNDLE}
     dockerManifestCleanup || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_MANIFEST}

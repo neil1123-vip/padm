@@ -483,6 +483,77 @@ runSingBoxCustomPathsRegression() (
     procArgsFixture[3]="${root}/conf/config.json"
     padmReadProcExe() { printf '%s (deleted)\n' "${PADM_SINGBOX_BINARY}"; }
     singBoxRunning
+    (
+        local config="${root}/conf/config.json" flag value expected
+        # 对照真实 Cobra 参数：配置累加，帮助布尔取最后值，字符串值不当命令。
+        procArgsFixture=("${PADM_SINGBOX_BINARY}" -c "${config}" run)
+        singBoxRunning || return 1
+        for flag in -c --config; do
+            procArgsFixture=("${PADM_SINGBOX_BINARY}" run "${flag}=${config}" --disable-color)
+            singBoxRunning || return 1
+            procArgsFixture=("${PADM_SINGBOX_BINARY}" run "${flag}" "${root}/extra.json" "${flag}" "${config}")
+            singBoxRunning || return 1
+        done
+        procArgsFixture=("${PADM_SINGBOX_BINARY}" run "-c${config}" "-D${root}" "-C${root}/conf")
+        singBoxRunning || return 1
+        for flag in --help -h; do
+            for value in false False FALSE 0 f F true True TRUE 1 t T invalid; do
+                expected=1
+                [[ "${value}" != false && "${value}" != False && "${value}" != FALSE &&
+                    "${value}" != 0 && "${value}" != f && "${value}" != F ]] || expected=0
+                procArgsFixture=("${PADM_SINGBOX_BINARY}" run -c "${config}" "${flag}=${value}")
+                regressionExpectStatus "${expected}" singBoxRunning || return 1
+            done
+            procArgsFixture=("${PADM_SINGBOX_BINARY}" run -c "${config}" "${flag}" "${flag}=false")
+            singBoxRunning || return 1
+            procArgsFixture+=("${flag}=true")
+            regressionExpectStatus 1 singBoxRunning || return 1
+        done
+        procArgsFixture=("${PADM_SINGBOX_BINARY}" run -c "${config}" -hh=false)
+        singBoxRunning || return 1
+        procArgsFixture=("${PADM_SINGBOX_BINARY}" run run -c "${config}" -- check --help)
+        singBoxRunning || return 1
+        procArgsFixture=("${PADM_SINGBOX_BINARY}" -c "${config}" -- run)
+        regressionExpectStatus 1 singBoxRunning || return 1
+        procArgsFixture=("${PADM_SINGBOX_BINARY}" -D run -c "${config}")
+        regressionExpectStatus 1 singBoxRunning || return 1
+        for flag in --help -h -dh --help=invalid -f; do
+            procArgsFixture=("${PADM_SINGBOX_BINARY}" run -c "${config}" "${flag}")
+            regressionExpectStatus 1 singBoxRunning || return 1
+        done
+        procArgsFixture=("${PADM_SINGBOX_BINARY}" check -c "${config}")
+        regressionExpectStatus 1 singBoxRunning || return 1
+        procArgsFixture=("${PADM_SINGBOX_BINARY}" "" run -c "${config}")
+        regressionExpectStatus 1 singBoxRunning || return 1
+        procArgsFixture=("${PADM_SINGBOX_BINARY}" run -c "${config}" -D)
+        regressionExpectStatus 1 singBoxRunning || return 1
+    ) || return 1
+
+    (
+        local PADM_XRAY_BINARY="${root}/bin/custom-xray"
+        local PADM_SINGBOX_BINARY="${root}/bin/custom-sing-box"
+        local PADM_XRAY_CONF_DIR="${root}/custom-conf" service processBinary fixtureConfig
+        # 候选进程名可以自定义；仍须拒绝其它可执行文件或配置。
+        pgrep() { [[ "$1" == -f && "$2" == . ]] && printf '123\n'; }
+        for service in xray sing-box; do
+            if [[ "${service}" == xray ]]; then
+                processBinary=${PADM_XRAY_BINARY}
+                fixtureConfig=${PADM_XRAY_CONF_DIR}
+                procArgsFixture=("${processBinary}" run -confdir "${fixtureConfig}")
+            else
+                processBinary=${PADM_SINGBOX_BINARY}
+                fixtureConfig="${root}/conf/config.json"
+                procArgsFixture=("${processBinary}" run -c "${fixtureConfig}")
+            fi
+            padmReadProcExe() { printf '%s\n' "${processBinary}"; }
+            serviceRunning "${service}" || return 1
+            procArgsFixture[3]+=.wrong
+            regressionExpectStatus 1 serviceRunning "${service}" || return 1
+            procArgsFixture[3]=${fixtureConfig}
+            processBinary="${root}/other-core"
+            regressionExpectStatus 1 serviceRunning "${service}" || return 1
+        done
+    ) || return 1
 
     local PADM_XRAY_BINARY="${root}/bin/xray" PADM_XRAY_CONF_DIR="${root}/xray/conf"
     local processBinary="${PADM_XRAY_BINARY}"
@@ -592,6 +663,21 @@ runCoreReleaseArchiveRejectsRegression() (
 
     rm -rf "${root}"
     mkdir -p "${tmpDir}"
+    if [[ "${mode}" == unsafe-path ]]; then
+        # 正常 Unix 权限条目必须兼容旧版 awk，链接条目仍拒绝。
+        python3 - "${tmpDir}/regular.zip" "${tmpDir}/linked.zip" <<'PY'
+import sys
+import zipfile
+for path, mode in zip(sys.argv[1:], [0o100755, 0o120777]):
+    with zipfile.ZipFile(path, "w") as archive:
+        entry = zipfile.ZipInfo("xray")
+        entry.create_system = 3
+        entry.external_attr = mode << 16
+        archive.writestr(entry, "payload")
+PY
+        validateCoreZipArchive "${tmpDir}/regular.zip" || return 1
+        regressionExpectStatus 1 validateCoreZipArchive "${tmpDir}/linked.zip" || return 1
+    fi
     xrayCoreCPUVendor=Xray-linux-64
     singBoxCoreCPUVendor=-linux-amd64
     if [[ "${mode}" == "symlink-payload" ]]; then
@@ -1079,7 +1165,7 @@ runCoreUpgradePendingStartRollbackRegression() (
     )
 
     (
-        local wasRunning recovery caseRoot
+        local wasRunning recovery caseRoot failure
         local serviceRunning serviceLog originalBinary candidateDir
         eval "$(declare -f restoreManagedFileFromBackup | sed '1s/^restoreManagedFileFromBackup/realPendingRestoreManagedFileFromBackup/')"
         restoreManagedFileFromBackup() {
@@ -1092,7 +1178,9 @@ runCoreUpgradePendingStartRollbackRegression() (
         handlePendingService() {
             printf '%s\n' "$1" >>"${serviceLog}"
             if [[ "$1" == stop ]]; then
+                [[ "${failure}" != stop-running ]] || return 1
                 serviceRunning=false
+                [[ "${failure}" != stop-stopped ]] || return 1
             else
                 [[ "${recovery}" != service-fail ]] || return 1
                 serviceRunning=true
@@ -1100,12 +1188,15 @@ runCoreUpgradePendingStartRollbackRegression() (
         }
         handleXray() { handlePendingService "$@"; }
         handleSingBox() { handlePendingService "$@"; }
-        # 普通提交失败应恢复原运行状态，任何恢复失败都必须保留旧文件备份。
+        # stop 部分失败和提交失败都应恢复原运行态，恢复失败必须保留备份。
         for core in xray sing-box; do
+            for failure in commit stop-running stop-stopped; do
             for wasRunning in false true; do
                 for recovery in success file-fail service-fail; do
                     [[ "${wasRunning}" != false || "${recovery}" != service-fail ]] || continue
-                    caseRoot="${root}/${core}-${wasRunning}-${recovery}"
+                    [[ "${failure}" == commit || "${recovery}" != file-fail ]] || continue
+                    [[ "${failure}" != stop-running || "${recovery}" != service-fail ]] || continue
+                    caseRoot="${root}/${core}-${failure}-${wasRunning}-${recovery}"
                     PADM_XRAY_BINARY="${caseRoot}/installed/xray"
                     PADM_SINGBOX_BINARY="${caseRoot}/installed/sing-box"
                     candidateDir="${caseRoot}/candidate"
@@ -1150,6 +1241,7 @@ runCoreUpgradePendingStartRollbackRegression() (
                             compgen -G "$(coreSingBoxInstallDir)/.libcronet.so.bak.*" >/dev/null
                     fi
                 done
+            done
             done
         done
     )
@@ -1876,6 +1968,7 @@ runCorePortFileTransactionRegression() {
 
 runCoreInstallSignalRollbackRegression() (
     set -euo pipefail
+    local release=debian
     local root="${TMP_DIR}/core-install-signal"
     local fixture core signal mode status
     mkdir -p "${root}"
@@ -2060,12 +2153,62 @@ runCoreInstallSignalRollbackRegression() (
     runPackageCommandWithProgress normal-test 10 'printf normal; exit 7' "${fixture}/normal.log" || status=$?
     [[ "${status}" == 7 && "$(<"${fixture}/normal.log")" == normal ]]
     [[ ! -e "${fixture}/normal.log.progress" && -z "${PADM_EXIT_ROLLBACKS[*]}" ]]
+
+    (
+        source "${PROJECT_ROOT}/shell/subscription/accounts.sh"
+        source "${PROJECT_ROOT}/shell/subscription/output.sh"
+        eval "$(awk '/^cleanDirectoryContent\(\)/ { capture=1 } capture { print } capture && /^}/ { exit }' "${PROJECT_ROOT}/shell/core/runtime.sh")"
+        local PADM_SUBSCRIBE_LOCAL_DIR category outputBackupDir selectCustomInstallType=",999,"
+        mode=normal core=sing-box
+        serviceQueueRestart() { :; }
+        serviceQueueApply() { :; }
+        checkGFWStatue() { :; }
+        cleanUp() { :; }
+        readInstallType() { :; }
+        readInstallProtocolType() { :; }
+        readConfigHostPathUUID() { :; }
+        readSingBoxConfig() { :; }
+        protocolCapabilityRegistry() { printf '1|Regression|node\n'; }
+        currentProtocolHas() { return 0; }
+        subscriptionAccountDisplayFunction() { printf 'signalOutputDisplayAccounts\n'; }
+        signalOutputDisplayAccounts() {
+            printf '%s\n' "${PADM_CORE_TEMPLATE_ROLLBACK[subscribeOutputBackupDir]}" >"${fixture}/output-backup"
+            appendDefaultSubscribeLine new-user new-default
+            kill -"${signal}" "${BASHPID}"
+            :
+        }
+        for signal in INT TERM; do
+            fixture="${root}/subscribe-${signal}"
+            PADM_SUBSCRIBE_LOCAL_DIR="${fixture}/subscribe_local"
+            for category in default clashMeta sing-box; do
+                mkdir -p "${PADM_SUBSCRIBE_LOCAL_DIR}/${category}"
+                printf 'old-%s\n' "${category}" >"${PADM_SUBSCRIBE_LOCAL_DIR}/${category}/old-user"
+            done
+            for category in xray.conf sing-box.conf nginx.conf; do
+                printf 'old\n' >"${fixture}/${category}"
+            done
+            printf 'false\n' >"${fixture}/xray.running"
+            printf 'false\n' >"${fixture}/sing-box.running"
+            status=0
+            ( coreInstallConfigTransaction sing-box completeCoreInstall sing-box 5 6 ) >/dev/null 2>&1 || status=$?
+            if [[ "${signal}" == INT ]]; then [[ "${status}" == 130 ]]; else [[ "${status}" == 143 ]]; fi
+            for category in default clashMeta sing-box; do
+                [[ "$(<"${PADM_SUBSCRIBE_LOCAL_DIR}/${category}/old-user")" == "old-${category}" ]]
+                [[ ! -e "${PADM_SUBSCRIBE_LOCAL_DIR}/${category}/new-user" ]]
+            done
+            outputBackupDir=$(<"${fixture}/output-backup")
+            [[ -n "${outputBackupDir}" && ! -e "${outputBackupDir}" ]]
+            [[ ! -e "$(<"${fixture}/config-backup")" ]]
+        done
+    )
     printf '核心信号回归: 前台取消\n'
     runCancelableInstallCommandRegression
     printf '核心信号回归: 二进制回滚\n'
     runCoreBinaryInstallSignalRollbackRegression
     printf '核心信号回归: 文件整组恢复\n'
     runCoreInstallFileSignalRollbackRegression
+    printf '核心信号回归: 旧核心自启恢复\n'
+    runCoreStartupSwitchRollbackRegression signal
 )
 
 runCoreInstallFileSignalRollbackRegression() (
@@ -2591,6 +2734,7 @@ EOF
 )
 
 runCoreTemplateReturnFailureRegression() (
+    local release=debian
     local root="${TMP_DIR}/core-template-return"
     local xrayRoot="${root}/xray"
     local singBoxRoot="${root}/sing-box"
@@ -2858,9 +3002,262 @@ runCoreTemplateReturnFailureRegression() (
     mode=cleanup-fail
     selectCustomInstallType=",999,"
     regressionExpectFailure padmRunPortAllowTransaction initSingBoxConfigApply custom 1 2>/dev/null
+
+    (
+        local singBoxRoot="${root}/merged/config"
+        local PADM_SINGBOX_CONFIG_DIR="${singBoxRoot}" singBoxConfigPath="${singBoxRoot}/"
+        local singBoxServiceRunning=false xrayServiceRunning=false
+        local mergedConfig mergedState
+        mkdir -p "${singBoxRoot}"
+        mergedConfig=$(singBoxMergedConfigFile)
+        singBoxInstalled() { return 1; }
+        handleSingBox() {
+            printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+            if [[ "$1" == start ]]; then
+                printf 'new-merged-config\n' >"${mergedConfig}"
+                singBoxServiceRunning=true
+            else
+                singBoxServiceRunning=false
+            fi
+        }
+        failAfterSingBoxMerge() {
+            printf 'new-sing-box-inbound\n' >"${singBoxRoot}/02_VLESS_TCP_inbounds.json"
+            runCoreServiceActionAllowFailure handleSingBox start || return 1
+            return 7
+        }
+        for mergedState in present absent; do
+            printf 'old-sing-box-inbound\n' >"${singBoxRoot}/02_VLESS_TCP_inbounds.json"
+            if [[ "${mergedState}" == present ]]; then
+                printf 'old-merged-config\n' >"${mergedConfig}"
+            else
+                rm -f "${mergedConfig}"
+            fi
+            : >"${serviceLog}"
+            regressionExpectStatus 7 coreInstallConfigTransaction sing-box failAfterSingBoxMerge >/dev/null 2>&1
+            [[ "$(<"${singBoxRoot}/02_VLESS_TCP_inbounds.json")" == old-sing-box-inbound ]]
+            [[ "${singBoxServiceRunning}" == false ]]
+            grep -qx 'sing-box:start:true' "${serviceLog}"
+            grep -qx 'sing-box:stop:true' "${serviceLog}"
+            if [[ "${mergedState}" == present ]]; then
+                [[ "$(<"${mergedConfig}")" == old-merged-config ]]
+            else
+                [[ ! -e "${mergedConfig}" ]]
+            fi
+        done
+    )
+
+    (
+        source "${PROJECT_ROOT}/shell/subscription/accounts.sh"
+        source "${PROJECT_ROOT}/shell/subscription/output.sh"
+        eval "$(awk '/^cleanDirectoryContent\(\)/ { capture=1 } capture { print } capture && /^}/ { exit }' "${PROJECT_ROOT}/shell/core/runtime.sh")"
+        local PADM_SUBSCRIBE_LOCAL_DIR="${root}/subscribe-output"
+        local singBoxServiceRunning=false xrayServiceRunning=false
+        local outputMode category backupPath
+        eval "$(declare -f subscribeLocalOutputAppendLine | sed '1s/^subscribeLocalOutputAppendLine/installOutputAppendLine/')"
+        eval "$(declare -f appendSingBoxSubscribeLocalConfig | sed '1s/^appendSingBoxSubscribeLocalConfig/installOutputAppendSingBox/')"
+        eval "$(declare -f subscriptionSyncRestoreBackupPath | sed '1s/^subscriptionSyncRestoreBackupPath/installOutputRestoreBackupPath/')"
+        singBoxInstalled() { return 1; }
+        serviceQueueRestart() { :; }
+        serviceQueueApply() { :; }
+        checkGFWStatue() { :; }
+        cleanUp() { :; }
+        readInstallType() { :; }
+        readInstallProtocolType() { :; }
+        readConfigHostPathUUID() { :; }
+        readSingBoxConfig() { :; }
+        protocolCapabilityRegistry() { printf '1|Regression|node\n'; }
+        currentProtocolHas() { return 0; }
+        subscriptionAccountDisplayFunction() { printf 'installOutputDisplayAccounts\n'; }
+        subscribeLocalOutputAppendLine() {
+            [[ "$1" != "${PADM_SUBSCRIBE_LOCAL_DIR}/${outputMode}/new-user" ]] || return 7
+            installOutputAppendLine "$@"
+        }
+        appendSingBoxSubscribeLocalConfig() {
+            [[ "${outputMode}" != sing-box ]] || return 7
+            installOutputAppendSingBox "$@"
+        }
+        subscriptionSyncRestoreBackupPath() {
+            [[ "${outputMode}" != restore-fail ]] || return 1
+            installOutputRestoreBackupPath "$@"
+        }
+        installOutputDisplayAccounts() {
+            printf '%s\n' "${PADM_CORE_TEMPLATE_ROLLBACK[subscribeOutputBackupDir]}" >"${root}/output-backup"
+            appendDefaultSubscribeLine new-user new-default || return 1
+            [[ "${outputMode}" != display && "${outputMode}" != restore-fail ]] || return 7
+            appendClashMetaSubscribeBlock new-user new-clash || return 1
+            appendSingBoxSubscribeLocalConfig new-user '. + [{type:"vless",tag:"new-user"}]'
+        }
+        for outputMode in display default clashMeta sing-box success restore-fail; do
+            for category in default clashMeta sing-box; do
+                mkdir -p "${PADM_SUBSCRIBE_LOCAL_DIR}/${category}"
+                printf 'old-%s\n' "${category}" >"${PADM_SUBSCRIBE_LOCAL_DIR}/${category}/old-user"
+            done
+            if [[ "${outputMode}" == success ]]; then
+                coreInstallConfigTransaction sing-box completeCoreInstall sing-box 5 6 >/dev/null
+            else
+                regressionExpectStatus 1 coreInstallConfigTransaction sing-box completeCoreInstall sing-box 5 6 >/dev/null 2>&1
+            fi
+            backupPath=$(<"${root}/output-backup")
+            [[ -n "${backupPath}" ]]
+            if [[ "${outputMode}" == restore-fail ]]; then
+                for category in default clashMeta sing-box; do
+                    [[ "$(<"${backupPath}/local/${category}/old-user")" == "old-${category}" ]]
+                done
+                padmRemoveCleanupPath "${backupPath}"
+                continue
+            fi
+            [[ ! -e "${backupPath}" ]]
+            for category in default clashMeta sing-box; do
+                if [[ "${outputMode}" == success ]]; then
+                    [[ ! -e "${PADM_SUBSCRIBE_LOCAL_DIR}/${category}/old-user" ]]
+                    [[ -s "${PADM_SUBSCRIBE_LOCAL_DIR}/${category}/new-user" ]]
+                else
+                    [[ "$(<"${PADM_SUBSCRIBE_LOCAL_DIR}/${category}/old-user")" == "old-${category}" ]]
+                    [[ ! -e "${PADM_SUBSCRIBE_LOCAL_DIR}/${category}/new-user" ]]
+                fi
+            done
+        done
+    )
+)
+
+runCoreStartupSwitchRollbackRegression() (
+    local root="${TMP_DIR}/core-startup-switch-${1:-return}" fixture core oldCore platform enabled mode status
+    local release=debian selectCustomInstallType=",999," SERVICE_ACTIONS=
+    local PADM_CORE_INSTALL_SERVICE_BACKUP_DIR= PADM_CORE_INSTALL_SERVICE_NAME=
+    local PADM_CORE_TEMPLATE_TRANSACTION_ACTIVE=false
+    local -a modes=(success output-fail disable-fail restore-fail target-service-restore-fail)
+    [[ "${1:-}" != signal ]] || modes=(INT TERM)
+
+    coreTemplateConfigBackupCreate() {
+        checkLogBackupCreate "$1" "${fixture}/xray.conf" "${fixture}/sing-box.conf"
+    }
+    coreSwitchCleanupBackupCreate() { printf -v "$1" '%s' ''; }
+    checkLogBackupRestore() { padmRestoreManagedFileBackupManifest "$1"; }
+    singBoxInstalled() { return 1; }
+    nginxRuntimeRequired() { return 1; }
+    xrayRunning() { grep -qx true "${fixture}/xray.running"; }
+    singBoxRunning() { grep -qx true "${fixture}/sing-box.running"; }
+    handleXray() { startupSwitchService xray "$1"; }
+    handleSingBox() { startupSwitchService sing-box "$1"; }
+    startupSwitchService() {
+        printf '%s\n' "$([[ "$2" == start ]] && printf true || printf false)" >"${fixture}/$1.running"
+    }
+    startupSwitchRegistration() {
+        local service=$1 nextEnabled=$2
+        printf 'startup:%s:%s\n' "${service}" "${nextEnabled}" >>"${fixture}/actions"
+        [[ "${mode}" != restore-fail || "${nextEnabled}" != true ]] || return 1
+        printf '%s\n' "${nextEnabled}" >"${fixture}/${service}.enabled"
+        [[ "${mode}" != disable-fail || "${nextEnabled}" != false ]]
+    }
+    systemctl() {
+        case "$1" in
+        is-enabled) grep -qx true "${fixture}/${3%.service}.enabled" ;;
+        enable) startupSwitchRegistration "${2%.service}" true ;;
+        disable) startupSwitchRegistration "${2%.service}" false ;;
+        daemon-reload) return 0 ;;
+        *) return 1 ;;
+        esac
+    }
+    rc-update() {
+        case "$1" in
+        show)
+            local service
+            for service in xray sing-box; do
+                if grep -qx true "${fixture}/${service}.enabled"; then
+                    printf '%s | default\n' "${service}"
+                fi
+            done
+            return 0
+            ;;
+        add) startupSwitchRegistration "$2" true ;;
+        del) startupSwitchRegistration "$2" false ;;
+        *) return 1 ;;
+        esac
+    }
+    serviceQueueRestart() { :; }
+    serviceQueueApply() { startupSwitchService "${core}" start; }
+    checkGFWStatue() { :; }
+    cleanUp() { printf 'cleaned\n' >"${fixture}/${oldCore}.conf"; }
+    subscribeLocalBaseDir() { printf '%s/subscribe_local\n' "${fixture}"; }
+    subscriptionSyncBackupPath() { :; }
+    subscriptionSyncRestoreBackupPath() { :; }
+    errorCard() { printf '%s\n' "$*" >>"${fixture}/errors"; }
+    restoreCoreStartupServiceInstall() {
+        padmForgetCleanupPath "$1"
+        return 1
+    }
+    showAccounts() {
+        if [[ "${mode}" == target-service-restore-fail ]]; then
+            padmCreateTmpRootPath PADM_CORE_INSTALL_SERVICE_BACKUP_DIR target-service-restore.XXXXXX -d || return 1
+            PADM_CORE_INSTALL_SERVICE_NAME=${core}
+            printf '%s\n' "${PADM_CORE_INSTALL_SERVICE_BACKUP_DIR}" >"${fixture}/service-backup"
+        fi
+        if [[ "${mode}" == INT || "${mode}" == TERM ]]; then
+            kill -"${mode}" "${BASHPID}"
+            :
+        elif [[ "${mode}" != success ]]; then
+            return 7
+        fi
+    }
+    # 使用真实平台登记 helper，文件夹具跨子 shell 记录取消后的 enabled 与运行态。
+    for platform in systemd openrc; do
+        release=debian
+        [[ "${platform}" != openrc ]] || release=alpine
+        for core in xray sing-box; do
+            oldCore=sing-box
+            [[ "${core}" != sing-box ]] || oldCore=xray
+            for enabled in true false; do
+                for mode in "${modes[@]}"; do
+                    [[ "${enabled}" == true || ( "${mode}" != disable-fail && "${mode}" != restore-fail ) ]] || continue
+                    fixture="${root}/${platform}-${core}-${enabled}-${mode}"
+                    mkdir -p "${fixture}"
+                    printf 'old\n' >"${fixture}/xray.conf"
+                    printf 'old\n' >"${fixture}/sing-box.conf"
+                    printf false >"${fixture}/${core}.running"
+                    printf true >"${fixture}/${oldCore}.running"
+                    printf false >"${fixture}/${core}.enabled"
+                    printf '%s\n' "${enabled}" >"${fixture}/${oldCore}.enabled"
+                    : >"${fixture}/actions"
+                    : >"${fixture}/errors"
+                    status=0
+                    ( coreSwitchConfigTransaction "${core}" completeCoreInstall "${core}" 5 6 ) >/dev/null 2>&1 || status=$?
+                    if [[ "${mode}" == success ]]; then
+                        [[ "${status}" == 0 && "$(<"${fixture}/${oldCore}.enabled")" == false &&
+                            "$(<"${fixture}/${oldCore}.running")" == false && "$(<"${fixture}/${core}.running")" == true ]]
+                        [[ "${enabled}" != true ]] || grep -qx "startup:${oldCore}:false" "${fixture}/actions"
+                    else
+                        case "${mode}" in
+                        INT) [[ "${status}" == 130 ]] ;;
+                        TERM) [[ "${status}" == 143 ]] ;;
+                        disable-fail) [[ "${status}" == 1 ]] ;;
+                        *) [[ "${status}" == 7 ]] ;;
+                        esac
+                        [[ "$(<"${fixture}/xray.conf")" == old && "$(<"${fixture}/sing-box.conf")" == old &&
+                            "$(<"${fixture}/${core}.running")" == false ]]
+                        if [[ "${mode}" == target-service-restore-fail ]]; then
+                            [[ "$(<"${fixture}/${oldCore}.running")" == false && -d "$(<"${fixture}/service-backup")" ]]
+                            grep -q '核心服务运行状态恢复失败' "${fixture}/errors"
+                            padmRemoveCleanupPath "$(<"${fixture}/service-backup")"
+                        else
+                            [[ "$(<"${fixture}/${oldCore}.running")" == true ]]
+                        fi
+                        if [[ "${mode}" == restore-fail ]]; then
+                            [[ "$(<"${fixture}/${oldCore}.enabled")" == false ]]
+                            grep -q '开机自启恢复失败' "${fixture}/errors"
+                            ! grep -q '失败，已恢复旧配置' "${fixture}/errors"
+                        else
+                            [[ "$(<"${fixture}/${oldCore}.enabled")" == "${enabled}" ]]
+                            [[ "${enabled}" != true ]] || grep -qx "startup:${oldCore}:true" "${fixture}/actions"
+                        fi
+                    fi
+                done
+            done
+        done
+    done
 )
 
 runCoreInstallServiceActionFailureRegression() (
+    local release=debian
     local root="${TMP_DIR}/core-install-service-action"
     local serviceLog="${root}/service.log"
     local callLog="${root}/calls.log"
@@ -2875,6 +3272,7 @@ runCoreInstallServiceActionFailureRegression() (
     local PADM_XRAY_BINARY="${xrayRoot}/xray"
     local PADM_XRAY_CONF_DIR="${xrayRoot}"
     local PADM_SINGBOX_CONFIG_DIR="${singBoxRoot}"
+    local PADM_SUBSCRIBE_LOCAL_DIR="${root}/subscribe_local"
     local PADM_REALITY_STREAM_CONF_FILE="${nginxRoot}/stream.conf"
     local PADM_REALITY_STREAM_STATE_FILE="${nginxRoot}/stream.json"
     local PADM_REALITY_STREAM_NGINX_CONF="${nginxRoot}/nginx.conf"
@@ -3352,6 +3750,7 @@ $1:refresh"
             done
         done
     )
+    runCoreStartupSwitchRollbackRegression
 )
 
 runSingBoxMergeConfigTransactionRegression() (
@@ -3612,6 +4011,196 @@ runSingBoxUninstallFailurePropagationRegression() (
         [[ -z "${coreInstallType}" && -z "${singBoxConfigPath}" ]]
         [[ "${actions}" == $'registration\ncleanup\n' ]]
     )
+
+    (
+        # 中断恢复先停止新服务；不可恢复的核心清理中断只保留备份。
+        local signalName signalCase signalPhase signalDelivered signalRoot expectedRc resultRc
+        local signalShard signalMerged signalUnit signalBinary signalCalls signalErrors signalBackup
+        local signalWasRunning signalRelease
+        eval "$(declare -f removeManagedFileIfPresent | sed '1s/^removeManagedFileIfPresent/originalUninstallSignalRemove/')"
+        eval "$(declare -f checkLogBackupCreate | sed '1s/^checkLogBackupCreate/originalUninstallSignalBackup/')"
+        eval "$(declare -f checkLogBackupRestore | sed '1s/^checkLogBackupRestore/originalUninstallSignalRestore/')"
+        uninstallSignalAt() {
+            if [[ "${signalPhase}" == "$1" && "${signalDelivered}" == false ]]; then
+                signalDelivered=true
+                kill "-${signalName}" "${BASHPID}"
+            fi
+            return 0
+        }
+        checkLogBackupCreate() {
+            originalUninstallSignalBackup "$@" || return 1
+            printf '%s\n' "${!1}" >"${signalRoot}/backup-path"
+        }
+        checkLogBackupRestore() {
+            printf 'restore\n' >>"${signalCalls}"
+            originalUninstallSignalRestore "$@" || return 1
+            uninstallSignalAt ordinary
+        }
+        removeManagedFileIfPresent() {
+            originalUninstallSignalRemove "$@" || return 1
+            case "$1" in
+            "${signalShard}") uninstallSignalAt shard ;;
+            "${signalMerged}") uninstallSignalAt merged ;;
+            "${signalUnit}") uninstallSignalAt registration ;;
+            esac
+            return 0
+        }
+        singBoxMergedConfigFile() { printf '%s\n' "${signalMerged}"; }
+        singBoxRunning() { [[ "$(<"${signalRoot}/running")" == true ]]; }
+        coreStartupServiceEnabled() { [[ "$(<"${signalRoot}/enabled")" == true ]]; }
+        readPortHopping() { tuicPortHoppingStart=; tuicPortHoppingEnd=; }
+        readInstallType() {
+            singBoxConfigPath=
+            if [[ -f "${signalShard}" || -f "${signalRoot}/conf/config/02_other_inbounds.json" ]]; then
+                singBoxConfigPath="${signalRoot}/conf/config/"
+            fi
+            uninstallSignalAt read
+        }
+        runCoreServiceActionAllowFailure() {
+            case "$2" in
+            stop)
+                printf 'stop\n' >>"${signalCalls}"
+                [[ "${signalCase}" != stop-fail || "${signalDelivered}" == false ]] || return 1
+                printf false >"${signalRoot}/running"
+                uninstallSignalAt stop
+                ;;
+            start)
+                if [[ -f "${signalShard}" ]]; then
+                    printf 'start:old\n' >>"${signalCalls}"
+                else
+                    printf 'start:new\n' >>"${signalCalls}"
+                fi
+                printf true >"${signalRoot}/running"
+                uninstallSignalAt start
+                ;;
+            esac
+            return 0
+        }
+        singBoxMergeConfigForValidation() {
+            printf '{"generation":"new"}\n' >"${signalMerged}"
+            uninstallSignalAt validate
+            [[ "${signalCase}" != ordinary ]]
+        }
+        systemctl() {
+            printf 'systemctl:%s\n' "$*" >>"${signalCalls}"
+            case "$1" in
+            disable) printf false >"${signalRoot}/enabled" ;;
+            enable) printf true >"${signalRoot}/enabled" ;;
+            esac
+            return 0
+        }
+        rc-update() {
+            printf 'rc-update:%s\n' "$*" >>"${signalCalls}"
+            case "$1" in
+            del) printf false >"${signalRoot}/enabled" ;;
+            add) printf true >"${signalRoot}/enabled" ;;
+            esac
+            return 0
+        }
+        cleanCoreInstallDirectory() {
+            rm -f "${signalBinary}" || return 1
+            uninstallSignalAt cleanup
+        }
+        denyPort() { return 0; }
+        refreshManagedProtocolSubscriptions() { uninstallSignalAt refresh; }
+        errorCard() { printf '%s\n' "$*" >>"${signalErrors}"; }
+        statusCard() { return 0; }
+        successCard() { return 0; }
+        for signalName in INT TERM; do
+            expectedRc=130
+            [[ "${signalName}" != TERM ]] || expectedRc=143
+            for signalCase in stop shard merged read validate start registration cleanup refresh stop-fail stopped alpine ordinary; do
+                case "${signalCase}" in
+                stop-fail|stopped|alpine|ordinary) [[ "${signalName}" == TERM ]] || continue ;;
+                esac
+                signalPhase=${signalCase} signalWasRunning=true signalRelease=debian
+                case "${signalCase}" in
+                stop-fail) signalPhase=start ;;
+                stopped) signalPhase=read; signalWasRunning=false ;;
+                alpine) signalPhase=registration; signalRelease=alpine ;;
+                esac
+                signalDelivered=false
+                signalRoot="${root}/signal-${signalName}-${signalCase}"
+                signalShard="${signalRoot}/conf/config/09_tuic_inbounds.json"
+                signalMerged="${signalRoot}/conf/config.json"
+                signalUnit="${signalRoot}/sing-box.service"
+                signalBinary="${signalRoot}/sing-box"
+                signalCalls="${signalRoot}/calls.log" signalErrors="${signalRoot}/errors.log"
+                mkdir -p "${signalRoot}/conf/config" "${signalRoot}/tmp" || return 1
+                printf '{"inbounds":[{"type":"tuic","listen_port":26451}]}\n' >"${signalShard}"
+                printf '{"generation":"old"}\n' >"${signalMerged}"
+                printf old-unit >"${signalUnit}"
+                printf '#!/bin/sh\nexit 0\n' >"${signalBinary}"
+                chmod +x "${signalBinary}" || return 1
+                printf '%s' "${signalWasRunning}" >"${signalRoot}/running"
+                printf true >"${signalRoot}/enabled"
+                : >"${signalCalls}"
+                : >"${signalErrors}"
+                case "${signalPhase}" in
+                registration|cleanup) ;;
+                *) printf '{"inbounds":[{"type":"vless","listen_port":2443}]}\n' >"${signalRoot}/conf/config/02_other_inbounds.json" ;;
+                esac
+                (
+                    local release=${signalRelease} PADM_TMP_DIR="${signalRoot}/tmp"
+                    local PADM_SINGBOX_BINARY="${signalBinary}"
+                    local PADM_SINGBOX_SYSTEMD_SERVICE_FILE="${signalUnit}"
+                    local PADM_SINGBOX_OPENRC_SERVICE_FILE="${signalUnit}"
+                    local singBoxConfigPath="${signalRoot}/conf/config/" normalStatus
+                    if unInstallSingBox tuic; then normalStatus=0; else normalStatus=$?; fi
+                    if [[ "${signalCase}" == ordinary ]]; then
+                        printf '%s\n' "${normalStatus}" >"${signalRoot}/normal-status"
+                        kill "-${signalName}" "${BASHPID}"
+                    fi
+                    exit "${normalStatus}"
+                ) >/dev/null 2>&1 && resultRc=0 || resultRc=$?
+                [[ "${resultRc}" == "${expectedRc}" ]] || return 1
+                signalBackup=$(<"${signalRoot}/backup-path")
+                if [[ "${signalPhase}" == cleanup ]]; then
+                    [[ ! -e "${signalShard}" && ! -e "${signalMerged}" && ! -e "${signalUnit}" &&
+                        ! -e "${signalBinary}" && -d "${signalBackup}" ]] || return 1
+                    [[ "$(<"${signalRoot}/running")" == false && "$(<"${signalRoot}/enabled")" == false ]] || return 1
+                    ! grep -Eq '^(restore|start:)' "${signalCalls}" || return 1
+                    jq -e '.inbounds[0].type == "tuic"' "${signalBackup}/000000.json" >/dev/null || return 1
+                elif [[ "${signalCase}" == stop-fail ]]; then
+                    [[ ! -e "${signalShard}" && -d "${signalBackup}" &&
+                        "$(<"${signalRoot}/running")" == true ]] || return 1
+                    jq -e '.generation == "new"' "${signalMerged}" >/dev/null || return 1
+                    ! grep -Eq '^(restore|start:old)$' "${signalCalls}" || return 1
+                    grep -q '中断后服务停止失败' "${signalErrors}" || return 1
+                    jq -e '.inbounds[0].type == "tuic"' "${signalBackup}/000000.json" >/dev/null || return 1
+                elif [[ "${signalPhase}" == refresh ]]; then
+                    [[ ! -e "${signalShard}" && ! -e "${signalBackup}" &&
+                        "$(<"${signalRoot}/running")" == true ]] || return 1
+                    jq -e '.generation == "new"' "${signalMerged}" >/dev/null || return 1
+                    [[ "$(<"${signalCalls}")" == $'stop\nstart:new' ]] || return 1
+                else
+                    jq -e '.inbounds[0].type == "tuic"' "${signalShard}" >/dev/null || return 1
+                    jq -e '.generation == "old"' "${signalMerged}" >/dev/null || return 1
+                    [[ "$(<"${signalUnit}")" == old-unit && ! -e "${signalBackup}" &&
+                        "$(<"${signalRoot}/running")" == "${signalWasRunning}" &&
+                        "$(<"${signalRoot}/enabled")" == true ]] || return 1
+                    [[ "$(grep -c '^restore$' "${signalCalls}")" == 1 ]] || return 1
+                    if [[ "${signalWasRunning}" == true ]]; then
+                        grep -qx start:old "${signalCalls}" || return 1
+                    else
+                        ! grep -q '^start:' "${signalCalls}" || return 1
+                    fi
+                    if [[ "${signalPhase}" == start ]]; then
+                        [[ "$(<"${signalCalls}")" == $'stop\nstart:new\nstop\nrestore\nstart:old' ]] || return 1
+                    elif [[ "${signalPhase}" == registration ]]; then
+                        if [[ "${signalRelease}" == alpine ]]; then
+                            grep -qx 'rc-update:add sing-box default' "${signalCalls}" || return 1
+                        else
+                            grep -qx 'systemctl:enable sing-box.service' "${signalCalls}" || return 1
+                        fi
+                    elif [[ "${signalCase}" == ordinary ]]; then
+                        [[ "$(<"${signalRoot}/normal-status")" == 1 &&
+                            "$(<"${signalCalls}")" == $'stop\nrestore\nstart:old' ]] || return 1
+                    fi
+                fi
+            done
+        done
+    ) || return 1
 
     singBoxConfigPath="${configDir}"
     readInstallType() { singBoxConfigPath="${configDir}"; }
@@ -4666,20 +5255,15 @@ runGeoUpdateReloadFailureRegression() (
     (
         # 非普通 Geo 目标在读取备份前拒绝；普通文件与缺失目标保持原合同。
         local fifoPath="${root}/geo-fifo" regularPath="${root}/geo-regular"
-        local backupPath="${root}/geo-backup" copyCalls=0
+        local backupPath="${root}/geo-backup"
         mkfifo "${fifoPath}" || return 1
-        cp() {
-            copyCalls=$((copyCalls + 1))
-            [[ -f "$2" ]] || return 7
-            command cp "$@"
-        }
-        regressionExpectStatus 1 backupXrayGeoFileIfPresent "${fifoPath}" "${backupPath}" || return 1
-        [[ "${copyCalls}" == 0 && -p "${fifoPath}" && ! -e "${backupPath}" ]] || return 1
-        backupXrayGeoFileIfPresent "${root}/missing-geo" "${backupPath}" || return 1
-        [[ "${copyCalls}" == 0 && ! -e "${backupPath}" ]] || return 1
+        regressionExpectStatus 1 padmWriteManagedFileBackupManifest "${backupPath}" geo "${fifoPath}" || return 1
+        [[ -p "${fifoPath}" && ! -e "${backupPath}/geo" ]] || return 1
+        padmWriteManagedFileBackupManifest "${backupPath}" geo "${root}/missing-geo" || return 1
+        [[ ! -e "${backupPath}/geo" ]] || return 1
         printf 'old-geo\n' >"${regularPath}" || return 1
-        backupXrayGeoFileIfPresent "${regularPath}" "${backupPath}" || return 1
-        [[ "${copyCalls}" == 1 && "$(<"${backupPath}")" == old-geo ]] || return 1
+        padmWriteManagedFileBackupManifest "${backupPath}" geo "${regularPath}" || return 1
+        [[ "$(<"${backupPath}/geo")" == old-geo ]] || return 1
     ) || return 1
     (
         # Geo 版本沿用核心发布解析；请求失败或坏响应不开始暂存和下载。
@@ -4742,6 +5326,32 @@ runGeoUpdateReloadFailureRegression() (
             fi
             [[ "$(find "${target}" -type f | wc -l)" == 3 ]] || return 1
         done
+    ) || return 1
+    (
+        local file mode target backup
+        for file in geosite.dat geoip.dat geo.version; do
+            for mode in missing directory; do
+                target="${root}/lost-${file}-${mode}"
+                backup="${target}/backup"
+                mkdir -p "${target}"
+                printf 'old\n' >"${target}/${file}"
+                padmWriteManagedFileBackupManifest "${backup}" "${file}" "${target}/${file}" || return 1
+                command rm -f -- "${backup}/${file}"
+                [[ "${mode}" != directory ]] || mkdir "${backup}/${file}"
+                printf 'new\n' >"${target}/${file}"
+                local -A PADM_XRAY_GEO_COMMIT=([active]=true [backup]="${backup}")
+                # 必需备份丢失不能删除当前数据，恢复失败也不能清理备份目录。
+                regressionExpectStatus 1 rollbackXrayGeoCommitOnExit || return 1
+                [[ "$(<"${target}/${file}")" == new && -d "${backup}" ]] || return 1
+            done
+        done
+        target="${root}/originally-missing"
+        backup="${target}/backup"
+        padmWriteManagedFileBackupManifest "${backup}" geosite.dat "${target}/geosite.dat" || return 1
+        printf 'new\n' >"${target}/geosite.dat"
+        PADM_XRAY_GEO_COMMIT=([active]=true [backup]="${backup}")
+        rollbackXrayGeoCommitOnExit || return 1
+        [[ ! -e "${target}/geosite.dat" && ! -e "${backup}" ]]
     ) || return 1
     : >"${callLog}"
     : >"${statusLog}"
@@ -5485,6 +6095,88 @@ JSON
     [[ "$(wc -l <"${reloadCountFile}" | tr -d ' ')" == "1" ]]
     [[ "$(wc -l <"${refreshCountFile}" | tr -d ' ')" == "1" ]]
     refreshMode=success
+
+    (
+        # 提交和校验中断只恢复文件，重载中断同时恢复旧核心；订阅中断保留已生效配置。
+        local signalPhase signalRecovery signalName expectedRc caseRoot calls errors resultRc
+        local targetFile backupFile stagedFile
+        eval "$(declare -f commitGeneratedJsonFile | sed '1s/^commitGeneratedJsonFile/originalConfigSignalCommit/')"
+        eval "$(declare -f restoreManagedFileFromBackup | sed '1s/^restoreManagedFileFromBackup/originalConfigSignalRestore/')"
+        commitGeneratedJsonFile() {
+            originalConfigSignalCommit "$@" || return 1
+            [[ "${signalPhase}" != commit ]] || kill "-${signalName}" "${BASHPID}"
+        }
+        restoreManagedFileFromBackup() {
+            [[ "${signalRecovery}" != file-fail ]] || return 1
+            originalConfigSignalRestore "$@"
+        }
+        configSignalValidate() {
+            [[ "${signalPhase}" != validate ]] || kill "-${signalName}" "${BASHPID}"
+            return 0
+        }
+        configSignalReload() {
+            local mode
+            mode=$(jq -r '.mode' "${targetFile}") || return 1
+            printf '%s\n' "${mode}" >>"${calls}"
+            if [[ "${mode}" == new && "${signalPhase}" == reload ]]; then
+                kill "-${signalName}" "${BASHPID}"
+            fi
+            [[ "${mode}" != old || "${signalRecovery}" != reload-fail ]]
+        }
+        configSignalRefresh() {
+            [[ "${signalPhase}" != refresh ]] || kill "-${signalName}" "${BASHPID}"
+            return 0
+        }
+        for signalName in INT TERM; do
+            expectedRc=130
+            [[ "${signalName}" != TERM ]] || expectedRc=143
+            for signalPhase in commit validate reload refresh; do
+                for signalRecovery in success file-fail reload-fail; do
+                    [[ "${signalPhase}" != refresh || "${signalRecovery}" == success ]] || continue
+                    [[ "${signalRecovery}" != reload-fail || "${signalPhase}" == reload ]] || continue
+                    caseRoot="${tmpRoot}/config-signal-${signalName}-${signalPhase}-${signalRecovery}"
+                    mkdir -p "${caseRoot}" || return 1
+                    targetFile="${caseRoot}/config.json"
+                    backupFile="${caseRoot}/config.bak"
+                    stagedFile="${caseRoot}/staged.json"
+                    calls="${caseRoot}/reload.log" errors="${caseRoot}/errors.log"
+                    printf '{"mode":"old"}\n' >"${targetFile}"
+                    printf '{"mode":"new"}\n' >"${stagedFile}"
+                    : >"${calls}" "${errors}"
+                    (
+                        errorCard() { printf '%s\n' "$*" >>"${errors}"; }
+                        configTransactionCommit "${targetFile}" "${stagedFile}" "${backupFile}" \
+                            configSignalValidate "事务校验失败" "已回滚事务" "事务成功" \
+                            configSignalRefresh configSignalReload
+                    ) >/dev/null 2>&1 && resultRc=0 || resultRc=$?
+                    [[ "${resultRc}" == "${expectedRc}" && ! -e "${stagedFile}" ]] || return 1
+                    if [[ "${signalPhase}" == refresh ]]; then
+                        jq -e '.mode == "new"' "${targetFile}" >/dev/null || return 1
+                        [[ ! -e "${backupFile}" && "$(<"${calls}")" == new ]] || return 1
+                    elif [[ "${signalRecovery}" == file-fail ]]; then
+                        jq -e '.mode == "new"' "${targetFile}" >/dev/null || return 1
+                        jq -e '.mode == "old"' "${backupFile}" >/dev/null || return 1
+                        [[ "${signalPhase}" != reload || "$(<"${calls}")" == new ]] || return 1
+                        [[ "${signalPhase}" == reload || ! -s "${calls}" ]] || return 1
+                        grep -q '中断后回滚失败' "${errors}" || return 1
+                    else
+                        jq -e '.mode == "old"' "${targetFile}" >/dev/null || return 1
+                        if [[ "${signalPhase}" == reload ]]; then
+                            [[ "$(<"${calls}")" == $'new\nold' ]] || return 1
+                        else
+                            [[ ! -s "${calls}" ]] || return 1
+                        fi
+                        if [[ "${signalRecovery}" == reload-fail ]]; then
+                            jq -e '.mode == "old"' "${backupFile}" >/dev/null || return 1
+                            grep -q '旧核心重载失败' "${errors}" || return 1
+                        else
+                            [[ ! -e "${backupFile}" ]] || return 1
+                        fi
+                    fi
+                done
+            done
+        done
+    ) || return 1
 
     (
         # 协议只重载对应核心；失败时回滚自身配置，订阅刷新成功后才通知。

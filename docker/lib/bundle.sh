@@ -440,6 +440,9 @@ dockerActivateStagedBundle() {
         mv -- "${candidate}" "${releaseDir}" || return 1
         rmdir -- "${stageDir}" || return 1
     fi
+    if [[ "${DOCKER_INSTALL_TRANSACTION_ACTIVE:-0}" == 1 ]]; then
+        DOCKER_INSTALL_BUNDLE_TARGET=".bundles/${digest}"
+    fi
     dockerActivateBundle ".bundles/${digest}"
 }
 

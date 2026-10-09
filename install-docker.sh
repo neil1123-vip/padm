@@ -317,6 +317,47 @@ dockerEntryInstallCommandRequested() {
     [[ "${1:-}" == 'install' ]]
 }
 
+dockerEntryParseInstallArgs() {
+    local sourceRoot= requestedRef= noMenu=0
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+        --no-menu)
+            noMenu=1
+            shift
+            ;;
+        --source|--ref)
+            [[ "$#" -ge 2 && -n "$2" ]] || return 2
+            if [[ "$1" == --source ]]; then sourceRoot=$2; else requestedRef=$2; fi
+            shift 2
+            ;;
+        *)
+            dockerEntryUsage
+            return 2
+            ;;
+        esac
+    done
+    if [[ -n "${sourceRoot}" && "${requestedRef}" == latest ]]; then
+        dockerEntryError '--source 不能与 --ref latest 同时使用'
+        return 2
+    fi
+    if [[ -n "${requestedRef}" && "${requestedRef}" != latest &&
+        ! "${requestedRef}" =~ ^[0-9a-f]{40}$ && ! "${requestedRef}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+        dockerEntryError '--ref 必须是 40 位小写 commit SHA 或 latest'
+        return 2
+    fi
+    if [[ -n "${sourceRoot}" ]]; then
+        sourceRoot=$(cd -- "${sourceRoot}" 2>/dev/null && pwd -P) || return 13
+        dockerEntryPathIsSafe "${sourceRoot}" && dockerEntryBundleModulesPresent "${sourceRoot}" || {
+            dockerEntryError "Docker bundle 源不完整: ${sourceRoot}"
+            return 13
+        }
+    fi
+    DOCKER_ENTRY_INSTALL_SOURCE=${sourceRoot}
+    DOCKER_ENTRY_INSTALL_REF=${requestedRef}
+    [[ "${noMenu}" -ne 1 ]] || DOCKER_MENU_AFTER_INSTALL=0
+    return 0
+}
+
 dockerEntryArchivePathIsSafe() {
     local path=${1%/} segment
     local -a segments=()
@@ -361,14 +402,33 @@ dockerEntryCleanup() {
 dockerEntryBundleModulesPresent() {
     local sourceRoot=$1 required
     [[ -d "${sourceRoot}" && ! -L "${sourceRoot}" ]] || return 1
+    [[ -d "${sourceRoot}/docker" && ! -L "${sourceRoot}/docker" &&
+        -z "$(find "${sourceRoot}/docker" -type l -print -quit 2>/dev/null)" ]] || return 1
     for required in \
         install-docker.sh \
         docker/lib/bootstrap.sh docker/lib/bundle.sh docker/lib/manifest.sh \
-        docker/lib/services.sh docker/lib/lifecycle.sh docker/lib/setup.sh \
+        docker/lib/services.sh docker/lib/traffic.sh docker/lib/lifecycle.sh docker/lib/setup.sh \
         docker/lib/accounts.sh docker/lib/subscriptions.sh docker/lib/business.sh \
-        docker/lib/menu.sh shell/core/deployment_mode.sh; do
+        docker/lib/menu.sh docker/contracts/configure.schema.json \
+        docker/contracts/deployment.schema.json docker/contracts/features.json \
+        shell/core/deployment_mode.sh shell/core/stats_grpc.sh; do
         [[ -f "${sourceRoot}/${required}" && ! -L "${sourceRoot}/${required}" ]] || return 1
     done
+    for required in renewal schedule geo control-sync control; do
+        if grep -qF "/${required}.sh\"" "${sourceRoot}/docker/lib/services.sh"; then
+            [[ -f "${sourceRoot}/docker/lib/${required}.sh" &&
+                ! -L "${sourceRoot}/docker/lib/${required}.sh" ]] || return 1
+        fi
+    done
+    if grep -qF '/shell/core/cores.sh"' "${sourceRoot}/docker/lib/lifecycle.sh"; then
+        [[ -f "${sourceRoot}/shell/core/cores.sh" && ! -L "${sourceRoot}/shell/core/cores.sh" ]] || return 1
+    fi
+    if grep -qF '/reality-targets.sh"' "${sourceRoot}/docker/lib/services.sh" ||
+        [[ -f "${sourceRoot}/docker/lib/reality-targets.sh" ]]; then
+        for required in docker/lib/reality-targets.sh shell/core/runtime.sh shell/core/reality_targets.sh; do
+            [[ -f "${sourceRoot}/${required}" && ! -L "${sourceRoot}/${required}" ]] || return 1
+        done
+    fi
 }
 
 dockerEntryFetchBundle() {
@@ -419,20 +479,9 @@ dockerEntryPrepareBundleSource() {
     local sourceRoot= requestedRef= command=${1:-}
     if [[ "${1:-}" == install ]]; then
         shift
-        while [[ "$#" -gt 0 ]]; do
-            case "$1" in
-            --no-menu) shift ;;
-            --source|--ref)
-                [[ "$#" -ge 2 && -n "$2" ]] || return 2
-                if [[ "$1" == --source ]]; then sourceRoot=$2; else requestedRef=$2; fi
-                shift 2
-                ;;
-            *) return 2 ;;
-            esac
-        done
-        [[ -z "${sourceRoot}" || "${requestedRef}" != latest ]] || return 2
-        [[ -z "${requestedRef}" || "${requestedRef}" == latest ||
-            "${requestedRef}" =~ ^[0-9a-f]{40}$ || "${requestedRef}" =~ ^sha256:[0-9a-f]{64}$ ]] || return 2
+        dockerEntryParseInstallArgs "$@" || return $?
+        sourceRoot=${DOCKER_ENTRY_INSTALL_SOURCE}
+        requestedRef=${DOCKER_ENTRY_INSTALL_REF}
     fi
     if [[ -n "${sourceRoot}" ]]; then
         sourceRoot=$(cd -- "${sourceRoot}" 2>/dev/null && pwd -P) || return 13
@@ -465,6 +514,7 @@ if [[ "${1:-}" == install && -t 0 && -t 1 ]]; then
 fi
 
 if dockerEntryInstallCommandRequested "${1:-}"; then
+    dockerEntryParseInstallArgs "${@:2}" || exit $?
     dockerEntryEnsureDockerForInstall
     DOCKER_ENTRY_ENGINE_STATUS=$?
     if [[ "${DOCKER_ENTRY_ENGINE_STATUS}" -ne 0 ]]; then
