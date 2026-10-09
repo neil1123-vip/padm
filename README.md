@@ -1137,21 +1137,24 @@ Windows 本机使用 PowerShell 7.3 或更新版本运行专用 Docker Linux 回
 .\shell\regression\run-docker.ps1 -Selector ci -Jobs 3
 ```
 
-普通定向 selector 默认 `-Jobs 2`，完整 `ci`、`ci-pr`、`all` 默认 `-Jobs 3`。
+普通定向 selector 默认 `-Jobs 2`，完整 `ci`、`ci-pr`、`all` 默认 `-Jobs 3`，
+完整 `docker-contracts` 默认 `-Jobs 6`（支持 1–8）。
 各任务先运行匹配改动的定向回归，集成完成后集中执行完整回归。
 入口归档当前工作区的已跟踪文件和未忽略的新文件，包含未提交修改，不包含 `.git`
 和 `.tmp-*`；源码、`TMPDIR`、`HOME` 在容器内部，不挂载 Windows 工作目录。
 每次运行的源码快照、日志和结果保存在 `.tmp-regression-docker-*/`，测试失败保留日志并返回原退出码。
 镜像只装工具，不固化项目源码；使用 Debian 官方依赖、固定 digest 的官方静态 jq 1.8.2 和官方 Docker CLI/Buildx/Compose，
 不安装 daemon、不挂 Docker socket，运行时无网络。工具层需要重新安装时使用 `-Rebuild`。
-同一仓库、同一 Windows 用户的各任务和 worktree 共用两个回归槽位；普通 selector 占一个，
-`ci`、`ci-pr` 和 `all` 占两个。完整回归登记等待后，先排空运行中的任务，不再放行新普通任务；
-没有空位时自动等待，不保证严格 FIFO。
+同一仓库、同一 Windows 用户的各任务和 worktree 试用三个回归槽位；普通 selector 占一个，
+`ci`、`ci-pr`、`all` 和 `docker-contracts` 占两个。完整回归登记等待后，不再放行新普通任务，
+优先等待所需槽位；取得槽位后，普通任务可以使用剩余一槽。最多三个普通任务或一套完整回归加一个普通任务，
+两套完整回归不能重叠；没有足够空位时自动等待，不保证严格 FIFO。
 排队前生成源码快照；镜像构建串行化并固定镜像 ID；异常退出后的槽位接管会先清理本入口标记的残留容器。
 完整回归复用输入相同的成功结果：源码按路径、内容、类型和权限匹配，忽略归档时间戳；
 同时匹配工具镜像内容、selector、架构和 `Jobs`。失败、输入变化或 `-ForceRun` 都会实际执行。
 共享索引放在主工作区 `.tmp-regression-shared-*/`；原始日志或结果丢失/改变时不再复用。
-`result.json` 记录等待时长、槽位数、镜像 ID 和复用来源；`-Jobs` 只控制容器内测试并发，不是宿主资源配额。
+`result.json` 记录等待时长、占用槽位数、总预算 `queue_budget`、镜像 ID 和复用来源；
+`-Jobs` 只控制容器内测试并发，不是宿主资源配额。
 真实宿主、重启、公网及业务容器连通性验收仍须单独环境，普通回归容器不能代替。
 入口自检运行 `.\shell\regression\test-run-docker.ps1`。下面的 Bash 命令适用于 Linux 执行环境。
 

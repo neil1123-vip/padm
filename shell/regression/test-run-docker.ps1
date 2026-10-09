@@ -89,7 +89,9 @@ foreach ($case in @(
     $result = Get-Content -Raw -LiteralPath (Join-Path $artifacts.FullName 'result.json') | ConvertFrom-Json
     if ($result.exit_code -ne $case.expected) { throw 'Wrong saved exit code.' }
     if ($result.jobs -ne 2 -or $result.cache_hit) { throw 'Wrong ordinary regression defaults.' }
-    if ($result.queue_slots -ne 1 -or $result.image_id -notmatch '^sha256:') { throw 'Missing queue or image evidence.' }
+    if ($result.queue_slots -ne 1 -or $result.queue_budget -ne 3 -or $result.image_id -notmatch '^sha256:') {
+        throw 'Missing queue or image evidence.'
+    }
     if (-not (Select-String -Quiet -LiteralPath (Join-Path $artifacts.FullName 'regression.log') `
         -SimpleMatch 'current-worktree-snapshot-ok')) { throw 'Missing snapshot proof in saved log.' }
 }
@@ -145,37 +147,48 @@ function Get-RunnerResult {
 }
 
 try {
-    # 两个普通任务必须重叠；第三个等待，并继续使用排队前的快照。
+    # 三个普通任务必须重叠；第四个等待，并继续使用排队前的快照。
     $first = Start-RunnerCheck hold queue-first
     Wait-RunnerOutput $first current-worktree-snapshot-ok
     $second = Start-RunnerCheck hold queue-second
     Wait-RunnerOutput $second current-worktree-snapshot-ok
-    if ($first.Process.HasExited) { throw 'Ordinary regressions did not overlap.' }
-    $third = Start-RunnerCheck fast queue-third
-    Wait-RunnerOutput $third 'Regression queue: waiting'
+    $third = Start-RunnerCheck hold queue-third
+    Wait-RunnerOutput $third current-worktree-snapshot-ok
+    if ($first.Process.HasExited -or $second.Process.HasExited) { throw 'Ordinary regressions did not overlap.' }
+    $fourth = Start-RunnerCheck fast queue-fourth
+    Wait-RunnerOutput $fourth 'Regression queue: waiting'
     [IO.File]::WriteAllText((Join-Path $fixture 'new file.txt'), 'changed-while-queued', $utf8)
     Wait-RunnerExit $first
     Wait-RunnerExit $second
     Wait-RunnerExit $third
+    Wait-RunnerExit $fourth
     [IO.File]::WriteAllText((Join-Path $fixture 'new file.txt'), 'untracked-current', $utf8)
 
     # 完整合同等待时，后来的普通任务不能使用空闲槽位插入。
     $holder = Start-RunnerCheck hold queue-before-heavy
     Wait-RunnerOutput $holder current-worktree-snapshot-ok
+    $otherHolder = Start-RunnerCheck hold queue-before-heavy-other
+    Wait-RunnerOutput $otherHolder current-worktree-snapshot-ok
     $heavy = Start-RunnerCheck docker-contracts queue-heavy
     Wait-RunnerOutput $heavy 'Regression queue: waiting'
     $queued = Start-RunnerCheck fast queue-after-heavy
     Wait-RunnerOutput $queued 'Regression queue: waiting'
-    if ($holder.Process.HasExited) { throw 'Priority check missed the occupied slot.' }
-    Wait-RunnerExit $holder
-    Wait-RunnerOutput $heavy current-worktree-snapshot-ok
+    if ($holder.Process.HasExited -or $otherHolder.Process.HasExited) {
+        throw 'Priority check missed the occupied slots.'
+    }
     if (Select-String -Quiet -LiteralPath $queued.Output -SimpleMatch current-worktree-snapshot-ok) {
         throw 'Ordinary regression bypassed a waiting full regression.'
     }
+    Wait-RunnerExit $holder
+    Wait-RunnerExit $otherHolder
+    Wait-RunnerOutput $heavy current-worktree-snapshot-ok
+    Wait-RunnerOutput $queued current-worktree-snapshot-ok
+    if ($heavy.Process.HasExited) { throw 'Full and ordinary regressions did not overlap.' }
     Wait-RunnerExit $heavy
     Wait-RunnerExit $queued
     $heavyResult = Get-RunnerResult $heavy
-    if ($heavyResult.jobs -ne 6 -or $heavyResult.queue_slots -ne 2 -or $heavyResult.cache_hit) {
+    if ($heavyResult.jobs -ne 6 -or $heavyResult.queue_slots -ne 2 -or
+        $heavyResult.queue_budget -ne 3 -or $heavyResult.cache_hit) {
         throw 'Wrong Docker contracts defaults.'
     }
     $contractReuse = Start-RunnerCheck docker-contracts cache-contracts
@@ -259,14 +272,19 @@ try {
     # 被取消的等待任务不能留下永久的完整回归优先标记。
     $holder = Start-RunnerCheck hold queue-cancel-holder
     Wait-RunnerOutput $holder current-worktree-snapshot-ok
+    $otherHolder = Start-RunnerCheck hold queue-cancel-holder-other
+    Wait-RunnerOutput $otherHolder current-worktree-snapshot-ok
     $cancelled = Start-RunnerCheck ci queue-cancel-waiter -ForceRun
     Wait-RunnerOutput $cancelled 'Regression queue: waiting'
     Stop-Process -Id $cancelled.Process.Id -Force
     $cancelled.Process.WaitForExit()
     $afterCancel = Start-RunnerCheck fast queue-after-cancel
     Wait-RunnerOutput $afterCancel current-worktree-snapshot-ok
-    if ($holder.Process.HasExited) { throw 'Cancelled priority marker blocked the available slot.' }
+    if ($holder.Process.HasExited -or $otherHolder.Process.HasExited) {
+        throw 'Cancelled priority marker blocked the available slot.'
+    }
     Wait-RunnerExit $holder
+    Wait-RunnerExit $otherHolder
     Wait-RunnerExit $afterCancel
 }
 finally {

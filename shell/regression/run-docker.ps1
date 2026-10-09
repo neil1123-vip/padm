@@ -68,6 +68,7 @@ $buildGuard = [Threading.Mutex]::new($false, "Global\padm-regression-$userKey-bu
 $slotMutexes = @(
     [Threading.Mutex]::new($false, "$mutexPrefix-slot-1")
     [Threading.Mutex]::new($false, "$mutexPrefix-slot-2")
+    [Threading.Mutex]::new($false, "$mutexPrefix-slot-3")
 )
 $requiredSlots = if ($fullRegression) { 2 } else { 1 }
 $heldSlots = @()
@@ -250,6 +251,7 @@ try {
         platform = $platform
         jobs = $Jobs
         queue_slots = $requiredSlots
+        queue_budget = $slotMutexes.Count
         queue_wait_ms = $queueWatch.ElapsedMilliseconds
         image_id = $imageId
         tool_sha256 = $toolHash
