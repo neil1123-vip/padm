@@ -2915,6 +2915,49 @@ runCoreTemplateReturnFailureRegression() (
     mode=cleanup-fail
     selectCustomInstallType=",999,"
     regressionExpectFailure padmRunPortAllowTransaction initSingBoxConfigApply custom 1 2>/dev/null
+
+    (
+        local singBoxRoot="${root}/merged/config"
+        local PADM_SINGBOX_CONFIG_DIR="${singBoxRoot}" singBoxConfigPath="${singBoxRoot}/"
+        local singBoxServiceRunning=false xrayServiceRunning=false
+        local mergedConfig mergedState
+        mkdir -p "${singBoxRoot}"
+        mergedConfig=$(singBoxMergedConfigFile)
+        singBoxInstalled() { return 1; }
+        handleSingBox() {
+            printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+            if [[ "$1" == start ]]; then
+                printf 'new-merged-config\n' >"${mergedConfig}"
+                singBoxServiceRunning=true
+            else
+                singBoxServiceRunning=false
+            fi
+        }
+        failAfterSingBoxMerge() {
+            printf 'new-sing-box-inbound\n' >"${singBoxRoot}/02_VLESS_TCP_inbounds.json"
+            runCoreServiceActionAllowFailure handleSingBox start || return 1
+            return 7
+        }
+        for mergedState in present absent; do
+            printf 'old-sing-box-inbound\n' >"${singBoxRoot}/02_VLESS_TCP_inbounds.json"
+            if [[ "${mergedState}" == present ]]; then
+                printf 'old-merged-config\n' >"${mergedConfig}"
+            else
+                rm -f "${mergedConfig}"
+            fi
+            : >"${serviceLog}"
+            regressionExpectStatus 7 coreInstallConfigTransaction sing-box failAfterSingBoxMerge >/dev/null 2>&1
+            [[ "$(<"${singBoxRoot}/02_VLESS_TCP_inbounds.json")" == old-sing-box-inbound ]]
+            [[ "${singBoxServiceRunning}" == false ]]
+            grep -qx 'sing-box:start:true' "${serviceLog}"
+            grep -qx 'sing-box:stop:true' "${serviceLog}"
+            if [[ "${mergedState}" == present ]]; then
+                [[ "$(<"${mergedConfig}")" == old-merged-config ]]
+            else
+                [[ ! -e "${mergedConfig}" ]]
+            fi
+        done
+    )
 )
 
 runCoreInstallServiceActionFailureRegression() (

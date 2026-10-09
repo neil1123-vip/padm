@@ -232,6 +232,11 @@ coreTemplateConfigBackupCreate() {
         targets+=("${targetPath}")
     done
 
+    if [[ "${core}" == "sing-box" ]]; then
+        targetPath=$(singBoxMergedConfigFile) || return 1
+        targets+=("${targetPath}")
+    fi
+
     if [[ "${core}" == "sing-box" ]] && declare -F realityKeyFile >/dev/null 2>&1; then
         targetPath=$(realityKeyFile) || return 1
         targets+=("${targetPath}")
