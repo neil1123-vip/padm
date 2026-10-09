@@ -976,10 +976,17 @@ prefix bare domains with `domain:`. They replace the whole group rather than app
 to historical rules. Empty/invalid items or more than 256 unique rules are rejected;
 use the corresponding off command to clear the group. Private JSON imports through
 `--direct/--block` remain available, and ordinary `--spec` editing still freezes routing.
+Menu options `22/23` and `--direct-domains-add/--block-domains-add` append instead:
+existing order is retained, then previously unseen rules are added in input order.
+A missing group is created; more than 256 unique rules after merging is rejected.
+Repeated additions do not duplicate rules, but confirmation still uses the deployment
+transaction and may update rollback metadata.
 
 ```bash
 padm-docker edit --direct-domains 'example.org,full:exact.example.net' --preview
 padm-docker edit --block-domains 'keyword:example,geosite:cn' --confirm PADM-DOCKER-EDIT
+padm-docker edit --direct-domains-add 'full:updates.example.org' --preview
+padm-docker edit --block-domains-add 'domain:ads.example.net' --confirm PADM-DOCKER-EDIT
 ```
 
 Menu `17`, options `16–17`, enables or disables detected BitTorrent blocking.

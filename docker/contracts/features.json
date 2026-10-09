@@ -485,7 +485,7 @@
       "profiles": [],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "5B.3a–5B.3e 已交付两核心 DNS 分流、精确 hosts、域名 Direct/Block、独立字面目的 IP/CIDR/geoip:cn、可识别明文 BT 阻断及独立所有权的 CN 区域预设；Direct/Block 保留私有 JSON 并提供 CSV 整组替换，复用规范化和编辑事务，不累加历史规则。另提供独立 IPv6 域名 AAAA-only 选择性/默认出站及 WARP 私有参数合同和核心内 WireGuard 出站。WARP 双核心本地加密 Peer 的 TCP/UDP、DNS 来源、失联无直连与关闭恢复已验，Cloudflare 账号、公网 UDP 和公网出口仍待验。关闭保留其它子策略；默认及自定义直连例外优先 Block/BT/IPv6/WARP/SOCKS，重复默认出站明确拒绝。WARP 保留 hosts/指定 DNS，family 同时选择隧道地址及目的域名解析族，不转换字面 IP；不注册账号、不授予宿主权限。Block 在解析前拒绝 TCP/UDP，不阻断域名解析后的 IP。公网连通取决于容器路由；BT 不保证覆盖加密、混淆或部分 uTP。完整区域策略、逐条规则编辑和冲突检测尚未迁移，206 不作为公开节点协议。"
+      "reason": "5B.3a–5B.3e 已交付两核心 DNS 分流、精确 hosts、域名 Direct/Block、独立字面目的 IP/CIDR/geoip:cn、可识别明文 BT 阻断及独立所有权的 CN 区域预设；Direct/Block 保留私有 JSON 并提供 CSV 整组替换或稳定去重的增量追加，复用规范化和编辑事务，合并后仍受 256 条上限约束。另提供独立 IPv6 域名 AAAA-only 选择性/默认出站及 WARP 私有参数合同和核心内 WireGuard 出站。WARP 双核心本地加密 Peer 的 TCP/UDP、DNS 来源、失联无直连与关闭恢复已验，Cloudflare 账号、公网 UDP 和公网出口仍待验。关闭保留其它子策略；默认及自定义直连例外优先 Block/BT/IPv6/WARP/SOCKS，重复默认出站明确拒绝。WARP 保留 hosts/指定 DNS，family 同时选择隧道地址及目的域名解析族，不转换字面 IP；不注册账号、不授予宿主权限。Block 在解析前拒绝 TCP/UDP，不阻断域名解析后的 IP。公网连通取决于容器路由；BT 不保证覆盖加密、混淆或部分 uTP。完整区域策略、逐条规则编辑和冲突检测尚未迁移，206 不作为公开节点协议。"
     },
     "internal-207-access-control": {
       "status": "deferred",

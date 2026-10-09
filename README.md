@@ -283,6 +283,9 @@ SOCKS5 匹配目标仍交上游解析，DNS/hosts 不改变上游域名或实际
 逗号分隔规则；CLI `--direct-domains/--block-domains` 使用相同输入。
 CSV 去首尾空白、转小写、按首次出现去重，裸域名补 `domain:`，
 整组替换而非累加，空项/非法或超过 256 条拒绝；清空请使用对应关闭命令。
+菜单 `17` 的 `22/23` 或 `--direct-domains-add/--block-domains-add` 可增量追加：
+保留原规则顺序，再添加首次出现的新项；对应组缺失时创建，合并后超过 256 条拒绝。
+重复追加不重复规则，确认仍沿用部署事务，可能更新回滚元数据。
 仍保留 root 私有 JSON 导入，格式均为
 `{"domains":["full:exact.example.net","domain:example.org","keyword:example","geosite:cn"]}`。
 规则接受 1–256 条唯一小写 `full/domain/keyword/geosite`，四类保持 OR；
@@ -296,6 +299,8 @@ padm-docker edit --direct /root/padm-direct.json --confirm PADM-DOCKER-EDIT
 padm-docker edit --block /root/padm-block.json --confirm PADM-DOCKER-EDIT
 padm-docker edit --direct-domains 'example.org,full:exact.example.net' --preview
 padm-docker edit --block-domains 'keyword:example,geosite:cn' --confirm PADM-DOCKER-EDIT
+padm-docker edit --direct-domains-add 'full:updates.example.org' --preview
+padm-docker edit --block-domains-add 'domain:ads.example.net' --confirm PADM-DOCKER-EDIT
 padm-docker edit --direct-off --confirm PADM-DOCKER-EDIT
 padm-docker edit --block-off --confirm PADM-DOCKER-EDIT
 ```

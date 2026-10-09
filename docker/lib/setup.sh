@@ -1406,14 +1406,16 @@ dockerEditCommand() {
             socks5=global
             shift
             ;;
-        --direct-domains|--block-domains)
+        --direct-domains|--block-domains|--direct-domains-add|--block-domains-add)
             [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${routingKind}" ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
-            routingKind=${1#--}
+            routingKind=${1#--} routingAction=domains
+            if [[ "${routingKind}" == *-add ]]; then
+                routingKind=${routingKind%-add} routingAction=domains_add
+            fi
             routingKind=${routingKind%-domains}
             routingDomains=$(dockerSocks5DomainsNormalize "$2") ||
                 return "${PADM_DOCKER_RC_USAGE}"
-            routingAction=domains
             shift 2
             ;;
         --http-relay)
@@ -1761,6 +1763,13 @@ dockerEditCommand() {
         elif [[ "${routingKind}" == ipv6 && "${routingAction}" == enable ]]; then
             jq --arg mode "${ipv6Mode}" --argjson domains "${ipv6Domains}" \
                 '.routing.ipv6 = {mode:$mode,domains:$domains}' "${draft}" >"${draft}.next"
+        elif [[ "${routingAction}" == domains_add ]]; then
+            jq --arg kind "${routingKind}" --argjson domains "${routingDomains}" '
+              (reduce $domains[] as $rule ((.routing[$kind].domains // []);
+                if index($rule) == null then . + [$rule] else . end)) as $merged |
+              if ($merged | length) <= 256 then .routing[$kind].domains = $merged
+              else error("合并后域名规则超过 256 项，未提交配置") end
+            ' "${draft}" >"${draft}.next"
         elif [[ "${routingAction}" == domains ]]; then
             jq --arg kind "${routingKind}" --argjson domains "${routingDomains}" \
                 '.routing[$kind].domains = $domains' "${draft}" >"${draft}.next"
