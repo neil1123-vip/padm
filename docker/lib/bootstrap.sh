@@ -244,6 +244,10 @@ dockerAcquireDeploymentLock() {
     [[ "${timeout}" =~ ^[0-9]+$ ]] || return 1
     deadline=$((SECONDS + timeout))
     while ! mkdir -- "${lockDir}" 2>/dev/null; do
+        [[ ! -L "${lockDir}" && ( ! -e "${lockDir}" || -d "${lockDir}" ) ]] || {
+            dockerError 'Docker 部署锁路径异常'
+            return 1
+        }
         ownerPid=$(cat "${lockDir}/pid" 2>/dev/null || true)
         if [[ "${ownerPid}" =~ ^[0-9]+$ ]] && ! kill -0 "${ownerPid}" 2>/dev/null; then
             rm -f -- "${lockDir}/pid" 2>/dev/null || true

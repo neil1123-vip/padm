@@ -384,6 +384,31 @@ PADM_DOCKER_INSTALL_DIR="${ORPHAN_LOCK_ROOT}" PADM_DOCKER_LOCK_TIMEOUT=0 \
 grep -q '等待 Docker 部署锁超时' "${CONTROL_LOG}" || fail 'orphan-lock: timeout diagnostic missing'
 [[ "$(<"${ORPHAN_LOCK_ROOT}/locks/deployment.lock/residual")" == keep ]] || fail 'orphan-lock: removed unknown file'
 
+LINK_LOCK_ROOT="${TEST_ROOT}/link-lock"
+LINK_LOCK_TARGET="${TEST_ROOT}/external-lock"
+mkdir -p "${LINK_LOCK_ROOT}/locks" "${LINK_LOCK_TARGET}"
+printf '99999999\n' >"${LINK_LOCK_TARGET}/pid"
+ln -s "${LINK_LOCK_TARGET}" "${LINK_LOCK_ROOT}/locks/deployment.lock"
+lockStatus=0
+PADM_DOCKER_INSTALL_DIR="${LINK_LOCK_ROOT}" PADM_DOCKER_LOCK_TIMEOUT=0 \
+    bash -c 'source "$1/docker/lib/bootstrap.sh"; dockerAcquireDeploymentLock' \
+    bash "${PROJECT_ROOT}" >"${CONTROL_LOG}" 2>&1 || lockStatus=$?
+[[ "${lockStatus}" == 1 && -L "${LINK_LOCK_ROOT}/locks/deployment.lock" &&
+    "$(<"${LINK_LOCK_TARGET}/pid")" == 99999999 ]] || fail 'lock symlink changed external state'
+PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/released-lock" PADM_DOCKER_LOCK_TIMEOUT=1 \
+    bash -c '
+        source "$1/docker/lib/bootstrap.sh"
+        raced=false
+        mkdir() {
+            if [[ "$*" == "-- ${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock" && "$raced" == false ]]; then
+                raced=true
+                return 1
+            fi
+            command mkdir "$@"
+        }
+        dockerAcquireDeploymentLock && dockerReleaseDeploymentLock
+    ' bash "${PROJECT_ROOT}" || fail 'released lock was treated as an unsafe path'
+
 BROKEN_SOURCE="${TEST_ROOT}/broken-source"
 copyBundleFixture "${BROKEN_SOURCE}"
 rm -f -- "${BROKEN_SOURCE}/docker/lib/lifecycle.sh"
