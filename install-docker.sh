@@ -364,6 +364,11 @@ dockerEntryFetchBundle() {
     local refUrl=https://api.github.com/repos/neil1123-vip/padm/commits/main
     local archiveBase=https://github.com/neil1123-vip/padm/archive
 
+    if [[ -n "${DOCKER_ENTRY_FETCHED_REF:-}" &&
+        ( "${requestedRef}" == "${DOCKER_ENTRY_FETCHED_REF}" || "${requestedRef}" == latest ) &&
+        -f "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/bootstrap.sh" ]]; then
+        return 0
+    fi
     command -v jq >/dev/null 2>&1 && command -v tar >/dev/null 2>&1 || return 1
     command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || return 1
     dockerEntryCleanup || return 1
@@ -411,6 +416,43 @@ dockerEntryFetchBundle() {
     DOCKER_ENTRY_FETCHED_REF=${requestedRef}
 }
 
+dockerEntryPrepareBundleSource() {
+    local sourceRoot= requestedRef=
+    if [[ "${1:-}" == install ]]; then
+        shift
+        while [[ "$#" -gt 0 ]]; do
+            case "$1" in
+            --no-menu) shift ;;
+            --source|--ref)
+                [[ "$#" -ge 2 && -n "$2" ]] || return 2
+                if [[ "$1" == --source ]]; then sourceRoot=$2; else requestedRef=$2; fi
+                shift 2
+                ;;
+            *) return 2 ;;
+            esac
+        done
+        [[ -z "${sourceRoot}" || "${requestedRef}" != latest ]] || return 2
+        [[ -z "${requestedRef}" || "${requestedRef}" == latest ||
+            "${requestedRef}" =~ ^[0-9a-f]{40}$ || "${requestedRef}" =~ ^sha256:[0-9a-f]{64}$ ]] || return 2
+    fi
+    if [[ -n "${sourceRoot}" ]]; then
+        sourceRoot=$(cd -- "${sourceRoot}" 2>/dev/null && pwd -P) || return 13
+        dockerEntryPathIsSafe "${sourceRoot}" || return 13
+        DOCKER_ENTRY_SOURCE_DIR=${sourceRoot}
+        cmp -s "${DOCKER_ENTRY_PATH}" "${sourceRoot}/install-docker.sh" || {
+            dockerEntryError 'Docker 入口与本地 bundle 版本不一致，请使用匹配的入口'
+            return 13
+        }
+    else
+        DOCKER_ENTRY_REQUIRE_MATCH=1 dockerEntryFetchBundle "${requestedRef:-latest}" || return 13
+    fi
+    [[ -f "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/bundle.sh" &&
+        ! -L "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/bundle.sh" ]] || return 13
+    # 加载模块前检查完整本地源，避免显式源缺文件时退回联网。
+    source "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/bundle.sh" || return 13
+    dockerBundleSourceIsComplete "${DOCKER_ENTRY_SOURCE_DIR}" || return 13
+}
+
 DOCKER_ENTRY_PATH=$(dockerEntryResolvePath "${BASH_SOURCE[0]}") || {
     printf '无法解析 Docker 安装入口路径\n' >&2
     exit 1
@@ -434,10 +476,12 @@ if dockerEntryInstallCommandRequested "${1:-}"; then
 fi
 
 if [[ ! -f "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/bootstrap.sh" ]]; then
-    if ! DOCKER_ENTRY_REQUIRE_MATCH=1 dockerEntryFetchBundle latest; then
+    dockerEntryPrepareBundleSource "$@"
+    DOCKER_ENTRY_SOURCE_STATUS=$?
+    if [[ "${DOCKER_ENTRY_SOURCE_STATUS}" -ne 0 ]]; then
         dockerEntryCleanup || true
-        printf '无法下载完整 Docker 控制 bundle\n' >&2
-        exit 13
+        printf '无法准备完整 Docker 控制 bundle\n' >&2
+        exit "${DOCKER_ENTRY_SOURCE_STATUS}"
     fi
 fi
 

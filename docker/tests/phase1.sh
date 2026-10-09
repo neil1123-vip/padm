@@ -183,6 +183,53 @@ NO_COMPOSE_SOURCE="${TEST_ROOT}/no-compose-source"
 copyBundleFixture "${NO_COMPOSE_SOURCE}"
 rm -f -- "${NO_COMPOSE_SOURCE}/docker/compose.yaml"
 
+# 单文件入口应尊重完整本地源，不下载 latest 或其它模块。
+STANDALONE_ROOT="${TEST_ROOT}/standalone"
+FETCH_LOG="${TEST_ROOT}/standalone-fetch.log"
+mkdir -p "${STANDALONE_ROOT}"
+cp -- "${PROJECT_ROOT}/install-docker.sh" "${STANDALONE_ROOT}/install-docker.sh"
+(
+    curl() { printf '%s\n' "$*" >>"${PHASE1_FETCH_LOG}"; return 99; }
+    wget() { curl "$@"; }
+    export -f curl wget
+    export PHASE1_FETCH_LOG="${FETCH_LOG}"
+    PROJECT_ROOT="${STANDALONE_ROOT}" runControl 0 standalone-local-source \
+        "${TEST_ROOT}/standalone-state" "${NATIVE_ROOT}" "${TEST_ROOT}/standalone-bin" \
+        install --no-menu --source "${NO_COMPOSE_SOURCE}"
+    [[ ! -s "${FETCH_LOG}" ]] || fail 'standalone local source attempted a download'
+    PROJECT_ROOT="${STANDALONE_ROOT}" runControl 2 standalone-source-latest \
+        "${TEST_ROOT}/standalone-invalid" "${NATIVE_ROOT}" "${TEST_ROOT}/standalone-invalid-bin" \
+        install --source "${NO_COMPOSE_SOURCE}" --ref latest
+    [[ ! -s "${FETCH_LOG}" && ! -e "${TEST_ROOT}/standalone-invalid" ]] ||
+        fail 'invalid standalone source/ref performed installation work'
+)
+
+# 指定 SHA 只取一次匹配归档，不访问 latest 元数据。
+FETCH_ARCHIVE="${TEST_ROOT}/standalone-source.tar.gz"
+FETCH_REF=ffffffffffffffffffffffffffffffffffffffff
+tar -czf "${FETCH_ARCHIVE}" -C "${TEST_ROOT}" no-compose-source
+(
+    curl() {
+        local url=${!#} target=
+        printf '%s\n' "${url}" >>"${PHASE1_FETCH_LOG}"
+        [[ "${url}" == "https://github.com/neil1123-vip/padm/archive/${PHASE1_FETCH_REF}.tar.gz" ]] || return 99
+        while [[ "$#" -gt 0 ]]; do
+            if [[ "$1" == -o ]]; then target=$2; break; fi
+            shift
+        done
+        [[ -n "${target}" ]] && command cp -- "${PHASE1_FETCH_ARCHIVE}" "${target}"
+    }
+    wget() { return 99; }
+    export -f curl wget
+    export PHASE1_FETCH_LOG="${FETCH_LOG}" PHASE1_FETCH_ARCHIVE="${FETCH_ARCHIVE}" PHASE1_FETCH_REF="${FETCH_REF}"
+    PROJECT_ROOT="${STANDALONE_ROOT}" runControl 0 standalone-fixed-ref \
+        "${TEST_ROOT}/standalone-ref-state" "${NATIVE_ROOT}" "${TEST_ROOT}/standalone-ref-bin" \
+        install --no-menu --ref "${FETCH_REF}"
+    [[ "$(wc -l <"${FETCH_LOG}")" -eq 1 ]] || fail 'standalone fixed ref downloaded more than once'
+    [[ "$(<"${TEST_ROOT}/standalone-ref-state/bundle/.padm-docker-bundle-ref")" == "${FETCH_REF}" ]] ||
+        fail 'standalone fixed ref did not preserve the requested version'
+)
+
 runControl 0 install "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" install --source "${NO_COMPOSE_SOURCE}"
 [[ "$(<"${DOCKER_ROOT}/mode")" == "docker" ]] || fail 'mode marker was not initialized'
 for directory in bundle config data secrets logs backups locks; do
