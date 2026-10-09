@@ -939,6 +939,101 @@ runCoreUpgradePendingStartRollbackRegression() (
         done
     )
     (
+        local core release signal scope enabled fixture status installer serviceFile configFile events
+        local PADM_XRAY_SYSTEMD_SERVICE_FILE PADM_SINGBOX_SYSTEMD_SERVICE_FILE
+        local PADM_XRAY_OPENRC_SERVICE_FILE PADM_SINGBOX_OPENRC_SERVICE_FILE
+        local PADM_TMP_DIR TMPDIR
+        padmCommandExists() { [[ "$1" == systemctl ]]; }
+        singBoxInstalled() { return 1; }
+        coreTemplateConfigBackupCreate() { checkLogBackupCreate "$1" "${configFile}"; }
+        handleXray() { printf '%s\n' "$1" >>"${events}"; }
+        handleSingBox() { handleXray "$@"; }
+        systemctl() {
+            case "$1" in
+            is-enabled) [[ -e "${fixture}/enabled" ]] ;;
+            enable) touch "${fixture}/enabled" ;;
+            disable) command rm -f "${fixture}/enabled" ;;
+            daemon-reload) printf 'reload\n' >>"${events}" ;;
+            *) return 1 ;;
+            esac
+        }
+        rc-update() {
+            case "$1" in
+            show) [[ ! -e "${fixture}/enabled" ]] || printf '%s | default\n' "${core}" ;;
+            add) touch "${fixture}/enabled"; printf 'reload\n' >>"${events}" ;;
+            del) command rm -f "${fixture}/enabled"; printf 'reload\n' >>"${events}" ;;
+            *) return 1 ;;
+            esac
+        }
+        bootStartup() {
+            touch "${fixture}/enabled"
+            [[ "${scope}" != outer ]] || printf 'new-config\n' >"${configFile}"
+            kill "-${signal}" "${BASHPID}"
+        }
+        # 替换模板后中断，独立调用和外层事务都必须恢复模板及原自启状态。
+        for core in xray sing-box; do
+            installer=installXrayService
+            [[ "${core}" != sing-box ]] || installer=installSingBoxService
+            for release in debian alpine; do
+                for scope in standalone outer; do
+                    for signal in INT TERM; do
+                        for enabled in false true; do
+                            fixture="${root}/startup-${core}-${release}-${scope}-${signal}-${enabled}"
+                            PADM_TMP_DIR="${fixture}/tmp"
+                            TMPDIR=${PADM_TMP_DIR}
+                            mkdir -p "${PADM_TMP_DIR}"
+                            serviceFile="${fixture}/service" configFile="${fixture}/config" events="${fixture}/events"
+                            PADM_XRAY_SYSTEMD_SERVICE_FILE=${serviceFile} PADM_SINGBOX_SYSTEMD_SERVICE_FILE=${serviceFile}
+                            PADM_XRAY_OPENRC_SERVICE_FILE=${serviceFile} PADM_SINGBOX_OPENRC_SERVICE_FILE=${serviceFile}
+                            printf 'old-service\n' >"${serviceFile}"
+                            printf 'old-config\n' >"${configFile}"
+                            : >"${events}"
+                            [[ "${enabled}" != true ]] || touch "${fixture}/enabled"
+                            status=0
+                            (
+                                local PADM_CLEANUP_TRAP_INSTALLED= PADM_CLEANUP_PATHS=()
+                                local PADM_EXIT_ROLLBACK_OWNER= PADM_EXIT_ROLLBACKS=()
+                                if [[ "${scope}" == outer ]]; then
+                                    coreInstallConfigTransaction "${core}" "${installer}" test
+                                else
+                                    "${installer}" test
+                                fi
+                            ) >"${fixture}/output" 2>&1 || status=$?
+                            [[ "${status}" == "$([[ "${signal}" == TERM ]] && printf 143 || printf 130)" ]] || return 1
+                            [[ "$(<"${serviceFile}")" == old-service && "$(<"${configFile}")" == old-config ]] || return 1
+                            [[ "${enabled}" == "$([[ -e "${fixture}/enabled" ]] && printf true || printf false)" ]] || return 1
+                            if [[ "${scope}" == outer ]]; then
+                                [[ "$(head -n 1 "${events}")" == stop ]] || return 1
+                            fi
+                            [[ -z "$(find "${PADM_TMP_DIR}" -name 'padm-check-log-backup.*' -print)" ]] || return 1
+                        done
+                    done
+                done
+            done
+        done
+        (
+            fixture="${root}/startup-restore-fail"
+            PADM_TMP_DIR="${fixture}/tmp"
+            TMPDIR=${PADM_TMP_DIR}
+            mkdir -p "${PADM_TMP_DIR}"
+            serviceFile="${fixture}/service" configFile="${fixture}/config" events="${fixture}/events"
+            PADM_XRAY_SYSTEMD_SERVICE_FILE=${serviceFile}
+            release=debian signal=TERM scope=standalone
+            printf 'old-service\n' >"${serviceFile}"
+            checkLogBackupRestore() { return 1; }
+            errorCard() { printf '%s\n' "$*"; }
+            status=0
+            (
+                local PADM_CLEANUP_TRAP_INSTALLED= PADM_CLEANUP_PATHS=()
+                local PADM_EXIT_ROLLBACK_OWNER= PADM_EXIT_ROLLBACKS=()
+                installXrayService test
+            ) >"${fixture}/output" 2>&1 || status=$?
+            [[ "${status}" == 143 && "$(<"${serviceFile}")" != old-service ]] || return 1
+            [[ -n "$(find "${PADM_TMP_DIR}" -name 'padm-check-log-backup.*' -print)" ]] || return 1
+            grep -q '安装前服务状态恢复失败' "${fixture}/output"
+        ) || return 1
+    ) || return 1
+    (
         local core failure events= configBackup= serviceBackup=
         coreTemplateConfigBackupCreate() {
             configBackup="${root}/config-backup"

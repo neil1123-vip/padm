@@ -2357,15 +2357,38 @@ restoreCoreStartupServiceInstall() {
 
 failCoreStartupServiceInstall() {
     local backupDir=$1
-    local serviceName=$2
-    local serviceWasEnabled=$3
     local reason=$4
-    if restoreCoreStartupServiceInstall "${backupDir}" "${serviceName}" "${serviceWasEnabled}"; then
+    # 外层事务先停止新核心，再统一恢复模板和运行状态。
+    if [[ "${PADM_CORE_INSTALL_TRANSACTION_ACTIVE:-}" == true ]]; then
+        errorCard "${reason}"
+        return 1
+    fi
+    if padmRunRollback rollbackCoreStartupServiceInstallOnExit; then
         errorCard "${reason}，已恢复安装前服务状态"
     else
         errorCard "${reason}，且安装前服务状态恢复失败" "请手动检查备份目录: ${backupDir}"
     fi
     return 1
+}
+
+rollbackCoreStartupServiceInstallOnExit() {
+    [[ "${PADM_CORE_SERVICE_INSTALL_ROLLBACK[active]:-false}" == true ]] || return 0
+    PADM_CORE_SERVICE_INSTALL_ROLLBACK[active]=false
+    if ! restoreCoreStartupServiceInstall "${PADM_CORE_SERVICE_INSTALL_ROLLBACK[backupDir]}" \
+        "${PADM_CORE_SERVICE_INSTALL_ROLLBACK[name]}" "${PADM_CORE_SERVICE_INSTALL_ROLLBACK[enabled]}"; then
+        errorCard "安装前服务状态恢复失败" "备份目录: ${PADM_CORE_SERVICE_INSTALL_ROLLBACK[backupDir]}"
+        return 1
+    fi
+}
+
+registerCoreStartupServiceInstallRollback() {
+    [[ -n "$1" ]] || return 0
+    if [[ "${PADM_CORE_INSTALL_TRANSACTION_ACTIVE:-}" == true ]]; then
+        coreInstallServiceBackupFinalize "$@"
+    else
+        PADM_CORE_SERVICE_INSTALL_ROLLBACK=([active]=true [backupDir]="$1" [name]="$2" [enabled]="$3")
+        padmRegisterExitRollback rollbackCoreStartupServiceInstallOnExit
+    fi
 }
 
 coreInstallServiceBackupFinalize() {
@@ -2374,9 +2397,8 @@ coreInstallServiceBackupFinalize() {
     local serviceWasEnabled=$3
     [[ -n "${backupDir}" ]] || return 0
     if [[ "${PADM_CORE_INSTALL_TRANSACTION_ACTIVE:-}" == "true" ]]; then
-        PADM_CORE_INSTALL_SERVICE_BACKUP_DIR=${backupDir}
-        PADM_CORE_INSTALL_SERVICE_NAME=${serviceName}
-        PADM_CORE_INSTALL_SERVICE_WAS_ENABLED=${serviceWasEnabled}
+        PADM_CORE_INSTALL_SERVICE_BACKUP_DIR=${backupDir} PADM_CORE_INSTALL_SERVICE_NAME=${serviceName} \
+            PADM_CORE_INSTALL_SERVICE_WAS_ENABLED=${serviceWasEnabled}
     else
         padmRemoveCleanupPath "${backupDir}"
     fi
@@ -2393,6 +2415,9 @@ installSingBoxService() {
     local serviceFile=
     local serviceBackupDir=
     local serviceWasEnabled=false
+    local -A PADM_CORE_SERVICE_INSTALL_ROLLBACK=([active]=false)
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
 
     if [[ "${release}" != "alpine" ]] && padmCommandExists systemctl; then
         serviceFile=${PADM_SINGBOX_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/sing-box.service}
@@ -2421,6 +2446,7 @@ WantedBy=multi-user.target
 EOF
         coreStartupServiceEnabled sing-box && serviceWasEnabled=true
         checkLogBackupCreate serviceBackupDir "${serviceFile}" || { padmRemoveCleanupPath "${tmpFile}"; errorCard "sing-box systemd 模板备份失败"; return 1; }
+        registerCoreStartupServiceInstallRollback "${serviceBackupDir}" sing-box "${serviceWasEnabled}" || return 1
         if ! commitGeneratedFile "${tmpFile}" "${serviceFile}" 644; then
             padmRemoveCleanupPath "${tmpFile}"
             failCoreStartupServiceInstall "${serviceBackupDir}" sing-box "${serviceWasEnabled}" "sing-box systemd 模板提交失败"
@@ -2434,6 +2460,7 @@ EOF
         serviceFile=${PADM_SINGBOX_OPENRC_SERVICE_FILE:-/etc/init.d/sing-box}
         coreStartupServiceEnabled sing-box && serviceWasEnabled=true
         checkLogBackupCreate serviceBackupDir "${serviceFile}" || { errorCard "sing-box OpenRC 模板备份失败"; return 1; }
+        registerCoreStartupServiceInstallRollback "${serviceBackupDir}" sing-box "${serviceWasEnabled}" || return 1
         if ! installAlpineStartup "sing-box"; then
             failCoreStartupServiceInstall "${serviceBackupDir}" sing-box "${serviceWasEnabled}" "sing-box OpenRC 模板提交失败"
             return 1
@@ -2447,6 +2474,7 @@ EOF
         return 1
     fi
 
+    PADM_CORE_SERVICE_INSTALL_ROLLBACK[active]=false
     coreInstallServiceBackupFinalize "${serviceBackupDir}" sing-box "${serviceWasEnabled}" || return 1
     successCard "配置sing-box开机启动完毕"
 }
@@ -2462,6 +2490,9 @@ installXrayService() {
     local serviceFile=
     local serviceBackupDir=
     local serviceWasEnabled=false
+    local -A PADM_CORE_SERVICE_INSTALL_ROLLBACK=([active]=false)
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
     if [[ "${release}" != "alpine" ]] && padmCommandExists systemctl; then
         serviceFile=${PADM_XRAY_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/xray.service}
         local tmpFile
@@ -2483,6 +2514,7 @@ WantedBy=multi-user.target
 EOF
         coreStartupServiceEnabled xray && serviceWasEnabled=true
         checkLogBackupCreate serviceBackupDir "${serviceFile}" || { padmRemoveCleanupPath "${tmpFile}"; errorCard "Xray systemd 模板备份失败"; return 1; }
+        registerCoreStartupServiceInstallRollback "${serviceBackupDir}" xray "${serviceWasEnabled}" || return 1
         if ! commitGeneratedFile "${tmpFile}" "${serviceFile}" 644; then
             padmRemoveCleanupPath "${tmpFile}"
             failCoreStartupServiceInstall "${serviceBackupDir}" xray "${serviceWasEnabled}" "Xray systemd 模板提交失败"
@@ -2496,6 +2528,7 @@ EOF
         serviceFile=${PADM_XRAY_OPENRC_SERVICE_FILE:-/etc/init.d/xray}
         coreStartupServiceEnabled xray && serviceWasEnabled=true
         checkLogBackupCreate serviceBackupDir "${serviceFile}" || { errorCard "Xray OpenRC 模板备份失败"; return 1; }
+        registerCoreStartupServiceInstallRollback "${serviceBackupDir}" xray "${serviceWasEnabled}" || return 1
         if ! installAlpineStartup "xray"; then
             failCoreStartupServiceInstall "${serviceBackupDir}" xray "${serviceWasEnabled}" "Xray OpenRC 模板提交失败"
             return 1
@@ -2508,6 +2541,7 @@ EOF
         errorCard "Xray 开机自启配置失败：缺少可用的服务管理器"
         return 1
     fi
+    PADM_CORE_SERVICE_INSTALL_ROLLBACK[active]=false
     coreInstallServiceBackupFinalize "${serviceBackupDir}" xray "${serviceWasEnabled}" || return 1
     successCard "配置Xray开机自启成功"
 }
