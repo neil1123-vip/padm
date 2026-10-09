@@ -325,6 +325,7 @@ dockerPrepareInstallSource() {
 
 dockerInstallCommand() {
     local sourceRoot= requestedRef= root
+    local previousBundleTarget= installedBundleTarget
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
         --no-menu)
@@ -368,15 +369,32 @@ dockerInstallCommand() {
         dockerError 'Docker 状态目录初始化失败'
         return "${PADM_DOCKER_RC_STATE}"
     }
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    if [[ -e "${root}/bundle" || -L "${root}/bundle" ]]; then
+        previousBundleTarget=$(readlink "${root}/bundle" 2>/dev/null) &&
+            dockerBundlePathForTarget "${previousBundleTarget}" >/dev/null || {
+                dockerError '现有 Docker bundle 指针无法安全恢复，已取消安装'
+                return "${PADM_DOCKER_RC_BUNDLE}"
+            }
+    fi
     dockerInstallBundle "${DOCKER_INSTALL_SOURCE_ROOT}" "${DOCKER_INSTALL_SOURCE_REF}" || {
         dockerError 'Docker 控制 bundle 校验或切换失败'
         return "${PADM_DOCKER_RC_BUNDLE}"
     }
+    installedBundleTarget=$(readlink "${root}/bundle") || return "${PADM_DOCKER_RC_BUNDLE}"
     dockerInstallCli || {
         dockerError 'padm-docker 命令安装失败'
+        if [[ -n "${previousBundleTarget}" ]]; then
+            dockerActivateBundle "${previousBundleTarget}" ||
+                dockerError "旧 Docker bundle 恢复失败，请检查: ${root}/bundle"
+        elif [[ -L "${root}/bundle" && "$(readlink "${root}/bundle")" == "${installedBundleTarget}" ]]; then
+            rm -f -- "${root}/bundle" ||
+                dockerError "本次 Docker bundle 指针清理失败，请检查: ${root}/bundle"
+        else
+            dockerError "本次 Docker bundle 指针已改变，未清理: ${root}/bundle"
+        fi
         return "${PADM_DOCKER_RC_STATE}"
     }
-    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     printf 'Docker 控制骨架已安装: %s\n' "${root}"
 }
 

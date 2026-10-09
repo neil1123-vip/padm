@@ -162,6 +162,67 @@ printf 'keep-data\n' >"${STATE_ROOT}/data/sentinel"
 printf 'keep-secret\n' >"${STATE_ROOT}/secrets/sentinel"
 printf '{"keep":"deployment"}\n' >"${STATE_ROOT}/deployment.json"
 
+# CLI 安装冲突不能留下已切换的控制脚本，也不能清理用户文件。
+CLI_CONFLICT_BIN="${TEST_ROOT}/cli-conflict"
+mkdir "${CLI_CONFLICT_BIN}"
+printf 'user-command\n' >"${CLI_CONFLICT_BIN}/padm-docker"
+OLD_BUNDLE_TARGET=$(readlink "${STATE_ROOT}/bundle")
+installStatus=0
+PADM_DOCKER_BIN_DIR="${CLI_CONFLICT_BIN}" \
+    bash -u "${PROJECT_ROOT}/install-docker.sh" install --no-menu --source "${CONTROL_ROOT}" \
+    >"${OUT}" 2>"${ERR}" || installStatus=$?
+[[ "${installStatus}" == 15 && "$(readlink "${STATE_ROOT}/bundle")" == "${OLD_BUNDLE_TARGET}" ]] ||
+    fail 'CLI failure did not restore the old bundle'
+[[ "$(<"${STATE_ROOT}/config/sentinel")" == keep-config &&
+    "$(<"${STATE_ROOT}/data/sentinel")" == keep-data &&
+    "$(<"${STATE_ROOT}/secrets/sentinel")" == keep-secret &&
+    "$(<"${STATE_ROOT}/deployment.json")" == '{"keep":"deployment"}' &&
+    "$(<"${CLI_CONFLICT_BIN}/padm-docker")" == user-command ]] ||
+    fail 'CLI failure changed deployment or user files'
+[[ "$(readlink "${CLI}")" == "${STATE_ROOT}/bundle/install-docker.sh" ]] ||
+    fail 'CLI failure changed the old command'
+grep -Fq 'padm-docker 命令安装失败' "${ERR}" || fail 'reinstall did not reach the CLI failure'
+
+installStatus=0
+bash -u -c '
+    source "$1/install-docker.sh"
+    dockerInstallCli() {
+        dockerActivateBundle() { return 1; }
+        return 1
+    }
+    dockerMain install --no-menu --source "$2"
+' bash "${PROJECT_ROOT}" "${CONTROL_ROOT}" >"${OUT}" 2>"${ERR}" || installStatus=$?
+[[ "${installStatus}" == 15 && "$(readlink "${STATE_ROOT}/bundle")" != "${OLD_BUNDLE_TARGET}" ]] ||
+    fail 'bundle rollback failure was not injected'
+grep -Fq '旧 Docker bundle 恢复失败' "${ERR}" || fail 'bundle rollback failure was not explained'
+bash -u -c 'source "$1/install-docker.sh"; dockerActivateBundle "$2"' \
+    bash "${PROJECT_ROOT}" "${OLD_BUNDLE_TARGET}" || fail 'could not reset the rollback fixture'
+
+FIRST_FAILED_ROOT="${TEST_ROOT}/first-cli-failure"
+installStatus=0
+PADM_DOCKER_INSTALL_DIR="${FIRST_FAILED_ROOT}" PADM_DOCKER_BIN_DIR="${CLI_CONFLICT_BIN}" \
+    bash -u "${PROJECT_ROOT}/install-docker.sh" install --no-menu --source "${SOURCE_ROOT}" \
+    >"${OUT}" 2>"${ERR}" || installStatus=$?
+[[ "${installStatus}" == 15 && ! -e "${FIRST_FAILED_ROOT}/bundle" && ! -L "${FIRST_FAILED_ROOT}/bundle" ]] ||
+    fail 'first CLI failure left an active bundle'
+[[ "$(<"${CLI_CONFLICT_BIN}/padm-docker")" == user-command ]] ||
+    fail 'first CLI failure removed the user command'
+
+CHANGED_FAILED_ROOT="${TEST_ROOT}/changed-cli-failure"
+installStatus=0
+PADM_DOCKER_INSTALL_DIR="${CHANGED_FAILED_ROOT}" bash -u -c '
+    source "$1/install-docker.sh"
+    dockerInstallCli() {
+        rm -f -- "${PADM_DOCKER_INSTALL_DIR}/bundle"
+        printf "user-file\n" >"${PADM_DOCKER_INSTALL_DIR}/bundle"
+        return 1
+    }
+    dockerMain install --no-menu --source "$2"
+' bash "${PROJECT_ROOT}" "${SOURCE_ROOT}" >"${OUT}" 2>"${ERR}" || installStatus=$?
+[[ "${installStatus}" == 15 && "$(<"${CHANGED_FAILED_ROOT}/bundle")" == user-file ]] ||
+    fail 'first CLI failure removed a changed bundle target'
+grep -Fq '指针已改变，未清理' "${ERR}" || fail 'changed bundle cleanup was not explained'
+
 snapshotState() {
     local path
     find "${STATE_ROOT}" -printf '%P %y %l\n' | LC_ALL=C sort
