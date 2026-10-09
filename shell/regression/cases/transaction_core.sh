@@ -1318,6 +1318,12 @@ runCoreInstallRejectsUnsafeBinaryPathRegression() (
 )
 
 runCoreCleanupFailurePropagationRegression() (
+    (
+        autoRead() { IFS= read -r "$3"; }
+        regressionExpectStatus 1 confirmCoreUpgrade Xray v1 stable </dev/null || return 1
+        printf '%s' y | regressionExpectStatus 1 confirmCoreUpgrade Xray v1 stable || return 1
+        regressionExpectStatus 0 confirmCoreUpgrade Xray v1 stable <<<y || return 1
+    ) || return 1
     local root="${TMP_DIR}/core-cleanup-failure"
     local serviceLog="${root}/service.log"
     local rmLog="${root}/rm.log"

@@ -2142,7 +2142,7 @@ confirmCoreUpgrade() {
     local version=$2
     local channel=$3
     local confirmVar
-    autoRead core_upgrade_confirm "${core} 将切换到 ${channel} ${version}，是否继续？[y/n]:" confirmVar
+    autoRead core_upgrade_confirm "${core} 将切换到 ${channel} ${version}，是否继续？[y/n]:" confirmVar || return 1
     [[ "${confirmVar}" == "y" ]]
 }
 
