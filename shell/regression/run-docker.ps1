@@ -296,7 +296,8 @@ try {
     # Peer 实测仅在容器的隔离网络空间创建接口，不使用宿主网络或发布端口。
     [string[]]$networkCapabilities = if ($Selector -in @('docker-control-two-node-real', 'docker-routing-warp-real')) {
         @('--cap-add', 'NET_ADMIN', '--cap-add', 'SYS_ADMIN')
-    } elseif ($Selector -in @('docker-control-two-deployment-real', 'docker-routing-ipv6-real')) {
+    } elseif ($Selector -in @('docker-control-two-deployment-real', 'docker-routing-ipv6-real',
+        'docker-http-relay-published-real')) {
         # 嵌套 daemon 只操作测试容器的隔离空间，不挂宿主 Socket。
         @('--privileged', '--mount', 'type=volume,dst=/n')
     } else { @() }
@@ -311,7 +312,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Source snapshot copy failed.' }
     if ($Selector -in @('routing-socks5-source-real', 'docker-routing-socks5-real', 'docker-routing-dns-hosts-real',
         'docker-routing-direct-block-real', 'docker-routing-block-ips-real', 'docker-routing-block-bt-real',
-        'docker-routing-region-real', 'docker-routing-warp-real')) {
+        'docker-routing-region-real', 'docker-routing-warp-real', 'docker-http-relay-real')) {
         # 仅复制已有本机镜像的程序到隔离回归容器，不安装宿主工具或挂载 Docker Socket。
         $cores = Join-Path $runDir 'routing-cores'
         New-Item -ItemType Directory -Path $cores | Out-Null
@@ -321,6 +322,7 @@ try {
             @{ name = 'sing-box'; reference = 'padm-local/padm-sing-box:tls-3b4' }
         )) {
             if ($Selector -eq 'routing-socks5-source-real' -and $entry.name -eq 'xray') { continue }
+            if ($Selector -eq 'docker-http-relay-real' -and $entry.name -eq 'sing-box') { continue }
             $info = & $docker image inspect $entry.reference
             if ($LASTEXITCODE -ne 0) { throw "Required routing image is missing: $($entry.reference)" }
             $info = $info | ConvertFrom-Json | Select-Object -First 1
@@ -343,7 +345,8 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Routing binary copy failed.' }
         $result.routing_images = $coreInputs
     }
-    if ($Selector -in @('docker-control-two-deployment-real', 'docker-routing-ipv6-real')) {
+    if ($Selector -in @('docker-control-two-deployment-real', 'docker-routing-ipv6-real',
+        'docker-http-relay-published-real')) {
         # 离线传入实际业务镜像；节点不得借用宿主 daemon 或旧源码。
         $references = [ordered]@{
             xray = 'padm-local/padm-xray:control-4c4b'

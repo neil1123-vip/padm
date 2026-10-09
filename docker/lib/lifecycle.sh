@@ -25,6 +25,8 @@ dockerUsage() {
   padm-docker edit --socks5-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --socks5-domains <域名规则 CSV> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --socks5-global [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --http-relay <root 私有 JSON 文件> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --http-relay-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --dns <root 私有 JSON 文件> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --dns-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --hosts <root 私有 JSON 文件> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]

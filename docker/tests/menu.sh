@@ -537,6 +537,13 @@ runRoutingDriver() {
         targetReply 'Docker WARP 出站' $'2\n'
         targetReply 'Docker WARP 出站' $'3\n'
         targetReply 'Docker WARP 出站' $'0\n'
+        targetReply 'Docker 路由与出站' $'21\n'
+        targetReply 'Docker HTTP 中继入站' $'invalid\n'
+        targetReply 'Docker HTTP 中继入站' $'1\n'
+        targetReply 'root 私有 HTTP 中继 JSON 文件绝对路径（0 返回）' $'/root/padm-http-relay.json\n'
+        targetReply 'Docker HTTP 中继入站' $'2\n'
+        targetReply 'Docker HTTP 中继入站' $'3\n'
+        targetReply 'Docker HTTP 中继入站' $'0\n'
         ;;
     cancel)
         targetReply 'Docker 路由与出站' $'1\n'
@@ -581,6 +588,12 @@ runRoutingDriver() {
         targetReply 'Docker WARP 出站' $'1\n'
         targetReply 'root 私有 WARP JSON 文件绝对路径（0 返回）' $'\n'
         targetReply 'Docker WARP 出站' $'0\n'
+        targetReply 'Docker 路由与出站' $'21\n'
+        targetReply 'Docker HTTP 中继入站' $'1\n'
+        targetReply 'root 私有 HTTP 中继 JSON 文件绝对路径（0 返回）' $'0\n'
+        targetReply 'Docker HTTP 中继入站' $'1\n'
+        targetReply 'root 私有 HTTP 中继 JSON 文件绝对路径（0 返回）' $'\n'
+        targetReply 'Docker HTTP 中继入站' $'0\n'
         ;;
     file-eof)
         targetReply 'Docker 路由与出站' $'1\n'
@@ -627,6 +640,12 @@ runRoutingDriver() {
         targetReply 'Docker WARP 出站' $'1\n'
         targetReply 'root 私有 WARP JSON 文件绝对路径（0 返回）' $'\004'
         targetReply 'Docker WARP 出站' $'0\n'
+        ;;
+    http-relay-eof)
+        targetReply 'Docker 路由与出站' $'21\n'
+        targetReply 'Docker HTTP 中继入站' $'1\n'
+        targetReply 'root 私有 HTTP 中继 JSON 文件绝对路径（0 返回）' $'\004'
+        targetReply 'Docker HTTP 中继入站' $'0\n'
         ;;
     esac
     targetReply 'Docker 路由与出站' $'0\n'
@@ -1050,7 +1069,7 @@ for siteCase in flow cancel static-eof redirect-eof alpn-diagnose-eof alpn-recom
 done
 unset SITE_MENU_RECORD_STATUS SITE_EDIT_STATUS SITE_ALPN_STATUS
 
-for routingCase in flow cancel file-eof domains-eof dns-file-eof hosts-file-eof direct-file-eof block-file-eof block-ips-file-eof region-eof ipv6-eof warp-eof failed return; do
+for routingCase in flow cancel file-eof domains-eof dns-file-eof hosts-file-eof direct-file-eof block-file-eof block-ips-file-eof region-eof ipv6-eof warp-eof http-relay-eof failed return; do
     : >"${TLS_WIZARD_ACTIONS}"
     export SITE_EDIT_STATUS=0 ROUTING_STATUS=0
     [[ "${routingCase}" != failed ]] || { SITE_EDIT_STATUS=15; ROUTING_STATUS=17; }
@@ -1062,6 +1081,7 @@ for routingCase in flow cancel file-eof domains-eof dns-file-eof hosts-file-eof 
         expectedRouting+=$'\nedit --region both --region-allow Example.NET, full:Exact.Example.Com\nedit --region domain\nedit --region ip\nedit --region-off'
         expectedRouting+=$'\nedit --ipv6 selective --ipv6-domains Example.NET, full:Exact.Example.Com\nedit --ipv6 global\nedit --ipv6-off\nprotocol routing-status'
         expectedRouting+=$'\nedit --warp /root/padm-warp.json\nedit --warp-off\nprotocol routing-status'
+        expectedRouting+=$'\nedit --http-relay /root/padm-http-relay.json\nedit --http-relay-off\nprotocol routing-status'
         grep -Fq '无效选项' "${CONTROL_LOG}" || fail '路由菜单没有保留无效输入后的操作'
         ;;
     esac

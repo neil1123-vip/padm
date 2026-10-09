@@ -700,7 +700,8 @@ dockerMenuRouting() {
             '11. 关闭 Direct 直连例外' '12. 设置 Block 域名阻断' \
             '13. 关闭 Block 域名阻断' '14. 设置 IP/CIDR 阻断' \
             '15. 关闭 IP/CIDR 阻断' '16. 启用 BT 协议阻断' \
-            '17. 关闭 BT 协议阻断' '18. 区域阻断策略' '19. IPv6 域名出站' '20. WARP 出站' '0. 返回'
+            '17. 关闭 BT 协议阻断' '18. 区域阻断策略' '19. IPv6 域名出站' '20. WARP 出站' \
+            '21. HTTP 中继入站' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -755,6 +756,33 @@ dockerMenuRouting() {
         18) dockerMenuRegion ;;
         19) dockerMenuIPv6 ;;
         20) dockerMenuWarp ;;
+        21) dockerMenuHttpRelay ;;
+        *) printf '无效选项，请重新选择。\n' ;;
+        esac
+    done
+}
+
+dockerMenuHttpRelay() {
+    local choice input
+    while :; do
+        DOCKER_MENU_SIGNAL=0
+        printf '\nDocker HTTP 中继入站\n'
+        printf '%s\n' '1. 导入认证与来源规则' '2. 关闭 HTTP 中继' '3. 查看路由状态' '0. 返回'
+        printf '请选择: '
+        if ! IFS= read -r choice; then
+            [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
+            return 0
+        fi
+        case "${choice}" in
+        0) return 0 ;;
+        1)
+            printf 'HTTP 中继只接受已有受管 Xray；sing-box 的代理头来源覆盖不满足来源限制。\n'
+            dockerSetupRead input 'root 私有 HTTP 中继 JSON 文件绝对路径（0 返回）: ' &&
+                [[ -n "${input}" ]] || continue
+            dockerMenuRun edit --http-relay "${input}" || true
+            ;;
+        2) dockerMenuRun edit --http-relay-off || true ;;
+        3) dockerMenuRun protocol routing-status || true ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

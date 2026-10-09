@@ -449,7 +449,7 @@
       "profiles": [],
       "network_mode": "bridge",
       "host_capabilities": [],
-      "reason": "原生内部能力 202 尚未纳入 Docker 路由配置合同。"
+      "reason": "5B.5a 提供已有受管 Xray 的独立认证 HTTP/CONNECT 入站、字面来源允许名单、专项编辑/关闭、脱敏状态和候选回滚；全部目的走专属直连，不继承全局出站，也不参与业务账号额度。sing-box v1.14.2 会信任 X-Forwarded-For 改写路由来源且没有关闭选项，合同明确拒绝。202 不作为公开节点协议；真实宿主、公网、IPv6 发布和 arm64 验收尚未完成，完整状态保持 deferred。"
     },
     "internal-203-wireguard": {
       "status": "host-integrated",

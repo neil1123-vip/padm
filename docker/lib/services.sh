@@ -147,9 +147,37 @@ dockerConfigureSpecValidate() {
         (if has("accounts") then ["accounts"] else [] end) +
         (if has("control_sync") then ["control_sync"] else [] end) +
         (if has("control") then ["control"] else [] end) +
+        (if has("relay") then ["relay"] else [] end) +
         (if has("routing") then ["routing"] else [] end) +
         (if has("site") then ["site"] else [] end)) and
       (.schema_version == 1 or .schema_version == 2 or .schema_version == 3) and
+      (if has("relay") then
+        .schema_version == 3 and
+        (.relay | exact(["http"]) and
+          (.http | exact(["core", "port", "address_families", "username", "password", "source_ips"]) and
+            .core == "xray" and
+            (.core == $request.core.type or
+              ($request.core.secondary_type != null and .core == $request.core.secondary_type)) and
+            (.port | port) and (.address_families | families) and
+            all([.username, .password][];
+              type == "string" and length >= 1 and length <= 255 and
+              (explode | all(. >= 33 and . <= 126))) and
+            (.username | contains(":") | not) and
+            (.source_ips | type == "array" and length >= 1 and length <= 256 and
+              length == (unique | length) and
+              all(.[]; . != "geoip:cn" and routing_ip_selector)))) and
+        all(.host_integrations[]; .type != "tun" and .type != "tproxy") and
+        (.relay.http.port as $port |
+          all(.core.protocols[]; .public_port != $port and
+            (.websocket // .httpupgrade // .grpc_tls).backend_port != $port and
+            (.websocket // .httpupgrade // .grpc_tls).tls_port != $port and
+            .fallback_tls.http_port != $port and .fallback_tls.http2_port != $port) and
+          $port != 10085 and $port != 10087 and
+          (.tls.http01 != true or $port != 80) and
+          .control.listen.port != $port and
+          (.reality_stream == null or ($port != 443 and $port != 15443)) and
+          .reality_stream.host_website.port != $port)
+       else true end) and
       (if has("routing") then
         .schema_version == 3 and
         (.routing | type == "object" and length >= 1 and
@@ -524,6 +552,7 @@ dockerConfigureSpecValidate() {
         ([$request.core.protocols[] | select((.core // $request.core.type) == $core) |
             if .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 then
               ((.websocket // .httpupgrade // .grpc_tls).backend_port // 31297) else .public_port end] +
+          [if $request.relay.http.core == $core then $request.relay.http.port else empty end] +
           [$request.host_integrations[] | select(.type == "tproxy") | .settings.port] +
           [if $core == "xray" then 10085 else 10087 end]) as $corePorts |
         ($corePorts | unique | length) == ($corePorts | length)) and
@@ -913,8 +942,15 @@ dockerManagedSpecMatchesDeployment() {
             public_port, container_port: (if .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 then (.websocket // .httpupgrade // .grpc_tls).tls_port else .public_port end)} end) +
           {
           transport: $transport, address_families}] | sort_by(.listener_id, .transport) as $expected |
-        $expected == ([$d.listeners[] | select(.listener_id | startswith("host-") | not)] | sort_by(.listener_id, .transport))
+        $expected == ([$d.listeners[] | select((.listener_id | startswith("host-") | not) and
+          .listener_id != "relay-http")] | sort_by(.listener_id, .transport))
        else true end) and
+      ([$d.listeners[] | select(.listener_id == "relay-http")] ==
+        [if .relay.http != null then {
+          listener_id: "relay-http", service: "xray",
+          public_port: .relay.http.port, container_port: .relay.http.port,
+          transport: "tcp", address_families: .relay.http.address_families
+        } else empty end]) and
       ([$d.listeners[] | select(.listener_id == "host-control")] ==
         [if .control != null then {
           listener_id: "host-control", service: "control",
@@ -1278,6 +1314,7 @@ dockerConfigurePortsAvailable() {
           [.host_integrations[] | select(.type == "tproxy") |
             "\(.settings.port)|tcp", "\(.settings.port)|udp"] +
           [if .tls.http01 == true then "80|tcp" else empty end] +
+          [if .relay.http != null then "\(.relay.http.port)|tcp" else empty end] +
           [if .reality_stream.host_website.network_mode == "host" then "15443|tcp" else empty end]) | unique[]
         ' "${specFile}"
         if jq -e 'any(.host_integrations[]; .type == "wireguard")' "${specFile}" >/dev/null; then
@@ -1444,6 +1481,10 @@ dockerGenerateXrayConfig() {
           .routing.block_ips.ips = ((.routing.block_ips.ips // []) + ["geoip:cn"] | unique)
         else . end
       else . end) as $r |
+      if $r.relay.http != null and ($r.relay.http.core != "xray" or
+        ([$r.core.type, $r.core.secondary_type] | index("xray") == null)) then
+        error("HTTP 中继仅支持已受管的 Xray") else . end |
+      ($r.relay.http != null) as $http_relay |
       (($r.routing.socks5 // {}) | has("domains")) as $selective |
       (($r.routing.socks5.domains // []) | map(
         if startswith("keyword:") then ltrimstr("keyword:") else . end)) as $domains |
@@ -1576,7 +1617,11 @@ dockerGenerateXrayConfig() {
             streamSettings: {sockopt: {tproxy: "tproxy"}},
             sniffing: {enabled: true, destOverride: ["http", "tls", "quic"], routeOnly: true}
           }
-        ]),
+        ] + [if $http_relay then {
+          listen: "::", port: $r.relay.http.port, protocol: "http", tag: "padm-relay-http",
+          settings: {userLevel: 1,
+            accounts: [{user: $r.relay.http.username, pass: $r.relay.http.password}]}
+        } else empty end]),
         outbounds: [
           (if $ipv6_global then $ipv6_outbound else empty end),
           (if $warp_global then $warp_outbound else empty end),
@@ -1592,9 +1637,14 @@ dockerGenerateXrayConfig() {
           (if $selective then empty else $direct end),
           (if $ipv6 and ($ipv6_global | not) then $ipv6_outbound else empty end),
           (if $warp and ($warp_global | not) then $warp_outbound else empty end),
-          {protocol: "blackhole", tag: "blocked"}
+          {protocol: "blackhole", tag: "blocked"},
+          (if $http_relay then {protocol: "freedom", tag: "padm-relay-http-direct",
+            settings: {domainStrategy: "AsIs"}} else empty end)
         ]
-      } + (if $dns_enabled then {
+      } + (if $http_relay then {
+        # 中继使用独立等级，避免同名认证用户计入业务流量。
+        policy: {levels: {"1": {statsUserUplink: false, statsUserDownlink: false}}}
+      } else {} end) + (if $dns_enabled then {
         dns: {tag: "padm-dns", disableFallbackIfMatch: true,
           hosts: (($r.routing.hosts // {}) | with_entries(.key = "full:" + .key)),
           servers: ([(if $r.routing.dns != null then {
@@ -1602,8 +1652,13 @@ dockerGenerateXrayConfig() {
             domains: $dns_domains, skipFallback: true, finalQuery: true
           } else empty end), "localhost"])}
       } else {} end) +
-      (if $r.routing.socks5 != null or $dns_enabled or $actions then {
-        routing: ({rules: ((if $dns_enabled then [
+      (if $r.routing.socks5 != null or $dns_enabled or $actions or $http_relay then {
+        routing: ({rules: ((if $http_relay then [
+          # 来源拒绝先于所有全局规则，HTTP 中继只走独立直连。
+          {type: "field", inboundTag: ["padm-relay-http"], source: $r.relay.http.source_ips,
+            outboundTag: "padm-relay-http-direct"},
+          {type: "field", inboundTag: ["padm-relay-http"], outboundTag: "blocked"}
+        ] else [] end) + (if $dns_enabled then [
           {type: "field", inboundTag: ["padm-dns"], outboundTag: "direct"}
         ] else [] end) +
         (if ($direct_domains | length) > 0 then [
@@ -1633,7 +1688,8 @@ dockerGenerateXrayConfig() {
           if ($block_ips | length) > 0 then {domainStrategy: "AsIs"} else {} end)
       } else {} end) |
       if $selective or $actions then
-        .inbounds |= map(.sniffing = {enabled: true, destOverride: ["http", "tls", "quic"], routeOnly: true})
+        .inbounds |= map(if .tag == "padm-relay-http" then . else
+          .sniffing = {enabled: true, destOverride: ["http", "tls", "quic"], routeOnly: true} end)
       else . end |
       if $r.accounts != null then
         # 独立账号按入口关联；统计身份不随认证凭据轮换。
@@ -1702,6 +1758,9 @@ dockerGenerateSingBoxConfig() {
           .routing.block_ips.ips = ((.routing.block_ips.ips // []) + ["geoip:cn"] | unique)
         else . end
       else . end) as $r |
+      if $r.relay.http != null and ($r.relay.http.core != "xray" or
+        ([$r.core.type, $r.core.secondary_type] | index("xray") == null)) then
+        error("HTTP 中继仅支持已受管的 Xray") else . end |
       (($r.routing.socks5 // {}) | has("domains")) as $selective |
       ($r.routing.socks5.domains // []) as $domains |
       (domain_matches($domains)) as $matches |
@@ -2451,6 +2510,13 @@ dockerGenerateCompose() {
         if . == "ipv4" then "0.0.0.0:\($protocol.public_port):\($containerPort)/\($transport)"
         else "[::]:\($protocol.public_port):\($containerPort)/\($transport)" end
       ];
+      def relay_ports($core): [
+        if $r.relay.http.core == $core then $r.relay.http as $relay |
+          $relay.address_families[] |
+          if . == "ipv4" then "0.0.0.0:\($relay.port):\($relay.port)/tcp"
+          else "[::]:\($relay.port):\($relay.port)/tcp" end
+        else empty end
+      ];
       [$r.core.type, $r.core.secondary_type] | map(select(. != null)) as $cores |
       ($r.core.protocols | map(select(.id == 1 or .id == 2 or .id == 3 or .id == 4 or .id == 5 or .id == 26 or .id == 27 or .id == 28 or .id == 29 or .id == 30 or .id == 31))) as $direct |
       ($r.core.protocols | map(select(.id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25))) as $websocket |
@@ -2492,7 +2558,7 @@ dockerGenerateCompose() {
               ($r.reality_stream == null or .listener_id != $r.reality_stream.listener_id)) |
                 . as $protocol | ports($protocol; $protocol.public_port)[]] +
                 [if $hostStream then $r.core.protocols[] | select(.listener_id == $r.reality_stream.listener_id) |
-                  "127.0.0.1:15443:\(.public_port)/tcp" else empty end]),
+                  "127.0.0.1:15443:\(.public_port)/tcp" else empty end] + relay_ports("xray")),
             tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=16m"],
             healthcheck: {
               test: ["CMD", "/usr/local/bin/xray", "-test", "-confdir", "/etc/padm/xray"],
@@ -2748,7 +2814,11 @@ dockerGenerateDeployment() {
             transport: $transport,
             address_families: .address_families
           } + if $r.schema_version >= 2 then {listener_id: .listener_id} else {} end)
-          ] + [
+          ] + [if $r.relay.http != null then {
+            listener_id: "relay-http", service: "xray",
+            public_port: $r.relay.http.port, container_port: $r.relay.http.port,
+            transport: "tcp", address_families: $r.relay.http.address_families
+          } else empty end] + [
           $r.host_integrations[] |
           if .type == "wireguard" then {
             service: "net-wireguard", public_port: $wireguardPort,
@@ -2810,8 +2880,16 @@ dockerDeploymentFileValidate() {
         (if any(.[]; has("listener_id")) then
           ([.[] | [.listener_id, .transport]] | unique | length) == length and
           all(.[]; .listener_id | type == "string" and
-            test("^(entry-[a-z0-9][a-z0-9-]{0,47}|vless-reality|vless-ws|host-wireguard|host-tproxy-tcp|host-tproxy-udp|host-control|host-acme-http)$"))
+            test("^(entry-[a-z0-9][a-z0-9-]{0,47}|vless-reality|vless-ws|host-wireguard|host-tproxy-tcp|host-tproxy-udp|host-control|host-acme-http|relay-http)$"))
          else true end)) and
+      (. as $deployment | all(.listeners[] | select(.listener_id == "relay-http");
+        exact(["listener_id", "service", "public_port", "container_port", "transport", "address_families"]) and
+        .service == "xray" and
+        (.service == $deployment.core.type or
+          ($deployment.core.secondary_type != null and .service == $deployment.core.secondary_type)) and
+        .public_port == .container_port and .transport == "tcp" and
+        (.address_families | type == "array" and length >= 1 and length <= 2 and
+          length == (unique | length) and all(.[]; . == "ipv4" or . == "ipv6")))) and
       all(.listeners[] | select(.listener_id == "host-acme-http");
         .service == "nginx" and .public_port == 80 and .container_port == 8088 and
         .transport == "tcp" and .address_families == ["ipv4", "ipv6"]) and

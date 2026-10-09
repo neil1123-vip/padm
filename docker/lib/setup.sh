@@ -797,6 +797,8 @@ dockerEditPrivateInputCopy() (
            elif $kind == "block_ips" then keys == ["ips"]
            elif $kind == "warp" then
              keys == ["domains", "family", "ipv6_address", "mode", "peer_public_key", "private_key", "reserved"]
+           elif $kind == "http_relay" then
+             keys == ["address_families", "core", "password", "port", "source_ips", "username"]
            else false end))
         ' "${target}" >/dev/null 2>&1
 )
@@ -911,7 +913,10 @@ dockerProtocolCommand() (
             {default_allow_domains:$region_defaults})} else {} end) +
           (if .routing.ipv6 != null then {ipv6:.routing.ipv6} else {} end) +
           (if .routing.warp != null then {warp:{mode:.routing.warp.mode,
-            family:.routing.warp.family,domains:.routing.warp.domains}} else {} end)' "${normalized}"
+            family:.routing.warp.family,domains:.routing.warp.domains}} else {} end) +
+          {http_relay:(if .relay.http != null then
+            (.relay.http | {enabled:true,core,port,address_families,source_ips})
+            else {enabled:false} end)}' "${normalized}"
         return $?
     fi
     if [[ "${action}" == list ]]; then
@@ -1327,6 +1332,7 @@ dockerEditCommand() {
     local siteMode= siteSource= siteUrl=
     local alpnListener= alpnOrder=
     local http01= socks5= socks5File= socks5Domains= routingKind= routingFile= routingAction=
+    local httpRelay= httpRelayFile=
     local regionMode= regionAllow='[]' regionAllowSet=0
     local ipv6Mode= ipv6Domains='[]' ipv6DomainsSet=0
     local DOCKER_CONFIG_RESTORE_ALPN_LISTENER=
@@ -1383,6 +1389,17 @@ dockerEditCommand() {
         --socks5-global)
             [[ -z "${socks5}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             socks5=global
+            shift
+            ;;
+        --http-relay)
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${httpRelay}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            httpRelay=enable httpRelayFile=$2
+            shift 2
+            ;;
+        --http-relay-off)
+            [[ -z "${httpRelay}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            httpRelay=disable
             shift
             ;;
         --dns|--hosts|--direct|--block|--block-ips|--warp)
@@ -1536,6 +1553,12 @@ dockerEditCommand() {
         dockerError '路由专项编辑不能与规格导入或其它专项动作组合'
         return "${PADM_DOCKER_RC_USAGE}"
     }
+    [[ -z "${httpRelay}" || ( -z "${specFile}" && -z "${regenerateReality}" &&
+        -z "${realityTarget}" && -z "${realityStream}" && -z "${siteMode}" &&
+        -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" && -z "${routingKind}" ) ]] || {
+        dockerError 'HTTP 中继专项编辑不能与规格导入或其它专项动作组合'
+        return "${PADM_DOCKER_RC_USAGE}"
+    }
     [[ "${mode}" != interactive || ( -t 0 && -t 1 ) ]] || {
         dockerError '非交互编辑需要 --preview 或 --confirm PADM-DOCKER-EDIT'
         return "${PADM_DOCKER_RC_USAGE}"
@@ -1547,7 +1570,7 @@ dockerEditCommand() {
     dockerTrafficSafePath "${root}" "${root}/config/spec.json" || return "${PADM_DOCKER_RC_STATE}"
     [[ ( -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" &&
         -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
-        -z "${routingKind}" ) ||
+        -z "${routingKind}" && -z "${httpRelay}" ) ||
         -f "${root}/config/spec.json" ]] ||
         return "${PADM_DOCKER_RC_STATE}"
     if [[ ! -e "${root}/config/spec.json" && ! -L "${root}/config/spec.json" && -z "${specFile}" ]]; then
@@ -1601,7 +1624,7 @@ dockerEditCommand() {
     if [[ "${mode}" == interactive && -z "${specFile}" && "${imported}" -eq 0 &&
         -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" &&
         -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
-        -z "${routingKind}" ]]; then
+        -z "${routingKind}" && -z "${httpRelay}" ]]; then
         dockerEditFields "${draft}" || status=$?
         if [[ "${status}" -eq 3 ]]; then
             printf '已取消配置编辑。\n'
@@ -1613,6 +1636,21 @@ dockerEditCommand() {
     fi
     jq -es 'length == 1 and (.[0] | type == "object")' "${draft}" >/dev/null 2>&1 ||
         return "${PADM_DOCKER_RC_STATE}"
+    if [[ "${httpRelay}" == enable ]]; then
+        dockerEditPrivateInputCopy "${httpRelayFile}" "${workspace}/http-relay.json" http_relay || {
+            dockerError 'HTTP 中继输入须为 root 所有的 0600 单链接普通 JSON 文件，最多 64 KiB，祖先目录不得可写或含链接'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        jq --slurpfile relay "${workspace}/http-relay.json" '.relay.http = $relay[0]' \
+            "${draft}" >"${draft}.next" 2>/dev/null &&
+            chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
+            return "${PADM_DOCKER_RC_STATE}"
+    elif [[ "${httpRelay}" == disable ]]; then
+        jq 'del(.relay.http) | if .relay == {} then del(.relay) else . end' \
+            "${draft}" >"${draft}.next" &&
+            chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
+            return "${PADM_DOCKER_RC_STATE}"
+    fi
     if [[ "${socks5}" == enable ]]; then
         dockerEditPrivateInputCopy "${socks5File}" "${workspace}/socks5.json" socks5 || {
             dockerError 'SOCKS5 输入须为 root 所有的 0600 单链接普通 JSON 文件，最多 64 KiB，祖先目录不得可写或含链接'
@@ -1782,6 +1820,7 @@ dockerEditCommand() {
     jq -en --arg regenerate "${regenerateReality}" --arg target "${realityTarget}" --arg stream "${realityStream}" \
         --arg site "${siteMode}" --arg alpn "${alpnListener}" --arg http01 "${http01}" \
         --arg socks5 "${socks5}" --arg routing_kind "${routingKind}" \
+        --arg http_relay "${httpRelay}" \
         --slurpfile before "${normalized}" --slurpfile after "${draft}" '
       def fixed: del(.server, .public_port, .address_families, .name,
         .reality.target_host, .reality.target_port, .reality.server_name, .websocket.path, .httpupgrade.path,
@@ -1812,7 +1851,10 @@ dockerEditCommand() {
           . as $bound | any($new.core.protocols[];
             .listener_id == $bound.listener_id and .core == $bound.core and
             .public_port == $bound.public_port and .address_families == $bound.address_families))) and
-      (if $socks5 != "" then
+      (if $http_relay != "" then
+        ($old | del(.relay.http) | if .relay == {} then del(.relay) else . end) ==
+          ($new | del(.relay.http) | if .relay == {} then del(.relay) else . end)
+       elif $socks5 != "" then
         ($old | del(.routing.socks5) | if .routing == {} then del(.routing) else . end) ==
           ($new | del(.routing.socks5) | if .routing == {} then del(.routing) else . end)
        elif $routing_kind != "" then
@@ -1863,7 +1905,7 @@ dockerEditCommand() {
         end)
        end)
     ' >/dev/null 2>&1 || {
-        dockerError '仅支持路由/HTTP-01/站点专项管理与现有入口编辑、复制、Reality 传输派生和删除；账号、密钥、已有入口身份、内部端口与核心、主核心、证书和发布不能改写'
+        dockerError '仅支持 HTTP 中继/路由/HTTP-01/站点专项管理与现有入口编辑、复制、Reality 传输派生和删除；账号、密钥、已有入口身份、内部端口与核心、主核心、证书和发布不能改写'
         return "${PADM_DOCKER_RC_STATE}"
     }
     opsImage=$(dockerManifestImageReference ops) || return "${PADM_DOCKER_RC_MANIFEST}"

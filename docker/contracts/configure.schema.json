@@ -23,11 +23,49 @@
   "x-padm-routing-region": true,
   "x-padm-routing-ipv6": true,
   "x-padm-routing-warp": true,
+  "x-padm-relay-http": true,
   "additionalProperties": false,
   "required": ["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"],
   "properties": {
     "schema_version": {
       "enum": [1, 2, 3]
+    },
+    "relay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["http"],
+      "properties": {
+        "http": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["core", "port", "address_families", "username", "password", "source_ips"],
+          "properties": {
+            "core": {"const": "xray"},
+            "port": {"$ref": "#/$defs/port"},
+            "address_families": {"$ref": "#/$defs/address_families"},
+            "username": {
+              "allOf": [
+                {"$ref": "#/properties/routing/properties/socks5/properties/username"},
+                {"not": {"pattern": ":"}}
+              ]
+            },
+            "password": {"$ref": "#/properties/routing/properties/socks5/properties/password"},
+            "source_ips": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 256,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "anyOf": [
+                  {"$ref": "#/properties/routing/properties/block_ips/properties/ips/items/anyOf/1"},
+                  {"$ref": "#/properties/routing/properties/block_ips/properties/ips/items/anyOf/2"}
+                ]
+              }
+            }
+          }
+        }
+      }
     },
     "control": {
       "type": "object",
@@ -560,6 +598,17 @@
     }
   },
   "allOf": [
+    {
+      "if": {"required": ["relay"]},
+      "then": {
+        "properties": {
+          "schema_version": {"const": 3},
+          "host_integrations": {
+            "items": {"properties": {"type": {"not": {"enum": ["tun", "tproxy"]}}}}
+          }
+        }
+      }
+    },
     {
       "if": {"required": ["routing"]},
       "then": {

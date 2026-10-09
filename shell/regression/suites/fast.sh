@@ -82,6 +82,7 @@ listRegressionDockerContractsChildSelectors() {
         docker-geo-data \
         docker-traffic \
         docker-routing-socks5 \
+        docker-http-relay \
         docker-accounts \
         docker-permissions \
         docker-wireguard-runtime \
@@ -112,6 +113,7 @@ listRegressionDockerContractsFastChildSelectors() {
         docker-geo-data \
         docker-traffic \
         docker-routing-socks5 \
+        docker-http-relay \
         docker-accounts \
         docker-control-cli \
         docker-wireguard-runtime \
@@ -145,6 +147,18 @@ runDockerTrafficRegression() {
 
 runDockerRoutingSocks5Regression() {
     bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
+}
+
+runDockerHttpRelayRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/http-relay.sh"
+}
+
+runDockerHttpRelayRealRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/http-relay-real.sh"
+}
+
+runDockerHttpRelayPublishedRealRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/http-relay-published-real.sh"
 }
 
 runDockerRoutingBlockBtRegression() {
@@ -289,6 +303,9 @@ registerRegressionFunctionLeaf docker-phase6 runDockerPhase6Regression
 registerRegressionFunctionLeaf docker-traffic runDockerTrafficRegression
 registerRegressionFunctionLeaf docker-routing-socks5 runDockerRoutingSocks5Regression
 registerRegressionFunctionLeaf docker-routing-socks5-real runDockerRoutingSocks5RealRegression
+registerRegressionFunctionLeaf docker-http-relay runDockerHttpRelayRegression
+registerRegressionFunctionLeaf docker-http-relay-real runDockerHttpRelayRealRegression
+registerRegressionFunctionLeaf docker-http-relay-published-real runDockerHttpRelayPublishedRealRegression
 registerRegressionFunctionLeaf docker-routing-dns-hosts runDockerRoutingSocks5Regression
 registerRegressionFunctionLeaf docker-routing-dns-hosts-real runDockerRoutingDnsHostsRealRegression
 registerRegressionFunctionLeaf docker-routing-direct-block runDockerRoutingSocks5Regression

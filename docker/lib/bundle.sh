@@ -345,6 +345,9 @@ dockerBundleSupportsSpec() {
           (if $spec[0].routing.socks5 != null then
             $schema[0]["x-padm-routing-socks5"] == true
           else true end) and
+          (if $spec[0].relay.http != null then
+            $schema[0]["x-padm-relay-http"] == true and $spec[0].relay.http.core == "xray"
+          else true end) and
           (if ($spec[0].routing.socks5 // {}) | has("domains") then
             $schema[0]["x-padm-routing-domains"] == true
           else true end) and

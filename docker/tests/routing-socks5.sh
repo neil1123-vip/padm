@@ -1664,7 +1664,8 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == bt ]]; then
 fi
 before=$(snapshot)
 runStatus 0
-jq -e '. == {enabled:false,server:null,port:null,tcp:"direct",udp:"direct",mode:"direct",domain_rules:[]}' "${LOG}" >/dev/null ||
+jq -e '. == {enabled:false,server:null,port:null,tcp:"direct",udp:"direct",mode:"direct",domain_rules:[],
+  http_relay:{enabled:false}}' "${LOG}" >/dev/null ||
     fail '关闭路由诊断合同错误'
 runStatus 2 unexpected
 runEdit 0 --socks5 "${INPUT}" --preview
@@ -1779,7 +1780,8 @@ jq '.routing.socks5.server = "203.0.113.10" | .routing.socks5.port = 1081' \
 runEdit 15 --spec "${TEST_ROOT}/routing-replacement.json" --confirm PADM-DOCKER-EDIT
 [[ "$(snapshot)" == "${before}" ]] || fail '普通 --spec 绕过路由专项冻结'
 runStatus 0
-jq -e '. == {enabled:true,server:"203.0.113.9",port:1080,tcp:"socks5",udp:"blocked",mode:"global",domain_rules:[]}' \
+jq -e '. == {enabled:true,server:"203.0.113.9",port:1080,tcp:"socks5",udp:"blocked",mode:"global",domain_rules:[],
+  http_relay:{enabled:false}}' \
     "${LOG}" >/dev/null || fail '开启路由诊断合同错误'
 runEdit 0 --socks5 "${DOMAINS_INPUT}" --preview
 [[ "$(snapshot)" == "${before}" ]] || fail '选择性启用预览改变在线部署'
@@ -1789,7 +1791,7 @@ jq -en --slurpfile expected "${TEST_ROOT}/domains.json" --slurpfile actual "${ro
 runStatus 0
 jq -e --argjson domains "${DOMAINS}" '
   . == {enabled:true,server:"203.0.113.9",port:1080,tcp:"matched-socks5",
-        udp:"matched-blocked",mode:"domains",domain_rules:$domains}
+        udp:"matched-blocked",mode:"domains",domain_rules:$domains,http_relay:{enabled:false}}
 ' "${LOG}" >/dev/null || fail '选择性路由诊断合同错误'
 before=$(snapshot)
 runEdit 15 --spec "${TEST_ROOT}/routed.json" --confirm PADM-DOCKER-EDIT
@@ -1809,7 +1811,7 @@ jq -en --argjson domains "${replacementDomains}" --slurpfile old "${TEST_ROOT}/r
 runStatus 0
 jq -e --argjson domains "${replacementDomains}" '
   . == {enabled:true,server:"203.0.113.9",port:1080,tcp:"matched-socks5",
-        udp:"matched-blocked",mode:"domains",domain_rules:$domains}
+        udp:"matched-blocked",mode:"domains",domain_rules:$domains,http_relay:{enabled:false}}
 ' "${LOG}" >/dev/null || fail '规则替换后状态没有返回规范化数组'
 before=$(snapshot)
 for failure in health-fail int term; do
@@ -1830,7 +1832,8 @@ runEdit 0 --socks5-global --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile expected "${TEST_ROOT}/routed.json" --slurpfile actual "${root}/config/spec.json" \
     '$actual == $expected' >/dev/null || fail '切换全局没有仅删除 domains 或改变凭据'
 runStatus 0
-jq -e '. == {enabled:true,server:"203.0.113.9",port:1080,tcp:"socks5",udp:"blocked",mode:"global",domain_rules:[]}' \
+jq -e '. == {enabled:true,server:"203.0.113.9",port:1080,tcp:"socks5",udp:"blocked",mode:"global",domain_rules:[],
+  http_relay:{enabled:false}}' \
     "${LOG}" >/dev/null || fail '切换全局后状态合同错误'
 runEdit 0 --socks5-domains 'example.net' --confirm PADM-DOCKER-EDIT
 runEdit 0 --socks5-off --confirm PADM-DOCKER-EDIT
@@ -1899,7 +1902,8 @@ jq -en --slurpfile old "${TEST_ROOT}/base.json" --slurpfile new "${root}/config/
 runStatus 0
 jq -e --argjson dns "${DNS}" '
   . == {enabled:true,server:null,port:null,tcp:"direct",udp:"direct",mode:"direct",
-        domain_rules:[],dns:{server:$dns.server,port:$dns.port,domain_rules:$dns.domains}}
+        domain_rules:[],dns:{server:$dns.server,port:$dns.port,domain_rules:$dns.domains},
+        http_relay:{enabled:false}}
 ' "${LOG}" >/dev/null || fail 'DNS 独立状态合同错误'
 before=$(snapshot)
 runEdit 15 --spec "${TEST_ROOT}/base.json" --confirm PADM-DOCKER-EDIT
