@@ -599,10 +599,18 @@ padm-docker fail2ban unban 2001:db8::7
 IPv4/IPv6 字面地址，不接受域名、CIDR、zone、任意 jail 或全部解封；
 菜单执行前需要确认。未配置、停机或归属不一致时拒绝操作，底层失败返回非零。
 维护前通过容器内 Fail2ban 原生只读协议核对已加载动作、公开参数和有效属性缓存；
-动作、地址族参数或缓存漂移，以及额外 action，均拒绝操作并返回 `15`。
+动作、地址族参数或缓存漂移，以及额外 action，均拒绝操作并返回 `15`；
+随后只读核对私密 runtime state 和两族内核规则，归属漂移时不执行解封 client。
 审计不是与特权管理员并发操作的原子事务，也不抵御恶意 Python action、
 私有执行缓存或 Fail2ban 程序本身被篡改；此时应先停止服务并人工核对。
-这不代表新启用或完整管理已验收；真实客户端来源、宿主规则归属与重启恢复仍按 5C 门槛验证。
+Fail2ban 使用 schema 2 的私密 `data/net/fail2ban/fail2ban.state`、随机链和完整 token
+标记 hook、封禁规则及末尾 RETURN。启动、动作和停止先核对归属，逐条精确删除，
+不 flush 固定链；旧 `ports=` state、固定 `padm-f2b`、外来引用及 hook 遮蔽拒绝接管。
+不要删除 state 强制重试：先停原拥有者，在原生 Linux 上人工核对遗留资源。
+双栈 WS 防护让 Nginx 接入已有受管 IPv6 辅助网，避免 IPv4 bridge proxy 丢失来源；
+旧双栈 Compose 需通过标准配置/升级事务更新，不能直接绕过正文一致性检查。
+隔离 Linux amd64 已验证真实双栈来源、日志自动封禁、丢包及解封；
+新启用、真实宿主、arm64、重启/卸载与完整管理仍按 5C 门槛验收。
 
 已有 TProxy profile 使用私密 `data/net/transparent/tproxy.state` 记录随机链、
 规则 token、mark、路由表和路由身份。预检只读核对当前归属与候选冲突；

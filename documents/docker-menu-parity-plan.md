@@ -2666,6 +2666,65 @@ phase4 验证审计严格先于维护、失败返回码及不启动服务；最�
 早期夹具的 shell 换行、原参数恢复、动态时间戳、空缓存与 lazy 派生期望误判已修复；
 失败日志保留，源码归档/清单清理，不动其它任务临时文件，不推送或发布。
 
+#### 5C.4 Fail2ban 运行时所有权与真实双栈来源
+
+state 升为 schema 2，固定 `schema_version/token/chain/ports/ipv6` 五字段，
+root/0600/单硬链接/非符号链接、逐字 canonical 核验，不执行 state。
+每次启动生成 32 hex token 与 `padm-f2b-<前 12 hex>` 链；
+hook、单 IP DROP 和链尾 RETURN sentinel 均带完整 token。
+所有 start/stop/flush/check/ban/unban 共用生产 owner helper，绑定本次启动 token，
+每次写入前核对当前 state 和受保护的全部地址族，只逐条 `-D/-X`，不使用链 flush。
+拒绝旧 ports-only state、固定链、无标记空链、外来 jump/goto、未知规则、
+重复 hook、sentinel 顺序与 hook 被前置 RETURN 遮蔽；失败保留 state。
+候选只读挂载当前 owner；installed validate 传 owned，cleanup 绑定初读 token。
+IPv6 输入解析后规范化，保留映射 IPv6 支持并拒 zone/跨族输入。
+
+维护在 loaded-action 审计之后增加 live owner/内核只读门禁，
+防止 action 拒绝而 Fail2ban 票据已被 client 删除；失败返回 `15` 且不执行维护 client。
+容器 capability 比对接受 Docker 的 `CAP_` 前缀，仍核对严格能力集合。
+真实来源夹具发现原双栈发布经 IPv4 bridge proxy，Nginx 首字段变为 `172.17.0.1`，
+因此仅在受保护 WS 21 需要 IPv6 时，让 Nginx 接入已有受管 IPv6 辅助网。
+默认网络、业务核心范围、端口和 capability 不扩大，网络清理按当前 Compose 判断。
+旧双栈 Compose 需标准配置/升级事务更新；旧 state/同名资源不自动迁移，
+必须先停止原拥有者并在原生主机核对，不能通过删除 state 绕过归属门禁。
+
+新增 `docker-fail2ban-ownership` 并入普通合同，focused 并行 ownership/phase4；
+`docker-fail2ban-source-real` 仅显式运行，离线只传 xray/nginx/net，
+独立 dockerd、双客户端 veth netns，不挂宿主 Socket，保持生产端口和网络。
+真实 Nginx 日志首字段须为客户端，伪造 XFF/Forwarded 不改变封禁地址；
+三个实际 `/.env` 404 自动触发封禁，不手工 banip。
+两族分别证明 DNAT 后 DROP counter 增加、被封连接超时且日志不增加、
+第二客户端和另一地址族可用、单 IP 解封恢复、健康与停止清理。
+测试仅给离线容器补自身名称本地解析，保留 ignoreself 检测；
+故障注入 tmpfs 显式 exec 只限真实 action 夹具，不放宽生产配置。
+
+本地验收（2026-10-10，Linux amd64，工具与业务镜像复用）：
+
+| 检查 | 结果 / 秒 | 证据目录 |
+| --- | --- | --- |
+| 最终 ownership + phase4 focused | 2/2，33.891 / 入口 34.853 | `.tmp-regression-docker-75df4ade260948c7b3958b5c0a41c139` |
+| 最终真实 action 双栈 | 47.859 / 入口 48.776 | `.tmp-regression-docker-b9cb76fa8fa44dcc946b1b587278bf2c` |
+| 严格真实来源三项 | 25.903 / 入口 26.856 | `.tmp-regression-docker-ce82122f2e8142709570fa0b8475ee08` |
+| 网络清理/installed validate 补验 phase4 | 33.138 / 入口 34.082 | `.tmp-regression-docker-9ea5ea3f19124b38b55159c50a0800c2` |
+| 完整 Docker 合同，Jobs 6 | 37/37，239.963 / 入口 240.835 | `.tmp-regression-docker-58c461e7628c40cf94847a77f46f8a61` |
+| dispatcher 注册/集合合同 | 0.484 / 入口 1.530 | `.tmp-regression-docker-b3e7d7fd295442ccb9d0d53332f9e665` |
+
+各实测仅证明对应快照与路径，不把早期快照声称为最终同输入全套。
+完整合同未命中缓存，排队 383 ms，最终 10 个生产/测试/入口文件与完整归档逐文件一致。
+完整源码归档 SHA256 `70228153EA531872BAD51A8DA261F394A3605AF4E50E85DB09CDAAC41079B8F8`，
+内容摘要 `365D3DFB729E87C4D1F3BDADF93F9B41C6D76375D298F7E307366ADC526ED087`。
+8 个 Shell 的 Linux 语法/ShellCheck error、4 段生产 inline Python 编译、
+真实来源 Python AST、PowerShell AST 与 diff 检查通过；独立复审无未决 P1/P2。
+初期 fixture capability 表示、自名 DNS 阻塞、noexec 故障注入和静态站点配置
+均按实际错误修复，失败日志保留；最终代码验证结束后仅更新本节及说明文档。
+不扩大三槽预算、不重建镜像；清理本轮源码归档/清单和检查脚本，日志/result/缓存保留。
+主任务已核对并清理本轮 23 个归档/清单/检查脚本，不动用户既有临时文件；
+实现与测试 `8d0fc2f0 fix(docker): bind Fail2ban actions to verified owners` 为本地 SSH 签名，
+签名 `G`，未推送或发布。
+特权并发修改非原子、SIGKILL 无标记空链需人工核对；大量 bans 的逐条审计删除
+尚未量测优化。真实宿主、systemd/重启/卸载、公网和原生 arm64 未验收，
+Fail2ban 完整管理、5C 及总目标继续 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。
