@@ -123,28 +123,29 @@ showTrojanAccounts() {
     if currentProtocolHas 28 || currentProtocolHas 29; then
         subscribeSectionTitle "Trojan TLS" "不推荐"
         if currentProtocolHas 28; then
-            showTrojanAccountsFromConfig "${configPath}28_trojan_TCP_direct_inbounds.json" "${currentDefaultPort:-${singBoxTrojanPort}}"
+            showTrojanAccountsFromConfig "${configPath}28_trojan_TCP_direct_inbounds.json" "${currentDefaultPort:-${singBoxTrojanPort}}" || return 1
             if [[ "${coreInstallType}" == "1" && -f "${singBoxConfigPath}28_trojan_TCP_direct_inbounds.json" ]]; then
-                showTrojanAccountsFromConfig "${singBoxConfigPath}28_trojan_TCP_direct_inbounds.json" "${singBoxTrojanPort}"
+                showTrojanAccountsFromConfig "${singBoxConfigPath}28_trojan_TCP_direct_inbounds.json" "${singBoxTrojanPort}" || return 1
             fi
         fi
         if currentProtocolHas 29; then
-            showTrojanAccountsFromConfig "${configPath}04_trojan_TCP_inbounds.json" "${currentDefaultPort}"
+            showTrojanAccountsFromConfig "${configPath}04_trojan_TCP_inbounds.json" "${currentDefaultPort}" || return 1
         fi
     fi
 }
 
-showTrojanAccountsFromConfig() {
+showTrojanAccountsFromConfig() (
+    set -o pipefail
     local trojanConfigFile=$1 port=$2
     [[ -f "${trojanConfigFile}" ]] || return 0
-    jq -c '(.inbounds[0].settings.clients // .inbounds[0].users)[]' "${trojanConfigFile}" | while read -r user; do
+    jq -c '(.inbounds[0].settings.clients // .inbounds[0].users) | if type == "array" then .[] else error("invalid clients") end' "${trojanConfigFile}" | while read -r user; do
             local email password
             IFS=$'\037' read -r email _ password _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
             subscribeAccountTitle "${email}"
 
             defaultBase64Code trojan "${port}" "${email}" "${password}" || return 1
         done
-}
+)
 
 showVlessGrpcAccounts() {
     # VLESS grpc
@@ -203,7 +204,9 @@ showVlessRealityAccounts() {
     # VLESS Reality Vision
     if currentProtocolHas 1; then
         subscribeSectionTitle "VLESS reality_vision" "推荐"
-        showVlessRealityAccountsFromConfig 1 "${configPath}07_VLESS_vision_reality_inbounds.json" "${xrayVLESSRealityVisionPort:-${xrayVLESSRealityPort}}" || return 1
+        local port=${xrayVLESSRealityVisionPort:-${xrayVLESSRealityPort:-}}
+        [[ "${coreInstallType}" != 2 ]] || port=${singBoxVLESSRealityVisionPort}
+        showVlessRealityAccountsFromConfig "${coreInstallType}" "${configPath}07_VLESS_vision_reality_inbounds.json" "${port}" || return 1
         if [[ "${coreInstallType}" == "1" && -f "${singBoxConfigPath}07_VLESS_vision_reality_inbounds.json" ]]; then
             showVlessRealityAccountsFromConfig 2 "${singBoxConfigPath}07_VLESS_vision_reality_inbounds.json" "${singBoxVLESSRealityVisionPort}" || return 1
         fi
@@ -211,12 +214,12 @@ showVlessRealityAccounts() {
 }
 
 showVlessRealityAccountsFromConfig() (
-    set -e
+    set -eo pipefail
     local core=$1 configFile=$2 port=$3
     [[ -f "${configFile}" ]] || return 0
     coreInstallType=${core}
     configPath="$(dirname -- "${configFile}")/"
-    local usersFilter='(.inbounds[1].settings.clients // .inbounds[0].users)[]'
+    local usersFilter='(.inbounds[1].settings.clients // .inbounds[0].users)'
     local realityVisionPort=${port}
     if [[ "${core}" == "1" ]]; then
         local streamPublicPort entryPort
@@ -225,8 +228,8 @@ showVlessRealityAccountsFromConfig() (
         entryPort=$(jq -r '.inbounds[0].port' "${configFile}") || return 1
         realityVisionPort=$(corePortSubscriptionPort "${entryPort}" "${realityVisionPort}") || return 1
     fi
-    [[ "${core}" == "2" ]] && usersFilter='.inbounds[0].users[]'
-    jq -c "${usersFilter}" "${configFile}" | while read -r user; do
+    [[ "${core}" == "2" ]] && usersFilter='.inbounds[0].users'
+    jq -c "${usersFilter} | if type == \"array\" then .[] else error(\"invalid clients\") end" "${configFile}" | while read -r user; do
             local email accountId
             IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
 
@@ -241,17 +244,18 @@ showVlessRealityGrpcAccounts() {
     if currentProtocolHas 26; then
         subscribeSectionTitle "VLESS reality_gRPC" "推荐"
         if [[ "${coreInstallType}" == "2" ]]; then
-            showVlessRealityGrpcAccountsFromConfig "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json" "${singBoxVLESSRealityGRPCPort:-}" "${singBoxVLESSRealityGRPCSNI:-}" "${singBoxVLESSRealityPublicKey:-}" ""
+            showVlessRealityGrpcAccountsFromConfig "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json" "${singBoxVLESSRealityGRPCPort:-}" "${singBoxVLESSRealityGRPCSNI:-}" "${singBoxVLESSRealityPublicKey:-}" "" || return 1
         else
-            showVlessRealityGrpcAccountsFromConfig "${configPath}08_VLESS_vision_gRPC_inbounds.json" "${xrayVLESSRealityGRPCPort:-}" "${xrayVLESSRealityGRPCSNI:-}" "${xrayVLESSRealityGRPCPublicKey:-${currentRealityPublicKey:-}}" "${xrayVLESSRealityGRPCMldsa65Verify:-}"
+            showVlessRealityGrpcAccountsFromConfig "${configPath}08_VLESS_vision_gRPC_inbounds.json" "${xrayVLESSRealityGRPCPort:-}" "${xrayVLESSRealityGRPCSNI:-}" "${xrayVLESSRealityGRPCPublicKey:-${currentRealityPublicKey:-}}" "${xrayVLESSRealityGRPCMldsa65Verify:-}" || return 1
         fi
         if [[ "${coreInstallType}" == "1" && -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json" ]]; then
-            showVlessRealityGrpcAccountsFromConfig "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json" "${singBoxVLESSRealityGRPCPort:-}" "${singBoxVLESSRealityGRPCSNI:-}" "${singBoxVLESSRealityPublicKey:-}" ""
+            showVlessRealityGrpcAccountsFromConfig "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json" "${singBoxVLESSRealityGRPCPort:-}" "${singBoxVLESSRealityGRPCSNI:-}" "${singBoxVLESSRealityPublicKey:-}" "" || return 1
         fi
     fi
 }
 
-showVlessRealityGrpcAccountsFromConfig() {
+showVlessRealityGrpcAccountsFromConfig() (
+    set -o pipefail
     local configFile=$1
     local realityGRPCPort=$2
     local realityGRPCSNI=$3
@@ -261,7 +265,7 @@ showVlessRealityGrpcAccountsFromConfig() {
     if jq -e '.inbounds[0].port' "${configFile}" >/dev/null 2>&1; then
         realityGRPCPort=$(corePortSubscriptionPort "$(jq -r '.inbounds[0].port' "${configFile}")" "${realityGRPCPort}") || return 1
     fi
-    jq -c '(.inbounds[0].settings.clients // .inbounds[0].users)[]' "${configFile}" | while read -r user; do
+    jq -c '(.inbounds[0].settings.clients // .inbounds[0].users) | if type == "array" then .[] else error("invalid clients") end' "${configFile}" | while read -r user; do
             local email accountId
             IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
 
@@ -274,7 +278,7 @@ showVlessRealityGrpcAccountsFromConfig() {
             local singBoxVLESSRealityPublicKey="${realityGRPCPublicKey}"
             defaultBase64Code vlessRealityGRPC "${realityGRPCPort}" "${email}" "${accountId}" || return 1
         done
-}
+)
 
 showTuicAccounts() {
     # TUIC
@@ -358,17 +362,23 @@ showVmessHTTPUpgradeAccounts() {
             path="${singBoxVMessHTTPUpgradePath}"
             vmessHTTPUpgradePort="${singBoxVMessHTTPUpgradePort}"
         fi
-        showVmessHTTPUpgradeAccountsFromConfig "${configPath}11_VMess_HTTPUpgrade_inbounds.json" "${vmessHTTPUpgradePort}" "${path}"
+        showVmessHTTPUpgradeAccountsFromConfig "${configPath}11_VMess_HTTPUpgrade_inbounds.json" "${vmessHTTPUpgradePort}" "${path}" || return 1
         if [[ "${coreInstallType}" == "1" && -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json" ]]; then
+            local currentHost currentCDNAddress
+            currentHost=$(awk '$1 == "server_name" { sub(/;$/, "", $2); print $2; exit }' "${nginxConfigPath}sing_box_VMess_HTTPUpgrade.conf") || return 1
+            padmIsValidHostName "${currentHost}" || return 1
+            currentCDNAddress=$(cdnStoredAddress) || return 1
+            currentCDNAddress=${currentCDNAddress:-${currentHost}}
             showVmessHTTPUpgradeAccountsFromConfig "${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json" "${singBoxVMessHTTPUpgradePort}" "${singBoxVMessHTTPUpgradePath}"
         fi
     fi
 }
 
-showVmessHTTPUpgradeAccountsFromConfig() {
+showVmessHTTPUpgradeAccountsFromConfig() (
+    set -o pipefail
     local configFile=$1 vmessHTTPUpgradePort=$2 path=$3
     [[ -f "${configFile}" ]] || return 0
-    jq -c '(.inbounds[0].settings.clients // .inbounds[0].users)[]' "${configFile}" | while read -r user; do
+    jq -c '(.inbounds[0].settings.clients // .inbounds[0].users) | if type == "array" then .[] else error("invalid clients") end' "${configFile}" | while read -r user; do
             local email accountId
             IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
 
@@ -382,7 +392,7 @@ showVmessHTTPUpgradeAccountsFromConfig() {
                 fi
             done < <(echo "${currentCDNAddress}" | tr ',' '\n')
         done
-}
+)
 
 showVlessRealityXHTTPAccounts() {
     # VLESS Reality XHTTP

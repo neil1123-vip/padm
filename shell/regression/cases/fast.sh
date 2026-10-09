@@ -5316,6 +5316,7 @@ EOF
             printf 'singbox:%s:%s\n' "$1" "$2" >>"${captureLog}"
         }
         initSubscribeLocalConfig() { return 0; }
+        cdnAddressFile() { printf '%s/cdn\n' "${root}"; }
 
         showAccounts >/dev/null
 
@@ -5339,6 +5340,42 @@ EOF
         httpupgradeJson=$(printf '%s' "${httpupgradeLink#default:sub_httpupgrade:vmess://}" | base64 -d)
         printf '%s\n' "${httpupgradeJson}" | grep -q '"port":24443'
         printf '%s\n' "${httpupgradeJson}" | grep -q '"path":"/padmhttp"'
+        printf '%s\n' "${httpupgradeJson}" | grep -q '"add":"upgrade.example.com"'
+        printf '%s\n' "${httpupgradeJson}" | grep -q '"sni":"upgrade.example.com"'
+        (
+            # Reality 主核心没有 TLS 域名时，辅助入口仍使用自己的 Nginx 域名。
+            source "${PROJECT_ROOT}/shell/core/state.sh"
+            readInstallType() {
+                coreInstallType=1 configPath="${xrayRoot}/" singBoxConfigPath="${singBoxRoot}/"
+                ctlPath="${fakeXray}" nginxConfigPath="${nginxRoot}/"
+            }
+            : >"${captureLog}"
+            readInstallType
+            readInstallProtocolType
+            readConfigHostPathUUID
+            [[ -z "${currentHost}${currentCDNAddress}" ]]
+            showVmessHTTPUpgradeAccounts >/dev/null
+            httpupgradeLink=$(grep '^default:sub_httpupgrade:vmess://' "${captureLog}" | head -n 1)
+            httpupgradeJson=$(printf '%s' "${httpupgradeLink#default:sub_httpupgrade:vmess://}" | base64 -d)
+            jq -e '.add == "upgrade.example.com" and .sni == "upgrade.example.com"' <<<"${httpupgradeJson}" >/dev/null
+        )
+        (
+            # 主配置读取或输出失败不能被合法辅助配置覆盖，且不依赖调用方 pipefail。
+            set +o pipefail
+            local wrapper configFile
+            for wrapper in showTrojanAccounts showVlessRealityGrpcAccounts showVmessHTTPUpgradeAccounts; do
+                case "${wrapper}" in
+                showTrojanAccounts) configFile=28_trojan_TCP_direct_inbounds.json; currentInstallProtocolType=,28, ;;
+                showVlessRealityGrpcAccounts) configFile=08_VLESS_vision_gRPC_inbounds.json; currentInstallProtocolType=,26, ;;
+                showVmessHTTPUpgradeAccounts) configFile=11_VMess_HTTPUpgrade_inbounds.json; currentInstallProtocolType=,23, ;;
+                esac
+                printf '{"inbounds":[{"settings":{"clients":{}}}]}\n' >"${xrayRoot}/${configFile}"
+                printf '{"inbounds":[{"users":[{"name":"aux-must-not-run","password":"aux","uuid":"aux"}]}]}\n' >"${singBoxRoot}/${configFile}"
+                : >"${captureLog}"
+                regressionExpectStatus 1 "${wrapper}"
+                [[ ! -s "${captureLog}" ]]
+            done
+        )
     )
 }
 
@@ -5391,6 +5428,8 @@ JSON
         printf '%s\n' '{"inbounds":[{"users":[{"uuid":"44444444-4444-4444-4444-444444444444","name":"sing-box-httpupgrade-user"}]}]}' >"${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json"
         singBoxVMessHTTPUpgradePort=24443
         singBoxVMessHTTPUpgradePath=/sing-box-upgrade
+        printf 'server_name upgrade.example.com;\n' >"${nginxConfigPath}sing_box_VMess_HTTPUpgrade.conf"
+        cdnAddressFile() { printf '%s/cdn\n' "${root}"; }
         : >"${captureLog}"
         showVmessHTTPUpgradeAccounts >/dev/null
         grep -qx 'vmessHTTPUpgrade|443|/padm' "${captureLog}"
