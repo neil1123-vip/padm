@@ -30,10 +30,12 @@ YAML
     fi
     addSingBoxRouteRule "test_outbound" "openai,example.com,full:api.example.com,keyword:video" "test_route"
     jq -e '
-      .route.rules[0].rule_set == ["geosite_openai_test_route"] and
-      .route.rules[0].domain_suffix == ["example.com"] and
-      .route.rules[0].domain == ["api.example.com"] and
-      .route.rules[0].domain_keyword == ["video"] and
+      .route.rules[0].type == "logical" and .route.rules[0].mode == "or" and
+      .route.rules[0].outbound == "test_outbound" and
+      .route.rules[0].rules[1].rule_set == ["geosite_openai_test_route"] and
+      .route.rules[0].rules[0].domain_suffix == ["example.com"] and
+      .route.rules[0].rules[0].domain == ["api.example.com"] and
+      .route.rules[0].rules[0].domain_keyword == ["video"] and
       (.route.rules[0].domain_regex | not) and
       .route.rule_set[0].url == "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-openai.srs" and
       .route.rule_set[0].http_client == {engine:"go"} and
@@ -42,8 +44,10 @@ YAML
     (
         autoRead() { printf -v "$3" 'y'; }
         addSingBoxRouteRule "test_outbound" "keyword:video,keyword:stream" "test_route"
-        jq -e '.route.rules[0].domain_keyword == ["stream", "video"] and
-          (.route.rules[0].domain_suffix | index("video") | not)' \
+        jq -e '.route.rules[0].rules[0].domain_keyword == ["stream", "video"] and
+          .route.rules[0].rules[0].domain == ["api.example.com"] and
+          .route.rules[0].rules[0].domain_suffix == ["example.com"] and
+          .route.rules[0].rules[1].rule_set == ["geosite_openai_test_route"]' \
             "${singBoxConfigPath}test_route.json" >/dev/null || { printf 'routing-keyword-fail:sing-box-history\n' >&2; return 1; }
     )
     [[ "$(getDLCMatchedRuleValue example.com "${singBoxConfigPath}")" == "domain:example.com" ]]
@@ -127,8 +131,16 @@ YAML
     rm -f "${singBoxConfigPath}bad_history_route.json"
     addSingBoxIPRouteRule "block_ip_outbound" "1.1.1.0/24,cn" "block_ip_route"
     jq -e '
-      (.route.rules[0].ip_cidr | sort) == (["1.1.1.0/24", "geoip:cn"] | sort) and
-      .route.rules[0].action == "reject"
+      .route.rules[0].rule_set == ["geoip_cn_block_ip_route"] and
+      .route.rule_set[0].url == "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs" and
+      .route.rules[1].ip_cidr == ["1.1.1.0/24"] and
+      all(.route.rules[]; .action == "reject") and
+      ([.route.rules[]?.ip_cidr[]?] | index("geoip:cn") | not)
+    ' "${singBoxConfigPath}block_ip_route.json" >/dev/null
+    addSingBoxIPRouteRule "block_ip_outbound" "2.2.2.2" "block_ip_route"
+    jq -e '
+      .route.rules[0].rule_set == ["geoip_cn_block_ip_route"] and
+      .route.rules[1].ip_cidr == ["1.1.1.0/24", "2.2.2.2"]
     ' "${singBoxConfigPath}block_ip_route.json" >/dev/null
     printf '{bad-json\n' >"${singBoxConfigPath}bad_ip_route.json"
     if addSingBoxIPRouteRule "block_ip_outbound" "2.2.2.2" "bad_ip_route" 2>/dev/null; then
@@ -496,8 +508,118 @@ JSON
         ! validateAccessIPList "${invalidIP}" >/dev/null || return 1
     done
     runRoutingKeywordDNSRegression
+    runAccessControlMatcherRegression
+    runSocks5InboundMatcherRegression
     runSNIRoutingCancelRegression
 }
+
+runSocks5InboundMatcherRegression() (
+    local root="${TMP_DIR}/socks5-inbound-matchers"
+    local configPath= singBoxConfigPath="${root}/" coreInstallType=2
+    local domains="geosite:openai,domain:example.com,full:api.example.com,keyword:track"
+    local allowAll=n history=n originalSources='["10.0.0.1","10.0.0.2"]'
+    mkdir -p "${singBoxConfigPath}"
+    autoRead() {
+        case "$1" in
+        socks5_inbound_source_ips) printf -v "$3" '10.0.0.1,10.0.0.2' ;;
+        socks5_inbound_allow_all) printf -v "$3" '%s' "${allowAll}" ;;
+        socks5_inbound_domains) printf -v "$3" '%s' "${domains}" ;;
+        singbox_route_history) printf -v "$3" '%s' "${history}" ;;
+        *) return 1 ;;
+        esac
+    }
+    setSocks5InboundRouting || return 1
+    jq -e --argjson sources "${originalSources}" '
+        .route.rules[0].type == "logical" and .route.rules[0].mode == "and" and
+        .route.rules[0].outbound == "01_direct_outbound" and
+        (.route.rules[0] | has("inbound") or has("source_ip_cidr") | not) and
+        .route.rules[0].rules[0] == {inbound:["socks5_inbound"], source_ip_cidr:$sources} and
+        .route.rules[0].rules[1].type == "logical" and .route.rules[0].rules[1].mode == "or" and
+        .route.rules[0].rules[1].rules[0].domain == ["api.example.com"] and
+        .route.rules[0].rules[1].rules[0].domain_suffix == ["example.com"] and
+        .route.rules[0].rules[1].rules[0].domain_keyword == ["track"] and
+        .route.rules[0].rules[1].rules[1].rule_set == ["geosite_openai_socks5_02_inbound_route"] and
+        all(.route.rules[0].rules[] | recurse(.rules[]?); has("action") or has("outbound") | not)
+    ' "${singBoxConfigPath}socks5_02_inbound_route.json" >/dev/null || return 1
+    domains=full:new.example.com history=y
+    setSocks5InboundRouting addRules || return 1
+    jq -e --argjson sources "${originalSources}" '
+        .route.rules[0].rules[0].source_ip_cidr == $sources and
+        .route.rules[0].rules[1].rules[0].domain == ["api.example.com", "new.example.com"] and
+        .route.rules[0].rules[1].rules[1].rule_set == ["geosite_openai_socks5_02_inbound_route"] and
+        all(.route.rules[0].rules[] | recurse(.rules[]?); has("action") or has("outbound") | not)
+    ' "${singBoxConfigPath}socks5_02_inbound_route.json" >/dev/null || return 1
+    domains=domain:example.com history=n
+    setSocks5InboundRouting addRules || return 1
+    jq -e --argjson sources "${originalSources}" '
+        .route.rules == [{domain_suffix:["example.com"], outbound:"01_direct_outbound",
+                          inbound:["socks5_inbound"], source_ip_cidr:$sources}]
+    ' "${singBoxConfigPath}socks5_02_inbound_route.json" >/dev/null || return 1
+    allowAll=y
+    setSocks5InboundRouting addRules || return 1
+    jq -e --argjson sources "${originalSources}" '
+        .route.rules == [{outbound:"01_direct_outbound", inbound:["socks5_inbound"], source_ip_cidr:$sources}]
+    ' "${singBoxConfigPath}socks5_02_inbound_route.json" >/dev/null || return 1
+)
+
+runAccessControlMatcherRegression() (
+    local root="${TMP_DIR}/access-control-matchers"
+    local configPath="${root}/xray/" singBoxConfigPath="${root}/sing-box/" coreInstallType=1
+    local input originalConfig originalRule kind
+    mkdir -p "${configPath}" "${singBoxConfigPath}"
+    printf '{"routing":{"rules":[{"domain":["domain:keep.example"],"outboundTag":"keep_out"}]}}\n' >"${configPath}09_routing.json"
+    originalConfig=$(<"${configPath}09_routing.json")
+    autoRead() { printf -v "$3" '%s' "${input}"; }
+    accessControlBackupCreate() { return 99; }
+    for input in '' ',' ' , , ' $' \t\n'; do
+        regressionExpectStatus 1 addBlockedDomains >/dev/null 2>&1 || return 1
+        regressionExpectStatus 1 addDirectAllowDomains >/dev/null 2>&1 || return 1
+        regressionExpectStatus 1 addXrayRouting blackhole_out outboundTag "${input}" >/dev/null 2>&1 || return 1
+        regressionExpectStatus 1 addSingBoxRouteRule block_domain_outbound "${input}" block_domain_route >/dev/null 2>&1 || return 1
+        regressionExpectStatus 1 addSingBoxRouteRule 01_direct_outbound "${input}" 00_allow_domain_route >/dev/null 2>&1 || return 1
+        [[ "$(<"${configPath}09_routing.json")" == "${originalConfig}" &&
+            ! -e "${singBoxConfigPath}block_domain_route.json" &&
+            ! -e "${singBoxConfigPath}00_allow_domain_route.json" ]] || return 1
+    done
+    addSingBoxRouteRule 01_direct_outbound "" socks5_02_inbound_route || return 1
+    jq -e '.route.rules == [{outbound:"01_direct_outbound"}]' "${singBoxConfigPath}socks5_02_inbound_route.json" >/dev/null || return 1
+    printf '{"route":{"rules":[{"rule_set":["geosite_category_ads_block_domain_route"],"domain":["api.example.com"],"domain_suffix":["example.com"],"domain_keyword":["track"],"action":"reject"}]}}\n' >"${singBoxConfigPath}block_domain_route.json"
+    input=y
+    addSingBoxRouteRule block_domain_outbound "full:new.example.com" block_domain_route || return 1
+    jq -e '
+        .route.rules[0].type == "logical" and .route.rules[0].mode == "or" and
+        .route.rules[0].action == "reject" and
+        .route.rules[0].rules[0].domain == ["api.example.com", "new.example.com"] and
+        .route.rules[0].rules[0].domain_suffix == ["example.com"] and
+        .route.rules[0].rules[0].domain_keyword == ["track"] and
+        .route.rules[0].rules[1].rule_set == ["geosite_category_ads_block_domain_route"]
+    ' "${singBoxConfigPath}block_domain_route.json" >/dev/null || return 1
+    originalRule=$(<"${singBoxConfigPath}block_domain_route.json")
+    autoRead() { return 1; }
+    regressionExpectStatus 1 addSingBoxRouteRule block_domain_outbound "example.net" block_domain_route || return 1
+    [[ "$(<"${singBoxConfigPath}block_domain_route.json")" == "${originalRule}" ]] || return 1
+    (
+        local configPath= coreInstallType=2 choice=0
+        coreNotInstalledErrorCard() { return 99; }
+        menuReadChoice() { choice=1; printf -v "$3" '7'; }
+        accessControlMenu >/dev/null || return 1
+        [[ "${choice}" == "1" ]]
+    ) || return 1
+    singBoxConfigPath=
+    addXrayRouting allow_domain_direct_outbound outboundTag "example.com,full:api.example.com" top || return 1
+    addXrayRouting allow_domain_direct_outbound outboundTag "full:api.example.com" top || return 1
+    jq -e '.routing.rules[0].domain == ["domain:example.com", "full:api.example.com"]' "${configPath}09_routing.json" >/dev/null || return 1
+    for kind in domain all; do
+        printf '{"routing":{"rules":[{"domain":["domain:block.example"],"outboundTag":"blackhole_out"},{"protocol":["bittorrent"],"outboundTag":"blackhole_out"}]}}\n' >"${configPath}09_routing.json"
+        addXrayOutbound blackhole_out || return 1
+        removeAccessControlByKind "${kind}" || return 1
+        [[ -f "${configPath}blackhole_out.json" ]] || return 1
+        jq -e '.routing.rules == [{protocol:["bittorrent"],outboundTag:"blackhole_out"}]' "${configPath}09_routing.json" >/dev/null || return 1
+        unInstallRouting blackhole_out outboundTag bittorrent || return 1
+        removeAccessControlByKind "${kind}" || return 1
+        [[ ! -e "${configPath}blackhole_out.json" ]] || return 1
+    done
+)
 
 runRoutingKeywordDNSRegression() (
     local root="${TMP_DIR}/routing-keyword-dns"
@@ -1178,11 +1300,14 @@ YAML
     allowAllMode=false
     setSocks5InboundRouting addRules
     jq -e '
-      .route.rules[0].inbound == ["socks5_inbound"] and
-      (.route.rules[0].source_ip_cidr | sort) == (["10.0.0.1", "10.0.0.2"] | sort) and
+      .route.rules[0].type == "logical" and .route.rules[0].mode == "and" and
+      .route.rules[0].rules[0].inbound == ["socks5_inbound"] and
+      (.route.rules[0].rules[0].source_ip_cidr | sort) == (["10.0.0.1", "10.0.0.2"] | sort) and
       .route.rules[0].outbound == "01_direct_outbound" and
-      .route.rules[0].domain_suffix == ["example.com"] and
-      .route.rules[0].rule_set == ["geosite_openai_socks5_02_inbound_route"] and
+      .route.rules[0].rules[1].type == "logical" and .route.rules[0].rules[1].mode == "or" and
+      .route.rules[0].rules[1].rules[0].domain_suffix == ["example.com"] and
+      .route.rules[0].rules[1].rules[1].rule_set == ["geosite_openai_socks5_02_inbound_route"] and
+      all(.route.rules[0].rules[] | recurse(.rules[]?); has("action") or has("outbound") | not) and
       (.route.rules[0].action? | not) and
       (.route.rules[0].protocol? | not) and
       (.route.rules[0].network? | not) and

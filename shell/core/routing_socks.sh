@@ -495,7 +495,7 @@ setSocks5InboundRouting() {
     fi
     local socks5InboundRoutingIPs=
     if [[ "${action}" == "addRules" ]]; then
-        socks5InboundRoutingIPs=$(jq .route.rules[0].source_ip_cidr "${singBoxConfigPath}socks5_02_inbound_route.json") || return 1
+        socks5InboundRoutingIPs=$(jq '[.route.rules[0] | recurse(.rules[]?) | .source_ip_cidr[]?] | unique' "${singBoxConfigPath}socks5_02_inbound_route.json") || return 1
     else
         echoContent title "\n┌─ Socks5 入站访问源 ────────────────────────────────"
         menuLine "请输入允许访问的 IP 地址，多个 IP 用英文逗号分隔"
@@ -519,9 +519,6 @@ setSocks5InboundRouting() {
     autoRead socks5_inbound_allow_all "是否允许所有网站？请选择[y/n]:" socks5InboundRoutingDomainStatus
     if [[ "${socks5InboundRoutingDomainStatus}" == "y" ]]; then
         addSingBoxRouteRule "01_direct_outbound" "" "socks5_02_inbound_route" || return 1
-        updateRoutingJsonConfig "${singBoxConfigPath}socks5_02_inbound_route.json" '.route.rules[0].inbound = ["socks5_inbound"] | .route.rules[0].source_ip_cidr = $sourceIPs' --argjson sourceIPs "${socks5InboundRoutingIPs}" || return 1
-
-        addSingBoxOutbound "01_direct_outbound" || return 1
     else
         echoContent yellow "录入示例:netflix,openai,example.com\n"
         autoRead socks5_inbound_domains "域名:" socks5InboundRoutingDomain
@@ -530,11 +527,18 @@ setSocks5InboundRouting() {
             return 1
         fi
         addSingBoxRouteRule "01_direct_outbound" "${socks5InboundRoutingDomain}" "socks5_02_inbound_route" || return 1
-        updateRoutingJsonConfig "${singBoxConfigPath}socks5_02_inbound_route.json" '.route.rules[0].inbound = ["socks5_inbound"] | .route.rules[0].source_ip_cidr = $sourceIPs' --argjson sourceIPs "${socks5InboundRoutingIPs}" || return 1
-
-        addSingBoxOutbound "01_direct_outbound" || return 1
     fi
-
+    # logical 根不支持来源匹配，限制与原域名 OR 必须组成外层 AND。
+    updateRoutingJsonConfig "${singBoxConfigPath}socks5_02_inbound_route.json" '
+        .route.rules[0] |= (
+            {inbound:["socks5_inbound"], source_ip_cidr:$sourceIPs} as $sourceMatch |
+            if .type == "logical" then
+                {type:"logical", mode:"and", rules:[$sourceMatch, del(.action, .outbound)]} +
+                ({action, outbound} | with_entries(select(.value != null)))
+            else . + $sourceMatch end
+        )
+    ' --argjson sourceIPs "${socks5InboundRoutingIPs}" || return 1
+    addSingBoxOutbound "01_direct_outbound" || return 1
 }
 
 

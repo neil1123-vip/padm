@@ -8,43 +8,54 @@ addSingBoxRouteRule() {
     local domainList=$2
     # 路由文件名称
     local routingName=$3
+    if [[ "${outboundTag}" == *block* || "${routingName}" == "00_allow_domain_route" ]] &&
+        [[ -z "${domainList//[[:space:],]/}" ]]; then
+        coreDomainRequiredErrorCard
+        return 1
+    fi
     # 读取上次安装内容
     if [[ -f "${singBoxConfigPath}${routingName}.json" ]]; then
-        autoRead singbox_route_history "读取到上次的配置，是否保留？[y/n]:" historyRouteStatus
+        local historyRouteStatus=
+        autoRead singbox_route_history "读取到上次的配置，是否保留？[y/n]:" historyRouteStatus || return 1
         if [[ "${historyRouteStatus}" == "y" ]]; then
-            local historyRuleSetLines historyRuleSets historyDomainLines historyDomains historyKeywordLines historyKeywords
-            historyRuleSetLines=$(jq -rc '.route.rules[0].rule_set[]?' "${singBoxConfigPath}${routingName}.json") || return 1
-            historyRuleSets=$(printf '%s\n' "${historyRuleSetLines}" | awk -F "[_]" '{print $2}' | paste -sd ',')
-            historyDomainLines=$(jq -rc '.route.rules[0].domain[]?,.route.rules[0].domain_suffix[]?' "${singBoxConfigPath}${routingName}.json") || return 1
-            historyDomains=$(printf '%s\n' "${historyDomainLines}" | paste -sd ',')
-            historyKeywordLines=$(jq -rc '.route.rules[0].domain_keyword[]? | "keyword:" + .' "${singBoxConfigPath}${routingName}.json") || return 1
-            historyKeywords=$(printf '%s\n' "${historyKeywordLines}" | paste -sd ',')
-            domainList="${domainList},${historyRuleSets}"
+            local historyDomains
+            historyDomains=$(jq -r --arg suffix "_${routingName}" '
+                [.route.rules[0] | recurse(.rules[]?) |
+                    (.rule_set[]? | "geosite:" + (ltrimstr("geosite_") | rtrimstr($suffix))),
+                    (.domain[]? | "full:" + .),
+                    (.domain_suffix[]? | "domain:" + .),
+                    (.domain_keyword[]? | "keyword:" + .)] | join(",")
+            ' "${singBoxConfigPath}${routingName}.json") || return 1
             domainList="${domainList},${historyDomains}"
-            domainList="${domainList},${historyKeywords}"
         fi
-
     fi
     local rules=
     rules=$(initSingBoxRules "${domainList}" "${routingName}") || return 1
     local domainRules suffixRules ruleSet ruleSetTag keywordRules
     splitSingBoxRules "${rules}" domainRules suffixRules ruleSet ruleSetTag keywordRules || return 1
+    if [[ "${outboundTag}" == *block* || "${routingName}" == "00_allow_domain_route" ]] &&
+        ! jq -e '(.domainRules + .suffixRules + .keywordRules + .ruleSet) | length > 0' <<<"${rules}" >/dev/null; then
+        coreDomainRequiredErrorCard
+        return 1
+    fi
     if [[ -n "${singBoxConfigPath}" ]]; then
-        local routeAction='"outbound": "'"${outboundTag}"'"'
-        if [[ "${outboundTag}" == *block* ]]; then
-            routeAction='"action": "reject"'
-        fi
+        local routeRule
+        routeRule=$(jq -n --arg outbound "${outboundTag}" \
+            --argjson domains "${domainRules}" --argjson suffixes "${suffixRules}" \
+            --argjson keywords "${keywordRules}" --argjson ruleTags "${ruleSetTag}" '
+            ({domain:$domains, domain_suffix:$suffixes, domain_keyword:$keywords} |
+                with_entries(select(.value | length > 0))) as $domainsMatch |
+            [($domainsMatch | select(length > 0)),
+             ({rule_set:$ruleTags} | select(.rule_set | length > 0))] as $matches |
+            (if ($matches | length) > 1 then {type:"logical", mode:"or", rules:$matches}
+             else $matches[0] // {} end) +
+            (if ($outbound | contains("block")) then {action:"reject"} else {outbound:$outbound} end)
+        ') || return 1
         writeRoutingJsonConfig "${singBoxConfigPath}${routingName}.json" <<EOF || return 1
 {
   "route": {
     "rules": [
-      {
-        "rule_set":${ruleSetTag},
-        "domain":${domainRules},
-        "domain_suffix":${suffixRules},
-        "domain_keyword":${keywordRules},
-        ${routeAction}
-      }
+      ${routeRule}
     ],
     "rule_set":${ruleSet}
   }

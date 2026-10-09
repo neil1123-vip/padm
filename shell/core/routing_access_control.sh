@@ -3,7 +3,7 @@
 ACCESS_CONTROL_ACTIVE_BACKUP_DIR=
 
 accessControlMenu() {
-    if [[ -z "${configPath}" ]]; then
+    if [[ -z "${configPath}" && -z "${singBoxConfigPath}" ]]; then
         coreNotInstalledErrorCard
         return 1
     fi
@@ -71,10 +71,11 @@ showSingBoxAccessRuleFile() {
     [[ -f "${file}" ]] || return 0
     menuLine "  ${name}:"
     jq -r '
-        .route.rules[]? as $rule |
+        .route.rules[]? | recurse(.rules[]?) as $rule |
         ($rule.rule_set[]? // empty),
         ($rule.domain[]? // empty),
         ($rule.domain_suffix[]? // empty),
+        ($rule.domain_keyword[]? // empty),
         ($rule.ip_cidr[]? // empty)
     ' "${file}" | sed 's/^/    /' || true
     jq -r '.route.rule_set[]?.url? // empty' "${file}" | sed 's/^/    /' || true
@@ -102,8 +103,8 @@ addBlockedDomains() {
     menuLine "具体域名会按 domain/domain_suffix 匹配，不再生成宽泛 regexp"
     menuLine "添加规则为增量配置，不会删除之前设置的内容"
     menuClose
-    autoRead access_block_domains "请录入要阻断的域名或规则:" domainList
-    if [[ -z "${domainList}" ]]; then
+    autoRead access_block_domains "请录入要阻断的域名或规则:" domainList || return 1
+    if [[ -z "${domainList//[[:space:],]/}" ]]; then
         coreDomainRequiredErrorCard
         return 1
     fi
@@ -126,7 +127,7 @@ addBlockedIPs() {
     echoContent title "\n┌─ 添加 IP/CIDR 阻断 ────────────────────────────────"
     menuLine "录入示例：1.1.1.1,8.8.8.8,1.1.1.0/24,2400:3200::/32,cn"
     menuClose
-    autoRead access_block_ips "请录入 IP/CIDR:" ipList
+    autoRead access_block_ips "请录入 IP/CIDR:" ipList || return 1
     normalizedIPs=$(validateAccessIPList "${ipList}") || { errorCard "IP/CIDR 格式错误"; return 1; }
     if [[ -z "${normalizedIPs}" ]]; then
         errorCard "IP/CIDR 不可为空"
@@ -151,8 +152,8 @@ addDirectAllowDomains() {
     menuLine "直连例外会优先于阻断规则，适合系统更新、证书签发或必要服务"
     menuLine "录入示例：dl.google.com,apple.com,domain:example.com,full:api.example.com"
     menuClose
-    autoRead access_allow_domains "请录入直连例外域名:" allowDomainList
-    if [[ -z "${allowDomainList}" ]]; then
+    autoRead access_allow_domains "请录入直连例外域名:" allowDomainList || return 1
+    if [[ -z "${allowDomainList//[[:space:],]/}" ]]; then
         coreDomainRequiredErrorCard
         return 1
     fi
@@ -262,7 +263,6 @@ removeAccessControlByKind() {
         case "${kind}" in
         domain)
             unInstallRouting blackhole_out outboundTag || return 1
-            removeXrayOutbound blackhole_out || return 1
             ;;
         ip)
             unInstallRouting blackhole_ip_out outboundTag || return 1
@@ -279,11 +279,20 @@ removeAccessControlByKind() {
             unInstallRouting blackhole_out outboundTag || return 1
             unInstallRouting blackhole_ip_out outboundTag || return 1
             unInstallRouting allow_domain_direct_outbound outboundTag || return 1
-            removeXrayOutbound blackhole_out || return 1
             removeXrayOutbound blackhole_ip_out || return 1
             removeXrayOutbound allow_domain_direct_outbound || return 1
             ;;
         esac
+        if [[ "${kind}" == "domain" || "${kind}" == "all" ]]; then
+            local blackholeReferences=0
+            if [[ -f "${configPath}09_routing.json" ]]; then
+                blackholeReferences=$(jq '[.routing.rules[]? | select(.outboundTag == "blackhole_out")] | length' "${configPath}09_routing.json") || return 1
+            fi
+            # BT 等协议规则与域名阻断共用出站，仍有引用时不能删除。
+            if [[ "${blackholeReferences}" == "0" ]]; then
+                removeXrayOutbound blackhole_out || return 1
+            fi
+        fi
     fi
 
     if [[ -n "${singBoxConfigPath}" ]]; then

@@ -127,7 +127,7 @@ addXrayRouting() {
     local domain=$3 # 域名
     local rulePosition=${4:-}
 
-    if [[ -z "${tag}" || -z "${type}" || -z "${domain}" ]]; then
+    if [[ -z "${tag}" || -z "${type}" || -z "${domain//[[:space:],]/}" ]]; then
         errorCard "参数错误"
         return 1
     fi
@@ -145,7 +145,8 @@ addXrayRouting() {
         [[ -n "${line}" ]] || continue
         local matchedRuleValue
         matchedRuleValue=$(getDLCMatchedRuleValue "${line}" "/etc/padm/xray") || return 1
-        if echo "${routingRule}" | grep -q "${line}"; then
+        [[ -n "${matchedRuleValue}" ]] || continue
+        if jq -e --arg rule "${matchedRuleValue}" '(.domain // []) | index($rule) != null' <<<"${routingRule}" >/dev/null; then
             coreRuleExistsStatusCard "${line} 已存在，跳过"
         else
             newRules+=("${matchedRuleValue}")
@@ -248,7 +249,10 @@ addSingBoxIPRouteRule() {
     local historyIPs=
     if [[ -f "${singBoxConfigPath}${routingName}.json" ]]; then
         local historyIPLines
-        historyIPLines=$(jq -r '.route.rules[0].ip_cidr[]?' "${singBoxConfigPath}${routingName}.json") || return 1
+        historyIPLines=$(jq -r --arg tag "geoip_cn_${routingName}" '
+            (.route.rules[]? | recurse(.rules[]?) | .ip_cidr[]?),
+            (.route.rule_set[]? | select(.tag == $tag) | "cn")
+        ' "${singBoxConfigPath}${routingName}.json") || return 1
         historyIPs=$(printf '%s\n' "${historyIPLines}" | paste -sd ',')
     fi
 
@@ -256,8 +260,21 @@ addSingBoxIPRouteRule() {
         ipList="${ipList},${historyIPs}"
     fi
 
-    local ipCIDR=[]
-    ipCIDR=$(echo "${ipList}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^cn$/geoip:cn/' | grep -v '^$' | sort -n | uniq | jq -R -s 'split("\n") | map(select(length > 0))') || return 1
+    local ipRules ipCIDR
+    ipRules=$(echo "${ipList}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^geoip:cn$/cn/' | sort -u | jq -R -s 'split("\n") | map(select(length > 0))') || return 1
+    [[ "${ipRules}" != "[]" ]] || return 1
+    ipCIDR=$(jq -c 'map(select(. != "cn"))' <<<"${ipRules}") || return 1
+
+    if jq -e 'index("cn") != null' <<<"${ipRules}" >/dev/null; then
+        addSingBoxGeoIPRouteRule "${outboundTag}" "cn" "${routingName}" || return 1
+        if [[ "${ipCIDR}" != "[]" ]]; then
+            updateRoutingJsonConfig "${singBoxConfigPath}${routingName}.json" '
+                .route.rules += [({ip_cidr:$ips} + (.route.rules[0] | {action, outbound} |
+                    with_entries(select(.value != null))))]
+            ' --argjson ips "${ipCIDR}" || return 1
+        fi
+        return 0
+    fi
 
     local routeAction='"outbound": "'"${outboundTag}"'"'
     if [[ "${outboundTag}" == *block* ]]; then
