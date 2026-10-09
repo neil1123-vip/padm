@@ -3891,6 +3891,7 @@ manageHysteria() {
     while true; do
         if [[ "${refreshInstallState}" == "true" ]]; then
             readInstallType || return 1
+            readInstallProtocolType || return 1
             refreshInstallState=false
         fi
         hysteria2Status=
@@ -4087,6 +4088,7 @@ manageTuic() {
     while true; do
         if [[ "${refreshInstallState}" == "true" ]]; then
             readInstallType || return 1
+            readInstallProtocolType || return 1
             refreshInstallState=false
         fi
         tuicStatus=

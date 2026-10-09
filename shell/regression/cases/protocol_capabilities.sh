@@ -1681,7 +1681,7 @@ runRealityTargetMenuStateRegression() (
 )
 
 runSingBoxProtocolMenuStateRegression() (
-    local installReads=0 fixtureConfig="${TMP_DIR}/sing-box-entry.json"
+    local installReads=0 protocolReads=0 hoppingCalls=0 diskPort=18443 fixtureConfig="${TMP_DIR}/sing-box-entry.json"
     coreInstallType=1
     mkdir -p "${TMP_DIR}" || return 1
     printf '{}\n' >"${fixtureConfig}"
@@ -1689,11 +1689,24 @@ runSingBoxProtocolMenuStateRegression() (
         installReads=$((installReads + 1))
         singBoxConfigPath="${TMP_DIR}/"
     }
+    readInstallProtocolType() {
+        protocolReads=$((protocolReads + 1))
+        singBoxHysteria2Port=${diskPort}
+        singBoxTuicPort=${diskPort}
+    }
     hysteria2ConfigFile() { printf '%s\n' "${fixtureConfig}"; }
     tuicConfigFile() { printf '%s\n' "${fixtureConfig}"; }
     hysteria2SettingsSummary() { :; }
     tuicSettingsSummary() { :; }
-    portHoppingMenu() { :; }
+    portHoppingMenu() {
+        hoppingCalls=$((hoppingCalls + 1))
+        case "$1" in
+        hysteria2) [[ "${singBoxHysteria2Port}" == "${diskPort}" ]] ;;
+        tuic) [[ "${singBoxTuicPort}" == "${diskPort}" ]] ;;
+        esac
+    }
+    singBoxHysteria2Install() { diskPort=24444; }
+    singBoxTuicInstall() { diskPort=24444; }
     echoContent() { :; }
     menuLine() { :; }
     menuItem() { :; }
@@ -1710,13 +1723,23 @@ runSingBoxProtocolMenuStateRegression() (
     manageHysteria <<< $'3\n5'
     local hysteriaRc=$?
     set -e
-    [[ "${hysteriaRc}" == 0 && "${installReads}" == 1 ]] || return 1
-    installReads=0
+    [[ "${hysteriaRc}" == 0 && "${installReads}:${protocolReads}:${hoppingCalls}" == 1:1:1 ]] || return 1
+    installReads=0 protocolReads=0 hoppingCalls=0
     set +e
     manageTuic <<< $'3\n7'
     local tuicRc=$?
     set -e
-    [[ "${tuicRc}" == 0 && "${installReads}" == 1 ]]
+    [[ "${tuicRc}" == 0 && "${installReads}:${protocolReads}:${hoppingCalls}" == 1:1:1 ]] || return 1
+    local protocol
+    for protocol in hysteria2 tuic; do
+        installReads=0 protocolReads=0 hoppingCalls=0 diskPort=18443
+        if [[ "${protocol}" == hysteria2 ]]; then
+            manageHysteria <<< $'1\n3\n5'
+        else
+            manageTuic <<< $'1\n3\n7'
+        fi
+        [[ "${installReads}:${protocolReads}:${hoppingCalls}" == 2:2:1 && "${diskPort}" == 24444 ]] || return 1
+    done
 )
 
 runCorePortMenuStateRegression() (
