@@ -34,6 +34,8 @@ DNS='{"server":"203.0.113.53","port":5353,"domains":["full:dns.example.com","dom
 HOSTS='{"exact.example.com":"203.0.113.10","ipv6.example.com":"2001:db8::10"}'
 DIRECT_INPUT=${PRIVATE_ROOT}/direct.json
 BLOCK_INPUT=${PRIVATE_ROOT}/block.json
+BLOCK_IPS_INPUT=${PRIVATE_ROOT}/block-ips.json
+BLOCK_IPS='{"ips":["192.0.2.10","2001:db8::10","198.51.100.0/24","2001:db8::/64","geoip:cn"]}'
 
 fail() {
     [[ ! -f "${LOG}" ]] || sed 's/^/  /' "${LOG}" >&2
@@ -129,6 +131,12 @@ for kind in direct block; do
 done
 jq --argjson domains "${DOMAINS}" '.routing += {direct:{domains:$domains},block:{domains:$domains}}' \
     "${TEST_ROOT}/routing-all-global.json" >"${TEST_ROOT}/routing-policy.json"
+printf '%s\n' "${BLOCK_IPS}" >"${BLOCK_IPS_INPUT}"
+chmod 0600 "${BLOCK_IPS_INPUT}"
+jq --argjson block_ips "${BLOCK_IPS}" '.routing = {block_ips:$block_ips}' \
+    "${TEST_ROOT}/base.json" >"${TEST_ROOT}/block-ips-only.json"
+jq --argjson block_ips "${BLOCK_IPS}" '.routing.block_ips = $block_ips' \
+    "${TEST_ROOT}/routing-policy.json" >"${TEST_ROOT}/routing-ip-policy.json"
 
 # 同批正反输入由两份校验合同独立判断，避免 Schema 与生产校验分歧。
 python3 - "${PROJECT_ROOT}" "${TEST_ROOT}" <<'PY'
@@ -162,6 +170,31 @@ case("hosts-only", hosts, True)
 case("routing-all", json.loads((root / "routing-all.json").read_text()), True)
 case("routing-all-global", json.loads((root / "routing-all-global.json").read_text()), True)
 case("routing-policy", json.loads((root / "routing-policy.json").read_text()), True)
+ip_block = json.loads((root / "block-ips-only.json").read_text())
+case("block-ips-only", ip_block, True)
+case("routing-ip-policy", json.loads((root / "routing-ip-policy.json").read_text()), True)
+for index, rules in enumerate((
+        ["0.0.0.0", "127.0.0.1", "255.255.255.255", "::", "::1", "FFFF:FFFF::1"],
+        ["0.0.0.0/0", "127.0.0.1/32", "::/0", "::1/128", "192.0.2.10/24", "2001:db8::10/64"],
+        [f"192.0.2.{n}" for n in range(256)])):
+    value = copy.deepcopy(ip_block)
+    value["routing"]["block_ips"]["ips"] = rules
+    case(f"valid-block-ips-{index}", value, True)
+for index, bad in enumerate((
+        None, [], {}, {"ips": []}, {"ips": ["192.0.2.1", "192.0.2.1"]},
+        {"ips": [1]}, {"ips": [None]}, {"ips": ["example.com"]}, {"ips": ["01.2.3.4"]},
+        {"ips": ["256.2.3.4"]}, {"ips": ["192.0.2.1/33"]}, {"ips": ["192.0.2.1/255.255.255.0"]},
+        {"ips": ["192.0.2.1/-1"]}, {"ips": ["192.0.2.1/1.5"]}, {"ips": ["192.0.2.1/"]},
+        {"ips": ["192.0.2.1/01"]}, {"ips": ["2001:db8::1/064"]},
+        {"ips": ["2001:db8::1/129"]}, {"ips": ["2001:db8::1::2"]},
+        {"ips": ["2001:db8::1%eth0"]}, {"ips": ["[2001:db8::1]"]},
+        {"ips": ["::ffff:192.0.2.1"]}, {"ips": ["geoip:us"]}, {"ips": ["geoip:CN"]},
+        {"ips": ["geosite:cn"]}, {"ips": ["!geoip:cn"]}, {"ips": [" 192.0.2.1"]},
+        {"ips": ["192.0.2.1"], "extra": True},
+        {"ips": [f"192.0.{n // 256}.{n % 256}" for n in range(257)]})):
+    value = copy.deepcopy(ip_block)
+    value["routing"]["block_ips"] = bad
+    case(f"invalid-block-ips-{index}", value, False)
 for kind in ("direct", "block"):
     template = json.loads((root / f"{kind}-only.json").read_text())
     case(f"{kind}-only", template, True)
@@ -180,7 +213,8 @@ for kind in ("direct", "block"):
         case(f"invalid-{kind}-{index}", value, False)
 for name, template in (("dns", dns), ("hosts", hosts),
                        ("direct", json.loads((root / "direct-only.json").read_text())),
-                       ("block", json.loads((root / "block-only.json").read_text()))):
+                       ("block", json.loads((root / "block-only.json").read_text())),
+                       ("block-ips", ip_block)):
     for version in (1, 2):
         value = copy.deepcopy(template)
         value["schema_version"] = version
@@ -387,6 +421,29 @@ done
 mv -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
     "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
 
+for fixture in block-ips-only routing-ip-policy; do
+    dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/${fixture}.json" ||
+        fail "${fixture}: 当前 bundle 拒绝 IP/CIDR/GeoIP 阻断"
+done
+cp -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json" \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved"
+jq 'del(."x-padm-routing-block-ips")' \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
+    >"${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+for fixture in block-ips-only routing-ip-policy; do
+    reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/${fixture}.json"
+done
+dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/routing-policy.json" ||
+    fail 'IP 阻断 marker 拒绝旧路由'
+jq 'del(."x-padm-routing-socks5", ."x-padm-routing-domains", ."x-padm-routing-dns-hosts",
+  ."x-padm-routing-direct-block")' \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
+    >"${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/block-ips-only.json" ||
+    fail 'IP-only 规格依赖其它路由 marker'
+mv -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+
 for fixture in direct-only block-only routing-policy; do
     dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/${fixture}.json" ||
         fail "${fixture}: 当前 bundle 拒绝 Direct/Block"
@@ -455,7 +512,7 @@ for version in 1 2; do
         "${TEST_ROOT}/legacy-sing-v${version}-core.json" >/dev/null ||
         fail "v${version}: 无 routing 改变旧 sing-box 默认出站"
 done
-for fixture in routed domains dns-only hosts-only routing-all routing-all-global direct-only block-only routing-policy; do
+for fixture in routed domains dns-only hosts-only routing-all routing-all-global direct-only block-only routing-policy block-ips-only routing-ip-policy; do
     for core in xray sing-box; do
         if [[ "${core}" == xray ]]; then
             dockerGenerateXrayConfig "${TEST_ROOT}/${fixture}.json" "${TEST_ROOT}/${fixture}-${core}.json"
@@ -567,6 +624,29 @@ jq -en --slurpfile direct "${TEST_ROOT}/direct-only-sing-box.json" \
   ($policy[0].route.rule_set | map(.tag) | sort) ==
     ["padm-geosite-category-ads-all","padm-geosite-cn"]
 ' >/dev/null || fail 'sing-box Direct/Block OR、排除 Direct 或共享分类去重错误'
+jq -en --argjson input "${BLOCK_IPS}" --slurpfile only "${TEST_ROOT}/block-ips-only-xray.json" \
+    --slurpfile policy "${TEST_ROOT}/routing-ip-policy-xray.json" '
+  $only[0].routing == {domainStrategy:"AsIs",
+    rules:[{type:"field",ip:$input.ips,outboundTag:"blocked"}]} and
+  $policy[0].routing.domainStrategy == "AsIs" and
+  $policy[0].routing.rules[0].inboundTag == ["padm-dns"] and
+  $policy[0].routing.rules[1].outboundTag == "direct" and
+  $policy[0].routing.rules[3] == {type:"field",ip:$input.ips,outboundTag:"blocked"}
+' >/dev/null || fail 'Xray IP 阻断未保持 AsIs、Direct 例外或内置 DNS 标签优先'
+jq -en --argjson input "${BLOCK_IPS}" --slurpfile only "${TEST_ROOT}/block-ips-only-sing-box.json" \
+    --slurpfile policy "${TEST_ROOT}/routing-ip-policy-sing-box.json" '
+  $only[0].route.rules == [
+    {action:"sniff",timeout:"1s"},
+    {ip_cidr:($input.ips | map(select(. != "geoip:cn"))),action:"reject"},
+    {rule_set:["padm-geoip-cn"],action:"reject"}] and
+  ($only[0].route.rule_set | map(.tag)) == ["padm-geoip-cn"] and
+  $only[0].route.rule_set[0].url ==
+    "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs" and
+  $only[0].route.rule_set[0].http_client == {engine:"go"} and
+  all($policy[0].route.rules[] | select(.action == "reject"); .type == "logical") and
+  ($policy[0].route.rule_set | map(.tag) | sort) ==
+    ["padm-geoip-cn","padm-geosite-category-ads-all","padm-geosite-cn"]
+' >/dev/null || fail 'sing-box IP/CIDR/GeoIP OR、Direct 例外或远程资源合同错误'
 # 用核心的匹配语义检查每类独立命中，防止不同 matcher 被错误组合成 AND。
 python3 - "${TEST_ROOT}/domains-sing-box.json" <<'PY'
 import json
@@ -624,7 +704,7 @@ assert all(rule["type"] == "remote" and rule["format"] == "binary" and
            rule["http_client"] == {"engine": "go"} and "download_detour" not in rule
            for rule in rule_sets)
 PY
-for fixture in routed domains routing-all-global direct-only block-only routing-policy; do
+for fixture in routed domains routing-all-global direct-only block-only routing-policy block-ips-only routing-ip-policy; do
     jq -en --slurpfile source "${TEST_ROOT}/${fixture}-xray.json" \
         --slurpfile runtime "${TEST_ROOT}/runtime-${fixture}-xray.json" '
       $runtime[0].outbounds == $source[0].outbounds and
@@ -638,7 +718,7 @@ for fixture in routed domains routing-all-global direct-only block-only routing-
 done
 for generator in dockerGenerateCompose dockerGenerateDeployment; do
     "${generator}" "${TEST_ROOT}/base.json" "${TEST_ROOT}/legacy-generated.json"
-    for fixture in routed domains dns-only hosts-only routing-all routing-all-global direct-only block-only routing-policy; do
+    for fixture in routed domains dns-only hosts-only routing-all routing-all-global direct-only block-only routing-policy block-ips-only routing-ip-policy; do
         "${generator}" "${TEST_ROOT}/${fixture}.json" "${TEST_ROOT}/routed-generated.json"
         cmp -s "${TEST_ROOT}/legacy-generated.json" "${TEST_ROOT}/routed-generated.json" ||
             fail "${generator}: ${fixture} 意外改变容器能力或宿主端口"
@@ -876,7 +956,7 @@ jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload == 17 and .accounts[$uuid].d
 
 # 路由子项共用私有文件与候选事务，每次编辑只替换自己的字段。
 before=$(snapshot)
-for kind in dns hosts direct block; do
+for kind in dns hosts direct block block-ips; do
     input="${PRIVATE_ROOT}/${kind}.json"
     runEdit 0 "--${kind}" "${input}" --preview
     runEdit 0 "--${kind}-off" --preview
@@ -900,15 +980,18 @@ runEdit 2 --dns "${DNS_INPUT}" --hosts "${HOSTS_INPUT}" --preview
 runEdit 2 --dns-off --hosts-off --preview
 runEdit 2 --direct "${DIRECT_INPUT}" --block "${BLOCK_INPUT}" --preview
 runEdit 2 --direct-off --block-off --preview
+runEdit 2 --block-ips "${BLOCK_IPS_INPUT}" --direct-off --preview
+runEdit 2 --block-ips-off --block-off --preview
 runEdit 15 --spec "${TEST_ROOT}/dns-only.json" --confirm PADM-DOCKER-EDIT
 runEdit 15 --spec "${TEST_ROOT}/hosts-only.json" --confirm PADM-DOCKER-EDIT
 runEdit 15 --spec "${TEST_ROOT}/direct-only.json" --confirm PADM-DOCKER-EDIT
 runEdit 15 --spec "${TEST_ROOT}/block-only.json" --confirm PADM-DOCKER-EDIT
+runEdit 15 --spec "${TEST_ROOT}/block-ips-only.json" --confirm PADM-DOCKER-EDIT
 (
     trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
     dockerSetupRead() { printf -v "$1" '%s' n; }
     dockerAcquireDeploymentLock
-    dockerConfigureApply "${TEST_ROOT}/routing-policy.json" '' '' interactive
+    dockerConfigureApply "${TEST_ROOT}/routing-ip-policy.json" '' '' interactive
 ) >"${LOG}" 2>&1 || fail 'DNS/hosts 确认取消失败'
 assertClean
 [[ "$(snapshot)" == "${before}" ]] || fail '路由子项预览、无效输入或取消改变完整部署'
@@ -1005,6 +1088,27 @@ runEdit 0 --hosts "${HOSTS_INPUT}" --confirm PADM-DOCKER-EDIT
 runEdit 0 --socks5 "${INPUT}" --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile expected "${TEST_ROOT}/routing-policy.json" --slurpfile actual "${root}/config/spec.json" \
     '$actual == $expected' >/dev/null || fail '开启旧子项丢弃 Direct/Block'
+runEdit 0 --block-ips "${BLOCK_IPS_INPUT}" --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile expected "${TEST_ROOT}/routing-ip-policy.json" --slurpfile actual "${root}/config/spec.json" \
+    '$actual == $expected' >/dev/null || fail '开启 IP 阻断改变已有子项'
+[[ "$(stat -c '%a %u %h' "${root}/config/spec.json")" == '600 0 1' ]] ||
+    fail 'IP 阻断规格未保留私有权限'
+before=$(snapshot)
+runEdit 15 --spec "${TEST_ROOT}/routing-policy.json" --confirm PADM-DOCKER-EDIT
+for failure in health-fail int term; do
+    MODE=${failure}
+    rm -f -- "${TEST_ROOT}/failed-once"
+    case "${failure}" in
+    health-fail) runEdit 14 --block-ips-off --confirm PADM-DOCKER-EDIT ;;
+    int) runEdit 130 --block-ips-off --confirm PADM-DOCKER-EDIT ;;
+    term) runEdit 143 --block-ips-off --confirm PADM-DOCKER-EDIT ;;
+    esac
+    [[ "$(snapshot)" == "${before}" ]] || fail "${failure}: IP 阻断未恢复全部子项及流量"
+done
+MODE=ok
+runEdit 0 --block-ips-off --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile expected "${TEST_ROOT}/routing-policy.json" --slurpfile actual "${root}/config/spec.json" \
+    '$actual == $expected' >/dev/null || fail '关闭 IP 阻断删除其它路由子项'
 runEdit 0 --direct-off --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile expected "${TEST_ROOT}/routing-policy.json" --slurpfile actual "${root}/config/spec.json" \
     '$actual[0] == ($expected[0] | del(.routing.direct))' >/dev/null ||
@@ -1019,6 +1123,17 @@ jq -en --slurpfile old "${TEST_ROOT}/base.json" --slurpfile new "${root}/config/
     '$new == $old' >/dev/null || fail '关闭最后 Block 没有删除空 routing'
 jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload == 17 and .accounts[$uuid].download == 19' \
     "${root}/data/traffic/state.json" >/dev/null || fail 'Direct/Block 事务清空流量'
+runEdit 0 --block-ips "${BLOCK_IPS_INPUT}" --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile expected "${TEST_ROOT}/block-ips-only.json" --slurpfile actual "${root}/config/spec.json" \
+    '$actual == $expected' >/dev/null || fail '独立 IP 阻断开启改变其它规格'
+runStatus 0
+jq -e --argjson input "${BLOCK_IPS}" '.enabled == true and .block_ips.ip_rules == $input.ips' \
+    "${LOG}" >/dev/null || fail 'IP 阻断状态没有保留有效列表'
+runEdit 0 --block-ips-off --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile old "${TEST_ROOT}/base.json" --slurpfile new "${root}/config/spec.json" \
+    '$new == $old' >/dev/null || fail '关闭最后 IP 阻断没有删除空 routing'
+runStatus 0
+jq -e 'has("block_ips") | not' "${LOG}" >/dev/null || fail 'IP 阻断关闭仍显示有效规则'
 
 menuLog="${TEST_ROOT}/routing-menu.log"
 (

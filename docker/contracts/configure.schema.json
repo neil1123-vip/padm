@@ -18,6 +18,7 @@
   "x-padm-routing-domains": true,
   "x-padm-routing-dns-hosts": true,
   "x-padm-routing-direct-block": true,
+  "x-padm-routing-block-ips": true,
   "additionalProperties": false,
   "required": ["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"],
   "properties": {
@@ -358,6 +359,35 @@
           "required": ["domains"],
           "properties": {
             "domains": {"$ref": "#/properties/routing/properties/socks5/properties/domains"}
+          }
+        },
+        "block_ips": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ips"],
+          "properties": {
+            "ips": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 256,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "anyOf": [
+                  {"const": "geoip:cn"},
+                  {
+                    "if": {"not": {"pattern": "/"}},
+                    "then": {"format": "ipv4"},
+                    "pattern": "^(?:0|[1-9][0-9]?|1[0-9]{2}|2[0-4][0-9]|25[0-5])(?:\\.(?:0|[1-9][0-9]?|1[0-9]{2}|2[0-4][0-9]|25[0-5])){3}(?:/(?:0|[1-9]|[12][0-9]|3[0-2]))?(?![\\s\\S])"
+                  },
+                  {
+                    "if": {"not": {"pattern": "/"}},
+                    "then": {"format": "ipv6"},
+                    "pattern": "^(?:(?:[A-Fa-f0-9]{1,4}:){7}[A-Fa-f0-9]{1,4}|(?:[A-Fa-f0-9]{1,4}:){1,7}:|(?:[A-Fa-f0-9]{1,4}:){1,6}:[A-Fa-f0-9]{1,4}|(?:[A-Fa-f0-9]{1,4}:){1,5}(?::[A-Fa-f0-9]{1,4}){1,2}|(?:[A-Fa-f0-9]{1,4}:){1,4}(?::[A-Fa-f0-9]{1,4}){1,3}|(?:[A-Fa-f0-9]{1,4}:){1,3}(?::[A-Fa-f0-9]{1,4}){1,4}|(?:[A-Fa-f0-9]{1,4}:){1,2}(?::[A-Fa-f0-9]{1,4}){1,5}|[A-Fa-f0-9]{1,4}:(?::[A-Fa-f0-9]{1,4}){1,6}|:(?:(?::[A-Fa-f0-9]{1,4}){1,7}|:))(?:/(?:0|[1-9][0-9]?|1[01][0-9]|12[0-8]))?(?![\\s\\S])"
+                  }
+                ]
+              }
+            }
           }
         }
       }

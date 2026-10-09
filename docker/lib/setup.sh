@@ -794,6 +794,7 @@ dockerEditPrivateInputCopy() (
            elif $kind == "dns" then keys == ["domains", "port", "server"]
            elif $kind == "hosts" then length >= 1 and length <= 256
            elif $kind == "direct" or $kind == "block" then keys == ["domains"]
+           elif $kind == "block_ips" then keys == ["ips"]
            else false end))
         ' "${target}" >/dev/null 2>&1
 )
@@ -900,7 +901,8 @@ dockerProtocolCommand() (
             port:.routing.dns.port,domain_rules:.routing.dns.domains}} else {} end) +
           (if .routing.hosts != null then {hosts:.routing.hosts} else {} end) +
           (if .routing.direct != null then {direct:{domain_rules:.routing.direct.domains}} else {} end) +
-          (if .routing.block != null then {block:{domain_rules:.routing.block.domains}} else {} end)' "${normalized}"
+          (if .routing.block != null then {block:{domain_rules:.routing.block.domains}} else {} end) +
+          (if .routing.block_ips != null then {block_ips:{ip_rules:.routing.block_ips.ips}} else {} end)' "${normalized}"
         return $?
     fi
     if [[ "${action}" == list ]]; then
@@ -1372,15 +1374,17 @@ dockerEditCommand() {
             socks5=global
             shift
             ;;
-        --dns|--hosts|--direct|--block)
+        --dns|--hosts|--direct|--block|--block-ips)
             [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${routingKind}" ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
             routingKind=${1#--} routingFile=$2 routingAction=enable
+            routingKind=${routingKind//-/_}
             shift 2
             ;;
-        --dns-off|--hosts-off|--direct-off|--block-off)
+        --dns-off|--hosts-off|--direct-off|--block-off|--block-ips-off)
             [[ -z "${routingKind}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             routingKind=${1#--} routingKind=${routingKind%-off} routingAction=disable
+            routingKind=${routingKind//-/_}
             shift
             ;;
         --alpn)

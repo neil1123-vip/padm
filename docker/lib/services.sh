@@ -76,6 +76,26 @@ dockerConfigureSpecValidate() {
       def ipv4: type == "string" and (split(".") as $parts |
         ($parts | length) == 4 and all($parts[]; test("^[0-9]{1,3}$") and (tonumber <= 255)));
       def ipv6: type == "string" and contains(":") and test("^[A-Fa-f0-9:]+$");
+      def routing_ipv4:
+        type == "string" and (split(".") as $parts |
+          ($parts | length) == 4 and
+          all($parts[]; test("^(0|[1-9][0-9]{0,2})$") and tonumber <= 255));
+      def routing_ipv6:
+        type == "string" and contains(":") and (test(":::") | not) and
+        (split("::") as $halves |
+          ($halves | length) <= 2 and
+          all($halves[]; . == "" or test("^(?:[A-Fa-f0-9]{1,4}:)*[A-Fa-f0-9]{1,4}$")) and
+          ([ $halves[] | split(":")[] | select(. != "") ] as $parts |
+            if ($halves | length) == 2 then ($parts | length) < 8
+            else ($parts | length) == 8 end));
+      def routing_ip_selector:
+        type == "string" and (. == "geoip:cn" or
+          (split("/") as $parts | ($parts | length) <= 2 and
+            ($parts[0] | routing_ipv4 or routing_ipv6) and
+            if ($parts | length) == 2 then
+              ($parts[1] | test("^(0|[1-9][0-9]{0,2})$") and
+                tonumber <= (if ($parts[0] | contains(":")) then 128 else 32 end))
+            else true end));
       # 宿主后端只接受可路由字面地址或 Docker 宿主别名，不能把容器回环当宿主。
       def host_address:
         . == "host.docker.internal" or
@@ -134,7 +154,8 @@ dockerConfigureSpecValidate() {
             (if has("dns") then ["dns"] else [] end) +
             (if has("hosts") then ["hosts"] else [] end) +
             (if has("direct") then ["direct"] else [] end) +
-            (if has("block") then ["block"] else [] end)) and
+            (if has("block") then ["block"] else [] end) +
+            (if has("block_ips") then ["block_ips"] else [] end)) and
           (if has("socks5") then
           (.socks5 | exact(["server", "port", "username", "password"] +
               if has("domains") then ["domains"] else [] end) and
@@ -165,7 +186,12 @@ dockerConfigureSpecValidate() {
               ($routing | has($kind) | not) or
               ($routing[$kind] | exact(["domains"]) and
                 (.domains | type == "array" and length >= 1 and length <= 256 and
-                  length == (unique | length) and all(.[]; routing_selector)))))) and
+                  length == (unique | length) and all(.[]; routing_selector))))) and
+          (if has("block_ips") then
+            (.block_ips | exact(["ips"]) and
+              (.ips | type == "array" and length >= 1 and length <= 256 and
+                length == (unique | length) and all(.[]; routing_ip_selector)))
+           else true end)) and
         all(.host_integrations[]; .type != "tun" and .type != "tproxy")
        else true end) and
       (if has("site") then
@@ -1377,7 +1403,8 @@ dockerGenerateXrayConfig() {
         if startswith("keyword:") then ltrimstr("keyword:") else . end)) as $direct_domains |
       (($r.routing.block.domains // []) | map(
         if startswith("keyword:") then ltrimstr("keyword:") else . end)) as $block_domains |
-      ($r.routing.direct != null or $r.routing.block != null) as $actions |
+      ($r.routing.block_ips.ips // []) as $block_ips |
+      ($r.routing.direct != null or $r.routing.block != null or $r.routing.block_ips != null) as $actions |
       ({protocol: "freedom", tag: "direct"} +
         if $resolve then {settings: {domainStrategy: "ForceIP"}} else {} end) as $direct |
       {
@@ -1499,7 +1526,7 @@ dockerGenerateXrayConfig() {
           } else empty end), "localhost"])}
       } else {} end) +
       (if $r.routing.socks5 != null or $resolve or $actions then {
-        routing: {rules: ((if $resolve then [
+        routing: ({rules: ((if $resolve then [
           {type: "field", inboundTag: ["padm-dns"], outboundTag: "direct"}
         ] else [] end) +
         (if ($direct_domains | length) > 0 then [
@@ -1507,12 +1534,17 @@ dockerGenerateXrayConfig() {
         ] else [] end) +
         (if ($block_domains | length) > 0 then [
           {type: "field", domain: $block_domains, outboundTag: "blocked"}
+        ] else [] end) +
+        (if ($block_ips | length) > 0 then [
+          {type: "field", ip: $block_ips, outboundTag: "blocked"}
         ] else [] end) + (if $selective then [
           {type: "field", domain: $domains, network: "udp", outboundTag: "blocked"},
           {type: "field", domain: $domains, network: "tcp", outboundTag: "padm-socks5"}
         ] elif $r.routing.socks5 != null then [
           {type: "field", network: "udp", outboundTag: "blocked"}
-        ] else [] end))}
+        ] else [] end))} +
+          # 仅匹配客户端字面目的 IP，不能为 IP 阻断本地解析 SOCKS 域名。
+          if ($block_ips | length) > 0 then {domainStrategy: "AsIs"} else {} end)
       } else {} end) |
       if $selective or $actions then
         .inbounds |= map(.sniffing = {enabled: true, destOverride: ["http", "tls", "quic"], routeOnly: true})
@@ -1555,7 +1587,11 @@ dockerGenerateSingBoxConfig() {
       (domain_matches($r.routing.dns.domains // [])) as $dns_matches |
       (domain_matches($r.routing.direct.domains // [])) as $direct_matches |
       (domain_matches($r.routing.block.domains // [])) as $block_matches |
-      ($r.routing.direct != null or $r.routing.block != null) as $actions |
+      ($r.routing.block_ips.ips // []) as $block_ips |
+      ($block_ips | index("geoip:cn") != null) as $geoip_cn |
+      ([({ip_cidr: [$block_ips[] | select(. != "geoip:cn")]} | select(.ip_cidr | length > 0)),
+        (if $geoip_cn then {rule_set: ["padm-geoip-cn"]} else empty end)]) as $ip_matches |
+      ($r.routing.direct != null or $r.routing.block != null or $r.routing.block_ips != null) as $actions |
       (($r.routing.hosts // {}) | keys) as $host_domains |
       ($r.routing.dns != null or $r.routing.hosts != null) as $resolve |
       (($domains + ($r.routing.dns.domains // []) +
@@ -1711,6 +1747,7 @@ dockerGenerateSingBoxConfig() {
             {rules: ((if $selective or $actions then [{action: "sniff", timeout: "1s"}]
                 else [] end) +
               [$block_matches[] | exclude_direct(.; $direct_matches) + {action: "reject"}] +
+              [$ip_matches[] | exclude_direct(.; $direct_matches) + {action: "reject"}] +
               (if $selective then
               [$matches[] | exclude_direct(. + {network: "udp"}; $direct_matches) + {action: "reject"}] +
               [$matches[] | exclude_direct(. + {network: "tcp"}; $direct_matches) +
@@ -1729,11 +1766,16 @@ dockerGenerateSingBoxConfig() {
               [$direct_matches[] | . + {action: "route", outbound: "direct"}])}
            else {} end) +
           (if $resolve then {default_domain_resolver: "padm-local"} else {} end) +
-          if ($sets | length) > 0 then
-              {rule_set: [$sets[] |
+          if ($sets | length) > 0 or $geoip_cn then
+              {rule_set: ([$sets[] |
                 {tag: ("padm-geosite-" + .), type: "remote", format: "binary",
                   url: ("https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-" + . + ".srs"),
-                  http_client: {engine: "go"}}]}
+                  http_client: {engine: "go"}}] +
+                if $geoip_cn then [{
+                  tag: "padm-geoip-cn", type: "remote", format: "binary",
+                  url: "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs",
+                  http_client: {engine: "go"}
+                }] else [] end)}
           else {} end)
       } + (if $resolve then {
         dns: {servers: [{type: "local", tag: "padm-local"},

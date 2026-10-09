@@ -23,6 +23,8 @@ fixture_assets = helpers["fixture_assets"]
 class RuleResource(BaseHTTPRequestHandler):
     def do_GET(self):
         self.server.requests += 1
+        if hasattr(self.server, "requested_paths"):
+            self.server.requested_paths.append(self.path)
         body = self.server.resources.get(self.path)
         self.send_response(200 if body is not None else 404)
         self.send_header("Content-Length", str(len(body or b"")))
@@ -60,6 +62,24 @@ def policy_assets(root):
     (root / "block.srs").chmod(0o644)
 
 
+def ip_assets(root):
+    cidrs = []
+    for family, host, prefix in ((socket.AF_INET, "127.0.0.1", 32), (socket.AF_INET6, "::1", 128)):
+        value = socket.inet_pton(family, host)
+        cidr = b"\x0a" + bytes([len(value)]) + value + b"\x10" + (
+            bytes([prefix]) if prefix < 128 else b"\x80\x01")
+        cidrs.append(b"\x12" + bytes([len(cidr)]) + cidr)
+    # CN 夹具只包含测试回环段，真实 GeoIP protobuf 与规则集均交核心读取。
+    country = b"\x0a\x02CN" + b"".join(cidrs)
+    (root / "geoip.dat").write_bytes(b"\x0a" + bytes([len(country)]) + country)
+    (root / "geoip.dat").chmod(0o644)
+    source = root / "geoip-cn.json"
+    source.write_text(json.dumps(dict(version=3, rules=[dict(ip_cidr=["127.0.0.1/32", "::1/128"])])))
+    subprocess.run(["/routing-cores/sing-box", "rule-set", "compile", "--output",
+                    str(root / "geoip-cn.srs"), str(source)], check=True, stdout=subprocess.DEVNULL)
+    (root / "geoip-cn.srs").chmod(0o644)
+
+
 class DnsServer(socketserver.ThreadingUDPServer):
     daemon_threads = True
 
@@ -94,17 +114,20 @@ class Dns(socketserver.BaseRequestHandler):
         channel.sendto(header + request[12:end] + answer, self.client_address)
 
 
-def request(host, local, destination, target, http_host=None, timeout=3):
+def request(host, local, destination, target, http_host=None, timeout=3, pipelined=False):
     with socket.create_connection((host, local), timeout=timeout) as conn:
         conn.sendall(b"\x05\x01\x00")
         assert exact(conn, 2) == b"\x05\x00"
-        conn.sendall(b"\x05\x01\x00" + socks_address(target) + struct.pack("!H", destination))
+        body = (b"GET /routing-check HTTP/1.1\r\nHost: " +
+                (http_host or target).encode("ascii") + b"\r\nConnection: close\r\n\r\n")
+        conn.sendall(b"\x05\x01\x00" + socks_address(target) + struct.pack("!H", destination) +
+                     (body if pipelined else b""))
         header = exact(conn, 4)
         if header[1]:
             return False
         exact(conn, {1: 4, 4: 16}[header[3]] + 2)
-        conn.sendall(b"GET /routing-check HTTP/1.1\r\nHost: " +
-                     (http_host or target).encode("ascii") + b"\r\nConnection: close\r\n\r\n")
+        if not pipelined:
+            conn.sendall(body)
         data = b""
         while part := conn.recv(4096):
             data += part
@@ -137,9 +160,11 @@ def runtime(root, core, family, host, local, dns, upstream, resource, mode="sele
     config = json.loads((root / f"{core}.{family}{variant}.json").read_text())
     suffix = "v6" if family == "ipv6" else "v4"
     mapped = f"hosts-{suffix}.padm.invalid"
-    mapped_address = "127.0.0.1" if family == "ipv6" else "::1"
+    mapped_address = host if mode.startswith("ip-") else ("127.0.0.1" if family == "ipv6" else "::1")
     if core == "xray":
         config["dns"]["hosts"]["full:" + mapped] = mapped_address
+        if mode.startswith("ip-"):
+            config["dns"]["hosts"][f"full:proxy-{suffix}.padm.invalid"] = host
         if mode.startswith("policy"):
             config["dns"]["hosts"]["full:" + f"proxy-{suffix}.padm.invalid"] = mapped_address
             config["dns"]["hosts"]["full:" + f"block-full-{suffix}.padm.invalid"] = mapped_address
@@ -151,7 +176,7 @@ def runtime(root, core, family, host, local, dns, upstream, resource, mode="sele
             outbound["settings"]["servers"][0].update(address=host, port=upstream.server_address[1])
         inbound = dict(listen=host, port=local, tag="fixture-in", protocol="socks",
                        settings=dict(auth="noauth", udp=True))
-        if mode in ("selective", "policy", "policy-global"):
+        if mode in ("selective", "policy", "policy-global") or mode.startswith("ip-"):
             sniff = copy.deepcopy(next(item["sniffing"] for item in config["inbounds"]
                                        if item["tag"] != "padm-traffic-api"))
             assert sniff["routeOnly"], "DNS/hosts 不得将 sniff-only Host 改成实际连接目的"
@@ -161,6 +186,8 @@ def runtime(root, core, family, host, local, dns, upstream, resource, mode="sele
         config["dns"]["timeout"] = "250ms"
         servers = {item["tag"]: item for item in config["dns"]["servers"]}
         servers["padm-hosts"]["predefined"][mapped] = mapped_address
+        if mode.startswith("ip-"):
+            servers["padm-hosts"]["predefined"][f"proxy-{suffix}.padm.invalid"] = host
         if mode.startswith("policy"):
             servers["padm-hosts"]["predefined"][f"proxy-{suffix}.padm.invalid"] = mapped_address
             servers["padm-hosts"]["predefined"][f"block-full-{suffix}.padm.invalid"] = mapped_address
@@ -171,9 +198,137 @@ def runtime(root, core, family, host, local, dns, upstream, resource, mode="sele
         config["inbounds"].append(dict(type="socks", tag="fixture-in", listen=host, listen_port=local))
         for item in config["route"]["rule_set"]:
             assert item["http_client"] == {"engine": "go"}
-            asset = "block" if item["tag"] == "padm-geosite-block" else "test"
+            asset = ("geoip-cn" if item["tag"] == "padm-geoip-cn" else
+                     "block" if item["tag"] == "padm-geosite-block" else "test")
             item["url"] = f"http://127.0.0.1:{resource.server_address[1]}/{asset}.srs"
     return config
+
+
+def check_ips(root, core, family, host):
+    suffix = "v6" if family == "ipv6" else "v4"
+    names = helpers["domain_names"](family)
+    mapped = f"hosts-{suffix}.padm.invalid"
+    allowed = f"allowip-{suffix}.padm.invalid"
+    resource_context = (Server(("127.0.0.1", 0), RuleResource) if core == "sing-box"
+                        else contextlib.nullcontext(None))
+    with (Server((host, 0), Destination) as destination, DnsServer((host, 0)) as dns,
+          Server((host, 0), Socks) as upstream, resource_context as resource,
+          system_hosts(family, host) as fallback,
+          socket.socket(socket.AF_INET6 if family == "ipv6" else socket.AF_INET,
+                        socket.SOCK_DGRAM) as datagram):
+        destination.received = []
+        destination.accepted = 0
+        dns.answer_kind = 28 if family == "ipv6" else 1
+        upstream.destination_hosts = [fallback[1], host]
+        upstream.destination = destination.server_address[1]
+        upstream.auth = upstream.connects = 0
+        upstream.reject = False
+        datagram.bind((host, 0))
+        datagram.settimeout(0.3)
+        servers = [destination, dns, upstream]
+        if resource is not None:
+            resource.requests = resource.successes = 0
+            resource.requested_paths = []
+            resource.resources = {f"/{asset}.srs": (root / f"{asset}.srs").read_bytes()
+                                  for asset in ("test", "geoip-cn")}
+            servers.append(resource)
+        threads = [threading.Thread(target=server.serve_forever, kwargs=dict(poll_interval=0.05),
+                                    daemon=True) for server in servers]
+        for thread in threads:
+            thread.start()
+        try:
+            local = port(host)
+            binary = f"/routing-cores/{core}"
+            command = [binary, "run", "-c"]
+            validate = [binary, "run", "-test", "-c"] if core == "xray" else [binary, "check", "-c"]
+            least = ["setpriv", "--reuid=10001", "--regid=10001", "--clear-groups",
+                     "--bounding-set=-all", "--no-new-privs"]
+            # Xray 的路由嗅探可读提前发送的数据；sing-box 按标准握手回复后再发送正文。
+            pipelined = core == "xray"
+            for mode in ("ip-control", "ip-literal", "ip-cidr", "ip-geoip"):
+                config = runtime(root, core, family, host, local, dns, upstream, resource, mode)
+                path = root / f"{core}.{family}.{mode}.runtime.json"
+                write_config(path, config)
+                subprocess.run(least + validate + [str(path)], check=True,
+                               stdout=subprocess.DEVNULL,
+                               env=dict(os.environ, XRAY_LOCATION_ASSET=str(root)))
+                with running(command, path, host, local, root / f"{core}.{family}.{mode}.log") as process:
+                    if mode == "ip-control":
+                        assert request(host, local, upstream.destination, host, pipelined=pipelined), (
+                            "同 IP TCP 阻断正对照不可达")
+                        helpers["udp"](host, local, datagram.getsockname()[1])
+                        assert datagram.recv(4096) == b"udp-leak", "同 IP UDP 阻断正对照不可达"
+                        continue
+                    before = (destination.accepted, len(dns.requests), upstream.auth, upstream.connects)
+                    try:
+                        assert not request(host, local, upstream.destination, host, pipelined=pipelined), (
+                            f"{mode}: 字面 IP TCP 未拒绝")
+                    except EOFError:
+                        pass
+                    except socket.timeout:
+                        raise AssertionError(f"{mode}: 字面 IP TCP 仅客户端超时，未实际拒绝")
+                    assert before == (destination.accepted, len(dns.requests),
+                                      upstream.auth, upstream.connects), f"{mode}: IP 拒绝前泄漏"
+                    helpers["udp"](host, local, datagram.getsockname()[1])
+                    datagram.settimeout(1.25)
+                    with contextlib.suppress(socket.timeout):
+                        raise AssertionError(f"{mode}: 字面 IP UDP 泄漏: {datagram.recv(4096)!r}")
+                    assert before == (destination.accepted, len(dns.requests),
+                                      upstream.auth, upstream.connects)
+                    assert process.poll() is None, "IP 阻断导致核心退出"
+                    accepted = destination.accepted
+                    # 送入 HTTP Host，让 Direct 的嗅探域名例外确实参与同 IP 决策。
+                    assert request(host, local, upstream.destination, host, allowed, pipelined=pipelined), (
+                        f"{mode}: Direct 嗅探例外被 IP 阻断")
+                    assert destination.accepted == accepted + 1
+                    assert before[1:] == (len(dns.requests), upstream.auth, upstream.connects), (
+                        "Direct 嗅探例外改写目的、解析或连接 SOCKS5")
+                    before_dns, auth = len(dns.requests), upstream.auth
+                    assert request(host, local, upstream.destination, names[1], pipelined=pipelined), (
+                        "域名指定 DNS 解析到同被阻断 IP 不应触发字面 IP 策略")
+                    assert names[1] in dns.requests[before_dns:] and upstream.auth == auth
+                    before_dns, auth = len(dns.requests), upstream.auth
+                    assert request(host, local, upstream.destination, mapped, pipelined=pipelined), (
+                        "域名 hosts 解析到同被阻断 IP 不应触发字面 IP 策略")
+                    assert before_dns == len(dns.requests) and auth == upstream.auth
+                    before_dns, connects = len(dns.requests), upstream.connects
+                    assert request(host, local, upstream.destination, fallback[1], pipelined=pipelined), (
+                        "域名 SOCKS5 上游解析到同被阻断 IP 不应触发字面 IP 策略")
+                    assert connects + 1 == upstream.connects and before_dns == len(dns.requests)
+                print(f"routing-block-ips-real-{core}-{family}-{mode}: "
+                      "same-IP-control/reject/Direct/domain-preservation checks passed", flush=True)
+                if mode == "ip-geoip" and family == "ipv4":
+                    if resource is not None:
+                        assert "/geoip-cn.srs" in resource.requested_paths, "GeoIP 未下载实际二进制资源"
+                    missing = copy.deepcopy(config)
+                    absent = root / "absent-ip-assets"
+                    absent.mkdir(exist_ok=True)
+                    absent.chmod(0o755)
+                    (absent / "geosite.dat").write_bytes((root / "geosite.dat").read_bytes())
+                    (absent / "geosite.dat").chmod(0o644)
+                    if core == "sing-box":
+                        item = next(item for item in missing["route"]["rule_set"]
+                                    if item["tag"] == "padm-geoip-cn")
+                        item.clear()
+                        item.update(type="local", tag="padm-geoip-cn", format="binary",
+                                    path=str(absent / "geoip-cn.srs"))
+                    write_config(path, missing)
+                    helpers["failed_start"](command, path, root / f"{core}.geoip-missing.log", absent,
+                                            "geoip.dat" if core == "xray" else "geoip-cn.srs", "no such file")
+                    if core == "sing-box":
+                        item.update(type="remote", format="binary",
+                                    url=f"http://127.0.0.1:{resource.server_address[1]}/missing-geoip.srs",
+                                    http_client={"engine": "go"})
+                        item.pop("path")
+                        write_config(path, missing)
+                        helpers["failed_start"](command, path, root / f"{core}.geoip-404.log", root,
+                                                "rule-set", "404")
+                        assert "/missing-geoip.srs" in resource.requested_paths, "GeoIP 404 未触达 HTTP fixture"
+        finally:
+            for server in servers:
+                server.shutdown()
+            for thread in threads:
+                thread.join(timeout=2)
 
 
 def check(root, core, family, host):
@@ -200,7 +355,7 @@ def check(root, core, family, host):
         if resource is not None:
             resource.requests = resource.successes = 0
             resource.resources = {f"/{asset}.srs": (root / f"{asset}.srs").read_bytes()
-                                  for asset in ("test", "block")}
+                                  for asset in ("test", "block", "geoip-cn")}
             servers.append(resource)
         threads = [threading.Thread(target=server.serve_forever, kwargs=dict(poll_interval=0.05),
                                     daemon=True) for server in servers]
@@ -403,6 +558,8 @@ if __name__ == "__main__":
     root.chmod(0o755)
     fixture_assets(root)
     policy_assets(root)
+    ip_assets(root)
     for family, host in (("ipv4", "127.0.0.1"), ("ipv6", "::1")):
         for core in ("xray", "sing-box"):
-            check(root, core, family, host)
+            (check_ips if os.environ.get("PADM_ROUTING_REAL_SCOPE") == "ips" else check)(
+                root, core, family, host)

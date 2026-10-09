@@ -59,13 +59,29 @@ for family in ipv4 ipv6; do
         dockerTrafficRender "${core}" "${TEST_ROOT}/${core}.${family}.base" \
             '{"schema_version":1,"accounts":{}}' >"${TEST_ROOT}/${core}.${family}.json"
     done
-    modes=(policy-control policy)
-    [[ "${family}" != ipv4 ]] || modes+=(global resolve policy-global)
+    if [[ "${PADM_ROUTING_REAL_SCOPE:-}" == ips ]]; then
+        modes=(ip-control ip-literal ip-cidr ip-geoip)
+    else
+        modes=(policy-control policy)
+        [[ "${family}" != ipv4 ]] || modes+=(global resolve policy-global)
+    fi
     for mode in "${modes[@]}"; do
         if [[ "${mode}" == global ]]; then
             jq 'del(.routing.socks5.domains)' "${TEST_ROOT}/${family}.spec.json"
         elif [[ "${mode}" == resolve ]]; then
             jq 'del(.routing.socks5)' "${TEST_ROOT}/${family}.spec.json"
+        elif [[ "${mode}" == ip-* ]]; then
+            address=127.0.0.1
+            network=127.0.0.0/8
+            [[ "${family}" != ipv6 ]] || { address=::1; network=::/64; }
+            jq --arg suffix "${suffix}" --arg mode "${mode}" --arg address "${address}" --arg network "${network}" '
+              .routing.direct = {domains:[("full:allowip-"+$suffix+".padm.invalid")]} |
+              if $mode == "ip-control" then .
+              else .routing.block_ips = {ips:[
+                if $mode == "ip-literal" then $address
+                elif $mode == "ip-cidr" then $network
+                else "geoip:cn" end]} end
+            ' "${TEST_ROOT}/${family}.spec.json"
         else
             jq --arg suffix "${suffix}" --arg mode "${mode}" '
               .routing.direct = {domains:[
