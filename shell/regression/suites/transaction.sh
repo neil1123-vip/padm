@@ -25,6 +25,7 @@ listRegressionTransactionCoreSelectorEntries() {
         'medium sing-box-merge-config-transaction' \
         'light sing-box-uninstall-failure-propagation' \
         'light sing-box-protocol-reload-failure' \
+        'light sing-box-protocol-output-rollback' \
         'light geo-update-reload-failure' \
         'medium reload-core-propagation' \
         'medium sing-box-log-transaction'
@@ -154,6 +155,7 @@ registerRegressionFunctionLeaf core-install-signal-rollback runCoreInstallSignal
 registerRegressionFunctionLeaf core-install-service-action-failure runCoreInstallServiceActionFailureRegression
 registerRegressionFunctionLeaf sing-box-uninstall-failure-propagation runSingBoxUninstallFailurePropagationRegression
 registerRegressionFunctionLeaf sing-box-protocol-reload-failure runSingBoxProtocolReloadFailureRegression
+registerRegressionFunctionLeaf sing-box-protocol-output-rollback runSingBoxProtocolOutputRollbackRegression
 registerRegressionFunctionLeaf geo-update-reload-failure runGeoUpdateReloadFailureRegression
 registerRegressionFunctionLeaf sing-box-log-transaction runSingBoxLogTransactionRegression
 registerRegressionFunctionLeaf sing-box-merge-config-transaction runSingBoxMergeConfigTransactionRegression

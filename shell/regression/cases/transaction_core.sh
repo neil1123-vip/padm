@@ -5284,6 +5284,98 @@ runSingBoxProtocolReloadFailureRegression() (
     )
 )
 
+runSingBoxProtocolOutputRollbackRegression() (
+    local root="${TMP_DIR}/sing-box-protocol-output-rollback"
+    local localBase="${root}/subscribe"
+    local outputMode category status backupPath
+    mkdir -p "${root}"
+    source "${PROJECT_ROOT}/shell/subscription/accounts.sh"
+    source "${PROJECT_ROOT}/shell/subscription/output.sh"
+    eval "$(awk '/^cleanDirectoryContent\(\)/ { capture=1 } capture { print } capture && /^}/ { exit }' \
+        "${PROJECT_ROOT}/shell/core/runtime.sh")"
+    eval "$(declare -f subscriptionSyncRestoreBackupPath | sed '1s/^subscriptionSyncRestoreBackupPath/protocolOutputRestoreBackupPath/')"
+
+    for outputMode in failure success restore-fail INT TERM; do
+        PADM_SUBSCRIBE_LOCAL_DIR="${localBase}"
+        rm -rf -- "${localBase}"
+        for category in default clashMeta sing-box; do
+            mkdir -p "${localBase}/${category}"
+            printf 'old-%s\n' "${category}" >"${localBase}/${category}/old-user"
+        done
+        coreTemplateConfigBackupCreate() {
+            local resultVar=$1
+            local backupDir="${root}/config-backup"
+            mkdir -p "${backupDir}"
+            printf -v "${resultVar}" '%s' "${backupDir}"
+        }
+        coreTemplateRestoreServiceState() { return 0; }
+        coreStartupServiceEnabled() { return 1; }
+        xrayRunning() { return 1; }
+        singBoxRunning() { return 1; }
+        singBoxInstalled() { return 1; }
+        checkLogBackupRestore() { return 0; }
+        installSingBox() { return 0; }
+        initSingBoxConfig() { return 0; }
+        installSingBoxService() { return 0; }
+        singBoxEnsureTLSDependency() { return 0; }
+        serviceQueueRestart() { :; }
+        serviceQueueApply() { return 0; }
+        subscriptionNotifyControllerRefresh() { return 0; }
+        readInstallType() { :; }
+        readInstallProtocolType() { :; }
+        readConfigHostPathUUID() { :; }
+        readSingBoxConfig() { :; }
+        protocolCapabilityRegistry() { printf '1|Regression|node\n'; }
+        currentProtocolHas() { return 0; }
+        subscriptionAccountDisplayFunction() { printf 'protocolOutputDisplayAccounts\n'; }
+        protocolOutputDisplayAccounts() {
+            printf '%s\n' "${PADM_CORE_TEMPLATE_ROLLBACK[subscribeOutputBackupDir]}" >"${root}/output-backup"
+            for category in default clashMeta sing-box; do
+                printf 'new-%s\n' "${category}" >"${localBase}/${category}/new-user"
+            done
+            if [[ "${outputMode}" == INT || "${outputMode}" == TERM ]]; then
+                kill -"${outputMode}" "${BASHPID}"
+                :
+            fi
+            [[ "${outputMode}" == success ]] || return 7
+        }
+        subscriptionSyncRestoreBackupPath() {
+            [[ "${outputMode}" != restore-fail ]] || return 1
+            protocolOutputRestoreBackupPath "$@"
+        }
+
+        status=0
+        ( coreInstallConfigTransaction sing-box singBoxProtocolInstallApply TUIC ) >/dev/null 2>&1 || status=$?
+        backupPath=$(<"${root}/output-backup")
+        [[ -n "${backupPath}" ]] || return 1
+        if [[ "${outputMode}" == success ]]; then
+            [[ "${status}" == 0 ]] || return 1
+            for category in default clashMeta sing-box; do
+                [[ ! -e "${localBase}/${category}/old-user" ]] || return 1
+                [[ "$(<"${localBase}/${category}/new-user")" == "new-${category}" ]] || return 1
+            done
+        elif [[ "${outputMode}" == restore-fail ]]; then
+            [[ "${status}" == 1 ]] || return 1
+            for category in default clashMeta sing-box; do
+                [[ "$(<"${backupPath}/local/${category}/old-user")" == "old-${category}" ]] || return 1
+            done
+            padmRemoveCleanupPath "${backupPath}"
+            continue
+        else
+            case "${outputMode}" in
+            failure) [[ "${status}" == 1 ]] || return 1 ;;
+            INT) [[ "${status}" == 130 ]] || return 1 ;;
+            TERM) [[ "${status}" == 143 ]] || return 1 ;;
+            esac
+            for category in default clashMeta sing-box; do
+                [[ "$(<"${localBase}/${category}/old-user")" == "old-${category}" ]] || return 1
+                [[ ! -e "${localBase}/${category}/new-user" ]] || return 1
+            done
+        fi
+        [[ ! -e "${backupPath}" ]] || return 1
+    done
+)
+
 runGeoUpdateReloadFailureRegression() (
     local root="${TMP_DIR}/geo-update-reload-failure"
     local callLog="${root}/calls.log"

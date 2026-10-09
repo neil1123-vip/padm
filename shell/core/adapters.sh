@@ -366,10 +366,12 @@ trackInstalledPackagesFromFile() {
     [[ -f "${tmpFile}" ]] || return 0
     while IFS= read -r packageName; do
         [[ -n "${packageName}" ]] || continue
-        if packageInstalled "${packageName}"; then
+        if packageInstalled "${packageName}" &&
+            [[ " ${PADM_INSTALLED_PACKAGES:-} " != *" ${packageName} "* ]]; then
             PADM_INSTALLED_PACKAGES="${PADM_INSTALLED_PACKAGES:-} ${packageName}"
         fi
     done <"${tmpFile}"
+    [[ "${PADM_PACKAGE_PENDING_FILE:-}" != "${tmpFile}" ]] || PADM_PACKAGE_PENDING_FILE=
     padmRemoveCleanupPath "${tmpFile}"
 }
 
@@ -382,15 +384,18 @@ beginPackageInstallTransaction() {
     PADM_PACKAGE_TRANSACTION_ACTIVE=true
     PADM_PACKAGE_TRANSACTION_STARTED=true
     PADM_INSTALLED_PACKAGES=
+    PADM_PACKAGE_PENDING_FILE=
     PADM_PACKAGE_ROLLBACK_FAILURES=
     PADM_PACKAGE_MANAGED_ROLLBACK_DIRS=()
     PADM_PACKAGE_MANAGED_ROLLBACK_FAILURES=
+    padmRegisterExitRollback rollbackPackageInstallTransactionOnExit
 }
 
 endPackageInstallTransaction() {
     if [[ "$1" == "true" ]]; then
         adapterClearPackageManagedRollback
         PADM_INSTALLED_PACKAGES=
+        PADM_PACKAGE_PENDING_FILE=
         PADM_PACKAGE_ROLLBACK_FAILURES=
         PADM_PACKAGE_TRANSACTION_ACTIVE=
     fi
@@ -428,16 +433,22 @@ rollbackPackageInstallTransaction() {
     return "${rc}"
 }
 
-failPackageInstallTransaction() {
+rollbackPackageInstallTransactionAndReport() {
     local managedRollbackStatus=0
     local rollbackStatus=0
     local managedRollbackCount=${#PADM_PACKAGE_MANAGED_ROLLBACK_DIRS[@]}
     local manualCheckMessage
+    PADM_PACKAGE_TRANSACTION_ACTIVE=
+    # 命令中断也先收集已落盘的新包，不能只恢复源文件。
+    [[ -z "${PADM_PACKAGE_PENDING_FILE:-}" ]] || trackInstalledPackagesFromFile "${PADM_PACKAGE_PENDING_FILE}"
     if [[ "${managedRollbackCount}" -gt 0 ]]; then
         adapterRollbackPackageManagedFiles || managedRollbackStatus=$?
     fi
     rollbackPackageInstallTransaction || rollbackStatus=$?
-    if [[ "${managedRollbackCount}" -eq 0 && "${rollbackStatus}" -eq 0 ]]; then
+    if [[ "${managedRollbackStatus}" -ne 0 && "$1" == "依赖安装中断" && -n "${PADM_ACME_INSTALL_BACKUP:-}" ]]; then
+        errorCard "acme.sh 安装中断，目录恢复失败，请检查备份目录: ${PADM_ACME_INSTALL_BACKUP}" \
+            "其它安装备份: ${PADM_PACKAGE_MANAGED_ROLLBACK_FAILURES}" "软件包回滚失败: ${PADM_PACKAGE_ROLLBACK_FAILURES:-无}"
+    elif [[ "${managedRollbackCount}" -eq 0 && "${rollbackStatus}" -eq 0 ]]; then
         errorCard "$1，已尝试回滚本次新增软件包"
     elif [[ "${managedRollbackCount}" -eq 0 ]]; then
         coreSetManualCheckMessage manualCheckMessage "回滚部分软件包失败" "${PADM_PACKAGE_ROLLBACK_FAILURES}"
@@ -453,6 +464,16 @@ failPackageInstallTransaction() {
     else
         errorCard "$1，系统源改动和软件包回滚均存在失败" "软件包：${PADM_PACKAGE_ROLLBACK_FAILURES}" "系统源备份：${PADM_PACKAGE_MANAGED_ROLLBACK_FAILURES}"
     fi
+    [[ "${managedRollbackStatus}" == 0 && "${rollbackStatus}" == 0 ]]
+}
+
+rollbackPackageInstallTransactionOnExit() {
+    [[ "${PADM_PACKAGE_TRANSACTION_ACTIVE:-}" == true ]] || return 0
+    rollbackPackageInstallTransactionAndReport "依赖安装中断"
+}
+
+failPackageInstallTransaction() {
+    padmRunRollback rollbackPackageInstallTransactionAndReport "$1" || true
     exit 1
 }
 
@@ -666,6 +687,7 @@ installPackageTracked() {
     fi
     [[ "${packageManager}" == "apt" && -s "${missingPackagesFile}" ]] && packageTimeout=900
 
+    PADM_PACKAGE_PENDING_FILE=${missingPackagesFile}
     runPackageCommandWithProgress "安装${displayName}" "${packageTimeout}" "${installType} ${packages[*]}" "${installLog}" || {
         if recoverAptInstallAfterTimeout "${displayName}" "${packages[@]}"; then
             :
@@ -697,6 +719,7 @@ installOptionalPackageTracked() {
     fi
     [[ "${packageManager}" == "apt" && -s "${missingPackagesFile}" ]] && packageTimeout=900
 
+    PADM_PACKAGE_PENDING_FILE=${missingPackagesFile}
     if ! runPackageCommandWithProgress "安装${displayName}" "${packageTimeout}" "${installType} ${packages[*]}" "${installLog}"; then
         recoverAptInstallAfterTimeout "${displayName}" "${packages[@]}" || {
             trackInstalledPackagesFromFile "${missingPackagesFile}"
@@ -780,6 +803,8 @@ acmeInstallIsComplete() {
 installAcmeTool() {
     acmeInstallIsComplete && return 0
     acmeInstallTargetIsSafe || { errorCard "acme.sh 安装目标路径、所有者或权限异常"; return 1; }
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
     beginPackageInstallTransaction
     local packageTransactionOwner=${PADM_PACKAGE_TRANSACTION_STARTED}
     local acmeArchive
@@ -796,9 +821,6 @@ installAcmeTool() {
     adapterCreateManagedRollbackBackup acmeBackupDir "${acmeHomeDirPath}" || failPackageInstallTransaction "acme目录备份失败"
     adapterRegisterPackageManagedRollback "${acmeBackupDir}"
     local PADM_ACME_INSTALL_BACKUP=${acmeBackupDir}
-    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
-    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
-    padmRegisterExitRollback restoreAcmeInstallOnExit
     padmCreateTmpRootPath acmeTmpDir padm-tls.XXXXXX -d || failPackageInstallTransaction "acme安装脚本临时目录创建失败"
     acmeArchive="${acmeTmpDir}/acme.tar.gz"
     padmCreateTempPath acmeDownloadArchive "${acmeTmpDir}/acme.tar.gz.download.XXXXXX" || { padmRemoveCleanupPath "${acmeTmpDir}"; failPackageInstallTransaction "acme安装包临时文件创建失败"; }
@@ -845,16 +867,6 @@ installAcmeTool() {
     endPackageInstallTransaction "${packageTransactionOwner}"
 }
 
-restoreAcmeInstallOnExit() {
-    [[ -d "${PADM_ACME_INSTALL_BACKUP}" ]] || return 0
-    if adapterRestoreManagedRollbackBackup "${PADM_ACME_INSTALL_BACKUP}"; then
-        padmRemoveCleanupPath "${PADM_ACME_INSTALL_BACKUP}"
-    else
-        padmForgetCleanupPath "${PADM_ACME_INSTALL_BACKUP}"
-        errorCard "acme.sh 安装中断，目录恢复失败，请检查备份目录: ${PADM_ACME_INSTALL_BACKUP}"
-    fi
-}
-
 # 安装工具包
 installTools() {
     padmAssertNativeInstallAllowed || return 1
@@ -893,6 +905,8 @@ installTools() {
         fi
     fi
 
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
     beginPackageInstallTransaction
     local packageTransactionOwner=${PADM_PACKAGE_TRANSACTION_STARTED}
 
@@ -980,6 +994,8 @@ bootStartup() {
 
 # 安装 Nginx
 installNginxTools() {
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
     beginPackageInstallTransaction
     local packageTransactionOwner=${PADM_PACKAGE_TRANSACTION_STARTED}
 

@@ -662,86 +662,32 @@ showLastInstallationConfig() {
 }
 
 
-# 只重置安装输入，保留磁盘配置供安装事务替换或恢复。
+# 重置和取消恢复共用字段清单，保留磁盘配置供安装事务替换或恢复。
+PADM_INSTALL_INPUT_VARIABLES=(
+    domain port customPath currentPath currentDefaultPort currentUUID currentClients currentHost
+    currentPort currentCDNAddress customPort realityPort realityGrpcPort xHTTPort hysteriaPort
+    hysteria2BandwidthMode hysteria2ClientDownloadSpeed hysteria2ClientUploadSpeed hysteria2ObfsType
+    hysteria2ObfsPassword hysteria2Masquerade tuicPort tuicAlgorithm tuicAuthTimeout tuicHeartbeat
+    tuicZeroRttHandshake singBoxVLESSVisionPort singBoxVLESSWSPort singBoxVMessWSPort
+    singBoxVMessHTTPUpgradePort singBoxHysteria2Port singBoxTrojanPort singBoxShadowsocksPort
+    singBoxTuicPort singBoxNaivePort singBoxAnyTLSPort singBoxSocks5Port singBoxVMessWSPath
+    singBoxVLESSWSPath singBoxVMessHTTPUpgradePath singBoxVLESSRealityVisionPort
+    singBoxVLESSRealityVisionSNI singBoxVLESSRealityGRPCPort singBoxVLESSRealityGRPCSNI
+    singBoxVLESSRealityPublicKey tlsEnabled tlsCertDomain tlsSNI tlsCertFile tlsKeyFile dnsTLSDomain
+    installedDNSAPIStatus realityPrivateKey realityPublicKey realitySNI realityTargetHost realityTargetPort
+    realityEntryHost realityDestDomain realityMldsa65Seed realityMldsa65Verify xrayVLESSRealityPort
+    xrayVLESSRealityVisionPort xrayVLESSRealitySNI xrayVLESSRealityXHTTPort xrayVLESSRealityXHTTPSNI
+    xrayVLESSRealityGRPCPort xrayVLESSRealityGRPCSNI xrayVLESSRealityGRPCPublicKey
+    xrayVLESSRealityGRPCMldsa65Verify currentRealityXHTTPPublicKey currentRealityPublicKey
+    currentRealityPrivateKey currentRealityMldsa65Seed currentRealityMldsa65Verify
+    currentInstallProtocolType frontingType frontingTypeReality
+)
+
 resetLastInstallationConfigInputs() {
-    domain=
-    port=
-    customPath=
-    currentPath=
-    currentDefaultPort=
-    currentUUID=
-    currentClients=
-    currentHost=
-    currentPort=
-    currentCDNAddress=
-    customPort=
-    realityPort=
-    realityGrpcPort=
-    xHTTPort=
-    hysteriaPort=
-    hysteria2BandwidthMode=
-    hysteria2ClientDownloadSpeed=
-    hysteria2ClientUploadSpeed=
-    hysteria2ObfsType=
-    hysteria2ObfsPassword=
-    hysteria2Masquerade=
-    tuicPort=
-    tuicAlgorithm=
-    tuicAuthTimeout=
-    tuicHeartbeat=
-    tuicZeroRttHandshake=
-    singBoxVLESSVisionPort=
-    singBoxVLESSWSPort=
-    singBoxVMessWSPort=
-    singBoxVMessHTTPUpgradePort=
-    singBoxHysteria2Port=
-    singBoxTrojanPort=
-    singBoxShadowsocksPort=
-    singBoxTuicPort=
-    singBoxNaivePort=
-    singBoxAnyTLSPort=
-    singBoxSocks5Port=
-    singBoxVMessWSPath=
-    singBoxVLESSWSPath=
-    singBoxVMessHTTPUpgradePath=
-    singBoxVLESSRealityVisionPort=
-    singBoxVLESSRealityVisionSNI=
-    singBoxVLESSRealityGRPCPort=
-    singBoxVLESSRealityGRPCSNI=
-    singBoxVLESSRealityPublicKey=
-    tlsEnabled=
-    tlsCertDomain=
-    tlsSNI=
-    tlsCertFile=
-    tlsKeyFile=
-    dnsTLSDomain=
-    installedDNSAPIStatus=
-    realityPrivateKey=
-    realityPublicKey=
-    realitySNI=
-    realityTargetHost=
-    realityTargetPort=
-    realityEntryHost=
-    realityDestDomain=
-    realityMldsa65Seed=
-    realityMldsa65Verify=
-    xrayVLESSRealityPort=
-    xrayVLESSRealityVisionPort=
-    xrayVLESSRealitySNI=
-    xrayVLESSRealityXHTTPort=
-    xrayVLESSRealityXHTTPSNI=
-    xrayVLESSRealityGRPCPort=
-    xrayVLESSRealityGRPCSNI=
-    xrayVLESSRealityGRPCPublicKey=
-    xrayVLESSRealityGRPCMldsa65Verify=
-    currentRealityXHTTPPublicKey=
-    currentRealityPublicKey=
-    currentRealityPrivateKey=
-    currentRealityMldsa65Seed=
-    currentRealityMldsa65Verify=
-    currentInstallProtocolType=
-    frontingType=
-    frontingTypeReality=
+    local inputVariable
+    for inputVariable in "${PADM_INSTALL_INPUT_VARIABLES[@]}"; do
+        printf -v "${inputVariable}" '%s' ''
+    done
 }
 
 # 读取上次安装的配置

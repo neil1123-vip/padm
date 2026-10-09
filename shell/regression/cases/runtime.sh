@@ -419,7 +419,7 @@ runInstallWorkflowRegression() (
 
     (
         # 重新填写后取消两核安装，证书、订阅、服务和 ACME 文件必须原样保留。
-        local root="${TMP_DIR}/install-reset-inputs" file before core protocols events=
+        local root="${TMP_DIR}/install-reset-inputs" file before core protocols events= inputBefore
         local PADM_INSTALL_RESET_HISTORY=false
         local PADM_REALITY_ENTRY_HOST_FILE="${root}/reality_entry_host"
         mkdir -p "${root}/tls" "${root}/subscribe" "${root}/services" "${root}/home/.acme.sh" "${root}/conf"
@@ -446,8 +446,16 @@ runInstallWorkflowRegression() (
             apply=customXrayInstall
             protocols=21
             [[ "${core}" != sing-box ]] || { protocols=3; apply=customSingBoxInstall; }
+            domain=previous.example.com currentHost=previous.example.com currentUUID=previous-user
+            currentClients='[{"id":"previous-user"}]' currentPath=previous-path customPort=7443
+            realityPort=10011 realityGrpcPort=10012 xHTTPort=10013
+            singBoxVLESSRealityVisionSNI=previous-target.example.com lastInstallationConfig=previous
+            inputBefore=$(declare -p domain currentHost currentUUID currentClients currentPath customPort \
+                realityPort realityGrpcPort xHTTPort singBoxVLESSRealityVisionSNI lastInstallationConfig)
             regressionExpectStatus 1 "${apply}" "${protocols}" < <(printf 'n\n\n')
-            [[ -z "${events}${currentHost}${currentUUID}${currentClients}${currentPath}${customPort}${realityPort}${realityGrpcPort}${xHTTPort}${singBoxVLESSRealityVisionSNI}" ]]
+            [[ -z "${events}" ]]
+            [[ "$(declare -p domain currentHost currentUUID currentClients currentPath customPort \
+                realityPort realityGrpcPort xHTTPort singBoxVLESSRealityVisionSNI lastInstallationConfig)" == "${inputBefore}" ]]
             [[ "${PADM_INSTALL_RESET_HISTORY}" == false && "${configPath}" == "${root}/conf/" ]]
             [[ "$(find "${root}" -type f -exec sha256sum {} + | LC_ALL=C sort)" == "${before}" ]]
         done
@@ -671,7 +679,7 @@ runInstallWorkflowRegression() (
 
     # 六个入口先确认历史和连接地址；取消不进入事务，重填标记只在本次安装可见。
     (
-        local install input events= historyReads=0 inputFd nextInput
+        local install input events= historyReads=0 inputFd nextInput oldEntry
         local configPath=/regression/installed/ currentHost= btDomain= domain=
         local PADM_INSTALL_RESET_HISTORY=parent-value
         unset AUTO_INSTALL AUTO_PROTOCOLS AUTO_REUSE_LAST AUTO_DOMAIN AUTO_ENTRY_HOST
@@ -701,13 +709,14 @@ runInstallWorkflowRegression() (
             AUTO_DOMAIN=new.example.com
             events=
             historyReads=0
+            oldEntry=${realityEntryHost}
             exec {inputFd}< <(printf 'next-parent-action\n')
             regressionExpectStatus 17 "${install}" 1 domain <&"${inputFd}"
             read -r -u "${inputFd}" nextInput
             [[ "${events}" == $'transaction:true\n' && "${historyReads}" == 0 ]]
             [[ "${nextInput}" == next-parent-action && "${PADM_INSTALL_RESET_HISTORY}" == parent-value ]]
             if [[ "${selectCustomInstallType}" == ,1, ]]; then
-                [[ "${realityEntryHost}" == new.example.com ]]
+                [[ "${realityEntryHost}" == "${oldEntry}" ]]
             else
                 [[ -z "${domain}" ]]
             fi
@@ -3011,6 +3020,89 @@ runInstallWorkflowRegression() (
             apk) expected='apk del' ;;
             esac
             [[ "${calls}" == "${expected} new-tool"$'\n'"${expected} failed-package"$'\n' ]]
+        done
+    )
+
+    (
+        # 中断包命令后恢复系统源并追踪已落盘的新包，不能删除历史依赖。
+        local root="${TMP_DIR}/install-package-interrupt" fixture signal operation failure status owner backup
+        local release=alpine packageManager=apk installType=fixture-install removeType=fixture-remove
+        local TMPDIR="${root}/tmp" PADM_PACKAGE_PENDING_FILE= PADM_PACKAGE_TRANSACTION_ACTIVE=
+        mkdir -p "${TMPDIR}"
+        eval "$(declare -f adapterRestoreManagedRollbackBackup | sed '1s/^adapterRestoreManagedRollbackBackup/packageInterruptRestoreBackup/')"
+        adapterManagedRollbackTemplate() { printf '%s/backup.XXXXXX' "${fixture}"; }
+        adapterInstallLogPath() { printf '%s/install.log' "${fixture}"; }
+        nginxConfigFilePath() { printf '%s/default.conf' "${fixture}"; }
+        nginxServiceInstalled() { return 1; }
+        errorCard() { printf '%s\n' "$@" >>"${fixture}/errors"; }
+        packageInstalled() { [[ "$1" == existing || -e "${fixture}/installed" ]]; }
+        runWithTimeout() {
+            printf '%s\n' "$2" >>"${fixture}/removed"
+            [[ "$2" != *' existing' ]]
+            rm -f "${fixture}/installed"
+        }
+        runPackageCommandWithProgress() {
+            : >"${fixture}/installed"
+            [[ "${signal}" != RETURN ]] || return 7
+            [[ "${signal}" == SUCCESS ]] || { kill -"${signal}" "${BASHPID}"; :; }
+        }
+
+        for operation in installNginxTools installPackageTracked installOptionalPackageTracked; do
+            for signal in INT TERM RETURN SUCCESS; do
+                for failure in normal restore-failure restore-signal; do
+                    [[ "${operation}" == installNginxTools || "${failure}" == normal ]] || continue
+                    [[ "${failure}" != restore-signal || "${signal}" == RETURN ]] || continue
+                    [[ "${failure}" != restore-failure || "${signal}" == INT || "${signal}" == TERM ]] || continue
+                    fixture="${root}/${operation}-${signal}-${failure}"
+                    mkdir -p "${fixture}"
+                    printf 'old\n' >"${fixture}/default.conf"
+                    status=0
+                    (
+                        local PADM_CLEANUP_TRAP_INSTALLED= PADM_CLEANUP_PATHS=()
+                        local PADM_EXIT_ROLLBACK_OWNER= PADM_EXIT_ROLLBACKS=()
+                        if [[ "${failure}" == restore-failure ]]; then
+                            adapterRestoreManagedRollbackBackup() { return 1; }
+                        elif [[ "${failure}" == restore-signal ]]; then
+                            # 普通失败恢复时忽略再次中断，旧文件恢复与包回滚必须完成。
+                            adapterRestoreManagedRollbackBackup() {
+                                kill -TERM "${BASHPID}"
+                                packageInterruptRestoreBackup "$@"
+                            }
+                        fi
+                        if [[ "${operation}" == installNginxTools ]]; then
+                            installNginxTools
+                        else
+                            beginPackageInstallTransaction
+                            owner=${PADM_PACKAGE_TRANSACTION_STARTED}
+                            "${operation}" fixture existing added || exit $?
+                            endPackageInstallTransaction "${owner}"
+                        fi
+                        [[ -z "${PADM_PACKAGE_PENDING_FILE}${PADM_PACKAGE_TRANSACTION_ACTIVE}${PADM_INSTALLED_PACKAGES}" ]]
+                        : >"${fixture}/continued"
+                    ) || status=$?
+                    case "${signal}" in
+                    INT) [[ "${status}" == 130 ]] ;;
+                    TERM) [[ "${status}" == 143 ]] ;;
+                    RETURN) [[ "${status}" == 1 ]] ;;
+                    SUCCESS) [[ "${status}" == 0 ]] ;;
+                    esac
+                    if [[ "${signal}" == SUCCESS ]]; then
+                        [[ -e "${fixture}/continued" && -e "${fixture}/installed" && ! -e "${fixture}/removed" ]]
+                    else
+                        [[ ! -e "${fixture}/continued" && ! -e "${fixture}/installed" ]]
+                        [[ "$(<"${fixture}/removed")" == "fixture-remove $([[ "${operation}" == installNginxTools ]] && printf nginx || printf added)" ]]
+                        if [[ "${operation}" == installNginxTools && "${failure}" == restore-failure ]]; then
+                            [[ ! -e "${fixture}/default.conf" && -s "${fixture}/errors" ]]
+                            backup=$(find "${fixture}" -maxdepth 1 -type d -name 'backup.*' -print)
+                            [[ -n "${backup}" && -f "${backup}/manifest" ]]
+                            continue
+                        fi
+                        [[ "$(<"${fixture}/default.conf")" == old ]]
+                    fi
+                    ! regressionFindHasMatches "${fixture}" -maxdepth 1 -name 'backup.*'
+                    ! regressionFindHasMatches "${TMPDIR}" -maxdepth 1 -name 'padm-packages.*'
+                done
+            done
         done
     )
 

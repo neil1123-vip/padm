@@ -1755,7 +1755,7 @@ runCoreServiceActionAllowFailure() {
 }
 
 runCoreInstall() {
-    local core=$1 operation=$2 previousDomain=${domain:-}
+    local core=$1 operation=$2 inputVariable installStatus=0 previousDomain=${domain:-}
     shift 2
     local selectCoreType
     case "${core}" in
@@ -1775,12 +1775,27 @@ runCoreInstall() {
     local tuicAlgorithm="${tuicAlgorithm:-}"
     local dnsAPIStatus dnsAPIType cfAPIToken cfZoneID aliKey aliSecret sslIPv6
     local AUTO_UUID="${AUTO_UUID:-}" AUTO_USER="${AUTO_USER:-}" AUTO_PORT="${AUTO_PORT:-}"
-    prepareCoreInstallInputs "${core}" || { domain=${previousDomain}; return 1; }
-    coreSwitchConfigTransaction "${core}" padmRunPortAllowTransaction "${operation}" "$@" || {
-        local installStatus=$?
+    local -A previousInputs=()
+    for inputVariable in "${PADM_INSTALL_INPUT_VARIABLES[@]}" lastInstallationConfig; do
+        [[ ! -v "${inputVariable}" ]] || previousInputs["${inputVariable}"]=${!inputVariable}
+    done
+    if ! prepareCoreInstallInputs "${core}"; then
+        installStatus=1
+    else
+        coreSwitchConfigTransaction "${core}" padmRunPortAllowTransaction "${operation}" "$@" || installStatus=$?
+    fi
+    if [[ "${installStatus}" != 0 && "${PADM_INSTALL_RESET_HISTORY:-false}" == true ]]; then
+        for inputVariable in "${PADM_INSTALL_INPUT_VARIABLES[@]}" lastInstallationConfig; do
+            if [[ -v "previousInputs[${inputVariable}]" ]]; then
+                printf -v "${inputVariable}" '%s' "${previousInputs[${inputVariable}]}"
+            else
+                unset "${inputVariable}"
+            fi
+        done
+    elif [[ "${installStatus}" != 0 ]]; then
         domain=${previousDomain}
-        return "${installStatus}"
-    }
+    fi
+    return "${installStatus}"
 }
 
 coreInstallServiceAction() {
@@ -2789,6 +2804,21 @@ prepareCoreInstallInputs() {
     return 0
 }
 
+# 完整和增量安装共用账号输出备份，失败时由外层事务统一恢复。
+coreInstallSubscriptionOutputBackupCreate() {
+    [[ "${PADM_CORE_INSTALL_TRANSACTION_ACTIVE:-}" == true ]] || return 0
+    local localBase outputBackupDir=
+    localBase=$(subscribeLocalBaseDir) || return 1
+    padmCreateTmpRootPath outputBackupDir padm-core-install-subscriptions.XXXXXX -d || return 1
+    if ! subscriptionSyncBackupPath "${localBase}" "${outputBackupDir}" local; then
+        padmRemoveCleanupPath "${outputBackupDir}"
+        errorCard "安装账号输出备份失败，已取消生成"
+        return 1
+    fi
+    PADM_CORE_TEMPLATE_ROLLBACK[subscribeLocalBase]=${localBase}
+    PADM_CORE_TEMPLATE_ROLLBACK[subscribeOutputBackupDir]=${outputBackupDir}
+}
+
 # 先释放旧核心端口，验证目标核心后才清理旧文件。
 completeCoreInstall() {
     local core=$1 checkStep=$2 accountStep=$3 oldCore oldHandler cleanupType
@@ -2818,18 +2848,7 @@ completeCoreInstall() {
         }
     fi
     cleanUp "${cleanupType}" || return 1
-    if [[ "${PADM_CORE_INSTALL_TRANSACTION_ACTIVE:-}" == true ]]; then
-        local localBase outputBackupDir=
-        localBase=$(subscribeLocalBaseDir) || return 1
-        padmCreateTmpRootPath outputBackupDir padm-core-install-subscriptions.XXXXXX -d || return 1
-        if ! subscriptionSyncBackupPath "${localBase}" "${outputBackupDir}" local; then
-            padmRemoveCleanupPath "${outputBackupDir}"
-            errorCard "安装账号输出备份失败，已取消生成"
-            return 1
-        fi
-        PADM_CORE_TEMPLATE_ROLLBACK[subscribeLocalBase]=${localBase}
-        PADM_CORE_TEMPLATE_ROLLBACK[subscribeOutputBackupDir]=${outputBackupDir}
-    fi
+    coreInstallSubscriptionOutputBackupCreate || return 1
     showAccounts "${accountStep}"
 }
 

@@ -540,6 +540,7 @@ singBoxProtocolInstallApply() {
     installSingBoxService 3 || return 1
     serviceQueueRestart sing-box
     serviceQueueApply || return 1
+    coreInstallSubscriptionOutputBackupCreate || return 1
     showAccounts 4 || return 1
     if declare -F subscriptionNotifyControllerRefresh >/dev/null 2>&1; then
         subscriptionNotifyControllerRefresh || true
