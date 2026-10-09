@@ -107,7 +107,7 @@ serviceInstalled() {
         local binary
         binary=$(xrayServiceBinaryPath)
         [[ -f "${binary}" && -x "${binary}" ||
-            -f "${PADM_XRAY_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/xray.service}" ||
+            -e "${PADM_XRAY_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/xray.service}" ||
             -f "${PADM_XRAY_OPENRC_SERVICE_FILE:-/etc/init.d/xray}" ]]
         ;;
     sing-box)
@@ -116,7 +116,7 @@ serviceInstalled() {
             binary=$(coreSingBoxBinaryPath)
         fi
         [[ -f "${binary}" && -x "${binary}" ||
-            -f "${PADM_SINGBOX_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/sing-box.service}" ||
+            -e "${PADM_SINGBOX_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/sing-box.service}" ||
             -f "${PADM_SINGBOX_OPENRC_SERVICE_FILE:-/etc/init.d/sing-box}" ]]
         ;;
     nginx)
@@ -378,7 +378,7 @@ singBoxRunning() {
             "${procArgs[2]:-}" == -c && "${procArgs[3]:-}" == "${mergedConfig}" ]] || continue
         return 0
     done < <(pgrep -x sing-box 2>/dev/null)
-    if [[ "${release:-}" != "alpine" && -f "${systemdServiceFile}" ]] && padmCommandExists systemctl; then
+    if [[ "${release:-}" != "alpine" && -e "${systemdServiceFile}" ]] && padmCommandExists systemctl; then
         systemctl is-active --quiet sing-box.service && return 0
     elif [[ -n "${openRcServiceFile}" && -f "${openRcServiceFile}" ]] && padmCommandExists rc-service; then
         rc-service sing-box status >/dev/null 2>&1 && return 0
@@ -401,7 +401,7 @@ handleSingBoxMergeFailure() {
 handleSingBox() {
     local serviceManager=
     if [[ "${release:-}" != "alpine" ]] &&
-        [[ -f "${PADM_SINGBOX_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/sing-box.service}" ]] &&
+        [[ -e "${PADM_SINGBOX_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/sing-box.service}" ]] &&
         padmCommandExists systemctl; then
         serviceManager=systemd
     elif [[ -f "${PADM_SINGBOX_OPENRC_SERVICE_FILE:-/etc/init.d/sing-box}" ]] &&
@@ -524,7 +524,7 @@ xrayRunning() {
         [[ "${configMatched}" == true && "${testMode}" == false && "${dumpMode}" == false ]] || continue
         return 0
     done < <(pgrep -x xray 2>/dev/null)
-    if [[ "${release:-}" != "alpine" && -f "${systemdServiceFile}" ]] && padmCommandExists systemctl; then
+    if [[ "${release:-}" != "alpine" && -e "${systemdServiceFile}" ]] && padmCommandExists systemctl; then
         systemctl is-active --quiet xray.service && return 0
     elif [[ -n "${openRcServiceFile}" && -f "${openRcServiceFile}" ]] && padmCommandExists rc-service; then
         rc-service xray status >/dev/null 2>&1 && return 0
@@ -540,7 +540,7 @@ handleXray() {
     xrayBinary=$(xrayServiceBinaryPath)
     xrayConfigDir=$(xrayServiceConfigDir)
     if [[ "${release:-}" != "alpine" ]] &&
-        [[ -f "${PADM_XRAY_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/xray.service}" ]] &&
+        [[ -e "${PADM_XRAY_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/xray.service}" ]] &&
         padmCommandExists systemctl; then
         serviceManager=systemd
     elif [[ -f "${PADM_XRAY_OPENRC_SERVICE_FILE:-/etc/init.d/xray}" ]] &&
