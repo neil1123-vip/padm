@@ -2807,6 +2807,18 @@ completeCoreInstall() {
     fi
     checkGFWStatue "${checkStep}" "${core}" || return 1
     cleanUp "${cleanupType}" || return 1
+    if [[ "${PADM_CORE_INSTALL_TRANSACTION_ACTIVE:-}" == true ]]; then
+        local localBase outputBackupDir=
+        localBase=$(subscribeLocalBaseDir) || return 1
+        padmCreateTmpRootPath outputBackupDir padm-core-install-subscriptions.XXXXXX -d || return 1
+        if ! subscriptionSyncBackupPath "${localBase}" "${outputBackupDir}" local; then
+            padmRemoveCleanupPath "${outputBackupDir}"
+            errorCard "安装账号输出备份失败，已取消生成"
+            return 1
+        fi
+        PADM_CORE_TEMPLATE_ROLLBACK[subscribeLocalBase]=${localBase}
+        PADM_CORE_TEMPLATE_ROLLBACK[subscribeOutputBackupDir]=${outputBackupDir}
+    fi
     showAccounts "${accountStep}"
 }
 

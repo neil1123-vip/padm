@@ -2117,6 +2117,54 @@ runCoreInstallSignalRollbackRegression() (
     runPackageCommandWithProgress normal-test 10 'printf normal; exit 7' "${fixture}/normal.log" || status=$?
     [[ "${status}" == 7 && "$(<"${fixture}/normal.log")" == normal ]]
     [[ ! -e "${fixture}/normal.log.progress" && -z "${PADM_EXIT_ROLLBACKS[*]}" ]]
+
+    (
+        source "${PROJECT_ROOT}/shell/subscription/accounts.sh"
+        source "${PROJECT_ROOT}/shell/subscription/output.sh"
+        eval "$(awk '/^cleanDirectoryContent\(\)/ { capture=1 } capture { print } capture && /^}/ { exit }' "${PROJECT_ROOT}/shell/core/runtime.sh")"
+        local PADM_SUBSCRIBE_LOCAL_DIR category outputBackupDir selectCustomInstallType=",999,"
+        mode=normal core=sing-box
+        serviceQueueRestart() { :; }
+        serviceQueueApply() { :; }
+        checkGFWStatue() { :; }
+        cleanUp() { :; }
+        readInstallType() { :; }
+        readInstallProtocolType() { :; }
+        readConfigHostPathUUID() { :; }
+        readSingBoxConfig() { :; }
+        protocolCapabilityRegistry() { printf '1|Regression|node\n'; }
+        currentProtocolHas() { return 0; }
+        subscriptionAccountDisplayFunction() { printf 'signalOutputDisplayAccounts\n'; }
+        signalOutputDisplayAccounts() {
+            printf '%s\n' "${PADM_CORE_TEMPLATE_ROLLBACK[subscribeOutputBackupDir]}" >"${fixture}/output-backup"
+            appendDefaultSubscribeLine new-user new-default
+            kill -"${signal}" "${BASHPID}"
+            :
+        }
+        for signal in INT TERM; do
+            fixture="${root}/subscribe-${signal}"
+            PADM_SUBSCRIBE_LOCAL_DIR="${fixture}/subscribe_local"
+            for category in default clashMeta sing-box; do
+                mkdir -p "${PADM_SUBSCRIBE_LOCAL_DIR}/${category}"
+                printf 'old-%s\n' "${category}" >"${PADM_SUBSCRIBE_LOCAL_DIR}/${category}/old-user"
+            done
+            for category in xray.conf sing-box.conf nginx.conf; do
+                printf 'old\n' >"${fixture}/${category}"
+            done
+            printf 'false\n' >"${fixture}/xray.running"
+            printf 'false\n' >"${fixture}/sing-box.running"
+            status=0
+            ( coreInstallConfigTransaction sing-box completeCoreInstall sing-box 5 6 ) >/dev/null 2>&1 || status=$?
+            if [[ "${signal}" == INT ]]; then [[ "${status}" == 130 ]]; else [[ "${status}" == 143 ]]; fi
+            for category in default clashMeta sing-box; do
+                [[ "$(<"${PADM_SUBSCRIBE_LOCAL_DIR}/${category}/old-user")" == "old-${category}" ]]
+                [[ ! -e "${PADM_SUBSCRIBE_LOCAL_DIR}/${category}/new-user" ]]
+            done
+            outputBackupDir=$(<"${fixture}/output-backup")
+            [[ -n "${outputBackupDir}" && ! -e "${outputBackupDir}" ]]
+            [[ ! -e "$(<"${fixture}/config-backup")" ]]
+        done
+    )
     printf '核心信号回归: 前台取消\n'
     runCancelableInstallCommandRegression
     printf '核心信号回归: 二进制回滚\n'
@@ -2958,6 +3006,79 @@ runCoreTemplateReturnFailureRegression() (
             fi
         done
     )
+
+    (
+        source "${PROJECT_ROOT}/shell/subscription/accounts.sh"
+        source "${PROJECT_ROOT}/shell/subscription/output.sh"
+        eval "$(awk '/^cleanDirectoryContent\(\)/ { capture=1 } capture { print } capture && /^}/ { exit }' "${PROJECT_ROOT}/shell/core/runtime.sh")"
+        local PADM_SUBSCRIBE_LOCAL_DIR="${root}/subscribe-output"
+        local singBoxServiceRunning=false xrayServiceRunning=false
+        local outputMode category backupPath
+        eval "$(declare -f subscribeLocalOutputAppendLine | sed '1s/^subscribeLocalOutputAppendLine/installOutputAppendLine/')"
+        eval "$(declare -f appendSingBoxSubscribeLocalConfig | sed '1s/^appendSingBoxSubscribeLocalConfig/installOutputAppendSingBox/')"
+        eval "$(declare -f subscriptionSyncRestoreBackupPath | sed '1s/^subscriptionSyncRestoreBackupPath/installOutputRestoreBackupPath/')"
+        singBoxInstalled() { return 1; }
+        serviceQueueRestart() { :; }
+        serviceQueueApply() { :; }
+        checkGFWStatue() { :; }
+        cleanUp() { :; }
+        readInstallType() { :; }
+        readInstallProtocolType() { :; }
+        readConfigHostPathUUID() { :; }
+        readSingBoxConfig() { :; }
+        protocolCapabilityRegistry() { printf '1|Regression|node\n'; }
+        currentProtocolHas() { return 0; }
+        subscriptionAccountDisplayFunction() { printf 'installOutputDisplayAccounts\n'; }
+        subscribeLocalOutputAppendLine() {
+            [[ "$1" != "${PADM_SUBSCRIBE_LOCAL_DIR}/${outputMode}/new-user" ]] || return 7
+            installOutputAppendLine "$@"
+        }
+        appendSingBoxSubscribeLocalConfig() {
+            [[ "${outputMode}" != sing-box ]] || return 7
+            installOutputAppendSingBox "$@"
+        }
+        subscriptionSyncRestoreBackupPath() {
+            [[ "${outputMode}" != restore-fail ]] || return 1
+            installOutputRestoreBackupPath "$@"
+        }
+        installOutputDisplayAccounts() {
+            printf '%s\n' "${PADM_CORE_TEMPLATE_ROLLBACK[subscribeOutputBackupDir]}" >"${root}/output-backup"
+            appendDefaultSubscribeLine new-user new-default || return 1
+            [[ "${outputMode}" != display && "${outputMode}" != restore-fail ]] || return 7
+            appendClashMetaSubscribeBlock new-user new-clash || return 1
+            appendSingBoxSubscribeLocalConfig new-user '. + [{type:"vless",tag:"new-user"}]'
+        }
+        for outputMode in display default clashMeta sing-box success restore-fail; do
+            for category in default clashMeta sing-box; do
+                mkdir -p "${PADM_SUBSCRIBE_LOCAL_DIR}/${category}"
+                printf 'old-%s\n' "${category}" >"${PADM_SUBSCRIBE_LOCAL_DIR}/${category}/old-user"
+            done
+            if [[ "${outputMode}" == success ]]; then
+                coreInstallConfigTransaction sing-box completeCoreInstall sing-box 5 6 >/dev/null
+            else
+                regressionExpectStatus 1 coreInstallConfigTransaction sing-box completeCoreInstall sing-box 5 6 >/dev/null 2>&1
+            fi
+            backupPath=$(<"${root}/output-backup")
+            [[ -n "${backupPath}" ]]
+            if [[ "${outputMode}" == restore-fail ]]; then
+                for category in default clashMeta sing-box; do
+                    [[ "$(<"${backupPath}/local/${category}/old-user")" == "old-${category}" ]]
+                done
+                padmRemoveCleanupPath "${backupPath}"
+                continue
+            fi
+            [[ ! -e "${backupPath}" ]]
+            for category in default clashMeta sing-box; do
+                if [[ "${outputMode}" == success ]]; then
+                    [[ ! -e "${PADM_SUBSCRIBE_LOCAL_DIR}/${category}/old-user" ]]
+                    [[ -s "${PADM_SUBSCRIBE_LOCAL_DIR}/${category}/new-user" ]]
+                else
+                    [[ "$(<"${PADM_SUBSCRIBE_LOCAL_DIR}/${category}/old-user")" == "old-${category}" ]]
+                    [[ ! -e "${PADM_SUBSCRIBE_LOCAL_DIR}/${category}/new-user" ]]
+                fi
+            done
+        done
+    )
 )
 
 runCoreInstallServiceActionFailureRegression() (
@@ -2975,6 +3096,7 @@ runCoreInstallServiceActionFailureRegression() (
     local PADM_XRAY_BINARY="${xrayRoot}/xray"
     local PADM_XRAY_CONF_DIR="${xrayRoot}"
     local PADM_SINGBOX_CONFIG_DIR="${singBoxRoot}"
+    local PADM_SUBSCRIBE_LOCAL_DIR="${root}/subscribe_local"
     local PADM_REALITY_STREAM_CONF_FILE="${nginxRoot}/stream.conf"
     local PADM_REALITY_STREAM_STATE_FILE="${nginxRoot}/stream.json"
     local PADM_REALITY_STREAM_NGINX_CONF="${nginxRoot}/nginx.conf"
