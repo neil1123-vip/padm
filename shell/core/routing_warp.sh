@@ -62,7 +62,7 @@ installWarpReg() {
         menuLine "项目地址：https://github.com/badafans/warp-reg"
         menuClose
 
-        autoRead warp_reg_install "warp-reg未安装，是否安装？[y/n]:" installWarpRegStatus
+        autoRead warp_reg_install "warp-reg未安装，是否安装？[y/n]:" installWarpRegStatus || return 1
 
         if [[ "${installWarpRegStatus}" == "y" ]]; then
 
@@ -241,7 +241,7 @@ removeWireGuardRoutingConfig() {
 warpRoutingReg() {
     local type=$2
     local title="WARP 分流 ${type}"
-    local address= successMessage=
+    local address= successMessage= domainList=
     [[ "${type}" == "IPv4" || "${type}" == "IPv6" ]] || {
         errorCard "IP获取失败，退出安装"
         return 1
@@ -267,7 +267,7 @@ warpRoutingReg() {
         menuLine "支持 sing-box、Xray-core"
         menuLine "请按 README 中的分流说明配置域名或规则"
         menuClose
-        autoRead routing_domain_rules "请按照上面示例录入域名:" domainList
+        autoRead routing_domain_rules "请按照上面示例录入域名:" domainList || return 0
         if [[ -z "${domainList}" ]]; then
             coreDomainRequiredErrorCard
             return 1

@@ -1003,6 +1003,52 @@ runWarpConfigSafeDirRegression() (
 
     (
         source "${PROJECT_ROOT}/shell/core/routing_warp.sh"
+        PADM_WARP_DIR="${root}/warp-install-eof"
+        warpRegCoreCPUVendor="warp-reg-linux-amd64"
+        local downloadMarker="${root}/warp-install-eof-download"
+        echoContent() { :; }
+        menuLine() { :; }
+        menuClose() { :; }
+        autoRead() { IFS= read -r "$3"; }
+        downloadGitHubReleaseAsset() { : >"${downloadMarker}"; return 1; }
+        regressionExpectStatus 1 installWarpReg < <(printf y) >/dev/null 2>&1
+        [[ ! -e "${downloadMarker}" && ! -e "${PADM_WARP_DIR}" ]]
+    )
+
+    (
+        source "${PROJECT_ROOT}/shell/core/routing_warp.sh"
+        local domainList=keep.example actions= captured=
+        progressCard() { :; }
+        echoContent() { :; }
+        menuLine() { :; }
+        menuItem() { :; }
+        menuDangerItem() { :; }
+        menuReturnItem() { :; }
+        menuClose() { :; }
+        successCard() { :; }
+        coreDomainRequiredErrorCard() { :; }
+        menuReadChoice() { IFS= read -r "$3"; }
+        autoRead() { IFS= read -r "$3"; }
+        installWarpReg() { actions+="install"$'\n'; }
+        readConfigWarpReg() { actions+="read"$'\n'; }
+        warpRoutingAddress() { printf '172.16.0.2/32\n'; }
+        routingConfigApplyTransaction() {
+            [[ "$4 $5 $6" == 'addWireGuardRoute IPv4 outboundTag' ]] || return 1
+            captured=$7
+            actions+="transaction"$'\n'
+        }
+        warpRoutingReg 1 IPv4 < <(printf '2\nmust-not-write.example') >/dev/null
+        [[ -z "${actions}" && -z "${captured}" && "${domainList}" == keep.example ]]
+        warpRoutingReg 1 IPv4 <<< $'2\nexample.com' >/dev/null
+        [[ "${actions}" == $'install\nread\ntransaction\n' && "${captured}" == example.com &&
+            "${domainList}" == keep.example ]]
+        actions=
+        regressionExpectStatus 1 warpRoutingReg 1 IPv4 <<< $'2\n' >/dev/null
+        [[ -z "${actions}" && "${domainList}" == keep.example ]]
+    )
+
+    (
+        source "${PROJECT_ROOT}/shell/core/routing_warp.sh"
         PADM_WARP_DIR="${root}/warp-latest"
         warpRegCoreCPUVendor="warp-reg-linux-amd64"
         local versionLog="${root}/warp-download-version.log"
