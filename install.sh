@@ -318,6 +318,7 @@ failScriptModuleRefreshAfterBackup() {
         printf '完整安装包替换失败，旧模块恢复失败，请手动检查备份目录: %s\n' "${backupDir}"
     fi
     scriptRemovePath "${tmpDir}" || true
+    scriptModuleLockRelease || true
     trap - EXIT INT TERM
     exit 1
 }
@@ -457,14 +458,16 @@ refreshScriptModules() {
     if [[ -e "${backupDir}" ]]; then
         printf '存在未处理模块备份目录，请手动检查后重试: %s\n' "${backupDir}"
         scriptRemovePath "${tmpDir}" || true
+        scriptModuleLockRelease || true
         trap - EXIT INT TERM
         exit 1
     fi
-    mkdir -p "${backupDir}" || { scriptRemovePath "${tmpDir}" || true; trap - EXIT INT TERM; exit 1; }
+    mkdir -p "${backupDir}" || { scriptRemovePath "${tmpDir}" || true; scriptModuleLockRelease || true; trap - EXIT INT TERM; exit 1; }
     if ! backupScriptModules "${backupDir}" "${SCRIPT_DIR}"; then
         printf '旧模块备份失败，已取消完整安装包替换\n'
         scriptRemovePath "${backupDir}" || true
         scriptRemovePath "${tmpDir}" || true
+        scriptModuleLockRelease || true
         trap - EXIT INT TERM
         exit 1
     fi

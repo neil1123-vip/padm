@@ -3222,8 +3222,10 @@ runInstallRefreshRestoresBackupRegression() (
         REPO_ARCHIVE_DIR="${archiveDirName}"
         SCRIPT_REF_FILE="${fixtureDir}/.padm-ref"
         SCRIPT_MANIFEST_FILE="${fixtureDir}/.padm-module-manifest"
+        SCRIPT_MODULE_LOCK_DIR="${fixtureDir}/.padm-module-lock"
         REPO_ZIP_URL="fixture.tar.gz"
         scriptIsSafeAbsolutePath() { return 0; }
+        scriptModuleLockAcquire || exit 1
         regressionMockCurlAvailable
         curl() { tar -czf "${@: -2:1}" -C "${fixtureDir}/archive" "${REPO_ARCHIVE_DIR}"; }
         cp() {
@@ -3242,6 +3244,7 @@ runInstallRefreshRestoresBackupRegression() (
     [[ "$(<"${fixtureDir}/documents/marker")" == "old-doc" ]]
     [[ "$(<"${fixtureDir}/README.md")" == "old-readme" ]]
     [[ "$(<"${fixtureDir}/reality_targets_results.tsv")" == "${realityLibraryLine}" ]]
+    [[ ! -e "${fixtureDir}/.padm-module-lock" ]]
 
     (
         set -e
