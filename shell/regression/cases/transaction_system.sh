@@ -2487,7 +2487,7 @@ SH
         autoRead() { printf -v "$3" '%s' "${redirectTarget}"; }
         serviceQueueRefresh() { :; }
         serviceQueueApply() { applyCalls=$((applyCalls + 1)); ((applyCalls > 1)); }
-        pgrep() { printf '1\n'; }
+        pgrep() { return 1; }
 
         cp "${original}" "${targetPath}"
         redirectTarget="https://bad.example'; add_header X-Padm injected; #"
