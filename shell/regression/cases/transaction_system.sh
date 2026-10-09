@@ -1714,6 +1714,16 @@ runUninstallServiceStopFailureRegression() (
 
     mkdir -p "${root}"
     REGRESSION_ERROR_CARD_LOG="${errorLog}"
+    (
+        local unInstallStatus=previous
+        autoRead() { IFS= read -r "$3"; }
+        unInstallApply() { printf 'uninstall\n' >>"${actionLog}"; }
+        nginxRunning() { printf 'probe\n' >>"${actionLog}"; return 1; }
+        : >"${actionLog}"
+        regressionExpectStatus 1 unInstall </dev/null || return 1
+        printf '%s' y | regressionExpectStatus 1 unInstall || return 1
+        [[ ! -s "${actionLog}" && "${unInstallStatus}" == previous ]] || return 1
+    ) || return 1
     autoRead() { printf -v "$3" 'y'; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
     menu() { return 0; }
@@ -1738,6 +1748,7 @@ runUninstallServiceStopFailureRegression() (
         printf 'padm-root-cleanup\n' >>"${actionLog}"
         return 0
     }
+    cleanupPadmFirewallRules() { return 0; }
     removePadmNginxConfigFragments() {
         printf 'nginx-fragments\n' >>"${actionLog}"
         return 0

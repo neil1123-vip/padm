@@ -1796,7 +1796,8 @@ cleanupPadmManagedRootOnUninstall() {
 }
 
 unInstall() {
-    autoRead uninstall_confirm "是否确认卸载安装内容？[y/n]:" unInstallStatus
+    local unInstallStatus=
+    autoRead uninstall_confirm "是否确认卸载安装内容？[y/n]:" unInstallStatus || return 1
     if [[ "${unInstallStatus}" != "y" ]]; then
         successCard "放弃卸载"
         return 0
