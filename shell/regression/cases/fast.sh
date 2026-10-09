@@ -4790,6 +4790,18 @@ JSON
         printf '%s\n' '{"inbounds":[{"listen_port":31306,"users":[{"uuid":"upgrade-user"}],"transport":{"type":"httpupgrade","path":"/padmhttp"}}]}' >"${root}/sing-box conf/11_VMess_HTTPUpgrade_inbounds.json"
         printf '%s\n' 'server {' 'listen 24443 so_keepalive=on ssl;http2 on;' 'server_name upgrade.example.com;' '}' >"${root}/nginx conf/sing_box_VMess_HTTPUpgrade.conf"
         (
+            coreInstallType=1
+            configPath="${root}/xray conf/"
+            singBoxConfigPath="${root}/sing-box conf/"
+            nginxConfigPath="${root}/nginx conf/"
+            getPublicIP() { printf '192.0.2.1\n'; }
+            readInstallProtocolType
+            [[ -z "${frontingType}" && "${singBoxVMessHTTPUpgradePort}" == 24443 ]]
+            singBoxVMessHTTPUpgradePath=/stale
+            readConfigHostPathUUID
+            [[ "${singBoxVMessHTTPUpgradePath}" == /padmhttp ]]
+        )
+        (
             coreInstallType=2
             configPath="${root}/sing-box conf/"
             singBoxConfigPath="${configPath}"
