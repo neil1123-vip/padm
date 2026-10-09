@@ -310,9 +310,13 @@ dockerTrafficCommand() {
 }
 
 dockerPrepareInstallSource() {
-    local sourceRoot=$1 requestedRef=${2:-}
+    local sourceRoot=$1 requestedRef=${2:-} bootstrapRef=${DOCKER_ENTRY_BOOTSTRAP_REF:-}
+    DOCKER_ENTRY_BOOTSTRAP_REF=
     if [[ -z "${sourceRoot}" && -n "${requestedRef}" ]]; then
-        dockerEntryFetchBundle "${requestedRef}" || return 1
+        if [[ "${requestedRef}" != "${bootstrapRef}" || -z "${DOCKER_ENTRY_FETCHED_REF:-}" ||
+            ! -f "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/bootstrap.sh" ]]; then
+            dockerEntryFetchBundle "${requestedRef}" || return 1
+        fi
         sourceRoot=${DOCKER_ENTRY_SOURCE_DIR}
         requestedRef=${DOCKER_ENTRY_FETCHED_REF}
     fi

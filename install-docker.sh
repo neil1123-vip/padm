@@ -358,17 +358,25 @@ dockerEntryCleanup() {
     DOCKER_ENTRY_TEMP_DIR=
 }
 
+dockerEntryBundleModulesPresent() {
+    local sourceRoot=$1 required
+    [[ -d "${sourceRoot}" && ! -L "${sourceRoot}" ]] || return 1
+    for required in \
+        install-docker.sh \
+        docker/lib/bootstrap.sh docker/lib/bundle.sh docker/lib/manifest.sh \
+        docker/lib/services.sh docker/lib/lifecycle.sh docker/lib/setup.sh \
+        docker/lib/accounts.sh docker/lib/subscriptions.sh docker/lib/business.sh \
+        docker/lib/menu.sh shell/core/deployment_mode.sh; do
+        [[ -f "${sourceRoot}/${required}" && ! -L "${sourceRoot}/${required}" ]] || return 1
+    done
+}
+
 dockerEntryFetchBundle() {
     local requestedRef=${1:-latest}
     local metadata archive entryList detailList extractDir candidate found=0
     local refUrl=https://api.github.com/repos/neil1123-vip/padm/commits/main
     local archiveBase=https://github.com/neil1123-vip/padm/archive
 
-    if [[ -n "${DOCKER_ENTRY_FETCHED_REF:-}" &&
-        ( "${requestedRef}" == "${DOCKER_ENTRY_FETCHED_REF}" || "${requestedRef}" == latest ) &&
-        -f "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/bootstrap.sh" ]]; then
-        return 0
-    fi
     command -v jq >/dev/null 2>&1 && command -v tar >/dev/null 2>&1 || return 1
     command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || return 1
     dockerEntryCleanup || return 1
@@ -393,16 +401,7 @@ dockerEntryFetchBundle() {
 
     while IFS= read -r candidate; do
         candidate=${candidate%/install-docker.sh}
-        [[ -f "${candidate}/docker/lib/bootstrap.sh" &&
-            -f "${candidate}/docker/lib/bundle.sh" &&
-            -f "${candidate}/docker/lib/manifest.sh" &&
-            -f "${candidate}/docker/lib/lifecycle.sh" &&
-            -f "${candidate}/docker/lib/setup.sh" &&
-            -f "${candidate}/docker/lib/accounts.sh" &&
-            -f "${candidate}/docker/lib/subscriptions.sh" &&
-            -f "${candidate}/docker/lib/business.sh" &&
-            -f "${candidate}/docker/lib/menu.sh" &&
-            -f "${candidate}/shell/core/deployment_mode.sh" ]] || continue
+        dockerEntryBundleModulesPresent "${candidate}" || continue
         DOCKER_ENTRY_SOURCE_DIR=${candidate}
         found=$((found + 1))
     done < <(find "${extractDir}" -mindepth 2 -maxdepth 2 -type f -name install-docker.sh -print)
@@ -417,7 +416,7 @@ dockerEntryFetchBundle() {
 }
 
 dockerEntryPrepareBundleSource() {
-    local sourceRoot= requestedRef=
+    local sourceRoot= requestedRef= command=${1:-}
     if [[ "${1:-}" == install ]]; then
         shift
         while [[ "$#" -gt 0 ]]; do
@@ -445,12 +444,9 @@ dockerEntryPrepareBundleSource() {
         }
     else
         DOCKER_ENTRY_REQUIRE_MATCH=1 dockerEntryFetchBundle "${requestedRef:-latest}" || return 13
+        [[ "${command}" != install ]] || DOCKER_ENTRY_BOOTSTRAP_REF=${requestedRef:-latest}
     fi
-    [[ -f "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/bundle.sh" &&
-        ! -L "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/bundle.sh" ]] || return 13
-    # 加载模块前检查完整本地源，避免显式源缺文件时退回联网。
-    source "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/bundle.sh" || return 13
-    dockerBundleSourceIsComplete "${DOCKER_ENTRY_SOURCE_DIR}" || return 13
+    dockerEntryBundleModulesPresent "${DOCKER_ENTRY_SOURCE_DIR}" || return 13
 }
 
 DOCKER_ENTRY_PATH=$(dockerEntryResolvePath "${BASH_SOURCE[0]}") || {
@@ -461,6 +457,7 @@ DOCKER_ENTRY_DIR=$(cd -- "$(dirname -- "${DOCKER_ENTRY_PATH}")" && pwd -P)
 DOCKER_ENTRY_SOURCE_DIR=${DOCKER_ENTRY_DIR}
 DOCKER_ENTRY_TEMP_DIR=
 DOCKER_ENTRY_FETCHED_REF=
+DOCKER_ENTRY_BOOTSTRAP_REF=
 DOCKER_ENTRY_ENGINE_READY=0
 DOCKER_MENU_AFTER_INSTALL=0
 if [[ "${1:-}" == install && -t 0 && -t 1 ]]; then

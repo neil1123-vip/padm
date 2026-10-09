@@ -8,6 +8,7 @@ runSubscriptionWireGuardMenuFlowRegression() (
     local oldWireGuardDir="${PADM_WIREGUARD_CONTROL_DIR:-}"
     local oldCurrentHost="${currentHost:-}"
     local oldNginxConfigPath="${nginxConfigPath:-}"
+    local PADM_WIREGUARD_NGINX_SYSTEMD_DROPIN_FILE="${TMP_DIR}/menu-smoke-nginx/10-padm-wg.conf"
     local oldPath="${PATH}"
     local updatedCredential failingReceiptJson completedAlias
     local mainPublicKey controlledPublicKey updatedPublicKey failingPublicKey
@@ -34,6 +35,7 @@ runSubscriptionWireGuardMenuFlowRegression() (
     source "${PROJECT_ROOT}/shell/subscription/control.sh"
     # shellcheck source=/dev/null
     source "${PROJECT_ROOT}/shell/subscription/wireguard_control.sh"
+    subscriptionWireGuardNginxSystemdDaemonReload() { return 0; }
     # shellcheck source=/dev/null
     source "${PROJECT_ROOT}/shell/subscription/menu.sh"
 

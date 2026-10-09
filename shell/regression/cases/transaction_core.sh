@@ -1743,6 +1743,7 @@ runCorePortFileTransactionRegression() {
     (
         local firewallLog="${TMP_DIR}/core-port-firewall-lifecycle.log"
         local firewallErrorLog="${TMP_DIR}/core-port-firewall-errors.log"
+        local PADM_FIREWALL_STATE_FILE="${TMP_DIR}/core-port-firewall.state"
         local denyShouldFail=false
         local denyTcpShouldFail=false
         local hysteriaPort=16295
@@ -1769,9 +1770,15 @@ runCorePortFileTransactionRegression() {
             esac
         }
         allowPort() {
+            local key="port:ufw:${2:-tcp}:$1"
+            PADM_LAST_ALLOW_PORT_ADDED=false
+            padmFirewallStateHas "${key}" && return 0
+            padmFirewallStateAdd "${key}" || return 1
+            padmTrackPortAllowTransactionKey "${key}"
             PADM_LAST_ALLOW_PORT_ADDED=true
             printf 'allow:%s:%s\n' "$1" "${2:-tcp}" >>"${firewallLog}"
         }
+        removeFirewallPortRule() { denyPort "$2" "$3"; }
         denyPort() {
             printf 'deny:%s:%s\n' "$1" "${2:-tcp}" >>"${firewallLog}"
             [[ "${denyShouldFail}" != "true" && ( "${denyTcpShouldFail}" != "true" || "${2:-tcp}" != "tcp" ) ]]
@@ -1792,6 +1799,16 @@ runCorePortFileTransactionRegression() {
         grep -qx 'deny:2555:udp' "${firewallLog}"
         grep -qx 'deny:2666:tcp' "${firewallLog}"
         grep -qx 'deny:2666:udp' "${firewallLog}"
+        [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
+
+        # 复用旧规则不记入本次事务，失败时仅移除本次新增规则。
+        padmFirewallStateAdd port:ufw:tcp:2555
+        : >"${firewallLog}"
+        regressionExpectStatus 1 originalAddCorePort >/dev/null 2>&1
+        ! grep -qx 'deny:2555:tcp' "${firewallLog}"
+        grep -qx 'deny:2555:udp' "${firewallLog}"
+        [[ "$(<"${PADM_FIREWALL_STATE_FILE}")" == port:ufw:tcp:2555 ]]
+        padmFirewallStateRemove port:ufw:tcp:2555
 
         denyShouldFail=true
         : >"${firewallErrorLog}"
@@ -1801,7 +1818,8 @@ runCorePortFileTransactionRegression() {
         set -e
         denyShouldFail=false
         [[ "${rc}" == "1" ]]
-        grep -qx '入口端口防火墙规则回滚失败，请检查防火墙状态' "${firewallErrorLog}"
+        grep -qx '操作失败，且本次新增端口的防火墙规则回滚失败，请检查防火墙状态' "${firewallErrorLog}"
+        padmFirewallStateHas port:ufw:tcp:2555
 
         mode=delete
         : >"${firewallLog}"

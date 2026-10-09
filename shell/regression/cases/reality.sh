@@ -1895,6 +1895,7 @@ runRealityProbeQueueRegression() (
             [[ -z "$(find "${queueRoot}/tmp" -mindepth 1 -print -quit)" ]]
         done
         cancelMode=normal
+        padmInstallCleanupTrap
         for monitorMode in off on; do
             [[ "${monitorMode}" != on ]] || set -m
             monitorTraps=$(trap -p EXIT INT TERM)
@@ -2834,6 +2835,8 @@ auto
 
 runRealityStreamSplitRegression() (
     local mode=${1:-all} root="${TMP_DIR}/reality-stream-split" failKey= defaultChoice=1
+    # 隔离容器自带的 /usr/sbin/nginx，安装状态只由下方函数模拟。
+    local PATH=/usr/local/bin:/usr/bin:/bin
     local configPath="${root}/ports/" aliasFile aliasXHTTPFile ignoredFile ignoredContent oldAlias oldXHTTPAlias
     local visionPort=2443 xhttpPort=2444 websitePortInput=8443
     local backupCalls=0 patchCalls=0 allowCalls=0 reloadCalls=0 installCalls=0 subscribeCalls=0

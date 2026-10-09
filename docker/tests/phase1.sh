@@ -230,6 +230,26 @@ tar -czf "${FETCH_ARCHIVE}" -C "${TEST_ROOT}" no-compose-source
         fail 'standalone fixed ref did not preserve the requested version'
 )
 
+# 预加载只供本次安装使用，同进程的后续 latest 必须重新解析。
+(
+    source "${PROJECT_ROOT}/install-docker.sh"
+    DOCKER_ENTRY_SOURCE_DIR=${NO_COMPOSE_SOURCE}
+    DOCKER_ENTRY_FETCHED_REF=${FETCH_REF}
+    DOCKER_ENTRY_BOOTSTRAP_REF=latest
+    fetches=0
+    dockerEntryFetchBundle() {
+        [[ "$1" == latest ]] || return 1
+        fetches=$((fetches + 1))
+        DOCKER_ENTRY_FETCHED_REF=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    }
+    dockerPrepareInstallSource "" latest || fail 'prefetched install source was rejected'
+    [[ "${fetches}" -eq 0 && -z "${DOCKER_ENTRY_BOOTSTRAP_REF}" &&
+        "${DOCKER_INSTALL_SOURCE_REF}" == "${FETCH_REF}" ]] || fail 'bootstrap ref was not consumed once'
+    dockerPrepareInstallSource "" latest || fail 'subsequent latest source was rejected'
+    [[ "${fetches}" -eq 1 && "${DOCKER_INSTALL_SOURCE_REF}" != "${FETCH_REF}" ]] ||
+        fail 'subsequent latest reused the bootstrap ref'
+)
+
 runControl 0 install "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" install --source "${NO_COMPOSE_SOURCE}"
 [[ "$(<"${DOCKER_ROOT}/mode")" == "docker" ]] || fail 'mode marker was not initialized'
 for directory in bundle config data secrets logs backups locks; do

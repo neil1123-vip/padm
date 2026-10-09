@@ -1084,6 +1084,7 @@ runRemoteControlServerRefreshRegression() (
     local refreshTmpDir="${TMP_DIR}/remote-control-server-refresh-${refreshMode}-${lightMode}-${BASHPID:-$$}"
     local TMP_DIR="${refreshTmpDir}"
     local TMPDIR="${TMP_DIR}"
+    local configPath="${TMP_DIR}/xray-conf/" singBoxConfigPath="${TMP_DIR}/sing-box-conf/"
     local PADM_SUBSCRIPTION_GROUPS_DIR="${TMP_DIR}/subscribe_groups"
     local PADM_SUBSCRIBE_LOCAL_DIR="${TMP_DIR}/subscribe_local"
     local PADM_SUBSCRIBE_DIR="${TMP_DIR}/subscribe"

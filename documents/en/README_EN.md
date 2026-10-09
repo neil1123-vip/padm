@@ -88,7 +88,7 @@ bash install.sh --install-type custom --core xray --protocols 2 --entry-host cdn
 No-domain Reality:
 
 ```bash
-bash install.sh --install-type reality --core xray --reality-target target.example.com:443 --reuse-last no --clean-acme no
+bash install.sh --install-type reality --core xray --reality-target target.example.com:443 --reuse-last no
 ```
 
 NaiveProxy:
@@ -1159,8 +1159,8 @@ Disabling it only removes padm's own sysctl file and attempts to restore the pre
 | `--cloudflare-zone-id` | zone id | Optional; can also use `PADM_CLOUDFLARE_ZONE_ID` | Sets `CF_Zone_ID` and reduces zone lookup requirements. |
 | `--aliyun-api-key` | key | Can also use `PADM_ALIYUN_API_KEY` | Aliyun AccessKey ID. |
 | `--aliyun-api-secret` | secret | Can also use `PADM_ALIYUN_API_SECRET` | Aliyun AccessKey Secret. |
-| `--reuse-last` | `yes`, `no`, `y`, `n` | `no` | Whether to reuse the previous installation config. |
-| `--clean-acme` | `yes`, `no`, `y`, `n` | `no` | Whether to remove acme data when clearing previous config. |
+| `--reuse-last` | `yes`, `no`, `y`, `n` | Reuse existing config by default; Enter keeps it in interactive mode | `no` re-enters installation settings and users without clearing the existing installation, certificates or subscriptions. |
+| `--clean-acme` | `yes`, `no`, `y`, `n` | Ignored | Kept only for legacy script compatibility; reinstallation always preserves ACME certificates and account configuration. |
 | `--reality-domain` | `yes`, `no`, `y`, `n` | `no` | Strict-domain mode for a single Reality Vision `1` selection only; `--entry-host` has priority over `--domain`. |
 | `--subscribe-port` | port number | No fixed default | Subscription publishing service port. |
 | `--install-nginx` | `yes`, `no`, `y`, `n` | `no` | Whether to auto-install Nginx when subscription publishing or reverse proxying needs it. |

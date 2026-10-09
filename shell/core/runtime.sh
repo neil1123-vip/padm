@@ -1069,7 +1069,7 @@ showInstallArgsHelp() {
 │ --aliyun-api-key <key>                   阿里云 DNS AccessKey ID，也可用 PADM_ALIYUN_API_KEY
 │ --aliyun-api-secret <secret>             阿里云 DNS AccessKey Secret，也可用 PADM_ALIYUN_API_SECRET
 │ --reuse-last <yes|no|y|n>               已有配置时默认复用；no 重新填写，保留证书和订阅
-│ --clean-acme <yes|no|y|n>               清空上次配置时是否清理 acme
+│ --clean-acme <yes|no|y|n>               旧参数仅保留兼容，已忽略；重装始终保留 ACME
 │ --reality-domain <yes|no|y|n>           严格域名模式，仅支持单选 Reality Vision 1
 │ --reality-target <host[:port]>          REALITY 伪装目标站；非交互未传且无可复用目标时检测后随机选 A 级
 │ --reality-server-name <sni>             REALITY SNI，默认等于 target host

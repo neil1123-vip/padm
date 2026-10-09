@@ -88,7 +88,7 @@ bash install.sh --install-type custom --core xray --protocols 2 --entry-host cdn
 无域名 Reality：
 
 ```bash
-bash install.sh --install-type reality --core xray --reality-target target.example.com:443 --reuse-last no --clean-acme no
+bash install.sh --install-type reality --core xray --reality-target target.example.com:443 --reuse-last no
 ```
 
 NaiveProxy：
@@ -1185,7 +1185,7 @@ net.ipv4.tcp_congestion_control = bbr
 | `--aliyun-api-key` | key | 也可用 `PADM_ALIYUN_API_KEY` | 阿里云 AccessKey ID。 |
 | `--aliyun-api-secret` | secret | 也可用 `PADM_ALIYUN_API_SECRET` | 阿里云 AccessKey Secret。 |
 | `--reuse-last` | `yes`、`no`、`y`、`n` | 已有配置时默认复用；交互回车保留 | `no` 重新填写安装参数和用户，保留证书和订阅，不清空现有安装。 |
-| `--clean-acme` | `yes`、`no`、`y`、`n` | `no` | 清空上次配置时是否同时清理 acme。 |
+| `--clean-acme` | `yes`、`no`、`y`、`n` | 忽略 | 仅为兼容旧脚本保留；重装始终保留 ACME 证书和账号配置。 |
 | `--reality-domain` | `yes`、`no`、`y`、`n` | `no` | 严格域名模式，仅支持单选 Reality Vision `1`；优先用 `--entry-host`，其次 `--domain`。 |
 | `--subscribe-port` | 端口号 | 无固定默认 | 订阅发布服务端口。 |
 | `--install-nginx` | `yes`、`no`、`y`、`n` | `no` | 订阅或反代需要 Nginx 时是否自动安装。 |
