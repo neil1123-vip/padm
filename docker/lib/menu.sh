@@ -737,7 +737,7 @@ dockerMenuIPv6() {
 }
 
 dockerMenuRouting() {
-    local choice input
+    local choice input server port
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 路由与出站\n'
@@ -772,9 +772,12 @@ dockerMenuRouting() {
             ;;
         5) dockerMenuRun edit --socks5-global || true ;;
         6)
-            dockerSetupRead input 'root 私有 DNS JSON 文件绝对路径（0 返回）: ' &&
+            dockerSetupRead server 'DNS 服务器 IPv4/IPv6（0 返回）: ' &&
+                [[ -n "${server}" ]] &&
+                dockerSetupRead port 'DNS 端口 [53，0 返回]: ' 53 &&
+                dockerSetupRead input 'DNS 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）: ' &&
                 [[ -n "${input}" ]] || continue
-            dockerMenuRun edit --dns "${input}" || true
+            dockerMenuRun edit --dns-rules "${server}" "${port}" "${input}" || true
             ;;
         7) dockerMenuRun edit --dns-off || true ;;
         8)

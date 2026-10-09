@@ -32,6 +32,7 @@ DOMAINS_CSV=' Full:Exact.Example.Com , FULL:Other.Example.Com , Example.NET , KE
 DNS_INPUT=${PRIVATE_ROOT}/dns.json
 HOSTS_INPUT=${PRIVATE_ROOT}/hosts.json
 DNS='{"server":"203.0.113.53","port":5353,"domains":["full:dns.example.com","domain:dns.example.net","keyword:dns-video","geosite:cn"]}'
+DNS_CSV=' Full:DNS.Example.Com , DNS.Example.NET , KEYWORD:DNS-Video , GEOSITE:CN , dns.example.net , geosite:cn '
 HOSTS='{"exact.example.com":"203.0.113.10","ipv6.example.com":"2001:db8::10"}'
 DIRECT_INPUT=${PRIVATE_ROOT}/direct.json
 BLOCK_INPUT=${PRIVATE_ROOT}/block.json
@@ -1885,6 +1886,35 @@ done
 boundaryCsv=$(jq -nr '[range(0;256) | "boundary-\(.).example.com"] | join(",")')
 overlimitCsv="${boundaryCsv},boundary-256.example.com"
 duplicateBoundaryCsv="${boundaryCsv},BOUNDARY-0.EXAMPLE.COM"
+runEdit 0 --dns-rules 203.0.113.53 05353 "${DNS_CSV}" --preview
+runEdit 0 --dns-rules 2001:db8::53 65535 "${boundaryCsv}" --preview
+runEdit 2 --dns-rules
+runEdit 2 --dns-rules 203.0.113.53
+runEdit 2 --dns-rules 203.0.113.53 53
+runEdit 2 --dns-rules '' 53 "${DNS_CSV}" --preview
+runEdit 2 --dns-rules 203.0.113.53 53 '' --preview
+runEdit 2 --dns-rules 203.0.113.53 53 --preview
+runEdit 2 --dns-rules 203.0.113.53 53 'regexp:.*' --preview
+runEdit 2 --dns-rules 203.0.113.53 53 "${overlimitCsv}" --preview
+for port in 0 65536 -1 1.5 invalid 000053; do
+    runEdit 2 --dns-rules 203.0.113.53 "${port}" "${DNS_CSV}" --preview
+done
+for server in 127.0.0.1 0.0.0.0 resolver.example.com 2001:db8::1::53 '[2001:db8::53]'; do
+    runEdit 15 --dns-rules "${server}" 53 "${DNS_CSV}" --preview
+done
+runEdit 2 --dns-rules 203.0.113.53 53 "${DNS_CSV}" --dns-rules 2001:db8::53 53 "${DNS_CSV}" --preview
+runEdit 2 --dns-rules 203.0.113.53 53 "${DNS_CSV}" --dns "${DNS_INPUT}" --preview
+runEdit 2 --dns "${DNS_INPUT}" --dns-rules 203.0.113.53 53 "${DNS_CSV}" --preview
+runEdit 2 --dns-rules 203.0.113.53 53 "${DNS_CSV}" --dns-off --preview
+runEdit 2 --dns-off --dns-rules 203.0.113.53 53 "${DNS_CSV}" --preview
+runEdit 2 --dns-rules 203.0.113.53 53 "${DNS_CSV}" --hosts "${HOSTS_INPUT}" --preview
+runEdit 2 --hosts "${HOSTS_INPUT}" --dns-rules 203.0.113.53 53 "${DNS_CSV}" --preview
+runEdit 2 --dns-rules 203.0.113.53 53 "${DNS_CSV}" --socks5-off --preview
+runEdit 2 --socks5-off --dns-rules 203.0.113.53 53 "${DNS_CSV}" --preview
+runEdit 2 --dns-rules 203.0.113.53 53 "${DNS_CSV}" --spec "${TEST_ROOT}/base.json" --preview
+runEdit 2 --dns-rules 203.0.113.53 53 "${DNS_CSV}" --http01 enable --preview
+runEdit 2 --dns-rules 203.0.113.53 53 "${DNS_CSV}" --http-relay-off --preview
+runEdit 2 --dns-rules 203.0.113.53 53 "${DNS_CSV}" --port-alias-default entry-xray base --preview
 for kind in direct block; do
     option="--${kind}-domains"
     runEdit 0 "${option}" "${DOMAINS_CSV}" --preview
@@ -1951,10 +1981,10 @@ runEdit 15 --spec "${TEST_ROOT}/block-ips-only.json" --confirm PADM-DOCKER-EDIT
 assertClean
 [[ "$(snapshot)" == "${before}" ]] || fail '路由子项预览、无效输入或取消改变完整部署'
 
-runEdit 0 --dns "${DNS_INPUT}" --confirm PADM-DOCKER-EDIT
+runEdit 0 --dns-rules 203.0.113.53 05353 "${DNS_CSV}" --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile old "${TEST_ROOT}/base.json" --slurpfile new "${root}/config/spec.json" \
     --argjson dns "${DNS}" '$new[0] == ($old[0] + {routing:{dns:$dns}})' >/dev/null ||
-    fail 'DNS 独立开启改变其它规格'
+    fail 'DNS 直接新建未保留字面 IP、规范化端口和 CSV，或改变其它规格'
 runStatus 0
 jq -e --argjson dns "${DNS}" '
   . == {enabled:true,server:null,port:null,tcp:"direct",udp:"direct",mode:"direct",
@@ -1975,17 +2005,44 @@ jq -e --argjson hosts "${HOSTS}" '.hosts == $hosts and .dns.server == "203.0.113
 [[ "$(stat -c '%a %u %h' "${root}/config/spec.json")" == '600 0 1' ]] ||
     fail 'DNS/hosts 规格没有保留 root 私有文件权限'
 before=$(snapshot)
+dnsReplacement='{"server":"2001:db8::53","port":53,"domains":["geosite:cn","full:replacement.example.com","domain:replacement.example.net","keyword:dns-video"]}'
+dnsReplacementCsv=' GEOSITE:CN , Full:Replacement.Example.COM , Replacement.Example.NET , Keyword:DNS-Video , full:replacement.example.com '
+cp -- "${root}/config/spec.json" "${TEST_ROOT}/dns-rules.before"
+jq --argjson dns "${dnsReplacement}" '.routing.dns=$dns' "${root}/config/spec.json" \
+    >"${TEST_ROOT}/dns-rules-replacement.json"
+runEdit 0 --dns-rules 2001:db8::53 00053 "${dnsReplacementCsv}" --preview
+runEdit 15 --spec "${TEST_ROOT}/dns-rules-replacement.json" --confirm PADM-DOCKER-EDIT
+(
+    trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+    dockerSetupRead() { printf -v "$1" '%s' n; }
+    dockerAcquireDeploymentLock
+    dockerConfigureApply "${TEST_ROOT}/dns-rules-replacement.json" '' '' interactive
+) >"${LOG}" 2>&1 || fail 'DNS 直接替换确认取消失败'
+assertClean
+[[ "$(snapshot)" == "${before}" ]] || fail 'DNS 直接替换预览、普通 spec 或取消改变部署'
+runEdit 0 --dns-rules 2001:db8::53 00053 "${dnsReplacementCsv}" --confirm PADM-DOCKER-EDIT
+jq -en --argjson dns "${dnsReplacement}" --slurpfile old "${TEST_ROOT}/dns-rules.before" \
+    --slurpfile new "${root}/config/spec.json" '$new[0]==($old[0]|.routing.dns=$dns)' >/dev/null ||
+    fail 'DNS IPv6 整组替换未规范化端口/CSV 或改变其它子项'
+runStatus 0
+jq -e --argjson dns "${dnsReplacement}" --argjson hosts "${HOSTS}" '
+  .dns=={server:$dns.server,port:$dns.port,domain_rules:$dns.domains} and .hosts==$hosts
+' "${LOG}" >/dev/null || fail 'DNS IPv6 直接录入状态未保留规范化值和 hosts'
+before=$(snapshot)
 for failure in health-fail int term; do
     MODE=${failure}
     rm -f -- "${TEST_ROOT}/failed-once"
     case "${failure}" in
-    health-fail) runEdit 14 --dns-off --confirm PADM-DOCKER-EDIT ;;
-    int) runEdit 130 --hosts-off --confirm PADM-DOCKER-EDIT ;;
-    term) runEdit 143 --dns-off --confirm PADM-DOCKER-EDIT ;;
+    health-fail) runEdit 14 --dns-rules 203.0.113.54 1 'failure.example.net' --confirm PADM-DOCKER-EDIT ;;
+    int) runEdit 130 --dns-rules 203.0.113.54 1 'failure.example.net' --confirm PADM-DOCKER-EDIT ;;
+    term) runEdit 143 --dns-rules 203.0.113.54 1 'failure.example.net' --confirm PADM-DOCKER-EDIT ;;
     esac
-    [[ "$(snapshot)" == "${before}" ]] || fail "${failure}: DNS/hosts 未恢复完整部署和流量"
+    [[ "$(snapshot)" == "${before}" ]] || fail "${failure}: DNS 直接录入未恢复完整部署和流量"
 done
 MODE=ok
+runEdit 0 --dns "${DNS_INPUT}" --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile expected "${TEST_ROOT}/dns-rules.before" --slurpfile actual "${root}/config/spec.json" \
+    '$actual==$expected' >/dev/null || fail 'DNS JSON 接口未恢复原 DNS/hosts 或改变其它规格'
 runEdit 0 --socks5 "${DOMAINS_INPUT}" --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile expected "${TEST_ROOT}/routing-all.json" --slurpfile actual "${root}/config/spec.json" \
     '$actual == $expected' >/dev/null || fail '开启 SOCKS5 丢弃 DNS/hosts'
@@ -2202,10 +2259,10 @@ menuLog="${TEST_ROOT}/routing-menu.log"
 [[ ! -e "${menuLog}" ]] || fail 'DNS/hosts 菜单路径取消仍调用编辑'
 (
     dockerMenuRun() { printf '%s\n' "$*" >>"${menuLog}"; }
-    dockerMenuRouting < <(printf '6\n%s\n7\n8\n%s\n9\n0\n' "${DNS_INPUT}" "${HOSTS_INPUT}")
+    dockerMenuRouting < <(printf '6\n203.0.113.53\n\n%s\n7\n8\n%s\n9\n0\n' "${DNS_CSV}" "${HOSTS_INPUT}")
 ) >"${LOG}" 2>&1
-printf 'edit --dns %s\nedit --dns-off\nedit --hosts %s\nedit --hosts-off\n' \
-    "${DNS_INPUT}" "${HOSTS_INPUT}" >"${TEST_ROOT}/routing-menu.expected"
+printf 'edit --dns-rules 203.0.113.53 53 %s\nedit --dns-off\nedit --hosts %s\nedit --hosts-off\n' \
+    "${DNS_CSV}" "${HOSTS_INPUT}" >"${TEST_ROOT}/routing-menu.expected"
 cmp -s "${menuLog}" "${TEST_ROOT}/routing-menu.expected" ||
     fail 'DNS/hosts 菜单没有映射到 CLI 事务'
 printf 'docker-routing-socks5-regression-ok\n'

@@ -259,6 +259,9 @@ sing-box 从固定 SagerNet 源直连下载所选分类，资源缺失或下载�
 DNS 私有 JSON 示例为 `{"server":"192.0.2.53","port":53,"domains":["domain:example.net"]}`，
 仅接受字面 IPv4/IPv6 UDP 服务器，`domains` 必须包含 1–256 条已规范化的
 `full:`、`domain:`、`keyword:` 或 `geosite:` 规则，各类为 OR；本阶段不提供全局 DNS、DoH 或 DoT。
+菜单 `17` 的 `6` 可直接输入服务器 IP、端口（留空默认 `53`）和域名规则 CSV，
+或使用 `--dns-rules <IP> <端口> <CSV>`；CSV 规范化与 Direct/Block 相同。
+此操作创建或整组替换 DNS 分流，保留 `--dns` 私有 JSON CLI 和其它路由子项。
 hosts 私有 JSON 示例为 `{"exact.example.net":"192.0.2.10"}`，接受 1–256 个小写精确域名，
 每个域名对应一个可路由字面 IPv4/IPv6；不支持 hosts 后缀、关键字或分类匹配。
 地址示例不可直接用作服务器；文件安全要求与 SOCKS5 输入相同。
@@ -266,6 +269,7 @@ hosts 私有 JSON 示例为 `{"exact.example.net":"192.0.2.10"}`，接受 1–25
 ```bash
 padm-docker edit --dns /root/padm-dns.json --preview
 padm-docker edit --dns /root/padm-dns.json --confirm PADM-DOCKER-EDIT
+padm-docker edit --dns-rules 192.0.2.53 53 'example.net,full:exact.example.org' --preview
 padm-docker edit --hosts /root/padm-hosts.json --confirm PADM-DOCKER-EDIT
 padm-docker edit --dns-off --confirm PADM-DOCKER-EDIT
 padm-docker edit --hosts-off --confirm PADM-DOCKER-EDIT

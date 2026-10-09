@@ -595,7 +595,7 @@ runSitesDriver() {
 }
 
 runRoutingDriver() {
-    local scenario=$1 choice
+    local scenario=$1 choice input
     local -A targetPrompts=()
     targetReply 'Docker 管理菜单' $'17\n'
     : >"${TLS_WIZARD_ACTIONS}"
@@ -611,7 +611,9 @@ runRoutingDriver() {
         targetReply 'Docker 路由与出站' $'5\n'
         targetReply 'Docker 路由与出站' $'3\n'
         targetReply 'Docker 路由与出站' $'6\n'
-        targetReply 'root 私有 DNS JSON 文件绝对路径（0 返回）' $'/root/padm-dns.json\n'
+        targetReply 'DNS 服务器 IPv4/IPv6（0 返回）' $'203.0.113.53\n'
+        targetReply 'DNS 端口 [53，0 返回]' $'\n'
+        targetReply 'DNS 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\n'
         targetReply 'Docker 路由与出站' $'7\n'
         targetReply 'Docker 路由与出站' $'8\n'
         targetReply 'root 私有 hosts JSON 文件绝对路径（0 返回）' $'/root/padm-hosts.json\n'
@@ -674,9 +676,18 @@ runRoutingDriver() {
         targetReply 'Docker 路由与出站' $'4\n'
         targetReply 'SOCKS5 域名规则（逗号分隔；domain:/full:/keyword:/geosite:，0 返回）' $'\n'
         targetReply 'Docker 路由与出站' $'6\n'
-        targetReply 'root 私有 DNS JSON 文件绝对路径（0 返回）' $'0\n'
+        targetReply 'DNS 服务器 IPv4/IPv6（0 返回）' $'0\n'
         targetReply 'Docker 路由与出站' $'6\n'
-        targetReply 'root 私有 DNS JSON 文件绝对路径（0 返回）' $'\n'
+        targetReply 'DNS 服务器 IPv4/IPv6（0 返回）' $'\n'
+        targetReply 'Docker 路由与出站' $'6\n'
+        targetReply 'DNS 服务器 IPv4/IPv6（0 返回）' $'203.0.113.53\n'
+        targetReply 'DNS 端口 [53，0 返回]' $'0\n'
+        for input in 0 ''; do
+            targetReply 'Docker 路由与出站' $'6\n'
+            targetReply 'DNS 服务器 IPv4/IPv6（0 返回）' $'203.0.113.53\n'
+            targetReply 'DNS 端口 [53，0 返回]' $'\n'
+            targetReply 'DNS 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' "${input}"$'\n'
+        done
         targetReply 'Docker 路由与出站' $'8\n'
         targetReply 'root 私有 hosts JSON 文件绝对路径（0 返回）' $'0\n'
         targetReply 'Docker 路由与出站' $'8\n'
@@ -728,9 +739,33 @@ runRoutingDriver() {
         targetReply 'Docker 路由与出站' $'4\n'
         targetReply 'SOCKS5 域名规则（逗号分隔；domain:/full:/keyword:/geosite:，0 返回）' $'\004'
         ;;
-    dns-file-eof)
+    dns-server-eof)
         targetReply 'Docker 路由与出站' $'6\n'
-        targetReply 'root 私有 DNS JSON 文件绝对路径（0 返回）' $'\004'
+        targetReply 'DNS 服务器 IPv4/IPv6（0 返回）' $'\004'
+        ;;
+    dns-port-eof|dns-domains-eof|dns-explicit-port|dns-invalid|dns-failed)
+        targetReply 'Docker 路由与出站' $'6\n'
+        targetReply 'DNS 服务器 IPv4/IPv6（0 返回）' $'203.0.113.53\n'
+        if [[ "${scenario}" == dns-port-eof ]]; then
+            targetReply 'DNS 端口 [53，0 返回]' $'\004'
+        else
+            case "${scenario}" in
+            dns-explicit-port) targetReply 'DNS 端口 [53，0 返回]' $'5353\n' ;;
+            dns-invalid) targetReply 'DNS 端口 [53，0 返回]' $'65536\n' ;;
+            *) targetReply 'DNS 端口 [53，0 返回]' $'\n' ;;
+            esac
+            if [[ "${scenario}" == dns-domains-eof ]]; then
+                targetReply 'DNS 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'\004'
+            else
+                targetReply 'DNS 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'Example.NET\n'
+            fi
+            if [[ "${scenario}" == dns-invalid ]]; then
+                targetReply 'Docker 路由与出站' $'6\n'
+                targetReply 'DNS 服务器 IPv4/IPv6（0 返回）' $'203.0.113.53\n'
+                targetReply 'DNS 端口 [53，0 返回]' $'\n'
+                targetReply 'DNS 域名规则 CSV（domain:/full:/keyword:/geosite:，0 返回）' $'regexp:bad\n'
+            fi
+        fi
         ;;
     hosts-file-eof)
         targetReply 'Docker 路由与出站' $'8\n'
@@ -1141,6 +1176,11 @@ edit)
     elif [[ "${2:-}" == --direct-domains || "${2:-}" == --block-domains ||
         "${2:-}" == --direct-domains-add || "${2:-}" == --block-domains-add ]]; then
         dockerSocks5DomainsNormalize "${3:-}" >/dev/null || exit 2
+    elif [[ "${2:-}" == --dns-rules ]]; then
+        [[ "$#" -eq 5 && -n "${3:-}" && "${3:-}" != --* &&
+            "${4:-}" =~ ^[0-9]{1,5}$ ]] || exit 2
+        [[ "$((10#$4))" -ge 1 && "$((10#$4))" -le 65535 ]] || exit 2
+        dockerSocks5DomainsNormalize "$5" >/dev/null || exit 2
     fi
     exit "${SITE_EDIT_STATUS:-0}"
     ;;
@@ -1273,22 +1313,35 @@ for siteCase in flow cancel static-eof redirect-eof alpn-diagnose-eof alpn-recom
 done
 unset SITE_MENU_RECORD_STATUS SITE_EDIT_STATUS SITE_ALPN_STATUS
 
-for routingCase in flow cancel file-eof domains-eof dns-file-eof hosts-file-eof direct-domains-eof block-domains-eof direct-block-invalid direct-domains-add-eof block-domains-add-eof direct-block-add-invalid direct-block-add-failed block-ips-file-eof region-eof ipv6-eof warp-eof http-relay-eof failed return; do
+for routingCase in flow cancel file-eof domains-eof dns-server-eof dns-port-eof dns-domains-eof dns-explicit-port dns-invalid dns-failed hosts-file-eof direct-domains-eof block-domains-eof direct-block-invalid direct-domains-add-eof block-domains-add-eof direct-block-add-invalid direct-block-add-failed block-ips-file-eof region-eof ipv6-eof warp-eof http-relay-eof failed return; do
     : >"${TLS_WIZARD_ACTIONS}"
     export SITE_EDIT_STATUS=0 ROUTING_STATUS=0
     [[ "${routingCase}" != failed ]] || { SITE_EDIT_STATUS=15; ROUTING_STATUS=17; }
-    [[ "${routingCase}" != direct-block-add-failed ]] || SITE_EDIT_STATUS=15
+    [[ "${routingCase}" != direct-block-add-failed && "${routingCase}" != dns-failed ]] || SITE_EDIT_STATUS=15
     runPty "routing-${routingCase}" routing "${routingCase}" "${TLS_WIZARD_CLI}" menu
     expectedRouting=
     case "${routingCase}" in
     flow|failed)
-        expectedRouting=$'edit --socks5 /root/padm-socks5.json\nedit --socks5-off\nprotocol routing-status\nedit --socks5-domains Example.NET, full:Exact.Example.Com, geosite:cn\nedit --socks5-global\nprotocol routing-status\nedit --dns /root/padm-dns.json\nedit --dns-off\nedit --hosts /root/padm-hosts.json\nedit --hosts-off\nedit --direct-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --direct-off\nedit --block-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --block-off\nedit --block-ips /root/padm-block-ips.json\nedit --block-ips-off\nedit --block-bt\nedit --block-bt-off'
+        expectedRouting=$'edit --socks5 /root/padm-socks5.json\nedit --socks5-off\nprotocol routing-status\nedit --socks5-domains Example.NET, full:Exact.Example.Com, geosite:cn\nedit --socks5-global\nprotocol routing-status\nedit --dns-rules 203.0.113.53 53 Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --dns-off\nedit --hosts /root/padm-hosts.json\nedit --hosts-off\nedit --direct-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --direct-off\nedit --block-domains Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --block-off\nedit --block-ips /root/padm-block-ips.json\nedit --block-ips-off\nedit --block-bt\nedit --block-bt-off'
         expectedRouting+=$'\nedit --region both --region-allow Example.NET, full:Exact.Example.Com\nedit --region domain\nedit --region ip\nedit --region-off'
         expectedRouting+=$'\nedit --ipv6 selective --ipv6-domains Example.NET, full:Exact.Example.Com\nedit --ipv6 global\nedit --ipv6-off\nprotocol routing-status'
         expectedRouting+=$'\nedit --warp /root/padm-warp.json\nedit --warp-off\nprotocol routing-status'
         expectedRouting+=$'\nedit --http-relay /root/padm-http-relay.json\nedit --http-relay-off\nprotocol routing-status'
         expectedRouting+=$'\nedit --direct-domains-add Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN\nedit --block-domains-add Example.NET, full:Exact.Example.Com, keyword:Ads, geosite:CN'
         grep -Fq '无效选项' "${CONTROL_LOG}" || fail '路由菜单没有保留无效输入后的操作'
+        ;;
+    dns-explicit-port)
+        expectedRouting='edit --dns-rules 203.0.113.53 5353 Example.NET'
+        ;;
+    dns-invalid)
+        expectedRouting=$'edit --dns-rules 203.0.113.53 65536 Example.NET\nedit --dns-rules 203.0.113.53 53 regexp:bad'
+        [[ "$(grep -Fc '操作失败，退出码: 2' "${CONTROL_LOG}")" -eq 2 ]] ||
+            fail 'DNS 非法端口或 CSV 未显示用法错误并保留菜单'
+        ;;
+    dns-failed)
+        expectedRouting='edit --dns-rules 203.0.113.53 53 Example.NET'
+        grep -Fq '操作失败，退出码: 15' "${CONTROL_LOG}" ||
+            fail 'DNS 规则提交失败未显示状态错误并保留菜单'
         ;;
     direct-block-invalid)
         expectedRouting=$'edit --direct-domains regexp:bad\nedit --block-domains regexp:bad'

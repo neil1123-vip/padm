@@ -969,6 +969,15 @@ not resolve domain targets just to match an IP or recheck addresses after DNS/ho
 These changes retain the same private-input and deployment transaction boundaries.
 SOCKS ingress, WARP and complete routing management remain deferred.
 
+Menu `17`, option `6`, accepts a literal UDP DNS server IP, a port (blank defaults
+to `53`), and domain-rule CSV. `--dns-rules <IP> <port> <CSV>` creates or replaces
+the same DNS object using existing CSV normalization and transaction checks;
+private JSON through `--dns` and all other routing policies remain available.
+
+```bash
+padm-docker edit --dns-rules 192.0.2.53 53 'example.net,full:exact.example.org' --preview
+```
+
 Menu `17`, options `10/12`, replaces Direct or Block domain rules using comma-separated
 input. `--direct-domains <CSV>` and `--block-domains <CSV>` use the same normalization:
 trim whitespace, lowercase, preserve first-occurrence order while deduplicating, and
