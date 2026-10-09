@@ -342,7 +342,13 @@ unInstallRouting() {
 
     if [[ -f "${configPath}09_routing.json" ]]; then
         if [[ -n "${protocol}" ]]; then
-            updateRoutingJsonConfig "${configPath}09_routing.json" 'del(.routing.rules[] | select(.[$type] == $tag and ((.protocol // []) | index($protocol))))' --arg type "${type}" --arg tag "${tag}" --arg protocol "${protocol}" || return 1
+            updateRoutingJsonConfig "${configPath}09_routing.json" '
+                .routing.rules |= map(
+                    if .[$type] == $tag and ((.protocol // []) | index($protocol)) then
+                        .protocol -= [$protocol] | select(.protocol | length > 0)
+                    else . end
+                )
+            ' --arg type "${type}" --arg tag "${tag}" --arg protocol "${protocol}" || return 1
         else
             updateRoutingJsonConfig "${configPath}09_routing.json" 'del(.routing.rules[] | select(.[$type] == $tag and (.protocol == null)))' --arg type "${type}" --arg tag "${tag}" || return 1
         fi
@@ -449,8 +455,15 @@ installSniffing() {
     if [[ "${coreInstallType}" == "1" ]]; then
         while IFS= read -r inbound; do
             updateRoutingJsonConfig "${inbound}" '
-                .inbounds[0].sniffing.enabled = true |
-                .inbounds[0].sniffing.destOverride = ((.inbounds[0].sniffing.destOverride // []) + ["http", "tls", "quic"] | unique)
+                if .inbounds == null then .
+                elif (.inbounds | type) != "array" then error("inbounds must be an array")
+                else
+                    .inbounds |= map(
+                        .sniffing.enabled = true |
+                        .sniffing.metadataOnly = false |
+                        .sniffing.destOverride = ((.sniffing.destOverride // []) + ["http", "tls", "quic"] | unique)
+                    )
+                end
             ' || return 1
         done < <(find "${configPath}" -name "*inbounds.json")
     fi

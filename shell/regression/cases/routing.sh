@@ -428,10 +428,16 @@ JSON
     ( removeUnlockSNI ) || return 1
     jq -e '.dns.servers[0] == "custom" and any(.dns.servers[] | objects; .tag == "padm-local" and .type == "local")' "${singBoxConfigPath}dns.json" >/dev/null
     coreInstallType=1
-    printf '{"inbounds":[{"sniffing":{"destOverride":["http"]},"settings":{}}]}
-' >"${configPath}02_sniffing_inbounds.json"
+    cat >"${configPath}02_sniffing_inbounds.json" <<'JSON'
+{"inbounds":[
+  {"tag":"first","settings":{"network":"tcp"},"sniffing":{"enabled":false,"metadataOnly":true,"routeOnly":true,"destOverride":["http","fakedns"],"domainsExcluded":["keep.example"]}},
+  {"tag":"second","settings":{"network":"udp"},"sniffing":{"enabled":false,"metadataOnly":true,"routeOnly":false,"destOverride":["tls"],"domainsExcluded":["second.example"]}}
+]}
+JSON
     printf '{"inbounds":[{"settings":{}}]}
 ' >"${configPath}03_sniffing_inbounds.json"
+    printf '{"inbounds":[]}\n' >"${configPath}04_empty_inbounds.json"
+    printf '{"routing":{"rules":[]}}\n' >"${configPath}05_no_inbounds.json"
     originalContent=$(<"${configPath}02_sniffing_inbounds.json")
     if updateRoutingJsonConfig "${configPath}02_sniffing_inbounds.json" '.inbounds[0].sniffing = [' 2>/dev/null; then
         return 1
@@ -440,16 +446,25 @@ JSON
     [[ ! -e "${configPath}02_sniffing_inbounds.json.tmp" ]]
     installSniffing
     jq -e '
-      .inbounds[0].sniffing.enabled == true and
-      (.inbounds[0].sniffing.destOverride | sort) == ["http", "quic", "tls"]
+      .inbounds == [
+        {tag:"first",settings:{network:"tcp"},sniffing:{enabled:true,metadataOnly:false,routeOnly:true,destOverride:["fakedns","http","quic","tls"],domainsExcluded:["keep.example"]}},
+        {tag:"second",settings:{network:"udp"},sniffing:{enabled:true,metadataOnly:false,routeOnly:false,destOverride:["http","quic","tls"],domainsExcluded:["second.example"]}}
+      ]
     ' "${configPath}02_sniffing_inbounds.json" >/dev/null
     jq -e '
       .inbounds[0].sniffing.enabled == true and
+      .inbounds[0].sniffing.metadataOnly == false and
       (.inbounds[0].sniffing.destOverride | sort) == ["http", "quic", "tls"]
     ' "${configPath}03_sniffing_inbounds.json" >/dev/null
-    updateRoutingJsonConfig "${configPath}02_sniffing_inbounds.json" 'del(.inbounds[0].sniffing)'
+    jq -e '.inbounds == []' "${configPath}04_empty_inbounds.json" >/dev/null
+    jq -e '. == {routing:{rules:[]}}' "${configPath}05_no_inbounds.json" >/dev/null
+    printf '{"inbounds":{}}\n' >"${configPath}06_invalid_inbounds.json"
+    regressionExpectStatus 1 installSniffing >/dev/null 2>&1 || return 1
+    jq -e '. == {inbounds:{}}' "${configPath}06_invalid_inbounds.json" >/dev/null
+    rm -f "${configPath}06_invalid_inbounds.json"
+    updateRoutingJsonConfig "${configPath}02_sniffing_inbounds.json" 'del(.inbounds[].sniffing)'
     updateRoutingJsonConfig "${configPath}03_sniffing_inbounds.json" 'del(.inbounds[0].sniffing)'
-    jq -e '.inbounds[0].sniffing | not' "${configPath}02_sniffing_inbounds.json" >/dev/null
+    jq -e 'all(.inbounds[]; .sniffing | not)' "${configPath}02_sniffing_inbounds.json" >/dev/null
     jq -e '.inbounds[0].sniffing | not' "${configPath}03_sniffing_inbounds.json" >/dev/null
     coreInstallType=
     cat >"${configPath}09_routing.json" <<'JSON'
@@ -477,6 +492,20 @@ JSON
     ' "${configPath}09_routing.json" >/dev/null
     addXrayBTBlockRule
     jq -e '.routing.rules[] | select(.outboundTag == "blackhole_out" and (.protocol | index("bittorrent")))' "${configPath}09_routing.json" >/dev/null
+    cat >"${configPath}09_routing.json" <<'JSON'
+{"routing":{"rules":[
+  {"type":"field","outboundTag":"blackhole_out","protocol":["bittorrent","http"],"domain":["full:keep.example"],"network":"tcp"},
+  {"outboundTag":"blackhole_out","protocol":["bittorrent"]},
+  {"outboundTag":"keep_out","protocol":["bittorrent","http"]},
+  {"outboundTag":"blackhole_out","domain":["domain:ordinary.example"]}
+]}}
+JSON
+    unInstallRouting blackhole_out outboundTag bittorrent || return 1
+    jq -e '.routing.rules == [
+      {type:"field",outboundTag:"blackhole_out",protocol:["http"],domain:["full:keep.example"],network:"tcp"},
+      {outboundTag:"keep_out",protocol:["bittorrent","http"]},
+      {outboundTag:"blackhole_out",domain:["domain:ordinary.example"]}
+    ]' "${configPath}09_routing.json" >/dev/null
     coreInstallType=2
     addSingBoxBTBlockRule
     hasSingBoxBTBlockRule
