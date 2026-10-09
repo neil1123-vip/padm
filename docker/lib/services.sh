@@ -4426,7 +4426,7 @@ dockerRestoreConfiguration() {
             dockerRealityStreamStopServices nginx xray || return 1
         fi
     else
-        dockerComposeRun down >/dev/null 2>&1 || true
+        dockerComposeRun down >/dev/null || return 1
     fi
     # 旧快照未记录站点内容时保留现有目录，不能把它当作空站点删除。
     grep -qxF data/static "${backup}/present" && includeStatic=1

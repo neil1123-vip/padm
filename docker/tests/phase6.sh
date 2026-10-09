@@ -74,6 +74,7 @@ compose)
         : >"${FAKE_DOCKER_FAIL_MARK}"
         exit 1
     fi
+    [[ " ${*} " != *' down '* || "${FAKE_DOCKER_FAIL_DOWN:-0}" != 1 ]] || exit 1
     ;;
 ps) ;;
 pull) ;;
@@ -438,6 +439,27 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
             "$successfulBackup/deployment.json" "$successfulBackup/images.env"
         dockerValidateConfigurationBackup "$successfulBackup"
         dockerCleanupStagedBundle
+
+        # 停止失败不能覆盖仍被容器使用的配置，也不能切换 bundle 或重新启动。
+        (
+            before=$(tar --sort=name --numeric-owner -cf - -C "$root" \
+                config secrets deployment.json compose.json images.env | sha256sum)
+            backupBefore=$(tar --sort=name --numeric-owner -cf - -C "$successfulBackup" . | sha256sum)
+            logBefore=$(wc -l <"$FAKE_DOCKER_LOG")
+            export FAKE_DOCKER_FAIL_DOWN=1
+            DOCKER_CONFIG_BACKUP=$successfulBackup
+            DOCKER_CONFIG_SWITCHED=1
+            ! dockerRestoreConfiguration
+            test "$DOCKER_CONFIG_SWITCHED" == 1
+            test -d "$DOCKER_CONFIG_BACKUP"
+            test "$before" == "$(tar --sort=name --numeric-owner -cf - -C "$root" \
+                config secrets deployment.json compose.json images.env | sha256sum)"
+            test "$backupBefore" == "$(tar --sort=name --numeric-owner -cf - -C "$successfulBackup" . | sha256sum)"
+            assertCurrent "$newBundle" "$newCommit" new-control "$(printf 2%.0s {1..64})"
+            commands=$(tail -n "+$((logBefore + 1))" "$FAKE_DOCKER_LOG")
+            grep -q " down " <<<"$commands"
+            ! grep -q " up " <<<"$commands"
+        )
 
         source="$PHASE6_MANIFEST.rollback"
         control=$PHASE6_FAILED_CONTROL_BUNDLE
