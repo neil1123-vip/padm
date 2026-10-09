@@ -497,7 +497,34 @@ JSON
         "${configPath}09_routing.json" >/dev/null || { printf 'routing-keyword-fail:xray-route\n' >&2; return 1; }
     addXrayIPRouting blackhole_ip_out outboundTag "cn,1.1.1.0/24"
     jq -e '.routing.rules[] | select(.outboundTag == "blackhole_ip_out") | .ip == ["geoip:cn", "1.1.1.0/24"]' "${configPath}09_routing.json" >/dev/null
+    addXrayIPRouting blackhole_ip_out outboundTag "geoip:cn,203.0.113.0/24,203.0.113.0/32,11.1.1.0/24"
+    addXrayIPRouting blackhole_ip_out outboundTag " GEOIP:CN ,203.0.113.0/2,203.0.113.0/2,1.1.1.0/24"
+    jq -e '
+      [.routing.rules[] | select(.outboundTag == "blackhole_ip_out") | .ip] |
+      length == 1 and .[0] == ["geoip:cn", "1.1.1.0/24", "203.0.113.0/24", "203.0.113.0/32", "11.1.1.0/24", "203.0.113.0/2"]
+    ' "${configPath}09_routing.json" >/dev/null || { printf 'routing-ip-fail:exact-dedupe\n' >&2; return 1; }
+    (
+        local invalidRoot="${routingRoot}/xray-invalid-ip"
+        local configPath="${invalidRoot}/"
+        local originalInvalidHash
+        mkdir -p "${configPath}"
+        printf '{"routing":{"rules":[{"outboundTag":"blackhole_ip_out","ip":["11.1.1.0/24"]}]}}\n' >"${configPath}09_routing.json"
+        addXrayIPRouting blackhole_ip_out outboundTag "1.1.1.0/24,11.1.1.0/24" || return 1
+        jq -e '.routing.rules[0].ip == ["11.1.1.0/24", "1.1.1.0/24"]' "${configPath}09_routing.json" >/dev/null || return 1
+        originalInvalidHash=$(sha256sum "${configPath}09_routing.json")
+        for invalidIP in '' ',' ' , , ' 'bad-ip' '1.2.3.4/33' 'geoip:us'; do
+            regressionExpectStatus 1 addXrayIPRouting blackhole_ip_out outboundTag "${invalidIP}" >/dev/null 2>&1 || return 1
+            [[ "$(sha256sum "${configPath}09_routing.json")" == "${originalInvalidHash}" ]] || return 1
+        done
+        local configPath="${invalidRoot}/missing/"
+        mkdir -p "${configPath}"
+        for invalidIP in '' ' , , ' 'bad-ip' '1.2.3.4/33'; do
+            regressionExpectStatus 1 addXrayIPRouting blackhole_ip_out outboundTag "${invalidIP}" >/dev/null 2>&1 || return 1
+            [[ ! -e "${configPath}09_routing.json" ]] || return 1
+        done
+    )
     [[ "$(validateAccessIPList '1.1.1.1, 1.1.1.1,2001:db8::/32,cn')" == "1.1.1.1,2001:db8::/32,cn" ]]
+    [[ "$(validateAccessIPList 'geoip:cn,CN')" == "cn" ]]
     [[ "$(validateAccessIPList '0.0.0.0/0,255.255.255.255/32,::/0,::1,2001:DB8::/128,1:2:3:4:5:6:7:8/128,CN,cn')" == \
         '0.0.0.0/0,255.255.255.255/32,::/0,::1,2001:db8::/128,1:2:3:4:5:6:7:8/128,cn' ]]
     local invalidIP

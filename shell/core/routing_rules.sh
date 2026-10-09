@@ -188,11 +188,14 @@ addXrayIPRouting() {
     local tag=$1
     local type=$2
     local ipList=$3
+    local normalizedIPList
 
-    if [[ -z "${tag}" || -z "${type}" || -z "${ipList}" ]]; then
+    if [[ -z "${tag}" || -z "${type}" || -z "${ipList//[[:space:],]/}" ]]; then
         errorCard "参数错误"
         return 1
     fi
+    normalizedIPList=$(validateAccessIPList "${ipList}") || { errorCard "IP/CIDR 格式错误"; return 1; }
+    [[ -n "${normalizedIPList}" ]] || { errorCard "IP/CIDR 不可为空"; return 1; }
 
     if [[ ! -f "${configPath}09_routing.json" ]]; then
         writeRoutingJsonConfig "${configPath}09_routing.json" <<EOF || return 1
@@ -223,12 +226,12 @@ EOF
             ipRuleValue="geoip:cn"
         fi
 
-        if echo "${routingRule}" | grep -q "${ipRuleValue}"; then
+        if jq -e --arg rule "${ipRuleValue}" '(.ip // []) | index($rule) != null' <<<"${routingRule}" >/dev/null; then
             coreRuleExistsStatusCard "${ipRuleValue} 已存在，跳过"
         else
             newRules+=("${ipRuleValue}")
         fi
-    done < <(echo "${ipList}" | tr ',' '\n')
+    done < <(echo "${normalizedIPList}" | tr ',' '\n')
     if [[ ${#newRules[@]} -gt 0 ]]; then
         local rulesJson
         rulesJson=$(printf '%s\n' "${newRules[@]}" | jq -R -s 'split("\n") | map(select(length > 0))') || return 1

@@ -349,6 +349,7 @@ validateAccessIPList() {
     while read -r item; do
         item=$(echo "${item}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
         [[ -z "${item}" ]] && continue
+        [[ "${item}" == "geoip:cn" ]] && item=cn
         if [[ "${item}" != "cn" ]]; then
             if [[ "${item}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}(/[0-9]{1,2})?$ ]]; then
                 padmIsValidHostName "${item%%/*}" || return 1
