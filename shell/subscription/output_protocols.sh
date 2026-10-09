@@ -146,17 +146,22 @@ emitVlessXHTTPSubscribeOutput() {
     if [[ -f "${xhttpConfigFile}" ]]; then
         realityMldsa65Verify=$(jq -r '.inbounds[0].streamSettings.realitySettings.mldsa65Verify // empty' "${xhttpConfigFile}") || return 1
     fi
-    path=$(xrayRealityXHTTPSetting path "${path}")
-    xhttpHost=$(xrayRealityXHTTPSetting host "${xrayVLESSRealityXHTTPSNI}")
-    xhttpMode=$(xrayRealityXHTTPSetting mode auto)
+    if ! path=$(xrayRealityXHTTPSetting path "${path}") ||
+        ! xhttpHost=$(xrayRealityXHTTPSetting host "${xrayVLESSRealityXHTTPSNI}") ||
+        ! xhttpMode=$(xrayRealityXHTTPSetting mode auto); then
+        errorCard "订阅输出生成失败" "XHTTP 配置读取失败"
+        return 1
+    fi
     if ! subscribeOutputSafeRouteValue "${path}"; then
         errorCard "订阅输出生成失败" "XHTTP path 格式不合法"
         return 1
     fi
-    if ! subscribeOutputSafeHostValue "${xhttpHost}"; then
+    if [[ -n "${xhttpHost}" ]] && ! subscribeOutputSafeHostValue "${xhttpHost}"; then
         errorCard "订阅输出生成失败" "XHTTP host 格式不合法"
         return 1
     fi
+    local xhttpHostYaml="${xhttpHost}"
+    [[ -n "${xhttpHostYaml}" ]] || xhttpHostYaml='""'
     case "${xhttpMode}" in
     auto | stream-one | packet-up | stream-up) ;;
     *)
@@ -189,7 +194,7 @@ ${mihomoEncryption:+    encryption: ${mihomoEncryption}
     servername: ${xrayVLESSRealityXHTTPSNI}
     xhttp-opts:
       path: ${path}
-      host: ${xhttpHost}
+      host: ${xhttpHostYaml}
       mode: ${xhttpMode}
     reality-opts:
       public-key: ${currentRealityXHTTPPublicKey}
