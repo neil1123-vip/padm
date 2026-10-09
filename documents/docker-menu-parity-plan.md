@@ -18,7 +18,7 @@
 | 2. 菜单与可信首次配置 | 2A–2C 已实现；本地 PTY、事务和 Linux 权限通过，真实发布/连通待验 | 安装后进入菜单、独立命令生命周期、无需手填镜像的首次配置 |
 | 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2–3C.12 基础入口已通过本地与 amd64 传输验收，3D.1 参数重生成、3D.2 当前目标站菜单已接入，3D.3c 受管共存、3D.3d1 桥接可达宿主网站和 3D.3d2 宿主回环已通过本地/真实 Desktop 验收 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
 | 4. 用户、订阅与服务维护 | 4A.1–4A.4、4B.1–4B.2 已交付；4C.1–4C.2 已实现，4C.3a–4C.3c 归属、健康与主控事务底座已补，连接与管理入口继续推进 | 稳定分享身份与双核心认证/统计、本机用户业务、多服务器后端、分范围备份恢复、核心运维 |
-| 5. 站点、路由与宿主集成 | 5A.1–5A.3b、5B.1–5B.2 本地合同及双核心双栈出站验收已通过；继续 5B 其余路由与 5C 宿主集成 | 站点管理、内部能力、规则所有权及可撤销宿主操作 |
+| 5. 站点、路由与宿主集成 | 5A.1–5A.3b、5B.1–5B.3a 本地合同及双核心双栈出站/解析验收已通过；继续 5B 其余路由与 5C 宿主集成 | 站点管理、内部能力、规则所有权及可撤销宿主操作 |
 | 6. 发布与完整验收 | 未开始 | 迁移文档、真实 Linux 与双架构证据、受门禁保护的 Release |
 
 当前机器可读支持状态以
@@ -1852,6 +1852,49 @@ SOCKS，HTTP 404 和缺资产严格匹配真实错误后拒绝启动；不以任
 `routing-core` `5.991` 秒通过，保留 DNS/hosts 原配置和 SOCKS 空项兼容。
 公网资源、原生 arm64、可信发布及完整 SOCKS 入站仍待适用验收；
 `routing-tools` 与 `internal-201-socks-relay` 完整状态继续 `deferred`。
+
+#### 5B.3a DNS 分流与精确 hosts
+
+v3 `.routing` 可独立包含 `socks5`、`dns`、`hosts`，至少保留一项；
+DNS 为 `{server,port,domains}`，仅 UDP 字面 IPv4/IPv6 与 1–256 条四类 OR 规则，
+hosts 为 1–256 个小写精确 FQDN 到单个可路由字面 IP 的映射。
+hosts 不提供后缀、关键字或分类假支持；本步不扩全局 DNS、DoH/DoT、Direct/Block。
+控制包须声明 `x-padm-routing-dns-hosts`，旧包在配置、更新和回滚前拒绝。
+
+菜单 `17` 增加 DNS/hosts 启用和关闭，CLI 为 `edit --dns <私有 JSON>`、
+`--dns-off`、`--hosts <私有 JSON>`、`--hosts-off`；
+输入文件沿用 SOCKS5 的 root 私有快照要求，确认、候选校验与失败/信号恢复复用原事务。
+只更改对应子能力，关闭 SOCKS5 不删除 DNS/hosts，关闭最后一项才删除 `.routing`。
+普通 `--spec` 编辑仍冻结 routing，状态只追加无凭据的 DNS/hosts 投影。
+
+只改变客户端直连域名目标的核心内解析，hosts 优先于 DNS 分流，未匹配走容器本地解析；
+匹配 DNS 失败不回退本地解析。SOCKS5 匹配在解析前选路，域名仍交上游解析；
+嗅探域名不改写 IP 目的地。Xray 使用匹配 resolver 禁回退、精确 hosts 与 direct ForceIP，
+内置 DNS 标签单独直连，避免被客户端 UDP 阻断；sing-box 使用显式 resolve server、
+hosts 精确解析后终止路由，四类 DNS matcher 分组保持 OR，远程分类去重并直连下载。
+不增加宿主端口、挂载、网络权限或防火墙操作；完整 `206` 和路由工具仍为 `deferred`。
+
+功能签名提交 `9dd803e2 feat(docker): add transactional DNS and hosts routing`。
+本地 Linux amd64 最终定向合同 `41.673` 秒、菜单真实 PTY `28.206` 秒通过。
+真实 Xray/sing-box × IPv4/IPv6 四路径 `31.239` 秒通过，四类 DNS matcher 独立命中，
+hosts/DNS 同名零查询且覆盖地址可达、SOCKS5 重叠目标经上游、IP/sniff 不替换目的。
+IPv4 两核心另验全局 SOCKS5 与解析共存、全局 UDP 阻断，以及独立解析 UDP 直达正对照。
+SERVFAIL 四路径和静默超时每核心一例均触达指定 DNS，实际返回失败且目的接入为零；
+仅夹具 deadline 缩到 `250 ms`，生产默认超时不改。
+
+真实反例暴露 Xray `localhost` 自动匹配 `.invalid/.test/.example`，
+`disableFallbackIfMatch` 不排除第二个已匹配服务器；指定 resolver 增加 `finalQuery:true`。
+保留本地 hosts 可解析诱饵，不通过改域名或吞超时规避失败。
+完整 Docker 合同 `31/31`、`193.026` 秒、`Jobs=6`，`ci` `34.418` 秒、
+`Jobs=3` 实际运行通过；13 Shell Bash/ShellCheck、
+两 Python AST、Schema/features JSON 与 PowerShell AST 通过，原有双槽和工具镜像不变。
+证据 `.tmp-docker-routing-5b3-evidence.md`，临时源码归档/核心副本和脚本收尾清理。
+
+原生相邻修复独立提交 `6f097e7e`：sing-box hosts 只接受精确域名，
+DNS geosite 与域名保持 OR，DNS/hosts 分别管理并保留自定义和跨分片引用；
+开放并修复 sing-box 单核菜单，非法 hosts IP/规则在写入前拒绝。
+`routing-core`、DNS 失败返回和 UI 冒烟通过，实际 pinned sing-box 合并配置检查通过。
+未更改原生全局 `UseIP` 策略；公网规则源、原生 arm64、可信发布及真实宿主仍待验。
 
 ### 5C. 宿主集成与端口跳跃
 
