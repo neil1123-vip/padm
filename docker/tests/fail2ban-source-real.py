@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
+import ipaddress
 import json
 import os
 from pathlib import Path
 import runpy
+import selectors
 import shutil
 import socket
 import ssl
@@ -36,12 +38,12 @@ def wait_ready(probe, message, limit=15):
         time.sleep(0.05)
 
 
-def request(family, path, forged):
+def request(family, path, forged, port=PORT):
     context = ssl.create_default_context()
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE
     try:
-        with socket.create_connection((HOST[family], PORT), timeout=1) as stream:
+        with socket.create_connection((HOST[family], int(port)), timeout=1) as stream:
             with context.wrap_socket(stream, server_hostname="source.padm.test") as tls:
                 tls.sendall(
                     f"GET {path} HTTP/1.1\r\nHost: source.padm.test\r\n"
@@ -101,14 +103,100 @@ def namespaces():
         raise
 
 
-def client(process, family, path="/", forged=None):
+def client(process, family, path="/", forged=None, port=PORT):
     return json.loads(command(
         ["nsenter", "--target", str(process.pid), "--net", "--", "python3", str(SCRIPT),
-         "client", family, path, forged or SOURCES[family][1]], timeout=5))
+         "client", family, path, forged or SOURCES[family][1], str(port)], timeout=5))
 
 
 def inspect(docker, identity):
     return json.loads(command(docker + ["inspect", identity]))[0]
+
+
+def witness(docker, identity, client_processes, family, listener, port, internal_port,
+            reject=None, history_uri=None):
+    # 离线编排改写了镜像身份，只替换容器审计；挑战、真实日志与来源匹配仍执行生产函数。
+    script = r'''
+source "$1"
+dockerFail2banSourceContainer() {
+    [[ "$1" == "$PADM_TEST_SOURCE_LISTENER" && "$2" == "$PADM_TEST_SOURCE_FAMILY" ]] || return 1
+    docker inspect "$PADM_TEST_SOURCE_CONTAINER" | jq -ce \
+      --argjson public "$PADM_TEST_SOURCE_PORT" --argjson internal "$PADM_TEST_SOURCE_INTERNAL" \
+      --argjson hosts "$PADM_TEST_SOURCE_HOSTS" '
+      select(length == 1) | .[0] |
+      select(.State.Running == true and .State.Restarting == false) |
+      {id:.Id,started_at:.State.StartedAt,restart_count:.RestartCount,
+       public_port:$public,internal_port:$internal,domain:"source.padm.test",
+       networks:(.NetworkSettings.Networks | to_entries |
+         map({name:.key,id:.value.NetworkID}) | sort_by(.name)),
+       addresses:($hosts + [.NetworkSettings.Networks[] |
+         .IPAddress,.Gateway,.GlobalIPv6Address,.IPv6Gateway] | map(select(. != "")) | unique)}
+    '
+}
+dockerFail2banSourceWitness "$2" "$3"
+'''
+    environment = dict(os.environ, DOCKER_HOST=docker[-1],
+                       PADM_TEST_SOURCE_CONTAINER=identity, PADM_TEST_SOURCE_LISTENER=listener,
+                       PADM_TEST_SOURCE_FAMILY=family, PADM_TEST_SOURCE_PORT=str(port),
+                       PADM_TEST_SOURCE_INTERNAL=str(internal_port),
+                       PADM_TEST_SOURCE_HOSTS=json.dumps(list(HOST.values()) +
+                           ["198.18.2.4", "fd42:7061:646d:2::4"]))
+    if history_uri is None:
+        history_uri = "/.well-known/padm-source/" + "f" * 48
+    assert client(client_processes[0], family, history_uri, port=port) == {"status": 204}
+    process = subprocess.Popen(
+        ["bash", "-u", "-c", script, "test", str(ROOT / "install-docker.sh"), listener,
+         SOURCES[family][0]], env=environment, text=True, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE)
+    try:
+        with selectors.DefaultSelector() as reader:
+            reader.register(process.stdout, selectors.EVENT_READ)
+            assert reader.select(timeout=5), "生产来源见证未输出挑战"
+            first = process.stdout.readline().strip()
+        assert first.startswith("source-challenge="), first
+        challenge = json.loads(first.removeprefix("source-challenge="))
+        assert challenge["public_port"] == port and challenge["family"] == family
+        assert challenge["domain"] == "source.padm.test"
+        uri = challenge["uri"]
+        assert uri.startswith("/.well-known/padm-source/") and len(uri.rsplit("/", 1)[1]) == 48
+        log = docker + ["logs", identity]
+        assert uri.encode() not in command(log), "fresh challenge 已存在于历史日志"
+        if reject == "port":
+            wrong_port = PORT + 1 if port == PORT else PORT
+            assert client(client_processes[0], family, uri, port=wrong_port) == {"status": 204}
+        elif reject == "source":
+            assert client(client_processes[1], family, uri,
+                          forged=SOURCES[family][0], port=port) == {"status": 204}
+        else:
+            # 历史 URI 和重放的旧挑战不能满足新 nonce，正确请求仍使用伪造头验证真实首字段。
+            assert client(client_processes[0], family, history_uri, port=port) == {"status": 204}
+            time.sleep(0.2)
+            assert process.poll() is None, "历史或重放日志提前满足了生产见证"
+            assert client(client_processes[0], family, uri, port=port) == {"status": 204}
+        output, error = process.communicate(timeout=8)
+        if reject is not None:
+            assert process.returncode != 0 and "source-verified=" not in output, (reject, output, error)
+            print(f"fail2ban-production-source-reject-{reject}=passed", flush=True)
+            return uri
+        assert process.returncode == 0, (first, output, error)
+        assert "source-verified=" in output, (first, output, error)
+        proof = next(json.loads(line.removeprefix("source-verified="))
+                     for line in output.splitlines() if line.startswith("source-verified="))
+        assert {key: value for key, value in proof.items() if key != "source"} == dict(
+            listener_id=listener, family=family, public_port=port, internal_port=internal_port), proof
+        assert ipaddress.ip_address(proof["source"]) == ipaddress.ip_address(SOURCES[family][0]), proof
+        print("fail2ban-production-source-witness=" + json.dumps(
+            dict(listener_id=listener, family=family, public_port=port, proof=proof),
+            sort_keys=True), flush=True)
+        return uri
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.communicate(timeout=3)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.communicate()
 
 
 def run(root):
@@ -175,9 +263,10 @@ def run(root):
                 assert host["ReadonlyRootfs"] and not host["Privileged"]
                 assert host["CapDrop"] == ["ALL"] and not host["CapAdd"]
                 assert nginx["Config"]["User"] == "10001:10001"
-                assert host["PortBindings"]["8443/tcp"] == [
-                    dict(HostIp="0.0.0.0", HostPort=str(PORT))] + (
-                    [dict(HostIp="::", HostPort=str(PORT))] if mode == "dual" else [])
+                for public_port, internal_port in ((PORT, 8443), (PORT + 1, 8444)):
+                    assert host["PortBindings"][f"{internal_port}/tcp"] == [
+                        dict(HostIp="0.0.0.0", HostPort=str(public_port))] + (
+                        [dict(HostIp="::", HostPort=str(public_port))] if mode == "dual" else [])
                 networks = nginx["NetworkSettings"]["Networks"]
                 assert set(networks) == {"padm-docker"} | (
                     {"padm-docker-ipv6"} if mode == "dual" else set()), networks
@@ -201,9 +290,19 @@ def run(root):
                     docker + ["exec", identities["net-fail2ban"], "fail2ban-client", "status", "padm-nginx"],
                     capture_output=True).returncode == 0, "Fail2ban 未就绪")
                 families = ("ipv4",) if mode == "ipv4" else ("ipv4", "ipv6")
+                history_uri = None
                 for family in families:
                     wait_ready(lambda: client(clients[0], family).get("status") == 200,
                                f"{family} 发布连接未就绪")
+                    for listener, public_port, internal_port in (
+                            ("entry-source-ws", PORT, 8443), ("entry-source-ws2", PORT + 1, 8444)):
+                        history_uri = witness(docker, identities["nginx"], clients, family,
+                                              listener, public_port, internal_port, history_uri=history_uri)
+                    if mode == "ipv4":
+                        for reason in ("port", "source"):
+                            witness(docker, identities["nginx"], clients, family,
+                                    "entry-source-ws", PORT, 8443, reject=reason)
+                    assert client(clients[0], family) == {"status": 200}
                     access = deployment / "logs/nginx/access.log"
                     wait_ready(lambda: access.stat().st_size > 0, f"{family} 请求没有真实日志")
                     source_address, forged = SOURCES[family]
@@ -309,6 +408,6 @@ def run(root):
 
 if __name__ == "__main__":
     if sys.argv[1] == "client":
-        print(json.dumps(request(*sys.argv[2:5])))
+        print(json.dumps(request(*sys.argv[2:6])))
     else:
         run(Path(sys.argv[1]))

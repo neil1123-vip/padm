@@ -434,6 +434,43 @@ runMaintenanceDriver() {
                 printf '\003' >&3
             fi
             ;;
+        fail2ban-verify)
+            for address in 203.0.113.9 2001:db8::9; do
+                targetReply 'Docker Fail2ban 维护' $'4\n'
+                targetReply 'WS 入口 ID（0 返回）: ' $'entry-fixture\n'
+                targetReply '外部客户端 IPv4/IPv6（0 返回）: ' "${address}"$'\n'
+            done
+            ;;
+        fail2ban-verify-cancel)
+            for answer in $'0\n' $'\n' $'\004'; do
+                targetReply 'Docker Fail2ban 维护' $'4\n'
+                targetReply 'WS 入口 ID（0 返回）: ' "${answer}"
+            done
+            for answer in $'0\n' $'\n' $'\004'; do
+                targetReply 'Docker Fail2ban 维护' $'4\n'
+                targetReply 'WS 入口 ID（0 返回）: ' $'entry-fixture\n'
+                targetReply '外部客户端 IPv4/IPv6（0 返回）: ' "${answer}"
+            done
+            ;;
+        fail2ban-verify-list-failed)
+            targetReply 'Docker Fail2ban 维护' $'4\n'
+            ;;
+        fail2ban-verify-*)
+            targetReply 'Docker Fail2ban 维护' $'4\n'
+            targetReply 'WS 入口 ID（0 返回）: ' $'entry-fixture\n'
+            address=203.0.113.9
+            [[ "${scenario}" != fail2ban-verify-invalid ]] || address=not-an-ip
+            targetReply '外部客户端 IPv4/IPv6（0 返回）: ' "${address}"$'\n'
+            if [[ "${scenario}" == fail2ban-verify-int || "${scenario}" == fail2ban-verify-term ]]; then
+                waitForText 'fixture-fail2ban-ready' "${CONTROL_LOG}" || exit 35
+                assertNoLock
+                if [[ "${scenario}" == fail2ban-verify-term ]]; then
+                    kill -TERM "$(<"${TEST_ROOT}/menu.pid")" || exit 36
+                    return 0
+                fi
+                printf '\003' >&3
+            fi
+            ;;
         fail2ban-menu-eof) ;;
         *)
             [[ "${scenario}" != fail2ban-failed ]] ||
@@ -912,7 +949,8 @@ runPty() {
     printf -v command '%q ' bash -u "${entry}" "$@"
     if [[ "${driver}" == term ||
         ( ( "${driver}" == targets || "${driver}" == geo ) && "${input}" == term ) ||
-        ( "${driver}" == maintenance && ( "${input}" == fail2ban-term || "${input}" == fail2ban-disable-term ) ) ]]; then
+        ( "${driver}" == maintenance && ( "${input}" == fail2ban-term ||
+          "${input}" == fail2ban-disable-term || "${input}" == fail2ban-verify-term ) ) ]]; then
         printf -v command 'printf "%%s\\n" "$$" >%q; exec %s' "${TEST_ROOT}/menu.pid" "${command}"
         expected=143
     fi
@@ -1145,6 +1183,10 @@ grep -Fq '用法:' "${CONTROL_LOG}" || fail 'installed non-TTY no-args did not s
 runNonTty 2 installed-explicit-menu "${CLI}" menu
 grep -Fq '用法:' "${CONTROL_LOG}" || fail 'installed non-TTY menu did not show help'
 [[ ! -s "${DOCKER_LOG}" ]] || fail 'installed non-TTY menu touched Docker'
+runNonTty 0 installed-help "${CLI}" help
+grep -Fq 'padm-docker fail2ban verify-source <WS 入口 ID> <外部客户端 IPv4/IPv6>' "${CONTROL_LOG}" ||
+    fail 'Fail2ban 真实来源诊断缺少命令帮助'
+[[ ! -s "${DOCKER_LOG}" ]] || fail 'installed help touched Docker'
 assertNoLock
 
 runPty installed-no-args-menu menu $'1\n1\n0\n' "${CLI}"
@@ -1214,6 +1256,7 @@ status)
 protocol)
     recordAction "$@"
     case "${2:-}" in
+    list) [[ "${FAIL2BAN_PROTOCOL_LIST_STATUS:-0}" -eq 0 ]] || exit "${FAIL2BAN_PROTOCOL_LIST_STATUS}" ;;
     select-target|scan-targets|scan-targets-asn)
         printf 'fixture-target-input: %s: ' "$2"
         IFS= read -r targetInput || exit 19
@@ -1262,9 +1305,12 @@ fail2ban)
     recordAction "$@"
     case "${2:-}" in
     status) printf 'fixture-fail2ban-status\n'; exit "${FAIL2BAN_STATUS:-0}" ;;
-    unban|disable)
+    unban|disable|verify-source)
         # 字面 IP 语法矩阵由服务合同覆盖，此处只验证错误返回后仍留在菜单。
         [[ "${2:-}" != unban || "${3:-}" != not-an-ip ]] || exit 2
+        if [[ "${2:-}" == verify-source ]]; then
+            [[ "$#" -eq 4 && "$3" == entry-fixture && "$4" != not-an-ip ]] || exit 2
+        fi
         if [[ "${FAIL2BAN_WAIT:-0}" == 1 ]]; then
             trap 'exit 130' INT
             trap 'exit 143' TERM
@@ -1275,6 +1321,10 @@ fail2ban)
         if [[ "${2:-}" == disable ]]; then
             [[ "$#" -eq 4 && "$3" == --confirm && "$4" == PADM-DOCKER-EDIT ]] || exit 2
             exit "${FAIL2BAN_DISABLE_STATUS:-0}"
+        fi
+        if [[ "${2:-}" == verify-source ]]; then
+            printf 'fixture-fail2ban-source-verified\n'
+            exit "${FAIL2BAN_VERIFY_STATUS:-0}"
         fi
         exit "${FAIL2BAN_UNBAN_STATUS:-0}"
         ;;
@@ -1373,13 +1423,17 @@ for maintenanceCase in flow cancel update-eof uninstall-eof failed update rollba
 done
 unset MAINTENANCE_STATUS MAINTENANCE_VALIDATE_STATUS
 
-for fail2banCase in flow cancel menu-eof invalid failed int term disable disable-failed disable-int disable-term; do
+for fail2banCase in flow cancel menu-eof invalid failed int term disable disable-failed disable-int disable-term \
+    verify verify-cancel verify-list-failed verify-invalid verify-failed verify-int verify-term; do
     : >"${TLS_WIZARD_ACTIONS}"
-    export FAIL2BAN_STATUS=0 FAIL2BAN_UNBAN_STATUS=0 FAIL2BAN_DISABLE_STATUS=0 FAIL2BAN_WAIT=0 \
+    export FAIL2BAN_STATUS=0 FAIL2BAN_UNBAN_STATUS=0 FAIL2BAN_DISABLE_STATUS=0 \
+        FAIL2BAN_VERIFY_STATUS=0 FAIL2BAN_PROTOCOL_LIST_STATUS=0 FAIL2BAN_WAIT=0 \
         FAIL2BAN_PID="${TEST_ROOT}/fail2ban.pid"
     [[ "${fail2banCase}" != failed ]] || { FAIL2BAN_STATUS=17; FAIL2BAN_UNBAN_STATUS=17; }
     [[ "${fail2banCase}" != disable-failed ]] || FAIL2BAN_DISABLE_STATUS=17
-    case "${fail2banCase}" in int|term|disable-int|disable-term) FAIL2BAN_WAIT=1 ;; esac
+    [[ "${fail2banCase}" != verify-failed ]] || FAIL2BAN_VERIFY_STATUS=17
+    [[ "${fail2banCase}" != verify-list-failed ]] || FAIL2BAN_PROTOCOL_LIST_STATUS=17
+    case "${fail2banCase}" in int|term|disable-int|disable-term|verify-int|verify-term) FAIL2BAN_WAIT=1 ;; esac
     runPty "fail2ban-${fail2banCase}" maintenance "fail2ban-${fail2banCase}" "${TLS_WIZARD_CLI}" menu
     expectedFail2ban=
     case "${fail2banCase}" in
@@ -1411,14 +1465,43 @@ for fail2banCase in flow cancel menu-eof invalid failed int term disable disable
                 fail "Fail2ban ${fail2banCase} 后 CLI 进程仍存活"
         fi
         ;;
+    verify)
+        expectedFail2ban=$'protocol list\nfail2ban verify-source entry-fixture 203.0.113.9'
+        expectedFail2ban+=$'\nprotocol list\nfail2ban verify-source entry-fixture 2001:db8::9'
+        [[ "$(grep -Fc 'fixture-fail2ban-source-verified' "${CONTROL_LOG}")" -eq 2 ]] ||
+            fail 'Fail2ban 双栈来源诊断未显示后端输出'
+        ;;
+    verify-cancel)
+        expectedFail2ban=$'protocol list\nprotocol list\nprotocol list\nprotocol list\nprotocol list\nprotocol list'
+        ;;
+    verify-list-failed)
+        expectedFail2ban='protocol list'
+        grep -Fq '操作失败，退出码: 17' "${CONTROL_LOG}" || fail 'Fail2ban 入口列表失败未留在菜单'
+        ! grep -Fq 'WS 入口 ID（0 返回）: ' "${CONTROL_LOG}" || fail 'Fail2ban 入口列表失败仍接受诊断输入'
+        ;;
+    verify-invalid|verify-failed|verify-int|verify-term)
+        address=203.0.113.9
+        [[ "${fail2banCase}" != verify-invalid ]] || address=not-an-ip
+        expectedFail2ban=$'protocol list\nfail2ban verify-source entry-fixture '"${address}"
+        if [[ "${fail2banCase}" == verify-invalid ]]; then
+            grep -Fq '操作失败，退出码: 2' "${CONTROL_LOG}" || fail 'Fail2ban 来源诊断非法 IP 未显示用法错误'
+        elif [[ "${fail2banCase}" == verify-failed ]]; then
+            grep -Fq '操作失败，退出码: 17' "${CONTROL_LOG}" || fail 'Fail2ban 来源诊断失败未留在菜单'
+        else
+            ! kill -0 "$(<"${FAIL2BAN_PID}")" 2>/dev/null ||
+                fail "Fail2ban ${fail2banCase} 后 CLI 进程仍存活"
+        fi
+        ;;
     esac
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedFail2ban}" ]] ||
         fail "Fail2ban ${fail2banCase} 参数分发错误或取消后仍执行操作"
-    for fail2banLabel in '5. Fail2ban 维护' 'Docker Fail2ban 维护' '1. 查看状态' '2. 解封单个 IP' '3. 停用站点扫描防护'; do
+    for fail2banLabel in '5. Fail2ban 维护' 'Docker Fail2ban 维护' '1. 查看状态' \
+        '2. 解封单个 IP' '3. 停用站点扫描防护' '4. 核对 WS 真实来源'; do
         grep -Fq "${fail2banLabel}" "${CONTROL_LOG}" || fail "Fail2ban 菜单缺少: ${fail2banLabel}"
     done
 done
-unset FAIL2BAN_STATUS FAIL2BAN_UNBAN_STATUS FAIL2BAN_DISABLE_STATUS FAIL2BAN_WAIT FAIL2BAN_PID
+unset FAIL2BAN_STATUS FAIL2BAN_UNBAN_STATUS FAIL2BAN_DISABLE_STATUS \
+    FAIL2BAN_VERIFY_STATUS FAIL2BAN_PROTOCOL_LIST_STATUS FAIL2BAN_WAIT FAIL2BAN_PID
 
 export SITE_MENU_RECORD_STATUS=1
 for siteCase in flow cancel static-eof redirect-eof alpn-diagnose-eof alpn-recommended-eof \

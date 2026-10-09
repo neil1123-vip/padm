@@ -91,6 +91,7 @@ listRegressionDockerContractsChildSelectors() {
         docker-wireguard-runtime \
         docker-tproxy-ownership \
         docker-fail2ban-ownership \
+        docker-fail2ban-source \
         docker-control-api \
         docker-subscriptions \
         docker-accounts-cli \
@@ -124,6 +125,7 @@ listRegressionDockerContractsFastChildSelectors() {
         docker-wireguard-runtime \
         docker-tproxy-ownership \
         docker-fail2ban-ownership \
+        docker-fail2ban-source \
         docker-control-api \
         docker-permissions \
         docker-accounts-cli \
@@ -218,6 +220,10 @@ runDockerFail2banSourceRealRegression() {
 
 runDockerFail2banOwnershipRegression() {
     bash "${PROJECT_ROOT}/docker/tests/fail2ban-ownership.sh"
+}
+
+runDockerFail2banSourceRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/fail2ban-source.sh"
 }
 
 runDockerRoutingWarpRegression() {
@@ -352,6 +358,7 @@ registerRegressionFunctionLeaf docker-phase4 runDockerPhase4Regression
 registerRegressionFunctionLeaf docker-fail2ban-real runDockerFail2banRealRegression
 registerRegressionFunctionLeaf docker-fail2ban-source-real runDockerFail2banSourceRealRegression
 registerRegressionFunctionLeaf docker-fail2ban-ownership runDockerFail2banOwnershipRegression
+registerRegressionFunctionLeaf docker-fail2ban-source runDockerFail2banSourceRegression
 registerRegressionFunctionLeaf docker-phase5 runDockerPhase5Regression
 registerRegressionFunctionLeaf docker-phase6 runDockerPhase6Regression
 registerRegressionFunctionLeaf docker-traffic runDockerTrafficRegression

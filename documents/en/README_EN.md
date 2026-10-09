@@ -406,6 +406,7 @@ padm-docker fail2ban unban 192.0.2.7
 padm-docker fail2ban unban 2001:db8::7
 padm-docker fail2ban disable --preview
 padm-docker fail2ban disable --confirm PADM-DOCKER-EDIT
+padm-docker fail2ban verify-source entry-ws 203.0.113.7
 ```
 
 Only the fixed `padm-nginx` jail in a running `net-fail2ban` container whose spec,
@@ -435,6 +436,20 @@ be stopped; inspect the original owner manually, never delete state to force pro
 A later startup failure restores the existing configuration snapshot while preserving
 SQLite ban history; old kernel rules are not copied. `disable` accepts only preview or
 the fixed confirmation token, and rejects an integration that is not enabled.
+
+The source-check menu and `verify-source <WS listener ID> <external IPv4/IPv6>`
+are read-only on-site diagnostics. Request the fresh challenge URI from the expected
+external client within 30 seconds using the displayed domain and public port.
+Verification binds the real Nginx source, internal port and container startup identity;
+forwarded headers and historical logs are not evidence. Local, container and gateway
+sources, port aliases sharing an internal listener, and coexistence entries are rejected.
+The result is not stored as an enabling credential and does not start Fail2ban or change
+configuration or firewall rules. Enabling still requires every protected port and family
+to be witnessed within the same configuration transaction.
+The 30 seconds is a log collection window; a blocked Docker log or address query can make
+the command take longer, and timeout still fails closed. The check proves consistency of
+the disk configuration, container metadata and observed request, not every byte loaded in
+an Nginx worker after a privileged change, and it is not the enabling transaction gate.
 
 Fail2ban uses private schema 2 `data/net/fail2ban/fail2ban.state`, a random chain
 and full-token markers on hooks, bans and the final RETURN. Startup, every action

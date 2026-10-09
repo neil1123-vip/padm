@@ -594,6 +594,7 @@ padm-docker fail2ban unban 192.0.2.7
 padm-docker fail2ban unban 2001:db8::7
 padm-docker fail2ban disable --preview
 padm-docker fail2ban disable --confirm PADM-DOCKER-EDIT
+padm-docker fail2ban verify-source entry-ws 203.0.113.7
 ```
 
 只操作当前运行且规格、镜像、标签及挂载一致的 `net-fail2ban` 容器和固定
@@ -612,6 +613,14 @@ IPv4/IPv6 字面地址，不接受域名、CIDR、zone、任意 jail 或全部�
 服务可能已停止，需人工核对原拥有者，不可删除 state 强制继续。
 提交后启动失败沿既有快照恢复旧配置，保留 SQLite 封禁历史，不复制旧内核规则。
 `disable` 只接受预览或固定确认参数；未启用时返回状态错误，不隐式启用或修改防护参数。
+来源核对菜单和 `verify-source <WS 入口 ID> <外部客户端 IPv4/IPv6>` 只做现场诊断。
+它为所选地址族生成一次性挑战，外部客户端在 30 秒内向显示的域名和公开端口请求该 URI；
+核对当前受管 Nginx 的真实来源、内部端口与容器启动身份，不信任转发头或历史日志。
+本机、容器、网关来源、共享内部端口的额外别名及共存分流入口拒绝验证。
+结果不保存为新启用凭证，不启动 Fail2ban、不修改配置或规则；新启用仍须在同一事务内逐保护端口与地址族见证。
+30 秒是日志采集窗口；Docker 日志或地址查询阻塞时命令可能更久，超时仍以失败收场。
+该检查证明磁盘配置、容器元数据和现场请求一致，不证明特权修改后的 Nginx worker
+已加载全部配置字节，也不替代新启用事务的现场门禁。
 Fail2ban 使用 schema 2 的私密 `data/net/fail2ban/fail2ban.state`、随机链和完整 token
 标记 hook、封禁规则及末尾 RETURN。启动、动作和停止先核对归属，逐条精确删除，
 不 flush 固定链；旧 `ports=` state、固定 `padm-f2b`、外来引用及 hook 遮蔽拒绝接管。

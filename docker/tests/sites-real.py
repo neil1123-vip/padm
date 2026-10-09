@@ -127,6 +127,11 @@ def main(test_root):
             token = challenge / CHALLENGE
             assert (token.stat().st_mode & 0o777, token.stat().st_uid,
                     token.stat().st_gid) == (0o640, 10001, 10001)
+            # Nginx 会重新打开 /dev/stdout，真实 UID 需要拥有对应文件而非 root 管道。
+            stdout_log = fixture / "stdout.log"
+            stdout_log.touch()
+            os.chown(stdout_log, 10001, 10001)
+            stdout_log.chmod(0o600)
             for output in sorted(test_root.glob("nginx-*-*.conf")):
                 parts = output.stem.split("-")
                 http01 = len(parts) == 4 and parts[1] == "http01"
@@ -173,16 +178,19 @@ def main(test_root):
                     os.chown(path, 0, 10001)
                     path.chmod(0o640)
                 command = ["nginx", "-p", str(fixture), "-c", str(config)]
-                parsed = subprocess.run(command + ["-t"], capture_output=True, text=True, timeout=5,
-                                        user=10001, group=10001, extra_groups=[])
-                assert parsed.returncode == 0, (output.name, parsed.stderr)
-                if not http01 or protocol not in ("21", "27", "29"):
-                    continue
-                process = subprocess.Popen(
-                    command + ["-g", "daemon off; master_process off;"],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                    user=10001, group=10001, extra_groups=[],
-                )
+                with stdout_log.open("ab") as stdout:
+                    parsed = subprocess.run(
+                        command + ["-t"], stdout=stdout, stderr=subprocess.PIPE, text=True,
+                        timeout=5, user=10001, group=10001, extra_groups=[],
+                    )
+                    assert parsed.returncode == 0, (output.name, parsed.stderr)
+                    if not http01 or protocol not in ("21", "27", "29"):
+                        continue
+                    process = subprocess.Popen(
+                        command + ["-g", "daemon off; master_process off;"],
+                        stdout=stdout, stderr=subprocess.DEVNULL,
+                        user=10001, group=10001, extra_groups=[],
+                    )
                 try:
                     deadline = time.monotonic() + 3
                     while True:

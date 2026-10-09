@@ -1,6 +1,6 @@
 # Docker 菜单与功能对齐实施计划
 
-修订日期：2026-10-09
+修订日期：2026-10-10
 
 本计划替代聊天中的六步菜单对齐方案，落实该方案的审计修正。它是
 [功能对照表](docker-feature-matrix.md)之后的实施路线，不是重做
@@ -2783,6 +2783,44 @@ Docker 控制服务的来源日志和 jail 合同仍独立待办。
 实现 `60feabb7 fix(docker): verify Fail2ban cleanup before disabling protection`
 已本地 SSH 签名提交，签名 `G`。
 新启用、SSH/控制面、真实宿主/arm64/重启卸载未验收，5C 与总目标继续 active。
+
+#### 5C.6a WS 只读现场来源见证
+
+服务维护的 Fail2ban 菜单新增“核对 WS 真实来源”，CLI 为
+`fail2ban verify-source <WS 入口 ID> <外部客户端 IPv4/IPv6>`。
+这是安全新启用的必要诊断底座，不启用 jail、不修改配置或防火墙，
+不保存 token 或可以复用的启用凭证，不宣称已完成新启用流程。
+
+WS 21 的受管 Nginx 仅为 `/.well-known/padm-source/<48 hex>` 返回 204，
+以 escape=json 输出真实 remote_addr、内部 server_port、Host、方法和原始 URI。
+普通 combined 日志与封禁 filter 保留，不在其它协议新增挑战端点。
+每次诊断新建随机 nonce，提示外部客户端使用对应 `curl -4/-6`，不跳过证书验证。
+读取新挑战之后的受管容器日志，逐条核对同 nonce 的全部字段；
+历史 URI、转发头及另一内部端口不能作为来源证明，任何同 nonce 错来源立即拒绝。
+本机、容器、网关、特殊范围及 IPv4 映射 IPv6 拒绝；
+IPv6 值规范化，族和 listener 地址族必须一致。
+
+诊断核对完整 spec/deployment/images.env、生成 Compose 与 Nginx 正文，
+唯一运行容器的镜像、标签、挂载、安全属性、日志驱动、公开端口和受管 bridge 网络。
+整个采集窗口及成功输出前，CID、StartedAt、RestartCount、
+按名称排序的网络 ID 和宿主地址快照保持一致。
+共享内部端口的别名及 Reality 共存会造成公开端口证据歧义，因此本项明确拒绝。
+日志采集窗口为 30 秒；底层 Docker 或地址查询阻塞不保证 CLI 的硬截止时间。
+磁盘与 inspect 一致不证明 worker 内存中已加载的全部配置，也不抵御特权篡改。
+
+真实夹具复用现有隔离 daemon、离线 Xray/Nginx/net 镜像及独立客户端 netns，
+扩为 24444/24445 两个公开入口和 8443/8444 独立内部端口。
+它实际调用生产 Witness，新 nonce 来自生产逻辑，日志由真实 Docker 读取；
+只有被离线改写镜像身份的容器审计边界采用真实 inspect 夹具，不伪称完整 CLI 宿主验收。
+每地址族、每端口独立见证；旧挑战重放不得提前成功，伪造 XFF/Forwarded
+不改变真实来源；错端口与错来源使用独立新挑战并验证失败。
+既有自动日志封禁、DNAT DROP counter、第二客户端隔离、解封和 TERM 清理继续验证。
+
+下一步仍须把逐端口/地址族现场见证接入同一次启用事务：
+先运行候选 Nginx 而不启动 jail，全部证明齐备才允许封禁；
+configure/update 与直接 restore/rollback 均需覆盖，旧来源日志不能解锁新镜像。
+SSH 宿主日志/INPUT、控制服务日志/jail、原生双架构及重启卸载独立未决，
+5C 与总目标继续 active。
 
 ## 第六步：发布与完整验收
 

@@ -192,7 +192,7 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 | `reality-coexistence` | 协议与入口 -> REALITY 管理 -> 443 共存分流 | `deferred` | `core-xray` / `nginx` | 宿主 CLI | 共存开启、状态检查、关闭及端口恢复事务尚未迁移。 |
 | `entry-port-management` | 协议与入口 -> 入口端口管理 | `deferred` | 核心 | bridge | v2/v3 已有多入口端口映射及候选事务，v3 明确核心归属；既有内部端口冻结，Fail2ban 联动和 443 共存等完整管理未交付。 |
 | `cdn-entry-management` | 协议与入口 -> CDN 入口管理 | `deferred` | `subscription` | bridge | 尚无独立订阅入口地址覆盖管理。 |
-| `fail2ban` | 系统与脚本 -> Fail2ban 防护 | `host-integrated` | `net-fail2ban` | host + `NET_ADMIN` | 已有受管容器支持状态、固定 jail 单 IP 解封与配置事务停用；维护前审计已加载动作及 live owner。停用先精确停止旧 CID，核对正常退出及两族规则/state 无残留，失败保留配置与恢复证据。schema 2 随机链/token、逐条精确撤销，旧 state/外来规则拒绝接管。隔离 Linux amd64 已验证双栈真实来源、自动日志封禁与解封；新启用前现场来源见证、SSH/控制面、原生宿主/arm64/重启卸载及完整管理仍待验收。 |
+| `fail2ban` | 系统与脚本 -> Fail2ban 防护 | `host-integrated` | `net-fail2ban` | host + `NET_ADMIN` | 已有受管容器支持状态、固定 jail 单 IP 解封与配置事务停用；另有 WS 单入口/地址族的只读现场来源挑战，不保存启用凭证。维护前审计已加载动作及 live owner。停用先精确停止旧 CID，核对正常退出及两族规则/state 无残留，失败保留配置与恢复证据。来源核对仅证明磁盘配置、容器元数据及现场请求，不证明 Nginx worker 全部已加载字节。schema 2 随机链/token、逐条精确撤销，旧 state/外来规则拒绝接管。新启用同事务逐端口/地址族见证、SSH/控制面、原生宿主/arm64/重启卸载及完整管理仍待验收。 |
 | `wireguard` | 订阅与用户 / 路由与访问控制 | `host-integrated` | `net-wireguard` | host + `NET_ADMIN` | 接口和密钥由宿主内核拥有。 |
 | `tun` | 路由与访问控制 -> TUN | `host-integrated` | `net-transparent` | host + `NET_ADMIN` + `/dev/net/tun` | 显式启用透明代理设备。 |
 | `tproxy` | 路由与访问控制 -> Redirect/TProxy | `host-integrated` | `net-transparent` | host + `NET_ADMIN` | 依赖宿主路由和防火墙规则。 |

@@ -42,15 +42,21 @@ jq -n '
    images:(["xray","sing-box","nginx","ops","net"] |
      map({key:.,value:image(.)}) | from_entries),
    host_integrations:[{type:"fail2ban",profile:"net-fail2ban",firewall_rules:["DOCKER-USER"],
-     devices:[],schedules:[],settings:{log_file:"access.log",ports:[24444],
-       max_retry:3,find_time:600,ban_time:3600}}]}
+     devices:[],schedules:[],settings:{log_file:"access.log",ports:[24444,24445],
+       max_retry:3,find_time:600,ban_time:3600}}]} |
+   .core.protocols += [(.core.protocols[0] | .listener_id = "entry-source-ws2" |
+     .public_port = 24445 | .name = "source-ws2" |
+     .uuid = "22222222-2222-4222-8222-222222222222" |
+     .websocket.path = "source-test2" | .websocket.backend_port = 31298 | .websocket.tls_port = 8444)]
 ' >"${TEST_ROOT}/base.json"
 for family in ipv4 dual; do
     target="${TEST_ROOT}/${family}"
     mkdir -p "${target}/config/"{xray,nginx,net/fail2ban} "${target}/data/"{xray,static,net/fail2ban} \
         "${target}/logs/nginx" "${target}/secrets/tls"
     jq --arg family "${family}" '
-      if $family == "dual" then .core.protocols[0].address_families += ["ipv6"] else . end
+      if $family == "dual" then
+        .core.protocols |= map(.address_families |= ((. + ["ipv6"]) | unique))
+      else . end
     ' "${TEST_ROOT}/base.json" >"${target}/spec.json"
     dockerConfigureSpecValidate "${target}/spec.json"
     dockerGenerateCompose "${target}/spec.json" "${target}/compose.json"

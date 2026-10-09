@@ -2222,7 +2222,13 @@ dockerGenerateNginxConfig() {
     token=$(jq -r '.subscription.token' "${specFile}") || return 1
     subscriptionEnabled=$(jq -r '.subscription.enabled' "${specFile}") || return 1
     fail2banEnabled=$(jq -r 'any(.host_integrations[]; .type == "fail2ban")' "${specFile}") || return 1
-    cat >"${target}" <<EOF
+    : >"${target}" || return 1
+    if jq -e 'any(.core.protocols[]; .id == 21)' "${specFile}" >/dev/null; then
+        cat >>"${target}" <<'EOF'
+log_format padm_source escape=json 'padm-source {"source":"$remote_addr","port":"$server_port","host":"$host","method":"$request_method","uri":"$request_uri"}';
+EOF
+    fi
+    cat >>"${target}" <<EOF
 server {
     listen 8080;
     listen [::]:8080;
@@ -2303,6 +2309,15 @@ server {
     ssl_certificate_key /etc/padm/secrets/tls/${domain}.key;
     ssl_protocols TLSv1.2 TLSv1.3;
 EOF
+        if [[ "${protocolId}" == 21 ]]; then
+            cat >>"${target}" <<'EOF'
+
+    location ~ "^/\.well-known/padm-source/[a-f0-9]{48}$" {
+        access_log /dev/stdout padm_source;
+        return 204;
+    }
+EOF
+        fi
     if [[ "${protocolId}" == 24 || "${protocolId}" == 25 ]]; then
         printf '    http2 on;\n' >>"${target}" || return 1
     fi
@@ -3266,6 +3281,257 @@ dockerFail2banAddressIsValid() (
     padmIsValidIPv6Address "${address}"
 )
 
+dockerFail2banSourceAddress() (
+    local address=$1 normalized first
+    # 只接受能指向独立客户端的原生地址，不把映射地址或特殊范围用于封禁见证。
+    # shellcheck source=/dev/null
+    source "${DOCKER_BUNDLE_SOURCE_ROOT}/shell/core/runtime.sh" || return 1
+    if [[ "${address}" == *:* ]]; then
+        normalized=$(padmNormalizeIPv6Address "${address}") || return 1
+        [[ "${normalized}" != 0000:0000:0000:0000:0000:0000:0000:0000 &&
+            "${normalized}" != 0000:0000:0000:0000:0000:0000:0000:0001 &&
+            "${normalized}" != 0000:0000:0000:0000:0000:ffff:* &&
+            "${normalized}" != ff* ]] || return 1
+        printf '%s\n' "${normalized}"
+    else
+        [[ "${address}" =~ ^(0|[1-9][0-9]{0,2})(\.(0|[1-9][0-9]{0,2})){3}$ ]] &&
+            padmIsValidHostName "${address}" || return 1
+        first=${address%%.*}
+        [[ "${first}" != 0 && "${first}" != 127 && "${first}" -lt 224 ]] || return 1
+        printf '%s\n' "${address}"
+    fi
+)
+
+dockerFail2banSourceContainer() (
+    local listener=$1 family=$2 root spec ids container image entry sourcePath hostAddresses networks networkInfo
+    local addresses address
+    local -a networkIds=() canonical=()
+    [[ "$#" -eq 2 ]] || return 1
+    case "${family}" in ipv4|ipv6) ;; *) return 1 ;; esac
+    root=$(dockerInstallRoot) || return 1
+    spec="${root}/config/spec.json"
+    for sourcePath in config/spec.json deployment.json images.env compose.json config/nginx/default.conf; do
+        dockerTrafficSafePath "${root}" "${root}/${sourcePath}" &&
+            [[ -f "${root}/${sourcePath}" && ! -L "${root}/${sourcePath}" ]] || return 1
+    done
+    dockerManagedSpecMatchesDeployment "${spec}" "${root}/deployment.json" "${root}/images.env" &&
+        cmp -s -- "${root}/compose.json" <(dockerGenerateCompose "${spec}" /dev/stdout "${root}") &&
+        [[ -z "$(find "${root}/config/nginx" ! -type f ! -type d -print -quit)" ]] &&
+        [[ -z "$(find "${root}/config/nginx" -name '*.conf' ! -name default.conf -print -quit)" ]] &&
+        cmp -s -- "${root}/config/nginx/default.conf" \
+            <(dockerGenerateNginxConfig "${spec}" /dev/stdout) || {
+        dockerError '来源见证需要完整且一致的受管 Nginx 配置'
+        return 1
+    }
+    entry=$(jq -ec --arg listener "${listener}" --arg family "${family}" '
+      . as $spec | [.core.protocols[] | select(.listener_id == $listener)] |
+      if length == 1 and .[0].id == 21 and
+        (.[0].address_families | index($family)) != null and
+        $spec.reality_stream == null and
+        all($spec.port_aliases[]?; .listener_id != $listener)
+      then {public_port:.[0].public_port,internal_port:(.[0].websocket.tls_port // 8443),
+        domain:($spec.tls.domain | ascii_downcase)}
+      else error("source witness requires a direct WS listener") end
+    ' "${spec}") || {
+        dockerError '来源见证仅接受无别名、无 Reality 共用入口的直接发布 WS 地址族'
+        return 1
+    }
+    while IFS= read -r sourcePath; do
+        sourcePath=${sourcePath/'${PADM_DOCKER_ROOT}'/${root}}
+        dockerTrafficSafePath "${root}" "${sourcePath}" || return 1
+    done < <(jq -r '.services.nginx.volumes[].source' "${root}/compose.json")
+    ids=$(docker ps -aq --filter "label=com.docker.compose.project=${PADM_DOCKER_PROJECT}" \
+        --filter label=com.docker.compose.service=nginx --filter label=com.docker.compose.oneoff=False) || return 1
+    [[ "${ids}" =~ ^[a-f0-9]{12,64}$ ]] || return 1
+    container=$(docker container inspect "${ids}") &&
+        image=$(jq -er '.images.nginx' "${spec}") || return 1
+    jq -e --arg root "${root}" --arg image "${image}" --arg id "${ids}" \
+        --slurpfile spec "${spec}" --slurpfile compose "${root}/compose.json" '
+      def bindings:
+        map(capture("^(?<host>0\\.0\\.0\\.0|\\[::\\]):(?<public>[0-9]+):(?<private>[0-9]+)/(?<proto>tcp|udp)$") |
+          {key:(.private + "/" + .proto),
+           value:{HostIp:(.host | if . == "[::]" then "::" else . end),HostPort:.public}}) |
+        group_by(.key) | map({key:.[0].key,value:map(.value) | sort_by(.HostIp,.HostPort)}) |
+        from_entries;
+      length == 1 and
+      (.[0] as $c | $c.Config.Labels as $labels | $compose[0] as $compose |
+        $compose.services.nginx as $service |
+        ($c.Id | type == "string" and test("^[a-f0-9]{64}$") and startswith($id)) and
+        $c.State.Status == "running" and $c.State.Running == true and
+        $c.State.Restarting == false and $c.State.Paused == false and $c.State.Dead == false and
+        ($c.State.StartedAt | type == "string" and
+          test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$")) and
+        ($c.RestartCount | type == "number" and floor == . and . >= 0) and
+        $labels["com.docker.compose.project"] == "padm-docker" and
+        $labels["com.docker.compose.project.working_dir"] == $root and
+        $labels["com.docker.compose.project.config_files"] == ($root + "/compose.json") and
+        $labels["com.docker.compose.service"] == "nginx" and
+        $labels["com.docker.compose.oneoff"] == "False" and
+        $labels["io.padm.mode"] == "docker" and $labels["io.padm.project"] == "padm-docker" and
+        $labels["io.padm.component"] == "nginx" and
+        $labels["io.padm.release"] == $spec[0].release.version and
+        $c.Config.Image == $image and $c.Config.User == "10001:10001" and
+        $c.Config.Entrypoint == ["/usr/sbin/nginx","-e","/dev/stderr"] and
+        $c.Config.Cmd == ["-g","daemon off;"] and
+        $c.HostConfig.NetworkMode == $compose.networks.default.name and
+        $c.HostConfig.ReadonlyRootfs == true and $c.HostConfig.Privileged == false and
+        ($c.HostConfig.CapAdd // []) == [] and
+        ($c.HostConfig.CapDrop | sort) == ["ALL"] and
+        ($c.HostConfig.SecurityOpt | sort) == ($service.security_opt | sort) and
+        $c.HostConfig.LogConfig.Type == $service.logging.driver and
+        $c.HostConfig.LogConfig.Config == $service.logging.options and
+        (($c.HostConfig.Tmpfs // {}) | keys | sort) ==
+          ([$service.tmpfs[] | split(":")[0]] | sort) and
+        all($c.Mounts[]; .Type == "bind") and
+        ($c.Mounts | map({source:.Source,target:.Destination,read_only:(.RW | not)}) | sort_by(.target)) ==
+          ($service.volumes | map({source:(.source | sub("^\\$\\{PADM_DOCKER_ROOT\\}"; $root)),
+            target,read_only}) | sort_by(.target)) and
+        ($c.HostConfig.PortBindings | with_entries(.value |= sort_by(.HostIp,.HostPort))) ==
+          ($service.ports | bindings) and
+        ($c.NetworkSettings.Networks | keys | sort) ==
+          ([($service.networks // ["default"])[] | $compose.networks[.].name] | sort) and
+        all($c.NetworkSettings.Networks[];
+          (.NetworkID | type == "string" and test("^[a-f0-9]{64}$")) and
+          (.IPAddress | type == "string") and (.Gateway | type == "string") and
+          (.GlobalIPv6Address | type == "string") and (.IPv6Gateway | type == "string")))
+    ' <<<"${container}" >/dev/null || {
+        dockerError '受管 Nginx 容器状态、配置或发布归属漂移，未发出来源挑战'
+        return 1
+    }
+    networks=$(jq -r '.[0].NetworkSettings.Networks | [.[] | .NetworkID] | unique | join(" ")' \
+        <<<"${container}") || return 1
+    read -r -a networkIds <<<"${networks}"
+    [[ "${#networkIds[@]}" -ge 1 ]] || return 1
+    networkInfo=$(docker network inspect "${networkIds[@]}") || return 1
+    jq -e --slurpfile compose "${root}/compose.json" --argjson container "${container}" '
+      length == ($container[0].NetworkSettings.Networks | length) and
+      all(.[]; . as $n |
+        ([($compose[0].services.nginx.networks // ["default"])[] as $key |
+          $compose[0].networks[$key] | select(.name == $n.Name)] | length) == 1 and
+        $n.Id == $container[0].NetworkSettings.Networks[$n.Name].NetworkID and
+        $n.Driver == "bridge" and $n.Labels["io.padm.mode"] == "docker" and
+        $n.Labels["io.padm.project"] == "padm-docker" and
+        ([($compose[0].services.nginx.networks // ["default"])[] as $key |
+          $compose[0].networks[$key] | select(.name == $n.Name)][0] as $expected |
+          $n.EnableIPv6 == ($expected.enable_ipv6 // false) and
+          all($expected.labels | to_entries[]; $n.Labels[.key] == .value)))
+    ' <<<"${networkInfo}" >/dev/null || return 1
+    command -v ip >/dev/null 2>&1 || {
+        dockerError '来源见证缺少 ip 工具，请先通过系统软件源安装 iproute2'
+        return 1
+    }
+    hostAddresses=$(ip -j address show) &&
+        jq -e 'type == "array" and all(.[]; (.addr_info | type == "array") and
+          all(.addr_info[]; (.family == "inet" or .family == "inet6") and
+            (.local | type == "string" and length > 0)))' <<<"${hostAddresses}" >/dev/null || return 1
+    # shellcheck source=/dev/null
+    source "${DOCKER_BUNDLE_SOURCE_ROOT}/shell/core/runtime.sh" || return 1
+    addresses=$(jq -r --argjson host "${hostAddresses}" '
+      [$host[].addr_info[].local] +
+      [.[0].NetworkSettings.Networks[] | .IPAddress,.Gateway,.GlobalIPv6Address,.IPv6Gateway] |
+      map(select(length > 0)) | unique[]
+    ' <<<"${container}") || return 1
+    while IFS= read -r address; do
+        if [[ "${address}" == *:* ]]; then
+            address=$(padmNormalizeIPv6Address "${address}") || return 1
+        else
+            [[ "${address}" =~ ^(0|[1-9][0-9]{0,2})(\.(0|[1-9][0-9]{0,2})){3}$ ]] &&
+                padmIsValidHostName "${address}" || return 1
+        fi
+        canonical+=("${address}")
+    done <<<"${addresses}"
+    addresses=$(printf '%s\n' "${canonical[@]}" | jq -Rsc 'split("\n") | map(select(length > 0)) | unique') ||
+        return 1
+    jq -cn --argjson container "${container}" --argjson entry "${entry}" --argjson addresses "${addresses}" '
+      $container[0] as $c |
+      {id:$c.Id,started_at:$c.State.StartedAt,restart_count:$c.RestartCount,
+       public_port:$entry.public_port,internal_port:$entry.internal_port,domain:$entry.domain,
+       addresses:$addresses,networks:($c.NetworkSettings.Networks | to_entries |
+         map({name:.key,id:.value.NetworkID}) | sort_by(.name))}
+    '
+)
+
+dockerFail2banSourceWitness() (
+    local listener=$1 expected=$2 family snapshot current uri nonce since started logs matches record address own
+    local id publicPort internalPort domain found=false
+    [[ "$#" -eq 2 ]] || return 1
+    expected=$(dockerFail2banSourceAddress "${expected}") || {
+        dockerError '来源见证只接受独立客户端的原生 IPv4/IPv6 字面地址'
+        return 1
+    }
+    family=ipv4
+    [[ "${expected}" != *:* ]] || family=ipv6
+    snapshot=$(dockerFail2banSourceContainer "${listener}" "${family}") || return 1
+    # 宿主、容器与网关都不能充当独立客户端；IPv6 统一值后比较。
+    # shellcheck source=/dev/null
+    source "${DOCKER_BUNDLE_SOURCE_ROOT}/shell/core/runtime.sh" || return 1
+    while IFS= read -r own; do
+        if [[ "${own}" == *:* ]]; then
+            own=$(padmNormalizeIPv6Address "${own}") || return 1
+        else
+            [[ "${own}" =~ ^(0|[1-9][0-9]{0,2})(\.(0|[1-9][0-9]{0,2})){3}$ ]] &&
+                padmIsValidHostName "${own}" || return 1
+        fi
+        [[ "${own}" != "${expected}" ]] || {
+            dockerError '来源地址属于本机、容器或网关，未发出来源挑战'
+            return 1
+        }
+    done < <(jq -r '.addresses[]' <<<"${snapshot}")
+    id=$(jq -er '.id' <<<"${snapshot}") &&
+        publicPort=$(jq -er '.public_port' <<<"${snapshot}") &&
+        internalPort=$(jq -er '.internal_port' <<<"${snapshot}") &&
+        domain=$(jq -er '.domain' <<<"${snapshot}") || return 1
+    since=$(date -u '+%Y-%m-%dT%H:%M:%S.%NZ') || return 1
+    nonce=$(dockerSubscriptionRandomHex) || return 1
+    [[ "${nonce}" =~ ^[a-f0-9]{48}$ ]] || return 1
+    uri="/.well-known/padm-source/${nonce}"
+    started=${SECONDS}
+    printf 'source-challenge=%s\n' "$(jq -cn --arg uri "${uri}" --argjson public_port "${publicPort}" \
+        --arg family "${family}" --arg domain "${domain}" '{uri:$uri,public_port:$public_port,
+        family:$family,domain:$domain}')" || return 1
+    printf '请让外部客户端使用 curl %s --fail --show-error "https://%s:%s%s"（不要使用 -k）访问上述挑战 URI。\n' \
+        "$(if [[ "${family}" == ipv6 ]]; then printf '%s' '-6'; else printf '%s' '-4'; fi)" \
+        "${domain}" "${publicPort}" "${uri}" >&2
+    while ((SECONDS - started < 30)); do
+        current=$(dockerFail2banSourceContainer "${listener}" "${family}") &&
+            [[ "${current}" == "${snapshot}" ]] || {
+            dockerError '挑战期间受管 Nginx 快照变化，来源见证已拒绝'
+            return 1
+        }
+        logs=$(docker logs --since "${since}" "${id}" 2>&1) || return 1
+        matches=$(jq -Rsc --arg uri "${uri}" '
+          [split("\n")[] | select(startswith("padm-source ")) |
+            .[12:] | fromjson | select(.uri == $uri)]
+        ' <<<"${logs}") || return 1
+        while IFS= read -r record; do
+            [[ -n "${record}" ]] || continue
+            jq -e --arg uri "${uri}" --arg port "${internalPort}" --arg domain "${domain}" '
+              type == "object" and (keys | sort) == ["host","method","port","source","uri"] and
+              all(.[]; type == "string") and .uri == $uri and .port == $port and
+              .host == $domain and .method == "GET"
+            ' <<<"${record}" >/dev/null &&
+                address=$(dockerFail2banSourceAddress "$(jq -er '.source' <<<"${record}")") &&
+                [[ "${address}" == "${expected}" ]] || {
+                dockerError '当前挑战的来源、端口、域名或请求字段不一致，见证已拒绝'
+                return 1
+            }
+            found=true
+        done < <(jq -c '.[]' <<<"${matches}")
+        if [[ "${found}" == true ]]; then
+            current=$(dockerFail2banSourceContainer "${listener}" "${family}") &&
+                [[ "${current}" == "${snapshot}" ]] && ((SECONDS - started < 30)) || return 1
+            printf 'source-verified=%s\n' "$(jq -cn --arg listener_id "${listener}" \
+                --arg family "${family}" --arg source "${expected}" --argjson public_port "${publicPort}" \
+                --argjson internal_port "${internalPort}" '{listener_id:$listener_id,family:$family,
+                source:$source,public_port:$public_port,internal_port:$internal_port}')"
+            return $?
+        fi
+        sleep 1
+    done
+    dockerError '30 秒内未收到当前挑战的真实来源记录，未形成启用证据'
+    return 1
+)
+
 dockerFail2banContainer() (
     local root ids container image sourcePath candidate status mode=${1:-running}
     [[ "$#" -le 1 ]] || return 1
@@ -3476,6 +3742,14 @@ dockerFail2banCommand() {
     [[ "$#" -gt 0 ]] && shift
     case "${action}" in
     status) [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
+    verify-source)
+        [[ "$#" -eq 2 ]] || return "${PADM_DOCKER_RC_USAGE}"
+        dockerFail2banSourceAddress "$2" >/dev/null || return "${PADM_DOCKER_RC_USAGE}"
+        dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+        dockerLockInstalledDeployment || return $?
+        dockerFail2banSourceWitness "$@" || return "${PADM_DOCKER_RC_STATE}"
+        return 0
+        ;;
     disable)
         if ! [[ "$#" -eq 0 || ( "$#" -eq 1 && "$1" == --preview ) ||
             ( "$#" -eq 2 && "$1" == --confirm && "$2" == PADM-DOCKER-EDIT ) ]]; then
