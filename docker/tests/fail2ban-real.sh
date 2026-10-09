@@ -31,6 +31,7 @@ jq -n '{
 dockerGenerateFail2banConfig "${TEST_ROOT}/spec.json" "${TEST_ROOT}"
 grep -qx 'allowipv6 = no' "${TEST_ROOT}/config/net/fail2ban/fail2ban.local"
 cp "${PROJECT_ROOT}/docker/images/net/entrypoint.sh" "${TEST_ROOT}/entrypoint.sh"
+chmod 0755 "${TEST_ROOT}/entrypoint.sh"
 cp "${TEST_ROOT}/config/net/fail2ban/fail2ban.local" "${TEST_ROOT}/ipv4.local"
 jq '.core.protocols[1].address_families += ["ipv6"]' "${TEST_ROOT}/spec.json" >"${TEST_ROOT}/dual.json"
 dockerGenerateFail2banConfig "${TEST_ROOT}/dual.json" "${TEST_ROOT}"
@@ -45,9 +46,10 @@ for family in ipv4 dual; do
     [[ "${family}" != ipv4 ]] || config="${MOUNT_ROOT}/ipv4.local"
     MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker run --rm -i --network none \
         --cap-add NET_ADMIN --security-opt no-new-privileges:true --read-only \
-        --tmpfs /run:rw --tmpfs /tmp:rw --tmpfs /var/lib/padm/net:rw \
+        --tmpfs /run:rw --tmpfs /tmp:rw --tmpfs /var/lib/padm/net:rw,exec \
         -e "PADM_TEST_FAMILY=${family}" \
         --mount "type=bind,source=${MOUNT_ROOT},target=/test,readonly" \
+        --mount "type=bind,source=${MOUNT_ROOT}/entrypoint.sh,target=/usr/local/bin/padm-entrypoint,readonly" \
         --mount "type=bind,source=${config},target=/etc/fail2ban/fail2ban.local,readonly" \
         --mount "type=bind,source=${MOUNT_ROOT}/config/net/fail2ban/padm.local,target=/etc/fail2ban/jail.d/padm.local,readonly" \
         --mount "type=bind,source=${MOUNT_ROOT}/config/net/fail2ban/padm-nginx.conf,target=/etc/fail2ban/filter.d/padm-nginx.conf,readonly" \
@@ -65,14 +67,14 @@ wait_ready() {
 }
 wait_rule() {
     for attempt in $(seq 1 100); do
-        "$1" -w -C padm-f2b -s "$2" -j DROP >/dev/null 2>&1 && return 0
+        "$1" -w -C "$chain" -s "$2" -m comment --comment "padm-f2b:$token" -j DROP >/dev/null 2>&1 && return 0
         sleep 0.1
     done
     fail "missing $1 ban for $2"
 }
 wait_unban() {
     for attempt in $(seq 1 100); do
-        if ! "$1" -w -C padm-f2b -s "$2" -j DROP >/dev/null 2>&1; then
+        if ! "$1" -w -C "$chain" -s "$2" -m comment --comment "padm-f2b:$token" -j DROP >/dev/null 2>&1; then
             return 0
         fi
         sleep 0.1
@@ -82,25 +84,28 @@ wait_unban() {
 assert_hooks() {
     for port in 24444 24445; do
         "$1" -w -C DOCKER-USER -p tcp -m conntrack --ctstate NEW \
-            --ctorigdstport "$port" -j padm-f2b || fail "missing $1 hook for $port"
+            --ctorigdstport "$port" -m comment --comment "padm-f2b:$token" -j "$chain" ||
+            fail "missing $1 hook for $port"
     done
 }
 start_server() {
     sh /test/entrypoint.sh fail2ban 24444,24445 >/tmp/fail2ban.log 2>&1 &
     server=$!
     wait_ready
+    token=$(sed -n 's/^token=//p' /var/lib/padm/net/fail2ban.state)
+    chain=$(sed -n 's/^chain=//p' /var/lib/padm/net/fail2ban.state)
     python3 /test/fail2ban-audit.py || fail "canonical loaded actions were rejected"
 }
 stop_server() {
     kill -TERM "$server"
     wait "$server" || fail "entrypoint failed on TERM"
     for table in iptables ip6tables; do
-        if "$table" -w -n -L padm-f2b >/dev/null 2>&1; then
+        if "$table" -w -n -L "$chain" >/dev/null 2>&1; then
             fail "$table chain survived TERM"
         fi
         for port in 24444 24445; do
             if "$table" -w -C DOCKER-USER -p tcp -m conntrack --ctstate NEW \
-                --ctorigdstport "$port" -j padm-f2b >/dev/null 2>&1; then
+                --ctorigdstport "$port" -m comment --comment "padm-f2b:$token" -j "$chain" >/dev/null 2>&1; then
                 fail "$table hook survived TERM"
             fi
         done
@@ -119,16 +124,21 @@ if [ "$PADM_TEST_FAMILY" = dual ]; then
     ip6tables -w -N DOCKER-USER
 fi
 sh /test/entrypoint.sh preflight fail2ban 24444,24445
-# 模拟上次异常退出留下的旧端口，确认清理不覆盖本次启动参数。
+# 旧 state 和固定名链没有所有权证据，启动必须拒绝且不修改资源。
 iptables -w -N padm-f2b
 iptables -w -I DOCKER-USER -p tcp -m conntrack --ctstate NEW --ctorigdstport 23444 -j padm-f2b
 printf 'ports=23444\n' >/var/lib/padm/net/fail2ban.state
-start_server
-grep -qx 'ports=24444,24445' /var/lib/padm/net/fail2ban.state
-if iptables -w -C DOCKER-USER -p tcp -m conntrack --ctstate NEW \
-    --ctorigdstport 23444 -j padm-f2b >/dev/null 2>&1; then
-    fail "stale published port survived startup"
+chmod 0600 /var/lib/padm/net/fail2ban.state
+iptables-save > /tmp/legacy.before
+if sh /test/entrypoint.sh fail2ban 24444,24445 >/tmp/fail2ban.log 2>&1; then
+    fail "legacy ownership state was accepted"
 fi
+iptables-save > /tmp/legacy.after
+cmp /tmp/legacy.before /tmp/legacy.after || fail "legacy refusal changed firewall rules"
+grep -qx 'ports=23444' /var/lib/padm/net/fail2ban.state
+iptables -w -D DOCKER-USER -p tcp -m conntrack --ctstate NEW --ctorigdstport 23444 -j padm-f2b
+iptables -w -X padm-f2b
+rm /var/lib/padm/net/fail2ban.state
 # 第二个 hook 失败时必须撤销第一个 hook 和新链，后续封禁仍可重试。
 iptables_command=$(command -v iptables)
 mkdir -p /var/lib/padm/net/bin
@@ -147,14 +157,21 @@ case " $* " in
 esac
 exec "$(cat /var/lib/padm/net/iptables-command)" "$@"
 SH
-original_iptables=$(fail2ban-client get padm-nginx action padm-docker-user iptables)
-fail2ban-client set padm-nginx action padm-docker-user iptables 'sh /var/lib/padm/net/bin/iptables -w'
+chmod 0700 /var/lib/padm/net/bin/iptables
+start_server
+grep -qx 'ports=24444,24445' /var/lib/padm/net/fail2ban.state
+sh /usr/local/bin/padm-entrypoint fail2ban-action stop "$token" iptables -w
 touch /var/lib/padm/net/reject-second-port
-fail2ban-client set padm-nginx banip 192.0.2.9
+if PATH="/var/lib/padm/net/bin:$PATH" sh /usr/local/bin/padm-entrypoint \
+    fail2ban-action start "$token" iptables -w >/tmp/injected.log 2>&1; then
+    cat /tmp/injected.log >&2
+    [ ! -f /var/lib/padm/net/iptables.calls ] || cat /var/lib/padm/net/iptables.calls >&2
+    fail "second hook failure was accepted"
+fi
 rolled_back=0
 for attempt in $(seq 1 100); do
     if [ -f /var/lib/padm/net/rejected-second-port ] &&
-        ! iptables -w -n -L padm-f2b >/dev/null 2>&1; then
+        ! iptables -w -n -L "$chain" >/dev/null 2>&1; then
         rolled_back=1
         break
     fi
@@ -165,7 +182,6 @@ if [ "$rolled_back" -ne 1 ]; then
     iptables -w -S >&2
     fail "partial actionstart was not rolled back"
 fi
-fail2ban-client set padm-nginx action padm-docker-user iptables "$original_iptables"
 fail2ban-client set padm-nginx banip 192.0.2.7
 wait_rule iptables 192.0.2.7
 assert_hooks iptables
@@ -175,6 +191,19 @@ if [ "$PADM_TEST_FAMILY" = dual ]; then
     assert_hooks ip6tables
 fi
 python3 /test/fail2ban-audit.py || fail "active loaded actions were rejected"
+# 内核规则漂移时只读门禁须拒绝，不触碰封禁票据或规则。
+iptables -w -I "$chain" 1 -s 192.0.2.99 -j DROP
+iptables-save > /tmp/owner.before
+fail2ban-client get padm-nginx banip > /tmp/bans.before
+if sh /usr/local/bin/padm-entrypoint fail2ban-health; then
+    fail "foreign kernel rule passed the maintenance ownership gate"
+fi
+iptables-save > /tmp/owner.after
+fail2ban-client get padm-nginx banip > /tmp/bans.after
+cmp /tmp/owner.before /tmp/owner.after || fail "owner audit changed firewall rules"
+cmp /tmp/bans.before /tmp/bans.after || fail "owner audit changed ban tickets"
+iptables -w -D "$chain" -s 192.0.2.99 -j DROP
+sh /usr/local/bin/padm-entrypoint fail2ban-health || fail "restored owner was rejected"
 # 改写已加载动作但不执行它，审计须拒绝且保留当前封禁。
 python3 - <<'PY'
 import os

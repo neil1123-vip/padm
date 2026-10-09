@@ -91,6 +91,10 @@ exec)
         esac
         exit 0
     fi
+    if [[ "$*" == "exec ${FAKE_DOCKER_FAIL2BAN_CONTAINER:?} sh /usr/local/bin/padm-entrypoint fail2ban-health" ]]; then
+        [[ "${FAKE_DOCKER_MODE:-ok}" != fail2ban-owner-drift ]] || exit 1
+        exit 0
+    fi
     [[ "${2:-}" == "${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}" &&
         "${3:-}" == fail2ban-client ]] || exit 1
     if [[ "$#" -eq 5 && "${4:-}" == status && "${5:-}" == padm-nginx ]]; then
@@ -329,15 +333,15 @@ FAKE_DOCKER_MODE=tls-validity-fail runControl 15 reject-expired-candidate config
 runControl 0 fail2ban configure --spec "${FAIL2BAN_SPEC}"
 grep -q 'access_log /var/log/nginx/access.log combined;' "${DOCKER_ROOT}/config/nginx/default.conf" ||
     fail 'Nginx real-source access log was not enabled'
-grep -q 'DOCKER-USER' "${DOCKER_ROOT}/config/net/fail2ban/padm-docker-user.conf" ||
-    fail 'Fail2ban action does not own DOCKER-USER'
 grep -qF "before = iptables.conf" "${DOCKER_ROOT}/config/net/fail2ban/padm-docker-user.conf" ||
     fail 'Fail2ban does not inherit native address-family commands'
-grep -qF "for port in \$(echo '<port>' | tr ',' ' '); do" \
-    "${DOCKER_ROOT}/config/net/fail2ban/padm-docker-user.conf" ||
-    fail 'Fail2ban does not expand each published port before matching conntrack'
-grep -qF -- '--ctorigdstport "$port" -j padm-f2b || { <actionstop>; exit 1; }' "${DOCKER_ROOT}/config/net/fail2ban/padm-docker-user.conf" ||
-    fail 'Fail2ban does not match the original published port after Docker DNAT'
+for operation in start stop flush check ban unban; do
+    grep -qF "action${operation} = sh /usr/local/bin/padm-entrypoint fail2ban-action ${operation} \"\$PADM_FAIL2BAN_TOKEN\" <iptables>" \
+        "${DOCKER_ROOT}/config/net/fail2ban/padm-docker-user.conf" ||
+        fail "Fail2ban ${operation} bypasses the bound ownership helper"
+done
+! grep -qE ' -[FX] | -[ID] DOCKER-USER' "${DOCKER_ROOT}/config/net/fail2ban/padm-docker-user.conf" ||
+    fail 'Fail2ban action mutates firewall rules without ownership verification'
 grep -qF 'port="24444,24445"' "${DOCKER_ROOT}/config/net/fail2ban/padm.local" ||
     fail 'Fail2ban did not preserve all protected published ports'
 grep -qx 'allowipv6 = no' "${DOCKER_ROOT}/config/net/fail2ban/fail2ban.local" ||
@@ -350,6 +354,10 @@ jq -e '
   ((.services.nginx.cap_add // []) | length) == 0
 ' "${DOCKER_ROOT}/compose.json" >/dev/null || fail 'Fail2ban privilege boundary is wrong'
 grep -q 'net-fail2ban preflight fail2ban 24444,24445' "${DOCKER_LOG}" || fail 'Fail2ban preflight was not called for all ports'
+: >"${DOCKER_LOG}"
+runControl 0 fail2ban-installed-validate validate
+grep -q 'net-fail2ban preflight fail2ban 24444,24445 owned' "${DOCKER_LOG}" ||
+    fail 'Installed Fail2ban validation did not verify its existing owner'
 
 # 维护命令只使用当前容器和固定 jail，不能借机启动服务或改写受管文件。
 jq -n --arg root "${DOCKER_ROOT}" --arg id "${FAIL2BAN_CONTAINER}" \
@@ -389,14 +397,14 @@ runControl 0 fail2ban-status fail2ban status
 grep -qx 'Currently banned: 1' "${CONTROL_LOG}" || fail 'Fail2ban status hid the client output'
 grep -qxF "exec ${FAIL2BAN_CONTAINER} fail2ban-client status padm-nginx" "${DOCKER_LOG}" ||
     fail 'Fail2ban status did not target the managed container and jail'
-[[ "$(grep '^exec ' "${DOCKER_LOG}")" == "exec -i ${FAIL2BAN_CONTAINER} python3 -"$'\n'"exec ${FAIL2BAN_CONTAINER} fail2ban-client status padm-nginx" ]] ||
+[[ "$(grep '^exec ' "${DOCKER_LOG}")" == "exec -i ${FAIL2BAN_CONTAINER} python3 -"$'\n'"exec ${FAIL2BAN_CONTAINER} sh /usr/local/bin/padm-entrypoint fail2ban-health"$'\n'"exec ${FAIL2BAN_CONTAINER} fail2ban-client status padm-nginx" ]] ||
     fail 'Fail2ban status did not audit loaded actions before the maintenance client'
 for ip in 192.0.2.7 2001:db8::1 ::ffff:192.0.2.7; do
     : >"${DOCKER_LOG}"
     runControl 0 fail2ban-unban fail2ban unban "${ip}"
     grep -qxF "exec ${FAIL2BAN_CONTAINER} fail2ban-client set padm-nginx unbanip ${ip}" "${DOCKER_LOG}" ||
         fail 'Fail2ban unban changed the literal IP, container or jail'
-    [[ "$(grep '^exec ' "${DOCKER_LOG}")" == "exec -i ${FAIL2BAN_CONTAINER} python3 -"$'\n'"exec ${FAIL2BAN_CONTAINER} fail2ban-client set padm-nginx unbanip ${ip}" ]] ||
+    [[ "$(grep '^exec ' "${DOCKER_LOG}")" == "exec -i ${FAIL2BAN_CONTAINER} python3 -"$'\n'"exec ${FAIL2BAN_CONTAINER} sh /usr/local/bin/padm-entrypoint fail2ban-health"$'\n'"exec ${FAIL2BAN_CONTAINER} fail2ban-client set padm-nginx unbanip ${ip}" ]] ||
         fail 'Fail2ban unban did not audit loaded actions before the maintenance client'
 done
 FAKE_DOCKER_MODE=fail2ban-client-fail runControl 37 fail2ban-status-client-error fail2ban status
@@ -406,7 +414,7 @@ FAKE_DOCKER_MODE=fail2ban-client-fail runControl 37 fail2ban-unban-client-error 
 ! grep -Eq '^(run|start|restart) |^compose .* (run|up|start|restart)( |$)' "${DOCKER_LOG}" ||
     fail 'Fail2ban maintenance automatically started a container'
 
-for auditMode in fail2ban-audit-drift fail2ban-audit-query-fail; do
+for auditMode in fail2ban-audit-drift fail2ban-audit-query-fail fail2ban-owner-drift; do
     : >"${DOCKER_LOG}"
     FAKE_DOCKER_MODE="${auditMode}" runControl 15 "${auditMode}-status" fail2ban status
     grep -qxF "exec -i ${FAIL2BAN_CONTAINER} python3 -" "${DOCKER_LOG}" ||
@@ -440,6 +448,8 @@ done
 for mode in fail2ban-absent fail2ban-duplicate fail2ban-invalid-id; do
     FAKE_DOCKER_MODE="${mode}" rejectFail2ban 15 "${mode}" fail2ban status
 done
+FAKE_DOCKER_INSPECT_FILTER='.[0].HostConfig.CapAdd = ["CAP_NET_ADMIN"]' \
+    runControl 0 fail2ban-canonical-capability fail2ban status
 while read -r name filter; do
     FAKE_DOCKER_INSPECT_FILTER="${filter}" rejectFail2ban 15 "fail2ban-${name}" fail2ban status
 done <<'EOF'
@@ -540,6 +550,37 @@ grep -qxF new-certificate "${DOCKER_ROOT}/secrets/tls/proxy.example.com.crt" ||
     fail 'successful deployment did not commit candidate TLS'
 grep -qxF new-acme-account "${DOCKER_ROOT}/data/acme/account" ||
     fail 'successful deployment did not commit candidate ACME data'
+
+# Fail2ban 的双栈发布复用受管辅助网，不扩大核心的出站网络范围。
+(
+    source "${PROJECT_ROOT}/install-docker.sh"
+    jq '.core.protocols[0].address_families += ["ipv6"]' \
+        "${DOCKER_ROOT}/config/spec.json" >"${TEST_ROOT}/fail2ban-dual.json"
+    dockerGenerateCompose "${TEST_ROOT}/fail2ban-dual.json" "${TEST_ROOT}/fail2ban-dual-compose.json"
+    jq -e '.networks.ipv6.enable_ipv6 == true and
+      .services.nginx.networks == ["default","ipv6"] and
+      .services.xray.networks == null' "${TEST_ROOT}/fail2ban-dual-compose.json"
+    jq -e '.networks.ipv6 == null and .services.nginx.networks == null' "${DOCKER_ROOT}/compose.json"
+    cleanupRoot="${TEST_ROOT}/fail2ban-network-cleanup"
+    export PADM_DOCKER_INSTALL_DIR="${cleanupRoot}"
+    mkdir -p "${cleanupRoot}"
+    cp "${TEST_ROOT}/fail2ban-dual-compose.json" "${cleanupRoot}/compose.json"
+    dockerIPv6NetworkManage() { printf '%s\n' "$*" >>"${cleanupRoot}/network.calls"; }
+    for current in dual ipv4; do
+        DOCKER_CONFIG_CANDIDATE="${cleanupRoot}/candidate"
+        mkdir -p "${DOCKER_CONFIG_CANDIDATE}"
+        cp "${TEST_ROOT}/fail2ban-dual-compose.json" "${DOCKER_CONFIG_CANDIDATE}/compose.json"
+        if [[ "${current}" == ipv4 ]]; then
+            cp "${DOCKER_ROOT}/compose.json" "${cleanupRoot}/compose.json"
+        fi
+        dockerCleanupConfigurationCandidate
+        if [[ "${current}" == dual ]]; then
+            [[ ! -e "${cleanupRoot}/network.calls" ]]
+        else
+            grep -qx cleanup "${cleanupRoot}/network.calls"
+        fi
+    done
+)
 
 : >"${DOCKER_LOG}"
 runControl 0 tun configure --spec "${TUN_SPEC}"

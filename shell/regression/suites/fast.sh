@@ -90,6 +90,7 @@ listRegressionDockerContractsChildSelectors() {
         docker-permissions \
         docker-wireguard-runtime \
         docker-tproxy-ownership \
+        docker-fail2ban-ownership \
         docker-control-api \
         docker-subscriptions \
         docker-accounts-cli \
@@ -122,6 +123,7 @@ listRegressionDockerContractsFastChildSelectors() {
         docker-control-cli \
         docker-wireguard-runtime \
         docker-tproxy-ownership \
+        docker-fail2ban-ownership \
         docker-control-api \
         docker-permissions \
         docker-accounts-cli \
@@ -208,6 +210,14 @@ runDockerRoutingIPv6RealRegression() {
 
 runDockerFail2banRealRegression() {
     bash "${PROJECT_ROOT}/docker/tests/fail2ban-isolated-real.sh"
+}
+
+runDockerFail2banSourceRealRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/fail2ban-source-real.sh"
+}
+
+runDockerFail2banOwnershipRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/fail2ban-ownership.sh"
 }
 
 runDockerRoutingWarpRegression() {
@@ -340,6 +350,8 @@ registerRegressionFunctionLeaf docker-phase2 runDockerPhase2Regression
 registerRegressionFunctionLeaf docker-phase3 runDockerPhase3Regression
 registerRegressionFunctionLeaf docker-phase4 runDockerPhase4Regression
 registerRegressionFunctionLeaf docker-fail2ban-real runDockerFail2banRealRegression
+registerRegressionFunctionLeaf docker-fail2ban-source-real runDockerFail2banSourceRealRegression
+registerRegressionFunctionLeaf docker-fail2ban-ownership runDockerFail2banOwnershipRegression
 registerRegressionFunctionLeaf docker-phase5 runDockerPhase5Regression
 registerRegressionFunctionLeaf docker-phase6 runDockerPhase6Regression
 registerRegressionFunctionLeaf docker-traffic runDockerTrafficRegression
@@ -388,6 +400,12 @@ listRegressionDockerTProxyChildSelectors() {
 }
 registerRegressionParallelSelectorList docker-tproxy-focused runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-tproxy-focused-${BASHPID:-$$}" listRegressionDockerTProxyChildSelectors 2
+
+listRegressionDockerFail2banChildSelectors() {
+    printf '%s\n' docker-fail2ban-ownership docker-phase4
+}
+registerRegressionParallelSelectorList docker-fail2ban-focused runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-fail2ban-focused-${BASHPID:-$$}" listRegressionDockerFail2banChildSelectors 2
 
 listRegressionDockerWireGuardChildSelectors() {
     printf '%s\n' docker-wireguard-runtime docker-phase4

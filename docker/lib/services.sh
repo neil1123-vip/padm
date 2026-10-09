@@ -1470,15 +1470,12 @@ EOF
 before = iptables.conf
 
 [Definition]
-actionstart = <iptables> -N padm-f2b || exit 1
-              for port in $(echo '<port>' | tr ',' ' '); do <iptables> -I DOCKER-USER 1 -p <protocol> -m conntrack --ctstate NEW --ctorigdstport "$port" -j padm-f2b || { <actionstop>; exit 1; }; done
-actionstop = for port in $(echo '<port>' | tr ',' ' '); do <iptables> -D DOCKER-USER -p <protocol> -m conntrack --ctstate NEW --ctorigdstport "$port" -j padm-f2b || true; done
-             <actionflush>
-             <iptables> -X padm-f2b
-actionflush = <iptables> -F padm-f2b
-actioncheck = for port in $(echo '<port>' | tr ',' ' '); do <iptables> -C DOCKER-USER -p <protocol> -m conntrack --ctstate NEW --ctorigdstport "$port" -j padm-f2b || exit 1; done
-actionban = <iptables> -I padm-f2b 1 -s <ip> -j DROP
-actionunban = <iptables> -D padm-f2b -s <ip> -j DROP
+actionstart = sh /usr/local/bin/padm-entrypoint fail2ban-action start "$PADM_FAIL2BAN_TOKEN" <iptables>
+actionstop = sh /usr/local/bin/padm-entrypoint fail2ban-action stop "$PADM_FAIL2BAN_TOKEN" <iptables>
+actionflush = sh /usr/local/bin/padm-entrypoint fail2ban-action flush "$PADM_FAIL2BAN_TOKEN" <iptables>
+actioncheck = sh /usr/local/bin/padm-entrypoint fail2ban-action check "$PADM_FAIL2BAN_TOKEN" <iptables>
+actionban = sh /usr/local/bin/padm-entrypoint fail2ban-action ban "$PADM_FAIL2BAN_TOKEN" <iptables> '<ip>'
+actionunban = sh /usr/local/bin/padm-entrypoint fail2ban-action unban "$PADM_FAIL2BAN_TOKEN" <iptables> '<ip>'
 EOF
     cat >"${candidate}/config/net/fail2ban/padm.local" <<EOF
 [DEFAULT]
@@ -2575,6 +2572,8 @@ dockerGenerateCompose() {
       ($r.core.protocols | map(select(.id == 27 or .id == 29))) as $fallback |
       ($r.host_integrations | map(select(.type == "wireguard"))) as $wireguard |
       ($r.host_integrations | map(select(.type == "fail2ban"))) as $fail2ban |
+      (any($websocket[]; .id == 21 and (.address_families | index("ipv6")) != null and
+        (.public_port as $port | any($fail2ban[].settings.ports[]; . == $port)))) as $fail2banIPv6 |
       ($r.host_integrations | map(select(.type == "tun"))) as $tun |
       ($r.host_integrations | map(select(.type == "tproxy"))) as $tproxy |
       ($r.routing.ipv6 != null) as $ipv6 |
@@ -2590,7 +2589,7 @@ dockerGenerateCompose() {
           }
         }
       }
-      | if $ipv6 then
+      | if $ipv6 or $fail2banIPv6 then
           .networks.ipv6 = {
             name: "padm-docker-ipv6", enable_ipv6: true,
             labels: {"io.padm.mode": "docker", "io.padm.project": "padm-docker",
@@ -2675,7 +2674,8 @@ dockerGenerateCompose() {
                 .public_port = 443 | ports(.; 15443)[] else empty end] +
               [if $r.tls.http01 == true then "0.0.0.0:80:8088/tcp", "[::]:80:8088/tcp" else empty end]),
             tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=32m"]
-          } + if $r.reality_stream.host_website.address == "host.docker.internal" then
+          } + (if $fail2banIPv6 then {networks: ["default", "ipv6"]} else {} end)
+          + if $r.reality_stream.host_website.address == "host.docker.internal" then
             {extra_hosts: ["host.docker.internal:host-gateway"]} else {} end)
         else . end
       | if $hostStream then
@@ -3329,8 +3329,8 @@ dockerFail2banContainer() (
         $c.Config.Entrypoint == ["/usr/local/bin/padm-entrypoint"] and $c.Config.User == "0:0" and
         $c.HostConfig.NetworkMode == "host" and
         $c.HostConfig.ReadonlyRootfs == $service.read_only and $c.HostConfig.Privileged == false and
-        ($c.HostConfig.CapAdd | sort) == ($service.cap_add | sort) and
-        ($c.HostConfig.CapDrop | sort) == ($service.cap_drop | sort) and
+        ($c.HostConfig.CapAdd | map(sub("^CAP_"; "")) | sort) == ($service.cap_add | sort) and
+        ($c.HostConfig.CapDrop | map(sub("^CAP_"; "")) | sort) == ($service.cap_drop | sort) and
         all($c.Mounts[]; .Type == "bind") and
         (($c.HostConfig.Tmpfs // {}) | keys | sort) ==
           ([$service.tmpfs[] | split(":")[0]] | sort) and
@@ -3343,6 +3343,10 @@ dockerFail2banContainer() (
     }
     dockerFail2banRuntimeAudit "${ids}" || {
         dockerError 'Fail2ban 已加载动作漂移或运行时审计失败，未执行维护操作'
+        return 1
+    }
+    docker exec "${ids}" sh /usr/local/bin/padm-entrypoint fail2ban-health </dev/null || {
+        dockerError 'Fail2ban 状态或内核规则归属漂移，未执行维护操作'
         return 1
     }
     printf '%s\n' "${ids}"
@@ -3396,9 +3400,19 @@ dockerValidateHostIntegrations() {
     fi
     if jq -e 'any(.host_integrations[]; .type == "fail2ban")' "${specFile}" >/dev/null; then
         ports=$(jq -r '.host_integrations[] | select(.type == "fail2ban") | .settings.ports | join(",")' "${specFile}") || return 1
-        dockerCandidateCompose "${candidate}" run --rm --no-deps net-fail2ban \
-            preflight fail2ban "${ports}" >/dev/null || {
-            dockerError 'Fail2ban 配置、DOCKER-USER 链或日志前置检查失败'
+        ownership=unowned
+        local -a ownershipMount=() ownershipArgs=("${ownership}")
+        if dockerCurrentOwnsHostIntegration fail2ban; then
+            root=$(dockerInstallRoot) || return 1
+            dockerTrafficSafePath "${root}" "${root}/data/net/fail2ban" || return 1
+            [[ -d "${root}/data/net/fail2ban" ]] || return 1
+            ownership=owned
+            ownershipMount=(--volume "${root}/data/net/fail2ban:/run/padm-fail2ban-owner:ro")
+            ownershipArgs=("${ownership}" /run/padm-fail2ban-owner)
+        fi
+        dockerCandidateCompose "${candidate}" run --rm --no-deps "${ownershipMount[@]}" net-fail2ban \
+            preflight fail2ban "${ports}" "${ownershipArgs[@]}" >/dev/null || {
+            dockerError 'Fail2ban 配置、DOCKER-USER 链、日志或归属前置检查失败'
             return 1
         }
     fi
@@ -4059,8 +4073,8 @@ dockerCleanupConfigurationCandidate() {
             { [[ -f "${candidate}/compose.json" && ! -L "${candidate}/compose.json" ]] &&
                 jq -e --arg project "${PADM_DOCKER_PROJECT}" \
                     '.name == $project and .networks.ipv6 != null' "${candidate}/compose.json" >/dev/null; }; } &&
-        ! { [[ -f "${root}/config/spec.json" ]] &&
-            jq -e '.routing.ipv6 != null' "${root}/config/spec.json" >/dev/null; }; then
+        ! { [[ -f "${root}/compose.json" && ! -L "${root}/compose.json" ]] &&
+            jq -e '.networks.ipv6 != null' "${root}/compose.json" >/dev/null; }; then
         dockerIPv6NetworkManage cleanup || return 1
     fi
     if [[ -d "${candidate}" ]]; then
@@ -5503,7 +5517,7 @@ dockerValidateInstalledCommand() {
         fail2ban)
             ports=$(jq -r '.host_integrations[] | select(.type == "fail2ban") | .settings.ports | join(",")' \
                 "${root}/deployment.json") || return "${PADM_DOCKER_RC_STATE}"
-            dockerComposeRun run --rm --no-deps net-fail2ban preflight fail2ban "${ports}" >/dev/null ||
+            dockerComposeRun run --rm --no-deps net-fail2ban preflight fail2ban "${ports}" owned >/dev/null ||
                 return "${PADM_DOCKER_RC_STATE}"
             ;;
         tun)

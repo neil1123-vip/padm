@@ -220,62 +220,343 @@ wireguard_health() {
     wireguard_owned "$interface"
 }
 
-fail2ban_preflight() {
-    ports=$1
+fail2ban_ports_valid() {
+    python3 - "$1" <<'PY'
+import sys
+ports = sys.argv[1].split(",")
+if not (1 <= len(ports) <= 16 and len(set(ports)) == len(ports)
+        and all(port.isascii() and port.isdigit() and str(int(port)) == port
+                and 1 <= int(port) <= 65535 for port in ports)):
+    raise SystemExit(1)
+PY
+}
+
+fail2ban_state_text() {
+    printf 'schema_version=2\ntoken=%s\nchain=%s\nports=%s\nipv6=%s\n' \
+        "$fb_token" "$fb_chain" "$fb_ports" "$fb_ipv6"
+}
+
+fail2ban_state_read() {
+    fb_root=${1:-$STATE_ROOT}
+    wireguard_state_directory "$fb_root" &&
+        wireguard_private_file "$fb_root/fail2ban.state" &&
+        [ "$(stat -c '%h' "$fb_root/fail2ban.state")" -eq 1 ] &&
+        [ "$(stat -c '%s' "$fb_root/fail2ban.state")" -le 512 ] || return 1
+    fb_token=$(sed -n 's/^token=//p' "$fb_root/fail2ban.state")
+    fb_chain=$(sed -n 's/^chain=//p' "$fb_root/fail2ban.state")
+    fb_ports=$(sed -n 's/^ports=//p' "$fb_root/fail2ban.state")
+    fb_ipv6=$(sed -n 's/^ipv6=//p' "$fb_root/fail2ban.state")
+    printf '%s\n' "$fb_token" | grep -Eq '^[a-f0-9]{32}$' &&
+        [ "$fb_chain" = "padm-f2b-$(printf '%s' "$fb_token" | cut -c1-12)" ] &&
+        fail2ban_ports_valid "$fb_ports" &&
+        { [ "$fb_ipv6" = yes ] || [ "$fb_ipv6" = no ]; } || return 1
+    # 固定字节格式拒绝重复字段、额外内容和 NUL，绝不执行 state。
+    fail2ban_state_text | cmp -s - "$fb_root/fail2ban.state"
+}
+
+fail2ban_state_write() (
+    umask 077
+    fb_stage=$(mktemp "$STATE_ROOT/.fail2ban-state.XXXXXX") || return 1
+    trap 'rm -f "$fb_stage"' EXIT
+    fail2ban_state_text >"$fb_stage" && chmod 0600 "$fb_stage" &&
+        mv -f "$fb_stage" "$STATE_ROOT/fail2ban.state"
+)
+
+fail2ban_resources() {
+    python3 - "$fb_root" "$fb_token" "$fb_chain" "$fb_ports" "$fb_ipv6" "$@" <<'PY'
+import ipaddress
+import os
+import shlex
+import stat
+import subprocess
+import sys
+
+root, token, chain, ports, ipv6, operation = sys.argv[1:7]
+tool = sys.argv[7] if len(sys.argv) > 7 else ""
+address = sys.argv[8] if len(sys.argv) > 8 else ""
+tools = ["iptables"] + (["ip6tables"] if ipv6 == "yes" or (operation == "audit" and tool == "yes") else [])
+ports = ports.split(",")
+comment = "padm-f2b:" + token
+state = (f"schema_version=2\ntoken={token}\nchain={chain}\n"
+         f"ports={','.join(ports)}\nipv6={ipv6}\n").encode()
+created = set()
+
+def owner():
+    directory = os.lstat(root)
+    if not stat.S_ISDIR(directory.st_mode) or directory.st_uid != 0 or directory.st_mode & 0o022:
+        raise ValueError("unsafe ownership directory")
+    path = os.path.join(root, "fail2ban.state")
+    if operation == "empty":
+        if os.path.lexists(path):
+            raise ValueError("unexpected ownership state")
+        return
+    current = os.lstat(path)
+    if (not stat.S_ISREG(current.st_mode) or current.st_uid != 0
+            or stat.S_IMODE(current.st_mode) != 0o600 or current.st_nlink != 1
+            or current.st_size > 512):
+        raise ValueError("unsafe ownership state")
+    with open(path, "rb") as stream:
+        if stream.read() != state:
+            raise ValueError("ownership state was replaced")
+
+def command(table, args, write=False):
+    if write:
+        owner()
+    result = subprocess.run([table, "-w", *args], text=True, capture_output=True)
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or "firewall command failed")
+    return result.stdout
+
+def audit():
+    owner()
+    result = {}
+    strict_order = operation != "empty"
+    for table in tools:
+        empty_table = operation == "empty" or (table == "ip6tables" and ipv6 == "no")
+        present, sentinel, hooks, bans, contents = False, False, [], [], []
+        hook_positions = []
+        rule_index = 0
+        for line in command(table, ["-S"]).splitlines():
+            args = shlex.split(line)
+            if args == ["-N", chain]:
+                present = True
+                continue
+            if len(args) == 2 and args[0] == "-N" and (
+                    args[1] == "padm-f2b" or args[1].startswith("padm-f2b-")):
+                raise ValueError("unverified Fail2ban chain")
+            if len(args) < 2 or args[0] != "-A":
+                continue
+            if args[1] == "DOCKER-USER":
+                rule_index += 1
+            own_chain = args[1] == chain
+            own_target = any(key in args and args[args.index(key) + 1] == chain
+                             for key in ("-j", "-g"))
+            own_comment = "--comment" in args and args[args.index("--comment") + 1] == comment
+            if not (own_chain or own_target or own_comment):
+                continue
+            if empty_table or not own_comment:
+                raise ValueError("foreign Fail2ban chain reference")
+            values, modules = {}, []
+            index = 2
+            while index < len(args):
+                if index + 1 >= len(args):
+                    raise ValueError("malformed firewall rule")
+                key, value = args[index:index + 2]
+                if key == "-m":
+                    modules.append(value)
+                elif key in values:
+                    raise ValueError("duplicate firewall option")
+                else:
+                    values[key] = value
+                index += 2
+            base = {"--comment": comment}
+            if (args[1] == "DOCKER-USER" and sorted(modules) == ["comment", "conntrack"]
+                    and values.get("--ctorigdstport") in ports
+                    and values == dict(base, **{"-p": "tcp", "--ctstate": "NEW",
+                       "--ctorigdstport": values["--ctorigdstport"], "-j": chain})):
+                port = values["--ctorigdstport"]
+                if port in hooks:
+                    raise ValueError("duplicate Fail2ban hook")
+                hooks.append(port)
+                hook_positions.append(rule_index - 1)
+            elif (own_chain and modules == ["comment"]
+                  and values == dict(base, **{"-j": "RETURN"}) and not sentinel):
+                sentinel = True
+                contents.append("sentinel")
+            elif own_chain and modules == ["comment"] and set(values) == {"-s", "--comment", "-j"} and values["-j"] == "DROP":
+                network = ipaddress.ip_network(values["-s"])
+                if (network.prefixlen != network.max_prefixlen
+                        or network.version != (4 if table == "iptables" else 6)
+                        or str(network.network_address) in bans):
+                    raise ValueError("changed or duplicate Fail2ban ban")
+                bans.append(str(network.network_address))
+                contents.append("ban")
+            else:
+                raise ValueError("changed Fail2ban rule")
+        if present and not sentinel and table not in created:
+            raise ValueError("chain has no verifiable owner")
+        if sentinel and contents[-1:] != ["sentinel"]:
+            raise ValueError("Fail2ban sentinel order changed")
+        if not present and (sentinel or hooks or bans):
+            raise ValueError("missing referenced Fail2ban chain")
+        if strict_order and present and hooks and table not in created:
+            if hooks != list(reversed(ports)) or hook_positions != list(range(len(ports))):
+                raise ValueError("Fail2ban hooks are not at the chain head")
+        if empty_table and present:
+            raise ValueError("Fail2ban chain already exists")
+        result[table] = (present, sentinel, hooks, bans)
+    return result
+
+def mutate(table, args):
+    audit()
+    command(table, args, True)
+
+def stop(table):
+    present, sentinel, hooks, bans = audit()[table]
+    if not present:
+        return
+    created.add(table)
+    for port in hooks:
+        mutate(table, ["-D", "DOCKER-USER", "-p", "tcp", "-m", "conntrack",
+                      "--ctstate", "NEW", "--ctorigdstport", port,
+                      "-m", "comment", "--comment", comment, "-j", chain])
+    for ip in bans:
+        mutate(table, ["-D", chain, "-s", ip, "-m", "comment", "--comment", comment, "-j", "DROP"])
+    if sentinel:
+        mutate(table, ["-D", chain, "-m", "comment", "--comment", comment, "-j", "RETURN"])
+    try:
+        mutate(table, ["-X", chain])
+    except Exception:
+        # 删除链失败时恢复所有权标记，重试不能依赖无标记空链。
+        if audit()[table] == (True, False, [], []):
+            mutate(table, ["-A", chain, "-m", "comment", "--comment", comment, "-j", "RETURN"])
+        raise
+    created.discard(table)
+
+try:
+    if operation in {"empty", "audit", "health", "cleanup"}:
+        resources = audit()
+        if operation == "health" and any(present and (not sentinel or set(hooks) != set(ports))
+                for present, sentinel, hooks, _ in resources.values()):
+            raise ValueError("incomplete Fail2ban resources")
+        if operation == "cleanup":
+            for table in tools:
+                stop(table)
+            if any(present for present, _, _, _ in audit().values()):
+                raise ValueError("Fail2ban resources survived cleanup")
+    else:
+        if tool not in tools or operation not in {"start", "stop", "flush", "check", "ban", "unban"}:
+            raise ValueError("invalid Fail2ban action")
+        if operation in {"ban", "unban"}:
+            ip = ipaddress.ip_address(address)
+            if "%" in address or ip.version != (4 if tool == "iptables" else 6):
+                raise ValueError("invalid Fail2ban address family")
+            address = str(ip)
+        elif address:
+            raise ValueError("unexpected Fail2ban address")
+        present, sentinel, hooks, bans = audit()[tool]
+        if operation == "start":
+            if not (present and sentinel and set(hooks) == set(ports)):
+                stop(tool)
+                try:
+                    mutate(tool, ["-N", chain])
+                    created.add(tool)
+                    mutate(tool, ["-A", chain, "-m", "comment", "--comment", comment, "-j", "RETURN"])
+                    for port in ports:
+                        mutate(tool, ["-I", "DOCKER-USER", "1", "-p", "tcp", "-m", "conntrack",
+                                      "--ctstate", "NEW", "--ctorigdstport", port,
+                                      "-m", "comment", "--comment", comment, "-j", chain])
+                except Exception:
+                    stop(tool)
+                    raise
+        elif operation == "stop":
+            stop(tool)
+        elif operation == "flush":
+            for ip in bans:
+                mutate(tool, ["-D", chain, "-s", ip, "-m", "comment", "--comment", comment, "-j", "DROP"])
+        elif not (present and sentinel and set(hooks) == set(ports)):
+            raise ValueError("incomplete Fail2ban action resources")
+        elif operation == "ban" and address not in bans:
+            mutate(tool, ["-I", chain, "1", "-s", address, "-m", "comment", "--comment", comment, "-j", "DROP"])
+        elif operation == "unban" and address in bans:
+            mutate(tool, ["-D", chain, "-s", address, "-m", "comment", "--comment", comment, "-j", "DROP"])
+except Exception as error:
+    print(f"padm-net: Fail2ban ownership/action refused: {error}", file=sys.stderr)
+    raise SystemExit(1)
+PY
+}
+
+fail2ban_preflight() (
+    requested_ports=$1
+    ownership=${2:-unowned}
+    ownership_root=${3:-$STATE_ROOT}
     need fail2ban-client
     need iptables
-    case "$ports" in ''|*[!0-9,]*|,*|*,|*,,*) die "invalid Fail2ban port list" ;; esac
+    need python3
+    fail2ban_ports_valid "$requested_ports" || die "invalid Fail2ban port list"
     [ -f /var/log/padm/nginx/access.log ] && [ ! -L /var/log/padm/nginx/access.log ] ||
         die "Nginx access log is missing"
     iptables -w -n -L DOCKER-USER >/dev/null 2>&1 || die "DOCKER-USER chain is unavailable"
+    requested_ipv6=no
     if grep -qx 'allowipv6 = yes' /etc/fail2ban/fail2ban.local; then
+        requested_ipv6=yes
         need ip6tables
         ip6tables -w -n -L DOCKER-USER >/dev/null 2>&1 || die "IPv6 DOCKER-USER chain is unavailable"
     fi
     fail2ban-client -t >/dev/null 2>&1 || die "Fail2ban configuration is invalid"
-}
+    if [ -e "$ownership_root/fail2ban.state" ] || [ -L "$ownership_root/fail2ban.state" ]; then
+        [ "$ownership" = owned ] && fail2ban_state_read "$ownership_root" &&
+            fail2ban_resources audit "$requested_ipv6" || die "Fail2ban ownership is unverified; refusing migration"
+        # 候选只读核验旧 owner，旧资源只能由运行入口精确撤销。
+    else
+        fb_root=$ownership_root fb_ports=$requested_ports fb_ipv6=$requested_ipv6
+        fb_token=00000000000000000000000000000000 fb_chain=padm-f2b-000000000000
+        fail2ban_resources empty || die "Fail2ban resources are already in use"
+    fi
+)
 
-fail2ban_cleanup() {
-    old_ifs=$IFS
-    IFS=,
-    for port in $1; do
-        iptables -w -D DOCKER-USER -p tcp -m conntrack --ctstate NEW --ctorigdstport "$port" -j padm-f2b >/dev/null 2>&1 || true
-        ip6tables -w -D DOCKER-USER -p tcp -m conntrack --ctstate NEW --ctorigdstport "$port" -j padm-f2b >/dev/null 2>&1 || true
-    done
-    IFS=$old_ifs
-    iptables -w -F padm-f2b >/dev/null 2>&1 || true
-    iptables -w -X padm-f2b >/dev/null 2>&1 || true
-    ip6tables -w -F padm-f2b >/dev/null 2>&1 || true
-    ip6tables -w -X padm-f2b >/dev/null 2>&1 || true
-}
+fail2ban_cleanup() (
+    expected_token=${1:-}
+    fail2ban_state_read "$STATE_ROOT" || return 1
+    cleanup_token=$fb_token
+    { [ -z "$expected_token" ] || [ "$cleanup_token" = "$expected_token" ]; } &&
+        fail2ban_resources cleanup || {
+        echo "padm-net: Fail2ban ownership changed; keeping resources and recovery state" >&2
+        return 1
+    }
+    fail2ban_state_read "$STATE_ROOT" &&
+        [ "$fb_token" = "$cleanup_token" ] &&
+        rm -f "$STATE_ROOT/fail2ban.state"
+)
+
+fail2ban_action() (
+    [ "$#" -ge 4 ] && [ "$#" -le 5 ] && [ "$4" = -w ] || die "invalid Fail2ban action arguments"
+    action=$1 expected_token=$2 table=$3 address=${5:-}
+    printf '%s\n' "$expected_token" | grep -Eq '^[a-f0-9]{32}$' &&
+        fail2ban_state_read "$STATE_ROOT" && [ "$fb_token" = "$expected_token" ] ||
+        die "Fail2ban action owner was replaced"
+    fail2ban_resources "$action" "$table" "$address"
+)
 
 fail2ban_run() {
-    ports=$1
-    fail2ban_preflight "$ports"
-    if [ -f "$STATE_ROOT/fail2ban.state" ]; then
-        old_ports=$(sed -n 's/^ports=//p' "$STATE_ROOT/fail2ban.state")
-        [ -n "$old_ports" ] && fail2ban_cleanup "$old_ports"
+    requested_ports=$1 ownership=unowned
+    [ ! -e "$STATE_ROOT/fail2ban.state" ] && [ ! -L "$STATE_ROOT/fail2ban.state" ] || ownership=owned
+    fail2ban_preflight "$requested_ports" "$ownership"
+    wireguard_state_directory "$STATE_ROOT" || die "Fail2ban state directory is unsafe"
+    if [ "$ownership" = owned ]; then
+        fail2ban_cleanup || die "Fail2ban previous state could not be revoked"
     fi
-    printf 'ports=%s\n' "$ports" >"$STATE_ROOT/fail2ban.state"
+    fb_root=$STATE_ROOT fb_ports=$requested_ports fb_ipv6=no
+    grep -qx 'allowipv6 = yes' /etc/fail2ban/fail2ban.local && fb_ipv6=yes
+    fb_token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+    [ "${#fb_token}" -eq 32 ] || die "Fail2ban random source failed"
+    fb_chain=padm-f2b-$(printf '%s' "$fb_token" | cut -c1-12)
+    fail2ban_resources empty || die "Fail2ban resources changed before start"
+    PADM_FAIL2BAN_TOKEN=$fb_token
+    export PADM_FAIL2BAN_TOKEN
+    server= stopped=0
+    trap 'fb_status=$?; trap - EXIT; if [ -e "$STATE_ROOT/fail2ban.state" ] || [ -L "$STATE_ROOT/fail2ban.state" ]; then fail2ban_cleanup "$PADM_FAIL2BAN_TOKEN" || fb_status=1; fi; exit "$fb_status"' EXIT
+    trap 'stopped=1; [ -z "$server" ] || { fail2ban-client stop >/dev/null 2>&1 || kill -TERM "$server" >/dev/null 2>&1 || true; }' INT TERM
+    fail2ban_state_write || die "cannot persist Fail2ban ownership"
+    [ "$stopped" -eq 0 ] || return 0
     fail2ban-server -f -x -s /run/fail2ban/fail2ban.sock &
     server=$!
-    stopped=0
-    trap 'stopped=1; fail2ban-client stop >/dev/null 2>&1 || kill "$server" >/dev/null 2>&1 || true' INT TERM
+    [ "$stopped" -eq 0 ] || { fail2ban-client stop >/dev/null 2>&1 || kill -TERM "$server" >/dev/null 2>&1 || true; }
     status=0
     wait "$server" || status=$?
     if [ "$stopped" -eq 1 ]; then
         status=0
-        wait "$server" || status=$?
+        wait "$server" 2>/dev/null || status=$?
     fi
-    fail2ban_cleanup "$ports"
-    rm -f "$STATE_ROOT/fail2ban.state"
+    server=
     return "$status"
 }
 
-fail2ban_health() {
+fail2ban_health() (
     need fail2ban-client
-    fail2ban-client ping >/dev/null 2>&1
-}
+    fail2ban-client ping >/dev/null 2>&1 &&
+        fail2ban_state_read "$STATE_ROOT" && fail2ban_resources health
+)
 
 tun_preflight() {
     need ip
@@ -601,6 +882,9 @@ wireguard-health)
     ;;
 fail2ban-health)
     fail2ban_health
+    ;;
+fail2ban-action)
+    shift; fail2ban_action "$@"
     ;;
 tproxy-health)
     shift; [ "$#" -eq 2 ] || exit 1; tproxy_health "$@"
