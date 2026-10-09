@@ -451,7 +451,7 @@ EOF
     local singBoxVisionConfigDir="${TMP_DIR}/sing-box-vision-output-conf"
     mkdir -p "${singBoxVisionConfigDir}"
     cat >"${singBoxVisionConfigDir}/07_VLESS_vision_reality_inbounds.json" <<'EOF'
-{"inbounds":[{"listen_port":443,"tls":{"server_name":"www.microsoft.com","reality":{"handshake":{"server":"www.microsoft.com","server_port":443},"private_key":"sing-box-private"}}}]}
+{"inbounds":[{"listen_port":1443,"users":[{"name":"sing-box-vision-wrapper","uuid":"uuid-wrapper"}],"tls":{"server_name":"www.microsoft.com","reality":{"handshake":{"server":"www.microsoft.com","server_port":443},"private_key":"sing-box-private"}}}]}
 EOF
     coreInstallType=2
     configPath="${singBoxVisionConfigDir}/"
@@ -462,6 +462,10 @@ EOF
     defaultBase64Code vlessReality 443 sing-box-vision-no-pqv uuid-vision "" ""
     regressionExpectStatus 1 grep -q 'pqv=' "${SUBSCRIBE_CAPTURE_DIR}/default/sing-box-vision-no-pqv"
     grep -qF '&pbk=sing-box-public&' "${SUBSCRIBE_CAPTURE_DIR}/default/sing-box-vision-no-pqv"
+    showVlessRealityAccounts
+    grep -qF 'vless://uuid-wrapper@tls.example.com:1443?' "${SUBSCRIBE_CAPTURE_DIR}/default/sing-box-vision-wrapper"
+    grep -qF '&sni=www.microsoft.com&' "${SUBSCRIBE_CAPTURE_DIR}/default/sing-box-vision-wrapper"
+    grep -qF '&pbk=sing-box-public&' "${SUBSCRIBE_CAPTURE_DIR}/default/sing-box-vision-wrapper"
 )
 rm -f "${PADM_VLESS_ENCRYPTION_STATE_FILE}"
 configPath="${visionOutputPreviousConfigPath}"

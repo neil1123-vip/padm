@@ -204,7 +204,7 @@ readInstallType() {
 
 # 读取协议类型
 readInstallProtocolType() {
-    local configFile
+    local configFile configFiles=
     PADM_INSTALL_STATUS_READY=0
     currentInstallProtocolType=
     frontingType=
@@ -257,7 +257,12 @@ readInstallProtocolType() {
         "${xrayBinary}" x25519 -i "${privateKey}" 2>/dev/null | awk '/Password \(PublicKey\):/ { print $3; exit }'
     }
 
-    while read -r row; do
+    if [[ -n "${configPath}" && -d "${configPath}" ]]; then
+        configFiles=$(find "${configPath}" -name "*inbounds.json" -print) || return 1
+        configFiles=$(sort <<<"${configFiles}") || return 1
+    fi
+    while IFS= read -r row; do
+        [[ -n "${row}" ]] || continue
         row=${row%.json}
         local protocolId=
         protocolId=$(protocolCapabilityIdByConfigFile "${row##*/}.json" 2>/dev/null || true)
@@ -428,11 +433,7 @@ readInstallProtocolType() {
             singBoxSocks5Port=$(jq .inbounds[0].listen_port "${row}.json")
         fi
 
-    done < <(
-        if [[ -n "${configPath}" && -d "${configPath}" ]]; then
-            find "${configPath}" -name "*inbounds.json" -print | sort
-        fi
-    )
+    done <<<"${configFiles}"
 
     if [[ "${coreInstallType}" == "1" && -n "${singBoxConfigPath}" ]]; then
         local protocolId
@@ -453,9 +454,10 @@ readInstallProtocolType() {
             fi
         fi
         if [[ -f "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json" ]]; then
+            local auxiliaryRealityPrivateKey
             singBoxVLESSRealityGRPCPort=$(jq -r '.inbounds[0].listen_port' "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json")
             singBoxVLESSRealityGRPCSNI=$(jq -r '.inbounds[0].tls.server_name // empty' "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json")
-            currentRealityPrivateKey=$(jq -r '.inbounds[0].tls.reality.private_key // empty' "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json")
+            auxiliaryRealityPrivateKey=$(jq -r '.inbounds[0].tls.reality.private_key // empty' "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json")
             if [[ -z "${realityTargetHost:-}" || "${realityTargetHost}" == "null" ]]; then
                 realityTargetHost=$(jq -r '.inbounds[0].tls.reality.handshake.server // empty' "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json")
             fi
@@ -465,11 +467,12 @@ readInstallProtocolType() {
             if [[ -z "${singBoxVLESSRealityPublicKey:-}" && -f "${singBoxConfigPath}reality_key" ]]; then
                 singBoxVLESSRealityPublicKey=$(grep "publicKey" <"${singBoxConfigPath}reality_key" | awk -F "[:]" '{print $2}')
             fi
-            if [[ -z "${singBoxVLESSRealityPublicKey:-}" && -n "${currentRealityPrivateKey:-}" ]]; then
-                singBoxVLESSRealityPublicKey=$(derivePublicKeyFromPrivateKey "${currentRealityPrivateKey}" || true)
+            if [[ -z "${singBoxVLESSRealityPublicKey:-}" && -n "${auxiliaryRealityPrivateKey:-}" ]]; then
+                singBoxVLESSRealityPublicKey=$(derivePublicKeyFromPrivateKey "${auxiliaryRealityPrivateKey}" || true)
             fi
             if [[ -z "${currentRealityPublicKey:-}" && -n "${singBoxVLESSRealityPublicKey:-}" ]]; then
                 currentRealityPublicKey=${singBoxVLESSRealityPublicKey}
+                currentRealityPrivateKey=${auxiliaryRealityPrivateKey}
             fi
         fi
         if [[ -f "${singBoxConfigPath}09_tuic_inbounds.json" ]]; then
@@ -555,7 +558,7 @@ readSingBoxConfig() {
 
 # 显示上次安装配置摘要
 showLastInstallationConfig() {
-    readInstallProtocolType
+    readInstallProtocolType || return 1
     readConfigHostPathUUID || return 1
     readCustomPort
     readNginxSubscribe
@@ -930,11 +933,11 @@ readConfigHostPathUUID() {
             currentPath=$(jq -r .inbounds[0].transport.path "${singBoxConfigPath}03_VLESS_WS_inbounds.json" | awk -F "[/]" '{print $2}')
             currentPath=${currentPath::-2}
         fi
-        if [[ -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json" ]]; then
-            singBoxVMessHTTPUpgradePath=$(jq -r .inbounds[0].transport.path "${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json")
-            if [[ -z "${currentPath}" || "${coreInstallType}" == "2" ]]; then
-                currentPath=$(jq -r .inbounds[0].transport.path "${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json" | awk -F "[/]" '{print $2}')
-            fi
+    fi
+    if [[ -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json" ]]; then
+        singBoxVMessHTTPUpgradePath=$(jq -r .inbounds[0].transport.path "${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json")
+        if [[ -z "${currentPath}" || "${coreInstallType}" == "2" ]]; then
+            currentPath=$(jq -r .inbounds[0].transport.path "${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json" | awk -F "[/]" '{print $2}')
         fi
     fi
     if declare -F realityEntryHostFile >/dev/null 2>&1; then
@@ -984,7 +987,7 @@ showInstallStatus() {
             fi
         fi
         # 直接调用默认刷新；菜单首帧可传 cached 复用启动阶段的状态快照。
-        [[ "${1:-refresh}" == "cached" ]] || readInstallProtocolType
+        [[ "${1:-refresh}" == "cached" ]] || readInstallProtocolType || return 1
 
         if [[ -n ${currentInstallProtocolType} ]]; then
             echoContent yellow "已安装协议: \c"

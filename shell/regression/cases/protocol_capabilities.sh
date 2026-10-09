@@ -531,8 +531,6 @@ runXrayDirectTlsInboundWithoutFallbackRegression() {
     cat >"${configDir}28_trojan_TCP_direct_inbounds.json" <<'JSON'
 {"inbounds":[{"port":443,"settings":{"clients":[{"password":"secret","email":"main-Trojan_TCP_direct"}]},"streamSettings":{"tlsSettings":{"certificates":[{"certificateFile":"/etc/padm/tls/example.com.crt"}]}}}]}
 JSON
-    printf '{}\n' >"${configDir}02_dokodemodoor_inbounds_443_default.json"
-
     coreInstallType=1
     configPath="${configDir}"
     singBoxConfigPath=
@@ -672,6 +670,20 @@ runProtocolEntryConfigUpdateRegression() (
         "${fixtureConfig}" >/dev/null
     [[ "${commits}" == 6 ]]
     before=$(<"${fixtureConfig}")
+    (
+        # 空 host 是有效默认值，只改 path 时仍允许保留空值。
+        local hostVariant
+        for hostVariant in empty missing; do
+            jq --arg variant "${hostVariant}" '.inbounds[0].streamSettings.xhttpSettings |=
+                (if $variant == "empty" then .host = "" else del(.host) end)' "${fixtureConfig}" >"${root}/empty-host.json"
+            mv "${root}/empty-host.json" "${fixtureConfig}"
+            setXHTTPPathHost <<< $'/empty-host\n'
+            jq -e '.inbounds[0].streamSettings.xhttpSettings | .path == "/empty-host" and .host == ""' "${fixtureConfig}" >/dev/null
+        done
+        printf '%s\n' "${before}" >"${fixtureConfig}"
+        regressionExpectStatus 1 setXHTTPPathHost <<< $'/bad-host\nbad:host'
+        [[ "$(<"${fixtureConfig}")" == "${before}" ]]
+    )
     (
         # 只修改一个连接参数时，另一个回车沿用现有值；恢复默认值由独立入口负责。
         setTuicConnectionParams <<< $'500ms\n'
@@ -1219,25 +1231,25 @@ runProtocolEntryPortRegression() (
     [[ -f "${configPath}02_dokodemodoor_inbounds_2053.json" && ! -e "${defaultFile}" ]]
     [[ "$(corePortSubscriptionPort 8443)" == 2443 && "$(corePortSubscriptionPort 443)" == 443 ]]
     (
-        # 订阅端口一次读取；空值、非法字段和解析失败仍不替换回退端口。
+        # 默认入口先校验归属再读取端口；非法字段和解析失败不能回退后继续发布。
         local defaultFile content reads="${root}/subscription-port-reads.log" value
         defaultFile=$(corePortDefaultFile)
         content=$(<"${defaultFile}")
         jq() { printf 'jq\n' >>"${reads}"; command jq "$@"; }
-        [[ "$(corePortSubscriptionPort 8443)" == 2443 && "$(wc -l <"${reads}")" == 1 ]]
+        [[ "$(corePortSubscriptionPort 8443)" == 2443 && "$(wc -l <"${reads}")" == 2 ]]
         printf '%s\n' '{"inbounds":[{"port":"2443","settings":{"port":"8443"}}]}' >"${defaultFile}"
-        [[ "$(corePortSubscriptionPort 8443)" == 2443 ]]
+        regressionExpectStatus 1 corePortSubscriptionPort 8443
         for value in '{"inbounds":[{"port":2443}]}' \
             '{"inbounds":[{"settings":{"port":8443}}]}' \
             '{"inbounds":[{"port":2443,"settings":{"port":{}}}]}' \
             '{"inbounds":[{"port":2443,"settings":{"port":"8443\t2053\n"}}]}'; do
             printf '%s\n' "${value}" >"${defaultFile}"
-            [[ "$(corePortSubscriptionPort 8443 443)" == 443 ]]
+            regressionExpectStatus 1 corePortSubscriptionPort 8443 443
         done
         printf '%s\n%s\n' \
             '{"inbounds":[{"port":2443,"settings":{"port":8443}}]}' \
             '{"inbounds":[{"port":2999,"settings":{"port":8443}}]}' >"${defaultFile}"
-        [[ "$(corePortSubscriptionPort 8443 443)" == 443 ]]
+        regressionExpectStatus 1 corePortSubscriptionPort 8443 443
         printf '{' >"${defaultFile}"
         regressionExpectStatus 1 corePortSubscriptionPort 8443 443
         printf '%s\n' "${content}" >"${defaultFile}"
@@ -1681,7 +1693,7 @@ runRealityTargetMenuStateRegression() (
 )
 
 runSingBoxProtocolMenuStateRegression() (
-    local installReads=0 fixtureConfig="${TMP_DIR}/sing-box-entry.json"
+    local installReads=0 protocolReads=0 hoppingCalls=0 diskPort=18443 fixtureConfig="${TMP_DIR}/sing-box-entry.json"
     coreInstallType=1
     mkdir -p "${TMP_DIR}" || return 1
     printf '{}\n' >"${fixtureConfig}"
@@ -1689,11 +1701,24 @@ runSingBoxProtocolMenuStateRegression() (
         installReads=$((installReads + 1))
         singBoxConfigPath="${TMP_DIR}/"
     }
+    readInstallProtocolType() {
+        protocolReads=$((protocolReads + 1))
+        singBoxHysteria2Port=${diskPort}
+        singBoxTuicPort=${diskPort}
+    }
     hysteria2ConfigFile() { printf '%s\n' "${fixtureConfig}"; }
     tuicConfigFile() { printf '%s\n' "${fixtureConfig}"; }
     hysteria2SettingsSummary() { :; }
     tuicSettingsSummary() { :; }
-    portHoppingMenu() { :; }
+    portHoppingMenu() {
+        hoppingCalls=$((hoppingCalls + 1))
+        case "$1" in
+        hysteria2) [[ "${singBoxHysteria2Port}" == "${diskPort}" ]] ;;
+        tuic) [[ "${singBoxTuicPort}" == "${diskPort}" ]] ;;
+        esac
+    }
+    singBoxHysteria2Install() { diskPort=24444; }
+    singBoxTuicInstall() { diskPort=24444; }
     echoContent() { :; }
     menuLine() { :; }
     menuItem() { :; }
@@ -1710,13 +1735,23 @@ runSingBoxProtocolMenuStateRegression() (
     manageHysteria <<< $'3\n5'
     local hysteriaRc=$?
     set -e
-    [[ "${hysteriaRc}" == 0 && "${installReads}" == 1 ]] || return 1
-    installReads=0
+    [[ "${hysteriaRc}" == 0 && "${installReads}:${protocolReads}:${hoppingCalls}" == 1:1:1 ]] || return 1
+    installReads=0 protocolReads=0 hoppingCalls=0
     set +e
     manageTuic <<< $'3\n7'
     local tuicRc=$?
     set -e
-    [[ "${tuicRc}" == 0 && "${installReads}" == 1 ]]
+    [[ "${tuicRc}" == 0 && "${installReads}:${protocolReads}:${hoppingCalls}" == 1:1:1 ]] || return 1
+    local protocol
+    for protocol in hysteria2 tuic; do
+        installReads=0 protocolReads=0 hoppingCalls=0 diskPort=18443
+        if [[ "${protocol}" == hysteria2 ]]; then
+            manageHysteria <<< $'1\n3\n5'
+        else
+            manageTuic <<< $'1\n3\n7'
+        fi
+        [[ "${installReads}:${protocolReads}:${hoppingCalls}" == 2:2:1 && "${diskPort}" == 24444 ]] || return 1
+    done
 )
 
 runCorePortMenuStateRegression() (

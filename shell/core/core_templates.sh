@@ -706,7 +706,7 @@ EOF
         initRealityProfile || return 1
         initXrayXHTTPort || return 1
         initRealityKey || return 1
-        initRealityMldsa65
+        initRealityMldsa65 || return 1
         writeGeneratedJsonFile /etc/padm/xray/conf/12_VLESS_XHTTP_inbounds.json padm-xray-xhttp <<EOF || { errorCard "Xray XHTTP 入站模板提交失败"; return 1; }
 {
 "inbounds":[
@@ -957,7 +957,7 @@ EOF
         initRealityProfile || return 1
         initXrayRealityPort || return 1
         initRealityKey || return 1
-        initRealityMldsa65
+        initRealityMldsa65 || return 1
         writeGeneratedJsonFile /etc/padm/xray/conf/07_VLESS_vision_reality_inbounds.json padm-xray-reality <<EOF || { errorCard "Xray Reality 入站模板提交失败"; return 1; }
 {
   "inbounds": [
@@ -1054,7 +1054,7 @@ EOF
         initRealityProfile || return 1
         initXrayRealityGrpcPort || return 1
         initRealityKey || return 1
-        initRealityMldsa65
+        initRealityMldsa65 || return 1
         writeGeneratedJsonFile /etc/padm/xray/conf/08_VLESS_vision_gRPC_inbounds.json padm-xray-reality-grpc <<EOF || { errorCard "Xray Reality gRPC 入站模板提交失败"; return 1; }
 {
   "inbounds": [

@@ -417,8 +417,8 @@ setVlessRealityEncryption() {
 manageVlessEncryptionExperiment() {
     local selectVlessEncryptionMenu confirmVlessEncryption
     while true; do
-        readInstallType
-        readInstallProtocolType
+        readInstallType || return 1
+        readInstallProtocolType || return 1
         echoContent title "\n┌─ VLESS Encryption 实验功能 ─────────────────────────"
         menuLine "最佳性能组合：Reality Vision 使用 VLESS Encryption + XTLS Vision"
         menuLine "CDN 场景：Reality XHTTP 使用 VLESS Encryption + XTLS Vision + XHTTP XMUX"
@@ -691,7 +691,10 @@ unInstallSingBox() {
         serviceWasEnabled=true
     fi
     if declare -F readPortHopping >/dev/null 2>&1; then
-        readPortHopping "${type}" "${protocolPort}" >/dev/null 2>&1 || true
+        readPortHopping "${type}" "${protocolPort}" >/dev/null 2>&1 || {
+            errorCard "sing-box ${type} 端口跳跃读取失败，已取消卸载"
+            return 1
+        }
         if [[ "${type}" == "hysteria2" ]]; then
             portHoppingStart=${hysteria2PortHoppingStart:-}
             portHoppingEnd=${hysteria2PortHoppingEnd:-}
@@ -765,9 +768,15 @@ unInstallSingBox() {
         cleanupStatus=1
     fi
 
-    if [[ -n "${portHoppingStart}" && -n "${portHoppingEnd}" ]]; then
-        deletePortHoppingRules "${type}" "${portHoppingStart}" "${portHoppingEnd}" "${protocolPort}" || firewallStatus=1
-    fi
+    while [[ -n "${portHoppingStart}" && -n "${portHoppingEnd}" ]] ||
+        padmFirewalldForwardStateKeyForTarget "${protocolPort}" >/dev/null 2>&1 ||
+        padmIptablesForwardStateKeyForTarget "${type}" "${protocolPort}" >/dev/null 2>&1; do
+        if ! deletePortHoppingRules "${type}" "${portHoppingStart}" "${portHoppingEnd}" "${protocolPort}"; then
+            firewallStatus=1
+            break
+        fi
+        portHoppingStart= portHoppingEnd=
+    done
     denyPort "${protocolPort}" || firewallStatus=1
     denyPort "${protocolPort}" udp || firewallStatus=1
     if [[ "${firewallStatus}" != "0" ]]; then
@@ -1189,10 +1198,21 @@ corePortResolveByIndex() {
 }
 
 corePortDefaultFile() {
-    local files
+    local files aliasPort
     files=$(corePortManagedFilesByPattern '02_dokodemodoor_inbounds_*_default.json') || return 1
     [[ "${files}" != *$'\n'* ]] || return 1
-    [[ -z "${files}" ]] || printf '%s\n' "${files}"
+    [[ -n "${files}" ]] || return 0
+    [[ "${files##*/}" =~ ^02_dokodemodoor_inbounds_([0-9]+)_default\.json$ ]] || return 1
+    aliasPort=${BASH_REMATCH[1]}
+    validPortNumber "${aliasPort}" || return 1
+    jq -se --arg tag "dokodemo-door-newPort-${aliasPort}" --argjson port "$((10#${aliasPort}))" '
+        if length != 1 then false else .[0] end |
+        select(.inbounds | type == "array" and length == 1) | .inbounds[0] |
+        .protocol == "dokodemo-door" and .settings.network == "tcp" and
+        .settings.address == "127.0.0.1" and .tag == $tag and .port == $port and
+        (.settings.port | type == "number" and . >= 1 and . <= 65535 and floor == .)
+    ' "${files}" >/dev/null || return 1
+    printf '%s\n' "${files}"
 }
 
 corePortForwardTarget() {
@@ -3029,7 +3049,7 @@ generateSubscribeOutputsUnlocked() {
 }
 
 subscribeUnlocked() {
-    readInstallProtocolType
+    readInstallProtocolType || return 1
     installSubscribe || return 1
     generateSubscribeOutputsUnlocked "$@"
 }
@@ -3040,7 +3060,7 @@ subscribe() {
 
 refreshPublishedSubscriptions() {
     local remoteSnapshots=${1:-}
-    readInstallProtocolType
+    readInstallProtocolType || return 1
     if [[ ( -z "${remoteSnapshots}" || "${remoteSnapshots}" == "null" ) &&
         "${SUBSCRIPTION_GROUPS_LOCK_HELD:-}" != "1" ]] &&
         subscriptionRemoteScopeEnabled &&
@@ -3177,34 +3197,68 @@ manageRealityTarget() {
 
 # reality管理
 regenerateRealityProfileApply() {
-    local selectCustomInstallType=, protocolId streamProtocol internalPort configFile
+    local protocolId configFile configDir index filter changed=false
+    local selectCoreType=${coreInstallType} realityPrivateKey= realityPublicKey=
+    local realityMldsa65Seed= realityMldsa65Verify=
+    case "${coreInstallType}" in
+    1) configDir=$(xrayTemplateConfigDir) || return 1 ;;
+    2) configDir=$(singBoxTemplateConfigDir) || return 1 ;;
+    *) return 1 ;;
+    esac
+    initRealityProfile || return 1
+    initRealityKey || return 1
+    [[ "${coreInstallType}" != 1 ]] || initRealityMldsa65 || return 1
     for protocolId in 1 2 26; do
-        if currentProtocolHas "${protocolId}"; then
-            selectCustomInstallType+="${protocolId},"
+        currentProtocolHas "${protocolId}" || continue
+        configFile=$(padmManagedFilePath "${configDir}" "$(protocolCapabilityMeta "${protocolId}" config_file)") || return 1
+        [[ -f "${configFile}" ]] || continue
+        if [[ "${coreInstallType}" == 1 ]]; then
+            index=0
+            [[ "${protocolId}" != 1 ]] || index=1
+            filter='.inbounds[$index].streamSettings.realitySettings |=
+                (. + {target:$target, serverNames:[$sni], privateKey:$privateKey, publicKey:$publicKey,
+                    mldsa65Seed:$seed, mldsa65Verify:$verify})'
+            if [[ "${protocolId}" == 1 ]]; then
+                # Vision 前端按 SNI 放行，随身份更新时保留其它路由条件。
+                filter='.inbounds[0] as $entry |
+                    .inbounds[1].streamSettings.realitySettings.serverNames[0] as $oldSNI |
+                    if $entry.protocol == "dokodemo-door" and ($entry.tag | type) == "string" and
+                        ($oldSNI | type) == "string" and (.routing.rules | type) == "array"
+                    then .routing.rules |= map(
+                        if .inboundTag == [$entry.tag] and .outboundTag == "z_direct_outbound" and (.domain | type) == "array"
+                        then .domain |= map(if . == $oldSNI then $sni else . end)
+                        else . end)
+                    else . end | '"${filter}"
+            fi
+            if [[ "${protocolId}" == 2 ]]; then
+                # 下行沿用本入站身份时同步公钥，独立下行身份保持不变。
+                filter='.inbounds[0].streamSettings.realitySettings as $oldReality |
+                    $oldReality.publicKey as $oldKey |
+                    if $oldKey != null and
+                        .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.publicKey == $oldKey and
+                        .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.serverName == $oldReality.serverNames[0]
+                    then .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings |=
+                        (.serverName = $sni | .publicKey = $publicKey)
+                    else . end | '"${filter}"
+            fi
+        elif [[ "${coreInstallType}" == 2 ]]; then
+            index=0
+            filter='.inbounds[0].tls.server_name = $sni |
+                .inbounds[0].tls.reality.handshake.server = $host |
+                .inbounds[0].tls.reality.handshake.server_port = ($port | tonumber) |
+                .inbounds[0].tls.reality.private_key = $privateKey'
+        else
+            return 1
         fi
+        updateRoutingJsonConfig "${configFile}" "${filter}" --argjson index "${index}" \
+            --arg target "${realityTargetHost}:${realityTargetPort}" --arg sni "${realitySNI}" \
+            --arg host "${realityTargetHost}" --arg port "${realityTargetPort}" \
+            --arg privateKey "${realityPrivateKey}" --arg publicKey "${realityPublicKey}" \
+            --arg seed "${realityMldsa65Seed}" --arg verify "${realityMldsa65Verify}" || return 1
+        changed=true
     done
-    [[ "${selectCustomInstallType}" != , ]] || return 1
-    if [[ "${coreInstallType}" == "1" ]]; then
-        initXrayConfig custom 1 true || return 1
-        if realityStreamSplitEnabled; then
-            for streamProtocol in vision xhttp; do
-                internalPort=$(realityStreamInternalPortForProtocol "${streamProtocol}") || return 1
-                [[ -n "${internalPort}" ]] || continue
-                validPortNumber "${internalPort}" || return 1
-                if [[ "${streamProtocol}" == vision ]]; then
-                    configFile=$(realityStreamVisionConfigFile) || return 1
-                else
-                    configFile=$(realityStreamXHTTPConfigFile) || return 1
-                fi
-                realityStreamPatchXrayConfig "${streamProtocol}" "${internalPort}" "${configFile}" || return 1
-            done
-        fi
-    elif [[ "${coreInstallType}" == "2" ]]; then
-        initSingBoxConfig custom 1 true || return 1
-    else
-        return 1
-    fi
-
+    [[ "${changed}" == true ]] || return 1
+    validateRealityTargetConfigAfterChange || return 1
     reloadCore
 }
 
@@ -3236,7 +3290,7 @@ manageReality() {
             refreshRealityState=false
         fi
         echoContent title "\n┌─ REALITY 管理 ─────────────────────────────────────"
-        menuItem 1 "重新生成 Reality 参数" "更新 key、shortId 等 Reality 参数"
+        menuItem 1 "重新生成 Reality 参数" "生成或复用密钥；保留账号、入口与传输设置"
         menuItem 2 "目标站管理" "查看、检测或切换 Reality 伪装目标"
         menuItem 3 "配置 443 共存分流" "同机真实网站与 Reality 共用公网 443"
         menuItem 4 "查看当前分流状态" "检查 state、Nginx stream 与后端监听"
@@ -3564,7 +3618,7 @@ setXHTTPPathHost() {
     fi
     autoRead xhttp_host "请输入 XHTTP host，[回车保持 ${currentHost}]:" newHost || return 1
     newHost=${newHost:-${currentHost}}
-    if ! padmIsValidHostName "${newHost}"; then
+    if [[ -n "${newHost}" ]] && ! padmIsValidHostName "${newHost}"; then
         errorCard "host 不合法"
         return 1
     fi
@@ -3943,6 +3997,7 @@ manageHysteria() {
     while true; do
         if [[ "${refreshInstallState}" == "true" ]]; then
             readInstallType || return 1
+            readInstallProtocolType || return 1
             refreshInstallState=false
         fi
         hysteria2Status=
@@ -4139,6 +4194,7 @@ manageTuic() {
     while true; do
         if [[ "${refreshInstallState}" == "true" ]]; then
             readInstallType || return 1
+            readInstallProtocolType || return 1
             refreshInstallState=false
         fi
         tuicStatus=

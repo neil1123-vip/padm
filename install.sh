@@ -747,8 +747,8 @@ initScriptRuntime() {
     checkSystem
     checkCPUVendor
 
-    readInstallType
-    readInstallProtocolType
+    readInstallType || return 1
+    readInstallProtocolType || return 1
     readConfigHostPathUUID || return 1
     readCustomPort
     readSingBoxConfig

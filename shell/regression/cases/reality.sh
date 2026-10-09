@@ -1,5 +1,59 @@
 #!/usr/bin/env bash
 
+runRealityMldsa65FailureRegression() (
+    local root="${TMP_DIR}/reality-mldsa65-failure" mode writes=0 reloads=0
+    local coreInstallType=1 currentInstallProtocolType=",2," lastInstallationConfig=
+    local realityTargetHost=target.example.com realityTargetPort=443 realitySNI=sni.example.com
+    local currentRealityMldsa65Seed=old-seed currentRealityMldsa65Verify=old-verify
+    local realityMldsa65Seed= realityMldsa65Verify=
+    local profileFile="${root}/12_VLESS_XHTTP_inbounds.json"
+    mkdir -p "${root}"
+    printf '%s\n' '{"inbounds":[{"streamSettings":{"realitySettings":{"mldsa65Seed":"old-seed","mldsa65Verify":"old-verify"}}}]}' >"${profileFile}"
+    coreXrayBinaryPath() { printf '%s\n' regressionMldsa65Xray; }
+    regressionMldsa65Xray() {
+        if [[ "$1" == tls ]]; then
+            [[ "${mode}" != ping-failure ]] || return 1
+            [[ "${mode}" != disabled ]] || { printf 'Pinging with SNI\nTLS version: TLS 1.3\n'; return 0; }
+            printf 'Pinging with SNI\nTLS Post-Quantum key exchange: X25519MLKEM768\nCertificate chain total length: 4096\n'
+        else
+            case "${mode}" in
+            generate-failure) return 1 ;;
+            seed-only) printf 'Seed: new-seed\n' ;;
+            verify-only) printf 'Verify: new-verify\n' ;;
+            *) printf 'Seed: new-seed\nVerify: new-verify\n' ;;
+            esac
+        fi
+    }
+    autoRead() {
+        [[ "${mode}" != read-failure ]] || return 1
+        printf -v "$3" '%s' n
+    }
+    errorCard() { :; }
+    initRealityProfile() { :; }
+    initRealityKey() { :; }
+    xrayTemplateConfigDir() { printf '%s\n' "${root}"; }
+    updateRoutingJsonConfig() { writes=$((writes + 1)); }
+    validateRealityTargetConfigAfterChange() { :; }
+    reloadCore() { reloads=$((reloads + 1)); }
+    currentProtocolHas() { [[ "$1" == 2 ]]; }
+    for mode in ping-failure read-failure generate-failure seed-only verify-only; do
+        realityMldsa65Seed= realityMldsa65Verify=
+        regressionExpectStatus 1 initRealityMldsa65 || return 1
+        [[ -z "${realityMldsa65Seed}${realityMldsa65Verify}" ]] || return 1
+        regressionExpectStatus 1 regenerateRealityProfileApply || return 1
+        [[ "${writes}${reloads}" == 00 &&
+            "${currentRealityMldsa65Seed}:${currentRealityMldsa65Verify}" == old-seed:old-verify ]] || return 1
+        jq -e '.inbounds[0].streamSettings.realitySettings |
+            .mldsa65Seed == "old-seed" and .mldsa65Verify == "old-verify"' "${profileFile}" >/dev/null || return 1
+    done
+    mode=complete realityMldsa65Seed= realityMldsa65Verify=
+    initRealityMldsa65 || return 1
+    [[ "${realityMldsa65Seed}:${realityMldsa65Verify}" == new-seed:new-verify ]] || return 1
+    mode=disabled realityMldsa65Seed= realityMldsa65Verify=
+    initRealityMldsa65 || return 1
+    [[ -z "${realityMldsa65Seed}${realityMldsa65Verify}" ]]
+)
+
 runRealityProfileFailureRegression() (
     local root="${TMP_DIR}/reality-profile-failure"
     local xrayRoot="${root}/xray/"
@@ -11,6 +65,7 @@ runRealityProfileFailureRegression() (
     local portReads=0
     local dnsCalls=0
 
+    runRealityMldsa65FailureRegression || return 1
     mkdir -p "${xrayRoot}" "${singBoxRoot}"
     configPath="${xrayRoot}"
     singBoxConfigPath="${singBoxRoot}"
@@ -482,6 +537,17 @@ runRealityProfileFailureRegression() (
             realitySNI=sni.example.com
         }
         initXrayRealityPort() { realityPort=10888; }
+        initXrayXHTTPort() { xHTTPort=10889; }
+        initXrayRealityGrpcPort() { realityGrpcPort=10891; }
+        initRealityMldsa65() { return 1; }
+        local protocolId
+        for protocolId in 1 2 26; do
+            selectCustomInstallType=",${protocolId},"
+            regressionExpectStatus 1 initXrayConfigApply custom 1 true || return 1
+            [[ ! -e "${xrayRoot}$(protocolCapabilityMeta "${protocolId}" config_file)" ]] || return 1
+        done
+        selectCustomInstallType=",1,"
+        initRealityMldsa65() { return 0; }
         initXrayConfigApply custom 1 true
         # 嗅探前端的 SNI 放行与兜底阻断规则必须匹配真实入站 tag。
         jq -e --arg sni "${realitySNI}" '
@@ -2525,11 +2591,27 @@ runRealityConfigApplyRegression() {
     local realityPatchXrayXhttp="${realityPatchDir}/xray/12_VLESS_XHTTP_inbounds.json"
     local realityPatchSingBoxVision="${realityPatchDir}/sing-box/07_VLESS_vision_reality_inbounds.json"
     local realityPatchSingBoxGrpc="${realityPatchDir}/sing-box/08_VLESS_vision_gRPC_inbounds.json"
-    local realityPatchOriginal
+    local realityPatchOriginal realityPatchXhttpHost realityPatchVisionUnchanged
     mkdir -p "${realityPatchDir}/xray" "${realityPatchDir}/sing-box"
     cat >"${realityPatchXrayVision}" <<'JSON'
-{"inbounds":[{}, {"streamSettings":{"realitySettings":{"target":"old.example.com:443","serverNames":["old.example.com"]}}}]}
+{
+  "inbounds": [
+    {"tag":"dokodemo-in","protocol":"dokodemo-door","port":2443,
+     "settings":{"address":"127.0.0.1","port":45987,"network":"tcp"}},
+    {"listen":"127.0.0.1","port":45987,"settings":{"clients":[{"id":"keep-id"}]},
+     "streamSettings":{"realitySettings":{"target":"old.example.com:443","serverNames":["old.example.com"],"shortIds":["keep-short-id"]}}}
+  ],
+  "routing": {"marker":"keep","rules":[
+    {"inboundTag":["dokodemo-in"],"domain":["old.example.com","other.example.com"],"outboundTag":"z_direct_outbound","network":"tcp"},
+    {"inboundTag":["dokodemo-in"],"outboundTag":"blackhole_out"},
+    {"inboundTag":["other-in"],"domain":["old.example.com"],"outboundTag":"z_direct_outbound"},
+    {"inboundTag":["dokodemo-in"],"domain":["old.example.com"],"outboundTag":"custom-out"},
+    {"inboundTag":["dokodemo-in"],"domain":["full:old.example.com"],"outboundTag":"z_direct_outbound"}
+  ]}
+}
 JSON
+    realityPatchVisionUnchanged=$(jq -c 'del(.inbounds[1].streamSettings.realitySettings.target,
+        .inbounds[1].streamSettings.realitySettings.serverNames, .routing.rules[0].domain[0])' "${realityPatchXrayVision}") || return 1
     jq -n '{inbounds: [{streamSettings: {realitySettings: {target: "old.example.com:443", serverNames: ["old.example.com"]}}}]}' >"${realityPatchXrayGrpc}"
     cat >"${realityPatchXrayXhttp}" <<'JSON'
 {"inbounds":[{"streamSettings":{"realitySettings":{"target":"old.example.com:443","serverNames":["old.example.com"]},"xhttpSettings":{"host":"old.example.com"}}}]}
@@ -2547,11 +2629,60 @@ JSON
     export PADM_REALITY_SINGBOX_GRPC_CONFIG_FILE="${realityPatchSingBoxGrpc}"
     applyRealityTargetToInstalledConfigs "new.example.com:8443" "sni.example.com"
     jq -e '.inbounds[1].streamSettings.realitySettings.target == "new.example.com:8443" and .inbounds[1].streamSettings.realitySettings.serverNames == ["sni.example.com"]' "${realityPatchXrayVision}" >/dev/null
+    # 前端只替换旧 SNI 精确元素，保留其它域名、无关规则、兜底和用户监听。
+    jq -e '.routing.rules[0].domain == ["sni.example.com","other.example.com"]' "${realityPatchXrayVision}" >/dev/null || return 1
+    [[ "$(jq -c 'del(.inbounds[1].streamSettings.realitySettings.target,
+        .inbounds[1].streamSettings.realitySettings.serverNames, .routing.rules[0].domain[0])' "${realityPatchXrayVision}")" == "${realityPatchVisionUnchanged}" ]] || return 1
     jq -e '.inbounds[0].streamSettings.realitySettings.target == "new.example.com:8443" and .inbounds[0].streamSettings.realitySettings.serverNames == ["sni.example.com"]' "${realityPatchXrayGrpc}" >/dev/null
     [[ "${xrayVLESSRealityGRPCSNI}" == sni.example.com ]]
     jq -e '.inbounds[0].streamSettings.realitySettings.target == "new.example.com:8443" and .inbounds[0].streamSettings.xhttpSettings.host == "sni.example.com"' "${realityPatchXrayXhttp}" >/dev/null
     jq -e '.inbounds[0].tls.server_name == "sni.example.com" and .inbounds[0].tls.reality.handshake.server == "new.example.com" and .inbounds[0].tls.reality.handshake.server_port == 8443' "${realityPatchSingBoxVision}" >/dev/null
     jq -e '.inbounds[0].tls.server_name == "sni.example.com" and .inbounds[0].tls.reality.handshake.server == "new.example.com" and .inbounds[0].tls.reality.handshake.server_port == 8443' "${realityPatchSingBoxGrpc}" >/dev/null
+    for realityPatchXhttpHost in custom.example.com ''; do
+        updateRoutingJsonConfig "${realityPatchXrayXhttp}" \
+            '.inbounds[0].streamSettings.xhttpSettings.host = $host' --arg host "${realityPatchXhttpHost}" || return 1
+        applyRealityTargetToInstalledConfigs "host.example.com:9443" "host-sni.example.com" || return 1
+        jq -e --arg host "${realityPatchXhttpHost}" \
+            '.inbounds[0].streamSettings.realitySettings.target == "host.example.com:9443" and
+                .inbounds[0].streamSettings.realitySettings.serverNames == ["host-sni.example.com"] and
+                .inbounds[0].streamSettings.xhttpSettings.host == $host' "${realityPatchXrayXhttp}" >/dev/null || return 1
+    done
+    (
+        # 同身份下行跟随 SNI；仅跟随主 SNI 的 host 同步，独立身份保持原值。
+        local identity downloadKey downloadSNI downloadHost expectedSNI expectedHost absentHost
+        for identity in shared independent-key independent-sni independent-host absent-host; do
+            downloadKey=shared-public downloadSNI=old.example.com downloadHost=old.example.com
+            expectedSNI=download-sni.example.com expectedHost=${downloadHost} absentHost=false
+            case "${identity}" in
+            shared) expectedHost=download-sni.example.com ;;
+            independent-key) downloadKey=independent-public; expectedSNI=${downloadSNI} ;;
+            independent-sni) downloadSNI=independent.example.com; expectedSNI=${downloadSNI} ;;
+            independent-host) downloadHost=independent-host.example.com; expectedHost=${downloadHost} ;;
+            absent-host) absentHost=true ;;
+            esac
+            updateRoutingJsonConfig "${realityPatchXrayXhttp}" '
+                .inbounds[0].streamSettings.realitySettings.publicKey = "shared-public" |
+                .inbounds[0].streamSettings.realitySettings.serverNames = ["old.example.com"] |
+                .inbounds[0].streamSettings.xhttpSettings.host = "old.example.com" |
+                .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings =
+                    {address:"download.example.com",realitySettings:{publicKey:$key,serverName:$sni},
+                     xhttpSettings:(if $absentHost then {} else {host:$host} end)}' \
+                --arg key "${downloadKey}" --arg sni "${downloadSNI}" --arg host "${downloadHost}" \
+                --argjson absentHost "${absentHost}" || return 1
+            applyRealityTargetToInstalledConfigs "download-target.example.com:443" "download-sni.example.com" || return 1
+            jq -e --arg key "${downloadKey}" --arg sni "${expectedSNI}" --arg host "${expectedHost}" \
+                --argjson absentHost "${absentHost}" '
+                .inbounds[0].streamSettings.realitySettings.serverNames == ["download-sni.example.com"] and
+                .inbounds[0].streamSettings.xhttpSettings.host == "download-sni.example.com" and
+                .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.address == "download.example.com" and
+                .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.publicKey == $key and
+                .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.serverName == $sni and
+                (if $absentHost
+                 then (.inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.xhttpSettings | has("host") | not)
+                 else .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.xhttpSettings.host == $host end)' \
+                "${realityPatchXrayXhttp}" >/dev/null || return 1
+        done
+    ) || return 1
     realityPatchOriginal=$(<"${realityPatchSingBoxVision}")
     if applyRealityTargetToInstalledConfigs "new.example.com:not-a-port" "sni.example.com" 2>/dev/null; then
         return 1

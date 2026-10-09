@@ -76,6 +76,71 @@ prepareSubscriptionGroupSyncStubs() {
     statusCard() { printf '%s\n' "$*" >"${statusLog}"; }
 }
 
+runReadInstallProtocolTypeScanFailureRegression() (
+    # shellcheck source=/dev/null
+    source "${PROJECT_ROOT}/shell/core/state.sh"
+    local root="${TMP_DIR}/protocol-state-scan-failure"
+    local configPath="${root}/conf/" singBoxConfigPath= coreInstallType=1
+    local pipefailMode failure outputStarted="${root}/output-started"
+    local actions="${root}/actions" response="${root}/control-response.json"
+    local syncFailureStatus syncFailureDetails
+    mkdir -p "${configPath}" || return 1
+    printf '%s\n' '{"inbounds":[{"port":443}]}' >"${configPath}02_VLESS_TCP_inbounds.json"
+    printf '%s\n' '{"inbounds":[{"port":31306}]}' >"${configPath}11_VMess_HTTPUpgrade_inbounds.json"
+    find() {
+        printf '%s\n' "${configPath}02_VLESS_TCP_inbounds.json"
+        [[ "${failure}" != find ]] || return 1
+        printf '%s\n' "${configPath}11_VMess_HTTPUpgrade_inbounds.json"
+    }
+    sort() {
+        if [[ "${failure}" == sort ]]; then
+            printf '%s\n' "${configPath}02_VLESS_TCP_inbounds.json"
+            return 1
+        fi
+        command sort "$@"
+    }
+    readInstallType() { return 0; }
+    readConfigHostPathUUID() { printf 'read-config\n' >>"${actions}"; return 1; }
+    ensureSubscriptionGroupsState() { return 0; }
+    subscriptionSyncMarkResult() { syncFailureStatus=$1; syncFailureDetails=$2; }
+    ensureTrafficStatsConfig() { printf 'stats-config\n' >>"${actions}"; return 1; }
+    initSubscribeLocalConfig() { printf 'started\n' >"${outputStarted}"; }
+    installSubscribe() { printf 'install-subscribe\n' >>"${actions}"; return 1; }
+    generateSubscribeOutputsUnlocked() { printf 'generate-subscribe\n' >>"${actions}"; return 1; }
+    runSubscriptionGroupSync() { printf 'subscription-sync\n' >>"${actions}"; return 1; }
+    subscriptionGroupsWithLock() { "$@"; }
+    subscriptionRemoteScopeEnabled() { return 0; }
+    subscriptionHasEnabledRemoteSources() { return 0; }
+    for pipefailMode in off on; do
+        set +o pipefail
+        [[ "${pipefailMode}" != on ]] || set -o pipefail
+        for failure in find sort; do
+            PADM_INSTALL_STATUS_READY=1
+            currentInstallProtocolType=,27,23,
+            regressionExpectStatus 1 readInstallProtocolType || return 1
+            [[ "${PADM_INSTALL_STATUS_READY}" == 0 && -z "${currentInstallProtocolType}${frontingType}" ]] || return 1
+            regressionExpectStatus 1 showAccounts >/dev/null || return 1
+            [[ ! -e "${outputStarted}" && "${PADM_INSTALL_STATUS_READY}" == 0 ]] || return 1
+            regressionExpectStatus 1 runSubscriptionGroupSyncUnlocked || return 1
+            [[ "${syncFailureStatus}" == partial && "${SUBSCRIPTION_SYNC_PUBLISHED}" == false ]] || return 1
+            jq -e '.[0] == "本机配置读取失败"' <<<"${syncFailureDetails}" >/dev/null || return 1
+            regressionExpectStatus 1 collectSubscriptionTrafficUnlocked || return 1
+            [[ ! -e "${actions}" && "${SUBSCRIPTION_TRAFFIC_LOCAL_COMMITTED}" == false &&
+                "${SUBSCRIPTION_TRAFFIC_COMPLETE}" == false ]] || return 1
+            regressionExpectStatus 1 subscriptionControlTrafficResponseUnlocked '{}' >"${response}" || return 1
+            jq -e '.ok == false and .error == "traffic_failed"' "${response}" >/dev/null || return 1
+            regressionExpectStatus 1 subscribeUnlocked false false || return 1
+            regressionExpectStatus 1 refreshPublishedSubscriptions || return 1
+            regressionExpectStatus 1 refreshPublishedSubscriptions '[]' || return 1
+            [[ ! -e "${actions}" && "${PADM_INSTALL_STATUS_READY}" == 0 ]] || return 1
+        done
+        failure=
+        readInstallProtocolType || return 1
+        [[ "${PADM_INSTALL_STATUS_READY}" == 1 ]] || return 1
+        currentProtocolHas 27 && currentProtocolHas 23 || return 1
+    done
+)
+
 runSubscriptionGroupStateStructureFoundationAddRemoveRegression() {
     local longId
     mkdir -p "$(subscriptionGroupsDir)"

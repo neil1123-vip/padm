@@ -94,6 +94,7 @@ listRegressionSubscriptionStateQuotaPartialSyncChildSelectors() {
 
 listRegressionSubscriptionStateSupportChildSelectors() {
     printf '%s\n' \
+        subscription-state-protocol-scan-failure \
         subscription-sync-tempdir \
         subscription-sync-process-substitution-failure \
         subscription-sync-missing-protocol-plan \
@@ -190,6 +191,7 @@ registerRegressionSequentialSelectorList subscription-state-quota-menu-tx listRe
 registerRegressionSequentialSelectorList subscription-state-quota-partial-sync listRegressionSubscriptionStateQuotaPartialSyncChildSelectors
 registerRegressionAggregateRunner parallel subscription-state-support runRegressionSubscriptionStateSupport \
     $(listRegressionSubscriptionStateSupportChildSelectors)
+registerRegressionFunctionLeaf subscription-state-protocol-scan-failure runRegressionStep subscription-state-protocol-scan-failure runReadInstallProtocolTypeScanFailureRegression
 registerRegressionFunctionLeaf subscription-sync-tempdir runRegressionStep subscription-sync-tempdir runSubscriptionSyncTempDirRegression
 registerRegressionFunctionLeaf subscription-sync-process-substitution-failure runRegressionStep subscription-sync-process-substitution-failure runSubscriptionSyncProcessSubstitutionFailureRegression
 registerRegressionFunctionLeaf subscription-sync-missing-protocol-plan runRegressionStep subscription-sync-missing-protocol-plan runSubscriptionSyncMissingProtocolPlanRegression

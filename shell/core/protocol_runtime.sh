@@ -314,8 +314,8 @@ addFirewalldPortHopping() {
 
 portHoppingPersistIptablesRules() {
     if command -v netfilter-persistent >/dev/null 2>&1; then
-        sudo netfilter-persistent save >/dev/null 2>&1
-        return $?
+        sudo netfilter-persistent save >/dev/null 2>&1 || return 1
+        return 0
     fi
     return 2
 }
@@ -397,7 +397,37 @@ addPortHopping() {
         break
     done
     protocolPortHoppingRangeStatusCard "${portHoppingRange}"
+    # 运行态为空时先回收旧归属和开放范围，避免旧状态遮住新规则。
+    while padmFirewalldForwardStateKeyForTarget "${targetPort}" >/dev/null 2>&1 ||
+        padmIptablesForwardStateKeyForTarget "${type}" "${targetPort}" >/dev/null 2>&1; do
+        if ! deletePortHoppingRules "${type}" "" "" "${targetPort}"; then
+            protocolPortHoppingStatusCard "旧端口跳跃规则清理失败，已取消添加端口跳跃"
+            return 1
+        fi
+    done
     if [[ "${rhelLike:-}" == "true" ]] && systemctl is-active --quiet firewalld; then
+                local existingForwardPorts
+                if ! existingForwardPorts=$(sudo firewall-cmd --zone=public --permanent --list-forward-ports); then
+                    protocolPortHoppingStatusCard "防火墙转发规则读取失败，已取消添加端口跳跃"
+                    return 1
+                fi
+                if ! awk -v candidateStart="${portStart}" -v candidateEnd="${portEnd}" -v targetPort="${targetPort}" '
+                    {
+                        for (i = 1; i <= NF; i++) {
+                            split($i, rule, ":")
+                            if (rule[1] !~ /^port=[0-9]+(-[0-9]+)?$/ || rule[2] != "proto=udp") continue
+                            if (rule[3] == "toport=" targetPort && $i !~ /:toaddr=.+/) continue
+                            count = split(substr(rule[1], 6), range, "-")
+                            start = range[1] + 0
+                            end = range[count] + 0
+                            if (start < 1 || end > 65535 || start > end) continue
+                            if (start <= candidateEnd && end >= candidateStart) exit 1
+                        }
+                    }
+                ' <<<"${existingForwardPorts}"; then
+                    protocolPortHoppingStatusCard "范围与现有 UDP 转发规则重叠，已取消添加端口跳跃"
+                    return 1
+                fi
                 local addedMasquerade=
                 local addedForwardPorts=
                 local forwardStateKey
@@ -443,6 +473,33 @@ addPortHopping() {
                     return 1
                 fi
             else
+                local existingRules
+                if ! existingRules=$(iptables-save -t nat); then
+                    protocolPortHoppingStatusCard "防火墙转发规则读取失败，已取消添加端口跳跃"
+                    return 1
+                fi
+                if ! awk -v candidateStart="${portStart}" -v candidateEnd="${portEnd}" '
+                    $1 == "-A" && $2 == "PREROUTING" {
+                        comment = ports = protocol = target = ""
+                        for (i = 1; i <= NF; i++) {
+                            if ($i == "--comment") comment = $(i + 1)
+                            else if ($i == "--dport") ports = $(i + 1)
+                            else if ($i == "-p") protocol = $(i + 1)
+                            else if ($i == "-j") target = $(i + 1)
+                        }
+                        if (comment ~ /^".*"$/) comment = substr(comment, 2, length(comment) - 2)
+                        if ((comment != "neil1123-vip_hysteria2_portHopping" && comment != "neil1123-vip_tuic_portHopping") || protocol != "udp" || target != "DNAT") next
+                        if (ports !~ /^[0-9]+(:[0-9]+)?$/) next
+                        count = split(ports, range, ":")
+                        start = range[1] + 0
+                        end = range[count] + 0
+                        if (start < 1 || end > 65535 || start > end) next
+                        if (start <= candidateEnd && end >= candidateStart) exit 1
+                    }
+                ' <<<"${existingRules}"; then
+                    protocolPortHoppingStatusCard "范围与现有端口跳跃规则重叠，已取消添加端口跳跃"
+                    return 1
+                fi
                 if ! iptables -t nat -A PREROUTING -p udp --dport "${portStart}:${portEnd}" -m comment --comment "neil1123-vip_${type}_portHopping" -j DNAT --to-destination ":${targetPort}"; then
                     rollbackPortHoppingIptablesRule "${type}" "${portStart}" "${portEnd}" "${targetPort}" || true
                     protocolPortHoppingStatusCard "端口跳跃添加失败，已尝试回滚本次 iptables 规则"
@@ -493,50 +550,89 @@ readPortHopping() {
     local portHoppingStart=
     local portHoppingEnd=
     local portHopping=
+    case "${type}" in
+    hysteria2) hysteria2PortHoppingStart=; hysteria2PortHoppingEnd=; hysteria2PortHopping= ;;
+    tuic) tuicPortHoppingStart=; tuicPortHoppingEnd=; tuicPortHopping= ;;
+    *) return 1 ;;
+    esac
 
-    local forwardStateKey stateKind stateBackend stateType stateStart stateEnd stateTarget ownership extra
+    local forwardStateKey stateKind stateBackend= stateType stateStart= stateEnd= stateTarget ownership extra
     if forwardStateKey=$(padmFirewalldForwardStateKeyForTarget "${targetPort}"); then
         IFS=: read -r stateKind stateBackend stateType stateStart stateEnd stateTarget ownership extra <<<"${forwardStateKey}"
-        portHoppingStart=${stateStart}
-        portHoppingEnd=${stateEnd}
     elif forwardStateKey=$(padmIptablesForwardStateKeyForTarget "${type}" "${targetPort}"); then
         IFS=: read -r stateKind stateBackend stateType stateStart stateEnd stateTarget <<<"${forwardStateKey}"
-        portHoppingStart=${stateStart}
-        portHoppingEnd=${stateEnd}
-    elif [[ "${rhelLike:-}" == "true" ]] && systemctl is-active --quiet firewalld; then
+    fi
+    if [[ -n "${stateBackend}" ]]; then
+        validPortNumber "${stateStart}" && validPortNumber "${stateEnd}" &&
+            ((10#${stateStart} <= 10#${stateEnd})) || return 1
+    fi
+    if [[ "${stateBackend}" == firewalld ]]; then
+        systemctl is-active --quiet firewalld || return 0
+    fi
+    if [[ "${stateBackend}" == firewalld ]] ||
+        { [[ -z "${stateBackend}" && "${rhelLike:-}" == true ]] && systemctl is-active --quiet firewalld; }; then
         local forwardPorts
         if forwardPorts=$(sudo firewall-cmd --zone=public --list-forward-ports); then
-            portHopping=$(awk -v targetPort="${targetPort}" '
+            portHopping=$(awk -v targetPort="${targetPort}" -v stateStart="${stateStart}" -v stateEnd="${stateEnd}" '
                 {
                     for (i = 1; i <= NF; i++) {
                         split($i, rule, ":")
                         if (rule[1] !~ /^port=[0-9]+$/ || rule[2] != "proto=udp" || rule[3] != "toport=" targetPort) continue
+                        if ($i ~ /:toaddr=.+/) continue
                         port = substr(rule[1], 6) + 0
                         if (port < 1 || port > 65535) continue
+                        sawRule = 1
+                        if (stateStart != "" && (port < stateStart || port > stateEnd)) continue
+                        if (!(port in ports)) { ports[port] = 1; count++ }
                         if (!start || port < start) start = port
                         if (!end || port > end) end = port
                     }
                 }
-                END { if (start) print start ":" end }
-            ' <<<"${forwardPorts}")
+                END {
+                    if (!count) { if (sawRule) exit 1; exit }
+                    if (count != end - start + 1 || (stateStart != "" && (start != stateStart || end != stateEnd))) exit 1
+                    print start ":" end
+                }
+            ' <<<"${forwardPorts}") || return 1
             portHoppingStart=${portHopping%%:*}
             portHoppingEnd=${portHopping#*:}
+        else
+            return 1
         fi
     else
         local iptablesRules
-        if iptablesRules=$(iptables-save); then
-            portHopping=$(awk -v marker="neil1123-vip_${type}_portHopping" '
-            $0 ~ marker {
+        if iptablesRules=$(iptables-save -t nat); then
+            portHopping=$(awk -v marker="neil1123-vip_${type}_portHopping" -v targetPort="${targetPort}" -v stateStart="${stateStart}" -v stateEnd="${stateEnd}" '
+            $1 == "-A" && $2 == "PREROUTING" {
+                comment = destination = ports = protocol = target = ""
                 for (i = 1; i <= NF; i++) {
-                    if ($i == "--dport" && (i + 1) <= NF) {
-                        print $(i + 1)
-                        exit
-                    }
+                    if ($i == "--comment") comment = $(i + 1)
+                    else if ($i == "--to-destination") destination = $(i + 1)
+                    else if ($i == "--dport") ports = $(i + 1)
+                    else if ($i == "-p") protocol = $(i + 1)
+                    else if ($i == "-j") target = $(i + 1)
                 }
+                if ((comment != marker && comment != "\"" marker "\"") || destination != ":" targetPort || protocol != "udp" || target != "DNAT") next
+                if (ports !~ /^[0-9]+(:[0-9]+)?$/) next
+                count = split(ports, range, ":")
+                start = range[1] + 0
+                end = range[count] + 0
+                if (start < 1 || end > 65535 || start > end) next
+                if (stateStart != "" && (start != stateStart || end != stateEnd)) { bad = 1; next }
+                if (found && (start != firstStart || end != firstEnd)) { bad = 1; next }
+                found = 1
+                firstStart = start
+                firstEnd = end
             }
-            ' <<<"${iptablesRules}")
+            END {
+                if (bad) exit 1
+                if (found) print firstStart ":" firstEnd
+            }
+            ' <<<"${iptablesRules}") || return 1
             portHoppingStart=${portHopping%%:*}
             portHoppingEnd=${portHopping#*:}
+        else
+            return 1
         fi
     fi
     if [[ -n "${portHoppingStart}" && -n "${portHoppingEnd}" ]]; then
@@ -582,15 +678,11 @@ deletePortHoppingRules() {
         selectedBackend=iptables
     fi
     if [[ "${selectedBackend}" == "firewalld" ]]; then
-        if removeFirewalldForwardPortRange "${start}" "${end}" "${targetPort}" "${ownership}"; then
-            padmFirewallStateRemove "${forwardStateKey}" || status=1
-        else
+        if ! removeFirewalldForwardPortRange "${start}" "${end}" "${targetPort}" "${ownership}"; then
             status=1
         fi
     else
-        if ! removeIptablesPortHoppingRules "${type}"; then
-            status=1
-        elif ! padmFirewallStateRemove "${forwardStateKey}"; then
+        if ! removeIptablesPortHoppingRules "${type}" "${start}" "${end}" "${targetPort}"; then
             status=1
         fi
     fi
@@ -599,7 +691,7 @@ deletePortHoppingRules() {
     fi
     if [[ "${status}" == "0" && "${rhelLike:-}" == "true" ]] && padmFirewallStateHas masquerade:firewalld; then
         local remainingForwardPorts
-        if ! remainingForwardPorts=$(sudo firewall-cmd --zone=public --permanent --list-forward-ports); then
+        if ! remainingForwardPorts=$(padmFirewalldPermanentCommand --list-forward-ports); then
             status=1
         elif [[ -z "${remainingForwardPorts//[[:space:]]/}" ]]; then
             if removeFirewalldMasqueradeRule; then
@@ -608,6 +700,9 @@ deletePortHoppingRules() {
                 status=1
             fi
         fi
+    fi
+    if [[ "${status}" == "0" ]] && ! padmFirewallStateRemove "${forwardStateKey}"; then
+        status=1
     fi
     return "${status}"
 }
@@ -628,12 +723,12 @@ portHoppingMenu() {
     local portHoppingEnd=
 
     if [[ "${type}" == "hysteria2" ]]; then
-        readPortHopping "${type}" "${singBoxHysteria2Port}"
+        readPortHopping "${type}" "${singBoxHysteria2Port}" || return 1
         targetPort=${singBoxHysteria2Port}
         portHoppingStart=${hysteria2PortHoppingStart}
         portHoppingEnd=${hysteria2PortHoppingEnd}
     elif [[ "${type}" == "tuic" ]]; then
-        readPortHopping "${type}" "${singBoxTuicPort}"
+        readPortHopping "${type}" "${singBoxTuicPort}" || return 1
         targetPort=${singBoxTuicPort}
         portHoppingStart=${tuicPortHoppingStart}
         portHoppingEnd=${tuicPortHoppingEnd}
@@ -821,29 +916,38 @@ initRealityMldsa65() {
     echoContent title "\n┌─ Reality ML-DSA-65 ───────────────────────────────"
     menuLine "生成 Reality ML-DSA-65"
     menuClose
-    local tlsPingResult=
-    local length=
+    local tlsPingResult= length= historyMldsa65Status= realityMldsa65=
+    local nextSeed="${realityMldsa65Seed:-}" nextVerify="${realityMldsa65Verify:-}"
     local target="${realityTargetHost}:${realityTargetPort}"
-    tlsPingResult=$("$(coreXrayBinaryPath)" tls ping "${target}" 2>/dev/null)
+    tlsPingResult=$("$(coreXrayBinaryPath)" tls ping "${target}" 2>/dev/null) || {
+        errorCard "Reality ML-DSA-65 目标检测失败"
+        return 1
+    }
     if echo "${tlsPingResult}" | awk '/Pinging with SNI/{inSni=1; next} inSni && /TLS Post-Quantum key exchange:.*X25519MLKEM768/{found=1} END{exit found ? 0 : 1}'; then
         length=$(echo "${tlsPingResult}" | awk '/Pinging with SNI/{inSni=1; next} inSni && /Certificate chain/{print $5; exit}')
 
         if [[ "${length}" =~ ^[0-9]+$ ]] && [ "${length}" -gt 3500 ]; then
             if [[ -n "${currentRealityMldsa65Seed}" && -z "${lastInstallationConfig}" ]]; then
-                autoRead reality_history_mldsa65 "读取到上次安装记录，Seed为 [${currentRealityMldsa65Seed}]，Verify为 [${currentRealityMldsa65Verify}]，是否复用？[y/n]:" historyMldsa65Status
+                autoRead reality_history_mldsa65 "读取到上次安装记录，Seed为 [${currentRealityMldsa65Seed}]，Verify为 [${currentRealityMldsa65Verify}]，是否复用？[y/n]:" historyMldsa65Status || return 1
                 if [[ "${historyMldsa65Status}" == "y" ]]; then
-                    realityMldsa65Seed=${currentRealityMldsa65Seed}
-                    realityMldsa65Verify=${currentRealityMldsa65Verify}
+                    nextSeed=${currentRealityMldsa65Seed}
+                    nextVerify=${currentRealityMldsa65Verify}
                 fi
             elif [[ -n "${currentRealityMldsa65Seed}" && -n "${lastInstallationConfig}" ]]; then
-                realityMldsa65Seed=${currentRealityMldsa65Seed}
-                realityMldsa65Verify=${currentRealityMldsa65Verify}
+                nextSeed=${currentRealityMldsa65Seed}
+                nextVerify=${currentRealityMldsa65Verify}
             fi
-            if [[ -z "${realityMldsa65Seed}" ]]; then
-                realityMldsa65=$("$(coreXrayBinaryPath)" mldsa65)
-                realityMldsa65Seed=$(echo "${realityMldsa65}" | head -1 | awk '{print $2}')
-                realityMldsa65Verify=$(echo "${realityMldsa65}" | tail -n 1 | awk '{print $2}')
+            if [[ -z "${nextSeed}" ]]; then
+                if ! realityMldsa65=$("$(coreXrayBinaryPath)" mldsa65); then
+                    errorCard "Reality ML-DSA-65 生成失败"
+                    return 1
+                fi
+                nextSeed=$(printf '%s\n' "${realityMldsa65}" | awk '$1 ~ /^Seed:?$/ { print $2; exit }')
+                nextVerify=$(printf '%s\n' "${realityMldsa65}" | awk '$1 ~ /^Verify:?$/ { print $2; exit }')
             fi
+            [[ -n "${nextSeed}" && -n "${nextVerify}" ]] || { errorCard "Reality ML-DSA-65 生成结果不完整"; return 1; }
+            realityMldsa65Seed=${nextSeed}
+            realityMldsa65Verify=${nextVerify}
         else
             statusCard "Reality ML-DSA-65" "目标域名支持 X25519MLKEM768，但是证书长度不足，忽略 ML-DSA-65"
         fi

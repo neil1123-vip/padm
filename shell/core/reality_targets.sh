@@ -3174,10 +3174,36 @@ applyRealityTargetToInstalledConfigs() {
         [[ -f "${configFile}" ]] || continue
         case "${configIndex}" in
         0|1|2)
-            # Xray Vision 使用第 2 个入站，其余使用第 1 个；XHTTP 同步 host。
+            # Xray Vision 使用第 2 个入站；XHTTP 仅同步原本跟随 SNI 的 host。
             filter='.inbounds[$index].streamSettings.realitySettings.target = $target |
                 .inbounds[$index].streamSettings.realitySettings.serverNames = [$sni]'
-            [[ "${configIndex}" != 2 ]] || filter+=' | .inbounds[0].streamSettings.xhttpSettings.host = $sni'
+            if [[ "${configIndex}" == 0 ]]; then
+                # Vision 前端按 SNI 放行，切换目标时同步受管规则的旧域名。
+                filter='.inbounds[0] as $entry |
+                    .inbounds[1].streamSettings.realitySettings.serverNames[0] as $oldSNI |
+                    if $entry.protocol == "dokodemo-door" and ($entry.tag | type) == "string" and
+                        ($oldSNI | type) == "string" and (.routing.rules | type) == "array"
+                    then .routing.rules |= map(
+                        if .inboundTag == [$entry.tag] and .outboundTag == "z_direct_outbound" and (.domain | type) == "array"
+                        then .domain |= map(if . == $oldSNI then $sni else . end)
+                        else . end)
+                    else . end | '"${filter}"
+            fi
+            [[ "${configIndex}" != 2 ]] || filter='
+                .inbounds[0].streamSettings.realitySettings as $oldReality |
+                .inbounds[0].streamSettings.xhttpSettings.host as $oldHost |
+                if $oldReality.publicKey != null and
+                    .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.publicKey == $oldReality.publicKey and
+                    .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.serverName == $oldReality.serverNames[0]
+                then .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.serverName = $sni
+                    | if ($oldHost | type) == "string" and $oldHost == $oldReality.serverNames[0] and
+                        .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.xhttpSettings.host == $oldHost
+                      then .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.xhttpSettings.host = $sni
+                      else . end
+                else . end |
+                if (.inbounds[0].streamSettings.xhttpSettings.host // "") != "" and
+                    .inbounds[0].streamSettings.xhttpSettings.host == .inbounds[0].streamSettings.realitySettings.serverNames[0]
+                then .inbounds[0].streamSettings.xhttpSettings.host = $sni else . end | '"${filter}"
             ;;
         3|4)
             filter='.inbounds[0].tls.server_name = $sni |
@@ -3235,7 +3261,7 @@ validateRealityTargetConfigAfterChange() {
     if [[ -f "$(realitySingBoxVisionConfigPath)" || -f "$(realitySingBoxGrpcConfigPath)" ]]; then
         if [[ -f "$(coreSingBoxBinaryPath)" && -x "$(coreSingBoxBinaryPath)" ]]; then
             logFile=$(realityTargetTmpPath padm-reality-target-sing-box-test.log)
-            singBoxMergeConfigForValidation "$(coreSingBoxBinaryPath)" "${logFile}" || return 1
+            singBoxMergeConfigForValidation "$(coreSingBoxBinaryPath)" "${logFile}" check || return 1
         fi
     fi
 }
