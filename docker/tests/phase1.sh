@@ -308,6 +308,26 @@ mkdir -p "${AMBIGUOUS_ROOT}"
 printf 'unknown\n' >"${AMBIGUOUS_ROOT}/residue"
 runControl 11 ambiguous-root "${AMBIGUOUS_ROOT}" "${NATIVE_ROOT}" "${TEST_ROOT}/ambiguous-bin" install --source "${PROJECT_ROOT}"
 [[ "$(<"${AMBIGUOUS_ROOT}/residue")" == "unknown" ]] || fail 'ambiguous state was modified'
+[[ ! -e "${AMBIGUOUS_ROOT}/mode" ]] || fail 'ambiguous state received a mode marker'
+
+# 初始化部分失败后，保留归属标记并允许下一次完整安装恢复。
+RETRY_ROOT="${TEST_ROOT}/initialize-retry"
+RETRY_BIN="${TEST_ROOT}/initialize-retry-bin"
+(
+    mkdir() {
+        [[ "$*" != "-- ${PADM_DOCKER_INSTALL_DIR}/config" ]] || return 1
+        command mkdir "$@"
+    }
+    export -f mkdir
+    runControl 15 initialize-failure "${RETRY_ROOT}" "${NATIVE_ROOT}" "${RETRY_BIN}" \
+        install --source "${NO_COMPOSE_SOURCE}"
+)
+[[ "$(<"${RETRY_ROOT}/mode")" == docker && -d "${RETRY_ROOT}/.bundles" &&
+    ! -e "${RETRY_ROOT}/config" ]] || fail 'initialization failure lost its managed state'
+runControl 0 initialize-retry "${RETRY_ROOT}" "${NATIVE_ROOT}" "${RETRY_BIN}" \
+    install --source "${NO_COMPOSE_SOURCE}"
+[[ -d "${RETRY_ROOT}/config" && -L "${RETRY_ROOT}/bundle" &&
+    -L "${RETRY_BIN}/padm-docker" ]] || fail 'retry did not finish initialization'
 
 for failureMode in daemon-fail rootless; do
     export FAKE_DOCKER_MODE=${failureMode}

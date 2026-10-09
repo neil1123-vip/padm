@@ -289,8 +289,21 @@ dockerInitializeStateRoot() {
     root=$(dockerInstallRoot) || return 1
     dockerPathIsSafeAbsolute "${root}" && [[ ! -L "${root}" ]] || return 1
     mkdir -p -- "${root}" || return 1
-    for directory in .bundles bundle config data secrets logs backups locks; do
-        [[ "${directory}" == "bundle" ]] && continue
+    modeFile="${root}/mode"
+    mode=$(padmDeploymentModeAtRoot "${root}") || return 1
+    if [[ "${mode}" == "docker" ]]; then
+        [[ -O "${modeFile}" ]] || return 1
+        chmod 0640 "${modeFile}" || return 1
+    else
+        [[ "${mode}" == "missing" ]] || return 1
+        tempMode=$(mktemp "${root}/.mode.XXXXXX") || return 1
+        # 先记录归属，后续目录创建失败时仍可安全重试安装。
+        printf 'docker\n' >"${tempMode}" && chmod 0640 "${tempMode}" && mv -f -- "${tempMode}" "${modeFile}" || {
+            rm -f -- "${tempMode}" 2>/dev/null || true
+            return 1
+        }
+    fi
+    for directory in .bundles config data secrets logs backups locks; do
         if [[ -e "${root}/${directory}" || -L "${root}/${directory}" ]]; then
             [[ -d "${root}/${directory}" && ! -L "${root}/${directory}" &&
                 -O "${root}/${directory}" ]] || return 1
@@ -301,20 +314,6 @@ dockerInitializeStateRoot() {
     chmod 0750 "${root}" "${root}/.bundles" "${root}/config" "${root}/data" \
         "${root}/logs" "${root}/backups" "${root}/locks" || return 1
     chmod 0700 "${root}/secrets" || return 1
-
-    modeFile="${root}/mode"
-    mode=$(padmDeploymentModeAtRoot "${root}") || return 1
-    if [[ "${mode}" == "docker" ]]; then
-        [[ -O "${modeFile}" ]] || return 1
-        chmod 0640 "${modeFile}" || return 1
-        return 0
-    fi
-    [[ "${mode}" == "missing" ]] || return 1
-    tempMode=$(mktemp "${root}/.mode.XXXXXX") || return 1
-    printf 'docker\n' >"${tempMode}" && chmod 0640 "${tempMode}" && mv -f -- "${tempMode}" "${modeFile}" || {
-        rm -f -- "${tempMode}" 2>/dev/null || true
-        return 1
-    }
 }
 
 dockerInstallCli() {
