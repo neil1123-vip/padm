@@ -2850,6 +2850,27 @@ configure/update 与直接 restore/rollback 均需覆盖，旧来源日志不能
 SSH 宿主日志/INPUT、控制服务日志/jail、原生双架构及重启卸载独立未决，
 5C 与总目标继续 active。
 
+#### 5C.6b 前置：停止失败时拒绝继续恢复
+
+核对新启用调用链时发现共享恢复路径吞掉 Compose `down` 错误后仍替换配置。
+非 Reality 分支现在停止失败立即返回，保留切换标记及备份，停止错误输出不再隐藏；
+不会继续删除/复制配置、切换 bundle 或启动服务。Reality 分支已有同样的失败门禁。
+控制恢复准备和最新流量合并仍在停止之前执行，不把本项描述成完全零副作用。
+当前编排缺失、损坏或无法确认停止时，自动恢复可能失败，需依据保留备份人工核对，
+不能为了“恢复成功”无证据覆盖仍被在线容器使用的文件。
+
+实现 `51872cf2 fix(docker): stop configuration restore when shutdown fails`，
+本地 SSH 签名 `G`。Docker Desktop Linux amd64、Jobs 2，固定工具镜像复用：
+完整规格及私密配置/备份摘要的 phase6 定向回归入口 27.128 秒通过，
+证据 `.tmp-regression-docker-5ee6dc3732da4245bd0cb2fb4410e1c1`；
+共享 Fail2ban 停用自动恢复/信号路径 phase4 入口 66.809 秒通过，
+证据 `.tmp-regression-docker-9da811ec7d98408db7d5cf94abfb9721`。
+两个最终代码/测试文件与这两次快照逐文件一致，Shell 语法/ShellCheck error
+和限定复审通过，不重复完整合同；清理本轮 6 个源码归档/清单，共 24,953,578 字节，
+日志、result 和 `.tmp-restore-stop-static.log` 保留。
+本项不开放 Fail2ban 新启用，不解决 configure/update/历史回滚缺现场来源见证的问题；
+5C.6b 启用事务门禁、SSH/控制面和原生宿主验收继续待办。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。
