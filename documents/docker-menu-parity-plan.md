@@ -2607,6 +2607,7 @@ rule/route protocol `186`，local route 另绑定 token 派生 realm。
 | 检查 | 结果 / 秒 | 证据目录 |
 | --- | --- | --- |
 | `docker-tproxy-ownership`，Jobs 2 | 18.060 / 入口 18.965 | `.tmp-regression-docker-f31d7b6534f643e79e6f9a0c432b733b` |
+| 外部 goto 引用补验，Jobs 2 | 18.018 / 入口 18.884 | `.tmp-regression-docker-41cdcf43513f47c28b33f673847b268d` |
 | `docker-tproxy-real`，Jobs 2 | 8.594 / 入口 9.518 | `.tmp-regression-docker-75dc87c8c91c453a8ce7153539f75fa1` |
 | `docker-tproxy-focused`，Jobs 2 | 2/2，33.615 / 入口 34.604 | `.tmp-regression-docker-0459cf67c97a41f5a9995c16d9aa08af` |
 | `docker-contracts`，Jobs 6 | 34/34，263.263 / 入口 264.122 | `.tmp-regression-docker-0463ad7eeaca40b48b06bfa471e4b0a2` |
@@ -2615,11 +2616,16 @@ rule/route protocol `186`，local route 另绑定 token 派生 realm。
 复用既有原生架构工具及 net 镜像，不扩大三槽预算，不重建依赖镜像。
 完整合同快照先于最后 5 行规则顺序约束及对应测试，之后只对这个新分支补验
 ownership 与真实内核；不把不同输入摘要声称相同，也不重复执行已通过的其它模块。
+之后补外部 `iptables -g` 引用的拒绝检查，ownership 和 Linux 静态检查通过；
+此更严格的拒绝分支未重跑完整合同，不把先前快照视作最终源码的全量证明。
+完整合同内容摘要为 `207AD58D189684BF9888D2F84E4E2AC4D372A9735737682D8B01594E06B0F949`。
 最终 6 个 Shell 的 Linux sh/Bash 语法、ShellCheck error、PowerShell AST 与
 diff 检查通过。独立复审的掩码、反向规则及顺序问题均已补最小拒绝断言。
 dispatcher 初次暴露既有长任务调度顺序与预期夹具不一致，已修预期并复验。
 失败的 mock 输出及错误 PID 注入、真实夹具 cp/tmpfs 的日志保留；
 正常/失败回归的源码归档和清单清理，日志/result/共享缓存保留。
+候选 `d4087c20`、运行时 `1fea324c`、goto 防护 `5d73f28e` 均为本地 SSH 签名
+阶段提交，签名 `G`；未推送、发布或构建新业务镜像。
 
 ## 第六步：发布与完整验收
 
