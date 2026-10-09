@@ -60,6 +60,7 @@ listRegressionDockerContractsChildSelectors() {
     # 完整合同按历史耗时全局长任务优先，减少尾部空等。
     printf '%s\n' \
         docker-traditional-tls \
+        docker-routing-socks5 \
         docker-phase3 \
         docker-setup-encrypted \
         docker-setup-transports \
@@ -81,7 +82,6 @@ listRegressionDockerContractsChildSelectors() {
         docker-release \
         docker-geo-data \
         docker-traffic \
-        docker-routing-socks5 \
         docker-http-relay \
         docker-entry-port-alias \
         docker-accounts \
