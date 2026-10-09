@@ -86,15 +86,13 @@ scriptModuleLockAcquire() {
         ownerPid=$(cat "${lockDir}/pid" 2>/dev/null || true)
         if [[ "${ownerPid}" =~ ^[0-9]+$ ]] && ! kill -0 "${ownerPid}" 2>/dev/null; then
             rm -f -- "${lockDir}/pid" 2>/dev/null || true
-            rmdir -- "${lockDir}" 2>/dev/null || true
-            continue
+            rmdir -- "${lockDir}" 2>/dev/null && continue
         fi
         if [[ -z "${ownerPid}" ]]; then
             now=$(date +%s)
             lockMtime=$(stat --format=%Y -- "${lockDir}" 2>/dev/null || printf '%s\n' "${now}")
             if ((now - lockMtime > 5)); then
-                rmdir -- "${lockDir}" 2>/dev/null || true
-                continue
+                rmdir -- "${lockDir}" 2>/dev/null && continue
             fi
         fi
         ((SECONDS < deadline)) || return 1

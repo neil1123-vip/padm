@@ -3487,6 +3487,17 @@ runInstallModuleLockSerializesLoadRegression() (
     wait "${firstPid}"
     wait "${secondPid}"
     [[ -e "${secondReady}" && ! -e "${SCRIPT_MODULE_LOCK_DIR}" ]]
+
+    # 残留锁无法删除时仍须返回超时，不能跳过 deadline 无限重试。
+    export -f scriptModuleLockAcquire scriptIsSafeAbsolutePath
+    export SCRIPT_MODULE_LOCK_DIR PADM_SCRIPT_MODULE_LOCK_TIMEOUT=0
+    mkdir -p "${SCRIPT_MODULE_LOCK_DIR}/unexpected"
+    printf '2147483647\n' >"${SCRIPT_MODULE_LOCK_DIR}/pid"
+    regressionExpectStatus 1 timeout 2 bash -c scriptModuleLockAcquire
+    [[ -d "${SCRIPT_MODULE_LOCK_DIR}/unexpected" ]]
+    touch -d '10 seconds ago' "${SCRIPT_MODULE_LOCK_DIR}"
+    regressionExpectStatus 1 timeout 2 bash -c scriptModuleLockAcquire
+    [[ -d "${SCRIPT_MODULE_LOCK_DIR}/unexpected" ]]
 )
 
 runInstallRefreshRejectsEntryMismatchRegression() (
