@@ -3139,34 +3139,56 @@ manageRealityTarget() {
 
 # reality管理
 regenerateRealityProfileApply() {
-    local selectCustomInstallType=, protocolId streamProtocol internalPort configFile
+    local protocolId configFile configDir index filter changed=false
+    local selectCoreType=${coreInstallType} realityPrivateKey= realityPublicKey=
+    local realityMldsa65Seed= realityMldsa65Verify=
+    case "${coreInstallType}" in
+    1) configDir=$(xrayTemplateConfigDir) || return 1 ;;
+    2) configDir=$(singBoxTemplateConfigDir) || return 1 ;;
+    *) return 1 ;;
+    esac
+    initRealityProfile || return 1
+    initRealityKey || return 1
+    [[ "${coreInstallType}" != 1 ]] || initRealityMldsa65 || return 1
     for protocolId in 1 2 26; do
-        if currentProtocolHas "${protocolId}"; then
-            selectCustomInstallType+="${protocolId},"
+        currentProtocolHas "${protocolId}" || continue
+        configFile=$(padmManagedFilePath "${configDir}" "$(protocolCapabilityMeta "${protocolId}" config_file)") || return 1
+        [[ -f "${configFile}" ]] || continue
+        if [[ "${coreInstallType}" == 1 ]]; then
+            index=0
+            [[ "${protocolId}" != 1 ]] || index=1
+            filter='.inbounds[$index].streamSettings.realitySettings |=
+                (. + {target:$target, serverNames:[$sni], privateKey:$privateKey, publicKey:$publicKey,
+                    mldsa65Seed:$seed, mldsa65Verify:$verify})'
+            if [[ "${protocolId}" == 2 ]]; then
+                # 下行沿用本入站身份时同步公钥，独立下行身份保持不变。
+                filter='.inbounds[0].streamSettings.realitySettings as $oldReality |
+                    $oldReality.publicKey as $oldKey |
+                    if $oldKey != null and
+                        .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings.publicKey == $oldKey
+                    then .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings |=
+                        (if .serverName == $oldReality.serverNames[0] then .serverName = $sni else . end |
+                            .publicKey = $publicKey)
+                    else . end | '"${filter}"
+            fi
+        elif [[ "${coreInstallType}" == 2 ]]; then
+            index=0
+            filter='.inbounds[0].tls.server_name = $sni |
+                .inbounds[0].tls.reality.handshake.server = $host |
+                .inbounds[0].tls.reality.handshake.server_port = ($port | tonumber) |
+                .inbounds[0].tls.reality.private_key = $privateKey'
+        else
+            return 1
         fi
+        updateRoutingJsonConfig "${configFile}" "${filter}" --argjson index "${index}" \
+            --arg target "${realityTargetHost}:${realityTargetPort}" --arg sni "${realitySNI}" \
+            --arg host "${realityTargetHost}" --arg port "${realityTargetPort}" \
+            --arg privateKey "${realityPrivateKey}" --arg publicKey "${realityPublicKey}" \
+            --arg seed "${realityMldsa65Seed}" --arg verify "${realityMldsa65Verify}" || return 1
+        changed=true
     done
-    [[ "${selectCustomInstallType}" != , ]] || return 1
-    if [[ "${coreInstallType}" == "1" ]]; then
-        initXrayConfig custom 1 true || return 1
-        if realityStreamSplitEnabled; then
-            for streamProtocol in vision xhttp; do
-                internalPort=$(realityStreamInternalPortForProtocol "${streamProtocol}") || return 1
-                [[ -n "${internalPort}" ]] || continue
-                validPortNumber "${internalPort}" || return 1
-                if [[ "${streamProtocol}" == vision ]]; then
-                    configFile=$(realityStreamVisionConfigFile) || return 1
-                else
-                    configFile=$(realityStreamXHTTPConfigFile) || return 1
-                fi
-                realityStreamPatchXrayConfig "${streamProtocol}" "${internalPort}" "${configFile}" || return 1
-            done
-        fi
-    elif [[ "${coreInstallType}" == "2" ]]; then
-        initSingBoxConfig custom 1 true || return 1
-    else
-        return 1
-    fi
-
+    [[ "${changed}" == true ]] || return 1
+    validateRealityTargetConfigAfterChange || return 1
     reloadCore
 }
 

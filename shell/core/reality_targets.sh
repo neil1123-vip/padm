@@ -3235,7 +3235,7 @@ validateRealityTargetConfigAfterChange() {
     if [[ -f "$(realitySingBoxVisionConfigPath)" || -f "$(realitySingBoxGrpcConfigPath)" ]]; then
         if [[ -f "$(coreSingBoxBinaryPath)" && -x "$(coreSingBoxBinaryPath)" ]]; then
             logFile=$(realityTargetTmpPath padm-reality-target-sing-box-test.log)
-            singBoxMergeConfigForValidation "$(coreSingBoxBinaryPath)" "${logFile}" || return 1
+            singBoxMergeConfigForValidation "$(coreSingBoxBinaryPath)" "${logFile}" check || return 1
         fi
     fi
 }
