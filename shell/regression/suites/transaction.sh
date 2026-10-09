@@ -101,9 +101,7 @@ listRegressionTransactionSystemChildSelectors() {
         warp-config-safe-dir \
         warp-config-file-cleanup \
         uninstall-service-stop-failure \
-        clean-last-installation-failure \
-        clean-last-installation-acme-home \
-        clean-last-installation-acme-relative-home \
+        xray-install-stop-failure \
         alone-nginx-write-transaction \
         alone-nginx-update-transaction
 }
@@ -173,9 +171,7 @@ registerRegressionFunctionLeaf wireguard-control-safe-dir runWireGuardControlSaf
 registerRegressionFunctionLeaf warp-config-safe-dir runWarpConfigSafeDirRegression
 registerRegressionFunctionLeaf warp-config-file-cleanup runWarpConfigFileCleanupRegression
 registerRegressionFunctionLeaf uninstall-service-stop-failure runUninstallServiceStopFailureRegression
-registerRegressionFunctionLeaf clean-last-installation-failure runCleanLastInstallationConfigFailureRegression
-registerRegressionFunctionLeaf clean-last-installation-acme-home runCleanLastInstallationConfigAcmeHomeRegression failure
-registerRegressionFunctionLeaf clean-last-installation-acme-relative-home runCleanLastInstallationConfigAcmeHomeRegression relative-home
+registerRegressionFunctionLeaf xray-install-stop-failure runXrayInstallStopFailureRegression
 registerRegressionFunctionLeaf alone-nginx-write-transaction runAloneNginxConfigWriteTransactionRegression
 registerRegressionFunctionLeaf alone-nginx-update-transaction runAloneNginxUpdateTransactionRegression
 

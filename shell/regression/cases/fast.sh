@@ -809,63 +809,6 @@ runSubscriptionWireGuardNginxDisableLifecycleRegression() (
     grep -qx 'nginx:start' <<<"${actions}"
 )
 
-runCleanLastInstallationSkipsDuplicateNginxCleanupRegression() {
-    (
-        set -euo pipefail
-        local root="${TMP_DIR}/clean-last-installation-nginx-safety"
-        local unsafeRoot="${root}/unsafe"
-        local cleanupLog="${root}/cleanup.log"
-        local managedFiles=(alone.conf sing_box_VMess_HTTPUpgrade.conf subscribe.conf checkPortOpen.conf)
-        local file
-        mkdir -p "${unsafeRoot}"
-        for file in "${managedFiles[@]}"; do
-            printf 'managed\n' >"${unsafeRoot}/${file}"
-        done
-        cd "${unsafeRoot}"
-
-        currentDefaultPort=
-        regressionResetProtocolPorts
-        nginxConfigPath=
-        nginxStaticPath="${root}/static"
-
-        handleXray() { return 0; }
-        handleSingBox() { return 0; }
-        handleNginx() { return 0; }
-        runCoreServiceActionAllowFailure() {
-            "$@"
-        }
-        cleanAgentNginxConf() {
-            printf 'clean-agent\n' >>"${cleanupLog}"
-            return 0
-        }
-        cleanDirectoryContent() {
-            printf 'clean-dir:%s\n' "$1" >>"${cleanupLog}"
-            return 0
-        }
-        rm() {
-            local arg safeArgs=()
-            printf 'rm:%s\n' "$*" >>"${cleanupLog}"
-            for arg in "$@"; do
-                [[ "${arg}" == -* ]] && { safeArgs+=("${arg}"); continue; }
-                [[ "${arg}" == /* ]] && return 0
-                safeArgs+=("${arg}")
-            done
-            command rm "${safeArgs[@]}"
-        }
-        systemctl() { return 0; }
-        lsof() { return 1; }
-        autoRead() { printf -v "$3" 'n'; }
-        readInstallType() { return 0; }
-        mkdirTools() { return 0; }
-
-        cleanLastInstallationConfig >/dev/null
-        grep -qx 'clean-agent' "${cleanupLog}"
-        for file in "${managedFiles[@]}"; do
-            [[ -f "${file}" ]]
-        done
-    )
-}
-
 runInstallNginxAlpineDefaultPathSafetyRegression() {
     (
         set -euo pipefail
@@ -998,47 +941,6 @@ runInstallNginxStaticPreservesLiveSiteOnUnzipFailureRegression() {
         [[ ! -e "${downloadMarker}" ]]
         [[ -f "${missingStaticDir}/index.html" ]] || return 1
         [[ "$(<"${missingStaticDir}/index.html")" == "keep" ]]
-    )
-}
-
-runCleanLastInstallationRejectsUnsafeStaticPathRegression() {
-    (
-        set -euo pipefail
-        local root="${TMP_DIR}/clean-last-installation-static-safety"
-        local staticDir="${root}/relative-static"
-        local errorLog="${root}/errors.log"
-        local rc
-        mkdir -p "${staticDir}"
-        printf 'check\n' >"${staticDir}/check"
-        cd "${root}"
-
-        currentDefaultPort=
-        regressionResetProtocolPorts
-        nginxStaticPath="relative-static"
-
-        handleXray() { return 0; }
-        handleSingBox() { return 0; }
-        handleNginx() { return 0; }
-        runCoreServiceActionAllowFailure() {
-            "$@"
-        }
-        cleanAgentNginxConf() { return 0; }
-        cleanDirectoryContent() { return 0; }
-        systemctl() { return 0; }
-        lsof() { return 1; }
-        autoRead() { printf -v "$3" 'n'; }
-        errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
-        rm() {
-            if [[ "$*" == "-rf relative-static" ]]; then
-                command rm -rf relative-static
-                return 0
-            fi
-            return 0
-        }
-
-        regressionExpectFailure cleanLastInstallationConfig >/dev/null
-        [[ -f "${staticDir}/check" ]]
-        grep -q '静态站点目录' "${errorLog}"
     )
 }
 
@@ -3231,6 +3133,7 @@ runUninstallPadmRootScopeRegression() {
             printf 'systemctl:%s\n' "$*" >>"${serviceLog}"
             return 0
         }
+        cleanupPadmFirewallRules() { printf 'firewall-cleanup\n' >>"${serviceLog}"; }
         cleanupSubscriptionWireGuardControlOnUninstall() { return 0; }
         cleanupFail2banManagedFilesOnUninstall() { return 0; }
         removePadmNginxConfigFragments() { return 0; }
@@ -3248,6 +3151,7 @@ runUninstallPadmRootScopeRegression() {
         ! grep -qxF -- "-rf ${padmRoot}" "${rmLog}"
         ! grep -qx 'handleNginx:stop' "${serviceLog}" || return 1
         grep -qx 'handleXray:stop' "${serviceLog}"
+        grep -qx firewall-cleanup "${serviceLog}"
         [[ ! -s "${errorLog}" ]]
     )
 }
@@ -6472,11 +6376,9 @@ runRegressionFastOnlySafety() {
         wireguard-firewall-lifecycle runSubscriptionWireGuardFirewallLifecycleRegression \
         wireguard-nginx-disable-lifecycle runSubscriptionWireGuardNginxDisableLifecycleRegression \
         write-alone-nginx-path-safety runWriteAloneNginxPathSafetyRegression \
-        clean-last-installation-nginx-safety runCleanLastInstallationSkipsDuplicateNginxCleanupRegression \
         install-nginx-alpine-default-path-safety runInstallNginxAlpineDefaultPathSafetyRegression \
         install-nginx-static-unsafe-path runInstallNginxStaticRejectsUnsafePathRegression \
         install-nginx-static-unzip-failure runInstallNginxStaticPreservesLiveSiteOnUnzipFailureRegression \
-        clean-last-installation-static-safety runCleanLastInstallationRejectsUnsafeStaticPathRegression \
         subscription-sync-path-safety runSubscriptionSyncPathSafetyRegression \
         subscription-sync-config-directory-target runSubscriptionSyncConfigRestoreRejectsDirectoryTargetRegression \
         subscription-sync-create-local-apply-backups-rollback runSubscriptionSyncCreateLocalApplyBackupsRollbackRegression \

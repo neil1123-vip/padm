@@ -169,7 +169,7 @@ runMenuReadChoiceRegression() (
 )
 
 runInstallWorkflowRegression() (
-    local renderedIds= errors=0 shown=0 cleaned=0 cleanStatus=0
+    local renderedIds= errors=0 shown=0
     local answer inputFd nextInput output apply
     unset AUTO_INSTALL AUTO_INSTALL_TYPE AUTO_INSTALL_SUMMARY_SHOWN AUTO_PROTOCOLS AUTO_REUSE_LAST AUTO_DOMAIN AUTO_PORT
     echoContent() { :; }
@@ -183,7 +183,6 @@ runInstallWorkflowRegression() (
     errorCard() { errors=$((errors + 1)); }
     showAutoInstallSummary() { :; }
     showLastInstallationConfig() { shown=$((shown + 1)); }
-    cleanLastInstallationConfig() { cleaned=$((cleaned + 1)); return "${cleanStatus}"; }
 
     (
         # 同一会话重新检测安装状态，不能沿用旧核心路径或 Reality 标记。
@@ -329,7 +328,7 @@ runInstallWorkflowRegression() (
     lastInstallationConfig=true
     exec {inputFd}< <(printf 'next-parent-action\n')
     readLastInstallationConfig <&"${inputFd}"
-    [[ -z "${lastInstallationConfig}" && "${shown}" == "0" && "${cleaned}" == "0" ]]
+    [[ -z "${lastInstallationConfig}" && "${shown}" == "0" ]]
     read -r -u "${inputFd}" nextInput
     [[ "${nextInput}" == "next-parent-action" ]]
     exec {inputFd}<&-
@@ -338,53 +337,51 @@ runInstallWorkflowRegression() (
     for answer in "" y Y yes YES true True 1; do
         lastInstallationConfig=previous
         readLastInstallationConfig <<<"${answer}"
-        [[ "${lastInstallationConfig}" == "true" && "${cleaned}" == "0" ]]
+        [[ "${lastInstallationConfig}" == "true" ]]
     done
     for answer in n N no NO false False 0; do
-        cleaned=0
         lastInstallationConfig=previous
         currentHost=old.example.com
         currentUUID=old-user
         currentClients='[{"id":"old-user"}]'
         customPort=8443
+        hysteria2BandwidthMode=bbr
+        hysteria2ClientDownloadSpeed=240
+        hysteria2ClientUploadSpeed=90
+        hysteria2ObfsType=salamander
+        hysteria2ObfsPassword=old-secret
+        hysteria2Masquerade=https://old.example.com
         readLastInstallationConfig <<<"${answer}"
-        [[ -z "${lastInstallationConfig}${currentHost}${currentUUID}${currentClients}${customPort}" && "${cleaned}" == "0" ]]
+        [[ -z "${lastInstallationConfig}${currentHost}${currentUUID}${currentClients}${customPort}" ]]
+        [[ -z "${hysteria2BandwidthMode}${hysteria2ClientDownloadSpeed}${hysteria2ClientUploadSpeed}${hysteria2ObfsType}${hysteria2ObfsPassword}${hysteria2Masquerade}" ]]
         [[ "${PADM_INSTALL_RESET_HISTORY}" == true ]]
     done
-    cleaned=0
     shown=0
     exec {inputFd}< <(printf 'maybe\n\nnext-parent-action\n')
     readLastInstallationConfig <&"${inputFd}"
-    [[ "${lastInstallationConfig}" == "true" && "${cleaned}" == "0" && "${shown}" == "1" ]]
+    [[ "${lastInstallationConfig}" == "true" && "${shown}" == "1" ]]
     read -r -u "${inputFd}" nextInput
     [[ "${nextInput}" == "next-parent-action" ]]
     exec {inputFd}<&-
     lastInstallationConfig=previous
     regressionExpectStatus 1 readLastInstallationConfig </dev/null
-    [[ -z "${lastInstallationConfig}" && "${cleaned}" == "0" ]]
+    [[ -z "${lastInstallationConfig}" ]]
     lastInstallationConfig=previous
-    cleaned=0
     regressionExpectStatus 1 readLastInstallationConfig < <(printf 'n')
-    [[ -z "${lastInstallationConfig}" && "${cleaned}" == "0" ]]
+    [[ -z "${lastInstallationConfig}" ]]
     readLastInstallationConfig <<<"n"
-    [[ -z "${lastInstallationConfig}" && "${cleaned}" == "0" ]]
-    cleanStatus=1
-    cleaned=0
-    readLastInstallationConfig <<<"n"
-    [[ -z "${lastInstallationConfig}" && "${cleaned}" == "0" ]]
-    cleanStatus=0
-    cleaned=0
+    [[ -z "${lastInstallationConfig}" ]]
 
     for AUTO_INSTALL in true 1 false; do
         unset AUTO_REUSE_LAST
         readLastInstallationConfig </dev/null
-        [[ "${lastInstallationConfig}" == "true" && "${cleaned}" == "0" ]]
+        [[ "${lastInstallationConfig}" == "true" ]]
     done
     AUTO_REUSE_LAST=maybe
     for AUTO_INSTALL in true 1 false; do
         exec {inputFd}< <(printf 'next-parent-action\n')
         regressionExpectStatus 1 readLastInstallationConfig <&"${inputFd}"
-        [[ -z "${lastInstallationConfig}" && "${cleaned}" == "0" ]]
+        [[ -z "${lastInstallationConfig}" ]]
         read -r -u "${inputFd}" nextInput
         [[ "${nextInput}" == "next-parent-action" ]]
         exec {inputFd}<&-
@@ -394,7 +391,7 @@ runInstallWorkflowRegression() (
     [[ "${lastInstallationConfig}" == "true" ]]
     AUTO_REUSE_LAST=no
     readLastInstallationConfig </dev/null
-    [[ -z "${lastInstallationConfig}" && "${cleaned}" == "0" ]]
+    [[ -z "${lastInstallationConfig}" ]]
     unset AUTO_INSTALL AUTO_REUSE_LAST
 
     (
@@ -404,7 +401,7 @@ runInstallWorkflowRegression() (
             for AUTO_REUSE_LAST in n N no NO false False 0; do
                 shown=0 currentHost=old.example.com currentUUID=old-user customPort=8443
                 readLastInstallationConfig </dev/null
-                [[ "${shown}" == 0 && "${cleaned}" == 0 && "${PADM_INSTALL_RESET_HISTORY}" == true &&
+                [[ "${shown}" == 0 && "${PADM_INSTALL_RESET_HISTORY}" == true &&
                     -z "${lastInstallationConfig}${currentHost}${currentUUID}${customPort}" ]]
             done
             AUTO_REUSE_LAST=yes
@@ -441,7 +438,6 @@ runInstallWorkflowRegression() (
             xHTTPort=10003
             singBoxVLESSRealityVisionSNI=old-target.example.com
         }
-        cleanLastInstallationConfig() { events+=$'cleanup\n'; return 1; }
         installTools() { events+=$'tools\n'; return 1; }
         coreTemplateConfigBackupCreate() { events+=$'backup\n'; return 1; }
         nginxRunning() { return 1; }
