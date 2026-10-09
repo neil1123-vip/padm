@@ -57,6 +57,35 @@ YAML
     [[ "$(getDLCMatchedRuleValue no-such-dlc-keyword "${singBoxConfigPath}")" == "no-such-dlc-keyword" ]] || { printf 'routing-keyword-fail:xray-fallback\n' >&2; return 1; }
     ! grep -q 'regexp:' < <(getDLCMatchedRuleValue example.com "${singBoxConfigPath}")
     (
+        local configPath="${routingRoot}/regional-policy/xray/"
+        local singBoxConfigPath="${routingRoot}/regional-policy/sing-box/"
+        local coreInstallType=1
+        local dlcLookupMarker="${routingRoot}/regional-policy/dlc-lookup"
+        local expectedDefaults='["apple.com","bing.com","dl.google.com","googleapis.cn","googleapis.com","gstatic.com","microsoft.com","xn--ngstr-lra8j.com"]'
+        mkdir -p "${configPath}" "${singBoxConfigPath}"
+        menuReadChoice() { printf -v "$3" '1'; }
+        autoRead() { printf -v "$3" ''; }
+        accessControlBackupCreate() { :; }
+        applyAccessControlConfigChange() { :; }
+        addXrayOutbound() { :; }
+        addSingBoxOutbound() { :; }
+        getDLCGeositeName() { touch "${dlcLookupMarker}"; return 99; }
+        manageRegionalBlockPolicy >/dev/null || return 1
+        jq -e --argjson defaults "${expectedDefaults}" '
+          any(.routing.rules[]; .outboundTag == "blackhole_out" and .domain == ["geosite:cn"]) and
+          any(.routing.rules[]; .outboundTag == "blackhole_ip_out" and .ip == ["geoip:cn"]) and
+          any(.routing.rules[]; .outboundTag == "allow_domain_direct_outbound" and
+            (.domain | map(ltrimstr("domain:")) | sort) == $defaults)
+        ' "${configPath}09_routing.json" >/dev/null || return 1
+        jq -e '.route.rules[0].rule_set == ["geosite_cn_cn_block_route"] and
+          .route.rules[0].action == "reject"' "${singBoxConfigPath}cn_block_route.json" >/dev/null || return 1
+        jq -e --argjson defaults "${expectedDefaults}" '
+          .route.rules[0].domain_suffix == $defaults and
+          .route.rules[0].outbound == "01_direct_outbound"
+        ' "${singBoxConfigPath}00_allow_domain_route.json" >/dev/null || return 1
+        [[ ! -e "${dlcLookupMarker}" ]]
+    ) || return 1
+    (
         local dlcRoot="${routingRoot}/dlc-release"
         local dlcCorePath="${dlcRoot}/core"
         local dlcTarget="${dlcCorePath}/dlc.dat_plain.yml"

@@ -174,7 +174,7 @@ addDirectAllowDomains() {
 manageRegionalBlockPolicy() {
     local policyStatus allowDomainList extraAllowDomainList
     while true; do
-        allowDomainList="dl.google.com,apple.com,bing.com,microsoft.com,gstatic,xn--ngstr-lra8j.com,googleapis.com,googleapis.cn"
+        allowDomainList="dl.google.com,apple.com,bing.com,microsoft.com,gstatic.com,xn--ngstr-lra8j.com,googleapis.com,googleapis.cn"
         extraAllowDomainList=
         echoContent title "\n┌─ 区域阻断策略 ─────────────────────────────────────"
         menuLine "危险操作：可能影响系统更新、证书签发、应用连接和客户端服务"
@@ -199,7 +199,7 @@ manageRegionalBlockPolicy() {
         accessControlBackupCreate || return 1
         if [[ "${coreInstallType}" == "1" ]]; then
             if [[ "${policyStatus}" == "1" || "${policyStatus}" == "2" ]]; then
-                addXrayRouting blackhole_out outboundTag "cn" || { accessControlAbortChange; return 1; }
+                addXrayRouting blackhole_out outboundTag "geosite:cn" || { accessControlAbortChange; return 1; }
                 addXrayOutbound blackhole_out || { accessControlAbortChange; return 1; }
             fi
             if [[ "${policyStatus}" == "1" || "${policyStatus}" == "3" ]]; then
@@ -211,7 +211,7 @@ manageRegionalBlockPolicy() {
         fi
         if [[ -n "${singBoxConfigPath}" ]]; then
             if [[ "${policyStatus}" == "1" || "${policyStatus}" == "2" ]]; then
-                addSingBoxRouteRule "cn_block_outbound" "cn" "cn_block_route" || { accessControlAbortChange; return 1; }
+                addSingBoxRouteRule "cn_block_outbound" "geosite:cn" "cn_block_route" || { accessControlAbortChange; return 1; }
             fi
             if [[ "${policyStatus}" == "1" || "${policyStatus}" == "3" ]]; then
                 addSingBoxGeoIPRouteRule "block_ip_outbound" "cn" "cn_block_ip_route" || { accessControlAbortChange; return 1; }
