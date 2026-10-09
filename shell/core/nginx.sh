@@ -166,42 +166,12 @@ realityStreamWarnWebsiteBackend() {
     fi
 }
 
-backupRealityStreamFile() {
-    local file=$1
-    local backup=$2
-    file=$(padmResolveManagedAbsolutePath "${file}") || return 1
-    backup=$(padmResolveManagedAbsolutePath "${backup}") || return 1
-    if [[ -f "${file}" ]]; then
-        backupManagedFileToPath "${file}" "${backup}" 644 || return 1
-    else
-        removeManagedFileIfPresent "${backup}" || return 1
-    fi
-}
-
-restoreRealityStreamFile() {
-    local file=$1
-    local backup=$2
-    file=$(padmResolveManagedAbsolutePath "${file}") || return 1
-    backup=$(padmResolveManagedAbsolutePath "${backup}") || return 1
-    if [[ -f "${backup}" ]]; then
-        restoreManagedFileFromBackup "${backup}" "${file}" 644 || return 1
-    else
-        removeManagedFileIfPresent "${file}" || return 1
-    fi
-}
-
 realityStreamRollback() {
     local tmpDir=$1
     local status=0
-    [[ -n "${tmpDir}" && -d "${tmpDir}" ]] || return 0
-    restoreRealityStreamFile "$(realityStreamVisionConfigFile)" "${tmpDir}/vision.json" || status=1
-    restoreRealityStreamFile "$(realityStreamXHTTPConfigFile)" "${tmpDir}/xhttp.json" || status=1
-    restoreRealityStreamFile "$(realityStreamSplitConfFile)" "${tmpDir}/stream.conf" || status=1
-    restoreRealityStreamFile "$(realityStreamSplitStateFile)" "${tmpDir}/state.json" || status=1
-    restoreRealityStreamFile "$(realityStreamSplitNginxConf)" "${tmpDir}/nginx.conf" || status=1
-    if [[ -d "${tmpDir}/ports" ]]; then
-        corePortRollbackFiles "${tmpDir}/ports" || status=1
-    fi
+    [[ -n "${tmpDir}" && -d "${tmpDir}" ]] || return 1
+    padmRestoreManagedFileBackupManifest "${tmpDir}" || status=1
+    corePortRollbackFiles "${tmpDir}/ports" || status=1
     return "${status}"
 }
 
@@ -212,11 +182,12 @@ removeRealityStreamBackup() {
 
 backupRealityStreamState() {
     local backupDir=$1
-    backupRealityStreamFile "$(realityStreamVisionConfigFile)" "${backupDir}/vision.json" || return 1
-    backupRealityStreamFile "$(realityStreamXHTTPConfigFile)" "${backupDir}/xhttp.json" || return 1
-    backupRealityStreamFile "$(realityStreamSplitConfFile)" "${backupDir}/stream.conf" || return 1
-    backupRealityStreamFile "$(realityStreamSplitStateFile)" "${backupDir}/state.json" || return 1
-    backupRealityStreamFile "$(realityStreamSplitNginxConf)" "${backupDir}/nginx.conf" || return 1
+    padmWriteManagedFileBackupManifest "${backupDir}" \
+        vision.json "$(realityStreamVisionConfigFile)" \
+        xhttp.json "$(realityStreamXHTTPConfigFile)" \
+        stream.conf "$(realityStreamSplitConfFile)" \
+        state.json "$(realityStreamSplitStateFile)" \
+        nginx.conf "$(realityStreamSplitNginxConf)" || return 1
     corePortBackupFiles "${backupDir}/ports"
 }
 

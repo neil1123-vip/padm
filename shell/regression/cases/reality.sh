@@ -3031,6 +3031,28 @@ runRealityStreamSplitRegression() (
     nginxRunning() { return 1; }
     menuLine() { printf '%s\n' "$*" >>"${root}/status.log"; }
     serviceQueueRefresh() { :; }
+    (
+        local snapshot damage
+        for damage in missing dir; do
+            padmCreateTempPath snapshot -d "$(realityStreamEnableBackupTemplate)" || return 1
+            backupRealityStreamState "${snapshot}" || return 1
+            printf 'current vision\n' >"${PADM_REALITY_STREAM_VISION_CONFIG_FILE}"
+            rm -f -- "${snapshot}/vision.json"
+            [[ "${damage}" != dir ]] || mkdir "${snapshot}/vision.json"
+            regressionExpectStatus 1 realityStreamRollback "${snapshot}" || return 1
+            [[ "$(<"${PADM_REALITY_STREAM_VISION_CONFIG_FILE}")" == 'current vision' ]] || return 1
+            removeRealityStreamBackup "${snapshot}" || return 1
+            printf '%s\n' '{"inbounds":[{"port":443,"settings":{"marker":"vision"}},{"port":12345}]}' >"${PADM_REALITY_STREAM_VISION_CONFIG_FILE}"
+        done
+        padmCreateTempPath snapshot -d "$(realityStreamEnableBackupTemplate)" || return 1
+        backupRealityStreamState "${snapshot}" || return 1
+        mkdir -p "$(dirname -- "${PADM_REALITY_STREAM_CONF_FILE}")"
+        printf 'new stream\n' >"${PADM_REALITY_STREAM_CONF_FILE}"
+        realityStreamRollback "${snapshot}" || return 1
+        [[ ! -e "${PADM_REALITY_STREAM_CONF_FILE}" ]] || return 1
+        removeRealityStreamBackup "${snapshot}" || return 1
+        regressionExpectStatus 1 realityStreamRollback "${snapshot}" || return 1
+    ) || return 1
     serviceQueueApply() { return 0; }
     readNginxSubscribe() { subscribePort=; return "${subscribeReadStatus}"; }
     subscribe() { subscribeCalls=$((subscribeCalls + 1)); }
