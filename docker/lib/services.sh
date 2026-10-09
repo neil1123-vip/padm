@@ -129,7 +129,11 @@ dockerConfigureSpecValidate() {
       (.schema_version == 1 or .schema_version == 2 or .schema_version == 3) and
       (if has("routing") then
         .schema_version == 3 and
-        (.routing | exact(["socks5"]) and
+        (.routing | type == "object" and length >= 1 and
+          exact((if has("socks5") then ["socks5"] else [] end) +
+            (if has("dns") then ["dns"] else [] end) +
+            (if has("hosts") then ["hosts"] else [] end)) and
+          (if has("socks5") then
           (.socks5 | exact(["server", "port", "username", "password"] +
               if has("domains") then ["domains"] else [] end) and
             (.server | host_address and . != "host.docker.internal") and
@@ -141,7 +145,19 @@ dockerConfigureSpecValidate() {
             (if has("domains") then
               (.domains | type == "array" and length >= 1 and length <= 256 and
                 length == (unique | length) and all(.[]; routing_selector))
-             else true end))) and
+             else true end))
+           else true end) and
+          (if has("dns") then
+            (.dns | exact(["server", "port", "domains"]) and
+              (.server | host_address and . != "host.docker.internal") and (.port | port) and
+              (.domains | type == "array" and length >= 1 and length <= 256 and
+                length == (unique | length) and all(.[]; routing_selector)))
+           else true end) and
+          (if has("hosts") then
+            (.hosts | type == "object" and length >= 1 and length <= 256 and
+              all(to_entries[]; (.key | hostname and . == ascii_downcase) and
+                (.value | host_address and . != "host.docker.internal")))
+           else true end)) and
         all(.host_integrations[]; .type != "tun" and .type != "tproxy")
        else true end) and
       (if has("site") then
@@ -1346,6 +1362,11 @@ dockerGenerateXrayConfig() {
       (($r.routing.socks5 // {}) | has("domains")) as $selective |
       (($r.routing.socks5.domains // []) | map(
         if startswith("keyword:") then ltrimstr("keyword:") else . end)) as $domains |
+      ($r.routing.dns != null or $r.routing.hosts != null) as $resolve |
+      (($r.routing.dns.domains // []) | map(
+        if startswith("keyword:") then ltrimstr("keyword:") else . end)) as $dns_domains |
+      ({protocol: "freedom", tag: "direct"} +
+        if $resolve then {settings: {domainStrategy: "ForceIP"}} else {} end) as $direct |
       {
         log: {loglevel: "warning"},
         inbounds: ([
@@ -1444,8 +1465,8 @@ dockerGenerateXrayConfig() {
           }
         ]),
         outbounds: [
-          (if $selective then {protocol: "freedom", tag: "direct"} else empty end),
-          (if $r.routing != null then {
+          (if $selective then $direct else empty end),
+          (if $r.routing.socks5 != null then {
             protocol: "socks", tag: "padm-socks5",
             settings: {servers: [{
               address: $r.routing.socks5.server,
@@ -1453,14 +1474,26 @@ dockerGenerateXrayConfig() {
               users: [{user: $r.routing.socks5.username, pass: $r.routing.socks5.password}]
             }]}
           } else empty end),
-          (if $selective then empty else {protocol: "freedom", tag: "direct"} end),
+          (if $selective then empty else $direct end),
           {protocol: "blackhole", tag: "blocked"}
         ]
-      } + (if $r.routing != null then {
-        routing: {rules: (if $selective then [
+      } + (if $resolve then {
+        dns: {tag: "padm-dns", disableFallbackIfMatch: true,
+          hosts: (($r.routing.hosts // {}) | with_entries(.key = "full:" + .key)),
+          servers: ([(if $r.routing.dns != null then {
+            address: $r.routing.dns.server, port: $r.routing.dns.port,
+            domains: $dns_domains, skipFallback: true, finalQuery: true
+          } else empty end), "localhost"])}
+      } else {} end) +
+      (if $r.routing.socks5 != null or $resolve then {
+        routing: {rules: ((if $resolve then [
+          {type: "field", inboundTag: ["padm-dns"], outboundTag: "direct"}
+        ] else [] end) + (if $selective then [
           {type: "field", domain: $domains, network: "udp", outboundTag: "blocked"},
           {type: "field", domain: $domains, network: "tcp", outboundTag: "padm-socks5"}
-        ] else [{type: "field", network: "udp", outboundTag: "blocked"}] end)}
+        ] elif $r.routing.socks5 != null then [
+          {type: "field", network: "udp", outboundTag: "blocked"}
+        ] else [] end))}
       } else {} end) |
       if $selective then
         .inbounds |= map(.sniffing = {enabled: true, destOverride: ["http", "tls", "quic"], routeOnly: true})
@@ -1484,15 +1517,22 @@ dockerGenerateXrayConfig() {
 dockerGenerateSingBoxConfig() {
     local specFile=$1 target=$2
     jq -n --slurpfile request "${specFile}" '
+      def domain_matches($rules):
+        {
+          domain: [$rules[] | select(startswith("full:")) | ltrimstr("full:")],
+          domain_suffix: [$rules[] | select(startswith("domain:")) | ltrimstr("domain:")],
+          domain_keyword: [$rules[] | select(startswith("keyword:")) | ltrimstr("keyword:")],
+          rule_set: [$rules[] | select(startswith("geosite:")) | "padm-geosite-" + ltrimstr("geosite:")]
+        } | to_entries | map(select(.value | length > 0) | {(.key): .value});
       $request[0] as $r |
       (($r.routing.socks5 // {}) | has("domains")) as $selective |
       ($r.routing.socks5.domains // []) as $domains |
-      ({
-        domain: [$domains[] | select(startswith("full:")) | ltrimstr("full:")],
-        domain_suffix: [$domains[] | select(startswith("domain:")) | ltrimstr("domain:")],
-        domain_keyword: [$domains[] | select(startswith("keyword:")) | ltrimstr("keyword:")],
-        rule_set: [$domains[] | select(startswith("geosite:")) | "padm-geosite-" + ltrimstr("geosite:")]
-      } | to_entries | map(select(.value | length > 0) | {(.key): .value})) as $matches |
+      (domain_matches($domains)) as $matches |
+      (domain_matches($r.routing.dns.domains // [])) as $dns_matches |
+      (($r.routing.hosts // {}) | keys) as $host_domains |
+      ($r.routing.dns != null or $r.routing.hosts != null) as $resolve |
+      (($domains + ($r.routing.dns.domains // [])) |
+        map(select(startswith("geosite:")) | ltrimstr("geosite:")) | unique) as $sets |
       {
         log: {disabled: false, level: "warn", timestamp: true},
         inbounds: ([
@@ -1629,29 +1669,44 @@ dockerGenerateSingBoxConfig() {
           } else empty end
         ]),
         outbounds: [
-          (if $r.routing != null then {
+          (if $r.routing.socks5 != null then {
             type: "socks", tag: "padm-socks5",
             server: $r.routing.socks5.server, server_port: $r.routing.socks5.port,
             version: "5", username: $r.routing.socks5.username, password: $r.routing.socks5.password
           } else empty end),
           {type: "direct", tag: "direct"}
         ],
-        route: ({final: (if $r.routing != null and ($selective | not) then "padm-socks5" else "direct" end),
+        route: ({final: (if $r.routing.socks5 != null and ($selective | not) then "padm-socks5" else "direct" end),
           auto_detect_interface: true} +
-          if $selective then
-            # 各类匹配分开成规则，域名与 rule-set 之间保持 OR，不改变实际目的地址。
-            {rules: ([{action: "sniff", timeout: "1s"}] +
+          (if $r.routing.socks5 != null or $resolve then
+            # 出站先决策；直连解析保留各类规则的 OR，固定 hosts 解析后立即路由避免被 DNS 覆盖。
+            {rules: ((if $selective then [{action: "sniff", timeout: "1s"}] +
               [$matches[] | . + {network: "udp", action: "reject"}] +
-              [$matches[] | . + {network: "tcp", action: "route", outbound: "padm-socks5"}])} +
-            if ($matches | any(has("rule_set"))) then
-              {rule_set: [$domains[] | select(startswith("geosite:")) | ltrimstr("geosite:") |
+              [$matches[] | . + {network: "tcp", action: "route", outbound: "padm-socks5"}]
+             elif $r.routing.socks5 != null then [{network: "udp", action: "reject"}] +
+               if $resolve then [{network: "tcp", action: "route", outbound: "padm-socks5"}] else [] end
+             else [] end) +
+              (if ($host_domains | length) > 0 then [
+                {domain: $host_domains, action: "resolve", server: "padm-hosts"},
+                {domain: $host_domains, action: "route", outbound: "direct"}
+              ] else [] end) +
+              [$dns_matches[] | . + {action: "resolve", server: "padm-dns"}])}
+           else {} end) +
+          (if $resolve then {default_domain_resolver: "padm-local"} else {} end) +
+          if ($sets | length) > 0 then
+              {rule_set: [$sets[] |
                 {tag: ("padm-geosite-" + .), type: "remote", format: "binary",
                   url: ("https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-" + . + ".srs"),
                   http_client: {engine: "go"}}]}
-            else {} end
-          elif $r.routing != null then {rules: [{network: "udp", action: "reject"}]}
           else {} end)
-      } |
+      } + (if $resolve then {
+        dns: {servers: [{type: "local", tag: "padm-local"},
+          (if $r.routing.hosts != null then
+            {type: "hosts", tag: "padm-hosts", predefined: $r.routing.hosts} else empty end),
+          (if $r.routing.dns != null then {type: "udp", tag: "padm-dns",
+            server: $r.routing.dns.server, server_port: $r.routing.dns.port} else empty end)],
+          final: "padm-local"}
+      } else {} end) |
       if $r.accounts != null then
         .inbounds |= map(. as $inbound |
           if .users != null then

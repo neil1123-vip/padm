@@ -16,6 +16,7 @@
   "x-padm-acme-webroot": true,
   "x-padm-routing-socks5": true,
   "x-padm-routing-domains": true,
+  "x-padm-routing-dns-hosts": true,
   "additionalProperties": false,
   "required": ["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"],
   "properties": {
@@ -283,7 +284,7 @@
     "routing": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["socks5"],
+      "minProperties": 1,
       "properties": {
         "socks5": {
           "type": "object",
@@ -321,6 +322,26 @@
               }
             }
           }
+        },
+        "dns": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["server", "port", "domains"],
+          "properties": {
+            "server": {"$ref": "#/properties/routing/properties/socks5/properties/server"},
+            "port": {"$ref": "#/$defs/port"},
+            "domains": {"$ref": "#/properties/routing/properties/socks5/properties/domains"}
+          }
+        },
+        "hosts": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 256,
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^(?=.{1,253}(?![\\s\\S]))(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}(?![\\s\\S])"
+          },
+          "additionalProperties": {"$ref": "#/properties/routing/properties/socks5/properties/server"}
         }
       }
     },

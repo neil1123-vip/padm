@@ -445,11 +445,12 @@ def check_mode(root, core, family, host, mode):
                 thread.join(timeout=2)
 
 
-root = Path(sys.argv[1])
-os.chmod(root, 0o755)
-fixture_assets(root)
-with fixture_hosts():
-    for family, host in (("ipv4", "127.0.0.1"), ("ipv6", "::1")):
-        for core in ("xray", "sing-box"):
-            for mode in ("global", "selective"):
-                check_mode(root, core, family, host, mode)
+if __name__ == "__main__":
+    root = Path(sys.argv[1])
+    os.chmod(root, 0o755)
+    fixture_assets(root)
+    with fixture_hosts():
+        for family, host in (("ipv4", "127.0.0.1"), ("ipv6", "::1")):
+            for core in ("xray", "sing-box"):
+                for mode in ("global", "selective"):
+                    check_mode(root, core, family, host, mode)

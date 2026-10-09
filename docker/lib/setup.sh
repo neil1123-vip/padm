@@ -764,8 +764,8 @@ dockerEditPreview() {
         "${draft}"
 }
 
-dockerEditSocks5InputCopy() (
-    local input=$1 target=$2 cursor metadata mode resolved
+dockerEditPrivateInputCopy() (
+    local input=$1 target=$2 kind=${3:-} cursor metadata mode resolved
     umask 077
     dockerPathIsSafeAbsolute "${input}" &&
         resolved=$(realpath -m -s -- "${input}" 2>/dev/null) &&
@@ -786,9 +786,15 @@ dockerEditSocks5InputCopy() (
     cp -- "${input}" "${target}" 2>/dev/null &&
         chmod 0600 "${target}" &&
         [[ "$(stat -c '%s' -- "${target}")" -le 65536 ]] &&
-        jq -es 'length == 1 and (.[0] | type == "object" and
-          keys == (["password", "port", "server", "username"] +
-            if has("domains") then ["domains"] else [] end | sort))' "${target}" >/dev/null 2>&1
+        jq -es --arg kind "${kind}" '
+          length == 1 and (.[0] | type == "object" and
+          (if $kind == "socks5" then
+             keys == (["password", "port", "server", "username"] +
+               if has("domains") then ["domains"] else [] end | sort)
+           elif $kind == "dns" then keys == ["domains", "port", "server"]
+           elif $kind == "hosts" then length >= 1 and length <= 256
+           else false end))
+        ' "${target}" >/dev/null 2>&1
 )
 
 dockerSocks5DomainsNormalize() {
@@ -882,13 +888,16 @@ dockerProtocolCommand() (
     if [[ "${action}" == routing-status ]]; then
         jq '{enabled:(.routing != null), server:(.routing.socks5.server // null),
           port:(.routing.socks5.port // null),
-          mode:(if .routing == null then "direct"
+          mode:(if .routing.socks5 == null then "direct"
             elif .routing.socks5 | has("domains") then "domains" else "global" end),
           domain_rules:(.routing.socks5.domains // []),
-          tcp:(if .routing == null then "direct"
+          tcp:(if .routing.socks5 == null then "direct"
             elif .routing.socks5 | has("domains") then "matched-socks5" else "socks5" end),
-          udp:(if .routing == null then "direct"
-            elif .routing.socks5 | has("domains") then "matched-blocked" else "blocked" end)}' "${normalized}"
+          udp:(if .routing.socks5 == null then "direct"
+            elif .routing.socks5 | has("domains") then "matched-blocked" else "blocked" end)} +
+          (if .routing.dns != null then {dns:{server:.routing.dns.server,
+            port:.routing.dns.port,domain_rules:.routing.dns.domains}} else {} end) +
+          (if .routing.hosts != null then {hosts:.routing.hosts} else {} end)' "${normalized}"
         return $?
     fi
     if [[ "${action}" == list ]]; then
@@ -1303,7 +1312,7 @@ dockerEditCommand() {
     local streamDomains= streamAddress= streamPort=8443
     local siteMode= siteSource= siteUrl=
     local alpnListener= alpnOrder=
-    local http01= socks5= socks5File= socks5Domains=
+    local http01= socks5= socks5File= socks5Domains= dnsHosts= dnsHostsFile= dnsHostsAction=
     local DOCKER_CONFIG_RESTORE_ALPN_LISTENER=
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
@@ -1358,6 +1367,17 @@ dockerEditCommand() {
         --socks5-global)
             [[ -z "${socks5}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             socks5=global
+            shift
+            ;;
+        --dns|--hosts)
+            [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${dnsHosts}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            dnsHosts=${1#--} dnsHostsFile=$2 dnsHostsAction=enable
+            shift 2
+            ;;
+        --dns-off|--hosts-off)
+            [[ -z "${dnsHosts}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            dnsHosts=${1#--} dnsHosts=${dnsHosts%-off} dnsHostsAction=disable
             shift
             ;;
         --alpn)
@@ -1446,7 +1466,13 @@ dockerEditCommand() {
     }
     [[ -z "${socks5}" || ( -z "${specFile}" && -z "${regenerateReality}" &&
         -z "${realityTarget}" && -z "${realityStream}" && -z "${siteMode}" &&
-        -z "${alpnListener}" && -z "${http01}" ) ]] || {
+        -z "${alpnListener}" && -z "${http01}" && -z "${dnsHosts}" ) ]] || {
+        dockerError '路由专项编辑不能与规格导入或其它专项动作组合'
+        return "${PADM_DOCKER_RC_USAGE}"
+    }
+    [[ -z "${dnsHosts}" || ( -z "${specFile}" && -z "${regenerateReality}" &&
+        -z "${realityTarget}" && -z "${realityStream}" && -z "${siteMode}" &&
+        -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" ) ]] || {
         dockerError '路由专项编辑不能与规格导入或其它专项动作组合'
         return "${PADM_DOCKER_RC_USAGE}"
     }
@@ -1460,7 +1486,8 @@ dockerEditCommand() {
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     dockerTrafficSafePath "${root}" "${root}/config/spec.json" || return "${PADM_DOCKER_RC_STATE}"
     [[ ( -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" &&
-        -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" ) ||
+        -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
+        -z "${dnsHosts}" ) ||
         -f "${root}/config/spec.json" ]] ||
         return "${PADM_DOCKER_RC_STATE}"
     if [[ ! -e "${root}/config/spec.json" && ! -L "${root}/config/spec.json" && -z "${specFile}" ]]; then
@@ -1513,7 +1540,8 @@ dockerEditCommand() {
     # 旧规格先接入，不能同时把未经证明的字段改动当作无损导入。
     if [[ "${mode}" == interactive && -z "${specFile}" && "${imported}" -eq 0 &&
         -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" &&
-        -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" ]]; then
+        -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
+        -z "${dnsHosts}" ]]; then
         dockerEditFields "${draft}" || status=$?
         if [[ "${status}" -eq 3 ]]; then
             printf '已取消配置编辑。\n'
@@ -1526,17 +1554,17 @@ dockerEditCommand() {
     jq -es 'length == 1 and (.[0] | type == "object")' "${draft}" >/dev/null 2>&1 ||
         return "${PADM_DOCKER_RC_STATE}"
     if [[ "${socks5}" == enable ]]; then
-        dockerEditSocks5InputCopy "${socks5File}" "${workspace}/socks5.json" || {
+        dockerEditPrivateInputCopy "${socks5File}" "${workspace}/socks5.json" socks5 || {
             dockerError 'SOCKS5 输入须为 root 所有的 0600 单链接普通 JSON 文件，最多 64 KiB，祖先目录不得可写或含链接'
             return "${PADM_DOCKER_RC_STATE}"
         }
         # 凭据仅从私有快照导入，不进入参数或配置预览。
-        jq --slurpfile socks5 "${workspace}/socks5.json" '.routing = {socks5:$socks5[0]}' \
+        jq --slurpfile socks5 "${workspace}/socks5.json" '.routing.socks5 = $socks5[0]' \
             "${draft}" >"${draft}.next" 2>/dev/null &&
             chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
             return "${PADM_DOCKER_RC_STATE}"
     elif [[ "${socks5}" == disable ]]; then
-        jq 'del(.routing)' "${draft}" >"${draft}.next" &&
+        jq 'del(.routing.socks5) | if .routing == {} then del(.routing) else . end' "${draft}" >"${draft}.next" &&
             chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
             return "${PADM_DOCKER_RC_STATE}"
     elif [[ "${socks5}" == domains || "${socks5}" == global ]]; then
@@ -1548,6 +1576,21 @@ dockerEditCommand() {
           if $action == "global" then del(.routing.socks5.domains)
           else .routing.socks5.domains = $domains end
         ' "${draft}" >"${draft}.next" &&
+            chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
+            return "${PADM_DOCKER_RC_STATE}"
+    fi
+    if [[ -n "${dnsHosts}" ]]; then
+        if [[ "${dnsHostsAction}" == enable ]]; then
+            dockerEditPrivateInputCopy "${dnsHostsFile}" "${workspace}/${dnsHosts}.json" "${dnsHosts}" || {
+                dockerError 'DNS/hosts 输入须为 root 所有的 0600 单链接普通 JSON 文件，最多 64 KiB，祖先目录不得可写或含链接'
+                return "${PADM_DOCKER_RC_STATE}"
+            }
+            jq --arg kind "${dnsHosts}" --slurpfile input "${workspace}/${dnsHosts}.json" \
+                '.routing[$kind] = $input[0]' "${draft}" >"${draft}.next" 2>/dev/null
+        else
+            jq --arg kind "${dnsHosts}" 'del(.routing[$kind]) |
+              if .routing == {} then del(.routing) else . end' "${draft}" >"${draft}.next"
+        fi &&
             chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
             return "${PADM_DOCKER_RC_STATE}"
     fi
@@ -1670,7 +1713,7 @@ dockerEditCommand() {
     [[ "${imported}" -eq 0 ]] || printf '完整原始规格已匹配，确认后接入受管输入。\n'
     jq -en --arg regenerate "${regenerateReality}" --arg target "${realityTarget}" --arg stream "${realityStream}" \
         --arg site "${siteMode}" --arg alpn "${alpnListener}" --arg http01 "${http01}" \
-        --arg socks5 "${socks5}" \
+        --arg socks5 "${socks5}" --arg dns_hosts "${dnsHosts}" \
         --slurpfile before "${normalized}" --slurpfile after "${draft}" '
       def fixed: del(.server, .public_port, .address_families, .name,
         .reality.target_host, .reality.target_port, .reality.server_name, .websocket.path, .httpupgrade.path,
@@ -1702,7 +1745,11 @@ dockerEditCommand() {
             .listener_id == $bound.listener_id and .core == $bound.core and
             .public_port == $bound.public_port and .address_families == $bound.address_families))) and
       (if $socks5 != "" then
-        ($old | del(.routing)) == ($new | del(.routing))
+        ($old | del(.routing.socks5) | if .routing == {} then del(.routing) else . end) ==
+          ($new | del(.routing.socks5) | if .routing == {} then del(.routing) else . end)
+       elif $dns_hosts != "" then
+        ($old | del(.routing[$dns_hosts]) | if .routing == {} then del(.routing) else . end) ==
+          ($new | del(.routing[$dns_hosts]) | if .routing == {} then del(.routing) else . end)
        elif $http01 != "" then
         ($old | del(.tls.http01)) == ($new | del(.tls.http01))
        elif $site != "" then

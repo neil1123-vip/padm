@@ -307,7 +307,7 @@ try {
     if ($LASTEXITCODE -ne 0) { $container = $null; throw 'Regression container creation failed.' }
     & $docker cp $snapshot "${container}:/snapshot.tar"
     if ($LASTEXITCODE -ne 0) { throw 'Source snapshot copy failed.' }
-    if ($Selector -eq 'docker-routing-socks5-real') {
+    if ($Selector -in @('docker-routing-socks5-real', 'docker-routing-dns-hosts-real')) {
         # 仅复制已有本机镜像的程序到隔离回归容器，不安装宿主工具或挂载 Docker Socket。
         $cores = Join-Path $runDir 'routing-cores'
         New-Item -ItemType Directory -Path $cores | Out-Null

@@ -342,11 +342,14 @@ dockerBundleSupportsSpec() {
           (if ($spec[0].tls // {}) | has("http01") then
             $schema[0]["x-padm-acme-webroot"] == true
           else true end) and
-          (if $spec[0] | has("routing") then
+          (if $spec[0].routing.socks5 != null then
             $schema[0]["x-padm-routing-socks5"] == true
           else true end) and
           (if ($spec[0].routing.socks5 // {}) | has("domains") then
             $schema[0]["x-padm-routing-domains"] == true
+          else true end) and
+          (if $spec[0].routing.dns != null or $spec[0].routing.hosts != null then
+            $schema[0]["x-padm-routing-dns-hosts"] == true
           else true end) and
           ($features | length) == 1 and ($features[0].protocols | type == "array") and
           all($spec[0].core.protocols[];

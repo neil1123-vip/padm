@@ -28,6 +28,10 @@ COMPOSE_LOG=${TEST_ROOT}/compose.log
 INPUT=${PRIVATE_ROOT}/socks5.json
 DOMAINS_INPUT=${PRIVATE_ROOT}/socks5-domains.json
 DOMAINS='["full:exact.example.com","full:other.example.com","domain:example.net","keyword:video","geosite:cn","geosite:category-ads-all"]'
+DNS_INPUT=${PRIVATE_ROOT}/dns.json
+HOSTS_INPUT=${PRIVATE_ROOT}/hosts.json
+DNS='{"server":"203.0.113.53","port":5353,"domains":["full:dns.example.com","domain:dns.example.net","keyword:dns-video","geosite:cn"]}'
+HOSTS='{"exact.example.com":"203.0.113.10","ipv6.example.com":"2001:db8::10"}'
 
 fail() {
     [[ ! -f "${LOG}" ]] || sed 's/^/  /' "${LOG}" >&2
@@ -107,6 +111,14 @@ jq --argjson domains "${DOMAINS}" '. + {domains:$domains}' "${INPUT}" >"${DOMAIN
 chmod 0600 "${DOMAINS_INPUT}"
 jq --slurpfile socks "${DOMAINS_INPUT}" '.routing = {socks5:$socks[0]}' \
     "${TEST_ROOT}/base.json" >"${TEST_ROOT}/domains.json"
+printf '%s\n' "${DNS}" >"${DNS_INPUT}"
+printf '%s\n' "${HOSTS}" >"${HOSTS_INPUT}"
+chmod 0600 "${DNS_INPUT}" "${HOSTS_INPUT}"
+jq --argjson dns "${DNS}" '.routing = {dns:$dns}' "${TEST_ROOT}/base.json" >"${TEST_ROOT}/dns-only.json"
+jq --argjson hosts "${HOSTS}" '.routing = {hosts:$hosts}' "${TEST_ROOT}/base.json" >"${TEST_ROOT}/hosts-only.json"
+jq --argjson dns "${DNS}" --argjson hosts "${HOSTS}" '.routing += {dns:$dns,hosts:$hosts}' \
+    "${TEST_ROOT}/domains.json" >"${TEST_ROOT}/routing-all.json"
+jq 'del(.routing.socks5.domains)' "${TEST_ROOT}/routing-all.json" >"${TEST_ROOT}/routing-all-global.json"
 
 # 同批正反输入由两份校验合同独立判断，避免 Schema 与生产校验分歧。
 python3 - "${PROJECT_ROOT}" "${TEST_ROOT}" <<'PY'
@@ -120,6 +132,8 @@ project, root = map(Path, sys.argv[1:])
 base = json.loads((root / "base.json").read_text())
 routed = json.loads((root / "routed.json").read_text())
 domains = json.loads((root / "domains.json").read_text())
+dns = json.loads((root / "dns-only.json").read_text())
+hosts = json.loads((root / "hosts-only.json").read_text())
 schema = json.loads((project / "docker/contracts/configure.schema.json").read_text())
 Draft202012Validator.check_schema(schema)
 validator = Draft202012Validator(schema, format_checker=FormatChecker())
@@ -133,6 +147,54 @@ def case(name, value, valid):
 case("legacy-v3", base, True)
 case("valid-dual", routed, True)
 case("valid-domains", domains, True)
+case("dns-only", dns, True)
+case("hosts-only", hosts, True)
+case("routing-all", json.loads((root / "routing-all.json").read_text()), True)
+case("routing-all-global", json.loads((root / "routing-all-global.json").read_text()), True)
+for name, template in (("dns", dns), ("hosts", hosts)):
+    for version in (1, 2):
+        value = copy.deepcopy(template)
+        value["schema_version"] = version
+        value["core"] = dict(type="xray", protocols=[value["core"]["protocols"][0]])
+        del value["core"]["protocols"][0]["core"]
+        if version == 1:
+            del value["core"]["protocols"][0]["listener_id"]
+        case(f"invalid-{name}-v{version}", value, False)
+for index, changed in enumerate((
+        dict(server="2001:db8::53", port=65535, domains=["full:dns.example.com"]),
+        dict(server="1.1.1.1", port=1,
+             domains=[f"full:host-{n}.example.com" for n in range(256)]))):
+    value = copy.deepcopy(dns)
+    value["routing"]["dns"] = changed
+    case(f"valid-dns-boundary-{index}", value, True)
+for field, bad in (("server", "127.0.0.1"), ("server", "resolver.example.com"),
+                   ("port", 0), ("port", True), ("domains", []),
+                   ("domains", ["full:a.example.com"] * 2),
+                   ("domains", ["domain:Example.com"]),
+                   ("domains", ["keyword:a:b"]),
+                   ("domains", [f"full:host-{n}.example.com" for n in range(257)])):
+    value = copy.deepcopy(dns)
+    value["routing"]["dns"][field] = bad
+    case(f"invalid-dns-{len(cases)}", value, False)
+for field in ("server", "port", "domains"):
+    value = copy.deepcopy(dns)
+    del value["routing"]["dns"][field]
+    case(f"invalid-dns-missing-{field}", value, False)
+value = copy.deepcopy(dns)
+value["routing"]["dns"]["extra"] = True
+case("invalid-dns-extra", value, False)
+value = copy.deepcopy(hosts)
+value["routing"]["hosts"] = {f"host-{n}.example.com": "192.0.2.10" for n in range(256)}
+case("valid-hosts-boundary", value, True)
+for index, changed in enumerate((
+        {}, [], None, {"Example.com": "192.0.2.10"}, {"full:example.com": "192.0.2.10"},
+        {"example.com.": "192.0.2.10"}, {"-bad.example.com": "192.0.2.10"},
+        {"example.com": "127.0.0.1"}, {"example.com": "host.docker.internal"},
+        {"example.com": ["192.0.2.10"]}, {"example.com": "2001:db8::10%eth0"},
+        {f"host-{n}.example.com": "192.0.2.10" for n in range(257)})):
+    value = copy.deepcopy(hosts)
+    value["routing"]["hosts"] = changed
+    case(f"invalid-hosts-{index}", value, False)
 hostname = ".".join(("a" * 63, "b" * 63, "c" * 63, "d" * 61))
 for index, rules in enumerate((
         ["full:" + hostname, "domain:" + hostname],
@@ -296,6 +358,30 @@ done
 mv -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
     "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
 
+for fixture in dns-only hosts-only routing-all; do
+    dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/${fixture}.json" ||
+        fail "${fixture}: 当前 bundle 拒绝 DNS/hosts 能力"
+done
+cp -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json" \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved"
+jq 'del(."x-padm-routing-dns-hosts")' \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
+    >"${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+for fixture in dns-only hosts-only routing-all; do
+    reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/${fixture}.json"
+done
+dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/routed.json" ||
+    fail 'DNS/hosts 能力门禁误拒绝旧 SOCKS5'
+jq 'del(."x-padm-routing-socks5", ."x-padm-routing-domains")' \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
+    >"${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+for fixture in dns-only hosts-only; do
+    dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/${fixture}.json" ||
+        fail "${fixture}: 无 SOCKS5 的规格依赖旧 SOCKS5 marker"
+done
+mv -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+
 for version in 1 2 3; do
     dockerGenerateXrayConfig "${TEST_ROOT}/legacy-v${version}.json" "${TEST_ROOT}/legacy-v${version}-xray.json"
     jq -e '.outbounds == [{protocol:"freedom",tag:"direct"},{protocol:"blackhole",tag:"blocked"}] and
@@ -314,7 +400,7 @@ for version in 1 2; do
         "${TEST_ROOT}/legacy-sing-v${version}-core.json" >/dev/null ||
         fail "v${version}: 无 routing 改变旧 sing-box 默认出站"
 done
-for fixture in routed domains; do
+for fixture in routed domains dns-only hosts-only routing-all routing-all-global; do
     for core in xray sing-box; do
         if [[ "${core}" == xray ]]; then
             dockerGenerateXrayConfig "${TEST_ROOT}/${fixture}.json" "${TEST_ROOT}/${fixture}-${core}.json"
@@ -362,6 +448,42 @@ jq -en --slurpfile new "${TEST_ROOT}/domains-sing-box.json" \
   ($new[0].route.rule_set | map(.tag) | sort) ==
     ["padm-geosite-category-ads-all","padm-geosite-cn"]
 ' >/dev/null || fail 'sing-box 选择性路由没有保持认证出站、直连或规则集'
+jq -en --slurpfile dns "${TEST_ROOT}/dns-only-xray.json" \
+    --slurpfile hosts "${TEST_ROOT}/hosts-only-xray.json" \
+    --slurpfile both "${TEST_ROOT}/routing-all-xray.json" '
+  ($dns[0].dns.disableFallbackIfMatch == true and
+   ($dns[0].dns.servers | length) == 2 and
+   $dns[0].dns.servers[0].address == "203.0.113.53" and
+   $dns[0].dns.servers[0].skipFallback == true and
+   $dns[0].dns.servers[0].finalQuery == true and
+   $dns[0].dns.servers[1] == "localhost" and
+   ($dns[0].routing.rules | index({type:"field",inboundTag:["padm-dns"],outboundTag:"direct"})) != null and
+   all($dns[0].outbounds[] | select(.tag == "direct"); .settings.domainStrategy == "ForceIP")) and
+  (($hosts[0].dns.servers | length) == 1 and $hosts[0].dns.servers[0] == "localhost") and
+  (($both[0].dns.servers | map(if type == "object" then .address else . end) | index("203.0.113.53")) != null)
+' >/dev/null || fail 'Xray DNS/hosts 解析器、直连策略或入站规则合同错误'
+jq -en --slurpfile dns "${TEST_ROOT}/dns-only-sing-box.json" \
+    --slurpfile hosts "${TEST_ROOT}/hosts-only-sing-box.json" \
+    --slurpfile both "${TEST_ROOT}/routing-all-sing-box.json" '
+  ($dns[0].dns.servers | map(.tag) | sort) == ["padm-dns","padm-local"] and
+  ($dns[0].route.final == "direct" and $dns[0].dns.final == "padm-local" and
+   $dns[0].route.default_domain_resolver == "padm-local") and
+  ($dns[0].route.rules | map(select(.action == "resolve" and .server == "padm-dns")) | length) >= 1 and
+  ($hosts[0].dns.servers | map(.tag) | sort) == ["padm-hosts","padm-local"] and
+  ($both[0].route.rules | map(select(.action == "route" and .outbound == "padm-socks5")) | length) >= 1
+' >/dev/null || fail 'sing-box DNS/hosts 解析器、直连最终出站或 SOCKS5 优先级合同错误'
+jq -en --slurpfile xray "${TEST_ROOT}/routing-all-global-xray.json" \
+    --slurpfile sing "${TEST_ROOT}/routing-all-global-sing-box.json" '
+  $xray[0].outbounds[0].tag == "padm-socks5" and
+  $xray[0].routing.rules == [
+    {type:"field",inboundTag:["padm-dns"],outboundTag:"direct"},
+    {type:"field",network:"udp",outboundTag:"blocked"}] and
+  $sing[0].route.final == "padm-socks5" and
+  $sing[0].route.rules[:2] == [
+    {network:"udp",action:"reject"},
+    {network:"tcp",action:"route",outbound:"padm-socks5"}] and
+  all($sing[0].route.rules[2:][]; .action == "resolve" or .outbound == "direct")
+' >/dev/null || fail '全局 SOCKS5 没有优先于 DNS/hosts 解析或改变 UDP 阻断'
 # 用核心的匹配语义检查每类独立命中，防止不同 matcher 被错误组合成 AND。
 python3 - "${TEST_ROOT}/domains-sing-box.json" <<'PY'
 import json
@@ -419,7 +541,7 @@ assert all(rule["type"] == "remote" and rule["format"] == "binary" and
            rule["http_client"] == {"engine": "go"} and "download_detour" not in rule
            for rule in rule_sets)
 PY
-for fixture in routed domains; do
+for fixture in routed domains routing-all-global; do
     jq -en --slurpfile source "${TEST_ROOT}/${fixture}-xray.json" \
         --slurpfile runtime "${TEST_ROOT}/runtime-${fixture}-xray.json" '
       $runtime[0].outbounds == $source[0].outbounds and
@@ -433,7 +555,7 @@ for fixture in routed domains; do
 done
 for generator in dockerGenerateCompose dockerGenerateDeployment; do
     "${generator}" "${TEST_ROOT}/base.json" "${TEST_ROOT}/legacy-generated.json"
-    for fixture in routed domains; do
+    for fixture in routed domains dns-only hosts-only routing-all routing-all-global; do
         "${generator}" "${TEST_ROOT}/${fixture}.json" "${TEST_ROOT}/routed-generated.json"
         cmp -s "${TEST_ROOT}/legacy-generated.json" "${TEST_ROOT}/routed-generated.json" ||
             fail "${generator}: ${fixture} 意外改变容器能力或宿主端口"
@@ -561,7 +683,7 @@ chmod 0600 "${PRIVATE_ROOT}/fifo.json"
 actual=0
 timeout -k 1 5 bash -c '
   source "$1"
-  dockerEditSocks5InputCopy "$2" "$3"
+  dockerEditPrivateInputCopy "$2" "$3" socks5
 ' _ "${PROJECT_ROOT}/install-docker.sh" "${PRIVATE_ROOT}/fifo.json" \
     "${TEST_ROOT}/fifo-copy.json" >"${LOG}" 2>&1 || actual=$?
 [[ "${actual}" == 1 ]] || fail "FIFO 应在读取前拒绝而非阻塞: ${actual}"
@@ -668,4 +790,112 @@ for core in xray sing-box; do
 done
 jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload == 17 and .accounts[$uuid].download == 19' \
     "${root}/data/traffic/state.json" >/dev/null || fail '路由编辑清空流量累计'
+
+# DNS/hosts 共用私有文件与候选事务，每次编辑只替换自己的子字段。
+before=$(snapshot)
+for kind in dns hosts; do
+    input="${PRIVATE_ROOT}/${kind}.json"
+    runEdit 0 "--${kind}" "${input}" --preview
+    runEdit 0 "--${kind}-off" --preview
+    runEdit 2 "--${kind}"
+    runEdit 2 "--${kind}" "${input}"
+    runEdit 2 "--${kind}" "${input}" "--${kind}-off" --preview
+    runEdit 2 "--${kind}" "${input}" "--${kind}" "${input}" --preview
+    runEdit 2 "--${kind}-off" "--${kind}-off" --preview
+    runEdit 2 "--${kind}" "${input}" --socks5-off --preview
+    runEdit 2 "--${kind}" "${input}" --spec "${TEST_ROOT}/base.json" --preview
+    runEdit 2 "--${kind}" "${input}" --http01 enable --preview
+    runEdit 2 "--${kind}" "${input}" --confirm invalid
+    cp -- "${input}" "${PRIVATE_ROOT}/bad.json"
+    chmod 0640 "${PRIVATE_ROOT}/bad.json"
+    runEdit 15 "--${kind}" "${PRIVATE_ROOT}/bad.json" --preview
+    chmod 0600 "${PRIVATE_ROOT}/bad.json"
+    printf '{}\n' >"${PRIVATE_ROOT}/bad.json"
+    runEdit 15 "--${kind}" "${PRIVATE_ROOT}/bad.json" --preview
+done
+runEdit 2 --dns "${DNS_INPUT}" --hosts "${HOSTS_INPUT}" --preview
+runEdit 2 --dns-off --hosts-off --preview
+runEdit 15 --spec "${TEST_ROOT}/dns-only.json" --confirm PADM-DOCKER-EDIT
+runEdit 15 --spec "${TEST_ROOT}/hosts-only.json" --confirm PADM-DOCKER-EDIT
+(
+    trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+    dockerSetupRead() { printf -v "$1" '%s' n; }
+    dockerAcquireDeploymentLock
+    dockerConfigureApply "${TEST_ROOT}/routing-all.json" '' '' interactive
+) >"${LOG}" 2>&1 || fail 'DNS/hosts 确认取消失败'
+assertClean
+[[ "$(snapshot)" == "${before}" ]] || fail 'DNS/hosts 预览、无效输入或取消改变完整部署'
+
+runEdit 0 --dns "${DNS_INPUT}" --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile old "${TEST_ROOT}/base.json" --slurpfile new "${root}/config/spec.json" \
+    --argjson dns "${DNS}" '$new[0] == ($old[0] + {routing:{dns:$dns}})' >/dev/null ||
+    fail 'DNS 独立开启改变其它规格'
+runStatus 0
+jq -e --argjson dns "${DNS}" '
+  . == {enabled:true,server:null,port:null,tcp:"direct",udp:"direct",mode:"direct",
+        domain_rules:[],dns:{server:$dns.server,port:$dns.port,domain_rules:$dns.domains}}
+' "${LOG}" >/dev/null || fail 'DNS 独立状态合同错误'
+before=$(snapshot)
+runEdit 15 --spec "${TEST_ROOT}/base.json" --confirm PADM-DOCKER-EDIT
+runEdit 15 --spec "${TEST_ROOT}/routing-all.json" --confirm PADM-DOCKER-EDIT
+[[ "$(snapshot)" == "${before}" ]] || fail '普通 --spec 绕过 DNS/hosts 冻结'
+runEdit 0 --hosts "${HOSTS_INPUT}" --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile old "${TEST_ROOT}/dns-only.json" --slurpfile new "${root}/config/spec.json" \
+    --argjson hosts "${HOSTS}" '$new[0] == ($old[0] | .routing.hosts=$hosts)' >/dev/null ||
+    fail 'hosts 开启覆盖已有 DNS 或其它规格'
+runStatus 0
+jq -e --argjson hosts "${HOSTS}" '.hosts == $hosts and .dns.server == "203.0.113.53"' \
+    "${LOG}" >/dev/null || fail 'DNS/hosts 状态缺少有效配置'
+[[ "$(stat -c '%a %u %h' "${root}/config/spec.json")" == '600 0 1' ]] ||
+    fail 'DNS/hosts 规格没有保留 root 私有文件权限'
+before=$(snapshot)
+for failure in health-fail int term; do
+    MODE=${failure}
+    rm -f -- "${TEST_ROOT}/failed-once"
+    case "${failure}" in
+    health-fail) runEdit 14 --dns-off --confirm PADM-DOCKER-EDIT ;;
+    int) runEdit 130 --hosts-off --confirm PADM-DOCKER-EDIT ;;
+    term) runEdit 143 --dns-off --confirm PADM-DOCKER-EDIT ;;
+    esac
+    [[ "$(snapshot)" == "${before}" ]] || fail "${failure}: DNS/hosts 未恢复完整部署和流量"
+done
+MODE=ok
+runEdit 0 --socks5 "${DOMAINS_INPUT}" --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile expected "${TEST_ROOT}/routing-all.json" --slurpfile actual "${root}/config/spec.json" \
+    '$actual == $expected' >/dev/null || fail '开启 SOCKS5 丢弃 DNS/hosts'
+runEdit 0 --hosts-off --confirm PADM-DOCKER-EDIT
+jq -e --argjson dns "${DNS}" --argjson domains "${DOMAINS}" '
+  .routing == {dns:$dns,socks5:{server:"203.0.113.9",port:1080,
+    username:"routing-user-secret-marker",password:"routing-password-secret-marker",domains:$domains}}
+' "${root}/config/spec.json" >/dev/null || fail '关闭 hosts 破坏 DNS/SOCKS5'
+runEdit 0 --hosts "${HOSTS_INPUT}" --confirm PADM-DOCKER-EDIT
+runEdit 0 --socks5-off --confirm PADM-DOCKER-EDIT
+jq -e --argjson dns "${DNS}" --argjson hosts "${HOSTS}" '.routing == {dns:$dns,hosts:$hosts}' \
+    "${root}/config/spec.json" >/dev/null || fail '关闭 SOCKS5 丢弃 DNS/hosts'
+runEdit 0 --dns-off --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile expected "${TEST_ROOT}/hosts-only.json" --slurpfile actual "${root}/config/spec.json" \
+    '$actual == $expected' >/dev/null || fail '关闭 DNS 破坏 hosts 或其它规格'
+runStatus 0
+jq -e --argjson hosts "${HOSTS}" '.enabled == true and .mode == "direct" and .hosts == $hosts and
+  (has("dns") | not)' "${LOG}" >/dev/null || fail 'hosts 独立状态或 DNS 关闭合同错误'
+runEdit 0 --hosts-off --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile old "${TEST_ROOT}/base.json" --slurpfile new "${root}/config/spec.json" \
+    '$new == $old' >/dev/null || fail '关闭最后一个路由字段未恢复无 routing 规格'
+jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload == 17 and .accounts[$uuid].download == 19' \
+    "${root}/data/traffic/state.json" >/dev/null || fail 'DNS/hosts 事务清空流量'
+
+menuLog="${TEST_ROOT}/routing-menu.log"
+(
+    dockerMenuRun() { printf '%s\n' "$*" >>"${menuLog}"; }
+    dockerMenuRouting < <(printf '6\n0\n8\n0\n0\n')
+) >"${LOG}" 2>&1
+[[ ! -e "${menuLog}" ]] || fail 'DNS/hosts 菜单路径取消仍调用编辑'
+(
+    dockerMenuRun() { printf '%s\n' "$*" >>"${menuLog}"; }
+    dockerMenuRouting < <(printf '6\n%s\n7\n8\n%s\n9\n0\n' "${DNS_INPUT}" "${HOSTS_INPUT}")
+) >"${LOG}" 2>&1
+printf 'edit --dns %s\nedit --dns-off\nedit --hosts %s\nedit --hosts-off\n' \
+    "${DNS_INPUT}" "${HOSTS_INPUT}" >"${TEST_ROOT}/routing-menu.expected"
+cmp -s "${menuLog}" "${TEST_ROOT}/routing-menu.expected" ||
+    fail 'DNS/hosts 菜单没有映射到 CLI 事务'
 printf 'docker-routing-socks5-regression-ok\n'

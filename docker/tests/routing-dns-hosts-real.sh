@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
+TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/padm-routing-dns-hosts-real.XXXXXX")
+cleanup() {
+    local status=$? file
+    if [[ "${status}" -ne 0 ]]; then
+        for file in "${TEST_ROOT}"/*.log; do
+            [[ -f "${file}" ]] || continue
+            printf '\nrouting-fixture-log: %s\n' "${file##*/}" >&2
+            cat -- "${file}" >&2
+        done
+    fi
+    rm -rf -- "${TEST_ROOT}"
+    return "${status}"
+}
+trap cleanup EXIT
+[[ "$(id -u)" == 0 && "$(uname -s)" == Linux ]] || exit 1
+for tool in jq python3 setpriv; do command -v "${tool}" >/dev/null; done
+[[ -f /routing-cores/xray && -f /routing-cores/sing-box ]] || {
+    printf 'routing-dns-hosts-real: 缺少本机镜像传入的两核心程序\n' >&2
+    exit 1
+}
+chmod 0755 /routing-cores/xray /routing-cores/sing-box
+export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state"
+# shellcheck source=/dev/null
+source "${PROJECT_ROOT}/install-docker.sh"
+for family in ipv4 ipv6; do
+    suffix=v4
+    [[ "${family}" != ipv6 ]] || suffix=v6
+    jq -n --arg suffix "${suffix}" '
+      def entry($core; $port): {
+        id:1,core:$core,listener_id:("entry-"+$core),server:"proxy.example.com",public_port:$port,
+        address_families:["ipv4"],name:$core,uuid:"11111111-1111-4111-8111-111111111111",
+        reality:{server_name:"www.debian.org",target_host:"www.debian.org",target_port:443,
+          private_key:"dwdtCnMYpX08FsFyUbJmRd9ML4frwJkqsXf7pR25LCo",
+          public_key:"hSDwCYkwp1R0i33ctD73Wg2_Og0mOBr066SpjqqbTmo",short_id:"1234"}};
+      {schema_version:3,release:{version:"3.1.8",manifest_sha256:("a"*64),signature_identity:"fixture"},
+       core:{type:"xray",secondary_type:"sing-box",protocols:[entry("xray";35441),entry("sing-box";35442)]},
+       tls:null,subscription:{enabled:false,token:"0123456789abcdef"},
+       images:(["xray","sing-box","nginx","ops","net"] | map({key:.,value:
+         ("ghcr.io/example/padm-"+.+":test@sha256:"+("a"*64))}) | from_entries),host_integrations:[],
+       routing:{
+         socks5:{server:"192.0.2.1",port:1080,username:"fixture-user",password:"fixture-password",
+           domains:[("full:proxy-"+$suffix+".padm.invalid")]},
+         dns:{server:"192.0.2.53",port:5353,domains:[
+           ("full:full-"+$suffix+".padm.invalid"),("domain:suffix-"+$suffix+".padm.invalid"),
+           ("keyword:keyword-"+$suffix),"geosite:test",("full:hosts-"+$suffix+".padm.invalid"),
+           ("full:proxy-"+$suffix+".padm.invalid"),("full:error-"+$suffix+".padm.invalid"),
+           ("full:timeout-"+$suffix+".padm.invalid")]},
+         hosts:{("hosts-"+$suffix+".padm.invalid"):"203.0.113.80",
+           ("proxy-"+$suffix+".padm.invalid"):"203.0.113.81"}}}
+    ' >"${TEST_ROOT}/${family}.spec.json"
+    dockerConfigureSpecValidate "${TEST_ROOT}/${family}.spec.json"
+    dockerGenerateXrayConfig "${TEST_ROOT}/${family}.spec.json" "${TEST_ROOT}/xray.${family}.base"
+    dockerGenerateSingBoxConfig "${TEST_ROOT}/${family}.spec.json" "${TEST_ROOT}/sing-box.${family}.base"
+    for core in xray sing-box; do
+        dockerTrafficRender "${core}" "${TEST_ROOT}/${core}.${family}.base" \
+            '{"schema_version":1,"accounts":{}}' >"${TEST_ROOT}/${core}.${family}.json"
+    done
+    [[ "${family}" == ipv4 ]] || continue
+    for mode in global resolve; do
+        if [[ "${mode}" == global ]]; then
+            jq 'del(.routing.socks5.domains)' "${TEST_ROOT}/${family}.spec.json"
+        else
+            jq 'del(.routing.socks5)' "${TEST_ROOT}/${family}.spec.json"
+        fi >"${TEST_ROOT}/${family}.${mode}.spec.json"
+        dockerConfigureSpecValidate "${TEST_ROOT}/${family}.${mode}.spec.json"
+        dockerGenerateXrayConfig "${TEST_ROOT}/${family}.${mode}.spec.json" \
+            "${TEST_ROOT}/xray.${family}.${mode}.base"
+        dockerGenerateSingBoxConfig "${TEST_ROOT}/${family}.${mode}.spec.json" \
+            "${TEST_ROOT}/sing-box.${family}.${mode}.base"
+        for core in xray sing-box; do
+            dockerTrafficRender "${core}" "${TEST_ROOT}/${core}.${family}.${mode}.base" \
+                '{"schema_version":1,"accounts":{}}' >"${TEST_ROOT}/${core}.${family}.${mode}.json"
+        done
+    done
+done
+# 生产生成和流量渲染不变；仅将外部地址换成隔离容器的本地 DNS/HTTP/SOCKS fixture。
+python3 "${PROJECT_ROOT}/docker/tests/routing-dns-hosts-real.py" "${TEST_ROOT}"
+printf 'docker-routing-dns-hosts-real-ok\n'

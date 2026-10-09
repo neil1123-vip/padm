@@ -495,6 +495,12 @@ runRoutingDriver() {
         targetReply 'SOCKS5 域名规则（逗号分隔；domain:/full:/keyword:/geosite:）' $'Example.NET, full:Exact.Example.Com, geosite:cn\n'
         targetReply 'Docker 路由与出站' $'5\n'
         targetReply 'Docker 路由与出站' $'3\n'
+        targetReply 'Docker 路由与出站' $'6\n'
+        targetReply 'root 私有 DNS JSON 文件绝对路径（0 返回）' $'/root/padm-dns.json\n'
+        targetReply 'Docker 路由与出站' $'7\n'
+        targetReply 'Docker 路由与出站' $'8\n'
+        targetReply 'root 私有 hosts JSON 文件绝对路径（0 返回）' $'/root/padm-hosts.json\n'
+        targetReply 'Docker 路由与出站' $'9\n'
         ;;
     cancel)
         targetReply 'Docker 路由与出站' $'1\n'
@@ -505,6 +511,14 @@ runRoutingDriver() {
         targetReply 'SOCKS5 域名规则（逗号分隔；domain:/full:/keyword:/geosite:）' $'0\n'
         targetReply 'Docker 路由与出站' $'4\n'
         targetReply 'SOCKS5 域名规则（逗号分隔；domain:/full:/keyword:/geosite:）' $'\n'
+        targetReply 'Docker 路由与出站' $'6\n'
+        targetReply 'root 私有 DNS JSON 文件绝对路径（0 返回）' $'0\n'
+        targetReply 'Docker 路由与出站' $'6\n'
+        targetReply 'root 私有 DNS JSON 文件绝对路径（0 返回）' $'\n'
+        targetReply 'Docker 路由与出站' $'8\n'
+        targetReply 'root 私有 hosts JSON 文件绝对路径（0 返回）' $'0\n'
+        targetReply 'Docker 路由与出站' $'8\n'
+        targetReply 'root 私有 hosts JSON 文件绝对路径（0 返回）' $'\n'
         ;;
     file-eof)
         targetReply 'Docker 路由与出站' $'1\n'
@@ -513,6 +527,14 @@ runRoutingDriver() {
     domains-eof)
         targetReply 'Docker 路由与出站' $'4\n'
         targetReply 'SOCKS5 域名规则（逗号分隔；domain:/full:/keyword:/geosite:）' $'\004'
+        ;;
+    dns-file-eof)
+        targetReply 'Docker 路由与出站' $'6\n'
+        targetReply 'root 私有 DNS JSON 文件绝对路径（0 返回）' $'\004'
+        ;;
+    hosts-file-eof)
+        targetReply 'Docker 路由与出站' $'8\n'
+        targetReply 'root 私有 hosts JSON 文件绝对路径（0 返回）' $'\004'
         ;;
     esac
     targetReply 'Docker 路由与出站' $'0\n'
@@ -936,7 +958,7 @@ for siteCase in flow cancel static-eof redirect-eof alpn-diagnose-eof alpn-recom
 done
 unset SITE_MENU_RECORD_STATUS SITE_EDIT_STATUS SITE_ALPN_STATUS
 
-for routingCase in flow cancel file-eof domains-eof failed return; do
+for routingCase in flow cancel file-eof domains-eof dns-file-eof hosts-file-eof failed return; do
     : >"${TLS_WIZARD_ACTIONS}"
     export SITE_EDIT_STATUS=0 ROUTING_STATUS=0
     [[ "${routingCase}" != failed ]] || { SITE_EDIT_STATUS=15; ROUTING_STATUS=17; }
@@ -944,7 +966,7 @@ for routingCase in flow cancel file-eof domains-eof failed return; do
     expectedRouting=
     case "${routingCase}" in
     flow|failed)
-        expectedRouting=$'edit --socks5 /root/padm-socks5.json\nedit --socks5-off\nprotocol routing-status\nedit --socks5-domains Example.NET, full:Exact.Example.Com, geosite:cn\nedit --socks5-global\nprotocol routing-status'
+        expectedRouting=$'edit --socks5 /root/padm-socks5.json\nedit --socks5-off\nprotocol routing-status\nedit --socks5-domains Example.NET, full:Exact.Example.Com, geosite:cn\nedit --socks5-global\nprotocol routing-status\nedit --dns /root/padm-dns.json\nedit --dns-off\nedit --hosts /root/padm-hosts.json\nedit --hosts-off'
         grep -Fq '无效选项' "${CONTROL_LOG}" || fail '路由菜单没有保留无效输入后的操作'
         ;;
     esac
@@ -952,7 +974,9 @@ for routingCase in flow cancel file-eof domains-eof failed return; do
         fail "路由 ${routingCase} 参数分发错误或取消后执行操作"
     if [[ "${routingCase}" == flow ]]; then
         for label in '17. 路由与出站' '1. 启用 SOCKS5 出站' '2. 关闭 SOCKS5 出站' \
-            '3. 查看路由状态' '4. 替换 SOCKS5 域名规则' '5. 切换 SOCKS5 全局出站' '0. 返回'; do
+            '3. 查看路由状态' '4. 替换 SOCKS5 域名规则' '5. 切换 SOCKS5 全局出站' \
+            '6. 设置 DNS 分流' '7. 关闭 DNS 分流' '8. 设置 DNS/hosts 覆盖' \
+            '9. 关闭 DNS/hosts 覆盖' '0. 返回'; do
             grep -Fq "${label}" "${CONTROL_LOG}" || fail "路由菜单缺少: ${label}"
         done
     elif [[ "${routingCase}" == failed ]]; then

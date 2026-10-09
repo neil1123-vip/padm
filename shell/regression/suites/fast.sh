@@ -151,6 +151,10 @@ runDockerRoutingSocks5RealRegression() {
     bash "${PROJECT_ROOT}/docker/tests/routing-socks5-real.sh"
 }
 
+runDockerRoutingDnsHostsRealRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/routing-dns-hosts-real.sh"
+}
+
 runDockerAccountsRegression() {
     bash "${PROJECT_ROOT}/docker/tests/accounts.sh"
 }
@@ -249,6 +253,8 @@ registerRegressionFunctionLeaf docker-phase6 runDockerPhase6Regression
 registerRegressionFunctionLeaf docker-traffic runDockerTrafficRegression
 registerRegressionFunctionLeaf docker-routing-socks5 runDockerRoutingSocks5Regression
 registerRegressionFunctionLeaf docker-routing-socks5-real runDockerRoutingSocks5RealRegression
+registerRegressionFunctionLeaf docker-routing-dns-hosts runDockerRoutingSocks5Regression
+registerRegressionFunctionLeaf docker-routing-dns-hosts-real runDockerRoutingDnsHostsRealRegression
 registerRegressionFunctionLeaf docker-accounts runDockerAccountsRegression
 registerRegressionFunctionLeaf docker-accounts-cli runDockerAccountsCliRegression
 registerRegressionFunctionLeaf docker-subscriptions runDockerSubscriptionsRegression

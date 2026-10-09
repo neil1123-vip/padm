@@ -252,7 +252,32 @@ sing-box 从固定 SagerNet 源直连下载所选分类，资源缺失或下载�
 不增加监听端口、宿主权限或防火墙规则，暂不与 TUN/TProxy 组合。
 启用、替换与关闭复用候选、确认、备份及失败/信号恢复，状态和预览不显示凭据；
 凭据保存在私有规格、受管核心配置及备份中。SOCKS5 认证链路本身不加密，须使用可信上游网络。
-完整 SOCKS 入站、DNS/WARP 和其它路由策略仍待迁移。
+完整 SOCKS 入站、WARP 和其它路由策略仍待迁移。
+
+菜单 `17` 还提供核心内 DNS 分流和精确 hosts 覆盖。两者可独立使用，也可与 SOCKS5 共存；
+只改变客户端直连域名目标的解析，不改宿主 DNS、路由、防火墙或公开监听。
+DNS 私有 JSON 示例为 `{"server":"192.0.2.53","port":53,"domains":["domain:example.net"]}`，
+仅接受字面 IPv4/IPv6 UDP 服务器，`domains` 必须包含 1–256 条已规范化的
+`full:`、`domain:`、`keyword:` 或 `geosite:` 规则，各类为 OR；本阶段不提供全局 DNS、DoH 或 DoT。
+hosts 私有 JSON 示例为 `{"exact.example.net":"192.0.2.10"}`，接受 1–256 个小写精确域名，
+每个域名对应一个可路由字面 IPv4/IPv6；不支持 hosts 后缀、关键字或分类匹配。
+地址示例不可直接用作服务器；文件安全要求与 SOCKS5 输入相同。
+
+```bash
+padm-docker edit --dns /root/padm-dns.json --preview
+padm-docker edit --dns /root/padm-dns.json --confirm PADM-DOCKER-EDIT
+padm-docker edit --hosts /root/padm-hosts.json --confirm PADM-DOCKER-EDIT
+padm-docker edit --dns-off --confirm PADM-DOCKER-EDIT
+padm-docker edit --hosts-off --confirm PADM-DOCKER-EDIT
+```
+
+v3 可选 `.routing.dns` 与 `.routing.hosts` 要求控制包声明 `x-padm-routing-dns-hosts`。
+hosts 优先于 DNS 分流；未匹配域名使用容器本地解析，匹配 DNS 失败不回退本地解析。
+SOCKS5 匹配目标仍交上游解析，DNS/hosts 不改变上游域名或实际 IP 目的地；
+只用于嗅探匹配的 HTTP Host/TLS SNI 不会被当作新的连接目的。
+每次专项编辑只替换或关闭相应子能力，保留其他路由、入口、账号和累计流量；
+普通 `--spec` 编辑不能绕过路由冻结。启用、替换与关闭复用原候选确认、备份和失败/信号恢复。
+`routing-status` 额外返回 DNS 服务器、域名规则和 hosts 映射，不显示 SOCKS5 凭据。
 
 完整 v3 `configure` 规格可选 `accounts`，用于追加 1–256 个独立账号，不替换原自用账号。
 每项必须包含 `id`、`name`、`enabled`、`uuid`、`password`、`shadowsocks_password` 和
