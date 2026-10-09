@@ -18,7 +18,7 @@
 | 2. 菜单与可信首次配置 | 2A–2C 已实现；本地 PTY、事务和 Linux 权限通过，真实发布/连通待验 | 安装后进入菜单、独立命令生命周期、无需手填镜像的首次配置 |
 | 3. 配置编辑、证书与协议管理 | 3A.1–3A.3 已提交，3B.1–3B.3 已通过本地验收，3B.4 部分真实验收通过，3C.1 已交付，3C.2–3C.12 基础入口已通过本地与 amd64 传输验收，3D.1 参数重生成、3D.2 当前目标站菜单已接入，3D.3c 受管共存、3D.3d1 桥接可达宿主网站和 3D.3d2 宿主回环已通过本地/真实 Desktop 验收 | 可恢复的编辑输入、多入口、双核心、TLS 轮换及自动续期底座、协议逐项安装与管理 |
 | 4. 用户、订阅与服务维护 | 4A.1–4A.4、4B.1–4B.2 已交付；4C.1–4C.2 已实现，4C.3a–4C.3c 归属、健康与主控事务底座已补，连接与管理入口继续推进 | 稳定分享身份与双核心认证/统计、本机用户业务、多服务器后端、分范围备份恢复、核心运维 |
-| 5. 站点、路由与宿主集成 | 5A.1–5A.3b、5B.1–5B.4a 本地合同及双核心双栈出站/解析/域名、IP、明文 BT、CN 预设与 IPv6 bridge 验收已通过；继续 WARP、5B 其余路由与 5C 宿主集成 | 站点管理、内部能力、规则所有权及可撤销宿主操作 |
+| 5. 站点、路由与宿主集成 | 5A.1–5A.3b、5B.1–5B.4b 本地合同及双核心双栈出站/解析/域名、IP、明文 BT、CN 预设、IPv6 bridge 与用户态 WARP 本地 Peer 验收已通过；继续 SOCKS/HTTP 入站、5B 其余路由与 5C 宿主集成 | 站点管理、内部能力、规则所有权及可撤销宿主操作 |
 | 6. 发布与完整验收 | 未开始 | 迁移文档、真实 Linux 与双架构证据、受门禁保护的 Release |
 
 当前机器可读支持状态以
@@ -2079,6 +2079,54 @@ PowerShell AST、diff 检查及独立只读复审通过。
 证据 `.tmp-docker-routing-5b4a-evidence.md`；重复源码和核心副本清理，日志与结果保留。
 公网 IPv6、真实宿主、arm64、可信发布与 WARP 未验收，
 完整 routing-tools/internal-206 保持 `deferred`。
+
+#### 5B.4b 用户态 WARP 出站
+
+独立 v3 `.routing.warp` 保存七个字段 `mode`、`family`、`private_key`、
+`peer_public_key`、`ipv6_address`、`reserved`、`domains`，门禁为 `x-padm-routing-warp`。
+selective 要求 1–256 条唯一规范四类规则，global 的 domains 必须为空；
+规范 32 字节 Base64 密钥、三个 u8 reserved 及 global/ULA IPv6 字面地址写前校验。
+菜单 `17` 的 `20` 与 CLI `--warp <root 私有 JSON>`、`--warp-off`
+复用安全输入快照、确认、候选校验及失败/信号恢复事务。
+状态仅投影 mode/family/domains，预览仅字段路径，不暴露密钥。
+关闭仅删除 WARP 子项，普通 `--spec` 冻结 routing，旧包在配置/更新/恢复前拒绝。
+功能签名提交 `fe2c3b87 feat(docker): add owned userspace WARP egress routing`。
+
+固定 Peer `162.159.192.1:2408`、MTU `1280`；IPv4 隧道为 `172.16.0.2/32`，
+IPv6 为导入地址 `/128`。family 同时选择隧道地址及匹配域名的解析族，
+不转换字面目的 IP，不承诺公网出口地址族，不注册账号或安装第三方注册器。
+Xray 显式 `noKernelTun:true`，sing-box 显式 `system:false`；
+不新增生产权限、TUN、宿主接口、端口、网络或 net-wireguard 依赖。
+Direct → 域名/IP/BT Block → selective IPv6 → selective WARP → SOCKS；
+global WARP 保留显式 IPv6/SOCKS，重复默认出站写前拒绝。
+hosts 与指定 DNS 来源保持，匹配 DNS 失败不回退系统解析或直连。
+
+Linux amd64 双核心 × control/selective4/selective6/global4/global6/off 共 12 次真实启动；
+隔离 namespace 的真实内核 WireGuard Peer 验证握手、加密传输计数、隧道源地址、
+TCP/UDP、字面及双 A/AAAA 目的、非 53 指定 DNS、hosts 零 DNS、策略优先级与关闭恢复。
+非零 reserved 先逐包记录，再适配标准内核 Peer 的头部，不能等同 Cloudflare 验收。
+业务核心及服务 UID/GID `10001`、capabilities 全零，用户态核心不创建接口；
+外层测试权限只给精确 selector，network none，不挂宿主 Socket 或发布端口。
+Peer 失联只证明 1 秒观测窗口无直连/代理接入，保持失联到核心退出后再恢复。
+
+集中完整 Docker 合同 `31/31`、`303.869` 秒（Jobs `6`）和 ci `34.466` 秒
+（Jobs `3`）实际执行通过；快照先于最终域名 UDP 与 DNS 同源修复，不冒充最终同源码全套。
+最终 WARP 合同 `26.169` 秒、IPv6 补验 `27.774` 秒、菜单 `30.738` 秒、
+phase6 `26.009` 秒、入口自检与静态检查通过。
+真实验收发现 pinned Xray `v26.3.27` WireGuard 域名 UDP 目的保留问题，
+用 outbound 顶层 `targetStrategy:ForceIPv4/ForceIPv6` 在拨号前解析；
+sing-box `v1.14.2` 的 resolve 会覆盖已有地址，改为同一 matcher 的 resolve 后立即 route，
+只给未匹配者 local resolve，保持 IPv6 原输出；最终合同/IPv6/真实定向补验通过。
+
+HTTP 正例精确比较完整固定响应，不等待 EOF，拒绝仍要求实际断开且不接受超时冒充阻断。
+相同真实场景 `39.153` → `6.372` 秒，约降 `83.7%`，断言未减；
+入口为 `40.061` → `7.327` 秒，队列等待分别 `191` / `5413 ms`，不混入执行加速。
+复用工具镜像、固定核心程序和现有 DNS/HTTP/SOCKS 服务，不重复全套或扩大三槽预算。
+原生菜单 WARP partial EOF/变量污染同步修复，独立签名提交 `d1142ed5`，
+`warp-config-safe-dir` `46 ms` 通过。
+证据 `.tmp-docker-routing-5b4b-evidence.md`；日志/result 保留，重复源码/核心副本清理。
+Cloudflare 账号、公网 UDP/出口、原生宿主、arm64 与可信发布仍未验；
+完整 routing-tools/internal-206 和 5B/5C 保持未完成。
 
 ### 5C. 宿主集成与端口跳跃
 
