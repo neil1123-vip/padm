@@ -906,8 +906,8 @@ initRealityMldsa65() {
     echoContent title "\n┌─ Reality ML-DSA-65 ───────────────────────────────"
     menuLine "生成 Reality ML-DSA-65"
     menuClose
-    local tlsPingResult=
-    local length=
+    local tlsPingResult= length= historyMldsa65Status= realityMldsa65=
+    local nextSeed="${realityMldsa65Seed:-}" nextVerify="${realityMldsa65Verify:-}"
     local target="${realityTargetHost}:${realityTargetPort}"
     tlsPingResult=$("$(coreXrayBinaryPath)" tls ping "${target}" 2>/dev/null)
     if echo "${tlsPingResult}" | awk '/Pinging with SNI/{inSni=1; next} inSni && /TLS Post-Quantum key exchange:.*X25519MLKEM768/{found=1} END{exit found ? 0 : 1}'; then
@@ -915,20 +915,26 @@ initRealityMldsa65() {
 
         if [[ "${length}" =~ ^[0-9]+$ ]] && [ "${length}" -gt 3500 ]; then
             if [[ -n "${currentRealityMldsa65Seed}" && -z "${lastInstallationConfig}" ]]; then
-                autoRead reality_history_mldsa65 "读取到上次安装记录，Seed为 [${currentRealityMldsa65Seed}]，Verify为 [${currentRealityMldsa65Verify}]，是否复用？[y/n]:" historyMldsa65Status
+                autoRead reality_history_mldsa65 "读取到上次安装记录，Seed为 [${currentRealityMldsa65Seed}]，Verify为 [${currentRealityMldsa65Verify}]，是否复用？[y/n]:" historyMldsa65Status || return 1
                 if [[ "${historyMldsa65Status}" == "y" ]]; then
-                    realityMldsa65Seed=${currentRealityMldsa65Seed}
-                    realityMldsa65Verify=${currentRealityMldsa65Verify}
+                    nextSeed=${currentRealityMldsa65Seed}
+                    nextVerify=${currentRealityMldsa65Verify}
                 fi
             elif [[ -n "${currentRealityMldsa65Seed}" && -n "${lastInstallationConfig}" ]]; then
-                realityMldsa65Seed=${currentRealityMldsa65Seed}
-                realityMldsa65Verify=${currentRealityMldsa65Verify}
+                nextSeed=${currentRealityMldsa65Seed}
+                nextVerify=${currentRealityMldsa65Verify}
             fi
-            if [[ -z "${realityMldsa65Seed}" ]]; then
-                realityMldsa65=$("$(coreXrayBinaryPath)" mldsa65)
-                realityMldsa65Seed=$(echo "${realityMldsa65}" | head -1 | awk '{print $2}')
-                realityMldsa65Verify=$(echo "${realityMldsa65}" | tail -n 1 | awk '{print $2}')
+            if [[ -z "${nextSeed}" ]]; then
+                if ! realityMldsa65=$("$(coreXrayBinaryPath)" mldsa65); then
+                    errorCard "Reality ML-DSA-65 生成失败"
+                    return 1
+                fi
+                nextSeed=$(printf '%s\n' "${realityMldsa65}" | awk '$1 ~ /^Seed:?$/ { print $2; exit }')
+                nextVerify=$(printf '%s\n' "${realityMldsa65}" | awk '$1 ~ /^Verify:?$/ { print $2; exit }')
             fi
+            [[ -n "${nextSeed}" && -n "${nextVerify}" ]] || { errorCard "Reality ML-DSA-65 生成结果不完整"; return 1; }
+            realityMldsa65Seed=${nextSeed}
+            realityMldsa65Verify=${nextVerify}
         else
             statusCard "Reality ML-DSA-65" "目标域名支持 X25519MLKEM768，但是证书长度不足，忽略 ML-DSA-65"
         fi

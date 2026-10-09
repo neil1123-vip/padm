@@ -1,5 +1,58 @@
 #!/usr/bin/env bash
 
+runRealityMldsa65FailureRegression() (
+    local root="${TMP_DIR}/reality-mldsa65-failure" mode writes=0 reloads=0
+    local coreInstallType=1 currentInstallProtocolType=",2," lastInstallationConfig=
+    local realityTargetHost=target.example.com realityTargetPort=443 realitySNI=sni.example.com
+    local currentRealityMldsa65Seed=old-seed currentRealityMldsa65Verify=old-verify
+    local realityMldsa65Seed= realityMldsa65Verify=
+    local profileFile="${root}/12_VLESS_XHTTP_inbounds.json"
+    mkdir -p "${root}"
+    printf '%s\n' '{"inbounds":[{"streamSettings":{"realitySettings":{"mldsa65Seed":"old-seed","mldsa65Verify":"old-verify"}}}]}' >"${profileFile}"
+    coreXrayBinaryPath() { printf '%s\n' regressionMldsa65Xray; }
+    regressionMldsa65Xray() {
+        if [[ "$1" == tls ]]; then
+            [[ "${mode}" != disabled ]] || { printf 'Pinging with SNI\nTLS version: TLS 1.3\n'; return 0; }
+            printf 'Pinging with SNI\nTLS Post-Quantum key exchange: X25519MLKEM768\nCertificate chain total length: 4096\n'
+        else
+            case "${mode}" in
+            generate-failure) return 1 ;;
+            seed-only) printf 'Seed: new-seed\n' ;;
+            verify-only) printf 'Verify: new-verify\n' ;;
+            *) printf 'Seed: new-seed\nVerify: new-verify\n' ;;
+            esac
+        fi
+    }
+    autoRead() {
+        [[ "${mode}" != read-failure ]] || return 1
+        printf -v "$3" '%s' n
+    }
+    errorCard() { :; }
+    initRealityProfile() { :; }
+    initRealityKey() { :; }
+    xrayTemplateConfigDir() { printf '%s\n' "${root}"; }
+    updateRoutingJsonConfig() { writes=$((writes + 1)); }
+    validateRealityTargetConfigAfterChange() { :; }
+    reloadCore() { reloads=$((reloads + 1)); }
+    currentProtocolHas() { [[ "$1" == 2 ]]; }
+    for mode in read-failure generate-failure seed-only verify-only; do
+        realityMldsa65Seed= realityMldsa65Verify=
+        regressionExpectStatus 1 initRealityMldsa65 || return 1
+        [[ -z "${realityMldsa65Seed}${realityMldsa65Verify}" ]] || return 1
+        regressionExpectStatus 1 regenerateRealityProfileApply || return 1
+        [[ "${writes}${reloads}" == 00 &&
+            "${currentRealityMldsa65Seed}:${currentRealityMldsa65Verify}" == old-seed:old-verify ]] || return 1
+        jq -e '.inbounds[0].streamSettings.realitySettings |
+            .mldsa65Seed == "old-seed" and .mldsa65Verify == "old-verify"' "${profileFile}" >/dev/null || return 1
+    done
+    mode=complete realityMldsa65Seed= realityMldsa65Verify=
+    initRealityMldsa65 || return 1
+    [[ "${realityMldsa65Seed}:${realityMldsa65Verify}" == new-seed:new-verify ]] || return 1
+    mode=disabled realityMldsa65Seed= realityMldsa65Verify=
+    initRealityMldsa65 || return 1
+    [[ -z "${realityMldsa65Seed}${realityMldsa65Verify}" ]]
+)
+
 runRealityProfileFailureRegression() (
     local root="${TMP_DIR}/reality-profile-failure"
     local xrayRoot="${root}/xray/"
@@ -11,6 +64,7 @@ runRealityProfileFailureRegression() (
     local portReads=0
     local dnsCalls=0
 
+    runRealityMldsa65FailureRegression || return 1
     mkdir -p "${xrayRoot}" "${singBoxRoot}"
     configPath="${xrayRoot}"
     singBoxConfigPath="${singBoxRoot}"
@@ -482,6 +536,17 @@ runRealityProfileFailureRegression() (
             realitySNI=sni.example.com
         }
         initXrayRealityPort() { realityPort=10888; }
+        initXrayXHTTPort() { xHTTPort=10889; }
+        initXrayRealityGrpcPort() { realityGrpcPort=10891; }
+        initRealityMldsa65() { return 1; }
+        local protocolId
+        for protocolId in 1 2 26; do
+            selectCustomInstallType=",${protocolId},"
+            regressionExpectStatus 1 initXrayConfigApply custom 1 true || return 1
+            [[ ! -e "${xrayRoot}$(protocolCapabilityMeta "${protocolId}" config_file)" ]] || return 1
+        done
+        selectCustomInstallType=",1,"
+        initRealityMldsa65() { return 0; }
         initXrayConfigApply custom 1 true
         # 嗅探前端的 SNI 放行与兜底阻断规则必须匹配真实入站 tag。
         jq -e --arg sni "${realitySNI}" '
