@@ -958,7 +958,7 @@ traditionalTlsFallbackSelection() {
 }
 
 ensureTraditionalTlsFallbackNginxConfig() {
-    local targetPath rebuildSelection= recoveryFile= rebuildStatus=0
+    local targetPath rebuildSelection= recoveryFile= rebuildStatus=0 wasRunning=false
     targetPath=$(nginxConfigFilePath alone.conf) || {
         errorCard "传统 TLS fallback 配置路径异常"
         return 1
@@ -1017,6 +1017,7 @@ ensureTraditionalTlsFallbackNginxConfig() {
         }
         padmForgetCleanupPath "${recoveryFile}"
     fi
+    nginxRunning && wasRunning=true
     local previousSelection="${selectCustomInstallType:-}"
     selectCustomInstallType="${rebuildSelection}"
     updateRedirectNginxConf || rebuildStatus=1
@@ -1035,11 +1036,18 @@ ensureTraditionalTlsFallbackNginxConfig() {
                 return 1
             }
             if [[ "${rebuildStatus}" == 2 ]]; then
-                local -a restoreArgs=(refresh)
-                nginxRunning || restoreArgs=(start restore)
-                if ! runCoreServiceActionAllowFailure handleNginx "${restoreArgs[@]}"; then
-                    errorCard "旧 Nginx 配置已恢复，但服务重新加载失败，请检查服务日志"
-                    return 1
+                if [[ "${wasRunning}" == true ]]; then
+                    local -a restoreArgs=(refresh)
+                    nginxRunning || restoreArgs=(start restore)
+                    if ! runCoreServiceActionAllowFailure handleNginx "${restoreArgs[@]}"; then
+                        errorCard "旧 Nginx 配置已恢复，但服务重新加载失败，请检查服务日志"
+                        return 1
+                    fi
+                elif nginxRunning; then
+                    if ! runCoreServiceActionAllowFailure handleNginx stop; then
+                        errorCard "旧 Nginx 配置已恢复，但服务停止失败，请检查服务日志"
+                        return 1
+                    fi
                 fi
             fi
             errorCard "Nginx 重建失败，已恢复旧 alone.conf"
@@ -1288,5 +1296,4 @@ backupNginxConfig() {
         fi
         return 0
     fi
-
 }

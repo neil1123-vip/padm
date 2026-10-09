@@ -2191,6 +2191,7 @@ SH
         local original calls=0 failAgain=false serviceLog="${TMP_DIR}/nginx-rebuild-service.log"
         local errorLog="${TMP_DIR}/nginx-rebuild-error.log"
         original=$(<"${targetPath}")
+        nginxRunning() { [[ "${calls}" == 0 ]]; }
         errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
         handleNginx() {
             calls=$((calls + 1))
@@ -2216,6 +2217,31 @@ SH
         handleNginx() { return 0; }
         ensureTraditionalTlsFallbackNginxConfig >/dev/null 2>&1 || return 1
         [[ -z "$(find "${nginxRoot}" -maxdepth 1 -name '.alone.conf.nginx-rebuild.*' -print -quit)" ]] || return 1
+    ) || return 1
+    (
+        local original startedBeforeFailure nginxActive=false serviceLog="${TMP_DIR}/nginx-rebuild-stopped.log"
+        original=$(<"${targetPath}")
+        nginxRunning() { [[ "${nginxActive}" == true ]]; }
+        handleNginx() {
+            printf '%s\n' "$*" >>"${serviceLog}"
+            if [[ "$1" == refresh ]]; then
+                nginxActive="${startedBeforeFailure}"
+                return 1
+            fi
+            [[ "$1" == stop ]] || return 1
+            nginxActive=false
+        }
+        for startedBeforeFailure in false true; do
+            nginxActive=false
+            : >"${serviceLog}"
+            regressionExpectStatus 1 ensureTraditionalTlsFallbackNginxConfig >/dev/null 2>&1 || return 1
+            [[ "${nginxActive}" == false && "$(<"${targetPath}")" == "${original}" ]] || return 1
+            if [[ "${startedBeforeFailure}" == true ]]; then
+                [[ "$(<"${serviceLog}")" == $'refresh\nstop' ]] || return 1
+            else
+                [[ "$(<"${serviceLog}")" == refresh ]] || return 1
+            fi
+        done
     ) || return 1
     (
         local original recoveryFile errorLog="${TMP_DIR}/nginx-rebuild-restore-error.log"
