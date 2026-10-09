@@ -169,6 +169,7 @@ runMenuReadChoiceRegression() (
 )
 
 runInstallWorkflowRegression() (
+    local release=debian
     local renderedIds= errors=0 shown=0
     local answer inputFd nextInput output apply
     unset AUTO_INSTALL AUTO_INSTALL_TYPE AUTO_INSTALL_SUMMARY_SHOWN AUTO_PROTOCOLS AUTO_REUSE_LAST AUTO_DOMAIN AUTO_PORT

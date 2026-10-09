@@ -1933,6 +1933,7 @@ runCorePortFileTransactionRegression() {
 
 runCoreInstallSignalRollbackRegression() (
     set -euo pipefail
+    local release=debian
     local root="${TMP_DIR}/core-install-signal"
     local fixture core signal mode status
     mkdir -p "${root}"
@@ -2171,6 +2172,8 @@ runCoreInstallSignalRollbackRegression() (
     runCoreBinaryInstallSignalRollbackRegression
     printf '核心信号回归: 文件整组恢复\n'
     runCoreInstallFileSignalRollbackRegression
+    printf '核心信号回归: 旧核心自启恢复\n'
+    runCoreStartupSwitchRollbackRegression signal
 )
 
 runCoreInstallFileSignalRollbackRegression() (
@@ -2696,6 +2699,7 @@ EOF
 )
 
 runCoreTemplateReturnFailureRegression() (
+    local release=debian
     local root="${TMP_DIR}/core-template-return"
     local xrayRoot="${root}/xray"
     local singBoxRoot="${root}/sing-box"
@@ -3081,7 +3085,144 @@ runCoreTemplateReturnFailureRegression() (
     )
 )
 
+runCoreStartupSwitchRollbackRegression() (
+    local root="${TMP_DIR}/core-startup-switch-${1:-return}" fixture core oldCore platform enabled mode status
+    local release=debian selectCustomInstallType=",999," SERVICE_ACTIONS=
+    local PADM_CORE_INSTALL_SERVICE_BACKUP_DIR= PADM_CORE_INSTALL_SERVICE_NAME=
+    local PADM_CORE_TEMPLATE_TRANSACTION_ACTIVE=false
+    local -a modes=(success output-fail disable-fail restore-fail target-service-restore-fail)
+    [[ "${1:-}" != signal ]] || modes=(INT TERM)
+
+    coreTemplateConfigBackupCreate() {
+        checkLogBackupCreate "$1" "${fixture}/xray.conf" "${fixture}/sing-box.conf"
+    }
+    coreSwitchCleanupBackupCreate() { printf -v "$1" '%s' ''; }
+    checkLogBackupRestore() { padmRestoreManagedFileBackupManifest "$1"; }
+    singBoxInstalled() { return 1; }
+    nginxRuntimeRequired() { return 1; }
+    xrayRunning() { grep -qx true "${fixture}/xray.running"; }
+    singBoxRunning() { grep -qx true "${fixture}/sing-box.running"; }
+    handleXray() { startupSwitchService xray "$1"; }
+    handleSingBox() { startupSwitchService sing-box "$1"; }
+    startupSwitchService() {
+        printf '%s\n' "$([[ "$2" == start ]] && printf true || printf false)" >"${fixture}/$1.running"
+    }
+    startupSwitchRegistration() {
+        local service=$1 nextEnabled=$2
+        printf 'startup:%s:%s\n' "${service}" "${nextEnabled}" >>"${fixture}/actions"
+        [[ "${mode}" != restore-fail || "${nextEnabled}" != true ]] || return 1
+        printf '%s\n' "${nextEnabled}" >"${fixture}/${service}.enabled"
+        [[ "${mode}" != disable-fail || "${nextEnabled}" != false ]]
+    }
+    systemctl() {
+        case "$1" in
+        is-enabled) grep -qx true "${fixture}/${3%.service}.enabled" ;;
+        enable) startupSwitchRegistration "${2%.service}" true ;;
+        disable) startupSwitchRegistration "${2%.service}" false ;;
+        daemon-reload) return 0 ;;
+        *) return 1 ;;
+        esac
+    }
+    rc-update() {
+        case "$1" in
+        show)
+            local service
+            for service in xray sing-box; do
+                if grep -qx true "${fixture}/${service}.enabled"; then
+                    printf '%s | default\n' "${service}"
+                fi
+            done
+            return 0
+            ;;
+        add) startupSwitchRegistration "$2" true ;;
+        del) startupSwitchRegistration "$2" false ;;
+        *) return 1 ;;
+        esac
+    }
+    serviceQueueRestart() { :; }
+    serviceQueueApply() { startupSwitchService "${core}" start; }
+    checkGFWStatue() { :; }
+    cleanUp() { printf 'cleaned\n' >"${fixture}/${oldCore}.conf"; }
+    subscribeLocalBaseDir() { printf '%s/subscribe_local\n' "${fixture}"; }
+    subscriptionSyncBackupPath() { :; }
+    subscriptionSyncRestoreBackupPath() { :; }
+    errorCard() { printf '%s\n' "$*" >>"${fixture}/errors"; }
+    restoreCoreStartupServiceInstall() {
+        padmForgetCleanupPath "$1"
+        return 1
+    }
+    showAccounts() {
+        if [[ "${mode}" == target-service-restore-fail ]]; then
+            padmCreateTmpRootPath PADM_CORE_INSTALL_SERVICE_BACKUP_DIR target-service-restore.XXXXXX -d || return 1
+            PADM_CORE_INSTALL_SERVICE_NAME=${core}
+            printf '%s\n' "${PADM_CORE_INSTALL_SERVICE_BACKUP_DIR}" >"${fixture}/service-backup"
+        fi
+        if [[ "${mode}" == INT || "${mode}" == TERM ]]; then
+            kill -"${mode}" "${BASHPID}"
+            :
+        elif [[ "${mode}" != success ]]; then
+            return 7
+        fi
+    }
+    # 使用真实平台登记 helper，文件夹具跨子 shell 记录取消后的 enabled 与运行态。
+    for platform in systemd openrc; do
+        release=debian
+        [[ "${platform}" != openrc ]] || release=alpine
+        for core in xray sing-box; do
+            oldCore=sing-box
+            [[ "${core}" != sing-box ]] || oldCore=xray
+            for enabled in true false; do
+                for mode in "${modes[@]}"; do
+                    [[ "${enabled}" == true || ( "${mode}" != disable-fail && "${mode}" != restore-fail ) ]] || continue
+                    fixture="${root}/${platform}-${core}-${enabled}-${mode}"
+                    mkdir -p "${fixture}"
+                    printf 'old\n' >"${fixture}/xray.conf"
+                    printf 'old\n' >"${fixture}/sing-box.conf"
+                    printf false >"${fixture}/${core}.running"
+                    printf true >"${fixture}/${oldCore}.running"
+                    printf false >"${fixture}/${core}.enabled"
+                    printf '%s\n' "${enabled}" >"${fixture}/${oldCore}.enabled"
+                    : >"${fixture}/actions"
+                    : >"${fixture}/errors"
+                    status=0
+                    ( coreSwitchConfigTransaction "${core}" completeCoreInstall "${core}" 5 6 ) >/dev/null 2>&1 || status=$?
+                    if [[ "${mode}" == success ]]; then
+                        [[ "${status}" == 0 && "$(<"${fixture}/${oldCore}.enabled")" == false &&
+                            "$(<"${fixture}/${oldCore}.running")" == false && "$(<"${fixture}/${core}.running")" == true ]]
+                        [[ "${enabled}" != true ]] || grep -qx "startup:${oldCore}:false" "${fixture}/actions"
+                    else
+                        case "${mode}" in
+                        INT) [[ "${status}" == 130 ]] ;;
+                        TERM) [[ "${status}" == 143 ]] ;;
+                        disable-fail) [[ "${status}" == 1 ]] ;;
+                        *) [[ "${status}" == 7 ]] ;;
+                        esac
+                        [[ "$(<"${fixture}/xray.conf")" == old && "$(<"${fixture}/sing-box.conf")" == old &&
+                            "$(<"${fixture}/${core}.running")" == false ]]
+                        if [[ "${mode}" == target-service-restore-fail ]]; then
+                            [[ "$(<"${fixture}/${oldCore}.running")" == false && -d "$(<"${fixture}/service-backup")" ]]
+                            grep -q '核心服务运行状态恢复失败' "${fixture}/errors"
+                            padmRemoveCleanupPath "$(<"${fixture}/service-backup")"
+                        else
+                            [[ "$(<"${fixture}/${oldCore}.running")" == true ]]
+                        fi
+                        if [[ "${mode}" == restore-fail ]]; then
+                            [[ "$(<"${fixture}/${oldCore}.enabled")" == false ]]
+                            grep -q '开机自启恢复失败' "${fixture}/errors"
+                            ! grep -q '失败，已恢复旧配置' "${fixture}/errors"
+                        else
+                            [[ "$(<"${fixture}/${oldCore}.enabled")" == "${enabled}" ]]
+                            [[ "${enabled}" != true ]] || grep -qx "startup:${oldCore}:true" "${fixture}/actions"
+                        fi
+                    fi
+                done
+            done
+        done
+    done
+)
+
 runCoreInstallServiceActionFailureRegression() (
+    local release=debian
     local root="${TMP_DIR}/core-install-service-action"
     local serviceLog="${root}/service.log"
     local callLog="${root}/calls.log"
@@ -3574,6 +3715,7 @@ $1:refresh"
             done
         done
     )
+    runCoreStartupSwitchRollbackRegression
 )
 
 runSingBoxMergeConfigTransactionRegression() (

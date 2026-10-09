@@ -2297,6 +2297,25 @@ coreStartupServiceEnabled() {
     fi
 }
 
+coreSetStartupServiceEnabled() {
+    local serviceName=$1 serviceEnabled=$2
+    if [[ "${release}" == "alpine" ]]; then
+        if command -v rc-update >/dev/null 2>&1; then
+            if [[ "${serviceEnabled}" == true ]]; then
+                rc-update add "${serviceName}" default >/dev/null 2>&1
+            elif coreStartupServiceEnabled "${serviceName}"; then
+                rc-update del "${serviceName}" default >/dev/null 2>&1
+            fi
+        else
+            [[ "${serviceEnabled}" != true ]]
+        fi
+    elif [[ "${serviceEnabled}" == true ]]; then
+        systemctl enable "${serviceName}.service" >/dev/null 2>&1
+    elif coreStartupServiceEnabled "${serviceName}"; then
+        systemctl disable "${serviceName}.service" >/dev/null 2>&1
+    fi
+}
+
 restoreCoreStartupServiceInstall() {
     local backupDir=$1
     local serviceName=$2
@@ -2307,24 +2326,10 @@ restoreCoreStartupServiceInstall() {
         padmForgetCleanupPath "${backupDir}"
         return 1
     fi
-    if [[ "${release}" == "alpine" ]]; then
-        if command -v rc-update >/dev/null 2>&1; then
-            if [[ "${serviceWasEnabled}" == "true" ]]; then
-                rc-update add "${serviceName}" default >/dev/null 2>&1 || rollbackFailed=true
-            elif coreStartupServiceEnabled "${serviceName}"; then
-                rc-update del "${serviceName}" default >/dev/null 2>&1 || rollbackFailed=true
-            fi
-        elif [[ "${serviceWasEnabled}" == "true" ]]; then
-            rollbackFailed=true
-        fi
-    else
+    if [[ "${release}" != "alpine" ]]; then
         systemctl daemon-reload >/dev/null 2>&1 || rollbackFailed=true
-        if [[ "${serviceWasEnabled}" == "true" ]]; then
-            systemctl enable "${serviceName}.service" >/dev/null 2>&1 || rollbackFailed=true
-        elif systemctl is-enabled --quiet "${serviceName}.service" >/dev/null 2>&1; then
-            systemctl disable "${serviceName}.service" >/dev/null 2>&1 || rollbackFailed=true
-        fi
     fi
+    coreSetStartupServiceEnabled "${serviceName}" "${serviceWasEnabled}" || rollbackFailed=true
     if [[ "${rollbackFailed}" == "true" ]]; then
         padmForgetCleanupPath "${backupDir}"
         return 1
@@ -2806,6 +2811,14 @@ completeCoreInstall() {
         persistRealityEntryProfile || return 1
     fi
     checkGFWStatue "${checkStep}" "${core}" || return 1
+    if [[ "${PADM_CORE_INSTALL_TRANSACTION_ACTIVE:-}" == true &&
+        "${PADM_CORE_TEMPLATE_ROLLBACK[oldStartupWasEnabled]:-false}" == true ]]; then
+        PADM_CORE_TEMPLATE_ROLLBACK[oldStartupChanged]=true
+        coreSetStartupServiceEnabled "${oldCore}" false || {
+            errorCard "旧 ${oldCore} 开机自启关闭失败，已取消核心切换"
+            return 1
+        }
+    fi
     cleanUp "${cleanupType}" || return 1
     if [[ "${PADM_CORE_INSTALL_TRANSACTION_ACTIVE:-}" == true ]]; then
         local localBase outputBackupDir=
