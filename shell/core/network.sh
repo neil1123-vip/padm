@@ -431,24 +431,53 @@ removeFirewalldMasqueradeRule() {
 
 removeIptablesPortHoppingRules() {
     local type=$1
+    local start=${2:-} end=${3:-} targetPort=${4:-}
     local marker="neil1123-vip_${type}_portHopping"
-    local line savedRules
+    local line savedRules ruleNumbers
     local status=0
     local -a ruleLines=()
     [[ "${type}" == "hysteria2" || "${type}" == "tuic" ]] || return 1
+    if (($# != 1)); then
+        (($# == 4)) && validPortNumber "${start}" && validPortNumber "${end}" &&
+            validPortNumber "${targetPort}" && ((10#${start} <= 10#${end})) || return 1
+    fi
     command -v iptables >/dev/null 2>&1 && command -v iptables-save >/dev/null 2>&1 || return 1
-    iptables -t nat -L PREROUTING --line-numbers >/dev/null 2>&1 || return 1
-    mapfile -t ruleLines < <(iptables -t nat -L PREROUTING --line-numbers | awk -v marker="${marker}" '$0 ~ marker { print $1 }' | sort -rn)
-    for line in "${ruleLines[@]}"; do
-        [[ -n "${line}" ]] || continue
-        iptables -t nat -D PREROUTING "${line}" || status=1
+    local matchRules='
+        $1 == "-A" && $2 == "PREROUTING" {
+            line++
+            comment = ports = protocol = target = destination = ""
+            for (i = 1; i <= NF; i++) {
+                if ($i == "--comment") comment = $(i + 1)
+                else if ($i == "--dport") ports = $(i + 1)
+                else if ($i == "-p") protocol = $(i + 1)
+                else if ($i == "-j") target = $(i + 1)
+                else if ($i == "--to-destination") destination = $(i + 1)
+            }
+            if (comment ~ /^".*"$/) comment = substr(comment, 2, length(comment) - 2)
+            if (comment != marker || protocol != "udp" || target != "DNAT" || destination !~ /^:[0-9]+$/) next
+            if (ports !~ /^[0-9]+(:[0-9]+)?$/) next
+            count = split(ports, range, ":")
+            ruleStart = range[1] + 0
+            ruleEnd = range[count] + 0
+            ruleTarget = substr(destination, 2) + 0
+            if (ruleStart < 1 || ruleEnd > 65535 || ruleStart > ruleEnd || ruleTarget < 1 || ruleTarget > 65535) next
+            if (targetPort != "" && (ruleStart != start || ruleEnd != end || ruleTarget != targetPort)) next
+            print line
+        }
+    '
+    savedRules=$(iptables-save -t nat) || return 1
+    ruleNumbers=$(awk -v marker="${marker}" -v start="${start}" -v end="${end}" -v targetPort="${targetPort}" "${matchRules}" <<<"${savedRules}") || return 1
+    mapfile -t ruleLines <<<"${ruleNumbers}"
+    for ((line = ${#ruleLines[@]} - 1; line >= 0; line--)); do
+        [[ -n "${ruleLines[line]}" ]] || continue
+        iptables -t nat -D PREROUTING "${ruleLines[line]}" || status=1
     done
     if command -v netfilter-persistent >/dev/null 2>&1; then
         netfilter-persistent save >/dev/null 2>&1 || status=1
     fi
-    if ! savedRules=$(iptables-save); then
+    if ! savedRules=$(iptables-save -t nat); then
         status=1
-    elif grep -Fq "${marker}" <<<"${savedRules}"; then
+    elif ! ruleNumbers=$(awk -v marker="${marker}" -v start="${start}" -v end="${end}" -v targetPort="${targetPort}" "${matchRules}" <<<"${savedRules}") || [[ -n "${ruleNumbers}" ]]; then
         status=1
     fi
     return "${status}"
@@ -463,7 +492,7 @@ cleanupPadmFirewallRules() {
     local -a keys=()
     stateFile=$(padmFirewallStateFile) || return 1
     if command -v iptables-save >/dev/null 2>&1; then
-        if ! savedRules=$(iptables-save); then
+        if ! savedRules=$(iptables-save -t nat); then
             status=1
         else
             for hopType in hysteria2 tuic; do

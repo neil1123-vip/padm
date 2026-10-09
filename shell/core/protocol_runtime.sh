@@ -655,7 +655,7 @@ deletePortHoppingRules() {
             status=1
         fi
     else
-        if ! removeIptablesPortHoppingRules "${type}"; then
+        if ! removeIptablesPortHoppingRules "${type}" "${start}" "${end}" "${targetPort}"; then
             status=1
         elif ! padmFirewallStateRemove "${forwardStateKey}"; then
             status=1

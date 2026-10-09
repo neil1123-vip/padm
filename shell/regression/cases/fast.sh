@@ -1718,6 +1718,51 @@ EOF
     [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
 
     (
+        local natStateFile="${TMP_DIR}/port-hopping-exact-delete.state"
+        local deleteLog="${TMP_DIR}/port-hopping-exact-delete.log"
+        local PADM_FIREWALL_STATE_FILE="${TMP_DIR}/port-hopping-exact-delete-firewall.state"
+        local readStatus=1 beforeRules
+        rm -f "${PADM_FIREWALL_STATE_FILE}"
+        : >"${deleteLog}"
+        cat >"${natStateFile}" <<'EOF'
+-A PREROUTING -p udp --dport 33000:33002 -m comment --comment neil1123-vip_hysteria2_portHopping -j DNAT --to-destination :16294
+-A PREROUTING -p udp --dport 33000:33002 -m comment --comment "neil1123-vip_hysteria2_portHopping" -j DNAT --to-destination :16295
+-A PREROUTING -p udp --dport 33000:33002 -m comment --comment neil1123-vip_hysteria2_portHopping-other -j DNAT --to-destination :16295
+-A PREROUTING -p tcp --dport 33000:33002 -m comment --comment neil1123-vip_hysteria2_portHopping -j DNAT --to-destination :16295
+-A PREROUTING -p udp --dport 33000:33002 -m comment --comment neil1123-vip_tuic_portHopping -j DNAT --to-destination :26451
+-A PREROUTING -p udp --dport 34000:34002 -m comment --comment neil1123-vip_hysteria2_portHopping -j DNAT --to-destination :16295
+EOF
+        beforeRules=$(<"${natStateFile}")
+        iptables-save() {
+            [[ "$*" == '-t nat' ]] || return 99
+            cat "${natStateFile}"
+            return "${readStatus}"
+        }
+        iptables() {
+            [[ "$1 $2 $3 $4" == '-t nat -D PREROUTING' && "$5" =~ ^[0-9]+$ ]] || return 99
+            printf '%s\n' "$5" >>"${deleteLog}"
+            awk -v line="$5" 'NR != line' "${natStateFile}" >"${natStateFile}.tmp"
+            mv "${natStateFile}.tmp" "${natStateFile}"
+        }
+        regressionExpectStatus 1 deletePortHoppingRules hysteria2 33000 33002 16295
+        [[ ! -s "${deleteLog}" && "$(<"${natStateFile}")" == "${beforeRules}" ]]
+        readStatus=0
+        regressionExpectStatus 0 deletePortHoppingRules hysteria2 33000 33002 16295
+        [[ "$(<"${deleteLog}")" == 2 ]]
+        grep -q -- '--to-destination :16294' "${natStateFile}"
+        grep -q -- '--dport 34000:34002' "${natStateFile}"
+        grep -q 'neil1123-vip_hysteria2_portHopping-other' "${natStateFile}"
+        grep -q -- '-p tcp' "${natStateFile}"
+        grep -q 'neil1123-vip_tuic_portHopping' "${natStateFile}"
+        : >"${deleteLog}"
+        cleanupPadmFirewallRules
+        [[ "$(<"${deleteLog}")" == $'5\n1\n3' ]]
+        [[ "$(wc -l <"${natStateFile}")" == 2 ]]
+        grep -q 'neil1123-vip_hysteria2_portHopping-other' "${natStateFile}"
+        grep -q -- '-p tcp' "${natStateFile}"
+    )
+
+    (
         local persistExitStatus=0
         local initialAllowCalls=${allowCalls}
         command() {
