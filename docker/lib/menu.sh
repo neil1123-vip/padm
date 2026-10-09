@@ -105,7 +105,7 @@ dockerMenuProtocols() {
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 协议与入口\n'
-        printf '%s\n' '1. 查看入口' '2. 查看分享链接' '3. 编辑参数/复制或删除入口' '4. 重生成 Reality 参数' '5. Reality 目标站管理' '6. Reality 443 共存' '7. 分享订阅管理' '0. 返回'
+        printf '%s\n' '1. 查看入口' '2. 查看分享链接' '3. 编辑参数/复制或删除入口' '4. 重生成 Reality 参数' '5. Reality 目标站管理' '6. Reality 443 共存' '7. 分享订阅管理' '8. 额外入口端口' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -140,6 +140,38 @@ dockerMenuProtocols() {
         5) dockerMenuRealityTargets ;;
         6) dockerMenuRealityStream ;;
         7) dockerMenuSubscriptions ;;
+        8) dockerMenuPortAliases ;;
+        *) printf '无效选项，请重新选择。\n' ;;
+        esac
+    done
+}
+
+dockerMenuPortAliases() {
+    local choice listener port
+    while :; do
+        DOCKER_MENU_SIGNAL=0
+        printf '\nDocker 额外入口端口\n'
+        printf '%s\n' '1. 查看额外端口' '2. 添加端口' '3. 删除端口' '0. 返回'
+        printf '请选择: '
+        if ! IFS= read -r choice; then
+            [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
+            return 0
+        fi
+        case "${choice}" in
+        0) return 0 ;;
+        1) dockerMenuRun protocol port-alias-status || true ;;
+        2|3)
+            dockerMenuRun protocol list || continue
+            dockerSetupRead listener '入口 ID（0 返回）: ' &&
+                [[ -n "${listener}" && "${listener}" != 0 ]] &&
+                dockerSetupRead port '额外端口（0 返回）: ' &&
+                [[ -n "${port}" && "${port}" != 0 ]] || continue
+            if [[ "${choice}" == 2 ]]; then
+                dockerMenuRun edit --port-alias "${listener}" "${port}" || true
+            else
+                dockerMenuRun edit --port-alias-remove "${listener}" "${port}" || true
+            fi
+            ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

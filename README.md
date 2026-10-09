@@ -442,6 +442,26 @@ padm-docker edit --spec /root/original-spec.json --preview
 padm-docker edit --spec /root/original-spec.json --confirm PADM-DOCKER-EDIT
 ```
 
+菜单“协议与入口”的“额外入口端口”可给已有受管入口添加或删除额外公开端口。
+v3 可选顶层 `port_aliases` 保存最多 16 项 `{listener_id, public_port}`；
+TCP/UDP 和地址族继承目标入口，多个发布端口仍使用同一认证、入口 ID、账号与累计流量。
+TLS 入口继续经 Nginx TLS 前端；bridge 的 Reality 443 共存别名继承完整 SNI 分流，
+不是单独隔离的网站或 Reality 入口。没有新核心、证书、宿主权限或任意目的转发。
+
+```bash
+padm-docker protocol port-alias-status
+padm-docker edit --port-alias entry-reality 8444 --preview
+padm-docker edit --port-alias entry-reality 8444 --confirm PADM-DOCKER-EDIT
+padm-docker edit --port-alias-remove entry-reality 8444 --confirm PADM-DOCKER-EDIT
+```
+
+默认分享链接仍使用原公开端口，不自动生成别名节点；默认分享端口切换后续单独交付。
+重复 TCP 或 UDP 发布端口会拒绝，同一数字的 TCP/UDP 可分别使用；
+Fail2ban、TUN/TProxy 与 host-network 共存暂不接受别名。
+普通 `edit --spec` 不能新增或改写别名；删除入口同步清理其别名，复制不继承。
+旧控制 bundle 缺少 `x-padm-port-aliases` 时拒绝配置、更新或恢复带别名的规格。
+公网、IPv6 发布、原生宿主及 arm64 仍需独立验收，完整 `207` 保持 `deferred`。
+
 菜单新增“协议与入口”，可查看稳定入口 ID、核心、协议、地址/端口及地址族，
 查看全部或指定入口的分享链接，并进入现有编辑器修改、复制或删除入口。
 `protocol links` 标准输出只含 URI；关闭 HTTPS 订阅发布时仍可输出本地链接，

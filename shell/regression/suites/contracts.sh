@@ -262,7 +262,7 @@ runRegressionDockerContractsAggregateContract() (
         docker-setup-tls docker-reality-parameters docker-setup-core docker-sites docker-phase6
         docker-menu docker-reality-target-library docker-control-state docker-phase4 docker-control-client
         docker-phase1 docker-phase5 docker-control-cli docker-control-sync docker-release docker-geo-data docker-traffic
-        docker-routing-socks5 docker-http-relay
+        docker-routing-socks5 docker-http-relay docker-entry-port-alias
         docker-accounts docker-permissions docker-wireguard-runtime docker-control-api docker-subscriptions
         docker-accounts-cli docker-business docker-phase2
     )

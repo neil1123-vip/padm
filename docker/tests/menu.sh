@@ -284,6 +284,44 @@ runGeoDriver() {
     targetReply 'Docker 管理菜单' $'0\n'
 }
 
+runPortAliasDriver() {
+    local scenario=$1
+    local -A targetPrompts=()
+    targetReply 'Docker 管理菜单' $'9\n'
+    targetReply 'Docker 协议与入口' $'8\n'
+    case "${scenario}" in
+    flow)
+        targetReply 'Docker 额外入口端口' $'1\n'
+        targetReply 'Docker 额外入口端口' $'2\n'
+        targetReply '入口 ID（0 返回）' $'entry-fixture\n'
+        targetReply '额外端口（0 返回）' $'2053\n'
+        targetReply 'Docker 额外入口端口' $'3\n'
+        targetReply '入口 ID（0 返回）' $'entry-fixture\n'
+        targetReply '额外端口（0 返回）' $'2053\n'
+        ;;
+    cancel)
+        targetReply 'Docker 额外入口端口' $'99\n'
+        targetReply 'Docker 额外入口端口' $'2\n'
+        targetReply '入口 ID（0 返回）' $'0\n'
+        targetReply 'Docker 额外入口端口' $'3\n'
+        targetReply '入口 ID（0 返回）' $'entry-fixture\n'
+        targetReply '额外端口（0 返回）' $'0\n'
+        ;;
+    eof|failed|invalid)
+        targetReply 'Docker 额外入口端口' $'2\n'
+        targetReply '入口 ID（0 返回）' $'entry-fixture\n'
+        case "${scenario}" in
+        eof) targetReply '额外端口（0 返回）' $'\004' ;;
+        invalid) targetReply '额外端口（0 返回）' $'invalid\n' ;;
+        failed) targetReply '额外端口（0 返回）' $'2053\n' ;;
+        esac
+        ;;
+    esac
+    targetReply 'Docker 额外入口端口' $'0\n'
+    targetReply 'Docker 协议与入口' $'0\n'
+    targetReply 'Docker 管理菜单' $'0\n'
+}
+
 runMaintenanceDriver() {
     local scenario=$1 choice answer=n
     local -A targetPrompts=()
@@ -787,6 +825,8 @@ runPty() {
             runTargetsDriver "${input}"
         elif [[ "${driver}" == geo ]]; then
             runGeoDriver "${input}"
+        elif [[ "${driver}" == port-alias ]]; then
+            runPortAliasDriver "${input}"
         elif [[ "${driver}" == maintenance ]]; then
             runMaintenanceDriver "${input}"
         elif [[ "${driver}" == control ]]; then
@@ -1030,7 +1070,13 @@ protocol)
     esac
     printf 'fixture-protocol-output\n'
     ;;
-edit) recordAction "$@"; exit "${SITE_EDIT_STATUS:-0}" ;;
+edit)
+    recordAction "$@"
+    if [[ "${2:-}" == --port-alias || "${2:-}" == --port-alias-remove ]]; then
+        [[ "${4:-}" =~ ^[0-9]{1,5}$ ]] || exit 2
+    fi
+    exit "${SITE_EDIT_STATUS:-0}"
+    ;;
 account) recordAction "$@" ;;
 assess) recordAction "$@" ;;
 validate|update|rollback|uninstall)
@@ -1422,6 +1468,34 @@ runPty protocols-dispatch protocols read "${TLS_WIZARD_CLI}" menu
 runPty protocols-links-cancel protocols cancel "${TLS_WIZARD_CLI}" menu
 [[ "$(<"${TLS_WIZARD_ACTIONS}")" == 'protocol list' ]] ||
     fail 'cancelled protocol link selection dispatched a business command'
+
+# 额外入口菜单使用真实 PTY，取消与 EOF 不向 CLI 提交端口变更。
+for aliasCase in flow cancel eof invalid failed; do
+    : >"${TLS_WIZARD_ACTIONS}"
+    export SITE_EDIT_STATUS=0
+    [[ "${aliasCase}" != failed ]] || SITE_EDIT_STATUS=15
+    runPty "port-alias-${aliasCase}" port-alias "${aliasCase}" "${TLS_WIZARD_CLI}" menu
+    expectedAliases='protocol list'
+    case "${aliasCase}" in
+    flow)
+        expectedAliases+=$'\nprotocol port-alias-status\nprotocol list\nedit --port-alias entry-fixture 2053\nprotocol list\nedit --port-alias-remove entry-fixture 2053'
+        grep -Fq '8. 额外入口端口' "${CONTROL_LOG}" || fail '额外入口菜单未接入协议菜单'
+        ;;
+    cancel) expectedAliases+=$'\nprotocol list\nprotocol list' ;;
+    eof) expectedAliases+=$'\nprotocol list' ;;
+    invalid)
+        expectedAliases+=$'\nprotocol list\nedit --port-alias entry-fixture invalid'
+        grep -Fq '操作失败，退出码: 2' "${CONTROL_LOG}" || fail '非法别名端口未保留菜单'
+        ;;
+    failed)
+        expectedAliases+=$'\nprotocol list\nedit --port-alias entry-fixture 2053'
+        grep -Fq '操作失败，退出码: 15' "${CONTROL_LOG}" || fail '别名 CLI 失败未保留菜单'
+        ;;
+    esac
+    [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedAliases}" ]] ||
+        fail "额外入口 ${aliasCase} 参数分发错误或取消后执行操作"
+done
+unset SITE_EDIT_STATUS
 
 # 按新版八项菜单现场握手，扫描和选择必须真实读取前台终端。
 : >"${TLS_WIZARD_ACTIONS}"

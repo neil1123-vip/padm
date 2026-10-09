@@ -125,6 +125,7 @@ dockerConfigureSpecValidate() {
       def wireguard_key: type == "string" and length == 44 and test("^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$");
       def families: type == "array" and length >= 1 and length <= 2 and
         (unique | length) == length and all(.[]; . == "ipv4" or . == "ipv6");
+      def transports: if .id == 30 then "tcp", "udp" elif .id == 3 or .id == 31 then "udp" else "tcp" end;
       def image: type == "string" and test("^[a-z0-9][a-z0-9._/:@-]*:[A-Za-z0-9._-]+@sha256:[a-f0-9]{64}$");
       def safe_names($max): type == "array" and length <= $max and
         (unique | length) == length and all(.[]; type == "string" and test("^[A-Za-z0-9._:/-]{1,128}$"));
@@ -148,9 +149,32 @@ dockerConfigureSpecValidate() {
         (if has("control_sync") then ["control_sync"] else [] end) +
         (if has("control") then ["control"] else [] end) +
         (if has("relay") then ["relay"] else [] end) +
+        (if has("port_aliases") then ["port_aliases"] else [] end) +
         (if has("routing") then ["routing"] else [] end) +
         (if has("site") then ["site"] else [] end)) and
       (.schema_version == 1 or .schema_version == 2 or .schema_version == 3) and
+      (if has("port_aliases") then
+        .schema_version == 3 and
+        (.port_aliases | type == "array" and length >= 1 and length <= 16 and
+          length == (unique | length) and
+          all(.[]; exact(["listener_id", "public_port"]) and (.public_port | port) and
+            (.listener_id as $id | [$request.core.protocols[] | select(.listener_id == $id)] | length == 1))) and
+        all(.host_integrations[]; .type == "wireguard") and
+        .reality_stream.host_website.network_mode != "host" and
+        # 别名只占宿主发布端口；共享 SNI 入口的两个基础记录先去重。
+        (([.core.protocols[] | transports as $transport |
+          (if $request.reality_stream != null and
+            (.listener_id == $request.reality_stream.listener_id or .listener_id == $request.reality_stream.website_listener_id)
+           then 443 else .public_port end) as $port | [$port, $transport]] | unique) as $base |
+        ([$request.port_aliases[] as $alias |
+          $request.core.protocols[] | select(.listener_id == $alias.listener_id) |
+          transports as $transport | [$alias.public_port, $transport]]) as $aliases |
+        ($base + $aliases +
+          [if $request.relay.http != null then [$request.relay.http.port, "tcp"] else empty end] +
+          [if $request.tls.http01 == true then [80, "tcp"] else empty end] +
+          [if $request.control != null then [$request.control.listen.port, "tcp"] else empty end]) as $published |
+        ($published | length) == ($published | unique | length))
+       else true end) and
       (if has("relay") then
         .schema_version == 3 and
         (.relay | exact(["http"]) and
@@ -943,8 +967,21 @@ dockerManagedSpecMatchesDeployment() {
           {
           transport: $transport, address_families}] | sort_by(.listener_id, .transport) as $expected |
         $expected == ([$d.listeners[] | select((.listener_id | startswith("host-") | not) and
+          (.listener_id | startswith("alias-") | not) and
           .listener_id != "relay-http")] | sort_by(.listener_id, .transport))
        else true end) and
+      ([$d.listeners[] | select(.listener_id // "" | startswith("alias-"))] | sort_by(.listener_id)) ==
+        ([$request.port_aliases[]? as $alias |
+          $request.core.protocols[] | select(.listener_id == $alias.listener_id) |
+          (if .id == 30 then "tcp", "udp" elif .id == 3 or .id == 31 then "udp" else "tcp" end) as $transport |
+          (if $request.reality_stream != null and
+            (.listener_id == $request.reality_stream.listener_id or .listener_id == $request.reality_stream.website_listener_id)
+           then {service:"nginx",container_port:15443}
+           elif .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 then
+             {service:"nginx",container_port:(.websocket // .httpupgrade // .grpc_tls).tls_port}
+           else {service:(.core // $request.core.type),container_port:.public_port} end) +
+          {listener_id:("alias-\($alias.public_port)-\($transport)"),target_listener_id:.listener_id,
+           public_port:$alias.public_port,transport:$transport,address_families}] | sort_by(.listener_id)) and
       ([$d.listeners[] | select(.listener_id == "relay-http")] ==
         [if .relay.http != null then {
           listener_id: "relay-http", service: "xray",
@@ -1315,6 +1352,10 @@ dockerConfigurePortsAvailable() {
             "\(.settings.port)|tcp", "\(.settings.port)|udp"] +
           [if .tls.http01 == true then "80|tcp" else empty end] +
           [if .relay.http != null then "\(.relay.http.port)|tcp" else empty end] +
+          [.port_aliases[]? as $alias | $request.core.protocols[] |
+            select(.listener_id == $alias.listener_id) |
+            (if .id == 30 then "tcp", "udp" elif .id == 3 or .id == 31 then "udp" else "tcp" end) as $transport |
+            "\($alias.public_port)|\($transport)"] +
           [if .reality_stream.host_website.network_mode == "host" then "15443|tcp" else empty end]) | unique[]
         ' "${specFile}"
         if jq -e 'any(.host_integrations[]; .type == "wireguard")' "${specFile}" >/dev/null; then
@@ -2505,10 +2546,14 @@ dockerGenerateCompose() {
         read_only: $readonly
       }];
       def ports($protocol; $containerPort): [
+        ([$protocol.public_port] + [$r.port_aliases[]? |
+          select(.listener_id == $protocol.listener_id or
+            ($r.reality_stream != null and $protocol.listener_id == $r.reality_stream.listener_id and
+              .listener_id == $r.reality_stream.website_listener_id)) | .public_port])[] as $port |
         $protocol.address_families[] |
         (if $protocol.id == 30 then "tcp", "udp" elif $protocol.id == 3 or $protocol.id == 31 then "udp" else "tcp" end) as $transport |
-        if . == "ipv4" then "0.0.0.0:\($protocol.public_port):\($containerPort)/\($transport)"
-        else "[::]:\($protocol.public_port):\($containerPort)/\($transport)" end
+        if . == "ipv4" then "0.0.0.0:\($port):\($containerPort)/\($transport)"
+        else "[::]:\($port):\($containerPort)/\($transport)" end
       ];
       def relay_ports($core): [
         if $r.relay.http.core == $core then $r.relay.http as $relay |
@@ -2814,6 +2859,17 @@ dockerGenerateDeployment() {
             transport: $transport,
             address_families: .address_families
           } + if $r.schema_version >= 2 then {listener_id: .listener_id} else {} end)
+          ] + [$r.port_aliases[]? as $alias |
+            $r.core.protocols[] | select(.listener_id == $alias.listener_id) |
+            (if .id == 30 then "tcp", "udp" elif .id == 3 or .id == 31 then "udp" else "tcp" end) as $transport |
+            (if $r.reality_stream != null and
+              (.listener_id == $r.reality_stream.listener_id or .listener_id == $r.reality_stream.website_listener_id)
+             then {service:"nginx",container_port:15443}
+             elif .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 then
+               {service:"nginx",container_port:(.websocket // .httpupgrade // .grpc_tls).tls_port}
+             else {service:(.core // $r.core.type),container_port:.public_port} end) +
+            {listener_id:("alias-\($alias.public_port)-\($transport)"),target_listener_id:.listener_id,
+             public_port:$alias.public_port,transport:$transport,address_families}
           ] + [if $r.relay.http != null then {
             listener_id: "relay-http", service: "xray",
             public_port: $r.relay.http.port, container_port: $r.relay.http.port,
@@ -2880,8 +2936,19 @@ dockerDeploymentFileValidate() {
         (if any(.[]; has("listener_id")) then
           ([.[] | [.listener_id, .transport]] | unique | length) == length and
           all(.[]; .listener_id | type == "string" and
-            test("^(entry-[a-z0-9][a-z0-9-]{0,47}|vless-reality|vless-ws|host-wireguard|host-tproxy-tcp|host-tproxy-udp|host-control|host-acme-http|relay-http)$"))
+            test("^(entry-[a-z0-9][a-z0-9-]{0,47}|vless-reality|vless-ws|alias-[1-9][0-9]{0,4}-(tcp|udp)|host-wireguard|host-tproxy-tcp|host-tproxy-udp|host-control|host-acme-http|relay-http)$"))
          else true end)) and
+      (. as $deployment | all(.listeners[] | select(.listener_id // "" | startswith("alias-"));
+        exact(["listener_id", "target_listener_id", "service", "public_port", "container_port", "transport", "address_families"]) and
+        .listener_id == "alias-\(.public_port)-\(.transport)" and
+        (.target_listener_id | type == "string" and
+          test("^(entry-[a-z0-9][a-z0-9-]{0,47}|vless-reality|vless-ws)$")) and
+        (. as $alias | any($deployment.listeners[];
+          .listener_id == $alias.target_listener_id and .service == $alias.service and
+          .container_port == $alias.container_port and .transport == $alias.transport and
+          .address_families == $alias.address_families)))) and
+      all(.listeners[] | select(.listener_id // "" | startswith("alias-") | not);
+        has("target_listener_id") | not) and
       (. as $deployment | all(.listeners[] | select(.listener_id == "relay-http");
         exact(["listener_id", "service", "public_port", "container_port", "transport", "address_families"]) and
         .service == "xray" and

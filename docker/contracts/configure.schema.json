@@ -24,11 +24,30 @@
   "x-padm-routing-ipv6": true,
   "x-padm-routing-warp": true,
   "x-padm-relay-http": true,
+  "x-padm-port-aliases": true,
   "additionalProperties": false,
   "required": ["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"],
   "properties": {
     "schema_version": {
       "enum": [1, 2, 3]
+    },
+    "port_aliases": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["listener_id", "public_port"],
+        "properties": {
+          "listener_id": {
+            "type": "string",
+            "pattern": "^(?:entry-[a-z0-9][a-z0-9-]{0,47}|vless-(?:reality|ws))$"
+          },
+          "public_port": {"$ref": "#/$defs/port"}
+        }
+      }
     },
     "relay": {
       "type": "object",
@@ -598,6 +617,20 @@
     }
   },
   "allOf": [
+    {
+      "if": {"required": ["port_aliases"]},
+      "then": {
+        "properties": {
+          "schema_version": {"const": 3},
+          "host_integrations": {"items": {"properties": {"type": {"const": "wireguard"}}}},
+          "reality_stream": {
+            "properties": {
+              "host_website": {"properties": {"network_mode": {"not": {"const": "host"}}}}
+            }
+          }
+        }
+      }
+    },
     {
       "if": {"required": ["relay"]},
       "then": {

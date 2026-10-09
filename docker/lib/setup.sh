@@ -820,7 +820,7 @@ dockerProtocolCommand() (
     local -a targetArgs=()
     [[ "$#" -gt 0 ]] && shift
     case "${action}" in
-    list|stream-status|routing-status) [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
+    list|stream-status|routing-status|port-alias-status) [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
     links|alpn-status|targets|check-target|target-status|select-target|block-current-target)
         [[ "$#" -le 1 && "${1:-}" != --* ]] || return "${PADM_DOCKER_RC_USAGE}"
         listener=${1:-}
@@ -891,6 +891,15 @@ dockerProtocolCommand() (
     dockerEditBaselineValidate "${original}" "${workspace}" &&
         dockerConfigureSpecMigrate "${original}" "${normalized}" &&
         chmod 0600 "${normalized}" || return "${PADM_DOCKER_RC_STATE}"
+    if [[ "${action}" == port-alias-status ]]; then
+        jq '. as $request | {enabled:has("port_aliases"), aliases:[
+          .port_aliases[]? | . as $alias |
+          $request.core.protocols[] | select(.listener_id == $alias.listener_id) |
+          {listener_id,core,public_port:$alias.public_port,
+           transport:(if .id == 30 then ["tcp","udp"] elif .id == 3 or .id == 31 then ["udp"] else ["tcp"] end),
+           address_families}]}' "${normalized}"
+        return $?
+    fi
     if [[ "${action}" == routing-status ]]; then
         jq --argjson region_defaults "${PADM_DOCKER_REGION_DEFAULT_DOMAINS}" '
           {enabled:(.routing != null), server:(.routing.socks5.server // null),
@@ -1075,6 +1084,10 @@ dockerEditFields() {
                 jq --arg key "${listener}" '
                   .core.type as $primary |
                   .core.protocols |= map(select(.listener_id != $key)) |
+                   if has("port_aliases") then
+                     .port_aliases |= map(select(.listener_id != $key)) |
+                     if .port_aliases == [] then del(.port_aliases) else . end
+                   else . end |
                   if all(.core.protocols[]; .core != $primary) then error("主核心至少保留一个入口")
                   elif any(.core.protocols[]; .id == 21) then .
                   elif any(.core.protocols[]; .id == 3 or .id == 4 or .id == 5 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 28 or .id == 29 or .id == 31) then .subscription.enabled = false
@@ -1333,6 +1346,7 @@ dockerEditCommand() {
     local alpnListener= alpnOrder=
     local http01= socks5= socks5File= socks5Domains= routingKind= routingFile= routingAction=
     local httpRelay= httpRelayFile=
+    local portAlias= portAliasListener= portAliasPort=
     local regionMode= regionAllow='[]' regionAllowSet=0
     local ipv6Mode= ipv6Domains='[]' ipv6DomainsSet=0
     local DOCKER_CONFIG_RESTORE_ALPN_LISTENER=
@@ -1401,6 +1415,14 @@ dockerEditCommand() {
             [[ -z "${httpRelay}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             httpRelay=disable
             shift
+            ;;
+        --port-alias|--port-alias-remove)
+            [[ "$#" -ge 3 && -n "$2" && "$2" != --* && "$3" =~ ^[0-9]{1,5}$ &&
+                -z "${portAlias}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            [[ "$((10#$3))" -ge 1 && "$((10#$3))" -le 65535 ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            portAlias=${1#--} portAliasListener=$2 portAliasPort=$((10#$3))
+            shift 3
             ;;
         --dns|--hosts|--direct|--block|--block-ips|--warp)
             [[ "$#" -ge 2 && -n "$2" && "$2" != --* && -z "${routingKind}" ]] ||
@@ -1559,6 +1581,13 @@ dockerEditCommand() {
         dockerError 'HTTP 中继专项编辑不能与规格导入或其它专项动作组合'
         return "${PADM_DOCKER_RC_USAGE}"
     }
+    [[ -z "${portAlias}" || ( -z "${specFile}" && -z "${regenerateReality}" &&
+        -z "${realityTarget}" && -z "${realityStream}" && -z "${siteMode}" &&
+        -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
+        -z "${routingKind}" && -z "${httpRelay}" ) ]] || {
+        dockerError '额外入口端口专项编辑不能与规格导入或其它专项动作组合'
+        return "${PADM_DOCKER_RC_USAGE}"
+    }
     [[ "${mode}" != interactive || ( -t 0 && -t 1 ) ]] || {
         dockerError '非交互编辑需要 --preview 或 --confirm PADM-DOCKER-EDIT'
         return "${PADM_DOCKER_RC_USAGE}"
@@ -1624,7 +1653,7 @@ dockerEditCommand() {
     if [[ "${mode}" == interactive && -z "${specFile}" && "${imported}" -eq 0 &&
         -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" &&
         -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
-        -z "${routingKind}" && -z "${httpRelay}" ]]; then
+        -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" ]]; then
         dockerEditFields "${draft}" || status=$?
         if [[ "${status}" -eq 3 ]]; then
             printf '已取消配置编辑。\n'
@@ -1636,6 +1665,25 @@ dockerEditCommand() {
     fi
     jq -es 'length == 1 and (.[0] | type == "object")' "${draft}" >/dev/null 2>&1 ||
         return "${PADM_DOCKER_RC_STATE}"
+    if [[ -n "${portAlias}" ]]; then
+        jq --arg listener "${portAliasListener}" --argjson port "${portAliasPort}" --arg action "${portAlias}" '
+          if any(.core.protocols[]; .listener_id == $listener) then .
+          else error("入口 ID 不存在") end |
+          if $action == "port-alias" then
+            if any(.port_aliases[]?; .listener_id == $listener and .public_port == $port) then .
+            else .port_aliases = ((.port_aliases // []) + [{listener_id:$listener,public_port:$port}]) end
+          else
+            if any(.port_aliases[]?; .listener_id == $listener and .public_port == $port) then
+              .port_aliases |= map(select(.listener_id != $listener or .public_port != $port)) |
+              if .port_aliases == [] then del(.port_aliases) else . end
+            else error("额外端口不存在") end
+          end
+        ' "${draft}" >"${draft}.next" 2>/dev/null &&
+            chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" || {
+            dockerError '额外入口端口不存在或候选写入失败，未提交配置'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+    fi
     if [[ "${httpRelay}" == enable ]]; then
         dockerEditPrivateInputCopy "${httpRelayFile}" "${workspace}/http-relay.json" http_relay || {
             dockerError 'HTTP 中继输入须为 root 所有的 0600 单链接普通 JSON 文件，最多 64 KiB，祖先目录不得可写或含链接'
@@ -1821,6 +1869,7 @@ dockerEditCommand() {
         --arg site "${siteMode}" --arg alpn "${alpnListener}" --arg http01 "${http01}" \
         --arg socks5 "${socks5}" --arg routing_kind "${routingKind}" \
         --arg http_relay "${httpRelay}" \
+        --arg port_alias "${portAlias}" \
         --slurpfile before "${normalized}" --slurpfile after "${draft}" '
       def fixed: del(.server, .public_port, .address_families, .name,
         .reality.target_host, .reality.target_port, .reality.server_name, .websocket.path, .httpupgrade.path,
@@ -1851,7 +1900,9 @@ dockerEditCommand() {
           . as $bound | any($new.core.protocols[];
             .listener_id == $bound.listener_id and .core == $bound.core and
             .public_port == $bound.public_port and .address_families == $bound.address_families))) and
-      (if $http_relay != "" then
+      (if $port_alias != "" then
+        ($old | del(.port_aliases)) == ($new | del(.port_aliases))
+       elif $http_relay != "" then
         ($old | del(.relay.http) | if .relay == {} then del(.relay) else . end) ==
           ($new | del(.relay.http) | if .relay == {} then del(.relay) else . end)
        elif $socks5 != "" then
@@ -1876,7 +1927,10 @@ dockerEditCommand() {
        else true end) and
       # 分次提交新增与删除，防止借同凭据入口绕过已有身份和内部端口冻结。
       ((($oldIds - $newIds) | length) == 0 or (($newIds - $oldIds) | length) == 0) and
-      ($old | root) == ($new | root) and
+      # 普通编辑只随入口删除清理别名，不允许借规格导入新增或更换公开别名。
+      ([($old.port_aliases // [])[] | select(.listener_id as $id | ($newIds | index($id)) != null)] | sort_by(.listener_id,.public_port)) ==
+        (($new.port_aliases // []) | sort_by(.listener_id,.public_port)) and
+      ($old | root | del(.port_aliases)) == ($new | root | del(.port_aliases)) and
       ($new.tls | del(.http01)) == (if any($new.core.protocols[]; .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25 or .id == 27 or .id == 29 or .id == 3 or .id == 4 or .id == 5 or .id == 28 or .id == 31) then ($old.tls | del(.http01)) else null end) and
       all($new.core.protocols[];
         . as $entry | [$old.core.protocols[] | select(.listener_id == $entry.listener_id)] as $existing |
@@ -1905,7 +1959,7 @@ dockerEditCommand() {
         end)
        end)
     ' >/dev/null 2>&1 || {
-        dockerError '仅支持 HTTP 中继/路由/HTTP-01/站点专项管理与现有入口编辑、复制、Reality 传输派生和删除；账号、密钥、已有入口身份、内部端口与核心、主核心、证书和发布不能改写'
+        dockerError '仅支持额外入口端口/HTTP 中继/路由/HTTP-01/站点专项管理与现有入口编辑、复制、Reality 传输派生和删除；账号、密钥、已有入口身份、内部端口与核心、主核心、证书和发布不能改写'
         return "${PADM_DOCKER_RC_STATE}"
     }
     opsImage=$(dockerManifestImageReference ops) || return "${PADM_DOCKER_RC_MANIFEST}"

@@ -277,6 +277,29 @@ padm-docker protocol links
 padm-docker protocol links vless-reality
 ```
 
+The protocol/listener menu also manages extra published ports for existing listeners.
+Optional v3 `port_aliases` contains up to 16 `{listener_id, public_port}` entries.
+Each alias retains the listener's TCP/UDP transports, address families, authentication,
+account identity and traffic counters. TLS still terminates at the existing Nginx frontend;
+bridge Reality 443 aliases expose the same complete SNI frontend, not an isolated branch.
+No extra core, certificate, host privilege or arbitrary destination forwarding is added.
+
+```bash
+padm-docker protocol port-alias-status
+padm-docker edit --port-alias entry-reality 8444 --preview
+padm-docker edit --port-alias entry-reality 8444 --confirm PADM-DOCKER-EDIT
+padm-docker edit --port-alias-remove entry-reality 8444 --confirm PADM-DOCKER-EDIT
+```
+
+Share links retain the original public port; selecting an alias as the default share port
+is not yet implemented. Conflicting published TCP or UDP ports are rejected; separate
+TCP and UDP uses of the same number are allowed. Fail2ban, TUN/TProxy and host-network
+coexistence reject aliases for now. Ordinary spec editing cannot add or replace aliases;
+deleting a listener removes its aliases, while copying does not inherit them.
+Older control bundles without `x-padm-port-aliases` reject alias-bearing configuration,
+updates and restoration. Public/IPv6 publishing, native hosts and arm64 remain unverified;
+the complete internal capability `207` stays `deferred`.
+
 `--preview` does not commit, collect traffic, or start/stop application services.
 Validation still verifies the release, pulls images, and runs candidate checks.
 `edit` verifies the current deployment version rather than latest by default; it also

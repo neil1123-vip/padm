@@ -83,6 +83,7 @@ listRegressionDockerContractsChildSelectors() {
         docker-traffic \
         docker-routing-socks5 \
         docker-http-relay \
+        docker-entry-port-alias \
         docker-accounts \
         docker-permissions \
         docker-wireguard-runtime \
@@ -114,6 +115,7 @@ listRegressionDockerContractsFastChildSelectors() {
         docker-traffic \
         docker-routing-socks5 \
         docker-http-relay \
+        docker-entry-port-alias \
         docker-accounts \
         docker-control-cli \
         docker-wireguard-runtime \
@@ -159,6 +161,14 @@ runDockerHttpRelayRealRegression() {
 
 runDockerHttpRelayPublishedRealRegression() {
     bash "${PROJECT_ROOT}/docker/tests/http-relay-published-real.sh"
+}
+
+runDockerEntryPortAliasRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/entry-port-alias.sh"
+}
+
+runDockerEntryPortAliasRealRegression() {
+    bash "${PROJECT_ROOT}/docker/tests/entry-port-alias-real.sh"
 }
 
 runDockerRoutingBlockBtRegression() {
@@ -306,6 +316,8 @@ registerRegressionFunctionLeaf docker-routing-socks5-real runDockerRoutingSocks5
 registerRegressionFunctionLeaf docker-http-relay runDockerHttpRelayRegression
 registerRegressionFunctionLeaf docker-http-relay-real runDockerHttpRelayRealRegression
 registerRegressionFunctionLeaf docker-http-relay-published-real runDockerHttpRelayPublishedRealRegression
+registerRegressionFunctionLeaf docker-entry-port-alias runDockerEntryPortAliasRegression
+registerRegressionFunctionLeaf docker-entry-port-alias-real runDockerEntryPortAliasRealRegression
 registerRegressionFunctionLeaf docker-routing-dns-hosts runDockerRoutingSocks5Regression
 registerRegressionFunctionLeaf docker-routing-dns-hosts-real runDockerRoutingDnsHostsRealRegression
 registerRegressionFunctionLeaf docker-routing-direct-block runDockerRoutingSocks5Regression
