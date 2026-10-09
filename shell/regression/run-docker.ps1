@@ -296,7 +296,7 @@ try {
     # 双节点实测仅在容器的隔离网络空间创建 Peer，不使用宿主网络或发布端口。
     [string[]]$networkCapabilities = if ($Selector -eq 'docker-control-two-node-real') {
         @('--cap-add', 'NET_ADMIN', '--cap-add', 'SYS_ADMIN')
-    } elseif ($Selector -eq 'docker-control-two-deployment-real') {
+    } elseif ($Selector -in @('docker-control-two-deployment-real', 'docker-routing-ipv6-real')) {
         # 嵌套 daemon 只操作测试容器的隔离空间，不挂宿主 Socket。
         @('--privileged', '--mount', 'type=volume,dst=/n')
     } else { @() }
@@ -342,7 +342,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Routing binary copy failed.' }
         $result.routing_images = $coreInputs
     }
-    if ($Selector -eq 'docker-control-two-deployment-real') {
+    if ($Selector -in @('docker-control-two-deployment-real', 'docker-routing-ipv6-real')) {
         # 离线传入实际业务镜像；节点不得借用宿主 daemon 或旧源码。
         $references = [ordered]@{
             xray = 'padm-local/padm-xray:control-4c4b'

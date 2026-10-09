@@ -26,6 +26,7 @@ readonly PADM_DOCKER_REGION_DEFAULT_DOMAINS='["domain:dl.google.com","domain:app
 DOCKER_CONFIG_CANDIDATE=
 DOCKER_CONFIG_BACKUP=
 DOCKER_CONFIG_SWITCHED=0
+DOCKER_CONFIG_IPV6_TOUCHED=0
 DOCKER_CONFIG_STREAM_TRANSITION=0
 DOCKER_CONFIG_STREAM_HOST_TRANSITION=0
 DOCKER_CONFIG_RELEASE_INPUTS=
@@ -158,7 +159,8 @@ dockerConfigureSpecValidate() {
             (if has("block") then ["block"] else [] end) +
             (if has("block_ips") then ["block_ips"] else [] end) +
             (if has("block_bt") then ["block_bt"] else [] end) +
-            (if has("region") then ["region"] else [] end)) and
+            (if has("region") then ["region"] else [] end) +
+            (if has("ipv6") then ["ipv6"] else [] end)) and
           (if has("socks5") then
           (.socks5 | exact(["server", "port", "username", "password"] +
               if has("domains") then ["domains"] else [] end) and
@@ -201,6 +203,15 @@ dockerConfigureSpecValidate() {
               (.mode == "both" or .mode == "domain" or .mode == "ip") and
               (.allow_domains | type == "array" and length <= 256 and
                 length == (unique | length) and all(.[]; routing_selector)))
+           else true end) and
+          (if has("ipv6") then
+            (.ipv6 | exact(["mode", "domains"]) and
+              (.mode == "selective" or .mode == "global") and
+              (.domains | type == "array" and length <= 256 and
+                length == (unique | length) and all(.[]; routing_selector)) and
+              (if .mode == "selective" then (.domains | length >= 1) else .domains == [] end)) and
+            (if .ipv6.mode == "global" and .socks5 != null then
+              (.socks5 | has("domains")) else true end)
            else true end)) and
         all(.host_integrations[]; .type != "tun" and .type != "tproxy")
        else true end) and
@@ -1286,6 +1297,7 @@ dockerCreateConfigurationCandidate() {
     chmod 0750 "${candidate}" || return 1
     DOCKER_CONFIG_BACKUP=
     DOCKER_CONFIG_SWITCHED=0
+    DOCKER_CONFIG_IPV6_TOUCHED=0
     DOCKER_CONFIG_STREAM_TRANSITION=0
     DOCKER_CONFIG_CANDIDATE=${candidate}
 }
@@ -1418,6 +1430,11 @@ dockerGenerateXrayConfig() {
       (($r.routing.socks5.domains // []) | map(
         if startswith("keyword:") then ltrimstr("keyword:") else . end)) as $domains |
       ($r.routing.dns != null or $r.routing.hosts != null) as $resolve |
+      ($r.routing.ipv6 != null) as $ipv6 |
+      ($r.routing.ipv6.mode == "global") as $ipv6_global |
+      (($r.routing.ipv6.domains // []) | map(
+        if startswith("keyword:") then ltrimstr("keyword:") else . end)) as $ipv6_domains |
+      ($resolve or $ipv6) as $dns_enabled |
       (($r.routing.dns.domains // []) | map(
         if startswith("keyword:") then ltrimstr("keyword:") else . end)) as $dns_domains |
       (($r.routing.direct.domains // []) | map(
@@ -1426,9 +1443,10 @@ dockerGenerateXrayConfig() {
         if startswith("keyword:") then ltrimstr("keyword:") else . end)) as $block_domains |
       ($r.routing.block_ips.ips // []) as $block_ips |
       ($r.routing.block_bt == true) as $block_bt |
-      ($r.routing.direct != null or $r.routing.block != null or $r.routing.block_ips != null or $block_bt) as $actions |
+      ($r.routing.direct != null or $r.routing.block != null or $r.routing.block_ips != null or $block_bt or $ipv6) as $actions |
       ({protocol: "freedom", tag: "direct"} +
         if $resolve then {settings: {domainStrategy: "ForceIP"}} else {} end) as $direct |
+      {protocol: "freedom", tag: "padm-ipv6", settings: {domainStrategy: "ForceIPv6"}} as $ipv6_outbound |
       {
         log: {loglevel: "warning"},
         inbounds: ([
@@ -1527,6 +1545,7 @@ dockerGenerateXrayConfig() {
           }
         ]),
         outbounds: [
+          (if $ipv6_global then $ipv6_outbound else empty end),
           (if $selective then $direct else empty end),
           (if $r.routing.socks5 != null then {
             protocol: "socks", tag: "padm-socks5",
@@ -1537,9 +1556,10 @@ dockerGenerateXrayConfig() {
             }]}
           } else empty end),
           (if $selective then empty else $direct end),
+          (if $ipv6 and ($ipv6_global | not) then $ipv6_outbound else empty end),
           {protocol: "blackhole", tag: "blocked"}
         ]
-      } + (if $resolve then {
+      } + (if $dns_enabled then {
         dns: {tag: "padm-dns", disableFallbackIfMatch: true,
           hosts: (($r.routing.hosts // {}) | with_entries(.key = "full:" + .key)),
           servers: ([(if $r.routing.dns != null then {
@@ -1547,8 +1567,8 @@ dockerGenerateXrayConfig() {
             domains: $dns_domains, skipFallback: true, finalQuery: true
           } else empty end), "localhost"])}
       } else {} end) +
-      (if $r.routing.socks5 != null or $resolve or $actions then {
-        routing: ({rules: ((if $resolve then [
+      (if $r.routing.socks5 != null or $dns_enabled or $actions then {
+        routing: ({rules: ((if $dns_enabled then [
           {type: "field", inboundTag: ["padm-dns"], outboundTag: "direct"}
         ] else [] end) +
         (if ($direct_domains | length) > 0 then [
@@ -1562,6 +1582,9 @@ dockerGenerateXrayConfig() {
         ] else [] end) +
         (if $block_bt then [
           {type: "field", protocol: ["bittorrent"], outboundTag: "blocked"}
+        ] else [] end) +
+        (if ($ipv6_domains | length) > 0 then [
+          {type: "field", domain: $ipv6_domains, outboundTag: "padm-ipv6"}
         ] else [] end) + (if $selective then [
           {type: "field", domain: $domains, network: "udp", outboundTag: "blocked"},
           {type: "field", domain: $domains, network: "tcp", outboundTag: "padm-socks5"}
@@ -1605,6 +1628,20 @@ dockerGenerateSingBoxConfig() {
           {type: "logical", mode: "and", rules: [$match,
             {type: "logical", mode: "or", rules: $direct, invert: true}]}
         else $match end;
+      # IPv6 选中流量仍用原 hosts/DNS 来源，只收 AAAA，失败不换源。
+      def ipv6_routes($matches; $direct; $hosts; $dns):
+        if ($matches | length) == 0 then [] else
+          (if ($matches | length) == 1 then $matches[0]
+           else {type: "logical", mode: "or", rules: $matches} end) as $match |
+          (if ($hosts | length) > 0 then
+            exclude_direct({type: "logical", mode: "and", rules: [$match, {domain: $hosts}]}; $direct) as $host_match |
+            [$host_match + {action: "resolve", server: "padm-hosts", strategy: "ipv6_only"},
+             $host_match + {action: "route", outbound: "padm-ipv6"}]
+           else [] end) +
+          [$dns[] | exclude_direct({type: "logical", mode: "and", rules: [$match, .]}; $direct) +
+            {action: "resolve", server: "padm-dns", strategy: "ipv6_only"}] +
+          [exclude_direct($match; $direct) + {action: "route", outbound: "padm-ipv6"}]
+        end;
       # 区域预设只在生成时展开，关闭不会删除用户手工配置的相同规则。
       ($request[0] | if .routing.region != null then
         .routing.region as $region |
@@ -1620,6 +1657,9 @@ dockerGenerateSingBoxConfig() {
       (($r.routing.socks5 // {}) | has("domains")) as $selective |
       ($r.routing.socks5.domains // []) as $domains |
       (domain_matches($domains)) as $matches |
+      ($r.routing.ipv6 != null) as $ipv6 |
+      ($r.routing.ipv6.mode == "global") as $ipv6_global |
+      (domain_matches($r.routing.ipv6.domains // [])) as $ipv6_matches |
       (domain_matches($r.routing.dns.domains // [])) as $dns_matches |
       (domain_matches($r.routing.direct.domains // [])) as $direct_matches |
       (domain_matches($r.routing.block.domains // [])) as $block_matches |
@@ -1628,11 +1668,13 @@ dockerGenerateSingBoxConfig() {
       ([({ip_cidr: [$block_ips[] | select(. != "geoip:cn")]} | select(.ip_cidr | length > 0)),
         (if $geoip_cn then {rule_set: ["padm-geoip-cn"]} else empty end)]) as $ip_matches |
       ($r.routing.block_bt == true) as $block_bt |
-      ($r.routing.direct != null or $r.routing.block != null or $r.routing.block_ips != null or $block_bt) as $actions |
+      ($r.routing.direct != null or $r.routing.block != null or $r.routing.block_ips != null or $block_bt or $ipv6) as $actions |
       (($r.routing.hosts // {}) | keys) as $host_domains |
       ($r.routing.dns != null or $r.routing.hosts != null) as $resolve |
+      ($resolve or $ipv6) as $dns_enabled |
       (($domains + ($r.routing.dns.domains // []) +
-        ($r.routing.direct.domains // []) + ($r.routing.block.domains // [])) |
+        ($r.routing.direct.domains // []) + ($r.routing.block.domains // []) +
+        ($r.routing.ipv6.domains // [])) |
         map(select(startswith("geosite:")) | ltrimstr("geosite:")) | unique) as $sets |
       {
         log: {disabled: false, level: "warn", timestamp: true},
@@ -1775,9 +1817,12 @@ dockerGenerateSingBoxConfig() {
             server: $r.routing.socks5.server, server_port: $r.routing.socks5.port,
             version: "5", username: $r.routing.socks5.username, password: $r.routing.socks5.password
           } else empty end),
+          (if $ipv6 then {type: "direct", tag: "padm-ipv6",
+            domain_resolver: {server: "padm-local", strategy: "ipv6_only"}} else empty end),
           {type: "direct", tag: "direct"}
         ],
-        route: ({final: (if $r.routing.socks5 != null and ($selective | not) then "padm-socks5" else "direct" end),
+        route: ({final: (if $ipv6_global then "padm-ipv6"
+          elif $r.routing.socks5 != null and ($selective | not) then "padm-socks5" else "direct" end),
           auto_detect_interface: true} +
           (if $r.routing.socks5 != null or $resolve or $actions then
             # 先排除直连例外再阻断或代理；例外在 hosts/DNS 解析后选路，避免跳过解析。
@@ -1788,6 +1833,7 @@ dockerGenerateSingBoxConfig() {
               (if $block_bt then [
                 exclude_direct({protocol: ["bittorrent"]}; $direct_matches) + {action: "reject"}
               ] else [] end) +
+              ipv6_routes($ipv6_matches; $direct_matches; $host_domains; $dns_matches) +
               (if $selective then
               [$matches[] | exclude_direct(. + {network: "udp"}; $direct_matches) + {action: "reject"}] +
               [$matches[] | exclude_direct(. + {network: "tcp"}; $direct_matches) +
@@ -1798,6 +1844,9 @@ dockerGenerateSingBoxConfig() {
                  [exclude_direct({network: "tcp"}; $direct_matches) +
                    {action: "route", outbound: "padm-socks5"}] else [] end
              else [] end) +
+              (if $ipv6_global then
+                ipv6_routes([{network: ["tcp", "udp"]}]; $direct_matches; $host_domains; $dns_matches)
+               else [] end) +
               (if ($host_domains | length) > 0 then [
                 {domain: $host_domains, action: "resolve", server: "padm-hosts"},
                 {domain: $host_domains, action: "route", outbound: "direct"}
@@ -1805,7 +1854,7 @@ dockerGenerateSingBoxConfig() {
               [$dns_matches[] | . + {action: "resolve", server: "padm-dns"}] +
               [$direct_matches[] | . + {action: "route", outbound: "direct"}])}
            else {} end) +
-          (if $resolve then {default_domain_resolver: "padm-local"} else {} end) +
+          (if $dns_enabled then {default_domain_resolver: "padm-local"} else {} end) +
           if ($sets | length) > 0 or $geoip_cn then
               {rule_set: ([$sets[] |
                 {tag: ("padm-geosite-" + .), type: "remote", format: "binary",
@@ -1817,7 +1866,7 @@ dockerGenerateSingBoxConfig() {
                   http_client: {engine: "go"}
                 }] else [] end)}
           else {} end)
-      } + (if $resolve then {
+      } + (if $dns_enabled then {
         dns: {servers: [{type: "local", tag: "padm-local"},
           (if $r.routing.hosts != null then
             {type: "hosts", tag: "padm-hosts", predefined: $r.routing.hosts} else empty end),
@@ -2345,6 +2394,7 @@ dockerGenerateCompose() {
       ($r.host_integrations | map(select(.type == "fail2ban"))) as $fail2ban |
       ($r.host_integrations | map(select(.type == "tun"))) as $tun |
       ($r.host_integrations | map(select(.type == "tproxy"))) as $tproxy |
+      ($r.routing.ipv6 != null) as $ipv6 |
         ($r.reality_stream.host_website.network_mode == "host") as $hostStream |
       (($tun | length) + ($tproxy | length) == 1) as $transparent |
       ({
@@ -2357,6 +2407,13 @@ dockerGenerateCompose() {
           }
         }
       }
+      | if $ipv6 then
+          .networks.ipv6 = {
+            name: "padm-docker-ipv6", enable_ipv6: true,
+            labels: {"io.padm.mode": "docker", "io.padm.project": "padm-docker",
+              "io.padm.component": "routing-ipv6"}
+          }
+        else . end
       | if ($cores | index("xray")) != null then
           .services.xray = (defaults + {
             image: "${PADM_XRAY_IMAGE:?PADM_XRAY_IMAGE is required}",
@@ -2395,6 +2452,10 @@ dockerGenerateCompose() {
               interval: "30s", timeout: "5s", start_period: "5s", retries: 3
             }
           })
+        else . end
+      | if $ipv6 then
+          reduce $cores[] as $core (.;
+            .services[$core].networks = ["default", "ipv6"])
         else . end
       | if $transparent then
           .services[$r.core.type].profiles += ["net-transparent"]
@@ -2844,6 +2905,13 @@ dockerCandidateCompose() (
     # 候选只使用已验证的 env-file，宿主导出变量不能覆盖镜像和挂载根。
     unset PADM_DOCKER_ROOT PADM_NET_ROOT PADM_XRAY_IMAGE PADM_SINGBOX_IMAGE \
         PADM_NGINX_IMAGE PADM_OPS_IMAGE PADM_NET_IMAGE
+    case "${1:-}" in
+    run|up)
+        if jq -e '.networks.ipv6 != null' "${candidate}/compose.json" >/dev/null; then
+            dockerIPv6NetworkManage check "${DOCKER_ASSESS_PROJECT:-${PADM_DOCKER_PROJECT}}" || return 1
+        fi
+        ;;
+    esac
     docker compose --project-name "${DOCKER_ASSESS_PROJECT:-${PADM_DOCKER_PROJECT}}" \
         --project-directory "${candidate}" --env-file "${candidate}/images.env" \
         --file "${candidate}/compose.json" --profile '*' "$@" </dev/null
@@ -3173,6 +3241,7 @@ dockerCreateUpdateCandidate() {
     root=$(dockerInstallRoot) || return 1
     dockerControlRecoveryCheck || return 1
     DOCKER_CONFIG_CANDIDATE=
+    DOCKER_CONFIG_IPV6_TOUCHED=0
     candidate=$(mktemp -d "${root}/.update.XXXXXX") || return 1
     dockerManagedPathIsSafe "${root}" "${candidate}" || {
         dockerRemoveManagedTree "${root}" "${candidate}" || true
@@ -3305,6 +3374,17 @@ dockerInstallCandidate() {
     local candidate=$1 backup=$2 root relative source target
     root=$(dockerInstallRoot) || return 1
     dockerRealityStreamDeploymentCheck "${candidate}/config/spec.json" "${root}/config/spec.json" || return 1
+    dockerManagedPathIsSafe "${root}" "${candidate}" &&
+        dockerManagedPathIsSafe "${root}" "${backup}" &&
+        [[ -d "${candidate}" && ! -L "${candidate}" && -d "${backup}" && ! -L "${backup}" ]] || return 1
+    for source in "${candidate}/compose.json" "${backup}/compose.json"; do
+        [[ -e "${source}" || -L "${source}" ]] || continue
+        [[ -f "${source}" && ! -L "${source}" ]] || return 1
+        if jq -e '.networks.ipv6 != null' "${source}" >/dev/null; then
+            # 编排随后会移动，事务保留开启/关闭及失败恢复需要的网络清理依据。
+            DOCKER_CONFIG_IPV6_TOUCHED=1
+        fi
+    done
     if [[ -f "${candidate}/config/spec.json" ]] &&
         jq -e '.tls.http01 == true' "${candidate}/config/spec.json" >/dev/null; then
         # 挑战根独立于配置事务，不能移动候选空目录或替换在线 inode。
@@ -3389,7 +3469,7 @@ dockerEnsureRuntimeDataPermissions() {
 
 dockerRestoreConfiguration() {
     local root backup=${DOCKER_CONFIG_BACKUP:-} relative core bundleTarget= savedTraffic currentTraffic restoredTraffic includeStatic=0
-    local alpnListener=${DOCKER_CONFIG_RESTORE_ALPN_LISTENER:-} alpnTemporary=
+    local alpnListener=${DOCKER_CONFIG_RESTORE_ALPN_LISTENER:-} alpnTemporary= ipv6Cleanup=0
     [[ "${DOCKER_CONFIG_SWITCHED:-0}" == "1" && -n "${backup}" ]] || return 0
     root=$(dockerInstallRoot) || return 1
     if [[ -e "${backup}/bundle.target" || -L "${backup}/bundle.target" ]]; then
@@ -3408,6 +3488,12 @@ dockerRestoreConfiguration() {
     dockerControlRestorePrepare "${backup}" || return 1
     # 当前配置可能只安装了一部分，恢复授权只取自已验证的备份。
     dockerRealityStreamDeploymentCheck "${backup}/config/spec.json" || return 1
+    if [[ -f "${root}/compose.json" && ! -L "${root}/compose.json" ]] &&
+        jq -e '.networks.ipv6 != null' "${root}/compose.json" >/dev/null &&
+        ! { [[ -f "${backup}/compose.json" && ! -L "${backup}/compose.json" ]] &&
+            jq -e '.networks.ipv6 != null' "${backup}/compose.json" >/dev/null; }; then
+        ipv6Cleanup=1
+    fi
     if grep -qxF data/traffic/state.json "${backup}/present"; then
         dockerTrafficBeforeChange
         savedTraffic=$(jq -c . "${backup}/data/traffic/state.json") &&
@@ -3488,6 +3574,8 @@ dockerRestoreConfiguration() {
         fi
         dockerTrafficScheduleRemove || return 1
     fi
+    # 中继恢复可能只停止部分服务；关闭 IPv6 后再清理已无容器的受管网络。
+    [[ "${ipv6Cleanup}" != 1 ]] || dockerIPv6NetworkManage cleanup || return 1
     dockerRenewalScheduleInstall && dockerGeoScheduleInstall || return 1
     DOCKER_CONFIG_SWITCHED=0
     DOCKER_CONFIG_STREAM_TRANSITION=0
@@ -3509,10 +3597,20 @@ dockerCleanupConfigurationCandidate() {
         return 1
     fi
     root=$(dockerInstallRoot) || return 1
+    if [[ -z "${DOCKER_ASSESS_PROJECT:-}" ]] &&
+        { [[ "${DOCKER_CONFIG_IPV6_TOUCHED:-0}" == 1 ]] ||
+            { [[ -f "${candidate}/compose.json" && ! -L "${candidate}/compose.json" ]] &&
+                jq -e --arg project "${PADM_DOCKER_PROJECT}" \
+                    '.name == $project and .networks.ipv6 != null' "${candidate}/compose.json" >/dev/null; }; } &&
+        ! { [[ -f "${root}/config/spec.json" ]] &&
+            jq -e '.routing.ipv6 != null' "${root}/config/spec.json" >/dev/null; }; then
+        dockerIPv6NetworkManage cleanup || return 1
+    fi
     if [[ -d "${candidate}" ]]; then
         dockerRemoveManagedTree "${root}" "${candidate}" || return 1
     fi
     DOCKER_CONFIG_CANDIDATE=
+    DOCKER_CONFIG_IPV6_TOUCHED=0
 }
 
 dockerConfigurationInterrupted() {

@@ -39,6 +39,8 @@ dockerUsage() {
   padm-docker edit --block-bt-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --region <both|domain|ip> [--region-allow <域名规则 CSV>] [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --region-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --ipv6 <selective|global> [--ipv6-domains <域名规则 CSV>] [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
+  padm-docker edit --ipv6-off [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker edit --alpn <入口 ID> <h2,http/1.1|http/1.1,h2|http/1.1> [--preview|--confirm PADM-DOCKER-EDIT] [发布资产参数]
   padm-docker protocol list
   padm-docker protocol links [入口 ID]
@@ -415,6 +417,36 @@ dockerComposeFile() {
     printf '%s\n' "${composeFile}"
 }
 
+dockerIPv6NetworkManage() {
+    local action=${1:-cleanup} project=${2:-${PADM_DOCKER_PROJECT}} name ids state id
+    [[ "${action}" == check || "${action}" == cleanup ]] &&
+        [[ "${project}" == "${PADM_DOCKER_PROJECT}" || "${project}" =~ ^padm-docker-assess-[a-z0-9]{6}$ ]] ||
+        return 1
+    name="${project}-ipv6"
+    ids=$(docker network ls -q --filter "name=^${name}$") || return 1
+    [[ -n "${ids}" ]] || return 0
+    [[ "${ids}" =~ ^[a-f0-9]{12,64}$ ]] || return 1
+    state=$(docker network inspect "${ids}") || return 1
+    if ! jq -e --arg name "${name}" --arg project "${project}" '
+      length == 1 and (.[0] |
+        .Name == $name and .Driver == "bridge" and .EnableIPv6 == true and
+        .Labels["io.padm.mode"] == "docker" and .Labels["io.padm.project"] == $project and
+        .Labels["io.padm.component"] == "routing-ipv6" and
+        .Labels["com.docker.compose.project"] == $project and
+        .Labels["com.docker.compose.network"] == "ipv6" and (.Containers | type == "object"))
+    ' <<<"${state}" >/dev/null; then
+        [[ "${action}" == cleanup ]] && return 0
+        dockerError "IPv6 网络已存在但不属于本项目: ${name}"
+        return 1
+    fi
+    [[ "${action}" == cleanup ]] || return 0
+    # 不强制断开任何容器；未知归属或仍在使用的辅助网络保持不动。
+    jq -e '.[0].Containers | length == 0' <<<"${state}" >/dev/null || return 0
+    id=$(jq -er '.[0].Id' <<<"${state}") || return 1
+    [[ "${id}" =~ ^[a-f0-9]{12,64}$ ]] || return 1
+    docker network rm "${id}" >/dev/null
+}
+
 dockerComposeRun() {
     local composeFile composeDir root profile
     local -a commandArgs=() extraArgs=()
@@ -430,6 +462,13 @@ dockerComposeRun() {
     up|restart|run|exec)
         dockerRealityStreamDeploymentCheck "${root}/config/spec.json" ||
             return "${PADM_DOCKER_RC_STATE}"
+        ;;
+    esac
+    case "${1:-}" in
+    up|down|restart|run|exec)
+        if jq -e '.networks.ipv6 != null' "${composeFile}" >/dev/null; then
+            dockerIPv6NetworkManage check || return "${PADM_DOCKER_RC_COMPOSE}"
+        fi
         ;;
     esac
     [[ -f "${root}/images.env" && ! -L "${root}/images.env" ]] || {
@@ -464,6 +503,9 @@ dockerComposeRun() {
         dockerError 'Docker Compose 操作失败'
         return "${PADM_DOCKER_RC_COMPOSE}"
     }
+    if [[ "${1:-}" == down ]] && jq -e '.networks.ipv6 != null' "${composeFile}" >/dev/null; then
+        dockerIPv6NetworkManage cleanup || return "${PADM_DOCKER_RC_COMPOSE}"
+    fi
 }
 
 dockerLockInstalledDeployment() {
@@ -596,12 +638,17 @@ dockerAssessCleanup() {
         [[ "${id}" =~ ^[a-f0-9]{12,64}$ ]] || return 1
         docker rm -f "${id}" >/dev/null || failed=1
     done <<<"${ids}"
-    ids=$(docker network ls -q --filter "label=com.docker.compose.project=${project}") || return 1
+    ids=$(docker network ls -q --filter "label=com.docker.compose.project=${project}" \
+        --filter label=com.docker.compose.network=default) || return 1
     while IFS= read -r id; do
         [[ -n "${id}" ]] || continue
         [[ "${id}" =~ ^[a-f0-9]{12,64}$ ]] || return 1
         docker network rm "${id}" >/dev/null || failed=1
     done <<<"${ids}"
+    if [[ -f "${candidate}/compose.json" && ! -L "${candidate}/compose.json" ]] &&
+        jq -e '.networks.ipv6 != null' "${candidate}/compose.json" >/dev/null; then
+        dockerIPv6NetworkManage cleanup "${project}" || failed=1
+    fi
     [[ "${failed}" == 0 ]] || { dockerError "评估资源清理失败: ${project}"; return 1; }
     DOCKER_ASSESS_PROJECT=
     DOCKER_ASSESS_CANDIDATE=
@@ -627,6 +674,10 @@ dockerAssessCandidate() (
               .networks.default.name = "padm-docker" |
               .networks.default.labels["io.padm.project"] = "padm-docker"
             else . end |
+            if .networks.ipv6.name == ($project + "-ipv6") then
+              .networks.ipv6.name = "padm-docker-ipv6" |
+              .networks.ipv6.labels["io.padm.project"] = "padm-docker"
+            else . end |
             .services |= with_entries(.value.labels |= del(."io.padm.release"));
           ($actual | length) == 1 and ($expected[0] | comparable) == ($actual[0] | comparable)
         ' >/dev/null || {
@@ -635,7 +686,11 @@ dockerAssessCandidate() (
     }
     jq --arg project "${DOCKER_ASSESS_PROJECT}" '
       .name = $project | .networks.default.name = $project |
-      .networks.default.labels["io.padm.project"] = $project
+      .networks.default.labels["io.padm.project"] = $project |
+      if .networks.ipv6 != null then
+        .networks.ipv6.name = ($project + "-ipv6") |
+        .networks.ipv6.labels["io.padm.project"] = $project
+      else . end
     ' "${candidate}/compose.json" >"${candidate}/compose.assessment-isolated.json" &&
         mv -- "${candidate}/compose.assessment-isolated.json" "${candidate}/compose.json" || return 1
     # 只加载菜单版扫描函数，不调用原生下载、安装、迁移或服务操作。

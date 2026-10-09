@@ -356,6 +356,26 @@ padm-docker edit --region-off --confirm PADM-DOCKER-EDIT
 IP 模式不为域名目标提前解析或在解析后复查；CN 数据沿用现有资源与下载失败恢复门禁，
 不代表最终拨号 IP 过滤或完整区域策略管理。
 
+菜单 `17` 的 `19` 管理 IPv6 域名出站。v3 `.routing.ipv6` 使用独立
+`x-padm-routing-ipv6` 门禁，保存 `mode` 与 `domains`；选择性模式接受现有四类
+域名规则，全局模式仅改变默认出口，不删除其它策略。
+
+```bash
+padm-docker edit --ipv6 selective --ipv6-domains 'example.com,full:api.example.net' --preview
+padm-docker edit --ipv6 global --confirm PADM-DOCKER-EDIT
+padm-docker edit --ipv6-off --confirm PADM-DOCKER-EDIT
+```
+
+Direct 例外、域名/IP/BT 阻断优先于选择性 IPv6，选择性 IPv6 优先于 SOCKS5；
+全局 IPv6 保留显式 SOCKS5 分流，但不能与全局 SOCKS5 同时定义默认出口。
+匹配的域名仅使用 AAAA 地址，不回退使用 A 地址；系统 resolver 仍可能查询 A。
+原 hosts 与 DNS 分流来源保持不变，IPv4-only hosts 在此路径拒绝，不换源回退。
+这不是 IPv4 防火墙，字面 IPv4 不会转换为 IPv6。
+关闭只删除 IPv6 子项，保留其它路由、凭据与累计流量。
+核心仍为无额外权限的普通容器；启用时附加本项目独立 IPv6 bridge，
+不修改原默认网络、Docker daemon 或宿主接口，宿主仍须具备 IPv6 路由与出口。
+TUN/TProxy 的宿主网络模式不属于本阶段支持范围，完整 WARP 和宿主验收继续待补。
+
 完整 v3 `configure` 规格可选 `accounts`，用于追加 1–256 个独立账号，不替换原自用账号。
 每项必须包含 `id`、`name`、`enabled`、`uuid`、`password`、`shadowsocks_password` 和
 `listeners`；`id` 是稳定的小写 UUID，认证 `uuid` 和密码独立，`listeners` 引用现有入口 ID。

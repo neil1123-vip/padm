@@ -661,6 +661,33 @@ dockerMenuRegion() {
     done
 }
 
+dockerMenuIPv6() {
+    local choice domains
+    while :; do
+        DOCKER_MENU_SIGNAL=0
+        printf '\nDocker IPv6 域名出站\n'
+        printf '%s\n' '1. 替换 IPv6 域名规则' '2. IPv6 默认出站' \
+            '3. 关闭 IPv6 出站策略' '4. 查看路由状态' '0. 返回'
+        printf '请选择: '
+        if ! IFS= read -r choice; then
+            [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
+            return 0
+        fi
+        case "${choice}" in
+        0) return 0 ;;
+        1)
+            dockerSetupRead domains 'IPv6 域名规则（逗号分隔；domain:/full:/keyword:/geosite:，0 返回）: ' &&
+                [[ -n "${domains}" ]] || continue
+            dockerMenuRun edit --ipv6 selective --ipv6-domains "${domains}" || true
+            ;;
+        2) dockerMenuRun edit --ipv6 global || true ;;
+        3) dockerMenuRun edit --ipv6-off || true ;;
+        4) dockerMenuRun protocol routing-status || true ;;
+        *) printf '无效选项，请重新选择。\n' ;;
+        esac
+    done
+}
+
 dockerMenuRouting() {
     local choice input
     while :; do
@@ -673,7 +700,7 @@ dockerMenuRouting() {
             '11. 关闭 Direct 直连例外' '12. 设置 Block 域名阻断' \
             '13. 关闭 Block 域名阻断' '14. 设置 IP/CIDR 阻断' \
             '15. 关闭 IP/CIDR 阻断' '16. 启用 BT 协议阻断' \
-            '17. 关闭 BT 协议阻断' '18. 区域阻断策略' '0. 返回'
+            '17. 关闭 BT 协议阻断' '18. 区域阻断策略' '19. IPv6 域名出站' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -726,6 +753,7 @@ dockerMenuRouting() {
         16) dockerMenuRun edit --block-bt || true ;;
         17) dockerMenuRun edit --block-bt-off || true ;;
         18) dockerMenuRegion ;;
+        19) dockerMenuIPv6 ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

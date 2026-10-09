@@ -522,6 +522,14 @@ runRoutingDriver() {
         targetReply '追加直连例外规则' $'\n'
         targetReply 'Docker 区域阻断策略' $'4\n'
         targetReply 'Docker 区域阻断策略' $'0\n'
+        targetReply 'Docker 路由与出站' $'19\n'
+        targetReply 'Docker IPv6 域名出站' $'invalid\n'
+        targetReply 'Docker IPv6 域名出站' $'1\n'
+        targetReply 'IPv6 域名规则' $'Example.NET, full:Exact.Example.Com\n'
+        targetReply 'Docker IPv6 域名出站' $'2\n'
+        targetReply 'Docker IPv6 域名出站' $'3\n'
+        targetReply 'Docker IPv6 域名出站' $'4\n'
+        targetReply 'Docker IPv6 域名出站' $'0\n'
         ;;
     cancel)
         targetReply 'Docker 路由与出站' $'1\n'
@@ -554,6 +562,12 @@ runRoutingDriver() {
         targetReply 'Docker 区域阻断策略' $'1\n'
         targetReply '追加直连例外规则' $'0\n'
         targetReply 'Docker 区域阻断策略' $'0\n'
+        targetReply 'Docker 路由与出站' $'19\n'
+        targetReply 'Docker IPv6 域名出站' $'1\n'
+        targetReply 'IPv6 域名规则' $'0\n'
+        targetReply 'Docker IPv6 域名出站' $'1\n'
+        targetReply 'IPv6 域名规则' $'\n'
+        targetReply 'Docker IPv6 域名出站' $'0\n'
         ;;
     file-eof)
         targetReply 'Docker 路由与出站' $'1\n'
@@ -588,6 +602,12 @@ runRoutingDriver() {
         targetReply 'Docker 区域阻断策略' $'1\n'
         targetReply '追加直连例外规则' $'\004'
         targetReply 'Docker 区域阻断策略' $'0\n'
+        ;;
+    ipv6-eof)
+        targetReply 'Docker 路由与出站' $'19\n'
+        targetReply 'Docker IPv6 域名出站' $'1\n'
+        targetReply 'IPv6 域名规则' $'\004'
+        targetReply 'Docker IPv6 域名出站' $'0\n'
         ;;
     esac
     targetReply 'Docker 路由与出站' $'0\n'
@@ -1011,7 +1031,7 @@ for siteCase in flow cancel static-eof redirect-eof alpn-diagnose-eof alpn-recom
 done
 unset SITE_MENU_RECORD_STATUS SITE_EDIT_STATUS SITE_ALPN_STATUS
 
-for routingCase in flow cancel file-eof domains-eof dns-file-eof hosts-file-eof direct-file-eof block-file-eof block-ips-file-eof region-eof failed return; do
+for routingCase in flow cancel file-eof domains-eof dns-file-eof hosts-file-eof direct-file-eof block-file-eof block-ips-file-eof region-eof ipv6-eof failed return; do
     : >"${TLS_WIZARD_ACTIONS}"
     export SITE_EDIT_STATUS=0 ROUTING_STATUS=0
     [[ "${routingCase}" != failed ]] || { SITE_EDIT_STATUS=15; ROUTING_STATUS=17; }
@@ -1021,6 +1041,7 @@ for routingCase in flow cancel file-eof domains-eof dns-file-eof hosts-file-eof 
     flow|failed)
         expectedRouting=$'edit --socks5 /root/padm-socks5.json\nedit --socks5-off\nprotocol routing-status\nedit --socks5-domains Example.NET, full:Exact.Example.Com, geosite:cn\nedit --socks5-global\nprotocol routing-status\nedit --dns /root/padm-dns.json\nedit --dns-off\nedit --hosts /root/padm-hosts.json\nedit --hosts-off\nedit --direct /root/padm-direct.json\nedit --direct-off\nedit --block /root/padm-block.json\nedit --block-off\nedit --block-ips /root/padm-block-ips.json\nedit --block-ips-off\nedit --block-bt\nedit --block-bt-off'
         expectedRouting+=$'\nedit --region both --region-allow Example.NET, full:Exact.Example.Com\nedit --region domain\nedit --region ip\nedit --region-off'
+        expectedRouting+=$'\nedit --ipv6 selective --ipv6-domains Example.NET, full:Exact.Example.Com\nedit --ipv6 global\nedit --ipv6-off\nprotocol routing-status'
         grep -Fq '无效选项' "${CONTROL_LOG}" || fail '路由菜单没有保留无效输入后的操作'
         ;;
     esac
@@ -1034,7 +1055,8 @@ for routingCase in flow cancel file-eof domains-eof dns-file-eof hosts-file-eof 
             '12. 设置 Block 域名阻断' '13. 关闭 Block 域名阻断' '14. 设置 IP/CIDR 阻断' \
             '15. 关闭 IP/CIDR 阻断' '16. 启用 BT 协议阻断' '17. 关闭 BT 协议阻断' \
             '18. 区域阻断策略' '1. 屏蔽 geosite:cn + geoip:cn' '2. 仅屏蔽 geosite:cn' \
-            '3. 仅屏蔽 geoip:cn' '4. 关闭区域策略' '0. 返回'; do
+            '3. 仅屏蔽 geoip:cn' '4. 关闭区域策略' '19. IPv6 域名出站' \
+            '1. 替换 IPv6 域名规则' '2. IPv6 默认出站' '3. 关闭 IPv6 出站策略' '0. 返回'; do
             grep -Fq "${label}" "${CONTROL_LOG}" || fail "路由菜单缺少: ${label}"
         done
     elif [[ "${routingCase}" == failed ]]; then

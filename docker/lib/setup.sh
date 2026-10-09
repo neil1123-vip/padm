@@ -906,7 +906,8 @@ dockerProtocolCommand() (
           (if .routing.block_ips != null then {block_ips:{ip_rules:.routing.block_ips.ips}} else {} end) +
           (if .routing.block_bt == true then {block_bt:true} else {} end) +
           (if .routing.region != null then {region:(.routing.region +
-            {default_allow_domains:$region_defaults})} else {} end)' "${normalized}"
+            {default_allow_domains:$region_defaults})} else {} end) +
+          (if .routing.ipv6 != null then {ipv6:.routing.ipv6} else {} end)' "${normalized}"
         return $?
     fi
     if [[ "${action}" == list ]]; then
@@ -1323,6 +1324,7 @@ dockerEditCommand() {
     local alpnListener= alpnOrder=
     local http01= socks5= socks5File= socks5Domains= routingKind= routingFile= routingAction=
     local regionMode= regionAllow='[]' regionAllowSet=0
+    local ipv6Mode= ipv6Domains='[]' ipv6DomainsSet=0
     local DOCKER_CONFIG_RESTORE_ALPN_LISTENER=
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
@@ -1405,7 +1407,21 @@ dockerEditCommand() {
             regionAllowSet=1
             shift 2
             ;;
-        --dns-off|--hosts-off|--direct-off|--block-off|--block-ips-off|--block-bt-off|--region-off)
+        --ipv6)
+            [[ "$#" -ge 2 && -z "${routingKind}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            case "$2" in selective|global) ipv6Mode=$2 ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+            routingKind=ipv6 routingAction=enable
+            shift 2
+            ;;
+        --ipv6-domains)
+            [[ "$#" -ge 2 && "${ipv6DomainsSet}" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
+            if [[ -n "$2" ]]; then
+                ipv6Domains=$(dockerSocks5DomainsNormalize "$2") || return "${PADM_DOCKER_RC_USAGE}"
+            fi
+            ipv6DomainsSet=1
+            shift 2
+            ;;
+        --dns-off|--hosts-off|--direct-off|--block-off|--block-ips-off|--block-bt-off|--region-off|--ipv6-off)
             [[ -z "${routingKind}" ]] || return "${PADM_DOCKER_RC_USAGE}"
             routingKind=${1#--} routingKind=${routingKind%-off} routingAction=disable
             routingKind=${routingKind//-/_}
@@ -1476,6 +1492,13 @@ dockerEditCommand() {
     done
     [[ "${regionAllowSet}" -eq 0 || ( "${routingKind}" == region && "${routingAction}" == enable ) ]] ||
         return "${PADM_DOCKER_RC_USAGE}"
+    [[ "${ipv6DomainsSet}" -eq 0 || ( "${routingKind}" == ipv6 && "${routingAction}" == enable ) ]] ||
+        return "${PADM_DOCKER_RC_USAGE}"
+    if [[ "${routingKind}" == ipv6 && "${routingAction}" == enable ]]; then
+        [[ ( "${ipv6Mode}" == selective && "${ipv6Domains}" != '[]' ) ||
+            ( "${ipv6Mode}" == global && "${ipv6Domains}" == '[]' ) ]] ||
+            return "${PADM_DOCKER_RC_USAGE}"
+    fi
     [[ ( -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" ) || -z "${specFile}" ]] &&
         [[ -z "${regenerateReality}" || ( -z "${realityTarget}" && -z "${realityStream}" ) ]] &&
         [[ -z "${realityTarget}" || -z "${realityStream}" ]] || {
@@ -1618,6 +1641,9 @@ dockerEditCommand() {
         elif [[ "${routingKind}" == region && "${routingAction}" == enable ]]; then
             jq --arg mode "${regionMode}" --argjson allow "${regionAllow}" \
                 '.routing.region = {mode:$mode,allow_domains:$allow}' "${draft}" >"${draft}.next"
+        elif [[ "${routingKind}" == ipv6 && "${routingAction}" == enable ]]; then
+            jq --arg mode "${ipv6Mode}" --argjson domains "${ipv6Domains}" \
+                '.routing.ipv6 = {mode:$mode,domains:$domains}' "${draft}" >"${draft}.next"
         elif [[ "${routingAction}" == enable ]]; then
             dockerEditPrivateInputCopy "${routingFile}" "${workspace}/${routingKind}.json" "${routingKind}" || {
                 dockerError '路由输入须为 root 所有的 0600 单链接普通 JSON 文件，最多 64 KiB，祖先目录不得可写或含链接'

@@ -26,7 +26,7 @@ set -euo pipefail
 [[ "$(cat 'new file.txt')" == untracked-current ]]
 [[ "$(cat probe.lock)" == linux-text ]]
 python3 -c 'from pathlib import Path; assert Path("probe.bin").read_bytes() == b"\0\r\n\xff"'
-# 只有精确的真实节点 selector 获得额外网络能力，普通和近似名称均不能获得。
+# 只有精确的隔离网络 selector 获得额外能力，普通和近似名称均不能获得。
 python3 - "$1" <<'PY'
 import sys
 import json
@@ -34,19 +34,18 @@ import subprocess
 from pathlib import Path
 status = dict(line.split(":", 1) for line in Path("/proc/self/status").read_text().splitlines())
 mask = (1 << 12) | (1 << 21)
-expected = mask if sys.argv[1] in (
-    "docker-control-two-node-real", "docker-control-two-deployment-real"
-) else 0
+nested = sys.argv[1] in ("docker-control-two-deployment-real", "docker-routing-ipv6-real")
+expected = mask if sys.argv[1] == "docker-control-two-node-real" or nested else 0
 assert int(status["CapEff"].strip(), 16) & mask == expected
 privileged_mask = (1 << 19) | (1 << 25)
 assert int(status["CapEff"].strip(), 16) & privileged_mask == (
-    privileged_mask if sys.argv[1] == "docker-control-two-deployment-real" else 0)
+    privileged_mask if nested else 0)
 assert [link["ifname"] for link in json.loads(
     subprocess.check_output(["ip", "-j", "link"])
 )] == ["lo"]
 assert not Path("/var/run/docker.sock").exists()
-assert Path("/node-images.json").is_file() == (sys.argv[1] == "docker-control-two-deployment-real")
-assert Path("/n").is_mount() == (sys.argv[1] == "docker-control-two-deployment-real")
+assert Path("/node-images.json").is_file() == nested
+assert Path("/n").is_mount() == nested
 PY
 [[ ! -e ignored.txt && ! -e .git ]]
 [[ "$HOME" == /tmp/padm-regression-home && "$TMPDIR" == /tmp/padm-regression-tmp ]]
@@ -80,7 +79,9 @@ foreach ($case in @(
     @{ selector = 'docker-control-two-node-real'; expected = 0 },
     @{ selector = 'docker-control-two-node-real-other'; expected = 0 },
     @{ selector = 'docker-control-two-deployment-real'; expected = 0 },
-    @{ selector = 'docker-control-two-deployment-real-other'; expected = 0 }
+    @{ selector = 'docker-control-two-deployment-real-other'; expected = 0 },
+    @{ selector = 'docker-routing-ipv6-real'; expected = 0 },
+    @{ selector = 'docker-routing-ipv6-real-other'; expected = 0 }
 )) {
     & $runner -Selector $case.selector
     if ($LASTEXITCODE -ne $case.expected) { throw "Wrong exit code for $($case.selector): $LASTEXITCODE" }

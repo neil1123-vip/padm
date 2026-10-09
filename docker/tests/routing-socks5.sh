@@ -38,6 +38,7 @@ BLOCK_IPS_INPUT=${PRIVATE_ROOT}/block-ips.json
 BLOCK_IPS='{"ips":["192.0.2.10","2001:db8::10","198.51.100.0/24","2001:db8::/64","geoip:cn"]}'
 REGION_ALLOW='["full:exact.example.com","domain:apple.com","full:custom-region.example.com"]'
 REGION_DEFAULTS='["domain:dl.google.com","domain:apple.com","domain:bing.com","domain:microsoft.com","domain:gstatic.com","domain:xn--ngstr-lra8j.com","domain:googleapis.com","domain:googleapis.cn"]'
+IPV6_DOMAINS='["full:exact.example.com","domain:example.net","keyword:video","geosite:cn"]'
 
 fail() {
     [[ ! -f "${LOG}" ]] || sed 's/^/  /' "${LOG}" >&2
@@ -48,6 +49,14 @@ reject() { if "$@" >"${LOG}" 2>&1; then fail "应拒绝: $*"; fi; }
 # 仅核心、宿主和发布使用桩；路由生成、权限、锁与恢复走生产代码。
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/install-docker.sh"
+docker() {
+    # 合同夹具没有 daemon；真实辅助网络归属和删除由 bridge 专项验收。
+    if [[ "$#" -eq 5 && "$1" == network && "$2" == ls && "$3" == -q &&
+        "$4" == --filter && "$5" == 'name=^padm-docker-ipv6$' ]]; then
+        return 0
+    fi
+    command docker "$@"
+}
 dockerHostPreflight() { :; }
 dockerRequireInstalledBundle() { :; }
 dockerLockInstalledDeployment() { dockerAcquireDeploymentLock; }
@@ -149,6 +158,17 @@ for mode in both domain ip; do
 done
 jq --argjson allow "${REGION_ALLOW}" '.routing.region = {mode:"both",allow_domains:$allow}' \
     "${TEST_ROOT}/routing-bt-policy.json" >"${TEST_ROOT}/region-owner.json"
+for mode in selective global; do
+    jq --arg mode "${mode}" --argjson domains "${IPV6_DOMAINS}" '
+      .routing = {ipv6:{mode:$mode,domains:(if $mode == "selective" then $domains else [] end)}}
+    ' "${TEST_ROOT}/base.json" >"${TEST_ROOT}/ipv6-${mode}.json"
+done
+jq --argjson domains "${IPV6_DOMAINS}" \
+    '.routing.ipv6 = {mode:"selective",domains:$domains}' \
+    "${TEST_ROOT}/routing-bt-policy.json" >"${TEST_ROOT}/ipv6-owner.json"
+jq --argjson domains "${DOMAINS}" \
+    '.routing.ipv6 = {mode:"global",domains:[]} | .routing.socks5.domains = $domains' \
+    "${TEST_ROOT}/routing-bt-policy.json" >"${TEST_ROOT}/ipv6-global-owner.json"
 
 # 同批正反输入由两份校验合同独立判断，避免 Schema 与生产校验分歧。
 python3 - "${PROJECT_ROOT}" "${TEST_ROOT}" <<'PY'
@@ -213,6 +233,30 @@ for index, bad in enumerate((
     value = copy.deepcopy(region)
     value["routing"]["region"] = bad
     case(f"invalid-region-{index}", value, False)
+ipv6 = json.loads((root / "ipv6-selective.json").read_text())
+for name in ("ipv6-selective", "ipv6-global", "ipv6-owner", "ipv6-global-owner"):
+    case(name, json.loads((root / f"{name}.json").read_text()), True)
+value = copy.deepcopy(ipv6)
+value["routing"]["ipv6"]["domains"] = [f"full:v6-{n}.example.com" for n in range(256)]
+case("ipv6-domain-boundary", value, True)
+for index, bad in enumerate((
+        None, [], {}, {"mode": "selective"}, {"domains": []},
+        {"mode": "all", "domains": []}, {"mode": "Selective", "domains": ["full:a.example.com"]},
+        {"mode": True, "domains": []}, {"mode": "selective", "domains": []},
+        {"mode": "global", "domains": ["full:a.example.com"]},
+        {"mode": "global", "domains": None},
+        {"mode": "selective", "domains": ["full:Example.com"]},
+        {"mode": "selective", "domains": ["regexp:.*"]},
+        {"mode": "selective", "domains": ["full:a.example.com"] * 2},
+        {"mode": "selective", "domains": [True]},
+        {"mode": "selective", "domains": [f"full:v6-{n}.example.com" for n in range(257)]},
+        {"mode": "global", "domains": [], "extra": True})):
+    value = copy.deepcopy(ipv6)
+    value["routing"]["ipv6"] = bad
+    case(f"invalid-ipv6-{index}", value, False)
+value = copy.deepcopy(json.loads((root / "ipv6-global-owner.json").read_text()))
+del value["routing"]["socks5"]["domains"]
+case("invalid-ipv6-global-socks", value, False)
 for index, rules in enumerate((
         ["0.0.0.0", "127.0.0.1", "255.255.255.255", "::", "::1", "FFFF:FFFF::1"],
         ["0.0.0.0/0", "127.0.0.1/32", "::/0", "::1/128", "192.0.2.10/24", "2001:db8::10/64"],
@@ -254,7 +298,8 @@ for kind in ("direct", "block"):
 for name, template in (("dns", dns), ("hosts", hosts),
                        ("direct", json.loads((root / "direct-only.json").read_text())),
                        ("block", json.loads((root / "block-only.json").read_text())),
-                       ("block-ips", ip_block), ("block-bt", bt_block), ("region", region)):
+                       ("block-ips", ip_block), ("block-bt", bt_block), ("region", region),
+                       ("ipv6", ipv6)):
     for version in (1, 2):
         value = copy.deepcopy(template)
         value["schema_version"] = version
@@ -406,6 +451,8 @@ for integration in ("tun", "tproxy"):
     del legacy["routing"]
     case(f"valid-integration-{integration}", legacy, True)
     case(f"invalid-integration-{integration}", value, False)
+    value["routing"] = ipv6["routing"]
+    case(f"invalid-ipv6-integration-{integration}", value, False)
     if integration == "tun":
         for version in (1, 2):
             value = copy.deepcopy(legacy)
@@ -458,6 +505,29 @@ for version in 1 2 3; do
     dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/legacy-v${version}.json" ||
         fail "v${version}: 无 routing 被域名规则能力门禁误拒绝"
 done
+mv -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+
+for fixture in ipv6-selective ipv6-global ipv6-owner ipv6-global-owner; do
+    dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/${fixture}.json" ||
+        fail "${fixture}: 当前 bundle 拒绝 IPv6 路由"
+done
+cp -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json" \
+    "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved"
+for marker in 'del(."x-padm-routing-ipv6")' '."x-padm-routing-ipv6" = false'; do
+    jq "${marker}" "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
+        >"${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+    reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/ipv6-selective.json"
+    reject dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/ipv6-global-owner.json"
+    dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/routing-bt-policy.json" ||
+        fail 'IPv6 marker 拒绝旧路由'
+done
+jq 'del(."x-padm-routing-socks5", ."x-padm-routing-domains", ."x-padm-routing-dns-hosts",
+  ."x-padm-routing-direct-block", ."x-padm-routing-block-ips", ."x-padm-routing-block-bt",
+  ."x-padm-routing-region")' "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
+    >"${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
+dockerBundleSupportsSpec "${TEST_ROOT}/bundle" "${TEST_ROOT}/ipv6-global.json" ||
+    fail 'IPv6-only 规格依赖其它路由 marker'
 mv -- "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json.saved" \
     "${TEST_ROOT}/bundle/docker/contracts/configure.schema.json"
 
@@ -598,7 +668,7 @@ for version in 1 2; do
         "${TEST_ROOT}/legacy-sing-v${version}-core.json" >/dev/null ||
         fail "v${version}: 无 routing 改变旧 sing-box 默认出站"
 done
-for fixture in routed domains dns-only hosts-only routing-all routing-all-global direct-only block-only routing-policy block-ips-only routing-ip-policy block-bt-only routing-bt-policy region-both region-domain region-ip region-owner; do
+for fixture in routed domains dns-only hosts-only routing-all routing-all-global direct-only block-only routing-policy block-ips-only routing-ip-policy block-bt-only routing-bt-policy region-both region-domain region-ip region-owner ipv6-selective ipv6-global ipv6-owner ipv6-global-owner; do
     for core in xray sing-box; do
         if [[ "${core}" == xray ]]; then
             dockerGenerateXrayConfig "${TEST_ROOT}/${fixture}.json" "${TEST_ROOT}/${fixture}-${core}.json"
@@ -811,6 +881,52 @@ jq -en --slurpfile old "${TEST_ROOT}/routing-bt-policy-sing-box.json" \
     .rules[1].invert == true and
     (.rules[1].rules | map(.domain_suffix // []) | add | index("apple.com")) != null)
 ' >/dev/null || fail 'sing-box 区域重复分类、generic 或默认例外未合并'
+jq -en --argjson domains "${IPV6_DOMAINS}" \
+    --slurpfile selective "${TEST_ROOT}/ipv6-selective-xray.json" \
+    --slurpfile global "${TEST_ROOT}/ipv6-global-xray.json" \
+    --slurpfile owner "${TEST_ROOT}/ipv6-owner-xray.json" '
+  ($domains | map(if startswith("keyword:") then ltrimstr("keyword:") else . end)) as $match |
+  {protocol:"freedom",tag:"padm-ipv6",settings:{domainStrategy:"ForceIPv6"}} as $v6 |
+  ($selective[0].outbounds | index($v6)) != null and
+  $selective[0].outbounds[0] == {protocol:"freedom",tag:"direct"} and
+  $selective[0].routing.rules == [
+    {type:"field",inboundTag:["padm-dns"],outboundTag:"direct"},
+    {type:"field",domain:$match,outboundTag:"padm-ipv6"}] and
+  $global[0].outbounds[0] == $v6 and
+  $global[0].routing.rules == [{type:"field",inboundTag:["padm-dns"],outboundTag:"direct"}] and
+  $owner[0].routing.rules[4].protocol == ["bittorrent"] and
+  $owner[0].routing.rules[5] == {type:"field",domain:$match,outboundTag:"padm-ipv6"} and
+  $owner[0].routing.rules[6].network == "udp" and
+  $owner[0].dns.hosts["full:ipv6.example.com"] == "2001:db8::10" and
+  $owner[0].dns.servers[0].finalQuery == true and
+  $owner[0].dns.disableFallbackIfMatch == true
+' >/dev/null || fail 'Xray IPv6 默认/选择性出站、AAAA 来源或策略优先级错误'
+jq -en --slurpfile selective "${TEST_ROOT}/ipv6-selective-sing-box.json" \
+    --slurpfile global "${TEST_ROOT}/ipv6-global-sing-box.json" \
+    --slurpfile owner "${TEST_ROOT}/ipv6-owner-sing-box.json" \
+    --slurpfile global_owner "${TEST_ROOT}/ipv6-global-owner-sing-box.json" '
+  {type:"direct",tag:"padm-ipv6",
+    domain_resolver:{server:"padm-local",strategy:"ipv6_only"}} as $v6 |
+  ($selective[0].outbounds | index($v6)) != null and
+  $selective[0].route.final == "direct" and
+  $selective[0].route.rules[-1] == {type:"logical",mode:"or",rules:[
+    {domain:["exact.example.com"]},{domain_suffix:["example.net"]},
+    {domain_keyword:["video"]},{rule_set:["padm-geosite-cn"]}],
+    action:"route",outbound:"padm-ipv6"} and
+  $global[0].route.final == "padm-ipv6" and
+  $global[0].route.rules[-1] == {network:["tcp","udp"],action:"route",outbound:"padm-ipv6"} and
+  ($owner[0].route.rules | map(.outbound) | index("padm-ipv6")) <
+    ($owner[0].route.rules | map(.outbound) | index("padm-socks5")) and
+  ($global_owner[0].route.rules | map(.outbound) | index("padm-socks5")) <
+    ($global_owner[0].route.rules | map(.outbound) | index("padm-ipv6")) and
+  all($owner[0].route.rules[] | select(.outbound == "padm-ipv6");
+    .type == "logical" and .rules[1].invert == true) and
+  ([$owner[0].route.rules[] | select(.action == "resolve" and .strategy == "ipv6_only") |
+    .server] | sort) == ["padm-dns","padm-dns","padm-dns","padm-dns","padm-hosts"] and
+  $owner[0].dns.final == "padm-local" and
+  ($owner[0].route.rules | map(.action) | index("reject")) <
+    ($owner[0].route.rules | map(.outbound) | index("padm-ipv6"))
+' >/dev/null || fail 'sing-box IPv6 OR、Direct 例外、同源解析或 SOCKS 优先级错误'
 # 用核心的匹配语义检查每类独立命中，防止不同 matcher 被错误组合成 AND。
 python3 - "${TEST_ROOT}/domains-sing-box.json" <<'PY'
 import json
@@ -868,7 +984,7 @@ assert all(rule["type"] == "remote" and rule["format"] == "binary" and
            rule["http_client"] == {"engine": "go"} and "download_detour" not in rule
            for rule in rule_sets)
 PY
-for fixture in routed domains routing-all-global direct-only block-only routing-policy block-ips-only routing-ip-policy block-bt-only routing-bt-policy region-both region-domain region-ip region-owner; do
+for fixture in routed domains routing-all-global direct-only block-only routing-policy block-ips-only routing-ip-policy block-bt-only routing-bt-policy region-both region-domain region-ip region-owner ipv6-selective ipv6-global ipv6-owner ipv6-global-owner; do
     jq -en --slurpfile source "${TEST_ROOT}/${fixture}-xray.json" \
         --slurpfile runtime "${TEST_ROOT}/runtime-${fixture}-xray.json" '
       $runtime[0].outbounds == $source[0].outbounds and
@@ -888,6 +1004,52 @@ for generator in dockerGenerateCompose dockerGenerateDeployment; do
             fail "${generator}: ${fixture} 意外改变容器能力或宿主端口"
     done
 done
+dockerGenerateCompose "${TEST_ROOT}/base.json" "${TEST_ROOT}/legacy-compose.json"
+dockerGenerateDeployment "${TEST_ROOT}/base.json" "${TEST_ROOT}/legacy-deployment.json"
+for fixture in ipv6-selective ipv6-global ipv6-owner ipv6-global-owner; do
+    dockerGenerateCompose "${TEST_ROOT}/${fixture}.json" "${TEST_ROOT}/ipv6-compose.json"
+    jq -en --slurpfile legacy "${TEST_ROOT}/legacy-compose.json" \
+        --slurpfile ipv6 "${TEST_ROOT}/ipv6-compose.json" '
+      $ipv6[0].networks.ipv6 == {name:"padm-docker-ipv6",enable_ipv6:true,
+        labels:{"io.padm.mode":"docker","io.padm.project":"padm-docker",
+          "io.padm.component":"routing-ipv6"}} and
+      $ipv6[0].services.xray.networks == ["default","ipv6"] and
+      $ipv6[0].services["sing-box"].networks == ["default","ipv6"] and
+      ($ipv6[0] | del(.networks.ipv6,.services.xray.networks,
+        .services["sing-box"].networks)) == $legacy[0]
+    ' >/dev/null || fail "${fixture}: IPv6 编排改变默认网络、辅助服务或容器权限"
+    dockerGenerateDeployment "${TEST_ROOT}/${fixture}.json" "${TEST_ROOT}/ipv6-deployment.json"
+    cmp -s "${TEST_ROOT}/legacy-deployment.json" "${TEST_ROOT}/ipv6-deployment.json" ||
+        fail "${fixture}: IPv6 意外改变部署权限或宿主集成"
+done
+# API 失败不是“网络不存在”，不能继续清理或吞掉原始错误。
+(
+    docker() {
+        case "$1 $2" in
+        'network ls')
+            if [[ "${NETWORK_FAILURE}" == list ]]; then
+                printf 'fixture-network-list-failed\n' >&2
+                return 1
+            fi
+            printf 'aaaaaaaaaaaa\n'
+            ;;
+        'network inspect')
+            printf 'fixture-network-inspect-failed\n' >&2
+            return 1
+            ;;
+        *) fail '网络查询失败后仍调用删除或其它命令' ;;
+        esac
+    }
+    for NETWORK_FAILURE in list inspect; do
+        for action in check cleanup; do
+            if dockerIPv6NetworkManage "${action}" >"${LOG}" 2>&1; then
+                fail "${action}: 网络 ${NETWORK_FAILURE} 失败被当作成功"
+            fi
+            grep -Fxq "fixture-network-${NETWORK_FAILURE}-failed" "${LOG}" ||
+                fail "${action}: 网络 ${NETWORK_FAILURE} 原始错误丢失"
+        done
+    done
+)
 
 snapshot() (
     cd "${root}"
@@ -930,6 +1092,148 @@ runStatus() {
 assertClean
 jq -cn --arg uuid "${UUID}" '{schema_version:1,accounts:{($uuid):{
   name:"routing",upload:17,download:19,limit_bytes:0,baseline:{}}}}' | dockerTrafficWriteState
+# 中继交接恢复只 stop 部分服务，没有 Compose down，仍须清理 IPv6→off 的空辅助网络。
+(
+    trap 'dockerReleaseDeploymentLock' EXIT
+    dockerAcquireDeploymentLock
+    dockerBackupConfiguration ipv6-restore
+    restoreLog="${TEST_ROOT}/ipv6-restore.log"
+    dockerRealityStreamStopServices() { printf 'stop:%s\n' "$*" >>"${restoreLog}"; }
+    dockerComposeRun() {
+        [[ "$1" == up ]] || fail '中继恢复意外走 Compose down'
+        printf 'compose:%s\n' "$1" >>"${restoreLog}"
+    }
+    dockerIPv6NetworkManage() {
+        [[ "$#" -eq 1 && "$1" == cleanup ]] || fail '恢复调用了错误网络动作或项目'
+        jq -e '.routing.ipv6 == null' "${root}/config/spec.json" >/dev/null &&
+            jq -e '.networks.ipv6 == null' "${root}/compose.json" >/dev/null ||
+            fail '尚未恢复 off 编排就清理网络'
+        printf 'network:cleanup\n' >>"${restoreLog}"
+    }
+    for mode in off ipv6; do
+        : >"${restoreLog}"
+        if [[ "${mode}" == ipv6 ]]; then
+            dockerGenerateCompose "${TEST_ROOT}/ipv6-global.json" "${root}/compose.json"
+        fi
+        DOCKER_CONFIG_SWITCHED=1 DOCKER_CONFIG_STREAM_TRANSITION=1
+        dockerRestoreConfiguration
+        [[ "${DOCKER_CONFIG_SWITCHED}" == 0 && "${DOCKER_CONFIG_STREAM_TRANSITION}" == 0 ]] ||
+            fail '恢复后没有清除切换标记'
+        printf 'stop:nginx xray\ncompose:up\n' >"${TEST_ROOT}/ipv6-restore.expected"
+        [[ "${mode}" != ipv6 ]] || printf 'network:cleanup\n' >>"${TEST_ROOT}/ipv6-restore.expected"
+        cmp -s "${restoreLog}" "${TEST_ROOT}/ipv6-restore.expected" ||
+            fail "${mode}→off: 部分服务恢复顺序或网络清理触达错误"
+    done
+)
+assertClean
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != bt && "${PADM_DOCKER_ROUTING_SCOPE:-}" != region ]]; then
+    before=$(snapshot)
+    runEdit 0 --ipv6 selective --ipv6-domains 'example.net' --preview
+    runEdit 0 --ipv6-domains 'example.net' --ipv6 selective --preview
+    runEdit 0 --ipv6 global --preview
+    runEdit 0 --ipv6 global --ipv6-domains '' --preview
+    runEdit 0 --ipv6-domains '' --ipv6 global --preview
+    runEdit 0 --ipv6-off --preview
+    runEdit 2 --ipv6
+    runEdit 2 --ipv6 Global --preview
+    runEdit 2 --ipv6 selective --preview
+    runEdit 2 --ipv6 selective --ipv6-domains '' --preview
+    runEdit 2 --ipv6 global --ipv6-domains 'example.net' --preview
+    runEdit 2 --ipv6-domains 'example.net' --ipv6 global --preview
+    runEdit 2 --ipv6-domains 'example.net' --preview
+    runEdit 2 --ipv6-domains '' --ipv6-off --preview
+    runEdit 2 --ipv6-off --ipv6-domains '' --preview
+    runEdit 2 --ipv6 global --ipv6 selective --preview
+    runEdit 2 --ipv6-off --ipv6-off --preview
+    runEdit 2 --ipv6 global --ipv6-off --preview
+    runEdit 2 --ipv6-off --ipv6 global --preview
+    runEdit 2 --ipv6 selective --ipv6-domains 'example.net' --ipv6-domains 'example.org' --preview
+    runEdit 2 --ipv6 selective --ipv6-domains 'regexp:.*' --preview
+    runEdit 2 --ipv6 global --block-bt --preview
+    runEdit 2 --ipv6-off --direct-off --preview
+    runEdit 2 --ipv6 global --spec "${TEST_ROOT}/base.json" --preview
+    runEdit 2 --ipv6 global --http01 enable --preview
+    runEdit 2 --ipv6 global --confirm invalid
+    runEdit 2 --ipv6 global
+    runEdit 15 --spec "${TEST_ROOT}/ipv6-global.json" --confirm PADM-DOCKER-EDIT
+    (
+        trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+        dockerSetupRead() { printf -v "$1" '%s' n; }
+        dockerAcquireDeploymentLock
+        dockerConfigureApply "${TEST_ROOT}/ipv6-selective.json" '' '' interactive
+    ) >"${LOG}" 2>&1 || fail 'IPv6 确认取消失败'
+    assertClean
+    [[ "$(snapshot)" == "${before}" ]] || fail 'IPv6 预览、非法参数或取消改变完整部署'
+    runEdit 0 --ipv6-domains ' Full:Exact.Example.Com , Example.NET , KEYWORD:Video , geosite:CN , example.net ' \
+        --ipv6 selective --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile expected "${TEST_ROOT}/ipv6-selective.json" --slurpfile actual "${root}/config/spec.json" \
+        '$actual == $expected' >/dev/null || fail 'IPv6 选择性没有 trim/lower/dedupe 或改变其它规格'
+    runStatus 0
+    jq -e --argjson domains "${IPV6_DOMAINS}" '
+      .enabled == true and .ipv6 == {mode:"selective",domains:$domains} and .mode == "direct"
+    ' "${LOG}" >/dev/null || fail 'IPv6 状态没有投影规范化规则'
+    [[ "$(stat -c '%a %u %h' "${root}/config/spec.json")" == '600 0 1' ]] ||
+        fail 'IPv6 规格没有保留私有权限'
+    before=$(snapshot)
+    runEdit 15 --spec "${TEST_ROOT}/base.json" --confirm PADM-DOCKER-EDIT
+    runEdit 15 --spec "${TEST_ROOT}/ipv6-global.json" --confirm PADM-DOCKER-EDIT
+    [[ "$(snapshot)" == "${before}" ]] || fail '普通 --spec 绕过 IPv6 专项冻结'
+    runEdit 0 --ipv6 global --ipv6-domains '' --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile expected "${TEST_ROOT}/ipv6-global.json" --slurpfile actual "${root}/config/spec.json" \
+        '$actual == $expected' >/dev/null || fail 'IPv6 全局模式没有替换选择性列表'
+    runStatus 0
+    jq -e '.ipv6 == {mode:"global",domains:[]}' "${LOG}" >/dev/null ||
+        fail 'IPv6 全局状态错误'
+    runEdit 0 --ipv6-off --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile old "${TEST_ROOT}/base.json" --slurpfile new "${root}/config/spec.json" \
+        '$new == $old' >/dev/null || fail 'IPv6-only 关闭后没有恢复无 routing 规格'
+    (
+        trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+        dockerAcquireDeploymentLock
+        dockerConfigureApply "${TEST_ROOT}/routing-bt-policy.json" '' '' configure
+    ) >"${LOG}" 2>&1 || fail '初始化 IPv6 组合夹具失败'
+    assertClean
+    before=$(snapshot)
+    runEdit 15 --ipv6 global --confirm PADM-DOCKER-EDIT
+    [[ "$(snapshot)" == "${before}" ]] || fail '全局 SOCKS/IPv6 冲突改变在线部署'
+    runEdit 0 --ipv6 selective --ipv6-domains 'full:exact.example.com,example.net,keyword:video,geosite:cn' \
+        --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile expected "${TEST_ROOT}/ipv6-owner.json" --slurpfile actual "${root}/config/spec.json" \
+        '$actual == $expected' >/dev/null || fail 'IPv6 开启覆盖 generic 路由子项'
+    before=$(snapshot)
+    for failure in health-fail int term; do
+        MODE=${failure}
+        rm -f -- "${TEST_ROOT}/failed-once"
+        case "${failure}" in
+        health-fail) runEdit 14 --ipv6 selective --ipv6-domains 'replacement.example.org' --confirm PADM-DOCKER-EDIT ;;
+        int) runEdit 130 --ipv6-off --confirm PADM-DOCKER-EDIT ;;
+        term) runEdit 143 --ipv6-off --confirm PADM-DOCKER-EDIT ;;
+        esac
+        [[ "$(snapshot)" == "${before}" ]] || fail "${failure}: IPv6 未恢复全部路由、编排与流量"
+    done
+    MODE=ok
+    runEdit 0 --ipv6-off --confirm PADM-DOCKER-EDIT
+    jq -en --slurpfile expected "${TEST_ROOT}/routing-bt-policy.json" --slurpfile actual "${root}/config/spec.json" \
+        '$actual == $expected' >/dev/null || fail 'IPv6 关闭删除 generic 路由子项'
+    for core in xray sing-box; do
+        cmp -s "${root}/config/${core}/config.json" "${TEST_ROOT}/runtime-routing-bt-policy-${core}.json" ||
+            fail "${core}: 关闭 IPv6 未恢复旧运行配置"
+    done
+    runStatus 0
+    jq -e 'has("ipv6") | not' "${LOG}" >/dev/null || fail 'IPv6 关闭仍显示有效规则'
+    jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload == 17 and .accounts[$uuid].download == 19' \
+        "${root}/data/traffic/state.json" >/dev/null || fail 'IPv6 事务清空流量累计'
+    (
+        trap 'dockerCleanupConfigurationCandidate; dockerReleaseDeploymentLock' EXIT
+        dockerAcquireDeploymentLock
+        dockerConfigureApply "${TEST_ROOT}/base.json" '' '' configure
+    ) >"${LOG}" 2>&1 || fail '重置 IPv6 夹具失败'
+    assertClean
+    if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == ipv6 ]]; then
+        printf 'docker-routing-ipv6-regression-ok\n'
+        exit 0
+    fi
+fi
 if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != bt ]]; then
     before=$(snapshot)
     runEdit 0 --region both --preview

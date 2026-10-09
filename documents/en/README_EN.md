@@ -980,6 +980,31 @@ and other routing policies. Status reports `region.mode`, `allow_domains` and
 recheck their resolved addresses. Existing CN resource and download-failure gates
 remain in force; this is not final destination-IP filtering or complete regional management.
 
+Menu `17`, option `19`, manages IPv6 domain egress. Optional v3 `.routing.ipv6`
+stores `mode` and `domains`, gated separately by `x-padm-routing-ipv6`.
+Selective mode uses the existing four domain-rule types; global mode changes
+only the default outbound and does not remove other policies.
+
+```bash
+padm-docker edit --ipv6 selective --ipv6-domains 'example.com,full:api.example.net' --preview
+padm-docker edit --ipv6 global --confirm PADM-DOCKER-EDIT
+padm-docker edit --ipv6-off --confirm PADM-DOCKER-EDIT
+```
+
+Direct exceptions and domain/IP/BT blocking precede selective IPv6, which precedes
+SOCKS5. Global IPv6 preserves explicit SOCKS5 rules, but cannot share the default
+outbound with global SOCKS5. Matched domains use only AAAA addresses, without
+falling back to A addresses; the system resolver may still query A records.
+Existing hosts and split-DNS sources remain in use; IPv4-only hosts are rejected
+on this path rather than falling back to another source. This is not an IPv4
+firewall and does not convert literal IPv4 destinations.
+Disabling removes only the IPv6 item and preserves other routes, credentials and
+traffic totals. Core containers retain their normal privileges and attach to a
+separate owned IPv6 bridge without changing the existing default network,
+Docker daemon or host interfaces. The host still needs working IPv6 routing and
+egress. TUN/TProxy host-network mode, complete WARP and native-host acceptance
+remain outside this stage.
+
 `Routing & access control` manages server-side outbound behavior and access policies. It is not a client configuration tutorial.
 
 | Feature | Notes |

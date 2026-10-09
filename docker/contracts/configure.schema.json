@@ -21,6 +21,7 @@
   "x-padm-routing-block-ips": true,
   "x-padm-routing-block-bt": true,
   "x-padm-routing-region": true,
+  "x-padm-routing-ipv6": true,
   "additionalProperties": false,
   "required": ["schema_version", "release", "core", "tls", "subscription", "images", "host_integrations"],
   "properties": {
@@ -290,6 +291,27 @@
       "additionalProperties": false,
       "minProperties": 1,
       "properties": {
+        "ipv6": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "domains"],
+          "properties": {
+            "mode": {"enum": ["selective", "global"]},
+            "domains": {
+              "type": "array",
+              "maxItems": 256,
+              "uniqueItems": true,
+              "items": {"$ref": "#/properties/routing/properties/socks5/properties/domains/items"}
+            }
+          },
+          "allOf": [
+            {
+              "if": {"properties": {"mode": {"const": "selective"}}},
+              "then": {"properties": {"domains": {"minItems": 1}}},
+              "else": {"properties": {"domains": {"maxItems": 0}}}
+            }
+          ]
+        },
         "socks5": {
           "type": "object",
           "additionalProperties": false,
@@ -512,6 +534,18 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "required": ["routing"],
+        "properties": {
+          "routing": {
+            "required": ["ipv6", "socks5"],
+            "properties": {"ipv6": {"properties": {"mode": {"const": "global"}}}}
+          }
+        }
+      },
+      "then": {"properties": {"routing": {"properties": {"socks5": {"required": ["domains"]}}}}}
     },
     {
       "if": {
