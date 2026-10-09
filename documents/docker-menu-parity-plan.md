@@ -2128,6 +2128,40 @@ HTTP 正例精确比较完整固定响应，不等待 EOF，拒绝仍要求实�
 Cloudflare 账号、公网 UDP/出口、原生宿主、arm64 与可信发布仍未验；
 完整 routing-tools/internal-206 和 5B/5C 保持未完成。
 
+#### 5B.5 SOCKS/HTTP 入站前置核对与原生来源修复
+
+原生 `201` 安装路径实际使用 sing-box SOCKS 入站，支持 TCP CONNECT 与 UDP
+ASSOCIATE；注册表不能作为 Xray 入站已实现的证据。`source_ip_cidr` 为来源允许名单，
+域名为分流匹配，不擅自改成目的白名单。`202` 尚未发现原生 HTTP 入站工作流，
+后续需独立合同，不能用 HTTPUpgrade 或 NaiveProxy 替代。
+
+核对发现原生只生成来源匹配的 direct 规则，未匹配来源仍可走默认或更早的全局放行。
+新增独占 `00_00_socks5_source_route.json`，早于全局 allow，以
+`inbound=socks5_inbound AND NOT source_ip_cidr` 拒绝非白名单来源；
+其它入站、域名分流、地址族和 UDP 语义不变。规则更新补齐旧部署缺失的分片，
+备份、失败回滚及入站/全部卸载覆盖该分片，单独出站卸载保留它。
+原生修复签名提交 `d9cbd163 fix(routing): enforce SOCKS inbound source allowlists`；
+前置 partial EOF 修复为 `fbe499f0`。
+
+Linux amd64 `routing-core` `15.075` 秒、`routing-socks5-udp-associate` `309 ms`，
+独立 `routing-socks5-source-real` 最终 `2.654` 秒通过。真实 sing-box merge 后
+检查顺序，三个模式（全部目的分流、域名分流、仅 IPv4 来源）分别运行旧/修复对照：
+旧规则下 `127.0.0.2` 的 TCP/UDP 实际触达目的服务；修复后实际拒绝且目的零接入。
+允许来源、双栈、错误认证及其它入站均验证；UDP 按连接 ID 关联实际 reject 日志，
+不以超时或前一个 TCP 拒绝日志冒充成功。核心以 UID/GID `10001`、无 capabilities
+运行，复用固定 sing-box 镜像程序，不发布宿主端口或挂载 Docker Socket。
+Shell 语法/ShellCheck error、Python AST、PowerShell AST 与独立只读复审通过。
+集中 ci `35.163` 秒、入口 `36.045` 秒（Jobs `3`、未缓存）通过；
+最后仅减少该真实 selector 的 Xray 程序复制，经真实 selector 补验，不重复全套。
+证据 `.tmp-regression-docker-0042a4a282a14d45858b5e470ab1f62b/` 与
+`.tmp-regression-docker-fd6237a62cdd4c219a9fc1c52cd4bcb8/`；日志/result 保留，
+重复源码及程序副本收尾清理。
+
+Docker 入站需独立受管合同、私有认证输入、来源前置拒绝、专项编辑及取消/回滚、
+端口与部署一致性、统计身份边界和真实流量验收。SOCKS UDP 尤须验证
+`BND.ADDR/BND.PORT` 在 Docker 发布/NAT 下可达，不能仅用容器内回环通过代替。
+本前置修复不等于 Docker 入站交付，`internal-201`、`internal-202` 仍 `deferred`。
+
 ### 5C. 宿主集成与端口跳跃
 
 - 完善 WireGuard、TUN/TProxy、Fail2ban 的管理流程及内部 `203`、`204`、`205`；
