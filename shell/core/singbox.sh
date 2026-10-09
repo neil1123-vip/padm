@@ -711,6 +711,22 @@ singBoxMergeConfigForValidation() {
     padmRemoveCleanupPath "${tmpFile}"
 }
 
+singBoxMergeConfigRollbackOnExit() {
+    [[ "${PADM_SINGBOX_MERGE_ROLLBACK[active]:-false}" == true ]] || return 0
+    PADM_SINGBOX_MERGE_ROLLBACK[active]=false
+
+    local backupDir=${PADM_SINGBOX_MERGE_ROLLBACK[backup]:-}
+    [[ -n "${backupDir}" ]] || return 0
+    if checkLogBackupRestore "${backupDir}"; then
+        padmRemoveCleanupPath "${backupDir}"
+        return 0
+    fi
+
+    padmForgetCleanupPath "${backupDir}"
+    errorCard "sing-box 统计配置恢复失败" "请手动检查备份目录: ${backupDir}"
+    return 1
+}
+
 # 合并 sing-box 配置
 singBoxMergeConfig() {
     local binary="${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}"
@@ -725,21 +741,28 @@ singBoxMergeConfig() {
             checkLogBackupCreate statsBackupDir "${statsConfig}" || return 1
         fi
     fi
+    local -A PADM_SINGBOX_MERGE_ROLLBACK=([active]=false [backup]="${statsBackupDir}")
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
+    if [[ -n "${statsBackupDir}" ]]; then
+        PADM_SINGBOX_MERGE_ROLLBACK[active]=true
+        padmRegisterExitRollback singBoxMergeConfigRollbackOnExit
+    fi
     if { [[ -z "${statsBackupDir}" ]] || removeManagedFileIfPresent "${statsConfig}"; } &&
         singBoxMergeConfigToTemp tmpFile "${binary}" /dev/null &&
         { [[ "${1:-}" != check ]] || "${binary}" check -c "${tmpFile}" >"$(padmTmpFilePath padm-sing-box-start-test.log)" 2>&1; } &&
         commitGeneratedFile "${tmpFile}" "${outputFile}" 644; then
-        [[ -z "${statsBackupDir}" ]] || padmRemoveCleanupPath "${statsBackupDir}" || true
+        PADM_SINGBOX_MERGE_ROLLBACK[active]=false
+        if [[ -n "${statsBackupDir}" ]]; then
+            unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
+            padmRemoveCleanupPath "${statsBackupDir}" || true
+        fi
         return 0
     fi
     [[ -z "${tmpFile}" ]] || padmRemoveCleanupPath "${tmpFile}"
     if [[ -n "${statsBackupDir}" ]]; then
-        if checkLogBackupRestore "${statsBackupDir}"; then
-            padmRemoveCleanupPath "${statsBackupDir}"
-        else
-            padmForgetCleanupPath "${statsBackupDir}"
-            errorCard "sing-box 统计配置恢复失败" "请手动检查备份目录: ${statsBackupDir}"
-        fi
+        padmRunRollback singBoxMergeConfigRollbackOnExit || true
+        unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
     fi
     return 1
 }

@@ -3905,6 +3905,10 @@ if [[ "$1" == "check" ]]; then
         esac
     done
     printf 'check:%s\n' "${config}" >>"${PADM_FAKE_SINGBOX_CHECK_LOG}"
+    if [[ -n "${PADM_FAKE_SINGBOX_CHECK_SIGNAL:-}" ]]; then
+        kill "-${PADM_FAKE_SINGBOX_CHECK_SIGNAL}" "${PPID}"
+        exit 0
+    fi
     [[ "${PADM_FAKE_SINGBOX_CHECK_MODE:-success}" == "success" ]]
     exit
 fi
@@ -4054,6 +4058,74 @@ SH
         cp "${keptBackup}/000000.json" "${statsConfig}"
         padmRemoveCleanupPath "${keptBackup}"
     )
+    (
+        # 删除分片后的中断恢复原状态；恢复失败保留备份，不能进入主配置提交。
+        local signalName signalPhase signalOriginal signalRecovery expectedRc resultRc
+        local caseRoot statsConfig outputFile errorLog backups
+        eval "$(declare -f removeManagedFileIfPresent | sed '1s/^removeManagedFileIfPresent/mergeSignalRemove/')"
+        eval "$(declare -f singBoxMergeConfigToTemp | sed '1s/^singBoxMergeConfigToTemp/mergeSignalToTemp/')"
+        eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/mergeSignalCommit/')"
+        eval "$(declare -f checkLogBackupRestore | sed '1s/^checkLogBackupRestore/mergeSignalRestore/')"
+        removeManagedFileIfPresent() {
+            mergeSignalRemove "$@" || return 1
+            [[ "$1" != "${statsConfig}" || "${signalPhase}" != remove ]] ||
+                kill "-${signalName}" "${BASHPID}"
+        }
+        singBoxMergeConfigToTemp() {
+            mergeSignalToTemp "$@" || return 1
+            [[ "${signalPhase}" != merge ]] || kill "-${signalName}" "${BASHPID}"
+        }
+        commitGeneratedFile() {
+            [[ "$2" != "${outputFile}" || "${signalPhase}" != commit ]] ||
+                kill "-${signalName}" "${BASHPID}"
+            mergeSignalCommit "$@"
+        }
+        checkLogBackupRestore() {
+            [[ "${signalRecovery}" != fail ]] || return 1
+            mergeSignalRestore "$@"
+        }
+        errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+        for signalName in INT TERM; do
+            expectedRc=130
+            [[ "${signalName}" != TERM ]] || expectedRc=143
+            for signalPhase in remove merge check commit; do
+                for signalOriginal in present missing; do
+                    [[ "${signalPhase}" != remove || "${signalOriginal}" == present ]] || continue
+                    for signalRecovery in success fail; do
+                        [[ "${signalOriginal}" != missing || "${signalRecovery}" == success ]] || continue
+                        caseRoot="${root}/signal-${signalName}-${signalPhase}-${signalOriginal}-${signalRecovery}"
+                        mkdir -p "${caseRoot}/conf/config" "${caseRoot}/tmp" || return 1
+                        statsConfig="${caseRoot}/conf/config/14_stats_api.json"
+                        outputFile="${caseRoot}/conf/config.json" errorLog="${caseRoot}/errors"
+                        printf '{"runtime":true}\n' >"${outputFile}"
+                        : >"${errorLog}"
+                        [[ "${signalOriginal}" != present ]] || printf '%s\n' "${statsBefore}" >"${statsConfig}"
+                        (
+                            local TMPDIR="${caseRoot}/tmp" singBoxConfigPath="${caseRoot}/conf/config/"
+                            export PADM_FAKE_SINGBOX_CHECK_SIGNAL=
+                            [[ "${signalPhase}" != check ]] || PADM_FAKE_SINGBOX_CHECK_SIGNAL=${signalName}
+                            singBoxMergeConfig check
+                        ) >/dev/null 2>&1 && resultRc=0 || resultRc=$?
+                        [[ "${resultRc}" == "${expectedRc}" && "$(<"${outputFile}")" == '{"runtime":true}' ]] || return 1
+                        backups=$(find "${caseRoot}/tmp" -maxdepth 1 -name 'padm-check-log-backup.*' -type d -print)
+                        if [[ "${signalRecovery}" == fail ]]; then
+                            [[ ! -e "${statsConfig}" && -n "${backups}" && "${backups}" != *$'\n'* ]] || return 1
+                            [[ "$(<"${backups}/000000.json")" == "${statsBefore}" ]] || return 1
+                            grep -q 'sing-box 统计配置恢复失败' "${errorLog}" || return 1
+                        else
+                            if [[ "${signalOriginal}" == present ]]; then
+                                [[ -f "${statsConfig}" && "$(<"${statsConfig}")" == "${statsBefore}" ]] || return 1
+                            else
+                                [[ ! -e "${statsConfig}" ]] || return 1
+                            fi
+                            [[ -z "${backups}" && ! -s "${errorLog}" ]] || return 1
+                        fi
+                        ! compgen -G "${caseRoot}/conf/.config.json.merge.*" >/dev/null || return 1
+                    done
+                done
+            done
+        done
+    ) || return 1
     singBoxMergeConfig check
     [[ ! -e "${statsConfig}" ]]
     [[ "$(<"${outputFile}")" == '{"merged":true}' ]]
