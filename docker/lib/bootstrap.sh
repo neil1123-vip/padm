@@ -22,6 +22,7 @@ readonly PADM_DOCKER_RC_STATE=15
 readonly PADM_DOCKER_RC_MANIFEST=16
 
 DOCKER_DEPLOYMENT_LOCK_DIR=
+DOCKER_INITIALIZE_MODE_TEMP=
 
 dockerError() {
     printf '%s\n' "$*" >&2
@@ -288,8 +289,21 @@ dockerReleaseDeploymentLock() {
     DOCKER_DEPLOYMENT_LOCK_DIR=
 }
 
+dockerCleanupStateInitialization() {
+    local root tempMode=${DOCKER_INITIALIZE_MODE_TEMP:-}
+    [[ -n "${tempMode}" ]] || return 0
+    root=$(dockerInstallRoot) || return 1
+    dockerManagedPathIsSafe "${root}" "${tempMode}" &&
+        [[ "${tempMode%/*}" == "${root}" && "${tempMode##*/}" == .mode.* ]] || return 1
+    if [[ -e "${tempMode}" || -L "${tempMode}" ]]; then
+        [[ -f "${tempMode}" && ! -L "${tempMode}" && -O "${tempMode}" ]] &&
+            rm -f -- "${tempMode}" || return 1
+    fi
+    DOCKER_INITIALIZE_MODE_TEMP=
+}
+
 dockerInitializeStateRoot() {
-    local root modeFile tempMode directory mode
+    local root modeFile directory mode
     root=$(dockerInstallRoot) || return 1
     dockerPathIsSafeAbsolute "${root}" && [[ ! -L "${root}" ]] || return 1
     mkdir -p -- "${root}" || return 1
@@ -300,12 +314,15 @@ dockerInitializeStateRoot() {
         chmod 0640 "${modeFile}" || return 1
     else
         [[ "${mode}" == "missing" ]] || return 1
-        tempMode=$(mktemp "${root}/.mode.XXXXXX") || return 1
+        DOCKER_INITIALIZE_MODE_TEMP=$(mktemp "${root}/.mode.XXXXXX") || return 1
         # 先记录归属，后续目录创建失败时仍可安全重试安装。
-        printf 'docker\n' >"${tempMode}" && chmod 0640 "${tempMode}" && mv -f -- "${tempMode}" "${modeFile}" || {
-            rm -f -- "${tempMode}" 2>/dev/null || true
+        printf 'docker\n' >"${DOCKER_INITIALIZE_MODE_TEMP}" &&
+            chmod 0640 "${DOCKER_INITIALIZE_MODE_TEMP}" &&
+            mv -f -- "${DOCKER_INITIALIZE_MODE_TEMP}" "${modeFile}" || {
+            dockerCleanupStateInitialization || true
             return 1
         }
+        DOCKER_INITIALIZE_MODE_TEMP=
     fi
     for directory in .bundles config data secrets logs backups locks; do
         if [[ -e "${root}/${directory}" || -L "${root}/${directory}" ]]; then
@@ -344,6 +361,9 @@ dockerInstallCli() {
     tempLink="${binDir}/.padm-docker.${BASHPID:-$$}"
     rm -f -- "${tempLink}" 2>/dev/null || true
     ln -s "${expectedTarget}" "${tempLink}" || return 1
+    if [[ "${DOCKER_INSTALL_TRANSACTION_ACTIVE:-0}" == 1 && "${DOCKER_INSTALL_CLI_EXISTED:-1}" == 0 ]]; then
+        DOCKER_INSTALL_CLI_INODE=$(stat --format=%d:%i -- "${tempLink}") || return 1
+    fi
     mv -Tf -- "${tempLink}" "${target}" || {
         rm -f -- "${tempLink}" 2>/dev/null || true
         return 1
