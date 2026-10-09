@@ -1247,6 +1247,9 @@ runUninstallNginxCleanupRegression() {
     local oldNginxConfigPath="${nginxConfigPath:-}"
     local oldFallbackDir="${PADM_NGINX_CONF_FALLBACK_DIR:-}"
     local name
+    local PADM_REALITY_STREAM_CONF_FILE="${TMP_DIR}/uninstall-stream.conf"
+    local PADM_REALITY_STREAM_STATE_FILE="${TMP_DIR}/uninstall-stream.json"
+    local PADM_REALITY_STREAM_NGINX_CONF="${TMP_DIR}/uninstall-nginx.conf"
 
     mkdir -p "${primaryDir}" "${actualDir}"
     nginxConfigPath="${primaryDir}"
@@ -1257,8 +1260,16 @@ runUninstallNginxCleanupRegression() {
     for name in sing_box_VMess_HTTPUpgrade.conf subscribe.conf padm-control-wg.conf; do
         printf 'padm config\n' >"${actualDir}${name}"
     done
+    printf 'managed\n' >"${PADM_REALITY_STREAM_CONF_FILE}"
+    printf '{"enabled":true}\n' >"${PADM_REALITY_STREAM_STATE_FILE}"
+    printf 'events {}\n# padm stream include start\nstream { include managed; }\n# padm stream include end\nhttp { include third-party; }\n' \
+        >"${PADM_REALITY_STREAM_NGINX_CONF}"
+    printf 'keep\n' >"${actualDir}third-party.conf"
 
     removePadmNginxConfigFragments
+    [[ ! -e "${PADM_REALITY_STREAM_CONF_FILE}" && ! -e "${PADM_REALITY_STREAM_STATE_FILE}" ]] || return 1
+    [[ "$(<"${PADM_REALITY_STREAM_NGINX_CONF}")" == $'events {}\nhttp { include third-party; }' ]] || return 1
+    [[ "$(<"${actualDir}third-party.conf")" == keep ]] || return 1
     for name in alone.conf checkPortOpen.conf sing_box_VMess_HTTPUpgrade.conf subscribe.conf padm-control-wg.conf; do
         [[ ! -e "${primaryDir}${name}" ]]
     done
@@ -1896,6 +1907,14 @@ runUninstallServiceStopFailureRegression() (
         runUninstallStillRunningCase "${mode}"
     done
     runUninstallNoNginxProtocolCase
+    (
+        local PADM_REALITY_STREAM_CONF_FILE="${root}/stream-only.conf"
+        printf 'managed stream\n' >"${PADM_REALITY_STREAM_CONF_FILE}"
+        runUninstallCase nginx-stop-fail ",1," "" "${root}/nginx/" 1 || return 1
+        grep -qx 'nginx:stop:true' "${serviceLog}" || return 1
+        ! grep -qxF padm-root-cleanup "${actionLog}" || return 1
+        rm -f -- "${PADM_REALITY_STREAM_CONF_FILE}"
+    ) || return 1
     runUninstallWireGuardCleanupFailureCase
     runUninstallRestoresNginxCase
 )

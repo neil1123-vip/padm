@@ -1612,6 +1612,10 @@ removePadmNginxConfigFragments() {
             removeInstallPath "${candidate}" "Nginx PADM配置" || failed=true
         done
     done
+    for candidate in "$(realityStreamSplitConfFile)" "$(realityStreamSplitStateFile)"; do
+        removeInstallPath "${candidate}" "Nginx Reality 分流配置" || failed=true
+    done
+    removeRealityStreamNginxInclude || failed=true
 
     [[ "${failed}" != "true" ]]
 }
@@ -1681,6 +1685,7 @@ uninstallShouldStopNginx() {
     fi
     [[ -f "${nginxConfigPath:-/etc/nginx/conf.d/}subscribe.conf" ]] && return 0
     [[ -f "${nginxConfigPath:-/etc/nginx/conf.d/}padm-control-wg.conf" ]] && return 0
+    [[ -e "$(realityStreamSplitConfFile)" || -L "$(realityStreamSplitConfFile)" ]] && return 0
     [[ -d "${nginxStaticPath:-}" && -f "${nginxStaticPath}/check" ]] && return 0
     return 1
 }
