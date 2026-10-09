@@ -202,6 +202,21 @@ readInstallType() {
     fi
 }
 
+# 只校验受管协议的监听结构，未知自定义入站仍由核心校验。
+protocolStateConfigValid() {
+    local configFile=$1 core=$2 protocolId=$3
+    jq -se --arg core "${core}" --arg id "${protocolId}" '
+        length == 1 and (.[0] |
+            type == "object" and (.inbounds | type == "array") and
+            (if $id == "" then true else
+                (.inbounds | length > 0 and all(.[]; type == "object")) and
+                (.inbounds[0][if $core == "2" then "listen_port" else "port" end] |
+                    type == "number" and . >= 1 and . <= 65535 and floor == .) and
+                (if $core == "1" and $id == "1" then (.inbounds | length >= 2) else true end)
+            end))
+    ' "${configFile}" >/dev/null 2>&1
+}
+
 # 读取协议类型
 readInstallProtocolType() {
     local configFile configFiles=
@@ -263,10 +278,10 @@ readInstallProtocolType() {
     fi
     while IFS= read -r row; do
         [[ -n "${row}" ]] || continue
-        jq -se 'length == 1 and (.[0] | type == "object" and (.inbounds | type == "array"))' "${row}" >/dev/null 2>&1 || return 1
-        row=${row%.json}
         local protocolId=
-        protocolId=$(protocolCapabilityIdByConfigFile "${row##*/}.json" 2>/dev/null || true)
+        protocolId=$(protocolCapabilityIdByConfigFile "${row##*/}" 2>/dev/null || true)
+        protocolStateConfigValid "${row}" "${coreInstallType}" "${protocolId}" || return 1
+        row=${row%.json}
         if [[ "${coreInstallType}" == 1 && "${protocolId}" == 27 ]] &&
             jq -e '.inbounds[0].tag == "TLSFallback"' "${row}.json" >/dev/null 2>&1; then
             protocolId=
@@ -442,7 +457,7 @@ readInstallProtocolType() {
             [[ -n "${protocolId}" ]] || continue
             configFile=$(protocolCapabilityMeta "${protocolId}" config_file 2>/dev/null || true)
             [[ -n "${configFile}" && -f "${singBoxConfigPath}${configFile}" ]] || continue
-            jq -se 'length == 1 and (.[0] | type == "object" and (.inbounds | type == "array"))' "${singBoxConfigPath}${configFile}" >/dev/null 2>&1 || return 1
+            protocolStateConfigValid "${singBoxConfigPath}${configFile}" 2 "${protocolId}" || return 1
             protocolStateAdd "${protocolId}"
         done < <(protocolCapabilityIdsByProjectCore sing-box | tr ',' '\n')
         if [[ -f "${singBoxConfigPath}06_hysteria2_inbounds.json" ]]; then

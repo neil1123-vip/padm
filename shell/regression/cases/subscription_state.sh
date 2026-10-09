@@ -141,18 +141,61 @@ runReadInstallProtocolTypeScanFailureRegression() (
         [[ "${PADM_INSTALL_STATUS_READY}" == 1 ]] || return 1
         currentProtocolHas 27 && currentProtocolHas 23 || return 1
         (
-            local configPath="${root}/empty/" singBoxConfigPath="${root}/auxiliary/" value
+            local configPath singBoxConfigPath coreInstallType sourceType configFile portKey value
             unset -f find
-            mkdir -p "${configPath}" "${singBoxConfigPath}" || return 1
-            printf '%s\n' '{"inbounds":[{"listen_port":8443}]}' >"${singBoxConfigPath}13_anytls_inbounds.json"
-            readInstallProtocolType || return 1
-            [[ "${PADM_INSTALL_STATUS_READY}" == 1 ]] && currentProtocolHas 4 || return 1
-            for value in '' '{}' '[]' '{"inbounds":{}}' '{"inbounds":[]} {"inbounds":[]}'; do
-                printf '%s\n' "${value}" >"${singBoxConfigPath}13_anytls_inbounds.json"
-                PADM_INSTALL_STATUS_READY=1
+            for sourceType in xray sing-box auxiliary; do
+                configPath="${root}/${sourceType}/primary/"
+                singBoxConfigPath=
+                coreInstallType=1
+                portKey=port
+                configFile="${configPath}02_VLESS_TCP_inbounds.json"
+                if [[ "${sourceType}" != xray ]]; then
+                    portKey=listen_port
+                    singBoxConfigPath="${root}/${sourceType}/sing-box/"
+                    configFile="${singBoxConfigPath}13_anytls_inbounds.json"
+                    if [[ "${sourceType}" == sing-box ]]; then
+                        coreInstallType=2
+                        configPath=${singBoxConfigPath}
+                    fi
+                fi
+                mkdir -p "${configPath}" "$(dirname -- "${configFile}")" || return 1
+                jq -n --arg key "${portKey}" '{inbounds:[{($key):8443,users:[]}]}' >"${configFile}"
+                readInstallProtocolType || return 1
+                [[ "${PADM_INSTALL_STATUS_READY}" == 1 ]] || return 1
+                if [[ "${sourceType}" == xray ]]; then currentProtocolHas 27; else currentProtocolHas 4; fi || return 1
+                for value in '' '{}' '[]' '{"inbounds":{}}' '{"inbounds":[]} {"inbounds":[]}' \
+                    '{"inbounds":[]}' '{"inbounds":[null]}' '{"inbounds":[1]}' '{"inbounds":[{}]}'; do
+                    printf '%s\n' "${value}" >"${configFile}"
+                    PADM_INSTALL_STATUS_READY=1
+                    regressionExpectStatus 1 readInstallProtocolType || return 1
+                    [[ "${PADM_INSTALL_STATUS_READY}" == 0 ]] || return 1
+                done
+                for value in null '"bad"' '"8443"' true '{}' '[]' 0 65536 1.5; do
+                    jq -n --arg key "${portKey}" --argjson value "${value}" \
+                        '{inbounds:[{($key):$value}]}' >"${configFile}"
+                    regressionExpectStatus 1 readInstallProtocolType || return 1
+                    [[ "${PADM_INSTALL_STATUS_READY}" == 0 ]] || return 1
+                done
+                jq -n --arg key "${portKey}" '{inbounds:[{($key):8443},null]}' >"${configFile}"
                 regressionExpectStatus 1 readInstallProtocolType || return 1
                 [[ "${PADM_INSTALL_STATUS_READY}" == 0 ]] || return 1
+                rm -f "${configFile}" || return 1
             done
+            coreInstallType=1
+            singBoxConfigPath=
+            configPath="${root}/vision/"
+            configFile="${configPath}07_VLESS_vision_reality_inbounds.json"
+            mkdir -p "${configPath}" || return 1
+            printf '%s\n' '{"inbounds":[{"port":443}]}' >"${configFile}"
+            regressionExpectStatus 1 readInstallProtocolType || return 1
+            [[ "${PADM_INSTALL_STATUS_READY}" == 0 ]] || return 1
+            printf '%s\n' '{"inbounds":[{"port":443},{}]}' >"${configFile}"
+            readInstallProtocolType || return 1
+            [[ "${PADM_INSTALL_STATUS_READY}" == 1 ]] && currentProtocolHas 1 || return 1
+            rm -f "${configFile}" || return 1
+            printf '%s\n' '{"inbounds":[]}' >"${configPath}custom_inbounds.json"
+            readInstallProtocolType || return 1
+            [[ "${PADM_INSTALL_STATUS_READY}" == 1 && "${currentInstallProtocolType}" == , ]] || return 1
         ) || return 1
     done
 )
