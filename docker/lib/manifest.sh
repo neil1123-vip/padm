@@ -33,12 +33,14 @@ dockerManifestCleanup() {
 }
 
 dockerManifestInputCopy() {
-    local source=$1 target=$2 maxBytes=$3
+    local source=$1 target=$2 maxBytes=$3 actualSize
     [[ -n "${source}" && -n "${target}" ]] || return 1
     if [[ -f "${source}" && ! -L "${source}" ]]; then
         [[ -O "${source}" ]] || return 1
         cp -- "${source}" "${target}" || return 1
-        [[ "$(wc -c <"${target}" | tr -d '[:space:]')" -le "${maxBytes}" ]]
+        actualSize=$(wc -c <"${target}") || return 1
+        [[ "${actualSize}" =~ ^[[:space:]]*[0-9]+[[:space:]]*$ &&
+            "${actualSize}" -le "${maxBytes}" ]]
         return $?
     fi
     [[ "${source}" =~ ^https:// ]] || return 1
