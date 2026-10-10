@@ -423,6 +423,8 @@ showVmessHTTPUpgradeAccountsFromConfig() (
     set -o pipefail
     local configFile=$1 vmessHTTPUpgradePort=$2 path=$3
     [[ -f "${configFile}" ]] || return 0
+    jq -e '.inbounds[0] | (if .streamSettings.httpupgradeSettings != null then .streamSettings.httpupgradeSettings.path else .transport.path end) |
+        . == null or (type == "string" and (any(explode[]; . < 32 or . == 127) | not))' "${configFile}" >/dev/null || return 1
     jq -c '(.inbounds[0].settings.clients // .inbounds[0].users) | if type == "array" then .[] else error("invalid clients") end' "${configFile}" | while read -r user; do
             local email accountId profile
             profile=$(subscriptionAccountProfile "${user}") || return 1

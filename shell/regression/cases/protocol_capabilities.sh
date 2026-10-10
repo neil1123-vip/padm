@@ -770,6 +770,37 @@ runProtocolEntryReaderFailureRegression() (
             done
             [[ "${failed}" == 0 ]]
         ) || failed=1
+        (
+            # HTTPUpgrade 原始 SNI 必须在 jq 输出前校验，缺省时仍复用 Nginx 域名。
+            local configFile rawSNI status failed=0
+            local PADM_XRAY_BINARY="${root}/missing-xray" PADM_XRAY_CONF_DIR="${root}/missing-xray-conf"
+            local PADM_SINGBOX_BINARY=/bin/true PADM_SINGBOX_CONFIG_DIR="${root}/httpupgrade-sni/config"
+            local nginxConfigPath="${root}/httpupgrade-sni/nginx/"
+            mkdir -p "${PADM_SINGBOX_CONFIG_DIR}" "${nginxConfigPath}" || return 1
+            printf 'listen 443 ssl;\nserver_name tls.example.com;\n' >"${nginxConfigPath}sing_box_VMess_HTTPUpgrade.conf"
+            configFile="${PADM_SINGBOX_CONFIG_DIR}/11_VMess_HTTPUpgrade_inbounds.json"
+            for rawSNI in '"tls.example.com"' null 42 false '{}' '[]' '"tls.example.com\n"'; do
+                jq -n --argjson sni "${rawSNI}" '
+                    {inbounds:[{type:"vmess",listen_port:31306,users:[{name:"saved-user",uuid:"saved-uuid"}],
+                        tls:{server_name:$sni},transport:{type:"httpupgrade",path:"/saved"}}]}
+                ' >"${configFile}" || return 1
+                readInstallType && readInstallProtocolType || return 1
+                [[ "${coreInstallType}" == 2 && "${frontingType}" == 11_VMess_HTTPUpgrade_inbounds ]] || return 1
+                currentHost=stale currentClients=stale currentUUID=stale currentPath=stale currentCDNAddress=stale
+                readConfigHostPathUUID; status=$?
+                if [[ "${rawSNI}" == '"tls.example.com"' || "${rawSNI}" == null ]]; then
+                    if [[ "${status}" != 0 || "${currentHost}" != tls.example.com ||
+                        "${currentUUID}" != saved-uuid || "${currentPath}" != saved ]]; then
+                        printf 'assert-fail:entry-host-httpupgrade-baseline:%s\n' "${rawSNI}" >&2
+                        failed=1
+                    fi
+                elif [[ "${status}" != 1 || -n "${currentHost}${currentUUID}${currentClients}${currentPath}${currentCDNAddress}" ]]; then
+                    printf 'assert-fail:entry-host-httpupgrade-raw-sni:%s\n' "${rawSNI}" >&2
+                    failed=1
+                fi
+            done
+            [[ "${failed}" == 0 ]]
+        ) || failed=1
         [[ "${failed}" == 0 ]]
     ) || failed=1
     (

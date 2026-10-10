@@ -556,7 +556,7 @@ readSingBoxConfig() {
         if [[ -f "${singBoxConfigPath}09_tuic_inbounds.json" ]]; then
             tuicPort=$(jq -ser 'select(length == 1) | .[0].inbounds[0].listen_port |
                 select(type == "number" and . >= 1 and . <= 65535 and floor == .)' "${singBoxConfigPath}09_tuic_inbounds.json") || return 1
-            tuicAlgorithm=$(jq -r '.inbounds[0].congestion_control // "cubic"' "${singBoxConfigPath}09_tuic_inbounds.json")
+            tuicAlgorithm=$(jq -r '.inbounds[0].congestion_control | if . == null then "cubic" elif . == "cubic" or . == "bbr" or . == "new_reno" then . else error("invalid congestion_control") end' "${singBoxConfigPath}09_tuic_inbounds.json") || return 1
             tuicAuthTimeout=$(jq -r '.inbounds[0].auth_timeout // "3s"' "${singBoxConfigPath}09_tuic_inbounds.json")
             tuicHeartbeat=$(jq -r '.inbounds[0].heartbeat // "10s"' "${singBoxConfigPath}09_tuic_inbounds.json")
             tuicZeroRttHandshake=$(jq -r '.inbounds[0].zero_rtt_handshake // false' "${singBoxConfigPath}09_tuic_inbounds.json")
@@ -833,7 +833,7 @@ readConfigHostPathUUID() {
         fi
     elif [[ "${coreInstallType}" == "2" ]]; then
         if [[ -n "${frontingType}" ]]; then
-            currentHost=$(jq -r .inbounds[0].tls.server_name "${configPath}${frontingType}.json") || return 1
+            currentHost=$(jq -r '.inbounds[0].tls.server_name | if . == null then "null" elif type == "string" and (any(explode[]; . < 32 or . == 127) | not) then . else error("invalid server_name") end' "${configPath}${frontingType}.json") || return 1
             if currentProtocolHas 23 && [[ "${currentHost}" == "null" ]]; then
                 currentHost=$(grep 'server_name' <"${nginxConfigPath}sing_box_VMess_HTTPUpgrade.conf" | awk '{print $2}')
                 currentHost=${currentHost//;/}
