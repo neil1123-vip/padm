@@ -6,7 +6,6 @@ import ipaddress
 import json
 import os
 from pathlib import Path
-import pwd
 import re
 import selectors
 import shutil
@@ -97,6 +96,19 @@ def run_command(args, deadline=None, limit=MAX_OUTPUT):
                 process.kill()
                 process.wait()
             process.stdout.close()
+
+
+def read_privsep_uid(deadline):
+    # NSS 查询可能阻塞，隔离到受现有命令期限约束的子进程。
+    output = run_command([
+        sys.executable, "-I", "-c",
+        "import pwd\naccount = pwd.getpwnam('sshd')\n"
+        "if account.pw_name != 'sshd': raise ValueError('invalid privsep name')\n"
+        "print(account.pw_uid)",
+    ], deadline, limit=32)
+    if not re.fullmatch(r"[1-9][0-9]{0,9}\n", output) or int(output) > 4294967294:
+        raise Failure("SSH 共享套接字的 privsep 专用账号无效")
+    return int(output)
 
 
 def parse_json_lines(text):
@@ -397,12 +409,8 @@ def verify_event(event, master, local, port, source, deadline):
     extra_owners = [item for item in accepted["owners"] if item != owner]
     children, privsep_uid = [], None
     if extra_owners:
-        try:
-            account = pwd.getpwnam("sshd")
-        except KeyError:
-            raise Failure("SSH 共享套接字缺少可信 privsep 专用账号") from None
-        privsep_uid = account.pw_uid
-        if account.pw_name != "sshd" or privsep_uid <= 0:
+        privsep_uid = read_privsep_uid(deadline)
+        if privsep_uid <= 0:
             raise Failure("SSH 共享套接字的 privsep 专用账号无效")
         for child_pid, child_fd in extra_owners:
             child = read_process(child_pid, PRIVSEP_EXES, privsep_uid)
@@ -419,7 +427,7 @@ def verify_event(event, master, local, port, source, deadline):
             or get_accepted(local, port, source, event["sport"], deadline) != accepted):
         raise Failure("SSH 监听、日志进程或挑战连接在核验期间变化")
     if extra_owners:
-        if pwd.getpwnam("sshd").pw_uid != privsep_uid:
+        if read_privsep_uid(deadline) != privsep_uid:
             raise Failure("SSH privsep 专用账号在核验期间变化")
         for child, (child_pid, child_fd) in zip(children, extra_owners):
             if read_process(child_pid, PRIVSEP_EXES, privsep_uid) != child:

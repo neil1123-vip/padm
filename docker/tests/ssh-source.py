@@ -216,8 +216,53 @@ class SourceContracts(unittest.TestCase):
             with self.subTest(missing=field), self.assertRaises(ssh.Failure):
                 ssh.event_source(candidate, USERNAME, ipaddress.ip_address(SOURCE), BOOT, FRESH_US)
 
+    def test_privsep_uid_lookup_is_bounded_and_strict(self):
+        for output in ("1\n", "996\n", "4294967294\n"):
+            with self.subTest(output=output), patch.object(
+                ssh, "run_command", return_value=output
+            ) as command:
+                self.assertEqual(ssh.read_privsep_uid(5000), int(output))
+                args, deadline = command.call_args.args
+                self.assertEqual(args[:3], [ssh.sys.executable, "-I", "-c"])
+                self.assertIn("pwd.getpwnam('sshd')", args[3])
+                self.assertEqual(deadline, 5000)
+                self.assertEqual(command.call_args.kwargs, {"limit": 32})
+        for output in ("", "0\n", "-1\n", "0996\n", "+996\n", "996", "996 \n",
+                       " 996\n", "996\n997\n", "4294967295\n", "10000000000\n"):
+            with self.subTest(output=output), patch.object(
+                ssh, "run_command", return_value=output
+            ), self.assertRaises(ssh.Failure):
+                ssh.read_privsep_uid(5000)
+        with patch.object(ssh.time, "monotonic", return_value=10), \
+                patch.object(ssh.subprocess, "Popen") as process, self.assertRaises(ssh.Failure):
+            ssh.read_privsep_uid(9)
+        process.assert_not_called()
+
+    def test_command_reaps_failed_or_blocked_uid_helper(self):
+        original_popen, processes = ssh.subprocess.Popen, []
+
+        def start(*args, **kwargs):
+            process = original_popen(*args, **kwargs)
+            processes.append(process)
+            self.addCleanup(process.stdout.close)
+            self.addCleanup(process.wait)
+            self.addCleanup(process.kill)
+            return process
+
+        for code, expected in (("raise SystemExit(3)", 3), ("import time; time.sleep(10)", -9)):
+            with self.subTest(code=code), patch.object(
+                ssh.subprocess, "Popen", side_effect=start
+            ), self.assertRaises(ssh.Failure):
+                ssh.run_command(
+                    [ssh.sys.executable, "-I", "-c", code],
+                    deadline=ssh.time.monotonic() + 0.25, limit=32,
+                )
+            self.assertEqual(processes[-1].returncode, expected)
+            self.assertTrue(processes[-1].stdout.closed)
+
     def verify_event(self, *, accepted=None, emitter=None, next_master=None, fd_error=False,
-                     child=None, final_child=None, privsep_uid=996, child_fd_error=False):
+                     child=None, final_child=None, privsep_uid=996, final_privsep_uid=None,
+                     child_fd_error=False):
         event = ssh.event_source(
             record(), USERNAME, ipaddress.ip_address(SOURCE), BOOT, FRESH_US
         )
@@ -259,15 +304,18 @@ class SourceContracts(unittest.TestCase):
             stack.enter_context(patch.object(
                 ssh, "socket_fd", side_effect=held
             ))
-            stack.enter_context(patch.object(ssh.pwd, "getpwnam", return_value=SimpleNamespace(
-                pw_name="sshd", pw_uid=privsep_uid,
-            )))
+            lookup = stack.enter_context(patch.object(ssh, "read_privsep_uid", side_effect=[
+                privsep_uid, privsep_uid if final_privsep_uid is None else final_privsep_uid,
+            ]))
             stack.enter_context(patch.object(ssh.os, "sysconf", return_value=100))
             stack.enter_context(patch.object(ssh.time, "monotonic", return_value=3000))
-            return ssh.verify_event(
+            result = ssh.verify_event(
                 event, copy.deepcopy(MASTER), ipaddress.ip_address(LOCAL), PORT,
                 ipaddress.ip_address(SOURCE), 5000,
             )
+            self.assertEqual([item.args for item in lookup.call_args_list],
+                             [(5000,), (5000,)] if child is not None else [])
+            return result
 
     def test_live_emitter_is_root_child_of_same_master(self):
         emitter, connection = self.verify_event()
@@ -297,6 +345,8 @@ class SourceContracts(unittest.TestCase):
             self.verify_event(accepted=shared, child=child, child_fd_error=True)
         with self.assertRaises(ssh.Failure):
             self.verify_event(accepted=shared, child=child, privsep_uid=0)
+        with self.assertRaises(ssh.Failure):
+            self.verify_event(accepted=shared, child=child, final_privsep_uid=997)
         with self.assertRaises(ssh.Failure):
             self.verify_event(accepted={**shared, "owners": ((23, 5),)}, child=child)
         with self.assertRaises(ssh.Failure):
