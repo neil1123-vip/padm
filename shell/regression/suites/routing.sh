@@ -9,6 +9,7 @@ listRegressionRoutingHeavyChildSelectors() {
     printf '%s\n' \
         routing-access-control-config-transaction \
         routing-dns-failure-return \
+        routing-signal-transaction \
         routing-socks5-udp-associate
 }
 
@@ -55,6 +56,7 @@ registerRegressionFunctionLeaf routing-core-unsafe-config-dir runRoutingCoreReje
 registerRegressionFunctionLeaf routing-access-control-config-transaction runAccessControlConfigTransactionRegression
 registerRegressionFunctionLeaf routing-access-control-failure-return runAccessControlFailureReturnRegression
 registerRegressionFunctionLeaf routing-dns-failure-return runDNSRoutingFailureReturnRegression
+registerRegressionFunctionLeaf routing-signal-transaction runRoutingSignalTransactionRegression
 runRegressionRoutingSafety() (
     set -euo pipefail
     runRoutingRejectsUnsafeDirRegression access-control backup
