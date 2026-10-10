@@ -619,6 +619,65 @@ runProtocolConfigOwnershipRegression() (
     assertEquals '' "${currentRealityMldsa65Verify}" grpc-reality-no-stale-verify
 )
 
+runProtocolEntryReaderFailureRegression() (
+    local root="${TMP_DIR}/protocol-entry-reader-failure" capture step validator reader
+    local failed=0 inputFd unread AUTO_INSTALL= configPath="${root}/"
+    capture="${root}/actions"
+    mkdir -p "${root}" || return 1
+    (
+        # helper 的输出不能掩盖非零状态，失败后不再执行核心校验。
+        local failed=0
+        manageXrayBinaryPath() { printf '%s\n' fixtureXray; [[ "${step}" != binary ]]; }
+        manageXrayConfigDir() { printf '%s\n' "${root}"; [[ "${step}" != config ]]; }
+        coreExecutableFile() { return 0; }
+        fixtureXray() { printf 'validate\n' >>"${capture}"; }
+        for validator in validateXHTTPConfigUpdate validateVlessEncryptionConfig; do
+            for step in binary config; do
+                : >"${capture}"
+                regressionExpectStatus 1 "${validator}" ||
+                    { printf 'assert-fail:entry-validator-status:%s:%s\n' "${validator}" "${step}" >&2; failed=1; }
+                [[ ! -s "${capture}" ]] ||
+                    { printf 'assert-fail:entry-validator-executed:%s:%s\n' "${validator}" "${step}" >&2; failed=1; }
+            done
+        done
+        [[ "${failed}" == 0 ]]
+    ) || failed=1
+    (
+        # 历史读取失败不能展示可复用摘要，也不能消费确认或上级菜单输入。
+        local failed=0 coreInstallType=1 currentInstallProtocolType=,1, configPath="${root}/" singBoxConfigPath=
+        local frontingType= currentHost= currentDefaultPort= currentPort= currentPath= currentUUID=
+        local currentClients= currentCDNAddress= realitySNI= realityTargetHost= realityTargetPort=
+        local subscribePort= currentRealityPublicKey= xrayVLESSRealityPort= xrayVLESSRealityXHTTPort=
+        local singBoxVLESSVisionPort= singBoxVLESSRealityVisionPort= singBoxVLESSRealityGRPCPort=
+        local singBoxHysteria2Port= singBoxTuicPort= singBoxSocks5Port=
+        realityStreamSplitEnabled() { return 1; }
+        readInstallProtocolType() { return 0; }
+        readConfigHostPathUUID() { return 0; }
+        readCustomPort() { [[ "${reader}" != readCustomPort ]]; }
+        readNginxSubscribe() { [[ "${reader}" != readNginxSubscribe ]]; }
+        readSingBoxConfig() { [[ "${reader}" != readSingBoxConfig ]]; }
+        echoContent() { printf 'summary\n' >>"${capture}"; }
+        menuLine() { :; }
+        menuClose() { :; }
+        for reader in readCustomPort readNginxSubscribe readSingBoxConfig; do
+            : >"${capture}"
+            regressionExpectStatus 1 showLastInstallationConfig ||
+                { printf 'assert-fail:entry-history-reader-status:%s\n' "${reader}" >&2; failed=1; }
+            [[ ! -s "${capture}" ]] ||
+                { printf 'assert-fail:entry-history-reader-output:%s\n' "${reader}" >&2; failed=1; }
+            exec {inputFd}<<<$'y\nsentinel'
+            regressionExpectStatus 1 readLastInstallationConfig <&"${inputFd}" ||
+                { printf 'assert-fail:entry-history-reuse-status:%s\n' "${reader}" >&2; failed=1; }
+            read -r unread <&"${inputFd}"
+            exec {inputFd}<&-
+            [[ "${unread}" == y && -z "${lastInstallationConfig}" ]] ||
+                { printf 'assert-fail:entry-history-reuse-input:%s\n' "${reader}" >&2; failed=1; }
+        done
+        [[ "${failed}" == 0 ]]
+    ) || failed=1
+    [[ "${failed}" == 0 ]]
+)
+
 runProtocolEntryConfigUpdateRegression() (
     local root="${TMP_DIR}/protocol-entry-config" fixtureConfig before commits=0 field command value statusLog
     mkdir -p "${root}"
@@ -1812,6 +1871,7 @@ runCorePortMenuStateRegression() (
 )
 
 runProtocolCapabilitiesRegression() {
+    runRegressionStep protocol-entry-reader-failure runProtocolEntryReaderFailureRegression
     runRegressionStep protocol-entry-config-update runProtocolEntryConfigUpdateRegression
     runRegressionStep protocol-entry-port runProtocolEntryPortRegression
     runRegressionStep protocol-entry-menu-sync runProtocolEntryMenuSyncRegression

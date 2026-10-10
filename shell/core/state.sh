@@ -581,9 +581,9 @@ readSingBoxConfig() {
 showLastInstallationConfig() {
     readInstallProtocolType || return 1
     readConfigHostPathUUID || return 1
-    readCustomPort
-    readNginxSubscribe
-    readSingBoxConfig
+    readCustomPort || return 1
+    readNginxSubscribe || return 1
+    readSingBoxConfig || return 1
 
     echoContent title "\n┌─ 上次安装配置 ─────────────────────────────────────"
     if [[ "${coreInstallType}" == "1" ]]; then

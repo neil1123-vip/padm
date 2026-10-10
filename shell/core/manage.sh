@@ -13,8 +13,8 @@ vlessEncryptionConfigFile() {
 validateVlessEncryptionConfig() {
     local xrayBinary
     local xrayConfigDir
-    xrayBinary=$(manageXrayBinaryPath)
-    xrayConfigDir=$(manageXrayConfigDir)
+    xrayBinary=$(manageXrayBinaryPath) || return 1
+    xrayConfigDir=$(manageXrayConfigDir) || return 1
     "${xrayBinary}" -test -confdir "${xrayConfigDir}" >"$(padmTmpFilePath padm-xray-test.log)" 2>&1
 }
 
@@ -3528,8 +3528,8 @@ configTransactionCommit() {
 validateXHTTPConfigUpdate() {
     local xrayBinary
     local xrayConfigDir
-    xrayBinary=$(manageXrayBinaryPath)
-    xrayConfigDir=$(manageXrayConfigDir)
+    xrayBinary=$(manageXrayBinaryPath) || return 1
+    xrayConfigDir=$(manageXrayConfigDir) || return 1
     coreExecutableFile "${xrayBinary}" || return 0
     "${xrayBinary}" -test -confdir "${xrayConfigDir}" >"$(xhttpConfigTestLog)" 2>&1
 }
