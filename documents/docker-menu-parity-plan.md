@@ -3289,6 +3289,47 @@ net `sha256:7aabb6e5e336161497e8f47e643771d5c914a6a7d12d4536465756c942ba964c`，
 原生宿主 systemd/重启卸载、公网及 arm64 仍未验收；
 受管锁不保证抵御外部特权 daemon 并发，5C 和总目标继续 active。
 
+#### 5C.8a SSH 宿主只读预检
+
+实现 `a5f9c17b feat(docker): add read-only SSH host preflight`，本地 SSH 签名 G。
+Fail2ban 菜单第 12 项与 `fail2ban ssh preflight [--json]` 沿用 Linux/root、
+本机 rootful Docker 环境门禁，不要求已安装部署，也不取得部署锁。
+从默认 `sshd -T` 提取有效去重端口，与 `ss -H -ltnp` 的精确 sshd/PID
+监听集合一致才继续；同端口外来/混合 owner、漏端口及额外端口拒绝。
+两个解析管道局部启用 `pipefail`，真实 CLI 未开启该选项时也不会吞掉错误。
+
+只报告本次 boot 的一条 sshd journal 或固定 auth.log/secure 候选；
+文件必须 root 所有、普通可读、路径无软链接且不可被组/其他用户写入。
+认证消息、账号、来源 IP 和原始 stderr 不进入输出。JSON 明确
+`scope=host-preflight-only` 与 `source_verified/runtime_configuration_verified/jail_ready=false`；
+文本只说明本次预检不启用 SSH 防护，不推断宿主已有防护状态。
+默认配置不证明运行实例的 `-f/-p/-o`、socket activation、绑定地址/地址族；
+日志候选不作为 fresh 来源授权。其余 ssh action 先 usage 拒绝。
+没有新增 SSH schema、jail、规则、日志挂载或凭证，也不升级完整支持状态。
+
+2026-10-10，Docker Desktop Linux amd64，工具镜像复用
+`sha256:dbdfde081d3763df53ff13e5a79a9f2fbd7a98ef8660fed9ee02681a96abc2de`：
+
+| 最终检查 | 入口秒数 | 证据 |
+| --- | --- | --- |
+| SSH 正反例及空事务 CLI | 1.379 | `.tmp-regression-docker-6339bf67f8844d1c94269b95489b24e9` |
+| 菜单 PTY 成功/失败后返回 | 52.746 | `.tmp-regression-docker-e0bcb655a5d348469dfaee6699d85e5e` |
+| 注册/完整集合/CI 分片合同 | 1.403 | `.tmp-regression-docker-47650ee788df43a2935c627cc3f2a447` |
+| 完整 Docker 合同，45/45 | 280.448 | `.tmp-regression-docker-615d4ec957d54b6b98c64f18d154252c` |
+| 真实 OpenSSH/ss 格式、语法及 ShellCheck error | 通过 | `.tmp-ssh-preflight-8a/real.log` |
+
+全部回归实际执行、`cache_hit=false`；完整排队 360 ms，三槽预算和 Jobs 6 保持。
+10 个交付文件 SHA256 与最终完整快照逐一匹配，独立只读复审通过。
+真实格式检查仅在临时容器从 Debian 官方源补 OpenSSH 10.0p1，
+生产 `sshd -T` 与真实双栈 TCP listener 解析通过，环境门禁使用桩；
+这不是宿主 SSH/systemd、真实失败来源或封禁验收。首次安装因未初始化容器
+TMPDIR 失败，修正目录后通过，原始日志保留。只修改容器，无宿主工具安装。
+定向/完整共享依赖镜像，没有重建工具镜像或重复全套原生回归。
+详细证据 `.tmp-ssh-preflight-8a/evidence.md`；未推送或发布。
+清理本轮 5 套源码归档/清单及一次性脚本，保留结果/日志/摘要，其它任务文件未动。
+fresh SSH 来源、独立 INPUT owner/jail、原生宿主/arm64/重启卸载继续待办，
+5C 和总目标 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。
