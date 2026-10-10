@@ -1047,53 +1047,68 @@ ensureTraditionalTlsFallbackNginxConfig() {
         padmForgetCleanupPath "${recoveryFile}"
     fi
     nginxRunning && wasRunning=true
-    local previousSelection="${selectCustomInstallType:-}"
-    selectCustomInstallType="${rebuildSelection}"
+    local -A PADM_NGINX_REBUILD_ROLLBACK=(
+        [active]=true [targetPath]="${targetPath}" [recoveryFile]="${recoveryFile}"
+        [wasRunning]="${wasRunning}" [serviceAttempted]=false
+    )
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
+    padmRegisterExitRollback rollbackTraditionalTlsFallbackNginxOnExit
+    local selectCustomInstallType="${rebuildSelection}"
     updateRedirectNginxConf || rebuildStatus=1
-    selectCustomInstallType="${previousSelection}"
-    if [[ "${rebuildStatus}" == 0 ]] && ! runCoreServiceActionAllowFailure handleNginx refresh; then
-        rebuildStatus=2
+    if [[ "${rebuildStatus}" == 0 ]]; then
+        PADM_NGINX_REBUILD_ROLLBACK[serviceAttempted]=true
+        runCoreServiceActionAllowFailure handleNginx refresh || rebuildStatus=2
     fi
     if [[ "${rebuildStatus}" != 0 ]]; then
-        if [[ -n "${recoveryFile}" ]]; then
-            if ! restoreManagedFileFromBackup "${recoveryFile}" "${targetPath}" 644; then
-                errorCard "Nginx 重建失败，且旧配置恢复失败；请检查 ${targetPath} 和 ${recoveryFile}"
-                return 1
-            fi
-            removeManagedFileIfPresent "${recoveryFile}" || {
-                errorCard "旧 Nginx 配置已恢复，但恢复文件清理失败；请检查 ${recoveryFile}"
-                return 1
-            }
-            if [[ "${rebuildStatus}" == 2 ]]; then
-                if [[ "${wasRunning}" == true ]]; then
-                    local -a restoreArgs=(refresh)
-                    nginxRunning || restoreArgs=(start restore)
-                    if ! runCoreServiceActionAllowFailure handleNginx "${restoreArgs[@]}"; then
-                        errorCard "旧 Nginx 配置已恢复，但服务重新加载失败，请检查服务日志"
-                        return 1
-                    fi
-                elif nginxRunning; then
-                    if ! runCoreServiceActionAllowFailure handleNginx stop; then
-                        errorCard "旧 Nginx 配置已恢复，但服务停止失败，请检查服务日志"
-                        return 1
-                    fi
-                fi
-            fi
-            errorCard "Nginx 重建失败，已恢复旧 alone.conf"
-        else
-            removeManagedFileIfPresent "${targetPath}" || {
-                errorCard "Nginx 重建失败，且本次新配置清理失败；请检查 ${targetPath}"
-                return 1
-            }
-            errorCard "Nginx 重建失败，已删除本次新 alone.conf"
-        fi
+        padmRunRollback rollbackTraditionalTlsFallbackNginxOnExit || true
         return 1
     fi
+    # 提交成功后的备份清理失败不应撤销已生效配置。
+    PADM_NGINX_REBUILD_ROLLBACK[active]=false
     if [[ -n "${recoveryFile}" ]] && ! removeManagedFileIfPresent "${recoveryFile}"; then
         errorCard "Nginx 配置已重建，但恢复文件清理失败；请检查 ${recoveryFile}"
         return 1
     fi
     successCard "传统 TLS fallback 配置已重建"
+}
+
+rollbackTraditionalTlsFallbackNginxOnExit() {
+    [[ "${PADM_NGINX_REBUILD_ROLLBACK[active]:-false}" == true ]] || return 0
+    PADM_NGINX_REBUILD_ROLLBACK[active]=false
+    local targetPath="${PADM_NGINX_REBUILD_ROLLBACK[targetPath]}"
+    local recoveryFile="${PADM_NGINX_REBUILD_ROLLBACK[recoveryFile]}"
+    if [[ -n "${recoveryFile}" ]]; then
+        if ! restoreManagedFileFromBackup "${recoveryFile}" "${targetPath}" 644; then
+            errorCard "Nginx 重建失败，且旧配置恢复失败；请检查 ${targetPath} 和 ${recoveryFile}"
+            return 1
+        fi
+    elif ! removeManagedFileIfPresent "${targetPath}"; then
+        errorCard "Nginx 重建失败，且本次新配置清理失败；请检查 ${targetPath}"
+        return 1
+    fi
+    if [[ "${PADM_NGINX_REBUILD_ROLLBACK[serviceAttempted]}" == true ]]; then
+        if [[ "${PADM_NGINX_REBUILD_ROLLBACK[wasRunning]}" == true ]]; then
+            local -a restoreArgs=(refresh)
+            nginxRunning || restoreArgs=(start restore)
+            if ! runCoreServiceActionAllowFailure handleNginx "${restoreArgs[@]}"; then
+                errorCard "旧 Nginx 配置已恢复，但服务重新加载失败；请检查 ${targetPath} 和 ${recoveryFile}"
+                return 1
+            fi
+        elif nginxRunning && ! runCoreServiceActionAllowFailure handleNginx stop; then
+            errorCard "旧 Nginx 配置已恢复，但服务停止失败；请检查 ${targetPath} 和 ${recoveryFile}"
+            return 1
+        fi
+    fi
+    if [[ -n "${recoveryFile}" ]]; then
+        removeManagedFileIfPresent "${recoveryFile}" || {
+            errorCard "旧 Nginx 配置已恢复，但恢复文件清理失败；请检查 ${recoveryFile}"
+            return 1
+        }
+        errorCard "Nginx 重建失败，已恢复旧 alone.conf"
+    else
+        errorCard "Nginx 重建失败，已删除本次新 alone.conf"
+    fi
 }
 
 removeNginx302FromFile() {

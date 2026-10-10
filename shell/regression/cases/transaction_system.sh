@@ -2188,7 +2188,7 @@ SH
     ) || return 1
 
     (
-        local original calls=0 failAgain=false serviceLog="${TMP_DIR}/nginx-rebuild-service.log"
+        local original recoveryFile calls=0 failAgain=false serviceLog="${TMP_DIR}/nginx-rebuild-service.log"
         local errorLog="${TMP_DIR}/nginx-rebuild-error.log"
         original=$(<"${targetPath}")
         nginxRunning() { [[ "${calls}" == 0 ]]; }
@@ -2208,11 +2208,14 @@ SH
         regressionExpectStatus 1 ensureTraditionalTlsFallbackNginxConfig >/dev/null 2>&1 || return 1
         [[ "$(<"${targetPath}")" == "${original}" && "${calls}" == 2 ]] || return 1
         grep -q '旧 Nginx 配置已恢复，但服务重新加载失败' "${errorLog}" || return 1
+        recoveryFile=$(find "${nginxRoot}" -maxdepth 1 -name '.alone.conf.nginx-rebuild.*' -print -quit)
+        [[ -n "${recoveryFile}" && "$(<"${recoveryFile}")" == "${original}" ]] || return 1
+        removeManagedFileIfPresent "${recoveryFile}" || return 1
 
         rm -f -- "${targetPath}"
         calls=0
         regressionExpectStatus 1 ensureTraditionalTlsFallbackNginxConfig >/dev/null 2>&1 || return 1
-        [[ ! -e "${targetPath}" && "${calls}" == 1 ]] || return 1
+        [[ ! -e "${targetPath}" && "${calls}" == 2 ]] || return 1
         printf '%s' "${original}" >"${targetPath}"
         handleNginx() { return 0; }
         ensureTraditionalTlsFallbackNginxConfig >/dev/null 2>&1 || return 1
@@ -2268,6 +2271,137 @@ SH
         }
         ensureTraditionalTlsFallbackNginxConfig >/dev/null 2>&1 || return 1
         [[ "$(<"${serviceLog}")" == refresh ]] || return 1
+    ) || return 1
+
+    (
+        local phase signal status hadConfig wasRunning recoveryFile original menuCalls=0
+        local coreInstallType=1 domain=signal.example.com
+        local stateFile="${TMP_DIR}/nginx-rebuild-signal-state"
+        local signalFile="${TMP_DIR}/nginx-rebuild-signal-once"
+        local serviceLog="${TMP_DIR}/nginx-rebuild-signal.log"
+        original=$(<"${targetPath}")
+        nginxRunning() { [[ "$(<"${stateFile}")" == true ]]; }
+        menuReadChoice() {
+            menuCalls=$((menuCalls + 1))
+            if [[ "${menuCalls}" == 1 ]]; then
+                printf -v "$3" '%s' 1
+            else
+                printf -v "$3" '%s' 7
+            fi
+        }
+        nginx() {
+            command nginx "$@" || return
+            if [[ "$1" == -t && "${phase}" == validate && ! -f "${signalFile}" ]]; then
+                : >"${signalFile}"
+                kill "-${signal}" "${BASHPID}"
+                :
+            fi
+        }
+        handleNginx() {
+            printf '%s\n' "$*" >>"${serviceLog}"
+            case "$1" in
+            refresh | start) printf 'true\n' >"${stateFile}" ;;
+            stop) printf 'false\n' >"${stateFile}" ;;
+            *) return 1 ;;
+            esac
+            if [[ "$1" == refresh && "${phase}" == refresh && ! -f "${signalFile}" ]]; then
+                : >"${signalFile}"
+                kill "-${signal}" "${BASHPID}"
+                :
+            fi
+        }
+        # 公开维护菜单中断后，旧文件、原运行态与本轮回调均须收回。
+        for phase in validate refresh; do
+            for signal in INT TERM; do
+                for hadConfig in true false; do
+                    for wasRunning in true false; do
+                        local -a staleBackups=("${nginxRoot}"/.alone.conf.nginx-rebuild.*)
+                        [[ ! -f "${staleBackups[0]}" ]] || {
+                            printf 'fallback-signal-stale-backup\n' >&2
+                            return 1
+                        }
+                        rm -f -- "${targetPath}.bak"
+                        printf '%s' "${original}" >"${targetPath}"
+                        [[ "${hadConfig}" == true ]] || rm -f -- "${targetPath}"
+                        printf '%s\n' "${wasRunning}" >"${stateFile}"
+                        rm -f -- "${signalFile}"
+                        : >"${serviceLog}"
+                        menuCalls=0 status=0
+                        ( manageTraditionalTlsFallback 1 ) >/dev/null 2>&1 || status=$?
+                        [[ "${status}" == "$([[ "${signal}" == INT ]] && printf 130 || printf 143)" ]] || {
+                            printf 'fallback-signal-status:%s:%s:%s\n' "${phase}" "${signal}" "${status}" >&2
+                            return 1
+                        }
+                        if [[ "${hadConfig}" == true ]]; then
+                            [[ "$(<"${targetPath}")" == "${original}" ]] || {
+                                printf 'fallback-signal-file-not-restored:%s:%s\n' "${phase}" "${signal}" >&2
+                                return 1
+                            }
+                        else
+                            [[ ! -e "${targetPath}" ]] || return 1
+                        fi
+                        [[ "$(<"${stateFile}")" == "${wasRunning}" ]] || return 1
+                        [[ -z "$(find "${nginxRoot}" -maxdepth 1 -name '.alone.conf.nginx-rebuild.*' -print -quit)" ]] || return 1
+                        if [[ "${phase}" == validate ]]; then
+                            [[ ! -s "${serviceLog}" ]] || return 1
+                        elif [[ "${wasRunning}" == true ]]; then
+                            [[ "$(<"${serviceLog}")" == $'refresh\nrefresh' ]] || return 1
+                        else
+                            [[ "$(<"${serviceLog}")" == $'refresh\nstop' ]] || return 1
+                        fi
+                    done
+                done
+            done
+        done
+        printf '%s' "${original}" >"${targetPath}"
+        printf 'true\n' >"${stateFile}"
+        phase=restore-fail
+        : >"${serviceLog}"
+        handleNginx() { printf '%s\n' "$*" >>"${serviceLog}"; return 1; }
+        regressionExpectStatus 1 ensureTraditionalTlsFallbackNginxConfig >/dev/null 2>&1 || return 1
+        [[ "$(<"${targetPath}")" == "${original}" && "$(<"${serviceLog}")" == $'refresh\nrefresh' ]] || return 1
+        recoveryFile=$(find "${nginxRoot}" -maxdepth 1 -name '.alone.conf.nginx-rebuild.*' -print -quit)
+        [[ -n "${recoveryFile}" && "$(<"${recoveryFile}")" == "${original}" ]] || return 1
+        removeManagedFileIfPresent "${recoveryFile}" || return 1
+
+        # 普通回滚屏蔽第二次中断，成功后的清理失败只保留备份。
+        handleNginx() {
+            printf '%s\n' "$*" >>"${serviceLog}"
+            if [[ "$(wc -l <"${serviceLog}")" == 1 ]]; then
+                return 1
+            fi
+            kill -TERM "${BASHPID}"
+            printf 'true\n' >"${stateFile}"
+        }
+        : >"${serviceLog}"
+        regressionExpectStatus 1 ensureTraditionalTlsFallbackNginxConfig >/dev/null 2>&1 || return 1
+        [[ "$(<"${targetPath}")" == "${original}" &&
+            "$(<"${serviceLog}")" == $'refresh\nrefresh' ]] || return 1
+        [[ -z "$(find "${nginxRoot}" -maxdepth 1 -name '.alone.conf.nginx-rebuild.*' -print -quit)" ]] || return 1
+
+        handleNginx() { printf '%s\n' "$*" >>"${serviceLog}"; }
+        local callbackCount=${#PADM_EXIT_ROLLBACKS[@]} callbackOwner=${PADM_EXIT_ROLLBACK_OWNER:-}
+        local outerSelection="${selectCustomInstallType:-}" attempt
+        for attempt in 1 2 3; do
+            ensureTraditionalTlsFallbackNginxConfig >/dev/null 2>&1 || return 1
+            [[ ${#PADM_EXIT_ROLLBACKS[@]} == "${callbackCount}" &&
+                "${PADM_EXIT_ROLLBACK_OWNER:-}" == "${callbackOwner}" &&
+                "${selectCustomInstallType:-}" == "${outerSelection}" ]] || return 1
+        done
+        original=$(<"${targetPath}")
+        domain=cleanup.example.com
+        eval "$(declare -f removeManagedFileIfPresent | sed '1s/removeManagedFileIfPresent/originalRemoveRebuildFile/')"
+        removeManagedFileIfPresent() {
+            [[ "$1" != "${nginxRoot}/.alone.conf.nginx-rebuild."* ]] || return 1
+            originalRemoveRebuildFile "$@"
+        }
+        : >"${serviceLog}"
+        regressionExpectStatus 1 ensureTraditionalTlsFallbackNginxConfig >/dev/null 2>&1 || return 1
+        grep -q 'server_name cleanup.example.com;' "${targetPath}" || return 1
+        [[ "$(<"${serviceLog}")" == refresh && ${#PADM_EXIT_ROLLBACKS[@]} == "${callbackCount}" ]] || return 1
+        recoveryFile=$(find "${nginxRoot}" -maxdepth 1 -name '.alone.conf.nginx-rebuild.*' -print -quit)
+        [[ -n "${recoveryFile}" && "$(<"${recoveryFile}")" == "${original}" ]] || return 1
+        originalRemoveRebuildFile "${recoveryFile}" || return 1
     ) || return 1
 
     (
