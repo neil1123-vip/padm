@@ -3500,6 +3500,72 @@ source 18、unit 9、客户端合同及既有预检。
 本阶段不启用 collector、封禁 action、jail 或菜单/CLI 新入口；原生宿主、
 公网、arm64、重启卸载和连续短连接仍未验收。
 
+#### 5C.8c.2b SSH NSS 查询期限与生命周期证据
+
+本地签名提交 `9176eec2 fix(docker): bound SSH privsep NSS lookups`，
+`2217ce7e perf(regression): prioritize measured Docker contract workloads`，签名 `G`；
+未推送或发布，5C 与总目标继续 active。
+
+shared socket 的专用 UID 原来在父进程同步调用 NSS，远程 NSS 失联时可绕过既有
+总期限。现在通过固定 Python `-I` 子进程调用标准库 `pwd.getpwnam("sshd")`，
+复用现有 `run_command` 的每次 3 秒上限和总 deadline，输出最多 32 字节；
+专用账号名必须精确匹配，UID 只接受规范十进制 `1..4294967294`。
+两次 UID 查询均使用原 deadline 并拒绝漂移，root-only 连接不查询 NSS；
+owner、exe、父链、netns、socket 和完整代次核验保留。
+真实 subprocess 检查覆盖非零退出和已启动后的期限耗尽，并确认 kill/wait 回收、
+stdout 关闭；不新增运行依赖或放宽专用账号来源。
+
+完整合同按 8c.2a 的实测单项耗时优先调度长任务，集合与断言不变。
+原 45 项、Jobs 6 的独立 FIFO 模拟由 337690 降至 326562 ms，仅为预测。
+本轮 45/45 实测入口 302.946 秒；之后其它任务合入 `520a4309`，
+phase3 拆成独立 edit/entries，完整变为 46 叶，仍为 18 个 CI 分片。
+保留该提交的快速子集和状态隔离，独审确认当前 46 项唯一、集合一致、
+分发预期与生产同序；源码变化后重新集中验收，旧 45 项结果不替代新输入。
+
+2026-10-11，Docker Desktop Linux amd64，复用工具镜像
+`sha256:dbdfde081d3763df53ff13e5a79a9f2fbd7a98ef8660fed9ee02681a96abc2de`：
+
+| 最终检查 | 入口秒数 | 证据 |
+| --- | --- | --- |
+| SSH source 20/unit 9/preflight/client，Jobs 2 | 1.910 | `.tmp-regression-docker-5522274aea594beebe2c857bdf3e9188` |
+| 整合后分发合同，Jobs 2 | 1.457 | `.tmp-regression-docker-587d573a9f3c4ac6a8262da5edaee1a6` |
+| 整合后完整 Docker 合同，46/46，Jobs 6 | 291.860 | `.tmp-regression-docker-ee31dc5f64674a4aa65709b356813b4f` |
+| 真实 NSS helper 与过期 deadline | 通过 | `.tmp-ssh-nss-8c2b/result.json` |
+
+表中三项回归均 `exit_code=0`、`cache_hit=false`；SSH 定向在 phase3 拆分前，
+NSS 两文件未变，最终完整合同也再次执行 source 20/unit 9/client。
+完整内部 290.912 秒、
+排队 0.374 秒，仍占三槽预算中的 2 个槽位。292 个输入文件在启动后及提交前
+逐一 SHA256 与工作区相同；同一完整容器内通过 Shell 语法、
+ShellCheck error 和 Python AST 检查。真实 NSS helper 在既有 SSH 依赖镜像
+返回 UID 996，与标准库同值；过期 deadline 拒绝，探针容器及脚本已清理。
+
+用最终相同的 46 项单项耗时固定输入重算，旧排序预测 301774 ms、
+新排序 290857 ms，预计减少 10917 ms；这是模拟，没有再运行旧排序对照。
+不同轮次的宿主负载和源码变化不完全相同，实际入口下降不能全部归因排序。
+旧 45 项运行的 12 个离散资源样本看到 CPU 688.54%、内存 474.1 MiB、
+PIDs 53；初始阶段有采样间隔，不宣称绝对峰值或新的并发预算。
+
+生命周期隔离原型在当前 `6.6.87.2-microsoft-standard-WSL2` 内核中
+确认 pidfd 可观察已知进程退出、受控 ptrace 子树可观察 fork/exec/exit；
+私有容器的 proc connector LISTEN 返回 `ECONNREFUSED 111`，
+不能推断内核禁用，也未切换宿主 namespace 绕过。
+单个无网络、私有 PID、无特权、零挂载 receiver 原型 5 个场景符合预期：
+`SO_PASSCRED/SO_PASSPIDFD` 可取得活 sender 的同消息 pidfd；
+sender 已回收时返回 `-EINVAL`，正文和控制数据截断必须拒绝。
+发送后 exec 的反例保留同 PID、starttime 与有效 pidfd，当前 exe 已改变；
+pidfd 不固定发送时 exe、父链或已关闭 accepted socket。
+ptrace EXIT 停点也不能恢复此前用户态已关闭的 socket。
+这些能力证据不授权历史日志或连续 collector，未修改宿主 SSH、全局 `/dev/log`、
+权限规则或 unit namespace，未启用 jail。
+
+详细证据 `.tmp-ssh-bounded-8c2b/evidence.md`、
+`.tmp-ssh-lifecycle-8c2b/receiver-design.md` 和 `.tmp-ssh-pidfd-8c2b/evidence.md`。
+原型进程、socket、收到的 FD 与容器均已清理；本轮删除 6 套成功回归的
+源码归档/清单，共 12 文件、55,109,628 bytes，保留日志、结果、哈希及复用镜像。
+后续需同消息进程代次、exec 与真实连接生命周期的完整证据；原生宿主、
+LSM、systemd 服务切换、arm64、公网、重启卸载与完整防护仍未验收。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。
