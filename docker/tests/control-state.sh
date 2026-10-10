@@ -194,6 +194,7 @@ jq -e '.control.revision == 0 and .control.last_digest != null' "${spec}" >/dev/
 [[ "$(stat -c '%a:%u:%g' "${root}/config/control")" == 750:0:10001 ]]
 [[ "$(stat -c '%a:%u:%g' "${root}/logs/control")" == 750:0:10001 ]]
 [[ "$(stat -c '%a:%u:%g:%h' "${root}/logs/control/auth.log")" == 640:10001:10001:1 ]]
+[[ "$(stat -c '%a:%u:%g:%h' "${root}/logs/control/auth.lock")" == 640:0:10001:1 ]]
 [[ "$(stat -c '%a:%u:%g:%h' "${root}/logs/control/source.receipt")" == 640:10001:10001:1 ]]
 [[ "$(stat -c '%a:%u:%g' "${root}/data/control-source")" == 750:0:10001 &&
     ! -e "${root}/data/control-source/challenge.json" ]]
@@ -209,6 +210,7 @@ jq -e '.services.control |
   (.volumes | length) == 3 and
   .command == ["control","--state","/etc/padm/control/state.json",
     "--access-log","/var/log/padm/control/auth.log",
+    "--access-lock","/var/log/padm/control/auth.lock",
     "--source-challenge","/run/padm/control-source/challenge.json",
     "--source-receipt","/var/log/padm/control/source.receipt"] and
   .healthcheck.test[-3:] == ["control-health","--state","/etc/padm/control/state.json"]' \
@@ -289,24 +291,27 @@ DOCKER_STAGED_BUNDLE_PATH=$(dockerCurrentBundlePath)
     [[ "$(jq '.control.revision' "${DOCKER_CONFIG_CANDIDATE}/config/spec.json")" == 0 ]]
     [[ "$(stat -c '%a:%u:%g' "${DOCKER_CONFIG_CANDIDATE}/logs/control")" == 750:0:10001 &&
         ! -e "${DOCKER_CONFIG_CANDIDATE}/logs/control/auth.log" &&
+        ! -e "${DOCKER_CONFIG_CANDIDATE}/logs/control/auth.lock" &&
         ! -e "${DOCKER_CONFIG_CANDIDATE}/logs/control/source.receipt" &&
         "$(stat -c '%a:%u:%g' "${DOCKER_CONFIG_CANDIDATE}/data/control-source")" == 750:0:10001 &&
         ! -e "${DOCKER_CONFIG_CANDIDATE}/data/control-source/challenge.json" ]]
-    jq -e '.services.control.command[-6:] ==
+    jq -e '.services.control.command[-8:] ==
       ["--access-log","/var/log/padm/control/auth.log",
+       "--access-lock","/var/log/padm/control/auth.lock",
        "--source-challenge","/run/padm/control-source/challenge.json",
        "--source-receipt","/var/log/padm/control/source.receipt"] and
       ([.services[].labels["io.padm.release"]] | unique) == ["3.1.8"]' \
       "${DOCKER_CONFIG_CANDIDATE}/compose.json" >/dev/null
     dockerCandidateCompose() {
         [[ "$*" == "${DOCKER_CONFIG_CANDIDATE} config --format json" ]] && return 0
-        [[ "$*" == "${DOCKER_CONFIG_CANDIDATE} run --rm --no-deps control control --state /etc/padm/control/state.json --access-log /var/log/padm/control/auth.log --source-challenge /run/padm/control-source/challenge.json --source-receipt /var/log/padm/control/source.receipt --check" ]] || return 1
-        [[ "${REJECT_ACCESS_LOG_ARGUMENT:-0}" != 1 ]]
+        [[ "$*" == "${DOCKER_CONFIG_CANDIDATE} run --rm --no-deps control control --state /etc/padm/control/state.json --access-log /var/log/padm/control/auth.log --access-lock /var/log/padm/control/auth.lock --source-challenge /run/padm/control-source/challenge.json --source-receipt /var/log/padm/control/source.receipt --check" ]] || return 1
+        [[ "${REJECT_ACCESS_LOCK_ARGUMENT:-0}" != 1 ]]
     }
     dockerValidateUpdateCandidate "${DOCKER_CONFIG_CANDIDATE}"
-    REJECT_ACCESS_LOG_ARGUMENT=1
+    REJECT_ACCESS_LOCK_ARGUMENT=1
     if dockerValidateUpdateCandidate "${DOCKER_CONFIG_CANDIDATE}"; then exit 1; fi
     [[ ! -e "${DOCKER_CONFIG_CANDIDATE}/logs/control/auth.log" &&
+        ! -e "${DOCKER_CONFIG_CANDIDATE}/logs/control/auth.lock" &&
         ! -e "${DOCKER_CONFIG_CANDIDATE}/logs/control/source.receipt" &&
         ! -e "${DOCKER_CONFIG_CANDIDATE}/data/control-source/challenge.json" &&
         ! -e "${root}/logs/control" && ! -e "${root}/data/control-source" ]]
@@ -315,6 +320,13 @@ DOCKER_STAGED_BUNDLE_PATH=$(dockerCurrentBundlePath)
     mv -- "${root}/saved-control-source" "${root}/data/control-source"
     # 旧参数和新挂载的混合形态不属于任何受管版本，不能在升级时洗白。
     jq '.services.control.command = ["control","--state","/etc/padm/control/state.json"]' \
+        "${root}/current-compose.json" >"${root}/compose.json"
+    if dockerCreateUpdateCandidate; then exit 1; fi
+    dockerCleanupConfigurationCandidate
+    jq '.services.control.command = ["control","--state","/etc/padm/control/state.json",
+      "--access-log","/var/log/padm/control/auth.log",
+      "--access-lock","/var/log/padm/control/auth.lock"] |
+      .services.control.volumes = .services.control.volumes[:2]' \
         "${root}/current-compose.json" >"${root}/compose.json"
     if dockerCreateUpdateCandidate; then exit 1; fi
     dockerCleanupConfigurationCandidate
@@ -534,6 +546,32 @@ jq -e '.services.control.command == ["control","--state","/etc/padm/control/stat
   "--access-log","/var/log/padm/control/auth.log"] and
   (.services.control.volumes | length) == 2' "${root}/compose.json" >/dev/null
 [[ "$(sha256sum "${root}/logs/control/source.receipt")" == "${receiptDigest}" &&
+    -f "${root}/data/control-source/challenge.json" ]]
+dockerCleanupConfigurationCandidate
+# 5C.7c 来源挑战版本保留三挂载及原参数，不向旧镜像追加协作锁参数。
+dockerBackupConfiguration update
+sourceBackup=${DOCKER_CONFIG_BACKUP}
+dockerGenerateCompose "${spec}" /dev/stdout "${root}" |
+    jq '.services.control.command = ["control","--state","/etc/padm/control/state.json",
+      "--access-log","/var/log/padm/control/auth.log",
+      "--source-challenge","/run/padm/control-source/challenge.json",
+      "--source-receipt","/var/log/padm/control/source.receipt"]' >"${sourceBackup}/compose.json"
+chmod 0600 "${sourceBackup}/compose.json"
+sourceComposeDigest=$(sha256sum "${sourceBackup}/compose.json")
+lockIdentity=$(stat -c '%d:%i' -- "${root}/logs/control/auth.lock")
+DOCKER_CONFIG_BACKUP=${sourceBackup}
+DOCKER_CONFIG_SWITCHED=1
+dockerRestoreConfiguration
+jq -e '.services.control.command == ["control","--state","/etc/padm/control/state.json",
+  "--access-log","/var/log/padm/control/auth.log",
+  "--source-challenge","/run/padm/control-source/challenge.json",
+  "--source-receipt","/var/log/padm/control/source.receipt"] and
+  (.services.control.volumes | length) == 3 and
+  .services.control.volumes[2].target == "/run/padm/control-source" and
+  .services.control.volumes[2].read_only' "${root}/compose.json" >/dev/null
+[[ "$(sha256sum "${sourceBackup}/compose.json")" == "${sourceComposeDigest}" &&
+    "$(sha256sum "${root}/logs/control/source.receipt")" == "${receiptDigest}" &&
+    "$(stat -c '%d:%i' -- "${root}/logs/control/auth.lock")" == "${lockIdentity}" &&
     -f "${root}/data/control-source/challenge.json" ]]
 rm -- "${root}/data/control-source/challenge.json"
 dockerCleanupConfigurationCandidate

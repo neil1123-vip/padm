@@ -2762,6 +2762,7 @@ dockerGenerateCompose() {
             network_mode: "host",
             command: ["control", "--state", "/etc/padm/control/state.json",
               "--access-log", "/var/log/padm/control/auth.log",
+              "--access-lock", "/var/log/padm/control/auth.lock",
               "--source-challenge", "/run/padm/control-source/challenge.json",
               "--source-receipt", "/var/log/padm/control/source.receipt"],
             labels: labels("control"),
@@ -2838,8 +2839,13 @@ dockerGenerateCompose() {
 dockerGenerateCompatibleControlCompose() {
     local specFile=$1 actualFile=$2 directory=$3 expected
     expected=$(dockerGenerateCompose "${specFile}" /dev/stdout "${directory}") || return 1
-    # release 标签沿用既有编辑规则；三代主控只接受各自完整的固定参数与挂载。
+    # release 标签沿用既有编辑规则；四代主控只接受各自完整的固定参数与挂载。
     jq -en --argjson expected "${expected}" --slurpfile actual "${actualFile}" '
+      def source_legacy:
+        .services.control.command = ["control", "--state", "/etc/padm/control/state.json",
+          "--access-log", "/var/log/padm/control/auth.log",
+          "--source-challenge", "/run/padm/control-source/challenge.json",
+          "--source-receipt", "/var/log/padm/control/source.receipt"];
       def logged_legacy:
         .services.control.command = ["control", "--state", "/etc/padm/control/state.json",
           "--access-log", "/var/log/padm/control/auth.log"] |
@@ -2859,6 +2865,9 @@ dockerGenerateCompatibleControlCompose() {
       if ($actual | length) != 1 then error("invalid control compose")
       else ($expected | release_metadata($actual[0])) as $compatible |
         if $actual[0].services.control == $compatible.services.control then $compatible
+          elif $compatible.services.control != null and
+            $actual[0].services.control == ($compatible | source_legacy | .services.control)
+          then $compatible | source_legacy
         elif $compatible.services.control != null and
           $actual[0].services.control == ($compatible | logged_legacy | .services.control)
         then $compatible | logged_legacy
@@ -4179,6 +4188,7 @@ dockerValidateCandidate() {
         dockerCandidateCompose "${candidate}" run --rm --no-deps control \
             control --state /etc/padm/control/state.json \
             --access-log /var/log/padm/control/auth.log \
+            --access-lock /var/log/padm/control/auth.lock \
             --source-challenge /run/padm/control-source/challenge.json \
             --source-receipt /var/log/padm/control/source.receipt --check >/dev/null || {
             dockerError '主控私网服务候选配置校验失败'
@@ -4462,6 +4472,7 @@ dockerValidateUpdateCandidate() {
         dockerCandidateCompose "${candidate}" run --rm --no-deps control \
             control --state /etc/padm/control/state.json \
             --access-log /var/log/padm/control/auth.log \
+            --access-lock /var/log/padm/control/auth.lock \
             --source-challenge /run/padm/control-source/challenge.json \
             --source-receipt /var/log/padm/control/source.receipt --check >/dev/null || return 1
     fi
@@ -4612,14 +4623,22 @@ dockerControlAccessLogEnsure() {
         [[ -d "${logDirectory}" &&
             "$(stat -c '%a:%u:%g' -- "${logDirectory}")" == "750:0:${PADM_DOCKER_CONTAINER_GID}" &&
             -z "$(find "${logDirectory}" -mindepth 1 -maxdepth 1 \
-                ! -path "${logDirectory}/auth.log" ! -path "${logDirectory}/source.receipt" -print -quit)" ]] || return 1
+                ! -path "${logDirectory}/auth.log" ! -path "${logDirectory}/source.receipt" \
+                ! -path "${logDirectory}/auth.lock" ! -path "${logDirectory}/auth.log.1" \
+                ! -path "${logDirectory}/auth.log.2" -print -quit)" ]] || return 1
     fi
-    for logFile in "${logDirectory}/auth.log" "${logDirectory}/source.receipt"; do
+    for logFile in "${logDirectory}/auth.log" "${logDirectory}/source.receipt" \
+        "${logDirectory}/auth.log.1" "${logDirectory}/auth.log.2"; do
         [[ -e "${logFile}" || -L "${logFile}" ]] || continue
         [[ -f "${logFile}" && ! -L "${logFile}" &&
             "$(stat -c '%a:%u:%g:%h' -- "${logFile}")" == \
                 "640:${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}:1" ]] || return 1
     done
+    if [[ -e "${logDirectory}/auth.lock" || -L "${logDirectory}/auth.lock" ]]; then
+        [[ -f "${logDirectory}/auth.lock" && ! -L "${logDirectory}/auth.lock" &&
+            "$(stat -c '%a:%u:%g:%h' -- "${logDirectory}/auth.lock")" == \
+                "640:0:${PADM_DOCKER_CONTAINER_GID}:1" ]] || return 1
+    fi
     if [[ -e "${sourceDirectory}" || -L "${sourceDirectory}" ]]; then
         [[ -d "${sourceDirectory}" &&
             "$(stat -c '%a:%u:%g' -- "${sourceDirectory}")" == "750:0:${PADM_DOCKER_CONTAINER_GID}" &&
@@ -4646,6 +4665,12 @@ dockerControlAccessLogEnsure() {
                 chown "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" "${logFile}" || return 1
         fi
     done
+    if [[ ! -e "${logDirectory}/auth.lock" && ! -L "${logDirectory}/auth.lock" ]]; then
+        # 固定 root 锁由 API 只读持有，轮转和追加共用同一 inode，已有锁不得重建。
+        (umask 027; set -C; : >"${logDirectory}/auth.lock") &&
+            chmod 0640 "${logDirectory}/auth.lock" &&
+            chown "0:${PADM_DOCKER_CONTAINER_GID}" "${logDirectory}/auth.lock" || return 1
+    fi
 }
 
 dockerEnsureRuntimeDataPermissions() {

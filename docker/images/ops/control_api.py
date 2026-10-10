@@ -8,15 +8,18 @@ import ipaddress
 import json
 import os
 import re
+import signal
 import socket
 import socketserver
 import stat
 import struct
 import sys
+import tempfile
 import threading
 import time
 import uuid
 from datetime import datetime, timezone
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -24,6 +27,7 @@ API_VERSION = 1
 MAX_STATE_BYTES = 1024 * 1024
 MAX_HEALTH_BYTES = 256
 HEALTH_TIMEOUT = 2
+ACCESS_LOG_ROTATE_BYTES = 10 * 1024 * 1024
 PRIVATE_NETWORKS = tuple(ipaddress.ip_network(value) for value in (
     "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
 ))
@@ -202,7 +206,7 @@ def request_log_tuple(connection):
         return None
 
 
-def open_access_log(path):
+def access_log_parent(path):
     path = Path(path)
     if not path.is_absolute():
         raise ValueError("访问日志路径不安全")
@@ -213,7 +217,13 @@ def open_access_log(path):
             raise ValueError("访问日志目录不安全")
         if parent == path.parent and (metadata.st_gid != 10001 or stat.S_IMODE(metadata.st_mode) != 0o750):
             raise ValueError("访问日志目录权限不匹配")
-    descriptor = os.open(path, os.O_APPEND | os.O_WRONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    return path
+
+
+def open_access_log(path, read_only=False):
+    path = access_log_parent(path)
+    flags = os.O_RDONLY if read_only else os.O_APPEND | os.O_WRONLY
+    descriptor = os.open(path, flags | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
     try:
         metadata = os.fstat(descriptor)
         if (not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1
@@ -226,6 +236,43 @@ def open_access_log(path):
         raise
 
 
+@contextmanager
+def access_log_lock(path, lock_path=None, exclusive=False):
+    if lock_path is None:
+        yield
+        return
+    path, lock_path = Path(path), Path(lock_path)
+    if not lock_path.is_absolute() or lock_path.name != "auth.lock" or lock_path.parent != path.parent:
+        raise ValueError("访问日志锁路径不安全")
+    access_log_parent(lock_path)
+    descriptor = os.open(lock_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    try:
+        def check(metadata):
+            if (not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1
+                    or metadata.st_uid != 0 or metadata.st_gid != 10001
+                    or stat.S_IMODE(metadata.st_mode) != 0o640):
+                raise ValueError("访问日志锁权限不匹配")
+        check(os.fstat(descriptor))
+        deadline = time.monotonic() + 10
+        while True:
+            try:
+                fcntl.flock(descriptor, (fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH) | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise ValueError("访问日志锁等待超时") from None
+                time.sleep(0.02)
+        access_log_parent(lock_path)
+        opened, current = os.fstat(descriptor), lock_path.lstat()
+        check(opened)
+        check(current)
+        if (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino):
+            raise ValueError("访问日志锁已被替换")
+        yield
+    finally:
+        os.close(descriptor)
+
+
 def access_log_failure():
     try:
         print("控制访问日志写入失败，服务已停止", file=sys.stderr, flush=True)
@@ -233,15 +280,120 @@ def access_log_failure():
         raise SystemExit(78) from None
 
 
-def append_access_line(path, line):
-    descriptor = open_access_log(path)
-    try:
-        content = (line + "\n").encode("ascii")
-        if os.write(descriptor, content) != len(content):
-            raise OSError("访问日志短写")
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
+def append_access_line(path, line, lock_path=None):
+    with access_log_lock(path, lock_path):
+        descriptor = open_access_log(path)
+        try:
+            content = (line + "\n").encode("ascii")
+            if os.write(descriptor, content) != len(content):
+                raise OSError("访问日志短写")
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+
+def rotate_access_log(path, lock_path):
+    path = Path(path)
+    if os.geteuid() != 0 or path.name != "auth.log" or lock_path is None:
+        raise ValueError("控制日志轮转需要 root 和固定日志锁")
+    with access_log_lock(path, lock_path, exclusive=True):
+        allowed = {"auth.log", "auth.lock", "source.receipt", "auth.log.1", "auth.log.2"}
+        if not set(os.listdir(path.parent)) <= allowed:
+            raise ValueError("控制日志目录存在未处理文件")
+        metadata = {}
+        for name in sorted(allowed - {"auth.lock"}):
+            leaf = path.with_name(name)
+            if name != "auth.log" and not leaf.exists() and not leaf.is_symlink():
+                continue
+            descriptor = open_access_log(leaf, read_only=True)
+            try:
+                opened, current = os.fstat(descriptor), leaf.lstat()
+                if (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino):
+                    raise ValueError("控制日志文件已被替换")
+                metadata[leaf] = opened
+            finally:
+                os.close(descriptor)
+        if metadata[path].st_size < ACCESS_LOG_ROTATE_BYTES:
+            return "not-needed"
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        stage = None
+        owned, moves = {}, []
+        previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM})
+
+        def identity(leaf):
+            value = leaf.lstat()
+            return value.st_dev, value.st_ino
+
+        def move(source, target, expected):
+            if identity(source) != expected or target.exists() or target.is_symlink():
+                raise ValueError("控制日志轮转文件已变化")
+            moves.append((source, target, expected))
+            if target.parent == stage:
+                owned[target.name] = expected
+            os.rename(source, target)
+
+        def cleanup():
+            nonlocal stage
+            if stage is None:
+                return
+            if identity(stage) != stage_identity or set(os.listdir(stage)) - set(owned):
+                raise ValueError("控制日志轮转临时目录已变化")
+            for leaf in stage.iterdir():
+                if identity(leaf) != owned[leaf.name]:
+                    raise ValueError("控制日志轮转临时文件已变化")
+                leaf.unlink()
+            stage.rmdir()
+            stage = None
+            os.fsync(directory)
+
+        try:
+            stage = Path(tempfile.mkdtemp(prefix=".control-log-rotate.", dir=path.parent))
+            stage_identity = identity(stage)
+            new = stage / "new"
+            descriptor = os.open(new, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o640)
+            try:
+                owned["new"] = identity(new)
+                os.fchmod(descriptor, 0o640)
+                os.fchown(descriptor, 10001, 10001)
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+            # 排他锁已取得；文件准备、移名、同步及恢复保持同一信号边界。
+            try:
+                oldest = path.with_name("auth.log.2")
+                previous = path.with_name("auth.log.1")
+                for source, target in ((oldest, stage / "oldest"), (previous, oldest), (path, previous)):
+                    if source in metadata:
+                        expected = metadata[source].st_dev, metadata[source].st_ino
+                        move(source, target, expected)
+                move(new, path, owned["new"])
+                os.fsync(directory)
+            except BaseException:
+                restored = True
+                for source, target, expected in reversed(moves):
+                    try:
+                        if not target.exists() and not target.is_symlink() and identity(source) == expected:
+                            continue
+                        if identity(target) != expected or source.exists() or source.is_symlink():
+                            raise ValueError("控制日志轮转恢复文件已变化")
+                        os.rename(target, source)
+                    except (OSError, ValueError):
+                        restored = False
+                os.fsync(directory)
+                if restored:
+                    cleanup()
+                raise ValueError("控制日志轮转失败") from None
+            cleanup()
+        except BaseException:
+            if not moves:
+                cleanup()
+            raise
+        finally:
+            try:
+                os.close(directory)
+            finally:
+                signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+        return "rotated"
 
 
 def read_source_challenge(path):
@@ -289,7 +441,7 @@ def read_source_challenge(path):
         raise ValueError("来源登记类型不合法") from error
 
 
-def request_log_event(status, endpoints, access_log=None):
+def request_log_event(status, endpoints, access_log=None, lock_path=None):
     if endpoints is None:
         if access_log is not None:
             access_log_failure()
@@ -300,7 +452,7 @@ def request_log_event(status, endpoints, access_log=None):
     try:
         if access_log is not None:
             # 每条重新打开已预建的安全文件，单次追加并同步后才允许 stdout 或响应。
-            append_access_line(access_log, line)
+            append_access_line(access_log, line, lock_path)
         print(line, flush=True)
     except (OSError, ValueError):
         if access_log is not None:
@@ -320,7 +472,8 @@ class ControlHandler(BaseHTTPRequestHandler):
     def handle_one_request(self):
         super().handle_one_request()
         if getattr(self, "raw_requestline", None) == b"":
-            request_log_event("connection_closed", self.log_endpoints, getattr(self.server, "access_log", None))
+            request_log_event("connection_closed", self.log_endpoints, getattr(self.server, "access_log", None),
+                              getattr(self.server, "access_lock", None))
 
     def do_GET(self):
         try:
@@ -404,12 +557,14 @@ class ControlHandler(BaseHTTPRequestHandler):
 
     def log_request(self, code="-", size="-"):
         if isinstance(code, int) and not isinstance(code, bool) and 100 <= code <= 599:
-            request_log_event(int(code), self.log_endpoints, getattr(self.server, "access_log", None))
+            request_log_event(int(code), self.log_endpoints, getattr(self.server, "access_log", None),
+                              getattr(self.server, "access_lock", None))
 
     def log_error(self, message_format, *args):
         # BaseHTTP 会吞掉读取超时，只按异常类型记录关闭，不读取异常原文。
         if len(args) == 1 and isinstance(args[0], TimeoutError):
-            request_log_event("connection_closed", self.log_endpoints, getattr(self.server, "access_log", None))
+            request_log_event("connection_closed", self.log_endpoints, getattr(self.server, "access_log", None),
+                              getattr(self.server, "access_lock", None))
 
     def log_message(self, message_format, *args):
         # BaseHTTP 的格式参数可能含请求原文，日志只走固定状态与真实 socket。
@@ -446,7 +601,8 @@ class ControlServer(HTTPServer):
         try:
             super().finish_request(connection, address)
         except (BrokenPipeError, ConnectionResetError, TimeoutError):
-            request_log_event("connection_closed", endpoints, getattr(self, "access_log", None))
+            request_log_event("connection_closed", endpoints, getattr(self, "access_log", None),
+                              getattr(self, "access_lock", None))
         finally:
             deadline.cancel()
             deadline.join()
@@ -457,25 +613,44 @@ def main():
     parser.add_argument("--version", action="version", version="padm-control/1")
     parser.add_argument("--state", required=True)
     parser.add_argument("--access-log")
+    parser.add_argument("--access-lock")
     parser.add_argument("--source-challenge")
     parser.add_argument("--source-receipt")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true")
     mode.add_argument("--health", action="store_true")
+    mode.add_argument("--rotate-access-log", action="store_true")
     args = parser.parse_args()
     if ((args.source_challenge is None) != (args.source_receipt is None)
             or (args.source_challenge is not None and args.access_log is None)):
         parser.error("来源登记和回执须成对设置，且必须启用访问日志")
+    if args.access_lock is not None and (
+            args.access_log is None or not Path(args.access_lock).is_absolute()
+            or Path(args.access_lock).name != "auth.lock"
+            or Path(args.access_lock).parent != Path(args.access_log).parent):
+        parser.error("访问日志锁须与访问日志同目录，固定名为 auth.lock")
+    if args.rotate_access_log and (args.access_log is None or args.access_lock is None):
+        parser.error("控制日志轮转必须启用访问日志和锁")
     try:
         state = read_state(args.state)
         if args.check:
+            return
+        if args.rotate_access_log:
+            try:
+                result = rotate_access_log(args.access_log, args.access_lock)
+            except (OSError, ValueError):
+                parser.exit(78, "控制日志轮转失败，已停止\n")
+            except KeyboardInterrupt:
+                parser.exit(130, "控制日志轮转已中止\n")
+            print(f"control-log-rotation={result}", flush=True)
             return
         if args.health:
             health_check(state)
             return
         if args.access_log is not None:
             try:
-                os.close(open_access_log(args.access_log))
+                with access_log_lock(args.access_log, args.access_lock):
+                    os.close(open_access_log(args.access_log))
                 if args.source_challenge is not None:
                     os.close(open_access_log(args.source_receipt))
                     read_source_challenge(args.source_challenge)
@@ -486,11 +661,14 @@ def main():
         server.state_path = args.state
         server.listen = state["listen"]
         server.access_log = args.access_log
+        server.access_lock = args.access_lock
         server.source_challenge = args.source_challenge
         server.source_receipt = args.source_receipt
         with server:
             server.serve_forever()
     except (OSError, ValueError, http.client.HTTPException) as error:
+        if args.rotate_access_log:
+            parser.exit(78, "控制日志轮转失败，已停止\n")
         if args.health:
             parser.exit(1, "控制服务健康检查失败\n")
         parser.exit(78, f"控制后端启动失败: {error}\n")

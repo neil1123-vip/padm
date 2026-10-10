@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+import concurrent.futures
+import fcntl
+import hashlib
 import json
 import os
 import re
@@ -132,6 +135,126 @@ def services(node):
     assert sorted(clients, key=lambda value: value["email"]) == sorted(expected, key=lambda value: value["email"]), \
         "真实核心账号与已提交规格不一致"
     return result
+
+
+def source_check(controller, controlled):
+    proof_output = controller["path"] / "source-proof.log"
+    with proof_output.open("wb") as output:
+        proof = subprocess.Popen(
+            controller["enter"] + ["bash", str(controller["path"] / "bin/padm-docker"),
+                                   "control", "source-check"],
+            env=controller["env"], stdout=output, stderr=subprocess.STDOUT,
+        )
+        try:
+            deadline = time.monotonic() + 20
+            while b"source-challenge=" not in proof_output.read_bytes():
+                assert proof.poll() is None and time.monotonic() < deadline, \
+                    f"来源挑战未发布，退出码 {proof.poll()}：" + diagnostic(
+                        controller, proof_output.read_text())
+                time.sleep(0.05)
+            registration_path = controller["path"] / "deployment/data/control-source/challenge.json"
+            registration = json.loads(registration_path.read_text())
+            cli(controlled, "control", "source-probe", "--address", ADDRESS[0], "--port", "39778",
+                "--peer-address", ADDRESS[1], "--nonce", registration["nonce"])
+            assert proof.wait(timeout=20) == 0, diagnostic(controller, proof_output.read_text())
+            assert b"source-verified=" in proof_output.read_bytes()
+            assert not registration_path.exists()
+            receipt = (controller["path"] / "deployment/logs/control/source.receipt").read_text()
+            assert f"nonce={registration['nonce']} status=401 source={ADDRESS[1]}" in receipt
+            print("docker-control-two-deployment-source-witness-ok", flush=True)
+        finally:
+            stop(proof)
+
+
+def log_rotate(controller, controlled, invitation):
+    root = controller["path"] / "deployment"
+    directory = root / "logs/control"
+    auth, receipt = directory / "auth.log", directory / "source.receipt"
+    assert not (directory / "auth.log.1").exists() and not (directory / "auth.log.2").exists()
+    before = services(controller)
+    previous = auth.stat()
+    receipt_before = receipt.stat()
+    receipt_hash = hashlib.sha256(receipt.read_bytes()).digest()
+    helper = None
+    # 持真实协作锁观察生产 helper，释放后由原 CLI 等待提交并清理，API 始终在线。
+    with (directory / "auth.lock").open("rb") as lock, \
+            concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            seeded = auth.read_bytes().splitlines(keepends=True)[0]
+            padding = seeded * (10 * 1024 * 1024 // len(seeded) + 1)
+            with auth.open("ab") as output:
+                output.write(padding)
+                output.flush()
+                os.fsync(output.fileno())
+            expected = auth.read_bytes()
+            future = executor.submit(cli, controller, "control", "log-rotate", "--yes")
+            deadline = time.monotonic() + 5
+            while helper is None:
+                if future.done():
+                    future.result()
+                    raise AssertionError("轮转 CLI 未启动持锁等待的真实 helper")
+                containers = command(controller["docker"] + [
+                    "ps", "--quiet", "--filter", "label=io.padm.mode=docker",
+                    "--filter", "label=io.padm.project=padm-docker",
+                ], timeout=max(0.1, deadline - time.monotonic())).decode().split()
+                inspected = []
+                for container in containers:
+                    try:
+                        inspected.extend(json.loads(command(
+                            controller["docker"] + ["inspect", container],
+                            timeout=max(0.1, deadline - time.monotonic()))))
+                    except AssertionError as error:
+                        if "no such object" in str(error).lower():
+                            continue
+                        raise
+                for actual in inspected:
+                    if "--rotate-access-log" not in (actual["Config"].get("Cmd") or []):
+                        continue
+                    assert actual["State"]["Running"]
+                    assert actual["Config"]["User"] == "0:10001"
+                    assert actual["HostConfig"]["ReadonlyRootfs"] and not actual["HostConfig"]["Privileged"]
+                    assert actual["HostConfig"]["CapDrop"] == ["ALL"]
+                    assert [cap.removeprefix("CAP_") for cap in actual["HostConfig"]["CapAdd"]] == ["CHOWN"]
+                    assert actual["HostConfig"]["NetworkMode"] == "none"
+                    assert actual["HostConfig"]["LogConfig"]["Type"] == "none"
+                    assert any(mount["Source"] == str(directory) and mount["Destination"] == "/var/log/padm/control"
+                               and mount["RW"] for mount in actual["Mounts"])
+                    helper = actual["Id"]
+                assert helper is not None or time.monotonic() < deadline, "未观察到真实轮转 helper"
+                if helper is None:
+                    time.sleep(0.02)
+            time.sleep(0.1)
+            assert not future.done(), "真实轮转 CLI 未等待协作锁"
+            locked_auth = auth.stat()
+            assert (locked_auth.st_dev, locked_auth.st_ino) == (previous.st_dev, previous.st_ino) and \
+                auth.read_bytes() == expected, "持锁期间真实轮转改动原日志"
+            assert not (directory / "auth.log.1").exists() and not (directory / "auth.log.2").exists() and \
+                not list(directory.glob(".control-log-rotate.*")), "持锁期间真实轮转创建归档或临时目录"
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+        future.result(timeout=35)
+    assert not command(controller["docker"] + ["ps", "--all", "--quiet", "--filter", f"id={helper}"])
+    archive = directory / "auth.log.1"
+    archived = archive.stat()
+    assert (archived.st_dev, archived.st_ino) == (previous.st_dev, previous.st_ino)
+    assert archive.read_bytes()[:len(expected)] == expected, "真实轮转丢失原日志内容"
+    assert (archived.st_mode & 0o7777, archived.st_uid, archived.st_gid, archived.st_nlink) == (0o640, 10001, 10001, 1)
+    current_auth = auth.stat()
+    assert (current_auth.st_dev, current_auth.st_ino) != (previous.st_dev, previous.st_ino)
+    assert (current_auth.st_mode & 0o7777, current_auth.st_uid, current_auth.st_gid, current_auth.st_nlink) == \
+        (0o640, 10001, 10001, 1)
+    current_receipt = receipt.stat()
+    assert (current_receipt.st_dev, current_receipt.st_ino) == (receipt_before.st_dev, receipt_before.st_ino)
+    assert hashlib.sha256(receipt.read_bytes()).digest() == receipt_hash, "真实轮转改动来源回执"
+    assert services(controller) == before, "真实轮转重建了在线服务"
+    reachable(controlled, invitation)
+    assert f"control-request status=401 source={ADDRESS[1]}".encode() in auth.read_bytes(), \
+        "真实 API 未向轮转后的日志续写"
+    source_check(controller, controlled)
+    assert services(controller) == before and not (root / "locks/deployment.lock").exists()
+    assert set(path.name for path in directory.iterdir()) == {"auth.log", "auth.lock", "auth.log.1", "source.receipt"}
+    print("docker-control-two-deployment-log-rotate-online-ok", flush=True)
 
 
 def reachable(node, invitation):
@@ -478,32 +601,7 @@ def main():
                 "--peer-address", ADDRESS[1], "--yes")
             initial_services = services(controller)
             assert "control" in initial_services
-            proof_output = controller["path"] / "source-proof.log"
-            with proof_output.open("wb") as output:
-                proof = subprocess.Popen(
-                    controller["enter"] + ["bash", str(controller["path"] / "bin/padm-docker"),
-                                           "control", "source-check"],
-                    env=controller["env"], stdout=output, stderr=subprocess.STDOUT,
-                )
-                try:
-                    deadline = time.monotonic() + 20
-                    while b"source-challenge=" not in proof_output.read_bytes():
-                        assert proof.poll() is None and time.monotonic() < deadline, \
-                            f"来源挑战未发布，退出码 {proof.poll()}：" + diagnostic(
-                                controller, proof_output.read_text())
-                        time.sleep(0.05)
-                    registration_path = controller["path"] / "deployment/data/control-source/challenge.json"
-                    registration = json.loads(registration_path.read_text())
-                    cli(controlled, "control", "source-probe", "--address", ADDRESS[0], "--port", "39778",
-                        "--peer-address", ADDRESS[1], "--nonce", registration["nonce"])
-                    assert proof.wait(timeout=20) == 0, diagnostic(controller, proof_output.read_text())
-                    assert b"source-verified=" in proof_output.read_bytes()
-                    assert not registration_path.exists()
-                    receipt = (controller["path"] / "deployment/logs/control/source.receipt").read_text()
-                    assert f"nonce={registration['nonce']} status=401 source={ADDRESS[1]}" in receipt
-                    print("docker-control-two-deployment-source-witness-ok", flush=True)
-                finally:
-                    stop(proof)
+            source_check(controller, controlled)
             invite = controller["path"] / "private/invite.json"
             cli(controller, "control", "invite", "--output", str(invite), "--yes")
             controlled_invite = controlled["path"] / "private/invite.json"
@@ -519,6 +617,7 @@ def main():
             assert services(controlled) == before_services, "真实幂等同步重建了服务"
             assert state(controlled) == joined
             print("docker-control-two-deployment-join-idempotency-ok", flush=True)
+            log_rotate(controller, controlled, controlled_invite)
             traffic_before = traffic(controlled, images["sing-box"])
             command(controlled["enter"] + ["ip", "route", "replace", ADDRESS[0] + "/32", "dev", "underlay"])
             cli(controlled, "control", "sync", "--invite", str(controlled_invite), accepted=False)

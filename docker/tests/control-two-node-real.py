@@ -98,6 +98,9 @@ def main():
         auth_log = auth_directory / "auth.log"
         auth_log.touch(mode=0o640)
         os.chown(auth_log, 10001, 10001)
+        auth_lock = auth_directory / "auth.lock"
+        auth_lock.touch(mode=0o640)
+        os.chown(auth_lock, 0, 10001)
         receipt = auth_directory / "source.receipt"
         receipt.touch(mode=0o640)
         os.chown(receipt, 10001, 10001)
@@ -196,6 +199,7 @@ def main():
                     namespace(controller) + [sys.executable, str(Path(__file__).resolve()),
                                              "--api", "--state", str(state_path),
                                              "--access-log", str(auth_log),
+                                             "--access-lock", str(auth_lock),
                                              "--source-challenge", str(challenge_path),
                                              "--source-receipt", str(receipt)],
                     stdout=output, stderr=subprocess.STDOUT,
@@ -251,6 +255,40 @@ def main():
             evidence["source_challenge"] = {
                 "registered_nonce_only": True, "peer_socket_matched": True,
                 "old_nonce_wrong_source_expired_missing_rejected": True, "auth_log_unchanged_format": True,
+            }
+
+            # 真实降权 API 与仅 CHOWN 的 root 轮转并行，完整日志不能丢行或重复。
+            seeded = auth_log.read_bytes().splitlines(keepends=True)[0]
+            padding = seeded * (10 * 1024 * 1024 // len(seeded) + 1)
+            with auth_log.open("ab") as output:
+                output.write(padding)
+            receipt_before = receipt.stat(), receipt.read_bytes()
+            with client_log.open("ab") as output:
+                requests = subprocess.Popen(
+                    namespace(controlled) + [sys.executable, str(Path(__file__).resolve()),
+                                             "--rotation-requests"],
+                    stdout=output, stderr=subprocess.STDOUT,
+                )
+            try:
+                rotation = run([
+                    "setpriv", "--regid", "10001", "--clear-groups", "--bounding-set=-all,+chown",
+                    "--inh-caps=-all", "--ambient-caps=-all", "--",
+                    sys.executable, str(OPS / "control_api.py"), "--state", str(state_path),
+                    "--access-log", str(auth_log), "--access-lock", str(auth_lock), "--rotate-access-log",
+                ])
+                assert rotation == b"control-log-rotation=rotated\n"
+                assert requests.wait(timeout=8) == 0, "并发轮转期间真实 API 请求失败"
+            finally:
+                stop(requests)
+            archived = auth_log.with_name("auth.log.1").read_bytes()
+            assert archived.count(padding) == 1, "轮转前日志内容未完整保留"
+            rotation_prefix = archived.replace(padding, b"", 1)
+            assert (receipt.stat().st_dev, receipt.stat().st_ino, receipt.read_bytes()) == (
+                receipt_before[0].st_dev, receipt_before[0].st_ino, receipt_before[1])
+            assert server.poll() is None, "在线轮转重启或终止了 API"
+            evidence["log_rotation"] = {
+                "api_uid": 10001, "rotator_only_chown": True, "requests": 30,
+                "receipt_inode_unchanged": True, "api_not_restarted": True,
             }
 
             def client(*, join=False, accepted=True):
@@ -358,7 +396,8 @@ def main():
             assert result.returncode == 0 and not result.stderr and json.loads(result.stdout) == recovered
             stop(server)
             server = None
-            assert auth_log.read_bytes() == api_log.read_bytes(), "持久日志与生产标准输出不一致"
+            assert rotation_prefix + auth_log.read_bytes() == api_log.read_bytes(), \
+                "轮转前后持久日志与生产标准输出不一致"
 
             failure_log = work / "log-failure.log"
             with failure_log.open("wb") as output:
@@ -366,6 +405,7 @@ def main():
                     namespace(controller) + [sys.executable, str(Path(__file__).resolve()),
                                              "--api", "--state", str(state_path),
                                              "--access-log", str(auth_log),
+                                             "--access-lock", str(auth_lock),
                                              "--source-challenge", str(challenge_path),
                                              "--source-receipt", str(receipt)],
                     stdout=output, stderr=subprocess.STDOUT,
@@ -461,6 +501,18 @@ if __name__ == "__main__":
                 assert response.read() == b'{"ok":false,"error":"unauthorized"}'
         finally:
             connection.close()
+        sys.exit(0)
+    if sys.argv[1:2] == ["--rotation-requests"]:
+        for _ in range(30):
+            connection = http.client.HTTPConnection(
+                ADDRESS, PORT, timeout=4, source_address=(PEER_ADDRESS, 0))
+            try:
+                connection.request("GET", "/v1/health", headers={"Connection": "close"})
+                with connection.getresponse() as response:
+                    assert response.status == 401
+                    assert response.read() == b'{"ok":false,"error":"unauthorized"}'
+            finally:
+                connection.close()
         sys.exit(0)
     if sys.argv[1:2] == ["--source-probe"]:
         sys.path.insert(0, str(OPS))

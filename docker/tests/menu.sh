@@ -562,6 +562,27 @@ runControlDriver() {
     local -A targetPrompts=()
     targetReply 'Docker 管理菜单' $'15\n'
     case "${scenario}" in
+    diagnostics|diagnostics-failed|log-rotate-cancel|log-rotate-eof|source-menu-eof)
+        if [[ "${scenario}" != log-rotate-* ]]; then
+            targetReply 'Docker 控制连接' $'7\n'
+        fi
+        if [[ "${scenario}" == source-menu-eof ]]; then
+            targetReply 'Docker 控制连接' $'\004'
+        else
+            targetReply 'Docker 控制连接' $'8\n'
+            case "${scenario}" in
+            log-rotate-cancel) targetReply 'fixture-control-rotate-confirm [yes]' $'n\n' ;;
+            log-rotate-eof) targetReply 'fixture-control-rotate-confirm [yes]' $'\004' ;;
+            *) targetReply 'fixture-control-rotate-confirm [yes]' $'yes\n' ;;
+            esac
+            if [[ "${scenario}" == diagnostics-failed ]]; then
+                targetReply 'Docker 控制连接' $'1\n'
+            fi
+            targetReply 'Docker 控制连接' $'0\n'
+        fi
+        targetReply 'Docker 管理菜单' $'0\n'
+        return 0
+        ;;
     join|join-cancel|join-eof|sync|sync-cancel|sync-eof|sync-failed)
         if [[ "${scenario}" == join* ]]; then
             if [[ "${scenario}" == join-cancel ]]; then
@@ -1416,6 +1437,21 @@ control)
     recordAction "$@"
     case "${2:-}" in
     status) printf 'fixture-control-status\n' ;;
+    source-check)
+        printf 'fixture-control-source-probe\n'
+        exit "${CONTROL_DIAGNOSTIC_STATUS:-0}"
+        ;;
+    log-rotate)
+        printf 'fixture-control-rotate-confirm [yes]: '
+        if ! IFS= read -r confirmation; then
+            recordAction control-rotate-confirm eof
+            exit 2
+        fi
+        recordAction control-rotate-confirm "${confirmation}"
+        [[ "${confirmation}" == yes ]] || exit 2
+        [[ "${CONTROL_DIAGNOSTIC_STATUS:-0}" -eq 0 ]] || exit "${CONTROL_DIAGNOSTIC_STATUS}"
+        recordAction control-rotate-commit
+        ;;
     init|invite|revoke|join)
         printf 'fixture-control-confirm [y/N]: '
         if ! IFS= read -r confirmation; then
@@ -1462,12 +1498,15 @@ esac
 EOF
 # 启动与恢复共用来源输入；直接验证生产动作分组，不重复业务菜单的导航矩阵。
 export SOURCE_INPUT_CHECK=1
-for sourceAction in up restart update rollback fail2ban-disable fail2ban-enable fail2ban-settings business-restore; do
+for sourceAction in up restart update rollback fail2ban-disable fail2ban-enable fail2ban-settings business-restore \
+    control-source-check control-log-rotate; do
     case "${sourceAction}" in
     fail2ban-disable) sourceCommand=(fail2ban disable --confirm PADM-DOCKER-EDIT) ;;
     fail2ban-enable) sourceCommand=(fail2ban enable 24444,24445 6 600 3600 --confirm PADM-DOCKER-EDIT) ;;
     fail2ban-settings) sourceCommand=(fail2ban settings 24444,24445 6 600 3600 --confirm PADM-DOCKER-EDIT) ;;
     business-restore) sourceCommand=(business restore fixture.json --strategy replace --yes) ;;
+    control-source-check) sourceCommand=(control source-check) ;;
+    control-log-rotate) sourceCommand=(control log-rotate) ;;
     *) sourceCommand=("${sourceAction}") ;;
     esac
     : >"${TLS_WIZARD_ACTIONS}"
@@ -1732,7 +1771,7 @@ unset SITE_EDIT_STATUS ROUTING_STATUS
 : >"${TLS_WIZARD_ACTIONS}"
 runPty control-dispatch control flow "${TLS_WIZARD_CLI}" menu
 for controlLabel in '15. 控制连接' '1. 查看角色状态' '2. 初始化主控' '3. 邀请或轮换凭据' \
-    '4. 撤销授权' '5. 接入被控角色' '6. 同步受管账号' '0. 返回'; do
+    '4. 撤销授权' '5. 接入被控角色' '6. 同步受管账号' '7. 验证 Peer 来源' '8. 手动轮转认证日志' '0. 返回'; do
     grep -Fq "${controlLabel}" "${CONTROL_LOG}" || fail "missing control menu item: ${controlLabel}"
 done
 [[ "$(<"${TLS_WIZARD_ACTIONS}")" == $'control status\ncontrol init --address 10.77.0.1 --port 19443 --peer-address 10.77.0.2\ncontrol-confirm y\ncontrol-commit' ]] ||
@@ -1814,6 +1853,33 @@ for controlCase in join join-cancel join-eof sync sync-cancel sync-eof sync-fail
     fi
 done
 unset CONTROL_INIT_STATUS
+
+for controlCase in diagnostics diagnostics-failed log-rotate-cancel log-rotate-eof source-menu-eof; do
+    : >"${TLS_WIZARD_ACTIONS}"
+    export CONTROL_DIAGNOSTIC_STATUS=0
+    [[ "${controlCase}" != diagnostics-failed ]] || CONTROL_DIAGNOSTIC_STATUS=17
+    runPty "control-${controlCase}" control "${controlCase}" "${TLS_WIZARD_CLI}" menu
+    case "${controlCase}" in
+    diagnostics)
+        expectedControl=$'control source-check\ncontrol log-rotate\ncontrol-rotate-confirm yes\ncontrol-rotate-commit'
+        ;;
+    diagnostics-failed)
+        expectedControl=$'control source-check\ncontrol log-rotate\ncontrol-rotate-confirm yes\ncontrol status'
+        [[ "$(grep -Fc '操作失败，退出码: 17' "${CONTROL_LOG}")" -eq 2 ]] ||
+            fail 'control diagnostics did not report both backend failures'
+        ;;
+    log-rotate-cancel) expectedControl=$'control log-rotate\ncontrol-rotate-confirm n' ;;
+    log-rotate-eof) expectedControl=$'control log-rotate\ncontrol-rotate-confirm eof' ;;
+    source-menu-eof) expectedControl='control source-check' ;;
+    esac
+    [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedControl}" ]] ||
+        fail "control ${controlCase} repeated a backend action or bypassed cancellation"
+    if [[ "${controlCase}" != source-menu-eof ]]; then
+        [[ "$(grep -Fc 'fixture-control-rotate-confirm [yes]' "${CONTROL_LOG}")" -eq 1 ]] ||
+            fail "control ${controlCase} did not confirm rotation exactly once"
+    fi
+done
+unset CONTROL_DIAGNOSTIC_STATUS
 
 : >"${TLS_WIZARD_ACTIONS}"
 runPty geo-dispatch geo flow "${TLS_WIZARD_CLI}" menu

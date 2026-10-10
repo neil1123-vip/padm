@@ -672,6 +672,78 @@ except Exception:
 ' "${address}" "${port}" "${source}" "${nonce}" || return "${PADM_DOCKER_RC_HOST}"
 )
 
+dockerControlLogRotate() (
+    local yes=0 answer root image snapshot current receiptIdentity receiptHash container= status=0 interrupted=0
+    local inspected remaining cleanupWarned=0
+    [[ "$#" == 0 || ( "$#" == 1 && "$1" == --yes ) ]] || return "${PADM_DOCKER_RC_USAGE}"
+    [[ "$#" == 0 ]] || yes=1
+    [[ "${yes}" == 1 || ( -t 0 && -t 1 ) ]] || {
+        dockerError '轮转控制认证日志需要 --yes 确认'
+        return "${PADM_DOCKER_RC_USAGE}"
+    }
+    if [[ "${yes}" == 0 ]]; then
+        dockerSetupRead answer '确认轮转满 10 MiB 的控制认证日志并只保留两份历史？[y/N]: ' n ||
+            return "${PADM_DOCKER_RC_USAGE}"
+        case "${answer}" in y|Y|yes|YES) ;; *) return "${PADM_DOCKER_RC_USAGE}" ;; esac
+    fi
+    dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+    root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
+    dockerTrafficSafePath "${root}" "${root}/data/control-source" &&
+        [[ -d "${root}/data/control-source" &&
+            "$(stat -c '%a:%u:%g' "${root}/data/control-source")" == "750:0:10001" &&
+            -z "$(find "${root}/data/control-source" -mindepth 1 -print -quit)" ]] ||
+        return "${PADM_DOCKER_RC_STATE}"
+    dockerLockInstalledDeployment || return "${PADM_DOCKER_RC_LOCK}"
+    trap 'status=$?; if [[ -n "${container}" ]]; then
+        while ! docker rm "${container}" >/dev/null; do
+            if remaining=$(docker ps --all --quiet --no-trunc --filter "id=${container}") &&
+                [[ -z "${remaining}" ]]; then break; fi
+            if [[ "${cleanupWarned}" == 0 ]]; then
+                dockerError "等待日志轮转容器退出后再释放部署锁"
+                cleanupWarned=1
+            fi
+            docker wait "${container}" >/dev/null || sleep 0.1
+        done
+      fi; dockerReleaseDeploymentLock || status=12; exit "${status}"' EXIT
+    trap 'interrupted=130' INT
+    trap 'interrupted=143' TERM
+    [[ -z "$(find "${root}/data/control-source" -mindepth 1 -print -quit)" ]] ||
+        return "${PADM_DOCKER_RC_STATE}"
+    snapshot=$(dockerControlSourceSnapshot) || return "${PADM_DOCKER_RC_STATE}"
+    receiptIdentity=$(stat -c '%d:%i:%a:%u:%g:%h' "${root}/logs/control/source.receipt") &&
+        receiptHash=$(sha256sum "${root}/logs/control/source.receipt") &&
+        image=$(dockerAccountImage ops) || return "${PADM_DOCKER_RC_STATE}"
+    # 轮转不是探测：正常中断等待根端事务结束，不强杀仍在持锁的写入者。
+    container=$(docker create --read-only --cap-drop ALL --cap-add CHOWN \
+        --security-opt no-new-privileges --user 0:10001 --network none --log-driver none \
+        --label io.padm.mode=docker --label io.padm.project="${PADM_DOCKER_PROJECT}" \
+        --mount "type=bind,src=${root}/logs/control,dst=/var/log/padm/control" \
+        --mount "type=bind,src=${root}/config/control/state.json,dst=/etc/padm/control/state.json,readonly" \
+        --entrypoint python3 "${image}" /opt/padm/control_api.py \
+        --state /etc/padm/control/state.json --access-log /var/log/padm/control/auth.log \
+        --access-lock /var/log/padm/control/auth.lock --rotate-access-log) &&
+        [[ "${container}" =~ ^[a-f0-9]{64}$ ]] || return "${PADM_DOCKER_RC_STATE}"
+    docker start "${container}" >/dev/null || return "${PADM_DOCKER_RC_STATE}"
+    while :; do
+        inspected=$(docker inspect --format '{{json .State}}' "${container}") ||
+            return "${PADM_DOCKER_RC_STATE}"
+        if jq -e '.Running == false and .Status == "exited"' <<<"${inspected}" >/dev/null; then
+            status=$(jq -er '.ExitCode | select(type == "number" and floor == . and . >= 0)' <<<"${inspected}") ||
+                return "${PADM_DOCKER_RC_STATE}"
+            break
+        fi
+        jq -e '.Running == true and .Status == "running"' <<<"${inspected}" >/dev/null ||
+            return "${PADM_DOCKER_RC_STATE}"
+        docker wait "${container}" >/dev/null || true
+    done
+    [[ "${status}" == 0 ]] || return "${PADM_DOCKER_RC_STATE}"
+    current=$(dockerControlSourceSnapshot) && [[ "${current}" == "${snapshot}" &&
+        "$(stat -c '%d:%i:%a:%u:%g:%h' "${root}/logs/control/source.receipt")" == "${receiptIdentity}" &&
+        "$(sha256sum "${root}/logs/control/source.receipt")" == "${receiptHash}" ]] ||
+        return "${PADM_DOCKER_RC_STATE}"
+    return "${interrupted}"
+)
+
 dockerControlClientBuildDraft() {
     local directory=$1 image
     shift
@@ -845,8 +917,9 @@ dockerControlCommand() {
     sync) dockerControlSync "$@" ;;
     source-check) dockerControlSourceCheck "$@" ;;
     source-probe) dockerControlSourceProbe "$@" ;;
+    log-rotate) dockerControlLogRotate "$@" ;;
     *)
-        dockerError '用法: control status [--json] | init --address <IPv4> --port <端口> --peer-address <IPv4> [--yes] | invite --output <绝对路径> [--expires-in <秒>] [--yes] | revoke [--yes] | join --invite <私有文件> --listener <入口 ID>... [--yes] | sync --invite <私有文件> | source-check | source-probe --address <IPv4> --port <端口> --peer-address <IPv4> --nonce <64 位 hex>'
+        dockerError '用法: control status [--json] | init --address <IPv4> --port <端口> --peer-address <IPv4> [--yes] | invite --output <绝对路径> [--expires-in <秒>] [--yes] | revoke [--yes] | join --invite <私有文件> --listener <入口 ID>... [--yes] | sync --invite <私有文件> | source-check | source-probe --address <IPv4> --port <端口> --peer-address <IPv4> --nonce <64 位 hex> | log-rotate [--yes]'
         return "${PADM_DOCKER_RC_USAGE}"
         ;;
     esac

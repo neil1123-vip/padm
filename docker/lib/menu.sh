@@ -584,7 +584,7 @@ dockerMenuControl() {
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker 控制连接\n'
         printf '%s\n' '1. 查看角色状态' '2. 初始化主控' '3. 邀请或轮换凭据' '4. 撤销授权' \
-            '5. 接入被控角色' '6. 同步受管账号' '0. 返回'
+            '5. 接入被控角色' '6. 同步受管账号' '7. 验证 Peer 来源' '8. 手动轮转认证日志' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -620,6 +620,8 @@ dockerMenuControl() {
                 [[ -n "${invitation}" ]] || continue
             dockerMenuRun control sync --invite "${invitation}" || true
             ;;
+        7) dockerMenuRun control source-check || true ;;
+        8) dockerMenuRun control log-rotate || true ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac
     done

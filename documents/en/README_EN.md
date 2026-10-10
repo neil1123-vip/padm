@@ -584,7 +584,7 @@ The API responds only after safe-file checks, a complete write and synchronizati
 an invalid log or unprovable socket source stops the API. Configuration restore never overwrites log
 history, and first creation preserves existing content. Connection closure is separate from authentication
 failure. Exact managed legacy restores may retain stdout-only logging without claiming the new capability.
-Automatic rotation and control-plane Fail2ban protection are not yet provided.
+Control-plane Fail2ban protection is not yet provided.
 New controllers can run `padm-docker control source-check` to register a random challenge for up to
 30 seconds, then run the printed `control source-probe` command on the managed Peer. The probe binds
 its WireGuard source address without reading an invitation or sending a token. Only a 401 matching
@@ -592,6 +592,16 @@ the root-owned registration, actual socket and controller state writes `logs/con
 ordinary access logs never record the nonce. Exit or interruption removes only this transaction's
 unchanged registration. Old receipts are not reusable evidence; configuration or container-generation
 changes reject the proof. Foreign or changed registrations are preserved and rejected. No jail is enabled.
+The control menu's manual authentication-log rotation, or `padm-docker control log-rotate --yes`,
+rotates `auth.log` at 10 MiB and retains two fixed archives, `auth.log.1` and `auth.log.2`.
+The API holds a read-only cooperative lock on root-owned `auth.lock`; rotation does not restart the API,
+use copytruncate, or rotate or replace source receipts. Legacy deployments without the lock must
+complete a normal upgrade first. No automatic schedule is installed; 10 MiB is a manual threshold,
+not a live size limit. Failed recovery preserves its private directory and rejects further takeover.
+After a forced kill or power loss, inspect the retained evidence manually; do not delete residual
+files or recreate a missing active log to bypass the check.
+INT/TERM waits for the rotation container to finish and be removed before releasing the deployment lock;
+if the Docker daemon is unavailable, the lock is retained until it recovers.
 Legacy internal roles without connection metadata
 remain compatible but cannot use external sync; old bundles cannot restore the new connection spec.
 Explicit `rollback` checks controlled identity, listener mapping and connection before sampling, creating a

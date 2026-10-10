@@ -31,7 +31,7 @@ cat >"${TEST_ROOT}/cli.sh" <<'EOF'
 set -u
 case "${1:-}" in
 status) exit 0 ;;
-setup|edit|tls)
+setup|edit|tls|control)
     printf '%s\n' "${BASHPID}" >"${SIGNAL_TEST_ROOT}/setup.pid"
     trap 'printf "setup-cleaned\n"; exit 143' TERM
     source "${SIGNAL_PROJECT_ROOT}/docker/lib/setup.sh"
@@ -47,7 +47,11 @@ setup|edit|tls)
         )
         printf '%s\n' "${workerOutput}"
     }
-    if [[ "${1:-}" == tls ]]; then
+    if [[ "${1:-}" == control ]]; then
+        [[ "$#" -eq 2 && ( "$2" == source-check || "$2" == log-rotate ) ]] || exit 2
+        printf '%s\n' "$*" >>"${SIGNAL_TEST_ROOT}/control.calls"
+        waitWorker
+    elif [[ "${1:-}" == tls ]]; then
         [[ "${2:-}" == manage ]] || exit 2
         dockerInstallRoot() { printf '%s\n' "${SIGNAL_TEST_ROOT}"; }
         dockerError() { printf '%s\n' "$*" >&2; }
@@ -79,24 +83,31 @@ menu)
 esac
 EOF
 waitText() {
-    local attempt
+    local attempt count=${2:-1}
     for ((attempt = 0; attempt < 200; attempt++)); do
-        grep -Fq "$1" "${TEST_ROOT}/control.log" 2>/dev/null && return 0
+        [[ "$(grep -Fc "$1" "${TEST_ROOT}/control.log" 2>/dev/null || true)" -ge "${count}" ]] && return 0
         sleep 0.05
     done
     return 1
 }
-for mode in input worker edit-input edit-worker tls-input tls-worker; do
+for mode in input worker edit-input edit-worker tls-input tls-worker \
+    control-source-int control-source-term control-rotate-int control-rotate-term; do
     export SIGNAL_MODE="${mode##*-}"
+    [[ "${mode}" != control-* ]] || SIGNAL_MODE=worker
     # Linux /proc 的后代终止另行实测；MSYS2 只覆盖真实 PTY 输入。
     [[ "${SIGNAL_MODE}" != worker || "$(uname -s)" == Linux ]] || continue
     rm -f -- "${TEST_ROOT}/menu.pid" "${TEST_ROOT}/setup.pid" "${TEST_ROOT}/worker.pid" \
-        "${TEST_ROOT}/input" "${TEST_ROOT}/control.log"
+        "${TEST_ROOT}/input" "${TEST_ROOT}/control.log" "${TEST_ROOT}/control.calls"
     mkfifo "${TEST_ROOT}/input"
     (
         exec 3>"${TEST_ROOT}/input"
         waitText 'Docker 管理菜单' || exit 11
         case "${mode}" in
+        control-*)
+            printf '15\n' >&3
+            waitText 'Docker 控制连接' || exit 18
+            if [[ "${mode}" == control-source-* ]]; then printf '7\n' >&3; else printf '8\n' >&3; fi
+            ;;
         edit-*) printf '7\n' >&3 ;;
         tls-*) printf '8\n' >&3 ;;
         *) printf '2\n' >&3 ;;
@@ -115,6 +126,14 @@ for mode in input worker edit-input edit-worker tls-input tls-worker; do
         else
             if [[ "${mode}" != tls-* ]]; then waitText 'setup-input: ' || exit 14; fi
         fi
+        if [[ "${mode}" == control-*-int ]]; then
+            printf '\003' >&3
+            waitText 'Docker 控制连接' 2 || exit 19
+            printf '0\n' >&3
+            waitText 'Docker 管理菜单' 2 || exit 20
+            printf '0\n' >&3
+            exit 0
+        fi
         kill -TERM "$(<"${TEST_ROOT}/menu.pid")" || exit 15
         for ((attempt = 0; attempt < 100; attempt++)); do
             kill -0 "$(<"${TEST_ROOT}/menu.pid")" 2>/dev/null || exit 0
@@ -131,11 +150,19 @@ for mode in input worker edit-input edit-worker tls-input tls-worker; do
         -c "${commandArgs}" "${TEST_ROOT}/control.log" <"${TEST_ROOT}/input" \
         >"${TEST_ROOT}/stdout.log" 2>&1 || rc=$?
     wait "${feeder}" || fail "${mode}: driver failed at checkpoint $?"
-    [[ "${rc}" -eq 143 ]] || fail "${mode}: expected 143, got ${rc}"
+    expected=143
+    [[ "${mode}" != control-*-int ]] || expected=0
+    [[ "${rc}" -eq "${expected}" ]] || fail "${mode}: expected ${expected}, got ${rc}"
     grep -Fq setup-cleaned "${TEST_ROOT}/control.log" || fail "${mode}: CLI did not clean up"
     ! kill -0 "$(<"${TEST_ROOT}/setup.pid")" 2>/dev/null || fail "${mode}: CLI survived"
     if [[ "${SIGNAL_MODE}" == worker ]]; then
         ! kill -0 "$(<"${TEST_ROOT}/worker.pid")" 2>/dev/null || fail 'worker survived'
+    fi
+    if [[ "${mode}" == control-* ]]; then
+        action=source-check
+        [[ "${mode}" != control-rotate-* ]] || action=log-rotate
+        [[ "$(<"${TEST_ROOT}/control.calls")" == "control ${action}" ]] ||
+            fail "${mode}: control backend was repeated or dispatched incorrectly"
     fi
 done
 printf 'docker-menu-signals-regression-ok\n'

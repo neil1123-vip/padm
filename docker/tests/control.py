@@ -282,7 +282,8 @@ with tempfile.TemporaryDirectory(prefix=".tmp-control-", dir="/var/lib") as dire
         from email.message import Message
         # 这里只核对登记和响应顺序，私网三元组为夹具，不冒充真实 WireGuard。
         handler = api.ControlHandler.__new__(api.ControlHandler)
-        handler.server = Mock(source_challenge=challenge_path, source_receipt=receipt_path, access_log=access_path)
+        handler.server = Mock(source_challenge=challenge_path, source_receipt=receipt_path,
+                              access_log=access_path, access_lock=None)
         handler.path = path
         handler.headers = Message()
         for key, value in (headers if headers is not None else [("X-Padm-Source-Challenge", nonce)]):
@@ -364,6 +365,231 @@ with tempfile.TemporaryDirectory(prefix=".tmp-control-", dir="/var/lib") as dire
         os.setgid(10001)
         os.setuid(10001)
 
+    lock_path = log_directory / "auth.lock"
+    lock_path.write_bytes(b"")
+    lock_path.chmod(0o640)
+    os.chown(lock_path, 0, 10001)
+
+    def check_lock(path=lock_path):
+        with api.access_log_lock(access_path, path):
+            pass
+
+    check_lock()
+    for mode in (0o600, 0o644, 0o660):
+        lock_path.chmod(mode)
+        rejected(check_lock)
+    lock_path.chmod(0o600)
+    original_locked_auth = access_path.read_bytes()
+    log_failed(api.request_log_event, 401, ("10.77.0.2", "10.77.0.1", 39778), access_path, lock_path)
+    assert access_path.read_bytes() == original_locked_auth
+    with patch.object(sys, "argv", [str(ROOT / "docker/images/ops/control_api.py"), "--state", str(state_path),
+                                   "--access-log", str(access_path), "--access-lock", str(lock_path)]), \
+            patch.object(api, "require_wireguard_address", side_effect=AssertionError("锁校验必须早于监听")):
+        log_failed(api.main)
+    lock_path.chmod(0o640)
+    for uid, gid in ((10001, 10001), (0, 0)):
+        os.chown(lock_path, uid, gid)
+        rejected(check_lock)
+    os.chown(lock_path, 0, 10001)
+    lock_backup = log_directory / "lock.backup"
+    lock_path.rename(lock_backup)
+    lock_path.symlink_to(lock_backup)
+    rejected(check_lock)
+    lock_path.unlink()
+    lock_backup.rename(lock_path)
+    with patch.object(api.fcntl, "flock", side_effect=BlockingIOError), \
+            patch.object(api.time, "monotonic", side_effect=[0, 11]):
+        rejected(check_lock)
+    os.link(lock_path, lock_backup)
+    rejected(check_lock)
+    lock_backup.unlink()
+    real_flock = api.fcntl.flock
+
+    def replace_locked_inode(descriptor, operation):
+        real_flock(descriptor, operation)
+        lock_path.rename(lock_backup)
+        lock_path.write_bytes(b"")
+        lock_path.chmod(0o640)
+        os.chown(lock_path, 0, 10001)
+
+    with patch.object(api.fcntl, "flock", side_effect=replace_locked_inode):
+        rejected(check_lock)
+    lock_path.unlink()
+    lock_backup.rename(lock_path)
+
+    # 独立进程真实持有排他锁；写者不得提前打开或追加旧日志 inode。
+    held, attempted = Path(directory) / "lock-held", Path(directory) / "lock-attempted"
+    holder = subprocess.Popen([sys.executable, "-c", """
+import fcntl, os, pathlib, sys
+descriptor = os.open(sys.argv[1], os.O_RDONLY)
+fcntl.flock(descriptor, fcntl.LOCK_EX)
+pathlib.Path(sys.argv[2]).write_text("held")
+sys.stdin.buffer.read(1)
+os.close(descriptor)
+""", str(lock_path), str(held)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    writer = None
+    try:
+        deadline = time.monotonic() + 3
+        while not held.exists() and time.monotonic() < deadline:
+            assert holder.poll() is None
+            time.sleep(0.01)
+        assert held.exists()
+        before_write = access_path.read_bytes()
+        writer = subprocess.Popen([sys.executable, "-c", """
+import importlib.util, pathlib, sys
+spec = importlib.util.spec_from_file_location("locked_control_api", sys.argv[1])
+api = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(api)
+real_flock = api.fcntl.flock
+def observed_flock(descriptor, operation):
+    try:
+        return real_flock(descriptor, operation)
+    except BlockingIOError:
+        pathlib.Path(sys.argv[4]).write_text("attempted")
+        raise
+api.fcntl.flock = observed_flock
+api.append_access_line(sys.argv[2], "locked-append", sys.argv[3])
+""", str(ROOT / "docker/images/ops/control_api.py"), str(access_path), str(lock_path), str(attempted)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        deadline = time.monotonic() + 3
+        while not attempted.exists() and time.monotonic() < deadline:
+            assert writer.poll() is None
+            time.sleep(0.01)
+        assert attempted.exists()
+        assert writer.poll() is None and access_path.read_bytes() == before_write
+        assert holder.communicate(input=b"\n", timeout=3) == (b"", b"") and holder.returncode == 0
+        assert writer.communicate(timeout=3) == (b"", b"") and writer.returncode == 0
+        assert access_path.read_bytes() == before_write + b"locked-append\n"
+    finally:
+        for process in (writer, holder):
+            if process is not None and process.poll() is None:
+                process.kill()
+                process.communicate(timeout=3)
+
+    rotation_directory = Path(directory) / "rotation"
+    rotation_directory.mkdir(mode=0o750)
+    os.chown(rotation_directory, 0, 10001)
+    rotation_log = rotation_directory / "auth.log"
+    rotation_lock = rotation_directory / "auth.lock"
+    rotation_lock.write_bytes(b"")
+    rotation_lock.chmod(0o640)
+    os.chown(rotation_lock, 0, 10001)
+
+    def rotation_file(name, content):
+        leaf = rotation_directory / name
+        leaf.write_bytes(content)
+        leaf.chmod(0o640)
+        os.chown(leaf, 10001, 10001)
+        return leaf
+
+    def rotation_identity():
+        return {leaf.name: (leaf.stat().st_dev, leaf.stat().st_ino, leaf.stat().st_size)
+                for leaf in rotation_directory.iterdir()}
+
+    rotation_file("auth.log", b"small\n")
+    rotation_file("source.receipt", b"receipt-unchanged\n")
+    assert api.rotate_access_log(rotation_log, rotation_lock) == "not-needed"
+    rotation_file("auth.log", b"x" * api.ACCESS_LOG_ROTATE_BYTES)
+    rotation_file("auth.log.1", b"previous\n")
+    rotation_file("auth.log.2", b"oldest\n")
+    before_rotation = rotation_identity()
+    assert api.rotate_access_log(rotation_log, rotation_lock) == "rotated"
+    after_rotation = rotation_identity()
+    assert after_rotation["auth.log.1"] == before_rotation["auth.log"]
+    assert after_rotation["auth.log.2"] == before_rotation["auth.log.1"]
+    assert after_rotation["auth.log"][2] == 0 and rotation_log.read_bytes() == b""
+    assert (rotation_log.stat().st_uid, rotation_log.stat().st_gid,
+            stat.S_IMODE(rotation_log.stat().st_mode), rotation_log.stat().st_nlink) == (10001, 10001, 0o640, 1)
+    assert (rotation_directory / "source.receipt").read_bytes() == b"receipt-unchanged\n"
+    rotation_file("auth.log", b"x" * api.ACCESS_LOG_ROTATE_BYTES)
+    for name in ("auth.log.1", "source.receipt"):
+        leaf = rotation_directory / name
+        leaf.chmod(0o600)
+        rejected(api.rotate_access_log, rotation_log, rotation_lock)
+        leaf.chmod(0o640)
+    unknown = rotation_directory / ".control-log-rotate.residual"
+    unknown.mkdir()
+    rejected(api.rotate_access_log, rotation_log, rotation_lock)
+    unknown.rmdir()
+    before_rotation = rotation_identity()
+    real_rename, real_fsync = api.os.rename, api.os.fsync
+    rename_calls = 0
+
+    def fail_second_rename(source, target):
+        global rename_calls
+        rename_calls += 1
+        if rename_calls == 2:
+            raise OSError(TOKEN)
+        real_rename(source, target)
+
+    with patch.object(api.os, "rename", side_effect=fail_second_rename):
+        rejected(api.rotate_access_log, rotation_log, rotation_lock)
+    assert rotation_identity() == before_rotation, "移名失败必须按 inode 恢复全部日志和清理临时目录"
+    rename_calls = 0
+
+    def fail_after_auth_rename(source, target):
+        global rename_calls
+        rename_calls += 1
+        real_rename(source, target)
+        if rename_calls == 3:
+            raise OSError(TOKEN)
+
+    with patch.object(api.os, "rename", side_effect=fail_after_auth_rename):
+        rejected(api.rotate_access_log, rotation_log, rotation_lock)
+    assert rotation_identity() == before_rotation, "移名后异常也必须按实际 inode 恢复，不能留下 auth 缺口"
+    directory_sync_failed = False
+
+    def fail_directory_sync_once(descriptor):
+        global directory_sync_failed
+        if stat.S_ISDIR(os.fstat(descriptor).st_mode) and not directory_sync_failed:
+            directory_sync_failed = True
+            raise OSError(TOKEN)
+        real_fsync(descriptor)
+
+    with patch.object(api.os, "fsync", side_effect=fail_directory_sync_once):
+        rejected(api.rotate_access_log, rotation_log, rotation_lock)
+    assert rotation_identity() == before_rotation, "目录同步失败必须恢复，不能丢失已持久化日志"
+    rotate_arguments = [sys.executable, str(ROOT / "docker/images/ops/control_api.py"), "--state", str(state_path),
+                        "--access-log", str(rotation_log), "--access-lock", str(rotation_lock), "--rotate-access-log"]
+    checked = subprocess.run(rotate_arguments, preexec_fn=runtime_user, capture_output=True, timeout=3)
+    assert checked.returncode == 78 and checked.stdout == b""
+    assert checked.stderr.decode() == "控制日志轮转失败，已停止\n"
+    assert rotation_identity() == before_rotation, "真实非 root 用户不得轮转"
+    real_unlink = Path.unlink
+
+    def fail_oldest_cleanup(leaf, *arguments, **keywords):
+        if leaf.name == "oldest" and leaf.parent.name.startswith(".control-log-rotate."):
+            raise OSError(TOKEN)
+        return real_unlink(leaf, *arguments, **keywords)
+
+    with patch.object(Path, "unlink", fail_oldest_cleanup):
+        rejected(api.rotate_access_log, rotation_log, rotation_lock)
+    residuals = list(rotation_directory.glob(".control-log-rotate.*"))
+    assert len(residuals) == 1 and (residuals[0] / "oldest").exists()
+    after_failed_cleanup = rotation_identity()
+    rejected(api.rotate_access_log, rotation_log, rotation_lock)
+    assert rotation_identity() == after_failed_cleanup, "清理失败必须保留私有证据并拒绝再次自动轮转"
+    (residuals[0] / "oldest").unlink()
+    residuals[0].rmdir()
+    rotation_file("auth.log", b"x" * api.ACCESS_LOG_ROTATE_BYTES)
+    rotation_file("auth.log.2", b"oldest-again\n")
+    rename_calls = 0
+
+    def replace_rollback_target(source, target):
+        global rename_calls
+        rename_calls += 1
+        if rename_calls == 2:
+            rotation_file("auth.log.2", b"foreign-inode\n")
+            raise OSError(TOKEN)
+        real_rename(source, target)
+
+    with patch.object(api.os, "rename", side_effect=replace_rollback_target):
+        rejected(api.rotate_access_log, rotation_log, rotation_lock)
+    assert (rotation_directory / "auth.log.2").read_bytes() == b"foreign-inode\n"
+    residuals = list(rotation_directory.glob(".control-log-rotate.*"))
+    assert len(residuals) == 1 and (residuals[0] / "oldest").read_bytes() == b"oldest-again\n", \
+        "恢复不能覆盖已变化 inode，原始证据必须保留"
+
     checked = subprocess.run(
         [sys.executable, str(ROOT / "docker/images/ops/control_api.py"), "--state", str(state_path), "--check"],
         preexec_fn=runtime_user, capture_output=True, timeout=3,
@@ -382,9 +608,20 @@ with tempfile.TemporaryDirectory(prefix=".tmp-control-", dir="/var/lib") as dire
         preexec_fn=runtime_user, capture_output=True, timeout=3,
     )
     assert checked.returncode == 0 and checked.stdout == checked.stderr == b"", "--check 不读取登记或回执"
+    checked = subprocess.run(
+        [sys.executable, str(ROOT / "docker/images/ops/control_api.py"), "--state", str(state_path),
+         "--access-log", str(Path(directory) / "missing-logs/auth.log"),
+         "--access-lock", str(Path(directory) / "missing-logs/auth.lock"), "--check"],
+        preexec_fn=runtime_user, capture_output=True, timeout=3,
+    )
+    assert checked.returncode == 0 and checked.stdout == checked.stderr == b"", "--check 不读取生产锁"
     for arguments in (["--source-challenge", str(challenge_path)],
                       ["--source-receipt", str(receipt_path)],
-                      ["--source-challenge", str(challenge_path), "--source-receipt", str(receipt_path)]):
+                      ["--source-challenge", str(challenge_path), "--source-receipt", str(receipt_path)],
+                      ["--access-lock", str(lock_path)],
+                      ["--access-log", str(access_path), "--access-lock", str(log_directory / "other.lock")],
+                      ["--access-log", str(access_path), "--access-lock", str(rotation_lock)],
+                      ["--rotate-access-log"]):
         checked = subprocess.run(
             [sys.executable, str(ROOT / "docker/images/ops/control_api.py"), "--state", str(state_path),
              "--check", *arguments], preexec_fn=runtime_user, capture_output=True, timeout=3,

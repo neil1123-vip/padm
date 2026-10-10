@@ -91,6 +91,7 @@ dockerUsage() {
   padm-docker control sync --invite <私有邀请文件>
   padm-docker control source-check
   padm-docker control source-probe --address <WireGuard IPv4> --port <端口> --peer-address <对端 IPv4> --nonce <64 位 hex>
+  padm-docker control log-rotate [--yes]
   padm-docker business backup <绝对 JSON 路径>
   padm-docker business preview <备份 JSON 路径> --strategy <merge|replace>
   padm-docker business restore <备份 JSON 路径> --strategy <merge|replace> --yes

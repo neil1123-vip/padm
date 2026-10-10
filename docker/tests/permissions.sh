@@ -146,17 +146,21 @@ chmod 0750 "${controlRoot}" "${controlRoot}/config"
 printf '{"control":{"role":"main"}}\n' >"${controlRoot}/config/spec.json"
 dockerControlAccessLogEnsure "${controlRoot}"
 controlLog="${controlRoot}/logs/control/auth.log"
+controlLock="${controlRoot}/logs/control/auth.lock"
 sourceReceipt="${controlRoot}/logs/control/source.receipt"
 sourceChallenge="${controlRoot}/data/control-source/challenge.json"
 assertMetadata "${controlRoot}/logs/control" '750 0 10001'
 assertMetadata "${controlLog}" '640 10001 10001'
+assertMetadata "${controlLock}" '640 0 10001'
 assertMetadata "${sourceReceipt}" '640 10001 10001'
 assertMetadata "${controlRoot}/data/control-source" '750 0 10001'
 [[ ! -e "${sourceChallenge}" ]] || fail 'runtime permissions created a challenge'
+[[ ! -e "${controlLog}.1" && ! -e "${controlLog}.2" ]] || fail 'runtime permissions created archives'
 (
     cd "${controlRoot}/logs/control"
     setpriv --reuid 10001 --regid 10001 --clear-groups -- sh -c \
-        'test -w auth.log && test ! -w . && printf "kept-control-evidence\n" >>auth.log'
+        'test -w auth.log && test -r auth.lock && test ! -w auth.lock && test ! -w . &&
+         printf "kept-control-evidence\n" >>auth.log'
 ) || fail 'control UID could not append to the protected log'
 controlDigest=$(sha256sum "${controlLog}")
 printf 'kept-source-receipt\n' >"${sourceReceipt}"
@@ -164,6 +168,57 @@ receiptDigest=$(sha256sum "${sourceReceipt}")
 dockerControlAccessLogEnsure "${controlRoot}"
 [[ "$(sha256sum "${controlLog}")" == "${controlDigest}" ]] || fail 'existing control log was truncated'
 [[ "$(sha256sum "${sourceReceipt}")" == "${receiptDigest}" ]] || fail 'existing source receipt was truncated'
+# 锁 inode 与历史归档必须保留；坏条目不能借权限准备得到修复或补建日志。
+printf 'kept-lock-content\n' >"${controlLock}"
+lockIdentity=$(stat -c '%d:%i' -- "${controlLock}")
+for archive in "${controlLog}.1" "${controlLog}.2"; do
+    printf 'kept-control-archive\n' >"${archive}"
+    chmod 0640 "${archive}"
+    chown 10001:10001 "${archive}"
+done
+rotationDigest=$(sha256sum "${controlLock}" "${controlLog}.1" "${controlLog}.2")
+dockerControlAccessLogEnsure "${controlRoot}"
+[[ "$(sha256sum "${controlLock}" "${controlLog}.1" "${controlLog}.2")" == "${rotationDigest}" &&
+    "$(stat -c '%d:%i' -- "${controlLock}")" == "${lockIdentity}" ]] ||
+    fail 'existing control lock or archives were replaced'
+for entry in "${controlLock}" "${controlLog}.1" "${controlLog}.2"; do
+    safeOwner=10001
+    unsafeOwner=0
+    if [[ "${entry}" == "${controlLock}" ]]; then
+        safeOwner=0
+        unsafeOwner=10001
+    fi
+    chmod 0660 "${entry}"
+    ! dockerControlAccessLogEnsure "${controlRoot}" || fail 'unsafe rotation entry mode was repaired'
+    assertMetadata "${entry}" "660 ${safeOwner} 10001"
+    chmod 0640 "${entry}"
+    chown "${unsafeOwner}:10001" "${entry}"
+    ! dockerControlAccessLogEnsure "${controlRoot}" || fail 'unsafe rotation entry owner was repaired'
+    assertMetadata "${entry}" "640 ${unsafeOwner} 10001"
+    chown "${safeOwner}:10001" "${entry}"
+    mv -- "${entry}" "${controlRoot}/saved-rotation-entry"
+    ln -s "${controlRoot}/saved-rotation-entry" "${entry}"
+    ! dockerControlAccessLogEnsure "${controlRoot}" || fail 'rotation entry symlink was accepted'
+    rm -- "${entry}"
+    ln "${controlRoot}/saved-rotation-entry" "${entry}"
+    ! dockerControlAccessLogEnsure "${controlRoot}" || fail 'rotation entry hardlink was accepted'
+    rm -- "${entry}"
+    mv -- "${controlRoot}/saved-rotation-entry" "${entry}"
+done
+mv -- "${controlLog}" "${controlRoot}/saved-auth.log"
+chmod 0660 "${controlLog}.2"
+! dockerControlAccessLogEnsure "${controlRoot}" || fail 'unsafe archive was accepted with a missing active log'
+[[ ! -e "${controlLog}" ]] || fail 'unsafe archive refusal created the missing active log'
+chmod 0640 "${controlLog}.2"
+mv -- "${controlRoot}/saved-auth.log" "${controlLog}"
+printf 'unknown-archive\n' >"${controlLog}.3"
+! dockerControlAccessLogEnsure "${controlRoot}" || fail 'unknown control archive name was accepted'
+grep -qxF unknown-archive "${controlLog}.3" || fail 'unknown control archive was changed'
+rm -- "${controlLog}.3"
+dockerControlAccessLogEnsure "${controlRoot}"
+[[ "$(sha256sum "${controlLock}" "${controlLog}.1" "${controlLog}.2")" == "${rotationDigest}" &&
+    "$(stat -c '%d:%i' -- "${controlLock}")" == "${lockIdentity}" ]] ||
+    fail 'control lock or archives changed after rejected inputs'
 mv -- "${controlLog}" "${controlRoot}/saved-auth.log"
 printf 'untouched\n' >"${controlRoot}/outside-log"
 chmod 0600 "${controlRoot}/outside-log"
@@ -254,7 +309,7 @@ chmod 0750 "${controlRoot}/data"
 dockerControlAccessLogEnsure "${controlRoot}"
 [[ "$(sha256sum "${sourceReceipt}")" == "${receiptDigest}" ]] || fail 'source receipt changed after rejected unsafe inputs'
 printf '{"control_sync":{}}\n' >"${controlRoot}/config/spec.json"
-rm -- "${controlLog}" "${sourceReceipt}"
+rm -- "${controlLog}" "${sourceReceipt}" "${controlLock}" "${controlLog}.1" "${controlLog}.2"
 rmdir -- "${controlRoot}/logs/control"
 rmdir -- "${controlRoot}/data/control-source"
 dockerControlAccessLogEnsure "${controlRoot}"

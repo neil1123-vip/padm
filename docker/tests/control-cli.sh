@@ -447,4 +447,83 @@ jq -e '.schema_version == 3 and .core.secondary_type == null and
         done
     )
 )
+(
+    dockerControlAccessLogEnsure "${root}"
+    dockerControlSourceSnapshot() {
+        if [[ -f "${TEST_ROOT}/rotation-drift" ]]; then printf 'changed\n'; else printf 'stable\n'; fi
+    }
+    cid="$(printf 3%.0s {1..64})"
+    docker() {
+        printf '%s\n' "$1" >>"${TEST_ROOT}/rotation-docker.log"
+        case "$1" in
+        create)
+            [[ " $* " == *' --cap-drop ALL --cap-add CHOWN '* &&
+                " $* " == *' --user 0:10001 --network none --log-driver none '* &&
+                " $* " == *' --rotate-access-log '* && "$*" != *' --privileged'* ]] || return 1
+            printf '%s\n' "${cid}"
+            ;;
+        start)
+            [[ "$*" == "start ${cid}" ]] || return 1
+            case "${ROTATE_CASE:-normal}" in
+            signal) touch "${TEST_ROOT}/rotation-running"; kill -TERM "${BASHPID}" ;;
+            drift) touch "${TEST_ROOT}/rotation-drift" ;;
+            esac
+            ;;
+        inspect)
+            [[ "${!#}" == "${cid}" ]] || return 1
+            if [[ "${ROTATE_CASE:-normal}" == inspect-signal ]]; then
+                touch "${TEST_ROOT}/rotation-running"
+                kill -TERM "${BASHPID}"
+                return 143
+            fi
+            if [[ -f "${TEST_ROOT}/rotation-running" ]]; then
+                printf '{"Running":true,"Status":"running"}\n'
+            else
+                printf '{"Running":false,"Status":"exited","ExitCode":%s}\n' \
+                    "$([[ "${ROTATE_CASE:-normal}" == failure ]] && printf 78 || printf 0)"
+            fi
+            ;;
+        wait)
+            [[ "$*" == "wait ${cid}" && -f "${TEST_ROOT}/rotation-running" ]] || return 1
+            [[ "$(tail -n 1 "${TEST_ROOT}/host.log")" == lock ]] || return 1
+            rm -- "${TEST_ROOT}/rotation-running"
+            ;;
+        rm)
+            [[ "$*" == "rm ${cid}" ]] || return 1
+            if [[ -f "${TEST_ROOT}/rotation-running" ]]; then
+                printf 'still-running\n' >>"${TEST_ROOT}/rotation-docker.log"
+                return 1
+            fi
+            ;;
+        ps)
+            [[ "$*" == "ps --all --quiet --no-trunc --filter id=${cid}" ]] || return 1
+            printf '%s\n' "${cid}"
+            ;;
+        *) return 1 ;;
+        esac
+    }
+    reject dockerControlCommand log-rotate
+    reject dockerControlCommand log-rotate --yes --yes
+    printf 'foreign\n' >"${root}/data/control-source/challenge.json"
+    reject dockerControlCommand log-rotate --yes
+    rm -- "${root}/data/control-source/challenge.json"
+    [[ ! -e "${TEST_ROOT}/rotation-docker.log" ]]
+    dockerControlCommand log-rotate --yes
+    for ROTATE_CASE in failure signal drift inspect-signal; do
+        status=0
+        dockerControlCommand log-rotate --yes || status=$?
+        if [[ "${ROTATE_CASE}" == signal ]]; then
+            [[ "${status}" == 143 ]]
+            grep -qxF wait "${TEST_ROOT}/rotation-docker.log"
+        elif [[ "${ROTATE_CASE}" == inspect-signal ]]; then
+            [[ "${status}" == 15 && ! -f "${TEST_ROOT}/rotation-running" ]]
+            grep -qxF still-running "${TEST_ROOT}/rotation-docker.log"
+        else
+            [[ "${status}" == 15 ]]
+        fi
+    done
+    [[ "$(grep -c '^create$' "${TEST_ROOT}/rotation-docker.log")" == 5 &&
+        "$(grep -c '^rm$' "${TEST_ROOT}/rotation-docker.log")" == 6 ]]
+    rm -- "${TEST_ROOT}/rotation-drift"
+)
 printf 'docker-control-cli-regression-ok\n'

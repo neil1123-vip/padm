@@ -755,13 +755,20 @@ padm-docker control sync --invite /root/padm-control-invite.json
 文件安全核验、完整写入和同步成功后才发送响应；日志失效或来源不可证明时停止 API。
 日志留在配置恢复之外，首次创建不截断已有内容。连接关闭与鉴权失败分开记录；
 精确旧版本恢复可保留仅标准输出的受管格式，不宣称具备新日志能力。
-自动轮转和控制面 Fail2ban 防护尚未交付。
+控制面 Fail2ban 防护尚未交付。
 新版主控可执行 `padm-docker control source-check` 登记最多 30 秒的随机挑战，
 再在受管 Peer 执行输出的 `control source-probe` 命令。探测绑定 WireGuard 源地址，
 不读取邀请或发送 token；精确匹配登记、真实 socket 与主控状态的 401 才写独立
 `logs/control/source.receipt`，普通访问日志不记录 nonce。
 登记退出或中断即清理，旧回执不作为后续启用凭证；配置/容器代次变化时拒绝证明。
 存在陌生或变化后的登记时保留并拒绝，不自动删除；此命令不会启用 jail。
+控制菜单的“手动轮转认证日志”或 `padm-docker control log-rotate --yes` 在
+`auth.log` 达到 10 MiB 时轮转，固定保留 `auth.log.1`、`auth.log.2` 两份历史。
+API 使用 root 拥有的 `auth.lock` 只读协作锁；轮转不重启 API，不使用 copytruncate，
+不轮转或更换来源回执。旧无协作锁编排拒绝轮转，需先完成正常升级。
+自动调度尚未提供，10 MiB 是手动触发阈值而非实时大小上限；异常恢复失败保留私有目录，
+后续操作拒绝接管。强杀或断电后的现场需人工核对，不能直接删除残留或补建缺失日志。
+INT/TERM 等待轮转容器结束并移除后才释放部署锁；Docker daemon 不可用时保持锁并等待恢复。
 旧无连接元数据的内部被控规格继续兼容，但不能直接使用外部同步；旧 bundle 不得恢复新连接规格。
 显式 `rollback` 在采集、备份和停服前检查被控身份、入口映射与连接一致，拒绝降同步版本，
 同版本必须保持摘要和受管账号；同步状态未变的兼容发行版快照仍可回滚。
