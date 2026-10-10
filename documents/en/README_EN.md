@@ -602,6 +602,13 @@ After a forced kill or power loss, inspect the retained evidence manually; do no
 files or recreate a missing active log to bypass the check.
 INT/TERM waits for the rotation container to finish and be removed before releasing the deployment lock;
 if the Docker daemon is unavailable, the lock is retained until it recovers.
+The isolated control Fail2ban backend provides a `padm-control` jail, separate SQLite database and
+random owner. It bans INPUT TCP `NEW` connections only to one RFC 1918 IPv4 /32 and port on an actual
+`wg-padm` interface, leaving the WS dual-stack DOCKER-USER resources unchanged. Its process runs as
+`0:10001` with only `NET_ADMIN` and read-only trusted logs. Enable transactions and menu integration
+are not yet provided; ordinary 401s, old logs and source receipts do not authorize enabling protection.
+Do not start the backend manually to bypass the pending fresh nonce gate. The dedicated real fixture
+is `docker-control-fail2ban-real`.
 Legacy internal roles without connection metadata
 remain compatible but cannot use external sync; old bundles cannot restore the new connection spec.
 Explicit `rollback` checks controlled identity, listener mapping and connection before sampling, creating a

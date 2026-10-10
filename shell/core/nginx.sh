@@ -149,10 +149,10 @@ realityStreamWarnWebsiteDomainResolve() {
 realityStreamLocalPortListening() {
     local port=$1
     if command -v ss >/dev/null 2>&1; then
-        ss -ltn 2>/dev/null | awk -v port=":${port}" '$4 ~ port"$" {print $4}' | grep -Eq "(^|:)(127\.0\.0\.1|0\.0\.0\.0|\[::\]|::1):?${port}$|:${port}$" && return 0
+        ss -ltn 2>/dev/null | awk -v port=":${port}" '$4 ~ port"$" {print $4}' | grep -Eq "^(127\.0\.0\.1|0\.0\.0\.0|\*|\[::\]):${port}$" && return 0
     fi
     if command -v lsof >/dev/null 2>&1; then
-        lsof -nP -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null | awk 'NR > 1 {print $9}' | grep -Eq "127\.0\.0\.1:${port}|0\.0\.0\.0:${port}|\*:${port}|\[::1\]:${port}" && return 0
+        lsof -nP -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null | awk 'NR > 1 {print $9}' | grep -Eq "^(127\.0\.0\.1|0\.0\.0\.0|\*|\[::\]):${port}$" && return 0
     fi
     return 1
 }

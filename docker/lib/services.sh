@@ -1448,6 +1448,70 @@ dockerStageHostIntegrationFiles() {
         chmod 0600 "${candidate}/secrets/net/wireguard/wg-padm.conf"
 }
 
+dockerGenerateControlFail2banConfig() {
+    local specFile=$1 candidate=$2 maxRetry=$3 findTime=$4 banTime=$5 address port directory
+    [[ "${maxRetry}" =~ ^[1-9][0-9]*$ && "${findTime}" =~ ^[1-9][0-9]*$ &&
+        "${banTime}" =~ ^[1-9][0-9]*$ &&
+        "${#maxRetry}" -le 2 && "${#findTime}" -le 5 && "${#banTime}" -le 6 ]] &&
+        ((maxRetry <= 20 && findTime >= 60 && findTime <= 86400 &&
+          banTime >= 60 && banTime <= 604800)) || return 1
+    address=$(jq -er '.control | select(.role == "main" and .listen.interface == "wg-padm") |
+        .listen.address | select(type == "string")' "${specFile}") &&
+        dockerControlPrivateAddressIsValid "${address}" &&
+        port=$(jq -er '.control.listen.port |
+          select(type == "number" and floor == . and . >= 1024 and . <= 65535)' "${specFile}") || return 1
+    directory="${candidate}/config/net/control-fail2ban"
+    mkdir -p -- "${directory}" || return 1
+    # 只读取独立认证日志；目标和端口精确绑定，不把来源回执当作认证失败。
+    cat >"${directory}/padm-control.conf" <<EOF
+[Definition]
+datepattern = {^LN-BEG}%%Y-%%m-%%dT%%H:%%M:%%S.%%fZ
+failregex = ^ control-request status=401 source=<HOST> target=${address//./\\.} port=${port}$
+ignoreregex =
+EOF
+    cat >"${directory}/padm-control-input.conf" <<'EOF'
+[INCLUDES]
+before = iptables.conf
+
+[Definition]
+actionstart_on_demand = false
+actionstart = sh /usr/local/bin/padm-entrypoint fail2ban-control-action start "$PADM_FAIL2BAN_CONTROL_TOKEN" <iptables>
+actionstop = sh /usr/local/bin/padm-entrypoint fail2ban-control-action stop "$PADM_FAIL2BAN_CONTROL_TOKEN" <iptables>
+actionflush = sh /usr/local/bin/padm-entrypoint fail2ban-control-action flush "$PADM_FAIL2BAN_CONTROL_TOKEN" <iptables>
+actioncheck = sh /usr/local/bin/padm-entrypoint fail2ban-control-action check "$PADM_FAIL2BAN_CONTROL_TOKEN" <iptables>
+actionban = sh /usr/local/bin/padm-entrypoint fail2ban-control-action ban "$PADM_FAIL2BAN_CONTROL_TOKEN" <iptables> '<ip>'
+actionunban = sh /usr/local/bin/padm-entrypoint fail2ban-control-action unban "$PADM_FAIL2BAN_CONTROL_TOKEN" <iptables> '<ip>'
+EOF
+    cat >"${directory}/padm.local" <<EOF
+[DEFAULT]
+backend = polling
+bantime = ${banTime}
+findtime = ${findTime}
+maxretry = ${maxRetry}
+
+[sshd]
+enabled = false
+
+[sshd-ddos]
+enabled = false
+
+[padm-control]
+enabled = true
+filter = padm-control
+logpath = /var/log/padm/control/auth.log
+port = ${port}
+action = padm-control-input[port="${port}", protocol=tcp]
+EOF
+    cat >"${directory}/fail2ban.local" <<'EOF'
+[Definition]
+allowipv6 = no
+logtarget = STDOUT
+socket = /run/fail2ban/fail2ban.sock
+pidfile = /run/fail2ban/fail2ban.pid
+dbfile = /var/lib/padm/net/control-fail2ban.sqlite3
+EOF
+}
+
 dockerGenerateFail2banConfig() {
     local specFile=$1 candidate=$2 ports maxRetry findTime banTime allowIPv6
     jq -e 'any(.host_integrations[]; .type == "fail2ban")' "${specFile}" >/dev/null || return 0

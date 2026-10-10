@@ -92,7 +92,7 @@ emitVmessWsSubscribeOutput() {
         Host: ${currentHost}
 EOF
 )
-    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vmess",server:$server,server_port:$port,uuid:$uuid,alter_id:0,tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"}},packet_encoding:"packetaddr",transport:{type:"ws",path:$path,max_early_data:2048,early_data_header_name:"Sec-WebSocket-Protocol"}}' --arg tag "${email}" --arg server "${add}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${currentHost}" --arg path "${path}") || return 1
+    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vmess",server:$server,server_port:$port,uuid:$uuid,alter_id:0,tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"}},packet_encoding:"packetaddr",transport:{type:"ws",path:$path,headers:{Host:$host},max_early_data:2048,early_data_header_name:"Sec-WebSocket-Protocol"}}' --arg tag "${email}" --arg server "${add}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${currentHost}" --arg path "${path}" --arg host "${currentHost}") || return 1
     appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"
 
 }
@@ -620,7 +620,7 @@ emitVmessHTTPUpgradeSubscribeOutput() {
      v2ray-http-upgrade: true
 EOF
 )
-    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vmess",server:$server,server_port:$port,uuid:$uuid,security:"auto",alter_id:0,tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"}},packet_encoding:"packetaddr",transport:{type:"httpupgrade",path:$path}}' --arg tag "${email}" --arg server "${add}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${currentHost}" --arg path "${path}") || return 1
+    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vmess",server:$server,server_port:$port,uuid:$uuid,security:"auto",alter_id:0,tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"}},packet_encoding:"packetaddr",transport:{type:"httpupgrade",path:$path,host:$host}}' --arg tag "${email}" --arg server "${add}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${currentHost}" --arg path "${path}" --arg host "${currentHost}") || return 1
     appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"
 
 }
