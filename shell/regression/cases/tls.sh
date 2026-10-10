@@ -1338,9 +1338,85 @@ runTlsRenewalFailurePropagationRegression() (
     }
 
     (
-        # 同会话切换 CA 必须重新计算有效期，不能继承上一次的 180 天。
-        local sslRenewalDays=90 mode=ca-switch
-        prepareRenewalFixture
+        # 复制或恢复源文件后，续签仍以已安装证书的真实有效期和可用性为准。
+        local timeRoot="${root}/fresh-source" age certificate
+        mkdir -p "${timeRoot}/certs"
+        : >"${timeRoot}/index"
+        printf '01\n' >"${timeRoot}/serial"
+        cat >"${timeRoot}/openssl.cnf" <<EOF
+[ca]
+default_ca=local_ca
+[local_ca]
+database=${timeRoot}/index
+serial=${timeRoot}/serial
+new_certs_dir=${timeRoot}/certs
+default_md=sha256
+policy=subject_policy
+x509_extensions=certificate_extensions
+unique_subject=no
+[subject_policy]
+commonName=supplied
+[certificate_extensions]
+subjectAltName=DNS:renew.example.com
+EOF
+        command openssl req -new -key "${root}/valid.key" -subj '/CN=renew.example.com' \
+            -out "${timeRoot}/request.pem" >/dev/null 2>&1
+        command openssl req -new -x509 -key "${root}/valid.key" -days 3 \
+            -subj '/CN=renew.example.com' -addext 'subjectAltName=DNS:renew.example.com' \
+            -out "${timeRoot}/healthy.crt" >/dev/null 2>&1
+        for age in expired future; do
+            local start='3 days ago' end='1 day ago'
+            [[ "${age}" != future ]] || { start='1 day'; end='3 days'; }
+            command openssl ca -selfsign -batch -notext -config "${timeRoot}/openssl.cnf" \
+                -cert "${root}/valid.crt" -keyfile "${root}/valid.key" \
+                -in "${timeRoot}/request.pem" -out "${timeRoot}/${age}.crt" \
+                -startdate "$(date -u -d "${start}" +%Y%m%d%H%M%SZ)" \
+                -enddate "$(date -u -d "${end}" +%Y%m%d%H%M%SZ)" >/dev/null 2>&1
+        done
+        stat() { command stat "$@"; }
+        sudo() {
+            printf 'sudo:%s\n' "$*" >>"${commandLog}"
+            [[ "$*" != *" --installcert "* ]] ||
+                cp "${timeRoot}/healthy.crt" "${tlsDir}/renew.example.com.crt"
+        }
+        for age in bad expiring expired future healthy; do
+            mode=fresh-source
+            prepareRenewalFixture
+            certificate="${timeRoot}/${age}.crt"
+            [[ "${age}" != expiring ]] || certificate="${root}/valid.crt"
+            if [[ "${age}" == bad ]]; then
+                printf 'corrupt-installed-certificate\n' >"${tlsDir}/renew.example.com.crt"
+            else
+                cp "${certificate}" "${tlsDir}/renew.example.com.crt"
+            fi
+            cp "${timeRoot}/healthy.crt" "${homeDir}/.acme.sh/renew.example.com_ecc/renew.example.com.cer"
+            renewalTLS >/dev/null 2>&1 || {
+                printf 'tls-legacy-failed-to-recover-%s-certificate\n' "${age}" >&2
+                return 1
+            }
+            if [[ "${age}" == healthy ]]; then
+                [[ ! -s "${commandLog}" && ! -s "${serviceLog}" ]] || return 1
+            else
+                grep -q -- ' --cron ' "${commandLog}" &&
+                    grep -q -- ' --installcert ' "${commandLog}" || {
+                        printf 'tls-legacy-fresh-source-missed-%s-certificate\n' "${age}" >&2
+                        return 1
+                    }
+                tlsCertificatePairUsable "${tlsDir}" renew.example.com || return 1
+            fi
+            if [[ "${age}" == expiring ]]; then
+                ! grep -q '证书剩余天数:已过期' "${statusLog}" || {
+                    printf 'tls-legacy-valid-expiring-certificate-displayed-as-expired\n' >&2
+                    return 1
+                }
+            fi
+            [[ "${nginxState}" == true && "${xrayState}" == true && "${singBoxState}" == false ]] || return 1
+        done
+    ) || return 1
+
+    (
+        # 同会话切换 CA 不能改变已安装证书的真实续签窗口。
+        local sslRenewalDays=90 mode=ca-switch ca
         stat() {
             if [[ "$1" == --format=%z ]]; then
                 date -d '100 days ago' '+%F %T.000000000 %z'
@@ -1348,13 +1424,13 @@ runTlsRenewalFailurePropagationRegression() (
                 command stat "$@"
             fi
         }
-        printf 'buypass\n' >"$(tlsSslTypeFile)"
-        renewalTLS >/dev/null 2>&1
-        [[ ! -s "${commandLog}" && "${sslRenewalDays}" == 90 ]]
-        printf 'letsencrypt\n' >"$(tlsSslTypeFile)"
-        renewalTLS >/dev/null 2>&1
-        grep -q '^sudo:.*--cron --home ' "${commandLog}"
-        [[ "${sslRenewalDays}" == 90 ]]
+        for ca in buypass letsencrypt; do
+            prepareRenewalFixture
+            printf '%s\n' "${ca}" >"$(tlsSslTypeFile)"
+            renewalTLS >/dev/null 2>&1
+            grep -q '^sudo:.*--cron --home ' "${commandLog}"
+            [[ "${sslRenewalDays}" == 90 ]]
+        done
     )
 
     rm -rf "${tlsDir}" "${homeDir}/.acme.sh"
@@ -1575,6 +1651,26 @@ EOF
         done
         # 没有 ACME 目录或受管记录仍允许原有自定义证书路径。
         enumerationBackend=none
+        (
+            # 子目录、穿越与重复分隔符不能把根目录证书误登记为受管安装目标。
+            local invalidPath configFile="${homeDir}/.acme.sh/${firstDomain}_ecc/${firstDomain}.conf"
+            rm -f "${homeDir}/.acme.sh/${secondDomain}_ecc/${secondDomain}.conf"
+            for invalidPath in "${tlsDir}/nested/${firstDomain}.crt" \
+                "${tlsDir}/../${firstDomain}.crt" "${tlsDir}//${firstDomain}.crt"; do
+                printf "Le_RealFullChainPath='%s'\nLe_RealKeyPath='%s/%s.key'\n" \
+                    "${invalidPath}" "${tlsDir}" "${firstDomain}" >"${configFile}"
+                records=$(tlsAcmeManagedCertificateRecords)
+                [[ -z "${records}" ]] || {
+                    printf 'tls-acme-record-accepted-noncanonical-target:%s\n' "${invalidPath}" >&2
+                    return 1
+                }
+                regressionExpectStatus 2 renewManagedTLSCertificates || return 1
+            done
+            printf "Le_RealFullChainPath='%s/%s.crt'\nLe_RealKeyPath='%s/%s.key'\n" \
+                "${tlsDir}" "${firstDomain}" "${tlsDir}" "${firstDomain}" >"${configFile}"
+            records=$(tlsAcmeManagedCertificateRecords)
+            [[ "${records}" == "${firstDomain}"$'\t'* ]] || return 1
+        ) || return 1
         HOME="${enumerationRoot}/empty-home"
         mkdir -p "${HOME}" || return 1
         regressionExpectStatus 2 renewManagedTLSCertificates || return 1
