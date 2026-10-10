@@ -639,7 +639,10 @@ dockerComposeExecute() {
         return "${PADM_DOCKER_RC_STATE}"
     }
     composeDir=$(dirname -- "${composeFile}")
-    commandArgs=(docker compose --project-name "${PADM_DOCKER_PROJECT}"
+    # 已验证的镜像和挂载根只从受管 env-file 读取，不接受宿主导出变量覆盖。
+    commandArgs=(env -u PADM_DOCKER_ROOT -u PADM_NET_ROOT \
+        -u PADM_XRAY_IMAGE -u PADM_SINGBOX_IMAGE -u PADM_NGINX_IMAGE \
+        -u PADM_OPS_IMAGE -u PADM_NET_IMAGE docker compose --project-name "${PADM_DOCKER_PROJECT}"
         --project-directory "${composeDir}" --env-file "${root}/images.env"
         --file "${composeFile}")
     while IFS= read -r profile; do

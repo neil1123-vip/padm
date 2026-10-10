@@ -936,6 +936,26 @@ dockerRealityStreamContractChecks() {
     printf '\nhttp { server { listen 8080; } }\n' >>"${PADM_DOCKER_INSTALL_DIR}/config/nginx/stream/host-main"
     runRead 1 stream-loopback-tls-main-drift dockerTlsConsumers ws.example.com
     cp "${TEST_ROOT}/stream-loop-main.saved" "${PADM_DOCKER_INSTALL_DIR}/config/nginx/stream/host-main"
+    # 已安装校验必须检查独立 stream 主配置，并传播其校验失败。
+    if ! (
+        calls="${TEST_ROOT}/stream-loop-installed.calls"
+        streamCheck='run --rm --no-deps nginx-stream -t -c /etc/nginx/stream.d/host-main'
+        dockerHostPreflight() { return 0; }
+        dockerLockInstalledDeployment() { return 0; }
+        dockerComposeRun() {
+            printf '%s\n' "$*" >>"${calls}"
+            [[ "$*" != "${streamCheck}" || "${rejectStreamCheck:-0}" != 1 ]]
+        }
+        : >"${calls}"
+        dockerValidateInstalledCommand >/dev/null &&
+            grep -Fxq "${streamCheck}" "${calls}" || exit 1
+        rejectStreamCheck=1
+        status=0
+        dockerValidateInstalledCommand >/dev/null || status=$?
+        [[ "${status}" == "${PADM_DOCKER_RC_STATE}" ]]
+    ); then
+        fail '已安装校验遗漏 stream 主配置或忽略校验失败'
+    fi
     if ! (
         calls="${TEST_ROOT}/stream-loop-candidate.calls"
         : >"${calls}"

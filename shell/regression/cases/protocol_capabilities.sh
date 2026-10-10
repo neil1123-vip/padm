@@ -219,7 +219,7 @@ runProtocolCapabilityTemplateRegression() {
 
     for id in 1 2 21 22 23 24 25 26 27 28 29; do
         configFile=$(protocolCapabilityMeta "${id}" config_file)
-        if ! grep -Fq "writeGeneratedJsonFile /etc/padm/xray/conf/${configFile}" "${coreTemplate}"; then
+        if ! grep -Fq "writeGeneratedJsonFile \"\${configPath}${configFile}\"" "${coreTemplate}"; then
             printf 'assert-fail:xray template missing config path for %s:%s\n' "${id}" "${configFile}" >&2
             return 1
         fi

@@ -174,6 +174,12 @@ dockerComposeRun() {
         return 1
     fi
 }
+dockerComposeExecute() {
+    case "${1:-}" in
+    up|restart) dockerControlRecoveryCheck current || return "${PADM_DOCKER_RC_STATE}" ;;
+    esac
+    dockerComposeRun "$@"
+}
 apply() (
     trap dockerConfigurationInterrupted EXIT
     trap 'exit 130' INT
@@ -218,6 +224,49 @@ jq -e '.services.control |
 printf 'existing-control-auth-evidence\n' >>"${root}/logs/control/auth.log"
 authDigest=$(sha256sum "${root}/logs/control/auth.log")
 dockerControlStateCheck "${root}"
+# 已安装校验不能漏过主控投影漂移或运行 UID 的只读检查失败。
+(
+    validateCalls="${TEST_ROOT}/installed-validate.calls"
+    controlCheck='run --rm --no-deps control control --state /etc/padm/control/state.json --access-log /var/log/padm/control/auth.log --access-lock /var/log/padm/control/auth.lock --source-challenge /run/padm/control-source/challenge.json --source-receipt /var/log/padm/control/source.receipt --check'
+    dockerComposeRun() {
+        printf '%s\n' "$*" >>"${validateCalls}"
+        [[ "$*" != "${controlCheck}" || "${rejectControlCheck:-0}" != 1 ]]
+    }
+    : >"${validateCalls}"
+    dockerValidateInstalledCommand >/dev/null
+    grep -Fxq "${controlCheck}" "${validateCalls}"
+    rejectControlCheck=1
+    if dockerValidateInstalledCommand >/dev/null; then exit 1; fi
+    rejectControlCheck=0
+    cp -p -- "${root}/config/control/state.json" "${TEST_ROOT}/installed-state.saved"
+    jq '.revision += 1' "${root}/config/control/state.json" >"${TEST_ROOT}/installed-state.drift"
+    cp -- "${TEST_ROOT}/installed-state.drift" "${root}/config/control/state.json"
+    if dockerControlStateCheck "${root}"; then exit 1; fi
+    : >"${validateCalls}"
+    if dockerValidateInstalledCommand >/dev/null; then exit 1; fi
+    [[ ! -s "${validateCalls}" ]]
+    cp -p -- "${TEST_ROOT}/installed-state.saved" "${root}/config/control/state.json"
+    # 无规格的旧部署仍可校验，但孤立服务、profile 或状态不能被视为未启用。
+    legacy="${TEST_ROOT}/installed-validate-legacy"
+    mkdir -p "${legacy}/config"
+    jq '.compose.profiles |= map(select(. != "control")) |
+      .listeners |= map(select(.service != "control"))' "${root}/deployment.json" >"${legacy}/deployment.json"
+    jq 'del(.services.control)' "${root}/compose.json" >"${legacy}/compose.json"
+    PADM_DOCKER_INSTALL_DIR="${legacy}" dockerValidateInstalledCommand >/dev/null
+    for orphan in service profile state; do
+        case "${orphan}" in
+        service) jq '.services.control = {}' "${root}/compose.json" >"${legacy}/compose.json" ;;
+        profile) cp -- "${root}/deployment.json" "${legacy}/deployment.json" ;;
+        state) mkdir "${legacy}/config/control"; cp -- "${root}/config/control/state.json" "${legacy}/config/control/state.json" ;;
+        esac
+        : >"${validateCalls}"
+        if PADM_DOCKER_INSTALL_DIR="${legacy}" dockerValidateInstalledCommand >/dev/null; then exit 1; fi
+        [[ ! -s "${validateCalls}" ]]
+        jq 'del(.services.control)' "${root}/compose.json" >"${legacy}/compose.json"
+        jq '.compose.profiles |= map(select(. != "control")) |
+          .listeners |= map(select(.service != "control"))' "${root}/deployment.json" >"${legacy}/deployment.json"
+    done
+)
 chmod 0666 "${spec}"
 if dockerControlStateCheck "${root}"; then exit 1; fi
 chmod 0600 "${spec}"

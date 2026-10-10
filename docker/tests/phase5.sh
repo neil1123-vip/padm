@@ -838,7 +838,9 @@ for siteContract in \
     'docker build --tag padm-regression:contracts shell/regression/container' \
     'git ls-files -z | tar --null -T - -cf' \
     'docker run --rm --network none --init' \
-    '--env PADM_REGRESSION_PARALLEL_JOBS=4' \
+    'jobs=2' \
+    'if [[ "${SELECTOR}" == docker-contracts-fast-* ]]; then jobs=4; fi' \
+    '--env PADM_REGRESSION_PARALLEL_JOBS="${jobs}"' \
     '--env PADM_DOCKER_CONTRACTS_SHARED_CHECKS' \
     'padm-regression:contracts "${SELECTOR}"'; do
     grep -Fq -- "${siteContract}" "${CONTRACT_WORKFLOW}" ||
@@ -855,8 +857,8 @@ grep -Fq "if: startsWith(matrix.selector, 'docker-contracts-fast-') || startsWit
     fail 'fast 分片没有同时使用隔离工具镜像和源码快照'
 grep -Fq "      PADM_DOCKER_CONTRACTS_SHARED_CHECKS: '1'" "${CONTRACT_WORKFLOW}" ||
     fail 'CI 合同矩阵没有共享已独立覆盖的传统 TLS 祖先合同'
-grep -Fq 'max-parallel: 20' "${CONTRACT_WORKFLOW}" ||
-    fail 'CI 合同矩阵没有保留 20 个并发槽位'
+grep -Fq 'max-parallel: 18' "${CONTRACT_WORKFLOW}" ||
+    fail 'CI 合同矩阵没有给原生与 TLS 门禁保留两个槽位'
 if grep -Fq 'subscription_groups_regression.sh docker-contracts' "${BUILD_WORKFLOW}"; then
     fail 'image workflow repeats the contract suite'
 fi

@@ -138,6 +138,13 @@ dockerComposeRun() {
         return 1
     fi
 }
+# 恢复直接调用执行层，服务动作仍隔离，但保留残留事务门禁。
+dockerComposeExecute() {
+    case "${1:-}" in
+    up|restart) dockerControlRecoveryCheck current || return "${PADM_DOCKER_RC_STATE}" ;;
+    esac
+    dockerComposeRun "$@"
+}
 docker() { :; }
 dockerRealityProbeRun() {
     local previous= directory= argument

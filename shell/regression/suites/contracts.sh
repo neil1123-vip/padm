@@ -299,9 +299,10 @@ runRegressionDockerContractsAggregateContract() (
     local workflow="${PROJECT_ROOT}/.github/workflows/docker-contracts.yml"
     local actual="${TMP_DIR}/docker-contract-shards.actual"
     local expected="${TMP_DIR}/docker-contract-shards.expected"
-    local kind children
+    local kind children shardCount=0
     : >"${actual}"
     while IFS= read -r selector; do
+        shardCount=$((shardCount + 1))
         kind=${PADM_REGRESSION_SELECTOR_KIND[${selector}]:-}
         case "${kind}" in
         function) printf '%s\n' "${selector}" >>"${actual}" ;;
@@ -320,6 +321,25 @@ runRegressionDockerContractsAggregateContract() (
     printf '%s\n' "${expectedSelectors[@]}" | sort >"${expected}"
     sort -o "${actual}" "${actual}"
     cmp -s "${expected}" "${actual}"
+    [[ "${shardCount}" -eq 18 ]]
+
+    # 短任务组合沿用两个 worker，给原生与 TLS 留出 runner，不依赖矩阵创建顺序。
+    runFrameworkParallelRegressionSelectors() {
+        [[ "${PADM_REGRESSION_PARALLEL_SELECTOR_MODE:-}" == pairs &&
+            "${PADM_REGRESSION_PARALLEL_JOBS:-}" == 2 ]] || return 8
+        shift
+        printf '%s\n' "$@" >"${callLog}"
+    }
+    for selector in docker-contracts-reality-metadata docker-contracts-setup-basic \
+        docker-contracts-system-light docker-routing-core-network; do
+        : >"${callLog}"
+        PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "${selector}"
+        : >"${expectedLog}"
+        while IFS= read -r children; do
+            printf '%s\n%s\n' "${children}" "${children}" >>"${expectedLog}"
+        done <<<"${PADM_REGRESSION_SELECTOR_CHILDREN[${selector}]}"
+        cmp -s "${expectedLog}" "${callLog}"
+    done
 
     runDockerSetupRegression() { printf '%s\n' "$*" >>"${callLog}"; }
     : >"${callLog}"

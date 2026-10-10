@@ -627,7 +627,21 @@ installCronTLS() {
     fi
 }
 
-# 定时任务更新geo文件
+padmMaintenanceCronActive() {
+    awk -v action="$1" '
+      $1 !~ /^#/ {
+        command = ($1 ~ /^@/) ? 2 : 6
+        if ($command == "/bin/bash" || $command == "bash") command++
+        nextArg = $(command + 2)
+        if ($command == "/etc/padm/install.sh" && $(command + 1) == action &&
+            ($1 !~ /^@/ || $1 ~ /^@(annually|yearly|monthly|weekly|daily|midnight|hourly)$/) &&
+            (nextArg == "" || nextArg ~ /^(>|2>|#)/)) found = 1
+      }
+      END { exit !found }
+    '
+}
+
+# 定时任务更新 Geo 文件
 installCronUpdateGeo() {
     if [[ "${coreInstallType}" == "1" ]]; then
         local historyCrontab
@@ -635,7 +649,7 @@ installCronUpdateGeo() {
             errorCard "读取现有定时任务失败，已取消添加 Geo 更新任务"
             return 1
         }
-        if grep -q "UpdateGeo" <<<"${historyCrontab}"; then
+        if padmMaintenanceCronActive UpdateGeo <<<"${historyCrontab}"; then
             statusCard "Geo 自动更新" "已设置" "保留现有定时任务"
             return 0
         fi
@@ -675,7 +689,7 @@ resolveInstalledTLSDomain() {
 }
 
 tlsRenewCronState() {
-    if crontab -l 2>/dev/null | grep -q "RenewTLS"; then
+    if crontab -l 2>/dev/null | padmMaintenanceCronActive RenewTLS; then
         printf '已设置'
     else
         printf '未设置'

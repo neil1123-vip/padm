@@ -59,6 +59,15 @@ compose)
         printf '%s\n' "${FAKE_COMPOSE_VERSION:-v2.29.1}"
         exit 0
     fi
+    if [[ "${mode}" == compose-env-isolation ]]; then
+        for name in PADM_DOCKER_ROOT PADM_NET_ROOT PADM_XRAY_IMAGE PADM_SINGBOX_IMAGE \
+            PADM_NGINX_IMAGE PADM_OPS_IMAGE PADM_NET_IMAGE; do
+            [[ ! -v "${name}" ]] || {
+                printf 'Compose 收到了可覆盖受管输入的环境变量: %s\n' "${name}" >&2
+                exit 1
+            }
+        done
+    fi
     printf '%s\n' "$*" >>"${FAKE_DOCKER_LOG:?}"
     [[ "${mode}" != "compose-slow" ]] || exec sleep 30
     [[ "${mode}" != "compose-fail" ]]
@@ -1090,6 +1099,17 @@ grep -q ' up -d --remove-orphans$' "${DOCKER_CALL_LOG}" || fail 'up did not remo
 grep -q ' down --remove-orphans$' "${DOCKER_CALL_LOG}" || fail 'down did not remove Compose orphans'
 grep -q ' restart$' "${DOCKER_CALL_LOG}" || fail 'restart did not call Compose restart'
 grep -q ' logs --tail 5$' "${DOCKER_CALL_LOG}" || fail 'logs arguments were not forwarded'
+
+# 镜像和挂载根只取受管 env-file，隔离不能清空调用者环境。
+(
+    export PADM_DOCKER_ROOT=/outside/root PADM_NET_ROOT=/outside/net \
+        PADM_XRAY_IMAGE=outside:xray PADM_SINGBOX_IMAGE=outside:sing-box \
+        PADM_NGINX_IMAGE=outside:nginx PADM_OPS_IMAGE=outside:ops PADM_NET_IMAGE=outside:net
+    FAKE_DOCKER_MODE=compose-env-isolation runControl 0 compose-env-isolation \
+        "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" status
+    [[ "${PADM_DOCKER_ROOT}" == /outside/root && "${PADM_XRAY_IMAGE}" == outside:xray ]] ||
+        fail 'Compose 隔离改变了调用者环境'
+)
 
 # 使用生产 Compose 入口核验有界执行，不只断言调用方设置了超时变量。
 DOCKER_COMPOSE_TIMEOUT=10 runControl 0 compose-bounded "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" status

@@ -20,7 +20,8 @@ jobs:
       PADM_DOCKER_CONTRACTS_SHARED_CHECKS: '1'
     strategy:
       fail-fast: true
-      max-parallel: 20
+      # 留出原生与 TLS 门禁的两个槽位，避免长分片排队。
+      max-parallel: 18
       matrix:
         selector:
           - docker-contracts-fast-rest
@@ -31,20 +32,16 @@ jobs:
           - docker-setup-transports
           - docker-contracts-fast-heavy
           - docker-phase4-maintenance
-          - docker-phase4-lifecycle
+          - docker-contracts-system-light
           - docker-setup-encrypted-udp
-          - docker-setup-encrypted-tcp
-          - docker-reality-parameters
+          - docker-contracts-setup-basic
+          - docker-contracts-reality-metadata
           - docker-reality
-          - docker-setup-core
           - docker-setup-tls
           - docker-routing-direct-block-workflow
           - docker-routing-dns-hosts-workflow
           - docker-routing-core-policy-lifecycle
-          - docker-routing-core-network-lifecycle
-          - docker-phase6
-          - docker-routing-core-contracts
-          - docker-reality-target-library
+          - docker-routing-core-network
     steps:
       - name: Checkout checked source
         uses: actions/checkout@v7
@@ -63,9 +60,11 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "${SELECTOR}" == docker-contracts-fast-* || "${SELECTOR}" == docker-routing-* ]]; then
+            jobs=2
+            if [[ "${SELECTOR}" == docker-contracts-fast-* ]]; then jobs=4; fi
             git ls-files -z | tar --null -T - -cf "${RUNNER_TEMP}/padm-contracts-source.tar"
             docker run --rm --network none --init \
-              --env PADM_REGRESSION_PARALLEL_JOBS=4 \
+              --env PADM_REGRESSION_PARALLEL_JOBS="${jobs}" \
               --env PADM_DOCKER_CONTRACTS_SHARED_CHECKS \
               --mount "type=bind,src=${RUNNER_TEMP}/padm-contracts-source.tar,dst=/snapshot.tar,readonly" \
               padm-regression:contracts "${SELECTOR}"
