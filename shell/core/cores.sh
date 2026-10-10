@@ -2296,7 +2296,7 @@ EOF
     elif [[ "${serviceName}" == "xray" ]]; then
         serviceFile=${PADM_XRAY_OPENRC_SERVICE_FILE:-${serviceFile}}
     fi
-    commitGeneratedFile "${tmpFile}" "${serviceFile}" 755
+    commitGeneratedFile "${tmpFile}" "${serviceFile}" 755 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
 
 coreStartupServiceEnabled() {
@@ -3203,6 +3203,7 @@ singBoxLog() {
     true | false) ;;
     *) errorCard "sing-box 日志开关无效"; return 1 ;;
     esac
+    singBoxRequireShardSource || return 1
     singBoxRunning && serviceWasRunning=true
     targetPath=$(singBoxLogConfigFile)
     targetPath=$(padmResolveManagedAbsolutePath "${targetPath}") || { errorCard "sing-box 日志配置路径异常"; return 1; }

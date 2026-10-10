@@ -82,14 +82,18 @@ runCleanupTrapRegression() {
     termProbe="${tmpDir}/term.XXXXXX"
     intOutput="${tmpDir}/int.out"
     termOutput="${tmpDir}/term.out"
-    bash -c 'source "$1"; padmCreateTempPath p "$2"; exit 0' _ "${PROJECT_ROOT}/shell/core/runtime.sh" "${exitProbe}"
+    exitProbe=$(bash -c 'source "$1"; padmCreateTempPath p "$2" || exit 1; printf "%s\n" "$p"; exit 0' _ "${PROJECT_ROOT}/shell/core/runtime.sh" "${exitProbe}")
+    [[ -n "${exitProbe}" ]]
     [[ ! -e "${exitProbe}" ]]
     set +e
-    bash -c 'source "$1"; padmCreateTempPath p "$2"; kill -INT $$; exit 99' _ "${PROJECT_ROOT}/shell/core/runtime.sh" "${intProbe}" >"${intOutput}" 2>&1
+    bash -c 'source "$1"; padmCreateTempPath p "$2" || exit 1; printf "%s\n" "$p"; kill -INT $$; exit 99' _ "${PROJECT_ROOT}/shell/core/runtime.sh" "${intProbe}" >"${intOutput}"
     local intStatus=$?
-    bash -c 'source "$1"; padmCreateTempPath p "$2"; kill -TERM $$; exit 99' _ "${PROJECT_ROOT}/shell/core/runtime.sh" "${termProbe}" >"${termOutput}" 2>&1
+    bash -c 'source "$1"; padmCreateTempPath p "$2" || exit 1; printf "%s\n" "$p"; kill -TERM $$; exit 99' _ "${PROJECT_ROOT}/shell/core/runtime.sh" "${termProbe}" >"${termOutput}"
     local termStatus=$?
     set -e
+    intProbe=$(<"${intOutput}")
+    termProbe=$(<"${termOutput}")
+    [[ -n "${intProbe}" && -n "${termProbe}" ]]
     [[ ${intStatus} -eq 130 ]]
     [[ ${termStatus} -eq 143 ]]
     [[ ! -e "${intProbe}" ]]

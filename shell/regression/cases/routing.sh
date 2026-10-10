@@ -690,6 +690,130 @@ runSocks5InboundMatcherRegression() (
             fi
         done
     ) || return 1
+    (
+        # 主动删除最后入站要重建合并配置，清理或重载失败仍恢复原文件。
+        local uninstallChoice failure caseRoot mergedFile= oldMerged oldInbound
+        local configPath= singBoxConfigPath PADM_SINGBOX_BINARY stopCalls reloadCalls denyCalls removePending signalPending
+        local TMPDIR REGRESSION_ERROR_CARD_LOG signalStatus expectedStatus keptBackup backupFile targetFile state mergedRestored inboundRestored
+        eval "$(declare -f removeManagedFileIfPresent | sed '1s/^removeManagedFileIfPresent/originalSocks5RemoveManagedFile/')"
+        eval "$(declare -f checkLogBackupRestore | sed '1s/^checkLogBackupRestore/originalSocks5CheckLogBackupRestore/')"
+        singBoxV2rayApiSupported() { return 0; }
+        menuReadChoice() { IFS= read -r "$3"; }
+        stopSocks5SingBox() { stopCalls=$((stopCalls + 1)); }
+        denyPort() { denyCalls=$((denyCalls + 1)); }
+        removeManagedFileIfPresent() {
+            if [[ "$1" == "${mergedFile}" && "${failure}" == remove && "${removePending}" == true ]]; then
+                removePending=false
+                return 1
+            fi
+            originalSocks5RemoveManagedFile "$@" || return 1
+            if [[ "$1" == "${mergedFile}" && "${signalPending}" == true ]]; then
+                signalPending=false
+                kill "-${failure%%-*}" "${BASHPID}"
+            fi
+        }
+        checkLogBackupRestore() {
+            printf '%s\n' "$1" >>"${caseRoot}/restore.calls"
+            [[ "${failure}" != *-restore ]] || return 1
+            originalSocks5CheckLogBackupRestore "$@"
+        }
+        reloadCore() {
+            reloadCalls=$((reloadCalls + 1))
+            printf 'reload\n' >>"${caseRoot}/reload.calls"
+            singBoxMergeConfig check || return 1
+            [[ "${failure}" != reload || "${reloadCalls}" -gt 1 ]]
+        }
+        for uninstallChoice in 2 3; do
+            for failure in success remove reload INT TERM INT-restore TERM-restore; do
+                caseRoot="${root}/remove-last-${uninstallChoice}-${failure}"
+                singBoxConfigPath="${caseRoot}/config/"
+                PADM_SINGBOX_BINARY="${caseRoot}/sing-box"
+                TMPDIR="${caseRoot}/tmp"
+                REGRESSION_ERROR_CARD_LOG="${caseRoot}/errors.log"
+                mkdir -p "${singBoxConfigPath}" "${TMPDIR}" || return 1
+                cat >"${PADM_SINGBOX_BINARY}" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+case "$1" in
+merge)
+    jq -s '{inbounds:[.[] | .inbounds[]?], outbounds:[.[] | .outbounds[]?]}' "$4"*.json >"${6%/}/$2"
+    ;;
+check) jq -e 'type == "object"' "$3" >/dev/null ;;
+*) exit 1 ;;
+esac
+EOF
+                chmod +x "${PADM_SINGBOX_BINARY}" || return 1
+                writeSocks5InboundConfig "${singBoxConfigPath}20_socks5_inbounds.json" 1080 fixture-uuid || return 1
+                addSingBoxOutbound 01_direct_outbound || return 1
+                singBoxMergeConfig check || return 1
+                mergedFile=$(singBoxMergedConfigFile) || return 1
+                oldMerged=$(<"${mergedFile}")
+                oldInbound=$(<"${singBoxConfigPath}20_socks5_inbounds.json")
+                stopCalls=0 reloadCalls=0 denyCalls=0 removePending=true signalPending=false
+                if [[ "${failure}" == success ]]; then
+                    removeSocks5Routing <<<"${uninstallChoice}"$'\n4' >/dev/null || return 1
+                    jq -e '.inbounds == [] and (.outbounds | length > 0)' "${mergedFile}" >/dev/null || return 1
+                    [[ ! -e "${singBoxConfigPath}20_socks5_inbounds.json" &&
+                        "${stopCalls}:${reloadCalls}:${denyCalls}" == 1:1:2 ]] || return 1
+                elif [[ "${failure}" == remove || "${failure}" == reload ]]; then
+                    regressionExpectStatus 1 removeSocks5Routing <<<"${uninstallChoice}"$'\n4' >/dev/null 2>&1 || return 1
+                    [[ "$(<"${mergedFile}")" == "${oldMerged}" &&
+                        "$(<"${singBoxConfigPath}20_socks5_inbounds.json")" == "${oldInbound}" &&
+                        "${stopCalls}" == 1 && "${denyCalls}" == 0 ]] || return 1
+                    [[ "${failure}:${reloadCalls}" == remove:1 || "${failure}:${reloadCalls}" == reload:2 ]] || return 1
+                else
+                    # 直接中断卸载所在 shell，证明退出恢复发生在临时备份清理之前。
+                    cp "${mergedFile}" "${caseRoot}/old-merged.json" || return 1
+                    cp "${singBoxConfigPath}20_socks5_inbounds.json" "${caseRoot}/old-inbound.json" || return 1
+                    signalPending=true signalStatus=0 expectedStatus=130
+                    [[ "${failure%%-*}" != TERM ]] || expectedStatus=143
+                    ( removeSocks5Routing <<<"${uninstallChoice}"$'\n4' ) >"${caseRoot}/signal.log" 2>&1 || signalStatus=$?
+                    [[ "${signalStatus}" == "${expectedStatus}" && -f "${caseRoot}/restore.calls" &&
+                        "$(wc -l <"${caseRoot}/restore.calls")" -eq 1 ]] || return 1
+                    keptBackup=$(<"${caseRoot}/restore.calls")
+                    if [[ "${failure}" == *-restore ]]; then
+                        [[ -f "${keptBackup}/manifest" && ! -e "${mergedFile}" &&
+                            ! -e "${singBoxConfigPath}20_socks5_inbounds.json" && ! -e "${caseRoot}/reload.calls" ]] || return 1
+                        grep -q '且旧配置恢复失败' "${REGRESSION_ERROR_CARD_LOG}" || return 1
+                        ! grep -q '已恢复旧配置' "${REGRESSION_ERROR_CARD_LOG}" || return 1
+                        mergedRestored=false inboundRestored=false
+                        while IFS=$'\t' read -r backupFile targetFile state; do
+                            if [[ "${targetFile}" == "${mergedFile}" && "${state}" == file ]]; then
+                                cmp -s "${backupFile}" "${caseRoot}/old-merged.json" || return 1
+                                mergedRestored=true
+                            elif [[ "${targetFile}" == "${singBoxConfigPath}20_socks5_inbounds.json" && "${state}" == file ]]; then
+                                cmp -s "${backupFile}" "${caseRoot}/old-inbound.json" || return 1
+                                inboundRestored=true
+                            fi
+                        done <"${keptBackup}/manifest"
+                        [[ "${mergedRestored}:${inboundRestored}" == true:true ]] || return 1
+                    else
+                        cmp -s "${mergedFile}" "${caseRoot}/old-merged.json" || return 1
+                        cmp -s "${singBoxConfigPath}20_socks5_inbounds.json" "${caseRoot}/old-inbound.json" || return 1
+                        [[ ! -e "${keptBackup}" && -f "${caseRoot}/reload.calls" &&
+                            "$(wc -l <"${caseRoot}/reload.calls")" -eq 1 ]] || return 1
+                    fi
+                fi
+            done
+        done
+        (
+            local singBoxConfigPath="${root}/merged-only/config/" mergedFile originalMerged
+            local inputCalls="${root}/merged-only-input"
+            mkdir -p "${singBoxConfigPath}" || return 1
+            mergedFile=$(singBoxMergedConfigFile) || return 1
+            printf '{"inbounds":[{"type":"socks","tag":"keep","listen_port":1081}]}\n' >"${mergedFile}"
+            originalMerged=$(<"${mergedFile}")
+            readSingBoxPortResult() { printf 'read\n' >>"${inputCalls}"; return 99; }
+            autoRead() { printf 'read\n' >>"${inputCalls}"; return 99; }
+            regressionExpectStatus 1 setSocks5Inbound >/dev/null 2>&1 || return 1
+            [[ "$(<"${mergedFile}")" == "${originalMerged}" &&
+                ! -e "${singBoxConfigPath}20_socks5_inbounds.json" && ! -e "${inputCalls}" ]] || return 1
+            failure=success stopCalls=0 reloadCalls=0 denyCalls=0
+            removeSocks5Routing <<< $'2\n4' >/dev/null || return 1
+            [[ "$(<"${mergedFile}")" == "${originalMerged}" &&
+                "${stopCalls}:${reloadCalls}:${denyCalls}" == 1:1:0 ]] || return 1
+        ) || return 1
+    ) || return 1
 )
 
 runAccessControlMatcherRegression() (

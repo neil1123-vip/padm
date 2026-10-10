@@ -201,6 +201,7 @@ ensureSingBoxTrafficStatsConfig() {
         return 1
     }
     [[ -d "${configDir}" ]] || return 0
+    singBoxRequireShardSource || return 1
     statsConfig=${configDir}14_stats_api.json
     mergedConfig=$(singBoxMergedConfigFile) || return 1
     if declare -F singBoxV2rayApiSupported >/dev/null 2>&1 &&
