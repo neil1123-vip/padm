@@ -517,6 +517,12 @@ if [[ "${1:-}" == install && -t 0 && -t 1 ]]; then
     DOCKER_MENU_AFTER_INSTALL=1
 fi
 
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    trap 'dockerEntryCleanup || true' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+fi
+
 if dockerEntryInstallCommandRequested "${1:-}"; then
     dockerEntryParseInstallArgs "${@:2}" || exit $?
     dockerEntryEnsureDockerForInstall
@@ -558,7 +564,6 @@ source "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/business.sh"
 source "${DOCKER_ENTRY_SOURCE_DIR}/docker/lib/menu.sh"
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-    trap 'dockerEntryCleanup || true' EXIT
     dockerMain "$@"
     DOCKER_ENTRY_STATUS=$?
     if [[ "${DOCKER_ENTRY_STATUS}" -eq 0 && "${DOCKER_MENU_AFTER_INSTALL}" -eq 1 ]]; then

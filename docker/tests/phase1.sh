@@ -269,6 +269,46 @@ tar -czf "${FETCH_ARCHIVE}" -C "${TEST_ROOT}" no-compose-source
         fail 'standalone fixed ref did not preserve the requested version'
 )
 
+# 加载控制模块前中断下载或解包，也必须清理本次临时源。
+for signal in INT TERM; do
+    signalStatus=130
+    [[ "${signal}" != TERM ]] || signalStatus=143
+    for stage in download extract; do
+        interruptedTemp="${TEST_ROOT}/standalone-${stage}-${signal}-tmp"
+        interruptedState="${TEST_ROOT}/standalone-${stage}-${signal}-state"
+        mkdir -- "${interruptedTemp}"
+        (
+            curl() {
+                local target=
+                if [[ "${PHASE1_FETCH_STAGE}" == download ]]; then
+                    kill -"${PHASE1_FETCH_SIGNAL}" "${BASHPID:-$$}"
+                fi
+                while [[ "$#" -gt 0 ]]; do
+                    if [[ "$1" == -o ]]; then target=$2; break; fi
+                    shift
+                done
+                [[ -n "${target}" ]] && command cp -- "${PHASE1_FETCH_ARCHIVE}" "${target}"
+            }
+            tar() {
+                if [[ "${PHASE1_FETCH_STAGE}" == extract && "${1:-}" == -xzf ]]; then
+                    kill -"${PHASE1_FETCH_SIGNAL}" "${BASHPID:-$$}"
+                fi
+                command tar "$@"
+            }
+            wget() { return 99; }
+            export -f curl wget tar
+            export TMPDIR="${interruptedTemp}" PHASE1_FETCH_ARCHIVE="${FETCH_ARCHIVE}"
+            export PHASE1_FETCH_SIGNAL="${signal}" PHASE1_FETCH_STAGE="${stage}"
+            PROJECT_ROOT="${STANDALONE_ROOT}" runControl "${signalStatus}" \
+                "standalone-${stage}-${signal}" "${interruptedState}" "${NATIVE_ROOT}" \
+                "${TEST_ROOT}/standalone-${stage}-${signal}-bin" install --no-menu --ref "${FETCH_REF}"
+        )
+        [[ ! -e "${interruptedState}" &&
+            -z "$(find "${interruptedTemp}" -mindepth 1 -print -quit)" ]] ||
+            fail "standalone-${stage}-${signal}: interruption kept bootstrap source"
+    done
+done
+
 # 预加载只供本次安装使用，同进程的后续 latest 必须重新解析。
 (
     source "${PROJECT_ROOT}/install-docker.sh"
