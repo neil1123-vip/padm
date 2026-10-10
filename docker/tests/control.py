@@ -57,6 +57,17 @@ def rejected(function, *args):
     raise AssertionError("应拒绝不安全控制输入")
 
 
+def log_failed(function, *args):
+    with patch.object(api, "print", create=True) as output:
+        try:
+            function(*args)
+        except SystemExit as error:
+            assert error.code == 78, "日志失败必须退出服务，不能交给 socketserver 吞掉"
+        else:
+            raise AssertionError("日志失败后不应继续服务")
+        output.assert_called_once_with("控制访问日志写入失败，服务已停止", file=sys.stderr, flush=True)
+
+
 validator.validate(STATE)
 api.validate_state(STATE)
 for field, value in (("role", "controlled"), ("revision", True), ("schema_version", 2), ("accounts", {})):
@@ -138,6 +149,62 @@ with tempfile.TemporaryDirectory(prefix=".tmp-control-", dir="/var/lib") as dire
     os.chown(directory, 0, 10001)
     os.chown(state_path, 0, 10001)
 
+    log_directory = Path(directory) / "logs"
+    log_directory.mkdir(mode=0o750)
+    os.chown(log_directory, 0, 10001)
+    access_path = log_directory / "auth.log"
+    access_path.write_bytes(b"existing\n")
+    os.chown(access_path, 10001, 10001)
+    access_path.chmod(0o640)
+    descriptor = api.open_access_log(access_path)
+    try:
+        flags = api.fcntl.fcntl(descriptor, api.fcntl.F_GETFL)
+        assert flags & os.O_APPEND and flags & os.O_NONBLOCK
+        assert api.fcntl.fcntl(descriptor, api.fcntl.F_GETFD) & api.fcntl.FD_CLOEXEC
+    finally:
+        os.close(descriptor)
+    assert access_path.read_bytes() == b"existing\n", "安全打开不能截断已有证据"
+    for mode in (0o600, 0o644, 0o660, 0o4640):
+        access_path.chmod(mode)
+        rejected(api.open_access_log, access_path)
+    access_path.chmod(0o640)
+    for uid, gid in ((0, 10001), (10001, 0)):
+        os.chown(access_path, uid, gid)
+        rejected(api.open_access_log, access_path)
+    os.chown(access_path, 10001, 10001)
+    for uid, gid, mode in ((10001, 10001, 0o750), (0, 0, 0o750), (0, 10001, 0o770),
+                           (0, 10001, 0o755)):
+        os.chown(log_directory, uid, gid)
+        log_directory.chmod(mode)
+        rejected(api.open_access_log, access_path)
+    os.chown(log_directory, 0, 10001)
+    log_directory.chmod(0o750)
+    Path(directory).chmod(0o770)
+    rejected(api.open_access_log, access_path)
+    Path(directory).chmod(0o750)
+    log_link = log_directory / "linked.log"
+    log_link.symlink_to(access_path)
+    rejected(api.open_access_log, log_link)
+    directory_link = Path(directory) / "linked-logs"
+    directory_link.symlink_to(log_directory, target_is_directory=True)
+    rejected(api.open_access_log, directory_link / "auth.log")
+    hard_link = log_directory / "hard.log"
+    os.link(access_path, hard_link)
+    rejected(api.open_access_log, access_path)
+    hard_link.unlink()
+    log_fifo = log_directory / "fifo.log"
+    os.mkfifo(log_fifo, 0o640)
+    rejected(api.open_access_log, log_fifo)
+    rejected(api.open_access_log, log_directory)
+    rejected(api.open_access_log, "relative.log")
+    missing_log = log_directory / (TOKEN + ".log")
+    rejected(api.open_access_log, missing_log)
+    assert not missing_log.exists(), "API 不能自行创建缺失日志"
+    with patch.object(sys, "argv", [str(ROOT / "docker/images/ops/control_api.py"),
+                                   "--state", str(state_path), "--access-log", str(missing_log)]), \
+            patch.object(api, "require_wireguard_address", side_effect=AssertionError("日志校验必须早于监听")):
+        log_failed(api.main)
+
     def runtime_user():
         os.setgroups([])
         os.setgid(10001)
@@ -148,6 +215,12 @@ with tempfile.TemporaryDirectory(prefix=".tmp-control-", dir="/var/lib") as dire
         preexec_fn=runtime_user, capture_output=True, timeout=3,
     )
     assert checked.returncode == 0 and checked.stdout == checked.stderr == b"", "默认容器用户应能只读检查状态"
+    checked = subprocess.run(
+        [sys.executable, str(ROOT / "docker/images/ops/control_api.py"), "--state", str(state_path),
+         "--access-log", str(missing_log), "--check"],
+        preexec_fn=runtime_user, capture_output=True, timeout=3,
+    )
+    assert checked.returncode == 0 and checked.stdout == checked.stderr == b"", "--check 不访问持久日志"
     failed_health = subprocess.run(
         [sys.executable, str(ROOT / "docker/images/ops/control_api.py"), "--state", str(state_path), "--health"],
         preexec_fn=runtime_user, capture_output=True, timeout=6,
@@ -237,6 +310,7 @@ with tempfile.TemporaryDirectory(prefix=".tmp-control-", dir="/var/lib") as dire
                 with connected:
                     handler = api.ControlHandler.__new__(api.ControlHandler)
                     handler.connection = connected
+                    handler.server = server
                     handler.log_endpoints = api.request_log_tuple(connected)
                     before = len(request_logs)
                     for code in (True, False, "200", TOKEN, 99, 600, None):
@@ -284,6 +358,38 @@ with tempfile.TemporaryDirectory(prefix=".tmp-control-", dir="/var/lib") as dire
         connection.getpeername.side_effect = OSError(TOKEN)
         api.request_log_event("connection_closed", api.request_log_tuple(connection))
         assert len(request_logs) == before, "socket 失败不得回显异常文本"
+        endpoints = ("127.0.0.1", "127.0.0.1", server.server_address[1])
+        original_log = access_path.read_bytes()
+        with patch.object(api.os, "write", wraps=os.write) as write, \
+                patch.object(api.os, "fsync", wraps=os.fsync) as sync:
+            api.request_log_event(401, endpoints, access_path)
+            write.assert_called_once()
+            sync.assert_called_once()
+        assert access_path.read_bytes() == original_log + (request_logs[-1] + "\n").encode("ascii")
+        request_logs.pop()
+        for tool, failure in (("write", 1), ("write", OSError(TOKEN)), ("fsync", OSError(TOKEN))):
+            arguments = {"side_effect": failure} if isinstance(failure, OSError) else {"return_value": failure}
+            with patch.object(api.os, tool, **arguments):
+                log_failed(api.request_log_event, 401, endpoints, access_path)
+
+        def fail_stdout(message, **arguments):
+            if arguments.get("file") is not sys.stderr:
+                raise BrokenPipeError(TOKEN)
+
+        with patch.object(api, "print", side_effect=fail_stdout) as output:
+            try:
+                api.request_log_event(401, endpoints, access_path)
+            except SystemExit as error:
+                assert error.code == 78
+            else:
+                raise AssertionError("持久日志的 stdout 断管也必须停止服务")
+            assert output.call_count == 2
+            output.assert_called_with("控制访问日志写入失败，服务已停止", file=sys.stderr, flush=True)
+        with patch.object(api, "open_access_log", wraps=api.open_access_log) as opened:
+            log_failed(api.request_log_event, 401, None, access_path)
+            opened.assert_not_called()
+        access_path.write_bytes(b"")
+        server.access_log = access_path
         status, body = request()
         assert status == 200 and json.loads(body)["capabilities"] == ["health", "desired"]
         health()
@@ -433,6 +539,8 @@ api.main()
         assert int(record["port"]) == server.server_address[1], "不能以模拟监听配置代替真实端口"
         statuses.add(record["status"])
     assert {"200", "401", "404", "400", "501", "connection_closed"} <= statuses
+    assert access_path.read_bytes() == ("\n".join(request_logs) + "\n").encode("ascii"), \
+        "真实响应与健康检查的持久日志必须逐字等于 stdout"
     logs = "\n".join(request_logs)
     for secret in (TOKEN, STATE["peer"]["token_sha256"], STATE["accounts"][0]["password"],
                    STATE["accounts"][0]["uuid"], "/v1/desired", "secret", "log-injection",
@@ -440,5 +548,17 @@ api.main()
                    STATE["listen"]["address"], STATE["peer"]["address"]):
         assert secret not in logs, "日志不得记录凭据、路径、转发头或模拟来源"
     rejected(health)
+    access_path.chmod(0o600)
+    original_log = access_path.read_bytes()
+    with api.ControlServer(("127.0.0.1", 0), TestHandler) as failed_server:
+        failed_server.state_path = state_path
+        failed_server.listen = STATE["listen"]
+        failed_server.access_log = access_path
+        with socket.create_connection(failed_server.server_address, timeout=2) as client, \
+                patch.object(failed_server, "handle_error", side_effect=AssertionError("不能吞掉日志失败")):
+            client.sendall(b"GET /v1/health HTTP/1.1\r\nHost: local\r\n\r\n")
+            log_failed(failed_server._handle_request_noblock)
+            assert client.recv(1) == b"", "日志权限失效必须先于任何 HTTP 响应退出"
+    assert access_path.read_bytes() == original_log, "坏权限日志不能继续写入"
 
 print("docker-control-api-regression-ok")

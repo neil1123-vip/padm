@@ -576,11 +576,16 @@ the new invitation and sync again. Every sync explicitly reads a root-private in
 directory, with the same parent-directory restrictions; expired or revoked credentials fail.
 The raw token is not stored in specs, backups, arguments, environment or ordinary logs. The capability-free
 client binds its private source address and connects directly, without proxies, redirects or public fallback.
-Status exposes connection metadata, not remote health. Control API stdout records only a UTC timestamp
+Status exposes connection metadata, not remote health. New control APIs write both managed
+`logs/control/auth.log` and stdout, recording only a UTC timestamp
 with milliseconds, status, and the actual socket source, target and port. Forwarding headers are ignored;
 request paths, headers, accounts, credentials and exception text are never logged.
-Connection closure is separate from authentication failure. This source-log foundation does not enable
-control-plane Fail2ban protection. Legacy internal roles without connection metadata
+The API responds only after safe-file checks, a complete write and synchronization succeed;
+an invalid log or unprovable socket source stops the API. Configuration restore never overwrites log
+history, and first creation preserves existing content. Connection closure is separate from authentication
+failure. Exact managed legacy restores may retain stdout-only logging without claiming the new capability.
+Automatic rotation and control-plane Fail2ban protection are not yet provided.
+Legacy internal roles without connection metadata
 remain compatible but cannot use external sync; old bundles cannot restore the new connection spec.
 Explicit `rollback` checks controlled identity, listener mapping and connection before sampling, creating a
 backup or stopping services. It rejects lower sync revisions and requires matching digest and managed accounts
