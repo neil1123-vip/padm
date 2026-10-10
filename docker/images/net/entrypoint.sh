@@ -255,6 +255,18 @@ except ValueError:
 PY
 }
 
+fail2ban_control_clean() (
+    [ "$#" -eq 2 ] || exit 1
+    fail2ban_control_scope
+    need python3
+    need iptables
+    fail2ban_control_parameters_valid "$1" "$2" || exit 1
+    # 停服时接口可不存在；这里只读证明本范围的 state 和内核资源为空。
+    fb_root=$STATE_ROOT fb_target=$1 fb_ports=$2 fb_ipv6=no
+    fb_token=00000000000000000000000000000000 fb_chain=${fb_prefix}000000000000
+    fail2ban_resources empty
+)
+
 fail2ban_control_precheck() {
     need ip
     fail2ban_control_parameters_valid "$1" "$2" || die "invalid control Fail2ban target or port"
@@ -1026,6 +1038,9 @@ fail2ban-action)
     ;;
 fail2ban-control-health)
     shift; [ "$#" -eq 0 ] || exit 1; fail2ban_control_scope; fail2ban_health
+    ;;
+fail2ban-control-clean)
+    shift; fail2ban_control_clean "$@"
     ;;
 fail2ban-control-action)
     shift; fail2ban_control_scope; fail2ban_action "$@"

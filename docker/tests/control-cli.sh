@@ -56,8 +56,20 @@ jq -r '.images | to_entries[] |
 
 # 宿主探针使用桩；参数、Peer 核验脚本、规划器和角色校验均走生产实现。
 dockerHostPreflight() { printf 'host\n' >>"${TEST_ROOT}/host.log"; }
-dockerLockInstalledDeployment() { printf 'lock\n' >>"${TEST_ROOT}/host.log"; }
-dockerReleaseDeploymentLock() { printf 'unlock\n' >>"${TEST_ROOT}/host.log"; }
+dockerLockInstalledDeployment() {
+    DOCKER_DEPLOYMENT_LOCK_DIR="${PADM_DOCKER_INSTALL_DIR}/.fixture-deployment.lock"
+    mkdir -- "${DOCKER_DEPLOYMENT_LOCK_DIR}" &&
+        printf '%s\n' "${BASHPID:-$$}" >"${DOCKER_DEPLOYMENT_LOCK_DIR}/pid" &&
+        printf 'lock\n' >>"${TEST_ROOT}/host.log"
+}
+dockerReleaseDeploymentLock() {
+    [[ -n "${DOCKER_DEPLOYMENT_LOCK_DIR:-}" &&
+        "$(cat "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid")" == "${BASHPID:-$$}" ]] || return 1
+    rm -- "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid" &&
+        rmdir -- "${DOCKER_DEPLOYMENT_LOCK_DIR}" &&
+        printf 'unlock\n' >>"${TEST_ROOT}/host.log" || return 1
+    DOCKER_DEPLOYMENT_LOCK_DIR=
+}
 dockerConfigureReleaseReuseInstalled() { :; }
 dockerManagedSpecMatchesDeployment() { [[ ! -f "${TEST_ROOT}/bad-deployment" ]]; }
 dockerCurrentOwnsHostIntegration() { [[ "$1" == wireguard && ! -f "${TEST_ROOT}/unowned" ]]; }
@@ -279,7 +291,11 @@ jq -e '.schema_version == 3 and .core.secondary_type == null and
     spec="${root}/config/spec.json"
     export PADM_DOCKER_INSTALL_DIR="${root}"
     dockerGenerateCompose "${spec}" "${root}/compose.json" "${root}"
-    dockerControlRequireMain() { [[ "$1" == "${spec}" && "$2" == "${root}" ]]; }
+    dockerControlRequireMain() {
+        [[ "$1" == "${spec}" && "$2" == "${root}" ]] || return 1
+        printf '%s\n' "${4:-}" >>"${TEST_ROOT}/snapshot-recovery-modes"
+        dockerControlRecoveryCheck "${4:-}"
+    }
     dockerControlInviteRuntimeCheck() { [[ "$1" == "${spec}" ]]; }
     controlId="$(printf 1%.0s {1..64})"
     netId="$(printf 2%.0s {1..64})"
@@ -339,6 +355,30 @@ jq -e '.schema_version == 3 and .core.secondary_type == null and
     jq -e '(.containers | length == 2) and
       (.hashes | split("\n") | map(select(length > 0)) | length == 7)' \
         "${TEST_ROOT}/snapshot.json" >/dev/null
+    # 已切换事务仅在同锁完成回调内可检查当前配置，其它恢复计划仍阻止发布。
+    DOCKER_CONFIG_SWITCHED=1
+    reject dockerControlSourceSnapshot
+    dockerLockInstalledDeployment
+    witnessOwner=${BASHPID:-$$}
+    mf_lockOwner=${witnessOwner}
+    mf_phase=witnessed
+    completion=dockerFail2banStartManagedCommit
+    dockerControlSourceSnapshot >"${TEST_ROOT}/snapshot.json"
+    [[ "$(tail -n 1 "${TEST_ROOT}/snapshot-recovery-modes")" == current ]]
+    mf_phase=prepare
+    reject dockerControlSourceSnapshot
+    mf_phase=witnessed
+    completion=
+    reject dockerControlSourceSnapshot
+    completion=dockerFail2banStartManagedCommit
+    residual="${root}/.candidate.residual"
+    mkdir -- "${residual}"
+    printf '{}\n' >"${residual}/control-plan.json"
+    reject dockerControlSourceSnapshot
+    dockerRemoveManagedTree "${root}" "${residual}"
+    DOCKER_CONFIG_SWITCHED=0
+    unset witnessOwner mf_lockOwner mf_phase completion
+    dockerReleaseDeploymentLock
     (
         sha256sum() { return 1; }
         reject dockerControlSourceSnapshot
@@ -354,6 +394,15 @@ jq -e '.schema_version == 3 and .core.secondary_type == null and
     sourceDirectory="${root}/data/control-source"
     receipt="${root}/logs/control/source.receipt"
     nonce="$(printf c%.0s {1..64})"
+    dockerSetupRandomHex() {
+        [[ "$2" == 32 ]] || return 1
+        local counter=0
+        [[ ! -f "${TEST_ROOT}/source-nonce-counter" ]] ||
+            counter=$(<"${TEST_ROOT}/source-nonce-counter")
+        counter=$((counter + 1))
+        printf '%s\n' "${counter}" >"${TEST_ROOT}/source-nonce-counter"
+        printf '%064x\n' "${counter}"
+    }
     dockerControlSourceSnapshot() {
         if [[ -f "${TEST_ROOT}/source-drift" ]]; then printf 'changed\n'; else printf 'stable\n'; fi
     }
@@ -364,8 +413,10 @@ jq -e '.schema_version == 3 and .core.secondary_type == null and
         fi
     }
     sleep() {
-        local challenge="${sourceDirectory}/challenge.json" event
+        local challenge="${sourceDirectory}/challenge.json" event nonce
         [[ "$1" == 1 && -f "${challenge}" ]] || return 1
+        nonce=$(jq -er '.nonce' "${challenge}") || return 1
+        printf '%s\n' "${nonce}" >>"${TEST_ROOT}/source-nonces.log"
         case "${SOURCE_CASE:-valid}" in
         signal) kill -TERM "${BASHPID}"; return ;;
         changed-registration)
@@ -428,6 +479,51 @@ jq -e '.schema_version == 3 and .core.secondary_type == null and
     done
     [[ -z "$(find "${root}" -maxdepth 1 -name '.control-source.*' -print -quit)" ]]
     [[ "$(grep -c '^lock$' "${TEST_ROOT}/host.log")" == "$(grep -c '^unlock$' "${TEST_ROOT}/host.log")" ]]
+    # 来源证明借用父事务锁；失败清理登记后重试必须发起新的挑战。
+    reject dockerControlSourceWitnessLocked
+    SOURCE_CASE=valid
+    dockerLockInstalledDeployment
+    fixtureLockOwner=${BASHPID:-$$}
+    fixtureLockCount=$(grep -c '^lock$' "${TEST_ROOT}/host.log")
+    fixtureUnlockCount=$(grep -c '^unlock$' "${TEST_ROOT}/host.log")
+    dockerFail2banStartManagedCommit() {
+        [[ -f "${sourceDirectory}/challenge.json" &&
+            "$(cat "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid")" == "${fixtureLockOwner}" &&
+            "${witnessOwner}" == "${fixtureLockOwner}" ]] || return 1
+        printf '%s\n' "${nonce}" >>"${TEST_ROOT}/source-completions.log"
+        if [[ "${WITNESS_COMMIT_CASE:-}" == drift ]]; then
+            touch "${TEST_ROOT}/source-drift"
+        elif [[ "${WITNESS_COMMIT_CASE:-}" == signal ]]; then
+            kill -TERM "${BASHPID}"
+        fi
+        dockerControlSourceWitnessRecheck
+    }
+    WITNESS_COMMIT_CASE=drift
+    reject dockerControlSourceWitnessLocked dockerFail2banStartManagedCommit
+    failedNonce=$(tail -n 1 "${TEST_ROOT}/source-completions.log")
+    [[ ! -e "${sourceDirectory}/challenge.json" &&
+        "$(cat "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid")" == "${fixtureLockOwner}" ]]
+    rm -- "${TEST_ROOT}/source-drift"
+    WITNESS_COMMIT_CASE=valid
+    dockerControlSourceWitnessLocked dockerFail2banStartManagedCommit >"${TEST_ROOT}/source-check.log" \
+        2>"${TEST_ROOT}/source-check.err"
+    [[ "$(tail -n 1 "${TEST_ROOT}/source-completions.log")" != "${failedNonce}" &&
+        ! -e "${sourceDirectory}/challenge.json" &&
+        "$(cat "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid")" == "${fixtureLockOwner}" &&
+        "$(grep -c '^lock$' "${TEST_ROOT}/host.log")" == "${fixtureLockCount}" &&
+        "$(grep -c '^unlock$' "${TEST_ROOT}/host.log")" == "${fixtureUnlockCount}" &&
+        -z "$(find "${root}" -maxdepth 1 -name '.control-source.*' -print -quit)" ]]
+    # 完成回调中断只清理本次登记，子见证不能释放父事务锁。
+    WITNESS_COMMIT_CASE=signal
+    status=0
+    dockerControlSourceWitnessLocked dockerFail2banStartManagedCommit >"${TEST_ROOT}/source-check.log" \
+        2>"${TEST_ROOT}/source-check.err" || status=$?
+    [[ "${status}" == 143 && ! -e "${sourceDirectory}/challenge.json" &&
+        "$(cat "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid")" == "${fixtureLockOwner}" &&
+        "$(grep -c '^lock$' "${TEST_ROOT}/host.log")" == "${fixtureLockCount}" &&
+        "$(grep -c '^unlock$' "${TEST_ROOT}/host.log")" == "${fixtureUnlockCount}" &&
+        -z "$(find "${root}" -maxdepth 1 -name '.control-source.*' -print -quit)" ]]
+    dockerReleaseDeploymentLock
     (
         dockerControlClientRuntimeCheck() { [[ "$1" == "${root}/.control-source-probe."*/connection.json ]]; }
         dockerRealityProbeRun() {

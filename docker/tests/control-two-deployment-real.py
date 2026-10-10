@@ -113,11 +113,11 @@ def services(node):
         assert inspected["HostConfig"]["CapDrop"] == ["ALL"]
         assert not inspected["HostConfig"]["Privileged"]
         service = inspected["Config"]["Labels"]["com.docker.compose.service"]
-        if service == "net-wireguard":
+        if service in ("net-wireguard", "net-fail2ban-control"):
             assert [cap.removeprefix("CAP_") for cap in inspected["HostConfig"]["CapAdd"]] == ["NET_ADMIN"]
         else:
             assert not inspected["HostConfig"]["CapAdd"]
-        if service in ("net-wireguard", "control"):
+        if service in ("net-wireguard", "control", "net-fail2ban-control"):
             assert inspected["HostConfig"]["NetworkMode"] == "host"
             assert not inspected["HostConfig"]["PortBindings"]
             child_ns = command(node["docker"] + ["exec", container, "readlink", "/proc/self/ns/net"]).decode().strip()
@@ -164,6 +164,175 @@ def source_check(controller, controlled):
             print("docker-control-two-deployment-source-witness-ok", flush=True)
         finally:
             stop(proof)
+
+
+def fail2ban_source_transaction(controller, controlled, *arguments, fail_first=False):
+    registration_path = controller["path"] / "deployment/data/control-source/challenge.json"
+    output_path = controller["path"] / "fail2ban-transaction.log"
+    seen = []
+    started = time.monotonic()
+    with output_path.open("wb") as output:
+        process = subprocess.Popen(
+            controller["enter"] + ["bash", str(ROOT / "docker/tests/control-fail2ban-deployment.sh"),
+                                   str(controller["path"]), "fail2ban", "control", *arguments],
+            env=controller["env"], stdout=output, stderr=subprocess.STDOUT,
+        )
+        try:
+            while process.poll() is None:
+                assert time.monotonic() - started < 180, "真实 Fail2ban 事务超时"
+                try:
+                    registration = json.loads(registration_path.read_text())
+                except FileNotFoundError:
+                    time.sleep(0.05)
+                    continue
+                if registration["nonce"] in seen:
+                    time.sleep(0.05)
+                    continue
+                # 登记原子发布早于 receipt cursor；等待生产输出后再探测，避免提前响应丢失。
+                if (b"source-challenge=" not in output_path.read_bytes()
+                        or registration["nonce"].encode() not in output_path.read_bytes()):
+                    time.sleep(0.05)
+                    continue
+                # 每个生产登记只响应一次；第一次错端口后必须等待恢复事务的新 nonce。
+                seen.append(registration["nonce"])
+                failed = fail_first and len(seen) == 1
+                cli(controlled, "control", "source-probe", "--address", registration["target"],
+                    "--port", str(registration["port"] + int(failed)),
+                    "--peer-address", registration["expected_source"], "--nonce", registration["nonce"],
+                    accepted=not failed)
+            status = process.wait(timeout=5)
+            contents = output_path.read_bytes()
+            with (controller["path"] / "cli.log").open("ab") as combined:
+                combined.write(contents)
+            assert (status != 0) if fail_first else (status == 0), diagnostic(
+                controller, contents.decode(errors="replace"))
+            assert len(seen) == (2 if fail_first else 1), diagnostic(
+                controller, contents.decode(errors="replace"))
+            verified_count = contents.count(b"source-verified=")
+            assert verified_count == 1, f"真实来源证明输出次数异常：{verified_count}"
+            assert not registration_path.exists()
+            print(f"docker-control-two-deployment-fail2ban:{arguments[0]}:"
+                  f"rc={status}:nonces={len(seen)}:elapsed={time.monotonic()-started:.3f}s", flush=True)
+            return seen
+        finally:
+            stop(process)
+
+
+def control_fail2ban(controller, controlled, invitation):
+    root = controller["path"] / "deployment"
+    before = state(controller)
+    assert before["control"]["peer"]["enabled"] is False
+    controlled_before = state(controlled)
+    ws_database = root / "data/net/fail2ban/fail2ban.sqlite3"
+    ws_database_before = ws_database.read_bytes() if ws_database.is_file() else None
+
+    def rules():
+        return command(controller["enter"] + ["iptables-save", "-c", "-t", "filter"]).decode()
+
+    def ws_rules():
+        return [line for line in rules().splitlines() if "padm-f2b-" in line]
+
+    initial_ws_rules = ws_rules()
+
+    def isolated():
+        assert (ws_database.read_bytes() if ws_database.is_file() else None) == ws_database_before, \
+            "控制操作改动 WS SQLite"
+        assert ws_rules() == initial_ws_rules, "控制操作改动 WS 规则"
+        assert not (root / "data/net/fail2ban/fail2ban.state").exists()
+        assert not command(controller["docker"] + [
+            "ps", "--all", "--quiet", "--filter", "label=com.docker.compose.service=net-fail2ban",
+        ]), "控制操作启动了 WS jail"
+        assert state(controlled) == controlled_before, "主控防护改动受控节点规格"
+
+    nonce = fail2ban_source_transaction(
+        controller, controlled, "enable", "20", "60", "60", "--confirm", "PADM-DOCKER-EDIT")[0]
+    current = state(controller)
+    expected = {"max_retry": 20, "find_time": 60, "ban_time": 60}
+    integration = next(item for item in current["host_integrations"] if item["type"] == "fail2ban-control")
+    assert integration["settings"] == expected and current["control"]["peer"]["enabled"] is False
+    jail = services(controller)["net-fail2ban-control"]["id"]
+    inspected = json.loads(command(controller["docker"] + ["inspect", jail]))[0]
+    assert inspected["Config"]["User"] == "0:10001" and inspected["HostConfig"]["RestartPolicy"]["Name"] == "no"
+    assert all(not mount["RW"] for mount in inspected["Mounts"]
+               if mount["Destination"] == "/var/log/padm/control")
+    receipt = (root / "logs/control/source.receipt").read_text()
+    assert f"nonce={nonce} status=401 source={ADDRESS[1]}" in receipt
+    isolated()
+
+    # 401 来自真实 Peer HTTP 请求，不伪造认证日志，也不把普通 401 当作 nonce 证明。
+    command(controlled["enter"] + ["python3", "-c", """
+import http.client, sys
+for _ in range(22):
+    connection = http.client.HTTPConnection(sys.argv[1], int(sys.argv[2]), timeout=0.5,
+                                           source_address=(sys.argv[3], 0))
+    try:
+        connection.request("GET", "/v1/health")
+        response = connection.getresponse()
+        assert response.status == 401
+        response.read()
+    except (OSError, TimeoutError):
+        break
+    finally:
+        connection.close()
+""", ADDRESS[0], "39778", ADDRESS[1]], timeout=10)
+
+    def drops():
+        return sum(int(match[1]) for line in rules().splitlines()
+                   if (match := re.match(r"^\[(\d+):\d+\] -A padm-f2bc-\S+ ", line))
+                   and f"-s {ADDRESS[1]}/32" in line and "-j DROP" in line)
+
+    deadline = time.monotonic() + 12
+    while True:
+        banned = command(controller["docker"] + ["exec", jail, "fail2ban-client",
+                                                 "get", "padm-control", "banip"]).decode().split()
+        if ADDRESS[1] in banned and f"-s {ADDRESS[1]}/32" in rules():
+            break
+        assert time.monotonic() < deadline, "真实控制 401 未形成 Peer 封禁"
+        time.sleep(0.1)
+    count = drops()
+    blocked = subprocess.run(controlled["enter"] + [
+        "curl", "-sS", "--noproxy", "*", "--interface", ADDRESS[1], "--max-time", "2",
+        f"http://{ADDRESS[0]}:39778/v1/health",
+    ], capture_output=True, timeout=4)
+    assert blocked.returncode != 0 and drops() > count, "真实 Peer 请求未命中控制 DROP"
+    status = cli(controller, "fail2ban", "control", "status")
+    assert ADDRESS[1].encode() in status.stdout
+    cli(controller, "fail2ban", "control", "unban", ADDRESS[1])
+    assert ADDRESS[1] not in command(controller["docker"] + [
+        "exec", jail, "fail2ban-client", "get", "padm-control", "banip",
+    ]).decode().split()
+    reachable(controlled, invitation)
+    isolated()
+
+    recovered = fail2ban_source_transaction(
+        controller, controlled, "settings", "19", "120", "120", "--confirm", "PADM-DOCKER-EDIT",
+        fail_first=True)
+    assert nonce not in recovered
+    restored = state(controller)
+    assert next(item["settings"] for item in restored["host_integrations"]
+                if item["type"] == "fail2ban-control") == expected, "来源失败未恢复旧防护参数"
+    assert restored["control"]["peer"]["enabled"] is False
+    assert restored["release"] == before["release"] and restored["images"] == before["images"]
+    assert services(controller)["net-fail2ban-control"]["id"] != jail
+    isolated()
+    result = subprocess.run(
+        controller["enter"] + ["bash", str(ROOT / "docker/tests/control-fail2ban-deployment.sh"),
+                               str(controller["path"]), "fail2ban", "control", "disable",
+                               "--confirm", "PADM-DOCKER-EDIT"],
+        env=controller["env"], capture_output=True, timeout=180,
+    )
+    with (controller["path"] / "cli.log").open("ab") as output:
+        output.write(result.stdout + result.stderr)
+    assert result.returncode == 0, diagnostic(
+        controller, (result.stdout + result.stderr).decode(errors="replace"))
+    assert all(item["type"] != "fail2ban-control" for item in state(controller)["host_integrations"])
+    assert "net-fail2ban-control" not in services(controller)
+    assert not (root / "data/net/control-fail2ban/fail2ban-control.state").exists()
+    assert "padm-f2bc-" not in rules()
+    assert not (root / "data/control-source/challenge.json").exists()
+    assert not (root / "locks/deployment.lock").exists()
+    isolated()
+    print("docker-control-two-deployment-fail2ban-enable-ban-unban-restore-disable-ok", flush=True)
 
 
 def log_rotate(controller, controlled, invitation):
@@ -686,6 +855,7 @@ def main():
             assert state(controlled) == updated
             services(controller)
             services(controlled)
+            control_fail2ban(controller, controlled, controlled_invite)
             for node in nodes:
                 assert not list((node["path"] / "deployment").glob(".candidate.*"))
                 assert not list((node["path"] / "deployment").glob(".control-client.*"))

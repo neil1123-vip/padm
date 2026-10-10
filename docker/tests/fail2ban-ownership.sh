@@ -49,6 +49,7 @@ control-seed)
     ;;
 control-valid) fail2ban_control_parameters_valid "$2" "$3" ;;
 control-precheck) fail2ban_control_precheck "$2" "$3" ;;
+control-clean) shift; fail2ban_control_clean "$@" ;;
 action|control-action) shift; fail2ban_action "$@" ;;
 cleanup|control-cleanup) fail2ban_cleanup "${2:-}" ;;
 audit|control-audit)
@@ -355,6 +356,9 @@ coexist() {
 
 reset
 run control-valid 10.77.0.1 39778
+clean_before=$(sha256sum "${FAKE_FB_ROOT}/iptables.json" "${FAKE_FB_ROOT}/ip6tables.json")
+run control-clean 10.77.0.1 39778
+[[ "$(sha256sum "${FAKE_FB_ROOT}/iptables.json" "${FAKE_FB_ROOT}/ip6tables.json")" == "${clean_before}" ]]
 reject_unchanged control-precheck 10.77.0.1 39778
 grep -qF 'requires an actual wg-padm WireGuard interface' "${TEST_ROOT}/output.log"
 for target in 127.0.0.1 8.8.8.8 10.077.0.1 ::1; do
@@ -369,6 +373,7 @@ fb_scope=control fb_state=fail2ban-control.state fb_prefix=padm-f2bc- run seed "
 
 coexist
 ws_before=$(ws_snapshot)
+reject_unchanged control-clean 10.77.0.1 39778
 run audit health
 run control-audit health
 reject_unchanged control-action ban "${CONTROL_TOKEN}" ip6tables -w 2001:db8::9
@@ -377,6 +382,7 @@ run control-action unban "${CONTROL_TOKEN}" iptables -w 192.0.2.9
 run control-action ban "${CONTROL_TOKEN}" iptables -w 192.0.2.9
 run control-action flush "${CONTROL_TOKEN}" iptables -w
 run control-cleanup "${CONTROL_TOKEN}"
+run control-clean 10.77.0.1 39778
 [[ ! -e "${FAKE_FB_STATE}/fail2ban-control.state" && "$(ws_snapshot)" == "${ws_before}" ]]
 run audit health
 
