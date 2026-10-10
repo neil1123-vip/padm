@@ -7,6 +7,8 @@ PADM_DOCKER_BUNDLE_LOADED=1
 
 readonly PADM_DOCKER_BUNDLE_MANIFEST=.padm-docker-bundle-manifest
 readonly PADM_DOCKER_BUNDLE_REF=.padm-docker-bundle-ref
+DOCKER_BUNDLE_LINK_TEMP_PATH=
+DOCKER_BUNDLE_LINK_TEMP_TARGET=
 
 dockerBundleRelativePathIsSafe() {
     local path=$1 segment
@@ -19,18 +21,22 @@ dockerBundleRelativePathIsSafe() {
 }
 
 dockerBundlePayloadPaths() {
-    local sourceRoot=$1 path
+    local sourceRoot=$1 path paths
     [[ -f "${sourceRoot}/install-docker.sh" && ! -L "${sourceRoot}/install-docker.sh" ]] || return 1
     [[ -d "${sourceRoot}/docker" && ! -L "${sourceRoot}/docker" ]] || return 1
-    [[ -z "$(find "${sourceRoot}/docker" -type l -print -quit 2>/dev/null)" ]] || return 1
+    paths=$(find "${sourceRoot}/docker" -type l -print -quit 2>/dev/null) || return 1
+    [[ -z "${paths}" ]] || return 1
     [[ -f "${sourceRoot}/shell/core/deployment_mode.sh" &&
         ! -L "${sourceRoot}/shell/core/deployment_mode.sh" ]] || return 1
     printf 'install-docker.sh\n'
+    paths=$(find "${sourceRoot}/docker" -type f -print) || return 1
+    paths=$(LC_ALL=C sort <<<"${paths}") || return 1
     while IFS= read -r path; do
+        [[ -n "${path}" ]] || continue
         path=${path#"${sourceRoot}/"}
         dockerBundleRelativePathIsSafe "${path}" || return 1
         printf '%s\n' "${path}"
-    done < <(find "${sourceRoot}/docker" -type f -print | LC_ALL=C sort)
+    done <<<"${paths}"
     printf 'shell/core/deployment_mode.sh\n'
     printf 'shell/core/stats_grpc.sh\n'
     if [[ "$(<"${sourceRoot}/docker/lib/lifecycle.sh")" == *'/shell/core/cores.sh"'* ]]; then
@@ -44,11 +50,14 @@ dockerBundlePayloadPaths() {
         done
     fi
     if [[ -d "${sourceRoot}/documents" && ! -L "${sourceRoot}/documents" ]]; then
+        paths=$(find "${sourceRoot}/documents" -maxdepth 1 -type f -name 'docker*.md' -print) || return 1
+        paths=$(LC_ALL=C sort <<<"${paths}") || return 1
         while IFS= read -r path; do
+            [[ -n "${path}" ]] || continue
             path=${path#"${sourceRoot}/"}
             dockerBundleRelativePathIsSafe "${path}" || return 1
             printf '%s\n' "${path}"
-        done < <(find "${sourceRoot}/documents" -maxdepth 1 -type f -name 'docker*.md' -print | LC_ALL=C sort)
+        done <<<"${paths}"
     fi
 }
 
@@ -190,20 +199,23 @@ dockerWriteBundleManifest() {
 }
 
 dockerValidateBundle() {
-    local bundleRoot=$1 manifest expectedList manifestList line expectedHash relativePath status directory
+    local bundleRoot=$1 manifest expectedList manifestList line expectedHash relativePath status directory directories
     manifest="${bundleRoot}/${PADM_DOCKER_BUNDLE_MANIFEST}"
     [[ -d "${bundleRoot}" && ! -L "${bundleRoot}" && -O "${bundleRoot}" &&
         -f "${manifest}" && ! -L "${manifest}" && -O "${manifest}" ]] || return 1
+    dockerBundleSourceIsComplete "${bundleRoot}" || return 1
+    directories=$(find "${bundleRoot}" -type d -print) || return 1
     while IFS= read -r directory; do
         [[ -O "${directory}" ]] || return 1
-    done < <(find "${bundleRoot}" -type d -print)
+    done <<<"${directories}"
     expectedList=$(mktemp "${TMPDIR:-/tmp}/padm-docker-expected.XXXXXX") || return 1
     manifestList=$(mktemp "${TMPDIR:-/tmp}/padm-docker-manifest.XXXXXX") || {
         rm -f -- "${expectedList}"
         return 1
     }
-    if ! { dockerBundlePayloadPaths "${bundleRoot}"; printf '%s\n' "${PADM_DOCKER_BUNDLE_REF}"; } |
-        LC_ALL=C sort -u >"${expectedList}"; then
+    if ! dockerBundlePayloadPaths "${bundleRoot}" >"${expectedList}" ||
+        ! printf '%s\n' "${PADM_DOCKER_BUNDLE_REF}" >>"${expectedList}" ||
+        ! LC_ALL=C sort -u "${expectedList}" -o "${expectedList}"; then
         rm -f -- "${expectedList}" "${manifestList}"
         return 1
     fi
@@ -226,7 +238,10 @@ dockerValidateBundle() {
         }
         printf '%s  %s\n' "${expectedHash}" "${relativePath}" >>"${manifestList}"
     done <"${manifest}"
-    LC_ALL=C sort -k2,2 "${manifestList}" -o "${manifestList}"
+    LC_ALL=C sort -k2,2 "${manifestList}" -o "${manifestList}" || {
+        rm -f -- "${expectedList}" "${manifestList}"
+        return 1
+    }
     [[ -z "$(cut -c 67- "${manifestList}" | uniq -d)" ]] &&
         cmp -s "${expectedList}" <(cut -c 67- "${manifestList}") &&
         (cd -- "${bundleRoot}" && sha256sum --check --status --strict) <"${manifestList}"
@@ -472,12 +487,39 @@ dockerActivateBundle() {
         [[ "${currentTarget}" == "${linkTarget}" ]] && return 0
     fi
     tempLink="${root}/.bundle-link.${BASHPID:-$$}"
-    rm -f -- "${tempLink}" 2>/dev/null || true
-    ln -s "${linkTarget}" "${tempLink}" || return 1
-    mv -Tf -- "${tempLink}" "${root}/bundle" || {
-        rm -f -- "${tempLink}" 2>/dev/null || true
+    [[ ! -e "${tempLink}" && ! -L "${tempLink}" ]] || {
+        dockerError "bundle 临时链接路径已存在，已保留: ${tempLink}"
         return 1
     }
+    DOCKER_BUNDLE_LINK_TEMP_PATH=${tempLink}
+    DOCKER_BUNDLE_LINK_TEMP_TARGET=${linkTarget}
+    ln -s "${linkTarget}" "${tempLink}" || {
+        dockerCleanupBundleLinkTemp || true
+        return 1
+    }
+    mv -Tf -- "${tempLink}" "${root}/bundle" || {
+        dockerCleanupBundleLinkTemp || true
+        return 1
+    }
+    DOCKER_BUNDLE_LINK_TEMP_PATH=
+    DOCKER_BUNDLE_LINK_TEMP_TARGET=
+}
+
+dockerCleanupBundleLinkTemp() {
+    local root temp=${DOCKER_BUNDLE_LINK_TEMP_PATH:-} expectedTarget=${DOCKER_BUNDLE_LINK_TEMP_TARGET:-}
+    [[ -n "${temp}" ]] || return 0
+    root=$(dockerInstallRoot) || return 1
+    dockerManagedPathIsSafe "${root}" "${temp}" &&
+        [[ "${temp}" == "${root}/.bundle-link.${BASHPID:-$$}" &&
+            "${expectedTarget}" =~ ^[.]bundles/[0-9a-f]{64}$ ]] || return 1
+    if [[ -L "${temp}" ]]; then
+        [[ -O "${temp}" && "$(readlink "${temp}" 2>/dev/null || true)" == "${expectedTarget}" ]] || return 1
+        rm -f -- "${temp}" || return 1
+    elif [[ -e "${temp}" ]]; then
+        return 1
+    fi
+    DOCKER_BUNDLE_LINK_TEMP_PATH=
+    DOCKER_BUNDLE_LINK_TEMP_TARGET=
 }
 
 dockerInstallBundle() {

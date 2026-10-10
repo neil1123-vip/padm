@@ -254,25 +254,26 @@ dockerEntryInstallDockerEngine() {
 
 dockerEntryNativeInstallAllowed() {
     local module=${DOCKER_ENTRY_SOURCE_DIR:-}/shell/core/deployment_mode.sh
-    local state root marker entry unit
-    if [[ -f "${module}" && ! -L "${module}" ]]; then
-        # shellcheck disable=SC1090
-        source "${module}" || return 1
-        state=$(padmNativeDeploymentState 2>/dev/null) || state=ambiguous
-        [[ "${state}" == 'absent' ]] && return 0
-        dockerEntryError "检测到原生版状态 (${state})，请先清理原生部署后再安装 Docker"
-        return 1
-    fi
+    local state root entry unit
     root=${PADM_NATIVE_INSTALL_DIR:-${PADM_INSTALL_DIR:-/etc/padm}}
     [[ "${root}" == /* && "${root}" != '/' && "${root}" != *'/../'* &&
         "${root}" != */.. && "${root}" != *'/./'* && "${root}" != */. ]] || {
         dockerEntryError '原生版状态根路径不安全，拒绝自动安装 Docker'
         return 1
     }
-    [[ ! -L "${root}" ]] || {
-        dockerEntryError '检测到原生版状态根是符号链接，拒绝自动安装 Docker'
+    [[ ! -L "${root}" && ( ! -e "${root}" || -d "${root}" ) ]] || {
+        dockerEntryError '原生版状态根不是普通目录，拒绝自动安装 Docker'
         return 1
     }
+    if [[ -f "${module}" && ! -L "${module}" ]]; then
+        # shellcheck disable=SC1090
+        source "${module}" || return 1
+        state=$(padmNativeDeploymentState 2>/dev/null) || state=ambiguous
+        [[ "${state}" == 'absent' ]] || {
+            dockerEntryError "检测到原生版状态 (${state})，请先清理原生部署后再安装 Docker"
+            return 1
+        }
+    fi
     if [[ -e "${root}/mode" || -L "${root}/mode" ]]; then
         dockerEntryError "检测到原生版模式标记: ${root}/mode"
         return 1
@@ -291,6 +292,16 @@ dockerEntryNativeInstallAllowed() {
             return 1
         fi
     done
+    if [[ -d "${root}" ]]; then
+        entry=$(find "${root}" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null) || {
+            dockerEntryError "无法检查原生版状态根: ${root}"
+            return 1
+        }
+        [[ -z "${entry}" ]] || {
+            dockerEntryError "检测到原生版状态根存在残留: ${root}"
+            return 1
+        }
+    fi
 }
 
 dockerEntryEnsureDockerForInstall() {
