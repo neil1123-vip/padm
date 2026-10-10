@@ -55,8 +55,9 @@ dockerEntryPathIsSafe() {
 }
 
 dockerEntryDownloadFile() {
-    local url=$1 target=$2 maxSize=$3
+    local url=$1 target=$2 maxSize=$3 deadline remaining
     local -a pipelineStatus=()
+    deadline=$((SECONDS + 120))
     : >"${target}" || return 1
     if command -v curl >/dev/null 2>&1; then
         curl -fsSL --connect-timeout 10 --max-time 120 --max-filesize "${maxSize}" \
@@ -64,7 +65,13 @@ dockerEntryDownloadFile() {
     fi
     : >"${target}" || return 1
     if command -v wget >/dev/null 2>&1; then
-        wget -T 30 -t 2 -qO- "${url}" | head -c "$((maxSize + 1))" >"${target}"
+        remaining=$((deadline - SECONDS))
+        ((remaining > 0)) || return 1
+        command -v timeout >/dev/null 2>&1 || {
+            dockerEntryError '缺少 timeout，无法限制 Docker 下载时长'
+            return 1
+        }
+        timeout -k 2 "${remaining}" wget -T 30 -t 2 -qO- "${url}" | head -c "$((maxSize + 1))" >"${target}"
         pipelineStatus=("${PIPESTATUS[@]}")
         [[ "${pipelineStatus[0]:-1}" -eq 0 && "${pipelineStatus[1]:-1}" -eq 0 &&
             "$(wc -c <"${target}")" -le "${maxSize}" ]] && return 0
