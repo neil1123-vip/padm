@@ -86,6 +86,53 @@ chmod 0755 "${MOCK_BIN}/systemctl"
 
 export FAKE_DOCKER_LOG="${DOCKER_CALL_LOG}"
 
+# 用推进 SECONDS 压缩生产预算，仍由真实 timeout 终止 wget 子进程。
+DOWNLOAD_BIN="${TEST_ROOT}/download-bin"
+mkdir -- "${DOWNLOAD_BIN}"
+cat >"${DOWNLOAD_BIN}/wget" <<'EOF'
+#!/usr/bin/env bash
+printf 'called\n' >>"${PHASE1_DOWNLOAD_MARKER:?}"
+sleep 3
+printf 'downloaded\n'
+EOF
+chmod 0755 "${DOWNLOAD_BIN}/wget"
+downloadFailures=0
+for downloadCase in spent wget-remaining missing-timeout; do
+    if (
+        source "${PROJECT_ROOT}/install-docker.sh" help
+        export PATH="${DOWNLOAD_BIN}:${PATH}"
+        export PHASE1_DOWNLOAD_MARKER="${TEST_ROOT}/download-${downloadCase}.called"
+        curl() {
+            case "${downloadCase}" in
+            spent) SECONDS=$((SECONDS + 120)) ;;
+            wget-remaining) SECONDS=$((SECONDS + 119)) ;;
+            esac
+            return 22
+        }
+        command() {
+            if [[ "${downloadCase}" == missing-timeout && "$*" == '-v timeout' ]]; then
+                return 1
+            fi
+            builtin command "$@"
+        }
+        downloadStatus=0
+        dockerEntryDownloadFile 'https://fixture.invalid/bundle' \
+            "${TEST_ROOT}/download-${downloadCase}.out" 1024 || downloadStatus=$?
+        [[ "${downloadStatus}" -ne 0 ]] || fail "download-${downloadCase}: unbounded fallback succeeded"
+        if [[ "${downloadCase}" == wget-remaining ]]; then
+            [[ -s "${PHASE1_DOWNLOAD_MARKER}" ]] || fail 'download-wget-remaining: fallback was not exercised'
+        else
+            [[ ! -e "${PHASE1_DOWNLOAD_MARKER}" ]] || fail "download-${downloadCase}: unbounded wget was started"
+        fi
+    ); then
+        :
+    else
+        printf 'docker-phase1-boundary-fail: download-%s\n' "${downloadCase}" >&2
+        downloadFailures=$((downloadFailures + 1))
+    fi
+done
+[[ "${downloadFailures}" == 0 ]] || fail "download deadlines failed: ${downloadFailures}"
+
 runControl() {
     local expected=$1 name=$2 dockerRoot=$3 nativeRoot=$4 binDir=$5
     local actual=0

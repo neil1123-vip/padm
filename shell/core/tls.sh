@@ -135,10 +135,13 @@ tlsAcmeConfigValue() {
 }
 
 tlsAcmeManagedCertificateRecords() {
-    local acmeDir tlsDir configFile certFile keyFile certDomain
+    local acmeDir tlsDir configFile certFile keyFile certDomain configFiles
     local -A seen=()
     acmeDir=$(acmeSafeHomeDir) || return 1
     tlsDir=$(tlsManagedDir) || return 1
+    [[ -d "${acmeDir}" ]] || return 0
+    configFiles=$(find "${acmeDir}" -mindepth 2 -maxdepth 2 -type f -name '*.conf' -print) || return 1
+    configFiles=$(LC_ALL=C sort <<<"${configFiles}") || return 1
     while IFS= read -r configFile; do
         [[ -n "${configFile}" ]] || continue
         certFile=$(tlsAcmeConfigValue "${configFile}" Le_RealFullChainPath) || return 1
@@ -150,15 +153,16 @@ tlsAcmeManagedCertificateRecords() {
         [[ -z "${seen[${certDomain}]+x}" ]] || continue
         seen["${certDomain}"]=1
         printf '%s\t%s\t%s\t%s\n' "${certDomain}" "${configFile}" "${certFile}" "${keyFile}"
-    done < <(find "${acmeDir}" -mindepth 2 -maxdepth 2 -type f -name '*.conf' -print 2>/dev/null | LC_ALL=C sort)
+    done <<<"${configFiles}"
 }
 
 tlsCertificateManagedByAcme() {
     local certDomain=$1
-    local domain _
+    local domain _ records
+    records=$(tlsAcmeManagedCertificateRecords) || return 2
     while IFS=$'\t' read -r domain _; do
         [[ "${domain}" == "${certDomain}" ]] && return 0
-    done < <(tlsAcmeManagedCertificateRecords 2>/dev/null)
+    done <<<"${records}"
     return 1
 }
 
@@ -847,7 +851,7 @@ renewManagedTLSCertificates() {
     local -a renewArgs=()
 
     [[ -z "${requestedDomain}" ]] || tlsDomainNameIsSafe "${requestedDomain}" || return 1
-    records=$(tlsAcmeManagedCertificateRecords) || return 2
+    records=$(tlsAcmeManagedCertificateRecords) || return 1
     if [[ -n "${requestedDomain}" ]]; then
         records=$(awk -F '\t' -v domain="${requestedDomain}" '$1 == domain' <<<"${records}")
     else

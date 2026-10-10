@@ -1874,7 +1874,7 @@ padmEnsureSafeDirectory() {
 cleanDirectoryContent() {
     local targetPath=$1
     local resolvedPath
-    local childPath
+    local childPath childList
     if ! padmIsSafeAbsolutePath "${targetPath}"; then
         padmShowUnsafePathError "清理目录"
         return 1
@@ -1889,10 +1889,20 @@ cleanDirectoryContent() {
         padmShowUnsafePathError "清理目录"
         return 1
     fi
-    while IFS= read -r childPath; do
+    padmCreateTmpRootPath childList padm-clean-directory.XXXXXX || return 1
+    if ! find "${resolvedPath}" -mindepth 1 -maxdepth 1 -print0 >"${childList}"; then
+        padmRemoveCleanupPath "${childList}"
+        return 1
+    fi
+    while IFS= read -r -d '' childPath; do
         [[ -n "${childPath}" ]] || continue
-        removeManagedPathWithinRootIfPresent "${resolvedPath}" "${childPath}" || return 1
-    done < <(find "${resolvedPath}" -mindepth 1 -maxdepth 1 -print)
+        removeManagedPathWithinRootIfPresent "${resolvedPath}" "${childPath}" || {
+            padmRemoveCleanupPath "${childList}"
+            return 1
+        }
+    done <"${childList}"
+    padmRemoveCleanupPath "${childList}"
+    [[ ! -e "${childList}" && ! -L "${childList}" ]]
 }
 
 

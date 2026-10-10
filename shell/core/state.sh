@@ -897,9 +897,9 @@ readConfigHostPathUUID() {
             currentPath=$(jq -r .inbounds[0].transport.path "${singBoxConfigPath}05_VMess_WS_inbounds.json" | awk -F "[/]" '{print $2}')
         fi
         if [[ "${coreInstallType}" == "2" && -f "${singBoxConfigPath}03_VLESS_WS_inbounds.json" ]]; then
-            singBoxVLESSWSPath=$(jq -r .inbounds[0].transport.path "${singBoxConfigPath}03_VLESS_WS_inbounds.json")
-            currentPath=$(jq -r .inbounds[0].transport.path "${singBoxConfigPath}03_VLESS_WS_inbounds.json" | awk -F "[/]" '{print $2}')
-            currentPath=${currentPath::-2}
+            singBoxVLESSWSPath=$(jq -r '.inbounds[0].transport.path | if . == null then "" elif type == "string" and (any(explode[]; . < 32 or . == 127) | not) then . else error("invalid path") end' "${singBoxConfigPath}03_VLESS_WS_inbounds.json") || return 1
+            currentPath=$(printf '%s\n' "${singBoxVLESSWSPath}" | awk -F "[/]" '{print $2}')
+            currentPath=${currentPath%ws}
         fi
     fi
     if [[ -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json" ]]; then
