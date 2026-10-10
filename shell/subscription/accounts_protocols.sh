@@ -9,7 +9,7 @@ subscriptionAccountProfile() {
       ((.username // .name // .email // "") | tostring),
       ((.name // .email // .username // "") | tostring),
       ((.uuid // .id // "") | tostring)
-    ] | join("\u001f")' <<<"${user}"
+    ] | if any(.[]; any(explode[]; . < 32 or . == 127)) then error("invalid account field") else join("\u001f") end' <<<"${user}"
 }
 
 showVlessTcpAccounts() (
@@ -19,8 +19,9 @@ showVlessTcpAccounts() (
 
         subscribeSectionTitle "VLESS TCP TLS Vision" "传统 TLS 兼容方案"
         jq -c '(.inbounds[0].settings.clients // .inbounds[0].users) | if type == "array" then .[] else error("invalid clients") end' "${configPath}02_VLESS_TCP_inbounds.json" | while read -r user; do
-            local email accountId
-            IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
+            local email accountId profile
+            profile=$(subscriptionAccountProfile "${user}") || return 1
+            IFS=$'\037' read -r email accountId _ _ _ _ <<<"${profile}"
 
             subscribeAccountTitle "${email}"
             echo
@@ -37,8 +38,9 @@ showVlessWsAccounts() (
         subscribeSectionTitle "VLESS WS TLS" "兼容旧客户端，不作为新手推荐"
 
         jq -c '(.inbounds[0].settings.clients // .inbounds[0].users) | if type == "array" then .[] else error("invalid clients") end' "${configPath}03_VLESS_WS_inbounds.json" | while read -r user; do
-            local email accountId
-            IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
+            local email accountId profile
+            profile=$(subscriptionAccountProfile "${user}") || return 1
+            IFS=$'\037' read -r email accountId _ _ _ _ <<<"${profile}"
 
             local vlessWSPort=${currentDefaultPort}
             if [[ "${coreInstallType}" == "2" ]]; then
@@ -72,8 +74,9 @@ showTrojanGrpcAccounts() (
     if currentProtocolHas 25; then
         subscribeSectionTitle "Trojan gRPC TLS" "兼容旧客户端，不作为新手推荐"
         jq -c '.inbounds[0].settings.clients | if type == "array" then .[] else error("invalid clients") end' "${configPath}04_trojan_GRPc_inbounds.json" | while read -r user; do
-            local email password
-            IFS=$'\037' read -r email _ password _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
+            local email password profile
+            profile=$(subscriptionAccountProfile "${user}") || return 1
+            IFS=$'\037' read -r email _ password _ _ _ <<<"${profile}"
             local count=
             while read -r line; do
                 subscribeAccountTitle "${email}${count}"
@@ -100,8 +103,9 @@ showVmessWsAccounts() (
             path="${singBoxVMessWSPath}"
         fi
         jq -c '(.inbounds[0].settings.clients // .inbounds[0].users) | if type == "array" then .[] else error("invalid clients") end' "${configPath}05_VMess_WS_inbounds.json" | while read -r user; do
-            local email accountId
-            IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
+            local email accountId profile
+            profile=$(subscriptionAccountProfile "${user}") || return 1
+            IFS=$'\037' read -r email accountId _ _ _ _ <<<"${profile}"
 
             local vmessPort=${currentDefaultPort}
             if [[ "${coreInstallType}" == "2" ]]; then
@@ -145,8 +149,9 @@ showTrojanAccountsFromConfig() (
     protocolHost=$(jq -r '.inbounds[0].tls.server_name | if . == null then empty elif type == "string" then . else error("invalid server_name") end' "${trojanConfigFile}") || return 1
     protocolHost=${protocolHost:-${currentHost:-}}
     jq -c '(.inbounds[0].settings.clients // .inbounds[0].users) | if type == "array" then .[] else error("invalid clients") end' "${trojanConfigFile}" | while read -r user; do
-            local email password
-            IFS=$'\037' read -r email _ password _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
+            local email password profile
+            profile=$(subscriptionAccountProfile "${user}") || return 1
+            IFS=$'\037' read -r email _ password _ _ _ <<<"${profile}"
             subscribeAccountTitle "${email}"
 
             defaultBase64Code trojan "${port}" "${email}" "${password}" "${protocolHost}" || return 1
@@ -159,8 +164,9 @@ showVlessGrpcAccounts() (
     if currentProtocolHas 24; then
         subscribeSectionTitle "VLESS gRPC TLS" "兼容旧客户端，不作为新手推荐"
         jq -c '.inbounds[0].settings.clients | if type == "array" then .[] else error("invalid clients") end' "${configPath}06_VLESS_GRPc_inbounds.json" | while read -r user; do
-            local email accountId
-            IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
+            local email accountId profile
+            profile=$(subscriptionAccountProfile "${user}") || return 1
+            IFS=$'\037' read -r email accountId _ _ _ _ <<<"${profile}"
 
             local count=
             while read -r line; do
@@ -197,8 +203,9 @@ showHysteriaAccounts() (
         fi
 
         jq -c '.inbounds[] | .users | if type == "array" then .[] else error("invalid users") end' "${configFile}" | while read -r user; do
-            local name password
-            IFS=$'\037' read -r _ _ password _ name _ <<<"$(subscriptionAccountProfile "${user}")"
+            local name password profile
+            profile=$(subscriptionAccountProfile "${user}") || return 1
+            IFS=$'\037' read -r _ _ password _ name _ <<<"${profile}"
             subscribeAccountTitle "${name}"
             echo
             defaultBase64Code hysteria "${hysteria2DefaultPort}" "${name}" "${password}" || return 1
@@ -224,6 +231,10 @@ showVlessRealityAccounts() {
 showVlessRealityAccountsFromConfig() (
     set -eo pipefail
     local core=$1 configFile=$2 port=$3
+    if [[ "${core}" == "1" && -n "${PADM_VLESS_REALITY_CONFIG_FILE:-}" ]]; then
+        configFile=${PADM_VLESS_REALITY_CONFIG_FILE}
+        [[ -f "${configFile}" ]] || return 1
+    fi
     [[ -f "${configFile}" ]] || return 0
     coreInstallType=${core}
     configPath="$(dirname -- "${configFile}")/"
@@ -234,12 +245,16 @@ showVlessRealityAccountsFromConfig() (
         streamPublicPort=$(realityStreamPublicPortForProtocol vision) || return 1
         [[ -z "${streamPublicPort}" ]] || realityVisionPort=${streamPublicPort}
         entryPort=$(jq -r '.inbounds[0].port' "${configFile}") || return 1
+        if [[ -n "${PADM_VLESS_REALITY_CONFIG_FILE:-}" && -z "${streamPublicPort}" ]]; then
+            realityVisionPort=${entryPort}
+        fi
         realityVisionPort=$(corePortSubscriptionPort "${entryPort}" "${realityVisionPort}") || return 1
     fi
     [[ "${core}" == "2" ]] && usersFilter='.inbounds[0].users'
     jq -c "${usersFilter} | if type == \"array\" then .[] else error(\"invalid clients\") end" "${configFile}" | while read -r user; do
-            local email accountId
-            IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
+            local email accountId profile
+            profile=$(subscriptionAccountProfile "${user}") || return 1
+            IFS=$'\037' read -r email accountId _ _ _ _ <<<"${profile}"
 
             subscribeAccountTitle "${email}"
             echo
@@ -274,8 +289,9 @@ showVlessRealityGrpcAccountsFromConfig() (
         realityGRPCPort=$(corePortSubscriptionPort "$(jq -r '.inbounds[0].port' "${configFile}")" "${realityGRPCPort}") || return 1
     fi
     jq -c '(.inbounds[0].settings.clients // .inbounds[0].users) | if type == "array" then .[] else error("invalid clients") end' "${configFile}" | while read -r user; do
-            local email accountId
-            IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
+            local email accountId profile
+            profile=$(subscriptionAccountProfile "${user}") || return 1
+            IFS=$'\037' read -r email accountId _ _ _ _ <<<"${profile}"
 
             subscribeAccountTitle "${email}"
             echo
@@ -306,8 +322,9 @@ showTuicAccounts() (
             tuicDefaultPort="${tuicPortHopping}"
         fi
         jq -c '.inbounds[] | .users | if type == "array" then .[] else error("invalid users") end' "${configFile}" | while read -r user; do
-            local name uuid password
-            IFS=$'\037' read -r _ _ password _ name uuid <<<"$(subscriptionAccountProfile "${user}")"
+            local name uuid password profile
+            profile=$(subscriptionAccountProfile "${user}") || return 1
+            IFS=$'\037' read -r _ _ password _ name uuid <<<"${profile}"
             subscribeAccountTitle "${name}"
             echo
             defaultBase64Code tuic "${tuicDefaultPort}" "${name}" "${uuid}_${password}" || return 1
@@ -328,8 +345,9 @@ showNaiveAccounts() (
         protocolHost=$(jq -r '.inbounds[0].tls.server_name | if . == null then empty elif type == "string" then . else error("invalid server_name") end' "${path}10_naive_inbounds.json") || return 1
         protocolHost=${protocolHost:-${currentHost:-}}
         jq -r -c '.inbounds[] | .users | if type == "array" then .[] else error("invalid users") end' "${path}10_naive_inbounds.json" | while read -r user; do
-            local username password
-            IFS=$'\037' read -r _ _ password username _ _ <<<"$(subscriptionAccountProfile "${user}")"
+            local username password profile
+            profile=$(subscriptionAccountProfile "${user}") || return 1
+            IFS=$'\037' read -r _ _ password username _ _ <<<"${profile}"
             subscribeAccountTitle "${username}"
             echo
             defaultBase64Code naive "${singBoxNaivePort}" "${username}" "${password}" "${protocolHost}" || return 1
@@ -352,8 +370,9 @@ showShadowsocksAccounts() (
         local protocolHost=${currentHost:-}
         [[ -n "${protocolHost}" ]] || protocolHost=$(realityEntryHost) || return 1
         jq -c '.inbounds[] | .users | if type == "array" then .[] else error("invalid users") end' "${path}30_shadowsocks_inbounds.json" | while read -r user; do
-            local name password
-            IFS=$'\037' read -r _ _ password _ name _ <<<"$(subscriptionAccountProfile "${user}")"
+            local name password profile
+            profile=$(subscriptionAccountProfile "${user}") || return 1
+            IFS=$'\037' read -r _ _ password _ name _ <<<"${profile}"
             subscribeAccountTitle "${name}"
             echo
             defaultBase64Code shadowsocks "${singBoxShadowsocksPort}" "${name}" "${serverPassword}:${password}" "${protocolHost}" || return 1
@@ -394,8 +413,9 @@ showVmessHTTPUpgradeAccountsFromConfig() (
     local configFile=$1 vmessHTTPUpgradePort=$2 path=$3
     [[ -f "${configFile}" ]] || return 0
     jq -c '(.inbounds[0].settings.clients // .inbounds[0].users) | if type == "array" then .[] else error("invalid clients") end' "${configFile}" | while read -r user; do
-            local email accountId
-            IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
+            local email accountId profile
+            profile=$(subscriptionAccountProfile "${user}") || return 1
+            IFS=$'\037' read -r email accountId _ _ _ _ <<<"${profile}"
 
             local count=
             while read -r line; do
@@ -426,8 +446,9 @@ showVlessRealityXHTTPAccounts() (
         [[ -z "${streamPublicPort}" ]] || xhttpPort=${streamPublicPort}
         xhttpPort=$(corePortSubscriptionPort "${xhttpEntryPort}" "${xhttpPort}") || return 1
         jq -c '(.inbounds[0].settings.clients // .inbounds[0].users) | if type == "array" then .[] else error("invalid clients") end' "${configFile}" | while read -r user; do
-            local email accountId
-            IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
+            local email accountId profile
+            profile=$(subscriptionAccountProfile "${user}") || return 1
+            IFS=$'\037' read -r email accountId _ _ _ _ <<<"${profile}"
             echo
 
             local count=
@@ -459,8 +480,9 @@ showAnyTlsAccounts() (
         protocolHost=$(jq -r '.inbounds[0].tls.server_name | if . == null then empty elif type == "string" then . else error("invalid server_name") end' "${path}13_anytls_inbounds.json") || return 1
         protocolHost=${protocolHost:-${currentHost:-}}
         jq -r -c '.inbounds[] | .users | if type == "array" then .[] else error("invalid users") end' "${path}13_anytls_inbounds.json" | while read -r user; do
-            local name password
-            IFS=$'\037' read -r _ _ password _ name _ <<<"$(subscriptionAccountProfile "${user}")"
+            local name password profile
+            profile=$(subscriptionAccountProfile "${user}") || return 1
+            IFS=$'\037' read -r _ _ password _ name _ <<<"${profile}"
             subscribeAccountTitle "${name}"
             echo
             defaultBase64Code anytls "${singBoxAnyTLSPort}" "${name}" "${password}" "${protocolHost}" || return 1

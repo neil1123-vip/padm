@@ -294,11 +294,10 @@ EOF
 emitHysteriaSubscribeOutput() {
     local port=$1 email=$2 id=$3 user=$6
     local clashMetaPortContent="port: ${port}"
-    local uriPort=${singBoxHysteria2Port}
+    local uriPort=${port}
     local singBoxPortExpression='{server_port:($port|tonumber)}'
     if [[ "${port}" == *-* ]]; then
         clashMetaPortContent="ports: ${port}"
-        uriPort=${port}
         singBoxPortExpression='{server_ports:[$ports]}'
     fi
 
@@ -357,7 +356,7 @@ EOF
 )
     singBoxFilter=$(singBoxSubscribeAppendFilter \
         "{tag:\$tag,type:\"hysteria2\",server:\$server} + (${singBoxPortExpression}) + (${bandwidthSingBoxExpression}) + {password:\$password,tls:{enabled:true,server_name:\$sni,alpn:[\"h3\"]}} + (${obfsSingBoxExpression})" \
-        --arg tag "${email}" --arg server "${currentHost}" --arg port "${singBoxHysteria2Port}" --arg ports "${port/-/:}" \
+        --arg tag "${email}" --arg server "${currentHost}" --arg port "${port}" --arg ports "${port/-/:}" \
         --arg up "${hysteria2ClientUploadSpeed:-}" --arg down "${hysteria2ClientDownloadSpeed:-}" \
         --arg password "${id}" --arg sni "${currentHost}" --arg obfs_type "${hysteria2ObfsType:-}" --arg obfs_password "${hysteria2ObfsPassword:-}") || return 1
 
@@ -396,9 +395,11 @@ emitVlessRealitySubscribeOutput() {
         realitySNI=${singBoxVLESSRealityVisionSNI}
         publicKey=${singBoxVLESSRealityPublicKey}
     elif [[ -f "${realityConfigFile}" ]]; then
+        realitySNI=$(jq -r --arg fallback "${realitySNI}" '.inbounds[1].streamSettings.realitySettings.serverNames[0] | if . == null then $fallback elif type == "string" then . else error("invalid serverName") end' "${realityConfigFile}") || return 1
         publicKey=$(jq -r '.inbounds[1].streamSettings.realitySettings.publicKey // empty' "${realityConfigFile}") || return 1
         realityMldsa65Verify=$(jq -r '.inbounds[1].streamSettings.realitySettings.mldsa65Verify // empty' "${realityConfigFile}") || return 1
     fi
+    subscribeOutputSafeHostValue "${realitySNI}" || return 1
     local defaultLink
     defaultLink=$(serializeVlessRealityVisionLink "${id}" "${entryHost}" "${port}" "${realitySNI}" "${publicKey}" "${realityMldsa65Verify}" "${email}" "${vlessEncryption}")
     subscribeOutputTitle "通用格式：VLESS Reality Vision"
@@ -483,7 +484,8 @@ emitTuicSubscribeOutput() {
     local tuicPassword=
     tuicPassword=${id#*_}
     local encodedTuicUUID encodedTuicPassword yamlPassword defaultLink clashMetaBlock singBoxFilter
-    local singBoxServerPort=${singBoxTuicPort:-${port}}
+    local singBoxServerPort=${port}
+    [[ "${port}" != *-* ]] || singBoxServerPort=${singBoxTuicPort:-${port}}
     encodedTuicUUID=$(encodeUriUserInfoComponent "${tuicUUID}") || return 1
     encodedTuicPassword=$(encodeUriUserInfoComponent "${tuicPassword}") || return 1
     yamlPassword=$(serializeYamlString "${tuicPassword}") || return 1
