@@ -1358,11 +1358,11 @@ EOF
         showRealityTargetCachedQuality() { printf 'unexpected probe\n'; return 1; }
         jq -n '{inbounds: [{streamSettings: {network: "grpc", realitySettings: {mldsa65Verify: "grpc-pqv"}}}]}' >"${configPath}/grpc.json"
         output=$(showRealityTargetPqcSummary)
-        [[ "${output}" == "ML-DSA-65 (grpc): grpc-pqv" ]]
+        [[ "${output}" == "ML-DSA-65 (grpc): 已启用" ]]
         jq -n '{inbounds: [{streamSettings: {network: "tcp", realitySettings: {}}},
             {streamSettings: {network: "xhttp", realitySettings: {mldsa65Verify: "xhttp-pqv"}}}]}' >"${configPath}/mixed.json"
         output=$(showRealityTargetPqcSummary)
-        [[ "${output}" == *"ML-DSA-65 (grpc): grpc-pqv"* && "${output}" == *"ML-DSA-65 (tcp): 未启用"* && "${output}" == *"ML-DSA-65 (xhttp): xhttp-pqv"* ]]
+        [[ "${output}" == *"ML-DSA-65 (grpc): 已启用"* && "${output}" == *"ML-DSA-65 (tcp): 未启用"* && "${output}" == *"ML-DSA-65 (xhttp): 已启用"* ]]
         [[ "${output}" != *"unexpected probe"* ]]
         printf '{bad json\n' >"${configPath}/invalid.json"
         regressionExpectStatus 1 showRealityTargetPqcSummary

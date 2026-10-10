@@ -3109,7 +3109,7 @@ showRealityTargetPqcSummary() {
     if [[ ${#configFiles[@]} -gt 0 ]]; then
         if ! summary=$(jq -r '.inbounds[]? | .streamSettings? |
             select(.realitySettings? | type == "object") |
-            "ML-DSA-65 (\(.network // "tcp")): \(.realitySettings.mldsa65Verify // "" | if . == "" then "未启用" else . end)"
+              "ML-DSA-65 (\(.network // "tcp")): \(.realitySettings.mldsa65Verify // "" | if . == "" then "未启用" else "已启用" end)"
         ' "${configFiles[@]}" 2>/dev/null); then
             menuLine "ML-DSA-65: 配置读取失败"
             return 1

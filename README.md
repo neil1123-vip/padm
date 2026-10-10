@@ -923,7 +923,7 @@ padm 面向 Linux 服务器运行。代码会识别 Debian、Ubuntu、RHEL/CentO
 | --- | --- |
 | 权限 | 需要 root 或等价权限。 |
 | 架构 | `x86_64/amd64`、`aarch64/arm64`。 |
-| 基础命令 | 入口下载至少需要 `curl` 或 `wget`；完整包刷新需要 `tar`。 |
+| 基础命令 | 入口下载至少需要 `curl` 或 `wget`，wget 回退还需 `timeout` 限制总时长；完整包刷新需要 `tar`。 |
 | 常用依赖 | 脚本会按功能安装或使用 `jq`、`nginx`、`acme.sh`、WireGuard tools、Fail2ban 等组件。 |
 | 服务管理 | 核心服务优先使用 systemd；Alpine/OpenRC 路径有专门处理。主控/被控订阅控制服务目前要求 systemd 和 `python3`。 |
 
