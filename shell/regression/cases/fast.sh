@@ -1583,6 +1583,8 @@ EOF
         ! grep -q 'neil1123-vip_hysteria2_portHopping' "${natStateFile}"
         for savedRule in \
             '-A PREROUTING -p udp --dport 32000:33000 -m comment --comment keep-other-rule -j DNAT --to-destination :26450' \
+            '-A PREROUTING -p udp -m multiport --dports 32000,33000:33002,34000 -j DNAT --to-destination :26450' \
+            '-A PREROUTING -p udp -m multiport --dports 32000:33000,34000 -j DNAT --to-destination :26450' \
             '-A PREROUTING -p udp --dport 33000:33002 -j DNAT --to-destination 192.0.2.1:16295' \
             '-A PREROUTING -p udp --dport 33000:33002 -j DNAT --to-destination [2001:db8::1]:16295'; do
             printf '%s\n' "${savedRule}" >"${natStateFile}"
@@ -1601,6 +1603,7 @@ EOF
 -A PREROUTING -p udp --dport 34000:34002 -m comment --comment neil1123-vip_tuic_portHopping -j DNAT --to-destination :26450
 -A PREROUTING -p tcp --dport 33000:33002 -m comment --comment neil1123-vip_tuic_portHopping -j DNAT --to-destination :26450
 -A PREROUTING -p udp --dport 33000:33002 -j DNAT --to-destination :16295
+-A PREROUTING -p udp -m multiport --dports 33000:33002,34000 -j DNAT --to-destination :16295
 EOF
         inputCount=1
         regressionExpectStatus 0 addPortHopping hysteria2 16295 >/dev/null 2>&1

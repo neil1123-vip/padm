@@ -495,18 +495,21 @@ addPortHopping() {
                     $1 == "-A" && $2 == "PREROUTING" {
                         ports = protocol = target = destination = ""
                         for (i = 1; i <= NF; i++) {
-                            if ($i == "--dport") ports = $(i + 1)
+                            if ($i == "--dport" || $i == "--dports") ports = $(i + 1)
                             else if ($i == "-p") protocol = $(i + 1)
                             else if ($i == "-j") target = $(i + 1)
                             else if ($i == "--to-destination") destination = $(i + 1)
                         }
                         if (protocol != "udp" || target != "DNAT" || destination == ":" targetPort) next
-                        if (ports !~ /^[0-9]+(:[0-9]+)?$/) next
-                        count = split(ports, range, ":")
-                        start = range[1] + 0
-                        end = range[count] + 0
-                        if (start < 1 || end > 65535 || start > end) next
-                        if (start <= candidateEnd && end >= candidateStart) exit 1
+                        portCount = split(ports, portRanges, ",")
+                        for (portIndex = 1; portIndex <= portCount; portIndex++) {
+                            if (portRanges[portIndex] !~ /^[0-9]+(:[0-9]+)?$/) continue
+                            count = split(portRanges[portIndex], range, ":")
+                            start = range[1] + 0
+                            end = range[count] + 0
+                            if (start < 1 || end > 65535 || start > end) continue
+                            if (start <= candidateEnd && end >= candidateStart) exit 1
+                        }
                     }
                 ' <<<"${existingRules}"; then
                     protocolPortHoppingStatusCard "范围与现有端口跳跃规则重叠，已取消添加端口跳跃"

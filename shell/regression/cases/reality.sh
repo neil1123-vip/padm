@@ -3161,6 +3161,21 @@ runRealityStreamSplitRegression() (
     if [[ "${mode}" == input ]]; then return 0; fi
 
     (
+        # 默认后端缺失或损坏时，在备份和开放端口前停止。
+        local PADM_REALITY_STREAM_VISION_CONFIG_FILE="${root}/missing-vision.json"
+        local nginxBefore=$(<"${PADM_REALITY_STREAM_NGINX_CONF}") invalidConfig
+        local effects="${backupCalls}:${patchCalls}:${allowCalls}:${reloadCalls}"
+        for invalidConfig in missing '{' '{"inbounds":[{}]}' '{"inbounds":[{"port":0}]}'; do
+            [[ "${invalidConfig}" == missing ]] || printf '%s\n' "${invalidConfig}" >"${PADM_REALITY_STREAM_VISION_CONFIG_FILE}"
+            regressionExpectStatus 1 configureRealityStreamSplit || return 1
+            [[ ! -e "${PADM_REALITY_STREAM_STATE_FILE}" && ! -e "${PADM_REALITY_STREAM_CONF_FILE}" &&
+                "$(<"${PADM_REALITY_STREAM_NGINX_CONF}")" == "${nginxBefore}" &&
+                "${backupCalls}:${patchCalls}:${allowCalls}:${reloadCalls}" == "${effects}" ]] || return 1
+        done
+        rm "${PADM_REALITY_STREAM_VISION_CONFIG_FILE}"
+    ) || return 1
+
+    (
         # stream 专属路径优先；未设置时应与协议入口共用 canonical 配置。
         local PADM_VLESS_REALITY_CONFIG_FILE="${root}/canonical-vision.json"
         local PADM_VLESS_XHTTP_CONFIG_FILE="${root}/canonical-xhttp.json"

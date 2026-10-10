@@ -402,7 +402,7 @@ realityStreamPatchXrayConfig() {
     local internalPort=$2
     local configFile=$3
     local tmpFile previousPort
-    [[ -f "${configFile}" ]] || return 0
+    [[ -f "${configFile}" ]] || return 1
     previousPort=$(jq -er '.inbounds[0].port' "${configFile}") || return 1
     validPortNumber "${previousPort}" || return 1
     padmCreateTempFileForTarget tmpFile "${configFile}" reality || return 1
@@ -545,7 +545,7 @@ showRealityStreamSplitStatus() {
 configureRealityStreamSplitApply() {
     local installNginxStatus enableRealityStreamSplit websiteDomainsInput websiteDomains
     local websitePort visionInternalPort= xhttpInternalPort= currentVisionPort currentXHTTPPort
-    local stateFile publicPort=443 defaultProtocol defaultInternalPort backupDir
+    local stateFile publicPort=443 defaultProtocol defaultInternalPort defaultConfigFile defaultCurrentPort backupDir
     local selectDefaultRealityProtocol previousVisionPort= previousXHTTPPort= otherRealityPort firewallOwned=false
     realityStreamValidateState || return 1
     if [[ "${coreInstallType}" != "1" ]]; then
@@ -627,8 +627,23 @@ configureRealityStreamSplitApply() {
     fi
 
     stateFile=$(realityStreamSplitStateFile) || return 1
-    currentVisionPort=$(jq -r '.inbounds[0].port // empty' "$(realityStreamVisionConfigFile)" 2>/dev/null)
-    currentXHTTPPort=$(jq -r '.inbounds[0].port // empty' "$(realityStreamXHTTPConfigFile)" 2>/dev/null)
+    if [[ "${defaultProtocol}" == vision ]]; then
+        defaultConfigFile=$(realityStreamVisionConfigFile)
+    else
+        defaultConfigFile=$(realityStreamXHTTPConfigFile)
+    fi
+    if ! defaultCurrentPort=$(jq -er '.inbounds[0].port' "${defaultConfigFile}" 2>/dev/null) ||
+        ! validPortNumber "${defaultCurrentPort}"; then
+        errorCard "Reality 默认后端配置缺失或端口不合法" "${defaultConfigFile}"
+        return 1
+    fi
+    if [[ "${defaultProtocol}" == vision ]]; then
+        currentVisionPort=${defaultCurrentPort}
+        currentXHTTPPort=$(jq -r '.inbounds[0].port // empty' "$(realityStreamXHTTPConfigFile)" 2>/dev/null)
+    else
+        currentXHTTPPort=${defaultCurrentPort}
+        currentVisionPort=$(jq -r '.inbounds[0].port // empty' "$(realityStreamVisionConfigFile)" 2>/dev/null)
+    fi
     if realityStreamSplitEnabled; then
         previousVisionPort=$(realityStreamStoredPublicPortForProtocol vision) || return 1
         previousXHTTPPort=$(realityStreamStoredPublicPortForProtocol xhttp) || return 1
@@ -693,12 +708,6 @@ configureRealityStreamSplitApply() {
         ! realityStreamRestoreXrayConfig xhttp "${previousXHTTPPort}" "$(realityStreamXHTTPConfigFile)"; then
         realityStreamRollbackAndFail "${backupDir}" "无法恢复原 Reality XHTTP 后端"
         return 1
-    fi
-    local defaultConfigFile
-    if [[ "${defaultProtocol}" == vision ]]; then
-        defaultConfigFile=$(realityStreamVisionConfigFile)
-    else
-        defaultConfigFile=$(realityStreamXHTTPConfigFile)
     fi
     if ! realityStreamPatchXrayConfig "${defaultProtocol}" "${defaultInternalPort}" "${defaultConfigFile}"; then
         realityStreamRollbackAndFail "${backupDir}" "无法写入 Reality 默认后端配置"
