@@ -277,8 +277,13 @@ runDockerFail2banSourceRealRegression() {
     bash "${PROJECT_ROOT}/docker/tests/fail2ban-source-real.sh"
 }
 
+runDockerControlFail2banRealRegression() {
+    PYTHONDONTWRITEBYTECODE=1 python3 "${PROJECT_ROOT}/docker/tests/control-fail2ban-real.py"
+}
+
 runDockerFail2banOwnershipRegression() {
-    bash "${PROJECT_ROOT}/docker/tests/fail2ban-ownership.sh"
+    bash "${PROJECT_ROOT}/docker/tests/fail2ban-ownership.sh" &&
+        bash "${PROJECT_ROOT}/docker/tests/control-fail2ban.sh"
 }
 
 runDockerFail2banSourceRegression() {
@@ -423,6 +428,7 @@ registerRegressionFunctionLeaf docker-phase3 runDockerPhase3Regression
 registerRegressionFunctionLeaf docker-phase4 runDockerPhase4Regression
 registerRegressionFunctionLeaf docker-fail2ban-real runDockerFail2banRealRegression
 registerRegressionFunctionLeaf docker-fail2ban-source-real runDockerFail2banSourceRealRegression
+registerRegressionFunctionLeaf docker-control-fail2ban-real runDockerControlFail2banRealRegression
 registerRegressionFunctionLeaf docker-fail2ban-ownership runDockerFail2banOwnershipRegression
 registerRegressionFunctionLeaf docker-fail2ban-source runDockerFail2banSourceRegression
 registerRegressionFunctionLeaf docker-phase5 runDockerPhase5Regression

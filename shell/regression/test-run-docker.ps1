@@ -34,7 +34,8 @@ import subprocess
 from pathlib import Path
 status = dict(line.split(":", 1) for line in Path("/proc/self/status").read_text().splitlines())
 mask = (1 << 12) | (1 << 21)
-nested = sys.argv[1] in ("docker-control-two-deployment-real", "docker-routing-ipv6-real")
+nested = sys.argv[1] in ("docker-control-two-deployment-real", "docker-routing-ipv6-real",
+                       "docker-control-fail2ban-real")
 expected = mask if sys.argv[1] in ("docker-control-two-node-real", "docker-routing-warp-real") or nested else 0
 assert int(status["CapEff"].strip(), 16) & mask == expected
 privileged_mask = (1 << 19) | (1 << 25)
@@ -83,7 +84,9 @@ foreach ($case in @(
     @{ selector = 'docker-routing-ipv6-real'; expected = 0 },
     @{ selector = 'docker-routing-ipv6-real-other'; expected = 0 },
     @{ selector = 'docker-routing-warp-real'; expected = 0 },
-    @{ selector = 'docker-routing-warp-real-other'; expected = 0 }
+    @{ selector = 'docker-routing-warp-real-other'; expected = 0 },
+    @{ selector = 'docker-control-fail2ban-real'; expected = 0 },
+    @{ selector = 'docker-control-fail2ban-real-other'; expected = 0 }
 )) {
     & $runner -Selector $case.selector
     if ($LASTEXITCODE -ne $case.expected) { throw "Wrong exit code for $($case.selector): $LASTEXITCODE" }

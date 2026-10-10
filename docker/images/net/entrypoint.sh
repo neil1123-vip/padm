@@ -2,6 +2,8 @@
 set -eu
 
 STATE_ROOT=/var/lib/padm/net
+# 默认入口固定为 WS；控制面范围只能由显式内部命令选择。
+fb_scope=ws fb_state=fail2ban.state fb_prefix=padm-f2b- fb_stage_prefix=.fail2ban-state fb_target=
 die() { echo "padm-net: $*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "missing command: $1"; }
 integer() { case "$1" in ''|*[!0-9]*) return 1 ;; esac; }
@@ -231,39 +233,114 @@ if not (1 <= len(ports) <= 16 and len(set(ports)) == len(ports)
 PY
 }
 
+fail2ban_control_scope() {
+    fb_scope=control fb_state=fail2ban-control.state fb_prefix=padm-f2bc-
+    fb_stage_prefix=.fail2ban-control-state fb_target=
+}
+
+fail2ban_control_parameters_valid() {
+    python3 - "$1" "$2" <<'PY'
+import ipaddress
+import sys
+target, port = sys.argv[1:]
+try:
+    address = ipaddress.IPv4Address(target)
+    networks = [ipaddress.ip_network(value) for value in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")]
+    if (str(address) != target or not any(address in network for network in networks)
+            or not port.isascii() or not port.isdigit() or str(int(port)) != port
+            or not 1024 <= int(port) <= 65535):
+        raise ValueError("invalid control target or port")
+except ValueError:
+    raise SystemExit(1)
+PY
+}
+
+fail2ban_control_precheck() {
+    need ip
+    fail2ban_control_parameters_valid "$1" "$2" || die "invalid control Fail2ban target or port"
+    fb_interface=$(ip -j -d link show dev wg-padm) || die "cannot inspect wg-padm interface"
+    printf '%s\n' "$fb_interface" | python3 -c '
+import json, sys
+links = json.load(sys.stdin)
+if not (len(links) == 1 and links[0].get("ifname") == "wg-padm"
+        and links[0].get("linkinfo", {}).get("info_kind") == "wireguard"):
+    raise SystemExit(1)
+' || die "control Fail2ban requires an actual wg-padm WireGuard interface"
+    fb_addresses=$(ip -j -4 address show dev wg-padm) || die "cannot inspect wg-padm control address"
+    printf '%s\n' "$fb_addresses" | python3 -c '
+import json, sys
+addresses = json.load(sys.stdin)
+if not any(item.get("ifname") == "wg-padm" and any(address.get("family") == "inet"
+        and address.get("local") == sys.argv[1] for address in item.get("addr_info", []))
+        for item in addresses):
+    raise SystemExit(1)
+' "$1" || die "control Fail2ban target is not an actual wg-padm address"
+    python3 - <<'PY'
+import os
+import stat
+from pathlib import Path
+root = Path("/var/log/padm/control")
+for parent in (root, *root.parents):
+    metadata = parent.lstat()
+    if (not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != 0 or metadata.st_mode & 0o022
+            or (parent == root and (metadata.st_gid != 10001 or stat.S_IMODE(metadata.st_mode) != 0o750))):
+        raise SystemExit(1)
+for name, uid in (("auth.log", 10001), ("auth.lock", 0), ("source.receipt", 10001)):
+    path = root / name
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    try:
+        opened, current = os.fstat(descriptor), path.lstat()
+        if (not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1 or opened.st_uid != uid
+                or opened.st_gid != 10001 or stat.S_IMODE(opened.st_mode) != 0o640
+                or (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino)):
+            raise SystemExit(1)
+    finally:
+        os.close(descriptor)
+PY
+}
+
 fail2ban_state_text() {
-    printf 'schema_version=2\ntoken=%s\nchain=%s\nports=%s\nipv6=%s\n' \
-        "$fb_token" "$fb_chain" "$fb_ports" "$fb_ipv6"
+    if [ "$fb_scope" = control ]; then
+        printf 'schema_version=1\ntoken=%s\nchain=%s\nports=%s\nipv6=no\ntarget=%s\n' \
+            "$fb_token" "$fb_chain" "$fb_ports" "$fb_target"
+    else
+        printf 'schema_version=2\ntoken=%s\nchain=%s\nports=%s\nipv6=%s\n' \
+            "$fb_token" "$fb_chain" "$fb_ports" "$fb_ipv6"
+    fi
 }
 
 fail2ban_state_read() {
     fb_root=${1:-$STATE_ROOT}
     wireguard_state_directory "$fb_root" &&
-        wireguard_private_file "$fb_root/fail2ban.state" &&
-        [ "$(stat -c '%h' "$fb_root/fail2ban.state")" -eq 1 ] &&
-        [ "$(stat -c '%s' "$fb_root/fail2ban.state")" -le 512 ] || return 1
-    fb_token=$(sed -n 's/^token=//p' "$fb_root/fail2ban.state")
-    fb_chain=$(sed -n 's/^chain=//p' "$fb_root/fail2ban.state")
-    fb_ports=$(sed -n 's/^ports=//p' "$fb_root/fail2ban.state")
-    fb_ipv6=$(sed -n 's/^ipv6=//p' "$fb_root/fail2ban.state")
+        wireguard_private_file "$fb_root/$fb_state" &&
+        [ "$(stat -c '%h' "$fb_root/$fb_state")" -eq 1 ] &&
+        [ "$(stat -c '%s' "$fb_root/$fb_state")" -le 512 ] || return 1
+    fb_token=$(sed -n 's/^token=//p' "$fb_root/$fb_state")
+    fb_chain=$(sed -n 's/^chain=//p' "$fb_root/$fb_state")
+    fb_ports=$(sed -n 's/^ports=//p' "$fb_root/$fb_state")
+    fb_ipv6=$(sed -n 's/^ipv6=//p' "$fb_root/$fb_state")
+    if [ "$fb_scope" = control ]; then
+        fb_target=$(sed -n 's/^target=//p' "$fb_root/$fb_state")
+        [ "$fb_ipv6" = no ] && fail2ban_control_parameters_valid "$fb_target" "$fb_ports" || return 1
+    fi
     printf '%s\n' "$fb_token" | grep -Eq '^[a-f0-9]{32}$' &&
-        [ "$fb_chain" = "padm-f2b-$(printf '%s' "$fb_token" | cut -c1-12)" ] &&
+        [ "$fb_chain" = "$fb_prefix$(printf '%s' "$fb_token" | cut -c1-12)" ] &&
         fail2ban_ports_valid "$fb_ports" &&
         { [ "$fb_ipv6" = yes ] || [ "$fb_ipv6" = no ]; } || return 1
     # 固定字节格式拒绝重复字段、额外内容和 NUL，绝不执行 state。
-    fail2ban_state_text | cmp -s - "$fb_root/fail2ban.state"
+    fail2ban_state_text | cmp -s - "$fb_root/$fb_state"
 }
 
 fail2ban_state_write() (
     umask 077
-    fb_stage=$(mktemp "$STATE_ROOT/.fail2ban-state.XXXXXX") || return 1
+    fb_stage=$(mktemp "$STATE_ROOT/$fb_stage_prefix.XXXXXX") || return 1
     trap 'rm -f "$fb_stage"' EXIT
     fail2ban_state_text >"$fb_stage" && chmod 0600 "$fb_stage" &&
-        mv -f "$fb_stage" "$STATE_ROOT/fail2ban.state"
+        mv -f "$fb_stage" "$STATE_ROOT/$fb_state"
 )
 
 fail2ban_resources() {
-    python3 - "$fb_root" "$fb_token" "$fb_chain" "$fb_ports" "$fb_ipv6" "$@" <<'PY'
+    python3 - "$fb_root" "$fb_token" "$fb_chain" "$fb_ports" "$fb_ipv6" "$fb_scope" "$fb_target" "$@" <<'PY'
 import ipaddress
 import os
 import shlex
@@ -271,21 +348,34 @@ import stat
 import subprocess
 import sys
 
-root, token, chain, ports, ipv6, operation = sys.argv[1:7]
-tool = sys.argv[7] if len(sys.argv) > 7 else ""
-address = sys.argv[8] if len(sys.argv) > 8 else ""
-tools = ["iptables"] + (["ip6tables"] if ipv6 == "yes" or (operation == "audit" and tool == "yes") else [])
+root, token, chain, ports, ipv6, scope, target, operation = sys.argv[1:9]
+tool = sys.argv[9] if len(sys.argv) > 9 else ""
+address = sys.argv[10] if len(sys.argv) > 10 else ""
 ports = ports.split(",")
-comment = "padm-f2b:" + token
-state = (f"schema_version=2\ntoken={token}\nchain={chain}\n"
-         f"ports={','.join(ports)}\nipv6={ipv6}\n").encode()
+control = scope == "control"
+tools = ["iptables"] + (["ip6tables"] if not control and
+        (ipv6 == "yes" or (operation == "audit" and tool == "yes")) else [])
+prefix = "padm-f2bc" if control else "padm-f2b"
+parent = "INPUT" if control else "DOCKER-USER"
+comment = prefix + ":" + token
+state_name = "fail2ban-control.state" if control else "fail2ban.state"
+state = (f"schema_version={1 if control else 2}\ntoken={token}\nchain={chain}\n"
+         f"ports={','.join(ports)}\nipv6={ipv6}\n" + (f"target={target}\n" if control else "")).encode()
 created = set()
+
+def hook(port):
+    if control:
+        return ["-d", target + "/32", "-p", "tcp", "--dport", port,
+                "-m", "conntrack", "--ctstate", "NEW",
+                "-m", "comment", "--comment", comment, "-j", chain]
+    return ["-p", "tcp", "-m", "conntrack", "--ctstate", "NEW", "--ctorigdstport", port,
+            "-m", "comment", "--comment", comment, "-j", chain]
 
 def owner():
     directory = os.lstat(root)
     if not stat.S_ISDIR(directory.st_mode) or directory.st_uid != 0 or directory.st_mode & 0o022:
         raise ValueError("unsafe ownership directory")
-    path = os.path.join(root, "fail2ban.state")
+    path = os.path.join(root, state_name)
     if operation == "empty":
         if os.path.lexists(path):
             raise ValueError("unexpected ownership state")
@@ -322,11 +412,11 @@ def audit():
                 present = True
                 continue
             if len(args) == 2 and args[0] == "-N" and (
-                    args[1] == "padm-f2b" or args[1].startswith("padm-f2b-")):
+                    args[1] == prefix or args[1].startswith(prefix + "-")):
                 raise ValueError("unverified Fail2ban chain")
             if len(args) < 2 or args[0] != "-A":
                 continue
-            if args[1] == "DOCKER-USER":
+            if args[1] == parent:
                 rule_index += 1
             own_chain = args[1] == chain
             own_target = any(key in args and args[args.index(key) + 1] == chain
@@ -350,7 +440,17 @@ def audit():
                     values[key] = value
                 index += 2
             base = {"--comment": comment}
-            if (args[1] == "DOCKER-USER" and sorted(modules) == ["comment", "conntrack"]
+            if (control and args[1] == parent
+                    and sorted(modules) in (["comment", "conntrack"], ["comment", "conntrack", "tcp"])
+                    and values.get("--dport") in ports
+                    and values == dict(base, **{"-d": target + "/32", "-p": "tcp",
+                       "--dport": values["--dport"], "--ctstate": "NEW", "-j": chain})):
+                port = values["--dport"]
+                if port in hooks:
+                    raise ValueError("duplicate Fail2ban hook")
+                hooks.append(port)
+                hook_positions.append(rule_index - 1)
+            elif (not control and args[1] == parent and sorted(modules) == ["comment", "conntrack"]
                     and values.get("--ctorigdstport") in ports
                     and values == dict(base, **{"-p": "tcp", "--ctstate": "NEW",
                        "--ctorigdstport": values["--ctorigdstport"], "-j": chain})):
@@ -397,9 +497,7 @@ def stop(table):
         return
     created.add(table)
     for port in hooks:
-        mutate(table, ["-D", "DOCKER-USER", "-p", "tcp", "-m", "conntrack",
-                      "--ctstate", "NEW", "--ctorigdstport", port,
-                      "-m", "comment", "--comment", comment, "-j", chain])
+        mutate(table, ["-D", parent, *hook(port)])
     for ip in bans:
         mutate(table, ["-D", chain, "-s", ip, "-m", "comment", "--comment", comment, "-j", "DROP"])
     if sentinel:
@@ -416,7 +514,7 @@ def stop(table):
 try:
     if operation in {"empty", "audit", "health", "cleanup"}:
         resources = audit()
-        if operation == "health" and any(present and (not sentinel or set(hooks) != set(ports))
+        if operation == "health" and any((present or control) and (not present or not sentinel or set(hooks) != set(ports))
                 for present, sentinel, hooks, _ in resources.values()):
             raise ValueError("incomplete Fail2ban resources")
         if operation == "cleanup":
@@ -443,9 +541,7 @@ try:
                     created.add(tool)
                     mutate(tool, ["-A", chain, "-m", "comment", "--comment", comment, "-j", "RETURN"])
                     for port in ports:
-                        mutate(tool, ["-I", "DOCKER-USER", "1", "-p", "tcp", "-m", "conntrack",
-                                      "--ctstate", "NEW", "--ctorigdstport", port,
-                                      "-m", "comment", "--comment", comment, "-j", chain])
+                        mutate(tool, ["-I", parent, "1", *hook(port)])
                 except Exception:
                     stop(tool)
                     raise
@@ -467,30 +563,46 @@ PY
 }
 
 fail2ban_preflight() (
-    requested_ports=$1
-    ownership=${2:-unowned}
-    ownership_root=${3:-$STATE_ROOT}
+    if [ "$fb_scope" = control ]; then
+        [ "$#" -ge 2 ] && [ "$#" -le 4 ] || die "control Fail2ban preflight requires target and port"
+        requested_target=$1 requested_ports=$2
+        ownership=${3:-unowned} ownership_root=${4:-$STATE_ROOT}
+    else
+        requested_ports=$1
+        ownership=${2:-unowned}
+        ownership_root=${3:-$STATE_ROOT}
+    fi
     need fail2ban-client
     need iptables
     need python3
     fail2ban_ports_valid "$requested_ports" || die "invalid Fail2ban port list"
-    [ -f /var/log/padm/nginx/access.log ] && [ ! -L /var/log/padm/nginx/access.log ] ||
-        die "Nginx access log is missing"
-    iptables -w -n -L DOCKER-USER >/dev/null 2>&1 || die "DOCKER-USER chain is unavailable"
     requested_ipv6=no
-    if grep -qx 'allowipv6 = yes' /etc/fail2ban/fail2ban.local; then
-        requested_ipv6=yes
-        need ip6tables
-        ip6tables -w -n -L DOCKER-USER >/dev/null 2>&1 || die "IPv6 DOCKER-USER chain is unavailable"
+    if [ "$fb_scope" = control ]; then
+        fail2ban_control_precheck "$requested_target" "$requested_ports" ||
+            die "control Fail2ban log or address precheck failed"
+        iptables -w -n -L INPUT >/dev/null 2>&1 || die "INPUT chain is unavailable"
+        grep -qx 'allowipv6 = no' /etc/fail2ban/fail2ban.local &&
+            ! grep -Eq '^allowipv6[[:space:]]*=[[:space:]]*yes' /etc/fail2ban/fail2ban.local ||
+            die "control Fail2ban must disable IPv6"
+    else
+        [ -f /var/log/padm/nginx/access.log ] && [ ! -L /var/log/padm/nginx/access.log ] ||
+            die "Nginx access log is missing"
+        iptables -w -n -L DOCKER-USER >/dev/null 2>&1 || die "DOCKER-USER chain is unavailable"
+        if grep -qx 'allowipv6 = yes' /etc/fail2ban/fail2ban.local; then
+            requested_ipv6=yes
+            need ip6tables
+            ip6tables -w -n -L DOCKER-USER >/dev/null 2>&1 || die "IPv6 DOCKER-USER chain is unavailable"
+        fi
     fi
     fail2ban-client -t >/dev/null 2>&1 || die "Fail2ban configuration is invalid"
-    if [ -e "$ownership_root/fail2ban.state" ] || [ -L "$ownership_root/fail2ban.state" ]; then
+    if [ -e "$ownership_root/$fb_state" ] || [ -L "$ownership_root/$fb_state" ]; then
         [ "$ownership" = owned ] && fail2ban_state_read "$ownership_root" &&
             fail2ban_resources audit "$requested_ipv6" || die "Fail2ban ownership is unverified; refusing migration"
         # 候选只读核验旧 owner，旧资源只能由运行入口精确撤销。
     else
         fb_root=$ownership_root fb_ports=$requested_ports fb_ipv6=$requested_ipv6
-        fb_token=00000000000000000000000000000000 fb_chain=padm-f2b-000000000000
+        fb_target=${requested_target:-}
+        fb_token=00000000000000000000000000000000 fb_chain=${fb_prefix}000000000000
         fail2ban_resources empty || die "Fail2ban resources are already in use"
     fi
 )
@@ -506,7 +618,7 @@ fail2ban_cleanup() (
     }
     fail2ban_state_read "$STATE_ROOT" &&
         [ "$fb_token" = "$cleanup_token" ] &&
-        rm -f "$STATE_ROOT/fail2ban.state"
+        rm -f "$STATE_ROOT/$fb_state"
 )
 
 fail2ban_action() (
@@ -519,23 +631,44 @@ fail2ban_action() (
 )
 
 fail2ban_run() {
-    requested_ports=$1 ownership=unowned
-    [ ! -e "$STATE_ROOT/fail2ban.state" ] && [ ! -L "$STATE_ROOT/fail2ban.state" ] || ownership=owned
-    fail2ban_preflight "$requested_ports" "$ownership"
+    if [ "$fb_scope" = control ]; then
+        requested_target=$1 requested_ports=$2
+    else
+        requested_ports=$1
+    fi
+    ownership=unowned
+    [ ! -e "$STATE_ROOT/$fb_state" ] && [ ! -L "$STATE_ROOT/$fb_state" ] || ownership=owned
+    if [ "$fb_scope" = control ]; then
+        fail2ban_preflight "$requested_target" "$requested_ports" "$ownership"
+    else
+        fail2ban_preflight "$requested_ports" "$ownership"
+    fi
     wireguard_state_directory "$STATE_ROOT" || die "Fail2ban state directory is unsafe"
     if [ "$ownership" = owned ]; then
         fail2ban_cleanup || die "Fail2ban previous state could not be revoked"
     fi
     fb_root=$STATE_ROOT fb_ports=$requested_ports fb_ipv6=no
-    grep -qx 'allowipv6 = yes' /etc/fail2ban/fail2ban.local && fb_ipv6=yes
+    if [ "$fb_scope" = control ]; then
+        fb_target=$requested_target
+    else
+        grep -qx 'allowipv6 = yes' /etc/fail2ban/fail2ban.local && fb_ipv6=yes
+    fi
     fb_token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
     [ "${#fb_token}" -eq 32 ] || die "Fail2ban random source failed"
-    fb_chain=padm-f2b-$(printf '%s' "$fb_token" | cut -c1-12)
+    fb_chain=$fb_prefix$(printf '%s' "$fb_token" | cut -c1-12)
     fail2ban_resources empty || die "Fail2ban resources changed before start"
-    PADM_FAIL2BAN_TOKEN=$fb_token
-    export PADM_FAIL2BAN_TOKEN
+    run_token=$fb_token
+    if [ "$fb_scope" = control ]; then
+        unset PADM_FAIL2BAN_TOKEN
+        PADM_FAIL2BAN_CONTROL_TOKEN=$run_token
+        export PADM_FAIL2BAN_CONTROL_TOKEN
+    else
+        unset PADM_FAIL2BAN_CONTROL_TOKEN
+        PADM_FAIL2BAN_TOKEN=$run_token
+        export PADM_FAIL2BAN_TOKEN
+    fi
     server= stopped=0
-    trap 'fb_status=$?; trap - EXIT; if [ -e "$STATE_ROOT/fail2ban.state" ] || [ -L "$STATE_ROOT/fail2ban.state" ]; then fail2ban_cleanup "$PADM_FAIL2BAN_TOKEN" || fb_status=1; fi; exit "$fb_status"' EXIT
+    trap 'fb_status=$?; trap - EXIT; if [ -e "$STATE_ROOT/$fb_state" ] || [ -L "$STATE_ROOT/$fb_state" ]; then fail2ban_cleanup "$run_token" || fb_status=1; fi; exit "$fb_status"' EXIT
     trap 'stopped=1; [ -z "$server" ] || { fail2ban-client stop >/dev/null 2>&1 || kill -TERM "$server" >/dev/null 2>&1 || true; }' INT TERM
     fail2ban_state_write || die "cannot persist Fail2ban ownership"
     [ "$stopped" -eq 0 ] || return 0
@@ -863,6 +996,7 @@ preflight)
     case "${1:-}" in
     wireguard) shift; wireguard_preflight "$@" ;;
     fail2ban) shift; fail2ban_preflight "$@" ;;
+    fail2ban-control) shift; fail2ban_control_scope; fail2ban_preflight "$@" ;;
     tun) shift; tun_preflight "$@" ;;
     tproxy) shift; tproxy_preflight "$@" ;;
     *) die "unsupported preflight" ;;
@@ -873,6 +1007,10 @@ wireguard)
     ;;
 fail2ban)
     shift; [ "$#" -eq 1 ] || die "fail2ban requires ports"; fail2ban_run "$@"
+    ;;
+fail2ban-control)
+    shift; [ "$#" -eq 2 ] || die "fail2ban-control requires target and port"
+    fail2ban_control_scope; fail2ban_run "$@"
     ;;
 tproxy)
     shift; [ "$#" -eq 2 ] || die "tproxy requires port and mark"; tproxy_run "$@"
@@ -885,6 +1023,12 @@ fail2ban-health)
     ;;
 fail2ban-action)
     shift; fail2ban_action "$@"
+    ;;
+fail2ban-control-health)
+    shift; [ "$#" -eq 0 ] || exit 1; fail2ban_control_scope; fail2ban_health
+    ;;
+fail2ban-control-action)
+    shift; fail2ban_control_scope; fail2ban_action "$@"
     ;;
 tproxy-health)
     shift; [ "$#" -eq 2 ] || exit 1; tproxy_health "$@"
