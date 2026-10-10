@@ -741,6 +741,12 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
     dockerComposeFile() { printf '%s/compose.json\n' "${composeRoot}"; }
     # 模拟 Compose 默认交互读取 stdin，不能吞掉双核心循环的下一项。
     docker() { [[ "$1" == compose ]]; cat >/dev/null; }
+    # 仅接住外部 env 边界，stdin 重定向继续由生产执行层提供。
+    env() {
+        [[ "${*:1:16}" == '-u PADM_DOCKER_ROOT -u PADM_NET_ROOT -u PADM_XRAY_IMAGE -u PADM_SINGBOX_IMAGE -u PADM_NGINX_IMAGE -u PADM_OPS_IMAGE -u PADM_NET_IMAGE docker compose' ]] || return 1
+        shift 14
+        "$@"
+    }
     processed=()
     while IFS= read -r core; do
         dockerComposeRun exec -T "${core}" true

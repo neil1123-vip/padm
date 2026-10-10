@@ -6419,12 +6419,39 @@ dockerAcmeApply() {
 }
 
 dockerValidateInstalledCommand() {
-    local root core integration port mark ports
+    local root core integration port mark ports controlEnabled deployedControl specControl
     [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
     dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
     dockerLockInstalledDeployment || return $?
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     dockerComposeFile >/dev/null || return "${PADM_DOCKER_RC_COMPOSE}"
+    controlEnabled=$(jq -ers 'if length == 1 and (.[0].services | type) == "object"
+      then .[0].services | has("control") | tostring else error("invalid compose") end' \
+        "${root}/compose.json") || return "${PADM_DOCKER_RC_STATE}"
+    deployedControl=$(jq -ers 'if length == 1 and (.[0].compose.profiles | type) == "array"
+      then (.[0].compose.profiles | index("control") != null) | tostring
+      else error("invalid deployment") end' "${root}/deployment.json") ||
+        return "${PADM_DOCKER_RC_STATE}"
+    [[ "${controlEnabled}" == "${deployedControl}" ]] || return "${PADM_DOCKER_RC_STATE}"
+    # 先拒绝孤立或漂移的主控投影，不能把损坏输入当成未启用。
+    dockerTrafficSafePath "${root}" "${root}/config/spec.json" &&
+        dockerTrafficSafePath "${root}" "${root}/config/control" || return "${PADM_DOCKER_RC_STATE}"
+    if [[ -e "${root}/config/spec.json" || -L "${root}/config/spec.json" ]]; then
+        [[ -f "${root}/config/spec.json" && ! -L "${root}/config/spec.json" ]] ||
+            return "${PADM_DOCKER_RC_STATE}"
+        specControl=$(jq -ers 'if length == 1 and (.[0] | type) == "object"
+          then .[0] | has("control") | tostring else error("invalid spec") end' \
+            "${root}/config/spec.json") || return "${PADM_DOCKER_RC_STATE}"
+        [[ "${specControl}" == "${controlEnabled}" ]] &&
+            dockerControlStateCheck "${root}" || return "${PADM_DOCKER_RC_STATE}"
+    else
+        [[ "${controlEnabled}" == false ]] || return "${PADM_DOCKER_RC_STATE}"
+        if [[ -e "${root}/config/control" || -L "${root}/config/control" ]]; then
+            [[ -d "${root}/config/control" &&
+                -z "$(find "${root}/config/control" -mindepth 1 -print -quit)" ]] ||
+                return "${PADM_DOCKER_RC_STATE}"
+        fi
+    fi
     dockerComposeRun config --format json >/dev/null || return "${PADM_DOCKER_RC_COMPOSE}"
     while IFS= read -r core; do
         case "${core}" in
@@ -6443,8 +6470,21 @@ dockerValidateInstalledCommand() {
     if jq -e '.compose.profiles | index("nginx") != null' "${root}/deployment.json" >/dev/null; then
         dockerComposeRun run --rm --no-deps nginx -t >/dev/null || return "${PADM_DOCKER_RC_STATE}"
     fi
+    if jq -e '.compose.profiles | index("nginx-stream") != null' "${root}/deployment.json" >/dev/null; then
+        dockerComposeRun run --rm --no-deps nginx-stream -t -c /etc/nginx/stream.d/host-main \
+            >/dev/null || return "${PADM_DOCKER_RC_STATE}"
+    fi
     if jq -e '.compose.profiles | index("subscription") != null' "${root}/deployment.json" >/dev/null; then
         dockerComposeRun run --rm --no-deps subscription subscription --check >/dev/null ||
+            return "${PADM_DOCKER_RC_STATE}"
+    fi
+    if [[ "${controlEnabled}" == true ]]; then
+        dockerComposeRun run --rm --no-deps control \
+            control --state /etc/padm/control/state.json \
+            --access-log /var/log/padm/control/auth.log \
+            --access-lock /var/log/padm/control/auth.lock \
+            --source-challenge /run/padm/control-source/challenge.json \
+            --source-receipt /var/log/padm/control/source.receipt --check >/dev/null ||
             return "${PADM_DOCKER_RC_STATE}"
     fi
     while IFS= read -r integration; do

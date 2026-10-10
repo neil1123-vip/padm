@@ -145,6 +145,14 @@ docker() {
     esac
 }
 
+# 只隔离 env 启动外部 Compose；真实执行门禁、stdin 和信号目标不变。
+env() {
+    [[ "${*:1:16}" == '-u PADM_DOCKER_ROOT -u PADM_NET_ROOT -u PADM_XRAY_IMAGE -u PADM_SINGBOX_IMAGE -u PADM_NGINX_IMAGE -u PADM_OPS_IMAGE -u PADM_NET_IMAGE docker compose' ]] ||
+        fail 'Geo Compose 环境隔离参数错误'
+    shift 14
+    "$@"
+}
+
 systemctl() {
     printf '%s\n' "$*" >>"${TEST_ROOT}/schedule.log"
     case "$1" in
