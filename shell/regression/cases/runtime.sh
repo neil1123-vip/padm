@@ -2614,7 +2614,7 @@ runInstallWorkflowRegression() (
             audit-failure) auditStatus=1 ;;
             nginx-reinstall)
                 selectCustomInstallType=,24, nginxTestVersion=1.13.12
-                expected+=$'timeout:300 DEBIAN_FRONTEND=noninteractive apt-get -y -o APT::Get::AutomaticRemove=false remove nginx\nnginx-install\n'
+                expected+=$'nginx-install\n'
                 ;;
             esac
             installTools 1 <<<y
@@ -2695,7 +2695,7 @@ runInstallWorkflowRegression() (
         for answer in y Y yes YES true 1; do
             events=
             installTools 1 <<<"${answer}"
-            [[ "${events}" == $'begin\ntimeout:120 dpkg --configure -a\nupdate\nbase\ntimeout:300 DEBIAN_FRONTEND=noninteractive apt-get -y -o APT::Get::AutomaticRemove=false remove nginx\nnginx-install\nacme\nend\n' ]]
+            [[ "${events}" == $'begin\ntimeout:120 dpkg --configure -a\nupdate\nbase\nnginx-install\nacme\nend\n' ]]
         done
         events=
         selectCustomInstallType=",1,"
@@ -2742,11 +2742,11 @@ runInstallWorkflowRegression() (
         )
 
         (
-            # yum 重装同样保留旧自动依赖，不借用包回滚状态卸载已有 Nginx。
+            # yum 原位更新同样不预先卸载已有 Nginx。
             local packageManager=yum release=centos removeType='yum -y remove'
             events= selectCustomInstallType=,24, nginxTestVersion=1.13.12 nginxAvailable=true
             installTools 1 <<<y
-            [[ "${events}" == $'begin\nupdate\nbase\ntimeout:300 yum -y remove --setopt=clean_requirements_on_remove=False nginx\nnginx-install\nacme\nend\n' ]]
+            [[ "${events}" == $'begin\nupdate\nbase\nnginx-install\nacme\nend\n' ]]
         )
 
         (
@@ -3106,6 +3106,90 @@ runInstallWorkflowRegression() (
                 done
             done
         done
+    )
+
+    (
+        # 旧 Nginx 原位更新，包已配置也必须尝试升级；失败不能先移除旧服务。
+        local root="${TMP_DIR}/install-nginx-upgrade" fixture mode status=0
+        local release=fedora packageManager=yum rhelLike=true centosVersion=40 installType=fixture-install removeType=fixture-remove
+        local selectCustomInstallType=,24, selectCoreType=1
+        local PADM_PACKAGE_TRANSACTION_ACTIVE= PADM_PACKAGE_TRANSACTION_STARTED= PADM_INSTALLED_PACKAGES=
+        local PADM_PACKAGE_PENDING_FILE= PADM_PACKAGE_ROLLBACK_FAILURES= PADM_PACKAGE_MANAGED_ROLLBACK_FAILURES=
+        local -a PADM_PACKAGE_MANAGED_ROLLBACK_DIRS=()
+        padmAssertNativeInstallAllowed() { :; }
+        acmeInstallTargetIsSafe() { :; }
+        progressCard() { :; }
+        collectMissingBasePackages() { local -n result=$1; result=(); }
+        waitAptProcess() { :; }
+        adapterInstallLogPath() { printf '%s/install.log' "${fixture}"; }
+        packageInstalled() { [[ "$1" == nginx && -f "${fixture}/nginx" ]]; }
+        command() {
+            case "$*" in
+            "-v nginx") [[ -f "${fixture}/nginx" ]] ;;
+            "-v qrencode") return 0 ;;
+            *) builtin command "$@" ;;
+            esac
+        }
+        nginx() { printf 'nginx version: nginx/%s\n' "$(<"${fixture}/nginx")" >&2; }
+        nginxServiceInstalled() { return 0; }
+        bootStartup() { printf 'boot:%s\n' "$1" >>"${fixture}/events"; }
+        installAcmeTool() { :; }
+        runWithTimeout() {
+            printf 'remove:%s\n' "$2" >>"${fixture}/events"
+            rm -f "${fixture}/nginx"
+        }
+        runPackageCommandWithProgress() {
+            printf 'install:%s\n' "$3" >>"${fixture}/events"
+            [[ "${mode}" != failure ]] || return 7
+            [[ "${mode}" != success ]] || printf '1.24.0\n' >"${fixture}/nginx"
+        }
+
+        fixture="${root}/configured"
+        mkdir -p "${fixture}"
+        printf '1.13.12\n' >"${fixture}/nginx"
+        : >"${fixture}/events"
+        mode=configured
+        beginPackageInstallTransaction
+        installPackageTracked nginx nginx || return 1
+        endPackageInstallTransaction "${PADM_PACKAGE_TRANSACTION_STARTED}"
+        [[ ! -s "${fixture}/events" && "$(<"${fixture}/nginx")" == 1.13.12 ]] || return 1
+
+        for mode in failure unchanged success; do
+            fixture="${root}/${mode}"
+            mkdir -p "${fixture}"
+            printf '1.13.12\n' >"${fixture}/nginx"
+            : >"${fixture}/events"
+            status=0
+            (
+                installTools 1 <<<y
+                [[ -z "${PADM_INSTALLED_PACKAGES}${PADM_PACKAGE_TRANSACTION_ACTIVE}" ]] || exit 1
+                printf 'completed\n' >>"${fixture}/events"
+            ) || status=$?
+            [[ -f "${fixture}/nginx" ]] || {
+                printf '旧 Nginx 在更新 %s 后丢失\n' "${mode}" >&2
+                return 1
+            }
+            ! grep -q '^remove:' "${fixture}/events" || return 1
+            grep -qxF 'install:fixture-install nginx' "${fixture}/events" || return 1
+            if [[ "${mode}" == success ]]; then
+                [[ "${status}" == 0 && "$(<"${fixture}/nginx")" == 1.24.0 ]] || return 1
+                [[ "$(<"${fixture}/events")" == $'install:fixture-install nginx\nboot:nginx\ncompleted' ]] || return 1
+            else
+                [[ "${status}" == 1 && "$(<"${fixture}/nginx")" == 1.13.12 ]] || return 1
+                [[ "$(<"${fixture}/events")" == 'install:fixture-install nginx' ]] || return 1
+            fi
+        done
+
+        fixture="${root}/apk"
+        mkdir -p "${fixture}"
+        printf '1.13.12\n' >"${fixture}/nginx"
+        : >"${fixture}/events"
+        packageManager=apk installType='fixture-apk add' mode=success
+        beginPackageInstallTransaction
+        installPackageTracked nginx --upgrade nginx || return 1
+        endPackageInstallTransaction "${PADM_PACKAGE_TRANSACTION_STARTED}"
+        [[ "$(<"${fixture}/events")" == 'install:fixture-apk add --upgrade nginx' &&
+            "$(<"${fixture}/nginx")" == 1.24.0 ]] || return 1
     )
 
     (

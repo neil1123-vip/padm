@@ -674,6 +674,11 @@ diagnosePackageInstallFailure() {
 installPackageTracked() {
     local displayName=$1
     shift
+    local upgradePackage=false
+    if [[ "${1:-}" == --upgrade ]]; then
+        upgradePackage=true
+        shift
+    fi
     local packages=("$@")
     local missingPackagesFile
     local installLog
@@ -684,14 +689,16 @@ installPackageTracked() {
     padmEnsureSafeDirectory "$(dirname -- "${installLog}")" || failPackageInstallTransaction "${displayName}安装日志目录创建失败"
     padmCreateTempPath missingPackagesFile "$(adapterTmpPath padm-packages.XXXXXX)" || failPackageInstallTransaction "${displayName}安装状态记录失败"
     writeMissingPackages "${missingPackagesFile}" "${packages[@]}" || { padmRemoveCleanupPath "${missingPackagesFile}"; failPackageInstallTransaction "${displayName}安装状态记录失败"; }
-    if [[ ! -s "${missingPackagesFile}" ]] && allPackagesConfigured "${packages[@]}"; then
+    if [[ "${upgradePackage}" != true && ! -s "${missingPackagesFile}" ]] && allPackagesConfigured "${packages[@]}"; then
         padmRemoveCleanupPath "${missingPackagesFile}"
         return 0
     fi
     [[ "${packageManager}" == "apt" && -s "${missingPackagesFile}" ]] && packageTimeout=900
 
+    local packageInstallType=${installType}
+    [[ "${upgradePackage}" != true || "${packageManager}" != apk ]] || packageInstallType+=' --upgrade'
     PADM_PACKAGE_PENDING_FILE=${missingPackagesFile}
-    runPackageCommandWithProgress "安装${displayName}" "${packageTimeout}" "${installType} ${packages[*]}" "${installLog}" || {
+    runPackageCommandWithProgress "安装${displayName}" "${packageTimeout}" "${packageInstallType} ${packages[*]}" "${installLog}" || {
         if recoverAptInstallAfterTimeout "${displayName}" "${packages[@]}"; then
             :
         else
@@ -966,13 +973,9 @@ installTools() {
     if protocolSelectionSkipsNginx "${selectCustomInstallType}"; then
         successCard "检测到无需依赖Nginx的服务，跳过安装"
     else
-        if [[ "${reinstallNginx}" == "true" ]]; then
-            runWithTimeout 300 "$(packageRemoveCommand) nginx" >/dev/null 2>&1 || failPackageInstallTransaction "旧版Nginx卸载失败"
-            statusCard "Nginx 状态" "nginx 卸载完成"
-        fi
         if [[ "${reinstallNginx}" == "true" ]] || ! command -v nginx >/dev/null 2>&1; then
             successCard "安装nginx"
-            installNginxTools || failPackageInstallTransaction "Nginx安装失败"
+            installNginxTools "${reinstallNginx}" || failPackageInstallTransaction "Nginx安装失败"
         fi
     fi
 
@@ -997,13 +1000,14 @@ bootStartup() {
 
 # 安装 Nginx
 installNginxTools() {
+    local upgradeNginx=${1:-false}
     local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
     local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
     beginPackageInstallTransaction
     local packageTransactionOwner=${PADM_PACKAGE_TRANSACTION_STARTED}
 
     if [[ "${release}" == "debian" || "${release}" == "ubuntu" ]]; then
-        installPackageTracked "Nginx依赖" gnupg2 ca-certificates lsb-release
+        installPackageTracked "Nginx依赖" gnupg2 ca-certificates lsb-release || return 1
         local nginxRepoCodename
         local nginxKeyringFile nginxRepoTarget nginxPinTarget repoBackupDir
         nginxRepoCodename=$(lsb_release -cs)
@@ -1026,7 +1030,7 @@ installNginxTools() {
         fi
 
     elif [[ "${release}" == "centos" ]]; then
-        installPackageTracked "yum-utils" yum-utils
+        installPackageTracked "yum-utils" yum-utils || return 1
         local yumReposDir=${PADM_YUM_REPOS_DIR:-/etc/yum.repos.d}
         local repoFile repoBackupDir nginxRepoTarget nginxRpmKeyTarget
         nginxRepoTarget=$(adapterNginxYumRepoFile "${yumReposDir}")
@@ -1065,7 +1069,12 @@ EOF
         adapterRegisterPackageManagedRollback "${repoBackupDir}"
         rm -f -- "${defaultNginxConf}" || failPackageInstallTransaction "Nginx 默认配置删除失败"
     fi
-    installPackageTracked "nginx" nginx
+    local -a nginxPackages=(nginx)
+    [[ "${upgradeNginx}" != true ]] || nginxPackages=(--upgrade nginx)
+    installPackageTracked "nginx" "${nginxPackages[@]}" || return 1
+    if [[ "${upgradeNginx}" == true ]] && ! nginxVersionAtLeast 1.14.0; then
+        failPackageInstallTransaction "Nginx更新后仍不支持gRPC"
+    fi
     if nginxServiceInstalled; then
         bootStartup nginx || failPackageInstallTransaction "Nginx开机自启配置失败"
     else
