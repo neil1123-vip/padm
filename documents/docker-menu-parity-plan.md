@@ -3077,6 +3077,62 @@ API 退出 78；真实 Compose 的两个独立 daemon/netns 使用生产 CLI，�
 现场来源证明。SSH、原生双架构/宿主 systemd/重启卸载及公网验收继续未决，
 本阶段不宣称控制面防护、5C 或总目标完成。
 
+#### 5C.7c 控制 API 严格随机挑战来源见证
+
+新增 `control source-check` 与 `control source-probe`。主控在部署锁下生成
+64 hex 随机 nonce，root:10001 / 0640 登记在 `data/control-source/challenge.json`，
+最多 30 秒后失效；API 只读挂载。Peer 固定受管唯一 WireGuard /32、
+目标源路由和真实源地址，不读取邀请、不发送 token、不使用代理或重定向。
+
+只有精确 `/v1/health`、没有任何 Authorization、唯一合法 nonce header，
+登记与当前主控 state、实际 socket 的 source/target/port 完全匹配时，
+API 才将 401 写入独立 `logs/control/source.receipt`。普通 auth.log 格式不变，
+不记录 nonce；先同步访问日志，再同步并关闭回执，最后发 HTTP。
+登记、日志或回执不安全时固定诊断并退出 78，不吞错后继续服务。
+
+主控只读新偏移后完整回执，绑定 inode、唯一 nonce、三元组及当前时限；
+成功前复核配置摘要、运行容器代次、登记身份与摘要、回执和到期时间。
+结束或 INT/TERM 仅删除本次未变化登记；陌生/变化登记保留并拒绝，
+probe 临时目录删除失败返回 15、释放锁失败返回 12。
+配置候选与恢复不复制或覆盖登记/回执，旧回执不能成为未来启用凭证。
+三代 Compose（stdout-only、持久日志、随机挑战）精确兼容，
+旧恢复保留原参数与挂载；来源见证只接受最新完整受管编排。
+
+限定独审修复摘要命令与管道错误传播、登记发布信号清理及 probe 清理错误。
+真实验收又发现 Docker capability 的 `CAP_` 前缀和 WireGuard 的
+`${PADM_NET_ROOT}` 挂载前缀误拒，按既有模式规范化，不降低路径/权限比较；
+最小合同使用生产 Compose 派生 inspect，正常通过，额外能力、错误挂载及摘要失败拒绝。
+
+| 检查，Jobs 2（合同为 6） | 容器 / 入口秒数 | 证据 |
+| --- | --- | --- |
+| `docker-control-api` | 1.909 / 2.853 | `.tmp-regression-docker-3bf0fa46978644c19f1def470015d2eb` |
+| `docker-control-client` | 20.485 / 22.111 | `.tmp-regression-docker-a04456741c0a451a9e7ad65993b50f94` |
+| `docker-control-two-node-real` | 6.992 / 7.878 | `.tmp-regression-docker-4a32a7f6a9094cfb80468fdb572a93ba` |
+| `docker-permissions` | 2.609 / 3.604 | `.tmp-regression-docker-ddf00f82a16043ac8971707ea8692adc` |
+| `docker-control-state` | 26.213 / 27.187 | `.tmp-regression-docker-3c4df50ad4654d56b29cd72a38d0a45c` |
+| 最终 `docker-control-cli` | 9.798 / 11.339 | `.tmp-regression-docker-ba2e85de88bd4833969ab1a5e8da4245` |
+| `docker-control-two-deployment-real` | 257.354 / 258.568 | `.tmp-regression-docker-79560cf8930742dd887da94c0b9883b9` |
+| 最终 `docker-contracts`，44/44 | 303.394 / 304.342 | `.tmp-regression-docker-e4693adbbb904efd8728064350d59303` |
+
+全部 Linux amd64、`cache_hit: false`，复用工具镜像，不扩大三槽预算；
+最终完整排队 390 ms，44 分片按实际调度日志计数，不沿用续接时的 40 项预估。
+最终 CLI 与完整合同归档摘要相同，14 个本阶段文件逐一匹配完整快照；
+成功定向及真实部署的对应文件也逐一匹配。真实两个独立 daemon/netns 使用
+生产 CLI，随机挑战/登记清理、接入/幂等、实际流量、断网/冲突、
+健康/INT/TERM 恢复、凭据轮换和撤销全部通过。
+真实首次失败未有细分诊断，第二次确认 net-wireguard 误拒，修复后通过；
+旧合同快照主动结束 exit 137 不计成功，最终完整合同实际执行通过。
+
+本地 ops 离线复用依赖层，当前 6 文件镜像内摘要匹配，
+固定 `sha256:cb43e9f122f88eca1638364c971ec60db678362429f76752abc4b9902d4d9b43`；
+没有旧源码冒充当前输入。实现
+`4b3647f4 feat(docker): verify control sources with fresh nonce challenges`，
+本地 SSH 签名 G，未推送/发布；证据 `.tmp-control-challenge-stage-evidence.md`。
+清理本轮 34 个归档/清单共 146,990,909 字节、临时核验脚本与构建目录，
+保留 result/log、摘要、共享缓存及用户原有 8 个临时文件。
+日志轮转、独立 INPUT action/jail、事务菜单、SSH 和原生双架构/宿主验收
+仍待交付；本阶段命令不启用防护，5C 与总目标继续 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。
