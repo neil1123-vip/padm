@@ -113,11 +113,15 @@ tlsCertificateFilesUsable() {
         currentTime=$(date +%s) &&
         [[ "${startTime}" =~ ^-?[0-9]+$ && "${currentTime}" =~ ^[0-9]+$ ]] &&
         (( startTime <= currentTime )) || return 1
-    certDigest=$(openssl x509 -in "${certFile}" -pubkey -noout 2>/dev/null |
-        openssl pkey -pubin -outform DER 2>/dev/null |
-        openssl dgst -sha256 2>/dev/null) || return 1
-    keyDigest=$(openssl pkey -in "${keyFile}" -pubout -outform DER 2>/dev/null |
-        openssl dgst -sha256 2>/dev/null) || return 1
+    certDigest=$(set -o pipefail
+        openssl x509 -in "${certFile}" -pubkey -noout 2>/dev/null |
+            openssl pkey -pubin -outform DER 2>/dev/null |
+            openssl dgst -sha256 2>/dev/null
+    ) || return 1
+    keyDigest=$(set -o pipefail
+        openssl pkey -in "${keyFile}" -pubout -outform DER 2>/dev/null |
+            openssl dgst -sha256 2>/dev/null
+    ) || return 1
     [[ -n "${certDigest}" && "${certDigest}" == "${keyDigest}" ]]
 }
 

@@ -236,6 +236,17 @@ runEngineArgumentCase 2 engine-args-source-latest --source "${PROJECT_ROOT}" --r
 runEngineArgumentCase 13 engine-args-missing-directory --source "${TEST_ROOT}/missing-source"
 mkdir -- "${TEST_ROOT}/empty-source"
 runEngineArgumentCase 13 engine-args-empty-directory --source "${TEST_ROOT}/empty-source"
+(
+    find() {
+        if [[ "$*" == "${PHASE1_SOURCE_ROOT}/docker -type l -print -quit" ]]; then
+            return 17
+        fi
+        command find "$@"
+    }
+    export -f find
+    export PHASE1_SOURCE_ROOT="${PROJECT_ROOT}"
+    runEngineArgumentCase 13 engine-args-source-enumeration-failure --source "${PROJECT_ROOT}"
+)
 
 env \
     PHASE1_PROJECT_ROOT="${PROJECT_ROOT}" \

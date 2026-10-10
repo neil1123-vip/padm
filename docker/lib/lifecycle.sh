@@ -289,6 +289,7 @@ dockerRenewalScheduleInstall() {
     if dockerRenewalEnabled "${root}/secrets/renewal"; then
         dockerRenewalScheduleApply install
     else
+        [[ "$?" == 1 ]] || return 1
         dockerRenewalScheduleRemove
     fi
 }
@@ -1345,6 +1346,8 @@ dockerRollbackCommand() {
             bundlePath=$(dockerCurrentBundlePath) || return "${PADM_DOCKER_RC_BUNDLE}"
         fi
         dockerRenewalBundleCheck "${bundlePath}" || return "${PADM_DOCKER_RC_BUNDLE}"
+    else
+        [[ "$?" == 1 ]] || return "${PADM_DOCKER_RC_STATE}"
     fi
     dockerTrafficRollbackCheck "${backup}" || return "${PADM_DOCKER_RC_STATE}"
     dockerTrafficRuntimeCheck "$(jq -r '.core.type, (.core.secondary_type // empty)' "${backup}/deployment.json")" ||

@@ -251,6 +251,17 @@ runGitHubReleaseAssetDirectFallbackRegression() {
         unset -f command
         downloadGitHubReleaseAsset -P "${outputDir}" example/repo latest asset.tar.gz || return 1
         grep -qxF 'https://github.com/example/repo/releases/download/v2.0.0/asset.tar.gz' "${downloadLog}" || return 1
+        # 真实入口不启用 pipefail；摘要已输出后的工具失败也不能接受资产。
+        set +o pipefail
+        sha256sum() {
+            command sha256sum "$@" || return $?
+            return 17
+        }
+        if downloadGitHubReleaseAsset -P "${outputDir}" example/repo v1.2.5 asset.tar.gz; then
+            printf 'Release 摘要工具失败后仍接受资产\n' >&2
+            return 1
+        fi
+        [[ ! -e "${outputDir}/asset.tar.gz" ]] || return 1
     )
 }
 

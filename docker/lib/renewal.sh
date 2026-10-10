@@ -30,11 +30,13 @@ dockerRenewalCredentialsValidate() {
 }
 
 dockerRenewalRegistryValidate() {
-    local directory=$1 entry domain request provider
+    local directory=$1 entry domain request provider entries fileCount
     [[ ! -L "${directory}" ]] || return 1
     [[ -e "${directory}" ]] || return 0
     [[ -d "${directory}" && "$(stat -c '%u:%g:%a' "${directory}")" == 0:0:700 ]] || return 1
+    entries=$(find "${directory}" -mindepth 1 -maxdepth 1 -print) || return 1
     while IFS= read -r entry; do
+        [[ -n "${entry}" ]] || continue
         domain=${entry##*/}
         dockerDomainIsValid "${domain}" &&
             [[ -d "${entry}" && ! -L "${entry}" && "$(stat -c '%u:%g:%a' "${entry}")" == 0:0:700 ]] ||
@@ -54,36 +56,50 @@ dockerRenewalRegistryValidate() {
         ' "${request}" >/dev/null 2>&1 &&
             dockerEmailIsValid "$(jq -r '.email' "${request}")" || return 1
         provider=$(jq -r '.provider' "${request}") || return 1
+        fileCount=$(set -o pipefail
+            find "${entry}" -mindepth 1 -maxdepth 1 | wc -l
+        ) || return 1
         if [[ "${provider}" == standalone || "${provider}" == webroot ]]; then
-            [[ "$(find "${entry}" -mindepth 1 -maxdepth 1 | wc -l)" -eq 1 ]] || return 1
+            [[ "${fileCount}" -eq 1 ]] || return 1
         else
-            [[ "$(find "${entry}" -mindepth 1 -maxdepth 1 | wc -l)" -eq 2 &&
+            [[ "${fileCount}" -eq 2 &&
                 "$(stat -c '%u:%g:%a' "${entry}/credentials.env")" == 0:0:600 ]] &&
                 dockerRenewalCredentialsValidate "${entry}/credentials.env" || return 1
         fi
-    done < <(find "${directory}" -mindepth 1 -maxdepth 1 -print)
+    done <<<"${entries}"
 }
 
 dockerRenewalEnabled() {
-    local directory=$1 file
+    local directory=$1 file files enabled
     [[ -d "${directory}" ]] || return 1
+    # 1 表示未启用，2 表示读取失败，调用方不能据此删除已有调度。
+    files=$(find "${directory}" -mindepth 2 -maxdepth 2 -name request.json -print) || return 2
     while IFS= read -r file; do
-        jq -e '.enabled == true' "${file}" >/dev/null && return 0
-    done < <(find "${directory}" -mindepth 2 -maxdepth 2 -name request.json -print)
+        [[ -n "${file}" ]] || continue
+        enabled=$(jq -r '.enabled' "${file}") || return 2
+        case "${enabled}" in
+        true) return 0 ;;
+        false) ;;
+        *) return 2 ;;
+        esac
+    done <<<"${files}"
     return 1
 }
 
 dockerRenewalBundleCheck() {
-    local bundle=$1 root registry request schema=1 enabledSchema bundleSchema
+    local bundle=$1 root registry request requests schema=0 enabledSchema bundleSchema
     root=$(dockerInstallRoot) || return 1
     registry="${root}/secrets/renewal"
     dockerTrafficSafePath "${root}" "${registry}" &&
         dockerRenewalRegistryValidate "${registry}" || return 1
-    dockerRenewalEnabled "${registry}" || return 0
+    [[ -d "${registry}" ]] || return 0
+    requests=$(find "${registry}" -mindepth 2 -maxdepth 2 -name request.json -print) || return 1
     while IFS= read -r request; do
+        [[ -n "${request}" ]] || continue
         enabledSchema=$(jq -r 'if .enabled == true then .schema_version else 0 end' "${request}") || return 1
         [[ "${enabledSchema}" -le "${schema}" ]] || schema=${enabledSchema}
-    done < <(find "${registry}" -mindepth 2 -maxdepth 2 -name request.json -print)
+    done <<<"${requests}"
+    [[ "${schema}" != 0 ]] || return 0
     [[ -f "${bundle}/docker/lib/renewal.sh" && ! -L "${bundle}/docker/lib/renewal.sh" ]] &&
         bundleSchema=$(sed -nE 's/^readonly PADM_DOCKER_RENEWAL_SCHEMA=([1-9][0-9]{0,5})$/\1/p' "${bundle}/docker/lib/renewal.sh") &&
         [[ "${bundleSchema}" =~ ^[1-9][0-9]{0,5}$ && "${bundleSchema}" -ge "${schema}" ]] || {
@@ -261,14 +277,22 @@ dockerRenewalChange() {
 }
 
 dockerRenewalRun() {
-    local root registry request domain email provider credentials image status=0 result
+    local root registry request requests domain email provider credentials image status=0 result
     root=$(dockerInstallRoot) || return 1
     registry="${root}/secrets/renewal"
     dockerTrafficSafePath "${root}" "${registry}" &&
         dockerRenewalRegistryValidate "${registry}" || return "${PADM_DOCKER_RC_STATE}"
-    dockerRenewalEnabled "${registry}" || return 0
+    dockerRenewalEnabled "${registry}" || {
+        status=$?
+        [[ "${status}" == 1 ]] && return 0
+        return "${PADM_DOCKER_RC_STATE}"
+    }
+    requests=$(set -o pipefail
+        find "${registry}" -mindepth 2 -maxdepth 2 -name request.json -print | LC_ALL=C sort
+    ) || return "${PADM_DOCKER_RC_STATE}"
     image=$(dockerResolveOpsImage) || return "${PADM_DOCKER_RC_STATE}"
     while IFS= read -r request; do
+        [[ -n "${request}" ]] || continue
         jq -e '.enabled == true' "${request}" >/dev/null || continue
         domain=$(jq -r '.domain' "${request}")
         email=$(jq -r '.email' "${request}")
@@ -294,12 +318,12 @@ dockerRenewalRun() {
             -z "${DOCKER_ACME_WEBROOT:-}" ]] ||
             return "${PADM_DOCKER_RC_STATE}"
         dockerCleanupTlsCandidate || return "${PADM_DOCKER_RC_STATE}"
-    done < <(find "${registry}" -mindepth 2 -maxdepth 2 -name request.json -print | LC_ALL=C sort)
+    done <<<"${requests}"
     return "${status}"
 }
 
 dockerRenewalCommand() {
-    local action=${1:-status} domain= email= provider= credentials= root registry request
+    local action=${1:-status} domain= email= provider= credentials= root registry request requests
     [[ "$#" -eq 0 ]] || shift
     case "${action}" in
     enable|disable)
@@ -349,9 +373,13 @@ dockerRenewalCommand() {
         ;;
     status)
         [[ -d "${registry}" ]] || { printf '自动续期未启用\n'; return 0; }
+        requests=$(set -o pipefail
+            find "${registry}" -mindepth 2 -maxdepth 2 -name request.json -print | LC_ALL=C sort
+        ) || return "${PADM_DOCKER_RC_STATE}"
         while IFS= read -r request; do
+            [[ -n "${request}" ]] || continue
             jq -r '"domain=\(.domain) enabled=\(.enabled) provider=\(.provider)"' "${request}" || return 1
-        done < <(find "${registry}" -mindepth 2 -maxdepth 2 -name request.json -print | LC_ALL=C sort)
+        done <<<"${requests}"
         ;;
     esac
 }
