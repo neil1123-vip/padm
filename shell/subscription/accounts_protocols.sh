@@ -251,7 +251,10 @@ showVlessRealityAccountsFromConfig() (
         fi
         realityVisionPort=$(corePortSubscriptionPort "${entryPort}" "${realityVisionPort}") || return 1
     fi
-    [[ "${core}" == "2" ]] && usersFilter='.inbounds[0].users'
+    if [[ "${core}" == "2" ]]; then
+        jq -e '.inbounds[0].tls.server_name | . == null or (type == "string" and (any(explode[]; . < 32 or . == 127) | not))' "${configFile}" >/dev/null || return 1
+        usersFilter='.inbounds[0].users'
+    fi
     jq -c "${usersFilter} | if type == \"array\" then .[] else error(\"invalid clients\") end" "${configFile}" | while read -r user; do
             local email accountId profile
             profile=$(subscriptionAccountProfile "${user}") || return 1

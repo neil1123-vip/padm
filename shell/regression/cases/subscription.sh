@@ -830,6 +830,24 @@ EOF
     updateRoutingJsonConfig "${configFile}" '.inbounds[0].streamSettings.realitySettings |= {serverNames:["sni.example.com"],publicKey:"42",mldsa65Verify:""} | .inbounds[0].settings.clients[0].email = "reality-string-key"' || return 1
     showVlessRealityXHTTPAccounts >/dev/null || return 1
     grep -qx '      public-key: "42"' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/reality-string-key" || return 1
+    (
+        local coreInstallType=2 singBoxVLESSRealityVisionSNI singBoxVLESSRealityPublicKey=pubkey
+        local configFile="${TMP_DIR}/singbox-vision-boundary.json" value account index=0
+        for value in '42' '"sni.example.com\n"'; do
+            index=$((index + 1))
+            account="singbox-vision-sni-${index}"
+            jq -n --arg email "${account}" --argjson sni "${value}" \
+                '{inbounds:[{users:[{name:$email,uuid:"uuid"}],tls:{server_name:$sni}}]}' >"${configFile}" || return 1
+            singBoxVLESSRealityVisionSNI=$(jq -r '.inbounds[0].tls.server_name' "${configFile}") || return 1
+            if showVlessRealityAccountsFromConfig 2 "${configFile}" 443 >/dev/null 2>&1 ||
+                [[ -e "${SUBSCRIBE_CAPTURE_DIR}/default/${account}" || -e "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/${account}" ||
+                    -e "${SUBSCRIBE_CAPTURE_DIR}/sing-box/${account}" ]]; then
+                printf 'assert-fail:singbox-vision-sni:%s\n' "${value}" >&2
+                failed=1
+            fi
+        done
+        [[ "${failed}" -eq 0 ]]
+    ) || failed=1
     configPath="${TMP_DIR}/missing-reality-output-config/"
     serializeVlessRealityVisionLink() { return 1; }
     serializeVlessRealityGrpcLink() { return 1; }
