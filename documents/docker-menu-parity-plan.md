@@ -3133,6 +3133,56 @@ probe 临时目录删除失败返回 15、释放锁失败返回 12。
 日志轮转、独立 INPUT action/jail、事务菜单、SSH 和原生双架构/宿主验收
 仍待交付；本阶段命令不启用防护，5C 与总目标继续 active。
 
+#### 5C.7d 控制认证日志在线手动轮转
+
+新增 `control log-rotate [--yes]` 和控制菜单“手动轮转认证日志”，菜单同时
+接入已有“验证 Peer 来源”；直接调用后端，只确认一次，取消/EOF/失败以及
+INT 返回、TERM 退出由现有 PTY/信号合同覆盖。新增固定 root:10001 / 0640
+普通单链接 `auth.lock`，API 只读打开；共享锁覆盖安全重开、追加、同步和关闭，
+root 排他锁进行轮转。锁等待最多 10 秒，取得后重核父目录及锁 inode。
+
+`auth.log` 达到 10 MiB 时才轮转，固定保留 `.1`、`.2` 两份历史；
+不重启 API、不用 copytruncate、不更换或轮转 `source.receipt`。
+私有准备目录保存新 leaf 和旧 `.2`，INT/TERM 屏蔽覆盖移名、同步、逆序恢复及
+清理；失败按实际 inode 回滚，陌生文件或残留保留并拒绝接管。
+四代完整受管编排精确兼容；旧恢复保留参数，不给无协作锁部署开放轮转。
+活动或陌生来源登记拒绝轮转，操作前后复核代次、配置和 receipt inode/hash。
+生产 helper 为 root:10001、只读根、仅 CHOWN、无网络、日志驱动 none。
+CLI 后台启动并等待 terminal；非 force 移除成功或确认已不存在后才释放部署锁。
+复审修复不受支持的 `docker start --sig-proxy` 参数及 inspect 被中断时提前释锁。
+daemon 不可用时持锁等待恢复，不强杀根端事务。
+
+| 检查，Jobs 2（合同为 6） | 容器 / 入口秒数 | 证据 |
+| --- | --- | --- |
+| `docker-control-api` | 2.334 / 3.295 | `.tmp-regression-docker-b229f9130c014e26a2193e21cce2fe27` |
+| `docker-permissions` | 3.623 / 4.551 | `.tmp-regression-docker-1103646899ac4a4bb1e1719ed2ef601c` |
+| `docker-control-state` | 39.096 / 40.040 | `.tmp-regression-docker-3fdf3ed7ae7a4a819fef0d04a97a0c03` |
+| 最终 `docker-control-cli` | 9.746 / 10.655 | `.tmp-regression-docker-0e7fc7757d0b45ecb434195f857161de` |
+| `docker-menu`（含 PTY） | 48.496 / 49.524 | `.tmp-regression-docker-3200f06b2f074ee88a64d5206d595773` |
+| `docker-control-two-node-real` | 7.269 / 8.222 | `.tmp-regression-docker-44c9b81621d6452580c1a9fc25681481` |
+| 最终 `docker-control-two-deployment-real` | 240.047 / 240.999 | `.tmp-regression-docker-53af9774fdc34a8e807e835964311933` |
+| `docker-contracts`，44/44 | 285.346 / 288.409 | `.tmp-regression-docker-577a826204a8418097d022457c0fdabc` |
+
+全部 Linux amd64、`cache_hit: false`，复用工具镜像，三槽预算不变；
+合同排队 407 ms，入口比 7c 少 15.933 秒，不据单次结果扩大并发。
+真实 WG 让 30 次 Peer 请求与轮转并行，持久日志和 stdout 逐字一致；
+真实双 Compose 使用生产 CLI，锁内确证等待、helper 最小权限、归档完整、
+receipt 不变、服务 CID/StartedAt 不变、续写及轮转后新 nonce 见证均通过。
+首次真实失败为观察短命 helper 的 ps/inspect 竞态；只忽略已消失对象，
+其它错误仍拒绝，修正后真实 selector 通过。该夹具不在合同 44 个子项内，
+不重复已稳定合同；14 文件匹配合同快照，最终真实夹具及 4 个生产文件匹配
+真实快照，其余成功定向相关文件也逐一核验。
+
+ops 离线复用依赖，当前 6 文件镜像内摘要匹配，固定
+`sha256:34d48510ed0d080590b72c40e55e958d02453b7fcc9858d9718171c57f95c9a1`。
+实现 `6c5755f6 feat(docker): rotate control access logs safely online`，
+本地 SSH 签名 G，未推送/发布；详细证据 `.tmp-control-rotation-stage-evidence.md`。
+提交后摘要再次匹配；清理 22 个归档/清单共 96,418,991 字节及临时核验/构建文件，
+保留 result/log、摘要、共享缓存和用户原有 8 个临时文件。
+自动调度未实现，10 MiB 为手动触发阈值而非实时大小上限；SIGKILL/断电残留
+仍须人工核对。独立 INPUT action/jail、事务菜单、SSH、原生宿主与双架构
+验收仍待交付，5C 和总目标 active，本阶段不启用控制面防护。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。
