@@ -409,6 +409,7 @@ dockerRestoreInstallTransaction() {
     local status=0
     [[ "${DOCKER_INSTALL_TRANSACTION_ACTIVE:-0}" == 1 ]] || return 0
     root=$(dockerInstallRoot) || return 1
+    dockerCleanupBundleLinkTemp || status=1
     dockerCleanupInstallCliTemp || status=1
     previousTarget=${DOCKER_INSTALL_PREVIOUS_BUNDLE_TARGET:-}
     expectedTarget=${DOCKER_INSTALL_BUNDLE_TARGET:-}
@@ -1363,6 +1364,7 @@ dockerCommandInterrupted() {
     dockerRestoreInstallTransaction || true
     dockerSetupCleanup || true
     dockerCleanupStateInitialization || true
+    dockerCleanupBundleLinkTemp || true
     dockerReleaseDeploymentLock || true
     dockerCleanupStagedBundle || true
     dockerManifestCleanup || true
@@ -1443,6 +1445,7 @@ dockerMain() {
     if [[ "${command}" == install && "${status}" -ne 0 ]]; then
         dockerRestoreInstallTransaction || true
     fi
+    dockerCleanupBundleLinkTemp || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_BUNDLE}
     dockerReleaseDeploymentLock || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_LOCK}
     dockerCleanupStagedBundle || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_BUNDLE}
     dockerManifestCleanup || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_MANIFEST}

@@ -1423,7 +1423,9 @@ downloadFileOptionHasValue() {
 }
 
 downloadUrlToFileBounded() {
-    padmRunCancelableCommand downloadUrlToFileBoundedApply "$@"
+    local maxTime=${4:-30}
+    [[ "${maxTime}" =~ ^[1-9][0-9]{0,8}$ ]] || return 1
+    padmRunCancelableCommand --timeout "${maxTime}" downloadUrlToFileBoundedApply "$@"
 }
 
 downloadUrlToFileBoundedApply() {

@@ -205,6 +205,21 @@ env \
         [[ "$actual" -eq 10 ]]
     ' || fail 'native installation conflict was not rejected before Docker bootstrap'
 
+NATIVE_RESIDUE_PROMPT_ROOT="${TEST_ROOT}/native-residue-prompt"
+NATIVE_RESIDUE_ENGINE_MARKER="${TEST_ROOT}/native-residue-engine-called"
+mkdir -p "${NATIVE_RESIDUE_PROMPT_ROOT}"
+printf 'keep\n' >"${NATIVE_RESIDUE_PROMPT_ROOT}/residue"
+env PHASE1_PROJECT_ROOT="${PROJECT_ROOT}" PADM_NATIVE_INSTALL_DIR="${NATIVE_RESIDUE_PROMPT_ROOT}" \
+    PHASE1_ENGINE_MARKER="${NATIVE_RESIDUE_ENGINE_MARKER}" bash -u -c '
+        source "$PHASE1_PROJECT_ROOT/install-docker.sh"
+        dockerEntryDockerAvailable() { return 1; }
+        dockerEntryInstallDockerEngine() { : >"$PHASE1_ENGINE_MARKER"; }
+        actual=0
+        dockerEntryEnsureDockerForInstall <<<yes || actual=$?
+        [[ "$actual" == 10 && ! -e "$PHASE1_ENGINE_MARKER" &&
+            "$(<"$PADM_NATIVE_INSTALL_DIR/residue")" == keep ]]
+    ' || fail 'unknown native residue reached Docker engine installation'
+
 copyBundleFixture() {
     local target=$1
     mkdir -p "${target}/shell/core" "${target}/documents"
@@ -401,7 +416,40 @@ done
     if dockerValidateBundle "${validationRoot}"; then
         fail 'bundle with a missing file was accepted'
     fi
+    (
+        cd -- "${validationRoot}"
+        sha256sum -- "${PADM_DOCKER_BUNDLE_REF}" >"${manifest}"
+        if dockerValidateBundle "${validationRoot}"; then
+            fail 'incomplete bundle with a matching partial manifest was accepted'
+        fi
+    ) || fail 'partial manifest completeness check failed'
+    cp -- "${TEST_ROOT}/bundle-manifest" "${manifest}"
     cp -- "${DOCKER_ROOT}/bundle/install-docker.sh" "${validationRoot}/install-docker.sh"
+    (
+        rm -f -- "${validationRoot}/docker/lib/bootstrap.sh"
+        dockerWriteBundleManifest "${validationRoot}" || fail 'incomplete module manifest fixture failed'
+        if dockerValidateBundle "${validationRoot}"; then
+            fail 'bundle missing a required module with a matching manifest was accepted'
+        fi
+    ) || fail 'required module completeness check failed'
+    cp -- "${DOCKER_ROOT}/bundle/docker/lib/bootstrap.sh" "${validationRoot}/docker/lib/bootstrap.sh"
+    cp -- "${TEST_ROOT}/bundle-manifest" "${manifest}"
+    (
+        find() {
+            if [[ "$*" == "${validationRoot}/docker -type f -print" ]]; then
+                return 1
+            fi
+            command find "$@"
+        }
+        dockerBundlePayloadPaths "${validationRoot}" >"${referenceManifest}" || true
+        printf '%s\n' "${PADM_DOCKER_BUNDLE_REF}" >>"${referenceManifest}"
+        dockerBundleHashPaths "${validationRoot}" "${referenceManifest}" "${manifest}" ||
+            fail 'enumeration failure partial manifest fixture failed'
+        if dockerValidateBundle "${validationRoot}"; then
+            fail 'bundle file enumeration failure with a matching partial manifest was accepted'
+        fi
+    ) || fail 'bundle enumeration failure propagation failed'
+    cp -- "${TEST_ROOT}/bundle-manifest" "${manifest}"
     head -n 1 "${TEST_ROOT}/bundle-manifest" >>"${manifest}"
     if dockerValidateBundle "${validationRoot}"; then
         fail 'bundle with a duplicate manifest entry was accepted'
@@ -453,6 +501,67 @@ for signal in INT TERM; do
         ! -e "${DOCKER_ROOT}/locks/deployment.lock" ]] ||
         fail "stage-copy-${signal}: interrupted staging left temporary bundle or changed state"
 done
+
+# 激活临时链接创建后中断，首装撤回指针，重装保留旧控制版本。
+for signal in INT TERM; do
+    signalStatus=130
+    [[ "${signal}" != TERM ]] || signalStatus=143
+    for installKind in first repeat; do
+        TRANSACTION_ROOT="${TEST_ROOT}/install-bundle-temp-${signal}-${installKind}"
+        TRANSACTION_BIN="${TEST_ROOT}/install-bundle-temp-${signal}-${installKind}-bin"
+        previousTarget=
+        if [[ "${installKind}" == repeat ]]; then
+            runControl 0 "install-bundle-temp-${signal}-prepare" "${TRANSACTION_ROOT}" \
+                "${NATIVE_ROOT}" "${TRANSACTION_BIN}" install --source "${NO_COMPOSE_SOURCE}"
+            previousTarget=$(readlink "${TRANSACTION_ROOT}/bundle")
+            printf 'keep\n' >"${TRANSACTION_ROOT}/data/sentinel"
+        fi
+        (
+            ln() {
+                command ln "$@" || return $?
+                if [[ "${*: -1}" == "${PADM_DOCKER_INSTALL_DIR}/.bundle-link."* ]]; then
+                    kill -"${PHASE1_BUNDLE_TEMP_SIGNAL}" "${BASHPID:-$$}"
+                fi
+            }
+            export -f ln
+            export PHASE1_BUNDLE_TEMP_SIGNAL=${signal}
+            runControl "${signalStatus}" "install-bundle-temp-${signal}-${installKind}" \
+                "${TRANSACTION_ROOT}" "${NATIVE_ROOT}" "${TRANSACTION_BIN}" \
+                install --source "${NO_COMPOSE_SOURCE}" --ref aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        )
+        [[ ! -e "${TRANSACTION_ROOT}/locks/deployment.lock" &&
+            -z "$(find "${TRANSACTION_ROOT}/.bundles" -maxdepth 1 -name '.stage.*' -print)" &&
+            -z "$(find "${TRANSACTION_ROOT}" -maxdepth 1 -name '.bundle-link.*' -print)" ]] ||
+            fail "install-bundle-temp-${signal}-${installKind}: interrupted activation left temporary state"
+        if [[ "${installKind}" == repeat ]]; then
+            [[ "$(readlink "${TRANSACTION_ROOT}/bundle")" == "${previousTarget}" &&
+                "$(<"${TRANSACTION_ROOT}/data/sentinel")" == keep &&
+                "$(readlink "${TRANSACTION_BIN}/padm-docker")" == "${TRANSACTION_ROOT}/bundle/install-docker.sh" ]] ||
+                fail "install-bundle-temp-${signal}: interrupted activation changed the old deployment"
+        else
+            [[ ! -e "${TRANSACTION_ROOT}/bundle" && ! -L "${TRANSACTION_ROOT}/bundle" &&
+                ! -e "${TRANSACTION_BIN}/padm-docker" ]] ||
+                fail "install-bundle-temp-${signal}: interrupted first activation kept installed state"
+        fi
+    done
+done
+
+# 同名普通文件只在本次测试根创建，激活不能删除未知内容。
+TRANSACTION_ROOT="${TEST_ROOT}/install-bundle-temp-conflict"
+TRANSACTION_BIN="${TEST_ROOT}/install-bundle-temp-conflict-bin"
+runControl 0 install-bundle-temp-conflict-prepare "${TRANSACTION_ROOT}" "${NATIVE_ROOT}" \
+    "${TRANSACTION_BIN}" install --source "${NO_COMPOSE_SOURCE}"
+env PHASE1_PROJECT_ROOT="${PROJECT_ROOT}" PADM_DOCKER_INSTALL_DIR="${TRANSACTION_ROOT}" \
+    PHASE1_BUNDLE_TARGET="$(readlink "${TRANSACTION_ROOT}/bundle")" bash -u -c '
+        source "$PHASE1_PROJECT_ROOT/install-docker.sh" help
+        rm -f -- "$PADM_DOCKER_INSTALL_DIR/bundle"
+        temp="$PADM_DOCKER_INSTALL_DIR/.bundle-link.${BASHPID:-$$}"
+        printf "keep\n" >"$temp"
+        status=0
+        dockerActivateBundle "$PHASE1_BUNDLE_TARGET" || status=$?
+        [[ "$status" == 1 && -f "$temp" && "$(<"$temp")" == keep &&
+            ! -L "$PADM_DOCKER_INSTALL_DIR/bundle" ]]
+    ' || fail 'install-bundle-temp-conflict: activation removed an unknown temporary file'
 
 # CLI 完成前收到信号，首装撤销本次指针，重装恢复旧控制版本。
 for signal in INT TERM; do
