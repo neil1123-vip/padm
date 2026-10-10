@@ -2291,6 +2291,31 @@ runCoreInstallSignalRollbackRegression() (
     [[ ! -e "${fixture}/normal.log.progress" && -z "${PADM_EXIT_ROLLBACKS[*]}" ]]
 
     (
+        # 主命令失败后不能放任后台后代与外层回滚同时运行。
+        local failureRunner failureChild failureState failureStatus failureCount=0
+        for failureRunner in cancelable timed package; do
+            printf -v commandString \
+                '(trap "" TERM; printf %%s "$BASHPID" >%q; exec sleep 4) & while [[ ! -s %q ]]; do sleep 0.01; done; exit 7' \
+                "${fixture}/${failureRunner}.pid" "${fixture}/${failureRunner}.pid"
+            failureStatus=0
+            case "${failureRunner}" in
+            cancelable) padmRunCancelableCommand bash -lc "${commandString}" || failureStatus=$? ;;
+            timed) runWithTimeout 10 "${commandString}" || failureStatus=$? ;;
+            package) runPackageCommandWithProgress failure-test 10 "${commandString}" "${fixture}/failure.log" || failureStatus=$? ;;
+            esac
+            failureChild=$(<"${fixture}/${failureRunner}.pid")
+            failureState=$(ps -o stat= -p "${failureChild}" 2>/dev/null || true)
+            if [[ "${failureStatus}" != 7 || "${failureState}" == *[RS]* ]]; then
+                printf 'failure descendant escaped: %s status=%s state=%s\n' \
+                    "${failureRunner}" "${failureStatus}" "${failureState}" >&2
+                failureCount=$((failureCount + 1))
+                kill -KILL "${failureChild}" 2>/dev/null || true
+            fi
+        done
+        [[ "${failureCount}" == 0 ]]
+    )
+
+    (
         # 无 timeout 工具或命令忽略 TERM 时，安装预算仍须收回整个进程组。
         local timeoutMode timeoutStatus timeoutStarted
         command() {

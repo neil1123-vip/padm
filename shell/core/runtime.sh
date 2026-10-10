@@ -756,7 +756,11 @@ padmRunCancelableCommand() {
             sleep 0.1
         done
     fi
-    [[ "${padmCommandStatus}" != 0 ]] || wait "${padmCommandPid}" || padmCommandStatus=$?
+    [[ "${padmCommandStatus}" != 0 ]] || wait "${padmCommandPid}" || {
+        padmCommandStatus=$?
+        # 主命令失败也必须收回后代，避免它们与外层恢复或重试并行写入。
+        padmStopCommandGroup "${padmCommandPid}"
+    }
     PADM_CANCELABLE_COMMAND[active]=false
     unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
     return "${padmCommandStatus}"
