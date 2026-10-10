@@ -117,14 +117,13 @@ listRegressionDockerContractsFastChildSelectors() {
 }
 
 listRegressionDockerContractsFastHeavyChildSelectors() {
-    printf '%s\n' docker-sites docker-entry-port-alias
+    printf '%s\n' docker-sites docker-entry-port-alias docker-menu
 }
 
 listRegressionDockerContractsFastRestChildSelectors() {
     # 按云端实测长任务优先，站点与入口别名由另一个隔离分片执行。
     printf '%s\n' \
         docker-phase1 \
-        docker-menu \
         docker-control-state \
         docker-control-client \
         docker-tproxy-ownership \
@@ -175,6 +174,22 @@ listRegressionDockerGeoChildSelectors() {
 listRegressionDockerContractsRealityChildSelectors() {
     printf '%s\n' docker-reality-parameters docker-reality-targets-direct \
         docker-reality-targets-selection docker-reality-target-library
+}
+
+listRegressionDockerContractsRealityMetadataChildSelectors() {
+    printf '%s\n' docker-reality-parameters docker-reality-target-library
+}
+
+listRegressionDockerContractsSetupBasicChildSelectors() {
+    printf '%s\n' docker-setup-core docker-setup-encrypted-tcp
+}
+
+listRegressionDockerContractsSystemLightChildSelectors() {
+    printf '%s\n' docker-phase4-lifecycle docker-phase6
+}
+
+listRegressionDockerRoutingCoreNetworkChildSelectors() {
+    printf '%s\n' docker-routing-core-contracts docker-routing-core-network-lifecycle
 }
 
 runDockerTrafficRegression() {
@@ -522,6 +537,14 @@ registerRegressionParallelSelectorList docker-contracts-system runFrameworkParal
     "${TMP_DIR}/docker-contracts-system-parallel-${BASHPID:-$$}" listRegressionDockerContractsSystemChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts-reality runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-contracts-reality-parallel-${BASHPID:-$$}" listRegressionDockerContractsRealityChildSelectors 2
+registerRegressionParallelSelectorList docker-contracts-reality-metadata runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-contracts-reality-metadata-parallel-${BASHPID:-$$}" listRegressionDockerContractsRealityMetadataChildSelectors 2
+registerRegressionParallelSelectorList docker-contracts-setup-basic runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-contracts-setup-basic-parallel-${BASHPID:-$$}" listRegressionDockerContractsSetupBasicChildSelectors 2
+registerRegressionParallelSelectorList docker-contracts-system-light runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-contracts-system-light-parallel-${BASHPID:-$$}" listRegressionDockerContractsSystemLightChildSelectors 2
+registerRegressionParallelSelectorList docker-routing-core-network runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-routing-core-network-parallel-${BASHPID:-$$}" listRegressionDockerRoutingCoreNetworkChildSelectors 2
 registerRegressionParallelSelectorList fast-only-output runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/fast-only-output-parallel-${BASHPID:-$$}" listRegressionFastOnlyOutputChildSelectors
 registerRegressionParallelSelectorList fast-only runFrameworkParallelRegressionSelectorList \

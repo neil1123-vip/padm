@@ -4087,6 +4087,22 @@ runInstallModuleLockSerializesLoadRegression() (
     wait "${secondPid}"
     [[ -e "${secondReady}" && ! -e "${SCRIPT_MODULE_LOCK_DIR}" ]]
 
+    (
+        SCRIPT_MODULE_LOCK_DIR="${root}/released-during-check"
+        mkdir -- "${SCRIPT_MODULE_LOCK_DIR}"
+        released=false
+        mkdir() {
+            if [[ "$*" == "-- ${SCRIPT_MODULE_LOCK_DIR}" && "${released}" == false ]]; then
+                released=true
+                rmdir -- "${SCRIPT_MODULE_LOCK_DIR}"
+                return 1
+            fi
+            command mkdir "$@"
+        }
+        scriptModuleLockAcquire && scriptModuleLockRelease || exit 1
+        [[ ! -e "${SCRIPT_MODULE_LOCK_DIR}" ]]
+    )
+
     # 残留锁无法删除时仍须返回超时，不能跳过 deadline 无限重试。
     export -f scriptModuleLockAcquire scriptIsSafeAbsolutePath
     export SCRIPT_MODULE_LOCK_DIR PADM_SCRIPT_MODULE_LOCK_TIMEOUT=0
@@ -4097,6 +4113,32 @@ runInstallModuleLockSerializesLoadRegression() (
     touch -d '10 seconds ago' "${SCRIPT_MODULE_LOCK_DIR}"
     regressionExpectStatus 1 timeout 2 bash -c scriptModuleLockAcquire
     [[ -d "${SCRIPT_MODULE_LOCK_DIR}/unexpected" ]]
+
+    local boundary failures=0
+    for boundary in acquire release; do
+        if (
+            local external="${root}/external-${boundary}"
+            local expectedPid=2147483647 status=0
+            SCRIPT_MODULE_LOCK_DIR="${root}/linked-${boundary}"
+            [[ "${boundary}" != release ]] || expectedPid=${BASHPID:-$$}
+            mkdir -- "${external}"
+            printf '%s\n' "${expectedPid}" >"${external}/pid"
+            ln -s "${external}" "${SCRIPT_MODULE_LOCK_DIR}"
+            if [[ "${boundary}" == acquire ]]; then
+                scriptModuleLockAcquire || status=$?
+            else
+                scriptModuleLockRelease || status=$?
+            fi
+            [[ "${status}" == 1 && -L "${SCRIPT_MODULE_LOCK_DIR}" && -f "${external}/pid" ]] &&
+                [[ "$(<"${external}/pid")" == "${expectedPid}" ]]
+        ); then
+            :
+        else
+            printf 'install-module-lock-boundary-fail: symlink-%s\n' "${boundary}" >&2
+            failures=$((failures + 1))
+        fi
+    done
+    [[ "${failures}" == 0 ]]
 )
 
 runInstallRefreshRejectsEntryMismatchRegression() (

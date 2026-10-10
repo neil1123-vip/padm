@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-SCRIPT_VERSION="3.23.0"
+SCRIPT_VERSION="3.24.0"
 
 commitRequiresMajorBump() {
     local commitMessage=$1

@@ -134,10 +134,11 @@ dockerBundleSourceDigest() {
         rm -f -- "${pathList}" "${hashList}"
         return 1
     }
-    digest=$(sha256sum -- "${hashList}" | cut -d ' ' -f 1) || {
+    digest=$(sha256sum -- "${hashList}") || {
         rm -f -- "${pathList}" "${hashList}"
         return 1
     }
+    digest=${digest%% *}
     rm -f -- "${pathList}" "${hashList}"
     [[ "${digest}" =~ ^[0-9a-f]{64}$ ]] || return 1
     printf 'sha256:%s\n' "${digest}"
@@ -436,7 +437,8 @@ dockerActivateStagedBundle() {
     dockerManagedPathIsSafe "${root}" "${stageDir}" && [[ "${candidate}" == "${stageDir}/bundle" ]] || return 1
     dockerValidateBundle "${candidate}" || return 1
     manifest="${candidate}/${PADM_DOCKER_BUNDLE_MANIFEST}"
-    digest=$(sha256sum "${manifest}" | cut -d ' ' -f 1) || return 1
+    digest=$(sha256sum -- "${manifest}") || return 1
+    digest=${digest%% *}
     [[ "${digest}" =~ ^[0-9a-f]{64}$ ]] || return 1
     releaseDir="${root}/.bundles/${digest}"
     if [[ -e "${releaseDir}" || -L "${releaseDir}" ]]; then
@@ -444,10 +446,11 @@ dockerActivateStagedBundle() {
             dockerRemoveManagedTree "${root}" "${stageDir}" || true
             return 1
         }
-        existingDigest=$(sha256sum "${releaseDir}/${PADM_DOCKER_BUNDLE_MANIFEST}" | cut -d ' ' -f 1) || {
+        existingDigest=$(sha256sum -- "${releaseDir}/${PADM_DOCKER_BUNDLE_MANIFEST}") || {
             dockerRemoveManagedTree "${root}" "${stageDir}" || true
             return 1
         }
+        existingDigest=${existingDigest%% *}
         [[ "${existingDigest}" == "${digest}" ]] || {
             dockerRemoveManagedTree "${root}" "${stageDir}" || true
             return 1
@@ -464,13 +467,15 @@ dockerActivateStagedBundle() {
 }
 
 dockerBundlePathForTarget() {
-    local target=$1 root digest
+    local target=$1 root digest manifestDigest
     root=$(dockerInstallRoot) || return 1
     [[ "${target}" =~ ^[.]bundles/([0-9a-f]{64})$ ]] || return 1
     digest=${BASH_REMATCH[1]}
     [[ -d "${root}/.bundles" && ! -L "${root}/.bundles" &&
         -d "${root}/${target}" && ! -L "${root}/${target}" ]] || return 1
-    [[ "$(sha256sum "${root}/${target}/${PADM_DOCKER_BUNDLE_MANIFEST}" | cut -d ' ' -f 1)" == "${digest}" ]] || return 1
+    manifestDigest=$(sha256sum -- "${root}/${target}/${PADM_DOCKER_BUNDLE_MANIFEST}") || return 1
+    manifestDigest=${manifestDigest%% *}
+    [[ "${manifestDigest}" == "${digest}" ]] || return 1
     dockerValidateBundle "${root}/${target}" || return 1
     printf '%s\n' "${root}/${target}"
 }

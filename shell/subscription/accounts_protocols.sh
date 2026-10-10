@@ -60,7 +60,7 @@ showVlessWsAccounts() (
             while read -r line; do
                 subscribeAccountTitle "${email}${count}"
                 if [[ -n "${line}" ]]; then
-                    defaultBase64Code vlessws "${vlessWSPort}" "${email}${count}" "${accountId}" "${line}" "${path}" || return 1
+                    defaultBase64Code vlessws "${vlessWSPort}" "${email}" "${accountId}" "${line}" "${path}" "${email}${count}" || return 1
                     count=$((count + 1))
                     echo
                 fi
@@ -83,7 +83,7 @@ showTrojanGrpcAccounts() (
                 subscribeAccountTitle "${email}${count}"
                 echo
                 if [[ -n "${line}" ]]; then
-                    defaultBase64Code trojangrpc "${currentDefaultPort}" "${email}${count}" "${password}" "${line}" || return 1
+                    defaultBase64Code trojangrpc "${currentDefaultPort}" "${email}" "${password}" "${line}" "" "${email}${count}" || return 1
                     count=$((count + 1))
                 fi
             done < <(echo "${currentCDNAddress}" | tr ',' '\n')
@@ -118,7 +118,7 @@ showVmessWsAccounts() (
                 subscribeAccountTitle "${email}${count}"
                 echo
                 if [[ -n "${line}" ]]; then
-                    defaultBase64Code vmessws "${vmessPort}" "${email}${count}" "${accountId}" "${line}" "${path}" || return 1
+                    defaultBase64Code vmessws "${vmessPort}" "${email}" "${accountId}" "${line}" "${path}" "${email}${count}" || return 1
                     count=$((count + 1))
                 fi
             done < <(echo "${currentCDNAddress}" | tr ',' '\n')
@@ -174,7 +174,7 @@ showVlessGrpcAccounts() (
                 subscribeAccountTitle "${email}${count}"
                 echo
                 if [[ -n "${line}" ]]; then
-                    defaultBase64Code vlessgrpc "${currentDefaultPort}" "${email}${count}" "${accountId}" "${line}" || return 1
+                    defaultBase64Code vlessgrpc "${currentDefaultPort}" "${email}" "${accountId}" "${line}" "" "${email}${count}" || return 1
                     count=$((count + 1))
                 fi
             done < <(echo "${currentCDNAddress}" | tr ',' '\n')
@@ -435,7 +435,7 @@ showVmessHTTPUpgradeAccountsFromConfig() (
                 subscribeAccountTitle "${email}${count}"
                 echo
                 if [[ -n "${line}" ]]; then
-                    defaultBase64Code vmessHTTPUpgrade "${vmessHTTPUpgradePort}" "${email}${count}" "${accountId}" "${line}" "${path}" || return 1
+                    defaultBase64Code vmessHTTPUpgrade "${vmessHTTPUpgradePort}" "${email}" "${accountId}" "${line}" "${path}" "${email}${count}" || return 1
                     count=$((count + 1))
                 fi
             done < <(echo "${currentCDNAddress}" | tr ',' '\n')
@@ -472,7 +472,7 @@ showVlessRealityXHTTPAccounts() (
                     subscribeOutputSafeHostValue "${line}" || return 1
                 fi
                 if [[ -n "${line}" ]]; then
-                    defaultBase64Code vlessXHTTP "${xhttpPort}" "${email}${count}" "${accountId}" "${line}" "${path}" || return 1
+                    defaultBase64Code vlessXHTTP "${xhttpPort}" "${email}" "${accountId}" "${line}" "${path}" "${email}${count}" || return 1
                     count=$((count + 1))
                     echo
                 fi

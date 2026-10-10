@@ -270,13 +270,13 @@ realityEntryHost() {
 defaultBase64Code() {
     local type=$1
     local port=$2
-    local email=$3
+    local email=${7:-$3}
     local id=$4
     local add=${5:-}
     local path=${6:-}
     local user=
     local defaultDir clashDir singBoxDir
-    user=$(stripClientNameSuffix "${email}")
+    user=$(stripClientNameSuffix "$3")
     if ! subscribeOutputPortIsValid "${type}" "${port}"; then
         errorCard "订阅输出生成失败" "协议 ${type} 的端口格式不合法"
         return 1

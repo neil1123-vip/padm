@@ -3699,7 +3699,8 @@ setXHTTPPathHost() {
     local configFile currentPath currentHost newPath newHost values
     configFile=$(manageXHTTPConfigFile) || return 1
     values=$(jq -er '.inbounds[0].streamSettings.xhttpSettings |
-        [(.path // ""), (.host // "")] | join("\u001f")
+        [.path, .host] | map(if . == null then "" elif type == "string" and
+            (any(explode[]; . < 32 or . == 127) | not) then . else error("invalid path or host") end) | join("\u001f")
     ' "${configFile}" 2>/dev/null) || { errorCard "读取 XHTTP 配置失败"; return 1; }
     IFS=$'\037' read -r currentPath currentHost <<<"${values}"
     autoRead xhttp_path "请输入 XHTTP path，[回车保持 ${currentPath}]:" newPath || return 1
@@ -3745,8 +3746,10 @@ setXHTTPDownloadSettings() {
     local configFile address port security serverName host path alpn= mode publicKey shortId currentServerName currentPath values
     configFile=$(manageXHTTPConfigFile) || return 1
     values=$(jq -er '.inbounds[0].streamSettings |
-        [(.realitySettings.serverNames[0] // ""), (.xhttpSettings.path // ""),
-         (.realitySettings.publicKey // ""), (.realitySettings.shortIds[1] // .realitySettings.shortIds[0] // "")] | join("\u001f")
+        [.realitySettings.serverNames[0], .xhttpSettings.path, .realitySettings.publicKey,
+         (.realitySettings.shortIds | if .[1] == null then .[0] else .[1] end)] |
+        map(if . == null then "" elif type == "string" and
+            (any(explode[]; . < 32 or . == 127) | not) then . else error("invalid download defaults") end) | join("\u001f")
     ' "${configFile}" 2>/dev/null) || { errorCard "读取 XHTTP 配置失败"; return 1; }
     IFS=$'\037' read -r currentServerName currentPath publicKey shortId <<<"${values}"
     echoContent title "\n┌─ XHTTP 上下行分离风险 ─────────────────────────────"
@@ -4212,7 +4215,9 @@ readTuicDuration() {
 setTuicConnectionParams() {
     local configFile authTimeout heartbeat values
     configFile=$(tuicConfigFile) || return 1
-    values=$(jq -er '.inbounds[0] | [.auth_timeout // "3s", .heartbeat // "10s"] | join("\u001f")' \
+    values=$(jq -er '.inbounds[0] | [.auth_timeout, .heartbeat] |
+        if all(.[]; . == null or (type == "string" and (any(explode[]; . < 32 or . == 127) | not))) then
+            [.[0] // "3s", .[1] // "10s"] | join("\u001f") else error("invalid connection defaults") end' \
         "${configFile}" 2>/dev/null) || { errorCard "读取 Tuic 配置失败"; return 1; }
     IFS=$'\037' read -r authTimeout heartbeat <<<"${values}"
     readTuicDuration "请输入认证超时时间 auth_timeout" "${authTimeout}" authTimeout || return 1

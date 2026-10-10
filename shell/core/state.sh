@@ -867,9 +867,9 @@ readConfigHostPathUUID() {
             path=$(echo "${fallback}" | jq -r .path | awk -F "[/]" '{print $2}')
 
             if [[ $(echo "${fallback}" | jq -r .dest) == 31297 ]]; then
-                currentPath=$(echo "${path}" | awk -F "[w][s]" '{print $1}')
+                currentPath=${path%ws}
             elif [[ $(echo "${fallback}" | jq -r .dest) == 31299 ]]; then
-                currentPath=$(echo "${path}" | awk -F "[v][w][s]" '{print $1}')
+                currentPath=${path%vws}
             elif [[ $(echo "${fallback}" | jq -r .dest) == 31306 ]]; then
                 currentPath=${path}
             fi
