@@ -1499,6 +1499,35 @@ runInstallWorkflowRegression() (
     )
 
     (
+        local sourceKind hysteriaJson= AUTO_INSTALL= lastInstallationConfig=
+        local PADM_INSTALL_CLIENTS_PREPARED=true PADM_INSTALL_HY2_INPUTS_PREPARED=false
+        local selectCustomInstallType=,3, hysteria2BandwidthMode=brutal
+        local hysteria2ClientDownloadSpeed=0100 hysteria2ClientUploadSpeed=0050
+        local hysteria2ObfsType= hysteria2ObfsPassword= hysteria2Masquerade=
+        local currentUUID=11111111-1111-4111-8111-111111111111
+        local currentClients='[{"uuid":"11111111-1111-4111-8111-111111111111","name":"regression"}]'
+        local -a result=()
+        collectTLSProfile() { tlsCertDomain=tls.example.com; }
+        readSingBoxProtocolPort() { local -n ports=$1; ports=(443); }
+        getSingBoxCurrentVersion() { printf '1.14.2'; }
+        setSniffRouting() { :; }
+        writeGeneratedJsonFile() { hysteriaJson=$(cat); }
+        # 原始模板字节必须是十进制；jq 数值比较会掩盖非标准 JSON 前导零。
+        for sourceKind in interactive history prepared; do
+            lastInstallationConfig= PADM_INSTALL_HY2_INPUTS_PREPARED=false
+            hysteria2ClientDownloadSpeed=0100 hysteria2ClientUploadSpeed=0050
+            [[ "${sourceKind}" != history ]] || lastInstallationConfig=true
+            [[ "${sourceKind}" != prepared ]] || PADM_INSTALL_HY2_INPUTS_PREPARED=true
+            initSingBoxConfigApply custom 1 true <<< $'1\n0100\n0050\noff\noff' >/dev/null || return 1
+            if ! grep -Eq '"up_mbps":[[:space:]]*100,' <<<"${hysteriaJson}" ||
+                ! grep -Eq '"down_mbps":[[:space:]]*50,' <<<"${hysteriaJson}"; then
+                printf 'Hysteria2 模板带宽未规范化: %s\n%s\n' "${sourceKind}" "${hysteriaJson}" >&2
+                return 1
+            fi
+        done
+    ) || return 1
+
+    (
         # 多协议共享监听准备，各端口仍检测；失败与重试不能沿用准备标记。
         local domain=tls.example.com currentPath=path currentClients='[{"uuid":"11111111-1111-4111-8111-111111111111","name":"alice"}]'
         local PADM_INSTALL_CLIENTS_PREPARED=true singBoxTemplateTLSListenerPrepared=parent

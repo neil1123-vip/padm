@@ -837,6 +837,38 @@ runProtocolEntryReaderFailureRegression() (
             done
             [[ "${failed}" == 0 ]]
         ) || failed=1
+        (
+            # 回落模板只在末尾添加协议标记，复用时保留自定义段内部的同名字符。
+            local suffix segment rawPath fallbackPort configFile failed=0
+            local coreInstallType=1 currentInstallProtocolType=,27, frontingType=02_VLESS_TCP_inbounds
+            local frontingTypeReality= singBoxConfigPath= configPath="${root}/xray-ws-path/"
+            mkdir -p "${configPath}" || return 1
+            configFile="${configPath}${frontingType}.json"
+            for suffix in ws vws; do
+                fallbackPort=31297
+                [[ "${suffix}" != vws ]] || fallbackPort=31299
+                for segment in saved news vws-middle nws-end; do
+                    rawPath="/${segment}${suffix}"
+                    jq -n --arg path "${rawPath}" --argjson port "${fallbackPort}" '
+                        {inbounds:[{port:443,settings:{clients:[{id:"saved-user"}],
+                            fallbacks:[{path:$path,dest:$port}]},streamSettings:{tlsSettings:{
+                                certificates:[{certificateFile:"/etc/padm/tls/tls.example.com.crt"}]}}}]}
+                    ' >"${configFile}" || return 1
+                    readConfigHostPathUUID ||
+                        { printf 'assert-fail:entry-xray-fallback-path-read:%s:%s\n' "${suffix}" "${segment}" >&2; failed=1; }
+                    [[ "${currentPath}" == "${segment}" ]] ||
+                        { printf 'assert-fail:entry-xray-fallback-path-value:%s:%s:%s\n' "${suffix}" "${segment}" "${currentPath}" >&2; failed=1; }
+                done
+                # 外部合法配置未使用模板标记时，不能盲裁它的最后字符。
+                jq --arg path /news-route '.inbounds[0].settings.fallbacks[0].path = $path' \
+                    "${configFile}" >"${root}/fallback-path.json" || return 1
+                mv "${root}/fallback-path.json" "${configFile}" || return 1
+                readConfigHostPathUUID || failed=1
+                [[ "${currentPath}" == news-route ]] ||
+                    { printf 'assert-fail:entry-xray-fallback-path-no-suffix:%s\n' "${suffix}" >&2; failed=1; }
+            done
+            [[ "${failed}" == 0 ]]
+        ) || failed=1
         [[ "${failed}" == 0 ]]
     ) || failed=1
     (
@@ -1101,6 +1133,79 @@ runProtocolEntryConfigUpdateRegression() (
                 exec {inputFd}<&-
                 [[ "${unread}" == sentinel && "${commits}" == 9 ]]
                 [[ -z "$(find "${root}" -name '.config.json.xhttp.*' -print -quit)" ]]
+            done
+        done
+    )
+    printf '%s\n' "${before}" >"${fixtureConfig}"
+
+    (
+        # null 仍按既有缺省语义处理，显式新值不受原字段类型守卫影响。
+        for command in setXHTTPPathHost setXHTTPDownloadSettings setTuicConnectionParams; do
+            (
+                case "${command}" in
+                setXHTTPPathHost)
+                    jq '.inbounds[0].streamSettings.xhttpSettings |= {path:null,host:null}' \
+                        <<<"${before}" >"${fixtureConfig}"
+                    setXHTTPPathHost <<< $'/explicit-null\n'
+                    jq -e '.inbounds[0].streamSettings.xhttpSettings | .path == "/explicit-null" and .host == ""' \
+                        "${fixtureConfig}" >/dev/null ;;
+                setXHTTPDownloadSettings)
+                    jq '.inbounds[0].streamSettings |=
+                        (.realitySettings |= {serverNames:[null],publicKey:null,shortIds:[null,null]}) |
+                        .inbounds[0].streamSettings.xhttpSettings.path = null' <<<"${before}" >"${fixtureConfig}"
+                    setXHTTPDownloadSettings <<< $'down.example.com\n\ntls\ntls.example.com\n\n/explicit-null\n\n'
+                    jq -e '.inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings |
+                        .security == "tls" and .tlsSettings.serverName == "tls.example.com" and
+                        .xhttpSettings.path == "/explicit-null" and .xhttpSettings.host == "tls.example.com"' \
+                        "${fixtureConfig}" >/dev/null ;;
+                setTuicConnectionParams)
+                    jq '.inbounds[0] |= (.auth_timeout = null | .heartbeat = null)' \
+                        <<<"${before}" >"${fixtureConfig}"
+                    setTuicConnectionParams <<< $'\n\n'
+                    jq -e '.inbounds[0] | .auth_timeout == "3s" and .heartbeat == "10s"' \
+                        "${fixtureConfig}" >/dev/null ;;
+                esac
+                assertEquals 7 "${commits}" "${command}-null-default-commit"
+            )
+        done
+    )
+    printf '%s\n' "${before}" >"${fixtureConfig}"
+
+    (
+        # 原字段不能先被换行或分隔符裁掉，也不能把数字转成可接受的字符串默认值。
+        local badVariant badValue inputFd unread malformedConfig input actualStatus
+        for command in setXHTTPPathHost setXHTTPDownloadSettings setTuicConnectionParams; do
+            for badVariant in tail-lf separator number boolean; do
+                case "${badVariant}" in
+                tail-lf) badValue='"saved-value\n"' ;;
+                separator) badValue='"saved-value\u001fextra"' ;;
+                number) badValue=123 ;;
+                boolean) badValue=false ;;
+                esac
+                case "${command}" in
+                setXHTTPPathHost)
+                    jq --argjson value "${badValue}" '.inbounds[0].streamSettings.xhttpSettings.host = $value' \
+                        <<<"${before}" >"${fixtureConfig}"
+                    input=$'\n\n' ;;
+                setXHTTPDownloadSettings)
+                    jq --argjson value "${badValue}" '.inbounds[0].streamSettings.realitySettings.shortIds[1] = $value' \
+                        <<<"${before}" >"${fixtureConfig}"
+                    input=$'down.example.com\n\nreality\n\n\n\npacket-up' ;;
+                setTuicConnectionParams)
+                    jq --argjson value "${badValue}" '.inbounds[0].heartbeat = $value' \
+                        <<<"${before}" >"${fixtureConfig}"
+                    input=$'500ms\n15s' ;;
+                esac
+                malformedConfig=$(<"${fixtureConfig}")
+                exec {inputFd}<<<"${input}"$'\nsentinel'
+                actualStatus=0
+                "${command}" <&"${inputFd}" || actualStatus=$?
+                assertEquals 1 "${actualStatus}" "${command}-${badVariant}-status"
+                IFS= read -r unread <&"${inputFd}"
+                exec {inputFd}<&-
+                assertEquals "${input%%$'\n'*}" "${unread}" "${command}-${badVariant}-input-preserved"
+                assertEquals 6 "${commits}" "${command}-${badVariant}-no-commit"
+                assertEquals "${malformedConfig}" "$(<"${fixtureConfig}")" "${command}-${badVariant}-config-preserved"
             done
         done
     )
