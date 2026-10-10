@@ -4772,7 +4772,8 @@ runInstallModuleManifestCompleteRegression() {
         ! scriptModulesReady >/dev/null
     )
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
-    runInstallModuleEnumerationFailureRegression
+    runInstallModuleEnumerationFailureRegression || return 1
+    runInstallModuleHashFailureRegression
 }
 
 runInstallModuleEnumerationFailureRegression() (
@@ -4790,6 +4791,28 @@ runInstallModuleEnumerationFailureRegression() (
             sort) sort() { command sort "$@"; return 1; } ;;
             esac
             ! scriptModuleFilesPresent || return 1
+            ! moduleManifestReady "${SCRIPT_MANIFEST_FILE}" || return 1
+            ! writeModuleManifest "${fixtureDir}/failed-manifest" || return 1
+        ) || return 1
+    done
+)
+
+runInstallModuleHashFailureRegression() (
+    local fixtureDir="${TMP_DIR}/install-module-hash-failure" failure
+    set +o pipefail
+    regressionCreateInstallModuleFixture "${fixtureDir}"
+    regressionLoadInstallFunctions
+    regressionConfigureInstallRefreshFixture "${fixtureDir}"
+    writeModuleManifest "${SCRIPT_MANIFEST_FILE}" || return 1
+    for failure in empty complete invalid; do
+        (
+            sha256sum() {
+                case "${failure}" in
+                complete) command sha256sum "$@" || return $? ;;
+                invalid) printf 'invalid  %s\n' "$1"; return 0 ;;
+                esac
+                return 1
+            }
             ! moduleManifestReady "${SCRIPT_MANIFEST_FILE}" || return 1
             ! writeModuleManifest "${fixtureDir}/failed-manifest" || return 1
         ) || return 1
