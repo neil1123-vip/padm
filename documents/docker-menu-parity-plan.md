@@ -3183,6 +3183,55 @@ ops 离线复用依赖，当前 6 文件镜像内摘要匹配，固定
 仍须人工核对。独立 INPUT action/jail、事务菜单、SSH、原生宿主与双架构
 验收仍待交付，5C 和总目标 active，本阶段不启用控制面防护。
 
+#### 5C.7e 控制面独立 INPUT action/jail 后端
+
+实现 `73499313 feat(docker): add isolated control INPUT Fail2ban backend`，
+本地 SSH 签名 G，未推送。复用既有所有权审计，只参数化范围、state、父链和 hook；
+原 WS schema 2 字节、双栈 DOCKER-USER 行为保持。控制范围固定独立 schema 1、
+随机 token、`padm-f2bc-*` 链与 comment、`padm-control` jail 和
+`control-fail2ban.sqlite3`，不读写 WS 数据库或状态。
+只接受实际 WireGuard 类型的 `wg-padm` 和规范 RFC 1918 IPv4，
+INPUT hook 精确为单目标 /32、TCP、单目的端口和 `conntrack NEW`。
+新增严格资源漂移、双范围故障不串清理、启动失败/删除失败保留恢复 state 合同。
+
+生成器拒绝角色、接口、地址、端口、类型和数值边界污染，认证 filter 只接受该目标端口
+的普通 401，200、连接关闭、其它目标/端口及来源回执不匹配。
+`actionstart_on_demand = false` 确保 jail 启动即建立可健康检查的 hook；
+Fail2ban 原生配置解析和真实 retry 封禁通过，不用手工 action 掩盖启动行为。
+防护进程为 `0:10001`、drop ALL、仅 `NET_ADMIN`、只读根和只读日志，
+可信日志祖先、单链接、uid/gid/mode、无符号链接及打开前后 inode 均核对。
+
+本地验收（2026-10-10，Docker Desktop Linux amd64）：
+
+| 检查，Jobs 2（合同为 6） | 容器 / 入口秒数 | 证据 |
+| --- | --- | --- |
+| 修正初始化后的 ownership/生成器 | 25.770 / 26.730 | `.tmp-regression-docker-cb9b0e531dc94830b5f5f64b3f3037a0` |
+| 原 WS IPv4/双栈真实 action | 50.308 / 51.400 | `.tmp-regression-docker-27d4cab3f1a74bc0bff047b3915b22df` |
+| 独立控制面真实 INPUT/jail | 21.170 / 22.059 | `.tmp-regression-docker-d1edb8256646401880ab2cc6a4393dca` |
+| 最终完整 Docker 合同，44/44 | 312.508 / 313.516 | `.tmp-regression-docker-8a3c352f375a4c999ea68eb9822c3e64` |
+
+各项实际执行、`cache_hit: false`，完整排队 412 ms；三槽预算不变，工具内容未变。
+真实控制验收与完整合同归档 SHA256 同为
+`7FA1926A1F63BF62BC327E67320DA9B81B4EA59F4BBC089C830A8FF9F72C9EB1`；
+工具镜像固定 `sha256:dbdfde081d3763df53ff13e5a79a9f2fbd7a98ef8660fed9ee02681a96abc2de`，
+与先前镜像工具内容摘要一致，入口自检重建缓存后复用，不为任务重复构建依赖。
+10 个交付文件提交后逐项匹配冻结快照；Linux Shell/ShellCheck error、嵌入 Python
+AST、PowerShell AST、精确/近似 selector 权限及入口/队列自检、独立复审通过。
+
+真实夹具使用独立 netns、WireGuard Peer 与嵌套 daemon，不挂宿主 Socket：
+生产 API 的真实 401 达到 maxretry 后命中 INPUT DROP counter，未进入 API 日志；
+异端口仍使用生产 API，异目标仅为标准库 HTTP 负例，明确不作为启用授权。
+独立 SQLite 停启恢复、token 变化、解封、TERM 清理、owner 替换拒绝与 WS 原资源保持通过。
+首轮新合同漏安装入口初始化、真实夹具试图在 WG 第二地址启动单主地址 API 均失败，
+分别修正 source 初始化和异目标负例布局后补验，不改生产单地址校验，不把失败计作通过。
+
+本阶段仅交付独立后端与真实封禁底座，尚未接入配置事务、Compose 或菜单，
+不能手工启动绕过门禁。7f 继续 fresh nonce 同事务启用/停用/维护；
+普通 401、旧日志、历史回执不作授权。SSH、原生宿主 systemd/重启卸载、
+公网及 arm64 仍未验收，5C 与总目标 active。详细证据 `.tmp-control-fail2ban-stage-evidence.md`。
+清理本轮 12 个源码归档/清单及入口自检目录共 314,848,320 字节和两个临时检查脚本；
+保留日志、result、摘要、自检结果、共享缓存及用户原有 8 个临时文件。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。
