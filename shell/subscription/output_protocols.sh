@@ -136,6 +136,7 @@ emitVlessXHTTPSubscribeOutput() {
     local xhttpConfigFile=${PADM_VLESS_XHTTP_CONFIG_FILE:-${xrayConfigDir%/}/12_VLESS_XHTTP_inbounds.json}
     local vlessEncryption mihomoEncryption=
     local defaultLink xhttpHost xhttpMode realityMldsa65Verify=
+    local realitySNI=${xrayVLESSRealityXHTTPSNI} publicKey=${currentRealityXHTTPPublicKey}
     if ! vlessEncryption=$(vlessEncryptionForConfig "${xhttpConfigFile}" 0); then
         errorCard "订阅输出生成失败" "VLESS Encryption 配置与状态不一致，请重新启用或关闭实验功能后重试"
         return 1
@@ -144,10 +145,12 @@ emitVlessXHTTPSubscribeOutput() {
         mihomoEncryption=$(serializeYamlString "${vlessEncryption}") || return 1
     fi
     if [[ -f "${xhttpConfigFile}" ]]; then
+        realitySNI=$(jq -r --arg fallback "${realitySNI}" '.inbounds[0].streamSettings.realitySettings.serverNames[0] | if . == null then $fallback elif type == "string" then . else error("invalid serverName") end' "${xhttpConfigFile}") || return 1
+        publicKey=$(jq -r --arg fallback "${publicKey}" '.inbounds[0].streamSettings.realitySettings.publicKey | if . == null then $fallback elif type == "string" then . else error("invalid publicKey") end' "${xhttpConfigFile}") || return 1
         realityMldsa65Verify=$(jq -r '.inbounds[0].streamSettings.realitySettings.mldsa65Verify // empty' "${xhttpConfigFile}") || return 1
     fi
     if ! path=$(xrayRealityXHTTPSetting path "${path}") ||
-        ! xhttpHost=$(xrayRealityXHTTPSetting host "${xrayVLESSRealityXHTTPSNI}") ||
+        ! xhttpHost=$(xrayRealityXHTTPSetting host "${realitySNI}") ||
         ! xhttpMode=$(xrayRealityXHTTPSetting mode auto); then
         errorCard "订阅输出生成失败" "XHTTP 配置读取失败"
         return 1
@@ -169,13 +172,13 @@ emitVlessXHTTPSubscribeOutput() {
         return 1
         ;;
     esac
-    defaultLink=$(serializeVlessRealityXHTTPLink "${id}" "${add}" "${port}" "${xrayVLESSRealityXHTTPSNI}" "${path}" "${currentRealityXHTTPPublicKey}" "${email}" "${vlessEncryption}" "${xhttpHost}" "${xhttpMode}" "${realityMldsa65Verify}")
+    defaultLink=$(serializeVlessRealityXHTTPLink "${id}" "${add}" "${port}" "${realitySNI}" "${path}" "${publicKey}" "${email}" "${vlessEncryption}" "${xhttpHost}" "${xhttpMode}" "${realityMldsa65Verify}")
 
     subscribeOutputTitle "通用格式：VLESS Reality XHTTP Vision XMUX"
     echoContent green "    ${defaultLink}\n"
 
     subscribeOutputTitle "格式化明文：VLESS Reality XHTTP Vision XMUX"
-    echoContent green "协议类型:VLESS reality，入口地址:${add}，publicKey:${currentRealityXHTTPPublicKey}，shortId: 6ba85179e30d4fc2${realityMldsa65Verify:+，pqv=${realityMldsa65Verify}}，serverNames：${xrayVLESSRealityXHTTPSNI}，端口:${port}，XHTTP host:${xhttpHost}，路径：${path}，mode:${xhttpMode}，Reality SNI:${xrayVLESSRealityXHTTPSNI}，用户ID:${id}，传输方式:xhttp，账户名:${email}\n"
+    echoContent green "协议类型:VLESS reality，入口地址:${add}，publicKey:${publicKey}，shortId: 6ba85179e30d4fc2${realityMldsa65Verify:+，pqv=${realityMldsa65Verify}}，serverNames：${realitySNI}，端口:${port}，XHTTP host:${xhttpHost}，路径：${path}，mode:${xhttpMode}，Reality SNI:${realitySNI}，用户ID:${id}，传输方式:xhttp，账户名:${email}\n"
     appendDefaultSubscribeLine "${user}" "${defaultLink}" || return 1
 
     appendClashMetaSubscribeLines "${user}" <<EOF || return 1
@@ -191,13 +194,13 @@ ${mihomoEncryption:+    encryption: ${mihomoEncryption}
     client-fingerprint: chrome
     alpn:
       - h2
-    servername: ${xrayVLESSRealityXHTTPSNI}
+    servername: ${realitySNI}
     xhttp-opts:
       path: ${path}
       host: ${xhttpHostYaml}
       mode: ${xhttpMode}
     reality-opts:
-      public-key: ${currentRealityXHTTPPublicKey}
+      public-key: ${publicKey}
       short-id: 6ba85179e30d4fc2
 EOF
 
@@ -372,7 +375,8 @@ EOF
 emitVlessRealitySubscribeOutput() {
     local port=$1 email=$2 id=$3 user=$6
     local entryHost
-    entryHost=$(realityEntryHost)
+    entryHost=$(realityEntryHost) || return 1
+    subscribeOutputSafeHostValue "${entryHost}" || return 1
 
     local realitySNI=${xrayVLESSRealitySNI}
     local publicKey=${currentRealityPublicKey:-}
@@ -428,7 +432,8 @@ ${mihomoEncryption:+    encryption: ${mihomoEncryption}
 emitVlessRealityGrpcSubscribeOutput() {
     local port=$1 email=$2 id=$3 user=$6
     local entryHost
-    entryHost=$(realityEntryHost)
+    entryHost=$(realityEntryHost) || return 1
+    subscribeOutputSafeHostValue "${entryHost}" || return 1
     local realitySNI=${xrayVLESSRealitySNI}
     local publicKey=${currentRealityPublicKey:-}
     local realityMldsa65Verify=${currentRealityMldsa65Verify:-}

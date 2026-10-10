@@ -487,6 +487,30 @@ assertDisplayedDefaultSubscribeLink "user-a-grpc" "通用格式：VLESS Reality 
 jq -e '.[0].transport.service_name == "grpc" and .[0].tls.reality.short_id == "6ba85179e30d4fc2"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/user-a-grpc" >/dev/null
 grep -q 'pqv=pqv' "${SUBSCRIBE_CAPTURE_DIR}/screen.log"
 
+(
+    local protocol variant account
+    for protocol in vlessReality vlessRealityGRPC; do
+        for variant in failed empty invalid; do
+            account="reality-${protocol}-${variant}"
+            case "${variant}" in
+            failed) realityEntryHost() { printf '%s' node.example.com; return 1; } ;;
+            empty) realityEntryHost() { :; } ;;
+            invalid) realityEntryHost() { printf '%s' 'bad host'; } ;;
+            esac
+            regressionExpectStatus 1 defaultBase64Code "${protocol}" 443 "${account}" uuid-a "" "" || return 1
+            [[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/default/${account}" &&
+                ! -e "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/${account}" &&
+                ! -e "${SUBSCRIBE_CAPTURE_DIR}/sing-box/${account}" ]] || return 1
+        done
+        realityEntryHost() { printf '%s' 2001:db8::10; }
+        account="reality-${protocol}-ipv6"
+        defaultBase64Code "${protocol}" 443 "${account}" uuid-a "" "" || return 1
+        grep -qF 'vless://uuid-a@[2001:db8::10]:443?' "${SUBSCRIBE_CAPTURE_DIR}/default/${account}" || return 1
+        grep -qx '    server: 2001:db8::10' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/${account}" || return 1
+        jq -e '.[0].server == "2001:db8::10"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/${account}" >/dev/null || return 1
+    done
+) || return 1
+
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentRealityMldsa65Verify=""
 local oldConfigPath="${configPath:-}"
@@ -586,22 +610,55 @@ EOF
     local variant
     for variant in no-slash directory-override; do
         [[ "${variant}" != directory-override ]] || configPath=
-        defaultBase64Code vlessXHTTP 443 "user-a-xhttp-${variant}" uuid-a "cdn.example.com" "/ignored"
-        grep -qF 'host=noslash.example.com' "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-${variant}"
-        grep -qF '&path=/noslash&mode=stream-up' "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-${variant}"
+        defaultBase64Code vlessXHTTP 443 "user-a-xhttp-${variant}" uuid-a "cdn.example.com" "/ignored" || return 1
+        grep -qF 'host=noslash.example.com' "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-${variant}" || return 1
+        grep -qF '&path=/noslash&mode=stream-up' "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-${variant}" || return 1
     done
 
     cat >"${xhttpOverrideFile}" <<'EOF'
-{"inbounds":[{"streamSettings":{"xhttpSettings":{"host":"override.example.com","path":"/override","mode":"packet-up"}}}]}
+{"inbounds":[{"port":9443,"settings":{"clients":[{"email":"user-a-xhttp-override-reader","id":"uuid-override"}],"decryption":"none"},"streamSettings":{"realitySettings":{"serverNames":["override-sni.example.com"],"publicKey":"override-public","mldsa65Verify":"override-pqv"},"xhttpSettings":{"host":"override.example.com","path":"/override","mode":"packet-up"}}}]}
 EOF
     cat >"${PADM_XRAY_CONF_DIR}/12_VLESS_XHTTP_inbounds.json" <<'EOF'
 {"inbounds":[{"streamSettings":{"xhttpSettings":{"host":"wrong.example.com","path":"/wrong","mode":"auto"}}}]}
 EOF
     PADM_VLESS_XHTTP_CONFIG_FILE="${xhttpOverrideFile}"
-    defaultBase64Code vlessXHTTP 443 user-a-xhttp-override uuid-a "cdn.example.com" "/ignored"
-    grep -qF 'host=override.example.com' "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-override"
-    grep -qF '&path=/override&mode=packet-up' "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-override"
-)
+    defaultBase64Code vlessXHTTP 443 user-a-xhttp-override uuid-a "cdn.example.com" "/ignored" || return 1
+    grep -qF 'host=override.example.com' "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-override" || return 1
+    grep -qF '&path=/override&mode=packet-up' "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-override" || return 1
+    grep -qF '&sni=override-sni.example.com&' "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-override" || return 1
+    grep -qF '&pbk=override-public&' "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-override" || return 1
+    grep -qF '&pqv=override-pqv&' "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-override" || return 1
+    grep -qx '    servername: override-sni.example.com' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp-override" || return 1
+    grep -qx '      public-key: override-public' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp-override" || return 1
+    local currentInstallProtocolType=,2, xrayVLESSRealityXHTTPort=443 currentCDNAddress=cdn.example.com currentPath=padm
+    realityStreamPublicPortForProtocol() { :; }
+    corePortSubscriptionPort() { printf '%s\n' "$2"; }
+    showVlessRealityXHTTPAccounts || return 1
+    grep -qF 'vless://uuid-override@cdn.example.com:9443?' "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-override-reader" || return 1
+    grep -qF '&sni=override-sni.example.com&' "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-override-reader" || return 1
+    grep -qF '&host=override.example.com&' "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-override-reader" || return 1
+    currentCDNAddress=
+    local account
+    for variant in failed empty invalid; do
+        account="xhttp-fallback-${variant}"
+        updateRoutingJsonConfig "${xhttpOverrideFile}" '.inbounds[0].settings.clients[0].email = $email' --arg email "${account}" || return 1
+        case "${variant}" in
+        failed) realityEntryHost() { printf '%s' node.example.com; return 1; } ;;
+        empty) realityEntryHost() { :; } ;;
+        invalid) realityEntryHost() { printf '%s' 'bad host'; } ;;
+        esac
+        regressionExpectStatus 1 showVlessRealityXHTTPAccounts || return 1
+        [[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/default/${account}" &&
+            ! -e "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/${account}" &&
+            ! -e "${SUBSCRIBE_CAPTURE_DIR}/sing-box/${account}" ]] || return 1
+    done
+    account=xhttp-fallback-ipv6
+    updateRoutingJsonConfig "${xhttpOverrideFile}" '.inbounds[0].settings.clients[0].email = $email' --arg email "${account}" || return 1
+    realityEntryHost() { printf '%s' 2001:db8::10; }
+    showVlessRealityXHTTPAccounts || return 1
+    grep -qF 'vless://uuid-override@[2001:db8::10]:9443?' "${SUBSCRIBE_CAPTURE_DIR}/default/${account}" || return 1
+    grep -qx '    server: 2001:db8::10' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/${account}" || return 1
+) || return 1
 
 (
     local configPath="${TMP_DIR}/xhttp-subscription-empty-host/"
@@ -988,6 +1045,49 @@ runSubscriptionOutputMixedLocalRemoteAllFailedPreservesPreviousRegression() (
 )
 
 runSubscriptionOutputTlsVlessVmessTrojanRegression() {
+    (
+        # 各账号读取入口独立传播读取和输出失败，不改变调用方的 pipefail。
+        set +o pipefail
+        local configPath="${TMP_DIR}/tls-account-reader/"
+        local singBoxConfigPath= currentDefaultPort=443 coreInstallType=1
+        local currentInstallProtocolType=,27,21,22,24,25,2,
+        local currentPath=padm currentCDNAddress=cdn.example.com
+        local xrayVLESSRealityXHTTPort=443 reader configFile variant
+        local capture="${TMP_DIR}/tls-account-reader.log"
+        mkdir -p "${configPath}"
+        subscribeSectionTitle() { :; }
+        subscribeAccountTitle() { :; }
+        realityStreamPublicPortForProtocol() { :; }
+        corePortSubscriptionPort() { printf '%s\n' "$2"; }
+        xrayRealityXHTTPSetting() { printf '%s\n' "$2"; }
+        for reader in showVlessTcpAccounts showVlessWsAccounts showVmessWsAccounts showVlessGrpcAccounts showTrojanGrpcAccounts showVlessRealityXHTTPAccounts; do
+            case "${reader}" in
+            showVlessTcpAccounts) configFile=02_VLESS_TCP_inbounds.json ;;
+            showVlessWsAccounts) configFile=03_VLESS_WS_inbounds.json ;;
+            showVmessWsAccounts) configFile=05_VMess_WS_inbounds.json ;;
+            showVlessGrpcAccounts) configFile=06_VLESS_GRPc_inbounds.json ;;
+            showTrojanGrpcAccounts) configFile=04_trojan_GRPc_inbounds.json ;;
+            showVlessRealityXHTTPAccounts) configFile=12_VLESS_XHTTP_inbounds.json ;;
+            esac
+            defaultBase64Code() { printf 'output\n' >>"${capture}"; }
+            for variant in null '{}'; do
+                jq -n --argjson clients "${variant}" '{inbounds:[{port:443,settings:{clients:$clients}}]}' >"${configPath}${configFile}"
+                : >"${capture}"
+                regressionExpectFailure "${reader}" >/dev/null 2>&1 || return 1
+                [[ ! -s "${capture}" ]] || return 1
+            done
+            printf '{invalid\n' >"${configPath}${configFile}"
+            regressionExpectFailure "${reader}" >/dev/null 2>&1 || return 1
+            printf '{"inbounds":[{"port":443,"settings":{"clients":[]}}]}\n' >"${configPath}${configFile}"
+            "${reader}" >/dev/null || return 1
+            [[ ! -s "${capture}" ]] || return 1
+            printf '{"inbounds":[{"port":443,"settings":{"clients":[{"email":"sub-reader","id":"uuid","password":"pass"}]}}]}\n' >"${configPath}${configFile}"
+            defaultBase64Code() { printf 'failed-write\n' >>"${capture}"; return 1; }
+            regressionExpectStatus 1 "${reader}" >/dev/null 2>&1 || return 1
+            [[ "$(<"${capture}")" == failed-write ]] || return 1
+            [[ "${SHELLOPTS}" != *pipefail* ]] || return 1
+        done
+    ) || return 1
     local SUBSCRIBE_CAPTURE_DIR="${SUBSCRIBE_CAPTURE_DIR}-${BASHPID:-$$}"
     local PADM_SUBSCRIBE_LOCAL_DIR="${SUBSCRIBE_CAPTURE_DIR}"
 local quotedTlsUser='tls-"quoted-user'

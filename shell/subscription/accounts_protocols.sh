@@ -12,12 +12,13 @@ subscriptionAccountProfile() {
     ] | join("\u001f")' <<<"${user}"
 }
 
-showVlessTcpAccounts() {
+showVlessTcpAccounts() (
+    set -o pipefail
     # VLESS TCP
     if currentProtocolHas 27; then
 
         subscribeSectionTitle "VLESS TCP TLS Vision" "传统 TLS 兼容方案"
-        jq -c '(.inbounds[0].settings.clients // .inbounds[0].users)[]' ${configPath}02_VLESS_TCP_inbounds.json | while read -r user; do
+        jq -c '(.inbounds[0].settings.clients // .inbounds[0].users) | if type == "array" then .[] else error("invalid clients") end' "${configPath}02_VLESS_TCP_inbounds.json" | while read -r user; do
             local email accountId
             IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
 
@@ -27,14 +28,15 @@ showVlessTcpAccounts() {
         done
     fi
 
-}
+)
 
-showVlessWsAccounts() {
+showVlessWsAccounts() (
+    set -o pipefail
     # VLESS WS
     if currentProtocolHas 21; then
         subscribeSectionTitle "VLESS WS TLS" "兼容旧客户端，不作为新手推荐"
 
-        jq -c '(.inbounds[0].settings.clients // .inbounds[0].users)[]' ${configPath}03_VLESS_WS_inbounds.json | while read -r user; do
+        jq -c '(.inbounds[0].settings.clients // .inbounds[0].users) | if type == "array" then .[] else error("invalid clients") end' "${configPath}03_VLESS_WS_inbounds.json" | while read -r user; do
             local email accountId
             IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
 
@@ -62,13 +64,14 @@ showVlessWsAccounts() {
             done < <(echo "${currentCDNAddress}" | tr ',' '\n')
         done
     fi
-}
+)
 
-showTrojanGrpcAccounts() {
+showTrojanGrpcAccounts() (
+    set -o pipefail
     # trojan grpc
     if currentProtocolHas 25; then
         subscribeSectionTitle "Trojan gRPC TLS" "兼容旧客户端，不作为新手推荐"
-        jq -c '.inbounds[0].settings.clients[]' ${configPath}04_trojan_GRPc_inbounds.json | while read -r user; do
+        jq -c '.inbounds[0].settings.clients | if type == "array" then .[] else error("invalid clients") end' "${configPath}04_trojan_GRPc_inbounds.json" | while read -r user; do
             local email password
             IFS=$'\037' read -r email _ password _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
             local count=
@@ -83,9 +86,10 @@ showTrojanGrpcAccounts() {
 
         done
     fi
-}
+)
 
-showVmessWsAccounts() {
+showVmessWsAccounts() (
+    set -o pipefail
     # VMess WS
     if currentProtocolHas 22; then
         subscribeSectionTitle "VMess WS TLS" "兼容旧客户端，不作为新手推荐"
@@ -95,7 +99,7 @@ showVmessWsAccounts() {
         elif [[ "${coreInstallType}" == "2" ]]; then
             path="${singBoxVMessWSPath}"
         fi
-        jq -c '(.inbounds[0].settings.clients // .inbounds[0].users)[]' ${configPath}05_VMess_WS_inbounds.json | while read -r user; do
+        jq -c '(.inbounds[0].settings.clients // .inbounds[0].users) | if type == "array" then .[] else error("invalid clients") end' "${configPath}05_VMess_WS_inbounds.json" | while read -r user; do
             local email accountId
             IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
 
@@ -116,7 +120,7 @@ showVmessWsAccounts() {
         done
     fi
 
-}
+)
 
 showTrojanAccounts() {
     # trojan tcp
@@ -149,11 +153,12 @@ showTrojanAccountsFromConfig() (
         done
 )
 
-showVlessGrpcAccounts() {
+showVlessGrpcAccounts() (
+    set -o pipefail
     # VLESS grpc
     if currentProtocolHas 24; then
         subscribeSectionTitle "VLESS gRPC TLS" "兼容旧客户端，不作为新手推荐"
-        jq -c '.inbounds[0].settings.clients[]' ${configPath}06_VLESS_GRPc_inbounds.json | while read -r user; do
+        jq -c '.inbounds[0].settings.clients | if type == "array" then .[] else error("invalid clients") end' "${configPath}06_VLESS_GRPc_inbounds.json" | while read -r user; do
             local email accountId
             IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
 
@@ -169,7 +174,7 @@ showVlessGrpcAccounts() {
 
         done
     fi
-}
+)
 
 showHysteriaAccounts() (
     set -o pipefail
@@ -404,19 +409,23 @@ showVmessHTTPUpgradeAccountsFromConfig() (
         done
 )
 
-showVlessRealityXHTTPAccounts() {
+showVlessRealityXHTTPAccounts() (
+    set -o pipefail
     # VLESS Reality XHTTP
     if currentProtocolHas 2; then
         subscribeSectionTitle "VLESS Reality XHTTP" "CDN推荐"
 
-        local path xhttpPort streamPublicPort xhttpEntryPort
-        path=$(xrayRealityXHTTPSetting path "/${currentPath}xHTTP")
+        local path xhttpPort streamPublicPort xhttpEntryPort xrayConfigDir configFile
+        xrayConfigDir="${configPath:-${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}}"
+        configFile="${PADM_VLESS_XHTTP_CONFIG_FILE:-${xrayConfigDir%/}/12_VLESS_XHTTP_inbounds.json}"
+        path=$(xrayRealityXHTTPSetting path "/${currentPath}xHTTP") || return 1
+        xhttpEntryPort=$(jq -r '.inbounds[0].port' "${configFile}") || return 1
         xhttpPort=${xrayVLESSRealityXHTTPort}
+        [[ -z "${PADM_VLESS_XHTTP_CONFIG_FILE:-}" ]] || xhttpPort=${xhttpEntryPort}
         streamPublicPort=$(realityStreamPublicPortForProtocol xhttp) || return 1
         [[ -z "${streamPublicPort}" ]] || xhttpPort=${streamPublicPort}
-        xhttpEntryPort=$(jq -r '.inbounds[0].port' "${configPath}12_VLESS_XHTTP_inbounds.json") || return 1
         xhttpPort=$(corePortSubscriptionPort "${xhttpEntryPort}" "${xhttpPort}") || return 1
-        jq -c '(.inbounds[0].settings.clients // .inbounds[0].users)[]' ${configPath}12_VLESS_XHTTP_inbounds.json | while read -r user; do
+        jq -c '(.inbounds[0].settings.clients // .inbounds[0].users) | if type == "array" then .[] else error("invalid clients") end' "${configFile}" | while read -r user; do
             local email accountId
             IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
             echo
@@ -425,7 +434,8 @@ showVlessRealityXHTTPAccounts() {
             while read -r line; do
                 subscribeAccountTitle "${email}${count}"
                 if [[ -z "${line}" ]]; then
-                    line=$(realityEntryHost)
+                    line=$(realityEntryHost) || return 1
+                    subscribeOutputSafeHostValue "${line}" || return 1
                 fi
                 if [[ -n "${line}" ]]; then
                     defaultBase64Code vlessXHTTP "${xhttpPort}" "${email}${count}" "${accountId}" "${line}" "${path}" || return 1
@@ -435,7 +445,7 @@ showVlessRealityXHTTPAccounts() {
             done < <(echo "${currentCDNAddress}" | tr ',' '\n')
         done
     fi
-}
+)
 
 showAnyTlsAccounts() (
     set -o pipefail
