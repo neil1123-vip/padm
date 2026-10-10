@@ -591,6 +591,7 @@ singBoxProtocolInstall() {
     fi
     # 每次重读磁盘，采集仅保存在本次作用域，取消或失败不污染后续重装。
     singBoxConfigPath="$(singBoxTemplateConfigDir)/" || return 1
+    singBoxRequireShardSource || return 1
     readSingBoxConfig || return 1
     [[ "${protocolId}" != 3 ]] || oldHysteriaPort=${hysteriaPort}
     if [[ -f "${configFile}" ]]; then
@@ -678,11 +679,37 @@ singBoxMergedConfigFile() {
     printf '%s/config.json\n' "$(singBoxConfigConfDir)"
 }
 
+singBoxRequireShardSource() {
+    local configDir outputFile configFile hasShard=false
+    configDir=$(singBoxConfigShardDir)
+    outputFile=$(singBoxMergedConfigFile)
+    [[ -s "${outputFile}" ]] || return 0
+    for configFile in "${configDir}"*.json; do
+        [[ -f "${configFile}" ]] || continue
+        hasShard=true
+        break
+    done
+    if [[ "${hasShard}" == false ]] || jq -se '
+        def has_inbounds: .inbounds? | type == "array" and length > 0;
+        def has_topology:
+            has_inbounds or
+            (.outbounds? | type == "array" and length > 0) or
+            (.endpoints? | type == "array" and length > 0) or
+            (.route? | type == "object" and length > 0);
+        .[0] as $merged | .[1:] as $shards |
+        (($merged | has_inbounds) and (any($shards[]; has_inbounds) | not)) or
+        (($merged | has_topology) and (any($shards[]; has_topology) | not))
+    ' "${outputFile}" "${configDir}"*.json >/dev/null 2>&1; then
+        errorCard "sing-box 分片不足以保留现有配置，已取消修改，请恢复完整分片配置"
+        return 1
+    fi
+}
+
 singBoxMergeConfigToTemp() {
     local resultVar=$1
     local binary="${2:-${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}}"
     local logFile="${3:-/dev/null}"
-    local configDir confDir outputFile mergedTmpFile tmpName
+    local configDir confDir outputFile mergedTmpFile tmpName configFile hasShard=false
 
     configDir=$(singBoxConfigShardDir)
     confDir=$(singBoxConfigConfDir)
@@ -690,6 +717,24 @@ singBoxMergeConfigToTemp() {
 
     initSingBoxLocalDNSConfig check || return 1
     padmCreateTempFileForTarget mergedTmpFile "${outputFile}" merge || return 1
+    for configFile in "${configDir}"*.json; do
+        [[ -f "${configFile}" ]] || continue
+        hasShard=true
+        break
+    done
+    # 无分片时校验已有合并配置，不能用空 merge 替换实际运行配置。
+    if [[ "${hasShard}" == false ]]; then
+        if [[ ! -s "${outputFile}" ]] || ! cp -- "${outputFile}" "${mergedTmpFile}" 2>"${logFile}"; then
+            padmRemoveCleanupPath "${mergedTmpFile}"
+            return 1
+        fi
+        printf -v "${resultVar}" '%s' "${mergedTmpFile}"
+        return 0
+    fi
+    if ! singBoxRequireShardSource; then
+        padmRemoveCleanupPath "${mergedTmpFile}"
+        return 1
+    fi
     tmpName=$(basename -- "${mergedTmpFile}")
     rm -f "${mergedTmpFile}" >/dev/null 2>&1 || { padmRemoveCleanupPath "${mergedTmpFile}"; return 1; }
 
@@ -735,7 +780,7 @@ singBoxMergeConfigRollbackOnExit() {
 # 合并 sing-box 配置
 singBoxMergeConfig() {
     local binary="${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}"
-    local outputFile tmpFile= statsConfig statsBackupDir=
+    local outputFile tmpFile= statsConfig statsBackupDir= configFile hasOtherShard=false
 
     outputFile=$(singBoxMergedConfigFile)
     if declare -F singBoxV2rayApiSupported >/dev/null 2>&1 &&
@@ -743,6 +788,12 @@ singBoxMergeConfig() {
         statsConfig="$(singBoxConfigShardDir)14_stats_api.json"
         if [[ -e "${statsConfig}" || -L "${statsConfig}" ]]; then
             [[ -f "${statsConfig}" && ! -L "${statsConfig}" ]] || return 1
+            for configFile in "$(singBoxConfigShardDir)"*.json; do
+                [[ -f "${configFile}" && "${configFile}" != "${statsConfig}" ]] || continue
+                hasOtherShard=true
+                break
+            done
+            [[ "${hasOtherShard}" == true ]] || return 1
             checkLogBackupCreate statsBackupDir "${statsConfig}" || return 1
         fi
     fi

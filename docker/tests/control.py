@@ -5,6 +5,7 @@ import http.client
 import importlib.util
 import json
 import os
+import re
 import socket
 import stat
 import subprocess
@@ -12,8 +13,10 @@ import sys
 import tempfile
 import threading
 import time
+from datetime import datetime
+from http import HTTPStatus
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from jsonschema import Draft202012Validator, FormatChecker
 
@@ -167,9 +170,6 @@ with tempfile.TemporaryDirectory(prefix=".tmp-control-", dir="/var/lib") as dire
             super().setup()
             self.client_address = (self.peer_address, self.client_address[1])
 
-        def log_message(self, *_):
-            pass
-
         def do_GET(self):
             if self.health_status is None:
                 super().do_GET()
@@ -192,6 +192,14 @@ with tempfile.TemporaryDirectory(prefix=".tmp-control-", dir="/var/lib") as dire
         server = api.ControlServer(("127.0.0.1", 0), TestHandler)
     server.state_path = state_path
     server.listen = STATE["listen"]
+    request_logs = []
+
+    def capture_log(message, *, flush):
+        assert flush
+        request_logs.append(message)
+
+    log_sink = patch.object(api, "print", capture_log, create=True)
+    log_sink.start()
     thread = threading.Thread(target=server.serve_forever)
     thread.start()
     http_connection = http.client.HTTPConnection
@@ -207,18 +215,75 @@ with tempfile.TemporaryDirectory(prefix=".tmp-control-", dir="/var/lib") as dire
                 patch.object(api.http.client, "HTTPConnection", side_effect=local_health_connection):
             api.health_check(api.read_state(state_path))
 
-    def request(path="/v1/health", token=TOKEN, version="1", method="GET", authorization=None):
+    def request(path="/v1/health", token=TOKEN, version="1", method="GET", authorization=None, extra_headers=None):
         connection = http.client.HTTPConnection(*server.server_address, timeout=3)
-        connection.request(method, path, headers={
+        headers = {
             "Authorization": f"Bearer {token}" if authorization is None else authorization,
             "X-Padm-Control-Version": version,
-        })
+        }
+        headers.update(extra_headers or {})
+        connection.request(method, path, headers=headers)
         response = connection.getresponse()
         status, content = response.status, response.read()
         connection.close()
         return status, content
 
     try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.bind(("127.0.0.1", 0))
+            listener.listen(1)
+            with socket.create_connection(listener.getsockname(), timeout=2) as client:
+                connected, _ = listener.accept()
+                with connected:
+                    handler = api.ControlHandler.__new__(api.ControlHandler)
+                    handler.connection = connected
+                    handler.log_endpoints = api.request_log_tuple(connected)
+                    before = len(request_logs)
+                    for code in (True, False, "200", TOKEN, 99, 600, None):
+                        handler.log_request(code, TOKEN)
+                    handler.log_message(TOKEN, f"GET /{TOKEN}", 401)
+                    assert len(request_logs) == before, "不可信状态和 HTTP 格式实参不得进入日志"
+                    handler.log_request(HTTPStatus.UNAUTHORIZED, TOKEN)
+                    assert len(request_logs) == before + 1
+                    assert request_logs[-1].endswith(
+                        f"status=401 source=127.0.0.1 target=127.0.0.1 port={listener.getsockname()[1]}"
+                    ), "标准 HTTPStatus 必须记录真实 socket 来源与目标"
+                    request_logs.pop()
+                    handler.log_error(TOKEN, f"GET /{TOKEN}", 401)
+                    assert len(request_logs) == before, "任意 HTTP 错误格式实参不能伪造关闭事件"
+                    handler.log_error(TOKEN, TimeoutError(TOKEN))
+                    assert len(request_logs) == before + 1
+                    assert request_logs[-1].endswith(
+                        f"status=connection_closed source=127.0.0.1 target=127.0.0.1 "
+                        f"port={listener.getsockname()[1]}"
+                    ), "HTTP 超时只能触发固定关闭事件，不得回显格式或异常原文"
+                    request_logs.pop()
+                    connected.close()
+                    handler.log_request(HTTPStatus.UNAUTHORIZED, TOKEN)
+                    assert len(request_logs) == before + 1
+                    assert request_logs[-1].endswith(
+                        f"status=401 source=127.0.0.1 target=127.0.0.1 port={listener.getsockname()[1]}"
+                    ), "连接关闭后仍须保留已接受 socket 的真实鉴权失败来源"
+                    request_logs.pop()
+        for method, endpoint in (
+                ("getpeername", ("::ffff:127.0.0.1", 1)),
+                ("getpeername", ("127.000.0.1", 1)),
+                ("getpeername", ("127.0.0.1\n" + TOKEN, 1)),
+                ("getsockname", ("127.0.0.1", 0)),
+                ("getsockname", ("127.0.0.1", True)),
+                ("getsockname", ("127.0.0.1", "80")),
+                ("getsockname", ("127.0.0.1", 80, 0, 0))):
+            connection = Mock()
+            connection.getpeername.return_value = ("127.0.0.1", 1)
+            connection.getsockname.return_value = ("127.0.0.1", 80)
+            getattr(connection, method).return_value = endpoint
+            before = len(request_logs)
+            api.request_log_event(401, api.request_log_tuple(connection))
+            assert len(request_logs) == before, "不完整或非规范 socket 三元组不能伪造日志"
+        connection = Mock()
+        connection.getpeername.side_effect = OSError(TOKEN)
+        api.request_log_event("connection_closed", api.request_log_tuple(connection))
+        assert len(request_logs) == before, "socket 失败不得回显异常文本"
         status, body = request()
         assert status == 200 and json.loads(body)["capabilities"] == ["health", "desired"]
         health()
@@ -264,6 +329,11 @@ api.main()
             connection.close()
         assert request(version="2")[0] == 409
         assert request("/v1/desired?token=secret")[0] == 404
+        assert request(f"/{TOKEN}?password={STATE['accounts'][0]['password']}", extra_headers={
+            "X-Forwarded-For": "198.51.100.41",
+            "Forwarded": 'for="198.51.100.42";host="log-injection"',
+            "X-Real-IP": "198.51.100.43",
+        })[0] == 404
         assert request(method="POST")[0] == 501
         malformed = socket.create_connection(server.server_address, timeout=2)
         malformed.sendall(b"GET /" + TOKEN.encode() + b" BROKEN\r\n\r\n")
@@ -316,15 +386,17 @@ api.main()
             assert time.monotonic() - before < 1, "持续慢速健康响应也必须按总时限终止"
         TestHandler.health_status, TestHandler.health_delay = None, 0
         server.request_timeout = 0.2
-        for slow in (False, True):
+        for mode in ("zero", "partial", "slow"):
+            log_count = len(request_logs)
             blocked = socket.create_connection(server.server_address, timeout=2)
             started = threading.Event()
 
             def occupy():
                 try:
-                    blocked.sendall(b"G")
+                    if mode != "zero":
+                        blocked.sendall(b"G")
                     started.set()
-                    if slow:
+                    if mode == "slow":
                         for _ in range(20):
                             time.sleep(0.04)
                             blocked.sendall(b"E")
@@ -340,11 +412,33 @@ api.main()
             blocked.close()
             sender.join(timeout=2)
             assert not sender.is_alive()
+            assert any("status=connection_closed source=127.0.0.1 " in line
+                       for line in request_logs[log_count:]), f"{mode} 请求关闭必须记录真实 socket 来源"
     finally:
         server.shutdown()
         thread.join(timeout=3)
         server.server_close()
+        log_sink.stop()
         assert not thread.is_alive()
+    pattern = re.compile(
+        r"(?P<time>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z) "
+        r"control-request status=(?P<status>[1-5][0-9]{2}|connection_closed) "
+        r"source=127\.0\.0\.1 target=127\.0\.0\.1 port=(?P<port>[0-9]+)"
+    )
+    statuses = set()
+    for line in request_logs:
+        record = pattern.fullmatch(line)
+        assert record is not None, "访问与慢关闭日志必须只含固定字段和真实回环 socket 三元组"
+        assert datetime.fromisoformat(record["time"]).utcoffset().total_seconds() == 0
+        assert int(record["port"]) == server.server_address[1], "不能以模拟监听配置代替真实端口"
+        statuses.add(record["status"])
+    assert {"200", "401", "404", "400", "501", "connection_closed"} <= statuses
+    logs = "\n".join(request_logs)
+    for secret in (TOKEN, STATE["peer"]["token_sha256"], STATE["accounts"][0]["password"],
+                   STATE["accounts"][0]["uuid"], "/v1/desired", "secret", "log-injection",
+                   "198.51.100.41", "198.51.100.42", "198.51.100.43",
+                   STATE["listen"]["address"], STATE["peer"]["address"]):
+        assert secret not in logs, "日志不得记录凭据、路径、转发头或模拟来源"
     rejected(health)
 
 print("docker-control-api-regression-ok")
