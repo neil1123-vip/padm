@@ -226,7 +226,7 @@ showCoreStatusOverview() {
     elif coreExecutableFile "${xrayBinary}"; then
         geoStatus="缺失或为空"
     fi
-    crontab -l 2>/dev/null | grep -q "UpdateGeo" && geoCron="已设置"
+    crontab -l 2>/dev/null | padmMaintenanceCronActive UpdateGeo && geoCron="已设置"
     nginxReasons=$(nginxRuntimeReasons)
     while IFS= read -r reason; do
         [[ -n "${reason}" ]] || continue

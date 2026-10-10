@@ -303,7 +303,7 @@ showXrayGeoStatus() {
     local cronStatus="未设置"
     [[ -s "${targetDir}/geoip.dat" ]] && geoipStatus="已安装"
     [[ -s "${targetDir}/geosite.dat" ]] && geositeStatus="已安装"
-    if crontab -l 2>/dev/null | grep -q "UpdateGeo"; then
+    if crontab -l 2>/dev/null | padmMaintenanceCronActive UpdateGeo; then
         cronStatus="已设置"
     fi
     statusCard "Xray Geo 状态" "geoip.dat：${geoipStatus}" "geosite.dat：${geositeStatus}" "版本：$(xrayGeoDisplayVersion "${targetDir}")" "自动更新：${cronStatus}"

@@ -405,6 +405,52 @@ runSingBoxCustomPathsRegression() (
     )
 
     (
+        # Xray 模板、出站、备份和服务必须使用同一覆盖目录，不以桩重映射写入目标。
+        local PADM_XRAY_DIR="${root}/xray-install" PADM_XRAY_CONF_DIR= configDir state file
+        local PADM_REALITY_ENTRY_HOST_FILE="${root}/reality-entry-host"
+        local PADM_INSTALL_CLIENTS_PREPARED=true selectCustomInstallType=,28,
+        local currentClients='[{"id":"saved-password","email":"saved-user"}]'
+        local port=8443 domain=example.com add=example.com
+        source "${PROJECT_ROOT}/shell/core/core_templates.sh"
+        [[ "$(xrayTemplateConfigDir)" == "$(coreXrayConfigDir)" ]] || return 1
+        PADM_XRAY_CONF_DIR="${root}/xray config[1]/"
+        configDir=$(coreXrayConfigDir)
+        [[ "$(xrayTemplateConfigDir)" == "${configDir}" ]] || return 1
+        mkdir -p "${configDir}"
+        installSniffing() { :; }
+        xrayRunning() { return 1; }
+        handleXray() { [[ "$1" == stop ]]; }
+        failAfterCustomXrayInit() {
+            initXrayConfigApply custom test true || return 1
+            return 7
+        }
+        for state in present missing; do
+            for file in 00_log.json 12_policy.json 11_dns.json; do
+                if [[ "${state}" == present ]]; then
+                    printf '{"saved":true}\n' >"${configDir}/${file}"
+                else
+                    rm -f -- "${configDir}/${file}"
+                fi
+            done
+            regressionExpectStatus 7 coreTemplateConfigTransaction xray failAfterCustomXrayInit || return 1
+            [[ ! -e "${configDir}/09_routing.json" &&
+                ! -e "${configDir}/28_trojan_TCP_direct_inbounds.json" &&
+                ! -e "${configDir}/z_direct_outbound.json" ]] || return 1
+            initXrayConfigApply custom test true || return 1
+            for file in 00_log.json 12_policy.json 11_dns.json; do
+                if [[ "${state}" == present ]]; then
+                    jq -e '.saved == true' "${configDir}/${file}" >/dev/null || return 1
+                else
+                    jq -e 'has("saved") | not' "${configDir}/${file}" >/dev/null || return 1
+                fi
+            done
+            jq -e '.inbounds[0].port == 8443 and .inbounds[0].settings.clients[0].password == "saved-password"' \
+                "${configDir}/28_trojan_TCP_direct_inbounds.json" >/dev/null || return 1
+            removeXrayTemplateConfigFiles 09_routing.json 28_trojan_TCP_direct_inbounds.json z_direct_outbound.json || return 1
+        done
+    ) || return 1
+
+    (
         # 仅设置目录覆盖时，DNS 检查和初始化不能读取或写入默认目录。
         local dnsConfigDir="${root}/dns-only/config"
         local PADM_SINGBOX_CONFIG_DIR="${dnsConfigDir}" singBoxConfigPath=
@@ -3084,7 +3130,7 @@ runCoreTemplateReturnFailureRegression() (
         local mappedTarget=${targetFile}
         shift 2
         writeCalls=$((writeCalls + 1))
-        if [[ "${mode}" == "xray" && "${targetFile}" == "/etc/padm/xray/conf/09_routing.json" ]]; then
+        if [[ "${mode}" == "xray" && "${targetFile}" == "${xrayRoot}/09_routing.json" ]]; then
             return 1
         fi
         if [[ "${mode}" == "sing-box" && "${targetFile}" == "/etc/padm/sing-box/conf/config/03_VLESS_WS_inbounds.json" ]]; then
@@ -6085,25 +6131,44 @@ runGeoUpdateReloadFailureRegression() (
         readUserCrontabContent() {
             printf 'read\n' >>"${reads}"
             [[ "${cronMode}" != read-fail ]] || return 1
-            [[ "${cronMode}" != exists ]] || printf '35 1 * * * bash /etc/padm/install.sh UpdateGeo\n'
+            case "${cronMode}" in
+            exists) printf '35 1 * * * bash /etc/padm/install.sh UpdateGeo\n' ;;
+            commented) printf '# 35 1 * * * /bin/bash /etc/padm/install.sh UpdateGeo\n' ;;
+            foreign) printf '5 5 * * * /usr/local/bin/keep UpdateGeo\n' ;;
+            esac
             return 0
         }
         installUserCrontabContent() {
             printf '%s\n' "$1" >>"${writes}"
             [[ "${cronMode}" != write-fail ]]
         }
-        for cronMode in exists read-fail write-fail success; do
+        for cronMode in exists read-fail write-fail success commented foreign; do
             : >"${reads}"
             : >"${writes}"
             local expected=1
-            [[ "${cronMode}" != exists && "${cronMode}" != success ]] || expected=0
+            case "${cronMode}" in exists | success | commented | foreign) expected=0 ;; esac
             regressionExpectStatus "${expected}" installCronUpdateGeo >/dev/null 2>&1 || return 1
             [[ "$(wc -l <"${reads}")" == 1 ]] || return 1
             if [[ "${cronMode}" == exists || "${cronMode}" == read-fail ]]; then
                 [[ ! -s "${writes}" ]] || return 1
             else
-                grep -q 'UpdateGeo' "${writes}" || return 1
+                grep -qx '35 1 \* \* \* /bin/bash /etc/padm/install.sh UpdateGeo >> /etc/padm/crontab_tls.log 2>&1' "${writes}" || return 1
+                case "${cronMode}" in
+                commented) grep -qx '# 35 1 \* \* \* /bin/bash /etc/padm/install.sh UpdateGeo' "${writes}" || return 1 ;;
+                foreign) grep -qx '5 5 \* \* \* /usr/local/bin/keep UpdateGeo' "${writes}" || return 1 ;;
+                esac
             fi
+        done
+        # 状态展示与启用判断一致，注释、无关命令和额外参数不能冒充维护任务。
+        local action line
+        for action in UpdateGeo RenewTLS; do
+            for line in "# 35 1 * * * /bin/bash /etc/padm/install.sh ${action}" \
+                "5 5 * * * /usr/local/bin/keep ${action}" \
+                "35 1 * * * /bin/bash /etc/padm/install.sh ${action} old" \
+                "@reboot /bin/bash /etc/padm/install.sh ${action}"; do
+                regressionExpectStatus 1 padmMaintenanceCronActive "${action}" <<<"${line}" || return 1
+            done
+            padmMaintenanceCronActive "${action}" <<<"@daily /bin/bash /etc/padm/install.sh ${action} >> /tmp/maintenance.log 2>&1" || return 1
         done
     ) || return 1
 

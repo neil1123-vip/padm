@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
-# core template managed config helpers
+# 核心模板复用运行时目录，写入、备份和服务读取保持一致。
 xrayTemplateConfigDir() {
-    printf '%s\n' "/etc/padm/xray/conf"
+    coreXrayConfigDir
 }
 
 xrayTemplateConfigFile() {
@@ -574,8 +574,8 @@ initXrayConfigApply() {
     [[ "${PADM_INSTALL_CLIENTS_PREPARED:-}" == true && -n "${currentClients:-}" ]] || coreTemplateCollectInitialClients xray || return 1
 
     # log
-    if [[ ! -f "/etc/padm/xray/conf/00_log.json" ]]; then
-        writeGeneratedJsonFile /etc/padm/xray/conf/00_log.json padm-xray-log <<EOF || { errorCard "Xray 日志配置模板提交失败"; return 1; }
+    if [[ ! -f "${configPath}00_log.json" ]]; then
+        writeGeneratedJsonFile "${configPath}00_log.json" padm-xray-log <<EOF || { errorCard "Xray 日志配置模板提交失败"; return 1; }
 {
   "log": {
     "error": "/etc/padm/xray/error.log",
@@ -586,8 +586,8 @@ initXrayConfigApply() {
 EOF
     fi
 
-    if [[ ! -f "/etc/padm/xray/conf/12_policy.json" ]]; then
-        writeGeneratedJsonFile /etc/padm/xray/conf/12_policy.json padm-xray-policy <<EOF || { errorCard "Xray policy 配置模板提交失败"; return 1; }
+    if [[ ! -f "${configPath}12_policy.json" ]]; then
+        writeGeneratedJsonFile "${configPath}12_policy.json" padm-xray-policy <<EOF || { errorCard "Xray policy 配置模板提交失败"; return 1; }
 {
   "policy": {
       "levels": {
@@ -603,8 +603,8 @@ EOF
 
     addXrayOutbound "z_direct_outbound" || return 1
     # dns
-    if [[ ! -f "/etc/padm/xray/conf/11_dns.json" ]]; then
-        writeGeneratedJsonFile /etc/padm/xray/conf/11_dns.json padm-xray-dns <<EOF || { errorCard "Xray DNS 配置模板提交失败"; return 1; }
+    if [[ ! -f "${configPath}11_dns.json" ]]; then
+        writeGeneratedJsonFile "${configPath}11_dns.json" padm-xray-dns <<EOF || { errorCard "Xray DNS 配置模板提交失败"; return 1; }
 {
     "dns": {
         "servers": [
@@ -615,7 +615,7 @@ EOF
 EOF
     fi
     # routing
-    writeGeneratedJsonFile /etc/padm/xray/conf/09_routing.json padm-xray-routing <<EOF || { errorCard "Xray routing 配置模板提交失败"; return 1; }
+    writeGeneratedJsonFile "${configPath}09_routing.json" padm-xray-routing <<EOF || { errorCard "Xray routing 配置模板提交失败"; return 1; }
 {
   "routing": {
     "rules": [
@@ -639,7 +639,7 @@ EOF
     # Trojan TCP
     if protocolSelectionIncludes "${selectCustomInstallType}" 29 "$1"; then
         fallbacksList='{"dest":31296,"xver":1},{"alpn":"h2","dest":31302,"xver":1}'
-        writeGeneratedJsonFile /etc/padm/xray/conf/04_trojan_TCP_inbounds.json padm-xray-trojan <<EOF || { errorCard "Xray Trojan TCP 入站模板提交失败"; return 1; }
+        writeGeneratedJsonFile "${configPath}04_trojan_TCP_inbounds.json" padm-xray-trojan <<EOF || { errorCard "Xray Trojan TCP 入站模板提交失败"; return 1; }
 {
 "inbounds":[
 	{
@@ -674,7 +674,7 @@ EOF
     # VLESS_WS_TLS
     if protocolSelectionIncludes "${selectCustomInstallType}" 21 "$1"; then
         fallbacksList=${fallbacksList}',{"path":"/'${customPath}'ws","dest":31297,"xver":1}'
-        writeGeneratedJsonFile /etc/padm/xray/conf/03_VLESS_WS_inbounds.json padm-xray-vless-ws <<EOF || { errorCard "Xray VLESS WS 入站模板提交失败"; return 1; }
+        writeGeneratedJsonFile "${configPath}03_VLESS_WS_inbounds.json" padm-xray-vless-ws <<EOF || { errorCard "Xray VLESS WS 入站模板提交失败"; return 1; }
 {
 "inbounds":[
     {
@@ -707,7 +707,7 @@ EOF
         initXrayXHTTPort || return 1
         initRealityKey || return 1
         initRealityMldsa65 || return 1
-        writeGeneratedJsonFile /etc/padm/xray/conf/12_VLESS_XHTTP_inbounds.json padm-xray-xhttp <<EOF || { errorCard "Xray XHTTP 入站模板提交失败"; return 1; }
+        writeGeneratedJsonFile "${configPath}12_VLESS_XHTTP_inbounds.json" padm-xray-xhttp <<EOF || { errorCard "Xray XHTTP 入站模板提交失败"; return 1; }
 {
 "inbounds":[
     {
@@ -759,7 +759,7 @@ EOF
     fi
     if protocolSelectionIncludes "${selectCustomInstallType}" 23 "$1"; then
         fallbacksList=${fallbacksList}',{"path":"/'${customPath}'","dest":31306,"xver":1}'
-        writeGeneratedJsonFile /etc/padm/xray/conf/11_VMess_HTTPUpgrade_inbounds.json padm-xray-vmess-httpupgrade <<EOF || { errorCard "Xray VMess HTTPUpgrade 入站模板提交失败"; return 1; }
+        writeGeneratedJsonFile "${configPath}11_VMess_HTTPUpgrade_inbounds.json" padm-xray-vmess-httpupgrade <<EOF || { errorCard "Xray VMess HTTPUpgrade 入站模板提交失败"; return 1; }
 {
     "inbounds":[
         {
@@ -787,7 +787,7 @@ EOF
     fi
     if protocolSelectionIncludes "${selectCustomInstallType}" 22 "$1"; then
         fallbacksList=${fallbacksList}',{"path":"/'${customPath}'vws","dest":31299,"xver":1}'
-        writeGeneratedJsonFile /etc/padm/xray/conf/05_VMess_WS_inbounds.json padm-xray-vmess-ws <<EOF || { errorCard "Xray VMess WS 入站模板提交失败"; return 1; }
+        writeGeneratedJsonFile "${configPath}05_VMess_WS_inbounds.json" padm-xray-vmess-ws <<EOF || { errorCard "Xray VMess WS 入站模板提交失败"; return 1; }
 {
     "inbounds":[
         {
@@ -815,7 +815,7 @@ EOF
     fi
     if protocolSelectionIncludes "${selectCustomInstallType}" 24 "$1"; then
         fallbacksList=${fallbacksList}',{"path":"/'${customPath}'grpc","dest":31301,"xver":1}'
-        writeGeneratedJsonFile /etc/padm/xray/conf/06_VLESS_GRPc_inbounds.json padm-xray-vless-grpc <<EOF || { errorCard "Xray VLESS gRPC 入站模板提交失败"; return 1; }
+        writeGeneratedJsonFile "${configPath}06_VLESS_GRPc_inbounds.json" padm-xray-vless-grpc <<EOF || { errorCard "Xray VLESS gRPC 入站模板提交失败"; return 1; }
 {
     "inbounds":[
         {
@@ -843,7 +843,7 @@ EOF
     fi
     if protocolSelectionIncludes "${selectCustomInstallType}" 25 "$1"; then
         fallbacksList=${fallbacksList}',{"path":"/'${customPath}'trojangrpc","dest":31304,"xver":1}'
-        writeGeneratedJsonFile /etc/padm/xray/conf/04_trojan_GRPc_inbounds.json padm-xray-trojan-grpc <<EOF || { errorCard "Xray Trojan gRPC 入站模板提交失败"; return 1; }
+        writeGeneratedJsonFile "${configPath}04_trojan_GRPc_inbounds.json" padm-xray-trojan-grpc <<EOF || { errorCard "Xray Trojan gRPC 入站模板提交失败"; return 1; }
 {
     "inbounds":[
         {
@@ -875,7 +875,7 @@ EOF
             frontendClients=$(initXrayClients 27) || return 1
             frontendTag=VLESSTCP
         fi
-        writeGeneratedJsonFile /etc/padm/xray/conf/02_VLESS_TCP_inbounds.json padm-xray-vless-tcp <<EOF || { errorCard "Xray VLESS TCP 入站模板提交失败"; return 1; }
+        writeGeneratedJsonFile "${configPath}02_VLESS_TCP_inbounds.json" padm-xray-vless-tcp <<EOF || { errorCard "Xray VLESS TCP 入站模板提交失败"; return 1; }
 {
     "inbounds":[
         {
@@ -915,7 +915,7 @@ EOF
 
     # Trojan TCP direct
     if [[ "$1" != "all" ]] && protocolSelectionIncludes "${selectCustomInstallType}" 28 "$1"; then
-        writeGeneratedJsonFile /etc/padm/xray/conf/28_trojan_TCP_direct_inbounds.json padm-xray-trojan-direct <<EOF || { errorCard "Xray Trojan TCP direct 入站模板提交失败"; return 1; }
+        writeGeneratedJsonFile "${configPath}28_trojan_TCP_direct_inbounds.json" padm-xray-trojan-direct <<EOF || { errorCard "Xray Trojan TCP direct 入站模板提交失败"; return 1; }
 {
     "inbounds":[
         {
@@ -958,7 +958,7 @@ EOF
         initXrayRealityPort || return 1
         initRealityKey || return 1
         initRealityMldsa65 || return 1
-        writeGeneratedJsonFile /etc/padm/xray/conf/07_VLESS_vision_reality_inbounds.json padm-xray-reality <<EOF || { errorCard "Xray Reality 入站模板提交失败"; return 1; }
+        writeGeneratedJsonFile "${configPath}07_VLESS_vision_reality_inbounds.json" padm-xray-reality <<EOF || { errorCard "Xray Reality 入站模板提交失败"; return 1; }
 {
   "inbounds": [
     {
@@ -1055,7 +1055,7 @@ EOF
         initXrayRealityGrpcPort || return 1
         initRealityKey || return 1
         initRealityMldsa65 || return 1
-        writeGeneratedJsonFile /etc/padm/xray/conf/08_VLESS_vision_gRPC_inbounds.json padm-xray-reality-grpc <<EOF || { errorCard "Xray Reality gRPC 入站模板提交失败"; return 1; }
+        writeGeneratedJsonFile "${configPath}08_VLESS_vision_gRPC_inbounds.json" padm-xray-reality-grpc <<EOF || { errorCard "Xray Reality gRPC 入站模板提交失败"; return 1; }
 {
   "inbounds": [
     {
