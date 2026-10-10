@@ -99,6 +99,8 @@ chmod 0600 "${SPEC}"
 newState() {
     local name=$1 spec=$2 candidate
     export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/${name}"
+    export PADM_DOCKER_SYSTEMD_DIR="${TEST_ROOT}/systemd-${name}"
+    mkdir "${PADM_DOCKER_SYSTEMD_DIR}"
     dockerInitializeStateRoot
     dockerStageBundle "${SOURCE_ROOT}" ffffffffffffffffffffffffffffffffffffffff
     dockerActivateStagedBundle

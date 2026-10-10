@@ -323,6 +323,8 @@ newState() {
     local name=$1
     export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-${name}"
     export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-${name}"
+    export PADM_DOCKER_SYSTEMD_DIR="${TEST_ROOT}/systemd-${name}"
+    mkdir "${PADM_DOCKER_SYSTEMD_DIR}"
     cp -R "${BASE_ROOT}" "${PADM_DOCKER_INSTALL_DIR}"
     mkdir "${PADM_DOCKER_BIN_DIR}"
     ln -s "${PADM_DOCKER_INSTALL_DIR}/bundle/install-docker.sh" "${PADM_DOCKER_BIN_DIR}/padm-docker"
@@ -742,6 +744,7 @@ runPty 11 ss-dual-port-conflict "${DUAL_SS_INPUT/24459/24445}" setup "${ASSET_AR
 # 通用编辑、复制和删除不重写 Shadowsocks 方法、密码、统计身份或核心。
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-ss-default"
 export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-ss-default"
+export PADM_DOCKER_SYSTEMD_DIR="${TEST_ROOT}/systemd-ss-default"
 CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
 SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
 cp -- "${SPEC}" "${TEST_ROOT}/ss-original.json"
@@ -907,6 +910,7 @@ done
 # NaiveProxy 复用通用编辑与同核复制；原生 URI 的服务器不能与冻结的证书域名分离。
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-naive-default"
 export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-naive-default"
+export PADM_DOCKER_SYSTEMD_DIR="${TEST_ROOT}/systemd-naive-default"
 CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
 SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
 cp -- "${SPEC}" "${TEST_ROOT}/naive-original.json"
@@ -965,6 +969,7 @@ jq -e '.tls.domain == "naive.example.com" and (.core.protocols | length) == 1 an
 # AnyTLS 复用通用字段编辑与同核复制，凭据、域名、核心和入口身份不能被重写。
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-anytls-default"
 export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-anytls-default"
+export PADM_DOCKER_SYSTEMD_DIR="${TEST_ROOT}/systemd-anytls-default"
 CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
 SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
 cp -- "${SPEC}" "${TEST_ROOT}/anytls-original.json"
@@ -1063,6 +1068,7 @@ done
 # 复用首配部署验证参数菜单、复制和取消，账号与 TLS 身份始终保持不变。
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-hy2-default"
 export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-hy2-default"
+export PADM_DOCKER_SYSTEMD_DIR="${TEST_ROOT}/systemd-hy2-default"
 CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
 SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
 cp -- "${SPEC}" "${TEST_ROOT}/hy2-original.json"
@@ -1122,6 +1128,7 @@ done
 # TLS 入口删除不得误删仍需证书的入口；最后保留 Shadowsocks 时仍清除无用 TLS 关系。
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-dual-hy2"
 export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-dual-hy2"
+export PADM_DOCKER_SYSTEMD_DIR="${TEST_ROOT}/systemd-dual-hy2"
 CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
 SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
 jq --slurpfile ss "${TEST_ROOT}/ss-original.json" '.core.protocols += [
@@ -1307,6 +1314,7 @@ if [[ "${SECTION}" == all || "${SECTION}" == core ]]; then
 # 安装新传输只派生已有 Reality 凭据，原入口和内部身份不得被替换。
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-xray-success"
 export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-xray-success"
+export PADM_DOCKER_SYSTEMD_DIR="${TEST_ROOT}/systemd-xray-success"
 CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
 : >"${EVENTS}"; : >"${VERIFY_LOG}"; : >"${ARGV_LOG}"
 SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
@@ -1407,6 +1415,7 @@ done
 
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-tuic-default"
 export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-tuic-default"
+export PADM_DOCKER_SYSTEMD_DIR="${TEST_ROOT}/systemd-tuic-default"
 CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
 SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
 cp -- "${SPEC}" "${TEST_ROOT}/tuic-original.json"
@@ -1459,6 +1468,7 @@ jq -e '.tls.domain == "tuic.example.com" and (.core.protocols | length) == 1' "$
 # 混合入口删除仍保留 TUIC 证书关系；最后删除 TUIC 后只撤销规格引用。
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-dual-tuic"
 export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-dual-tuic"
+export PADM_DOCKER_SYSTEMD_DIR="${TEST_ROOT}/systemd-dual-tuic"
 CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
 SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
 jq --slurpfile ss "${TEST_ROOT}/ss-original.json" '
@@ -1549,6 +1559,7 @@ done
 
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-trojan-xray"
 export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-trojan-xray"
+export PADM_DOCKER_SYSTEMD_DIR="${TEST_ROOT}/systemd-trojan-xray"
 CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
 SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
 cp -- "${SPEC}" "${TEST_ROOT}/trojan-original.json"
@@ -1604,6 +1615,7 @@ jq -e '.tls.domain == "trojan.example.com" and (.core.protocols | length) == 1' 
 # 混合 WS 删除不影响 direct TLS；最后消费者删除仅撤销规格引用。
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-dual-trojan-xray"
 export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-dual-trojan-xray"
+export PADM_DOCKER_SYSTEMD_DIR="${TEST_ROOT}/systemd-dual-trojan-xray"
 CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
 SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
 jq '.core.protocols += [
@@ -1676,6 +1688,7 @@ for vmessCase in vmess-single vmess-dual; do
 done
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-vmess-single"
 export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-vmess-single"
+export PADM_DOCKER_SYSTEMD_DIR="${TEST_ROOT}/systemd-vmess-single"
 CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
 SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
 VMESS_LISTENER=$(jq -r '.core.protocols[0].listener_id' "${SPEC}")
@@ -1796,6 +1809,7 @@ for httpupgradeCase in httpupgrade-xray httpupgrade-sing dual-httpupgrade-xray d
 done
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-httpupgrade-xray"
 export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-httpupgrade-xray"
+export PADM_DOCKER_SYSTEMD_DIR="${TEST_ROOT}/systemd-httpupgrade-xray"
 CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
 SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
 cp -- "${SPEC}" "${TEST_ROOT}/httpupgrade-original.json"
@@ -1917,6 +1931,7 @@ for grpcProtocol in 24 25; do
     done
     export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-grpc-tls-${grpcProtocol}-single"
     export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-grpc-tls-${grpcProtocol}-single"
+    export PADM_DOCKER_SYSTEMD_DIR="${TEST_ROOT}/systemd-grpc-tls-${grpcProtocol}-single"
     CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
     SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
     cp -- "${SPEC}" "${TEST_ROOT}/grpc-tls-original.json"
@@ -2028,6 +2043,7 @@ for fallbackProtocol in 27 29; do
     done
     export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state-fallback-${fallbackProtocol}-single"
     export PADM_DOCKER_BIN_DIR="${TEST_ROOT}/bin-fallback-${fallbackProtocol}-single"
+    export PADM_DOCKER_SYSTEMD_DIR="${TEST_ROOT}/systemd-fallback-${fallbackProtocol}-single"
     CLI="${PADM_DOCKER_BIN_DIR}/padm-docker"
     SPEC="${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
     cp -- "${SPEC}" "${TEST_ROOT}/fallback-original.json"
