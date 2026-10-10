@@ -286,6 +286,13 @@ showVlessRealityGrpcAccountsFromConfig() (
     local realityGRPCPublicKey=$4
     local realityGRPCMldsa65Verify=$5
     [[ -f "${configFile}" ]] || return 0
+    jq -e '[
+        .inbounds[0].streamSettings.realitySettings.publicKey,
+        .inbounds[0].streamSettings.realitySettings.mldsa65Verify,
+        .inbounds[0].streamSettings.realitySettings.serverNames[0],
+        .inbounds[0].tls.server_name,
+        .inbounds[0].tls.reality.public_key
+    ] | all(.[]; . == null or (type == "string" and (any(explode[]; . < 32 or . == 127) | not)))' "${configFile}" >/dev/null || return 1
     if jq -e '.inbounds[0].port' "${configFile}" >/dev/null 2>&1; then
         realityGRPCPort=$(corePortSubscriptionPort "$(jq -r '.inbounds[0].port' "${configFile}")" "${realityGRPCPort}") || return 1
     fi
