@@ -2958,6 +2958,38 @@ runInstallWorkflowRegression() (
     )
 
     (
+        # 真实入口不启用 pipefail；密钥摘要已输出后的失败必须保留原文件。
+        set +o pipefail
+        local root="${TMP_DIR}/install-signing-key-hash-failure"
+        local expectedSha256 operation targetFile status=0
+        local TMPDIR="${root}/tmp"
+        mkdir -p "${TMPDIR}"
+        printf 'fixture-signing-key\n' >"${root}/downloaded-key"
+        expectedSha256=$(command sha256sum "${root}/downloaded-key")
+        expectedSha256=${expectedSha256%% *}
+        downloadUrlToFileBounded() { cp "${root}/downloaded-key" "$2"; }
+        sha256sum() {
+            command sha256sum "$@" || return $?
+            return 17
+        }
+        gpg() { printf 'unexpected-gpg\n' >>"${root}/gpg.calls"; cat; }
+        failPackageInstallTransaction() { printf '%s\n' "$1" >&2; exit 1; }
+        for operation in installAptKeyringFromUrl installVerifiedSigningKeyFile; do
+            targetFile="${root}/${operation}.key"
+            printf 'original-key\n' >"${targetFile}"
+            if ("${operation}" fixture-url "${targetFile}" Nginx "${expectedSha256}"); then
+                printf '%s 摘要工具失败后仍提交密钥\n' "${operation}" >&2
+                status=1
+            fi
+            [[ "$(<"${targetFile}")" == original-key ]] || status=1
+        done
+        [[ ! -e "${root}/gpg.calls" ]] || status=1
+        ! regressionFindHasMatches "${TMPDIR}" -mindepth 1 || status=1
+        ! regressionFindHasMatches "${root}" -maxdepth 1 -name '.*.aptkey.*' -o -name '.*.rpmkey.*' || status=1
+        [[ "${status}" == 0 ]]
+    )
+
+    (
         # 已齐全的依赖不调用包管理器，缺包时保留完整安装命令和新增包记录。
         local packageManager missingPackage= packageCompleted=false install
         local installType=install-fixture installCalls=0 recordedTimeout= packageCommand=

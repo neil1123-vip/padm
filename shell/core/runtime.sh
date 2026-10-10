@@ -1697,8 +1697,7 @@ downloadGitHubReleaseAsset() {
         return 1
     fi
     expectedSha256=${digest#sha256:}
-    actualSha256=$(sha256sum "${outputPath}" | awk '{print $1}')
-    if [[ "${actualSha256}" != "${expectedSha256}" ]]; then
+    if ! actualSha256=$(sha256sum "${outputPath}") || [[ "${actualSha256%% *}" != "${expectedSha256}" ]]; then
         echoContent title "\n┌─ GitHub Release 校验 ──────────────────────────────"
         menuLine "下载文件 sha256 校验失败: ${assetName}"
         menuClose

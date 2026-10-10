@@ -89,7 +89,8 @@ installAptKeyringFromUrl() {
     fi
     if [[ -n "${expectedSha256}" ]]; then
         command -v sha256sum >/dev/null 2>&1 || { padmRemoveCleanupPath "${downloadedFile}"; padmRemoveCleanupPath "${stagedFile}"; failPackageInstallTransaction "${displayName} apt key 缺少 sha256sum"; }
-        actualSha256=$(sha256sum "${downloadedFile}" | awk '{print $1}') || { padmRemoveCleanupPath "${downloadedFile}"; padmRemoveCleanupPath "${stagedFile}"; failPackageInstallTransaction "${displayName} apt key 校验失败"; }
+        actualSha256=$(sha256sum "${downloadedFile}") || { padmRemoveCleanupPath "${downloadedFile}"; padmRemoveCleanupPath "${stagedFile}"; failPackageInstallTransaction "${displayName} apt key 校验失败"; }
+        actualSha256=${actualSha256%% *}
         if [[ "${actualSha256}" != "${expectedSha256}" ]]; then
             padmRemoveCleanupPath "${downloadedFile}"
             padmRemoveCleanupPath "${stagedFile}"
@@ -123,7 +124,8 @@ installVerifiedSigningKeyFile() {
         failPackageInstallTransaction "${displayName} key 下载失败"
     fi
     command -v sha256sum >/dev/null 2>&1 || { padmRemoveCleanupPath "${stagedFile}"; failPackageInstallTransaction "${displayName} key 缺少 sha256sum"; }
-    actualSha256=$(sha256sum "${stagedFile}" | awk '{print $1}') || { padmRemoveCleanupPath "${stagedFile}"; failPackageInstallTransaction "${displayName} key 校验失败"; }
+    actualSha256=$(sha256sum "${stagedFile}") || { padmRemoveCleanupPath "${stagedFile}"; failPackageInstallTransaction "${displayName} key 校验失败"; }
+    actualSha256=${actualSha256%% *}
     if [[ "${actualSha256}" != "${expectedSha256}" ]]; then
         padmRemoveCleanupPath "${stagedFile}"
         failPackageInstallTransaction "${displayName} key sha256 校验失败"
