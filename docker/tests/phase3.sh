@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+PHASE3_SCOPE=${PADM_DOCKER_PHASE3_SCOPE:-full}
+case "${PHASE3_SCOPE}" in
+full|edit|entries) ;;
+*) printf 'docker-phase3-regression-fail: unknown scope %s\n' "${PHASE3_SCOPE}" >&2; exit 1 ;;
+esac
+
 export FAKE_PHASE3_HOST_SYSTEM FAKE_PHASE3_HOST_STAT
 FAKE_PHASE3_HOST_SYSTEM=$(uname -s)
 FAKE_PHASE3_HOST_STAT=$(command -v stat)
@@ -304,6 +310,7 @@ jq --slurpfile reality "${REALITY_XRAY_SPEC}" '.core.protocols += $reality[0].co
 jq '.core.protocols[0].id = 31' "${REALITY_XRAY_SPEC}" >"${UNSUPPORTED_SPEC}"
 writeRealitySpec "${ROLLBACK_SPEC}" xray changed-after-failure 24444
 
+if [[ "${PHASE3_SCOPE}" != entries ]]; then
 SUBSCRIPTION_UNIT_ROOT="${TEST_ROOT}/subscription-unit"
 mkdir -p "${SUBSCRIPTION_UNIT_ROOT}"
 printf 'vless://unit-test\n' >"${SUBSCRIPTION_UNIT_ROOT}/0123456789abcdef"
@@ -318,8 +325,10 @@ assert module.read_subscription(sys.argv[2], "0123456789abcdef") == b"vless://un
 assert module.TOKEN.fullmatch("0123456789abcdef")
 assert not module.TOKEN.fullmatch("../escape")
 PY
+fi
 
 runControl 0 install install --source "${PROJECT_ROOT}"
+if [[ "${PHASE3_SCOPE}" != entries ]]; then
 runControl 0 unconfigured-status status
 grep -qxF 'configured=no' "${CONTROL_LOG}" || fail 'fresh install did not report configured=no'
 
@@ -368,6 +377,7 @@ jq -e '.inbounds[0].type == "vless" and .inbounds[0].tls.reality.enabled == true
     "${DOCKER_ROOT}/config/sing-box/config.json" >/dev/null || fail 'sing-box Reality config is wrong'
 [[ ! -s "${DOCKER_ROOT}/config/xray/config.json" ]] || fail 'old Xray config survived core switch'
 runControl 0 edit-sing-box-preview edit --preview
+fi
 
 CERT_FILE="${TEST_ROOT}/proxy.example.com.crt"
 KEY_FILE="${TEST_ROOT}/proxy.example.com.key"
@@ -378,6 +388,7 @@ runControl 0 tls-install tls install --domain proxy.example.com --cert "${CERT_F
     --key "${KEY_FILE}" --ops-image "${OPS_IMAGE}"
 [[ -f "${DOCKER_ROOT}/secrets/tls/proxy.example.com.crt" ]] || fail 'TLS certificate was not installed'
 
+if [[ "${PHASE3_SCOPE}" != entries ]]; then
 runControl 0 configure-websocket configure --spec "${WS_SPEC}"
 jq -e '(.compose.profiles | sort) == ["core-xray", "nginx", "subscription"]' \
     "${DOCKER_ROOT}/deployment.json" >/dev/null || fail 'Nginx profiles are wrong'
@@ -411,6 +422,7 @@ grep -q 'vless://11111111-1111-4111-8111-111111111111@proxy.example.com:24443.*s
 grep -q 'vless://22222222-2222-4222-8222-222222222222@proxy.example.com:24444' \
     "${DOCKER_ROOT}/data/subscription/0123456789abcdef" ||
     fail 'mixed Xray deployment lost its WebSocket node'
+fi
 
 # 编辑回归复用真实生成器和原有事务模拟，只比较生效配置，不把备份算作状态变化。
 editLiveHash() {
@@ -469,6 +481,7 @@ jq '
     if .id == 21 then .websocket += {backend_port: 31297, tls_port: 8443} else . end) |
   .core.protocols[1].public_port = 25443
 ' "${MIXED_WS_SPEC}" >"${EDIT_SPEC}"
+if [[ "${PHASE3_SCOPE}" != entries ]]; then
 # 旧控制包只能接收 v1，新控制包声明兼容三个受管规格版本。
 OLD_SCHEMA_BUNDLE="${TEST_ROOT}/old-schema-bundle"
 NEW_SCHEMA_BUNDLE="${TEST_ROOT}/new-schema-bundle"
@@ -746,7 +759,29 @@ if [[ "${FAKE_PHASE3_HOST_SYSTEM}" == Linux ]]; then
         fail 'interactive entry deletion left a stale deployment listener'
     assertEditCleanup
 fi
+fi
 
+if [[ "${PHASE3_SCOPE}" == entries ]]; then
+    # 独立生成切点前的受管状态，保留非零流量和 Geo，避免弱化后续恢复断言。
+    jq '.schema_version = 3 | .core.secondary_type = null |
+        .core.protocols |= map(.core = "xray")' "${EDIT_SPEC}" >"${TEST_ROOT}/edit-v3.json"
+    runControl 0 configure-entry-baseline configure --spec "${TEST_ROOT}/edit-v3.json"
+    mkdir -p "${DOCKER_ROOT}/data/traffic" "${DOCKER_ROOT}/config/xray/geo"
+    printf '%s\n' '{"schema_version":1,"accounts":{"11111111-1111-4111-8111-111111111111":{"name":"main-xray","upload":7,"download":11,"limit_bytes":0,"baseline":{}}}}' \
+        >"${DOCKER_ROOT}/data/traffic/state.json"
+    chmod 0600 "${DOCKER_ROOT}/data/traffic/state.json"
+    printf 'geoip-fixture\n' >"${DOCKER_ROOT}/config/xray/geo/geoip.dat"
+    printf 'geosite-fixture\n' >"${DOCKER_ROOT}/config/xray/geo/geosite.dat"
+    jq -n --arg geoip "$(sha256sum "${DOCKER_ROOT}/config/xray/geo/geoip.dat" | cut -d ' ' -f1)" \
+        --arg geosite "$(sha256sum "${DOCKER_ROOT}/config/xray/geo/geosite.dat" | cut -d ' ' -f1)" \
+        '{schema_version:1,version:"202610070140",enabled:false,
+          sha256:{"geoip.dat":$geoip,"geosite.dat":$geosite}}' >"${DOCKER_ROOT}/config/xray/geo/state.json"
+    jq '.services.xray.environment.XRAY_LOCATION_ASSET = "/etc/padm/xray/geo"' \
+        "${DOCKER_ROOT}/compose.json" >"${TEST_ROOT}/geo-compose.json"
+    cp -- "${TEST_ROOT}/geo-compose.json" "${DOCKER_ROOT}/compose.json"
+fi
+
+if [[ "${PHASE3_SCOPE}" != edit ]]; then
 # 多入口复用既有凭据；身份、核心端口与 TLS 端口必须由完整规格明确记录。
 MULTI_SPEC="${TEST_ROOT}/multi-v2.json"
 jq '
@@ -1059,7 +1094,9 @@ grep -qxF 'configured=yes' "${CONTROL_LOG}" || fail 'configured status was not r
 runControl 0 validate-persistence validate
 grep -qxF 'Docker 部署配置校验通过' "${CONTROL_LOG}" || fail 'validate did not report success'
 runControl 0 restart-up up
+fi
 
+if [[ "${PHASE3_SCOPE}" != entries ]]; then
 MATRIX_FILE="${PROJECT_ROOT}/docker/contracts/features.json"
 REGISTRY_FILE="${TEST_ROOT}/protocol-registry.json"
 bash -c 'source "$1"; protocolCapabilityRegistry' _ "${PROJECT_ROOT}/shell/core/protocols.sh" |
@@ -1200,5 +1237,6 @@ del(.feature_matrix["reality-target-management"])
 .feature_matrix["reality-parameter-management"].status = "deferred"
 .feature_matrix["reality-target-management"].status = "deferred"
 EOF
+fi
 
 printf 'docker-phase3-regression-ok\n'

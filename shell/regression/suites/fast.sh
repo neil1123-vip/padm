@@ -66,7 +66,8 @@ listRegressionDockerContractsChildSelectors() {
         docker-routing-core-policy-lifecycle \
         docker-routing-dns-hosts-workflow \
         docker-routing-direct-block-workflow \
-        docker-phase3 \
+        docker-phase3-edit \
+        docker-phase3-entries \
         docker-setup-encrypted-udp \
         docker-setup-encrypted-tcp \
         docker-setup-transports \
@@ -118,14 +119,13 @@ listRegressionDockerContractsFastChildSelectors() {
 }
 
 listRegressionDockerContractsFastHeavyChildSelectors() {
-    printf '%s\n' docker-sites docker-entry-port-alias docker-menu
+    printf '%s\n' docker-sites docker-entry-port-alias docker-menu docker-control-state
 }
 
 listRegressionDockerContractsFastRestChildSelectors() {
-    # 按云端实测长任务优先，站点与入口别名由另一个隔离分片执行。
+    # 按云端实测长任务优先，将控制状态移到仍有 worker 空位的分片。
     printf '%s\n' \
         docker-phase1 \
-        docker-control-state \
         docker-control-client \
         docker-tproxy-ownership \
         docker-http-relay \
@@ -179,7 +179,7 @@ listRegressionDockerContractsRealityChildSelectors() {
 }
 
 listRegressionDockerContractsRealityMetadataChildSelectors() {
-    printf '%s\n' docker-reality-parameters docker-reality-target-library
+    printf '%s\n' docker-reality-parameters docker-reality-target-library docker-reality-targets-selection
 }
 
 listRegressionDockerContractsSetupBasicChildSelectors() {
@@ -256,6 +256,14 @@ runDockerRoutingCorePolicyLifecycleRegression() {
 
 runDockerPhase4MaintenanceRegression() {
     PADM_DOCKER_PHASE4_SCOPE=maintenance bash "${PROJECT_ROOT}/docker/tests/phase4.sh"
+}
+
+runDockerPhase3EditRegression() {
+    PADM_DOCKER_PHASE3_SCOPE=edit bash "${PROJECT_ROOT}/docker/tests/phase3.sh"
+}
+
+runDockerPhase3EntriesRegression() {
+    PADM_DOCKER_PHASE3_SCOPE=entries bash "${PROJECT_ROOT}/docker/tests/phase3.sh"
 }
 
 runDockerPhase4LifecycleRegression() {
@@ -449,6 +457,8 @@ registerRegressionFunctionLeaf docker-tls runDockerTlsRegression
 registerRegressionFunctionLeaf docker-renewal runDockerRenewalRegression
 registerRegressionFunctionLeaf docker-phase2 runDockerPhase2Regression
 registerRegressionFunctionLeaf docker-phase3 runDockerPhase3Regression
+registerRegressionFunctionLeaf docker-phase3-edit runDockerPhase3EditRegression
+registerRegressionFunctionLeaf docker-phase3-entries runDockerPhase3EntriesRegression
 registerRegressionFunctionLeaf docker-phase4 runDockerPhase4Regression
 registerRegressionFunctionLeaf docker-fail2ban-real runDockerFail2banRealRegression
 registerRegressionFunctionLeaf docker-fail2ban-source-real runDockerFail2banSourceRealRegression
