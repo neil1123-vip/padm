@@ -6,6 +6,7 @@ import ipaddress
 import json
 import os
 from pathlib import Path
+import pwd
 import re
 import selectors
 import shutil
@@ -21,8 +22,10 @@ EMITTER_EXES = MASTER_EXES + (
     "/usr/libexec/openssh/sshd-session",
     "/usr/lib/ssh/sshd-session",
 )
+PRIVSEP_EXES = MASTER_EXES + ("/usr/lib/openssh/sshd-auth",)
 TIMEOUT = 30
 MAX_OUTPUT = 1024 * 1024
+MAX_SOCKET_OWNERS = 4
 
 
 class Failure(Exception):
@@ -197,7 +200,7 @@ def safe_executable(path):
     return str(canonical), *identity(after), digest.hexdigest()
 
 
-def read_process(pid, allowed_exes):
+def read_process(pid, allowed_exes, expected_uid=0):
     root = Path("/proc") / str(pid)
     before = (root / "stat").read_text()
     fields = before[before.rindex(")") + 2:].split()
@@ -205,7 +208,7 @@ def read_process(pid, allowed_exes):
                     (root / "status").read_text(), re.MULTILINE)
     exe = os.readlink(root / "exe")
     allowed = {str(Path(value).resolve()) for value in allowed_exes}
-    if (not uid or any(int(value) != 0 for value in uid.groups())
+    if (not uid or any(int(value) != expected_uid for value in uid.groups())
             or exe not in allowed or len(fields) < 47):
         raise Failure("SSH 进程身份或权限不可核验")
     executable = safe_executable(exe)
@@ -219,7 +222,7 @@ def read_process(pid, allowed_exes):
     generation = tuple(int(fields[index]) for index in (23, 24, 25, 45, 46))
     output = {
         "pid": pid, "ppid": int(fields[1]), "starttime": int(fields[19]),
-        "uid": (0, 0, 0, 0), "exe": exe, "exe_identity": executable,
+        "uid": (expected_uid,) * 4, "exe": exe, "exe_identity": executable,
         "exec_generation": generation, "netns": netns, "boot_id": boot_id(),
     }
     final = (root / "stat").read_text()
@@ -233,7 +236,8 @@ def read_process(pid, allowed_exes):
             or tuple(int(final_fields[i]) for i in (23, 24, 25, 45, 46)) != generation
             or os.readlink(root / "exe") != exe
             or os.readlink(root / "ns/net") != netns
-            or not final_uid or any(int(value) != 0 for value in final_uid.groups())):
+            or not final_uid
+            or any(int(value) != expected_uid for value in final_uid.groups())):
         raise Failure("SSH 进程在核验期间发生变化")
     return output
 
@@ -264,9 +268,13 @@ def get_accepted(local, port, source, sport, deadline=None):
     matching = [row for row in rows if row["state"] == "ESTAB"
                 and row["local"] == (str(local), port)
                 and row["remote"] == (str(source), sport)]
-    if len(matching) != 1 or len(matching[0]["owners"]) != 1:
+    if len(matching) != 1:
         raise Failure("SSH 新连接的实时端点或所有者不唯一")
-    return matching[0]
+    owners = matching[0]["owners"]
+    if (not 1 <= len(owners) <= MAX_SOCKET_OWNERS
+            or len({pid for pid, _fd in owners}) != len(owners)):
+        raise Failure("SSH 新连接的套接字所有者重复或超出范围")
+    return {**matching[0], "owners": tuple(sorted(owners))}
 
 
 def verify_addresses(local, source, deadline=None):
@@ -381,21 +389,50 @@ def verify_event(event, master, local, port, source, deadline):
             or emitter["starttime"] * 1000000 > event["timestamp"] * ticks):
         raise Failure("SSH 日志进程与目标监听进程不属于同一次连接")
     accepted = get_accepted(local, port, source, event["sport"], deadline)
-    owner = accepted["owners"][0]
-    if owner[0] != emitter["pid"]:
+    root_owners = [owner for owner in accepted["owners"] if owner[0] == emitter["pid"]]
+    if len(root_owners) != 1:
         raise Failure("SSH 日志进程没有持有挑战连接")
+    owner = root_owners[0]
     socket_fd(*owner, accepted["inode"])
+    extra_owners = [item for item in accepted["owners"] if item != owner]
+    children, privsep_uid = [], None
+    if extra_owners:
+        try:
+            account = pwd.getpwnam("sshd")
+        except KeyError:
+            raise Failure("SSH 共享套接字缺少可信 privsep 专用账号") from None
+        privsep_uid = account.pw_uid
+        if account.pw_name != "sshd" or privsep_uid <= 0:
+            raise Failure("SSH 共享套接字的 privsep 专用账号无效")
+        for child_pid, child_fd in extra_owners:
+            child = read_process(child_pid, PRIVSEP_EXES, privsep_uid)
+            if (child["ppid"] != emitter["pid"]
+                    or child["uid"] != (privsep_uid,) * 4
+                    or child["boot_id"] != emitter["boot_id"]
+                    or child["netns"] != emitter["netns"]
+                    or child["starttime"] * 1000000 > event["timestamp"] * ticks):
+                raise Failure("SSH 共享套接字包含未核验的 privsep 子进程")
+            socket_fd(child_pid, child_fd, accepted["inode"])
+            children.append(child)
     if (get_listener(local, port, deadline) != master
             or read_process(event["pid"], EMITTER_EXES) != emitter
             or get_accepted(local, port, source, event["sport"], deadline) != accepted):
         raise Failure("SSH 监听、日志进程或挑战连接在核验期间变化")
+    if extra_owners:
+        if pwd.getpwnam("sshd").pw_uid != privsep_uid:
+            raise Failure("SSH privsep 专用账号在核验期间变化")
+        for child, (child_pid, child_fd) in zip(children, extra_owners):
+            if read_process(child_pid, PRIVSEP_EXES, privsep_uid) != child:
+                raise Failure("SSH privsep 子进程代次在核验期间变化")
+            socket_fd(child_pid, child_fd, accepted["inode"])
     socket_fd(*owner, accepted["inode"])
     if time.monotonic() >= deadline:
         raise Failure("SSH 来源核验已超时")
-    return emitter, accepted
+    # 私有证据保留共享进程代次，连续两次核验不能仅比较 PID 与 fd。
+    return emitter, ({**accepted, "privsep": tuple(children)} if children else accepted)
 
 
-def witness(local, port, source, nonce):
+def witness_evidence(local, port, source, nonce):
     try:
         verify_addresses(local, source)
         master = get_listener(local, port)
@@ -431,9 +468,9 @@ def witness(local, port, source, nonce):
             if second_evidence != first_evidence:
                 raise Failure("SSH 监听、日志进程或挑战连接代次发生变化")
             return {
-                "scope": "ssh-source-only", "source_verified": True,
-                "runtime_configuration_verified": False, "jail_ready": False,
-                "target": str(local), "port": port, "source": str(source),
+                "master": master, "record": row, "event": event,
+                "emitter": second_evidence[0], "accepted": second_evidence[1],
+                "cursor": cursor, "fresh_us": fresh_us, "deadline": deadline,
             }
         if rows:
             last = rows[-1]
@@ -447,6 +484,15 @@ def witness(local, port, source, nonce):
             fresh_us = max(fresh_us, int(last["__MONOTONIC_TIMESTAMP"]))
         time.sleep(min(0.2, max(0, deadline - time.monotonic())))
     raise Failure("SSH 来源核验超时，未获得完整的新连接证据")
+
+
+def witness(local, port, source, nonce):
+    witness_evidence(local, port, source, nonce)
+    return {
+        "scope": "ssh-source-only", "source_verified": True,
+        "runtime_configuration_verified": False, "jail_ready": False,
+        "target": str(local), "port": port, "source": str(source),
+    }
 
 
 def main(args):
