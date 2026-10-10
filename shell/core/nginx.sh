@@ -76,11 +76,11 @@ realityStreamXrayConfDir() {
 }
 
 realityStreamVisionConfigFile() {
-    echo "${PADM_REALITY_STREAM_VISION_CONFIG_FILE:-${configPath}07_VLESS_vision_reality_inbounds.json}"
+    echo "${PADM_REALITY_STREAM_VISION_CONFIG_FILE:-${PADM_VLESS_REALITY_CONFIG_FILE:-${configPath}07_VLESS_vision_reality_inbounds.json}}"
 }
 
 realityStreamXHTTPConfigFile() {
-    echo "${PADM_REALITY_STREAM_XHTTP_CONFIG_FILE:-${configPath}12_VLESS_XHTTP_inbounds.json}"
+    echo "${PADM_REALITY_STREAM_XHTTP_CONFIG_FILE:-${PADM_VLESS_XHTTP_CONFIG_FILE:-${configPath}12_VLESS_XHTTP_inbounds.json}}"
 }
 
 realityStreamNginxSupportsStream() {

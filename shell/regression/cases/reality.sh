@@ -3160,6 +3160,35 @@ runRealityStreamSplitRegression() (
     fi
     if [[ "${mode}" == input ]]; then return 0; fi
 
+    (
+        # stream 专属路径优先；未设置时应与协议入口共用 canonical 配置。
+        local PADM_VLESS_REALITY_CONFIG_FILE="${root}/canonical-vision.json"
+        local PADM_VLESS_XHTTP_CONFIG_FILE="${root}/canonical-xhttp.json"
+        [[ "$(realityStreamVisionConfigFile)" == "${PADM_REALITY_STREAM_VISION_CONFIG_FILE}" ]] || return 1
+        [[ "$(realityStreamXHTTPConfigFile)" == "${PADM_REALITY_STREAM_XHTTP_CONFIG_FILE}" ]] || return 1
+        local PADM_REALITY_STREAM_VISION_CONFIG_FILE= PADM_REALITY_STREAM_XHTTP_CONFIG_FILE=
+        local configPath="${root}/canonical-default/"
+        local defaultChoice=1 canonicalBefore
+        [[ "$(realityStreamVisionConfigFile)" == "${PADM_VLESS_REALITY_CONFIG_FILE}" ]] || return 1
+        [[ "$(realityStreamXHTTPConfigFile)" == "${PADM_VLESS_XHTTP_CONFIG_FILE}" ]] || return 1
+        mkdir -p "${configPath}" || return 1
+        printf 'unchanged\n' >"${configPath}07_VLESS_vision_reality_inbounds.json"
+        printf 'unchanged\n' >"${configPath}12_VLESS_XHTTP_inbounds.json"
+        canonicalBefore=$(sha256sum "${configPath}"*.json)
+        jq '.inbounds[0].port = 11443' "${root}/vision.json" >"${PADM_VLESS_REALITY_CONFIG_FILE}" || return 1
+        cp "${root}/xhttp.json" "${PADM_VLESS_XHTTP_CONFIG_FILE}" || return 1
+        configureRealityStreamSplit || return 1
+        jq -e '.inbounds[0].listen == "127.0.0.1" and .inbounds[0].port == 2443' "${PADM_VLESS_REALITY_CONFIG_FILE}" >/dev/null || return 1
+        disableRealityStreamSplit || return 1
+        jq -e '.inbounds[0].port == 11443' "${PADM_VLESS_REALITY_CONFIG_FILE}" >/dev/null || return 1
+        defaultChoice=2
+        configureRealityStreamSplit || return 1
+        jq -e '.inbounds[0].listen == "127.0.0.1" and .inbounds[0].port == 2444' "${PADM_VLESS_XHTTP_CONFIG_FILE}" >/dev/null || return 1
+        disableRealityStreamSplit || return 1
+        jq -e '.inbounds[0].listen == "0.0.0.0" and .inbounds[0].port == 9443' "${PADM_VLESS_XHTTP_CONFIG_FILE}" >/dev/null || return 1
+        [[ "$(sha256sum "${configPath}"*.json)" == "${canonicalBefore}" ]] || return 1
+    ) || return 1
+
     aliasFile="${configPath}02_dokodemodoor_inbounds_2053_default.json"
     aliasXHTTPFile="${configPath}02_dokodemodoor_inbounds_2083.json"
     ignoredFile="${configPath}02_dokodemodoor_inbounds_hysteria_2053.json"

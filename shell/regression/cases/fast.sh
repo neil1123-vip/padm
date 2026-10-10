@@ -2042,6 +2042,23 @@ EOF
         [[ "${masquerade}" == "false" ]]
         [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
 
+        (
+            # 非 RHEL 的活跃 firewalld 同样支持添加和旧运行态读取，不要求 iptables。
+            local rhelLike=false inputCount=1 hoppingMenuChoice=1
+            iptables() { return 99; }
+            iptables-save() { return 99; }
+            portHoppingMenu hysteria2 || return 1
+            padmFirewallStateHas 'forward:firewalld:udp:33000:33002:16295:owned=33000,33001,33002' || return 1
+            padmFirewallStateRemove 'forward:firewalld:udp:33000:33002:16295:owned=33000,33001,33002' || return 1
+            readPortHopping hysteria2 16295 || return 1
+            [[ "${hysteria2PortHopping}" == 33000-33002 ]] || return 1
+            hoppingMenuChoice=3
+            portHoppingMenu hysteria2 || return 1
+            deletePortHoppingRules hysteria2 33000 33002 16295 || return 1
+            [[ "${#fixtureForwardPorts[@]}" == 0 && "${masquerade}" == false ]] || return 1
+            [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]] || return 1
+        ) || return 1
+
         inputCount=1
         addPortHopping hysteria2 16295
         removeMasqueradeFailure=true
