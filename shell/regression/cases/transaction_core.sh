@@ -6456,6 +6456,18 @@ JSON
         regressionExpectStatus 1 applyTraditionalTlsAlpn '["h2","http/1.1"]' >/dev/null 2>&1
         jq -e '.inbounds[0].streamSettings.tlsSettings.alpn == ["h2","http/1.1"]' "${alpnConfig}" >/dev/null
         [[ "$(<"${alpnConfig}.alpn.bak")" == "${originalContent}" ]]
+        # 回滚失败的原始备份不可被后续 ALPN 修改覆盖。
+        local failedContent previousReloads
+        failedContent=$(<"${alpnConfig}")
+        previousReloads=$(<"${reloadLog}")
+        regressionExpectStatus 1 applyTraditionalTlsAlpn '["http/1.1","h2"]' >/dev/null 2>&1
+        [[ "$(<"${alpnConfig}")" == "${failedContent}" &&
+            "$(<"${alpnConfig}.alpn.bak")" == "${originalContent}" &&
+            "$(<"${reloadLog}")" == "${previousReloads}" &&
+            ! -e "${alpnConfig}.tmp" ]] || {
+            printf 'ALPN 后续修改覆盖旧恢复证据或执行重载\n' >&2
+            return 1
+        }
     ) || return 1
     printf '%s\n' "${originalContent}" >"${alpnConfig}"
     rm -f "${alpnConfig}.alpn.bak"
@@ -6852,6 +6864,77 @@ JSON
     [[ "$(wc -l <"${reloadCountFile}" | tr -d ' ')" == "1" ]]
     [[ "$(wc -l <"${refreshCountFile}" | tr -d ' ')" == "1" ]]
     refreshMode=success
+
+    (
+        # 输入中断不能写入新 Salt；完整空回车仍可生成随机值。
+        local saltFile="${tmpRoot}/transaction-subscribe-salt"
+        local branch failMode readCalls=0
+        local AUTO_INSTALL= historySaltStatus= subscribeSalt=preserved
+        initRandomSalt() { printf 'generated-salt\n'; }
+        for branch in history replacement fresh; do
+            for failMode in eof partial; do
+                readCalls=0
+                if [[ "${branch}" == fresh ]]; then
+                    rm -f "${saltFile}"
+                else
+                    printf 'old-salt\n' >"${saltFile}"
+                fi
+                subscribeSalt=preserved historySaltStatus=
+                autoRead() {
+                    readCalls=$((readCalls + 1))
+                    if [[ "${branch}" == replacement && "${readCalls}" == 1 ]]; then
+                        printf -v "$3" '%s' n
+                        return 0
+                    fi
+                    if [[ "${failMode}" == partial ]]; then
+                        printf -v "$3" '%s' partial-salt
+                        return 1
+                    fi
+                    read -r "$3" </dev/null
+                }
+                regressionExpectStatus 1 resolveSubscribeSalt "${saltFile}" "" || {
+                    printf 'Salt 输入失败仍返回成功：%s/%s\n' "${branch}" "${failMode}" >&2
+                    return 1
+                }
+                if [[ "${branch}" == fresh ]]; then
+                    [[ ! -e "${saltFile}" ]] || return 1
+                else
+                    [[ "$(<"${saltFile}")" == old-salt ]] || return 1
+                fi
+            done
+        done
+        autoRead() { printf -v "$3" '%s' ""; return 0; }
+        resolveSubscribeSalt "${saltFile}" "" || return 1
+        [[ "$(<"${saltFile}")" == generated-salt && "${subscribeSalt}" == generated-salt ]] || return 1
+        autoRead() { printf -v "$3" '%s' y; return 0; }
+        resolveSubscribeSalt "${saltFile}" "" || return 1
+        [[ "$(<"${saltFile}")" == generated-salt && "${subscribeSalt}" == generated-salt ]] || return 1
+        (
+            local outputRoot="${tmpRoot}/transaction-salt-output" coreInstallType=1
+            local PADM_SUBSCRIBE_LOCAL_DIR="${outputRoot}/local" PADM_SUBSCRIBE_DIR="${outputRoot}/public"
+            mkdir -p "${PADM_SUBSCRIBE_LOCAL_DIR}/default" "${PADM_SUBSCRIBE_DIR}/default" || return 1
+            printf 'old-output\n' >"${PADM_SUBSCRIBE_LOCAL_DIR}/default/user"
+            printf 'old-public\n' >"${PADM_SUBSCRIBE_DIR}/default/user"
+            readNginxSubscribe() { return 0; }
+            showAccounts() { printf 'unexpected\n' >"${outputRoot}/generated"; }
+            for failMode in eof partial; do
+                printf 'old-salt\n' >"${PADM_SUBSCRIBE_LOCAL_DIR}/subscribeSalt"
+                subscribeSalt=old-salt
+                autoRead() {
+                    if [[ "${failMode}" == partial ]]; then
+                        printf -v "$3" '%s' partial-salt
+                        return 1
+                    fi
+                    read -r "$3" </dev/null
+                }
+                regressionExpectStatus 1 generateSubscribeOutputsUnlocked "" true >/dev/null || return 1
+                [[ "$(<"${PADM_SUBSCRIBE_LOCAL_DIR}/subscribeSalt")" == old-salt &&
+                    "${subscribeSalt}" == old-salt && ! -e "${outputRoot}/generated" &&
+                    "$(<"${PADM_SUBSCRIBE_LOCAL_DIR}/default/user")" == old-output &&
+                    "$(<"${PADM_SUBSCRIBE_DIR}/default/user")" == old-public ]] || return 1
+            done
+        ) || return 1
+    ) || return 1
 
     (
         # 提交和校验中断只恢复文件，重载中断同时恢复旧核心；订阅中断保留已生效配置。

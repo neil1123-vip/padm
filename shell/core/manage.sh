@@ -1078,6 +1078,10 @@ applyTraditionalTlsAlpn() {
     configFile=$(traditionalTlsFallbackConfigFile)
     configFile=$(padmRequireSafeAbsolutePath "${configFile}") || { errorCard "传统 TLS fallback 配置路径异常"; return 1; }
     backupFile="${configFile}.alpn.bak"
+    if [[ -e "${backupFile}" || -L "${backupFile}" ]]; then
+        errorCard "上次 ALPN 配置备份仍未处理，已取消修改" "请先检查 ${configFile} 和 ${backupFile}"
+        return 1
+    fi
     if [[ ! -f "${configFile}" ]]; then
         errorCard "未检测到传统 TLS fallback 入站配置"
         return 1
@@ -2688,11 +2692,11 @@ resolveSubscribeSalt() {
     existingSalt=$(readSubscribeSalt "${subscribeSaltFile}")
     if [[ -n "${existingSalt}" ]]; then
         if [[ -z "${renewSalt}" ]]; then
-            autoRead subscribe_history_salt "读取到上次安装设置的Salt [${existingSalt}]，是否使用？[y/n]:" historySaltStatus
+            autoRead subscribe_history_salt "读取到上次安装设置的Salt [${existingSalt}]，是否使用？[y/n]:" historySaltStatus || return 1
             if [[ "${historySaltStatus}" == "y" ]]; then
                 subscribeSalt=${existingSalt}
             else
-                autoRead subscribe_salt "请输入salt值, [回车]使用随机:" subscribeSalt
+                autoRead subscribe_salt "请输入salt值, [回车]使用随机:" subscribeSalt || return 1
             fi
         else
             subscribeSalt=${existingSalt}
@@ -2700,7 +2704,7 @@ resolveSubscribeSalt() {
     elif [[ -n "${renewSalt}" || -n "${AUTO_INSTALL:-}" ]]; then
         subscribeSalt=$(initRandomSalt) || return 1
     else
-        autoRead subscribe_salt "请输入salt值, [回车]使用随机:" subscribeSalt
+        autoRead subscribe_salt "请输入salt值, [回车]使用随机:" subscribeSalt || return 1
     fi
 
     if [[ -z "${subscribeSalt}" ]]; then

@@ -405,6 +405,23 @@ runRemoveNginxDefaultConfSafetyRegression() {
         removeNginxDefaultConf
         [[ ! -e "${nginxRoot}/default.conf" ]]
         grep -qx '删除Nginx默认配置' "${successLog}"
+
+        writeDefaultNginxConf "${nginxRoot}/default.conf"
+        (
+            : >"${successLog}"
+            rm() {
+                if [[ "$1" == "-f" && "$2" == "--" && "$3" == "${nginxRoot}/default.conf" ]]; then
+                    return 1
+                fi
+                command rm "$@"
+            }
+            ! removeNginxDefaultConf
+            [[ -f "${nginxRoot}/default.conf" ]]
+            [[ ! -s "${successLog}" ]] || {
+                printf 'nginx-delete-failure-reported-success\n' >&2
+                return 1
+            }
+        )
     )
 }
 

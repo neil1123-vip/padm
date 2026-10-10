@@ -844,8 +844,11 @@ removeNginxDefaultConf() {
     if [[ -f "${defaultConf}" ]] &&
         [[ "$(grep -c "server_name" <"${defaultConf}")" == "1" ]] &&
         [[ "$(grep -c "server_name  localhost;" <"${defaultConf}")" == "1" ]]; then
+        if ! rm -f -- "${defaultConf}" >/dev/null 2>&1; then
+            errorCard "删除Nginx默认配置失败"
+            return 1
+        fi
         successCard "删除Nginx默认配置"
-        rm -f -- "${defaultConf}" >/dev/null 2>&1
     fi
 }
 
