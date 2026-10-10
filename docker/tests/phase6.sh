@@ -222,7 +222,27 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
             [[ -z "$renewalBefore" ]] ||
                 test "$(find "$root/secrets/renewal" -type f -print0 | sort -z | xargs -0 sha256sum)" == "$renewalBefore"
         }
+        assertRejectedUpdateCheck() (
+            local check=$1 before backupBefore bundleBefore rc=0
+            before=$(tar --sort=name --numeric-owner -cf - -C "$root" \
+                config secrets deployment.json compose.json images.env | sha256sum)
+            backupBefore=$(find "$root/backups" -mindepth 1 -maxdepth 1 -type d -print | sort)
+            bundleBefore=$(readlink "$root/bundle")
+            export FAKE_DOCKER_LOG="$root/.update-check-${BASHPID}.log" FAKE_DOCKER_FAIL_CHECK="$check"
+            dockerMain update --manifest "$source" >"$root/.update-check-result" 2>&1 || rc=$?
+            [[ "$rc" == "$PADM_DOCKER_RC_STATE" ]]
+            grep -qF " $check " "$FAKE_DOCKER_LOG"
+            ! grep -Eq " (up|down|restart|stop|exec) " "$FAKE_DOCKER_LOG"
+            [[ "$before" == "$(tar --sort=name --numeric-owner -cf - -C "$root" \
+                config secrets deployment.json compose.json images.env | sha256sum)" ]]
+            [[ "$backupBefore" == "$(find "$root/backups" -mindepth 1 -maxdepth 1 -type d -print | sort)" ]]
+            [[ "$bundleBefore" == "$(readlink "$root/bundle")" ]]
+            [[ "${DOCKER_CONFIG_SWITCHED:-0}" == 0 && -z "${DOCKER_CONFIG_CANDIDATE:-}" ]]
+            [[ -z "$(find "$root" -maxdepth 1 -type d -name ".update.*" -print)" ]]
+        )
         control=$PHASE6_CONTROL_BUNDLE
+        # 无原始规格的旧部署也必须在快照和切换前执行新核心的原生检查。
+        assertRejectedUpdateCheck "xray -test"
         dockerUpdateCommand --manifest "$source"
         test "$(grep -c "^pull " "${FAKE_DOCKER_LOG}")" -eq 5
         newBundle=$(readlink "$root/bundle")
@@ -635,6 +655,8 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
           .images = (\$manifest[0].images | map_values(.reference))
         " "$dualOldSpec" >"$dualNewSpec"
         control=$PHASE6_FAILED_CONTROL_BUNDLE
+        # Compose 会读取 stdin；第二个核心不能被第一个检查吞掉。
+        assertRejectedUpdateCheck "sing-box check"
         dockerUpdateCommand --manifest "$source"
         dualBundle=$(readlink "$root/bundle")
         assertCurrent "$dualBundle" "$failedCommit" failed-control "$(printf 3%.0s {1..64})"

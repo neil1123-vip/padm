@@ -201,7 +201,7 @@ dockerSubscriptionStateWrite() {
     temp=$(mktemp "${path}.XXXXXX") || return 1
     chmod 0600 "${temp}" || { rm -f -- "${temp}"; return 1; }
     printf '%s\n' "${json}" >"${temp}" || { rm -f -- "${temp}"; return 1; }
-    jq empty "${temp}" || { rm -f -- "${temp}"; return 1; }
+    dockerSubscriptionStateValidate "${temp}" || { rm -f -- "${temp}"; return 1; }
     [[ "${PADM_DOCKER_SKIP_CHOWN:-0}" == "1" ]] || chown 0:0 "${temp}" || {
         rm -f -- "${temp}"
         return 1

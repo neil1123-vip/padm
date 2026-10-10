@@ -180,4 +180,33 @@ grep -qF 'location ~ "^/subscriptions/(?<padm_subscription_token>[A-Za-z0-9_-]{1
 grep -qF 'proxy_pass http://subscription:8081/$padm_subscription_token;' "${NGINX}" ||
     fail 'Nginx token 代理路径错误'
 
+# 达到组数上限后拒绝新增，不能写入后续管理入口无法读取的状态。
+(
+    state="${PADM_DOCKER_INSTALL_DIR}/config/share-groups.json"
+    original="${TEST_ROOT}/share-groups-original.json"
+    cp -p -- "${state}" "${original}"
+    trap 'cp -p -- "${original}" "${state}"' EXIT
+    jq -n --arg account "${ALICE}" '
+      {schema_version:1,groups:[range(0;256) |
+        ("0000000000000000" + tostring)[-16:] as $suffix |
+        {id:("share-" + $suffix),name:("Limit-" + $suffix),enabled:false,
+         token:("limit-token-" + $suffix),account_ids:[$account],listener_ids:["entry-reality"]}]}
+    ' >"${state}"
+    chmod 0600 "${state}"
+    dockerSubscriptionStateValidate "${state}" || fail '上限夹具不合法'
+    before=$(sha256sum "${state}")
+    tokensBefore=$(find "${PADM_DOCKER_INSTALL_DIR}/data/subscription" -type f -print0 |
+        sort -z | xargs -0 sha256sum)
+    for mode in enabled disabled; do
+        args=(subscription create --name Overflow --accounts "${ALICE}" --listeners entry-reality)
+        [[ "${mode}" != disabled ]] || args+=(--disabled)
+        reject dockerMain "${args[@]}"
+        [[ "${before}" == "$(sha256sum "${state}")" ]] || fail '拒绝新增改写了分享状态'
+        [[ "${tokensBefore}" == "$(find "${PADM_DOCKER_INSTALL_DIR}/data/subscription" -type f -print0 |
+            sort -z | xargs -0 sha256sum)" ]] || fail '拒绝新增改写或遗留了 token 文件'
+        jq -e 'length == 256' <<<"$(dockerMain subscription list --json)" >/dev/null ||
+            fail '拒绝新增后原有分享组不可管理'
+    done
+)
+
 printf 'docker-subscriptions-regression-ok\n'

@@ -1305,12 +1305,15 @@ runUninstallNginxCleanupRegression() {
             '30 1 * * * /bin/bash /etc/padm/install.sh RenewTLS >> /etc/padm/crontab_tls.log 2>&1' \
             '35 1 * * * /bin/bash /etc/padm/install.sh UpdateGeo >> /etc/padm/crontab_tls.log 2>&1' \
             '* * * * * /bin/bash /etc/padm/install.sh SyncSubscriptionGroups' \
+            '@reboot /bin/bash /etc/padm/install.sh UpdateGeo' \
+            '# 备忘 /etc/padm/install.sh UpdateGeo' \
+            "0 * * * * printf '/etc/padm/install.sh RenewTLS' >> /backup/note" \
             '5 5 * * * /usr/local/bin/keep'
     }
     installUserCrontabContent() { installedCrontab=$1; }
     crontab() { return 0; }
     cleanupPadmCronJobsOnUninstall
-    [[ "${installedCrontab}" == '5 5 * * * /usr/local/bin/keep' ]]
+    [[ "${installedCrontab}" == $'# 备忘 /etc/padm/install.sh UpdateGeo\n'"0 * * * * printf '/etc/padm/install.sh RenewTLS' >> /backup/note"$'\n5 5 * * * /usr/local/bin/keep' ]]
 
     nginxConfigPath="${oldNginxConfigPath}"
     PADM_NGINX_CONF_FALLBACK_DIR="${oldFallbackDir}"

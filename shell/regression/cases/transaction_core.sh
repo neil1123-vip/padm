@@ -4484,7 +4484,7 @@ runSingBoxUninstallFailurePropagationRegression() (
         readPortHopping() { tuicPortHoppingStart=; tuicPortHoppingEnd=; }
         singBoxMergeConfigForValidation() { return 0; }
         singBoxRemoveServiceRegistration() { actions+=$'registration\n'; }
-        cleanCoreInstallDirectory() { actions+=$'cleanup\n'; }
+        cleanCoreInstallFiles() { actions+=$'cleanup\n'; }
         denyPort() { return 0; }
         refreshProtocolSubscriptions() { return 0; }
         readInstallType
@@ -4580,7 +4580,7 @@ runSingBoxUninstallFailurePropagationRegression() (
             esac
             return 0
         }
-        cleanCoreInstallDirectory() {
+        cleanCoreInstallFiles() {
             rm -f "${signalBinary}" || return 1
             uninstallSignalAt cleanup
         }
@@ -4887,7 +4887,7 @@ runSingBoxUninstallFailurePropagationRegression() (
     rc-update() {
         printf '%s\n' "$*" >>"${rcUpdateLog}"
     }
-    cleanCoreInstallDirectory() { [[ "${cleanupMode}" == success ]]; }
+    cleanCoreInstallFiles() { [[ "${cleanupMode}" == success ]]; }
     padmForgetCleanupPath() { keptBackup=$1; }
     for cleanupMode in success failure; do
         printf '{"inbounds":[{"type":"hysteria2","listen_port":16295}]}\n' >"${alpineConfigDir}06_hysteria2_inbounds.json"
