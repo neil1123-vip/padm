@@ -70,7 +70,7 @@ printf '%s\n' "$*" >>"${FAKE_VERIFY_LOG:?}"
     "$4" == --certificate-identity-regexp &&
     "$5" == '^https://github\.com/neil1123-vip/padm/\.github/workflows/create_release\.yml@refs/heads/main$' &&
     "$6" == --certificate-oidc-issuer && "$7" == https://token.actions.githubusercontent.com ]] || exit 1
-manifestSha=$(sha256sum "$8" | cut -d ' ' -f 1)
+manifestSha=$(command sha256sum "$8" | cut -d ' ' -f 1)
 # 假验证器仍检查固定信任边界和签名绑定，不能无条件接受任意输入。
 jq -e --arg sha "${manifestSha}" '
     .signature == "fixture-valid" and .manifest_sha256 == $sha and
@@ -235,7 +235,7 @@ runRelease() {
     local expected=$1 name=$2 actual=0
     shift 2
     : >"${PULL_LOG}"; : >"${VERIFY_LOG}"; : >"${DOWNLOAD_LOG}"
-    bash -u "${CLI}" release "$@" >"${OUT}" 2>"${ERR}" || actual=$?
+    FAKE_HASH_CHILD=1 bash -u "${CLI}" release "$@" >"${OUT}" 2>"${ERR}" || actual=$?
     [[ "${actual}" -eq "${expected}" ]] || fail "${name}: expected rc=${expected}, got rc=${actual}"
     [[ "$(snapshotState)" == "${BASELINE}" ]] || fail "${name}: changed deployment, bundle, locks or temporary state"
     if [[ "${expected}" -ne 0 ]]; then
@@ -263,6 +263,57 @@ assertSuccess() {
 runRelease 0 local-amd64 --manifest "${MANIFEST}" --bundle "${SIGNATURE}" --control-bundle "${CONTROL_BUNDLE}"
 assertSuccess
 [[ ! -s "${DOWNLOAD_LOG}" ]] || fail 'local assets caused a download'
+
+hashFailures=0
+for hashCase in control manifest inputs; do
+    if (
+        sha256sum() {
+            local last="${!#}" output
+            output=$(command sha256sum "$@") || return $?
+            if [[ "${FAKE_HASH_CHILD:-0}" != 1 ]]; then
+                printf '%s\n' "${output}"
+                return 0
+            fi
+            case "${FAKE_HASH_FAILURE:-}" in
+            control)
+                if [[ "${last}" == */padm-docker-bundle.tar.gz ]]; then
+                    printf '%s\n' "${output}"
+                    return 17
+                fi
+                ;;
+            manifest)
+                if [[ "${last}" == */release-manifest.json ]]; then
+                    printf '%s\n' "${output}"
+                    return 17
+                fi
+                ;;
+            inputs)
+                if [[ "${last}" == */release-manifest.json && -n "${PADM_DOCKER_MANIFEST_SHA256:-}" ]]; then
+                    printf '%s\n' "${output}"
+                    return 17
+                fi
+                ;;
+            esac
+            printf '%s\n' "${output}"
+        }
+        export -f sha256sum
+        export FAKE_HASH_FAILURE=${hashCase}
+        runRelease 16 "complete-${hashCase}-hash-output-tool-failure" --manifest "${MANIFEST}" \
+            --bundle "${SIGNATURE}" --control-bundle "${CONTROL_BUNDLE}"
+        [[ "$(wc -l <"${VERIFY_LOG}")" -eq 1 ]] || fail "${hashCase}: signature verification was bypassed"
+        if [[ "${hashCase}" == inputs ]]; then
+            [[ "$(wc -l <"${PULL_LOG}")" -eq 5 ]] || fail 'inputs: fixture did not reach final trusted output'
+        else
+            [[ ! -s "${PULL_LOG}" ]] || fail "${hashCase}: hash tool failure reached image pull"
+        fi
+    ); then
+        :
+    else
+        printf 'docker-release-boundary-fail: complete-hash-%s\n' "${hashCase}" >&2
+        hashFailures=$((hashFailures + 1))
+    fi
+done
+[[ "${hashFailures}" == 0 ]] || fail "complete hash failure propagation failed: ${hashFailures}"
 
 export FAKE_ARCH=aarch64
 runRelease 0 https-arm64 --manifest https://example.invalid/release-manifest.json

@@ -153,7 +153,8 @@ dockerManifestPrepare() {
         dockerError '无法获取 release 控制 bundle'
         return 1
     }
-    controlSha=$(sha256sum "${PADM_DOCKER_CONTROL_BUNDLE}" | cut -d ' ' -f 1) || return 1
+    controlSha=$(sha256sum -- "${PADM_DOCKER_CONTROL_BUNDLE}") || return 1
+    controlSha=${controlSha%% *}
     expectedSha=$(jq -er '.control.sha256' "${PADM_DOCKER_MANIFEST_FILE}") || return 1
     [[ "${controlSha}" == "${expectedSha}" ]] || {
         dockerError 'release 控制 bundle SHA-256 不匹配'
@@ -165,7 +166,8 @@ dockerManifestPrepare() {
         dockerError "release manifest 不支持当前架构: ${arch}"
         return 1
     }
-    PADM_DOCKER_MANIFEST_SHA256=$(sha256sum "${PADM_DOCKER_MANIFEST_FILE}" | cut -d ' ' -f 1) || return 1
+    PADM_DOCKER_MANIFEST_SHA256=$(sha256sum -- "${PADM_DOCKER_MANIFEST_FILE}") || return 1
+    PADM_DOCKER_MANIFEST_SHA256=${PADM_DOCKER_MANIFEST_SHA256%% *}
     [[ "${PADM_DOCKER_MANIFEST_SHA256}" =~ ^[0-9a-f]{64}$ ]]
 }
 
@@ -193,7 +195,8 @@ dockerManifestConfigurationInputs() {
     [[ -n "${PADM_DOCKER_MANIFEST_FILE}" &&
         "${PADM_DOCKER_MANIFEST_SHA256}" =~ ^[0-9a-f]{64}$ &&
         -f "${PADM_DOCKER_MANIFEST_FILE}" && ! -L "${PADM_DOCKER_MANIFEST_FILE}" ]] || return 1
-    currentSha=$(sha256sum "${PADM_DOCKER_MANIFEST_FILE}" | cut -d ' ' -f 1) || return 1
+    currentSha=$(sha256sum -- "${PADM_DOCKER_MANIFEST_FILE}") || return 1
+    currentSha=${currentSha%% *}
     [[ "${currentSha}" == "${PADM_DOCKER_MANIFEST_SHA256}" ]] || return 1
     jq -e --arg sha "${PADM_DOCKER_MANIFEST_SHA256}" \
         --arg identity "${PADM_DOCKER_MANIFEST_SIGNATURE_IDENTITY}" '

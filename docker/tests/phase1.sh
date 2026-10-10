@@ -449,6 +449,51 @@ done
         [[ -z "$(find "${TMPDIR}" -mindepth 1 -print -quit)" ]] ||
             fail 'hash failure leaked temporary files'
     ) || fail 'batch hash failure cleanup failed'
+    hashFailures=0
+    for hashCase in source target staged existing; do
+        if (
+            # 生产入口未启用 pipefail；完整摘要但工具非零不能被管道末端吞掉。
+            set +o pipefail
+            source "${PROJECT_ROOT}/install-docker.sh" help
+            export PADM_DOCKER_INSTALL_DIR="${DOCKER_ROOT}" PADM_NATIVE_INSTALL_DIR="${NATIVE_ROOT}"
+            export PADM_DOCKER_BIN_DIR="${CLI_DIR}" PATH="${MOCK_BIN}:${PATH}"
+            target=$(readlink "${DOCKER_ROOT}/bundle")
+            manifestPath="${DOCKER_ROOT}/${target}/${PADM_DOCKER_BUNDLE_MANIFEST}"
+            sha256sum() {
+                local last="${!#}" output
+                output=$(command sha256sum "$@") || return $?
+                printf '%s\n' "${output}"
+                case "${hashCase}" in
+                source) [[ "${last}" != *padm-docker-source-hashes.* ]] || return 17 ;;
+                target) [[ "${last}" != "${manifestPath}" ]] || return 17 ;;
+                staged) [[ "${last}" != "${DOCKER_STAGED_BUNDLE_PATH:-}/${PADM_DOCKER_BUNDLE_MANIFEST}" ]] || return 17 ;;
+                existing)
+                    [[ -z "${DOCKER_STAGED_BUNDLE_DIR:-}" || "${last}" != "${manifestPath}" ]] || return 17
+                    ;;
+                esac
+            }
+            status=0
+            case "${hashCase}" in
+            source) dockerBundleSourceDigest "${validationRoot}" >/dev/null || status=$? ;;
+            target) dockerBundlePathForTarget "${target}" >/dev/null || status=$? ;;
+            staged|existing)
+                dockerMain install --no-menu --source "${NO_COMPOSE_SOURCE}" >"${CONTROL_LOG}" 2>&1 || status=$?
+                [[ "${status}" == 13 && "$(readlink "${DOCKER_ROOT}/bundle")" == "${target}" &&
+                    "$(readlink "${CLI_DIR}/padm-docker")" == "${DOCKER_ROOT}/bundle/install-docker.sh" &&
+                    ! -e "${DOCKER_ROOT}/locks/deployment.lock" &&
+                    -z "$(command find "${DOCKER_ROOT}/.bundles" -maxdepth 1 -name '.stage.*' -print)" ]] ||
+                    fail "${hashCase}: failed hash committed or leaked installation state"
+                ;;
+            esac
+            [[ "${status}" -ne 0 ]] || fail "${hashCase}: complete hash output with tool failure was accepted"
+        ); then
+            :
+        else
+            printf 'docker-phase1-boundary-fail: complete-hash-%s\n' "${hashCase}" >&2
+            hashFailures=$((hashFailures + 1))
+        fi
+    done
+    [[ "${hashFailures}" == 0 ]] || fail "complete hash failure propagation failed: ${hashFailures}"
     cp -- "${TEST_ROOT}/bundle-manifest" "${manifest}"
     manifestText=$(<"${manifest}")
     printf '%s' "${manifestText//  /$'\t\t'}" >"${manifest}"
