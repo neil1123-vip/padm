@@ -871,6 +871,10 @@ readConfigHostPathUUID() {
                 currentPath=${path%ws}
             elif [[ $(echo "${fallback}" | jq -r .dest) == 31299 ]]; then
                 currentPath=${path%vws}
+            elif [[ $(echo "${fallback}" | jq -r .dest) == 31301 ]]; then
+                currentPath=${path%grpc}
+            elif [[ $(echo "${fallback}" | jq -r .dest) == 31304 ]]; then
+                currentPath=${path%trojangrpc}
             elif [[ $(echo "${fallback}" | jq -r .dest) == 31306 ]]; then
                 currentPath=${path}
             fi

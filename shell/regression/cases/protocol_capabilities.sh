@@ -925,6 +925,33 @@ runProtocolEntryReaderFailureRegression() (
             [[ "${failed}" == 0 ]]
         ) || failed=1
         (
+            # 真实模板的 fallback 目标端口区分 gRPC 身份，路径尾部的 trojan 不是协议名。
+            local suffix segment targetPort configFile failed=0
+            local coreInstallType=1 currentInstallProtocolType=,27, frontingType=02_VLESS_TCP_inbounds
+            local frontingTypeReality= singBoxConfigPath= configPath="${root}/xray-grpc-fallback-path/"
+            local nginxConfigPath="${root}/xray-grpc-fallback-path/nginx/"
+            mkdir -p "${configPath}" "${nginxConfigPath}" || return 1
+            configFile="${configPath}${frontingType}.json"
+            for suffix in grpc trojangrpc; do
+                targetPort=31301
+                [[ "${suffix}" != trojangrpc ]] || targetPort=31304
+                for segment in saved trojan tailtrojan tailtrojangrpc; do
+                    jq -n --arg path "/${segment}${suffix}" --argjson port "${targetPort}" '
+                        {inbounds:[{port:443,settings:{clients:[{id:"saved-user"}],
+                            fallbacks:[{alpn:"h2",dest:31302},{path:$path,dest:$port}]},
+                            streamSettings:{tlsSettings:{certificates:[
+                                {certificateFile:"/etc/padm/tls/tls.example.com.crt"}]}}}]}
+                    ' >"${configFile}" || return 1
+                    printf '    location /%s%s {\n    }\n' "${segment}" "${suffix}" >"${nginxConfigPath}alone.conf" || return 1
+                    readConfigHostPathUUID ||
+                        { printf 'assert-fail:entry-grpc-fallback-read:%s:%s\n' "${suffix}" "${segment}" >&2; failed=1; }
+                    [[ "${currentPath}" == "${segment}" ]] ||
+                        { printf 'assert-fail:entry-grpc-fallback-value:%s:%s:%s\n' "${suffix}" "${segment}" "${currentPath}" >&2; failed=1; }
+                done
+            done
+            [[ "${failed}" == 0 ]]
+        ) || failed=1
+        (
             # 原 JSON 混淆字段不能在 jq -r 或命令替换时变成不同的客户端密码。
             local field rawValue expectedStatus failed=0
             local singBoxConfigPath="${root}/hysteria-obfs-defaults/"
