@@ -258,11 +258,14 @@ runRegressionDockerContractsAggregateContract() (
     local expectedLog="${TMP_DIR}/docker-contracts-aggregate.expected.log"
     local status=0 selector
     local -a expectedSelectors=(
-        docker-reality docker-traditional-tls docker-routing-core-contracts docker-routing-core-lifecycle
+        docker-reality docker-traditional-tls docker-routing-core-contracts
+        docker-routing-core-network-lifecycle docker-routing-core-policy-lifecycle
         docker-routing-dns-hosts-workflow docker-routing-direct-block-workflow
-        docker-phase3 docker-setup-encrypted docker-setup-transports docker-reality-targets
+        docker-phase3 docker-setup-encrypted-udp docker-setup-encrypted-tcp
+        docker-setup-transports docker-reality-targets-direct docker-reality-targets-selection
         docker-setup-tls docker-reality-parameters docker-setup-core docker-sites docker-phase6
-        docker-menu docker-reality-target-library docker-control-state docker-phase4 docker-control-client
+        docker-menu docker-reality-target-library docker-control-state
+        docker-phase4-maintenance docker-phase4-lifecycle docker-control-client
         docker-phase1 docker-phase5 docker-control-cli docker-control-sync docker-release docker-geo-data docker-traffic
         docker-http-relay docker-entry-port-alias
         docker-accounts docker-permissions docker-wireguard-runtime docker-tproxy-ownership docker-fail2ban-ownership
@@ -320,10 +323,10 @@ runRegressionDockerContractsAggregateContract() (
 
     runDockerSetupRegression() { printf '%s\n' "$*" >>"${callLog}"; }
     : >"${callLog}"
-    for selector in core encrypted transports tls; do
+    for selector in core encrypted encrypted-udp encrypted-tcp transports tls; do
         PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "docker-setup-${selector}"
     done
-    printf '%s\n' core encrypted transports tls >"${expectedLog}"
+    printf '%s\n' core encrypted encrypted-udp encrypted-tcp transports tls >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
 
     # 独立 selector 仍执行祖先合同，只有完整集合或 CI 矩阵才共享它们。
@@ -332,22 +335,33 @@ runRegressionDockerContractsAggregateContract() (
     }
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain docker-contracts-reality
     bash() {
-        printf '%s:%s\n' "${PADM_DOCKER_TEST_FIXTURE_ONLY:-0}" "${1##*/}" >>"${callLog}"
+        printf '%s:%s:%s\n' "${PADM_DOCKER_TEST_FIXTURE_ONLY:-0}" \
+            "${PADM_DOCKER_REALITY_TARGETS_SCOPE:-full}" "${1##*/}" >>"${callLog}"
     }
     : >"${callLog}"
     unset PADM_DOCKER_CONTRACTS_SHARED_CHECKS
+    unset PADM_DOCKER_REALITY_TARGETS_SCOPE
     runDockerRealityParametersRegression
     runDockerRealityTargetsRegression
+    runDockerRealityTargetsDirectRegression
+    runDockerRealityTargetsSelectionRegression
     runDockerTraditionalTlsRegression
     runDockerRealityRegression
     PADM_DOCKER_CONTRACTS_SHARED_CHECKS=1 runDockerRealityParametersRegression
     PADM_DOCKER_CONTRACTS_SHARED_CHECKS=1 runDockerRealityTargetsRegression
+    PADM_DOCKER_CONTRACTS_SHARED_CHECKS=1 runDockerRealityTargetsDirectRegression
+    PADM_DOCKER_CONTRACTS_SHARED_CHECKS=1 runDockerRealityTargetsSelectionRegression
     PADM_DOCKER_CONTRACTS_SHARED_CHECKS=1 runDockerTraditionalTlsRegression
     PADM_DOCKER_CONTRACTS_SHARED_CHECKS=1 runDockerRealityRegression
-    printf '%s\n' 0:reality-parameters.sh 0:reality-targets.sh 0:traditional-tls.sh 0:reality.sh \
-        1:reality-parameters.sh 1:reality-targets.sh 1:traditional-tls.sh 0:reality.sh >"${expectedLog}"
+    printf '%s\n' 0:full:reality-parameters.sh 0:full:reality-targets.sh \
+        0:direct:reality-targets.sh 0:selection:reality-targets.sh \
+        0:full:traditional-tls.sh 0:full:reality.sh \
+        1:full:reality-parameters.sh 1:full:reality-targets.sh \
+        1:direct:reality-targets.sh 1:selection:reality-targets.sh \
+        1:full:traditional-tls.sh 0:full:reality.sh >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
     [[ -z "${PADM_DOCKER_CONTRACTS_SHARED_CHECKS:-}" ]]
+    [[ -z "${PADM_DOCKER_REALITY_TARGETS_SCOPE:-}" ]]
 
     # 注册集合相同还不够，新旧路由入口都必须把正确 scope 传给原脚本。
     bash() { printf '%s:%s\n' "${PADM_DOCKER_ROUTING_SCOPE:-full}" "${1##*/}" >>"${callLog}"; }
@@ -358,12 +372,24 @@ runRegressionDockerContractsAggregateContract() (
     runDockerRoutingDomainsWorkflowRegression
     runDockerRoutingCoreContractsRegression
     runDockerRoutingCoreLifecycleRegression
+    runDockerRoutingCoreNetworkLifecycleRegression
+    runDockerRoutingCorePolicyLifecycleRegression
     runDockerRoutingDnsHostsWorkflowRegression
     runDockerRoutingDirectBlockWorkflowRegression
     printf '%s\n' full:routing-socks5.sh core-workflow:routing-socks5.sh \
         domains-workflow:routing-socks5.sh core-contracts:routing-socks5.sh \
-        core-lifecycle:routing-socks5.sh domains-dns-hosts:routing-socks5.sh \
+        core-lifecycle:routing-socks5.sh core-network-lifecycle:routing-socks5.sh \
+        core-policy-lifecycle:routing-socks5.sh domains-dns-hosts:routing-socks5.sh \
         domains-direct-block:routing-socks5.sh >"${expectedLog}"
+    cmp -s "${expectedLog}" "${callLog}"
+
+    bash() { printf '%s:%s\n' "${PADM_DOCKER_PHASE4_SCOPE:-full}" "${1##*/}" >>"${callLog}"; }
+    : >"${callLog}"
+    unset PADM_DOCKER_PHASE4_SCOPE
+    runDockerPhase4Regression
+    runDockerPhase4MaintenanceRegression
+    runDockerPhase4LifecycleRegression
+    printf '%s\n' full:phase4.sh maintenance:phase4.sh lifecycle:phase4.sh >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
 )
 

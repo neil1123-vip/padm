@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+PHASE4_SCOPE=${PADM_DOCKER_PHASE4_SCOPE:-full}
+case "${PHASE4_SCOPE}" in
+full|maintenance|lifecycle) ;;
+*) printf 'docker-phase4-regression-fail: unknown scope %s\n' "${PHASE4_SCOPE}" >&2; exit 1 ;;
+esac
+
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/padm-docker-phase4.XXXXXX")
 MOCK_BIN="${TEST_ROOT}/bin"
@@ -390,6 +396,7 @@ fail2banManagedSnapshot() {
 }
 
 # 公共 CLI 只精确转发专项参数；不为测试扩大它可接受的发布参数。
+if [[ "${PHASE4_SCOPE}" != lifecycle ]]; then
 (
     source "${PROJECT_ROOT}/install-docker.sh"
     dockerEditCommand() { printf '%s\n' "$*"; }
@@ -413,6 +420,7 @@ fail2banManagedSnapshot() {
         done
     done
 )
+fi
 
 imageReference() { printf 'ghcr.io/example/padm-%s:test@sha256:%s' "$1" "${IMAGE_DIGEST}"; }
 
@@ -505,12 +513,16 @@ EOF
 chmod 0600 "${DOCKER_ROOT}/secrets/net/wireguard/wg-padm.conf"
 
 : >"${DOCKER_LOG}"
+if [[ "${PHASE4_SCOPE}" != lifecycle ]]; then
 for field in '.release.signature_identity = "untrusted"' '.images.xray |= sub("1$"; "2")'; do
     jq "${field}" "${WIREGUARD_SPEC}" >"${TEST_ROOT}/untrusted.json"
     runControl 16 untrusted-input configure --spec "${TEST_ROOT}/untrusted.json"
     [[ ! -e "${DOCKER_ROOT}/deployment.json" ]] || fail 'untrusted release inputs changed deployment'
 done
+fi
+# 两个分片都从独立的已部署 WireGuard 和证书夹具开始。
 runControl 0 wireguard configure --spec "${WIREGUARD_SPEC}"
+if [[ "${PHASE4_SCOPE}" != lifecycle ]]; then
 cmp -s "${WIREGUARD_SPEC}" "${DOCKER_ROOT}/config/spec.json" || fail 'complete spec was not persisted'
 if [[ "$(command -p uname -s)" == Linux ]]; then
     [[ "$(command -p stat --format=%a "${DOCKER_ROOT}/config/spec.json")" == 600 ]] ||
@@ -537,6 +549,7 @@ grep -Fq "${DOCKER_ROOT}/data/net/wireguard:/run/padm-wireguard-owner:ro net-wir
     "${DOCKER_LOG}" || fail 'WireGuard candidate did not mount live ownership read-only'
 rejectFail2ban 15 fail2ban-not-configured-status fail2ban status
 rejectFail2ban 15 fail2ban-not-configured-unban fail2ban unban 192.0.2.7
+fi
 
 CERT_FILE="${TEST_ROOT}/proxy.example.com.crt"
 KEY_FILE="${TEST_ROOT}/proxy.example.com.key"
@@ -545,6 +558,7 @@ printf 'fake-private-key\n' >"${KEY_FILE}"
 chmod 0600 "${KEY_FILE}"
 runControl 0 tls-install tls install --domain proxy.example.com --cert "${CERT_FILE}" \
     --key "${KEY_FILE}" --ops-image "${OPS_IMAGE}"
+if [[ "${PHASE4_SCOPE}" != lifecycle ]]; then
 BEFORE_TLS_RECONFIGURE=$(sha256sum "${DOCKER_ROOT}/deployment.json" | cut -d ' ' -f 1)
 FAKE_DOCKER_MODE=tls-validity-fail runControl 15 reject-expired-candidate configure --spec "${FAIL2BAN_SPEC}"
 [[ "$(sha256sum "${DOCKER_ROOT}/deployment.json" | cut -d ' ' -f 1)" == "${BEFORE_TLS_RECONFIGURE}" ]] ||
@@ -718,18 +732,23 @@ for config in padm-docker-user.conf padm.local; do
 done
 [[ "$(fail2banManagedSnapshot)" == "${FAIL2BAN_MAINTENANCE_BEFORE}" ]] ||
     fail 'Fail2ban status or unban modified managed files'
+fi
 
 # 停用先验证旧 owner 和正常清理，候选预览、取消及失败不能借机重启或删库。
 FAIL2BAN_DISABLED_SPEC="${TEST_ROOT}/fail2ban-disabled.json"
 # 专项编辑沿用既有 schema 迁移，完整对照必须使用同一规范化基线。
 (
     source "${PROJECT_ROOT}/install-docker.sh"
-    dockerConfigureSpecMigrate "${DOCKER_ROOT}/config/spec.json" "${TEST_ROOT}/fail2ban-normalized.json"
+    sourceSpec="${DOCKER_ROOT}/config/spec.json"
+    [[ "${PHASE4_SCOPE}" != lifecycle ]] || sourceSpec="${FAIL2BAN_SPEC}"
+    dockerConfigureSpecMigrate "${sourceSpec}" "${TEST_ROOT}/fail2ban-normalized.json"
 )
 jq '.host_integrations |= map(select(.type != "fail2ban"))' \
     "${TEST_ROOT}/fail2ban-normalized.json" >"${FAIL2BAN_DISABLED_SPEC}"
+mkdir -p "${DOCKER_ROOT}/data/net/fail2ban"
 printf 'persistent-fail2ban-sqlite-fixture\n' >"${DOCKER_ROOT}/data/net/fail2ban/fail2ban.sqlite3"
 FAIL2BAN_SQLITE_HASH=$(sha256sum "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.sqlite3")
+if [[ "${PHASE4_SCOPE}" != lifecycle ]]; then
 writeFail2banOwnerState() {
     printf 'schema_version=2\ntoken=%s\nchain=padm-f2b-aaaaaaaaaaaa\nports=24444,24445\nipv6=no\n' \
         "$(printf 'a%.0s' {1..32})" >"${DOCKER_ROOT}/data/net/fail2ban/fail2ban.state"
@@ -921,6 +940,12 @@ for residualMode in orphan state; do
         fail "${residualMode}: disabled shared wrapper changed residual evidence"
 done
 rm -f -- "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.state"
+fi
+
+if [[ "${PHASE4_SCOPE}" == maintenance ]]; then
+    printf 'docker-phase4-maintenance-regression-ok\n'
+    exit 0
+fi
 
 # 专项启用与参数修改保留其它集成，并复用逐入口见证及失败恢复，不另造启动路径。
 FAIL2BAN_EDIT_BASE="${TEST_ROOT}/fail2ban-edit-base.json"
