@@ -586,6 +586,82 @@ jq -e '.schema_version == 3 and .provider == "webroot" and .enabled == true' \
 dockerRenewalRegistryValidate "$(registry)"
 reject dockerRenewalBundleCheck "${TEST_ROOT}/schema1-bundle"
 reject dockerRenewalBundleCheck "${TEST_ROOT}/schema2-bundle"
+enumerationFailures=0
+for enumerationOutput in empty full; do
+    for enumerationCase in registry registry-count enabled bundle schedule run run-list status run-sort status-sort; do
+        if (
+            set +o pipefail
+            registryPath=$(registry)
+            enumerationArgs="${registryPath} -mindepth 2 -maxdepth 2 -name request.json -print"
+            case "${enumerationCase}" in
+            registry) enumerationArgs="${registryPath} -mindepth 1 -maxdepth 1 -print" ;;
+            registry-count) enumerationArgs="${registryPath}/a.example.com -mindepth 1 -maxdepth 1" ;;
+            esac
+            find() {
+                if [[ "$*" == "${enumerationArgs}" && "${enumerationCase}" != *-sort ]] &&
+                    { [[ "${enumerationCase}" != run-list ]] || [[ "${FUNCNAME[1]:-}" == dockerRenewalRun ]]; }; then
+                    [[ "${enumerationOutput}" != full ]] || command find "$@" || return $?
+                    return 17
+                fi
+                command find "$@"
+            }
+            sort() {
+                if [[ "$#" == 0 && ( "${enumerationCase}" == run-sort &&
+                    "${FUNCNAME[1]:-}" == dockerRenewalRun || "${enumerationCase}" == status-sort &&
+                    "${FUNCNAME[1]:-}" == dockerRenewalCommand ) ]]; then
+                    if [[ "${enumerationOutput}" == full ]]; then command sort "$@"; else command cat >/dev/null; fi
+                    return 17
+                fi
+                command sort "$@"
+            }
+            status=0
+            case "${enumerationCase}" in
+            registry|registry-count)
+                dockerRenewalRegistryValidate "${registryPath}" || status=$?
+                [[ "${status}" -ne 0 ]] || fail '登记枚举失败仍通过校验'
+                ;;
+            enabled)
+                dockerRenewalEnabled "${registryPath}" || status=$?
+                [[ "${status}" == 2 ]] || fail '启用状态枚举失败未返回错误状态'
+                ;;
+            bundle)
+                dockerRenewalBundleCheck "${TEST_ROOT}/new-bundle" || status=$?
+                [[ "${status}" -ne 0 ]] || fail '请求枚举失败仍接受控制 bundle'
+                ;;
+            schedule)
+                beforeJobs=$(registryAndJobs)
+                dockerRenewalScheduleInstall || status=$?
+                afterJobs=$(registryAndJobs)
+                unset -f find
+                dockerRenewalScheduleInstall || fail '调度夹具恢复失败'
+                [[ "${status}" -ne 0 && "${afterJobs}" == "${beforeJobs}" ]] ||
+                    fail '请求枚举失败仍修改已有调度'
+                ;;
+            run|run-list|run-sort)
+                beforeMaterials=$(materials)
+                MODE=skip
+                : >"${TEST_ROOT}/acme.log"
+                runControl failure acme auto-renew
+                [[ ! -s "${TEST_ROOT}/acme.log" && "$(materials)" == "${beforeMaterials}" ]] ||
+                    fail '请求枚举失败仍执行续期'
+                ;;
+            status|status-sort)
+                beforeJobs=$(registryAndJobs)
+                runControl failure acme schedule status
+                [[ "$(registryAndJobs)" == "${beforeJobs}" ]] &&
+                    ! grep -q '^domain=' "${TEST_ROOT}/control.log" ||
+                    fail '状态枚举失败仍报告登记或修改任务'
+                ;;
+            esac
+        ); then
+            :
+        else
+            printf 'docker-renewal-boundary-fail: %s-%s\n' "${enumerationCase}" "${enumerationOutput}" >&2
+            enumerationFailures=$((enumerationFailures + 1))
+        fi
+    done
+done
+[[ "${enumerationFailures}" == 0 ]] || fail "续期枚举失败处理缺陷: ${enumerationFailures}"
 dockerRenewalBundleCheck "${TEST_ROOT}/new-bundle"
 dockerRenewalBundleCheck "${TEST_ROOT}/schema4-bundle"
 runControl failure acme schedule enable --domain b.example.com --email admin@example.com --webroot
