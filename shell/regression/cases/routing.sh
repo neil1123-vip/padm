@@ -1,5 +1,216 @@
 #!/usr/bin/env bash
 
+runRoutingSignalTransactionRegression() (
+    local root="${TMP_DIR}/routing-signal-transaction"
+    local action phase signal failure caseRoot targetFile backupDir signalStatus expectedStatus
+    local configPath singBoxConfigPath= coreInstallType=1 TMPDIR reloadCalls signalPending signalFailures=0
+    local PADM_WARP_DIR PADM_XRAY_DNS_STATE_FILE= stateMode event
+    local PADM_DNS_ROUTING_BACKUP_DIR= PADM_ACCESS_CONTROL_BACKUP_DIR=
+    local DNS_ROUTING_ACTIVE_BACKUP_DIR= ACCESS_CONTROL_ACTIVE_BACKUP_DIR=
+    local REGRESSION_ERROR_CARD_LOG
+    eval "$(declare -f padmRestoreManagedFileBackupManifest | sed '1s/^padmRestoreManagedFileBackupManifest/signalRoutingManifestRestore/')"
+    eval "$(declare -f writeRoutingJsonConfig | sed '1s/^writeRoutingJsonConfig/signalRoutingWriteConfig/')"
+    readInstallType() { :; }
+    hasIPv6Connectivity() { return 0; }
+    installWarpReg() { :; }
+    readConfigWarpReg() { :; }
+    getDLCMatchedRuleValue() { printf 'domain:%s\n' "$1"; }
+    menuReadChoice() {
+        case "$1" in
+        bt_menu) printf -v "$3" 1 ;;
+        ipv6_menu|warp_ipv4_menu) printf -v "$3" 2 ;;
+        access_region_policy|access_remove_menu) printf -v "$3" 1 ;;
+        *) return 1 ;;
+        esac
+    }
+    autoRead() {
+        case "$1" in
+        sni_routing_ip) printf -v "$3" 203.0.113.10 ;;
+        dns_routing_server) printf -v "$3" 1.1.1.1 ;;
+        access_block_ips) printf -v "$3" 203.0.113.0/24 ;;
+        access_region_extra_allow) printf -v "$3" '' ;;
+        *) printf -v "$3" example.com ;;
+        esac
+    }
+    validateAccessControlConfig() { return 0; }
+    reportAccessControlApplyFailure() { errorCard "$@"; }
+    writeRoutingJsonConfig() {
+        signalRoutingWriteConfig "$@" || return 1
+        if [[ "$1" == "${targetFile}" && "${phase}" == write && "${signalPending}" == true ]]; then
+            signalPending=false
+            kill "-${signal}" "${BASHPID}"
+        fi
+    }
+    addXrayBTBlockRule() { writeRoutingJsonConfig "${targetFile}" <<<'{"changed":true}'; }
+    addXrayOutbound() { :; }
+    installSniffing() { :; }
+    removeXrayOutbound() { :; }
+    addIPv6RoutingConfig() { addXrayBTBlockRule; }
+    addWireGuardRoute() { addXrayBTBlockRule; }
+    addXrayRouting() { addXrayBTBlockRule; }
+    addXrayIPRouting() { addXrayBTBlockRule; }
+    removeAccessControlByKind() { addXrayBTBlockRule; }
+    reloadCore() {
+        printf 'reload\n' >>"${caseRoot}/reload.calls"
+        reloadCalls=$((reloadCalls + 1))
+        if [[ "${phase}" == reload && "${signalPending}" == true ]]; then
+            signalPending=false
+            kill "-${signal}" "${BASHPID}"
+        fi
+        [[ "${phase}" != rollback || "${reloadCalls}" -gt 1 ]] && [[ "${failure}" != reload-fail ]]
+    }
+    padmRestoreManagedFileBackupManifest() {
+        printf '%s\n' "$1" >>"${caseRoot}/restore.calls"
+        [[ "${failure}" != restore-fail ]] || return 1
+        # 普通回滚收到第二次信号时仍必须完整恢复。
+        [[ "${phase}" != rollback ]] || kill "-${signal}" "${BASHPID}"
+        signalRoutingManifestRestore "$@"
+    }
+    checkLogBackupRestore() { padmRestoreManagedFileBackupManifest "$@"; }
+    for action in btTools ipv6Routing warpRoutingReg setUnlockDNS setUnlockSNI removeUnlockDNS removeUnlockSNI \
+        addBlockedDomains addBlockedIPs addDirectAllowDomains manageRegionalBlockPolicy removeAccessControlMenu; do
+        for phase in write reload rollback; do
+            for signal in INT TERM; do
+                for failure in success restore-fail reload-fail; do
+                    [[ "${failure}" == success || "${phase}" != write ]] || continue
+                    caseRoot="${root}/${action}-${phase}-${signal}-${failure}"
+                    configPath="${caseRoot}/xray/" TMPDIR="${caseRoot}/tmp" PADM_WARP_DIR="${caseRoot}/warp"
+                    targetFile="${configPath}09_routing.json"
+                    [[ "${action}" != *Unlock* ]] || targetFile="${configPath}11_dns.json"
+                    mkdir -p "${configPath}" "${TMPDIR}" || return 1
+                    printf '{"old":true}\n' >"${targetFile}"
+                    if [[ "${action}" == removeUnlockDNS || "${action}" == removeUnlockSNI ]]; then
+                        printf '{"dns":{"servers":["1.1.1.1"],"hosts":{}}}\n' >"${targetFile}"
+                        if [[ "${action}" == removeUnlockDNS ]]; then
+                            printf '{"version":1,"dns":{"servers":["1.1.1.1"],"hosts":{}},"sni":{"servers":[],"hosts":{}}}\n' >"${configPath}dns_routing.state"
+                        else
+                            printf '{"version":1,"dns":{"servers":[],"hosts":{}},"sni":{"servers":["1.1.1.1"],"hosts":{}}}\n' >"${configPath}dns_routing.state"
+                        fi
+                    fi
+                    cp "${targetFile}" "${caseRoot}/original.json" || return 1
+                    [[ ! -f "${configPath}dns_routing.state" ]] ||
+                        cp "${configPath}dns_routing.state" "${caseRoot}/original.state" || return 1
+                    signalPending=true reloadCalls=0 signalStatus=0 expectedStatus=130
+                    REGRESSION_ERROR_CARD_LOG="${caseRoot}/errors.log"
+                    [[ "${signal}" != TERM ]] || expectedStatus=143
+                    [[ "${phase}" != rollback ]] || expectedStatus=1
+                    if [[ "${action}" == warpRoutingReg ]]; then
+                        ( "${action}" 1 IPv4 ) >"${caseRoot}/signal.log" 2>&1 || signalStatus=$?
+                    else
+                        ( "${action}" ) >"${caseRoot}/signal.log" 2>&1 || signalStatus=$?
+                    fi
+                    if [[ "${signalStatus}" != "${expectedStatus}" || ! -f "${caseRoot}/restore.calls" ]] ||
+                        [[ "$(wc -l <"${caseRoot}/restore.calls")" -ne 1 ]]; then
+                        printf 'routing-signal-fail:%s:%s:%s:%s:status=%s\n' "${action}" "${phase}" "${signal}" "${failure}" "${signalStatus}" >&2
+                        signalFailures=$((signalFailures + 1))
+                        continue
+                    fi
+                    backupDir=$(<"${caseRoot}/restore.calls")
+                    if [[ "${failure}" == restore-fail || "${failure}" == reload-fail ]]; then
+                        [[ -f "${backupDir}/manifest" ]] ||
+                            { printf 'routing-signal-fail:backup:%s\n' "${caseRoot}" >&2; return 1; }
+                        grep -q '备份目录' "${REGRESSION_ERROR_CARD_LOG}" || return 1
+                        if [[ "${failure}" == restore-fail ]]; then
+                            ! cmp -s "${targetFile}" "${caseRoot}/original.json" || return 1
+                            grep -q '恢复失败\|回滚失败' "${REGRESSION_ERROR_CARD_LOG}" || return 1
+                            ! grep -q '已恢复旧配置\|已回滚本次修改' "${REGRESSION_ERROR_CARD_LOG}" || return 1
+                        else
+                            cmp -s "${targetFile}" "${caseRoot}/original.json" || return 1
+                            grep -q '重载.*失败' "${REGRESSION_ERROR_CARD_LOG}" || return 1
+                        fi
+                    else
+                        cmp -s "${targetFile}" "${caseRoot}/original.json" || return 1
+                        [[ ! -e "${backupDir}" ]] || return 1
+                        if [[ -f "${caseRoot}/original.state" ]]; then
+                            cmp -s "${configPath}dns_routing.state" "${caseRoot}/original.state" || return 1
+                        else
+                            [[ ! -e "${configPath}dns_routing.state" ]] || return 1
+                        fi
+                    fi
+                    if [[ "${phase}" == write ]]; then
+                        [[ ! -e "${caseRoot}/reload.calls" ]] || return 1
+                    elif [[ "${failure}" == restore-fail ]]; then
+                        [[ "$(wc -l <"${caseRoot}/reload.calls")" -eq 1 ]] || return 1
+                    else
+                        [[ "$(wc -l <"${caseRoot}/reload.calls")" -eq 2 ]] || return 1
+                    fi
+                done
+            done
+        done
+    done
+    # 状态路径覆盖是已有功能；原缺失和原存在都必须与 DNS JSON 同步恢复。
+    for stateMode in missing present; do
+        for event in INT reload-fail; do
+            caseRoot="${root}/dns-state-${stateMode}-${event}"
+            configPath="${caseRoot}/xray/" TMPDIR="${caseRoot}/tmp"
+            PADM_XRAY_DNS_STATE_FILE="${caseRoot}/external.state"
+            targetFile="${PADM_XRAY_DNS_STATE_FILE}"
+            mkdir -p "${configPath}" "${TMPDIR}" || return 1
+            printf '{"dns":{"servers":["custom"],"hosts":{}}}\n' >"${configPath}11_dns.json"
+            cp "${configPath}11_dns.json" "${caseRoot}/original.json" || return 1
+            if [[ "${stateMode}" == present ]]; then
+                printf '{"version":1,"dns":{"servers":[],"hosts":{}},"sni":{"servers":[],"hosts":{}}}\n' >"${targetFile}"
+                cp "${targetFile}" "${caseRoot}/original.state" || return 1
+            fi
+            signal=INT failure=success signalPending=true reloadCalls=0 signalStatus=0 phase=write expectedStatus=130
+            [[ "${event}" != reload-fail ]] || { phase=rollback; expectedStatus=1; }
+            REGRESSION_ERROR_CARD_LOG="${caseRoot}/errors.log"
+            ( setUnlockDNS ) >"${caseRoot}/signal.log" 2>&1 || signalStatus=$?
+            [[ "${signalStatus}" == "${expectedStatus}" && "$(wc -l <"${caseRoot}/restore.calls")" -eq 1 ]] || return 1
+            cmp -s "${configPath}11_dns.json" "${caseRoot}/original.json" || return 1
+            if [[ "${stateMode}" == missing ]]; then
+                [[ ! -e "${targetFile}" ]] || return 1
+            else
+                cmp -s "${targetFile}" "${caseRoot}/original.state" || return 1
+            fi
+            [[ ! -e "$(<"${caseRoot}/restore.calls")" ]] || return 1
+        done
+    done
+    (
+        local PADM_XRAY_DNS_STATE_FILE= coreInstallType=2 previousCallbacks="${#PADM_EXIT_ROLLBACKS[@]}" iteration
+        local PADM_ACCESS_CONTROL_BACKUP_DIR= PADM_DNS_ROUTING_BACKUP_DIR=
+        rm() {
+            if [[ "${phase}" == cleanup && "$1" == -rf && -f "${!#}/manifest" ]]; then
+                printf '%s\n' "${!#}" >>"${caseRoot}/cleanup.calls"
+                return 1
+            fi
+            command rm "$@"
+        }
+        for action in btTools setUnlockSNI addBlockedDomains; do
+            caseRoot="${root}/sing-box-${action}"
+            configPath="${caseRoot}/xray/" singBoxConfigPath="${caseRoot}/sing-box/" TMPDIR="${caseRoot}/tmp"
+            targetFile="${singBoxConfigPath}bt_block_route.json"
+            [[ "${action}" != setUnlockSNI ]] || targetFile="${singBoxConfigPath}dns.json"
+            [[ "${action}" != addBlockedDomains ]] || targetFile="${singBoxConfigPath}block_domain_route.json"
+            mkdir -p "${configPath}" "${singBoxConfigPath}" "${TMPDIR}" || return 1
+            printf '{"dns":{"servers":[{"tag":"padm-local","type":"local"}]},"old":true}\n' >"${targetFile}"
+            cp "${targetFile}" "${caseRoot}/original.json" || return 1
+            phase=write signal=TERM failure=success signalPending=true reloadCalls=0 signalStatus=0
+            REGRESSION_ERROR_CARD_LOG="${caseRoot}/errors.log"
+            # 外层同名局部变量不能遮蔽事务自己的备份路径。
+            ( local backupDir=not-a-real-backup; "${action}" ) >"${caseRoot}/signal.log" 2>&1 || signalStatus=$?
+            [[ "${signalStatus}" == 143 && "$(wc -l <"${caseRoot}/restore.calls")" -eq 1 ]] || return 1
+            cmp -s "${targetFile}" "${caseRoot}/original.json" || return 1
+            [[ ! -e "${caseRoot}/reload.calls" && ! -e "$(<"${caseRoot}/restore.calls")" ]] || return 1
+            phase=success signalPending=false
+            for iteration in 1 2 3; do
+                "${action}" >/dev/null || return 1
+                [[ "${#PADM_EXIT_ROLLBACKS[@]}" == "${previousCallbacks}" ]] || return 1
+            done
+            rm "${caseRoot}/restore.calls" || return 1
+            cp "${targetFile}" "${caseRoot}/applied.json" || return 1
+            phase=cleanup signalStatus=0
+            ( "${action}" ) >"${caseRoot}/cleanup.log" 2>&1 || signalStatus=$?
+            [[ "${signalStatus}" == 1 && ! -e "${caseRoot}/restore.calls" ]] || return 1
+            cmp -s "${targetFile}" "${caseRoot}/applied.json" || return 1
+            backupDir=$(<"${caseRoot}/cleanup.calls")
+            [[ -f "${backupDir}/manifest" ]] || return 1
+            grep -q '清理失败' "${REGRESSION_ERROR_CARD_LOG}" || return 1
+        done
+    ) || return 1
+    [[ "${signalFailures}" -eq 0 ]]
+)
+
 runRoutingRegression() {
     runXrayDNSCustomConfigRegression
     runDNSRoutingCustomConfigRegression
@@ -1350,7 +1561,7 @@ runAccessControlFailureReturnCase() {
         [[ -e "${addMarker}" ]]
         [[ -e "${outboundMarker}" ]]
         [[ -e "${restoreMarker}" ]]
-        [[ -e "${cleanupMarker}" ]]
+        [[ ! -e "${cleanupMarker}" ]]
         [[ -e "${reloadMarker}" ]]
         [[ "$(wc -l <"${reloadMarker}")" == "2" ]]
         ;;
@@ -1823,6 +2034,9 @@ runDNSRoutingFailureReturnRegression() (
     )
 
     (
+        local retainedBackup=
+        eval "$(declare -f dnsRoutingBackupRestore | sed '1s/^dnsRoutingBackupRestore/dnsFailureBackupRestore/')"
+        dnsRoutingBackupRestore() { retainedBackup=$(dnsRoutingSafeBackupDir); dnsFailureBackupRestore "$@"; }
         mkdir -p "${rootRel}/dns-xray"
         configPath="${root}/dns-xray/"
         singBoxConfigPath=
@@ -1844,7 +2058,8 @@ runDNSRoutingFailureReturnRegression() (
         [[ "$(wc -l <"${reloadMarker}")" == "2" ]]
         jq -e '.dns.servers == ["old-xray"]' "${configPath}11_dns.json" >/dev/null
         [[ -z "${DNS_ROUTING_ACTIVE_BACKUP_DIR:-}" ]]
-        grep -q 'DNS 分流核心重载失败，已回滚本次修改' "${errorLog}"
+        grep -q 'DNS 分流核心重载失败，旧配置已恢复但核心重载仍失败' "${errorLog}"
+        [[ -f "${retainedBackup}/manifest" ]]
     )
 
     (
@@ -1888,7 +2103,7 @@ runDNSRoutingFailureReturnRegression() (
         [[ -e "${reloadMarker}" ]]
         [[ "$(wc -l <"${reloadMarker}")" == "2" ]]
         jq -e '.dns.servers == ["old-sni"]' "${configPath}11_dns.json" >/dev/null
-        [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
+        [[ -f "${PADM_DNS_ROUTING_BACKUP_DIR}/manifest" ]]
     )
 
     (
@@ -1927,7 +2142,7 @@ JSON
         [[ -e "${reloadMarker}" ]]
         [[ "$(wc -l <"${reloadMarker}")" == "2" ]]
         jq -e '.dns.servers == ["8.8.8.8"]' "${configPath}11_dns.json" >/dev/null
-        [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
+        [[ -f "${PADM_DNS_ROUTING_BACKUP_DIR}/manifest" ]]
         [[ ! -e "${root}/remove-dns/dns.json" ]]
     )
 
@@ -1949,7 +2164,7 @@ JSON
         [[ "$(wc -l <"${reloadMarker}")" == "2" ]]
         jq -e '.dns.servers == ["8.8.8.8"]' "${configPath}11_dns.json" >/dev/null
         jq -e '.dns.servers[0].tag == "hosts"' "${singBoxConfigPath}dns.json" >/dev/null
-        [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
+        [[ -f "${PADM_DNS_ROUTING_BACKUP_DIR}/manifest" ]]
     )
 
     (
@@ -1970,7 +2185,7 @@ JSON
         [[ "$(wc -l <"${reloadMarker}")" == "2" ]]
         jq -e '.dns.hosts["domain:example.com"] == "203.0.113.10"' "${configPath}11_dns.json" >/dev/null
         jq -e '.dns.servers[0].tag == "hosts"' "${singBoxConfigPath}dns.json" >/dev/null
-        [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
+        [[ -f "${PADM_DNS_ROUTING_BACKUP_DIR}/manifest" ]]
     )
 
     (

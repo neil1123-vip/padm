@@ -400,9 +400,16 @@ routingConfigBackupCreate() {
 }
 
 routingConfigRollback() {
+    padmRunRollback routingConfigRollbackApply "$@"
+}
+
+routingConfigRollbackApply() {
     local backupDir=$1
     local reason=$2
     local retryReload=${3:-false}
+    if declare -p PADM_ROUTING_TRANSACTION >/dev/null 2>&1; then
+        PADM_ROUTING_TRANSACTION[pending]=false
+    fi
 
     if ! checkLogBackupRestore "${backupDir}"; then
         padmForgetCleanupPath "${backupDir}"
@@ -414,12 +421,20 @@ routingConfigRollback() {
         errorCard "${reason}，旧配置已恢复但核心重载失败" "请手动检查备份目录: ${backupDir}"
         return 1
     fi
-    if ! padmRemoveCleanupPath "${backupDir}"; then
+    if ! removeManagedPathIfPresent "${backupDir}"; then
+        padmForgetCleanupPath "${backupDir}"
         errorCard "${reason}，旧配置已恢复但备份目录清理失败" "请手动检查备份目录: ${backupDir}"
         return 1
     fi
+    padmForgetCleanupPath "${backupDir}"
     errorCard "${reason}，已恢复旧配置"
     return 1
+}
+
+routingConfigRollbackOnExit() {
+    [[ "${PADM_ROUTING_TRANSACTION[pending]:-false}" == true ]] || return 0
+    routingConfigRollback "${PADM_ROUTING_TRANSACTION[backupDir]}" \
+        "${PADM_ROUTING_TRANSACTION[title]}：操作被中断" "${PADM_ROUTING_TRANSACTION[reloadStarted]}"
 }
 
 routingConfigApplyTransaction() {
@@ -428,24 +443,34 @@ routingConfigApplyTransaction() {
     local includeWarpConfig=$3
     local applyFn=$4
     local backupDir=
+    local -A PADM_ROUTING_TRANSACTION=([pending]=false [backupDir]= [title]="${failureTitle}" [reloadStarted]=false)
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
     shift 4
 
     routingConfigBackupCreate backupDir "${includeInbounds}" "${includeWarpConfig}" || {
         errorCard "${failureTitle}：配置备份失败，已取消修改"
         return 1
     }
+    PADM_ROUTING_TRANSACTION[backupDir]=${backupDir}
+    PADM_ROUTING_TRANSACTION[pending]=true
+    padmRegisterExitRollback routingConfigRollbackOnExit
     if ! "${applyFn}" "$@"; then
         routingConfigRollback "${backupDir}" "${failureTitle}" false
         return 1
     fi
+    PADM_ROUTING_TRANSACTION[reloadStarted]=true
     if ! reloadCore; then
         routingConfigRollback "${backupDir}" "${failureTitle}：核心重载失败" true
         return 1
     fi
-    if ! padmRemoveCleanupPath "${backupDir}"; then
+    PADM_ROUTING_TRANSACTION[pending]=false
+    if ! removeManagedPathIfPresent "${backupDir}"; then
+        padmForgetCleanupPath "${backupDir}"
         errorCard "${failureTitle}：配置已生效，但备份目录清理失败" "请手动检查备份目录: ${backupDir}"
         return 1
     fi
+    padmForgetCleanupPath "${backupDir}"
 }
 
 # 安装嗅探配置

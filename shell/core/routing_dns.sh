@@ -2,6 +2,26 @@
 
 DNS_ROUTING_ACTIVE_BACKUP_DIR=
 
+dnsRoutingApplyTransaction() {
+    local -A PADM_DNS_ROUTING_TRANSACTION=([pending]=false [reloadStarted]=false)
+    local DNS_ROUTING_ACTIVE_BACKUP_DIR=
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
+    local status=0
+    "$@" || status=$?
+    if [[ "${PADM_DNS_ROUTING_TRANSACTION[pending]}" == true ]]; then
+        dnsRoutingAbortChange "DNS/hosts 配置修改失败" || true
+        status=1
+    fi
+    return "${status}"
+}
+
+dnsRoutingRollbackOnExit() {
+    [[ "${PADM_DNS_ROUTING_TRANSACTION[pending]:-false}" == true ]] || return 0
+    padmRunRollback dnsRoutingRollbackApply "DNS/hosts 配置修改被中断" \
+        "${PADM_DNS_ROUTING_TRANSACTION[reloadStarted]}" "已恢复旧配置"
+}
+
 # DNS/hosts 路由与覆盖
 dnsRouting() {
     if [[ -z "${configPath:-}" && -z "${singBoxConfigPath:-}" ]]; then
@@ -76,7 +96,7 @@ dnsRoutingBackupCreate() {
         xrayManagedFile=$(padmManagedFilePath "${xrayConfigDir}" "11_dns.json") || return 1
         backupArgs+=("xray/11_dns.json" "${xrayManagedFile}")
         backupTargets+=("${xrayManagedFile}")
-        xrayManagedFile=$(padmManagedFilePath "${xrayConfigDir}" "dns_routing.state") || return 1
+        xrayManagedFile=$(dnsRoutingXrayStateFile) || return 1
         backupArgs+=("xray/dns_routing.state" "${xrayManagedFile}")
         backupTargets+=("${xrayManagedFile}")
     fi
@@ -97,6 +117,10 @@ dnsRoutingBackupCreate() {
         backupDir="${createdBackupDir}"
     fi
     DNS_ROUTING_ACTIVE_BACKUP_DIR="${backupDir}"
+    if declare -p PADM_DNS_ROUTING_TRANSACTION >/dev/null 2>&1; then
+        PADM_DNS_ROUTING_TRANSACTION[pending]=true
+        padmRegisterExitRollback dnsRoutingRollbackOnExit
+    fi
 }
 
 dnsRoutingBackupRestore() {
@@ -117,22 +141,45 @@ dnsRoutingBackupRestore() {
 dnsRoutingBackupCleanup() {
     local backupDir
     backupDir=$(dnsRoutingSafeBackupDir) || return 1
-    removeManagedPathIfPresent "${backupDir}" || return 1
+    if declare -p PADM_DNS_ROUTING_TRANSACTION >/dev/null 2>&1; then
+        PADM_DNS_ROUTING_TRANSACTION[pending]=false
+    fi
+    if ! removeManagedPathIfPresent "${backupDir}"; then
+        padmForgetCleanupPath "${backupDir}"
+        DNS_ROUTING_ACTIVE_BACKUP_DIR=
+        return 1
+    fi
     padmForgetCleanupPath "${backupDir}"
     DNS_ROUTING_ACTIVE_BACKUP_DIR=
 }
 
 # 返回恢复与清理结果，调用方保留原操作的失败状态。
 dnsRoutingAbortChange() {
+    padmRunRollback dnsRoutingRollbackApply "$1" false "已恢复旧配置"
+}
+
+dnsRoutingRollbackApply() {
     local reason=$1
+    local retryReload=${2:-false}
+    local restoredMessage=${3:-已恢复旧配置}
     local backupDir
     local restoreMessage
+    if declare -p PADM_DNS_ROUTING_TRANSACTION >/dev/null 2>&1; then
+        PADM_DNS_ROUTING_TRANSACTION[pending]=false
+    fi
     backupDir=$(dnsRoutingSafeBackupDir) || return 1
     if dnsRoutingBackupRestore; then
+        if [[ "${retryReload}" == true ]] && ! reloadCore; then
+            padmForgetCleanupPath "${backupDir}"
+            DNS_ROUTING_ACTIVE_BACKUP_DIR=
+            errorCard "${reason}，旧配置已恢复但核心重载仍失败" "请手动检查备份目录: ${backupDir}"
+            return 1
+        fi
         if ! dnsRoutingBackupCleanup; then
             errorCard "${reason}，旧配置已恢复，但备份目录清理失败: ${backupDir}"
             return 1
         fi
+        [[ "${retryReload}" != true ]] || errorCard "${reason}，${restoredMessage}"
         return 0
     else
         padmForgetCleanupPath "${backupDir}"
@@ -146,23 +193,18 @@ dnsRoutingAbortChange() {
 dnsRoutingReloadOrRollback() {
     local title=$1
     local backupDir
-    local restoreMessage
     backupDir=$(dnsRoutingSafeBackupDir) || return 1
+    if declare -p PADM_DNS_ROUTING_TRANSACTION >/dev/null 2>&1; then
+        PADM_DNS_ROUTING_TRANSACTION[reloadStarted]=true
+    fi
     if reloadCore; then
-        dnsRoutingBackupCleanup || errorCard "${title}已应用，但备份目录清理失败: ${backupDir}"
+        dnsRoutingBackupCleanup || {
+            errorCard "${title}已应用，但备份目录清理失败: ${backupDir}"
+            return 1
+        }
         return 0
     fi
-    if ! dnsRoutingBackupRestore; then
-        padmForgetCleanupPath "${backupDir}"
-        DNS_ROUTING_ACTIVE_BACKUP_DIR=
-        coreSetSingleRestoreResultMessage restoreMessage "${title}核心重载失败" false "已恢复旧配置" "旧配置" "备份目录: ${backupDir}" || true
-        errorCard "${restoreMessage}"
-        return 1
-    fi
-    dnsRoutingBackupCleanup || true
-    local rollbackMessage
-    coreSetRollbackResultMessage rollbackMessage "${title}核心重载失败" "已回滚本次修改" reloadCore "恢复旧配置后重载仍失败，请检查核心服务日志"
-    errorCard "${rollbackMessage}"
+    padmRunRollback dnsRoutingRollbackApply "${title}核心重载失败" true "已回滚本次修改" || true
     return 1
 }
 
@@ -274,7 +316,9 @@ updateXrayDNSRoutingConfig() {
 }
 
 # DNS/hosts 配置写入
-setUnlockSNI() {
+setUnlockSNI() { dnsRoutingApplyTransaction setUnlockSNIApply; }
+
+setUnlockSNIApply() {
     autoRead sni_routing_ip "请输入要覆盖到的 IP:" setSNIP || return 0
     if [[ -n ${setSNIP} ]]; then
         dnsRoutingValidateHostIP "${setSNIP}" || return 1
@@ -535,7 +579,9 @@ addSingBoxDNSConfig() {
     fi
 }
 # 设置 DNS 分流
-setUnlockDNS() {
+setUnlockDNS() { dnsRoutingApplyTransaction setUnlockDNSApply; }
+
+setUnlockDNSApply() {
     autoRead dns_routing_server "请输入分流的DNS:" setDNS || return 0
     if [[ -n ${setDNS} ]]; then
         echoContent title "\n┌─ DNS 分流规则 ─────────────────────────────────────"
@@ -571,7 +617,9 @@ setUnlockDNS() {
 }
 
 # 移除 DNS/hosts 配置
-removeUnlockRoutingConfig() {
+removeUnlockRoutingConfig() { dnsRoutingApplyTransaction removeUnlockRoutingConfigApply "$@"; }
+
+removeUnlockRoutingConfigApply() {
     local title=$1
     local checkXrayFile=${2:-}
     dnsRoutingBackupCreate || { errorCard "${title}配置备份失败，已取消移除"; return 1; }

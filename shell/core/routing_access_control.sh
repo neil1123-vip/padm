@@ -2,6 +2,26 @@
 
 ACCESS_CONTROL_ACTIVE_BACKUP_DIR=
 
+accessControlApplyTransaction() {
+    local -A PADM_ACCESS_CONTROL_TRANSACTION=([pending]=false [reloadStarted]=false)
+    local ACCESS_CONTROL_ACTIVE_BACKUP_DIR=
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
+    local status=0
+    "$@" || status=$?
+    if [[ "${PADM_ACCESS_CONTROL_TRANSACTION[pending]}" == true ]]; then
+        accessControlAbortChange || true
+        status=1
+    fi
+    return "${status}"
+}
+
+accessControlRollbackOnExit() {
+    [[ "${PADM_ACCESS_CONTROL_TRANSACTION[pending]:-false}" == true ]] || return 0
+    padmRunRollback accessControlRollbackApply "访问控制修改被中断" \
+        "${PADM_ACCESS_CONTROL_TRANSACTION[reloadStarted]}"
+}
+
 accessControlMenu() {
     if [[ -z "${configPath}" && -z "${singBoxConfigPath}" ]]; then
         coreNotInstalledErrorCard
@@ -82,21 +102,44 @@ showSingBoxAccessRuleFile() {
 }
 
 accessControlAbortChange() {
+    padmRunRollback accessControlRollbackApply "访问控制修改失败" false
+}
+
+accessControlRollbackApply() {
+    local reason=$1
+    local retryReload=${2:-false}
+    local title=${3:-访问控制修改失败}
+    local logFile=${4:-}
     local backupDir
     local rollbackMessage
+    if declare -p PADM_ACCESS_CONTROL_TRANSACTION >/dev/null 2>&1; then
+        PADM_ACCESS_CONTROL_TRANSACTION[pending]=false
+    fi
     backupDir=$(accessControlBackupDir) || return 1
     if accessControlBackupRestore; then
-        accessControlBackupCleanup || errorCard "访问控制修改失败，旧配置已恢复，但备份目录清理失败: $(accessControlBackupDir)"
+        if [[ "${retryReload}" == true ]] && ! reloadCore; then
+            padmForgetCleanupPath "${backupDir}"
+            ACCESS_CONTROL_ACTIVE_BACKUP_DIR=
+            reportAccessControlApplyFailure "${title}" "${reason}，旧配置已恢复但核心重载仍失败，备份目录: ${backupDir}" "${logFile}"
+            return 1
+        fi
+        if ! accessControlBackupCleanup; then
+            reportAccessControlApplyFailure "${title}" "${reason}，旧配置已恢复，但备份目录清理失败: ${backupDir}" "${logFile}"
+            return 1
+        fi
+        reportAccessControlApplyFailure "${title}" "${reason}，已回滚本次修改" "${logFile}"
     else
         padmForgetCleanupPath "${backupDir}"
         ACCESS_CONTROL_ACTIVE_BACKUP_DIR=
-        coreSetRollbackFailureMessage rollbackMessage "访问控制修改失败" "${backupDir}"
-        errorCard "${rollbackMessage}"
+        coreSetRollbackFailureMessage rollbackMessage "${reason}" "${backupDir}"
+        reportAccessControlApplyFailure "${title}" "${rollbackMessage}" "${logFile}"
     fi
     return 1
 }
 
-addBlockedDomains() {
+addBlockedDomains() { accessControlApplyTransaction addBlockedDomainsApply; }
+
+addBlockedDomainsApply() {
     local domainList
     echoContent title "\n┌─ 添加域名阻断 ─────────────────────────────────────"
     menuLine "示例：openai,geosite:category-ads-all,domain:example.com,full:api.example.com,keyword:tracker"
@@ -122,7 +165,9 @@ addBlockedDomains() {
     successCard "域名阻断规则已添加"
 }
 
-addBlockedIPs() {
+addBlockedIPs() { accessControlApplyTransaction addBlockedIPsApply; }
+
+addBlockedIPsApply() {
     local ipList normalizedIPs
     echoContent title "\n┌─ 添加 IP/CIDR 阻断 ────────────────────────────────"
     menuLine "录入示例：1.1.1.1,8.8.8.8,1.1.1.0/24,2400:3200::/32,cn"
@@ -146,7 +191,9 @@ addBlockedIPs() {
     successCard "IP/CIDR 阻断规则已添加"
 }
 
-addDirectAllowDomains() {
+addDirectAllowDomains() { accessControlApplyTransaction addDirectAllowDomainsApply; }
+
+addDirectAllowDomainsApply() {
     local allowDomainList
     echoContent title "\n┌─ 添加直连例外 ─────────────────────────────────────"
     menuLine "直连例外会优先于阻断规则，适合系统更新、证书签发或必要服务"
@@ -171,7 +218,9 @@ addDirectAllowDomains() {
     successCard "直连例外已添加"
 }
 
-manageRegionalBlockPolicy() {
+manageRegionalBlockPolicy() { accessControlApplyTransaction manageRegionalBlockPolicyApply; }
+
+manageRegionalBlockPolicyApply() {
     local policyStatus allowDomainList extraAllowDomainList
     while true; do
         allowDomainList="dl.google.com,apple.com,bing.com,microsoft.com,gstatic.com,xn--ngstr-lra8j.com,googleapis.com,googleapis.cn"
@@ -225,7 +274,9 @@ manageRegionalBlockPolicy() {
     done
 }
 
-removeAccessControlMenu() {
+removeAccessControlMenu() { accessControlApplyTransaction removeAccessControlMenuApply; }
+
+removeAccessControlMenuApply() {
     local removeStatus=
     while true; do
         echoContent title "\n┌─ 移除访问控制 ─────────────────────────────────────"
@@ -459,6 +510,10 @@ accessControlBackupCreate() {
         backupDir="${createdBackupDir}"
     fi
     ACCESS_CONTROL_ACTIVE_BACKUP_DIR="${backupDir}"
+    if declare -p PADM_ACCESS_CONTROL_TRANSACTION >/dev/null 2>&1; then
+        PADM_ACCESS_CONTROL_TRANSACTION[pending]=true
+        padmRegisterExitRollback accessControlRollbackOnExit
+    fi
 }
 
 accessControlBackupRestore() {
@@ -481,7 +536,14 @@ accessControlBackupRestore() {
 accessControlBackupCleanup() {
     local backupDir
     backupDir=$(accessControlSafeBackupDir) || return 1
-    removeManagedPathIfPresent "${backupDir}" || return 1
+    if declare -p PADM_ACCESS_CONTROL_TRANSACTION >/dev/null 2>&1; then
+        PADM_ACCESS_CONTROL_TRANSACTION[pending]=false
+    fi
+    if ! removeManagedPathIfPresent "${backupDir}"; then
+        padmForgetCleanupPath "${backupDir}"
+        ACCESS_CONTROL_ACTIVE_BACKUP_DIR=
+        return 1
+    fi
     padmForgetCleanupPath "${backupDir}"
     ACCESS_CONTROL_ACTIVE_BACKUP_DIR=
 }
@@ -520,32 +582,17 @@ validateAccessControlConfig() {
 
 applyAccessControlConfigChange() {
     local backupDir
-    local rollbackMessage
     backupDir=$(accessControlBackupDir)
     if ! validateAccessControlConfig; then
-        if accessControlBackupRestore; then
-            accessControlBackupCleanup || true
-            reportAccessControlApplyFailure "${ACCESS_CONTROL_FAILURE_TITLE:-访问控制配置校验失败}" "访问控制配置未通过校验，已回滚本次修改" "${ACCESS_CONTROL_FAILURE_LOG:-}"
-        else
-            padmForgetCleanupPath "${backupDir}"
-            ACCESS_CONTROL_ACTIVE_BACKUP_DIR=
-            coreSetRollbackFailureMessage rollbackMessage "访问控制配置未通过校验" "${backupDir}"
-            reportAccessControlApplyFailure "${ACCESS_CONTROL_FAILURE_TITLE:-访问控制配置校验失败}" "${rollbackMessage}" "${ACCESS_CONTROL_FAILURE_LOG:-}"
-        fi
+        padmRunRollback accessControlRollbackApply "访问控制配置未通过校验" false \
+            "${ACCESS_CONTROL_FAILURE_TITLE:-访问控制配置校验失败}" "${ACCESS_CONTROL_FAILURE_LOG:-}"
         return 1
     fi
+    if declare -p PADM_ACCESS_CONTROL_TRANSACTION >/dev/null 2>&1; then
+        PADM_ACCESS_CONTROL_TRANSACTION[reloadStarted]=true
+    fi
     if ! reloadCore; then
-        if ! accessControlBackupRestore; then
-            padmForgetCleanupPath "${backupDir}"
-            ACCESS_CONTROL_ACTIVE_BACKUP_DIR=
-            coreSetRollbackFailureMessage rollbackMessage "核心重载失败" "${backupDir}"
-            reportAccessControlApplyFailure "访问控制重载失败" "${rollbackMessage}"
-            return 1
-        fi
-        accessControlBackupCleanup || true
-        local rollbackMessage
-        coreSetRollbackResultMessage rollbackMessage "核心重载失败" "已回滚本次修改" reloadCore "恢复旧配置后重载仍失败，请检查核心服务日志"
-        reportAccessControlApplyFailure "访问控制重载失败" "${rollbackMessage}"
+        padmRunRollback accessControlRollbackApply "核心重载失败" true "访问控制重载失败"
         return 1
     fi
     if ! accessControlBackupCleanup; then
