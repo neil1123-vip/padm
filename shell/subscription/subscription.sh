@@ -357,7 +357,12 @@ prepareSubscribeTLSCertificate() {
     local tlsDir confirm= reuseSource=false
     tlsDir=$(tlsManagedDir) || return 1
     if tlsCertificatePairUsable "${tlsDir}" "${certDomain}"; then
-        if tlsCertificateManagedByAcme "${certDomain}"; then
+        local managedStatus=0
+        tlsCertificateManagedByAcme "${certDomain}" || managedStatus=$?
+        if [[ "${managedStatus}" == 2 ]]; then
+            errorCard "订阅 TLS 证书归属检查失败" "无法确认 acme.sh 是否管理 ${certDomain}，未修改 Nginx 配置"
+            return 1
+        elif [[ "${managedStatus}" == 0 ]]; then
             installCronTLS 1 || return 1
             statusCard "订阅 TLS 证书" "已复用 acme.sh 管理的可用证书：${certDomain}"
         else
