@@ -174,7 +174,8 @@ tlsAcmeManagedCertificateRecords() {
         [[ "${certFile}" == "${tlsDir}/"*.crt ]] || continue
         certDomain=$(basename -- "${certFile}" .crt)
         tlsDomainNameIsSafe "${certDomain}" || continue
-        [[ "${keyFile}" == "${tlsDir}/${certDomain}.key" ]] || continue
+        [[ "${certFile}" == "${tlsDir}/${certDomain}.crt" &&
+            "${keyFile}" == "${tlsDir}/${certDomain}.key" ]] || continue
         [[ -z "${seen[${certDomain}]+x}" ]] || continue
         seen["${certDomain}"]=1
         printf '%s\t%s\t%s\t%s\n' "${certDomain}" "${configFile}" "${certFile}" "${keyFile}"
@@ -1075,12 +1076,11 @@ renewalTLS() {
         return "${managedRenewStatus}"
     fi
     local domain=${currentHost:-${tlsDomain:-}}
-    local sslTypeFile
     local tlsDir
     local acmeDir
     local acmeBin
     local renewStatus
-    local renewalDays=90
+    local startDate endDate modifyTime endTime currentTime days remainingDays tlsStatus dateStatus=0
     tlsDir=$(tlsManagedDir) || return 1
     acmeDir=$(acmeSafeHomeDir 2>/dev/null || true)
     if [[ -n "${domain}" ]] && ! tlsDomainNameIsSafe "${domain}"; then
@@ -1091,10 +1091,6 @@ renewalTLS() {
     fi
     readAcmeTLS "${domain}" || return 1
 
-    sslTypeFile=$(tlsSslTypeFile) || return 1
-    if [[ -f "${sslTypeFile}" ]] && grep -q "buypass" <"${sslTypeFile}"; then
-        renewalDays=180
-    fi
     if [[ "${installedDNSAPIStatus:-}" == "true" && -z "${acmeDir}" ]]; then
         errorCard "acme.sh HOME 路径异常"
         return 1
@@ -1103,33 +1099,33 @@ renewalTLS() {
         -s "${acmeDir}/${domain}_ecc/${domain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; }; then
         acmeBin=$(acmeExecutable) || { errorCard "acme.sh 路径、所有者或权限异常"; return 1; }
         chmod 600 -- "${tlsDir}/${domain}.key" || { errorCard "TLS 私钥权限收紧失败"; return 1; }
-        modifyTime=
-
-        if [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
-            modifyTime=$(stat --format=%z "${acmeDir}/*.${dnsTLSDomain}_ecc/*.${dnsTLSDomain}.cer")
+        # 旧登记缺安装路径时仍使用真实证书时间，复制源文件不能延长续签窗口。
+        if startDate=$(openssl x509 -in "${tlsDir}/${domain}.crt" -startdate -noout 2>/dev/null) &&
+            endDate=$(openssl x509 -in "${tlsDir}/${domain}.crt" -enddate -noout 2>/dev/null) &&
+            [[ "${startDate}" == notBefore=* && "${endDate}" == notAfter=* ]] &&
+            modifyTime=$(tlsCertificateDateEpoch "${startDate#notBefore=}") &&
+            endTime=$(tlsCertificateDateEpoch "${endDate#notAfter=}") &&
+            currentTime=$(date +%s); then
+            days=$(( (currentTime - modifyTime) / 86400 ))
+            remainingDays=$(( (endTime - currentTime) / 86400 ))
+            tlsStatus=${remainingDays}
+            if (( endTime <= currentTime )); then
+                tlsStatus="已过期"
+            fi
+            tlsCertificateStatusCard \
+                "证书检查日期:$(date "+%F %H:%M:%S")" \
+                "证书生成日期:$(date -d @"${modifyTime}" +"%F %H:%M:%S")" \
+                "证书生成天数:${days}" \
+                "证书剩余天数:${tlsStatus}" \
+                "证书过期前最后一天自动更新，如更新失败请手动更新"
         else
-            modifyTime=$(stat --format=%z "${acmeDir}/${domain}_ecc/${domain}.cer")
+            dateStatus=1
+            tlsCertificateStatusCard "证书有效期读取失败" "将尝试使用 ACME 源恢复证书"
         fi
 
-        modifyTime=$(date +%s -d "${modifyTime}")
-        currentTime=$(date +%s)
-        ((stampDiff = currentTime - modifyTime))
-        ((days = stampDiff / 86400))
-        ((remainingDays = renewalDays - days))
-
-        tlsStatus=${remainingDays}
-        if [[ ${remainingDays} -le 0 ]]; then
-            tlsStatus="已过期"
-        fi
-
-        tlsCertificateStatusCard \
-            "证书检查日期:$(date "+%F %H:%M:%S")" \
-            "证书生成日期:$(date -d @"${modifyTime}" +"%F %H:%M:%S")" \
-            "证书生成天数:${days}" \
-            "证书剩余天数:${tlsStatus}" \
-            "证书过期前最后一天自动更新，如更新失败请手动更新"
-
-        if [[ ${remainingDays} -le 1 ]]; then
+        if [[ "${dateStatus}" != 0 ]] ||
+            ! tlsCertificatePairUsable "${tlsDir}" "${domain}" ||
+            ! openssl x509 -in "${tlsDir}/${domain}.crt" -checkend 86400 -noout >/dev/null 2>&1; then
             local installDomain="${domain}"
             local crtFile="${tlsDir}/${domain}.crt"
             local keyFile="${tlsDir}/${domain}.key"

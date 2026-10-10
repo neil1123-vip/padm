@@ -4835,11 +4835,6 @@ dockerValidateUpdateCandidate() {
     dockerDeploymentFileValidate "${candidate}/deployment.json" || return 1
     if [[ -f "${candidate}/config/spec.json" ]]; then
         dockerBundleSupportsSpec "${DOCKER_STAGED_BUNDLE_PATH}" "${candidate}/config/spec.json" &&
-            dockerControlStateCheck "${candidate}" || return 1
-    fi
-    if [[ -f "${candidate}/config/spec.json" ]] &&
-        jq -e '.reality_stream != null or .tls.http01 == true' "${candidate}/config/spec.json" >/dev/null; then
-        dockerBundleSupportsSpec "${DOCKER_STAGED_BUNDLE_PATH}" "${candidate}/config/spec.json" &&
             dockerValidateCandidate "${candidate}/config/spec.json" "${candidate}"
         return $?
     fi
@@ -4866,14 +4861,6 @@ dockerValidateUpdateCandidate() {
         *) return 1 ;;
         esac
     done <<<"${cores}"
-    if jq -e '.control != null' "${candidate}/config/spec.json" >/dev/null 2>&1; then
-        dockerCandidateCompose "${candidate}" run --rm --no-deps control \
-            control --state /etc/padm/control/state.json \
-            --access-log /var/log/padm/control/auth.log \
-            --access-lock /var/log/padm/control/auth.lock \
-            --source-challenge /run/padm/control-source/challenge.json \
-            --source-receipt /var/log/padm/control/source.receipt --check >/dev/null || return 1
-    fi
 }
 
 dockerRemoveConfigurationTargets() {

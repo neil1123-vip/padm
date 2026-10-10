@@ -277,7 +277,7 @@ dockerRenewalChange() {
 }
 
 dockerRenewalRun() {
-    local root registry request requests domain email provider credentials image status=0 result
+    local root registry request requests domain email provider credentials image enabled status=0 result
     root=$(dockerInstallRoot) || return 1
     registry="${root}/secrets/renewal"
     dockerTrafficSafePath "${root}" "${registry}" &&
@@ -293,10 +293,15 @@ dockerRenewalRun() {
     image=$(dockerResolveOpsImage) || return "${PADM_DOCKER_RC_STATE}"
     while IFS= read -r request; do
         [[ -n "${request}" ]] || continue
-        jq -e '.enabled == true' "${request}" >/dev/null || continue
-        domain=$(jq -r '.domain' "${request}")
-        email=$(jq -r '.email' "${request}")
-        provider=$(jq -r '.provider' "${request}")
+        enabled=$(jq -r '.enabled' "${request}") || return "${PADM_DOCKER_RC_STATE}"
+        case "${enabled}" in
+        true) ;;
+        false) continue ;;
+        *) return "${PADM_DOCKER_RC_STATE}" ;;
+        esac
+        domain=$(jq -er '.domain' "${request}") || return "${PADM_DOCKER_RC_STATE}"
+        email=$(jq -er '.email' "${request}") || return "${PADM_DOCKER_RC_STATE}"
+        provider=$(jq -er '.provider' "${request}") || return "${PADM_DOCKER_RC_STATE}"
         credentials=
         [[ "${provider}" == standalone || "${provider}" == webroot ]] || credentials="${request%/*}/credentials.env"
         dockerRenewalAccountCheck "${root}" "${domain}" "${provider}" || {

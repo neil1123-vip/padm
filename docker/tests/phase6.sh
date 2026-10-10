@@ -231,8 +231,16 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
             bundleBefore=$(readlink "$root/bundle")
             export FAKE_DOCKER_LOG="$root/.update-check-${BASHPID}.log" FAKE_DOCKER_FAIL_CHECK="$check"
             dockerMain update --manifest "$source" >"$root/.update-check-result" 2>&1 || rc=$?
-            [[ "$rc" == "$PADM_DOCKER_RC_STATE" ]]
-            grep -qF " $check " "$FAKE_DOCKER_LOG"
+            [[ "$rc" == "$PADM_DOCKER_RC_STATE" ]] || {
+                printf "候选检查 %s 应返回 %s，实际 %s\n" "$check" "$PADM_DOCKER_RC_STATE" "$rc" >&2
+                cat "$root/.update-check-result" >&2
+                return 1
+            }
+            grep -qE " $check( |$)" "$FAKE_DOCKER_LOG" || {
+                printf "未执行预期候选检查: %s\n" "$check" >&2
+                cat "$root/.update-check-result" "$FAKE_DOCKER_LOG" >&2
+                return 1
+            }
             ! grep -Eq " (up|down|restart|stop|exec) " "$FAKE_DOCKER_LOG"
             [[ "$before" == "$(tar --sort=name --numeric-owner -cf - -C "$root" \
                 config secrets deployment.json compose.json images.env | sha256sum)" ]]
@@ -743,6 +751,34 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
         assertCurrent "$oldBundle" "$oldCommit" old-control "$(printf 1%.0s {1..64})"
         test "$(jq -Sc . "$root/config/spec.json")" == "$(jq -Sc . "$oldSpec")"
         test "$(jq -Sc . "$root/data/traffic/state.json")" == "$trafficBefore"
+
+        # 普通 WS 更新也要在切换前检查 Nginx 与订阅，不能等启动失败再恢复。
+        (
+            root="${root}/.service-check-state"
+            export PADM_DOCKER_INSTALL_DIR="${root}" PADM_DOCKER_BIN_DIR="${root}/bin"
+            dockerInitializeStateRoot
+            dockerInstallBundle "$PHASE6_NEW_CONTROL_SOURCE" "$newCommit"
+            dockerCreateConfigurationCandidate
+            candidate=$DOCKER_CONFIG_CANDIDATE
+            mkdir -p "${root}/secrets/tls"
+            printf "fixture-cert\n" >"${root}/secrets/tls/proxy.example.com.crt"
+            printf "fixture-key\n" >"${root}/secrets/tls/proxy.example.com.key"
+            jq --arg ref "ghcr.io/example/padm-test:3.1.9@sha256:$digest" "
+              .release = {version: \"3.1.9\", manifest_sha256: (\"a\" * 64), signature_identity: \"test\"} |
+              .core.protocols[0].public_port = 24443 |
+              .core.protocols[0].address_families = [\"ipv4\"] |
+              .images |= map_values(\$ref)
+            " "$PHASE6_PROJECT_ROOT/docker/configure-nginx.example.json" >"${root}/service-spec.json"
+            dockerGenerateCandidate "${root}/service-spec.json" "${candidate}"
+            dockerBackupConfiguration configure
+            dockerInstallCandidate "${candidate}" "${DOCKER_CONFIG_BACKUP}"
+            DOCKER_CONFIG_SWITCHED=0
+            dockerCleanupConfigurationCandidate
+            source=$PHASE6_MANIFEST
+            control=$PHASE6_CONTROL_BUNDLE
+            assertRejectedUpdateCheck "nginx -t"
+            assertRejectedUpdateCheck "subscription subscription --check"
+        )
 
         test -d "$root"
         ! dockerUninstallCommand --purge

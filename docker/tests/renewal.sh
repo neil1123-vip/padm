@@ -493,6 +493,28 @@ runControl failure acme auto-renew
 [[ ! -s "${TEST_ROOT}/acme.log" && "$(materials)" == "${before}" ]] ||
     fail '账户 provider 漂移仍执行了续期或改写材料'
 
+# 登记校验通过后，执行阶段的逐域读取失败仍必须上报，不能当成停用或空字段。
+for FIELD in enabled domain email provider; do
+    newState "run-read-${FIELD}"
+    enableDomain a.example.com
+    before=$(materials)
+    (
+        jq() {
+            local filter=".${FIELD}"
+            if [[ "${FUNCNAME[1]:-}" == dockerRenewalRun && "${2:-}" == "${filter}" ]]; then
+                printf '模拟续期读取失败: %s\n' "${filter}" >&2
+                return 17
+            fi
+            command jq "$@"
+        }
+        runControl "${PADM_DOCKER_RC_STATE}" acme auto-renew
+        grep -qF "模拟续期读取失败: .${FIELD}" "${TEST_ROOT}/control.log" ||
+            fail "${FIELD}: 未触发逐域读取故障"
+    )
+    [[ ! -s "${TEST_ROOT}/acme.log" && "$(materials)" == "${before}" ]] ||
+        fail "${FIELD}: 逐域读取失败仍执行了续期或修改材料"
+done
+
 newState lock-conflict
 enableDomain a.example.com
 mkdir "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock"
