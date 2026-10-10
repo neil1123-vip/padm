@@ -351,6 +351,22 @@ for BACKEND in systemd cron; do
     else
         [[ "$(grep -c 'geo auto-update' "${TEST_ROOT}/crontab")" == 1 ]] || fail '重复安装了 Geo cron'
     fi
+    (
+        before=$(materials)
+        beforeJobs=$(jobs)
+        : >"${TEST_ROOT}/download.log"
+        jq() {
+            local argument
+            for argument in "$@"; do
+                [[ "${argument}" != '.enabled' && "${argument}" != '.enabled == true' ]] || return 3
+            done
+            command jq "$@"
+        }
+        reject dockerGeoScheduleInstall
+        runControl "${PADM_DOCKER_RC_STATE}" geo auto-update
+        [[ "$(materials)" == "${before}" && "$(jobs)" == "${beforeJobs}" &&
+            ! -s "${TEST_ROOT}/download.log" ]] || fail 'Geo 开关读取失败修改了调度、数据或发起下载'
+    )
     for mode in schedule-fail schedule-term; do
         before=$(materials)
         beforeJobs=$(jobs)

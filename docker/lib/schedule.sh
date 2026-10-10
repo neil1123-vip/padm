@@ -11,7 +11,7 @@ DOCKER_MAINTENANCE_CHANGED=0
 
 dockerMaintenanceScheduleRestore() {
     local snapshot=$1 unitDir=$2 systemdReady=$3 timerEnabled=$4 timerActive=$5 job=$6 file failed=0
-    case "${job}" in renewal|geo) ;; *) return 1 ;; esac
+    case "${job}" in renewal|geo|traffic) ;; *) return 1 ;; esac
     if [[ "${systemdReady}" == 1 ]]; then
         [[ ! -f "${unitDir}/padm-docker-${job}.timer" ]] ||
             systemctl disable --now "padm-docker-${job}.timer" >/dev/null 2>&1 || return 1
@@ -63,6 +63,7 @@ dockerMaintenanceScheduleCommit() {
     case "${job}" in
     renewal) DOCKER_MAINTENANCE_CHANGED=0 DOCKER_RENEWAL_SWITCHED=0 ;;
     geo) DOCKER_MAINTENANCE_CHANGED=0 DOCKER_GEO_SWITCHED=0 ;;
+    traffic) DOCKER_MAINTENANCE_CHANGED=0 ;;
     *) return 1 ;;
     esac
     dockerMaintenanceScheduleInterrupted "${job}"
@@ -71,7 +72,8 @@ dockerMaintenanceScheduleCommit() {
 dockerMaintenanceScheduleApply() {
     [[ "$#" -eq 2 ]] || return 1
     local action=$1 job=$2 root cli bashPath unitDir file fragment snapshot= cronText= cronLine line
-    local marker command calendar cronSchedule description timerDescription
+    local marker cronMarker command calendar cronSchedule description timerDescription expected
+    local timeout=1800 timerOptions='RandomizedDelaySec=300' legacy=0
     local systemdReady=0 cronReady=0 timerEnabled=0 timerActive=0 haveUnits=0 haveCron=0
     case "${action}" in install|remove) ;; *) return 1 ;; esac
     case "${job}" in
@@ -91,6 +93,16 @@ dockerMaintenanceScheduleApply() {
         description='padm Docker Xray Geo update'
         timerDescription='Update padm Docker Xray Geo daily'
         ;;
+    traffic)
+        marker='# padm-docker 流量采集'
+        command='traffic collect'
+        calendar='*-*-* *:*:00'
+        cronSchedule='* * * * *'
+        description='padm Docker traffic accounting'
+        timerDescription='Collect padm Docker traffic every minute'
+        timeout=90
+        timerOptions='AccuracySec=1s'
+        ;;
     *) return 1 ;;
     esac
     [[ -z "${DOCKER_MAINTENANCE_SNAPSHOT:-}" ]] || return 1
@@ -109,10 +121,16 @@ dockerMaintenanceScheduleApply() {
             cronReady=1
         fi
     fi
-    cronLine="${cronSchedule} PADM_DOCKER_INSTALL_DIR=${root} ${bashPath} ${cli} ${command} ${marker} root=${root}"
+    cronMarker=${marker}
+    if [[ "${job}" == traffic ]]; then
+        cronMarker='# padm-docker-traffic'
+        cronLine="${cronSchedule} PADM_DOCKER_INSTALL_DIR=${root} ${bashPath} ${cli} ${command} ${cronMarker}"
+    else
+        cronLine="${cronSchedule} PADM_DOCKER_INSTALL_DIR=${root} ${bashPath} ${cli} ${command} ${cronMarker} root=${root}"
+    fi
     # 全部来源先确认归本部署所有，不能覆盖同名外部 unit 或其它 root 的任务。
     while IFS= read -r line; do
-        [[ "${line}" == *"${marker}"* ]] || continue
+        [[ "${line}" == *"${cronMarker}"* ]] || continue
         [[ "${line}" == "${cronLine}" ]] || return 1
         haveCron=1
     done <<<"${cronText}"
@@ -121,16 +139,56 @@ dockerMaintenanceScheduleApply() {
             "$(cd -- "${unitDir}" && pwd -P)" == "${unitDir}" ]] || return 1
     fi
     for file in "padm-docker-${job}.service" "padm-docker-${job}.timer"; do
+        legacy=0
         [[ ! -L "${unitDir}/${file}" ]] || return 1
         if [[ -e "${unitDir}/${file}" ]]; then
             [[ -f "${unitDir}/${file}" && -O "${unitDir}/${file}" ]] &&
-                grep -qxF "${marker}" "${unitDir}/${file}" &&
+                grep -qxF "${marker}" "${unitDir}/${file}" || return 1
+            if [[ "${job}" == traffic ]] &&
+                ! grep -q '^# padm-docker root=' "${unitDir}/${file}"; then
+                # 旧流量模板只凭精确内容迁移，默认同名 timer 必须仍绑定本 root 的 service。
+                if [[ "${file}" == *.service ]]; then
+                    expected=$(cat <<EOF
+${marker}
+[Unit]
+Description=${description}
+After=docker.service
+[Service]
+Type=oneshot
+Environment=PADM_DOCKER_INSTALL_DIR=${root}
+ExecStart=${bashPath} ${cli} ${command}
+TimeoutStartSec=${timeout}
+EOF
+)
+                else
+                    grep -qxF "Environment=PADM_DOCKER_INSTALL_DIR=${root}" \
+                        "${unitDir}/padm-docker-traffic.service" &&
+                        grep -qxF "ExecStart=${bashPath} ${cli} ${command}" \
+                            "${unitDir}/padm-docker-traffic.service" || return 1
+                    expected=$(cat <<EOF
+${marker}
+[Unit]
+Description=${timerDescription}
+[Timer]
+OnCalendar=${calendar}
+${timerOptions}
+Persistent=true
+[Install]
+WantedBy=timers.target
+EOF
+)
+                fi
+                [[ "$(<"${unitDir}/${file}")" == "${expected}" ]] || return 1
+                legacy=1
+            else
                 grep -qxF "# padm-docker root=${root}" "${unitDir}/${file}" || return 1
+            fi
             if [[ "${file}" == *.service ]]; then
                 grep -qxF "Environment=PADM_DOCKER_INSTALL_DIR=${root}" "${unitDir}/${file}" &&
                     grep -qxF "ExecStart=${bashPath} ${cli} ${command}" "${unitDir}/${file}" || return 1
             else
-                grep -qxF "Unit=padm-docker-${job}.service" "${unitDir}/${file}" || return 1
+                [[ "${legacy}" == 1 ]] ||
+                    grep -qxF "Unit=padm-docker-${job}.service" "${unitDir}/${file}" || return 1
             fi
             haveUnits=1
         fi
@@ -197,7 +255,7 @@ After=docker.service
 Type=oneshot
 Environment=PADM_DOCKER_INSTALL_DIR=${root}
 ExecStart=${bashPath} ${cli} ${command}
-TimeoutStartSec=1800
+TimeoutStartSec=${timeout}
 EOF
         cat >"${snapshot}/new.timer" <<EOF
 ${marker}
@@ -206,7 +264,7 @@ ${marker}
 Description=${timerDescription}
 [Timer]
 OnCalendar=${calendar}
-RandomizedDelaySec=300
+${timerOptions}
 Persistent=true
 Unit=padm-docker-${job}.service
 [Install]
@@ -233,6 +291,7 @@ EOF
             [[ -z "${DOCKER_GEO_STAGE:-}" || "${DOCKER_GEO_SWITCHED:-0}" != 1 ]] || return 0
             dockerGeoScheduleCommit
             ;;
+        traffic) dockerMaintenanceScheduleCommit traffic ;;
         esac
     else
         dockerMaintenanceScheduleInterrupted "${job}" || true

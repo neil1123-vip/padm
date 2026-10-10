@@ -160,15 +160,6 @@ dockerTrafficReadCrontab() {
     printf '%s\n' "${content}"
 }
 
-dockerTrafficCronRemove() {
-    local content
-    command -v crontab >/dev/null 2>&1 || return 0
-    content=$(dockerTrafficReadCrontab) || return 1
-    if [[ "${content}" == *'# padm-docker-traffic'* ]]; then
-        printf '%s\n' "${content}" | sed '/# padm-docker-traffic$/d' | crontab - || return 1
-    fi
-}
-
 dockerTrafficRuntimeCheck() {
     local cores=${1:-} core
     if [[ -z "${cores}" ]]; then
@@ -191,75 +182,11 @@ dockerTrafficRuntimeCheck() {
 }
 
 dockerTrafficScheduleInstall() {
-    local root cli bashPath unitDir temp cronText
-    dockerTrafficScheduleCheck || return 1
-    root=$(dockerInstallRoot) || return 1
-    cli="${PADM_DOCKER_BIN_DIR:-/usr/local/bin}/padm-docker"
-    bashPath=$(command -v bash) || return 1
-    # 定时任务配置不能接受换行、shell 表达式或 systemd 占位符。
-    [[ "${root}" =~ ^/[A-Za-z0-9._/-]+$ && "${cli}" =~ ^/[A-Za-z0-9._/-]+$ &&
-        "${bashPath}" =~ ^/[A-Za-z0-9._/-]+$ ]] || return 1
-    if command -v systemctl >/dev/null 2>&1 && systemctl show-environment >/dev/null 2>&1; then
-        unitDir=${PADM_DOCKER_SYSTEMD_DIR:-/etc/systemd/system}
-        [[ -d "${unitDir}" && ! -L "${unitDir}" && -O "${unitDir}" ]] || return 1
-        for temp in "${unitDir}/padm-docker-traffic.service" "${unitDir}/padm-docker-traffic.timer"; do
-            [[ ! -L "${temp}" ]] || return 1
-            if [[ -e "${temp}" ]]; then
-                [[ -f "${temp}" && -O "${temp}" ]] &&
-                    grep -qxF '# padm-docker 流量采集' "${temp}" || return 1
-            fi
-        done
-        temp=$(mktemp "${root}/locks/traffic-unit.XXXXXX") || return 1
-        cat >"${temp}" <<EOF
-# padm-docker 流量采集
-[Unit]
-Description=padm Docker traffic accounting
-After=docker.service
-[Service]
-Type=oneshot
-Environment=PADM_DOCKER_INSTALL_DIR=${root}
-ExecStart=${bashPath} ${cli} traffic collect
-TimeoutStartSec=90
-EOF
-        install -m 0644 "${temp}" "${unitDir}/padm-docker-traffic.service" || { rm -f -- "${temp}"; return 1; }
-        cat >"${temp}" <<'EOF'
-# padm-docker 流量采集
-[Unit]
-Description=Collect padm Docker traffic every minute
-[Timer]
-OnCalendar=*-*-* *:*:00
-AccuracySec=1s
-Persistent=true
-[Install]
-WantedBy=timers.target
-EOF
-        install -m 0644 "${temp}" "${unitDir}/padm-docker-traffic.timer" || { rm -f -- "${temp}"; return 1; }
-        rm -f -- "${temp}"
-        systemctl daemon-reload && systemctl enable --now padm-docker-traffic.timer && dockerTrafficCronRemove
-    else
-        cronText=$(dockerTrafficReadCrontab) || return 1
-        {
-            printf '%s\n' "${cronText}" | sed '/# padm-docker-traffic$/d'
-            printf '* * * * * PADM_DOCKER_INSTALL_DIR=%s %s %s traffic collect # padm-docker-traffic\n' "${root}" "${bashPath}" "${cli}"
-        } | crontab -
-    fi
+    dockerMaintenanceScheduleApply install traffic
 }
 
 dockerTrafficScheduleRemove() {
-    local unitDir file changed=0
-    unitDir=${PADM_DOCKER_SYSTEMD_DIR:-/etc/systemd/system}
-    for file in "${unitDir}/padm-docker-traffic.timer" "${unitDir}/padm-docker-traffic.service"; do
-        [[ -e "${file}" || -L "${file}" ]] || continue
-        [[ -d "${unitDir}" && ! -L "${unitDir}" && -O "${unitDir}" &&
-            -f "${file}" && ! -L "${file}" && -O "${file}" ]] || return 1
-        grep -qxF '# padm-docker 流量采集' "${file}" || return 1
-        if [[ "${file}" == *.timer ]]; then systemctl disable --now "${file##*/}" || return 1;
-        else systemctl stop "${file##*/}" || return 1; fi
-        rm -f -- "${file}" || return 1
-        changed=1
-    done
-    [[ "${changed}" == 0 ]] || systemctl daemon-reload || return 1
-    dockerTrafficCronRemove
+    dockerMaintenanceScheduleApply remove traffic
 }
 
 dockerRenewalScheduleRestore() {
@@ -1473,6 +1400,7 @@ dockerCommandInterrupted() {
     local status=$1
     dockerAcmeChallengeRestore || true
     dockerAssessCleanup || true
+    dockerMaintenanceScheduleInterrupted traffic || true
     dockerGeoScheduleInterrupted || true
     dockerGeoInterrupted || true
     dockerRenewalScheduleInterrupted || true
@@ -1550,6 +1478,7 @@ dockerMain() {
     esac
     status=${status:-$?}
     dockerAcmeChallengeRestore || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_STATE}
+    dockerMaintenanceScheduleInterrupted traffic || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_STATE}
     dockerGeoScheduleInterrupted || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_STATE}
     dockerGeoInterrupted || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_STATE}
     dockerRenewalScheduleInterrupted || [[ "${status}" -ne 0 ]] || status=${PADM_DOCKER_RC_STATE}

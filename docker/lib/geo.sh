@@ -238,13 +238,14 @@ dockerGeoScheduleRemove() {
 }
 
 dockerGeoScheduleInstall() {
-    local root directory
+    local root directory enabled
     root=$(dockerInstallRoot) || return 1
     directory="${root}/config/xray/geo"
     dockerTrafficSafePath "${root}" "${directory}" || return 1
     if [[ -e "${directory}" || -L "${directory}" ]]; then
         dockerGeoStateValidate "${directory}" || return 1
-        if jq -e '.enabled == true' "${directory}/state.json" >/dev/null; then
+        enabled=$(jq -r '.enabled' "${directory}/state.json") || return 1
+        if [[ "${enabled}" == true ]]; then
             dockerGeoScheduleApply install
             return $?
         fi
@@ -253,7 +254,7 @@ dockerGeoScheduleInstall() {
 }
 
 dockerGeoCommand() {
-    local action=${1:-status} version= schedule= root directory status=0
+    local action=${1:-status} version= schedule= root directory enabled status=0
     [[ "$#" == 0 ]] || shift
     case "${action}" in
     update)
@@ -300,8 +301,9 @@ dockerGeoCommand() {
         ;;
     update|auto-update)
         if [[ "${action}" == auto-update ]]; then
-            [[ -d "${directory}" ]] &&
-                jq -e '.enabled == true' "${directory}/state.json" >/dev/null || return 0
+            [[ -d "${directory}" ]] || return 0
+            enabled=$(jq -r '.enabled' "${directory}/state.json") || return "${PADM_DOCKER_RC_STATE}"
+            [[ "${enabled}" == true ]] || return 0
         fi
         dockerGeoUpdate "${version}" || {
             status=${PADM_DOCKER_RC_STATE}

@@ -961,6 +961,99 @@ if [[ "${PHASE4_SCOPE}" == maintenance ]]; then
     exit 0
 fi
 
+# 流量调度只能处理本 root 的任务，同名 marker 不能证明另一部署归本次操作所有。
+(
+    source "${PROJECT_ROOT}/install-docker.sh"
+    scheduleRoot="${TEST_ROOT}/traffic-schedule-ownership"
+    export PADM_DOCKER_INSTALL_DIR="${scheduleRoot}"
+    export PADM_DOCKER_SYSTEMD_DIR="${scheduleRoot}/units"
+    export PADM_DOCKER_BIN_DIR="${scheduleRoot}/bin"
+    mkdir -p "${scheduleRoot}/locks" "${PADM_DOCKER_SYSTEMD_DIR}" "${PADM_DOCKER_BIN_DIR}"
+    scheduler=systemd scheduleFailure=
+    systemctl() {
+        [[ "${scheduler}" == systemd ]] || return 1
+        printf '%s\n' "$*" >>"${scheduleRoot}/systemctl.log"
+        case "$1" in
+        is-enabled) [[ -f "${scheduleRoot}/enabled" ]]; return $? ;;
+        is-active) [[ -f "${scheduleRoot}/active" ]]; return $? ;;
+        enable) : >"${scheduleRoot}/enabled"; [[ "$*" != *--now* ]] || : >"${scheduleRoot}/active" ;;
+        start) : >"${scheduleRoot}/active" ;;
+        disable)
+            rm -f -- "${scheduleRoot}/enabled"
+            [[ "$*" != *--now* ]] || rm -f -- "${scheduleRoot}/active"
+            ;;
+        esac
+        if [[ "${scheduleFailure}" == "$1" && ! -e "${scheduleRoot}/failed-once" ]]; then
+            : >"${scheduleRoot}/failed-once"
+            return 1
+        fi
+        return 0
+    }
+    pgrep() { [[ "${scheduler}" == cron ]]; }
+    crontab() {
+        if [[ "$1" == -l ]]; then cat "${scheduleRoot}/crontab"; return 0; fi
+        cat >"${scheduleRoot}/crontab"
+        if [[ "${scheduleFailure}" == cron && ! -e "${scheduleRoot}/failed-once" ]]; then
+            : >"${scheduleRoot}/failed-once"
+            return 1
+        fi
+    }
+    scheduleMaterials() {
+        find "${PADM_DOCKER_SYSTEMD_DIR}" -type f -print0 | sort -z | xargs -0 -r sha256sum
+        cat "${scheduleRoot}/crontab"
+        for state in enabled active; do [[ ! -f "${scheduleRoot}/${state}" ]] || printf '%s\n' "${state}"; done
+        return 0
+    }
+    unrelatedJobs=$'# unrelated job\n17 3 * * * another-renewal # padm-docker TLS 自动续期 root=/elsewhere'
+    printf '%s\n' "${unrelatedJobs}" >"${scheduleRoot}/crontab"
+    for scheduler in systemd cron; do
+        dockerTrafficScheduleInstall
+        if [[ "${scheduler}" == systemd ]]; then
+            for file in service timer; do
+                sed '/^# padm-docker root=/d; /^Unit=padm-docker-traffic.service$/d' \
+                    "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-traffic.${file}" >"${scheduleRoot}/legacy.${file}"
+                cp -- "${scheduleRoot}/legacy.${file}" "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-traffic.${file}"
+            done
+            dockerTrafficScheduleInstall || fail '本 root 的旧流量调度不能规范化'
+        fi
+        for operation in dockerTrafficScheduleInstall dockerTrafficScheduleRemove; do
+            before=$(scheduleMaterials)
+            rm -f -- "${scheduleRoot}/failed-once"
+            if [[ "${scheduler}" == cron ]]; then scheduleFailure=cron;
+            elif [[ "${operation}" == dockerTrafficScheduleInstall ]]; then scheduleFailure=enable;
+            else scheduleFailure=disable; fi
+            if "${operation}"; then fail "${scheduler}: ${operation} 吞掉调度写入失败"; fi
+            [[ "$(scheduleMaterials)" == "${before}" ]] || fail "${scheduler}: 调度失败未恢复材料和 timer 状态"
+            [[ -z "${DOCKER_MAINTENANCE_SNAPSHOT:-}" ]] || fail '流量调度失败遗留统一调度事务'
+            scheduleFailure=
+        done
+        if [[ "${scheduler}" == systemd ]]; then
+            sed "s|${scheduleRoot}|/another-deployment|g" \
+                "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-traffic.service" >"${scheduleRoot}/external.service"
+            cp -- "${scheduleRoot}/external.service" "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-traffic.service"
+            before=$(sha256sum "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-traffic."*)
+        else
+            sed "s|${scheduleRoot}|/another-deployment|g" \
+                "${scheduleRoot}/crontab" >"${scheduleRoot}/external.crontab"
+            cp -- "${scheduleRoot}/external.crontab" "${scheduleRoot}/crontab"
+            before=$(<"${scheduleRoot}/crontab")
+        fi
+        for operation in dockerTrafficScheduleInstall dockerTrafficScheduleRemove; do
+            if "${operation}"; then fail "${scheduler}: ${operation} 接管了其它 root 的流量调度"; fi
+            if [[ "${scheduler}" == systemd ]]; then
+                [[ "$(sha256sum "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-traffic."*)" == "${before}" ]] ||
+                    fail '拒绝时修改了其它 root 的流量 unit'
+            else
+                [[ "$(<"${scheduleRoot}/crontab")" == "${before}" ]] || fail '拒绝时删除了其它 root 的流量 cron'
+            fi
+        done
+        rm -f -- "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-traffic.service" \
+            "${PADM_DOCKER_SYSTEMD_DIR}/padm-docker-traffic.timer"
+        rm -f -- "${scheduleRoot}/enabled" "${scheduleRoot}/active"
+        printf '%s\n' "${unrelatedJobs}" >"${scheduleRoot}/crontab"
+    done
+)
+
 # 只替换现场边界；双 scope 的停用门禁、启动编排与最终提交走生产函数。
 (
     source "${PROJECT_ROOT}/install-docker.sh"

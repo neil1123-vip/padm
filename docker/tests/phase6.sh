@@ -815,7 +815,9 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
 )
 
 (
+    source "${PROJECT_ROOT}/docker/lib/bootstrap.sh"
     source "${PROJECT_ROOT}/docker/lib/lifecycle.sh"
+    source "${PROJECT_ROOT}/docker/lib/schedule.sh"
     scheduleRoot="${TEST_ROOT}/schedule"
     export PADM_DOCKER_SYSTEMD_DIR="${scheduleRoot}/units"
     export PADM_DOCKER_BIN_DIR="${scheduleRoot}/bin"
