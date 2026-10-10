@@ -780,6 +780,46 @@ for path, mode in zip(sys.argv[1:], [0o100755, 0o120777]):
 PY
         validateCoreZipArchive "${tmpDir}/regular.zip" || return 1
         regressionExpectStatus 1 validateCoreZipArchive "${tmpDir}/linked.zip" || return 1
+        (
+            # 完整输出后的计数或截断工具失败，也不能放行原生安装包。
+            local archiveType failure archiveFile archiveFailures=0
+            set +o pipefail
+            printf payload >"${tmpDir}/archive-payload"
+            command tar -czf "${tmpDir}/regular.tar.gz" -C "${tmpDir}" archive-payload || return 1
+            validateCoreTarArchive "${tmpDir}/regular.tar.gz" || return 1
+            for archiveType in zip tar; do
+                archiveFile="${tmpDir}/regular.$([[ "${archiveType}" == zip ]] && printf zip || printf tar.gz)"
+                for failure in entry-empty entry-complete size-empty size-complete size-invalid size-spaced cutoff-empty cutoff-complete; do
+                    (
+                        wc() {
+                            case "${failure}:${1:-}" in
+                            entry-empty:-l | size-empty:-c) return 17 ;;
+                            entry-complete:-l | size-complete:-c)
+                                command wc "$@" || return $?
+                                return 17
+                                ;;
+                            size-invalid:-c) printf 'invalid\n'; return 0 ;;
+                            size-spaced:-c) printf '1 2\n'; return 0 ;;
+                            esac
+                            command wc "$@"
+                        }
+                        head() {
+                            [[ "${failure}" != cutoff-empty ]] || return 17
+                            command head "$@" || return $?
+                            [[ "${failure}" != cutoff-complete ]] || return 17
+                        }
+                        if [[ "${archiveType}" == zip ]]; then
+                            if ! validateCoreZipArchive "${archiveFile}"; then return 0; fi
+                        else
+                            if ! validateCoreTarArchive "${archiveFile}"; then return 0; fi
+                        fi
+                        printf '原生安装包计数校验失守: %s/%s\n' "${archiveType}" "${failure}" >&2
+                        return 1
+                    ) || archiveFailures=$((archiveFailures + 1))
+                done
+            done
+            [[ "${archiveFailures}" == 0 ]]
+        ) || return 1
     fi
     xrayCoreCPUVendor=Xray-linux-64
     singBoxCoreCPUVendor=-linux-amd64

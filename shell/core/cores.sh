@@ -23,14 +23,18 @@ coreArchiveExpandedSizeIsSafe() {
     local entryList=$3
     local entryCount expandedBytes
 
-    entryCount=$(wc -l <"${entryList}" | tr -d '[:space:]') || return 1
-    [[ "${entryCount}" =~ ^[0-9]+$ ]] && ((entryCount <= 4096)) || return 1
+    entryCount=$(wc -l <"${entryList}") || return 1
+    [[ "${entryCount}" =~ ^[[:space:]]*[0-9]+[[:space:]]*$ ]] || return 1
+    entryCount=${entryCount//[[:space:]]/}
+    ((entryCount <= 4096)) || return 1
     case "${archiveType}" in
-    zip) expandedBytes=$({ unzip -p "${archiveFile}" 2>/dev/null || true; } | head -c 268435457 | wc -c | tr -d '[:space:]') ;;
-    tar) expandedBytes=$({ tar -xOzf "${archiveFile}" 2>/dev/null || true; } | head -c 268435457 | wc -c | tr -d '[:space:]') ;;
+    zip) expandedBytes=$(set -o pipefail; { unzip -p "${archiveFile}" 2>/dev/null || true; } | head -c 268435457 | wc -c) || return 1 ;;
+    tar) expandedBytes=$(set -o pipefail; { tar -xOzf "${archiveFile}" 2>/dev/null || true; } | head -c 268435457 | wc -c) || return 1 ;;
     *) return 1 ;;
     esac
-    [[ "${expandedBytes}" =~ ^[0-9]+$ ]] && ((expandedBytes <= 268435456))
+    [[ "${expandedBytes}" =~ ^[[:space:]]*[0-9]+[[:space:]]*$ ]] || return 1
+    expandedBytes=${expandedBytes//[[:space:]]/}
+    ((expandedBytes <= 268435456))
 }
 
 validateCoreZipArchive() {
@@ -51,7 +55,9 @@ validateCoreZipArchive() {
         padmRemoveCleanupPath "${detailList}"
         return 1
     fi
-    entryCount=$(wc -l <"${entryList}" | tr -d '[:space:]') || { padmRemoveCleanupPath "${entryList}"; padmRemoveCleanupPath "${detailList}"; return 1; }
+    entryCount=$(wc -l <"${entryList}") || { padmRemoveCleanupPath "${entryList}"; padmRemoveCleanupPath "${detailList}"; return 1; }
+    [[ "${entryCount}" =~ ^[[:space:]]*[0-9]+[[:space:]]*$ ]] || { padmRemoveCleanupPath "${entryList}"; padmRemoveCleanupPath "${detailList}"; return 1; }
+    entryCount=${entryCount//[[:space:]]/}
     detailCount=$(awk 'length($1) == 10 && $1 ~ /^[-d][rwxStTs-]+$/ { count++ } END { print count + 0 }' "${detailList}") || { padmRemoveCleanupPath "${entryList}"; padmRemoveCleanupPath "${detailList}"; return 1; }
     [[ "${detailCount}" == "${entryCount}" ]] || { padmRemoveCleanupPath "${entryList}"; padmRemoveCleanupPath "${detailList}"; return 1; }
     if ! coreArchiveExpandedSizeIsSafe zip "${archiveFile}" "${entryList}"; then

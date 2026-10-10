@@ -557,9 +557,9 @@ readSingBoxConfig() {
             tuicPort=$(jq -ser 'select(length == 1) | .[0].inbounds[0].listen_port |
                 select(type == "number" and . >= 1 and . <= 65535 and floor == .)' "${singBoxConfigPath}09_tuic_inbounds.json") || return 1
             tuicAlgorithm=$(jq -r '.inbounds[0].congestion_control | if . == null then "cubic" elif . == "cubic" or . == "bbr" or . == "new_reno" then . else error("invalid congestion_control") end' "${singBoxConfigPath}09_tuic_inbounds.json") || return 1
-            tuicAuthTimeout=$(jq -r '.inbounds[0].auth_timeout // "3s"' "${singBoxConfigPath}09_tuic_inbounds.json")
-            tuicHeartbeat=$(jq -r '.inbounds[0].heartbeat // "10s"' "${singBoxConfigPath}09_tuic_inbounds.json")
-            tuicZeroRttHandshake=$(jq -r '.inbounds[0].zero_rtt_handshake // false' "${singBoxConfigPath}09_tuic_inbounds.json")
+            tuicAuthTimeout=$(jq -r '.inbounds[0].auth_timeout | if . == null then "3s" elif type == "string" and (any(explode[]; . < 32 or . == 127 or . == 34 or . == 92) | not) then . else error("invalid auth_timeout") end' "${singBoxConfigPath}09_tuic_inbounds.json") || return 1
+            tuicHeartbeat=$(jq -r '.inbounds[0].heartbeat | if . == null then "10s" elif type == "string" and (any(explode[]; . < 32 or . == 127 or . == 34 or . == 92) | not) then . else error("invalid heartbeat") end' "${singBoxConfigPath}09_tuic_inbounds.json") || return 1
+            tuicZeroRttHandshake=$(jq -r '.inbounds[0].zero_rtt_handshake | if . == null then false elif type == "boolean" then . else error("invalid zero_rtt_handshake") end' "${singBoxConfigPath}09_tuic_inbounds.json") || return 1
         fi
         if [[ -f "${singBoxConfigPath}06_hysteria2_inbounds.json" ]]; then
             hysteriaPort=$(jq -ser 'select(length == 1) | .[0].inbounds[0].listen_port |

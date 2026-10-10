@@ -262,6 +262,24 @@ runGitHubReleaseAssetDirectFallbackRegression() {
             return 1
         fi
         [[ ! -e "${outputDir}/asset.tar.gz" ]] || return 1
+        unset -f sha256sum
+        local countFailure
+        for countFailure in empty complete invalid; do
+            (
+                wc() {
+                    case "${countFailure}" in
+                    complete) command wc "$@" || return $? ;;
+                    invalid) printf '1+1\n'; return 0 ;;
+                    esac
+                    return 17
+                }
+                if downloadGitHubReleaseAsset -P "${outputDir}" example/repo v1.2.5 asset.tar.gz; then
+                    printf 'Release 计数工具失败后仍接受资产: %s\n' "${countFailure}" >&2
+                    return 1
+                fi
+                [[ ! -e "${outputDir}/asset.tar.gz" ]]
+            ) || return 1
+        done
     )
 }
 
@@ -3681,6 +3699,7 @@ runInstallRefreshRejectsUnsafeArchiveRegression() (
 )
 
 runInstallRefreshRejectsUnsupportedArchiveEntriesRegression() {
+    runInstallArchiveCountFailureRegression || return 1
     (
         set -euo pipefail
         # shellcheck source=/dev/null
@@ -3730,6 +3749,41 @@ runInstallRefreshRejectsUnsupportedArchiveEntriesRegression() {
         if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
     )
 }
+
+runInstallArchiveCountFailureRegression() (
+    local root="${TMP_DIR}/install-archive-count-failure" stage failure status failed=0
+    set +o pipefail
+    mkdir -p "${root}/payload"
+    printf payload >"${root}/payload/file"
+    tar -czf "${root}/archive.tar.gz" -C "${root}" payload || return 1
+    regressionLoadInstallFunctions
+    for stage in entries bytes head; do
+        for failure in empty complete; do
+            (
+                wc() {
+                    if [[ ( "${stage}" == entries && "$1" == -l ) ||
+                        ( "${stage}" == bytes && "$1" == -c ) ]]; then
+                        [[ "${failure}" != complete ]] || command wc "$@" || return $?
+                        return 1
+                    fi
+                    command wc "$@"
+                }
+                head() {
+                    if [[ "${stage}" == head ]]; then
+                        [[ "${failure}" != complete ]] || command head "$@" || return $?
+                        return 1
+                    fi
+                    command head "$@"
+                }
+                ! validateRepoArchive "${root}/archive.tar.gz"
+            ) || {
+                printf 'archive count failure accepted: %s %s\n' "${stage}" "${failure}" >&2
+                failed=$((failed + 1))
+            }
+        done
+    done
+    [[ "${failed}" == 0 ]]
+)
 
 runRemoveInstallPathRetryRegression() {
     (
@@ -4266,6 +4320,7 @@ runNoThirdPartyQrServiceRegression() {
 runInstallRefreshDownloadBoundsRegression() (
     set -euo pipefail
 
+    runInstallDownloadCountFailureRegression || return 1
     local root="${TMP_DIR}/install-refresh-download-bounds"
     local archiveRoot="${root}/archive"
     local curlLog="${root}/curl.log"
@@ -4414,6 +4469,48 @@ EOF
         done
         [[ "${failed}" == 0 ]]
     )
+)
+
+runInstallDownloadCountFailureRegression() (
+    local root="${TMP_DIR}/install-download-count-failure" mode failure status
+    set +o pipefail
+    mkdir -p "${root}"
+    regressionLoadInstallFunctions
+    for mode in curl wget; do
+        for failure in empty complete invalid; do
+            (
+                command() {
+                    if [[ "$1" == -v ]]; then
+                        case "$2" in
+                        curl) [[ "${mode}" == curl ]]; return ;;
+                        wget) [[ "${mode}" == wget ]]; return ;;
+                        esac
+                    fi
+                    builtin command "$@"
+                }
+                curl() {
+                    local target
+                    while [[ $# -gt 0 ]]; do
+                        if [[ "$1" == -o ]]; then target=$2; break; fi
+                        shift
+                    done
+                    printf payload >"${target}"
+                }
+                wget() { printf payload; }
+                timeout() { shift 3; "$@"; }
+                wc() {
+                    case "${failure}" in
+                    complete) command wc "$@" || return $? ;;
+                    invalid) printf 'invalid\n'; return 0 ;;
+                    esac
+                    return 1
+                }
+                status=0
+                scriptDownloadUrlToFileBounded fixture "${root}/${mode}-${failure}" 16 || status=$?
+                [[ "${status}" == 1 ]]
+            ) || return 1
+        done
+    done
 )
 
 runInstallEnsureModulesRegression() (
@@ -4843,8 +4940,34 @@ runInstallModuleManifestCompleteRegression() {
     )
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
     runInstallModuleEnumerationFailureRegression || return 1
+    runInstallModuleCountFailureRegression || return 1
     runInstallModuleHashFailureRegression
 }
+
+runInstallModuleCountFailureRegression() (
+    local fixtureDir="${TMP_DIR}/install-module-count-failure" failure extra
+    set +o pipefail
+    regressionCreateInstallModuleFixture "${fixtureDir}"
+    for extra in 1 2 3 4 5; do printf fixture >"${fixtureDir}/assets/${extra}"; done
+    regressionLoadInstallFunctions
+    regressionConfigureInstallRefreshFixture "${fixtureDir}"
+    writeModuleManifest "${SCRIPT_MANIFEST_FILE}" || return 1
+    for failure in empty complete spaced; do
+        (
+            wc() {
+                if [[ "${failure}" == spaced ]]; then
+                    local count
+                    count=$(command wc "$@") || return $?
+                    printf '%s %s\n' "${count:0:1}" "${count:1}"
+                    return 0
+                fi
+                [[ "${failure}" != complete ]] || command wc "$@" || return $?
+                return 1
+            }
+            ! moduleManifestReady "${SCRIPT_MANIFEST_FILE}" || return 1
+        ) || return 1
+    done
+)
 
 runInstallModuleEnumerationFailureRegression() (
     local fixtureDir="${TMP_DIR}/install-module-enumeration-failure" failingTool

@@ -16,12 +16,13 @@ vlessEncryptionForConfig() {
         printf 'none\n'
         return
     fi
-    configDecryption=$(jq -er ".inbounds[${inboundIndex}].settings.decryption | if . == null then \"none\" else . end | select(type == \"string\" and (any(explode[]; . < 32 or . == 127) | not))" "${configFile}" 2>/dev/null) || return 1
+    configDecryption=$(jq -ser "select(length == 1 and (.[0] | type) == \"object\") | .[0].inbounds[${inboundIndex}].settings.decryption | if . == null then \"none\" else . end | select(type == \"string\" and (any(explode[]; . < 32 or . == 127) | not))" "${configFile}" 2>/dev/null) || return 1
     if [[ -z "${configDecryption}" || "${configDecryption}" == "none" ]]; then
         printf 'none\n'
         return
     fi
-    encryption=$(jq -er --arg decryption "${configDecryption}" '
+    encryption=$(jq -ser --arg decryption "${configDecryption}" '
+        select(length == 1 and (.[0] | type) == "object") | .[0] |
         select(.enabled == true and
             .decryption == $decryption and
             (.encryption | type) == "string" and

@@ -3571,6 +3571,52 @@ runRuntimeAndRealityRegression() {
     local visionClients
 
     (
+        # 真实入口不启用 pipefail，长度工具失败或输出异常不能放行下载。
+        local root="${TMP_DIR}/runtime-download-count-failure" mode failure status failed=0
+        set +o pipefail
+        set +u
+        mkdir -p "${root}"
+        for mode in curl wget; do
+            for failure in empty complete invalid; do
+                (
+                    command() {
+                        if [[ "$1" == -v ]]; then
+                            case "$2" in
+                            curl) [[ "${mode}" == curl ]]; return ;;
+                            wget) [[ "${mode}" == wget ]]; return ;;
+                            esac
+                        fi
+                        builtin command "$@"
+                    }
+                    curl() {
+                        local target=
+                        while [[ $# -gt 0 ]]; do
+                            if [[ "$1" == -o ]]; then target=$2; break; fi
+                            shift
+                        done
+                        printf payload >"${target}"
+                    }
+                    wget() { printf payload; }
+                    wc() {
+                        case "${failure}" in
+                        complete) command wc "$@" || return $? ;;
+                        invalid) printf 'invalid\n'; return 0 ;;
+                        esac
+                        return 17
+                    }
+                    status=0
+                    downloadUrlToFileBounded fixture "${root}/${mode}-${failure}" 16 10 || status=$?
+                    if [[ "${status}" != 1 ]]; then
+                        printf '下载长度校验失守: %s/%s status=%s\n' "${mode}" "${failure}" "${status}" >&2
+                        return 1
+                    fi
+                ) || failed=$((failed + 1))
+            done
+        done
+        [[ "${failed}" == 0 ]]
+    )
+
+    (
         # wget 持续收到数据时，下载仍必须遵守整次调用的时间预算。
         local root="${TMP_DIR}/download-total-time" downloadMode downloadStatus downloadStarted workerPid workerState
         local failed=0 downloadFailure=false budget

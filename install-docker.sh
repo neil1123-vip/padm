@@ -55,13 +55,15 @@ dockerEntryPathIsSafe() {
 }
 
 dockerEntryDownloadFile() {
-    local url=$1 target=$2 maxSize=$3 deadline remaining
+    local url=$1 target=$2 maxSize=$3 deadline remaining actualSize
     local -a pipelineStatus=()
     deadline=$((SECONDS + 120))
     : >"${target}" || return 1
     if command -v curl >/dev/null 2>&1; then
         curl -fsSL --connect-timeout 10 --max-time 120 --max-filesize "${maxSize}" \
-            -o "${target}" "${url}" && [[ "$(wc -c <"${target}")" -le "${maxSize}" ]] && return 0
+            -o "${target}" "${url}" && actualSize=$(wc -c <"${target}") &&
+            [[ "${actualSize}" =~ ^[[:space:]]*[0-9]+[[:space:]]*$ &&
+                "${actualSize}" -le "${maxSize}" ]] && return 0
     fi
     : >"${target}" || return 1
     if command -v wget >/dev/null 2>&1; then
@@ -73,8 +75,10 @@ dockerEntryDownloadFile() {
         }
         timeout -k 2 "${remaining}" wget -T 30 -t 2 -qO- "${url}" | head -c "$((maxSize + 1))" >"${target}"
         pipelineStatus=("${PIPESTATUS[@]}")
-        [[ "${pipelineStatus[0]:-1}" -eq 0 && "${pipelineStatus[1]:-1}" -eq 0 &&
-            "$(wc -c <"${target}")" -le "${maxSize}" ]] && return 0
+        [[ "${pipelineStatus[0]:-1}" -eq 0 && "${pipelineStatus[1]:-1}" -eq 0 ]] &&
+            actualSize=$(wc -c <"${target}") &&
+            [[ "${actualSize}" =~ ^[[:space:]]*[0-9]+[[:space:]]*$ &&
+                "${actualSize}" -le "${maxSize}" ]] && return 0
     fi
     return 1
 }
@@ -391,9 +395,11 @@ dockerEntryArchivePathIsSafe() {
 }
 
 dockerEntryArchiveIsSafe() {
-    local archive=$1 entryList=$2 detailList=$3 entry line expandedBytes
+    local archive=$1 entryList=$2 detailList=$3 entry line entryCount expandedBytes
     tar -tzf "${archive}" >"${entryList}" 2>/dev/null || return 1
-    [[ "$(wc -l <"${entryList}" | tr -d '[:space:]')" -le 10000 ]] || return 1
+    entryCount=$(wc -l <"${entryList}") || return 1
+    [[ "${entryCount}" =~ ^[[:space:]]*[0-9]+[[:space:]]*$ &&
+        "${entryCount}" -le 10000 ]] || return 1
     while IFS= read -r entry; do
         dockerEntryArchivePathIsSafe "${entry}" || return 1
     done <"${entryList}"
@@ -405,12 +411,13 @@ dockerEntryArchiveIsSafe() {
         esac
     done <"${detailList}"
     expandedBytes=$(
+        set -o pipefail
         { tar -xOzf "${archive}" 2>/dev/null || true; } |
             head -c 104857601 |
-            wc -c |
-            tr -d '[:space:]'
+            wc -c
     ) || return 1
-    [[ "${expandedBytes}" =~ ^[0-9]+$ ]] && ((expandedBytes <= 104857600))
+    [[ "${expandedBytes}" =~ ^[[:space:]]*[0-9]+[[:space:]]*$ &&
+        "${expandedBytes}" -le 104857600 ]]
 }
 
 dockerEntryCleanup() {
@@ -462,7 +469,7 @@ dockerEntryBundleModulesPresent() {
 
 dockerEntryFetchBundle() {
     local requestedRef=${1:-latest}
-    local metadata archive entryList detailList extractDir candidate found=0
+    local metadata archive entryList detailList extractDir candidate candidates found=0
     local refUrl=https://api.github.com/repos/neil1123-vip/padm/commits/main
     local archiveBase=https://github.com/neil1123-vip/padm/archive
 
@@ -488,12 +495,13 @@ dockerEntryFetchBundle() {
     mkdir -p "${extractDir}" || return 1
     tar -xzf "${archive}" -C "${extractDir}" || return 1
 
+    candidates=$(find "${extractDir}" -mindepth 2 -maxdepth 2 -type f -name install-docker.sh -print) || return 1
     while IFS= read -r candidate; do
         candidate=${candidate%/install-docker.sh}
         dockerEntryBundleModulesPresent "${candidate}" || continue
         DOCKER_ENTRY_SOURCE_DIR=${candidate}
         found=$((found + 1))
-    done < <(find "${extractDir}" -mindepth 2 -maxdepth 2 -type f -name install-docker.sh -print)
+    done <<<"${candidates}"
     [[ "${found}" -eq 1 ]] || return 1
     if [[ "${DOCKER_ENTRY_REQUIRE_MATCH:-}" == "1" && -f "${DOCKER_ENTRY_PATH}" &&
         "${DOCKER_ENTRY_PATH}" != /dev/* ]] &&
