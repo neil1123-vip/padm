@@ -27,13 +27,6 @@ on:
         description: PR base commit for changed-image validation (empty builds all)
         default: ''
         type: string
-    outputs:
-      artifact_name:
-        description: Release assets artifact produced after image publication
-        value: ${{ jobs.assemble.outputs.artifact_name }}
-      manifest_sha256:
-        description: SHA-256 of release-manifest.json
-        value: ${{ jobs.assemble.outputs.manifest_sha256 }}
 
 jobs:
   contract:
@@ -267,6 +260,8 @@ jobs:
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v4
+        with:
+          driver: docker
 
       - name: Log in to registry
         uses: docker/login-action@v4
@@ -366,73 +361,3 @@ jobs:
             ${{ runner.temp }}/${{ matrix.image.name }}.json
             ${{ runner.temp }}/imagetools-${{ matrix.image.name }}.json
             ${{ runner.temp }}/cosign-${{ matrix.image.name }}.json
-
-  assemble:
-    name: Assemble release assets
-    timeout-minutes: 10
-    if: ${{ always() && inputs.push && !inputs.contracts_only && needs.publish.result == 'success' }}
-    needs: publish
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    outputs:
-      artifact_name: ${{ steps.output.outputs.artifact_name }}
-      manifest_sha256: ${{ steps.output.outputs.manifest_sha256 }}
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.source_ref }}
-          fetch-depth: 1
-
-      - name: Download image evidence
-        uses: actions/download-artifact@v8
-        with:
-          pattern: padm-image-*-${{ github.run_id }}
-          path: ${{ runner.temp }}/image-results
-          merge-multiple: true
-
-      - name: Build control bundle and release manifest
-        id: manifest
-        shell: bash
-        env:
-          PADM_RELEASE_VERSION: ${{ inputs.version }}
-          PADM_SOURCE_REF: ${{ inputs.source_ref }}
-          PADM_REGISTRY: ${{ inputs.registry }}
-        run: |
-          set -euo pipefail
-          assets="${RUNNER_TEMP}/release-assets"
-          mkdir -p "${assets}"
-          tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -cf - \
-            install-docker.sh docker shell/core/deployment_mode.sh shell/core/stats_grpc.sh \
-            shell/core/runtime.sh shell/core/reality_targets.sh shell/core/cores.sh versions.lock docker-bake.hcl \
-            documents/docker*.md | gzip -n >"${assets}/padm-docker-bundle.tar.gz"
-          bundle_sha256=$(sha256sum "${assets}/padm-docker-bundle.tar.gz" | cut -d ' ' -f 1)
-          bundle_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${PADM_RELEASE_VERSION}/padm-docker-bundle.tar.gz"
-          bash docker/release.sh manifest \
-            --version "${PADM_RELEASE_VERSION}" \
-            --commit "${PADM_SOURCE_REF}" \
-            --created-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --registry "${PADM_REGISTRY}" \
-            --bundle-url "${bundle_url}" \
-            --bundle-sha256 "${bundle_sha256}" \
-            --results-dir "${RUNNER_TEMP}/image-results" \
-            --output "${assets}/release-manifest.json"
-
-      - name: Expose release artifact metadata
-        id: output
-        shell: bash
-        run: |
-          set -euo pipefail
-          artifact_name="padm-release-assets-${GITHUB_RUN_ID}"
-          manifest_sha256=$(sha256sum "${RUNNER_TEMP}/release-assets/release-manifest.json" | cut -d ' ' -f 1)
-          echo "artifact_name=${artifact_name}" >>"${GITHUB_OUTPUT}"
-          echo "manifest_sha256=${manifest_sha256}" >>"${GITHUB_OUTPUT}"
-
-      - name: Upload release assets artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: padm-release-assets-${{ github.run_id }}
-          if-no-files-found: error
-          retention-days: 7
-          path: ${{ runner.temp }}/release-assets
