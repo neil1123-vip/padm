@@ -123,6 +123,7 @@ dockerUsage() {
   padm-docker fail2ban control settings <失败阈值> <检测秒数> <封禁秒数> [--preview | --confirm PADM-DOCKER-EDIT]
   padm-docker fail2ban control disable [--preview | --confirm PADM-DOCKER-EDIT]
   padm-docker fail2ban ssh preflight [--json]
+  padm-docker fail2ban ssh verify-source <本机 IPv4/IPv6> <SSH 端口> <外部客户端 IPv4/IPv6>
   padm-docker up
   padm-docker down
   padm-docker restart

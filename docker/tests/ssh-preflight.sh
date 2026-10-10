@@ -47,7 +47,7 @@ ss() {
     return "${SS_STATUS}"
 }
 journalctl() {
-    [[ "$*" == '--quiet --no-pager --boot --output=json --lines=1 _COMM=sshd' ]] ||
+    [[ "$*" == '--quiet --no-pager --boot --output=json --lines=1 _COMM=sshd _COMM=sshd-session' ]] ||
         forbidden journalctl "$@"
     printf '%s\n' "${JOURNAL}"
     printf 'private-stderr\n' >&2
@@ -78,6 +78,8 @@ jq -e '.scope == "host-preflight-only" and .configured_default_ports == [22,2222
 expectStatus 0 dockerFail2banCommand ssh preflight
 grep -qF '本次预检不启用 SSH 防护' "${TEST_ROOT}/output"
 grep -qF '实时来源未证明' "${TEST_ROOT}/output"
+JOURNAL='{"_COMM":"sshd-session","MESSAGE":"private-account from 192.0.2.99"}' \
+    expectStatus 0 dockerFail2banCommand ssh preflight --json
 
 # 真实 CLI 清理路径在空事务下不能访问安装状态或修改既有文件。
 mkdir -p "${TEST_ROOT}/state/config" "${TEST_ROOT}/state/logs"
@@ -162,4 +164,25 @@ if dockerSshLogFileReadable "${TEST_ROOT}" || dockerSshLogFileReadable "${TEST_R
     fail '非普通候选日志被接受'
 fi
 [[ ! -e "${TEST_ROOT}/forbidden" ]] || fail '只读预检触发写入、部署锁或容器动作'
+
+# 分发直接使用宿主只读 helper；不要求已有部署，返回码不能被包装吞掉。
+(
+    python3() {
+        [[ "$#" -eq 6 && "$1" == -B &&
+            "$2" == "${PROJECT_ROOT}/docker/lib/ssh-source.py" &&
+            "$3" == 198.51.100.10 && "$4" == 2222 && "$5" == 203.0.113.9 &&
+            "$6" =~ ^[a-f0-9]{48}$ ]] || return 99
+        return "${SOURCE_STATUS:-0}"
+    }
+    expectStatus 0 dockerMain fail2ban ssh verify-source 198.51.100.10 2222 203.0.113.9
+    SOURCE_STATUS=15 expectStatus 15 dockerMain fail2ban ssh verify-source 198.51.100.10 2222 203.0.113.9
+    for values in '198.51.100.10 0 203.0.113.9' '198.51.100.10 65536 203.0.113.9' \
+        '198.51.100.10 2222 2001:db8::9' '198.51.100.10 2222 127.0.0.1'; do
+        read -r -a args <<<"${values}"
+        expectStatus 2 dockerFail2banCommand ssh verify-source "${args[@]}"
+    done
+    expectStatus 2 dockerFail2banCommand ssh verify-source 198.51.100.10 2222 203.0.113.9 extra
+    MISSING_TOOL=python3 expectStatus 10 dockerFail2banCommand ssh verify-source 198.51.100.10 2222 203.0.113.9
+)
+[[ ! -e "${TEST_ROOT}/forbidden" ]] || fail '来源分发访问安装状态、部署锁或写操作'
 printf 'docker-ssh-preflight-regression-ok\n'

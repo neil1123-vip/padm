@@ -416,7 +416,7 @@ Fail2ban submenu item 12 and `padm-docker fail2ban ssh preflight [--json]`
 provide a read-only host check. The usual Linux/root and local rootful Docker
 preflight applies; an installed deployment is not required. Default `sshd -T`
 ports must match actual TCP listeners explicitly owned by `sshd`. The command
-only lists current-boot journal or fixed `/var/log/auth.log` and `/var/log/secure`
+only lists current-boot `sshd`/`sshd-session` journal or fixed `/var/log/auth.log` and `/var/log/secure`
 candidates, without printing authentication messages, accounts or source addresses.
 File candidates must be root-owned regular files without symlink components or
 group/other write permission. Missing tools, port mismatch or no candidate returns `10`.
@@ -426,6 +426,35 @@ does not verify a running instance using `-f/-p/-o` or socket activation;
 equal ports do not verify bind addresses or address families. Historical logs are
 not fresh source proof. This check saves no credential, changes no configuration
 or firewall rule, and does not enable an SSH jail.
+
+Fail2ban submenu item 13 verifies a live external source for an explicit host SSH endpoint:
+
+```bash
+padm-docker fail2ban ssh verify-source 198.51.100.10 2222 203.0.113.7
+```
+
+The target must be configured on the host and the independent client must use the same
+address family. Host/Docker addresses, loopback, mapped and unscoped link-local
+addresses are rejected. The host needs `python3`, `ip`, `ss` and `journalctl`.
+After `source-challenge` prints a random username, run on the external client:
+
+```bash
+python3 -B docker/lib/ssh-source-client.py 198.51.100.10 2222 padm-source-<48-hex-nonce> /client/known_hosts
+```
+
+Install `python3-paramiko` from the client's official package source. `known_hosts`
+must already contain the endpoint's trusted host key (`[IP]:port` for a nonstandard
+port). The client checks that key, makes one credentialless `auth_none` request,
+and holds the unauthenticated connection for 25 seconds. A normal `ssh` command
+disconnects after authentication failure and cannot replace this client.
+Within 30 seconds, the host binds a post-cursor trusted journal emitter to its
+master and live socket, checking both endpoints, the source port, boot/process
+generation and socket inode/fd before printing `source-verified`.
+Only a unique host `sshd` listener with a direct child emitter is accepted;
+file tags, old records, closed sockets, multiple owners or identity drift are rejected.
+The result is not saved or reusable across transactions.
+`source_verified=true` describes this observation; `runtime_configuration_verified`
+and `jail_ready` remain `false`. This command does not enable SSH protection.
 
 Status and unban access only the fixed `padm-nginx` jail in a running `net-fail2ban`
 container whose spec, image, labels and mounts match the current deployment. They
@@ -1349,7 +1378,7 @@ Maintainers can run the `Build sing-box Traffic Stats` Actions workflow, leaving
 
 - 🔄 Update the padm script; if the subscription control service is enabled or running, the update also refreshes and restarts it. A refresh failure does not roll back the script update and prompts you to retry from control-plane maintenance.
 - 🧾 Inspect entry validation, version, ref, and manifest.
-- 🛡️ Manage Fail2ban protection, including basic SSH and `/s/control/` protection.
+- 🛡️ Manage Fail2ban protection: native deployments include SSH and `/s/control/`; Docker provides WS, control-plane protection, and read-only SSH host preflight.
 - 🚀 Inspect or enable network optimization / BBR.
 
 The recommended network optimization only enables the official `bbr` implementation provided by the current kernel and writes padm's own `/etc/sysctl.d/99-padm-bbr.conf`:

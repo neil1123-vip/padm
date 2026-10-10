@@ -443,6 +443,12 @@ dockerEntryBundleModulesPresent() {
                 ! -L "${sourceRoot}/docker/lib/${required}.sh" ]] || return 1
         fi
     done
+    if grep -qF '/docker/lib/ssh-source.py"' "${sourceRoot}/docker/lib/services.sh"; then
+        for required in ssh-source.py ssh-source-client.py; do
+            [[ -f "${sourceRoot}/docker/lib/${required}" &&
+                ! -L "${sourceRoot}/docker/lib/${required}" ]] || return 1
+        done
+    fi
     if grep -qF '/shell/core/cores.sh"' "${sourceRoot}/docker/lib/lifecycle.sh"; then
         [[ -f "${sourceRoot}/shell/core/cores.sh" && ! -L "${sourceRoot}/shell/core/cores.sh" ]] || return 1
     fi

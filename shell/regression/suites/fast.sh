@@ -391,7 +391,9 @@ runDockerControlCliRegression() {
 }
 
 runDockerSshPreflightRegression() {
-    bash "${PROJECT_ROOT}/docker/tests/ssh-preflight.sh"
+    bash "${PROJECT_ROOT}/docker/tests/ssh-preflight.sh" &&
+        python3 -B "${PROJECT_ROOT}/docker/tests/ssh-source.py" &&
+        python3 -B "${PROJECT_ROOT}/docker/tests/ssh-source-client.py"
 }
 
 runDockerWireGuardRuntimeRegression() {

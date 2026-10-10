@@ -660,7 +660,7 @@ padm-docker fail2ban ssh preflight --json
 
 沿用 Docker 版 Linux/root、本机 rootful daemon 门禁，不要求已有部署。
 从宿主默认 `sshd -T` 读取端口，核对 `ss` 中明确属于 `sshd` 的实际监听端口集合，
-仅列出本次 boot 的 journal 或固定 `/var/log/auth.log`、`/var/log/secure` 日志候选。
+仅列出本次 boot 的 `sshd`/`sshd-session` journal 或固定 `/var/log/auth.log`、`/var/log/secure` 日志候选。
 文件候选必须是 root 拥有的普通文件，路径无软链接且不允许组/其他用户写入；
 不输出认证日志正文、账号或来源地址。工具缺失、端口不符或无候选返回 `10`。
 JSON 明确 `scope=host-preflight-only`，`source_verified`、
@@ -668,6 +668,31 @@ JSON 明确 `scope=host-preflight-only`，`source_verified`、
 默认配置不能证明运行实例的 `-f/-p/-o` 或 socket activation 配置，
 端口一致也不证明绑定地址及地址族一致。历史日志不证明真实失败来源；
 该命令不保存凭证、不修改规则或配置、不启用 SSH jail。
+
+Fail2ban 子菜单第 13 项验证本机 SSH 端点的实时外部来源：
+
+```bash
+padm-docker fail2ban ssh verify-source 198.51.100.10 2222 203.0.113.7
+```
+
+目标须是本机已配置地址，客户端须是同族独立地址；拒绝本机、Docker 网络、
+loopback、映射及无 scope 的 link-local 地址。宿主需要 `python3`、`ip`、`ss`、
+`journalctl`；这里只读验证，返回的证明不保存、不跨事务使用。
+命令输出 `source-challenge` 的随机用户名后，在外部客户端执行：
+
+```bash
+python3 -B docker/lib/ssh-source-client.py 198.51.100.10 2222 padm-source-<48位随机值> /client/known_hosts
+```
+
+客户端通过官方源安装 `python3-paramiko`，`known_hosts` 必须已可信登记该端点公钥
+（非 22 端口使用 `[IP]:端口` 条目）。客户端核对主机密钥后只发送一次无凭据
+`auth_none`，保持未认证连接 25 秒。普通 `ssh` 认证失败后会断开，不能替代此客户端。
+宿主在 30 秒内将 cursor 后的可信 journal emitter 与同一 master 的 live socket
+绑定，精确核对来源及临时端口、目标地址及端口、boot、进程代次和 inode/fd，
+成功输出 `source-verified`。只支持唯一宿主 `sshd` listener 与直接子进程 emitter；
+日志文件/tag、旧记录、已断开连接、多 owner 或身份漂移均不能成为证明。
+`source_verified=true` 只表示本次来源绑定完成，`runtime_configuration_verified`
+和 `jail_ready` 仍为 `false`；本命令不启用 SSH 防护。
 
 已有 TProxy profile 使用私密 `data/net/transparent/tproxy.state` 记录随机链、
 规则 token、mark、路由表和路由身份。预检只读核对当前归属与候选冲突；
@@ -1315,7 +1340,7 @@ Docker 镜像按 `versions.lock` 固定统计包版本和双架构 SHA256；官�
 
 - 🔄 更新 padm 脚本；若订阅控制服务已启用或正在运行，会同步刷新并重启。刷新失败不会回滚脚本更新，界面会提示从控制面维护入口重试。
 - 🧾 查看入口校验、版本、ref 和 manifest。
-- 🛡️ 管理 Fail2ban 防护，包含 SSH 和 `/s/control/` 的基础防护入口。
+- 🛡️ 管理 Fail2ban 防护：原生版包含 SSH 和 `/s/control/`；Docker 版提供 WS、控制面防护及 SSH 宿主只读预检。
 - 🚀 查看或启用网络优化 / BBR。
 
 网络优化推荐项只启用当前内核提供的官方 `bbr`，并写入 padm 自己管理的 `/etc/sysctl.d/99-padm-bbr.conf`：

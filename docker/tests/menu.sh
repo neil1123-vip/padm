@@ -415,6 +415,16 @@ runMaintenanceDriver() {
         fail2ban-ssh-preflight|fail2ban-ssh-preflight-failed)
             targetReply 'Docker Fail2ban 维护' $'12\n'
             ;;
+        fail2ban-ssh-source|fail2ban-ssh-source-failed|fail2ban-ssh-source-cancel)
+            targetReply 'Docker Fail2ban 维护' $'13\n'
+            targetReply '宿主 SSH 本机 IPv4/IPv6（0 返回）' $'198.51.100.10\n'
+            targetReply '宿主 SSH 端口（0 返回）' $'2222\n'
+            if [[ "${scenario}" == fail2ban-ssh-source-cancel ]]; then
+                targetReply '外部 SSH 客户端 IPv4/IPv6（0 返回）' $'0\n'
+            else
+                targetReply '外部 SSH 客户端 IPv4/IPv6（0 返回）' $'203.0.113.9\n'
+            fi
+            ;;
         fail2ban-flow)
             targetReply 'Docker Fail2ban 维护' "${statusChoice}"$'\n'
             for address in "${unbanAddresses[@]}"; do
@@ -1421,8 +1431,14 @@ validate|update|rollback|uninstall)
 fail2ban)
     recordAction "$@"
     if [[ "${2:-}" == ssh ]]; then
-        [[ "$#" -eq 3 && "$3" == preflight ]] || exit 2
-        printf 'fixture-ssh-preflight: source_verified=false jail_ready=false\n'
+        if [[ "${3:-}" == preflight ]]; then
+            [[ "$#" -eq 3 ]] || exit 2
+            printf 'fixture-ssh-preflight: source_verified=false jail_ready=false\n'
+        else
+            [[ "$#" -eq 6 && "$3" == verify-source && "$4" == 198.51.100.10 &&
+                "$5" == 2222 && "$6" == 203.0.113.9 ]] || exit 2
+            printf 'fixture-ssh-source: source_verified=true jail_ready=false\n'
+        fi
         exit "${FAIL2BAN_STATUS:-0}"
     fi
     if [[ "${2:-}" == control ]]; then
@@ -1603,13 +1619,14 @@ for fail2banCase in flow cancel menu-eof invalid failed int term disable disable
     verify verify-cancel verify-list-failed verify-invalid verify-failed verify-int verify-term \
     enable enable-cancel enable-invalid enable-failed enable-list-failed enable-int enable-term \
     settings settings-cancel settings-invalid settings-failed settings-list-failed settings-int settings-term \
-    ssh-preflight ssh-preflight-failed; do
+    ssh-preflight ssh-preflight-failed ssh-source ssh-source-failed ssh-source-cancel; do
     : >"${TLS_WIZARD_ACTIONS}"
     export FAIL2BAN_STATUS=0 FAIL2BAN_UNBAN_STATUS=0 FAIL2BAN_DISABLE_STATUS=0 \
         FAIL2BAN_VERIFY_STATUS=0 FAIL2BAN_EDIT_STATUS=0 FAIL2BAN_PROTOCOL_LIST_STATUS=0 FAIL2BAN_WAIT=0 \
         FAIL2BAN_PID="${TEST_ROOT}/fail2ban.pid"
     [[ "${fail2banCase}" != failed ]] || { FAIL2BAN_STATUS=17; FAIL2BAN_UNBAN_STATUS=17; }
     [[ "${fail2banCase}" != ssh-preflight-failed ]] || FAIL2BAN_STATUS=10
+    [[ "${fail2banCase}" != ssh-source-failed ]] || FAIL2BAN_STATUS=15
     [[ "${fail2banCase}" != disable-failed ]] || FAIL2BAN_DISABLE_STATUS=17
     [[ "${fail2banCase}" != verify-failed ]] || FAIL2BAN_VERIFY_STATUS=17
     [[ "${fail2banCase}" != verify-list-failed ]] || FAIL2BAN_PROTOCOL_LIST_STATUS=17
@@ -1619,6 +1636,15 @@ for fail2banCase in flow cancel menu-eof invalid failed int term disable disable
     runPty "fail2ban-${fail2banCase}" maintenance "fail2ban-${fail2banCase}" "${TLS_WIZARD_CLI}" menu
     expectedFail2ban=
     case "${fail2banCase}" in
+    ssh-source|ssh-source-failed)
+        expectedFail2ban='fail2ban ssh verify-source 198.51.100.10 2222 203.0.113.9'
+        grep -Fq 'fixture-ssh-source: source_verified=true jail_ready=false' "${CONTROL_LOG}" ||
+            fail 'SSH 来源命令未显示 jail 未就绪'
+        if [[ "${fail2banCase}" == ssh-source-failed ]]; then
+            grep -Fq '操作失败，退出码: 15' "${CONTROL_LOG}" || fail 'SSH 来源失败未保留退出码或留在菜单'
+        fi
+        ;;
+    ssh-source-cancel) ;;
     ssh-preflight|ssh-preflight-failed)
         expectedFail2ban='fail2ban ssh preflight'
         grep -Fq 'fixture-ssh-preflight: source_verified=false jail_ready=false' "${CONTROL_LOG}" ||
@@ -1712,7 +1738,8 @@ for fail2banCase in flow cancel menu-eof invalid failed int term disable disable
         fail "Fail2ban ${fail2banCase} 参数分发错误或取消后仍执行操作"
     for fail2banLabel in '5. Fail2ban 维护' 'Docker Fail2ban 维护' '1. 查看 WS 状态' \
         '2. 解封 WS 单个 IP' '3. 停用 WS 站点扫描防护' '4. 核对 WS 真实来源' \
-        '5. 启用 WS 站点扫描防护' '6. 修改 WS 站点扫描参数' '12. SSH 宿主只读预检'; do
+        '5. 启用 WS 站点扫描防护' '6. 修改 WS 站点扫描参数' '12. SSH 宿主只读预检' \
+        '13. 核对 SSH 实时来源'; do
         grep -Fq "${fail2banLabel}" "${CONTROL_LOG}" || fail "Fail2ban 菜单缺少: ${fail2banLabel}"
     done
 done

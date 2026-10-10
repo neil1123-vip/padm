@@ -883,7 +883,7 @@ dockerMenuWarp() {
 }
 
 dockerMenuFail2ban() {
-    local choice address answer listener
+    local choice address answer listener target port
     local action ports maxRetry findTime banTime defaultRetry defaultFind defaultBan confirmation
     while :; do
         DOCKER_MENU_SIGNAL=0
@@ -891,7 +891,8 @@ dockerMenuFail2ban() {
         printf '%s\n' '1. 查看 WS 状态' '2. 解封 WS 单个 IP' '3. 停用 WS 站点扫描防护' \
             '4. 核对 WS 真实来源' '5. 启用 WS 站点扫描防护' '6. 修改 WS 站点扫描参数' \
             '7. 查看控制面状态' '8. 解封控制面单个 IP' '9. 停用控制面防护' \
-            '10. 启用控制面防护' '11. 修改控制面防护参数' '12. SSH 宿主只读预检' '0. 返回'
+            '10. 启用控制面防护' '11. 修改控制面防护参数' '12. SSH 宿主只读预检' \
+            '13. 核对 SSH 实时来源' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -902,6 +903,15 @@ dockerMenuFail2ban() {
         1) dockerMenuRun fail2ban status || true ;;
         7) dockerMenuRun fail2ban control status || true ;;
         12) dockerMenuRun fail2ban ssh preflight || true ;;
+        13)
+            dockerSetupRead target '宿主 SSH 本机 IPv4/IPv6（0 返回）: ' &&
+                [[ -n "${target}" ]] &&
+                dockerSetupRead port '宿主 SSH 端口（0 返回）: ' &&
+                [[ -n "${port}" ]] &&
+                dockerSetupRead address '外部 SSH 客户端 IPv4/IPv6（0 返回）: ' &&
+                [[ -n "${address}" ]] || continue
+            dockerMenuRun fail2ban ssh verify-source "${target}" "${port}" "${address}" || true
+            ;;
         2|8)
             local jail=padm-nginx
             local -a scopeArgs=()

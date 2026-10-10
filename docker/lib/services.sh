@@ -4192,8 +4192,9 @@ dockerSshLogCandidates() {
     local journal=false records files
     # 历史记录只证明日志可读，不证明当前客户端来源；正文不进入输出。
     if command -v journalctl >/dev/null 2>&1 &&
-        records=$(journalctl --quiet --no-pager --boot --output=json --lines=1 _COMM=sshd 2>/dev/null) &&
-        jq -se 'length == 1 and (.[0] | type == "object" and ._COMM == "sshd" and
+        records=$(journalctl --quiet --no-pager --boot --output=json --lines=1 _COMM=sshd _COMM=sshd-session 2>/dev/null) &&
+        jq -se 'length == 1 and (.[0] | type == "object" and
+          (._COMM == "sshd" or ._COMM == "sshd-session") and
           (.MESSAGE | type == "string"))' <<<"${records}" >/dev/null 2>&1; then
         journal=true
     fi
@@ -4285,15 +4286,39 @@ dockerSshPreflight() {
     fi
 }
 
+dockerSshSourceWitness() (
+    local target=${1:-} port=${2:-} expected=${3:-} nonce tool helper
+    [[ "$#" -eq 3 && "${port}" =~ ^[1-9][0-9]{0,4}$ ]] &&
+        ((port <= 65535)) || return "${PADM_DOCKER_RC_USAGE}"
+    target=$(dockerFail2banSourceAddress "${target}") &&
+        expected=$(dockerFail2banSourceAddress "${expected}") || return "${PADM_DOCKER_RC_USAGE}"
+    [[ ( "${target}" == *:* && "${expected}" == *:* ) ||
+        ( "${target}" != *:* && "${expected}" != *:* ) ]] || return "${PADM_DOCKER_RC_USAGE}"
+    dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+    for tool in python3 ss ip journalctl; do
+        dockerRequireCommand "${tool}" || return "${PADM_DOCKER_RC_HOST}"
+    done
+    helper="${DOCKER_BUNDLE_SOURCE_ROOT}/docker/lib/ssh-source.py"
+    [[ -f "${helper}" && ! -L "${helper}" ]] || return "${PADM_DOCKER_RC_BUNDLE}"
+    nonce=$(dockerSubscriptionRandomHex) &&
+        [[ "${nonce}" =~ ^[a-f0-9]{48}$ ]] || return "${PADM_DOCKER_RC_STATE}"
+    # 来源证明只读宿主，不保存跨事务凭证，也不取得部署锁或启用 jail。
+    python3 -B "${helper}" "${target}" "${port}" "${expected}" "${nonce}"
+)
+
 dockerFail2banCommand() {
     local scope=ws type=fail2ban jail=padm-nginx
     local action=${1:-} address='' container
     local ports maxRetry findTime banTime required
     if [[ "${action}" == ssh ]]; then
-        [[ "$#" -eq 2 || ( "$#" -eq 3 && "$3" == --json ) ]] &&
-            [[ "$2" == preflight ]] || return "${PADM_DOCKER_RC_USAGE}"
+        [[ "$#" -ge 2 ]] || return "${PADM_DOCKER_RC_USAGE}"
+        action=$2
         shift 2
-        dockerSshPreflight "$@"
+        case "${action}" in
+        preflight) dockerSshPreflight "$@" ;;
+        verify-source) dockerSshSourceWitness "$@" ;;
+        *) return "${PADM_DOCKER_RC_USAGE}" ;;
+        esac
         return $?
     fi
     if [[ "${action}" == control ]]; then
