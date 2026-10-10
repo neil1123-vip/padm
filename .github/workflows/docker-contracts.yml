@@ -25,9 +25,9 @@ jobs:
       matrix:
         selector:
           - docker-contracts-fast-rest
-          - docker-phase3
+          - docker-phase3-edit
+          - docker-phase3-entries
           - docker-reality-targets-direct
-          - docker-reality-targets-selection
           - docker-traditional-tls
           - docker-setup-transports
           - docker-contracts-fast-heavy

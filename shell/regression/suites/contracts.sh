@@ -261,7 +261,7 @@ runRegressionDockerContractsAggregateContract() (
         docker-reality docker-traditional-tls docker-routing-core-contracts
         docker-routing-core-network-lifecycle docker-routing-core-policy-lifecycle
         docker-routing-dns-hosts-workflow docker-routing-direct-block-workflow
-        docker-phase3 docker-setup-encrypted-udp docker-setup-encrypted-tcp
+        docker-phase3-edit docker-phase3-entries docker-setup-encrypted-udp docker-setup-encrypted-tcp
         docker-setup-transports docker-reality-targets-direct docker-reality-targets-selection
         docker-setup-tls docker-reality-parameters docker-setup-core docker-sites docker-phase6
         docker-menu docker-reality-target-library docker-fail2ban-ownership docker-control-state
@@ -402,6 +402,16 @@ runRegressionDockerContractsAggregateContract() (
         core-policy-lifecycle:routing-socks5.sh domains-dns-hosts:routing-socks5.sh \
         domains-direct-block:routing-socks5.sh >"${expectedLog}"
     cmp -s "${expectedLog}" "${callLog}"
+
+    bash() { printf '%s:%s\n' "${PADM_DOCKER_PHASE3_SCOPE:-full}" "${1##*/}" >>"${callLog}"; }
+    : >"${callLog}"
+    unset PADM_DOCKER_PHASE3_SCOPE
+    runDockerPhase3Regression
+    runDockerPhase3EditRegression
+    runDockerPhase3EntriesRegression
+    printf '%s\n' full:phase3.sh edit:phase3.sh entries:phase3.sh >"${expectedLog}"
+    cmp -s "${expectedLog}" "${callLog}"
+    [[ -z "${PADM_DOCKER_PHASE3_SCOPE:-}" ]]
 
     bash() { printf '%s:%s\n' "${PADM_DOCKER_PHASE4_SCOPE:-full}" "${1##*/}" >>"${callLog}"; }
     : >"${callLog}"
