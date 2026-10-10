@@ -617,6 +617,15 @@ runSubscriptionGroupStateStructureSyncCronRegression() {
                     printf '5 5 * * * /usr/local/bin/keep\n'
                     ;;
                 tls-reboot) printf '@reboot /bin/bash /etc/padm/install.sh RenewTLS\n' ;;
+                tls-whitespace)
+                    printf '45 2 * * * /bin/bash\t/etc/padm/install.sh\tRenewTLS old\n'
+                    printf '5 0 * * * /bin/bash  /etc/padm/install.sh  RenewTLS\n'
+                    printf '5 5 * * * /usr/local/bin/keep\n'
+                    ;;
+                tls-literal)
+                    printf "5 5 * * * /bin/echo '/etc/padm/install.sh RenewTLS' > /root/keep.log\n"
+                    printf '@reboot /bin/bash /etc/padm/install.sh RenewTLS\n'
+                    ;;
                 *)
                     printf '5 0 * * * /bin/bash /etc/padm/install.sh RenewTLS\n'
                     printf '10 0 * * * /bin/bash /etc/padm/install.sh SyncSubscriptionGroups old\n'
@@ -694,6 +703,23 @@ runSubscriptionGroupStateStructureSyncCronRegression() {
         [[ "${crontabWrites}" == "$((previousWrites + 2))" ]]
         ! grep -q '^@reboot' "${crontabLog}"
         grep -q '^30 1 ' "${crontabLog}"
+
+        local tlsCronFailure=0
+        crontabReadMode=tls-whitespace
+        installCronTLS 1 >/dev/null
+        if [[ "$(grep -c 'RenewTLS' "${crontabLog}")" != 1 ]] ||
+            ! grep -qx '5 5 \* \* \* /usr/local/bin/keep' "${crontabLog}"; then
+            printf 'TLS cron did not replace whitespace-separated duplicates\n' >&2
+            tlsCronFailure=1
+        fi
+        crontabReadMode=tls-literal
+        installCronTLS 1 >/dev/null
+        if ! grep -qxF "5 5 * * * /bin/echo '/etc/padm/install.sh RenewTLS' > /root/keep.log" "${crontabLog}" ||
+            ! grep -q '^30 1 ' "${crontabLog}" || grep -q '^@reboot' "${crontabLog}"; then
+            printf 'TLS cron removed an unrelated literal command\n' >&2
+            tlsCronFailure=1
+        fi
+        [[ "${tlsCronFailure}" == 0 ]]
     )
 }
 
