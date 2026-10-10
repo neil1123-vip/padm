@@ -169,8 +169,8 @@ rm)
     rm -f -- "${FAKE_DOCKER_FAIL2BAN_INSPECT:?}" "${FAKE_DOCKER_FAIL2BAN_STOPPED:?}"
     ;;
 exec)
-    if [[ "$#" -eq 5 && "${2:-}" == "-i" && "${3:-}" == "${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}" &&
-        "${4:-}" == python3 && "${5:-}" == - ]]; then
+    if [[ "$#" -eq 6 && "${2:-}" == "-i" && "${3:-}" == "${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}" &&
+        "${4:-}" == python3 && "${5:-}" == - && "${6:-}" == ws ]]; then
         cat >/dev/null
         case "${FAKE_DOCKER_MODE:-ok}" in
         fail2ban-audit-drift)
@@ -407,6 +407,12 @@ if [[ "${PHASE4_SCOPE}" != lifecycle ]]; then
         output=$(dockerFail2banCommand "${action}" 24444 7 900 7200 --confirm PADM-DOCKER-EDIT)
         [[ "${output}" == "--fail2ban-${action} 24444 7 900 7200 --confirm PADM-DOCKER-EDIT" ]] ||
             fail "Fail2ban ${action} confirm 参数未精确转发"
+        output=$(dockerFail2banCommand control "${action}" 6 600 3600 --preview)
+        [[ "${output}" == "--fail2ban-control-${action} 6 600 3600 --preview" ]] ||
+            fail "控制 Fail2ban ${action} preview 参数未精确转发"
+        output=$(dockerFail2banCommand control "${action}" 7 900 7200 --confirm PADM-DOCKER-EDIT)
+        [[ "${output}" == "--fail2ban-control-${action} 7 900 7200 --confirm PADM-DOCKER-EDIT" ]] ||
+            fail "控制 Fail2ban ${action} confirm 参数未精确转发"
         for suffix in extra bad-confirm release; do
             status=0
             case "${suffix}" in
@@ -417,8 +423,16 @@ if [[ "${PHASE4_SCOPE}" != lifecycle ]]; then
             output=$(dockerFail2banCommand "${action}" 24444 6 600 3600 "${args[@]}") || status=$?
             [[ "${status}" -eq 2 && -z "${output}" ]] ||
                 fail "Fail2ban ${action} 接受多余参数、错误确认或发布参数"
+            status=0
+            output=$(dockerFail2banCommand control "${action}" 6 600 3600 "${args[@]}") || status=$?
+            [[ "${status}" -eq 2 && -z "${output}" ]] ||
+                fail "控制 Fail2ban ${action} 接受多余参数、错误确认或发布参数"
         done
     done
+    [[ "$(dockerFail2banCommand control disable --preview)" == '--fail2ban-control-off --preview' ]]
+    status=0
+    dockerFail2banCommand control unban 2001:db8::1 >/dev/null || status=$?
+    [[ "${status}" == 2 ]] || fail '控制 Fail2ban 解封接受 IPv6'
 )
 fi
 
@@ -621,14 +635,14 @@ runControl 0 fail2ban-status fail2ban status
 grep -qx 'Currently banned: 1' "${CONTROL_LOG}" || fail 'Fail2ban status hid the client output'
 grep -qxF "exec ${FAIL2BAN_CONTAINER} fail2ban-client status padm-nginx" "${DOCKER_LOG}" ||
     fail 'Fail2ban status did not target the managed container and jail'
-[[ "$(grep '^exec ' "${DOCKER_LOG}")" == "exec -i ${FAIL2BAN_CONTAINER} python3 -"$'\n'"exec ${FAIL2BAN_CONTAINER} sh /usr/local/bin/padm-entrypoint fail2ban-health"$'\n'"exec ${FAIL2BAN_CONTAINER} fail2ban-client status padm-nginx" ]] ||
+[[ "$(grep '^exec ' "${DOCKER_LOG}")" == "exec -i ${FAIL2BAN_CONTAINER} python3 - ws"$'\n'"exec ${FAIL2BAN_CONTAINER} sh /usr/local/bin/padm-entrypoint fail2ban-health"$'\n'"exec ${FAIL2BAN_CONTAINER} fail2ban-client status padm-nginx" ]] ||
     fail 'Fail2ban status did not audit loaded actions before the maintenance client'
 for ip in 192.0.2.7 2001:db8::1 ::ffff:192.0.2.7; do
     : >"${DOCKER_LOG}"
     runControl 0 fail2ban-unban fail2ban unban "${ip}"
     grep -qxF "exec ${FAIL2BAN_CONTAINER} fail2ban-client set padm-nginx unbanip ${ip}" "${DOCKER_LOG}" ||
         fail 'Fail2ban unban changed the literal IP, container or jail'
-    [[ "$(grep '^exec ' "${DOCKER_LOG}")" == "exec -i ${FAIL2BAN_CONTAINER} python3 -"$'\n'"exec ${FAIL2BAN_CONTAINER} sh /usr/local/bin/padm-entrypoint fail2ban-health"$'\n'"exec ${FAIL2BAN_CONTAINER} fail2ban-client set padm-nginx unbanip ${ip}" ]] ||
+    [[ "$(grep '^exec ' "${DOCKER_LOG}")" == "exec -i ${FAIL2BAN_CONTAINER} python3 - ws"$'\n'"exec ${FAIL2BAN_CONTAINER} sh /usr/local/bin/padm-entrypoint fail2ban-health"$'\n'"exec ${FAIL2BAN_CONTAINER} fail2ban-client set padm-nginx unbanip ${ip}" ]] ||
         fail 'Fail2ban unban did not audit loaded actions before the maintenance client'
 done
 FAKE_DOCKER_MODE=fail2ban-client-fail runControl 37 fail2ban-status-client-error fail2ban status
@@ -641,7 +655,7 @@ FAKE_DOCKER_MODE=fail2ban-client-fail runControl 37 fail2ban-unban-client-error 
 for auditMode in fail2ban-audit-drift fail2ban-audit-query-fail fail2ban-owner-drift; do
     : >"${DOCKER_LOG}"
     FAKE_DOCKER_MODE="${auditMode}" runControl 15 "${auditMode}-status" fail2ban status
-    grep -qxF "exec -i ${FAIL2BAN_CONTAINER} python3 -" "${DOCKER_LOG}" ||
+    grep -qxF "exec -i ${FAIL2BAN_CONTAINER} python3 - ws" "${DOCKER_LOG}" ||
         fail "${auditMode}: status skipped the loaded-action audit"
     ! grep -qF "fail2ban-client" "${DOCKER_LOG}" ||
         fail "${auditMode}: status executed the maintenance client after audit failure"
@@ -649,7 +663,7 @@ for auditMode in fail2ban-audit-drift fail2ban-audit-query-fail fail2ban-owner-d
         fail "${auditMode}: status started a container after audit failure"
     : >"${DOCKER_LOG}"
     FAKE_DOCKER_MODE="${auditMode}" runControl 15 "${auditMode}-unban" fail2ban unban 192.0.2.7
-    grep -qxF "exec -i ${FAIL2BAN_CONTAINER} python3 -" "${DOCKER_LOG}" ||
+    grep -qxF "exec -i ${FAIL2BAN_CONTAINER} python3 - ws" "${DOCKER_LOG}" ||
         fail "${auditMode}: unban skipped the loaded-action audit"
     ! grep -qF "fail2ban-client" "${DOCKER_LOG}" ||
         fail "${auditMode}: unban executed the maintenance client after audit failure"
@@ -912,7 +926,7 @@ python3 - "${DOCKER_LOG}" "${FAIL2BAN_CONTAINER}" <<'PY'
 import sys
 commands = open(sys.argv[1], encoding="utf-8").read().splitlines()
 cid = sys.argv[2]
-audit = commands.index(f"exec -i {cid} python3 -")
+audit = commands.index(f"exec -i {cid} python3 - ws")
 health = commands.index(f"exec {cid} sh /usr/local/bin/padm-entrypoint fail2ban-health")
 stop = commands.index(f"stop {cid}")
 proof = next(i for i, command in enumerate(commands)
@@ -946,6 +960,173 @@ if [[ "${PHASE4_SCOPE}" == maintenance ]]; then
     printf 'docker-phase4-maintenance-regression-ok\n'
     exit 0
 fi
+
+# 只替换现场边界；双 scope 的停用门禁、启动编排与最终提交走生产函数。
+(
+    source "${PROJECT_ROOT}/install-docker.sh"
+    root="${TEST_ROOT}/dual-fail2ban"
+    export PADM_DOCKER_INSTALL_DIR="${root}"
+    mkdir -p "${root}/config" "${root}/data/net/fail2ban" "${root}/data/net/control-fail2ban"
+    jq --slurpfile wireguard "${WIREGUARD_SPEC}" '
+      .schema_version = 3 | .core.secondary_type = null |
+      .core.protocols |= map(.core = "xray") |
+      .host_integrations += ($wireguard[0].host_integrations + [{
+        type:"fail2ban-control",profile:"net-fail2ban-control",firewall_rules:["INPUT"],
+        devices:[],schedules:[],settings:{max_retry:6,find_time:600,ban_time:3600}
+      }]) |
+      .control = {schema_version:1,role:"main",node_id:"44444444-4444-4444-8444-444444444444",
+        listen:{interface:"wg-padm",address:"10.23.0.1",port:18080},
+        peer:{id:"55555555-5555-4555-8555-555555555555",address:"10.23.0.2",
+          enabled:false,expires_at:1,token_sha256:("a"*64)},revision:0,last_digest:null}
+    ' "${FAIL2BAN_SPEC}" >"${root}/config/spec.json"
+    dockerGenerateCompose "${root}/config/spec.json" "${root}/compose.json" "${root}"
+    PADM_DOCKER_INSTALL_DIR="${DOCKER_ROOT}" dockerGenerateDeployment \
+        "${root}/config/spec.json" "${root}/deployment.json"
+    cp -- "${root}/config/spec.json" "${root}/dual.json"
+    dualLog="${TEST_ROOT}/dual-fail2ban.log"
+    DOCKER_DEPLOYMENT_LOCK_DIR="${root}/.fixture-lock"
+    mkdir -- "${DOCKER_DEPLOYMENT_LOCK_DIR}"
+    printf '%s\n' "${BASHPID:-$$}" >"${DOCKER_DEPLOYMENT_LOCK_DIR}/pid"
+    DOCKER_FAIL2BAN_SOURCE_IPV4=198.51.100.9
+    controlId="$(printf d%.0s {1..64})"
+    eval "$(declare -f dockerFail2banCleanCheck | sed '1s/dockerFail2banCleanCheck/dockerDualProductionCleanCheck/')"
+    dockerRealityStreamDeploymentCheck() { :; }
+    dockerFail2banConfigurationCheck() { printf 'config %s\n' "${2:-ws}" >>"${dualLog}"; }
+    dockerControlFail2banConfigurationCheck() { dockerFail2banConfigurationCheck current control; }
+    dockerFail2banCleanCheck() { printf 'clean %s\n' "${1:-ws}" >>"${dualLog}"; }
+    dockerControlFail2banCleanCheck() { dockerDualProductionCleanCheck control; }
+    dockerFail2banSourceContainer() {
+        [[ "$#" == 2 ]] || return 1
+        if [[ -f "${root}/source-drift" ]]; then printf 'changed\n'; else printf 'stable\n'; fi
+    }
+    dockerFail2banSourceWitness() { printf 'ws-witness %s\n' "$1" >>"${dualLog}"; }
+    dockerControlSourceWitnessLocked() {
+        [[ "$*" == dockerFail2banStartManagedCommit &&
+            "$(cat "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid")" == "${mf_lockOwner}" ]] || return 1
+        local number=0
+        [[ ! -f "${root}/nonce-counter" ]] || number=$(<"${root}/nonce-counter")
+        number=$((number + 1))
+        printf '%s\n' "${number}" >"${root}/nonce-counter"
+        printf 'control-witness %064x\n' "${number}" >>"${dualLog}"
+        case "${dualFault:-}" in
+        witness-once) dualFault=; return 1 ;;
+        ws-drift) touch "${root}/source-drift" ;;
+        esac
+        "$1"
+    }
+    dockerControlSourceWitnessRecheck() { printf 'control-recheck\n' >>"${dualLog}"; }
+    dockerFail2banContainer() {
+        printf 'container %s %s\n' "${1:-running}" "${2:-ws}" >>"${dualLog}"
+        if [[ "${2:-ws}" == control && "${1:-running}" == exited &&
+            "${dualFault:-}" == owner-drift ]]; then return 1; fi
+        printf '%s\n' "${controlId}"
+    }
+    dockerControlFail2banContainer() { dockerFail2banContainer "${1:-running}" control; }
+    docker() {
+        printf '%s\n' "$*" >>"${dualLog}"
+        case "$*" in
+        'ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=net-fail2ban --filter label=com.docker.compose.oneoff=False') ;;
+        'ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=net-fail2ban-control --filter label=com.docker.compose.oneoff=False')
+            [[ "${controlPresent:-0}" != 1 ]] || printf '%s\n' "${controlId}"
+            ;;
+        "container inspect ${controlId}")
+            jq -n --arg id "${controlId}" '[{Id:$id,State:{Running:true}}]'
+            ;;
+        "stop ${controlId}") [[ "${dualFault:-}" != stop-fail ]] ;;
+        "rm ${controlId}") controlPresent=0 ;;
+        *) return 1 ;;
+        esac
+    }
+    dockerComposeExecute() {
+        printf 'compose %s\n' "$*" >>"${dualLog}"
+        case "$*" in
+        'run --rm --no-deps net-fail2ban-control preflight fail2ban-control 10.23.0.1 18080 unowned')
+            [[ "${ordinarySourcesReady:-0}" == 1 ]] || return 1
+            if [[ "${dualFault:-}" == final-clean-ws-drift ]] &&
+                grep -q '^control-witness ' "${dualLog}"; then
+                touch "${root}/source-drift"
+            fi
+            ;;
+        *fail2ban-control-clean*)
+            [[ "$*" == 'run --rm --no-deps net-fail2ban-control fail2ban-control-clean 10.23.0.1 18080' ]]
+            ;;
+        'up -d '*)
+            [[ "$*" == *' --no-deps '* ]] || ordinarySourcesReady=1
+            ;;
+        *) [[ "$*" != *'preflight fail2ban-control'* ]] ;;
+        esac
+    }
+    ordinarySourcesReady=0
+    : >"${dualLog}"
+    dockerControlFail2banDisablePrepare "${root}/config/spec.json"
+    grep -qxF 'compose run --rm --no-deps net-fail2ban-control fail2ban-control-clean 10.23.0.1 18080' "${dualLog}"
+    [[ "${ordinarySourcesReady}" == 0 ]] &&
+        ! grep -q 'preflight fail2ban-control' "${dualLog}" || fail '未启动来源时执行了完整 preflight'
+    : >"${dualLog}"
+    dockerComposeRun up -d --wait
+    python3 - "${dualLog}" <<'PY'
+import sys
+lines = open(sys.argv[1], encoding="utf-8").read().splitlines()
+starts = [i for i, line in enumerate(lines) if line.startswith("compose up ")]
+ws = [i for i, line in enumerate(lines) if line.startswith("ws-witness ")]
+control = next(i for i, line in enumerate(lines) if line.startswith("control-witness "))
+assert len(starts) == 2 and len(ws) == 2 and starts[0] < ws[0] < ws[1] < control < starts[1]
+assert "net-fail2ban" not in lines[starts[0]]
+assert " nginx" in lines[starts[0]] and " control" in lines[starts[0]] and " net-wireguard" in lines[starts[0]]
+assert lines[starts[1]].endswith("net-fail2ban net-fail2ban-control") and "--no-deps" in lines[starts[1]]
+early = lines.index("compose run --rm --no-deps net-fail2ban-control fail2ban-control-clean 10.23.0.1 18080")
+full = lines.index("compose run --rm --no-deps net-fail2ban-control preflight fail2ban-control 10.23.0.1 18080 unowned")
+assert early < starts[0] < full < control
+assert lines.index("control-recheck") < starts[1]
+PY
+    : >"${dualLog}"
+    dockerComposeRun restart
+    [[ "$(grep -c '^compose restart --no-deps ' "${dualLog}")" == 1 ]]
+    python3 - "${dualLog}" <<'PY'
+import sys
+lines = open(sys.argv[1], encoding="utf-8").read().splitlines()
+restart = next(i for i, line in enumerate(lines) if line.startswith("compose restart --no-deps "))
+queries = [line for line in lines[:restart] if line.startswith("ps -aq ")]
+assert len(queries) == 2
+assert "service=net-fail2ban " in queries[0] and "service=net-fail2ban-control " in queries[1]
+PY
+    for dualFault in witness-once ws-drift final-clean-ws-drift; do
+        : >"${dualLog}"
+        if dockerComposeRun up -d --wait; then fail "双 scope 未拒绝 ${dualFault}"; fi
+        ! grep -q '^compose up .*--no-deps ' "${dualLog}" || fail '来源失败后启动了 jail'
+        rm -f -- "${root}/source-drift"
+        dualFault=
+        dockerComposeRun up -d --wait
+        [[ "$(grep -c '^compose up .*--no-deps ' "${dualLog}")" == 1 &&
+            "$(grep '^control-witness ' "${dualLog}" | sort -u | wc -l)" == 2 ]]
+    done
+    printf 'ws-sqlite\n' >"${root}/data/net/fail2ban/fail2ban.sqlite3"
+    printf 'control-sqlite\n' >"${root}/data/net/control-fail2ban/control-fail2ban.sqlite3"
+    sqliteHash=$(sha256sum "${root}"/data/net/{fail2ban,control-fail2ban}/*.sqlite3)
+    specHash=$(sha256sum "${root}/config/spec.json")
+    controlPresent=1
+    for dualFault in stop-fail owner-drift; do
+        : >"${dualLog}"
+        if dockerComposeRun down; then fail "控制 scope 未拒绝 ${dualFault}"; fi
+        ! grep -Eq "^rm ${controlId}$|^compose (down|run .*(preflight|fail2ban-control-clean))" "${dualLog}" ||
+            fail '停止失败或 owner 漂移后执行了清理'
+        [[ "$(sha256sum "${root}/config/spec.json")" == "${specHash}" &&
+            "$(sha256sum "${root}"/data/net/{fail2ban,control-fail2ban}/*.sqlite3)" == "${sqliteHash}" ]]
+    done
+    dualFault=
+    : >"${dualLog}"
+    dockerComposeRun down
+    grep -qxF "rm ${controlId}" "${dualLog}"
+    grep -qxF 'compose run --rm --no-deps net-fail2ban-control fail2ban-control-clean 10.23.0.1 18080' "${dualLog}"
+    [[ "$(sha256sum "${root}"/data/net/{fail2ban,control-fail2ban}/*.sqlite3)" == "${sqliteHash}" ]]
+    jq '.host_integrations |= map(select(.type != "fail2ban"))' "${root}/dual.json" >"${root}/config/spec.json"
+    dockerGenerateCompose "${root}/config/spec.json" "${root}/compose.json" "${root}"
+    PADM_DOCKER_INSTALL_DIR="${DOCKER_ROOT}" dockerGenerateDeployment \
+        "${root}/config/spec.json" "${root}/deployment.json"
+    : >"${dualLog}"
+    dockerComposeRun exec -T nginx nginx -e /dev/stderr -s reload
+    [[ "$(<"${dualLog}")" == 'compose exec -T nginx nginx -e /dev/stderr -s reload' ]]
+)
 
 # 专项启用与参数修改保留其它集成，并复用逐入口见证及失败恢复，不另造启动路径。
 FAIL2BAN_EDIT_BASE="${TEST_ROOT}/fail2ban-edit-base.json"

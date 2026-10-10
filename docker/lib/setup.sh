@@ -1351,7 +1351,7 @@ dockerEditCommand() {
     local portAlias= portAliasListener= portAliasPort=
     local regionMode= regionAllow='[]' regionAllowSet=0
     local ipv6Mode= ipv6Domains='[]' ipv6DomainsSet=0
-    local fail2banAction= fail2banPorts= fail2banMaxRetry= fail2banFindTime= fail2banBanTime=
+    local fail2banAction= fail2banType=fail2ban fail2banPorts= fail2banMaxRetry= fail2banFindTime= fail2banBanTime=
     local DOCKER_CONFIG_RESTORE_ALPN_LISTENER=
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
@@ -1444,39 +1444,50 @@ dockerEditCommand() {
             httpRelay=disable
             shift
             ;;
-        --fail2ban-enable|--fail2ban-settings)
-            [[ "$#" -ge 5 && -n "$2" && "$2" != --* &&
-                -n "$3" && "$3" != --* && -n "$4" && "$4" != --* &&
-                -n "$5" && "$5" != --* && -z "${fail2banAction}" ]] ||
+        --fail2ban-enable|--fail2ban-settings|--fail2ban-control-enable|--fail2ban-control-settings)
+            local fail2banArgCount=5 retryInput= findInput= banInput=
+            [[ -z "${fail2banAction}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            if [[ "$1" == --fail2ban-control-* ]]; then
+                fail2banType=fail2ban-control fail2banArgCount=4
+                fail2banAction=${1#--fail2ban-control-}
+            else
+                fail2banAction=${1#--fail2ban-}
+            fi
+            [[ "$#" -ge "${fail2banArgCount}" ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
-            fail2banAction=${1#--fail2ban-}
-            [[ "$2" =~ ^[0-9]{1,5}(,[0-9]{1,5}){0,15}$ ]] ||
+            if [[ "${fail2banType}" == fail2ban ]]; then
+                [[ "$2" =~ ^[0-9]{1,5}(,[0-9]{1,5}){0,15}$ ]] ||
                 return "${PADM_DOCKER_RC_USAGE}"
-            local -a fail2banPortValues=()
-            local fail2banPort fail2banPortNumber fail2banPortList=
-            IFS=',' read -r -a fail2banPortValues <<<"$2"
-            for fail2banPort in "${fail2banPortValues[@]}"; do
-                fail2banPortNumber=$((10#${fail2banPort}))
-                (( fail2banPortNumber >= 1 && fail2banPortNumber <= 65535 )) ||
-                    return "${PADM_DOCKER_RC_USAGE}"
-                [[ ",${fail2banPortList}," != *",${fail2banPortNumber},"* ]] ||
-                    return "${PADM_DOCKER_RC_USAGE}"
-                fail2banPortList+="${fail2banPortList:+,}${fail2banPortNumber}"
-            done
-            [[ "$3" =~ ^[0-9]{1,2}$ ]] && fail2banMaxRetry=$((10#$3)) &&
+                local -a fail2banPortValues=()
+                local fail2banPort fail2banPortNumber fail2banPortList=
+                IFS=',' read -r -a fail2banPortValues <<<"$2"
+                for fail2banPort in "${fail2banPortValues[@]}"; do
+                    fail2banPortNumber=$((10#${fail2banPort}))
+                    (( fail2banPortNumber >= 1 && fail2banPortNumber <= 65535 )) ||
+                        return "${PADM_DOCKER_RC_USAGE}"
+                    [[ ",${fail2banPortList}," != *",${fail2banPortNumber},"* ]] ||
+                        return "${PADM_DOCKER_RC_USAGE}"
+                    fail2banPortList+="${fail2banPortList:+,}${fail2banPortNumber}"
+                done
+                fail2banPorts=${fail2banPortList}
+                retryInput=$3 findInput=$4 banInput=$5
+            else
+                retryInput=$2 findInput=$3 banInput=$4
+            fi
+            [[ "${retryInput}" =~ ^[0-9]{1,2}$ ]] && fail2banMaxRetry=$((10#${retryInput})) &&
                 (( fail2banMaxRetry >= 1 && fail2banMaxRetry <= 20 )) ||
                 return "${PADM_DOCKER_RC_USAGE}"
-            [[ "$4" =~ ^[0-9]{1,5}$ ]] && fail2banFindTime=$((10#$4)) &&
+            [[ "${findInput}" =~ ^[0-9]{1,5}$ ]] && fail2banFindTime=$((10#${findInput})) &&
                 (( fail2banFindTime >= 60 && fail2banFindTime <= 86400 )) ||
                 return "${PADM_DOCKER_RC_USAGE}"
-            [[ "$5" =~ ^[0-9]{1,6}$ ]] && fail2banBanTime=$((10#$5)) &&
+            [[ "${banInput}" =~ ^[0-9]{1,6}$ ]] && fail2banBanTime=$((10#${banInput})) &&
                 (( fail2banBanTime >= 60 && fail2banBanTime <= 604800 )) ||
                 return "${PADM_DOCKER_RC_USAGE}"
-            fail2banPorts=${fail2banPortList}
-            shift 5
+            shift "${fail2banArgCount}"
             ;;
-        --fail2ban-off)
+        --fail2ban-off|--fail2ban-control-off)
             [[ -z "${fail2banAction}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            [[ "$1" != --fail2ban-control-off ]] || fail2banType=fail2ban-control
             fail2banAction=off
             shift
             ;;
@@ -1743,42 +1754,43 @@ dockerEditCommand() {
     jq -es 'length == 1 and (.[0] | type == "object")' "${draft}" >/dev/null 2>&1 ||
         return "${PADM_DOCKER_RC_STATE}"
     if [[ "${fail2banAction}" == off ]]; then
-        jq -e 'any(.host_integrations[]; .type == "fail2ban")' "${draft}" >/dev/null || {
+        jq -e --arg type "${fail2banType}" 'any(.host_integrations[]; .type == $type)' "${draft}" >/dev/null || {
             dockerError '当前规格未启用受管 Fail2ban 站点扫描防护'
             return "${PADM_DOCKER_RC_STATE}"
         }
-        jq '.host_integrations |= map(select(.type != "fail2ban"))' "${draft}" >"${draft}.next" &&
+        jq --arg type "${fail2banType}" '.host_integrations |= map(select(.type != $type))' "${draft}" >"${draft}.next" &&
             chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
             return "${PADM_DOCKER_RC_STATE}"
     elif [[ "${fail2banAction}" == enable ]]; then
-        jq -e 'all(.host_integrations[]; .type != "fail2ban")' "${draft}" >/dev/null || {
+        jq -e --arg type "${fail2banType}" 'all(.host_integrations[]; .type != $type)' "${draft}" >/dev/null || {
             dockerError '当前规格已启用受管 Fail2ban 站点扫描防护，不能重复启用'
             return "${PADM_DOCKER_RC_STATE}"
         }
-        jq --arg ports "${fail2banPorts}" --argjson max_retry "${fail2banMaxRetry}" \
+        jq --arg type "${fail2banType}" --arg ports "${fail2banPorts}" --argjson max_retry "${fail2banMaxRetry}" \
             --argjson find_time "${fail2banFindTime}" --argjson ban_time "${fail2banBanTime}" '
           ($ports | split(",") | map(tonumber)) as $ports |
           .host_integrations += [{
-            type:"fail2ban", profile:"net-fail2ban", firewall_rules:["DOCKER-USER"],
+            type:$type, profile:("net-" + $type),
+            firewall_rules:[if $type == "fail2ban" then "DOCKER-USER" else "INPUT" end],
             devices:[], schedules:[],
-            settings:{log_file:"access.log",ports:$ports,max_retry:$max_retry,
-              find_time:$find_time,ban_time:$ban_time}
+            settings:({max_retry:$max_retry,find_time:$find_time,ban_time:$ban_time} +
+              if $type == "fail2ban" then {log_file:"access.log",ports:$ports} else {} end)
           }]
         ' "${draft}" >"${draft}.next" &&
             chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
             return "${PADM_DOCKER_RC_STATE}"
     elif [[ "${fail2banAction}" == settings ]]; then
-        jq -e '([.host_integrations[] | select(.type == "fail2ban")] | length) == 1' \
+        jq -e --arg type "${fail2banType}" '([.host_integrations[] | select(.type == $type)] | length) == 1' \
             "${draft}" >/dev/null || {
             dockerError '当前规格未启用受管 Fail2ban 站点扫描防护，不能修改参数'
             return "${PADM_DOCKER_RC_STATE}"
         }
-        jq --arg ports "${fail2banPorts}" --argjson max_retry "${fail2banMaxRetry}" \
+        jq --arg type "${fail2banType}" --arg ports "${fail2banPorts}" --argjson max_retry "${fail2banMaxRetry}" \
             --argjson find_time "${fail2banFindTime}" --argjson ban_time "${fail2banBanTime}" '
           ($ports | split(",") | map(tonumber)) as $ports |
           .host_integrations |= map(
-            if .type == "fail2ban" then
-              .settings.ports = $ports |
+            if .type == $type then
+              (if $type == "fail2ban" then .settings.ports = $ports else . end) |
               .settings.max_retry = $max_retry |
               .settings.find_time = $find_time |
               .settings.ban_time = $ban_time
@@ -1981,7 +1993,8 @@ dockerEditCommand() {
         chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
         return "${PADM_DOCKER_RC_STATE}"
     dockerConfigureSpecValidate "${draft}" || return "${PADM_DOCKER_RC_STATE}"
-    if [[ "${fail2banAction}" == enable || "${fail2banAction}" == settings ]]; then
+    if [[ "${fail2banType}" == fail2ban &&
+        ( "${fail2banAction}" == enable || "${fail2banAction}" == settings ) ]]; then
         dockerFail2banSourcePlan "${draft}" >/dev/null || return "${PADM_DOCKER_RC_STATE}"
     fi
     dockerAcmeWebrootTransitionValidate "${draft}" || return "${PADM_DOCKER_RC_STATE}"
@@ -2021,6 +2034,7 @@ dockerEditCommand() {
         --arg http_relay "${httpRelay}" \
         --arg port_alias "${portAlias}" \
         --arg fail2ban_action "${fail2banAction}" \
+        --arg fail2ban_type "${fail2banType}" \
         --slurpfile before "${normalized}" --slurpfile after "${draft}" '
       def fixed: del(.server, .public_port, .address_families, .name,
         .reality.target_host, .reality.target_port, .reality.server_name, .websocket.path, .httpupgrade.path,
@@ -2032,9 +2046,9 @@ dockerEditCommand() {
       def shared: fixed | del(.listener_id, .core, .id, .xhttp, .grpc);
       def root: del(.core.protocols, .core.secondary_type, .tls, .subscription.enabled, .site);
       def without_fail2ban:
-        .host_integrations |= map(select(.type != "fail2ban"));
+        .host_integrations |= map(select(.type != $fail2ban_type));
       def without_fail2ban_settings:
-        .host_integrations |= map(if .type == "fail2ban" then
+        .host_integrations |= map(if .type == $fail2ban_type then
           del(.settings.ports, .settings.max_retry, .settings.find_time, .settings.ban_time)
           else . end);
       def special: .core.protocols |= map(
@@ -2058,15 +2072,15 @@ dockerEditCommand() {
             .listener_id == $bound.listener_id and .core == $bound.core and
             .public_port == $bound.public_port and .address_families == $bound.address_families))) and
       (if $fail2ban_action == "off" then
-        $new.host_integrations == [$old.host_integrations[] | select(.type != "fail2ban")] and
+        $new.host_integrations == [$old.host_integrations[] | select(.type != $fail2ban_type)] and
         ($old | del(.host_integrations)) == ($new | del(.host_integrations))
        elif $fail2ban_action == "enable" then
-        ([$old.host_integrations[] | select(.type == "fail2ban")] | length) == 0 and
-        ([$new.host_integrations[] | select(.type == "fail2ban")] | length) == 1 and
+        ([$old.host_integrations[] | select(.type == $fail2ban_type)] | length) == 0 and
+        ([$new.host_integrations[] | select(.type == $fail2ban_type)] | length) == 1 and
         ($old | without_fail2ban) == ($new | without_fail2ban)
        elif $fail2ban_action == "settings" then
-        ([$old.host_integrations[] | select(.type == "fail2ban")] | length) == 1 and
-        ([$new.host_integrations[] | select(.type == "fail2ban")] | length) == 1 and
+        ([$old.host_integrations[] | select(.type == $fail2ban_type)] | length) == 1 and
+        ([$new.host_integrations[] | select(.type == $fail2ban_type)] | length) == 1 and
         ($old | without_fail2ban_settings) == ($new | without_fail2ban_settings)
        elif $port_alias != "" then
         ($old | del(.port_aliases)) == ($new | del(.port_aliases))

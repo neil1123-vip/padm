@@ -73,7 +73,8 @@ compose)
     [[ "${mode}" != "compose-fail" ]]
     ;;
 ps)
-    if [[ "$*" != 'ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=net-fail2ban --filter label=com.docker.compose.oneoff=False' ]]; then
+    if [[ "$*" != 'ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=net-fail2ban --filter label=com.docker.compose.oneoff=False' &&
+        "$*" != 'ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=net-fail2ban-control --filter label=com.docker.compose.oneoff=False' ]]; then
         [[ "${mode}" != "active" ]] || printf 'container-id\n'
     fi
     ;;

@@ -351,6 +351,9 @@ dockerBundleSupportsSpec() {
           (if $spec[0] | has("control") then
             $schema[0]["x-padm-control-state"] == true
           else true end) and
+          (if any($spec[0].host_integrations[]; .type == "fail2ban-control") then
+            $schema[0]["x-padm-control-fail2ban"] == true
+          else true end) and
           (if $spec[0] | has("site") then
             $schema[0]["x-padm-site-content"] == true
           else true end) and

@@ -81,6 +81,23 @@ next_plan = planner.build_plan(changed, first["spec"])
 assert next_plan["state"]["revision"] == 1
 assert planner.build_plan(first["spec"], next_plan["spec"])["state"]["revision"] == 2
 assert planner.build_plan(first["spec"], first["spec"]) == first
+protected = copy.deepcopy(first["spec"])
+protected["host_integrations"].append(dict(type="fail2ban-control",
+    profile="net-fail2ban-control", firewall_rules=["INPUT"], devices=[], schedules=[],
+    settings=dict(max_retry=6, find_time=600, ban_time=3600)))
+validator.validate(protected)
+assert planner.build_plan(protected, first["spec"])["state"] == first["state"]
+# 目标和端口只取主控监听，不能通过独立集成覆盖或污染 API 投影。
+for mutation in (lambda s: s.pop("control"),
+                 lambda s: s["host_integrations"].pop(0),
+                 lambda s: s["host_integrations"][-1]["settings"].update(port=18081),
+                 lambda s: s["host_integrations"][-1]["settings"].update(address="10.77.0.3"),
+                 lambda s: s["host_integrations"][-1]["settings"].update(max_retry=0),
+                 lambda s: s["host_integrations"][-1]["settings"].update(find_time=59),
+                 lambda s: s["host_integrations"][-1]["settings"].update(ban_time=604801)):
+    bad = copy.deepcopy(protected)
+    mutation(bad)
+    assert not validator.is_valid(bad)
 authorization = copy.deepcopy(first["spec"])
 authorization["control"]["peer"]["enabled"] = False
 assert planner.build_plan(authorization, first["spec"])["state"]["revision"] == 0
@@ -111,6 +128,7 @@ for mutation in (lambda s: s.update(control_sync={}),
 save(root / "initial.json", spec)
 save(root / "changed.json", changed)
 save(root / "published.json", first["spec"])
+save(root / "protected.json", protected)
 PY
 
 # 核心、宿主和发布动作使用桩；生成、备份、安装、恢复和权限走生产路径。
@@ -221,6 +239,68 @@ jq -e '.services.control |
     "--source-receipt","/var/log/padm/control/source.receipt"] and
   .healthcheck.test[-3:] == ["control-health","--state","/etc/padm/control/state.json"]' \
   "${root}/compose.json" >/dev/null
+(
+    dockerConfigureSpecValidate "${root}/protected.json"
+    dockerGenerateCompose "${root}/protected.json" "${TEST_ROOT}/protected-compose.json" "${root}"
+    jq -e --slurpfile baseline "${root}/compose.json" --arg root "${root}" '
+      .services.control == $baseline[0].services.control and
+      (all(.services[].volumes[]?; (.source | endswith("/config/spec.json") | not))) and
+      (.services["net-fail2ban-control"] |
+        .restart == "no" and .user == "0:10001" and .network_mode == "host" and
+        .profiles == ["net-fail2ban-control"] and .cap_drop == ["ALL"] and
+        .cap_add == ["NET_ADMIN"] and .read_only == true and (has("ports") | not) and
+        .command == ["fail2ban-control","10.77.0.1","18080"] and
+        .depends_on == {control:{condition:"service_healthy"},
+          "net-wireguard":{condition:"service_healthy"}} and
+        [.volumes[] | {source,target,read_only}] == [
+          {source:"${PADM_NET_ROOT}/config/net/control-fail2ban/padm.local",
+            target:"/etc/fail2ban/jail.d/padm.local",read_only:true},
+          {source:"${PADM_NET_ROOT}/config/net/control-fail2ban/fail2ban.local",
+            target:"/etc/fail2ban/fail2ban.local",read_only:true},
+          {source:"${PADM_NET_ROOT}/config/net/control-fail2ban/padm-control.conf",
+            target:"/etc/fail2ban/filter.d/padm-control.conf",read_only:true},
+          {source:"${PADM_NET_ROOT}/config/net/control-fail2ban/padm-control-input.conf",
+            target:"/etc/fail2ban/action.d/padm-control-input.conf",read_only:true},
+          {source:"${PADM_NET_ROOT}/logs/control",target:"/var/log/padm/control",read_only:true},
+          {source:"${PADM_NET_ROOT}/data/net/control-fail2ban",target:"/var/lib/padm/net",read_only:false}
+        ] and
+        .healthcheck.test == ["CMD","/usr/local/bin/padm-entrypoint","fail2ban-control-health"])
+    ' "${TEST_ROOT}/protected-compose.json" >/dev/null
+    dockerGenerateDeployment "${root}/protected.json" "${TEST_ROOT}/protected-deployment.json"
+    # 部署记录既通过运行时合同，也须被发布的机器可读 schema 接受。
+    dockerDeploymentFileValidate "${TEST_ROOT}/protected-deployment.json"
+    python3 - "${PROJECT_ROOT}" "${TEST_ROOT}/protected-deployment.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+from jsonschema import Draft202012Validator
+project, deployment = map(Path, sys.argv[1:])
+schema = json.loads((project / "docker/contracts/deployment.schema.json").read_text())
+Draft202012Validator.check_schema(schema)
+Draft202012Validator(schema).validate(json.loads(deployment.read_text()))
+PY
+    dockerGenerateControlFail2banConfig "${root}/protected.json" "${TEST_ROOT}/protected"
+    grep -qxF 'logpath = /var/log/padm/control/auth.log' \
+        "${TEST_ROOT}/protected/config/net/control-fail2ban/padm.local"
+    grep -qxF 'dbfile = /var/lib/padm/net/control-fail2ban.sqlite3' \
+        "${TEST_ROOT}/protected/config/net/control-fail2ban/fail2ban.local"
+    mkdir -p "${TEST_ROOT}/old-control-fail2ban/docker/contracts"
+    jq 'del(.["x-padm-control-fail2ban"])' "$(dockerConfigureSchemaFile)" \
+        >"${TEST_ROOT}/old-control-fail2ban/docker/contracts/configure.schema.json"
+    cp -- "$(dockerFeatureMatrixFile)" "${TEST_ROOT}/old-control-fail2ban/docker/contracts/features.json"
+    dockerBundleSupportsSpec "${TEST_ROOT}/old-control-fail2ban" "${spec}"
+    if dockerBundleSupportsSpec "${TEST_ROOT}/old-control-fail2ban" "${root}/protected.json"; then exit 1; fi
+    before=$(sha256sum "${spec}" "${root}/config/control/state.json" \
+        "${root}/logs/control/auth.log" "${root}/logs/control/source.receipt")
+    upCount=$(wc -l <"${TEST_ROOT}/compose.log")
+    apply "${root}/protected.json" '' '' preview
+    [[ "$(sha256sum "${spec}" "${root}/config/control/state.json" \
+        "${root}/logs/control/auth.log" "${root}/logs/control/source.receipt")" == "${before}" &&
+        "$(wc -l <"${TEST_ROOT}/compose.log")" == "${upCount}" &&
+        ! -e "${root}/config/net/control-fail2ban" &&
+        ! -e "${root}/data/control-source/challenge.json" &&
+        -z "$(find "${root}" -maxdepth 1 -name '.candidate.*' -print -quit)" ]]
+)
 printf 'existing-control-auth-evidence\n' >>"${root}/logs/control/auth.log"
 authDigest=$(sha256sum "${root}/logs/control/auth.log")
 dockerControlStateCheck "${root}"

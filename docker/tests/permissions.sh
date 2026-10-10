@@ -38,7 +38,8 @@ dockerComposeExecute() {
 dockerComposeRun() { dockerComposeExecute "$@"; }
 dockerTrafficScheduleRemove() { printf 'removed\n' >>"${TEST_ROOT}/schedule.log"; }
 docker() {
-    [[ "$*" == 'ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=net-fail2ban --filter label=com.docker.compose.oneoff=False' ]] ||
+    [[ "$*" == 'ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=net-fail2ban --filter label=com.docker.compose.oneoff=False' ||
+        "$*" == 'ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=net-fail2ban-control --filter label=com.docker.compose.oneoff=False' ]] ||
         fail "unexpected ownership query: $*"
     printf '%s\n' "$*" >>"${TEST_ROOT}/ownership.log"
     [[ "${OWNERSHIP_QUERY_FAIL:-0}" != 1 ]]
@@ -105,10 +106,20 @@ jq -r '.images | "PADM_XRAY_IMAGE=" + .xray, "PADM_SINGBOX_IMAGE=" + ."sing-box"
     "PADM_NGINX_IMAGE=" + .nginx, "PADM_OPS_IMAGE=" + .ops, "PADM_NET_IMAGE=" + .net' \
     "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" >"${PADM_DOCKER_INSTALL_DIR}/images.env"
 dockerEnsureRuntimeDataPermissions
+# 两个范围的运行数据库不属于配置恢复点，恢复须保留各自最新内容。
+mkdir -p "${PADM_DOCKER_INSTALL_DIR}/data/net/"{fail2ban,control-fail2ban}
+wsDatabase="${PADM_DOCKER_INSTALL_DIR}/data/net/fail2ban/fail2ban.sqlite3"
+controlDatabase="${PADM_DOCKER_INSTALL_DIR}/data/net/control-fail2ban/control-fail2ban.sqlite3"
+printf 'ws-database-before-backup\n' >"${wsDatabase}"
+printf 'control-database-before-backup\n' >"${controlDatabase}"
 dockerBackupConfiguration configure
 backup=${DOCKER_CONFIG_BACKUP}
 [[ -z "$(find "${backup}" ! -uid 0 -o ! -gid 0)" ]] || fail 'backup retained runtime file owners'
+[[ ! -e "${backup}/data/net" ]] || fail 'configuration backup copied runtime Fail2ban databases'
 dockerValidateConfigurationBackup "${backup}" || fail 'root-owned runtime backup did not validate'
+printf 'ws-database-after-backup\n' >>"${wsDatabase}"
+printf 'control-database-after-backup\n' >>"${controlDatabase}"
+databaseDigest=$(sha256sum "${wsDatabase}" "${controlDatabase}")
 printf 'changed\n' >"${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
 printf 'changed\n' >"${PADM_DOCKER_INSTALL_DIR}/secrets/tls/example.com.key"
 jq 'del(.host_integrations)' "${backup}/deployment.json" \
@@ -130,6 +141,8 @@ grep -qxF changed "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/example.com.key" ||
 [[ ! -e "${TEST_ROOT}/compose.log" ]] || fail 'refused restore stopped or started services'
 OWNERSHIP_QUERY_FAIL=0
 dockerRestoreConfiguration || fail 'runtime backup restore failed'
+[[ "$(sha256sum "${wsDatabase}" "${controlDatabase}")" == "${databaseDigest}" ]] ||
+    fail 'configuration restore overwrote or crossed Fail2ban database scopes'
 assertMetadata "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" '600 0 0'
 dockerManagedSpecMatchesDeployment "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" \
     "${PADM_DOCKER_INSTALL_DIR}/deployment.json" "${PADM_DOCKER_INSTALL_DIR}/images.env" || fail 'restored spec was inconsistent'

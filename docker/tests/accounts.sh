@@ -16,7 +16,8 @@ mkdir -p "${PADM_DOCKER_SYSTEMD_DIR}"
 source "${PROJECT_ROOT}/install-docker.sh"
 
 docker() {
-    [[ "$*" != "ps -aq --filter label=com.docker.compose.project=${PADM_DOCKER_PROJECT} --filter label=com.docker.compose.service=net-fail2ban --filter label=com.docker.compose.oneoff=False" ]] || return 0
+    [[ "$*" != "ps -aq --filter label=com.docker.compose.project=${PADM_DOCKER_PROJECT} --filter label=com.docker.compose.service=net-fail2ban --filter label=com.docker.compose.oneoff=False" &&
+        "$*" != "ps -aq --filter label=com.docker.compose.project=${PADM_DOCKER_PROJECT} --filter label=com.docker.compose.service=net-fail2ban-control --filter label=com.docker.compose.oneoff=False" ]] || return 0
     command docker "$@"
 }
 fail() { printf 'docker-accounts-regression-fail: %s\n' "$*" >&2; exit 1; }

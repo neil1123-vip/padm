@@ -156,12 +156,14 @@ require_wireguard_address({"listen": {"interface": "wg-padm", "address": sys.arg
 )
 
 dockerControlRequireMain() {
-    local spec=$1 root=$2
+    local spec=$1 root=$2 recoveryMode=${4:-}
+    [[ -z "${recoveryMode}" || "${recoveryMode}" == current ]] ||
+        return "${PADM_DOCKER_RC_USAGE}"
     jq -e '.control.role == "main" and (has("control_sync") | not)' "${spec}" >/dev/null || {
         dockerError '邀请和撤销仅适用于已初始化的主控角色'
         return "${PADM_DOCKER_RC_CONFLICT}"
     }
-    dockerControlRecoveryCheck &&
+    dockerControlRecoveryCheck "${recoveryMode}" &&
         dockerControlStateCheck "${root}" "${3:-}" &&
         dockerManagedSpecMatchesDeployment "${spec}" "${root}/deployment.json" "${root}/images.env" ||
         return "${PADM_DOCKER_RC_STATE}"
@@ -421,10 +423,16 @@ ip -4 route get "$1" from "$2" | awk -v source="$2" '"'"'
 }
 
 dockerControlSourceSnapshot() (
-    local root spec service ids inspected image snapshots='[]' file hashes digest
+    local root spec service ids inspected image snapshots='[]' file hashes digest recoveryMode=
     root=$(dockerInstallRoot) || return 1
     spec="${root}/config/spec.json"
-    dockerControlRequireMain "${spec}" "${root}" &&
+    if [[ "${completion:-}" == dockerFail2banStartManagedCommit &&
+        "${mf_phase:-}" == witnessed && -n "${witnessOwner:-}" &&
+        "${witnessOwner}" == "${mf_lockOwner:-}" &&
+        "$(cat "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid" 2>/dev/null || true)" == "${witnessOwner}" ]]; then
+        recoveryMode=current
+    fi
+    dockerControlRequireMain "${spec}" "${root}" '' "${recoveryMode}" &&
         dockerControlInviteRuntimeCheck "${spec}" &&
         cmp -s -- "${root}/compose.json" <(dockerGenerateCompose "${spec}" /dev/stdout "${root}") ||
         return 1
@@ -520,11 +528,16 @@ dockerControlSourceReceipt() (
         '
 )
 
-dockerControlSourceCheck() (
+dockerControlSourceWitnessLocked() {
+    local witnessOwner=${BASHPID:-$$}
+    (
     local root spec challenge receipt temporary= registration= snapshot current nonce image expires cursor result started
-    local registrationHash= since until directory mode
-    [[ "$#" == 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
-    dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+    local registrationHash= since until directory mode completion=${1:-}
+    [[ "$#" -le 1 ]] && { [[ -z "${completion}" ]] || declare -F "${completion}" >/dev/null; } ||
+        return "${PADM_DOCKER_RC_USAGE}"
+    [[ -n "${DOCKER_DEPLOYMENT_LOCK_DIR:-}" &&
+        "$(cat "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid" 2>/dev/null || true)" == "${witnessOwner}" ]] ||
+        return "${PADM_DOCKER_RC_LOCK}"
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     spec="${root}/config/spec.json"
     challenge="${root}/data/control-source/challenge.json"
@@ -552,7 +565,6 @@ dockerControlSourceCheck() (
         directory=${directory%/*}
         [[ -n "${directory}" ]] || directory=/
     done
-    dockerLockInstalledDeployment || return "${PADM_DOCKER_RC_LOCK}"
     trap 'status=$?; if [[ -n "${registration}" ]]; then
         if [[ ! -e "${challenge}" && ! -L "${challenge}" ]]; then :
         elif [[ -f "${challenge}" && ! -L "${challenge}" &&
@@ -562,7 +574,7 @@ dockerControlSourceCheck() (
         else dockerError "来源挑战登记已变化，保留文件"; status=15; fi
       fi
       [[ -z "${temporary}" ]] || dockerRemoveManagedTree "${root}" "${temporary}" || status=15
-      dockerReleaseDeploymentLock || status=12; exit "${status}"' EXIT
+      exit "${status}"' EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM
     snapshot=$(dockerControlSourceSnapshot) || return "${PADM_DOCKER_RC_STATE}"
@@ -617,13 +629,41 @@ dockerControlSourceCheck() (
                       "$(jq -r .control.peer.address "${spec}")" "$(jq -r .control.listen.address "${spec}")" \
                       "$(jq -r .control.listen.port "${spec}")" "${since}" "${until}")" == verified ]] ||
                 return "${PADM_DOCKER_RC_STATE}"
-            printf 'source-verified=%s\n' "$(jq -c '{source:.expected_source,target,port}' "${challenge}")"
-            return $?
+            printf 'source-verified=%s\n' "$(jq -c '{source:.expected_source,target,port}' "${challenge}")" ||
+                return 1
+            [[ -z "${completion}" ]] || "${completion}" || return "${PADM_DOCKER_RC_STATE}"
+            return 0
         fi
         sleep 1
     done
     dockerError '30 秒内未收到当前随机挑战的可信回执'
     return "${PADM_DOCKER_RC_HOST}"
+    )
+}
+
+dockerControlSourceWitnessRecheck() {
+    # 仅供同锁挑战完成回调使用；登记与快照不能跨事务缓存。
+    [[ -n "${registration:-}" && -n "${snapshot:-}" && -n "${nonce:-}" &&
+        "${completion:-}" == dockerFail2banStartManagedCommit ]] &&
+        [[ "$(cat "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid" 2>/dev/null || true)" == "${witnessOwner}" &&
+            "$(date +%s)" -lt "${expires}" ]] &&
+        ((SECONDS - started < 30)) &&
+        [[ "$(stat -c '%d:%i:%a:%u:%g:%h' "${challenge}")" == "${registration}" &&
+            "$(sha256sum "${challenge}")" == "${registrationHash}" ]] &&
+        current=$(dockerControlSourceSnapshot) && [[ "${current}" == "${snapshot}" ]] &&
+        [[ "$(dockerControlSourceReceipt "${receipt}" "${cursor}" "${nonce}" \
+          "$(jq -r .control.peer.address "${spec}")" "$(jq -r .control.listen.address "${spec}")" \
+          "$(jq -r .control.listen.port "${spec}")" "${since}" "${until}")" == verified &&
+            "$(date +%s)" -lt "${expires}" ]] && ((SECONDS - started < 30))
+}
+
+dockerControlSourceCheck() (
+    local status
+    [[ "$#" == 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
+    dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+    dockerLockInstalledDeployment || return "${PADM_DOCKER_RC_LOCK}"
+    trap 'status=$?; dockerReleaseDeploymentLock || status=12; exit "${status}"' EXIT
+    dockerControlSourceWitnessLocked
 )
 
 dockerControlSourceProbe() (

@@ -117,6 +117,11 @@ dockerUsage() {
   padm-docker fail2ban settings <WS 端口,端口> <失败阈值> <检测秒数> <封禁秒数> [--preview | --confirm PADM-DOCKER-EDIT]
   padm-docker fail2ban disable [--preview | --confirm PADM-DOCKER-EDIT]
   padm-docker fail2ban verify-source <WS 入口 ID> <外部客户端 IPv4/IPv6>
+  padm-docker fail2ban control status
+  padm-docker fail2ban control unban <单个 IPv4>
+  padm-docker fail2ban control enable <失败阈值> <检测秒数> <封禁秒数> [--preview | --confirm PADM-DOCKER-EDIT]
+  padm-docker fail2ban control settings <失败阈值> <检测秒数> <封禁秒数> [--preview | --confirm PADM-DOCKER-EDIT]
+  padm-docker fail2ban control disable [--preview | --confirm PADM-DOCKER-EDIT]
   padm-docker up
   padm-docker down
   padm-docker restart
@@ -527,7 +532,7 @@ dockerIPv6NetworkManage() {
 }
 
 dockerComposeRun() {
-    local root composeFile enabled specEnabled deployedEnabled argument noDeps=0 recreate='' skipTimeout=0
+    local root composeFile enabled controlEnabled specEnabled deployedEnabled argument noDeps=0 recreate='' skipTimeout=0
     local -a services=()
     case "${1:-}" in up|restart|down|exec) ;; *) dockerComposeExecute "$@"; return $? ;; esac
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
@@ -541,6 +546,8 @@ dockerComposeRun() {
     jq -e 'type == "object" and (.services | type == "object")' \
         "${composeFile}" >/dev/null || return "${PADM_DOCKER_RC_STATE}"
     enabled=$(jq -r '.services | has("net-fail2ban")' "${composeFile}") || return "${PADM_DOCKER_RC_STATE}"
+    controlEnabled=$(jq -r '.services | has("net-fail2ban-control")' "${composeFile}") ||
+        return "${PADM_DOCKER_RC_STATE}"
     if [[ -f "${root}/config/spec.json" ]]; then
         specEnabled=$(jq -r 'any(.host_integrations[]; .type == "fail2ban")' "${root}/config/spec.json") &&
             deployedEnabled=$(jq -r 'any(.host_integrations[]; .type == "fail2ban")' "${root}/deployment.json") &&
@@ -548,11 +555,17 @@ dockerComposeRun() {
             dockerError 'Fail2ban 规格、部署与编排不一致，拒绝服务变更'
             return "${PADM_DOCKER_RC_STATE}"
         }
-    elif [[ "${enabled}" == true ]]; then
+        specEnabled=$(jq -r 'any(.host_integrations[]; .type == "fail2ban-control")' "${root}/config/spec.json") &&
+            deployedEnabled=$(jq -r 'any(.host_integrations[]; .type == "fail2ban-control")' "${root}/deployment.json") &&
+            [[ "${controlEnabled}" == "${specEnabled}" && "${controlEnabled}" == "${deployedEnabled}" ]] || {
+            dockerError '控制 Fail2ban 规格、部署与编排不一致，拒绝服务变更'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+    elif [[ "${enabled}" == true || "${controlEnabled}" == true ]]; then
         dockerError 'Fail2ban 缺少受管规格，拒绝服务变更'
         return "${PADM_DOCKER_RC_STATE}"
     fi
-    if [[ "${enabled}" == true ]]; then
+    if [[ "${enabled}" == true || "${controlEnabled}" == true ]]; then
         case "${1:-}" in
         up|restart)
             for argument in "${@:2}"; do
@@ -576,38 +589,135 @@ dockerComposeRun() {
             [[ "${skipTimeout}" == 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
             [[ "$1" != restart ]] || recreate=restart
             if [[ "${noDeps}" == 1 && "${#services[@]}" -gt 0 &&
-                " ${services[*]} " != *' net-fail2ban '* && " ${services[*]} " != *' nginx '* ]]; then
+                " ${services[*]} " != *' net-fail2ban '* && " ${services[*]} " != *' net-fail2ban-control '* &&
+                " ${services[*]} " != *' nginx '* && " ${services[*]} " != *' control '* &&
+                " ${services[*]} " != *' net-wireguard '* ]]; then
                 dockerComposeExecute "$@"
                 return $?
             fi
-            dockerFail2banConfigurationCheck || {
+            { [[ "${enabled}" != true ]] || dockerFail2banConfigurationCheck; } &&
+                { [[ "${controlEnabled}" != true ]] || dockerControlFail2banConfigurationCheck; } || {
                 dockerError '当前 Fail2ban 编排不是受管新策略，请先通过 update 规范化后再启动'
                 return "${PADM_DOCKER_RC_STATE}"
             }
             dockerFail2banSourceInputsCheck "${root}/config/spec.json" &&
                 dockerFail2banDisablePrepare "${root}/config/spec.json" &&
-                dockerFail2banStartVerified "${recreate}" || return "${PADM_DOCKER_RC_STATE}"
+                dockerControlFail2banDisablePrepare "${root}/config/spec.json" &&
+                dockerFail2banStartManagedVerified "${recreate}" || return "${PADM_DOCKER_RC_STATE}"
             return 0
             ;;
         down)
-            dockerFail2banDisablePrepare "${root}/config/spec.json" || return "${PADM_DOCKER_RC_STATE}"
+            dockerFail2banDisablePrepare "${root}/config/spec.json" &&
+                dockerControlFail2banDisablePrepare "${root}/config/spec.json" ||
+                return "${PADM_DOCKER_RC_STATE}"
             ;;
         exec)
-            if [[ " $* " == *' nginx '* && " $* " == *' reload '* ]]; then
+            if [[ "${enabled}" == true && " $* " == *' nginx '* && " $* " == *' reload '* ]]; then
                 dockerFail2banConfigurationCheck &&
                     dockerFail2banSourceInputsCheck "${root}/config/spec.json" &&
                     dockerFail2banDisablePrepare "${root}/config/spec.json" || return "${PADM_DOCKER_RC_STATE}"
             fi
             ;;
         esac
-    elif [[ "$1" == up || "$1" == down ]]; then
+    elif [[ "$1" == up || "$1" == restart || "$1" == down ]]; then
         if [[ -f "${root}/config/spec.json" ]]; then
-            dockerFail2banDisablePrepare "${root}/config/spec.json" || return "${PADM_DOCKER_RC_STATE}"
+            dockerFail2banDisablePrepare "${root}/config/spec.json" &&
+                dockerControlFail2banDisablePrepare "${root}/config/spec.json" ||
+                return "${PADM_DOCKER_RC_STATE}"
         else
-            dockerFail2banDisablePrepare "${root}/deployment.json" || return "${PADM_DOCKER_RC_STATE}"
+            dockerFail2banDisablePrepare "${root}/deployment.json" &&
+                dockerControlFail2banDisablePrepare "${root}/deployment.json" ||
+                return "${PADM_DOCKER_RC_STATE}"
         fi
     fi
     dockerComposeExecute "$@"
+}
+
+dockerFail2banStartManagedVerified() {
+    local mf_root mf_spec mf_hash mf_plan mf_tuple mf_listener mf_family mf_source mf_services mf_index
+    local mf_ws mf_control mf_current mf_phase=prepare mf_lockOwner=${BASHPID:-$$}
+    local -a mf_starts=() mf_tuples=() mf_snapshots=() mf_recreate=() mf_jails=()
+    case "${1:-}" in ''|restart) ;; recreate) mf_recreate=(--force-recreate) ;; *) return 1 ;; esac
+    [[ -n "${DOCKER_DEPLOYMENT_LOCK_DIR:-}" &&
+        "$(cat "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid" 2>/dev/null || true)" == "${mf_lockOwner}" ]] || return 1
+    mf_root=$(dockerInstallRoot) || return 1
+    mf_spec="${mf_root}/config/spec.json"
+    mf_ws=$(jq -r '.services | has("net-fail2ban")' "${mf_root}/compose.json") &&
+        mf_control=$(jq -r '.services | has("net-fail2ban-control")' "${mf_root}/compose.json") &&
+        mf_hash=$(sha256sum -- "${mf_spec}") || return 1
+    [[ "${mf_ws}" == true || "${mf_control}" == true ]] || return 1
+    if [[ "${mf_ws}" == true ]]; then
+        dockerFail2banSourceInputsCheck "${mf_spec}" &&
+            mf_plan=$(dockerFail2banSourcePlan "${mf_spec}") &&
+            [[ "$(jq 'length' <<<"${mf_plan}")" -gt 0 ]] &&
+            dockerFail2banConfigurationCheck && dockerFail2banCleanCheck || return 1
+        mapfile -t mf_tuples < <(jq -c '.[]' <<<"${mf_plan}")
+        mf_jails+=(net-fail2ban)
+    fi
+    if [[ "${mf_control}" == true ]]; then
+        dockerControlFail2banConfigurationCheck || return 1
+        mf_jails+=(net-fail2ban-control)
+    fi
+    mf_services=$(jq -er --argjson ws "${mf_ws}" --argjson control "${mf_control}" \
+        --slurpfile deployment "${mf_root}/deployment.json" '
+      [.services | to_entries[] |
+        select(.key != "net-fail2ban" and .key != "net-fail2ban-control") |
+        select((.value.profiles // [] | index("net-check")) == null) |
+        select((.value.profiles // [] | length) == 0 or
+          any(.value.profiles[]; . as $p | $deployment[0].compose.profiles | index($p))) |
+        select((.value.depends_on // {} | has("net-fail2ban") or has("net-fail2ban-control")) | not) |
+        .key] |
+      if length > 0 and (if $ws then index("nginx") != null else true end) and
+        (if $control then index("control") != null and index("net-wireguard") != null else true end)
+      then .[] else error("missing protection source services") end
+    ' "${mf_root}/compose.json") || return 1
+    mapfile -t mf_starts <<<"${mf_services}"
+    # 两个 jail 均不进入普通启动列表；所有来源服务先就绪，再分别取得现场证明。
+    if [[ "${1:-}" == restart ]]; then
+        dockerComposeExecute restart --no-deps "${mf_starts[@]}" >/dev/null || return 1
+    fi
+    dockerComposeExecute up -d "${mf_recreate[@]}" --wait \
+        --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" "${mf_starts[@]}" >/dev/null || return 1
+    for mf_tuple in "${mf_tuples[@]}"; do
+        mf_listener=$(jq -er '.listener_id' <<<"${mf_tuple}") &&
+            mf_family=$(jq -er '.family' <<<"${mf_tuple}") &&
+            mf_current=$(dockerFail2banSourceContainer "${mf_listener}" "${mf_family}") || return 1
+        mf_snapshots+=("${mf_current}")
+    done
+    for mf_tuple in "${mf_tuples[@]}"; do
+        mf_listener=$(jq -er '.listener_id' <<<"${mf_tuple}") &&
+            mf_family=$(jq -er '.family' <<<"${mf_tuple}") || return 1
+        mf_source="DOCKER_FAIL2BAN_SOURCE_${mf_family^^}"
+        dockerFail2banSourceWitness "${mf_listener}" "${!mf_source}" >&2 || return 1
+    done
+    mf_phase=witnessed
+    if [[ "${mf_control}" == true ]]; then
+        dockerControlFail2banCleanCheck || return 1
+        # 控制 nonce 最后取得；完成回调保留本次登记，启 jail 前再次核对全部来源。
+        dockerControlSourceWitnessLocked dockerFail2banStartManagedCommit >&2
+    else
+        dockerFail2banStartManagedCommit
+    fi
+}
+
+dockerFail2banStartManagedCommit() {
+    [[ "${mf_phase:-}" == witnessed && -n "${mf_hash:-}" &&
+        "$(cat "${DOCKER_DEPLOYMENT_LOCK_DIR}/pid" 2>/dev/null || true)" == "${mf_lockOwner}" ]] || return 1
+    { [[ "${mf_ws}" != true ]] || { dockerFail2banConfigurationCheck && dockerFail2banCleanCheck; }; } &&
+        { [[ "${mf_control}" != true ]] ||
+            { dockerControlFail2banConfigurationCheck && dockerControlFail2banCleanCheck; }; } || return 1
+    for ((mf_index = 0; mf_index < ${#mf_tuples[@]}; mf_index++)); do
+        mf_listener=$(jq -er '.listener_id' <<<"${mf_tuples[mf_index]}") &&
+            mf_family=$(jq -er '.family' <<<"${mf_tuples[mf_index]}") &&
+            mf_current=$(dockerFail2banSourceContainer "${mf_listener}" "${mf_family}") &&
+            [[ "${mf_current}" == "${mf_snapshots[mf_index]}" ]] || return 1
+    done
+    [[ "$(sha256sum -- "${mf_spec}")" == "${mf_hash}" ]] &&
+        { [[ "${mf_control}" != true ]] || dockerControlSourceWitnessRecheck; } || return 1
+    dockerComposeExecute up -d --no-deps --wait \
+        --wait-timeout "${PADM_DOCKER_HEALTH_TIMEOUT:-60}" "${mf_jails[@]}" >/dev/null &&
+        { [[ "${mf_ws}" != true ]] || dockerFail2banContainer >/dev/null; } &&
+        { [[ "${mf_control}" != true ]] || dockerControlFail2banContainer >/dev/null; }
 }
 
 dockerComposeExecute() {
