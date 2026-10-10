@@ -4754,6 +4754,79 @@ EOF
 
 )
 
+runInstallSyncSignalRollbackRegression() (
+    local base="${TMP_DIR}/install-sync-signal" root sourceDir targetDir signal phase hadTarget status
+    for hadTarget in true false; do
+        for phase in backup commit; do
+            [[ "${hadTarget}" == true || "${phase}" != backup ]] || continue
+            for signal in INT TERM; do
+                root="${base}/directory-${hadTarget}-${phase}-${signal}"
+                sourceDir="${root}/source" targetDir="${root}/target"
+                mkdir -p "${sourceDir}"
+                printf 'new\n' >"${sourceDir}/marker"
+                if [[ "${hadTarget}" == true ]]; then
+                    mkdir -p "${targetDir}"
+                    printf 'old\n' >"${targetDir}/marker"
+                fi
+                status=0
+                (
+                    mv() {
+                        command mv "$@" || return
+                        if [[ "${phase}" == backup && "$1" == "${targetDir}" ]] ||
+                            [[ "${phase}" == commit && "$2" == "${targetDir}" ]]; then
+                            kill -"${signal}" "${BASHPID}"
+                        fi
+                    }
+                    syncInstallDirectoryTree "${sourceDir}" "${targetDir}"
+                ) >"${root}/run.log" 2>&1 || status=$?
+                [[ "${status}" == "$([[ "${signal}" == TERM ]] && printf 143 || printf 130)" ]] || return 1
+                if [[ "${hadTarget}" == true ]]; then
+                    [[ -f "${targetDir}/marker" && "$(<"${targetDir}/marker")" == old ]] ||
+                        { printf '目录同步中断未恢复旧目录：%s\n' "${root}" >&2; return 1; }
+                else
+                    [[ ! -e "${targetDir}" ]] || return 1
+                fi
+                [[ -z "$(find "${root}" -maxdepth 1 -name '.target.padm-*' -print)" ]] || return 1
+            done
+        done
+    done
+    for phase in sync-return backup commit; do
+      for signal in INT TERM; do
+        root="${base}/alias-${phase}-${signal}"
+        sourceDir="${root}/source" targetDir="${root}/install"
+        mkdir -p "${sourceDir}/shell" "${targetDir}/shell"
+        printf '#!/usr/bin/env bash\nensureScriptModules() { :; }\n' >"${sourceDir}/install.sh"
+        printf 'new-shell\n' >"${sourceDir}/shell/marker"
+        printf 'old-shell\n' >"${targetDir}/shell/marker"
+        printf 'old-entry\n' >"${targetDir}/install.sh"
+        chmod 700 "${targetDir}/install.sh"
+        status=0
+        (
+            local SCRIPT_DIR="${sourceDir}" PADM_INSTALL_DIR="${targetDir}" PADM_DOCKER_INSTALL_DIR="${root}/docker"
+            eval "$(declare -f syncInstallDirectoryTree | sed '1s/^syncInstallDirectoryTree/originalSyncInstallDirectoryTree/')"
+            syncInstallDirectoryTree() {
+                originalSyncInstallDirectoryTree "$@" || return
+                [[ "${phase}" != sync-return || "$2" != "${PADM_INSTALL_DIR}/shell" ]] || kill -"${signal}" "${BASHPID}"
+            }
+            mv() {
+                command mv "$@" || return
+                if [[ "${phase}" == backup && "$1" == "${PADM_INSTALL_DIR}/shell" ]] ||
+                    [[ "${phase}" == commit && "$2" == "${PADM_INSTALL_DIR}/shell" ]]; then
+                    kill -"${signal}" "${BASHPID}"
+                fi
+            }
+            aliasInstall
+        ) >"${root}/run.log" 2>&1 || status=$?
+        [[ "${status}" == "$([[ "${signal}" == TERM ]] && printf 143 || printf 130)" ]] || return 1
+        [[ -f "${targetDir}/shell/marker" && "$(<"${targetDir}/shell/marker")" == old-shell ]] ||
+            { printf '整组脚本安装中断未恢复旧模块：%s\n' "${root}" >&2; return 1; }
+        [[ "$(<"${targetDir}/install.sh")" == old-entry ]]
+        [[ "$(stat -c %a "${targetDir}/install.sh")" == 700 ]]
+        [[ ! -e "${targetDir}/mode" ]]
+      done
+    done
+)
+
 runInstallEntrySymlinkPathRegression() {
     local fixtureDir realDir linkDir
     fixtureDir="${TMP_DIR}/install-entry-real"
@@ -7184,6 +7257,7 @@ runRegressionPlatformRestInstall() {
         deployment-schema-contract runDeploymentSchemaContractRegression \
         install-entry-symlink runInstallEntrySymlinkPathRegression \
         alias-install-metadata runAliasInstallMetadataCopyRegression \
+        install-sync-signal-rollback runInstallSyncSignalRollbackRegression \
         alias-install-mode-rollback runAliasInstallModeMarkerRollbackRegression \
         alias-install-same-target runAliasInstallSameTargetRegression \
         alias-install-rejects-unsafe-target runAliasInstallRejectsUnsafeTargetRegression \

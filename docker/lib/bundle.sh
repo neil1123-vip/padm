@@ -250,6 +250,9 @@ dockerStageBundle() {
     }
     stageDir=$(mktemp -d "${bundlesRoot}/.stage.XXXXXX") || return 1
     candidate="${stageDir}/bundle"
+    # 创建候选目录前登记，复制或校验中断时统一清理本次 stage。
+    DOCKER_STAGED_BUNDLE_DIR=${stageDir}
+    DOCKER_STAGED_BUNDLE_PATH=${candidate}
     mkdir -- "${candidate}" || {
         dockerRemoveManagedTree "${root}" "${stageDir}" || true
         return 1
@@ -279,8 +282,6 @@ dockerStageBundle() {
         dockerRemoveManagedTree "${root}" "${stageDir}" || true
         return 1
     }
-    DOCKER_STAGED_BUNDLE_DIR=${stageDir}
-    DOCKER_STAGED_BUNDLE_PATH=${candidate}
 }
 
 dockerCleanupStagedBundle() {

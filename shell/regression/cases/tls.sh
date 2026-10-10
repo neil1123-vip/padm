@@ -1138,6 +1138,9 @@ runTlsRenewalFailurePropagationRegression() (
     local nginxState xrayState singBoxState
 
     mkdir -p "${tlsDir}" "${homeDir}"
+    openssl req -new -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 \
+        -subj '/CN=renew.example.com' -addext 'subjectAltName=DNS:renew.example.com' \
+        -keyout "${root}/valid.key" -out "${root}/valid.crt" >/dev/null 2>&1
     HOME="${homeDir}"
     PADM_TLS_DIR="${tlsDir}"
     currentHost=renew.example.com
@@ -1215,10 +1218,10 @@ runTlsRenewalFailurePropagationRegression() (
     prepareRenewalFixture() {
         rm -rf "${tlsDir}" "${homeDir}/.acme.sh"
         mkdir -p "${tlsDir}" "${homeDir}/.acme.sh/renew.example.com_ecc"
-        printf 'cert\n' >"${tlsDir}/renew.example.com.crt"
-        printf 'key\n' >"${tlsDir}/renew.example.com.key"
-        printf 'cert\n' >"${homeDir}/.acme.sh/renew.example.com_ecc/renew.example.com.cer"
-        printf 'key\n' >"${homeDir}/.acme.sh/renew.example.com_ecc/renew.example.com.key"
+        cp "${root}/valid.crt" "${tlsDir}/renew.example.com.crt"
+        cp "${root}/valid.key" "${tlsDir}/renew.example.com.key"
+        cp "${root}/valid.crt" "${homeDir}/.acme.sh/renew.example.com_ecc/renew.example.com.cer"
+        cp "${root}/valid.key" "${homeDir}/.acme.sh/renew.example.com_ecc/renew.example.com.key"
         printf '#!/usr/bin/env sh\n' >"${homeDir}/.acme.sh/acme.sh"
         chmod 755 "${homeDir}/.acme.sh/acme.sh"
         : >"${serviceLog}"
@@ -1368,6 +1371,31 @@ runTlsRenewalFailurePropagationRegression() (
     grep -qx 'nginx:start' "${serviceLog}"
     ! grep -qx 'reload' "${serviceLog}"
     [[ "${nginxState}" == "true" && "${xrayState}" == "true" && "${singBoxState}" == "true" ]]
+
+    (
+        local certificateHash keyHash
+        mode=invalid-sync
+        prepareRenewalFixture
+        certificateHash=$(sha256sum "${tlsDir}/renew.example.com.crt")
+        keyHash=$(sha256sum "${tlsDir}/renew.example.com.key")
+        sudo() {
+            printf 'sudo:%s\n' "$*" >>"${commandLog}"
+            if [[ "$*" == *" --installcert "* ]]; then
+                printf 'invalid certificate\n' >"${tlsDir}/renew.example.com.crt"
+            fi
+            return 0
+        }
+        regressionExpectStatus 1 renewalTLS >/dev/null 2>&1 || {
+            printf '旧版 TLS 续签必须拒绝无效同步证书并返回失败\n' >&2
+            return 1
+        }
+        [[ "$(sha256sum "${tlsDir}/renew.example.com.crt")" == "${certificateHash}" ]]
+        [[ "$(sha256sum "${tlsDir}/renew.example.com.key")" == "${keyHash}" ]]
+        tlsCertificatePairUsable "${tlsDir}" renew.example.com
+        [[ "${nginxState}" == true && "${xrayState}" == true && "${singBoxState}" == false ]]
+        grep -qx 'xray:start' "${serviceLog}"
+        grep -qx 'nginx-mode:start restore' "${serviceLog}"
+    )
 
     (
         local phase signal status

@@ -592,7 +592,10 @@ runPackageCommandWithProgress() {
         fi
     done
 
-    [[ ${status} -ne 0 ]] || wait "${commandPid}" || status=$?
+    [[ ${status} -ne 0 ]] || wait "${commandPid}" || {
+        status=$?
+        padmStopCommandGroup "${commandPid}"
+    }
     PADM_PACKAGE_COMMAND_CONTEXT[active]=false
     unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
     cat "${progressFile}" >>"${logFile}"

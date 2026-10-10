@@ -1149,6 +1149,9 @@ renewalTLS() {
             if [[ "${installStatus}" -eq 0 ]]; then
                 chmod 600 -- "${keyFile}" || installStatus=$?
             fi
+            if [[ "${installStatus}" -eq 0 ]] && ! tlsCertificatePairUsable "${tlsDir}" "${domain}"; then
+                installStatus=1
+            fi
             if [[ "${installStatus}" -ne 0 ]]; then
                 errorCard "TLS 证书安装失败，正在尝试恢复服务"
                 restoreManagedFileFromBackup "${backupCrt}" "${crtFile}" 644 || restoreStatus=1

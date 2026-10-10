@@ -430,6 +430,30 @@ runControl 0 repeat-install "${DOCKER_ROOT}" "${NATIVE_ROOT}" "${CLI_DIR}" insta
 [[ "$(readlink "${DOCKER_ROOT}/bundle")" == "${bundleBefore}" ]] || fail 'repeat install changed an identical bundle'
 [[ "$(<"${DOCKER_ROOT}/data/sentinel")" == "keep" ]] || fail 'repeat install changed persistent data'
 
+# stage 复制中断不能遗留半份 bundle，也不能影响旧指针和持久数据。
+for signal in INT TERM; do
+    signalStatus=130
+    [[ "${signal}" != TERM ]] || signalStatus=143
+    (
+        cp() {
+            command cp "$@" || return $?
+            if [[ "${*: -1}" == "${PADM_DOCKER_INSTALL_DIR}/.bundles/.stage."*/bundle/install-docker.sh ]]; then
+                kill -"${PHASE1_STAGE_SIGNAL}" "${BASHPID:-$$}"
+            fi
+        }
+        export -f cp
+        export PHASE1_STAGE_SIGNAL=${signal}
+        runControl "${signalStatus}" "stage-copy-${signal}" "${DOCKER_ROOT}" \
+            "${NATIVE_ROOT}" "${CLI_DIR}" install --source "${NO_COMPOSE_SOURCE}" \
+            --ref aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    )
+    [[ -z "$(find "${DOCKER_ROOT}/.bundles" -maxdepth 1 -name '.stage.*' -print)" &&
+        "$(readlink "${DOCKER_ROOT}/bundle")" == "${bundleBefore}" &&
+        "$(<"${DOCKER_ROOT}/data/sentinel")" == keep &&
+        ! -e "${DOCKER_ROOT}/locks/deployment.lock" ]] ||
+        fail "stage-copy-${signal}: interrupted staging left temporary bundle or changed state"
+done
+
 # CLI 完成前收到信号，首装撤销本次指针，重装恢复旧控制版本。
 for signal in INT TERM; do
     signalStatus=130
