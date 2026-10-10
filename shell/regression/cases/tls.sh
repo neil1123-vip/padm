@@ -1434,6 +1434,70 @@ runTlsRenewalFailurePropagationRegression() (
     )
 
     (
+        # 枚举中途失败不能把部分受管证书当作完整续签清单。
+        local enumerationRoot="${root}/enumeration"
+        local homeDir="${enumerationRoot}/home" tlsDir="${enumerationRoot}/tls"
+        local firstDomain=first.example.com secondDomain=second.example.com
+        local enumerationBackend records recordsStatus beforeHash afterHash certDomain
+        local HOME="${homeDir}" PADM_TLS_DIR="${tlsDir}"
+        mkdir -p "${tlsDir}" "${homeDir}/.acme.sh/${firstDomain}_ecc" \
+            "${homeDir}/.acme.sh/${secondDomain}_ecc" || return 1
+        chmod 700 "${homeDir}/.acme.sh"
+        printf '#!/usr/bin/env sh\n' >"${homeDir}/.acme.sh/acme.sh"
+        chmod 755 "${homeDir}/.acme.sh/acme.sh"
+        for certDomain in "${firstDomain}" "${secondDomain}"; do
+            cp "${root}/valid.crt" "${tlsDir}/${certDomain}.crt" || return 1
+            cp "${root}/valid.key" "${tlsDir}/${certDomain}.key" || return 1
+            cat >"${homeDir}/.acme.sh/${certDomain}_ecc/${certDomain}.conf" <<EOF
+Le_Domain='${certDomain}'
+Le_Webroot='dns_cf'
+Le_RealFullChainPath='${tlsDir}/${certDomain}.crt'
+Le_RealKeyPath='${tlsDir}/${certDomain}.key'
+EOF
+        done
+        find() {
+            if [[ "${enumerationBackend}" == find && "${1:-}" == "${homeDir}/.acme.sh" ]]; then
+                printf '%s\n' "${homeDir}/.acme.sh/${firstDomain}_ecc/${firstDomain}.conf"
+                return 23
+            fi
+            command find "$@"
+        }
+        sort() {
+            command sort "$@" || return 1
+            [[ "${enumerationBackend}" != sort ]] || return 24
+        }
+        tlsCertificatePairUsable() { return 0; }
+        installCronTLS() { printf 'cron\n' >>"${commandLog}"; }
+        beforeHash=$(sha256sum "${tlsDir}"/*.crt "${tlsDir}"/*.key) || return 1
+        for enumerationBackend in find sort; do
+            recordsStatus=0
+            records=$(tlsAcmeManagedCertificateRecords) || recordsStatus=$?
+            [[ "${recordsStatus}" != 0 && -z "${records}" ]] || return 1
+            : >"${commandLog}"
+            : >"${serviceLog}"
+            : >"${statusLog}"
+            regressionExpectStatus 1 renewManagedTLSCertificates || return 1
+            regressionExpectStatus 2 tlsCertificateManagedByAcme "${firstDomain}" || return 1
+            regressionExpectStatus 1 prepareSubscribeTLSCertificate "${firstDomain}" || return 1
+            [[ ! -s "${commandLog}" && ! -s "${serviceLog}" ]] || return 1
+            ! grep -q '已复用' "${statusLog}" || return 1
+            afterHash=$(sha256sum "${tlsDir}"/*.crt "${tlsDir}"/*.key) || return 1
+            [[ "${afterHash}" == "${beforeHash}" ]] || return 1
+        done
+        # 没有 ACME 目录或受管记录仍允许原有自定义证书路径。
+        enumerationBackend=none
+        HOME="${enumerationRoot}/empty-home"
+        mkdir -p "${HOME}" || return 1
+        regressionExpectStatus 2 renewManagedTLSCertificates || return 1
+        mkdir -p "${HOME}/.acme.sh" || return 1
+        regressionExpectStatus 2 renewManagedTLSCertificates || return 1
+        regressionExpectStatus 1 tlsCertificateManagedByAcme "${firstDomain}" || return 1
+        prepareSubscribeTLSCertificate "${firstDomain}" || return 1
+        [[ ! -s "${commandLog}" ]] || return 1
+        grep -q '已复用自定义证书' "${statusLog}" || return 1
+    ) || return 1
+
+    (
         local legacyDomain=legacy.example.com
         local subscribeTlsDomain=subscribe.example.com
         local usableChecks=0

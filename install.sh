@@ -603,10 +603,11 @@ moduleManifestReady() {
             rm -f "${moduleList}"
             return 1
         }
-        actualHash=$(sha256sum "${SCRIPT_DIR}/${requiredPath}" | cut -d ' ' -f 1) || {
+        actualHash=$(sha256sum "${SCRIPT_DIR}/${requiredPath}") || {
             rm -f "${moduleList}"
             return 1
         }
+        actualHash=${actualHash%% *}
         [[ "${actualHash}" == "${expectedHash}" ]] || {
             rm -f "${moduleList}"
             return 1
@@ -617,7 +618,7 @@ moduleManifestReady() {
 
 writeModuleManifest() {
     local manifestPath=$1
-    local requiredPath moduleList
+    local requiredPath moduleList actualHash
     command -v sha256sum >/dev/null 2>&1 || return 1
     moduleList=$(scriptCreateTempPath padm-modules.XXXXXX) || return 1
     if ! modulePaths >"${moduleList}"; then
@@ -627,7 +628,10 @@ writeModuleManifest() {
     : >"${manifestPath}" || { rm -f "${moduleList}"; return 1; }
     while IFS= read -r requiredPath; do
         [[ -f "${SCRIPT_DIR}/${requiredPath}" ]] || { rm -f "${moduleList}"; return 1; }
-        sha256sum "${SCRIPT_DIR}/${requiredPath}" | awk -v path="${requiredPath}" '{ print $1 "  " path }' >>"${manifestPath}" || { rm -f "${moduleList}"; return 1; }
+        actualHash=$(sha256sum "${SCRIPT_DIR}/${requiredPath}") || { rm -f "${moduleList}"; return 1; }
+        actualHash=${actualHash%% *}
+        [[ "${actualHash}" =~ ^[0-9a-f]{64}$ ]] || { rm -f "${moduleList}"; return 1; }
+        printf '%s  %s\n' "${actualHash}" "${requiredPath}" >>"${manifestPath}" || { rm -f "${moduleList}"; return 1; }
     done <"${moduleList}"
     rm -f "${moduleList}"
 }
