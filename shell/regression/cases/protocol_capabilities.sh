@@ -610,15 +610,17 @@ runProtocolEntryConfigUpdateRegression() (
     statusLog="${root}/status.log"
     AUTO_INSTALL=
     (
-        local PADM_XHTTP_CONFIG_FILE= PADM_XRAY_CONF_DIR="${root}/separate/conf/" PADM_XRAY_DIR="${root}/custom"
+        local PADM_XHTTP_CONFIG_FILE= PADM_VLESS_XHTTP_CONFIG_FILE= PADM_XRAY_CONF_DIR="${root}/separate/conf/" PADM_XRAY_DIR="${root}/custom"
         assertEquals "${root}/separate/conf/12_VLESS_XHTTP_inbounds.json" "$(manageXHTTPConfigFile)" xhttp-custom-conf-dir
         PADM_XRAY_CONF_DIR=
         assertEquals "${root}/custom/conf/12_VLESS_XHTTP_inbounds.json" "$(manageXHTTPConfigFile)" xhttp-custom-root
+        PADM_VLESS_XHTTP_CONFIG_FILE="${root}/canonical/xhttp.json"
+        assertEquals "${root}/canonical/xhttp.json" "$(manageXHTTPConfigFile)" xhttp-canonical-override
         PADM_XHTTP_CONFIG_FILE="${fixtureConfig}"
-        assertEquals "${fixtureConfig}" "$(manageXHTTPConfigFile)" xhttp-explicit-config
+        assertEquals "${fixtureConfig}" "$(manageXHTTPConfigFile)" xhttp-legacy-override-priority
         PADM_XHTTP_CONFIG_FILE=relative/xhttp.json
         assertEquals relative/xhttp.json "$(manageXHTTPConfigFile)" xhttp-relative-config
-        PADM_XHTTP_CONFIG_FILE=
+        PADM_XHTTP_CONFIG_FILE= PADM_VLESS_XHTTP_CONFIG_FILE=
         manageXrayConfigDir() { return 1; }
         regressionExpectStatus 1 manageXHTTPConfigFile
     )
