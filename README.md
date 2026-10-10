@@ -690,9 +690,16 @@ python3 -B docker/lib/ssh-source-client.py 198.51.100.10 2222 padm-source-<48位
 宿主在 30 秒内将 cursor 后的可信 journal emitter 与同一 master 的 live socket
 绑定，精确核对来源及临时端口、目标地址及端口、boot、进程代次和 inode/fd，
 成功输出 `source-verified`。只支持唯一宿主 `sshd` listener 与直接子进程 emitter；
-日志文件/tag、旧记录、已断开连接、多 owner 或身份漂移均不能成为证明。
+同一 socket 由 emitter 与 privsep child 共享时，逐一核对专用 `sshd` UID、安全
+可执行文件、直接父子关系、boot/netns、时间、inode/fd 和稳定代次，拒绝其它 owner。
+日志文件/tag、旧记录、已断开连接或身份漂移均不能成为证明。
 `source_verified=true` 只表示本次来源绑定完成，`runtime_configuration_verified`
 和 `jail_ready` 仍为 `false`；本命令不启用 SSH 防护。
+
+内部 unit 来源核验进一步要求 fresh master 等于所选 systemd service 的 MainPID，
+固定当前 invocation/cgroup，并完整核对两族监听。socket activation、wildcard、
+额外 listener/master、不可读 owner 和代次变化均拒绝。它只证明当次仍存活连接，
+不授权历史日志、连续 collector 或 jail；没有新增菜单/CLI 启用入口。
 
 已有 TProxy profile 使用私密 `data/net/transparent/tproxy.state` 记录随机链、
 规则 token、mark、路由表和路由身份。预检只读核对当前归属与候选冲突；
