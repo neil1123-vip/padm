@@ -1054,6 +1054,10 @@ dockerUpdateCommand() {
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_STATE}"
     }
+    dockerControlAccessLogEnsure "${root}" "${candidate}/config/spec.json" || {
+        dockerCleanupConfigurationCandidate || true
+        return "${PADM_DOCKER_RC_STATE}"
+    }
     dockerBackupConfiguration update || {
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_STATE}"

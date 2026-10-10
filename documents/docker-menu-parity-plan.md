@@ -3027,6 +3027,56 @@ SHA256 摘要、共享缓存及用户原有 8 个临时文件；未改其它任�
 可信持久文件、权限/轮转、fresh witness、独立 INPUT jail、事务菜单管理
 以及 SSH/原生宿主验收仍未交付；5C 与总目标继续 active。
 
+#### 5C.7b 控制 API 持久可信日志
+
+新生成的主控编排显式传入 `--access-log /var/log/padm/control/auth.log`，
+挂载受管 `logs/control`。目录固定 root:10001 / 0750，文件固定
+10001:10001 / 0640、普通单链接；API 没有目录写权限，不创建或截断文件。
+每条记录重新核验 root 祖先、安全打开并单次追加，完整写入、`fsync` 与关闭
+完成后才输出 stdout、发送 HTTP 响应。日志或可信 socket 失效时只输出固定
+诊断并退出 78，不交给 socketserver 吞错后继续服务。`--check` 只验证状态和
+参数能力，不以其成功代替真实写入及健康证明。
+
+配置、真实更新及恢复在事务入口准备日志，已有内容不变；日志不进候选、
+配置备份或恢复目标。评估共用的候选创建不得给旧 stdout 部署创建生产日志，
+新增断言同时覆盖生成及参数拒绝后仍无生产写入。
+旧受管恢复精确保留 stdout-only 的命令与挂载，不把不认识新参数的旧 ops
+镜像强行切成新格式；未知或混合编排拒绝。沿用既有编辑合同，仅兼容历史
+`io.padm.release` 元数据滞后，其余字段精确核验；新升级生成当前标签。
+
+2026-10-10 的定向、限定独审、静态检查和集成结果：
+
+| 检查 | 容器 / 入口秒数 | 证据 |
+| --- | --- | --- |
+| `docker-control-api`，Jobs 2 | 1.660 / 2.576 | `.tmp-regression-docker-64ee4433b4ad49f0b86d295087a5fbf1` |
+| `docker-control-two-node-real`，Jobs 2 | 6.703 / 7.609 | `.tmp-regression-docker-76048a2b0fa549e3b93875f36abd7679` |
+| `docker-permissions`，Jobs 2 | 2.081 / 3.179 | `.tmp-regression-docker-5bf7d43d4b5f4e96b0119f575572b392` |
+| 最终 `docker-control-state`，Jobs 2 | 25.599 / 26.586 | `.tmp-regression-docker-276287cca01246e0b94391536a9318ab` |
+| `docker-control-two-deployment-real`，Jobs 2 | 235.006 / 236.773 | `.tmp-regression-docker-ad10805a72b64ee3b6bc3c4c63c64a7e` |
+| `docker-contracts`，Jobs 6，38/38 | 341.384 / 342.365 | `.tmp-regression-docker-cbefdf73fc8a47838c96fad3a408f750` |
+
+首次控制状态检查因 Shell 换行及引号错误失败，修复后通过；
+兼容断言补强后只重跑受影响 selector，再集中一次完整合同。
+全部复用工具镜像，`cache_hit: false`；完整排队 4982 ms，不扩大三槽预算。
+最终状态、真实部署和完整合同源码摘要相同，9 个本阶段文件逐一匹配完整快照。
+真 WG 验证文件与 stdout 逐字相同，运行时改坏权限后无响应、无继续写入、
+API 退出 78；真实 Compose 的两个独立 daemon/netns 使用生产 CLI，健康、
+接入、幂等、真实流量、断网/冲突恢复、信号回滚、凭据轮换及撤销均通过。
+
+本地旧 ops 缺新参数；离线复用依赖层，将当前 6 个生产文件构建进测试镜像，
+逐文件核验一致，不用旧源码冒充当前输入。固定 ops 为
+`sha256:2b53d30542e08f535731f4975f658e2b3789b049db2ab88493920aabd3c2534d`；
+只更新测试代码层，未发布镜像、未重建工具镜像。
+实现 `127b20f2 feat(docker): persist trusted control API access logs` 为本地 G 签名提交。
+清理本轮 16 个归档/清单共 68,399,976 字节及两个构建/核验临时目录；
+保留 result/log、摘要、共享缓存和用户原有 8 个临时文件。
+详细证据 `.tmp-control-persist-stage-evidence.md`。
+
+日志轮转、严格关联随机挑战的 fresh witness、独立 INPUT jail 和事务菜单
+仍未交付；普通新 401 不等于 nonce 证明，不得用历史日志或健康结果代替
+现场来源证明。SSH、原生双架构/宿主 systemd/重启卸载及公网验收继续未决，
+本阶段不宣称控制面防护、5C 或总目标完成。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

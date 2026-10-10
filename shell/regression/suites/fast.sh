@@ -61,8 +61,10 @@ listRegressionDockerContractsChildSelectors() {
     printf '%s\n' \
         docker-reality \
         docker-traditional-tls \
-        docker-routing-core-workflow \
-        docker-routing-domains-workflow \
+        docker-routing-core-contracts \
+        docker-routing-core-lifecycle \
+        docker-routing-dns-hosts-workflow \
+        docker-routing-direct-block-workflow \
         docker-phase3 \
         docker-setup-encrypted \
         docker-setup-transports \
@@ -146,7 +148,11 @@ listRegressionDockerContractsSystemChildSelectors() {
 }
 
 listRegressionDockerContractsRoutingChildSelectors() {
-    printf '%s\n' docker-routing-core-workflow docker-routing-domains-workflow
+    printf '%s\n' \
+        docker-routing-core-contracts \
+        docker-routing-core-lifecycle \
+        docker-routing-dns-hosts-workflow \
+        docker-routing-direct-block-workflow
 }
 
 listRegressionDockerContractsProtocolChildSelectors() {
@@ -207,6 +213,22 @@ runDockerRoutingDomainsWorkflowRegression() {
 
 runDockerRoutingCoreWorkflowRegression() {
     PADM_DOCKER_ROUTING_SCOPE=core-workflow bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
+}
+
+runDockerRoutingCoreContractsRegression() {
+    PADM_DOCKER_ROUTING_SCOPE=core-contracts bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
+}
+
+runDockerRoutingCoreLifecycleRegression() {
+    PADM_DOCKER_ROUTING_SCOPE=core-lifecycle bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
+}
+
+runDockerRoutingDnsHostsWorkflowRegression() {
+    PADM_DOCKER_ROUTING_SCOPE=domains-dns-hosts bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
+}
+
+runDockerRoutingDirectBlockWorkflowRegression() {
+    PADM_DOCKER_ROUTING_SCOPE=domains-direct-block bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
 }
 
 runDockerRoutingIPv6Regression() {
@@ -391,6 +413,10 @@ registerRegressionFunctionLeaf docker-routing-region runDockerRoutingRegionRegre
 registerRegressionFunctionLeaf docker-routing-region-real runDockerRoutingRegionRealRegression
 registerRegressionFunctionLeaf docker-routing-domains-workflow runDockerRoutingDomainsWorkflowRegression
 registerRegressionFunctionLeaf docker-routing-core-workflow runDockerRoutingCoreWorkflowRegression
+registerRegressionFunctionLeaf docker-routing-core-contracts runDockerRoutingCoreContractsRegression
+registerRegressionFunctionLeaf docker-routing-core-lifecycle runDockerRoutingCoreLifecycleRegression
+registerRegressionFunctionLeaf docker-routing-dns-hosts-workflow runDockerRoutingDnsHostsWorkflowRegression
+registerRegressionFunctionLeaf docker-routing-direct-block-workflow runDockerRoutingDirectBlockWorkflowRegression
 registerRegressionFunctionLeaf docker-routing-ipv6 runDockerRoutingIPv6Regression
 registerRegressionFunctionLeaf docker-routing-ipv6-real runDockerRoutingIPv6RealRegression
 registerRegressionFunctionLeaf docker-routing-warp runDockerRoutingWarpRegression

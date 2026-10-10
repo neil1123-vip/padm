@@ -198,7 +198,10 @@ jq --slurpfile warp "${WARP_INPUT}" '.routing.warp = ($warp[0] | .mode="global" 
     "${TEST_ROOT}/domains.json" >"${TEST_ROOT}/warp-global-owner.json"
 
 # 域名工作流定向复用夹具，完整入口仍执行全部独立矩阵。
-if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-workflow ]]; then
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-workflow &&
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-dns-hosts &&
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block &&
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-lifecycle ]]; then
 # 同批正反输入由两份校验合同独立判断，避免 Schema 与生产校验分歧。
 python3 - "${PROJECT_ROOT}" "${TEST_ROOT}" <<'PY'
 import copy
@@ -1202,6 +1205,31 @@ done
 )
 fi
 
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-lifecycle ]]; then
+    # 生命周期只复用关闭后的预期模板，全部独立生成合同由 core-contracts 覆盖。
+    dockerGenerateXrayConfig "${TEST_ROOT}/base.json" "${TEST_ROOT}/legacy-v3-xray.json"
+    dockerGenerateSingBoxConfig "${TEST_ROOT}/base.json" "${TEST_ROOT}/legacy-sing-box.json"
+    for fixture in ipv6-owner routing-bt-policy; do
+        for core in xray sing-box; do
+            if [[ "${core}" == xray ]]; then
+                dockerGenerateXrayConfig "${TEST_ROOT}/${fixture}.json" \
+                    "${TEST_ROOT}/${fixture}-${core}.json"
+            else
+                dockerGenerateSingBoxConfig "${TEST_ROOT}/${fixture}.json" \
+                    "${TEST_ROOT}/${fixture}-${core}.json"
+            fi
+            dockerTrafficRender "${core}" "${TEST_ROOT}/${fixture}-${core}.json" \
+                '{"schema_version":1,"accounts":{}}' \
+                >"${TEST_ROOT}/runtime-${fixture}-${core}.json"
+        done
+    done
+fi
+
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-contracts ]]; then
+    printf 'docker-routing-core-contracts-regression-ok\n'
+    exit 0
+fi
+
 snapshot() (
     cd "${root}"
     find config data secrets -type f -printf '%p %m %U %G %n\n' | LC_ALL=C sort
@@ -1246,7 +1274,9 @@ assertClean
 jq -cn --arg uuid "${UUID}" '{schema_version:1,accounts:{($uuid):{
   name:"routing",upload:17,download:19,limit_bytes:0,baseline:{}}}}' | dockerTrafficWriteState
 # 域名工作流保留非空流量和原事务断言，只跳过其它能力的生命周期。
-if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-workflow ]]; then
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-workflow &&
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-dns-hosts &&
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block ]]; then
 # 中继交接恢复只 stop 部分服务，没有 Compose down，仍须清理 IPv6→off 的空辅助网络。
 (
     trap 'dockerReleaseDeploymentLock' EXIT
@@ -1282,7 +1312,8 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-workflow ]]; then
 )
 assertClean
 if [[ -z "${PADM_DOCKER_ROUTING_SCOPE:-}" || "${PADM_DOCKER_ROUTING_SCOPE:-}" == warp ||
-    "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-workflow ]]; then
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-workflow ||
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-lifecycle ]]; then
     before=$(snapshot)
     runEdit 0 --warp "${WARP_INPUT}" --preview
     runEdit 0 --warp-off --preview
@@ -1867,13 +1898,15 @@ jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload == 17 and .accounts[$uuid].d
     "${root}/data/traffic/state.json" >/dev/null || fail '路由编辑清空流量累计'
 fi
 
-# CI 分片保留前半全部合同，后半由独立域名事务夹具覆盖。
-if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-workflow ]]; then
-    printf 'docker-routing-core-workflow-regression-ok\n'
+# 核心入口在生命周期结束退出，域名子项由独立事务夹具覆盖。
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-workflow ||
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-lifecycle ]]; then
+    printf 'docker-routing-%s-regression-ok\n' "${PADM_DOCKER_ROUTING_SCOPE}"
     exit 0
 fi
 
 # 路由子项共用私有文件与候选事务，每次编辑只替换自己的字段。
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block ]]; then
 before=$(snapshot)
 for kind in dns hosts direct block block-ips; do
     input="${PRIVATE_ROOT}/${kind}.json"
@@ -2079,7 +2112,9 @@ jq -en --slurpfile old "${TEST_ROOT}/base.json" --slurpfile new "${root}/config/
 jq -e --arg uuid "${UUID}" '.accounts[$uuid].upload == 17 and .accounts[$uuid].download == 19' \
     "${root}/data/traffic/state.json" >/dev/null || fail 'DNS/hosts 事务清空流量'
 
+fi
 # Direct/Block 沿用相同事务，同时验证同域规则允许共存并保留其它路由子项。
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-dns-hosts ]]; then
 runEdit 0 --direct-domains-add "${DOMAINS_CSV}" --confirm PADM-DOCKER-EDIT
 jq -en --slurpfile expected "${TEST_ROOT}/direct-only.json" --slurpfile actual "${root}/config/spec.json" \
     '$actual == $expected' >/dev/null || fail 'Direct CSV 追加缺项未创建规范化规则或改变其它规格'
@@ -2262,7 +2297,9 @@ jq -en --slurpfile old "${TEST_ROOT}/base.json" --slurpfile new "${root}/config/
     '$new == $old' >/dev/null || fail '关闭最后 IP 阻断没有删除空 routing'
 runStatus 0
 jq -e 'has("block_ips") | not' "${LOG}" >/dev/null || fail 'IP 阻断关闭仍显示有效规则'
+fi
 
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block ]]; then
 menuLog="${TEST_ROOT}/routing-menu.log"
 (
     dockerMenuRun() { printf '%s\n' "$*" >>"${menuLog}"; }
@@ -2277,4 +2314,5 @@ printf 'edit --dns-rules 203.0.113.53 53 %s\nedit --dns-off\nedit --hosts %s\ned
     "${DNS_CSV}" "${HOSTS_INPUT}" >"${TEST_ROOT}/routing-menu.expected"
 cmp -s "${menuLog}" "${TEST_ROOT}/routing-menu.expected" ||
     fail 'DNS/hosts 菜单没有映射到 CLI 事务'
+fi
 printf 'docker-routing-socks5-regression-ok\n'
