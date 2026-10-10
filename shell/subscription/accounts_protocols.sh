@@ -147,7 +147,7 @@ showTrojanAccountsFromConfig() (
     set -o pipefail
     local trojanConfigFile=$1 port=$2 protocolHost
     [[ -f "${trojanConfigFile}" ]] || return 0
-    protocolHost=$(jq -r '.inbounds[0].tls.server_name | if . == null then empty elif type == "string" then . else error("invalid server_name") end' "${trojanConfigFile}") || return 1
+    protocolHost=$(jq -r '.inbounds[0].tls.server_name | if . == null then empty elif type == "string" and (any(explode[]; . < 32 or . == 127) | not) then . else error("invalid server_name") end' "${trojanConfigFile}") || return 1
     protocolHost=${protocolHost:-${currentHost:-}}
     jq -c '(.inbounds[0].settings.clients // .inbounds[0].users) | if type == "array" then .[] else error("invalid clients") end' "${trojanConfigFile}" | while read -r user; do
             local email password profile
@@ -191,7 +191,7 @@ showHysteriaAccounts() (
         subscribeSectionTitle "Hysteria2 TLS" "UDP/移动网络可选"
         local configFile currentHost
         configFile=$(protocolConfigFile 3) || return 1
-        if ! currentHost=$(jq -er '.inbounds[0].tls.server_name | select(type == "string" and length > 0)' "${configFile}") ||
+        if ! currentHost=$(jq -er '.inbounds[0].tls.server_name | select(type == "string" and length > 0 and (any(explode[]; . < 32 or . == 127) | not))' "${configFile}") ||
             ! padmIsValidConnectAddress "${currentHost}"; then
             errorCard "Hysteria2 订阅生成失败" "协议配置缺少有效的 TLS 域名"
             return 1
@@ -323,7 +323,7 @@ showTuicAccounts() (
         subscribeSectionTitle "Tuic TLS" "UDP/移动网络可选"
         local configFile currentHost
         configFile=$(protocolConfigFile 31) || return 1
-        if ! currentHost=$(jq -er '.inbounds[0].tls.server_name | select(type == "string" and length > 0)' "${configFile}") ||
+        if ! currentHost=$(jq -er '.inbounds[0].tls.server_name | select(type == "string" and length > 0 and (any(explode[]; . < 32 or . == 127) | not))' "${configFile}") ||
             ! padmIsValidConnectAddress "${currentHost}"; then
             errorCard "TUIC 订阅生成失败" "协议配置缺少有效的 TLS 域名"
             return 1
@@ -353,7 +353,7 @@ showNaiveAccounts() (
         if [[ "${coreInstallType}" == "1" && -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}10_naive_inbounds.json" ]]; then
             path="${singBoxConfigPath}"
         fi
-        protocolHost=$(jq -r '.inbounds[0].tls.server_name | if . == null then empty elif type == "string" then . else error("invalid server_name") end' "${path}10_naive_inbounds.json") || return 1
+        protocolHost=$(jq -r '.inbounds[0].tls.server_name | if . == null then empty elif type == "string" and (any(explode[]; . < 32 or . == 127) | not) then . else error("invalid server_name") end' "${path}10_naive_inbounds.json") || return 1
         protocolHost=${protocolHost:-${currentHost:-}}
         jq -r -c '.inbounds[] | .users | if type == "array" then .[] else error("invalid users") end' "${path}10_naive_inbounds.json" | while read -r user; do
             local username password profile
@@ -488,7 +488,7 @@ showAnyTlsAccounts() (
         if [[ "${coreInstallType}" == "1" && -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}13_anytls_inbounds.json" ]]; then
             path="${singBoxConfigPath}"
         fi
-        protocolHost=$(jq -r '.inbounds[0].tls.server_name | if . == null then empty elif type == "string" then . else error("invalid server_name") end' "${path}13_anytls_inbounds.json") || return 1
+        protocolHost=$(jq -r '.inbounds[0].tls.server_name | if . == null then empty elif type == "string" and (any(explode[]; . < 32 or . == 127) | not) then . else error("invalid server_name") end' "${path}13_anytls_inbounds.json") || return 1
         protocolHost=${protocolHost:-${currentHost:-}}
         jq -r -c '.inbounds[] | .users | if type == "array" then .[] else error("invalid users") end' "${path}13_anytls_inbounds.json" | while read -r user; do
             local name password profile

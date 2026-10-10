@@ -201,7 +201,9 @@ jq --slurpfile warp "${WARP_INPUT}" '.routing.warp = ($warp[0] | .mode="global" 
 if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-workflow &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-dns-hosts &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block &&
-    "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-lifecycle ]]; then
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-lifecycle &&
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-network-lifecycle &&
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-policy-lifecycle ]]; then
 # 同批正反输入由两份校验合同独立判断，避免 Schema 与生产校验分歧。
 python3 - "${PROJECT_ROOT}" "${TEST_ROOT}" <<'PY'
 import copy
@@ -1205,11 +1207,17 @@ done
 )
 fi
 
-if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-lifecycle ]]; then
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-lifecycle ||
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-network-lifecycle ||
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-policy-lifecycle ]]; then
     # 生命周期只复用关闭后的预期模板，全部独立生成合同由 core-contracts 覆盖。
-    dockerGenerateXrayConfig "${TEST_ROOT}/base.json" "${TEST_ROOT}/legacy-v3-xray.json"
-    dockerGenerateSingBoxConfig "${TEST_ROOT}/base.json" "${TEST_ROOT}/legacy-sing-box.json"
+    if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-network-lifecycle ]]; then
+        dockerGenerateXrayConfig "${TEST_ROOT}/base.json" "${TEST_ROOT}/legacy-v3-xray.json"
+        dockerGenerateSingBoxConfig "${TEST_ROOT}/base.json" "${TEST_ROOT}/legacy-sing-box.json"
+    fi
     for fixture in ipv6-owner routing-bt-policy; do
+        [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-policy-lifecycle || "${fixture}" != ipv6-owner ]] ||
+            continue
         for core in xray sing-box; do
             if [[ "${core}" == xray ]]; then
                 dockerGenerateXrayConfig "${TEST_ROOT}/${fixture}.json" \
@@ -1277,6 +1285,7 @@ jq -cn --arg uuid "${UUID}" '{schema_version:1,accounts:{($uuid):{
 if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-workflow &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-dns-hosts &&
     "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-direct-block ]]; then
+if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-policy-lifecycle ]]; then
 # 中继交接恢复只 stop 部分服务，没有 Compose down，仍须清理 IPv6→off 的空辅助网络。
 (
     trap 'dockerReleaseDeploymentLock' EXIT
@@ -1311,9 +1320,11 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != domains-workflow &&
     done
 )
 assertClean
+fi
 if [[ -z "${PADM_DOCKER_ROUTING_SCOPE:-}" || "${PADM_DOCKER_ROUTING_SCOPE:-}" == warp ||
     "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-workflow ||
-    "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-lifecycle ]]; then
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-lifecycle ||
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-network-lifecycle ]]; then
     before=$(snapshot)
     runEdit 0 --warp "${WARP_INPUT}" --preview
     runEdit 0 --warp-off --preview
@@ -1412,7 +1423,8 @@ if [[ -z "${PADM_DOCKER_ROUTING_SCOPE:-}" || "${PADM_DOCKER_ROUTING_SCOPE:-}" ==
     fi
 fi
 if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != bt && "${PADM_DOCKER_ROUTING_SCOPE:-}" != region &&
-    "${PADM_DOCKER_ROUTING_SCOPE:-}" != warp ]]; then
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" != warp &&
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" != core-policy-lifecycle ]]; then
     before=$(snapshot)
     runEdit 0 --ipv6 selective --ipv6-domains 'example.net' --preview
     runEdit 0 --ipv6-domains 'example.net' --ipv6 selective --preview
@@ -1515,8 +1527,9 @@ if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" != bt && "${PADM_DOCKER_ROUTING_SCOPE:-}"
         dockerConfigureApply "${TEST_ROOT}/base.json" '' '' configure
     ) >"${LOG}" 2>&1 || fail '重置 IPv6 夹具失败'
     assertClean
-    if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == ipv6 ]]; then
-        printf 'docker-routing-ipv6-regression-ok\n'
+    if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == ipv6 ||
+        "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-network-lifecycle ]]; then
+        printf 'docker-routing-%s-regression-ok\n' "${PADM_DOCKER_ROUTING_SCOPE}"
         exit 0
     fi
 fi
@@ -1900,7 +1913,8 @@ fi
 
 # 核心入口在生命周期结束退出，域名子项由独立事务夹具覆盖。
 if [[ "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-workflow ||
-    "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-lifecycle ]]; then
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-lifecycle ||
+    "${PADM_DOCKER_ROUTING_SCOPE:-}" == core-policy-lifecycle ]]; then
     printf 'docker-routing-%s-regression-ok\n' "${PADM_DOCKER_ROUTING_SCOPE}"
     exit 0
 fi

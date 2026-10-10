@@ -98,6 +98,13 @@ def main():
         auth_log = auth_directory / "auth.log"
         auth_log.touch(mode=0o640)
         os.chown(auth_log, 10001, 10001)
+        receipt = auth_directory / "source.receipt"
+        receipt.touch(mode=0o640)
+        os.chown(receipt, 10001, 10001)
+        challenge_directory = work / "source-registration"
+        challenge_directory.mkdir(mode=0o750)
+        os.chown(challenge_directory, 0, 10001)
+        challenge_path = challenge_directory / "challenge.json"
         try:
             # 保留进程持有私有网络空间，避免 ip netns 的全局挂载和命名空间目录。
             original_namespace = os.readlink("/proc/self/ns/net")
@@ -188,7 +195,9 @@ def main():
                 server = subprocess.Popen(
                     namespace(controller) + [sys.executable, str(Path(__file__).resolve()),
                                              "--api", "--state", str(state_path),
-                                             "--access-log", str(auth_log)],
+                                             "--access-log", str(auth_log),
+                                             "--source-challenge", str(challenge_path),
+                                             "--source-receipt", str(receipt)],
                     stdout=output, stderr=subprocess.STDOUT,
                 )
             for _ in range(100):
@@ -211,6 +220,38 @@ def main():
                 assert line in status, "实际 API 必须以 10001:10001 且无能力运行"
 
             run([sys.executable, str(Path(__file__).resolve()), "--log-probe"], controlled)
+            nonce = "d" * 64
+            registration = {
+                "schema_version": 1, "nonce": nonce, "expires_at": int(time.time()) + 30,
+                "expected_source": PEER_ADDRESS, "target": ADDRESS, "port": PORT,
+            }
+            save(challenge_path, registration, api=True)
+
+            def probe(pid, source, challenge):
+                run(["setpriv", "--bounding-set=-all", "--inh-caps=-all", "--ambient-caps=-all", "--",
+                     sys.executable, str(Path(__file__).resolve()), "--source-probe",
+                     source, challenge], pid)
+
+            probe(controlled, PEER_ADDRESS, "e" * 64)
+            probe(controller, ADDRESS, nonce)
+            assert receipt.read_bytes() == b"", "旧 nonce 或本机健康地址不得形成挑战回执"
+            probe(controlled, PEER_ADDRESS, nonce)
+            source_record = receipt.read_text(encoding="ascii")
+            assert re.fullmatch(
+                r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z control-source "
+                rf"nonce={nonce} status=401 source={PEER_ADDRESS} target={ADDRESS} port={PORT}\n",
+                source_record), "实际 WireGuard 挑战缺少精确 nonce/socket 回执"
+            save(challenge_path, dict(registration, expires_at=int(time.time()) - 1), api=True)
+            probe(controlled, PEER_ADDRESS, nonce)
+            assert receipt.read_text(encoding="ascii") == source_record, "过期登记不能追加回执"
+            challenge_path.unlink()
+            probe(controlled, PEER_ADDRESS, nonce)
+            assert receipt.read_text(encoding="ascii") == source_record, "移除登记后不能复用历史挑战"
+            assert nonce.encode() not in auth_log.read_bytes(), "nonce 不得进入普通访问日志"
+            evidence["source_challenge"] = {
+                "registered_nonce_only": True, "peer_socket_matched": True,
+                "old_nonce_wrong_source_expired_missing_rejected": True, "auth_log_unchanged_format": True,
+            }
 
             def client(*, join=False, accepted=True):
                 before = spec_path.read_bytes(), invite_path.read_bytes()
@@ -324,7 +365,9 @@ def main():
                 server = subprocess.Popen(
                     namespace(controller) + [sys.executable, str(Path(__file__).resolve()),
                                              "--api", "--state", str(state_path),
-                                             "--access-log", str(auth_log)],
+                                             "--access-log", str(auth_log),
+                                             "--source-challenge", str(challenge_path),
+                                             "--source-receipt", str(receipt)],
                     stdout=output, stderr=subprocess.STDOUT,
                 )
             for _ in range(100):
@@ -418,5 +461,20 @@ if __name__ == "__main__":
                 assert response.read() == b'{"ok":false,"error":"unauthorized"}'
         finally:
             connection.close()
+        sys.exit(0)
+    if sys.argv[1:2] == ["--source-probe"]:
+        sys.path.insert(0, str(OPS))
+        from control_client import source_probe
+        if sys.argv[2] == ADDRESS:
+            connection = http.client.HTTPConnection(ADDRESS, PORT, timeout=4, source_address=(ADDRESS, 0))
+            try:
+                connection.request("GET", "/v1/health", headers={"X-Padm-Source-Challenge": sys.argv[3]})
+                with connection.getresponse() as response:
+                    assert response.status == 401
+                    response.read()
+            finally:
+                connection.close()
+        else:
+            source_probe(ADDRESS, PORT, sys.argv[2], sys.argv[3])
         sys.exit(0)
     main()

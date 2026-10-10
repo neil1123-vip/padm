@@ -220,6 +220,30 @@ try:
         for status in (401, 302, 500):
             publish(status=status)
             rejected(client.fetch_desired, INVITATION)
+        nonce = "b" * 64
+        publish({"ok": False, "error": "unauthorized"}, status=401)
+        client.source_probe("10.77.0.1", 18080, "10.77.0.2", nonce)
+        path, address, probe_headers = server.requests[-1]
+        assert path == "/v1/health" and address == "127.0.0.2"
+        assert probe_headers.get_all("X-Padm-Source-Challenge") == [nonce]
+        assert probe_headers.get_all("Authorization") is None, "来源探测不得携带授权"
+        before = len(connections)
+        for arguments in (("8.8.8.8", 18080, "10.77.0.2", nonce),
+                          ("10.77.0.1", True, "10.77.0.2", nonce),
+                          ("10.77.0.1", 18080, "10.77.0.1", nonce),
+                          ("10.77.0.1", 18080, "10.77.0.2", nonce + "\n")):
+            rejected(client.source_probe, *arguments)
+        assert len(connections) == before
+        for body, status in (({"ok": True}, 401), ({"ok": False, "error": "unauthorized"}, 200),
+                             ({"ok": False, "error": "unauthorized"}, 302)):
+            publish(body, status=status)
+            rejected(client.source_probe, "10.77.0.1", 18080, "10.77.0.2", nonce)
+        publish({"ok": False, "error": "unauthorized"}, status=401, delay=0.025)
+        with patch.object(client, "REQUEST_TIMEOUT", 0.2):
+            started = time.monotonic()
+            rejected(client.source_probe, "10.77.0.1", 18080, "10.77.0.2", nonce)
+            assert time.monotonic() - started < 1, "来源探测必须沿用请求总时限"
+        publish()
         headers = [
             ("Content-Type", "application/json"), ("Cache-Control", "no-store"),
             ("Content-Length", str(len(server.body))),

@@ -62,13 +62,16 @@ listRegressionDockerContractsChildSelectors() {
         docker-reality \
         docker-traditional-tls \
         docker-routing-core-contracts \
-        docker-routing-core-lifecycle \
+        docker-routing-core-network-lifecycle \
+        docker-routing-core-policy-lifecycle \
         docker-routing-dns-hosts-workflow \
         docker-routing-direct-block-workflow \
         docker-phase3 \
-        docker-setup-encrypted \
+        docker-setup-encrypted-udp \
+        docker-setup-encrypted-tcp \
         docker-setup-transports \
-        docker-reality-targets \
+        docker-reality-targets-direct \
+        docker-reality-targets-selection \
         docker-setup-tls \
         docker-reality-parameters \
         docker-setup-core \
@@ -77,7 +80,8 @@ listRegressionDockerContractsChildSelectors() {
         docker-menu \
         docker-reality-target-library \
         docker-control-state \
-        docker-phase4 \
+        docker-phase4-maintenance \
+        docker-phase4-lifecycle \
         docker-control-client \
         docker-phase1 \
         docker-phase5 \
@@ -144,13 +148,14 @@ listRegressionDockerContractsFastRestChildSelectors() {
 }
 
 listRegressionDockerContractsSystemChildSelectors() {
-    printf '%s\n' docker-phase3 docker-phase4 docker-phase6
+    printf '%s\n' docker-phase3 docker-phase4-maintenance docker-phase4-lifecycle docker-phase6
 }
 
 listRegressionDockerContractsRoutingChildSelectors() {
     printf '%s\n' \
         docker-routing-core-contracts \
-        docker-routing-core-lifecycle \
+        docker-routing-core-network-lifecycle \
+        docker-routing-core-policy-lifecycle \
         docker-routing-dns-hosts-workflow \
         docker-routing-direct-block-workflow
 }
@@ -168,7 +173,8 @@ listRegressionDockerGeoChildSelectors() {
 }
 
 listRegressionDockerContractsRealityChildSelectors() {
-    printf '%s\n' docker-reality-parameters docker-reality-targets docker-reality-target-library
+    printf '%s\n' docker-reality-parameters docker-reality-targets-direct \
+        docker-reality-targets-selection docker-reality-target-library
 }
 
 runDockerTrafficRegression() {
@@ -221,6 +227,30 @@ runDockerRoutingCoreContractsRegression() {
 
 runDockerRoutingCoreLifecycleRegression() {
     PADM_DOCKER_ROUTING_SCOPE=core-lifecycle bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
+}
+
+runDockerRoutingCoreNetworkLifecycleRegression() {
+    PADM_DOCKER_ROUTING_SCOPE=core-network-lifecycle bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
+}
+
+runDockerRoutingCorePolicyLifecycleRegression() {
+    PADM_DOCKER_ROUTING_SCOPE=core-policy-lifecycle bash "${PROJECT_ROOT}/docker/tests/routing-socks5.sh"
+}
+
+runDockerPhase4MaintenanceRegression() {
+    PADM_DOCKER_PHASE4_SCOPE=maintenance bash "${PROJECT_ROOT}/docker/tests/phase4.sh"
+}
+
+runDockerPhase4LifecycleRegression() {
+    PADM_DOCKER_PHASE4_SCOPE=lifecycle bash "${PROJECT_ROOT}/docker/tests/phase4.sh"
+}
+
+runDockerRealityTargetsDirectRegression() {
+    PADM_DOCKER_REALITY_TARGETS_SCOPE=direct runDockerRealityTargetsRegression
+}
+
+runDockerRealityTargetsSelectionRegression() {
+    PADM_DOCKER_REALITY_TARGETS_SCOPE=selection runDockerRealityTargetsRegression
 }
 
 runDockerRoutingDnsHostsWorkflowRegression() {
@@ -364,12 +394,16 @@ registerRegressionFunctionLeaf docker-release runDockerReleaseRegression
 registerRegressionFunctionLeaf docker-setup runDockerSetupRegression
 registerRegressionFunctionLeaf docker-setup-core runDockerSetupRegression core
 registerRegressionFunctionLeaf docker-setup-encrypted runDockerSetupRegression encrypted
+registerRegressionFunctionLeaf docker-setup-encrypted-udp runDockerSetupRegression encrypted-udp
+registerRegressionFunctionLeaf docker-setup-encrypted-tcp runDockerSetupRegression encrypted-tcp
 registerRegressionFunctionLeaf docker-setup-transports runDockerSetupRegression transports
 registerRegressionFunctionLeaf docker-setup-tls runDockerSetupRegression tls
 registerRegressionFunctionLeaf docker-protocol runDockerProtocolRegression
 registerRegressionFunctionLeaf docker-reality runDockerRealityRegression
 registerRegressionFunctionLeaf docker-reality-parameters runDockerRealityParametersRegression
 registerRegressionFunctionLeaf docker-reality-targets runDockerRealityTargetsRegression
+registerRegressionFunctionLeaf docker-reality-targets-direct runDockerRealityTargetsDirectRegression
+registerRegressionFunctionLeaf docker-reality-targets-selection runDockerRealityTargetsSelectionRegression
 registerRegressionFunctionLeaf docker-reality-target-library runDockerRealityTargetLibraryRegression
 registerRegressionFunctionLeaf docker-hysteria2 runDockerHysteria2Regression
 registerRegressionFunctionLeaf docker-anytls runDockerAnyTlsRegression
@@ -415,6 +449,10 @@ registerRegressionFunctionLeaf docker-routing-domains-workflow runDockerRoutingD
 registerRegressionFunctionLeaf docker-routing-core-workflow runDockerRoutingCoreWorkflowRegression
 registerRegressionFunctionLeaf docker-routing-core-contracts runDockerRoutingCoreContractsRegression
 registerRegressionFunctionLeaf docker-routing-core-lifecycle runDockerRoutingCoreLifecycleRegression
+registerRegressionFunctionLeaf docker-routing-core-network-lifecycle runDockerRoutingCoreNetworkLifecycleRegression
+registerRegressionFunctionLeaf docker-routing-core-policy-lifecycle runDockerRoutingCorePolicyLifecycleRegression
+registerRegressionFunctionLeaf docker-phase4-maintenance runDockerPhase4MaintenanceRegression
+registerRegressionFunctionLeaf docker-phase4-lifecycle runDockerPhase4LifecycleRegression
 registerRegressionFunctionLeaf docker-routing-dns-hosts-workflow runDockerRoutingDnsHostsWorkflowRegression
 registerRegressionFunctionLeaf docker-routing-direct-block-workflow runDockerRoutingDirectBlockWorkflowRegression
 registerRegressionFunctionLeaf docker-routing-ipv6 runDockerRoutingIPv6Regression

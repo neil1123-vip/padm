@@ -2,9 +2,9 @@
 set -euo pipefail
 
 SECTION=${1-all}
-[[ "$#" -le 1 ]] || { printf 'usage: %s [all|core|encrypted|transports|tls]\n' "${BASH_SOURCE[0]}" >&2; exit 2; }
+[[ "$#" -le 1 ]] || { printf 'usage: %s [all|core|encrypted|encrypted-udp|encrypted-tcp|transports|tls]\n' "${BASH_SOURCE[0]}" >&2; exit 2; }
 case "${SECTION}" in
-all|core|encrypted|transports|tls) ;;
+all|core|encrypted|encrypted-udp|encrypted-tcp|transports|tls) ;;
 *) printf 'unknown setup section: %s\n' "${SECTION}" >&2; exit 2 ;;
 esac
 
@@ -663,10 +663,12 @@ runPty 11 dual-port-conflict "${DUAL_XRAY_INPUT/24445/24443}" setup "${ASSET_ARG
     fail 'dual-core conflicting ports reached confirmation, signature verification or generation'
 fi
 
-if [[ "${SECTION}" == all || "${SECTION}" == encrypted ]]; then
+if [[ "${SECTION}" == all || "${SECTION}" == encrypted ||
+    "${SECTION}" == encrypted-udp || "${SECTION}" == encrypted-tcp ]]; then
 # Shadowsocks 首配不读取 TLS 或订阅参数，仅在确认后生成两份独立密码。
 SS_INPUT=$'2\n9\nproxy.example.com\n3\n24459\ny\n'
 DUAL_SS_INPUT=$'4\n9\nproxy.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\n24459\ny\n'
+if [[ "${SECTION}" != encrypted-tcp ]]; then
 for ssCase in ss-default dual-ss; do
     newState "${ssCase}"
     if [[ "${ssCase}" == ss-default ]]; then input=${SS_INPUT}; single=true; else input=${DUAL_SS_INPUT}; single=false; fi
@@ -793,6 +795,12 @@ jq -e '.tls == null and (.core.protocols | length) == 1 and
 before=$(snapshot)
 runPty 15 ss-delete-last-primary $'10\nentry-shadowsocks\n' edit "${ASSET_ARGS[@]}"
 [[ "$(snapshot)" == "${before}" ]] || fail 'deleting the final primary Shadowsocks entry changed deployment'
+else
+    # NaiveProxy 的新增协议拒绝合同仍使用真实首配生成的 Shadowsocks 夹具。
+    newState ss-fixture
+    runPty 0 ss-fixture "${SS_INPUT}" setup "${ASSET_ARGS[@]}"
+    cp -- "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" "${TEST_ROOT}/ss-original.json"
+fi
 
 printf -v HY2_INPUT '2\n6\nproxy.example.com\n1\nhy2.example.com\n24449\n\n\n\nn\n\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
@@ -806,6 +814,7 @@ printf -v NAIVE_INPUT '2\n8\nnaive.example.com\n3\n\n24455\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
 printf -v DUAL_NAIVE_INPUT '4\n8\nnaive.example.com\n3\n2\ntarget.example.com:443\ntarget.example.com\n24445\nnaive.example.com\n24455\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"
+if [[ "${SECTION}" != encrypted-udp ]]; then
 for tlsProtocolCase in anytls-default dual-anytls naive-default dual-naive; do
     newState "${tlsProtocolCase}"
     case "${tlsProtocolCase}" in
@@ -1003,7 +1012,9 @@ for rejectedEdit in uuid domain core listener new-account new-hy2 new-naive; do
     assertClean
     assertNoSecrets
 done
+fi
 
+if [[ "${SECTION}" != encrypted-tcp ]]; then
 for hy2Case in hy2-default dual-hy2; do
     newState "${hy2Case}"
     if [[ "${hy2Case}" == hy2-default ]]; then input=${HY2_INPUT}; else input=${DUAL_HY2_INPUT}; fi
@@ -1146,6 +1157,7 @@ jq -e '.tls == null and (.subscription.enabled | not) and
   any(.core.protocols[]; .id == 30) and
   all(.core.protocols[]; .id != 3 and .id != 4 and .id != 5 and .id != 21)' "${SPEC}" >/dev/null ||
     fail 'deleting the last TLS protocol removed Shadowsocks or retained its TLS reference'
+fi
 fi
 
 if [[ "${SECTION}" == all || "${SECTION}" == transports ]]; then
@@ -1343,7 +1355,7 @@ for rejectedEdit in existing-id new-credential invalid-transport; do
 done
 fi
 
-if [[ "${SECTION}" == all || "${SECTION}" == encrypted ]]; then
+if [[ "${SECTION}" == all || "${SECTION}" == encrypted || "${SECTION}" == encrypted-udp ]]; then
 # TUIC 复用首配与编辑事务；取消、凭据冻结和 TLS 消费者删除均检查受管状态。
 printf -v TUIC_INPUT '2\n10\nproxy.example.com\n3\ntuic.example.com\n24465\n\n\n\nn\n2\n%s\n%s\ny\n' \
     "${TEST_ROOT}/cert.pem" "${TEST_ROOT}/key.pem"

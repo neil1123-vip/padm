@@ -205,6 +205,160 @@ with tempfile.TemporaryDirectory(prefix=".tmp-control-", dir="/var/lib") as dire
             patch.object(api, "require_wireguard_address", side_effect=AssertionError("日志校验必须早于监听")):
         log_failed(api.main)
 
+    challenge_directory = Path(directory) / "control-source"
+    challenge_directory.mkdir(mode=0o750)
+    os.chown(challenge_directory, 0, 10001)
+    challenge_path = challenge_directory / "challenge.json"
+    receipt_path = log_directory / "source.receipt"
+    receipt_path.write_bytes(b"")
+    os.chown(receipt_path, 10001, 10001)
+    receipt_path.chmod(0o640)
+    nonce = "c" * 64
+    challenge = {
+        "schema_version": 1, "nonce": nonce, "expires_at": int(time.time()) + 20,
+        "expected_source": STATE["peer"]["address"], "target": STATE["listen"]["address"],
+        "port": STATE["listen"]["port"],
+    }
+
+    def register_challenge(value):
+        challenge_path.write_text(json.dumps(value))
+        challenge_path.chmod(0o640)
+        os.chown(challenge_path, 0, 10001)
+
+    assert api.read_source_challenge(challenge_path) is None
+    register_challenge(challenge)
+    assert api.read_source_challenge(challenge_path) == challenge
+    for field, value in (("schema_version", True), ("schema_version", 2), ("nonce", "d" * 63),
+                         ("nonce", "D" * 64), ("expires_at", True), ("expires_at", int(time.time()) + 60),
+                         ("expected_source", STATE["listen"]["address"]), ("expected_source", "127.0.0.1"),
+                         ("target", "10.077.0.1"), ("port", True), ("port", 1023), ("port", 65536)):
+        register_challenge(dict(challenge, **{field: value}))
+        rejected(api.read_source_challenge, challenge_path)
+    register_challenge(dict(challenge, expires_at=int(time.time()) - 1))
+    assert api.read_source_challenge(challenge_path) is None
+    register_challenge(dict(challenge, extra=TOKEN))
+    rejected(api.read_source_challenge, challenge_path)
+    register_challenge(challenge)
+    challenge_path.write_text(json.dumps(challenge)[:-1] + ',"nonce":"' + TOKEN + '"}')
+    rejected(api.read_source_challenge, challenge_path)
+    challenge_path.write_bytes(b"[" * 1100 + b"0" + b"]" * 1100)
+    rejected(api.read_source_challenge, challenge_path)
+    challenge_path.write_bytes(b" " * 4097)
+    rejected(api.read_source_challenge, challenge_path)
+    register_challenge(challenge)
+    for mode in (0o600, 0o644, 0o660):
+        challenge_path.chmod(mode)
+        rejected(api.read_source_challenge, challenge_path)
+    register_challenge(challenge)
+    for uid, gid in ((10001, 10001), (0, 0)):
+        os.chown(challenge_path, uid, gid)
+        rejected(api.read_source_challenge, challenge_path)
+    register_challenge(challenge)
+    challenge_link = challenge_directory / "linked.json"
+    challenge_link.symlink_to(challenge_path)
+    rejected(api.read_source_challenge, challenge_link)
+    challenge_hardlink = challenge_directory / "hard.json"
+    os.link(challenge_path, challenge_hardlink)
+    rejected(api.read_source_challenge, challenge_path)
+    challenge_hardlink.unlink()
+    challenge_directory.chmod(0o770)
+    rejected(api.read_source_challenge, challenge_path)
+    challenge_directory.chmod(0o750)
+    challenge_arguments = [str(ROOT / "docker/images/ops/control_api.py"),
+                           "--state", str(state_path), "--access-log", str(access_path),
+                           "--source-challenge", str(challenge_path), "--source-receipt", str(receipt_path)]
+    challenge_path.chmod(0o600)
+    with patch.object(sys, "argv", challenge_arguments), \
+            patch.object(api, "require_wireguard_address", side_effect=AssertionError("登记校验必须早于监听")):
+        log_failed(api.main)
+    register_challenge(challenge)
+    receipt_path.chmod(0o600)
+    with patch.object(sys, "argv", challenge_arguments), \
+            patch.object(api, "require_wireguard_address", side_effect=AssertionError("回执校验必须早于监听")):
+        log_failed(api.main)
+    receipt_path.chmod(0o640)
+
+    def challenge_request(*, path="/v1/health", headers=None, endpoints=None):
+        from email.message import Message
+        # 这里只核对登记和响应顺序，私网三元组为夹具，不冒充真实 WireGuard。
+        handler = api.ControlHandler.__new__(api.ControlHandler)
+        handler.server = Mock(source_challenge=challenge_path, source_receipt=receipt_path, access_log=access_path)
+        handler.path = path
+        handler.headers = Message()
+        for key, value in (headers if headers is not None else [("X-Padm-Source-Challenge", nonce)]):
+            handler.headers[key] = value
+        handler.log_endpoints = endpoints or (
+            STATE["peer"]["address"], STATE["listen"]["address"], STATE["listen"]["port"])
+        return handler
+
+    handler = challenge_request()
+    assert handler.source_challenge(STATE) == challenge
+    for headers in ([], [("X-Padm-Source-Challenge", "d" * 64)],
+                    [("X-Padm-Source-Challenge", TOKEN)], [("X-Unregistered-Challenge", nonce)],
+                    [("X-Padm-Source-Challenge", nonce), ("X-Padm-Source-Challenge", nonce)],
+                    [("X-Padm-Source-Challenge", nonce), ("Authorization", "")],
+                    [("X-Padm-Source-Challenge", nonce), ("Authorization", "Bearer " + TOKEN)]):
+        assert challenge_request(headers=headers).source_challenge(STATE) is None
+    assert challenge_request(path="/v1/health?nonce=" + nonce).source_challenge(STATE) is None
+    assert challenge_request(endpoints=("10.77.0.3", "10.77.0.1", STATE["listen"]["port"])).source_challenge(STATE) is None
+    register_challenge(dict(challenge, expected_source="10.77.0.3"))
+    assert handler.source_challenge(STATE) is None
+    register_challenge(dict(challenge, expires_at=int(time.time()) - 1))
+    assert handler.source_challenge(STATE) is None
+    challenge_path.unlink()
+    assert handler.source_challenge(STATE) is None
+    register_challenge(challenge)
+    challenge_path.chmod(0o600)
+    log_failed(handler.source_challenge, STATE)
+    register_challenge(challenge)
+
+    handler.request_version = "HTTP/1.1"
+    handler.wfile = Mock()
+    original_auth = access_path.read_bytes()
+    with patch.object(api, "print", create=True) as output, \
+            patch.object(api, "append_access_line", wraps=api.append_access_line) as appended:
+        handler.reply(401, {"ok": False, "error": "unauthorized"}, handler.source_challenge(STATE))
+        assert appended.call_count == 2
+        assert appended.call_args_list[0].args[0] == access_path
+        assert appended.call_args_list[1].args[0] == receipt_path
+        output.assert_called_once()
+        assert nonce not in output.call_args.args[0], "nonce 只能进入独立 receipt，不能进入 stdout"
+    assert access_path.read_bytes() == original_auth + (output.call_args.args[0] + "\n").encode("ascii")
+    expected_receipt = (
+        r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z "
+        rf"control-source nonce={nonce} status=401 source=10\.77\.0\.2 target=10\.77\.0\.1 "
+        rf"port={STATE['listen']['port']}\n"
+    )
+    assert re.fullmatch(expected_receipt, receipt_path.read_text()) is not None
+    original_receipt = receipt_path.read_bytes()
+    receipt_path.chmod(0o600)
+    handler.wfile = Mock()
+    with patch.object(api, "print", create=True) as output:
+        try:
+            handler.reply(401, {"ok": False, "error": "unauthorized"}, challenge)
+        except SystemExit as error:
+            assert error.code == 78
+        else:
+            raise AssertionError("receipt 权限错误必须停止响应")
+        assert output.call_count == 2
+        output.assert_called_with("控制访问日志写入失败，服务已停止", file=sys.stderr, flush=True)
+    handler.wfile.write.assert_not_called()
+    assert receipt_path.read_bytes() == original_receipt
+    receipt_path.chmod(0o640)
+    handler.wfile = Mock()
+    with patch.object(api.os, "fsync", side_effect=[None, OSError(TOKEN)]), \
+            patch.object(api, "print", create=True) as output:
+        try:
+            handler.reply(401, {"ok": False, "error": "unauthorized"}, challenge)
+        except SystemExit as error:
+            assert error.code == 78
+        else:
+            raise AssertionError("receipt 同步失败必须停止响应")
+        output.assert_called_with("控制访问日志写入失败，服务已停止", file=sys.stderr, flush=True)
+    handler.wfile.write.assert_not_called()
+    receipt_path.write_bytes(b"")
+    challenge_path.unlink()
+
     def runtime_user():
         os.setgroups([])
         os.setgid(10001)
@@ -221,6 +375,21 @@ with tempfile.TemporaryDirectory(prefix=".tmp-control-", dir="/var/lib") as dire
         preexec_fn=runtime_user, capture_output=True, timeout=3,
     )
     assert checked.returncode == 0 and checked.stdout == checked.stderr == b"", "--check 不访问持久日志"
+    checked = subprocess.run(
+        [sys.executable, str(ROOT / "docker/images/ops/control_api.py"), "--state", str(state_path),
+         "--access-log", str(missing_log), "--source-challenge", str(challenge_path),
+         "--source-receipt", str(missing_log), "--check"],
+        preexec_fn=runtime_user, capture_output=True, timeout=3,
+    )
+    assert checked.returncode == 0 and checked.stdout == checked.stderr == b"", "--check 不读取登记或回执"
+    for arguments in (["--source-challenge", str(challenge_path)],
+                      ["--source-receipt", str(receipt_path)],
+                      ["--source-challenge", str(challenge_path), "--source-receipt", str(receipt_path)]):
+        checked = subprocess.run(
+            [sys.executable, str(ROOT / "docker/images/ops/control_api.py"), "--state", str(state_path),
+             "--check", *arguments], preexec_fn=runtime_user, capture_output=True, timeout=3,
+        )
+        assert checked.returncode == 2 and not checked.stdout, "挑战参数必须成对并启用访问日志"
     failed_health = subprocess.run(
         [sys.executable, str(ROOT / "docker/images/ops/control_api.py"), "--state", str(state_path), "--health"],
         preexec_fn=runtime_user, capture_output=True, timeout=6,

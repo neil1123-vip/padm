@@ -756,6 +756,12 @@ padm-docker control sync --invite /root/padm-control-invite.json
 日志留在配置恢复之外，首次创建不截断已有内容。连接关闭与鉴权失败分开记录；
 精确旧版本恢复可保留仅标准输出的受管格式，不宣称具备新日志能力。
 自动轮转和控制面 Fail2ban 防护尚未交付。
+新版主控可执行 `padm-docker control source-check` 登记最多 30 秒的随机挑战，
+再在受管 Peer 执行输出的 `control source-probe` 命令。探测绑定 WireGuard 源地址，
+不读取邀请或发送 token；精确匹配登记、真实 socket 与主控状态的 401 才写独立
+`logs/control/source.receipt`，普通访问日志不记录 nonce。
+登记退出或中断即清理，旧回执不作为后续启用凭证；配置/容器代次变化时拒绝证明。
+存在陌生或变化后的登记时保留并拒绝，不自动删除；此命令不会启用 jail。
 旧无连接元数据的内部被控规格继续兼容，但不能直接使用外部同步；旧 bundle 不得恢复新连接规格。
 显式 `rollback` 在采集、备份和停服前检查被控身份、入口映射与连接一致，拒绝降同步版本，
 同版本必须保持摘要和受管账号；同步状态未变的兼容发行版快照仍可回滚。

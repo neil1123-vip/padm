@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+TARGET_SCOPE=${PADM_DOCKER_REALITY_TARGETS_SCOPE:-full}
+case "${TARGET_SCOPE}" in
+full|direct|selection) ;;
+*) printf 'docker-reality-targets-regression-fail: unknown scope %s\n' "${TARGET_SCOPE}" >&2; exit 1 ;;
+esac
+
 # 复用双核部署、可信资产和事务夹具，不重复参数重生成全套场景。
 # shellcheck source=/dev/null
 source "$(dirname -- "${BASH_SOURCE[0]}")/reality.sh"
@@ -219,6 +225,8 @@ quota=$(jq --arg uuid "${UUID}" '.accounts[$uuid].limit_bytes = 1' \
     "${PADM_DOCKER_INSTALL_DIR}/data/traffic/state.json")
 printf '%s\n' "${quota}" | dockerTrafficWriteState
 dockerTrafficPrepareCandidate "${PADM_DOCKER_INSTALL_DIR}"
+library="${PADM_DOCKER_INSTALL_DIR}/data/reality-targets/results.tsv"
+if [[ "${TARGET_SCOPE}" != selection ]]; then
 runTargetRead 0 targets-all bash -u "${CLI}" protocol targets
 jq -r '.core.protocols[] | select(.id == 1 or .id == 2 or .id == 26) |
   "\(.listener_id)  \(.core)  \(.reality.target_host):\(.reality.target_port)  SNI=\(.reality.server_name)"' \
@@ -242,7 +250,6 @@ for field in '评分: C' 'X25519MLKEM768: no' 'TLS1.3: yes' '证书链长度: 40
     '全部 2 个地址按最差评分聚合' '证书链数量: 1'; do
     grep -qF "${field}" "${STDOUT}" || fail "共享原生检测缺少结果: ${field}"
 done
-library="${PADM_DOCKER_INSTALL_DIR}/data/reality-targets/results.tsv"
 [[ -f "${library}" && ! -s "${library}" && "$(stat -c %a "${library}")" == 600 ]] ||
     fail 'C 级检测误保存为 A 级目标或目标库权限错误'
 for action in targets check-target target-status; do
@@ -440,6 +447,12 @@ FAKE_TARGET_HEALTH_FAIL=1 runTargetEdit 14 health-restored changed --reality-tar
     new-target.example.net 8443 front.example.net --confirm PADM-DOCKER-EDIT
 [[ -e "${FAKE_REALITY_FAIL_MARKER}" && "$(liveSnapshot)" == "${before}" ]] ||
     fail '目标切换健康失败未恢复旧配置'
+fi
+
+if [[ "${TARGET_SCOPE}" == direct ]]; then
+    printf 'docker-reality-targets-direct-regression-ok\n'
+    exit 0
+fi
 
 # 缓存选择仍需重新验签与在线复测；只模拟三个可信下载资产，不放开公网请求。
 export FAKE_TARGET_MANIFEST="${CONFIGURE_MANIFEST}" FAKE_TARGET_SIGNATURE="${CONFIGURE_BUNDLE}"

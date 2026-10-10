@@ -550,7 +550,7 @@ emitShadowsocksSubscribeOutput() {
     local method="2022-blake3-aes-128-gcm"
     local defaultUserInfo defaultLink clashMetaBlock singBoxFilter yamlPassword
 
-    defaultUserInfo=$(printf '%s' "${method}:${id}" | base64 -w 0)
+    defaultUserInfo=$(printf '%s' "${method}:${id}" | base64 -w 0) || return 1
     defaultLink="ss://${defaultUserInfo}@$(formatUriAuthorityHost "${host}"):${port}#${email}"
     yamlPassword=$(serializeYamlString "${id}") || return 1
     clashMetaBlock=$(cat <<EOF

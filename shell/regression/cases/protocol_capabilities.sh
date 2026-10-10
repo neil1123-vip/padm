@@ -707,6 +707,72 @@ runProtocolEntryReaderFailureRegression() (
         [[ "${failed}" == 0 ]]
     ) || failed=1
     (
+        # 已扫描的配置消失时不能继续返回成功；存在的语法坏文件仍由预扫描阻断。
+        source "${PROJECT_ROOT}/shell/core/state.sh"
+        local failed=0 branch configFile coreInstallType= configPath= singBoxConfigPath=
+        local frontingType= frontingTypeReality= currentInstallProtocolType= nginxConfigPath="${root}/"
+        local currentUUID= currentClients= domain= AUTO_ENTRY_HOST=
+        cdnStoredAddress() { :; }
+        realityEntryHostFile() { printf '%s\n' "${root}/missing-entry-host"; }
+        corePortSubscriptionPort() { printf '%s\n' "$1"; }
+        resolveInstalledTLSDomain() { printf '%s\n' tls.example.com; }
+        getPublicIP() { printf '%s\n' 192.0.2.1; }
+        for branch in xray-fronting xhttp singbox-fronting singbox-reality; do
+            configPath="${root}/${branch}/"
+            singBoxConfigPath=
+            frontingType= frontingTypeReality=
+            mkdir -p "${configPath}" || return 1
+            case "${branch}" in
+            xray-fronting)
+                coreInstallType=1 frontingType=28_trojan_TCP_direct_inbounds currentInstallProtocolType=,28,
+                configFile="${configPath}${frontingType}.json" ;;
+            xhttp)
+                coreInstallType=1 currentInstallProtocolType=,2,
+                configFile="${configPath}12_VLESS_XHTTP_inbounds.json" ;;
+            singbox-fronting)
+                coreInstallType=2 frontingType=30_shadowsocks_inbounds currentInstallProtocolType=,30,
+                configFile="${configPath}${frontingType}.json" ;;
+            singbox-reality)
+                coreInstallType=2 frontingTypeReality=07_VLESS_vision_reality_inbounds currentInstallProtocolType=,1,
+                configFile="${configPath}${frontingTypeReality}.json" ;;
+            esac
+            printf '%s\n' '{"inbounds":[{"port":443,"listen_port":443,"settings":{"clients":[{"id":"saved-user"}]},"users":[{"uuid":"saved-user"}],"tls":{"server_name":"tls.example.com"},"streamSettings":{"tlsSettings":{"certificates":[{"certificateFile":"/etc/padm/tls/tls.example.com.crt"}]},"xhttpSettings":{"path":"/saved"}}}]}' >"${configFile}"
+            readConfigHostPathUUID || { printf 'assert-fail:entry-host-valid:%s\n' "${branch}" >&2; failed=1; }
+            [[ "${currentUUID}" == saved-user ]] || failed=1
+            rm "${configFile}" || return 1
+            regressionExpectStatus 1 readConfigHostPathUUID ||
+                { printf 'assert-fail:entry-host-missing:%s\n' "${branch}" >&2; failed=1; }
+            printf '{\n' >"${configFile}"
+            regressionExpectStatus 1 readConfigHostPathUUID ||
+                { printf 'assert-fail:entry-host-parse-invalid:%s\n' "${branch}" >&2; failed=1; }
+        done
+        (
+            # 只有内部入站或合并配置时，真实扫描没有公共前端，不能尝试读取空选择器。
+            local mode rootDir
+            local PADM_XRAY_BINARY="${root}/missing-xray" PADM_XRAY_CONF_DIR="${root}/missing-xray-conf"
+            local PADM_SINGBOX_BINARY=/bin/true PADM_SINGBOX_CONFIG_DIR=
+            for mode in socks merged; do
+                rootDir="${root}/internal-${mode}"
+                PADM_SINGBOX_CONFIG_DIR="${rootDir}/config"
+                mkdir -p "${PADM_SINGBOX_CONFIG_DIR}" || return 1
+                if [[ "${mode}" == socks ]]; then
+                    printf '%s\n' '{"inbounds":[{"type":"socks","listen_port":1080,"users":[{"username":"socks-user","password":"pass"}]}]}' \
+                        >"${PADM_SINGBOX_CONFIG_DIR}/20_socks5_inbounds.json"
+                else
+                    printf '%s\n' '{"inbounds":[],"outbounds":[{"type":"direct","tag":"direct"}]}' >"${rootDir}/config.json"
+                fi
+                readInstallType && readInstallProtocolType || return 1
+                [[ "${coreInstallType}" == 2 && -z "${frontingType}${frontingTypeReality}" ]] || return 1
+                currentUUID=stale currentClients=stale
+                regressionExpectStatus 0 readConfigHostPathUUID ||
+                    { printf 'assert-fail:entry-host-internal-only:%s\n' "${mode}" >&2; failed=1; }
+                [[ -z "${currentUUID}${currentClients}" ]] || failed=1
+            done
+            [[ "${failed}" == 0 ]]
+        ) || failed=1
+        [[ "${failed}" == 0 ]]
+    ) || failed=1
+    (
         # 历史读取失败不能展示可复用摘要，也不能消费确认或上级菜单输入。
         local failed=0 coreInstallType=1 currentInstallProtocolType=,1, configPath="${root}/" singBoxConfigPath=
         local frontingType= currentHost= currentDefaultPort= currentPort= currentPath= currentUUID=

@@ -53,8 +53,8 @@ def validate_invitation(invitation):
     return invitation
 
 
-def _response(response):
-    if response.status != 200:
+def _response(response, status=200, max_bytes=MAX_STATE_BYTES):
+    if response.status != status:
         raise ValueError("控制同步 HTTP 状态不支持")
     if response.headers.get_all("Content-Type") != ["application/json"]:
         raise ValueError("控制同步响应类型不匹配")
@@ -69,7 +69,7 @@ def _response(response):
     if not re.fullmatch(r"(?:0|[1-9][0-9]*)", length):
         raise ValueError("控制同步响应长度不规范")
     length = int(length)
-    if length > MAX_STATE_BYTES:
+    if length > max_bytes:
         raise ValueError("控制同步响应超过大小限制")
     content = response.read(length + 1)
     if len(content) != length:
@@ -83,15 +83,12 @@ def _response(response):
     return value
 
 
-def fetch_desired(invitation):
-    # 仅使用邀请中的 RFC1918 字面地址，并固定从受管 WireGuard 地址发起连接。
-    require_wireguard_address({
-        "listen": {"interface": "wg-padm", "address": invitation["peer_address"]}
-    })
+def _request(address, port, source, path, headers, status=200, max_bytes=MAX_STATE_BYTES):
+    # 同步与来源探测均固定受管 WireGuard 源地址，不使用代理或重定向。
+    require_wireguard_address({"listen": {"interface": "wg-padm", "address": source}})
     deadline = time.monotonic() + REQUEST_TIMEOUT
     connection = http.client.HTTPConnection(
-        invitation["listen"]["address"], invitation["listen"]["port"],
-        timeout=REQUEST_TIMEOUT, source_address=(invitation["peer_address"], 0))
+        address, port, timeout=REQUEST_TIMEOUT, source_address=(source, 0))
     try:
         connection.connect()
         transport = connection.sock
@@ -109,18 +106,33 @@ def fetch_desired(invitation):
         timer = threading.Timer(remaining, expire)
         timer.start()
         try:
-            connection.request("GET", "/v1/desired", headers={
-                "Authorization": f"Bearer {invitation['token']}",
-                "X-Padm-Control-Version": str(API_VERSION),
-                "Connection": "close",
-            })
+            connection.request("GET", path, headers=headers)
             with connection.getresponse() as response:
-                return _response(response)
+                return _response(response, status, max_bytes)
         finally:
             timer.cancel()
             timer.join()
     finally:
         connection.close()
+
+
+def fetch_desired(invitation):
+    return _request(
+        invitation["listen"]["address"], invitation["listen"]["port"], invitation["peer_address"],
+        "/v1/desired", {"Authorization": f"Bearer {invitation['token']}",
+                        "X-Padm-Control-Version": str(API_VERSION), "Connection": "close"})
+
+
+def source_probe(address, port, source, nonce):
+    private_address(address)
+    private_address(source)
+    if (address == source or type(port) is not int or not 1024 <= port <= 65535
+            or not isinstance(nonce, str) or re.fullmatch(r"[a-f0-9]{64}", nonce) is None):
+        raise ValueError("控制来源挑战参数不合法")
+    value = _request(address, port, source, "/v1/health",
+                     {"X-Padm-Source-Challenge": nonce, "Connection": "close"}, 401, 256)
+    if value != {"ok": False, "error": "unauthorized"}:
+        raise ValueError("控制来源挑战响应不匹配")
 
 
 def _mapping(spec, listeners):

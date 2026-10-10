@@ -263,4 +263,188 @@ dockerControlCommand init "${args[@]}" >/dev/null
 jq -e '.schema_version == 3 and .core.secondary_type == null and
   .core.protocols[0].core == "xray" and .control.role == "main" and
   .core.protocols[0].uuid == "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"' "${spec}" >/dev/null
+
+(
+    # 从实际 Compose 构造 inspect 夹具，独立目录不改变后续命令的在线文件。
+    snapshotRoot="${TEST_ROOT}/source-snapshot"
+    mkdir -p "${snapshotRoot}/config/control" "${snapshotRoot}/secrets/net/wireguard" \
+        "${snapshotRoot}/data/net/wireguard"
+    cp -- "${spec}" "${snapshotRoot}/config/spec.json"
+    cp -- "${root}/config/control/state.json" "${snapshotRoot}/config/control/state.json"
+    cp -- "${root}/images.env" "${snapshotRoot}/images.env"
+    cp -- "${CONTROL_WG_CONFIG}" "${snapshotRoot}/secrets/net/wireguard/wg-padm.conf"
+    printf '{}\n' >"${snapshotRoot}/deployment.json"
+    printf '{}\n' >"${snapshotRoot}/data/net/wireguard/wireguard.state"
+    root=${snapshotRoot}
+    spec="${root}/config/spec.json"
+    export PADM_DOCKER_INSTALL_DIR="${root}"
+    dockerGenerateCompose "${spec}" "${root}/compose.json" "${root}"
+    dockerControlRequireMain() { [[ "$1" == "${spec}" && "$2" == "${root}" ]]; }
+    dockerControlInviteRuntimeCheck() { [[ "$1" == "${spec}" ]]; }
+    controlId="$(printf 1%.0s {1..64})"
+    netId="$(printf 2%.0s {1..64})"
+    for service in control net-wireguard; do
+        jq --arg root "${root}" --arg service "${service}" --arg controlId "${controlId}" \
+            --arg netId "${netId}" --slurpfile spec "${spec}" '
+          .services[$service] as $s |
+          [{
+            Id: (if $service == "control" then $controlId else $netId end),
+            State: {Status:"running", Running:true, Restarting:false, Paused:false, Dead:false,
+              Health:{Status:"healthy"}, StartedAt:"2026-10-10T00:00:00.000Z"},
+            RestartCount:0,
+            Config: {
+              Labels: ($s.labels + {
+                "com.docker.compose.project":"padm-docker",
+                "com.docker.compose.project.working_dir":$root,
+                "com.docker.compose.project.config_files":($root + "/compose.json"),
+                "com.docker.compose.service":$service, "com.docker.compose.oneoff":"False"
+              }),
+              Image:$spec[0].images[if $service == "control" then "ops" else "net" end],
+              User:($s.user // "0:0"), Entrypoint:["/usr/local/bin/padm-entrypoint"],
+              Cmd:$s.command, Healthcheck:{Test:$s.healthcheck.test}
+            },
+            HostConfig: {
+              NetworkMode:$s.network_mode, ReadonlyRootfs:$s.read_only, Privileged:false, Init:$s.init,
+              CapAdd:($s.cap_add // [] | map("CAP_" + .)), CapDrop:$s.cap_drop,
+              SecurityOpt:$s.security_opt, LogConfig:{Type:$s.logging.driver, Config:$s.logging.options},
+              Tmpfs:($s.tmpfs | map(split(":") | {key:.[0], value:.[1]}) | from_entries)
+            },
+            Mounts:($s.volumes | map({
+              Type:"bind", Source:(.source | sub("^\\$\\{PADM_(DOCKER|NET)_ROOT\\}"; $root)),
+              Destination:.target, RW:(.read_only | not)
+            }))
+          }]
+        ' "${root}/compose.json" >"${TEST_ROOT}/snapshot-${service}.json"
+    done
+    docker() {
+        if [[ "$1" == ps ]]; then
+            case "$*" in
+            *label=com.docker.compose.service=control*) printf '%s\n' "${controlId}" ;;
+            *label=com.docker.compose.service=net-wireguard*) printf '%s\n' "${netId}" ;;
+            *) return 1 ;;
+            esac
+        elif [[ "$*" == "container inspect ${controlId}" ]]; then
+            cat -- "${TEST_ROOT}/snapshot-control.json"
+        elif [[ "$*" == "container inspect ${netId}" ]]; then
+            jq --arg fault "${SNAPSHOT_FAULT:-}" '
+              if $fault == "extra-cap" then .[0].HostConfig.CapAdd += ["CAP_NET_RAW"]
+              elif $fault == "wrong-mount" then .[0].Mounts[0].Source += ".wrong"
+              else . end
+            ' "${TEST_ROOT}/snapshot-net-wireguard.json"
+        else
+            return 1
+        fi
+    }
+    dockerControlSourceSnapshot >"${TEST_ROOT}/snapshot.json"
+    jq -e '(.containers | length == 2) and
+      (.hashes | split("\n") | map(select(length > 0)) | length == 7)' \
+        "${TEST_ROOT}/snapshot.json" >/dev/null
+    (
+        sha256sum() { return 1; }
+        reject dockerControlSourceSnapshot
+    )
+    for SNAPSHOT_FAULT in extra-cap wrong-mount; do
+        reject dockerControlSourceSnapshot
+    done
+)
+
+(
+    # 仅在线代次检查使用桩，登记、偏移解析及信号清理走生产命令。
+    dockerControlAccessLogEnsure "${root}"
+    sourceDirectory="${root}/data/control-source"
+    receipt="${root}/logs/control/source.receipt"
+    nonce="$(printf c%.0s {1..64})"
+    dockerControlSourceSnapshot() {
+        if [[ -f "${TEST_ROOT}/source-drift" ]]; then printf 'changed\n'; else printf 'stable\n'; fi
+    }
+    mv() {
+        command mv "$@" || return $?
+        if [[ "${SOURCE_CASE:-}" == publish-signal && "$*" == *'.control-source.'* ]]; then
+            kill -TERM "${BASHPID}"
+        fi
+    }
+    sleep() {
+        local challenge="${sourceDirectory}/challenge.json" event
+        [[ "$1" == 1 && -f "${challenge}" ]] || return 1
+        case "${SOURCE_CASE:-valid}" in
+        signal) kill -TERM "${BASHPID}"; return ;;
+        changed-registration)
+            jq '.target = "10.77.0.3"' "${challenge}" >"${TEST_ROOT}/changed-source.json"
+            cat -- "${TEST_ROOT}/changed-source.json" >"${challenge}"
+            return
+            ;;
+        drift) touch "${TEST_ROOT}/source-drift" ;;
+        esac
+        event="$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ') control-source nonce=${nonce} status=401 source=10.77.0.2 target=10.77.0.1 port=18080"
+        printf '%s\n' "${event}" >>"${receipt}"
+    }
+    reject dockerControlCommand source-check --extra
+    reject dockerControlCommand source-probe --address 8.8.8.8 --port 18080 --peer-address 10.77.0.2 --nonce "${nonce}"
+    reject dockerControlCommand source-probe --address 10.77.0.1 --port 18080 --peer-address 10.77.0.2 --nonce short
+    # 偏移以前的同 nonce 行不得自证；部分行、截断、替换和错来源有独立失败价值。
+    event="2026-10-10T00:00:01.000Z control-source nonce=${nonce} status=401 source=10.77.0.2 target=10.77.0.1 port=18080"
+    printf '%s\n' "${event}" >"${receipt}"
+    cursor=$(stat -c '%d:%i:%s' "${receipt}")
+    receiptArgs=("${receipt}" "${cursor}" "${nonce}" 10.77.0.2 10.77.0.1 18080 \
+        2026-10-10T00:00:00.000Z 2026-10-10T00:00:30.000Z)
+    [[ "$(dockerControlSourceReceipt "${receiptArgs[@]}")" == pending ]]
+    printf '%s' "${event}" >>"${receipt}"
+    [[ "$(dockerControlSourceReceipt "${receiptArgs[@]}")" == pending ]]
+    printf '\n' >>"${receipt}"
+    [[ "$(dockerControlSourceReceipt "${receiptArgs[@]}")" == verified ]]
+    (
+        dd() { command dd "$@"; return 1; }
+        reject dockerControlSourceReceipt "${receiptArgs[@]}"
+    )
+    printf '%s\n' "${event}" >>"${receipt}"
+    reject dockerControlSourceReceipt "${receiptArgs[@]}"
+    : >"${receipt}"
+    reject dockerControlSourceReceipt "${receiptArgs[@]}"
+    cursor=$(stat -c '%d:%i:%s' "${receipt}")
+    receiptArgs[1]=${cursor}
+    printf '%s\n' "${event/10.77.0.2/10.77.0.3}" >>"${receipt}"
+    reject dockerControlSourceReceipt "${receiptArgs[@]}"
+    : >"${receipt}"
+    printf 'untrusted receipt\n' >>"${receipt}"
+    reject dockerControlSourceReceipt "${receiptArgs[@]}"
+    : >"${receipt}"
+    beforeReceipt=$(stat -c '%s' "${receipt}")
+    dockerControlCommand source-check >"${TEST_ROOT}/source-check.log" 2>"${TEST_ROOT}/source-check.err"
+    grep -Fq 'source-verified=' "${TEST_ROOT}/source-check.log"
+    [[ ! -e "${sourceDirectory}/challenge.json" && "$(stat -c '%s' "${receipt}")" -gt "${beforeReceipt}" ]]
+    for SOURCE_CASE in signal publish-signal drift changed-registration; do
+        status=0
+        dockerControlCommand source-check >"${TEST_ROOT}/source-check.log" 2>&1 || status=$?
+        if [[ "${SOURCE_CASE}" == signal || "${SOURCE_CASE}" == publish-signal ]]; then
+            [[ "${status}" == 143 && ! -e "${sourceDirectory}/challenge.json" ]]
+        elif [[ "${SOURCE_CASE}" == changed-registration ]]; then
+            [[ "${status}" == 15 && -f "${sourceDirectory}/challenge.json" ]]
+            reject dockerControlCommand source-check
+            rm -- "${sourceDirectory}/challenge.json"
+        else
+            [[ "${status}" == 15 && ! -e "${sourceDirectory}/challenge.json" ]]
+            rm -- "${TEST_ROOT}/source-drift"
+        fi
+    done
+    [[ -z "$(find "${root}" -maxdepth 1 -name '.control-source.*' -print -quit)" ]]
+    [[ "$(grep -c '^lock$' "${TEST_ROOT}/host.log")" == "$(grep -c '^unlock$' "${TEST_ROOT}/host.log")" ]]
+    (
+        dockerControlClientRuntimeCheck() { [[ "$1" == "${root}/.control-source-probe."*/connection.json ]]; }
+        dockerRealityProbeRun() {
+            [[ "$1" == 10 && " $* " == *' --log-driver none '* &&
+                " $* " == *'from control_client import source_probe'* ]]
+        }
+        probeArgs=(--address 10.77.0.1 --port 18080 --peer-address 10.77.0.2 --nonce "${nonce}")
+        dockerControlCommand source-probe "${probeArgs[@]}"
+        [[ -z "$(find "${root}" -maxdepth 1 -name '.control-source-probe.*' -print -quit)" ]]
+        dockerRemoveManagedTree() { return 1; }
+        status=0
+        dockerControlCommand source-probe "${probeArgs[@]}" >"${TEST_ROOT}/probe-cleanup.log" 2>&1 || status=$?
+        [[ "${status}" == 15 ]]
+        grep -Fq '控制来源探测临时目录清理失败' "${TEST_ROOT}/probe-cleanup.log"
+        for directory in "${root}"/.control-source-probe.*; do
+            [[ -d "${directory}" ]] && rm -rf -- "${directory}"
+        done
+    )
+)
 printf 'docker-control-cli-regression-ok\n'
