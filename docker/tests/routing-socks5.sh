@@ -107,6 +107,8 @@ dockerComposeRun() {
         esac
     fi
 }
+# 恢复已过 owner 门禁后直接执行 Compose，沿用当前作用域的锁、故障和停服断言。
+dockerComposeExecute() { dockerComposeRun "$@"; }
 dockerInitializeStateRoot
 mkdir -p "${root}/secrets/tls"
 printf 'fixture-cert\n' >"${root}/secrets/tls/${DOMAIN}.crt"

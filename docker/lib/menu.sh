@@ -58,6 +58,9 @@ dockerMenuRun() {
     # 独立进程组便于中断整个动作，包括 CLI 正在等待的 Docker 命令。
     [[ $- != *m* ]] || monitorEnabled=1
     if [[ "${1:-}" == setup || "${1:-}" == edit ||
+        "${1:-}" == up || "${1:-}" == restart || "${1:-}" == update || "${1:-}" == rollback ||
+        ( "${1:-}" == fail2ban && "${2:-}" == disable ) ||
+        ( "${1:-}" == business && "${2:-}" == restore ) ||
         ( "${1:-}" == account && "${2:-}" != list ) ||
         ( ( "${1:-}" == subscription || "${1:-}" == share ) &&
           "${2:-}" != list && "${2:-}" != content && "${2:-}" != links ) ||
@@ -65,7 +68,7 @@ dockerMenuRun() {
         ( "${1:-}" == control && "${2:-}" != status ) ||
         ( "${1:-}" == protocol && ( "${2:-}" == select-target ||
           "${2:-}" == scan-targets || "${2:-}" == scan-targets-asn ) ) ]]; then
-        # 交互配置必须与菜单共用前台进程组，否则后台 read 会收到 SIGTTIN。
+        # 配置与启动来源输入必须共用前台进程组，否则后台 read 会收到 SIGTTIN。
         setupMode=1
         set +m
     else

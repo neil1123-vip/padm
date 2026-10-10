@@ -17,7 +17,7 @@ cleanup() {
 }
 trap cleanup EXIT
 [[ "$(id -u)" == 0 && "$(uname -s)" == Linux && -f /.dockerenv ]] || exit 1
-for tool in jq python3 docker dockerd nsenter ip unshare sysctl openssl; do
+for tool in jq python3 docker dockerd nsenter ip unshare sysctl openssl curl; do
     command -v "${tool}" >/dev/null
 done
 [[ -f /node-images.json && -f /node-images.tar && -d /n ]] || {
@@ -28,6 +28,9 @@ export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/state" PYTHONDONTWRITEBYTECODE=1
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/install-docker.sh"
 
+mkdir -p "${TEST_ROOT}/bundle"
+printf 'local-test\n' >"${TEST_ROOT}/bundle/${PADM_DOCKER_BUNDLE_REF}"
+dockerCurrentBundlePath() { printf '%s\n' "${TEST_ROOT}/bundle"; }
 jq -n '
   def image($name): "ghcr.io/example/padm-"+$name+":test@sha256:"+("a"*64);
   {schema_version:3,
@@ -57,12 +60,14 @@ for family in ipv4 dual; do
       if $family == "dual" then
         .core.protocols |= map(.address_families |= ((. + ["ipv6"]) | unique))
       else . end
-    ' "${TEST_ROOT}/base.json" >"${target}/spec.json"
-    dockerConfigureSpecValidate "${target}/spec.json"
-    dockerGenerateCompose "${target}/spec.json" "${target}/compose.json"
-    dockerGenerateNginxConfig "${target}/spec.json" "${target}/config/nginx/default.conf"
-    dockerGenerateFail2banConfig "${target}/spec.json" "${target}"
-    dockerGenerateXrayConfig "${target}/spec.json" "${target}/xray.base"
+    ' "${TEST_ROOT}/base.json" >"${target}/config/spec.json"
+    dockerConfigureSpecValidate "${target}/config/spec.json"
+    dockerGenerateCompose "${target}/config/spec.json" "${target}/compose.json"
+    dockerGenerateDeployment "${target}/config/spec.json" "${target}/deployment.json"
+    dockerGenerateImagesEnv "${target}/config/spec.json" "${target}/images.env" "${target}"
+    dockerGenerateNginxConfig "${target}/config/spec.json" "${target}/config/nginx/default.conf"
+    dockerGenerateFail2banConfig "${target}/config/spec.json" "${target}"
+    dockerGenerateXrayConfig "${target}/config/spec.json" "${target}/xray.base"
     dockerTrafficRender xray "${target}/xray.base" \
         '{"schema_version":1,"accounts":{}}' >"${target}/config/xray/config.json"
     printf '<!doctype html><title>Source Test</title>source-ok\n' >"${target}/data/static/index.html"
