@@ -467,6 +467,11 @@ singBoxInstallLocalTLSCertificate() {
     nginxRunning && nginxWasRunning=true
     xrayRunning && xrayWasRunning=true
     singBoxRunning && singBoxWasRunning=true
+    local PADM_TLS_ISSUE_NGINX_WAS_RUNNING=${nginxWasRunning}
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
+    # 签发返回后 Nginx 仍可能暂停，退出恢复须覆盖后续校验和续签任务。
+    padmRegisterExitRollback restoreTLSIssueServiceOnExit
     statusCard "本机 TLS 证书" \
         "Reality 不使用本机证书，现有核心配置保持不变" \
         "先申请或复用证书，成功后再继续安装"
