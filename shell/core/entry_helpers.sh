@@ -1290,11 +1290,28 @@ preserveInstallSyncPath() {
     fi
 }
 
+rollbackInstallDirectorySyncOnExit() {
+    [[ "${padmInstallSyncActive:-false}" == true ]] || return 0
+    padmInstallSyncActive=false
+    if [[ -n "${backupPath}" && ( -e "${backupPath}" || -L "${backupPath}" ) ]]; then
+        if ! removeManagedPathIfPresent "${targetDir}" || ! mv "${backupPath}" "${targetDir}"; then
+            preserveInstallSyncPath "${backupRoot}"
+            errorCard "目录同步回滚失败，请手动恢复备份：${backupPath}"
+            return 1
+        fi
+    elif [[ "${padmInstallSyncHadTarget}" == false && ! -e "${stageDir}" ]]; then
+        removeManagedPathIfPresent "${targetDir}" || return 1
+    fi
+}
+
 syncInstallDirectoryTree() {
     local sourceDir=$1
     local targetDir=$2
     local targetParent targetName stageRoot stageDir backupRoot= backupPath=
     local restoreStatus=0
+    local padmInstallSyncActive=false padmInstallSyncHadTarget=false
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
 
     sourceDir=$(padmResolveManagedAbsolutePath "${sourceDir}") || return 1
     targetDir=$(padmResolveManagedAbsolutePath "${targetDir}") || return 1
@@ -1314,29 +1331,33 @@ syncInstallDirectoryTree() {
         return 1
     fi
 
+    # 先登记恢复，避免移走旧目录后取消时被临时路径清理一并删除。
+    padmRegisterExitRollback rollbackInstallDirectorySyncOnExit
+    padmInstallSyncActive=true
     if [[ -e "${targetDir}" || -L "${targetDir}" ]]; then
+        padmInstallSyncHadTarget=true
         padmCreateTempPath backupRoot -d "${targetParent}/.${targetName}.padm-backup.XXXXXX" || {
+            padmInstallSyncActive=false
             cleanupInstallSyncPath "${stageRoot}"
             return 1
         }
         backupPath="${backupRoot}/${targetName}"
         if ! mv "${targetDir}" "${backupPath}"; then
+            padmRunRollback rollbackInstallDirectorySyncOnExit || restoreStatus=1
             cleanupInstallSyncPath "${stageRoot}"
-            cleanupInstallSyncPath "${backupRoot}"
+            [[ "${restoreStatus}" -eq 0 ]] && cleanupInstallSyncPath "${backupRoot}"
             return 1
         fi
     fi
 
     if ! mv "${stageDir}" "${targetDir}"; then
-        if [[ -n "${backupPath}" ]] && ! mv "${backupPath}" "${targetDir}" >/dev/null 2>&1; then
-            restoreStatus=1
-            preserveInstallSyncPath "${backupRoot}"
-        fi
+        padmRunRollback rollbackInstallDirectorySyncOnExit || restoreStatus=1
         cleanupInstallSyncPath "${stageRoot}"
         [[ "${restoreStatus}" -eq 0 ]] && cleanupInstallSyncPath "${backupRoot}"
         return 1
     fi
 
+    padmInstallSyncActive=false
     cleanupInstallSyncPath "${stageRoot}"
     cleanupInstallSyncPath "${backupRoot}"
 }
@@ -1363,6 +1384,23 @@ ensureNativeModeMarker() {
     }
 }
 
+rollbackAliasInstallOnExit() {
+    [[ "${padmAliasInstallActive:-false}" == true ]] || return 0
+    padmAliasInstallActive=false
+    local rollbackStatus=0
+    adapterRestoreManagedRollbackBackup "${rollbackBackupDir}" || rollbackStatus=1
+    if [[ -f "${padmAliasInstallTargetDir}/install.sh" ]] && ! chmod 700 "${padmAliasInstallTargetDir}/install.sh"; then
+        rollbackStatus=1
+    fi
+    if [[ "${rollbackStatus}" -eq 0 ]]; then
+        padmRemoveCleanupPath "${rollbackBackupDir}"
+    else
+        padmForgetCleanupPath "${rollbackBackupDir}"
+        errorCard "脚本安装失败且回滚失败，请手动恢复备份：${rollbackBackupDir}"
+    fi
+    return "${rollbackStatus}"
+}
+
 # 脚本快捷方式
 aliasInstall() {
     local sourceInstall="${SCRIPT_DIR}/install.sh"
@@ -1387,7 +1425,10 @@ aliasInstall() {
     if [[ -f "${sourceInstall}" && -d "${targetDir}" ]] && padmEntryScriptReady "${sourceInstall}"; then
         padmAssertNativeInstallAllowed || return 1
         local rollbackBackupDir=
-        local rollbackStatus=0
+        local padmAliasInstallActive=false
+        local padmAliasInstallTargetDir="${targetDir}"
+        local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+        local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
         local -a rollbackPaths=(
             "${targetDir}/shell"
             "${targetDir}/documents"
@@ -1404,6 +1445,8 @@ aliasInstall() {
             errorCard "脚本安装失败：创建回滚备份失败"
             return 1
         fi
+        padmRegisterExitRollback rollbackAliasInstallOnExit
+        padmAliasInstallActive=true
 
         if ! syncInstallDirectoryTree "${SCRIPT_DIR}/shell" "${targetDir}/shell" ||
             ! syncInstallDirectoryTree "${SCRIPT_DIR}/documents" "${targetDir}/documents" ||
@@ -1415,18 +1458,10 @@ aliasInstall() {
             ! rm -f "${targetDir}/xray/README.md" ||
             ! syncInstallManagedFile "${sourceInstall}" "${targetDir}/install.sh" 700 ||
             ! ensureNativeModeMarker "${targetDir}"; then
-            adapterRestoreManagedRollbackBackup "${rollbackBackupDir}" || rollbackStatus=1
-            if [[ -f "${targetDir}/install.sh" ]] && ! chmod 700 "${targetDir}/install.sh"; then
-                rollbackStatus=1
-            fi
-            if [[ "${rollbackStatus}" -eq 0 ]]; then
-                padmRemoveCleanupPath "${rollbackBackupDir}"
-            else
-                padmForgetCleanupPath "${rollbackBackupDir}"
-                errorCard "脚本安装失败且回滚失败，请手动恢复备份：${rollbackBackupDir}"
-            fi
+            padmRunRollback rollbackAliasInstallOnExit || true
             return 1
         fi
+        padmAliasInstallActive=false
         padmRemoveCleanupPath "${rollbackBackupDir}"
         local shortcutCreated=
         if [[ -d "/usr/bin/" ]]; then
