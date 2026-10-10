@@ -3618,9 +3618,51 @@ close 后当前 owned TCP 为空，只保留 fork 初停的历史 tuple，
 全部 9 个负例的接收端 FD 数未增加，非 ASCII 场景为 6 -> 6。
 这里只验证同可执行文件 self-exec、自建普通 fork 和实际停止的 task，
 不外推不同 exe、运行中 sender 竞态或生产 observer。
-真实 OpenSSH fork 初停继承 LISTEN FD 的窗口需专门验证，
+首次真实 OpenSSH ptrace 原型进一步取得 partial 证据，内部耗时 355 ms、
+客户端退出码 0、18 个 wait 事件、6 条原始日志，完整结果 `passed=false`：
+`/usr/sbin/sshd` 的 child 首停同时继承同一 LISTEN inode 和唯一 accepted
+inode/tuple；connection child 从 sshd EXEC 到 `/usr/lib/openssh/sshd-session`，
+其 child 再 EXEC 到 `/usr/lib/openssh/sshd-auth`，实际不同 exe 切换；
+每个已处理 EXEC/EXIT 停点都先 drain 到真实 EAGAIN，再更新或终结 epoch。
+但是 auth child 的首次 SIGSTOP 早于父进程收到 FORK event，探针把该未知停点
+继续后才登记第二次 SIGSTOP，不能把该快照宣称为严格 child-first-stop。
+由于多个 sender 的日志在同一 receiver 队列中，短连接 close 日志最终被
+`sender_epoch_not_stopped` 拒绝，历史连接授权断言失败；不能把 5/6 partial
+结果包装成 collector 可用。此轮 EXIT 快照的 accepted inode 仍由 FD 持有，
+TCP 状态为 CLOSE_WAIT；`accepted_matches=[]` 仅表示不再 ESTABLISHED，
+不能写成该 FD 已关闭。四条消息实际因非当前停点 sender 拒绝，
+未额外注入 unknown sender，也未走到 child 正例的 held pidfd 比对。
+证据保留在
+`.tmp-ssh-syslog-8c2c/openssh-trace/first-attempt/`，保留四个原文件及指纹。
+
+随后有实质差异的最小原型仅实际执行一次：9/9 通过，内部 366 ms，
+16 条 trace、3 个 EXEC、3 个 EXIT、2 个真实 child anchor，独审及主代理复核一致。
+auth child 首次 SIGSTOP 早于父 FORK event 的分支实际出现一次：
+先保持 stopped，父 FORK event 确认后才登记并 CONT(0)，两 child 均在首次
+CONT 前登记。不同 sender 消息放入总量最多 32 条的有界 pending，
+冻结旧 epoch/exe/anchor 并持续持有同消息 pidfd；在 sender 自身 EXEC/EXIT
+停点先 drain 到真实 EAGAIN，提交旧 epoch并关闭消息 FD，再更新/终结与 CONT。
+每个实际停点均保存该顺序、双 pidfd 前后活性与末尾 task generation 复核。
+
+真实 root session 的 `Connection from`、`Invalid user`、
+`Connection closed … [preauth]` 三条原消息在 auth child 停点入队，
+在 session 自身 EXIT 提交，均绑定 epoch 1 的
+`/usr/lib/openssh/sshd-session`，不会套用 auth 的当前 exe。
+fork 初停的唯一 accepted inode/tuple 保留；提交时
+`owns_anchor_fd=true`、`established_tuple_live=false`、TCP CLOSE_WAIT，
+不声称 FD 已关闭。三条 master 日志因没有 accepted anchor 拒绝。
+所有待处理消息解决，tracee、未登记停点和已接收 FD 的终局清单均为空，
+客户端拒认证后退出 0，私有 `/dev/log` 路由随自有树释放。
+首轮失败原文件及指纹继续保留；最终证据
+`.tmp-ssh-syslog-8c2c/openssh-trace/evidence.md`，没有再次重复该方案。
+
+真实 OpenSSH fork 初停继承 LISTEN FD 的窗口在本受控实例已验证，
 不能直接复用现有严格单 owner witness，也不能泛化放宽生产 owner 检查。
 没有 syscall 创建参数审计时，仅限受控普通单线程 fork 假设。
+本轮 cgroup 只记录，不认证宿主 unit；unknown sender 未注入，
+超限/超时、异常 tracer、多线程/de-thread/共享 clone，以及跨不同 exe 的
+积压旧消息场景未完成实测。未知、回收、负 pidfd、超限或无法在期限内
+归属仍要求拒绝，原型成功不替代这些生产门槛。
 生产 observer 故障恢复、LSM、原生 systemd、arm64、公网、重启卸载仍未验收。
 
 证据 `.tmp-ssh-syslog-8c2c/evidence.md`、
