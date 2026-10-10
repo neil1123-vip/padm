@@ -516,13 +516,18 @@ refreshScriptModules() {
 
 modulePaths() {
     local bootstrapPath="${SCRIPT_DIR}/shell/core/bootstrap.sh"
-    local sourcePath relativePath
+    local sourcePath relativePath sourceLines moduleSources payloadPaths
     [[ -f "${bootstrapPath}" && -d "${SCRIPT_DIR}/documents" && -d "${SCRIPT_DIR}/assets" && -f "${SCRIPT_DIR}/README.md" ]] || return 1
+    sourceLines=$(grep '^source ' "${bootstrapPath}") || return 1
+    moduleSources=$(sed 's/^source "//; s/"$//' <<<"${sourceLines}") || return 1
+    payloadPaths=$(find "${SCRIPT_DIR}/documents" "${SCRIPT_DIR}/assets" -type f -print) || return 1
+    payloadPaths=$(LC_ALL=C sort <<<"${payloadPaths}") || return 1
     printf 'install.sh\n'
     printf 'README.md\n'
     printf 'shell/core/bootstrap.sh\n'
     printf 'shell/validate_install.sh\n'
     while IFS= read -r sourcePath; do
+        [[ -n "${sourcePath}" ]] || continue
         case "${sourcePath}" in
         \$\{CORE_DIR\}/*)
             relativePath="shell/core/${sourcePath#\$\{CORE_DIR\}/}"
@@ -535,12 +540,13 @@ modulePaths() {
             ;;
         esac
         printf '%s\n' "${relativePath}"
-    done < <(grep '^source ' "${bootstrapPath}" | sed 's/^source "//; s/"$//')
+    done <<<"${moduleSources}"
     while IFS= read -r sourcePath; do
+        [[ -n "${sourcePath}" ]] || continue
         relativePath=${sourcePath#"${SCRIPT_DIR}/"}
         [[ "${relativePath}" != "${sourcePath}" ]] || return 1
         printf '%s\n' "${relativePath}"
-    done < <(find "${SCRIPT_DIR}/documents" "${SCRIPT_DIR}/assets" -type f -print | LC_ALL=C sort)
+    done <<<"${payloadPaths}"
 }
 
 scriptModuleFilesPresent() {

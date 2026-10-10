@@ -4772,7 +4772,29 @@ runInstallModuleManifestCompleteRegression() {
         ! scriptModulesReady >/dev/null
     )
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+    runInstallModuleEnumerationFailureRegression
 }
+
+runInstallModuleEnumerationFailureRegression() (
+    local fixtureDir="${TMP_DIR}/install-module-enumeration-failure" failingTool
+    regressionCreateInstallModuleFixture "${fixtureDir}"
+    regressionLoadInstallFunctions
+    regressionConfigureInstallRefreshFixture "${fixtureDir}"
+    writeModuleManifest "${SCRIPT_MANIFEST_FILE}" || return 1
+    for failingTool in grep sed find sort; do
+        (
+            case "${failingTool}" in
+            grep) grep() { command grep "$@"; return 2; } ;;
+            sed) sed() { command sed "$@"; return 1; } ;;
+            find) find() { command find "$@"; return 1; } ;;
+            sort) sort() { command sort "$@"; return 1; } ;;
+            esac
+            ! scriptModuleFilesPresent || return 1
+            ! moduleManifestReady "${SCRIPT_MANIFEST_FILE}" || return 1
+            ! writeModuleManifest "${fixtureDir}/failed-manifest" || return 1
+        ) || return 1
+    done
+)
 
 runInstallModuleManifestRequiresSha256Regression() {
     local fixtureDir moduleTmpRoot oldPath oldTmpDir
