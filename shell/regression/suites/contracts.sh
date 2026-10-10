@@ -258,20 +258,19 @@ runRegressionDockerContractsAggregateContract() (
     local expectedLog="${TMP_DIR}/docker-contracts-aggregate.expected.log"
     local status=0 selector
     local -a expectedSelectors=(
-        docker-reality docker-traditional-tls docker-routing-core-contracts
-        docker-routing-core-network-lifecycle docker-routing-core-policy-lifecycle
-        docker-routing-dns-hosts-workflow docker-routing-direct-block-workflow
-        docker-phase3-edit docker-phase3-entries docker-setup-encrypted-udp docker-setup-encrypted-tcp
-        docker-setup-transports docker-reality-targets-direct docker-reality-targets-selection
-        docker-setup-tls docker-reality-parameters docker-setup-core docker-sites docker-phase6
-        docker-menu docker-reality-target-library docker-fail2ban-ownership docker-control-state
-        docker-phase4-maintenance docker-phase4-lifecycle docker-control-client
-        docker-phase1 docker-phase5 docker-control-cli docker-control-sync docker-release docker-geo-data docker-traffic
-        docker-http-relay docker-entry-port-alias
-        docker-accounts docker-permissions docker-wireguard-runtime docker-tproxy-ownership
-        docker-fail2ban-source docker-ssh-preflight
-        docker-control-api docker-subscriptions
-        docker-accounts-cli docker-business docker-phase2
+        docker-phase3-edit docker-phase3-entries docker-traditional-tls docker-setup-transports docker-setup-encrypted-udp
+        docker-phase4-maintenance docker-reality docker-setup-tls docker-phase4-lifecycle
+        docker-reality-targets-direct docker-reality-parameters docker-sites
+        docker-routing-direct-block-workflow docker-routing-core-policy-lifecycle
+        docker-setup-core docker-phase1 docker-menu docker-setup-encrypted-tcp
+        docker-routing-dns-hosts-workflow docker-phase6 docker-entry-port-alias
+        docker-fail2ban-ownership docker-routing-core-network-lifecycle docker-control-state
+        docker-reality-targets-selection docker-reality-target-library docker-control-client
+        docker-tproxy-ownership docker-routing-core-contracts docker-http-relay docker-control-cli
+        docker-release docker-control-sync docker-phase5 docker-geo-data docker-accounts
+        docker-traffic docker-permissions docker-fail2ban-source docker-control-api
+        docker-wireguard-runtime docker-subscriptions docker-accounts-cli
+        docker-ssh-preflight docker-business docker-phase2
     )
 
     runFrameworkParallelRegressionSelectors() {
