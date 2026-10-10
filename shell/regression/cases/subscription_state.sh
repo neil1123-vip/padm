@@ -626,6 +626,15 @@ runSubscriptionGroupStateStructureSyncCronRegression() {
                     printf "5 5 * * * /bin/echo '/etc/padm/install.sh RenewTLS' > /root/keep.log\n"
                     printf '@reboot /bin/bash /etc/padm/install.sh RenewTLS\n'
                     ;;
+                tls-bare-custom)
+                    printf '45 2 * * * bash /etc/padm/install.sh RenewTLS >> /custom/renew.log 2>&1\n'
+                    printf '5 5 * * * /usr/local/bin/keep\n'
+                    ;;
+                tls-bare-whitespace)
+                    printf '45 2 * * * bash\t/etc/padm/install.sh\tRenewTLS old\n'
+                    printf '5 0 * * * bash  /etc/padm/install.sh  RenewTLS\n'
+                    printf '5 5 * * * /usr/local/bin/keep\n'
+                    ;;
                 *)
                     printf '5 0 * * * /bin/bash /etc/padm/install.sh RenewTLS\n'
                     printf '10 0 * * * /bin/bash /etc/padm/install.sh SyncSubscriptionGroups old\n'
@@ -717,6 +726,21 @@ runSubscriptionGroupStateStructureSyncCronRegression() {
         if ! grep -qxF "5 5 * * * /bin/echo '/etc/padm/install.sh RenewTLS' > /root/keep.log" "${crontabLog}" ||
             ! grep -q '^30 1 ' "${crontabLog}" || grep -q '^@reboot' "${crontabLog}"; then
             printf 'TLS cron removed an unrelated literal command\n' >&2
+            tlsCronFailure=1
+        fi
+        # 状态识别支持裸 bash；重装保留和重复清理必须使用相同语法。
+        previousWrites=${crontabWrites}
+        crontabReadMode=tls-bare-custom
+        installCronTLS 1 >/dev/null
+        if [[ "${crontabWrites}" != "${previousWrites}" ]]; then
+            printf 'TLS cron rewrote an active bare bash schedule\n' >&2
+            tlsCronFailure=1
+        fi
+        crontabReadMode=tls-bare-whitespace
+        installCronTLS 1 >/dev/null
+        if [[ "$(grep -c 'RenewTLS' "${crontabLog}")" != 1 ]] ||
+            ! grep -qx '5 5 \* \* \* /usr/local/bin/keep' "${crontabLog}"; then
+            printf 'TLS cron did not replace bare bash duplicates\n' >&2
             tlsCronFailure=1
         fi
         [[ "${tlsCronFailure}" == 0 ]]

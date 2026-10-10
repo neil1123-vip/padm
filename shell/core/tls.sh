@@ -594,7 +594,7 @@ installCronTLS() {
         if awk '
           $1 !~ /^#/ {
             command = ($1 ~ /^@/) ? 2 : 6
-            if ($command == "/bin/bash") command++
+            if ($command == "/bin/bash" || $command == "bash") command++
             if ($command == "/etc/padm/install.sh" && $(command + 1) == "RenewTLS") {
               count++
               nextArg = $(command + 2)
@@ -610,7 +610,7 @@ installCronTLS() {
         historyCrontab=$(awk '
           $1 !~ /^#/ {
             command = ($1 ~ /^@/) ? 2 : 6
-            if ($command == "/bin/bash") command++
+            if ($command == "/bin/bash" || $command == "bash") command++
             if ($command == "/etc/padm/install.sh" && $(command + 1) == "RenewTLS") next
           }
           { print }
