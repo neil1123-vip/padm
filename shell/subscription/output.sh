@@ -281,6 +281,7 @@ defaultBase64Code() {
         errorCard "订阅输出生成失败" "协议 ${type} 的端口格式不合法"
         return 1
     fi
+    [[ "${port}" == *-* ]] || port=$((10#${port}))
     subscribeOutputSafeLabel "${email}" || return 1
     subscribeOutputSafeFileName "${user}" || return 1
     [[ -z "${path}" ]] || subscribeOutputSafeRouteValue "${path}" || return 1

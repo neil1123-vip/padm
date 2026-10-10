@@ -398,6 +398,15 @@ IFS=$'\037' read -r _ _ profilePassword _ profileName profileUuid <<<"$(subscrip
 [[ "${profilePassword}" == "udp-pass" && "${profileName}" == "udp-user" && -z "${profileUuid}" ]]
 IFS=$'\037' read -r _ _ profilePassword _ _ _ <<<"$(subscriptionAccountProfile '{"name":"udp-user","password":"pass with \"quotes\""}')"
 [[ "${profilePassword}" == 'pass with "quotes"' ]] || return 1
+local profileField profileValue
+for profileField in email id password username name uuid; do
+    for profileValue in '{}' '[]'; do
+        regressionExpectFailure subscriptionAccountProfile \
+            "$(jq -nc --arg field "${profileField}" --argjson value "${profileValue}" '{($field):$value}')" >/dev/null 2>&1 || return 1
+    done
+done
+IFS=$'\037' read -r _ _ profilePassword _ _ _ <<<"$(subscriptionAccountProfile '{"name":"scalar-user","password":42}')"
+[[ "${profilePassword}" == 42 ]] || return 1
 coreInstallType=1
 currentHost="tls.example.com"
 realityEntryHost="node.example.com"
@@ -488,6 +497,18 @@ assertCapturedSubscribeOutputs "user-a-grpc" "${expectedGrpcLink}" "node.example
 assertDisplayedDefaultSubscribeLink "user-a-grpc" "通用格式：VLESS Reality gRPC"
 jq -e '.[0].transport.service_name == "grpc" and .[0].tls.reality.short_id == "6ba85179e30d4fc2"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/user-a-grpc" >/dev/null
 grep -q 'pqv=pqv' "${SUBSCRIBE_CAPTURE_DIR}/screen.log"
+
+(
+    local protocol account
+    singBoxSubscribeAppendFilter() { return 1; }
+    for protocol in vlessReality vlessRealityGRPC; do
+        account="reality-filter-failure-${protocol}"
+        regressionExpectStatus 1 defaultBase64Code "${protocol}" 443 "${account}" uuid-a "" "" || return 1
+        [[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/default/${account}" &&
+            ! -e "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/${account}" &&
+            ! -e "${SUBSCRIBE_CAPTURE_DIR}/sing-box/${account}" ]] || return 1
+    done
+) || return 1
 
 (
     local protocol variant account
@@ -1287,6 +1308,14 @@ JSON
                 regressionExpectStatus 1 "${functionName}" >/dev/null 2>&1 || return 1
                 [[ ! -s "${capture}" ]] || return 1
             done
+            local passwordJson
+            for passwordJson in '{}' '[]'; do
+                jq -n --argjson user "${userJson}" --argjson password "${passwordJson}" \
+                    '{inbounds:[{tls:{server_name:"udp.example.com"},users:[$user | .password = $password]}]}' >"${configFile}"
+                : >"${capture}"
+                regressionExpectStatus 1 "${functionName}" >/dev/null 2>&1 || return 1
+                [[ ! -s "${capture}" ]] || return 1
+            done
             jq -n --argjson user "${userJson}" \
                 '{inbounds:[{tls:{server_name:"udp.example.com"},users:[$user]}]}' >"${configFile}"
             defaultBase64Code() { printf '%s\n' failed-write >>"${capture}"; return 1; }
@@ -1311,6 +1340,10 @@ rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="tls.example.com"
 ! defaultBase64Code vlesstcp 0 invalid-port-user invalid-port-id "" "" >/dev/null 2>&1
 [[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/default/invalid-port-user" ]]
+defaultBase64Code vlesstcp 08443 leading-zero-port-user uuid-leading-zero "" "" >/dev/null || return 1
+grep -qF ':8443?' "${SUBSCRIBE_CAPTURE_DIR}/default/leading-zero-port-user" || return 1
+grep -qx '    port: 8443' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/leading-zero-port-user" || return 1
+jq -e '.[0].server_port == 8443' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/leading-zero-port-user" >/dev/null || return 1
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 export REGRESSION_ECHO_LOG="${SUBSCRIBE_CAPTURE_DIR}/screen.log"

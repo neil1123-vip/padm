@@ -402,6 +402,8 @@ emitVlessRealitySubscribeOutput() {
     subscribeOutputSafeHostValue "${realitySNI}" || return 1
     local defaultLink
     defaultLink=$(serializeVlessRealityVisionLink "${id}" "${entryHost}" "${port}" "${realitySNI}" "${publicKey}" "${realityMldsa65Verify}" "${email}" "${vlessEncryption}")
+    local singBoxFilter
+    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vless",server:$server,server_port:$port,uuid:$uuid,flow:"xtls-rprx-vision",tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"},reality:{enabled:true,public_key:$public_key,short_id:"6ba85179e30d4fc2"}},packet_encoding:"xudp"}' --arg tag "${email}" --arg server "${entryHost}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${realitySNI}" --arg public_key "${publicKey}") || return 1
     subscribeOutputTitle "通用格式：VLESS Reality Vision"
     echoContent green "    ${defaultLink}\n"
 
@@ -424,8 +426,6 @@ ${mihomoEncryption:+    encryption: ${mihomoEncryption}
       short-id: 6ba85179e30d4fc2
     client-fingerprint: chrome" || return 1
 
-    local singBoxFilter
-    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vless",server:$server,server_port:$port,uuid:$uuid,flow:"xtls-rprx-vision",tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"},reality:{enabled:true,public_key:$public_key,short_id:"6ba85179e30d4fc2"}},packet_encoding:"xudp"}' --arg tag "${email}" --arg server "${entryHost}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${realitySNI}" --arg public_key "${publicKey}") || return 1
     appendSingBoxSubscribeLocalConfig "${user}" "${singBoxFilter}" || return 1
 
 }
@@ -448,6 +448,8 @@ emitVlessRealityGrpcSubscribeOutput() {
 
     local defaultLink
     defaultLink=$(serializeVlessRealityGrpcLink "${id}" "${entryHost}" "${port}" "${realitySNI}" "${publicKey}" "${realityMldsa65Verify}" "${email}")
+    local singBoxFilter
+    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vless",server:$server,server_port:$port,uuid:$uuid,tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"},reality:{enabled:true,public_key:$public_key,short_id:"6ba85179e30d4fc2"}},packet_encoding:"xudp",transport:{type:"grpc",service_name:"grpc"}}' --arg tag "${email}" --arg server "${entryHost}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${realitySNI}" --arg public_key "${publicKey}") || return 1
     subscribeOutputTitle "通用格式：VLESS Reality gRPC"
     echoContent green "    ${defaultLink}\n"
 
@@ -470,8 +472,6 @@ emitVlessRealityGrpcSubscribeOutput() {
       grpc-service-name: \"grpc\"
     client-fingerprint: chrome" || return 1
 
-    local singBoxFilter
-    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vless",server:$server,server_port:$port,uuid:$uuid,tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"},reality:{enabled:true,public_key:$public_key,short_id:"6ba85179e30d4fc2"}},packet_encoding:"xudp",transport:{type:"grpc",service_name:"grpc"}}' --arg tag "${email}" --arg server "${entryHost}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${realitySNI}" --arg public_key "${publicKey}") || return 1
     appendSingBoxSubscribeLocalConfig "${user}" "${singBoxFilter}" || return 1
 
 }

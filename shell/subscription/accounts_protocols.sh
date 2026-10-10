@@ -3,13 +3,14 @@
 subscriptionAccountProfile() {
     local user=$1
     jq -r '[
-      ((.email // .name // .username // "") | tostring),
-      ((.id // .uuid // "") | tostring),
-      ((.password // "") | tostring),
-      ((.username // .name // .email // "") | tostring),
-      ((.name // .email // .username // "") | tostring),
-      ((.uuid // .id // "") | tostring)
-    ] | if any(.[]; any(explode[]; . < 32 or . == 127)) then error("invalid account field") else join("\u001f") end' <<<"${user}"
+      (.email // .name // .username // ""),
+      (.id // .uuid // ""),
+      (.password // ""),
+      (.username // .name // .email // ""),
+      (.name // .email // .username // ""),
+      (.uuid // .id // "")
+    ] | if any(.[]; type == "object" or type == "array") then error("invalid account field") else map(tostring) end |
+    if any(.[]; any(explode[]; . < 32 or . == 127)) then error("invalid account field") else join("\u001f") end' <<<"${user}"
 }
 
 showVlessTcpAccounts() (
