@@ -3408,11 +3408,63 @@ runInstallWorkflowRegression() (
     )
 
     (
+        # 自定义二进制可能与其它工具共用目录，清理只删除明确归属的核心文件。
+        local root="${TMP_DIR}/core-custom-cleanup" branch failed=0
+        local PADM_XRAY_BINARY="${root}/bin/xray" PADM_XRAY_CONF_DIR="${root}/xray-conf"
+        local PADM_SINGBOX_BINARY="${root}/bin/sing-box"
+        local PADM_SINGBOX_CONFIG_DIR="${root}/sing-box-conf/config"
+        local PADM_SINGBOX_SYSTEMD_SERVICE_FILE="${root}/sing-box.service"
+        local configPath= singBoxConfigPath= coreInstallType= ctlPath= realityStatus=
+        mkdir -p "${root}/bin"
+        printf 'keep\n' >"${root}/bin/other-tool"
+        printf 'old-xray\n' >"${PADM_XRAY_BINARY}"
+        handleXray() { return 0; }
+        if ! cleanUp xrayDel || [[ -e "${PADM_XRAY_BINARY}" || ! -f "${root}/bin/other-tool" ]]; then
+            printf '自定义 Xray 清理删除了共享目录或留下二进制\n' >&2
+            failed=$((failed + 1))
+        fi
+
+        source "${PROJECT_ROOT}/shell/core/state.sh"
+        singBoxRunning() { return 1; }
+        coreStartupServiceEnabled() { return 1; }
+        handleSingBox() { return 0; }
+        systemctl() { return 0; }
+        readPortHopping() { tuicPortHoppingStart=; tuicPortHoppingEnd=; }
+        denyPort() { return 0; }
+        refreshManagedProtocolSubscriptions() { return 0; }
+        # 旧实现会清理固定系统目录；测试只隔离该边界，不触碰容器其它夹具。
+        cleanCoreInstallDirectory() { return 0; }
+        for branch in empty last; do
+            singBoxConfigPath=
+            printf 'keep\n' >"${root}/bin/other-tool"
+            printf '#!/bin/sh\nexit 0\n' >"${PADM_SINGBOX_BINARY}"
+            chmod 755 "${PADM_SINGBOX_BINARY}"
+            printf 'old-cronet\n' >"${root}/bin/libcronet.so"
+            printf 'old-unit\n' >"${PADM_SINGBOX_SYSTEMD_SERVICE_FILE}"
+            if [[ "${branch}" == last ]]; then
+                mkdir -p "${PADM_SINGBOX_CONFIG_DIR}"
+                printf '{"inbounds":[{"type":"tuic","listen_port":26451}]}\n' \
+                    >"${PADM_SINGBOX_CONFIG_DIR}/09_tuic_inbounds.json"
+                cp "${PADM_SINGBOX_CONFIG_DIR}/09_tuic_inbounds.json" "${root}/sing-box-conf/config.json"
+                readInstallType || return 1
+            fi
+            if ! unInstallSingBox tuic ||
+                [[ -e "${PADM_SINGBOX_BINARY}" || -e "${root}/bin/libcronet.so" ||
+                    ! -f "${root}/bin/other-tool" ]]; then
+                printf '自定义 sing-box %s 清理没有按文件归属完成\n' "${branch}" >&2
+                failed=$((failed + 1))
+            fi
+        done
+        [[ "${failed}" == 0 ]]
+    ) || return 1
+
+    (
         # 清理旧核心前必须完整枚举；失败不能删除已列出的文件或报告成功。
         local root="${TMP_DIR}/install-clean-enumeration" failure operation status failed=0
         eval "$(awk '/^cleanDirectoryContent\(\)/ { capture=1 } capture { print } capture && /^}/ { exit }' \
             "${PROJECT_ROOT}/shell/core/runtime.sh")"
-        coreXrayInstallDir() { printf '%s\n' "${root}"; }
+        # 本夹具只检验专用目录枚举，实际自定义目录归属由前一夹具检查。
+        cleanCoreInstallFiles() { cleanCoreInstallDirectory "${root}" Xray; }
         handleXray() { return 0; }
         find() {
             if [[ "${failure}" == success ]]; then

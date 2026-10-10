@@ -82,9 +82,24 @@ tlsCertificatePairUsable() {
     tlsCertificateFilesUsable "${tlsDir}/${certDomain}.crt" "${tlsDir}/${certDomain}.key" "${certDomain}"
 }
 
+tlsCertificateDateEpoch() {
+    local value=$1 epoch
+    [[ -n "${value}" ]] || return 1
+    epoch=$(LC_ALL=C date -d "${value}" +%s 2>/dev/null) &&
+        [[ "${epoch}" =~ ^-?[0-9]+$ ]] && {
+            printf '%s\n' "${epoch}"
+            return 0
+        }
+    [[ "${value}" == *" GMT" ]] || return 1
+    value=${value% GMT}
+    epoch=$(LC_ALL=C date -u -D '%b %e %H:%M:%S %Y' -d "${value}" +%s 2>/dev/null) || return 1
+    [[ "${epoch}" =~ ^-?[0-9]+$ ]] || return 1
+    printf '%s\n' "${epoch}"
+}
+
 tlsCertificateFilesUsable() {
     local certFile=$1 keyFile=$2 certDomain=$3
-    local certDigest keyDigest
+    local certDigest keyDigest startDate startTime currentTime
     tlsDomainNameIsSafe "${certDomain}" || return 1
     [[ -s "${certFile}" && -s "${keyFile}" ]] || return 1
     command -v openssl >/dev/null 2>&1 || return 1
@@ -92,6 +107,12 @@ tlsCertificateFilesUsable() {
         openssl x509 -in "${certFile}" -checkend 0 -noout >/dev/null 2>&1 &&
         openssl x509 -in "${certFile}" -checkhost "${certDomain}" -noout >/dev/null 2>&1 &&
         openssl pkey -in "${keyFile}" -check -noout >/dev/null 2>&1 || return 1
+    startDate=$(openssl x509 -in "${certFile}" -startdate -noout 2>/dev/null) || return 1
+    [[ "${startDate}" == notBefore=* ]] || return 1
+    startTime=$(tlsCertificateDateEpoch "${startDate#notBefore=}") &&
+        currentTime=$(date +%s) &&
+        [[ "${startTime}" =~ ^-?[0-9]+$ && "${currentTime}" =~ ^[0-9]+$ ]] &&
+        (( startTime <= currentTime )) || return 1
     certDigest=$(openssl x509 -in "${certFile}" -pubkey -noout 2>/dev/null |
         openssl pkey -pubin -outform DER 2>/dev/null |
         openssl dgst -sha256 2>/dev/null) || return 1
@@ -691,7 +712,6 @@ tlsRenewCronState() {
 
 tlsCertificateStatusJson() {
     local domain=${currentHost:-${tlsDomain:-}}
-    local sslTypeFile
     local tlsDir
     local acmeDir
     tlsDir=$(tlsManagedDir) || return 1
@@ -704,28 +724,22 @@ tlsCertificateStatusJson() {
     fi
     readAcmeTLS "${domain}" || return 1
 
-    local sslDays=90
-    sslTypeFile=$(tlsSslTypeFile) || return 1
-    if [[ -f "${sslTypeFile}" ]] && grep -q "buypass" <"${sslTypeFile}"; then
-        sslDays=180
-    fi
-
     if tlsCertificatePairExists "${tlsDir}" "${domain}"; then
         if [[ -n "${acmeDir}" ]] && { [[ -s "${acmeDir}/${domain}_ecc/${domain}.key" &&
             -s "${acmeDir}/${domain}_ecc/${domain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; }; then
-            local modifyTime currentTime stampDiff days remainingDays sourceType
+            local startDate endDate modifyTime endTime currentTime remainingDays sourceType
             if [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
-                modifyTime=$(stat --format=%z "${acmeDir}/*.${dnsTLSDomain}_ecc/*.${dnsTLSDomain}.cer")
                 sourceType="acme-dns-api"
             else
-                modifyTime=$(stat --format=%z "${acmeDir}/${domain}_ecc/${domain}.cer")
                 sourceType="acme-standalone"
             fi
-            modifyTime=$(date +%s -d "${modifyTime}")
-            currentTime=$(date +%s)
-            ((stampDiff = currentTime - modifyTime))
-            ((days = stampDiff / 86400))
-            ((remainingDays = sslDays - days))
+            startDate=$(openssl x509 -in "${tlsDir}/${domain}.crt" -startdate -noout 2>/dev/null) &&
+                endDate=$(openssl x509 -in "${tlsDir}/${domain}.crt" -enddate -noout 2>/dev/null) &&
+                [[ "${startDate}" == notBefore=* && "${endDate}" == notAfter=* ]] || return 1
+            modifyTime=$(tlsCertificateDateEpoch "${startDate#notBefore=}") &&
+                endTime=$(tlsCertificateDateEpoch "${endDate#notAfter=}") &&
+                currentTime=$(date +%s) || return 1
+            remainingDays=$(( (endTime - currentTime) / 86400 ))
             jq -n \
                 --arg status "installed" \
                 --arg source "${sourceType}" \
