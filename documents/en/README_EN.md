@@ -412,6 +412,21 @@ padm-docker fail2ban disable --confirm PADM-DOCKER-EDIT
 padm-docker fail2ban verify-source entry-ws 203.0.113.7
 ```
 
+Fail2ban submenu item 12 and `padm-docker fail2ban ssh preflight [--json]`
+provide a read-only host check. The usual Linux/root and local rootful Docker
+preflight applies; an installed deployment is not required. Default `sshd -T`
+ports must match actual TCP listeners explicitly owned by `sshd`. The command
+only lists current-boot journal or fixed `/var/log/auth.log` and `/var/log/secure`
+candidates, without printing authentication messages, accounts or source addresses.
+File candidates must be root-owned regular files without symlink components or
+group/other write permission. Missing tools, port mismatch or no candidate returns `10`.
+JSON declares `scope=host-preflight-only`, `source_verified=false`,
+`runtime_configuration_verified=false` and `jail_ready=false`. Default configuration
+does not verify a running instance using `-f/-p/-o` or socket activation;
+equal ports do not verify bind addresses or address families. Historical logs are
+not fresh source proof. This check saves no credential, changes no configuration
+or firewall rule, and does not enable an SSH jail.
+
 Status and unban access only the fixed `padm-nginx` jail in a running `net-fail2ban`
 container whose spec, image, labels and mounts match the current deployment. They
 do not start services, change configuration or add bans. Unban accepts one literal

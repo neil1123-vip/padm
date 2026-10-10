@@ -269,7 +269,7 @@ runRegressionDockerContractsAggregateContract() (
         docker-phase1 docker-phase5 docker-control-cli docker-control-sync docker-release docker-geo-data docker-traffic
         docker-http-relay docker-entry-port-alias
         docker-accounts docker-permissions docker-wireguard-runtime docker-tproxy-ownership docker-fail2ban-ownership
-        docker-fail2ban-source
+        docker-fail2ban-source docker-ssh-preflight
         docker-control-api docker-subscriptions
         docker-accounts-cli docker-business docker-phase2
     )

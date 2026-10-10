@@ -412,6 +412,9 @@ runMaintenanceDriver() {
     fail2ban-*)
         targetReply 'Docker 服务维护' $'5\n'
         case "${scenario}" in
+        fail2ban-ssh-preflight|fail2ban-ssh-preflight-failed)
+            targetReply 'Docker Fail2ban 维护' $'12\n'
+            ;;
         fail2ban-flow)
             targetReply 'Docker Fail2ban 维护' "${statusChoice}"$'\n'
             for address in "${unbanAddresses[@]}"; do
@@ -1417,6 +1420,11 @@ validate|update|rollback|uninstall)
     ;;
 fail2ban)
     recordAction "$@"
+    if [[ "${2:-}" == ssh ]]; then
+        [[ "$#" -eq 3 && "$3" == preflight ]] || exit 2
+        printf 'fixture-ssh-preflight: source_verified=false jail_ready=false\n'
+        exit "${FAIL2BAN_STATUS:-0}"
+    fi
     if [[ "${2:-}" == control ]]; then
         shift
         if [[ "${2:-}" == enable || "${2:-}" == settings ]]; then
@@ -1594,12 +1602,14 @@ unset MAINTENANCE_STATUS MAINTENANCE_VALIDATE_STATUS
 for fail2banCase in flow cancel menu-eof invalid failed int term disable disable-failed disable-int disable-term \
     verify verify-cancel verify-list-failed verify-invalid verify-failed verify-int verify-term \
     enable enable-cancel enable-invalid enable-failed enable-list-failed enable-int enable-term \
-    settings settings-cancel settings-invalid settings-failed settings-list-failed settings-int settings-term; do
+    settings settings-cancel settings-invalid settings-failed settings-list-failed settings-int settings-term \
+    ssh-preflight ssh-preflight-failed; do
     : >"${TLS_WIZARD_ACTIONS}"
     export FAIL2BAN_STATUS=0 FAIL2BAN_UNBAN_STATUS=0 FAIL2BAN_DISABLE_STATUS=0 \
         FAIL2BAN_VERIFY_STATUS=0 FAIL2BAN_EDIT_STATUS=0 FAIL2BAN_PROTOCOL_LIST_STATUS=0 FAIL2BAN_WAIT=0 \
         FAIL2BAN_PID="${TEST_ROOT}/fail2ban.pid"
     [[ "${fail2banCase}" != failed ]] || { FAIL2BAN_STATUS=17; FAIL2BAN_UNBAN_STATUS=17; }
+    [[ "${fail2banCase}" != ssh-preflight-failed ]] || FAIL2BAN_STATUS=10
     [[ "${fail2banCase}" != disable-failed ]] || FAIL2BAN_DISABLE_STATUS=17
     [[ "${fail2banCase}" != verify-failed ]] || FAIL2BAN_VERIFY_STATUS=17
     [[ "${fail2banCase}" != verify-list-failed ]] || FAIL2BAN_PROTOCOL_LIST_STATUS=17
@@ -1609,6 +1619,14 @@ for fail2banCase in flow cancel menu-eof invalid failed int term disable disable
     runPty "fail2ban-${fail2banCase}" maintenance "fail2ban-${fail2banCase}" "${TLS_WIZARD_CLI}" menu
     expectedFail2ban=
     case "${fail2banCase}" in
+    ssh-preflight|ssh-preflight-failed)
+        expectedFail2ban='fail2ban ssh preflight'
+        grep -Fq 'fixture-ssh-preflight: source_verified=false jail_ready=false' "${CONTROL_LOG}" ||
+            fail 'SSH 预检未显示未证明来源和 jail 未就绪'
+        if [[ "${fail2banCase}" == ssh-preflight-failed ]]; then
+            grep -Fq '操作失败，退出码: 10' "${CONTROL_LOG}" || fail 'SSH 预检失败未保留退出码或留在子菜单'
+        fi
+        ;;
     flow)
         expectedFail2ban=$'fail2ban status\nfail2ban unban 203.0.113.9\nfail2ban unban 2001:db8::9'
         grep -Fq 'fixture-fail2ban-status' "${CONTROL_LOG}" || fail 'Fail2ban 状态未显示后端输出'
@@ -1694,7 +1712,7 @@ for fail2banCase in flow cancel menu-eof invalid failed int term disable disable
         fail "Fail2ban ${fail2banCase} 参数分发错误或取消后仍执行操作"
     for fail2banLabel in '5. Fail2ban 维护' 'Docker Fail2ban 维护' '1. 查看 WS 状态' \
         '2. 解封 WS 单个 IP' '3. 停用 WS 站点扫描防护' '4. 核对 WS 真实来源' \
-        '5. 启用 WS 站点扫描防护' '6. 修改 WS 站点扫描参数'; do
+        '5. 启用 WS 站点扫描防护' '6. 修改 WS 站点扫描参数' '12. SSH 宿主只读预检'; do
         grep -Fq "${fail2banLabel}" "${CONTROL_LOG}" || fail "Fail2ban 菜单缺少: ${fail2banLabel}"
     done
 done

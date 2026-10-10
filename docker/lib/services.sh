@@ -4166,10 +4166,136 @@ dockerControlFail2banDisablePrepare() {
     dockerFail2banDisablePrepare "$1" "${2:-normal}" control
 }
 
+dockerSshLogFileReadable() {
+    local path=${1:-} parent metadata owner mode
+    [[ "$#" -eq 1 && "${path}" == /* && -f "${path}" && ! -L "${path}" && -r "${path}" ]] || return 1
+    parent=${path%/*}
+    while [[ -n "${parent}" && "${parent}" != / ]]; do
+        [[ -d "${parent}" && ! -L "${parent}" ]] || return 1
+        parent=${parent%/*}
+    done
+    metadata=$(stat -c '%u %a' -- "${path}" 2>/dev/null) || return 1
+    read -r owner mode <<<"${metadata}"
+    [[ "${owner}" == 0 && "${mode}" =~ ^[0-7]{1,4}$ && -f "${path}" && ! -L "${path}" ]] &&
+        (( (8#${mode} & 8#22) == 0 ))
+}
+
+dockerSshFixedLogCandidates() {
+    local auth=false secure=false
+    dockerSshLogFileReadable /var/log/auth.log && auth=true
+    dockerSshLogFileReadable /var/log/secure && secure=true
+    jq -cn --argjson auth "${auth}" --argjson secure "${secure}" \
+        '{auth_log:$auth,secure:$secure}'
+}
+
+dockerSshLogCandidates() {
+    local journal=false records files
+    # 历史记录只证明日志可读，不证明当前客户端来源；正文不进入输出。
+    if command -v journalctl >/dev/null 2>&1 &&
+        records=$(journalctl --quiet --no-pager --boot --output=json --lines=1 _COMM=sshd 2>/dev/null) &&
+        jq -se 'length == 1 and (.[0] | type == "object" and ._COMM == "sshd" and
+          (.MESSAGE | type == "string"))' <<<"${records}" >/dev/null 2>&1; then
+        journal=true
+    fi
+    files=$(dockerSshFixedLogCandidates) || return 1
+    jq -cn --argjson files "${files}" --argjson journal "${journal}" \
+        '$files + {systemd:$journal}'
+}
+
+dockerSshPreflight() {
+    local output=${1:-} tool config listeners configured observed candidates result
+    [[ "$#" -eq 0 || ( "$#" -eq 1 && "${output}" == --json ) ]] || return "${PADM_DOCKER_RC_USAGE}"
+    dockerHostPreflight || return "${PADM_DOCKER_RC_HOST}"
+    for tool in sshd ss awk stat; do
+        dockerRequireCommand "${tool}" || return "${PADM_DOCKER_RC_HOST}"
+    done
+    config=$(sshd -T 2>/dev/null) || {
+        dockerError '无法读取宿主 SSH 默认配置端口'
+        return "${PADM_DOCKER_RC_HOST}"
+    }
+    configured=$(set -o pipefail; awk '
+      $1 == "port" {
+        if (NF != 2 || $2 !~ /^[0-9]+$/ || $2 + 0 < 1 || $2 + 0 > 65535) exit 1
+        printf "%d\n", $2 + 0
+        count++
+      }
+      END { if (!count) exit 1 }
+    ' <<<"${config}" | jq -sc 'unique | sort') || {
+        dockerError '宿主 SSH 默认配置端口为空或非法'
+        return "${PADM_DOCKER_RC_HOST}"
+    }
+    listeners=$(ss -H -ltnp 2>/dev/null) || {
+        dockerError '无法读取宿主 SSH TCP 监听'
+        return "${PADM_DOCKER_RC_HOST}"
+    }
+    observed=$(set -o pipefail; awk -v expected="${configured//[\[\] ]/}" '
+      BEGIN {
+        split(expected, values, ",")
+        for (i in values) if (values[i] != "") wanted[values[i] + 0] = 1
+      }
+      {
+        owned=$NF ~ /^users:\(\("sshd",pid=[1-9][0-9]*,fd=[0-9]+\)(,\("sshd",pid=[1-9][0-9]*,fd=[0-9]+\))*\)$/
+        if ($1 != "LISTEN" || $4 !~ /:[0-9]+$/) {
+          if (owned) exit 1
+          next
+        }
+        port=$4
+        sub(/^.*:/, "", port)
+        if (port + 0 < 1 || port + 0 > 65535) exit 1
+        port += 0
+        if (wanted[port] && !owned) exit 1
+        if (owned) {
+          seen[port] = 1
+          printf "%d\n", port
+        }
+      }
+      END {
+        for (port in wanted) if (!seen[port]) exit 1
+      }
+    ' <<<"${listeners}" | jq -sc 'unique | sort') || {
+        dockerError '宿主没有可核验的 sshd TCP 监听'
+        return "${PADM_DOCKER_RC_HOST}"
+    }
+    [[ "${configured}" == "${observed}" ]] || {
+        dockerError '宿主 sshd 监听端口与默认配置端口不一致'
+        return "${PADM_DOCKER_RC_HOST}"
+    }
+    candidates=$(dockerSshLogCandidates) &&
+        jq -e 'any(.[]; . == true)' <<<"${candidates}" >/dev/null || {
+        dockerError '未发现可读的宿主 SSH 候选日志'
+        return "${PADM_DOCKER_RC_HOST}"
+    }
+    # 默认配置与端口集合相同，仍不能证明启动参数、端点地址族或实时来源。
+    result=$(jq -cn --argjson configured "${configured}" --argjson observed "${observed}" \
+        --argjson candidates "${candidates}" '{
+          scope:"host-preflight-only",configured_default_ports:$configured,observed_sshd_ports:$observed,
+          log_candidates:$candidates,candidate_backends:[
+            if $candidates.systemd then "systemd" else empty end,
+            if $candidates.auth_log or $candidates.secure then "polling" else empty end],
+          source_verified:false,runtime_configuration_verified:false,jail_ready:false
+        }') || return "${PADM_DOCKER_RC_HOST}"
+    if [[ "${output}" == --json ]]; then
+        printf '%s\n' "${result}"
+    else
+        jq -r '"宿主 SSH 只读预检（默认配置端口核对）",
+          "默认配置端口: \(.configured_default_ports | map(tostring) | join(","))",
+          "观察到的 sshd 端口: \(.observed_sshd_ports | map(tostring) | join(","))",
+          "候选日志后端: \(.candidate_backends | join(","))",
+          "实时来源未证明，运行配置未完整核验；本次预检不启用 SSH 防护。"' <<<"${result}"
+    fi
+}
+
 dockerFail2banCommand() {
     local scope=ws type=fail2ban jail=padm-nginx
     local action=${1:-} address='' container
     local ports maxRetry findTime banTime required
+    if [[ "${action}" == ssh ]]; then
+        [[ "$#" -eq 2 || ( "$#" -eq 3 && "$3" == --json ) ]] &&
+            [[ "$2" == preflight ]] || return "${PADM_DOCKER_RC_USAGE}"
+        shift 2
+        dockerSshPreflight "$@"
+        return $?
+    fi
     if [[ "${action}" == control ]]; then
         shift
         scope=control type=fail2ban-control jail=padm-control action=${1:-}
