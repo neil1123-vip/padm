@@ -192,7 +192,7 @@ Fail2ban 关联 WS 的增删及公开端口修改暂冻结；真实签名发布�
 | `reality-coexistence` | 协议与入口 -> REALITY 管理 -> 443 共存分流 | `deferred` | `core-xray` / `nginx` | 宿主 CLI | 共存开启、状态检查、关闭及端口恢复事务尚未迁移。 |
 | `entry-port-management` | 协议与入口 -> 入口端口管理 | `deferred` | 核心 | bridge | v2/v3 已有多入口端口映射及候选事务，v3 明确核心归属；既有内部端口冻结，Fail2ban 联动和 443 共存等完整管理未交付。 |
 | `cdn-entry-management` | 协议与入口 -> CDN 入口管理 | `deferred` | `subscription` | bridge | 尚无独立订阅入口地址覆盖管理。 |
-| `fail2ban` | 系统与脚本 -> Fail2ban 防护 | `host-integrated` | `net-fail2ban` / `net-fail2ban-control` | host + `NET_ADMIN` | WS 双栈 DOCKER-USER 与控制面 IPv4 INPUT 的独立 jail、状态、数据库及菜单/CLI。配置/更新/启动/恢复在同锁内停止审计旧 owner、启动普通服务、取得分别的 fresh witness，最终复核来源/配置后 no-deps 启 jail；控制范围取自主控监听，不要求 API 授权启用。禁自动重启，失败保留现场，旧 state/外来规则拒绝接管。WS 证明不保证 Nginx worker 全部内存字节；SSH、原生宿主/arm64/重启卸载及完整管理仍待验收。 |
+| `fail2ban` | 系统与脚本 -> Fail2ban 防护 | `host-integrated` | `net-fail2ban` / `net-fail2ban-control` | host + `NET_ADMIN` | WS 双栈 DOCKER-USER 与控制面 IPv4 INPUT 的独立 jail、状态、数据库及菜单/CLI。配置/更新/启动/恢复在同锁内停止审计旧 owner、启动普通服务、取得分别的 fresh witness，最终复核来源/配置后 no-deps 启 jail；控制范围取自主控监听，不要求 API 授权启用。禁自动重启，失败保留现场，旧 state/外来规则拒绝接管。SSH 菜单/CLI 只读预检默认端口、sshd 监听及日志候选，明确来源/运行配置未证明、jail 未就绪。WS 证明不保证 Nginx worker 全部内存字节；SSH 防护、原生宿主/arm64/重启卸载及完整管理仍待验收。 |
 | `wireguard` | 订阅与用户 / 路由与访问控制 | `host-integrated` | `net-wireguard` | host + `NET_ADMIN` | 接口和密钥由宿主内核拥有。 |
 | `tun` | 路由与访问控制 -> TUN | `host-integrated` | `net-transparent` | host + `NET_ADMIN` + `/dev/net/tun` | 显式启用透明代理设备。 |
 | `tproxy` | 路由与访问控制 -> Redirect/TProxy | `host-integrated` | `net-transparent` | host + `NET_ADMIN` | 依赖宿主路由和防火墙规则。 |

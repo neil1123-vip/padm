@@ -651,6 +651,24 @@ Fail2ban 使用 schema 2 的私密 `data/net/fail2ban/fail2ban.state`、随机�
 隔离 Linux amd64 已验证真实双栈来源、日志自动封禁、丢包及解封；
 同事务双端口/双栈启用已验收；SSH/控制面防护、真实宿主、arm64、重启/卸载与完整管理仍按 5C 门槛验收。
 
+Fail2ban 子菜单第 12 项和以下命令提供 SSH 宿主只读预检：
+
+```bash
+padm-docker fail2ban ssh preflight
+padm-docker fail2ban ssh preflight --json
+```
+
+沿用 Docker 版 Linux/root、本机 rootful daemon 门禁，不要求已有部署。
+从宿主默认 `sshd -T` 读取端口，核对 `ss` 中明确属于 `sshd` 的实际监听端口集合，
+仅列出本次 boot 的 journal 或固定 `/var/log/auth.log`、`/var/log/secure` 日志候选。
+文件候选必须是 root 拥有的普通文件，路径无软链接且不允许组/其他用户写入；
+不输出认证日志正文、账号或来源地址。工具缺失、端口不符或无候选返回 `10`。
+JSON 明确 `scope=host-preflight-only`，`source_verified`、
+`runtime_configuration_verified`、`jail_ready` 均为 `false`。
+默认配置不能证明运行实例的 `-f/-p/-o` 或 socket activation 配置，
+端口一致也不证明绑定地址及地址族一致。历史日志不证明真实失败来源；
+该命令不保存凭证、不修改规则或配置、不启用 SSH jail。
+
 已有 TProxy profile 使用私密 `data/net/transparent/tproxy.state` 记录随机链、
 规则 token、mark、路由表和路由身份。预检只读核对当前归属与候选冲突；
 启动失败及正常停止逐条精确撤销，不 flush 整个链或路由表。
