@@ -2329,13 +2329,43 @@ coreSetStartupServiceEnabled() {
     fi
 }
 
+coreStartupServiceBackupCreate() {
+    local resultVar=$1 serviceFile=$2 serviceMode= backupDir=
+    if [[ -f "${serviceFile}" ]]; then
+        serviceMode=$(stat -Lc %a -- "${serviceFile}") || return 1
+        [[ "${serviceMode}" =~ ^[0-7]{1,4}$ ]] || return 1
+    fi
+    checkLogBackupCreate backupDir "${serviceFile}" || return 1
+    # 通用配置备份固定为 644，启动脚本另存原权限。
+    if [[ -n "${serviceMode}" ]] &&
+        ! printf '%s\t%s\n' "${serviceMode}" "${serviceFile}" >"${backupDir}/service.mode"; then
+        padmRemoveCleanupPath "${backupDir}"
+        return 1
+    fi
+    printf -v "${resultVar}" '%s' "${backupDir}"
+}
+
 restoreCoreStartupServiceInstall() {
     local backupDir=$1
     local serviceName=$2
     local serviceWasEnabled=$3
-    local rollbackFailed=false
+    local rollbackFailed=false serviceMode= serviceFile=
+
+    if [[ -e "${backupDir}/service.mode" || -L "${backupDir}/service.mode" ]]; then
+        if [[ ! -f "${backupDir}/service.mode" || -L "${backupDir}/service.mode" ]] ||
+            ! IFS=$'\t' read -r serviceMode serviceFile <"${backupDir}/service.mode" ||
+            [[ ! "${serviceMode}" =~ ^[0-7]{1,4}$ ]] ||
+            ! padmIsSafeAbsolutePath "${serviceFile}"; then
+            padmForgetCleanupPath "${backupDir}"
+            return 1
+        fi
+    fi
 
     if ! checkLogBackupRestore "${backupDir}"; then
+        padmForgetCleanupPath "${backupDir}"
+        return 1
+    fi
+    if [[ -n "${serviceMode}" ]] && ! chmod "${serviceMode}" -- "${serviceFile}"; then
         padmForgetCleanupPath "${backupDir}"
         return 1
     fi
@@ -2440,7 +2470,7 @@ LimitNOFILE=infinity
 WantedBy=multi-user.target
 EOF
         coreStartupServiceEnabled sing-box && serviceWasEnabled=true
-        checkLogBackupCreate serviceBackupDir "${serviceFile}" || { padmRemoveCleanupPath "${tmpFile}"; errorCard "sing-box systemd 模板备份失败"; return 1; }
+        coreStartupServiceBackupCreate serviceBackupDir "${serviceFile}" || { padmRemoveCleanupPath "${tmpFile}"; errorCard "sing-box systemd 模板备份失败"; return 1; }
         registerCoreStartupServiceInstallRollback "${serviceBackupDir}" sing-box "${serviceWasEnabled}" || return 1
         if ! commitGeneratedFile "${tmpFile}" "${serviceFile}" 644; then
             padmRemoveCleanupPath "${tmpFile}"
@@ -2454,7 +2484,7 @@ EOF
     elif [[ "${release}" == "alpine" ]]; then
         serviceFile=${PADM_SINGBOX_OPENRC_SERVICE_FILE:-/etc/init.d/sing-box}
         coreStartupServiceEnabled sing-box && serviceWasEnabled=true
-        checkLogBackupCreate serviceBackupDir "${serviceFile}" || { errorCard "sing-box OpenRC 模板备份失败"; return 1; }
+        coreStartupServiceBackupCreate serviceBackupDir "${serviceFile}" || { errorCard "sing-box OpenRC 模板备份失败"; return 1; }
         registerCoreStartupServiceInstallRollback "${serviceBackupDir}" sing-box "${serviceWasEnabled}" || return 1
         if ! installAlpineStartup "sing-box"; then
             failCoreStartupServiceInstall "${serviceBackupDir}" sing-box "${serviceWasEnabled}" "sing-box OpenRC 模板提交失败"
@@ -2508,7 +2538,7 @@ LimitNOFILE=infinity
 WantedBy=multi-user.target
 EOF
         coreStartupServiceEnabled xray && serviceWasEnabled=true
-        checkLogBackupCreate serviceBackupDir "${serviceFile}" || { padmRemoveCleanupPath "${tmpFile}"; errorCard "Xray systemd 模板备份失败"; return 1; }
+        coreStartupServiceBackupCreate serviceBackupDir "${serviceFile}" || { padmRemoveCleanupPath "${tmpFile}"; errorCard "Xray systemd 模板备份失败"; return 1; }
         registerCoreStartupServiceInstallRollback "${serviceBackupDir}" xray "${serviceWasEnabled}" || return 1
         if ! commitGeneratedFile "${tmpFile}" "${serviceFile}" 644; then
             padmRemoveCleanupPath "${tmpFile}"
@@ -2522,7 +2552,7 @@ EOF
     elif [[ "${release}" == "alpine" ]]; then
         serviceFile=${PADM_XRAY_OPENRC_SERVICE_FILE:-/etc/init.d/xray}
         coreStartupServiceEnabled xray && serviceWasEnabled=true
-        checkLogBackupCreate serviceBackupDir "${serviceFile}" || { errorCard "Xray OpenRC 模板备份失败"; return 1; }
+        coreStartupServiceBackupCreate serviceBackupDir "${serviceFile}" || { errorCard "Xray OpenRC 模板备份失败"; return 1; }
         registerCoreStartupServiceInstallRollback "${serviceBackupDir}" xray "${serviceWasEnabled}" || return 1
         if ! installAlpineStartup "xray"; then
             failCoreStartupServiceInstall "${serviceBackupDir}" xray "${serviceWasEnabled}" "Xray OpenRC 模板提交失败"

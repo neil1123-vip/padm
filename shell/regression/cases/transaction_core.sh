@@ -1066,7 +1066,7 @@ runCoreUpgradePendingStartRollbackRegression() (
         done
     )
     (
-        local core release signal scope enabled fixture status installer serviceFile configFile events
+        local core release signal scope enabled fixture status installer serviceFile configFile events originalMode
         local PADM_XRAY_SYSTEMD_SERVICE_FILE PADM_SINGBOX_SYSTEMD_SERVICE_FILE
         local PADM_XRAY_OPENRC_SERVICE_FILE PADM_SINGBOX_OPENRC_SERVICE_FILE
         local PADM_TMP_DIR TMPDIR
@@ -1113,6 +1113,9 @@ runCoreUpgradePendingStartRollbackRegression() (
                             PADM_XRAY_SYSTEMD_SERVICE_FILE=${serviceFile} PADM_SINGBOX_SYSTEMD_SERVICE_FILE=${serviceFile}
                             PADM_XRAY_OPENRC_SERVICE_FILE=${serviceFile} PADM_SINGBOX_OPENRC_SERVICE_FILE=${serviceFile}
                             printf 'old-service\n' >"${serviceFile}"
+                            originalMode=750
+                            [[ "${enabled}" != true ]] || originalMode=755
+                            chmod "${originalMode}" "${serviceFile}" || return 1
                             printf 'old-config\n' >"${configFile}"
                             : >"${events}"
                             [[ "${enabled}" != true ]] || touch "${fixture}/enabled"
@@ -1128,6 +1131,7 @@ runCoreUpgradePendingStartRollbackRegression() (
                             ) >"${fixture}/output" 2>&1 || status=$?
                             [[ "${status}" == "$([[ "${signal}" == TERM ]] && printf 143 || printf 130)" ]] || return 1
                             [[ "$(<"${serviceFile}")" == old-service && "$(<"${configFile}")" == old-config ]] || return 1
+                            [[ "$(stat -c %a "${serviceFile}")" == "${originalMode}" ]] || return 1
                             [[ "${enabled}" == "$([[ -e "${fixture}/enabled" ]] && printf true || printf false)" ]] || return 1
                             if [[ "${scope}" == outer ]]; then
                                 [[ "$(head -n 1 "${events}")" == stop ]] || return 1
@@ -7067,6 +7071,60 @@ JSON
         done
     ) || return 1
 
+    (
+        local signal failure caseRoot signalStatus expectedStatus backupDir signalRoot="${entryTmpRoot}/check-log-signals"
+        local coreInstallType=1 configPath realityStatus=7 TMPDIR REGRESSION_ERROR_CARD_LOG
+        eval "$(declare -f writeXrayLogConfig | sed '1s/^writeXrayLogConfig/originalSignalWriteXrayLogConfig/')"
+        eval "$(declare -f checkLogBackupRestore | sed '1s/^checkLogBackupRestore/originalSignalCheckLogBackupRestore/')"
+        autoRead() { printf -v "$3" '1'; }
+        xrayRunning() { [[ "${failure}" == reload ]]; }
+        writeXrayLogConfig() {
+            originalSignalWriteXrayLogConfig "$@" || return 1
+            [[ "${failure}" != write && "${failure}" != restore ]] || kill "-${signal}" "${BASHPID}"
+        }
+        runServiceAction() {
+            printf '%s\n' "$*" >>"${caseRoot}/service.calls"
+            [[ "$(wc -l <"${caseRoot}/service.calls")" -ne 1 ]] || kill "-${signal}" "${BASHPID}"
+        }
+        checkLogBackupRestore() {
+            printf '%s\n' "$1" >>"${caseRoot}/restore.calls"
+            [[ "${failure}" != restore ]] || return 1
+            originalSignalCheckLogBackupRestore "$@"
+        }
+        for signal in INT TERM; do
+            for failure in write reload restore; do
+                caseRoot="${signalRoot}/${signal}-${failure}"
+                configPath="${caseRoot}/conf/"
+                TMPDIR="${caseRoot}/tmp"
+                REGRESSION_ERROR_CARD_LOG="${caseRoot}/errors.log"
+                mkdir -p "${configPath}" "${TMPDIR}" || return 1
+                originalSignalWriteXrayLogConfig "${configPath}00_log.json" "${caseRoot}/" false || return 1
+                printf '{"inbounds":[{"streamSettings":{"realitySettings":{"show":false}}}]}\n' >"${configPath}07_VLESS_vision_reality_inbounds.json"
+                cp "${configPath}00_log.json" "${caseRoot}/old-log.json" || return 1
+                cp "${configPath}07_VLESS_vision_reality_inbounds.json" "${caseRoot}/old-reality.json" || return 1
+                signalStatus=0 expectedStatus=130
+                [[ "${signal}" != TERM ]] || expectedStatus=143
+                ( checkLog ) >"${caseRoot}/signal.log" 2>&1 || signalStatus=$?
+                [[ "${signalStatus}" == "${expectedStatus}" && -f "${caseRoot}/restore.calls" &&
+                    "$(wc -l <"${caseRoot}/restore.calls")" -eq 1 ]] || return 1
+                backupDir=$(<"${caseRoot}/restore.calls")
+                if [[ "${failure}" == restore ]]; then
+                    [[ -f "${backupDir}/manifest" && ! -e "${caseRoot}/service.calls" ]] || return 1
+                    grep -q '旧配置恢复失败' "${REGRESSION_ERROR_CARD_LOG}" || return 1
+                else
+                    cmp -s "${configPath}00_log.json" "${caseRoot}/old-log.json" || return 1
+                    cmp -s "${configPath}07_VLESS_vision_reality_inbounds.json" "${caseRoot}/old-reality.json" || return 1
+                    [[ ! -e "${backupDir}" ]] || return 1
+                    if [[ "${failure}" == reload ]]; then
+                        [[ "$(wc -l <"${caseRoot}/service.calls")" -eq 2 ]] || return 1
+                    else
+                        [[ ! -e "${caseRoot}/service.calls" ]] || return 1
+                    fi
+                fi
+            done
+        done
+    ) || return 1
+
     nginxConfigPath="${TMP_DIR}/entry-helper-nginx/"
     domain=example.com
     nginxStaticPath="${TMP_DIR}/static"
@@ -7146,7 +7204,7 @@ JSON
 
     (
         local errorLog="${TMP_DIR}/entry-helper-check-log-write-error.log"
-        local readCalls=0 rc
+        local readCalls=0 restoreCalls=0 rc
         : >"${errorLog}"
         coreInstallType=1
         configPath="${entryConfigPath}"
@@ -7162,11 +7220,18 @@ JSON
         updateRealityShowConfig() {
             return 1
         }
+        eval "$(declare -f checkLogBackupRestore | sed '1s/^checkLogBackupRestore/interruptedCheckLogBackupRestore/')"
+        checkLogBackupRestore() {
+            restoreCalls=$((restoreCalls + 1))
+            kill -TERM "${BASHPID}"
+            interruptedCheckLogBackupRestore "$@"
+        }
         errorCard() {
             printf '%s\n' "$*" >>"${errorLog}"
         }
         regressionExpectStatus 1 checkLog >/dev/null 2>&1
         [[ "${readCalls}" == "1" ]]
+        [[ "${restoreCalls}" == "1" ]]
         grep -q 'Reality 日志联动配置写入失败' "${errorLog}"
         jq -e '(.log.access | not) and .log.error == "'"${entryLogBase}"'error.log" and .log.loglevel == "warning"' "${entryConfigPath}00_log.json" >/dev/null
         jq -e '.inbounds[0].streamSettings.realitySettings.show == false' "${realityVisionFile}" >/dev/null
@@ -7177,7 +7242,7 @@ JSON
 
     (
         local errorLog="${TMP_DIR}/entry-helper-check-log-error.log"
-        local reloadCalls=0 readCalls=0 rc
+        local reloadCalls=0 readCalls=0 rc keptBackup
         : >"${errorLog}"
         coreInstallType=1
         configPath="${entryConfigPath}"
@@ -7206,9 +7271,8 @@ JSON
         grep -q '恢复旧配置后核心重载仍失败' "${errorLog}"
         jq -e '(.log.access | not) and .log.error == "'"${entryLogBase}"'error.log" and .log.loglevel == "warning"' "${entryConfigPath}00_log.json" >/dev/null
         jq -e '.inbounds[0].streamSettings.realitySettings.show == false' "${realityVisionFile}" >/dev/null
-        if regressionFindHasMatches "${entryTmpRoot}" -maxdepth 1 -type d -name 'padm-check-log-backup.*'; then
-            return 1
-        fi
+        keptBackup=$(find "${entryTmpRoot}" -maxdepth 1 -type d -name 'padm-check-log-backup.*' -print)
+        [[ -n "${keptBackup}" && "${keptBackup}" != *$'\n'* && -f "${keptBackup}/manifest" ]] || return 1
         xrayRunning() { return 1; }
         reloadCalls=0
         checkLog >/dev/null 2>&1 || return 1

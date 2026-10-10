@@ -32,6 +32,12 @@ failTrafficStatsConfigChange() {
     return 1
 }
 
+rollbackTrafficStatsConfigOnExit() {
+    [[ "${trafficStatsRollbackActive:-false}" == true ]] || return 0
+    trafficStatsRollbackActive=false
+    failTrafficStatsConfigChange "${trafficBackupDir}" "${1:-流量统计配置更新中断}" "${trafficStatsRetryReload}"
+}
+
 ensureXrayTrafficStatsConfig() {
     local xrayConfigPath=${configPath:-/etc/padm/xray/conf/}
     local statsConfig=${xrayConfigPath}13_stats_api.json
@@ -41,6 +47,9 @@ ensureXrayTrafficStatsConfig() {
     local trafficBackupDir
     local statsChanged=false
     local policyChanged=false
+    local trafficStatsRollbackActive=false trafficStatsRetryReload=false
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
     [[ "${coreInstallType}" == "1" && -d "${xrayConfigPath}" ]] || return 0
     padmCreateTempFileForTarget tmpFile "${statsConfig}" stats || {
         errorCard "Xray 流量统计 stats 临时文件创建失败"
@@ -130,11 +139,13 @@ EOF
         errorCard "Xray 流量统计配置备份失败，已取消更新"
         return 1
     }
+    trafficStatsRollbackActive=true
+    padmRegisterExitRollback rollbackTrafficStatsConfigOnExit
     if [[ "${statsChanged}" == "true" ]]; then
         commitGeneratedJsonFile "${tmpFile}" "${statsConfig}" || {
             padmRemoveCleanupPath "${tmpFile}"
             padmRemoveCleanupPath "${policyTmp}"
-            failTrafficStatsConfigChange "${trafficBackupDir}" "Xray 流量统计 stats 配置写入失败"
+            padmRunRollback rollbackTrafficStatsConfigOnExit "Xray 流量统计 stats 配置写入失败" || true
             return 1
         }
     else
@@ -143,7 +154,7 @@ EOF
     if [[ "${policyChanged}" == "true" ]]; then
         commitGeneratedJsonFile "${policyTmp}" "${policyConfig}" || {
             padmRemoveCleanupPath "${policyTmp}"
-            failTrafficStatsConfigChange "${trafficBackupDir}" "Xray 流量统计策略配置写入失败"
+            padmRunRollback rollbackTrafficStatsConfigOnExit "Xray 流量统计策略配置写入失败" || true
             return 1
         }
     else
@@ -151,11 +162,14 @@ EOF
     fi
 
     if [[ -n "${configPath:-}" ]]; then
+        trafficStatsRetryReload=true
         if ! reloadCore; then
-            failTrafficStatsConfigChange "${trafficBackupDir}" "Xray 流量统计配置更新后核心重载失败" true
+            padmRunRollback rollbackTrafficStatsConfigOnExit "Xray 流量统计配置更新后核心重载失败" || true
             return 1
         fi
     fi
+    trafficStatsRollbackActive=false
+    unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
     padmRemoveCleanupPath "${trafficBackupDir}"
 }
 
@@ -195,6 +209,9 @@ ensureSingBoxTrafficStatsConfig() {
     local tmpFile
     local trafficBackupDir
     local users
+    local trafficStatsRollbackActive=false trafficStatsRetryReload=false
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
     [[ -n "${singBoxConfigPath:-}" ]] || return 0
     configDir=$(subscriptionSyncSafeSingBoxConfigDir) || {
         errorCard "sing-box 流量统计配置目录不可用"
@@ -211,15 +228,20 @@ ensureSingBoxTrafficStatsConfig() {
             errorCard "sing-box 不支持 v2ray_api，旧统计配置备份失败，已取消更新"
             return 1
         }
+        trafficStatsRollbackActive=true
+        padmRegisterExitRollback rollbackTrafficStatsConfigOnExit
         if ! removeManagedFileIfPresent "${statsConfig}"; then
-            failTrafficStatsConfigChange "${trafficBackupDir}" "sing-box 不支持 v2ray_api，旧统计配置清理失败"
+            padmRunRollback rollbackTrafficStatsConfigOnExit "sing-box 不支持 v2ray_api，旧统计配置清理失败" || true
             return 1
         fi
+        trafficStatsRetryReload=true
         if ! reloadCore; then
-            failTrafficStatsConfigChange "${trafficBackupDir}" "sing-box 不支持 v2ray_api，配置清理后核心重载失败" true
+            padmRunRollback rollbackTrafficStatsConfigOnExit "sing-box 不支持 v2ray_api，配置清理后核心重载失败" || true
             return 1
         fi
         SUBSCRIPTION_TRAFFIC_STATS_RELOADED=true
+        trafficStatsRollbackActive=false
+        unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
         padmRemoveCleanupPath "${trafficBackupDir}"
         return 0
     fi
@@ -250,20 +272,25 @@ ensureSingBoxTrafficStatsConfig() {
         errorCard "sing-box 流量统计配置备份失败，已取消更新"
         return 1
     }
+    trafficStatsRollbackActive=true
+    padmRegisterExitRollback rollbackTrafficStatsConfigOnExit
     commitGeneratedJsonFile "${tmpFile}" "${statsConfig}" || {
         padmRemoveCleanupPath "${tmpFile}"
-        failTrafficStatsConfigChange "${trafficBackupDir}" "sing-box 流量统计配置写入失败"
+        padmRunRollback rollbackTrafficStatsConfigOnExit "sing-box 流量统计配置写入失败" || true
         return 1
     }
     if ! singBoxMergeConfig; then
-        failTrafficStatsConfigChange "${trafficBackupDir}" "sing-box 流量统计主配置合并失败"
+        padmRunRollback rollbackTrafficStatsConfigOnExit "sing-box 流量统计主配置合并失败" || true
         return 1
     fi
+    trafficStatsRetryReload=true
     if ! reloadCore; then
-        failTrafficStatsConfigChange "${trafficBackupDir}" "sing-box 流量统计配置更新后核心重载失败" true
+        padmRunRollback rollbackTrafficStatsConfigOnExit "sing-box 流量统计配置更新后核心重载失败" || true
         return 1
     fi
     SUBSCRIPTION_TRAFFIC_STATS_RELOADED=true
+    trafficStatsRollbackActive=false
+    unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
     padmRemoveCleanupPath "${trafficBackupDir}"
 }
 
