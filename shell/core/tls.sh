@@ -594,7 +594,7 @@ installCronTLS() {
         if awk '
           $1 !~ /^#/ {
             command = ($1 ~ /^@/) ? 2 : 6
-            if ($command == "/bin/bash") command++
+            if ($command == "/bin/bash" || $command == "bash") command++
             if ($command == "/etc/padm/install.sh" && $(command + 1) == "RenewTLS") {
               count++
               nextArg = $(command + 2)
@@ -607,7 +607,14 @@ installCronTLS() {
             statusCard "TLS 自动续签" "已设置" "保留现有定时任务"
             return 0
         fi
-        historyCrontab=$(sed '\|/etc/padm/install.sh RenewTLS|d' <<<"${historyCrontab}") || {
+        historyCrontab=$(awk '
+          $1 !~ /^#/ {
+            command = ($1 ~ /^@/) ? 2 : 6
+            if ($command == "/bin/bash" || $command == "bash") command++
+            if ($command == "/etc/padm/install.sh" && $(command + 1) == "RenewTLS") next
+          }
+          { print }
+        ' <<<"${historyCrontab}") || {
             errorCard "整理现有定时任务失败，已取消添加证书维护任务"
             return 1
         }

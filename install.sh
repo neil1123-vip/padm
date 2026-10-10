@@ -68,7 +68,9 @@ scriptCreateTempDir() {
 scriptModuleLockRelease() {
     local lockDir=${SCRIPT_MODULE_LOCK_DIR:-}
     local ownerPid
-    [[ -n "${lockDir}" && -d "${lockDir}" ]] || return 0
+    [[ -n "${lockDir}" ]] || return 0
+    [[ ! -L "${lockDir}" ]] || return 1
+    [[ -d "${lockDir}" ]] || return 0
     ownerPid=$(cat "${lockDir}/pid" 2>/dev/null || true)
     [[ "${ownerPid}" == "${BASHPID:-$$}" ]] || return 0
     rm -f -- "${lockDir}/pid" 2>/dev/null || return 1
@@ -83,6 +85,7 @@ scriptModuleLockAcquire() {
     scriptIsSafeAbsolutePath "${lockDir}" || return 1
     deadline=$((SECONDS + timeout))
     while ! mkdir -- "${lockDir}" 2>/dev/null; do
+        [[ ! -L "${lockDir}" ]] || return 1
         ownerPid=$(cat "${lockDir}/pid" 2>/dev/null || true)
         if [[ "${ownerPid}" =~ ^[0-9]+$ ]] && ! kill -0 "${ownerPid}" 2>/dev/null; then
             rm -f -- "${lockDir}/pid" 2>/dev/null || true
