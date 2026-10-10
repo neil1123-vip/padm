@@ -785,7 +785,8 @@ readConfigHostPathUUID() {
 
         # 安装
         if [[ -n "${frontingType}" ]]; then
-            currentHost=$(jq -r .inbounds[0].streamSettings.tlsSettings.certificates[0].certificateFile "${configPath}${frontingType}.json" | awk -F '[t][l][s][/]' '{print $2}' | awk -F '[.][c][r][t]' '{print $1}')
+            currentHost=$(jq -r .inbounds[0].streamSettings.tlsSettings.certificates[0].certificateFile "${configPath}${frontingType}.json" | awk -F '[t][l][s][/]' '{print $2}')
+            currentHost=${currentHost%.crt}
             if [[ -z "${currentHost}" || "${currentHost}" == "null" ]]; then
                 currentHost=$(resolveInstalledTLSDomain 2>/dev/null || true)
             fi

@@ -31,7 +31,7 @@ def wait_ready(probe, message, limit=15):
     while True:
         if probe():
             return
-        assert time.monotonic() < deadline, message
+        assert time.monotonic() < deadline, message() if callable(message) else message
         time.sleep(0.05)
 
 
@@ -180,6 +180,9 @@ def wireguard(work, holders):
         run(["ip", "link", "set", "wg-padm", "up"], pid)
         for address in peers:
             run(["ip", "route", "add", f"{address}/32", "dev", "wg-padm"], pid)
+            route = json.loads(run(["ip", "-j", "route", "get", address], pid))[0]
+            assert route["dev"] == "wg-padm" and route["prefsrc"] == addresses[0], \
+                f"控制路由不匹配：target={address} expected_source={addresses[0]} route={route}"
     assert os.readlink(f"/proc/{controller}/ns/net") != os.readlink(f"/proc/{controlled}/ns/net")
     return controller, controlled
 
@@ -242,11 +245,48 @@ def main():
             container = create(arguments)
             actual = json.loads(run(docker + ["inspect", container]))[0]
             assert actual["Config"]["User"] == "10001:10001" and not actual["HostConfig"]["CapAdd"]
+            assert os.readlink(f"/proc/{actual['State']['Pid']}/ns/net") == \
+                os.readlink(f"/proc/{controller}/ns/net"), "API 容器未使用 controller 网络空间"
             assert run(docker + ["exec", container, "sha256sum", destination]).split()[0].decode() == \
                 hashlib.sha256(source.read_bytes()).hexdigest()
             status = 401 if address == OTHER_TARGET else 200
-            wait_ready(lambda: client(controlled, address, port, "authorized") == {"status": status},
-                       "真实 HTTP 端点未就绪")
+            last_response = None
+
+            def api_ready():
+                nonlocal last_response
+                last_response = client(controlled, address, port, "authorized")
+                return last_response == {"status": status}
+
+            try:
+                wait_ready(api_ready, lambda: (
+                    f"真实 HTTP 端点未就绪：address={address} port={port} "
+                    f"expected_status={status} last_response={last_response}"))
+            except AssertionError:
+                # 超时只采集实际网络证据，不输出 WireGuard 公私钥或请求凭据。
+                evidence = {}
+                try:
+                    evidence["api"] = os.readlink(f"/proc/{actual['State']['Pid']}/ns/net")
+                    for name, pid, target in (("controller", controller, PEER), ("controlled", controlled, address)):
+                        handshake = run(["wg", "show", "wg-padm", "latest-handshakes"], pid).splitlines()
+                        transfer = run(["wg", "show", "wg-padm", "transfer"], pid).splitlines()
+                        evidence[name] = {
+                            "netns": os.readlink(f"/proc/{pid}/ns/net"),
+                            "route": json.loads(run(["ip", "-j", "route", "get", target], pid)),
+                            "latest_handshakes": [int(line.split()[1]) for line in handshake],
+                            "transfer": [list(map(int, line.split()[1:])) for line in transfer],
+                            "listeners": run(["ss", "-H", "-ltn"], pid).decode().splitlines(),
+                        }
+                    if address != OTHER_TARGET:
+                        health = subprocess.run(docker + ["exec", container, "python3", destination,
+                            "--state", "/input/state.json", "--health"], capture_output=True, timeout=5)
+                        evidence["local_health"] = {
+                            "rc": health.returncode, "stderr": health.stderr.decode(errors="replace")}
+                except (OSError, ValueError, AssertionError, subprocess.TimeoutExpired) as error:
+                    detail = re.sub(r"(?<![0-9a-f])[0-9a-f]{32,64}(?![0-9a-f])", "[REDACTED]", str(error)[:400])
+                    evidence["diagnostic_error"] = {"type": type(error).__name__, "message": detail}
+                print("docker-control-network-diagnostic=" + json.dumps(evidence, sort_keys=True),
+                      file=sys.stderr, flush=True)
+                raise
         main_api = api_paths[TARGET, PORT]
         auth = main_api / "logs/auth.log"
         receipt = main_api / "logs/source.receipt"
@@ -462,8 +502,24 @@ def main():
             for container in reversed(containers):
                 if failed:
                     try:
-                        result = subprocess.run(docker + ["logs", container], capture_output=True, timeout=5)
-                        print((result.stdout + result.stderr).decode(errors="replace")[-4000:], file=sys.stderr)
+                        # 只输出运行状态和日志尾部，避免配置、令牌和来源回执进入诊断。
+                        result = subprocess.run(docker + ["inspect", "--format", "{{json .State}}", container],
+                                                capture_output=True, timeout=5)
+                        if result.returncode == 0:
+                            state = json.loads(result.stdout)
+                            selected = {key: state.get(key) for key in
+                                        ("Status", "Running", "ExitCode", "OOMKilled", "Dead", "Error")}
+                            detail = json.dumps(selected, ensure_ascii=False, sort_keys=True)
+                        else:
+                            detail = f"inspect_rc={result.returncode} " + result.stderr.decode(errors="replace")
+                        detail = re.sub(r"(?<![0-9a-f])[0-9a-f]{32,64}(?![0-9a-f])", "[REDACTED]", detail)
+                        print(f"docker-container-state:{container[:12]}:{detail}", file=sys.stderr)
+                        result = subprocess.run(docker + ["logs", "--tail", "50", container],
+                                                capture_output=True, timeout=5)
+                        detail = (result.stdout + result.stderr).decode(errors="replace")[-4000:]
+                        detail = re.sub(r"(?<![0-9a-f])[0-9a-f]{32,64}(?![0-9a-f])", "[REDACTED]", detail)
+                        print(f"docker-container-logs:{container[:12]}:rc={result.returncode}\n{detail}",
+                              file=sys.stderr)
                     except subprocess.TimeoutExpired as error:
                         print(str(error), file=sys.stderr)
                 try:

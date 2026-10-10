@@ -747,6 +747,27 @@ runProtocolEntryReaderFailureRegression() (
                 { printf 'assert-fail:entry-host-parse-invalid:%s\n' "${branch}" >&2; failed=1; }
         done
         (
+            # 证书扩展名只在文件名末尾，合法域名内部的 .crt 不能被截断。
+            local tlsDomain frontingType failed=0
+            local coreInstallType=1 currentInstallProtocolType=,27, singBoxConfigPath= frontingTypeReality=
+            local configPath="${root}/xray-cert-host/"
+            mkdir -p "${configPath}" || return 1
+            for frontingType in 02_VLESS_TCP_inbounds 28_trojan_TCP_direct_inbounds; do
+                for tlsDomain in tls.example.com api.crt.example.com api.crtcdn.example.com; do
+                    padmIsValidHostName "${tlsDomain}" || return 1
+                    jq -n --arg cert "/etc/padm/tls/${tlsDomain}.crt" '
+                        {inbounds:[{port:443,settings:{clients:[{id:"saved-user"}]},
+                            streamSettings:{tlsSettings:{certificates:[{certificateFile:$cert}]}}}]}
+                    ' >"${configPath}${frontingType}.json" || return 1
+                    readConfigHostPathUUID ||
+                        { printf 'assert-fail:entry-xray-cert-host-read:%s:%s\n' "${frontingType}" "${tlsDomain}" >&2; failed=1; }
+                    [[ "${currentHost}" == "${tlsDomain}" ]] ||
+                        { printf 'assert-fail:entry-xray-cert-host-value:%s:%s:%s\n' "${frontingType}" "${tlsDomain}" "${currentHost}" >&2; failed=1; }
+                done
+            done
+            [[ "${failed}" == 0 ]]
+        ) || failed=1
+        (
             # 只有内部入站或合并配置时，真实扫描没有公共前端，不能尝试读取空选择器。
             local mode rootDir
             local PADM_XRAY_BINARY="${root}/missing-xray" PADM_XRAY_CONF_DIR="${root}/missing-xray-conf"

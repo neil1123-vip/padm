@@ -94,7 +94,7 @@ start_server() {
     wait_ready
     token=$(sed -n 's/^token=//p' /var/lib/padm/net/fail2ban.state)
     chain=$(sed -n 's/^chain=//p' /var/lib/padm/net/fail2ban.state)
-    python3 /test/fail2ban-audit.py || fail "canonical loaded actions were rejected"
+    python3 /test/fail2ban-audit.py ws || fail "canonical loaded actions were rejected"
 }
 stop_server() {
     cp /var/lib/padm/net/fail2ban.state /tmp/stopped-owner.state
@@ -139,6 +139,129 @@ reject_stop_proof() {
         fail "rejected stop cleanup proof changed kernel resources"
     cmp /tmp/proof-state.before /tmp/proof-state.after ||
         fail "rejected stop cleanup proof removed owner evidence or SQLite"
+}
+ssh_owner_real() {
+    # 只验证 SSH owner/action；不生成认证日志、启动 jail 或冒充来源授权。
+    sed '/^case "${1:-idle}" in/,$d' /test/entrypoint.sh >/tmp/ssh-functions.sh
+    cat >/tmp/ssh-owner.sh <<'SH'
+#!/bin/sh
+set -eu
+. /tmp/ssh-functions.sh
+STATE_ROOT=/var/lib/padm/net/ssh-owner
+fail2ban_ssh_scope
+action=$1
+shift
+case "$action" in
+seed)
+    fb_root=$STATE_ROOT fb_token=$1 fb_chain=$fb_prefix$(printf '%s' "$1" | cut -c1-12)
+    fb_target=$2 fb_ports=$3 fb_ipv6=no
+    case "$fb_target" in *:*) fb_ipv6=yes ;; esac
+    fail2ban_state_write
+    ;;
+preflight) fail2ban_ssh_preflight "$@" ;;
+action) fail2ban_action "$@" ;;
+health) fail2ban_ssh_health ;;
+clean) fail2ban_ssh_clean "$@" ;;
+cleanup) fail2ban_cleanup "$@" ;;
+*) exit 1 ;;
+esac
+SH
+    mkdir -p /var/lib/padm/net/ssh-owner
+    chmod 0700 /var/lib/padm/net/ssh-owner
+    ws_owner_before=$(sha256sum /var/lib/padm/net/fail2ban.state)
+    ws_database_before=$(sha256sum /var/lib/padm/net/fail2ban.sqlite3)
+    ssh_expect_refusal() {
+        expected=$1
+        shift
+        if sh /tmp/ssh-owner.sh "$@" >/tmp/ssh-proof.log 2>&1; then
+            fail "SSH backend accepted an invalid ownership operation"
+        fi
+        if ! grep -Fq "$expected" /tmp/ssh-proof.log; then
+            cat /tmp/ssh-proof.log >&2
+            fail "SSH backend refusal was caused by an unexpected failure"
+        fi
+    }
+    fail2ban-client get padm-nginx banip >/tmp/ssh-ws-bans.before
+    ssh_ws_snapshot() {
+        ssh_snapshot_table=$1 ssh_snapshot_path=$2
+        if [ "$ssh_snapshot_table" = iptables ] || [ "$PADM_TEST_FAMILY" = dual ]; then
+            "$ssh_snapshot_table" -w -S DOCKER-USER >"$ssh_snapshot_path" &&
+                "$ssh_snapshot_table" -w -S "$chain" >>"$ssh_snapshot_path" ||
+                fail "cannot read active WS kernel resources"
+        else
+            "$ssh_snapshot_table" -w -S >"$ssh_snapshot_path" ||
+                fail "cannot read IPv6 kernel resources"
+            if grep -Eq -- "^-N ($chain|DOCKER-USER)$|^-A ($chain|DOCKER-USER) " "$ssh_snapshot_path"; then
+                fail "unexpected IPv6 WS resources in IPv4 fixture"
+            fi
+        fi
+    }
+    for ssh_table in iptables ip6tables; do
+        ssh_ws_snapshot "$ssh_table" "/tmp/ssh-ws-$ssh_table.before"
+    done
+    ssh_token=abcdefabcdefabcdefabcdefabcdefab
+    ssh_chain=padm-f2bs-abcdefabcdef
+    for ssh_target in 198.51.100.10 2001:db8::10; do
+        ssh_table=iptables ssh_other=ip6tables ssh_peer=192.0.2.20 ssh_mask=32
+        case "$ssh_target" in *:*)
+            ssh_table=ip6tables ssh_other=iptables ssh_peer=2001:db8::20 ssh_mask=128
+            ;;
+        esac
+        sh /tmp/ssh-owner.sh clean "$ssh_target" 22220
+        sh /tmp/ssh-owner.sh seed "$ssh_token" "$ssh_target" 22220
+        ssh_expect_refusal "incomplete Fail2ban resources" health
+        sh /tmp/ssh-owner.sh action start "$ssh_token" "$ssh_table" -w
+        "$ssh_table" -w -C INPUT -d "$ssh_target/$ssh_mask" -p tcp --dport 22220 \
+            -m conntrack --ctstate NEW -m comment --comment "padm-f2bs:$ssh_token" -j "$ssh_chain" ||
+            fail "missing exact $ssh_table SSH INPUT hook"
+        sh /tmp/ssh-owner.sh health
+        sh /tmp/ssh-owner.sh preflight "$ssh_target" 22220 owned
+        ssh_expect_refusal "invalid Fail2ban action" action start "$ssh_token" "$ssh_other" -w
+        sh /tmp/ssh-owner.sh action ban "$ssh_token" "$ssh_table" -w "$ssh_peer"
+        "$ssh_table" -w -C "$ssh_chain" -s "$ssh_peer" \
+            -m comment --comment "padm-f2bs:$ssh_token" -j DROP ||
+            fail "missing $ssh_table SSH ban"
+        sh /tmp/ssh-owner.sh action unban "$ssh_token" "$ssh_table" -w "$ssh_peer"
+        if "$ssh_table" -w -C "$ssh_chain" -s "$ssh_peer" \
+            -m comment --comment "padm-f2bs:$ssh_token" -j DROP >/dev/null 2>&1; then
+            fail "SSH unban retained its own DROP"
+        fi
+        sh /tmp/ssh-owner.sh action ban "$ssh_token" "$ssh_table" -w "$ssh_peer"
+        sh /tmp/ssh-owner.sh action flush "$ssh_token" "$ssh_table" -w
+        # control 在任一地址族出现时，SSH 动作不得改写任何内核规则或 owner。
+        iptables -w -N padm-f2bc-ffffffffffff
+        iptables-save | sed '/^#/d' >/tmp/ssh-refusal.before
+        ip6tables-save | sed '/^#/d' >>/tmp/ssh-refusal.before
+        ssh_owner_before=$(sha256sum /var/lib/padm/net/ssh-owner/fail2ban-ssh.state)
+        ssh_expect_refusal "control INPUT ownership conflicts with SSH" \
+            action stop "$ssh_token" "$ssh_table" -w
+        iptables-save | sed '/^#/d' >/tmp/ssh-refusal.after
+        ip6tables-save | sed '/^#/d' >>/tmp/ssh-refusal.after
+        cmp /tmp/ssh-refusal.before /tmp/ssh-refusal.after ||
+            fail "SSH conflict refusal changed kernel rules"
+        [ "$(sha256sum /var/lib/padm/net/ssh-owner/fail2ban-ssh.state)" = "$ssh_owner_before" ] ||
+            fail "SSH conflict refusal removed ownership evidence"
+        iptables -w -X padm-f2bc-ffffffffffff
+        sh /tmp/ssh-owner.sh cleanup "$ssh_token"
+        sh /tmp/ssh-owner.sh clean "$ssh_target" 22220
+        [ ! -e /var/lib/padm/net/ssh-owner/fail2ban-ssh.state ] ||
+            fail "SSH cleanup retained state"
+        if "$ssh_table" -w -n -L "$ssh_chain" >/dev/null 2>&1; then
+            fail "SSH cleanup retained its chain"
+        fi
+        for table in iptables ip6tables; do
+            ssh_ws_snapshot "$table" "/tmp/ssh-ws-$table.after"
+            cmp "/tmp/ssh-ws-$table.before" "/tmp/ssh-ws-$table.after" ||
+                fail "SSH actions changed WS hooks or bans"
+        done
+        [ "$(sha256sum /var/lib/padm/net/fail2ban.state)" = "$ws_owner_before" ] &&
+            [ "$(sha256sum /var/lib/padm/net/fail2ban.sqlite3)" = "$ws_database_before" ] ||
+            fail "SSH actions changed WS owner or SQLite"
+        fail2ban-client get padm-nginx banip >/tmp/ssh-ws-bans.after
+        cmp /tmp/ssh-ws-bans.before /tmp/ssh-ws-bans.after || fail "SSH actions changed WS jail tickets"
+        sh /usr/local/bin/padm-entrypoint fail2ban-health || fail "SSH action broke WS health"
+    done
+    printf 'fail2ban-real-%s-ssh-owner-dual-ok\n' "$PADM_TEST_FAMILY"
 }
 
 iptables -w -N DOCKER-USER
@@ -218,7 +341,7 @@ if [ "$PADM_TEST_FAMILY" = dual ]; then
     wait_rule ip6tables 2001:db8::7
     assert_hooks ip6tables
 fi
-python3 /test/fail2ban-audit.py || fail "active loaded actions were rejected"
+python3 /test/fail2ban-audit.py ws || fail "active loaded actions were rejected"
 # 内核规则漂移时只读门禁须拒绝，不触碰封禁票据或规则。
 iptables -w -I "$chain" 1 -s 192.0.2.99 -j DROP
 iptables-save | sed '/^#/d' > /tmp/owner.before
@@ -256,7 +379,7 @@ def snapshot():
 
 def rejected():
     before = snapshot()
-    result = subprocess.run(["python3", "/test/fail2ban-audit.py"],
+    result = subprocess.run(["python3", "/test/fail2ban-audit.py", "ws"],
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     assert result.returncode != 0, "loaded action drift was accepted"
     after = snapshot()
@@ -297,13 +420,14 @@ for name, value in (
     finally:
         query("set", "padm-nginx", "action", action, "_CommandAction__properties",
               original_cache)
-assert subprocess.run(["python3", "/test/fail2ban-audit.py"]).returncode == 0, \
+assert subprocess.run(["python3", "/test/fail2ban-audit.py", "ws"]).returncode == 0, \
     "restored loaded actions were rejected"
 PY
 fail2ban-client set padm-nginx unbanip 192.0.2.7
 wait_unban iptables 192.0.2.7
 fail2ban-client set padm-nginx banip 192.0.2.7
 wait_rule iptables 192.0.2.7
+ssh_owner_real
 stop_server
 # 停止后的只读证明拒绝残留 state 或链，SQLite 中的真实封禁票据留给恢复启动。
 cp /tmp/stopped-owner.state /var/lib/padm/net/fail2ban.state

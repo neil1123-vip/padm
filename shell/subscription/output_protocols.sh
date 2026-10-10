@@ -16,7 +16,7 @@ vlessEncryptionForConfig() {
         printf 'none\n'
         return
     fi
-    configDecryption=$(jq -er ".inbounds[${inboundIndex}].settings.decryption // \"none\" | select(type == \"string\")" "${configFile}" 2>/dev/null) || return 1
+    configDecryption=$(jq -er ".inbounds[${inboundIndex}].settings.decryption | if . == null then \"none\" else . end | select(type == \"string\" and (any(explode[]; . < 32 or . == 127) | not))" "${configFile}" 2>/dev/null) || return 1
     if [[ -z "${configDecryption}" || "${configDecryption}" == "none" ]]; then
         printf 'none\n'
         return
@@ -25,6 +25,7 @@ vlessEncryptionForConfig() {
         select(.enabled == true and
             .decryption == $decryption and
             (.encryption | type) == "string" and
+            (.encryption | any(explode[]; . < 32 or . == 127) | not) and
             .encryption != "" and
             .encryption != "none") |
         .encryption
