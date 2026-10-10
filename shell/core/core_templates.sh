@@ -1374,7 +1374,7 @@ EOF
             hysteria2BandwidthConfig='            "ignore_client_bandwidth": true,'
             ;;
         brutal)
-            hysteria2BandwidthConfig=$(printf '            "up_mbps": %s,\n            "down_mbps": %s,' "${hysteria2ClientDownloadSpeed}" "${hysteria2ClientUploadSpeed}")
+            hysteria2BandwidthConfig=$(printf '            "up_mbps": %s,\n            "down_mbps": %s,' "$((10#${hysteria2ClientDownloadSpeed}))" "$((10#${hysteria2ClientUploadSpeed}))")
             ;;
         *)
             errorCard "Hysteria2 拥塞模式不受支持"

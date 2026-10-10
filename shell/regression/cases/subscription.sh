@@ -1196,6 +1196,53 @@ runSubscriptionOutputMixedLocalRemoteAllFailedPreservesPreviousRegression() (
 )
 
 runSubscriptionOutputTlsVlessVmessTrojanRegression() {
+    (
+        local root="${TMP_DIR}/subscription-multi-cdn-account"
+        local coreInstallType=1 currentHost=tls.example.com currentPath=svc- currentDefaultPort=443
+        local currentCDNAddress=cdn-a.example.com,cdn-b.example.com singBoxConfigPath=
+        local xrayVLESSRealityXHTTPort=443 xrayVLESSRealityXHTTPSNI=target.example.com currentRealityXHTTPPublicKey=pubkey
+        local configPath="${root}/conf/" PADM_VLESS_XHTTP_CONFIG_FILE=
+        local protocol reader file suffix account userA userB
+        local SUBSCRIBE_CAPTURE_DIR PADM_SUBSCRIBE_LOCAL_DIR
+        mkdir -p "${configPath}"
+        subscribeSectionTitle() { :; }
+        subscribeAccountTitle() { :; }
+        realityStreamPublicPortForProtocol() { :; }
+        corePortSubscriptionPort() { printf '%s\n' "${2:-443}"; }
+        while IFS='|' read -r protocol reader file suffix; do
+            local currentInstallProtocolType=",${protocol},"
+            SUBSCRIBE_CAPTURE_DIR="${root}/${protocol}"
+            PADM_SUBSCRIBE_LOCAL_DIR="${SUBSCRIBE_CAPTURE_DIR}"
+            userA="cdn-user-a-${suffix}1" userB=cdn-user-b
+            jq -nc --arg suffix "${suffix}" --arg userA "${userA}" --arg userB "${userB}" '
+                {inbounds:[{port:443,settings:{decryption:"none",clients:[
+                    {email:($userA+"-"+$suffix),id:"uuid-a",password:"pass-a"},
+                    {email:($userB+"-"+$suffix),id:"uuid-b",password:"pass-b"}]},
+                    streamSettings:{httpupgradeSettings:{path:"/upgrade"},
+                        xhttpSettings:{path:"/xhttp",host:"tls.example.com",mode:"auto"},
+                        realitySettings:{serverNames:["target.example.com"],publicKey:"pubkey"}}}]}' >"${configPath}${file}" || return 1
+            "${reader}" >/dev/null || return 1
+            for account in "${userA}" "${userB}"; do
+                [[ -f "${SUBSCRIBE_CAPTURE_DIR}/default/${account}" &&
+                    "$(wc -l <"${SUBSCRIBE_CAPTURE_DIR}/default/${account}")" == 2 ]] ||
+                    { printf 'assert-fail:multi-cdn-account:%s:%s\n' "${protocol}" "${account}" >&2; return 1; }
+                [[ "$(grep -c '^  - name:' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/${account}")" == 2 ]] || return 1
+                if [[ "${protocol}" != 2 ]]; then
+                    jq -e --arg tag "${account}-${suffix}" 'length == 2 and .[0].tag == $tag and .[1].tag == ($tag+"1") and
+                        .[0].server == "cdn-a.example.com" and .[1].server == "cdn-b.example.com"' \
+                        "${SUBSCRIBE_CAPTURE_DIR}/sing-box/${account}" >/dev/null || return 1
+                fi
+            done
+            [[ "$(find "${SUBSCRIBE_CAPTURE_DIR}/default" -mindepth 1 -maxdepth 1 -type f | wc -l)" == 2 ]] || return 1
+        done <<'CASES'
+21|showVlessWsAccounts|03_VLESS_WS_inbounds.json|VLESS_WS
+22|showVmessWsAccounts|05_VMess_WS_inbounds.json|VMess_WS
+23|showVmessHTTPUpgradeAccounts|11_VMess_HTTPUpgrade_inbounds.json|VMess_HTTPUpgrade
+24|showVlessGrpcAccounts|06_VLESS_GRPc_inbounds.json|vless_grpc
+25|showTrojanGrpcAccounts|04_trojan_GRPc_inbounds.json|Trojan_gRPC
+2|showVlessRealityXHTTPAccounts|12_VLESS_XHTTP_inbounds.json|VLESS_Reality_XHTTP
+CASES
+    ) || return 1
     local httpUpgradeBoundaryFailed=0
     (
         # 共享读取入口必须在原 JSON 值被字符串化或裁去尾换行前拒绝坏 path。
