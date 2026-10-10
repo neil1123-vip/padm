@@ -209,7 +209,7 @@ coreTemplateConfigBackupCreate() {
             02_VLESS_TCP_inbounds.json 03_VLESS_WS_inbounds.json 05_VMess_WS_inbounds.json
             06_hysteria2_inbounds.json 07_VLESS_vision_reality_inbounds.json
             08_VLESS_vision_gRPC_inbounds.json 09_tuic_inbounds.json 10_naive_inbounds.json
-            11_VMess_HTTPUpgrade_inbounds.json 13_anytls_inbounds.json
+            11_VMess_HTTPUpgrade_inbounds.json 13_anytls_inbounds.json 14_stats_api.json
             28_trojan_TCP_direct_inbounds.json 30_shadowsocks_inbounds.json sniff.json
             wireguard_endpoints_IPv4_route.json wireguard_endpoints_IPv6_route.json
             wireguard_endpoints_IPv4.json wireguard_endpoints_IPv6.json IPv4_out.json

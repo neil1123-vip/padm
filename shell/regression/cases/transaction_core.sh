@@ -304,6 +304,53 @@ runSingBoxStatsBuildRegression() (
             ! -e "${root}/installed/libcronet.so" &&
             "$(jq -r .phase "${legacyFile}")" == legacy && "${serviceRunning}" == true &&
             -n "${statsRollbackDir}" && ! -e "${statsRollbackDir}" ]]
+        (
+            source "${PROJECT_ROOT}/shell/subscription/traffic.sh"
+            eval "$(awk '/^coreTemplateConfigBackupCreate\(\)/ { capture=1 } capture { print } capture && /^}/ { exit }' "${PROJECT_ROOT}/shell/core/core_templates.sh")"
+            local PADM_SINGBOX_CONFIG_DIR="${singBoxConfigPath%/}"
+            local statsFile="${singBoxConfigPath}14_stats_api.json" statsState statsBefore mergedBefore
+            singBoxMergeConfig() { cp "${statsFile}" "$(singBoxMergedConfigFile)"; }
+            runServiceAction() {
+                [[ "$*" == 'sing-box restart' ]] || return 99
+                printf '%s\n' "$*" >>"${root}/stats-service"
+            }
+            failAfterRealStatsUpgrade() {
+                statsRollbackDir=${statsBinaryBackupDir}
+                installSingBox 1 || return 1
+                [[ "$(singBoxV2rayApiCapability)" == supported ]] || return 1
+                jq -e '.experimental.v2ray_api.stats.users == ["sub_team_hy2"]' "${statsFile}" >/dev/null || return 1
+                return 7
+            }
+            # 原核心停止时不会重启合并，外层回滚也须清理升级新增的统计分片。
+            for statsState in missing present; do
+                serviceRunning=false
+                printf '%s\n' "${originalBinary}" >"${PADM_SINGBOX_BINARY}"
+                chmod 755 "${PADM_SINGBOX_BINARY}"
+                printf '{"phase":"legacy"}\n' >"${legacyFile}"
+                printf '{"oldMerged":true}\n' >"$(singBoxMergedConfigFile)"
+                mergedBefore=$(<"$(singBoxMergedConfigFile)")
+                if [[ "${statsState}" == present ]]; then
+                    printf '{"experimental":{"v2ray_api":{"listen":"127.0.0.1:10088"}}}\n' >"${statsFile}"
+                    statsBefore=$(<"${statsFile}")
+                else
+                    rm -f -- "${statsFile}"
+                fi
+                statsRollbackDir=
+                regressionExpectStatus 7 coreInstallConfigTransaction sing-box failAfterRealStatsUpgrade || return 1
+                [[ "$(<"${PADM_SINGBOX_BINARY}")" == "${originalBinary}" &&
+                    "$(singBoxV2rayApiCapability)" == unsupported && "${serviceRunning}" == false &&
+                    "$(<"$(singBoxMergedConfigFile)")" == "${mergedBefore}" &&
+                    -n "${statsRollbackDir}" && ! -e "${statsRollbackDir}" ]] || return 1
+                if [[ "${statsState}" == present ]]; then
+                    [[ "$(<"${statsFile}")" == "${statsBefore}" ]] || return 1
+                else
+                    [[ ! -e "${statsFile}" ]] || {
+                        printf '统计升级回滚残留新增分片: %s\n' "${statsFile}" >&2
+                        return 1
+                    }
+                fi
+            done
+        ) || return 1
     )
 )
 
