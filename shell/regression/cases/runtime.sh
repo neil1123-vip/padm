@@ -3406,6 +3406,49 @@ runInstallWorkflowRegression() (
         output=$(installXray 1 </dev/null) && return 1
         [[ "${output}" == geo ]]
     )
+
+    (
+        # 清理旧核心前必须完整枚举；失败不能删除已列出的文件或报告成功。
+        local root="${TMP_DIR}/install-clean-enumeration" failure operation status failed=0
+        eval "$(awk '/^cleanDirectoryContent\(\)/ { capture=1 } capture { print } capture && /^}/ { exit }' \
+            "${PROJECT_ROOT}/shell/core/runtime.sh")"
+        coreXrayInstallDir() { printf '%s\n' "${root}"; }
+        handleXray() { return 0; }
+        find() {
+            if [[ "${failure}" == success ]]; then
+                command find "$@"
+            else
+                if [[ "${failure}" == partial ]]; then
+                    [[ "${*: -1}" != -print0 ]] && printf '%s\n' "${root}/first" ||
+                        printf '%s\0' "${root}/first"
+                fi
+                return 7
+            fi
+        }
+        mkdir -p "${root}"
+        for operation in directory core; do
+            for failure in zero partial; do
+                printf 'old\n' >"${root}/first"
+                printf 'old\n' >"${root}/second"
+                status=0
+                if [[ "${operation}" == directory ]]; then
+                    cleanCoreInstallDirectory "${root}" Xray || status=$?
+                else
+                    cleanUp xrayDel || status=$?
+                fi
+                if [[ "${status}" == 0 || ! -f "${root}/first" || ! -f "${root}/second" ]]; then
+                    printf 'cleanup enumeration escaped: %s %s status=%s\n' "${operation}" "${failure}" "${status}" >&2
+                    failed=$((failed + 1))
+                fi
+            done
+        done
+        failure=success
+        printf 'old\n' >"${root}/space name"
+        printf 'old\n' >"${root}/"$'line\nname'
+        cleanUp xrayDel || failed=$((failed + 1))
+        [[ -z "$(command find "${root}" -mindepth 1 -maxdepth 1 -print)" ]] || failed=$((failed + 1))
+        [[ "${failed}" == 0 ]]
+    )
 )
 
 runRuntimeAndRealityRegression() {
