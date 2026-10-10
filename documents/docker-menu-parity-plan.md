@@ -3566,6 +3566,63 @@ ptrace EXIT 停点也不能恢复此前用户态已关闭的 socket。
 后续需同消息进程代次、exec 与真实连接生命周期的完整证据；原生宿主、
 LSM、systemd 服务切换、arm64、公网、重启卸载与完整防护仍未验收。
 
+#### 5C.8c.2c 私有 syslog 与真实 OpenSSH 生命周期前置
+
+2026-10-11，本阶段只运行隔离原型，未修改来源模块、菜单、collector 或 jail。
+复用既有依赖镜像，不安装宿主工具，不重复已通过的完整 Docker 合同。
+所有子智能体禁用内置联网搜索；需要联网时仅用 Agent Reach。
+
+真实 libc `openlog/syslog/closelog` 在 sender 私有 mount namespace 中访问
+测试 `/dev/log`，receiver 使用 `SO_PASSCRED/SO_PASSPIDFD`。活 sender 的同条
+消息取得 credentials 和有效 pidfd；sender 完全回收后附件为 `-EINVAL`，
+必须拒绝。全局 `/dev/log` 未被替换。
+
+复用固定 SSH 依赖镜像
+`sha256:0698b0ffcad3c265ab623b5bce0fcb9ef6cf9ed038811ba6b34162eee5d76f00`，
+实际 `OpenSSH_10.0p2 Debian-7+deb13u4`、glibc 2.41、Paramiko 3.5.1；
+独立无网络、私有 PID、零宿主挂载的临时容器内，新建 sshd 私有 mount namespace、
+临时 host key 和回环监听 `127.0.0.1:45139`。privileged 仅用于该原型的
+namespace/mount 操作；未附加现有 SSH，也未切入宿主 namespace。
+关闭 root/password/keyboard-interactive 登录，客户端验证临时 host key。
+
+真实 OpenSSH 原消息正反例耗时 1780 ms、退出码 0：
+
+- 保持连接时，`Connection from` 和 `Invalid user` 的实际 sender 是 root
+  `/usr/lib/openssh/sshd-session`，同消息 pidfd 前后存活；UID 996 的
+  `/usr/lib/openssh/sshd-auth` 与它共享唯一 accepted inode/tuple。
+- 关闭后立即接收的 `Connection closed … [preauth]` 捕获真实退出竞态：
+  pidfd 非负且首次 poll 存活，读取 `/proc` 时进程已消失，末次 poll 为 POLLIN。
+  该消息不能因为首次存活检查成功就取得来源授权。
+- 另一短连接完全回收后，三条原日志正文仍排队，但 sender 的 pidfd 均为
+  `-22`、`/proc` 不存在、accepted socket 消失，必须拒绝。
+
+实际 sender 符合 root session 输出路径，但未截获内部 monitor IPC 或调用栈，
+不把具体日志转发实现写成独立实证；也未观察到额外 `Failed publickey` 行。
+接收时 exe/父链/accepted socket 快照仍不固定发送时 exec epoch。
+
+另用既有回归工具镜像在非 privileged、无网络、私有 PID、零挂载容器中
+验证受控普通 fork 子树：9 项连接/代次断言与 tracer 正常退出恢复通过，
+内部 16.038 ms。父 fork、child 初停和 exec 停点读到同一真实 accepted
+FD/inode/tuple；用户态 close 后和 EXIT 停点均无法补回该 socket。
+exec 前排队消息在新 exe 停点收到同代 pidfd，仍不授权套用新 exe 身份。
+未验证 tracer 崩溃/SIGKILL、未知 clone 参数、线程或既有服务接入。
+
+下一最小验证是 EXEC/EXIT 实际停点期间先 drain receiver 到 EAGAIN，
+按旧 epoch 处理队列，再更新 exe/epoch 或终结连接记录，最后 CONT；
+close 后仅允许输出已有 fork anchor 的历史连接事实，不能声称 live socket。
+真实 OpenSSH fork 初停继承 LISTEN FD 的窗口需专门验证，
+不能直接复用现有严格单 owner witness，也不能泛化放宽生产 owner 检查。
+没有 syscall 创建参数审计时，仅限受控普通单线程 fork 假设。
+生产 observer 故障恢复、LSM、原生 systemd、arm64、公网、重启卸载仍未验收。
+
+证据 `.tmp-ssh-syslog-8c2c/evidence.md`、
+`.tmp-ssh-syslog-8c2c/openssh/evidence.md`、
+`.tmp-ssh-lifecycle-8c2c/evidence.md` 与 `.tmp-ssh-epoch-8c2c/design.md`。
+本轮原型容器、进程、非负 FD、socket、临时 key/config 均已清理；
+保留可复现探针与原始结果，不删除其它任务文件。
+`runtime_configuration_verified=false`、`jail_ready=false` 保持；
+未推送或发布，5C 与总目标 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。
