@@ -587,11 +587,42 @@ restorePadmEntryBackup() {
 }
 
 # 更新脚本
+rollbackPadmEntryUpdateOnExit() {
+    [[ "${padmEntryUpdateActive:-false}" == true ]] || return 0
+    padmEntryUpdateActive=false
+    local SCRIPT_DIR="${installPath%/*}"
+    local SCRIPT_REF_FILE="${SCRIPT_DIR}/.padm-ref" SCRIPT_EXPECTED_REF_FILE="${SCRIPT_DIR}/.padm-entry-ref"
+    local SCRIPT_MANIFEST_FILE="${SCRIPT_DIR}/.padm-module-manifest"
+    # 子进程可能已提交完整新版，取消不能只撤回入口而破坏模块一致性。
+    if [[ -f "${SCRIPT_REF_FILE}" && -f "${SCRIPT_EXPECTED_REF_FILE}" &&
+        "$(<"${SCRIPT_REF_FILE}")" == "${remoteRef}" &&
+        "$(<"${SCRIPT_EXPECTED_REF_FILE}")" == "${remoteRef}" ]]; then
+        if padmEntryScriptReady "${installPath}" && scriptModulesReady; then
+            removeManagedFilesIfPresentIgnoreFailure "${backupPath}"
+            return 0
+        fi
+    fi
+    if [[ "${padmEntryUpdateHadEntry}" == false ]]; then
+        removeManagedFileIfPresent "${installPath}" || return 1
+        errorCard "新版入口执行失败，已撤回新入口"
+    elif restorePadmEntryBackup "${backupPath}" "${installPath}" >/dev/null 2>&1; then
+        errorCard "新版入口执行失败，已恢复旧入口"
+    else
+        local restoreMessage
+        coreSetPairedFileRestoreFailureMessage restoreMessage "新版入口执行失败" "旧入口" "${installPath}" "${backupPath}"
+        errorCard "${restoreMessage}"
+        return 1
+    fi
+}
+
 updatePadm() {
     local installDir="${PADM_INSTALL_DIR:-/etc/padm}"
     local installPath backupPath
     local tmpDir newInstall installStage
     local remoteRef= installUrl
+    local padmEntryUpdateActive=false padmEntryUpdateHadEntry=false
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
     if ! padmIsSafeAbsolutePath "${installDir}"; then
         errorCard "更新入口目录异常"
         return 1
@@ -660,7 +691,12 @@ updatePadm() {
         errorCard "旧入口备份失败，已取消更新"
         return 1
     fi
+    [[ ! -f "${backupPath}" ]] || padmEntryUpdateHadEntry=true
+    # 先登记入口恢复，再替换；取消时先终止模块刷新进程，随后恢复旧入口。
+    padmRegisterExitRollback rollbackPadmEntryUpdateOnExit
+    padmEntryUpdateActive=true
     if ! commitGeneratedFile "${installStage}" "${installPath}" 700; then
+        padmEntryUpdateActive=false
         removeManagedFilesIfPresentIgnoreFailure "${backupPath}"
         padmRemoveCleanupPath "${installStage}" 2>/dev/null || true
         padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
@@ -670,7 +706,9 @@ updatePadm() {
     padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
 
     successCard "更新入口已下载，正在重新打开新版脚本"
-    if PADM_FORCE_SCRIPT_MODULE_REFRESH=1 PADM_SCRIPT_MODULE_REF="${remoteRef}" "${installPath}" RefreshScriptModules; then
+    if PADM_FORCE_SCRIPT_MODULE_REFRESH=1 PADM_SCRIPT_MODULE_REF="${remoteRef}" \
+        padmRunCancelableCommand "${installPath}" RefreshScriptModules; then
+        padmEntryUpdateActive=false
         removeManagedFilesIfPresentIgnoreFailure "${backupPath}"
         if "${installPath}" RefreshSubscriptionControlService; then
             successCard "padm 管理脚本更新成功"
@@ -680,17 +718,7 @@ updatePadm() {
         exec "${installPath}"
     fi
 
-    if [[ -f "${backupPath}" ]]; then
-        if restorePadmEntryBackup "${backupPath}" "${installPath}" >/dev/null 2>&1; then
-            errorCard "新版入口执行失败，已恢复旧入口"
-        else
-            local restoreMessage
-            coreSetPairedFileRestoreFailureMessage restoreMessage "新版入口执行失败" "旧入口" "${installPath}" "${backupPath}"
-            errorCard "${restoreMessage}"
-        fi
-    else
-        errorCard "新版入口执行失败，旧入口备份不存在"
-    fi
+    padmRunRollback rollbackPadmEntryUpdateOnExit || true
     menuLine "$(uiStyle warn "请手动执行下面命令重新更新")"
     menuLine "$(uiStyle value "wget -O /root/install.sh https://raw.githubusercontent.com/neil1123-vip/padm/${remoteRef}/install.sh && chmod 700 /root/install.sh && /root/install.sh")"
     echo
