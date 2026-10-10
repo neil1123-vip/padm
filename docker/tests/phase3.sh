@@ -1076,7 +1076,7 @@ validateFeatureMatrix() {
       def metadata:
         (.status | state) and (.native_menu | text) and (.native_action | text) and (.reason | text) and
         (.profiles | names(["core-xray", "core-sing-box", "nginx", "nginx-stream", "acme", "subscription",
-          "net-wireguard", "net-fail2ban", "net-transparent"])) and
+          "net-wireguard", "net-fail2ban", "net-fail2ban-control", "net-transparent"])) and
         (.network_mode == "bridge" or .network_mode == "host" or .network_mode == "host-cli") and
         (.host_capabilities | names(["NET_ADMIN", "/dev/net/tun"])) and
         (if .network_mode != "host" then
@@ -1121,16 +1121,21 @@ validateFeatureMatrix() {
         . as $entry | (.value | metadata) and
         .value.network_mode == (if ($host_cli | index($entry.key)) != null then "host-cli"
           elif ($host | index($entry.key)) != null then "host" else "bridge" end)) and
-      (.host_integrations | type == "object" and keys == (["fail2ban", "tun", "tproxy", "wireguard"] | sort)) and
+      (.host_integrations | type == "object" and
+        keys == (["fail2ban", "fail2ban-control", "tun", "tproxy", "wireguard"] | sort)) and
       all(.host_integrations | to_entries[];
         . as $entry |
         (.value | .status == "host-integrated" and .network_mode == "host" and
           .capabilities == ["NET_ADMIN"] and
           .devices == (if $entry.key == "tun" then ["/dev/net/tun"] else [] end)) and
-        ($matrix.feature_matrix[$entry.key] |
+        ($matrix.feature_matrix[if $entry.key == "fail2ban-control" then "fail2ban" else $entry.key end] |
           .status == $entry.value.status and .network_mode == $entry.value.network_mode and
-          .profiles == [$entry.value.profile] and
+          .profiles == (if $entry.key == "fail2ban" or $entry.key == "fail2ban-control"
+            then ["net-fail2ban", "net-fail2ban-control"] else [$entry.value.profile] end) and
           (.host_capabilities | sort) == ($entry.value.capabilities + $entry.value.devices | sort))) and
+      (.host_integrations["fail2ban-control"] |
+        .profile == "net-fail2ban-control" and .address_families == ["ipv4"] and
+        .services == ["control", "net-wireguard", "net-fail2ban-control"]) and
       all({
         nginx: ["nginx"], "tls-files": ["nginx", "acme"], "acme-dns": ["acme"],
         subscription: ["core-xray", "nginx", "subscription"],
@@ -1177,6 +1182,8 @@ del(.feature_matrix["reality-target-management"])
 .feature_matrix["acme-standalone"].network_mode = "host"
 .feature_matrix.wireguard.host_capabilities = ["SYS_ADMIN"]
 .host_integrations.wireguard.capabilities = ["SYS_ADMIN"]
+.host_integrations["fail2ban-control"].profile = "net-fail2ban"
+.host_integrations["fail2ban-control"].address_families = ["ipv4","ipv6"]
 .feature_matrix["internal-203-wireguard"].profiles = ["net-fail2ban"]
 .feature_matrix["internal-204-tun"].host_capabilities = ["NET_ADMIN"]
 .protocols[3].transport = "quic"

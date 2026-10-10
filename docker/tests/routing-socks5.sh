@@ -55,7 +55,8 @@ reject() { if "$@" >"${LOG}" 2>&1; then fail "应拒绝: $*"; fi; }
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/install-docker.sh"
 docker() {
-    if [[ "$*" == "ps -aq --filter label=com.docker.compose.project=${PADM_DOCKER_PROJECT} --filter label=com.docker.compose.service=net-fail2ban --filter label=com.docker.compose.oneoff=False" ]]; then
+    if [[ "$*" == "ps -aq --filter label=com.docker.compose.project=${PADM_DOCKER_PROJECT} --filter label=com.docker.compose.service=net-fail2ban --filter label=com.docker.compose.oneoff=False" ||
+        "$*" == "ps -aq --filter label=com.docker.compose.project=${PADM_DOCKER_PROJECT} --filter label=com.docker.compose.service=net-fail2ban-control --filter label=com.docker.compose.oneoff=False" ]]; then
         return 0
     fi
     # 合同夹具没有 daemon；真实辅助网络归属和删除由 bridge 专项验收。

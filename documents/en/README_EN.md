@@ -584,7 +584,6 @@ The API responds only after safe-file checks, a complete write and synchronizati
 an invalid log or unprovable socket source stops the API. Configuration restore never overwrites log
 history, and first creation preserves existing content. Connection closure is separate from authentication
 failure. Exact managed legacy restores may retain stdout-only logging without claiming the new capability.
-Control-plane Fail2ban protection is not yet provided.
 New controllers can run `padm-docker control source-check` to register a random challenge for up to
 30 seconds, then run the printed `control source-probe` command on the managed Peer. The probe binds
 its WireGuard source address without reading an invitation or sending a token. Only a 401 matching
@@ -605,10 +604,30 @@ if the Docker daemon is unavailable, the lock is retained until it recovers.
 The isolated control Fail2ban backend provides a `padm-control` jail, separate SQLite database and
 random owner. It bans INPUT TCP `NEW` connections only to one RFC 1918 IPv4 /32 and port on an actual
 `wg-padm` interface, leaving the WS dual-stack DOCKER-USER resources unchanged. Its process runs as
-`0:10001` with only `NET_ADMIN` and read-only trusted logs. Enable transactions and menu integration
-are not yet provided; ordinary 401s, old logs and source receipts do not authorize enabling protection.
-Do not start the backend manually to bypass the pending fresh nonce gate. The dedicated real fixture
-is `docker-control-fail2ban-real`.
+`0:10001` with only `NET_ADMIN` and read-only trusted logs. The Fail2ban maintenance menu now provides
+separate control-plane status, IPv4 unban, enable/disable and settings:
+
+```bash
+padm-docker fail2ban control status
+padm-docker fail2ban control unban 10.77.0.2
+padm-docker fail2ban control enable 6 600 3600 --preview
+padm-docker fail2ban control enable 6 600 3600 --confirm PADM-DOCKER-EDIT
+padm-docker fail2ban control settings 8 900 7200 --confirm PADM-DOCKER-EDIT
+padm-docker fail2ban control disable --confirm PADM-DOCKER-EDIT
+```
+
+The independent `fail2ban-control` integration stores only retry, find-time and ban-time settings;
+its target and port come from `control.listen`. It requires a managed controller and WireGuard,
+but the Peer's API authorization may be disabled. After confirmation, one deployment lock covers
+old-jail shutdown and clean-resource proof, ordinary-service startup, a fresh Peer source challenge,
+configuration and container-generation rechecks, and jail startup with `--no-deps`.
+Recovery must obtain a new challenge. Ordinary 401s, historical logs/receipts and an independent
+`source-check` are not enable credentials; do not start the backend manually to bypass this gate.
+Both jails disable automatic restart. After a daemon restart, use the management entry point for
+a fresh proof; failed cleanup retains ownership state and rules.
+The backend fixture is `docker-control-fail2ban-real`; transaction acceptance reuses
+`docker-control-two-deployment-real`. SSH, native-host systemd/reboot/uninstall, public-network and
+arm64 acceptance remain pending.
 Legacy internal roles without connection metadata
 remain compatible but cannot use external sync; old bundles cannot restore the new connection spec.
 Explicit `rollback` checks controlled identity, listener mapping and connection before sampling, creating a

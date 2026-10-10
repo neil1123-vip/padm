@@ -383,10 +383,10 @@
       "status": "host-integrated",
       "native_menu": "系统与脚本",
       "native_action": "Fail2ban 防护",
-      "profiles": ["net-fail2ban"],
+      "profiles": ["net-fail2ban", "net-fail2ban-control"],
       "network_mode": "host",
       "host_capabilities": ["NET_ADMIN"],
-      "reason": "封禁规则属于宿主防火墙，容器只提供受控工具。"
+      "reason": "7f 仅接入 WS 站点扫描和主控 WireGuard INPUT 认证防护；控制 jail 的启用与恢复在部署锁内重新证明真实来源，数据库与内核规则独立。封禁属于宿主防火墙，SSH 防护及真实宿主重启、卸载和完整管理尚未验收。"
     },
     "wireguard": {
       "status": "host-integrated",
@@ -575,6 +575,15 @@
       "profile": "net-fail2ban",
       "services": ["nginx", "net-fail2ban"],
       "address_families": ["ipv4", "ipv6"],
+      "network_mode": "host",
+      "capabilities": ["NET_ADMIN"],
+      "devices": []
+    },
+    "fail2ban-control": {
+      "status": "host-integrated",
+      "profile": "net-fail2ban-control",
+      "services": ["control", "net-wireguard", "net-fail2ban-control"],
+      "address_families": ["ipv4"],
       "network_mode": "host",
       "capabilities": ["NET_ADMIN"],
       "devices": []

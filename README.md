@@ -755,7 +755,6 @@ padm-docker control sync --invite /root/padm-control-invite.json
 文件安全核验、完整写入和同步成功后才发送响应；日志失效或来源不可证明时停止 API。
 日志留在配置恢复之外，首次创建不截断已有内容。连接关闭与鉴权失败分开记录；
 精确旧版本恢复可保留仅标准输出的受管格式，不宣称具备新日志能力。
-控制面 Fail2ban 防护尚未交付。
 新版主控可执行 `padm-docker control source-check` 登记最多 30 秒的随机挑战，
 再在受管 Peer 执行输出的 `control source-probe` 命令。探测绑定 WireGuard 源地址，
 不读取邀请或发送 token；精确匹配登记、真实 socket 与主控状态的 401 才写独立
@@ -772,8 +771,26 @@ INT/TERM 等待轮转容器结束并移除后才释放部署锁；Docker daemon 
 控制面独立 Fail2ban 后端已具备 `padm-control` jail、独立 SQLite 和随机 owner：
 只对实际 `wg-padm` 上单个 RFC 1918 IPv4 /32、TCP 端口的 INPUT `NEW` 连接封禁，
 不改 WS 的双栈 DOCKER-USER 资源。防护进程使用 `0:10001`、仅 `NET_ADMIN` 和只读可信日志。
-该后端尚未接入启用事务或菜单，普通 401、旧日志和来源回执均不构成启用授权；
-不能手工启动后端绕过后续 fresh nonce 门禁。定向真实夹具为 `docker-control-fail2ban-real`。
+服务维护的 Fail2ban 菜单已提供独立控制面状态、IPv4 解封、启停及参数管理：
+
+```bash
+padm-docker fail2ban control status
+padm-docker fail2ban control unban 10.77.0.2
+padm-docker fail2ban control enable 6 600 3600 --preview
+padm-docker fail2ban control enable 6 600 3600 --confirm PADM-DOCKER-EDIT
+padm-docker fail2ban control settings 8 900 7200 --confirm PADM-DOCKER-EDIT
+padm-docker fail2ban control disable --confirm PADM-DOCKER-EDIT
+```
+
+独立 `fail2ban-control` 集成只保存失败阈值、检测窗口和封禁秒数，目标与端口从
+`control.listen` 派生；必须为主控且有受管 WireGuard，不要求 Peer 的 API 授权启用。
+确认后在同一部署锁内停止旧 jail 并证明本范围清洁，先启动普通服务，再输出本次挑战，
+由 Peer 执行 `control source-probe`。nonce、回执、来源容器代次和配置重新核验后，
+仅用 `--no-deps` 启动 `net-fail2ban-control`，恢复也必须取得新挑战，不能复用旧证明。
+普通 401、旧日志、历史回执和独立 `source-check` 均不构成启用授权；禁止手工启动绕过。
+两个 jail 禁用自动重启，daemon 重启后须通过管理入口重新挑战；清理失败保留 state 和规则。
+后端真实夹具为 `docker-control-fail2ban-real`，事务验收复用 `docker-control-two-deployment-real`；
+SSH、原生宿主 systemd/重启卸载、公网和 arm64 尚未验收。
 旧无连接元数据的内部被控规格继续兼容，但不能直接使用外部同步；旧 bundle 不得恢复新连接规格。
 显式 `rollback` 在采集、备份和停服前检查被控身份、入口映射与连接一致，拒绝降同步版本，
 同版本必须保持摘要和受管账号；同步状态未变的兼容发行版快照仍可回滚。

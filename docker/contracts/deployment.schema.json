@@ -187,7 +187,7 @@
         "required": ["type", "profile", "firewall_rules", "devices", "schedules", "settings"],
         "properties": {
           "type": {
-            "enum": ["fail2ban", "wireguard", "tun", "tproxy"]
+            "enum": ["fail2ban", "fail2ban-control", "wireguard", "tun", "tproxy"]
           },
           "profile": {
             "type": "string",
