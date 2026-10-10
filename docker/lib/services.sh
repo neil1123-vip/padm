@@ -1113,7 +1113,8 @@ dockerEditBaselineValidate() {
             }
         fi
     done
-    dockerGenerateCompose "${specFile}" "${baseline}/compose.json" &&
+    dockerGenerateCompatibleControlCompose "${specFile}" "${root}/compose.json" "${root}" \
+        >"${baseline}/compose.json" &&
         dockerGenerateDeployment "${specFile}" "${baseline}/deployment.json" || return 1
     : >"${baseline}/images.env"
     dockerGenerateImagesEnv "${specFile}" "${baseline}/images.env" "${root}" || return 1
@@ -1388,7 +1389,7 @@ dockerCreateConfigurationCandidate() {
         config/xray config/sing-box config/nginx config/control config/net/fail2ban config/net/transparent \
         data/xray data/sing-box data/static data/subscription data/acme \
         data/net/wireguard data/net/fail2ban data/net/transparent \
-        secrets/tls secrets/net/wireguard logs/nginx logs/subscription logs/acme; do
+        secrets/tls secrets/net/wireguard logs/nginx logs/subscription logs/acme logs/control; do
         mkdir -p -- "${candidate}/${directory}" || {
             dockerRemoveManagedTree "${root}" "${candidate}" || true
             return 1
@@ -2759,10 +2760,12 @@ dockerGenerateCompose() {
             profiles: ["control"],
             user: "10001:10001",
             network_mode: "host",
-            command: ["control", "--state", "/etc/padm/control/state.json"],
+            command: ["control", "--state", "/etc/padm/control/state.json",
+              "--access-log", "/var/log/padm/control/auth.log"],
             labels: labels("control"),
             depends_on: {"net-wireguard": {condition: "service_healthy"}},
-            volumes: mounts("config/control"; "/etc/padm/control"; true),
+            volumes: (mounts("config/control"; "/etc/padm/control"; true) +
+              mounts("logs/control"; "/var/log/padm/control"; false)),
             tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=8m"],
             healthcheck: {
               test: ["CMD", "/usr/local/bin/padm-entrypoint", "control-health",
@@ -2827,6 +2830,34 @@ dockerGenerateCompose() {
         else . end
       )
     ' >"${target}"
+}
+
+dockerGenerateCompatibleControlCompose() {
+    local specFile=$1 actualFile=$2 directory=$3 expected
+    expected=$(dockerGenerateCompose "${specFile}" /dev/stdout "${directory}") || return 1
+    # release 标签沿用既有编辑兼容规则；旧主控只差固定日志参数与挂载。
+    jq -en --argjson expected "${expected}" --slurpfile actual "${actualFile}" '
+      def legacy:
+        .services.control.command = ["control", "--state", "/etc/padm/control/state.json"] |
+        .services.control.volumes = [.services.control.volumes[0]];
+      def release_metadata($actual):
+        .services |= with_entries(.key as $service |
+          if (.value.labels | type) == "object" and
+            ($actual.services[$service].labels | type) == "object" then
+            .value.labels |= del(."io.padm.release") |
+            if $actual.services[$service].labels | has("io.padm.release") then
+              .value.labels["io.padm.release"] = $actual.services[$service].labels["io.padm.release"]
+            else . end
+          else . end);
+      if ($actual | length) != 1 then error("invalid control compose")
+      else ($expected | release_metadata($actual[0])) as $compatible |
+        if $actual[0].services.control == $compatible.services.control then $compatible
+        elif $compatible.services.control != null and
+          $actual[0].services.control == ($compatible | legacy | .services.control)
+        then $compatible | legacy
+        else error("unmanaged control compose") end
+      end
+    '
 }
 
 dockerGenerateDeployment() {
@@ -3027,6 +3058,10 @@ dockerPrepareCandidatePermissions() {
         dockerError '候选权限准备拒绝符号链接'
         return 1
     }
+    if [[ -e "${candidate}/logs/control" || -L "${candidate}/logs/control" ]]; then
+        [[ -d "${candidate}/logs/control" &&
+            -z "$(find "${candidate}/logs/control" -mindepth 1 -print -quit)" ]] || return 1
+    fi
     dockerSiteTreeValidate "${candidate}/data/static" || return 1
     if jq -e '.tls.http01 == true' "${candidate}/config/spec.json" >/dev/null 2>&1; then
         [[ -d "${candidate}/data/acme-webroot" && ! -L "${candidate}/data/acme-webroot" ]] || return 1
@@ -4127,7 +4162,8 @@ dockerValidateCandidate() {
     fi
     if jq -e 'has("control")' "${specFile}" >/dev/null; then
         dockerCandidateCompose "${candidate}" run --rm --no-deps control \
-            control --state /etc/padm/control/state.json --check >/dev/null || {
+            control --state /etc/padm/control/state.json \
+            --access-log /var/log/padm/control/auth.log --check >/dev/null || {
             dockerError '主控私网服务候选配置校验失败'
             return 1
         }
@@ -4294,7 +4330,7 @@ dockerUpdateRenderImagesEnv() {
 }
 
 dockerCreateUpdateCandidate() {
-    local root candidate relative source target version manifestSha previous
+    local root candidate relative source target version manifestSha previous expected
     root=$(dockerInstallRoot) || return 1
     dockerControlRecoveryCheck || return 1
     DOCKER_CONFIG_CANDIDATE=
@@ -4322,6 +4358,15 @@ dockerCreateUpdateCandidate() {
     [[ -f "${root}/compose.json" && ! -L "${root}/compose.json" &&
         -f "${root}/images.env" && ! -L "${root}/images.env" &&
         -f "${root}/deployment.json" && ! -L "${root}/deployment.json" ]] || return 1
+    if jq -e '.control != null' "${root}/config/spec.json" >/dev/null 2>&1; then
+        expected=$(dockerGenerateCompatibleControlCompose "${root}/config/spec.json" \
+            "${root}/compose.json" "${root}") || return 1
+        { cmp -s -- "${root}/compose.json" <(printf '%s\n' "${expected}") ||
+            cmp -s -- "${root}/compose.json" \
+                <(jq -e 'select(.services["net-fail2ban"] != null) |
+                    .services["net-fail2ban"].restart = "unless-stopped"' <<<"${expected}"); } || return 1
+        mkdir -p -- "${candidate}/logs/control" || return 1
+    fi
     cp -- "${root}/compose.json" "${candidate}/compose.json" || return 1
     dockerUpdateRenderImagesEnv "${root}/images.env" "${candidate}/images.env" "${candidate}" || return 1
     dockerUpdateRenderImagesEnv "${root}/images.env" "${candidate}/images.runtime.env" "${root}" || return 1
@@ -4358,7 +4403,8 @@ dockerCreateUpdateCandidate() {
           .release = $inputs.release | .images = $inputs.images
         ' "${root}/config/spec.json" >"${candidate}/config/spec.json" || return 1
         chmod 0600 "${candidate}/config/spec.json" || return 1
-        if jq -e 'any(.host_integrations[]; .type == "fail2ban")' "${candidate}/config/spec.json" >/dev/null; then
+        if jq -e '.control != null or any(.host_integrations[]; .type == "fail2ban")' \
+            "${candidate}/config/spec.json" >/dev/null; then
             dockerGenerateCompose "${candidate}/config/spec.json" "${candidate}/compose.json" "${root}" || return 1
         fi
         dockerConfigureSpecValidate "${candidate}/config/spec.json" &&
@@ -4395,6 +4441,11 @@ dockerValidateUpdateCandidate() {
         return $?
     fi
     dockerCandidateCompose "${candidate}" config --format json >/dev/null 2>&1 || return 1
+    if jq -e '.control != null' "${candidate}/config/spec.json" >/dev/null 2>&1; then
+        dockerCandidateCompose "${candidate}" run --rm --no-deps control \
+            control --state /etc/padm/control/state.json \
+            --access-log /var/log/padm/control/auth.log --check >/dev/null || return 1
+    fi
 }
 
 dockerRemoveConfigurationTargets() {
@@ -4516,9 +4567,50 @@ dockerInstallCandidate() {
     chmod 0640 "${root}/compose.json" "${root}/images.env" "${root}/deployment.json" || return 1
 }
 
+dockerControlAccessLogEnsure() {
+    local root=$1 directory="${1}/logs/control" logFile="${1}/logs/control/auth.log" cursor mode
+    local specFile=${2:-"${1}/config/spec.json"}
+    jq -e '.control != null and .control.role == "main"' "${specFile}" >/dev/null 2>&1 || return 0
+    dockerTrafficSafePath "${root}" "${logFile}" || return 1
+    cursor=${directory%/*}
+    [[ -e "${cursor}" || -L "${cursor}" ]] || cursor=${root}
+    while [[ -n "${cursor}" ]]; do
+        [[ -d "${cursor}" && ! -L "${cursor}" && "$(stat -c %u -- "${cursor}")" == 0 ]] || return 1
+        mode=$(stat -c %a -- "${cursor}") || return 1
+        # 只允许部署根外的 root sticky 临时目录，受管父目录不能由其它用户替换。
+        (( (8#${mode} & 022) == 0 )) ||
+            { [[ "${cursor}" != "${root}" && "${cursor}" != "${root}/"* ]] &&
+                (( (8#${mode} & 01000) != 0 )); } || return 1
+        [[ "${cursor}" != / ]] || break
+        cursor=${cursor%/*}
+        [[ -n "${cursor}" ]] || cursor=/
+    done
+    if [[ ! -e "${root}/logs" && ! -L "${root}/logs" ]]; then
+        mkdir -- "${root}/logs" && chmod 0750 "${root}/logs" &&
+            chown "0:${PADM_DOCKER_CONTAINER_GID}" "${root}/logs" || return 1
+    fi
+    if [[ ! -e "${directory}" && ! -L "${directory}" ]]; then
+        mkdir -- "${directory}" && chmod 0750 "${directory}" &&
+            chown "0:${PADM_DOCKER_CONTAINER_GID}" "${directory}" || return 1
+    fi
+    [[ -d "${directory}" && ! -L "${directory}" &&
+        "$(stat -c '%a:%u:%g' -- "${directory}")" == "750:0:${PADM_DOCKER_CONTAINER_GID}" &&
+        -z "$(find "${directory}" -mindepth 1 -maxdepth 1 ! -path "${logFile}" -print -quit)" ]] || return 1
+    if [[ ! -e "${logFile}" && ! -L "${logFile}" ]]; then
+        # 仅首启创建，不截断已存在的来源证据；目录只有 root 能创建或替换文件。
+        (umask 027; set -C; : >"${logFile}") &&
+            chmod 0640 "${logFile}" &&
+            chown "${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}" "${logFile}" || return 1
+    fi
+    [[ -f "${logFile}" && ! -L "${logFile}" &&
+        "$(stat -c '%a:%u:%g:%h' -- "${logFile}")" == \
+            "640:${PADM_DOCKER_CONTAINER_UID}:${PADM_DOCKER_CONTAINER_GID}:1" ]]
+}
+
 dockerEnsureRuntimeDataPermissions() {
     local root directory privateFile
     root=$(dockerInstallRoot) || return 1
+    dockerControlAccessLogEnsure "${root}" || return 1
     if jq -e '.tls.http01 == true' "${root}/config/spec.json" >/dev/null 2>&1; then
         dockerAcmeWebrootEnsure "${root}" || return 1
     fi
@@ -4577,7 +4669,7 @@ dockerEnsureRuntimeDataPermissions() {
 dockerRestoreConfiguration() {
     local root backup=${DOCKER_CONFIG_BACKUP:-} relative core bundleTarget= savedTraffic currentTraffic restoredTraffic includeStatic=0
     local alpnListener=${DOCKER_CONFIG_RESTORE_ALPN_LISTENER:-} alpnTemporary= ipv6Cleanup=0
-    local legacyFail2ban=0
+    local legacyFail2ban=0 expectedCompose=
     [[ "${DOCKER_CONFIG_SWITCHED:-0}" == "1" && -n "${backup}" ]] || return 0
     root=$(dockerInstallRoot) || return 1
     if [[ -e "${backup}/bundle.target" || -L "${backup}/bundle.target" ]]; then
@@ -4595,12 +4687,24 @@ dockerRestoreConfiguration() {
     fi
     if [[ -f "${backup}/config/spec.json" ]]; then
         dockerFail2banSourceInputsCheck "${backup}/config/spec.json" || return 1
+        if jq -e '.control != null' "${backup}/config/spec.json" >/dev/null; then
+            expectedCompose=$(dockerGenerateCompatibleControlCompose "${backup}/config/spec.json" \
+                "${backup}/compose.json" "${root}") || return 1
+        elif jq -e 'any(.host_integrations[]; .type == "fail2ban")' "${backup}/config/spec.json" >/dev/null; then
+            expectedCompose=$(dockerGenerateCompose "${backup}/config/spec.json" /dev/stdout "${root}") || return 1
+        fi
+        if jq -e '.control != null' "${backup}/config/spec.json" >/dev/null &&
+            ! jq -e 'any(.host_integrations[]; .type == "fail2ban")' "${backup}/config/spec.json" >/dev/null; then
+            cmp -s -- "${backup}/compose.json" <(printf '%s\n' "${expectedCompose}") || {
+                dockerError '主控恢复编排不受管，尚未停止或修改服务'
+                return 1
+            }
+        fi
         if jq -e 'any(.host_integrations[]; .type == "fail2ban")' "${backup}/config/spec.json" >/dev/null; then
             if ! cmp -s -- "${backup}/compose.json" \
-                <(dockerGenerateCompose "${backup}/config/spec.json" /dev/stdout "${root}"); then
+                <(printf '%s\n' "${expectedCompose}"); then
                 cmp -s -- "${backup}/compose.json" \
-                    <(dockerGenerateCompose "${backup}/config/spec.json" /dev/stdout "${root}" |
-                      jq '.services["net-fail2ban"].restart = "unless-stopped"') || {
+                    <(jq '.services["net-fail2ban"].restart = "unless-stopped"' <<<"${expectedCompose}") || {
                     dockerError 'Fail2ban 恢复编排不受管，尚未停止或修改服务'
                     return 1
                 }
@@ -4620,6 +4724,7 @@ dockerRestoreConfiguration() {
             return 1
         }
     fi
+    dockerControlAccessLogEnsure "${root}" "${backup}/config/spec.json" || return 1
     dockerControlRestorePrepare "${backup}" || return 1
     # 当前配置可能只安装了一部分，恢复授权只取自已验证的备份。
     dockerRealityStreamDeploymentCheck "${backup}/config/spec.json" || return 1
@@ -4684,7 +4789,7 @@ dockerRestoreConfiguration() {
     fi
     if [[ "${legacyFail2ban}" == 1 ]]; then
         # 备份原文不变，仅规范化已验证的旧自动重启策略，再重新取得现场证明。
-        dockerGenerateCompose "${root}/config/spec.json" "${root}/compose.json" "${root}" || return 1
+        printf '%s\n' "${expectedCompose}" >"${root}/compose.json" || return 1
     fi
     [[ -z "${bundleTarget}" ]] || dockerActivateBundle "${bundleTarget}" || return 1
     if [[ -f "${root}/deployment.json" && -f "${root}/compose.json" && -f "${root}/images.env" ]]; then
@@ -4938,6 +5043,10 @@ dockerConfigureApply() {
             return "${PADM_DOCKER_RC_STATE}"
         }
     fi
+    dockerControlAccessLogEnsure "${root}" "${specFile}" || {
+        dockerCleanupConfigurationCandidate || true
+        return "${PADM_DOCKER_RC_STATE}"
+    }
     dockerBackupConfiguration "${backupPrefix}" || {
         dockerCleanupConfigurationCandidate || true
         return "${PADM_DOCKER_RC_STATE}"

@@ -92,6 +92,12 @@ def main():
         api_log, client_log, sync_log = [work / name for name in ("api.log", "client.log", "sync.log")]
         for log in (api_log, client_log, sync_log):
             log.touch(mode=0o600)
+        auth_directory = work / "control-logs"
+        auth_directory.mkdir(mode=0o750)
+        os.chown(auth_directory, 0, 10001)
+        auth_log = auth_directory / "auth.log"
+        auth_log.touch(mode=0o640)
+        os.chown(auth_log, 10001, 10001)
         try:
             # 保留进程持有私有网络空间，避免 ip netns 的全局挂载和命名空间目录。
             original_namespace = os.readlink("/proc/self/ns/net")
@@ -181,7 +187,8 @@ def main():
             with api_log.open("ab") as output:
                 server = subprocess.Popen(
                     namespace(controller) + [sys.executable, str(Path(__file__).resolve()),
-                                             "--api", "--state", str(state_path)],
+                                             "--api", "--state", str(state_path),
+                                             "--access-log", str(auth_log)],
                     stdout=output, stderr=subprocess.STDOUT,
                 )
             for _ in range(100):
@@ -310,7 +317,39 @@ def main():
             assert result.returncode == 0 and not result.stderr and json.loads(result.stdout) == recovered
             stop(server)
             server = None
+            assert auth_log.read_bytes() == api_log.read_bytes(), "持久日志与生产标准输出不一致"
+
+            failure_log = work / "log-failure.log"
+            with failure_log.open("wb") as output:
+                server = subprocess.Popen(
+                    namespace(controller) + [sys.executable, str(Path(__file__).resolve()),
+                                             "--api", "--state", str(state_path),
+                                             "--access-log", str(auth_log)],
+                    stdout=output, stderr=subprocess.STDOUT,
+                )
+            for _ in range(100):
+                assert server.poll() is None, "日志故障验收 API 启动失败"
+                health = subprocess.run(
+                    namespace(controller) + [sys.executable, str(Path(__file__).resolve()),
+                                             "--api", "--state", str(state_path), "--health"],
+                    capture_output=True, timeout=4,
+                )
+                if health.returncode == 0:
+                    break
+                time.sleep(0.02)
+            else:
+                raise AssertionError("日志故障验收 API 未通过健康检查")
+            before_failure = auth_log.read_bytes()
+            auth_log.chmod(0o600)
+            client(accepted=False)
+            assert server.wait(timeout=3) == 78, "日志权限失效后 API 仍继续服务"
+            server = None
+            assert auth_log.read_bytes() == before_failure, "不安全日志仍被写入"
+            assert failure_log.read_bytes().endswith("控制访问日志写入失败，服务已停止\n".encode()), \
+                "日志故障未给出固定停服诊断"
+            auth_log.chmod(0o640)
             logs = b"".join(path.read_bytes() for path in (api_log, client_log, sync_log))
+            logs += auth_log.read_bytes() + failure_log.read_bytes()
             secrets = [token, rotated, identity(9)] + [
                 value for number in (3, 4, 5) for value in (account(number)["password"], account(number)["uuid"])
             ]
@@ -333,6 +372,7 @@ def main():
             evidence["source_logs"] = {
                 "target": ADDRESS, "port": PORT, "sources": sorted({source for _, source in entries}),
                 "forwarded_headers_ignored": True, "secrets_absent": True, "utc": True,
+                "persistent_stdout_match": True, "unsafe_log_stops_api": True,
             }
         finally:
             if server is not None:

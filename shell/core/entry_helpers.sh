@@ -1097,11 +1097,17 @@ checkLogBackupRestore() {
 }
 
 checkLogRollbackOrReport() {
+    padmRunRollback checkLogRollbackOrReportApply "$@"
+}
+
+checkLogRollbackOrReportApply() {
     local backupDir=$1
     local restoreReason=$2
     local rollbackReason=$3
+    local retryReload=${4:-false}
     local restoreMessage
     local rollbackMessage
+    PADM_CHECK_LOG_ROLLBACK_PENDING=false
 
     if ! checkLogBackupRestore "${backupDir}"; then
         padmForgetCleanupPath "${backupDir}"
@@ -1110,12 +1116,24 @@ checkLogRollbackOrReport() {
         return 1
     fi
 
+    if [[ "${retryReload}" == true ]] && ! runServiceAction xray restart; then
+        padmForgetCleanupPath "${backupDir}"
+        errorCard "${restoreReason}，${rollbackReason}，恢复旧配置后核心重载仍失败，请检查核心服务日志" "备份目录: ${backupDir}"
+        return 1
+    fi
     padmRemoveCleanupPath "${backupDir}"
     if [[ -n "${rollbackReason}" ]]; then
         coreSetRollbackResultMessage rollbackMessage "${restoreReason}" "${rollbackReason}"
         errorCard "${rollbackMessage}"
     fi
     return 1
+}
+
+rollbackXrayLogConfigOnExit() {
+    [[ "${PADM_CHECK_LOG_ROLLBACK_PENDING:-false}" == true ]] || return 0
+    PADM_CHECK_LOG_ROLLBACK_PENDING=false
+    checkLogRollbackOrReport "${PADM_CHECK_LOG_BACKUP_DIR}" "${1:-日志修改中断}" \
+        "${2:-已回滚本次日志修改}" "${PADM_CHECK_LOG_RELOAD_PENDING}"
 }
 
 # 日志管理
@@ -1159,6 +1177,9 @@ checkLog() {
     case ${selectAccessLogType} in
     1)
         local logBackupDir
+        local PADM_CHECK_LOG_ROLLBACK_PENDING=false PADM_CHECK_LOG_BACKUP_DIR= PADM_CHECK_LOG_RELOAD_PENDING=false
+        local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+        local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
         local -a backupTargets=("${configPath}00_log.json")
         [[ ${realityStatus} == "7" ]] && backupTargets+=("${configPath}07_VLESS_vision_reality_inbounds.json")
         [[ ${realityStatus} == "12" ]] && backupTargets+=("${configPath}12_VLESS_XHTTP_inbounds.json")
@@ -1166,6 +1187,9 @@ checkLog() {
             errorCard "日志配置备份失败，已取消修改"
             return 1
         }
+        PADM_CHECK_LOG_BACKUP_DIR=${logBackupDir}
+        PADM_CHECK_LOG_ROLLBACK_PENDING=true
+        padmRegisterExitRollback rollbackXrayLogConfigOnExit
         if [[ "${logStatus}" == "false" ]]; then
             realityLogShow=true
         else
@@ -1188,21 +1212,12 @@ checkLog() {
                 return 1
             fi
         fi
+        PADM_CHECK_LOG_RELOAD_PENDING=${serviceWasRunning}
         if [[ "${serviceWasRunning}" == true ]] && ! runServiceAction xray restart; then
-            if ! checkLogBackupRestore "${logBackupDir}"; then
-                padmForgetCleanupPath "${logBackupDir}"
-                local restoreMessage
-                coreSetSingleRestoreResultMessage restoreMessage "日志配置更新后核心重载失败" false "已恢复旧配置" "旧配置" "备份目录: ${logBackupDir}"
-                errorCard "${restoreMessage}"
-                return 1
-            fi
-            padmRemoveCleanupPath "${logBackupDir}"
-            local rollbackMessage
-            coreSetRollbackResultMessage rollbackMessage "核心重载失败" "已回滚日志配置修改" runServiceAction \
-                "恢复旧配置后核心重载仍失败，请检查核心服务日志" xray restart
-            errorCard "${rollbackMessage}"
+            padmRunRollback rollbackXrayLogConfigOnExit "核心重载失败" "已回滚日志配置修改" || true
             return 1
         fi
+        PADM_CHECK_LOG_ROLLBACK_PENDING=false
         padmRemoveCleanupPath "${logBackupDir}"
         return 0
         ;;

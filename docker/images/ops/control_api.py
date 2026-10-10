@@ -12,6 +12,7 @@ import socket
 import socketserver
 import stat
 import struct
+import sys
 import threading
 import time
 import uuid
@@ -201,12 +202,61 @@ def request_log_tuple(connection):
         return None
 
 
-def request_log_event(status, endpoints):
+def open_access_log(path):
+    path = Path(path)
+    if not path.is_absolute():
+        raise ValueError("访问日志路径不安全")
+    for parent in path.parents:
+        metadata = parent.lstat()
+        if (not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != 0
+                or metadata.st_mode & 0o022):
+            raise ValueError("访问日志目录不安全")
+        if parent == path.parent and (metadata.st_gid != 10001 or stat.S_IMODE(metadata.st_mode) != 0o750):
+            raise ValueError("访问日志目录权限不匹配")
+    descriptor = os.open(path, os.O_APPEND | os.O_WRONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    try:
+        metadata = os.fstat(descriptor)
+        if (not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1
+                or metadata.st_uid != 10001 or metadata.st_gid != 10001
+                or stat.S_IMODE(metadata.st_mode) != 0o640):
+            raise ValueError("访问日志文件权限不匹配")
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def access_log_failure():
+    try:
+        print("控制访问日志写入失败，服务已停止", file=sys.stderr, flush=True)
+    finally:
+        raise SystemExit(78) from None
+
+
+def request_log_event(status, endpoints, access_log=None):
     if endpoints is None:
+        if access_log is not None:
+            access_log_failure()
         return
     source, target, port = endpoints
     timestamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-    print(f"{timestamp} control-request status={status} source={source} target={target} port={port}", flush=True)
+    line = f"{timestamp} control-request status={status} source={source} target={target} port={port}"
+    try:
+        if access_log is not None:
+            # 每条重新打开已预建的安全文件，单次追加并同步后才允许 stdout 或响应。
+            descriptor = open_access_log(access_log)
+            try:
+                content = (line + "\n").encode("ascii")
+                if os.write(descriptor, content) != len(content):
+                    raise OSError("访问日志短写")
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+        print(line, flush=True)
+    except (OSError, ValueError):
+        if access_log is not None:
+            access_log_failure()
+        raise
 
 
 class ControlHandler(BaseHTTPRequestHandler):
@@ -221,7 +271,7 @@ class ControlHandler(BaseHTTPRequestHandler):
     def handle_one_request(self):
         super().handle_one_request()
         if getattr(self, "raw_requestline", None) == b"":
-            request_log_event("connection_closed", self.log_endpoints)
+            request_log_event("connection_closed", self.log_endpoints, getattr(self.server, "access_log", None))
 
     def do_GET(self):
         try:
@@ -276,12 +326,12 @@ class ControlHandler(BaseHTTPRequestHandler):
 
     def log_request(self, code="-", size="-"):
         if isinstance(code, int) and not isinstance(code, bool) and 100 <= code <= 599:
-            request_log_event(int(code), self.log_endpoints)
+            request_log_event(int(code), self.log_endpoints, getattr(self.server, "access_log", None))
 
     def log_error(self, message_format, *args):
         # BaseHTTP 会吞掉读取超时，只按异常类型记录关闭，不读取异常原文。
         if len(args) == 1 and isinstance(args[0], TimeoutError):
-            request_log_event("connection_closed", self.log_endpoints)
+            request_log_event("connection_closed", self.log_endpoints, getattr(self.server, "access_log", None))
 
     def log_message(self, message_format, *args):
         # BaseHTTP 的格式参数可能含请求原文，日志只走固定状态与真实 socket。
@@ -318,7 +368,7 @@ class ControlServer(HTTPServer):
         try:
             super().finish_request(connection, address)
         except (BrokenPipeError, ConnectionResetError, TimeoutError):
-            request_log_event("connection_closed", endpoints)
+            request_log_event("connection_closed", endpoints, getattr(self, "access_log", None))
         finally:
             deadline.cancel()
             deadline.join()
@@ -328,6 +378,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--version", action="version", version="padm-control/1")
     parser.add_argument("--state", required=True)
+    parser.add_argument("--access-log")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true")
     mode.add_argument("--health", action="store_true")
@@ -339,10 +390,16 @@ def main():
         if args.health:
             health_check(state)
             return
+        if args.access_log is not None:
+            try:
+                os.close(open_access_log(args.access_log))
+            except (OSError, ValueError):
+                access_log_failure()
         require_wireguard_address(state)
         server = ControlServer((state["listen"]["address"], state["listen"]["port"]), ControlHandler)
         server.state_path = args.state
         server.listen = state["listen"]
+        server.access_log = args.access_log
         with server:
             server.serve_forever()
     except (OSError, ValueError, http.client.HTTPException) as error:
