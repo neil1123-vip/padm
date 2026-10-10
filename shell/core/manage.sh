@@ -3364,6 +3364,10 @@ manageXHTTPConfigFile() {
         printf '%s\n' "${PADM_XHTTP_CONFIG_FILE}"
         return
     fi
+    if [[ -n "${PADM_VLESS_XHTTP_CONFIG_FILE:-}" ]]; then
+        printf '%s\n' "${PADM_VLESS_XHTTP_CONFIG_FILE}"
+        return
+    fi
     local configDir
     configDir=$(manageXrayConfigDir) || return 1
     printf '%s\n' "${configDir%/}/12_VLESS_XHTTP_inbounds.json"

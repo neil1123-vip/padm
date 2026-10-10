@@ -196,6 +196,18 @@ runReadInstallProtocolTypeScanFailureRegression() (
             printf '%s\n' '{"inbounds":[]}' >"${configPath}custom_inbounds.json"
             readInstallProtocolType || return 1
             [[ "${PADM_INSTALL_STATUS_READY}" == 1 && "${currentInstallProtocolType}" == , ]] || return 1
+            coreInstallType=2
+            configPath="${root}/grpc-sni/"
+            singBoxConfigPath=${configPath}
+            configFile="${configPath}08_VLESS_vision_gRPC_inbounds.json"
+            mkdir -p "${configPath}" || return 1
+            printf '%s\n' '{"inbounds":[{"listen_port":8443,"users":[],"tls":{"server_name":"grpc.example.com","reality":{"handshake":{"server":"target.example.com","server_port":443}}}}]}' >"${configFile}"
+            realitySNI=stale.example.com
+            readInstallProtocolType || return 1
+            [[ "${realitySNI}" == grpc.example.com && "${realityTargetHost}" == target.example.com ]] || return 1
+            rm -f "${configFile}" || return 1
+            readInstallProtocolType || return 1
+            [[ -z "${realitySNI}${realityTargetHost}${realityTargetPort}" && "${PADM_INSTALL_STATUS_READY}" == 1 ]] || return 1
         ) || return 1
     done
 )

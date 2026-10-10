@@ -243,6 +243,7 @@ readInstallProtocolType() {
 
     realityTargetHost=
     realityTargetPort=
+    realitySNI=
     realityEntryHost=
 
     singBoxVLESSVisionPort=
@@ -400,6 +401,7 @@ readInstallProtocolType() {
                 frontingTypeReality=08_VLESS_vision_gRPC_inbounds
                 singBoxVLESSRealityGRPCPort=$(jq -r .inbounds[0].listen_port "${row}.json")
                 singBoxVLESSRealityGRPCSNI=$(jq -r .inbounds[0].tls.server_name "${row}.json")
+                realitySNI=${singBoxVLESSRealityGRPCSNI}
                 realityTargetHost=$(jq -r .inbounds[0].tls.reality.handshake.server "${row}.json")
                 realityTargetPort=$(jq -r .inbounds[0].tls.reality.handshake.server_port "${row}.json")
                 currentRealityPrivateKey=$(jq -r '.inbounds[0].tls.reality.private_key // empty' "${row}.json")
