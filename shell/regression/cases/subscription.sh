@@ -1417,6 +1417,45 @@ JSON
 
 runSubscriptionOutputTlsAnyHysteriaTuicNaiveRegression() {
     runRegressionStep subscription-output-auxiliary-udp runSubscriptionOutputAuxiliaryUdpRegression
+    local tlsBoundaryFailed=0
+    (
+        local configPath="${TMP_DIR}/tls-reader-tail-lf/" coreInstallType=2 singBoxConfigPath=
+        local currentInstallProtocolType=,3,5,4,31, currentHost=tls.example.com
+        local singBoxHysteria2Port=8443 singBoxTuicPort=9443 singBoxNaivePort=443 singBoxAnyTLSPort=443
+        local hysteria2PortHoppingStart= hysteria2PortHoppingEnd= hysteria2PortHopping=
+        local reader readerConfigFile status failed=0 capture="${TMP_DIR}/tls-reader-tail-lf-output"
+        local -a readerArgs=()
+        mkdir -p "${configPath}"
+        readPortHopping() { :; }
+        protocolConfigFile() { printf '%s\n' "${readerConfigFile}"; }
+        defaultBase64Code() { printf 'unexpected\n' >>"${capture}"; }
+        for reader in showTrojanAccountsFromConfig showHysteriaAccounts showTuicAccounts showNaiveAccounts showAnyTlsAccounts; do
+            case "${reader}" in
+            showTrojanAccountsFromConfig) readerConfigFile="${configPath}trojan.json" ;;
+            showHysteriaAccounts) readerConfigFile="${configPath}hysteria.json" ;;
+            showTuicAccounts) readerConfigFile="${configPath}tuic.json" ;;
+            showNaiveAccounts) readerConfigFile="${configPath}10_naive_inbounds.json" ;;
+            showAnyTlsAccounts) readerConfigFile="${configPath}13_anytls_inbounds.json" ;;
+            esac
+            readerArgs=()
+            [[ "${reader}" != showTrojanAccountsFromConfig ]] || readerArgs=("${readerConfigFile}" 443)
+            jq -n '{inbounds:[{tls:{server_name:"tls.example.com"},users:[{name:"tail-lf-user",uuid:"uuid",password:"pass"}]}]}' >"${readerConfigFile}" || return 1
+            : >"${capture}"
+            "${reader}" "${readerArgs[@]}" >/dev/null 2>&1; status=$?
+            if [[ "${status}" -ne 0 || ! -s "${capture}" ]]; then
+                printf 'assert-fail:tls-reader-baseline:%s\n' "${reader}" >&2
+                failed=1
+            fi
+            jq -n '{inbounds:[{tls:{server_name:"tls.example.com\n"},users:[{name:"tail-lf-user",uuid:"uuid",password:"pass"}]}]}' >"${readerConfigFile}" || return 1
+            : >"${capture}"
+            "${reader}" "${readerArgs[@]}" >/dev/null 2>&1; status=$?
+            if [[ "${status}" -eq 0 || -s "${capture}" ]]; then
+                printf 'assert-fail:tls-reader-tail-lf:%s\n' "${reader}" >&2
+                failed=1
+            fi
+        done
+        [[ "${failed}" -eq 0 ]]
+    ) || tlsBoundaryFailed=1
     local SUBSCRIBE_CAPTURE_DIR="${SUBSCRIBE_CAPTURE_DIR}-${BASHPID:-$$}"
     local PADM_SUBSCRIBE_LOCAL_DIR="${SUBSCRIBE_CAPTURE_DIR}"
 subscribeOutputPortIsValid hysteria "20000-20002"
@@ -1546,7 +1585,16 @@ defaultUserInfo=$(printf '%s' '2022-blake3-aes-128-gcm:pass-"quoted' | base64 -w
 grep -qxF "ss://${defaultUserInfo}@[2001:db8::10]:8388#tls-ss-user" "${SUBSCRIBE_CAPTURE_DIR}/default/tls-ss-user"
 assertDisplayedDefaultSubscribeLink "tls-ss-user" "通用链接：Shadowsocks"
 grep -qxF '    password: "pass-\"quoted"' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-ss-user"
+(
+    base64() { return 1; }
+    regressionExpectStatus 1 defaultBase64Code shadowsocks 8388 tls-ss-base64-failure pass "" "" >/dev/null 2>&1 ||
+        { printf 'assert-fail:shadowsocks-base64-status\n' >&2; return 1; }
+    [[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/default/tls-ss-base64-failure" &&
+        ! -e "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-ss-base64-failure" &&
+        ! -e "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-ss-base64-failure" ]] || return 1
+) || tlsBoundaryFailed=1
 unset REGRESSION_ECHO_LOG
+[[ "${tlsBoundaryFailed}" -eq 0 ]] || return 1
 }
 
 runRemoteSubscribeSourcesAvoidReverseDecodeRegression() (
