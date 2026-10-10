@@ -1551,7 +1551,7 @@ EOF
         local PADM_FIREWALL_STATE_FILE="${TMP_DIR}/port-hopping-guard-firewall.state"
         local writeCallsBefore=${iptablesWriteCalls}
         local allowCallsBefore=${allowCalls}
-        local saveStatus=1
+        local saveStatus=1 savedRule
         singBoxTuicPort=26451
         rm -f "${PADM_FIREWALL_STATE_FILE}"
         cat >"${natStateFile}" <<'EOF'
@@ -1581,10 +1581,26 @@ EOF
         [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
         grep -q 'neil1123-vip_tuic_portHopping' "${natStateFile}"
         ! grep -q 'neil1123-vip_hysteria2_portHopping' "${natStateFile}"
+        for savedRule in \
+            '-A PREROUTING -p udp --dport 32000:33000 -m comment --comment keep-other-rule -j DNAT --to-destination :26450' \
+            '-A PREROUTING -p udp --dport 33000:33002 -j DNAT --to-destination 192.0.2.1:16295' \
+            '-A PREROUTING -p udp --dport 33000:33002 -j DNAT --to-destination [2001:db8::1]:16295'; do
+            printf '%s\n' "${savedRule}" >"${natStateFile}"
+            inputCount=1
+            regressionExpectStatus 1 addPortHopping hysteria2 16295 >/dev/null 2>&1
+            [[ "${iptablesWriteCalls}" == "${writeCallsBefore}" && "${allowCalls}" == "${allowCallsBefore}" ]]
+            [[ ! -e "${PADM_FIREWALL_STATE_FILE}" && "$(<"${natStateFile}")" == "${savedRule}" ]]
+        done
+        cat >"${natStateFile}" <<'EOF'
+-A PREROUTING -p udp --dport 33000:33002 -m comment --comment neil1123-vip_tuic_portHopping-other -j DNAT --to-destination :26450
+EOF
+        inputCount=1
+        regressionExpectStatus 1 addPortHopping hysteria2 16295 >/dev/null 2>&1
+        [[ "${iptablesWriteCalls}" == "${writeCallsBefore}" && "${allowCalls}" == "${allowCallsBefore}" ]]
         cat >"${natStateFile}" <<'EOF'
 -A PREROUTING -p udp --dport 34000:34002 -m comment --comment neil1123-vip_tuic_portHopping -j DNAT --to-destination :26450
--A PREROUTING -p udp --dport 33000:33002 -m comment --comment neil1123-vip_tuic_portHopping-other -j DNAT --to-destination :26450
 -A PREROUTING -p tcp --dport 33000:33002 -m comment --comment neil1123-vip_tuic_portHopping -j DNAT --to-destination :26450
+-A PREROUTING -p udp --dport 33000:33002 -j DNAT --to-destination :16295
 EOF
         inputCount=1
         regressionExpectStatus 0 addPortHopping hysteria2 16295 >/dev/null 2>&1
@@ -1924,6 +1940,8 @@ EOF
         local masquerade=false
         local firewalldActive=true
         local removeFailurePort=
+        local addFailurePort=
+        local removeAlwaysFailurePort=
         local removeMasqueradeFailure=false
         local hoppingMenuChoice=2 singBoxHysteria2Port=16295
         local rc
@@ -1990,11 +2008,13 @@ EOF
             --add-forward-port=*)
                 spec=${1#--add-forward-port=port=}
                 port=${spec%%:*}
+                [[ "${port}" != "${addFailurePort}" ]] || return 1
                 fixtureForwardPorts[${port}]=1
                 ;;
             --remove-forward-port=*)
                 spec=${1#--remove-forward-port=port=}
                 port=${spec%%:*}
+                [[ "${port}" != "${removeAlwaysFailurePort}" ]] || return 1
                 [[ "${port}" != "${removeFailurePort}" ]] || { removeFailurePort=; return 1; }
                 [[ -n "${fixtureForwardPorts[${port}]:-}" ]] || return 1
                 unset 'fixtureForwardPorts['"${port}"']'
@@ -2042,6 +2062,74 @@ EOF
             grep -q '防火墙 masquerade 状态读取失败' "${warnLog}"
             [[ "${masquerade}" == true && "${#fixtureForwardPorts[@]}" == 0 ]]
             [[ ! -e "${PADM_FIREWALL_STATE_FILE}" && ! -s "${firewalldLog}" ]]
+        )
+
+        (
+            # 部分新增与回滚均失败时，只保留本次残留归属，不认领已有转发和 masquerade。
+            local initialMasquerade
+            local addFailurePort=33002 removeAlwaysFailurePort=33001
+            for initialMasquerade in false true; do
+                masquerade=${initialMasquerade}
+                fixtureForwardPorts=([33000]=1)
+                rm -f "${PADM_FIREWALL_STATE_FILE}"
+                regressionExpectStatus 1 addPortHopping hysteria2 16295 >/dev/null 2>&1
+                [[ "${#fixtureForwardPorts[@]}" == 2 && "${masquerade}" == true ]]
+                padmFirewallStateHas 'forward:firewalld:udp:33000:33002:16295:owned=33001'
+                if [[ "${initialMasquerade}" == false ]]; then
+                    padmFirewallStateHas masquerade:firewalld
+                else
+                    ! padmFirewallStateHas masquerade:firewalld
+                fi
+                removeAlwaysFailurePort=
+                deletePortHoppingRules hysteria2 "" "" 16295
+                [[ "${#fixtureForwardPorts[@]}" == 1 && -n "${fixtureForwardPorts[33000]:-}" ]]
+                ! padmFirewallStateHas 'forward:firewalld:udp:33000:33002:16295:owned=33001'
+                [[ "${masquerade}" == true ]]
+                if [[ "${initialMasquerade}" == false ]]; then
+                    padmFirewallStateHas masquerade:firewalld
+                else
+                    [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
+                fi
+                removeAlwaysFailurePort=33001
+            done
+        )
+
+        (
+            # 删除按持久归属选择后端，非 RHEL 同样回收本次 masquerade。
+            local rhelLike=false active
+            for active in true false; do
+                local firewalldActive=${active}
+                fixtureForwardPorts=([33000]=1 [33001]=1 [33002]=1)
+                masquerade=true
+                padmFirewallStateAdd 'forward:firewalld:udp:33000:33002:16295:owned=33000,33001,33002'
+                padmFirewallStateAdd masquerade:firewalld
+                deletePortHoppingRules hysteria2 "" "" 16295
+                [[ "${#fixtureForwardPorts[@]}" == 0 && "${masquerade}" == false ]]
+                [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
+            done
+        )
+
+        (
+            # 回滚状态不可读时保留已知本次新增归属，留档失败必须明确报告。
+            local addFailurePort=33002
+            local masquerade=false
+            local -A fixtureForwardPorts=([33000]=1)
+            padmFirewalldPermanentCommand() { return 1; }
+            regressionExpectStatus 1 addPortHopping hysteria2 16295 >/dev/null 2>&1
+            [[ "${#fixtureForwardPorts[@]}" == 2 && "${masquerade}" == true ]]
+            padmFirewallStateHas 'forward:firewalld:udp:33000:33002:16295:owned=33001'
+            padmFirewallStateHas masquerade:firewalld
+            grep -q '回滚后防火墙状态读取失败' "${warnLog}"
+            rm -f "${PADM_FIREWALL_STATE_FILE}"
+            fixtureForwardPorts=([33000]=1)
+            masquerade=false
+            padmFirewallStateAdd() { return 1; }
+            : >"${warnLog}"
+            regressionExpectStatus 1 addPortHopping hysteria2 16295 >/dev/null 2>&1
+            [[ "${#fixtureForwardPorts[@]}" == 2 && ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
+            grep -q '残留规则归属记录失败' "${warnLog}"
+            grep -q 'masquerade 归属记录失败' "${warnLog}"
+            ! grep -q '端口跳跃添加成功' "${warnLog}"
         )
 
         fixtureForwardPorts[33002]=1

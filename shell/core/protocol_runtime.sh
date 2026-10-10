@@ -253,6 +253,7 @@ addFirewalldPortHopping() {
     local rule
     local queryStatus
     local addedPorts=
+    [[ -z "${outputVar}" ]] || printf -v "${outputVar}" '%s' ""
     for port in $(seq "$start" "$end"); do
         rule="port=${port}:proto=udp:toport=${targetPort}"
         if sudo firewall-cmd --zone=public --permanent --query-forward-port="${rule}" >/dev/null 2>&1; then
@@ -260,24 +261,78 @@ addFirewalldPortHopping() {
         else
             queryStatus=$?
             if [[ "${queryStatus}" != "1" ]]; then
-                [[ -z "${addedPorts}" ]] || removeFirewalldForwardPortRange "${start}" "${end}" "${targetPort}" "owned=${addedPorts}" >/dev/null 2>&1 || true
                 return 1
             fi
         fi
         if sudo firewall-cmd --zone=public --permanent --add-forward-port="${rule}"; then
             addedPorts="${addedPorts:+${addedPorts},}${port}"
+            [[ -z "${outputVar}" ]] || printf -v "${outputVar}" '%s' "${addedPorts}"
         else
-            [[ -z "${addedPorts}" ]] || removeFirewalldForwardPortRange "${start}" "${end}" "${targetPort}" "owned=${addedPorts}" >/dev/null 2>&1 || true
             return 1
         fi
     done
     if ! sudo firewall-cmd --reload; then
-        [[ -z "${addedPorts}" ]] || removeFirewalldForwardPortRange "${start}" "${end}" "${targetPort}" "owned=${addedPorts}" >/dev/null 2>&1 || true
         return 1
     fi
-    if [[ -n "${outputVar}" ]]; then
-        printf -v "${outputVar}" '%s' "${addedPorts}"
+}
+
+rollbackFirewalldPortHopping() {
+    local start=$1 end=$2 targetPort=$3 addedPorts=$4 addedMasquerade=$5 undoAllow=${6:-false}
+    local remainingPorts= permanentRules forwardStateKey remainingStateKey
+    local status=0
+    forwardStateKey=$(padmFirewalldForwardStateKey "${start}" "${end}" "${targetPort}" "${addedPorts}")
+    if [[ -n "${addedPorts}" ]]; then
+        removeFirewalldForwardPortRange "${start}" "${end}" "${targetPort}" "owned=${addedPorts}" >/dev/null 2>&1 || status=1
+        if permanentRules=$(padmFirewalldPermanentCommand --list-forward-ports); then
+            remainingPorts=$(awk -v owned="${addedPorts}" -v target="${targetPort}" '
+                BEGIN { count = split(owned, ports, ",") }
+                {
+                    for (i = 1; i <= NF; i++) existing[$i] = 1
+                }
+                END {
+                    separator = ""
+                    for (i = 1; i <= count; i++) {
+                        if (("port=" ports[i] ":proto=udp:toport=" target) in existing) {
+                            printf "%s%s", separator, ports[i]
+                            separator = ","
+                        }
+                    }
+                }
+            ' <<<"${permanentRules}") || { remainingPorts=${addedPorts}; status=1; }
+            # 永久规则已删但 reload 失败时，仍需保留本次归属以便再次同步运行态。
+            [[ "${status}" == 0 || -n "${remainingPorts}" ]] || remainingPorts=${addedPorts}
+        else
+            remainingPorts=${addedPorts}
+            status=1
+            protocolPortHoppingStatusCard "回滚后防火墙状态读取失败，保留本次新增归属供重试"
+        fi
     fi
+    if [[ "${undoAllow}" == true ]]; then
+        denyPort "${start}:${end}" udp >/dev/null 2>&1 || status=1
+    fi
+    if [[ -n "${remainingPorts}" ]]; then
+        remainingStateKey=$(padmFirewalldForwardStateKey "${start}" "${end}" "${targetPort}" "${remainingPorts}")
+        if ! padmFirewallStateAdd "${remainingStateKey}"; then
+            protocolPortHoppingStatusCard "端口跳跃回滚失败，残留规则归属记录失败，请手动检查防火墙"
+            status=1
+        elif [[ "${remainingStateKey}" != "${forwardStateKey}" ]]; then
+            padmFirewallStateRemove "${forwardStateKey}" || { protocolPortHoppingStatusCard "端口跳跃旧归属清理失败"; status=1; }
+        fi
+        status=1
+    else
+        padmFirewallStateRemove "${forwardStateKey}" || { protocolPortHoppingStatusCard "端口跳跃归属清理失败"; status=1; }
+    fi
+    if [[ "${addedMasquerade}" == true ]]; then
+        if [[ -n "${remainingPorts}" ]] || ! removeFirewalldMasqueradeRule; then
+            if ! padmFirewallStateAdd masquerade:firewalld; then
+                protocolPortHoppingStatusCard "端口跳跃回滚失败，masquerade 归属记录失败，请手动检查防火墙"
+            fi
+            status=1
+        else
+            padmFirewallStateRemove masquerade:firewalld || { protocolPortHoppingStatusCard "masquerade 归属清理失败"; status=1; }
+        fi
+    fi
+    return "${status}"
 }
 
 portHoppingPersistIptablesRules() {
@@ -411,40 +466,23 @@ addPortHopping() {
                     addedMasquerade=true
                 fi
                 if ! sudo firewall-cmd --zone=public --permanent --add-masquerade || ! sudo firewall-cmd --reload || ! addFirewalldPortHopping "${portStart}" "${portEnd}" "${targetPort}" addedForwardPorts || ! sudo firewall-cmd --zone=public --list-forward-ports | grep -q "toport=${targetPort}"; then
-                    [[ -z "${addedForwardPorts}" ]] || removeFirewalldForwardPortRange "${portStart}" "${portEnd}" "${targetPort}" "owned=${addedForwardPorts}" >/dev/null 2>&1 || true
-                    if [[ "${addedMasquerade}" == "true" ]]; then
-                        sudo firewall-cmd --zone=public --permanent --remove-masquerade >/dev/null 2>&1 || true
-                    fi
-                    sudo firewall-cmd --reload >/dev/null 2>&1 || true
+                    rollbackFirewalldPortHopping "${portStart}" "${portEnd}" "${targetPort}" "${addedForwardPorts}" "${addedMasquerade}" || true
                     protocolPortHoppingStatusCard "端口跳跃添加失败，已尝试回滚本次 firewalld 规则"
                     return 1
                 fi
                 if ! ( allowPort "${portStart}:${portEnd}" udp ); then
-                    [[ -z "${addedForwardPorts}" ]] || removeFirewalldForwardPortRange "${portStart}" "${portEnd}" "${targetPort}" "owned=${addedForwardPorts}" >/dev/null 2>&1 || true
-                    if [[ "${addedMasquerade}" == "true" ]]; then
-                        sudo firewall-cmd --zone=public --permanent --remove-masquerade >/dev/null 2>&1 || true
-                    fi
-                    sudo firewall-cmd --reload >/dev/null 2>&1 || true
+                    rollbackFirewalldPortHopping "${portStart}" "${portEnd}" "${targetPort}" "${addedForwardPorts}" "${addedMasquerade}" || true
                     protocolPortHoppingStatusCard "端口跳跃开放端口失败，已尝试回滚本次 firewalld 规则"
                     return 1
                 fi
                 forwardStateKey=$(padmFirewalldForwardStateKey "${portStart}" "${portEnd}" "${targetPort}" "${addedForwardPorts}")
                 if ! padmFirewallStateAdd "${forwardStateKey}"; then
-                    [[ -z "${addedForwardPorts}" ]] || removeFirewalldForwardPortRange "${portStart}" "${portEnd}" "${targetPort}" "owned=${addedForwardPorts}" >/dev/null 2>&1 || true
-                    denyPort "${portStart}:${portEnd}" udp >/dev/null 2>&1 || true
-                    if [[ "${addedMasquerade}" == "true" ]]; then
-                        sudo firewall-cmd --zone=public --permanent --remove-masquerade >/dev/null 2>&1 || true
-                    fi
-                    sudo firewall-cmd --reload >/dev/null 2>&1 || true
+                    rollbackFirewalldPortHopping "${portStart}" "${portEnd}" "${targetPort}" "${addedForwardPorts}" "${addedMasquerade}" true || true
                     protocolPortHoppingStatusCard "端口跳跃状态记录失败，已尝试回滚本次 firewalld 规则"
                     return 1
                 fi
                 if [[ "${addedMasquerade}" == "true" ]] && ! padmFirewallStateAdd masquerade:firewalld; then
-                    [[ -z "${addedForwardPorts}" ]] || removeFirewalldForwardPortRange "${portStart}" "${portEnd}" "${targetPort}" "owned=${addedForwardPorts}" >/dev/null 2>&1 || true
-                    denyPort "${portStart}:${portEnd}" udp >/dev/null 2>&1 || true
-                    padmFirewallStateRemove "${forwardStateKey}" >/dev/null 2>&1 || true
-                    sudo firewall-cmd --zone=public --permanent --remove-masquerade >/dev/null 2>&1 || true
-                    sudo firewall-cmd --reload >/dev/null 2>&1 || true
+                    rollbackFirewalldPortHopping "${portStart}" "${portEnd}" "${targetPort}" "${addedForwardPorts}" "${addedMasquerade}" true || true
                     protocolPortHoppingStatusCard "端口跳跃状态记录失败，已尝试回滚本次 firewalld 规则"
                     return 1
                 fi
@@ -454,17 +492,16 @@ addPortHopping() {
                     protocolPortHoppingStatusCard "防火墙转发规则读取失败，已取消添加端口跳跃"
                     return 1
                 fi
-                if ! awk -v candidateStart="${portStart}" -v candidateEnd="${portEnd}" '
+                if ! awk -v candidateStart="${portStart}" -v candidateEnd="${portEnd}" -v targetPort="${targetPort}" '
                     $1 == "-A" && $2 == "PREROUTING" {
-                        comment = ports = protocol = target = ""
+                        ports = protocol = target = destination = ""
                         for (i = 1; i <= NF; i++) {
-                            if ($i == "--comment") comment = $(i + 1)
-                            else if ($i == "--dport") ports = $(i + 1)
+                            if ($i == "--dport") ports = $(i + 1)
                             else if ($i == "-p") protocol = $(i + 1)
                             else if ($i == "-j") target = $(i + 1)
+                            else if ($i == "--to-destination") destination = $(i + 1)
                         }
-                        if (comment ~ /^".*"$/) comment = substr(comment, 2, length(comment) - 2)
-                        if ((comment != "neil1123-vip_hysteria2_portHopping" && comment != "neil1123-vip_tuic_portHopping") || protocol != "udp" || target != "DNAT") next
+                        if (protocol != "udp" || target != "DNAT" || destination == ":" targetPort) next
                         if (ports !~ /^[0-9]+(:[0-9]+)?$/) next
                         count = split(ports, range, ":")
                         start = range[1] + 0
@@ -665,7 +702,7 @@ deletePortHoppingRules() {
     if [[ "${status}" == "0" ]] && ! denyPort "${start}:${end}" udp; then
         status=1
     fi
-    if [[ "${status}" == "0" && "${rhelLike:-}" == "true" ]] && padmFirewallStateHas masquerade:firewalld; then
+    if [[ "${status}" == "0" && "${selectedBackend}" == "firewalld" ]] && padmFirewallStateHas masquerade:firewalld; then
         local remainingForwardPorts
         if ! remainingForwardPorts=$(padmFirewalldPermanentCommand --list-forward-ports); then
             status=1
