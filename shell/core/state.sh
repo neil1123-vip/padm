@@ -790,7 +790,7 @@ readConfigHostPathUUID() {
                 currentHost=$(resolveInstalledTLSDomain 2>/dev/null || true)
             fi
 
-            currentPort=$(jq .inbounds[0].port "${configPath}${frontingType}.json")
+            currentPort=$(jq .inbounds[0].port "${configPath}${frontingType}.json") || return 1
 
             currentDefaultPort=$(corePortSubscriptionPort "${currentPort}") || return 1
             currentUUID=$(jq -r '.inbounds[0].settings.clients[0] | .id // .password // empty' "${configPath}${frontingType}.json")
@@ -810,7 +810,7 @@ readConfigHostPathUUID() {
         # reality xhttp
         if currentProtocolHas 2; then
 
-            currentClients=$(jq -r .inbounds[0].settings.clients "${configPath}12_VLESS_XHTTP_inbounds.json")
+            currentClients=$(jq -r .inbounds[0].settings.clients "${configPath}12_VLESS_XHTTP_inbounds.json") || return 1
             currentUUID=$(jq -r .inbounds[0].settings.clients[0].id "${configPath}12_VLESS_XHTTP_inbounds.json")
             xrayVLESSRealityXHTTPort=$(jq -r .inbounds[0].port "${configPath}12_VLESS_XHTTP_inbounds.json")
             if [[ "${currentPort}" == "${xrayVLESSRealityXHTTPort}" ]]; then
@@ -833,7 +833,7 @@ readConfigHostPathUUID() {
         fi
     elif [[ "${coreInstallType}" == "2" ]]; then
         if [[ -n "${frontingType}" ]]; then
-            currentHost=$(jq -r .inbounds[0].tls.server_name "${configPath}${frontingType}.json")
+            currentHost=$(jq -r .inbounds[0].tls.server_name "${configPath}${frontingType}.json") || return 1
             if currentProtocolHas 23 && [[ "${currentHost}" == "null" ]]; then
                 currentHost=$(grep 'server_name' <"${nginxConfigPath}sing_box_VMess_HTTPUpgrade.conf" | awk '{print $2}')
                 currentHost=${currentHost//;/}
@@ -849,8 +849,8 @@ readConfigHostPathUUID() {
             fi
             currentUUID=$(jq -r .inbounds[0].users[0].uuid "${configPath}${frontingType}.json")
             currentClients=$(jq -r .inbounds[0].users "${configPath}${frontingType}.json")
-        else
-            currentUUID=$(jq -r .inbounds[0].users[0].uuid "${configPath}${frontingTypeReality}.json")
+        elif [[ -n "${frontingTypeReality}" ]]; then
+            currentUUID=$(jq -r .inbounds[0].users[0].uuid "${configPath}${frontingTypeReality}.json") || return 1
             currentClients=$(jq -r .inbounds[0].users "${configPath}${frontingTypeReality}.json")
         fi
     fi
