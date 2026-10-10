@@ -1433,6 +1433,7 @@ downloadUrlToFileBoundedApply() {
     local targetFile=$2
     local maxSize=$3
     local maxTime=${4:-30}
+    local actualSize
     local -a pipelineStatus=()
     [[ -n "${url}" && "${maxSize}" =~ ^[0-9]+$ && "${maxSize}" -gt 0 ]] || return 1
     [[ "${maxTime}" =~ ^[0-9]+$ && "${maxTime}" -gt 0 ]] || return 1
@@ -1440,7 +1441,8 @@ downloadUrlToFileBoundedApply() {
     : >"${targetFile}" || return 1
     if command -v curl >/dev/null 2>&1; then
         if curl -fsSL --connect-timeout 10 --max-time "${maxTime}" --max-filesize "${maxSize}" --retry 1 --retry-delay 1 -o "${targetFile}" "${url}" &&
-            [[ "$(wc -c <"${targetFile}")" -le "${maxSize}" ]]; then
+            actualSize=$(wc -c <"${targetFile}") &&
+            [[ "${actualSize}" =~ ^[[:space:]]*[0-9]+[[:space:]]*$ && "${actualSize}" -le "${maxSize}" ]]; then
             return 0
         fi
     fi
@@ -1452,8 +1454,9 @@ downloadUrlToFileBoundedApply() {
         else
             pipelineStatus=("${PIPESTATUS[@]}")
         fi
-        if [[ "${pipelineStatus[0]:-1}" -eq 0 && "${pipelineStatus[1]:-1}" -eq 0 &&
-            "$(wc -c <"${targetFile}")" -le "${maxSize}" ]]; then
+        if [[ "${pipelineStatus[0]:-1}" -eq 0 && "${pipelineStatus[1]:-1}" -eq 0 ]] &&
+            actualSize=$(wc -c <"${targetFile}") &&
+            [[ "${actualSize}" =~ ^[[:space:]]*[0-9]+[[:space:]]*$ && "${actualSize}" -le "${maxSize}" ]]; then
             return 0
         fi
     fi
@@ -1677,12 +1680,8 @@ downloadGitHubReleaseAsset() {
     if ! downloadFile -P "${outputDir}" "${downloadUrl}"; then
         return 1
     fi
-    if [[ -f "${outputPath}" ]]; then
-        actualSize=$(wc -c <"${outputPath}")
-    else
-        actualSize=0
-    fi
-    if [[ ! -f "${outputPath}" || "${actualSize}" -ne "${expectedSize}" ]]; then
+    if [[ ! -f "${outputPath}" ]] || ! actualSize=$(wc -c <"${outputPath}") ||
+        [[ ! "${actualSize}" =~ ^[[:space:]]*[0-9]+[[:space:]]*$ || "${actualSize}" -ne "${expectedSize}" ]]; then
         echoContent title "\n┌─ GitHub Release 下载 ──────────────────────────────"
         menuLine "下载文件大小与 Release 元数据不一致，已取消下载: ${assetName}"
         menuClose
