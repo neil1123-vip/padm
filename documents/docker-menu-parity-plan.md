@@ -3607,9 +3607,17 @@ FD/inode/tuple；用户态 close 后和 EXIT 停点均无法补回该 socket。
 exec 前排队消息在新 exe 停点收到同代 pidfd，仍不授权套用新 exe 身份。
 未验证 tracer 崩溃/SIGKILL、未知 clone 参数、线程或既有服务接入。
 
-下一最小验证是 EXEC/EXIT 实际停点期间先 drain receiver 到 EAGAIN，
+最小顺序要求是 EXEC/EXIT 实际停点期间先 drain receiver 到 EAGAIN，
 按旧 epoch 处理队列，再更新 exe/epoch 或终结连接记录，最后 CONT；
 close 后仅允许输出已有 fork anchor 的历史连接事实，不能声称 live socket。
+该顺序的受控 self-exec 原型已通过：11 项生命周期断言、9 个拒绝场景，
+内部 36.819 ms，独立审查及主代理复核一致。EXEC 旧消息归 epoch 0，
+排空到 EAGAIN 后才更新；EXIT 新消息归 epoch 1，排空后才终结。
+close 后当前 owned TCP 为空，只保留 fork 初停的历史 tuple，
+`live_socket_verified=false`。原型修复正文解码失败时漏关已交付 FD；
+全部 9 个负例的接收端 FD 数未增加，非 ASCII 场景为 6 -> 6。
+这里只验证同可执行文件 self-exec、自建普通 fork 和实际停止的 task，
+不外推不同 exe、运行中 sender 竞态或生产 observer。
 真实 OpenSSH fork 初停继承 LISTEN FD 的窗口需专门验证，
 不能直接复用现有严格单 owner witness，也不能泛化放宽生产 owner 检查。
 没有 syscall 创建参数审计时，仅限受控普通单线程 fork 假设。
@@ -3617,7 +3625,8 @@ close 后仅允许输出已有 fork anchor 的历史连接事实，不能声称 
 
 证据 `.tmp-ssh-syslog-8c2c/evidence.md`、
 `.tmp-ssh-syslog-8c2c/openssh/evidence.md`、
-`.tmp-ssh-lifecycle-8c2c/evidence.md` 与 `.tmp-ssh-epoch-8c2c/design.md`。
+`.tmp-ssh-lifecycle-8c2c/evidence.md`、
+`.tmp-ssh-lifecycle-drain-8c2c/evidence.md` 与 `.tmp-ssh-epoch-8c2c/design.md`。
 本轮原型容器、进程、非负 FD、socket、临时 key/config 均已清理；
 保留可复现探针与原始结果，不删除其它任务文件。
 `runtime_configuration_verified=false`、`jail_ready=false` 保持；
