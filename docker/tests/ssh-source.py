@@ -143,10 +143,18 @@ class SourceContracts(unittest.TestCase):
             row.replace(f":{SPORT}", ":41009"),
             row + "\n" + row,
             row.replace("ESTAB", "TIME-WAIT"),
+            row.replace('pid=19,fd=7))', 'pid=19,fd=7),("sshd-auth",pid=19,fd=5))'),
+            row.replace('pid=19,fd=7))', 'pid=19,fd=7),("sshd-auth",pid=23,fd=5),'
+                        '("sshd-auth",pid=24,fd=5),("sshd-auth",pid=25,fd=5),'
+                        '("sshd-auth",pid=26,fd=5))'),
         ):
             with self.subTest(rows=rows), patch.object(ssh, "run_command", return_value=rows), \
                     self.assertRaises(ssh.Failure):
                 ssh.get_accepted(local, PORT, source, SPORT)
+        shared = row.replace('pid=19,fd=7))', 'pid=23,fd=5),("sshd-session",pid=19,fd=7))')
+        with patch.object(ssh, "run_command", return_value=shared):
+            self.assertEqual(ssh.get_accepted(local, PORT, source, SPORT)["owners"],
+                             ((19, 7), (23, 5)))
 
     def test_listener_rejects_ambiguous_master_and_tracks_inode(self):
         local = ipaddress.ip_address(LOCAL)
@@ -208,18 +216,33 @@ class SourceContracts(unittest.TestCase):
             with self.subTest(missing=field), self.assertRaises(ssh.Failure):
                 ssh.event_source(candidate, USERNAME, ipaddress.ip_address(SOURCE), BOOT, FRESH_US)
 
-    def verify_event(self, *, accepted=None, emitter=None, next_master=None, fd_error=False):
+    def verify_event(self, *, accepted=None, emitter=None, next_master=None, fd_error=False,
+                     child=None, final_child=None, privsep_uid=996, child_fd_error=False):
         event = ssh.event_source(
             record(), USERNAME, ipaddress.ip_address(SOURCE), BOOT, FRESH_US
         )
         emitter = process(EMITTER_PID) if emitter is None else emitter
 
-        def snapshot(pid, *_args):
+        child_reads = 0
+
+        def snapshot(pid, allowed_exes, expected_uid=0):
+            nonlocal child_reads
             if pid == EMITTER_PID:
                 return copy.deepcopy(emitter)
             if pid == MASTER_PID:
                 return copy.deepcopy(MASTER["process"])
+            if pid == 23 and child is not None:
+                child_reads += 1
+                candidate = child if child_reads == 1 or final_child is None else final_child
+                if (candidate["exe"] not in allowed_exes
+                        or candidate["uid"] != (expected_uid,) * 4):
+                    raise ssh.Failure("测试中的子进程权限或可执行文件无效")
+                return copy.deepcopy(candidate)
             raise ssh.Failure("测试中的未知进程")
+
+        def held(pid, _fd, _inode):
+            if fd_error or (child_fd_error and pid == 23):
+                raise ssh.Failure("连接 inode 已变化")
 
         with contextlib.ExitStack() as stack:
             stack.enter_context(patch.object(ssh, "read_process", side_effect=snapshot))
@@ -234,8 +257,11 @@ class SourceContracts(unittest.TestCase):
                 )
             ))
             stack.enter_context(patch.object(
-                ssh, "socket_fd", side_effect=ssh.Failure("连接 inode 已变化") if fd_error else None
+                ssh, "socket_fd", side_effect=held
             ))
+            stack.enter_context(patch.object(ssh.pwd, "getpwnam", return_value=SimpleNamespace(
+                pw_name="sshd", pw_uid=privsep_uid,
+            )))
             stack.enter_context(patch.object(ssh.os, "sysconf", return_value=100))
             stack.enter_context(patch.object(ssh.time, "monotonic", return_value=3000))
             return ssh.verify_event(
@@ -247,6 +273,34 @@ class SourceContracts(unittest.TestCase):
         emitter, connection = self.verify_event()
         self.assertEqual(emitter["pid"], EMITTER_PID)
         self.assertEqual(connection, ACCEPTED)
+
+    def test_privsep_shared_owner_requires_safe_direct_child_and_stable_generation(self):
+        child = process(23, ppid=EMITTER_PID, uid=(996,) * 4,
+                        exe="/usr/lib/openssh/sshd-auth")
+        shared = {**ACCEPTED, "owners": ((EMITTER_PID, 7), (23, 5))}
+        emitter, connection = self.verify_event(accepted=shared, child=child)
+        self.assertEqual(emitter["pid"], EMITTER_PID)
+        self.assertEqual(connection, {**shared, "privsep": (child,)})
+        for changes in (
+            {"ppid": MASTER_PID}, {"uid": (0,) * 4}, {"uid": (1000,) * 4},
+            {"exe": "/usr/bin/logger"}, {"boot_id": "c" * 32},
+            {"netns": "net:[different]"}, {"starttime": EVENT_US // 10000 + 100},
+        ):
+            with self.subTest(changes=changes), self.assertRaises(ssh.Failure):
+                self.verify_event(accepted=shared, child={**child, **changes})
+        for changes in (
+            {"starttime": child["starttime"] + 1}, {"exec_generation": (9, 8, 7, 6, 5)},
+        ):
+            with self.subTest(final_changes=changes), self.assertRaises(ssh.Failure):
+                self.verify_event(accepted=shared, child=child, final_child={**child, **changes})
+        with self.assertRaises(ssh.Failure):
+            self.verify_event(accepted=shared, child=child, child_fd_error=True)
+        with self.assertRaises(ssh.Failure):
+            self.verify_event(accepted=shared, child=child, privsep_uid=0)
+        with self.assertRaises(ssh.Failure):
+            self.verify_event(accepted={**shared, "owners": ((23, 5),)}, child=child)
+        with self.assertRaises(ssh.Failure):
+            self.verify_event(accepted={**shared, "owners": ((19, 7), (24, 5))}, child=child)
 
     def test_process_reuse_namespace_ancestor_and_fd_drift_are_rejected(self):
         for emitter in (
@@ -278,7 +332,8 @@ class SourceContracts(unittest.TestCase):
         )
         status = "Name:\tsshd-session\nUid:\t0\t0\t0\t0\n"
 
-        def check(*, uid_text=status, final=raw, executable=EMITTER_EXE, namespace=None):
+        def check(*, uid_text=status, final=raw, executable=EMITTER_EXE, namespace=None,
+                  expected_uid=0):
             states = iter((raw, final))
 
             def read_text(path, *_args, **_kwargs):
@@ -296,16 +351,21 @@ class SourceContracts(unittest.TestCase):
                     patch.object(ssh.os, "readlink", side_effect=readlink), \
                     patch.object(ssh, "boot_id", return_value=BOOT), \
                     patch.object(ssh, "safe_executable", return_value=process(19)["exe_identity"]):
-                return ssh.read_process(19, ssh.EMITTER_EXES)
+                return ssh.read_process(19, ssh.EMITTER_EXES, expected_uid)
 
         actual = check()
         self.assertEqual((actual["pid"], actual["ppid"], actual["starttime"]), (19, 16, 254158))
         self.assertEqual(actual["uid"], (0, 0, 0, 0))
+        child_uid = status.replace("0\t0\t0\t0", "996\t996\t996\t996")
+        self.assertEqual(check(uid_text=child_uid, expected_uid=996)["uid"], (996,) * 4)
         for values in (
             {"uid_text": status.replace("0\t0\t0\t0", "0\t1000\t0\t0")},
             {"final": raw.replace("254158", "254159")},
             {"executable": "/usr/bin/logger"},
             {"namespace": "net:[4026533000]"},
+            {"uid_text": child_uid},
+            {"uid_text": child_uid.replace("996\t996\t996\t996", "996\t0\t996\t996"),
+             "expected_uid": 996},
         ):
             with self.subTest(values=values), self.assertRaises(ssh.Failure):
                 check(**values)
@@ -359,10 +419,45 @@ class SourceContracts(unittest.TestCase):
                          (LOCAL, PORT, SOURCE))
         self.assertNotIn("MESSAGE", result)
 
+    def test_internal_evidence_retains_verified_generation_without_public_expansion(self):
+        local, source = ipaddress.ip_address(LOCAL), ipaddress.ip_address(SOURCE)
+        with patch.object(ssh, "verify_addresses"), \
+                patch.object(ssh, "get_listener", return_value=copy.deepcopy(MASTER)), \
+                patch.object(ssh, "checkpoint", return_value=("cursor", FRESH_US)), \
+                patch.object(ssh, "journal_records", return_value=[record()]), \
+                patch.object(ssh, "verify_event", return_value=(process(19), ACCEPTED)), \
+                patch.object(ssh.time, "monotonic", return_value=3000), \
+                contextlib.redirect_stdout(io.StringIO()):
+            evidence = ssh.witness_evidence(local, PORT, source, NONCE)
+        self.assertEqual(evidence["master"], MASTER)
+        self.assertEqual(evidence["record"], record())
+        self.assertEqual((evidence["emitter"], evidence["accepted"]), (process(19), ACCEPTED))
+        self.assertEqual((evidence["cursor"], evidence["fresh_us"]), ("cursor", FRESH_US))
+        with patch.object(ssh, "witness_evidence", return_value=evidence) as fresh:
+            self.assertEqual(ssh.witness(local, PORT, source, NONCE), {
+                "scope": "ssh-source-only", "source_verified": True,
+                "runtime_configuration_verified": False, "jail_ready": False,
+                "target": LOCAL, "port": PORT, "source": SOURCE,
+            })
+        fresh.assert_called_once_with(local, PORT, source, NONCE)
+
     def test_witness_requires_same_verified_generation_at_commit(self):
         local, source = ipaddress.ip_address(LOCAL), ipaddress.ip_address(SOURCE)
         first = (process(EMITTER_PID), ACCEPTED)
         changed = (process(EMITTER_PID, exec_generation=(1, 2, 3, 4, 5)), ACCEPTED)
+        with patch.object(ssh, "verify_addresses"), \
+                patch.object(ssh, "get_listener", return_value=copy.deepcopy(MASTER)), \
+                patch.object(ssh, "checkpoint", return_value=("cursor", FRESH_US)), \
+                patch.object(ssh, "journal_records", return_value=[record()]), \
+                patch.object(ssh, "verify_event", side_effect=[first, changed]), \
+                patch.object(ssh.time, "monotonic", return_value=3000), \
+                contextlib.redirect_stdout(io.StringIO()), self.assertRaises(ssh.Failure):
+            ssh.witness(local, PORT, source, NONCE)
+        child = process(23, ppid=19, uid=(996,) * 4, exe="/usr/lib/openssh/sshd-auth")
+        first = (process(EMITTER_PID), {**ACCEPTED, "privsep": (child,)})
+        changed = (process(EMITTER_PID), {
+            **ACCEPTED, "privsep": ({**child, "exec_generation": (9, 8, 7, 6, 5)},),
+        })
         with patch.object(ssh, "verify_addresses"), \
                 patch.object(ssh, "get_listener", return_value=copy.deepcopy(MASTER)), \
                 patch.object(ssh, "checkpoint", return_value=("cursor", FRESH_US)), \

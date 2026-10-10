@@ -264,11 +264,11 @@ runRegressionDockerContractsAggregateContract() (
         docker-phase3 docker-setup-encrypted-udp docker-setup-encrypted-tcp
         docker-setup-transports docker-reality-targets-direct docker-reality-targets-selection
         docker-setup-tls docker-reality-parameters docker-setup-core docker-sites docker-phase6
-        docker-menu docker-reality-target-library docker-control-state
+        docker-menu docker-reality-target-library docker-fail2ban-ownership docker-control-state
         docker-phase4-maintenance docker-phase4-lifecycle docker-control-client
         docker-phase1 docker-phase5 docker-control-cli docker-control-sync docker-release docker-geo-data docker-traffic
         docker-http-relay docker-entry-port-alias
-        docker-accounts docker-permissions docker-wireguard-runtime docker-tproxy-ownership docker-fail2ban-ownership
+        docker-accounts docker-permissions docker-wireguard-runtime docker-tproxy-ownership
         docker-fail2ban-source docker-ssh-preflight
         docker-control-api docker-subscriptions
         docker-accounts-cli docker-business docker-phase2

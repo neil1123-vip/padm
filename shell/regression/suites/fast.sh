@@ -79,6 +79,7 @@ listRegressionDockerContractsChildSelectors() {
         docker-phase6 \
         docker-menu \
         docker-reality-target-library \
+        docker-fail2ban-ownership \
         docker-control-state \
         docker-phase4-maintenance \
         docker-phase4-lifecycle \
@@ -96,7 +97,6 @@ listRegressionDockerContractsChildSelectors() {
         docker-permissions \
         docker-wireguard-runtime \
         docker-tproxy-ownership \
-        docker-fail2ban-ownership \
         docker-fail2ban-source \
         docker-ssh-preflight \
         docker-control-api \
@@ -393,6 +393,7 @@ runDockerControlCliRegression() {
 runDockerSshPreflightRegression() {
     bash "${PROJECT_ROOT}/docker/tests/ssh-preflight.sh" &&
         python3 -B "${PROJECT_ROOT}/docker/tests/ssh-source.py" &&
+        python3 -B "${PROJECT_ROOT}/docker/tests/ssh-journal.py" &&
         python3 -B "${PROJECT_ROOT}/docker/tests/ssh-source-client.py"
 }
 
