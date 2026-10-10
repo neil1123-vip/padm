@@ -422,10 +422,11 @@ dockerEntryCleanup() {
 }
 
 dockerEntryBundleModulesPresent() {
-    local sourceRoot=$1 required
+    local sourceRoot=$1 required links
     [[ -d "${sourceRoot}" && ! -L "${sourceRoot}" ]] || return 1
-    [[ -d "${sourceRoot}/docker" && ! -L "${sourceRoot}/docker" &&
-        -z "$(find "${sourceRoot}/docker" -type l -print -quit 2>/dev/null)" ]] || return 1
+    [[ -d "${sourceRoot}/docker" && ! -L "${sourceRoot}/docker" ]] || return 1
+    links=$(find "${sourceRoot}/docker" -type l -print -quit 2>/dev/null) || return 1
+    [[ -z "${links}" ]] || return 1
     for required in \
         install-docker.sh \
         docker/lib/bootstrap.sh docker/lib/bundle.sh docker/lib/manifest.sh \
