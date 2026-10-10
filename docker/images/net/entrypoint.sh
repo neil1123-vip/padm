@@ -2,7 +2,7 @@
 set -eu
 
 STATE_ROOT=/var/lib/padm/net
-# 默认入口固定为 WS；控制面范围只能由显式内部命令选择。
+# 默认入口固定为 WS；其它范围只能由显式内部命令选择。
 fb_scope=ws fb_state=fail2ban.state fb_prefix=padm-f2b- fb_stage_prefix=.fail2ban-state fb_target=
 die() { echo "padm-net: $*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "missing command: $1"; }
@@ -238,6 +238,64 @@ fail2ban_control_scope() {
     fb_stage_prefix=.fail2ban-control-state fb_target=
 }
 
+fail2ban_ssh_scope() {
+    fb_scope=ssh fb_state=fail2ban-ssh.state fb_prefix=padm-f2bs-
+    fb_stage_prefix=.fail2ban-ssh-state fb_target=
+}
+
+fail2ban_ssh_parameters_valid() {
+    python3 - "$1" "$2" <<'PY'
+import ipaddress
+import sys
+target, port = sys.argv[1:]
+try:
+    address = ipaddress.ip_address(target)
+    if (str(address) != target or "%" in target or address.is_unspecified
+            or address.is_loopback or address.is_link_local or address.is_multicast
+            or getattr(address, "ipv4_mapped", None)
+            or (address.version == 4 and (int(address) >> 24 == 0 or int(address) >> 24 >= 224))
+            or not port.isascii() or not port.isdigit() or str(int(port)) != port
+            or not 1 <= int(port) <= 65535):
+        raise ValueError("invalid SSH target or port")
+except ValueError:
+    raise SystemExit(1)
+PY
+}
+
+fail2ban_ssh_preflight() (
+    [ "$#" -ge 2 ] && [ "$#" -le 4 ] || exit 1
+    requested_target=$1 requested_ports=$2 ownership=${3:-unowned} ownership_root=${4:-$STATE_ROOT}
+    case "$ownership" in owned|unowned) ;; *) exit 1 ;; esac
+    fail2ban_ssh_scope
+    need python3
+    need iptables
+    need ip6tables
+    fail2ban_ssh_parameters_valid "$requested_target" "$requested_ports" || exit 1
+    requested_ipv6=no
+    case "$requested_target" in *:*) requested_ipv6=yes ;; esac
+    if [ -e "$ownership_root/$fb_state" ] || [ -L "$ownership_root/$fb_state" ]; then
+        [ "$ownership" = owned ] && fail2ban_state_read "$ownership_root" &&
+            [ "$fb_target" = "$requested_target" ] && [ "$fb_ports" = "$requested_ports" ] &&
+            fail2ban_resources audit || exit 1
+    else
+        fb_root=$ownership_root fb_target=$requested_target fb_ports=$requested_ports fb_ipv6=$requested_ipv6
+        fb_token=00000000000000000000000000000000 fb_chain=${fb_prefix}000000000000
+        fail2ban_resources empty
+    fi
+)
+
+fail2ban_ssh_clean() (
+    [ "$#" -eq 2 ] || exit 1
+    # 与控制面 clean 相同，只证明停止后 state 和规则为空，不负责撤销。
+    fail2ban_ssh_preflight "$1" "$2" unowned
+)
+
+fail2ban_ssh_health() (
+    fail2ban_ssh_scope
+    # 仅核验规则所有权；尚未建立 SSH jail，不宣称认证日志或 jail 健康。
+    fail2ban_state_read "$STATE_ROOT" && fail2ban_resources health
+)
+
 fail2ban_control_parameters_valid() {
     python3 - "$1" "$2" <<'PY'
 import ipaddress
@@ -315,6 +373,9 @@ fail2ban_state_text() {
     if [ "$fb_scope" = control ]; then
         printf 'schema_version=1\ntoken=%s\nchain=%s\nports=%s\nipv6=no\ntarget=%s\n' \
             "$fb_token" "$fb_chain" "$fb_ports" "$fb_target"
+    elif [ "$fb_scope" = ssh ]; then
+        printf 'schema_version=1\ntoken=%s\nchain=%s\nports=%s\nipv6=%s\ntarget=%s\n' \
+            "$fb_token" "$fb_chain" "$fb_ports" "$fb_ipv6" "$fb_target"
     else
         printf 'schema_version=2\ntoken=%s\nchain=%s\nports=%s\nipv6=%s\n' \
             "$fb_token" "$fb_chain" "$fb_ports" "$fb_ipv6"
@@ -334,6 +395,14 @@ fail2ban_state_read() {
     if [ "$fb_scope" = control ]; then
         fb_target=$(sed -n 's/^target=//p' "$fb_root/$fb_state")
         [ "$fb_ipv6" = no ] && fail2ban_control_parameters_valid "$fb_target" "$fb_ports" || return 1
+    elif [ "$fb_scope" = ssh ]; then
+        fb_target=$(sed -n 's/^target=//p' "$fb_root/$fb_state")
+        fail2ban_ssh_parameters_valid "$fb_target" "$fb_ports" || return 1
+        case "$fb_target:$fb_ipv6" in
+        *:*:yes) ;;
+        *:no) case "$fb_target" in *:*) return 1 ;; esac ;;
+        *) return 1 ;;
+        esac
     fi
     printf '%s\n' "$fb_token" | grep -Eq '^[a-f0-9]{32}$' &&
         [ "$fb_chain" = "$fb_prefix$(printf '%s' "$fb_token" | cut -c1-12)" ] &&
@@ -364,20 +433,23 @@ root, token, chain, ports, ipv6, scope, target, operation = sys.argv[1:9]
 tool = sys.argv[9] if len(sys.argv) > 9 else ""
 address = sys.argv[10] if len(sys.argv) > 10 else ""
 ports = ports.split(",")
-control = scope == "control"
-tools = ["iptables"] + (["ip6tables"] if not control and
-        (ipv6 == "yes" or (operation == "audit" and tool == "yes")) else [])
-prefix = "padm-f2bc" if control else "padm-f2b"
-parent = "INPUT" if control else "DOCKER-USER"
+control, ssh = scope == "control", scope == "ssh"
+input_scope = control or ssh
+tools = (["ip6tables" if ipv6 == "yes" else "iptables"] if ssh else
+         ["iptables"] + (["ip6tables"] if not control and
+         (ipv6 == "yes" or (operation == "audit" and tool == "yes")) else []))
+prefix = "padm-f2bs" if ssh else "padm-f2bc" if control else "padm-f2b"
+parent = "INPUT" if input_scope else "DOCKER-USER"
 comment = prefix + ":" + token
-state_name = "fail2ban-control.state" if control else "fail2ban.state"
-state = (f"schema_version={1 if control else 2}\ntoken={token}\nchain={chain}\n"
-         f"ports={','.join(ports)}\nipv6={ipv6}\n" + (f"target={target}\n" if control else "")).encode()
+state_name = "fail2ban-ssh.state" if ssh else "fail2ban-control.state" if control else "fail2ban.state"
+state = (f"schema_version={1 if input_scope else 2}\ntoken={token}\nchain={chain}\n"
+         f"ports={','.join(ports)}\nipv6={ipv6}\n" + (f"target={target}\n" if input_scope else "")).encode()
 created = set()
 
 def hook(port):
-    if control:
-        return ["-d", target + "/32", "-p", "tcp", "--dport", port,
+    if input_scope:
+        mask = "/128" if ssh and ipv6 == "yes" else "/32"
+        return ["-d", target + mask, "-p", "tcp", "--dport", port,
                 "-m", "conntrack", "--ctstate", "NEW",
                 "-m", "comment", "--comment", comment, "-j", chain]
     return ["-p", "tcp", "-m", "conntrack", "--ctstate", "NEW", "--ctorigdstport", port,
@@ -411,14 +483,29 @@ def command(table, args, write=False):
 
 def audit():
     owner()
+    snapshots = {}
+    if ssh:
+        # 两个 INPUT 范围尚无共享 owner 合同；写入前跨地址族拒绝控制面资源。
+        for table in ("iptables", "ip6tables"):
+            snapshots[table] = command(table, ["-S"])
+            for line in snapshots[table].splitlines():
+                args = shlex.split(line)
+                if any(value == "padm-f2bc" or value.startswith(("padm-f2bc-", "padm-f2bc:"))
+                       for value in args):
+                    raise ValueError("control INPUT ownership conflicts with SSH")
+                if table not in tools and any(
+                        value == "padm-f2bs" or value.startswith(("padm-f2bs-", "padm-f2bs:"))
+                        for value in args):
+                    raise ValueError("SSH resources exist in the wrong address family")
     result = {}
     strict_order = operation != "empty"
     for table in tools:
-        empty_table = operation == "empty" or (table == "ip6tables" and ipv6 == "no")
+        empty_table = operation == "empty" or (not ssh and table == "ip6tables" and ipv6 == "no")
         present, sentinel, hooks, bans, contents = False, False, [], [], []
         hook_positions = []
         rule_index = 0
-        for line in command(table, ["-S"]).splitlines():
+        snapshot = snapshots[table] if ssh else command(table, ["-S"])
+        for line in snapshot.splitlines():
             args = shlex.split(line)
             if args == ["-N", chain]:
                 present = True
@@ -452,17 +539,18 @@ def audit():
                     values[key] = value
                 index += 2
             base = {"--comment": comment}
-            if (control and args[1] == parent
+            mask = "/128" if ssh and ipv6 == "yes" else "/32"
+            if (input_scope and args[1] == parent
                     and sorted(modules) in (["comment", "conntrack"], ["comment", "conntrack", "tcp"])
                     and values.get("--dport") in ports
-                    and values == dict(base, **{"-d": target + "/32", "-p": "tcp",
+                    and values == dict(base, **{"-d": target + mask, "-p": "tcp",
                        "--dport": values["--dport"], "--ctstate": "NEW", "-j": chain})):
                 port = values["--dport"]
                 if port in hooks:
                     raise ValueError("duplicate Fail2ban hook")
                 hooks.append(port)
                 hook_positions.append(rule_index - 1)
-            elif (not control and args[1] == parent and sorted(modules) == ["comment", "conntrack"]
+            elif (not input_scope and args[1] == parent and sorted(modules) == ["comment", "conntrack"]
                     and values.get("--ctorigdstport") in ports
                     and values == dict(base, **{"-p": "tcp", "--ctstate": "NEW",
                        "--ctorigdstport": values["--ctorigdstport"], "-j": chain})):
@@ -497,6 +585,8 @@ def audit():
         if empty_table and present:
             raise ValueError("Fail2ban chain already exists")
         result[table] = (present, sentinel, hooks, bans)
+    if ssh:
+        owner()
     return result
 
 def mutate(table, args):
@@ -526,7 +616,7 @@ def stop(table):
 try:
     if operation in {"empty", "audit", "health", "cleanup"}:
         resources = audit()
-        if operation == "health" and any((present or control) and (not present or not sentinel or set(hooks) != set(ports))
+        if operation == "health" and any((present or input_scope) and (not present or not sentinel or set(hooks) != set(ports))
                 for present, sentinel, hooks, _ in resources.values()):
             raise ValueError("incomplete Fail2ban resources")
         if operation == "cleanup":
@@ -643,6 +733,7 @@ fail2ban_action() (
 )
 
 fail2ban_run() {
+    [ "$fb_scope" != ssh ] || die "SSH jail requires a fresh managed transaction and is not enabled"
     if [ "$fb_scope" = control ]; then
         requested_target=$1 requested_ports=$2
     else
@@ -1009,6 +1100,7 @@ preflight)
     wireguard) shift; wireguard_preflight "$@" ;;
     fail2ban) shift; fail2ban_preflight "$@" ;;
     fail2ban-control) shift; fail2ban_control_scope; fail2ban_preflight "$@" ;;
+    fail2ban-ssh) shift; fail2ban_ssh_preflight "$@" ;;
     tun) shift; tun_preflight "$@" ;;
     tproxy) shift; tproxy_preflight "$@" ;;
     *) die "unsupported preflight" ;;
@@ -1044,6 +1136,15 @@ fail2ban-control-clean)
     ;;
 fail2ban-control-action)
     shift; fail2ban_control_scope; fail2ban_action "$@"
+    ;;
+fail2ban-ssh-health)
+    shift; [ "$#" -eq 0 ] || exit 1; fail2ban_ssh_health
+    ;;
+fail2ban-ssh-clean)
+    shift; fail2ban_ssh_clean "$@"
+    ;;
+fail2ban-ssh-action)
+    shift; fail2ban_ssh_scope; fail2ban_action "$@"
     ;;
 tproxy-health)
     shift; [ "$#" -eq 2 ] || exit 1; tproxy_health "$@"

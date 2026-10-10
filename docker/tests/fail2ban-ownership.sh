@@ -23,6 +23,8 @@ TOKEN=0123456789abcdef0123456789abcdef
 CHAIN=padm-f2b-0123456789ab
 CONTROL_TOKEN=fedcba9876543210fedcba9876543210
 CONTROL_CHAIN=padm-f2bc-fedcba987654
+SSH_TOKEN=abcdefabcdefabcdefabcdefabcdefab
+SSH_CHAIN=padm-f2bs-abcdefabcdef
 mkdir -p "${TEST_ROOT}/bin" "${FAKE_FB_ROOT}" "${FAKE_FB_STATE}"
 chmod 0700 "${FAKE_FB_STATE}"
 
@@ -35,7 +37,7 @@ set -eu
 . "$1"
 STATE_ROOT=$FAKE_FB_STATE
 shift
-case "$1" in control-*) fail2ban_control_scope ;; esac
+case "$1" in control-*) fail2ban_control_scope ;; ssh-*) fail2ban_ssh_scope ;; esac
 case "$1" in
 seed)
     fb_root=$STATE_ROOT fb_token=$2 fb_chain=padm-f2b-$(printf '%s' "$2" | cut -c1-12)
@@ -47,12 +49,22 @@ control-seed)
     fb_target=${3:-10.77.0.1} fb_ports=${4:-39778} fb_ipv6=no
     fail2ban_state_write
     ;;
+ssh-seed)
+    fb_root=$STATE_ROOT fb_token=$2 fb_chain=$fb_prefix$(printf '%s' "$2" | cut -c1-12)
+    fb_target=$3 fb_ports=$4 fb_ipv6=no
+    case "$fb_target" in *:*) fb_ipv6=yes ;; esac
+    fail2ban_state_write
+    ;;
+ssh-valid) fail2ban_ssh_parameters_valid "$2" "$3" ;;
+ssh-preflight) shift; fail2ban_ssh_preflight "$@" ;;
+ssh-clean) shift; fail2ban_ssh_clean "$@" ;;
+ssh-run) shift; fail2ban_run "$@" ;;
 control-valid) fail2ban_control_parameters_valid "$2" "$3" ;;
 control-precheck) fail2ban_control_precheck "$2" "$3" ;;
 control-clean) shift; fail2ban_control_clean "$@" ;;
-action|control-action) shift; fail2ban_action "$@" ;;
-cleanup|control-cleanup) fail2ban_cleanup "${2:-}" ;;
-audit|control-audit)
+action|control-action|ssh-action) shift; fail2ban_action "$@" ;;
+cleanup|control-cleanup|ssh-cleanup) fail2ban_cleanup "${2:-}" ;;
+audit|control-audit|ssh-audit)
     fail2ban_state_read && fail2ban_resources "${2:-audit}" "${3:-}"
     ;;
 control-empty)
@@ -87,6 +99,16 @@ action = args[0]
 if action == "-S":
     with open(os.environ["FAKE_FB_READS"], "a") as stream:
         stream.write(table + "\n")
+    if os.environ["FAKE_FB_MODE"] == "replace-ssh-state":
+        state = os.path.join(os.environ["FAKE_FB_STATE"], "fail2ban-ssh.state")
+        with open(state) as stream:
+            value = stream.read()
+        with open(state, "w") as stream:
+            stream.write(value.replace("token=" + "abcdef" * 5 + "ab", "token=" + "f" * 32))
+    if os.environ["FAKE_FB_MODE"] == "create-ssh-state":
+        state = os.path.join(os.environ["FAKE_FB_STATE"], "fail2ban-ssh.state")
+        with open(state, "w") as stream:
+            stream.write("created-during-read-only-audit\n")
     for chain, rules in chains.items():
         print("-N", chain)
         for rule in rules:
@@ -150,7 +172,8 @@ chmod 0755 "${TEST_ROOT}/bin/ip"
 export PATH="${TEST_ROOT}/bin:${PATH}"
 run() { sh "${TEST_ROOT}/runner.sh" "${TEST_ROOT}/functions.sh" "$@"; }
 reset() {
-    rm -f -- "${FAKE_FB_STATE}/fail2ban.state" "${FAKE_FB_STATE}/fail2ban-control.state" "${FAKE_FB_ROOT}/failed"
+    rm -f -- "${FAKE_FB_STATE}/fail2ban.state" "${FAKE_FB_STATE}/fail2ban-control.state" \
+        "${FAKE_FB_STATE}/fail2ban-ssh.state" "${FAKE_FB_ROOT}/failed"
     printf '{"DOCKER-USER": [], "INPUT": [], "FOREIGN": []}' >"${FAKE_FB_ROOT}/iptables.json"
     cp "${FAKE_FB_ROOT}/iptables.json" "${FAKE_FB_ROOT}/ip6tables.json"
     : >"${FAKE_FB_WRITES}"
@@ -446,5 +469,185 @@ run cleanup "${TOKEN}"
 [[ ! -e "${FAKE_FB_STATE}/fail2ban.state" && "$(control_snapshot)" == "${control_before}" ]]
 run control-audit health
 run control-cleanup "${CONTROL_TOKEN}"
+! grep -Eq '(^| )-F( |$)' "${FAKE_FB_WRITES}"
+
+# SSH 只新增单端点 owner 后端；WS 共存不改其 state、双族 hook 或 ban。
+ws_scope_snapshot() {
+    python3 - "${FAKE_FB_ROOT}" "${CHAIN}" <<'PY'
+import json
+from pathlib import Path
+import sys
+root, chain = Path(sys.argv[1]), sys.argv[2]
+for table in ("iptables", "ip6tables"):
+    rules = json.loads((root / (table + ".json")).read_text())
+    print(json.dumps({name: rules[name] for name in ("DOCKER-USER", chain)}, sort_keys=True))
+PY
+    sha256sum "${FAKE_FB_STATE}/fail2ban.state"
+}
+ssh_ws_coexist() {
+    reset
+    run seed "${TOKEN}"
+    run action start "${TOKEN}" iptables -w
+    run action start "${TOKEN}" ip6tables -w
+    run action ban "${TOKEN}" iptables -w 192.0.2.7
+    run action ban "${TOKEN}" ip6tables -w 2001:db8::7
+}
+ssh_alter() {
+    python3 - "${FAKE_FB_ROOT}/$1.json" "$2" "${SSH_CHAIN}" <<'PY'
+import json
+import sys
+path, mode, chain = sys.argv[1:]
+with open(path) as stream:
+    rules = json.load(stream)
+rule = rules["INPUT"][0]
+if mode in ("target", "wide-target", "port", "state"):
+    key = {"target":"-d", "wide-target":"-d", "port":"--dport", "state":"--ctstate"}[mode]
+    rule[rule.index(key) + 1] = {
+        "target":"198.51.100.11/32", "wide-target":"198.51.100.0/24",
+        "port":"22221", "state":"ESTABLISHED",
+    }[mode]
+elif mode == "head":
+    rules["INPUT"].insert(0, ["-j", "ACCEPT"])
+elif mode == "foreign":
+    rules["FOREIGN"].append(["-g", chain])
+elif mode == "token":
+    rules[chain][-1][3] = "padm-f2bs:" + "f" * 32
+with open(path, "w") as stream:
+    json.dump(rules, stream)
+PY
+}
+for target in 198.51.100.10 2001:db8::10; do
+    run ssh-valid "${target}" 22220
+done
+for target in 127.0.0.1 0.0.0.0 0.1.2.3 240.1.2.3 ::1 :: \
+    fe80::1 ff02::1 ::ffff:192.0.2.1 2001:0DB8::10 198.51.100.10/32; do
+    reject_unchanged ssh-valid "${target}" 22220
+done
+for port in 0 65536 022220 22,23 '22;id'; do
+    reject_unchanged ssh-valid 198.51.100.10 "${port}"
+done
+reset
+reject_unchanged ssh-run 198.51.100.10 22220
+before=$(snapshot)
+if sh "${PROJECT_ROOT}/docker/images/net/entrypoint.sh" fail2ban-ssh 198.51.100.10 22220 \
+    >"${TEST_ROOT}/output.log" 2>&1; then exit 1; fi
+[[ "$(snapshot)" == "${before}" ]]
+for target in 198.51.100.10 2001:db8::10; do
+    table=iptables peer=192.0.2.20 other=ip6tables
+    [[ "${target}" != *:* ]] || { table=ip6tables peer=2001:db8::20 other=iptables; }
+    ssh_ws_coexist
+    ws_before=$(ws_scope_snapshot)
+    run ssh-preflight "${target}" 22220
+    run ssh-clean "${target}" 22220
+    reject_unchanged ssh-preflight "${target}" 22220 anything
+    run ssh-seed "${SSH_TOKEN}" "${target}" 22220
+    reject_unchanged ssh-audit health
+    reject_unchanged ssh-clean "${target}" 22220
+    run ssh-action start "${SSH_TOKEN}" "${table}" -w
+    run ssh-action check "${SSH_TOKEN}" "${table}" -w
+    run ssh-audit health
+    run ssh-preflight "${target}" 22220 owned
+    reject_unchanged ssh-preflight "${target}" 22221 owned
+    for bad_field in family target; do
+        cp -- "${FAKE_FB_STATE}/fail2ban-ssh.state" "${TEST_ROOT}/ssh-state.saved"
+        if [[ "${bad_field}" == family ]]; then
+            bad_family=yes
+            [[ "${target}" != *:* ]] || bad_family=no
+            sed "s/^ipv6=.*/ipv6=${bad_family}/" "${TEST_ROOT}/ssh-state.saved" \
+                >"${FAKE_FB_STATE}/fail2ban-ssh.state"
+        else
+            bad_target=198.051.100.10
+            [[ "${target}" != *:* ]] || bad_target=2001:DB8::10
+            sed "s/^target=.*/target=${bad_target}/" "${TEST_ROOT}/ssh-state.saved" \
+                >"${FAKE_FB_STATE}/fail2ban-ssh.state"
+        fi
+        reject_unchanged ssh-action check "${SSH_TOKEN}" "${table}" -w
+        reject_unchanged ssh-cleanup "${SSH_TOKEN}"
+        cp -- "${TEST_ROOT}/ssh-state.saved" "${FAKE_FB_STATE}/fail2ban-ssh.state"
+        chmod 0600 "${FAKE_FB_STATE}/fail2ban-ssh.state"
+    done
+    python3 - "${FAKE_FB_ROOT}/${other}.json" add <<'PY'
+import json
+import sys
+path = sys.argv[1]
+with open(path) as stream:
+    rules = json.load(stream)
+rules["padm-f2bs-ffffffffffff"] = []
+with open(path, "w") as stream:
+    json.dump(rules, stream)
+PY
+    reject_unchanged ssh-preflight "${target}" 22220 owned
+    reject_unchanged ssh-action check "${SSH_TOKEN}" "${table}" -w
+    reject_unchanged ssh-cleanup "${SSH_TOKEN}"
+    python3 - "${FAKE_FB_ROOT}/${other}.json" <<'PY'
+import json
+import sys
+path = sys.argv[1]
+with open(path) as stream:
+    rules = json.load(stream)
+del rules["padm-f2bs-ffffffffffff"]
+with open(path, "w") as stream:
+    json.dump(rules, stream)
+PY
+    reject_unchanged ssh-action start "${SSH_TOKEN}" "${other}" -w
+    reject_unchanged ssh-action ban "${CONTROL_TOKEN}" "${table}" -w "${peer}"
+    run ssh-action ban "${SSH_TOKEN}" "${table}" -w "${peer}"
+    run ssh-action unban "${SSH_TOKEN}" "${table}" -w "${peer}"
+    run ssh-action ban "${SSH_TOKEN}" "${table}" -w "${peer}"
+    run ssh-action flush "${SSH_TOKEN}" "${table}" -w
+    [[ "$(ws_scope_snapshot)" == "${ws_before}" ]]
+    export FAKE_FB_MODE=fail-delete
+    if run ssh-cleanup "${SSH_TOKEN}" >"${TEST_ROOT}/output.log" 2>&1; then exit 1; fi
+    [[ -f "${FAKE_FB_STATE}/fail2ban-ssh.state" && "$(ws_scope_snapshot)" == "${ws_before}" ]]
+    run ssh-audit
+    export FAKE_FB_MODE=ok
+    run ssh-cleanup "${SSH_TOKEN}"
+    run ssh-clean "${target}" 22220
+    [[ ! -e "${FAKE_FB_STATE}/fail2ban-ssh.state" && "$(ws_scope_snapshot)" == "${ws_before}" ]]
+done
+for drift in target wide-target port state head foreign token; do
+    reset
+    run ssh-seed "${SSH_TOKEN}" 198.51.100.10 22220
+    run ssh-action start "${SSH_TOKEN}" iptables -w
+    ssh_alter iptables "${drift}"
+    for operation in start check stop flush; do
+        reject_unchanged ssh-action "${operation}" "${SSH_TOKEN}" iptables -w
+    done
+    reject_unchanged ssh-action ban "${SSH_TOKEN}" iptables -w 192.0.2.20
+    reject_unchanged ssh-cleanup "${SSH_TOKEN}"
+done
+# 控制面规则在 IPv4 时，IPv6 SSH 动作也须在任何写入之前拒绝。
+for target in 198.51.100.10 2001:db8::10; do
+    coexist
+    table=iptables
+    [[ "${target}" != *:* ]] || table=ip6tables
+    reject_unchanged ssh-preflight "${target}" 22220
+    reject_unchanged ssh-clean "${target}" 22220
+    run ssh-seed "${SSH_TOKEN}" "${target}" 22220
+    for operation in start stop check flush; do
+        reject_unchanged ssh-action "${operation}" "${SSH_TOKEN}" "${table}" -w
+    done
+    reject_unchanged ssh-audit health
+    reject_unchanged ssh-cleanup "${SSH_TOKEN}"
+    run control-audit health
+    run audit health
+done
+for operation in ssh-preflight ssh-clean; do
+    reset
+    kernel_before=$(sha256sum "${FAKE_FB_ROOT}/iptables.json" "${FAKE_FB_ROOT}/ip6tables.json" "${FAKE_FB_WRITES}")
+    export FAKE_FB_MODE=create-ssh-state
+    if run "${operation}" 198.51.100.10 22220 >"${TEST_ROOT}/output.log" 2>&1; then exit 1; fi
+    grep -qF 'unexpected ownership state' "${TEST_ROOT}/output.log"
+    [[ "$(sha256sum "${FAKE_FB_ROOT}/iptables.json" "${FAKE_FB_ROOT}/ip6tables.json" "${FAKE_FB_WRITES}")" == "${kernel_before}" ]]
+    grep -qxF 'created-during-read-only-audit' "${FAKE_FB_STATE}/fail2ban-ssh.state"
+done
+reset
+run ssh-seed "${SSH_TOKEN}" 198.51.100.10 22220
+run ssh-action start "${SSH_TOKEN}" iptables -w
+kernel_before=$(sha256sum "${FAKE_FB_ROOT}/iptables.json" "${FAKE_FB_ROOT}/ip6tables.json" "${FAKE_FB_WRITES}")
+export FAKE_FB_MODE=replace-ssh-state
+if run ssh-action ban "${SSH_TOKEN}" iptables -w 192.0.2.20 >"${TEST_ROOT}/output.log" 2>&1; then exit 1; fi
+[[ "$(sha256sum "${FAKE_FB_ROOT}/iptables.json" "${FAKE_FB_ROOT}/ip6tables.json" "${FAKE_FB_WRITES}")" == "${kernel_before}" &&
+    -f "${FAKE_FB_STATE}/fail2ban-ssh.state" ]]
 ! grep -Eq '(^| )-F( |$)' "${FAKE_FB_WRITES}"
 printf 'docker-fail2ban-ownership-ok\n'
