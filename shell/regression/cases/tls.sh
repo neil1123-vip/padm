@@ -694,6 +694,31 @@ runTlsFailureReturnRegression() (
             -keyout "${certificateRoot}/wrong.key" -out "${certificateRoot}/wrong.crt" >/dev/null 2>&1
 
         (
+            # 安装入口未开启 pipefail，公钥导出失败不能被后续摘要命令掩盖。
+            set +o pipefail
+            local failureStage exportFailure checkFailed=false
+            tlsCertificateFilesUsable "${certificateRoot}/valid.crt" "${certificateRoot}/valid.key" "${certDomain}"
+            openssl() {
+                if [[ "${failureStage}" == cert-export && "$1" == x509 && " $* " == *" -pubkey "* ]] ||
+                    [[ "${failureStage}" == cert-DER && "$1" == pkey && " $* " == *" -pubin "* ]] ||
+                    [[ "${failureStage}" == key-export && "$1" == pkey && " $* " == *" -pubout "* ]]; then
+                    [[ "${exportFailure}" == output ]] && command openssl "$@"
+                    return 23
+                fi
+                command openssl "$@"
+            }
+            for failureStage in cert-export cert-DER key-export; do
+                for exportFailure in output empty; do
+                    if tlsCertificateFilesUsable "${certificateRoot}/valid.crt" "${certificateRoot}/valid.key" "${certDomain}"; then
+                        printf 'TLS 公钥导出 %s/%s 失败被误判为可用\n' "${failureStage}" "${exportFailure}" >&2
+                        checkFailed=true
+                    fi
+                done
+            done
+            [[ "${checkFailed}" == false ]]
+        )
+
+        (
             # 普通安装和严格修复均只复用有效源；坏源和显式参数回到同一申请流程。
             local PADM_REQUIRE_USABLE_TLS_CERTIFICATE= dnsAPIStatus
             local AUTO_TLS_CA= AUTO_DNS_API= AUTO_DNS_API_TYPE= AUTO_DNS_API_WILDCARD=

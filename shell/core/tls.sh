@@ -92,11 +92,15 @@ tlsCertificateFilesUsable() {
         openssl x509 -in "${certFile}" -checkend 0 -noout >/dev/null 2>&1 &&
         openssl x509 -in "${certFile}" -checkhost "${certDomain}" -noout >/dev/null 2>&1 &&
         openssl pkey -in "${keyFile}" -check -noout >/dev/null 2>&1 || return 1
-    certDigest=$(openssl x509 -in "${certFile}" -pubkey -noout 2>/dev/null |
-        openssl pkey -pubin -outform DER 2>/dev/null |
-        openssl dgst -sha256 2>/dev/null) || return 1
-    keyDigest=$(openssl pkey -in "${keyFile}" -pubout -outform DER 2>/dev/null |
-        openssl dgst -sha256 2>/dev/null) || return 1
+    certDigest=$(set -o pipefail
+        openssl x509 -in "${certFile}" -pubkey -noout 2>/dev/null |
+            openssl pkey -pubin -outform DER 2>/dev/null |
+            openssl dgst -sha256 2>/dev/null
+    ) || return 1
+    keyDigest=$(set -o pipefail
+        openssl pkey -in "${keyFile}" -pubout -outform DER 2>/dev/null |
+            openssl dgst -sha256 2>/dev/null
+    ) || return 1
     [[ -n "${certDigest}" && "${certDigest}" == "${keyDigest}" ]]
 }
 
