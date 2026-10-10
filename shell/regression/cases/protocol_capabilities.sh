@@ -801,6 +801,42 @@ runProtocolEntryReaderFailureRegression() (
             done
             [[ "${failed}" == 0 ]]
         ) || failed=1
+        (
+            # VLESS WS 缺省或短路径不能触发负长度展开，也不能误裁非 ws 后缀。
+            local rawPath expectedPath expectedStatus configFile failed=0
+            local PADM_XRAY_BINARY="${root}/missing-xray" PADM_XRAY_CONF_DIR="${root}/missing-xray-conf"
+            local PADM_SINGBOX_BINARY=/bin/true PADM_SINGBOX_CONFIG_DIR="${root}/vless-ws-path/config"
+            mkdir -p "${PADM_SINGBOX_CONFIG_DIR}" || return 1
+            configFile="${PADM_SINGBOX_CONFIG_DIR}/03_VLESS_WS_inbounds.json"
+            for rawPath in '"/savedws"' missing null '"/"' '"/x"' '"/plain"' 42 '{}' '"/savedws\n"'; do
+                (
+                    if [[ "${rawPath}" == missing ]]; then
+                        jq -n '{inbounds:[{type:"vless",listen_port:443,users:[{uuid:"saved-uuid"}],
+                            tls:{server_name:"tls.example.com"},transport:{type:"ws"}}]}' >"${configFile}" || return 1
+                    else
+                        jq -n --argjson path "${rawPath}" '
+                            {inbounds:[{type:"vless",listen_port:443,users:[{uuid:"saved-uuid"}],
+                                tls:{server_name:"tls.example.com"},transport:{type:"ws",path:$path}}]}
+                        ' >"${configFile}" || return 1
+                    fi
+                    readInstallType && readInstallProtocolType || return 1
+                    [[ "${coreInstallType}" == 2 && "${frontingType}" == 03_VLESS_WS_inbounds ]] || return 1
+                    case "${rawPath}" in
+                    '"/savedws"') expectedPath=saved expectedStatus=0 ;;
+                    '"/x"') expectedPath=x expectedStatus=0 ;;
+                    '"/plain"') expectedPath=plain expectedStatus=0 ;;
+                    missing | null | '"/"') expectedPath= expectedStatus=0 ;;
+                    *) expectedPath= expectedStatus=1 ;;
+                    esac
+                    currentPath=stale
+                    regressionExpectStatus "${expectedStatus}" readConfigHostPathUUID ||
+                        { printf 'assert-fail:entry-vless-ws-path-status:%s\n' "${rawPath}" >&2; return 1; }
+                    [[ "${currentPath}" == "${expectedPath}" ]] ||
+                        { printf 'assert-fail:entry-vless-ws-path-value:%s\n' "${rawPath}" >&2; return 1; }
+                ) || failed=1
+            done
+            [[ "${failed}" == 0 ]]
+        ) || failed=1
         [[ "${failed}" == 0 ]]
     ) || failed=1
     (

@@ -2994,6 +2994,31 @@ runRealityStreamSplitRegression() (
     local mode=${1:-all} root="${TMP_DIR}/reality-stream-split" failKey= defaultChoice=1
     # 隔离容器自带的 /usr/sbin/nginx，安装状态只由下方函数模拟。
     local PATH=/usr/local/bin:/usr/bin:/bin
+    (
+        local endpoint listenerBackend=ss
+        command() {
+            if [[ "${1:-}" == -v && "${2:-}" == ss && "${listenerBackend}" == lsof ]]; then
+                return 1
+            fi
+            builtin command "$@"
+        }
+        ss() { printf 'LISTEN 0 128 %s 0.0.0.0:*\n' "${endpoint}"; }
+        lsof() {
+            [[ "${listenerBackend}" == lsof ]] || return 1
+            printf 'COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\nnginx 1 root 3u IPv4 0 0t0 TCP %s (LISTEN)\n' "${endpoint}"
+        }
+        # 具体公网地址和 IPv6-only 回环不能证明固定 IPv4 upstream 可达。
+        for listenerBackend in ss lsof; do
+            for endpoint in 203.0.113.9:8443 '[::1]:8443' 127.0.0.1:84430; do
+                regressionExpectStatus 1 realityStreamLocalPortListening 8443 ||
+                    { printf '错误接受网站监听: %s %s\n' "${listenerBackend}" "${endpoint}" >&2; return 1; }
+            done
+            for endpoint in 127.0.0.1:8443 0.0.0.0:8443 '*:8443' '[::]:8443'; do
+                realityStreamLocalPortListening 8443 ||
+                    { printf '错误拒绝网站监听: %s %s\n' "${listenerBackend}" "${endpoint}" >&2; return 1; }
+            done
+        done
+    ) || return 1
     local configPath="${root}/ports/" aliasFile aliasXHTTPFile ignoredFile ignoredContent oldAlias oldXHTTPAlias
     local visionPort=2443 xhttpPort=2444 websitePortInput=8443
     local backupCalls=0 patchCalls=0 allowCalls=0 reloadCalls=0 installCalls=0 subscribeCalls=0
