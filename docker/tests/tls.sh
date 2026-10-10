@@ -69,6 +69,15 @@ cp() {
         kill -TERM "${BASHPID}"
     fi
 }
+find() {
+    local query=${FIND_FAIL_QUERY:-'* -print -quit'}
+    if [[ -n "${FIND_FAIL_PATH:-}" && "$1" == ${FIND_FAIL_PATH} &&
+        "$*" == ${query} ]]; then
+        printf 'injected-find-failure: %s\n' "$*" >&2
+        return 1
+    fi
+    command find "$@"
+}
 
 # 保留实际候选校验，Docker 只映射 bind 路径到本测试目录。
 docker() {
@@ -570,8 +579,8 @@ materials() (
 assertClean() {
     local root=${PADM_DOCKER_INSTALL_DIR}
     [[ ! -e "${root}/locks/deployment.lock" ]] || fail '部署锁未释放'
-    [[ -z "$(find "${root}" -maxdepth 1 -name '.tls.*' -print -quit)" ]] || fail 'TLS 候选未清理'
-    [[ -z "$(find "${root}/secrets/tls" -maxdepth 1 -name '.*' -type f -print -quit)" ]] || fail '临时证书未清理'
+    [[ -z "$(command find "${root}" -maxdepth 1 -name '.tls.*' -print -quit)" ]] || fail 'TLS 候选未清理'
+    [[ -z "$(command find "${root}/secrets/tls" -maxdepth 1 -name '.*' -type f -print -quit)" ]] || fail '临时证书未清理'
     [[ "$(<"${root}/data/traffic/state.json")" == history ]] || fail 'TLS 修改了历史累计'
 }
 
@@ -1302,6 +1311,94 @@ printf '{"inbounds":\n' >"${PARSER}"
 reject dockerCoreTlsDomains xray "${PARSER}"
 reject dockerCoreTlsDomains sing-box "${PARSER}"
 reject dockerCoreTlsDomains unknown "${PARSER}"
+
+# 扫描失败的空输出不能冒充安全目录，必须在采样、换证和消费方动作前拒绝。
+for SCAN in candidate target xray nginx extra-json extra-conf; do
+    coreTlsState "scan-${SCAN}" both true
+    before=$(materials)
+    FIND_FAIL_QUERY='* -print -quit'
+    case "${SCAN}" in
+    candidate) FIND_FAIL_PATH="${PADM_DOCKER_INSTALL_DIR}/.tls.*" ;;
+    target) FIND_FAIL_PATH="${PADM_DOCKER_INSTALL_DIR}/secrets/tls" ;;
+    xray|extra-json) FIND_FAIL_PATH="${PADM_DOCKER_INSTALL_DIR}/config/xray" ;;
+    nginx|extra-conf) FIND_FAIL_PATH="${PADM_DOCKER_INSTALL_DIR}/config/nginx" ;;
+    esac
+    [[ "${SCAN}" != extra-json ]] || FIND_FAIL_QUERY='* -name *.json * -print -quit'
+    [[ "${SCAN}" != extra-conf ]] || FIND_FAIL_QUERY='* -name *.conf * -print -quit'
+    runCoreCommit failure
+    FIND_FAIL_PATH=
+    grep -q '^injected-find-failure:' "${TEST_ROOT}/control.log" || fail "${SCAN}: 未触发扫描故障"
+    [[ "$(materials)" == "${before}" && ! -s "${TEST_ROOT}/compose.log" ]] ||
+        fail "${SCAN}: 扫描失败仍然修改了证书或消费者"
+done
+FIND_FAIL_QUERY=
+
+newState scan-stage-permissions
+dockerCreateTlsCandidate
+mkdir -p "${DOCKER_TLS_CANDIDATE}/secrets/tls"
+before=$(stat -c '%a %u %g' "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/${DOMAIN}.key")
+FIND_FAIL_PATH="${PADM_DOCKER_INSTALL_DIR}/secrets/tls"
+reject dockerStageTlsFiles "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" "${DOCKER_TLS_CANDIDATE}"
+reject dockerTlsRuntimePermissions "${PADM_DOCKER_INSTALL_DIR}/secrets/tls"
+FIND_FAIL_PATH=
+[[ ! -e "${DOCKER_TLS_CANDIDATE}/secrets/tls/${DOMAIN}.crt" &&
+    "$(stat -c '%a %u %g' "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/${DOMAIN}.key")" == "${before}" ]] ||
+    fail '扫描失败仍然复制 TLS 材料或修改权限'
+dockerCleanupTlsCandidate
+
+newState scan-account-backup
+dockerCreateTlsCandidate
+mkdir "${DOCKER_TLS_CANDIDATE}/acme"
+before=$(materials)
+FIND_FAIL_PATH="${PADM_DOCKER_INSTALL_DIR}/data/acme"
+reject dockerBackupTlsFiles "${DOMAIN}" "${DOCKER_TLS_CANDIDATE}"
+FIND_FAIL_PATH=
+[[ "$(materials)" == "${before}" && -z "${DOCKER_TLS_BACKUP}" ]] ||
+    fail '账户扫描失败仍然确认了 TLS 回滚备份'
+dockerCleanupTlsCandidate
+
+for SCAN in backup target; do
+    newState "scan-restore-${SCAN}"
+    dockerBackupTlsFiles "${DOMAIN}"
+    DOCKER_TLS_SWITCHED=1
+    cp -- "${CERT_FILE}" "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/${DOMAIN}.crt"
+    before=$(materials)
+    FIND_FAIL_PATH=${DOCKER_TLS_BACKUP}
+    [[ "${SCAN}" != target ]] || FIND_FAIL_PATH="${PADM_DOCKER_INSTALL_DIR}/secrets/tls"
+    reject dockerRestoreTlsFiles
+    FIND_FAIL_PATH=
+    [[ "$(materials)" == "${before}" && "${DOCKER_TLS_SWITCHED}" == 1 &&
+        ! -s "${TEST_ROOT}/compose.log" ]] || fail "${SCAN}: 扫描失败导致部分恢复"
+    DOCKER_TLS_SWITCHED=0
+done
+
+for SCAN in source candidate; do
+    newState "scan-acme-${SCAN}"
+    before=$(materials)
+    FIND_FAIL_PATH="${PADM_DOCKER_INSTALL_DIR}/data/acme"
+    [[ "${SCAN}" != candidate ]] || FIND_FAIL_PATH="${PADM_DOCKER_INSTALL_DIR}/.tls.*/acme"
+    runControl 15 acme issue --domain "${DOMAIN}" --email admin@example.com --dns dns_test --credentials "${CREDENTIALS}"
+    FIND_FAIL_PATH=
+    [[ "$(materials)" == "${before}" && ! -s "${TEST_ROOT}/compose.log" ]] ||
+        fail "${SCAN}: ACME 扫描失败仍然切换材料或消费者"
+    if [[ "${SCAN}" == source ]]; then
+        [[ ! -s "${TEST_ROOT}/acme.log" ]] || fail '旧账户扫描失败仍然运行 ACME 工具'
+    fi
+done
+
+webrootState scan-webroot
+webroot="${PADM_DOCKER_INSTALL_DIR}/data/acme-webroot"
+for QUERY in '* ! -type d ! -type f -print -quit' '* -mindepth 1 -print -quit'; do
+    FIND_FAIL_PATH=${webroot}
+    FIND_FAIL_QUERY=${QUERY}
+    reject dockerAcmeWebrootTreeValidate "${PADM_DOCKER_INSTALL_DIR}" "${webroot}" true
+    FIND_FAIL_PATH=
+done
+FIND_FAIL_QUERY=
+FIND_FAIL_PATH="${PADM_DOCKER_INSTALL_DIR}/config/nginx"
+reject dockerAcmeWebrootDeploymentCheck "${DOMAIN}"
+FIND_FAIL_PATH=
+assertClean
 
 coreTlsState core-only xray
 [[ "$(dockerTlsConsumers "${DOMAIN}")" == '["xray"]' ]] || fail '核心独立消费者识别错误'

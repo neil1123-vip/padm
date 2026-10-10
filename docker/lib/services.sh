@@ -2142,14 +2142,15 @@ dockerGenerateSingBoxConfig() {
 }
 
 dockerStageTlsFiles() {
-    local specFile=$1 candidate=$2 sourceDir=${3:-} root domain extension
+    local specFile=$1 candidate=$2 sourceDir=${3:-} root domain extension unsafe
     root=$(dockerInstallRoot) || return 1
     [[ -z "${sourceDir}" || ( -d "${sourceDir}" && ! -L "${sourceDir}" ) ]] || return 1
     [[ -n "${sourceDir}" ]] || sourceDir="${root}/secrets/tls"
     if [[ -e "${sourceDir}" || -L "${sourceDir}" ]]; then
         dockerManagedPathIsSafe "${root}" "${sourceDir}" &&
             [[ -d "${sourceDir}" && ! -L "${sourceDir}" ]] &&
-            [[ -z "$(find "${sourceDir}" -type l -print -quit)" ]] || return 1
+            unsafe=$(find "${sourceDir}" -type l -print -quit) &&
+            [[ -z "${unsafe}" ]] || return 1
         cp -a -- "${sourceDir}/." "${candidate}/secrets/tls/" || return 1
     fi
     jq -e '.tls != null' "${specFile}" >/dev/null || return 0
@@ -3173,10 +3174,11 @@ dockerDeploymentFileValidate() {
 }
 
 dockerTlsRuntimePermissions() {
-    local directory=$1
+    local directory=$1 unsafe
     [[ -e "${directory}" || -L "${directory}" ]] || return 0
     [[ -d "${directory}" && ! -L "${directory}" ]] &&
-        [[ -z "$(find "${directory}" -type l -print -quit)" ]] || return 1
+        unsafe=$(find "${directory}" -type l -print -quit) &&
+        [[ -z "${unsafe}" ]] || return 1
     find "${directory}" -type d -exec chmod 0750 {} + || return 1
     find "${directory}" -type f ! -name '*.key' -exec chmod 0640 {} + || return 1
     find "${directory}" -type f -name '*.key' -exec chmod 0600 {} + || return 1
@@ -5725,7 +5727,7 @@ dockerCoreTlsDomains() {
 }
 
 dockerTlsConsumers() {
-    local domain=$1 root core cores domains consumers='[]' image config nginxDomain count imageKey
+    local domain=$1 root core cores domains consumers='[]' image config nginxDomain count imageKey unsafe
     local nginxTlsExpected=true specFile
     root=$(dockerInstallRoot) || return 1
     dockerDomainIsValid "${domain}" &&
@@ -5750,12 +5752,14 @@ dockerTlsConsumers() {
           .[0].source == ("${PADM_DOCKER_ROOT}/config/" + $core)
         ' "${root}/compose.json" >/dev/null || return 1
         dockerTrafficSafePath "${root}" "${config}" &&
-            [[ -z "$(find "${root}/config/${core}" ! -type f ! -type d -print -quit)" ]] || return 1
+            unsafe=$(find "${root}/config/${core}" ! -type f ! -type d -print -quit) &&
+            [[ -z "${unsafe}" ]] || return 1
         if [[ "${core}" == xray && -d "${root}/config/xray/geo" ]]; then
             dockerGeoStateValidate "${root}/config/xray/geo" || return 1
         fi
-        [[ -z "$(find "${root}/config/${core}" -name '*.json' ! -name config.json \
-            ! -path "${root}/config/xray/geo/state.json" -print -quit)" ]] || return 1
+        unsafe=$(find "${root}/config/${core}" -name '*.json' ! -name config.json \
+            ! -path "${root}/config/xray/geo/state.json" -print -quit) &&
+            [[ -z "${unsafe}" ]] || return 1
         domains=$(dockerCoreTlsDomains "${core}" "${config}") || return 1
         jq -e --arg domain "${domain}" 'index($domain) != null' <<<"${domains}" >/dev/null || continue
         jq -e --arg core "${core}" '.compose.profiles | index("core-" + $core) != null' \
@@ -5783,7 +5787,8 @@ dockerTlsConsumers() {
             dockerConfigureSpecValidate "${specFile}" &&
             dockerManagedSpecMatchesDeployment "${specFile}" "${root}/deployment.json" "${root}/images.env" &&
             dockerTrafficSafePath "${root}" "${root}/config/nginx/stream/host-main" &&
-            [[ -z "$(find "${root}/config/nginx" ! -type f ! -type d -print -quit)" ]] &&
+            unsafe=$(find "${root}/config/nginx" ! -type f ! -type d -print -quit) &&
+            [[ -z "${unsafe}" ]] &&
             cmp -s -- "${root}/config/nginx/stream/host-main" \
                 <(dockerGenerateRealityStreamMain "${specFile}" /dev/stdout) &&
             cmp -s -- "${root}/config/nginx/stream/reality.conf" \
@@ -5805,7 +5810,8 @@ dockerTlsConsumers() {
         ' "${root}/compose.json" >/dev/null || return 1
         dockerTrafficSafePath "${root}" "${root}/config/nginx/default.conf" || return 1
         [[ -f "${root}/config/nginx/default.conf" && ! -L "${root}/config/nginx/default.conf" ]] || return 1
-        [[ -z "$(find "${root}/config/nginx" ! -type f ! -type d -print -quit)" ]] || return 1
+        unsafe=$(find "${root}/config/nginx" ! -type f ! -type d -print -quit) &&
+            [[ -z "${unsafe}" ]] || return 1
         specFile="${root}/config/spec.json"
         if [[ -e "${specFile}" || -L "${specFile}" ]]; then
             dockerTrafficSafePath "${root}" "${specFile}" &&
@@ -5814,8 +5820,9 @@ dockerTlsConsumers() {
               .id == 21 or .id == 22 or .id == 23 or .id == 24 or .id == 25)' "${specFile}") || return 1
         fi
         if [[ -f "${specFile}" ]] && jq -e '.reality_stream != null' "${specFile}" >/dev/null; then
-            [[ -z "$(find "${root}/config/nginx" -name '*.conf' ! -name default.conf \
-                ! -path "${root}/config/nginx/stream/reality.conf" -print -quit)" ]] &&
+            unsafe=$(find "${root}/config/nginx" -name '*.conf' ! -name default.conf \
+                ! -path "${root}/config/nginx/stream/reality.conf" -print -quit) &&
+            [[ -z "${unsafe}" ]] &&
                 cmp -s -- "${root}/config/nginx/stream/reality.conf" \
                     <(dockerGenerateRealityStreamConfig "${specFile}" /dev/stdout) &&
                 cmp -s -- "${root}/config/nginx/default.conf" \
@@ -5827,7 +5834,8 @@ dockerTlsConsumers() {
                   .services.nginx.network_mode == null' \
                     "${root}/compose.json" >/dev/null || return 1
         else
-            [[ -z "$(find "${root}/config/nginx" -name '*.conf' ! -name default.conf -print -quit)" ]] || return 1
+            unsafe=$(find "${root}/config/nginx" -name '*.conf' ! -name default.conf -print -quit) &&
+                [[ -z "${unsafe}" ]] || return 1
         fi
         if [[ "${nginxTlsExpected}" == true ]]; then
         nginxDomain=$(awk '
@@ -5910,7 +5918,7 @@ dockerReloadTlsConsumers() {
 }
 
 dockerBackupTlsFiles() {
-    local domain=$1 candidate=${2:-} root backup extension source consumers
+    local domain=$1 candidate=${2:-} root backup extension source consumers unsafe
     root=$(dockerInstallRoot) || return 1
     consumers=$(dockerTlsConsumers "${domain}") || return 1
     if [[ "${DOCKER_ACME_RUNNING}" != null ]]; then
@@ -5934,8 +5942,9 @@ dockerBackupTlsFiles() {
         source="${root}/data/acme"
         dockerTrafficSafePath "${root}" "${source}" || return 1
         if [[ -e "${source}" ]]; then
-            [[ -d "${source}" &&
-                -z "$(find "${source}" ! -type f ! -type d -print -quit)" ]] || return 1
+            [[ -d "${source}" ]] &&
+                unsafe=$(find "${source}" ! -type f ! -type d -print -quit) &&
+                [[ -z "${unsafe}" ]] || return 1
             cp -a -- "${source}" "${backup}/acme" || return 1
             printf 'present\n' >"${backup}/acme.changed" || return 1
         else
@@ -5948,7 +5957,7 @@ dockerBackupTlsFiles() {
 }
 
 dockerCommitTlsCandidate() {
-    local candidate=$1 domain=$2 root targetDir extension tempFile
+    local candidate=$1 domain=$2 root targetDir extension tempFile unsafe
     # TLS 失败恢复通过动态作用域读取本次来源输入。
     # shellcheck disable=SC2034
     local DOCKER_FAIL2BAN_SOURCE_IPV4='' DOCKER_FAIL2BAN_SOURCE_IPV6=''
@@ -5958,11 +5967,13 @@ dockerCommitTlsCandidate() {
     dockerDomainIsValid "${domain}" &&
         dockerTrafficSafePath "${root}" "${candidate}" &&
         dockerTrafficSafePath "${root}" "${targetDir}" || return 1
-    [[ -d "${candidate}" && ! -L "${candidate}" &&
-        -z "$(find "${candidate}" ! -type f ! -type d -print -quit)" ]] || return 1
+    [[ -d "${candidate}" && ! -L "${candidate}" ]] &&
+        unsafe=$(find "${candidate}" ! -type f ! -type d -print -quit) &&
+        [[ -z "${unsafe}" ]] || return 1
     if [[ -e "${targetDir}" || -L "${targetDir}" ]]; then
-        [[ -d "${targetDir}" && ! -L "${targetDir}" &&
-            -z "$(find "${targetDir}" ! -type f ! -type d -print -quit)" ]] || return 1
+        [[ -d "${targetDir}" && ! -L "${targetDir}" ]] &&
+            unsafe=$(find "${targetDir}" ! -type f ! -type d -print -quit) &&
+            [[ -z "${unsafe}" ]] || return 1
     else
         mkdir -- "${targetDir}" || return 1
     fi
@@ -6026,16 +6037,17 @@ dockerCommitTlsCandidate() {
 }
 
 dockerRestoreTlsFiles() {
-    local root backup=${DOCKER_TLS_BACKUP:-} domain extension target
+    local root backup=${DOCKER_TLS_BACKUP:-} domain extension target unsafe
     [[ "${DOCKER_TLS_SWITCHED:-0}" == "1" && -n "${backup}" ]] || return 0
     root=$(dockerInstallRoot) || return 1
     dockerTrafficSafePath "${root}" "${backup}" &&
         dockerTrafficSafePath "${root}" "${root}/secrets/tls" &&
         dockerTrafficSafePath "${root}" "${root}/data/acme" || return 1
-    [[ "${backup}" == "${root}/backups/tls."* && -d "${backup}" && -O "${backup}" &&
-        -z "$(find "${backup}" ! -type f ! -type d -print -quit)" &&
-        -f "${backup}/present" && ! -L "${backup}/present" &&
-        -f "${backup}/consumers" ]] || return 1
+    [[ "${backup}" == "${root}/backups/tls."* && -d "${backup}" && -O "${backup}" ]] &&
+        unsafe=$(find "${backup}" ! -type f ! -type d -print -quit) &&
+        [[ -z "${unsafe}" ]] &&
+        [[ -f "${backup}/present" && ! -L "${backup}/present" &&
+            -f "${backup}/consumers" ]] || return 1
     jq -es 'length == 1 and (.[0] | type == "array" and
       length == (unique | length) and all(.[]; . == "xray" or . == "sing-box" or . == "nginx"))' \
         "${backup}/consumers" >/dev/null || return 1
@@ -6044,7 +6056,8 @@ dockerRestoreTlsFiles() {
     dockerDomainIsValid "${domain}" || return 1
     [[ -z "$(grep -vxE 'crt|key' "${backup}/present")" &&
         -z "$(sort "${backup}/present" | uniq -d)" ]] || return 1
-    [[ -z "$(find "${root}/secrets/tls" ! -type f ! -type d -print -quit)" ]] || return 1
+    unsafe=$(find "${root}/secrets/tls" ! -type f ! -type d -print -quit) &&
+        [[ -z "${unsafe}" ]] || return 1
     # 先检查整份备份，缺失私钥或账户不能触发部分恢复。
     for extension in crt key; do
         target="${root}/secrets/tls/${domain}.${extension}"
@@ -6181,12 +6194,14 @@ dockerAcmeWebrootParentValidate() {
 }
 
 dockerAcmeWebrootTreeValidate() {
-    local root=$1 directory=$2 empty=${3:-false} entry relative owner mode value
+    local root=$1 directory=$2 empty=${3:-false} entry relative owner mode value unsafe
     dockerAcmeWebrootParentValidate "${root}" "${directory}" &&
         [[ -d "${directory}" ]] || return 1
-    [[ -z "$(find "${directory}" ! -type d ! -type f -print -quit)" ]] || return 1
+    unsafe=$(find "${directory}" ! -type d ! -type f -print -quit) &&
+        [[ -z "${unsafe}" ]] || return 1
     if [[ "${empty}" == true ]]; then
-        [[ -z "$(find "${directory}" -mindepth 1 -print -quit)" ]] || return 1
+        unsafe=$(find "${directory}" -mindepth 1 -print -quit) &&
+            [[ -z "${unsafe}" ]] || return 1
     fi
     while IFS= read -r -d '' entry; do
         relative=${entry#"${directory}"}
@@ -6411,7 +6426,7 @@ dockerAcmeOwnersValidate() {
 }
 
 dockerAcmeWebrootDeploymentCheck() {
-    local domain=$1 root owners
+    local domain=$1 root owners unsafe
     root=$(dockerInstallRoot) || return 1
     dockerTrafficSafePath "${root}" "${root}/config/spec.json" &&
         [[ -f "${root}/config/spec.json" ]] &&
@@ -6422,8 +6437,9 @@ dockerAcmeWebrootDeploymentCheck() {
     }
     dockerAcmeWebrootTreeValidate "${root}" "${root}/data/acme-webroot" &&
         dockerTrafficSafePath "${root}" "${root}/config/nginx/default.conf" &&
-        [[ -f "${root}/config/nginx/default.conf" &&
-            -z "$(find "${root}/config/nginx" ! -type f ! -type d -print -quit)" ]] &&
+        [[ -f "${root}/config/nginx/default.conf" ]] &&
+        unsafe=$(find "${root}/config/nginx" ! -type f ! -type d -print -quit) &&
+        [[ -z "${unsafe}" ]] &&
         cmp -s -- "${root}/config/nginx/default.conf" \
             <(dockerGenerateNginxConfig "${root}/config/spec.json" /dev/stdout) || return 1
     owners=$(dockerAcmePortOwners) || return 1
@@ -6647,7 +6663,7 @@ dockerAcmeCommand() {
 
 dockerAcmeApply() {
     local action=$1 domain=$2 email=$3 provider=$4 credentials=$5 image=$6
-    local root candidate status
+    local root candidate status unsafe
     local -a keyArgs=() issueKeyArgs=(--keylength 2048) challengeArgs=(--dns "${provider}")
     root=$(dockerInstallRoot) || return "${PADM_DOCKER_RC_STATE}"
     if [[ "${action}" == renew &&
@@ -6665,8 +6681,9 @@ dockerAcmeApply() {
     dockerTrafficSafePath "${root}" "${root}/data/acme" || return "${PADM_DOCKER_RC_STATE}"
     mkdir -- "${candidate}/acme" || return "${PADM_DOCKER_RC_STATE}"
     if [[ -e "${root}/data/acme" ]]; then
-        [[ -d "${root}/data/acme" &&
-            -z "$(find "${root}/data/acme" ! -type f ! -type d -print -quit)" ]] ||
+        [[ -d "${root}/data/acme" ]] &&
+            unsafe=$(find "${root}/data/acme" ! -type f ! -type d -print -quit) &&
+            [[ -z "${unsafe}" ]] ||
             return "${PADM_DOCKER_RC_STATE}"
         cp -a -- "${root}/data/acme/." "${candidate}/acme/" || return "${PADM_DOCKER_RC_STATE}"
     fi
@@ -6731,7 +6748,8 @@ dockerAcmeApply() {
         return "${PADM_DOCKER_RC_STATE}"
     }
     # acme.sh 可能创建宽权限文件，提交前恢复最小账户读取权限。
-    [[ -z "$(find "${candidate}/acme" ! -type f ! -type d -print -quit)" ]] &&
+    unsafe=$(find "${candidate}/acme" ! -type f ! -type d -print -quit) &&
+        [[ -z "${unsafe}" ]] &&
         find "${candidate}/acme" -type d -exec chmod 0750 {} + &&
         find "${candidate}/acme" -type f -exec chmod 0600 {} + || return "${PADM_DOCKER_RC_STATE}"
     if ! dockerTlsValidateCandidate "${image}" "${candidate}" "${domain}" ||
