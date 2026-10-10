@@ -2302,7 +2302,105 @@ runCorePortMenuStateRegression() (
     [[ "${installReads}:${singBoxReads}" == 1:1 ]]
 )
 
+runProtocolEntryStoredInputRegression() (
+    local failed=0
+    (
+        # 重复编号仍是同一个协议，真实参数准备不能丢弃指定端口。
+        local failed=0 core id portVar selection
+        local realityPort= xHTTPort= realityGrpcPort= xrayVLESSRealityPort= xrayVLESSRealityXHTTPort= xrayVLESSRealityGRPCPort=
+        local singBoxVLESSRealityVisionPort= singBoxVLESSRealityGRPCPort= lastInstallationConfig=
+        local -A PADM_INSTALL_SINGBOX_PORTS=()
+        echoContent() { :; }
+        menuLine() { :; }
+        menuClose() { :; }
+        statusCard() { :; }
+        errorCard() { :; }
+        protocolRegistryMenu() { :; }
+        menuReadChoice() { return 1; }
+        resolveRealityInstallCoexistPort() { return 1; }
+        for core in xray sing-box; do
+            for id in 1 26; do
+                parseInstallArgs --install-type custom --core "${core}" --protocols "${id},${id}" --port 2443
+                selectCoreInstallProtocols "${core}" "${AUTO_PROTOCOLS}" || failed=1
+                assertEquals ",${id}," "${selectCustomInstallType}" "duplicate-selection:${core}:${id}" || failed=1
+                if [[ "${core}" == xray ]]; then
+                    realityPort= realityGrpcPort=
+                    prepareXrayInstallInputs || failed=1
+                    portVar=realityPort
+                    [[ "${id}" != 26 ]] || portVar=realityGrpcPort
+                    assertEquals 2443 "${!portVar}" "duplicate-port:${core}:${id}" || failed=1
+                else
+                    PADM_INSTALL_SINGBOX_PORTS=()
+                    prepareSingBoxInstallInputs || failed=1
+                    assertEquals 2443 "${PADM_INSTALL_SINGBOX_PORTS[${id}]:-}" "duplicate-port:${core}:${id}" || failed=1
+                fi
+            done
+        done
+        parseInstallArgs --install-type custom --protocols 1,1 --reality-domain yes
+        autoInstallValidateRequiredInputs ||
+            { printf 'assert-fail:duplicate-strict-reality\n' >&2; failed=1; }
+        assertEquals ',2,1,26,' "$(protocolSelectionNormalizeCsv ' 2，1,2,,26,1 ')" duplicate-selection-order || failed=1
+        for selection in $'1\n1' $'1,\n' $'1,2\n999' '1,999,1'; do
+            regressionExpectStatus 1 selectCoreInstallProtocols xray "${selection}" || failed=1
+        done
+        [[ "${failed}" == 0 ]]
+    ) || failed=1
+    (
+        # 历史原值须在 jq 输出及模板插值前拒绝，不能改变类型或开启 0-RTT。
+        source "${PROJECT_ROOT}/shell/core/state.sh"
+        local failed=0 root="${TMP_DIR}/tuic-stored-input" field value expectedDuration expectedBool before
+        local singBoxConfigPath="${root}/" renderedFile="${root}/rendered.json" configFile="${root}/09_tuic_inbounds.json"
+        local selectCustomInstallType=,31, lastInstallationConfig=true singBoxTuicPort=
+        local PADM_INSTALL_CLIENTS_PREPARED=true currentClients='[{"uuid":"saved-user","name":"saved"}]'
+        local PADM_SINGBOX_CONFIG_DIR="${root}"
+        mkdir -p "${root}" || return 1
+        collectTLSProfile() { tlsCertDomain=tls.example.com; }
+        readSingBoxPortResult() { local -n fixturePorts=$1; fixturePorts=(2443); }
+        setSniffRouting() { :; }
+        initSingBoxClients() { printf '[]'; }
+        writeGeneratedJsonFile() { jq -ec . >"${renderedFile}"; }
+        before='{"inbounds":[{"type":"tuic","listen_port":2443,"congestion_control":"bbr","auth_timeout":"3s","heartbeat":"10s","zero_rtt_handshake":false}]}'
+        for field in auth_timeout heartbeat zero_rtt_handshake; do
+            for value in false 42 '{}' '"true"' '"10s\n"' '"10s\u0000"' '"10s\\x"' '"10s\", \"zero_rtt_handshake\": true, \"heartbeat\": \"10s"'; do
+                [[ "${field}" != zero_rtt_handshake || "${value}" != false ]] || continue
+                [[ "${field}" == zero_rtt_handshake || "${value}" != '"true"' ]] || continue
+                jq --arg field "${field}" --argjson value "${value}" '.inbounds[0][$field] = $value' \
+                    <<<"${before}" >"${configFile}" || return 1
+                rm -f "${renderedFile}" || return 1
+                if readSingBoxConfig && initSingBoxConfigApply custom 1 true >/dev/null; then
+                    printf 'assert-fail:tuic-stored-input-accepted:%s:%s\n' "${field}" "${value}" >&2
+                    failed=1
+                fi
+                [[ ! -e "${renderedFile}" ]] ||
+                    { printf 'assert-fail:tuic-stored-input-rendered:%s:%s\n' "${field}" "${value}" >&2; failed=1; }
+            done
+        done
+        for value in null '"1m30s"' '"1.5s"'; do
+            expectedDuration=${value}
+            [[ "${value}" != null ]] || expectedDuration='"3s"'
+            for expectedBool in null false true; do
+                jq --argjson duration "${value}" --argjson enabled "${expectedBool}" '
+                    .inbounds[0] |= (.auth_timeout = $duration | .heartbeat = $duration | .zero_rtt_handshake = $enabled)
+                ' <<<"${before}" >"${configFile}" || return 1
+                readSingBoxConfig && initSingBoxConfigApply custom 1 true >/dev/null ||
+                    { printf 'assert-fail:tuic-stored-input-valid:%s:%s\n' "${value}" "${expectedBool}" >&2; failed=1; }
+                jq -e --argjson duration "${expectedDuration}" --argjson enabled "${expectedBool}" '
+                    .inbounds[0] | .auth_timeout == $duration and .zero_rtt_handshake == ($enabled // false)
+                ' "${renderedFile}" >/dev/null || failed=1
+            done
+        done
+        jq 'del(.inbounds[0].auth_timeout, .inbounds[0].heartbeat, .inbounds[0].zero_rtt_handshake)' \
+            <<<"${before}" >"${configFile}" || return 1
+        readSingBoxConfig && initSingBoxConfigApply custom 1 true >/dev/null || failed=1
+        jq -e '.inbounds[0] | .auth_timeout == "3s" and .heartbeat == "10s" and .zero_rtt_handshake == false' \
+            "${renderedFile}" >/dev/null || failed=1
+        [[ "${failed}" == 0 ]]
+    ) || failed=1
+    [[ "${failed}" == 0 ]]
+)
+
 runProtocolCapabilitiesRegression() {
+    runRegressionStep protocol-entry-stored-input runProtocolEntryStoredInputRegression
     runRegressionStep protocol-entry-reader-failure runProtocolEntryReaderFailureRegression
     runRegressionStep protocol-entry-config-update runProtocolEntryConfigUpdateRegression
     runRegressionStep protocol-entry-port runProtocolEntryPortRegression

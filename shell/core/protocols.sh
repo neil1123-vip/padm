@@ -414,14 +414,17 @@ protocolCoreUnsupportedReason() {
 }
 
 protocolSelectionNormalizeCsv() {
-    local selection=$1
+    local selection=$1 protocolId normalized=,
     selection="${selection// /}"
     selection="${selection//，/,}"
-    selection=",${selection},"
-    while [[ "${selection}" == *",,"* ]]; do
-        selection=${selection//,,/,}
+    selection="${selection},"
+    while [[ "${selection}" == *","* ]]; do
+        protocolId=${selection%%,*}
+        selection=${selection#*,}
+        [[ -n "${protocolId}" ]] || continue
+        [[ "${normalized}" == *",${protocolId},"* ]] || normalized+="${protocolId},"
     done
-    printf '%s' "${selection}"
+    printf '%s' "${normalized}"
 }
 
 protocolSelectionCurrentIdsForCore() {

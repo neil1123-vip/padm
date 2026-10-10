@@ -196,6 +196,48 @@ runSubscribeLocalRollbackRegression() (
     captureSubscribeLocalSnapshot >"${beforeSnapshot}"
     captureSubscribePublicSnapshot >"${beforePublicSnapshot}"
 
+    (
+        # EOF 必须取消发布；只有成功读到空行才授权随机 salt。
+        local scenario input expectedSalt failed=0
+        local localDir="${root}/salt-input-local" publicDir="${root}/salt-input-public"
+        local PADM_SUBSCRIBE_LOCAL_DIR="${localDir}" PADM_SUBSCRIBE_DIR="${publicDir}" AUTO_INSTALL=
+        export PADM_SUBSCRIBE_LOCAL_DIR PADM_SUBSCRIBE_DIR
+        readNginxSubscribe() { return 0; }
+        initRandomSalt() { printf 'random\n' >>"${callLog}"; printf 'random-salt\n'; }
+        showAccounts() { printf 'accounts\n' >>"${callLog}"; }
+        renderAllSubscribeUserOutputs() { printf 'render\n' >>"${callLog}"; }
+        coreInstallType=1
+        for scenario in new history reenter; do
+            mkdir -p "${localDir}/default" "${publicDir}/default" || return 1
+            printf 'old-local\n' >"${localDir}/default/existing"
+            printf 'old-public\n' >"${publicDir}/default/existing"
+            input= expectedSalt=existing-salt
+            if [[ "${scenario}" == new ]]; then
+                rm -f "${localDir}/subscribeSalt"
+                expectedSalt=
+            else
+                printf 'existing-salt\n' >"${localDir}/subscribeSalt"
+                [[ "${scenario}" != reenter ]] || input=$'n\n'
+            fi
+            subscribeSalt=${expectedSalt}
+            captureSubscribeLocalSnapshot >"${root}/salt-input-local.before"
+            captureSubscribePublicSnapshot >"${root}/salt-input-public.before"
+            : >"${callLog}"
+            if generateSubscribeOutputsUnlocked "" true < <(printf '%s' "${input}") >/dev/null 2>&1 ||
+                [[ -s "${callLog}" || "${subscribeSalt}" != "${expectedSalt}" ]] ||
+                ! diff -u "${root}/salt-input-local.before" <(captureSubscribeLocalSnapshot) >/dev/null ||
+                ! diff -u "${root}/salt-input-public.before" <(captureSubscribePublicSnapshot) >/dev/null; then
+                printf 'assert-fail:subscribe-salt-eof:%s\n' "${scenario}" >&2
+                failed=1
+            fi
+        done
+        rm -f "${localDir}/subscribeSalt"
+        subscribeSalt=
+        resolveSubscribeSalt "${localDir}/subscribeSalt" "" < <(printf '\n') || return 1
+        [[ "${subscribeSalt}" == random-salt && "$(<"${localDir}/subscribeSalt")" == random-salt ]] || return 1
+        [[ "${failed}" == 0 ]]
+    ) || return 1
+
     readInstallProtocolType() { return 0; }
     readNginxSubscribe() { return 0; }
     installSubscribe() { return 0; }
@@ -915,6 +957,49 @@ EOF
                     fi
                 fi
             done
+        done
+    done
+    [[ "${failed}" == 0 ]]
+) || return 1
+(
+    # JSON 流中的多个对象不能拼成多行加密值，配置和状态都只允许一个对象。
+    local configPath="${TMP_DIR}/encryption-output-document/" coreInstallType=1 currentPath=padm
+    local PADM_VLESS_ENCRYPTION_STATE_FILE="${configPath}state.json"
+    local PADM_VLESS_REALITY_CONFIG_FILE= PADM_VLESS_XHTTP_CONFIG_FILE=
+    local protocol configFile inboundIndex variant account configJson stateJson failed=0
+    mkdir -p "${configPath}" || return 1
+    stateJson='{"enabled":true,"decryption":"active-decryption","encryption":"active-encryption"}'
+    for protocol in vlessReality vlessXHTTP; do
+        inboundIndex=1 configFile="${configPath}07_VLESS_vision_reality_inbounds.json"
+        [[ "${protocol}" != vlessXHTTP ]] || { inboundIndex=0; configFile="${configPath}12_VLESS_XHTTP_inbounds.json"; }
+        configJson=$(jq -nc --argjson index "${inboundIndex}" '
+            {inbounds:[{port:443}]} | .inbounds[$index] = {
+                settings:{decryption:"active-decryption"},
+                streamSettings:{realitySettings:{serverNames:["sni.example.com"],publicKey:"pubkey"},
+                    xhttpSettings:{host:"",path:"/path",mode:"auto"}}}') || return 1
+        for variant in single state-null state-empty state-multiple config-null config-empty config-multiple; do
+            account="encryption-document-${protocol}-${variant}"
+            printf '%s\n' "${configJson}" >"${configFile}" || return 1
+            printf '%s\n' "${stateJson}" >"${PADM_VLESS_ENCRYPTION_STATE_FILE}" || return 1
+            case "${variant}" in
+            state-null) printf 'null\n' >"${PADM_VLESS_ENCRYPTION_STATE_FILE}" ;;
+            state-empty) : >"${PADM_VLESS_ENCRYPTION_STATE_FILE}" ;;
+            state-multiple) printf '%s\n' '{"enabled":true,"decryption":"active-decryption","encryption":"other-encryption"}' >>"${PADM_VLESS_ENCRYPTION_STATE_FILE}" ;;
+            config-null) printf 'null\n' >"${configFile}" ;;
+            config-empty) : >"${configFile}" ;;
+            config-multiple) printf '%s\n' "${configJson}" >>"${configFile}" ;;
+            esac
+            if [[ "${variant}" == single ]]; then
+                defaultBase64Code "${protocol}" 443 "${account}" uuid node.example.com /path >/dev/null || return 1
+                grep -qF '?encryption=active-encryption&' "${SUBSCRIBE_CAPTURE_DIR}/default/${account}" || return 1
+                grep -qx '    encryption: "active-encryption"' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/${account}" || return 1
+            elif defaultBase64Code "${protocol}" 443 "${account}" uuid node.example.com /path >/dev/null 2>&1 ||
+                [[ -e "${SUBSCRIBE_CAPTURE_DIR}/default/${account}" ||
+                    -e "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/${account}" ||
+                    -e "${SUBSCRIBE_CAPTURE_DIR}/sing-box/${account}" ]]; then
+                printf 'assert-fail:vless-encryption-document:%s:%s\n' "${protocol}" "${variant}" >&2
+                failed=1
+            fi
         done
     done
     [[ "${failed}" == 0 ]]
