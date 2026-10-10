@@ -2871,6 +2871,66 @@ SSH 宿主日志/INPUT、控制服务日志/jail、原生双架构及重启卸�
 本项不开放 Fail2ban 新启用，不解决 configure/update/历史回滚缺现场来源见证的问题；
 5C.6b 启用事务门禁、SSH/控制面和原生宿主验收继续待办。
 
+#### 5C.6b WS 同事务来源门禁与独立 jail 启动
+
+configure、update、up/restart、rollback、共享 restore 与 TLS reload 已接入同一启用门禁。
+本次预期外部 IPv4/IPv6 输入仅在调用栈中共享，失败恢复复用输入但重新生成挑战；
+非交互入口使用 `PADM_DOCKER_FAIL2BAN_SOURCE_IPV4/IPV6`，不读取成功票据或历史日志。
+配置确认后才收集输入，取消、EOF、缺族或非法地址在停止旧 jail 之前拒绝。
+菜单来源输入动作共用前台进程组，避免后台 read 被 SIGTTIN 停止。
+
+先审计旧 owner、精确停止 CID、核对正常退出与两族规则/state 清理，再移除旧容器。
+候选长期服务先启动，不启动 jail、acme 或一次性 net-check。
+逐保护端口及其全部地址族调用生产 Witness；全部挑战完成后统一复核最初的每份
+容器/网络快照、规格摘要、生成配置和无 owner/state 前置，再以 `--no-deps` 单独启动 jail。
+最后审计 jail 容器与健康；任一失败不保存可复用证明，保留备份或恢复标记。
+核心独立 `--no-deps` 维护不重启 Nginx，不借未知 Compose 参数绕过门禁。
+
+`net-fail2ban` 使用 `restart: no`，daemon 重启不自动复用旧来源证明。
+旧 `unless-stopped` 仅在 owner 审计中兼容；普通启动/reload 要求先通过标准更新规范化。
+已验证旧备份恢复时只重生成恢复后的 Compose，备份原文不改，并重新执行来源挑战。
+首启只创建缺失的 Nginx access.log，不截断既有证据。
+Fail2ban 保护的 Nginx 拒绝 standalone HTTP-01 停启，使用 webroot；
+TLS reload 和恢复同样需要当前来源响应，未配置输入的无人值守轮换拒绝提交。
+
+集成补修保留 Reality 的原规格前置门禁和错误消息。
+损坏当前规格只在显式 restore 模式、当前 deployment/Compose 均明确 disabled、
+无 jail CID/state 且路径安全时允许从合法备份恢复；enabled、未知元数据或查询失败拒绝。
+同次恢复已完成 owner 门禁后直接停止当前编排，停止失败仍不覆盖配置或切换 bundle。
+旧模拟夹具补齐明确 disabled 状态、精确 owner 查询及恢复 down 执行边界；
+保留健康失败、信号、权限、订阅 token 和最新流量恢复断言，不放宽生产检查。
+
+本地验收（2026-10-10，Docker Desktop Linux amd64，复用工具镜像）：
+
+| 检查 | 结果 / 入口秒数 | 证据目录 |
+| --- | --- | --- |
+| 来源与启用批次合同 | 通过，4.179 | `.tmp-regression-docker-e2b291047e0143c79959810981efcaee` |
+| 真实双端口双栈启用、封禁/解封/DROP counter | 通过，63.928 | `.tmp-regression-docker-e5d2c1116ec348919e2eb32f2cd30ebd` |
+| Reality 损坏规格恢复与拒绝合同 | 通过，75.186 | `.tmp-regression-docker-3543a3179860485db1c21b6eccd4776b` |
+| 权限恢复与 owner 查询失败 | 通过，2.578 | `.tmp-regression-docker-125e0ea57cf84d6296e13e2cf3f678fd` |
+| 菜单 PTY 与前台来源输入 | 通过，41.335 | `.tmp-regression-docker-ef4d6123803945028946f51c07790a6f` |
+| 完整 Docker 合同，Jobs 6 | 32/38，274.720 | `.tmp-regression-docker-0c67ebc14e2e464a8c7e39b908dcfcfa` |
+| 路由核心/域名恢复补验，Jobs 2 | 两项通过，107.596 | `.tmp-regression-docker-68e916e6bed545be9f5922b6afc8afad` |
+| 站点恢复及真实 Nginx 补验 | 通过，56.479 | `.tmp-regression-docker-3a5b3b75f80c4b4e8b1427972c03af2f` |
+| 账号累计恢复补验 | 通过，5.049 | `.tmp-regression-docker-a5258c1f96a743ce94cef696237a775e` |
+| HTTP relay 恢复补验 | 通过，11.847 | `.tmp-regression-docker-ffd7defdf58e401eb7121c2b1900fe20` |
+| 端口别名与订阅恢复补验 | 通过，40.663 | `.tmp-regression-docker-2e4dc811f5c248d8b58b93743fa03aac` |
+
+各项使用工具镜像 `sha256:3a790074c74a19bd40e6c5fdeeebcdba5ae230548f057ca4ca1d40f49435ce55`。
+完整合同中的 phase4/phase6、所有权、来源、控制、菜单与其它 32 项通过；
+仅六个旧 mock 夹具未覆盖恢复的 ComposeExecute，均已修复并完成上述定向补验。
+该完整合同之后生产代码未变，不重复稳定全套，不把组合证据声称为最终快照单次 38/38。
+首次完整合同失败记录及安装/Geo 的定向修复证据仍保留在本轮结果目录。
+最终 19 个代码/测试文件与账号补验归档逐文件一致，Shell 语法、ShellCheck error、
+相对 HEAD 无新增 warning 及 Python AST 通过，摘要在 `.tmp-fail2ban-start-final-static.log`。
+限定复审无未决确定 P1/P2；清理本轮 49 个源码归档/清单，共 209,360,440 字节，
+保留日志、result、共享缓存及用户原有 8 个临时文件，记录在 `.tmp-fail2ban-start-cleanup.log`。
+实现 `ad48ef80 feat(docker): require fresh source proof for Fail2ban startup`，
+本地 SSH 签名 `G`，未推送或发布。
+真实来源夹具实际调用生产 Start/Witness，离线业务镜像身份适配不冒充完整可信发布 CLI。
+SSH/控制面日志与独立 jail、原生宿主 systemd/重启卸载、公网及 arm64 继续未决，
+Fail2ban 完整管理、5C 与总目标继续 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

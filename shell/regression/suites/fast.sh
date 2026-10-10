@@ -106,30 +106,37 @@ runRegressionDockerContracts() {
 }
 
 listRegressionDockerContractsFastChildSelectors() {
-    # 长测试先入队，避免最后只剩单个主控事务占用一个槽位。
+    listRegressionDockerContractsFastHeavyChildSelectors
+    listRegressionDockerContractsFastRestChildSelectors
+}
+
+listRegressionDockerContractsFastHeavyChildSelectors() {
+    printf '%s\n' docker-sites docker-entry-port-alias
+}
+
+listRegressionDockerContractsFastRestChildSelectors() {
+    # 按云端实测长任务优先，站点与入口别名由另一个隔离分片执行。
     printf '%s\n' \
+        docker-phase1 \
         docker-menu \
         docker-control-state \
-        docker-sites \
-        docker-phase1 \
-        docker-phase5 \
-        docker-control-sync \
         docker-control-client \
+        docker-tproxy-ownership \
+        docker-http-relay \
+        docker-control-cli \
+        docker-phase5 \
+        docker-fail2ban-ownership \
+        docker-control-sync \
         docker-release \
         docker-geo-data \
-        docker-traffic \
-        docker-http-relay \
-        docker-entry-port-alias \
         docker-accounts \
-        docker-control-cli \
-        docker-wireguard-runtime \
-        docker-tproxy-ownership \
-        docker-fail2ban-ownership \
+        docker-traffic \
         docker-fail2ban-source \
-        docker-control-api \
         docker-permissions \
+        docker-wireguard-runtime \
         docker-accounts-cli \
         docker-subscriptions \
+        docker-control-api \
         docker-business \
         docker-phase2
 }
@@ -223,7 +230,8 @@ runDockerFail2banOwnershipRegression() {
 }
 
 runDockerFail2banSourceRegression() {
-    bash "${PROJECT_ROOT}/docker/tests/fail2ban-source.sh"
+    bash "${PROJECT_ROOT}/docker/tests/fail2ban-source.sh" &&
+        bash "${PROJECT_ROOT}/docker/tests/fail2ban-start.sh"
 }
 
 runDockerRoutingWarpRegression() {
@@ -431,6 +439,10 @@ registerRegressionParallelSelectorList docker-contracts runRegressionDockerContr
     "${TMP_DIR}/docker-contracts-parallel-${BASHPID:-$$}" listRegressionDockerContractsChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts-fast runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-contracts-fast-parallel-${BASHPID:-$$}" listRegressionDockerContractsFastChildSelectors 4
+registerRegressionParallelSelectorList docker-contracts-fast-heavy runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-contracts-fast-heavy-parallel-${BASHPID:-$$}" listRegressionDockerContractsFastHeavyChildSelectors 4
+registerRegressionParallelSelectorList docker-contracts-fast-rest runFrameworkParallelRegressionSelectorListWithJobs \
+    "${TMP_DIR}/docker-contracts-fast-rest-parallel-${BASHPID:-$$}" listRegressionDockerContractsFastRestChildSelectors 4
 registerRegressionParallelSelectorList docker-contracts-routing runFrameworkParallelRegressionSelectorListWithJobs \
     "${TMP_DIR}/docker-contracts-routing-parallel-${BASHPID:-$$}" listRegressionDockerContractsRoutingChildSelectors 2
 registerRegressionParallelSelectorList docker-contracts-protocol runRegressionDockerContracts \

@@ -367,6 +367,10 @@ jq -e --arg id "${ALICE}" '.accounts[$id] | .upload == 220 and .download == 440'
     fail '轮换凭据改变稳定 ID 累计'
 cp "${STATE}" "${TEST_ROOT}/latest-flow"
 dockerComposeRun() { printf '%s\n' "$*" >>"${TEST_ROOT}/compose.log"; }
+dockerComposeExecute() {
+    [[ "$*" == down ]] || fail "意外恢复启停参数: $*"
+    dockerComposeRun "$@"
+}
 dockerRenewalScheduleInstall() { :; }
 dockerRestoreConfiguration
 cmp -s "${SPEC}" "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" || fail '恢复没有保留原 accounts 规格'

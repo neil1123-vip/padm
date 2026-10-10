@@ -576,6 +576,11 @@ generate_manifest() {
         --output "${MANIFEST}"
 }
 generate_manifest || fail 'manifest generation failed'
+mv "${RESULTS_DIR}/net.json" "${TEST_ROOT}/net.original.json"
+if generate_manifest >"${TEST_ROOT}/manifest-error.log" 2>&1; then
+    fail 'manifest accepted missing image evidence'
+fi
+mv "${TEST_ROOT}/net.original.json" "${RESULTS_DIR}/net.json"
 bash "${RELEASE_SCRIPT}" validate-manifest "${MANIFEST}" | grep -qx 'release-manifest-ok' ||
     fail 'generated manifest does not validate'
 jq -e --arg version "${CURRENT_VERSION}" '
@@ -841,9 +846,16 @@ for siteContract in \
 done
 grep -Fq 'listRegressionDockerContractsFastChildSelectors 4' "${FAST_SUITE}" ||
     fail 'docker-contracts-fast does not use four workers'
+for shard in Heavy Rest; do
+    grep -Fq "listRegressionDockerContractsFast${shard}ChildSelectors 4" "${FAST_SUITE}" ||
+        fail "fast ${shard} 分片没有保留有界并发"
+done
+grep -Fq "if: startsWith(matrix.selector, 'docker-contracts-fast-') || startsWith(matrix.selector, 'docker-routing-')" "${CONTRACT_WORKFLOW}" &&
+    grep -Fq '"${SELECTOR}" == docker-contracts-fast-*' "${CONTRACT_WORKFLOW}" ||
+    fail 'fast 分片没有同时使用隔离工具镜像和源码快照'
 grep -Fq "      PADM_DOCKER_CONTRACTS_SHARED_CHECKS: '1'" "${CONTRACT_WORKFLOW}" ||
     fail 'CI 合同矩阵没有共享已独立覆盖的传统 TLS 祖先合同'
-grep -Fq 'max-parallel: 10' "${CONTRACT_WORKFLOW}" ||
+grep -Fq 'max-parallel: 11' "${CONTRACT_WORKFLOW}" ||
     fail 'CI 合同矩阵没有同时启动全部分片'
 if grep -Fq 'subscription_groups_regression.sh docker-contracts' "${BUILD_WORKFLOW}"; then
     fail 'image workflow repeats the contract suite'
@@ -873,9 +885,37 @@ grep -Fq 'max-parallel: 10' "${BUILD_WORKFLOW}" ||
     fail 'smoke matrix does not allow all ten native platform builds'
 grep -Fq 'max-parallel: 5' "${BUILD_WORKFLOW}" ||
     fail 'publish matrix does not allow all five images'
+publishDefinition=$(awk '
+    /^  publish:$/ {inside = 1; next}
+    inside && /^  [^ ]/ {exit}
+    inside {print}
+' "${BUILD_WORKFLOW}")
+grep -Fq 'driver: docker' <<<"${publishDefinition}" ||
+    fail '镜像索引发布仍启动不需要的 BuildKit 容器'
 grep -Fq 'packages: write' "${RELEASE_WORKFLOW}" || fail 'Release caller lacks package write permission'
 grep -Fq 'id-token: write' "${RELEASE_WORKFLOW}" || fail 'Release caller lacks OIDC permission'
-grep -Fq 'release-manifest.json' "${BUILD_WORKFLOW}" || fail 'release manifest is not an artifact'
+releaseDefinition=$(awk '
+    /^  release:$/ {inside = 1; next}
+    inside && /^  [^ ]/ {exit}
+    inside {print}
+' "${RELEASE_WORKFLOW}")
+for requirement in \
+    '    needs: [prepare, images]' \
+    "    if: \${{ needs.prepare.outputs.skip != 'true' && needs.images.result == 'success' }}" \
+    'ref: ${{ needs.prepare.outputs.release_sha }}' \
+    'pattern: padm-image-*-${{ github.run_id }}' \
+    'PADM_RELEASE_VERSION: ${{ needs.prepare.outputs.release_version }}' \
+    'PADM_SOURCE_REF: ${{ needs.prepare.outputs.release_sha }}' \
+    'assets=release-assets' \
+    'bash docker/release.sh manifest \' \
+    '--results-dir "${RUNNER_TEMP}/image-results"' \
+    '--output "${assets}/release-manifest.json"'; do
+    grep -Fq -- "${requirement}" <<<"${releaseDefinition}" ||
+        fail "最终发布的资产组装合同缺失: ${requirement}"
+done
+if grep -Eq '^  assemble:|jobs[.]assemble|needs[.]images[.]outputs' "${BUILD_WORKFLOW}" "${RELEASE_WORKFLOW}"; then
+    fail '发布资产仍经过重复的组装 job 或附件传输'
+fi
 grep -Fq -- '--new-bundle-format=true' "${RELEASE_WORKFLOW}" || fail 'Release does not request the new Cosign bundle format'
 grep -Fq 'application/vnd.dev.sigstore.bundle.v0.3+json' "${RELEASE_WORKFLOW}" ||
     fail 'Release does not validate the Sigstore v0.3 bundle media type'
@@ -903,8 +943,8 @@ grep -Fq 'needs.smoke.result == '\''skipped'\''' "${BUILD_WORKFLOW}" ||
     fail 'publish job cannot continue when all images are reused'
 grep -Fq 'needs.contract.result == '\''success'\''' "${BUILD_WORKFLOW}" ||
     fail 'publish job can bypass a failed contract job'
-grep -Fq "if: \${{ always() && inputs.push && !inputs.contracts_only && needs.publish.result == 'success' }}" "${BUILD_WORKFLOW}" ||
-    fail 'release assets can be skipped after reused image publication'
+grep -Fq "if: \${{ needs.prepare.outputs.skip != 'true' && needs.images.result == 'success' }}" "${RELEASE_WORKFLOW}" ||
+    fail '最终资产组装或发布绕过了镜像成功门槛'
 # 测试和发布流程修复必须进入检查，是否发布由相对已发布版本的运行差异决定。
 grep -Fq "      - '.github/workflows/**'" "${RELEASE_WORKFLOW}" ||
     fail 'main workflow does not receive workflow changes'

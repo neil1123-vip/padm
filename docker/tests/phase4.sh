@@ -8,6 +8,7 @@ DOCKER_LOG="${TEST_ROOT}/docker.log"
 CONTROL_LOG="${TEST_ROOT}/control.log"
 DOCKER_ROOT="${TEST_ROOT}/state"
 FAIL2BAN_INSPECT="${TEST_ROOT}/fail2ban-inspect.json"
+SOURCE_BOUNDARY="${TEST_ROOT}/source-boundary.sh"
 FAIL2BAN_CONTAINER=abcdef123456
 NATIVE_ROOT="${TEST_ROOT}/native"
 CLI_DIR="${TEST_ROOT}/bin-installed"
@@ -63,7 +64,12 @@ compose)
         case "${FAKE_DOCKER_MODE:-ok}" in
         fail2ban-cleanup-proof-fail) exit 1 ;;
         fail2ban-cleanup-proof-term-fail) kill -TERM "${PPID}"; exit 1 ;;
-        fail2ban-cleanup-proof-term) kill -TERM "${PPID}" ;;
+        fail2ban-cleanup-proof-term)
+            if [[ ! -e "${FAKE_DOCKER_SIGNAL_ONCE:?}" ]]; then
+                : >"${FAKE_DOCKER_SIGNAL_ONCE}"
+                kill -TERM "${PPID}"
+            fi
+            ;;
         esac
         [[ ! -e "${FAKE_DOCKER_ROOT}/data/net/fail2ban/fail2ban.state" ]] || exit 1
     fi
@@ -71,6 +77,42 @@ compose)
         ! -e "${FAKE_DOCKER_FAIL_ONCE:?}" ]]; then
         : >"${FAKE_DOCKER_FAIL_ONCE}"
         exit 1
+    fi
+    if [[ " ${*} " == *' up -d '* && " ${*} " == *' --no-deps '* &&
+        " ${*} " == *' net-fail2ban --remove-orphans ' ]]; then
+        jq -n --arg root "${FAKE_DOCKER_ROOT:?}" --arg id "${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}" \
+            --slurpfile spec "${FAKE_DOCKER_ROOT}/config/spec.json" \
+            --slurpfile compose "${FAKE_DOCKER_ROOT}/compose.json" '
+          $compose[0].services["net-fail2ban"] as $service |
+          [{
+            Id: ($id + ("a" * (64 - ($id | length)))),
+            State: {Status: "running", Running: true, Restarting: false,
+              Paused: false, Dead: false, OOMKilled: false, ExitCode: 0, Error: ""},
+            Config: {
+              Image: $spec[0].images.net, Cmd: $service.command,
+              Entrypoint: ["/usr/local/bin/padm-entrypoint"], User: "0:0",
+              Labels: ($service.labels + {
+                "com.docker.compose.project": "padm-docker",
+                "com.docker.compose.project.working_dir": $root,
+                "com.docker.compose.project.config_files": ($root + "/compose.json"),
+                "com.docker.compose.service": "net-fail2ban",
+                "com.docker.compose.oneoff": "False"
+              })
+            },
+            HostConfig: {
+              NetworkMode: $service.network_mode,
+              ReadonlyRootfs: $service.read_only, Privileged: false,
+              RestartPolicy: {Name: $service.restart},
+              CapAdd: $service.cap_add, CapDrop: $service.cap_drop,
+              Tmpfs: ($service.tmpfs | map({key: split(":")[0], value: "rw"}) | from_entries)
+            },
+            Mounts: ($service.volumes | map({
+              Type: .type, Source: (.source | sub("^\\$\\{PADM_NET_ROOT\\}"; $root)),
+              Destination: .target, RW: (.read_only | not)
+            }))
+          }]
+        ' >"${FAKE_DOCKER_FAIL2BAN_INSPECT:?}" || exit 1
+        rm -f -- "${FAKE_DOCKER_FAIL2BAN_STOPPED:?}"
     fi
     ;;
 ps)
@@ -82,8 +124,7 @@ ps)
     fail2ban-duplicate) printf '%s\nfedcba654321\n' "${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}" ;;
     fail2ban-invalid-id) printf 'padm-net-fail2ban-1\n' ;;
     *)
-        if jq -e 'any(.host_integrations[]; .type == "fail2ban")' \
-            "${FAKE_DOCKER_ROOT:?}/config/spec.json" >/dev/null 2>&1; then
+        if [[ -f "${FAKE_DOCKER_FAIL2BAN_INSPECT:?}" ]]; then
             printf '%s\n' "${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}"
         fi
         ;;
@@ -109,6 +150,17 @@ stop)
     fail2ban-stop-137|fail2ban-cleanup-proof-fail|fail2ban-cleanup-proof-term-fail) ;;
     *) rm -f -- "${FAKE_DOCKER_ROOT:?}/data/net/fail2ban/fail2ban.state" ;;
     esac
+    ;;
+rm)
+    [[ "$*" == "rm ${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}" &&
+        ! -e "${FAKE_DOCKER_ROOT:?}/data/net/fail2ban/fail2ban.state" &&
+        ! -L "${FAKE_DOCKER_ROOT}/data/net/fail2ban/fail2ban.state" ]] || exit 1
+    "${BASH_SOURCE[0]}" container inspect "${FAKE_DOCKER_FAIL2BAN_CONTAINER}" |
+        jq -e 'length == 1 and (.[0].State |
+          .Status == "exited" and .Running == false and .Restarting == false and
+          .Paused == false and .Dead == false and .OOMKilled == false and
+          .ExitCode == 0 and .Error == "")' >/dev/null || exit 1
+    rm -f -- "${FAKE_DOCKER_FAIL2BAN_INSPECT:?}" "${FAKE_DOCKER_FAIL2BAN_STOPPED:?}"
     ;;
 exec)
     if [[ "$#" -eq 5 && "${2:-}" == "-i" && "${3:-}" == "${FAKE_DOCKER_FAIL2BAN_CONTAINER:?}" &&
@@ -172,9 +224,54 @@ printf '#!/usr/bin/env bash\nexit 0\n' >"${MOCK_BIN}/systemctl"
 chmod 0755 "${MOCK_BIN}/systemctl"
 cp "${MOCK_BIN}/systemctl" "${MOCK_BIN}/nsenter"
 
+# 只替换 Nginx 现场边界，来源计划、输入校验、停止证明和两阶段启动仍走生产函数。
+cat >"${SOURCE_BOUNDARY}" <<'EOF'
+dockerFail2banSourceContainer() {
+    local listener=$1 family=$2
+    jq -ec --arg listener "${listener}" --arg family "${family}" '
+      . as $spec | [.core.protocols[] | select(.listener_id == $listener and .id == 21 and
+        (.address_families | index($family)) != null)] |
+      if length == 1 then .[0] as $entry |
+        {id:("b"*64),started_at:"2026-10-10T01:00:00.000000000Z",restart_count:0,
+         public_port:$entry.public_port,internal_port:($entry.websocket.tls_port // 8443),
+         domain:($spec.tls.domain | ascii_downcase),addresses:["192.0.2.1"],
+         networks:[{name:"padm-docker",id:("c"*64)}]}
+      else error("invalid source tuple") end
+    ' "${FAKE_DOCKER_ROOT:?}/config/spec.json"
+}
+dockerFail2banSourceWitness() {
+    local listener=$1 address=$2 family=ipv4 snapshot number=0
+    [[ "${address}" != *:* ]] || family=ipv6
+    snapshot=$(dockerFail2banSourceContainer "${listener}" "${family}") || return 1
+    [[ ! -f "${FAKE_DOCKER_WITNESS_COUNT:?}" ]] || number=$(<"${FAKE_DOCKER_WITNESS_COUNT}")
+    number=$((number + 1))
+    printf '%s\n' "${number}" >"${FAKE_DOCKER_WITNESS_COUNT}"
+    printf 'source-witness %s %s %s %048x\n' "${listener}" "${family}" "${address}" "${number}" \
+        >>"${FAKE_DOCKER_LOG:?}"
+    printf 'source-challenge=%s\n' "${snapshot}" >&2
+    if [[ "${listener}" == entry-alt-ws ]]; then
+        case "${FAKE_DOCKER_MODE:-ok}" in
+        fail2ban-source-last-fail) return 1 ;;
+        fail2ban-source-last-once)
+            if [[ ! -e "${FAKE_DOCKER_SOURCE_FAIL_ONCE:?}" ]]; then
+                : >"${FAKE_DOCKER_SOURCE_FAIL_ONCE}"
+                return 1
+            fi
+            ;;
+        esac
+    fi
+    printf 'source-verified=%s\n' "${snapshot}" >&2
+}
+EOF
+
 runControl() {
     local expected=$1 name=$2 actual=0
-    local -a command=(bash -u "${PROJECT_ROOT}/install-docker.sh")
+    local -a command=(bash -u -c '
+      source "$1"
+      source "${FAKE_DOCKER_SOURCE_BOUNDARY:?}"
+      shift
+      dockerMain "$@"
+    ' test "${PROJECT_ROOT}/install-docker.sh")
     shift 2
     if [[ "${1:-}" == configure ]]; then
         set -- "$@" --manifest "${CONFIGURE_MANIFEST}" --bundle "${CONFIGURE_BUNDLE}" \
@@ -186,12 +283,43 @@ runControl() {
         shift
         command=(bash -u -c '
           source "$1"
+          source "${FAKE_DOCKER_SOURCE_BOUNDARY:?}"
           dockerFail2banDisablePrepare "$2"
         ' test "${PROJECT_ROOT}/install-docker.sh")
+    elif [[ "${1:-}" == shared-compose || "${1:-}" == restore-backup ]]; then
+        local directOperation=$1
+        shift
+        command=(bash -u -c '
+          source "$1"
+          source "${FAKE_DOCKER_SOURCE_BOUNDARY:?}"
+          directOperation=$2
+          shift 2
+          dockerHostPreflight || exit 10
+          dockerLockInstalledDeployment || exit $?
+          DOCKER_FAIL2BAN_SOURCE_IPV4=
+          DOCKER_FAIL2BAN_SOURCE_IPV6=
+          if [[ "${directOperation}" == restore-backup ]]; then
+              DOCKER_CONFIG_BACKUP=$1
+              DOCKER_CONFIG_SWITCHED=1
+              dockerFail2banSourceInputsPrepare "${DOCKER_CONFIG_BACKUP}/config/spec.json" \
+                  "${FAKE_DOCKER_ROOT}/config/spec.json" || exit 15
+              dockerRestoreConfiguration
+          else
+              if [[ -n "${PADM_DOCKER_FAIL2BAN_SOURCE_IPV4:-}" ||
+                  -n "${PADM_DOCKER_FAIL2BAN_SOURCE_IPV6:-}" ]]; then
+                  dockerFail2banSourceInputsPrepare "${FAKE_DOCKER_ROOT}/config/spec.json" || exit 15
+              fi
+              dockerComposeRun "$@"
+          fi
+          status=$?
+          dockerReleaseDeploymentLock
+          exit "${status}"
+        ' test "${PROJECT_ROOT}/install-docker.sh" "${directOperation}")
     elif [[ "${1:-}" == apply-cancel ]]; then
         shift
         command=(bash -u -c '
           source "$1"
+          source "${FAKE_DOCKER_SOURCE_BOUNDARY:?}"
           dockerHostPreflight || exit 10
           dockerLockInstalledDeployment || exit $?
           dockerConfigureReleasePrepare "$2" "$3" "$4" || exit $?
@@ -207,6 +335,7 @@ runControl() {
         shift
         command=(bash -u -c '
           source "$1"
+          source "${FAKE_DOCKER_SOURCE_BOUNDARY:?}"
           dockerHostPreflight || exit 10
           dockerLockInstalledDeployment || exit $?
           dockerConfigureReleasePrepare "$2" "$3" "$4" || exit $?
@@ -225,6 +354,7 @@ runControl() {
         PADM_DOCKER_BIN_DIR="${CLI_DIR}" PADM_DOCKER_LOCK_TIMEOUT=2 \
         PADM_DOCKER_SYSTEMD_DIR="${TEST_ROOT}/systemd" \
         PADM_DOCKER_HEALTH_TIMEOUT=1 PADM_DOCKER_SKIP_CHOWN=1 \
+        PADM_DOCKER_FAIL2BAN_SOURCE_IPV4="${PADM_DOCKER_FAIL2BAN_SOURCE_IPV4-198.51.100.9}" \
         FAKE_DOCKER_LOG="${DOCKER_LOG}" FAKE_DOCKER_MODE="${FAKE_DOCKER_MODE:-ok}" \
         FAKE_DOCKER_FAIL2BAN_CONTAINER="${FAIL2BAN_CONTAINER}" \
         FAKE_DOCKER_FAIL2BAN_INSPECT="${FAIL2BAN_INSPECT}" \
@@ -232,6 +362,10 @@ runControl() {
         FAKE_DOCKER_FAIL2BAN_STOPPED="${TEST_ROOT}/fail2ban-stopped" \
         FAKE_DOCKER_INSPECT_FILTER="${FAKE_DOCKER_INSPECT_FILTER:-.}" \
         FAKE_DOCKER_FAIL_ONCE="${TEST_ROOT}/fail-once" \
+        FAKE_DOCKER_SIGNAL_ONCE="${TEST_ROOT}/signal-once" \
+        FAKE_DOCKER_SOURCE_BOUNDARY="${SOURCE_BOUNDARY}" \
+        FAKE_DOCKER_WITNESS_COUNT="${TEST_ROOT}/witness-count" \
+        FAKE_DOCKER_SOURCE_FAIL_ONCE="${TEST_ROOT}/source-fail-once" \
         "${command[@]}" "$@" >"${CONTROL_LOG}" 2>&1 || actual=$?
     if [[ "${actual}" -ne "${expected}" ]]; then
         sed 's/^/  /' "${CONTROL_LOG}" >&2
@@ -391,7 +525,26 @@ FAKE_DOCKER_MODE=tls-validity-fail runControl 15 reject-expired-candidate config
 [[ "$(sha256sum "${DOCKER_ROOT}/deployment.json" | cut -d ' ' -f 1)" == "${BEFORE_TLS_RECONFIGURE}" ]] ||
     fail 'invalid certificate lifetime changed deployment'
 : >"${DOCKER_LOG}"
+PADM_DOCKER_FAIL2BAN_SOURCE_IPV4='' runControl 15 fail2ban-source-missing configure --spec "${FAIL2BAN_SPEC}"
+! grep -Eq '^compose .* up -d |^(stop|rm) ' "${DOCKER_LOG}" ||
+    fail 'Missing Fail2ban source input stopped or started the deployment'
+[[ "$(sha256sum "${DOCKER_ROOT}/deployment.json" | cut -d ' ' -f 1)" == "${BEFORE_TLS_RECONFIGURE}" ]] ||
+    fail 'Missing Fail2ban source input changed deployment'
+: >"${DOCKER_LOG}"
 runControl 0 fail2ban configure --spec "${FAIL2BAN_SPEC}"
+[[ "$(grep -c '^source-witness ' "${DOCKER_LOG}")" -eq 2 ]] ||
+    fail 'Fail2ban configure did not verify both protected IPv4 entry ports'
+python3 - "${DOCKER_LOG}" <<'PY'
+import sys
+commands = open(sys.argv[1], encoding="utf-8").read().splitlines()
+starts = [(i, line) for i, line in enumerate(commands) if " up -d " in line]
+witnesses = [i for i, line in enumerate(commands) if line.startswith("source-witness ")]
+assert len(starts) == 2 and starts[0][0] < witnesses[0] < witnesses[1] < starts[1][0]
+assert " xray " in starts[0][1] and " nginx " in starts[0][1]
+assert " net-fail2ban --remove-orphans" not in starts[0][1]
+assert " --no-deps " in starts[1][1] and " net-fail2ban --remove-orphans" in starts[1][1]
+assert " acme --remove-orphans" not in starts[0][1]
+PY
 grep -q 'access_log /var/log/nginx/access.log combined;' "${DOCKER_ROOT}/config/nginx/default.conf" ||
     fail 'Nginx real-source access log was not enabled'
 grep -qF "before = iptables.conf" "${DOCKER_ROOT}/config/net/fail2ban/padm-docker-user.conf" ||
@@ -420,39 +573,8 @@ runControl 0 fail2ban-installed-validate validate
 grep -q 'net-fail2ban preflight fail2ban 24444,24445 owned' "${DOCKER_LOG}" ||
     fail 'Installed Fail2ban validation did not verify its existing owner'
 
-# 维护命令只使用当前容器和固定 jail，不能借机启动服务或改写受管文件。
-jq -n --arg root "${DOCKER_ROOT}" --arg id "${FAIL2BAN_CONTAINER}" \
-    --slurpfile spec "${DOCKER_ROOT}/config/spec.json" \
-    --slurpfile compose "${DOCKER_ROOT}/compose.json" '
-  $compose[0].services["net-fail2ban"] as $service |
-  [{
-    Id: ($id + ("a" * (64 - ($id | length)))),
-    State: {Status: "running", Running: true, Restarting: false,
-      Paused: false, Dead: false, OOMKilled: false, ExitCode: 0, Error: ""},
-    Config: {
-      Image: $spec[0].images.net, Cmd: $service.command,
-      Entrypoint: ["/usr/local/bin/padm-entrypoint"], User: "0:0",
-      Labels: ($service.labels + {
-        "com.docker.compose.project": "padm-docker",
-        "com.docker.compose.project.working_dir": $root,
-        "com.docker.compose.project.config_files": ($root + "/compose.json"),
-        "com.docker.compose.service": "net-fail2ban",
-        "com.docker.compose.oneoff": "False"
-      })
-    },
-    HostConfig: {
-      NetworkMode: $service.network_mode,
-      ReadonlyRootfs: $service.read_only, Privileged: false,
-      CapAdd: $service.cap_add, CapDrop: $service.cap_drop,
-      Tmpfs: ($service.tmpfs | map({key: split(":")[0], value: "rw"}) | from_entries)
-    },
-    Mounts: ($service.volumes | map({
-      Type: .type,
-      Source: (.source | sub("^\\$\\{PADM_NET_ROOT\\}"; $root)),
-      Destination: .target, RW: (.read_only | not)
-    }))
-  }]
-' >"${FAIL2BAN_INSPECT}"
+# 维护命令只使用刚由最终阶段创建的当前容器和固定 jail。
+cp -p -- "${FAIL2BAN_INSPECT}" "${TEST_ROOT}/fail2ban-inspect.fixture"
 printf 'existing-nginx-access-log\n' >>"${DOCKER_ROOT}/logs/nginx/access.log"
 FAIL2BAN_MAINTENANCE_BEFORE=$(fail2banManagedSnapshot)
 : >"${DOCKER_LOG}"
@@ -532,6 +654,7 @@ command .[0].Config.Cmd = ["fail2ban", "1"]
 entrypoint .[0].Config.Entrypoint = ["/bin/sh"]
 user .[0].Config.User = "65534:65534"
 network .[0].HostConfig.NetworkMode = "bridge"
+restart-policy .[0].HostConfig.RestartPolicy.Name = "unless-stopped"
 readonly-root .[0].HostConfig.ReadonlyRootfs = false
 privileged .[0].HostConfig.Privileged = true
 cap-add .[0].HostConfig.CapAdd += ["SYS_ADMIN"]
@@ -586,6 +709,7 @@ writeFail2banOwnerState() {
     printf 'schema_version=2\ntoken=%s\nchain=padm-f2b-aaaaaaaaaaaa\nports=24444,24445\nipv6=no\n' \
         "$(printf 'a%.0s' {1..32})" >"${DOCKER_ROOT}/data/net/fail2ban/fail2ban.state"
     chmod 0600 "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.state"
+    cp -p -- "${TEST_ROOT}/fail2ban-inspect.fixture" "${FAIL2BAN_INSPECT}"
     rm -f -- "${TEST_ROOT}/fail2ban-stopped"
 }
 assertFail2banDisablePreserved() {
@@ -624,17 +748,20 @@ cp -p "${DOCKER_ROOT}/compose.json" "${TEST_ROOT}/fail2ban-enabled.compose"
 jq 'del(.services["net-fail2ban"])' "${TEST_ROOT}/fail2ban-enabled.compose" >"${DOCKER_ROOT}/compose.json"
 cp -p "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.state" "${TEST_ROOT}/fail2ban-owner.fixture"
 FAIL2BAN_RESIDUAL_BEFORE=$(fail2banManagedSnapshot)
-rejectFail2ban 1 fail2ban-disabled-residual-state disable-prepare "${FAIL2BAN_DISABLED_SPEC}"
+FAKE_DOCKER_MODE=fail2ban-absent rejectFail2ban 1 fail2ban-disabled-residual-state \
+    disable-prepare "${FAIL2BAN_DISABLED_SPEC}"
 [[ "$(fail2banManagedSnapshot)" == "${FAIL2BAN_RESIDUAL_BEFORE}" ]] ||
     fail 'Disabled Fail2ban residual-state refusal changed owner evidence'
 rm -f -- "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.state"
 ln -s missing-owner-state "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.state"
 FAIL2BAN_RESIDUAL_BEFORE=$(fail2banManagedSnapshot)
-rejectFail2ban 1 fail2ban-disabled-residual-state-symlink disable-prepare "${FAIL2BAN_DISABLED_SPEC}"
+FAKE_DOCKER_MODE=fail2ban-absent rejectFail2ban 1 fail2ban-disabled-residual-state-symlink \
+    disable-prepare "${FAIL2BAN_DISABLED_SPEC}"
 [[ "$(fail2banManagedSnapshot)" == "${FAIL2BAN_RESIDUAL_BEFORE}" ]] ||
     fail 'Disabled Fail2ban broken-symlink refusal changed owner evidence'
 rm -f -- "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.state"
-runControl 0 fail2ban-disabled-clean-noop disable-prepare "${FAIL2BAN_DISABLED_SPEC}"
+FAKE_DOCKER_MODE=fail2ban-absent runControl 0 fail2ban-disabled-clean-noop \
+    disable-prepare "${FAIL2BAN_DISABLED_SPEC}"
 FAKE_DOCKER_MODE=fail2ban-orphan rejectFail2ban 1 fail2ban-disabled-runtime-orphan \
     disable-prepare "${FAIL2BAN_DISABLED_SPEC}"
 FAKE_DOCKER_MODE=fail2ban-ps-fail rejectFail2ban 1 fail2ban-disabled-runtime-query-failed \
@@ -699,6 +826,10 @@ cmp -s "${FAIL2BAN_SPEC}" "${DOCKER_ROOT}/config/spec.json" ||
     fail 'TERM after successful cleanup proof did not restore the enabled spec'
 grep -Eq '^compose .* up -d .*--remove-orphans' "${DOCKER_LOG}" ||
     fail 'TERM after successful cleanup proof did not restart the old deployment'
+[[ "$(grep -c '^source-witness ' "${DOCKER_LOG}")" -eq 2 ]] ||
+    fail 'TERM recovery started the old jail without fresh source witnesses'
+grep -Eq '^compose .* up -d --no-deps .* net-fail2ban --remove-orphans' "${DOCKER_LOG}" ||
+    fail 'TERM recovery skipped the final isolated jail start'
 [[ "$(sha256sum "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.sqlite3")" == "${FAIL2BAN_SQLITE_HASH}" ]] ||
     fail 'TERM recovery changed the persistent SQLite'
 writeFail2banOwnerState
@@ -708,8 +839,10 @@ FAKE_DOCKER_MODE=fail-next-up runControl 14 fail2ban-disable-start-failed \
     edit --fail2ban-off --confirm PADM-DOCKER-EDIT
 cmp -s "${FAIL2BAN_SPEC}" "${DOCKER_ROOT}/config/spec.json" ||
     fail 'Fail2ban disable startup failure did not restore the enabled spec'
-[[ "$(grep -Ec '^compose .* up -d ' "${DOCKER_LOG}")" == 2 ]] ||
+[[ "$(grep -Ec '^compose .* up -d ' "${DOCKER_LOG}")" == 3 ]] ||
     fail 'Fail2ban disable startup failure did not retry the old deployment'
+[[ "$(grep -c '^source-witness ' "${DOCKER_LOG}")" -eq 2 ]] ||
+    fail 'Fail2ban disable rollback reused an old source witness'
 [[ "$(sha256sum "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.sqlite3")" == "${FAIL2BAN_SQLITE_HASH}" ]] ||
     fail 'Fail2ban disable rollback changed the persistent SQLite'
 rm -f -- "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.state" "${TEST_ROOT}/fail2ban-stopped"
@@ -720,6 +853,8 @@ FAKE_DOCKER_INSPECT_FILTER='.[0].State = {Status:"exited",Running:false,Restarti
     fail 'Fail2ban disable executed or stopped an already cleanly exited owner'
 grep -q 'net-fail2ban preflight fail2ban 24444,24445 unowned' "${DOCKER_LOG}" ||
     fail 'Fail2ban disable skipped cleanup proof for an exited owner'
+grep -qxF "rm ${FAIL2BAN_CONTAINER}" "${DOCKER_LOG}" ||
+    fail 'Fail2ban disable did not remove the audited cleanly exited owner'
 writeFail2banOwnerState
 : >"${DOCKER_LOG}"
 runControl 0 fail2ban-disable-success edit --fail2ban-off --confirm PADM-DOCKER-EDIT
@@ -741,8 +876,120 @@ proof = next(i for i, command in enumerate(commands)
 up = next(i for i, command in enumerate(commands) if " up -d " in command)
 assert audit < health < stop < proof < up, "disable skipped its old-owner stop/cleanup gate"
 PY
+
+# 三份记录均停用时仍须拒绝运行时孤儿和残留 state，不能把旧 jail 当作无关服务删除。
+for residualMode in orphan state; do
+    if [[ "${residualMode}" == state ]]; then
+        cp -p -- "${TEST_ROOT}/fail2ban-owner.fixture" \
+            "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.state"
+        residualDockerMode=fail2ban-absent
+    else
+        residualDockerMode=fail2ban-orphan
+    fi
+    FAIL2BAN_RESIDUAL_BEFORE=$(fail2banManagedSnapshot)
+    : >"${DOCKER_LOG}"
+    FAKE_DOCKER_MODE="${residualDockerMode}" runControl 15 "disabled-${residualMode}-up" up
+    FAKE_DOCKER_MODE="${residualDockerMode}" runControl 15 "disabled-${residualMode}-down" down
+    ! grep -Eq '^(stop|rm) |^compose .* (up|down|restart|stop)( |$)' "${DOCKER_LOG}" ||
+        fail "${residualMode}: disabled shared wrapper touched Compose or owner"
+    [[ "$(fail2banManagedSnapshot)" == "${FAIL2BAN_RESIDUAL_BEFORE}" ]] ||
+        fail "${residualMode}: disabled shared wrapper changed residual evidence"
+done
+rm -f -- "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.state"
+
 runControl 0 fail2ban-restore-for-other-contracts configure --spec "${FAIL2BAN_SPEC}"
 rm -f -- "${TEST_ROOT}/fail2ban-stopped"
+
+# 旧策略只可经配置事务清理；当前启动和 Nginx reload 不得先停 owner 再尝试修复。
+jq '.services["net-fail2ban"].restart = "unless-stopped"' "${DOCKER_ROOT}/compose.json" \
+    >"${TEST_ROOT}/legacy-restart.compose"
+cp -p -- "${TEST_ROOT}/legacy-restart.compose" "${DOCKER_ROOT}/compose.json"
+jq '.[0].HostConfig.RestartPolicy.Name = "unless-stopped"' "${FAIL2BAN_INSPECT}" \
+    >"${TEST_ROOT}/legacy-restart.inspect"
+cp -p -- "${TEST_ROOT}/legacy-restart.inspect" "${FAIL2BAN_INSPECT}"
+FAIL2BAN_LEGACY_BEFORE=$(fail2banManagedSnapshot)
+: >"${DOCKER_LOG}"
+runControl 15 legacy-restart-up up
+runControl 15 legacy-restart-restart restart
+runControl 15 legacy-restart-reload shared-compose exec -T nginx nginx -e /dev/stderr -s reload
+! grep -Eq '^(stop|rm) |^compose .* (up|restart|down|exec)( |$)' "${DOCKER_LOG}" ||
+    fail 'Legacy restart policy was not rejected before changing owner or runtime services'
+[[ "$(fail2banManagedSnapshot)" == "${FAIL2BAN_LEGACY_BEFORE}" ]] ||
+    fail 'Legacy restart refusal changed managed files'
+: >"${DOCKER_LOG}"
+runControl 0 legacy-restart-normalize configure --spec "${FAIL2BAN_SPEC}"
+grep -qxF "stop ${FAIL2BAN_CONTAINER}" "${DOCKER_LOG}" ||
+    fail 'Standard configure did not use owner-mode cleanup for legacy restart policy'
+grep -qxF "rm ${FAIL2BAN_CONTAINER}" "${DOCKER_LOG}" ||
+    fail 'Standard configure retained the audited legacy owner'
+jq -e '.services["net-fail2ban"].restart == "no"' "${DOCKER_ROOT}/compose.json" >/dev/null ||
+    fail 'Standard configure did not normalize legacy restart policy'
+LEGACY_RESTART_BACKUP=$(sed -n 's/^Docker 配置已提交，回滚快照: //p' "${CONTROL_LOG}")
+[[ -n "${LEGACY_RESTART_BACKUP}" ]] || fail 'Legacy normalization did not preserve its rollback snapshot'
+cmp -s -- "${TEST_ROOT}/legacy-restart.compose" "${LEGACY_RESTART_BACKUP}/compose.json" ||
+    fail 'Legacy normalization modified the saved Compose evidence'
+LEGACY_RESTART_BACKUP_HASH=$(sha256sum "${LEGACY_RESTART_BACKUP}/compose.json")
+: >"${DOCKER_LOG}"
+runControl 0 legacy-restart-backup-restore restore-backup "${LEGACY_RESTART_BACKUP}"
+jq -e '.services["net-fail2ban"].restart == "no"' "${DOCKER_ROOT}/compose.json" >/dev/null ||
+    fail 'Legacy backup restore republished automatic jail restart'
+[[ "$(sha256sum "${LEGACY_RESTART_BACKUP}/compose.json")" == "${LEGACY_RESTART_BACKUP_HASH}" ]] ||
+    fail 'Legacy backup restore rewrote the saved Compose evidence'
+[[ "$(grep -c '^source-witness ' "${DOCKER_LOG}")" -eq 2 ]] ||
+    fail 'Legacy backup restore skipped fresh source evidence'
+
+# 明确的核心无依赖操作继续可用，未知 Compose 参数不能绕过来源门禁。
+: >"${DOCKER_LOG}"
+PADM_DOCKER_FAIL2BAN_SOURCE_IPV4='' runControl 0 core-no-deps shared-compose up -d --no-deps xray
+grep -Eq '^compose .* up -d --no-deps xray --remove-orphans$' "${DOCKER_LOG}" ||
+    fail 'Shared wrapper rejected a targeted core no-deps operation'
+! grep -Eq '^(stop|rm|source-witness) ' "${DOCKER_LOG}" ||
+    fail 'Targeted core no-deps operation changed Fail2ban owner or source proof'
+: >"${DOCKER_LOG}"
+PADM_DOCKER_FAIL2BAN_SOURCE_IPV4='' runControl 15 shared-full-up-missing-source shared-compose up -d
+! grep -Eq '^(stop|rm|source-witness) |^compose .* (up|restart|down)( |$)' "${DOCKER_LOG}" ||
+    fail 'Shared full up stopped or started Fail2ban without this-command source input'
+for operation in up restart; do
+    : >"${DOCKER_LOG}"
+    runControl 2 "shared-${operation}-unknown-option" shared-compose "${operation}" --scale xray=2
+    ! grep -Eq '^(stop|rm|source-witness) |^compose .* (up|restart|down)( |$)' "${DOCKER_LOG}" ||
+        fail 'Unknown Compose arguments bypassed the shared source guard'
+done
+
+# 失败恢复重新遍历两个保护入口，最后一个失败时不能启动 jail。
+rm -f -- "${TEST_ROOT}/source-fail-once"
+: >"${DOCKER_LOG}"
+FAKE_DOCKER_MODE=fail2ban-source-last-once runControl 14 fail2ban-source-rollback \
+    configure --spec "${FAIL2BAN_SPEC}"
+cmp -s "${FAIL2BAN_SPEC}" "${DOCKER_ROOT}/config/spec.json" ||
+    fail 'Source witness failure did not restore the old spec'
+[[ "$(grep -Ec '^compose .* up -d ' "${DOCKER_LOG}")" -eq 3 &&
+    "$(grep -c '^source-witness ' "${DOCKER_LOG}")" -eq 4 ]] ||
+    fail 'Source witness rollback skipped a protected entry or its fresh restart'
+python3 - "${DOCKER_LOG}" <<'PY'
+import sys
+commands = open(sys.argv[1], encoding="utf-8").read().splitlines()
+witnesses = [(i, line.split()) for i, line in enumerate(commands) if line.startswith("source-witness ")]
+jails = [i for i, line in enumerate(commands) if " up -d " in line and " net-fail2ban --remove-orphans" in line]
+assert [line[1:4] for _, line in witnesses] == [
+    ["entry-main-ws", "ipv4", "198.51.100.9"], ["entry-alt-ws", "ipv4", "198.51.100.9"],
+    ["entry-main-ws", "ipv4", "198.51.100.9"], ["entry-alt-ws", "ipv4", "198.51.100.9"]]
+assert len({line[4] for _, line in witnesses}) == 4, "rollback reused a witness nonce"
+assert len(jails) == 1 and jails[0] > witnesses[-1][0], "jail started before fresh recovery witnesses"
+PY
+: >"${DOCKER_LOG}"
+FAKE_DOCKER_MODE=fail2ban-source-last-fail runControl 14 fail2ban-source-rollback-refused \
+    configure --spec "${FAIL2BAN_SPEC}"
+cmp -s "${FAIL2BAN_SPEC}" "${DOCKER_ROOT}/config/spec.json" ||
+    fail 'Failed recovery source witness changed the old spec'
+[[ "$(grep -c '^source-witness ' "${DOCKER_LOG}")" -eq 4 ]] ||
+    fail 'Failed recovery did not challenge every protected entry anew'
+! grep -Eq '^compose .* up -d .* net-fail2ban --remove-orphans' "${DOCKER_LOG}" ||
+    fail 'Jail started despite the final source witness failure'
+[[ ! -e "${FAIL2BAN_INSPECT}" ]] || fail 'Failed recovery retained a running jail'
+grep -qF '旧配置恢复失败' "${CONTROL_LOG}" ||
+    fail 'Failed recovery hid its incomplete source proof'
+runControl 0 fail2ban-source-recovery configure --spec "${FAIL2BAN_SPEC}"
 
 jq '.core.protocols[0].public_port = 25444' "${FAIL2BAN_SPEC}" >"${TEST_ROOT}/fail2ban-edit.json"
 runControl 15 reject-fail2ban-port-edit edit --spec "${TEST_ROOT}/fail2ban-edit.json" --preview
@@ -755,6 +1002,7 @@ FAIL2BAN_HASH=$(sha256sum "${DOCKER_ROOT}/config/net/fail2ban/padm.local" | cut 
 DEPLOYMENT_HASH=$(sha256sum "${DOCKER_ROOT}/deployment.json" | cut -d ' ' -f 1)
 SPEC_HASH=$(sha256sum "${DOCKER_ROOT}/config/spec.json" | cut -d ' ' -f 1)
 rm -f -- "${TEST_ROOT}/fail-once"
+: >"${DOCKER_LOG}"
 FAKE_DOCKER_MODE=fail-next-up runControl 14 rollback-net configure --spec "${TPROXY_SPEC}"
 [[ "$(sha256sum "${DOCKER_ROOT}/config/net/fail2ban/padm.local" | cut -d ' ' -f 1)" == "${FAIL2BAN_HASH}" ]] ||
     fail 'failed deployment did not restore config/net'
@@ -762,6 +1010,8 @@ FAKE_DOCKER_MODE=fail-next-up runControl 14 rollback-net configure --spec "${TPR
     fail 'failed deployment did not restore deployment state'
 [[ "$(sha256sum "${DOCKER_ROOT}/config/spec.json" | cut -d ' ' -f 1)" == "${SPEC_HASH}" ]] ||
     fail 'failed deployment did not restore complete spec'
+[[ "$(grep -c '^source-witness ' "${DOCKER_LOG}")" -eq 2 ]] ||
+    fail 'Host integration rollback restarted Fail2ban without both fresh source witnesses'
 
 # 首配证书和 ACME 数据只暂存，健康检查失败时一起恢复。
 STAGED_TLS="${DOCKER_ROOT}/.staged-tls"
@@ -773,6 +1023,7 @@ printf 'new-certificate\n' >"${STAGED_TLS}/proxy.example.com.crt"
 printf 'new-private-key\n' >"${STAGED_TLS}/proxy.example.com.key"
 printf 'new-acme-account\n' >"${STAGED_ACME}/account"
 rm -f -- "${TEST_ROOT}/fail-once"
+: >"${DOCKER_LOG}"
 FAKE_DOCKER_MODE=fail-next-up runControl 14 rollback-staged apply-staged \
     "${FAIL2BAN_SPEC}" "${STAGED_TLS}" "${STAGED_ACME}"
 grep -qxF fake-certificate "${DOCKER_ROOT}/secrets/tls/proxy.example.com.crt" ||
@@ -781,11 +1032,16 @@ grep -qxF old-acme-account "${DOCKER_ROOT}/data/acme/account" ||
     fail 'failed deployment committed candidate ACME data'
 [[ "$(sha256sum "${DOCKER_ROOT}/config/spec.json" | cut -d ' ' -f 1)" == "${SPEC_HASH}" ]] ||
     fail 'failed staged deployment did not restore complete spec'
+[[ "$(grep -c '^source-witness ' "${DOCKER_LOG}")" -eq 2 ]] ||
+    fail 'Staged deployment rollback reused Fail2ban source evidence'
+: >"${DOCKER_LOG}"
 runControl 0 commit-staged apply-staged "${FAIL2BAN_SPEC}" "${STAGED_TLS}" "${STAGED_ACME}"
 grep -qxF new-certificate "${DOCKER_ROOT}/secrets/tls/proxy.example.com.crt" ||
     fail 'successful deployment did not commit candidate TLS'
 grep -qxF new-acme-account "${DOCKER_ROOT}/data/acme/account" ||
     fail 'successful deployment did not commit candidate ACME data'
+[[ "$(grep -c '^source-witness ' "${DOCKER_LOG}")" -eq 2 ]] ||
+    fail 'Staged deployment did not verify both protected source tuples'
 
 # Fail2ban 的双栈发布复用受管辅助网，不扩大核心的出站网络范围。
 (

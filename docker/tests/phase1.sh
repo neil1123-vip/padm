@@ -64,7 +64,9 @@ compose)
     [[ "${mode}" != "compose-fail" ]]
     ;;
 ps)
-    [[ "${mode}" != "active" ]] || printf 'container-id\n'
+    if [[ "$*" != 'ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=net-fail2ban --filter label=com.docker.compose.oneoff=False' ]]; then
+        [[ "${mode}" != "active" ]] || printf 'container-id\n'
+    fi
     ;;
 *) exit 1 ;;
 esac
@@ -744,6 +746,7 @@ cat >"${DOCKER_ROOT}/deployment.json" <<'EOF'
   "mode": "docker",
   "padm_version": "test",
   "core": {"type": "xray"},
+  "host_integrations": [],
   "compose": {"project": "padm-docker", "profiles": ["core-xray"]}
 }
 EOF
