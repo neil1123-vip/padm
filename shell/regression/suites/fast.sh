@@ -223,7 +223,8 @@ runDockerFail2banOwnershipRegression() {
 }
 
 runDockerFail2banSourceRegression() {
-    bash "${PROJECT_ROOT}/docker/tests/fail2ban-source.sh"
+    bash "${PROJECT_ROOT}/docker/tests/fail2ban-source.sh" &&
+        bash "${PROJECT_ROOT}/docker/tests/fail2ban-start.sh"
 }
 
 runDockerRoutingWarpRegression() {

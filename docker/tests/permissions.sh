@@ -28,9 +28,21 @@ fail() { printf 'docker-permissions-regression-fail: %s\n' "$*" >&2; exit 1; }
 assertMetadata() {
     [[ "$(stat -c '%a %u %g' "$1")" == "$2" ]] || fail "unexpected permissions/owner: $1"
 }
-# 只隔离服务启停，文件复制、属主和所有权限检查均使用实际共享函数。
-dockerComposeRun() { printf '%s\n' "$*" >>"${TEST_ROOT}/compose.log"; }
+# 只隔离服务启停和只读归属查询，文件复制、属主和权限检查均使用实际共享函数。
+dockerComposeExecute() {
+    [[ "$*" == down ||
+        "$*" == "up -d --force-recreate --wait --wait-timeout ${PADM_DOCKER_HEALTH_TIMEOUT:-60}" ]] ||
+        fail "unexpected restore service operation: $*"
+    printf '%s\n' "$*" >>"${TEST_ROOT}/compose.log"
+}
+dockerComposeRun() { dockerComposeExecute "$@"; }
 dockerTrafficScheduleRemove() { printf 'removed\n' >>"${TEST_ROOT}/schedule.log"; }
+docker() {
+    [[ "$*" == 'ps -aq --filter label=com.docker.compose.project=padm-docker --filter label=com.docker.compose.service=net-fail2ban --filter label=com.docker.compose.oneoff=False' ]] ||
+        fail "unexpected ownership query: $*"
+    printf '%s\n' "$*" >>"${TEST_ROOT}/ownership.log"
+    [[ "${OWNERSHIP_QUERY_FAIL:-0}" != 1 ]]
+}
 
 seedRuntimeSecrets() {
     mkdir -p "${PADM_DOCKER_INSTALL_DIR}/secrets/tls" "${PADM_DOCKER_INSTALL_DIR}/data/acme"
@@ -88,7 +100,7 @@ jq -n --slurpfile spec "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" '
      images:($s.images|with_entries(.value={index_digest:(.value|split("@")|last)})),
      formats:{compose:1,config:1,data:1},previous_manifest_sha256:null,host_integrations:[]}
 ' >"${PADM_DOCKER_INSTALL_DIR}/deployment.json"
-printf '{}\n' >"${PADM_DOCKER_INSTALL_DIR}/compose.json"
+printf '{"name":"padm-docker","services":{}}\n' >"${PADM_DOCKER_INSTALL_DIR}/compose.json"
 jq -r '.images | "PADM_XRAY_IMAGE=" + .xray, "PADM_SINGBOX_IMAGE=" + ."sing-box",
     "PADM_NGINX_IMAGE=" + .nginx, "PADM_OPS_IMAGE=" + .ops, "PADM_NET_IMAGE=" + .net' \
     "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" >"${PADM_DOCKER_INSTALL_DIR}/images.env"
@@ -99,7 +111,24 @@ backup=${DOCKER_CONFIG_BACKUP}
 dockerValidateConfigurationBackup "${backup}" || fail 'root-owned runtime backup did not validate'
 printf 'changed\n' >"${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
 printf 'changed\n' >"${PADM_DOCKER_INSTALL_DIR}/secrets/tls/example.com.key"
+jq 'del(.host_integrations)' "${backup}/deployment.json" \
+    >"${PADM_DOCKER_INSTALL_DIR}/deployment.json"
 DOCKER_CONFIG_SWITCHED=1
+! dockerRestoreConfiguration >"${TEST_ROOT}/restore-corrupt.log" 2>&1 ||
+    fail 'runtime restore overwrote a corrupt current spec with unknown integration metadata'
+grep -qxF changed "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" ||
+    fail 'corrupt-spec refusal changed the current spec'
+grep -qxF changed "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/example.com.key" ||
+    fail 'corrupt-spec refusal changed the current TLS key'
+cp -p -- "${backup}/deployment.json" "${PADM_DOCKER_INSTALL_DIR}/deployment.json"
+OWNERSHIP_QUERY_FAIL=1
+! dockerRestoreConfiguration >"${TEST_ROOT}/restore-query-fail.log" 2>&1 ||
+    fail 'runtime restore ignored an ownership query failure'
+[[ "${DOCKER_CONFIG_SWITCHED}" == 1 ]] || fail 'ownership query refusal discarded the restore transaction'
+grep -qxF changed "${PADM_DOCKER_INSTALL_DIR}/secrets/tls/example.com.key" ||
+    fail 'ownership query refusal changed the current TLS key'
+[[ ! -e "${TEST_ROOT}/compose.log" ]] || fail 'refused restore stopped or started services'
+OWNERSHIP_QUERY_FAIL=0
 dockerRestoreConfiguration || fail 'runtime backup restore failed'
 assertMetadata "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" '600 0 0'
 dockerManagedSpecMatchesDeployment "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" \

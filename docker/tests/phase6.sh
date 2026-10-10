@@ -735,6 +735,7 @@ MSYS=winsymlinks:sys PATH="${MOCK_BIN}:${PATH}" FAKE_DOCKER_LOG="${DOCKER_LOG}" 
     composeRoot="${TEST_ROOT}/compose-stdin"
     mkdir -p "${composeRoot}"
     : >"${composeRoot}/images.env"
+    printf '%s\n' '{"services":{},"networks":{}}' >"${composeRoot}/compose.json"
     printf '%s\n' '{"compose":{"profiles":["core-xray","core-sing-box"]}}' >"${composeRoot}/deployment.json"
     dockerInstallRoot() { printf '%s\n' "${composeRoot}"; }
     dockerComposeFile() { printf '%s/compose.json\n' "${composeRoot}"; }
