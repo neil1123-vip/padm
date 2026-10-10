@@ -140,21 +140,27 @@ dockerHostPreflight() {
 }
 
 dockerRootHasOnlyBootstrapFiles() {
-    local root=$1 entry lockEntry lockFile
+    local root=$1 entry lockEntry lockFile entries lockEntries lockFiles
     [[ -d "${root}" && ! -L "${root}" ]] || return 1
+    entries=$(find "${root}" -mindepth 1 -maxdepth 1 -print 2>/dev/null) || return 1
     while IFS= read -r entry; do
+        [[ -n "${entry}" ]] || continue
         [[ "${entry}" == "${root}/locks" ]] || return 1
-    done < <(find "${root}" -mindepth 1 -maxdepth 1 -print 2>/dev/null)
+    done <<<"${entries}"
     if [[ -e "${root}/locks" || -L "${root}/locks" ]]; then
         [[ -d "${root}/locks" && ! -L "${root}/locks" && -O "${root}/locks" ]] || return 1
+        lockEntries=$(find "${root}/locks" -mindepth 1 -maxdepth 1 -print 2>/dev/null) || return 1
         while IFS= read -r lockEntry; do
+            [[ -n "${lockEntry}" ]] || continue
             [[ "${lockEntry}" == "${root}/locks/deployment.lock" && -d "${lockEntry}" &&
                 ! -L "${lockEntry}" && -O "${lockEntry}" ]] || return 1
+            lockFiles=$(find "${lockEntry}" -mindepth 1 -maxdepth 1 -print 2>/dev/null) || return 1
             while IFS= read -r lockFile; do
+                [[ -n "${lockFile}" ]] || continue
                 [[ "${lockFile}" == "${lockEntry}/pid" && -f "${lockFile}" &&
                     ! -L "${lockFile}" && -O "${lockFile}" ]] || return 1
-            done < <(find "${lockEntry}" -mindepth 1 -maxdepth 1 -print 2>/dev/null)
-        done < <(find "${root}/locks" -mindepth 1 -maxdepth 1 -print 2>/dev/null)
+            done <<<"${lockFiles}"
+        done <<<"${lockEntries}"
     fi
 }
 
@@ -271,12 +277,13 @@ dockerAcquireDeploymentLock() {
         rmdir -- "${lockDir}" 2>/dev/null || true
         return 1
     }
+    DOCKER_DEPLOYMENT_LOCK_DIR=${lockDir}
     printf '%s\n' "${BASHPID:-$$}" >"${lockDir}/pid" && chmod 0640 "${lockDir}/pid" || {
         rm -f -- "${lockDir}/pid" 2>/dev/null || true
         rmdir -- "${lockDir}" 2>/dev/null || true
+        DOCKER_DEPLOYMENT_LOCK_DIR=
         return 1
     }
-    DOCKER_DEPLOYMENT_LOCK_DIR=${lockDir}
 }
 
 dockerReleaseDeploymentLock() {

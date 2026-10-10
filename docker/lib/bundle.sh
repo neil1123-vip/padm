@@ -251,7 +251,7 @@ dockerValidateBundle() {
 }
 
 dockerStageBundle() {
-    local sourceRoot=$1 requestedRef=${2:-} root bundlesRoot stageDir candidate relativePath ref
+    local sourceRoot=$1 requestedRef=${2:-} root bundlesRoot stageDir candidate relativePath ref payloadPaths
     root=$(dockerInstallRoot) || return 1
     bundlesRoot="${root}/.bundles"
     [[ -d "${bundlesRoot}" && ! -L "${bundlesRoot}" ]] || return 1
@@ -263,6 +263,7 @@ dockerStageBundle() {
         dockerError '无法确定 Docker bundle ref'
         return 1
     }
+    payloadPaths=$(dockerBundlePayloadPaths "${sourceRoot}") || return 1
     stageDir=$(mktemp -d "${bundlesRoot}/.stage.XXXXXX") || return 1
     candidate="${stageDir}/bundle"
     # 创建候选目录前登记，复制或校验中断时统一清理本次 stage。
@@ -282,7 +283,7 @@ dockerStageBundle() {
             dockerRemoveManagedTree "${root}" "${stageDir}" || true
             return 1
         }
-    done < <(dockerBundlePayloadPaths "${sourceRoot}")
+    done <<<"${payloadPaths}"
     printf '%s\n' "${ref}" >"${candidate}/${PADM_DOCKER_BUNDLE_REF}" || {
         dockerRemoveManagedTree "${root}" "${stageDir}" || true
         return 1

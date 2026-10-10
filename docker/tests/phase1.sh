@@ -869,6 +869,105 @@ for missing in docker/lib/reality-targets.sh shell/core/runtime.sh shell/core/re
         fail 'incomplete target module changed the active bundle'
 done
 
+# 三类失败逐项取证，不能让首个失败掩盖其它边界。
+boundaryFailures=0
+for scope in root locks lock; do
+    boundaryRoot="${TEST_ROOT}/bootstrap-enumeration-${scope}"
+    boundaryBin="${TEST_ROOT}/bootstrap-enumeration-${scope}-bin"
+    boundaryPath=${boundaryRoot}
+    mkdir -p "${boundaryRoot}/locks/deployment.lock"
+    case "${scope}" in
+    root) printf 'keep\n' >"${boundaryRoot}/residue" ;;
+    locks)
+        boundaryPath="${boundaryRoot}/locks"
+        printf 'keep\n' >"${boundaryPath}/residue"
+        ;;
+    lock)
+        boundaryPath="${boundaryRoot}/locks/deployment.lock"
+        printf 'keep\n' >"${boundaryPath}/residue"
+        ;;
+    esac
+    if (
+        find() {
+            [[ "$*" != "${PHASE1_ENUMERATION_PATH} -mindepth 1 -maxdepth 1 -print" ]] || return 1
+            command find "$@"
+        }
+        export -f find
+        export PHASE1_ENUMERATION_PATH=${boundaryPath}
+        runControl 11 "bootstrap-enumeration-${scope}" "${boundaryRoot}" "${NATIVE_ROOT}" \
+            "${boundaryBin}" install --source "${NO_COMPOSE_SOURCE}"
+        [[ "$(<"${boundaryPath}/residue")" == keep && ! -e "${boundaryRoot}/mode" &&
+            ! -L "${boundaryRoot}/bundle" && ! -L "${boundaryBin}/padm-docker" ]] ||
+            fail "bootstrap-enumeration-${scope}: failed enumeration claimed unknown state"
+    ); then
+        :
+    else
+        printf 'docker-phase1-boundary-fail: bootstrap-enumeration-%s\n' "${scope}" >&2
+        boundaryFailures=$((boundaryFailures + 1))
+    fi
+done
+
+if (
+    source "${PROJECT_ROOT}/install-docker.sh" help
+    export PADM_DOCKER_INSTALL_DIR="${DOCKER_ROOT}" PADM_NATIVE_INSTALL_DIR="${NATIVE_ROOT}"
+    export PADM_DOCKER_BIN_DIR="${CLI_DIR}" PATH="${MOCK_BIN}:${PATH}"
+    stageFailureSource="${TEST_ROOT}/stage-enumeration-source"
+    copyBundleFixture "${stageFailureSource}"
+    printf 'keep source document\n' >"${stageFailureSource}/documents/docker-enumeration.md"
+    stageFindCount="${TEST_ROOT}/stage-enumeration-count"
+    find() {
+        if [[ "$*" == "${stageFailureSource}/documents -maxdepth 1 -type f -name docker*.md -print" ]]; then
+            count=$(<"${stageFindCount}")
+            count=$((count + 1))
+            printf '%s\n' "${count}" >"${stageFindCount}"
+            [[ "${count}" != 3 ]] || return 1
+        fi
+        command find "$@"
+    }
+    printf '0\n' >"${stageFindCount}"
+    status=0
+    dockerMain install --source "${stageFailureSource}" \
+        --ref aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa >"${CONTROL_LOG}" 2>&1 || status=$?
+    [[ "${status}" == 13 && "$(readlink "${DOCKER_ROOT}/bundle")" == "${bundleBefore}" &&
+        "$(<"${DOCKER_ROOT}/data/sentinel")" == keep &&
+        ! -e "${DOCKER_ROOT}/locks/deployment.lock" &&
+        -z "$(command find "${DOCKER_ROOT}/.bundles" -maxdepth 1 -name '.stage.*' -print)" ]] ||
+        fail 'stage-enumeration: failed copying enumeration was committed'
+); then
+    :
+else
+    printf 'docker-phase1-boundary-fail: stage-enumeration\n' >&2
+    boundaryFailures=$((boundaryFailures + 1))
+fi
+
+for signal in INT TERM; do
+    boundaryRoot="${TEST_ROOT}/lock-pid-${signal}"
+    boundaryBin="${TEST_ROOT}/lock-pid-${signal}-bin"
+    signalStatus=130
+    [[ "${signal}" != TERM ]] || signalStatus=143
+    if (
+        chmod() {
+            command chmod "$@" || return $?
+            if [[ "$1" == 0640 && "${2:-}" == "${PADM_DOCKER_INSTALL_DIR}/locks/deployment.lock/pid" ]]; then
+                kill -"${PHASE1_LOCK_PID_SIGNAL}" "${BASHPID:-$$}"
+            fi
+        }
+        export -f chmod
+        export PHASE1_LOCK_PID_SIGNAL=${signal}
+        runControl "${signalStatus}" "lock-pid-${signal}" "${boundaryRoot}" "${NATIVE_ROOT}" \
+            "${boundaryBin}" install --source "${NO_COMPOSE_SOURCE}"
+        [[ ! -e "${boundaryRoot}/mode" && ! -L "${boundaryRoot}/bundle" &&
+            ! -L "${boundaryBin}/padm-docker" && ! -e "${boundaryRoot}/locks/deployment.lock" ]] ||
+            fail "lock-pid-${signal}: interrupted acquisition left its recorded lock"
+    ); then
+        :
+    else
+        printf 'docker-phase1-boundary-fail: lock-pid-%s\n' "${signal}" >&2
+        boundaryFailures=$((boundaryFailures + 1))
+    fi
+done
+[[ "${boundaryFailures}" == 0 ]] || fail "new installation boundaries failed: ${boundaryFailures}"
+
 COMPOSE_SOURCE="${TEST_ROOT}/compose-source"
 copyBundleFixture "${COMPOSE_SOURCE}"
 printf 'services: {}\n' >"${COMPOSE_SOURCE}/docker/compose.yaml"
