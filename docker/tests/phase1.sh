@@ -134,6 +134,82 @@ for downloadCase in spent wget-remaining missing-timeout; do
 done
 [[ "${downloadFailures}" == 0 ]] || fail "download deadlines failed: ${downloadFailures}"
 
+# 裸入口不能把计数工具失败或算式输出当作有效大小。
+sizeFailures=0
+printf 'fixture\n' >"${TEST_ROOT}/size-source"
+tar -czf "${TEST_ROOT}/size-archive.tar.gz" -C "${TEST_ROOT}" size-source
+for sizeCase in curl wget manifest archive-entries archive-expanded archive-head; do
+    for sizeMode in normal empty-failure full-failure invalid-success oversized; do
+        [[ "${sizeCase}" != archive-head || "${sizeMode}" == empty-failure ||
+            "${sizeMode}" == full-failure ]] || continue
+        if (
+            source "${PROJECT_ROOT}/install-docker.sh" help
+            source "${PROJECT_ROOT}/docker/lib/manifest.sh"
+            set +o pipefail
+            wc() {
+                if [[ ( "${sizeCase}" != archive-* && "$*" == -c ) ||
+                    ( "${sizeCase}" == archive-entries && "$*" == -l ) ||
+                    ( "${sizeCase}" == archive-expanded && "$*" == -c ) ]]; then
+                    case "${sizeMode}" in
+                    empty-failure) command cat >/dev/null; return 17 ;;
+                    full-failure) command wc "$@" || return $?; return 17 ;;
+                    invalid-success) command cat >/dev/null; printf '1+1\n'; return 0 ;;
+                    oversized) command cat >/dev/null; printf '104857601\n'; return 0 ;;
+                    esac
+                fi
+                command wc "$@"
+            }
+            head() {
+                if [[ "${sizeCase}" == archive-head ]]; then
+                    if [[ "${sizeMode}" == full-failure ]]; then command head "$@"; else command cat >/dev/null; fi
+                    return 17
+                fi
+                command head "$@"
+            }
+            curl() {
+                [[ "${sizeCase}" != wget ]] || return 22
+                while [[ "$#" -gt 0 ]]; do
+                    if [[ "$1" == -o ]]; then printf 'downloaded\n' >"$2"; return 0; fi
+                    shift
+                done
+                return 1
+            }
+            wget() { printf 'downloaded\n'; }
+            timeout() { shift 3; "$@"; }
+            command() {
+                [[ "${sizeCase}" != curl || "$*" != '-v wget' ]] || return 1
+                builtin command "$@"
+            }
+            sizeStatus=0
+            case "${sizeCase}" in
+            curl|wget)
+                dockerEntryDownloadFile 'https://fixture.invalid/bundle' \
+                    "${TEST_ROOT}/size-${sizeCase}.out" 1024 || sizeStatus=$?
+                ;;
+            manifest)
+                dockerManifestInputCopy "${TEST_ROOT}/size-source" \
+                    "${TEST_ROOT}/size-manifest.out" 1024 || sizeStatus=$?
+                ;;
+            archive-entries|archive-expanded|archive-head)
+                dockerEntryArchiveIsSafe "${TEST_ROOT}/size-archive.tar.gz" \
+                    "${TEST_ROOT}/size-entries" "${TEST_ROOT}/size-details" || sizeStatus=$?
+                ;;
+            esac
+            if [[ "${sizeMode}" == normal ]]; then
+                [[ "${sizeStatus}" == 0 ]] || fail "size-${sizeCase}: normal count was rejected"
+            else
+                [[ "${sizeStatus}" -ne 0 ]] || fail "size-${sizeCase}-${sizeMode}: invalid count was accepted"
+            fi
+        ); then
+            :
+        else
+            printf 'docker-phase1-boundary-fail: size-%s-%s\n' "${sizeCase}" "${sizeMode}" >&2
+            sizeFailures=$((sizeFailures + 1))
+        fi
+    done
+done
+[[ "${sizeFailures}" == 0 ]] || fail "size count failures: ${sizeFailures}"
+
 runControl() {
     local expected=$1 name=$2 dockerRoot=$3 nativeRoot=$4 binDir=$5
     local actual=0
@@ -353,6 +429,36 @@ tar -czf "${FETCH_ARCHIVE}" -C "${TEST_ROOT}" no-compose-source
     [[ "$(<"${TEST_ROOT}/standalone-ref-state/bundle/.padm-docker-bundle-ref")" == "${FETCH_REF}" ]] ||
         fail 'standalone fixed ref did not preserve the requested version'
 )
+
+# 候选目录完整输出后 find 失败，不能发布远端源或初始化状态。
+(
+    candidateTemp="${TEST_ROOT}/standalone-candidate-failure-tmp"
+    candidateState="${TEST_ROOT}/standalone-candidate-failure-state"
+    mkdir -- "${candidateTemp}"
+    curl() {
+        local target=
+        while [[ "$#" -gt 0 ]]; do
+            if [[ "$1" == -o ]]; then target=$2; break; fi
+            shift
+        done
+        [[ -n "${target}" ]] && command cp -- "${PHASE1_FETCH_ARCHIVE}" "${target}"
+    }
+    wget() { return 99; }
+    find() {
+        if [[ "$*" == *'/extract -mindepth 2 -maxdepth 2 -type f -name install-docker.sh -print' ]]; then
+            command find "$@" || return $?
+            return 17
+        fi
+        command find "$@"
+    }
+    export -f curl wget find
+    export TMPDIR="${candidateTemp}" PHASE1_FETCH_ARCHIVE="${FETCH_ARCHIVE}"
+    PROJECT_ROOT="${STANDALONE_ROOT}" runControl 13 standalone-candidate-failure \
+        "${candidateState}" "${NATIVE_ROOT}" "${TEST_ROOT}/standalone-candidate-failure-bin" \
+        install --no-menu --ref "${FETCH_REF}"
+    [[ ! -e "${candidateState}" && -z "$(command find "${candidateTemp}" -mindepth 1 -print -quit)" ]] ||
+        fail 'candidate enumeration failure published installation state or kept temporary source'
+) || fail 'candidate enumeration failure was accepted'
 
 # 加载控制模块前中断下载或解包，也必须清理本次临时源。
 for signal in INT TERM; do

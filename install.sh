@@ -110,7 +110,7 @@ scriptDownloadUrlToFileBounded() {
     local maxSize=$3
     local maxTime=${4:-30}
     local toolFound=false
-    local deadline remaining
+    local deadline remaining actualSize
     local -a pipelineStatus=()
     [[ -n "${url}" && "${maxSize}" =~ ^[0-9]+$ && "${maxSize}" -gt 0 ]] || return 1
     [[ "${maxTime}" =~ ^[1-9][0-9]{0,8}$ ]] || return 1
@@ -120,7 +120,8 @@ scriptDownloadUrlToFileBounded() {
     if command -v curl >/dev/null 2>&1; then
         toolFound=true
         if curl -fsSL --connect-timeout 10 --max-time "${maxTime}" --max-filesize "${maxSize}" -o "${targetFile}" "${url}" &&
-            [[ "$(wc -c <"${targetFile}")" -le "${maxSize}" ]]; then
+            actualSize=$(wc -c <"${targetFile}") &&
+            [[ "${actualSize}" =~ ^[[:space:]]*[0-9]+[[:space:]]*$ && "${actualSize}" -le "${maxSize}" ]]; then
             return 0
         fi
     fi
@@ -136,8 +137,9 @@ scriptDownloadUrlToFileBounded() {
         }
         timeout -k 2 "${remaining}" wget -T 30 -t 2 -qO- "${url}" | head -c "$((maxSize + 1))" >"${targetFile}"
         pipelineStatus=("${PIPESTATUS[@]}")
-        if [[ "${pipelineStatus[0]:-1}" -eq 0 && "${pipelineStatus[1]:-1}" -eq 0 &&
-            "$(wc -c <"${targetFile}")" -le "${maxSize}" ]]; then
+        if [[ "${pipelineStatus[0]:-1}" -eq 0 && "${pipelineStatus[1]:-1}" -eq 0 ]] &&
+            actualSize=$(wc -c <"${targetFile}") &&
+            [[ "${actualSize}" =~ ^[[:space:]]*[0-9]+[[:space:]]*$ && "${actualSize}" -le "${maxSize}" ]]; then
             return 0
         fi
     fi
@@ -183,15 +185,15 @@ scriptArchiveExpandedSizeIsSafe() {
     local entryList=$2
     local entryCount expandedBytes
 
-    entryCount=$(wc -l <"${entryList}" | tr -d '[:space:]') || return 1
-    [[ "${entryCount}" =~ ^[0-9]+$ ]] && ((entryCount <= 10000)) || return 1
+    entryCount=$(wc -l <"${entryList}") || return 1
+    [[ "${entryCount}" =~ ^[[:space:]]*[0-9]+[[:space:]]*$ && "${entryCount}" -le 10000 ]] || return 1
     expandedBytes=$(
+        set -o pipefail
         { tar -xOzf "${archiveFile}" 2>/dev/null || true; } |
             head -c 104857601 |
-            wc -c |
-            tr -d '[:space:]'
+            wc -c
     ) || return 1
-    [[ "${expandedBytes}" =~ ^[0-9]+$ ]] && ((expandedBytes <= 104857600))
+    [[ "${expandedBytes}" =~ ^[[:space:]]*[0-9]+[[:space:]]*$ && "${expandedBytes}" -le 104857600 ]]
 }
 
 validateRepoArchive() {
@@ -588,7 +590,12 @@ moduleManifestReady() {
         rm -f "${moduleList}"
         return 1
     fi
-    moduleCount=$(wc -l <"${moduleList}" | tr -d ' ')
+    moduleCount=$(wc -l <"${moduleList}") &&
+        [[ "${moduleCount}" =~ ^[[:space:]]*[0-9]+[[:space:]]*$ ]] || {
+        rm -f "${moduleList}"
+        return 1
+    }
+    moduleCount=${moduleCount// /}
     manifestCount=$(awk 'NF == 0 { next } NF != 2 { bad = 1 } { count++ } END { if (bad) exit 1; print count + 0 }' "${manifestPath}") || {
         rm -f "${moduleList}"
         return 1
