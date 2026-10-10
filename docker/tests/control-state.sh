@@ -353,6 +353,7 @@ DOCKER_STAGED_BUNDLE_PATH=$(dockerCurrentBundlePath)
       "${DOCKER_CONFIG_CANDIDATE}/compose.json" >/dev/null
     dockerCandidateCompose() {
         [[ "$*" == "${DOCKER_CONFIG_CANDIDATE} config --format json" ]] && return 0
+        [[ "$*" == "${DOCKER_CONFIG_CANDIDATE} run --rm --no-deps xray -test -confdir /etc/padm/xray" ]] && return 0
         [[ "$*" == "${DOCKER_CONFIG_CANDIDATE} run --rm --no-deps control control --state /etc/padm/control/state.json --access-log /var/log/padm/control/auth.log --access-lock /var/log/padm/control/auth.lock --source-challenge /run/padm/control-source/challenge.json --source-receipt /var/log/padm/control/source.receipt --check" ]] || return 1
         [[ "${REJECT_ACCESS_LOCK_ARGUMENT:-0}" != 1 ]]
     }
