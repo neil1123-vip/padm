@@ -59,7 +59,8 @@ dockerMenuRun() {
     [[ $- != *m* ]] || monitorEnabled=1
     if [[ "${1:-}" == setup || "${1:-}" == edit ||
         "${1:-}" == up || "${1:-}" == restart || "${1:-}" == update || "${1:-}" == rollback ||
-        ( "${1:-}" == fail2ban && "${2:-}" == disable ) ||
+        ( "${1:-}" == fail2ban && ( "${2:-}" == disable ||
+          "${2:-}" == enable || "${2:-}" == settings ) ) ||
         ( "${1:-}" == business && "${2:-}" == restore ) ||
         ( "${1:-}" == account && "${2:-}" != list ) ||
         ( ( "${1:-}" == subscription || "${1:-}" == share ) &&
@@ -879,11 +880,12 @@ dockerMenuWarp() {
 
 dockerMenuFail2ban() {
     local choice address answer listener
+    local action ports maxRetry findTime banTime defaultRetry defaultFind defaultBan confirmation
     while :; do
         DOCKER_MENU_SIGNAL=0
         printf '\nDocker Fail2ban 维护\n'
         printf '%s\n' '1. 查看状态' '2. 解封单个 IP' '3. 停用站点扫描防护' \
-            '4. 核对 WS 真实来源' '0. 返回'
+            '4. 核对 WS 真实来源' '5. 启用 WS 站点扫描防护' '6. 修改 WS 站点扫描参数' '0. 返回'
         printf '请选择: '
         if ! IFS= read -r choice; then
             [[ "${DOCKER_MENU_SIGNAL}" -ne 130 ]] || continue
@@ -911,6 +913,28 @@ dockerMenuFail2ban() {
                 dockerSetupRead address '外部客户端 IPv4/IPv6（0 返回）: ' &&
                 [[ -n "${address}" ]] || continue
             dockerMenuRun fail2ban verify-source "${listener}" "${address}" || true
+            ;;
+        5|6)
+            dockerMenuRun protocol list || continue
+            if [[ "${choice}" == 5 ]]; then
+                action=enable defaultRetry=6 defaultFind=600 defaultBan=3600
+                confirmation='确认启用受管 WS 站点扫描防护？[y/N]: '
+            else
+                action=settings defaultRetry= defaultFind= defaultBan=
+                confirmation='确认更新受管 WS 站点扫描参数？[y/N]: '
+            fi
+            dockerSetupRead ports '保护 WS 端口（逗号分隔，0 返回）: ' &&
+                [[ -n "${ports}" ]] &&
+                dockerSetupRead maxRetry "失败阈值（1–20，0 返回）${defaultRetry:+ [${defaultRetry}]}: " "${defaultRetry}" &&
+                [[ -n "${maxRetry}" ]] &&
+                dockerSetupRead findTime "检测窗口秒（60–86400，0 返回）${defaultFind:+ [${defaultFind}]}: " "${defaultFind}" &&
+                [[ -n "${findTime}" ]] &&
+                dockerSetupRead banTime "封禁秒数（60–604800，0 返回）${defaultBan:+ [${defaultBan}]}: " "${defaultBan}" &&
+                [[ -n "${banTime}" ]] || continue
+            dockerSetupRead answer "${confirmation}" n || continue
+            case "${answer}" in y|Y|yes|YES) ;; *) continue ;; esac
+            dockerMenuRun fail2ban "${action}" "${ports}" "${maxRetry}" \
+                "${findTime}" "${banTime}" --confirm PADM-DOCKER-EDIT || true
             ;;
         *) printf '无效选项，请重新选择。\n' ;;
         esac

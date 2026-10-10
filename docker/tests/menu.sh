@@ -350,7 +350,7 @@ runPortAliasDriver() {
 }
 
 runMaintenanceDriver() {
-    local scenario=$1 choice address answer=n
+    local scenario=$1 choice address answer=n action field previous
     local -A targetPrompts=()
     targetReply 'Docker 管理菜单' $'18\n'
     case "${scenario}" in
@@ -469,6 +469,61 @@ runMaintenanceDriver() {
                     return 0
                 fi
                 printf '\003' >&3
+            fi
+            ;;
+        fail2ban-enable*|fail2ban-settings*)
+            action=${scenario#fail2ban-}
+            action=${action%%-*}
+            choice=5
+            [[ "${action}" != settings ]] || choice=6
+            local -a fields=('保护 WS 端口（逗号分隔，0 返回）' '失败阈值（1–20，0 返回）'
+                '检测窗口秒（60–86400，0 返回）' '封禁秒数（60–604800，0 返回）')
+            local -a values=(24444,24445 6 600 3600)
+            if [[ "${scenario}" == *-cancel ]]; then
+                for ((field = 0; field < ${#fields[@]}; field++)); do
+                    for answer in $'0\n' $'\004'; do
+                        targetReply 'Docker Fail2ban 维护' "${choice}"$'\n'
+                        for ((previous = 0; previous < field; previous++)); do
+                            targetReply "${fields[previous]}" "${values[previous]}"$'\n'
+                        done
+                        targetReply "${fields[field]}" "${answer}"
+                    done
+                done
+                for answer in $'n\n' $'\n' $'0\n' $'\004'; do
+                    targetReply 'Docker Fail2ban 维护' "${choice}"$'\n'
+                    for ((field = 0; field < ${#fields[@]}; field++)); do
+                        targetReply "${fields[field]}" "${values[field]}"$'\n'
+                    done
+                    if [[ "${action}" == enable ]]; then
+                        targetReply '确认启用受管 WS 站点扫描防护？[y/N]: ' "${answer}"
+                    else
+                        targetReply '确认更新受管 WS 站点扫描参数？[y/N]: ' "${answer}"
+                    fi
+                done
+            else
+                targetReply 'Docker Fail2ban 维护' "${choice}"$'\n'
+                if [[ "${scenario}" != *-list-failed ]]; then
+                    for ((field = 0; field < ${#fields[@]}; field++)); do
+                        answer=${values[field]}
+                        [[ "${scenario}" != *-invalid || "${field}" -ne 0 ]] || answer=not-a-port
+                        [[ "${scenario}" != fail2ban-enable || "${field}" -eq 0 ]] || answer=''
+                        targetReply "${fields[field]}" "${answer}"$'\n'
+                    done
+                    if [[ "${action}" == enable ]]; then
+                        targetReply '确认启用受管 WS 站点扫描防护？[y/N]: ' $'y\n'
+                    else
+                        targetReply '确认更新受管 WS 站点扫描参数？[y/N]: ' $'y\n'
+                    fi
+                    if [[ "${scenario}" == *-int || "${scenario}" == *-term ]]; then
+                        waitForText 'fixture-fail2ban-ready' "${CONTROL_LOG}" || exit 35
+                        assertNoLock
+                        if [[ "${scenario}" == *-term ]]; then
+                            kill -TERM "$(<"${TEST_ROOT}/menu.pid")" || exit 36
+                            return 0
+                        fi
+                        printf '\003' >&3
+                    fi
+                fi
             fi
             ;;
         fail2ban-menu-eof) ;;
@@ -950,7 +1005,8 @@ runPty() {
     if [[ "${driver}" == term ||
         ( ( "${driver}" == targets || "${driver}" == geo ) && "${input}" == term ) ||
         ( "${driver}" == maintenance && ( "${input}" == fail2ban-term ||
-          "${input}" == fail2ban-disable-term || "${input}" == fail2ban-verify-term ) ) ]]; then
+          "${input}" == fail2ban-disable-term || "${input}" == fail2ban-verify-term ||
+          "${input}" == fail2ban-enable-term || "${input}" == fail2ban-settings-term ) ) ]]; then
         printf -v command 'printf "%%s\\n" "$$" >%q; exec %s' "${TEST_ROOT}/menu.pid" "${command}"
         expected=143
     fi
@@ -1323,11 +1379,15 @@ fail2ban)
     recordAction "$@"
     case "${2:-}" in
     status) printf 'fixture-fail2ban-status\n'; exit "${FAIL2BAN_STATUS:-0}" ;;
-    unban|disable|verify-source)
+    unban|disable|verify-source|enable|settings)
         # 字面 IP 语法矩阵由服务合同覆盖，此处只验证错误返回后仍留在菜单。
         [[ "${2:-}" != unban || "${3:-}" != not-an-ip ]] || exit 2
         if [[ "${2:-}" == verify-source ]]; then
             [[ "$#" -eq 4 && "$3" == entry-fixture && "$4" != not-an-ip ]] || exit 2
+        fi
+        if [[ "${2:-}" == enable || "${2:-}" == settings ]]; then
+            [[ "$#" -eq 8 && "$3" != not-a-port && "$7" == --confirm &&
+                "$8" == PADM-DOCKER-EDIT ]] || exit 2
         fi
         if [[ "${FAIL2BAN_WAIT:-0}" == 1 ]]; then
             trap 'exit 130' INT
@@ -1343,6 +1403,9 @@ fail2ban)
         if [[ "${2:-}" == verify-source ]]; then
             printf 'fixture-fail2ban-source-verified\n'
             exit "${FAIL2BAN_VERIFY_STATUS:-0}"
+        fi
+        if [[ "${2:-}" == enable || "${2:-}" == settings ]]; then
+            exit "${FAIL2BAN_EDIT_STATUS:-0}"
         fi
         exit "${FAIL2BAN_UNBAN_STATUS:-0}"
         ;;
@@ -1399,9 +1462,11 @@ esac
 EOF
 # 启动与恢复共用来源输入；直接验证生产动作分组，不重复业务菜单的导航矩阵。
 export SOURCE_INPUT_CHECK=1
-for sourceAction in up restart update rollback fail2ban-disable business-restore; do
+for sourceAction in up restart update rollback fail2ban-disable fail2ban-enable fail2ban-settings business-restore; do
     case "${sourceAction}" in
     fail2ban-disable) sourceCommand=(fail2ban disable --confirm PADM-DOCKER-EDIT) ;;
+    fail2ban-enable) sourceCommand=(fail2ban enable 24444,24445 6 600 3600 --confirm PADM-DOCKER-EDIT) ;;
+    fail2ban-settings) sourceCommand=(fail2ban settings 24444,24445 6 600 3600 --confirm PADM-DOCKER-EDIT) ;;
     business-restore) sourceCommand=(business restore fixture.json --strategy replace --yes) ;;
     *) sourceCommand=("${sourceAction}") ;;
     esac
@@ -1457,16 +1522,20 @@ done
 unset MAINTENANCE_STATUS MAINTENANCE_VALIDATE_STATUS
 
 for fail2banCase in flow cancel menu-eof invalid failed int term disable disable-failed disable-int disable-term \
-    verify verify-cancel verify-list-failed verify-invalid verify-failed verify-int verify-term; do
+    verify verify-cancel verify-list-failed verify-invalid verify-failed verify-int verify-term \
+    enable enable-cancel enable-invalid enable-failed enable-list-failed enable-int enable-term \
+    settings settings-cancel settings-invalid settings-failed settings-list-failed settings-int settings-term; do
     : >"${TLS_WIZARD_ACTIONS}"
     export FAIL2BAN_STATUS=0 FAIL2BAN_UNBAN_STATUS=0 FAIL2BAN_DISABLE_STATUS=0 \
-        FAIL2BAN_VERIFY_STATUS=0 FAIL2BAN_PROTOCOL_LIST_STATUS=0 FAIL2BAN_WAIT=0 \
+        FAIL2BAN_VERIFY_STATUS=0 FAIL2BAN_EDIT_STATUS=0 FAIL2BAN_PROTOCOL_LIST_STATUS=0 FAIL2BAN_WAIT=0 \
         FAIL2BAN_PID="${TEST_ROOT}/fail2ban.pid"
     [[ "${fail2banCase}" != failed ]] || { FAIL2BAN_STATUS=17; FAIL2BAN_UNBAN_STATUS=17; }
     [[ "${fail2banCase}" != disable-failed ]] || FAIL2BAN_DISABLE_STATUS=17
     [[ "${fail2banCase}" != verify-failed ]] || FAIL2BAN_VERIFY_STATUS=17
     [[ "${fail2banCase}" != verify-list-failed ]] || FAIL2BAN_PROTOCOL_LIST_STATUS=17
-    case "${fail2banCase}" in int|term|disable-int|disable-term|verify-int|verify-term) FAIL2BAN_WAIT=1 ;; esac
+    case "${fail2banCase}" in enable-failed|settings-failed) FAIL2BAN_EDIT_STATUS=17 ;; esac
+    case "${fail2banCase}" in enable-list-failed|settings-list-failed) FAIL2BAN_PROTOCOL_LIST_STATUS=17 ;; esac
+    case "${fail2banCase}" in int|term|*-int|*-term) FAIL2BAN_WAIT=1 ;; esac
     runPty "fail2ban-${fail2banCase}" maintenance "fail2ban-${fail2banCase}" "${TLS_WIZARD_CLI}" menu
     expectedFail2ban=
     case "${fail2banCase}" in
@@ -1525,16 +1594,42 @@ for fail2banCase in flow cancel menu-eof invalid failed int term disable disable
                 fail "Fail2ban ${fail2banCase} 后 CLI 进程仍存活"
         fi
         ;;
+    enable*|settings*)
+        action=${fail2banCase%%-*}
+        case "${fail2banCase}" in
+        *-cancel)
+            expectedFail2ban=$(printf 'protocol list\n%.0s' {1..12})
+            ;;
+        *-list-failed)
+            expectedFail2ban='protocol list'
+            grep -Fq '操作失败，退出码: 17' "${CONTROL_LOG}" || fail 'Fail2ban 入口列表失败未留在菜单'
+            ! grep -Fq '保护 WS 端口（逗号分隔，0 返回）' "${CONTROL_LOG}" || fail '列表失败仍接受写操作输入'
+            ;;
+        *)
+            ports=24444,24445
+            [[ "${fail2banCase}" != *-invalid ]] || ports=not-a-port
+            expectedFail2ban=$'protocol list\nfail2ban '"${action} ${ports} 6 600 3600 --confirm PADM-DOCKER-EDIT"
+            case "${fail2banCase}" in
+            *-invalid) grep -Fq '操作失败，退出码: 2' "${CONTROL_LOG}" || fail 'Fail2ban 参数错误未保留退出码' ;;
+            *-failed) grep -Fq '操作失败，退出码: 17' "${CONTROL_LOG}" || fail 'Fail2ban 编辑失败未留在菜单' ;;
+            *-int|*-term)
+                ! kill -0 "$(<"${FAIL2BAN_PID}")" 2>/dev/null || fail "Fail2ban ${fail2banCase} 后 CLI 仍存活"
+                ;;
+            esac
+            ;;
+        esac
+        ;;
     esac
     [[ "$(<"${TLS_WIZARD_ACTIONS}")" == "${expectedFail2ban}" ]] ||
         fail "Fail2ban ${fail2banCase} 参数分发错误或取消后仍执行操作"
     for fail2banLabel in '5. Fail2ban 维护' 'Docker Fail2ban 维护' '1. 查看状态' \
-        '2. 解封单个 IP' '3. 停用站点扫描防护' '4. 核对 WS 真实来源'; do
+        '2. 解封单个 IP' '3. 停用站点扫描防护' '4. 核对 WS 真实来源' \
+        '5. 启用 WS 站点扫描防护' '6. 修改 WS 站点扫描参数'; do
         grep -Fq "${fail2banLabel}" "${CONTROL_LOG}" || fail "Fail2ban 菜单缺少: ${fail2banLabel}"
     done
 done
 unset FAIL2BAN_STATUS FAIL2BAN_UNBAN_STATUS FAIL2BAN_DISABLE_STATUS \
-    FAIL2BAN_VERIFY_STATUS FAIL2BAN_PROTOCOL_LIST_STATUS FAIL2BAN_WAIT FAIL2BAN_PID
+    FAIL2BAN_VERIFY_STATUS FAIL2BAN_EDIT_STATUS FAIL2BAN_PROTOCOL_LIST_STATUS FAIL2BAN_WAIT FAIL2BAN_PID
 
 export SITE_MENU_RECORD_STATUS=1
 for siteCase in flow cancel static-eof redirect-eof alpn-diagnose-eof alpn-recommended-eof \

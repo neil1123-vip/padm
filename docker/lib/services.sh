@@ -3911,6 +3911,7 @@ dockerFail2banDisablePrepare() {
 
 dockerFail2banCommand() {
     local action=${1:-} address='' container
+    local ports maxRetry findTime banTime
     [[ "$#" -gt 0 ]] && shift
     case "${action}" in
     status) [[ "$#" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}" ;;
@@ -3928,6 +3929,18 @@ dockerFail2banCommand() {
             return "${PADM_DOCKER_RC_USAGE}"
         fi
         dockerEditCommand --fail2ban-off "$@"
+        return $?
+        ;;
+    enable|settings)
+        [[ "$#" -ge 4 ]] || return "${PADM_DOCKER_RC_USAGE}"
+        ports=$1 maxRetry=$2 findTime=$3 banTime=$4
+        shift 4
+        if ! [[ "$#" -eq 0 || ( "$#" -eq 1 && "$1" == --preview ) ||
+            ( "$#" -eq 2 && "$1" == --confirm && "$2" == PADM-DOCKER-EDIT ) ]]; then
+            return "${PADM_DOCKER_RC_USAGE}"
+        fi
+        dockerEditCommand "--fail2ban-${action}" "${ports}" "${maxRetry}" \
+            "${findTime}" "${banTime}" "$@"
         return $?
         ;;
     unban)
