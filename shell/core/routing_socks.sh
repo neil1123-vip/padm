@@ -33,6 +33,9 @@ socks5InboundRoutingMenu() {
     local backupDir= selectType=
     local PADM_PORT_ALLOW_TRANSACTION_ACTIVE=false
     local PADM_PORT_ALLOW_TRANSACTION_KEYS=
+    local PADM_SOCKS5_ROLLBACK_PENDING=false PADM_SOCKS5_BACKUP_DIR= PADM_SOCKS5_RELOAD_PENDING=false
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
     while true; do
         readInstallType
         echoContent title "\n┌─ Socks5 入站 ──────────────────────────────────────"
@@ -51,30 +54,30 @@ socks5InboundRoutingMenu() {
             singBoxConfigPath="${singBoxConfigPath:-${PADM_SINGBOX_CONFIG_DIR:-/etc/padm/sing-box/conf/config/}}"
             backupDir=
             socks5RoutingBackupCreate backupDir || { errorCard "Socks5 入站配置备份失败"; return 1; }
+            socks5RoutingRegisterExitRollback "${backupDir}"
             PADM_PORT_ALLOW_TRANSACTION_ACTIVE=true
             PADM_PORT_ALLOW_TRANSACTION_KEYS=
             if ! setSocks5Inbound; then
-                socks5RoutingRollback "${backupDir}" "Socks5 入站配置失败" false || true
-                padmRollbackPortAllowTransaction || errorCard "Socks5 入站配置失败，且新增端口防火墙规则回滚失败"
+                padmRunRollback socks5RoutingExitRollback "Socks5 入站配置失败" || true
                 return 1
             fi
             if ! setSocks5InboundRouting; then
-                socks5RoutingRollback "${backupDir}" "Socks5 入站配置失败" false || true
-                padmRollbackPortAllowTransaction || errorCard "Socks5 入站配置失败，且新增端口防火墙规则回滚失败"
+                padmRunRollback socks5RoutingExitRollback "Socks5 入站配置失败" || true
                 return 1
             fi
             if ! installSingBoxService 1; then
-                socks5RoutingRollback "${backupDir}" "sing-box 服务安装失败" false || true
-                padmRollbackPortAllowTransaction || errorCard "sing-box 服务安装失败，且 Socks5 入站端口防火墙规则回滚失败"
+                padmRunRollback socks5RoutingExitRollback "sing-box 服务安装失败" || true
                 return 1
             fi
+            PADM_SOCKS5_RELOAD_PENDING=true
             if ! reloadCore; then
-                socks5RoutingRollback "${backupDir}" "Socks5 入站核心重载失败" true || true
-                padmRollbackPortAllowTransaction || errorCard "Socks5 入站核心重载失败，且新增端口防火墙规则回滚失败"
+                padmRunRollback socks5RoutingExitRollback "Socks5 入站核心重载失败" || true
                 return 1
             fi
             PADM_PORT_ALLOW_TRANSACTION_ACTIVE=false
             PADM_PORT_ALLOW_TRANSACTION_KEYS=
+            PADM_SOCKS5_ROLLBACK_PENDING=false
+            unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
             padmRemoveCleanupPath "${backupDir}"
             ;;
         2)
@@ -83,14 +86,18 @@ socks5InboundRoutingMenu() {
         3)
             backupDir=
             socks5RoutingBackupCreate backupDir || { errorCard "Socks5 入站规则备份失败"; return 1; }
+            socks5RoutingRegisterExitRollback "${backupDir}"
             if ! setSocks5InboundRouting addRules; then
-                socks5RoutingRollback "${backupDir}" "Socks5 入站规则更新失败" false
+                padmRunRollback socks5RoutingExitRollback "Socks5 入站规则更新失败" || true
                 return 1
             fi
+            PADM_SOCKS5_RELOAD_PENDING=true
             if ! reloadCore; then
-                socks5RoutingRollback "${backupDir}" "Socks5 入站核心重载失败" true
+                padmRunRollback socks5RoutingExitRollback "Socks5 入站核心重载失败" || true
                 return 1
             fi
+            PADM_SOCKS5_ROLLBACK_PENDING=false
+            unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
             padmRemoveCleanupPath "${backupDir}"
             ;;
         4)
@@ -114,6 +121,9 @@ socks5InboundRoutingMenu() {
 # Socks5 出站菜单
 socks5OutboundRoutingMenu() {
     local backupDir= selectType=
+    local PADM_SOCKS5_ROLLBACK_PENDING=false PADM_SOCKS5_BACKUP_DIR= PADM_SOCKS5_RELOAD_PENDING=false
+    local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
+    local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
     while true; do
         echoContent title "\n┌─ Socks5 出站 ──────────────────────────────────────"
         menuItem 1 "安装 Socks5 出站" "配置转发机/代理机出站"
@@ -128,27 +138,35 @@ socks5OutboundRoutingMenu() {
         1)
             backupDir=
             socks5RoutingBackupCreate backupDir || { errorCard "Socks5 出站配置备份失败"; return 1; }
+            socks5RoutingRegisterExitRollback "${backupDir}"
             if ! setSocks5Outbound || ! setSocks5OutboundRouting; then
-                socks5RoutingRollback "${backupDir}" "Socks5 出站配置失败" false
+                padmRunRollback socks5RoutingExitRollback "Socks5 出站配置失败" || true
                 return 1
             fi
+            PADM_SOCKS5_RELOAD_PENDING=true
             if ! reloadCore; then
-                socks5RoutingRollback "${backupDir}" "Socks5 出站核心重载失败" true
+                padmRunRollback socks5RoutingExitRollback "Socks5 出站核心重载失败" || true
                 return 1
             fi
+            PADM_SOCKS5_ROLLBACK_PENDING=false
+            unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
             padmRemoveCleanupPath "${backupDir}"
             ;;
         2)
             backupDir=
             socks5RoutingBackupCreate backupDir || { errorCard "Socks5 全局出站配置备份失败"; return 1; }
+            socks5RoutingRegisterExitRollback "${backupDir}"
             if ! setSocks5Outbound || ! setSocks5OutboundRoutingAll; then
-                socks5RoutingRollback "${backupDir}" "Socks5 全局出站配置失败" false
+                padmRunRollback socks5RoutingExitRollback "Socks5 全局出站配置失败" || true
                 return 1
             fi
+            PADM_SOCKS5_RELOAD_PENDING=true
             if ! reloadCore; then
-                socks5RoutingRollback "${backupDir}" "Socks5 全局出站核心重载失败" true
+                padmRunRollback socks5RoutingExitRollback "Socks5 全局出站核心重载失败" || true
                 return 1
             fi
+            PADM_SOCKS5_ROLLBACK_PENDING=false
+            unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
             padmRemoveCleanupPath "${backupDir}"
             successCard "Socks5全局出站设置完毕"
             ;;
@@ -159,14 +177,18 @@ socks5OutboundRoutingMenu() {
         4)
             backupDir=
             socks5RoutingBackupCreate backupDir || { errorCard "Socks5 出站规则备份失败"; return 1; }
+            socks5RoutingRegisterExitRollback "${backupDir}"
             if ! setSocks5OutboundRouting addRules; then
-                socks5RoutingRollback "${backupDir}" "Socks5 出站规则更新失败" false
+                padmRunRollback socks5RoutingExitRollback "Socks5 出站规则更新失败" || true
                 return 1
             fi
+            PADM_SOCKS5_RELOAD_PENDING=true
             if ! reloadCore; then
-                socks5RoutingRollback "${backupDir}" "Socks5 出站核心重载失败" true
+                padmRunRollback socks5RoutingExitRollback "Socks5 出站核心重载失败" || true
                 return 1
             fi
+            PADM_SOCKS5_ROLLBACK_PENDING=false
+            unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
             padmRemoveCleanupPath "${backupDir}"
             ;;
         5) return 0 ;;
@@ -293,9 +315,16 @@ socks5RoutingBackupCreate() {
 }
 
 socks5RoutingRollback() {
+    padmRunRollback socks5RoutingRollbackApply "$@"
+}
+
+socks5RoutingRollbackApply() {
     local backupDir=$1
     local reason=$2
     local retryReload=${3:-false}
+    if [[ "${PADM_SOCKS5_BACKUP_DIR:-}" == "${backupDir}" ]]; then
+        PADM_SOCKS5_ROLLBACK_PENDING=false
+    fi
 
     if ! checkLogBackupRestore "${backupDir}"; then
         padmForgetCleanupPath "${backupDir}"
@@ -312,10 +341,22 @@ socks5RoutingRollback() {
     return 1
 }
 
-socks5RoutingUninstallExitRollback() {
-    [[ "${PADM_SOCKS5_UNINSTALL_ROLLBACK_PENDING:-false}" == true ]] || return 0
-    PADM_SOCKS5_UNINSTALL_ROLLBACK_PENDING=false
-    socks5RoutingRollback "${PADM_SOCKS5_UNINSTALL_BACKUP_DIR}" "${1:-Socks5 卸载中断}" true
+socks5RoutingRegisterExitRollback() {
+    PADM_SOCKS5_BACKUP_DIR=$1
+    PADM_SOCKS5_ROLLBACK_PENDING=true
+    PADM_SOCKS5_RELOAD_PENDING=false
+    padmRegisterExitRollback socks5RoutingExitRollback
+}
+
+socks5RoutingExitRollback() {
+    [[ "${PADM_SOCKS5_ROLLBACK_PENDING:-false}" == true ]] || return 0
+    PADM_SOCKS5_ROLLBACK_PENDING=false
+    local reason=${1:-Socks5 配置修改中断}
+    socks5RoutingRollback "${PADM_SOCKS5_BACKUP_DIR}" "${reason}" "${PADM_SOCKS5_RELOAD_PENDING}" || true
+    if [[ "${PADM_PORT_ALLOW_TRANSACTION_ACTIVE:-false}" == true ]]; then
+        padmRollbackPortAllowTransaction || errorCard "${reason}，且新增端口防火墙规则回滚失败"
+    fi
+    return 1
 }
 
 # 卸载 Socks5 分流
@@ -324,7 +365,7 @@ removeSocks5Routing() {
     local socks5InboundPort=
     local socks5InboundConfig=
     local unInstallSocks5RoutingStatus=
-    local PADM_SOCKS5_UNINSTALL_ROLLBACK_PENDING=false PADM_SOCKS5_UNINSTALL_BACKUP_DIR=
+    local PADM_SOCKS5_ROLLBACK_PENDING=false PADM_SOCKS5_BACKUP_DIR= PADM_SOCKS5_RELOAD_PENDING=false
     local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
     local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
     while true; do
@@ -342,6 +383,7 @@ removeSocks5Routing() {
         case "${unInstallSocks5RoutingStatus}" in
         1 | 2 | 3)
             socks5RoutingBackupCreate backupDir || { errorCard "Socks5 卸载配置备份失败"; return 1; }
+            socks5RoutingRegisterExitRollback "${backupDir}"
             ;;
         4)
             return 0
@@ -392,6 +434,7 @@ removeSocks5Routing() {
                 removeSingBoxConfig "strategy_ipv6_only_socks5_inbound" || { socks5RoutingRollback "${backupDir}" "Socks5 入站卸载失败" false; return 1; }
             fi
 
+            PADM_SOCKS5_RELOAD_PENDING=true
             stopSocks5SingBox || { socks5RoutingRollback "${backupDir}" "Socks5 入站服务停止失败" true; return 1; }
         elif [[ "${unInstallSocks5RoutingStatus}" == "3" ]]; then
             if [[ "${coreInstallType}" == "1" ]]; then
@@ -413,29 +456,24 @@ removeSocks5Routing() {
                 addSingBoxOutbound 01_direct_outbound || { socks5RoutingRollback "${backupDir}" "Socks5 卸载失败" false; return 1; }
             fi
 
+            PADM_SOCKS5_RELOAD_PENDING=true
             stopSocks5SingBox || { socks5RoutingRollback "${backupDir}" "Socks5 服务停止失败" true; return 1; }
         fi
         if [[ "${unInstallSocks5RoutingStatus}" != "1" && -n "${socks5InboundPort}" ]]; then
-            PADM_SOCKS5_UNINSTALL_BACKUP_DIR=${backupDir}
-            PADM_SOCKS5_UNINSTALL_ROLLBACK_PENDING=true
-            padmRegisterExitRollback socks5RoutingUninstallExitRollback
             removeManagedFileIfPresent "$(singBoxMergedConfigFile)" || {
-                padmRunRollback socks5RoutingUninstallExitRollback "Socks5 合并配置清理失败" || true
+                padmRunRollback socks5RoutingExitRollback "Socks5 合并配置清理失败" || true
                 unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
                 return 1
             }
         fi
+        PADM_SOCKS5_RELOAD_PENDING=true
         if ! reloadCore; then
-            if [[ "${PADM_SOCKS5_UNINSTALL_ROLLBACK_PENDING}" == true ]]; then
-                padmRunRollback socks5RoutingUninstallExitRollback "Socks5 卸载核心重载失败" || true
-                unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
-            else
-                socks5RoutingRollback "${backupDir}" "Socks5 卸载核心重载失败" true
-            fi
+            padmRunRollback socks5RoutingExitRollback "Socks5 卸载核心重载失败" || true
+            unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
             return 1
         fi
-        if [[ "${PADM_SOCKS5_UNINSTALL_ROLLBACK_PENDING}" == true ]]; then
-            PADM_SOCKS5_UNINSTALL_ROLLBACK_PENDING=false
+        if [[ "${PADM_SOCKS5_ROLLBACK_PENDING}" == true ]]; then
+            PADM_SOCKS5_ROLLBACK_PENDING=false
             unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
         fi
         padmRemoveCleanupPath "${backupDir}"

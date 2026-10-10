@@ -2435,6 +2435,111 @@ SH
 )
 
 runLocalTrafficAccountsBatchRegression() (
+    (
+        # 同进程信号必须恢复统计事务，不能让退出清理先删除唯一备份。
+        local root="${TMP_DIR}/traffic-stats-signals" caseRoot kind phase signal recovery
+        local statsFile policyFile mergedFile firstWrite resultRc expectedRc signalPending backups
+        local configPath singBoxConfigPath coreInstallType TMPDIR REGRESSION_ERROR_CARD_LOG
+        eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/trafficSignalCommit/')"
+        eval "$(declare -f removeManagedFileIfPresent | sed '1s/^removeManagedFileIfPresent/trafficSignalRemove/')"
+        eval "$(declare -f checkLogBackupRestore | sed '1s/^checkLogBackupRestore/trafficSignalRestore/')"
+        commitGeneratedFile() {
+            trafficSignalCommit "$@" || return 1
+            if [[ "$2" == "${firstWrite}" && "${signalPending}" == true ]]; then
+                signalPending=false
+                kill "-${signal}" "${BASHPID}"
+            fi
+        }
+        removeManagedFileIfPresent() {
+            trafficSignalRemove "$@" || return 1
+            if [[ "${kind}" == singbox-unsupported && "${phase}" == stats && "$1" == "${statsFile}" && "${signalPending}" == true ]]; then
+                signalPending=false
+                kill "-${signal}" "${BASHPID}"
+            fi
+        }
+        checkLogBackupRestore() {
+            printf 'restore\n' >>"${caseRoot}/restore.calls"
+            [[ "${recovery}" != fail ]] || return 1
+            trafficSignalRestore "$@"
+        }
+        singBoxV2rayApiSupported() { [[ "${kind}" != singbox-unsupported ]]; }
+        singBoxMergedConfigFile() { printf '%s\n' "${mergedFile}"; }
+        singBoxMergeConfig() {
+            commitGeneratedFile "${caseRoot}/new-merged.json" "${mergedFile}" 644
+        }
+        reloadCore() {
+            printf 'reload\n' >>"${caseRoot}/reload.calls"
+            if [[ "${phase}" == reload && "${signalPending}" == true ]]; then
+                signalPending=false
+                kill "-${signal}" "${BASHPID}"
+            fi
+            [[ "${signalPending}" != true ]] || return 99
+        }
+        for kind in xray singbox singbox-unsupported; do
+            for phase in stats merged reload; do
+                [[ "${phase}" != merged || "${kind}" == singbox ]] || continue
+                for signal in INT TERM; do
+                    expectedRc=130
+                    [[ "${signal}" != TERM ]] || expectedRc=143
+                    for recovery in success fail; do
+                        caseRoot="${root}/${kind}-${phase}-${signal}-${recovery}"
+                        configPath="${caseRoot}/config/" singBoxConfigPath="${caseRoot}/config/" coreInstallType=2
+                        [[ "${kind}" != xray ]] || { coreInstallType=1; singBoxConfigPath=; }
+                        statsFile="${configPath}14_stats_api.json"
+                        [[ "${kind}" != xray ]] || statsFile="${configPath}13_stats_api.json"
+                        policyFile="${configPath}12_policy.json" mergedFile="${caseRoot}/config.json"
+                        TMPDIR="${caseRoot}/tmp" REGRESSION_ERROR_CARD_LOG="${caseRoot}/errors.log"
+                        mkdir -p "${configPath}" "${TMPDIR}" || return 1
+                        printf '{"stats":{"custom":true}}\n' >"${statsFile}"
+                        printf '{"policy":{"levels":{"0":{"statsUserUplink":false,"statsUserDownlink":false}}}}\n' >"${policyFile}"
+                        printf '{"inbounds":[{"type":"tuic","users":[{"name":"fixture-user"}]}]}\n' >"${configPath}09_tuic_inbounds.json"
+                        printf '{"inbounds":[{"type":"tuic","users":[{"name":"old-user"}]}]}\n' >"${mergedFile}"
+                        printf '{"inbounds":[{"type":"tuic","users":[{"name":"fixture-user"}]}]}\n' >"${caseRoot}/new-merged.json"
+                        cp "${statsFile}" "${caseRoot}/old-stats.json" || return 1
+                        cp "${policyFile}" "${caseRoot}/old-policy.json" || return 1
+                        cp "${mergedFile}" "${caseRoot}/old-merged.json" || return 1
+                        firstWrite="${statsFile}"
+                        [[ "${phase}" != merged ]] || firstWrite="${mergedFile}"
+                        [[ "${phase}" != reload ]] || firstWrite=
+                        signalPending=true resultRc=0
+                        (
+                            if [[ "${kind}" == xray ]]; then
+                                ensureXrayTrafficStatsConfig
+                            else
+                                ensureSingBoxTrafficStatsConfig
+                            fi
+                        ) >"${caseRoot}/signal.log" 2>&1 || resultRc=$?
+                        [[ "${resultRc}" == "${expectedRc}" && -f "${caseRoot}/restore.calls" &&
+                            "$(wc -l <"${caseRoot}/restore.calls")" -eq 1 ]] || {
+                            printf 'traffic-signal-fail:%s:%s:%s:%s:rc=%s\n' "${kind}" "${phase}" "${signal}" "${recovery}" "${resultRc}" >&2
+                            return 1
+                        }
+                        backups=$(find "${TMPDIR}" -maxdepth 1 -name 'padm-check-log-backup.*' -type d -print)
+                        if [[ "${recovery}" == fail ]]; then
+                            [[ -n "${backups}" && "${backups}" != *$'\n'* && -f "${backups}/manifest" ]] || return 1
+                            cmp -s "${backups}/000000.json" "${caseRoot}/old-stats.json" || return 1
+                            grep -q '备份目录' "${REGRESSION_ERROR_CARD_LOG}" || return 1
+                            if [[ "${phase}" == reload ]]; then
+                                [[ "$(wc -l <"${caseRoot}/reload.calls")" -eq 1 ]] || return 1
+                            else
+                                [[ ! -e "${caseRoot}/reload.calls" ]] || return 1
+                            fi
+                        else
+                            cmp -s "${statsFile}" "${caseRoot}/old-stats.json" || return 1
+                            cmp -s "${policyFile}" "${caseRoot}/old-policy.json" || return 1
+                            cmp -s "${mergedFile}" "${caseRoot}/old-merged.json" || return 1
+                            [[ -z "${backups}" ]] || return 1
+                            if [[ "${phase}" == reload ]]; then
+                                [[ "$(wc -l <"${caseRoot}/reload.calls")" -eq 2 ]] || return 1
+                            else
+                                [[ ! -e "${caseRoot}/reload.calls" ]] || return 1
+                            fi
+                        fi
+                    done
+                done
+            done
+        done
+    ) || return 1
     local xrayConfig="${TMP_DIR}/traffic-xray-conf/"
     local singBoxConfig="${TMP_DIR}/traffic-sing-box-conf/"
     local fakeBin="${TMP_DIR}/traffic-fake-bin"
