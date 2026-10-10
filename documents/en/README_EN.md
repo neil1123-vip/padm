@@ -451,10 +451,20 @@ Within 30 seconds, the host binds a post-cursor trusted journal emitter to its
 master and live socket, checking both endpoints, the source port, boot/process
 generation and socket inode/fd before printing `source-verified`.
 Only a unique host `sshd` listener with a direct child emitter is accepted;
-file tags, old records, closed sockets, multiple owners or identity drift are rejected.
+when the emitter shares its socket with privsep children, each child must have the
+dedicated `sshd` UID, a safe executable, a direct parent relationship, matching
+boot/netns, valid timing, the same inode/fd and a stable process generation.
+Other owners, file tags, old records, closed sockets or identity drift are rejected.
 The result is not saved or reusable across transactions.
 `source_verified=true` describes this observation; `runtime_configuration_verified`
 and `jail_ready` remain `false`. This command does not enable SSH protection.
+
+The internal unit witness additionally requires the fresh master to be the selected
+systemd service's MainPID, fixes its current invocation/cgroup and checks all TCP
+listeners in both address families. Socket activation, wildcard listeners, extra
+listeners/masters, unreadable owners and generation changes are rejected. It proves
+only this live connection, not historical logs or continuous collector/jail readiness;
+there is no new menu or CLI activation entry.
 
 Status and unban access only the fixed `padm-nginx` jail in a running `net-fail2ban`
 container whose spec, image, labels and mounts match the current deployment. They

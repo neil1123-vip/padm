@@ -3346,7 +3346,8 @@ Fail2ban 菜单第 13 项直接接入；不要求已安装部署、不取得部�
 真实事件中的端口是客户端临时端口，目标地址/端口由 live accepted socket 绑定。
 emitter 必须直接为同 master 的子进程且持有该 socket，进程启动 tick 不晚于
 journal 单调时间；最终两次完整复核的稳定进程/socket 证据必须相等。
-只读命令有时间及输出上限，游标失效/溢出、连接关闭、多 owner 或身份漂移拒绝。
+只读命令有时间及输出上限，游标失效/溢出、连接关闭、未核验 owner 或身份漂移拒绝。
+合法 privsep 共享 socket 的逐一身份核验见 5C.8c.2a。
 
 独立客户端核对已可信登记的 known_hosts 主机公钥后仅执行一次 `auth_none`，
 保持未认证连接 25 秒；不传密码/私钥，不绕过主机密钥检查。
@@ -3437,6 +3438,67 @@ INPUT 插队、token/rule 漂移、半失败与 owner 竞态均有拒绝和保�
 核对完整唯一显式 listener，短命 child 不能靠已消失的 socket 猜测目的端口。
 连续来源、jail/启停事务、INPUT 共存、原生宿主/arm64/systemd/重启卸载
 仍未验收；未推送或发布，5C 与总目标 active。
+
+#### 5C.8c.2a SSH 当次活连接的 systemd unit 来源前置
+
+实现 `23b690d1 feat(docker): bind live SSH sources to systemd unit generations`，
+本地 SSH 签名；未推送或发布。
+
+内部 `ssh-journal.py` 复用同进程 `witness_evidence`，保留原公开来源结果，
+不接受跨事务 `source_verified` JSON 作为授权。所选 service 必须 loaded/active/running，
+有明确 MainPID、非零 InvocationID、规范 cgroup v2 与启动单调时间，拒绝 socket activation。
+fresh master 必须等于 MainPID；前后核对 unit 属性、主进程和完整两族 TCP listener。
+当前 cgroup 子树有遍历/进程上限，成员必须稳定且属于同 netns；
+只接受唯一显式 listener，拒绝 wildcard、额外 master/listener 与不可读 owner。
+
+当次挑战记录要求可信 `_SYSTEMD_UNIT/_SYSTEMD_INVOCATION_ID/_SYSTEMD_CGROUP`、
+boot、root emitter、exe 与新游标/单调时间逐项一致；末尾再次核对 live socket，
+完整进程代次及 emitter cgroup。结果仅 `scope=ssh-unit-source-only`，
+`source_verified/unit_verified=true`、`runtime_configuration_verified/jail_ready=false`。
+该模块没有公开菜单/CLI、日志挂载、collector、jail 或事务写入；
+unit 字段不能把已退出 child 的历史日志直接归因到目标端口。
+
+真实 privileged systemd 原型暴露原 8b 对合法 privsep shared socket 的误拒：
+同一唯一 ESTAB/inode 由 root `sshd-session` 与专用低权 `sshd-auth` child 持有。
+修复保留唯一 tuple 和 root emitter，最多 4 个唯一 PID owner，
+逐一核对专用非 root `sshd` UID 四值、安全 canonical exe、直接父子关系、
+boot/netns、启动 tick、同 inode/fd 及两次完整身份。owner 排序避免 `ss` 输出次序误报，
+额外 child 快照纳入 source 两次与 unit 末尾比较，PID/fd 未变但代次漂移仍拒绝。
+只增加本次实证的 `/usr/lib/openssh/sshd-auth` 与既有 `/usr/sbin/sshd` 路径，
+没有泛化其它发行版或远程 NSS；专用账号仍沿用 `pwd.getpwnam`。
+
+回归复用既有 `docker-ssh-preflight` selector，无新分片或重复全套；
+完整合同将较慢 ownership 提前调度，保持 45 项集合、18 分片及 Jobs 6。
+8c.1 实测单项耗时模拟由 331.065 降至 324.853 秒，仅为调度预测，
+不将它写成实际性能提升。
+
+2026-10-11，Docker Desktop Linux amd64，复用工具镜像
+`sha256:dbdfde081d3763df53ff13e5a79a9f2fbd7a98ef8660fed9ee02681a96abc2de`：
+
+| 最终检查 | 入口秒数 | 证据 |
+| --- | --- | --- |
+| SSH source/unit/preflight/client 定向，Jobs 2 | 1.600 | `.tmp-regression-docker-bfbd3bacc6e2463798ece5a31c172b92` |
+| 回归分发合同，Jobs 2 | 1.836 | `.tmp-regression-docker-7b1add768ac44b389ff496edeb87a937` |
+| 完整 Docker 合同，45/45，Jobs 6 | 338.768 | `.tmp-regression-docker-6f6f53a434fe4a79acd58f23f1a3fa7a` |
+| 双栈 systemd unit 正例，客户端各保持 25 秒 | 通过 | `.tmp-ssh-unit-probe-8c2/positive-results/summary.json` |
+
+三项 Docker 回归均实际执行，`cache_hit=false`；完整合同排队 22.569 秒，
+占用 2 个槽位，未扩展三槽预算。完整快照中的 10 个阶段文件与工作区逐一
+SHA256 匹配，四份 Python 文件和两份 Shell 回归入口已在容器内通过 AST、
+语法及 ShellCheck error 级别检查。完整合同仍包含 45 项，SSH 定向为
+source 18、unit 9、客户端合同及既有预检。
+
+双栈正例在真实 privileged systemd 原型中看到 root `sshd-session` 与 UID 996
+`sshd-auth` 共享同一 ESTAB inode；IPv4 `172.30.8.3 -> 172.30.8.2`、IPv6
+`fd08:cc:8c2::3 -> fd08:cc:8c2::2` 均返回
+`scope=ssh-unit-source-only`、`source_verified=true`、`unit_verified=true`，
+`runtime_configuration_verified=false`、`jail_ready=false`。错误 unit 和同 unit
+第二 master/额外端口原型仍 4/4 拒绝；旧误拒日志、现场进程和完整 journal 均保留。
+测试 units、veth、client 和 probe 容器已清理，仅保留依赖镜像与 `.tmp-*` 证据。
+清理本轮 6 套回归源码归档/清单及 2 份重复模块副本，共 14 文件、
+54,915,921 bytes，保留结果、日志、摘要与其它任务文件。
+本阶段不启用 collector、封禁 action、jail 或菜单/CLI 新入口；原生宿主、
+公网、arm64、重启卸载和连续短连接仍未验收。
 
 ## 第六步：发布与完整验收
 
