@@ -389,6 +389,31 @@ fail2banManagedSnapshot() {
         compose.json deployment.json images.env config secrets data logs | sha256sum
 }
 
+# 公共 CLI 只精确转发专项参数；不为测试扩大它可接受的发布参数。
+(
+    source "${PROJECT_ROOT}/install-docker.sh"
+    dockerEditCommand() { printf '%s\n' "$*"; }
+    for action in enable settings; do
+        output=$(dockerFail2banCommand "${action}" 24444,24445 6 600 3600 --preview)
+        [[ "${output}" == "--fail2ban-${action} 24444,24445 6 600 3600 --preview" ]] ||
+            fail "Fail2ban ${action} preview 参数未精确转发"
+        output=$(dockerFail2banCommand "${action}" 24444 7 900 7200 --confirm PADM-DOCKER-EDIT)
+        [[ "${output}" == "--fail2ban-${action} 24444 7 900 7200 --confirm PADM-DOCKER-EDIT" ]] ||
+            fail "Fail2ban ${action} confirm 参数未精确转发"
+        for suffix in extra bad-confirm release; do
+            status=0
+            case "${suffix}" in
+            extra) args=(--preview extra) ;;
+            bad-confirm) args=(--confirm wrong) ;;
+            release) args=(--manifest fixture) ;;
+            esac
+            output=$(dockerFail2banCommand "${action}" 24444 6 600 3600 "${args[@]}") || status=$?
+            [[ "${status}" -eq 2 && -z "${output}" ]] ||
+                fail "Fail2ban ${action} 接受多余参数、错误确认或发布参数"
+        done
+    done
+)
+
 imageReference() { printf 'ghcr.io/example/padm-%s:test@sha256:%s' "$1" "${IMAGE_DIGEST}"; }
 
 # shellcheck source=/dev/null
@@ -896,6 +921,140 @@ for residualMode in orphan state; do
         fail "${residualMode}: disabled shared wrapper changed residual evidence"
 done
 rm -f -- "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.state"
+
+# 专项启用与参数修改保留其它集成，并复用逐入口见证及失败恢复，不另造启动路径。
+FAIL2BAN_EDIT_BASE="${TEST_ROOT}/fail2ban-edit-base.json"
+jq --slurpfile wireguard "${WIREGUARD_SPEC}" \
+    '.host_integrations += $wireguard[0].host_integrations' \
+    "${FAIL2BAN_DISABLED_SPEC}" >"${FAIL2BAN_EDIT_BASE}"
+runControl 0 fail2ban-edit-base configure --spec "${FAIL2BAN_EDIT_BASE}"
+FAIL2BAN_EDIT_BEFORE=$(fail2banManagedSnapshot)
+rejectFail2ban 15 fail2ban-settings-disabled edit --fail2ban-settings 24444,24445 6 600 3600 --preview
+rejectFail2ban 2 fail2ban-enable-no-confirm edit --fail2ban-enable 24444,24445 6 600 3600
+rejectFail2ban 2 fail2ban-enable-missing-value edit --fail2ban-enable 24444,24445 6 600 --preview
+rejectFail2ban 2 fail2ban-enable-extra-value edit --fail2ban-enable 24444,24445 6 600 3600 extra --preview
+for action in enable settings; do
+    rejectFail2ban 2 "fail2ban-${action}-import" edit "--fail2ban-${action}" \
+        24444,24445 6 600 3600 --spec "${FAIL2BAN_SPEC}" --preview
+    rejectFail2ban 2 "fail2ban-${action}-other-edit" edit "--fail2ban-${action}" \
+        24444,24445 6 600 3600 --site-default --preview
+    rejectFail2ban 2 "fail2ban-${action}-off" edit "--fail2ban-${action}" \
+        24444,24445 6 600 3600 --fail2ban-off --preview
+    rejectFail2ban 2 "fail2ban-${action}-duplicate" edit "--fail2ban-${action}" \
+        24444,24445 6 600 3600 "--fail2ban-${action}" 24444 6 600 3600 --preview
+done
+while IFS='|' read -r ports maxRetry findTime banTime; do
+    rejectFail2ban 2 fail2ban-enable-invalid edit --fail2ban-enable \
+        "${ports}" "${maxRetry}" "${findTime}" "${banTime}" --preview
+done <<'EOF'
+|6|600|3600
+0|6|600|3600
+65536|6|600|3600
+24444,24444|6|600|3600
+24444,|6|600|3600
+24444, 24445|6|600|3600
+24444-24445|6|600|3600
+1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17|6|600|3600
+24444|0|600|3600
+24444|21|600|3600
+24444|6x|600|3600
+24444|6|59|3600
+24444|6|86401|3600
+24444|6|600|59
+24444|6|600|604801
+EOF
+rejectFail2ban 15 fail2ban-enable-unmanaged-port edit --fail2ban-enable 24446 6 600 3600 --preview
+for limits in '1 60 60' '20 86400 604800'; do
+    read -r maxRetry findTime banTime <<<"${limits}"
+    : >"${DOCKER_LOG}"
+    PADM_DOCKER_FAIL2BAN_SOURCE_IPV4='' runControl 0 fail2ban-enable-preview edit \
+        --fail2ban-enable 24444,24445 "${maxRetry}" "${findTime}" "${banTime}" --preview
+    ! grep -Eq '^(stop|rm|source-witness) |^compose .* (up|down|restart)( |$)' "${DOCKER_LOG}" ||
+        fail 'Fail2ban enable preview changed the owner, runtime or source proof'
+done
+FAIL2BAN_ENABLE_DRAFT="${TEST_ROOT}/fail2ban-enable-draft.json"
+jq '.host_integrations += [{
+  type:"fail2ban",profile:"net-fail2ban",firewall_rules:["DOCKER-USER"],devices:[],schedules:[],
+  settings:{log_file:"access.log",ports:[24444,24445],max_retry:6,find_time:600,ban_time:3600}
+}]' "${FAIL2BAN_EDIT_BASE}" >"${FAIL2BAN_ENABLE_DRAFT}"
+: >"${DOCKER_LOG}"
+runControl 0 fail2ban-enable-cancel apply-cancel "${FAIL2BAN_ENABLE_DRAFT}"
+! grep -Eq '^(stop|rm|source-witness) |^compose .* (up|down|restart)( |$)' "${DOCKER_LOG}" ||
+    fail 'Fail2ban enable cancellation changed the owner, runtime or source proof'
+[[ "$(fail2banManagedSnapshot)" == "${FAIL2BAN_EDIT_BEFORE}" ]] ||
+    fail 'Fail2ban enable preview, cancellation or rejected parameters changed managed files'
+: >"${DOCKER_LOG}"
+PADM_DOCKER_FAIL2BAN_SOURCE_IPV4='' runControl 15 fail2ban-enable-missing-source edit \
+    --fail2ban-enable 24444,24445 6 600 3600 --confirm PADM-DOCKER-EDIT
+! grep -Eq '^(stop|rm|source-witness) |^compose .* (up|down|restart)( |$)' "${DOCKER_LOG}" ||
+    fail 'Fail2ban enable touched the deployment without current source input'
+[[ "$(fail2banManagedSnapshot)" == "${FAIL2BAN_EDIT_BEFORE}" ]] ||
+    fail 'Fail2ban enable without source input changed managed files'
+: >"${DOCKER_LOG}"
+runControl 0 fail2ban-enable-success edit --fail2ban-enable 24444,24445 6 600 3600 \
+    --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile before "${FAIL2BAN_EDIT_BASE}" --slurpfile after "${DOCKER_ROOT}/config/spec.json" '
+  ($before[0] | del(.host_integrations)) == ($after[0] | del(.host_integrations)) and
+  $after[0].host_integrations == ($before[0].host_integrations + [{
+    type:"fail2ban",profile:"net-fail2ban",firewall_rules:["DOCKER-USER"],devices:[],schedules:[],
+    settings:{log_file:"access.log",ports:[24444,24445],max_retry:6,find_time:600,ban_time:3600}
+  }])
+' >/dev/null || fail 'Fail2ban enable changed fields or integrations beyond its new jail'
+python3 - "${DOCKER_LOG}" <<'PY'
+import sys
+commands = open(sys.argv[1], encoding="utf-8").read().splitlines()
+witnesses = [(i, line.split()) for i, line in enumerate(commands) if line.startswith("source-witness ")]
+starts = [(i, line) for i, line in enumerate(commands) if " up -d " in line]
+assert len(witnesses) == 2 and len({line[4] for _, line in witnesses}) == 2
+assert [line[1] for _, line in witnesses] == ["entry-main-ws", "entry-alt-ws"]
+assert len(starts) == 2 and starts[0][0] < witnesses[0][0] < witnesses[1][0] < starts[1][0]
+assert " net-fail2ban --remove-orphans" not in starts[0][1]
+assert " --no-deps " in starts[1][1] and " net-fail2ban --remove-orphans" in starts[1][1]
+PY
+rejectFail2ban 15 fail2ban-enable-already-enabled edit --fail2ban-enable 24444 1 60 60 --preview
+FAIL2BAN_SETTINGS_BEFORE=$(fail2banManagedSnapshot)
+cp -p -- "${DOCKER_ROOT}/config/spec.json" "${TEST_ROOT}/fail2ban-settings-before.json"
+: >"${DOCKER_LOG}"
+runControl 0 fail2ban-settings-preview edit --fail2ban-settings 24444 7 900 7200 --preview
+! grep -Eq '^(stop|rm|source-witness) |^compose .* (up|down|restart)( |$)' "${DOCKER_LOG}" ||
+    fail 'Fail2ban settings preview changed the owner, runtime or source proof'
+: >"${DOCKER_LOG}"
+PADM_DOCKER_FAIL2BAN_SOURCE_IPV4='' runControl 15 fail2ban-settings-missing-source edit \
+    --fail2ban-settings 24444 7 900 7200 --confirm PADM-DOCKER-EDIT
+! grep -Eq '^(stop|rm|source-witness) |^compose .* (up|down|restart)( |$)' "${DOCKER_LOG}" ||
+    fail 'Fail2ban settings stopped or restarted an owner without current source input'
+[[ "$(fail2banManagedSnapshot)" == "${FAIL2BAN_SETTINGS_BEFORE}" ]] ||
+    fail 'Fail2ban settings preview or missing source input changed managed files'
+: >"${DOCKER_LOG}"
+runControl 0 fail2ban-settings-success edit --fail2ban-settings 24444 7 900 7200 \
+    --confirm PADM-DOCKER-EDIT
+jq -en --slurpfile before "${TEST_ROOT}/fail2ban-settings-before.json" \
+    --slurpfile after "${DOCKER_ROOT}/config/spec.json" '
+  ($before[0] | .host_integrations |= map(if .type == "fail2ban" then
+    .settings.ports = [24444] | .settings.max_retry = 7 |
+    .settings.find_time = 900 | .settings.ban_time = 7200 else . end)) == $after[0]
+' >/dev/null || fail 'Fail2ban settings changed other fields or integrations'
+[[ "$(grep -c '^source-witness ' "${DOCKER_LOG}")" -eq 1 ]] &&
+    grep -q '^source-witness entry-main-ws ipv4 198.51.100.9 ' "${DOCKER_LOG}" ||
+    fail 'Fail2ban settings did not verify exactly its selected protected port'
+cp -p -- "${DOCKER_ROOT}/config/spec.json" "${TEST_ROOT}/fail2ban-settings-subset.json"
+rm -f -- "${TEST_ROOT}/source-fail-once"
+: >"${DOCKER_LOG}"
+FAKE_DOCKER_MODE=fail2ban-source-last-once runControl 14 fail2ban-settings-source-rollback edit \
+    --fail2ban-settings 24444,24445 8 1200 10800 --confirm PADM-DOCKER-EDIT
+cmp -s "${TEST_ROOT}/fail2ban-settings-subset.json" "${DOCKER_ROOT}/config/spec.json" ||
+    fail 'Fail2ban settings source failure did not restore the previous selected ports and parameters'
+python3 - "${DOCKER_LOG}" <<'PY'
+import sys
+commands = open(sys.argv[1], encoding="utf-8").read().splitlines()
+witnesses = [(i, line.split()) for i, line in enumerate(commands) if line.startswith("source-witness ")]
+jails = [i for i, line in enumerate(commands) if " up -d " in line and " net-fail2ban --remove-orphans" in line]
+assert [line[1] for _, line in witnesses] == ["entry-main-ws", "entry-alt-ws", "entry-main-ws"]
+assert len({line[4] for _, line in witnesses}) == 3, "settings rollback reused a witness nonce"
+assert len(jails) == 1 and jails[0] > witnesses[-1][0], "settings jail started without fresh recovery proof"
+PY
+[[ "$(sha256sum "${DOCKER_ROOT}/data/net/fail2ban/fail2ban.sqlite3")" == "${FAIL2BAN_SQLITE_HASH}" ]] ||
+    fail 'Fail2ban enable or settings changed persistent SQLite'
 
 runControl 0 fail2ban-restore-for-other-contracts configure --spec "${FAIL2BAN_SPEC}"
 rm -f -- "${TEST_ROOT}/fail2ban-stopped"

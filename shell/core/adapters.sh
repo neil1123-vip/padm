@@ -556,13 +556,9 @@ runPackageCommandWithProgress() {
     padmRegisterExitRollback stopPackageCommandWithProgress
     local packageMonitor=
     [[ $- != *m* ]] || packageMonitor=1
-    # Bash 原生成组，超时工具缺失时也能终止安装命令及其子进程。
+    # Bash 原生成组，超时预算不依赖外部工具，也能收回忽略 TERM 的命令。
     set -m
-    if command -v timeout >/dev/null 2>&1; then
-        timeout "${timeoutSeconds}s" bash -lc "${commandString}" </dev/null >"${progressFile}" 2>&1 &
-    else
-        bash -lc "${commandString}" </dev/null >"${progressFile}" 2>&1 &
-    fi
+    bash -lc "${commandString}" </dev/null >"${progressFile}" 2>&1 &
     local commandPid=$!
     PADM_PACKAGE_COMMAND_CONTEXT[pid]=${commandPid}
     [[ -n "${packageMonitor}" ]] || set +m
@@ -570,6 +566,11 @@ runPackageCommandWithProgress() {
     while kill -0 "${commandPid}" >/dev/null 2>&1; do
         sleep 1
         elapsed=$((elapsed + 1))
+        if [[ ${elapsed} -ge ${timeoutSeconds} ]] && kill -0 "${commandPid}" >/dev/null 2>&1; then
+            padmStopCommandGroup "${commandPid}"
+            status=124
+            break
+        fi
         [[ $((elapsed % 10)) -eq 0 ]] || continue
         if [[ -s "${progressFile}" ]]; then
             currentLogLine=$(tail -n 1 "${progressFile}")
@@ -591,8 +592,7 @@ runPackageCommandWithProgress() {
         fi
     done
 
-    wait "${commandPid}"
-    status=$?
+    [[ ${status} -ne 0 ]] || wait "${commandPid}" || status=$?
     PADM_PACKAGE_COMMAND_CONTEXT[active]=false
     unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
     cat "${progressFile}" >>"${logFile}"

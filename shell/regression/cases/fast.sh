@@ -3269,6 +3269,108 @@ EOF
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
 
+runUpdatePadmSignalRollbackRegression() (
+    set -euo pipefail
+    local base="${TMP_DIR}/update-padm-signal" root installDir status attempt signal hadEntry
+    fetchRemoteRef() { printf '1111111111111111111111111111111111111111\n'; }
+    downloadFile() {
+        cat >"$2/install.sh" <<'EOF'
+#!/usr/bin/env bash
+ensureScriptModules() { :; }
+trap 'printf stopped >"${PADM_UPDATE_SIGNAL_ROOT}/stopped"; exit 143' TERM
+printf ready >"${PADM_UPDATE_SIGNAL_ROOT}/ready"
+kill -"${PADM_UPDATE_SIGNAL}" "${PADM_UPDATE_SIGNAL_PID}"
+while true; do sleep 0.05; done
+EOF
+    }
+    for hadEntry in true false; do
+        for signal in INT TERM; do
+            root="${base}/${hadEntry}-${signal}"
+            installDir="${root}/install"
+            mkdir -p "${installDir}" "${root}/tmp"
+            if [[ "${hadEntry}" == true ]]; then
+                printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${installDir}/install.sh"
+                chmod 700 "${installDir}/install.sh"
+            fi
+            # 启用作业控制，避免后台 shell 在安装 trap 前继承忽略 INT。
+            set -m
+            (
+                export PADM_UPDATE_SIGNAL_PID=${BASHPID} PADM_UPDATE_SIGNAL_ROOT="${root}" PADM_UPDATE_SIGNAL="${signal}"
+                PADM_INSTALL_DIR="${installDir}" TMPDIR="${root}/tmp" updatePadm 1
+            ) >"${root}/run.log" 2>&1 &
+            local updatePid=$!
+            set +m
+            for ((attempt=0; attempt < 100; attempt++)); do
+                [[ -f "${root}/ready" ]] && break
+                sleep 0.05
+            done
+            [[ -f "${root}/ready" ]] || { kill -TERM "${updatePid}" 2>/dev/null || true; wait "${updatePid}" || true; return 1; }
+            for ((attempt=0; attempt < 100; attempt++)); do
+                kill -0 "${updatePid}" 2>/dev/null || break
+                sleep 0.05
+            done
+            if kill -0 "${updatePid}" 2>/dev/null; then
+                pkill -TERM -P "${updatePid}" 2>/dev/null || true
+            fi
+            status=0
+            wait "${updatePid}" || status=$?
+            [[ "${status}" == "$([[ "${signal}" == TERM ]] && printf 143 || printf 130)" ]]
+            if [[ "${hadEntry}" == true ]]; then
+                [[ "$(<"${installDir}/install.sh")" == $'#!/usr/bin/env bash\nprintf "old-entry\\n"' ]]
+            else
+                [[ ! -e "${installDir}/install.sh" ]]
+            fi
+            [[ -f "${root}/stopped" && ! -e "${installDir}/install.sh.bak" ]]
+        done
+    done
+    (
+        # 模块提交已完成但父进程尚未确认时取消，只保留入口与模块完整一致的新版。
+        regressionLoadInstallFunctions
+        local completed signal hadEntry status root installDir
+        fetchRemoteRef() { printf '1111111111111111111111111111111111111111\n'; }
+        downloadFile() { printf '#!/usr/bin/env bash\nensureScriptModules() { :; }\n' >"$2/install.sh"; }
+        padmRunCancelableCommand() {
+            local SCRIPT_DIR="${installDir}"
+            local SCRIPT_REF_FILE="${SCRIPT_DIR}/.padm-ref" SCRIPT_EXPECTED_REF_FILE="${SCRIPT_DIR}/.padm-entry-ref"
+            local SCRIPT_MANIFEST_FILE="${SCRIPT_DIR}/.padm-module-manifest"
+            printf '%s\n' "${PADM_SCRIPT_MODULE_REF}" >"${SCRIPT_REF_FILE}"
+            printf '%s\n' "${PADM_SCRIPT_MODULE_REF}" >"${SCRIPT_EXPECTED_REF_FILE}"
+            writeModuleManifest "${SCRIPT_MANIFEST_FILE}"
+            [[ "${completed}" == true ]] || printf broken >>"${SCRIPT_DIR}/shell/core/version.sh"
+            kill -"${signal}" "${BASHPID}"
+            return 0
+        }
+        for completed in true false; do
+            for hadEntry in true false; do
+                for signal in INT TERM; do
+                    root="${base}/committed-${completed}-${hadEntry}-${signal}"
+                    installDir="${root}/install"
+                    mkdir -p "${root}"
+                    regressionCreateInstallModuleFixture "${installDir}"
+                    if [[ "${hadEntry}" == true ]]; then
+                        printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${installDir}/install.sh"
+                    else
+                        rm -f "${installDir}/install.sh"
+                    fi
+                    local SCRIPT_DIR="${base}/other-entry"
+                    status=0
+                    ( PADM_INSTALL_DIR="${installDir}" updatePadm 1 ) >"${root}/run.log" 2>&1 || status=$?
+                    [[ "${status}" == "$([[ "${signal}" == TERM ]] && printf 143 || printf 130)" ]] ||
+                        { cat "${root}/run.log"; return 1; }
+                    if [[ "${completed}" == true ]]; then
+                        ( regressionConfigureInstallRefreshFixture "${installDir}"; scriptModulesReady )
+                    elif [[ "${hadEntry}" == true ]]; then
+                        [[ "$(<"${installDir}/install.sh")" == $'#!/usr/bin/env bash\nprintf "old-entry\\n"' ]]
+                    else
+                        [[ ! -e "${installDir}/install.sh" ]]
+                    fi
+                    [[ ! -e "${installDir}/install.sh.bak" ]]
+                done
+            done
+        done
+    )
+)
+
 runInstallRefreshRefFailClosedRegression() (
     (
         set -euo pipefail
@@ -7024,7 +7126,8 @@ runRegressionPlatformUpdate() {
     PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_PLATFORM_UPDATE_JOBS:-2}" \
         runParallelRegressionRunners "${TMP_DIR}/platform-update-parallel-${BASHPID:-$$}" \
         update-padm-version-prompt runUpdatePadmVersionPromptRegression \
-        update-padm-single-ref runUpdatePadmSingleRefRegression
+        update-padm-single-ref runUpdatePadmSingleRefRegression \
+        update-padm-signal-rollback runUpdatePadmSignalRollbackRegression
 }
 
 runRegressionPlatformRefresh() {

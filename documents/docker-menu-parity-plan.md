@@ -2931,6 +2931,59 @@ TLS reload 和恢复同样需要当前来源响应，未配置输入的无人值
 SSH/控制面日志与独立 jail、原生宿主 systemd/重启卸载、公网及 arm64 继续未决，
 Fail2ban 完整管理、5C 与总目标继续 active。
 
+#### 5C.6c WS 站点扫描启用与参数管理
+
+服务维护的 Fail2ban 子菜单保留现有 1–4 项，新增 5 启用、6 参数管理：
+
+```bash
+padm-docker fail2ban enable 443,8443 6 600 3600 --preview
+padm-docker fail2ban enable 443,8443 6 600 3600 --confirm PADM-DOCKER-EDIT
+padm-docker fail2ban settings 443,8443 8 900 7200 --confirm PADM-DOCKER-EDIT
+```
+
+四项依次为保护端口、失败阈值、检测窗口秒数、封禁秒数。
+保护端口显式输入，限 1–16 个已有协议 21 直连 WS；数字边界沿既有 schema，
+分别为 1–20、60–86400、60–604800。重复端口、缺值、多值、错误确认、
+规格导入与其它专项混用均拒绝；重复启用不重置参数，未启用不能修改参数。
+启用菜单显示 `6 / 600 / 3600` 默认值，参数修改不提供默认值。
+
+内部复用 `edit --fail2ban-enable` / `--fail2ban-settings` 的私有草稿、规格迁移、
+窄字段对照与 `dockerConfigureApply`。只新增该集成或修改四项 settings，
+固定 profile、日志和防火墙边界，保留其它集成、账号及持久数据。
+专项预览先执行现有 SourcePlan，带端口别名或 Reality stream 的不可证明组合提前拒绝。
+预览、字段取消、EOF 或确认取消不提交，也不停止旧 jail；
+缺本次来源输入在旧拥有者停止之前拒绝。
+确认后的参数更新同样经过 5C.6b 的 owner 清理、逐端口/族 fresh witness、
+整批快照复核和独立 jail `--no-deps` 启动；失败恢复重新挑战，不复用 nonce。
+菜单两项使用前台动作组，来源 `read` 与 INT/TERM 保持有效。
+
+本轮集中回归复用 `padm-regression:local`，未重建镜像、未安装宿主依赖，
+不扩大现有三槽预算；子智能体只做限定实现与复审，不分别重复完整合同。
+公共 CLI 精确转发检查、参数边界、WireGuard 集成保留、SQLite 保留、
+双端口启用、参数端口子集及末项来源失败后 fresh witness 恢复均在 phase4 通过。
+菜单 PTY 覆盖启用默认值、显式参数、四项输入及确认取消/EOF、后端失败、INT/TERM、
+入口列表失败和前台来源输入；限定静态复审无未决确定 P1/P2。
+
+| 检查 | 容器 / 入口秒数 | 证据 |
+| --- | --- | --- |
+| 最终 `docker-phase4`，Jobs 2 | 142.774 / 144.204 | `.tmp-regression-docker-c7377abe43de4da4af38607ff532585d` |
+| 最终 `docker-menu`，Jobs 2 | 45.882 / 46.984 | `.tmp-regression-docker-3a8a2fda08424f50a08738420f1db94e` |
+| 最终 `docker-contracts`，Jobs 6，38/38 | 332.776 / 333.670 | `.tmp-regression-docker-3a940641f9e34d69957baf4f2a273aa9` |
+
+菜单排队 152.353 秒，独立于 46.984 秒入口运行耗时；不以队列等待冒充测试变慢。
+完整合同排队 73.545 秒，最终快照单次 38/38 通过，`cache_hit: false`；
+通过后没有代码或测试改动，仅记录本次结果，不重复已稳定的完整回归。
+最终 9 个代码/测试/说明文件与完整合同快照逐文件一致，
+SHA256 证据在 `.tmp-fail2ban-manage-snapshot-check.log`；
+六个 Shell 文件语法及 ShellCheck error 通过，证据 `.tmp-fail2ban-manage-static.log`。
+实现 `b08247ec feat(docker): add transactional WS Fail2ban management`，
+本地 SSH 签名 `G`，本任务未推送或发布。清理本轮 17 个归档/清单/快照文件，
+共 34,738,595 字节；保留日志、result、SHA256 摘要、共享缓存及用户原有 8 个临时文件，
+记录在 `.tmp-fail2ban-manage-cleanup.log`。
+本步未改来源验证器或封禁 action，不重复 5C.6b 的双栈实流量矩阵。
+SSH/控制面日志与独立 jail、原生宿主 systemd/重启卸载、公网及 arm64 仍未验收；
+Fail2ban 完整管理、5C 与总目标继续 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

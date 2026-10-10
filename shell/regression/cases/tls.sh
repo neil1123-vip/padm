@@ -1063,6 +1063,49 @@ runTlsFailureReturnRegression() (
         exec {inputFd}<&-
     )
 
+    (
+        # 签发成功后的续签任务阶段仍须在取消时恢复 Nginx 原运行态。
+        local fixture="${root}/local-certificate-signal" signal wasRunning status
+        local HOME="${fixture}/home" PADM_TLS_DIR="${fixture}/tls"
+        local domain=signal.example.com currentHost= lastInstallationConfig=
+        local AUTO_DOMAIN="${domain}" btDomain= sslType=letsencrypt installedDNSAPIStatus=
+        mkdir -p "${HOME}/.acme.sh" "${PADM_TLS_DIR}"
+        installAcmeTool() { return 0; }
+        nginxRunning() { [[ "$(<"${fixture}/nginx.running")" == true ]]; }
+        xrayRunning() { return 1; }
+        singBoxRunning() { return 1; }
+        handleNginx() {
+            printf '%s\n' "$([[ "$1" == start ]] && printf true || printf false)" >"${fixture}/nginx.running"
+        }
+        readAcmeTLS() { :; }
+        tlsCertificatePairExists() { return 1; }
+        tlsAcmeSourceCertificateReusable() { return 1; }
+        tlsCertificatePairUsable() { return 0; }
+        switchDNSAPI() { dnsAPIStatus=n; dnsAPIType=; }
+        switchSSLType() { :; }
+        customSSLEmail() { :; }
+        acmeExecutable() { printf '/bin/true\n'; }
+        allowPort() { :; }
+        sudo() { "$@"; }
+        padmRunPortAllowTransaction() { "$@"; }
+        installTLSFromAcme() { :; }
+        singBoxLocalCertificateAvailable() { return 0; }
+        installCronTLS() {
+            [[ "$(<"${fixture}/nginx.running")" == false ]] || return 1
+            kill -"${signal}" "${BASHPID}"
+            :
+        }
+        for wasRunning in true false; do
+            for signal in INT TERM; do
+                printf '%s\n' "${wasRunning}" >"${fixture}/nginx.running"
+                status=0
+                ( singBoxInstallLocalTLSCertificate ) >/dev/null 2>&1 || status=$?
+                [[ "${status}" == "$([[ "${signal}" == TERM ]] && printf 143 || printf 130)" ]] || return 1
+                [[ "$(<"${fixture}/nginx.running")" == "${wasRunning}" ]] || return 1
+            done
+        done
+    )
+
     btDomain=
     readLastInstallationConfig() { return 0; }
     unInstallSubscribe() { return 0; }

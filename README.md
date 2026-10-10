@@ -586,19 +586,22 @@ padm-docker validate
 padm-docker assess
 ```
 
-服务维护菜单第 5 项提供已有受管 Fail2ban 的状态、单 IP 解封与站点扫描停用：
+服务维护菜单第 5 项提供受管 Fail2ban 的状态、单 IP 解封、WS 站点扫描启停及参数管理：
 
 ```bash
 padm-docker fail2ban status
 padm-docker fail2ban unban 192.0.2.7
 padm-docker fail2ban unban 2001:db8::7
+padm-docker fail2ban enable 443,8443 6 600 3600 --preview
+padm-docker fail2ban enable 443,8443 6 600 3600 --confirm PADM-DOCKER-EDIT
+padm-docker fail2ban settings 443,8443 8 900 7200 --confirm PADM-DOCKER-EDIT
 padm-docker fail2ban disable --preview
 padm-docker fail2ban disable --confirm PADM-DOCKER-EDIT
 padm-docker fail2ban verify-source entry-ws 203.0.113.7
 ```
 
-只操作当前运行且规格、镜像、标签及挂载一致的 `net-fail2ban` 容器和固定
-`padm-nginx` jail；状态与解封不自动启动服务、不修改配置或新增封禁。解封接受单个
+状态与解封只操作当前运行且规格、镜像、标签及挂载一致的 `net-fail2ban` 容器和固定
+`padm-nginx` jail；不自动启动服务、不修改配置或新增封禁。解封接受单个
 IPv4/IPv6 字面地址，不接受域名、CIDR、zone、任意 jail 或全部解封；
 菜单执行前需要确认。未配置、停机或归属不一致时拒绝操作，底层失败返回非零。
 维护前通过容器内 Fail2ban 原生只读协议核对已加载动作、公开参数和有效属性缓存；
@@ -606,6 +609,13 @@ IPv4/IPv6 字面地址，不接受域名、CIDR、zone、任意 jail 或全部�
 随后只读核对私密 runtime state 和两族内核规则，归属漂移时不执行解封 client。
 审计不是与特权管理员并发操作的原子事务，也不抵御恶意 Python action、
 私有执行缓存或 Fail2ban 程序本身被篡改；此时应先停止服务并人工核对。
+`enable` 只接受尚未启用的受管规格，`settings` 要求已经启用；四项参数依次为
+保护 WS 公开端口列表、失败阈值（1–20）、检测窗口（60–86400 秒）、
+封禁时长（60–604800 秒）。端口最多 16 个，必须是已有协议 21 的直连 WS，
+不接受端口别名或共存分流；重复启用不会重置已有参数。
+菜单启用的数字默认值为 `6 / 600 / 3600`，修改参数须逐项显式填写。
+两项复用专项编辑和配置事务，只改变该 Fail2ban 条目，保留其它集成、账号及持久数据；
+不是对运行 jail 直接 reload。预览或取消不启停服务，确认后的更新也必须重新完成来源挑战。
 停用复用配置编辑事务及既有规格迁移，只移除 Fail2ban 条目，其它宿主集成和业务数据保持不变。
 预览或取消不停止容器；确认后先审计旧拥有者，只停止该容器并保留退出证据，
 确认正常退出、私密 state 和两族受管规则均已清理，才安装新配置。

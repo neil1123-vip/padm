@@ -1351,7 +1351,7 @@ dockerEditCommand() {
     local portAlias= portAliasListener= portAliasPort=
     local regionMode= regionAllow='[]' regionAllowSet=0
     local ipv6Mode= ipv6Domains='[]' ipv6DomainsSet=0
-    local fail2banOff=0
+    local fail2banAction= fail2banPorts= fail2banMaxRetry= fail2banFindTime= fail2banBanTime=
     local DOCKER_CONFIG_RESTORE_ALPN_LISTENER=
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
@@ -1444,9 +1444,40 @@ dockerEditCommand() {
             httpRelay=disable
             shift
             ;;
+        --fail2ban-enable|--fail2ban-settings)
+            [[ "$#" -ge 5 && -n "$2" && "$2" != --* &&
+                -n "$3" && "$3" != --* && -n "$4" && "$4" != --* &&
+                -n "$5" && "$5" != --* && -z "${fail2banAction}" ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            fail2banAction=${1#--fail2ban-}
+            [[ "$2" =~ ^[0-9]{1,5}(,[0-9]{1,5}){0,15}$ ]] ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            local -a fail2banPortValues=()
+            local fail2banPort fail2banPortNumber fail2banPortList=
+            IFS=',' read -r -a fail2banPortValues <<<"$2"
+            for fail2banPort in "${fail2banPortValues[@]}"; do
+                fail2banPortNumber=$((10#${fail2banPort}))
+                (( fail2banPortNumber >= 1 && fail2banPortNumber <= 65535 )) ||
+                    return "${PADM_DOCKER_RC_USAGE}"
+                [[ ",${fail2banPortList}," != *",${fail2banPortNumber},"* ]] ||
+                    return "${PADM_DOCKER_RC_USAGE}"
+                fail2banPortList+="${fail2banPortList:+,}${fail2banPortNumber}"
+            done
+            [[ "$3" =~ ^[0-9]{1,2}$ ]] && fail2banMaxRetry=$((10#$3)) &&
+                (( fail2banMaxRetry >= 1 && fail2banMaxRetry <= 20 )) ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            [[ "$4" =~ ^[0-9]{1,5}$ ]] && fail2banFindTime=$((10#$4)) &&
+                (( fail2banFindTime >= 60 && fail2banFindTime <= 86400 )) ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            [[ "$5" =~ ^[0-9]{1,6}$ ]] && fail2banBanTime=$((10#$5)) &&
+                (( fail2banBanTime >= 60 && fail2banBanTime <= 604800 )) ||
+                return "${PADM_DOCKER_RC_USAGE}"
+            fail2banPorts=${fail2banPortList}
+            shift 5
+            ;;
         --fail2ban-off)
-            [[ "${fail2banOff}" -eq 0 ]] || return "${PADM_DOCKER_RC_USAGE}"
-            fail2banOff=1
+            [[ -z "${fail2banAction}" ]] || return "${PADM_DOCKER_RC_USAGE}"
+            fail2banAction=off
             shift
             ;;
         --port-alias|--port-alias-remove|--port-alias-default)
@@ -1627,11 +1658,11 @@ dockerEditCommand() {
         dockerError '额外入口端口专项编辑不能与规格导入或其它专项动作组合'
         return "${PADM_DOCKER_RC_USAGE}"
     }
-    [[ "${fail2banOff}" -eq 0 || ( -z "${specFile}" && -z "${regenerateReality}" &&
+    [[ -z "${fail2banAction}" || ( -z "${specFile}" && -z "${regenerateReality}" &&
         -z "${realityTarget}" && -z "${realityStream}" && -z "${siteMode}" &&
         -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
         -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" ) ]] || {
-        dockerError 'Fail2ban 停用不能与规格导入或其它专项动作组合'
+        dockerError 'Fail2ban 专项动作不能与规格导入或其它专项动作组合'
         return "${PADM_DOCKER_RC_USAGE}"
     }
     [[ "${mode}" != interactive || ( -t 0 && -t 1 ) ]] || {
@@ -1645,7 +1676,7 @@ dockerEditCommand() {
     dockerTrafficSafePath "${root}" "${root}/config/spec.json" || return "${PADM_DOCKER_RC_STATE}"
     [[ ( -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" &&
         -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
-        -z "${routingKind}" && -z "${httpRelay}" && "${fail2banOff}" -eq 0 ) ||
+        -z "${routingKind}" && -z "${httpRelay}" && -z "${fail2banAction}" ) ||
         -f "${root}/config/spec.json" ]] ||
         return "${PADM_DOCKER_RC_STATE}"
     if [[ ! -e "${root}/config/spec.json" && ! -L "${root}/config/spec.json" && -z "${specFile}" ]]; then
@@ -1699,7 +1730,7 @@ dockerEditCommand() {
     if [[ "${mode}" == interactive && -z "${specFile}" && "${imported}" -eq 0 &&
         -z "${regenerateReality}" && -z "${realityTarget}" && -z "${realityStream}" &&
         -z "${siteMode}" && -z "${alpnListener}" && -z "${http01}" && -z "${socks5}" &&
-        -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" && "${fail2banOff}" -eq 0 ]]; then
+        -z "${routingKind}" && -z "${httpRelay}" && -z "${portAlias}" && -z "${fail2banAction}" ]]; then
         dockerEditFields "${draft}" || status=$?
         if [[ "${status}" -eq 3 ]]; then
             printf '已取消配置编辑。\n'
@@ -1711,12 +1742,48 @@ dockerEditCommand() {
     fi
     jq -es 'length == 1 and (.[0] | type == "object")' "${draft}" >/dev/null 2>&1 ||
         return "${PADM_DOCKER_RC_STATE}"
-    if [[ "${fail2banOff}" -eq 1 ]]; then
+    if [[ "${fail2banAction}" == off ]]; then
         jq -e 'any(.host_integrations[]; .type == "fail2ban")' "${draft}" >/dev/null || {
             dockerError '当前规格未启用受管 Fail2ban 站点扫描防护'
             return "${PADM_DOCKER_RC_STATE}"
         }
         jq '.host_integrations |= map(select(.type != "fail2ban"))' "${draft}" >"${draft}.next" &&
+            chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
+            return "${PADM_DOCKER_RC_STATE}"
+    elif [[ "${fail2banAction}" == enable ]]; then
+        jq -e 'all(.host_integrations[]; .type != "fail2ban")' "${draft}" >/dev/null || {
+            dockerError '当前规格已启用受管 Fail2ban 站点扫描防护，不能重复启用'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        jq --arg ports "${fail2banPorts}" --argjson max_retry "${fail2banMaxRetry}" \
+            --argjson find_time "${fail2banFindTime}" --argjson ban_time "${fail2banBanTime}" '
+          ($ports | split(",") | map(tonumber)) as $ports |
+          .host_integrations += [{
+            type:"fail2ban", profile:"net-fail2ban", firewall_rules:["DOCKER-USER"],
+            devices:[], schedules:[],
+            settings:{log_file:"access.log",ports:$ports,max_retry:$max_retry,
+              find_time:$find_time,ban_time:$ban_time}
+          }]
+        ' "${draft}" >"${draft}.next" &&
+            chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
+            return "${PADM_DOCKER_RC_STATE}"
+    elif [[ "${fail2banAction}" == settings ]]; then
+        jq -e '([.host_integrations[] | select(.type == "fail2ban")] | length) == 1' \
+            "${draft}" >/dev/null || {
+            dockerError '当前规格未启用受管 Fail2ban 站点扫描防护，不能修改参数'
+            return "${PADM_DOCKER_RC_STATE}"
+        }
+        jq --arg ports "${fail2banPorts}" --argjson max_retry "${fail2banMaxRetry}" \
+            --argjson find_time "${fail2banFindTime}" --argjson ban_time "${fail2banBanTime}" '
+          ($ports | split(",") | map(tonumber)) as $ports |
+          .host_integrations |= map(
+            if .type == "fail2ban" then
+              .settings.ports = $ports |
+              .settings.max_retry = $max_retry |
+              .settings.find_time = $find_time |
+              .settings.ban_time = $ban_time
+            else . end)
+        ' "${draft}" >"${draft}.next" &&
             chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
             return "${PADM_DOCKER_RC_STATE}"
     fi
@@ -1914,6 +1981,9 @@ dockerEditCommand() {
         chmod 0600 "${draft}.next" && mv -f -- "${draft}.next" "${draft}" ||
         return "${PADM_DOCKER_RC_STATE}"
     dockerConfigureSpecValidate "${draft}" || return "${PADM_DOCKER_RC_STATE}"
+    if [[ "${fail2banAction}" == enable || "${fail2banAction}" == settings ]]; then
+        dockerFail2banSourcePlan "${draft}" >/dev/null || return "${PADM_DOCKER_RC_STATE}"
+    fi
     dockerAcmeWebrootTransitionValidate "${draft}" || return "${PADM_DOCKER_RC_STATE}"
     if [[ -n "${regenerateReality}" ]]; then
         regenerateReality=$(jq -er --arg listener "${regenerateReality}" '
@@ -1950,7 +2020,7 @@ dockerEditCommand() {
         --arg socks5 "${socks5}" --arg routing_kind "${routingKind}" \
         --arg http_relay "${httpRelay}" \
         --arg port_alias "${portAlias}" \
-        --argjson fail2ban_off "${fail2banOff}" \
+        --arg fail2ban_action "${fail2banAction}" \
         --slurpfile before "${normalized}" --slurpfile after "${draft}" '
       def fixed: del(.server, .public_port, .address_families, .name,
         .reality.target_host, .reality.target_port, .reality.server_name, .websocket.path, .httpupgrade.path,
@@ -1961,6 +2031,12 @@ dockerEditCommand() {
       def reality: .id == 1 or .id == 2 or .id == 26;
       def shared: fixed | del(.listener_id, .core, .id, .xhttp, .grpc);
       def root: del(.core.protocols, .core.secondary_type, .tls, .subscription.enabled, .site);
+      def without_fail2ban:
+        .host_integrations |= map(select(.type != "fail2ban"));
+      def without_fail2ban_settings:
+        .host_integrations |= map(if .type == "fail2ban" then
+          del(.settings.ports, .settings.max_retry, .settings.find_time, .settings.ban_time)
+          else . end);
       def special: .core.protocols |= map(
         if $regenerate != "" and .listener_id == $regenerate then
           del(.reality.private_key, .reality.public_key, .reality.short_id)
@@ -1981,9 +2057,17 @@ dockerEditCommand() {
           . as $bound | any($new.core.protocols[];
             .listener_id == $bound.listener_id and .core == $bound.core and
             .public_port == $bound.public_port and .address_families == $bound.address_families))) and
-      (if $fail2ban_off == 1 then
+      (if $fail2ban_action == "off" then
         $new.host_integrations == [$old.host_integrations[] | select(.type != "fail2ban")] and
         ($old | del(.host_integrations)) == ($new | del(.host_integrations))
+       elif $fail2ban_action == "enable" then
+        ([$old.host_integrations[] | select(.type == "fail2ban")] | length) == 0 and
+        ([$new.host_integrations[] | select(.type == "fail2ban")] | length) == 1 and
+        ($old | without_fail2ban) == ($new | without_fail2ban)
+       elif $fail2ban_action == "settings" then
+        ([$old.host_integrations[] | select(.type == "fail2ban")] | length) == 1 and
+        ([$new.host_integrations[] | select(.type == "fail2ban")] | length) == 1 and
+        ($old | without_fail2ban_settings) == ($new | without_fail2ban_settings)
        elif $port_alias != "" then
         ($old | del(.port_aliases)) == ($new | del(.port_aliases))
        elif $http_relay != "" then
@@ -2043,7 +2127,7 @@ dockerEditCommand() {
         end)
        end)
     ' >/dev/null 2>&1 || {
-        dockerError '仅支持 Fail2ban 停用、额外入口端口/HTTP 中继/路由/HTTP-01/站点专项管理与现有入口编辑、复制、Reality 传输派生和删除；账号、密钥、已有入口身份、内部端口与核心、主核心、证书和发布不能改写'
+        dockerError '仅支持 Fail2ban/额外入口端口/HTTP 中继/路由/HTTP-01/站点专项管理与现有入口编辑、复制、Reality 传输派生和删除；账号、密钥、已有入口身份、内部端口与核心、主核心、证书和发布不能改写'
         return "${PADM_DOCKER_RC_STATE}"
     }
     opsImage=$(dockerManifestImageReference ops) || return "${PADM_DOCKER_RC_MANIFEST}"

@@ -397,20 +397,23 @@ padm-docker logs
 padm-docker validate
 ```
 
-Service maintenance menu item 5 provides status, single-IP unban and site-scan
-disabling for an existing managed Fail2ban container:
+Service maintenance menu item 5 provides status, single-IP unban, WS site-scan
+enabling/disabling and settings for managed Fail2ban:
 
 ```bash
 padm-docker fail2ban status
 padm-docker fail2ban unban 192.0.2.7
 padm-docker fail2ban unban 2001:db8::7
+padm-docker fail2ban enable 443,8443 6 600 3600 --preview
+padm-docker fail2ban enable 443,8443 6 600 3600 --confirm PADM-DOCKER-EDIT
+padm-docker fail2ban settings 443,8443 8 900 7200 --confirm PADM-DOCKER-EDIT
 padm-docker fail2ban disable --preview
 padm-docker fail2ban disable --confirm PADM-DOCKER-EDIT
 padm-docker fail2ban verify-source entry-ws 203.0.113.7
 ```
 
-Only the fixed `padm-nginx` jail in a running `net-fail2ban` container whose spec,
-image, labels and mounts match the current deployment is accessed. Status and unban
+Status and unban access only the fixed `padm-nginx` jail in a running `net-fail2ban`
+container whose spec, image, labels and mounts match the current deployment. They
 do not start services, change configuration or add bans. Unban accepts one literal
 IPv4/IPv6 address, not a hostname, CIDR, zone, arbitrary jail or bulk unban;
 the menu requires confirmation. Missing, stopped or mismatched deployments are
@@ -424,6 +427,17 @@ This is not atomic against concurrent
 privileged changes and does not defend against malicious Python actions, private
 execution-cache tampering or modified Fail2ban code. Stop the service and inspect
 such changes manually.
+
+`enable` requires a managed spec without Fail2ban; `settings` requires it to be enabled.
+The four arguments are protected public WS ports, retry threshold (1–20),
+find window (60–86400 seconds) and ban duration (60–604800 seconds).
+At most 16 ports are accepted, all belonging to existing direct protocol 21 WS listeners;
+port aliases and coexistence entries are rejected. Enabling twice never resets settings.
+The enabling menu defaults are `6 / 600 / 3600`; settings must be entered explicitly.
+Both actions reuse narrow spec editing and the configuration transaction, changing only
+the Fail2ban integration while preserving other integrations, accounts and persistent data.
+They do not directly reload a running jail. Preview and cancellation do not start or stop
+services; confirmed settings changes require new source challenges too.
 
 Disabling reuses configuration editing and its existing spec migration, removing only the Fail2ban
 integration; other integrations and business data remain unchanged. Preview and
