@@ -3391,6 +3391,53 @@ SHA256 与工作区一致。实际 Fail2ban 1.1.0 上游 `sshd.conf` 对 OpenSSH
 未推送或发布；独立 INPUT owner/jail、原生宿主/arm64/systemd/重启卸载
 仍待验收，5C 和总目标 active。
 
+#### 5C.8c.1 SSH 独立 INPUT 所有权后端
+
+实现 `c60e77d8 feat(docker): add isolated SSH INPUT ownership backend`，
+本地 SSH 签名 G；真实 control 夹具诊断独立提交 `4f981767`，签名 G。
+SSH 内部 preflight/health/clean/action 复用既有 owner、随机链、sentinel
+与精确清理机制，使用独立 schema 1 `fail2ban-ssh.state`、
+`padm-f2bs-*` 链和 token comment；只接受规范单目标地址、单端口与单地址族。
+每次写入前复核 state/kernel，SSH 审计扫描末尾再次复核 owner，发现替换拒绝。
+health 仅证明后端资源，clean 仅证明停止后 state/规则为空，不负责撤销。
+
+未开放 SSH run/menu、jail、原始 journal 挂载或跨事务来源票据。
+两个 INPUT 范围仍要求链首，本阶段在两族扫描中拒绝任何 control 资源，
+不宣称 SSH/control 可并存；WS 原审计不放宽，SSH/WS 共存保持原 state、
+SQLite、jail tickets 和规则不变。state 地址族错配、另一族残留、外来引用、
+INPUT 插队、token/rule 漂移、半失败与 owner 竞态均有拒绝和保留证据合同。
+
+2026-10-10 至 2026-10-11，Docker Desktop Linux amd64，复用工具镜像
+`sha256:dbdfde081d3763df53ff13e5a79a9f2fbd7a98ef8660fed9ee02681a96abc2de`：
+
+| 最终检查 | 入口秒数 | 证据 |
+| --- | --- | --- |
+| ownership 正反例，Jobs 2 | 39.404 | `.tmp-regression-docker-22c9a617d77c4e5885d44ad7d5b9d21b` |
+| 真实 WS/SSH 双族 owner/action，Jobs 2 | 55.238 | `.tmp-regression-docker-a5f56ee9546c460aad977c04b992215c` |
+| 真实 control/WireGuard/封禁计数补验，Jobs 2 | 17.136 | `.tmp-regression-docker-f001408493124e4e84f31d56f170e67c` |
+| 完整 Docker 合同，45/45，Jobs 6 | 332.031 | `.tmp-regression-docker-38db0609c3844ffe8e1a383478c74744` |
+| 三个 Shell 语法/ShellCheck error、6 块嵌入 Python AST、新夹具 AST | 通过 | Docker 当前源码快照 |
+
+全部实际执行、`cache_hit=false`；完整排队 382 ms，保持三槽预算。
+四个交付源码与最终完整归档逐一 SHA256 匹配，源码内容摘要
+`DC3C8376AC130D30896FF4BB79A275E2D09F8EDACEFC05650665ABD752AA429A`。
+真实夹具复用原两个隔离 net 容器，在 WS jail 运行时验证 SSH IPv4/IPv6
+内部 action 与精确清理，不冒充 SSH 认证日志、真实封禁流量或宿主验收。
+
+首次真实 WS/SSH 失败于旧 loaded-action 审计调用漏传 `ws`，四处统一显式传参
+后补验通过。control 补验两次在 jail 启动前发生 HTTP 初始化 timeout；
+新增有限状态/网络诊断，以及始终核对路由 dev/prefsrc 和 API PID netns，
+保持原等待与成功断言。随后两次真实回归通过，间歇超时根因仍未确认，
+不将诊断补丁写成已修复生产故障。
+
+详细证据 `.tmp-ssh-input-8c1/evidence.md`；清理本轮 18 个归档/清单文件，
+共 81,886,484 bytes，
+保留结果、日志、摘要、共享镜像索引与其他任务临时文件。
+后续 collector 必须绑定 fresh master 与 systemd MainPID/invocation/cgroup，
+核对完整唯一显式 listener，短命 child 不能靠已消失的 socket 猜测目的端口。
+连续来源、jail/启停事务、INPUT 共存、原生宿主/arm64/systemd/重启卸载
+仍未验收；未推送或发布，5C 与总目标 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。
