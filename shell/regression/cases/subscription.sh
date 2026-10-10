@@ -1196,6 +1196,56 @@ runSubscriptionOutputMixedLocalRemoteAllFailedPreservesPreviousRegression() (
 )
 
 runSubscriptionOutputTlsVlessVmessTrojanRegression() {
+    local httpUpgradeBoundaryFailed=0
+    (
+        # 共享读取入口必须在原 JSON 值被字符串化或裁去尾换行前拒绝坏 path。
+        local root="${TMP_DIR}/httpupgrade-reader-path"
+        local configPath="${root}/primary/" singBoxConfigPath= nginxConfigPath="${root}/nginx/"
+        local currentInstallProtocolType=,23, coreInstallType=1 currentPath=fallback currentDefaultPort=443
+        local currentCDNAddress=cdn.example.com singBoxVMessHTTPUpgradePort=8443 singBoxVMessHTTPUpgradePath=/upgrade
+        local mode variant configFile expected status failed=0 capture="${root}/output"
+        mkdir -p "${configPath}" "${root}/auxiliary" "${nginxConfigPath}"
+        printf 'server_name tls.example.com;\n' >"${nginxConfigPath}sing_box_VMess_HTTPUpgrade.conf"
+        subscribeSectionTitle() { :; }
+        subscribeAccountTitle() { :; }
+        cdnStoredAddress() { printf '%s\n' cdn.example.com; }
+        defaultBase64Code() { printf '%s\n' "$6" >>"${capture}"; }
+        for mode in xray singbox auxiliary; do
+            coreInstallType=1 singBoxConfigPath=
+            configFile="${configPath}11_VMess_HTTPUpgrade_inbounds.json"
+            [[ ! -f "${configFile}" ]] || rm -f "${configFile}"
+            if [[ "${mode}" == singbox ]]; then
+                coreInstallType=2
+            elif [[ "${mode}" == auxiliary ]]; then
+                singBoxConfigPath="${root}/auxiliary/"
+                configFile="${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json"
+            fi
+            for variant in '"/upgrade"' null missing '""' 42 '"/upgrade\n"'; do
+                [[ "${mode}" == xray || "${variant}" != null && "${variant}" != missing && "${variant}" != '""' ]] || continue
+                expected=/upgrade
+                [[ "${variant}" != null && "${variant}" != missing && "${variant}" != '""' ]] || expected=/fallback
+                if [[ "${variant}" == missing ]]; then
+                    jq -n '{inbounds:[{settings:{clients:[{email:"sub-path",id:"uuid"}]},streamSettings:{httpupgradeSettings:{}}}]}' >"${configFile}" || return 1
+                elif [[ "${mode}" == xray ]]; then
+                    jq -n --argjson path "${variant}" '{inbounds:[{settings:{clients:[{email:"sub-path",id:"uuid"}]},streamSettings:{httpupgradeSettings:{path:$path}}}]}' >"${configFile}" || return 1
+                else
+                    jq -n --argjson path "${variant}" '{inbounds:[{users:[{name:"sub-path",uuid:"uuid"}],transport:{type:"httpupgrade",path:$path}}]}' >"${configFile}" || return 1
+                fi
+                : >"${capture}"
+                showVmessHTTPUpgradeAccounts >/dev/null 2>&1; status=$?
+                if [[ "${variant}" == 42 || "${variant}" == '"/upgrade\n"' ]]; then
+                    if [[ "${status}" -ne 1 || -s "${capture}" ]]; then
+                        printf 'assert-fail:httpupgrade-raw-path:%s:%s\n' "${mode}" "${variant}" >&2
+                        failed=1
+                    fi
+                elif [[ "${status}" -ne 0 || "$(<"${capture}")" != "${expected}" ]]; then
+                    printf 'assert-fail:httpupgrade-path-baseline:%s:%s\n' "${mode}" "${variant}" >&2
+                    failed=1
+                fi
+            done
+        done
+        [[ "${failed}" -eq 0 ]]
+    ) || httpUpgradeBoundaryFailed=1
     (
         # 各账号读取入口独立传播读取和输出失败，不改变调用方的 pipefail。
         set +o pipefail
@@ -1312,6 +1362,7 @@ assertCapturedSubscribeOutputs "tls-httpupgrade-user" "${httpUpgradeLink}" "edge
 assertDisplayedDefaultSubscribeLink "tls-httpupgrade-user" "通用链接：VMess HTTPUpgrade TLS"
 jq -e '.[0].security == "auto" and .[0].transport.path == "/upgrade" and .[0].packet_encoding == "packetaddr"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-httpupgrade-user" >/dev/null
 unset REGRESSION_ECHO_LOG
+[[ "${httpUpgradeBoundaryFailed}" -eq 0 ]] || return 1
 }
 
 runSubscriptionOutputAuxiliaryUdpRegression() (
@@ -1418,6 +1469,41 @@ JSON
 runSubscriptionOutputTlsAnyHysteriaTuicNaiveRegression() {
     runRegressionStep subscription-output-auxiliary-udp runSubscriptionOutputAuxiliaryUdpRegression
     local tlsBoundaryFailed=0
+    (
+        # 使用真实状态读取与订阅入口，坏拥塞算法不得被裁剪后进入输出。
+        local singBoxConfigPath="${TMP_DIR}/tuic-reader-algorithm/" configPath= coreInstallType=2
+        local currentInstallProtocolType=,31, singBoxTuicPort=9443
+        local tuicPortHoppingStart= tuicPortHoppingEnd= tuicPortHopping=
+        local variant expected status failed=0 capture="${TMP_DIR}/tuic-reader-algorithm-output"
+        local tuicConfigFile="${singBoxConfigPath}09_tuic_inbounds.json"
+        mkdir -p "${singBoxConfigPath}"
+        readPortHopping() { :; }
+        protocolConfigFile() { printf '%s\n' "${tuicConfigFile}"; }
+        defaultBase64Code() { printf '%s\n' "${tuicAlgorithm}" >>"${capture}"; }
+        for variant in '"cubic"' '"bbr"' '"new_reno"' null missing 42 '"bbr\n"' '"bbr&allow_insecure=1"'; do
+            if [[ "${variant}" == missing ]]; then
+                jq -n '{inbounds:[{listen_port:9443,tls:{server_name:"tuic.example.com"},users:[{name:"sub-tuic",uuid:"uuid",password:"pass"}]}]}' >"${tuicConfigFile}" || return 1
+            else
+                jq -n --argjson algorithm "${variant}" '{inbounds:[{listen_port:9443,congestion_control:$algorithm,tls:{server_name:"tuic.example.com"},users:[{name:"sub-tuic",uuid:"uuid",password:"pass"}]}]}' >"${tuicConfigFile}" || return 1
+            fi
+            : >"${capture}"
+            (readSingBoxConfig && showTuicAccounts) >/dev/null 2>&1; status=$?
+            if [[ "${variant}" == 42 || "${variant}" == '"bbr\n"' || "${variant}" == '"bbr&allow_insecure=1"' ]]; then
+                if [[ "${status}" -ne 1 || -s "${capture}" ]]; then
+                    printf 'assert-fail:tuic-raw-algorithm:%s\n' "${variant}" >&2
+                    failed=1
+                fi
+            else
+                expected=cubic
+                [[ "${variant}" == null || "${variant}" == missing ]] || expected=$(jq -r . <<<"${variant}")
+                if [[ "${status}" -ne 0 || "$(<"${capture}")" != "${expected}" ]]; then
+                    printf 'assert-fail:tuic-algorithm-baseline:%s\n' "${variant}" >&2
+                    failed=1
+                fi
+            fi
+        done
+        [[ "${failed}" -eq 0 ]]
+    ) || tlsBoundaryFailed=1
     (
         local configPath="${TMP_DIR}/tls-reader-tail-lf/" coreInstallType=2 singBoxConfigPath=
         local currentInstallProtocolType=,3,5,4,31, currentHost=tls.example.com
