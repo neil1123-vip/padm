@@ -192,14 +192,22 @@ jq -e '.control.revision == 0 and .control.last_digest != null' "${spec}" >/dev/
 [[ "$(stat -c '%a:%u:%g' "${spec}")" == 600:0:0 ]]
 [[ "$(stat -c '%a:%u:%g' "${root}/config/control/state.json")" == 640:0:10001 ]]
 [[ "$(stat -c '%a:%u:%g' "${root}/config/control")" == 750:0:10001 ]]
+[[ "$(stat -c '%a:%u:%g' "${root}/logs/control")" == 750:0:10001 ]]
+[[ "$(stat -c '%a:%u:%g:%h' "${root}/logs/control/auth.log")" == 640:10001:10001:1 ]]
 jq -e '.services.control |
   .network_mode == "host" and .user == "10001:10001" and
   .cap_drop == ["ALL"] and (has("ports") | not) and
   .depends_on["net-wireguard"].condition == "service_healthy" and
   .volumes[0].target == "/etc/padm/control" and .volumes[0].read_only and
-  .command == ["control","--state","/etc/padm/control/state.json"] and
+  .volumes[1] == {type:"bind",source:"${PADM_DOCKER_ROOT}/logs/control",
+    target:"/var/log/padm/control",read_only:false} and
+  (.volumes | length) == 2 and
+  .command == ["control","--state","/etc/padm/control/state.json",
+    "--access-log","/var/log/padm/control/auth.log"] and
   .healthcheck.test[-3:] == ["control-health","--state","/etc/padm/control/state.json"]' \
   "${root}/compose.json" >/dev/null
+printf 'existing-control-auth-evidence\n' >>"${root}/logs/control/auth.log"
+authDigest=$(sha256sum "${root}/logs/control/auth.log")
 dockerControlStateCheck "${root}"
 chmod 0666 "${spec}"
 if dockerControlStateCheck "${root}"; then exit 1; fi
@@ -255,15 +263,58 @@ DOCKER_STAGED_BUNDLE_PATH=$(dockerCurrentBundlePath)
     ' "${spec}" >"${PADM_DOCKER_MANIFEST_FILE}"
     PADM_DOCKER_MANIFEST_SHA256=$(sha256sum "${PADM_DOCKER_MANIFEST_FILE}" | cut -d ' ' -f 1)
     PADM_DOCKER_MANIFEST_SIGNATURE_IDENTITY=fixture
+    cp -- "${root}/compose.json" "${root}/current-compose.json"
+    jq '.services.control.command = ["control","--state","/etc/padm/control/state.json"] |
+      .services.control.volumes = [.services.control.volumes[0]] |
+      .services[].labels["io.padm.release"] = "3.1.7"' \
+      "${root}/current-compose.json" >"${root}/compose.json"
+    cmp -s -- "${root}/compose.json" \
+        <(dockerGenerateCompatibleControlCompose "${spec}" "${root}/compose.json" "${root}")
+    mkdir -- "${root}/legacy-baseline"
+    dockerEditBaselineValidate "${spec}" "${root}/legacy-baseline"
+    # 候选生成也用于只读评估，不得给旧 stdout 部署创建生产日志。
+    mv -- "${root}/logs/control" "${root}/saved-control-log"
     dockerCreateUpdateCandidate
+    [[ ! -e "${root}/logs/control" ]]
     [[ "$(stat -c '%a:%u:%g' "${DOCKER_CONFIG_CANDIDATE}/config/spec.json")" == 600:0:0 ]]
     dockerControlStateCheck "${DOCKER_CONFIG_CANDIDATE}"
     [[ "$(jq '.control.revision' "${DOCKER_CONFIG_CANDIDATE}/config/spec.json")" == 0 ]]
+    [[ "$(stat -c '%a:%u:%g' "${DOCKER_CONFIG_CANDIDATE}/logs/control")" == 750:0:10001 &&
+        ! -e "${DOCKER_CONFIG_CANDIDATE}/logs/control/auth.log" ]]
+    jq -e '.services.control.command[-2:] ==
+      ["--access-log","/var/log/padm/control/auth.log"] and
+      ([.services[].labels["io.padm.release"]] | unique) == ["3.1.8"]' \
+      "${DOCKER_CONFIG_CANDIDATE}/compose.json" >/dev/null
+    dockerCandidateCompose() {
+        [[ "$*" == "${DOCKER_CONFIG_CANDIDATE} config --format json" ]] && return 0
+        [[ "$*" == "${DOCKER_CONFIG_CANDIDATE} run --rm --no-deps control control --state /etc/padm/control/state.json --access-log /var/log/padm/control/auth.log --check" ]] || return 1
+        [[ "${REJECT_ACCESS_LOG_ARGUMENT:-0}" != 1 ]]
+    }
+    dockerValidateUpdateCandidate "${DOCKER_CONFIG_CANDIDATE}"
+    REJECT_ACCESS_LOG_ARGUMENT=1
+    if dockerValidateUpdateCandidate "${DOCKER_CONFIG_CANDIDATE}"; then exit 1; fi
+    [[ ! -e "${DOCKER_CONFIG_CANDIDATE}/logs/control/auth.log" &&
+        ! -e "${root}/logs/control" ]]
     dockerCleanupConfigurationCandidate
+    mv -- "${root}/saved-control-log" "${root}/logs/control"
+    # 旧参数和新挂载的混合形态不属于任何受管版本，不能在升级时洗白。
+    jq '.services.control.command = ["control","--state","/etc/padm/control/state.json"]' \
+        "${root}/current-compose.json" >"${root}/compose.json"
+    if dockerCreateUpdateCandidate; then exit 1; fi
+    dockerCleanupConfigurationCandidate
+    cp -- "${root}/current-compose.json" "${root}/compose.json"
 )
 
 before=$(sha256sum "${spec}" "${root}/config/control/state.json")
 upCount=$(wc -l <"${TEST_ROOT}/compose.log")
+backupsBefore=$(find "${root}/backups" -mindepth 1 -maxdepth 1 -type d | sort)
+chmod 0660 "${root}/logs/control/auth.log"
+if apply "${root}/changed.json"; then exit 1; fi
+[[ "$(sha256sum "${spec}" "${root}/config/control/state.json")" == "${before}" &&
+    "$(wc -l <"${TEST_ROOT}/compose.log")" == "${upCount}" &&
+    "$(find "${root}/backups" -mindepth 1 -maxdepth 1 -type d | sort)" == "${backupsBefore}" &&
+    "$(stat -c %a "${root}/logs/control/auth.log")" == 660 ]]
+chmod 0640 "${root}/logs/control/auth.log"
 apply "${root}/changed.json" '' '' preview
 [[ "$(sha256sum "${spec}" "${root}/config/control/state.json")" == "${before}" ]]
 [[ "$(wc -l <"${TEST_ROOT}/compose.log")" == "${upCount}" ]]
@@ -420,6 +471,44 @@ dockerRestoreConfiguration
 [[ "$(jq '.control.revision' "${spec}")" == "${revision}" ]]
 dockerCleanupConfigurationCandidate
 
+# 旧镜像恢复保留精确旧主控编排；日志不是配置快照，不能倒退已有来源证据。
+dockerBackupConfiguration update
+legacyBackup=${DOCKER_CONFIG_BACKUP}
+[[ ! -e "${legacyBackup}/logs" ]] &&
+    ! grep -q '^logs/' "${legacyBackup}/present"
+jq '.services.control.command = ["control","--state","/etc/padm/control/state.json"] |
+  .services.control.volumes = [.services.control.volumes[0]] |
+  .services[].labels["io.padm.release"] = "3.1.7"' \
+  "${legacyBackup}/compose.json" >"${legacyBackup}/compose.next.json"
+mv -- "${legacyBackup}/compose.next.json" "${legacyBackup}/compose.json"
+chmod 0600 "${legacyBackup}/compose.json"
+legacyComposeDigest=$(sha256sum "${legacyBackup}/compose.json")
+DOCKER_CONFIG_BACKUP=${legacyBackup}
+DOCKER_CONFIG_SWITCHED=1
+upCount=$(wc -l <"${TEST_ROOT}/compose.log")
+chmod 0660 "${root}/logs/control/auth.log"
+if dockerRestoreConfiguration; then exit 1; fi
+[[ "$(wc -l <"${TEST_ROOT}/compose.log")" == "${upCount}" ]]
+chmod 0640 "${root}/logs/control/auth.log"
+dockerRestoreConfiguration
+jq -e '.services.control.command == ["control","--state","/etc/padm/control/state.json"] and
+  (.services.control.volumes | length) == 1 and
+  ([.services[].labels["io.padm.release"]] | unique) == ["3.1.7"]' "${root}/compose.json" >/dev/null
+[[ "$(sha256sum "${legacyBackup}/compose.json")" == "${legacyComposeDigest}" &&
+    "$(sha256sum "${root}/logs/control/auth.log")" == "${authDigest}" ]]
+dockerCleanupConfigurationCandidate
+# 不明确受管的恢复点在服务停止之前拒绝，不能只靠删日志参数兼容。
+cp -- "${legacyBackup}/compose.json" "${legacyBackup}/compose.safe.json"
+jq '.services.control.command += ["--unknown"]' \
+    "${legacyBackup}/compose.safe.json" >"${legacyBackup}/compose.json"
+rm -- "${legacyBackup}/compose.safe.json"
+upCount=$(wc -l <"${TEST_ROOT}/compose.log")
+DOCKER_CONFIG_SWITCHED=1
+if dockerRestoreConfiguration; then exit 1; fi
+[[ "$(wc -l <"${TEST_ROOT}/compose.log")" == "${upCount}" ]]
+DOCKER_CONFIG_SWITCHED=0
+dockerCleanupConfigurationCandidate
+
 # 即使旧备份授权仍启用，轮换或撤销后的回滚也不能复活它。
 jq '.control.peer.enabled = true | .control.peer.expires_at = 2000000000' \
     "${spec}" >"${root}/reinvite.json"
@@ -475,4 +564,5 @@ ln -s "${TEST_ROOT}/empty" "${residual}"
 if dockerControlRecoveryCheck; then exit 1; fi
 rm -- "${residual}"
 dockerControlRecoveryCheck
+[[ "$(sha256sum "${root}/logs/control/auth.log")" == "${authDigest}" ]]
 printf 'docker-control-state-regression-ok\n'
