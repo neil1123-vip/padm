@@ -750,7 +750,7 @@ initScriptRuntime() {
     readInstallType || return 1
     readInstallProtocolType || return 1
     readConfigHostPathUUID || return 1
-    readCustomPort
+    readCustomPort || return 1
     readSingBoxConfig
 }
 

@@ -47,7 +47,8 @@ readCustomPort() {
     customPort=
     if [[ -n "${configPath}" && -n "${frontingType}" && -z "${realityStatus}" && "${coreInstallType}" == "1" ]]; then
         local port=
-        port=$(jq -r .inbounds[0].port "${configPath}${frontingType}.json")
+        port=$(jq -r .inbounds[0].port "${configPath}${frontingType}.json") || return 1
+        validPortNumber "${port}" || return 1
         if [[ "${port}" != "443" ]]; then
             customPort=${port}
         fi

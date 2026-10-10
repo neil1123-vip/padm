@@ -690,7 +690,7 @@ EOF
     grep -qF '&pbk=override-public&' "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-override" || return 1
     grep -qF '&pqv=override-pqv&' "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-override" || return 1
     grep -qx '    servername: override-sni.example.com' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp-override" || return 1
-    grep -qx '      public-key: override-public' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp-override" || return 1
+    grep -qx '      public-key: "override-public"' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp-override" || return 1
     local currentInstallProtocolType=,2, xrayVLESSRealityXHTTPort=443 currentCDNAddress=cdn.example.com currentPath=padm
     realityStreamPublicPortForProtocol() { :; }
     corePortSubscriptionPort() { printf '%s\n' "$2"; }
@@ -773,6 +773,96 @@ cat >"${configPath}12_VLESS_XHTTP_inbounds.json" <<'EOF'
 EOF
 ! defaultBase64Code vlessXHTTP 443 user-bad-mode uuid-a "cdn.example.com" "/ignored"
 [[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/default/user-bad-mode" ]]
+(
+    local configPath="${TMP_DIR}/reality-output-boundary/" coreInstallType=1 currentPath=padm
+    local currentInstallProtocolType=,1,2,26, currentCDNAddress=node.example.com
+    local xrayVLESSRealitySNI=sni.example.com xrayVLESSRealityXHTTPSNI=sni.example.com
+    local currentRealityPublicKey=pubkey currentRealityXHTTPPublicKey=pubkey
+    local xrayVLESSRealityXHTTPort=443 currentRealityMldsa65Verify=
+    local singBoxVLESSRealityGRPCSNI= singBoxVLESSRealityPublicKey=
+    local PADM_VLESS_REALITY_CONFIG_FILE= PADM_VLESS_XHTTP_CONFIG_FILE=
+    local protocol configFile inboundIndex field value account grpcSNI grpcPublicKey grpcPQV index=0 failed=0
+    realityStreamPublicPortForProtocol() { :; }
+    corePortSubscriptionPort() { printf '%s\n' "$2"; }
+    mkdir -p "${configPath}"
+    for protocol in vision grpc xhttp; do
+        inboundIndex=0
+        case "${protocol}" in
+        vision) configFile="${configPath}07_VLESS_vision_reality_inbounds.json"; inboundIndex=1 ;;
+        grpc) configFile="${configPath}08_VLESS_vision_gRPC_inbounds.json" ;;
+        xhttp) configFile="${configPath}12_VLESS_XHTTP_inbounds.json" ;;
+        esac
+        for field in publicKey mldsa65Verify sni; do
+            for value in '42' 'false' '{}' '[]' '"bad\nfield"' '"bad\n"' '"bad&security=none"' '"bad:"'; do
+                index=$((index + 1))
+                account="reality-boundary-${protocol}-${index}"
+                jq -n --argjson index "${inboundIndex}" --arg email "${account}" \
+                    --arg field "${field}" --argjson value "${value}" '
+                    {inbounds:[{port:443}]} |
+                    .inbounds[$index].settings = {clients:[{email:$email,id:"uuid"}],decryption:"none"} |
+                    .inbounds[$index].streamSettings = {
+                        realitySettings:{serverNames:["sni.example.com"],publicKey:"pubkey",mldsa65Verify:""},
+                        xhttpSettings:{host:"",path:"/path",mode:"auto"}} |
+                    if $field == "sni" then .inbounds[$index].streamSettings.realitySettings.serverNames[0] = $value
+                    else .inbounds[$index].streamSettings.realitySettings[$field] = $value end
+                ' >"${configFile}" || return 1
+                case "${protocol}" in
+                vision) showVlessRealityAccountsFromConfig 1 "${configFile}" 443 >/dev/null 2>&1 ;;
+                grpc)
+                    grpcSNI=sni.example.com grpcPublicKey=pubkey grpcPQV=
+                    case "${field}" in
+                    sni) grpcSNI=$(jq -r . <<<"${value}") || return 1 ;;
+                    publicKey) grpcPublicKey=$(jq -r . <<<"${value}") || return 1 ;;
+                    mldsa65Verify) grpcPQV=$(jq -r . <<<"${value}") || return 1 ;;
+                    esac
+                    showVlessRealityGrpcAccountsFromConfig "${configFile}" 443 "${grpcSNI}" "${grpcPublicKey}" "${grpcPQV}" >/dev/null 2>&1
+                    ;;
+                xhttp) showVlessRealityXHTTPAccounts >/dev/null 2>&1 ;;
+                esac
+                if [[ $? -eq 0 || -e "${SUBSCRIBE_CAPTURE_DIR}/default/${account}" ||
+                    -e "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/${account}" || -e "${SUBSCRIBE_CAPTURE_DIR}/sing-box/${account}" ]]; then
+                    printf 'assert-fail:reality-field:%s:%s:%s\n' "${protocol}" "${field}" "${value}" >&2
+                    failed=1
+                fi
+            done
+        done
+    done
+    updateRoutingJsonConfig "${configFile}" '.inbounds[0].streamSettings.realitySettings |= {serverNames:["sni.example.com"],publicKey:"42",mldsa65Verify:""} | .inbounds[0].settings.clients[0].email = "reality-string-key"' || return 1
+    showVlessRealityXHTTPAccounts >/dev/null || return 1
+    grep -qx '      public-key: "42"' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/reality-string-key" || return 1
+    (
+        local coreInstallType=2 singBoxVLESSRealityVisionSNI singBoxVLESSRealityPublicKey=pubkey
+        local configFile="${TMP_DIR}/singbox-vision-boundary.json" value account index=0
+        for value in '42' '"sni.example.com\n"'; do
+            index=$((index + 1))
+            account="singbox-vision-sni-${index}"
+            jq -n --arg email "${account}" --argjson sni "${value}" \
+                '{inbounds:[{users:[{name:$email,uuid:"uuid"}],tls:{server_name:$sni}}]}' >"${configFile}" || return 1
+            singBoxVLESSRealityVisionSNI=$(jq -r '.inbounds[0].tls.server_name' "${configFile}") || return 1
+            if showVlessRealityAccountsFromConfig 2 "${configFile}" 443 >/dev/null 2>&1 ||
+                [[ -e "${SUBSCRIBE_CAPTURE_DIR}/default/${account}" || -e "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/${account}" ||
+                    -e "${SUBSCRIBE_CAPTURE_DIR}/sing-box/${account}" ]]; then
+                printf 'assert-fail:singbox-vision-sni:%s\n' "${value}" >&2
+                failed=1
+            fi
+        done
+        [[ "${failed}" -eq 0 ]]
+    ) || failed=1
+    configPath="${TMP_DIR}/missing-reality-output-config/"
+    serializeVlessRealityVisionLink() { return 1; }
+    serializeVlessRealityGrpcLink() { return 1; }
+    serializeVlessRealityXHTTPLink() { return 1; }
+    for protocol in vlessReality vlessRealityGRPC vlessXHTTP; do
+        account="serializer-failure-${protocol}"
+        if defaultBase64Code "${protocol}" 443 "${account}" uuid node.example.com /path >/dev/null 2>&1 ||
+            [[ -e "${SUBSCRIBE_CAPTURE_DIR}/default/${account}" || -e "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/${account}" ||
+                -e "${SUBSCRIBE_CAPTURE_DIR}/sing-box/${account}" ]]; then
+            printf 'assert-fail:reality-serializer:%s\n' "${protocol}" >&2
+            failed=1
+        fi
+    done
+    [[ "${failed}" -eq 0 ]]
+) || return 1
 configPath="${oldConfigPath}"
 unset REGRESSION_ERROR_CARD_LOG
 }

@@ -135,7 +135,7 @@ emitVlessXHTTPSubscribeOutput() {
     local xrayConfigDir=${configPath:-${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}}
     local xhttpConfigFile=${PADM_VLESS_XHTTP_CONFIG_FILE:-${xrayConfigDir%/}/12_VLESS_XHTTP_inbounds.json}
     local vlessEncryption mihomoEncryption=
-    local defaultLink xhttpHost xhttpMode realityMldsa65Verify=
+    local defaultLink xhttpHost xhttpMode publicKeyYaml realityMldsa65Verify=
     local realitySNI=${xrayVLESSRealityXHTTPSNI} publicKey=${currentRealityXHTTPPublicKey}
     if ! vlessEncryption=$(vlessEncryptionForConfig "${xhttpConfigFile}" 0); then
         errorCard "订阅输出生成失败" "VLESS Encryption 配置与状态不一致，请重新启用或关闭实验功能后重试"
@@ -145,10 +145,14 @@ emitVlessXHTTPSubscribeOutput() {
         mihomoEncryption=$(serializeYamlString "${vlessEncryption}") || return 1
     fi
     if [[ -f "${xhttpConfigFile}" ]]; then
-        realitySNI=$(jq -r --arg fallback "${realitySNI}" '.inbounds[0].streamSettings.realitySettings.serverNames[0] | if . == null then $fallback elif type == "string" then . else error("invalid serverName") end' "${xhttpConfigFile}") || return 1
-        publicKey=$(jq -r --arg fallback "${publicKey}" '.inbounds[0].streamSettings.realitySettings.publicKey | if . == null then $fallback elif type == "string" then . else error("invalid publicKey") end' "${xhttpConfigFile}") || return 1
-        realityMldsa65Verify=$(jq -r '.inbounds[0].streamSettings.realitySettings.mldsa65Verify // empty' "${xhttpConfigFile}") || return 1
+        realitySNI=$(jq -r --arg fallback "${realitySNI}" '.inbounds[0].streamSettings.realitySettings.serverNames[0] | if . == null then $fallback elif type == "string" and (any(explode[]; . < 32 or . == 127) | not) then . else error("invalid serverName") end' "${xhttpConfigFile}") || return 1
+        publicKey=$(jq -r --arg fallback "${publicKey}" '.inbounds[0].streamSettings.realitySettings.publicKey | if . == null then $fallback elif type == "string" and (any(explode[]; . < 32 or . == 127) | not) then . else error("invalid publicKey") end' "${xhttpConfigFile}") || return 1
+        realityMldsa65Verify=$(jq -r '.inbounds[0].streamSettings.realitySettings.mldsa65Verify | if . == null then empty elif type == "string" and (any(explode[]; . < 32 or . == 127) | not) then . else error("invalid mldsa65Verify") end' "${xhttpConfigFile}") || return 1
     fi
+    subscribeOutputSafeHostValue "${realitySNI}" || return 1
+    subscribeOutputSafeLabel "${publicKey}" && [[ "${publicKey}" != *[:@]* ]] || return 1
+    [[ -z "${realityMldsa65Verify}" ]] || { subscribeOutputSafeLabel "${realityMldsa65Verify}" && [[ "${realityMldsa65Verify}" != *[:@]* ]]; } || return 1
+    publicKeyYaml=$(serializeYamlString "${publicKey}") || return 1
     if ! path=$(xrayRealityXHTTPSetting path "${path}") ||
         ! xhttpHost=$(xrayRealityXHTTPSetting host "${realitySNI}") ||
         ! xhttpMode=$(xrayRealityXHTTPSetting mode auto); then
@@ -172,7 +176,7 @@ emitVlessXHTTPSubscribeOutput() {
         return 1
         ;;
     esac
-    defaultLink=$(serializeVlessRealityXHTTPLink "${id}" "${add}" "${port}" "${realitySNI}" "${path}" "${publicKey}" "${email}" "${vlessEncryption}" "${xhttpHost}" "${xhttpMode}" "${realityMldsa65Verify}")
+    defaultLink=$(serializeVlessRealityXHTTPLink "${id}" "${add}" "${port}" "${realitySNI}" "${path}" "${publicKey}" "${email}" "${vlessEncryption}" "${xhttpHost}" "${xhttpMode}" "${realityMldsa65Verify}") || return 1
 
     subscribeOutputTitle "通用格式：VLESS Reality XHTTP Vision XMUX"
     echoContent green "    ${defaultLink}\n"
@@ -200,7 +204,7 @@ ${mihomoEncryption:+    encryption: ${mihomoEncryption}
       host: ${xhttpHostYaml}
       mode: ${xhttpMode}
     reality-opts:
-      public-key: ${publicKey}
+      public-key: ${publicKeyYaml}
       short-id: 6ba85179e30d4fc2
 EOF
 
@@ -378,7 +382,7 @@ emitVlessRealitySubscribeOutput() {
     subscribeOutputSafeHostValue "${entryHost}" || return 1
 
     local realitySNI=${xrayVLESSRealitySNI}
-    local publicKey=${currentRealityPublicKey:-}
+    local publicKey=${currentRealityPublicKey:-} publicKeyYaml
     local realityMldsa65Verify=
     local xrayConfigDir=${configPath:-${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}}
     local realityConfigFile=${PADM_VLESS_REALITY_CONFIG_FILE:-${xrayConfigDir%/}/07_VLESS_vision_reality_inbounds.json}
@@ -395,13 +399,16 @@ emitVlessRealitySubscribeOutput() {
         realitySNI=${singBoxVLESSRealityVisionSNI}
         publicKey=${singBoxVLESSRealityPublicKey}
     elif [[ -f "${realityConfigFile}" ]]; then
-        realitySNI=$(jq -r --arg fallback "${realitySNI}" '.inbounds[1].streamSettings.realitySettings.serverNames[0] | if . == null then $fallback elif type == "string" then . else error("invalid serverName") end' "${realityConfigFile}") || return 1
-        publicKey=$(jq -r '.inbounds[1].streamSettings.realitySettings.publicKey // empty' "${realityConfigFile}") || return 1
-        realityMldsa65Verify=$(jq -r '.inbounds[1].streamSettings.realitySettings.mldsa65Verify // empty' "${realityConfigFile}") || return 1
+        realitySNI=$(jq -r --arg fallback "${realitySNI}" '.inbounds[1].streamSettings.realitySettings.serverNames[0] | if . == null then $fallback elif type == "string" and (any(explode[]; . < 32 or . == 127) | not) then . else error("invalid serverName") end' "${realityConfigFile}") || return 1
+        publicKey=$(jq -r '.inbounds[1].streamSettings.realitySettings.publicKey | if . == null then empty elif type == "string" and (any(explode[]; . < 32 or . == 127) | not) then . else error("invalid publicKey") end' "${realityConfigFile}") || return 1
+        realityMldsa65Verify=$(jq -r '.inbounds[1].streamSettings.realitySettings.mldsa65Verify | if . == null then empty elif type == "string" and (any(explode[]; . < 32 or . == 127) | not) then . else error("invalid mldsa65Verify") end' "${realityConfigFile}") || return 1
     fi
     subscribeOutputSafeHostValue "${realitySNI}" || return 1
+    subscribeOutputSafeLabel "${publicKey}" && [[ "${publicKey}" != *[:@]* ]] || return 1
+    [[ -z "${realityMldsa65Verify}" ]] || { subscribeOutputSafeLabel "${realityMldsa65Verify}" && [[ "${realityMldsa65Verify}" != *[:@]* ]]; } || return 1
+    publicKeyYaml=$(serializeYamlString "${publicKey}") || return 1
     local defaultLink
-    defaultLink=$(serializeVlessRealityVisionLink "${id}" "${entryHost}" "${port}" "${realitySNI}" "${publicKey}" "${realityMldsa65Verify}" "${email}" "${vlessEncryption}")
+    defaultLink=$(serializeVlessRealityVisionLink "${id}" "${entryHost}" "${port}" "${realitySNI}" "${publicKey}" "${realityMldsa65Verify}" "${email}" "${vlessEncryption}") || return 1
     local singBoxFilter
     singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vless",server:$server,server_port:$port,uuid:$uuid,flow:"xtls-rprx-vision",tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"},reality:{enabled:true,public_key:$public_key,short_id:"6ba85179e30d4fc2"}},packet_encoding:"xudp"}' --arg tag "${email}" --arg server "${entryHost}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${realitySNI}" --arg public_key "${publicKey}") || return 1
     subscribeOutputTitle "通用格式：VLESS Reality Vision"
@@ -422,7 +429,7 @@ ${mihomoEncryption:+    encryption: ${mihomoEncryption}
     flow: xtls-rprx-vision
     servername: ${realitySNI}
     reality-opts:
-      public-key: ${publicKey}
+      public-key: ${publicKeyYaml}
       short-id: 6ba85179e30d4fc2
     client-fingerprint: chrome" || return 1
 
@@ -436,7 +443,7 @@ emitVlessRealityGrpcSubscribeOutput() {
     entryHost=$(realityEntryHost) || return 1
     subscribeOutputSafeHostValue "${entryHost}" || return 1
     local realitySNI=${xrayVLESSRealitySNI}
-    local publicKey=${currentRealityPublicKey:-}
+    local publicKey=${currentRealityPublicKey:-} publicKeyYaml
     local realityMldsa65Verify=${currentRealityMldsa65Verify:-}
 
     if [[ -n "${singBoxVLESSRealityGRPCSNI:-}" ]]; then
@@ -445,9 +452,13 @@ emitVlessRealityGrpcSubscribeOutput() {
     if [[ -n "${singBoxVLESSRealityPublicKey:-}" ]]; then
         publicKey=${singBoxVLESSRealityPublicKey}
     fi
+    subscribeOutputSafeHostValue "${realitySNI}" || return 1
+    subscribeOutputSafeLabel "${publicKey}" && [[ "${publicKey}" != *[:@]* ]] || return 1
+    [[ -z "${realityMldsa65Verify}" ]] || { subscribeOutputSafeLabel "${realityMldsa65Verify}" && [[ "${realityMldsa65Verify}" != *[:@]* ]]; } || return 1
+    publicKeyYaml=$(serializeYamlString "${publicKey}") || return 1
 
     local defaultLink
-    defaultLink=$(serializeVlessRealityGrpcLink "${id}" "${entryHost}" "${port}" "${realitySNI}" "${publicKey}" "${realityMldsa65Verify}" "${email}")
+    defaultLink=$(serializeVlessRealityGrpcLink "${id}" "${entryHost}" "${port}" "${realitySNI}" "${publicKey}" "${realityMldsa65Verify}" "${email}") || return 1
     local singBoxFilter
     singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vless",server:$server,server_port:$port,uuid:$uuid,tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"},reality:{enabled:true,public_key:$public_key,short_id:"6ba85179e30d4fc2"}},packet_encoding:"xudp",transport:{type:"grpc",service_name:"grpc"}}' --arg tag "${email}" --arg server "${entryHost}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${realitySNI}" --arg public_key "${publicKey}") || return 1
     subscribeOutputTitle "通用格式：VLESS Reality gRPC"
@@ -466,7 +477,7 @@ emitVlessRealityGrpcSubscribeOutput() {
     udp: true
     servername: ${realitySNI}
     reality-opts:
-      public-key: ${publicKey}
+      public-key: ${publicKeyYaml}
       short-id: 6ba85179e30d4fc2
     grpc-opts:
       grpc-service-name: \"grpc\"
