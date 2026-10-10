@@ -139,6 +139,70 @@ dockerManagedSpecMatchesDeployment "${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
 ) || fail 'container UID could read the root-only spec'
 assertRuntimeSecrets
 
+# 主控来源日志只允许 root 管理目录、运行 UID 追加普通单链接文件。
+controlRoot="${TEST_ROOT}/control-log-runtime"
+mkdir -p -- "${controlRoot}/config"
+chmod 0750 "${controlRoot}" "${controlRoot}/config"
+printf '{"control":{"role":"main"}}\n' >"${controlRoot}/config/spec.json"
+dockerControlAccessLogEnsure "${controlRoot}"
+controlLog="${controlRoot}/logs/control/auth.log"
+assertMetadata "${controlRoot}/logs/control" '750 0 10001'
+assertMetadata "${controlLog}" '640 10001 10001'
+(
+    cd "${controlRoot}/logs/control"
+    setpriv --reuid 10001 --regid 10001 --clear-groups -- sh -c \
+        'test -w auth.log && test ! -w . && printf "kept-control-evidence\n" >>auth.log'
+) || fail 'control UID could not append to the protected log'
+controlDigest=$(sha256sum "${controlLog}")
+dockerControlAccessLogEnsure "${controlRoot}"
+[[ "$(sha256sum "${controlLog}")" == "${controlDigest}" ]] || fail 'existing control log was truncated'
+mv -- "${controlLog}" "${controlRoot}/saved-auth.log"
+printf 'untouched\n' >"${controlRoot}/outside-log"
+chmod 0600 "${controlRoot}/outside-log"
+chown 12345:12345 "${controlRoot}/outside-log"
+ln -s "${controlRoot}/outside-log" "${controlLog}"
+! dockerControlAccessLogEnsure "${controlRoot}" || fail 'control log symlink was accepted'
+rm -- "${controlLog}"
+ln "${controlRoot}/outside-log" "${controlLog}"
+! dockerControlAccessLogEnsure "${controlRoot}" || fail 'control log hardlink was accepted'
+assertMetadata "${controlRoot}/outside-log" '600 12345 12345'
+grep -qxF untouched "${controlRoot}/outside-log" || fail 'unsafe control log changed its external target'
+rm -- "${controlLog}"
+mv -- "${controlRoot}/saved-auth.log" "${controlLog}"
+chmod 0660 "${controlLog}"
+! dockerControlAccessLogEnsure "${controlRoot}" || fail 'unsafe control log permissions were repaired'
+assertMetadata "${controlLog}" '660 10001 10001'
+chmod 0640 "${controlLog}"
+chown 0:10001 "${controlLog}"
+! dockerControlAccessLogEnsure "${controlRoot}" || fail 'unsafe control log owner was repaired'
+assertMetadata "${controlLog}" '640 0 10001'
+chown 10001:10001 "${controlLog}"
+for unsafeParent in "${controlRoot}" "${controlRoot}/logs" "${controlRoot}/logs/control"; do
+    safeMode=$(stat -c %a -- "${unsafeParent}")
+    chmod 0770 "${unsafeParent}"
+    ! dockerControlAccessLogEnsure "${controlRoot}" || fail 'unsafe control log parent was accepted'
+    [[ "$(stat -c %a -- "${unsafeParent}")" == 770 ]] || fail 'unsafe log parent was silently repaired'
+    chmod "${safeMode}" "${unsafeParent}"
+done
+mv -- "${controlRoot}/logs/control" "${controlRoot}/saved-control"
+ln -s "${controlRoot}/saved-control" "${controlRoot}/logs/control"
+! dockerControlAccessLogEnsure "${controlRoot}" || fail 'control log directory symlink was accepted'
+rm -- "${controlRoot}/logs/control"
+mv -- "${controlRoot}/saved-control" "${controlRoot}/logs/control"
+mkdir -- "${controlRoot}/logs/control/unexpected"
+chmod 0777 "${controlRoot}/logs/control/unexpected"
+! dockerControlAccessLogEnsure "${controlRoot}" || fail 'unexpected control log tree was accepted'
+[[ "$(stat -c %a -- "${controlRoot}/logs/control/unexpected")" == 777 ]] ||
+    fail 'unexpected control log tree was recursively repaired'
+rmdir -- "${controlRoot}/logs/control/unexpected"
+dockerControlAccessLogEnsure "${controlRoot}"
+[[ "$(sha256sum "${controlLog}")" == "${controlDigest}" ]] || fail 'control log changed after rejected unsafe inputs'
+printf '{"control_sync":{}}\n' >"${controlRoot}/config/spec.json"
+rm -- "${controlLog}"
+rmdir -- "${controlRoot}/logs/control"
+dockerControlAccessLogEnsure "${controlRoot}"
+[[ ! -e "${controlRoot}/logs/control" ]] || fail 'controlled node created an unused control log'
+
 export PADM_DOCKER_INSTALL_DIR="${TEST_ROOT}/unconfigured"
 dockerInitializeStateRoot
 seedRuntimeSecrets
@@ -161,4 +225,11 @@ chown 12345:12345 "${TEST_ROOT}/external"
 ln -s "${TEST_ROOT}/external" "${unsafeCandidate}/config/xray/unsafe"
 ! dockerPrepareCandidatePermissions "${unsafeCandidate}" || fail 'candidate symlink was accepted'
 assertMetadata "${TEST_ROOT}/external" '600 12345 12345'
+unsafeLogCandidate="${TEST_ROOT}/unsafe-log-candidate"
+mkdir -p "${unsafeLogCandidate}/logs/control"
+printf 'not-candidate-evidence\n' >"${unsafeLogCandidate}/logs/control/auth.log"
+chmod 0600 "${unsafeLogCandidate}/logs/control/auth.log"
+chown 12345:12345 "${unsafeLogCandidate}/logs/control/auth.log"
+! dockerPrepareCandidatePermissions "${unsafeLogCandidate}" || fail 'candidate carried runtime control evidence'
+assertMetadata "${unsafeLogCandidate}/logs/control/auth.log" '600 12345 12345'
 printf 'docker-permissions-regression-ok\n'
