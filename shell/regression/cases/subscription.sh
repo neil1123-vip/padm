@@ -1591,6 +1591,35 @@ runSubscriptionOutputTlsAnyHysteriaTuicNaiveRegression() {
     ) || tlsBoundaryFailed=1
     local SUBSCRIBE_CAPTURE_DIR="${SUBSCRIBE_CAPTURE_DIR}-${BASHPID:-$$}"
     local PADM_SUBSCRIBE_LOCAL_DIR="${SUBSCRIBE_CAPTURE_DIR}"
+    (
+        local configPath="${TMP_DIR}/shadowsocks-password-boundary/" singBoxConfigPath= coreInstallType=2
+        local currentInstallProtocolType=,30, singBoxShadowsocksPort=8388 currentHost=tls.example.com currentPath=padm
+        local configFile="${configPath}30_shadowsocks_inbounds.json" value account index=0 failed=0
+        mkdir -p "${configPath}" || return 1
+        jq -n '{inbounds:[{method:"2022-blake3-aes-128-gcm",password:"MDEyMzQ1Njc4OWFiY2RlZg==",
+            users:[{name:"ss-password-baseline",password:"user-key"}]}]}' >"${configFile}" || return 1
+        showShadowsocksAccounts >/dev/null || return 1
+        jq -e '.[0].password == "MDEyMzQ1Njc4OWFiY2RlZg==:user-key"' \
+            "${SUBSCRIBE_CAPTURE_DIR}/sing-box/ss-password-baseline" >/dev/null || return 1
+        for value in null 42 false '[]' '{}' '"MDEyMzQ1Njc4OWFiY2RlZg==\n"' '"server\nkey"' '"server\u001fkey"' '"server\u007fkey"'; do
+            index=$((index + 1))
+            account="ss-password-invalid-${index}"
+            jq -n --arg name "${account}" --argjson password "${value}" \
+                '{inbounds:[{method:"2022-blake3-aes-128-gcm",password:$password,
+                    users:[{name:$name,password:"user-key"}]}]}' >"${configFile}" || return 1
+            if showShadowsocksAccounts >/dev/null 2>&1; then
+                printf 'assert-fail:shadowsocks-raw-password:%s\n' "${value}" >&2
+                failed=1
+            fi
+            if [[ -e "${SUBSCRIBE_CAPTURE_DIR}/default/${account}" ||
+                -e "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/${account}" ||
+                -e "${SUBSCRIBE_CAPTURE_DIR}/sing-box/${account}" ]]; then
+                printf 'assert-fail:shadowsocks-password-output:%s\n' "${value}" >&2
+                failed=1
+            fi
+        done
+        [[ "${failed}" -eq 0 ]]
+    ) || tlsBoundaryFailed=1
 subscribeOutputPortIsValid hysteria "20000-20002"
 subscribeOutputPortIsValid tuic "30000-30002"
 ! subscribeOutputPortIsValid vlesstcp "20000-20002"

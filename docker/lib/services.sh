@@ -4680,7 +4680,7 @@ dockerCreateUpdateCandidate() {
 }
 
 dockerValidateUpdateCandidate() {
-    local candidate=$1
+    local candidate=$1 core cores
     dockerDeploymentFileValidate "${candidate}/deployment.json" || return 1
     if [[ -f "${candidate}/config/spec.json" ]]; then
         dockerBundleSupportsSpec "${DOCKER_STAGED_BUNDLE_PATH}" "${candidate}/config/spec.json" &&
@@ -4693,6 +4693,28 @@ dockerValidateUpdateCandidate() {
         return $?
     fi
     dockerCandidateCompose "${candidate}" config --format json >/dev/null 2>&1 || return 1
+    # 旧部署可能没有原始规格，仍须用新镜像验证已记录的全部核心。
+    cores=$(jq -r '[.core.type, .core.secondary_type] | .[] | select(. != null)' \
+        "${candidate}/deployment.json") || return 1
+    while IFS= read -r core; do
+        case "${core}" in
+        xray)
+            dockerCandidateCompose "${candidate}" run --rm --no-deps xray \
+                -test -confdir /etc/padm/xray >/dev/null || {
+                dockerError 'Xray 候选配置校验失败'
+                return 1
+            }
+            ;;
+        sing-box)
+            dockerCandidateCompose "${candidate}" run --rm --no-deps sing-box \
+                check -D /var/lib/padm/sing-box -c /etc/padm/sing-box/config.json >/dev/null || {
+                dockerError 'sing-box 候选配置校验失败'
+                return 1
+            }
+            ;;
+        *) return 1 ;;
+        esac
+    done <<<"${cores}"
     if jq -e '.control != null' "${candidate}/config/spec.json" >/dev/null 2>&1; then
         dockerCandidateCompose "${candidate}" run --rm --no-deps control \
             control --state /etc/padm/control/state.json \

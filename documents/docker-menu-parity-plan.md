@@ -3232,6 +3232,63 @@ AST、PowerShell AST、精确/近似 selector 权限及入口/队列自检、独
 清理本轮 12 个源码归档/清单及入口自检目录共 314,848,320 字节和两个临时检查脚本；
 保留日志、result、摘要、自检结果、共享缓存及用户原有 8 个临时文件。
 
+#### 5C.7f 控制防护同锁事务与菜单管理
+
+实现 `9f48cfee feat(docker): manage control Fail2ban with fresh source challenges`，
+本地 SSH 签名 G，未推送。新增独立 `fail2ban-control` 规格、Compose profile
+和 bundle 能力门禁；设置仅保存 retry/find-time/ban-time，目标和端口从
+主控 `control.listen` 派生，要求受管 WireGuard，不要求 Peer API 授权启用。
+菜单及 `fail2ban control` 提供状态、IPv4 解封、启用、参数修改和停用；
+预览、取消和 EOF 不启动 jail，命令帮助及中英文说明同步。
+
+配置、更新、回滚、普通启动/重启和恢复共用同父部署锁：
+先审计并正常停止两个范围的旧 jail、证明各自资源为空，再启普通来源服务。
+WS 按各保护入口和地址族证明，控制最后取得本次 fresh nonce；
+双方配置和清洁检查完成后，最终复核全部 WS 代次、规格摘要、
+控制登记/回执/来源代次及期限，再一次 `--no-deps` 启 jail 并审计运行归属。
+两个 jail 不进入普通服务启动列表，禁止自动重启及来源服务的 no-deps 快捷绕过。
+内部见证不取得或释放父锁；callback TERM 只清理本次登记。
+恢复必须重新挑战，失败保留备份和版本计划；两个运行数据库不被配置恢复覆盖。
+
+独审及真实运行修复三处：停服清洁证明原先误要求尚未启动的 WireGuard，
+现仅读本范围 state/INPUT 空资源，完整 WG 检查仍在来源就绪后；
+恢复静默启动吞掉挑战输出，现内部挑战/证明走 stderr，公开 `source-check`
+stdout 约定不变；双方最终清洁期间的 WS 代次漂移现被最后复核拒绝。
+相邻合同夹具只接受精确的两个范围空资源查询，不放宽生产 owner 门禁。
+
+2026-10-10，Docker Desktop Linux amd64，定向 Jobs 2、完整合同 Jobs 6：
+
+| 最终检查 | 入口秒数 | 证据 |
+| --- | --- | --- |
+| 生命周期及最后清洁期间漂移拒绝 | 80.580 | `.tmp-regression-docker-aa4c6d9e87554ce884e111c39d49a3b5` |
+| 同锁 CLI、callback TERM | 11.702 | `.tmp-regression-docker-b49c94ef22ea4aaf97c4297246f3ec5c` |
+| 真实双部署事务 | 390.780 | `.tmp-regression-docker-c46625548c1947c4b92f78deac503943` |
+| 路由 / 站点 / REALITY 夹具修正 | 44.118 / 57.800 / 77.182 | `.tmp-control-fail2ban-7f-evidence.md` |
+| 完整 Docker 合同，44/44 | 295.474 | `.tmp-regression-docker-77ea509ea88f4d73a59c42d4e1d4676a` |
+
+全部实际执行、`cache_hit: false`，工具镜像复用
+`sha256:dbdfde081d3763df53ff13e5a79a9f2fbd7a98ef8660fed9ee02681a96abc2de`；
+完整排队 396 ms，三槽预算不变。没有新增依赖、重建工具镜像或扩大并发。
+31 个阶段文件逐项匹配最终完整快照；真实归档中的生产文件也逐项匹配。
+ops `sha256:34d48510ed0d080590b72c40e55e958d02453b7fcc9858d9718171c57f95c9a1`、
+net `sha256:7aabb6e5e336161497e8f47e643771d5c914a6a7d12d4536465756c942ba964c`，
+镜像内 7 个生产文件 SHA256 均与当前源码一致，net 仅更新本地测试代码层。
+生产 Shell/Sh 语法、ShellCheck error、Python AST、JSON 及限定独审通过；
+附加测试 ShellCheck 保留 `control-state.sh` 既有 SC2218/SC2199 诊断。
+
+真实夹具复用两个独立 daemon/netns、生产 API、WireGuard Peer 和已安装管理链，
+完成启用、真实 401 封禁、INPUT DROP counter、状态、解封、错端口拒绝、
+新 nonce 恢复及停用，WS 资源和受控节点规格保持。
+播种发布输入无正式签名，夹具仅适配当前 release/images 读取并核一致性；
+该证据不代替真实签名发布验收。前两次真实夹具发布输入及输出计数失败、
+首轮完整合同夹具失败后主动退出 137 均保留日志，不计成功。
+
+清理 40 个归档/清单和构建目录共 178,819,095 字节，提取容器及核验目录已清理；
+保留 20 份回归 result/log、摘要、共享缓存及其它任务文件。
+详细证据 `.tmp-control-fail2ban-7f-evidence.md`。SSH、自动轮转调度、
+原生宿主 systemd/重启卸载、公网及 arm64 仍未验收；
+受管锁不保证抵御外部特权 daemon 并发，5C 和总目标继续 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

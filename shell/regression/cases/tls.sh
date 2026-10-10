@@ -358,6 +358,66 @@ runTlsFailureReturnRegression() (
     openssl req -new -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 \
         -subj '/CN=secure.example.com' -addext 'subjectAltName=DNS:secure.example.com' \
         -keyout "${secureTlsRoot}/new.key" -out "${secureTlsRoot}/new.crt" >/dev/null 2>&1
+    (
+        # BusyBox 回退必须按 UTC 解析，不能把 GMT 证书时间当成本地时间。
+        local TZ=Asia/Shanghai
+        export TZ
+        date() {
+            [[ "${LC_ALL:-}" == C ]] || return 1
+            [[ "$1" != -d ]] || return 1
+            [[ "$#" == 6 && "$1" == -u && "$2" == -D &&
+                "$3" == '%b %e %H:%M:%S %Y' && "$4" == -d &&
+                "$5" == 'Oct 10 07:00:00 2026' && "$6" == +%s ]] || return 1
+            printf '1791615600\n'
+        }
+        [[ "$(tlsCertificateDateEpoch 'Oct 10 07:00:00 2026 GMT')" == 1791615600 ]] || {
+            printf 'tls-busybox-certificate-date-fallback-failed\n' >&2
+            return 1
+        }
+        regressionExpectStatus 1 tlsCertificateDateEpoch 'Oct 10 07:00:00 2026 UTC'
+        regressionExpectStatus 1 tlsCertificateDateEpoch 'invalid GMT'
+    )
+    (
+        # 尚未生效的真实证书即使域名、私钥及剩余有效期正常，也不能复用。
+        local futureRoot="${secureTlsRoot}/future" certDigest keyDigest
+        mkdir -p "${futureRoot}/certs"
+        : >"${futureRoot}/index"
+        printf '01\n' >"${futureRoot}/serial"
+        cat >"${futureRoot}/openssl.cnf" <<EOF
+[ca]
+default_ca=local_ca
+[local_ca]
+database=${futureRoot}/index
+serial=${futureRoot}/serial
+new_certs_dir=${futureRoot}/certs
+default_md=sha256
+policy=subject_policy
+x509_extensions=certificate_extensions
+[subject_policy]
+commonName=supplied
+[certificate_extensions]
+subjectAltName=DNS:secure.example.com
+EOF
+        command openssl req -new -key "${secureTlsRoot}/new.key" -subj '/CN=secure.example.com' \
+            -out "${futureRoot}/request.pem" >/dev/null 2>&1
+        command openssl ca -selfsign -batch -notext -config "${futureRoot}/openssl.cnf" \
+            -cert "${secureTlsRoot}/new.crt" -keyfile "${secureTlsRoot}/new.key" \
+            -in "${futureRoot}/request.pem" -out "${futureRoot}/certificate.pem" \
+            -startdate "$(date -u -d '1 day' +%Y%m%d%H%M%SZ)" \
+            -enddate "$(date -u -d '3 days' +%Y%m%d%H%M%SZ)" >/dev/null 2>&1
+        command openssl x509 -in "${futureRoot}/certificate.pem" -checkend 86400 -noout >/dev/null
+        command openssl x509 -in "${futureRoot}/certificate.pem" -checkhost secure.example.com -noout >/dev/null
+        command openssl pkey -in "${secureTlsRoot}/new.key" -check -noout >/dev/null 2>&1
+        certDigest=$(command openssl x509 -in "${futureRoot}/certificate.pem" -pubkey -noout |
+            command openssl pkey -pubin -outform DER | command openssl dgst -sha256)
+        keyDigest=$(command openssl pkey -in "${secureTlsRoot}/new.key" -pubout -outform DER |
+            command openssl dgst -sha256)
+        [[ -n "${certDigest}" && "${certDigest}" == "${keyDigest}" ]]
+        if tlsCertificateFilesUsable "${futureRoot}/certificate.pem" "${secureTlsRoot}/new.key" secure.example.com; then
+            printf 'tls-future-certificate-was-accepted\n' >&2
+            return 1
+        fi
+    )
     command chmod 644 "${PADM_TLS_DIR}/secure.example.com.key"
     : >"${chmodLog}"
     chmod() {
@@ -411,6 +471,10 @@ runTlsFailureReturnRegression() (
         crontab() { return 1; }
         snapshot=$(tlsCertificateStatusJson)
         jq -e '.domain == "secure.example.com" and .source == "acme-standalone"' <<<"${snapshot}" >/dev/null
+        jq -e '.remaining_days >= 0 and .remaining_days <= 1' <<<"${snapshot}" >/dev/null || {
+            printf 'tls-status-remaining-days-do-not-match-certificate\n' >&2
+            return 1
+        }
         (
             local sslRenewalDays=90
             stat() {
@@ -657,8 +721,8 @@ runTlsFailureReturnRegression() (
             else
                 [[ "${issues}" == 1 ]]
             fi
-            printf 'local-cert\n' >"${PADM_TLS_DIR}/${domain}.crt"
-            printf 'local-key\n' >"${PADM_TLS_DIR}/${domain}.key"
+            cp "${secureTlsRoot}/new.crt" "${PADM_TLS_DIR}/${domain}.crt"
+            cp "${secureTlsRoot}/new.key" "${PADM_TLS_DIR}/${domain}.key"
             snapshot=$(tlsCertificateStatusJson)
             if [[ "${state}" == complete ]]; then
                 jq -e '.source == "acme-standalone"' <<<"${snapshot}" >/dev/null

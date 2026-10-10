@@ -570,8 +570,8 @@ readSingBoxConfig() {
             if jq -e '.inbounds[0].ignore_client_bandwidth == true and (.inbounds[0].up_mbps // 0) == 0 and (.inbounds[0].down_mbps // 0) == 0' "${singBoxConfigPath}06_hysteria2_inbounds.json" >/dev/null 2>&1; then
                 hysteria2BandwidthMode=bbr
             fi
-            hysteria2ObfsType=$(jq -r '.inbounds[0].obfs.type // empty' "${singBoxConfigPath}06_hysteria2_inbounds.json")
-            hysteria2ObfsPassword=$(jq -r '.inbounds[0].obfs.password // empty' "${singBoxConfigPath}06_hysteria2_inbounds.json")
+            hysteria2ObfsType=$(jq -r '.inbounds[0].obfs.type | if . == null then "" elif type == "string" and (any(explode[]; . < 32 or . == 127) | not) then . else error("invalid obfs type") end' "${singBoxConfigPath}06_hysteria2_inbounds.json") || return 1
+            hysteria2ObfsPassword=$(jq -r '.inbounds[0].obfs.password | if . == null then "" elif type == "string" and (any(explode[]; . < 32 or . == 127) | not) then . else error("invalid obfs password") end' "${singBoxConfigPath}06_hysteria2_inbounds.json") || return 1
             hysteria2Masquerade=$(jq -r '.inbounds[0].masquerade // empty | if type == "string" then . else empty end' "${singBoxConfigPath}06_hysteria2_inbounds.json")
         fi
     fi
@@ -816,7 +816,8 @@ readConfigHostPathUUID() {
             if [[ "${currentPort}" == "${xrayVLESSRealityXHTTPort}" ]]; then
                 xrayVLESSRealityXHTTPort="${currentDefaultPort}"
             fi
-            currentPath=$(jq -r .inbounds[0].streamSettings.xhttpSettings.path "${configPath}12_VLESS_XHTTP_inbounds.json" | awk -F "[/]" '{print $2}' | awk -F "[x][H][T][T][P]" '{print $1}')
+            currentPath=$(jq -r .inbounds[0].streamSettings.xhttpSettings.path "${configPath}12_VLESS_XHTTP_inbounds.json" | awk -F "[/]" '{print $2}')
+            currentPath=${currentPath%xHTTP}
         fi
         # 回落前端没有用户时，从实际启用的协议读取，保留重装凭据。
         if ! jq -e 'type == "array" and length > 0' <<<"${currentClients:-[]}" >/dev/null 2>&1; then
@@ -870,6 +871,10 @@ readConfigHostPathUUID() {
                 currentPath=${path%ws}
             elif [[ $(echo "${fallback}" | jq -r .dest) == 31299 ]]; then
                 currentPath=${path%vws}
+            elif [[ $(echo "${fallback}" | jq -r .dest) == 31301 ]]; then
+                currentPath=${path%grpc}
+            elif [[ $(echo "${fallback}" | jq -r .dest) == 31304 ]]; then
+                currentPath=${path%trojangrpc}
             elif [[ $(echo "${fallback}" | jq -r .dest) == 31306 ]]; then
                 currentPath=${path}
             fi
@@ -882,15 +887,18 @@ readConfigHostPathUUID() {
                     # check1Panel
                     if [[ -f "${nginxConfigPath}alone.conf" ]]; then
                         if grep -q "trojangrpc {" <"${nginxConfigPath}alone.conf"; then
-                            currentPath=$(grep "trojangrpc {" <"${nginxConfigPath}alone.conf" | awk -F "[/]" '{print $2}' | awk -F "[t][r][o][j][a][n]" '{print $1}')
+                            currentPath=$(grep "trojangrpc {" <"${nginxConfigPath}alone.conf" | awk -F "[/]" '{sub(/[[:space:]].*$/, "", $2); print $2}')
+                            currentPath=${currentPath%trojangrpc}
                         elif grep -q "grpc {" <"${nginxConfigPath}alone.conf"; then
-                            currentPath=$(grep "grpc {" <"${nginxConfigPath}alone.conf" | head -1 | awk -F "[/]" '{print $2}' | awk -F "[g][r][p][c]" '{print $1}')
+                            currentPath=$(grep "grpc {" <"${nginxConfigPath}alone.conf" | head -1 | awk -F "[/]" '{sub(/[[:space:]].*$/, "", $2); print $2}')
+                            currentPath=${currentPath%grpc}
                         fi
                     fi
                 fi
             fi
             if [[ -z "${currentPath}" && -f "${configPath}12_VLESS_XHTTP_inbounds.json" ]]; then
-                currentPath=$(jq -r .inbounds[0].streamSettings.xhttpSettings.path "${configPath}12_VLESS_XHTTP_inbounds.json" | awk -F "[x][H][T][T][P]" '{print $1}' | awk -F "[/]" '{print $2}')
+                currentPath=$(jq -r .inbounds[0].streamSettings.xhttpSettings.path "${configPath}12_VLESS_XHTTP_inbounds.json" | awk -F "[/]" '{print $2}')
+                currentPath=${currentPath%xHTTP}
             fi
         elif [[ "${coreInstallType}" == "2" && -f "${singBoxConfigPath}05_VMess_WS_inbounds.json" ]]; then
             singBoxVMessWSPath=$(jq -r .inbounds[0].transport.path "${singBoxConfigPath}05_VMess_WS_inbounds.json")

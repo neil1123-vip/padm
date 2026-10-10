@@ -566,6 +566,42 @@ cleanCoreInstallDirectory() {
     cleanDirectoryContent "${targetDir}" || { errorCard "${description}文件清理失败"; return 1; }
 }
 
+cleanCoreInstallFiles() {
+    local core=$1 binary targetDir defaultDir description file target
+    local -a files=() targets=()
+    case "${core}" in
+    xray)
+        binary=$(coreXrayBinaryPath) || return 1
+        defaultDir=/etc/padm/xray
+        description=Xray
+        files=(geosite.dat geoip.dat geo.version geo.reload.pending)
+        ;;
+    sing-box)
+        binary=$(coreSingBoxBinaryPath) || return 1
+        defaultDir=/etc/padm/sing-box
+        description=sing-box
+        files=(libcronet.so)
+        ;;
+    *) return 1 ;;
+    esac
+    binary=$(padmRequireSafeAbsolutePath "${binary}") || return 1
+    targetDir=$(dirname -- "${binary}")
+    # 默认专用目录保留完整清理；自定义二进制不能代表父目录中的其它文件。
+    if [[ "${targetDir}" == "${defaultDir}" && ! -L "${targetDir}" ]]; then
+        cleanCoreInstallDirectory "${targetDir}" "${description}"
+        return $?
+    fi
+    targets=("${binary}")
+    for file in "${files[@]}"; do
+        target=$(padmManagedFilePath "${targetDir}" "${file}") || return 1
+        targets+=("${target}")
+    done
+    removeManagedFilesIfPresent "${targets[@]}" || {
+        errorCard "${description}受管文件清理失败"
+        return 1
+    }
+}
+
 singBoxProtocolUninstallRollback() {
     if declare -p PADM_SINGBOX_UNINSTALL_ROLLBACK >/dev/null 2>&1; then
         PADM_SINGBOX_UNINSTALL_ROLLBACK[active]=false
@@ -657,7 +693,7 @@ unInstallSingBox() {
             errorCard "sing-box 开机自启清理失败，已取消卸载"
             return 1
         }
-        cleanCoreInstallDirectory /etc/padm/sing-box "sing-box" || return 1
+        cleanCoreInstallFiles sing-box || return 1
         successCard "sing-box 卸载完成"
         return 0
     fi
@@ -756,7 +792,7 @@ unInstallSingBox() {
         # 核心清理不可回滚，中断或失败时仍需留下备份供手动检查。
         padmForgetCleanupPath "${uninstallBackupDir}"
         PADM_SINGBOX_UNINSTALL_ROLLBACK[active]=false
-        if ! cleanCoreInstallDirectory /etc/padm/sing-box "sing-box"; then
+        if ! cleanCoreInstallFiles sing-box; then
             errorCard "sing-box 核心清理失败，请检查备份目录: ${uninstallBackupDir}"
             cleanupStatus=1
         fi
@@ -795,7 +831,7 @@ unInstallSingBox() {
 cleanUp() {
     if [[ "$1" == "xrayDel" ]]; then
         runCoreServiceActionAllowFailure handleXray stop || { errorCard "Xray 服务停止失败，已取消清理旧核心"; return 1; }
-        cleanCoreInstallDirectory "$(coreXrayInstallDir)" "Xray" || return 1
+        cleanCoreInstallFiles xray || return 1
     elif [[ "$1" == "singBoxDel" ]]; then
         runCoreServiceActionAllowFailure handleSingBox stop || { errorCard "sing-box 服务停止失败，已取消清理旧核心"; return 1; }
         removeManagedFileIfPresent "$(singBoxMergedConfigFile)" || { errorCard "sing-box 主配置清理失败"; return 1; }
@@ -1814,10 +1850,17 @@ cleanupPadmCronJobsOnUninstall() {
     local currentCrontab cleanedCrontab
     command -v crontab >/dev/null 2>&1 || return 0
     currentCrontab=$(readUserCrontabContent) || return 1
-    cleanedCrontab=$(sed \
-        -e '\|/etc/padm/install.sh RenewTLS|d' \
-        -e '\|/etc/padm/install.sh UpdateGeo|d' \
-        -e '\|/etc/padm/install.sh SyncSubscriptionGroups|d' \
+    cleanedCrontab=$(awk '
+      {
+        command = ($1 ~ /^@/) ? 2 : 6
+        if ($command == "/bin/bash" || $command == "bash") command++
+        action = $(command + 1)
+        nextArg = $(command + 2)
+        if ($1 !~ /^#/ && $command == "/etc/padm/install.sh" &&
+            (action == "RenewTLS" || action == "UpdateGeo" || action == "SyncSubscriptionGroups") &&
+            (nextArg == "" || nextArg ~ /^(>|2>|#)/)) next
+        print
+      }' \
         <<<"${currentCrontab}") || return 1
     [[ "${cleanedCrontab}" == "${currentCrontab}" ]] && return 0
     installUserCrontabContent "${cleanedCrontab}"

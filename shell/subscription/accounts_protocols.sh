@@ -377,7 +377,7 @@ showShadowsocksAccounts() (
             path="${singBoxConfigPath}"
         fi
         local serverPassword
-        serverPassword=$(jq -er '.inbounds[0].password | select(type == "string" and length > 0)' "${path}30_shadowsocks_inbounds.json") || return 1
+        serverPassword=$(jq -er '.inbounds[0].password | select(type == "string" and length > 0 and (any(explode[]; . < 32 or . == 127) | not))' "${path}30_shadowsocks_inbounds.json") || return 1
         local protocolHost=${currentHost:-}
         [[ -n "${protocolHost}" ]] || protocolHost=$(realityEntryHost) || return 1
         jq -c '.inbounds[] | .users | if type == "array" then .[] else error("invalid users") end' "${path}30_shadowsocks_inbounds.json" | while read -r user; do
