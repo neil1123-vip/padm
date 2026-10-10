@@ -2291,6 +2291,25 @@ runCoreInstallSignalRollbackRegression() (
     [[ ! -e "${fixture}/normal.log.progress" && -z "${PADM_EXIT_ROLLBACKS[*]}" ]]
 
     (
+        # 无 timeout 工具或命令忽略 TERM 时，安装预算仍须收回整个进程组。
+        local timeoutMode timeoutStatus timeoutStarted
+        command() {
+            [[ "${timeoutMode}" != no-tool || "$*" != "-v timeout" ]] || return 1
+            builtin command "$@"
+        }
+        for timeoutMode in no-tool ignore-term; do
+            printf -v commandString 'sleep 4; printf continued >%q' "${fixture}/${timeoutMode}.continued"
+            [[ "${timeoutMode}" != ignore-term ]] || commandString="trap '' TERM; ${commandString}"
+            timeoutStatus=0
+            timeoutStarted=$(date +%s%N)
+            runPackageCommandWithProgress "${timeoutMode}" 1 "${commandString}" "${fixture}/${timeoutMode}.log" || timeoutStatus=$?
+            [[ "${timeoutStatus}" == 124 && ! -e "${fixture}/${timeoutMode}.continued" ]]
+            [[ $(( ($(date +%s%N) - timeoutStarted) / 1000000 )) -lt 3800 ]]
+            [[ ! -e "${fixture}/${timeoutMode}.log.progress" && -z "${PADM_EXIT_ROLLBACKS[*]}" ]]
+        done
+    )
+
+    (
         source "${PROJECT_ROOT}/shell/subscription/accounts.sh"
         source "${PROJECT_ROOT}/shell/subscription/output.sh"
         eval "$(awk '/^cleanDirectoryContent\(\)/ { capture=1 } capture { print } capture && /^}/ { exit }' "${PROJECT_ROOT}/shell/core/runtime.sh")"
@@ -2721,10 +2740,14 @@ runCancelableInstallCommandRegression() (
     }
     cancelableFixtureOperation() {
         case "${mode}" in
-        timeout | timeout-no-tool)
+        timeout | timeout-no-tool | timeout-nested)
             printf -v commandString 'printf %%s "$BASHPID" >%q; touch %q; sleep 4; touch %q' \
                 "${fixture}/worker" "${fixture}/started" "${fixture}/continued"
-            runWithTimeout 10 "${commandString}"
+            if [[ "${mode}" == timeout-nested ]]; then
+                padmRunCancelableCommand runWithTimeout 10 "${commandString}"
+            else
+                runWithTimeout 10 "${commandString}"
+            fi
             ;;
         curl | wget) downloadUrlToFileBounded fixture "${fixture}/download" 1024 10 ;;
         capture) padmCaptureCancelableCommand captured resolveGitHubCommitRef fixture/repo main ;;
@@ -2760,7 +2783,7 @@ runCancelableInstallCommandRegression() (
         renew) renewManagedTLSCertificates ;;
         esac
     }
-    for mode in timeout timeout-no-tool curl wget capture acme-install acme-restore-failure issue issue-retry cloudflare aliyun subscription tls-flow sync sync-missing renew; do
+    for mode in timeout timeout-no-tool timeout-nested curl wget capture acme-install acme-restore-failure issue issue-retry cloudflare aliyun subscription tls-flow sync sync-missing renew; do
         for signal in TERM INT; do
             fixture="${root}/${mode}-${signal}"
             PADM_TLS_DIR="${fixture}/tls"
@@ -2844,6 +2867,31 @@ EOF
             [[ "$(ps -o stat= -p "$(<"${fixture}/worker")" 2>/dev/null || true)" != *[RS]* ]]
         done
     done
+
+    (
+        # 定时包装不能丢掉嵌套预算，非法预算也不能启动命令。
+        local budgetCase budgetStarted budgetStatus budget
+        for budget in "" 0 -1 bad 1000000000; do
+            regressionExpectStatus 2 padmRunCancelableCommand --timeout "${budget}" \
+                touch "${root}/invalid-budget"
+            [[ ! -e "${root}/invalid-budget" ]]
+        done
+        regressionExpectStatus 2 padmRunCancelableCommand --timeout 1
+        for budgetCase in no-tool ignore-term nested; do
+            mode=timeout-no-tool
+            printf -v commandString 'sleep 4; printf continued >%q' "${root}/${budgetCase}.continued"
+            [[ "${budgetCase}" != ignore-term ]] || commandString="trap '' TERM; ${commandString}"
+            budgetStatus=0
+            budgetStarted=$(date +%s%N)
+            if [[ "${budgetCase}" == nested ]]; then
+                padmRunCancelableCommand runWithTimeout 1 "${commandString}" || budgetStatus=$?
+            else
+                runWithTimeout 1 "${commandString}" || budgetStatus=$?
+            fi
+            [[ "${budgetStatus}" == 124 && ! -e "${root}/${budgetCase}.continued" ]]
+            [[ $(( ($(date +%s%N) - budgetStarted) / 1000000 )) -lt 3800 ]]
+        done
+    )
 
     local output status release=debian attempts="${root}/attempts"
     waitAptProcess() { :; }

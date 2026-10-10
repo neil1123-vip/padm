@@ -694,9 +694,9 @@ padmRunRollback() {
 }
 
 padmStopCommandGroup() {
-    local padmCommandPid=$1 padmCommandAttempt
+    local padmCommandPid=$1 padmCommandAttempt padmCommandWaitAttempts=${2:-20}
     kill -TERM -- "-${padmCommandPid}" 2>/dev/null || true
-    for ((padmCommandAttempt=0; padmCommandAttempt < 20; padmCommandAttempt++)); do
+    for ((padmCommandAttempt=0; padmCommandAttempt < padmCommandWaitAttempts; padmCommandAttempt++)); do
         kill -0 -- "-${padmCommandPid}" 2>/dev/null || break
         sleep 0.1
     done
@@ -709,16 +709,27 @@ padmStopCancelableCommand() {
     PADM_CANCELABLE_COMMAND[active]=false
     local padmCommandPid=${PADM_CANCELABLE_COMMAND[pid]:-${!:-}}
     if [[ -n "${padmCommandPid}" && "${padmCommandPid}" != "${PADM_CANCELABLE_COMMAND[previousPid]}" ]]; then
-        padmStopCommandGroup "${padmCommandPid}"
+        local padmCommandWaitAttempts=20
+        # 外层也会收组，嵌套退出不能再占满外层的两秒宽限。
+        [[ "${PADM_CANCELABLE_COMMAND[nested]:-false}" != true ]] || padmCommandWaitAttempts=0
+        padmStopCommandGroup "${padmCommandPid}" "${padmCommandWaitAttempts}"
     fi
 }
 
 padmRunCancelableCommand() {
-    if [[ "${PADM_CANCELABLE_COMMAND_WORKER:-false}" == true ]]; then
+    local padmCommandTimeout=0
+    if [[ "${1:-}" == --timeout ]]; then
+        [[ "${2:-}" =~ ^[1-9][0-9]{0,8}$ && $# -ge 3 ]] || return 2
+        padmCommandTimeout=$2
+        shift 2
+    fi
+    if [[ "${PADM_CANCELABLE_COMMAND_WORKER:-false}" == true && "${padmCommandTimeout}" == 0 ]]; then
         "$@"
         return
     fi
-    local -A PADM_CANCELABLE_COMMAND=([active]=true [pid]= [previousPid]="${!:-}")
+    local -A PADM_CANCELABLE_COMMAND=(
+        [active]=true [pid]= [previousPid]="${!:-}" [nested]="${PADM_CANCELABLE_COMMAND_WORKER:-false}"
+    )
     local PADM_EXIT_ROLLBACK_OWNER=${PADM_EXIT_ROLLBACK_OWNER:-}
     local -a PADM_EXIT_ROLLBACKS=("${PADM_EXIT_ROLLBACKS[@]}")
     local padmCommandMonitor= padmCommandStatus=0 padmCommandPid
@@ -734,7 +745,18 @@ padmRunCancelableCommand() {
     padmCommandPid=$!
     PADM_CANCELABLE_COMMAND[pid]=${padmCommandPid}
     [[ -n "${padmCommandMonitor}" ]] || set +m
-    wait "${padmCommandPid}" || padmCommandStatus=$?
+    if [[ "${padmCommandTimeout}" != 0 ]]; then
+        local padmCommandDeadline=$((SECONDS + padmCommandTimeout))
+        while kill -0 "${padmCommandPid}" 2>/dev/null; do
+            if (( SECONDS >= padmCommandDeadline )); then
+                padmStopCommandGroup "${padmCommandPid}"
+                padmCommandStatus=124
+                break
+            fi
+            sleep 0.1
+        done
+    fi
+    [[ "${padmCommandStatus}" != 0 ]] || wait "${padmCommandPid}" || padmCommandStatus=$?
     PADM_CANCELABLE_COMMAND[active]=false
     unset "PADM_EXIT_ROLLBACKS[$((${#PADM_EXIT_ROLLBACKS[@]} - 1))]"
     return "${padmCommandStatus}"
@@ -1757,11 +1779,7 @@ runWithTimeout() {
         fi
 
         status=0
-        if command -v timeout >/dev/null 2>&1; then
-            padmRunCancelableCommand timeout "${timeoutSeconds}s" bash -lc "${commandString}" || status=$?
-        else
-            padmRunCancelableCommand bash -lc "${commandString}" || status=$?
-        fi
+        padmRunCancelableCommand --timeout "${timeoutSeconds}" bash -lc "${commandString}" || status=$?
 
         if [[ ${status} -eq 0 ]]; then
             return 0
