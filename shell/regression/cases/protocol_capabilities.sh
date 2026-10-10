@@ -338,7 +338,7 @@ runHysteria2CapabilityRegression() {
     local tlsFallbackDir="${TMP_DIR}/hysteria2-tls-fallback/"
 
     if ! grep -Fq '"up_mbps": %s,\n            "down_mbps": %s,' "${coreTemplate}" ||
-        ! grep -Fq '"${hysteria2ClientDownloadSpeed}" "${hysteria2ClientUploadSpeed}"' "${coreTemplate}"; then
+        ! grep -Fq '"$((10#${hysteria2ClientDownloadSpeed}))" "$((10#${hysteria2ClientUploadSpeed}))"' "${coreTemplate}"; then
         printf 'assert-fail:hysteria2 template should map client download/upload to server up/down\n' >&2
         return 1
     fi
@@ -866,6 +866,88 @@ runProtocolEntryReaderFailureRegression() (
                 readConfigHostPathUUID || failed=1
                 [[ "${currentPath}" == news-route ]] ||
                     { printf 'assert-fail:entry-xray-fallback-path-no-suffix:%s\n' "${suffix}" >&2; failed=1; }
+            done
+            [[ "${failed}" == 0 ]]
+        ) || failed=1
+        (
+            # XHTTP 两个历史入口都只裁末尾标记，不能裁合法段中间的 xHTTP。
+            local mode segment rawPath configFile failed=0
+            local coreInstallType=1 currentInstallProtocolType=,2, frontingType= frontingTypeReality=
+            local singBoxConfigPath= configPath="${root}/xray-xhttp-path/"
+            mkdir -p "${configPath}" || return 1
+            configFile="${configPath}12_VLESS_XHTTP_inbounds.json"
+            for mode in xhttp fallback; do
+                currentInstallProtocolType=,2, frontingType=
+                if [[ "${mode}" == fallback ]]; then
+                    currentInstallProtocolType=,27, frontingType=02_VLESS_TCP_inbounds
+                    printf '%s\n' '{"inbounds":[{"port":443,"settings":{"clients":[{"id":"saved-user"}]},"streamSettings":{"tlsSettings":{"certificates":[{"certificateFile":"/etc/padm/tls/tls.example.com.crt"}]}}}]}' \
+                        >"${configPath}${frontingType}.json" || return 1
+                fi
+                for segment in saved xHTTP-middle tailxHTTP no-suffix; do
+                    rawPath="/${segment}"
+                    [[ "${segment}" == no-suffix ]] || rawPath+=xHTTP
+                    jq -n --arg path "${rawPath}" '
+                        {inbounds:[{port:9443,settings:{clients:[{id:"saved-user"}]},
+                            streamSettings:{xhttpSettings:{path:$path}}}]}
+                    ' >"${configFile}" || return 1
+                    readConfigHostPathUUID ||
+                        { printf 'assert-fail:entry-xhttp-path-read:%s:%s\n' "${mode}" "${segment}" >&2; failed=1; }
+                    [[ "${currentPath}" == "${segment}" ]] ||
+                        { printf 'assert-fail:entry-xhttp-path-value:%s:%s:%s\n' "${mode}" "${segment}" "${currentPath}" >&2; failed=1; }
+                done
+            done
+            [[ "${failed}" == 0 ]]
+        ) || failed=1
+        (
+            # gRPC 的 Nginx location 末尾有空格和花括号，先取路径再去协议后缀。
+            local suffix segment fallbackPort configFile failed=0
+            local coreInstallType=1 currentInstallProtocolType=,27, frontingType=02_VLESS_TCP_inbounds
+            local frontingTypeReality= singBoxConfigPath= configPath="${root}/xray-grpc-path/"
+            local nginxConfigPath="${root}/xray-grpc-path/nginx/"
+            mkdir -p "${configPath}" "${nginxConfigPath}" || return 1
+            configFile="${configPath}${frontingType}.json"
+            for suffix in grpc trojangrpc; do
+                fallbackPort=31302
+                [[ "${suffix}" != trojangrpc ]] || fallbackPort=31304
+                jq -n --argjson port "${fallbackPort}" '
+                    {inbounds:[{port:443,settings:{clients:[{id:"saved-user"}],
+                        fallbacks:[{alpn:"h2",dest:$port}]},streamSettings:{tlsSettings:{
+                            certificates:[{certificateFile:"/etc/padm/tls/tls.example.com.crt"}]}}}]}
+                ' >"${configFile}" || return 1
+                for segment in saved grpc-middle trojan-middle tailtrojangrpc; do
+                    printf '    location /%s%s {\n    }\n' "${segment}" "${suffix}" >"${nginxConfigPath}alone.conf" || return 1
+                    readConfigHostPathUUID ||
+                        { printf 'assert-fail:entry-grpc-path-read:%s:%s\n' "${suffix}" "${segment}" >&2; failed=1; }
+                    [[ "${currentPath}" == "${segment}" ]] ||
+                        { printf 'assert-fail:entry-grpc-path-value:%s:%s:%s\n' "${suffix}" "${segment}" "${currentPath}" >&2; failed=1; }
+                done
+            done
+            [[ "${failed}" == 0 ]]
+        ) || failed=1
+        (
+            # 原 JSON 混淆字段不能在 jq -r 或命令替换时变成不同的客户端密码。
+            local field rawValue expectedStatus failed=0
+            local singBoxConfigPath="${root}/hysteria-obfs-defaults/"
+            local configFile="${singBoxConfigPath}06_hysteria2_inbounds.json"
+            mkdir -p "${singBoxConfigPath}" || return 1
+            for field in type password; do
+                for rawValue in '"salamander"' null false 42 '{}' '[]' '"salamander\n"' '"salamander\u0000"'; do
+                    jq -n --arg field "${field}" --argjson value "${rawValue}" '
+                        {inbounds:[{type:"hysteria2",listen_port:2443,ignore_client_bandwidth:true,
+                            obfs:{type:"salamander",password:"secret"}}]} | .inbounds[0].obfs[$field] = $value
+                    ' >"${configFile}" || return 1
+                    expectedStatus=1
+                    [[ "${rawValue}" != '"salamander"' && "${rawValue}" != null ]] || expectedStatus=0
+                    regressionExpectStatus "${expectedStatus}" readSingBoxConfig ||
+                        { printf 'assert-fail:entry-hysteria-obfs-raw:%s:%s\n' "${field}" "${rawValue}" >&2; failed=1; }
+                    if [[ "${expectedStatus}" == 0 ]]; then
+                        local expectedValue=salamander actualValue="${hysteria2ObfsType}"
+                        [[ "${field}" != password ]] || actualValue=${hysteria2ObfsPassword}
+                        [[ "${rawValue}" != null ]] || expectedValue=
+                        [[ "${actualValue}" == "${expectedValue}" ]] ||
+                            { printf 'assert-fail:entry-hysteria-obfs-baseline:%s:%s\n' "${field}" "${rawValue}" >&2; failed=1; }
+                    fi
+                done
             done
             [[ "${failed}" == 0 ]]
         ) || failed=1
