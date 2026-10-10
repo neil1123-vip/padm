@@ -3330,6 +3330,67 @@ TMPDIR 失败，修正目录后通过，原始日志保留。只修改容器，�
 fresh SSH 来源、独立 INPUT owner/jail、原生宿主/arm64/重启卸载继续待办，
 5C 和总目标 active。
 
+#### 5C.8b SSH journal 与实时连接来源绑定
+
+实现 `d0146a14 feat(docker): verify SSH sources with fresh journal and live sockets`，
+本地 SSH 签名 G。新增 `fail2ban ssh verify-source <本机 IP> <端口> <外部 IP>`，
+Fail2ban 菜单第 13 项直接接入；不要求已安装部署、不取得部署锁。
+地址同族且为明确本机端点，拒绝本机及 Docker 内部来源、loopback、映射、
+未指定、组播与无 scope 的 link-local 地址。宿主使用标准库 Python 与
+`ip/ss/journalctl`，客户端单独使用 Paramiko；未增加宿主第三方 Python 包。
+
+挑战前固定唯一 sshd listener 的 boot、PID/starttime、root UID、exe
+身份/摘要、exec 映射地址、netns 和 socket inode/fd，并取得本 boot journal cursor。
+仅接受游标后精确随机用户名的 `Invalid user` 记录，可信 `_TRANSPORT=syslog`、
+`_UID/_PID/_EXE/_BOOT_ID` 与实时进程一致；日志 tag 与文件权限不作为 emitter 证明。
+真实事件中的端口是客户端临时端口，目标地址/端口由 live accepted socket 绑定。
+emitter 必须直接为同 master 的子进程且持有该 socket，进程启动 tick 不晚于
+journal 单调时间；最终两次完整复核的稳定进程/socket 证据必须相等。
+只读命令有时间及输出上限，游标失效/溢出、连接关闭、多 owner 或身份漂移拒绝。
+
+独立客户端核对已可信登记的 known_hosts 主机公钥后仅执行一次 `auth_none`，
+保持未认证连接 25 秒；不传密码/私钥，不绕过主机密钥检查。
+JSON 成功仅 `scope=ssh-source-only/source_verified=true`，
+`runtime_configuration_verified/jail_ready=false`，不保存跨事务票据。
+未新增 SSH schema、jail、日志挂载、INPUT action 或规则，支持矩阵保持原边界。
+顺手修复只读预检漏识别 OpenSSH 10 `sshd-session` 候选，并区分文档中的
+原生 SSH 防护与 Docker 只读检查。
+
+2026-10-10，Docker Desktop Linux amd64，复用工具镜像
+`sha256:dbdfde081d3763df53ff13e5a79a9f2fbd7a98ef8660fed9ee02681a96abc2de`：
+
+| 最终检查 | 入口秒数 | 证据 |
+| --- | --- | --- |
+| SSH CLI、16 项来源合同、客户端合同，Jobs 2 | 1.516 | `.tmp-regression-docker-aeb793c867e348c987eb9fae88c0bfc6` |
+| 菜单 PTY 成功/失败/取消，Jobs 2 | 53.606 | `.tmp-regression-docker-01ab46f43baf4d00a7d48c25dacb1f77` |
+| 分发/完整集合/CI 分片，Jobs 2 | 1.383 | `.tmp-regression-docker-60c27fcd1f264ac087748f29f7ed9b0b` |
+| 首配夹具补验，Jobs 2 | 50.299 | `.tmp-regression-docker-d827eaa8c4f549949643f1668db16934` |
+| 系统/升级夹具补验，Jobs 2 | 66.063 | `.tmp-regression-docker-eb8f992119354e40be1b70f920eadca1` |
+| 完整 Docker 合同，45/45，Jobs 6 | 287.327 | `.tmp-regression-docker-a456c3ab3a124de2a69e3f63c9cd1ddb` |
+| 实际双栈/双端口 core、witness、客户端，4/4 | 通过 | `.tmp-ssh-source-8b-probe/evidence.md` |
+| 12 脚本语法/ShellCheck error、4 Python AST | 通过 | 最终完整容器源码快照 |
+
+全部回归实际执行、`cache_hit=false`；完整排队 428 ms，保持三槽预算。
+首配/系统/完整归档 SHA256 相同，18 个交付文件与最终完整快照逐一匹配；
+源码内容摘要 `88C901B24F7487B247BB3C9924D5C29E24073EF502E63DCAD32F202458394A67`。
+首次完整因三个显式 bundle 夹具漏复制 Python helper 失败，主动停止 exit 137；
+补齐 setup/release/phase6 夹具及缺模块断言后，定向再集中完整通过。
+误写分发 selector 的一次 exit 2 为入口拒绝，修正名称后通过，原日志保留。
+独审补 `_TRANSPORT` 与最终两次证据一致性，未删除失败合同规避问题。
+
+真实实验仅容器内非 loopback、独立双栈 client/server netns；
+Docker inventory 门禁用空清单桩，其余 `ip/ss/journal/proc` 全真，
+生产仍拒绝该 bridge 客户端，不冒充原生宿主外部来源验收。
+core/witness/client 四组通过、错误目的端口四组拒绝；容器内两个 helper
+SHA256 与工作区一致。实际 Fail2ban 1.1.0 上游 `sshd.conf` 对 OpenSSH 10
+前缀为 0/4，Alpine 实际 sshd jail 的 `alpine-sshd` 为 4/4；
+后续 SSH jail 必须明确过滤器兼容，不直接沿用上游默认值宣称可用。
+详细证据 `.tmp-ssh-source-8b-integration/evidence.md` 与实验报告。
+本轮三个实验容器和内部网络已清理，依赖镜像保留；
+清理本轮回归归档/清单及核验副本，保留结果、日志、摘要和他人临时文件。
+未推送或发布；独立 INPUT owner/jail、原生宿主/arm64/systemd/重启卸载
+仍待验收，5C 和总目标 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。
