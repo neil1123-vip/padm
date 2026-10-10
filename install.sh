@@ -107,9 +107,11 @@ scriptDownloadUrlToFileBounded() {
     local maxSize=$3
     local maxTime=${4:-30}
     local toolFound=false
+    local deadline remaining
     local -a pipelineStatus=()
     [[ -n "${url}" && "${maxSize}" =~ ^[0-9]+$ && "${maxSize}" -gt 0 ]] || return 1
-    [[ "${maxTime}" =~ ^[0-9]+$ && "${maxTime}" -gt 0 ]] || return 1
+    [[ "${maxTime}" =~ ^[1-9][0-9]{0,8}$ ]] || return 1
+    deadline=$((SECONDS + maxTime))
 
     : >"${targetFile}" || return 1
     if command -v curl >/dev/null 2>&1; then
@@ -123,7 +125,13 @@ scriptDownloadUrlToFileBounded() {
     : >"${targetFile}" || return 1
     if command -v wget >/dev/null 2>&1; then
         toolFound=true
-        wget -T 30 -t 2 -qO- "${url}" | head -c "$((maxSize + 1))" >"${targetFile}"
+        remaining=$((deadline - SECONDS))
+        ((remaining > 0)) || return 1
+        command -v timeout >/dev/null 2>&1 || {
+            printf '缺少 timeout，无法限制下载时长\n' >&2
+            return 1
+        }
+        timeout -k 2 "${remaining}" wget -T 30 -t 2 -qO- "${url}" | head -c "$((maxSize + 1))" >"${targetFile}"
         pipelineStatus=("${PIPESTATUS[@]}")
         if [[ "${pipelineStatus[0]:-1}" -eq 0 && "${pipelineStatus[1]:-1}" -eq 0 &&
             "$(wc -c <"${targetFile}")" -le "${maxSize}" ]]; then

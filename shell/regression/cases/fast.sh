@@ -4136,6 +4136,10 @@ runInstallRefreshDownloadBoundsRegression() (
         printf '%s\n' "$*" >"${wgetLog}"
         tar -cz -C "${archiveRoot}" padm-main
     }
+    timeout() {
+        shift 3
+        "$@"
+    }
     downloadRepoArchive "https://example.invalid/padm.tar.gz" "${root}/wget-extract"
     grep -q -- '-T' "${wgetLog}"
     grep -q -- '-t' "${wgetLog}"
@@ -4147,6 +4151,94 @@ runInstallRefreshDownloadBoundsRegression() (
     fi
     [[ "$(wc -c <"${root}/oversized" | tr -d ' ')" == "17" ]]
 
+    (
+        # 入口尚未加载 runtime，必须用独立 PATH 程序验证真实下载总预算。
+        local fixture="${root}/standalone" mode downloadMode budget caseRoot bin tool
+        local started status workerPid workerState failed=0
+        local bashPath wgetDefinition
+        bashPath=$(type -P bash)
+        wgetDefinition=$(declare -f scriptDownloadUrlToFileBounded)
+        mkdir -p "${fixture}/programs"
+        cat >"${fixture}/programs/wget" <<'EOF'
+#!/bin/bash
+printf started >"${PADM_BOOTSTRAP_DOWNLOAD_CASE}/wget.started"
+printf '%s\n' "${BASHPID}" >"${PADM_BOOTSTRAP_DOWNLOAD_CASE}/wget.pid"
+if [[ "${PADM_BOOTSTRAP_DOWNLOAD_MODE}" == trickle ]]; then
+    trap '' TERM
+    for ((chunk=0; chunk < 20; chunk++)); do
+        printf x
+        sleep 0.2
+    done
+else
+    printf payload
+fi
+EOF
+        cat >"${fixture}/programs/curl" <<'EOF'
+#!/bin/bash
+sleep 1.2
+exit 7
+EOF
+        chmod +x "${fixture}/programs/wget" "${fixture}/programs/curl"
+        for mode in trickle spent missing-timeout missing-tools invalid:0 invalid:-1 invalid:bad invalid:01 invalid:1000000000; do
+            downloadMode=${mode%%:*}
+            budget=1
+            [[ "${downloadMode}" != invalid ]] || budget=${mode#*:}
+            caseRoot="${fixture}/${mode//:/-}"
+            bin="${caseRoot}/bin"
+            mkdir -p "${bin}"
+            for tool in head wc sleep; do
+                ln -s "$(type -P "${tool}")" "${bin}/${tool}"
+            done
+            [[ "${downloadMode}" == missing-timeout ]] || ln -s "$(type -P timeout)" "${bin}/timeout"
+            [[ "${downloadMode}" == missing-tools ]] || ln -s "${fixture}/programs/wget" "${bin}/wget"
+            [[ "${downloadMode}" != spent ]] || ln -s "${fixture}/programs/curl" "${bin}/curl"
+            printf unchanged >"${caseRoot}/target"
+            started=$(date +%s%N)
+            if ! BASH_ENV= PATH="${bin}" PADM_BOOTSTRAP_DOWNLOAD_CASE="${caseRoot}" \
+                PADM_BOOTSTRAP_DOWNLOAD_MODE="${downloadMode}" "${bashPath}" --noprofile --norc -c '
+                    set -uo pipefail
+                    eval "$1"
+                    ! declare -F padmRunCancelableCommand >/dev/null || exit 2
+                    status=0
+                    scriptDownloadUrlToFileBounded fixture "$2/target" 1024 "$3" || status=$?
+                    printf "%s\n" "${status}" >"$2/status"
+                ' _ "${wgetDefinition}" "${caseRoot}" "${budget}" >"${caseRoot}/stdout" 2>"${caseRoot}/stderr"; then
+                printf 'bootstrap standalone fixture failed: %s\n' "${mode}" >&2
+                failed=$((failed + 1))
+                continue
+            fi
+            status=$(<"${caseRoot}/status")
+            if [[ "${downloadMode}" == missing-tools ]]; then
+                [[ "${status}" == 127 ]] && continue
+            elif [[ "${status}" == 1 ]]; then
+                case "${downloadMode}" in
+                trickle)
+                    workerPid=$(<"${caseRoot}/wget.pid")
+                    workerState=$(ps -o stat= -p "${workerPid}" 2>/dev/null || true)
+                    if [[ "${workerState}" != *[RS]* &&
+                        $(( ($(date +%s%N) - started) / 1000000 )) -lt 3800 ]]; then
+                        continue
+                    fi
+                    kill -KILL "${workerPid}" 2>/dev/null || true
+                    ;;
+                spent)
+                    [[ ! -e "${caseRoot}/wget.started" ]] && continue
+                    ;;
+                missing-timeout)
+                    [[ ! -e "${caseRoot}/wget.started" ]] &&
+                        grep -q '缺少 timeout' "${caseRoot}/stderr" && continue
+                    ;;
+                invalid)
+                    [[ "$(<"${caseRoot}/target")" == unchanged &&
+                        ! -e "${caseRoot}/wget.started" ]] && continue
+                    ;;
+                esac
+            fi
+            printf 'bootstrap download budget escaped: %s status=%s\n' "${mode}" "${status}" >&2
+            failed=$((failed + 1))
+        done
+        [[ "${failed}" == 0 ]]
+    )
 )
 
 runInstallEnsureModulesRegression() (

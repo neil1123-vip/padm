@@ -774,7 +774,7 @@ padm is designed for Linux servers. The code detects Debian, Ubuntu, RHEL/CentOS
 | --- | --- |
 | Permission | root or equivalent privileges. |
 | Architecture | `x86_64/amd64`, `aarch64/arm64`. |
-| Basic commands | Entry download needs at least `curl` or `wget`; full bundle refresh needs `tar`. |
+| Basic commands | Entry download needs at least `curl` or `wget`; the wget fallback also needs `timeout` to bound total duration. Full bundle refresh needs `tar`. |
 | Common dependencies | The script installs or uses `jq`, `nginx`, `acme.sh`, WireGuard tools, Fail2ban, and related tools as features require. |
 | Service management | Core services prefer systemd; Alpine/OpenRC paths are handled separately. The controller/controlled subscription control service currently requires systemd and `python3`. |
 
