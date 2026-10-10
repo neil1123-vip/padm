@@ -1002,7 +1002,7 @@ ensureTraditionalTlsFallbackNginxConfig() {
         readConfigHostPathUUID || return 1
     fi
     if [[ -z "${currentPort:-}" ]]; then
-        readCustomPort
+        readCustomPort || return 1
     fi
     if ! traditionalTlsFallbackAvailable; then
         errorCard "未检测到传统 TLS fallback 入站配置"

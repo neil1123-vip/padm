@@ -643,6 +643,70 @@ runProtocolEntryReaderFailureRegression() (
         [[ "${failed}" == 0 ]]
     ) || failed=1
     (
+        # 配置在前置扫描后失效时，真实端口读取及调用入口都必须阻断后续操作。
+        source "${PROJECT_ROOT}/shell/core/state.sh"
+        local failed=0 coreInstallType=1 frontingType=missing realityStatus= customPort=
+        local configPath="${root}/" invalidPort expectedPort skip cronName=
+        regressionExpectStatus 1 readCustomPort ||
+            { printf 'assert-fail:entry-custom-port-missing\n' >&2; failed=1; }
+        frontingType=02_VLESS_TCP_inbounds
+        printf '{\n' >"${configPath}${frontingType}.json"
+        regressionExpectStatus 1 readCustomPort ||
+            { printf 'assert-fail:entry-custom-port-malformed\n' >&2; failed=1; }
+        for invalidPort in null 0 65536; do
+            printf '{"inbounds":[{"port":%s}]}\n' "${invalidPort}" >"${configPath}${frontingType}.json"
+            customPort=stale
+            regressionExpectStatus 1 readCustomPort ||
+                { printf 'assert-fail:entry-custom-port-invalid:%s\n' "${invalidPort}" >&2; failed=1; }
+            [[ -z "${customPort}" ]] ||
+                { printf 'assert-fail:entry-custom-port-stale:%s\n' "${invalidPort}" >&2; failed=1; }
+        done
+        for invalidPort in 443 8443; do
+            printf '{"inbounds":[{"port":%s}]}\n' "${invalidPort}" >"${configPath}${frontingType}.json"
+            readCustomPort || failed=1
+            expectedPort=${invalidPort}
+            [[ "${invalidPort}" != 443 ]] || expectedPort=
+            [[ "${customPort}" == "${expectedPort}" ]] || failed=1
+        done
+        for skip in fronting reality core path; do
+            (
+                case "${skip}" in
+                fronting) frontingType= ;;
+                reality) realityStatus=7 ;;
+                core) coreInstallType=2 ;;
+                path) configPath= ;;
+                esac
+                customPort=stale
+                readCustomPort && [[ -z "${customPort}" ]]
+            ) || { printf 'assert-fail:entry-custom-port-bypass:%s\n' "${skip}" >&2; failed=1; }
+        done
+        frontingType=missing
+        eval "$(awk '/^initScriptRuntime\(\)/,/^}/ { print }' "${PROJECT_ROOT}/install.sh")"
+        parseInstallArgs() { :; }
+        autoInstallValidateRequiredInputs() { :; }
+        initVar() { :; }
+        checkSystem() { :; }
+        checkCPUVendor() { :; }
+        readInstallType() { :; }
+        readInstallProtocolType() { :; }
+        readConfigHostPathUUID() { :; }
+        readSingBoxConfig() { printf 'sing-box\n' >>"${capture}"; }
+        : >"${capture}"
+        regressionExpectStatus 1 initScriptRuntime fixture ||
+            { printf 'assert-fail:entry-init-custom-port-status\n' >&2; failed=1; }
+        [[ ! -s "${capture}" ]] ||
+            { printf 'assert-fail:entry-init-custom-port-continued\n' >&2; failed=1; }
+        local currentInstallProtocolType=,21, currentHost=tls.example.com currentPath=fixture currentPort=
+        nginxConfigFilePath() { printf '%s\n' "${root}/alone.conf"; }
+        traditionalTlsFallbackAvailable() { printf 'nginx\n' >>"${capture}"; return 1; }
+        errorCard() { :; }
+        : >"${capture}"
+        regressionExpectStatus 1 ensureTraditionalTlsFallbackNginxConfig || failed=1
+        [[ ! -s "${capture}" ]] ||
+            { printf 'assert-fail:entry-nginx-custom-port-continued\n' >&2; failed=1; }
+        [[ "${failed}" == 0 ]]
+    ) || failed=1
+    (
         # 历史读取失败不能展示可复用摘要，也不能消费确认或上级菜单输入。
         local failed=0 coreInstallType=1 currentInstallProtocolType=,1, configPath="${root}/" singBoxConfigPath=
         local frontingType= currentHost= currentDefaultPort= currentPort= currentPath= currentUUID=
