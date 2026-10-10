@@ -863,6 +863,62 @@ EOF
     done
     [[ "${failed}" -eq 0 ]]
 ) || return 1
+(
+    # 加密字段必须在原 JSON 中校验，不能把 false 或控制字符裁成缺省及不同密钥。
+    local configPath="${TMP_DIR}/encryption-output-boundary/" coreInstallType=1 currentPath=padm
+    local PADM_VLESS_ENCRYPTION_STATE_FILE="${configPath}encryption-state.json"
+    local protocol configFile inboundIndex source value account expected index=0 failed=0
+    local PADM_VLESS_REALITY_CONFIG_FILE= PADM_VLESS_XHTTP_CONFIG_FILE=
+    mkdir -p "${configPath}" || return 1
+    for protocol in vlessReality vlessXHTTP; do
+        inboundIndex=1 configFile="${configPath}07_VLESS_vision_reality_inbounds.json"
+        [[ "${protocol}" != vlessXHTTP ]] || { inboundIndex=0; configFile="${configPath}12_VLESS_XHTTP_inbounds.json"; }
+        for source in decryption encryption; do
+            for value in missing null '""' '"none"' '"active-encryption"' false 42 '{}' '[]' '"none\n"' '"active-encryption\n"' '"active-encryption\u0000"'; do
+                index=$((index + 1))
+                account="encryption-boundary-${index}"
+                jq -n --argjson index "${inboundIndex}" \
+                    '{inbounds:[{port:443}]} |
+                    .inbounds[$index] = {settings:{decryption:"active-decryption"},
+                        streamSettings:{realitySettings:{serverNames:["sni.example.com"],publicKey:"pubkey"},
+                            xhttpSettings:{host:"",path:"/path",mode:"auto"}}}' >"${configFile}" || return 1
+                jq -n '{enabled:true,decryption:"active-decryption",encryption:"active-encryption"}' \
+                    >"${PADM_VLESS_ENCRYPTION_STATE_FILE}" || return 1
+                expected=1
+                if [[ "${source}" == decryption ]]; then
+                    if [[ "${value}" == missing ]]; then
+                        updateRoutingJsonConfig "${configFile}" "del(.inbounds[${inboundIndex}].settings.decryption)" || return 1
+                    else
+                        updateRoutingJsonConfig "${configFile}" ".inbounds[${inboundIndex}].settings.decryption = \$value" --argjson value "${value}" || return 1
+                    fi
+                    case "${value}" in missing | null | '""' | '"none"') expected=0 ;; esac
+                else
+                    if [[ "${value}" == missing ]]; then
+                        updateRoutingJsonConfig "${PADM_VLESS_ENCRYPTION_STATE_FILE}" 'del(.encryption)' || return 1
+                    else
+                        updateRoutingJsonConfig "${PADM_VLESS_ENCRYPTION_STATE_FILE}" '.encryption = $value' --argjson value "${value}" || return 1
+                    fi
+                    [[ "${value}" != '"active-encryption"' ]] || expected=0
+                fi
+                if [[ "${expected}" == 0 ]]; then
+                    defaultBase64Code "${protocol}" 443 "${account}" uuid node.example.com /path >/dev/null || return 1
+                    local expectedEncryption=none
+                    [[ "${source}" != encryption ]] || expectedEncryption=active-encryption
+                    grep -qF "?encryption=${expectedEncryption}&" "${SUBSCRIBE_CAPTURE_DIR}/default/${account}" || return 1
+                else
+                    if defaultBase64Code "${protocol}" 443 "${account}" uuid node.example.com /path >/dev/null 2>&1 ||
+                        [[ -e "${SUBSCRIBE_CAPTURE_DIR}/default/${account}" ||
+                            -e "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/${account}" ||
+                            -e "${SUBSCRIBE_CAPTURE_DIR}/sing-box/${account}" ]]; then
+                        printf 'assert-fail:vless-encryption-raw:%s:%s:%s\n' "${protocol}" "${source}" "${value}" >&2
+                        failed=1
+                    fi
+                fi
+            done
+        done
+    done
+    [[ "${failed}" == 0 ]]
+) || return 1
 configPath="${oldConfigPath}"
 unset REGRESSION_ERROR_CARD_LOG
 }
