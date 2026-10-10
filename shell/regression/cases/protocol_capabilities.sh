@@ -600,6 +600,23 @@ runProtocolConfigOwnershipRegression() (
     assertEquals 34443 "${singBoxShadowsocksPort}" auxiliary-shadowsocks-port
     readConfigHostPathUUID 2>"${root}/host-errors"
     [[ ! -s "${root}/host-errors" ]]
+
+    # 通用 Reality 身份与最后扫描的入站同源，不能漏读或沿用其它协议的 ML-DSA。
+    printf '%s\n' '{"inbounds":[{"port":24443,"streamSettings":{"realitySettings":{"target":"grpc.example:443","serverNames":["grpc.example"],"publicKey":"grpc-public","privateKey":"grpc-private","mldsa65Seed":"grpc-seed","mldsa65Verify":"grpc-verify"}}}]}' >"${configPath}08_VLESS_vision_gRPC_inbounds.json"
+    readInstallProtocolType
+    assertEquals grpc-seed "${currentRealityMldsa65Seed}" grpc-reality-mldsa-seed
+    assertEquals grpc-verify "${currentRealityMldsa65Verify}" grpc-reality-mldsa-verify
+    printf '%s\n' '{"inbounds":[{"port":14443},{"streamSettings":{"realitySettings":{"target":"vision.example:443","serverNames":["vision.example"],"publicKey":"vision-public","privateKey":"vision-private","mldsa65Seed":"vision-seed","mldsa65Verify":"vision-verify"}}}]}' >"${configPath}07_VLESS_vision_reality_inbounds.json"
+    readInstallProtocolType
+    assertEquals grpc-private "${currentRealityPrivateKey}" grpc-reality-coexist-private
+    assertEquals grpc-seed "${currentRealityMldsa65Seed}" grpc-reality-coexist-seed
+    assertEquals grpc-verify "${currentRealityMldsa65Verify}" grpc-reality-coexist-verify
+    jq 'del(.inbounds[0].streamSettings.realitySettings.mldsa65Seed, .inbounds[0].streamSettings.realitySettings.mldsa65Verify)' \
+        "${configPath}08_VLESS_vision_gRPC_inbounds.json" >"${root}/grpc-no-mldsa.json"
+    mv "${root}/grpc-no-mldsa.json" "${configPath}08_VLESS_vision_gRPC_inbounds.json"
+    readInstallProtocolType
+    assertEquals '' "${currentRealityMldsa65Seed}" grpc-reality-no-stale-seed
+    assertEquals '' "${currentRealityMldsa65Verify}" grpc-reality-no-stale-verify
 )
 
 runProtocolEntryConfigUpdateRegression() (

@@ -15,6 +15,7 @@ import struct
 import threading
 import time
 import uuid
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -186,9 +187,41 @@ def health_check(state):
         connection.close()
 
 
+def request_log_tuple(connection):
+    try:
+        peer, target = connection.getpeername(), connection.getsockname()
+        for endpoint in (peer, target):
+            if (not isinstance(endpoint, tuple) or len(endpoint) != 2
+                    or not isinstance(endpoint[0], str)
+                    or str(ipaddress.IPv4Address(endpoint[0])) != endpoint[0]
+                    or type(endpoint[1]) is not int or not 1 <= endpoint[1] <= 65535):
+                return None
+        return peer[0], target[0], target[1]
+    except (AttributeError, OSError, TypeError, ValueError):
+        return None
+
+
+def request_log_event(status, endpoints):
+    if endpoints is None:
+        return
+    source, target, port = endpoints
+    timestamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    print(f"{timestamp} control-request status={status} source={source} target={target} port={port}", flush=True)
+
+
 class ControlHandler(BaseHTTPRequestHandler):
     server_version = "padm-control/1"
     sys_version = ""
+
+    def setup(self):
+        super().setup()
+        # 请求读完后连接可能被重置，响应日志保留已接受 socket 的真实三元组。
+        self.log_endpoints = request_log_tuple(self.connection)
+
+    def handle_one_request(self):
+        super().handle_one_request()
+        if getattr(self, "raw_requestline", None) == b"":
+            request_log_event("connection_closed", self.log_endpoints)
 
     def do_GET(self):
         try:
@@ -241,9 +274,18 @@ class ControlHandler(BaseHTTPRequestHandler):
         # 不回显畸形请求，防止 URL 或请求行中的秘密进入错误和日志。
         self.reply(code, {"ok": False, "error": "invalid_request"})
 
+    def log_request(self, code="-", size="-"):
+        if isinstance(code, int) and not isinstance(code, bool) and 100 <= code <= 599:
+            request_log_event(int(code), self.log_endpoints)
+
+    def log_error(self, message_format, *args):
+        # BaseHTTP 会吞掉读取超时，只按异常类型记录关闭，不读取异常原文。
+        if len(args) == 1 and isinstance(args[0], TimeoutError):
+            request_log_event("connection_closed", self.log_endpoints)
+
     def log_message(self, message_format, *args):
-        status = args[1] if len(args) > 1 else "-"
-        print(f"control-request status={status}", flush=True)
+        # BaseHTTP 的格式参数可能含请求原文，日志只走固定状态与真实 socket。
+        pass
 
 
 class ControlServer(HTTPServer):
@@ -261,6 +303,9 @@ class ControlServer(HTTPServer):
         return connection, address
 
     def finish_request(self, connection, address):
+        # 断连后 peer 查询可能失效，只保留本次真实 socket 的规范三元组。
+        endpoints = request_log_tuple(connection)
+
         def expire():
             try:
                 connection.shutdown(socket.SHUT_RDWR)
@@ -273,7 +318,7 @@ class ControlServer(HTTPServer):
         try:
             super().finish_request(connection, address)
         except (BrokenPipeError, ConnectionResetError, TimeoutError):
-            print("control-request status=connection_closed", flush=True)
+            request_log_event("connection_closed", endpoints)
         finally:
             deadline.cancel()
             deadline.join()

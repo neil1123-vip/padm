@@ -82,14 +82,18 @@ runCleanupTrapRegression() {
     termProbe="${tmpDir}/term.XXXXXX"
     intOutput="${tmpDir}/int.out"
     termOutput="${tmpDir}/term.out"
-    bash -c 'source "$1"; padmCreateTempPath p "$2"; exit 0' _ "${PROJECT_ROOT}/shell/core/runtime.sh" "${exitProbe}"
+    exitProbe=$(bash -c 'source "$1"; padmCreateTempPath p "$2" || exit 1; printf "%s\n" "$p"; exit 0' _ "${PROJECT_ROOT}/shell/core/runtime.sh" "${exitProbe}")
+    [[ -n "${exitProbe}" ]]
     [[ ! -e "${exitProbe}" ]]
     set +e
-    bash -c 'source "$1"; padmCreateTempPath p "$2"; kill -INT $$; exit 99' _ "${PROJECT_ROOT}/shell/core/runtime.sh" "${intProbe}" >"${intOutput}" 2>&1
+    bash -c 'source "$1"; padmCreateTempPath p "$2" || exit 1; printf "%s\n" "$p"; kill -INT $$; exit 99' _ "${PROJECT_ROOT}/shell/core/runtime.sh" "${intProbe}" >"${intOutput}"
     local intStatus=$?
-    bash -c 'source "$1"; padmCreateTempPath p "$2"; kill -TERM $$; exit 99' _ "${PROJECT_ROOT}/shell/core/runtime.sh" "${termProbe}" >"${termOutput}" 2>&1
+    bash -c 'source "$1"; padmCreateTempPath p "$2" || exit 1; printf "%s\n" "$p"; kill -TERM $$; exit 99' _ "${PROJECT_ROOT}/shell/core/runtime.sh" "${termProbe}" >"${termOutput}"
     local termStatus=$?
     set -e
+    intProbe=$(<"${intOutput}")
+    termProbe=$(<"${termOutput}")
+    [[ -n "${intProbe}" && -n "${termProbe}" ]]
     [[ ${intStatus} -eq 130 ]]
     [[ ${termStatus} -eq 143 ]]
     [[ ! -e "${intProbe}" ]]
@@ -2041,6 +2045,23 @@ EOF
         grep -qx 'deny:33000:33002:udp' "${firewalldLog}"
         [[ "${masquerade}" == "false" ]]
         [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
+
+        (
+            # 非 RHEL 的活跃 firewalld 同样支持添加和旧运行态读取，不要求 iptables。
+            local rhelLike=false inputCount=1 hoppingMenuChoice=1
+            iptables() { return 99; }
+            iptables-save() { return 99; }
+            portHoppingMenu hysteria2 || return 1
+            padmFirewallStateHas 'forward:firewalld:udp:33000:33002:16295:owned=33000,33001,33002' || return 1
+            padmFirewallStateRemove 'forward:firewalld:udp:33000:33002:16295:owned=33000,33001,33002' || return 1
+            readPortHopping hysteria2 16295 || return 1
+            [[ "${hysteria2PortHopping}" == 33000-33002 ]] || return 1
+            hoppingMenuChoice=3
+            portHoppingMenu hysteria2 || return 1
+            deletePortHoppingRules hysteria2 33000 33002 16295 || return 1
+            [[ "${#fixtureForwardPorts[@]}" == 0 && "${masquerade}" == false ]] || return 1
+            [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]] || return 1
+        ) || return 1
 
         inputCount=1
         addPortHopping hysteria2 16295

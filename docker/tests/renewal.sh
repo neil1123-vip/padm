@@ -561,8 +561,20 @@ dockerRenewalBundleCheck "${TEST_ROOT}/schema1-bundle"
 
 newState webroot-renewal
 mkdir -p -- "${PADM_DOCKER_INSTALL_DIR}/config"
-printf '{"schema_version":3,"tls":{"domain":"a.example.com","http01":true},"core":{"protocols":[{"id":21}]}}\n' \
-    >"${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+# TLS 提交复用真实规格校验，webroot 夹具必须是完整的 v3 配置。
+jq -n --arg ops "${OPS_IMAGE}" '
+  def ref($name): $ops | sub("padm-ops"; "padm-" + $name);
+  {schema_version:3,release:{version:"3.2.0",manifest_sha256:("a"*64),signature_identity:"test"},
+   core:{type:"xray",secondary_type:null,protocols:[
+     {id:21,core:"xray",listener_id:"entry-webroot",server:"proxy.example.com",public_port:24443,
+      address_families:["ipv4"],name:"main",uuid:"11111111-1111-4111-8111-111111111111",
+      websocket:{domain:"a.example.com",path:"abcdefgh",backend_port:31297,tls_port:8443}}]},
+   tls:{domain:"a.example.com",http01:true},subscription:{enabled:false,token:("a"*32)},
+   images:{xray:ref("xray"),"sing-box":ref("sing-box"),nginx:ref("nginx"),ops:$ops,net:ref("net")},
+   host_integrations:[]}
+' >"${PADM_DOCKER_INSTALL_DIR}/config/spec.json"
+dockerConfigureSpecValidate "${PADM_DOCKER_INSTALL_DIR}/config/spec.json" ||
+    fail 'webroot 夹具没有使用有效的真实配置规格'
 sed -i "s|Le_Webroot='dns_test'|Le_Webroot='/var/lib/padm/acme-webroot'|" \
     "${PADM_DOCKER_INSTALL_DIR}/data/acme/a.example.com/a.example.com.conf"
 runControl 0 acme schedule enable --domain a.example.com --email admin@example.com --webroot

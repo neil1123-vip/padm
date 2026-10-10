@@ -396,6 +396,8 @@ IFS=$'\037' read -r profileEmail profileId profilePassword _ profileName profile
 [[ "${profileEmail}" == "user-main" && "${profileId}" == "uuid-main" && "${profilePassword}" == "pass-main" && "${profileName}" == "user-main" && "${profileUuid}" == "uuid-main" ]]
 IFS=$'\037' read -r _ _ profilePassword _ profileName profileUuid <<<"$(subscriptionAccountProfile '{"name":"udp-user","password":"udp-pass"}')"
 [[ "${profilePassword}" == "udp-pass" && "${profileName}" == "udp-user" && -z "${profileUuid}" ]]
+IFS=$'\037' read -r _ _ profilePassword _ _ _ <<<"$(subscriptionAccountProfile '{"name":"udp-user","password":"pass with \"quotes\""}')"
+[[ "${profilePassword}" == 'pass with "quotes"' ]] || return 1
 coreInstallType=1
 currentHost="tls.example.com"
 realityEntryHost="node.example.com"
@@ -598,6 +600,44 @@ grep -qx "      mode: packet-up" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhtt
 ! grep -q '^    encryption:' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp"
 ! grep -q 'flow: xtls-rprx-vision' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp"
 ! grep -q '&flow=xtls-rprx-vision' "${SUBSCRIBE_CAPTURE_DIR}/screen.log"
+
+(
+    local PADM_VLESS_REALITY_CONFIG_FILE="${TMP_DIR}/vision-subscription-override.json"
+    local coreInstallType=1 currentInstallProtocolType=,1, xrayVLESSRealityVisionPort=443
+    local singBoxConfigPath= currentPath=padm xrayVLESSRealitySNI=wrong.example.com
+    local publicPort=
+    cat >"${PADM_VLESS_REALITY_CONFIG_FILE}" <<'EOF'
+{"inbounds":[{"port":9443},{"settings":{"clients":[{"email":"vision-override-reader","id":"uuid-override"}],"decryption":"none"},"streamSettings":{"realitySettings":{"serverNames":["override-sni.example.com"],"publicKey":"override-public","mldsa65Verify":"override-pqv"}}}]}
+EOF
+    realityStreamPublicPortForProtocol() { printf '%s' "${publicPort}"; }
+    corePortSubscriptionPort() { printf '%s\n' "$2"; }
+    showVlessRealityAccounts || return 1
+    grep -qF 'vless://uuid-override@tls.example.com:9443?' "${SUBSCRIBE_CAPTURE_DIR}/default/vision-override-reader" || return 1
+    grep -qF '&sni=override-sni.example.com&' "${SUBSCRIBE_CAPTURE_DIR}/default/vision-override-reader" || return 1
+    grep -qF '&pbk=override-public&' "${SUBSCRIBE_CAPTURE_DIR}/default/vision-override-reader" || return 1
+    grep -qF '&pqv=override-pqv&' "${SUBSCRIBE_CAPTURE_DIR}/default/vision-override-reader" || return 1
+    jq -e '.[0].server_port == 9443 and .[0].tls.server_name == "override-sni.example.com" and .[0].tls.reality.public_key == "override-public"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/vision-override-reader" >/dev/null || return 1
+    publicPort=10443
+    updateRoutingJsonConfig "${PADM_VLESS_REALITY_CONFIG_FILE}" '.inbounds[1].settings.clients[0].email = "vision-override-stream"' || return 1
+    showVlessRealityAccounts || return 1
+    grep -qF '@tls.example.com:10443?' "${SUBSCRIBE_CAPTURE_DIR}/default/vision-override-stream" || return 1
+    local badSNI account
+    for badSNI in '"bad host"' '["bad.example.com"]'; do
+        account=vision-override-invalid-sni
+        updateRoutingJsonConfig "${PADM_VLESS_REALITY_CONFIG_FILE}" \
+            '.inbounds[1].settings.clients[0].email = $email | .inbounds[1].streamSettings.realitySettings.serverNames[0] = $sni' \
+            --arg email "${account}" --argjson sni "${badSNI}" || return 1
+        regressionExpectStatus 1 showVlessRealityAccounts || return 1
+        [[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/default/${account}" &&
+            ! -e "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/${account}" &&
+            ! -e "${SUBSCRIBE_CAPTURE_DIR}/sing-box/${account}" ]] || return 1
+    done
+    PADM_VLESS_REALITY_CONFIG_FILE="${TMP_DIR}/missing-vision-override.json"
+    local missingCapture="${TMP_DIR}/missing-vision-output"
+    defaultBase64Code() { printf 'unexpected output\n' >>"${missingCapture}"; }
+    regressionExpectStatus 1 showVlessRealityAccounts || return 1
+    [[ ! -e "${missingCapture}" ]] || return 1
+) || return 1
 
 (
     local configPath="${TMP_DIR}/xhttp-subscription-no-slash"
@@ -1239,6 +1279,14 @@ JSON
             jq -n '{inbounds:[{tls:{server_name:"udp.example.com"},users:[]}]}' >"${configFile}"
             "${functionName}" >/dev/null || return 1
             [[ ! -s "${capture}" ]] || return 1
+            local password
+            for password in $'bad\037password' $'bad\npassword' $'bad\rpassword'; do
+                jq -n --argjson user "${userJson}" --arg password "${password}" \
+                    '{inbounds:[{tls:{server_name:"udp.example.com"},users:[$user | .password = $password]}]}' >"${configFile}"
+                : >"${capture}"
+                regressionExpectStatus 1 "${functionName}" >/dev/null 2>&1 || return 1
+                [[ ! -s "${capture}" ]] || return 1
+            done
             jq -n --argjson user "${userJson}" \
                 '{inbounds:[{tls:{server_name:"udp.example.com"},users:[$user]}]}' >"${configFile}"
             defaultBase64Code() { printf '%s\n' failed-write >>"${capture}"; return 1; }
@@ -1280,11 +1328,11 @@ singBoxHysteria2Port=9443
 hysteria2ClientUploadSpeed=100
 hysteria2ClientDownloadSpeed=200
 hysteriaV2rayN=$(jq() { command jq "$@"; }; defaultBase64Code hysteria 8443 tls-hysteria-user "pass@:/?#[]" "" "")
-assertCapturedSubscribeOutputs "tls-hysteria-user" "hysteria2://pass%40%3A%2F%3F%23%5B%5D@[2001:db8::10]:9443?peer=2001:db8::10&insecure=0&sni=2001:db8::10&alpn=h3&upmbps=100&downmbps=200#tls-hysteria-user" "2001:db8::10" "2001:db8::10" "tcp" "hysteria2"
+assertCapturedSubscribeOutputs "tls-hysteria-user" "hysteria2://pass%40%3A%2F%3F%23%5B%5D@[2001:db8::10]:8443?peer=2001:db8::10&insecure=0&sni=2001:db8::10&alpn=h3&upmbps=100&downmbps=200#tls-hysteria-user" "2001:db8::10" "2001:db8::10" "tcp" "hysteria2" || return 1
 assertDisplayedDefaultSubscribeLink "tls-hysteria-user" "通用链接：Hysteria2 TLS"
 grep -qxF '    password: "pass@:/?#[]"' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-hysteria-user"
 jq -e '.server == "[2001:db8::10]:8443" and .auth == "pass@:/?#[]" and .tls.sni == "2001:db8::10" and .socks5.timeout == 300' <<<"${hysteriaV2rayN}" >/dev/null
-jq -e '.[0].password == "pass@:/?#[]" and .[0].up_mbps == 100 and .[0].down_mbps == 200 and .[0].tls.alpn[0] == "h3"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-hysteria-user" >/dev/null
+jq -e '.[0].server_port == 8443 and .[0].password == "pass@:/?#[]" and .[0].up_mbps == 100 and .[0].down_mbps == 200 and .[0].tls.alpn[0] == "h3"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-hysteria-user" >/dev/null || return 1
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="tls.example.com"
@@ -1333,6 +1381,7 @@ fi
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="2001:db8::10"
 tuicAlgorithm="bbr"
+singBoxTuicPort=8443
 tuicV2rayN=$(jq() { command jq "$@"; }; defaultBase64Code tuic 9443 tls-tuic-user "uuid-tuic_pass@:/?#[]" "" "")
 grep -qxF "tuic://uuid-tuic:pass%40%3A%2F%3F%23%5B%5D@[2001:db8::10]:9443?congestion_control=bbr&alpn=h3&sni=2001:db8::10&udp_relay_mode=native&allow_insecure=0#tls-tuic-user" "${SUBSCRIBE_CAPTURE_DIR}/default/tls-tuic-user"
 assertDisplayedDefaultSubscribeLink "tls-tuic-user" "通用链接：Tuic TLS"
@@ -1344,7 +1393,7 @@ grep -qx "    disable-sni: false" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-tuic-u
 grep -qx "    reduce-rtt: false" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-tuic-user"
 grep -qx "    sni: 2001:db8::10" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-tuic-user"
 jq -e '.[0].type == "tuic" and .[0].server == "2001:db8::10" and .[0].tls.server_name == "2001:db8::10"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-tuic-user" >/dev/null
-jq -e '.[0].uuid == "uuid-tuic" and .[0].password == "pass@:/?#[]" and .[0].congestion_control == "bbr" and .[0].udp_relay_mode == "native" and .[0].zero_rtt_handshake == false and .[0].tls.alpn[0] == "h3"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-tuic-user" >/dev/null
+jq -e '.[0].server_port == 9443 and .[0].uuid == "uuid-tuic" and .[0].password == "pass@:/?#[]" and .[0].congestion_control == "bbr" and .[0].udp_relay_mode == "native" and .[0].zero_rtt_handshake == false and .[0].tls.alpn[0] == "h3"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-tuic-user" >/dev/null || return 1
 
 (
     # 标准订阅写入失败必须向上传播，不能继续生成 v2rayN 输出。

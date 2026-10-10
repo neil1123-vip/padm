@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
 import copy
 import hashlib
+import http.client
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 OPS = ROOT / "docker/images/ops"
 ADDRESS, PEER_ADDRESS = "10.231.0.1", "10.231.0.2"
 PORT = 39778
+LOG_SECRET, FORGED_SOURCE = "ControlLogPrivacyMarker", "198.51.100.77"
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 
 
@@ -173,6 +177,7 @@ def main():
             save(state_path, state, api=True)
             save(spec_path, spec)
             save(invite_path, invitation)
+            log_started = int(time.time())
             with api_log.open("ab") as output:
                 server = subprocess.Popen(
                     namespace(controller) + [sys.executable, str(Path(__file__).resolve()),
@@ -197,6 +202,8 @@ def main():
                          "CapEff:\t0000000000000000", "CapPrm:\t0000000000000000",
                          "CapInh:\t0000000000000000", "CapAmb:\t0000000000000000"):
                 assert line in status, "实际 API 必须以 10001:10001 且无能力运行"
+
+            run([sys.executable, str(Path(__file__).resolve()), "--log-probe"], controlled)
 
             def client(*, join=False, accepted=True):
                 before = spec_path.read_bytes(), invite_path.read_bytes()
@@ -308,8 +315,25 @@ def main():
                 value for number in (3, 4, 5) for value in (account(number)["password"], account(number)["uuid"])
             ]
             secrets += [path.read_text().strip() for path in keys]
+            secrets += [LOG_SECRET, FORGED_SOURCE]
             assert all(secret.encode() not in logs for secret in secrets), "三个生产 CLI 的日志泄露凭据"
-            assert b"control-request status=200" in logs and b"control-request status=401" in logs
+            entries = []
+            for line in api_log.read_text().splitlines():
+                match = re.fullmatch(
+                    r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z) control-request "
+                    r"status=([1-5]\d{2}|connection_closed) source=(10\.231\.0\.[12]) "
+                    rf"target={re.escape(ADDRESS)} port={PORT}", line,
+                )
+                assert match, "真实控制日志格式或 socket 来源不匹配"
+                timestamp = datetime.strptime(match[1], "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
+                assert log_started <= timestamp.timestamp() <= time.time(), "控制日志时间不是本次 UTC 时间"
+                entries.append((match[2], match[3]))
+            assert {("200", PEER_ADDRESS), ("401", PEER_ADDRESS), ("401", ADDRESS)} <= set(entries), \
+                "控制日志缺少真实 Peer 或本机健康来源"
+            evidence["source_logs"] = {
+                "target": ADDRESS, "port": PORT, "sources": sorted({source for _, source in entries}),
+                "forwarded_headers_ignored": True, "secrets_absent": True, "utc": True,
+            }
         finally:
             if server is not None:
                 stop(server)
@@ -341,4 +365,18 @@ if __name__ == "__main__":
         for capability in ("CapEff", "CapPrm", "CapInh", "CapAmb", "CapBnd"):
             assert f"{capability}:\t0000000000000000" in status, "实际客户端必须无能力运行"
         os.execv(sys.executable, [sys.executable, str(OPS / "control_client.py"), *sys.argv[2:]])
+    if sys.argv[1:2] == ["--log-probe"]:
+        connection = http.client.HTTPConnection(ADDRESS, PORT, timeout=4)
+        try:
+            connection.request("GET", f"/v1/health?{LOG_SECRET}", headers={
+                "Authorization": f"Bearer {LOG_SECRET}", "X-Padm-Control-Version": "1",
+                "Forwarded": f"for={FORGED_SOURCE}", "X-Forwarded-For": FORGED_SOURCE,
+                "X-Real-IP": FORGED_SOURCE, "X-Private": LOG_SECRET,
+            })
+            with connection.getresponse() as response:
+                assert response.status == 401
+                assert response.read() == b'{"ok":false,"error":"unauthorized"}'
+        finally:
+            connection.close()
+        sys.exit(0)
     main()

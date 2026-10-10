@@ -400,6 +400,16 @@ runSingBoxCustomPathsRegression() (
         [[ ! -e "${PADM_SINGBOX_SYSTEMD_SERVICE_FILE}" && ! -e "${PADM_XRAY_SYSTEMD_SERVICE_FILE}" ]] || return 1
         [[ ! -s "${serviceFinalizeLog}" && ! -s "${REGRESSION_SUCCESS_CARD_LOG}" ]] || return 1
     ) || return 1
+    (
+        # 提交失败后菜单仍可继续，两种 OpenRC 模板都必须立即清理临时文件。
+        local serviceName TMPDIR="${root}/openrc-failure-tmp"
+        mkdir -p "${TMPDIR}" || return 1
+        commitGeneratedFile() { return 1; }
+        for serviceName in sing-box xray; do
+            regressionExpectStatus 1 installAlpineStartup "${serviceName}" || return 1
+            ! compgen -G "${TMPDIR}/padm-${serviceName}.init.*" >/dev/null || return 1
+        done
+    ) || return 1
     installSingBoxService test >/dev/null
     grep -Fxq "ExecStart=\"${PADM_SINGBOX_BINARY}\" run -c \"${root}/conf/config.json\"" "${PADM_SINGBOX_SYSTEMD_SERVICE_FILE}"
     installAlpineStartup sing-box
@@ -3961,6 +3971,7 @@ runSingBoxMergeConfigTransactionRegression() (
     local rc
 
     mkdir -p "${shardDir}"
+    printf '{}\n' >"${shardDir}/base.json"
     cat >"${binary}" <<'SH'
 #!/usr/bin/env bash
 if [[ "$1" == "check" ]]; then
@@ -3978,6 +3989,9 @@ if [[ "$1" == "check" ]]; then
         esac
     done
     printf 'check:%s\n' "${config}" >>"${PADM_FAKE_SINGBOX_CHECK_LOG}"
+    if [[ -n "${PADM_FAKE_SINGBOX_EXPECT_CONFIG_FILE:-}" ]]; then
+        cmp -s "${config}" "${PADM_FAKE_SINGBOX_EXPECT_CONFIG_FILE}" || exit 1
+    fi
     if [[ -n "${PADM_FAKE_SINGBOX_CHECK_SIGNAL:-}" ]]; then
         kill "-${PADM_FAKE_SINGBOX_CHECK_SIGNAL}" "${PPID}"
         exit 0
@@ -4095,6 +4109,84 @@ SH
     local statsBefore='{"experimental":{"v2ray_api":{}}}'
     printf '%s\n' "${statsBefore}" >"${statsConfig}"
     (
+        # 删除唯一统计分片后不能退回含旧统计配置的合并文件。
+        rm -f "${shardDir}/base.json"
+        regressionExpectStatus 1 singBoxMergeConfig check || return 1
+        [[ "$(<"${statsConfig}")" == "${statsBefore}" &&
+            "$(<"${outputFile}")" == '{"runtime":true}' ]] || return 1
+        printf '{}\n' >"${shardDir}/base.json"
+    ) || return 1
+    (
+        # 空分片目录和不存在的分片目录都必须校验、保留真实合并配置。
+        local mode auxiliary mergedOnly="${root}/merged-only" singBoxConfigPath=
+        local PADM_SINGBOX_CONFIG_DIR="${mergedOnly}/config"
+        local mergedOnlyOutput="${mergedOnly}/config.json"
+        local expected="${root}/merged-only-expected.json"
+        export PADM_FAKE_SINGBOX_EXPECT_CONFIG_FILE="${expected}"
+        singBoxV2rayApiSupported() { return 0; }
+        mkdir -p "${mergedOnly}"
+        printf '{"inbounds":[{"type":"socks","listen_port":12345}]}\n' >"${expected}"
+        for mode in missing empty; do
+            [[ "${mode}" != empty ]] || mkdir -p "${PADM_SINGBOX_CONFIG_DIR}"
+            cp "${expected}" "${mergedOnlyOutput}"
+            : >"${mergeCalls}"
+            export PADM_FAKE_SINGBOX_CHECK_MODE=success
+            validateSingBoxConfigWithBinary "${binary}" "${logFile}" || return 1
+            singBoxMergeConfig check || return 1
+            cmp -s "${expected}" "${mergedOnlyOutput}" || return 1
+            [[ ! -s "${mergeCalls}" ]] || return 1
+            export PADM_FAKE_SINGBOX_CHECK_MODE=fail
+            regressionExpectStatus 1 validateSingBoxConfigWithBinary "${binary}" "${logFile}" || return 1
+            regressionExpectStatus 1 singBoxMergeConfig check || return 1
+            cmp -s "${expected}" "${mergedOnlyOutput}" || return 1
+            ! compgen -G "${mergedOnly}/.config.json.merge.*" >/dev/null || return 1
+        done
+        export PADM_FAKE_SINGBOX_CHECK_MODE=success
+        for auxiliary in log dns 14_stats_api; do
+            printf '{"%s":{}}\n' "${auxiliary}" >"${PADM_SINGBOX_CONFIG_DIR}/${auxiliary}.json"
+            regressionExpectStatus 1 singBoxMergeConfig check || return 1
+            cmp -s "${expected}" "${mergedOnlyOutput}" || return 1
+            [[ ! -s "${mergeCalls}" ]] || return 1
+            ! compgen -G "${mergedOnly}/.config.json.merge.*" >/dev/null || return 1
+            regressionExpectStatus 1 singBoxProtocolInstall 3 || return 1
+            [[ ! -e "${PADM_SINGBOX_CONFIG_DIR}/06_hysteria2_inbounds.json" ]] || return 1
+            cmp -s "${expected}" "${mergedOnlyOutput}" || return 1
+            rm "${PADM_SINGBOX_CONFIG_DIR}/${auxiliary}.json"
+        done
+        singBoxConfigPath="${PADM_SINGBOX_CONFIG_DIR}/"
+        local PADM_SINGBOX_LOG_CONFIG_FILE="${singBoxConfigPath}log.json"
+        singBoxRunning() { return 0; }
+        serviceQueueRestart() { :; }
+        serviceQueueApply() { singBoxMergeConfig check; }
+        regressionExpectStatus 1 singBoxLog false || return 1
+        [[ ! -e "${PADM_SINGBOX_LOG_CONFIG_FILE}" ]] || return 1
+        cmp -s "${expected}" "${mergedOnlyOutput}" || return 1
+        collectSingBoxTrafficUsers() { printf '[]\n'; }
+        regressionExpectStatus 1 ensureSingBoxTrafficStatsConfig || return 1
+        [[ ! -e "${singBoxConfigPath}14_stats_api.json" ]] || return 1
+        cmp -s "${expected}" "${mergedOnlyOutput}" || return 1
+        # 仅出站和路由的 merged-only 布局也不能被第一个新分片覆盖。
+        printf '{"outbounds":[{"type":"socks","tag":"keep","server":"192.0.2.1","server_port":1080}],"route":{"final":"keep"}}\n' >"${expected}"
+        cp "${expected}" "${mergedOnlyOutput}"
+        regressionExpectStatus 1 singBoxProtocolInstall 3 || return 1
+        regressionExpectStatus 1 singBoxProtocolInstall 31 || return 1
+        regressionExpectStatus 1 setSocks5Inbound || return 1
+        regressionExpectStatus 1 singBoxLog false || return 1
+        regressionExpectStatus 1 ensureSingBoxTrafficStatsConfig || return 1
+        cmp -s "${expected}" "${mergedOnlyOutput}" || return 1
+        ! compgen -G "${singBoxConfigPath}*.json" >/dev/null || return 1
+        for auxiliary in log dns 14_stats_api; do
+            : >"${mergeCalls}"
+            printf '{"%s":{}}\n' "${auxiliary}" >"${singBoxConfigPath}${auxiliary}.json"
+            regressionExpectStatus 1 singBoxMergeConfig check || return 1
+            [[ ! -s "${mergeCalls}" ]] || return 1
+            cmp -s "${expected}" "${mergedOnlyOutput}" || return 1
+            rm "${singBoxConfigPath}${auxiliary}.json"
+        done
+        singBoxMergeConfig check || return 1
+        cmp -s "${expected}" "${mergedOnlyOutput}" || return 1
+    ) || return 1
+    (
         # 直接服务预检失败时，统计分片和旧合并配置必须一起保持。
         local failure commitReached=false
         eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/realCommitGeneratedFile/')"
@@ -4171,6 +4263,7 @@ SH
                         statsConfig="${caseRoot}/conf/config/14_stats_api.json"
                         outputFile="${caseRoot}/conf/config.json" errorLog="${caseRoot}/errors"
                         printf '{"runtime":true}\n' >"${outputFile}"
+                        printf '{}\n' >"${caseRoot}/conf/config/base.json"
                         : >"${errorLog}"
                         [[ "${signalOriginal}" != present ]] || printf '%s\n' "${statsBefore}" >"${statsConfig}"
                         (

@@ -2984,6 +2984,49 @@ SHA256 证据在 `.tmp-fail2ban-manage-snapshot-check.log`；
 SSH/控制面日志与独立 jail、原生宿主 systemd/重启卸载、公网及 arm64 仍未验收；
 Fail2ban 完整管理、5C 与总目标继续 active。
 
+#### 5C.7a 控制 API 可信来源日志底座
+
+生产 `control_api.py` 的标准输出改为固定记录：
+
+```text
+2026-10-10T01:23:45.678Z control-request status=401 source=10.231.0.2 target=10.231.0.1 port=39778
+```
+
+UTC 毫秒时间和数字状态使用标准库；来源、目标及端口仅从本次实际 socket
+捕获并规范化，不使用可变的 `client_address`、受管规格或转发头作为日志来源。
+拒绝非规范 IPv4、端口及不可信状态；保留旧 `control-request status=` 子串。
+401 在写响应头前记录，后续断连仍保留已捕获来源，不回显路径、请求行、
+账号、请求头、token、正文及异常原文。零字节 EOF、读取超时及外层断连
+单独记录 `connection_closed`，不计为认证失败。
+
+回环合同新增真实 socket 与模拟鉴权来源的区分、HTTPStatus/bool 边界、
+注入与畸形请求、关闭后来源以及 zero/partial/slow 三种关闭断言。
+真实双节点夹具新增伪造 Forwarded/XFF/X-Real-IP 和 URL/header 凭据标记，
+要求生产日志的 source/target/port、UTC 时间、Peer 401/200 与自身健康 401
+均匹配；原有同步、轮换、撤销和断网恢复断言保留。
+中英文说明同步标明 stdout 日志边界，不宣称已启用控制面防护。
+
+2026-10-10 的限定只读复审与 `git diff --check` 通过，无确定 P1/P2。
+首次沙箱 Docker 管道访问被拒绝，两次提权审核超时；续接后审核成功，
+以下回归均在 Linux amd64 快照执行，复用工具镜像，无宿主依赖安装：
+
+| 检查 | 容器 / 入口秒数 | 证据 |
+| --- | --- | --- |
+| `docker-control-api`，Jobs 2 | 1.639 / 2.547 | `.tmp-regression-docker-c3c073aa52cf4d84aba95e6987548b17` |
+| `docker-control-two-node-real`，Jobs 2 | 6.533 / 7.465 | `.tmp-regression-docker-6ed3a12f201a4878a1710f87e6c10f3a` |
+| `docker-contracts`，Jobs 6，38/38 | 319.126 / 320.070 | `.tmp-regression-docker-7f8289ed1f8d4865929dbddeb675c0bd` |
+
+三次源码摘要一致，`cache_hit: false`；完整排队 406 ms，不扩大三槽预算。
+5 个实现/测试/双语说明文件逐文件匹配完整快照，摘要与固定镜像 ID 留在
+`.tmp-control-source-stage-evidence.md`。真实 API 为 `10001:10001`、无能力，
+来源仅有实际 Peer 与本机健康地址，伪造代理头和秘密标记未进入日志。
+通过后无代码或断言改动，不重复已成功合同。
+实现 `ebdbc9f9 feat(docker): log trusted control API socket sources` 为本地签名提交；
+本任务未推送。清理本轮 6 个归档/清单，25,513,287 字节，保留 result/log、
+SHA256 摘要、共享缓存及用户原有 8 个临时文件；未改其它任务文件。
+可信持久文件、权限/轮转、fresh witness、独立 INPUT jail、事务菜单管理
+以及 SSH/原生宿主验收仍未交付；5C 与总目标继续 active。
+
 ## 第六步：发布与完整验收
 
 本步做整体验收，不把前面阶段的 CI 或文档更新拖到这里。

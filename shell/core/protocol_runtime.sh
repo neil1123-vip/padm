@@ -381,8 +381,7 @@ addPortHopping() {
         protocolPortHoppingStatusCard "已添加不可重复添加，可删除后重新添加"
         return 0
     fi
-    if [[ "${rhelLike:-}" == "true" ]] ||
-        padmFirewalldForwardStateKeyForTarget "${targetPort}" >/dev/null 2>&1; then
+    if padmFirewalldForwardStateKeyForTarget "${targetPort}" >/dev/null 2>&1; then
         if ! systemctl is-active --quiet firewalld 2>/dev/null; then
             protocolPortHoppingStatusCard "未启动 firewalld 防火墙，无法设置端口跳跃"
             return 1
@@ -429,7 +428,7 @@ addPortHopping() {
             return 1
         fi
     done
-    if [[ "${rhelLike:-}" == "true" ]] && systemctl is-active --quiet firewalld; then
+    if systemctl is-active --quiet firewalld 2>/dev/null; then
                 local existingForwardPorts
                 if ! existingForwardPorts=$(sudo firewall-cmd --zone=public --permanent --list-forward-ports); then
                     protocolPortHoppingStatusCard "防火墙转发规则读取失败，已取消添加端口跳跃"
@@ -583,7 +582,7 @@ readPortHopping() {
         systemctl is-active --quiet firewalld || return 0
     fi
     if [[ "${stateBackend}" == firewalld ]] ||
-        { [[ -z "${stateBackend}" && "${rhelLike:-}" == true ]] && systemctl is-active --quiet firewalld; }; then
+        { [[ -z "${stateBackend}" ]] && systemctl is-active --quiet firewalld 2>/dev/null; }; then
         local forwardPorts
         if forwardPorts=$(sudo firewall-cmd --zone=public --list-forward-ports); then
             portHopping=$(awk -v targetPort="${targetPort}" -v stateStart="${stateStart}" -v stateEnd="${stateEnd}" '
@@ -671,7 +670,7 @@ deletePortHoppingRules() {
     local end=$3
     local targetPort=$4
     local status=0
-    local forwardStateKey stateKind stateBackend stateType stateStart stateEnd stateTarget ownership extra
+    local forwardStateKey stateKind stateBackend stateType stateStart stateEnd stateTarget ownership= extra
     local selectedBackend=
     if forwardStateKey=$(padmFirewalldForwardStateKeyForTarget "${targetPort}"); then
         IFS=: read -r stateKind stateBackend stateType stateStart stateEnd stateTarget ownership extra <<<"${forwardStateKey}"
@@ -683,7 +682,7 @@ deletePortHoppingRules() {
         start=${stateStart}
         end=${stateEnd}
         selectedBackend=iptables
-    elif [[ "${rhelLike:-}" == "true" ]] && systemctl is-active --quiet firewalld; then
+    elif systemctl is-active --quiet firewalld 2>/dev/null; then
         forwardStateKey=$(padmFirewalldForwardStateKey "${start}" "${end}" "${targetPort}")
         selectedBackend=firewalld
     else
@@ -748,7 +747,7 @@ portHoppingMenu() {
     [[ -n "${stateBackend}" ]] && hadForwardState=true
     # 非 firewalld 后端需要 iptables；已有永久 firewalld 归属时允许离线进入删除流程。
     if [[ "${stateBackend}" != firewalld ]] &&
-        { [[ "${rhelLike:-}" != "true" ]] || ! systemctl is-active --quiet firewalld 2>/dev/null; } &&
+        { [[ "${stateBackend}" == iptables ]] || ! systemctl is-active --quiet firewalld 2>/dev/null; } &&
         ! command -v iptables >/dev/null 2>&1; then
         protocolPortHoppingStatusCard "无法识别 iptables 工具，无法使用端口跳跃，退出安装"
         return 1
